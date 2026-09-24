@@ -11,7 +11,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '4.77'
+$HarnessContractVersion = '4.78'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -74,6 +74,8 @@ $taskBoard = [ordered]@{
     ProjectItemCount = $null
     CompletedItemCount = $null
     BlockedItemCount = $null
+    DependenciesAvailable = $false
+    DependencyError = $null
     CensusDomainDoneCount = $null
     CensusDomainTotal = 12
     ActiveCount = $null
@@ -91,14 +93,29 @@ if ($localSettings.githubProjectNumber -and $localSettings.githubOwner) {
         $taskBoard.Available = $true
         $taskBoard.ProjectItemCount = $projectItems.Count
         $taskBoard.CompletedItemCount = @($projectItems | Where-Object { $_.status -eq 'Done' }).Count
-        $taskBoard.BlockedItemCount = @($projectItems | Where-Object { $_.gate -eq 'Blocked' }).Count
         $taskBoard.CensusDomainDoneCount = @($domainItems | Where-Object { $_.status -eq 'Done' }).Count
         $taskBoard.ActiveCount = $activeItems.Count
+        try {
+            $dependencyQuery = 'query($owner:String!,$name:String!){repository(owner:$owner,name:$name){issues(first:100,states:[OPEN,CLOSED]){nodes{number blockedBy(first:20){nodes{number}}}}}}'
+            $dependencyJson = (& gh api graphql -F "owner=$($localSettings.githubOwner)" -F "name=$($localSettings.githubRepository)" -f "query=$dependencyQuery" 2>$null | Out-String)
+            if ($LASTEXITCODE -ne 0) { throw 'GitHub issue dependency query failed.' }
+            $dependencyIssues = @((ConvertFrom-Json $dependencyJson).data.repository.issues.nodes)
+            $blockedIssueNumbers = [Collections.Generic.HashSet[int]]::new()
+            foreach ($issue in $dependencyIssues) {
+                if (@($issue.blockedBy.nodes).Count -gt 0) { [void]$blockedIssueNumbers.Add([int]$issue.number) }
+            }
+            $taskBoard.BlockedItemCount = @($projectItems | Where-Object {
+                $null -ne $_.content.number -and $blockedIssueNumbers.Contains([int]$_.content.number)
+            }).Count
+            $taskBoard.DependenciesAvailable = $true
+        } catch {
+            $taskBoard.DependencyError = $_.Exception.Message
+        }
         if ($activeItems.Count -eq 1) {
             $taskBoard.ActiveTitle = [string]$activeItems[0].title
             $taskBoard.ActiveIssue = [string]$activeItems[0].content.url
         }
-        if ($activeItems.Count -ne 1) { $taskBoard.Error = "Expected exactly one In Progress work item; found $($activeItems.Count)." }
+        if ($activeItems.Count -gt 1) { $taskBoard.Error = "Expected at most one In Progress work item; found $($activeItems.Count)." }
     } catch { $taskBoard.Error = $_.Exception.Message }
 }
 
@@ -132,10 +149,13 @@ function Write-StageResult {
     $result['TaskBoardActiveCount'] = $taskBoard.ActiveCount
     $result['TaskBoardActiveIssue'] = $taskBoard.ActiveIssue
     $result['TaskBoardActiveTitle'] = $taskBoard.ActiveTitle
+    $result['TaskBoardError'] = $taskBoard.Error
     $result['TaskBoardProjectUrl'] = $taskBoard.ProjectUrl
     $result['TaskBoardItemCount'] = $taskBoard.ProjectItemCount
     $result['TaskBoardCompletedItemCount'] = $taskBoard.CompletedItemCount
     $result['TaskBoardBlockedItemCount'] = $taskBoard.BlockedItemCount
+    $result['TaskBoardDependenciesAvailable'] = $taskBoard.DependenciesAvailable
+    $result['TaskBoardDependencyError'] = $taskBoard.DependencyError
     $result['CensusDomainDoneCount'] = $taskBoard.CensusDomainDoneCount
     $result['CensusDomainTotal'] = $taskBoard.CensusDomainTotal
     if ($Name -eq 'Docs') {
@@ -194,7 +214,7 @@ foreach ($stage in $requestedStages) {
     $stageResult = switch ($stage) {
         'Docs' {
             Invoke-Stage -Name 'Docs' -Action {
-                if ($taskBoard.Available -and $taskBoard.ActiveCount -ne 1) { throw "GitHub Project WIP policy requires exactly one In Progress item; found $($taskBoard.ActiveCount)." }
+                if ($taskBoard.Available -and $taskBoard.ActiveCount -gt 1) { throw "GitHub Project WIP policy allows at most one In Progress item; found $($taskBoard.ActiveCount)." }
                 & powershell -NoProfile -ExecutionPolicy Bypass -File $docsScript
                 if ($LASTEXITCODE -ne 0) { throw "Documentation check failed with exit code $LASTEXITCODE." }
                 & powershell -NoProfile -ExecutionPolicy Bypass -File $contextPackScript

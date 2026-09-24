@@ -14,6 +14,7 @@
 - [MechanicGate] 实现任何原版玩家动作前，必须先在现有 `Focus/MAINLINE.md` 的“原版机制契约”记录：玩家实际入口/按键修饰、原版自然状态变化、Campaign 时间模式如何流动、直接 API 与 UI handler 的差别、当前证据和未知项。不得从 API 名称、其他游戏经验或想当然推导玩家体验。
 - [ClockPolicy] 时间流动与地图/菜单动作分开建模：若原版时间模式正在运行，世界会自然推进；仅在明确的时间控制/固定步进或 Harness 需要确定性时调用时钟控制。移动、追近、进入定居点等动作不得为了让测试快结束而暗中强制快进或暂停；任何宏动作都须显式标记为 Harness/Agent Host 策略，不得冒充原版玩家动作。
 - [ProgressMetrics] 项目工作项、依赖、阻塞与唯一WIP状态以GitHub Project为准；系统域/行为分母、技术验收指标和证据解释维护在 `Focus/MAINLINE.md`；Harness结果记录Git commit/脏树与活动Issue，不用“完成了若干命令”冒充Agent自主能力。
+- [HarnessBoundary] GitHub Issues/Projects 只管任务、依赖、评审与协作状态；Git 管代码历史；本地 Harness 管游戏/工具环境、可重复测试与原始运行证据；Agent 管研究、判断、目标分解和异常后的下一步。不得在 Markdown 复制动态任务状态。远程服务不可用时将状态标为 unavailable/unknown，不能伪报零值，也不能阻断无远程依赖的本地 Docs/Build/测试。
 - 静态源码无法判明交互链时，先追到 UI 入口、输入修饰与副作用；仍无法验证且会改变实现的玩家体验事实时，向用户提出一个具体、最小的问题，不得先选架构再补解释。
 - 不把“能启动”“能进主菜单”“加载 DLL”“进入战役”“行为已触发”当成同一个结论。
 - 所有功能变更必须经过 `Dev/ChronicleFramework/Run-Harness.ps1` 对应阶段；没有自动证据就标记为未验证。

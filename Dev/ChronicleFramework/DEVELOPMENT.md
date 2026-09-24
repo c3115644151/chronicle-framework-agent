@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 
-Contract version: 4.77
+Contract version: 4.78
 
 ## 目标与边界
 
@@ -21,7 +21,11 @@ Campaign Agent Bridge 是验证基础设施，不是新玩法。它负责把战�
 | `DESIGN.md` | 双方确认、准备实施的功能清单 |
 | `SYSTEM_INVENTORY.md` | 原版系统总清单与研究路由 |
 
-GitHub Project 是工作项、依赖和状态的唯一事实源，限制一个 `In Progress` 卡片。`Focus/MAINLINE.md` 记录工程事实、机制契约、研究结论与验收分母，不复制任务状态；`ContextState.json` 保存当前设计焦点、复核期限、默认读取顺序和文档层级。`TestResults/latest.json` 记录每次运行的Git提交/脏树状态、项目板活动Issue和自动测试结果。`Research/<类别>/` 是按需引用的稳定知识；主题自然分化时可拆分，且每份都必须经`ContextState.json`和`SYSTEM_INVENTORY.md`路由。`Archive/`默认不读。
+GitHub Project 是工作项、依赖和状态的唯一事实源，最多一个 `In Progress` 卡片。`Focus/MAINLINE.md` 记录工程事实、机制契约、研究结论与验收分母，不复制任务状态；`ContextState.json` 保存当前设计焦点、复核期限、默认读取顺序和文档层级。`TestResults/latest.json` 记录每次运行的Git提交/脏树状态、项目板活动Issue和自动测试结果。`Research/<类别>/` 是按需引用的稳定知识；主题自然分化时可拆分，且每份都必须经`ContextState.json`和`SYSTEM_INVENTORY.md`路由。`Archive/`默认不读。
+
+GitHub 与 Harness 不互相替代：GitHub Issues/Projects 管理工作项、依赖、评审和协作状态；Git 记录可审查的源代码历史；本机 Harness 探测已安装的游戏版本/模组、编译并启动游戏、操作 disposable fixture、采集崩溃与结构化断言。AI/Agent 负责解释目标、做机制研究、选择下一步和处理未覆盖异常，这些不是 Project 自动提供的能力。Harness 将本次测试绑定到 commit、工作树脏状态和唯一活动 Issue；证据原件保存在本地 `TestResults/<run-id>`，只有适合代码评审的摘要/变更才进入 GitHub，不自动把大型日志、存档或画面上传为评论。
+
+GitHub 是远程协作系统而非本地运行时依赖。离线或 API 不可用时，Docs/Build/本地测试仍应能执行；Harness 明确记录 GitHub 状态未知/不可用，不把未知转换为 0 个阻塞项或通过。项目板可用时，Harness 检查最多一个 `In Progress` 工作项，并以 GitHub 原生 issue dependencies 计算阻塞；无活动卡片表示待领任务，不妨碍本地文档与构建检查。项目板不可用不应阻断不依赖它的本地测试。
 
 源码仓库位于 Bannerlord 安装目录之外；游戏目录只作为 Harness 的运行时目标。被Git忽略的 `harness.local.json` 保存本机仓库/游戏路径和GitHub项目编号；新工作区用 `Initialize-ChronicleWorkspace.ps1` 生成。源码、模块清单、Harness和工程规则均由同一Git提交追踪；构建将版本化模块清单与DLL部署到本机 `Modules/ChronicleFramework`。大型`TestResults`不提交Git，证据仍按运行号保留在本地。
 
@@ -72,6 +76,8 @@ Provider loop 输入观察及上一动作原始回执，再执行 allowlist 动�
 每次 Harness 将 MSBuild/`Add-Type` 临时文件定向到 `TestResults/<run-id>/Temp`；项目排除 `TestResults/**/*.cs`，防止反编译研究源码污染 Mod Build。
 
 ## Harness 架构
+
+职责按事实来源划分，不复制状态：GitHub 项目板回答“做什么/顺序/谁在做/是否阻塞”；Git 回答“代码变成了什么”；Harness 回答“本机游戏与工具实际上发生了什么”；Agent 决策层回答“基于证据下一步做什么”。Harness 输出不能覆盖 GitHub 卡片状态，也不能把测试指标当作产品自主能力。
 
 ```text
 CLI / Computer Use 启动适配

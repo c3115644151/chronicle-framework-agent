@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '4.77'
+$contractVersion = '4.78'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -55,10 +55,10 @@ if ($projectFile -notmatch [regex]::Escape('<Compile Remove="TestResults/**/*.cs
 if ($harnessScript -notmatch "HarnessContractVersion\s*=\s*'$contractVersion'") {
     throw "Run-Harness.ps1 does not declare contract version $contractVersion."
 }
-if ($harnessScript -notmatch 'DefaultReadMarkdownBytes' -or $harnessScript -notmatch 'MarkdownBytes' -or $harnessScript -notmatch 'TaskBoardActiveIssue' -or $harnessScript -notmatch 'TaskBoardProjectUrl' -or $harnessScript -notmatch 'CensusDomainDoneCount' -or $harnessScript -notmatch 'GitCommit' -or $harnessScript -notmatch 'gh project item-list' -or $harnessScript -notmatch 'status --porcelain') { throw 'Harness summary must expose document footprint, Git provenance, and external task-board progress.' }
+if ($harnessScript -notmatch 'DefaultReadMarkdownBytes' -or $harnessScript -notmatch 'MarkdownBytes' -or $harnessScript -notmatch 'TaskBoardActiveIssue' -or $harnessScript -notmatch 'TaskBoardProjectUrl' -or $harnessScript -notmatch 'CensusDomainDoneCount' -or $harnessScript -notmatch 'GitCommit' -or $harnessScript -notmatch 'gh project item-list' -or $harnessScript -notmatch 'blockedBy\(first:20\)' -or $harnessScript -notmatch 'DependenciesAvailable' -or $harnessScript -notmatch 'DependencyError' -or $harnessScript -notmatch 'status --porcelain') { throw 'Harness summary must expose document footprint, Git provenance, and native GitHub task/dependency state.' }
 if ($projectFile -notmatch 'ChronicleGameRoot' -or $harnessScript -notmatch 'ChronicleGameRoot=\$gameRoot' -or -not (Test-Path -LiteralPath (Join-Path $harnessRoot 'Initialize-ChronicleWorkspace.ps1'))) { throw 'Cloned repositories must accept a local game path and provide a repeatable workspace initializer.' }
 foreach ($ignoredPath in @('TestResults', 'obj', 'bin', 'harness.local.json')) { if ($gitIgnore -notmatch [regex]::Escape($ignoredPath)) { throw "Repository .gitignore must exclude generated/local data '$ignoredPath'." } }
-if ($developmentDoc -notmatch 'GitHub Project 是工作项' -or $developmentDoc -notmatch '源码仓库位于 Bannerlord 安装目录之外') { throw 'Development policy must make task tracking and source/runtime repository boundaries explicit.' }
+if ($developmentDoc -notmatch 'GitHub Project 是工作项' -or $developmentDoc -notmatch '源码仓库位于 Bannerlord 安装目录之外' -or $developmentDoc -notmatch 'API 不可用时') { throw 'Development policy must define task/source/runtime boundaries and local operation during GitHub outages.' }
 if (-not (Test-Path -LiteralPath $sourceManifestPath)) { throw 'The version-controlled Chronicle module manifest is missing.' }
 [xml]$sourceModuleManifest = Get-Content -LiteralPath $sourceManifestPath -Encoding UTF8
 if ([string]$sourceModuleManifest.Module.Id.value -ne 'ChronicleFramework') { throw 'The version-controlled manifest must declare ChronicleFramework.' }
@@ -135,6 +135,7 @@ if ($freshCampaignTelemetry -notmatch 'FreshCampaignHarness\.ProbeLocalIssueConv
 foreach ($requiredText in @('MechanicGate', 'ClockPolicy', 'ResearchFirstGate', 'DecisionGate')) {
     if ($rootAgents -notmatch [regex]::Escape($requiredText)) { throw "Root AGENTS.md is missing mechanic-contract rule '$requiredText'." }
 }
+if ($rootAgents -notmatch 'HarnessBoundary' -or $rootAgents -notmatch '不能阻断无远程依赖的本地 Docs/Build/测试') { throw 'AGENTS.md must preserve the GitHub/Git/Harness/Agent boundary and offline-local-test policy.' }
 if ($developmentDoc -notmatch 'Research Readiness Gate' -or $developmentDoc -notmatch 'DecisionGate' -or $harnessScript -notmatch 'Get-ChronicleResearchReadiness' -or -not (Test-Path -LiteralPath $researchReadinessScript)) { throw 'Research and decision readiness rules must be documented and enforced before building changed game C# sources.' }
 $approvedDiagnosticHash = [regex]::Match($researchReadinessSource, "AuditedHarnessDiagnosticSha256 = '([0-9a-f]{64})'")
 $actualDiagnosticHash = (Get-FileHash (Join-Path $harnessRoot 'SubModule.cs') -Algorithm SHA256).Hash.ToLowerInvariant()
