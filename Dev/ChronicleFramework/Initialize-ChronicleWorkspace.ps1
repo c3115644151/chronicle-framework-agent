@@ -4,7 +4,7 @@ param(
     [string]$GameRoot,
     [string]$GitHubOwner,
     [string]$GitHubRepository,
-    [Nullable[int]]$GitHubProjectNumber
+    [int]$GitHubProjectNumber = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -18,7 +18,7 @@ $settings = [ordered]@{
     gameRoot = $resolvedGameRoot
     githubOwner = $GitHubOwner
     githubRepository = $GitHubRepository
-    githubProjectNumber = if ($GitHubProjectNumber.HasValue) { $GitHubProjectNumber.Value } else { $null }
+    githubProjectNumber = if ($GitHubProjectNumber -gt 0) { $GitHubProjectNumber } else { $null }
 }
 $settingsPath = Join-Path $PSScriptRoot 'harness.local.json'
 $json = $settings | ConvertTo-Json -Depth 4
@@ -28,5 +28,5 @@ $json = $settings | ConvertTo-Json -Depth 4
     SettingsPath = $settingsPath
     RepositoryRoot = $repositoryRoot
     GameRoot = $resolvedGameRoot
-    GitHubProjectConfigured = ($GitHubOwner -and $GitHubRepository -and $GitHubProjectNumber.HasValue)
+    GitHubProjectConfigured = ($GitHubOwner -and $GitHubRepository -and $GitHubProjectNumber -gt 0)
 } | ConvertTo-Json

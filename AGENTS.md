@@ -13,7 +13,7 @@
 - [DecisionGate] 重大方案/工程判断按序检查：先问最可能改变答案的问题；界定真实问题；预演三种失败原因；列出标准答案及其缺陷；反查能推翻当前判断的变量；分开事实、推断、未知并说明改判证据；最后只给一个按目标/限制/代价选出的结论。无需把七项机械打印，但问题若真的会改变决策，先向用户确认，不用猜测填空。
 - [MechanicGate] 实现任何原版玩家动作前，必须先在现有 `Focus/MAINLINE.md` 的“原版机制契约”记录：玩家实际入口/按键修饰、原版自然状态变化、Campaign 时间模式如何流动、直接 API 与 UI handler 的差别、当前证据和未知项。不得从 API 名称、其他游戏经验或想当然推导玩家体验。
 - [ClockPolicy] 时间流动与地图/菜单动作分开建模：若原版时间模式正在运行，世界会自然推进；仅在明确的时间控制/固定步进或 Harness 需要确定性时调用时钟控制。移动、追近、进入定居点等动作不得为了让测试快结束而暗中强制快进或暂停；任何宏动作都须显式标记为 Harness/Agent Host 策略，不得冒充原版玩家动作。
-- [ProgressMetrics] 项目工作项、依赖、阻塞与唯一WIP状态以GitHub Project为准；系统域/行为分母、技术验收指标和证据解释维护在 `Focus/MAINLINE.md`；Harness结果必须记录Git commit/脏树及活动Issue，不用“完成了若干命令”冒充Agent自主能力。
+- [ProgressMetrics] 项目工作项、依赖、阻塞与唯一WIP状态以GitHub Project为准；系统域/行为分母、技术验收指标和证据解释维护在 `Focus/MAINLINE.md`；Harness结果记录Git commit/脏树与活动Issue，不用“完成了若干命令”冒充Agent自主能力。
 - 静态源码无法判明交互链时，先追到 UI 入口、输入修饰与副作用；仍无法验证且会改变实现的玩家体验事实时，向用户提出一个具体、最小的问题，不得先选架构再补解释。
 - 不把“能启动”“能进主菜单”“加载 DLL”“进入战役”“行为已触发”当成同一个结论。
 - 所有功能变更必须经过 `Dev/ChronicleFramework/Run-Harness.ps1` 对应阶段；没有自动证据就标记为未验证。
@@ -38,7 +38,7 @@
 
 ## 按任务读取
 
-- 每次任务先读取 `ContextState.json` 和 `Get-ContextPack.ps1` 输出，再读取GitHub Project里唯一 `In Progress` 的工作项；不要假定上次会话的主线/活动Issue仍然有效。
+- 每次任务先读取 `ContextState.json` 和 `Get-ContextPack.ps1` 输出，再读取GitHub Project中唯一 `In Progress` 的工作项；不要假定上次会话的主线或活动Issue仍然有效。
 - 只读取 `SYSTEM_INVENTORY.md` 路由到的目标系统研究文件；不要为普通任务加载全部 `Research/`。
 - Research 文档按清晰的系统/主题维护；主题自然分化时允许拆分多份，不得为满足任意字数上限而极端压缩。每份文档必须在 `ContextState.json` 中分层路由，并由 `SYSTEM_INVENTORY.md` 指向；过时材料应更新、删除或移入默认不读取的 Archive。
 - Agent Bridge 任务读取 `Dev/ChronicleFramework/Focus/MAINLINE.md`。
@@ -50,4 +50,4 @@
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Dev\ChronicleFramework\Run-Harness.ps1 -Phase All
 ```
 
-任务状态只看GitHub Project；每次本地Harness运行的Git provenance和测试结果看 `Dev/ChronicleFramework/TestResults/latest.json`；设计事实和系统覆盖指标看 `Focus/MAINLINE.md`。不要在Markdown复制维护任务状态。
+任务状态只看GitHub Project；本地Harness的Git provenance和最新测试证据看 `Dev/ChronicleFramework/TestResults/latest.json`；技术事实及系统覆盖指标看 `Focus/MAINLINE.md`。不要在Markdown复制维护任务状态。

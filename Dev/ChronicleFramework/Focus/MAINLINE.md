@@ -38,9 +38,9 @@ Research Gate: **BLOCKED**
 Implementation Gate: **BLOCKED**
 行为总分母：**UNKNOWN**　完整系统域：**0/12**　游戏版本：**1.4.8.119303**
 
-**唯一活动工作项：W1 行为与观察全景盘点。** 当前切片是 A01 战役生命周期；先逐系统核对玩家实际入口/输入修饰、被动及按需信息、原版后果和Campaign时间、UI handler/API差异、当前适配、证据及未知，再去重形成行为分母。`SYSTEM_INVENTORY.md`的127项是盘点入口，不是玩家动作数。W1按A-L逐域完成；在它达到12/12前不新增游戏能力。P5声望路线暂停；Tier 1仍只是未来成熟度夹具。
+当前工程焦点是 **W1 行为与观察全景盘点**，本轮从A01战役生命周期开始；先逐系统核对玩家实际入口/输入修饰、被动及按需信息、原版后果和Campaign时间、UI handler/API差异、当前适配、证据及未知，再去重形成行为分母。`SYSTEM_INVENTORY.md`的127项是盘点入口，不是玩家动作数。W1按A-L逐域完成；在它达到12/12前不新增游戏能力。P5声望路线暂停；Tier 1仍只是未来成熟度夹具。
 
-完整阶段、工作项、依赖与唯一WIP状态由GitHub Project管理（见ContextState中的项目链接）；本文只维护技术事实、研究门槛和分母证据，不复制看板。既有基线（非全景覆盖）：环境/协议通过；P3-P4已有Map/Party/Inventory 3类观察、9类抽样动作及战斗夹具；GameStates 3/15已细查，Agent vertical slice 0/1；P5前置4/4，Tier1 E2E 0/1。GameState数和CampaignEvent数都不等于玩家行为数。Minecraft Agent研究作为后续架构参考，不构成绕过W1的理由。
+任务状态、依赖和唯一WIP由[GitHub Project](https://github.com/users/c3115644151/projects/5)维护，当前研究卡为[W1-A（Issue #1）](https://github.com/c3115644151/chronicle-framework-agent/issues/1)；本文不复制卡片状态。既有基线（非全景覆盖）：环境/协议通过；P3-P4已有Map/Party/Inventory 3类观察、9类抽样动作及战斗夹具；GameStates 3/15已细查，Agent vertical slice 0/1；P5前置4/4，Tier1 E2E 0/1。GameState数和CampaignEvent数都不等于玩家行为数。Minecraft Agent研究作为后续架构参考，不构成绕过W1的理由。
 
 Minecraft Agent 的环境、规划、技能、记忆和评测研究已沉淀到本文后续架构段落；本文不再把项目目标定义为“测试工具”。
 

@@ -70,6 +70,12 @@ try {
 $taskBoard = [ordered]@{
     Available = $false
     ProjectNumber = $localSettings.githubProjectNumber
+    ProjectUrl = if ($localSettings.githubOwner -and $localSettings.githubProjectNumber) { "https://github.com/users/$($localSettings.githubOwner)/projects/$($localSettings.githubProjectNumber)" } else { $null }
+    ProjectItemCount = $null
+    CompletedItemCount = $null
+    BlockedItemCount = $null
+    CensusDomainDoneCount = $null
+    CensusDomainTotal = 12
     ActiveCount = $null
     ActiveIssue = $null
     ActiveTitle = $null
@@ -77,11 +83,16 @@ $taskBoard = [ordered]@{
 }
 if ($localSettings.githubProjectNumber -and $localSettings.githubOwner) {
     try {
-        $projectJson = (& gh project item-list ([string]$localSettings.githubProjectNumber) --owner ([string]$localSettings.githubOwner) --format json 2>$null | Out-String)
+        $projectJson = (& gh project item-list ([string]$localSettings.githubProjectNumber) --owner '@me' --format json --limit 100 2>$null | Out-String)
         if ($LASTEXITCODE -ne 0) { throw 'GitHub Project query failed.' }
         $projectItems = @((ConvertFrom-Json $projectJson).items)
         $activeItems = @($projectItems | Where-Object { $_.status -eq 'In Progress' })
+        $domainItems = @($projectItems | Where-Object { $_.title -match '^\[W1-[A-L]\]' })
         $taskBoard.Available = $true
+        $taskBoard.ProjectItemCount = $projectItems.Count
+        $taskBoard.CompletedItemCount = @($projectItems | Where-Object { $_.status -eq 'Done' }).Count
+        $taskBoard.BlockedItemCount = @($projectItems | Where-Object { $_.gate -eq 'Blocked' }).Count
+        $taskBoard.CensusDomainDoneCount = @($domainItems | Where-Object { $_.status -eq 'Done' }).Count
         $taskBoard.ActiveCount = $activeItems.Count
         if ($activeItems.Count -eq 1) {
             $taskBoard.ActiveTitle = [string]$activeItems[0].title
@@ -121,6 +132,12 @@ function Write-StageResult {
     $result['TaskBoardActiveCount'] = $taskBoard.ActiveCount
     $result['TaskBoardActiveIssue'] = $taskBoard.ActiveIssue
     $result['TaskBoardActiveTitle'] = $taskBoard.ActiveTitle
+    $result['TaskBoardProjectUrl'] = $taskBoard.ProjectUrl
+    $result['TaskBoardItemCount'] = $taskBoard.ProjectItemCount
+    $result['TaskBoardCompletedItemCount'] = $taskBoard.CompletedItemCount
+    $result['TaskBoardBlockedItemCount'] = $taskBoard.BlockedItemCount
+    $result['CensusDomainDoneCount'] = $taskBoard.CensusDomainDoneCount
+    $result['CensusDomainTotal'] = $taskBoard.CensusDomainTotal
     if ($Name -eq 'Docs') {
         $sizeMatch = [regex]::Match($Output, '"MarkdownBytes"\s*:\s*(\d+)[\s\S]*?"DefaultReadMarkdownBytes"\s*:\s*(\d+)')
         if ($sizeMatch.Success) {
@@ -177,6 +194,7 @@ foreach ($stage in $requestedStages) {
     $stageResult = switch ($stage) {
         'Docs' {
             Invoke-Stage -Name 'Docs' -Action {
+                if ($taskBoard.Available -and $taskBoard.ActiveCount -ne 1) { throw "GitHub Project WIP policy requires exactly one In Progress item; found $($taskBoard.ActiveCount)." }
                 & powershell -NoProfile -ExecutionPolicy Bypass -File $docsScript
                 if ($LASTEXITCODE -ne 0) { throw "Documentation check failed with exit code $LASTEXITCODE." }
                 & powershell -NoProfile -ExecutionPolicy Bypass -File $contextPackScript

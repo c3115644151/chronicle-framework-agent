@@ -8,6 +8,7 @@ $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -L
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
 $contractVersion = '4.77'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
 $routedPaths = @(
     $requiredRootPaths
@@ -54,7 +55,7 @@ if ($projectFile -notmatch [regex]::Escape('<Compile Remove="TestResults/**/*.cs
 if ($harnessScript -notmatch "HarnessContractVersion\s*=\s*'$contractVersion'") {
     throw "Run-Harness.ps1 does not declare contract version $contractVersion."
 }
-if ($harnessScript -notmatch 'DefaultReadMarkdownBytes' -or $harnessScript -notmatch 'MarkdownBytes' -or $harnessScript -notmatch 'TaskBoardActiveIssue' -or $harnessScript -notmatch 'GitCommit' -or $harnessScript -notmatch 'gh project item-list' -or $harnessScript -notmatch 'status --porcelain') { throw 'Harness summary must expose document footprint, Git provenance, and external task-board state.' }
+if ($harnessScript -notmatch 'DefaultReadMarkdownBytes' -or $harnessScript -notmatch 'MarkdownBytes' -or $harnessScript -notmatch 'TaskBoardActiveIssue' -or $harnessScript -notmatch 'TaskBoardProjectUrl' -or $harnessScript -notmatch 'CensusDomainDoneCount' -or $harnessScript -notmatch 'GitCommit' -or $harnessScript -notmatch 'gh project item-list' -or $harnessScript -notmatch 'status --porcelain') { throw 'Harness summary must expose document footprint, Git provenance, and external task-board progress.' }
 if ($projectFile -notmatch 'ChronicleGameRoot' -or $harnessScript -notmatch 'ChronicleGameRoot=\$gameRoot' -or -not (Test-Path -LiteralPath (Join-Path $harnessRoot 'Initialize-ChronicleWorkspace.ps1'))) { throw 'Cloned repositories must accept a local game path and provide a repeatable workspace initializer.' }
 foreach ($ignoredPath in @('TestResults', 'obj', 'bin', 'harness.local.json')) { if ($gitIgnore -notmatch [regex]::Escape($ignoredPath)) { throw "Repository .gitignore must exclude generated/local data '$ignoredPath'." } }
 if ($developmentDoc -notmatch 'GitHub Project 是工作项' -or $developmentDoc -notmatch '源码仓库位于 Bannerlord 安装目录之外') { throw 'Development policy must make task tracking and source/runtime repository boundaries explicit.' }
@@ -139,6 +140,7 @@ $approvedDiagnosticHash = [regex]::Match($researchReadinessSource, "AuditedHarne
 $actualDiagnosticHash = (Get-FileHash (Join-Path $harnessRoot 'SubModule.cs') -Algorithm SHA256).Hash.ToLowerInvariant()
 if (-not $approvedDiagnosticHash.Success -or $approvedDiagnosticHash.Groups[1].Value -ne $actualDiagnosticHash) { throw 'The exact-hash SubModule diagnostic exception must match the reviewed source.' }
 if ($mainlineDoc -notmatch '(?m)^Research Gate: \*\*(BLOCKED|READY)\*\*' -or $mainlineDoc -notmatch '(?m)^Implementation Gate: \*\*(BLOCKED|READY)\*\*' -or $mainlineDoc -notmatch '行为总分母：\*\*(UNKNOWN|[1-9]\d*)\*\*' -or $mainlineDoc -notmatch 'SYSTEM_INVENTORY' -or $mainlineDoc -notmatch '127') { throw 'MAINLINE must expose gate status and distinguish system inventory from the behavior denominator.' }
+if ([string]::IsNullOrWhiteSpace($taskTrackerUrl) -or $mainlineDoc -notmatch [regex]::Escape($taskTrackerUrl)) { throw 'ContextState taskTracker URL must be linked from MAINLINE.' }
 $domainCensus = [regex]::Match($mainlineDoc, '(?m)^\| Behavior-interface census \| \*\*(\d{1,2})/12 domains\*\*')
 if (-not $domainCensus.Success -or [int]$domainCensus.Groups[1].Value -gt 12) { throw 'MAINLINE must measure behavior-interface mapping against the 12 SYSTEM_INVENTORY domains.' }
 if ($mainlineDoc -match '(?m)^Research Gate: \*\*READY\*\*' -and $mainlineDoc -match 'Behavior universe denominator: \*\*UNKNOWN\*\*') { throw 'Research cannot be marked READY while the behavior denominator is unknown.' }
@@ -187,5 +189,6 @@ if (@($contextState.defaultRead | Where-Object { $_ -like 'Archive/*' }).Count -
     ArchiveFiles = @($actualFiles | Where-Object { $_.FullName -like '*\Archive\*' }).Count
     MarkdownBytes = $totalBytes
     DefaultReadMarkdownBytes = $defaultReadBytes
+    TaskTrackerUrl = $taskTrackerUrl
     CheckedUtc = (Get-Date).ToUniversalTime().ToString('O')
 } | ConvertTo-Json
