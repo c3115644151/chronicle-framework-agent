@@ -1,0 +1,76 @@
+﻿{
+    "schemaVersion":  1,
+    "current":  {
+                    "id":  "autonomous-campaign-agent-mod",
+                    "objective":  "Build a Bannerlord Mod that gives an AI full autonomous player agency: either controlling the current singleplayer client or joining as an independent multiplayer campaign client.",
+                    "phase":  "W1 ACTIVE: full behavior/observation census; current item A01 Campaign lifecycle. 0/12 domains complete; behavior denominator UNKNOWN. All implementation and P5 tracks queued.",
+                    "path":  "Focus/MAINLINE.md",
+                    "updatedUtc":  "2026-09-24T22:41:45.7722603Z",
+                    "reviewAfterUtc":  "2026-10-08T22:41:45.7722603Z",
+                    "mainlineSha256":  "71e272f68f6f08386be64fce9a6f7a56632f04a7a423a61e84e3643034e31bf6"
+                },
+    "defaultRead":  [
+                        "DEVELOPMENT.md",
+                        "DESIGN.md",
+                        "SYSTEM_INVENTORY.md",
+                        "Focus/MAINLINE.md"
+                    ],
+    "references":  [
+                       {
+                           "path":  "Research/A/CampaignRuntimeWorldState.md",
+                           "tags":  [
+                                        "campaign-runtime",
+                                        "time",
+                                        "events",
+                                        "save"
+                                    ]
+                       },
+                       {
+                           "path":  "Research/B/WorldEntitiesIdentity.md",
+                           "tags":  [
+                                        "hero",
+                                        "clan",
+                                        "kingdom",
+                                        "identity",
+                                        "relation"
+                                    ]
+                       },
+                       {
+                           "path":  "Research/C/PoliticalDiplomacyAndRelationConsumers.md",
+                           "tags":  [
+                                        "politics",
+                                        "diplomacy",
+                                        "kingdom",
+                                        "relation"
+                                    ]
+                       },
+                       {
+                           "path":  "Research/F/CaptivityAndRelease.md",
+                           "tags":  [
+                                        "captivity",
+                                        "release",
+                                        "prisoner",
+                                        "relation"
+                                    ]
+                       },
+                       {
+                           "path":  "Research/J/RelationNarrativeConsumers.md",
+                           "tags":  [
+                                        "dialogue",
+                                        "quest",
+                                        "narrative",
+                                        "relation"
+                                    ]
+                       }
+                   ],
+    "archives":  [
+
+                 ],
+    "lifecyclePolicy":  {
+                            "maxActiveMainlines":  1,
+                            "reviewIntervalDays":  14,
+                            "defaultCompletedDisposition":  "delete",
+                            "archiveDirectory":  "Archive",
+                            "archiveReadByDefault":  false
+                        }
+}

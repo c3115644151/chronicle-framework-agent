@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Module>
+  <Name value="Chronicle Framework" />
+  <Id value="ChronicleFramework" />
+  <Version value="v0.1.0" />
+  <SingleplayerModule value="true" />
+  <MultiplayerModule value="false" />
+  <DependedModules>
+    <DependedModule Id="Native" />
+    <DependedModule Id="SandBoxCore" />
+    <DependedModule Id="SandBox" />
+  </DependedModules>
+  <SubModules>
+    <SubModule>
+      <Name value="Chronicle Framework" />
+      <DLLName value="ChronicleFramework.dll" />
+      <SubModuleClassType value="ChronicleFramework.SubModule" />
+      <Tags>
+        <Tag key="DedicatedServerType" value="none" />
+        <Tag key="IsNoRenderModeElement" value="false" />
+      </Tags>
+    </SubModule>
+  </SubModules>
+</Module>

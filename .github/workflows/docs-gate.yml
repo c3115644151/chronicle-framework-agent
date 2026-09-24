@@ -1,0 +1,19 @@
+name: Documentation gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate documentation routing and harness contracts
+        shell: pwsh
+        run: ./Dev/ChronicleFramework/Check-Docs.ps1

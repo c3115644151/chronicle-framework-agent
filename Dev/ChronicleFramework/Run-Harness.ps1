@@ -1,0 +1,449 @@
+[CmdletBinding()]
+param(
+    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'BattleFixture', 'PostBattle', 'Observation', 'Movement', 'Recruitment', 'Rest', 'Pursuit', 'VisualCapture', 'All')]
+    [string]$Phase = 'All',
+    [int]$SmokeTimeoutSeconds = 45,
+    [int]$SmokeStabilitySeconds = 8
+)
+
+$ErrorActionPreference = 'Stop'
+$startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
+. $startupEvidenceScript
+$researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
+. $researchReadinessScript
+$HarnessContractVersion = '4.77'
+$harnessRoot = $PSScriptRoot
+$localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
+if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
+$localSettings = Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$repositoryRoot = [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot)
+$gameRoot = [IO.Path]::GetFullPath([string]$localSettings.gameRoot)
+if (-not (Test-Path -LiteralPath $repositoryRoot -PathType Container)) { throw "Repository root not found: $repositoryRoot" }
+if (-not (Test-Path -LiteralPath (Join-Path $gameRoot 'bin\Win64_Shipping_Client\Bannerlord.exe'))) { throw "Configured Bannerlord game root is invalid: $gameRoot" }
+$env:CHRONICLE_GAME_ROOT = $gameRoot
+$env:CHRONICLE_REPOSITORY_ROOT = $repositoryRoot
+$evidenceRoot = Join-Path $harnessRoot 'TestResults'
+$runId = Get-Date -Format 'yyyyMMdd-HHmmss'
+$runDirectory = Join-Path $evidenceRoot $runId
+$manifestPath = Join-Path $gameRoot 'Modules\ChronicleFramework\SubModule.xml'
+$sourceManifestPath = Join-Path $repositoryRoot 'Modules\ChronicleFramework\SubModule.xml'
+$gameExe = Join-Path $gameRoot 'bin\Win64_Shipping_Client\Bannerlord.exe'
+$projectPath = Join-Path $harnessRoot 'ChronicleFramework.csproj'
+$apiScript = Join-Path (Split-Path -Parent $harnessRoot) 'ApiProbe\Inspect-CampaignApi.ps1'
+$smokeScript = Join-Path $harnessRoot 'Test-Module.ps1'
+$campaignScript = Join-Path $harnessRoot 'Test-Campaign.ps1'
+$freshCampaignScript = Join-Path $harnessRoot 'Test-AgentFreshCampaign.ps1'
+$protocolScript = Join-Path $harnessRoot 'Test-AgentProtocol.ps1'
+$observationScript = Join-Path $harnessRoot 'Test-AgentObservation.ps1'
+$movementScript = Join-Path $harnessRoot 'Test-AgentMovement.ps1'
+$recruitmentScript = Join-Path $harnessRoot 'Test-AgentRecruitment.ps1'
+$restScript = Join-Path $harnessRoot 'Test-AgentRest.ps1'
+$pursuitScript = Join-Path $harnessRoot 'Test-AgentPursuit.ps1'
+$agentLoopScript = Join-Path $harnessRoot 'Test-AgentLoop.ps1'
+$battleFixtureScript = Join-Path $harnessRoot 'Test-AgentBattleFixture.ps1'
+$visualCaptureScript = Join-Path $harnessRoot 'Test-AgentVisualCapture.ps1'
+$docsScript = Join-Path $harnessRoot 'Check-Docs.ps1'
+$contextPackScript = Join-Path $harnessRoot 'Get-ContextPack.ps1'
+
+$sourceControl = [ordered]@{
+    Available = $false
+    Commit = $null
+    Branch = $null
+    Dirty = $null
+    DirtyFileCount = $null
+}
+try {
+    $gitCommit = [string](& git -C $repositoryRoot rev-parse --verify HEAD 2>$null)
+    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($gitCommit)) {
+        $gitBranch = [string](& git -C $repositoryRoot branch --show-current 2>$null)
+        $gitStatus = @(& git -C $repositoryRoot status --porcelain=v1 --untracked-files=all 2>$null)
+        if ($LASTEXITCODE -eq 0) {
+            $sourceControl.Available = $true
+            $sourceControl.Commit = $gitCommit.Trim()
+            $sourceControl.Branch = $gitBranch.Trim()
+            $sourceControl.Dirty = ($gitStatus.Count -gt 0)
+            $sourceControl.DirtyFileCount = $gitStatus.Count
+        }
+    }
+} catch { }
+
+$taskBoard = [ordered]@{
+    Available = $false
+    ProjectNumber = $localSettings.githubProjectNumber
+    ActiveCount = $null
+    ActiveIssue = $null
+    ActiveTitle = $null
+    Error = $null
+}
+if ($localSettings.githubProjectNumber -and $localSettings.githubOwner) {
+    try {
+        $projectJson = (& gh project item-list ([string]$localSettings.githubProjectNumber) --owner ([string]$localSettings.githubOwner) --format json 2>$null | Out-String)
+        if ($LASTEXITCODE -ne 0) { throw 'GitHub Project query failed.' }
+        $projectItems = @((ConvertFrom-Json $projectJson).items)
+        $activeItems = @($projectItems | Where-Object { $_.status -eq 'In Progress' })
+        $taskBoard.Available = $true
+        $taskBoard.ActiveCount = $activeItems.Count
+        if ($activeItems.Count -eq 1) {
+            $taskBoard.ActiveTitle = [string]$activeItems[0].title
+            $taskBoard.ActiveIssue = [string]$activeItems[0].content.url
+        }
+        if ($activeItems.Count -ne 1) { $taskBoard.Error = "Expected exactly one In Progress work item; found $($activeItems.Count)." }
+    } catch { $taskBoard.Error = $_.Exception.Message }
+}
+
+New-Item -ItemType Directory -Path $runDirectory -Force | Out-Null
+$harnessTempDirectory = Join-Path $runDirectory 'Temp'
+New-Item -ItemType Directory -Path $harnessTempDirectory -Force | Out-Null
+$env:CHRONICLE_HARNESS_TEMP = $harnessTempDirectory
+$env:TEMP = $harnessTempDirectory
+$env:TMP = $harnessTempDirectory
+
+function Write-StageResult {
+    param(
+        [string]$Name,
+        [int]$ExitCode,
+        [string]$Output
+    )
+
+    $result = [ordered]@{
+        Stage = $Name
+        ExitCode = $ExitCode
+        Passed = ($ExitCode -eq 0)
+        TimestampUtc = (Get-Date).ToUniversalTime().ToString('O')
+    }
+    if ($sourceControl.Available) {
+        $result['GitCommit'] = $sourceControl.Commit
+        $result['GitBranch'] = $sourceControl.Branch
+        $result['GitDirty'] = $sourceControl.Dirty
+        $result['GitDirtyFileCount'] = $sourceControl.DirtyFileCount
+    }
+    $result['TaskBoardAvailable'] = $taskBoard.Available
+    $result['TaskBoardActiveCount'] = $taskBoard.ActiveCount
+    $result['TaskBoardActiveIssue'] = $taskBoard.ActiveIssue
+    $result['TaskBoardActiveTitle'] = $taskBoard.ActiveTitle
+    if ($Name -eq 'Docs') {
+        $sizeMatch = [regex]::Match($Output, '"MarkdownBytes"\s*:\s*(\d+)[\s\S]*?"DefaultReadMarkdownBytes"\s*:\s*(\d+)')
+        if ($sizeMatch.Success) {
+            $result['MarkdownBytes'] = [int]$sizeMatch.Groups[1].Value
+            $result['DefaultReadMarkdownBytes'] = [int]$sizeMatch.Groups[2].Value
+        }
+    }
+    $Output | Set-Content -Path (Join-Path $runDirectory "$Name.log") -Encoding UTF8
+    $result | ConvertTo-Json | Set-Content -Path (Join-Path $runDirectory "$Name.json") -Encoding UTF8
+    return $result
+}
+
+function Invoke-Stage {
+    param(
+        [string]$Name,
+        [scriptblock]$Action
+    )
+
+    try {
+        $output = (& $Action 2>&1 | Out-String)
+        $exitCode = if ($LASTEXITCODE -is [int]) { $LASTEXITCODE } else { 0 }
+        return Write-StageResult -Name $Name -ExitCode $exitCode -Output $output
+    }
+    catch {
+        $output = ($_ | Out-String)
+        return Write-StageResult -Name $Name -ExitCode 1 -Output $output
+    }
+}
+
+$stages = @()
+$requestedStages = switch ($Phase) {
+    'Docs' { @('Docs') }
+    'Preflight' { @('Preflight') }
+    'Api' { @('Api') }
+    'Build' { @('Build') }
+    'Smoke' { @('Smoke') }
+    'Campaign' { @('Preflight', 'Build', 'Campaign') }
+    'FreshCampaign' { @('Preflight', 'Build', 'FreshCampaign') }
+    'FreshCampaignProgression' { @('Preflight', 'Build', 'FreshCampaignProgression') }
+    'Protocol' { @('Preflight', 'Build', 'Protocol') }
+    'AgentLoop' { @('Preflight', 'Build', 'AgentLoop') }
+    'BattleFixture' { @('Preflight', 'Build', 'BattleFixture') }
+    'PostBattle' { @('Preflight', 'Build', 'PostBattle') }
+    'Observation' { @('Preflight', 'Build', 'Observation') }
+    'Movement' { @('Preflight', 'Build', 'Movement') }
+    'Recruitment' { @('Preflight', 'Build', 'Recruitment') }
+    'Rest' { @('Preflight', 'Build', 'Rest') }
+    'Pursuit' { @('Preflight', 'Build', 'Pursuit') }
+    'VisualCapture' { @('Preflight', 'Build', 'VisualCapture') }
+    'All' { @('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'Protocol', 'AgentLoop', 'Observation', 'Movement', 'Recruitment', 'Rest', 'Pursuit', 'BattleFixture', 'PostBattle') }
+}
+
+foreach ($stage in $requestedStages) {
+    $stageResult = switch ($stage) {
+        'Docs' {
+            Invoke-Stage -Name 'Docs' -Action {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $docsScript
+                if ($LASTEXITCODE -ne 0) { throw "Documentation check failed with exit code $LASTEXITCODE." }
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $contextPackScript
+                if ($LASTEXITCODE -ne 0) { throw "Context pack failed with exit code $LASTEXITCODE." }
+            }
+        }
+        'Preflight' {
+            Invoke-Stage -Name 'Preflight' -Action {
+                if (-not (Test-Path $gameExe)) { throw "Game executable not found: $gameExe" }
+                if (-not (Test-Path $projectPath)) { throw "Project not found: $projectPath" }
+                if (-not (Test-Path $manifestPath)) { throw "Manifest not found: $manifestPath" }
+                if (-not (Test-Path $sourceManifestPath)) { throw "Version-controlled manifest not found: $sourceManifestPath" }
+                if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) { throw 'dotnet was not found on PATH.' }
+                if (-not (Get-Command ilspycmd -ErrorAction SilentlyContinue)) { throw 'ilspycmd was not found on PATH.' }
+                $templateList = dotnet new list 2>&1 | Out-String
+                if ($templateList -notmatch 'blmodfx') { throw 'Bannerlord.Templates blmodfx template was not found.' }
+                [xml]$manifest = Get-Content $sourceManifestPath
+                if ([string]$manifest.Module.Id.value -ne 'ChronicleFramework') { throw 'Unexpected module id.' }
+                $dependencies = @($manifest.Module.DependedModules.DependedModule | ForEach-Object { [string]$_.Id })
+                foreach ($dependency in @('Native', 'SandBoxCore', 'SandBox')) {
+                    if ($dependency -notin $dependencies) {
+                        throw "Missing dependency: $dependency"
+                    }
+                }
+                $moduleIds = @(
+                    'Bannerlord.Harmony',
+                    'Bannerlord.ButterLib',
+                    'Bannerlord.UIExtenderEx',
+                    'Bannerlord.MBOptionScreen',
+                    'Native',
+                    'SandBoxCore',
+                    'CustomBattle',
+                    'SandBox',
+                    'StoryMode',
+                    'BirthAndDeath',
+                    'ChronicleFramework'
+                )
+                $moduleVersions = @($moduleIds | ForEach-Object {
+                    $moduleId = $_
+                    $moduleDirectory = Get-ChildItem (Join-Path $gameRoot 'Modules') -Directory |
+                        Where-Object { Test-Path (Join-Path $_.FullName 'SubModule.xml') } |
+                        Where-Object {
+                            try { ([xml](Get-Content (Join-Path $_.FullName 'SubModule.xml'))).Module.Id.value -eq $moduleId } catch { $false }
+                        } |
+                        Select-Object -First 1
+                    if (-not $moduleDirectory) { throw "Module manifest not found for id: $moduleId" }
+                    [xml]$moduleManifest = Get-Content (Join-Path $moduleDirectory.FullName 'SubModule.xml')
+                    [pscustomobject]@{
+                        Id = $moduleId
+                        Directory = $moduleDirectory.Name
+                        Version = [string]$moduleManifest.Module.Version.value
+                    }
+                })
+                $gameFileVersion = (Get-Item $gameExe).VersionInfo.FileVersion
+                $packageInfoText = [string](Get-Content (Join-Path $gameRoot 'package_info.txt') -Raw)
+                $compileChangeset = if ($packageInfoText -match 'Compile Changeset:\s*(\d+)') { $Matches[1] } else { $null }
+                [pscustomobject]@{
+                    GameExecutable = $gameExe
+                    GameFileVersion = $gameFileVersion
+                    CompileChangeset = $compileChangeset
+                    Manifest = $manifestPath
+                    SourceManifest = $sourceManifestPath
+                    RuntimeManifestMatchesSource = ((Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $sourceManifestPath -Algorithm SHA256).Hash)
+                    ModuleVersion = [string]$manifest.Module.Version.value
+                    ModuleSet = $moduleVersions
+                    Toolchain = @('dotnet', 'ilspycmd', 'Bannerlord.Templates:blmodfx')
+                    PackageInfoHint = $packageInfoText
+                } | ConvertTo-Json
+            }
+        }
+        'Api' {
+            Invoke-Stage -Name 'Api' -Action {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $apiScript -Scope Lifecycle
+                if ($LASTEXITCODE -ne 0) { throw "API lifecycle stage failed with exit code $LASTEXITCODE." }
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $apiScript -Scope Events
+                if ($LASTEXITCODE -ne 0) { throw "API events stage failed with exit code $LASTEXITCODE." }
+            }
+        }
+        'Build' {
+            Invoke-Stage -Name 'Build' -Action {
+                $mainlinePath = Join-Path $harnessRoot 'Focus\MAINLINE.md'
+                $mainlineText = Get-Content -LiteralPath $mainlinePath -Raw -Encoding UTF8
+                $researchGateReady = $mainlineText -match '(?m)^Research Gate: \*\*READY\*\*\s*$'
+                $implementationGateReady = $mainlineText -match '(?m)^Implementation Gate: \*\*READY\*\*\s*$'
+                $moduleDll = Join-Path $gameRoot 'Modules\ChronicleFramework\bin\Win64_Shipping_Client\ChronicleFramework.dll'
+                $sourceFiles = @(Get-ChildItem -LiteralPath $harnessRoot -File -Filter '*.cs')
+                $changedFeatureSources = if (Test-Path -LiteralPath $moduleDll) {
+                    @($sourceFiles | Where-Object { $_.LastWriteTimeUtc -gt (Get-Item -LiteralPath $moduleDll).LastWriteTimeUtc })
+                } else { $sourceFiles }
+                $subModuleSource = Join-Path $harnessRoot 'SubModule.cs'
+                $diagnosticSourceHash = if (Test-Path -LiteralPath $subModuleSource) { (Get-FileHash -LiteralPath $subModuleSource -Algorithm SHA256).Hash.ToLowerInvariant() } else { '' }
+                $readiness = Get-ChronicleResearchReadiness -ResearchReady $researchGateReady -ImplementationReady $implementationGateReady -ChangedFeatureSources @($changedFeatureSources | ForEach-Object Name) -AuditedHarnessDiagnosticSha256 $diagnosticSourceHash
+                if (-not $readiness.Allowed) { throw $readiness.Reason }
+                $sourceManifestHash = (Get-FileHash -LiteralPath $sourceManifestPath -Algorithm SHA256).Hash
+                $runtimeManifestHash = if (Test-Path -LiteralPath $manifestPath) { (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash } else { '' }
+                if ($sourceManifestHash -ne $runtimeManifestHash) { Copy-Item -LiteralPath $sourceManifestPath -Destination $manifestPath -Force }
+                & dotnet build $projectPath --configuration Release --no-restore "-p:ChronicleGameRoot=$gameRoot"
+                if ($LASTEXITCODE -ne 0) { throw "Build failed with exit code $LASTEXITCODE." }
+            }
+        }
+        'Smoke' {
+            Invoke-Stage -Name 'Smoke' -Action {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $smokeScript -TimeoutSeconds $SmokeTimeoutSeconds -StabilitySeconds $SmokeStabilitySeconds
+                if ($LASTEXITCODE -ne 0) { throw "Smoke test failed with exit code $LASTEXITCODE." }
+            }
+        }
+        'Campaign' {
+            Invoke-Stage -Name 'Campaign' -Action {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $campaignScript
+                if ($LASTEXITCODE -ne 0) { throw "Campaign test failed with exit code $LASTEXITCODE." }
+            }
+        }
+        'FreshCampaign' {
+            Invoke-Stage -Name 'FreshCampaign' -Action {
+                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $freshCampaignScript 2>&1 | Out-String
+                if ($LASTEXITCODE -ne 0) { throw "Fresh campaign character-creation test failed with exit code $LASTEXITCODE. Output: $testOutput" }
+                $testOutput
+            }
+        }
+        'FreshCampaignProgression' {
+            Invoke-Stage -Name 'FreshCampaignProgression' -Action {
+                $attempts = @()
+                $finalResult = $null
+                for ($attempt = 1; $attempt -le 2; $attempt++) {
+                    $attemptTemp = Join-Path $harnessTempDirectory "FreshCampaignProgressionAttempt$attempt"
+                    New-Item -ItemType Directory -Path $attemptTemp -Force | Out-Null
+                    $previousTemp = $env:CHRONICLE_HARNESS_TEMP
+                    $env:CHRONICLE_HARNESS_TEMP = $attemptTemp
+                    try {
+                        $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $freshCampaignScript -ValidateRecruitmentProgression 2>&1 | Out-String
+                        $testExitCode = $LASTEXITCODE
+                    }
+                    finally { $env:CHRONICLE_HARNESS_TEMP = $previousTemp }
+                    try { $testResult = $testOutput | ConvertFrom-Json }
+                    catch { throw "Fresh campaign attempt $attempt returned invalid JSON (exit=$testExitCode): $testOutput" }
+                    $rglTail = @()
+                    if ($testResult.RglLog -and (Test-Path -LiteralPath $testResult.RglLog)) {
+                        try {
+                            $rglLogLines = @(Get-Content -LiteralPath $testResult.RglLog -Tail 8 -ErrorAction Stop)
+                            $rglTail = @(ConvertTo-ChronicleLogTail -Lines $rglLogLines)
+                        }
+                        catch { $rglTail = @([pscustomobject]@{ text = "RGL tail unavailable: $($_.Exception.Message)" }) }
+                    }
+                    $startupAssessment = Get-ChronicleStartupAssessment -Attempt $attempt -GameStarted ([bool]$testResult.GameStarted) -NativeNewCampaignRequested ([bool]$testResult.NativeNewCampaignRequested) -CrashDetected ([bool]$testResult.CrashDetected) -CrashWindowTitle ([string]$testResult.CrashWindowTitle) -SaveDirectoryMetadataUnchanged ([bool]$testResult.SaveDirectoryMetadataUnchanged) -RglLogExists ([bool]($testResult.RglLog -and (Test-Path -LiteralPath $testResult.RglLog)))
+                    $attemptSummary = [ordered]@{
+                        attempt = $attempt
+                        exitCode = $testExitCode
+                        passed = [bool]$testResult.Passed
+                        gameStarted = [bool]$testResult.GameStarted
+                        characterCreationCompleted = [bool]$testResult.CharacterCreationCompleted
+                        nativeNewCampaignRequested = [bool]$testResult.NativeNewCampaignRequested
+                        gameProcessId = $testResult.GameProcessId
+                        crashWindowTitle = [string]$testResult.CrashWindowTitle
+                        crashDetected = [bool]$testResult.CrashDetected
+                        crashWindowCapture = $testResult.CrashWindowCapture
+                        crashWindowCaptureError = [string]$testResult.CrashWindowCaptureError
+                        crashWindowCaptureVideoRetained = [bool]$testResult.CrashWindowCaptureVideoRetained
+                        crashExceptionPath = [string]$testResult.CrashExceptionPath
+                        crashExceptionCaptured = [bool]$testResult.CrashExceptionCaptured
+                        crashFaultAddress = [string]$testResult.CrashFaultAddress
+                        crashFaultModule = [string]$testResult.CrashFaultModule
+                        crashModuleInventory = $testResult.CrashModuleInventory
+                        crashModuleCaptureError = [string]$testResult.CrashModuleCaptureError
+                        startupClassification = $startupAssessment.Classification
+                        rglLogPath = [string]$testResult.RglLog
+                        rglLogExists = [bool]($testResult.RglLog -and (Test-Path -LiteralPath $testResult.RglLog))
+                        rglTail = $rglTail
+                        progressionFailureDetail = [string]$testResult.RecruitmentProgressionError
+                        freshClanRenown = $testResult.ClanRenown
+                        recruitmentProgression = $testResult.RecruitmentProgression
+                        progressionSaveCycleVerified = [bool]($testResult.RecruitmentProgression -and $testResult.RecruitmentProgression.DisposableSaveName -and $testResult.RecruitmentProgression.Passed)
+                        saveDirectoryUnchanged = [bool]$testResult.SaveDirectoryMetadataUnchanged
+                        evidenceDirectory = $attemptTemp
+                    }
+                    $attempts += $attemptSummary
+                    $attemptSummary | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $attemptTemp 'attempt-summary.json') -Encoding UTF8
+                    $finalResult = $testResult
+                    if ($testExitCode -eq 0 -and $testResult.Passed) { break }
+                    # A per-process RGL log proves only that the launcher emitted a log; it is not crash evidence.
+                    # Retry once only when the test itself observed an explicit crash signature or crash-report window.
+                    if (-not $startupAssessment.ShouldRetry) { break }
+                }
+                $stageOutput = [ordered]@{ scenario = 'FreshCampaignProgressionWithExplicitCrashOnlyRetry'; attempts = $attempts; finalResult = $finalResult; passed = [bool]($finalResult.Passed -and $attempts[-1].exitCode -eq 0) }
+                $stageOutput | ConvertTo-Json -Depth 8
+                if (-not $stageOutput.passed) { throw 'Fresh campaign recruitment progression failed after bounded startup recovery.' }
+            }
+        }
+        'Protocol' {
+            Invoke-Stage -Name 'Protocol' -Action {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $protocolScript
+                if ($LASTEXITCODE -ne 0) { throw "Agent protocol test failed with exit code $LASTEXITCODE." }
+            }
+        }
+        'Observation' {
+            Invoke-Stage -Name 'Observation' -Action {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $observationScript
+                if ($LASTEXITCODE -ne 0) { throw "Agent observation test failed with exit code $LASTEXITCODE." }
+            }
+        }
+        'Movement' {
+            Invoke-Stage -Name 'Movement' -Action {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $movementScript
+                if ($LASTEXITCODE -ne 0) { throw "Agent movement test failed with exit code $LASTEXITCODE." }
+            }
+        }
+        'Recruitment' {
+            Invoke-Stage -Name 'Recruitment' -Action {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $recruitmentScript
+                if ($LASTEXITCODE -ne 0) { throw "Agent recruitment test failed with exit code $LASTEXITCODE." }
+            }
+        }
+        'Rest' {
+            Invoke-Stage -Name 'Rest' -Action {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $restScript
+                if ($LASTEXITCODE -ne 0) { throw "Agent rest test failed with exit code $LASTEXITCODE." }
+            }
+        }
+        'Pursuit' {
+            Invoke-Stage -Name 'Pursuit' -Action {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $pursuitScript
+                if ($LASTEXITCODE -ne 0) { throw "Agent pursuit test failed with exit code $LASTEXITCODE." }
+            }
+        }
+        'AgentLoop' {
+            Invoke-Stage -Name 'AgentLoop' -Action {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $agentLoopScript
+                if ($LASTEXITCODE -ne 0) { throw "Agent decision loop test failed with exit code $LASTEXITCODE." }
+            }
+        }
+        'BattleFixture' {
+            Invoke-Stage -Name 'BattleFixture' -Action {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $battleFixtureScript
+                if ($LASTEXITCODE -ne 0) { throw "Battle fixture test failed with exit code $LASTEXITCODE." }
+            }
+        }
+        'PostBattle' {
+            Invoke-Stage -Name 'PostBattle' -Action {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $battleFixtureScript -Scenario PostBattle -CaptureFrames
+                if ($LASTEXITCODE -ne 0) { throw "Postbattle test failed with exit code $LASTEXITCODE." }
+            }
+        }
+        'VisualCapture' {
+            Invoke-Stage -Name 'VisualCapture' -Action {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $visualCaptureScript
+                if ($LASTEXITCODE -ne 0) { throw "Window-only visual capture failed with exit code $LASTEXITCODE." }
+            }
+        }
+    }
+    $stages += $stageResult
+    if (-not $stageResult.Passed) {
+        break
+    }
+}
+
+$summary = [ordered]@{
+    RunId = $runId
+    Phase = $Phase
+    Passed = @($stages | Where-Object { -not $_.Passed }).Count -eq 0 -and $stages.Count -eq $requestedStages.Count
+    Stages = $stages
+    SourceControl = $sourceControl
+    TaskBoard = $taskBoard
+    EvidenceDirectory = $runDirectory
+}
+$summary | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $runDirectory 'summary.json') -Encoding UTF8
+$summary | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $evidenceRoot 'latest.json') -Encoding UTF8
+$summary | ConvertTo-Json -Depth 5
+
+if (-not $summary.Passed) {
+    exit 1
+}
