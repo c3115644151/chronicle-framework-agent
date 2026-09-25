@@ -1,6 +1,6 @@
 # D 类研究：聚落与领地
 
-状态：机制盘点中；D01-D08 已完成首轮静态盘点，目前继续研究 D09 聚落访问入口，未进行方案评审。
+状态：本类 D01-D10 已完成首轮源码盘点，未进行方案评审；界面实测与已标明的未知项仍未穷尽。
 
 适用本体：Bannerlord v1.4.8.119303。依据安装目录中的 `TaleWorlds.CampaignSystem.dll` 反编译结果和 Chronicle 当前 `AgentObserver.cs`；本节是静态代码证据，不代表已经在游戏界面逐项实测。
 
@@ -305,14 +305,42 @@ Normal 村庄入口包含招募 troops、购买产品、走入 village center、
 
 未知项：MapScreen 实际到达时的鼠标/键盘操作与各入口 GameState 切换全链；TownManagementVM、PartyScreen、交易屏幕、菜单选项的可视呈现、默认焦点、关闭/取消恢复行为；敌对、犯罪、城镇状态、在海上、部队归属等全部条件组合；Quest/Issue 从人物对话回到菜单/地图的入口矩阵；Mod 新增 MenuOption/Location 对 Chronicle 当前菜单观察和操作的影响。
 
-### 时间与证据边界
+## D10 易主、占领与后续聚落状态
 
-D01 中的实体分类、所有权查询与绑定关系是读取对象状态，不会自行推进 Campaign 时间。城镇/村庄的每日状态计算由各组件的 `DailyTick` 执行，并受 Campaign 时钟调度；具体数值模型和状态变化分别留给 D02-D04。直接读取属性不等价于玩家打开地图百科或聚落界面；本节没有声称 UI handler 与直接 API 的完整交互已经运行验证。
+### 原版所有权变更的单一入口
 
-证据：本机 `TaleWorlds.CampaignSystem.dll` 的 `Settlement`、`SettlementComponent`、`Town`、`Village`、`Hideout`；Chronicle `AgentObserver.cs` 的附近聚落采集与序列化逻辑。当前本节结论来自 v1.4.8.119303 安装程序集反编译及本地代码静态核对。
+`ChangeOwnerOfSettlementAction` 用不同 detail 标记 Default、BySiege、ByBarter、ByLeaveFaction、ByKingDecision、ByGift、ByRebellion、ByClanDestruction。fortification 所有者写入 `Town.OwnerClan`，由 Clan 侧移除旧领地/登记新领地；Settlement 的地图派系和 Owner Hero 随现任 Clan 解析。Town 会将 `IsOwnerUnassigned` 清为 false。城堡/城镇文化字段并不由这个 action 改写。
 
-未知项：玩家地图上不同聚落类型的精确图标/悬停/ALT/百科字段及遮蔽规则；OwnerClan为空或绑定改变的具体场景；每类 Settlement 的地图可见与侦察状态如何由原版行为更新；直接 VM/API 读取与玩家界面展示之间的全部差异。后续 D02-D10 分域补足，不从这些未知项预设设计方案。
+随后 action 处理驻军、总督、地图视觉和事件：任何 fortification 易主都会移除原 Governor；BySiege 会销毁现存 Garrison Party，再在缺失时创建新驻军 Party，因此攻占城镇的守军 roster 不会作为完整驻军保留到新领主名下。非 siege 的易主分支是否保留现有 garrison，由具体 action/detail 与其他事件逻辑共同决定，不能拿攻城结论套用到贸易/赠地/王国决策。
+
+通过围城、Clan毁灭或家族离开王国造成的 fortification 易主会以 `openToClaim` 参数通知后续认领处理；攻城入口还记录 `Town.LastCapturedBy`。Campaign `OnSettlementOwnerChanged` 会通知订阅行为并传递新/旧 Owner、Capturer 和 Detail，具体后果由各订阅者分摊，不是某一条统一的“换领主奖励”公式。
+
+### 已追到的跨系统后果
+
+- Settlement 及绑定村庄的地图视觉会标脏。村民 Party 若正朝绑定村庄移动、并且没有与新 Owner 开战，部分路径会切换到 Hold；战事/围城相关的目标 Party 也可能被要求停止原目标。
+- `BuildingsCampaignBehavior` 监听易主：新 Owner 不属于 Player Clan 时清除现有普通建设队列；当前日常项目和既有建筑等级不由该分支直接清空。建筑队列结果因此存在易主方向差异。
+- `VillageTradeBoundCampaignBehavior` 监听易主并重新计算 TradeBound；村庄 `Bound` 本身仍指向原城镇/城堡，所以 Village MapFaction 随被绑定聚落的新派系解析。Bound 与 TradeBound 的更新是不同机制。
+- `GarrisonTroopsCampaignBehavior` 在攻城易主且 `openToClaim` 时记录“刚攻下的聚落”，后续领主 Party 进入时进行原版 AI 转兵；它会排除普通玩家 MainParty（除刚占领特殊场景外），不等价于玩家手动管理驻军。
+- `OnSettlementOwnerChanged` 还可触发 Kingdom/fief claim、日志、通知和 NPC 评论；不同 detail 继续影响认领与王国决策链。相应政治、战争、叛乱与日志资料分属 C/J/G 域，本段不重复重写。
+
+这个 action 本身没有直接重置 Prosperity、FoodStocks、Loyalty、Security、Militia、Buildings 或 Settlement.Culture。可是换 OwnerClan 会改变所属 Kingdom、政策、Governor（被移除）、安全/忠诚/经济模型输入和 Village/TradeBound 等后续状态；这些是状态模型随时间重新计算的连锁，而不是“易主时所有发展值归零”。围城战损、驻军被捕获/伤亡和建设 queue 的 detail 分支应分别从 G/F/D05 核对。
+
+### 玩家可见性与 Chronicle 当前覆盖
+
+原版使用地图通知/事件日志、王国领地认领/决策以及 `SettlementOwnerChanged` 相关行为表现易主；攻城、赠地、叛乱、离开王国、王国决策等不是同一种玩家入口，也可能具有不同的 `openToClaim`/驻军后果。玩家地图附近 Settlement 当前只返回 type、距离、hostile、underSiege 等，Chronicle Observer 不提供 OwnerClan/owner Hero、所有权变化原因、Bound/TradeBound、认领资格、建筑 queue 是否被清空或新旧驻军差异；Protocol 也没有易主/认领操作。
+
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `ChangeOwnerOfSettlementAction`、`Town.OwnerClan`、`Clan.OnFortificationAdded/Removed`、`Settlement.BoundVillages`；`BuildingsCampaignBehavior`、`GarrisonTroopsCampaignBehavior`、`VillageTradeBoundCampaignBehavior`、`SettlementClaimantCampaignBehavior` 及易主通知/日志类型；Chronicle `AgentObserver.cs`。结论基于 v1.4.8.119303 静态源码；本节未在存档中触发围城、王国决策或所有权转换，也没有检查玩家收到的可视通知。
+
+未知项：全部 OnSettlementOwnerChanged 订阅者的逐一完整清单及运行顺序；攻城胜利后 defender garrison 的士兵/俘虏去向与战斗结算顺序；失去/取得 fief 的 relationship、影响力、收入、通知和日志按 Detail 的差异；领地认领期间无人所有状态的可视入口、超时处理与多 Clan 冲突；绑定村庄和贸易路线在战争、叛乱、投降或新王国成立后的完整链路。
+
+### 时间、证据等级与跨域边界
+
+读取 Settlement/Town/Village/Alley 字段本身和直接 `ChangeOwnerOfSettlementAction` 状态转换都不调用 Campaign clock 控制；每日状态、建筑、驻军、村庄生产/恢复和 Alley 犯罪/帮派处理由各自 Campaign Tick 在原生时间推进时运行。D09 的 Wait 菜单使用原生 StartWait/EndWait；进入真实 Location/Mission 按 A02 的 Mission 时间语义处理。普通菜单、移动或占领动作不应暗中追加测试快进/暂停。
+
+各 D01-D10 段落已分别列出本机 v1.4.8.119303 程序集、SandBox 行为、ViewModel、官方模块数据或 Chronicle 代码的来源；这些属于源码/资源核实。没有进行当前界面逐项点击、全条件组合运行、Mission战斗、围城、领地转换或长周期经济的视觉/运行验收。遇到直接 API 与玩家 UI 的差异，文中分别写出已证实调用链和未核实的界面/状态，不能互相替代。
+
+D 类观察总缺口：目前 Nearby Settlement 快照没有 OwnerClan/文化/Bound 与 TradeBound、Town/Village 发展指标、建筑/项目、Governor/Garrison roster、Alley/犯罪状态或易主原因。Observer 仅能读取当前已打开 GameMenu 的动态菜单选项；未打开的子菜单与 3D Location 内交互不可由该字段推断。对应实际玩家入口、按键/菜单、访问限制、原版副作用和未知分别在 D01-D10 记录，跨域去重与行为分母仍留给 W1-M。
 
 ## 研究范围状态
 
-D01-D09 已完成首轮静态对象、聚落发展、村庄生命周期、建筑/日常项目、总督/驻军、巷道犯罪及聚落入口盘点。D10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 D 域范围逐项核对，不将此文档视作聚落系统整体已完成。
+D01-D10 已完成首轮静态聚落对象、发展、生产、建筑/项目、总督/驻军、犯罪巷道、玩家入口和易主后果盘点；整体仍是源码研究首轮，尚未声称所有动态条件、UI路径和运行时结果均已穷尽。
