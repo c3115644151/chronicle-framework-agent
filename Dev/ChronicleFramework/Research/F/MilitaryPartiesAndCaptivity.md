@@ -194,6 +194,32 @@ Siege之后会根据 attacking/defending outcome、capturer与 MapEvent contribu
 
 未知项：围城准备到 `menu_siege_strategies` 的完整玩家地图点击/状态链和真实时钟模式；攻城武器部署/构建UI和引擎可见反馈对应的所有字段；Lead Assault/Send Troops在玩家作为 Army leader、附属队伍、单Party时的具体进入路线及伤亡差异；各个Aftermath选项的全部公式和战斗贡献分配；战后state resets/故障恢复与保存加载跨系统顺序。
 
+## F09 掠夺、营地防守与领土受侵
+
+### Military Raid 与 Village hostile actions
+
+AI `RaidSettlement`、玩家强征 supplies/volunteers 和玩家劫掠村庄不是一个统一操作。AI进行战役地图掠夺时，Raid会创建 `MapEvent.BattleTypes.Raid` 并挂上专用 `RaidEventComponent`，在该事件中对 Village `SettlementHitPoints` 逐tick造成损害。默认 `RaidModel.CalculateHitDamage` 大致按 `(sqrt(attacker troop count)+5)/900 × CampaignTime.DeltaTime hours` 计算损害，并可受参与 Raider Perk 影响。
+
+RaidEvent开始将 VillageState 置为 BeingRaided、派 Village militia 到防守方；战斗被结束时若聚落伤害归零则转换为 Looted，否则回到 Normal，发 `RaidCompleted` 并结束 MapEvent。这不是常规双侧野战即时损害：settlement hitpoints、村庄状态、掉落商品和在场/参与 party 都与普通 FieldBattle MapEvent 不同。玩家从菜单主动掠村或强征志愿兵/补给使用另外的 GameMenu/MapEventContext 链，D04已列明入口和 Village 被掠状态，不能将 player hostile action 与AI常规 `RaidSettlement` 目标选择混写。
+
+Raid component 在战斗进度/胜负路径中依村庄产物、RaidDamage和 loot 随机模型生成物品与资金/经验结果；破坏村庄货物、绑村安全、村民货物在途商队的后果分别见 D04/E03。若攻击者被打散/撤退，MapEvent以相应撤退/战后逻辑 finalize；之后的失去 troop、俘虏/赎金、物品转移属于 F10/F12，不在 raid component一处全部处理。
+
+### 聚落与 Party 防守
+
+防守不是只有军队在Settlement里等敌人：城堡/城镇有 Garrison、Militia与附近WarParty/Army等防御来源；村庄允许其 militia及同派系单位参与Raid defending party，具体FIEF/settlement类型、地图事件类型会筛选防守对象（D07/G相关）。NPC防守Party目标源和援防权重由F07 `AiMilitaryBehavior`/TargetScore模型选择。
+
+村民Party在SiegeEvent开始时会停止地图移动；Villager raid出击和村庄 Hostile action的保护/警告另有专用CampaignBehavior。具体遭遇是否打断Raid、玩家MainParty是attack/defend、主人是否自动加入等，需结合 `PlayerEncounter`、`MapEvent` 和Village menu conditions分类，不能凭 map 图标/IsUnderRaid状态直接假定进入战斗了。
+
+### 结果回调、观察与 Chronicle覆盖
+
+`RaidEventComponent` 的RaidCompleted/MapEventEnded事件，聚落 `SettlementHitPoints`、VillageState转换、Loot roster和关系/日志触发时机不同；AI低频意图与玩家菜单逐项确认亦不同。原版代码将这些结果拆到 `RaidEventComponent`、`VillageHostileActionCampaignBehavior`、`MapEvent`、Ransom/Combat rewards等若干层。
+
+Chronicle附近Settlement摘要没有 `VillageState`、`SettlementHitPoints`、RaidDamage、粮食/生产损失或Looted状态；Party摘要不含 `MapEvent.BattleTypes`、双方部队构成和raid结算进度。现有 Protocol可在当前Campaign菜单选择可用option，也支持部分AutoResolve和战后操作，但没有主动把任意 VillageParty转换成RaidMapEvent、编排Raid战斗或核验攻击村庄后果的通用指令。
+
+证据：本机 v1.4.8.119303 `DefaultRaidModel`、`RaidEventComponent.CreateRaidEvent/OnBeforeFinalize/FinalizeComponent`、`MapEvent`、`Village.GetDefenderParties`、`VillageHostileActionCampaignBehavior`、Chronicle `AgentObserver.cs`、`AgentProtocol.cs`；村庄访问前置与经济后果见 D04/E03。静态源码证据，没有从玩家菜单运行劫掠、强征或驻军守卫回归。
+
+未知项：不同目标与Player/AI参与时MapEvent何时建立/结束、RaidDamage战役tick和胜利结果全分支；村庄防守联盟在围城、Army、叛乱、非敌对派系下的完整Party候选；强征vs Raid状态值、钱物/声望/关系副作用差异和Recovery时间；D09实体村庄Mission/场景交互与战役Raid抽象的具体切换条件。
+
 ## F12 Hero 俘虏、管理与释放
 
 本节保留既有俘虏子系统研究。俘虏转移涉及 Factions、战斗、菜单/Party UI 和关系/叙事，相关的关系后果与日志消费者另见 B/C/J 类研究。
