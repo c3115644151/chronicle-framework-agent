@@ -56,9 +56,11 @@ Chronicle仅在指定Harness研究接口中能读取/选择有限Incident，产�
 
 ## J07 Notifications：地图提示、事件通知和操作入口
 
-需要区分Campaign Map Notification、QuickInformation/短提示、Scene notification、Quest JournalLog和Incidents MapState：它们用途/保留期/交互不同。`CampaignInformationManager`收集通知数据，`MapNotificationVM`按通知类型注册对应ViewModel，向玩家展示、定位或允许前往相关操作；Sandbox默认通知Behavior订阅任务开始/完成、Relation变化、征兵/俘虏/聚落/军团/婚姻/战斗等CampaignEvent。
+需要区分Campaign Map Notification、QuickInformation/短提示、Scene notification、Quest JournalLog和Incidents MapState：它们用途/保留期/交互不同。`CampaignInformationManager`收集通知数据，`MapNotificationVM`按通知类型注册对应ViewModel，向玩家展示、定位或允许前往相关操作；Sandbox默认通知Behavior订阅任务开始/完成、Relation变化、征兵/俘虏/聚落/军团/婚姻/战斗等CampaignEvent。`SceneNotificationData`不只用于Battle Mission场景：Campaign对话也会通过`ShowSceneNotification`调用它，Hero Execution scene popup就是可点击Proceed的决策确认；执行结果本身仍在其上下文通知回调发生，不能把“弹窗打开”认作已处置。
 
 通知常是玩家获知新任务/结果/选择权的引导，但通知本身并不必然产生游戏后果；例如点“跳转”会定位对象，不等于自动完成任务。玩家是否能关掉、过期、再次点开或标记已读要由该通知VM决定。
+
+跨域去重：`OBS-J07-03`覆盖Mission/Scene局部消息及Campaign中以`SceneNotificationData`呈现的确认面；特定弹窗之后果归属对应领域动作（例如俘虏处决为`ACT-F12-12`），不新增通用Scene弹窗观察/确认ACT。确认前可见目标/动作与最终回执必须分开记录；全量视觉确认、宿主时钟与Close/Proceed键鼠路径仍待运行核实。
 
 Chronicle当前未观察通知队列、优先级/已读/过期/目标点击行为；Observer的Campaign state/Quest摘要也不能说明通知是否显示。来源：`CampaignInformationManager`、`MapNotificationVM/MapNotificationItemBaseVM`、`DefaultNotificationsCampaignBehavior`和各通知类。未知各种类型的完整快捷入口/过期规则、窗口被遮挡或事件已失效时的响应与单帧通知/日志对应关系。
 
