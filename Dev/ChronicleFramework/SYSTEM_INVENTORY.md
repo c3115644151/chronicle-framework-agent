@@ -376,7 +376,7 @@ D域初步覆盖全部D01-D10系统条目；建设/每日项目以及可视页�
 | E02 Market | `OBS-E02-01`当前Town交易双方库存/报价；买入`ACT-E02-01`、卖出`ACT-E02-02` | 买入和卖出造成的资金/库存/价格改变不同；与Barter分开 |
 | E03 Village supply | 村庄资源/绑定城镇状态映射D04/D09，贸易运输见`OBS-E05-01` | 生产、TradeBound和Villager运输是自动Campaign运行，不是玩家直接“制造货物”动作 |
 | E04 Workshop | `OBS-E04-01`Clan工坊清单/Owner/生产状态；购买`ACT-E04-01`、改产`ACT-E04-02`、出售`ACT-E04-03` | 买入、改产、出售为不同交易/所有权结果 |
-| E05 Caravan | `OBS-E05-01`附近Caravan摘要/主人与贸易路径（常驻快照缺失细项）；创建`ACT-E05-01`、设置偏好候选`ACT-E05-02` | NPC Caravan日常跑商与玩家创建/对话配置不是同一动作 |
+| E05 Caravan | `OBS-E05-01`附近Caravan摘要/主人与贸易路径（常驻快照缺失细项）；创建`ACT-E05-01`、改HomeSettlement`ACT-E05-02`、切换禁贸王国`ACT-E05-03` | NPC Caravan日常跑商与玩家创建/对话配置不是同一动作；HomeSettlement不是逐城路线 |
 | E06 Party economics | `OBS-E06-01`主队粮食、工资、负重/roster；补粮映射`ACT-E02-01` | 日工资/食物消耗/逃兵为自动结算，不另建玩家直接“调账”按钮 |
 | E07 Clan finance | `OBS-E07-01`Clan财务页的Gold、收入/支出预测/资产说明 | Finance预估与每日实扣分开；已有层级/财产页面映射H02/D域 |
 | E08 Kingdom budget | 钱包/协议财务大部分没有确认的玩家直接UI字段；政治信息跨B06/C | 预算注资/分摊为后台模型，不构造“取王国钱”动作 |
@@ -399,7 +399,8 @@ D域初步覆盖全部D01-D10系统条目；建设/每日项目以及可视页�
 | ACT-E04-02 | 行为 | 与自有工坊经营者交谈切换生产类型 | 可能支付改产成本并改变之后每日输入/产出，不是立即给Gold | Chronicle无改产动作；源码路径存在、未视觉运行 | E04/E02/D09 |
 | ACT-E04-03 | 行为 | 通过Notable/Clan经营交互出售Workshop | 转移Owner并结算关联资产/库存；与改产不同 | Chronicle没有Workshop出售动作 | E04/E07、H02/D09 |
 | ACT-E05-01 | 行为 | Town Center与商人对话创建Caravan并配置领队/质量 | 支付创建成本；Companion离队成为Leader并创建WarParty/流动资金 | Chronicle无地图3D接近/Caravan创建动作 | E05、H05/F06/J08 |
-| ACT-E05-02 | 候选行为 | Caravan商人与领队对话设置HomeSettlement或禁贸目标 | 修改贸易偏好但不等于逐步指定路线；对话入口和确认/撤销UI未核实 | 暂不计入最终分母，待追通Conversation和状态结果 | E05/F01/J08 |
+| ACT-E05-02 | 行为 | 与自有Caravan leader对话，选择可用Kingdom后再选合格Town以改HomeSettlement | 调用`CaravanPartyComponent.ChangeHomeSettlement`；目标须不同于当前Home，Naval caravan要求Town有Port；只设回访Home，不指定逐城路线；handler未见Gold/Influence副作用 | 1.4.8对话源码链已追到最终handler；Chronicle未适配，未运行验证对话时钟、提交/取消视觉路径与重选址时点 | E05/F01/J08、`CaravanConversationsCampaignBehavior`、`CaravanPartyComponent.ChangeHomeSettlement` |
+| ACT-E05-03 | 行为 | 与自有Caravan leader对话打开“trade partners”，逐个禁止或恢复一个Kingdom的贸易 | 切换`CaravansCampaignBehavior._prohibitedKingdomsForPlayerCaravans`；Quest使用中的Caravan不能配置；双方战时的对话反馈说明和平后仍维持禁贸；handler未见Gold/Influence副作用 | 1.4.8对话与状态handler源码链已追通；Chronicle未适配，未运行验证对话时钟与菜单视觉/取消路径 | E05/F01/J08、`CaravanConversationsCampaignBehavior`、`CaravansCampaignBehavior` |
 
 E03、E06、E08、E09、E10的大量变化由每日模型、其它玩家动作或跨域Barter驱动，不按Campaign模型调用数计成新玩家动作。市场、Settlement管理与Barter以其实际入口/确认结果为准，不从报价、预估财务或API方法名推断交易已完成。
 

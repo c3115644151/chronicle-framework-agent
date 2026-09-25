@@ -148,7 +148,9 @@ Chronicle Observer 目前只给 PlayerClan 的 Gold/Influence/Renown，不枚举
 
 Caravan 到达 Town 时先按本地 `Town.GetItemPrice` 尝试卖货，使用本地价格与预算/Party重量条件买货则发生在后续每日/小时交易决策中。购买倾向高价值品类并受分类预算、市场库存、单位类别限额、载重、初始资金与城镇金库约束；海上 Caravan 还有特定食物/船只逻辑。卖货会保留一定数量的包驮动物和牲畜，TradeActionLog 记录部分品类的买入/卖出地点与价格差，用于贸易传闻，而非完整逐日财务报表。
 
-玩家可与可遇到的 Caravan 对话，询问贸易传闻或打开 Caravan Trader 的 Inventory trade；其 Owner/leader 可通过对话改变 HomeSettlement、禁止某些 Kingdom 作为贸易对象。Caravan 与目标城镇若处于战争关系，不会继续与之交易；玩家 Owner 的 Caravan 还会检查由对话配置的禁贸王国列表。这些控制是经营规则配置，不是直接指定逐步路线。
+玩家与自有Caravan leader对话的 “We need to talk business” 分支有两个独立偏好动作。其一，选择改换 HomeSettlement 后分步选一个有可用Town的 Kingdom，再选Town，最后由 `CaravanPartyComponent.ChangeHomeSettlement`提交；目标不等同于设置逐城路线，Naval caravan 还要求目标有Port。其二，选择“trade partners”后对候选Kingdom逐项切换禁止/恢复贸易，改变 `CaravansCampaignBehavior`保存的 `_prohibitedKingdomsForPlayerCaravans`；当前双方在战争中时，回复文本明确说明即使将来议和也不会开始贸易。Quest使用中的Caravan不能配置禁贸名单。另有询问Trade Rumors和打开Caravan Trader库存交易的对话，后两者分别映射J06和E02，不与偏好设置重复。
+
+上述偏好选项调用对话/RepeatablePlayerLine Handler，不扣Gold/Influence，也不改变Caravan Owner/Leader；Home位置和禁贸清单是两种不同状态。战时目标、玩家Owner Caravan贸易许可和已设置的禁贸名单会共同影响后续AI选址与交易。设置动作的源码handler没有显式改CampaignTime，但对话宿主State时钟/条件变化后的重新选址时机本轮未运行核实；这些操作只是贸易偏好，不是逐站手工路由。
 
 ### 战斗、损毁与恢复
 
