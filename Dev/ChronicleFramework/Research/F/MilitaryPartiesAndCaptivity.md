@@ -367,6 +367,8 @@ Hero 俘虏可以存在于：
 
 成功后离开Settlement并与囚犯Hero对话，最终经`EndCaptivityAction.ApplyByEscape`释放，默认`PrisonBreakModel` relation reward为+15并给予Roguery XP；若目标是玩家Companion，专属对话分支还会将Hero置为Active并加入MainParty。成功后的状态提交单列为`ACT-F12-14`，与付费启动/Mission阶段分开。实际潜入、近身交互、护送和战斗控制由G03 Mission身体承载，Chronicle当前没有3D控制动作。Inquiry和Mission UI视觉、Campaign/Scene时钟、失败分支保存恢复未运行核验。
 
+被救Hero在Mission中的跟随控制是另一实际提交：`PrisonBreakMissionController.OnAgentInteraction`仅在MainAgent作用于目标prisoner、且所有存活守卫未Alarmed时响应。第一次交互会生成第二阶段守卫、切至第二阶段并调用`SwitchPrisonerFollowingState`；之后再次交互切换跟随/停止跟随。该Action仅改变Mission内护送状态，不能单凭“开始跟随”推断Hero已脱离囚禁；最后仍需成功结束Mission并经过上段的`ACT-F12-14`。此交互单列`ACT-F12-15`，与Campaign释放和进入突围Mission分开。
+
 ### 赎金与 Barter 转移
 
 玩家要通过普通领主Barter与对方谈判，BarterVM是否出现Hero俘虏条款由`BarterablesRequested`监听者按双方Party/Faction状态动态构造；Conversation/Barter入口和通用议价状态见 [E10](../E/EconomyAndTrade.md#e10-barter-交换谈判)，此处只记录俘虏状态变化。战后PartyScreen、主角被俘GameMenu与对话Barter不是同一入口。

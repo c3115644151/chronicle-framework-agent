@@ -54,6 +54,8 @@ Cheer键打开的是径向Taunt/Shout选单，不等同“提高部队士气”�
 
 Action键对普通Agent还有第三条结果路径：当焦点目标不是Mount且不是`UsableMissionObject`时，`MissionMainAgentInteractionComponent.FocusStateCheckTick`调用目标的`Agent.OnUse(MainAgent, boneIndex)`，再由`Mission.OnAgentInteraction`分发到当前Mission各`MissionBehavior.OnAgentInteraction`。它可承载场景NPC/任务对象特定的脚本；不等同机器的Start/StopUse，也不自动等价Campaign Conversation。目录暂另列`ACT-G03-17`，实际场景应按其MissionBehavior调用者逐个检查是否有不同状态提交，而不能把所有Agent focus 当成同一结果。
 
+当前1.4.8 `SandBox.dll`与`StoryMode.dll`的Mission构造调用点中，Agent互动消费者进一步分出明确场景结果：Campaign Mission的一般NPC talk由`MissionConversationLogic`启动对话；棋桌对手由`MissionBoardGameLogic`委托同一Conversation，所以棋桌入口不重复计Agent互动，但后续选棋/下棋仍是J11行为。`PrisonBreakMissionController`在MainAgent对指定囚犯Hero交互且存活守卫未Alarmed时切换阶段并改变Follow状态，另列`ACT-F12-15`。`CorpseDraggingMissionLogic`在多个SandBox/Story任务加载，玩家对尸体交互后启动ragdoll拖拽、限制自身速度并可能令尸体武器掉落，另列`ACT-G03-18`。`StealthPatrolPointMissionLogic`在对应Story/Stealth任务加载，MainAgent交互未开始移动的CoverAnimal后调用`StartMovement`，另列`ACT-G03-19`。相反，`SearchBodyMissionHandler`虽存在，但扫描当前SandBox/Story Mission构造器未发现实例注册；暂无证据把它纳入当前基础模块可用动作，保留为“活动装配未知”的开放项。
+
 Multiplayer Mission还有独立于Campaign战斗指令的VoiceChat：`VoiceChatHandler`在voice chat enabled且音频/平台权限允许时，按`PushToTalk`(33)按下启动录音、松开后停录并将压缩音频作为`SendVoiceRecord`发服务器；服务器按接收列表与同队关系转发`SendVoiceToPlay`，客户端再解压播放并更新Peer voice status。未连接网络Mission的单机战役没有这条语音传输路径；该行为不修改Campaign、Army或Mission Agent战斗状态，但属于联网玩家沟通入口。Chronicle没有麦克风输入、语音转录或语音输出适配。
 
 Prison Break是F12从地牢菜单启动的自定义Sandbox Mission subtype，而非通常的MapEvent战斗：启动入口/囚犯选择/Bribe提交映射F12 `ACT-F12-13`，成功后的Captivity结束对话映射`ACT-F12-14`。`PrisonBreakMissionController`在单一场景中交替处理潜行接近和警报后的护送/战斗，玩家须使用Use交互俘虏触发跟随，警卫感知和StealthFailCounter会改写结果；它不是进入场景后自动营救。它暴露G03通用Mission身体控制仍是未知清单，具体Movement/Use/Melee等Action族尚待研究，不能把F12启动入口算作完整营救支持。
