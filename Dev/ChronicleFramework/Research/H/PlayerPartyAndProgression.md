@@ -42,9 +42,9 @@ Chronicle主快照已返回Hero/Clan ID与名称、Clan Tier、下一级所需Re
 
 同伴是Hero，通常以可招募Wanderer身份在Settlement出现；加入PlayerClan后不再只是战斗Roster兵种：有个人技能/Perk/装备、关系和忙碌状态，可进入主队、担任角色、创建家族Party、被俘或离队。伴侣模板按周期由 `CompanionsCampaignBehavior`管理，生成/淘汰与Clan上限、世界人口和模板池有关；不是玩家可随时从固定菜单无限抽取的兵种。
 
-原版玩家入口是找到可招募Wanderer并完成对应互动/招募条件；最终Clan成员增加由 `AddCompanionAction`完成，既有同伴改属其他Clan时先走移除旧Clan。默认聘用价格模型按候选Hero的军用与民用Equipment在城镇的市场价格之和取一半，再加角色等级价格项及玩家Perk修正；不是只按好感度固定报价。死亡、雇佣解雇、任务结果或同伴转为领主等会走不同 `RemoveCompanionAction` 分支，某些离队还需要结束其Party/当前领导状态；不能把“从主队离开”自动等同“从Clan删除”。
+原版玩家雇佣入口由 `LordConversationsCampaignBehavior` 注册：与未雇用、不是当前Companion、且不属于某个Party的Wanderer交谈，出现“I can use someone like you in my company”；后续对话先显示 `CompanionHiringPriceCalculationModel.GetCompanionHiringPrice`报价。接受选项要求 Main Hero 金币严格大于报价且未达到 `Clan.PlayerClan.CompanionLimit`，确认后依次调用 `GiveGoldAction`、`AddCompanionAction` 与 `AddHeroToPartyAction`，因此结果是支付后加入Clan并加入MainParty；看报价/拒绝/取消本身不会支付。默认价格按候选Hero军用与民用Equipment在城镇的市场价格之和取一半，再加角色等级价格项及玩家Perk修正；不是只按好感度固定报价。死亡、雇佣解雇、任务结果或同伴转为领主等会走不同 `RemoveCompanionAction` 分支，某些离队还需要结束其Party/当前领导状态；不能把“从主队离开”自动等同“从Clan删除”。
 
-Chronicle主观察不逐个列出Clan成员/同伴、能力/装备/当前位置/忙碌状态，PartyScreen存在成员列表但只在相应PartyState读取；没有探索Wanderer、通用对话雇佣、解雇/转封臣、个人状态管理工具。跨入同伴、任务和亲属关系后的关系变化见B/C/J；家族角色分工见H06，创建家族Party见F06。来源：`CompanionsCampaignBehavior`、`AddCompanionAction`、`RemoveCompanionAction`、`DefaultCompanionHiringPriceCalculationModel`、当前Chronicle Observer/Protocol。未知：本机当前版本每类Wanderer的出现位置与昼夜/酒馆入口、招募对话的逐步条件/退出和钱款提交、同伴自动刷新与不同Campaign类型限制、每种离队原因后NPC身份/装备/关系的完整长时结果。
+Chronicle主观察不逐个列出Clan成员/同伴、能力/装备/当前位置/忙碌状态，PartyScreen存在成员列表但只在相应PartyState读取；没有Wanderer寻访/对话雇佣、解雇/转封臣、个人状态管理工具。跨入同伴、任务和亲属关系后的变化见B/C/J；家族职责见H06，创建家族Party见F06。来源：`CompanionsCampaignBehavior`、`AddCompanionAction`、`RemoveCompanionAction`、`DefaultCompanionHiringPriceCalculationModel`、`LordConversationsCampaignBehavior`、当前Chronicle Observer/Protocol。本轮源码已核清雇佣句、门槛、扣款和加入Clan/MainParty的提交顺序；仍未知Wanderer生成/出现地点、从地图到酒馆/场景的完整玩家进入流程、Conversation宿主时钟，以及等待失败/取消分支在实际UI中的呈现。
 
 ## H06 Party Roles：家族成员职责分配
 
