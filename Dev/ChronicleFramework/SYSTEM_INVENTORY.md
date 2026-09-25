@@ -219,7 +219,6 @@
 | ACT-A08-01 | 行为 | 新战役开场动画按ESC跳过 | 结束视频播放并进入创建阶段；不应反复空等数分钟 | Harness FreshCampaign设跳过路径；ESC具体 handler 未定位，用户视觉确认可跳 | A01、A08；FreshCampaign验收 |
 | OBS-A02-01 | 观察 | 地图时间/日期/速度档 | HUD显示Campaign时钟与当前时间控制档；Mission暂停和战役快进分开 | Observer输出campaignDay/timeControlMode；UI图标/标题尚未实机对照 | A02、L06；MAINLINE |
 | OBS-A07-01 | 观察 | Encyclopedia(Hero history)/日志 | 从全局历史条目按页面可见条件筛出角色历史；不等于实时全世界快照 | Chronicle不输出LogEntryHistory或百科历史列表 | A07、L05；用户确认N百科入口 |
-| OBS-A07-02 | 观察 | Quest Journal/`JournalLog` | 按当前任务/日志状态显示文本、时间/进度；不是Hero永久历史 | Chronicle未提供完整Quest日志列表/筛选 | A07、J04、L05 |
 | OBS-A08-01 | 观察 | Tutorial提示 | 按Campaign类型/行为状态显示并可完成/关闭；StoryMode提示与Sandbox提示源不同 | Chronicle不读教程提示/完成状态 | A08、J12、L06 |
 | OBS-A08-02 | 观察 | Concept百科页 | 按概念分类/页面显示帮助文本与链接；N百科入口UI细节以实测为准 | Chronicle不读Concept数据或页面当前项 | A08、L05、用户确认N百科入口 |
 | N/A-A03-01 | N/A | Campaign小时/日/周等周期分发与对象Tick | 由Campaign时间和引擎调度触发，无“执行Tick”玩家入口；具体结果映射到造成状态变化的行为族 | 明确排除玩家动作分母；按时钟/生命周期研究保留来源与例外核查 | A03、`Research/A/CampaignRuntimeWorldState.md` |
@@ -522,7 +521,7 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 | J01 Issues | `OBS-J01-01`当前Notable/领主Issue提示；Quest接取`ACT-J02-01`；派遣部队的Alternative Solution`ACT-J01-02`、启动Lord Solution`ACT-J01-03`、回应反报价`ACT-J01-04`为不同分支 | 蓝色标记是玩家提供的视觉事实；三种结算入口/副作用不并成通用任务脚本；每种Issue的可用分支仍需逐类盘点 |
 | J02 Quests | `OBS-J02-01`任务列表/当前阶段/地图marker；接取/启动`ACT-J02-01` | Quest完成由各Task/真实世界动作达成，不另计“写QuestComplete” |
 | J03 Quest Tasks | 移动/交易/对话/战斗步骤映射K/E/I/G已有实际动作ID | TaskBase只是程序对象，具体任务步骤需回到相关原版UI/动作族 |
-| J04 Journal | `OBS-J04-01` Quest Journal/时间与进度记录 | JournalLog是回看信息，不等于世界状态或Action |
+| J04 Journal | Quest的`JournalLog`记录复用`OBS-J02-01`；Hero历史百科页复用`OBS-A07-01` | JournalLog是Quest状态的回看信息，不等于世界状态或另一独立Journal界面；百科Hero历史是不同LogEntryHistory面 |
 | J05 Incident | `OBS-J05-01` MapState当前Incident及条件选项；`ACT-J05-01`选择事件回应 | 每个Incident的Effect/Consequence按具体选项参数读取，不能合并不同事件后果 |
 | J06 Rumor | `OBS-J06-01`市场/玩家物品悬停中的异地买卖价格提示 | 同一ItemMenu消费者服务两侧；已有情报、具体物品、时效和价差共同筛选，专长可扩充来源；源码入口已确认，Chronicle尚未适配 |
 | J07 Notifications | Campaign Map Notice队列`OBS-J07-01`、QuickInfo瞬时提示`OBS-J07-02`、Scene通知`OBS-J07-03`分别观察 | A07记载LogEntry/百科日志；通知类分属不同存储/时间/宿主，不能与Log或彼此合并 |
@@ -557,9 +556,8 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 | ACT-J01-02 | 行为 | 对支持Alternative的Issue，在对话选择替代方案、选定符合条件的Companion，并按需用PartyScreen配置健康部队后确认 | 写入Alternative状态；Companion离开MainParty/变busy，派出Troop延迟返回；Issue子类可配置天数、伤亡、失败风险与奖励；并非所有Issue均支持 | 1.4.8 `IssuesCampaignBehavior` AddDialog/handler与`IssueBase.StartIssueWithAlternativeSolution`确认真实玩家行为；各Issue开放条件/结果、PartyScreen取消回退和视觉流程未全量核验；Chronicle无动作 | J01/J03/F/H、`IssuesCampaignBehavior`、`IssueBase.StartIssueWithAlternativeSolution` |
 | ACT-J01-03 | 行为 | 对支持Lord Solution的Issue，在Issue对话检查条件与影响力后选择该方案 | 需Issue自身条件、Issue owner当前聚落属于玩家Clan且Influence余额达到门槛；开始LordSolution状态后可能进入CounterOfferHero对话；余额为门槛，实际扣费取决于后续回应 | 1.4.8 `IssuesCampaignBehavior`玩家选项、clickable condition及`IssueBase.StartIssueWithLordSolution`确认；Issue子类开放类型、视觉门槛提示和无反报价路径未逐类核验；Chronicle无动作 | J01/C/E/I、`IssuesCampaignBehavior.issue_offer_player_accept_lord*`、`IssueBase.StartIssueWithLordSolution` |
 | ACT-J01-04 | 行为 | 在Lord Solution第二段Counter Offer对话中选择接受或拒绝 | 拒绝反报价会扣`NeededInfluenceForLordSolution`并走Issue成功/拒绝counter分支；接受会走Betrayal后果且不扣该影响力；若无CounterOfferHero或Issue owner离开Settlement，原版会自动走拒绝counter分支 | 1.4.8通用VM option/callback与`IssueBase.CompleteIssueWithLordSolutionWith*`确认两个互斥结果；实际遇到条件/视觉迁移未运行，各Issue子类后果未穷举；Chronicle无动作 | J01/J08、`IssuesCampaignBehavior.issue_counter_offer_*`、`IssueBase.CompleteIssueWithLordSolutionWith*` |
-| OBS-J02-01 | 观察 | Quest/Journal页面查看进行中阶段、期限、目标和日志 | Quest/QuestTask状态与自由文本记录不同；期限基于Campaign time | Observer只给当前任务摘要，不列完整日志/隐藏Task目标 | J02/J03/J04、QuestBase/QuestsVM |
+| OBS-J02-01 | 观察 | Quest Journal/QuestsVM查看当前任务、阶段、期限、目标及对应JournalLog文本/进度 | Quest/QuestTask状态与自由文本JournalLog不同；期限基于Campaign time；日志是该任务回看而非全局Hero历史 | Observer只给当前任务摘要，不列完整JournalLog/隐藏Task目标；A07/J02/J04对同一Quest Journal不重复计数 | A07/J02/J03/J04/L05、`QuestBase`/`JournalLog`/`QuestsVM` |
 | ACT-J02-01 | 行为 | 从Issue/Story/NPC提供入口接受并启动一个合法Quest | 依任务内容写Quest state/期限，可能引入Gold/关系/物品前置或失败风险 | Chronicle无通用Quest接取/阶段执行器；每类入口须单独映射 | J01/J02/J03/J12、QuestBase/IssueBase |
-| OBS-J04-01 | 观察 | Journal/LogEntry浏览任务/角色记录 | 日志过期、隐藏信息与当前状态不同步；不自动推进Campaign | Chronicle未输出完整LogEntryHistory/Quest Journal | A07/J04/L05、LogEntryHistory/QuestsVM |
 | OBS-J05-01 | 观察 | Settlement进出后打开Incident选择界面查看事件/选项 | Incident trigger、cooldown、条件筛选一条事件；Effect列表不等于实际已提交结果 | MAINLINE有Incident modal/state链，仍未所有Incident运行验证 | J05/A02、IncidentsCampaignBehaviour/Incident |
 | ACT-J05-01 | 行为 | Incident UI中选择一个条件合法的事件Option并确认/关闭 | 每个Effect和Option Consequence分别调用；可能改变金钱/Party/关系/Settlement状态；直接API跳过VM cleanup | Chronicle对Incident通用流程目前Unsupported/Research；结构化事件返回未全测 | J05/L06、Incident.InvokeOption、MAINLINE |
 | OBS-J06-01 | 观察 | Inventory/市场Goods物品悬停详情中的异地买卖地点/记录价格；玩家栏与市场栏为同一观察族的两个入口 | `ItemMenuVM.SetMerchandiseComponentTooltip`按具体ItemObject、未过期记录、异地及价差筛选；来源受城镇访问/每日事件/交易专长影响。读取不改库存/金币，记录随Campaign时间过期；宿主界面时钟待运行核验 | 用户报告商品例子为谷物/贵重品/木材/葡萄酒，确认武器不显示，马匹未核；与本机1.4.8源码Goods筛选相符。Chronicle未适配，Agent未视觉/运行复核；利润/行情颜色另见E09 | J06/E02/E05/E09、`TradeRumorsCampaignBehavior`、`ItemMenuVM`、`SPInventoryVM`；马匹展示、来源/去重边缘未知 |
