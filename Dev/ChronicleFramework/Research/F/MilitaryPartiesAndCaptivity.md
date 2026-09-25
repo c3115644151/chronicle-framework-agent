@@ -246,6 +246,38 @@ Observer 在BattleSimulation活动时只提供 finished/retreated/battleState等
 
 未知项：所有Encounter prompt到坐镇Simulation/Join Battle UI入口和按键焦点；Mission Battle与MapEvent simulation各技能/XP/伤亡/战利品差异矩阵；每一MapEvent Component结果回执字段、失效/中断与重新载入边缘条件；援军Party何时加入/退出的具体距离/同盟门禁；Pause/Skip Simulation与Campaign clock各平台/当前时间模式的所有精确边界验证。
 
+## F11 部队补充、训练、治疗与流失
+
+### Troop XP 与自动升级
+
+Party troop progression由 `TroopRoster` 的成员计数/伤员数/XP与 `CharacterObject.UpgradeTargets` 兵种树共同表示。`MobilePartyTrainingBehavior` 监听DailyTickParty给普通 troop 加模型计算的 daily XP；Battle/MapEvent参与可在战后 commit另外的共享XP。玩家升级不等于这种后台 XP 累积。
+
+`PartyUpgraderCampaignBehavior` 在每日 Party tick 和 MapEvent结束时检查可升级 troop；默认升级行为显式忽略 `PartyBase.MainParty`，NPC Party可按模型权重/首领偏好在多个升级分支中选一个。升级前可能检查 XP成本、Gold成本、队伍工资上限、所需 ItemCategory物品、Perk条件及Bandit来源限制；真正执行时从旧 roster扣人数/XP，加入目标兵种，并向Party Owner或Leader扣Gold/授予军需/Leadership相关技能经验。玩家通过Party Screen的升级交互是另一入口，具体操作是否即时提交、无法升级时的角色/tooltip提示未做当前版本视觉验证。Recruitment与加人入口见D09及当前 Protocol Recruitment Adapter；Garrison Volunteer自动招募见D07，战后Captured Prisoner吸收则见F12。
+
+### 日常训练与熟练度边界
+
+默认 `PartyTrainingModel` 可按NPC Lord party是否是主领主/Army、部队等级与领导Perk等累计日常 XP；技能效果还可能按当前Party角色/行军或驻扎/海上状态变化。MainParty不应直接按NPC每日经验规则假设自动升级；玩家Roster成长来自招兵、战斗技能奖励、Party XP结果与主动PartyScreen升级等不同入口。
+
+### 治疗、伤病与俘虏健康
+
+`PartyHealCampaignBehavior` 将伤兵/英雄治疗作为 PartyBase的队员与 Prisoner 两套 roster单独处理，溢出Healing rate 会随下次周期tick累加。其监听每日/每小时/每QuarterDaily Party tick与 MapEvent结束：MainParty有每小时治疗调用，其他Party约每QuarterDaily tick，Settlement party另有每日；`PartyHealingModel`决定治疗或因缺粮/伤病环境发生额外血量变化。Hero命中点恢复和Regular Troop伤员复原不是一种数量转换，伤兵仍留在 MemberRoster wounded count，除非被其他治疗/战后规则治愈或死亡。
+
+俘虏治疗独立调用 Prisoner伤兵/英雄恢复率并维护各自溢出缓存；俘虏逃跑/处决/兑换则见F12。不同场景/监狱/garrison和Mission时的治疗权限、正确玩家待机入口及玩家能看到的预估治疗项未在F11运行验证。
+
+### 逃兵、限额与资源不足
+
+`DesertionCampaignBehavior` 每日仅检查活动、在陆上、非Disbanding、非MapEvent且为Lord/Caravan/Garrison等符合条件、且仍有Regular troop的Party。模型按低Morale、工资限额超支、超PartySizeLimit等算要逃兵数量/选择Troop；Garrison对欠薪还有额外流失分支。实际移除从MemberRoster执行并发TroopsDeserted；队伍成员归零则销毁Party。故“目前人数小于PartySizeLimit”并不代表永不减员，缺粮/欠薪/士气是持续限制。
+
+食物/工资背景及玩家Clan每日付款入口分别见E06/E07；适用于Battle/Season/Army的士兵补充或逃兵结算还由相关WarParty/Army/Settlement Models调整。Roster改变的结果通常跨越上方XP、Food、Wage、Heal、Desertion等循环产生反馈。
+
+### Chronicle当前适配与缺口
+
+Observer输出主队成员/健康/伤兵/俘虏总数与Party SizeLimit，不输出每个兵种、UpgradeXP/UpgradeTargets、兵种技能/工资、招募上限/报名槽、逐兵伤病状态或模型推算逃兵风险。Protocol存在RecruitmentVM专用的一人招募流程和战后部分Party处理，但没有通用PartyScreen兵种转移、升级候选/费用核验、医疗治理或Roster rollback/retry动作；单兵总数变化不能替代“升级成功/伤病恢复/内部交换”细节。
+
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `PartyUpgraderCampaignBehavior`、`MobilePartyTrainingBehavior`、`DefaultPartyTrainingModel`、`DefaultPartyTroopUpgradeModel`、`PartyHealCampaignBehavior`、`DefaultPartyHealingModel`、`DesertionCampaignBehavior`、`DefaultPartyDesertionModel`；Chronicle `AgentObserver.cs`/`AgentProtocol.cs`。源码版本 v1.4.8.119303，没有实机触发训练长期XP、治疗周期、Troop升级或欠薪逃兵。
+
+未知项：Player PartyScreen里升级/治疗/人头不足等各操作结果和取消事务；所有招募渠道的出现频率、市场志愿者/家族同伴限额与失败后补充；Wounded Troop的动态疗效和长周期差异；AI party对 troop roster补充、随机晋升、伤员治疗和Army成员凋零的完整行为策略；相关 mods替换PartyUpgrade/Training/Healing/Desertion Model时的冲突。
+
 ## F12 Hero 俘虏、管理与释放
 
 本节保留既有俘虏子系统研究。俘虏转移涉及 Factions、战斗、菜单/Party UI 和关系/叙事，相关的关系后果与日志消费者另见 B/C/J 类研究。
