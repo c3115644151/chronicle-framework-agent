@@ -110,6 +110,32 @@ Observer目前只对 Nearby Party 摘要输出成员数和 EstimatedStrength，�
 
 未知项：Kingdom管理页面具体按键/Army管理View打开与取消恢复序；玩家AI Colony/领地页以外可触发Army管理的其他入口；每类 Party 的完整 eligibility 和成本公式在修改/费率Perk下的变化；Army与军团分裂/继承、战争/和平、玩家囚禁和结盟同步的全部后果；真实地图集结期限/自动解散条件与UI通知顺序。
 
+## F06 Clan War Party 与玩家家族队伍
+
+### WarPartyComponent 与 Clan 队伍名册
+
+`WarPartyComponent` 是族长/领主的可移动 Party Component 基类；`OnInitialize/OnFinalize` 分别登记/移除 `Clan.WarPartyComponents`，Clan 改变时同步从旧/新 Clan 的名册迁移。`Clan.WarPartyLimit` 由 ClanTierModel 按当前 Clan Tier 计算；`CurrentTotalStrength` 会汇总 Clan WarPartyComponent队伍和其名下 Fief Garrison 的 EstimatedStrength。Caravan、Garrison等有各自 Component/名册，不能直接等同为所有 `WarPartyComponents`。
+
+NPC Lord Party 的初始化会以 Lord Hero 为Party Leader，按所属 Clan DefaultPartyTemplate（Rebel Clan则用 RebelPartyTemplate）填入初始队伍，并给予一批 Grain；Campaign与PartyUpgrader/招募/升级等系统后续维护 roster。具体NPC招募频率与目标是 F11/F03/F04交叉项，本节不把全体NPC队伍模板当成玩家复制的“自动成长”。
+
+### 玩家从Clan页面创建家族Party
+
+`ClanPartiesVM` 在Clan管理的Parties类别中提供“Create new party”，默认模型与VM共同要求仍有Party slot (`WarPartyLimit - WarPartyComponents.Count > 0`)、有可带队的可用 Clan Hero/Companion、地图操作允许且MainParty没有在海上/raft，并要为该新Leader补足 `ClanFinanceModel.PartyGoldLowerThreshold` 的资金。创建时会列出候选及每名 Hero 的状态/限制；被囚禁、未成年、Governor、已带队、Fugitive、正在海上或资金不足等候选不可用或显示禁用原因。
+
+确认后 `MobilePartyHelper.CreateNewClanMobileParty` 创建以新 Hero 为领袖的 `LordPartyComponent`。如果该 Hero 仍在 MainParty，先从 MainParty roster 移除；随后在当前 Settlement 或当前/合适地图位置生成新队伍，VM 将最低 party gold补给给其 Leader，并将新队伍设为 Hold。关键差异：`LordPartyComponent.InitializeLordPartyProperties` 对非玩家 Clan Party 会按 Clan 默认PartyTemplate填兵；PlayerClan新建 Party走 `InitializeMobilePartyAtPosition` 分支，不复制NPC DefaultPartyTemplate，初始化对象明确添加的只有 Leader 和约 15–30 Grain。因而“创建一个家族Party”本身不保证得到可自行战斗/收税的满编部队；士兵/物资如何补齐需走Party管理和F11渠道。
+
+同一 Clan Parties VM 支持更换 Party Leader、分配 Party Roles/部分行为、查看 party 名单/工资等类别；更换 Leader 会调用对应Party/DelayedTeleport逻辑。解散操作拒绝 MainParty、Garrison、Militia或处于战斗/围城的队伍；普通自有 Party 的解散还涉及返回的 Settlement/物资及俘虏处理，分别在 F11/F12 边界核查。
+
+### 对照 AI Clan War Party 与 Chronicle 覆盖
+
+NPC Party 的 `LordPartyComponent` 由角色/clan war party 系统持有，模板生成和AI补兵链与上面的玩家新队伍入口不同。AI PartyThink选择 Army/战术目标是 F02/F05，不应把 WarPartyComponent 入册/生成等同一个长程自主目标。Clan改王国、领地变化、Hero死亡或Party被销毁，会改变 WarPartyComponent 名册、控制关系或Army成员，需要按各Event路径继续追踪。
+
+Chronicle主队Snapshot有Party摘要，但没有Clan Owned WarPartyComponent的全量 roster、PartyLimit使用情况、各队Leader/Home/工资/自动行为、创建草稿候选或新Party初始化后状态；Protocol没有 `CreateNewClanMobileParty`/队伍编成/编队补兵命令。当前静态证据不代表Agent可自主管理新的家族移动部队。
+
+证据：当前 `TaleWorlds.CampaignSystem.dll` 的 `WarPartyComponent`、`Clan.WarPartyLimit/WarPartyComponents/CurrentTotalStrength`、`DefaultClanTierModel`、`LordPartyComponent`、`MobilePartyHelper.CreateNewClanMobileParty`、`ClanFinanceModel.PartyGoldLowerThreshold`；`TaleWorlds.CampaignSystem.ViewModelCollection.dll` 的 `ClanPartiesVM`/`ClanPartyItemVM`；Chronicle `AgentObserver.cs`。源码版本 v1.4.8.119303；没有实机点击Create New Party、扣款、检查新party roster或返回MainParty的UI验收。
+
+未知项：AI NPC WarParty生成/死亡/损失后的完整补充频率和玩家Party的后续兵员增长策略；PlayerClan新Party在初始MainParty、城镇、队伍外等不同Hero位置下的所有位置/物资前后态；Party management中角色、兵种、伤兵、物品、工资上限和Disband各按钮的视觉输入/提交顺序；WarPartyLimit不同Tier、Clan类型与NPC衡量的实际差异；队伍被俘、改Faction、Leader死亡对Clan roster和军团存档恢复的完整结果。
+
 ## F12 Hero 俘虏、管理与释放
 
 本节保留既有俘虏子系统研究。俘虏转移涉及 Factions、战斗、菜单/Party UI 和关系/叙事，相关的关系后果与日志消费者另见 B/C/J 类研究。
