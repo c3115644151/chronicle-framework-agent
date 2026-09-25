@@ -82,10 +82,20 @@ Chronicle 当前状态：Observer/Protocol 快照不读取这些选项；没有�
 
 ## A07 日志、通知与百科信息
 
-用户确认N开百科，可查NPC经历/现况；本版界面未复核。1.4.8 `LogEntry.AddLogEntry` 写战役时间与递增ID；每项自有保留期，周清理过期项。`CampaignInformationManager` 将 `IChatNotification` 转为信息栏消息，地图通知独立保存、读档后重放。
+玩家入口：用户确认按 N 可打开百科总查表并从 Hero 页面查看该 NPC 的经历和现况；当前尚未通过实机按键再次核验。源码中的 `EncyclopediaHeroPageVM.RefreshValues` 清空 `History` 后从全局 `LogEntryHistory.GameActionLogs` 倒序遍历，只保留 `IEncyclopediaLog.IsVisibleInEncyclopediaPageOf(hero)` 为真的条目；`EncyclopediaHistoryEventVM` 显示条目的 Campaign 时间和百科文本。Hero 页面还读取 `HeroHelper.GetLastSeenText` 生成 Last Seen 字段。因此 NPC 历史不是每个 Hero 各有独立日志文件，而是由全局 log history 按条目可见条件筛出。
 
-AgentObserver 不读取日志/地图通知，无日志查询动作；Chronicle 诊断只记自身命令。证据：`LogEntryHistory`/`CampaignInformationManager` 及 AgentObserver/Protocol。
+`LogEntry.AddLogEntry` 在条目上写入 `CampaignTime.Now` 与单调递增的 ID，然后交给 `LogEntryHistory`；重载入口也允许提供明确的 CampaignTime。`LogEntryHistory` 保存全局有序列表及最后使用的 ID，支持按类型/条件查询。基类默认历史保留期为7天，具体 LogEntry 可覆盖；WeeklyTick 调用 `DeleteOutdatedLogs` 删除已过保留期或已失效的条目，所以这不是无限期全量历史。百科 Hero 历史从该列表读取，按条目提供的可见规则筛选。
+
+通知与历史分开：新增条目若实现 `IChatNotification` 且允许显示，`CampaignInformationManager.NewLogEntryAdded` 会在 Session 已启动后调用 `InformationManager.DisplayMessage` 显示信息栏消息；这条即时提示不是持久通知。Map Notices 另存在 `CampaignInformationManager._mapNotices`（SaveableField），移除时同步删除；读档后清除失效项并重新投递仍有效的 Notice。它们与 LogEntryHistory 是不同的数据集和 UI 表面。
+
+Chronicle 当前 `AgentObserver` 不读取 LogEntryHistory、百科 Hero History 或 Map Notices；Protocol/命令诊断只记自身的 Agent 命令回执，不等同于游戏事件日志。证据：当前安装 v1.4.8.119303 `TaleWorlds.CampaignSystem.dll`（`LogEntry`、`LogEntryHistory`、`CampaignInformationManager`）、`TaleWorlds.CampaignSystem.ViewModelCollection.dll`（`EncyclopediaHeroPageVM`、`EncyclopediaHistoryEventVM`）、本地 `AgentObserver.cs`/`AgentProtocol.cs`。未知项：N 到 Encyclopedia 的当前键位注册与 Hero 页历史列表实际画面尚未实机复核；每种 LogEntry 的具体保存期和百科可见条件由其子类实现，未完整枚举。
 
 ## A08 教程与概念提示
 
-`CampaignTutorial` 含类型/优先级/标题/说明；`CampaignEvents` 提供教程收集/完成事件。`Concept` 由 XML 加载，含标题/说明/分组/百科链接。`StoryMode.TutorialPhaseCampaignBehavior` 处理教学流程。AgentObserver/Protocol 无教程状态或概念查询；FreshCampaign 跳过开场不代表教程适配。UI链未核实。
+`CampaignTutorial` 是一个按 `TutorialTypeId` 和 `Priority` 标识的提示数据对象；标题和说明通过 `str_campaign_tutorial_title/description` 本地化文本解析。`CampaignEvents` 提供收集可用教程列表及教程完成事件。教程列表不是一个固定全局清单：运行中的 CampaignBehavior 可以按会话、任务或战斗等条件增添条目，收集时再合并并按优先级排序；`BannerlordConfig.EnableTutorialHints` 关闭时教程列表收集不返回提示。
+
+StoryMode 的 `StoryModeTutorialBoxCampaignBehavior` 维护当前可用教程、已展示教程和待恢复的优先级备份；它在 `SyncData` 保存展示/备份列表，在 Session 开始时布置 Encyclopedia、编队、招募、升级、Perk 等提示优先级，在特定 StoryMode 任务开始/完成时加入后续步骤提示；收到 TutorialCompleted 事件后将条目标记为已展示并移出当前/备份列表。此行为属于 StoryMode 的战役行为，不能将其全部提示认作 Sandbox 默认提示。另有 StoryMode 教学任务阶段与具体 Mission 教程逻辑，和通用 CampaignTutorial 提示是不同层。
+
+`Concept` 是另一种按需查询资料：由 SandBox 的 `concept_strings.xml` 加载，数据含标题、说明文本、分组与链接 ID；原版概念百科页一次列出有效 Concept，按 Characters、Kingdoms、Clans、Parties、Armies、Troops、Items、Campaign Issues 八组过滤。用户确认 N 可以进入百科查看 NPC 记录；Concept 页面在百科中的具体点击路径未实机复核。
+
+Chronicle Observer/Protocol 当前不读 CampaignTutorial 列表、教程完成状态或 Concept 页面数据；FreshCampaign 跳过开场并自动走角色创建，不代表 StoryMode 教程状态已适配。来源：当前安装 v1.4.8.119303 `TaleWorlds.CampaignSystem.dll`（`CampaignTutorial`、教程事件、`Concept`、`DefaultEncyclopediaConceptPage`）、`Modules/StoryMode/bin/Win64_Shipping_Client/StoryMode.dll`（`StoryModeTutorialBoxCampaignBehavior`）、`Modules/SandBox/ModuleData/concept_strings.xml`、本地 `AgentObserver.cs`/`AgentProtocol.cs`。未知项：实际 UI 弹出/消失、玩家确认或关闭方式、Sandbox 下启用教程的其他 Provider、教程状态在不同 StoryMode阶段的画面规则均未实机验证。
