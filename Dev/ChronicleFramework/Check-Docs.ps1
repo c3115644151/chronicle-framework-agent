@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '4.85'
+$contractVersion = '4.86'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -176,6 +176,21 @@ $inventoryIds = @([regex]::Matches($inventoryDoc, '(?m)^\|\s*([A-L]\d{2})\s*\|')
 $inventoryDomainLetters = @($inventoryIds | ForEach-Object { $_.Substring(0, 1) } | Sort-Object -Unique)
 $inventoryCountInFocus = [regex]::Match($mainlineDoc, 'SYSTEM_INVENTORY\.md.*?(\d+)项')
 if ($inventoryIds.Count -eq 0 -or @($inventoryIds | Sort-Object -Unique).Count -ne $inventoryIds.Count -or ($inventoryDomainLetters -join '') -ne 'ABCDEFGHIJKL' -or -not $inventoryCountInFocus.Success -or [int]$inventoryCountInFocus.Groups[1].Value -ne $inventoryIds.Count) { throw 'SYSTEM_INVENTORY item IDs, A-L coverage, or the derived count in MAINLINE do not agree.' }
+$catalogIdDefinitions = @([regex]::Matches($inventoryDoc, '(?m)^\|\s*((?:OBS|ACT|N/A)-[A-L]\d{2}-\d{2})\s*\|') | ForEach-Object { $_.Groups[1].Value })
+$duplicateCatalogIds = @($catalogIdDefinitions | Group-Object | Where-Object { $_.Count -gt 1 })
+$catalogIdSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+foreach ($catalogId in $catalogIdDefinitions) { [void]$catalogIdSet.Add($catalogId) }
+$catalogIdReferences = @([regex]::Matches($inventoryDoc, '(?:OBS|ACT|N/A)-[A-L]\d{2}-\d{2}') | ForEach-Object { $_.Value } | Sort-Object -Unique)
+$undefinedCatalogIds = @($catalogIdReferences | Where-Object { -not $catalogIdSet.Contains($_) })
+$catalogDefinitionLines = @([regex]::Matches($inventoryDoc, '(?m)^\|\s*(?:OBS|ACT|N/A)-[A-L]\d{2}-\d{2}\s*\|[^\r\n]*') | ForEach-Object { $_.Value })
+$catalogMappedSystemIds = @([regex]::Matches(($catalogDefinitionLines -join "`n"), '\b[A-L]\d{2}\b') | ForEach-Object { $_.Value } | Sort-Object -Unique)
+$unmappedSystemIds = @($inventoryIds | Where-Object { $_ -notin $catalogMappedSystemIds })
+if ($catalogIdDefinitions.Count -eq 0 -or $duplicateCatalogIds.Count -gt 0 -or $undefinedCatalogIds.Count -gt 0) {
+    throw "SYSTEM_INVENTORY observation/action IDs must be unique and every reference defined. Duplicate=[$($duplicateCatalogIds.Name -join ',')], undefined=[$($undefinedCatalogIds -join ',')]."
+}
+if ($unmappedSystemIds.Count -gt 0) {
+    throw "SYSTEM_INVENTORY A-L systems must appear in at least one explicit OBS/ACT/N/A directory row. Unmapped=[$($unmappedSystemIds -join ',')]."
+}
 if (-not (Test-ChronicleResearchReadiness)) { throw 'Research readiness gate regression checks failed.' }
 if ($mainlineDoc -notmatch '(?m)^#### .*Mechanic Contract\s*$') { throw 'MAINLINE.md is missing the required original-mechanic contract table.' }
 if ($mainlineDoc -notmatch '(?m)^#### .*Coverage and Evidence Contract') { throw 'MAINLINE.md must define durable denominator/acceptance rules without storing current task progress.' }
