@@ -61,6 +61,16 @@ Hero 的职业身份（`Occupation`）与 Clan/Faction 归属、队伍位置、�
 - 所属 Kingdom、佣兵状态、债务、贡金钱包、Aggressiveness、叛军/匪徒/贵族类型；
 - 在政治系统中作为 KingdomDecision、加入/离开、领地分配和战争行为主体。
 
+#### B05 Clan数据与玩家家族界面
+
+Clan 是 Faction 子类；`Clan.MapFaction` 在有 Kingdom 时为所属 Kingdom，否则为 Clan 自己。`Clan` 保存/提供 Leader、Heroes、Companions、Settlements/Fiefs、WarPartyComponents、Culture、HomeSettlement、Renown、Influence、Kingdom、佣兵状态等。`Tier` 是 Campaign 的 ClanTierModel 管理的缓存值，并受等级上下限约束；下一等级声望门槛和家族可带队伍上限也由 ClanTierModel 查询。需要区分 `Clan.Gold`：它返回 `Leader?.Gold ?? 0`，不是另一份独立的家族金库余额。
+
+`Hero.Clan` 变更会增删 Clan 的领主成员并分发 HeroChangedClan；`Clan.SetLeader` 同时把新 Leader 的 Clan 指向该 Clan。Clan Influence 属于 Clan；减少 Influence 时会调用当前 Leader 的 InfluenceSpent 技能经验处理。
+
+玩家入口：地图快捷键 L（`ClanWindow = 41`）在主 Hero 存活时推入 `ClanState`；`ClanManagementVM` 读取 `Hero.MainHero.Clan`。页面分成员、队伍、领地、收入四类数据，显示 Leader、Renown/Tier进度、Gold/日收入，并提供更改 Clan 名称、编辑旗帜等入口。控制台/接口直接改 Clan 字段不能自动执行上述 UI 的名单刷新、弹窗校验或派对/领地管理操作。
+
+Chronicle Observer 当前仅给出玩家 Clan ID/名称/Tier、玩家 Gold、Influence、Renown；没有输出完整 Heroes/Companions、领地、家族队伍、佣兵状态或领导权。Protocol没有Clan管理动作。证据：当前安装 `TaleWorlds.CampaignSystem.dll`（`Clan`、`ClanTierModel`、`Hero.Clan`）、`TaleWorlds.CampaignSystem.ViewModelCollection.dll`（`ClanManagementVM`）、`TaleWorlds.MountAndBlade.dll`（`GenericCampaignPanelsGameKeyCategory.ClanWindow`）、`Modules/SandBox/bin/Win64_Shipping_Client/SandBox.View.dll`（`MapScreen.OpenClanScreen`）与 `AgentObserver.cs`。未知项：Clan页面中各类别实际可用操作和权限、不同Clan类型（Player/Noble/Mercenary/Rebel/Minor）字段/菜单差异、英雄死亡后的领导权选择与家族解散链、Kingdom成员转换对家族界面的完整影响尚未逐项运行核验。
+
 ### Kingdom
 
 - 统治家族、成员 Clan、领地、政策、Army、预算和外交 Stance；
