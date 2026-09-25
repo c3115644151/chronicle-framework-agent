@@ -76,7 +76,9 @@ Mission combat士气与战役Party的 `MobileParty.Morale` 是不同状态。Mis
 
 玩家没有单独“加/减士气”命令；士气是Battle Mission与Campaign坐镇两条结果链中的状态，不能把战役Party `MobileParty.Morale` 当作Mission formation士气。
 
-战斗中按F1等打开Order界面后，`MissionOrderTroopControllerVM` 的Team绑定 `Mission.Current.PlayerTeam`，每个 `OrderTroopItemVM` 按 `BattleMoraleModel.GetAverageMorale(formation)`取得本formation平均士气，并暴露为整数 `Morale`。原版Native `OrderTroopItem.xml` 在每张Formation卡片上绑定一个Morale图标和该整数文本，仅对有兵的formation显示。本机原版资源与用户对当前界面的实玩描述不一致：用户看到每队五格亮灭提示、无具体数字，并确认敌军及非己方指挥的盟友不可见；具体是否为当前启用Mod/布局差异、另一个Order呈现分支，尚未解决。此项保留“玩家能观察己方Formation士气”的事实，呈现粒度依运行配置待复核。
+用户实玩观察：按F1等打开指挥界面后，己方各编队以五格士气图标显示，每格约代表20点；五格全亮表示约100，敌军和不由玩家指挥的盟友不显示。源码给Agent提供更精确的接口：`MissionOrderTroopControllerVM.Team`绑定`Mission.Current.PlayerTeam`，每个`OrderTroopItemVM.Morale`通过`BattleMoraleModel.GetAverageMorale(formation)`获取整数平均士气。Native `OrderTroopItem.xml`显示Morale图标和`@Morale`整数文本；人的五格读法是士气条的分档，Agent直接使用源值即可。Chronicle目前没有该字段的观察适配。
+
+当前首个AI战斗接入优先使用战役地图的原生坐镇/BattleSimulation流程。Mission里的部署、Orders、F1士气和实时士兵控制仍属于完整产品的观察/行动分母，但不是初始战斗支持切片；不能因为当前暂不接入Mission就把这些玩家可见信息判为不存在或N/A。
 
 用户还报告坐镇指挥界面可能有双方整体士气数值，但不确定其口径是整方还是别的统计；这与F1编队列表的信息粒度不同，单独列为候选观察，不与Formation士气合并。玩家能否看到双方/非己方兵力的具体Campaign simulation士气来源及更新仍待追线和界面确认。伤亡、领袖、队伍构成和模型系数均会改变结果，不将Party地图士气直接解释成Battle Mission实时士气。
 
