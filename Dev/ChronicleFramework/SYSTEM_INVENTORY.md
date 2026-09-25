@@ -229,7 +229,7 @@
 | N/A-A03-01 | N/A | Campaign小时/日/周等周期分发与对象Tick | 由Campaign时间和引擎调度触发，无“执行Tick”玩家入口；具体结果映射到造成状态变化的行为族 | 明确排除玩家动作分母；按时钟/生命周期研究保留来源与例外核查 | A03、`Research/A/CampaignRuntimeWorldState.md` |
 | N/A-A04-01 | N/A | CampaignEvent事件总线/订阅回调 | 由原版/Mod代码发布与消费，不存在通用“触发事件”玩家命令；只有带独立玩家入口的专属事件映射为实际ACT | 明确排除玩家动作分母；事件发布者/消费者用于追溯其它目录项 | A04、`Research/A/CampaignRuntimeWorldState.md` |
 
-A06开局与战役内上下文分别拆成“选择Difficulty preset”和“编辑单个启用Option”两族，并另列`ResetTutorials`、手柄专用`EnableCheats`，因此共对应`ACT-A06-01..06`；两个界面的设置数据共同映射`OBS-A06-01`。OptionId/Setter现已明确，但八项难度设置的下游模型消费者及Mod覆写兼容尚未逐项核实，A06虽有源码确认的结构映射，其最终行为分母/成效门禁仍未关闭。A03/A04目前映射为系统后台回调而非玩家直接动作；若某个具体事件存在手动玩家入口，应映射到发起该状态变化的ACT，而不是另造一个“触发CampaignEvent”动作。
+A06开局与战役内上下文分别拆成“选择Difficulty preset”和“编辑单个启用Option”两族，并另列`ResetTutorials`、手柄专用`EnableCheats`，因此共对应`ACT-A06-01..06`；两个Options界面的设置数据共同映射`OBS-A06-01`。八个默认难度字段的基础Model消费者现已在Research/A逐项建立本机源码链；第三方Provider/GameModel覆写及实际运行/UI仍待核验。A06 Vanilla源码行为已可分类；不以此宣称全项目行为总分母或Research Gate关闭。A03/A04目前映射为系统后台回调而非玩家直接动作；若某个具体事件存在手动玩家入口，应映射到发起该状态变化的ACT，而不是另造一个“触发CampaignEvent”动作。
 
 | 内部系统 / N/A候选 | 分类理由 | 映射来源 / 仍需排除的直接玩家入口 |
 | --- | --- | --- |

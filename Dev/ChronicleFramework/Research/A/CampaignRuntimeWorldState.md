@@ -74,6 +74,19 @@ Chronicle 自动证据：Protocol 测试从 `AgentBridgeLifecycle` disposable �
 
 界面数据流：`CampaignOptionsManager.Initialize` 扫描已启用游戏程序集并实例化所有 `ICampaignOptionProvider`；读取选项时按 Provider 列表倒序追加数据。`CampaignOptionItemVM` 根据Boolean/Selection/Numeric/Action类型生成控件，将选择写回Provider setter；`CampaignOptionsControllerVM` 在选择预设时对关联字段执行批量`SetValue`，手动改其中一个关联字段后重算预设（匹配不上则为Custom），并刷新禁用状态。两个Options上下文的字段集不同；ResetTutorial Action会弹Inquiry，确认后发出`ResetAllTutorialsEvent`；手柄输入时才注册的EnableCheats Action调用`MapState.Handler.OnGameplayCheatsEnabled`，源码追到`MapScreen.OpenGameplayCheats`加入`MapCheatsView`并置`IsMapCheatsActive`。这只证明打开地图作弊View；其内部命令和对Campaign/作弊状态的最终效果仍未知。直接设置一个`CampaignOptions`属性虽能写字段，但不会自动执行预设联动、禁用条件、界面提示和回调。Campaign配置字段随战役保存。
 
+八项默认难度值均由`DefaultDifficultyModel`按VeryEasy/Easy/Realistic返回值，以下是已追到的原版消费者链（第三方替换GameModel/OptionProvider后的结果另算）：
+
+- `PlayerTroopsReceivedDamage`：返回0.50/0.75/1.00伤害乘数；`MapEvent`战斗结算读取它，Sandbox Mission亦将其用于玩家军队相关的`DamageToFriends`与`DamageFromPlayerToFriends`。
+- `MaximumIndexPlayerCanRecruit`：返回+2/+1/+0玩家招募槽位奖励；`DefaultVolunteerModel.MaximumIndexCanPartyRecruitFromHeroInternal`只在buyer为MainHero时将其加入可见上限。
+- `PlayerMapMovementSpeed`：返回+10%/+5%/+0；`DefaultPartySpeedCalculatingModel`只给`MobileParty.MainParty`追加此速度因子。
+- `PersuasionSuccess`：返回+0.10/+0.05/+0基础成功因子；`DefaultPersuasionModel`将其作为难度修正纳入劝说成功机会计算，不等同固定加10个百分点。
+- `CombatAIDifficulty`：返回0/0.5/1.0；Sandbox `SandboxAgentStatCalculateModel.GetDifficultyModifier`将其交给Mission Agent difficulty modifier。
+- `ClanMemberBattleDeathPossibility`：返回-1.0/-0.5/0死亡因子；`DefaultPartyHealingModel.GetSurvivalChance`仅在死亡角色属于PlayerClan时将其作为生还计算因子。
+- `BattleDeath`是独立的特殊存活规则：`DefaultPartyHealingModel`在VeryEasy时让Hero必定存活，在Easy时让MainHero必定存活；Realistic回到正常生还计算。
+- `StealthAndDisguiseDifficulty`返回两条不同乘数：潜行警觉累积为0.5/0.75/1.0，伪装怀疑度为0.4/1.0/1.2；消费者分别是Sandbox `AlarmedBehaviorGroup`与`DisguiseMissionLogic`。
+
+`AutoAllocateClanMemberPerks`不是上述八项难度值：开启后，CharacterCreation结束时自动分配其他存活且非Child的玩家Clan成员成长，并参与这些成员后续周期/激活时的`DevelopCharacterStats`路径。`IronmanMode`由`SaveHandler`将保存路由到固定Ironman命名存档，并在GameOver时触发QuickSave。由此，A06原先“后续模型消费者未追”的未知已有以上本机基础源码映射；设置UI真实显示/输入、第三方Provider覆盖与实际运行各效应仍未核实。
+
 开局与战役中入口的差异：Character Creation 阶段提供难度预设、八项难度值、Perk 自动分配和 Ironman；存档槽位达到上限时 Ironman 项带禁用说明，否则其启用状态为 `DisabledLater`。战役内 Gameplay 列表提供预设和难度值，但 Ironman 项固定为 Disabled，不能从该页切换；其余包含 Perk 自动分配、ResetTutorial，以及满足手柄条件时的 Cheats 操作。
 
 Chronicle 当前状态：Observer/Protocol 快照不读取这些选项；没有自动快照字段或覆盖这八项的状态测试，也未模拟 Character Creation Options 或 ESC→Campaign Options 的点击。来源：当前安装 v1.4.8.119303 `TaleWorlds.CampaignSystem.dll`（`CampaignOptions` save fields）、`TaleWorlds.CampaignSystem.ViewModelCollection.dll`（`DefaultCampaignOptionsProvider`、`CampaignOptionsManager`、`CampaignOptionsVM`、`CampaignOptionsControllerVM`、`CampaignOptionItemVM`、`CharacterCreationOptionsStageVM`）、`Modules/SandBox/bin/Win64_Shipping_Client/SandBox.View.dll`（`MapScreen` / `MapCampaignOptionsView`），以及 `Modules/SandBox/GUI/Prefabs/CampaignOptions.xml`。
