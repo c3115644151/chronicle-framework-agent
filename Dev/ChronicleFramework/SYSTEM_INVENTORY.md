@@ -582,7 +582,7 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 | ACT-K02-01 | 行为 | MapScreen点击settlement visual请求主队自动移动至聚落 | 检查当前PathFace/NavType/访问权限；成功设目标并按地图点击配置自然改变Campaign time | Chronicle `move`已有Settlement ID路径/抵达断言，玩家完整视觉UI未完成 | K01/K02、MapScreen、MAINLINE move |
 | ACT-K02-02 | 候选行为 | MapScreen点击可导航地形点/空地图位置移动主队 | 设置位置目标/自动路径；不能把控制权/坐标直接设置冒充地图鼠标交互 | 当前move契约未确认自由坐标是否为玩家可用入口；暂不计最终分母，需检查API与NavMesh点击失败条件 | K02、MapScreen.HandleLeftMouseButtonClick/MAINLINE |
 | ACT-K02-03 | 行为 | 普通点击可见/有效移动Party(不按Follow Modifier)下达Engage/Pursue | 主队自动接近；目标丢失/不可达会自然停步或改Hold；点击time mode依用户配置 | Chronicle `pursue`已测自然接敌；不可见丢失时钟/停步边界仍未知 | K01/K02、F01-F04、MAINLINE pursue |
-| ACT-K02-04 | 候选行为 | 点击移动Party并使用MapFollowModifier跟随 | 设置Follow而不是敌对接近目标；退出视野/目标失效后的结果需与pursue区分 | Chronicle无Follow modifier行为动作 | K02/F02、MapScreen/MapEntityVisual.OnMapClick |
+| ACT-K02-04 | 行为 | MapScreen点击可导航Party时按住`MapFollowModifier` | `MobilePartyVisual.OnMapClick(true)`调用`SetMoveEscortParty`；不同于普通点击的`SetMoveEngageParty`。地图点击时钟处理与普通有效点击共用；目标失明/失效后的恢复仍未知 | 原版输入/状态路径由v1.4.8源码确认；Chronicle尚无Follow动作，也无该失效分支运行验证 | K01/K02、`MapScreen.HandleLeftMouseButtonClick`、`MobilePartyVisual.OnMapClick`、`MobileParty.SetMoveEscortParty` |
 | ACT-K02-05 | 行为 | MapScreen点击MainParty/玩家队伍Visual停步 | `SetMoveModeHold`清除移动目标，时钟副作用由原版点击时钟配置处理 | Chronicle `hold`已有目标清除断言并映射地图点击时间 | K02、F04、MAINLINE hold contract |
 | OBS-K02-01 | 观察 | World map上的主队位置/目标/当前移动状态及路径可达提示 | 路径的整条导航mesh/脚印不等于Observer已见到的地图路线 | Chronicle snapshot有位置/目标/isMoving/MoveMode，不返回导航path节点 | K01/K02、AgentObserver |
 | OBS-K03-01 | 观察 | Scouting/MapTrack visual当前已发现足迹的描述信息 | 只对Detected/live/半径内Track有效；信息精度由SkillEffect和Track年龄/距离/尺寸影响 | Chronicle NearbyParty不输出MapTrack | K03、DefaultMapTrackModel/MapTracksCampaignBehavior |

@@ -4,7 +4,7 @@
 
 ## K01 World Map：地图可见对象与点击
 
-玩家在 Campaign Map通过鼠标/手柄观察图标、悬停实体、选择队伍/聚落、点击地图位置或打开地图菜单。`SandBox.View.Map.MapScreen`接收地图输入，将当前鼠标射线命中视觉实体或合法地形点解析为不同操作；点击玩家主队会清目标并Hold，点击移动Party/Settlement会尝试调用视觉实体的原生 `OnMapClick`，地形点击则走位置导航请求。目标实体即使可见，若无有效导航面/无法构成有效路径也不一定接受移动输入。Follow Modifier、双击配置、鼠标焦点和当前Encounter/地图State会改变后果。
+玩家在 Campaign Map通过鼠标/手柄观察图标、悬停实体、选择队伍/聚落、点击地图位置或打开地图菜单。`SandBox.View.Map.MapScreen`接收地图输入，将当前鼠标射线命中视觉实体或合法地形点解析为不同操作；点击玩家主队会清目标并Hold，点击移动Party/Settlement会尝试调用视觉实体的原生 `OnMapClick`，地形点击则走位置导航请求。目标实体即使可见，若无有效导航面/无法构成有效路径也不一定接受移动输入。源码显示有效地图实体点击会把 `MapFollowModifier` 热键状态传给 `OnMapClick`；`MobilePartyVisual.OnMapClick` 在同一导航可达条件下根据该参数分别调用 `SetMoveEscortParty`（跟随/护送）或 `SetMoveEngageParty`（接敌追近）。这两种输入有不同默认AI行为，不能合并；双击配置、鼠标焦点和当前Encounter/地图State也会改变可用路径。
 
 玩家当前看到的是经过地图可视/侦察/模糊距离/百科等规则筛选的信息，不等于全图Campaign对象清单。`IsVisible`、`IsInspected`、图标、悬停详情、ALT兵力信息及百科“最后发现地点”是不同观察入口；其所有字段与实际玩家UI一一映射尚未完整核实，详见MAINLINE Observation contract。玩家点击移动/队伍的时钟行为也以MAINLINE机制表为准：普通移动是原生导航命令，地图点击根据用户配置改变时间档并让Campaign自然运行，不附加Harness快进。
 
@@ -14,7 +14,7 @@ Chronicle附近队伍观察当前只报告限半径且最多12项的摘要；不
 
 地图点击地点首先经过当前队伍导航类型、位置NavMesh面、陆海地形与可行路径检查；默认 `DefaultPartyNavigationModel.CanPlayerNavigateToPosition`要求有效面、当前/目标陆地等条件，而 `NavigationHelper`提供Land/port/embark-transition路径辅助。有效请求将目标/MoveMode存入MobileParty，之后Campaign地图AI按tick沿可导航路径更新；它不是一次传送。碰到路径无效、目标消失/失明、目标出海、遇到队伍或遭遇时，短期AI可Hold、绕行、逃离或切换Interaction/Encounter状态。
 
-玩家从地图点击目标产生Travel，Follow Modifier或队伍右键等不同输入与普通“设一个静态目标坐标”并不等价；原生点击可能同时改变TimeControlMode，Agent动作不应把 `advance`塞到move里。移动、追击、Hold的玩家输入、时间副作用和Chronicle当前适配均详见MAINLINE Mechanic Contract及F01-F04。直接设置MobileParty目标setter可复现部分状态，但跳过 `MapScreen`点击时钟、可视目标交互、导航条件和输入修饰。
+点击队伍视觉实体时，普通点击调用 `MobileParty.MainParty.SetMoveEngageParty`，按住 `MapFollowModifier`调用 `SetMoveEscortParty`；后者写入 `TargetParty`、当前目标位置、导航类型并设置 `DefaultBehavior = EscortParty`，不是敌对接近。地图Screen对两者使用同一有效点击后的 `HandleClickTimeChange`，所以点击时间档副作用来自原版地图点击策略，而不是跟随动作额外快进。追随目标失去可见性、目标失效和其余移动失败后的确切恢复分支仍需分开核实，不能仅凭这两个setter推断。原生移动、追击、Hold及时间副作用以MAINLINE Mechanic Contract为准；直接设置MobileParty目标setter仍会跳过 `MapScreen`可视目标条件与点击流程。
 
 Chronicle现有move/pursue/hold是研究桥，使用指定Settlement/Party ID、目标校验、原版目标setter与地图点击时间语义，再独立等待自然路径/遭遇结果；不代表完整NavMesh/路径故障/海陆迁移或任意地图点击覆盖。证据：`MapScreen`、`DefaultPartyNavigationModel`、`NavigationHelper`、`MobilePartyAi`、Protocol主队动作及MAINLINE机制运行记录。未知：所有陆地Navmesh孔洞/港口/地形障碍/移动速度影响，玩家输入锁定与模型可达性的全部分支，Mods对导航模型与PathDistance的更改。
 
