@@ -298,6 +298,8 @@ Barter 是按 Hero/Party/Faction 对方建立的谈判数据。`BarterData` 保�
 
 `BarterManager.StartBarterOffer` 建立 BarterData、添加当前基础/上下文 Barterables，再派发可扩展请求事件并开启 `BarterVM`。玩家在面板调整两侧项目与金额、查看 offer validity 后选择 Offer/Accept 或 Cancel；接受时执行全部所选 `Barterable.Apply`，发 `OnBarterAccepted`，关闭谈判并延续原对话；取消则不执行交易效果，关闭并发 `OnBarterCanceled`。超额补偿可能按 BarterModel 给非敌方 Hero 加个人关系，冷却在接受后更新。
 
+跨域目录将活跃 BarterVM 视为独立观察面（`OBS-E10-01`），因为它呈现的不是市场库存，也不是触发谈判的普通对话选项：玩家需要判断谈判双方、当前双方已放入的条款和可接受状态，才知道能否提交。可观察项目的完整候选集合、每种 Barterable 的价值解释和屏幕中各项数值是否与结构化接口一致，仍需运行/界面核验。不同场景的条款编辑共享谈判界面，但最终提交的状态变化各异，仍映射到真实上下文动作（例如婚姻与家族归附）；不创建通用“完成Barter”ACT，也不把临时改盘当作独立世界效果。
+
 ### 价值与失败规则
 
 `Barterable` 保存原始所有者 Hero/Party、所在 BarterGroup、是否上下文依赖、被提出数量及可链接项；各子类提供自己的 `GetUnitValueForFaction` 和 Apply 副作用。一般 offer 是否被接受读取对方视角的净 `GetOfferValue`；`IsOfferAcceptable` 的基础条件是该值不得低于约 0。DefaultBarterModel 还对物品交换应用双方角度不同的交易 Penalty，并影响 overpay→Relation 结果；和平/政治承诺、Marriage、俘虏/赎金与领地另有自定义价值/前置/结果模型，不具有同一通用估值公式。

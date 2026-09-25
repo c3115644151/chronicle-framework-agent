@@ -381,7 +381,7 @@ D域初步覆盖全部D01-D10系统条目；建设/每日项目以及可视页�
 | E07 Clan finance | `OBS-E07-01`Clan财务页的Gold、收入/支出预测/资产说明 | Finance预估与每日实扣分开；已有层级/财产页面映射H02/D域 |
 | E08 Kingdom budget | 钱包/协议财务大部分没有确认的玩家直接UI字段；政治信息跨B06/C | 预算注资/分摊为后台模型，不构造“取王国钱”动作 |
 | E09 Trade XP/Perk | 交易行为后角色开发页/技能反馈映射`OBS-B03-01` | XP是市场收益动作的后果，不计成单独经验领取动作 |
-| E10 Barter | 婚姻/政治/俘虏/商旅议价按I04/C/F各上下文映射 | 各上下文使用不同Barterable/结果模型，避免复制专属ACT |
+| E10 Barter | 活跃谈判双方、当前已加入议价盘的Barterables及报价状态共用`OBS-E10-01`；最终提交映射到真实上下文ACT（如婚姻`ACT-I04-03`、Clan defection`ACT-C07-06`） | BarterVM是独立于Inventory和Conversation option list的观察面；条款编辑属于上下文议价事务，不另造通用`ACT-E10`结果动作，各Barterable的提交后果归其实际领域；候选项全集、完整价值解释和运行展示待核 |
 
 #### E域目录项
 
@@ -392,6 +392,7 @@ D域初步覆盖全部D01-D10系统条目；建设/每日项目以及可视页�
 | OBS-E04-01 | 观察 | Clan Finance页→工坊资产/收入及工坊Owner/生产状态 | 财务预测与Workshop库存、资本、Daily income分属不同数据 | Observer不列OwnedWorkshop/资本/生产配方 | E04/E07、H02/L05 |
 | OBS-E06-01 | 观察 | 主队结构化Party摘要/Party页面查看粮食、FoodChange、Wage、负重/队伍容量/士气 | 数值来源不同，不足以推断完整收入/支出或Troop逐项构成 | Observer输出有限汇总字段，不枚举全部付款人/物品 | E06、H03、F01、AgentObserver |
 | OBS-E07-01 | 观察 | L→Clan Income/Finance查看Gold与预测日收支、资产收入 | UI forecast为预览计算，不是已结算每日账单；真实日Tick另按ClanFinanceModel记账 | Observer只有玩家Gold/Clan基础数值，无Income/Expense分项 | E07、H02、AgentObserver |
+| OBS-E10-01 | 观察 | 活跃BarterVM中的谈判双方、当前双方已放入的Barterables/数量与报价可接受状态 | 由当前BarterContext及Barterable子类决定候选、估值、兼容关系和最终副作用；读取不等于成交，接受/取消仍走上下文专属ACT | 原版`BarterData`/`BarterVM`为独立谈判界面；Chronicle Observer/Protocol未提供Barter快照或offer调整/接受命令，玩家UI细节与可见数值一致性未运行核验 | E10、I04/C07/C10/F/J、`BarterData`、`BarterManager`、`BarterVM`、`BarterItemVM` |
 | ACT-E02-01 | 行为 | Town `trade`中从市场买Item/指定数量并按Done确认 | 检查价格、市场库存、Gold、载重；提交使Player ItemRoster增、Town库存减、Gold扣除 | Chronicle AgentProvisioning/InventoryLogic支持有限商品购买并验收库存/Gold；可视UI未验证 | E01/E02、AgentProvisioning、D09 |
 | ACT-E02-02 | 行为 | Town `trade`中从Player Inventory卖Item/指定数量并按Done确认 | 玩家库存减、Town市场和Gold变化；出售方向单价重新计算 | Chronicle有有限出售适配；Modifier/全部Item/特殊模式未全覆盖 | E01/E02、AgentProvisioning |
 | ACT-E04-01 | 行为 | Town Center与Workshop owner/merchant notable交谈购买工坊 | 检查Gold、Clan Tier/上限、战争/Owner条件；改Workshop Owner并影响后续财务 | Chronicle无Town 3D交互/Workshop购买 | E04、B05/H02、D09/J08 |
