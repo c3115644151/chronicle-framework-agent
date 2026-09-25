@@ -56,11 +56,13 @@ Formation配置/部署发生在当前Battle Mission生命周期内，不由其�
 
 ## G05 Orders：玩家在Mission中下达命令
 
-玩家在战斗Mission通过原生Orders UI/快捷键选择Formation或类别、打开命令列表、选中命令，并可能指定位置、朝向、目标Formation或可用攻城对象。具体订单集合会随Mission阶段、选中Formation类别、可用器械、当前输入方式与命令上下文变化，不能预设每个队伍都能使用同一组F键/子选项。
+玩家在战斗Mission通过原生Orders UI/快捷键选择Formation、打开Order set并选具体命令；部分命令需光标世界坐标、主角Agent或另一Formation作目标。`MissionOrderVM.PopulateOrderSets`会调用`VisualOrderFactory.GetOrders`，从当前已注册且可用的Provider中采用优先级最高者。当前源码确认的Native `DefaultVisualOrderProvider`把基础界面组织成Movement/Form/Toggle三组；旧版Order Layout改变选项布局/快捷键别名，不应重复计数。SandBox的`HideoutVisualOrderProvider`仅在Hideout Mission启用，其移动组缺少Advance；因此订单集合依Mission上下文变，不可直接用普通战场清单代表所有Mission。
 
-`MissionOrderVM`负责订单集合、快捷键、焦点/选择、UI打开关闭与执行回调；`OrderController.SetOrder`及 `SetOrderWithAgent/Position/Formation/...`再把命令应用给被选中的Formation，更新目标/移动/阵形状态。直接调用Controller可发出原生Order，但绕过UI中的可见选择与条件检查；模拟按键/UI操作则还需处理当前主角控制器、部署状态和输入焦点。要验证命令效果，应看Formation收到的Order及其Agent执行结果，不能只把UI按钮按下算作成功。
+本机1.4.8 Default provider的行为语义包括：Movement组的Move（目标位置）、Follow Me（目标Agent）、Charge（无目标或目标Formation）、Advance、Fall Back、Stop/StandYourGround、Retreat；Form组以同一`ArrangementOrder`字段设置Line/Close/Loose/Circular/Schiltron/V/Column/Scatter，属于参数化队形设置；Toggle组包含Facing（Face Direction需位置/Face Enemy）、Fire at will/Hold fire、Mount/Dismount、单机Formation AI control on/off，以及单独的TransferTroopsVisualOrder。不同热键快捷入口映射回相同VisualOrder，不另建ACT；其参数选项因改变不同状态字段或目标类型而保留。手动 siege weapon DeploymentPoint 操作由MissionOrderDeploymentControllerVM处理，归G08，不重复列入Order。
 
-Mission期间推进的是本地战场仿真，不是Campaign时钟；暂停、部署界面及Mission终止有各自本体规则。Chronicle现有Agent没有战斗中常规Order动作，也没有读取 `MissionOrderVM` 的当前可选项或Confirmation状态。来源：MountAndBlade `OrderController`、Formation各订单Setter；ViewModelCollection `MissionOrderVM`、Order sets；当前Chronicle `AgentProtocol` 未实现此命令族。未知包括所有默认快捷键与改键映射、键盘/手柄分支、各Mission菜单命令的条件组合、UI和Controller对无效目标的失败/提示差别以及战斗中的实际执行确认。
+`MissionOrderVM`管理当前Provider给出的OrderSet/Order列表、Formation选择、快捷键、焦点/选中状态、UI开关和执行回调；`VisualOrder.ExecuteOrder`再通过`OrderController.SetOrder`及`SetOrderWithAgent/Position/Formation/...`将被选Formation的订单更新为原生状态。TransferTroops按钮只开启转编模式；玩家另选目标Formation及数量后点确认，才经`SetOrderWithFormationAndNumber(OrderType.Transfer, ...)`提交，Cancel只关闭模式不移动Agent。单击选择Formation/打开OrderSet属于操作导航而非已提交新战斗命令；每个Orders类行为须按效果字段/目标/可用条件区分。直接调用Controller虽能下原生Order，却绕过UI可见选择、目标条件、快捷键与失败提示；要证明成功，应复观察Order状态及Agent执行，不可把按钮/命令送达当成功。
+
+Mission期间推进的是本地战场仿真，不是Campaign时钟；暂停、部署界面及Mission终止有各自本体规则。Chronicle现有Agent没有战斗中常规Order动作，也没有读取`MissionOrderVM`的当前可选项或Confirmation状态。依据：Native `DefaultVisualOrderProvider`、SandBox `HideoutVisualOrderProvider`、`MissionOrderVM`/`OrderSetVM`/各`VisualOrder`、MountAndBlade `OrderController`与Formation订单Setter；当前Chronicle `AgentProtocol`未实现此族。未知包括其它MissionProvider是否注册、键盘/手柄和重设Order Layout对应视觉映射、目标失效与命令不可用提示、TransferTroops提交/撤销边界及订单执行反馈覆盖；现列出的Action候选仍未完成玩家视觉/运行核验。
 
 ## G06 Tactics 与战术AI
 
