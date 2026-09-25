@@ -1,6 +1,6 @@
 # D 类研究：聚落与领地
 
-状态：机制盘点中；D01-D07 已完成首轮静态盘点，目前继续研究 D08 犯罪与帮派，未进行方案评审。
+状态：机制盘点中；D01-D08 已完成首轮静态盘点，目前继续研究 D09 聚落访问入口，未进行方案评审。
 
 适用本体：Bannerlord v1.4.8.119303。依据安装目录中的 `TaleWorlds.CampaignSystem.dll` 反编译结果和 Chronicle 当前 `AgentObserver.cs`；本节是静态代码证据，不代表已经在游戏界面逐项实测。
 
@@ -258,6 +258,53 @@ Sandbox `AlleyCampaignBehavior` 是该系统的主要生命周期行为。Town �
 
 未知项：不同 Settlement alley tag/state 的完整生成与玩家可见地图入口；各个任务/对话/战斗结果对 Alley Owner 和关系的全部影响；玩家攻占/防守 Mission 的可用 roster、撤退/死亡/胜负处理细节；Attack 到期/被占领失败所有数据清理副作用；所有侵害行为的 Crime Rating 增量与 Arrest/接战/处置完整条件；巷道经营收入是否还经 Clan 财政其他比例或事件调整。
 
+## D09 聚落访问入口、菜单与地点场景
+
+### 地图抵达后的入口层级
+
+玩家通过战役地图抵达并进入 Settlement 后，原版按类型建立当前聚落菜单上下文；常规菜单 ID 为 `town`、`castle`、`village`，村庄被掠夺时可能转至 `village_looted`。在地图移动后出现哪一种类型入口属于 MAINLINE `move` 契约；本节只说明进入后按菜单/地点如何继续。选项不是固定按钮全集：`GameMenuOption.GetConditionsHold`、`IsEnabled`、AccessModel、当前派系/任务/聚落状态会决定可见或可用情况，其他 CampaignBehavior 还会向菜单动态增加选项。
+
+### 城镇 `town` 菜单和子菜单
+
+| 玩家菜单入口 | 原版后续界面/操作 | 主要门禁或差异 |
+| --- | --- | --- |
+| Manage town | `TownManagementVM`：发展/项目队列、日常项目、总督、城镇每日数值、绑定村庄、商店等管理显示 | `SettlementAccessModel.ManageTown`；菜单 option 的 VM 转接由 SandBox View 注册，需从游戏内做完整视觉验证 |
+| Recruit troops | 原生 `RecruitmentVM`/队伍操作，以 Notable volunteers 为来源 | 当前可招募对象、金钱、队伍空间和城镇状态动态决定；不能与村庄入口或 garrison 管理混为一处 |
+| Trade | `InventoryScreenHelper.OpenScreenAsTrade` 打开城镇市场 | SettlementAccessModel 交易许可/市场状态 |
+| Go to keep | 进入 `town_keep` 聚落菜单，不立即进入 lordshall Mission | AccessModel 可能要求伪装/贿赂/拒绝；敌国或 Crime Rating会改变条件 |
+| Go to the arena → Enter the arena | 先到 `town_arena` 再打开 `arena` Location Mission | 仅白天、不可伪装等条件；不是打开城镇管理面板 |
+| Go to tavern district → Visit the tavern | 先到 `town_backstreet` 再打开 `tavern` Location Mission | 人物/Issue/招募候选由具体地点/任务条件动态决定 |
+| Enter smithy | 打开锻造界面 | Craft 访问权限、角色/耐力等由锻造系统门禁决定 |
+| Take a walk around the town center | 打开 `center` Location Mission | SettlementAccessModel 地点许可、任务/Issue 位置上下文 |
+| Wait here | 切换到 `town_wait_menus` 原生 Wait menu | 通过 `StartWait` 推进时间；见 A02/MAINLINE，不等价于驻足查看菜单 |
+| Leave | 退出聚落，返回 Campaign Map | 军团/海上等状态可限制 |
+
+`town_keep` 另含通往 dungeon、驻军管理、向驻军捐兵、stash、lord’s hall 和返回 town 的选项。Manage Garrison 通过 `PartyScreenHelper.OpenScreenAsManageTroops` 打开真实 troop transfer 界面；Donate troops 是另一种受限的派对捐兵入口。`town_keep_dungeon` 包含捐俘虏、管理俘虏、进入 prison Location 和返回。Lord’s Hall 与 dungeon Location 是进一步打开的物理 Mission，不是名称为 keep/dungeon 的当前菜单本身。
+
+### 城堡 `castle` 菜单
+
+城堡没有 town-center/tavern/arena 那组入口；它有城堡管理、驻军管理/捐兵、stash、围绕城堡走动、领主大厅、地牢、等待、返回军团和离开等选项。管理城堡同样进入聚落管理 VM；“走动”对应 castle location，lordhall/prison 对应进一步的 Location Mission。访问领主大厅、地牢按派系关系、战争、Crime Rating、贿赂等条件判断。Castle 与 Town 共享部分选项 ID 但不可假定全部选项相同。
+
+### 村庄 `village` 菜单
+
+Normal 村庄入口包含招募 troops、购买产品、走入 village center、等待、返回军团和离开；`VillageHostileActionCampaignBehavior` 等还按玩家身份、与该阵营的关系和当前 VillageState 增加 raid/强征 supplies/volunteers 或警告选项。Looted 村庄菜单只保留符合受损/在海上状态的退场选择，并非仍可沿用 Normal village 全部菜单。玩家先从 Settlement 菜单选择地点/操作；进入实体村庄 Scene、与头人 Notable 对话、处理 Issue 是后续独立交互链，不能把 `village` 菜单出现当成已完成谈话或已接任务。
+
+### 门禁与运行层级
+
+`DefaultSettlementAccessModel` 为主城堡/领主大厅、地牢、中心、竞技场、酒馆以及 Recruit/Trade/Wait/ManageTown 等动作提供访问结果和禁用理由。领主大厅/地牢可以是 FullAccess、LimitedAccess（Disguise 或 Bribe）或 NoAccess；同阵营、OwnerClan、Neutral/War、犯罪、在城内伪装与 Bribe 条件会改变结果。竞技场夜间关闭；Tavern、Town Center、Village/Keep 位置亦各自经地点/任务条件检查。
+
+这些入口分为不同运行层级：GameMenu 切换、UI Window/PartyScreen/InventoryScreen、物理地点 Mission、Conversation/Issue 任务流程。相同屏幕的直接 VM/API 调用跳过了前置菜单条件、View 生命周期或 Location Mission 上下文，不可作为从玩家入口走通的证据。自然 Campaign 时钟遵守 A02；只有 wait 菜单明确以 `StartWait/EndWait` 控制等待，进入物理 Location 则进入 Mission 语义；普通菜单选项不应被包装为隐含的快进/暂停。
+
+### Chronicle 当前入口覆盖
+
+`AgentObserver` 在已有 `CurrentMenuContext` 时输出当前 `GameMenu` 的可用选项 ID、文本、available/enabled/isLeave；它不会预先列出 Town/Keep/Village 尚未打开的子菜单和物理 Location 的所有按钮。Protocol `menuSelect` 会核对当前菜单 ID、选项 ID 和 `GetConditionsHold` 后运行本体 option consequence；不能任意点尚未出现的选项，重复型选项不支持。部分后果会直接打开原生 Trade/PartyScreen/Mission；当前协议没有通用的任意 UI 点击或 3D 地点导航能力，所以“菜单后果调用完成”不代表它会继续完成物理 Scene 的全部互动。
+
+本地协议还存在专用招募/交易流程，但这些操作的自动验证不能倒推为已从可视窗口进入并体验。当前测试最高只说明相应本体 VM/事务可被 Harness 调用；Town/Keep/Village 从世界地图菜单到具体 3D 场景、再到返回地图的连续视觉流仍未运行验收。
+
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `PlayerTownVisitCampaignBehavior`、`DefaultSettlementAccessModel`、`GameMenu`/SettlementAccess 接口；`Modules/SandBox/bin/Win64_Shipping_Client/SandBox.View.dll` 的 `MenuTownManagementView`；Sandbox `TownManagementVM`、`VillageHostileActionCampaignBehavior`、`AlleyCampaignBehavior`、`CrimeCampaignBehavior` 和 `GameMenu` 注册；Chronicle `AgentObserver.cs`、`AgentProtocol.cs`。本节依据 v1.4.8.119303 安装源码和 XML/菜单定义，未开启游戏逐一目测所有条件与按钮。
+
+未知项：MapScreen 实际到达时的鼠标/键盘操作与各入口 GameState 切换全链；TownManagementVM、PartyScreen、交易屏幕、菜单选项的可视呈现、默认焦点、关闭/取消恢复行为；敌对、犯罪、城镇状态、在海上、部队归属等全部条件组合；Quest/Issue 从人物对话回到菜单/地图的入口矩阵；Mod 新增 MenuOption/Location 对 Chronicle 当前菜单观察和操作的影响。
+
 ### 时间与证据边界
 
 D01 中的实体分类、所有权查询与绑定关系是读取对象状态，不会自行推进 Campaign 时间。城镇/村庄的每日状态计算由各组件的 `DailyTick` 执行，并受 Campaign 时钟调度；具体数值模型和状态变化分别留给 D02-D04。直接读取属性不等价于玩家打开地图百科或聚落界面；本节没有声称 UI handler 与直接 API 的完整交互已经运行验证。
@@ -268,4 +315,4 @@ D01 中的实体分类、所有权查询与绑定关系是读取对象状态，�
 
 ## 研究范围状态
 
-D01-D08 已完成首轮静态对象、聚落发展、村庄生命周期、建筑/日常项目、总督/驻军和巷道犯罪系统盘点。D09-D10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 D 域范围逐项核对，不将此文档视作聚落系统整体已完成。
+D01-D09 已完成首轮静态对象、聚落发展、村庄生命周期、建筑/日常项目、总督/驻军、巷道犯罪及聚落入口盘点。D10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 D 域范围逐项核对，不将此文档视作聚落系统整体已完成。
