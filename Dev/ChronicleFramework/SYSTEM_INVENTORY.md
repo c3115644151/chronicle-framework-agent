@@ -482,13 +482,13 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 | I01 Personal Relation | `OBS-B09-01`上下文中的关系反馈；变化来源映射I/J/F/E实际行为 | 没有统一关系编辑器或全局日志入口 |
 | I02 Faction Relation | `OBS-B08-01`阵营敌对/外交状态；政策/宣战/和平等映射C和接敌G | Hero Relation与Faction Stance不同数据族 |
 | I03 Prisoner Social State | 俘虏状态映射`OBS-H04-01/OBS-H12-01`；释放/转移/赎金来自F12/J | 不重复创建Release/Take action；按主角/普通Hero/普通Troop区分 |
-| I04 Marriage/Romance | `OBS-I04-01`当前Courtship选项/阶段；`ACT-I04-01/02/03`已定义 | NPC每日婚姻算法不是玩家动作 |
+| I04 Marriage/Romance | Courtship阶段的当前对话选项复用`OBS-J08-01`；开始Courtship/说服/Marriage Barter映射`ACT-I04-01/ACT-I04-02/ACT-I04-03` | Romance阶段通过同一原生Conversation option list观察，不重复建立第二个对话观察ID；NPC每日婚姻算法不是玩家动作 |
 | I05 Family/Kinship | `OBS-B02-01`亲属图/百科；家庭产生/婚姻/死亡等结果由A/B/I类实际行为触发 | 无直接修改家族关系菜单 |
 | I06 Education | `OBS-I06-01`教育通知与选择面板 | 每个成长年龄选择是玩家可见事项；错过前段会自动随机补选 |
 | I07 Traits | `OBS-B10-01`Character Developer Trait展示；行为写入来自其它Action结果 | 玩家通常不能直接编辑Trait |
 | I08 Crime/Reputation | `OBS-B10-01`Crime/处罚上下文；`ACT-I08-01..06`既有初始处罚分支 | 处罚类型和自动Crime decay分开 |
 | I09 Dialogue Relation | 关系反馈映射`OBS-B09-01`；当前Conversation参与者/阶段/开放句复用`OBS-J08-01`，关系专属选择归属于各自行为ID | I09/J08描述同一原生Conversation观察面，不重复建第二个Observation ID；不能把每个string/关系文本条件单独计行为 |
-| I10 Persuasion | `OBS-I10-01`Persuasion progress/attempt/选项；行动为当前Dialogue options，后果映射J09/I04 | Persuasion参数/分支待按实际Task类型去重 |
+| I10 Persuasion | 当前Task/target/progress/attempt/argument probability观察复用`OBS-J09-01`；argument提交为`ACT-J09-01`，恋爱语境复用`ACT-I04-02` | I10与J09读取同一PersuasionVM/Task观察面，合并一个ID；各Task语境的成功/失败后果仍保留其领域映射 |
 
 #### H-I新增目录项
 
@@ -504,8 +504,6 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 | ACT-H12-01 | 行为 | Wilderness/Prison ransom offer菜单选择Accept | 检查当前Ransom Amount/主角金币；扣款后经`EndCaptivityAction.ApplyByRansom`解囚 | Chronicle无Captivity菜单/赎金支付动作；源码路径确认、UI未跑 | H12/F12、PlayerCaptivityCampaignBehavior |
 | ACT-H12-02 | 行为 | Ransom offer选择Refuse and wait for a better offer | 不支付本次赎金，接入原生`settlement_wait`并恢复LastTimeControlMode继续时间检查 | Chronicle没有囚禁Wait动作；等待推进依原版当前TimeMode | H12/A02、PlayerCaptivityCampaignBehavior |
 | N/A-H12-01 | N/A | Captor败退、盟友支付、时限随机逃脱等自动释放 | Campaign/MapEvent状态触发EndCaptivityAction，无可选择的玩家按钮 | 不计入ACT分母；后果观察映射F12/OBS-H12-01 | H12/F12、PlayerCaptivityCampaignBehavior |
-| OBS-I04-01 | 观察 | 与目标Hero对话时显示当前Romantic/courtship阶段相关选项 | 当前状态可隐藏/开放开始/重试/婚姻Barter选项；不等同完整爱慕数值 | Chronicle只读当前对话可选句，不读Romance state | I04、RomanceCampaignBehavior/J08 |
-| OBS-I10-01 | 观察 | 当前Persuasion target/progress/剩余attempt/argument概率 | PersuasionTask类型、对话阶段和模型决定可用信息与风险 | Chronicle未输出PersuasionTask；仅当前开放句可能可观察 | I10/J09、PersuasionVM |
 | ACT-H04-01 | 行为 | PartyScreen选兵种可用Upgrade target、支付对应upgrade cost并Done | 消耗兵种升级费用/候选路径及roster变化；取消不提交 | Chronicle有个别招募测试，未提供通用升级动作 | H04/F11/PartyVM |
 | ACT-H04-02 | 行为 | PartyScreen从俘虏列表选普通Troop Recruit并确认 | 受是否可招募、忠诚/容量/招募时间/风险模型限制；不是卖俘虏/释放Hero | Chronicle未实现通用Prisoner recruitment | H04/F12/PrisonerRecruitmentModel |
 | ACT-H05-01 | 行为 | 与未入Party/未属Player Clan的可雇用Wanderer对话，选择加入Player的company并确认报价 | 通过CompanionLimit与严格`Gold > hiring price`门槛后，先转Gold、再加入Clan与MainParty；报价依Hero装备/等级/Perk模型变化 | v1.4.8源码确认原生Dialogue句、条件和结果Action；Chronicle无此动作；Wanderer出现地点/到达其对话及宿主时间未运行视觉核验 | H05/J08/E10、`LordConversationsCampaignBehavior`、`AddCompanionAction`、`AddHeroToPartyAction`、`DefaultCompanionHiringPriceCalculationModel` |
@@ -515,7 +513,7 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 | ACT-H09-02 | 行为 | Smithing Smelting页选择已有Item熔炼并确认 | 消耗装备，产出材料/XP/解锁部件；与Crafting成品结果不同 | Chronicle无Smelt action | H09、SmeltingVM/CraftingCampaignBehavior |
 | ACT-H09-03 | 行为 | Smithing Refinement页选择公式/消耗材料并确认 | 付出Energy/材料，依英雄技能Perk产出锻造材料/XP | Chronicle无Refine action | H09、RefinementVM/SmithingModel |
 
-上述H05 companion招募实际Conversation路径、H08装备事务的完整确认边界、H12 captivity菜单各结果和I10 Persuasion的当前统计面均仍是候选映射；相关ID可以追溯，但在入口/条件/失败恢复验证前不能把“映射存在”当成覆盖或最终穷举。
+上述H05 companion招募实际Conversation路径、H08装备事务完整确认边界、H12 captivity菜单各结果仍有待核分支。I10 Persuasion观察已与J09同源视图合并；各Task类型的入口/条件/失败恢复仍需逐类确认，不能把“共用PersuasionVM”误报成所有说服行为都已覆盖。
 
 
 ### J-L域初始交叉映射与目录族
@@ -567,9 +565,9 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 | ACT-J05-01 | 行为 | Incident UI中选择一个条件合法的事件Option并确认/关闭 | 每个Effect和Option Consequence分别调用；可能改变金钱/Party/关系/Settlement状态；直接API跳过VM cleanup | Chronicle对Incident通用流程目前Unsupported/Research；结构化事件返回未全测 | J05/L06、Incident.InvokeOption、MAINLINE |
 | OBS-J06-01 | 观察 | Inventory/市场Goods物品悬停详情中的异地买卖地点/记录价格；玩家栏与市场栏为同一观察族的两个入口 | `ItemMenuVM.SetMerchandiseComponentTooltip`按具体ItemObject、未过期记录、异地及价差筛选；来源受城镇访问/每日事件/交易专长影响。读取不改库存/金币，记录随Campaign时间过期；宿主界面时钟待运行核验 | 用户报告商品例子为谷物/贵重品/木材/葡萄酒，确认武器不显示，马匹未核；与本机1.4.8源码Goods筛选相符。Chronicle未适配，Agent未视觉/运行复核；利润/行情颜色另见E09 | J06/E02/E05/E09、`TradeRumorsCampaignBehavior`、`ItemMenuVM`、`SPInventoryVM`；马匹展示、来源/去重边缘未知 |
 | OBS-J07-01 | 观察 | 地图通知/QuickInfo/Scene notification | 队列可过期/关闭/跳转；Notice、Log与世界对象值分开 | Observer不读Notification queue/已读/点击目标 | J07/A07/L06、MapNotificationVM |
-| OBS-J08-01 | 观察 | 活跃Conversation的发言人/Flow阶段/当下开放Option | sentence condition、身份token、Task与关系筛选，不能扫描未开放Option | Protocol提供有限Conversation state/option读取；这是J08与I09共享的同一观察面 | J08/I09/L04、ConversationManager/AgentObserver/Protocol |
+| OBS-J08-01 | 观察 | 活跃Conversation的发言人/Flow阶段/当下开放Option，包括由当前Courtship/Romance状态筛选出的开始/重试/Marriage Barter选项 | sentence condition、身份token、Task与关系筛选，不能扫描未开放Option；Romance选项不代表原始Romance数值 | Protocol提供有限Conversation state/option读取；这是J08/I09/I04共享的同一观察面 | I04/J08/I09/L04、ConversationManager/AgentObserver/Protocol、RomanceCampaignBehavior |
 | ACT-J08-01 | 行为 | 只选择当前Conversation实际开放且仍然valid的原生对话Option | Consequence可能启动Barter/Quest/Persuasion/Mission或改关系；context变化须重验 | Chronicle `dialogueSelect`仅限当前option列表；不支持全3D谈话接近 | J08/L04、ConversationManager/AgentProtocol |
-| OBS-J09-01 | 观察 | PersuasionVM展示当前task阶段、可用argument与进度/机会 | chance依Trait/Skill/Relation/difficulty，和最终成功不是一回事 | Chronicle不输出完整PersuasionTask对象 | J09/I10、PersuasionVM/PersuasionTask |
+| OBS-J09-01 | 观察 | 当前PersuasionVM/Task的参与目标、阶段、剩余attempt、可用argument及其成功概率/当前进度 | options/chance依Task类型、Trait/Skill/Relation/difficulty；显示机会不等于最终检定结果 | Chronicle不输出完整PersuasionTask对象；I10/J09为同源信息，不重复计Observation | I10/J09、`PersuasionVM`、`PersuasionTask` |
 | ACT-J09-01 | 行为 | 在当前Persuasion task中选择一个真实可用argument | 单次尝试会提交随机/模型概率结果和进度/失败效果；不等于一般`dialogueSelect`不加上下文 | Chronicle没有专用Persuasion观察/回执及重规划 | J09/I10、DefaultPersuasionModel |
 | OBS-J10-01 | 观察 | Arena/Tournament菜单或TournamentLeaderboard查看可加入赛事/对手/排名 | 赛事随Town每日模拟生成/结束；观看排名不是参加Mission | Chronicle无Tournament state/list/player visual | J10、TournamentCampaignBehavior/Manager |
 | ACT-J10-01 | 行为 | Town Arena选项加入一场Tournament并进入比赛Mission | 进入实时比赛、可获得奖励/排名；Campaign地图时钟在Mission停止 | Chronicle无赛事列表/格斗输入；三维动作未覆盖 | J10/G03、TournamentMissionStarter |
