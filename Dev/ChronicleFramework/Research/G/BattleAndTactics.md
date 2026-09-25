@@ -14,6 +14,8 @@
 
 `PlayerEncounter.StartBattleInternal` 按上下文建立不同的 `MapEvent`：野战、Raid、围城、突围/出击、Hideout、强征志愿者/物资、Blockade或Ambush等。附近队伍能否进入由 `CheckNearbyPartiesToJoinPlayerMapEvent`、`MapEvent.CanPartyJoinBattle` 等规则过滤；所属阵营、Army、战斗事件类别、距离与活动状态都会改变参与者和敌我侧。点攻击只会令原版入口继续到符合上下文的战斗处理，不等于胜负已经产生。
 
+攻击的敌对后果需与“已经处于战争”的遭遇区分。当前 `Helpers.MenuHelper.EncounterAttackConsequence` 与 `EncounterOrderAttack` 都会调用 `BeHostileAction.ApplyEncounterHostileAction`；当主队和对方属于不同Faction、之前不在战争中且 `EncounterModel.IsEncounterExemptFromHostileActions` 未豁免时，原版会对双方Leader关系写入惩罚并调用 `DeclareWarAction.ApplyByPlayerHostility`。前者继续进入Mission，后者继续坐镇模拟，因此是两个战斗处理ACT共享同一宣战副作用，不是另一个可独立点的“Declare War”按钮。源码：当前 v1.4.8.119303 `TaleWorlds.CampaignSystem` 的 `Helpers.MenuHelper`、`BeHostileAction`、`DeclareWarAction`。
+
 Campaign时间边界取决于进入的 GameState/Menu：玩家实际进入战斗 Mission 时战役时钟停止；地图等待菜单（例如部分围城准备）可能继续自然推进；遭遇菜单/会面也不能与 Wait menu 的时间规则混为一谈。接敌和创建 MapEvent 本身不是 Agent 隐式 `advance`。F10 记录的 BattleSimulation 使用独立战斗结算进度，不应伪装成 Campaign 日期快进。
 
 ### Chronicle 当前适配、证据与未知
