@@ -98,7 +98,9 @@ Sponsor Clan 与 Proposer Clan 领袖 Hero 的个人关系可参与支持计算�
 
 玩家入口：K→Fiefs 页面列出玩家 Kingdom 的 Town/Castle；选择后，可能出现 Resolve、Gift、Give Away 或 Annex/Propose 动作。当前 Hero 为 RulingClan Leader 且拥有该 Settlement 时，Gift 弹窗列出可接收家族，确认后 `KingdomManager.GiftSettlementOwnership` 直接交给选定 Clan，并给双方 Clan Leader 加关系、再走 `ChangeOwnerOfSettlementAction.ByGift`；当前 Hero 是领地所属 Clan 成员但非统治者时，只能确认 Give Away，`RelinquishSettlementOwnership` 建立新的归属决策让王国统治者分配。
 
-若选中的 Kingdom Settlement 属于其他 Clan，页面可显示拟改变所有权的 PreliminaryDecision；其候选“Yes/No”先询问王国是否需要另选所有者，按影响力/权限等禁用条件检查后进入 C02 选举。Yes 的 outcome 会自动建立一条正式 `SettlementClaimantDecision` 并强制到 RulingClan 作为选择者，候选为当前王国所有非佣兵、未消亡、Leader存活的 Clan（排除当前所有者）；其 Merit/支持会考虑现有堡垒领地价值/距离、军力、Tier、是否王族、刚征服情况、Leader特征与关系等。最终决策调用 `ChangeOwnerOfSettlementAction.ByKingDecision`，更新 Town.OwnerClan，刷新可见Settlement/BoundVillage visuals、驻军/Governor及相关MapEvent/Party行为，并发 `OnSettlementOwnerChanged`。
+若选中的 Kingdom Settlement 属于其他 Clan，玩家可从 K→Fiefs 页面选择 `Annex/Propose` 发起初步决定。`KingdomSettlementVM.ExecuteAnnex`检查 Map 操作权限、`GetInfluenceCostOfAnnexation`所需影响力、Settlement不是Ruling Clan领地、Player Clan不是佣兵后，创建 `SettlementClaimantPreliminaryDecision(Clan.PlayerClan, settlement)`并强制打开本次决议流程。其Yes/No outcome询问是否应更换当前Owner；Yes才会自动建立正式 `SettlementClaimantDecision` 并交给RulingClan选择所有者，候选为当前王国非佣兵、未消亡、Leader存活的Clan（排除当前所有者）。Formal decision的候选支持/Merit考虑现有堡垒领地价值/距离、军力、Tier、是否王族、刚征服情况、Leader特征与关系等。最终决策调用 `ChangeOwnerOfSettlementAction.ByKingDecision`，更新Town.OwnerClan、可见Settlement/BoundVillage visuals、驻军/Governor及相关MapEvent/Party行为，并发 `OnSettlementOwnerChanged`。玩家点击Propose是独立ACT；之后对Preliminary和正式Owner decision的Supporter/Chooser选择复用C02，不按每个Settlement决议另造投票动作。
+
+另有 `SettlementClaimantCampaignBehavior.DailyTickSettlement` 在无人归属的城镇情形自动创建正式 `SettlementClaimantDecision`；这是Campaign后台触发，不等于玩家点击K页Propose。`KingdomSettlementVM`检测到同一Settlement已有未决Proposal时显示Resolve，后续操作是前述决议回应，不重复计为发起Proposal。
 
 通过围城夺取、叛乱、离开/毁灭Clan、Kingdom决策、Gift/Barter 等不同路径都会进入不同 `ChangeOwnerOfSettlementDetail`，并可能有不同的开放申请、驻军、敌对队伍、关系副作用。AI ProposalBehavior 不是所有领地分配的唯一来源：玩家K页、王国决策、攻城结算和关系变更都可能触发相同Settlement所有者写入。
 
