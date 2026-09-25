@@ -48,6 +48,8 @@ Mission 内操作通过键盘/鼠标即时控制主角，TAB菜单可打开离�
 
 Cheer键打开的是径向Taunt/Shout选单，不等同“提高部队士气”：`MissionGauntletMainAgentCheerControllerView`在按键保持/类别选择/释放时控制菜单；选Taunt后单人分支调用`Agent.HandleTaunt(index, true)`，多人分支发`TauntSelected`；选Shout则调用`Agent.HandleBark(index)`或发`BarkSelected`。所追执行链体现MainAgent动画/语音及多人同步，没有调用`BattleMoraleModel`/`MobileParty.Morale`的证据，故Taunt和Bark先按表现结果分列候选动作，不虚报士气增益。执行过程有类别子菜单与4秒Taunt/2秒Bark冷却；具体菜单实际显示、每个cosmetic可用门槛和战斗打断效果仍未运行验证。
 
+装备控制还有快速UI路由：`MissionGauntletMainAgentEquipmentControllerView`在EquipmentSwitch按住超过约0.3秒后打开装备选择轮盘；单人打开时向Mission注册0.25 speed request，关闭后移除，因此只降低Mission局部时间，不推进Campaign日期。若该键短按且焦点为SpawnedItemEntity，则直接`HandleStartUsingAction`拾取到选择槽。DropWeapon键短按触发快速丢弃，长按约0.5秒打开物品槽选择轮盘；最终`Agent.HandleDropWeapon`在单人执行，Multiplayer客户端则发`DropWeapon`网络消息。快速切换与轮盘选择共享装备状态结果，不另计“打开轮盘”世界动作；若物品Drop/Sheath结果不同仍保留独立提交族。源码：当前Native `MissionGauntletMainAgentEquipmentControllerView`与VM绑定。
+
 Prison Break是F12从地牢菜单启动的自定义Sandbox Mission subtype，而非通常的MapEvent战斗：启动入口/囚犯选择/Bribe提交映射F12 `ACT-F12-13`，成功后的Captivity结束对话映射`ACT-F12-14`。`PrisonBreakMissionController`在单一场景中交替处理潜行接近和警报后的护送/战斗，玩家须使用Use交互俘虏触发跟随，警卫感知和StealthFailCounter会改写结果；它不是进入场景后自动营救。它暴露G03通用Mission身体控制仍是未知清单，具体Movement/Use/Melee等Action族尚待研究，不能把F12启动入口算作完整营救支持。
 
 ### Campaign 后果与适配边界
