@@ -136,6 +136,36 @@ Chronicle主队Snapshot有Party摘要，但没有Clan Owned WarPartyComponent的
 
 未知项：AI NPC WarParty生成/死亡/损失后的完整补充频率和玩家Party的后续兵员增长策略；PlayerClan新Party在初始MainParty、城镇、队伍外等不同Hero位置下的所有位置/物资前后态；Party management中角色、兵种、伤兵、物品、工资上限和Disband各按钮的视觉输入/提交顺序；WarPartyLimit不同Tier、Clan类型与NPC衡量的实际差异；队伍被俘、改Faction、Leader死亡对Clan roster和军团存档恢复的完整结果。
 
+## F07 战争状态下的聚落目标与军事行动候选
+
+### 从战争关系到地图目标
+
+War/Peace stance与宣战前置已在 C03 研究；当战争状态已存在时，F 域的 `AiMilitaryBehavior` 才会给Lord Party或Army Leader计算本地战略军事行动候选。它通常从派系 `FactionsAtWarWith` 的地图聚落筛选目标，再依ArmyType转换为 `RaidSettlement`、`BesiegeSettlement` 或 `DefendSettlement` 候选；NPC 的 Party/Army 后续行为由 F02 Think 分数体系决定，不是玩家直接下达一张全图战争路线。
+
+已追到的候选边界：
+
+- **Defender**：主要指向当前可用的 Settlement.LastAttackerParty 相关防守目标；别的本方/Army已承诺保卫的力量会参与本地防守强度和重复目标考虑。
+- **Raider**：以Normal状态村庄为目标；BeingRaided/Looted、已有 MapEvent 等状态会拒绝或显著改变候选。现有 Army/准备集合的某些分支不能再当作普通独立掠村目标。
+- **Besieger**：以 Fortification 为目标，跳过己方/无效围城、已经由敌方其他行动处理或相关 MapEvent/SiegeEvent 不兼容的聚落。仅有城镇/城堡是敌人的并不足以让所有 Party 都立即出征。
+
+War目标在完成的 war decision之外仍受 `AiMilitaryBehavior` 的 Party type、ArmyType、目标状态、局部力量、玩家作弊/事件回避标志和可用导航影响。定居点所有权变化、宣战/议和、Clan更换 Kingdom会检查/废止针对变更聚落/派系的失效移动目标，再触发AI重想；这会让同一战争中的路线随着目标归属/地图事件变化而改变。
+
+### 目标分数与行动可行性
+
+军事候选分不是单按“最近敌城”选。`AiMilitaryBehavior` 至少将 `TargetScoreCalculatingModel.GetTargetScoreForFaction` 的目标价值、距离/港口导航分、Army Cohesion、Party SizeScore、食物可持续天数、PartyObjective（Aggressive/Defensive）等相乘/修正后送入 F02 候选列表。Besieger 对相邻敌我 Fortification 拓扑与海陆导航算距离分；Defender考虑LastAttacker与本方援防力量；Raid考虑村庄安全/派系/当前事件。粮食低于 Raider/Siege Model threshold 时可不给目标或大幅降低分数，军团的多个成员可按平均可食天数计算。
+
+Army Leader 进行防守/掠村/围城类候选时可以使用 `WillGatherArmy` 和 PossibleArmyMembersStrength；满足 ArmyManagementModel 条件后可发出“召集军团再进攻”的候选。Objective、Army Cohesion、Party SizeRatio和是否正在 disbanding 会继续影响该目标分数。最终行动经 F02 的Think循环接受后才由 `SetPartyAiAction` 实施；分数不是保证它一定采取行动的概率，也不是绝对目标队列。
+
+### 玩家对目标选择的影响
+
+玩家能通过 C03 的外交宣战/议和、选举/政策/领地、加入或离开 Kingdom、攻守战果与聚落易主等原版系统，改变AI军事筛选使用的战争关系、Objective、Settlement owner、敌友、力量和粮食环境；玩家并没有一个直接菜单替NPC选择“下一个攻城目标”的原版通用动作。主动加入/指挥 Army、帮助战斗、围城或掠夺会进入不同 F/G 入口，不能视为单纯修改 AI Objective。
+
+Chronicle目前可以为 MainParty设置有限地图目标，并能观察附近可见 Party的摘要；不会读取 Kingdom的 `FactionsAtWarWith` 军事候选、NPC Army Objectives、目标分数、WarParties分配、敌我Strength估算明细、合法行动原因，也无NPC战争目标/攻城战略控制接口。
+
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `AiMilitaryBehavior`、`DefaultTargetScoreCalculatingModel`、`AiPartyThinkBehavior`、`DefaultArmyManagementCalculationModel`、`ChangeOwnerOfSettlementAction`及 War/Peace handlers；Chronicle `AgentObserver.cs`/`AgentProtocol.cs`与 MAINLINE 主队 action contracts。v1.4.8.119303 源码证据，未运行战争目标AI的周期统计或验证实机判定排序。
+
+未知项：`DefaultTargetScoreCalculatingModel`在不同版本/个性/危机下完整权重与随机数；进攻目标估值与和平战场边界变化下目标重算延迟；Army Leader、Attached Party、族长和Kingdom's AI role在军事候选生成中的优先级；AI何时从单队转Army/何时放弃目标的全部阈值组合；战争目标是否对玩家主动不可见信息进行遮蔽或特殊保证。
+
 ## F12 Hero 俘虏、管理与释放
 
 本节保留既有俘虏子系统研究。俘虏转移涉及 Factions、战斗、菜单/Party UI 和关系/叙事，相关的关系后果与日志消费者另见 B/C/J 类研究。
