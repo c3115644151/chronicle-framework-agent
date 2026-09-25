@@ -220,6 +220,32 @@ Chronicle附近Settlement摘要没有 `VillageState`、`SettlementHitPoints`、R
 
 未知项：不同目标与Player/AI参与时MapEvent何时建立/结束、RaidDamage战役tick和胜利结果全分支；村庄防守联盟在围城、Army、叛乱、非敌对派系下的完整Party候选；强征vs Raid状态值、钱物/声望/关系副作用差异和Recovery时间；D09实体村庄Mission/场景交互与战役Raid抽象的具体切换条件。
 
+## F10 Campaign MapEvent 与坐镇战斗模拟
+
+### MapEvent 对象和双方 Party
+
+Campaign 地图上的遭遇/战斗由 `MapEvent` 管理；它区分 `BattleTypes`（FieldBattle、Raid、ForceSupplies/Volunteers、Siege、SallyOut、SiegeOutside、Hideout、Blockade等），用 `MapEventSide`/`MapEventParty` 保存攻守侧、参战Party、Roster、Round casualty、伤兵、击杀/溃逃/参与贡献等。Settlement/raid/siege等MapEventComponent会把不同类型事件的目标状态和结算副作用接入同一 MapEvent框架；Field Battle不等于每一种MapEvent。
+
+一个 party开始战斗/遭遇后，还可以有其他Party在符合导航、派系、任务/战争等条件时加入其中。`MapEventSide` 按总战力、成员/健康队伍、守备器械/船只、贡献等管理本方实际参与，故“地图附近势力”“当前MapEvent involved Parties”“UI看到的实时 Mission troops”不一定是一套名单。
+
+### 坐镇模拟与真实 Mission 区别
+
+玩家开始遭遇后，原版可以把 `FlattenedTroopRoster` 的可用参战兵种交给 `BattleSimulation`。BattleSimulation 初始化或复用 `PlayerEncounter.Battle`，标记 player simulation，并按 CombatSimulationModel 为双方运行模拟 Tick/Round；胜负由 MapEvent battle state/Simulation continuation确定。它使用战斗模型、Army/Party composition、士气、领袖Perk和地形/攻守加成，不是只按总战力/人数比直接得胜。
+
+模拟状态是 Play、FastForward、Skip、Pause。`Tick(dt)` 中 FastForward 把simulation delta乘6，Pause把simulation dt设0；Skip在当前上下文同步反复调用模拟直至 `MapEvent.HasWinner`。这些是战斗模拟自己的进度控制，不是打开/关闭 Campaign TimeControlMode，也不等同于真实3D Mission暂停或快进。真实作战由 `PlayerEncounter.StartAttackMission` 与 Mission/Formation/战术Order链完成；F10只盘点地图抽象战斗，真实3D作战细节留 G 类。
+
+模拟结束后 UI通常返回原生 Encounter result flow；最终 `MapEvent` 结果计算/提交伤亡、胜者/撤退、俘虏捕获、战利品/失去金币、Hero死亡/昏迷、Renown/Influence/Morale、Party 状态和地图位置变化。若玩家伤亡/结束后仍有可领取物品，则需要通过后续Party/Inventory屏幕完成对应领取；结果界面显示、Party roster变化和世界状态提交是多个阶段，不应以“skip 调用成功”替代奖励/恢复验证。
+
+`BattleSimulation.OnPlayerRetreat` 会提交部分 XP 后返回遭遇流程，和 `BattleMission TryExit/RetreatMission`、玩家从地图Party撤退、战败被俘是不同的玩家入口/结果链；真实 Mission与Simulation的损伤/撤退/奖励处理不能互相复制。
+
+### Chronicle 当前处理与证据
+
+Observer 在BattleSimulation活动时只提供 finished/retreated/battleState等少量模拟状态，Encounter section输出当前参与方基本身份/loot count；Protocol中battlePause/battleSkip、完成和战后清理入口需以 MAINLINE的精确 actions契约为准。现有测试夹具可以为目标窗口注入明确的battle数据，但这不证明任意自然战斗、所有MapEvent类型和各种Party援军的Autonomous战斗处理已完整支持。
+
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `BattleSimulation`、`PlayerEncounter`、`MapEvent`、`MapEventSide/Party`、`DefaultCombatSimulationModel`、Raid/Siege等EventComponents；Chronicle `AgentObserver.cs`、`AgentProtocol.cs`和现有 MAINLINE 战后/模拟契约。版本 v1.4.8.119303；本节没有启动战斗 Mission或修改存档运行结果。
+
+未知项：所有Encounter prompt到坐镇Simulation/Join Battle UI入口和按键焦点；Mission Battle与MapEvent simulation各技能/XP/伤亡/战利品差异矩阵；每一MapEvent Component结果回执字段、失效/中断与重新载入边缘条件；援军Party何时加入/退出的具体距离/同盟门禁；Pause/Skip Simulation与Campaign clock各平台/当前时间模式的所有精确边界验证。
+
 ## F12 Hero 俘虏、管理与释放
 
 本节保留既有俘虏子系统研究。俘虏转移涉及 Factions、战斗、菜单/Party UI 和关系/叙事，相关的关系后果与日志消费者另见 B/C/J 类研究。
