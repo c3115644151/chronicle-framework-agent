@@ -62,7 +62,7 @@ Chronicle 不读取 NPC的候选分数、`ThinkParams`、ObjectiveValue、Rethin
 
 枚举行为被赋给 `MobileParty.DefaultBehavior`/`ShortTermBehavior`时，必须结合 `TargetSettlement`、`TargetParty`、`ShortTermTarget...`、地图事件与Scene状态才能理解。相同行为名称可能有不同状态转换：例如 EngageParty 是朝目标接敌的地图行为，不等于已发起战斗；DefendSettlement 可能组织周边队伍支援；FleeToGate 会以地形/聚落出口为逃离路径；这些表现与具体 `SetPartyAiAction`/`MobilePartyAi` 条件相关。
 
-此为枚举完整名单，不意味着每类 Party 可选择全部选项。组件类型、所属Faction、地形导航、Campaign状态、Army、SiegeEvent/MapEvent和行为提供者会过滤候选；每类候选的生成逻辑归 F04 与 F03后续逐项行为链核实。`None`表示未设定候选，不等于玩家空闲操作；`DoOperation`的具体操作目标/支持子系统本轮尚未闭环。
+此为枚举完整名单，不意味着每类 Party 可选择全部选项。组件类型、所属Faction、地形导航、Campaign状态、Army、SiegeEvent/MapEvent和行为提供者会过滤候选；每类候选的生成逻辑归 F02/F04 及后续逐项行为链核实。`None`表示未设定候选，不等于玩家空闲操作；`DoOperation`的具体操作目标/支持子系统本轮尚未闭环。
 
 ## F04 决策循环与短期移动状态
 
@@ -282,6 +282,12 @@ Observer输出主队成员/健康/伤兵/俘虏总数与Party SizeLimit，不输
 
 本节保留既有俘虏子系统研究。俘虏转移涉及 Factions、战斗、菜单/Party UI 和关系/叙事，相关的关系后果与日志消费者另见 B/C/J 类研究。
 
+### 玩家入口、状态观察与时间边界
+
+本体 `PartyVM` 暴露主队/对方的 Prisoner 列表、俘虏容量警告、转移全部俘虏/解雇等命令，以及在适用模式出现的俘虏招募弹窗；战后则进入 F10 记录的 PartyState/PartyScreen 流程。俘虏英雄的 Barter/对话释放属于另一条交互，不等同于普通兵俘转移。各操作受 PartyScreen 模式、Roster 容量、可转移对象和行动上下文限制。这里确认的是源码中的玩家界面模型能力；从地图按钮到不同 PartyScreen/酒馆/地牢/对话的每一种可视入口与确认流程尚未逐项实测，不将其压成一个“管理俘虏”按钮。
+
+Chronicle 主队观察输出俘虏总数，当前 PartyState 观察分别序列化左右双方成员与 Prisoner roster。`partyTakeAll` 仅允许战后 Loot 模式并通过原生 PartyScreen handler 的 Done 提交；它不是通用俘虏交易、招募或释放动作。现有协议没有独立的普通俘虏转移/卖出/招募/英雄释放命令。俘虏Roster读写本身不显式推进 Campaign 时间；赎金评估、逃脱等是由后续日常/小时 Campaign 行为驱动，进入不同 Wait/Encounter/PartyScreen 时是否继续运行按其宿主 GameState 的时钟规则决定，F12没有把它们另行快进。
+
 ### 被俘
 
 `TakePrisonerAction` 主要执行：
@@ -406,28 +412,40 @@ Hero 俘虏可以存在于：
 
 证据：本机 v1.4.8.119303 `TaleWorlds.CampaignSystem.dll` 中 `TakePrisonerAction`、`TransferPrisonerAction`、`EndCaptivityAction`、`RansomOfferCampaignBehavior`、`PrisonerReleaseCampaignBehavior`、`DefaultPrisonerDonationModel`、相关 Barterable 和日志 Behavior。本节描述源码链；各来源路径、触发分支及通知的玩家可见时点尚未全量运行/UI核验。
 
-## F01 MobileParty 与 PartyBase 对象
+## F13 军团召集、领主加入/退出与影响力
 
-### 队伍是 Campaign 实体，不是单一 troop 列表
+本节聚焦 AI 领主如何提议并维持 Army，以及玩家如何看见、管理这些结果；玩家创建/邀请/解散自己军团的基础入口与 VM 草稿提交过程见 F05，不在此重复展开。
 
-`MobileParty` 是可移动/可参加战役行动的 Campaign 实体；它持有 `PartyBase`、位置/路径、移动模式与目标、PartyComponent、LeaderHero、Roster、库存、食物/士气/工资及 AI 行为状态。`PartyBase` 持有成员、俘虏、物品 roster、地图事件/遭遇等战斗与物资数据。二者关系相关但不应当作同一个对象：地图移动、AI和目标通常看 MobileParty；伤亡/交易/人员物资常经过 PartyBase/Roster。
+### 玩家入口与可观察结果
 
-队伍类型由组件和派生标志区分，包括玩家 MainParty、Lord WarParty、Caravan、Garrison、Villager、Bandit、Militia、Patrol 等。它们的行动主体和系统资格并不相同：例如驻军有 GarrisonPartyComponent 且没有地图导航 AI；商队是 CaravanPartyComponent 且有独立 PartyTradeGold；Militia与Villager不按 Lord Party 行为结算。D04/D07/E05/E06已有对应对象/经济细节，本节不重复逐项重写。
+玩家可从 Kingdom 管理中的 Armies 页面查看军团列表、选择军团并尝试定位、管理或解散。可用命令由 `KingdomArmyVM` 根据所选 Army、玩家是否为管理者及影响力/解散条件启用；进入管理窗口后，`ArmyManagementVM` 展示可参与队伍、Strength、Influence Cost 与 Cohesion。点 Done 才提交 Party 与 Army 关系的改动；Cancel按管理窗口打开时与当前的 Influence 差额退款后关闭。实际游戏中从 Kingdom 页面打开此子页、悬停提示和确认弹窗的逐步视觉路径仍未核实，不能把反编译 VM 直接称作完整 UI 实测。
 
-Roster 按成员/俘虏/物品分开：成员伤兵仍处于成员 roster 并有 wounded count，俘虏在 PrisonRoster，货物在 ItemRoster。玩家队伍还可受到军团附属/临时支援/战后事件等上下文影响，`PartyBase.NumberOfAllMembers`、`MemberRoster.TotalManCount`、`PrisonRoster.TotalManCount` 和 UI当前可转移数量不应混用。
+地图上可看到集合/跟随中的领主队伍；Army 名单和状态属于额外的王国面板信息。当前 Chronicle 附近队伍观察没有 Army ID、领袖、成员名单、Cohesion 或目标；MainParty 观察只输出玩家 Clan Influence 数值，既不是军团成员成本，也不是军团管理页的完整信息。Protocol 没有玩家 Army 管理动作。
 
-### 入口、生命周期与 Campaign边界
+### NPC 发起军团与候选成员
 
-玩家的 Party 状态主要通过地图主队、Party Screen（队伍成员/升级/俘虏转移）、定居点驻军管理、遭遇/战后结算等入口变化。队伍生成/毁灭、成员加入/离队、Leader更换、Faction变更和Settlement进入/离开由 PartyComponent/Action/CampaignEvent 及不同 CampaignBehavior 管理；“地图上队伍图标”只是其一个可见阶段，不等同队伍成员 roster 或任务处理过程。
+一条已确认的 AI 路径从 `AiPartyThinkBehavior` 派发 Think 开始：`AiMilitaryBehavior` 为 AI 领主评估军事目标；符合 `CanLordCreateArmy` 时，它能把符合条件的 WarParty 候选放入 `PartyThinkParams`，并在相应的 Besieger 目标候选上标记 `WillGatherArmy`。随后如果该行为赢得 AI 目标选择，`AiPartyThinkBehavior` 调 `Kingdom.CreateArmy`，由 `Army.Gather` 与 `GatherArmyAction` 建立集合过程。它是周期性 Campaign Think/Army tick 驱动，不是玩家点击命令；满足某个静态条件也不代表必然组军，仍受军事候选评分、随机阈值和现有行为影响。
 
-Leader/Clan所属、移动AI、Faction敌对、队伍与军团关系、驻军、粮食/工资、俘虏、战斗和贸易都有独立状态及不同 tick。玩家移动/追近/停步/等待的时间入口由 MAINLINE 原版机制契约约束；一般 MobileParty 属性读取本身不推动Campaign时间。Mission内的Party由场景/队伍编制逻辑实例化，Campaign地图抽象与真实 Mission Party 不能无条件互推。
+当前模型要求建军领主不在海上、Clan Influence 大于 100、不是佣兵、食物足以支撑围城模型门槛、王国正在与拥有领地的势力交战、主队规模比例大于 AI 门槛 0.6；领主还须是 Clan Leader，或满足无其他 Clan Leader Party 且当前是 Clan 首个 WarParty 等分支。可能被召集的对象必须为可带队的 Lord Party，不能是主队、君主队伍、已经参军、战斗/围城/等待解散/正在解散/raft 中或被 `DoNotMakeNewDecisions` 禁止的队伍，且自身食物与规模比例也要超过门槛并处于最大召集距离内。不同导航能力会影响距离判断。
 
-### Chronicle 当前观察与行动覆盖
+候选顺序不是单纯按关系高低：模型用 `CalculatePartyInfluenceCost` 计算成本估值，再以预计战力、伤员比例与成本构成排序；同 Clan 队伍的成本为 0。跨 Clan 成本受两位领主关系、Party 规模和预计战力、距离、随机乘数，以及王国政策、领主 Perk 与文化特性影响。王国内现有军团数量会限制新 Army 可获得的候选 Party 数；有领地王国还要求候选合计的围城攻击战力达到源码门槛。F07/F08 继续解释 Army 接下来选何种军事目标和围城过程。
 
-Observer 当前主快照以 Player MainParty 为中心，给出成员/健康/伤兵/俘虏人数、物品总数、食物、工资、速度、士气、负重/容量、位置和移动目标；Nearby Parties 限于一定视距内可见队伍并最多截取若干项，输出种类、距离、敌对状态、是否移动、当前Settlement、人数/估算强度等，未展开完整 troop/item roster、Leader详细身份、Food、Wage、俘虏、目的地决策或内存目标。
+### 参军、集合与离队
 
-Protocol已有 move/pursue/hold、菜单/遭遇/战后部分操作；动作契约与限制继续引用 MAINLINE，不在 F01 重新定义。Agent目前不是通用队伍Roster/AI行为编辑器，也不能因为有MainParty快照就声称覆盖所有 AI MobileParty。
+加入不是一个由领主自由对话确认的同意流程。成为 Attached Party 后，`AiArmyMemberBehavior` 为追随 Leader Party 提供 `EscortParty` 候选分数：常规范围 20 至 10；食物不足或 Party 规模比例低于模型门槛时分数下降；无法计算通往领袖的可行导航时只给很低分。实际移动和聚集距离由地图 AI 与 Army Tick 决定，短期目标抵达可合并距离后才加入地图位置/Overlay 上的合并队伍；参与 Party 仍保留各自 Roster、食物、工资和士气。
 
-证据：本机 `TaleWorlds.CampaignSystem.dll` 的 `MobileParty`、`PartyBase`、`PartyComponent`、Concrete PartyComponents、`TroopRoster`、`ItemRoster`、CampaignEvent/Action；Chronicle `AgentObserver.cs`、`AgentProtocol.cs`、MAINLINE 机制契约。当前结论来自 v1.4.8.119303 安装程序集与现有代码，不代表各Party类型的可视呈现、队伍屏幕所有操作或地图AI目标已实机穷举。
+成员退出 Army 的已核实路径主要是其关联被解除或整个 Army 解散，而不是本节已经证实了 NPC 会通过一次“拒绝邀请”离开。AI Leader 的 Army 在目标行为切换到不适合作为 Army 目标的类型、目标完成或其他目标失效时可能被解散；`DisbandArmyAction` 按原因释放队伍。玩家手动解散是不同分支：只有 `DismissalRequestedWithInfluence` 明确扣玩家影响力并按成员/Leader 分别扣关系；AI 食物、失去战争、低凝聚、无活动等解散原因不会走该玩家成本分支。不要将玩家主动解散的关系损失推广到所有自动解散。
 
-未知项：不同PartyComponent队伍完整生命周期/创建源及Faction派生矩阵；玩家 PartyScreen 从入口到提交/取消的所有操作和限制；战争、遭遇、围城中 Party roster/Leader/Faction切换的完整顺序；单机抽象模拟与Mission单位的边界及同步细节；当前 Observer 截断规则与每类队伍对玩家UI情报面的一一对应关系。
+### 持续成本、凝聚力与解散
+
+Army 每小时更新会按模型每日 Cohesion 变化除以游戏小时数累加；基础日变化为 -2，并受到附属 Party 数量、挨饿、低士气/兵力不足，以及 Perk/围城等影响。模型对 AI Army 使用较低的部分负向系数，但不代表 AI 永不缺粮或永不解散。低于 50 Cohesion 时 AI 有尝试提升凝聚力的内部路径；AI Army Cohesion 低于 30 且不在战斗/围城时可解散。另有明确的解散检查：Army 成员中超过一半的队伍饥饿、没有正在争夺领地的战争（源码检查中有随机判定）、Cohesion 趋近于零、领主队伍失活，或达到约 48 小时的某些不活动计数阈值。该“不活动计数”按 Leader 当前行为增减，并非单纯静置 48 小时。
+
+AI 与玩家的费用不能混为一谈：VM 对玩家建军/邀请队伍显示并提交影响力成本；AI 模型也计算成员成本用于候选排序。但在核过的 `CanLordCreateArmy`、`Kingdom.CreateArmy`、`Army.Gather` 和该分支解散调用链中，没有确认 AI 创建/邀请时实际扣除 Clan Influence。`GetInfluenceBudgetWhileCreatingArmy` 返回 Clan Influence 的 70%，但在已反编译的调用点返回值未被接收，不能据此声称其构成扣费上限或已经花费。
+
+### Chronicle 当前覆盖与证据边界
+
+已覆盖的是 MainParty Influence 标量和附近 Party 有限摘要；没有当前玩家 Army 成员/凝聚/目标观察，也没有针对 NPC 建军、候选筛选、追随、脱离、Army 解散原因的事件化观察。现有 Army 机制尚无 UI 级运行验证；以上具体阈值和调用链均为本机 v1.4.8.119303 安装程序集反编译事实，不等于随机战役统计已验证。
+
+主要证据：`TaleWorlds.CampaignSystem.dll` 的 `AiMilitaryBehavior.AiHourlyTick`、`AiPartyThinkBehavior.PartyHourlyAiTick`、`DefaultArmyManagementCalculationModel.CanLordCreateArmy/CalculatePartyInfluenceCost/CalculateDailyCohesionChange`、`AiArmyMemberBehavior.AiHourlyTick`、`Kingdom.CreateArmy`、`Army.HourlyTick/Tick/CheckArmyDispersion/CheckInactivity/IsWaitingForArmyMembers/AddPartyToMergedParties`、`DisbandArmyAction`；`TaleWorlds.CampaignSystem.ViewModelCollection.dll` 的 `KingdomArmyVM` 与 `ArmyManagementVM`；Chronicle `AgentObserver.cs`、`AgentProtocol.cs` 及 F05 相关记录。
+
+未知项：AI 各分支实际 Influence 扣除是否发生于未覆盖的其他 CampaignBehavior/模型路径；随机军团生成/解散在真实 Campaign 中的发生率、持续时间和通知顺序；玩家从 Kingdom 页打开、修改、确认/取消 Army 的完整可视流程；不同 Party 类型/Mod 对召集门槛、成本和行为评分的改写；成员是否存在本节未覆盖的独立 NPC 拒绝/退出决策；自然地图时间与 Army hourly tick 在各时间模式下的精确运行分布。
