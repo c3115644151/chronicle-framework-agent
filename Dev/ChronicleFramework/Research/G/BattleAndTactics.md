@@ -46,6 +46,8 @@ Mission 内操作通过键盘/鼠标即时控制主角，TAB菜单可打开离�
 
 当前镜头类输入可继续追到本机 `MissionScreen`：`Zoom`按住时改变camera zoom amount/视距；`ViewCharacter`使第三人称视角暂时查看主角；`CameraToggle`改变`Mission.CameraIsFirstPerson`（鼠标输入时可点击切换，非鼠标需保持约0.5秒）；`LockTarget`切换MainAgent的target-lock/look行为。它们直接改变的是本地Mission画面/瞄准状态，不直接改变Campaign世界实体或Party roster，先作为`OBS-G03-01`的视图/目标控制方式记录，不另建普通世界ACT；若AI战斗规划依赖锁定目标，则仍须作为攻击动作的瞄准控制参数核验。对应源码：`MissionScreen.IsViewingCharacter/UpdateCamera/CanToggleCamera/GetCameraToggleProgress`、`MissionMainAgentController.ControlTick`。
 
+Cheer键打开的是径向Taunt/Shout选单，不等同“提高部队士气”：`MissionGauntletMainAgentCheerControllerView`在按键保持/类别选择/释放时控制菜单；选Taunt后单人分支调用`Agent.HandleTaunt(index, true)`，多人分支发`TauntSelected`；选Shout则调用`Agent.HandleBark(index)`或发`BarkSelected`。所追执行链体现MainAgent动画/语音及多人同步，没有调用`BattleMoraleModel`/`MobileParty.Morale`的证据，故Taunt和Bark先按表现结果分列候选动作，不虚报士气增益。执行过程有类别子菜单与4秒Taunt/2秒Bark冷却；具体菜单实际显示、每个cosmetic可用门槛和战斗打断效果仍未运行验证。
+
 Prison Break是F12从地牢菜单启动的自定义Sandbox Mission subtype，而非通常的MapEvent战斗：启动入口/囚犯选择/Bribe提交映射F12 `ACT-F12-13`，成功后的Captivity结束对话映射`ACT-F12-14`。`PrisonBreakMissionController`在单一场景中交替处理潜行接近和警报后的护送/战斗，玩家须使用Use交互俘虏触发跟随，警卫感知和StealthFailCounter会改写结果；它不是进入场景后自动营救。它暴露G03通用Mission身体控制仍是未知清单，具体Movement/Use/Melee等Action族尚待研究，不能把F12启动入口算作完整营救支持。
 
 ### Campaign 后果与适配边界
