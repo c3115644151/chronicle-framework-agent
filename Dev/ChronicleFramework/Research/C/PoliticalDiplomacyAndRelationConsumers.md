@@ -107,13 +107,17 @@ Sponsor Clan 与 Proposer Clan 领袖 Hero 的个人关系可参与支持计算�
 
 `ChangeKingdomAction` 处理加入/叛变加入、离开/叛乱离开、佣兵加入/离开、建立 Kingdom 与 Kingdom 毁灭导致的离开。身份转换会改 Clan.Kingdom 与 Faction Stance，并可能处理领地/驻军/队伍、佣兵状态、债务和贡金，发 `OnClanChangedKingdomEvent` / `OnClanDefectedEvent`。
 
-玩家离开入口为 K→Kingdom Action：若 Main Hero 是 RulingClan Leader，按钮是 Abdicate，并受 KingdomCreationModel 的 abdication permission 限制；否则是 Leave Kingdom。佣兵会确认结束合约；无领地封臣确认后离开并承担关系影响；有领地封臣需选保留（触发叛乱离开并与旧 Kingdom 开战）或归还领地（避免该战争路径）。NPC或玩家加入另一 Kingdom、投奔改投由 `JoinKingdomAsClanBarterable` 处理；加入佣兵身份用 `MercenaryJoinKingdomBarterable`，离开用 `LeaveKingdomAsClanBarterable`，最后调用相应 `ChangeKingdomAction`。这三种 barter 的准确对话入口/提出条件尚未映射到 Conversation UI。
+玩家离开入口为 K→Kingdom Action：若 Main Hero 是 RulingClan Leader，按钮是 Abdicate，并受 KingdomCreationModel 的 abdication permission 限制；否则是 Leave Kingdom。佣兵会确认结束合约；无领地封臣确认后离开并承担关系影响；有领地封臣需选保留（触发叛乱离开并与旧 Kingdom 开战）或归还领地（避免该战争路径）。
+
+加入服务也有独立的原版领主Conversation入口，不应统称为Barter：`LordConversationsCampaignBehavior.AddPoliticsAndBarter`先提供“I would like to enter your service”对话，适用于玩家未加入Kingdom或已为佣兵、目标是另一Kingdom且双方不在战争状态；再分成两支。佣兵分支由玩家选择“我的剑属于你，给出合适价钱”，可点击条件调用 `FactionHelper.CanPlayerOfferMercenaryService`（含Clan Tier、关系、领地和阵营战争兼容检查），接受后 `ChangeKingdomAction.ApplyByJoinFactionAsMercenary` 并给玩家5点Influence。结束佣兵合约另有Conversation句：需玩家在当前Kingdom服务、与目标领主同一Faction、对方非囚犯且MainParty不在Army；确认会先把Clan当前Influence清零，再执行 `ApplyByLeaveKingdomAsMercenary`。Kingdom管理页结束合约使用不同入口，反编译到的VM只直接提交后一个Action，故不得静默合并两入口。
+
+封臣支系是誓约Conversation，不是generic Barter：玩家可选择向领主宣誓效忠；只有Kingdom领袖能直接授予封臣身份，若当前对话对象不是领袖则会要求/引导玩家去见领袖。可点击条件通过 `FactionHelper.CanPlayerOfferVassalage` 检查Clan Tier、与领袖关系及战争兼容性；接受后 `ApplyByJoinToKingdom`，若从佣兵转封臣则先结束旧佣兵服务，并可能提交入仕奖励/关系/Influence。已确认上述玩家实际入口和核心提交点，但没运行视觉交互；完整Barterables `JoinKingdomAsClanBarterable`、`MercenaryJoinKingdomBarterable`、`LeaveKingdomAsClanBarterable` 是否另有可由玩家主动发起的改投路径仍需逐项核实，不能用其类名推定有第二入口。
 
 加入/离开支持模型会读取统治家族与目标 Clan 的关系、其它成员Clan关系、Culture、领地与军力、WarPartyLimit、最近换阵营时间、可靠性常数及当前战争状态；精确模型分数仍由政治子系统进一步追踪。
 
-玩家离开入口已在 Kingdom Management K 页验证源码：`KingdomManagementVM` 根据RulingClan身份提供Abdicate或Leave Kingdom；佣兵/无领地/有领地分支分别确认，拥有领地时选择保留（叛乱离开、转入战争路径）或归还王国。加入/变更身份的 barter 项包括 `JoinKingdomAsClanBarterable`、`MercenaryJoinKingdomBarterable`、`LeaveKingdomAsClanBarterable`，由其 Apply 调用对应 `ChangeKingdomAction`。精确的NPC对话触发入口未从全对话库穷举。
+K页离境交互与上述Conversation路径是两组入口：`KingdomManagementVM` 根据身份提供Abdicate或Leave Kingdom；佣兵/无领地/有领地分支各自确认，拥有领地时选择保留或归还。加入佣兵、结束佣兵服务、立誓成为封臣的对话链已由 `LordConversationsCampaignBehavior` 定位；其前置、退出代价与UI提交不同，参见本节上方。单独的通用改投Barter仍未追完。
 
-Chronicle Observer 当前不记录 player/Clan `Kingdom` 身份状态或敌友盟约历史；Protocol 没有加入/离开 Kingdom 动作。证据：当前安装 `ChangeKingdomAction`、三种 Clan Kingdom Barterable、`KingdomManagementVM`；转换前后状态与损失/回归未做运行时测试。
+Chronicle Observer 当前不记录 player/Clan `Kingdom` 身份状态或敌友盟约历史；Protocol 没有加入/离开 Kingdom 动作。证据：当前安装 `ChangeKingdomAction`、三种 Clan Kingdom Barterable、`KingdomManagementVM`、`LordConversationsCampaignBehavior` 与 `FactionHelper.CanPlayerOfferMercenaryService/CanPlayerOfferVassalage`；当前为源码调用链证据，UI/对话结果未运行测试。
 
 ## C08 王国创建与毁灭
 
