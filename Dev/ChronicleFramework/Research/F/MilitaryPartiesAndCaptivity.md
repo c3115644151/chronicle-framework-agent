@@ -30,6 +30,52 @@ Chronicle 当前常驻 Snapshot 对 MainParty 输出成员/健康/伤员/俘虏�
 
 未知项：各种 PartyComponent 的所有创建源、Destroy/Convert、Owner/Leader/Clan/Faction转移及 SaveData 生命周期；主队/领主队/Minor Faction/Caravan/Garrison/居民等模型过滤矩阵；伤员、英雄、俘虏和Roster操作各玩家 UI 的逐项结果；Map/Encounter/Mission 三层 Party 状态在暂停、结算、保存/加载时的交接边界；不同Mod对类型标志、AI和Roster的新增字段/行为。
 
+## F02 Party AI 决策与执行层
+
+### Campaign 战略目标选择
+
+原版 `AiPartyThinkBehavior` 订阅 `TickPartialHourlyAiEvent`。新建 Campaign 后它会对已存在 Party 初始化触发 Think；MobilePartyCreated 会标记 `RethinkAtNextHourlyTick`。战争/和平、Clan换Kingdom、SettlementOwnerChanged 等事件会结束或修正失效的领地目标、要求重新评估 Army/Party 行为。
+
+参与 Think 的 Party 必须启用 AI 且未被 `DoNotMakeNewDecisions` 禁止；Party Think 明确排除 `MobileParty.MainParty`。正常 NPC Party 的目标重算约以数个 HourCounter 间隔执行；Army Leader、Transition、Attached Party、显式重想标记和围攻/掠夺战斗会调整频率。Encounter中的普通Party不会照常任意换目标，Raid/SiegeAssault 的特定攻击方是例外。
+
+### 目标候选如何聚合
+
+Think 时清空 `PartyThinkParams` 并派发 `CampaignEvents.AiHourlyTick(party, thinkParams)`。注册的各 AI Behavior 向参数中添加 `AIBehaviorData` 和分数；候选记录行为类型、目标 Party/Settlement 或位置、NavigationType/港口参数及是否计划聚集 Army。`AiPartyThinkBehavior` 选择最高分候选，并另保留一个不要求 Gather Army 的候选，之后结合当前 Army、目标、ObjectiveValue、DoNotChangeBehavior 和随机阈值选择是否切换。
+
+因此观察到“一个 Lord Party 当前正围城/进攻”通常只说明 Campaign AI 当前已接受某个行为目标；具体行为候选来自多个 Behavior 评分，而不是 MobileParty 自己存有一个完整自然语言计划。目标会因目标消失、攻守态势、关系/战争变化、Settlement易主、Army状态和重新评估随机门限而被放弃/替换。
+
+### 目标决定怎样落成地图行为
+
+选定行为后，通过 `SetPartyAiAction` 写入原生行动：前往聚落、巡逻、护送、袭击、围城、守卫、绕行队伍、加入/解散 Army等。某些攻/守/巡逻行为可请求创建 Army，行动变化也可能解散原Army。地图移动目标和结算条件随后由 MobileParty/PartyThink/MapEvent/Encounter 子系统处理；当前目标调用成功不等于部队已经抵达或战斗已结束。
+
+### Chronicle 当前覆盖
+
+Chronicle 不读取 NPC的候选分数、`ThinkParams`、ObjectiveValue、Rethink标志、Initiative、AI禁止决策标志或目标评估理由；附近Party摘要只呈现有限状态。Protocol对 MainParty 有少量 move/pursue/hold/Wait动作，不具备向任意NPC Party设置目标/行为或控制其行动分值的动作。原版 AI 的 Campaign执行与 Chronicle Agent的玩家动作适配是两层系统。
+
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `AiPartyThinkBehavior`、`PartyThinkParams`、`AIBehaviorData`、`MobilePartyAi`、`DefaultMobilePartyAIModel`、`CampaignEventDispatcher.AiHourlyTick`、`SetPartyAiAction`；Chronicle `AgentObserver.cs`、`AgentProtocol.cs`。源码版本 v1.4.8.119303；未采集不同真实Party AI Think的完整运行轨迹。
+
+未知项：具体 AI Behavior 对各候选的评分表、模型权重与每种Party专属冷却/禁用门禁尚未全部拆开；AI HourCounter在各 Campaign 模式/地图tick速率下的精确自然时间映射；多队伍同时通过随机决策门限时 Army/Settlement目标竞争次序；Mod新增Behavior的注册和评分合并影响。
+
+## F03 原版 Party AI 行为类型
+
+当前 `TaleWorlds.CampaignSystem.Party.AiBehavior` 定义包括 Hold、None、GoToSettlement、AssaultSettlement、RaidSettlement、BesiegeSettlement、EngageParty、JoinParty、GoAroundParty、GoToPoint、FleeToPoint、FleeToGate、FleeToParty、PatrolAroundPoint、EscortParty、DefendSettlement、DoOperation、MoveToNearestLandOrPort。它们是原版地图行为枚举，不全是“AI长期目标”：Hold/GoToPoint/FleeToPoint等描述的可执行地图状态与攻城、袭击、Escort、DoOperation等高层行为粒度不同。
+
+枚举行为被赋给 `MobileParty.DefaultBehavior`/`ShortTermBehavior`时，必须结合 `TargetSettlement`、`TargetParty`、`ShortTermTarget...`、地图事件与Scene状态才能理解。相同行为名称可能有不同状态转换：例如 EngageParty 是朝目标接敌的地图行为，不等于已发起战斗；DefendSettlement 可能组织周边队伍支援；FleeToGate 会以地形/聚落出口为逃离路径；这些表现与具体 `SetPartyAiAction`/`MobilePartyAi` 条件相关。
+
+此为枚举完整名单，不意味着每类 Party 可选择全部选项。组件类型、所属Faction、地形导航、Campaign状态、Army、SiegeEvent/MapEvent和行为提供者会过滤候选；每类候选的生成逻辑归 F04 与 F03后续逐项行为链核实。`None`表示未设定候选，不等于玩家空闲操作；`DoOperation`的具体操作目标/支持子系统本轮尚未闭环。
+
+## F04 决策循环与短期移动状态
+
+Party战略 Think 与 `MobilePartyAi` 的短期地图导航是两个相邻层。前者按 partial-hourly campaign 事件统计 AI Behavior score、选择/保留 DefaultBehavior、管理Army目标；后者结合当前目标与Model重算 ShortTermBehavior、导航Point/Party，处理接近 Settlement/Party、攻击/规避/逃跑、地形路径和海陆转换。
+
+`MobilePartyAi.TickInternal` 会在Party不活动或处于MapEvent时暂停一般短期计算；否则检查禁用期限或依据当前DefaultBehavior/目标生成短期状态。它可问 `MobilePartyAIModel.GetBestInitiativeBehavior` 对附近敌方Party选 attack/avoid 方向；不同于Strategic Think的 `AiHourlyTick` 多行为评分。主队当前追击目标丢失可触发原版Hold分支，这属于 MainParty 的地图导航规则，而不是自动NPC Think目标选择。
+
+动作落成后，`SetPartyAiAction`设置DefaultBehavior及目标；`MobilePartyAi.UpdateBehavior`进一步映射GoTo/Flee等为目标点导航、Engage为跟随Party导航、Hold为停止，部分Defend/Flee状态经其他模型继续计算。地图到达、视野失去、遭遇启动、自然战斗和行为结束需另外由 Campaign/Encounter/MapEvent系统决定，不能把每个AI状态枚举直接当成玩家可调用的原语。
+
+证据：当前安装 `MobilePartyAi` 的 `TickInternal`、`GetBehaviors`、`UpdateBehavior`、`CalculateFleePosition` 等；`DefaultMobilePartyAIModel` 主动/规避评分；`SetPartyAiAction`；Chronicle `AgentProtocol` 既有 MainParty move/pursue/hold 动作与 MAINLINE机制契约。时钟随 Campaign 正常模式自然推进；本节源码调用中没有给普通AI地图行为追加测试快进操作。
+
+未知项：短期 navigation Tick/AI Think Tick/游戏每小时的引擎调度比；Initiative行为评分如何与已有 DefaultBehavior 和 Army目标优先级精确竞争；目标不可见、导航断连、港口过渡与MapEvent完成等边缘恢复的所有分支尚未录制/运行穷举。
+
 ## F12 Hero 俘虏、管理与释放
 
 本节保留既有俘虏子系统研究。俘虏转移涉及 Factions、战斗、菜单/Party UI 和关系/叙事，相关的关系后果与日志消费者另见 B/C/J 类研究。
