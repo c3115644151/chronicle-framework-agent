@@ -130,7 +130,13 @@ NPC Lord Party 的初始化会以 Lord Hero 为Party Leader，按所属 Clan Def
 
 确认后 `MobilePartyHelper.CreateNewClanMobileParty` 创建以新 Hero 为领袖的 `LordPartyComponent`。如果该 Hero 仍在 MainParty，先从 MainParty roster 移除；随后在当前 Settlement 或当前/合适地图位置生成新队伍，VM 将最低 party gold补给给其 Leader，并将新队伍设为 Hold。关键差异：`LordPartyComponent.InitializeLordPartyProperties` 对非玩家 Clan Party 会按 Clan 默认PartyTemplate填兵；PlayerClan新建 Party走 `InitializeMobilePartyAtPosition` 分支，不复制NPC DefaultPartyTemplate，初始化对象明确添加的只有 Leader 和约 15–30 Grain。因而“创建一个家族Party”本身不保证得到可自行战斗/收税的满编部队；士兵/物资如何补齐需走Party管理和F11渠道。
 
-同一 Clan Parties VM 支持更换 Party Leader、分配 Party Roles/部分行为、查看 party 名单/工资等类别；更换 Leader 会调用对应Party/DelayedTeleport逻辑。解散操作拒绝 MainParty、Garrison、Militia或处于战斗/围城的队伍；普通自有 Party 的解散还涉及返回的 Settlement/物资及俘虏处理，分别在 F11/F12 边界核查。
+同一 Clan Parties VM 的既有Party卡片有三个独立操作族，而非一个通用“管理Party”：
+
+- **更换Leader**（`ACT-F06-02`）：仅`ClanPartyType.Member/Caravan`显示按钮；候选需通过`FactionHelper.IsMainClanMemberAvailableForPartyLeaderChange`等条件。Done Inquiry确认后，旧Leader用DelayedTeleport回MainParty、新Leader去目标Party；若目标Hero低于最低Party Gold，玩家补足差额，界面提示预计旅行时间。
+- **Disband**（`ACT-F06-03`）：同一Leader selection popup包含`Disband Party`候选，但只有地图操作可用且目标不是MainParty/Garrison/Militia/已解散/战斗或围城Party时可选。确认后旧Leader被移出并成为Fugitive，再由`DisbandPartyAction.StartDisband`标记处理；派对可能等待、移动到Settlement后再合并/销毁，不是点击后Roster立即消失。此为Clan移动Party解散，不是`ACT-F05-02`Kingdom Army解散。
+- **Party Objective**（`ACT-F06-04`）：仅非Clan leader领导的、非Caravan且未Disband的Party可在卡片选择Neutral/Defensive/Aggressive。Selector按`SetPartyObjective`写`MobileParty.Objective`；`AiMilitaryBehavior`和`DefaultTargetScoreCalculatingModel`会据此改变防守/攻城/劫掠目标的权重及追敌倾向，它不是指定某个单一地图目标。
+
+Leader候选Inquiry在选普通Hero与选Disband之间切换；弹窗组件相同但最终状态不同，故分列ACT。Parties列表中的Caravan只有Leader/Disband适用项；Garrison不可使用此ChangeLeader UI。Role选择另映射H06，不在此重复计算。
 
 ### 对照 AI Clan War Party 与 Chronicle 覆盖
 

@@ -205,6 +205,8 @@ Chronicle Observer 不读取当前默认日常项目，也不计算这张表的�
 
 提交新总督时 `TownManagementVM.OnGovernorSelectionDone` 调用 `ChangeGovernorAction.Apply`。如果 Hero 已在该 Settlement 且不是囚犯，立即登记为 Governor；否则先清掉当前任命并经原版传送行为安排其之后前往。操作会解除旧 Governor 的 `GovernorOf`、派发 `OnGovernorChanged`，并将新 Governor 标记为因任职而忙碌。领主改变 Clan 后若不再属于聚落 OwnerClan，GovernorCampaignBehavior 会移除其任命。直接给 `Town.Governor` 赋值不等同于这一行动/事件链。
 
+跨入口去重：Clan Management→Fiefs子页的`ClanFiefsVM.ExecuteAssignGovernor/OnGovernorSelectionOver`也可为其选中的Town/Castle打开候选Popup与确认Inquiry，最终同样调用`ChangeGovernorAction.Apply`或`RemoveGovernorOfIfExists`，与Town Management窗口归为同一`ACT-D07-01`，不是额外的第二种“Governor指派”结果。Clan页Governor/fief观察字段仍与Town Management信息层次有差异，由B05/H02与D07现有Observation scopes保留。
+
 总督技能/Perk 会进入忠诚、安全、繁荣、建设等模型（见 D02/D05）；Town Management VM 的工具提示会显示总督相关效果，并在窗口统计中显示聚落状态与预测变化。GovernorCampaignBehavior 的 Settlement 日 tick 还会按其 Perk触发少量要人关系变化并授予治理经验。这个角色是一种持续的聚落治理指派，不只是文本头衔。
 
 ### 驻军数据对象与民兵区别

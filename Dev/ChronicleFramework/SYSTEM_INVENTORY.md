@@ -344,7 +344,7 @@ Decision跨域去重规则：`ACT-C02-01/02`是Decision Election中Supporter/Cho
 | D04 Village状态 | `OBS-D04-01`村庄产出/绑定Settlement/袭击状态 | 村庄交易/任务/袭击入口分别与E/J/F交叉映射 |
 | D05 Building queue | `ACT-D05-01`更改聚落建造队列 | 每日建设自动增长不是玩家动作；所有建筑/权限差异尚需细分 |
 | D06 Daily projects | `ACT-D06-01`选择/更换每日项目 | 立即选择和后续日tick效果不同；不能和建筑队列混同 |
-| D07 Governor/Garrison | `OBS-D07-01`治理/驻军管理视图；`ACT-D07-01/02`任免Governor和调度驻军 | Garrison PartyScreen转移与其它PartyScreen交易相关但影响对象/权限不同 |
+| D07 Governor/Garrison | `OBS-D07-01`治理/驻军管理视图；`ACT-D07-01/02`任免Governor和调度驻军；Governor `ACT-D07-01`也复用Clan Fiefs入口 | Town Management与Clan Fiefs页面的Governor确认调用同一结果Handler；Garrison PartyScreen转移与其它PartyScreen交易相关但影响对象/权限不同 |
 | D08 Crime/Alley | `OBS-D08-01`Alley控制/犯罪状态；进场`ACT-D08-01`、更换Leader`ACT-D08-02`、管Roster`ACT-D08-03`、放弃`ACT-D08-04`、领周招募`ACT-D08-05`、防守帮派进攻`ACT-D08-06`；犯罪处置与B10/I08分开 | 菜单/leader对话的同一Roster/选Hero/放弃后果合并为别名；专用Alley fight任务映射独立D08入口，并跨G03/G09后果核验 |
 | D09 Settlement visit | 点击Settlement并抵达映射`ACT-K02-01`；当前Settlement菜单Leave映射`ACT-D09-02`；特定Alley location entry cross-reference `ACT-D08-01` | 抵达菜单是Settlement导航结果，不再与K02地图移动重复计数；等待/对话/Alley入场仍是不同动作 |
 | D10 Settlement ownership | 结果观察复用B05/B06/C06、地图/日志通知；改变Owner的来源行动映射C06/F/G | Settlement owner change是结果事件，不另建“地图易主按钮” |
@@ -362,7 +362,7 @@ Decision跨域去重规则：`ACT-C02-01/02`是Decision Election中Supporter/Cho
 | ACT-D09-02 | 行为 | 在当前Settlement GameMenu选择对应Leave选项 | 按Settlement类型/当前State离开Town/Castle/Village回地图；可能触发Incident/事件，不等同点击地图移动 | Chronicle通用menuSelect需以当前Menu/Option ID重验，leave测试为菜单原语 | D09/J05/L03、MAINLINE menu contract |
 | ACT-D05-01 | 行为 | Fief管理VM选择/替换一个Building Queue条目并确认 | 消耗建设资源/时间槽，后续Construction由Settlement每日逻辑推进；只有拥有/有资格才可操作 | Chronicle无Building Queue动作；UI权限/确认未运行 | D05/D06、L03 |
 | ACT-D06-01 | 行为 | Fief管理VM选择当日项目/自动项目 | 变更聚落日常项目并影响后续日tick；不是立刻完成该项目 | Chronicle无daily project action；Town/Castle允许项矩阵未测 | D06、L03 |
-| ACT-D07-01 | 行为 | Fief管理页给当前Settlement任命/移除Governor | 改Hero Governor身份/角色及聚落模型后果；Hero忙碌/囚禁/军团等状态会限制 | Chronicle无Governor assign/remove action | D07、B04/H05-H06、L03 |
+| ACT-D07-01 | 行为 | Town Management窗口或Clan Management→Fiefs选中Fortification→选择/确认任命或移除Governor | 两入口在各自候选/Inquiry确认后同调用`ChangeGovernorAction.Apply/RemoveGovernorOfIfExists`，修改同一Town/Hero Governor关系并触发`OnGovernorChanged`；忙碌、囚禁、Faction/Owner与地图操作会限制 | v1.4.8 `TownManagementVM.OnGovernorSelectionDone`与`ClanFiefsVM.OnGovernorSelectionOver`最终Handler及结果一致，故跨域/跨UI合并一个ACT；Chronicle无动作，视觉/冷却时钟未核 | D07/B04/H02/H05-H06/L03、`TownManagementVM`、`ClanFiefsVM.ExecuteAssignGovernor/OnGovernorSelectionOver`、`ChangeGovernorAction` |
 | ACT-D07-02 | 行为 | Manage Garrison/PartyScreen在PlayerParty与Settlement Garrison转移成员 | Roster/双方容量/可转移对象决定成败；Done提交，Cancel保留前值 | Chronicle只在有限PartyState/Loot或已实现交易条件下读取Roster，未覆盖一般Garrison UI | D07/F11/H04、L03 |
 | ACT-D08-01 | 行为 | 在Town菜单选择“Go to alley”进入玩家已拥有的Alley location | 需当前聚落存在PlayerAlleyData；切换GameMenu并设置Alley location Scene，不直接修改Owner/Roster；该菜单/Scene承载时钟尚未运行核实 | v1.4.8 SandBox `AlleyCampaignBehavior`源码确认Option与SwitchToMenu；Chronicle没有Alley Scene入口 | D08/D09/L03/L07、`AlleyCampaignBehavior.go_to_alley_on_condition/consequence` |
 | ACT-D08-02 | 行为 | 在Alley管理菜单或Alley leader对话中选择更换负责人，并从符合条件的Clan Hero里确认新Leader | 攻击期间菜单项禁用；选择由`AlleyModel.GetClanMembersAndAvailabilityDetailsForLeadingAnAlley`筛选；写入AssignedClanMember、替换打手Roster中的Hero并将新Leader延迟传送到聚落 | 两入口调用同一Inquiry与状态Handler；Chronicle无Alley leader动作；玩家对话/时钟运行回执未知 | D08/B04/H02/J08/L03、`AlleyHelper.CreateMultiSelectionInquiryForSelectingClanMemberToAlley`、`ChangeTheLeaderOfAlleyInternal` |
@@ -418,7 +418,7 @@ E03、E06、E08、E09、E10的大量变化由每日模型、其它玩家动作�
 | F03 AI行为类型 | Party概要复用`OBS-F01-01`；`IsInspected`条件下可读行为提示映射`OBS-F03-01` | 原版把部分Default/ShortTerm行为和目标转换为摘要文字，不展示完整计划；用户确认的ALT仅对应政治Party兵种详情，不据此断定行为摘要也由ALT触发；行为tooltip入口仍未视觉核实 |
 | F04 Party Think | NPC长期/短期目标评分复用`N/A-F02-01`；影响其条件的玩家动作映射Army/外交/地图行为族 | 不把Think、行为切换或评分模型另计玩家动作；UI是否揭示选择理由未知 |
 | F05 Army | `OBS-F05-01`Kingdom Army管理视图；管理己方Army为`ACT-F05-01`、主动解散为`ACT-F05-02` | 调整cohesion/邀请party/取消的提交边界以Army VM事务为准；自动解散与主动解散分开 |
-| F06 Clan War Party | 家族Party信息复用`OBS-B05-01`/`OBS-F01-01`；Clan→Parties→Create New Party `ACT-F06-01` | 玩家创建Party由 ClanPartiesVM 提交；NPC War Party自动生成不是玩家按钮；初始PlayerClan Party不自动满编 |
+| F06 Clan War Party | 家族Party信息复用`OBS-B05-01`/`OBS-F01-01`；Clan→Parties创建`ACT-F06-01`、更换现有Leader`ACT-F06-02`、Disband`ACT-F06-03`、设置AI Objective`ACT-F06-04` | 创建、改Leader、解散、改变AI目标是不同状态结果；popup里的Disband按实际Startedisband语义另计；Party Role复用H06，Governor复用D07，Caravan经营映射E05 |
 | F07 战争目标 | 地图提示中的部分目标行为文字复用`OBS-F03-01`，军团目标`OBS-F05-01`，围城状态`OBS-F08-01`；AI目标选择/评分原因记`N/A-F07-01` | 原生界面可条件显示部分选定行为/目标，但不显示完整候选、评分或选择理由；无菜单替NPC指定下一目标 |
 | F08 Siege | 战略围城状态为`OBS-F08-01`；进入攻城Mission/坐镇/离开按G01遭遇分支和真实Mission动作映射 | Campaign围城周期、围城菜单及攻城Mission是不同状态层，不合并成“攻城”动作 |
 | F09 Raid/Defense | 村庄遭遇`ACT-F09-01`劫掠、`ACT-F09-02`强征志愿兵、`ACT-F09-03`强征物资；防守进入G战斗路径 | 三类村庄敌对行动后果不同；AI防守目标不是玩家可指定的直接动作 |
@@ -455,6 +455,9 @@ E03、E06、E08、E09、E10的大量变化由每日模型、其它玩家动作�
 | ACT-F05-01 | 行为 | K→Kingdom Armies打开ArmyManagement，创建己方Army/选择邀请Party并Done | 检查Kingdom成员/佣兵/Leader与参加Party条件，收取Influence并设置Army/Party关联；Cancel不提交 | Chronicle无Army Management交互 | F05/F13、KingdomArmyVM/ArmyManagementVM |
 | ACT-F05-02 | 行为 | Kingdom Army panel/战后上下文主动解散玩家Army | 玩家解散消耗Influence并可能扣参与者关系；自动解散不是同一action | Chronicle无解散Army命令 | F05/F13、DisbandArmyAction |
 | ACT-F06-01 | 行为 | Clan Management→Parties→Create New Party，选择符合条件的Clan Hero/Companion并确认费用 | 要有WarParty slot、可带队Hero、允许地图操作、MainParty不在海上/raft，并满足最低Leader资金；可能从MainParty移走该Hero，创建独立PlayerClan MobileParty并补最低资金、停为Hold；不自动复制NPC DefaultPartyTemplate，不能由“创建成功”推断已有完整部队 | v1.4.8 ClanPartiesVM与Prefab源码确认入口/条件/状态变化；Chronicle无动作适配；各Hero位置及正式视觉/运行结果未实测，Clan页面时钟宿主未核 | F06/H02/H05/E06、`ClanPartiesVM`、`ClanPartiesLeftPanel.xml`、`MobilePartyHelper.CreateNewClanMobileParty` |
+| ACT-F06-02 | 行为 | Clan→Parties选中既有Member Party/Caravan→Change Leader→选择合格Hero并确认 | 只对Member/Caravan显示；旧Leader经DelayedTeleport回MainParty，新Leader经DelayedTeleport加入目标Party；若新Leader低于`PartyGoldLowerThreshold`，玩家补足差额；Inquiry可显示预计旅行时间 | v1.4.8 `ClanPartyItemVM.IsChangeLeaderVisible/ClanPartiesVM.OnChangeLeaderOver`确认两Party类型共用此变更逻辑与成本/资格检查；Chronicle无动作；UI时钟、延迟位置结果/Cancel未运行核验 | F06/H02/H05/E05、`ClanPartyItemVM.ExecuteChangeLeader`、`ClanPartiesVM.GetChangeLeaderCandidates/OnChangeLeaderOver`、`TeleportHeroAction` |
+| ACT-F06-03 | 行为 | 同一Member Party/Caravan的Leader popup选择Disband Party并确认 | 仅在地图操作允许、非MainParty/Militia/Garrison、未Disband且不在MapEvent/SiegeEvent时允许；旧Leader变为Fugitive后调用`DisbandPartyAction.StartDisband`，队伍进入延迟解散/返乡处理；与Disband Army分开 | v1.4.8 ClanPartiesVM候选Inquiry及`GetCanDisbandParty`条件、StartDisband链确认；被送往何处、Roster/俘虏回收、实际毁队时机取后续disband Behavior；Chronicle无动作/UI未运行 | F06/F05/F11/F12/H02、`ClanPartiesVM.OnChangeLeaderOver/OnDisbandCurrentParty/GetCanDisbandParty`、`DisbandPartyAction`、`DisbandPartyCampaignBehavior` |
+| ACT-F06-04 | 行为 | 在Clan→Parties列表中对`IsPartyBehaviorEnabled`的Party卡片选择Neutral/Defensive/Aggressive | 仅当Party有Leader且其非Clan Leader、非Caravan、未Disband时显示；调用`MobileParty.SetPartyObjective`修改AI行为偏好，不指定地图上的单一目标地点，也不显式快进/暂停；AI后续依当前Campaign时间模式自然重新评估 | v1.4.8 selector/Setter和AI目标模型调用链确认：Defensive/Aggressive影响目标/任务权重及追敌距离；Campaign运行中重评时点及Mod覆写未核验；Chronicle无动作 | F06/F02/F04/F07/H02、`ClanPartyItemVM.IsPartyBehaviorEnabled/UpdatePartyBehaviorSelectionUpdate`、`AiMilitaryBehavior`、`DefaultTargetScoreCalculatingModel` |
 | ACT-F09-01 | 行为 | 在有效Village encounter选择Raid/Plunder | 进入RaidEvent并造成物资/繁荣/安全与关系等不同后果 | Chronicle无Raid选择动作 | F09/J05、EncounterGameMenuBehavior |
 | ACT-F09-02 | 行为 | Village encounter中强征Volunteers | 进入ForceVolunteersEvent，潜在获得部队并触发村庄/政治后果 | Chronicle无强征新兵动作 | F09/J05/G02 |
 | ACT-F09-03 | 行为 | Village encounter中强征Supplies | 进入ForceSuppliesEvent，物资获得及Village损害路径不同于Raid/Volunteers | Chronicle无强征物资动作 | F09/J05/G02 |
@@ -487,7 +490,7 @@ F/G中Mission主角移动/攻击、Formation orders及部署已作为真实玩�
 | 系统ID | 映射到的观察面/行动族 | 去重/未决 |
 | --- | --- | --- |
 | H01 Player identity | `OBS-B01-01`身份/百科；新档文化选择映射`ACT-A01-01/02` | Character Creator与Campaign中身份管理是不同上下文 |
-| H02 Player Clan | `OBS-B05-01`家族管理面；名称/旗帜操作映射`ACT-H02-01/02` | Gold/财务与E07可见预测共享数据，不重复建Clan finance动作 |
+| H02 Player Clan | `OBS-B05-01`家族管理面；名称/旗帜`ACT-H02-01/02`；Fiefs Governor复用`ACT-D07-01`；Party create/Leader/Disband/Objective`ACT-F06-01..04`；Party Roles`ACT-H06-01` | Clan Manager按成员/Party/Fief等子VM承载不同领域提交；链接到已有领域ACT，不按Tab重复计；Gold/财务读数共享E07 |
 | H03 Main Party | Party/经济汇总映射`OBS-E06-01`与`OBS-F01-01` | Party对象字段和队伍面板字段需按可见细节继续拆分 |
 | H04 Troop Roster | `OBS-H04-01`Party roster；升级/俘虏招募暂为`ACT-H04-01/02` | 招募新兵、俘虏招募、自动NPC升级各自不同，后者无玩家入口 |
 | H05 Companion | `OBS-H05-01`玩家Clan/Party同伴信息；`ACT-H05-01`游荡者付费招募；被俘的既有Companion经监狱营救恢复队伍`ACT-F12-14` | 救回既有玩家同伴是F12捕获/营救闭环，不重复计成雇佣游荡者；战斗临时加入、Clan membership和建Party仍是不同动作 |
