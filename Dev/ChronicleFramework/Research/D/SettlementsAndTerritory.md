@@ -1,6 +1,6 @@
 # D 类研究：聚落与领地
 
-状态：机制盘点中；D01-D06 已完成首轮静态盘点，目前继续研究 D07 总督与驻军，未进行方案评审。
+状态：机制盘点中；D01-D07 已完成首轮静态盘点，目前继续研究 D08 犯罪与帮派，未进行方案评审。
 
 适用本体：Bannerlord v1.4.8.119303。依据安装目录中的 `TaleWorlds.CampaignSystem.dll` 反编译结果和 Chronicle 当前 `AgentObserver.cs`；本节是静态代码证据，不代表已经在游戏界面逐项实测。
 
@@ -226,6 +226,38 @@ Nearby Settlement 快照不返回 Governor ID、GovernorOf、Garrison Party ID�
 
 未知项：Town Management 窗口从地图/聚落的精确按键入口、实际提交/返回的时序；玩家 Party 与驻军间手动士兵转移的真实 UI 路径及 roster、伤兵、升级和军需副作用；GarrisonWagePaymentLimit 的玩家修改 UI 与日工资结算调用链；AI 驻军转兵完整目标公式与排除条件；新征领地/失去领地时驻军、Governor 和工资设置的所有后果。
 
+## D08 聚落犯罪与帮派巷道
+
+### 城镇巷道与帮派占有
+
+每座城镇的 `Settlement.Alleys` 保存若干 `Alley` 区域。Alley 保存所属 Settlement、tag、名称、AreaState 和当前 Owner Hero；这是 Town 中的区域/派系状态，不是独立的城堡或村庄，也不等同于整个 Clan 所有权。城镇中的 gang leader Notable 可以拥有多条 Alley，原版每日聚落 tick 会按随机概率尝试让帮派占有未分配 Alley 或失去已有 Alley；概率随当前 Alley 数量改变。
+
+Sandbox `AlleyCampaignBehavior` 是该系统的主要生命周期行为。Town 的玩家入口来自 `town` 菜单新增的“Go to alley”，并进入 `manage_alley` 菜单/聚落 Alley 场景；在 Alley 内与人物对话还能触发打斗、离开、招募或管理选项。具体玩家移动、对话交互、战斗 Mission 和结算细节归 D09/G 类继续交叉盘点，本节只记录已有来源链。
+
+### 玩家经营 Alley 的状态循环
+
+玩家在 Alley 战斗中获胜后，`AlleyOccupiedByPlayer` 事件让主 Hero 成为 Alley Owner、保存驻守 roster 与指定 Clan Member，并添加 Alley 经验。占领会降低原帮派首领关系；若该镇不属于玩家 Clan，还会降低镇主和部分非帮派 notable 关系。清除/放弃玩家 Alley 会移除 Owner，改变与原 gang leader/notables 的关系并可解除对方的攻击状态。
+
+玩家 Alley 要指定一名 Clan Hero 领导并驻守一队打手，默认人数范围 5–10；可派 Hero 受 Roguery 至少 30、Mercy 不高于 0，以及“不能另任 Alley leader、Governor、囚犯、正在解 Issue/旅行/忙碌/逃亡”等资格限制。Alley 模型每个该 Hero 每日授予 200 XP，主角治理 Alley 每日有对应 Roguery XP；Alley 收入按 Town Prosperity / 50 计算。每个归主角所有的 Alley 每日向该派系 Crime Rating 增加 0.5。
+
+玩家拥有 Alley 会产生被其他 gang 攻击的长期风险。Campaign 每日以随机概率尝试发起 Alley attack；模型根据守军 roster 估算回应期限，默认区间为 8–12 天。期限前可进入 Alley 应对/战斗；到期未回应时 PlayerAlleyData 会被移除且 Alley 被销毁/失去控制。能否发生 attack 还要求城镇存在其他适用的 Alley state；具体全条件及不同战斗结果分支尚需进一步追踪。
+
+玩家每周有概率从 Alley 得到一批帮派兵种，模型根据固定随机值决定零人或不同组成，之后进入 MainParty roster 并更新上次招募时间。Town 菜单/对话管理项还能打开 Alley 打手 roster 管理、改变指定 Clan Member 或放弃 Alley；底层屏幕管理使用 `AlleyHelper.OpenScreenForManagingAlley`。这不是镇内普通志愿兵招募入口。
+
+### Faction 犯罪值与处置
+
+主角 Crime Rating 按 `IFaction` 分别保存；抢劫或对同王国居民实施侵害会增加相应派系罪恶值，处在战争状态和特定 Quest 行为有不同规则。默认每日模型根据目标派系与玩家的关系衰减罪恶值：自家 Clan 或作为君主的王国 -5/日；当前所属王国 -1.5/日；同王国其他 Clan -1.25/日；交战派系 -0.25/日；其他派系基础 -1/日。该派系下主角每拥有一个 Alley 又增加 0.5/日。具体犯罪行为的增量由调用者分别指定，不能把所有犯罪统一成一个常数。
+
+默认等级边界是轻微 `(0,30]`、中等 `(30,65]`、严重 `≥65`，最大 Crime Rating 100；和平时针对玩家所属阵营的罪恶值可能按模型阈值下调。进入有罪恶值的定居点可走原版 `town_inside_criminal`/surrender 处置菜单，选项依等级、当前阵营和支付能力包含金币、影响力、接受可能致命的惩罚、惩罚加付款或无视指控等分支；处置通过 `PayForCrimeAction` 处理并可能回到 Town/Castle 外部菜单。付清成本以罪恶值相对最低可接受阈值的 `pow(x,1.2)` 计算，金币按约 `×100`，Influence 按原值。完整死亡、逮捕、关系和进入城镇权限副作用留待 I/J/G 交叉研究。
+
+### Chronicle 当前覆盖
+
+当前 AgentObserver 不返回 Settlement.Alleys、Gang Leader、Alley Owner/State、玩家 Alley 守军/攻击期限/收入/周招募、各派系 MainHeroCrimeRating 或犯罪菜单选项；Protocol 也没有经营 Alley、招募 Alley 打手、面对帮派进攻或处理 Crime Rating 的动作。静态源码已明确这里存在一个独立且会持续变化的城镇经济/治安支线生态，但 Agent 当前既看不到，也不能管理；这句话描述覆盖事实，不是设计结论。
+
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `Alley`、`DefaultAlleyModel`、`DefaultCrimeModel`、`CrimeCampaignBehavior`、`ChangeCrimeRatingAction`、`PayForCrimeAction`、`AlleyHelper`；`Modules/SandBox/bin/Win64_Shipping_Client/SandBox.dll` 的 `AlleyCampaignBehavior`；Sandbox `ModuleData/settlements.xml`、`concept_strings.xml`；Chronicle `AgentObserver.cs`/`AgentProtocol.cs`。为 v1.4.8.119303 静态程序集和数据/菜单文本证据，未执行街巷战斗、占领、追击或赎罪 UI。
+
+未知项：不同 Settlement alley tag/state 的完整生成与玩家可见地图入口；各个任务/对话/战斗结果对 Alley Owner 和关系的全部影响；玩家攻占/防守 Mission 的可用 roster、撤退/死亡/胜负处理细节；Attack 到期/被占领失败所有数据清理副作用；所有侵害行为的 Crime Rating 增量与 Arrest/接战/处置完整条件；巷道经营收入是否还经 Clan 财政其他比例或事件调整。
+
 ### 时间与证据边界
 
 D01 中的实体分类、所有权查询与绑定关系是读取对象状态，不会自行推进 Campaign 时间。城镇/村庄的每日状态计算由各组件的 `DailyTick` 执行，并受 Campaign 时钟调度；具体数值模型和状态变化分别留给 D02-D04。直接读取属性不等价于玩家打开地图百科或聚落界面；本节没有声称 UI handler 与直接 API 的完整交互已经运行验证。
@@ -236,4 +268,4 @@ D01 中的实体分类、所有权查询与绑定关系是读取对象状态，�
 
 ## 研究范围状态
 
-D01-D07 已完成首轮静态对象、聚落发展、村庄生命周期、建筑/日常项目以及总督/驻军基础链盘点。D08-D10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 D 域范围逐项核对，不将此文档视作聚落系统整体已完成。
+D01-D08 已完成首轮静态对象、聚落发展、村庄生命周期、建筑/日常项目、总督/驻军和巷道犯罪系统盘点。D09-D10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 D 域范围逐项核对，不将此文档视作聚落系统整体已完成。
