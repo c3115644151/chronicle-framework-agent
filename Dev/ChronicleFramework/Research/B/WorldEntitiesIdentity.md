@@ -25,6 +25,16 @@
 
 证据：安装 `TaleWorlds.CampaignSystem.dll`（`Hero.CharacterStates`、`Hero.Age`、`Hero.ChangeState`、`KillCharacterAction`、`DefaultAgeModel`、`DefaultHeroDeathProbabilityCalculationModel`）、`TaleWorlds.CampaignSystem.ViewModelCollection.dll`（`EncyclopediaHeroPageVM`），以及 A03 的对象级 Campaign tick 事实。未知项：造成年龄跨阈值事件的全部行为、所有死亡模型调用点、不同身份/StoryMode下的死亡和继承分支、真实百科/附近观察UI覆盖仍未完成；本段只确立 Hero 本体生命周期合同，不提前扩展到 Clan 继承或关系消费者。
 
+#### B02 家庭、婚姻与子女
+
+Hero 的 `Father`、`Mother` 是独立持久引用；设置父/母属性时会将子 Hero 加到相应父/母的 `_children` 列表。`Children` 直接返回存储列表；`Siblings` 是按父母列表动态计算的派生枚举（若有 Father 则遍历父方列表，否则用 Mother 列表）。因此 family links 不等同于同 Clan 成员关系，也不是通过个人关系值推算。
+
+`Spouse` 是双向关系属性：设置一方会把对方的 `Spouse` 设回自身；解除/换配偶时原配偶被放入 `_exSpouses`。实际结婚流程不是单独写这个字段：`MarriageAction.Apply` 先检查 `MarriageModel.IsCoupleSuitableForMarriage`，写双方 Spouse、增加关系，再依据 MarriageModel 结果变更其中一方 Clan；若人物当前为总督/队伍/军团成员，Clan 变更还会撤总督、转队伍归属/可能解散队伍或军团并清理敌对行为，最后结束 Courtship 并设置 RomanticState.Marriage。配偶死亡时 `KillCharacterAction` 解除另一方 Spouse，历史配偶关系进入 ExSpouses。
+
+初始既有家庭由新档 `InitialChildGenerationCampaignBehavior` 在 `OnNewGameCreatedPartialFollowUp` 阶段生成；不是出生动画或玩家操作。运行中怀孕由 `PregnancyCampaignBehavior` 按 Hero 每日回调检查成年、Life/Death 周期开启、存活、女性、非叛军 Clan、婚姻及妊娠状态，并用 PregnancyModel 概率与位置条件计算受孕。怀孕记录单独保存 Mother、Father 与 DueDate；到期后随机双胞胎/死胎/母亲产后死亡分支，正常新生 Hero 由 `HeroCreator.DeliverOffSpring` 建立父母引用、族群/文化/性别/生日等，并分发 OnGivenBirth。玩家主角作为父/母时，子女沿用玩家 Clan/Culture；其他家庭中新生子女进入父亲 Clan，文化在父母间选取。子女的出生日龄、父母关系、所属 Clan 与配偶身份为不同字段/关系链。
+
+百科 Hero 页可展示家庭成员；玩家婚姻谈判/婚姻选项的具体 UI 入口涉及 J 类对话/Barter 路由，本段只记录 `MarriageAction` 与持久对象关系。证据：`TaleWorlds.CampaignSystem.dll`（`Hero`、`HeroCreator`、`MarriageAction`、`InitialChildGenerationCampaignBehavior`、`PregnancyCampaignBehavior`、`MarriageModel`），以及已有百科 Hero 页源码。未知项：婚姻对话到 Barter 的完整 UI 调用链、各代际/失去父母后 `_children` 列表处理、叛军/佣兵/婚姻 Clan 变更例外、妊娠概率和持续时间的默认数值仍需分别追对应系统；未从字段关系推断情感/忠诚含义。
+
 ### Clan
 
 - 成员、领袖、领地、队伍、文化、家园、家族等级、声望、影响力、金币和总军力；
