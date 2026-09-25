@@ -1,6 +1,6 @@
 # E 类研究：经济与贸易
 
-状态：机制盘点中；E01-E02 已完成首轮盘点，目前研究 E03 村庄生产链，未进行方案评审。
+状态：机制盘点中；E01-E03 已完成首轮盘点，目前研究 E04 工坊，未进行方案评审。
 
 适用本体：Bannerlord v1.4.8.119303。基于当前安装 `TaleWorlds.Core.dll`、`TaleWorlds.CampaignSystem.dll`、官方模块物品 XML 和 Chronicle 本地 Observer/Protocol 源码。静态对象核对不表示物品市场或背包 UI 已运行验证。
 
@@ -100,6 +100,38 @@ Observer 的附近 Party 列表可能识别可见的 `villager` Party 类型和�
 
 未知项：默认 VillageTradeBound 在关系/海路/封锁/地图连接变化下的所有重算条件；村民贸易 Party 负载量、路程中被劫后恢复/重生及具体到货时间分布；村庄交易税从 Accumulated 到 Clan 财政的全部调用链；玩家/商队同一小时买卖对村庄商路库存的竞争顺序；其他 Mod 添加生产类型或贸易点时的兼容与当前启用情况。
 
+## E04 Workshop 工坊
+
+### 工坊与生产配方
+
+`Workshop` 是固定在 Town 的产业实例，包含 WorkshopType、Hero Owner、Capital、InitialCapital、初始/当前运行时间及进度；`ProfitMade` 只是 `max(Capital - InitialCapital, 0)` 的差值，不等于累计销售额或 Clan 日收入。`WorkshopType` 定义多个 `Production`；每个 Production 以 ItemCategory 和数量列输入/产出，并有 ConversionSpeed。工坊经营因此需要配方输入、成本、转化速度、产物类别、库存/商铺资金共同计算，不是“每天固定发钱”的属性。
+
+### 玩家取得与经营入口
+
+Sandbox 将 shop worker 和 Workshop Owner 放入城镇中心 `center` 地点的对话系统；WorkshopType 的 owner/team 定位依 workshop Tag。面对 owner notable 的对话可购买其一个/多个公开工坊；条件包括没有与该 Town 派系交战、玩家黄金足够且玩家 Clan 拥有数没有达到 `ClanTier + 1` 的模型上限。单工坊价默认是 `WorkshopType.EquipmentCost + Town.Prosperity × 4 + Workshop.InitialCapital / 5`。买入最终调用 `ChangeOwnerOfWorkshopAction.ApplyByPlayerBuying`。
+
+玩家与 shop worker 对话可查看生产类型、切换工坊生产（`ChangeProductionTypeOfWorkshopAction`；默认转换成本等于目标 WorkshopType 的 EquipmentCost）、出售工坊给 town notable，也能请求仓库入口。玩家变更生产不是改配方 XML，而是在现有工作坊实例上替换 WorkshopType；转让所有权由独立 action 处理。准确对话按钮/确认显示仍未视觉运行验证，所在 town center 的入口见 D09。
+
+### 每日生产与市场/仓库流
+
+`WorkshopsCampaignBehavior` 监听 `DailyTickTownEvent`。正常城镇每日对各 Workshops 运行生产和费用逻辑；城镇叛乱期间暂停生产 cycle，但仍处理每日 workshop expense。Notable 工作坊从 Town ItemRoster 读取并消耗输入类别，再由 TownMarketData 价格模型计算输入/产出估值；商品产物回到 Town ItemRoster/市场。
+
+玩家所有工坊有额外仓库分支：其 WorkshopData 可决定从 Town 市场或玩家 Warehouse 获取投入，也可按 `StockProductionInWarehouseRatio` 把合格 trade-good 输出分入 Warehouse，不能入仓的或比例部分仍走 Town 市场库存。仓库有总体容量，输入不足、Owner资金不足、Town 金币或 Warehouse 容量限制、产物价值覆盖不了输入成本/转换成本等条件都可能让该 cycle 不发生。生产速率由 WorkshopType 配方、ConversionSpeed、所属地和 Perk/政策/建筑模型修正。
+
+生产成功时消耗对应输入数量并调用 OnItemConsumed；产出写入 Town 或 Warehouse，并发 OnItemProduced。对可进入市场的产物，Town 金币与 Workshop Capital 会按当时价格结算；另有每日固定 Expense。从 Capital 或 Owner 资金支付均按 workshop 类型/余额状态区别处理，资金不足可能触发破产并转让 Owner。Gross sales、市场输入成本、固定费用、周转资金与 ProfitMade 不是同一数值。
+
+### 所有权变化与原版后果
+
+Workshop Owner Changed 会新建/删除玩家 Warehouse 数据；Town 所有权、Clan 进入战争、Clan 改变 Kingdom、Hero 死亡等 Campaign 事件可改变/转移玩家工坊。在玩家离开某 Town 的最后一个自有工坊时，该 Town Warehouse 物品会按原版行为转移到 MainParty 或清理；具体时机受是否仍拥有同镇工坊和当前 Settlement 上下文影响。完整破产、战时易主和王国/聚落易主的所有分支尚未穷尽。
+
+### Chronicle 当前适配
+
+Chronicle Observer 目前只给 PlayerClan 的 Gold/Influence/Renown，不枚举 OwnedWorkshops、输入/产出配方、Workshop Capital、DailyExpense、生产进度、Warehouse存货或所有者变更风险；没有 Workshop 买入/卖出/改产/经营 Warehouse 的 Protocol 动作。现有 town market TradeOptions 能看当前市场报价，不等价于管理 Workshop 或查询产能/盈利。
+
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `Workshop`、`WorkshopType`、`DefaultWorkshopModel`、`WorkshopsCampaignBehavior`、`WorkshopsCharactersCampaignBehavior`、`ChangeOwnerOfWorkshopAction`、`ChangeProductionTypeOfWorkshopAction`、`TownMarketData`；`TaleWorlds.CampaignSystem.ViewModelCollection.dll` Clan Finance workshop summary VM；SandBox workshop/shop-worker dialogues 与地点生成；Chronicle `AgentObserver.cs`、`AgentProtocol.cs`。本节为 v1.4.8.119303 静态源码链核对，未运行购买、改产或多个周期收益验证。
+
+未知项：全部官方 WorkshopType 配方/EquipmentCost、其他 Mod 配方及当前启用状态；玩家对话买卖/改产每一支实际费用和确认后状态；仓库 UI 的输入/输出比例和容量、取消/返回的提交边界；生产周期按库存、城镇金库和 MarketData 价格的全公式与随机变化；Workshop profit 与 Clan 每日财政报表的精确结算时间、破产触发及贸易经验后果。
+
 ## 研究范围状态
 
-E01-E03 已完成首轮物品对象、市场价格及村庄生产/运输链盘点。E04-E10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 E 域范围逐项核对，不把部分市场和生产链盘点视作经济与贸易系统整体完成。
+E01-E04 已完成首轮物品、市场定价、村庄供应链和 Workshop 对象/生产/所有权盘点。E05-E10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 E 域范围逐项核对，不把这些子系统的静态首轮盘点视作经济与贸易系统整体完成。
