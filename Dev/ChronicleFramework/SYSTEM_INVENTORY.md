@@ -426,11 +426,11 @@ E03、E06、E08、E09、E10的大量变化由每日模型、其它玩家动作�
 | G01 Encounter | `OBS-G01-01`遭遇菜单双方/可用选项；Attack `ACT-G01-01`、Send Troops `ACT-G01-02`、escape `ACT-G01-03`、surrender `ACT-G01-04`、join/help/leave `ACT-G01-05` | 接敌、玩家选择、BattleSimulation与Mission入口须分开 |
 | G02 MapEvent | 双方Party/参战/战斗持续观察`OBS-G02-01`；真实开始战斗映射遭遇和村庄等发起动作 | 增援/战斗结算是事件过程或结果，不按每个参战Party复制玩家行为 |
 | G03 BattleMission | `OBS-G03-01`实际Mission状态；Mission入口复用`ACT-G01-01`；TAB撤退为`ACT-G03-01` | 实时Mission其余3D控制目前是待覆盖范围；Send Troops不是Mission |
-| G04 Formation | 编队/部署观察`OBS-G04-01`；配置部署候选`ACT-G04-01` | 不按F键/按钮计动作；不同Mission部署字段/确认仍需核实 |
+| G04 Formation | 编队/部署观察`OBS-G04-01`；Formation类别/兵种筛选/权重`ACT-G04-01`、Captain指派`ACT-G04-02`、Hero Troop指派`ACT-G04-03`、Auto Deploy`ACT-G04-04`、部署结束`ACT-G04-05`均为待分母确认候选 | 不按F键/按钮计动作；类别/Filter/Weight是否再拆分，以及与G08部署结束的去重仍待核实 |
 | G05 Orders | 当前编队/命令观察`OBS-G04-01`；Mission命令候选`ACT-G05-01` | 指挥种类的目标/效果需要按状态改变拆分，指令下达不等于执行成功 |
 | G06 Tactics AI | AI执行结果观察复用`OBS-G03-01`/`OBS-G04-01`；战术AI内部选择记`N/A-G06-01` | 战术AI不是玩家可直接选择的菜单动作；玩家显式下令才映射G05 |
 | G07 Morale | Mission Order中的玩家Formation平均士气`OBS-G07-01`；坐镇Scoreboard中双方整侧Morale `OBS-G07-02` | 前者来自PlayerTeam formations，后者来自BattleSimulation双方MapEventSide；粒度不能合并；坐镇BattleSimulation优先于Mission Orders接入AI |
-| G08 Siege Mission | 实时攻城器械/城门/双方状态观察`OBS-G08-01`；真实指令复用`ACT-G05-01`及G01遭遇分支 | SiegeEvent、战术菜单和实时攻城场景分层；不可用战略围城字段替代Mission状态 |
+| G08 Siege Mission | 实时攻城器械/城门/双方状态观察`OBS-G08-01`；器械点手动配置`ACT-G08-01`、器械/队伍Auto Deploy`ACT-G08-02`候选；战斗Order复用`ACT-G05-01`及G01遭遇分支 | SiegeEvent、器械部署菜单、战术菜单和实时攻城场景分层；部署结束候选复用G04 `ACT-G04-05`，待确认同族 |
 | G09 Combat Resolution | 战后伤亡/俘虏/战利品结果复用`OBS-G10-01`；Hero俘虏处置映射F12/H12 | 结算是多个遭遇入口的后果阶段，不是玩家直接“结算”动作；各路径模型差异须保留 |
 | G10 Battle Rewards | 领奖结果复用`OBS-G10-01`；经验/声望/影响力/物品均作为触发行为的后果 | 奖励模型不是独立玩家按钮；Simulation夹具不能代替自然战斗奖励证据 |
 
@@ -446,6 +446,8 @@ E03、E06、E08、E09、E10的大量变化由每日模型、其它玩家动作�
 | OBS-G03-01 | 观察 | 活跃Battle Mission的主角/队伍/场景/胜负/Agent状态 | 实时Mission与Campaign MapState不同；世界时钟暂停 | Observer当前无完整战术/Agent Mission state；仅missionRetreat查部分状态 | G03/G09、AgentProtocol |
 | OBS-G04-01 | 观察 | Deployment/Order UI当前Formation类别、单位、Captain和队形/目标 | 信息随Mission、阶段、选中Formation改变 | Chronicle无Deployment/Formation详情 | G04/G05、AgentObserver |
 | OBS-G08-01 | 观察 | Siege Mission攻防方、城门/墙/器械状态 | 场景对象与Campaign siege machine列表是两层 | Chronicle无实时siegeMission物件状态 | G08、AgentObserver |
+| ACT-G08-01 | 候选行为 | 在Siege Mission部署控制面选择DeploymentPoint并分配、更换或撤下一个合法Siege weapon | 检查该武器可部署库存后，对当前点调用`Deploy`/`Disband`，改变本次Mission器械放置 | 入口和handler已静态核实；具体UI打开/选择/取消恢复未视觉验证；Chronicle无动作 | G08、`MissionOrderDeploymentControllerVM.OnSelectDeploymentSiegeMachine`、`DeploymentPoint`、`SiegeDeploymentHandler` |
+| ACT-G08-02 | 候选行为 | 在Siege deployment控制面选择Auto Deploy | 重算当前Mission deployment plan，并自动部署可用Siege weapon与攻防Team | 与G04 Formation Auto Deploy同名但结果对象不同；实际部署结果、撤销恢复和玩家UI未运行核实；Chronicle无动作 | G04/G08、`MissionOrderDeploymentControllerVM.ExecuteAutoDeploy`、`IMissionDeploymentPlan`、`SiegeDeploymentHandler` |
 | OBS-G10-01 | 观察 | Battle end/Post-battle party/Inventory结果 | 贡献/战斗模型决定XP、Renown/Influence、loot和capture；领奖屏幕与Campaign state提交分开 | Chronicle对Simulation PostBattle有有限结构化验收，不覆盖所有自然Mission | G10/F10、MAINLINE PostBattle |
 | ACT-F05-01 | 行为 | K→Kingdom Armies打开ArmyManagement，创建己方Army/选择邀请Party并Done | 检查Kingdom成员/佣兵/Leader与参加Party条件，收取Influence并设置Army/Party关联；Cancel不提交 | Chronicle无Army Management交互 | F05/F13、KingdomArmyVM/ArmyManagementVM |
 | ACT-F05-02 | 行为 | Kingdom Army panel/战后上下文主动解散玩家Army | 玩家解散消耗Influence并可能扣参与者关系；自动解散不是同一action | Chronicle无解散Army命令 | F05/F13、DisbandArmyAction |
@@ -593,7 +595,11 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 | N/A-F02-01 | N/A | NPC Party AI/Think自动选择和切换地图行为 | AI对NPC队伍自动计算行动，不存在由玩家直接指定“下一项默认行为/思考结果”的统一入口；玩家只能改变其决策环境或通过地图/军团系统交互 | 不计入ACT分母；观察到的结果仍按可见Party、Army、Siege或地图界面分别映射 | F02/F04、AiPartyThinkBehavior、MobilePartyAi、AiMilitaryBehavior |
 | N/A-F07-01 | N/A | NPC Party/Army从军事候选中选取战略目标及其内部评分/理由 | 战争状态、聚落归属、战力/距离、军团/围城状态和目标模型形成AI候选；玩家可改变部分环境条件，但没有查看评分或直接替NPC指定目标的通用原版操作 | 不计入ACT分母；玩家可读取的部分结果由地图行为tooltip、军团面板和Siege状态分别观察，不代表全局目标/决策理由可见 | F07/F02/F05/F08、AiMilitaryBehavior、AiPartyThinkBehavior、DefaultTargetScoreCalculatingModel |
 | N/A-G06-01 | N/A | Mission战术AI选择目标/阵型行为本身 | 属于部队AI自动计算；玩家通过下令影响其后的执行，不存在直接调用某个AI决策的原版菜单动作 | 不计入ACT分母；玩家Order入口单独映射`ACT-G05-01`，结果按`OBS-G03-01/OBS-G04-01`验证 | G06/G05、OrderController、Mission tactical AI |
-| ACT-G04-01 | 候选行为族（待拆分） | Battle Mission的Order of Battle部署界面：改Formation类别/权重、指派Hero/队长、Auto Deploy、Begin Mission均已由1.4.8 VM/API调用链定位 | 类别/权重重分配Troops，Hero assignment改所属Formation；Auto Deploy仅Player General可用；Begin Mission提交启用的类别筛选并交给Deployment Controller；这些子操作发生在不同状态节点 | 已确认真实部署动作入口族与关键handler，但子动作数须按独立副作用/撤销边界拆分后才计入分母；Chronicle无部署/Formation动作，玩家UI/取消恢复未视觉核实 | G03/G04、`OrderOfBattleVM`、`BattleDeploymentMissionController`、`DeploymentMissionController` |
+| ACT-G04-01 | 候选行为族（待拆分） | Battle Mission的Order of Battle中更改Formation类别、兵种筛选与权重 | VM重配Formation类别及Troop assignment；筛选/权重经OrderController即时重排Mission Agent归属，不改Campaign Party roster | 类别选择、Filter toggles、Weight adjustment分别写不同状态字段，是否为同一动作族未定；Chronicle无动作，提交/撤回视觉未核 | G03/G04、`OrderOfBattleVM`、`OrderOfBattleFormationItemVM`、`OrderController` |
+| ACT-G04-02 | 候选行为 | 在Order of Battle把Hero指派/撤销为Formation Captain | Captain assignment写`Formation.Captain`、Hero Agent所属Formation及Banner关系；非玩家将军上下文还可能选择玩家在本队的角色/Formation | Captain和Hero Troop不是同一角色后果；视觉选择与撤销恢复未核，Chronicle无动作 | G03/G04、`OrderOfBattleVM.OnFormationAcceptCaptain`、`Formation.Captain` |
+| ACT-G04-03 | 候选行为 | 在Order of Battle把Hero加入/移出Formation的Hero Troops | 调整Hero Agent所属Formation并刷新该Formation；不设置Captain/旗帜 | 源码调用链已确认，视觉确认/取消与容量提示未核，Chronicle无动作 | G03/G04、`OrderOfBattleVM.OnFormationAcceptHeroTroops`、`OrderOfBattleFormationItemVM.AddHeroTroop/RemoveHeroTroop` |
+| ACT-G04-04 | 候选行为 | 在Order of Battle选择Auto Deploy formations | 仅玩家将军可执行；由Mission部署回调批量分配Formation/Agent并刷新Captain/Hero分配和troop counts | 与手工配置同阶段但造成整批结果；是否有稳定撤销/重置和非将军分支待核，Chronicle无动作 | G03/G04、`OrderOfBattleVM.ExecuteAutoDeploy`、`BattleDeploymentMissionController` |
+| ACT-G04-05 | 候选行为族（跨域去重待核） | 完成Order of Battle部署并进入实际Mission战斗；Siege deployment亦有FinishDeployment路径 | OOB收集Formation筛选器配置后调用开始回调；Siege控制面若仍有可部署器械先弹继续确认，接受后`FinishDeployment` | 行为入口与状态转换已源码确认，但和G08通用部署完成是否合并、视觉确认/Cancel恢复、初始/完成部署时钟均未知；Chronicle无Mission启动动作 | G03/G04/G08、`OrderOfBattleVM.ExecuteBeginMission`、`MissionOrderDeploymentControllerVM.ExecuteBeginMission` |
 | ACT-G05-01 | 候选行为 | Mission中选择Formation/兵种组并下达Movement/Arrangement/Facing/Riding/Firing/UsableMachine order | 只有适用Order与目标有效时才改变formation order；收到UI命令不等于Agent执行到位 | Chronicle没有BattleOrder动作/mission state反馈；快捷键/订单类型全量未列 | G04/G05/G06、MissionOrderVM/OrderController |
 | ACT-K02-01 | 行为 | MapScreen点击settlement visual请求主队自动移动至聚落 | 检查当前PathFace/NavType/访问权限；成功设目标并按地图点击配置自然改变Campaign time | Chronicle `move`已有Settlement ID路径/抵达断言，玩家完整视觉UI未完成 | K01/K02、MapScreen、MAINLINE move |
 | ACT-K02-02 | 行为 | Campaign Map点击有效NavMesh地形点/空地图位置 | `MapScreen`地形分支→`MapState.ProcessTravel`→导航可达性校验→`SetMoveGoToPoint`；有效点击共用原版time-control点击处理，之后Campaign自然运行 | v1.4.8源码确认真实地图入口/状态转移；Chronicle无自由坐标move动作，NavMesh/鼠标/失败边缘未运行覆盖 | K01/K02、`MapScreen.HandleLeftMouseButtonClick`、`MapState.ProcessTravel`、`NavigationHelper.CanPlayerNavigateToPosition` |

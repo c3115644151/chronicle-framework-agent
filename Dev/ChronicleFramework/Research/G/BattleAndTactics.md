@@ -50,9 +50,9 @@ Mission中的 `Team` 拥有多个 `Formation`；Formation 把参战Agent组织�
 
 玩家在可部署战斗的 Order of Battle 界面可调整Formation类型、权重、队长/英雄分配和自动部署；开始 Mission 后，还可用Formation选择控件、兵种分类与Orders控制多个Formation。适用性受Mission类型、战斗部署阶段、剩余可参战成员、队伍是否锁定/已有可用兵种影响；至少一个可参战Formation是开始条件之一。围城Mission中的器械/梯队有额外部署及控制对象，不应简化成野战队形设置。
 
-当前1.4.8源码链定位到 Battle Mission部署控制器与 `OrderOfBattleVM`。部署UI中的Formation类别筛选/权重回调会重分配可用兵种到Formation；队长/英雄分配会改变Hero所属Formation；玩家将军可以调用Auto Deploy快捷配置；Begin Mission会收集各Formation当前启用的类别过滤器并调用部署结束回调。BattleDeploymentMissionController负责部署期间Team/Agent spawn安排与部署结束后的reinforcement开闸。它们确实都属于可操作部署界面，但不能先压成一个行为：兵种/权重分配、Hero/队长位置、自动部署、确认开战是否应按独立状态提交拆为多个ACT，需以各自变更时机与可撤销边界继续研究。玩家界面还可能增加预览、确认、快捷键与输入焦点规则，直接设置Formation属性不等价于走完VM部署并验证可用阵型。
+当前1.4.8 `OrderOfBattleVM`源码显示这是多个独立写入点，而不是单一“部署”调用：改Formation Class会重置相应类别/锁定/权重并可能撤销不兼容的Captain/HeroTroop/filter assignment；筛选器和权重回调经 `OrderController.RearrangeFormationsAccordingToFilters`立即重分配Mission中的Agent；Captain assignment写Formation.Captain、Hero.Agent.Formation与旗帜，并记录玩家角色指挥选择；Hero Troop assignment单独把Hero Agent加入Formation但不设Captain。`ExecuteAutoDeploy`（仅Player General可用）通过Mission部署回调批量分配后刷新Formation与角色。`ExecuteBeginMission`收集每个Formation启用的troop filter配置，再调用BattleDeploymentMissionController的开始回调。它们都在同一Order of Battle交互阶段，但影响不同运行时字段；行为目录暂分配置、Captain、Hero Troop、Auto Deploy与部署结束五个候选族，类别/Filter/Weight本身是否还需拆分仍待副作用/恢复边界核验。玩家界面可能增加部署预览、确认、快捷键与输入焦点规则，直接设置Formation属性不等价于走完VM部署并验证可用阵型。
 
-Formation配置/部署发生在当前Battle Mission生命周期内，不由其本身额外推进Campaign地图时钟。Chronicle目前没有Battle Mission的Formation观察/创建/单位重分配/部署命令，也没有据此控制实际Agents。当前依据：MountAndBlade `BattleDeploymentMissionController`/`DeploymentMissionController`/`Formation`/`FormationAI`，ViewModelCollection `OrderOfBattleVM` 与Formation配置ViewModels；本机1.4.8.119303静态源码。完整部署界面玩家入口、改类/改权重/指派Hero各自的即时状态提交与取消、部署结束确认恢复、不同队伍组成的自动部署结果、Naval/围城Mission差异和输入焦点状态仍需可视/运行验证。
+Formation配置/部署发生在当前Battle Mission生命周期内，不由其本身额外推进Campaign地图时钟。Chronicle目前没有Battle Mission的Formation观察/创建/单位重分配/部署命令，也没有据此控制实际Agents。当前依据：MountAndBlade `BattleDeploymentMissionController`/`DeploymentMissionController`/`Formation`/`FormationAI`，ViewModelCollection `OrderOfBattleVM`、`OrderOfBattleFormationItemVM`、`OrderOfBattleFormationClassVM`、`OrderOfBattleHeroItemVM`；本机1.4.8.119303静态源码。完整部署界面玩家入口、改类/权重/筛选、Captain与Hero Troop指派的撤销/恢复、部署结束与G08 Siege deployment共用的确认边界、不同队伍组成的自动部署结果、Naval差异和输入焦点状态仍需可视/运行验证。
 
 ## G05 Orders：玩家在Mission中下达命令
 
@@ -90,7 +90,9 @@ F08记录 Campaign围城事件、工程/粮食/围困和攻城前后菜单；G08
 
 玩家实际入口是玩家参与攻城/守城并从原生围城选项进入 Mission。攻城方可能先经过部署/器械场景，守城方则有城墙、城门、器械等控制入口；突围、解围军和海上封锁会走专门 encounter/Mission 子类。打破城门/城墙、夺取入口/大厅、守方撤退/援军到达会改变结束条件与后续战斗，不是普通野战Formation命令的换皮。战役世界时间在围城战斗Mission内冻结；Mission结束再进入 MapEvent/Siege Event后果，最终是否攻陷要由 Campaign围城链完成。
 
-Chronicle当前只有围城战略菜单/战后研究和 Mission retreat 拦截；没有攻守器械布置、命令、墙门状态或围城Agent行为观察。依据：MountAndBlade `TeamAISiegeComponent/Attacker/Defender`、`MissionSiegeEnginesLogic`、`SiegeMissionPreparationHandler`、`BattleEndLogic`，并与 Campaign `PlayerEncounter`/F08关联。尚未知：当前build每种围城Mission里玩家从菜单到部署再到场景的视觉顺序、不同城/墙缺口/器械和士兵数量的实际spawn矩阵、撤退/守军投降/城门破坏具体胜利条件的全部组合、围城场景的可靠视觉/结构化测试。
+本机1.4.8 `MissionOrderDeploymentControllerVM`由当前Mission的`DeploymentPoint`/`SiegeDeploymentHandler`填充器械部署点。选择部署点的器械项会按库存数量检查，再对该点执行 `Disband` 或 `Deploy`；这是Mission场景内器械放置状态，不是Campaign SiegeEvent中的制造/建造。Auto Deploy会重算`IMissionDeploymentPlan`，攻城分支自动部署Siege weapon及Team，普通分支调用`DeploymentHandler`。Begin命令如果还有可部署但未安置器械，会先显示“仍可部署器械，是否开始？”确认；接受后执行`FinishDeployment`并关闭Orders toggle。器械逐点部署、Auto Deploy、战斗部署确认是分别触发的调用，但确认阶段可能与G04 OOB Begin Mission属同一跨Mission部署完成行为，目录暂将其列为候选并保留去重未知。
+
+Chronicle当前只有围城战略菜单/战后研究和 Mission retreat 拦截；没有攻守器械布置、命令、墙门状态或围城Agent行为观察。依据：MountAndBlade `TeamAISiegeComponent`/`TeamAISiegeAttacker`/`TeamAISiegeDefender`、`MissionSiegeEnginesLogic`、`SiegeMissionPreparationHandler`、`BattleEndLogic`、`DeploymentPoint`、`DeploymentHandler`/`SiegeDeploymentHandler`，ViewModelCollection `MissionOrderDeploymentControllerVM`/`DeploymentSiegeMachineVM`，并与 Campaign `PlayerEncounter`/F08关联。尚未知：当前build每种围城Mission里玩家从菜单到部署到场景的视觉顺序、器械选择/替换/撤下的可视提交与取消边界、Auto Deploy真实部署结果、部署结束确认与G04 Begin Mission去重、不同城/墙缺口/器械和士兵数量的实际spawn矩阵、撤退/守军投降/城门破坏具体胜利条件的全部组合、围城场景的可靠视觉/结构化测试。
 
 ## G09 Combat Resolution：伤害、击倒、死亡与战后Roster
 
