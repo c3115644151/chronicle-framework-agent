@@ -40,6 +40,10 @@ Chronicle可观察战斗模拟 finished/retreated/MapEvent battle state 等少�
 
 Mission 内操作通过键盘/鼠标即时控制主角，TAB菜单可打开离场/撤退流程；将领/部队命令则经原生Order UI控制 Formation，而非通过地图Party AI目标。`BattleEndLogic.TryExit` 对离场动作判定其本体结果；不同 Siege攻守状态的离开语义可能是投降或不可撤退，不能只用“Mission结束”推断为安全撤退。当前 Chronicle 的 `missionRetreat` 会检查 Mission 与 BattleEndLogic，读取 `TryExit`，并拒绝把围城守军的 SurrenderSiege 误报为撤退。
 
+当前安装 v1.4.8.119303 将MainAgent玩家操作分散到 `CombatHotKeyCategory`、`MissionMainAgentController` 和 `MissionMainAgentInteractionComponent`：`CombatHotKeyCategory` 有移动轴、Attack/Defend、Action/Jump/Crouch/Kick、步行/武器模式、装备槽切换、主副手切换、Drop/Sheath及视角/锁定等输入；`MissionMainAgentController.ControlTick`把移动轴转为 MainAgent movement vector/flags，并根据当前武器和状态处理攻击、防御、装备及姿态输入。`MissionMainAgentInteractionComponent.FocusTick`通过视线/raycast检查Agent、`IFocusable`、`UsableMissionObject`和`UsableMachine`；`FocusStateCheckTick`再按 Action 输入及 reach/permission/vacancy 条件开始或停止使用对象。Formation Orders 是另一条独立的 `MissionOrderVM`/`OrderController` 链，不能把 Formation 下令当作MainAgent身体控制。
+
+这些类型提供了输入/handler事实和上下文门槛，但原始按键数量不是玩家动作族分母：持续移动轴、攻击方向、按住防御、上下马、拾取/启动机关等仍须按持久结果、上下文与失败后果拆分或合并；视角/缩放等不改变世界状态的输入还需与观察控制区分。目录不得把它们概称为已由现有Formation订单覆盖。证据：当前安装 `TaleWorlds.MountAndBlade.dll` 的 `CombatHotKeyCategory`/`Agent`，`TaleWorlds.MountAndBlade.View.dll` 的 `MissionMainAgentController` 与 `MissionMainAgentInteractionComponent`；当前仅静态源码核对，未运行点击/键鼠操作验证。
+
 Prison Break是F12从地牢菜单启动的自定义Sandbox Mission subtype，而非通常的MapEvent战斗：启动入口/囚犯选择/Bribe提交映射F12 `ACT-F12-13`，成功后的Captivity结束对话映射`ACT-F12-14`。`PrisonBreakMissionController`在单一场景中交替处理潜行接近和警报后的护送/战斗，玩家须使用Use交互俘虏触发跟随，警卫感知和StealthFailCounter会改写结果；它不是进入场景后自动营救。它暴露G03通用Mission身体控制仍是未知清单，具体Movement/Use/Melee等Action族尚待研究，不能把F12启动入口算作完整营救支持。
 
 ### Campaign 后果与适配边界

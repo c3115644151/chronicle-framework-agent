@@ -440,7 +440,7 @@ E03、E06、E08、E09、E10的大量变化由每日模型、其它玩家动作�
 | F13 Army decisions | 领主自动组军/加入/解散结果观察`OBS-F05-01`；玩家管理Party成员`ACT-F05-01`、解散`ACT-F05-02`与增加Cohesion`ACT-F05-03` | NPC“意愿”不是独立谈判确认或玩家按钮 |
 | G01 Encounter | `OBS-G01-01`遭遇菜单双方/可用选项；Attack `ACT-G01-01`、Send Troops `ACT-G01-02`、escape `ACT-G01-03`、surrender `ACT-G01-04`、join/help/leave `ACT-G01-05` | 接敌、玩家选择、BattleSimulation与Mission入口须分开 |
 | G02 MapEvent | 双方Party/参战/战斗持续观察`OBS-G02-01`；真实开始战斗映射遭遇和村庄等发起动作 | 增援/战斗结算是事件过程或结果，不按每个参战Party复制玩家行为 |
-| G03 BattleMission | `OBS-G03-01`实际Mission状态；战斗Mission入口`ACT-G01-01`，监狱突围Mission入口与目标选择`ACT-F12-13`、救援后结果映射`ACT-F12-14`；TAB撤退`ACT-G03-01` | PrisonBreak是独立Sanbox Mission subtype，地图菜单发起但Mission内实时身体/潜行/互动控制尚未盘清；Send Troops不是Mission |
+| G03 BattleMission | `OBS-G03-01`实际Mission状态；战斗Mission入口`ACT-G01-01`，监狱突围Mission入口与目标选择`ACT-F12-13`、救援后结果映射`ACT-F12-14`；TAB撤退`ACT-G03-01` | 当前Action目录缺MainAgent Mission身体控制族（移动、攻击/防御、Use/骑乘、装备等仍待去重）；Formation Orders是独立对象/调用链；PrisonBreak在这些通用身体交互上还有任务特定约束；Send Troops不是Mission |
 | G04 Formation | 编队/部署观察`OBS-G04-01`；Formation composition配置`ACT-G04-01`、Captain指派`ACT-G04-02`、Hero Troop指派`ACT-G04-03`、Auto Deploy`ACT-G04-04`、部署结束`ACT-G04-05`均为独立行为族 | 不按F键/按钮计动作；类别/Filter/Weight是同一Troop分配配置族的不同参数；G08 Siege部署完成路径复用ACT-G04-05 |
 | G05 Orders | 当前编队/命令观察`OBS-G04-01`；移动Order`ACT-G05-01`、队形变换`ACT-G05-02`、朝向`ACT-G05-03`、射击模式`ACT-G05-04`、骑乘模式`ACT-G05-05`、AI接管`ACT-G05-06`、Troop Transfer`ACT-G05-07`均已由原版Provider/VM调用链确认 | Order variants按效果/目标字段记录；键盘快捷键别名不重复计数；Hideout Provider与攻城部署另有上下文 |
 | G06 Tactics AI | AI执行结果观察复用`OBS-G03-01`/`OBS-G04-01`；战术AI内部选择记`N/A-G06-01` | 战术AI不是玩家可直接选择的菜单动作；玩家显式下令才映射G05 |
@@ -496,7 +496,7 @@ E03、E06、E08、E09、E10的大量变化由每日模型、其它玩家动作�
 | ACT-G01-05 | 行为 | JoinEncounter菜单选择帮助攻击/防守一方、放弃Army或离开 | 变更参战方/Army membership或结束Encounter；权限依阵营/Army/当前双方 | Chronicle无支援参战/脱离Army菜单动作 | G01/F13/K06、EncounterGameMenuBehavior |
 | ACT-G03-01 | 行为 | Mission的TAB菜单选择Exit/撤退并确认 | `BattleEndLogic.TryExit`返回不同结果；围城守方可能变为SurrenderSiege，不能误报安全撤退 | Chronicle有有限missionRetreat adapter并检查TryExit；未覆盖键盘HUD视觉确认 | G03/G09、BattleEndLogic |
 
-F/G中Mission主角移动/攻击、Formation orders及部署已作为真实玩家行为族进入目录分母；Chronicle目前没有这些3D Mission的Agent动作适配，因此目录行为存在不代表产品已经支持。首个AI战斗接入仍优先用坐镇/BattleSimulation；相同战后/Campaign结果跨域映射到唯一结果观察，按玩家入口与提交点去重。
+F/G当前目录已经记录地图遭遇/战斗处理、Formation orders、部署与撤退等玩家族，但**G03 Mission内直接控制MainHero的身体行为尚未拆成ACT目录项**。Research/G确认玩家通过键鼠实时控制移动、攻击/防御、骑乘和Use交互；这些是完整产品范围中会改变行为分母的未完成盘点，不得说成已由编队Order覆盖。必须再依当前1.4.8输入绑定、Mission handler与本体状态结果梳理具体动作族及上下文，再做去重；首个AI战斗实现仍可优先使用坐镇/BattleSimulation，但不能据此从全产品分母删除Mission行为。
 
 ### H-I域初始交叉映射与目录族
 
