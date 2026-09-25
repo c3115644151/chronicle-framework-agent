@@ -64,6 +64,12 @@ Chronicle 不读取 NPC的候选分数、`ThinkParams`、ObjectiveValue、Rethin
 
 此为枚举完整名单，不意味着每类 Party 可选择全部选项。组件类型、所属Faction、地形导航、Campaign状态、Army、SiegeEvent/MapEvent和行为提供者会过滤候选；每类候选的生成逻辑归 F02/F04 及后续逐项行为链核实。`None`表示未设定候选，不等于玩家空闲操作；`DoOperation`的具体操作目标/支持子系统本轮尚未闭环。
 
+### 地图提示中的玩家可见行为文字
+
+当前安装版 `TaleWorlds.CampaignSystem.ViewModelCollection.dll` 的 `TooltipRefresherCollection.RefreshMobilePartyTooltip` 会在队伍已 `IsInspected` 时加入 `CampaignUIHelper.GetMobilePartyBehaviorText`；该帮助方法转到 `MobileParty.GetBehaviorText`，将部分 `DefaultBehavior`/`ShortTermBehavior`/目标组合转换成可读文字，例如“Engaging”“Chasing”“Running from”“Defending”“Raiding”“Besieging”“Patrolling”或“Following”。这不是完整计划，也不是原始枚举的逐项展示；Army成员可能优先显示 `Army.GetLongTermBehaviorText`，未匹配组合则可能呈现通用 travelling/unknown 文本。
+
+`PartyBase.UpdateVisibilityAndInspected` 为源码所见的 `IsInspected` 写入路径：正常移动 Party 的可见与调查状态受当前地图距离和 `MapVisibilityModel.GetPartySpottingRatioForMainParty` 筛选；同一 Army 的 Attached Party 可跟随 Leader 的可见性，且主队同 Army 的成员 `MobileParty.IsInspected` getter 强制为真。当前证据因此确认“地图 tooltip 有条件地呈现可读队伍行为”，但没有证明玩家视觉入口一定由 ALT 键触发，也没有核全体队伍图标/悬停的显示门槛；须将结构化 tooltip 条件与玩家实际地图界面分开。
+
 ## F04 决策循环与短期移动状态
 
 Party战略 Think 与 `MobilePartyAi` 的短期地图导航是两个相邻层。前者按 partial-hourly campaign 事件统计 AI Behavior score、选择/保留 DefaultBehavior、管理Army目标；后者结合当前目标与Model重算 ShortTermBehavior、导航Point/Party，处理接近 Settlement/Party、攻击/规避/逃跑、地形路径和海陆转换。

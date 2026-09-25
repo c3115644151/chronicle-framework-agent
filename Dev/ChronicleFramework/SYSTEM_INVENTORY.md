@@ -402,11 +402,11 @@ E03、E06、E08、E09、E10的大量变化由每日模型、其它玩家动作�
 | --- | --- | --- |
 | F01 MobileParty | `OBS-F01-01`附近可见队伍摘要/玩家队伍状态；地图移动/追击/停步映射`ACT-K02-01`、`ACT-K02-03`、`ACT-K02-05` | 同一Party的对象/AI/roster字段不应拆成每个属性一个观察族 |
 | F02 Party AI | NPC行动结果在地图/Army/Siege中可观察；内部自主决策记`N/A-F02-01`，玩家影响环境映射至真实战争/军团动作 | `AiPartyThinkBehavior`目标执行属于后台决策；具体可见结果不保证能观察到NPC意图 |
-| F03 AI行为类型 | Party概要复用`OBS-F01-01`；地图提示/行为标记为候选`OBS-F03-01` | `AiBehavior`枚举不是玩家命令；UI是否直接显示具体行为未核，候选不计最终分母 |
+| F03 AI行为类型 | Party概要复用`OBS-F01-01`；`IsInspected`条件下可读行为提示映射`OBS-F03-01` | 原版把部分Default/ShortTerm行为和目标转换为摘要文字，不展示完整计划；tooltip的真实玩家触发/ALT关系尚未视觉核实，不能按完整AI意图观察 |
 | F04 Party Think | NPC长期/短期目标评分复用`N/A-F02-01`；影响其条件的玩家动作映射Army/外交/地图行为族 | 不把Think、行为切换或评分模型另计玩家动作；UI是否揭示选择理由未知 |
 | F05 Army | `OBS-F05-01`Kingdom Army管理视图；管理己方Army为`ACT-F05-01`、主动解散为`ACT-F05-02` | 调整cohesion/邀请party/取消的提交边界以Army VM事务为准；自动解散与主动解散分开 |
 | F06 Clan War Party | 家族Party信息复用`OBS-B05-01`/`OBS-F01-01`；创建玩家Clan War Party候选`ACT-F06-01` | NPC War Party自动生成不是玩家按钮；玩家创建流程/权限仍待UI核实 |
-| F07 战争目标 | 军团目标复用`OBS-F05-01`，围城状态复用`OBS-F08-01`；非Army Party战略目标候选`OBS-F07-01` | 无通用玩家菜单替NPC指定下一目标；候选观察未证实目标能被玩家稳定读到 |
+| F07 战争目标 | 地图提示中的部分目标行为文字复用`OBS-F03-01`，军团目标`OBS-F05-01`，围城状态`OBS-F08-01`；AI目标选择/评分原因记`N/A-F07-01` | 原生界面可条件显示部分选定行为/目标，但不显示完整候选、评分或选择理由；无菜单替NPC指定下一目标 |
 | F08 Siege | 战略围城状态为`OBS-F08-01`；进入攻城Mission/坐镇/离开按G01遭遇分支和真实Mission动作映射 | Campaign围城周期、围城菜单及攻城Mission是不同状态层，不合并成“攻城”动作 |
 | F09 Raid/Defense | 村庄遭遇`ACT-F09-01`劫掠、`ACT-F09-02`强征志愿兵、`ACT-F09-03`强征物资；防守进入G战斗路径 | 三类村庄敌对行动后果不同；AI防守目标不是玩家可指定的直接动作 |
 | F10 BattleSimulation | `OBS-F10-01`模拟状态/胜负；坐镇动作映射`ACT-G01-02` | Campaign战斗simulation不等于Mission实时操作；战后伤亡/奖励还映射G09/G10结果观察 |
@@ -571,11 +571,11 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 
 | ID | 类型 | 玩家入口 / 观察语义 | 原版后果、前置/时间 | Chronicle覆盖 / 证据 / 未知 | 来源 |
 | --- | --- | --- | --- | --- | --- |
-| OBS-F03-01 | 候选观察 | 地图上可见Party的悬停信息/行为图标若显示其当前地图行为 | AI行为对象可能由Default/ShortTermBehavior、目标实体和地图事件派生；图标/悬停可见字段尚未以当前1.4.8界面核实 | 暂不计入最终OBS分母；需追当前MapEntity tooltip/marker调用链并核对玩家画面；不得从`AiBehavior`字段名推断玩家可见性 | F03/F01、MobilePartyAi、MapEntityVisual；UI消费者未知 |
-| OBS-F07-01 | 候选观察 | 地图/军团/围城原生界面显示NPC Party或Army当前战略目标的状态 | AI军事目标是候选评分与行为执行结果；宣战关系、聚落归属、Army目标和短期导航目标不是同一字段 | 暂不计入最终OBS分母；需核实非Army Lord Party目标是否可通过玩家界面稳定观察，以及可见/过期条件 | F07/F02/F05/F08、AiMilitaryBehavior、AgentObserver；玩家UI字段未知 |
+| OBS-F03-01 | 观察 | 地图MobileParty tooltip在`IsInspected`时呈现当前行为摘要文字 | `GetBehaviorText`按Army长程行为或Default/ShortTerm行为、目标条件组合描述；不是原始AI计划，目标/场景变化可改变文字 | 源码确认tooltip提供该字段；玩家具体悬停/ALT显示条件尚未视觉核实，Chronicle不采集该摘要 | F03/F01、`RefreshMobilePartyTooltip`、`MobileParty.GetBehaviorText`、`PartyBase.UpdateVisibilityAndInspected`；v1.4.8.119303 |
 | OBS-G01-01 | 观察 | Map encounter菜单中双方、遭遇类型和当前可用谈判/接战/脱离/投降选项 | 选项由双方Faction、事件类型、装备/兵力、围城及Mission状态筛选；菜单可用项不是已提交战斗结果 | Chronicle未提供通用Encounter菜单观察；各交战类型的选项集合与显示信息未全量验证 | G01、PlayerEncounter、EncounterGameMenuBehavior |
 | OBS-G07-01 | 候选观察 | Mission HUD/战斗提示若显示双方或部队士气、动摇/溃败状态 | 士气数值会受参战规模、伤亡、领导与场景行为改变；公开模型字段不代表HUD可见 | 暂不计入最终OBS分母；需核当前Mission HUD和提示的实际字段、粒度与刷新条件 | G07/G03、BattleMoraleModel、Mission morale logic；玩家UI消费者未知 |
 | N/A-F02-01 | N/A | NPC Party AI/Think自动选择和切换地图行为 | AI对NPC队伍自动计算行动，不存在由玩家直接指定“下一项默认行为/思考结果”的统一入口；玩家只能改变其决策环境或通过地图/军团系统交互 | 不计入ACT分母；观察到的结果仍按可见Party、Army、Siege或地图界面分别映射 | F02/F04、AiPartyThinkBehavior、MobilePartyAi、AiMilitaryBehavior |
+| N/A-F07-01 | N/A | NPC Party/Army从军事候选中选取战略目标及其内部评分/理由 | 战争状态、聚落归属、战力/距离、军团/围城状态和目标模型形成AI候选；玩家可改变部分环境条件，但没有查看评分或直接替NPC指定目标的通用原版操作 | 不计入ACT分母；玩家可读取的部分结果由地图行为tooltip、军团面板和Siege状态分别观察，不代表全局目标/决策理由可见 | F07/F02/F05/F08、AiMilitaryBehavior、AiPartyThinkBehavior、DefaultTargetScoreCalculatingModel |
 | N/A-G06-01 | N/A | Mission战术AI选择目标/阵型行为本身 | 属于部队AI自动计算；玩家通过下令影响其后的执行，不存在直接调用某个AI决策的原版菜单动作 | 不计入ACT分母；玩家Order入口单独映射`ACT-G05-01`，结果按`OBS-G03-01/OBS-G04-01`验证 | G06/G05、OrderController、Mission tactical AI |
 | ACT-G04-01 | 候选行为 | Battle Mission开战部署时配置Formation分类/队长/自动部署后Begin Mission | 改变任务内Formation分配和spawn安排；不同Mission类型部署选项有差异 | Chronicle未实现；各部署面操作/确认未知，暂不计最终分母 | G03/G04、OrderOfBattleVM/BattleDeploymentMissionController |
 | ACT-G05-01 | 候选行为 | Mission中选择Formation/兵种组并下达Movement/Arrangement/Facing/Riding/Firing/UsableMachine order | 只有适用Order与目标有效时才改变formation order；收到UI命令不等于Agent执行到位 | Chronicle没有BattleOrder动作/mission state反馈；快捷键/订单类型全量未列 | G04/G05/G06、MissionOrderVM/OrderController |
