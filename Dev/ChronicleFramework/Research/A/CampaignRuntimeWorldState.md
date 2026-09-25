@@ -52,6 +52,8 @@ Chronicle `SubModule.RegisterEvents` 当前订阅 DailyTick、Tick、GameLoaded�
 
 玩家入口：在地图界面按 ESC 打开暂停菜单；菜单 `Save` 与 `Save And Exit` 都调用 QuickSave，后者只在 OnSaveOver 确认成功后退出。默认快捷键 F5（`MapHotKeyCategory.QuickSave = 54`）也调用 QuickSave。`Save As` 打开存档列表的保存模式，可选择现有档并确认覆盖，或选“Create New Save Slot”输入新名称；`Load` 打开同一界面的读档模式。`EscapeMenu.xml` 与 `SaveLoadScreen.xml` 的按钮通过 ViewModel 命令进入这些 handler。ESC 菜单的 QuickSave 受存档槽位上限约束（铁人模式可覆写活动槽）且在地图对话期间禁用；Save As/Load 在铁人模式及地图对话期间禁用。F5 handler 源码直接调用 QuickSave，地图对话期间的可用性未单独验证。
 
+ESC菜单的`Save And Exit`是QuickSave之后退出的复合入口：`MapScreen.GetEscapeMenuItems`调用QuickSave并置`_exitOnSaveOver`，只有`OnSaveOver(success)`为真才执行`OnExit`。`Exit to Main Menu`则不先保存，先显示确认询问，确认后调用`OnExitToMainMenu`，拒绝回到当前地图；因此两者都不应被折叠为单纯QuickSave或同一个退出动作。源码链已映射至跨域目录`ACT-A05-03/04`，具体确认/拒绝画面和保存失败运行回执未验证。
+
 原生保存不是同步写文件：`SaveHandler.QuickSaveCurrentGame` / `SaveAs` 将请求排入队列；活动 `MapState.OnTick` 发现队列非空时逐帧运行 `SaveTick` 并暂不执行该帧的 Campaign Tick。保存开始先等待 Campaign 异步任务、发出 OnSaveStarted，再发出 OnBeforeSave 并调用 `MBSaveLoad` 的 QuickSave/SaveAs/AutoSave；异步完成后发出 OnSaveOver(success, name)。失败会显示保存错误提示；Save And Exit 只有成功才退出。
 
 自动保存间隔来自 `BannerlordConfig.AutoSaveInterval`，当前版本默认30分钟，设置值4映射为关闭值-1。它依据 `DateTime.Now` 与上次自动保存的墙上时间差，而非 Campaign 游戏日：`CampaignTick` 只在 `TimeControlMode != Stop` 时检查，实际排队还要求活动 GameState 为无地图对话的 `MapState`。注意 `FastForwardStop` 虽不推进 CampaignTime，也不等于 `Stop`，因此仍满足外层检查。另有优先自动保存入口 `SignalAutoSave`，使用配置间隔的75%作为阈值；该方法的调用方尚未映射。自动存档完成时会更新墙上时钟基点，成功与失败结果都经过 OnSaveOver。
@@ -73,6 +75,8 @@ Chronicle 自动证据：Protocol 测试从 `AgentBridgeLifecycle` disposable �
 当前 `DefaultCampaignOptionsProvider` 的三个预设是 Freebooter、Warrior、Bannerlord；手动改值会被控制器匹配为已有预设或Custom。八项难度相关OptionId分别是`PlayerTroopsReceivedDamage`、`MaximumIndexPlayerCanRecruit`、`PlayerMapMovementSpeed`、`PersuasionSuccess`、`CombatAIDifficulty`、`ClanMemberBattleDeathPossibility`、`BattleDeath`、`StealthAndDisguiseDifficulty`；均为Selection字段，Provider setter写入对应`CampaignOptions`值（Recruitment项对应`RecruitmentDifficulty`）。各值采用VeryEasy、Easy、Realistic三档；`BattleDeath`会受Life/Death周期选项与其注册模块影响而禁用。另有Boolean `AutoAllocateClanMemberPerks`；Ironman Boolean只在开局Options中可用/DisabledLater，Gameplay页固定Disabled。游戏内设置页另注册`ResetTutorial`和`EnableCheats`两个Action项，后者仅在Gamepad active时提供。配置项集合会随已加载Mod注册的Provider改变。
 
 界面数据流：`CampaignOptionsManager.Initialize` 扫描已启用游戏程序集并实例化所有 `ICampaignOptionProvider`；读取选项时按 Provider 列表倒序追加数据。`CampaignOptionItemVM` 根据Boolean/Selection/Numeric/Action类型生成控件，将选择写回Provider setter；`CampaignOptionsControllerVM` 在选择预设时对关联字段执行批量`SetValue`，手动改其中一个关联字段后重算预设（匹配不上则为Custom），并刷新禁用状态。两个Options上下文的字段集不同；ResetTutorial Action会弹Inquiry，确认后发出`ResetAllTutorialsEvent`；手柄输入时才注册的EnableCheats Action调用`MapState.Handler.OnGameplayCheatsEnabled`，源码追到`MapScreen.OpenGameplayCheats`加入`MapCheatsView`并置`IsMapCheatsActive`。这只证明打开地图作弊View；其内部命令和对Campaign/作弊状态的最终效果仍未知。直接设置一个`CampaignOptions`属性虽能写字段，但不会自动执行预设联动、禁用条件、界面提示和回调。Campaign配置字段随战役保存。
+
+Sandbox的原生作弊列表另有独立内容链：`GameplayCheatsManager.GetMapCheatList`提供13个顶层条目（堡垒内才出现完成建设项；其中Boost Skill是进入子列表的组），包括金钱、Influence、Renown、材料、兵力、粮食、战马、队伍治疗、锻造解锁和地图迷雾等效果；`GetMissionCheatList`在满足Mission条件时提供敌方受伤及主角治疗。`GameplayCheatsVM`将组映射为导航子页、将可执行项映射为`CheatActionItemVM`；玩家点具体项时调用`GameplayCheatItem.ExecuteCheat`，随后显示Cheat Used提示。故打开作弊菜单与执行其内状态改动是不同入口/结果；具体每项的完整副作用由相应Cheat类定义，以上仅记录列表与调用层。
 
 八项默认难度值均由`DefaultDifficultyModel`按VeryEasy/Easy/Realistic返回值，以下是已追到的原版消费者链（第三方替换GameModel/OptionProvider后的结果另算）：
 
