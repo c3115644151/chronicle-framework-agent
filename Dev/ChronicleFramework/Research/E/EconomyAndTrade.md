@@ -1,6 +1,6 @@
 # E 类研究：经济与贸易
 
-状态：机制盘点中；E01-E08 已完成首轮盘点，目前研究 E09 Trade 技能与贸易经验，未进行方案评审。
+状态：机制盘点中；E01-E09 已完成首轮盘点，目前研究 E10 Barter，未进行方案评审。
 
 适用本体：Bannerlord v1.4.8.119303。基于当前安装 `TaleWorlds.Core.dll`、`TaleWorlds.CampaignSystem.dll`、官方模块物品 XML 和 Chronicle 本地 Observer/Protocol 源码。静态对象核对不表示物品市场或背包 UI 已运行验证。
 
@@ -280,6 +280,34 @@ Chronicle `AgentProvisioning.TradeItem` 用 InventoryLogic 的 TransferCommand/D
 
 未知项：所有 Trade Perk 对价格/XP/结算的写入点和副作用；多个交易订单/部分卖出/回购/市场退货等情况下平均买入成本数据如何更正；NPC Caravan/贸易委托、Workshop 产出的价格变化是否给主角 Trade XP；Trade XP 最终调用和 CharacterDeveloper UI 增长显示间的用户可见结果；存在其他 Mod 交易监听器时事件顺序。
 
+## E10 Barter 交换谈判
+
+### Barter 不是 Inventory 市场交易
+
+Barter 是按 Hero/Party/Faction 对方建立的谈判数据。`BarterData` 保存 Offerer/Other Hero 与 Party、阵营、初始化 Context、BarterGroup 和双方可加入的 `Barterable`；事件 `OnBarterablesRequested` 可由各系统追加本次上下文允许的选项。普通金币/物品转移、领地与囚犯交换、和平/宣战、加入/离开 Kingdom、佣兵服务、婚姻、安全通行等由不同 Barterable 类型和行为系统提供，具体有效范围、价值和后果因类型而异。
+
+这和 E02/E04 的买卖不同：Inventory 是按市场报价、数量与转移命令成交；BarterVM 则在双方谈判盘中修改一组将一并接受或取消的 Barterables，并以阵营视角计算总 offer value/AI可接受性。不同项之间可互相平衡、带有兼容/链接关系，不能用 ItemMarketPrice 对所有 Barterables 求和来替代原版评估模型。
+
+### 玩家入口与确认链
+
+普通领主谈判来源是与 Hero 进行地图/定居点 Conversation，进入对话的 Speak Diplomacy/谈判分支并选择“我有一个可能让双方受益的提议”。原版条件要求对象是非囚犯 Lord、不是 Minor Faction Hero、且不与玩家阵营交战；同一 Hero 受 BarterManager 的冷却计时限制。特殊的 Peace、Safe Passage、Prisoner、Marriage、Join/Leave Faction 等系统可以传入自定义 Context和初始 Barterables，故并非全部从同一个通用对话按钮产生。
+
+`BarterManager.StartBarterOffer` 建立 BarterData、添加当前基础/上下文 Barterables，再派发可扩展请求事件并开启 `BarterVM`。玩家在面板调整两侧项目与金额、查看 offer validity 后选择 Offer/Accept 或 Cancel；接受时执行全部所选 `Barterable.Apply`，发 `OnBarterAccepted`，关闭谈判并延续原对话；取消则不执行交易效果，关闭并发 `OnBarterCanceled`。超额补偿可能按 BarterModel 给非敌方 Hero 加个人关系，冷却在接受后更新。
+
+### 价值与失败规则
+
+`Barterable` 保存原始所有者 Hero/Party、所在 BarterGroup、是否上下文依赖、被提出数量及可链接项；各子类提供自己的 `GetUnitValueForFaction` 和 Apply 副作用。一般 offer 是否被接受读取对方视角的净 `GetOfferValue`；`IsOfferAcceptable` 的基础条件是该值不得低于约 0。DefaultBarterModel 还对物品交换应用双方角度不同的交易 Penalty，并影响 overpay→Relation 结果；和平/政治承诺、Marriage、俘虏/赎金与领地另有自定义价值/前置/结果模型，不具有同一通用估值公式。
+
+失败/拒绝意味着保持原物品/金币/领地状态，仅结束本轮或沿剧情继续对话；接受后多个关联 Barterable 一并生效，故可能同时修改 faction stance、城镇/家族归属、 prisoner状态、角色婚姻和关系。具体前置、取消/协商结果留给 C/I/F/J 域补齐；本节不将“Barter UI 打开”算作交易成功。
+
+### Chronicle 当前覆盖与未知
+
+Chronicle `dialogueSelect` 可选择当前原生 Conversation 的可点击选项；若后续原版对话触发 BarterVM，这只证明进入下一 UI 状态，AgentProtocol 目前没有观察两侧 Barterable/金额/offer score、调数量/平衡/拒绝/接受 Barter 的命令，也没有提交后状态差验收。Observer 未将当前 Barter Data 加入快照。因此 Agent 当前不具备经济谈判行为覆盖。
+
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `BarterManager`、`BarterData`、`Barterable`/各子类、`DefaultBarterModel`、`LordConversationsCampaignBehavior`、BarterBehaviors；`TaleWorlds.CampaignSystem.ViewModelCollection.dll` `BarterVM`/`BarterItemVM`；Chronicle `AgentObserver.cs`、`AgentProtocol.cs`。源码版本 v1.4.8.119303；未运行玩家 UI barter、接受/取消/模型差异和特殊 Barterable 结算。
+
+未知项：全部玩家触发入口（NPC/Encounter/监狱/婚姻/政治等）的条件矩阵；各 Barterable 的具体报价算法、计算视角、数量限制、链路兼容和取消恢复；BarterVM 活跃期间 Campaign clock 与对话生命周期；协议可观察 offer 值与现有 tooltip/动画/AI接受判断一致性的验证；跨 C/F/I/J 域的 Barter 对话/关系/战俘结局须按各类系统继续研究。
+
 ## 研究范围状态
 
-E01-E09 已完成首轮物品、市场、村庄供应链、Workshop、Caravan、Party/Clan/Kingdom财政和Trade技能盘点。E10 Barter 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 E 域范围逐项核对，不将首轮研究误报为完整可运行的 Agent经济能力。
+E01-E10 已完成经济/贸易全域首轮静态研究，涵盖商品数据、供需/定价、村庄、Workshop、Caravan、Party/Clan/Kingdom财政、Trade技能与 Barter。域级资料与代码门禁不等于所有UI/运行路径都已验证，也不等于 Chronicle 已实现这些玩家行为。
