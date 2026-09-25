@@ -33,7 +33,7 @@ Hero 的 `Father`、`Mother` 是独立持久引用；设置父/母属性时会�
 
 初始既有家庭由新档 `InitialChildGenerationCampaignBehavior` 在 `OnNewGameCreatedPartialFollowUp` 阶段生成；不是出生动画或玩家操作。运行中怀孕由 `PregnancyCampaignBehavior` 按 Hero 每日回调检查成年、Life/Death 周期开启、存活、女性、非叛军 Clan、婚姻及妊娠状态，并用 PregnancyModel 概率与位置条件计算受孕。怀孕记录单独保存 Mother、Father 与 DueDate；到期后随机双胞胎/死胎/母亲产后死亡分支，正常新生 Hero 由 `HeroCreator.DeliverOffSpring` 建立父母引用、族群/文化/性别/生日等，并分发 OnGivenBirth。玩家主角作为父/母时，子女沿用玩家 Clan/Culture；其他家庭中新生子女进入父亲 Clan，文化在父母间选取。子女的出生日龄、父母关系、所属 Clan 与配偶身份为不同字段/关系链。
 
-百科 Hero 页可展示家庭成员；玩家婚姻谈判/婚姻选项的具体 UI 入口涉及 J 类对话/Barter 路由，本段只记录 `MarriageAction` 与持久对象关系。证据：`TaleWorlds.CampaignSystem.dll`（`Hero`、`HeroCreator`、`MarriageAction`、`InitialChildGenerationCampaignBehavior`、`PregnancyCampaignBehavior`、`MarriageModel`），以及已有百科 Hero 页源码。未知项：婚姻对话到 Barter 的完整 UI 调用链、各代际/失去父母后 `_children` 列表处理、叛军/佣兵/婚姻 Clan 变更例外、妊娠概率和持续时间的默认数值仍需分别追对应系统；未从字段关系推断情感/忠诚含义。
+百科 Hero 页可展示家庭成员；玩家婚姻谈判/婚姻选项的具体 UI 入口涉及 J 类对话/Barter 路由，本段只记录 `MarriageAction` 与持久对象关系。Chronicle Observer 当前没有输出完整家庭链，也没有婚姻/生育动作。证据：`TaleWorlds.CampaignSystem.dll`（`Hero`、`HeroCreator`、`MarriageAction`、`InitialChildGenerationCampaignBehavior`、`PregnancyCampaignBehavior`、`MarriageModel`），以及已有百科 Hero 页源码。未知项：婚姻对话到 Barter 的完整 UI 调用链、各代际/失去父母后 `_children` 列表处理、叛军/佣兵/婚姻 Clan 变更例外、妊娠概率和持续时间的默认数值仍需分别追对应系统；未从字段关系推断情感/忠诚含义。
 
 #### B03 能力成长与角色开发界面
 
@@ -137,6 +137,8 @@ Faction 关系经 `FactionManager` 查询/更新，双方阵营状态由 `Stance
 当前源码中 `CharacterRelationManager` 持久保存 Hero ID 对的整数关系（key 按两 Hero ID 排序，查询为对称 raw value）；`Hero.GetBaseHeroRelation` 读取原始值，`Hero.GetRelation` 交 `DiplomacyModel` 得到 effective value。`DefaultDiplomacyModel` 会先通过 `GetHeroesForEffectiveRelation` 通常把双方替换成所属 Clan Leader；若两者因此相同，或涉及玩家本人和玩家 Companion，则使用原 Hero。随后将 Honor、Valor、Mercy 的 Trait 组合加减到 raw value 并 Clamp。因为特质修正以传入的 Hero 与 effective Hero 计算，raw value 对称不意味着所有身份情形下的 effective value 必然对称。
 
 `ChangeRelationAction` 在写入前只对正向变化调用 `GetRelationIncreaseFactor`（Charm 经验/Perk等来源会调整增长量并随机取整）；再选 effective Hero pair，将原始整数相加并 Clamp 到[-100,100]。随后通过 `Hero.SetPersonalRelation` 写入并分发 `OnHeroRelationChanged`，事件参数同时携带 effective pair、变化量、原始调用双方与 `ChangeRelationDetail`。`CharacterRelationManager` 不为每笔整数变化保存完整原因链；没有独立恩情、仇恨、债务或关系阶段字段。旧档加载仍有对早于v1.1版本无效Hero ID的清理。
+
+Chronicle Observer/Protocol 当前不读取或写入 raw/effective Hero relation，也没有关系历史/关系动作；关系源和消费者目前是源码映射，尚无自动测试。证据：当前安装 `TaleWorlds.CampaignSystem.dll`（`CharacterRelationManager`、`DefaultDiplomacyModel`、`ChangeRelationAction`、`Hero.GetRelation`）、本地 `AgentObserver.cs`/`AgentProtocol.cs`。未将 B/C/F/J 中的每个 relation caller 合并去重，B09 的玩家行为/观察总数仍留待 W1-M 交叉整理。
 
 ## 关系写入来源
 
