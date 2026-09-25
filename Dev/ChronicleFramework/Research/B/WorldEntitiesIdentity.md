@@ -76,6 +76,16 @@ Chronicle Observer 当前仅给出玩家 Clan ID/名称/Tier、玩家 Gold、Inf
 - 统治家族、成员 Clan、领地、政策、Army、预算和外交 Stance；
 - 持久状态包括未解决决策、总军力、PoliticalStagnation、钱包和最近决策时间。
 
+#### B06 Kingdom数据与玩家界面
+
+Kingdom 是独立 Faction；`MapFaction` 返回 Kingdom 自身。`RulingClan` 持有王国统治家族，`Leader` 从该 Clan 的 Leader 派生；`Clans`、`Fiefs/Towns/Villages` 与 `Armies` 暴露只读集合，`KingdomBudgetWallet` 是王国预算余额。Kingdom 与 Clan 不是同一所有者：Clan 的 Kingdom 归属将 Hero/Clan 映射到王国阵营，但 Hero 个人关系和 Clan 自己的成员/财富仍由各自数据持有。
+
+玩家入口：地图快捷键 K（`GenericCampaignPanelsGameKeyCategory.KingdomWindow`）只有在 Main Hero 的 MapFaction 是 Kingdom faction 时才打开 `KingdomState`。`KingdomManagementVM` 以 Player Clan 当前 Kingdom 建立界面，包含 Clans、Fiefs、Policies、Armies、Diplomacy 五类页面；Policies/Diplomacy 是否允许切换还受 PlayerHasKingdom 状态控制。领导者/普通王国成员见到的“王国行动”不同：分别显示退位或离开王国/结束佣兵服务，执行时还要过原生权限检查与确认流程。
+
+身份变更边界：Clan 加入/离开 Kingdom 由 `ChangeKingdomAction` 处理，而不是修改某个 Hero 的个人身份文本字段。其动作会调整 Kingdom 对 Clan 的隶属及 Stance/贡金相关收尾、在离境情形处理领地、队伍移动及战争状态，并分发 `OnClanChangedKingdom`；Defection 另分发 `OnClanDefected`。具体外交/决策后果归 C 类研究，本段记录 Kingdom 与 Hero/Clan 的对象连接及界面入口。
+
+Chronicle 当前 Player snapshot记录Clan标识、名称、Tier、Gold/Influence/Renown，但不读取 `Clan.Kingdom` / Kingdom id、RulingClan、Clans/Fiefs/Armies、KingdomBudgetWallet或Policies；尚无 Kingdom 管理动作。证据：当前安装 `TaleWorlds.CampaignSystem.dll`（`Kingdom`、`ChangeKingdomAction`）、`TaleWorlds.CampaignSystem.ViewModelCollection.dll`（`KingdomManagementVM`）、`TaleWorlds.MountAndBlade.dll`（K键）、`Modules/SandBox/bin/Win64_Shipping_Client/SandBox.View.dll`（`MapScreen.OpenKingdomScreen`）、`AgentObserver.cs`。未知项：国王/普通成员/佣兵/叛军的各页面差异、Kingdom faction关闭或废弃过程中的残留 Hero/Clan 状态、王国管理每项读写权限和 UI 确认分支尚未完整核验；战争/选举/政策效果不在本项重复拆解。
+
 ### Culture、Faction 与 MapFaction
 
 - Culture 提供兵种、PartyTemplate、默认政策、Trait、聚落和场景数据；
