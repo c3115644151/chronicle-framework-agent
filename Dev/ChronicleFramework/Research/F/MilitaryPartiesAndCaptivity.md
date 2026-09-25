@@ -136,6 +136,8 @@ NPC Lord Party 的初始化会以 Lord Hero 为Party Leader，按所属 Clan Def
 - **Disband**（`ACT-F06-03`）：同一Leader selection popup包含`Disband Party`候选，但只有地图操作可用且目标不是MainParty/Garrison/Militia/已解散/战斗或围城Party时可选。确认后旧Leader被移出并成为Fugitive，再由`DisbandPartyAction.StartDisband`标记处理；派对可能等待、移动到Settlement后再合并/销毁，不是点击后Roster立即消失。此为Clan移动Party解散，不是`ACT-F05-02`Kingdom Army解散。
 - **Party Objective**（`ACT-F06-04`）：仅非Clan leader领导的、非Caravan且未Disband的Party可在卡片选择Neutral/Defensive/Aggressive。Selector按`SetPartyObjective`写`MobileParty.Objective`；`AiMilitaryBehavior`和`DefaultTargetScoreCalculatingModel`会据此改变防守/攻城/劫掠目标的权重及追敌倾向，它不是指定某个单一地图目标。
 
+Garrison卡片还单独显示Settlement的`Auto Recruitment`开关；虽然它出现在同一个Clan Parties VM，写入的是`Town.GarrisonAutoRecruitmentIsEnabled`并影响未来聚落每日自动招募，因此归D07 `ACT-D07-03`，不并进Clan War Party Objective，也不新增F06 ACT。自动招募的志愿者/费用/食物/上限条件见D07。
+
 Leader候选Inquiry在选普通Hero与选Disband之间切换；弹窗组件相同但最终状态不同，故分列ACT。Parties列表中的Caravan只有Leader/Disband适用项；Garrison不可使用此ChangeLeader UI。Role选择另映射H06，不在此重复计算。
 
 ### 对照 AI Clan War Party 与 Chronicle 覆盖

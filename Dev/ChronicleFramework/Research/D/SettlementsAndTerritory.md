@@ -218,11 +218,13 @@ Chronicle Observer 不读取当前默认日常项目，也不计算这张表的�
 - `GarrisonRecruitmentCampaignBehavior` 每日更新 fortification。Issue/叛军模型可能提供基础变化；自动招募则要求开关启用、`FoodChange > 0` 且没有 MapEvent/SiegeEvent。它从聚落要人和正常状态的绑定村庄要人处建立志愿者列表，受可用工资预算、Party Size Limit 与每日最大招募数共同限制；当前默认模型的每日自动招募上限是 1。招入时消耗对应志愿者槽，并记入 Clan 的自动招募费用。GarrisonAutoRecruitment 日常项目效果（D06）会进入该计算。
 - `GarrisonTroopsCampaignBehavior` 在 AI Lord Party 进入同阵营 fortification 时运行编队/驻军转兵逻辑；它不是让玩家的 MainParty 自动换兵。AI 的保留人数综合领地理想驻军、队伍理想规模、食物与工资限制等，并可能在 Party 和 Garrison roster 间转兵。新攻占聚落有特殊处理条件。
 
+玩家另可在Clan Management→Parties选中Garrison Party卡片切换`Auto Recruitment`。这由`ClanPartyItemVM.IsAutoRecruitmentVisible/AutoRecruitmentValue`控制可见状态，setter直接写所属Town的`GarrisonAutoRecruitmentIsEnabled`；不是Town Management的PartyScreen转兵入口，也不会立即招募。该卡片状态复用`OBS-B05-01`，玩家开/关设置映射`ACT-D07-03`。DailyTick随后仍须满足食物盈余、无MapEvent/SiegeEvent、Notable候选、工资/人数上限才尝试招募。
+
 驻军还进入 D02 食物模型的消耗、Settlement Security、围城防守、驻军工资和建设容量效果链。Town Management VM 显示驻军数量及模型预测的每日变化，但本轮没有把“玩家手动从 Party 转移士兵”入口、工资上限调节入口及它们的完整 UI handler/API 副作用闭环；不依据自动招募或 AI Lord 转兵来声称玩家可以通过同一操作执行它们。
 
 ### Chronicle 当前覆盖
 
-Nearby Settlement 快照不返回 Governor ID、GovernorOf、Garrison Party ID、驻军 roster、自动招募开关、志愿者来源、工资上限或估算每日变化。Town Management VM 是玩家可见的原版管理面之一，但 Chronicle 目前不读取其聚落管理统计、不调用 governor selection 或 garrison roster 操作。本节证明了原版内部存在两套差异化的治理/补兵机制，不等于 Agent 能操作这些界面。
+Nearby Settlement 快照不返回 Governor ID、GovernorOf、Garrison Party ID、驻军 roster、自动招募开关、志愿者来源、工资上限或估算每日变化。Town Management VM 是玩家可见的原版管理面之一，ClanPartiesVM另提供Garrison Auto Recruitment开关；Chronicle目前不读取这些聚落/Clan管理字段，也不调用Governor/Garrison UI操作。开关入口现在已用源码映射为`ACT-D07-03`，其视觉状态、地图输入禁用/提示条件和实际自动招募结果仍未运行验证。本节说明原版有两套差异化的治理/补兵机制，不等于Agent能操作。
 
 证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `Town`、`ChangeGovernorAction`、`GovernorCampaignBehavior`、`GarrisonPartyComponent`、`GarrisonTroopsCampaignBehavior`、`GarrisonRecruitmentCampaignBehavior`、`DefaultSettlementGarrisonModel`；`TaleWorlds.CampaignSystem.ViewModelCollection.dll` 的 `TownManagementVM`、`SettlementGovernorSelectionVM`、`TownManagementReserveControlVM`；Sandbox `concept_strings.xml` 的 Governor 玩家说明；Chronicle `AgentObserver.cs`。目前是 v1.4.8.119303 静态源码和资源说明证据，未运行 UI。
 

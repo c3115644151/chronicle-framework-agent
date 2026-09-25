@@ -22,7 +22,7 @@ UI流程会限制阶段顺序、选项条件、FaceGen及Review；直接构造He
 
 玩家入口为家族/Clan管理面板中的成员、Party、领地、收入等分类；`ClanManagementVM`汇总并切换这些类别，子VM允许查看Hero/Party/Settlement/Workshop，并存在改名、Banner、Finance等操作。王国加入/退出和家族/领地转移需走独立政治/动作链，不能仅以Clan面板打开/点击代表完成。财务日结见 E07，Party创建/Army另见 F06/F13，关系及Kingdom成员后果见 B/C。
 
-跨域提交映射：Clan Fiefs子页任免Governor走D07 `ACT-D07-01`（与Town Management同一`ChangeGovernorAction`结果）；Parties子页创建、换Leader、Disband与Objective selector映射F06 `ACT-F06-01..04`；Party职责任命仍是H06 `ACT-H06-01`。这些属于子系统动作，不合成一个“Clan面板管理”行为，也不因进入相同ClanManagementVM重复建ID。
+跨域提交映射：Clan Fiefs子页任免Governor走D07 `ACT-D07-01`（与Town Management同一`ChangeGovernorAction`结果）；Parties子页创建、换Leader、Disband与Objective selector映射F06 `ACT-F06-01..04`；Garrison party card的AutoRecruit switch映射D07 `ACT-D07-03`；Party职责任命仍是H06 `ACT-H06-01`。这些属于子系统动作，不合成一个“Clan面板管理”行为，也不因进入相同ClanManagementVM重复建ID。
 
 Chronicle主快照已返回Hero/Clan ID与名称、Clan Tier、下一级所需Renown、Gold、Influence和Renown；不输出完整Clan roster、领地、Workshop、Clan finance分项或Kingdom成员权限，没有Clan management操作。源码证据：`Clan`、`DefaultClanTierModel`、ViewModelCollection `ClanManagementVM`及各分类VM、Chronicle `AgentObserver.cs`。当前数值基于本机v1.4.8.119303；实际从Campaign界面进入各tab、不同身份权限、每种Tier的具体加成/解锁文本和显示状态尚未做完整视觉验证。
 
