@@ -1,24 +1,16 @@
 ﻿{
-    "schemaVersion":  1,
+    "schemaVersion":  2,
     "current":  {
-                    "id":  "autonomous-campaign-agent-mod",
-                    "objective":  "Build a Bannerlord Mod that gives an AI full autonomous player agency: either controlling the current singleplayer client or joining as an independent multiplayer campaign client.",
-                    "phase":  "W1 behavior/observation census; 0/12 domains, denominator unknown. Live work-item status comes from the GitHub Project.",
                     "path":  "Focus/MAINLINE.md",
-                    "updatedUtc":  "2026-09-24T23:02:19.8226809Z",
-                    "reviewAfterUtc":  "2026-10-08T23:02:19.8226809Z",
-                    "mainlineSha256":  "cdfb53a1ea9b978419d1f84b53ce78cf2fdd2becd69392899580e1e5e86140fe"
+                    "reviewedUtc":  "2026-09-25T00:22:45.7714507Z",
+                    "reviewAfterUtc":  "2026-10-09T00:22:45.7714507Z",
+                    "mainlineSha256":  "14c2ec99a25192273845237777065935406bc74c1ecf890b9cfc333807431ee7"
                 },
     "taskTracker":  {
-                        "provider":  "github-projects",
-                        "repository":  "c3115644151/chronicle-framework-agent",
-                        "projectNumber":  5,
                         "projectUrl":  "https://github.com/users/c3115644151/projects/5"
                     },
     "defaultRead":  [
                         "DEVELOPMENT.md",
-                        "DESIGN.md",
-                        "SYSTEM_INVENTORY.md",
                         "Focus/MAINLINE.md"
                     ],
     "references":  [

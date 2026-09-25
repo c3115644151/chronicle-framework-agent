@@ -1,7 +1,5 @@
 # 当前主线：Autonomous Campaign Agent Mod
 
-状态：P0-P4 环境桥与抽样切片已验，非完整行为覆盖；当前P5只作验证样本。
-
 绝对目标：AI 不能只是观察者、建议器、辅助工具或需要玩家确认的 Copilot。AI 必须能够独立感知战役状态、制定目标、执行行动、处理失败并持续推进战役。
 
 只有两种正式部署形态：
@@ -36,11 +34,9 @@ Mineflayer/MineDojo 等 Agent 以独立玩家为动作和观察主体；这不�
 
 Research Gate: **BLOCKED**
 Implementation Gate: **BLOCKED**
-行为总分母：**UNKNOWN**　完整系统域：**0/12**　游戏版本：**1.4.8.119303**
+行为总分母：**UNKNOWN**　游戏版本：**1.4.8.119303**
 
-当前工程焦点是 **W1 行为与观察全景盘点**，本轮从A01战役生命周期开始；先逐系统核对玩家实际入口/输入修饰、被动及按需信息、原版后果和Campaign时间、UI handler/API差异、当前适配、证据及未知，再去重形成行为分母。`SYSTEM_INVENTORY.md`的127项是盘点入口，不是玩家动作数。W1按A-L逐域完成；在它达到12/12前不新增游戏能力。P5声望路线暂停；Tier 1仍只是未来成熟度夹具。
-
-任务状态、依赖和唯一WIP由[GitHub Project](https://github.com/users/c3115644151/projects/5)维护，当前研究卡为[W1-A（Issue #1）](https://github.com/c3115644151/chronicle-framework-agent/issues/1)；本文不复制卡片状态。既有基线（非全景覆盖）：环境/协议通过；P3-P4已有Map/Party/Inventory 3类观察、9类抽样动作及战斗夹具；GameStates 3/15已细查，Agent vertical slice 0/1；P5前置4/4，Tier1 E2E 0/1。GameState数和CampaignEvent数都不等于玩家行为数。Minecraft Agent研究作为后续架构参考，不构成绕过W1的理由。
+当前技术焦点是完整盘点玩家与战役世界的观察和行动接口。逐系统核实玩家入口/输入修饰、被动与按需信息、原版后果和Campaign时间、UI handler/API差异、当前适配、证据及未知，然后跨域去重建立真实行为分母。`SYSTEM_INVENTORY.md`的127项是研究入口，不是玩家动作数。盘点验收、域间依赖和工作次序由GitHub Project维护；本文不保存活动卡片、完成数量或当前工作状态。Research Gate通过前不新增游戏能力；Tier 1仅作为未来成熟度夹具。Minecraft Agent研究作为后续架构参考，不构成绕过全景研究的理由。
 
 Minecraft Agent 的环境、规划、技能、记忆和评测研究已沉淀到本文后续架构段落；本文不再把项目目标定义为“测试工具”。
 
@@ -82,7 +78,7 @@ Steam 创意工坊或 CurseForge 可以分发 Mod 文件、依赖和配置，但
 
 AI 效应的现有资料显示，Player2 不是它的唯一 Agent Host，而是可选 AI Backend：公开配置同时列出 Player2、OpenRouter、DeepSeek、Ollama、KoboldCpp 等后端；Mod 自己负责生成结构化提示词、读取游戏上下文、保存世界/提示词数据，并通过后端 URL 请求模型。[AI Influence 后端说明](https://www.nexusmods.com/mountandblade2bannerlord/mods/9711) [AI Influence Prompt Control](https://github.com/PiTatva/AI_Influence_Prompt_Control)
 
-当前只冻结两个技术结论：后端必须可替换，游戏动作与结果验证必须留在 Mod 的安全边界内。规划、提示词、长期记忆和技能库运行在 Mod 内还是 Host 内，等待 P0-P2 原型基准后决定。
+当前只冻结两个技术结论：后端必须可替换，游戏动作与结果验证必须留在 Mod 的安全边界内。规划、提示词、长期记忆和技能库运行在 Mod 内还是 Host 内，须通过同一 Agent 循环的可重复对照原型决定，不能由现有代码库存或安装偏好反推。
 
 ## Minecraft Agent 全景结论
 
@@ -196,88 +192,42 @@ flowchart TD
 
 当前代码中已有只读 `ChronicleCampaignBehavior` 与 `DailyTickEvent` 计数实验；旧模块加载、行为注册和旧存档日志不能作为当前版本证据。
 
-## 阶段计划
+## Observation knowledge and open contract
 
-### P0 版本事实重建
+原版实体分别暴露 `IsVisible` 与 `IsInspected` 两种地图状态；属性本身不足以证明它们如何对应地图图标、悬浮提示、ALT 部队详情或百科信息。任何 Agent 情报策略都应先核对玩家实际入口与运行时可见结果，不从字段命名推导遮蔽规则。静态面板按需读取，不应默认将玩家物品、队伍、家族、王国和日志全部塞入每次决策上下文。
 
-- 锁定实际版本、官方模块、四前置、Chronicle 最小集和整合包集；
-- 当前 DLL 重新运行 API Probe；
-- 清除 `1.5.3` 与 `1.4.8` 冲突；
-- Docs、Api、Build、Smoke 在同一基线上通过。
+## Action contracts and coverage definitions
 
-退出：所有证据包含版本、模块集、PID 和时间，不引用旧日志作为当前通过。
+#### 覆盖口径与验收证据 / Coverage and Evidence Contract
 
-### P1 战役生命周期
+本表定义长期有效的分母和判定方式，不维护当前完成数。任务完成状态由GitHub Project Issue表示；单次通过/失败、运行号和原始文件由 `TestResults/<run-id>` 表示。
 
-- 创建新的 `AgentBridgeFixture` disposable 战役；
-- 验证行为注册、`DailyTickEvent` 次数和战役时间；
-- 用 `SyncData` 保存协议版本与计数；
-- 自动推进、保存、退出、重载和比对。
+| 范围 | 分母或判定规则 | 证据规则 |
+| --- | --- | --- |
+| 玩家行为与观察面 | 先审完SYSTEM_INVENTORY A-L全部12个研究域，再跨域去重；真实行为总分母在此之前保持未知 | 每个域Issue满足其验收并链接对应研究/测试依据；Epic子项提供覆盖总览 |
+| GameState接口 | 反编译枚举的状态类型只是接口分母，不等于玩家行为或 Agent 覆盖率 | 按当前安装DLL重新盘点；API Probe和运行时结果分别标记 |
+| 自主 Agent 闭环 | 必须有非测试模型/规划器选择目标、调用白名单动作、验证结果，并在世界变化或失败后重规划 | 确定性Provider、单动作成功或累计动作数量均不能算自主闭环 |
+| 长程成长夹具 | Tier 1用于评测长期规划、资源、风险和恢复，不是产品目标，也不要求通过刷固定奖励达成 | 结果必须来自 disposable campaign、保留状态/动作证据并清理夹具；失败如实保留 |
+| 视觉证据 | 仅用于结构化遥测不能判明的真实界面迁移；采集窗口、帧覆盖、索引和源视频清理均需验证 | 关键帧与事件时间线可追溯至同一run；不将截图替代游戏状态真值 |
 
-退出：无人值守推进至少一个战役日，重载后状态一致，正式存档无变化。
-
-### P2 环境协议与 CLI
-
-状态：已完成。Protocol v1 已通过 CLI 启动/重载、状态、暂停/恢复、时间推进、保存、进程停止、持久状态回读与 fixture 哈希保护。
-
-- 定义状态、命令、回执、错误和事件 schema；
-- 第一版用原子文件与 JSONL，优先可检查、回放和崩溃保留；
-- 实现 `start/load/state/advance/pause/resume/save/stop`；
-- 支持唯一命令 ID、超时、幂等和 `--json`。
-
-退出：除一次性启动 UI 外，可通过 CLI 完成推进、保存和重载。
-
-### P3 结构化观察
-
-状态：基础快照已实现。原版实体存在 `IsVisible` 与 `IsInspected` 两种地图状态，当前观察器保留可见实体并读取人数/战力。二者如何对应地图标记、悬浮提示、ALT 部队详情仍需沿原版界面链验证。是否要求 AI 与玩家同等信息、是否允许 AI 使用额外推断，属于产品情报策略，当前未定；不得仅凭 API 名称推导为“未侦察必须遮蔽”。
-
-- 玩家队伍、资源、兵力、伤员、俘虏和负重；
-- 位置、目标、附近聚落/队伍、菜单、遭遇、任务和危险；
-- 增量事件、稳定 ID、相关范围裁剪和状态版本；
-- 字段来源、最后观察时间、可见/已侦察级别和未知值语义；
-- 玩家物品、队伍、家族、王国、日志等静态面板按需查询，不把所有面板常驻塞入模型上下文；
-- 单独记录 AI 可用情报策略；它可以选择玩家视野、扩展情报或其他经过产品确认的模式。
-
-退出：不读截图也能解释当前提供给 Agent 的局势并判断下一个合法原子动作；每个字段来源与情报策略可追溯，未知和过期信息表达清楚。
-
-### P4 白名单动作原语
-
-#### 量化进度 / Quantified Progress（2026-09-24）
-
-| Metric | 当前值 | 口径/证据 |
-| --- | ---: | --- |
-| P4 sampled action families | **9** | Total unknown; samples only |
-| Behavior-interface census | **0/12 domains** | A-L各域完成玩家入口/被动观察、副作用/时间、Agent覆盖和证据未知项映射；行为总数待盘点 |
-| Campaign GameState surfaces | **3/15 detailed** | 1.4.8 CampaignSystem.dll；Map/Party/Inventory typed data；state数非动作数 |
-| P3 Structured observation | **1/1** | Schema8身份/队伍/loot；Obs `20260924-131118` |
-| Map-click/time parity | **3/3** | `move`/`pursue`/`hold` 均验证普通地图单击时间档位：Movement `20260924-061109`、Pursuit `20260924-055319` |
-| Agent loop contract | **1/1** | `200757/201522` receipt/offer forwarding；deterministic Provider |
-| Battle fixture | **1/1** | BattleFixture `20260924-083440`：looter→pursue→原版对话/continue→encounter；fixture 未改、进程退出 |
-| BattleSimulation bridge | **1/1** | `PostBattle 20260924-222714`：全链/奖励遥测通过、Renown+2.562、夹具哈希不变 |
-| Agent vertical slice | **0/1** | 尚无模型调用、目标选择或跨动作重规划；当前为身体/环境桥 |
-| P5 precursor checks | **4/4；E2E0/1** | Fresh 215022, Recruit 201522, Battle 222714, Progression 045339 pass; deterministic provider, save/reload/move/recruit 1, fixture cleanup verified. |
-| Visual capture transport | **1/1** | HWND-only `gfxcapture`; VisualCapture `20260924-152546`: 233/233@30fps；视频卸载、关键图保留 |
-| Visual UI evidence | **2/2** | `154639`: 838帧/30fps；10事件→30关键帧；MP4删除 |
-| Latest Docs gate | **1/1** | `latest.json` Docs pass + contract match |
-
-新增/拆分动作族先改分母与验收；命令数不代表 Agent 进度。
+新增动作族先更新完整行为分母和验收定义；命令数、Issue数量和测试运行次数都不代表 Agent 能力进度。
 
 #### 原版机制契约 / Mechanic Contract
 
 | 动作 | 玩家入口 | 原版自然副作用 | Campaign 时间行为 | UI/API 差异及当前实现 | 证据 / 未知 |
 | --- | --- | --- | --- | --- | --- |
-| move | 地图点聚落 | `GetInteractionDataForMainParty`+`SetMoveGoToSettlement` | 单击按配置切速；运行模式自然推进 | CLI 复现 setter/点击时钟；Harness 独立步进抵达 | Movement `20260924-061109` 通过 |
-| pursue | 普通点击移动队伍（非 Follow Modifier） | `EngageParty`；失明时原版 Hold | 单击按配置切速；自然接敌 | CLI 复现 Engage 与点击时钟，立即回执 | Pursuit `20260924-055319`：无 advance 接敌；失明未测 |
-| hold | 点击玩家队伍 | `SetMoveModeHold` 清目标 | 地图单击时间策略 | CLI Hold+点击时钟 | Movement `20260924-061109` 通过 |
-| rest | `town_wait` 菜单 | `StartWait` 快进；`EndWait` Stop | `rest(days)` 只观察时长 | Rest `20260924-055458`：保留原生时钟，离开后 Stop |
-| advance | Harness 专用，不是地图输入 | 按请求推进 Campaign | 固定步长；遭遇可提前结束 | CLI/Harness 显式工具；决策 provider 拒绝调用 | AgentLoop `20260924-100325` 拒绝回归通过；Pursuit `20260924-042347` 遭遇提前返回 |
-| autoresolve (research) | 遭遇“坐镇指挥”→Done | Init→StartSimulation→Skip→OnFinished→PartyState | 追近自然推进；模拟Stop | 原生Pause/Skip/Done；wool测试注入 | `PostBattle 222714`奖励断言/全链通过 |
-| dialogueSelect (research) | Party click→Map conversation | `DoMeeting`→native conversation; `CurOptions`→`DoOption(id)` | clock unverified | protocol only selects active options | `20260924-083440` ultimatum test |
-| incidentSelect | Town leave→modal→choose/Done | VM Confirm→effects/close | Modal pauses/locks time; close restores | Direct API skips cleanup; unsupported | Source; runtime unknown |
-| talkToIssueOwner (research) | 蓝标→聚落场景→交互 notable | Issue→give→precheck→brief或拒绝 | probe Stop→Stop；运行未知 | native map跳过3D接近；本地限域 | `194812`到brief；`194018`未到brief，原因未定 |
-| dialogueContinue (research) | 地图对话无选项时 Continue/继续 | Gauntlet `ExecuteContinue`→`ConversationManager.ContinueConversation` | 对话/遭遇时间待核实 | 仅 CurOptions 为空时调用 | `20260924-083440`：NPC 回答后继续至 encounter |
-| retreat (research) | Mission TAB→Quit；模拟结果→Quit确认 | `TryExit`→RetreatMission；Simulation→XP/encounter | Mission暂停；Simulation未知 | Adapter绕过HUD确认 | `085658`返回成功；结算未知 |
-| partyLoot (research) | Battle Done→Party/Inventory Loot→Map | 原生Loot screens/Done | 战后Stop | 测试wool注入；直接离开会跳过Loot | `154639`收俘10/物品10；自然掉落未知 |
+| move | 地图点聚落 | `GetInteractionDataForMainParty`+`SetMoveGoToSettlement` | 单击按配置切速；运行模式自然推进 | CLI 复现 setter/点击时钟；Harness 独立步进抵达 | 运行断言检查目标、菜单迁移、自然时钟；版本重测时重新确认 |
+| pursue | 普通点击移动队伍（非 Follow Modifier） | `EngageParty`；失明时原版 Hold | 单击按配置切速；自然接敌 | CLI 复现 Engage 与点击时钟，立即回执 | 可见目标已测自然接敌；目标失明后的停留/时间语义仍未知 |
+| hold | 点击玩家队伍 | `SetMoveModeHold` 清目标 | 地图单击时间策略 | CLI Hold+点击时钟 | 运行断言目标清除并检查原版点击时钟 |
+| rest | `town_wait` 菜单 | `StartWait` 快进；`EndWait` Stop | `rest(days)` 只观察时长 | 保留原生 Wait menu 时钟，离开后 Stop | 运行断言 Wait menu、持续时间及离开效果；`IsMainPartyWaiting` 生命周期语义需单独理解 |
+| advance | Harness 专用，不是地图输入 | 按请求推进 Campaign | 固定步长；遭遇可提前结束 | CLI/Harness 显式工具；决策 provider 拒绝调用 | 独立时钟测试；不得塞进普通地图动作 |
+| autoresolve (research) | 遭遇“坐镇指挥”→Done | Init→StartSimulation→Skip→OnFinished→PartyState | 追近自然推进；模拟Stop | 原生Pause/Skip/Done；测试夹具注入敌方 | 奖励与双方状态可结构化核验；自然随机战斗结果需另验 |
+| dialogueSelect (research) | Party click→Map conversation | `DoMeeting`→native conversation; `CurOptions`→`DoOption(id)` | clock unverified | 仅选择当前原生条件开放的选项 | 选项条件、结果回执；选项变化或失效时须拒绝 |
+| incidentSelect | Town leave→modal→choose/Done | VM Confirm→effects/close | Modal pauses/locks time; close restores | Direct API skips cleanup; unsupported | 目前源码链；模态窗口生命周期与时钟仍待运行核实 |
+| talkToIssueOwner (research) | 蓝标→聚落场景→交互 notable | Issue→give→precheck→brief或拒绝 | probe Stop→Stop；运行未知 | 现有本地探针跳过3D接近，仅研究性 | 不同Issue种子/前置会产生不同对话；不可泛化成通用接委托能力 |
+| dialogueContinue (research) | 地图对话无选项时 Continue/继续 | Gauntlet `ExecuteContinue`→`ConversationManager.ContinueConversation` | 对话/遭遇时间待核实 | 仅 `CurOptions` 为空时调用 | 运行后要确认对话阶段和遭遇迁移；时钟语义未知 |
+| retreat (research) | Mission TAB→Quit；模拟结果→Quit确认 | `TryExit`→RetreatMission；Simulation→XP/encounter | Mission暂停；Simulation未知 | Adapter绕过HUD确认 | 分开验证UI确认副作用与API结果结算，不相互替代 |
+| partyLoot (research) | Battle Done→Party/Inventory Loot→Map | 原生Loot screens/Done | 战后Stop | 测试夹具注入战利品；直接离开会跳过Loot | 通过Roster/Inventory前后差异核验；自然掉落和视觉交互分别标明 |
 
 ```mermaid
 flowchart LR
@@ -299,55 +249,33 @@ flowchart LR
 
 证据等级统一标为：源码/资源核实、运行时状态核实、自动动作/结果核实、人工视觉核实。高等级不自动替代低等级；尤其“VM 调用成功”不等于“已验证玩家从界面入口走通”。
 
-退出：每个原语在 Standard 和失败条件下都有独立夹具与结构化结果。
-
-### P5 一级家族纵向闭环
+## Tier 1 long-horizon evaluation fixture
 
 本阶段定位：Tier 1 是衡量新档 Agent 成长/资源/风险闭环的验证场景，不是产品目标或必须“过关”的交付承诺。不得为凑足 50 Renown 临时堆一次性功能；若通用能力不足，记录证据与缺口，按产品主线判断是否值得补齐。
 
 1.4.8新档与成长证据
 
 - 角色创建反编译显示：成年背景选择在新档起始给予 Clan Renown +20；Tier 1 门槛为50，因此示例背景下缺30。StoryMode 的+25奖励要在Tier 1 后才可能取得，不能作为前置成长路径。
-- `Progression 20260925-045339` 通过了确定性测试 Provider 下的保存、重载、移动和招募链：起始声望20；招入1名瓦兰迪亚新兵花费20第纳尔，工资2/日；队伍人数1→2、金币1000→980，声望不变。它没有声望成长决策，也不是自主 Tier 1 闭环，E2E仍为0/1。测试启动时遇到的 CampaignMusic 初始化 NRE 已由 Harness 等待原版初始化解决。
-- 早先 `Fresh 20260924-212453` 观察到新档创建选择Vlandia+20、停在MapState且未存档。不同 fresh fixture 的 Issue 种子和条件变化：有的没有本地 Issue，有的仅有金币报酬，也有到不了 Brief 的情况；这些只是变异样本，不能推成统一规则。
+- 在确定性、非模型Provider下，测试招募入口通过VM产生过以下原生副作用：招入一名瓦兰迪亚新兵花费20第纳尔、工资2/日、队伍人数+1；此类单动作结果不代表Agent具备自主成长能力。
+- 新档的本地Issue种子和条件有变化：有的没有Issue，有的仅有金币报酬，也有到不了Brief的情况；单个fixture不能推成通用可用的任务路线。
 
-声望来源的当前静态盘点
+声望来源静态研究记录
 
-对已有的 1.4.8 CampaignSystem、SandBox、StoryMode 反编译快照，检索 `GainRenownAction.Apply` 和 `Clan.AddRenown`，得到68处命中、涉及39个源码文件；其中52处位于26个 Issue 相关文件。它们是赋值调用点，不是玩家行为全集：同一 Issue 可有多种奖励分支，一个行为也可能共用奖励 helper。证据源位于 `TestResults/20260924-102913/Temp/{CampaignSystem, SandBox, StoryMode}Decompiled/`。
+对 1.4.8 CampaignSystem、SandBox、StoryMode 的反编译源码检索 `GainRenownAction.Apply` 和 `Clan.AddRenown`，可定位大量声望赋值调用点。它们不等于玩家行为全集：同一Issue可有多种奖励分支，一个行为也可能共用奖励helper。必须逐项还原入口、条件、成本、失败与奖励，才能判断玩家是否真的有该路径。
 
 - 战斗：`MapEventSide` 先根据敌我强度与双方强度比计算战斗声望值；`MapEvent` 再按胜方各队贡献份额和敌方战力被消灭的比例分配，`DefaultBattleRewardModel` 还可能叠加 perk/文化修正。它不是每胜一场给定常数。
-- 已有 `PostBattle 20260924-222714` 是受控夹具：19名劫匪、敌方起始强度12.540；玩家贡献1764/1764，模拟胜利后声望+2.562，其中模型基础值为2.440。这个单样本验证结算链有效，不证明野外自然遭遇的典型收益，也不能直接线性外推胜场数。
+- 受控战斗夹具证明原版结算会依据双方强度、胜方贡献和敌方消灭比例计算声望；单个受控样本不代表野外自然遭遇的典型收益，不能线性外推成达标战斗场数。
 - 锦标赛：`DefaultTournamentModel` 默认胜者给3点，但赛事生成受城镇状态、时间及当地参赛者等条件影响；玩家须进入赛事 Mission。Chronicle 当前没有锦标赛/3D比赛控制能力，因此奖励数值并不等于可用路线。
 - Issue：源码中存在多个+1至+10左右的奖励分支，但每种 Issue 的触发对象、前置资源、交付方式和成败结果不同；聚合调用点不足以判断哪一种适合作为通用的 Tier 1 前置循环。
 
 当前判断：地图战斗与已有 battle bridge 的复用度最高，只能列为一个可检验候选；不能把P5偷换为“反复打劫匪直到50”。在确定验证场景前，还需从玩家实际可用路径、出现率、损失/收益及尚未适配的入口完成比较，并继续保持 Tier 1 是Agent成熟度夹具而非产品目标。
 
-### P6 规划与记忆
-
-长期目标 → 候选子目标 → 可达性/风险选择 → 技能执行；失败产生描述和原因，再选择替代路线。根据目标检索相关技能，并从结构化 checkpoint 跨进程恢复。
-
-退出：资源变化、目标消失或动作失败后可自主改线。
-
-### P7 崩溃自治与模组诊断
-
-关联最后命令、状态、模块集、RGL/Watchdog/Mod 日志和 checkpoint；分类弹窗、卡死和崩溃；只自动恢复一次，重复故障转入模块二分和隔离。
-
-退出：强制崩溃可自动保存证据、恢复并给出机器可读归因。
-
-### P8 任务评测与整合包
-
-建立原子、组合、一级家族和 10/30/100 日 soak；每项有 Standard/Hard 和基线/Candidate A/B。
-
-退出：形成可重复的兼容性矩阵、已知问题和证据包。
-
-### P9 服务原版增强
-
-关系、俘虏、身份转换和长期目标优化接入同一 A/B Harness，但仍需先完成对应系统研究并进入 `DESIGN.md`。
-
 ## 维护规则
 
-- 本文维护领域架构、迁移决策和阶段计划；新项目归入现有层，仅架构决策改变时修订；不另建路线图/竞品文档。
-- 阶段状态以 `TestResults` 为准，本文记录退出条件和当前入口；缺少前置则回退补地基，不删退出条件。
+- 本文维护技术目标、机制契约、领域架构、长期验收定义和未解事实；不保存项目工作项状态、域完成计数或测试通过快照。
+- GitHub Project 是唯一工作项/依赖/状态入口；本地 `TestResults/latest.json` 只代表最近一次本机Harness运行，不代表任务完成或当前项目状态。
+- 主线改变时更新本文并运行 `Set-ContextFocus.ps1 -Review` 刷新hash/复核期；ContextState只作为本文件和按需研究的路由器。
+- 缺少前置时按GitHub原生依赖表示阻塞；领域事实和验收约束留在本文/Research，不复制进任务状态字段。
 
 ## 主要来源
 

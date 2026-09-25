@@ -13,8 +13,8 @@
 - [DecisionGate] 重大方案/工程判断按序检查：先问最可能改变答案的问题；界定真实问题；预演三种失败原因；列出标准答案及其缺陷；反查能推翻当前判断的变量；分开事实、推断、未知并说明改判证据；最后只给一个按目标/限制/代价选出的结论。无需把七项机械打印，但问题若真的会改变决策，先向用户确认，不用猜测填空。
 - [MechanicGate] 实现任何原版玩家动作前，必须先在现有 `Focus/MAINLINE.md` 的“原版机制契约”记录：玩家实际入口/按键修饰、原版自然状态变化、Campaign 时间模式如何流动、直接 API 与 UI handler 的差别、当前证据和未知项。不得从 API 名称、其他游戏经验或想当然推导玩家体验。
 - [ClockPolicy] 时间流动与地图/菜单动作分开建模：若原版时间模式正在运行，世界会自然推进；仅在明确的时间控制/固定步进或 Harness 需要确定性时调用时钟控制。移动、追近、进入定居点等动作不得为了让测试快结束而暗中强制快进或暂停；任何宏动作都须显式标记为 Harness/Agent Host 策略，不得冒充原版玩家动作。
-- [ProgressMetrics] 项目工作项、依赖、阻塞与唯一WIP状态以GitHub Project为准；系统域/行为分母、技术验收指标和证据解释维护在 `Focus/MAINLINE.md`；Harness结果记录Git commit/脏树与活动Issue，不用“完成了若干命令”冒充Agent自主能力。
-- [HarnessBoundary] GitHub Issues/Projects 只管任务、依赖、评审与协作状态；Git 管代码历史；本地 Harness 管游戏/工具环境、可重复测试与原始运行证据；Agent 管研究、判断、目标分解和异常后的下一步。不得在 Markdown 复制动态任务状态。远程服务不可用时将状态标为 unavailable/unknown，不能伪报零值，也不能阻断无远程依赖的本地 Docs/Build/测试。
+- [ProgressMetrics] GitHub Project是唯一工作项状态源；领域/行为分母与可重复验收定义在 `Focus/MAINLINE.md`，单次运行结果和可计算的通过/失败数在本地 `TestResults`。不能把命令次数或验证夹具通过率当作Agent自主能力。
+- [HarnessBoundary] GitHub Issues/Projects只管任务、依赖和协作状态；Git只管代码历史；本地Harness只管游戏/工具环境、可重复测试和原始运行收据；Agent负责研究、判断、目标分解和异常后的下一步。Harness不读取或镜像项目板，也不需登录GitHub即可测试。不得在Markdown复制动态任务状态。
 - 静态源码无法判明交互链时，先追到 UI 入口、输入修饰与副作用；仍无法验证且会改变实现的玩家体验事实时，向用户提出一个具体、最小的问题，不得先选架构再补解释。
 - 不把“能启动”“能进主菜单”“加载 DLL”“进入战役”“行为已触发”当成同一个结论。
 - 所有功能变更必须经过 `Dev/ChronicleFramework/Run-Harness.ps1` 对应阶段；没有自动证据就标记为未验证。
@@ -29,20 +29,20 @@
 - 主线完成或切换使用 `Complete-ContextFocus.ps1`，默认删除旧主线，只有明确需要追溯时才归档。
 - 禁止用新增 Markdown 代替维护现有事实源；`Check-Docs.ps1` 强制唯一主线、复核期限、hash、文档路由和默认读取层级，文档字节数只作诊断而非硬上限。
 
-## 进入开发前阅读
+## 每次任务启动
 
-- `Dev/ChronicleFramework/DEVELOPMENT.md`
-- `Dev/ChronicleFramework/DESIGN.md`
-- `Dev/ChronicleFramework/SYSTEM_INVENTORY.md`
-- `Dev/ChronicleFramework/ContextState.json`
-- `Dev/ChronicleFramework/Focus/MAINLINE.md`
+- 读取 `ContextState.json` 与 `Get-ContextPack.ps1` 输出；默认只加载工程契约和当前技术焦点。
+- 从GitHub Project检查当前 `In Progress` 工作项、原生依赖及验收；不要假定上次会话的活动事项仍然有效。一次最多启动一个工作项；若没有活动事项，选择一个已解除依赖且符合当前焦点的事项后再开始。
+- 项目卡状态按统一约定使用：Todo=未开始（阻塞看原生依赖），In Progress=唯一当前工作，Done=验收达成且有commit/结果摘要。父项维护共用验收，子项只维护独有范围。
+- GitHub任务卡是执行清单和状态；不再把活动Issue、已完成域数或阶段状态抄入 `ContextState.json`、`MAINLINE.md` 或 Harness结果。
 
 ## 按任务读取
 
-- 每次任务先读取 `ContextState.json` 和 `Get-ContextPack.ps1` 输出，再读取GitHub Project中唯一 `In Progress` 的工作项；不要假定上次会话的主线或活动Issue仍然有效。
+- `DEVELOPMENT.md` 与 `Focus/MAINLINE.md` 是默认上下文；详细机制事实通过 `SYSTEM_INVENTORY.md` 路由到对应Research文档。
+- 只有设计/方案任务才读取 `DESIGN.md`；只有系统盘点任务才读取 `SYSTEM_INVENTORY.md` 和对应Research文件；普通代码/Harness任务不加载整份系统清单或无关Research。
 - 只读取 `SYSTEM_INVENTORY.md` 路由到的目标系统研究文件；不要为普通任务加载全部 `Research/`。
 - Research 文档按清晰的系统/主题维护；主题自然分化时允许拆分多份，不得为满足任意字数上限而极端压缩。每份文档必须在 `ContextState.json` 中分层路由，并由 `SYSTEM_INVENTORY.md` 指向；过时材料应更新、删除或移入默认不读取的 Archive。
-- Agent Bridge 任务读取 `Dev/ChronicleFramework/Focus/MAINLINE.md`。
+- Agent Bridge任务以 `Dev/ChronicleFramework/Focus/MAINLINE.md` 为技术事实源。
 - 关系/身份任务读取 `Dev/ChronicleFramework/Research/B/WorldEntitiesIdentity.md`，跨系统时再读取 C、F、J 对应文件。
 
 当前已验证的默认入口：
@@ -51,4 +51,4 @@
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Dev\ChronicleFramework\Run-Harness.ps1 -Phase All
 ```
 
-任务状态只看GitHub Project；本地Harness的Git provenance和最新测试证据看 `Dev/ChronicleFramework/TestResults/latest.json`；技术事实及系统覆盖指标看 `Focus/MAINLINE.md`。不要在Markdown复制维护任务状态。
+任务状态只看GitHub Project；源码差异只看Git；当前单次测试收据看 `Dev/ChronicleFramework/TestResults/latest.json`；长期机制事实和验收定义看 `Focus/MAINLINE.md`。GitHub Project只在Agent开始/结束工作项时读取或更新，Harness运行阶段完全本地化。

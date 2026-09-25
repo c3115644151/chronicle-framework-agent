@@ -1,8 +1,5 @@
 [CmdletBinding()]
 param(
-    [string]$Id,
-    [string]$Objective,
-    [string]$Phase,
     [switch]$Review
 )
 
@@ -14,22 +11,12 @@ if (-not (Test-Path $statePath)) { throw "Context state is missing: $statePath" 
 if (-not (Test-Path $mainlinePath)) { throw "Current mainline document is missing: $mainlinePath" }
 
 $state = Get-Content $statePath -Raw | ConvertFrom-Json
-if ($Review) {
-    if (-not $Id) { $Id = [string]$state.current.id }
-    if (-not $Objective) { $Objective = [string]$state.current.objective }
-    if (-not $Phase) { $Phase = [string]$state.current.phase }
-}
-foreach ($value in @($Id, $Objective, $Phase)) {
-    if ([string]::IsNullOrWhiteSpace($value)) { throw 'Id, Objective and Phase are required when setting context focus.' }
-}
+if (-not $Review) { throw 'Use -Review after editing Focus/MAINLINE.md. Work-item status is managed in GitHub Project, not ContextState.' }
 
 $now = [DateTime]::UtcNow
 $reviewDays = [int]$state.lifecyclePolicy.reviewIntervalDays
-$state.current.id = $Id
-$state.current.objective = $Objective
-$state.current.phase = $Phase
 $state.current.path = 'Focus/MAINLINE.md'
-$state.current.updatedUtc = $now.ToString('O')
+$state.current.reviewedUtc = $now.ToString('O')
 $state.current.reviewAfterUtc = $now.AddDays($reviewDays).ToString('O')
 $state.current.mainlineSha256 = (Get-FileHash $mainlinePath -Algorithm SHA256).Hash.ToLowerInvariant()
 
@@ -48,7 +35,10 @@ Move-Item -LiteralPath $temporaryPath -Destination $statePath -Force
 
 [pscustomobject]@{
     Updated = $true
-    Current = $state.current
+    FocusPath = $state.current.path
+    ReviewedUtc = $state.current.reviewedUtc
+    ReviewAfterUtc = $state.current.reviewAfterUtc
+    MainlineSha256 = $state.current.mainlineSha256
     DefaultRead = $state.defaultRead
     References = $state.references
     Archives = $state.archives

@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 
-Contract version: 4.78
+Contract version: 4.79
 
 ## 目标与边界
 
@@ -21,13 +21,15 @@ Campaign Agent Bridge 是验证基础设施，不是新玩法。它负责把战�
 | `DESIGN.md` | 双方确认、准备实施的功能清单 |
 | `SYSTEM_INVENTORY.md` | 原版系统总清单与研究路由 |
 
-GitHub Project 是工作项、依赖和状态的唯一事实源，最多一个 `In Progress` 卡片。`Focus/MAINLINE.md` 记录工程事实、机制契约、研究结论与验收分母，不复制任务状态；`ContextState.json` 保存当前设计焦点、复核期限、默认读取顺序和文档层级。`TestResults/latest.json` 记录每次运行的Git提交/脏树状态、项目板活动Issue和自动测试结果。`Research/<类别>/` 是按需引用的稳定知识；主题自然分化时可拆分，且每份都必须经`ContextState.json`和`SYSTEM_INVENTORY.md`路由。`Archive/`默认不读。
+GitHub Project 是工作项、原生依赖、状态的唯一事实源，最多一个 `In Progress` 卡片。Git是代码及其历史的唯一事实源。`Focus/MAINLINE.md` 保存长期有效的工程目标、机制契约、技术事实、未知项、覆盖分母和验收定义，不保存活动Issue、完成数或单次测试快照。`ContextState.json` 是上下文路由器，只保存当前技术焦点路径、hash/复核元数据、默认读取层和按需Research路由；项目目标、当前阶段和Issue状态不在其中重复。`TestResults/latest.json` 仅代表本机最近一次Harness运行及其commit/脏树信息。`Research/<类别>/` 按需加载并维护稳定领域事实；主题自然分化时可拆分，且每份都必须经`ContextState.json`和`SYSTEM_INVENTORY.md`路由。`Archive/`默认不读。
 
-GitHub 与 Harness 不互相替代：GitHub Issues/Projects 管理工作项、依赖、评审和协作状态；Git 记录可审查的源代码历史；本机 Harness 探测已安装的游戏版本/模组、编译并启动游戏、操作 disposable fixture、采集崩溃与结构化断言。AI/Agent 负责解释目标、做机制研究、选择下一步和处理未覆盖异常，这些不是 Project 自动提供的能力。Harness 将本次测试绑定到 commit、工作树脏状态和唯一活动 Issue；证据原件保存在本地 `TestResults/<run-id>`，只有适合代码评审的摘要/变更才进入 GitHub，不自动把大型日志、存档或画面上传为评论。
+GitHub 与 Harness 不互相替代：GitHub Issues/Projects 管理工作项、原生依赖、评审和协作状态；Git记录可审查的源代码历史；本机Harness探测安装的游戏版本/模组、编译并启动游戏、操作disposable fixture、采集崩溃与结构化断言；Agent负责解释目标、研究机制、选择下一步和处理未覆盖异常。这四者之间不复制状态。Harness只输出本次运行的commit、工作树状态和测试收据，不查询或更改GitHub，也不因GitHub未登录/离线而失效。运行收据以run ID保存在本地`TestResults/<run-id>`并由`latest.json`指向最近一次；Agent在工作项达到验收时，将相关commit与简洁测试结论回填到GitHub Issue。大型日志、存档与视频不自动上传或塞进Issue。
 
-GitHub 是远程协作系统而非本地运行时依赖。离线或 API 不可用时，Docs/Build/本地测试仍应能执行；Harness 明确记录 GitHub 状态未知/不可用，不把未知转换为 0 个阻塞项或通过。项目板可用时，Harness 检查最多一个 `In Progress` 工作项，并以 GitHub 原生 issue dependencies 计算阻塞；无活动卡片表示待领任务，不妨碍本地文档与构建检查。项目板不可用不应阻断不依赖它的本地测试。
+Project采用最少任务状态：`Todo`表示尚未开始（是否被阻塞看Issue原生dependency关系），`In Progress`表示唯一当前工作（最多一项），`Done`表示验收标准已满足且Issue附有commit/结果摘要。W1用一个父Issue持有跨域审计和退出标准，子Issue只写独有的系统范围；W2-W8由原生Issue dependencies排序，标题前缀提供阶段标识，不再维护重复的自定义Phase/Gate字段。
 
-源码仓库位于 Bannerlord 安装目录之外；游戏目录只作为 Harness 的运行时目标。被Git忽略的 `harness.local.json` 保存本机仓库/游戏路径和GitHub项目编号；新工作区用 `Initialize-ChronicleWorkspace.ps1` 生成。源码、模块清单、Harness和工程规则均由同一Git提交追踪；构建将版本化模块清单与DLL部署到本机 `Modules/ChronicleFramework`。大型`TestResults`不提交Git，证据仍按运行号保留在本地。
+任务工作流由Agent在明确边界点同步，而非由Harness轮询：开始前从Project确认唯一活动Issue、依赖及验收；仅执行该Issue范围；本地Harness验证并记录commit/测试证据；只有验收条件满足时，Agent才更新Issue为Done并附上commit与结果摘要。暂缓、阻塞或范围变化直接更新对应Issue/依赖，不另开状态文档。没有活动Issue时，Agent选择可执行且依赖已解除的下一项后再开始。
+
+源码仓库位于 Bannerlord 安装目录之外；游戏目录只作为 Harness 的运行时目标。被Git忽略的 `harness.local.json` 仅保存本机仓库与游戏路径；GitHub任务板位置只在 `ContextState.json` 记录一次。新工作区用 `Initialize-ChronicleWorkspace.ps1` 生成本地路径设置。源码、模块清单、Harness和工程规则均由同一Git提交追踪；构建将版本化模块清单与DLL部署到本机 `Modules/ChronicleFramework`。大型`TestResults`不提交Git，证据仍按运行号保留在本地。
 
 文档管理优先保证可读性和信息层级，不以总字数或文件总数强迫压缩。`Check-Docs.ps1` 强制的是文档均有明确路由、引用目标存在、主线唯一且复核/hash有效；总文档字节数和默认读取集合的大小只作诊断数据。主题过长时先按概念边界拆分并调整路由；过时内容应修订、删除或移入默认不读取的 Archive，不得为了塞进一个任意容量而写成密文。
 
@@ -45,7 +47,7 @@ GitHub 是远程协作系统而非本地运行时依赖。离线或 API 不可�
 
 实现前追当前版本玩家入口；反编译出 setter 不等于复现操作。Campaign 时间运行时自然推进，原版地图点击可调档；移动不得暗藏快进/暂停。仅对影响实现且源码未知的玩法事实询问用户。
 
-这不是新增文档：在既有 MAINLINE 契约表中维护事实。`Check-Docs.ps1` 检查契约表、必需字段和当前实现动作是否都有记录；实现范围改变时同步维护该表与 Harness contract version。PowerShell 读取 AGENTS/Markdown/JSON 权威文件时必须显式 UTF-8，中文规则门禁不得依赖系统默认代码页。进度只在 MAINLINE 维护有分母、有验收证据的指标；不以动作数量替代自主决策闭环进度。
+这不是新增文档：在既有 MAINLINE 契约表中维护事实。`Check-Docs.ps1` 检查契约表、必需字段和当前实现动作是否都有记录；实现范围改变时同步维护该表与 Harness contract version。PowerShell 读取 AGENTS/Markdown/JSON 权威文件时必须显式 UTF-8，中文规则门禁不得依赖系统默认代码页。MAINLINE维护分母定义与验收规则，GitHub维护任务状态，`TestResults`维护单次运行结果；不以动作数量替代自主决策闭环进度。
 
 ## Research Readiness Gate
 
@@ -77,7 +79,7 @@ Provider loop 输入观察及上一动作原始回执，再执行 allowlist 动�
 
 ## Harness 架构
 
-职责按事实来源划分，不复制状态：GitHub 项目板回答“做什么/顺序/谁在做/是否阻塞”；Git 回答“代码变成了什么”；Harness 回答“本机游戏与工具实际上发生了什么”；Agent 决策层回答“基于证据下一步做什么”。Harness 输出不能覆盖 GitHub 卡片状态，也不能把测试指标当作产品自主能力。
+职责按事实来源划分，不复制状态：GitHub 项目板回答“做什么/顺序/当前工作项/是否被依赖阻塞”；Git回答“代码变成了什么”；Harness回答“本机游戏与工具实际上发生了什么”；Agent决策层回答“基于证据下一步做什么”。Harness输出不能覆盖GitHub卡片状态，也不能把测试指标当作产品自主能力；Harness不调用GitHub API/CLI。
 
 ```text
 CLI / Computer Use 启动适配
@@ -139,7 +141,7 @@ stop()
 
 | 层级 | 必须证明 | 自动证据 |
 | --- | --- | --- |
-| Docs | 文档路由、主线层级、引用/hash/复核和契约一致 | `Check-Docs.ps1`；Harness摘要另报Git与项目板状态 |
+| Docs | 文档路由、主线层级、引用/hash/复核和契约一致 | `Check-Docs.ps1`；Harness收据另记Git commit/脏树 |
 | Preflight | 本体、项目、清单和工具存在 | JSON 清单 |
 | Api | 当前 DLL 存在目标签名 | API Probe 输出 |
 | Build | 项目针对当前 DLL 编译 | 构建退出码和 DLL |
@@ -234,19 +236,19 @@ stop()
 
 ## 文档维护契约
 
-- 始终只有一个 `Focus/MAINLINE.md`；主线目标和阶段由 `ContextState.json` 声明，工作项状态由GitHub Project声明。
-- 每次任务开始先比较用户目标与 `ContextState.json.current`；目标不一致时必须先替换、删除或归档旧主线，再调用 `Set-ContextFocus.ps1`。
-- 主线完成或切换必须使用 `Complete-ContextFocus.ps1` 原子执行“删除/归档旧主线 + 写入新主线 + 更新状态”；禁止手工留下两个活跃主线。
-- `Set-ContextFocus.ps1 -Review` 用于确认主线仍有效并刷新复核期限；主线内容发生变化但未更新 hash 时 Docs 必须失败。
-- `Get-ContextPack.ps1` 默认只返回 Core + Active；Reference 通过标签按需加入，Archive 只有显式请求才返回。
+- 始终只有一个 `Focus/MAINLINE.md`；它维护技术焦点，不记录当前Issue、域完成数或项目阶段状态。工作项状态仅由GitHub Project声明。
+- `ContextState.json` 只路由当前MAINLINE、文档默认层、按需Research和复核/hash元数据；不得加入任务ID、活动Issue、阶段或完成百分比。
+- MAINLINE焦点改变时直接维护该文件，再运行 `Set-ContextFocus.ps1 -Review` 更新review日期和hash；它不接受或存储任务目标/阶段参数。
+- 主线完成或主题切换必须使用 `Complete-ContextFocus.ps1` 原子执行“删除/归档旧MAINLINE + 写入新技术焦点 + 更新路由元数据”；任务Issue另在GitHub关闭或更新，两边不互相复制状态。
+- `Get-ContextPack.ps1` 默认只返回Development Contract + Active Focus；`DESIGN.md`仅设计任务读取，`SYSTEM_INVENTORY.md`与Research仅盘点任务按路由加载，Archive只有显式请求才返回。
 - `Check-Docs.ps1` 检查层级、唯一主线、hash、复核期限、Reference 单文件规则以及 Archive 不进入默认读取列表。
 - 文档内容过时直接修改权威段落，不新增“新版”“补充”文件。
 - 删除、移动或归档文档时同步修正 `ContextState.json`、根 `AGENTS.md` 和 Docs 检查。
 - Harness、验收、工具链或文档拓扑变化时提升 contract version。
 - 启动重试只认明确崩溃；RGL存在不等于崩溃。Progression留故障摘要；PostBattle夹具读取并校验奖励遥测，不改结算。
-- 每次任务开始和结束运行 `Run-Harness.ps1 -Phase Docs`；Docs 输出当前主线和默认上下文包，主线过期或 hash 失配时禁止进入功能开发。
-- 动态状态只读 `TestResults/latest.json`，不得手工维护状态文档。
+- Harness入口只接收本地游戏路径和仓库路径；不需要GitHub授权、配置、网络或Project字段。
+- 每次修改后运行相关Harness阶段；Docs检查文档路由/技术门禁，`TestResults/latest.json`只表示最新本地收据。项目板状态只在Agent开始/结束工作项时更新。
 
 ## 当前执行焦点
 
-当前目标、阶段和主线文件只读取 `ContextState.json.current`。项目方法与阶段退出条件写在 `Focus/MAINLINE.md`，不得在本文件复制当前状态。
+`ContextState.json.current.path`只定位当前技术焦点；GitHub Project及活动Issue决定工作项和执行次序；`Focus/MAINLINE.md`保存跨任务有效的技术约束、机制事实和研究门槛。不得从单个来源推导另外两个来源的动态状态。

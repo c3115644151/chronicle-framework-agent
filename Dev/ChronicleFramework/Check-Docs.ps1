@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '4.78'
+$contractVersion = '4.79'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -55,10 +55,16 @@ if ($projectFile -notmatch [regex]::Escape('<Compile Remove="TestResults/**/*.cs
 if ($harnessScript -notmatch "HarnessContractVersion\s*=\s*'$contractVersion'") {
     throw "Run-Harness.ps1 does not declare contract version $contractVersion."
 }
-if ($harnessScript -notmatch 'DefaultReadMarkdownBytes' -or $harnessScript -notmatch 'MarkdownBytes' -or $harnessScript -notmatch 'TaskBoardActiveIssue' -or $harnessScript -notmatch 'TaskBoardProjectUrl' -or $harnessScript -notmatch 'CensusDomainDoneCount' -or $harnessScript -notmatch 'GitCommit' -or $harnessScript -notmatch 'gh project item-list' -or $harnessScript -notmatch 'blockedBy\(first:20\)' -or $harnessScript -notmatch 'DependenciesAvailable' -or $harnessScript -notmatch 'DependencyError' -or $harnessScript -notmatch 'status --porcelain') { throw 'Harness summary must expose document footprint, Git provenance, and native GitHub task/dependency state.' }
+if ($harnessScript -notmatch 'GitCommit' -or $harnessScript -notmatch 'SourceControl' -or $harnessScript -notmatch 'status --porcelain' -or $harnessScript -match 'TaskBoard|CensusDomainDoneCount|gh project|gh api|githubProjectNumber') { throw 'Harness receipts must record Git provenance and remain independent of GitHub task tracking.' }
 if ($projectFile -notmatch 'ChronicleGameRoot' -or $harnessScript -notmatch 'ChronicleGameRoot=\$gameRoot' -or -not (Test-Path -LiteralPath (Join-Path $harnessRoot 'Initialize-ChronicleWorkspace.ps1'))) { throw 'Cloned repositories must accept a local game path and provide a repeatable workspace initializer.' }
+$initializerSource = Get-Content (Join-Path $harnessRoot 'Initialize-ChronicleWorkspace.ps1') -Raw -Encoding UTF8
+if ($initializerSource -notmatch 'git -C \$PSScriptRoot rev-parse --show-toplevel' -or $initializerSource -notmatch 'not a Chronicle Framework source repository') { throw 'Workspace initialization must resolve and validate the Git root, including when invoked through an install-directory junction.' }
 foreach ($ignoredPath in @('TestResults', 'obj', 'bin', 'harness.local.json')) { if ($gitIgnore -notmatch [regex]::Escape($ignoredPath)) { throw "Repository .gitignore must exclude generated/local data '$ignoredPath'." } }
-if ($developmentDoc -notmatch 'GitHub Project 是工作项' -or $developmentDoc -notmatch '源码仓库位于 Bannerlord 安装目录之外' -or $developmentDoc -notmatch 'API 不可用时') { throw 'Development policy must define task/source/runtime boundaries and local operation during GitHub outages.' }
+if ($developmentDoc -notmatch 'GitHub Project 是工作项' -or $developmentDoc -notmatch '源码仓库位于 Bannerlord 安装目录之外' -or $developmentDoc -notmatch 'Harness不调用GitHub API/CLI') { throw 'Development policy must define decoupled task/source/runtime responsibilities.' }
+if ($localSettings) {
+    $forbiddenSettings = @($localSettings.PSObject.Properties.Name | Where-Object { $_ -match '^github' })
+    if ($forbiddenSettings.Count -gt 0) { throw "Local Harness settings must not contain GitHub project state or credentials: $($forbiddenSettings -join ', ')." }
+}
 if (-not (Test-Path -LiteralPath $sourceManifestPath)) { throw 'The version-controlled Chronicle module manifest is missing.' }
 [xml]$sourceModuleManifest = Get-Content -LiteralPath $sourceManifestPath -Encoding UTF8
 if ([string]$sourceModuleManifest.Module.Id.value -ne 'ChronicleFramework') { throw 'The version-controlled manifest must declare ChronicleFramework.' }
@@ -135,27 +141,20 @@ if ($freshCampaignTelemetry -notmatch 'FreshCampaignHarness\.ProbeLocalIssueConv
 foreach ($requiredText in @('MechanicGate', 'ClockPolicy', 'ResearchFirstGate', 'DecisionGate')) {
     if ($rootAgents -notmatch [regex]::Escape($requiredText)) { throw "Root AGENTS.md is missing mechanic-contract rule '$requiredText'." }
 }
-if ($rootAgents -notmatch 'HarnessBoundary' -or $rootAgents -notmatch '不能阻断无远程依赖的本地 Docs/Build/测试') { throw 'AGENTS.md must preserve the GitHub/Git/Harness/Agent boundary and offline-local-test policy.' }
+if ($rootAgents -notmatch 'HarnessBoundary' -or $rootAgents -notmatch 'Harness不读取或镜像项目板') { throw 'AGENTS.md must preserve the GitHub/Git/Harness/Agent responsibility boundary.' }
 if ($developmentDoc -notmatch 'Research Readiness Gate' -or $developmentDoc -notmatch 'DecisionGate' -or $harnessScript -notmatch 'Get-ChronicleResearchReadiness' -or -not (Test-Path -LiteralPath $researchReadinessScript)) { throw 'Research and decision readiness rules must be documented and enforced before building changed game C# sources.' }
 $approvedDiagnosticHash = [regex]::Match($researchReadinessSource, "AuditedHarnessDiagnosticSha256 = '([0-9a-f]{64})'")
 $actualDiagnosticHash = (Get-FileHash (Join-Path $harnessRoot 'SubModule.cs') -Algorithm SHA256).Hash.ToLowerInvariant()
 if (-not $approvedDiagnosticHash.Success -or $approvedDiagnosticHash.Groups[1].Value -ne $actualDiagnosticHash) { throw 'The exact-hash SubModule diagnostic exception must match the reviewed source.' }
 if ($mainlineDoc -notmatch '(?m)^Research Gate: \*\*(BLOCKED|READY)\*\*' -or $mainlineDoc -notmatch '(?m)^Implementation Gate: \*\*(BLOCKED|READY)\*\*' -or $mainlineDoc -notmatch '行为总分母：\*\*(UNKNOWN|[1-9]\d*)\*\*' -or $mainlineDoc -notmatch 'SYSTEM_INVENTORY' -or $mainlineDoc -notmatch '127') { throw 'MAINLINE must expose gate status and distinguish system inventory from the behavior denominator.' }
-if ([string]::IsNullOrWhiteSpace($taskTrackerUrl) -or $mainlineDoc -notmatch [regex]::Escape($taskTrackerUrl)) { throw 'ContextState taskTracker URL must be linked from MAINLINE.' }
-$domainCensus = [regex]::Match($mainlineDoc, '(?m)^\| Behavior-interface census \| \*\*(\d{1,2})/12 domains\*\*')
-if (-not $domainCensus.Success -or [int]$domainCensus.Groups[1].Value -gt 12) { throw 'MAINLINE must measure behavior-interface mapping against the 12 SYSTEM_INVENTORY domains.' }
-if ($mainlineDoc -match '(?m)^Research Gate: \*\*READY\*\*' -and $mainlineDoc -match 'Behavior universe denominator: \*\*UNKNOWN\*\*') { throw 'Research cannot be marked READY while the behavior denominator is unknown.' }
-if ($mainlineDoc -match '(?m)^Research Gate: \*\*READY\*\*' -and [int]$domainCensus.Groups[1].Value -ne 12) { throw 'Research cannot be READY until all 12 system domains have behavior-interface maps.' }
+if ([string]::IsNullOrWhiteSpace($taskTrackerUrl) -or $taskTrackerUrl -notmatch '^https://github\.com/users/[^/]+/projects/\d+$' -or @($contextState.taskTracker.PSObject.Properties.Name).Count -ne 1) { throw 'ContextState must store only one GitHub Project locator, without duplicated task metadata.' }
+if ($mainlineDoc -match '(?m)^\| Behavior-interface census \|' -or $mainlineDoc -match '\b0/12 domains\b' -or $mainlineDoc -match '\[W1-A.*Issue #\d+') { throw 'MAINLINE must not mirror live GitHub work-item or domain-completion status.' }
+if ($mainlineDoc -match '(?m)^Research Gate: \*\*READY\*\*' -and $mainlineDoc -match '行为总分母：\*\*UNKNOWN\*\*') { throw 'Research cannot be marked READY while the behavior denominator is unknown.' }
 if ($mainlineDoc -match '(?m)^Implementation Gate: \*\*READY\*\*' -and $mainlineDoc -notmatch '(?m)^Research Gate: \*\*READY\*\*') { throw 'Implementation cannot be READY before the research gate.' }
 . $researchReadinessScript
 if (-not (Test-ChronicleResearchReadiness)) { throw 'Research readiness gate regression checks failed.' }
 if ($mainlineDoc -notmatch '(?m)^#### .*Mechanic Contract\s*$') { throw 'MAINLINE.md is missing the required original-mechanic contract table.' }
-if ($mainlineDoc -notmatch '(?m)^#### .*Quantified Progress') { throw 'MAINLINE.md is missing the quantified progress section.' }
-foreach ($metricId in @('P4 sampled action families', 'Behavior-interface census', 'Campaign GameState surfaces', 'P3 Structured observation', 'Agent loop contract', 'Battle fixture', 'BattleSimulation bridge', 'Agent vertical slice', 'P5 precursor checks', 'Visual capture transport', 'Visual UI evidence', 'Latest Docs gate')) {
-    if ($mainlineDoc -notmatch "(?m)^\|\s*$([regex]::Escape($metricId))\s*\|") {
-        throw "MAINLINE.md quantified progress is missing metric '$metricId'."
-    }
-}
+if ($mainlineDoc -notmatch '(?m)^#### .*Coverage and Evidence Contract') { throw 'MAINLINE.md must define durable denominator/acceptance rules without storing current task progress.' }
 foreach ($actionId in @('move', 'pursue', 'hold', 'rest', 'advance', 'autoresolve (research)', 'dialogueSelect (research)', 'dialogueContinue (research)', 'retreat (research)', 'partyLoot (research)')) {
     if ($mainlineDoc -notmatch "(?m)^\|\s*$([regex]::Escape($actionId))\s*\|") {
         throw "MAINLINE.md mechanic-contract table is missing action '$actionId'."
@@ -176,9 +175,11 @@ $mainlineHash = (Get-FileHash $mainlinePath -Algorithm SHA256).Hash.ToLowerInvar
 if ($contextState.current.mainlineSha256 -ne $mainlineHash) { throw 'Focus/MAINLINE.md hash is stale; run Set-ContextFocus.ps1 -Review.' }
 $reviewAfter = [DateTime]::Parse($contextState.current.reviewAfterUtc).ToUniversalTime()
 if ($reviewAfter -lt [DateTime]::UtcNow) { throw "Current focus review is overdue: $($contextState.current.reviewAfterUtc)." }
-if ([string]::IsNullOrWhiteSpace([string]$contextState.current.id)) { throw 'ContextState current.id is empty.' }
-if ([string]::IsNullOrWhiteSpace([string]$contextState.current.objective)) { throw 'ContextState current.objective is empty.' }
-if ([string]::IsNullOrWhiteSpace([string]$contextState.current.phase)) { throw 'ContextState current.phase is empty.' }
+if ([int]$contextState.schemaVersion -ne 2) { throw 'ContextState must use router-only schema version 2.' }
+if ([string]::IsNullOrWhiteSpace([string]$contextState.current.path) -or [string]::IsNullOrWhiteSpace([string]$contextState.current.reviewedUtc) -or [string]::IsNullOrWhiteSpace([string]$contextState.current.reviewAfterUtc) -or [string]::IsNullOrWhiteSpace([string]$contextState.current.mainlineSha256)) { throw 'ContextState current may contain only a valid focus pointer and review/hash metadata.' }
+if (@($contextState.current.PSObject.Properties.Name | Where-Object { $_ -in @('id', 'objective', 'phase', 'updatedUtc') }).Count -gt 0) { throw 'ContextState must not duplicate project/task objective, phase, or live status.' }
+[string[]]$expectedDefaultRead = @('DEVELOPMENT.md', 'Focus/MAINLINE.md')
+if (($contextState.defaultRead -join '|') -ne ($expectedDefaultRead -join '|')) { throw 'Default context is limited to the engineering contract and active technical focus; load design/inventory/research on demand.' }
 [string]$defaultMainline = $contextState.defaultRead | Where-Object { $_ -eq [string]$contextState.current.path }
 if (-not $defaultMainline) { throw 'Current focus is not in defaultRead.' }
 if (@($contextState.defaultRead | Where-Object { $_ -like 'Archive/*' }).Count -gt 0) { throw 'Archive content cannot be in defaultRead.' }
