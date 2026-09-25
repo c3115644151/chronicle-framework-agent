@@ -347,6 +347,16 @@ Hero 俘虏可以存在于：
 
 释放动作本身不统一处理个人关系后果。
 
+### 监狱突围与营救Hero
+
+玩家可从`town_keep_dungeon`、`castle_dungeon`或`town_enemy_town_keep`选择`Stage a prison break`。`DefaultPrisonBreakModel.CanPlayerStagePrisonBreak`要求Fortification、存在Hero prisoner，且聚落Faction与玩家Clan不属同Faction；菜单还会在MainHero受伤时禁用。冷却期内该入口转入警戒提示。
+
+选项启动后，`PrisonBreakCampaignBehavior`把Settlement与Garrison prisoners合并成目标清单，仅保留Hero：与玩家Faction敌对者禁用，金币不足者显示预计Bribe cost并禁用。费用由`PrisonBreakModel.GetPrisonBreakStartCost`按Hero赎金价值、聚落Security和玩家Roguery计算。选中目标后Start调用`GiveGoldAction`扣款、写入该聚落7日冷却并打开`PrisonBreakMission`；目标Inquiry记为`OBS-F12-01`，付费启动记`ACT-F12-13`。
+
+这不是直接调用救援结果：Mission分潜行接近囚犯与警报后护送逃离两段。关押者附近互动按Use键；第一阶段在守卫未警觉时互动会切换到第二阶段、让囚犯跟随并触发守卫警戒/追捕；`StealthFailCounterMissionLogic`记录潜行失败。Mission结束时主角昏迷会被留作Settlement俘虏；囚犯Agent不可用则救援失败/可能重伤死亡；双方仍active且未触发失败才进入救援成功菜单。
+
+成功后离开Settlement并与囚犯Hero对话，最终经`EndCaptivityAction.ApplyByEscape`释放，默认`PrisonBreakModel` relation reward为+15并给予Roguery XP；若目标是玩家Companion，专属对话分支还会将Hero置为Active并加入MainParty。成功后的状态提交单列为`ACT-F12-14`，与付费启动/Mission阶段分开。实际潜入、近身交互、护送和战斗控制由G03 Mission身体承载，Chronicle当前没有3D控制动作。Inquiry和Mission UI视觉、Campaign/Scene时钟、失败分支保存恢复未运行核验。
+
 ### 赎金与 Barter 转移
 
 玩家要通过普通领主Barter与对方谈判，BarterVM是否出现Hero俘虏条款由`BarterablesRequested`监听者按双方Party/Faction状态动态构造；Conversation/Barter入口和通用议价状态见 [E10](../E/EconomyAndTrade.md#e10-barter-交换谈判)，此处只记录俘虏状态变化。战后PartyScreen、主角被俘GameMenu与对话Barter不是同一入口。

@@ -38,6 +38,8 @@ Chronicle可观察战斗模拟 finished/retreated/MapEvent battle state 等少�
 
 Mission 内操作通过键盘/鼠标即时控制主角，TAB菜单可打开离场/撤退流程；将领/部队命令则经原生Order UI控制 Formation，而非通过地图Party AI目标。`BattleEndLogic.TryExit` 对离场动作判定其本体结果；不同 Siege攻守状态的离开语义可能是投降或不可撤退，不能只用“Mission结束”推断为安全撤退。当前 Chronicle 的 `missionRetreat` 会检查 Mission 与 BattleEndLogic，读取 `TryExit`，并拒绝把围城守军的 SurrenderSiege 误报为撤退。
 
+Prison Break是F12从地牢菜单启动的自定义Sandbox Mission subtype，而非通常的MapEvent战斗：启动入口/囚犯选择/Bribe提交映射F12 `ACT-F12-13`，成功后的Captivity结束对话映射`ACT-F12-14`。`PrisonBreakMissionController`在单一场景中交替处理潜行接近和警报后的护送/战斗，玩家须使用Use交互俘虏触发跟随，警卫感知和StealthFailCounter会改写结果；它不是进入场景后自动营救。它暴露G03通用Mission身体控制仍是未知清单，具体Movement/Use/Melee等Action族尚待研究，不能把F12启动入口算作完整营救支持。
+
 ### Campaign 后果与适配边界
 
 真实 Mission 的战斗时间推进属于局部场景；Campaign世界时间在战斗期间停止。Mission结束后再由Encounter/MapEvent流程应用死亡/昏迷、伤兵、经验、俘虏、战利品、关系/战斗奖励及是否继续战斗；与“坐镇指挥”模拟的伤亡和UI选择路径不应互相替代。Mission本身结束也可能进入下一段连续战斗、俘虏处理或战后 Party/Inventory 状态，而不是立即回到地图。
