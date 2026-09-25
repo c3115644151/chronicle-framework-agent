@@ -200,6 +200,7 @@ Research 只按系统类别维护事实，不为专题、路线图或阶段重�
 | B | `Research/B/WorldEntitiesIdentity.md` |
 | C | `Research/C/PoliticalDiplomacyAndRelationConsumers.md` |
 | D | `Research/D/SettlementsAndTerritory.md` |
+| E | `Research/E/EconomyAndTrade.md` |
 | F | `Research/F/CaptivityAndRelease.md` |
 | J | `Research/J/RelationNarrativeConsumers.md` |
 | K / Agent Bridge | `Focus/MAINLINE.md` |

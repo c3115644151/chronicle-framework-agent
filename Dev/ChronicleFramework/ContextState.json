@@ -52,6 +52,15 @@
                                     ]
                        },
                        {
+                           "path":  "Research/E/EconomyAndTrade.md",
+                           "tags":  [
+                                        "economy",
+                                        "trade",
+                                        "items",
+                                        "inventory"
+                                    ]
+                       },
+                       {
                            "path":  "Research/F/CaptivityAndRelease.md",
                            "tags":  [
                                         "captivity",
