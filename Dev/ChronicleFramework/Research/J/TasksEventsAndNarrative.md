@@ -8,9 +8,9 @@
 
 Issue是带有发起者、频率/冷却、解决条件和后果的Campaign委托。玩家此前确认地图中出现蓝色感叹号的委托标记；这里将其记录为玩家界面观察，不把它冒充本机UI实测。`IssueManager`会检查Hero的候选Issue类型/冷却、建立/分配Issue，并按每日/每小时tick使其失效、迁移、终结或转交AI领主处理；`IssueBase`保留Owner与DueTime，并让每个具体Issue提供 `CanPlayerTakeQuestConditions`、留存条件、超时后果和 `GenerateIssueQuest`。
 
-玩家入口通常是有有效Issue的Notable/领主交互；地图标记/菜单提示用于显示可交谈人，交谈后由Issue特定条件决定是否出现接取选项。接受某个Issue可以启动Quest，也可能有原版设计的Alternative Solution或Lord Solution：后者能要求兵种/人数/技能、花费一定时长、存在伤亡或失败风险，并允许计时处理，而不是“对话一下自动完结”。具体奖励、任务步骤和失败由各Issue子类决定，不能从带感叹号的图标推算奖励或可接受状态。
+玩家入口通常是有有效Issue的Notable/领主交互；地图标记/菜单提示用于显示可交谈人，交谈后由Issue特定条件决定哪些解决分支开放。1.4.8 `IssuesCampaignBehavior` 的共用Conversation链提供Quest、Alternative和Lord三种不同处理：Quest通过`IssueManager.StartIssueQuest`进入Issue Quest；Alternative需有可派遣同伴、通过Issue自己的`AlternativeSolutionCondition`，选择同伴并在条件要求多名士兵时打开PartyScreen配置满足人数/兵种的健康部队，确认后从MainParty roster移出并调用`StartIssueWithAlternativeSolution`，同伴进入busy状态，部队延迟返回；其后还会按Issue设置的天数、伤亡/失败风险结算。Lord Solution要求Issue自己的`LordSolutionCondition`、Issue owner当前聚落属于玩家Clan且玩家Influence足够；玩家选项先调用`StartIssueWithLordSolution`，随后仅在存在CounterOfferHero且issue owner仍在Settlement时开启第二段对话，否则通用代码自动走拒绝counteroffer结算。拒绝该NPC的counteroffer会扣`NeededInfluenceForLordSolution`并走成功/拒绝counter的Issue后果；接受则走Betrayal后果，不扣这笔Influence。以上三条的入口、前置、时间/资源与终态不同，不以“接委托”合并；Alternative和Lord能否按更细子类/确认节点继续分族，仍需查具体Issue override与提交/取消恢复。
 
-Chronicle目前只有限制在特定Harness探针的 `talkToIssueOwner`研究路径：测试可找到Issue、调用部分交谈/brief逻辑，但跳过实际地图接近/3D对话入口，且结果依Issue种子/前置变化；它不算通用接委托能力。稳定的NPC关系/日志见I/J08，Stage化Quest机制见J02/J03。来源：`IssueManager`、`IssueBase`、`DefaultIssueModel`、本体Issue子类、Sandbox任务VM/Behavior及Chronicle `AgentProtocol`。未知：每种Issue实际玩家可见入口/奖励/成本/失败条件的全量目录、出现频率、过期/冷却和地图标记视觉条件；完整范围不能用若干样本Issue代替。
+Chronicle目前只有限制在特定Harness探针的 `talkToIssueOwner`研究路径：测试可找到Issue、调用部分交谈/brief逻辑，但跳过实际地图接近/3D对话入口，且结果依Issue种子/前置变化；它不算通用接委托能力。稳定的NPC关系/日志见I/J08，Stage化Quest机制见J02/J03。来源：本机1.4.8 `IssueManager`、`IssueBase`、`IssuesCampaignBehavior`、`DefaultIssueModel`、Issue子类和Chronicle `AgentProtocol`。未知：每种Issue实际可用解决分支/玩家文字入口/资源成本/失败条件的全量目录、Alternative roster确认边界和各Issue子类如何继承通用流程、Lord Solution counteroffer种类/返回路径、出现频率/过期冷却及地图标记视觉条件；不能由通用handler推断每种Issue都支持同样解法，也不能用若干样本Issue代替完整范围。
 
 ## J02 Quests：任务生命周期与结果
 

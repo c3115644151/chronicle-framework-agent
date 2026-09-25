@@ -524,7 +524,7 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 
 | 系统ID | 映射到的观察面/行动族 | 去重/未决 |
 | --- | --- | --- |
-| J01 Issues | `OBS-J01-01`当前Notable/领主Issue提示；接取转入`ACT-J02-01`，Alternative/Lord Solution独立为`ACT-J01-02` | 蓝色标记是玩家提供的视觉事实；每种Issue的奖励/Brief不同，不并成通用任务脚本 |
+| J01 Issues | `OBS-J01-01`当前Notable/领主Issue提示；Quest接取`ACT-J02-01`；派遣部队的Alternative Solution`ACT-J01-02`、启动Lord Solution`ACT-J01-03`、回应反报价`ACT-J01-04`为不同分支 | 蓝色标记是玩家提供的视觉事实；三种结算入口/副作用不并成通用任务脚本；每种Issue的可用分支仍需逐类盘点 |
 | J02 Quests | `OBS-J02-01`任务列表/当前阶段/地图marker；接取/启动`ACT-J02-01` | Quest完成由各Task/真实世界动作达成，不另计“写QuestComplete” |
 | J03 Quest Tasks | 移动/交易/对话/战斗步骤映射K/E/I/G已有实际动作ID | TaskBase只是程序对象，具体任务步骤需回到相关原版UI/动作族 |
 | J04 Journal | `OBS-J04-01` Quest Journal/时间与进度记录 | JournalLog是回看信息，不等于世界状态或Action |
@@ -559,7 +559,9 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 | ID | 类型 | 玩家入口 / 观察语义 | 原版后果、时间/限制 | Chronicle状态 / 未知 | 来源 |
 | --- | --- | --- | --- | --- | --- |
 | OBS-J01-01 | 观察 | 聚落Notable/领主上可见的Issue标记/接取提示 | 当前有效Issue与Quest giver/Owner/任务状态决定是否显示 | `talkToIssueOwner`仅限Harness研究流程，跳过真实地图接近/视觉路径 | J01/IssueManager、用户确认蓝色感叹号 |
-| ACT-J01-02 | 候选行为 | Issue对话选择Alternative Solution或Lord Solution，而非Quest路线 | 可能派兵、花天数/资源并有伤亡/失败风险；每类Issue效果不同 | 未实现；不与接Quest合并，未穷举各Issue子类 | J01、IssueBase、DefaultIssueModel |
+| ACT-J01-02 | 候选行为 | 在Issue对话选择Alternative Solution，选定符合条件的Companion并在需要时用PartyScreen配置健康部队后确认 | 写入Alternative状态；Companion离开MainParty/变busy，派出Troop延迟返回；Issue子类可配置天数、伤亡、失败风险与奖励 | 1.4.8 `IssuesCampaignBehavior`/`IssueBase`共用调用链确认；入口/PartyScreen取消返回、各Issue门槛与后果未逐类核验；Chronicle无动作 | J01/J03/F/H、`IssuesCampaignBehavior`、`IssueBase.StartIssueWithAlternativeSolution` |
+| ACT-J01-03 | 候选行为 | 在可用Issue对话选择Lord Solution并确认 | Issue自身条件、Issue owner当前聚落属于玩家Clan及Influence余额门槛成立后，开始LordSolution状态；之后可能转到CounterOfferHero对话；是否成功取决于后续分支 | 1.4.8通用对话/状态调用链确认；Lord Solution具体类型、成本提示与没有后续对话时的默认处理需逐Issue核验；Chronicle无动作 | J01/C/E/I、`IssuesCampaignBehavior.issue_offer_player_accept_lord*`、`IssueBase.StartIssueWithLordSolution` |
+| ACT-J01-04 | 候选行为 | 对Lord Solution第二段Counter Offer选择接受或拒绝 | 拒绝反报价会扣`NeededInfluenceForLordSolution`并走Issue success/拒绝counter分支；接受会走Issue betrayal/counter accepted分支；无可响应CounterOfferHero或owner不在Settlement时原版可能自动拒绝counter | 两个选项是相反的状态后果；通用VM callback已确认，实际遇到条件/金额/视觉迁移未运行，Issue子类后果未穷举；Chronicle无动作 | J01/J08、`IssuesCampaignBehavior.issue_counter_offer_*`、`IssueBase.CompleteIssueWithLordSolutionWith*` |
 | OBS-J02-01 | 观察 | Quest/Journal页面查看进行中阶段、期限、目标和日志 | Quest/QuestTask状态与自由文本记录不同；期限基于Campaign time | Observer只给当前任务摘要，不列完整日志/隐藏Task目标 | J02/J03/J04、QuestBase/QuestsVM |
 | ACT-J02-01 | 行为 | 从Issue/Story/NPC提供入口接受并启动一个合法Quest | 依任务内容写Quest state/期限，可能引入Gold/关系/物品前置或失败风险 | Chronicle无通用Quest接取/阶段执行器；每类入口须单独映射 | J01/J02/J03/J12、QuestBase/IssueBase |
 | OBS-J04-01 | 观察 | Journal/LogEntry浏览任务/角色记录 | 日志过期、隐藏信息与当前状态不同步；不自动推进Campaign | Chronicle未输出完整LogEntryHistory/Quest Journal | A07/J04/L05、LogEntryHistory/QuestsVM |
