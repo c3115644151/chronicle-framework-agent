@@ -93,11 +93,25 @@ Chronicle 当前 Player snapshot记录Clan标识、名称、Tier、Gold/Influenc
 - Hero 通常经 Clan 映射到 Kingdom，Party 的 MapFaction 可能与 Hero 的个人状态不同；
 - MapFaction 参与敌对判断、AI、战争、菜单和遭遇条件。
 
+#### B07 Culture选择与数据载体
+
+新战役角色创建中的 Culture 阶段由 `CharacterCreationCultureStageVM` 调用当前 `CharacterCreationContent.GetCultures()` 建列表；点击文化项后选中该 Culture，可能按其 `DefaultCharacterCreationBodyProperty` 更新玩家脸部/体型数据，并设 `Hero.MainHero.Culture`；进入下一阶段时将选择写回 CharacterCreationContent。该选择属于角色创建，不是 Clan/Kingdom 身份；本机尚未找到 Campaign 内通用“更换文化”入口。
+
+`CultureObject` 是 XML 数据对象，提供 BasicTroop、DefaultPartyTemplate、默认政策、CulturalFeats、名字列表、Lord/Notable/叛乱 Hero 模板和可用船体等文化内容。Hero、Clan、Kingdom 与 Settlement 各有 Culture 字段/引用；模型与生成器选择各自读取这些字段，文化不是 MapFaction 的别名。玩家通常通过可见 NPC/Settlement、兵种和百科页接收文化信息；Chronicle Observer 当前未读取 Hero/Clan/Kingdom 的 Culture 字段。
+
+证据：当前 `TaleWorlds.CampaignSystem.dll`（`CultureObject.Deserialize` 与数据属性）、`TaleWorlds.CampaignSystem.ViewModelCollection.dll`（`CharacterCreationCultureStageVM`）、本机 Story/Sandbox/Native Data XML与 `AgentObserver.cs`。未知项：Culture 的全部模型效果、沙盒/故事模式可选文化集合、特殊 Culture 与阵营之间的变化规则和完整可见UI字段未全量枚举。
+
 ## 阵营关系
 
 `FactionManager` 管理 Faction 之间的 Stance。`StanceLink` 保存双方、战争与和平时间、伤亡、围城、掠夺、城镇攻占和贡金等统计。
 
-阵营敌对通过 `FactionManager.IsAtWarAgainstFaction` 等路径判断，与 Hero 个人关系分开存储。身份转换会改变 Clan、Kingdom 和 MapFaction，但不会自动重建个人关系历史。
+#### B08 Faction 与 Stance
+
+Faction 关系经 `FactionManager` 查询/更新，双方阵营状态由 `StanceLink` 保存；该链接还保留战争/和平起止、伤亡、围城、掠夺、攻占城镇和贡金等统计。王国间、Clan与王国、叛军等对象共享 Faction 接口，但具体参战和固定战争规则会由 DiplomacyModel/行动调用方进一步过滤。
+
+阵营敌对通过 `FactionManager.IsAtWarAgainstFaction` 等路径判断，与 Hero 个人关系分开存储。Hero 的 `MapFaction` 通常经 Clan 指到 Kingdom；Party 自己也有 MapFaction，因此同一角色与所在队伍的阵营信息在无 Clan、特殊 Hero、叛逃或代理 Party 情形下可能不同。身份转换会改变 Clan、Kingdom 和 MapFaction，但不会自动重建个人关系历史。玩家可在 Kingdom Diplomacy 等页面触发政治行动；本项只记录状态/对象，不重复 C03-C10 的宣战、议和、联盟和决策过程。
+
+证据：当前 `TaleWorlds.CampaignSystem.dll`（`FactionManager`、`StanceLink`）、本地 `Hero.MapFaction` 与 `AgentObserver.IsHostile` 路径。未知项：各 Faction 配对的无链接默认 Stance、ConstantWar 和特殊势力的具体例外、遭遇/AI/菜单处使用的全部 MapFaction 判定点仍需按 C/F/G 系统研究交叉核实。
 
 ## 个人关系数据模型
 
