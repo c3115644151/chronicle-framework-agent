@@ -220,7 +220,6 @@
 | OBS-A02-01 | 观察 | 地图时间/日期/速度档 | HUD显示Campaign时钟与当前时间控制档；Mission暂停和战役快进分开 | Observer输出campaignDay/timeControlMode；UI图标/标题尚未实机对照 | A02、L06；MAINLINE |
 | OBS-A07-01 | 观察 | Encyclopedia(Hero history)/日志 | 从全局历史条目按页面可见条件筛出角色历史；不等于实时全世界快照 | Chronicle不输出LogEntryHistory或百科历史列表 | A07、L05；用户确认N百科入口 |
 | OBS-A07-02 | 观察 | Quest Journal/`JournalLog` | 按当前任务/日志状态显示文本、时间/进度；不是Hero永久历史 | Chronicle未提供完整Quest日志列表/筛选 | A07、J04、L05 |
-| OBS-A07-03 | 观察 | Map Notification/QuickInfo | 事件通知、短提示和持久日志分属不同数据/交互 | Chronicle没有Notification队列/已读状态观察 | A07、J07、L06 |
 | OBS-A08-01 | 观察 | Tutorial提示 | 按Campaign类型/行为状态显示并可完成/关闭；StoryMode提示与Sandbox提示源不同 | Chronicle不读教程提示/完成状态 | A08、J12、L06 |
 | OBS-A08-02 | 观察 | Concept百科页 | 按概念分类/页面显示帮助文本与链接；N百科入口UI细节以实测为准 | Chronicle不读Concept数据或页面当前项 | A08、L05、用户确认N百科入口 |
 | N/A-A03-01 | N/A | Campaign小时/日/周等周期分发与对象Tick | 由Campaign时间和引擎调度触发，无“执行Tick”玩家入口；具体结果映射到造成状态变化的行为族 | 明确排除玩家动作分母；按时钟/生命周期研究保留来源与例外核查 | A03、`Research/A/CampaignRuntimeWorldState.md` |
@@ -526,7 +525,7 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 | J04 Journal | `OBS-J04-01` Quest Journal/时间与进度记录 | JournalLog是回看信息，不等于世界状态或Action |
 | J05 Incident | `OBS-J05-01` MapState当前Incident及条件选项；`ACT-J05-01`选择事件回应 | 每个Incident的Effect/Consequence按具体选项参数读取，不能合并不同事件后果 |
 | J06 Rumor | `OBS-J06-01`市场/玩家物品悬停中的异地买卖价格提示 | 同一ItemMenu消费者服务两侧；已有情报、具体物品、时效和价差共同筛选，专长可扩充来源；源码入口已确认，Chronicle尚未适配 |
-| J07 Notifications | `OBS-J07-01` MapNotification/QuickInfo/Scene通知 | 可点击通知若改变输入或位置则另映射所触发操作 |
+| J07 Notifications | Campaign Map Notice队列`OBS-J07-01`、QuickInfo瞬时提示`OBS-J07-02`、Scene通知`OBS-J07-03`分别观察 | A07记载LogEntry/百科日志；通知类分属不同存储/时间/宿主，不能与Log或彼此合并 |
 | J08 Conversations | `OBS-J08-01`当前Conversation Flow/参与者/选项；`ACT-J08-01`选择当前开放Dialogue option | Relation/Persuasion对话复用I09/I10的真实消费者，不重复文本条目 |
 | J09 Persuasion | `OBS-J09-01`当前Persuasion task/进度/风险信息；`ACT-J09-01`提交Persuasion argument | 说服尝试是Conversation option的特殊子族，任务/求偶/政治用相同模型但不同后果 |
 | J10 Tournament | `OBS-J10-01`赛事/对手/排行榜；`ACT-J10-01/02`参与或观看 | Join真实Mission与Watch模拟不同；奖励引用G10/H11，不能固定当Renown按钮 |
@@ -564,7 +563,9 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 | OBS-J05-01 | 观察 | Settlement进出后打开Incident选择界面查看事件/选项 | Incident trigger、cooldown、条件筛选一条事件；Effect列表不等于实际已提交结果 | MAINLINE有Incident modal/state链，仍未所有Incident运行验证 | J05/A02、IncidentsCampaignBehaviour/Incident |
 | ACT-J05-01 | 行为 | Incident UI中选择一个条件合法的事件Option并确认/关闭 | 每个Effect和Option Consequence分别调用；可能改变金钱/Party/关系/Settlement状态；直接API跳过VM cleanup | Chronicle对Incident通用流程目前Unsupported/Research；结构化事件返回未全测 | J05/L06、Incident.InvokeOption、MAINLINE |
 | OBS-J06-01 | 观察 | Inventory/市场Goods物品悬停详情中的异地买卖地点/记录价格；玩家栏与市场栏为同一观察族的两个入口 | `ItemMenuVM.SetMerchandiseComponentTooltip`按具体ItemObject、未过期记录、异地及价差筛选；来源受城镇访问/每日事件/交易专长影响。读取不改库存/金币，记录随Campaign时间过期；宿主界面时钟待运行核验 | 用户报告商品例子为谷物/贵重品/木材/葡萄酒，确认武器不显示，马匹未核；与本机1.4.8源码Goods筛选相符。Chronicle未适配，Agent未视觉/运行复核；利润/行情颜色另见E09 | J06/E02/E05/E09、`TradeRumorsCampaignBehavior`、`ItemMenuVM`、`SPInventoryVM`；马匹展示、来源/去重边缘未知 |
-| OBS-J07-01 | 观察 | 地图通知/QuickInfo/Scene notification | 队列可过期/关闭/跳转；Notice、Log与世界对象值分开 | Observer不读Notification queue/已读/点击目标 | J07/A07/L06、MapNotificationVM |
+| OBS-J07-01 | 观察 | Campaign Map Notification/Map Notice队列中的事件、有效期、目标和可点击跳转 | Notice由`CampaignInformationManager`持久保存并由`MapNotificationVM`呈现；过期/对象失效可关闭或跳转失败；不等同LogEntry正文 | Chronicle Observer不读Notice queue/已读/目标点击；各Notice类型筛选及失效后的视觉反馈未实机核验 | A07/J07/L06、`CampaignInformationManager._mapNotices`、`MapNotificationVM` |
+| OBS-J07-02 | 观察 | InformationManager QuickInformation/短时消息 | 由LogEntry/事件等消费端即时显示，不作为长期可回看的Notice队列；显示持续时间/宿主状态和持久日志不同 | Chronicle Observer不读取QuickInfo消息/队列；过期时间、被遮挡时是否保留和点击能力未核 | A07/J07/L06、`CampaignInformationManager.NewLogEntryAdded`、`InformationManager.DisplayMessage` |
+| OBS-J07-03 | 观察 | Mission/Scene局部通知、提示与可操作反馈 | 依当前Mission/Scene消息消费者显示；不等同Campaign Map Notice或QuickInfo，具体生命周期随Scene/Mission宿主 | Chronicle无Scene notification观察；全部显示入口、关闭/跳转/宿主时间规则未视觉核验 | J07/G03/L06/L07、Scene notification consumers |
 | OBS-J08-01 | 观察 | 活跃Conversation的发言人/Flow阶段/当下开放Option，包括由当前Courtship/Romance状态筛选出的开始/重试/Marriage Barter选项 | sentence condition、身份token、Task与关系筛选，不能扫描未开放Option；Romance选项不代表原始Romance数值 | Protocol提供有限Conversation state/option读取；这是J08/I09/I04共享的同一观察面 | I04/J08/I09/L04、ConversationManager/AgentObserver/Protocol、RomanceCampaignBehavior |
 | ACT-J08-01 | 行为 | 只选择当前Conversation实际开放且仍然valid的原生对话Option | Consequence可能启动Barter/Quest/Persuasion/Mission或改关系；context变化须重验 | Chronicle `dialogueSelect`仅限当前option列表；不支持全3D谈话接近 | J08/L04、ConversationManager/AgentProtocol |
 | OBS-J09-01 | 观察 | 当前PersuasionVM/Task的参与目标、阶段、剩余attempt、可用argument及其成功概率/当前进度 | options/chance依Task类型、Trait/Skill/Relation/difficulty；显示机会不等于最终检定结果 | Chronicle不输出完整PersuasionTask对象；I10/J09为同源信息，不重复计Observation | I10/J09、`PersuasionVM`、`PersuasionTask` |
