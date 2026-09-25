@@ -150,7 +150,7 @@ Town 把一个当前日常项目（`CurrentDefaultBuilding`）与普通建造队
 
 `BuildingsCampaignBehavior` 订阅 `DailyTickSettlementEvent`。对于城镇/城堡，若当前不是日常项目且当前没有围城、队列也非空，会把 `Town.Construction` 加到队首建筑的 `BuildingProgress`，随后由 `BuildingHelper.CheckIfBuildingIsComplete` 对照该等级施工成本。达到成本后建筑升一级并出队；达到 3 级后不再升级。围城会阻止此建筑施工推进。每日施工能力的输入和数值见 D02，建筑效果如何被各模型消费须结合具体 effect 与建筑类型查证。
 
-玩家管理 VM `SettlementProjectSelectionVM` 分别维护可用建设、日常项目与本地待提交队列；其中队列排序、选择 active development 与设置 daily default 是不同操作。`BuildingHelper.ChangeCurrentBuildingQueue` 会替换队列并拒绝把日常项目放入普通队列，`ChangeDefaultBuilding` 则只切换日常标记。`BoostBuildingProcessWithGold` 调整与金币差额对应的建设加速余额；其运行时按钮/确认流程和对玩家当前存款的界面呈现还未实机核实。
+玩家管理 VM `SettlementProjectSelectionVM` 分别维护可用建设、日常项目与本地开发队列草稿；但每次队列项增删/设为当前优先/重排都会触发`OnChangeInBuildingQueue`，父级`TownManagementVM.OnProjectSelectionDone`立即调用`BuildingHelper.ChangeCurrentBuildingQueue`，所以不是等管理窗口的Done才提交。选择日常项目走`SettlementDailyProjectVM.ExecuteSetAsActiveDevelopment`→同一父级回调，立即`ChangeDefaultBuilding`；仅`ExecuteSetAsCurrent`改变VM当前预览选择而不写Settlement。窗口Done负责关闭/结束，不应误当队列与日常项目唯一提交点。页面还提供Building reserve控制：`TownManagementReserveControlVM.ExecuteConfirm`按当前储备和本次输入金币调用`BuildingHelper.BoostBuildingProcessWithGold`，修改`Town.BoostBuildingProcess`供后续Construction逻辑使用；它不是立即升级建筑或绕过队列。源码/VM调用已定位，玩家实际输入数额、失败回执和建设储备后续扣用仍未运行核实。
 
 ### 易主、等级与效果事件
 
@@ -195,7 +195,7 @@ Chronicle Observer 不读取当前默认日常项目，也不计算这张表的�
 
 证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `DefaultBuildingTypes`、`BuildingType`、`Building.AddEffectOfBuilding`、`DefaultBuildingModel`；`TaleWorlds.CampaignSystem.ViewModelCollection.dll` 的 `SettlementProjectSelectionVM`、`SettlementDailyProjectVM`；Chronicle `AgentObserver.cs`。数据与 VM 逻辑为 v1.4.8.119303 静态程序集证据，尚无游戏内项目选择运行结果。
 
-未知项：UI 页面从哪个玩家入口打开、选择何时提交、关闭/取消是否回滚草稿；每项效果最终经过哪些模型及调用方；默认 AI 改选发生时所处 UI/围城/易主条件的全部限制；Mod 新增/替换日常项目时，ViewModel 与模型是否自动支持新效果。
+未知项：玩家实际点击具体daily项目后的视觉回执及聚落/围城上下文禁用条件；每项效果最终经过哪些模型及调用方；默认 AI 改选发生时所处 UI/围城/易主条件的全部限制；Mod 新增/替换日常项目时，ViewModel 与模型是否自动支持新效果。源码已表明选择即时写入；不可再把普通关闭窗口说成可回滚所有daily project改动。
 
 ## D07 总督任命与驻军
 
