@@ -34,9 +34,11 @@ Agent 覆盖：快照给出 `campaignDay`、`timeControlMode`；`pause`/`resume`
 
 ## A03 周期事件与调度粒度
 
-没有独立玩家按钮；事件依 A02 战役时钟运行。1.4.8 `Campaign.cs` 建立日(1d)、小时(1h)、QuarterHourly(0.25h)周期；小时与四分之一小时事件由 `CampaignEventDispatcher` 分发。每日分发后按战役已过日数对 7 取模触发周事件。另有 Party/Town/Settlement/Hero/Clan 日事件。
+没有独立玩家按钮；周期事件依 A02 的 Campaign 时钟运行。1.4.8 `Campaign.CreateCampaignEvents` 建立每日(1日)、每小时(1小时)、每15分钟(0.25小时)三个全局周期事件，并以当前战役时间计算各自首次触发延迟；处理器转发给 `CampaignEventDispatcher`。每日分发完成后，若从战役起始日经过的整日数可被7整除，则分发 WeeklyTick（按 Campaign 起点计周，不直接按现实星期）。
 
-影响包括队伍与 AI、食物工资、市场、聚落、英雄、任务、战争外交等；每种 CampaignBehavior 可订阅不同事件，加载组合决定实际消费者，行为总数尚未盘点。AgentObserver 是轮询快照：给出日期、玩家队资源/移动、可见聚落/队伍、进行中任务期限；不订阅 CampaignEvents，不输出通用事件增量/日志历史。证据：已安装 v1.4.8 `Campaign.cs`/`CampaignEvents.cs`、`AgentObserver.cs`；源码映射，未完成消费者或运行时全量清点。
+`CampaignPeriodicEventManager.InitializeTickers` 还按对象类别建立分散的定期处理：MobileParty 的小时/日处理、Party/Town/Settlement/Hero/Clan 事件，以及 Caravan、Garrison、Militia、Villager、Custom、Patrol、Bandit、Lord 等队伍的部分小时级 AI 事件。对象级 ticker 和全局小时/日/周事件是不同入口；订阅者决定收到哪些回调。全局 Campaign 运行路径受当前 GameState 限制：`MapState.OnMapModeTick` 只有在 MapState 为活动 State 时才调用 `Campaign.RealTick` 和 `Campaign.Tick`；Campaign 时间暂停期间，`_dt` 为0，周期 ticker 不推进。3D Mission 使用另一条 `CampaignMissionComponent.OnMissionTick` → `CampaignEventDispatcher.MissionTick(dt)` 实时回调，这不是 CampaignTime 的小时/日事件。地图内坐镇战斗模拟保持 MapState 的具体时间模式效果未在此处判定，见相应机制契约。
+
+影响包括队伍与 AI、食物工资、市场、聚落、英雄、任务、战争外交等；每种 CampaignBehavior 可订阅不同事件，加载组合决定实际消费者，行为总数尚未盘点。AgentObserver 是轮询快照：给出日期、玩家队资源/移动、可见聚落/队伍、进行中任务期限；不订阅 CampaignEvents，不输出通用事件增量/日志历史。证据：当前安装 v1.4.8 `TaleWorlds.CampaignSystem.dll`（`Campaign.CreateCampaignEvents`、`CampaignPeriodicEventManager`、`CampaignEventDispatcher`、`MapState`）和 `Modules/SandBox/bin/Win64_Shipping_Client/SandBox.dll`（`CampaignMissionComponent.OnMissionTick`）、`AgentObserver.cs`；为源码映射，未完成实际消费者或运行时全量清点。
 
 ## A04 CampaignEvents 事件总线
 
