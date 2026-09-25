@@ -397,7 +397,11 @@ Hero 俘虏可以存在于：
 
 放行、EndCaptivityDetail与关系奖励是可分别触发/核验的副作用；以上三种玩家入口及不同结果分别登记为目录`ACT-F12-03/04/05`。它们与Barter释放`ACT-F12-02`、自动释放和主角赎金菜单不同。
 
-相邻的收押路径也不能漏计：`CapturedLord`战后对话中，玩家可确认把被击败领主收为俘虏（`conversation_talk_lord_defeat_to_lord_capture_on_consequence`），与遭遇中MainHero投降不同；在`FreeOrCapturePrisonerHero`对话中，交战对象可以触发“重新囚禁”选项，只有目标此时仍是prisoner才真正调用`TakePrisonerAction`（`conversation_player_fails_to_release_prisoner_on_consequence`）。两者来源状态与结果守卫不同，分别记为`ACT-F12-06/07`。相关对话UI与此特殊ConversationContext的完整触发来源仍未运行核验。
+相邻的收押与处决路径也不能漏计：`CapturedLord`战后对话中，玩家可确认把被击败领主收为俘虏（`conversation_talk_lord_defeat_to_lord_capture_on_consequence`），与遭遇中MainHero投降不同；在`FreeOrCapturePrisonerHero`对话中，交战对象可以触发“重新囚禁”选项，只有目标此时仍是prisoner才真正调用`TakePrisonerAction`（`conversation_player_fails_to_release_prisoner_on_consequence`）。两者来源状态与结果守卫不同，分别记为`ACT-F12-06/07`。
+
+同一`CapturedLord`对话还提供`Off with your head`处决分支，但对话本身并不立即调用Kill action：目标先经请求处决/最后辩词回到玩家选择；选择“Prepare to die”调用`CreateForInformingPlayer`弹出`HeroExecutionSceneNotificationData`，该面板只有Proceed确认而无否定选项。通知的`OnAffirmativeAction`将执行标记延迟到关闭时，由`PostponedAffirmativeAction`在受害者非MainHero时根据MapEvent是否仍存在调用`KillCharacterAction.ApplyByExecutionAfterMapEvent`或`ApplyByExecution`；未确认而关闭不会调用此执行分支。因此“对话表态”和真正处决提交是复合流程中的前置与最终确认，目录将整个有状态结果计为`ACT-F12-12`，不将开面板当作已处决。关系/家族影响经执行模型和HeroKilled事件处理，数值需另按I域/执行模型核实。视觉确认与取消行为尚未实测。
+
+以上对话UI与`FreeOrCapturePrisonerHero`特殊ConversationContext的完整游戏入口仍未运行核验。
 
 ### 地牢、赎金商人与俘虏容器操作
 
