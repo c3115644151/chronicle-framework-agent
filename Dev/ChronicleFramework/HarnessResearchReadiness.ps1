@@ -1,6 +1,28 @@
 ﻿$script:AuditedHarnessDiagnosticSource = 'SubModule.cs'
 $script:AuditedHarnessDiagnosticSha256 = '714bde7336710cfcbe2ef4726d8275e495afacbb7966b1bfde563a4fbb490449'
 
+function Get-ChronicleCanonicalTextSha256 {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Content)
+
+    $canonicalContent = [regex]::Replace($Content, "`r`n|`r|`n", "`n")
+    $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($canonicalContent)
+    $algorithm = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        [BitConverter]::ToString($algorithm.ComputeHash($bytes)).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $algorithm.Dispose()
+    }
+}
+
+function Get-ChronicleCanonicalFileSha256 {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$LiteralPath)
+
+    Get-ChronicleCanonicalTextSha256 -Content ([IO.File]::ReadAllText($LiteralPath))
+}
+
 function Get-ChronicleResearchReadiness {
     [CmdletBinding()]
     param(
@@ -29,6 +51,10 @@ function Get-ChronicleResearchReadiness {
 }
 
 function Test-ChronicleResearchReadiness {
+    $lfHash = Get-ChronicleCanonicalTextSha256 -Content "line one`nline two`n"
+    $crlfHash = Get-ChronicleCanonicalTextSha256 -Content "line one`r`nline two`r`n"
+    if ($lfHash -ne $crlfHash) { throw 'Canonical source hashing must treat LF and CRLF as the same reviewed content.' }
+
     $unchangedBlocked = Get-ChronicleResearchReadiness -ResearchReady:$false -ImplementationReady:$false
     if (-not $unchangedBlocked.Allowed) { throw 'Research gate must permit builds/tests when no game C# source changed.' }
 

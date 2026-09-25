@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '4.83'
+$contractVersion = '4.84'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -45,6 +45,7 @@ $harnessScript = Get-Content (Join-Path $harnessRoot 'Run-Harness.ps1') -Raw -En
 $startupEvidenceScript = Join-Path $harnessRoot 'HarnessStartupEvidence.ps1'
 $researchReadinessScript = Join-Path $harnessRoot 'HarnessResearchReadiness.ps1'
 $researchReadinessSource = Get-Content $researchReadinessScript -Raw -Encoding UTF8
+. $researchReadinessScript
 $projectFile = Get-Content (Join-Path $harnessRoot 'ChronicleFramework.csproj') -Raw -Encoding UTF8
 $developmentDoc = Get-Content (Join-Path $harnessRoot 'DEVELOPMENT.md') -Raw -Encoding UTF8
 $designDoc = Get-Content (Join-Path $harnessRoot 'DESIGN.md') -Raw -Encoding UTF8
@@ -158,7 +159,7 @@ foreach ($requiredHeading in @('## 判断原则', '## 单一工作循环', '## �
 if ($rootAgents -notmatch '最多推进一项' -or $rootAgents -notmatch 'Harness 不调用 GitHub' -or $rootAgents -notmatch '高影响未知未解决前不猜着实现') { throw 'AGENTS.md must preserve single-task execution, source ownership, and consequential-unknown handling.' }
 if ($developmentDoc -notmatch '研究就绪门槛' -or $harnessScript -notmatch 'Get-ChronicleResearchReadiness' -or -not (Test-Path -LiteralPath $researchReadinessScript)) { throw 'Research readiness rules must be documented and enforced before building changed game C# sources.' }
 $approvedDiagnosticHash = [regex]::Match($researchReadinessSource, "AuditedHarnessDiagnosticSha256 = '([0-9a-f]{64})'")
-$actualDiagnosticHash = (Get-FileHash (Join-Path $harnessRoot 'SubModule.cs') -Algorithm SHA256).Hash.ToLowerInvariant()
+$actualDiagnosticHash = Get-ChronicleCanonicalFileSha256 -LiteralPath (Join-Path $harnessRoot 'SubModule.cs')
 if (-not $approvedDiagnosticHash.Success -or $approvedDiagnosticHash.Groups[1].Value -ne $actualDiagnosticHash) { throw 'The exact-hash SubModule diagnostic exception must match the reviewed source.' }
 if ($mainlineDoc -notmatch '(?m)^Research Gate: \*\*(BLOCKED|READY)\*\*' -or $mainlineDoc -notmatch '(?m)^Implementation Gate: \*\*(BLOCKED|READY)\*\*' -or $mainlineDoc -notmatch '行为总分母：\*\*(UNKNOWN|[1-9]\d*)\*\*' -or $mainlineDoc -notmatch 'SYSTEM_INVENTORY' -or $mainlineDoc -notmatch '126') { throw 'MAINLINE must expose gate status and distinguish the game-system inventory from the player-behavior denominator.' }
 if ([string]::IsNullOrWhiteSpace($taskTrackerUrl) -or $taskTrackerUrl -notmatch '^https://github\.com/users/[^/]+/projects/\d+$' -or @($contextState.taskTracker.PSObject.Properties.Name).Count -ne 1) { throw 'ContextState must store only one GitHub Project locator, without duplicated task metadata.' }
@@ -169,7 +170,6 @@ $inventoryIds = @([regex]::Matches($inventoryDoc, '(?m)^\|\s*([A-L]\d{2})\s*\|')
 $inventoryDomainLetters = @($inventoryIds | ForEach-Object { $_.Substring(0, 1) } | Sort-Object -Unique)
 $inventoryCountInFocus = [regex]::Match($mainlineDoc, 'SYSTEM_INVENTORY\.md.*?(\d+)项')
 if ($inventoryIds.Count -eq 0 -or @($inventoryIds | Sort-Object -Unique).Count -ne $inventoryIds.Count -or ($inventoryDomainLetters -join '') -ne 'ABCDEFGHIJKL' -or -not $inventoryCountInFocus.Success -or [int]$inventoryCountInFocus.Groups[1].Value -ne $inventoryIds.Count) { throw 'SYSTEM_INVENTORY item IDs, A-L coverage, or the derived count in MAINLINE do not agree.' }
-. $researchReadinessScript
 if (-not (Test-ChronicleResearchReadiness)) { throw 'Research readiness gate regression checks failed.' }
 if ($mainlineDoc -notmatch '(?m)^#### .*Mechanic Contract\s*$') { throw 'MAINLINE.md is missing the required original-mechanic contract table.' }
 if ($mainlineDoc -notmatch '(?m)^#### .*Coverage and Evidence Contract') { throw 'MAINLINE.md must define durable denominator/acceptance rules without storing current task progress.' }
