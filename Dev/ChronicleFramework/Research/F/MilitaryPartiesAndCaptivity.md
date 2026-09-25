@@ -96,6 +96,8 @@ Party战略 Think 与 `MobilePartyAi` 的短期地图导航是两个相邻层。
 
 确认 VM 草稿后，如 MainParty 当前尚无 Army 且在王国阵营，会建立玩家领导的 Army 并把选中 MobileParties 关联到它，按总 Influence Cost 扣除影响力；取消则不提交草稿。玩家可通过同一窗口移除 Party 或显式解散（另有影响力成本/确认）；`DisbandArmyAction` 会释放成员 Party 并记录原因事件。
 
+ArmyManagement VM还可在已有玩家Army时逐次`Boost Cohesion`：每次把草稿`NewCohesion`提高10点（上限100），并以`ArmyManagementCalculationModel.GetCohesionBoostInfluenceCost`累加费用；Done时`ApplyCohesionChange`调用`Army.BoostCohesionWithInfluence`并结算Influence，Cancel则退回打开管理页时的Influence。它可与Party加入/移除在同一Army管理窗口/Done中组合，但目标数值和Influence效果与改成员名单独立，因此目录另列`ACT-F05-03`，不混在建军/Party roster操作里。
+
 ### 集结过程与持续管理
 
 创建不是把所有 Party 瞬间合并为同一位置。`Army.Gather` 设集合目标，再经 `GatherArmyAction` 分发 ArmyGathered；Leader 向聚集点移动，AttachedParties 各自执行 Escort 到 Leader 的地图目标，抵达可遭遇的距离后才加入合并 Party 位置/Overlay。玩家 Army 以主队附近的可达聚落作为 gathering point；AI Army 由目标/目标 Settlement 决定适合的集合地点。
