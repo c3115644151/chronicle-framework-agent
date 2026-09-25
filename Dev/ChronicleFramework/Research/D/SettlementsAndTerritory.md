@@ -1,6 +1,6 @@
 # D 类研究：聚落与领地
 
-状态：机制盘点中；目前只完成 D01 基础对象与现有观察覆盖，未进行方案评审。
+状态：机制盘点中；D01-D03 已完成首轮静态盘点，目前继续研究 D04 村庄状态与生产，未进行方案评审。
 
 适用本体：Bannerlord v1.4.8.119303。依据安装目录中的 `TaleWorlds.CampaignSystem.dll` 反编译结果和 Chronicle 当前 `AgentObserver.cs`；本节是静态代码证据，不代表已经在游戏界面逐项实测。
 
@@ -100,6 +100,38 @@ Campaign 时间仍由全局时间控制推进；普通读取这些派生值不�
 
 未知项：玩家城堡管理页的精确字段/操作/权限；估值方法各调用者是否用于领地分配、AI 决策或玩家展示的全链路；城墙最大耐久模型的全部参数和围城各阶段 UI 对应；村庄绑定更改时的事件、税收/贸易/食物联动及玩家可操作条件。
 
+## D04 村庄状态、生产、村民队伍与掠夺
+
+### Hearth 与村庄状态
+
+`Village` 的 `Hearth` 是参与村庄繁荣、生产和村民队伍规模计算的数值，不是一个直接等同于可见居民人数的 roster。`VillageType` 定义基础生产商品及每种商品产量；Settlement 自身文化提供村民 Party 模板。`Bound` 是政治归属/绑定城镇或城堡，`TradeBound` 是经济交易目的地，二者并非始终相同。
+
+默认繁荣模型对正常村庄按 Hearth 档位计算基础每日增长：低于 300 为 +4，300–599 为 +1.2，达到 600 起为 +0.2；政策、文化、Issue、绑定城镇/城堡建筑及相关 Perk 可继续修正。被掠夺状态另有 -1 的基础项。`Village.DailyTick` 应用模型给出的 Hearth 变化后把 Hearth 下限保持在 10；随后更新关联 Settlement 民兵，并将村庄持有金币回调到 1000。模型数值只是默认 1.4.8 规则，其他 Mod 可替换模型。
+
+状态枚举为 Normal、BeingRaided、ForcedForVolunteers、ForcedForSupplies、Looted。`Village` setter 对 Normal、BeingRaided、Looted 分发各自的专属事件；强征状态没有对应的专属事件分支。原版 `ChangeVillageStateAction` 在状态实际改变时对所有这些状态分发统一 `OnVillageStateChanged(old,new,raider)` 并刷新 Settlement Party 视觉等级遮罩。Looted 使 `IsDeserted` 为真；村庄民兵模型在非 Normal 状态不增加或减少，普通产出模型也仅对 Normal 状态给出产量。围城的驻留村民 Party 会被停止移动。
+
+### 生产与仓储流
+
+`VillageGoodProductionCampaignBehavior` 订阅每日聚落 tick。每轮先统计村庄 Settlement Party 的物品 roster；若总物品量低于仓储容量的 1.5 倍才运行商品和食物产出。仓储容量约为五天预计产出量的上取整，至少为 5；模型把预计每日食物产出与 `VillageType` 各项商品产出相加后计算。
+
+商品模型要求 VillageState 为 Normal，按 VillageType 的商品基准量和 Hearth 档位乘数 `(HearthLevel + 1) × 0.5` 计算，再叠加适用的绑定城镇 Perk、文化和绑定建筑效果，最后以随机舍入转成整数。食物产出按 HearthLevel+1 计算，可被 Issue 效果修正；每份食物会从原版可食生品类中按价值权重随机抽取。每日生产的商品先进入村庄的物品 roster 并发出 `OnItemProduced`；它不是即时直接写入绑定城镇市场。
+
+后续村民运输有独立行为：每小时 Settlement tick 只考虑 Normal、未进入 MapEvent 的村庄；在随机判断通过、村庄库存达到容量且 Party/地图条件允许时，按 Hearth 和 PartySizeLimitModel 条件生成或补充 Villager Party，从村庄库存装载部分商品并驶向 TradeBound 城镇。路途、敌对关系、围城、队伍被拦截或仓储库存都会影响货物是否抵达，不能把“村庄每日生产”误当作“绑定城镇每天必然收到同量商品”。贸易绑定会在新档/载入、领地易主、宣战/议和、Clan 变更王国等事件后重新计算；具体 trade-bound 选择算法留待经济/贸易域交叉核对。
+
+### 掠夺与恢复边界
+
+玩家对村庄的敌对行动由原版 Village hostile-action GameMenu/Encounter 链处理，涉及袭击、强征志愿兵或补给等不同分支，不是一个统一的“村庄受损”结果。Village 状态转换会记录行为者并广播事件；袭击、强征可能分别改变 SettlementHitPoints、Hearth、村庄 roster、Party roster/战利品和外交状态。具体前置、警告、遭遇与结果要按 D09 的玩家入口分支及 D10 的所有权/后果复核，本节不把不同分支合并成固定数值。
+
+`SettlementHitPoints` 是聚落受损数据，不等同 Hearth。`VillageHealCampaignBehavior` 对血量低于 1、没有 MapEvent 且没有 SiegeEvent 的村庄/城镇逐日恢复部分 SettlementHitPoints；来源/领地力量和 Perk 会影响恢复速度。被掠夺村庄对绑定城镇安全度的影响见 D02；生产何时恢复、Hearth 如何回补、伤害/事件如何清理的完整生命周期仍未从所有状态转换调用点闭环。
+
+### Chronicle 当前覆盖与玩家观察边界
+
+Chronicle 附近 Settlement 快照不返回村庄 Hearth、VillageState、VillageType/产物、仓库容量、村民 Party、Bound/TradeBound 或 SettlementHitPoints，因此 Agent 当前不能从此接口判断村庄是否正常生产、是否被掠夺、货物是否已运出或有哪些绑定关系。玩家从地图点击进入村庄后所见菜单、交易/强征/Issue 入口以及百科显示字段尚未在本项运行观察，归 D09 逐入口核验。
+
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `Village`、`DefaultSettlementProsperityModel`、`DefaultSettlementMilitiaModel`、`DefaultVillageProductionCalculatorModel`、`VillageGoodProductionCampaignBehavior`、`VillagerCampaignBehavior`、`VillageTradeBoundCampaignBehavior`、`ChangeVillageStateAction`、`VillageHostileActionCampaignBehavior`、`VillageHealCampaignBehavior`；Chronicle `AgentObserver.cs`。本节为 v1.4.8.119303 静态程序集证据，没有运行新战役、掠夺村庄或改存档。
+
+未知项：各类村庄在 UI/百科中显示 Hearth、生产、绑定与受损状态的具体入口和限制；所有强征/袭击分支的条件、损害及战争/关系后果；TradeBound 模型选择逻辑、村民货物运输丢失/到货调用链；被掠夺结束后状态恢复的完整触发与时序；Hearth 变化的全部模型修正项和跨域事件消费者。
+
 ### 时间与证据边界
 
 D01 中的实体分类、所有权查询与绑定关系是读取对象状态，不会自行推进 Campaign 时间。城镇/村庄的每日状态计算由各组件的 `DailyTick` 执行，并受 Campaign 时钟调度；具体数值模型和状态变化分别留给 D02-D04。直接读取属性不等价于玩家打开地图百科或聚落界面；本节没有声称 UI handler 与直接 API 的完整交互已经运行验证。
@@ -110,4 +142,4 @@ D01 中的实体分类、所有权查询与绑定关系是读取对象状态，�
 
 ## 研究范围状态
 
-D01-D03 已完成首轮静态对象、城镇发展模型、城堡分类/城防/绑定村庄和 Observer 覆盖盘点。D04-D10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 D 域范围逐项核对，不将此文档视作聚落系统整体已完成。
+D01-D04 已完成首轮静态对象、城镇与城堡发展、村庄状态/生产和 Observer 覆盖盘点。D05-D10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 D 域范围逐项核对，不将此文档视作聚落系统整体已完成。
