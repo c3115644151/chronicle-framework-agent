@@ -395,6 +395,14 @@ Hero 俘虏可以存在于：
 
 相邻的收押路径也不能漏计：`CapturedLord`战后对话中，玩家可确认把被击败领主收为俘虏（`conversation_talk_lord_defeat_to_lord_capture_on_consequence`），与遭遇中MainHero投降不同；在`FreeOrCapturePrisonerHero`对话中，交战对象可以触发“重新囚禁”选项，只有目标此时仍是prisoner才真正调用`TakePrisonerAction`（`conversation_player_fails_to_release_prisoner_on_consequence`）。两者来源状态与结果守卫不同，分别记为`ACT-F12-06/07`。相关对话UI与此特殊ConversationContext的完整触发来源仍未运行核验。
 
+### 地牢、赎金商人与俘虏容器操作
+
+除了领主Barter，玩家还可在聚落菜单与Ransom Broker处理俘虏：`town_backstreet`提供一次出售全部可卖对象和打开挑选式PartyScreen两项；Ransom Broker对话中的“卖俘虏”同样打开`PartyScreenHelper.OpenScreenAsRansom`。全卖入口会排除被锁定对象，挑选/商人入口经Ransom PartyScreen的Done handler提交；三者最终都调用`SellPrisonersAction`，故合并为`ACT-F12-08`，按“全部/选择集合”作为参数，不重复计算。出售普通兵会移除其俘虏Roster并按Ransom model支付金币；Hero则按buyer上下文释放/转交；移动Party出售还触发俘虏出售技能经验和`OnPrisonerSold`。镇内菜单与Merchant对话的条件/具体现示、Sale UI、数值以及Campaign时间尚未视觉核验。
+
+对非玩家Clan拥有、但与玩家同Faction的要塞，玩家在Dungeon菜单选择`Donate prisoners`打开单向PartyScreen；要求存在可用地牢容量，Done时Hero俘虏进入Settlement，整体Roster变动发`OnPrisonerDonatedToSettlement`。若捐赠队伍和聚落OwnerClan均不属于玩家Clan，原版Influence行为按`PrisonerDonationModel`结算Influence；玩家捐赠Hero还可能按关系模型提高玩家与OwnerClan Leader关系。该行为是把俘虏交给同Faction要塞，不是卖给Ransom Broker，记为`ACT-F12-09`。
+
+玩家在本Clan拥有的Town/Castle地牢可选`Manage prisoners`，打开`PrisonerManage`模式PartyScreen调整MainParty与Settlement dungeon prisoner roster；这是俘虏容器整理，不产生卖价，也不是把Hero招入队伍。只在玩家Clan拥有且同Faction的Fortification开放，Done按roster差异同步Hero Settlement/Prisoner状态；具体双向提交副作用与Cancel回退尚未实机核实，记为`ACT-F12-10`。
+
 ### 其他释放路径
 
 赎金、和平释放、逃脱、战后释放和自动释放主要改变 Hero 状态、Party 和日志；不同路径不统一产生个人关系变化。
