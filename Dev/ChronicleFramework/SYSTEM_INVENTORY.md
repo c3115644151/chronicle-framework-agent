@@ -246,7 +246,7 @@ A06开局与战役内上下文分别拆成“选择Difficulty preset”和“编
 | --- | --- | --- |
 | B01 Hero生命周期 | `OBS-B01-01` Hero百科/状态页；状态变化映射至导致出生/成年/被俘/释放/死亡的具体行为，其中战后处决为`ACT-F12-12` | B01/B02/H12/F12；Hero是事件对象，没有通用生命周期操作面 |
 | B02 Hero家庭 | `OBS-B02-01` Hero家庭/配偶/子女百科链；婚姻交涉映射`ACT-I04-01`、`ACT-I04-02`、`ACT-I04-03`，教育通知见`OBS-I06-01` | B02/I04/I05/I06；婚姻、出生、教育后果分开，不把亲属字段读写计为动作 |
-| B03 Hero能力 | `OBS-B03-01` Character Developer面板；属性/Focus/Perk变更为`ACT-H10-01` | B03/H10；Character Developer待改→Done提交/Cancel撤销是一类界面事务，获得XP来自其它动作族 |
+| B03 Hero能力 | `OBS-B03-01` Character Developer面板；属性/Focus/Perk变更为`ACT-H10-01`，重置当前未提交的编辑草稿为`ACT-H10-02` | B03/H10；Done提交、Cancel退出并撤销与Reset保留页面但复原所有草稿是不同操作结果；获得XP来自其它动作族 |
 | B04 Hero身份 | `OBS-B04-01` Hero身份/职业/归属信息；婚姻Clan结果见I04，陪伴/封臣/王国变更见H05/C07 | B04/H05/C07/I04；没有通用“设置职业/归属”入口，转换必须映射具体原生流程 |
 | B05 Clan | `OBS-B05-01` Clan Management页；改名、旗帜和财务/领地/成员各是待细分操作 | B05/H02/C；Clan页面本身不等于独立行动，不能将13个Tab/VM方法计入分母 |
 | B06 Kingdom | `OBS-B06-01` Kingdom Management页；决议/战争/和平/联盟/政策映射C域独立行动族 | B06/C01-C10；K键/界面入口别名不是额外动作 |
@@ -272,6 +272,7 @@ A06开局与战役内上下文分别拆成“选择Difficulty preset”和“编
 | OBS-I06-01 | 观察 | EducationMapNotification→EducationState课程页面 | 显示玩家子女待选年龄阶段/教育选项；逾期阶段可能先自动随机处理 | Chronicle不读取教育状态/选项；I06/H02/A08；通知打开/关闭与时钟需视觉复核 |
 | OBS-B10-01 | 观察 | Character Developer页读取当前角色的Trait条目/等级 | Trait由行为累积改变，Character Developer显示Trait状态；不等于Faction CrimeRating或Hero Relation | Chronicle不输出Trait/XP；特征页完整入口和全部显示内容未视觉穷举 | B10/I07、CharacterDeveloperVM、HeroDeveloper |
 | ACT-H10-01 | 行为 | C→Character Developer调整适用Hero的Skill Focus/Attribute/Perk后Done；Cancel撤销暂改 | 消耗未用成长点/要求Perk条件；Done才提交，Cancel不改变Hero成长 | Chronicle未实现；B03/H10/L05；子VM逐项前置未全测 |
+| ACT-H10-02 | 行为 | Character Developer中选择Reset | 对列表中所有适用Hero调用`ResetChanges(isCancel:false)`并刷新角色选择器；复原本次打开面板后的拟改值/点数选择但保留面板，可继续编辑；不写入已提交的Hero成长值 | v1.4.8 `CharacterDeveloperVM.ExecuteReset` handler源码确认；实际提示/确认、多个Hero的视觉变化未核；Chronicle无动作 | B03/H10/L05、`CharacterDeveloperVM.ExecuteReset`、`CharacterDeveloperHeroItemVM.ResetChanges` |
 | ACT-H02-01 | 行为 | L→Clan Management改Clan名称并确认 | 写入名称、触发页面/展示刷新；取消不提交 | Chronicle未实现；B05/H02/L05；当前身份/命名校验待视觉验证 |
 | ACT-H02-02 | 行为 | L→Clan Management打开Banner Editor并确认 | 写入Clan Banner；不是单纯展示/百科编辑 | Chronicle未实现；B05/H02/L05；每种画面/确认取消未视觉验证 |
 | ACT-I04-01 | 行为 | 与可结婚Hero对话后选择开启Courtship | 仅当对话选项条件开放；写入Romance状态，不直接等于结婚 | Chronicle无Courtship专用动作；B02/I04/J08；目标/兼容性完整门禁见I04 |

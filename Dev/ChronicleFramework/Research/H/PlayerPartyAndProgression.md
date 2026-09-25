@@ -86,7 +86,7 @@ Chronicle没有Settlement场景黑smith交互、SmithingState/CraftingVM观察�
 
 Hero的 `HeroDeveloper`持有Skill XP/Level、Attributes、Focus和未花点数/Perks；这些和当前有效技能效果是关联但不同的数据。角色经验由战斗/任务/贸易/制造/旅行等多个系统产生，XP经Skill/CharacterDevelopment模型计算；升级角色等级后可分配Attribute与Focus，技能达到相应解锁点才出现Perk选择。Perk值又会被队伍、战斗、贸易等其他模型读取。
 
-玩家从角色发展(Character Developer)面板选择适用Hero，检查技能、升级进度、属性/Focus点数与开放Perks；`CharacterDeveloperVM`先保存拟改值，Done时调用 `ApplyAllChanges`写回`HeroDeveloper`，Cancel会复原未提交更改。直接调用 `HeroDeveloper.AddFocus/AddAttribute/AddPerk`绕过UI可用点数、前置技能、Perk选择提示和取消事务；不能把点数读出或界面打开当成成长发生。
+玩家从角色发展(Character Developer)面板选择适用Hero，检查技能、升级进度、属性/Focus点数与开放Perks；`CharacterDeveloperVM`先保存拟改值，Done时调用 `ApplyAllChanges`写回`HeroDeveloper`，Cancel会复原未提交更改并关闭面板。另一个独立的Reset控件调用`ExecuteReset`，遍历所有适用Hero执行`ResetChanges(isCancel:false)`并刷新选择器：复原本次面板会话中的未提交编辑，但不关闭页面，玩家可继续分配；因此Reset不等于Done，也不等于Cancel，映射`ACT-H10-02`。直接调用 `HeroDeveloper.AddFocus/AddAttribute/AddPerk`绕过UI可用点数、前置技能、Perk选择提示和取消事务；不能把点数读出或界面打开当成成长发生。
 
 Chronicle当前没有Character Developer完整观察面或Attribute/Focus/Perk投入动作，也没有通用获取技能经验动作；仅间接观察Clan/Renown等少量发展变量。技能效果来源分散，战斗技能与perk使用分别见F/G，制作技能见H09，任务与交易技能触发见J/E。角色发展页面编辑本身不应主动推进 Campaign；角色数值何时刷新UI显示及跨角色适用规则仍需核验。来源：本机 `HeroDeveloper`、`CharacterDeveloperState`、ViewModelCollection `CharacterDeveloperVM/CharacterDeveloperHeroItemVM/SkillVM/PerkSelectionVM`、Chronicle Observer；未知各技能XP源/倍率全量矩阵、存读档或死亡/角色切换对点数的交接，以及改Mod技能/perk数据的兼容。
 
