@@ -115,25 +115,28 @@ Faction 关系经 `FactionManager` 查询/更新，双方阵营状态由 `Stance
 
 ## 个人关系数据模型
 
+#### B09 个人关系的基础值与有效值
+
 ```text
 关系来源
 → ChangeRelationAction
-→ DiplomacyModel.GetEffectiveRelationChange
-→ 性别/Charm/Trait/Emissary等修正
+→ 正向变化的 DiplomacyModel/Charm 修正
 → GetHeroesForEffectiveRelation
 → 通常折算为双方 Clan Leader
-→ CharacterRelationManager 写入整数
+→ CharacterRelationManager 写入成对整数
 → HeroRelationChanged 事件
 ```
 
 - `Hero.GetBaseHeroRelation` 读取基础整数；
 - `Hero.GetRelation` 读取 DiplomacyModel 计算后的有效关系；
-- 有效关系可叠加亲属、Honor、Valor、Mercy 等修正并 Clamp；
+- 当前 DefaultDiplomacyModel 的有效关系会叠加 Honor、Valor、Mercy 等修正并 Clamp；亲属身份在独立关系路径中，不在此模型的 trait 修正函数中。
 - 玩家本人和玩家同伴存在特殊解析例外；
 - 两个非玩家领主之间的有效关系经常实际读取双方家族领袖关系；
 - 个人关系、Clan 关系、Faction Stance 和亲属关系是不同数据路径。
 
-关系事件包含变化双方、变化量、原始 Hero 和 `ChangeRelationDetail`，但当前整数关系不保存完整原因链，也没有统一的恩情、仇恨、债务或关系阶段对象。
+当前源码中 `CharacterRelationManager` 持久保存 Hero ID 对的整数关系（key 按两 Hero ID 排序，查询为对称 raw value）；`Hero.GetBaseHeroRelation` 读取原始值，`Hero.GetRelation` 交 `DiplomacyModel` 得到 effective value。`DefaultDiplomacyModel` 会先通过 `GetHeroesForEffectiveRelation` 通常把双方替换成所属 Clan Leader；若两者因此相同，或涉及玩家本人和玩家 Companion，则使用原 Hero。随后将 Honor、Valor、Mercy 的 Trait 组合加减到 raw value 并 Clamp。因为特质修正以传入的 Hero 与 effective Hero 计算，raw value 对称不意味着所有身份情形下的 effective value 必然对称。
+
+`ChangeRelationAction` 在写入前只对正向变化调用 `GetRelationIncreaseFactor`（Charm 经验/Perk等来源会调整增长量并随机取整）；再选 effective Hero pair，将原始整数相加并 Clamp 到[-100,100]。随后通过 `Hero.SetPersonalRelation` 写入并分发 `OnHeroRelationChanged`，事件参数同时携带 effective pair、变化量、原始调用双方与 `ChangeRelationDetail`。`CharacterRelationManager` 不为每笔整数变化保存完整原因链；没有独立恩情、仇恨、债务或关系阶段字段。旧档加载仍有对早于v1.1版本无效Hero ID的清理。
 
 ## 关系写入来源
 
@@ -166,6 +169,14 @@ Faction 关系经 `FactionManager` 查询/更新，双方阵营状态由 `Stance
 | 信息出口 | 百科排序、历史评论、日志、传闻和通知 |
 
 已确认模型消费者包括 `DefaultDiplomacyModel`、`DefaultAllianceModel`、`DefaultTradeAgreementModel`、`DefaultMarriageModel`、`DefaultSettlementAccessModel`、`DefaultSettlementLoyaltyModel`、`DefaultSettlementSecurityModel`、`DefaultVolunteerModel`、`DefaultTargetScoreCalculatingModel`、`DefaultArmyManagementCalculationModel` 和 `DefaultPrisonerDonationModel`。
+
+#### B10 Traits 与 Reputation
+
+Hero Traits 与 Crime/Reputation 不是同一数值。原版五种可见人格 Trait 为 Mercy、Valor、Honor、Generosity、Calculating，等级区间 -2…2；当前 DefaultDiplomacyModel 用 Honor/Valor/Mercy 组合修正有效关系。Trait XP 由 `TraitLevelingHelper` 经 `PlayerTraitDeveloper` 累积，通过 CharacterDevelopmentModel 转成 Hero trait level；等级改变时发 `OnPlayerTraitChanged`。足够大的 trait XP 变化还会生成 `PlayerReputationChangesLogEntry`。可见写入来源包括战斗英勇、牺牲兵力、处决领主、违约、劫掠村庄、敌对行动、善待/饿坏队伍、Issue/Quest结果、释放领主、说服叛逃与围城战后处理；此列表是源码已确认的调用样本，尚非所有调用点的完备分母。
+
+Crime Rating 则按 `IFaction.MainHeroCrimeRating` 分阵营保存，随玩家阵营变化可以不同；`DefaultCrimeModel` 的轻度条件为0<x≤30，中度为30<x≤65，严重为x≥65，故边界65同时满足中度和严重查询；Declare War 使用60门槛，最大值100。罚款计算和处罚后回落使用 CrimeModel 单独公式。因此 Honor/Trait、Hero间 personal relation 与对Faction的犯罪评价属于三条数据链；一次行为可能写入不止一条。
+
+Hero 的 Trait 在角色开发界面以条目显示而不由玩家直接任意编辑；普通 Agent Observer 当前不包含 Trait/Crime 字段。来源：当前安装 `TaleWorlds.CampaignSystem.dll`（`TraitLevelingHelper`、`DefaultTraits`、`DefaultCrimeModel`、`Faction.MainHeroCrimeRating`）、`TaleWorlds.CampaignSystem.ViewModelCollection.dll`（`CharacterDeveloperHeroItemVM`/traits显示）、本地 `AgentObserver.cs` 与已追踪的 Trait/Relation 消费者模型。未知项：全部Trait写入调用点及数值、Faction犯罪评级的所有UI入口、各难度/模块对Trait/Renown/Crime的修正尚未完成机器可读清点。
 
 ## 身份转换
 
