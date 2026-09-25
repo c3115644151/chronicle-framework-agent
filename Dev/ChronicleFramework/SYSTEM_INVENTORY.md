@@ -236,7 +236,7 @@ A06预设/设置页目前只定位到界面族；每个选项的写入字段、�
 
 | 系统ID | 映射到的玩家行动族 / 观察面 | 证据与去重边界 |
 | --- | --- | --- |
-| B01 Hero生命周期 | `OBS-B01-01` Hero百科/状态页；状态变化映射至导致出生/成年/被俘/释放/死亡的具体行为，不创建“改HeroState”玩家动作 | B01/B02/H12/F12；Hero是事件对象，没有通用生命周期操作面 |
+| B01 Hero生命周期 | `OBS-B01-01` Hero百科/状态页；状态变化映射至导致出生/成年/被俘/释放/死亡的具体行为，其中战后处决为`ACT-F12-12` | B01/B02/H12/F12；Hero是事件对象，没有通用生命周期操作面 |
 | B02 Hero家庭 | `OBS-B02-01` Hero家庭/配偶/子女百科链；婚姻交涉映射`ACT-I04-01`、`ACT-I04-02`、`ACT-I04-03`，教育通知见`OBS-I06-01` | B02/I04/I05/I06；婚姻、出生、教育后果分开，不把亲属字段读写计为动作 |
 | B03 Hero能力 | `OBS-B03-01` Character Developer面板；属性/Focus/Perk变更为`ACT-H10-01` | B03/H10；Character Developer待改→Done提交/Cancel撤销是一类界面事务，获得XP来自其它动作族 |
 | B04 Hero身份 | `OBS-B04-01` Hero身份/职业/归属信息；婚姻Clan结果见I04，陪伴/封臣/王国变更见H05/C07 | B04/H05/C07/I04；没有通用“设置职业/归属”入口，转换必须映射具体原生流程 |
@@ -429,7 +429,7 @@ E03、E06、E08、E09、E10的大量变化由每日模型、其它玩家动作�
 | G06 Tactics AI | AI执行结果观察复用`OBS-G03-01`/`OBS-G04-01`；战术AI内部选择记`N/A-G06-01` | 战术AI不是玩家可直接选择的菜单动作；玩家显式下令才映射G05 |
 | G07 Morale | Mission Order中的玩家Formation平均士气`OBS-G07-01`；坐镇Scoreboard中双方整侧Morale `OBS-G07-02` | 前者来自PlayerTeam formations，后者来自BattleSimulation双方MapEventSide；粒度不能合并；坐镇BattleSimulation优先于Mission Orders接入AI |
 | G08 Siege Mission | 实时攻城器械/城门/双方状态观察`OBS-G08-01`；器械点手动配置`ACT-G08-01`、器械/队伍Auto Deploy`ACT-G08-02`由原版VM链确认；战斗Order复用`ACT-G05-01`及G01遭遇分支 | SiegeEvent、器械部署菜单、战术菜单和实时攻城场景分层；部署结束成功转换复用G04 `ACT-G04-05`，攻城未放置器械时多一确认分支 |
-| G09 Combat Resolution | 战后伤亡/俘虏/战利品结果复用`OBS-G10-01`；战后Hero对话处置与普通兵俘Roster分配映射`ACT-F12-03/06/11`，主角被俘选择复用H12 | 战斗结算本身不是玩家直接“结算”动作；捕获和战后Roster选择是结果后的原生玩家步骤，与遭遇菜单投降分开 |
+| G09 Combat Resolution | 战后伤亡/俘虏/战利品结果复用`OBS-G10-01`；战后Hero处决/捕获/放行与普通兵俘Roster分配映射`ACT-F12-03/06/11/12`，主角被俘选择复用H12 | 战斗结算本身不是玩家直接“结算”动作；捕获和战后Roster选择是结果后的原生玩家步骤，与遭遇菜单投降分开 |
 | G10 Battle Rewards | 领奖结果复用`OBS-G10-01`；经验/声望/影响力/物品均作为触发行为的后果 | 奖励模型不是独立玩家按钮；Simulation夹具不能代替自然战斗奖励证据 |
 
 #### F-G域首轮行动/观察定义
