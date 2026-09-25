@@ -74,9 +74,13 @@ Mission战术决策运行在本地Mission tick中；Campaign地图时钟在该�
 
 Mission combat士气与战役Party的 `MobileParty.Morale` 是不同状态。Mission侧 `AgentMoraleInteractionLogic` 监听Agent被杀/昏迷/惊慌逃跑，再由 `BattleMoraleModel` 计算双方变化并影响周边Agent；具体影响取决于Agent与队伍、攻击者、状态和场景模型。`BattleEndLogic` 同时监视一方撤退/兵力耗尽等结束条件，单兵逃跑、局部士气下降与整场战斗结束不能等同。该过程推进Mission局部时间，玩家的Campaign地图时钟在战斗Mission期间停止。
 
-玩家入口不是点击“士气”：玩家在Mission通过战斗结果与可观察的队伍溃散/部队状态受到其影响；坐镇模拟另有 `MapEvent` 每轮的士气/溃败逻辑，战后 Party morale奖励再由Campaign模型应用，分别见 F10/G10。伤亡、领袖、队伍构成和模型的具体系数均会改变结果，不将战役地图士气值直接解释成Battle Mission实时士气。
+玩家没有单独“加/减士气”命令；士气是Battle Mission与Campaign坐镇两条结果链中的状态，不能把战役Party `MobileParty.Morale` 当作Mission formation士气。
 
-Chronicle无Mission实时士气/恐慌/溃逃观察或影响士气的玩家动作；只具备战斗模拟少量状态观察。证据：MountAndBlade `BattleMoraleModel`、`AgentMoraleInteractionLogic.OnAgentRemoved/OnAgentFleeing`、`BattleEndLogic`；Campaign `MapEvent`/`DefaultBattleRewardModel`的另一条战役结算路径。未知：1.4.8各battle mission model的具体伤亡/恐慌计算参数、所有触发阈值和界面反馈时点、任务场景/围城/海战的模型替换，以及Mission战意状态如何映射到Campaign结算。
+战斗中按F1等打开Order界面后，`MissionOrderTroopControllerVM` 的Team绑定 `Mission.Current.PlayerTeam`，每个 `OrderTroopItemVM` 按 `BattleMoraleModel.GetAverageMorale(formation)`取得本formation平均士气，并暴露为整数 `Morale`。原版Native `OrderTroopItem.xml` 在每张Formation卡片上绑定一个Morale图标和该整数文本，仅对有兵的formation显示。本机原版资源与用户对当前界面的实玩描述不一致：用户看到每队五格亮灭提示、无具体数字，并确认敌军及非己方指挥的盟友不可见；具体是否为当前启用Mod/布局差异、另一个Order呈现分支，尚未解决。此项保留“玩家能观察己方Formation士气”的事实，呈现粒度依运行配置待复核。
+
+用户还报告坐镇指挥界面可能有双方整体士气数值，但不确定其口径是整方还是别的统计；这与F1编队列表的信息粒度不同，单独列为候选观察，不与Formation士气合并。玩家能否看到双方/非己方兵力的具体Campaign simulation士气来源及更新仍待追线和界面确认。伤亡、领袖、队伍构成和模型系数均会改变结果，不将Party地图士气直接解释成Battle Mission实时士气。
+
+Chronicle无Formation士气观察/恐慌/溃逃状态或能影响Mission士气的玩家动作；只具备战斗模拟少量状态观察。证据：MountAndBlade `BattleMoraleModel`、`AgentMoraleInteractionLogic.OnAgentRemoved/OnAgentFleeing`、`BattleEndLogic`；`MissionOrderTroopControllerVM`、`OrderTroopItemVM`、Native `OrderTroopItem.xml`；Campaign `MapEvent`/`DefaultBattleRewardModel`的另一条战役结算路径。未知：1.4.8各battle mission model的具体伤亡/恐慌参数、所有触发阈值和反馈时点、围城/海战替换，以及Mission状态映射到Campaign结算。
 
 ## G08 Siege Mission：围城场景中的攻守战斗
 
