@@ -294,6 +294,10 @@ Observer输出主队成员/健康/伤兵/俘虏总数与Party SizeLimit，不输
 
 Chronicle 主队观察输出俘虏总数，当前 PartyState 观察分别序列化左右双方成员与 Prisoner roster。`partyTakeAll` 仅允许战后 Loot 模式并通过原生 PartyScreen handler 的 Done 提交；它不是通用俘虏交易、招募或释放动作。现有协议没有独立的普通俘虏转移/卖出/招募/英雄释放命令。俘虏Roster读写本身不显式推进 Campaign 时间；赎金评估、逃脱等是由后续日常/小时 Campaign 行为驱动，进入不同 Wait/Encounter/PartyScreen 时是否继续运行按其宿主 GameState 的时钟规则决定，F12没有把它们另行快进。
 
+战后普通兵俘虏另有明确玩家处置点：`PlayerEncounter`先以`DoFreeOrCapturePrisonerHeroes`把仍被敌方关押的Hero移出待分配成员Roster，使用`FreeOrCapturePrisonerHero`对话处理；之后若存在普通成员或俘虏Roster，`DoLootMembersAndPrisonersOfParty`打开`PartyScreenHelper.OpenScreenAsLoot`的`Aftermath` PartyScreen。`DefaultDoneHandler`按本次Roster差异分别将玩家接收的俘虏交给`TakePrisonerAction.ApplyByTakenFromPartyScreen`，并将玩家放弃的俘虏交给`EndCaptivityAction.ApplyByReleasedByChoice`，Encounter随后清理临时战后Roster。此战后普通兵俘分配记为`ACT-F12-11`，不与日常普通兵俘招募`ACT-H04-02`或Hero俘虏对话合并。自然战斗中不同MapEvent/胜负条件是否始终到达该界面、容量反馈和取消后的完整迁移仍待运行核验。
+
+`partyTakeAll`只在Loot模式走本体handler；这是战后接收Roster的现有Harness适配，不代表常规PartyScreen俘虏招募、日常容器转移或Hero处置已完整支持。
+
 ### 被俘
 
 `TakePrisonerAction` 主要执行：
