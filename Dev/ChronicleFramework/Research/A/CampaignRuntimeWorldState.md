@@ -24,9 +24,13 @@ Chronicle 当前覆盖：`ChronicleCampaignBehavior` 在 `OnGameStart` 加入 `C
 
 ## A02 战役时间与时间控制
 
-玩家入口：地图时间条选停止/正常/快进；聚落等待菜单另行开始/结束等待；移动的时间副作用见 MAINLINE 机制契约。1.4.8 `MapTimeControlVM.ExecuteTimeControlChange` 调 `Campaign.SetTimeSpeed(0/1/2)`；不同停止/正常/快进模式控制 `TickMapTime` 是否推进 `CampaignTime.Now`。待命、等待、从属军团会使正常/快进不可停止；档位不保证等于具体模式。时间以小时/日等单位驱动日历、期限和周期。
+玩家入口：地图栏三个按钮分别绑定 `MapTimeControlVM.ExecuteTimeControlChange`，点击参数为0（暂停）、1（正常）、2（快进）；当前按键/手柄提示由 VM 的快捷键集合提供，Prefab另给三个按钮排列导航序号。聚落等待菜单另行开始/结束等待；移动的自然时钟副作用见 MAINLINE 机制契约，不等价于玩家每次都要另按时间按钮。
 
-Agent 覆盖：快照给出 `campaignDay`、`timeControlMode`；`pause`/`resume` 直接赋模式，`advance` 是 Harness 固定步进，不是玩家动作。源码：已安装 v1.4.8 `TaleWorlds.CampaignSystem.ViewModelCollection.dll`、`Campaign.cs`；Movement `061109/055319`、Rest `055458`、Protocol `100325`。自动状态证据已覆盖；物理输入绑定、画面反馈及锁定下可用性未知。
+`ExecuteTimeControlChange` 在没有普通聚落菜单，或正在运行可解锁时间的等待菜单且时间控制未锁定时响应。它以请求档位调用 `Campaign.SetTimeSpeed`；此 API 并不总把档位一一映射到同名模式：正常/快进会检查主队是否等待、是否处于 Hold、是否是军团成员但非领袖，并在需要时进入不可暂停的 Unstoppable 模式；暂停时若正处于快进会进入 `FastForwardStop`，否则进入 `Stop`。等待期间，简化显示会把部分可暂停状态显示为暂停。地图栏在遭遇模拟、招募、百科、城镇/军团管理、战役选项、事件弹窗等状态下会禁用中心时间控制。
+
+`Campaign.TickMapTime` 根据 Campaign 时间模式决定自然推进量：Stop/FastForwardStop 不推进；StoppablePlay 与 UnstoppablePlay 使用 `0.25 × realDt`；快进模式再乘 `SpeedUpMultiplier`（当前默认值4）。Stoppable 模式在主队等待时不推进，Unstoppable 模式仍推进。推进后的 `_dt` 被 Campaign 实体、事件和周期系统使用；小时、日、周等计时不是每个Agent动作附带的单独开关。周期的分发粒度见 A03。
+
+Agent 覆盖：快照给出 `campaignDay`、`timeControlMode`；`pause`/`resume` 直接赋模式，`advance` 是 Harness 固定步进，不是玩家动作。源码：当前安装 v1.4.8 `Modules/SandBox/GUI/Prefabs/Map/MapBar.xml`、`TaleWorlds.CampaignSystem.ViewModelCollection.dll`（`MapTimeControlVM`）与 `TaleWorlds.CampaignSystem.dll`（`Campaign.TickMapTime`、`SetTimeSpeed`）；运行证据见 MAINLINE 机制契约所列 Movement、Rest、Protocol 阶段。自动状态证据已覆盖；本节未验证键鼠物理绑定、等待期间不同锁定状态的画面反馈以及各禁用状态恢复后的UI焦点。
 
 ## A03 周期事件与调度粒度
 
