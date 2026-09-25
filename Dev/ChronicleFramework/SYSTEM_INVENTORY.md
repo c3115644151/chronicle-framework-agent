@@ -412,7 +412,7 @@ E03、E06、E08、E09、E10的大量变化由每日模型、其它玩家动作�
 | F03 AI行为类型 | Party概要复用`OBS-F01-01`；`IsInspected`条件下可读行为提示映射`OBS-F03-01` | 原版把部分Default/ShortTerm行为和目标转换为摘要文字，不展示完整计划；tooltip的真实玩家触发/ALT关系尚未视觉核实，不能按完整AI意图观察 |
 | F04 Party Think | NPC长期/短期目标评分复用`N/A-F02-01`；影响其条件的玩家动作映射Army/外交/地图行为族 | 不把Think、行为切换或评分模型另计玩家动作；UI是否揭示选择理由未知 |
 | F05 Army | `OBS-F05-01`Kingdom Army管理视图；管理己方Army为`ACT-F05-01`、主动解散为`ACT-F05-02` | 调整cohesion/邀请party/取消的提交边界以Army VM事务为准；自动解散与主动解散分开 |
-| F06 Clan War Party | 家族Party信息复用`OBS-B05-01`/`OBS-F01-01`；创建玩家Clan War Party候选`ACT-F06-01` | NPC War Party自动生成不是玩家按钮；玩家创建流程/权限仍待UI核实 |
+| F06 Clan War Party | 家族Party信息复用`OBS-B05-01`/`OBS-F01-01`；Clan→Parties→Create New Party `ACT-F06-01` | 玩家创建Party由 ClanPartiesVM 提交；NPC War Party自动生成不是玩家按钮；初始PlayerClan Party不自动满编 |
 | F07 战争目标 | 地图提示中的部分目标行为文字复用`OBS-F03-01`，军团目标`OBS-F05-01`，围城状态`OBS-F08-01`；AI目标选择/评分原因记`N/A-F07-01` | 原生界面可条件显示部分选定行为/目标，但不显示完整候选、评分或选择理由；无菜单替NPC指定下一目标 |
 | F08 Siege | 战略围城状态为`OBS-F08-01`；进入攻城Mission/坐镇/离开按G01遭遇分支和真实Mission动作映射 | Campaign围城周期、围城菜单及攻城Mission是不同状态层，不合并成“攻城”动作 |
 | F09 Raid/Defense | 村庄遭遇`ACT-F09-01`劫掠、`ACT-F09-02`强征志愿兵、`ACT-F09-03`强征物资；防守进入G战斗路径 | 三类村庄敌对行动后果不同；AI防守目标不是玩家可指定的直接动作 |
@@ -446,7 +446,7 @@ E03、E06、E08、E09、E10的大量变化由每日模型、其它玩家动作�
 | OBS-G10-01 | 观察 | Battle end/Post-battle party/Inventory结果 | 贡献/战斗模型决定XP、Renown/Influence、loot和capture；领奖屏幕与Campaign state提交分开 | Chronicle对Simulation PostBattle有有限结构化验收，不覆盖所有自然Mission | G10/F10、MAINLINE PostBattle |
 | ACT-F05-01 | 行为 | K→Kingdom Armies打开ArmyManagement，创建己方Army/选择邀请Party并Done | 检查Kingdom成员/佣兵/Leader与参加Party条件，收取Influence并设置Army/Party关联；Cancel不提交 | Chronicle无Army Management交互 | F05/F13、KingdomArmyVM/ArmyManagementVM |
 | ACT-F05-02 | 行为 | Kingdom Army panel/战后上下文主动解散玩家Army | 玩家解散消耗Influence并可能扣参与者关系；自动解散不是同一action | Chronicle无解散Army命令 | F05/F13、DisbandArmyAction |
-| ACT-F06-01 | 候选行为 | Clan页创建Player Clan War Party | Clan Tier/队伍上限/Leader/兵力等限制；新Party获得独立库存/AI/目标 | Chronicle无创建家族Party动作；具体玩家UI流程需运行核实 | F06/H05、ClanPartiesVM |
+| ACT-F06-01 | 行为 | Clan Management→Parties→Create New Party，选择符合条件的Clan Hero/Companion并确认费用 | 要有WarParty slot、可带队Hero、允许地图操作、MainParty不在海上/raft，并满足最低Leader资金；可能从MainParty移走该Hero，创建独立PlayerClan MobileParty并补最低资金、停为Hold；不自动复制NPC DefaultPartyTemplate，不能由“创建成功”推断已有完整部队 | v1.4.8 ClanPartiesVM与Prefab源码确认入口/条件/状态变化；Chronicle无动作适配；各Hero位置及正式视觉/运行结果未实测，Clan页面时钟宿主未核 | F06/H02/H05/E06、`ClanPartiesVM`、`ClanPartiesLeftPanel.xml`、`MobilePartyHelper.CreateNewClanMobileParty` |
 | ACT-F09-01 | 行为 | 在有效Village encounter选择Raid/Plunder | 进入RaidEvent并造成物资/繁荣/安全与关系等不同后果 | Chronicle无Raid选择动作 | F09/J05、EncounterGameMenuBehavior |
 | ACT-F09-02 | 行为 | Village encounter中强征Volunteers | 进入ForceVolunteersEvent，潜在获得部队并触发村庄/政治后果 | Chronicle无强征新兵动作 | F09/J05/G02 |
 | ACT-F09-03 | 行为 | Village encounter中强征Supplies | 进入ForceSuppliesEvent，物资获得及Village损害路径不同于Raid/Volunteers | Chronicle无强征物资动作 | F09/J05/G02 |
