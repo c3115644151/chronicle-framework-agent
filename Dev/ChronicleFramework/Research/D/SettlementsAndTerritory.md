@@ -69,6 +69,37 @@ Campaign 时间仍由全局时间控制推进；普通读取这些派生值不�
 
 未知项：玩家界面中这些变化值/解释字段的逐页呈现与操作入口；日 tick 内各行为订阅者之间的完整执行次序及其跨版本稳定性；经济、建筑、总督、驻军、叛乱、Issue 对指标的全部子公式与边缘条件；当前 Agent 是否应在特定观察请求中按需读取其中某些状态，留待全域盘点及后续设计讨论，不在本研究中预判。
 
+## D03 城堡发展、城防、绑定村庄与领地价值
+
+### 城堡不是独立于 Town 的第二套发展对象
+
+城堡仍由 `Town` 组件承载；`Settlement.IsCastle`/`Town.IsCastle` 是 `_isCastle` 标志的分类结果，城镇和城堡共用 OwnerClan、繁荣度、食物、忠诚、安全、民兵、建筑、建设队列、总督、驻军和城墙状态字段。Castle/Town 专属差异通过各模型检查 `IsCastle` 或 `IsTown` 分支实现，不能将城镇公式直接照搬到城堡。
+
+本机默认模型中已确认的城堡差异包括：
+
+- 城堡不走只适用于 `IsTown` 的住房成本档位和市场繁荣加成；它仍使用公共繁荣模型中的食物、建筑、Perk、忠诚等影响。
+- 非围城时食物模型给城镇基础土地生产 15、城堡 10；正常绑定村庄和建筑等仍会参与生产，围城时切换为另一套生产分支。
+- 城堡的建筑加速成本/奖励使用 Castle 参数；建设模型还区分城堡军事建筑与城镇建筑对应的总督 Perk。
+- Settlement 估值的基础值公式分别是城堡 `250,000 + Prosperity × 1,000`、城镇 `750,000 + Prosperity × 1,000`；若启用计入绑定村庄，会递归累加村庄价值。调用者可选择是否计入绑定聚落，并可按英雄 Clan 的领地中心距离应用估值修正。该函数是内部估值，不等同于玩家购买价、投票价值或屏幕显示值。
+
+### 城墙与围城相关状态
+
+`Settlement.IsFortification` 对城镇/城堡均为真。每个 fortification 有两个城墙区段；当前和最大城墙耐久比例分开保存/计算，最大总墙体耐久经 `WallHitPointCalculationModel.CalculateMaximumWallHitPoint(Town)` 得出，单区段最大值再由两段均分。`Town.DailyTick` 会按驻军维修模型的每日修复额度逐段恢复城墙比例；围城状态通过 `Settlement.IsUnderSiege` 关联其他模型输入。城堡与城镇共享该城防数据结构，具体围城工程和攻防过程属于 F/G 类，不在 D03 展开。
+
+`Settlement.SettlementHitPoints` 是另一个保存字段，不应与两段城墙的 `SettlementWallSectionHitPointsRatioList` / `SettlementTotalWallHitPoints` 混为一项。结构化观察当前没有输出这些城防字段；它们是否以及如何出现在玩家地图、城镇管理页或围城界面，本轮没有运行时核实。
+
+### 绑定村庄与收益关系
+
+城堡和城镇都通过 `Settlement.BoundVillages` 暴露绑定村庄集合。绑定关系不只是地图归属：每日城镇食品生产会遍历绑定村庄，取决于其状态与 Hearth 等级；繁荣度、安全度也分别读取食物/被掠夺村庄等状态；Settlement 估值可递归计入绑定村庄。村庄文化/地图派系与所属 Clan 等关系见 D01。村庄绑定的形成/改动入口、玩家可见绑定列表和失去村庄后的完整后果未在本项实机验证，分别留待 D09/D10 及 D04 交叉盘点。
+
+### 玩家与 Agent 信息面
+
+玩家与城堡的地图遭遇、进入城堡、管理页面/领主大厅等实际入口归 D09；本节只核实底层 Castle/Town 数据复用、模型分支与关联状态。Chronicle 目前附近 Settlement 项不返回城堡所有者、绑定村庄、繁荣/食物/驻军/建设或墙体数据。任何“Agent 已知道一座城堡防御情况”或“直接 API 等于玩家管理操作”的结论都超出现有证据。
+
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `Settlement`、`Town`、`DefaultSettlementProsperityModel`、`DefaultSettlementFoodModel`、`DefaultBuildingConstructionModel`、`DefaultSettlementValueModel`、`DefaultWallHitPointCalculationModel`；Chronicle `AgentObserver.cs`。公式和结构结论来自 v1.4.8.119303 安装程序集反编译；没有启动游戏验证 UI 数值或城堡管理流程。
+
+未知项：玩家城堡管理页的精确字段/操作/权限；估值方法各调用者是否用于领地分配、AI 决策或玩家展示的全链路；城墙最大耐久模型的全部参数和围城各阶段 UI 对应；村庄绑定更改时的事件、税收/贸易/食物联动及玩家可操作条件。
+
 ### 时间与证据边界
 
 D01 中的实体分类、所有权查询与绑定关系是读取对象状态，不会自行推进 Campaign 时间。城镇/村庄的每日状态计算由各组件的 `DailyTick` 执行，并受 Campaign 时钟调度；具体数值模型和状态变化分别留给 D02-D04。直接读取属性不等价于玩家打开地图百科或聚落界面；本节没有声称 UI handler 与直接 API 的完整交互已经运行验证。
@@ -79,4 +110,4 @@ D01 中的实体分类、所有权查询与绑定关系是读取对象状态，�
 
 ## 研究范围状态
 
-D01-D02 已完成首轮静态对象、日常模型和 Observer 覆盖盘点。D03-D10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 D 域范围逐项核对，不将此文档视作聚落系统整体已完成。
+D01-D03 已完成首轮静态对象、城镇发展模型、城堡分类/城防/绑定村庄和 Observer 覆盖盘点。D04-D10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 D 域范围逐项核对，不将此文档视作聚落系统整体已完成。
