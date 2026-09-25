@@ -1,6 +1,6 @@
 # E 类研究：经济与贸易
 
-状态：机制盘点中；E01-E06 已完成首轮盘点，目前研究 E07 Clan 财政，未进行方案评审。
+状态：机制盘点中；E01-E07 已完成首轮盘点，目前研究 E08 Kingdom 财政，未进行方案评审。
 
 适用本体：Bannerlord v1.4.8.119303。基于当前安装 `TaleWorlds.Core.dll`、`TaleWorlds.CampaignSystem.dll`、官方模块物品 XML 和 Chronicle 本地 Observer/Protocol 源码。静态对象核对不表示物品市场或背包 UI 已运行验证。
 
@@ -227,6 +227,35 @@ Observer 当前主队输出 Gold、Party人数/健康/伤兵/囚犯、Item总量
 
 未知项：财务面板 income/expenses 明细与模型 `includeDetails` 的一一映射、负数/零收入显示和预计值舍入差异；各税/收益的实际领取事件顺序、自动招聘/欠薪/债务写入的相互顺序；非Player Clan 经济评估/工资限制的全部门槛；Clan Leader变更时 Gold/债务的继承规则；面板项目变更/滚动的完整玩家UI操作证据。
 
+## E08 Kingdom 钱包、预算及跨 Clan 财政
+
+### Kingdom 保存的钱包与 Clan Gold 的区别
+
+`Kingdom` 分别保存 `KingdomBudgetWallet`、`TributeWallet`、`MercenaryWallet`、`CallToWarWallet` 等预算/协议资金；它们不是 `Kingdom.Leader.Gold`，也不是统治 Clan 的独立可支配个人余额。Clan 财政仍通过 Leader Hero Gold 入账/扣账（E07）；若规则文字说“王国提供支持”，需要区分王国预算池实际扣款、领主 Clan 收入和外交 Stance 的每日贡金。
+
+在本机默认财政链中，王国预算池主要承担受条件限制的 Clan 补助/制度性资金分配：当非玩家、非佣兵且未达到特定财务条件的 Kingdom 成员可获支持时，`AddIncomeFromKingdomBudget` 依据 Clan 当前 Gold 分档计算支持上限，且不超过 KingdomBudgetWallet；在玩家的 Clan Management 收支计算中，这个补助被排除。财务每日处理还会按条件把 NPC Clan 超过 100,000 的余额的一部分汇入所属 Kingdom 预算池；Kingdom ruler 每日另有预算保底/低余额随机注资逻辑。详细阈值及随机支路位于 DefaultClanFinanceModel/ClanVariablesCampaignBehavior。
+
+王国账池不是全体 Fief 收入自动汇总后的一个总余额：Settlement 税费通常先进入实际拥有 fief 的 Clan 财政；统治 Clan 的 Land Tax、War Tax、Crown Duty 等政策会按 DefaultClanFinanceModel 读取 Village/Town 税收或 TradeTaxAccumulated，并依具体政策添加至统治 Clan 收入。Town TradeTax 的累计池和 KingdomBudgetWallet 是不同字段；各税/协议调用也可能有不同的累计、摊销和 event 记录。
+
+### 钱包的流入/流出通道
+
+- `KingdomBudgetWallet`：NPC Clan 超额财富贡献、统治者预算注资以及面向部分低余额 Clan 的补助。钱包是否低于 1M/2M、Clan Gold 阈值、是否是玩家 Clan或 mercenary 会影响分配/注资；它不是玩家直接提款用的 King 按钮资金。
+- `TributeWallet`：和平协议每日贡金链相关的王国间中间账户；净流出由 ClanFinanceModel 按各 Clan share 分摊，Clan 实际缴不起时会增加 `DebtToKingdom`。最终外部收款/入账由贡金相关行为与 stance 记账共同处理，完整支付时序/每次现金落在哪个 faction wallet 需和 C03/C10 原协议调用链合并核对。
+- `MercenaryWallet`：王国用于雇佣兵支出的资金池；负余额会通过各非佣兵 Clan 的 share 形成 Clan 费用/债务，加入雇佣兵服务的 Clan 另通过 MercenaryIncome 获得报酬。合同/账池更新入口见 C07、C10。
+- `CallToWarWallet`：调用援战协议相关 Clan 支出/收入的一项中间余额；耗费分配不足会按模型生成 Clan DebtToKingdom。该钱包参与外交约定，不等价于君主随时下达一支可购买 Army 的通用军费。
+
+因此 kingdom-level 财政是若干协议与预算池，再由 ClanFinanceModel 按派系关系分摊的账务流；不能用单一 Kingdom “总收入 - 总支出”数字解释全部状态。
+
+### 玩家可见性与 Chronicle 当前覆盖
+
+当前源码中可见 Kingdom 钱包字段与 ClanFinanceModel 影响各 Clan 收支的调用链。`KingdomManagementVM` 当前未见直接绑定/显示上述 Wallet 字段的 ViewModel 属性；玩家管理页面是否有其他内嵌/间接文本呈现尚未实机核实，故不能断言玩家可以读取确切 treasury 数额。Kingdom Diplomacy 的盟约、贡金、援战和 Clan Finance 页提供的是若干协议/本 Clan 收支入口，分别见 C 类与 E07。
+
+Chronicle Observer 不返回玩家所属 Kingdom ID/预算钱包/Tribute、Mercenary、CallToWar钱包、各成员 Clan财政或预算分配状态；Protocol 无 KingdomTreasury 或财政付款动作。只读 K 页面/Clan Finance 页面也没有被接入持续观察。
+
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `Kingdom` 钱包字段、`DefaultClanFinanceModel`（统治 Clan政策、预算分配、Clan surplus转账、贡金/雇佣兵/CallToWar费用与 debt）、`ClanVariablesCampaignBehavior.DailyTickClan`；`TaleWorlds.CampaignSystem.ViewModelCollection.dll` `KingdomManagementVM` 与 `ClanManagementVM`；Chronicle `AgentObserver.cs`、`AgentProtocol.cs`；C03/C07/C10 的政治协议研究。静态源码版本 v1.4.8.119303；未运行王国钱包长期变化或 UI 视觉核验。
+
+未知项：TributeWallet/MercenaryWallet/CallToWarWallet 所有正负余额的写入者、清零条件与跨 Kingdom 转账完整事件序；`KingdomManagementVM` 是否通过间接 formatter 显示预算值、K页面的准确菜单分区和权限；各 Kingdom 政策对领主 Clan Gold 或王国预算池影响的完整消费者；NPC预算自动注资随机结果、Clan财政/预算现金实际写入时序与存档恢复行为；其他 Mod 替换 ClanFinanceModel 对钱包规则的改写。
+
 ## 研究范围状态
 
-E01-E07 已完成首轮物品、市场、村庄供应链、Workshop、Caravan、Party与Clan财政盘点。E08-E10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 E 域范围逐项核对，不把这些子系统的静态首轮盘点视作经济与贸易系统整体完成。
+E01-E08 已完成首轮物品、市场、村庄供应链、Workshop、Caravan、Party/Clan与Kingdom财政盘点。E09-E10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 E 域范围逐项核对，不把这些子系统的静态首轮盘点视作经济与贸易系统整体完成。
