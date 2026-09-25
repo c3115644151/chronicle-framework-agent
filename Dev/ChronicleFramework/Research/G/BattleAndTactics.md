@@ -44,6 +44,8 @@ Mission 内操作通过键盘/鼠标即时控制主角，TAB菜单可打开离�
 
 这些类型提供了输入/handler事实和上下文门槛，但原始按键数量不是玩家动作族分母：持续移动轴、攻击方向、按住防御、上下马、拾取/启动机关等仍须按持久结果、上下文与失败后果拆分或合并；视角/缩放等不改变世界状态的输入还需与观察控制区分。目录不得把它们概称为已由现有Formation订单覆盖。证据：当前安装 `TaleWorlds.MountAndBlade.dll` 的 `CombatHotKeyCategory`/`Agent`，`TaleWorlds.MountAndBlade.View.dll` 的 `MissionMainAgentController` 与 `MissionMainAgentInteractionComponent`；当前仅静态源码核对，未运行点击/键鼠操作验证。
 
+当前镜头类输入可继续追到本机 `MissionScreen`：`Zoom`按住时改变camera zoom amount/视距；`ViewCharacter`使第三人称视角暂时查看主角；`CameraToggle`改变`Mission.CameraIsFirstPerson`（鼠标输入时可点击切换，非鼠标需保持约0.5秒）；`LockTarget`切换MainAgent的target-lock/look行为。它们直接改变的是本地Mission画面/瞄准状态，不直接改变Campaign世界实体或Party roster，先作为`OBS-G03-01`的视图/目标控制方式记录，不另建普通世界ACT；若AI战斗规划依赖锁定目标，则仍须作为攻击动作的瞄准控制参数核验。对应源码：`MissionScreen.IsViewingCharacter/UpdateCamera/CanToggleCamera/GetCameraToggleProgress`、`MissionMainAgentController.ControlTick`。
+
 Prison Break是F12从地牢菜单启动的自定义Sandbox Mission subtype，而非通常的MapEvent战斗：启动入口/囚犯选择/Bribe提交映射F12 `ACT-F12-13`，成功后的Captivity结束对话映射`ACT-F12-14`。`PrisonBreakMissionController`在单一场景中交替处理潜行接近和警报后的护送/战斗，玩家须使用Use交互俘虏触发跟随，警卫感知和StealthFailCounter会改写结果；它不是进入场景后自动营救。它暴露G03通用Mission身体控制仍是未知清单，具体Movement/Use/Melee等Action族尚待研究，不能把F12启动入口算作完整营救支持。
 
 ### Campaign 后果与适配边界
