@@ -1,6 +1,6 @@
 # E 类研究：经济与贸易
 
-状态：机制盘点中；E01-E09 已完成首轮盘点，目前研究 E10 Barter，未进行方案评审。
+状态：E01-E10 已完成经济/贸易领域首轮静态盘点，未进行方案评审；所有界面和长期运行未知项仍在文中分别标记。
 
 适用本体：Bannerlord v1.4.8.119303。基于当前安装 `TaleWorlds.Core.dll`、`TaleWorlds.CampaignSystem.dll`、官方模块物品 XML 和 Chronicle 本地 Observer/Protocol 源码。静态对象核对不表示物品市场或背包 UI 已运行验证。
 
