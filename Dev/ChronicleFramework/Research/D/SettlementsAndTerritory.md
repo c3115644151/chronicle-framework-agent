@@ -244,6 +244,18 @@ Sandbox `AlleyCampaignBehavior` 是该系统的主要生命周期行为。Town �
 
 玩家每周有概率从 Alley 得到一批帮派兵种，模型根据固定随机值决定零人或不同组成，之后进入 MainParty roster 并更新上次招募时间。Town 菜单/对话管理项还能打开 Alley 打手 roster 管理、改变指定 Clan Member 或放弃 Alley；底层屏幕管理使用 `AlleyHelper.OpenScreenForManagingAlley`。这不是镇内普通志愿兵招募入口。
 
+### Alley 的玩家操作链与跨域动作边界
+
+在拥有玩家 Alley 的 Town 菜单，`go_to_alley`选项以`GameMenu.SwitchToMenu("manage_alley")`进入 Alley location；此为访问 Alley 场景的独立玩家入口，菜单时钟/Location状态的运行回执尚未核实。进入后 Alley owner 可以在 Town GameMenu 选择管理项，也可以与指定 Alley leader 对话，部分管理选项两处入口共用同一 handler：
+
+- **更换 Alley leader**：`change_leader_of_alley`或 manager 对话打开 `AlleyHelper.CreateMultiSelectionInquiryForSelectingClanMemberToAlley`；`AlleyModel.GetClanMembersAndAvailabilityDetailsForLeadingAnAlley`筛掉无资格者，选中后`ChangeTheLeaderOfAlleyInternal`更新AssignedClanMember、替换守军Roster中的Hero并延迟传送新Leader到Settlement。Alley受攻击时菜单此项禁用。此处改变责任Hero，不等同占领/改Owner。
+- **管理 Alley 打手Roster**：Town GameMenu或 manager 对话打开专用 PartyScreen；Helper只允许Troop transfer，禁止传Hero/Prisoner，Done条件检查一般打手人数处于Model给定最小/最大值。Done回调把左侧Roster保存到PlayerAlleyData，Scene已开启时刷新 Alley Agents。Chronicle未做通用巷道Roster事务适配。
+- **放弃 Alley**：Town菜单确认或 manager 对话确认都会`PlayerAlleyData.AbandonTheAlley`，将非Hero守军转回MainParty、清空PlayerAlleyData并移除Owner；对话Scene路径额外清理非玩家Alley Agents。受攻击状态会在到期或放弃时交接/销毁。它和放弃聚落Fief不是同一行为。
+- **领取本周打手**：与指定 Alley leader 对话询问志愿者；按`RandomFloatWeekly`选出可能为空的Roster，玩家确认后直接加入MainParty并更新LastRecruitTime；这不是免费的Town volunteer菜单，也未发现此Handler扣Gold。
+- **回应 Alley attack**：仅在PlayerAlleyData.IsUnderAttack时出现与敌对帮派首领对话；可选Confront会结束当前Conversation并启动专用`OpenAlleyFightMission`。它不是地图 `MapEvent` 坐镇指挥入口，战斗后以胜/败更新 Alley Owner 与Roster，战役时钟按 Mission规则停走。
+
+以上核心入口及状态写入由当前 `SandBox.CampaignBehaviors.AlleyCampaignBehavior` 与 `Helpers.AlleyHelper` 源码确认；多菜单/对话别名按同一个最终提交动作合并。Chronicle没有这些Alley观察/动作适配。具体菜单时钟、对话到Mission的视觉顺序、Roster取消/提交确认和不同Alley类型的运行效果仍未做玩家视觉回归。
+
 ### Faction 犯罪值与处置
 
 主角 Crime Rating 按 `IFaction` 分别保存；抢劫或对同王国居民实施侵害会增加相应派系罪恶值，处在战争状态和特定 Quest 行为有不同规则。默认每日模型根据目标派系与玩家的关系衰减罪恶值：自家 Clan 或作为君主的王国 -5/日；当前所属王国 -1.5/日；同王国其他 Clan -1.25/日；交战派系 -0.25/日；其他派系基础 -1/日。该派系下主角每拥有一个 Alley 又增加 0.5/日。具体犯罪行为的增量由调用者分别指定，不能把所有犯罪统一成一个常数。

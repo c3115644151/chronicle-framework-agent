@@ -339,8 +339,8 @@ A06预设/设置页目前只定位到界面族；每个选项的写入字段、�
 | D05 Building queue | `ACT-D05-01`更改聚落建造队列 | 每日建设自动增长不是玩家动作；所有建筑/权限差异尚需细分 |
 | D06 Daily projects | `ACT-D06-01`选择/更换每日项目 | 立即选择和后续日tick效果不同；不能和建筑队列混同 |
 | D07 Governor/Garrison | `OBS-D07-01`治理/驻军管理视图；`ACT-D07-01/02`任免Governor和调度驻军 | Garrison PartyScreen转移与其它PartyScreen交易相关但影响对象/权限不同 |
-| D08 Crime/Alley | `OBS-D08-01`Alley控制/犯罪状态；行动与B10/I08 Crime Rating区分 | Clan/Alley运营不是逐个雇佣/战斗按钮的合并入口；地下犯罪内容需核模块 |
-| D09 Settlement visit | `ACT-D09-01/02`地图进入Settlement、菜单离开Settlement | 等待/访问/对话/入场Scene是不同动作；Menu列数不等于行为族数 |
+| D08 Crime/Alley | `OBS-D08-01`Alley控制/犯罪状态；进场`ACT-D08-01`、更换Leader`ACT-D08-02`、管Roster`ACT-D08-03`、放弃`ACT-D08-04`、领周招募`ACT-D08-05`、防守帮派进攻`ACT-D08-06`；犯罪处置与B10/I08分开 | 菜单/leader对话的同一Roster/选Hero/放弃后果合并为别名；专用Alley fight任务映射独立D08入口，并跨G03/G09后果核验 |
+| D09 Settlement visit | `ACT-D09-01/02`地图进入Settlement、菜单离开Settlement；特定Alley location entry cross-reference `ACT-D08-01` | 等待/访问/对话/入场Scene是不同动作；Menu列数不等于行为族数 |
 | D10 Settlement ownership | 结果观察复用B05/B06/C06、地图/日志通知；改变Owner的来源行动映射C06/F/G | Settlement owner change是结果事件，不另建“地图易主按钮” |
 
 #### D域目录项
@@ -359,9 +359,14 @@ A06预设/设置页目前只定位到界面族；每个选项的写入字段、�
 | ACT-D06-01 | 行为 | Fief管理VM选择当日项目/自动项目 | 变更聚落日常项目并影响后续日tick；不是立刻完成该项目 | Chronicle无daily project action；Town/Castle允许项矩阵未测 | D06、L03 |
 | ACT-D07-01 | 行为 | Fief管理页给当前Settlement任命/移除Governor | 改Hero Governor身份/角色及聚落模型后果；Hero忙碌/囚禁/军团等状态会限制 | Chronicle无Governor assign/remove action | D07、B04/H05-H06、L03 |
 | ACT-D07-02 | 行为 | Manage Garrison/PartyScreen在PlayerParty与Settlement Garrison转移成员 | Roster/双方容量/可转移对象决定成败；Done提交，Cancel保留前值 | Chronicle只在有限PartyState/Loot或已实现交易条件下读取Roster，未覆盖一般Garrison UI | D07/F11/H04、L03 |
-| ACT-D08-01 | 候选行为 | Clan/Alley管理中改变Alley投资/扩张/守卫 | 相关金额/角色/帮派控制与战斗风险需按各Option分开；不能从Faction Crime Rating推导 | Chronicle无Alley动作；当前玩家真实入口和每Option效果需视觉/源码逐项映射 | D08/H02/I08、L03 |
+| ACT-D08-01 | 行为 | 在Town菜单选择“Go to alley”进入玩家已拥有的Alley location | 需当前聚落存在PlayerAlleyData；切换GameMenu并设置Alley location Scene，不直接修改Owner/Roster；该菜单/Scene承载时钟尚未运行核实 | v1.4.8 SandBox `AlleyCampaignBehavior`源码确认Option与SwitchToMenu；Chronicle没有Alley Scene入口 | D08/D09/L03/L07、`AlleyCampaignBehavior.go_to_alley_on_condition/consequence` |
+| ACT-D08-02 | 行为 | 在Alley管理菜单或Alley leader对话中选择更换负责人，并从符合条件的Clan Hero里确认新Leader | 攻击期间菜单项禁用；选择由`AlleyModel.GetClanMembersAndAvailabilityDetailsForLeadingAnAlley`筛选；写入AssignedClanMember、替换打手Roster中的Hero并将新Leader延迟传送到聚落 | 两入口调用同一Inquiry与状态Handler；Chronicle无Alley leader动作；玩家对话/时钟运行回执未知 | D08/B04/H02/J08/L03、`AlleyHelper.CreateMultiSelectionInquiryForSelectingClanMemberToAlley`、`ChangeTheLeaderOfAlleyInternal` |
+| ACT-D08-03 | 行为 | 从Alley管理菜单或负责人对话打开“Manage Alley”PartyScreen并Done提交守军Roster | 攻击期间禁用；`AlleyHelper`禁止转入Hero/Prisoner并按当前AlleyModel上下限检查普通打手人数；Done更新PlayerAlleyData Roster，Scene内刷新Alley Agents | 两入口使用同一PartyScreen/Done回调；取消边界、双方列表细节和视觉结果未实机核实；Chronicle无Alley roster动作 | D08/F11/H04/L03/L07、`AlleyHelper.OpenScreenForManagingAlley`、`AlleyCampaignBehavior.OnPartyScreenClosed` |
+| ACT-D08-04 | 行为 | 在Alley GameMenu确认放弃，或与Alley leader对话确认放弃 | 移除PlayerAlleyData并撤销Alley Owner；普通打手回MainParty roster，UnderAttack时按Alley数据交接/销毁；对话Scene路径额外清理在场Alley Agents | 两入口合并为放弃同一Alley结果；Dialog/Menu的附带Scene清理按上下文记录；Chronicle无动作，完整关系回执/时钟未运行核验 | D08/B09/J08/L03/L07、`PlayerAlleyData.AbandonTheAlley/DestroyAlley`、`AlleyCampaignBehavior.abandon_alley_consequence` |
+| ACT-D08-05 | 行为 | 与玩家指定的Alley leader交谈，请求领取当前周可加入主队的Alley Volunteers并确认 | 受 `RandomFloatWeekly`和AlleyModel候选Roster限制；确认后 Troops加入MainParty并更新LastRecruitTime；调用路径不扣Gold；库存量可能为零或暂未开放 | v1.4.8对话行/Party roster handler源码确认；Chronicle无该动作，未实机验证具体刷新/拒绝分支 | D08/E06/H04/J08、`AlleyCampaignBehavior.player_recruited_troops_from_alley`、`DefaultAlleyModel` |
+| ACT-D08-06 | 行为 | Player Alley遭帮派袭击时，在manage_alley菜单选择Confront并完成领主对话以守卫据点 | 需当前PlayerAlleyData处于UnderAttack且回应期限未到；对话后调用专用`OpenAlleyFightMission`而非标准MapEvent，结果更新双方Alley Owner/守军 | 源码确认菜单提示、对话和专用Mission路径；Chronicle无Alley Mission动作；实际胜负/撤退、时钟与保有/失去据点的视觉恢复未运行核实 | D08/G01/G03/G09、`AlleyCampaignBehavior.alley_under_attack*`、`CampaignMission.OpenAlleyFightMission` |
 
-D域当前初步覆盖全部D01-D10系统条目；建设/每日项目、州内可视页面和Alley候选行为仍有未展开子族，尚不能把这些行数当最终D域动作分母。Town菜单、Army管理、交易与战斗路径交叉引用E/F/C/H/J，而不是重复创建同一Action ID。
+D域初步覆盖全部D01-D10系统条目；建设/每日项目以及可视页面/时钟边界仍待补核。D08现已分出Alley场景进入、换Leader、驻守Roster、放弃、周招募和攻击响应六族，其中相同GameMenu/Dialog的同果路径做了别名去重；仍缺玩家运行画面与部分异常恢复证据，故当前分类数不是最终D域行为分母。Town菜单、交易和战斗结果继续交叉引用E/F/C/H/J，不重复创建同一Action ID。
 
 ### E域初始交叉映射与目录族
 
