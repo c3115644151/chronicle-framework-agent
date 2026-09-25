@@ -485,7 +485,7 @@ F/G中Mission主角移动/攻击、Formation orders及部署已作为真实玩�
 | H02 Player Clan | `OBS-B05-01`家族管理面；名称/旗帜操作映射`ACT-H02-01/02` | Gold/财务与E07可见预测共享数据，不重复建Clan finance动作 |
 | H03 Main Party | Party/经济汇总映射`OBS-E06-01`与`OBS-F01-01` | Party对象字段和队伍面板字段需按可见细节继续拆分 |
 | H04 Troop Roster | `OBS-H04-01`Party roster；升级/俘虏招募暂为`ACT-H04-01/02` | 招募新兵、俘虏招募、自动NPC升级各自不同，后者无玩家入口 |
-| H05 Companion | `OBS-H05-01`玩家Clan/Party同伴信息；`ACT-H05-01`游荡者招募 | 战斗加入Party/加入Clan/同伴建Party不是同一动作 |
+| H05 Companion | `OBS-H05-01`玩家Clan/Party同伴信息；`ACT-H05-01`游荡者付费招募；被俘的既有Companion经监狱营救恢复队伍`ACT-F12-14` | 救回既有玩家同伴是F12捕获/营救闭环，不重复计成雇佣游荡者；战斗临时加入、Clan membership和建Party仍是不同动作 |
 | H06 Party Roles | `OBS-H06-01`Scout/Surgeon/Quartermaster/Engineer等角色分配状态；`ACT-H06-01`任命Party Role | 军团Captain/Governor/Clan Party Role分别映射F/D/H不同业务 |
 | H07 Inventory | `OBS-E01-01`当前Inventory Mode物品列表，交易动作复用`ACT-E02-01/02` | 普通买卖、Battle Loot、囚犯Roster不是同一容器/动作 |
 | H08 Equipment | `OBS-H08-01`Hero战斗/民用装备槽；`ACT-H08-01`装备/卸装 | Inventory VM里交易装备与改Hero穿戴是不同State副作用 |
