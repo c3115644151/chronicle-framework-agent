@@ -36,7 +36,7 @@ Research Gate: **BLOCKED**
 Implementation Gate: **BLOCKED**
 行为总分母：**UNKNOWN**　游戏版本：**1.4.8.119303**
 
-当前技术焦点是完整盘点玩家与战役世界的观察和行动接口。逐系统核实玩家入口/输入修饰、被动与按需信息、原版后果和Campaign时间、UI handler/API差异、当前适配、证据及未知，然后跨域去重建立真实行为分母。`SYSTEM_INVENTORY.md`的127项是研究入口，不是玩家动作数。盘点验收、域间依赖和工作次序由GitHub Project维护；本文不保存活动卡片、完成数量或当前工作状态。Research Gate通过前不新增游戏能力；Tier 1仅作为未来成熟度夹具。Minecraft Agent研究作为后续架构参考，不构成绕过全景研究的理由。
+当前技术焦点是完整盘点玩家与战役世界的观察和行动接口。逐系统核实玩家入口/输入修饰、被动与按需信息、原版后果和Campaign时间、UI handler/API差异、当前适配、证据及未知，然后跨域去重建立真实行为分母。`SYSTEM_INVENTORY.md`的126项是游戏系统研究入口，不是玩家动作数；开发期Harness不在这126项或玩家行为分母内。盘点验收、域间依赖和工作次序由GitHub Project维护；本文不保存活动卡片、完成数量或当前工作状态。Research Gate通过前不新增游戏能力；Tier 1仅作为未来成熟度夹具。Minecraft Agent研究作为后续架构参考，不构成绕过全景研究的理由。
 
 Minecraft Agent 的环境、规划、技能、记忆和评测研究已沉淀到本文后续架构段落；本文不再把项目目标定义为“测试工具”。
 

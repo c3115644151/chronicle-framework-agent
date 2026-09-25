@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '4.82'
+$contractVersion = '4.83'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -160,11 +160,15 @@ if ($developmentDoc -notmatch '研究就绪门槛' -or $harnessScript -notmatch 
 $approvedDiagnosticHash = [regex]::Match($researchReadinessSource, "AuditedHarnessDiagnosticSha256 = '([0-9a-f]{64})'")
 $actualDiagnosticHash = (Get-FileHash (Join-Path $harnessRoot 'SubModule.cs') -Algorithm SHA256).Hash.ToLowerInvariant()
 if (-not $approvedDiagnosticHash.Success -or $approvedDiagnosticHash.Groups[1].Value -ne $actualDiagnosticHash) { throw 'The exact-hash SubModule diagnostic exception must match the reviewed source.' }
-if ($mainlineDoc -notmatch '(?m)^Research Gate: \*\*(BLOCKED|READY)\*\*' -or $mainlineDoc -notmatch '(?m)^Implementation Gate: \*\*(BLOCKED|READY)\*\*' -or $mainlineDoc -notmatch '行为总分母：\*\*(UNKNOWN|[1-9]\d*)\*\*' -or $mainlineDoc -notmatch 'SYSTEM_INVENTORY' -or $mainlineDoc -notmatch '127') { throw 'MAINLINE must expose gate status and distinguish system inventory from the behavior denominator.' }
+if ($mainlineDoc -notmatch '(?m)^Research Gate: \*\*(BLOCKED|READY)\*\*' -or $mainlineDoc -notmatch '(?m)^Implementation Gate: \*\*(BLOCKED|READY)\*\*' -or $mainlineDoc -notmatch '行为总分母：\*\*(UNKNOWN|[1-9]\d*)\*\*' -or $mainlineDoc -notmatch 'SYSTEM_INVENTORY' -or $mainlineDoc -notmatch '126') { throw 'MAINLINE must expose gate status and distinguish the game-system inventory from the player-behavior denominator.' }
 if ([string]::IsNullOrWhiteSpace($taskTrackerUrl) -or $taskTrackerUrl -notmatch '^https://github\.com/users/[^/]+/projects/\d+$' -or @($contextState.taskTracker.PSObject.Properties.Name).Count -ne 1) { throw 'ContextState must store only one GitHub Project locator, without duplicated task metadata.' }
 if ($mainlineDoc -match '(?m)^\| Behavior-interface census \|' -or $mainlineDoc -match '\b0/12 domains\b' -or $mainlineDoc -match '\[W1-A.*Issue #\d+') { throw 'MAINLINE must not mirror live GitHub work-item or domain-completion status.' }
 if ($mainlineDoc -match '(?m)^Research Gate: \*\*READY\*\*' -and $mainlineDoc -match '行为总分母：\*\*UNKNOWN\*\*') { throw 'Research cannot be marked READY while the behavior denominator is unknown.' }
 if ($mainlineDoc -match '(?m)^Implementation Gate: \*\*READY\*\*' -and $mainlineDoc -notmatch '(?m)^Research Gate: \*\*READY\*\*') { throw 'Implementation cannot be READY before the research gate.' }
+$inventoryIds = @([regex]::Matches($inventoryDoc, '(?m)^\|\s*([A-L]\d{2})\s*\|') | ForEach-Object { $_.Groups[1].Value })
+$inventoryDomainLetters = @($inventoryIds | ForEach-Object { $_.Substring(0, 1) } | Sort-Object -Unique)
+$inventoryCountInFocus = [regex]::Match($mainlineDoc, 'SYSTEM_INVENTORY\.md.*?(\d+)项')
+if ($inventoryIds.Count -eq 0 -or @($inventoryIds | Sort-Object -Unique).Count -ne $inventoryIds.Count -or ($inventoryDomainLetters -join '') -ne 'ABCDEFGHIJKL' -or -not $inventoryCountInFocus.Success -or [int]$inventoryCountInFocus.Groups[1].Value -ne $inventoryIds.Count) { throw 'SYSTEM_INVENTORY item IDs, A-L coverage, or the derived count in MAINLINE do not agree.' }
 . $researchReadinessScript
 if (-not (Test-ChronicleResearchReadiness)) { throw 'Research readiness gate regression checks failed.' }
 if ($mainlineDoc -notmatch '(?m)^#### .*Mechanic Contract\s*$') { throw 'MAINLINE.md is missing the required original-mechanic contract table.' }

@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 
-Contract version: 4.82
+Contract version: 4.83
 
 ## 目标与边界
 
