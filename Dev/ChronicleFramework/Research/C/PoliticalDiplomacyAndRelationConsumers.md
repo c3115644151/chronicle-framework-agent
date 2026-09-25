@@ -126,9 +126,9 @@ Chronicle Observer 当前不记录 player/Clan `Kingdom` 身份状态或敌友�
 
 ## C08 王国创建与毁灭
 
-创建边界由 `KingdomCreationModel` 提供：当前 Default 模型要求 Player Clan 独立、至少 Clan Tier 4、拥有至少一个 Town/Castle、队伍及领地守军中有至少100名健康士兵；最多四项初始政策。StoryMode `CreateKingdomQuest` 会用离开王国状态、Clan Tier、主队健康人数与自有堡垒来跟踪任务进度；帝国路线要求 Imperial culture 的堡垒，其它路线可选任意 Town/Castle。任务日志提示条件完成后要与Governor谈话创建王国，但该 Governor 对话的完整UI handler及Sandbox模式通用入口尚未定位。
+创建有真实的玩家对话入口，不只是 StoryMode 任务提示：`SandBoxManager`会注册 `GovernorCampaignBehavior`，在玩家所属Faction的聚落Governor对话中提供“proclaim a new kingdom”选项。入口要求目标Hero确为其Governor聚落的Governor、该聚落属于玩家当前MapFaction，且玩家Clan当前没有Kingdom；点击后调用 `KingdomCreationModel.IsPlayerKingdomCreationPossible`并显示不可用理由。当前Default模型要求玩家Clan独立、至少Clan Tier 4、拥有至少一个Town/Castle，且主队所属WarParty兵力与Clan各城堡/城镇驻军健康兵力合计至少100。角色对话随后分页选择文化（玩家Clan文化及自有Town/Castle文化去重列表）、预览该文化默认政策、输入王国名称，最后确认；名称输入可取消并结束对话，文化阶段也有返回/取消选项。最终由 `GovernorCampaignBehavior` 调 `KingdomManager.CreateKingdom`，使用所选名称/文化/政策；引擎创建Kingdom、将玩家Founder Clan转入其中、按条件处理原有战争关系、加入初始政策并发 `OnKingdomCreated`。
 
-核心建立入口 `KingdomManager.CreateKingdom` 创建 Kingdom 并设名称、文化、旗帜、家园及初始描述，再经 `ChangeKingdomAction.ApplyByCreateKingdom` 把 Founder Clan 转入该 Kingdom；先前对 Founder Clan 有战争的 Faction 可能由 KingdomCreation 来源自动宣战，初始政策逐个加入，最后发 `OnKingdomCreated`。玩家可选 Kingdom culture 的来源为 Player Clan culture 与自有 Town/Castle cultures。
+StoryMode `CreateKingdomQuest` 是这条原生建国动作的目标/叙事包装，不是另一种独立建国入口：它跟踪Tier、100健康兵力、Clan独立和堡垒占有；帝国路线要求Imperial culture堡垒，反帝国路线要求任意堡垒，并引导玩家满足要求后找Governor。Sandbox通用入口则由注册的 `GovernorCampaignBehavior` 提供。源码handler没有显式改变CampaignTime；对话/命名弹窗实际暂停与恢复时钟、失败或Mod替换模型后的运行表现尚未实测。Chronicle尚不支持Governor 3D对话或建国动作。
 
 王位退让与王国毁灭不同：`KingdomManager.AbdicateTheThrone` 在可用 Clan 多于1时改RulingClan并加入强制 KingSelectionDecision；若只剩一个非佣兵 Clan，则让其退出王国并在清理战争关系后毁灭该 Kingdom。`DestroyKingdomAction` 会 Deactivate Kingdom，对成员 Clan 各调用 DestroyClanAction、移除 Clan 集合与 Faction war，并分发 `OnKingdomDestroyed`；每个被销毁 Clan 再处理其 Party、Heroes、Fiefs与 Kingdom 归属。
 

@@ -289,7 +289,7 @@ A06预设/设置页目前只定位到界面族；每个选项的写入字段、�
 | C05 Policy | `OBS-C05-01`王国当前政策与决策；`ACT-C05-01`提议政策，Decision支持/选择复用`ACT-C02-01/ACT-C02-02` | 政策结果、提出提案与投票支持不能合并 |
 | C06 Fief allocation | Settlement/Clan页面观察映射D10/B05/B06；K→Fiefs对其他Clan领地发起Preliminary claim为`ACT-C06-01`，后续投票响应复用`ACT-C02-01/ACT-C02-02` | Proposal、初步Yes/No、正式Claimant选择和最终ChangeOwnerAction是不同阶段；决议回应按C02去重 |
 | C07 Clan Kingdom change | `OBS-B04-01/OBS-B06-01`当前Clan/Kingdom身份；`ACT-C07-01`至`ACT-C07-05`区分离境/退位；`ACT-C07-06`劝说其他Clan归附当前玩家王国；`ACT-C07-07`开始佣兵、`ACT-C07-08`对话结束佣兵、`ACT-C07-09`宣誓封臣 | 玩家Clan改投与劝说目标Clan归附是方向相反的身份变化，不能混为同一动作；K页结束佣兵合同与对话结束合同也不能合并 |
-| C08 Kingdom create/destroy | `OBS-C08-01`Story/Kingdom创建任务阶段与Faction状态；`ACT-C08-01`在门槛满足后创建玩家王国 | 玩家创建有叙事/聚落/兵力等条件；Kingdom毁灭和AI灭国没有直接玩家按钮，战争/领地行为映射到F/G/C实际动作 |
+| C08 Kingdom create/destroy | `OBS-C08-01`Story/Kingdom创建任务阶段与Faction状态；`ACT-C08-01`满足模型门槛后与自有聚落Governor创建玩家王国 | StoryMode建国Quest是目标提示，不是第二个建国入口；Kingdom毁灭和AI灭国没有直接玩家按钮，战争/领地行为映射到F/G/C实际动作 |
 | C09 Rebellion | `OBS-C09-01`Settlement叛乱状态/通知；叛乱自动由忠诚/民兵等日常模型形成 | 玩家没有“触发叛乱”按钮；观察和参与镇压/攻城分别映射D/F/G，不得创建假动作 |
 | C10 Trade/Tribute | `OBS-C10-01`协议/贡金Stance数据；`ACT-C10-01`提议Trade Agreement，决议选择复用`ACT-C02-01/02`；贡金方案映射`ACT-C03-02` | 每日支付和Notice不是玩家动作；历史支付消费者尚未全定位 |
 
@@ -321,7 +321,7 @@ A06预设/设置页目前只定位到界面族；每个选项的写入字段、�
 | ACT-C07-07 | 行为 | 与异国领主对话“进入其阵营服务”后选择以佣兵身份效力并接受 | 要求目标Faction/战争兼容、Clan Tier/关系/领地等通过`CanPlayerOfferMercenaryService`；调用`ApplyByJoinFactionAsMercenary`并授予5 Influence | 源码确认真实对话句与状态提交；Campaign时间/对话状态语义及玩家视觉流程未运行核实 | C07/B04/J08/E10、`LordConversationsCampaignBehavior`、`FactionHelper` |
 | ACT-C07-08 | 行为 | 与同Faction领主对话提出结束佣兵服务并确认 | 需非囚禁且MainParty不在Army；对话路径先清零Clan Influence，再调用`ApplyByLeaveKingdomAsMercenary` | 与K页`ACT-C07-05`使用不同玩家入口；对话路径独有Influence清零，故保持独立；Campaign时间语义未运行核实 | C07/B04/J08、`LordConversationsCampaignBehavior`、`ChangeKingdomAction` |
 | ACT-C07-09 | 行为 | 在Lord Conversation提出宣誓效忠、通过条件后完成vassal oath | `CanPlayerOfferVassalage`筛Clan Tier、领袖关系和战争条件；必须向领袖完成授予；可能先结束旧佣兵服务，再`ApplyByJoinToKingdom`并提交入仕奖励 | 源码确认实际玩家选项/提交分支；Campaign时间、拒绝分支及奖励UI/状态结果未运行核实 | C07/B04/J08、`LordConversationsCampaignBehavior`、`FactionHelper` |
-| ACT-C08-01 | 候选行为 | 满足建国条件后从Sandbox或Story Mode入口创建Player Kingdom | 创建Faction、转换Founder Clan、初始化政策/战争关系；入口/条件是否在两种Campaign中一致未确认 | Chronicle没有建国流程；暂不计入最终分母，等待通用Sandbox入口与Story quest入口分支核验 | C08/J12、B06/D09/C03、L03 |
+| ACT-C08-01 | 行为 | 与玩家所属聚落Governor对话，满足条件后选王国文化、输入名称并确认建国 | Default模型要求Clan独立、Tier≥4、拥有Town/Castle且总计至少100健康驻军/WarParty兵；创建后玩家Clan转入新Kingdom并初始化文化政策/战争关系；StoryMode Quest仅作目标引导 | 当前1.4.8 `GovernorCampaignBehavior`、`SandBoxManager`、Default model和`KingdomManager`源码链已核实；Chronicle无动作，未实机走通条件提示/文化选择/名称取消、时钟与结果恢复 | C08/J12/B06/D09/C03/L03、`GovernorCampaignBehavior`、`DefaultKingdomCreationModel`、`KingdomManager.CreateKingdom` |
 | ACT-C10-01 | 行为 | 对非敌对Kingdom提出Trade Agreement proposal | 进入KingdomDecision/Election，并检查权限/Influence | Chronicle不支持 | C10/C01-C02、B06/E08/L03 |
 | N/A-C10-01 | N/A | 佣兵玩家收到贸易协定的自动接受分支 | 源码分支自动处理，不是玩家按键/对话行动；一般玩家决议支持仍映射`ACT-C02-01/02` | 不计入ACT分母；Chronicle未观察完整协议状态 | C10、B04/B06/L06 |
 | N/A-C08-01 | N/A | AI王国被消灭/玩家看到王国毁灭通知 | 王国消灭是Campaign结算，不存在通用玩家“摧毁王国”按钮；玩家能做的是引发战争/攻城等其它动作 | 不计入ACT分母；相关战争/战斗映射C03/F/G，通知见L06 | C08/C03、B06/L06 |
