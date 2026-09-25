@@ -114,11 +114,13 @@ Sponsor Clan 与 Proposer Clan 领袖 Hero 的个人关系可参与支持计算�
 
 加入服务也有独立的原版领主Conversation入口，不应统称为Barter：`LordConversationsCampaignBehavior.AddPoliticsAndBarter`先提供“I would like to enter your service”对话，适用于玩家未加入Kingdom或已为佣兵、目标是另一Kingdom且双方不在战争状态；再分成两支。佣兵分支由玩家选择“我的剑属于你，给出合适价钱”，可点击条件调用 `FactionHelper.CanPlayerOfferMercenaryService`（含Clan Tier、关系、领地和阵营战争兼容检查），接受后 `ChangeKingdomAction.ApplyByJoinFactionAsMercenary` 并给玩家5点Influence。结束佣兵合约另有Conversation句：需玩家在当前Kingdom服务、与目标领主同一Faction、对方非囚犯且MainParty不在Army；确认会先把Clan当前Influence清零，再执行 `ApplyByLeaveKingdomAsMercenary`。Kingdom管理页结束合约使用不同入口，反编译到的VM只直接提交后一个Action，故不得静默合并两入口。
 
-封臣支系是誓约Conversation，不是generic Barter：玩家可选择向领主宣誓效忠；只有Kingdom领袖能直接授予封臣身份，若当前对话对象不是领袖则会要求/引导玩家去见领袖。可点击条件通过 `FactionHelper.CanPlayerOfferVassalage` 检查Clan Tier、与领袖关系及战争兼容性；接受后 `ApplyByJoinToKingdom`，若从佣兵转封臣则先结束旧佣兵服务，并可能提交入仕奖励/关系/Influence。已确认上述玩家实际入口和核心提交点，但没运行视觉交互；完整Barterables `JoinKingdomAsClanBarterable`、`MercenaryJoinKingdomBarterable`、`LeaveKingdomAsClanBarterable` 是否另有可由玩家主动发起的改投路径仍需逐项核实，不能用其类名推定有第二入口。
+封臣支系是誓约Conversation，不是generic Barter：玩家可选择向领主宣誓效忠；只有Kingdom领袖能直接授予封臣身份，若当前对话对象不是领袖则会要求/引导玩家去见领袖。可点击条件通过 `FactionHelper.CanPlayerOfferVassalage` 检查Clan Tier、与领袖关系及战争兼容性；接受后 `ApplyByJoinToKingdom`，若从佣兵转封臣则先结束旧佣兵服务，并可能提交入仕奖励/关系/Influence。已确认上述玩家实际入口和核心提交点，但没运行视觉交互。
+
+还要区分“玩家 Clan 改投其他 Kingdom”和“玩家劝别的 Clan 改投玩家 Kingdom”。本机1.4.8中，通用 `lord_barter` 对话只检查目标领主、非囚犯、非Minor faction、双方非交战及Barter cooldown，随后调用 `StartBarterOffer`；但源码调用点里 `JoinKingdomAsClanBarterable` / `LeaveKingdomAsClanBarterable` 的通用阵营交换实例来自 `DiplomaticBartersBehavior` 的NPC决策，不能仅凭其 `Barterable` 类型推断玩家可在通用Barter界面自由改投。玩家劝说他Clan的确有独立路径：`LordDefectionCampaignBehavior` 对满足 `DefectionModel.CanHeroDefectToFaction` 的敌对/非交战目标提供对话入口，成功推进说服后以玩家Clan当前Kingdom作为固定目标打开特殊Barter，并注入 `JoinKingdomAsClanBarterable(targetHero, Clan.PlayerClan.Kingdom, isDefecting: true)`；接受后改变的是目标Clan的归属，不是玩家Clan改投。另有“以释放换投靠”囚犯入口，受玩家必须为Kingdom领袖、目标须为其Clan Leader及囚禁/场景上下文限制。当前DLL中的无Barter直接加入条件返回`false`，因此目录不把它当作保证可走的成功分支。敌对/非交战和囚犯入口共享说服/归附结果，但入口条件不同；源码调用链已确认，实际可见文本、条件组合和Barter界面未运行核验。
 
 加入/离开支持模型会读取统治家族与目标 Clan 的关系、其它成员Clan关系、Culture、领地与军力、WarPartyLimit、最近换阵营时间、可靠性常数及当前战争状态；精确模型分数仍由政治子系统进一步追踪。
 
-K页离境交互与上述Conversation路径是两组入口：`KingdomManagementVM` 根据身份提供Abdicate或Leave Kingdom；佣兵/无领地/有领地分支各自确认，拥有领地时选择保留或归还。加入佣兵、结束佣兵服务、立誓成为封臣的对话链已由 `LordConversationsCampaignBehavior` 定位；其前置、退出代价与UI提交不同，参见本节上方。单独的通用改投Barter仍未追完。
+K页离境交互与上述Conversation路径是两组入口：`KingdomManagementVM` 根据身份提供Abdicate或Leave Kingdom；佣兵/无领地/有领地分支各自确认，拥有领地时选择保留或归还。加入佣兵、结束佣兵服务、立誓成为封臣及劝说其他Clan归附的路径均有各自入口，不能合并成“Barter改投”。
 
 Chronicle Observer 当前不记录 player/Clan `Kingdom` 身份状态或敌友盟约历史；Protocol 没有加入/离开 Kingdom 动作。证据：当前安装 `ChangeKingdomAction`、三种 Clan Kingdom Barterable、`KingdomManagementVM`、`LordConversationsCampaignBehavior` 与 `FactionHelper.CanPlayerOfferMercenaryService/CanPlayerOfferVassalage`；当前为源码调用链证据，UI/对话结果未运行测试。
 
