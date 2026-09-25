@@ -6,9 +6,21 @@
 
 ## A01 战役生命周期
 
-玩家入口：新建/继续/读档，经历加载并进入地图。1.4.8 `MBSubModuleBase.OnGameStart` 提供 `CampaignGameStarter`，战役注册 CampaignBehavior；`CampaignEvents` 暴露新档创建、早期加载、读档、读档完成、会话开始等回调。事件名不等于所有玩法界面已就绪；不同 Campaign 类型的顺序/差异未核实。
+玩家入口：初始菜单中的“新战役”“沙盒”“继续战役”“已存档游戏”。`Modules/Native/GUI/Prefabs/InitialScreen.xml` 将菜单按钮点击绑定到 `ExecuteAction`；`InitialMenuVM.RefreshMenuOptions` 从 `Module.GetInitialStateOptions()` 生成选项行，`InitialMenuOptionVM.ExecuteAction` 先通知 `InitialState`，再运行该选项注册的动作。
 
-Chronicle 在 OnGameStart 加入行为，RegisterEvents 建立协议。FreshCampaign Harness 跳过开场并测选项到角色创建完成、MapState快照；这是自动夹具，不是Agent自主创建角色。来源：安装v1.4.8 CampaignSystem源码、SubModule、FreshCampaign测试；Story/Sandbox全生命周期矩阵与UI未核实。
+菜单选项由不同游戏视图模块注册：`StoryModeViewSubModule.OnSubModuleLoad` 注册 `StoryModeNewGame`（显示“新战役”，顺序2）；`SandBoxViewSubModule.OnSubModuleLoad` 注册 `CampaignResumeGame`（“已存档游戏”，顺序0）、`ContinueCampaign`（“继续战役”，顺序1）和 `SandBoxNewGame`（“沙盒”，顺序3）。因此“新战役”与“沙盒”虽然共享后续沙盒加载器，创建的 Campaign 类型不同。故事模式创建 `CampaignStoryMode`，并在 `_startedStoryMode` 标记本次开局；`OnBeforeGameStart` 会据该标记或存档元数据决定是否保留 StoryMode 模块。沙盒新战役创建普通 `Campaign`。这些菜单项会受仅核心内容模式禁用；继续战役还要求配置的最新存档存在且可用；“已存档游戏”打开列表，不依赖“继续战役”所指的最新存档。
+
+新战役路径：点击故事模式或沙盒选项 → `MBGameManager.StartNewGame` 建立 `GameLoadingState` → `SandBoxGameManager` 使用对应的 `CampaignCreatorDelegate` 创建 Campaign 并标记 `NewCampaign` → Campaign 初始化创建 `CampaignGameStarter`，先由 `SandBoxManager.Initialize` 和已启用模块的 `InitializeGameStarter` 注册行为/模型，再完成 Campaign 初始化与行为事件订阅。新战役 Campaign 初始化完成后，分发 `OnNewGameCreated`，随后分发 `OnSessionStart` 和 `OnAfterSessionStart`。`SandBoxGameManager.OnLoadFinished` 对非 Development Mode 的新战役先推入开场 `VideoPlaybackState`，视频结束委托进入 `CharacterCreationState`；Development Mode 跳过视频并直接进入该状态。角色创建最后由 `CharacterCreationState.FinalizeCharacterCreationState` 清理当前状态并推入 `MapState`，再触发 `OnCharacterCreationIsOver`。用户已确认开场动画可用 ESC 跳过；该输入修饰尚未在当前 1.4.8 反编译链中定位。
+
+读档路径：点击“已存档游戏”打开 `SaveLoadScreen`；`SaveLoadVM.InitializeAsync` 异步枚举存档，分组显示可用档并单列损坏档。选择存档后 `SavedGameVM.ExecuteSaveLoad` 调用 `SandBoxSaveHelper.TryLoadSave`；成功回调先结束当前 Game/Screen 状态，再经 `MBSaveLoad.OnStartGame` 和 `MBGameManager.StartNewGame` 建立 `SandBoxGameManager(LoadResult)`。此分支加载已保存 Campaign、调用行为 `SyncData` 并重建事件订阅，不进入新建角色流程。`ContinueCampaign` 则以 `BannerlordConfig.LatestSaveGameName` 建立 `PreloadState` 后读取该存档；启动参数要求继续游戏时，`SandBoxViewSubModule.OnInitialState` 也会尝试自动加载最新可用存档。读档完成后 `SandBoxGameManager.OnLoadFinished` 调用 `OnSavedGameLoadFinished`，清理状态栈并进入 `MapState`；恢复存档中的地图菜单，完成地图加载回调，最终将 Campaign 时间模式设为 Stop。
+
+事件和界面边界：`CampaignEvents` 的创建/加载/会话事件是 Campaign 生命周期通知，不表示初始菜单或角色创建界面已完成。玩家角色创建界面是 `CharacterCreationState`（由 `CharacterCreationManager` 管理阶段）；新战役的 Campaign 初始化和 `OnNewGameCreated` 发生在该状态之前。新档到地图需同时跨过 Campaign 初始化、开场视频/跳过、角色创建完成三段状态；读档则不经角色创建。Campaign 注册的 `CampaignBehavior` 在新档初始化时注册事件，在读档时先恢复 `SyncData` 再重建事件订阅。
+
+Chronicle 当前覆盖：`ChronicleCampaignBehavior` 在 `OnGameStart` 加入 `CampaignGameStarter` 并于 `RegisterEvents` 注册自身事件；现有 FreshCampaign 自动夹具曾实际到达全部7个角色创建阶段、触发创建完成并取得 `MapState` 快照（`TestResults/20260925-044807/FreshCampaignProgression.log` 与 `Temp/FreshCampaignProgressionAttempt1/FreshCampaign.initial-state.json`）。该夹具启动测试战役、自动选择角色创建内容并跳过开场，不从初始菜单点击选项；它证明测试进程内原生新战役到创建完成的路径，不证明玩家菜单点击链的端到端运行。角色创建后快照包含初始身份、声望、队伍、资源、地图位置和时间模式；其测试角色数据由 Harness 自动选择，不代表模型自主完成角色创建。
+
+证据来源：当前安装 v1.4.8.119303 的 `Modules/Native/GUI/Prefabs/InitialScreen.xml`、`TaleWorlds.MountAndBlade.ViewModelCollection.dll`（`InitialMenuVM`/`InitialMenuOptionVM`）、`TaleWorlds.MountAndBlade.dll`（`Module`/`MBGameManager`）、`Modules/SandBox/bin/Win64_Shipping_Client/SandBox.View.dll`（`SandBoxViewSubModule`）、`SandBox.ViewModelCollection.dll`（`SaveLoadVM`/`SavedGameVM`）、`SandBox.dll`（`SandBoxGameManager`）、`TaleWorlds.CampaignSystem.dll`（`Campaign`/`CharacterCreationState`），以及上述 Harness 运行证据。源码路径以本机 DLL 反编译类型/方法为证；当前没有单独执行“初始菜单→点击新战役/沙盒或存档→完整 Campaign”的 UI 运行测试。
+
+未知项：以鼠标点击以外的键盘/手柄触发绑定与具体焦点规则；无存档、损坏存档、无 StoryMode 模块、存档所需模块缺失时各菜单按钮的运行时表现；故事模式与沙盒模式在角色创建阶段及首次落图后的完整差异；开场视频 ESC 跳过所调用的具体 handler；自动继续模式下存档加载失败后的完整 UI 恢复链。Harness 中的 MapState 夹具未覆盖这些条件组合。
 
 ## A02 战役时间与时间控制
 
