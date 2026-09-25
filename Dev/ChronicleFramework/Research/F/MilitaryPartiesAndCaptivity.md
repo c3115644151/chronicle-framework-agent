@@ -24,7 +24,7 @@ Campaign 管理全体 MobileParty 及各类别集合；`MainParty` 是 Campaign 
 
 Chronicle 当前常驻 Snapshot 对 MainParty 输出成员/健康/伤员/俘虏人数、总物品数、粮食、每日FoodChange、DailyWage、速度、士气、cargo weight/capacity、AI MoveMode/DefaultBehavior 和目标 ID。NearbyParty 仅枚举可见且活动的队伍、按观察半径排序并最多给前 12 项，字段含 ID/Name/Type/Distance/Hostile/IsMoving/CurrentSettlementId/成员数/估算实力；不列具体Roster、领袖身份、物品/现金/食物、目标Settlement、任务或 AI 思考评分。
 
-当前快照所以是“一个玩家队伍的较丰富结构化观察 + 附近队伍的有限摘要”，不是全图 party census，也不是敌方/友方所有战役队伍的完整自省。`IsVisible`筛选和玩家地图图标/悬浮/ALT之间的精确视图对应关系尚未逐项验证，见 MAINLINE Observation contract 与 K 类。
+当前快照所以是“一个玩家队伍的较丰富结构化观察 + 附近队伍的有限摘要”，不是全图 party census，也不是敌方/友方所有战役队伍的完整自省。玩家视觉核对补充：地图上可见的附近队伍能直接读到人数；光标悬停并按住ALT可查看政治队伍的兵种/人员构成。此项为用户实际观察确认，未留截图；不外推成所有类型Party均有完整Roster tooltip。Chronicle附近队伍快照目前给成员数/估算实力，但不返回逐兵种Roster，因此“源码/Agent结构化读取更丰富”与“玩家按ALT可看局部详细Roster”是两个不同的证据面，也不能把ALT所见当成无条件常驻信息。
 
 证据：本机 `TaleWorlds.CampaignSystem.dll` 的 `MobileParty`、`PartyBase`、PartyComponents、Roster与Encounter事件；Chronicle `AgentObserver.cs`、`AgentProtocol.cs` 及 MAINLINE 原版动作契约。静态证据版本 v1.4.8.119303，没有声称各类 Party UI 或 Mission roster 已完整视觉验证。
 
@@ -68,7 +68,7 @@ Chronicle 不读取 NPC的候选分数、`ThinkParams`、ObjectiveValue、Rethin
 
 当前安装版 `TaleWorlds.CampaignSystem.ViewModelCollection.dll` 的 `TooltipRefresherCollection.RefreshMobilePartyTooltip` 会在队伍已 `IsInspected` 时加入 `CampaignUIHelper.GetMobilePartyBehaviorText`；该帮助方法转到 `MobileParty.GetBehaviorText`，将部分 `DefaultBehavior`/`ShortTermBehavior`/目标组合转换成可读文字，例如“Engaging”“Chasing”“Running from”“Defending”“Raiding”“Besieging”“Patrolling”或“Following”。这不是完整计划，也不是原始枚举的逐项展示；Army成员可能优先显示 `Army.GetLongTermBehaviorText`，未匹配组合则可能呈现通用 travelling/unknown 文本。
 
-`PartyBase.UpdateVisibilityAndInspected` 为源码所见的 `IsInspected` 写入路径：正常移动 Party 的可见与调查状态受当前地图距离和 `MapVisibilityModel.GetPartySpottingRatioForMainParty` 筛选；同一 Army 的 Attached Party 可跟随 Leader 的可见性，且主队同 Army 的成员 `MobileParty.IsInspected` getter 强制为真。当前证据因此确认“地图 tooltip 有条件地呈现可读队伍行为”，但没有证明玩家视觉入口一定由 ALT 键触发，也没有核全体队伍图标/悬停的显示门槛；须将结构化 tooltip 条件与玩家实际地图界面分开。
+`PartyBase.UpdateVisibilityAndInspected` 为源码所见的 `IsInspected` 写入路径：正常移动 Party 的可见与调查状态受当前地图距离和 `MapVisibilityModel.GetPartySpottingRatioForMainParty` 筛选；同一 Army 的 Attached Party 可跟随 Leader 的可见性，且主队同 Army 的成员 `MobileParty.IsInspected` getter 强制为真。玩家已确认ALT悬停可查看政治Party兵种构成，但这不能证明“行为摘要”也用相同修饰键/同一可见门槛。当前证据确认源码会在满足`IsInspected`时给地图tooltip添加可读队伍行为；该行为字段的具体玩家视觉触发方式及未侦察/不同行为类型表现仍未核全，须与已经确认的ALT兵种详情分开标记。
 
 ## F04 决策循环与短期移动状态
 

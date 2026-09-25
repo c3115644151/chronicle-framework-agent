@@ -408,9 +408,9 @@ E03、E06、E08、E09、E10的大量变化由每日模型、其它玩家动作�
 
 | 系统ID | 映射到的观察面/行动族 | 去重/未决 |
 | --- | --- | --- |
-| F01 MobileParty | `OBS-F01-01`附近可见队伍摘要/玩家队伍状态；地图移动/追击/停步映射`ACT-K02-01`、`ACT-K02-03`、`ACT-K02-05` | 同一Party的对象/AI/roster字段不应拆成每个属性一个观察族 |
+| F01 MobileParty | `OBS-F01-01`附近可见队伍摘要/玩家队伍状态；玩家视觉核对确认地图可见人数及ALT悬停政治Party兵种详情；移动/追击/停步映射`ACT-K02-01`、`ACT-K02-03`、`ACT-K02-05` | ALT详列证据仅限玩家确认的政治Party，不推广到所有Party；同一Party的对象/AI/roster字段不按每个属性另拆族 |
 | F02 Party AI | NPC行动结果在地图/Army/Siege中可观察；内部自主决策记`N/A-F02-01`，玩家影响环境映射至真实战争/军团动作 | `AiPartyThinkBehavior`目标执行属于后台决策；具体可见结果不保证能观察到NPC意图 |
-| F03 AI行为类型 | Party概要复用`OBS-F01-01`；`IsInspected`条件下可读行为提示映射`OBS-F03-01` | 原版把部分Default/ShortTerm行为和目标转换为摘要文字，不展示完整计划；tooltip的真实玩家触发/ALT关系尚未视觉核实，不能按完整AI意图观察 |
+| F03 AI行为类型 | Party概要复用`OBS-F01-01`；`IsInspected`条件下可读行为提示映射`OBS-F03-01` | 原版把部分Default/ShortTerm行为和目标转换为摘要文字，不展示完整计划；用户确认的ALT仅对应政治Party兵种详情，不据此断定行为摘要也由ALT触发；行为tooltip入口仍未视觉核实 |
 | F04 Party Think | NPC长期/短期目标评分复用`N/A-F02-01`；影响其条件的玩家动作映射Army/外交/地图行为族 | 不把Think、行为切换或评分模型另计玩家动作；UI是否揭示选择理由未知 |
 | F05 Army | `OBS-F05-01`Kingdom Army管理视图；管理己方Army为`ACT-F05-01`、主动解散为`ACT-F05-02` | 调整cohesion/邀请party/取消的提交边界以Army VM事务为准；自动解散与主动解散分开 |
 | F06 Clan War Party | 家族Party信息复用`OBS-B05-01`/`OBS-F01-01`；Clan→Parties→Create New Party `ACT-F06-01` | 玩家创建Party由 ClanPartiesVM 提交；NPC War Party自动生成不是玩家按钮；初始PlayerClan Party不自动满编 |
@@ -436,7 +436,7 @@ E03、E06、E08、E09、E10的大量变化由每日模型、其它玩家动作�
 
 | ID | 类型 | 玩家入口 / 观察语义 | 原版结果、前置/时间 | Chronicle覆盖 / 证据 / 未知 | 来源映射 |
 | --- | --- | --- | --- | --- | --- |
-| OBS-F01-01 | 观察 | Map上附近/可见MobileParty摘要 | 受主队视距、可见状态和观察半径过滤；Leader/roster/AI目标不是默认可见 | Observer最多12项摘要，字段有限，不是全图清单 | F01/K01、AgentObserver |
+| OBS-F01-01 | 观察 | Map上可见Party显示人数；光标悬停+ALT可查看政治Party兵种/人员构成（玩家视觉核对）；同一观察族包含当前可见MobileParty摘要 | 受地图可见性/侦察状态过滤；ALT详细Roster已确认适用于政治Party，但不外推到所有Party或未可见目标 | Chronicle Observer最多12项摘要，给成员数/估算实力、不列兵种Roster；视觉事实为用户确认、无截图留档，AI信息读取策略仍待设计 | F01/F03/K01、AgentObserver、人类视觉确认（本会话） |
 | OBS-F05-01 | 观察 | Kingdom→Armies/Army Management列表查看Army leader/成员/目标/cohesion | 管理权限及Kingdom身份过滤；地图Overlay和Panel有不同字段 | Chronicle没有完整Army/ArmyVM状态 | F05/F13、L03 |
 | OBS-F08-01 | 观察 | Siege menu/地图Army overlay观察Camp、Siege、进攻/防守状态 | Campaign siege campaign state不是Mission战场实时状态 | Observer只返回有限Settlement/Encounter信息 | F08/G08、D01、AgentObserver |
 | OBS-F10-01 | 观察 | Battle Simulation界面/Native map event的胜负、回合/finish状态 | 模拟推进不等于玩家Mission局部战斗 | Chronicle observer支持Simulation finished/retreated/state字段 | F10/G02、MAINLINE autoresolve |
