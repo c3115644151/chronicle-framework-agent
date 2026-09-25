@@ -493,7 +493,7 @@ F/G中Mission主角移动/攻击、Formation orders及部署已作为真实玩�
 | H10 Skills/Perks | `OBS-B03-01`成长面板；`ACT-H10-01`已定义点数分配事务 | 战斗/任务/交易/锻造获得经验是各来源行为结果 |
 | H11 Renown/Influence | `OBS-H11-01`Clan Tier/Renown/Influence摘要；获取/消费映射F/G/C和E实际行为 | 查询数值与获取声望/影响力、消费影响力是不同族 |
 | H12 Player Captivity | `OBS-H12-01`PlayerCaptivity/捕获方/赎金菜单；接受与拒绝offer分别映射`ACT-H12-01/02` | 自动逃脱/交换/战败释放不是玩家action；玩家等待依Campaign时钟 |
-| I01 Personal Relation | `OBS-B09-01`上下文中的关系反馈；俘虏放行/捐献/处决产生的具体Hero关系变化来自`ACT-F12-03/04/05/09/12`等源动作 | F12内Release、Prisoner-donation与Execution的关系效果依原生行为/模型而异；没有统一关系编辑器或全局日志入口，不另计通用“加减关系”ACT |
+| I01 Personal Relation | `OBS-B09-01`上下文中的关系反馈；俘虏放行/捐献/处决/突围产生的具体Hero关系变化来自`ACT-F12-03/04/05/09/12/14`等源动作 | F12内Release、Prisoner-donation、Execution与Prison Break的关系效果依原生行为/模型而异；没有统一关系编辑器或全局日志入口，不另计通用“加减关系”ACT |
 | I02 Faction Relation | `OBS-B08-01`阵营敌对/外交状态；政策/宣战/和平等映射C和接敌G | Hero Relation与Faction Stance不同数据族 |
 | I03 Prisoner Social State | 俘虏状态映射`OBS-H04-01/OBS-H12-01`；Hero/prisoner transfer、release、execution与战后Roster由`ACT-F12-01/02/03/04/05/06/07/08/09/10/11/12`及相应UI观察覆盖；MainHero ransom/wait是`ACT-H12-01/02` | 不另复制Release/Take动作；按主角/普通Hero/普通Troop、party/Barter/dungeon/aftermath上下文区分 |
 | I04 Marriage/Romance | Courtship阶段的当前对话选项复用`OBS-J08-01`；开始Courtship/说服/Marriage Barter映射`ACT-I04-01/ACT-I04-02/ACT-I04-03` | Romance阶段通过同一原生Conversation option list观察，不重复建立第二个对话观察ID；NPC每日婚姻算法不是玩家动作 |
