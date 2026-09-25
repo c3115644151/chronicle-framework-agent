@@ -16,6 +16,8 @@ Chronicle附近队伍观察当前只报告限半径且最多12项的摘要；不
 
 点击队伍视觉实体时，普通点击调用 `MobileParty.MainParty.SetMoveEngageParty`，按住 `MapFollowModifier`调用 `SetMoveEscortParty`；后者写入 `TargetParty`、当前目标位置、导航类型并设置 `DefaultBehavior = EscortParty`，不是敌对接近。地图Screen对两者使用同一有效点击后的 `HandleClickTimeChange`，所以点击时间档副作用来自原版地图点击策略，而不是跟随动作额外快进。追随目标失去可见性、目标失效和其余移动失败后的确切恢复分支仍需分开核实，不能仅凭这两个setter推断。原生移动、追击、Hold及时间副作用以MAINLINE Mechanic Contract为准；直接设置MobileParty目标setter仍会跳过 `MapScreen`可视目标条件与点击流程。
 
+点击空地图地形点另走位置导航：当鼠标射线取得有效NavMesh面、面间路径存在且允许地图输入时，`MapScreen.HandleLeftMouseButtonClick`调用 `MapState.ProcessTravel`；它复核 `NavigationHelper.CanPlayerNavigateToPosition`后使用 `MobileParty.MainParty.SetMoveGoToPoint` 写入目标坐标。无效面/不可达目标不提交该移动。该操作与点击Settlement（到访交互对象）或MobileParty（Engage/Escort实体）有不同目标语义与抵达后果，不合并为同一Action。空地点击也经过原版 `HandleClickTimeChange`，档位规则与其它有效地图点击共用；精确运行失败/双击分支未在本轮实测。
+
 Chronicle现有move/pursue/hold是研究桥，使用指定Settlement/Party ID、目标校验、原版目标setter与地图点击时间语义，再独立等待自然路径/遭遇结果；不代表完整NavMesh/路径故障/海陆迁移或任意地图点击覆盖。证据：`MapScreen`、`DefaultPartyNavigationModel`、`NavigationHelper`、`MobilePartyAi`、Protocol主队动作及MAINLINE机制运行记录。未知：所有陆地Navmesh孔洞/港口/地形障碍/移动速度影响，玩家输入锁定与模型可达性的全部分支，Mods对导航模型与PathDistance的更改。
 
 ## K03 Tracking：足迹、发现与侦察信息
