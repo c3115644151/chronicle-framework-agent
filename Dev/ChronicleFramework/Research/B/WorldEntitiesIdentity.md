@@ -45,6 +45,16 @@ Hero 的 `Father`、`Mother` 是独立持久引用；设置父/母属性时会�
 
 Chronicle 当前 Observer 不输出属性、技能XP、Focus、Perk或未分配点数；Protocol 当前没有角色开发动作。只读/测试动作接口不得直接替代 UI 中的点数校验、临时变更、提交与撤销行为。证据：安装 `TaleWorlds.MountAndBlade.dll`（快捷键 C）、`TaleWorlds.CampaignSystem.dll`（`HeroDeveloper` Saveable 字段、成长接口）、`TaleWorlds.CampaignSystem.ViewModelCollection.dll`（`CharacterDeveloperVM`、`CharacterDeveloperHeroItemVM`、`SkillVM`/`PerkVM`）、`Modules/SandBox/bin/Win64_Shipping_Client/SandBox.View.dll`（`MapScreen.OpenCharacterDevelopmentScreen`）和本地 `AgentObserver.cs`/`AgentProtocol.cs`。未知项：Character Developer 全部适用 Hero 的运行时筛选条件、每个技能完整 XP 来源与奖励/上限、角色开发 UI 锁定条件及同伴技能是否拥有同样的全部操作尚未逐项核实。
 
+#### B04 Hero身份与归属
+
+Hero 的职业身份（`Occupation`）与 Clan/Faction 归属、队伍位置、生命周期状态分别存储。`IsLord` 只是 `Occupation == Lord`，notable 判定由数种 notable occupation 组合派生；它不等同于“属于一个 Clan”或“当前在某支 Party”。`SetNewOccupation` 写入职业并分发 `OnHeroOccupationChanged`。
+
+有效 `Hero.Clan` 读取为 `CompanionOf ?? _clan`；加入玩家 Companion 关系后，显示 Clan 与存储的原始 Clan/OriginClan 可以不同。更改底层 `_clan` 会更新 Clan 的领主名单、清理 HomeSettlement 缓存并分发 `OnHeroChangedClan`。`Hero.MapFaction` 优先取 Clan 所属 Kingdom，否则取该 Clan；没有 Clan 时 Special occupation 返回 null，否则先看 HomeSettlement 的 MapFaction，再回退到当前 Party 的 MapFaction。因此 Hero 的个人地图阵营不总等于 Party 的阵营。
+
+位置/隶属另由 `PartyBelongedTo`、`PartyBelongedToAsPrisoner`、`StayingInSettlement` 保存；普通 Party 变更会在离开旧队伍时移除旧队长身份和队伍角色，战俘归属不是普通成员队伍。百科 Hero 页面显示 occupation、Clan/faction、Last Seen 等字段；玩家与 Hero 的对话/Barter文本还会依据职业、Faction 和当前关系生成身份称谓/选项。Chronicle 现有 Main Hero 快照仅包含有限 Hero/Clan 标识；附近 Party 快照不会展开每个 Party Leader 的完整职业、原始 Clan、OriginClan 等身份链。
+
+证据：当前 v1.4.8 `TaleWorlds.CampaignSystem.dll`（`Hero.Clan`、`MapFaction`、`Occupation`、`SetPartyBelongedTo`、`SetNewOccupation`）、`TaleWorlds.CampaignSystem.Actions.ChangeKingdomAction`、百科 Hero 页面源码及 `AgentObserver.cs`。未知项：所有职业转换动作的 UI入口和数据副作用、Clan/Kingdom转换后每类 Hero 的文本/可见信息矩阵、营地与聚落中NPC身份判定差异、Party与Hero MapFaction不一致的全部情境尚未穷举；Clan 与 Kingdom 归属操作分别在 B05/B06/C07 继续拆解。
+
 ### Clan
 
 - 成员、领袖、领地、队伍、文化、家园、家族等级、声望、影响力、金币和总军力；
