@@ -9,14 +9,33 @@ $ErrorActionPreference = 'Stop'
 $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
 $saveDirectory = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\Game Saves'
 $loadSavePath = Join-Path $saveDirectory "$LoadSaveName.sav"
-$protocolSavePath = Join-Path $saveDirectory "$ProtocolSaveName.sav"
 $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\session.json'
 $runPrefix = 'p2-' + (Get-Date -Format 'yyyyMMddHHmmssfff')
+$protocolSavePrefix = $ProtocolSaveName -replace '[^A-Za-z0-9_-]', ''
+if ([string]::IsNullOrWhiteSpace($protocolSavePrefix)) { $protocolSavePrefix = 'ChronicleProtocol' }
+$protocolSaveSuffix = [Guid]::NewGuid().ToString('N').Substring(0, 10)
+$maximumPrefixLength = 30 - $protocolSaveSuffix.Length - 1
+if ($protocolSavePrefix.Length -gt $maximumPrefixLength) { $protocolSavePrefix = $protocolSavePrefix.Substring(0, $maximumPrefixLength) }
+$protocolSaveNameForRun = "$protocolSavePrefix-$protocolSaveSuffix"
+$saveDirectoryPath = [IO.Path]::GetFullPath($saveDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+$protocolSavePath = [IO.Path]::GetFullPath((Join-Path $saveDirectoryPath "$protocolSaveNameForRun.sav"))
+if (-not [string]::Equals([IO.Path]::GetDirectoryName($protocolSavePath), $saveDirectoryPath, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Disposable protocol save path escaped Game Saves.'
+}
 
 if (-not (Test-Path $cli)) { throw "CLI not found: $cli" }
 if (-not (Test-Path $loadSavePath)) { throw "Save not found: $loadSavePath" }
 $fixtureHashBefore = (Get-FileHash $loadSavePath -Algorithm SHA256).Hash
-Remove-Item -LiteralPath $protocolSavePath -Force -ErrorAction SilentlyContinue
+if (Test-Path -LiteralPath $protocolSavePath) { throw 'Unique disposable protocol save name unexpectedly already exists.' }
+
+function Remove-ProtocolSaveFixture {
+    $fullPath = [IO.Path]::GetFullPath($protocolSavePath)
+    if (-not [string]::Equals([IO.Path]::GetDirectoryName($fullPath), $saveDirectoryPath, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Disposable protocol save cleanup path escaped Game Saves.'
+    }
+    if (Test-Path -LiteralPath $fullPath) { Remove-Item -LiteralPath $fullPath -Force }
+    return -not (Test-Path -LiteralPath $fullPath)
+}
 
 function Invoke-AgentCli {
     param([string]$Action, [string[]]$Arguments = @())
@@ -32,16 +51,17 @@ try {
     $pause = Invoke-AgentCli 'pause' @('-CommandId', "$runPrefix-pause", '-TimeoutSeconds', $TimeoutSeconds)
     $resume = Invoke-AgentCli 'resume' @('-CommandId', "$runPrefix-resume", '-TimeoutSeconds', $TimeoutSeconds)
     $advance = Invoke-AgentCli 'advance' @('-Days', '0.01', '-CommandId', "$runPrefix-advance", '-TimeoutSeconds', $TimeoutSeconds)
-    $save = Invoke-AgentCli 'save' @('-SaveName', $ProtocolSaveName, '-CommandId', "$runPrefix-save", '-TimeoutSeconds', $TimeoutSeconds)
+    $save = Invoke-AgentCli 'save' @('-SaveName', $protocolSaveNameForRun, '-CommandId', "$runPrefix-save", '-TimeoutSeconds', $TimeoutSeconds)
     $firstStop = Invoke-AgentCli 'stop' @('-CommandId', "$runPrefix-stop-1", '-TimeoutSeconds', $TimeoutSeconds)
 
-    $reload = Invoke-AgentCli 'load' @('-SaveName', $ProtocolSaveName, '-TimeoutSeconds', $TimeoutSeconds)
+    $reload = Invoke-AgentCli 'load' @('-SaveName', $protocolSaveNameForRun, '-TimeoutSeconds', $TimeoutSeconds)
     $reloadedState = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-reload-state", '-TimeoutSeconds', $TimeoutSeconds)
     $secondStop = Invoke-AgentCli 'stop' @('-CommandId', "$runPrefix-stop-2", '-TimeoutSeconds', $TimeoutSeconds)
 
     $fixtureHashAfter = (Get-FileHash $loadSavePath -Algorithm SHA256).Hash
     $result = [ordered]@{
         ProtocolVersion = $state.protocolVersion
+        ProtocolSaveName = $protocolSaveNameForRun
         Start = $start
         State = $state
         Pause = $pause
@@ -71,6 +91,8 @@ try {
         $secondStop.processStopped -and
         $result.FixtureUnchanged
     )
+    $result.ProtocolSaveCleaned = Remove-ProtocolSaveFixture
+    $result.Passed = $result.Passed -and $result.ProtocolSaveCleaned
     $result | ConvertTo-Json -Depth 10
     if (-not $result.Passed) { exit 1 }
 }
@@ -78,4 +100,5 @@ finally {
     if (Test-Path $sessionPath) {
         try { Invoke-AgentCli 'stop' @('-CommandId', "$runPrefix-cleanup", '-TimeoutSeconds', '15') | Out-Null } catch { }
     }
+    try { Remove-ProtocolSaveFixture | Out-Null } catch { Write-Warning "Could not clean disposable protocol save '$protocolSavePath': $($_.Exception.Message)" }
 }
