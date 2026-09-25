@@ -1,6 +1,6 @@
 # D 类研究：聚落与领地
 
-状态：机制盘点中；D01-D05 已完成首轮静态盘点，目前继续研究 D06 聚落项目，未进行方案评审。
+状态：机制盘点中；D01-D06 已完成首轮静态盘点，目前继续研究 D07 总督与驻军，未进行方案评审。
 
 适用本体：Bannerlord v1.4.8.119303。依据安装目录中的 `TaleWorlds.CampaignSystem.dll` 反编译结果和 Chronicle 当前 `AgentObserver.cs`；本节是静态代码证据，不代表已经在游戏界面逐项实测。
 
@@ -197,6 +197,35 @@ Chronicle Observer 不读取当前默认日常项目，也不计算这张表的�
 
 未知项：UI 页面从哪个玩家入口打开、选择何时提交、关闭/取消是否回滚草稿；每项效果最终经过哪些模型及调用方；默认 AI 改选发生时所处 UI/围城/易主条件的全部限制；Mod 新增/替换日常项目时，ViewModel 与模型是否自动支持新效果。
 
+## D07 总督任命与驻军
+
+### 总督对象与玩家任命链
+
+`Town.Governor` 与 `Hero.GovernorOf` 双向关联。原版 Town Management VM 在当前 Settlement 是 fortification 时建立 `SettlementGovernorSelectionVM`；候选来自 OwnerClan.Heroes，并须满足 `ClanPoliticsModel.CanHeroBeGovernor`，且尚未担任别处总督（或已经是当前聚落总督）。列表另有空选项用于移除。Sandbox 概念百科也把“聚落所有者在 town management window 指派同伴/家族成员”为官方入口说明；这里核实到的是代码/文本链，尚未实机点击整个窗口流程。
+
+提交新总督时 `TownManagementVM.OnGovernorSelectionDone` 调用 `ChangeGovernorAction.Apply`。如果 Hero 已在该 Settlement 且不是囚犯，立即登记为 Governor；否则先清掉当前任命并经原版传送行为安排其之后前往。操作会解除旧 Governor 的 `GovernorOf`、派发 `OnGovernorChanged`，并将新 Governor 标记为因任职而忙碌。领主改变 Clan 后若不再属于聚落 OwnerClan，GovernorCampaignBehavior 会移除其任命。直接给 `Town.Governor` 赋值不等同于这一行动/事件链。
+
+总督技能/Perk 会进入忠诚、安全、繁荣、建设等模型（见 D02/D05）；Town Management VM 的工具提示会显示总督相关效果，并在窗口统计中显示聚落状态与预测变化。GovernorCampaignBehavior 的 Settlement 日 tick 还会按其 Perk触发少量要人关系变化并授予治理经验。这个角色是一种持续的聚落治理指派，不只是文本头衔。
+
+### 驻军数据对象与民兵区别
+
+驻军是绑定 fortification 的 `GarrisonPartyComponent` / `MobileParty`；组件把自己登记到 `Town.GarrisonPartyComponent`，禁用 Party AI、将导航类型设为 None，并通过自身接口使用聚落的 wage-payment limit。其成员 roster 保存驻军士兵；没有创建 Garrison Party 时某些代码路径允许该值为空。它与 Settlement 民兵不是同一 roster：民兵是另一个派对组件及模型值，见 D02/F 类；不能把聚落总防御人数当作单一的“驻军人数”。
+
+新战役初始化会创建 fortification 的 Garrison Party，并按聚落文化的默认 PartyTemplate、繁荣度与随机权重填入初始兵员。普通 Campaign 中至少有两条自动化补充/调度链：
+
+- `GarrisonRecruitmentCampaignBehavior` 每日更新 fortification。Issue/叛军模型可能提供基础变化；自动招募则要求开关启用、`FoodChange > 0` 且没有 MapEvent/SiegeEvent。它从聚落要人和正常状态的绑定村庄要人处建立志愿者列表，受可用工资预算、Party Size Limit 与每日最大招募数共同限制；当前默认模型的每日自动招募上限是 1。招入时消耗对应志愿者槽，并记入 Clan 的自动招募费用。GarrisonAutoRecruitment 日常项目效果（D06）会进入该计算。
+- `GarrisonTroopsCampaignBehavior` 在 AI Lord Party 进入同阵营 fortification 时运行编队/驻军转兵逻辑；它不是让玩家的 MainParty 自动换兵。AI 的保留人数综合领地理想驻军、队伍理想规模、食物与工资限制等，并可能在 Party 和 Garrison roster 间转兵。新攻占聚落有特殊处理条件。
+
+驻军还进入 D02 食物模型的消耗、Settlement Security、围城防守、驻军工资和建设容量效果链。Town Management VM 显示驻军数量及模型预测的每日变化，但本轮没有把“玩家手动从 Party 转移士兵”入口、工资上限调节入口及它们的完整 UI handler/API 副作用闭环；不依据自动招募或 AI Lord 转兵来声称玩家可以通过同一操作执行它们。
+
+### Chronicle 当前覆盖
+
+Nearby Settlement 快照不返回 Governor ID、GovernorOf、Garrison Party ID、驻军 roster、自动招募开关、志愿者来源、工资上限或估算每日变化。Town Management VM 是玩家可见的原版管理面之一，但 Chronicle 目前不读取其聚落管理统计、不调用 governor selection 或 garrison roster 操作。本节证明了原版内部存在两套差异化的治理/补兵机制，不等于 Agent 能操作这些界面。
+
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `Town`、`ChangeGovernorAction`、`GovernorCampaignBehavior`、`GarrisonPartyComponent`、`GarrisonTroopsCampaignBehavior`、`GarrisonRecruitmentCampaignBehavior`、`DefaultSettlementGarrisonModel`；`TaleWorlds.CampaignSystem.ViewModelCollection.dll` 的 `TownManagementVM`、`SettlementGovernorSelectionVM`、`TownManagementReserveControlVM`；Sandbox `concept_strings.xml` 的 Governor 玩家说明；Chronicle `AgentObserver.cs`。目前是 v1.4.8.119303 静态源码和资源说明证据，未运行 UI。
+
+未知项：Town Management 窗口从地图/聚落的精确按键入口、实际提交/返回的时序；玩家 Party 与驻军间手动士兵转移的真实 UI 路径及 roster、伤兵、升级和军需副作用；GarrisonWagePaymentLimit 的玩家修改 UI 与日工资结算调用链；AI 驻军转兵完整目标公式与排除条件；新征领地/失去领地时驻军、Governor 和工资设置的所有后果。
+
 ### 时间与证据边界
 
 D01 中的实体分类、所有权查询与绑定关系是读取对象状态，不会自行推进 Campaign 时间。城镇/村庄的每日状态计算由各组件的 `DailyTick` 执行，并受 Campaign 时钟调度；具体数值模型和状态变化分别留给 D02-D04。直接读取属性不等价于玩家打开地图百科或聚落界面；本节没有声称 UI handler 与直接 API 的完整交互已经运行验证。
@@ -207,4 +236,4 @@ D01 中的实体分类、所有权查询与绑定关系是读取对象状态，�
 
 ## 研究范围状态
 
-D01-D06 已完成首轮静态对象、聚落发展、村庄生命周期、建筑施工/队列及日常项目盘点。D07-D10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 D 域范围逐项核对，不将此文档视作聚落系统整体已完成。
+D01-D07 已完成首轮静态对象、聚落发展、村庄生命周期、建筑/日常项目以及总督/驻军基础链盘点。D08-D10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 D 域范围逐项核对，不将此文档视作聚落系统整体已完成。
