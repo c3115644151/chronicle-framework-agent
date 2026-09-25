@@ -50,9 +50,21 @@ Chronicle `SubModule.RegisterEvents` 当前订阅 DailyTick、Tick、GameLoaded�
 
 ## A05 存档与读档
 
-玩家入口：快速/手动保存、自动存档与存档列表读档。1.4.8 `SaveHandler` 异步排队，SaveTick→OnBeforeSave→MBSaveLoad→OnSaveOver；自动档按墙钟间隔检查，要求时钟运行且处于无对话 MapState。Mod 字段经 `CampaignBehavior.SyncData` 读写；事件订阅加载后重建。
+玩家入口：在地图界面按 ESC 打开暂停菜单；菜单 `Save` 与 `Save And Exit` 都调用 QuickSave，后者只在 OnSaveOver 确认成功后退出。默认快捷键 F5（`MapHotKeyCategory.QuickSave = 54`）也调用 QuickSave。`Save As` 打开存档列表的保存模式，可选择现有档并确认覆盖，或选“Create New Save Slot”输入新名称；`Load` 打开同一界面的读档模式。`EscapeMenu.xml` 与 `SaveLoadScreen.xml` 的按钮通过 ViewModel 命令进入这些 handler。ESC 菜单的 QuickSave 受存档槽位上限约束（铁人模式可覆写活动槽）且在地图对话期间禁用；Save As/Load 在铁人模式及地图对话期间禁用。F5 handler 源码直接调用 QuickSave，地图对话期间的可用性未单独验证。
 
-Agent `save` 调原生 SaveAs 并等 OnSaveOver；CLI `load` 重启进程选择存档。Protocol `100325` disposable 往返验证日期/tick及源 fixture 哈希不变；存档菜单与全对象恢复未核验。
+原生保存不是同步写文件：`SaveHandler.QuickSaveCurrentGame` / `SaveAs` 将请求排入队列；活动 `MapState.OnTick` 发现队列非空时逐帧运行 `SaveTick` 并暂不执行该帧的 Campaign Tick。保存开始先等待 Campaign 异步任务、发出 OnSaveStarted，再发出 OnBeforeSave 并调用 `MBSaveLoad` 的 QuickSave/SaveAs/AutoSave；异步完成后发出 OnSaveOver(success, name)。失败会显示保存错误提示；Save And Exit 只有成功才退出。
+
+自动保存间隔来自 `BannerlordConfig.AutoSaveInterval`，当前版本默认30分钟，设置值4映射为关闭值-1。它依据 `DateTime.Now` 与上次自动保存的墙上时间差，而非 Campaign 游戏日：`CampaignTick` 只在 `TimeControlMode != Stop` 时检查，实际排队还要求活动 GameState 为无地图对话的 `MapState`。注意 `FastForwardStop` 虽不推进 CampaignTime，也不等于 `Stop`，因此仍满足外层检查。另有优先自动保存入口 `SignalAutoSave`，使用配置间隔的75%作为阈值；该方法的调用方尚未映射。自动存档完成时会更新墙上时钟基点，成功与失败结果都经过 OnSaveOver。
+
+Mod 存档数据通过 `CampaignBehaviorManager` 接入：保存前它清空行为数据表，对每个 `CampaignBehaviorBase` 按 `StringId` 调用 `SyncData(IDataStore)`，将键值记录随 Campaign 存档序列化；读档时依 `StringId` 找回记录并调用相同的 `SyncData`，旧行为ID还存在按类型名回迁的兼容分支。恢复状态后重新 `RegisterEvents`。Chronicle 当前将 `_stateVersion`、`_dailyTickCount`、`_lastDailyTickDay` 写入 `SyncData`；`AgentProtocol.save` 排队 `SaveAs` 并等待名称匹配的 OnSaveOver 回执；CLI 的 `load` 停止当前进程并启动新进程加载指定存档。
+
+读档界面异步枚举存档，按 Campaign ID 分组并将损坏档单列；行内可查看存档版本、主角、日期和记录模块。损坏或缺少原版明确禁止加载的模块会禁用该项；其他模块增删/版本不匹配可能弹窗要求确认；存档版本比当前客户端新时不提供继续加载选项。选择加载后读取 `LoadResult` 并经 `SandBoxGameManager` 走读档生命周期，不进入角色创建。加载失败会提示错误并停留在读档流程。
+
+Chronicle 自动证据：Protocol 测试从 `AgentBridgeLifecycle` disposable 源夹具启动，运行暂停/恢复/显式推进，保存到单次唯一命名的测试档，再以新进程加载；比较保存与读回的 `campaignDay`、`dailyTickCount` 并核对源夹具 SHA-256 不变。`TestResults/20260925-105941/Protocol.log` 通过：保存/读回日数均为91077.393，DailyTick计数均为2，推进约0.015日，源 fixture 哈希未变，`ProtocolSaveCleaned=true`；本次生成的 `.sav` 在记录名称/哈希与断言后已删除。测试存档属于 Harness，不是正式战役存档。
+
+来源：当前安装 v1.4.8.119303 的 `TaleWorlds.MountAndBlade.dll`（`MapHotKeyCategory`、`BannerlordConfig`）、`Modules/SandBox/bin/Win64_Shipping_Client/SandBox.View.dll`（`MapScreen`、`SaveLoadScreen`）、`SandBox.ViewModelCollection.dll`（`SaveLoadVM`、`SavedGameVM`）、`SandBox.dll`（`SandBoxSaveHelper`、`SandBoxSaveManager`）、`TaleWorlds.CampaignSystem.dll`（`SaveHandler`、`CampaignBehaviorDataStore`、`CampaignBehaviorManager`），以及本地 `SubModule.cs` / `AgentProtocol.cs` 与 Protocol 运行收据。
+
+未知项：当前没有从真实 ESC/F5 输入完成保存/读档的视觉运行测试；F5 在地图对话中的可用性、优先保存调用方、保存失败/进程崩溃时的 UI 恢复尚未逐项运行验证；`SyncData` 对各类型、跨版本迁移和删除/更名行为数据的规则仍需按实际行为字段继续核验。Protocol 测试只验证 Chronicle 当前少量状态字段与基础 Campaign 状态往返，不证明任意大型存档或所有 Mod 数据均可恢复。
 
 ## A06 难度与战役选项
 
