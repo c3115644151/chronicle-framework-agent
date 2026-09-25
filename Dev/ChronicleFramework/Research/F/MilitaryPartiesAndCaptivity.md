@@ -76,6 +76,40 @@ Party战略 Think 与 `MobilePartyAi` 的短期地图导航是两个相邻层。
 
 未知项：短期 navigation Tick/AI Think Tick/游戏每小时的引擎调度比；Initiative行为评分如何与已有 DefaultBehavior 和 Army目标优先级精确竞争；目标不可见、导航断连、港口过渡与MapEvent完成等边缘恢复的所有分支尚未录制/运行穷举。
 
+## F05 Army 军团对象、召集与解散
+
+### Army 结构与玩家入口
+
+`Army` 属于某一 Kingdom，包含一个 LeaderParty 与附属 `MobileParty`；ArmyOwner、ArmyType、目标 `AiBehaviorObject`、参与 Parties、Cohesion、集合地点与创建时间等状态由 Army 保存。ArmyType 枚举包含 Besieger、Raider、Defender、Patrolling。Party 进入 Army 后仍然保有各自的 roster/Leader/Faction，但其地图行动会受 ArmyLeader 的长期目标和集合命令协调。
+
+玩家入口至少包含 Kingdom Armies 管理页中的 `KingdomArmyVM`（列表、选择、地点、Manage/Disband/Create）与 `ArmyManagementVM`（邀请/移除 Party、估算 Strength/Influence Cost、提升 Cohesion）。实际界面入口的按键与可视交接仍未运行验证；VM源码显示玩家主要从 Kingdom Army 上下文管理自己的主军团，不能假设拥有同阵营每一支军团的同等权限。
+
+### 玩家建军与召集条件
+
+`DefaultArmyManagementCalculationModel.CanPlayerCreateArmy` 拦截玩家未加入 Kingdom、作为 Mercenary、已作为 Leader 指挥另一支 Army、在海上、囚禁、raft、Mission、地图遭遇、对村庄掠夺或被围城等情况。管理 VM 的篮子必须保留玩家 MainParty，至少需一个可加入/现存的额外 Party 才能创建；ArmyMembership influence cost 经 Model 计算而非固定创建费。被邀 Party 还要求适配阵营、未加入另一 Army、不是 Kingdom Ruler Party、未在战斗/围城/解散等待，队伍规模通常高于 PartySizeLimit 的指定比例、在召集距离内且有可用导航/船只。关系、Party Strength/Size/距离、Clan政策、LeaderPerk和文化特性都会修正影响力成本。
+
+确认 VM 草稿后，如 MainParty 当前尚无 Army 且在王国阵营，会建立玩家领导的 Army 并把选中 MobileParties 关联到它，按总 Influence Cost 扣除影响力；取消则不提交草稿。玩家可通过同一窗口移除 Party 或显式解散（另有影响力成本/确认）；`DisbandArmyAction` 会释放成员 Party 并记录原因事件。
+
+### 集结过程与持续管理
+
+创建不是把所有 Party 瞬间合并为同一位置。`Army.Gather` 设集合目标，再经 `GatherArmyAction` 分发 ArmyGathered；Leader 向聚集点移动，AttachedParties 各自执行 Escort 到 Leader 的地图目标，抵达可遭遇的距离后才加入合并 Party 位置/Overlay。玩家 Army 以主队附近的可达聚落作为 gathering point；AI Army 由目标/目标 Settlement 决定适合的集合地点。
+
+Army Cohesion 默认从 100 开始并受模型每日变化影响。基础下降、成员 Party 数量、饥饿、低士气、目标、Perk/政策、围城等都可能参与；玩家可消耗 Influence 主动提升Cohesion。Cohesion持续减损、长时间不活动、缺粮、无战争等条件可触发不同的ArmyDispersionReason并解散。已验证枚举原因包括 CohesionDepleted、ObjectiveFinished、FoodProblem、NoActiveWar、Inactivity、LeaderPartyRemoved、PlayerTakenPrisoner、ArmyLeaderIsDead、NotEnoughParty等；各条件对玩家/AI Army并不相同。
+
+### AI 与互动边界
+
+原版 AI Party Think 可根据高分 `WillGatherArmy` 决策由 Kingdom 创建 Raider/Defender/Besieger 等 Army，并为候选 WarParties 算参军意愿/Influence成本；`AiArmyMemberBehavior` 使成员 Party 随 LeaderParty，在海上、围城、地图遭遇时有特别处理。F02已记录 Think 评分过程；此节只记录 Army 作为多个 Party 的组织对象，ArmyWarTarget 的战争原因与围城细节另见 F06-F08。
+
+Army并不提升成员Party所有经济/人员状态为共享池。每个队伍仍分别携带食物、工资预算、士气、受伤和物品；军团聚合人数、Army cohesion、Leader map behavior是集合层。发生战斗后参战 roster、每Party贡献和队伍存活/脱离由 MapEvent/战斗结算层负责，不是Army加入本身。
+
+### Chronicle 当前覆盖
+
+Observer目前只对 Nearby Party 摘要输出成员数和 EstimatedStrength，不输出其Army ID、ArmyLeader、AttachedParties、ArmyType、Cohesion、Objective或成员招募代价；MainParty快照也没有军团管理页面内容。Protocol未实现从 Kingdom Army 页面选择Party、创建/解散Army、调整军团目标或BoostCohesion的完整交互；只适配MainParty移动、菜单与少量其他事务。
+
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `Army`、`DefaultArmyManagementCalculationModel`、`GatherArmyAction`、`DisbandArmyAction`、`AiPartyThinkBehavior`、`AiArmyMemberBehavior`；ViewModelCollection 的 `ArmyManagementVM`、`KingdomArmyVM`；Chronicle Observer/Protocol和MAINLINE。版本v1.4.8.119303源码证据，尚未实机建立、召集、取消或解散玩家 Army。
+
+未知项：Kingdom管理页面具体按键/Army管理View打开与取消恢复序；玩家AI Colony/领地页以外可触发Army管理的其他入口；每类 Party 的完整 eligibility 和成本公式在修改/费率Perk下的变化；Army与军团分裂/继承、战争/和平、玩家囚禁和结盟同步的全部后果；真实地图集结期限/自动解散条件与UI通知顺序。
+
 ## F12 Hero 俘虏、管理与释放
 
 本节保留既有俘虏子系统研究。俘虏转移涉及 Factions、战斗、菜单/Party UI 和关系/叙事，相关的关系后果与日志消费者另见 B/C/J 类研究。
