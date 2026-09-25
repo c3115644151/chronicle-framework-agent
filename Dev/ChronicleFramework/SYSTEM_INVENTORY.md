@@ -208,8 +208,8 @@
 
 | ID | 类型 | 玩家入口 / 观察语义 | 原版边界与时间 | Chronicle现状 / 证据与未知 | 来源映射 |
 | --- | --- | --- | --- | --- | --- |
-| ACT-A01-01 | 行为 | 初始菜单→Sandbox新战役 | 建立普通Campaign后进入角色创建；没有既有Campaign时间 | Harness能创建新Campaign，但不通过初始菜单点击端到端验证；新档创建夹具已结构化验证 | A01、L09；`Research/A/CampaignRuntimeWorldState.md` |
-| ACT-A01-02 | 行为 | 初始菜单→Story Mode新战役 | 建立`CampaignStoryMode`并进入StoryMode专属开局 | Chronicle未操控StoryMode菜单/主线初始化 | A01、J12、L09 |
+| ACT-A01-01 | 行为 | 初始菜单→Sandbox新战役 | 建立普通Campaign后进入角色创建；没有既有Campaign时间 | Harness能创建新Campaign，但不通过初始菜单点击端到端验证；新档创建夹具已结构化验证 | A01、B07、L09；`Research/A/CampaignRuntimeWorldState.md` |
+| ACT-A01-02 | 行为 | 初始菜单→Story Mode新战役 | 建立`CampaignStoryMode`并进入StoryMode专属开局 | Chronicle未操控StoryMode菜单/主线初始化 | A01、B07、J12、L09 |
 | ACT-A01-03 | 行为 | 初始菜单→Continue latest，或已存档游戏→选择slot→Load | 两入口最终均读取一个Campaign存档且跳过角色创建；默认slot选择与手动slot选择作为参数变体保留 | Protocol可指定存档并新进程加载；菜单自身未视觉/自动点击验证 | A01、A05、L13 |
 | ACT-A02-01 | 行为 | 地图底部Pause/Normal/Fast-forward时间控件 | 修改`CampaignTimeControlMode`；世界是否实际推进还受MapState、等待、Mission等上下文限制 | Observer读当前timeControlMode；Protocol可暂停/恢复/独立推进，显式`advance`仅Harness用 | A02、K02；MAINLINE原版机制契约 |
 | ACT-A05-01 | 行为 | 地图ESC/F5 QuickSave | 排队快速保存；只有保存完成回执后结果成立，F5与ESC别名最终落同入口 | Protocol `save`完成存档往返；没有ESC/F5真实输入测试 | A05、L13；MAINLINE Save验收 |
@@ -223,12 +223,14 @@
 | OBS-A07-03 | 观察 | Map Notification/QuickInfo | 事件通知、短提示和持久日志分属不同数据/交互 | Chronicle没有Notification队列/已读状态观察 | A07、J07、L06 |
 | OBS-A08-01 | 观察 | Tutorial提示 | 按Campaign类型/行为状态显示并可完成/关闭；StoryMode提示与Sandbox提示源不同 | Chronicle不读教程提示/完成状态 | A08、J12、L06 |
 | OBS-A08-02 | 观察 | Concept百科页 | 按概念分类/页面显示帮助文本与链接；N百科入口UI细节以实测为准 | Chronicle不读Concept数据或页面当前项 | A08、L05、用户确认N百科入口 |
+| N/A-A03-01 | N/A | Campaign小时/日/周等周期分发与对象Tick | 由Campaign时间和引擎调度触发，无“执行Tick”玩家入口；具体结果映射到造成状态变化的行为族 | 明确排除玩家动作分母；按时钟/生命周期研究保留来源与例外核查 | A03、`Research/A/CampaignRuntimeWorldState.md` |
+| N/A-A04-01 | N/A | CampaignEvent事件总线/订阅回调 | 由原版/Mod代码发布与消费，不存在通用“触发事件”玩家命令；只有带独立玩家入口的专属事件映射为实际ACT | 明确排除玩家动作分母；事件发布者/消费者用于追溯其它目录项 | A04、`Research/A/CampaignRuntimeWorldState.md` |
 
 A06预设/设置页目前只定位到界面族；每个选项的写入字段、条件与后续模型结果可能不同，候选设置操作不计入最终动作分母，待按原生Option ID逐项拆分。A03/A04目前映射为系统后台回调而非玩家直接动作；若某个具体事件存在手动玩家入口，应映射到发起该状态变化的ACT，而不是另造一个“触发CampaignEvent”动作。
 
 | 内部系统 / N/A候选 | 分类理由 | 映射来源 / 仍需排除的直接玩家入口 |
 | --- | --- | --- |
-| A03 周期事件、A04 CampaignEvent总线 | 这些是玩家动作/观察触发后的引擎调度与回调，不直接由玩家按“触发事件”调用；实际消费后果连接到对应行为/观察族 | `Research/A/CampaignRuntimeWorldState.md`；仍要检查是否存在有直接按钮语义的专属事件子系统，并映射到实际ACT ID |
+| A03 周期事件、A04 CampaignEvent总线 | `N/A-A03-01`、`N/A-A04-01`说明通用调度/事件总线不是玩家动作；带独立玩家入口的具体事件仍映射到其真实ACT | `Research/A/CampaignRuntimeWorldState.md`；若发现事件专属按钮，扩展对应ACT而不复用通用N/A |
 
 ### B域初始交叉映射
 
@@ -259,7 +261,7 @@ A06预设/设置页目前只定位到界面族；每个选项的写入字段、�
 | OBS-B04-01 | 观察 | Hero百科/对话对象上下文查看Occupation、Clan/Faction/当前归属 | Hero身份/Clan关系和Party所属状态分别显示，不能推断为一个“NPC阵营”字段 | Chronicle提供Main Hero身份和有限Party摘要；不提供周边Hero完整职业/历史归属 | B04、J08、AgentObserver；特例可见性未穷举 |
 | OBS-B05-01 | 观察 | L→Clan Management的成员/Party/Fief/Finance页面 | 页面数据随当前PlayerClan刷新；Tab不等于操作 | Chronicle只输出Clan摘要；B05/H02/L05；领导身份差异待测 |
 | OBS-B06-01 | 观察 | K→Kingdom Management各管理页 | 可用页面受Player Clan所在Faction与身份约束 | Chronicle无Kingdom/决议详情观察；B06/C/L05 |
-| OBS-B08-01 | 观察 | Kingdom外交页面或地图附近Party Hostile摘要 | Stance是Faction对关系，不是Hero personal Relation；地图摘要仅回答敌对 | Chronicle只给附近Party Hostile；B08/C03/L05；全Faction/联盟历史未接入 |
+| OBS-B08-01 | 观察 | Kingdom外交页面或地图附近Party Hostile摘要 | Stance是Faction对关系，不是Hero personal Relation；地图摘要仅回答敌对 | Chronicle只给附近Party Hostile；B08/I02/C03/L05；全Faction/联盟历史未接入 |
 | OBS-B09-01 | 观察 | 对当前对话Hero显示/推导出的相处状态、称呼或选项提示 | 关系可能经过有效关系模型/身份映射，不等于原始整数或完整历史 | Chronicle不输出Hero relation；B09/I01/J08；是否给出数值取决于具体UI/页面 |
 | OBS-I06-01 | 观察 | EducationMapNotification→EducationState课程页面 | 显示玩家子女待选年龄阶段/教育选项；逾期阶段可能先自动随机处理 | Chronicle不读取教育状态/选项；I06/H02/A08；通知打开/关闭与时钟需视觉复核 |
 | OBS-B10-01 | 观察 | Character Developer的Trait条目；Crime Rating在相关Faction/执法上下文中触发的提示 | Trait与Faction Crime Rating是不同对象，不把Trait文字当Crime值 | Chronicle均不提供；B10/I07/I08；Crime专属面板与显示范围未验证 |
@@ -440,7 +442,7 @@ E03、E06、E08、E09、E10的大量变化由每日模型、其它玩家动作�
 | OBS-F05-01 | 观察 | Kingdom→Armies/Army Management列表查看Army leader/成员/目标/cohesion | 管理权限及Kingdom身份过滤；地图Overlay和Panel有不同字段 | Chronicle没有完整Army/ArmyVM状态 | F05/F13、L03 |
 | OBS-F08-01 | 观察 | Siege menu/地图Army overlay观察Camp、Siege、进攻/防守状态 | Campaign siege campaign state不是Mission战场实时状态 | Observer只返回有限Settlement/Encounter信息 | F08/G08、D01、AgentObserver |
 | OBS-F10-01 | 观察 | Battle Simulation界面/Native map event的胜负、回合/finish状态 | 模拟推进不等于玩家Mission局部战斗 | Chronicle observer支持Simulation finished/retreated/state字段 | F10/G02、MAINLINE autoresolve |
-| OBS-G02-01 | 观察 | Encounter/MapEvent双方与持续战斗状态 | Participants/Side/round/campaign event may have hidden detail; nearby Party entry不等于参战 | Chronicle现有快照不列完整MapEvent parties/contribution | G02/F10、AgentObserver |
+| OBS-G02-01 | 观察 | Encounter/MapEvent双方与持续战斗状态 | Participants/Side/round/campaign event may have hidden detail; nearby Party entry不等于参战 | Chronicle现有快照不列完整MapEvent parties/contribution | G02/F10/K06、AgentObserver |
 | OBS-G03-01 | 观察 | 活跃Battle Mission的主角/队伍/场景/胜负/Agent状态 | 实时Mission与Campaign MapState不同；世界时钟暂停 | Observer当前无完整战术/Agent Mission state；仅missionRetreat查部分状态 | G03/G09、AgentProtocol |
 | OBS-G04-01 | 观察 | Deployment/Order UI当前Formation类别、单位、Captain和队形/目标 | 信息随Mission、阶段、选中Formation改变 | Chronicle无Deployment/Formation详情 | G04/G05、AgentObserver |
 | OBS-G08-01 | 观察 | Siege Mission攻防方、城门/墙/器械状态 | 场景对象与Campaign siege machine列表是两层 | Chronicle无实时siegeMission物件状态 | G08、AgentObserver |
@@ -451,11 +453,11 @@ E03、E06、E08、E09、E10的大量变化由每日模型、其它玩家动作�
 | ACT-F09-01 | 行为 | 在有效Village encounter选择Raid/Plunder | 进入RaidEvent并造成物资/繁荣/安全与关系等不同后果 | Chronicle无Raid选择动作 | F09/J05、EncounterGameMenuBehavior |
 | ACT-F09-02 | 行为 | Village encounter中强征Volunteers | 进入ForceVolunteersEvent，潜在获得部队并触发村庄/政治后果 | Chronicle无强征新兵动作 | F09/J05/G02 |
 | ACT-F09-03 | 行为 | Village encounter中强征Supplies | 进入ForceSuppliesEvent，物资获得及Village损害路径不同于Raid/Volunteers | Chronicle无强征物资动作 | F09/J05/G02 |
-| ACT-G01-01 | 行为 | 遭遇菜单选择 Attack/Lead an assault等进入实时Mission | 创建对应MapEvent并打开Mission，受类型/装备/围城/兵力条件限制 | Chronicle未实现通用Mission进入/战斗控制 | G01/G03、PlayerEncounter |
-| ACT-G01-02 | 行为 | Encounter选择Send Troops/坐镇指挥 | 初始化BattleSimulation并结算Campaign MapEvent；与实时Mission伤亡/交互不同 | Chronicle确定性BattleSimulation可测试，非模型Provider不计自主能力 | G01/F10/G02、MAINLINE BattleSimulation |
-| ACT-G01-03 | 行为 | Encounter选择Try to get away/撤离遭遇 | 依据追击/队伍/实力条件进行原生脱离尝试；失败可继续遇战，不等于Mission TAB retreat | Chronicle只处理已启动的战役Simulation retreat；通用逃脱未覆盖 | G01、EncounterGameMenuBehavior |
-| ACT-G01-04 | 行为 | Encounter选择Surrender | 触发PlayerSurrender/captivity并改变MainParty/英雄状态，非普通Leave | Chronicle无Surrender动作 | G01/H12/F12、PlayerEncounter |
-| ACT-G01-05 | 行为 | JoinEncounter菜单选择帮助攻击/防守一方、放弃Army或离开 | 变更参战方/Army membership或结束Encounter；权限依阵营/Army/当前双方 | Chronicle无支援参战/脱离Army菜单动作 | G01/F13、EncounterGameMenuBehavior |
+| ACT-G01-01 | 行为 | 遭遇菜单选择 Attack/Lead an assault等进入实时Mission | 创建对应MapEvent并打开Mission，受类型/装备/围城/兵力条件限制 | Chronicle未实现通用Mission进入/战斗控制 | G01/G03/K06、PlayerEncounter |
+| ACT-G01-02 | 行为 | Encounter选择Send Troops/坐镇指挥 | 初始化BattleSimulation并结算Campaign MapEvent；与实时Mission伤亡/交互不同 | Chronicle确定性BattleSimulation可测试，非模型Provider不计自主能力 | G01/F10/G02/K06、MAINLINE BattleSimulation |
+| ACT-G01-03 | 行为 | Encounter选择Try to get away/撤离遭遇 | 依据追击/队伍/实力条件进行原生脱离尝试；失败可继续遇战，不等于Mission TAB retreat | Chronicle只处理已启动的战役Simulation retreat；通用逃脱未覆盖 | G01/K06、EncounterGameMenuBehavior |
+| ACT-G01-04 | 行为 | Encounter选择Surrender | 触发PlayerSurrender/captivity并改变MainParty/英雄状态，非普通Leave | Chronicle无Surrender动作 | G01/H12/F12/K06、PlayerEncounter |
+| ACT-G01-05 | 行为 | JoinEncounter菜单选择帮助攻击/防守一方、放弃Army或离开 | 变更参战方/Army membership或结束Encounter；权限依阵营/Army/当前双方 | Chronicle无支援参战/脱离Army菜单动作 | G01/F13/K06、EncounterGameMenuBehavior |
 | ACT-G03-01 | 行为 | Mission的TAB菜单选择Exit/撤退并确认 | `BattleEndLogic.TryExit`返回不同结果；围城守方可能变为SurrenderSiege，不能误报安全撤退 | Chronicle有有限missionRetreat adapter并检查TryExit；未覆盖键盘HUD视觉确认 | G03/G09、BattleEndLogic |
 
 F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Formation orders目前没有原生Agent动作，因此只建目录/能力缺口，不计作已支持行为；Battle/Campaign结果源同时由F/G多项研究映射，去重时按唯一玩家入口和结果提交点核对。
@@ -491,13 +493,13 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 
 | ID | 类型 | 玩家入口 / 观察语义 | 原版结果、前置/时间 | Chronicle覆盖 / 证据 / 未知 | 来源映射 |
 | --- | --- | --- | --- | --- | --- |
-| OBS-H04-01 | 观察 | PartyScreen查看当前成员/伤员/俘虏Roster及升级/招募控件 | 列表按PartyScreen mode/roster side和容量过滤；UI显示不是全Campaign人口表 | Chronicle常驻只报MainParty总量；战后 PartyState 有有限Roster读取 | H04/F11/H12、PartyVM |
+| OBS-H04-01 | 观察 | PartyScreen查看当前成员/伤员/俘虏Roster及升级/招募控件 | 列表按PartyScreen mode/roster side和容量过滤；UI显示不是全Campaign人口表 | Chronicle常驻只报MainParty总量；战后 PartyState 有有限Roster读取 | H04/F11/H12/I03、PartyVM |
 | OBS-H05-01 | 观察 | Clan/Party成员页读取Hero同伴身份/所属Party/可用成员 | 任务/囚禁/领队/忙碌状态会影响能否入队或担任Party职位 | Observer不列完整同伴列表/技能/位置 | H05/B04、AgentObserver |
 | OBS-H06-01 | 观察 | Clan管理Party角色区查看每个职责的当前Hero/技能效果 | 角色资格基于Model及目标MobileParty；角色持有人变化后模型效果更新 | Chronicle不报角色Holder ID | H06、ClanRoleItemVM、AgentObserver |
 | OBS-H08-01 | 观察 | Inventory/Character Equipment显示Battle与Civilian装备槽/选中Hero | 装备候选受物品用途、装备模式、槽位和Hero资格筛选 | Chronicle无Hero装备槽快照；InventoryItem transaction不是穿戴状态证明 | H08/H07、SPInventoryVM |
 | OBS-H09-01 | 观察 | SmithingState显示执行Hero、Stamina、模板/已解锁组件、材料成本/预览 | 当前模式与选中Hero改变可执行Smithing actions | Chronicle无Crafting State/配方观察 | H09/L07、CraftingVM |
 | OBS-H11-01 | 观察 | MainParty/Clan状态栏显示Renown、Influence、Tier及下一门槛 | 仅为当前数值，不包含完整来源历史/未决政治支出 | Chronicle identity/economy Snapshot提供有限数值，无变化原因 | H11/B05/AgentObserver |
-| OBS-H12-01 | 观察 | MainHero俘虏GameMenu/赎金事件与Captor上下文 | 菜单会根据Captor类型、战争和计时检查分支动态切换 | Observer可见PlayerCaptivity State但没有当前菜单细项/处置报价 | H12/F12/PlayerCaptivity |
+| OBS-H12-01 | 观察 | MainHero俘虏GameMenu/赎金事件与Captor上下文 | 菜单会根据Captor类型、战争和计时检查分支动态切换 | Observer可见PlayerCaptivity State但没有当前菜单细项/处置报价 | H12/F12/I03、PlayerCaptivity |
 | ACT-H12-01 | 行为 | Wilderness/Prison ransom offer菜单选择Accept | 检查当前Ransom Amount/主角金币；扣款后经`EndCaptivityAction.ApplyByRansom`解囚 | Chronicle无Captivity菜单/赎金支付动作；源码路径确认、UI未跑 | H12/F12、PlayerCaptivityCampaignBehavior |
 | ACT-H12-02 | 行为 | Ransom offer选择Refuse and wait for a better offer | 不支付本次赎金，接入原生`settlement_wait`并恢复LastTimeControlMode继续时间检查 | Chronicle没有囚禁Wait动作；等待推进依原版当前TimeMode | H12/A02、PlayerCaptivityCampaignBehavior |
 | N/A-H12-01 | N/A | Captor败退、盟友支付、时限随机逃脱等自动释放 | Campaign/MapEvent状态触发EndCaptivityAction，无可选择的玩家按钮 | 不计入ACT分母；后果观察映射F12/OBS-H12-01 | H12/F12、PlayerCaptivityCampaignBehavior |
@@ -540,14 +542,14 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 | K06 Encounter Flow | 遭遇菜单/双方状态映射G01/G02；选项Actions映射G域逐项定义的ACT ID | K地图追近只是接触输入，协商/支援/开战/投降分流至G，不重复一条“Encounter”动作 |
 | K07 Hideout | 藏身处地图/Encounter观察映射`OBS-K07-01`；攻/等夜/坐镇映射F/G/J实际行动 | Hideout发现、Campaign Wait和Mission战斗是不同路径 |
 | K08 Bandit Density | `OBS-K08-01`可见Bandit Party/Hideout密度线索 | 全图Spawn人口和计时是后台Campaign，玩家无“生成/减少密度”按钮 |
-| L01 XML / L02 XSLT | 仅影响被加载对象/内容；无独立玩家动作ID | L01数据源与L02转换手段作为相关行为族的证据/版本约束，不能按XML/XSLT文件数计ACT |
-| L03 Game Menu/L04 Dialogue | 每个选项映射至其所属的Issue/Quest/政治/聚落/战斗等具体行为族；通用Menu/Dialogue引擎不另计玩家行为 | 复用相同点击外壳不代表同一原生后果 |
+| L01 XML / L02 XSLT | `N/A-L01-01`/`N/A-L02-01`标明无独立玩家动作；实际被加载对象/内容映射到使用它的行为族 | 数据源/转换手段作为证据与版本约束，不能按XML/XSLT文件数计ACT |
+| L03 Game Menu/L04 Dialogue | L03菜单与L04对话实际选项映射至所属Issue/Quest/政治/聚落/战斗行为族；通用Menu/Dialogue引擎不另计行为；对话当前项见`OBS-J08-01`/`ACT-J08-01` | 复用相同点击外壳不代表同一原生后果 |
 | L05 Encyclopedia/L06 Notifications | 观察面映射A07、B及J的已有OBS ID | 显示页面/通知的技术View不额外算对象动作 |
 | L07 Scene/Mission | 场景状态/实时输入映射D/G/J的已有OBS/ACT ID | Scene类型和MissionLogic不是玩家按钮数量 |
 | L08 Localization | N/A玩家行动；文本呈现映射相应Menu/Dialogue/通知OBS | 语言字符串本身不改变Campaign状态 |
 | L09 Module Loading | N/A战役内玩家动作；Launcher选择模块发生在战役前 | Module存在/排序是产品配置，不计入Campaign动作分母 |
-| L10 CampaignBehavior/L11 GameModel | N/A直接玩家动作；行为/模型输出映射到实际应用这些规则的ACT/OBS | 事件注册、模型调用数不是行为族 |
-| L12 Harmony/BLSE | N/A直接游戏动作；仅可能影响外部模块装载/方法执行 | Loader/patch链不计为玩家游戏行为或开发Harness能力 |
+| L10 CampaignBehavior/L11 GameModel | `N/A-L10-01`/`N/A-L11-01`标明没有直接玩家动作；行为/模型输出映射到实际应用规则的ACT/OBS | 事件注册、模型调用数不是行为族 |
+| L12 Harmony/BLSE | `N/A-L12-01`标明没有直接游戏动作；仅可能影响外部模块装载/方法执行 | Loader/patch链不计为玩家游戏行为或开发Harness能力 |
 | L13 SaveSystem | Save/SaveAs/Load复用`ACT-A05-01..03` | IDataStore/SaveableTypeDefiner是序列化机制，不另计数据字段数量 |
 
 #### J-L域新增行动/观察定义
@@ -556,15 +558,15 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 | --- | --- | --- | --- | --- | --- |
 | OBS-J01-01 | 观察 | 聚落Notable/领主上可见的Issue标记/接取提示 | 当前有效Issue与Quest giver/Owner/任务状态决定是否显示 | `talkToIssueOwner`仅限Harness研究流程，跳过真实地图接近/视觉路径 | J01/IssueManager、用户确认蓝色感叹号 |
 | ACT-J01-02 | 候选行为 | Issue对话选择Alternative Solution或Lord Solution，而非Quest路线 | 可能派兵、花天数/资源并有伤亡/失败风险；每类Issue效果不同 | 未实现；不与接Quest合并，未穷举各Issue子类 | J01、IssueBase、DefaultIssueModel |
-| OBS-J02-01 | 观察 | Quest/Journal页面查看进行中阶段、期限、目标和日志 | Quest/QuestTask状态与自由文本记录不同；期限基于Campaign time | Observer只给当前任务摘要，不列完整日志/隐藏Task目标 | J02-J04、QuestBase/QuestsVM |
-| ACT-J02-01 | 行为 | 从Issue/Story/NPC提供入口接受并启动一个合法Quest | 依任务内容写Quest state/期限，可能引入Gold/关系/物品前置或失败风险 | Chronicle无通用Quest接取/阶段执行器；每类入口须单独映射 | J01/J02/J12、QuestBase/IssueBase |
+| OBS-J02-01 | 观察 | Quest/Journal页面查看进行中阶段、期限、目标和日志 | Quest/QuestTask状态与自由文本记录不同；期限基于Campaign time | Observer只给当前任务摘要，不列完整日志/隐藏Task目标 | J02/J03/J04、QuestBase/QuestsVM |
+| ACT-J02-01 | 行为 | 从Issue/Story/NPC提供入口接受并启动一个合法Quest | 依任务内容写Quest state/期限，可能引入Gold/关系/物品前置或失败风险 | Chronicle无通用Quest接取/阶段执行器；每类入口须单独映射 | J01/J02/J03/J12、QuestBase/IssueBase |
 | OBS-J04-01 | 观察 | Journal/LogEntry浏览任务/角色记录 | 日志过期、隐藏信息与当前状态不同步；不自动推进Campaign | Chronicle未输出完整LogEntryHistory/Quest Journal | A07/J04/L05、LogEntryHistory/QuestsVM |
 | OBS-J05-01 | 观察 | Settlement进出后打开Incident选择界面查看事件/选项 | Incident trigger、cooldown、条件筛选一条事件；Effect列表不等于实际已提交结果 | MAINLINE有Incident modal/state链，仍未所有Incident运行验证 | J05/A02、IncidentsCampaignBehaviour/Incident |
 | ACT-J05-01 | 行为 | Incident UI中选择一个条件合法的事件Option并确认/关闭 | 每个Effect和Option Consequence分别调用；可能改变金钱/Party/关系/Settlement状态；直接API跳过VM cleanup | Chronicle对Incident通用流程目前Unsupported/Research；结构化事件返回未全测 | J05/L06、Incident.InvokeOption、MAINLINE |
 | OBS-J06-01 | 观察 | Inventory/市场Goods物品悬停详情中的异地买卖地点/记录价格；玩家栏与市场栏为同一观察族的两个入口 | `ItemMenuVM.SetMerchandiseComponentTooltip`按具体ItemObject、未过期记录、异地及价差筛选；来源受城镇访问/每日事件/交易专长影响。读取不改库存/金币，记录随Campaign时间过期；宿主界面时钟待运行核验 | 用户报告商品例子为谷物/贵重品/木材/葡萄酒，确认武器不显示，马匹未核；与本机1.4.8源码Goods筛选相符。Chronicle未适配，Agent未视觉/运行复核；利润/行情颜色另见E09 | J06/E02/E05/E09、`TradeRumorsCampaignBehavior`、`ItemMenuVM`、`SPInventoryVM`；马匹展示、来源/去重边缘未知 |
 | OBS-J07-01 | 观察 | 地图通知/QuickInfo/Scene notification | 队列可过期/关闭/跳转；Notice、Log与世界对象值分开 | Observer不读Notification queue/已读/点击目标 | J07/A07/L06、MapNotificationVM |
-| OBS-J08-01 | 观察 | 活跃Conversation的发言人/Flow阶段/当下开放Option | sentence condition、身份token、Task与关系筛选，不能扫描未开放Option | Protocol提供有限Conversation state/option读取 | J08/I09、ConversationManager/AgentObserver |
-| ACT-J08-01 | 行为 | 只选择当前Conversation实际开放且仍然valid的原生对话Option | Consequence可能启动Barter/Quest/Persuasion/Mission或改关系；context变化须重验 | Chronicle `dialogueSelect`仅限当前option列表；不支持全3D谈话接近 | J08、ConversationManager/AgentProtocol |
+| OBS-J08-01 | 观察 | 活跃Conversation的发言人/Flow阶段/当下开放Option | sentence condition、身份token、Task与关系筛选，不能扫描未开放Option | Protocol提供有限Conversation state/option读取 | J08/I09/L04、ConversationManager/AgentObserver |
+| ACT-J08-01 | 行为 | 只选择当前Conversation实际开放且仍然valid的原生对话Option | Consequence可能启动Barter/Quest/Persuasion/Mission或改关系；context变化须重验 | Chronicle `dialogueSelect`仅限当前option列表；不支持全3D谈话接近 | J08/L04、ConversationManager/AgentProtocol |
 | OBS-J09-01 | 观察 | PersuasionVM展示当前task阶段、可用argument与进度/机会 | chance依Trait/Skill/Relation/difficulty，和最终成功不是一回事 | Chronicle不输出完整PersuasionTask对象 | J09/I10、PersuasionVM/PersuasionTask |
 | ACT-J09-01 | 行为 | 在当前Persuasion task中选择一个真实可用argument | 单次尝试会提交随机/模型概率结果和进度/失败效果；不等于一般`dialogueSelect`不加上下文 | Chronicle没有专用Persuasion观察/回执及重规划 | J09/I10、DefaultPersuasionModel |
 | OBS-J10-01 | 观察 | Arena/Tournament菜单或TournamentLeaderboard查看可加入赛事/对手/排名 | 赛事随Town每日模拟生成/结束；观看排名不是参加Mission | Chronicle无Tournament state/list/player visual | J10、TournamentCampaignBehavior/Manager |
@@ -574,13 +576,18 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 | ACT-J11-01 | 行为 | Tavern host/lord对话设置赌注/难度/先后并确认开局 | Gold赌注档位与AI难度/对手条件改变；Conversation结束后启动棋局Mission | Chronicle无对话配置/BoardGame Mission入口 | J11、BoardGameCampaignBehavior |
 | ACT-J11-02 | 行为 | BoardGame Mission中点选棋盘落子 | 按具体棋类规则更新棋盘与回合；合法棋步/胜负条件由BoardGame类实现 | Chronicle无棋盘格像素/state/actions接口 | J11、BoardGame类/MissionBoardGameLogic |
 | OBS-J12-01 | 观察 | Story Mode任务/阶段通知、已完成的教程/主线阶段 | StoryMode阶段状态不同于Sandbox共同Quest集合 | Chronicle仅有限Quest摘要，不读主线StoryModeData | J12、StoryMode/MainStoryLine/StoryMode behaviors |
+| N/A-L01-01 | N/A | XML静态对象/内容定义 | XML描述商品、文化、兵种、文本等加载数据；它不是玩家可点击/可执行的独立动作，实际对象交互映射A-K现有ACT/OBS | 排除文件/节点数量；只作为对应原生行为的内容与版本依据 | L01、`Research/L/ContentInterfaceAndModRuntime.md` |
+| N/A-L02-01 | N/A | XSLT模块数据覆盖机制 | XSLT在加载期合并/替换数据，不提供战役内玩家操作入口；效果归于使用被覆盖数据的真实行为/观察项 | 排除补丁条目数量；验证数据来源时保留模块/版本上下文 | L02、`Research/L/ContentInterfaceAndModRuntime.md` |
+| N/A-L10-01 | N/A | CampaignBehavior注册、事件订阅与生命周期 | 由引擎启动/保存/加载及Campaign事件调度；玩家不能直接调用某个Behavior作为动作 | 排除Behavior/订阅数量；只记录它承载的具体状态效果及其玩家触发入口 | L10、`Research/L/ContentInterfaceAndModRuntime.md` |
+| N/A-L11-01 | N/A | GameModel规则公式/评分模型 | 模型由引擎在相关玩法结算时调用，不是可独立执行的玩家动作；结果归于触发/观察该结算的具体ACT/OBS | 排除模型数/方法数，避免把幕后公式当玩家可控行为 | L11、`Research/L/ContentInterfaceAndModRuntime.md` |
+| N/A-L12-01 | N/A | Harmony/BLSE补丁与外部加载/调试机制 | 只改变模块装载或代码运行方式，没有战役中玩家交互入口；游戏内结果归属被改变的实际玩法行为 | 排除补丁数/加载器功能；仅作为兼容/证据背景 | L12、`Research/L/ContentInterfaceAndModRuntime.md` |
 
 #### F/G/K跨域补充目录项
 
 | ID | 类型 | 玩家入口 / 观察语义 | 原版后果、前置/时间 | Chronicle覆盖 / 证据 / 未知 | 来源 |
 | --- | --- | --- | --- | --- | --- |
 | OBS-F03-01 | 观察 | 地图MobileParty tooltip在`IsInspected`时呈现当前行为摘要文字 | `GetBehaviorText`按Army长程行为或Default/ShortTerm行为、目标条件组合描述；不是原始AI计划，目标/场景变化可改变文字 | 源码确认tooltip提供该字段；玩家具体悬停/ALT显示条件尚未视觉核实，Chronicle不采集该摘要 | F03/F01、`RefreshMobilePartyTooltip`、`MobileParty.GetBehaviorText`、`PartyBase.UpdateVisibilityAndInspected`；v1.4.8.119303 |
-| OBS-G01-01 | 观察 | Map encounter菜单中双方、遭遇类型和当前可用谈判/接战/脱离/投降选项 | 选项由双方Faction、事件类型、装备/兵力、围城及Mission状态筛选；菜单可用项不是已提交战斗结果 | Chronicle未提供通用Encounter菜单观察；各交战类型的选项集合与显示信息未全量验证 | G01、PlayerEncounter、EncounterGameMenuBehavior |
+| OBS-G01-01 | 观察 | Map encounter菜单中双方、遭遇类型和当前可用谈判/接战/脱离/投降选项 | 选项由双方Faction、事件类型、装备/兵力、围城及Mission状态筛选；菜单可用项不是已提交战斗结果 | Chronicle未提供通用Encounter菜单观察；各交战类型的选项集合与显示信息未全量验证 | G01/K06、PlayerEncounter、EncounterGameMenuBehavior |
 | OBS-G07-01 | 观察 | 战斗中F1等Orders界面的己方Formation士气 | 每个 `OrderTroopItemVM` 用 `BattleMoraleModel.GetAverageMorale(formation)`提供整数Morale；仅 `Mission.Current.PlayerTeam`的formation列表；用户观察到五格呈现，每格约20点 | 用户报告敌军/非己方指挥盟友不可见；Native源将整数绑定到OrderTroopItem，AI可读原始数值；首个战斗接入不要求Mission控制 | G07/G03/G05、`MissionOrderTroopControllerVM`、`OrderTroopItemVM`、Native `OrderTroopItem.xml`、用户观察 |
 | OBS-G07-02 | 观察 | BattleSimulation结算面板中攻击方/防守方整侧Morale读数 | `SPScoreboardVM`在Simulation模式约每秒读取双方`MapEventSide.GetSideMorale()`；两边Scoreboard有五段条并提供整数悬停提示；这是Campaign坐镇模拟的侧级值，不是Mission Formation平均值，且不推进Campaign日期 | 本机v1.4.8源码与Native prefab绑定确认；用户记得坐镇页面有整体士气数值；Chronicle协议未返回该读数 | G07/F10、`SPScoreboardVM.CreateSimulation/OnTick`、`SPScoreboardSideVM.GetMoraleHintStr`、Native `SPScoreboard.xml`/`SPScoreboardSideHeader.xml` |
 | N/A-F02-01 | N/A | NPC Party AI/Think自动选择和切换地图行为 | AI对NPC队伍自动计算行动，不存在由玩家直接指定“下一项默认行为/思考结果”的统一入口；玩家只能改变其决策环境或通过地图/军团系统交互 | 不计入ACT分母；观察到的结果仍按可见Party、Army、Siege或地图界面分别映射 | F02/F04、AiPartyThinkBehavior、MobilePartyAi、AiMilitaryBehavior |
