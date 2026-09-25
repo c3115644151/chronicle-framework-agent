@@ -245,7 +245,7 @@ A06预设/设置页目前只定位到界面族；每个选项的写入字段、�
 | B07 Culture | 创建新Campaign时文化选择别名至`ACT-A01-01`或`ACT-A01-02` | B07/H01/A01；不建立Campaign中普遍存在的“换文化”动作 |
 | B08 Faction/Stance | `OBS-B08-01` Diplomacy/地图敌对状态；战争/和平动作映射C03，联盟/援战映射C04 | B08/C；个人Hero关系和Faction Stance不可合并 |
 | B09 Personal Relation | `OBS-B09-01` 对话/Barter中针对当前Hero的关系信息；写入来源映射I/J/F及具体动作族 | B09/I01/I09/J08；没有全局关系面板/统一增减关系动作 |
-| B10 Trait/Crime | `OBS-B10-01` Character Developer特征展示；Faction犯罪赎罪选项另映射I08动作 | B10/I07/I08/L；Trait和Crime Rating是不同观察面/状态族 |
+| B10 Trait/Crime | Trait展示映射`OBS-B10-01` Character Developer特征页；犯罪指控/可用处罚选项映射`OBS-I08-01` | Trait和Faction Crime Rating是不同数据族，角色开发页与执法菜单也不是同一观察面 |
 
 #### B域与已引用I域行为/观察族定义
 
@@ -262,13 +262,14 @@ A06预设/设置页目前只定位到界面族；每个选项的写入字段、�
 | OBS-B08-01 | 观察 | Kingdom外交页面或地图附近Party Hostile摘要 | Stance是Faction对关系，不是Hero personal Relation；地图摘要仅回答敌对 | Chronicle只给附近Party Hostile；B08/I02/C03/L05；全Faction/联盟历史未接入 |
 | OBS-B09-01 | 观察 | 对当前对话Hero显示/推导出的相处状态、称呼或选项提示 | 关系可能经过有效关系模型/身份映射，不等于原始整数或完整历史 | Chronicle不输出Hero relation；B09/I01/J08；是否给出数值取决于具体UI/页面 |
 | OBS-I06-01 | 观察 | EducationMapNotification→EducationState课程页面 | 显示玩家子女待选年龄阶段/教育选项；逾期阶段可能先自动随机处理 | Chronicle不读取教育状态/选项；I06/H02/A08；通知打开/关闭与时钟需视觉复核 |
-| OBS-B10-01 | 观察 | Character Developer的Trait条目；Crime Rating在相关Faction/执法上下文中触发的提示 | Trait与Faction Crime Rating是不同对象，不把Trait文字当Crime值 | Chronicle均不提供；B10/I07/I08；Crime专属面板与显示范围未验证 |
+| OBS-B10-01 | 观察 | Character Developer页读取当前角色的Trait条目/等级 | Trait由行为累积改变，Character Developer显示Trait状态；不等于Faction CrimeRating或Hero Relation | Chronicle不输出Trait/XP；特征页完整入口和全部显示内容未视觉穷举 | B10/I07、CharacterDeveloperVM、HeroDeveloper |
 | ACT-H10-01 | 行为 | C→Character Developer调整适用Hero的Skill Focus/Attribute/Perk后Done；Cancel撤销暂改 | 消耗未用成长点/要求Perk条件；Done才提交，Cancel不改变Hero成长 | Chronicle未实现；B03/H10/L05；子VM逐项前置未全测 |
 | ACT-H02-01 | 行为 | L→Clan Management改Clan名称并确认 | 写入名称、触发页面/展示刷新；取消不提交 | Chronicle未实现；B05/H02/L05；当前身份/命名校验待视觉验证 |
 | ACT-H02-02 | 行为 | L→Clan Management打开Banner Editor并确认 | 写入Clan Banner；不是单纯展示/百科编辑 | Chronicle未实现；B05/H02/L05；每种画面/确认取消未视觉验证 |
 | ACT-I04-01 | 行为 | 与可结婚Hero对话后选择开启Courtship | 仅当对话选项条件开放；写入Romance状态，不直接等于结婚 | Chronicle无Courtship专用动作；B02/I04/J08；目标/兼容性完整门禁见I04 |
 | ACT-I04-02 | 行为 | Courtship对话中选择Persuasion argument | 执行一次与当前Persuasion状态匹配的检定并推进/失败Romance阶段；不等于提交婚姻 | Chronicle无求偶说服动作；B02/I04/J09；各argument独立条件/概率仍需逐项映射 |
 | ACT-I04-03 | 行为 | 双方同意后向Clan leader提交Marriage Barter并确认 | Barter条款通过后才触发`MarriageAction`、关系/Clan后果；拒绝/Cancel不应计为结婚 | Chronicle无婚姻Barter动作；B02/I04/E10；跨Clan费用、条件、取消后UI恢复未知 |
+| OBS-I08-01 | 观察 | 被带到聚落处理犯罪指控时读取当前执法菜单的可用支付/处罚/忽视选项与条件反馈 | GameMenu选项按Faction/地区CrimeModel、金币/Influence余额、严重度和玩家身份动态出现；不由此推断可读取精确CrimeRating数字 | 当前为原版GameMenu条件/选择源码面；Chronicle无当前执法菜单/可用条件快照，金额/拒绝提示视觉未测 | I08/B10、`CrimeCampaignBehavior.AddGameMenus`、`PayForCrimeAction`、L03 |
 | ACT-I08-01 | 行为 | 城镇执法菜单选择支付Gold清除Crime Rating | 检查金钱/地区CrimeModel，扣Gold并处理Crime Rating；无钱时选项禁用 | Chronicle未支持；B10/I08；完整降值公式与关系后果待补 |
 | ACT-I08-02 | 行为 | 城镇执法菜单选择支付Influence清除Crime Rating | 使用Faction/Clan Influence付款条件和当前Faction crime成本 | Chronicle未支持；B10/I08；实际Influence付款人和精确公式待复核 |
 | ACT-I08-03 | 行为 | 城镇执法菜单接受体罚 | 走处罚结算，不等同支付金钱/影响力；伤病/犯罪值后果待核 | Chronicle未支持；B10/I08；来源及精确后果需运行确认 |
@@ -484,7 +485,7 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 | I05 Family/Kinship | `OBS-B02-01`亲属图/百科；家庭产生/婚姻/死亡等结果由A/B/I类实际行为触发 | 无直接修改家族关系菜单 |
 | I06 Education | `OBS-I06-01`教育通知与选择面板 | 每个成长年龄选择是玩家可见事项；错过前段会自动随机补选 |
 | I07 Traits | `OBS-B10-01`Character Developer Trait展示；行为写入来自其它Action结果 | 玩家通常不能直接编辑Trait |
-| I08 Crime/Reputation | `OBS-B10-01`Crime/处罚上下文；`ACT-I08-01..06`既有初始处罚分支 | 处罚类型和自动Crime decay分开 |
+| I08 Crime/Reputation | 当前执法/指控菜单可见信息映射`OBS-I08-01`；`ACT-I08-01..06`支付/处罚/忽略不同分支 | 不从选项可用性反推玩家能读取精确CrimeRating数值；处罚类型和自动Crime decay分开 |
 | I09 Dialogue Relation | 关系反馈映射`OBS-B09-01`；当前Conversation参与者/阶段/开放句复用`OBS-J08-01`，关系专属选择归属于各自行为ID | I09/J08描述同一原生Conversation观察面，不重复建第二个Observation ID；不能把每个string/关系文本条件单独计行为 |
 | I10 Persuasion | 当前Task/target/progress/attempt/argument probability观察复用`OBS-J09-01`；argument提交为`ACT-J09-01`，恋爱语境复用`ACT-I04-02` | I10与J09读取同一PersuasionVM/Task观察面，合并一个ID；各Task语境的成功/失败后果仍保留其领域映射 |
 
