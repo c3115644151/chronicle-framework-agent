@@ -127,7 +127,20 @@
                                         "board-game",
                                         "story-mode"
                                     ]
-                       }
+                       },
+                      {
+                          "path":  "Research/K/MapMovementAndEnvironment.md",
+                          "tags":  [
+                                        "world-map",
+                                        "navigation",
+                                        "tracking",
+                                        "weather",
+                                        "naval",
+                                        "ports",
+                                        "hideout",
+                                        "bandits"
+                                    ]
+                      }
                    ],
     "archives":  [
 
