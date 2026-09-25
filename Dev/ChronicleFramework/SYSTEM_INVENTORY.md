@@ -214,17 +214,22 @@
 | ACT-A02-01 | 行为 | 地图底部Pause/Normal/Fast-forward时间控件 | 修改`CampaignTimeControlMode`；世界是否实际推进还受MapState、等待、Mission等上下文限制 | Observer读当前timeControlMode；Protocol可暂停/恢复/独立推进，显式`advance`仅Harness用 | A02、K02；MAINLINE原版机制契约 |
 | ACT-A05-01 | 行为 | 地图ESC/F5 QuickSave | 排队快速保存；只有保存完成回执后结果成立，F5与ESC别名最终落同入口 | Protocol `save`完成存档往返；没有ESC/F5真实输入测试 | A05、L13；MAINLINE Save验收 |
 | ACT-A05-02 | 行为 | Save As→新建slot或覆盖→确认 | 选择名称/覆盖后排队保存；错误/取消不得误报完成 | Protocol使用唯一测试名SaveAs，UI确认流程未验证 | A05、L13 |
-| ACT-A06-01 | 行为 | 新战役Character Creation→Options/Difficulty | 选择初始难度/战役选项影响新Campaign初态 | Chronicle不适配角色创建选项控件；自动夹具会跳过/选择预设，不代表模型能力 | A01、A06、H01、L09 |
-| ACT-A06-02 | 行为 | Campaign Options界面更改当前存档选项 | 选项由Provider/身份/周期条件启用；会写入Campaign配置或触发模式变化 | Chronicle不观察/不操作Campaign Options VM；逐项门槛未在L域展开 | A06、L03/L08 |
+| ACT-A06-01 | 行为 | 新战役Character Creation→Options选择一个DifficultyPreset | 预设变化由`CampaignOptionsControllerVM`批量写入所有当前启用且关联难度的选项值；campaign创建前的初态设置 | v1.4.8 DefaultProvider/OptionsController调用链确认preset选择和批量改值；视图集合、禁用项/Custom匹配及下游八项模型影响尚未运行完整核验 | A01/A06/H01/L09、`DefaultCampaignOptionsProvider`、`CampaignOptionsControllerVM.UpdatePresetData` |
+| ACT-A06-02 | 行为 | 新战役Character Creation→Options修改一个启用的CampaignOptionItem | 通过OptionId/value参数写该配置字段；改Difficulty-related字段后ControllerVM重算preset为匹配预设或Custom；Auto Perks与Ironman亦属本页值控件，Ironman可DisabledLater | v1.4.8 `CampaignOptionItemVM.SetValue`/Provider setter源码已确认；Chronicle无此动作；CharacterCreation实际显示/提交时点和每个字段消费者待核 | A01/A06/H01/L09、`CampaignOptionItemVM`、`CampaignOptionsControllerVM.OnOptionChanged` |
+| ACT-A06-03 | 行为 | Campaign Options选择一个DifficultyPreset | 在当前存档上以预设批量覆盖启用的Difficulty-related字段；可能受某设置字段Disabled状态影响 | v1.4.8与CharacterCreation共用OptionsController preset逻辑；Chronicle无动作，菜单时钟/覆盖字段和最终保存时点未知 | A06/L03/L08、`DefaultCampaignOptionsProvider.GetGameplayCampaignOptions`、`CampaignOptionsControllerVM.UpdatePresetData` |
+| ACT-A06-04 | 行为 | Campaign Options修改一个启用的CampaignOptionItem | 按OptionId/value写入当前Campaign选项并更新预设匹配状态；不把Reset Tutorials/Cheats Action items合并进字段修改 | v1.4.8 `CampaignOptionItemVM`/Provider通用setter链确认；选项跨Mod的运行顺序和单项游戏模型消费者待核；Chronicle无此动作 | A06/L03/L08、`CampaignOptionItemVM.SetValue`、`DefaultCampaignOptionsProvider` |
+| ACT-A06-05 | 行为 | Campaign Options→ResetTutorials，Inquiry中确认Yes | 经`ResetTutorials()`触发`ResetAllTutorialsEvent`并显示重置提示；先打开Action项或拒绝确认不产生重置 | v1.4.8 `ActionCampaignOptionData`→Inquiry→event/confirmation message源码已确认；Campaign完整受影响项与UI/取消路径未运行核验；Chronicle无动作 | A06/A08/J12/L06、`DefaultCampaignOptionsProvider.ExecuteResetTutorial`、`ResetAllTutorialsEvent` |
+| ACT-A06-06 | 行为 | 手柄输入状态下Campaign Options选择Enable Cheats | Action项回调调用当前`MapState.Handler.OnGameplayCheatsEnabled`；非Gamepad条件下不注册该选项 | v1.4.8 Provider输入条件及handler调用源码已确认；handler后续作弊许可/确认效果与可见回执未追通；Chronicle无动作 | A06/L03/L08、`DefaultCampaignOptionsProvider.ExecuteEnableCheats`、`IMapStateHandler` |
 | ACT-A08-01 | 行为 | 新战役开场动画按ESC跳过 | 结束视频播放并进入创建阶段；不应反复空等数分钟 | Harness FreshCampaign设跳过路径；ESC具体 handler 未定位，用户视觉确认可跳 | A01、A08；FreshCampaign验收 |
 | OBS-A02-01 | 观察 | 地图时间/日期/速度档 | HUD显示Campaign时钟与当前时间控制档；Mission暂停和战役快进分开 | Observer输出campaignDay/timeControlMode；UI图标/标题尚未实机对照 | A02、L06；MAINLINE |
+| OBS-A06-01 | 观察 | CharacterCreation Options/Difficulty或ESC→Campaign Options查看当前preset、已注册Option项、值/类型/禁用状态与原因 | 初始与Campaign内Provider列表不同；设置字段、难度预设和操作项按OptionId/值显示，不等同消费模型的最终效果 | v1.4.8 `CampaignOptionsControllerVM.Options`/`CampaignOptionItemVM`构造、value和disabled state源码确认；Chronicle不读取这些设置；不同Mod Provider排序和视觉/禁用提示未实机核验 | A06、`CampaignOptionsManager`、`CampaignOptionsControllerVM`、`CampaignOptionItemVM`、`CharacterCreationOptionsStageVM` |
 | OBS-A07-01 | 观察 | Encyclopedia(Hero history)/日志 | 从全局历史条目按页面可见条件筛出角色历史；不等于实时全世界快照 | Chronicle不输出LogEntryHistory或百科历史列表 | A07、L05；用户确认N百科入口 |
 | OBS-A08-01 | 观察 | Tutorial提示 | 按Campaign类型/行为状态显示并可完成/关闭；StoryMode提示与Sandbox提示源不同 | Chronicle不读教程提示/完成状态 | A08、J12、L06 |
 | OBS-A08-02 | 观察 | Concept百科页 | 按概念分类/页面显示帮助文本与链接；N百科入口UI细节以实测为准 | Chronicle不读Concept数据或页面当前项 | A08、L05、用户确认N百科入口 |
 | N/A-A03-01 | N/A | Campaign小时/日/周等周期分发与对象Tick | 由Campaign时间和引擎调度触发，无“执行Tick”玩家入口；具体结果映射到造成状态变化的行为族 | 明确排除玩家动作分母；按时钟/生命周期研究保留来源与例外核查 | A03、`Research/A/CampaignRuntimeWorldState.md` |
 | N/A-A04-01 | N/A | CampaignEvent事件总线/订阅回调 | 由原版/Mod代码发布与消费，不存在通用“触发事件”玩家命令；只有带独立玩家入口的专属事件映射为实际ACT | 明确排除玩家动作分母；事件发布者/消费者用于追溯其它目录项 | A04、`Research/A/CampaignRuntimeWorldState.md` |
 
-A06预设/设置页目前只定位到界面族；每个选项的写入字段、条件与后续模型结果可能不同，候选设置操作不计入最终动作分母，待按原生Option ID逐项拆分。A03/A04目前映射为系统后台回调而非玩家直接动作；若某个具体事件存在手动玩家入口，应映射到发起该状态变化的ACT，而不是另造一个“触发CampaignEvent”动作。
+A06开局与战役内上下文分别拆成“选择Difficulty preset”和“编辑单个启用Option”两族，并另列`ResetTutorials`、手柄专用`EnableCheats`，因此共对应`ACT-A06-01..06`；两个界面的设置数据共同映射`OBS-A06-01`。OptionId/Setter现已明确，但八项难度设置的下游模型消费者及Mod覆写兼容尚未逐项核实，A06虽有源码确认的结构映射，其最终行为分母/成效门禁仍未关闭。A03/A04目前映射为系统后台回调而非玩家直接动作；若某个具体事件存在手动玩家入口，应映射到发起该状态变化的ACT，而不是另造一个“触发CampaignEvent”动作。
 
 | 内部系统 / N/A候选 | 分类理由 | 映射来源 / 仍需排除的直接玩家入口 |
 | --- | --- | --- |
