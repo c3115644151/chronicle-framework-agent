@@ -52,6 +52,8 @@ Cheer键打开的是径向Taunt/Shout选单，不等同“提高部队士气”�
 
 上/下马的玩家路径与一般Use可分开：`MissionMainAgentInteractionComponent.FocusTick`只把未骑乘、空座、可达的Mount设为焦点对象；按Action后`Mission.OnAgentInteraction`特判“主角与Mount”并调用`Agent.Main.Mount(target)`，是上马提交。主角已有Mount时，Crouch输入经`MissionMainAgentController.ControlTick`按当前速度/坐骑动作置Dismount flag，速度高时进入延迟状态；Action焦点当前Mount也能走StopUsing，解除行为和动画时点须进一步核对。因此目录暂拆`ACT-G03-15/16`，不把换乘骑坐骑隐藏在泛用“Use”或姿态切换里。
 
+Action键对普通Agent还有第三条结果路径：当焦点目标不是Mount且不是`UsableMissionObject`时，`MissionMainAgentInteractionComponent.FocusStateCheckTick`调用目标的`Agent.OnUse(MainAgent, boneIndex)`，再由`Mission.OnAgentInteraction`分发到当前Mission各`MissionBehavior.OnAgentInteraction`。它可承载场景NPC/任务对象特定的脚本；不等同机器的Start/StopUse，也不自动等价Campaign Conversation。目录暂另列`ACT-G03-17`，实际场景应按其MissionBehavior调用者逐个检查是否有不同状态提交，而不能把所有Agent focus 当成同一结果。
+
 Multiplayer Mission还有独立于Campaign战斗指令的VoiceChat：`VoiceChatHandler`在voice chat enabled且音频/平台权限允许时，按`PushToTalk`(33)按下启动录音、松开后停录并将压缩音频作为`SendVoiceRecord`发服务器；服务器按接收列表与同队关系转发`SendVoiceToPlay`，客户端再解压播放并更新Peer voice status。未连接网络Mission的单机战役没有这条语音传输路径；该行为不修改Campaign、Army或Mission Agent战斗状态，但属于联网玩家沟通入口。Chronicle没有麦克风输入、语音转录或语音输出适配。
 
 Prison Break是F12从地牢菜单启动的自定义Sandbox Mission subtype，而非通常的MapEvent战斗：启动入口/囚犯选择/Bribe提交映射F12 `ACT-F12-13`，成功后的Captivity结束对话映射`ACT-F12-14`。`PrisonBreakMissionController`在单一场景中交替处理潜行接近和警报后的护送/战斗，玩家须使用Use交互俘虏触发跟随，警卫感知和StealthFailCounter会改写结果；它不是进入场景后自动营救。它暴露G03通用Mission身体控制仍是未知清单，具体Movement/Use/Melee等Action族尚待研究，不能把F12启动入口算作完整营救支持。
