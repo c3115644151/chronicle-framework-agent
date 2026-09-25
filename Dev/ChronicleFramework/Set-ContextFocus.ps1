@@ -5,12 +5,13 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
+. (Join-Path $root 'HarnessResearchReadiness.ps1')
 $statePath = Join-Path $root 'ContextState.json'
 $mainlinePath = Join-Path $root 'Focus\MAINLINE.md'
 if (-not (Test-Path $statePath)) { throw "Context state is missing: $statePath" }
 if (-not (Test-Path $mainlinePath)) { throw "Current mainline document is missing: $mainlinePath" }
 
-$state = Get-Content $statePath -Raw | ConvertFrom-Json
+$state = Get-Content $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
 if (-not $Review) { throw 'Use -Review after editing Focus/MAINLINE.md. Work-item status is managed in GitHub Project, not ContextState.' }
 
 $now = [DateTime]::UtcNow
@@ -18,7 +19,7 @@ $reviewDays = [int]$state.lifecyclePolicy.reviewIntervalDays
 $state.current.path = 'Focus/MAINLINE.md'
 $state.current.reviewedUtc = $now.ToString('O')
 $state.current.reviewAfterUtc = $now.AddDays($reviewDays).ToString('O')
-$state.current.mainlineSha256 = (Get-FileHash $mainlinePath -Algorithm SHA256).Hash.ToLowerInvariant()
+$state.current.mainlineSha256 = Get-ChronicleCanonicalFileSha256 -LiteralPath $mainlinePath
 
 $archiveRoot = Join-Path $root ([string]$state.lifecyclePolicy.archiveDirectory)
 $archives = @()

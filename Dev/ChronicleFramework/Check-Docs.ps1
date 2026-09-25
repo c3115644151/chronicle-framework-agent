@@ -43,8 +43,11 @@ foreach ($scriptFile in $harnessPowerShellFiles) {
 
 $harnessScript = Get-Content (Join-Path $harnessRoot 'Run-Harness.ps1') -Raw -Encoding UTF8
 $startupEvidenceScript = Join-Path $harnessRoot 'HarnessStartupEvidence.ps1'
+$contextFocusScript = Join-Path $harnessRoot 'Set-ContextFocus.ps1'
 $researchReadinessScript = Join-Path $harnessRoot 'HarnessResearchReadiness.ps1'
 $researchReadinessSource = Get-Content $researchReadinessScript -Raw -Encoding UTF8
+. $researchReadinessScript
+$contextFocusSource = Get-Content $contextFocusScript -Raw -Encoding UTF8
 . $researchReadinessScript
 $projectFile = Get-Content (Join-Path $harnessRoot 'ChronicleFramework.csproj') -Raw -Encoding UTF8
 $developmentDoc = Get-Content (Join-Path $harnessRoot 'DEVELOPMENT.md') -Raw -Encoding UTF8
@@ -122,7 +125,7 @@ foreach ($requiredText in @('TestResults/latest.json', 'Computer Use', 'ContextS
         throw "DEVELOPMENT.md is missing contract element '$requiredText'."
     }
 }
-foreach ($requiredScript in @('Agent-DecisionLoop.ps1', 'Test-AgentLoop.ps1', 'Test-AgentLoopProvider.ps1', 'Test-AgentBattleFixture.ps1', 'Test-AgentVisualCapture.ps1', 'Test-AgentFreshCampaign.ps1', 'Test-AgentSupport.ps1', 'HarnessVideoCapture.ps1')) {
+foreach ($requiredScript in @('Agent-DecisionLoop.ps1', 'Test-AgentLoop.ps1', 'Test-AgentLoopProvider.ps1', 'Test-AgentBattleFixture.ps1', 'Test-AgentVisualCapture.ps1', 'Test-AgentFreshCampaign.ps1', 'Test-AgentSupport.ps1', 'HarnessVideoCapture.ps1', 'Set-ContextFocus.ps1')) {
     if (-not (Test-Path (Join-Path $harnessRoot $requiredScript))) { throw "Agent loop harness script is missing: $requiredScript" }
 }
 $freshCampaignSource = Get-Content (Join-Path $harnessRoot 'FreshCampaignHarness.cs') -Raw -Encoding UTF8
@@ -161,6 +164,7 @@ if ($developmentDoc -notmatch '研究就绪门槛' -or $harnessScript -notmatch 
 $approvedDiagnosticHash = [regex]::Match($researchReadinessSource, "AuditedHarnessDiagnosticSha256 = '([0-9a-f]{64})'")
 $actualDiagnosticHash = Get-ChronicleCanonicalFileSha256 -LiteralPath (Join-Path $harnessRoot 'SubModule.cs')
 if (-not $approvedDiagnosticHash.Success -or $approvedDiagnosticHash.Groups[1].Value -ne $actualDiagnosticHash) { throw 'The exact-hash SubModule diagnostic exception must match the reviewed source.' }
+if ($contextFocusSource -notmatch 'Get-ChronicleCanonicalFileSha256' -or $harnessScript -notmatch 'Get-ChronicleCanonicalFileSha256' -or $researchReadinessSource -notmatch 'Canonical source hashing must treat LF and CRLF') { throw 'Source-content hashing must normalize line endings consistently in the readiness gate, context updater, and Docs regression checks.' }
 if ($mainlineDoc -notmatch '(?m)^Research Gate: \*\*(BLOCKED|READY)\*\*' -or $mainlineDoc -notmatch '(?m)^Implementation Gate: \*\*(BLOCKED|READY)\*\*' -or $mainlineDoc -notmatch '行为总分母：\*\*(UNKNOWN|[1-9]\d*)\*\*' -or $mainlineDoc -notmatch 'SYSTEM_INVENTORY' -or $mainlineDoc -notmatch '126') { throw 'MAINLINE must expose gate status and distinguish the game-system inventory from the player-behavior denominator.' }
 if ([string]::IsNullOrWhiteSpace($taskTrackerUrl) -or $taskTrackerUrl -notmatch '^https://github\.com/users/[^/]+/projects/\d+$' -or @($contextState.taskTracker.PSObject.Properties.Name).Count -ne 1) { throw 'ContextState must store only one GitHub Project locator, without duplicated task metadata.' }
 if ($mainlineDoc -match '(?m)^\| Behavior-interface census \|' -or $mainlineDoc -match '\b0/12 domains\b' -or $mainlineDoc -match '\[W1-A.*Issue #\d+') { throw 'MAINLINE must not mirror live GitHub work-item or domain-completion status.' }
@@ -189,7 +193,7 @@ foreach ($reference in $contextState.references) {
         throw "SYSTEM_INVENTORY.md does not route to '$requiredText'."
     }
 }
-$mainlineHash = (Get-FileHash $mainlinePath -Algorithm SHA256).Hash.ToLowerInvariant()
+$mainlineHash = Get-ChronicleCanonicalFileSha256 -LiteralPath $mainlinePath
 if ($contextState.current.mainlineSha256 -ne $mainlineHash) { throw 'Focus/MAINLINE.md hash is stale; run Set-ContextFocus.ps1 -Review.' }
 $reviewAfter = [DateTime]::Parse($contextState.current.reviewAfterUtc).ToUniversalTime()
 if ($reviewAfter -lt [DateTime]::UtcNow) { throw "Current focus review is overdue: $($contextState.current.reviewAfterUtc)." }
