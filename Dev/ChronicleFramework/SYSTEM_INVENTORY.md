@@ -285,7 +285,7 @@ A06预设/设置页目前只定位到界面族；每个选项的写入字段、�
 | C01 KingdomDecision | `OBS-C01-01`未决决策列表；发起决策的ACT需按War/Peace/Policy/Fief/Alliance/Expel等类型拆分 | 决策后统一通过`Kingdom.AddDecision`不代表同一种提案行为；须结合候选与发起者权限 |
 | C02 KingdomElection | `OBS-C02-01`候选、Chooser/Supporter、选票/胜率状态；`ACT-C02-01`Supporter态度、`ACT-C02-02`Chooser结果选择 | 角色、权限、费用不同；Decision子类可参数化但其后果需逐类核对 |
 | C03 War/Peace | `OBS-B08-01`Faction stance；战争提案`ACT-C03-01`、议和提案`ACT-C03-02` | 地图敌对/开战是其它攻击/Hostile行为的副作用，不另计“DeclareWar按钮”；提案有决策/投票/Influence步骤 |
-| C04 Alliance/Call-to-War | `OBS-C04-01`联盟、援战协议、目标/期限；提议Alliance`ACT-C04-01`、援战提案候选`ACT-C04-02`，Decision回应复用`ACT-C02-01/ACT-C02-02` | 持续Alliance、援战提案和Chooser响应分开；Call-to-War发起UI尚未定位 |
+| C04 Alliance/Call-to-War | `OBS-C04-01`联盟、援战协议、目标/期限；提议Alliance`ACT-C04-01`、对话中向盟友提Call-to-War`ACT-C04-02`，Decision回应复用`ACT-C02-01/ACT-C02-02` | 常驻Alliance、一次援战提案与Chooser响应分开；盟友后续是否接受不由请求动作保证 |
 | C05 Policy | `OBS-C05-01`王国当前政策与决策；`ACT-C05-01`提议政策，Decision支持/选择复用`ACT-C02-01/ACT-C02-02` | 政策结果、提出提案与投票支持不能合并 |
 | C06 Fief allocation | Settlement/Clan页面观察映射D10/B05/B06；Claimant主张`ACT-C06-01`为候选，Decision选择复用`ACT-C02-01/ACT-C02-02` | Preliminary与Final claimant Decision分阶段，不能与最终ChangeOwnerAction重复计数 |
 | C07 Clan Kingdom change | `OBS-B04-01/OBS-B06-01`当前Clan/Kingdom身份；`ACT-C07-01`至`ACT-C07-05`区分离境/退位；`ACT-C07-07`开始佣兵、`ACT-C07-08`对话结束佣兵、`ACT-C07-09`宣誓封臣 | K页结束佣兵合同为`ACT-C07-05`；对话结束额外清空Influence，故不能合并。仅通用主动Barter改投候选`ACT-C07-06`仍待追入口 |
@@ -309,7 +309,7 @@ A06预设/设置页目前只定位到界面族；每个选项的写入字段、�
 | ACT-C03-01 | 行为 | K→Diplomacy提出Declare War proposal | 创建KingdomDecision/Election而非直接改War Stance；门槛/提案成本依权限模型 | Chronicle不操作决策；源码流程已核，UI未视觉确认 | C01-C03、B06、L03 |
 | ACT-C03-02 | 行为 | K→Diplomacy提出Make Peace proposal并提交贡金/时长方案 | 先形成Peace Decision；只有结果通过才执行Neutral Stance及Tribute | Chronicle不操作议和与贡金；日支付不是玩家动作 | C01-C03/C10、E08、B06 |
 | ACT-C04-01 | 行为 | K→Diplomacy向非敌对Kingdom提出Alliance proposal | 创建StartAllianceDecision；需通过双方Decision/Barter条件才成为期限协议 | Chronicle不支持Alliance；proposal与Chooser/Supporter响应分开 | C04/C01/C02、B06/L03 |
-| ACT-C04-02 | 候选行为 | 通过Alliance/Diplomacy流程向盟国提出Call-to-War请求 | 被接受可产生援战协议、费用和目标Kingdom开战链；玩家主动发起入口尚未定位 | 暂不计入最终分母，待核真实入口、前置/费用和失败/撤回提示 | C04/C01-C02、E08；Model/Decision源码有定义，UI调用未追通 |
+| ACT-C04-02 | 行为 | 与盟友领主进行Diplomacy对话，选择援战请求、目标敌国并确认费用 | 仅在双方为Kingdom盟友、无冲突未决提案且玩家有足额Gold时开放；调用`StartCallToWarAgreement`发起一次独立协议请求，对方仍须经C02 Kingdom Decision回应 | v1.4.8源码确认条件、重复目标、成本及提案链；Chronicle无此动作，未实机验证对话/时钟/拒绝恢复 | C04/C01-C02/E08、`LordConversationsCampaignBehavior`、`AllianceModel` |
 | ACT-C05-01 | 行为 | K→Policies提出增/废Policy提案 | 提案条件/成本通过才进入Election；非直接写Policy集合 | Chronicle不支持Policy提案 | C01/C05、B06/L03 |
 | ACT-C06-01 | 候选行为 | Settlement Claimant Preliminary/Claimant流程中提出候选主张 | 受Settlement、Clan/Hero身份与决策阶段限制；Preliminary与Final Claimant不是同一个菜单结果 | Chronicle无领地决策动作；暂不计入最终分母，待确认该Proposal是否有真实玩家入口及具体Supporter/Chooser调用 | C06/C01-C02、B05/B06、D10/L03 |
 | ACT-C07-01 | 行为 | 普通Vassal在K→Leave Kingdom，且无Fief | 改Clan Kingdom/关系/阵营状态；需确认菜单合法条件 | Chronicle无身份变更动作 | C07、B05/B06/L03 |

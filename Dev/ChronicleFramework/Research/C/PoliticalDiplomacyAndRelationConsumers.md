@@ -82,8 +82,9 @@ Sponsor Clan 与 Proposer Clan 领袖 Hero 的个人关系可参与支持计算�
 - K→Diplomacy中选择非敌对 Kingdom 时可提出联盟；`KingdomDiplomacyVM` 检查 Player Clan 是否为佣兵、Influence和`StartAllianceDecision.IsAllowed`后创建决策。决策只有同意/拒绝两个结果；同意调用 `AllianceCampaignBehavior.StartAlliance`。
 - `DefaultAllianceModel` 负责适用条件、提案成本、联盟评价和最长持续时间。通过后 `AllianceCampaignBehavior` 保存 Kingdom 对及到期时间，更新双方 AlliedKingdoms，并分发 OnAllianceStarted；结束时移除关系并发 OnAllianceEnded。外交/关系因素是提案评分输入，不是独立个人盟约状态。
 - Call-to-War 是已结盟 Kingdom 间单独的一次援战协议，不等于常驻 Alliance，也不等于双方自动进入同一支军团。协议保存 CallingKingdom、CalledKingdom、TargetKingdom 与 EndTime；盟友提出后由 Called Kingdom 的 KingdomDecision 决定接受或拒绝。
+- 玩家提出 Call-to-War 的原版入口已在 `LordConversationsCampaignBehavior.AddPoliticsAndBarter` 追到：大地图与盟友领主对话的 Diplomacy 选项中，玩家可提出援战请求。条件要求玩家和对话方分别属于 Kingdom、Player Clan 不是 mercenary、双方处于 Alliance、Called Kingdom 没有同一目标的未决援战提案；候选目标是玩家 Kingdom 当前交战、但盟友尚未交战的 Kingdom。目标重复选项显示 `AllianceModel.GetCallToWarCost`，金币不足时禁用；点击后走 `StartCallToWarAgreement(..., isPlayerPaying:true)`，后续是否对方接受仍由 Kingdom decision 决定。
 - 接受时将援战费用按 `isPlayerPaying` 路径从 Hero.MainHero.Gold 或 CallingKingdom 的 CallToWarWallet 转到 CalledKingdom 钱包；创建协议并可延长联盟期限，分发 OnCallToWarAgreementStarted 后通过 `DeclareWarAction.ApplyByCallToWarAgreement` 令 CalledKingdom 与目标进入战争。拒绝时调用相应关系惩罚处理；到期/取消时移除协议并分发 Ended 事件。
-- 证据：当前安装 `TaleWorlds.CampaignSystem.dll`（`StartAllianceDecision`、`ProposeCallToWarAgreementDecision`、`AcceptCallToWarAgreementDecision`、`AllianceCampaignBehavior`、`AllianceModel`）、`TaleWorlds.CampaignSystem.ViewModelCollection.dll`（`KingdomDiplomacyVM`）。援战通知的实机显示/接受、协议到期UI尚未运行核验。
+- 证据：当前安装 `TaleWorlds.CampaignSystem.dll`（`LordConversationsCampaignBehavior`、`ProposeCallToWarAgreementDecision`、`AcceptCallToWarAgreementDecision`、`AllianceCampaignBehavior`、`AllianceModel`）、`TaleWorlds.CampaignSystem.ViewModelCollection.dll`（`KingdomDiplomacyVM`）。入口/成本/决议链由v1.4.8.119303源码确认，但援战通知实机显示/接受、协议到期UI和Campaign时间均尚未运行核验。
 
 ## C05 王国政策
 
