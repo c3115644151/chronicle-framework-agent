@@ -487,7 +487,7 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 | I06 Education | `OBS-I06-01`教育通知与选择面板 | 每个成长年龄选择是玩家可见事项；错过前段会自动随机补选 |
 | I07 Traits | `OBS-B10-01`Character Developer Trait展示；行为写入来自其它Action结果 | 玩家通常不能直接编辑Trait |
 | I08 Crime/Reputation | `OBS-B10-01`Crime/处罚上下文；`ACT-I08-01..06`既有初始处罚分支 | 处罚类型和自动Crime decay分开 |
-| I09 Dialogue Relation | 对话/Barter选项反馈映射`OBS-B09-01/OBS-I09-01`；选择动作共用J08的Sentence family | 不能把每个string/关系文本条件单独计行为 |
+| I09 Dialogue Relation | 关系反馈映射`OBS-B09-01`；当前Conversation参与者/阶段/开放句复用`OBS-J08-01`，关系专属选择归属于各自行为ID | I09/J08描述同一原生Conversation观察面，不重复建第二个Observation ID；不能把每个string/关系文本条件单独计行为 |
 | I10 Persuasion | `OBS-I10-01`Persuasion progress/attempt/选项；行动为当前Dialogue options，后果映射J09/I04 | Persuasion参数/分支待按实际Task类型去重 |
 
 #### H-I新增目录项
@@ -505,7 +505,6 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 | ACT-H12-02 | 行为 | Ransom offer选择Refuse and wait for a better offer | 不支付本次赎金，接入原生`settlement_wait`并恢复LastTimeControlMode继续时间检查 | Chronicle没有囚禁Wait动作；等待推进依原版当前TimeMode | H12/A02、PlayerCaptivityCampaignBehavior |
 | N/A-H12-01 | N/A | Captor败退、盟友支付、时限随机逃脱等自动释放 | Campaign/MapEvent状态触发EndCaptivityAction，无可选择的玩家按钮 | 不计入ACT分母；后果观察映射F12/OBS-H12-01 | H12/F12、PlayerCaptivityCampaignBehavior |
 | OBS-I04-01 | 观察 | 与目标Hero对话时显示当前Romantic/courtship阶段相关选项 | 当前状态可隐藏/开放开始/重试/婚姻Barter选项；不等同完整爱慕数值 | Chronicle只读当前对话可选句，不读Romance state | I04、RomanceCampaignBehavior/J08 |
-| OBS-I09-01 | 观察 | 当前Conversation参与者、阶段和原生开放选项 | 条件句集合随身份/任务/关系/输入token变化 | Protocol可读当前Menu/Conversation选项，不穷举全树 | I09/J08、AgentObserver/Protocol |
 | OBS-I10-01 | 观察 | 当前Persuasion target/progress/剩余attempt/argument概率 | PersuasionTask类型、对话阶段和模型决定可用信息与风险 | Chronicle未输出PersuasionTask；仅当前开放句可能可观察 | I10/J09、PersuasionVM |
 | ACT-H04-01 | 行为 | PartyScreen选兵种可用Upgrade target、支付对应upgrade cost并Done | 消耗兵种升级费用/候选路径及roster变化；取消不提交 | Chronicle有个别招募测试，未提供通用升级动作 | H04/F11/PartyVM |
 | ACT-H04-02 | 行为 | PartyScreen从俘虏列表选普通Troop Recruit并确认 | 受是否可招募、忠诚/容量/招募时间/风险模型限制；不是卖俘虏/释放Hero | Chronicle未实现通用Prisoner recruitment | H04/F12/PrisonerRecruitmentModel |
@@ -539,7 +538,7 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 | K02 Navigation | `ACT-K02-01..05`地图移动、目标点移动、追近、Follow modifier、Hold；显式时间控制复用`ACT-A02-01` | move/pursue/hold已有MAINLINE契约；普通点击自然推进，不能重复计隐藏advance |
 | K03 Tracking | `OBS-K03-01`已发现Track与技能分级描述 | 未发现的Track不构成Agent可读信息；纪元/追踪技能细项未知 |
 | K04 Weather | `OBS-K04-01`地图Atmosphere/雨雪/时节 | 天气生成与环境后果是后台/场景数据，无Weather设置行动 |
-| K05 Sea/Port | 船只/港口模型候选观察`OBS-K05-01` | 默认PartyNavigationModel不开放naval capability；先映射为未决/模块依赖，不声称玩家能默认海上旅行 |
+| K05 Sea/Port | 当前无直接玩家海航affordance，`N/A-K05-01`按基础1.4.8默认导航模型留证 | 默认PartyNavigationModel无Naval capability；安装/启用模块若替换模型或增加UI，则扩展分母、重新研究该域 |
 | K06 Encounter Flow | 遭遇菜单/双方状态映射G01/G02；选项Actions映射G域逐项定义的ACT ID | K地图追近只是接触输入，协商/支援/开战/投降分流至G，不重复一条“Encounter”动作 |
 | K07 Hideout | 藏身处地图/Encounter观察映射`OBS-K07-01`；攻/等夜/坐镇映射F/G/J实际行动 | Hideout发现、Campaign Wait和Mission战斗是不同路径 |
 | K08 Bandit Density | `OBS-K08-01`可见Bandit Party/Hideout密度线索 | 全图Spawn人口和计时是后台Campaign，玩家无“生成/减少密度”按钮 |
@@ -568,7 +567,7 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 | ACT-J05-01 | 行为 | Incident UI中选择一个条件合法的事件Option并确认/关闭 | 每个Effect和Option Consequence分别调用；可能改变金钱/Party/关系/Settlement状态；直接API跳过VM cleanup | Chronicle对Incident通用流程目前Unsupported/Research；结构化事件返回未全测 | J05/L06、Incident.InvokeOption、MAINLINE |
 | OBS-J06-01 | 观察 | Inventory/市场Goods物品悬停详情中的异地买卖地点/记录价格；玩家栏与市场栏为同一观察族的两个入口 | `ItemMenuVM.SetMerchandiseComponentTooltip`按具体ItemObject、未过期记录、异地及价差筛选；来源受城镇访问/每日事件/交易专长影响。读取不改库存/金币，记录随Campaign时间过期；宿主界面时钟待运行核验 | 用户报告商品例子为谷物/贵重品/木材/葡萄酒，确认武器不显示，马匹未核；与本机1.4.8源码Goods筛选相符。Chronicle未适配，Agent未视觉/运行复核；利润/行情颜色另见E09 | J06/E02/E05/E09、`TradeRumorsCampaignBehavior`、`ItemMenuVM`、`SPInventoryVM`；马匹展示、来源/去重边缘未知 |
 | OBS-J07-01 | 观察 | 地图通知/QuickInfo/Scene notification | 队列可过期/关闭/跳转；Notice、Log与世界对象值分开 | Observer不读Notification queue/已读/点击目标 | J07/A07/L06、MapNotificationVM |
-| OBS-J08-01 | 观察 | 活跃Conversation的发言人/Flow阶段/当下开放Option | sentence condition、身份token、Task与关系筛选，不能扫描未开放Option | Protocol提供有限Conversation state/option读取 | J08/I09/L04、ConversationManager/AgentObserver |
+| OBS-J08-01 | 观察 | 活跃Conversation的发言人/Flow阶段/当下开放Option | sentence condition、身份token、Task与关系筛选，不能扫描未开放Option | Protocol提供有限Conversation state/option读取；这是J08与I09共享的同一观察面 | J08/I09/L04、ConversationManager/AgentObserver/Protocol |
 | ACT-J08-01 | 行为 | 只选择当前Conversation实际开放且仍然valid的原生对话Option | Consequence可能启动Barter/Quest/Persuasion/Mission或改关系；context变化须重验 | Chronicle `dialogueSelect`仅限当前option列表；不支持全3D谈话接近 | J08/L04、ConversationManager/AgentProtocol |
 | OBS-J09-01 | 观察 | PersuasionVM展示当前task阶段、可用argument与进度/机会 | chance依Trait/Skill/Relation/difficulty，和最终成功不是一回事 | Chronicle不输出完整PersuasionTask对象 | J09/I10、PersuasionVM/PersuasionTask |
 | ACT-J09-01 | 行为 | 在当前Persuasion task中选择一个真实可用argument | 单次尝试会提交随机/模型概率结果和进度/失败效果；不等于一般`dialogueSelect`不加上下文 | Chronicle没有专用Persuasion观察/回执及重规划 | J09/I10、DefaultPersuasionModel |
@@ -616,7 +615,7 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 | OBS-K02-01 | 观察 | World map上的主队位置/目标/当前移动状态及路径可达提示 | 路径的整条导航mesh/脚印不等于Observer已见到的地图路线 | Chronicle snapshot有位置/目标/isMoving/MoveMode，不返回导航path节点 | K01/K02、AgentObserver |
 | OBS-K03-01 | 观察 | Scouting/MapTrack visual当前已发现足迹的描述信息 | 只对Detected/live/半径内Track有效；信息精度由SkillEffect和Track年龄/距离/尺寸影响 | Chronicle NearbyParty不输出MapTrack | K03、DefaultMapTrackModel/MapTracksCampaignBehavior |
 | OBS-K04-01 | 观察 | World Map可见区域的当前雨雪/光照/季节环境与Mission天气 | 天气节点随Campaign周期按地区更新；视觉和战斗效果可能分离 | Chronicle不读天气/Atmosphere字段 | K04、MapWeatherCampaignBehavior/DefaultMapWeatherModel |
-| OBS-K05-01 | 观察 | Sea/Port/Ship状态及可导航能力 | Naval数据模型存在，但当前DefaultPartyNavigationModel返回无Naval能力，玩家航海入口未确认 | Chronicle无船队、海上移动或PortState Observation | K05、Ship/NavigationHelper；Active model replacement unknown |
+| N/A-K05-01 | N/A | Sea/Port/Ship Campaign海航与船只操作 | 基础1.4.8 `DefaultPartyNavigationModel.HasNavalNavigationCapability`返回false且玩家位置导航被限制到Land/NavMesh，因此引擎Ship/PortState/Embark类型不构成当前基础模块集中的可用玩家动作/观察面 | 只对未替换默认导航模型的基础版本排除；有Naval DLC/Mod、Harmony或自定义NavigationModel时必须重开此项并检验新入口，不将安装模块目录误作活动模块清单 | K05、`DefaultPartyNavigationModel`、`NavigationHelper`；当前安装模块无WarSails，实际Active overrides未知 |
 | OBS-K07-01 | 观察 | 地图上可见Hideout及其发现/遭遇/Infested线索 | Hideout隐藏/显示与Bandit/Settlement状态分开；队伍不可见不代表消失 | Chronicle无Hideout状态/识别动作 | K07、HideoutCampaignBehavior/HideoutModel |
 | OBS-K08-01 | 观察 | 可见Bandit/looter Party、Hideout和可见地区安全现象 | 仅观察到局部地图实体，不能推导全Faction总量/Spawn budget | Chronicle附近Party摘要有视距和12项截断，无全球Bandit计数 | K08/F02、BanditSpawnCampaignBehavior/AgentObserver |
 

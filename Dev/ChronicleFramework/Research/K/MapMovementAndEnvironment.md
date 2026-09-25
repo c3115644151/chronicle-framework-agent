@@ -42,7 +42,7 @@ Chronicle不观测当前天气、局部雨雪参数、湿润/风、时间与区�
 
 玩家入口、UI和操作成本需基于实际启用导航模型确认：若启用海航，目标可能要经Port和Embark/Disembark transition，Party舰队、船员/船只限制、海上Mission遭遇与陆地地图移动均需分开；若活动模块集未启用，则船只类型/海战程序集本身不构成玩家可用入口。当前本机 `Modules`目录未见WarSails模块，但这只是安装情况，不证明其它Mod不启用Naval替换模型。不可把naval对象反编译存在误报成玩家能直接点海面航行。
 
-Chronicle目前Protocol和Observer没有船队、港口、登/离船、海上目标/舰队战斗状态字段或动作。需要按实际模块清单核实模型替换后才能确定海路支持，不修改vanilla机制。证据：`DefaultPartyNavigationModel.HasNavalNavigationCapability`、`NavigationHelper.GetEmbarkAndDisembarkDataForPlayer`、`Ship`、`PortState`与当前 `Modules`目录检查。未知：当前官方安装配置是否另通过未查模块/运行时hook替换naval model、玩家可用海航的真实UI/权限/库存要求、启用Naval模式后的路径/天气/时间/海战后果全链。
+基础版1.4.8交叉目录将K05标为N/A：`DefaultPartyNavigationModel.HasNavalNavigationCapability`返回false，默认`CanPlayerNavigateToPosition`限制在Land/NavMesh；安装程序集存在Ship/Port/Embark类型不能证明无Naval扩展的玩家可使用这些接口。该N/A仅针对未替换默认导航模型的基础版本，不声称覆盖当前已安装的所有Mod组合。Chronicle现无船队/港口/登离船状态字段或动作。证据：`DefaultPartyNavigationModel.HasNavalNavigationCapability`、`NavigationHelper.GetEmbarkAndDisembarkDataForPlayer`、`Ship`、`PortState`和本机Modules目录未见WarSails。未知：实际启用的模块与运行时model overrides、Naval扩展的玩家入口/舰队条件、启用后路径/天气/时间/海战后果全链；检测到替换模型时必须撤销该N/A并重新加入分母评审。
 
 ## K06 Encounter Flow：地图接触与模式切换
 
