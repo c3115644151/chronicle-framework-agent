@@ -13,6 +13,18 @@
 - 角色身份包括王国/家族领袖、领主、队伍领袖、总督、同伴和各类 notable occupation；
 - 持久资料包括文化、年龄、属性、技能、Perk、Trait、装备、关系和历史日志引用。
 
+#### B01 生命周期与状态读取
+
+当前安装 v1.4.8 的 `Hero.CharacterStates` 枚举值为 NotSpawned、Active、Fugitive、Prisoner、Released、Dead、Disabled、Traveling。`Hero.IsActive` 等标志只是从 `HeroState` 派生；特别是 `IsAlive` 的源码判定是“状态不等于 Dead”，所以 Disabled、Prisoner、Fugitive 并不自动等同于 Dead。
+
+`Hero.ChangeState` 写入 HeroState，并通知所属 Clan 的 `OnHeroChangedState` 及 `CampaignObjectManager.HeroStateChanged`；转入 Traveling 会派发 `OnHeroGetsBusy`，转入 Active 会派发 `OnHeroActivated`。死亡不是普通 `ChangeState` 的替代调用：`KillCharacterAction` 先检查 `CanDie` 与遭遇/围城中的延迟死亡标记，再走 `BeforeHeroKilled`、死者状态/DeathDay、俘虏或队伍清理、Clan/Kingdom 继承/解散及 `HeroKilled` 等后果；玩家主角会先进入 `OnBeforeMainCharacterDied` 分支，由其专门处理。
+
+年龄不靠逐日累加字段：`Hero.Age` 在 Life/Death 周期启用时由 CampaignTime 与 BirthDay 即时计算（存活 Hero 到当前时间，死亡 Hero 到 DeathDay）；周期关闭时返回创建/设置生日时记录的 `_defaultAge`。默认 `AgeModel` 中成年门槛为18岁、老年起点55岁、最大年龄128岁。默认死亡概率模型在 Life/Death 周期开启且年龄大于55后才产生老死风险，概率按年龄由0增加，到127岁为1；`Hero.CanDie(DiedOfOldAge)` 仍会受周期选项限制。死亡、成年的实际触发行为可能来自战斗/故事/家族生命周期的不同调用方，不能只从年龄字段推导发生时机。
+
+可见信息：百科 Hero 页面显示名字、年龄、职业、关系、当前 Last Seen 文本、死者标记及筛选出的个人历史。玩家此前确认 N 可打开百科；本版本键位注册和页面完整交互仍需实机复核。普通地图观察主要覆盖附近/已知队伍及当前位置，不能据此推定整个 Hero 清单都对玩家可见。Chronicle Observer 目前只报告与Agent相关的有限身份/周边字段，不提供全体 Hero 生命周期事件流。
+
+证据：安装 `TaleWorlds.CampaignSystem.dll`（`Hero.CharacterStates`、`Hero.Age`、`Hero.ChangeState`、`KillCharacterAction`、`DefaultAgeModel`、`DefaultHeroDeathProbabilityCalculationModel`）、`TaleWorlds.CampaignSystem.ViewModelCollection.dll`（`EncyclopediaHeroPageVM`），以及 A03 的对象级 Campaign tick 事实。未知项：造成年龄跨阈值事件的全部行为、所有死亡模型调用点、不同身份/StoryMode下的死亡和继承分支、真实百科/附近观察UI覆盖仍未完成；本段只确立 Hero 本体生命周期合同，不提前扩展到 Clan 继承或关系消费者。
+
 ### Clan
 
 - 成员、领袖、领地、队伍、文化、家园、家族等级、声望、影响力、金币和总军力；
