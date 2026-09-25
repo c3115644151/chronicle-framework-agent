@@ -327,7 +327,7 @@ A06预设/设置页目前只定位到界面族；每个选项的写入字段、�
 | N/A-C10-01 | N/A | 佣兵玩家收到贸易协定的自动接受分支 | 源码分支自动处理，不是玩家按键/对话行动；一般玩家决议支持仍映射`ACT-C02-01/02` | 不计入ACT分母；Chronicle未观察完整协议状态 | C10、B04/B06/L06 |
 | N/A-C08-01 | N/A | AI王国被消灭/玩家看到王国毁灭通知 | 王国消灭是Campaign结算，不存在通用玩家“摧毁王国”按钮；玩家能做的是引发战争/攻城等其它动作 | 不计入ACT分母；相关战争/战斗映射C03/F/G，通知见L06 | C08/C03、B06/L06 |
 
-上述ACT行含部分“决策族候选”：C02/C03/C05/C06仍需通过每种Decision的Chooser/Supporter/Barter/Result差异进一步判定是否拆分；C07-06 generic Barter入口也仍未证实。表里已将N/A自动系统留在观察或真实导致它的玩家动作映射，不把后台CampaignEvent计入玩家行动族。未知/候选项不计入最终分母。
+Decision跨域去重规则：`ACT-C02-01/02`是Decision Election中Supporter/Chooser的共用选择族，Decision子类造成的候选/成本/Outcome差异作为参数与结果记录；战争/议和、Alliance、Policy、Fief claim、Trade agreement的发起入口和核心提交不同，分别保留各自ACT。仲裁条件、费用/结果及单Clan即时结算未知仍留在Research行中，只有发现另一真实玩家入口或独立状态提交点时才扩展ID。`C07-06`已核实为说服目标Clan归附的专用玩家路径，不是泛用Lord Barter。后台自动决议仍以明确N/A或其实际触发玩家行为映射，不计成“触发CampaignEvent”动作。
 
 ### D域首轮交叉映射与目录族
 
@@ -460,7 +460,7 @@ E03、E06、E08、E09、E10的大量变化由每日模型、其它玩家动作�
 | ACT-G01-05 | 行为 | JoinEncounter菜单选择帮助攻击/防守一方、放弃Army或离开 | 变更参战方/Army membership或结束Encounter；权限依阵营/Army/当前双方 | Chronicle无支援参战/脱离Army菜单动作 | G01/F13/K06、EncounterGameMenuBehavior |
 | ACT-G03-01 | 行为 | Mission的TAB菜单选择Exit/撤退并确认 | `BattleEndLogic.TryExit`返回不同结果；围城守方可能变为SurrenderSiege，不能误报安全撤退 | Chronicle有有限missionRetreat adapter并检查TryExit；未覆盖键盘HUD视觉确认 | G03/G09、BattleEndLogic |
 
-F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Formation orders目前没有原生Agent动作，因此只建目录/能力缺口，不计作已支持行为；Battle/Campaign结果源同时由F/G多项研究映射，去重时按唯一玩家入口和结果提交点核对。
+F/G中Mission主角移动/攻击、Formation orders及部署已作为真实玩家行为族进入目录分母；Chronicle目前没有这些3D Mission的Agent动作适配，因此目录行为存在不代表产品已经支持。首个AI战斗接入仍优先用坐镇/BattleSimulation；相同战后/Campaign结果跨域映射到唯一结果观察，按玩家入口与提交点去重。
 
 ### H-I域初始交叉映射与目录族
 
