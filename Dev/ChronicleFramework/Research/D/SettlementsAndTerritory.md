@@ -1,6 +1,6 @@
 # D 类研究：聚落与领地
 
-状态：机制盘点中；D01-D04 已完成首轮静态盘点，目前继续研究 D05 聚落建筑，未进行方案评审。
+状态：机制盘点中；D01-D05 已完成首轮静态盘点，目前继续研究 D06 聚落项目，未进行方案评审。
 
 适用本体：Bannerlord v1.4.8.119303。依据安装目录中的 `TaleWorlds.CampaignSystem.dll` 反编译结果和 Chronicle 当前 `AgentObserver.cs`；本节是静态代码证据，不代表已经在游戏界面逐项实测。
 
@@ -164,6 +164,39 @@ Town 把一个当前日常项目（`CurrentDefaultBuilding`）与普通建造队
 
 未知项：管理/建筑页面从玩家可见菜单进入的完整路径与确认按钮副作用；每类官方建筑的完整等级效果和成本数据；建筑建成后各模型/事件消费者的完整清单；所有权转换时日常项目、建筑等级与建设加速余额的保留/重置规则；其他 Mod 替换建筑类型/模型后的兼容行为。
 
+## D06 城镇与城堡日常项目
+
+### 与普通建造的区别
+
+原版 `BuildingType.IsDailyProject` 标记不进入普通建设队列的日常项目。选中的项目作为 `Town.CurrentDefaultBuilding`，其效果在各发展模型计算经过 `Building.AddEffectOfBuilding` 汇总时生效；若它不是当前被选项目，对应日常效果不会应用。它不是消耗建造进度升到等级 2/3 的普通建筑，也不是一次性的按钮奖励。项目切换由 `SettlementProjectSelectionVM` 和 `SettlementDailyProjectVM` 展示/选择，实际聚落数值仍由模型在相应状态计算或每日更新时应用。
+
+### 默认项目及其模型效果
+
+以下效果来自本机默认 `DefaultBuildingTypes` 定义，数字是 effect 输入值；模型如何在具体状态上组合它们，应与 D02 的繁荣/忠诚/民兵/建设模型和 D07 驻军相关链路一起理解。
+
+| 聚落类型 | 日常项目 | 本机定义的效果 |
+| --- | --- | --- |
+| 城镇 | Housing | Prosperity +2 |
+| 城镇 | Train Militia | Militia +2；GarrisonAutoRecruitment +1 |
+| 城镇 | Festival and Games | Loyalty +3 |
+| 城镇 | Irrigation | 绑定村庄 Hearth 每日 +1 |
+| 城堡 | Slacken Garrison | GarrisonWageReduction -5%（AddFactor） |
+| 城堡 | Raise Troops | Militia +3；GarrisonAutoRecruitment +2 |
+| 城堡 | Drills | ExperiencePerDay +8 |
+| 城堡 | Irrigation | 绑定村庄 Hearth 增长 +50%（AddFactor） |
+
+普通建筑与日常项目是两套并行发展位：日常项目不会排队施工，也不随普通建筑升至三阶；普通建筑则通过施工进度逐级升级。项目选择不会把城镇项目提供给城堡，`CanAddBuildingTypeToTown` 按 `IsTown`/`IsCastle` 过滤适用类型。
+
+### 玩家、AI 与时间
+
+玩家 VM 暴露 daily-project 候选、当前默认项目、项目效果与选择回调；完整的屏幕入口、确认/取消时提交到 Town 的具体链路和玩家可见文本仍未做运行验证。AI 的默认项目选择已在 D05 记录：原版 Campaign 行为会在每日聚落 tick 中低频尝试改选，不属于玩家 UI 操作。读取项目类型/效果本身不推进 Campaign 时间；其效果进入相关模型，底层日常数值依 Campaign 时间 tick 更新。
+
+Chronicle Observer 不读取当前默认日常项目，也不计算这张表的模型结果；Protocol 没有日常项目选择动作。因此目前只有引擎内部定义被核实，尚未证明 Agent 能看见、决定或提交项目切换。
+
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `DefaultBuildingTypes`、`BuildingType`、`Building.AddEffectOfBuilding`、`DefaultBuildingModel`；`TaleWorlds.CampaignSystem.ViewModelCollection.dll` 的 `SettlementProjectSelectionVM`、`SettlementDailyProjectVM`；Chronicle `AgentObserver.cs`。数据与 VM 逻辑为 v1.4.8.119303 静态程序集证据，尚无游戏内项目选择运行结果。
+
+未知项：UI 页面从哪个玩家入口打开、选择何时提交、关闭/取消是否回滚草稿；每项效果最终经过哪些模型及调用方；默认 AI 改选发生时所处 UI/围城/易主条件的全部限制；Mod 新增/替换日常项目时，ViewModel 与模型是否自动支持新效果。
+
 ### 时间与证据边界
 
 D01 中的实体分类、所有权查询与绑定关系是读取对象状态，不会自行推进 Campaign 时间。城镇/村庄的每日状态计算由各组件的 `DailyTick` 执行，并受 Campaign 时钟调度；具体数值模型和状态变化分别留给 D02-D04。直接读取属性不等价于玩家打开地图百科或聚落界面；本节没有声称 UI handler 与直接 API 的完整交互已经运行验证。
@@ -174,4 +207,4 @@ D01 中的实体分类、所有权查询与绑定关系是读取对象状态，�
 
 ## 研究范围状态
 
-D01-D05 已完成首轮静态对象、聚落发展、村庄生命周期和建筑施工/队列盘点。D06-D10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 D 域范围逐项核对，不将此文档视作聚落系统整体已完成。
+D01-D06 已完成首轮静态对象、聚落发展、村庄生命周期、建筑施工/队列及日常项目盘点。D07-D10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 D 域范围逐项核对，不将此文档视作聚落系统整体已完成。
