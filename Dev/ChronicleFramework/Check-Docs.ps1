@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '4.81'
+$contractVersion = '4.82'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -24,6 +24,11 @@ $unexpected = @($actualRelativePaths | Where-Object { $_ -notin $routedPaths })
 $missing = @($routedPaths | Where-Object { $_ -notin $actualRelativePaths })
 if ($unexpected.Count -gt 0) { throw "Unrouted Markdown files found; add each to ContextState and SYSTEM_INVENTORY routing: $($unexpected -join ', ')" }
 if ($missing.Count -gt 0) { throw "Routed Markdown files are missing: $($missing -join ', ')" }
+$researchFiles = @($actualRelativePaths | Where-Object { $_ -match '^Research\\[^\\]+\\.+\.md$' })
+$researchCategories = @($researchFiles | ForEach-Object { [regex]::Match($_, '^Research\\([^\\]+)\\').Groups[1].Value } | Group-Object)
+foreach ($category in $researchCategories) {
+    if ($category.Count -gt 1) { throw "Research category '$($category.Name)' has multiple Markdown sources; consolidate unless the user approved a deliberate split." }
+}
 ${activeFiles} = @($actualFiles | Where-Object { $_.FullName -notlike '*\Archive\*' })
 $totalBytes = ($actualFiles | Measure-Object Length -Sum).Sum
 $defaultReadPaths = @($contextState.defaultRead | ForEach-Object { ([string]$_).Replace('/', '\') })
@@ -45,11 +50,20 @@ $developmentDoc = Get-Content (Join-Path $harnessRoot 'DEVELOPMENT.md') -Raw -En
 $designDoc = Get-Content (Join-Path $harnessRoot 'DESIGN.md') -Raw -Encoding UTF8
 $inventoryDoc = Get-Content (Join-Path $harnessRoot 'SYSTEM_INVENTORY.md') -Raw -Encoding UTF8
 $rootAgents = Get-Content (Join-Path $projectRoot 'AGENTS.md') -Raw -Encoding UTF8
+$runtimeGameRoot = if ($localSettings -and $localSettings.gameRoot) { [IO.Path]::GetFullPath([string]$localSettings.gameRoot) } else { $null }
 $gitIgnore = Get-Content (Join-Path $projectRoot '.gitignore') -Raw -Encoding UTF8
 $sourceManifestPath = Join-Path $projectRoot 'Modules\ChronicleFramework\SubModule.xml'
 $mainlinePath = Join-Path $harnessRoot ([string]$contextState.current.path)
 $mainlineDoc = Get-Content $mainlinePath -Raw -Encoding UTF8
 if (-not (Test-Path (Join-Path $harnessRoot 'ContextState.json'))) { throw 'ContextState.json is missing.' }
+if ($runtimeGameRoot) {
+    $runtimeAgentsPath = Join-Path $runtimeGameRoot 'AGENTS.md'
+    if (Test-Path -LiteralPath $runtimeAgentsPath) {
+        $trackedAgentsHash = (Get-FileHash -LiteralPath (Join-Path $projectRoot 'AGENTS.md') -Algorithm SHA256).Hash
+        $runtimeAgentsHash = (Get-FileHash -LiteralPath $runtimeAgentsPath -Algorithm SHA256).Hash
+        if ($trackedAgentsHash -ne $runtimeAgentsHash) { throw 'Repository AGENTS.md and game-workspace AGENTS.md copies have diverged.' }
+    }
+}
 if ($projectFile -notmatch [regex]::Escape('<Compile Remove="TestResults/**/*.cs" />')) { throw 'ChronicleFramework.csproj must exclude generated/evidence C# sources under TestResults.' }
 
 if ($harnessScript -notmatch "HarnessContractVersion\s*=\s*'$contractVersion'") {
@@ -69,7 +83,7 @@ if (-not (Test-Path -LiteralPath $sourceManifestPath)) { throw 'The version-cont
 [xml]$sourceModuleManifest = Get-Content -LiteralPath $sourceManifestPath -Encoding UTF8
 if ([string]$sourceModuleManifest.Module.Id.value -ne 'ChronicleFramework') { throw 'The version-controlled manifest must declare ChronicleFramework.' }
 if ($PSCommandPath -and ((Get-Content -LiteralPath $PSCommandPath -Raw -Encoding UTF8) -match '(?m)^\s*\$markdownBudget\s*=|^\s*\$byteBudget\s*=')) { throw 'Documentation byte/count ceilings must not force compression; use routing and informational size reporting.' }
-if ($developmentDoc -notmatch '文档管理优先保证可读性' -or $rootAgents -notmatch '主题自然分化时允许拆分多份' -or $rootAgents -notmatch '文档字节数只作诊断') { throw 'Documentation policy must prioritize readable, routed topic documents without hard size/count ceilings.' }
+if ($developmentDoc -notmatch '文档管理优先保证可读性' -or $developmentDoc -notmatch '不以总字数或文件总数强迫压缩' -or $rootAgents -notmatch '每个 `Research/<类别>/` 默认维护一份权威文档') { throw 'Documentation policy must preserve readable documents and the one-authority-file-per-research-category rule.' }
 if ($harnessScript -notmatch "VisualCapture'\s*\{\s*@\('Preflight', 'Build', 'VisualCapture'\)") { throw 'VisualCapture phase must run Preflight and Build before its capture test.' }
 if ($harnessScript -notmatch "FreshCampaign'\s*\{\s*@\('Preflight', 'Build', 'FreshCampaign'\)") { throw 'FreshCampaign phase must run Preflight and Build before its test.' }
 if ($harnessScript -notmatch "FreshCampaignProgression'\s*\{\s*@\('Preflight', 'Build', 'FreshCampaignProgression'\)") { throw 'FreshCampaignProgression phase must run Preflight and Build before its test.' }
@@ -138,11 +152,11 @@ if ($freshCampaignTest -notmatch 'CHRONICLE_CAPTURE_CRASH_EXCEPTION' -or $freshC
 if ($freshCampaignTest -notmatch 'Start-ChronicleWindowVideoCapture' -or $freshCampaignTest -notmatch 'Stop-ChronicleWindowVideoCapture' -or $freshCampaignTest -notmatch 'CrashReport-\$bannerlordPid\.mp4' -or $freshCampaignTest -notmatch 'crashCaptureGraceActive' -or $freshCampaignTest -notmatch 'CrashWindowCaptureError') { throw 'FreshCampaign must capture an actual crash-report window into keyframe evidence before cleanup.' }
 if ($freshCampaignTelemetry -notmatch 'fresh-campaign-visible-issues' -or $freshCampaignTest -notmatch 'VisibleIssueTypesBySettlement') { throw 'FreshCampaign must record local issue types for route research.' }
 if ($freshCampaignTelemetry -notmatch 'FreshCampaignHarness\.ProbeLocalIssueConversation') { throw 'FreshCampaign must probe the local native issue dialogue after character creation.' }
-foreach ($requiredText in @('MechanicGate', 'ClockPolicy', 'ResearchFirstGate', 'DecisionGate', 'PlainLanguageHandoff', 'ProductTaskScope')) {
-    if ($rootAgents -notmatch [regex]::Escape($requiredText)) { throw "Root AGENTS.md is missing mechanic-contract rule '$requiredText'." }
+foreach ($requiredHeading in @('## 判断原则', '## 单一工作循环', '## 事实归属与资料读取')) {
+    if ($rootAgents -notmatch [regex]::Escape($requiredHeading)) { throw "AGENTS.md is missing the unified method section '$requiredHeading'." }
 }
-if ($rootAgents -notmatch 'HarnessBoundary' -or $rootAgents -notmatch 'Harness不读取或镜像项目板') { throw 'AGENTS.md must preserve the GitHub/Git/Harness/Agent responsibility boundary.' }
-if ($developmentDoc -notmatch 'Research Readiness Gate' -or $developmentDoc -notmatch 'DecisionGate' -or $harnessScript -notmatch 'Get-ChronicleResearchReadiness' -or -not (Test-Path -LiteralPath $researchReadinessScript)) { throw 'Research and decision readiness rules must be documented and enforced before building changed game C# sources.' }
+if ($rootAgents -notmatch '最多推进一项' -or $rootAgents -notmatch 'Harness 不调用 GitHub' -or $rootAgents -notmatch '高影响未知未解决前不猜着实现') { throw 'AGENTS.md must preserve single-task execution, source ownership, and consequential-unknown handling.' }
+if ($developmentDoc -notmatch '研究就绪门槛' -or $harnessScript -notmatch 'Get-ChronicleResearchReadiness' -or -not (Test-Path -LiteralPath $researchReadinessScript)) { throw 'Research readiness rules must be documented and enforced before building changed game C# sources.' }
 $approvedDiagnosticHash = [regex]::Match($researchReadinessSource, "AuditedHarnessDiagnosticSha256 = '([0-9a-f]{64})'")
 $actualDiagnosticHash = (Get-FileHash (Join-Path $harnessRoot 'SubModule.cs') -Algorithm SHA256).Hash.ToLowerInvariant()
 if (-not $approvedDiagnosticHash.Success -or $approvedDiagnosticHash.Groups[1].Value -ne $actualDiagnosticHash) { throw 'The exact-hash SubModule diagnostic exception must match the reviewed source.' }

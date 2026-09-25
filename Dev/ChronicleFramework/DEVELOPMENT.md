@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 
-Contract version: 4.81
+Contract version: 4.82
 
 ## 目标与边界
 
@@ -21,7 +21,7 @@ Campaign Agent Bridge 是验证基础设施，不是新玩法。它负责把战�
 | `DESIGN.md` | 双方确认、准备实施的功能清单 |
 | `SYSTEM_INVENTORY.md` | 原版系统总清单与研究路由 |
 
-GitHub Project 是工作项、原生依赖、状态的唯一事实源，最多一个 `In Progress` 卡片。Git是代码及其历史的唯一事实源。`Focus/MAINLINE.md` 保存长期有效的工程目标、机制契约、技术事实、未知项、覆盖分母和验收定义，不保存活动Issue、完成数或单次测试快照。`ContextState.json` 是上下文路由器，只保存当前技术焦点路径、hash/复核元数据、默认读取层和按需Research路由；项目目标、当前阶段和Issue状态不在其中重复。`TestResults/latest.json` 仅代表本机最近一次Harness运行及其commit/脏树信息。`Research/<类别>/` 按需加载并维护稳定领域事实；主题自然分化时可拆分，且每份都必须经`ContextState.json`和`SYSTEM_INVENTORY.md`路由。`Archive/`默认不读。
+GitHub Project 是工作项、原生依赖、状态的唯一事实源，最多一个 `In Progress` 卡片。Git是代码及其历史的唯一事实源。`Focus/MAINLINE.md` 保存长期有效的工程目标、机制契约、技术事实、未知项、覆盖分母和验收定义，不保存活动Issue、完成数或单次测试快照。`ContextState.json` 是上下文路由器，只保存当前技术焦点路径、hash/复核元数据、默认读取层和按需Research路由；项目目标、当前阶段和Issue状态不在其中重复。`TestResults/latest.json` 仅代表本机最近一次Harness运行及其commit/脏树信息。每个 `Research/<类别>/` 默认只有一份权威文档并按需加载，由`ContextState.json`和`SYSTEM_INVENTORY.md`路由；只有现有文件确实无法清楚表达且用户确认后才拆分。`Archive/`默认不读。
 
 GitHub 与 Harness 不互相替代：GitHub Issues/Projects 管理工作项、原生依赖、评审和协作状态；Git记录可审查的源代码历史；本机Harness探测安装的游戏版本/模组、编译并启动游戏、操作disposable fixture、采集崩溃与结构化断言；Agent负责解释目标、研究机制、选择下一步和处理未覆盖异常。这四者之间不复制状态。Harness只输出本次运行的commit、工作树状态和测试收据，不查询或更改GitHub，也不因GitHub未登录/离线而失效。运行收据以run ID保存在本地`TestResults/<run-id>`并由`latest.json`指向最近一次；Agent在工作项达到验收时，将相关commit与简洁测试结论回填到GitHub Issue。大型日志、存档与视频不自动上传或塞进Issue。
 
@@ -49,9 +49,9 @@ Project采用最少任务状态：`Todo`表示尚未开始（是否被阻塞看I
 
 这不是新增文档：在既有 MAINLINE 契约表中维护事实。`Check-Docs.ps1` 检查契约表、必需字段和当前实现动作是否都有记录；实现范围改变时同步维护该表与 Harness contract version。PowerShell 读取 AGENTS/Markdown/JSON 权威文件时必须显式 UTF-8，中文规则门禁不得依赖系统默认代码页。MAINLINE维护分母定义与验收规则，GitHub维护任务状态，`TestResults`维护单次运行结果；不以动作数量替代自主决策闭环进度。
 
-## Research Readiness Gate
+## 研究就绪门槛
 
-DecisionGate follows AGENTS.md; incomplete Research Gate blocks feature C#, except one exact-hash-reviewed `SubModule.cs` P5 harness-only fix (diagnostic cleanup/save scheduling), with no vanilla mechanic changes.
+`Focus/MAINLINE.md` 的 Research Gate 未就绪时，不实现新的游戏能力。就绪依据是玩家真实入口与相关观察/行为范围已研究到足以界定覆盖分母，而不是列出多少熟悉案例。纯Harness诊断维护不等于新游戏能力；若修改受精确hash保护的诊断代码，只限已审阅的 `SubModule.cs` 异常清理/存档调度实验，不得改变原版玩法。
 
 ## 当前版本事实
 
@@ -233,10 +233,6 @@ stop()
 ## 技术决策权
 
 产品体验是需求；机制判断和技术建议待验证。用当前源码/运行证据核实，并据此比较成本、风险、替代方案；证据冲突时直说。
-
-## 面向用户的完成说明
-
-每次完成工作后，先用非工程化语言说明实际改动、对用户/项目的影响、验证方式和未覆盖部分。第一次使用专门术语时顺手解释其含义，并预判可能让非程序员误会的状态。例如GitHub的`Blocked`表示前置任务尚未完成，不表示软件崩溃或测试失败。命令、commit和run ID是可追溯证据，不能取代清楚的结果说明。
 
 ## 文档维护契约
 

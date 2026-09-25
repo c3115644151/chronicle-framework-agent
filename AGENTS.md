@@ -1,56 +1,27 @@
-# Bannerlord Mod 工程记忆
+# Bannerlord Mod — Agent 工作方法
 
-这是 Chronicle Framework 的本体与开发工作区。
+本文件约束 Chronicle Framework 的开发 Agent。目标不是遵守最多规则，而是用最少且互不冲突的规则，稳定地产出符合游戏事实、可验证、可交接的项目成果。
 
-## 必须遵守
+## 判断原则
 
-- 遇到问题先检查工具、启动器、版本、模块清单、测试器和证据链，再修改 Mod 功能代码。
-- 工具本应避免但仍发生的问题，要修工具并加入回归验证，不能只给功能代码打补丁。
-- 用户提出的技术路径、平台类比或实现假设都只能视为待验证输入；不得因为用户这样描述就直接把它写成架构结论。
-- 技术方案、可行性、成本、依赖和替代路径由 AI 独立论证并负责把关；若用户的技术假设不成立，必须明确纠正，不以服从性替代理性。
-- 用户的设计目标和体验标准具有优先权，但不等于用户对实现机制的判断具有真理地位。
-- [ResearchFirstGate] 新阶段/新能力在方案或代码前，必须先在现有 MAINLINE 记录：用户目标与验收、完整行为/观察面清单及分母、当前实现覆盖、当下主源与版本/日期、参考项目的类型/成熟度/适用与不适用处、替代方案和未知项、通用复用价值、可重复测试。只记起几个熟悉案例不算全景；分母未知时标 BLOCKED/盘点中，不选实现路线。Research gate 非 READY 不得写新游戏功能；验证目标不能变成交付指标，不为通过它堆一次性能力。
-- [DecisionGate] 重大方案/工程判断按序检查：先问最可能改变答案的问题；界定真实问题；预演三种失败原因；列出标准答案及其缺陷；反查能推翻当前判断的变量；分开事实、推断、未知并说明改判证据；最后只给一个按目标/限制/代价选出的结论。无需把七项机械打印，但问题若真的会改变决策，先向用户确认，不用猜测填空。
-- [MechanicGate] 实现任何原版玩家动作前，必须先在现有 `Focus/MAINLINE.md` 的“原版机制契约”记录：玩家实际入口/按键修饰、原版自然状态变化、Campaign 时间模式如何流动、直接 API 与 UI handler 的差别、当前证据和未知项。不得从 API 名称、其他游戏经验或想当然推导玩家体验。
-- [ClockPolicy] 时间流动与地图/菜单动作分开建模：若原版时间模式正在运行，世界会自然推进；仅在明确的时间控制/固定步进或 Harness 需要确定性时调用时钟控制。移动、追近、进入定居点等动作不得为了让测试快结束而暗中强制快进或暂停；任何宏动作都须显式标记为 Harness/Agent Host 策略，不得冒充原版玩家动作。
-- [ProgressMetrics] GitHub Project是唯一工作项状态源；领域/行为分母与可重复验收定义在 `Focus/MAINLINE.md`，单次运行结果和可计算的通过/失败数在本地 `TestResults`。不能把命令次数或验证夹具通过率当作Agent自主能力。
-- [ProductTaskScope] GitHub Project只列直接形成Chronicle项目内容/成果的事项：Bannerlord系统研究、玩法设计、Mod能力与面向玩家的验收。Agent/Harness/文档/流程的内部结构维护不是产品任务，必要时直接维护、测试并提交，不创建路线图Issue或用其充当阶段产出；仅在用户明确要求把基础设施本身作为交付物时例外。
-- [HarnessBoundary] GitHub Issues/Projects只管任务、依赖和协作状态；Git只管代码历史；本地Harness只管游戏/工具环境、可重复测试和原始运行收据；Agent负责研究、判断、目标分解和异常后的下一步。Harness不读取或镜像项目板，也不需登录GitHub即可测试。不得在Markdown复制动态任务状态。
-- 静态源码无法判明交互链时，先追到 UI 入口、输入修饰与副作用；仍无法验证且会改变实现的玩家体验事实时，向用户提出一个具体、最小的问题，不得先选架构再补解释。
-- 不把“能启动”“能进主菜单”“加载 DLL”“进入战役”“行为已触发”当成同一个结论。
-- 所有功能变更必须经过 `Dev/ChronicleFramework/Run-Harness.ps1` 对应阶段；没有自动证据就标记为未验证。
-- 不修改正式存档进行测试；使用 disposable save 和带时间戳的证据目录。
-- Computer Use 只作为 UI 适配层，不能替代日志、遥测、存档和结构化断言。
-- 当前优先做原版增强/优化；任何新系统都必须先证明原版接口无法满足目标。
-- [ValidationTargetPolicy] P 阶段中的存档目标/验收场景是验证 Agent 通用能力的夹具，不是产品目的或必须达成的交付承诺。不得为通过单一目标临时堆叠一次性功能；只有能沉淀为通用感知、决策、动作或恢复能力且符合产品主线的改动才实施。若当前能力不足，保留失败证据并标明缺口，不为“过关”改目标或强行绕过原版流程。
-- [PlainLanguageHandoff] 每次完成一项工作后，用用户无需编程背景也能理解的大白话说明改了什么、对项目/用户有什么影响、如何验证、什么还没做；主动解释容易误读的术语和状态（例如Blocked表示等待前置事项，不等于程序出错）。不要用命令和工程行话代替结果汇报，也不要默认用户与Agent工程认知对等。
-- 文档过时视为工程缺陷；每次任务开始先运行 `Run-Harness.ps1 -Phase Docs`。
-- 修改 harness、工具链或验收规则时，必须同步更新对应文档并提升 harness contract version。
-- 文档必须按 ContextState 分层：当前主线只读 `Focus/MAINLINE.md`，稳定事实按标签读取，Archive 默认不读。
-- 主线改变时先更新 `ContextState.json` 和 `Focus/MAINLINE.md`，再处理旧材料；不能让旧主线继续留在默认上下文。
-- 主线完成或切换使用 `Complete-ContextFocus.ps1`，默认删除旧主线，只有明确需要追溯时才归档。
-- 禁止用新增 Markdown 代替维护现有事实源；`Check-Docs.ps1` 强制唯一主线、复核期限、hash、文档路由和默认读取层级，文档字节数只作诊断而非硬上限。
+- 以用户要的游戏体验和本项目内容为目标。用户提供的技术想法是待核实线索；实现机制由 Agent 根据当前源码、运行证据和工程成本把关。区分已知事实、推断、未知；只有未决事实会改变方案时，才向用户问一个具体问题。
+- 认识先于方案，但研究以足以作出当前决策为止。新游戏能力若缺少真实玩家入口、影响面或行为分母，先盘点，不先猜测实现；不把验证夹具变成产品目标，也不为“过关”堆一次性功能。
+- 先怀疑工具、启动器、版本、模块集与证据链，再归因游戏代码。若工具本应避免故障，修工具并加回归，不掩盖根因。
+- 内部 Agent/Harness/文档流程改进可以直接维护和提交；GitHub Project 只列本 Mod 的系统研究、玩法设计、能力和玩家验收，不把内部结构工作包装成产品事项。
 
-## 每次任务启动
+## 单一工作循环
 
-- 读取 `ContextState.json` 与 `Get-ContextPack.ps1` 输出；默认只加载工程契约和当前技术焦点。
-- 从GitHub Project检查当前 `In Progress` 工作项、原生依赖及验收；不要假定上次会话的活动事项仍然有效。一次最多启动一个工作项；若没有活动事项，选择一个已解除依赖且符合当前焦点的事项后再开始。
-- 项目卡状态按统一约定使用：Todo=未开始（阻塞看原生依赖），In Progress=唯一当前工作，Done=验收达成且有commit/结果摘要。父项维护共用验收，子项只维护独有范围。
-- GitHub任务卡是执行清单和状态；不再把活动Issue、已完成域数或阶段状态抄入 `ContextState.json`、`MAINLINE.md` 或 Harness结果。
+1. **定位**：先运行 `Run-Harness.ps1 -Phase Docs`，读取 `ContextState.json` 与 `Get-ContextPack.ps1`。再查看 GitHub Project 唯一的 `In Progress` 产品事项、依赖和验收；一次最多推进一项。没有活动项时，选符合当前技术焦点且依赖已解除的一项后再启动。
+2. **核实**：只加载该事项需要的资料。新做/改变玩家动作前，查当前版本的实际玩家入口、原版副作用、时间行为，以及 UI handler 与直接 API 的差别；把机制事实和未知记入现有 MAINLINE 契约。其他任务不强行做全游戏盘点。高影响未知未解决前不猜着实现。
+3. **取舍与实现**：一次只做一个边界清楚、直接服务目标的增量。保护正式存档，使用 disposable fixture。Harness/Agent 的宏操作必须与原版玩家行为分开标识。
+4. **验证**：先检查测试工具和环境，再用最窄的合适 Harness 阶段核验改动。按证据区分启动、加载、进入战役、动作执行和结果生效；失败先解释证据并修根因，不能拿命令成功代替游戏结果。
+5. **收尾**：保留本地 run 收据，用 Git 提交代码；只有产品事项的范围、状态或验收改变时才更新 GitHub Issue。完成后用大白话说明改了什么、影响、验证结果和未覆盖内容，并解释易误读术语。
 
-## 按任务读取
+## 事实归属与资料读取
 
-- `DEVELOPMENT.md` 与 `Focus/MAINLINE.md` 是默认上下文；详细机制事实通过 `SYSTEM_INVENTORY.md` 路由到对应Research文档。
-- 只有设计/方案任务才读取 `DESIGN.md`；只有系统盘点任务才读取 `SYSTEM_INVENTORY.md` 和对应Research文件；普通代码/Harness任务不加载整份系统清单或无关Research。
-- 只读取 `SYSTEM_INVENTORY.md` 路由到的目标系统研究文件；不要为普通任务加载全部 `Research/`。
-- Research 文档按清晰的系统/主题维护；主题自然分化时允许拆分多份，不得为满足任意字数上限而极端压缩。每份文档必须在 `ContextState.json` 中分层路由，并由 `SYSTEM_INVENTORY.md` 指向；过时材料应更新、删除或移入默认不读取的 Archive。
-- Agent Bridge任务以 `Dev/ChronicleFramework/Focus/MAINLINE.md` 为技术事实源。
-- 关系/身份任务读取 `Dev/ChronicleFramework/Research/B/WorldEntitiesIdentity.md`，跨系统时再读取 C、F、J 对应文件。
+- GitHub Project：产品工作项、依赖和状态；Git：源码历史；`TestResults/latest.json`：最近一次本机测试收据；`Focus/MAINLINE.md`：持久技术事实、机制契约、未知、分母定义和验收规则。不得在文档或 Harness 结果复制动态任务状态；Harness 不调用 GitHub。
+- `ContextState.json` 只做当前技术焦点、读取路由和 hash/复核元数据。默认上下文只读 `DEVELOPMENT.md` 与当前 MAINLINE；`DESIGN.md` 仅设计任务读取，`SYSTEM_INVENTORY.md` 与研究资料仅相关系统研究时按路由读取。
+- 每个 `Research/<类别>/` 默认维护一份权威文档，并由 `SYSTEM_INVENTORY.md` 和 `ContextState.json` 路由。只有现有文件确实无法清楚表达且用户明确同意时才拆分，同时更新路由和检查规则；不建重复补充文档。
+- 文档变化直接改权威段落；MAINLINE 修改后运行 `Set-ContextFocus.ps1 -Review`。真实主线切换才使用 `Complete-ContextFocus.ps1`。Harness 契约或验证门禁变化时同步更新 DEVELOPMENT、门禁并递增 contract version。
 
-当前已验证的默认入口：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Dev\ChronicleFramework\Run-Harness.ps1 -Phase All
-```
-
-任务状态只看GitHub Project；源码差异只看Git；当前单次测试收据看 `Dev/ChronicleFramework/TestResults/latest.json`；长期机制事实和验收定义看 `Focus/MAINLINE.md`。GitHub Project只在Agent开始/结束工作项时读取或更新，Harness运行阶段完全本地化。
+本方法以“目标 → 事实 → 取舍 → 一项改动 → 证据 → 状态/交接”为顺序。风险越高，前置核实越充分；低风险维护不机械执行全套研究，也不运行与改动无关的测试。
