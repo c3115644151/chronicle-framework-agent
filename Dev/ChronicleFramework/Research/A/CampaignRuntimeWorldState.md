@@ -42,9 +42,11 @@ Agent 覆盖：快照给出 `campaignDay`、`timeControlMode`；`pause`/`resume`
 
 ## A04 CampaignEvents 事件总线
 
-已安装 v1.4.8 `CampaignSystem.dll` 的 `CampaignEvents` 暴露 263 个公开 `IMbEvent` 通道，覆盖生命周期、时钟、战争/领地、英雄/队伍/聚落、王国、任务、对话与存档等。`CampaignBehaviorBase.RegisterEvents` 建立运行时订阅，`CampaignEventDispatcher` 分发；多 Behavior 可监听同一通道，非序列化订阅须在加载时重建。
+当前安装 v1.4.8 的 `CampaignEvents` 暴露263个公开 `IMbEvent` 通道，覆盖生命周期、时钟、战争/领地、英雄/队伍/聚落、王国、任务、对话与存档等。`Campaign.OnInitialize` 建立 `CampaignEventDispatcher`，初始接收器依次为 `CampaignEvents`、`IssueManager`、`QuestManager`；`AddCampaignEventReceiver` 会追加接收器。各转发入口按该接收器数组顺序调用；其中 `CanHeroLeadParty`、`CanHeroMarry` 等带 `ref result` 的询问类入口，会在结果变为 false 时停止继续询问，因此总线既传递通知，也承载可否决操作的查询，不是单一含义的“发生了某事”。
 
-Chronicle `SubModule.RegisterEvents` 当前订阅 DailyTick、Tick、GameLoaded、SaveOver；新角色创建回调仅 Harness 模式订阅。`AgentObserver` 不订阅事件总线，按需生成状态快照。263 是公开事件通道数，不是玩家动作数；实际加载 Behavior 的订阅者、顺序及事件到可见结果的映射未盘点。证据：v1.4.8 反编译源码与本地 SubModule/Observer；运行时通道覆盖未知。
+Campaign 模块的 `CampaignBehaviorManager` 保存 `CampaignBehaviorBase` 列表，`RegisterEvents` 按列表顺序逐个调用每个行为的注册函数；动态 `AddBehavior` 会立即对新行为注册事件。新战役由 `OnNewGameCreatedInternal` 在战役创建回调中调用该注册过程；读档则先恢复行为 `SyncData`，再重建事件订阅。公开通道存在并不表示每个行为都订阅，也不意味着每种事件都发生或会显示给玩家。
+
+Chronicle `SubModule.RegisterEvents` 当前订阅 DailyTick、Tick、GameLoaded、SaveOver；新角色创建回调仅 Harness 模式订阅。`AgentObserver` 不订阅事件总线，按需生成状态快照。263 是公开事件通道数，不是玩家动作数；实际加载 Behavior 的完整订阅者及事件到玩家可见结果的映射未盘点。证据：当前安装 v1.4.8 `TaleWorlds.CampaignSystem.dll`（`CampaignEvents`、`CampaignEventDispatcher`、`CampaignBehaviorManager`、`Campaign.OnInitialize`）、本地 `SubModule.cs`/`AgentObserver.cs`；运行时通道覆盖未知。
 
 ## A05 存档与读档
 
