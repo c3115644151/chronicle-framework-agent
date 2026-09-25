@@ -1,6 +1,6 @@
 # E 类研究：经济与贸易
 
-状态：机制盘点中；E01-E05 已完成首轮盘点，目前研究 E06 Party 经济，未进行方案评审。
+状态：机制盘点中；E01-E06 已完成首轮盘点，目前研究 E07 Clan 财政，未进行方案评审。
 
 适用本体：Bannerlord v1.4.8.119303。基于当前安装 `TaleWorlds.Core.dll`、`TaleWorlds.CampaignSystem.dll`、官方模块物品 XML 和 Chronicle 本地 Observer/Protocol 源码。静态对象核对不表示物品市场或背包 UI 已运行验证。
 
@@ -194,6 +194,39 @@ Observer 当前主队输出 Gold、Party人数/健康/伤兵/囚犯、Item总量
 
 未知项：Player/MainParty的每日实际工资扣款事件/调用顺序和与 ClanFinance 的精确钱包切分；各 trooper/wounded/hero/mercenary/garrison/daily-payment policy 的全部工资细节；背包重量/马匹分类影响速度上限和交易容量的完整公式；Army食物分享和债务/破产处理边缘条件；Player UI在 roster/item transfer中所有键鼠/提交/取消和失败恢复副作用。
 
+## E07 Clan 财政与玩家财务页
+
+### Clan Gold 与每日记账循环
+
+`Clan.Gold` 不是与领袖并列的一笔独立 Treasury 字段，而是 `Clan.Leader?.Gold ?? 0` 的派生属性；`DefaultClanFinanceModel` 计算 Clan 收支，并将产生的净变化应用到 Clan Leader Hero 的 Gold。`ClanVariablesCampaignBehavior.DailyTickClan` 是当前找到的实际每日写入链：调用 `ClanFinanceModel.CalculateClanGoldChange(..., applyWithdrawals:true)`，再通过 `GiveGoldAction` 应用总变化；对玩家 Clan 显示“Daily Gold Change”通知。Clan Finance UI 预测值不能当成现金已经结算。
+
+玩家在地图按 L 打开 Clan 页面后进入 Income/Finance 面板。`ClanManagementVM.RefreshDailyValues` 调用 `CalculateClanIncome/CalculateClanExpenses`（默认 `applyWithdrawals:false`）显示当前 Gold、总收入、总支出、DailyChange 和预计余额；计算预览与上面每日 tick 的真实扣款/入账参数不同。Clan Income 区域另列玩家工作坊、Supporters、Alleys等资产/收益列表。当前 UI 有财务估算及分类资产页，不代表 Agent 已能查看相同明细。
+
+### 默认收入来源
+
+`DefaultClanFinanceModel.CalculateClanIncomeInternal` 对每个 Clan 按上下文汇总：
+
+- 领地收入：Town 税、TradeTaxAccumulated 摊销后关税、建设项目收入、绑定 Village 收益；数值还受 SettlementTaxModel、政策与建筑影响。
+- 产业与队伍：Leader 资产中的工作坊利润按模型平滑；Party/Caravan 等流动资金在满足模型阈值时计入，Clan Finance detail 与 Clan Income 资产页不是同一展示列表。
+- 派系收入：Mercenary service、贡金、TradeAgreement/Call-to-War约定、作为统治 Clan 的 Kingdom预算/政策收入、符合条件时的 Kingdom 支持。
+- Player Clan 专属渠道：拥有 Alley 的收入；角色 Perk/特定资产事件还可能叠加。
+
+城镇/村庄税收源自已盘点的聚落状态；关税与村庄税使用 TradeTaxAccumulated 的平滑/领取过程，Workshop/Caravan 的经营资金也不会简单将全部营业额一次性当成 Clan 收入。
+
+### 默认费用、债务与资金来源
+
+`CalculateClanExpensesInternal` 汇总 Leader Party、其他 Clan Party、Caravan/War Party、各个领地 Garrison 的工资支出；另可能支出雇佣兵、贡金、auto recruitment 成本、Kingdom debt、Workshop expense、Call-to-War 等费用。部分 NPC Clan 高额超额余额会转入 Kingdom Budget；这不是玩家 Clan 的统一收入规则。
+
+`applyWithdrawals:true` 时模型按可用余额限制工资支付；欠薪的真实后果由 `PartyMoraleModel` 等产生 Morale penalty，特定 party 还会受限薪/人数导致 Desertion（见 E06）。Clan `DebtToKingdom` 按当前可用资金偿付并逐步减少，而不是与 Player Gold 共用的普通负数余额。`AutoRecruitmentExpenses` 通过每日分摊逐步从 Clan 结算；PartyTradeGold/Workshop Capital 与 Leader Gold 的归属边界见 E04-E06。
+
+### 可见财务与 Chronicle 适配
+
+原版 Clan 财务页有当前 Gold、预测日净变更和收入/支出说明；`DefaultClanFinanceModel` 同时支持 includeDescriptions/details 用于组成解释文本。Chronicle 常驻 Observer 只读 Main Hero Gold、Clan Influence/Renown/Tier，不输出 Total Income/Expenses、daily breakdown、DebtToKingdom、领地税收、Garrison wage 明细、AutoRecruitmentExpenses 或资产收益。Protocol 没有按用户要求交易之外的 Clan Gold 调整/缴债/领地财务动作。
+
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `Clan.Gold`、`DefaultClanFinanceModel`、`DefaultPartyWageModel`、`ClanVariablesCampaignBehavior.DailyTickClan`、`GiveGoldAction`；`TaleWorlds.CampaignSystem.ViewModelCollection.dll` 的 `ClanManagementVM.RefreshDailyValues`、`ClanIncomeVM`、财务条目 VM；Chronicle `AgentObserver.cs`。静态证据版本 v1.4.8.119303；未运行长周期结算验证每日 UI 数字和实际余额的每一项对应。
+
+未知项：财务面板 income/expenses 明细与模型 `includeDetails` 的一一映射、负数/零收入显示和预计值舍入差异；各税/收益的实际领取事件顺序、自动招聘/欠薪/债务写入的相互顺序；非Player Clan 经济评估/工资限制的全部门槛；Clan Leader变更时 Gold/债务的继承规则；面板项目变更/滚动的完整玩家UI操作证据。
+
 ## 研究范围状态
 
-E01-E06 已完成首轮物品、市场定价、村庄供应链、Workshop、Caravan 与 Party经济盘点。E07-E10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 E 域范围逐项核对，不把这些子系统的静态首轮盘点视作经济与贸易系统整体完成。
+E01-E07 已完成首轮物品、市场、村庄供应链、Workshop、Caravan、Party与Clan财政盘点。E08-E10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 E 域范围逐项核对，不把这些子系统的静态首轮盘点视作经济与贸易系统整体完成。
