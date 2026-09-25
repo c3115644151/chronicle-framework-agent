@@ -342,7 +342,7 @@ A06预设/设置页目前只定位到界面族；每个选项的写入字段、�
 | D06 Daily projects | `ACT-D06-01`选择/更换每日项目 | 立即选择和后续日tick效果不同；不能和建筑队列混同 |
 | D07 Governor/Garrison | `OBS-D07-01`治理/驻军管理视图；`ACT-D07-01/02`任免Governor和调度驻军 | Garrison PartyScreen转移与其它PartyScreen交易相关但影响对象/权限不同 |
 | D08 Crime/Alley | `OBS-D08-01`Alley控制/犯罪状态；进场`ACT-D08-01`、更换Leader`ACT-D08-02`、管Roster`ACT-D08-03`、放弃`ACT-D08-04`、领周招募`ACT-D08-05`、防守帮派进攻`ACT-D08-06`；犯罪处置与B10/I08分开 | 菜单/leader对话的同一Roster/选Hero/放弃后果合并为别名；专用Alley fight任务映射独立D08入口，并跨G03/G09后果核验 |
-| D09 Settlement visit | `ACT-D09-01/02`地图进入Settlement、菜单离开Settlement；特定Alley location entry cross-reference `ACT-D08-01` | 等待/访问/对话/入场Scene是不同动作；Menu列数不等于行为族数 |
+| D09 Settlement visit | 点击Settlement并抵达映射`ACT-K02-01`；当前Settlement菜单Leave映射`ACT-D09-02`；特定Alley location entry cross-reference `ACT-D08-01` | 抵达菜单是Settlement导航结果，不再与K02地图移动重复计数；等待/对话/Alley入场仍是不同动作 |
 | D10 Settlement ownership | 结果观察复用B05/B06/C06、地图/日志通知；改变Owner的来源行动映射C06/F/G | Settlement owner change是结果事件，不另建“地图易主按钮” |
 
 #### D域目录项
@@ -355,7 +355,6 @@ A06预设/设置页目前只定位到界面族；每个选项的写入字段、�
 | OBS-D04-01 | 观察 | Village列表/地图页面查看绑定Town、产物/村庄状态和生产 | 村庄供应、强征/劫掠/贸易使用不同接口；生产随Campaign tick | Chronicle只限可见Settlements摘要，不展示完整生产链 | D04、E03、F09、L05 |
 | OBS-D07-01 | 观察 | 玩家Fief管理面板查看Governor、Garrison、忠诚/安全等 | 任命/军队调度资格受Owner、Hero busy/Party状态与容量控制 | Chronicle不返回Fief管理VM/Garrison详情 | D07、B05、H06 |
 | OBS-D08-01 | 观察 | 进入Alley/Clan管理界面查看帮派据点、控制者/收益/防守状态 | 犯罪组织/Alley属独立Clan控制及Settlement子状态，不等于对村庄犯罪评级 | Chronicle不输出Alley当前控制/守卫者状态 | D08、H02、I08 |
-| ACT-D09-01 | 行为 | 在地图点击Settlement视觉实体并抵达 | `OnMapClick`设导航目标；路途自然推进Campaign，抵达后进入相应Settlement menu/Scene条件 | Chronicle `move`支持目标Settlement与抵达断言；具体菜单 UI未全视觉 | D09/K02、MAINLINE move contract |
 | ACT-D09-02 | 行为 | 在当前Settlement GameMenu选择对应Leave选项 | 按Settlement类型/当前State离开Town/Castle/Village回地图；可能触发Incident/事件，不等同点击地图移动 | Chronicle通用menuSelect需以当前Menu/Option ID重验，leave测试为菜单原语 | D09/J05/L03、MAINLINE menu contract |
 | ACT-D05-01 | 行为 | Fief管理VM选择/替换一个Building Queue条目并确认 | 消耗建设资源/时间槽，后续Construction由Settlement每日逻辑推进；只有拥有/有资格才可操作 | Chronicle无Building Queue动作；UI权限/确认未运行 | D05/D06、L03 |
 | ACT-D06-01 | 行为 | Fief管理VM选择当日项目/自动项目 | 变更聚落日常项目并影响后续日tick；不是立刻完成该项目 | Chronicle无daily project action；Town/Castle允许项矩阵未测 | D06、L03 |
@@ -609,7 +608,7 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 | ACT-G05-05 | 行为 | 对所选Formation切换Mount/Dismount | 写入骑乘模式Order，影响之后Formation Agent骑乘/下马行为；不直接增加/删除坐骑或Party库存 | Native provider确认两个OrderType与UI toggle；可用条件/执行延迟未视觉/运行核实，Chronicle无动作 | G05/G06、`GenericToggleVisualOrder`、`OrderType.Mount/Dismount` |
 | ACT-G05-06 | 行为 | 单机Mission中切换Formation AIControl On/Off | 写入Formation AIControl状态，控制由玩家下达Order还是交由AI接管；默认provider只在非Multiplayer提供 | Native provider确认单机UI存在该切换；实际控制交接与执行反馈未运行核实，Chronicle无动作 | G05/G06、`GenericToggleVisualOrder`、`OrderType.AIControlOn/AIControlOff` |
 | ACT-G05-07 | 行为 | 在Orders中启动Transfer，选择所选来源Formation、目标Formation与数量后确认 | 确认时调用`SetOrderWithFormationAndNumber(OrderType.Transfer, target, amount)`重新分配Mission Agents；Cancel只关闭Transfer mode，不提交转编 | Native `TransferTroopsVisualOrder`和VM确认/取消调用已确认；来源/目标/数量UI及Agent实际转编反馈未运行核实；Chronicle无动作 | G04/G05、`TransferTroopsVisualOrder`、`MissionOrderVM`、`MissionOrderTroopControllerVM.ExecuteConfirmTransfer/ExecuteCancelTransfer` |
-| ACT-K02-01 | 行为 | MapScreen点击settlement visual请求主队自动移动至聚落 | 检查当前PathFace/NavType/访问权限；成功设目标并按地图点击配置自然改变Campaign time | Chronicle `move`已有Settlement ID路径/抵达断言，玩家完整视觉UI未完成 | K01/K02、MapScreen、MAINLINE move |
+| ACT-K02-01 | 行为 | MapScreen点击Settlement visual请求主队前往；抵达后进入该Settlement的相应GameMenu/Scene条件 | 检查当前PathFace/NavType/访问权限；成功设目标并按地图点击配置自然改变Campaign time；抵达菜单是同一导航命令结果 | Chronicle `move`已有Settlement ID路径/抵达断言；玩家点击和各Settlement实际菜单视觉未全核 | D09/K01/K02、MapScreen、MAINLINE move |
 | ACT-K02-02 | 行为 | Campaign Map点击有效NavMesh地形点/空地图位置 | `MapScreen`地形分支→`MapState.ProcessTravel`→导航可达性校验→`SetMoveGoToPoint`；有效点击共用原版time-control点击处理，之后Campaign自然运行 | v1.4.8源码确认真实地图入口/状态转移；Chronicle无自由坐标move动作，NavMesh/鼠标/失败边缘未运行覆盖 | K01/K02、`MapScreen.HandleLeftMouseButtonClick`、`MapState.ProcessTravel`、`NavigationHelper.CanPlayerNavigateToPosition` |
 | ACT-K02-03 | 行为 | 普通点击可见/有效移动Party(不按Follow Modifier)下达Engage/Pursue | 主队自动接近；目标丢失/不可达会自然停步或改Hold；点击time mode依用户配置 | Chronicle `pursue`已测自然接敌；不可见丢失时钟/停步边界仍未知 | K01/K02、F01-F04、MAINLINE pursue |
 | ACT-K02-04 | 行为 | MapScreen点击可导航Party时按住`MapFollowModifier` | `MobilePartyVisual.OnMapClick(true)`调用`SetMoveEscortParty`；不同于普通点击的`SetMoveEngageParty`。地图点击时钟处理与普通有效点击共用；目标失明/失效后的恢复仍未知 | 原版输入/状态路径由v1.4.8源码确认；Chronicle尚无Follow动作，也无该失效分支运行验证 | K01/K02、`MapScreen.HandleLeftMouseButtonClick`、`MobilePartyVisual.OnMapClick`、`MobileParty.SetMoveEscortParty` |
