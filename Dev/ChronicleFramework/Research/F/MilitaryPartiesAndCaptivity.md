@@ -385,11 +385,15 @@ Hero 俘虏可以存在于：
 
 ### 主动释放
 
-领主对话中存在明确关系奖励：
+领主对话至少有三种由不同ConversationContext区分的放行结果，不能把关系奖励简化成“释放俘虏必加固定好感”：
 
-- 玩家主动释放战败后俘虏的领主，会调用 `ApplyPlayerRelation(..., 4)`；
-- 玩家选择释放非战斗俘虏的领主，会调用 `ApplyPlayerRelation(..., 10)`；
-- 释放行为和关系奖励是两个独立调用。
+- `CapturedLord`战后对话中，combatant与noncombatant对应的“free to go”玩家选项共用一条后果；若仍是prisoner则`EndCaptivityAction.ApplyByReleasedAfterBattle`，否则`MakeHeroFugitiveAction`，玩家关系+4（`conversation_talk_lord_defeat_to_lord_release_on_consequence`）。
+- 持有的普通俘虏在`hero_main_options`中选择放行，受Party/Clan Settlement归属及ConversationContext条件限制；使用`EndCaptivityAction.ApplyByReleasedByChoice`，关系+4，并可能离开Encounter（`conversation_player_let_prisoner_go_on_consequence`）。
+- `FreeOrCapturePrisonerHero`的非首次Lord对话中，对“Am I free?”选择确认释放，关系+10；若目标仍是prisoner再调用`ReleasedAfterBattle`。交战目标另有重新囚禁选项（`conversation_player_liberates_prisoner_on_consequence`）。该路径不能简单标成“释放非战斗俘虏+10”。
+
+放行、EndCaptivityDetail与关系奖励是可分别触发/核验的副作用；以上三种玩家入口及不同结果分别登记为目录`ACT-F12-03/04/05`。它们与Barter释放`ACT-F12-02`、自动释放和主角赎金菜单不同。
+
+相邻的收押路径也不能漏计：`CapturedLord`战后对话中，玩家可确认把被击败领主收为俘虏（`conversation_talk_lord_defeat_to_lord_capture_on_consequence`），与遭遇中MainHero投降不同；在`FreeOrCapturePrisonerHero`对话中，交战对象可以触发“重新囚禁”选项，只有目标此时仍是prisoner才真正调用`TakePrisonerAction`（`conversation_player_fails_to_release_prisoner_on_consequence`）。两者来源状态与结果守卫不同，分别记为`ACT-F12-06/07`。相关对话UI与此特殊ConversationContext的完整触发来源仍未运行核验。
 
 ### 其他释放路径
 
