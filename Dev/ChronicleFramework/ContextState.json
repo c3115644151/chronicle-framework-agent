@@ -60,9 +60,9 @@
                                         "inventory"
                                     ]
                        },
-                       {
-                           "path":  "Research/F/MilitaryPartiesAndCaptivity.md",
-                           "tags":  [
+                      {
+                          "path":  "Research/F/MilitaryPartiesAndCaptivity.md",
+                          "tags":  [
                                         "party",
                                         "military",
                                         "army",
@@ -72,9 +72,22 @@
                                         "prisoner",
                                         "relation"
                                     ]
-                       },
-                       {
-                           "path":  "Research/J/RelationNarrativeConsumers.md",
+                      },
+                      {
+                          "path":  "Research/G/BattleAndTactics.md",
+                          "tags":  [
+                                        "encounter",
+                                        "battle",
+                                        "mission",
+                                        "formation",
+                                        "orders",
+                                        "tactics",
+                                        "morale",
+                                        "combat"
+                                    ]
+                      },
+                      {
+                          "path":  "Research/J/RelationNarrativeConsumers.md",
                            "tags":  [
                                         "dialogue",
                                         "quest",
