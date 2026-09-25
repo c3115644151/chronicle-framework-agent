@@ -1,6 +1,6 @@
 # D 类研究：聚落与领地
 
-状态：机制盘点中；D01-D03 已完成首轮静态盘点，目前继续研究 D04 村庄状态与生产，未进行方案评审。
+状态：机制盘点中；D01-D04 已完成首轮静态盘点，目前继续研究 D05 聚落建筑，未进行方案评审。
 
 适用本体：Bannerlord v1.4.8.119303。依据安装目录中的 `TaleWorlds.CampaignSystem.dll` 反编译结果和 Chronicle 当前 `AgentObserver.cs`；本节是静态代码证据，不代表已经在游戏界面逐项实测。
 
@@ -132,6 +132,38 @@ Chronicle 附近 Settlement 快照不返回村庄 Hearth、VillageState、Villag
 
 未知项：各类村庄在 UI/百科中显示 Hearth、生产、绑定与受损状态的具体入口和限制；所有强征/袭击分支的条件、损害及战争/关系后果；TradeBound 模型选择逻辑、村民货物运输丢失/到货调用链；被掠夺结束后状态恢复的完整触发与时序；Hearth 变化的全部模型修正项和跨域事件消费者。
 
+## D05 聚落建筑与建设队列
+
+### 建筑对象与类型
+
+`BuildingType` 是建筑种类定义：最高等级为 3，数据含起始等级、各级生产成本、效果枚举及等级增量、是否为军事项目/日常项目和随机等级变化概率。每个聚落的 `Town.Buildings` 保存本聚落对应实例；实例另有当前等级、建设进度和当前日常项目标志。类型效果由 `Building.AddEffectOfBuilding`/Town 的效果汇总入口交给对应 Campaign Model 读取，等级变化会发 `OnBuildingLevelChanged`。
+
+`DefaultBuildingModel.CanAddBuildingTypeToTown` 按城镇/城堡身份筛选允许的类型：城镇型 fortifications、marketplace、warehouse 等不允许添加到城堡；Castle fortifications、granary、craftsman quarters 等不允许添加到城镇。默认日常项目类型也按城镇或城堡区分。具体可用建筑和效果以当前加载的 `BuildingType` 数据及替换模型为准，不能只用名称推断。
+
+### 两种发展槽位
+
+Town 把一个当前日常项目（`CurrentDefaultBuilding`）与普通建造队列（`BuildingsInProgress`）分开。日常项目通过 `IsCurrentlyDefault` 标记，不进入普通建设队列；普通建造项目按队列顺序施工。`CurrentBuilding` 在普通队列非空时返回队首，否则返回当前日常项目。因此查看“当前建筑”时要同时读取队列和日常项目，不能把两者当成同一槽位。
+
+游戏启动初始化会为各城镇/城堡创建所有适用的 Building 实例，再基于 `VarianceChance` 对起始等级做随机调整，并为其选择初始日常项目与普通建设队列。AI 持有聚落的后续自动选择由 `BuildingsCampaignBehavior` 进行：队列空时有随机机会提取 `BuildingScoreCalculationModel.GetNextBuilding`；另有较低频率机会选择 `GetNextDailyBuilding`。这是原版 AI 的聚落治理逻辑，不是玩家操作。
+
+### 施工、完成与队列变更
+
+`BuildingsCampaignBehavior` 订阅 `DailyTickSettlementEvent`。对于城镇/城堡，若当前不是日常项目且当前没有围城、队列也非空，会把 `Town.Construction` 加到队首建筑的 `BuildingProgress`，随后由 `BuildingHelper.CheckIfBuildingIsComplete` 对照该等级施工成本。达到成本后建筑升一级并出队；达到 3 级后不再升级。围城会阻止此建筑施工推进。每日施工能力的输入和数值见 D02，建筑效果如何被各模型消费须结合具体 effect 与建筑类型查证。
+
+玩家管理 VM `SettlementProjectSelectionVM` 分别维护可用建设、日常项目与本地待提交队列；其中队列排序、选择 active development 与设置 daily default 是不同操作。`BuildingHelper.ChangeCurrentBuildingQueue` 会替换队列并拒绝把日常项目放入普通队列，`ChangeDefaultBuilding` 则只切换日常标记。`BoostBuildingProcessWithGold` 调整与金币差额对应的建设加速余额；其运行时按钮/确认流程和对玩家当前存款的界面呈现还未实机核实。
+
+### 易主、等级与效果事件
+
+`BuildingsCampaignBehavior` 监听 Settlement owner change：新 Owner 不属于 Player Clan 时清空已有普通建设队列；玩家获得聚落时此条件不成立。建筑等级提升后会发出等级变化事件；本体监听器会更新受容量类建筑影响的驻军/监狱 roster 版本，并继续处理完成后的技能经验等效果。该事件是建筑升级与其他系统之间的连接点，不能仅把建筑当作静态聚落装饰。
+
+### Chronicle 当前覆盖与玩家观察边界
+
+附近 Settlement 快照不返回建筑类型/等级、普通队列、当前日常项目、施工进度或加速余额，也无相应协议动作。当前研究只追到 ViewModel 项目选择与底层队列/进度辅助逻辑，尚未从玩家真实按键一路运行到完成确认并核对聚落状态；管理页面准确入口、可用按钮、费用预览与取消/提交语义留待 D09 及 UI 验证。项目中使用 `Town.DailyTick` 或直接改 `BuildingProgress` 不能证明玩家 UI 路径相同。
+
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `Building`、`BuildingType`、`DefaultBuildingModel`、`DefaultBuildingScoreCalculationModel`、`DefaultBuildingConstructionModel`、`BuildingsCampaignBehavior`、`BuildingHelper`；`TaleWorlds.CampaignSystem.ViewModelCollection.dll` 的 `SettlementProjectSelectionVM`、`SettlementBuildingProjectVM`；Chronicle `AgentObserver.cs`。本节结论为 v1.4.8.119303 静态源码核对，不代表建筑管理 UI 已实机验证。
+
+未知项：管理/建筑页面从玩家可见菜单进入的完整路径与确认按钮副作用；每类官方建筑的完整等级效果和成本数据；建筑建成后各模型/事件消费者的完整清单；所有权转换时日常项目、建筑等级与建设加速余额的保留/重置规则；其他 Mod 替换建筑类型/模型后的兼容行为。
+
 ### 时间与证据边界
 
 D01 中的实体分类、所有权查询与绑定关系是读取对象状态，不会自行推进 Campaign 时间。城镇/村庄的每日状态计算由各组件的 `DailyTick` 执行，并受 Campaign 时钟调度；具体数值模型和状态变化分别留给 D02-D04。直接读取属性不等价于玩家打开地图百科或聚落界面；本节没有声称 UI handler 与直接 API 的完整交互已经运行验证。
@@ -142,4 +174,4 @@ D01 中的实体分类、所有权查询与绑定关系是读取对象状态，�
 
 ## 研究范围状态
 
-D01-D04 已完成首轮静态对象、城镇与城堡发展、村庄状态/生产和 Observer 覆盖盘点。D05-D10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 D 域范围逐项核对，不将此文档视作聚落系统整体已完成。
+D01-D05 已完成首轮静态对象、聚落发展、村庄生命周期和建筑施工/队列盘点。D06-D10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 D 域范围逐项核对，不将此文档视作聚落系统整体已完成。
