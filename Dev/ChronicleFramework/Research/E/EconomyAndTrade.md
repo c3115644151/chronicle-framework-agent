@@ -110,7 +110,9 @@ Observer 的附近 Party 列表可能识别可见的 `villager` Party 类型和�
 
 Sandbox 将 shop worker 和 Workshop Owner 放入城镇中心 `center` 地点的对话系统；WorkshopType 的 owner/team 定位依 workshop Tag。面对 owner notable 的对话可购买其一个/多个公开工坊；条件包括没有与该 Town 派系交战、玩家黄金足够且玩家 Clan 拥有数没有达到 `ClanTier + 1` 的模型上限。单工坊价默认是 `WorkshopType.EquipmentCost + Town.Prosperity × 4 + Workshop.InitialCapital / 5`。买入最终调用 `ChangeOwnerOfWorkshopAction.ApplyByPlayerBuying`。
 
-玩家与 shop worker 对话可查看生产类型、切换工坊生产（`ChangeProductionTypeOfWorkshopAction`；默认转换成本等于目标 WorkshopType 的 EquipmentCost）、出售工坊给 town notable，也能请求仓库入口。玩家变更生产不是改配方 XML，而是在现有工作坊实例上替换 WorkshopType；转让所有权由独立 action 处理。准确对话按钮/确认显示仍未视觉运行验证，所在 town center 的入口见 D09。
+玩家与 shop worker 对话可查看生产类型、切换工坊生产（`ChangeProductionTypeOfWorkshopAction`；默认转换成本等于目标 WorkshopType 的 EquipmentCost）、出售工坊给 town notable，也可请求访问Warehouse。玩家变更生产不是改配方 XML，而是在现有工作坊实例上替换 WorkshopType；转让所有权由独立action处理。准确对话按钮/确认显示仍未视觉运行验证，所在town center入口见D09。
+
+另有两类仓库交互位于不同界面，不能和生产切换/Workshop买卖合并：Clan Management→Finance的`ClanFinanceWorkshopItemVM`允许切换“Use Warehouse as Input”，直接写`IsGettingInputsFromWarehouse`；并允许选择0/25/50/75/100%的产出入仓比例，写`StockProductionInWarehouseRatio`。两者只影响后续生产取料/分配，不直接转移当前物品。Town center的`WorkshopsCampaignBehavior`则注册`manage_warehouse`菜单和shop-worker对话，调用`InventoryScreenHelper.OpenScreenAsWarehouse`打开主队与该城Workshop Warehouse双侧物品界面，仓库侧容量由WorkshopModel给定；存取物品属于原生库存转移，不是按市场报价交易。界面Done/Cancel实际回执尚未运行核验。
 
 ### 每日生产与市场/仓库流
 
@@ -298,7 +300,7 @@ Barter 是按 Hero/Party/Faction 对方建立的谈判数据。`BarterData` 保�
 
 `BarterManager.StartBarterOffer` 建立 BarterData、添加当前基础/上下文 Barterables，再派发可扩展请求事件并开启 `BarterVM`。玩家在面板调整两侧项目与金额、查看 offer validity 后选择 Offer/Accept 或 Cancel；接受时执行全部所选 `Barterable.Apply`，发 `OnBarterAccepted`，关闭谈判并延续原对话；取消则不执行交易效果，关闭并发 `OnBarterCanceled`。超额补偿可能按 BarterModel 给非敌方 Hero 加个人关系，冷却在接受后更新。
 
-跨域目录将活跃 BarterVM 视为独立观察面（`OBS-E10-01`），因为它呈现的不是市场库存，也不是触发谈判的普通对话选项：玩家需要判断谈判双方、当前双方已放入的条款和可接受状态，才知道能否提交。可观察项目的完整候选集合、每种 Barterable 的价值解释和屏幕中各项数值是否与结构化接口一致，仍需运行/界面核验。不同场景的条款编辑共享谈判界面，但最终提交的状态变化各异，仍映射到真实上下文动作（例如婚姻与家族归附）；不创建通用“完成Barter”ACT，也不把临时改盘当作独立世界效果。
+跨域目录将活跃BarterVM视为独立观察面（`OBS-E10-01`）：玩家需要看到谈判双方、当前加入两侧的条款和Offer有效状态，才知道能否提交。玩家在该VM的另一个共同操作是编辑临时提案草稿：通过兼容检查加入/移除Barterables、改变可分数量或Reset草稿，映射`ACT-E10-01`；这会写入当前`BarterData`并更新报价，但尚不改变World roster/Gold/关系。`ExecuteOffer`触发接受/拒绝并关闭谈判；接受后的持久后果仍映射到婚姻、家族归附、俘虏等上下文ACT，不创建重复的通用成交ACT。完整候选集合、报价解释和屏幕/时间语义仍需按各上下文核验。
 
 ### 价值与失败规则
 

@@ -388,13 +388,13 @@ D域初步覆盖全部D01-D10系统条目；建设/每日项目以及可视页�
 | E01 Items/商品 | `OBS-E01-01`Inventory容器与市场列表中的具名物品/价格/重量 | Item定义、库存实例、市场状态不同；定义XML不单计玩家观察 |
 | E02 Market | `OBS-E02-01`当前Town交易双方库存/报价；买入`ACT-E02-01`、卖出`ACT-E02-02` | 买入和卖出造成的资金/库存/价格改变不同；与Barter分开 |
 | E03 Village supply | 村庄资源/绑定城镇状态映射D04/D09，地图可见Villager运输Party复用`OBS-F01-01` | 生产、TradeBound和Villager运输是自动Campaign运行，不是玩家直接“制造货物”动作；摘要不泄露载货状态 |
-| E04 Workshop | `OBS-E04-01`Clan工坊清单/Owner/生产状态；购买`ACT-E04-01`、改产`ACT-E04-02`、出售`ACT-E04-03` | 买入、改产、出售为不同交易/所有权结果 |
+| E04 Workshop | `OBS-E04-01`Clan工坊清单/Owner/生产/仓库状态；购买`ACT-E04-01`、改产`ACT-E04-02`、出售`ACT-E04-03`、设置仓库原料与产物比例`ACT-E04-04/05`、调度Workshop Warehouse物品`ACT-E04-06` | 所有权/生产/仓库配置/存货转移是不同结果；Clan Finance设置与城镇中心仓库物品转移分开 |
 | E05 Caravan | 地图附近Caravan可见摘要/类型复用`OBS-F01-01`；创建`ACT-E05-01`、改HomeSettlement`ACT-E05-02`、切换禁贸王国`ACT-E05-03` | Caravan只是MobileParty摘要的一种PartyType；Owner/Leader/Home/货物/利润不在该观察面，另有对话/市场行为 |
 | E06 Party economics | `OBS-E06-01`主队粮食、工资、负重/roster；补粮映射`ACT-E02-01` | 日工资/食物消耗/逃兵为自动结算，不另建玩家直接“调账”按钮 |
 | E07 Clan finance | `OBS-E07-01`Clan财务页的Gold、收入/支出预测/资产说明 | Finance预估与每日实扣分开；已有层级/财产页面映射H02/D域 |
 | E08 Kingdom budget | 钱包/协议财务大部分没有确认的玩家直接UI字段；政治信息跨B06/C | 预算注资/分摊为后台模型，不构造“取王国钱”动作 |
 | E09 Trade XP/Perk | 交易行为后角色开发页/技能反馈映射`OBS-B03-01` | XP是市场收益动作的后果，不计成单独经验领取动作 |
-| E10 Barter | 活跃谈判双方、当前已加入议价盘的Barterables及报价状态共用`OBS-E10-01`；最终提交映射到真实上下文ACT（如婚姻`ACT-I04-03`、Clan defection`ACT-C07-06`、Hero俘虏转交/释放`ACT-F12-01/02`） | BarterVM是独立于Inventory和Conversation option list的观察面；条款编辑属于上下文议价事务，不另造通用`ACT-E10`结果动作，各Barterable的提交后果归其实际领域；候选项全集、完整价值解释和运行展示待核 |
+| E10 Barter | 活跃谈判双方、当前已加入议价盘的Barterables及报价状态=`OBS-E10-01`；加入/移除兼容条款、调整数量的临时提案编辑=`ACT-E10-01`；Offer/接受后的世界效果映射真实上下文ACT | BarterVM提案编辑改变活动谈判草稿而不转移物资；Offer接受后才提交，结果例如婚姻`ACT-I04-03`、Clan defection`ACT-C07-06`、Hero俘虏转交/释放`ACT-F12-01/02`，不重复创建通用成交ACT |
 
 #### E域目录项
 
@@ -402,7 +402,7 @@ D域初步覆盖全部D01-D10系统条目；建设/每日项目以及可视页�
 | --- | --- | --- | --- | --- | --- |
 | OBS-E01-01 | 观察 | Inventory/Trade屏幕中当前角色与容器的具名ItemObject、数量/价格/重量 | 仅显示当前InventoryMode左右容器，不能从市场视图得知全球库存/村庄在途货物 | Chronicle按需返回Town报价，常驻Party快照只有itemCount | E01/E02、H07/L05 |
 | OBS-E02-01 | 观察 | Town `trade`打开InventoryLogic后的当前报价、库存与Gold/容量条件 | 报价由Town MarketData/交易方向/商品/Perk计算；提交后改变市场/双方Roster/Gold | `tradeOptions`可按需读，渲染UI未验证；交易具有限原生接口 | E02、AgentProvisioning、D09/L07 |
-| OBS-E04-01 | 观察 | Clan Finance页→工坊资产/收入及工坊Owner/生产状态 | 财务预测与Workshop库存、资本、Daily income分属不同数据 | Observer不列OwnedWorkshop/资本/生产配方 | E04/E07、H02/L05 |
+| OBS-E04-01 | 观察 | Clan Finance页→工坊资产/收入、Owner/生产状态，以及仓库容量、输入/输出库存量与仓库设置 | 财务预测、Workshop库存、资本、每日收入与生产配方分属不同数据 | 原版VM显示仓库统计与设置；Observer不列OwnedWorkshop/资本/生产配方/仓库数据 | E04/E07、H02/L05、`ClanFinanceWorkshopItemVM` |
 | OBS-E06-01 | 观察 | 主队结构化Party摘要/Party页面查看粮食、FoodChange、Wage、负重/队伍容量/士气 | 数值来源不同，不足以推断完整收入/支出或Troop逐项构成 | Observer输出有限汇总字段，不枚举全部付款人/物品 | E06、H03、F01、AgentObserver |
 | OBS-E07-01 | 观察 | L→Clan Income/Finance查看Gold与预测日收支、资产收入 | UI forecast为预览计算，不是已结算每日账单；真实日Tick另按ClanFinanceModel记账 | Observer只有玩家Gold/Clan基础数值，无Income/Expense分项 | E07、H02、AgentObserver |
 | OBS-E10-01 | 观察 | 活跃BarterVM中的谈判双方、当前双方已放入的Barterables/数量与报价可接受状态 | 由当前BarterContext及Barterable子类决定候选、估值、兼容关系和最终副作用；读取不等于成交，接受/取消仍走上下文专属ACT | 原版`BarterData`/`BarterVM`为独立谈判界面；Chronicle Observer/Protocol未提供Barter快照或offer调整/接受命令，玩家UI细节与可见数值一致性未运行核验 | E10、I04/C07/C10/F/J、`BarterData`、`BarterManager`、`BarterVM`、`BarterItemVM` |
@@ -411,9 +411,13 @@ D域初步覆盖全部D01-D10系统条目；建设/每日项目以及可视页�
 | ACT-E04-01 | 行为 | Town Center与Workshop owner/merchant notable交谈购买工坊 | 检查Gold、Clan Tier/上限、战争/Owner条件；改Workshop Owner并影响后续财务 | Chronicle无Town 3D交互/Workshop购买 | E04、B05/H02、D09/J08 |
 | ACT-E04-02 | 行为 | 与自有工坊经营者交谈切换生产类型 | 可能支付改产成本并改变之后每日输入/产出，不是立即给Gold | Chronicle无改产动作；源码路径存在、未视觉运行 | E04/E02/D09 |
 | ACT-E04-03 | 行为 | 通过Notable/Clan经营交互出售Workshop | 转移Owner并结算关联资产/库存；与改产不同 | Chronicle没有Workshop出售动作 | E04/E07、H02/D09 |
+| ACT-E04-04 | 行为 | Clan Finance选中一座玩家Workshop，切换“Use Warehouse as Input” | 调用`SetIsGettingInputsFromWarehouse`保存来源开关；仅影响后续生产周期，缺料时仍可能回退使用Town市场，不直接转移物品 | v1.4.8 `ClanFinanceWorkshopItemVM.ExecuteToggleWarehouseUsage`与`WorkshopsCampaignBehavior`行为接口/生产链及官方Prefab确认；存档回读与周期结果未运行核 | E04/E07、H02、`ClanIncomeWorkshop.xml`、`ClanFinanceWorkshopItemVM.ExecuteToggleWarehouseUsage`、`IWorkshopWarehouseCampaignBehavior.SetIsGettingInputsFromWarehouse` |
+| ACT-E04-05 | 行为 | Clan Finance选中一座玩家Workshop，设置“Store Outputs in the Warehouse”比例（0/25/50/75/100%） | `SetStockProductionInWarehouseRatio`改变之后合格贸易品产物进入Warehouse的比例，受Warehouse容量约束；不改变已存在库存 | v1.4.8 `ClanFinanceWorkshopItemVM.OnStoreOutputInWarehousePercentageUpdated` Selector回调与官方Prefab确认；百分比具体后续逐周期结果未运行 | E04/E07、H02、`ClanIncomeWorkshop.xml`、`ClanFinanceWorkshopItemVM.OnStoreOutputInWarehousePercentageUpdated`、`IWorkshopWarehouseCampaignBehavior.SetStockProductionInWarehouseRatio` |
+| ACT-E04-06 | 行为 | 在Town center与Workshop shop worker交谈，选择访问Warehouse；在原生Warehouse Inventory界面向主队存入或取出物品并提交 | `OpenScreenAsWarehouse`把Workshop Warehouse与MainParty作为两侧Roster；物品在确认后转移，受Warehouse容量限制；非市场成交，不计算买价/卖价 | v1.4.8 Workshop对话菜单→`InventoryScreenHelper.OpenScreenAsWarehouse`/`InventoryLogic`调用链确认；Cancel/Done及画面回执未运行验证；Chronicle无通用Warehouse存取动作 | E04/E07/H07/D09/L07、`WorkshopsCampaignBehavior.warehouse_manage_on_consequence`、`InventoryScreenHelper.OpenScreenAsWarehouse` |
 | ACT-E05-01 | 行为 | Town Center与商人对话创建Caravan并配置领队/质量 | 支付创建成本；Companion离队成为Leader并创建WarParty/流动资金 | Chronicle无地图3D接近/Caravan创建动作 | E05、H05/F06/J08 |
 | ACT-E05-02 | 行为 | 与自有Caravan leader对话，选择可用Kingdom后再选合格Town以改HomeSettlement | 调用`CaravanPartyComponent.ChangeHomeSettlement`；目标须不同于当前Home，Naval caravan要求Town有Port；只设回访Home，不指定逐城路线；handler未见Gold/Influence副作用 | 1.4.8对话源码链已追到最终handler；Chronicle未适配，未运行验证对话时钟、提交/取消视觉路径与重选址时点 | E05/F01/J08、`CaravanConversationsCampaignBehavior`、`CaravanPartyComponent.ChangeHomeSettlement` |
 | ACT-E05-03 | 行为 | 与自有Caravan leader对话打开“trade partners”，逐个禁止或恢复一个Kingdom的贸易 | 切换`CaravansCampaignBehavior._prohibitedKingdomsForPlayerCaravans`；Quest使用中的Caravan不能配置；双方战时的对话反馈说明和平后仍维持禁贸；handler未见Gold/Influence副作用 | 1.4.8对话与状态handler源码链已追通；Chronicle未适配，未运行验证对话时钟与菜单视觉/取消路径 | E05/F01/J08、`CaravanConversationsCampaignBehavior`、`CaravansCampaignBehavior` |
+| ACT-E10-01 | 行为 | 活跃BarterVM中把兼容的Barterable放入/移出己方或对方提案、调整数量或重置提案草稿 | 改变当前`BarterData`/UI谈判盘并刷新兼容性及接受状态；只影响本轮临时议价，不立即转移Gold/物品/领地/关系；拒绝/Cancel不会提交。最终`ExecuteOffer`的世界副作用仍属于婚姻/俘虏/政治等上下文ACT | v1.4.8 `BarterVM.TransferItem/OfferItemAdd/OfferItemRemove/ExecuteReset`、`BarterItemVM.ExecuteAddOffered/ExecuteRemoveOffered`源码确认共享草稿交互；具体上下文候选与视觉/时钟未全验证；Chronicle无Barter编辑动作 | E10、C07/I04/F12/E05、`BarterVM`、`BarterItemVM`、`BarterData`、`BarterManager` |
 
 E03、E06、E08、E09、E10的大量变化由每日模型、其它玩家动作或跨域Barter驱动，不按Campaign模型调用数计成新玩家动作。市场、Settlement管理与Barter以其实际入口/确认结果为准，不从报价、预估财务或API方法名推断交易已完成。
 
