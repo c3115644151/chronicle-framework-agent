@@ -426,7 +426,7 @@ E03、E06、E08、E09、E10的大量变化由每日模型、其它玩家动作�
 | G04 Formation | 编队/部署观察`OBS-G04-01`；配置部署候选`ACT-G04-01` | 不按F键/按钮计动作；不同Mission部署字段/确认仍需核实 |
 | G05 Orders | 当前编队/命令观察`OBS-G04-01`；Mission命令候选`ACT-G05-01` | 指挥种类的目标/效果需要按状态改变拆分，指令下达不等于执行成功 |
 | G06 Tactics AI | AI执行结果观察复用`OBS-G03-01`/`OBS-G04-01`；战术AI内部选择记`N/A-G06-01` | 战术AI不是玩家可直接选择的菜单动作；玩家显式下令才映射G05 |
-| G07 Morale | Mission Order的己方Formation士气为`OBS-G07-01`；坐镇指挥界面的士气读数另列候选`OBS-G07-02` | Formation观察有用户视觉描述和原版整数绑定依据；首个AI战斗接入优先坐镇，Mission Orders保留在完整产品目录；坐镇读数口径未知 |
+| G07 Morale | Mission Order中的玩家Formation平均士气`OBS-G07-01`；坐镇Scoreboard中双方整侧Morale `OBS-G07-02` | 前者来自PlayerTeam formations，后者来自BattleSimulation双方MapEventSide；粒度不能合并；坐镇BattleSimulation优先于Mission Orders接入AI |
 | G08 Siege Mission | 实时攻城器械/城门/双方状态观察`OBS-G08-01`；真实指令复用`ACT-G05-01`及G01遭遇分支 | SiegeEvent、战术菜单和实时攻城场景分层；不可用战略围城字段替代Mission状态 |
 | G09 Combat Resolution | 战后伤亡/俘虏/战利品结果复用`OBS-G10-01`；Hero俘虏处置映射F12/H12 | 结算是多个遭遇入口的后果阶段，不是玩家直接“结算”动作；各路径模型差异须保留 |
 | G10 Battle Rewards | 领奖结果复用`OBS-G10-01`；经验/声望/影响力/物品均作为触发行为的后果 | 奖励模型不是独立玩家按钮；Simulation夹具不能代替自然战斗奖励证据 |
@@ -581,7 +581,7 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 | OBS-F03-01 | 观察 | 地图MobileParty tooltip在`IsInspected`时呈现当前行为摘要文字 | `GetBehaviorText`按Army长程行为或Default/ShortTerm行为、目标条件组合描述；不是原始AI计划，目标/场景变化可改变文字 | 源码确认tooltip提供该字段；玩家具体悬停/ALT显示条件尚未视觉核实，Chronicle不采集该摘要 | F03/F01、`RefreshMobilePartyTooltip`、`MobileParty.GetBehaviorText`、`PartyBase.UpdateVisibilityAndInspected`；v1.4.8.119303 |
 | OBS-G01-01 | 观察 | Map encounter菜单中双方、遭遇类型和当前可用谈判/接战/脱离/投降选项 | 选项由双方Faction、事件类型、装备/兵力、围城及Mission状态筛选；菜单可用项不是已提交战斗结果 | Chronicle未提供通用Encounter菜单观察；各交战类型的选项集合与显示信息未全量验证 | G01、PlayerEncounter、EncounterGameMenuBehavior |
 | OBS-G07-01 | 观察 | 战斗中F1等Orders界面的己方Formation士气 | 每个 `OrderTroopItemVM` 用 `BattleMoraleModel.GetAverageMorale(formation)`提供整数Morale；仅 `Mission.Current.PlayerTeam`的formation列表；用户观察到五格呈现，每格约20点 | 用户报告敌军/非己方指挥盟友不可见；Native源将整数绑定到OrderTroopItem，AI可读原始数值；首个战斗接入不要求Mission控制 | G07/G03/G05、`MissionOrderTroopControllerVM`、`OrderTroopItemVM`、Native `OrderTroopItem.xml`、用户观察 |
-| OBS-G07-02 | 候选观察 | 坐镇指挥BattleSimulation界面可能展示的双方/整队Morale数字 | Campaign模拟整体士气和Battle Mission每Formation平均士气是不同模型/粒度，不能由对象同名合并 | 用户记得界面有士气数字，但具体显示对象/算法口径未确认；暂不计入最终OBS分母 | G07/F10、MapEvent simulation / user-reported screen; exact VM consumer unknown |
+| OBS-G07-02 | 观察 | BattleSimulation结算面板中攻击方/防守方整侧Morale读数 | `SPScoreboardVM`在Simulation模式约每秒读取双方`MapEventSide.GetSideMorale()`；两边Scoreboard有五段条并提供整数悬停提示；这是Campaign坐镇模拟的侧级值，不是Mission Formation平均值，且不推进Campaign日期 | 本机v1.4.8源码与Native prefab绑定确认；用户记得坐镇页面有整体士气数值；Chronicle协议未返回该读数 | G07/F10、`SPScoreboardVM.CreateSimulation/OnTick`、`SPScoreboardSideVM.GetMoraleHintStr`、Native `SPScoreboard.xml`/`SPScoreboardSideHeader.xml` |
 | N/A-F02-01 | N/A | NPC Party AI/Think自动选择和切换地图行为 | AI对NPC队伍自动计算行动，不存在由玩家直接指定“下一项默认行为/思考结果”的统一入口；玩家只能改变其决策环境或通过地图/军团系统交互 | 不计入ACT分母；观察到的结果仍按可见Party、Army、Siege或地图界面分别映射 | F02/F04、AiPartyThinkBehavior、MobilePartyAi、AiMilitaryBehavior |
 | N/A-F07-01 | N/A | NPC Party/Army从军事候选中选取战略目标及其内部评分/理由 | 战争状态、聚落归属、战力/距离、军团/围城状态和目标模型形成AI候选；玩家可改变部分环境条件，但没有查看评分或直接替NPC指定目标的通用原版操作 | 不计入ACT分母；玩家可读取的部分结果由地图行为tooltip、军团面板和Siege状态分别观察，不代表全局目标/决策理由可见 | F07/F02/F05/F08、AiMilitaryBehavior、AiPartyThinkBehavior、DefaultTargetScoreCalculatingModel |
 | N/A-G06-01 | N/A | Mission战术AI选择目标/阵型行为本身 | 属于部队AI自动计算；玩家通过下令影响其后的执行，不存在直接调用某个AI决策的原版菜单动作 | 不计入ACT分母；玩家Order入口单独映射`ACT-G05-01`，结果按`OBS-G03-01/OBS-G04-01`验证 | G06/G05、OrderController、Mission tactical AI |

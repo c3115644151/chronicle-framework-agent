@@ -80,9 +80,9 @@ Mission combat士气与战役Party的 `MobileParty.Morale` 是不同状态。Mis
 
 当前首个AI战斗接入优先使用战役地图的原生坐镇/BattleSimulation流程。Mission里的部署、Orders、F1士气和实时士兵控制仍属于完整产品的观察/行动分母，但不是初始战斗支持切片；不能因为当前暂不接入Mission就把这些玩家可见信息判为不存在或N/A。
 
-用户还报告坐镇指挥界面可能有双方整体士气数值，但不确定其口径是整方还是别的统计；这与F1编队列表的信息粒度不同，单独列为候选观察，不与Formation士气合并。玩家能否看到双方/非己方兵力的具体Campaign simulation士气来源及更新仍待追线和界面确认。伤亡、领袖、队伍构成和模型系数均会改变结果，不将Party地图士气直接解释成Battle Mission实时士气。
+坐镇模拟有独立的第二种观察面。`SPScoreboardVM.CreateSimulation`创建坐镇结算面板，`OnTick`在Simulation模式每约一秒分别取 `MapEvent.AttackerSide.GetSideMorale()` 与 `DefenderSide.GetSideMorale()` 写入攻击方/防守方 `SPScoreboardSideVM.Morale`。Native `SPScoreboard.xml`同时呈现双方，`SPScoreboardSideHeader.xml`将0–100分成五段填充；悬停提示标签为“Morale”，显示取整后的数值。它是攻/守双方整侧指标，与Mission F1订单里的单个玩家编队平均士气分属不同信息源和粒度；坐镇Simulation推进自身战斗回合，不等同Campaign日期快进。
 
-Chronicle无Formation士气观察/恐慌/溃逃状态或能影响Mission士气的玩家动作；只具备战斗模拟少量状态观察。证据：MountAndBlade `BattleMoraleModel`、`AgentMoraleInteractionLogic.OnAgentRemoved/OnAgentFleeing`、`BattleEndLogic`；`MissionOrderTroopControllerVM`、`OrderTroopItemVM`、Native `OrderTroopItem.xml`；Campaign `MapEvent`/`DefaultBattleRewardModel`的另一条战役结算路径。未知：1.4.8各battle mission model的具体伤亡/恐慌参数、所有触发阈值和反馈时点、围城/海战替换，以及Mission状态映射到Campaign结算。
+Chronicle尚未观察Mission Formation士气或坐镇Scoreboard双方side-morale，也没有影响Mission士气的玩家动作；现有坐镇协议只返回少量战斗状态。证据：MountAndBlade `BattleMoraleModel`、`AgentMoraleInteractionLogic.OnAgentRemoved/OnAgentFleeing`、`BattleEndLogic`；`MissionOrderTroopControllerVM`、`OrderTroopItemVM`、Native `OrderTroopItem.xml`；`SPScoreboardVM.CreateSimulation/OnTick`、`SPScoreboardSideVM.GetMoraleHintStr`、Native `SPScoreboard.xml`/`SPScoreboardSideHeader.xml`；Campaign `MapEvent`/`DefaultBattleRewardModel`。未知：坐镇界面各tick与显示刷新映射、1.4.8各Mission model的伤亡/恐慌参数、围城/海战替换，以及Mission状态映射到Campaign结算。
 
 ## G08 Siege Mission：围城场景中的攻守战斗
 
