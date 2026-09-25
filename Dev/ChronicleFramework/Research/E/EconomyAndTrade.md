@@ -1,6 +1,6 @@
 # E 类研究：经济与贸易
 
-状态：机制盘点中；E01-E03 已完成首轮盘点，目前研究 E04 工坊，未进行方案评审。
+状态：机制盘点中；E01-E04 已完成首轮盘点，目前研究 E05 Caravan，未进行方案评审。
 
 适用本体：Bannerlord v1.4.8.119303。基于当前安装 `TaleWorlds.Core.dll`、`TaleWorlds.CampaignSystem.dll`、官方模块物品 XML 和 Chronicle 本地 Observer/Protocol 源码。静态对象核对不表示物品市场或背包 UI 已运行验证。
 
@@ -132,6 +132,38 @@ Chronicle Observer 目前只给 PlayerClan 的 Gold/Influence/Renown，不枚举
 
 未知项：全部官方 WorkshopType 配方/EquipmentCost、其他 Mod 配方及当前启用状态；玩家对话买卖/改产每一支实际费用和确认后状态；仓库 UI 的输入/输出比例和容量、取消/返回的提交边界；生产周期按库存、城镇金库和 MarketData 价格的全公式与随机变化；Workshop profit 与 Clan 每日财政报表的精确结算时间、破产触发及贸易经验后果。
 
+## E05 Caravan / Trade Convoy 商队
+
+### 玩家创建入口与初始化
+
+玩家建立 Caravan 的原版入口是在城镇中心与 Merchant/Artisan notable 对话。对话根据所在 Town 是否有 Port 将其呈现为陆路 Caravan 或 Trade Convoy；要求玩家有可带队的 Player Clan Companion（不在 Governor 等互斥岗位）和足够第纳尔。玩家可选择标准或更高品质的护卫队伍，再指定一名 Companion 为 Caravan Leader。创建后该 companion 从 MainParty 离开，成为 caravan leader；新 MobileParty 的 owner 是 Hero.MainHero，并初始化 PartyTradeGold。
+
+默认模型标准创建成本为 15,000；高品质为 22,500，第纳尔可受 Aserai Trader culture feat 修正。模型的 naval 参数默认不改变费用，但港口会影响陆/海模板。Standard PartyTradeGold 为 10,000，玩家拥有的 Caravan 额外 +5,000；高品质初始贸易金为 17,500，玩家仍有该加成。单物品类别最大购买预算默认 1,500。以上是 1.4.8 默认模型，不保证替换 Model 的 Mod 使用相同值。
+
+这与 NPC 商人生成不是一个入口：`DailyTickHero` 对符合 `CaravanModel.CanHeroCreateCaravan` 的非玩家 Merchant Hero 按日随机尝试生成；该检查包含 Merchant occupation、无队伍归属、无有效现存 Caravan、Hero可用且能带队。玩家对话创建则选择一个陪伴 Hero 作为 Party Leader，owner 仍是 Main Hero；不能用 NPC 的 `CanHeroCreateCaravan` 前置解释玩家创建条件。
+
+### NPC 贸易循环与目的地
+
+`CaravansCampaignBehavior` 注册每日 Hero、每日和每小时 Party tick，以及进入城镇、离开城镇、MapEvent结束、Party被摧毁等事件。每小时 Caravan 在可贸易、没有遭遇/海上raft等可用条件满足时检查当前目标：敌对、目标被围/封锁或目标失效会触发重新选址。路线由适用城镇、Faction trade许可、价格指数、库存、NavigationType、路程、HomeSettlement 回访间隔、Party载货率等评分；海路和陆路受港口/船只条件区别约束。
+
+Caravan 到达 Town 时先按本地 `Town.GetItemPrice` 尝试卖货，使用本地价格与预算/Party重量条件买货则发生在后续每日/小时交易决策中。购买倾向高价值品类并受分类预算、市场库存、单位类别限额、载重、初始资金与城镇金库约束；海上 Caravan 还有特定食物/船只逻辑。卖货会保留一定数量的包驮动物和牲畜，TradeActionLog 记录部分品类的买入/卖出地点与价格差，用于贸易传闻，而非完整逐日财务报表。
+
+玩家可与可遇到的 Caravan 对话，询问贸易传闻或打开 Caravan Trader 的 Inventory trade；其 Owner/leader 可通过对话改变 HomeSettlement、禁止某些 Kingdom 作为贸易对象。Caravan 与目标城镇若处于战争关系，不会继续与之交易；玩家 Owner 的 Caravan 还会检查由对话配置的禁贸王国列表。这些控制是经营规则配置，不是直接指定逐步路线。
+
+### 战斗、损毁与恢复
+
+Caravan 是 CaravanPartyComponent 管理的 MobileParty，持有 owner、leader、home、商队资金、货物和护卫 roster。遭遇战后会按战斗处理幸存 roster、装备、负重/动物与船只；Party 被摧毁时 Caravan 行为会清理对话/交易日志等缓存。损失货物、主人资金和 companion leader 的最终去向受 MapEvent 与战后处理链影响，本项未运行验证。
+
+原版每日商队重生尝试明确排除 Hero.MainHero，所以 NPC merchant Caravan 被毁和玩家自有 Caravan 被毁不能假定共享自动重建流程。当前源码未发现 player-owned Caravan 的通用自动重建承诺；本地不创建正式存档/不触发销毁测试。
+
+### Chronicle 当前观察与动作覆盖
+
+附近 Party 快照可把可见目标标为 `caravan`，并返回部分位置/移动/人数/估算实力信息；不会返回 Owner、Leader、Home、TargetSettlement、ItemRoster、PartyTradeGold、正在买卖的类别、交易日志或损毁恢复状态。Protocol 没有建立 Caravan、设置路线/贸易偏好、转移资金/商品、管理船只或重建商队的动作。现有 `dialogueSelect`/市场交易只在 Encounter/Conversation 已打开后可使用，不能自行完成战役地图追近、物理对话接近和创建所需 UI 流。
+
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `DefaultCaravanModel`、`CaravanPartyComponent`、`CaravansCampaignBehavior`、`CaravanConversationsCampaignBehavior`、`TownMarketData`、`TradeItemPriceFactorModel`、`MapEvent`与Party销毁事件；Chronicle `AgentObserver.cs`、`AgentProtocol.cs`。为 v1.4.8.119303 源码证据，未运行 Caravan 新建、长期跑商、被劫或恢复。
+
+未知项：创建后的首个购买/移动时序及被指定 companion 的恢复/复用流程；目的地评分的全部权重、随机扰动和对外解释字段；交易日志/传闻与 NPC实际交易量、利润的关系；Naval船只补充/损毁、战损/俘虏与玩家 Owned Caravan 被毁的完整跨域后果；当前启用 Mod 对 CaravanModel/交易AI的替换情况。
+
 ## 研究范围状态
 
-E01-E04 已完成首轮物品、市场定价、村庄供应链和 Workshop 对象/生产/所有权盘点。E05-E10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 E 域范围逐项核对，不把这些子系统的静态首轮盘点视作经济与贸易系统整体完成。
+E01-E05 已完成首轮物品、市场定价、村庄供应链、Workshop 和 Caravan 盘点。E06-E10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 E 域范围逐项核对，不把这些子系统的静态首轮盘点视作经济与贸易系统整体完成。
