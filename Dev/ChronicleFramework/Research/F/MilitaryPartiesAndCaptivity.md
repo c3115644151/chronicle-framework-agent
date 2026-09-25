@@ -166,6 +166,34 @@ Chronicle目前可以为 MainParty设置有限地图目标，并能观察附近�
 
 未知项：`DefaultTargetScoreCalculatingModel`在不同版本/个性/危机下完整权重与随机数；进攻目标估值与和平战场边界变化下目标重算延迟；Army Leader、Attached Party、族长和Kingdom's AI role在军事候选生成中的优先级；AI何时从单队转Army/何时放弃目标的全部阈值组合；战争目标是否对玩家主动不可见信息进行遮蔽或特殊保证。
 
+## F08 围城周期、攻防与围城后果
+
+### SiegeEvent 对象与 Campaign 周期
+
+`SiegeEvent` 连接 BesiegedSettlement 与 BesiegerCamp，后者保存围攻方阵营、参加 Party、战场人数、战术和器械容器；Settlement/Defender side 持有另一个 SiegeEventSide。壁段受损比例、围城准备时间/开始时间、Blockade、被围城/围攻方人数、各方 siege engine construction progress、预制/部署的 siege engines 和炮击目标分别是数据，不等于一个“攻城进度百分比”。
+
+围城是在地图行动/对象抵达后形成的 Campaign 战略状态，并由 SiegeEventTick/`SiegeEventCampaignBehavior` 按时间处理。模型控制器械建造速度、墙/武器损坏、炮击命中与伤亡；派对进出、和平、其他军团和军团目标会改变 BesiegerCamp 参与名单或使 Siege Event 结束。城墙基础属性见 D03；实际 Mission的兵力编组/器械操作另见 G03/G08。
+
+### 玩家可进入的 Siege menu 与 Mission
+
+处于玩家攻/守 SiegeEvent 上下文时，原版 `menu_siege_strategies` 是 WaitGameMenu；从 menu option 进入时钟自然推进直到 assault或其他事件，点 Lead an assault 会进入原生 `assault_town`/PlayerSiege Mission，Send troops 调用模拟/坐镇路径；防守方在条件允许时可以 Request a parley、Leave或Leave Army。没有可用 siege engine、Player wounded、玩家不在 siege command等情况会令 Lead Assault disabled 或给出说明。离开/终止 siege 另有确认菜单，且可失去/销毁器械。
+
+在 Siege preparation 与 Map Event之间分层：`PlayerSiege.StartSiegePreparation` / `StartPlayerSiege`分别处理初始化/玩家攻守进入，`StartSiegeMission`建立真实围城战场。Camp 战略菜单、地图“在围城中”、实时攻城 Mission和已经结束的战后决策不可互相替代。Simulation/Send Troops 的 outcomes由MapEvent/战斗结算处理，真实 Mission则进入 Formation、Siege mission tactics和结束条件。
+
+### 结束、战后决策与经济影响
+
+Siege之后会根据 attacking/defending outcome、capturer与 MapEvent contributions 进入 `SiegeAftermathCampaignBehavior`。玩家在攻陷 fortification 后可在条件开放时选择 Continue/Devastate/Pillage/Show Mercy等，不同后果分别改 Settlement Prosperity/Projects/Loyalty/Notables/Clan Relation/Army gold/Influence等；AI胜负则通过 `DefaultSiegeAftermathModel`/战后 behavior 自动决定。最终 settlement ownership变化由 `ChangeOwnerOfSettlementAction` 统一落地及通知（D10）；围城战损/士兵伤亡/驻军去向受 F10/G09、F12/F10等Battle/Captivity链影响，不应和after-action独立菜单选择合并成一个效果。
+
+围城不仅是 siege progress：Attacker food、Defender garrison food、围城/村庄受害、Settlement战损、阵营与Army支援、战后是否占领等会并行变化。点击“接到 siege menu”、“lead assault、battle完成、战后选项完成、改变所有权”是有条件的多个阶段，不是一个按钮。
+
+### Chronicle 当前观察/动作覆盖
+
+`AgentObserver` 附近Settlement仅输出 `underSiege` Boolean；主party context与battleSimulation仅显示少量battle状态，不读 SiegeEvent side、BesiegerCamp、谁被围、Siege strategy、blockade、food/engine/wall/assault readiness、战后Aftermath options或多队贡献。Protocol可对当前原生Campaign GameMenu执行已启用Option的menuSelect，也有部分Autobattle和战后loot适配；没有 siege-setup/engine placement/strategy/assault Mission通用Agent动作。本地 `menuSelect`完成只能说明本体菜单option consequence被调用，不代表3D攻城或整个防守/战后闭环已完成。
+
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `SiegeEvent`、`BesiegerCamp`、`PlayerSiege`、`SiegeEventCampaignBehavior`、`SiegeAftermathCampaignBehavior`、`SiegeAftermathAction`、`DefaultSiegeEventModel`/`DefaultSiegeAftermathModel`；Chronicle `AgentObserver.cs`、`AgentProtocol.cs`及 MAINLINE `autoresolve`/`retreat` contracts。源码版本 v1.4.8.119303，未启动攻城、战斗或战后Mission验证。
+
+未知项：围城准备到 `menu_siege_strategies` 的完整玩家地图点击/状态链和真实时钟模式；攻城武器部署/构建UI和引擎可见反馈对应的所有字段；Lead Assault/Send Troops在玩家作为 Army leader、附属队伍、单Party时的具体进入路线及伤亡差异；各个Aftermath选项的全部公式和战斗贡献分配；战后state resets/故障恢复与保存加载跨系统顺序。
+
 ## F12 Hero 俘虏、管理与释放
 
 本节保留既有俘虏子系统研究。俘虏转移涉及 Factions、战斗、菜单/Party UI 和关系/叙事，相关的关系后果与日志消费者另见 B/C/J 类研究。
