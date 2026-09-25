@@ -270,6 +270,8 @@ Chronicle Observer 不返回玩家所属 Kingdom ID/预算钱包/Tribute、Merce
 
 工坊转换速度、Caravan 的买卖决策、村庄生产、Workshop/Trade Rumor 等也会读取 Trade Skill/Perk；有关收益/所有权流分别见 E03-E08。Barter 中 Trade 技能的议价加成及双方接受条件留待 E10，不重复当作 Inventory 交易 XP。
 
+玩家可见的价格辅助有不同消费者：`SPItemVM.UpdateProfitType`在Trade模式下，对玩家库存检查`Appraiser`或`WholeSeller`，用`IPlayerTradeBehavior.GetProjectedProfit`推导利润标记；对聚落市场库存检查`CaravanMaster`或`MarketDealer`，比较当前与平均价格因子。物品详情中的异地买卖价来自另一条`ItemMenuVM`贸易传闻链，显示函数没有统一技能等级门槛；`TravelingRumors`/`Tollgates`分别扩充商队/工坊情报来源，具体过滤、过期与用户实玩依据见J06。不能把所有价格颜色、利润提示和异地情报统一解释为一个“高交易等级解锁”开关。以上为本机1.4.8源码依据，尚未进行无专长/有专长的运行对照。
+
 ### 玩家入口与 Chronicle 当前覆盖
 
 玩家在 Town `trade` 菜单进入原生 InventoryState 执行交易，完成 Transaction 后才触发 PlayerInventoryExchangeEvent；对话 barter、任务奖励、Party loot、Workshop 自动产出及 Caravan 自动买卖是不同来源，不能因为改变 Gold 就推定 Trade XP。该入口路径见 D09/E02。

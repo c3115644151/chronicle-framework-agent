@@ -519,7 +519,7 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 | J03 Quest Tasks | 移动/交易/对话/战斗步骤映射K/E/I/G已有实际动作ID | TaskBase只是程序对象，具体任务步骤需回到相关原版UI/动作族 |
 | J04 Journal | `OBS-J04-01` Quest Journal/时间与进度记录 | JournalLog是回看信息，不等于世界状态或Action |
 | J05 Incident | `OBS-J05-01` MapState当前Incident及条件选项；`ACT-J05-01`选择事件回应 | 每个Incident的Effect/Consequence按具体选项参数读取，不能合并不同事件后果 |
-| J06 Rumor | `OBS-J06-01` trade rumors候选数据/信息 | 创建者/实际玩家呈现尚未知；不能把TradeRumor对象计成观察已支持 |
+| J06 Rumor | `OBS-J06-01`市场/玩家物品悬停中的异地买卖价格提示 | 同一ItemMenu消费者服务两侧；已有情报、具体物品、时效和价差共同筛选，专长可扩充来源；源码入口已确认，Chronicle尚未适配 |
 | J07 Notifications | `OBS-J07-01` MapNotification/QuickInfo/Scene通知 | 可点击通知若改变输入或位置则另映射所触发操作 |
 | J08 Conversations | `OBS-J08-01`当前Conversation Flow/参与者/选项；`ACT-J08-01`选择当前开放Dialogue option | Relation/Persuasion对话复用I09/I10的真实消费者，不重复文本条目 |
 | J09 Persuasion | `OBS-J09-01`当前Persuasion task/进度/风险信息；`ACT-J09-01`提交Persuasion argument | 说服尝试是Conversation option的特殊子族，任务/求偶/政治用相同模型但不同后果 |
@@ -555,7 +555,7 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 | OBS-J04-01 | 观察 | Journal/LogEntry浏览任务/角色记录 | 日志过期、隐藏信息与当前状态不同步；不自动推进Campaign | Chronicle未输出完整LogEntryHistory/Quest Journal | A07/J04/L05、LogEntryHistory/QuestsVM |
 | OBS-J05-01 | 观察 | Settlement进出后打开Incident选择界面查看事件/选项 | Incident trigger、cooldown、条件筛选一条事件；Effect列表不等于实际已提交结果 | MAINLINE有Incident modal/state链，仍未所有Incident运行验证 | J05/A02、IncidentsCampaignBehaviour/Incident |
 | ACT-J05-01 | 行为 | Incident UI中选择一个条件合法的事件Option并确认/关闭 | 每个Effect和Option Consequence分别调用；可能改变金钱/Party/关系/Settlement状态；直接API跳过VM cleanup | Chronicle对Incident通用流程目前Unsupported/Research；结构化事件返回未全测 | J05/L06、Incident.InvokeOption、MAINLINE |
-| OBS-J06-01 | 候选观察 | TradeRumor data对象所表达的Settlement/商品/参考价/寿命信息 | 已确认数据结构，但玩家是否在市场/对话中看到此类信息尚未追到 | 暂不计入最终OBS分母；需要证明真实原版玩家UI入口和可见时点 | J06、TradeRumor、E02/E05；玩家消费者调用方未知 |
+| OBS-J06-01 | 观察 | Inventory/市场Goods物品悬停详情中的异地买卖地点/记录价格；玩家栏与市场栏为同一观察族的两个入口 | `ItemMenuVM.SetMerchandiseComponentTooltip`按具体ItemObject、未过期记录、异地及价差筛选；来源受到访/日事件/交易专长影响。读取不改库存/金币，记录随Campaign时间过期；宿主界面时钟待运行核验 | 用户2026-09-25实玩报告+本机1.4.8源码确认；Chronicle未适配，Agent未视觉/运行复核；利润/行情颜色另见E09，不能混入同一门槛 | J06/E02/E05/E09、`TradeRumorsCampaignBehavior`、`ItemMenuVM`、`SPInventoryVM`；来源/去重边缘未知 |
 | OBS-J07-01 | 观察 | 地图通知/QuickInfo/Scene notification | 队列可过期/关闭/跳转；Notice、Log与世界对象值分开 | Observer不读Notification queue/已读/点击目标 | J07/A07/L06、MapNotificationVM |
 | OBS-J08-01 | 观察 | 活跃Conversation的发言人/Flow阶段/当下开放Option | sentence condition、身份token、Task与关系筛选，不能扫描未开放Option | Protocol提供有限Conversation state/option读取 | J08/I09、ConversationManager/AgentObserver |
 | ACT-J08-01 | 行为 | 只选择当前Conversation实际开放且仍然valid的原生对话Option | Consequence可能启动Barter/Quest/Persuasion/Mission或改关系；context变化须重验 | Chronicle `dialogueSelect`仅限当前option列表；不支持全3D谈话接近 | J08、ConversationManager/AgentProtocol |
