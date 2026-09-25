@@ -374,9 +374,9 @@ D域初步覆盖全部D01-D10系统条目；建设/每日项目以及可视页�
 | --- | --- | --- |
 | E01 Items/商品 | `OBS-E01-01`Inventory容器与市场列表中的具名物品/价格/重量 | Item定义、库存实例、市场状态不同；定义XML不单计玩家观察 |
 | E02 Market | `OBS-E02-01`当前Town交易双方库存/报价；买入`ACT-E02-01`、卖出`ACT-E02-02` | 买入和卖出造成的资金/库存/价格改变不同；与Barter分开 |
-| E03 Village supply | 村庄资源/绑定城镇状态映射D04/D09，贸易运输见`OBS-E05-01` | 生产、TradeBound和Villager运输是自动Campaign运行，不是玩家直接“制造货物”动作 |
+| E03 Village supply | 村庄资源/绑定城镇状态映射D04/D09，地图可见Villager运输Party复用`OBS-F01-01` | 生产、TradeBound和Villager运输是自动Campaign运行，不是玩家直接“制造货物”动作；摘要不泄露载货状态 |
 | E04 Workshop | `OBS-E04-01`Clan工坊清单/Owner/生产状态；购买`ACT-E04-01`、改产`ACT-E04-02`、出售`ACT-E04-03` | 买入、改产、出售为不同交易/所有权结果 |
-| E05 Caravan | `OBS-E05-01`附近Caravan摘要/主人与贸易路径（常驻快照缺失细项）；创建`ACT-E05-01`、改HomeSettlement`ACT-E05-02`、切换禁贸王国`ACT-E05-03` | NPC Caravan日常跑商与玩家创建/对话配置不是同一动作；HomeSettlement不是逐城路线 |
+| E05 Caravan | 地图附近Caravan可见摘要/类型复用`OBS-F01-01`；创建`ACT-E05-01`、改HomeSettlement`ACT-E05-02`、切换禁贸王国`ACT-E05-03` | Caravan只是MobileParty摘要的一种PartyType；Owner/Leader/Home/货物/利润不在该观察面，另有对话/市场行为 |
 | E06 Party economics | `OBS-E06-01`主队粮食、工资、负重/roster；补粮映射`ACT-E02-01` | 日工资/食物消耗/逃兵为自动结算，不另建玩家直接“调账”按钮 |
 | E07 Clan finance | `OBS-E07-01`Clan财务页的Gold、收入/支出预测/资产说明 | Finance预估与每日实扣分开；已有层级/财产页面映射H02/D域 |
 | E08 Kingdom budget | 钱包/协议财务大部分没有确认的玩家直接UI字段；政治信息跨B06/C | 预算注资/分摊为后台模型，不构造“取王国钱”动作 |
@@ -390,7 +390,6 @@ D域初步覆盖全部D01-D10系统条目；建设/每日项目以及可视页�
 | OBS-E01-01 | 观察 | Inventory/Trade屏幕中当前角色与容器的具名ItemObject、数量/价格/重量 | 仅显示当前InventoryMode左右容器，不能从市场视图得知全球库存/村庄在途货物 | Chronicle按需返回Town报价，常驻Party快照只有itemCount | E01/E02、H07/L05 |
 | OBS-E02-01 | 观察 | Town `trade`打开InventoryLogic后的当前报价、库存与Gold/容量条件 | 报价由Town MarketData/交易方向/商品/Perk计算；提交后改变市场/双方Roster/Gold | `tradeOptions`可按需读，渲染UI未验证；交易具有限原生接口 | E02、AgentProvisioning、D09/L07 |
 | OBS-E04-01 | 观察 | Clan Finance页→工坊资产/收入及工坊Owner/生产状态 | 财务预测与Workshop库存、资本、Daily income分属不同数据 | Observer不列OwnedWorkshop/资本/生产配方 | E04/E07、H02/L05 |
-| OBS-E05-01 | 观察 | 地图附近可见Caravan图标及有限Party摘要 | Owner/Leader/Home/TradeBound/货物/PartyTradeGold通常不在NearbyParty摘要中 | Observer只给附近Party摘要，不给商队货载/利润 | E05、F01、AgentObserver/K03 |
 | OBS-E06-01 | 观察 | 主队结构化Party摘要/Party页面查看粮食、FoodChange、Wage、负重/队伍容量/士气 | 数值来源不同，不足以推断完整收入/支出或Troop逐项构成 | Observer输出有限汇总字段，不枚举全部付款人/物品 | E06、H03、F01、AgentObserver |
 | OBS-E07-01 | 观察 | L→Clan Income/Finance查看Gold与预测日收支、资产收入 | UI forecast为预览计算，不是已结算每日账单；真实日Tick另按ClanFinanceModel记账 | Observer只有玩家Gold/Clan基础数值，无Income/Expense分项 | E07、H02、AgentObserver |
 | ACT-E02-01 | 行为 | Town `trade`中从市场买Item/指定数量并按Done确认 | 检查价格、市场库存、Gold、载重；提交使Player ItemRoster增、Town库存减、Gold扣除 | Chronicle AgentProvisioning/InventoryLogic支持有限商品购买并验收库存/Gold；可视UI未验证 | E01/E02、AgentProvisioning、D09 |
