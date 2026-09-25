@@ -11,7 +11,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '4.86'
+$HarnessContractVersion = '4.87'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -98,6 +98,10 @@ function Write-StageResult {
         if ($sizeMatch.Success) {
             $result['MarkdownBytes'] = [int]$sizeMatch.Groups[1].Value
             $result['DefaultReadMarkdownBytes'] = [int]$sizeMatch.Groups[2].Value
+        }
+        foreach ($metric in @('CatalogSystemRows', 'CatalogMappedSystemRows', 'CatalogActionRows', 'CatalogObservationRows', 'CatalogNARows')) {
+            $metricMatch = [regex]::Match($Output, ('"' + [regex]::Escape($metric) + '"\s*:\s*(\d+)'))
+            if ($metricMatch.Success) { $result[$metric] = [int]$metricMatch.Groups[1].Value }
         }
     }
     $Output | Set-Content -Path (Join-Path $runDirectory "$Name.log") -Encoding UTF8
