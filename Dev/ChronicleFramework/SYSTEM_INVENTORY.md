@@ -381,7 +381,7 @@ D域初步覆盖全部D01-D10系统条目；建设/每日项目以及可视页�
 | E07 Clan finance | `OBS-E07-01`Clan财务页的Gold、收入/支出预测/资产说明 | Finance预估与每日实扣分开；已有层级/财产页面映射H02/D域 |
 | E08 Kingdom budget | 钱包/协议财务大部分没有确认的玩家直接UI字段；政治信息跨B06/C | 预算注资/分摊为后台模型，不构造“取王国钱”动作 |
 | E09 Trade XP/Perk | 交易行为后角色开发页/技能反馈映射`OBS-B03-01` | XP是市场收益动作的后果，不计成单独经验领取动作 |
-| E10 Barter | 活跃谈判双方、当前已加入议价盘的Barterables及报价状态共用`OBS-E10-01`；最终提交映射到真实上下文ACT（如婚姻`ACT-I04-03`、Clan defection`ACT-C07-06`） | BarterVM是独立于Inventory和Conversation option list的观察面；条款编辑属于上下文议价事务，不另造通用`ACT-E10`结果动作，各Barterable的提交后果归其实际领域；候选项全集、完整价值解释和运行展示待核 |
+| E10 Barter | 活跃谈判双方、当前已加入议价盘的Barterables及报价状态共用`OBS-E10-01`；最终提交映射到真实上下文ACT（如婚姻`ACT-I04-03`、Clan defection`ACT-C07-06`、Hero俘虏转交/释放`ACT-F12-01/02`） | BarterVM是独立于Inventory和Conversation option list的观察面；条款编辑属于上下文议价事务，不另造通用`ACT-E10`结果动作，各Barterable的提交后果归其实际领域；候选项全集、完整价值解释和运行展示待核 |
 
 #### E域目录项
 
@@ -419,7 +419,7 @@ E03、E06、E08、E09、E10的大量变化由每日模型、其它玩家动作�
 | F09 Raid/Defense | 村庄遭遇`ACT-F09-01`劫掠、`ACT-F09-02`强征志愿兵、`ACT-F09-03`强征物资；防守进入G战斗路径 | 三类村庄敌对行动后果不同；AI防守目标不是玩家可指定的直接动作 |
 | F10 BattleSimulation | `OBS-F10-01`模拟状态/胜负；坐镇动作映射`ACT-G01-02` | Campaign战斗simulation不等于Mission实时操作；战后伤亡/奖励还映射G09/G10结果观察 |
 | F11 troop training/recovery | Party Screen roster观察`OBS-H04-01`；玩家升级`ACT-H04-01`、普通俘虏招募`ACT-H04-02` | 自动NPC升级/治疗/逃兵不是玩家动作；不同PartyScreen上下文仍需交叉去重 |
-| F12 prisoners | 俘虏Roster观察`OBS-H04-01`/`OBS-H12-01`；主角赎金`ACT-H12-01`/`ACT-H12-02`，主动释放/转移/招募待具体入口核实 | capture/release结果与玩家处置动作分开；敌方Hero与普通兵俘不是同一类 |
+| F12 prisoners | 俘虏Roster观察`OBS-H04-01`/`OBS-H12-01`；主角赎金菜单`ACT-H12-01/02`；Barter Hero俘虏转交`ACT-F12-01`、以Barter释放`ACT-F12-02`；普通兵招募`ACT-H04-02` | 俘虏所在容器、接收方Faction关系和结果类型不同；战后结果/自动释放不是玩家处置动作；Hero与普通兵俘不可合并 |
 | F13 Army decisions | 领主自动组军/加入/解散结果观察`OBS-F05-01`；玩家邀请`ACT-F05-01`/解散`ACT-F05-02` | NPC“意愿”不是独立谈判确认或玩家按钮 |
 | G01 Encounter | `OBS-G01-01`遭遇菜单双方/可用选项；Attack `ACT-G01-01`、Send Troops `ACT-G01-02`、escape `ACT-G01-03`、surrender `ACT-G01-04`、join/help/leave `ACT-G01-05` | 接敌、玩家选择、BattleSimulation与Mission入口须分开 |
 | G02 MapEvent | 双方Party/参战/战斗持续观察`OBS-G02-01`；真实开始战斗映射遭遇和村庄等发起动作 | 增援/战斗结算是事件过程或结果，不按每个参战Party复制玩家行为 |
@@ -453,6 +453,8 @@ E03、E06、E08、E09、E10的大量变化由每日模型、其它玩家动作�
 | ACT-F09-01 | 行为 | 在有效Village encounter选择Raid/Plunder | 进入RaidEvent并造成物资/繁荣/安全与关系等不同后果 | Chronicle无Raid选择动作 | F09/J05、EncounterGameMenuBehavior |
 | ACT-F09-02 | 行为 | Village encounter中强征Volunteers | 进入ForceVolunteersEvent，潜在获得部队并触发村庄/政治后果 | Chronicle无强征新兵动作 | F09/J05/G02 |
 | ACT-F09-03 | 行为 | Village encounter中强征Supplies | 进入ForceSuppliesEvent，物资获得及Village损害路径不同于Raid/Volunteers | Chronicle无强征物资动作 | F09/J05/G02 |
+| ACT-F12-01 | 行为 | 通过有效的领主Barter，在双方Party俘虏条目中把一名Hero列入转移条款并接受 | `TransferPrisonerBarterBehavior`仅在俘虏所属Faction与接收Party交战时加入条款；接受后`TransferPrisonerAction`改变该Hero的囚禁Party；与交易/释放不同 | 本机1.4.8 Barterable请求/Apply源码链确认双向候选与交战复核；需实际可用的Conversation Barter上下文；取消、具体供选与UI时钟未实机核验；Chronicle无Barter适配 | F12/E10/J08、`TransferPrisonerBarterBehavior.CheckForBarters`、`TransferPrisonerBarterable.Apply`、`TransferPrisonerAction` |
+| ACT-F12-02 | 行为 | 通过有效的领主Barter，把一名与接收方非交战的Hero prisoner列入Release条款并接受 | `SetPrisonerFreeBarterBehavior`按双方交战状态加入条款；接受后以对方Hero为付款方调用`EndCaptivityAction.ApplyByRansom`；不是MainHero被俘时的Ransom menu | 本机1.4.8 Barterable请求/Apply源码链确认Party prisoners及特定Clan dungeon prisoners候选；场景上下文/视觉、金额呈现与关系结果未运行核验；Chronicle无Barter适配 | F12/E10/J08、`SetPrisonerFreeBarterBehavior.CheckForBarters`、`SetPrisonerFreeBarterable.Apply`、`EndCaptivityAction` |
 | ACT-G01-01 | 行为 | 遭遇菜单选择 Attack/Lead an assault等进入实时Mission | 创建对应MapEvent并打开Mission，受类型/装备/围城/兵力条件限制 | Chronicle未实现通用Mission进入/战斗控制 | G01/G03/K06、PlayerEncounter |
 | ACT-G01-02 | 行为 | Encounter选择Send Troops/坐镇指挥 | 初始化BattleSimulation并结算Campaign MapEvent；与实时Mission伤亡/交互不同 | Chronicle确定性BattleSimulation可测试，非模型Provider不计自主能力 | G01/F10/G02/K06、MAINLINE BattleSimulation |
 | ACT-G01-03 | 行为 | Encounter选择Try to get away/撤离遭遇 | 依据追击/队伍/实力条件进行原生脱离尝试；失败可继续遇战，不等于Mission TAB retreat | Chronicle只处理已启动的战役Simulation retreat；通用逃脱未覆盖 | G01/K06、EncounterGameMenuBehavior |

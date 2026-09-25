@@ -345,6 +345,8 @@ Hero 俘虏可以存在于：
 
 ### 赎金与 Barter 转移
 
+玩家要通过普通领主Barter与对方谈判，BarterVM是否出现Hero俘虏条款由`BarterablesRequested`监听者按双方Party/Faction状态动态构造；Conversation/Barter入口和通用议价状态见 [E10](../E/EconomyAndTrade.md#e10-barter-交换谈判)，此处只记录俘虏状态变化。战后PartyScreen、主角被俘GameMenu与对话Barter不是同一入口。
+
 ### 赎金
 
 `RansomOfferCampaignBehavior` 会按日评估是否提出赎金，受以下因素影响：
@@ -361,7 +363,11 @@ Hero 俘虏可以存在于：
 
 ### 转移
 
-`TransferPrisonerBarterable` 允许在满足阵营敌对条件时通过 Barter 转移俘虏。转移本身不改变 Hero 个人关系。
+`TransferPrisonerBarterBehavior.CheckForBarters`遍历双方Party的`PrisonerHeroes`：一方所持的Hero若与对方Party所属Faction处于战争状态，就把该Hero作为`TransferPrisonerBarterable`加入俘虏Barter组，双方方向分别检查。玩家调整谈判条款并接受后，`TransferPrisonerBarterable.Apply`再次确认交战关系，并调用`TransferPrisonerAction`把Hero俘虏转入对方Party；此转移本身不改Hero个人关系。取消Barter则不调用Apply，因此不转移。
+
+此为对方Party接收仍处敌对关系Hero的“转交俘虏”行为，不能与释放混为一项。目录记录为`ACT-F12-01`，活跃议价盘的信息与报价状态共用`OBS-E10-01`。
+
+`SetPrisonerFreeBarterBehavior`会为双方Party持有的Hero prisoner检查其所属Faction是否未与对方Faction交战；满足时可加入`SetPrisonerFreeBarterable`。若一方Party领袖也是其Clan领袖，该方Clan的dungeon prisoners也会进入遍历。接受条款时，只要该Hero仍为prisoner，就以对方Hero作为`ransompayer`调用`EndCaptivityAction.ApplyByRansom`。这条Barter释放路径可以涉及补偿，但不等同MainHero自己在PlayerCaptivity菜单接受定期Ransom offer；目录记录为`ACT-F12-02`。具体候选对象在玩家屏幕中如何排序/显示、金额与关系效果如何体现，尚未运行核实。
 
 ### 自动释放
 
