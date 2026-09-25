@@ -36,6 +36,39 @@ Chronicle `AgentObserver` 当前以 MainParty 位置和 `max(12, SeeingRange)` �
 
 玩家地图点击并进入城镇/城堡/村庄等入口属于聚落访问与地图移动契约（D09及 MAINLINE 对应动作），D01 只界定对象与状态归属，不把点击、进入场景或菜单行为误写成 Settlement 基础字段的副作用。
 
+## D02 城镇发展状态与每日更新
+
+### 状态更新入口
+
+`Town` 提供 `ProsperityChange`、`FoodChange`、`LoyaltyChange`、`SecurityChange`、`MilitiaChange` 和 `Construction` 等派生计算值；对应的 `...Explanation` 属性调用同一个模型并要求附带逐项解释。它们不是互相独立的常数，而是读取当前 Settlement、Town、Village、派系政策、建筑、总督、驻军、Issue 等状态后由 `Campaign.Current.Models` 计算。
+
+`Town.DailyTick` 将忠诚度和安全度分别加上模型变化值；有库存时触发 Owner 的食物消耗，然后按 `FoodChange` 更新食品库存并夹在 0 与 `FoodStocksUpperLimit()` 之间。库存耗尽会将 Owner 的 `RemainingFoodPercentage` 置为 -100；库存未耗尽则重置为 0。之后该日常更新继续处理繁荣度、民兵与城墙维修。Loyalty、Security 属性被限制在 0–100；Prosperity 属性只设有 0 下限，没有同样的固定上限。
+
+建筑由独立的 `BuildingsCampaignBehavior` 订阅 `DailyTickSettlementEvent` 处理：AI 所有的聚落会分别进行是否补建设队列、是否切换日常项目的随机判断；当前非日常项目且未围城时，以 `Town.Construction` 增加建设进度，并检查是否升级完成。队列权限、玩家建筑操作和项目细节归 D05/D06，不把这段引擎更新当作玩家菜单操作。
+
+### 各发展量的主要计算输入
+
+- **繁荣度**：模型综合食物短缺/盈余、城镇人口住房成本档位、市场售出且带繁荣加成的商品、建筑效果、总督特长、忠诚度条件及 Issue 效果。住房成本项会随当前繁荣度档位变化；城堡与城镇共享模型，但部分住房/市场计算只适用于 Town.IsTown。
+- **食物**：模型把地产与未被掠夺的绑定村庄、建筑和政策等生产项，与繁荣度/驻军规模对应的消耗项相减，再合入 Issue 效果；非围城与围城采用不同的生产分支。另一个参数可选择是否把市场售出商品日志中的食物库存加成计入。每日更新最终限制库存范围，因此“每日净变化”不等于库存一定按该数值无限累积。
+- **忠诚度**：输入组包括食物库存、总督/领主文化、政策、聚落项目、Issue、安全度、要人关系、总督特长和忠诚度漂移。具体解释可由 `LoyaltyChangeExplanation` 请求；基于名称不能把某一项单独视为决定因素。
+- **安全度**：输入组包括附近被感染的藏身处、绑定村庄被掠夺、围城、繁荣度、驻军力量、政策、总督、项目、Issue、特长、漂移、建筑与巡逻队。故安全并非仅由“当前驻军人数”决定。
+- **民兵**：模型含要塞/村庄基础生成、现有民兵自然流失、繁荣度（要塞）或 Hearth（村庄）、叛乱低忠诚条件、市场特定商品、政策、文化、建筑、总督特长和 Issue 等输入。D04 再展开村庄民兵，D07 再展开驻军构成与管理。
+- **建设能力**：每日建设模型以繁荣度为基础，并可叠加建设加速消耗、总督技能/特长、建设相关市场商品、建筑效果和忠诚度条件。建设能力只是可用进度值；当前项目、围城和队列决定其是否实际转成 BuildingProgress。
+
+### 状态之间的反馈与边界
+
+这些量形成原版内循环：食物库存变化会影响繁荣与忠诚；繁荣既是独立目标，也进入食物消耗、安全修正、民兵生成和建设能力；安全、忠诚、驻军、村庄受损和政策再反向改变每日变化。模型通过 `ExplainedNumber` 汇总正负项和倍率，而不是每个状态只有一条固定增减公式。某次行动可以通过原版模型间接影响多项城镇指标，但本节不据此提议或实现玩家行为。
+
+Campaign 时间仍由全局时间控制推进；普通读取这些派生值不会推进时间，城镇日常更新属于 Campaign 的聚落日 tick。此处的源码核对没有运行定时快进验证每项更新的确切执行先后，也没有改变时间或写入存档。
+
+### 玩家与 Agent 的当前信息面
+
+地图上的附近 Settlement 快照仍只给出 D01 所列的六项信息；`AgentObserver` 不读 Town 的繁荣、食物、忠诚、安全、民兵、建筑进度、驻军或总督，也不输出这些模型的 Explanation。玩家在聚落/领地/百科界面实际能看到哪些数值、在哪一页看到、是否有条件限制，本轮没有做界面运行验证，归 D09 的入口盘点交叉确认。当前只能确定游戏逻辑持有这些状态，不能据此说 Agent 已感知或能管理它们。
+
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `Town`、`DefaultSettlementProsperityModel`、`DefaultSettlementFoodModel`、`DefaultSettlementLoyaltyModel`、`DefaultSettlementSecurityModel`、`DefaultSettlementMilitiaModel`、`DefaultBuildingConstructionModel`、`BuildingsCampaignBehavior`；Chronicle `AgentObserver.cs`。其中模型默认实现是安装版本源码证据，不意味着其他 Mod 替换模型时数值保持相同。
+
+未知项：玩家界面中这些变化值/解释字段的逐页呈现与操作入口；日 tick 内各行为订阅者之间的完整执行次序及其跨版本稳定性；经济、建筑、总督、驻军、叛乱、Issue 对指标的全部子公式与边缘条件；当前 Agent 是否应在特定观察请求中按需读取其中某些状态，留待全域盘点及后续设计讨论，不在本研究中预判。
+
 ### 时间与证据边界
 
 D01 中的实体分类、所有权查询与绑定关系是读取对象状态，不会自行推进 Campaign 时间。城镇/村庄的每日状态计算由各组件的 `DailyTick` 执行，并受 Campaign 时钟调度；具体数值模型和状态变化分别留给 D02-D04。直接读取属性不等价于玩家打开地图百科或聚落界面；本节没有声称 UI handler 与直接 API 的完整交互已经运行验证。
@@ -46,4 +79,4 @@ D01 中的实体分类、所有权查询与绑定关系是读取对象状态，�
 
 ## 研究范围状态
 
-D01 已完成首轮静态对象与 Observer 覆盖盘点。D02-D10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 D 域范围逐项核对，不将此文档视作聚落系统整体已完成。
+D01-D02 已完成首轮静态对象、日常模型和 Observer 覆盖盘点。D03-D10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 D 域范围逐项核对，不将此文档视作聚落系统整体已完成。
