@@ -83,7 +83,7 @@ if (-not (Test-Path -LiteralPath $sourceManifestPath)) { throw 'The version-cont
 [xml]$sourceModuleManifest = Get-Content -LiteralPath $sourceManifestPath -Encoding UTF8
 if ([string]$sourceModuleManifest.Module.Id.value -ne 'ChronicleFramework') { throw 'The version-controlled manifest must declare ChronicleFramework.' }
 if ($PSCommandPath -and ((Get-Content -LiteralPath $PSCommandPath -Raw -Encoding UTF8) -match '(?m)^\s*\$markdownBudget\s*=|^\s*\$byteBudget\s*=')) { throw 'Documentation byte/count ceilings must not force compression; use routing and informational size reporting.' }
-if ($developmentDoc -notmatch '文档管理优先保证可读性' -or $developmentDoc -notmatch '不以总字数或文件总数强迫压缩' -or $rootAgents -notmatch '每个 `Research/<类别>/` 默认维护一份权威文档') { throw 'Documentation policy must preserve readable documents and the one-authority-file-per-research-category rule.' }
+if ($developmentDoc -notmatch '文档管理优先保证可读性' -or $developmentDoc -notmatch '不以总字数或文件总数强迫压缩' -or $rootAgents -notmatch '每个 `Research/<类别>/` 只维护一份权威文档') { throw 'Documentation policy must preserve readable documents and the one-authority-file-per-research-category rule.' }
 if ($harnessScript -notmatch "VisualCapture'\s*\{\s*@\('Preflight', 'Build', 'VisualCapture'\)") { throw 'VisualCapture phase must run Preflight and Build before its capture test.' }
 if ($harnessScript -notmatch "FreshCampaign'\s*\{\s*@\('Preflight', 'Build', 'FreshCampaign'\)") { throw 'FreshCampaign phase must run Preflight and Build before its test.' }
 if ($harnessScript -notmatch "FreshCampaignProgression'\s*\{\s*@\('Preflight', 'Build', 'FreshCampaignProgression'\)") { throw 'FreshCampaignProgression phase must run Preflight and Build before its test.' }

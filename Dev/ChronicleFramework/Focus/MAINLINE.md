@@ -149,29 +149,32 @@ Mindcraft 将命令路由、ActionManager、SelfPrompter、History、SkillLibrar
 
 ```mermaid
 flowchart TD
-    Codex[Codex 战略规划器] --> CLI[Campaign Agent CLI]
-    CLI --> Protocol[版本化命令/状态协议]
+    Player[玩家：安装产品/配置模型一次/启动 AI] --> ProductShell[产品启动与运行管理]
+    ProductShell --> Runtime[Chronicle Agent Runtime]
+    Runtime --> Provider[可替换模型 Provider]
+    Runtime <--> Protocol[版本化游戏 Agent 协议]
     Protocol --> Bridge[AgentBridgeBehavior]
-    Bridge --> Collector[状态收集器]
-    Bridge --> Dispatcher[白名单动作调度器]
+    Bridge --> Collector[引擎状态收集器]
+    Bridge --> Dispatcher[白名单原生动作适配器]
     Bridge --> Journal[事件/命令日志]
-    Collector --> Campaign[原生战役系统]
-    Dispatcher --> Campaign
-    Campaign --> Collector
-    Collector --> Verifier[确定性验证器]
-    Verifier --> Skills[技能状态机]
-    Skills --> CLI
-    Verifier --> Memory[工作记忆/情节/技能/完整轨迹]
-    Memory --> Codex
-    Harness[进程/存档/崩溃/模组矩阵] --> CLI
-    UI[Computer Use] -.无原生接口时.-> Dispatcher
+    Collector <--> Engine[Campaign/GameState/UI ViewModel/Mission]
+    Dispatcher --> Engine
+    Engine --> Collector
+    Collector --> Verifier[确定性后置条件核验]
+    Verifier --> Planner[目标/计划/重规划]
+    Planner --> Skills[可恢复技能状态机]
+    Skills --> Runtime
+    Verifier --> Memory[目标/事件/技能/checkpoint/完整轨迹]
+    Memory <--> Runtime
+    DevHarness[开发期 Test Harness] -.启动/遥测/回归证据.-> Protocol
+    DevCodex[Codex 仅为开发工具] -.开发期操作.-> DevHarness
+    RuntimePlacement[Runtime 最终放入 Mod 还是由产品透明管理的本地 Host：W6 证据决策] -.运行部署边界.-> Runtime
 ```
 
-- Mod 内只做安全读取、白名单动作、事件记录和存档状态，不运行 LLM；
-- CLI 提供一次性命令、JSON、超时、会话和可重放轨迹；
-- 技能状态机承担重复多步流程和局部恢复；
-- Codex 只在目标选择、权衡、异常解释和重规划时介入；
-- Computer Use 是回退适配，不是真值来源。
+- 游戏内 Mod 是深入 Bannerlord 引擎的身体：从当前 Campaign、GameState、原生菜单/ViewModel、Mission 与事件生命周期收集信息，并把 Agent 意图映射到有前置/后置条件的原生动作；不能用外部脚本伪造游戏结果。
+- Agent Runtime 是交付给玩家的自主决策系统，包含模型 Provider、目标规划、技能状态机、记忆、验证和重规划。部署到游戏进程内还是由产品透明管理的本地 Host，仍由 W6 的原型证据决定；无论边界如何，玩家都只安装/启动一个产品并配置模型一次。
+- Codex、MCP、开发用 CLI、Computer Use 与 Test Harness 只属于开发工具，不是交付依赖、产品界面或 Agent Runtime。若 Agent Runtime 位于进程外，它必须随产品被透明部署/启动/更新/停止，玩家不能被要求自行准备 Python/Node 等开发运行环境。
+- 游戏进程只执行协议允许的结构化读取与白名单动作；不得执行模型任意生成代码。模型调用不能阻塞 Campaign/UI 主线程。
 
 ## 状态、记忆与动作
 
