@@ -14,6 +14,7 @@
 - [MechanicGate] 实现任何原版玩家动作前，必须先在现有 `Focus/MAINLINE.md` 的“原版机制契约”记录：玩家实际入口/按键修饰、原版自然状态变化、Campaign 时间模式如何流动、直接 API 与 UI handler 的差别、当前证据和未知项。不得从 API 名称、其他游戏经验或想当然推导玩家体验。
 - [ClockPolicy] 时间流动与地图/菜单动作分开建模：若原版时间模式正在运行，世界会自然推进；仅在明确的时间控制/固定步进或 Harness 需要确定性时调用时钟控制。移动、追近、进入定居点等动作不得为了让测试快结束而暗中强制快进或暂停；任何宏动作都须显式标记为 Harness/Agent Host 策略，不得冒充原版玩家动作。
 - [ProgressMetrics] GitHub Project是唯一工作项状态源；领域/行为分母与可重复验收定义在 `Focus/MAINLINE.md`，单次运行结果和可计算的通过/失败数在本地 `TestResults`。不能把命令次数或验证夹具通过率当作Agent自主能力。
+- [ProductTaskScope] GitHub Project只列直接形成Chronicle项目内容/成果的事项：Bannerlord系统研究、玩法设计、Mod能力与面向玩家的验收。Agent/Harness/文档/流程的内部结构维护不是产品任务，必要时直接维护、测试并提交，不创建路线图Issue或用其充当阶段产出；仅在用户明确要求把基础设施本身作为交付物时例外。
 - [HarnessBoundary] GitHub Issues/Projects只管任务、依赖和协作状态；Git只管代码历史；本地Harness只管游戏/工具环境、可重复测试和原始运行收据；Agent负责研究、判断、目标分解和异常后的下一步。Harness不读取或镜像项目板，也不需登录GitHub即可测试。不得在Markdown复制动态任务状态。
 - 静态源码无法判明交互链时，先追到 UI 入口、输入修饰与副作用；仍无法验证且会改变实现的玩家体验事实时，向用户提出一个具体、最小的问题，不得先选架构再补解释。
 - 不把“能启动”“能进主菜单”“加载 DLL”“进入战役”“行为已触发”当成同一个结论。

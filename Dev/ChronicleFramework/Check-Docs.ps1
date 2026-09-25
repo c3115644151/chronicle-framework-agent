@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '4.80'
+$contractVersion = '4.81'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -138,7 +138,7 @@ if ($freshCampaignTest -notmatch 'CHRONICLE_CAPTURE_CRASH_EXCEPTION' -or $freshC
 if ($freshCampaignTest -notmatch 'Start-ChronicleWindowVideoCapture' -or $freshCampaignTest -notmatch 'Stop-ChronicleWindowVideoCapture' -or $freshCampaignTest -notmatch 'CrashReport-\$bannerlordPid\.mp4' -or $freshCampaignTest -notmatch 'crashCaptureGraceActive' -or $freshCampaignTest -notmatch 'CrashWindowCaptureError') { throw 'FreshCampaign must capture an actual crash-report window into keyframe evidence before cleanup.' }
 if ($freshCampaignTelemetry -notmatch 'fresh-campaign-visible-issues' -or $freshCampaignTest -notmatch 'VisibleIssueTypesBySettlement') { throw 'FreshCampaign must record local issue types for route research.' }
 if ($freshCampaignTelemetry -notmatch 'FreshCampaignHarness\.ProbeLocalIssueConversation') { throw 'FreshCampaign must probe the local native issue dialogue after character creation.' }
-foreach ($requiredText in @('MechanicGate', 'ClockPolicy', 'ResearchFirstGate', 'DecisionGate', 'PlainLanguageHandoff')) {
+foreach ($requiredText in @('MechanicGate', 'ClockPolicy', 'ResearchFirstGate', 'DecisionGate', 'PlainLanguageHandoff', 'ProductTaskScope')) {
     if ($rootAgents -notmatch [regex]::Escape($requiredText)) { throw "Root AGENTS.md is missing mechanic-contract rule '$requiredText'." }
 }
 if ($rootAgents -notmatch 'HarnessBoundary' -or $rootAgents -notmatch 'Harness不读取或镜像项目板') { throw 'AGENTS.md must preserve the GitHub/Git/Harness/Agent responsibility boundary.' }
