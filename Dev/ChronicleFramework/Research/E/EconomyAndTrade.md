@@ -1,6 +1,6 @@
 # E 类研究：经济与贸易
 
-状态：机制盘点中；E01-E07 已完成首轮盘点，目前研究 E08 Kingdom 财政，未进行方案评审。
+状态：机制盘点中；E01-E08 已完成首轮盘点，目前研究 E09 Trade 技能与贸易经验，未进行方案评审。
 
 适用本体：Bannerlord v1.4.8.119303。基于当前安装 `TaleWorlds.Core.dll`、`TaleWorlds.CampaignSystem.dll`、官方模块物品 XML 和 Chronicle 本地 Observer/Protocol 源码。静态对象核对不表示物品市场或背包 UI 已运行验证。
 
@@ -256,6 +256,30 @@ Chronicle Observer 不返回玩家所属 Kingdom ID/预算钱包/Tribute、Merce
 
 未知项：TributeWallet/MercenaryWallet/CallToWarWallet 所有正负余额的写入者、清零条件与跨 Kingdom 转账完整事件序；`KingdomManagementVM` 是否通过间接 formatter 显示预算值、K页面的准确菜单分区和权限；各 Kingdom 政策对领主 Clan Gold 或王国预算池影响的完整消费者；NPC预算自动注资随机结果、Clan财政/预算现金实际写入时序与存档恢复行为；其他 Mod 替换 ClanFinanceModel 对钱包规则的改写。
 
+## E09 Trade 技能、经验与 Perk
+
+### 玩家交易导致的 Trade XP
+
+本机 `TradeSkillCampaignBehavior` 监听 `PlayerInventoryExchangeEvent`。交易时，它为未加 ItemModifier 的 ItemObject 保存玩家购买件数和平均采购价；之后卖出时只对此前记录的购买数量计算可确认的正利润，按玩家本次卖出份额与历史平均采购成本比较，才调用 `SkillLevelingManager.OnTradeProfitMade(PartyBase.MainParty, profit)` 并发出 `OnPlayerTradeProfit`。没有采购记录、没有实现利润、带 ItemModifier 的装备以及非 `isTrading` 的转移都不等价于这个 Trade-XP 事件。
+
+这套经验判定在内存/存档中维护按物品的交易数据；它不是只看本次卖出价格高于 ItemObject.Value，也不是所有获得金币都会被认定为 Trade Profit。`GetProjectedProfit` 用记录的平均买入价与查询价格估算利润，但此提示数值不替代提交交易后的实际 Skill XP 结果。
+
+### 技能对价格的影响
+
+`DefaultPartyTradeModel.GetTradePenaltyFactor` 通过 `DefaultSkillEffects.TradePenaltyReduction` 计算 Party 的交易惩罚倍率；`DefaultTradeItemPriceFactorModel` 再将它用于 Context TradePenalty。模型还按照买卖方向、Town/Village/Caravan seller、与 Settlement 派系关系、贸易商品/动物/普通装备、战争关系等加入不同惩罚；多个 trade Perk 直接参与其加成/折减，例如 WholeSeller、Appraiser、Granary Accountant、Village/Rumor Network、Caravan Silver Tongue 等。明细规则见 E02，不将“Trade Skill 等级”误当成单一固定价格百分比。
+
+工坊转换速度、Caravan 的买卖决策、村庄生产、Workshop/Trade Rumor 等也会读取 Trade Skill/Perk；有关收益/所有权流分别见 E03-E08。Barter 中 Trade 技能的议价加成及双方接受条件留待 E10，不重复当作 Inventory 交易 XP。
+
+### 玩家入口与 Chronicle 当前覆盖
+
+玩家在 Town `trade` 菜单进入原生 InventoryState 执行交易，完成 Transaction 后才触发 PlayerInventoryExchangeEvent；对话 barter、任务奖励、Party loot、Workshop 自动产出及 Caravan 自动买卖是不同来源，不能因为改变 Gold 就推定 Trade XP。该入口路径见 D09/E02。
+
+Chronicle `AgentProvisioning.TradeItem` 用 InventoryLogic 的 TransferCommand/DoneLogic执行城镇市场买卖，回执核对库存、金币与食物差额；理论上交易提交会接入原版 PlayerInventoryExchangeEvent，但当前回执并不核验 Trade Skill XP、ItemsTradeData 或 `OnPlayerTradeProfit`，所以只能记作可能经过原版事件链，不标为已测试 XP 成长。Observer 不输出 Trade 技能等级、学习率、Perk/XP或 ItemTradeData，Protocol 也没有 Trade技能分配/查询命令。
+
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `TradeSkillCampaignBehavior`、`DefaultPartyTradeModel`、`DefaultTradeItemPriceFactorModel`、`SkillLevelingManager.OnTradeProfitMade`；`TaleWorlds.CampaignSystem.ViewModelCollection.dll` Trade Skill/Character VM；Chronicle `AgentProvisioning.cs`、`AgentObserver.cs`、`AgentProtocol.cs`。版本 v1.4.8.119303 静态源码核对；没有跑实际交易后Trade XP增量及存档重载验证。
+
+未知项：所有 Trade Perk 对价格/XP/结算的写入点和副作用；多个交易订单/部分卖出/回购/市场退货等情况下平均买入成本数据如何更正；NPC Caravan/贸易委托、Workshop 产出的价格变化是否给主角 Trade XP；Trade XP 最终调用和 CharacterDeveloper UI 增长显示间的用户可见结果；存在其他 Mod 交易监听器时事件顺序。
+
 ## 研究范围状态
 
-E01-E08 已完成首轮物品、市场、村庄供应链、Workshop、Caravan、Party/Clan与Kingdom财政盘点。E09-E10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 E 域范围逐项核对，不把这些子系统的静态首轮盘点视作经济与贸易系统整体完成。
+E01-E09 已完成首轮物品、市场、村庄供应链、Workshop、Caravan、Party/Clan/Kingdom财政和Trade技能盘点。E10 Barter 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 E 域范围逐项核对，不将首轮研究误报为完整可运行的 Agent经济能力。
