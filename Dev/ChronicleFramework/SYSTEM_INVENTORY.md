@@ -401,21 +401,28 @@ E03、E06、E08、E09、E10的大量变化由每日模型、其它玩家动作�
 | 系统ID | 映射到的观察面/行动族 | 去重/未决 |
 | --- | --- | --- |
 | F01 MobileParty | `OBS-F01-01`附近可见队伍摘要/玩家队伍状态；地图移动/追击/停步映射`ACT-K02-01`、`ACT-K02-03`、`ACT-K02-05` | 同一Party的对象/AI/roster字段不应拆成每个属性一个观察族 |
-| F02-F04 Party AI/行为/Think | NPC行动结果在地图/Army/Siege显示；无通用玩家“指定NPC想法”按钮 | `AiPartyThinkBehavior`/分数模型是后台，不单独计玩家ACT；玩家可通过Army/War动作间接影响 |
-| F05 Army | `OBS-F05-01`Kingdom Army管理视图；管理己方Army `ACT-F05-01`、解散`ACT-F05-02` | 调整cohesion/邀请party/取消属于一个VM事务还是多族，按结果提交边界核实 |
-| F06 Clan War Party | 家族Party/Leader/上限可见于Clan面板，创建行为候选`ACT-F06-01` | NPC War Party自动生成不是玩家按钮；与Army附属关系分开 |
-| F07-F08 战争目标/围城周期 | Siege/War状态观察映射`OBS-F08-01`；K地图移动/Army和G战斗入口承担玩家动作 | 战略目标评分/工程进度自动tick不当成直接玩家指令 |
-| F09 Raid/Defense | 村庄遭遇中`ACT-F09-01..03`劫掠/强征志愿兵/强征物资；防守进入G战斗路径 | 三类村庄Hostile action后果不同，不能只按Encounter菜单共用一个行为ID |
-| F10 BattleSimulation | `OBS-F10-01`模拟状态/胜负；坐镇动作映射`ACT-G01-02` | Campaign战斗simulation不等于Mission实时操作 |
-| F11 troop training/recovery | Party Screen roster观察映射`OBS-B03-01`、`OBS-E06-01`；玩家升级映射`ACT-H04-01` | 自动NPC升级/治疗/逃兵不是玩家动作 |
-| F12 prisoners | Prisoner roster映射H04/F12；Hero释放/Barter交互映射I03/I04等 | capture/release action effect需跟触发入口分开 |
-| F13 Army decisions | 领主自动组军/加入/解散映射`OBS-F05-01`；玩家邀请`ACT-F05-01`/解散`ACT-F05-02` | NPC“意愿”不等于独立谈判确认 |
-| G01 Encounter | `OBS-G02-01`当前MapEvent双方上下文；Attack`ACT-G01-01`、SendTroops`ACT-G01-02`、escape`ACT-G01-03`、surrender`ACT-G01-04`、join/help/leave`ACT-G01-05` | 选项的玩家行为、BattleSimulation与Mission入口须分开 |
-| G02 MapEvent | 双方Party、参战/胜负状态映射`OBS-G02-01` | 增援/战斗结算是参与/事件过程，不再复制为每个Party action |
-| G03 BattleMission | `OBS-G03-01`实际Mission状态；真实玩家3D输入族目前是待覆盖范围 | mission retreat映射`ACT-G03-01`；自动send troops不是实时Mission |
-| G04 Formation/G05 Orders | 编队/当前命令映射`OBS-G04-01`；部署候选`ACT-G04-01`、Mission Order候选`ACT-G05-01` | 不按F键/按钮个数计动作，需按command target与结果拆分 |
-| G06 Tactics/G07 Morale/G09 Resolution | Mission AI/士气/伤亡/击倒属于观察结果族，敌方AI内部Tactic没有玩家直接控制入口 | 没有直接玩家affordance的不做虚构ACT；投降/撤退依具体战斗上下文区分 |
-| G08 Siege Mission/G10 Battle Rewards | Siege mission status/奖励流映射`OBS-G08-01/OBS-G10-01`；真实指令依`ACT-G05-01`或遭遇G01选项 | Siege Campaign/Event和Siege Mission上下文分开；奖励属于结果，不是玩家按键action |
+| F02 Party AI | NPC行动结果在地图/Army/Siege中可观察；内部自主决策记`N/A-F02-01`，玩家影响环境映射至真实战争/军团动作 | `AiPartyThinkBehavior`目标执行属于后台决策；具体可见结果不保证能观察到NPC意图 |
+| F03 AI行为类型 | Party概要复用`OBS-F01-01`；地图提示/行为标记为候选`OBS-F03-01` | `AiBehavior`枚举不是玩家命令；UI是否直接显示具体行为未核，候选不计最终分母 |
+| F04 Party Think | NPC长期/短期目标评分复用`N/A-F02-01`；影响其条件的玩家动作映射Army/外交/地图行为族 | 不把Think、行为切换或评分模型另计玩家动作；UI是否揭示选择理由未知 |
+| F05 Army | `OBS-F05-01`Kingdom Army管理视图；管理己方Army为`ACT-F05-01`、主动解散为`ACT-F05-02` | 调整cohesion/邀请party/取消的提交边界以Army VM事务为准；自动解散与主动解散分开 |
+| F06 Clan War Party | 家族Party信息复用`OBS-B05-01`/`OBS-F01-01`；创建玩家Clan War Party候选`ACT-F06-01` | NPC War Party自动生成不是玩家按钮；玩家创建流程/权限仍待UI核实 |
+| F07 战争目标 | 军团目标复用`OBS-F05-01`，围城状态复用`OBS-F08-01`；非Army Party战略目标候选`OBS-F07-01` | 无通用玩家菜单替NPC指定下一目标；候选观察未证实目标能被玩家稳定读到 |
+| F08 Siege | 战略围城状态为`OBS-F08-01`；进入攻城Mission/坐镇/离开按G01遭遇分支和真实Mission动作映射 | Campaign围城周期、围城菜单及攻城Mission是不同状态层，不合并成“攻城”动作 |
+| F09 Raid/Defense | 村庄遭遇`ACT-F09-01`劫掠、`ACT-F09-02`强征志愿兵、`ACT-F09-03`强征物资；防守进入G战斗路径 | 三类村庄敌对行动后果不同；AI防守目标不是玩家可指定的直接动作 |
+| F10 BattleSimulation | `OBS-F10-01`模拟状态/胜负；坐镇动作映射`ACT-G01-02` | Campaign战斗simulation不等于Mission实时操作；战后伤亡/奖励还映射G09/G10结果观察 |
+| F11 troop training/recovery | Party Screen roster观察`OBS-H04-01`；玩家升级`ACT-H04-01`、普通俘虏招募`ACT-H04-02` | 自动NPC升级/治疗/逃兵不是玩家动作；不同PartyScreen上下文仍需交叉去重 |
+| F12 prisoners | 俘虏Roster观察`OBS-H04-01`/`OBS-H12-01`；主角赎金`ACT-H12-01`/`ACT-H12-02`，主动释放/转移/招募待具体入口核实 | capture/release结果与玩家处置动作分开；敌方Hero与普通兵俘不是同一类 |
+| F13 Army decisions | 领主自动组军/加入/解散结果观察`OBS-F05-01`；玩家邀请`ACT-F05-01`/解散`ACT-F05-02` | NPC“意愿”不是独立谈判确认或玩家按钮 |
+| G01 Encounter | `OBS-G01-01`遭遇菜单双方/可用选项；Attack `ACT-G01-01`、Send Troops `ACT-G01-02`、escape `ACT-G01-03`、surrender `ACT-G01-04`、join/help/leave `ACT-G01-05` | 接敌、玩家选择、BattleSimulation与Mission入口须分开 |
+| G02 MapEvent | 双方Party/参战/战斗持续观察`OBS-G02-01`；真实开始战斗映射遭遇和村庄等发起动作 | 增援/战斗结算是事件过程或结果，不按每个参战Party复制玩家行为 |
+| G03 BattleMission | `OBS-G03-01`实际Mission状态；Mission入口复用`ACT-G01-01`；TAB撤退为`ACT-G03-01` | 实时Mission其余3D控制目前是待覆盖范围；Send Troops不是Mission |
+| G04 Formation | 编队/部署观察`OBS-G04-01`；配置部署候选`ACT-G04-01` | 不按F键/按钮计动作；不同Mission部署字段/确认仍需核实 |
+| G05 Orders | 当前编队/命令观察`OBS-G04-01`；Mission命令候选`ACT-G05-01` | 指挥种类的目标/效果需要按状态改变拆分，指令下达不等于执行成功 |
+| G06 Tactics AI | AI执行结果观察复用`OBS-G03-01`/`OBS-G04-01`；战术AI内部选择记`N/A-G06-01` | 战术AI不是玩家可直接选择的菜单动作；玩家显式下令才映射G05 |
+| G07 Morale | 士气HUD/战斗提示暂列候选`OBS-G07-01` | Research记录了士气机制但尚未核当前画面是否显示数值或溃败提示；候选不计最终分母 |
+| G08 Siege Mission | 实时攻城器械/城门/双方状态观察`OBS-G08-01`；真实指令复用`ACT-G05-01`及G01遭遇分支 | SiegeEvent、战术菜单和实时攻城场景分层；不可用战略围城字段替代Mission状态 |
+| G09 Combat Resolution | 战后伤亡/俘虏/战利品结果复用`OBS-G10-01`；Hero俘虏处置映射F12/H12 | 结算是多个遭遇入口的后果阶段，不是玩家直接“结算”动作；各路径模型差异须保留 |
+| G10 Battle Rewards | 领奖结果复用`OBS-G10-01`；经验/声望/影响力/物品均作为触发行为的后果 | 奖励模型不是独立玩家按钮；Simulation夹具不能代替自然战斗奖励证据 |
 
 #### F-G域首轮行动/观察定义
 
@@ -500,27 +507,6 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 
 上述H05 companion招募实际Conversation路径、H08装备事务的完整确认边界、H12 captivity菜单各结果和I10 Persuasion的当前统计面均仍是候选映射；相关ID可以追溯，但在入口/条件/失败恢复验证前不能把“映射存在”当成覆盖或最终穷举。
 
-### F域系统与目录族映射
-
-| 系统ID | 已发现入口/观察族 | 去重与未决 |
-| --- | --- | --- |
-| F03 AI行为类型 | 附近Party概要复用`OBS-F01-01`；地图提示/行为标记暂列`OBS-F03-01`候选 | `AiBehavior`枚举是引擎地图状态，不是玩家可逐项下达的NPC命令。当前资料证明了行为对象与AI路径，尚未证明原版UI会直接展示具体行为类型；候选观察不计入最终OBS分母 |
-| F07 战争目标 | 军团目标复用`OBS-F05-01`，围城状态复用`OBS-F08-01`；非Army Party的战略目标暂列`OBS-F07-01`候选 | 玩家可通过外交、阵营转换和实际战争行动改变AI候选的环境，但无通用菜单替NPC指定下一目标。当前Observer不返回NPC目标评分/完整目标；是否有可见原版目标提示仍待核 |
-
-### G域系统与目录族映射
-
-| 系统ID | 已发现入口/观察族 | 去重与未决 |
-| --- | --- | --- |
-| G01 Encounter | `OBS-G01-01`遭遇界面中的双方/可用选项；战斗、坐镇、脱离、投降及援助分别映射`ACT-G01-01`至`ACT-G01-05` | 接触地图Party只是进入遭遇的前置；接战后是否进入Mission或BattleSimulation取决于玩家选择，不能合并成一个“遭遇动作” |
-| G02 Map Event | 战斗持续状态复用`OBS-G02-01`；创建遭遇/战斗映射G01及F09等真实发起动作 | `MapEvent`是Campaign战斗容器；有事件对象不代表每个参战Party或伤亡贡献都能由当前玩家界面/Observer观察 |
-| G03 Battle Mission | Mission状态复用`OBS-G03-01`；进入Mission映射`ACT-G01-01`，TAB退出映射`ACT-G03-01` | Battle Mission与坐镇模拟是不同分支；Chronicle无一般实时作战控制闭环 |
-| G04 Formation | 部署/编队观察复用`OBS-G04-01`；部署配置为候选`ACT-G04-01` | 编队类别与Mission类型、阶段和兵种相关；部署/确认入口未完成玩家UI核实 |
-| G05 Orders | 编队指挥状态观察复用`OBS-G04-01`；下达战术命令为候选`ACT-G05-01` | 同一Order菜单可产生移动、阵型、朝向、骑乘/射击及器械目标等不同状态；指令录入与部队执行到位必须分别核验 |
-| G06 Tactics与战术AI | AI执行结果可能反映在`OBS-G04-01`/`OBS-G03-01`；AI选择/执行战术本身记为`N/A-G06-01` | 战术AI是Mission自动决策机制，不是玩家可点选的独立动作；玩家显式下令归`ACT-G05-01`，不能把AI内部决策重复计数 |
-| G07 Morale | 战斗士气状态暂列`OBS-G07-01`候选；士气变化由Mission遭遇、战果和士兵行为等真实动作产生 | 目前Research覆盖了士气机制，但没有完成玩家HUD/提示可见字段核对；候选观察不计入最终分母，不将幕后morale数值等同玩家可读信息 |
-| G08 Siege Mission | 实时器械/城墙/攻守观察复用`OBS-G08-01`；进入攻城战按`ACT-G01-01`，Mission指挥复用候选`ACT-G05-01` | 战略SiegeEvent、围城菜单和Siege Mission是三个层次；不可用`OBS-F08-01`代替实时场景观察 |
-| G09 Combat Resolution | 战后伤亡/俘虏/战利品画面复用`OBS-G10-01`，俘虏处理另映射F12/H12；玩家主动Mission撤退为`ACT-G03-01` | 战斗结算是遭遇/坐镇/Mission的结果阶段，不计成直接“结算”动作；各入口伤亡模型与战后界面仍需区分核验 |
-| G10 Battle Rewards | 领奖结果观察复用`OBS-G10-01`；获得经验/声望/影响力/物品均是其它真实行为的后果 | 奖励计算不是独立玩家菜单动作；自然战斗结算与当前确定性模拟夹具证据不可互相代替 |
 
 ### J-L域初始交叉映射与目录族
 
@@ -589,6 +575,7 @@ F/G域行动族仍有候选项：真实Mission主角连续移动/攻击与Format
 | OBS-F07-01 | 候选观察 | 地图/军团/围城原生界面显示NPC Party或Army当前战略目标的状态 | AI军事目标是候选评分与行为执行结果；宣战关系、聚落归属、Army目标和短期导航目标不是同一字段 | 暂不计入最终OBS分母；需核实非Army Lord Party目标是否可通过玩家界面稳定观察，以及可见/过期条件 | F07/F02/F05/F08、AiMilitaryBehavior、AgentObserver；玩家UI字段未知 |
 | OBS-G01-01 | 观察 | Map encounter菜单中双方、遭遇类型和当前可用谈判/接战/脱离/投降选项 | 选项由双方Faction、事件类型、装备/兵力、围城及Mission状态筛选；菜单可用项不是已提交战斗结果 | Chronicle未提供通用Encounter菜单观察；各交战类型的选项集合与显示信息未全量验证 | G01、PlayerEncounter、EncounterGameMenuBehavior |
 | OBS-G07-01 | 候选观察 | Mission HUD/战斗提示若显示双方或部队士气、动摇/溃败状态 | 士气数值会受参战规模、伤亡、领导与场景行为改变；公开模型字段不代表HUD可见 | 暂不计入最终OBS分母；需核当前Mission HUD和提示的实际字段、粒度与刷新条件 | G07/G03、BattleMoraleModel、Mission morale logic；玩家UI消费者未知 |
+| N/A-F02-01 | N/A | NPC Party AI/Think自动选择和切换地图行为 | AI对NPC队伍自动计算行动，不存在由玩家直接指定“下一项默认行为/思考结果”的统一入口；玩家只能改变其决策环境或通过地图/军团系统交互 | 不计入ACT分母；观察到的结果仍按可见Party、Army、Siege或地图界面分别映射 | F02/F04、AiPartyThinkBehavior、MobilePartyAi、AiMilitaryBehavior |
 | N/A-G06-01 | N/A | Mission战术AI选择目标/阵型行为本身 | 属于部队AI自动计算；玩家通过下令影响其后的执行，不存在直接调用某个AI决策的原版菜单动作 | 不计入ACT分母；玩家Order入口单独映射`ACT-G05-01`，结果按`OBS-G03-01/OBS-G04-01`验证 | G06/G05、OrderController、Mission tactical AI |
 | ACT-G04-01 | 候选行为 | Battle Mission开战部署时配置Formation分类/队长/自动部署后Begin Mission | 改变任务内Formation分配和spawn安排；不同Mission类型部署选项有差异 | Chronicle未实现；各部署面操作/确认未知，暂不计最终分母 | G03/G04、OrderOfBattleVM/BattleDeploymentMissionController |
 | ACT-G05-01 | 候选行为 | Mission中选择Formation/兵种组并下达Movement/Arrangement/Facing/Riding/Firing/UsableMachine order | 只有适用Order与目标有效时才改变formation order；收到UI命令不等于Agent执行到位 | Chronicle没有BattleOrder动作/mission state反馈；快捷键/订单类型全量未列 | G04/G05/G06、MissionOrderVM/OrderController |
