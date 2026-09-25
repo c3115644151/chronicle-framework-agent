@@ -546,7 +546,7 @@ F/G中Mission主角移动/攻击、Formation orders及部署已作为真实玩�
 | J05 Incident | `OBS-J05-01` MapState当前Incident及条件选项；`ACT-J05-01`选择事件回应 | 每个Incident的Effect/Consequence按具体选项参数读取，不能合并不同事件后果 |
 | J06 Rumor | `OBS-J06-01`市场/玩家物品悬停中的异地买卖价格提示 | 同一ItemMenu消费者服务两侧；已有情报、具体物品、时效和价差共同筛选，专长可扩充来源；源码入口已确认，Chronicle尚未适配 |
 | J07 Notifications | Campaign Map Notice队列`OBS-J07-01`、QuickInfo瞬时提示`OBS-J07-02`、Scene通知`OBS-J07-03`分别观察 | A07记载LogEntry/百科日志；通知类分属不同存储/时间/宿主，不能与Log或彼此合并 |
-| J08 Conversations | `OBS-J08-01`当前Conversation Flow/参与者/选项；`ACT-J08-01`选择当前开放Dialogue option | Relation/Persuasion对话复用I09/I10的真实消费者，不重复文本条目 |
+| J08 Conversations | `OBS-J08-01`当前Conversation Flow/参与者/选项；选项导致的有效世界行为映射到Quest/政治/关系/Barter等所属ACT | `dialogueSelect`是通用输入操作而非独立玩家行为族：若某选项提交了有领域后果的状态变化，只计具体ACT；仅导航/读取文本造成的对话刷新并入OBS-J08-01，不按Sentence/API数计ACT |
 | J09 Persuasion | `OBS-J09-01`当前Persuasion task/进度/风险信息；`ACT-J09-01`提交Persuasion argument | 说服尝试是Conversation option的特殊子族，任务/求偶/政治用相同模型但不同后果 |
 | J10 Tournament | `OBS-J10-01`赛事/对手/排行榜；`ACT-J10-01/02`参与或观看 | Join真实Mission与Watch模拟不同；奖励引用G10/H11，不能固定当Renown按钮 |
 | J11 Board Games | `OBS-J11-01`对手/棋盘/当前局面；`ACT-J11-01/02`下注开局/棋盘落子 | Tavern dialog下注与Mission中棋盘走子是不同上下文；模型没有Campaign自主控制 |
@@ -560,7 +560,7 @@ F/G中Mission主角移动/攻击、Formation orders及部署已作为真实玩�
 | K07 Hideout | 藏身处地图/Encounter观察映射`OBS-K07-01`；攻/等夜/坐镇映射F/G/J实际行动 | Hideout发现、Campaign Wait和Mission战斗是不同路径 |
 | K08 Bandit Density | `OBS-K08-01`可见Bandit Party/Hideout密度线索 | 全图Spawn人口和计时是后台Campaign，玩家无“生成/减少密度”按钮 |
 | L01 XML / L02 XSLT | `N/A-L01-01`/`N/A-L02-01`标明无独立玩家动作；实际被加载对象/内容映射到使用它的行为族 | 数据源/转换手段作为证据与版本约束，不能按XML/XSLT文件数计ACT |
-| L03 Game Menu/L04 Dialogue | L03菜单与L04对话实际选项映射至所属Issue/Quest/政治/聚落/战斗行为族；通用Menu/Dialogue引擎不另计行为；对话当前项见`OBS-J08-01`/`ACT-J08-01` | 复用相同点击外壳不代表同一原生后果 |
+| L03 Game Menu/L04 Dialogue | L03菜单与L04对话实际选项映射至所属Issue/Quest/政治/聚落/战斗等行为族；通用Menu/Dialogue引擎不另计行为；对话当前项见`OBS-J08-01` | 复用同一点击外壳不代表同一原生后果；对话输入不再单独重复计作J08 ACT |
 | L05 Encyclopedia/L06 Notifications | 观察面映射A07、B及J的已有OBS ID | 显示页面/通知的技术View不额外算对象动作 |
 | L07 Scene/Mission | 场景状态/实时输入映射D/G/J的已有OBS/ACT ID | Scene类型和MissionLogic不是玩家按钮数量 |
 | L08 Localization | N/A玩家行动；文本呈现映射相应Menu/Dialogue/通知OBS | 语言字符串本身不改变Campaign状态 |
@@ -586,7 +586,6 @@ F/G中Mission主角移动/攻击、Formation orders及部署已作为真实玩�
 | OBS-J07-02 | 观察 | InformationManager QuickInformation/短时消息 | 由LogEntry/事件等消费端即时显示，不作为长期可回看的Notice队列；显示持续时间/宿主状态和持久日志不同 | Chronicle Observer不读取QuickInfo消息/队列；过期时间、被遮挡时是否保留和点击能力未核 | A07/J07/L06、`CampaignInformationManager.NewLogEntryAdded`、`InformationManager.DisplayMessage` |
 | OBS-J07-03 | 观察 | Mission/Scene局部通知、提示与可操作反馈；也覆盖Campaign状态下通过`ShowSceneNotification`显示的场景式对话/决策确认（如执行Hero弹窗的执行者/目标/Proceed） | 由具体`SceneNotificationData`类型决定；能承载待确认的动作提交，但不等同Campaign Map Notice或QuickInfo队列；具体宿主时间、确认/关闭后果按上下文ACT记录 | Chronicle无通用SceneNotification观察；全部类型、可见字段与关闭/宿主时间规则未视觉核验 | J07/F12/G03/L06/L07、`SceneNotificationData`、`HeroExecutionSceneNotificationData` |
 | OBS-J08-01 | 观察 | 活跃Conversation的发言人/Flow阶段/当下开放Option，包括由当前Courtship/Romance状态筛选出的开始/重试/Marriage Barter选项 | sentence condition、身份token、Task与关系筛选，不能扫描未开放Option；Romance选项不代表原始Romance数值 | Protocol提供有限Conversation state/option读取；这是J08/I09/I04共享的同一观察面 | I04/J08/I09/L04、ConversationManager/AgentObserver/Protocol、RomanceCampaignBehavior |
-| ACT-J08-01 | 行为 | 只选择当前Conversation实际开放且仍然valid的原生对话Option | Consequence可能启动Barter/Quest/Persuasion/Mission或改关系；context变化须重验 | Chronicle `dialogueSelect`仅限当前option列表；不支持全3D谈话接近 | J08/L04、ConversationManager/AgentProtocol |
 | OBS-J09-01 | 观察 | 当前PersuasionVM/Task的参与目标、阶段、剩余attempt、可用argument及其成功概率/当前进度 | options/chance依Task类型、Trait/Skill/Relation/difficulty；显示机会不等于最终检定结果 | Chronicle不输出完整PersuasionTask对象；I10/J09为同源信息，不重复计Observation | I10/J09、`PersuasionVM`、`PersuasionTask` |
 | ACT-J09-01 | 行为 | 在当前Persuasion task中选择一个真实可用argument | 单次尝试会提交随机/模型概率结果和进度/失败效果；不等于一般`dialogueSelect`不加上下文 | Chronicle没有专用Persuasion观察/回执及重规划 | J09/I10、DefaultPersuasionModel |
 | OBS-J10-01 | 观察 | Arena/Tournament菜单或TournamentLeaderboard查看可加入赛事/对手/排名 | 赛事随Town每日模拟生成/结束；观看排名不是参加Mission | Chronicle无Tournament state/list/player visual | J10、TournamentCampaignBehavior/Manager |

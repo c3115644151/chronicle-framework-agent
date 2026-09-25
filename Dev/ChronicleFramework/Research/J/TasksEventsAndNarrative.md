@@ -70,6 +70,8 @@ Chronicle当前未观察通知队列、优先级/已读/过期/目标点击行�
 
 玩家实际通过进入相应谈话对象/场景开始会面、选择当前开放句、继续/退出；场景交谈可能先经过3D移动、HUD互动、地图遭遇菜单或GauntletMission。Sentence consequence可调用多个Campaign actions或创建/更新Quest/Barter/Persuasion/Party状态。直接调用某个后果会绕过Sentence条件、当前Conversation状态、正常动画/离场和提示。
 
+跨域分母边界：`dialogueSelect`只是代理/输入层对当前valid Sentence执行点击的通用工具操作，不等于一项单独的Bannerlord行为。会创建/完成Quest、改变关系/阵营、开启或提交Barter/Persuasion、释放俘虏、开启Mission等Sentence consequence由各自领域的实际ACT承载，不能再加一个“点击对话选项”ACT重复计数；没有世界状态提交的询问/过场/显示信息，其信息与新Option列表并入`OBS-J08-01`。新发现的Sentence分支若产生此前未映射的实际世界效果，应补该领域ACT，而不是扩成一个吞并所有Conversation后果的J08族。
+
 原有关系反馈的边界见 I01/I04/I09与本J文关系段：文本/选项由Identity、Faction、Trait、关系、任务和世界状态筛选，关系不一定作为独立历史来源呈现。Chronicle通用Conversation研究适配仅限当前State真实开放选项、Continue和已核实路径；没有覆盖全量对话目录或自动跑3D接近。来源：Campaign `ConversationManager/ConversationSentence/CampaignMapConversation`、Sandbox DialogFlow/ConversationBehaviors、ViewModelCollection `ConversationVM`、当前Chronicle Protocol。未知全体ConversationFlow/条件去重分母、对话状态被任务/战斗打断后的恢复、不同语言和Mods扩展的动态选项。
 
 ## J09 Persuasion Dialogues：说服过程
