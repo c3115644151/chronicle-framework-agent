@@ -1,6 +1,6 @@
 # E 类研究：经济与贸易
 
-状态：机制盘点中；E01-E04 已完成首轮盘点，目前研究 E05 Caravan，未进行方案评审。
+状态：机制盘点中；E01-E05 已完成首轮盘点，目前研究 E06 Party 经济，未进行方案评审。
 
 适用本体：Bannerlord v1.4.8.119303。基于当前安装 `TaleWorlds.Core.dll`、`TaleWorlds.CampaignSystem.dll`、官方模块物品 XML 和 Chronicle 本地 Observer/Protocol 源码。静态对象核对不表示物品市场或背包 UI 已运行验证。
 
@@ -164,6 +164,36 @@ Caravan 是 CaravanPartyComponent 管理的 MobileParty，持有 owner、leader�
 
 未知项：创建后的首个购买/移动时序及被指定 companion 的恢复/复用流程；目的地评分的全部权重、随机扰动和对外解释字段；交易日志/传闻与 NPC实际交易量、利润的关系；Naval船只补充/损毁、战损/俘虏与玩家 Owned Caravan 被毁的完整跨域后果；当前启用 Mod 对 CaravanModel/交易AI的替换情况。
 
+## E06 Party 经济：工资、食物、货物与人员
+
+### Party 的经济状态不是单一余额
+
+`MobileParty` 的成员 `MemberRoster`、囚犯 `PrisonRoster`、物品 `ItemRoster`、剩余粮食比例、`PartyTradeGold`、工资支付上限及军团挂靠状态分别保存/派生。`PartyTradeGold` 对有 Leader Hero 的 Lord Party 映射到 Leader 的 Hero.Gold；Caravan/Garrison 等 Party component 则使用自己的 PartyTradeGold。玩家 Hero.Gold、Clan/Leader财政、PartyTradeGold、Town金库、Caravan流动资金不可当成同一“金币”。Clan 对这些Party/驻军每日工资支出的最终归属见 E07。
+
+### 工资、预算与欠薪后果
+
+`MobileParty.TotalWage` 由 `PartyWageModel.GetTotalWage(MobileParty, MemberRoster)` 计算；默认基础工资随 troop Tier 从 1/2/3/5/8/12/17 起算，Mercenary occupation 单位有加成，Hero、Leader、perk、garrison 等还可能有模型修正。`PrisonRoster` 不传入该 Party TotalWage 算式；囚犯会走食物消费链但不是普通在队兵工资。
+
+Party component 可限制每天工资支付额，`PaymentLimit` 未有限额时返回模型上限；`GetAvailableWageBudget()` 是 PaymentLimit - 当前 TotalWage - 5。ClanFinanceModel 按 Clan 的余额和 party 类型计算实际付薪；支付小于 TotalWage 时写入 `HasUnpaidWages` 并依未付比例降低 Morale。若特定 party 长期超出工资/队伍容量限制，Desertion Model 还会选择 troop 从 MemberRoster 离开。欠薪造成 morale / desertion，不能只记录为金币差额。
+
+### 粮食消耗、购买与牲畜
+
+`MobileParty.FoodChange` 由 `MobilePartyFoodConsumptionModel` 按成员总数加囚犯数量一半折算消耗，并可受 Steward/Scout等 Perk、地形、Sea和其他模型修正；`Food` 将库存总粮与 `RemainingFoodPercentage` 合并表示。Daily `FoodConsumptionBehavior` 根据消费缺口逐份从 ItemRoster 随机移除 `IsFood` 物品，可能宰杀 Livestock 转成 Meat；军团部分缺粮时还有 Party 间分配粮食的处理。正常食物消费对象筛除 Villager、Garrison、Caravan、Bandit、Militia、Patrol等 Party 类型；聚落驻军的供粮另归 D02/D07 SettlementFoodModel。
+
+原版 `PartiesBuyFoodCampaignBehavior` 在 Party 进入 Settlement/小时检查后，给适用的非玩家 Party 自动补买粮食；调用分支显式跳过 MainParty，所以玩家不能依赖它替自己自动补粮。Town/Village 的可买食品来源与买入结算由 `PartyFoodBuyingModel`、SettlementComponent/MarketData、`SellItemsAction` 等处理。Chronicle 已有的 Town food options/`provision` 是一次按需查询/交易；Observer 会持续输出主 Party `food`、`foodInventory`、`foodChange`，但不输出全部 food roster。
+
+### 货物、负重、动物与战后物资
+
+Party `ItemRoster` 同时承载食品、贸易物、动物与战利品；缓存的 `TotalFoodAtInventory`、`TotalWeightCarried`、`InventoryCapacity`、动物数量会分别影响食物、载重、速度或交易判断。战后 ItemRoster 可能先进入 Encounter 的待领取 Loot Roster，再经原生 InventoryState 领取到 Party；那不是“战斗奖励已到账”的同义词，处理链见 G/H 域及 MAINLINE 的 partyLoot 契约。队伍内囚犯、受伤/健康成员、战利品/库存的转移则由对应 PartyScreen、InventoryLogic 和结算动作分别提交。
+
+### Chronicle 当前经济观察面
+
+Observer 当前主队输出 Gold、Party人数/健康/伤兵/囚犯、Item总量、食物库存/变化、总工资、速度/士气、cargo weight/capacity；它不列具体普通物品、各 troop 的单兵工资、可用工资预算、欠薪比例、动物细分、非食物载货价值或全部战利品详情。若战后 Loot InventoryState 正在打开，Observer只计数左右物品数和有无 UI handler；Protocol有领取当前战后物品的专用处理，不是任意背包移动工具。玩家可以在城镇市场按菜单购买粮，且当前适配复用InventoryLogic交易；截图级的玩家 UI 路径与返回结果不据此宣称完成。
+
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `MobileParty`、`DefaultPartyWageModel`、`DefaultMobilePartyFoodConsumptionModel`、`DefaultPartyDesertionModel`、`FoodConsumptionBehavior`、`PartiesBuyFoodCampaignBehavior`、`DefaultClanFinanceModel`；Chronicle `AgentObserver.cs`、`AgentProtocol.cs`、`AgentProvisioning.cs`；相关战后 Loot 路径见现有 G/H研究/MAINLINE。此处为 v1.4.8.119303 静态源码与本地协议对照，未运行欠薪、粮尽、牲畜宰杀或债务时间序列。
+
+未知项：Player/MainParty的每日实际工资扣款事件/调用顺序和与 ClanFinance 的精确钱包切分；各 trooper/wounded/hero/mercenary/garrison/daily-payment policy 的全部工资细节；背包重量/马匹分类影响速度上限和交易容量的完整公式；Army食物分享和债务/破产处理边缘条件；Player UI在 roster/item transfer中所有键鼠/提交/取消和失败恢复副作用。
+
 ## 研究范围状态
 
-E01-E05 已完成首轮物品、市场定价、村庄供应链、Workshop 和 Caravan 盘点。E06-E10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 E 域范围逐项核对，不把这些子系统的静态首轮盘点视作经济与贸易系统整体完成。
+E01-E06 已完成首轮物品、市场定价、村庄供应链、Workshop、Caravan 与 Party经济盘点。E07-E10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 E 域范围逐项核对，不把这些子系统的静态首轮盘点视作经济与贸易系统整体完成。
