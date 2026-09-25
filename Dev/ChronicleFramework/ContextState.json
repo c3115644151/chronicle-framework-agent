@@ -113,12 +113,19 @@
                                     ]
                       },
                       {
-                          "path":  "Research/J/RelationNarrativeConsumers.md",
+                          "path":  "Research/J/TasksEventsAndNarrative.md",
                            "tags":  [
+                                        "issue",
                                         "dialogue",
                                         "quest",
-                                        "narrative",
-                                        "relation"
+                                        "journal",
+                                        "incident",
+                                        "rumor",
+                                        "notification",
+                                        "persuasion",
+                                        "tournament",
+                                        "board-game",
+                                        "story-mode"
                                     ]
                        }
                    ],

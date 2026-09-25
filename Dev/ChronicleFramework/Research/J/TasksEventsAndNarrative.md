@@ -1,0 +1,101 @@
+# J 类研究：任务、事件与叙事
+
+适用本体：Bannerlord v1.4.8.119303。本文是 J 域唯一研究资料，按 SYSTEM_INVENTORY 的 J01-J12 次序记录。关系数据机制归 B/C/I；此处只研究任务、事件、对话、日志等消费者与玩家入口，不复制个人关系模型。
+
+## J01 Issues：NPC委托与问题
+
+### 真实入口、生成与接取
+
+Issue是带有发起者、频率/冷却、解决条件和后果的Campaign委托。玩家此前确认地图中出现蓝色感叹号的委托标记；这里将其记录为玩家界面观察，不把它冒充本机UI实测。`IssueManager`会检查Hero的候选Issue类型/冷却、建立/分配Issue，并按每日/每小时tick使其失效、迁移、终结或转交AI领主处理；`IssueBase`保留Owner与DueTime，并让每个具体Issue提供 `CanPlayerTakeQuestConditions`、留存条件、超时后果和 `GenerateIssueQuest`。
+
+玩家入口通常是有有效Issue的Notable/领主交互；地图标记/菜单提示用于显示可交谈人，交谈后由Issue特定条件决定是否出现接取选项。接受某个Issue可以启动Quest，也可能有原版设计的Alternative Solution或Lord Solution：后者能要求兵种/人数/技能、花费一定时长、存在伤亡或失败风险，并允许计时处理，而不是“对话一下自动完结”。具体奖励、任务步骤和失败由各Issue子类决定，不能从带感叹号的图标推算奖励或可接受状态。
+
+Chronicle目前只有限制在特定Harness探针的 `talkToIssueOwner`研究路径：测试可找到Issue、调用部分交谈/brief逻辑，但跳过实际地图接近/3D对话入口，且结果依Issue种子/前置变化；它不算通用接委托能力。稳定的NPC关系/日志见I/J08，Stage化Quest机制见J02/J03。来源：`IssueManager`、`IssueBase`、`DefaultIssueModel`、本体Issue子类、Sandbox任务VM/Behavior及Chronicle `AgentProtocol`。未知：每种Issue实际玩家可见入口/奖励/成本/失败条件的全量目录、出现频率、过期/冷却和地图标记视觉条件；完整范围不能用若干样本Issue代替。
+
+## J02 Quests：任务生命周期与结果
+
+`QuestBase`管理Quest giver、期限、奖励、状态、追踪对象、任务Logs和任务回调；`QuestManager`统合开始、Hourly/Daily/Weekly tick、超时、完成、取消和追踪对象。各Quest子类创建时 `SetDialogs`、注册事件，并定义 `OnStartQuest/OnCompleteWithSuccess/OnFailed/OnCanceled/OnTimedOut`等路径；Quest类型共享生命周期但并无相同条件、付款或失败后果。
+
+玩家可通过Issue/Story/NPC交谈、外交/传闻事件等进入任务，也可在任务面板查看进行中任务并切换追踪、目标人物/聚落标记和进度。接受不等于完成：Quest可能有多个阶段、期限、目标事件、选择、目标消失/死亡、失败和取消；完成时可能产生钱物、关系/声望、身份或世界状态后果。`QuestManager.StartQuest`/直接结束方法和经过Quest giver的UI互动不是同一条玩家过程，必须保留Quest子类的前置与提示。
+
+Campaign时钟驱动Quest期限与事件，玩家进入Battle/Mission/对话/等待等GameState时钟规则由父层决定；任务动作本身不应嵌入隐式快进。Chronicle Observer可读取当前Quest概要与附近可见任务对象，但没有通用接受/选择/提交任何Quest的动作集。来源：`QuestBase`、`QuestManager`、Quest通知与 `QuestsVM`；具体行动跨J03/F/G/H等域。未知：所有Quest的公共/私人隐藏目标区分、日志/任务状态同步顺序、超时与保存加载中断的统一边界以及任务总分母。
+
+## J03 Quest Tasks：任务子步骤与触发器
+
+`QuestTaskBase`是一种嵌在Quest中的步骤机制，可挂接 `DialogFlow`和Success/Failure/Cancel回调；Quest子类也可直接监听Campaign事件、战斗或Settlement变化而不使用该基类。实际目标可能要求到达地点、追踪/护送人物、交付物品/兵力、赢得战斗、指定对话或在期限内触发事件。跨场景任务能依序打开对话、GameMenu、Mission或更新Quest阶段，不能以文本目标名直接调用完成接口。
+
+玩家从任务日志的提示/地图标记/对话选项进入对应步骤，但隐藏条件和可选路径由具体QuestTask/Quest实现控制。可见跟踪标记只说明一项目标被显示，不一定揭露唯一解法或所有失败条件。Harness需以稳定Quest/Task ID、任务前后状态与世界状态变化判断完成，不把日志字符串变化当作成功真值。
+
+Chronicle目前可观察任务摘要及部分菜单/Conversation状态，未实现跨任务的通用Task解析/执行器；Issue任务、Story Quest、护送/救援/交付等必须单独映射玩家原版交互。证据：本体 `QuestTaskBase`、`QuestBase`事件接口、SandBox/StoryMode若干QuestTask；未知项：任务行为/阶段分母、各任务所依赖的NPC/地图/战斗实际入口、目标失败后的恢复可达性、自动任务检查与玩家完成的同步方式。
+
+## J04 Journal：日志、任务记录与信息回看
+
+`JournalLog`以时间戳、文本、类型、可选当前进度/目标范围表示记录；`QuestBase.AddLog/AddDiscreteLog/AddTwoWayContinuousLog`将任务记录与Quest阶段连接，更新进度后可标记完成。它是一个叙事/状态回看面，并不必然是世界状态真值：文本可以延迟、隐藏信息、总结多次变化，且与 `LogEntryHistory`、通知队列、Quest状态是不同存储对象。
+
+玩家可在任务日志面板查看具体Quest记录/当前阶段，也可从N百科的Hero页面查看以Hero为主体的事件历史；这两个“记录”视角不应混为一页。用户已确认百科N能查NPC日志；本体 `JournalLog`/QuestVM是Quest日志与任务进度系统。实际快捷键和全部可见字段还需对当前build做UI核验。
+
+Chronicle Observer仅返回当前Quest摘要，不提供完整Quest Journal、Hero LogEntry检索或历史页筛选/跳转动作；不会把已经出现的日志正文当作全局状态。来源：`JournalLog`、`QuestBase`、`LogEntryHistory`、`QuestsVM`与百科VM。未知：任务/人物日志的持久保留/筛选/删除边界，隐藏信息何时向玩家揭示，日志时间与实际事件提交的延迟分布，以及Journal的最终玩家行为分母。
+
+## J05 Incidents：随机/上下文事件
+
+当前本体的 `Incident`不是所有故事事件的同义词：对象包含Trigger、Type、Cooldown、全局条件以及若干带Condition/Effects/Consequence的选项。`IncidentsCampaignBehaviour`监听主队进出Settlement、Conversation/Mission/Menu等上下文，按IncidentModel全局概率与触发冷却挑选适用Incident，并将其交给MapState呈现；玩家从事件面板选择一个条件有效的选项后，每项Effect及option Consequence分别生效并发Resolved事件。
+
+已确认的地图触发源包括进入/离开城镇、城堡、村庄以及围 siege/等待等上下文；全局最小/最大cooldown、事件触发概率随战役模型调整。选择一个事件选项可能消耗资源、改变队伍/聚落/关系或触发任务；UI直接逐个显示效果不代表后果Action只调用一次。用户此前已经用MAINLINE记录过incidentSelect：原生VM确认/关闭和直接API跳过清理不是等价路径。
+
+Chronicle仅在指定Harness研究接口中能读取/选择有限Incident，产品协议未提供通用随机Incident观察/交互；当前MAINLINE标注选择事件的时间锁/恢复证据。证据：`Incident`、`IncidentsCampaignBehaviour.TryInvokeIncident/InvokeIncident/OnGameMenuOptionSelected`、`IncidentModel/DefaultIncidentModel`及Map incident UI；未知所有注册Incident列表、各概率真实值/随机分布、被禁用/过期事件筛选和不同触发环境下玩家界面、事件结果结算的完整覆盖。
+
+## J06 Rumors：传闻和流言信息
+
+已找到的明确 `TradeRumor` 对象记录Settlement、商品分类、买入/卖出参考价与寿命，可用Item类别匹配并在过期后失效；这属于带来源/时间的贸易情报，不等于NPC八卦、事件历史评论、百科条目或任务标记。关系式闲谈和Hero历史评论另见B/J08；本体当前结构不足以声称存在一个能把世界全部消息传播给所有NPC的统一Rumor图谱。
+
+`TradeRumor`说明至少存在“按Settlement和商品类别、带价格/寿命”的传闻数据类型，但当前尚未追完其创建者、传播者和玩家可见入口；不能据此声称它必然出现在商队或市场某一界面。Chronicle当前观察不给Rumor来源/可信度/年龄字段，也没有通用获取/传播消息动作。来源：本机 `TradeRumor`、E02/E05贸易与商队数据、Conversation comment/history consumers。未知：贸易Rumor所有创建/更新消费者、非贸易传闻数据是否存在于其他内容或Mod、消息传播/可信度全分母、过期规则及玩家UI对应方式；未找到不等于确认不存在。
+
+## J07 Notifications：地图提示、事件通知和操作入口
+
+需要区分Campaign Map Notification、QuickInformation/短提示、Scene notification、Quest JournalLog和Incidents MapState：它们用途/保留期/交互不同。`CampaignInformationManager`收集通知数据，`MapNotificationVM`按通知类型注册对应ViewModel，向玩家展示、定位或允许前往相关操作；Sandbox默认通知Behavior订阅任务开始/完成、Relation变化、征兵/俘虏/聚落/军团/婚姻/战斗等CampaignEvent。
+
+通知常是玩家获知新任务/结果/选择权的引导，但通知本身并不必然产生游戏后果；例如点“跳转”会定位对象，不等于自动完成任务。玩家是否能关掉、过期、再次点开或标记已读要由该通知VM决定。
+
+Chronicle当前未观察通知队列、优先级/已读/过期/目标点击行为；Observer的Campaign state/Quest摘要也不能说明通知是否显示。来源：`CampaignInformationManager`、`MapNotificationVM/MapNotificationItemBaseVM`、`DefaultNotificationsCampaignBehavior`和各通知类。未知各种类型的完整快捷入口/过期规则、窗口被遮挡或事件已失效时的响应与单帧通知/日志对应关系。
+
+## J08 Conversations：NPC对话流程
+
+对话不是一组静态按钮列表。`ConversationManager`保留当前ConversationFlow/参与者/标签/阶段和可用Sentence；每句包含Condition、文本、InputToken/OutputToken、Consequences等内容，选项在当前上下文动态增删。`CampaignMapConversation`、Mission/Scene Conversation、聚落Notable交谈、地图队伍遭遇/领主会面、俘虏和Issue等入口会加载不同Flow与身份数据。
+
+玩家实际通过进入相应谈话对象/场景开始会面、选择当前开放句、继续/退出；场景交谈可能先经过3D移动、HUD互动、地图遭遇菜单或GauntletMission。Sentence consequence可调用多个Campaign actions或创建/更新Quest/Barter/Persuasion/Party状态。直接调用某个后果会绕过Sentence条件、当前Conversation状态、正常动画/离场和提示。
+
+原有关系反馈的边界见 I01/I04/I09与本J文关系段：文本/选项由Identity、Faction、Trait、关系、任务和世界状态筛选，关系不一定作为独立历史来源呈现。Chronicle通用Conversation研究适配仅限当前State真实开放选项、Continue和已核实路径；没有覆盖全量对话目录或自动跑3D接近。来源：Campaign `ConversationManager/ConversationSentence/CampaignMapConversation`、Sandbox DialogFlow/ConversationBehaviors、ViewModelCollection `ConversationVM`、当前Chronicle Protocol。未知全体ConversationFlow/条件去重分母、对话状态被任务/战斗打断后的恢复、不同语言和Mods扩展的动态选项。
+
+## J09 Persuasion Dialogues：说服过程
+
+Persuasion是J08对话内的一种状态化子流程。`PersuasionTask`保存当前目标、目标值/成功值、难度、可用Argument与已尝试情况；`DefaultPersuasionModel`以目标Trait、关系、ArgumentStrength、玩家Skill/Perk和difficulty multiplier等参数计算success/critical/failure概率和下一阶段/封锁选项效果。实际尝试以当前Conversation开放的argument为入口，结果再由该Task/Conversation consequences决定增加进度、继续、失败、关系变化或Quest后果。
+
+求偶、说服领主、Quest谈判等会分别初始化不同task，不能将一项Persuasion成功率输出到所有NPC。UI必须显示合法选项和条件提示；直接反复调用概率模型不会生成合法对话尝试或完整失败后果。当前Chronicle只尝试选择真实开放选项，无专用Persuasion状态/机会/剩余尝试观测。数值数据与社交入口见I04/I10。来源：`Persuasion/PersuasionTask/PersuasionAttempt`、`DefaultPersuasionModel`、`PersuasionVM`和Romance/Issue相关behaviors；未知不同Task建立源/概率公式全部权重、重复点选/关闭对话后的持久状态、测试seed与真实随机分布。
+
+## J10 Tournament：城镇竞技比赛
+
+`TournamentCampaignBehavior`按城镇DailyTick创建/结束赛事；城镇叛乱、围 siege、参赛者与场地状态会使它不可用或结束。玩家从到达Town后的Arena/Tournament菜单查看参与/观战/排行榜选项；选择参与会进入特定Tournament Mission（部分项目有单独规则/控制器），分轮淘汰后由TournamentManager更新参赛者、胜场和奖品。点“参加”不是直接获得胜利或固定Renown，玩家需在Mission中通过实际比赛。
+
+奖品、金钱下注/同伴比赛或声望影响分别由TournamentModel/结果处理、参加者与胜负决定；TournamentSimulation对NPC可用抽象结果，但玩家加入比赛会切换真实Mission，Campaign时间在Mission内停止。Chronicle当前无竞技场Tournament Mission控制、赛事状态/对手/排名观察或胜利动作；tier评测文档只引用锦标赛奖励公式，不代表可用路线。证据：`TournamentCampaignBehavior/TournamentManager/TournamentGame`、`TournamentModel`、Sandbox `TournamentMissionStarter`与Mission controllers、城镇相关GameMenus；未知赛事生成概率、每种比赛的玩家完整菜单路径、投注/奖品的全套结算和自然运行统计。
+
+## J11 Board Games：酒馆棋盘游戏
+
+`BoardGameCampaignBehavior`通过酒馆Host或可玩Lord对话允许设置对手/AI难度/先手和赌注（源码有0至500 Dinar档位条件）；再在Conversation结束后启动 `MissionBoardGameLogic`进行对应棋盘Mission。支持的游戏是具体BoardGame类（例如Tablut、Seega等），每种规则/状态机与AI实现不同；玩家按格子交互走子、吃子/判胜，不是大地图Party行动。
+
+胜负结束后流程读取对手/投注并更新Hero/Settlement每周游戏次数/冠军胜场等数据；赌注资金风险与Relation/活动剧情是不同结果。纪元/AI难度/哪方先手可能影响对局过程。Board Game Mission不是Campaign时间流逝入口，战役地图tick在场景内是否完全停止按Mission宿主验证。
+
+Chronicle没有打开酒馆、对话设置棋局、棋盘格子观察/落子或胜负结果接口。来源：Sandbox `BoardGameCampaignBehavior`、`MissionBoardGameLogic`、BoardGame规则和AI类；Campaign `BoardGameState`/`BoardGameHelper`。未知各城镇可玩对象生成与UI入场路径、每个游戏终局/和局判定、赌注确认/取消/作弊的回执差异、Mission暂停及存档恢复行为。
+
+## J12 Story Mode：教程与主线任务
+
+StoryMode是独立Campaign mode内容，不是所有Sandbox战役必有的任务。StoryMode通过 `StoryModeManager/MainStoryLine`和StoryMode campaign behaviors 注册Tutorial、First/Second/Third phase等阶段任务；教程涉及购买粮食、招募/旅行/村庄协助/找藏身处/营救家人等Quest，之后进入Banner Piece investigation、选择Imperial/anti-Imperial方向、盟友/军团与阴谋任务链。阶段转换有明确前置和角色/时间/战争后果，不能仅按任务文本认定所有剧情章节永远按同一路线线性开放。
+
+玩家入口来自新Campaign Story Mode选择、Tutorial/任务提示和对话；跳过教程会走 `CompleteTutorialPhase(isSkipped)`等专门路径，不等于跳过整条主线。故事子Quest通常复用QuestBase/QuestTask/CampaignMapConversation/Battle/Mission机制，但特定剧情角色、动画、模型和状态检查由StoryMode程序集控制。Chronicle当前的通用Quest摘要不能覆盖这些固定场景路线，也不能对Sandbox使用StoryMode专属Quest下结论。
+
+来源：`StoryMode.dll`的 `StoryModeManager/MainStoryLine`、`TutorialPhaseCampaignBehavior`、First/Second/Third phase Quest behaviors/QuestTasks、`StoryModeEncounterGameMenuModel`与Campaign `QuestBase`；版本v1.4.8.119303。未知Story/New Campaign各设置对流程的精确删减、分支是否会阻塞/过期、跳过/回档时任务数据的存取，以及所有剧情分支完整玩家操作/失败恢复矩阵。
+
+## 跨域关系与当前适配边界
+
+传统关系数据、家庭和Trait的规则以B/C/I为准；对话、说服、Quest/Incident/日志在此描述它们出现的消费者，不将关系变成一个全局活动清单。Evidence等级区分：本机反编译/数据资源、结构化State运行、自动UI动作/结果和人工视觉确认；本篇大量分支目前只有本机源码链，没有完整Campaign实测。
+
+Chronicle Observer目前重点覆盖Campaign状态、附近对象和Quest摘要；Protocol能读部分GameMenu/Conversation选项和走过的特定Issue/战斗流程，但不是通用Story/Quest/Incident/Journaling/Notification/Tournament/BoardGame Agent。当前没有任何因分类编号而自动推断“已支持”的结论。各域未决玩家行为/观察分母留待W1-M与A-L类别交叉去重，不在此复制完整日志或项目状态。
