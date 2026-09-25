@@ -207,6 +207,7 @@ Research 只按系统类别维护事实，不为专题、路线图或阶段重�
 | I | `Research/I/RelationsAndSocialSystems.md` |
 | J | `Research/J/TasksEventsAndNarrative.md` |
 | K | `Research/K/MapMovementAndEnvironment.md` |
+| L | `Research/L/ContentInterfaceAndModRuntime.md` |
 | Agent Bridge | `Focus/MAINLINE.md` |
 
 尚未研究的类别不预建空文档。W1首次开始某类别研究且该类别没有Research文件时，在实际研究过程中创建唯一的非空类别文档，并同步更新本表与 `ContextState.json` 路由；这是该域的内容交付，不另立流程事项。拆分已有类别文档才需用户明确批准。

@@ -140,6 +140,24 @@
                                         "hideout",
                                         "bandits"
                                     ]
+                      },
+                      {
+                          "path":  "Research/L/ContentInterfaceAndModRuntime.md",
+                          "tags":  [
+                                        "xml",
+                                        "xslt",
+                                        "menu",
+                                        "dialogue",
+                                        "encyclopedia",
+                                        "notifications",
+                                        "mission",
+                                        "localization",
+                                        "module-loading",
+                                        "campaign-behavior",
+                                        "game-model",
+                                        "harmony",
+                                        "save-system"
+                                    ]
                       }
                    ],
     "archives":  [
