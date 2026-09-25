@@ -1,6 +1,6 @@
 # E 类研究：经济与贸易
 
-状态：机制盘点中；E01 已完成首轮盘点，目前研究 E02 市场库存与动态定价，未进行方案评审。
+状态：机制盘点中；E01-E02 已完成首轮盘点，目前研究 E03 村庄生产链，未进行方案评审。
 
 适用本体：Bannerlord v1.4.8.119303。基于当前安装 `TaleWorlds.Core.dll`、`TaleWorlds.CampaignSystem.dll`、官方模块物品 XML 和 Chronicle 本地 Observer/Protocol 源码。静态对象核对不表示物品市场或背包 UI 已运行验证。
 
@@ -70,6 +70,36 @@
 
 未知项：默认 supply/demand 模型的完整消费者与每日/每周更新链；Caravan/商队/商人买卖对 MarketData Supply、Demand、InStore 的全部写入；各项 TradePenalty 全部规则与真实 UI 展示；Modified EquipmentElement、交易数量对阶梯报价和单笔合计的完整差异；其他 Mod 替换 Model/交易逻辑后的当前实际加载表现。
 
+## E03 村庄生产、商路与城镇供应
+
+### 生产到运输的分段链
+
+村庄经济不是 `VillageType.Productions` 直接持续写入绑定城镇市场，而是分段流转。D04 已记录：每日生产行为先将商品/食物放入村庄 Settlement 的 ItemRoster；生产受 VillageState、Hearth、仓库容量和当前产量模型影响。E03 在此接续“已产出的村庄 roster 如何变成城镇库存”。
+
+Villager Party 在村庄与城镇之间承担运输。原版按小时聚落 tick 对正常、无 MapEvent 的村庄进行尝试：随机机会通过、村庄物品总量至少到仓储容量、Party/地图条件允许时，会创建/补充 Villager Party，从村庄库存随机批量取货（每轮按单项约五分之一并受载重容量限制），然后设置目标为 `Village.TradeBound` 城镇；目标缺失或围城时不会照常发运。货物上限不是一个固定数量，而与仓库容量、商品重量和 Party InventoryCapacity 有关。
+
+Villager Party 到达 Town 时由 `VillagerCampaignBehavior.OnSettlementEntered` 调用 `SellGoodsForTradeAction.ApplyByVillagerTrade`。结算用目标 Town 的实时 `GetItemPrice(..., villagerParty, isSelling:true)`，受城镇金币限制；成交商品从 Villager Party roster 移到 Town Settlement owner 的 ItemRoster，城镇金币扣减、PartyTradeGold 增加。低价值 Pack Animal 有额外保留规则，故“载货总量”不等于“所有物品都会卖掉”。市镇库存更新再反映到 E02 的 TownMarketData 当前在店统计。
+
+完成返乡后，Villager Party 携带的交易收入在进入 Home Village 时由 SettlementTaxModel 计算税额，累加到 Village.TradeTaxAccumulated 并清空该 PartyTradeGold。税款实际进入 Clan/领主财政的后续结算调用留给 E07，不在此处推断为立刻到账。战斗损失、封锁、围城、敌对与 Party 销毁会打断“生产→运输→市场”链；村民队伍被打败时 Loot 由战斗/掠夺规则处理，不能把本地库存视为必然到货。
+
+### TradeBound 目的地选择
+
+`Village.Bound` 与 `Village.TradeBound` 分开：Bound 若为 Town，则 TradeBound 直接是该 Town；若 Bound 为 Castle，`VillageTradeBoundCampaignBehavior` 会按新档、易主、战争/和平与 Clan 王国关系变化重新选 trade destination。默认模型先找最近且同 MapFaction 的 Town；没有合格目标时再找距离范围内、非同派系但不处于战争关系的 Town；超出预估路程范围则不分配 TradeBound。
+
+默认距离门槛约以“三倍最近城镇间距”按估算 Villager Party 速度换算成行程时间，再转回 MapDistanceModel 距离比较。该路由属于默认 Model，可被其他 Mod 替换；它不是“绑定城堡旁最近城镇”的纯几何直线距离。战事/城主变动重选目的地可能改变已存在的商路，即使村庄 Bound 本身未改变。
+
+### 玩家贸易与自治贸易的区别
+
+玩家从 Town `trade` 入口与市场进行一次直接 InventoryLogic 买卖；Villager Party 则由 Campaign 自动移动，并在到 Town 时走专用 `SellGoodsForTradeAction`，按照 PartyTradeGold 和 Village tax 流程结算。它不是由 AI Agent 决定每种商品是否卖出，也不是玩家 trade UI 的自动复刻。村庄商品在 NPC 商路完成前，玩家/其他系统能否按该村庄 roster 直接交易需由具体入口判断，不可假设已经计入城镇市场库存。
+
+### Chronicle 当前观察覆盖
+
+Observer 的附近 Party 列表可能识别可见的 `villager` Party 类型和部分人数/位置状态，但没有输出其 Home Village、TradeBound、携带物品、PartyTradeGold 或目的地商品清单；Settlement 快照也不返回 Village TradeBound 和库存。当前 Agent 能从 Town `tradeOptions` 看到当前城镇市场买卖项，但看不到完整村庄生产量、在途商品、运输失联和交付税收链。Protocol 没有建立商路、指挥 Villager Party 或修改 TradeBound 的动作。
+
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `Village`、`DefaultVillageTradeModel`、`VillageTradeBoundCampaignBehavior`、`VillagerCampaignBehavior`、`SellGoodsForTradeAction`、`TownMarketData`、`SettlementTaxModel`；Chronicle `AgentObserver.cs`、`AgentProvisioning.cs`。村庄生产上游细节依 D04；本节为 v1.4.8.119303 源码链核对，未在战役中运行长周期村庄商队观察。
+
+未知项：默认 VillageTradeBound 在关系/海路/封锁/地图连接变化下的所有重算条件；村民贸易 Party 负载量、路程中被劫后恢复/重生及具体到货时间分布；村庄交易税从 Accumulated 到 Clan 财政的全部调用链；玩家/商队同一小时买卖对村庄商路库存的竞争顺序；其他 Mod 添加生产类型或贸易点时的兼容与当前启用情况。
+
 ## 研究范围状态
 
-E01-E02 已完成首轮物品对象、容器、MarketData/默认定价和 Chronicle 覆盖盘点。E03-E10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 E 域范围逐项核对，不把单价模型盘点视作经济与贸易系统整体完成。
+E01-E03 已完成首轮物品对象、市场价格及村庄生产/运输链盘点。E04-E10 尚未研究；继续按 `SYSTEM_INVENTORY.md` 的 E 域范围逐项核对，不把部分市场和生产链盘点视作经济与贸易系统整体完成。
