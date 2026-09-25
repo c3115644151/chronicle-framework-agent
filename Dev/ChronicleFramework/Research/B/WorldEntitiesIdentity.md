@@ -35,6 +35,16 @@ Hero 的 `Father`、`Mother` 是独立持久引用；设置父/母属性时会�
 
 百科 Hero 页可展示家庭成员；玩家婚姻谈判/婚姻选项的具体 UI 入口涉及 J 类对话/Barter 路由，本段只记录 `MarriageAction` 与持久对象关系。证据：`TaleWorlds.CampaignSystem.dll`（`Hero`、`HeroCreator`、`MarriageAction`、`InitialChildGenerationCampaignBehavior`、`PregnancyCampaignBehavior`、`MarriageModel`），以及已有百科 Hero 页源码。未知项：婚姻对话到 Barter 的完整 UI 调用链、各代际/失去父母后 `_children` 列表处理、叛军/佣兵/婚姻 Clan 变更例外、妊娠概率和持续时间的默认数值仍需分别追对应系统；未从字段关系推断情感/忠诚含义。
 
+#### B03 能力成长与角色开发界面
+
+地图界面快捷键 C（`GenericCampaignPanelsGameKeyCategory.CharacterWindow`）在主 Hero 存活时打开 `CharacterDeveloperState`。界面 ViewModel 包含可选择的 Hero、属性、技能、当前技能的 Focus 点、可用 perk 选择、等级与未分配点数；`ExecuteDone` 应用待修改项，`ExecuteCancel` 撤回界面未提交的修改，Reset 按钮恢复开发点/Perk 选择。列表来自玩家 Clan 的 Hero 集合和 Companions，筛掉 null、Disabled、死亡或未成年 Hero；这不是战役内所有 Hero 的总览。
+
+状态数据分属 Hero 与 `HeroDeveloper`：技能当前值、属性、已选 Perk 与等级由 Hero/角色数据持有；`HeroDeveloper` 另保存每项 skill XP、新增 Focus map、Total XP、未用 Focus 点及 Attribute 点。这些字段使用 SaveableField/SaveableProperty 随 Campaign 存档恢复。开局/新增 Hero 时 `InitializeHeroDeveloper` 根据已有技能建立初始等级、分配待用点；NPC/行为侧调用 `DevelopCharacterStats` 时会自动分配剩余点并选择 Perk，不能将其与玩家打开 C 后手动配置混为同一输入。
+
+技能成长链：`HeroDeveloper.AddSkillXp` 用 `GenericXpModel` 计算加成 XP，并根据 `CharacterDevelopmentModel.CalculateLearningRate` 的属性/Focus/当前技能值计算学习率；达到模型要求时更新 Hero 技能值、触发 `OnHeroGainedSkill`；原始 XP 增长会计算 Level，并按模型配置给 Focus 点、周期性给 Attribute 点并分发 `OnHeroLevelledUp`。各类 XP 的进入点由技能行为/战斗/任务等系统各自调用，本段不预设完整来源清单。
+
+Chronicle 当前 Observer 不输出属性、技能XP、Focus、Perk或未分配点数；Protocol 当前没有角色开发动作。只读/测试动作接口不得直接替代 UI 中的点数校验、临时变更、提交与撤销行为。证据：安装 `TaleWorlds.MountAndBlade.dll`（快捷键 C）、`TaleWorlds.CampaignSystem.dll`（`HeroDeveloper` Saveable 字段、成长接口）、`TaleWorlds.CampaignSystem.ViewModelCollection.dll`（`CharacterDeveloperVM`、`CharacterDeveloperHeroItemVM`、`SkillVM`/`PerkVM`）、`Modules/SandBox/bin/Win64_Shipping_Client/SandBox.View.dll`（`MapScreen.OpenCharacterDevelopmentScreen`）和本地 `AgentObserver.cs`/`AgentProtocol.cs`。未知项：Character Developer 全部适用 Hero 的运行时筛选条件、每个技能完整 XP 来源与奖励/上限、角色开发 UI 锁定条件及同伴技能是否拥有同样的全部操作尚未逐项核实。
+
 ### Clan
 
 - 成员、领袖、领地、队伍、文化、家园、家族等级、声望、影响力、金币和总军力；
