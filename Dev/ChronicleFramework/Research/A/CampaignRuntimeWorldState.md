@@ -68,9 +68,17 @@ Chronicle 自动证据：Protocol 测试从 `AgentBridgeLifecycle` disposable �
 
 ## A06 难度与战役选项
 
-入口：创建战役选项页、战役内 Campaign Options。1.4.8默认Provider提供预设及8项难度(部队伤害/招募/地图速度/说服/战斗AI/战斗死亡/家族死亡/潜行伪装，均三档)；另含perk自动分配、Ironman。其他 Provider 可扩展，列表随版本/Mod变化。
+玩家入口：新建战役流程中的 Character Creation “Options/Difficulty”阶段由 `CharacterCreationOptionsStageVM` 展示；战役中可按 ESC→Campaign Options 打开 `MapCampaignOptionsView`。两者都从 `CampaignOptionsManager` 取得选项数据，但开局阶段调用 `GetCharacterCreationCampaignOptions`，战役内设置页调用 `GetGameplayCampaignOptions`，可显示集合并不完全相同。
 
-UI VM 写入选项并协调预设关联/禁用项；直接改 CampaignOptions 字段不等价。Agent快照不含配置；无自动/视觉验证。来源：已安装 v1.4.8 CampaignOptions.cs、DefaultCampaignOptionsProvider、CampaignOptionsVM。难度可配置化仅是潜在价值，非已选方案。
+当前 `DefaultCampaignOptionsProvider` 的三个预设是 Freebooter、Warrior、Bannerlord，并可转成 Custom。八项难度相关选择分别是：玩家部队受到伤害、可招募兵种上限、玩家大地图移动速度、说服成功率、战斗 AI 难度、玩家家族成员战死概率、战斗死亡规则、潜行/伪装难度；其数值均采用 VeryEasy、Easy、Realistic 三档。`BattleDeath` 会受 Life/Death 周期选项与其注册模块影响而禁用。另有自动分配家族成员 Perk；游戏内设置页还含 Ironman、重置教程等操作选项，Cheats 行仅在手柄输入状态加入。配置项集合会随已加载 Mod 注册的 Provider 改变。
+
+界面数据流：`CampaignOptionsManager.Initialize` 扫描已启用游戏程序集并实例化所有 `ICampaignOptionProvider`；读取选项时按 Provider 列表倒序追加数据。`CampaignOptionItemVM` 根据 Boolean/Selection/Numeric/Action 类型生成控件，将选择写回 Provider 提供的 setter；`CampaignOptionsControllerVM` 在玩家选择预设时改写关联难度项，在手动改难度项后重算预设（匹配不上则为 Custom），并刷新禁用状态。直接设置一个 `CampaignOptions` 静态属性虽能写入相应 Campaign 字段，但不会自动执行这套预设联动、禁用条件、界面提示和回调。`CampaignOptions` 的难度字段是 Campaign 内的 `[SaveableField]`，随战役存档保留；`CampaignOptions` 不存在时读取属性返回各自默认值。
+
+开局与战役中入口的差异：Character Creation 阶段提供难度预设、八项难度值、Perk 自动分配和 Ironman；存档槽位达到上限时 Ironman 项带禁用说明，否则其启用状态为 `DisabledLater`。战役内 Gameplay 列表提供预设和难度值，但 Ironman 项固定为 Disabled，不能从该页切换；其余包含 Perk 自动分配、ResetTutorial，以及满足手柄条件时的 Cheats 操作。
+
+Chronicle 当前状态：Observer/Protocol 快照不读取这些选项；没有自动快照字段或覆盖这八项的状态测试，也未模拟 Character Creation Options 或 ESC→Campaign Options 的点击。来源：当前安装 v1.4.8.119303 `TaleWorlds.CampaignSystem.dll`（`CampaignOptions` save fields）、`TaleWorlds.CampaignSystem.ViewModelCollection.dll`（`DefaultCampaignOptionsProvider`、`CampaignOptionsManager`、`CampaignOptionsVM`、`CampaignOptionsControllerVM`、`CampaignOptionItemVM`、`CharacterCreationOptionsStageVM`）、`Modules/SandBox/bin/Win64_Shipping_Client/SandBox.View.dll`（`MapScreen` / `MapCampaignOptionsView`），以及 `Modules/SandBox/GUI/Prefabs/CampaignOptions.xml`。
+
+未知项：不同 Provider 在同一设置页的实际排列与互相覆盖顺序尚未用含相关 Mod 的运行实例核验；单项难度切换对每个游戏模型的最终数值影响没有逐项追踪；Character Creation `DisabledLater` 对可改时点的具体UI表现、在设置页开启 Cheats 的输入设备门槛及最终 Campaign 保存时点均待运行核实。
 
 ## A07 日志、通知与百科信息
 
