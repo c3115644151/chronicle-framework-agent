@@ -50,9 +50,9 @@ Mission中的 `Team` 拥有多个 `Formation`；Formation 把参战Agent组织�
 
 玩家在可部署战斗的 Order of Battle 界面可调整Formation类型、权重、队长/英雄分配和自动部署；开始 Mission 后，还可用Formation选择控件、兵种分类与Orders控制多个Formation。适用性受Mission类型、战斗部署阶段、剩余可参战成员、队伍是否锁定/已有可用兵种影响；至少一个可参战Formation是开始条件之一。围城Mission中的器械/梯队有额外部署及控制对象，不应简化成野战队形设置。
 
-引擎侧通过 `OrderOfBattleVM` 在部署阶段改变Formation配置/分配，战斗中通过 `Formation.SetMovementOrder/SetFacingOrder/SetArrangementOrder/SetFormOrder/SetRidingOrder/SetFiringOrder` 更新队伍状态；实体Agents之后由Formation AI执行移动与队形。玩家界面可能增加部署预览、确认、快捷键与输入焦点规则，直接设置Formation属性不等价于走完VM部署并验证可用阵型。
+当前1.4.8源码链定位到 Battle Mission部署控制器与 `OrderOfBattleVM`。部署UI中的Formation类别筛选/权重回调会重分配可用兵种到Formation；队长/英雄分配会改变Hero所属Formation；玩家将军可以调用Auto Deploy快捷配置；Begin Mission会收集各Formation当前启用的类别过滤器并调用部署结束回调。BattleDeploymentMissionController负责部署期间Team/Agent spawn安排与部署结束后的reinforcement开闸。它们确实都属于可操作部署界面，但不能先压成一个行为：兵种/权重分配、Hero/队长位置、自动部署、确认开战是否应按独立状态提交拆为多个ACT，需以各自变更时机与可撤销边界继续研究。玩家界面还可能增加预览、确认、快捷键与输入焦点规则，直接设置Formation属性不等价于走完VM部署并验证可用阵型。
 
-Formation配置/部署发生在当前Battle Mission生命周期内，不由其本身额外推进Campaign地图时钟。Chronicle目前没有Battle Mission的Formation观察/创建/单位重分配/部署命令，也没有据此控制实际Agents。当前依据：MountAndBlade `Formation`、`FormationAI`，ViewModelCollection `OrderOfBattleVM` 与Formation配置ViewModels；本机1.4.8.119303静态源码。完整部署界面入口、各选项默认分配规则、不同队伍组成的自动部署结果、Naval/围城Mission差异和输入焦点状态仍需可视/运行验证。
+Formation配置/部署发生在当前Battle Mission生命周期内，不由其本身额外推进Campaign地图时钟。Chronicle目前没有Battle Mission的Formation观察/创建/单位重分配/部署命令，也没有据此控制实际Agents。当前依据：MountAndBlade `BattleDeploymentMissionController`/`DeploymentMissionController`/`Formation`/`FormationAI`，ViewModelCollection `OrderOfBattleVM` 与Formation配置ViewModels；本机1.4.8.119303静态源码。完整部署界面玩家入口、改类/改权重/指派Hero各自的即时状态提交与取消、部署结束确认恢复、不同队伍组成的自动部署结果、Naval/围城Mission差异和输入焦点状态仍需可视/运行验证。
 
 ## G05 Orders：玩家在Mission中下达命令
 
