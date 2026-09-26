@@ -208,16 +208,16 @@
 
 | ID | 类型 | 玩家入口 / 观察语义 | 原版边界与时间 | Chronicle现状 / 证据与未知 | 来源映射 |
 | --- | --- | --- | --- | --- | --- |
-| ACT-A01-01 | 行为 | 初始菜单→Sandbox新战役 | 建立普通Campaign后进入角色创建；没有既有Campaign时间 | Harness能创建新Campaign，但不通过初始菜单点击端到端验证；新档创建夹具已结构化验证 | A01、B07、L09；`Research/A/CampaignRuntimeWorldState.md` |
-| ACT-A01-02 | 行为 | 初始菜单→Story Mode新战役 | 建立`CampaignStoryMode`并进入StoryMode专属开局 | Chronicle未操控StoryMode菜单/主线初始化 | A01、B07、J12、L09 |
+| ACT-A01-01 | 行为 | 初始菜单→Sandbox新战役 | 建立普通Campaign后进入角色创建；没有既有Campaign时间 | Harness能创建新Campaign，但不通过初始菜单点击端到端验证；新档创建夹具已结构化验证 | A01/H01、L09；`Research/A/CampaignRuntimeWorldState.md` |
+| ACT-A01-02 | 行为 | 初始菜单→Story Mode新战役 | 建立`CampaignStoryMode`并进入StoryMode专属开局 | Chronicle未操控StoryMode菜单/主线初始化 | A01/H01、J12、L09 |
 | ACT-A01-03 | 行为 | 初始菜单→Continue latest，或已存档游戏→选择slot→Load | 两入口最终均读取一个Campaign存档且跳过角色创建；默认slot选择与手动slot选择作为参数变体保留 | Protocol可指定存档并新进程加载；菜单自身未视觉/自动点击验证 | A01、A05、L13 |
 | ACT-A02-01 | 行为 | 地图底部Pause/Normal/Fast-forward时间控件 | 修改`CampaignTimeControlMode`；世界是否实际推进还受MapState、等待、Mission等上下文限制 | Observer读当前timeControlMode；Protocol可暂停/恢复/独立推进，显式`advance`仅Harness用 | A02、K02；MAINLINE原版机制契约 |
 | ACT-A05-01 | 行为 | 地图ESC/F5 QuickSave | 排队快速保存；只有保存完成回执后结果成立，F5与ESC别名最终落同入口 | Protocol `save`完成存档往返；没有ESC/F5真实输入测试 | A05、L13；MAINLINE Save验收 |
 | ACT-A05-02 | 行为 | Save As→新建slot或覆盖→确认 | 选择名称/覆盖后排队保存；错误/取消不得误报完成 | Protocol使用唯一测试名SaveAs，UI确认流程未验证 | A05、L13 |
 | ACT-A05-03 | 行为 | ESC菜单→Save And Exit | 发起QuickSave并设置保存成功后的退出标志；只有OnSaveOver(success)才返回主菜单，失败则不应误报已保存或已退出 | v1.4.8 `MapScreen.GetEscapeMenuItems`/`OnSaveOver`源码确认独立于QuickSave与SaveAs的复合结果；实际弹窗/失败恢复未运行核验 | A05/L03、`SandBox.View.Map.MapScreen.GetEscapeMenuItems/OnSaveOver` |
 | ACT-A05-04 | 行为 | ESC菜单→Exit to Main Menu并确认 | 不先保存；显示退出确认，确认后退出到主菜单，拒绝则关闭询问并回到战役 | v1.4.8 `MapScreen.GetEscapeMenuItems/OnExitToMainMenu`源码确认与Save And Exit不同的无保存退出路径；确认/拒绝的实际UI恢复未运行核验 | A01/A05/L03、`SandBox.View.Map.MapScreen.GetEscapeMenuItems/OnExitToMainMenu` |
-| ACT-A06-01 | 行为 | 新战役Character Creation→Options选择一个DifficultyPreset | 预设变化由`CampaignOptionsControllerVM`批量写入所有当前启用且关联难度的选项值；campaign创建前的初态设置 | v1.4.8 DefaultProvider/OptionsController调用链确认preset选择和批量改值；视图集合、禁用项/Custom匹配及下游八项模型影响尚未运行完整核验 | A01/A06/H01/L09、`DefaultCampaignOptionsProvider`、`CampaignOptionsControllerVM.UpdatePresetData` |
-| ACT-A06-02 | 行为 | 新战役Character Creation→Options修改一个启用的CampaignOptionItem | 通过OptionId/value参数写该配置字段；改Difficulty-related字段后ControllerVM重算preset为匹配预设或Custom；Auto Perks与Ironman亦属本页值控件，Ironman可DisabledLater | v1.4.8 `CampaignOptionItemVM.SetValue`/Provider setter源码已确认；Chronicle无此动作；CharacterCreation实际显示/提交时点和每个字段消费者待核 | A01/A06/H01/L09、`CampaignOptionItemVM`、`CampaignOptionsControllerVM.OnOptionChanged` |
+| ACT-A06-01 | 行为 | 新战役Character Creation→Options选择一个DifficultyPreset | 预设变化由`CampaignOptionsControllerVM`批量写入所有当前启用且关联难度的选项值；campaign创建前的初态设置 | v1.4.8 DefaultProvider/OptionsController调用链确认preset选择和批量改值；视图集合、禁用项/Custom匹配及下游八项模型影响尚未运行完整核验 | A01/A06/L09、`DefaultCampaignOptionsProvider`、`CampaignOptionsControllerVM.UpdatePresetData` |
+| ACT-A06-02 | 行为 | 新战役Character Creation→Options修改一个启用的CampaignOptionItem | 通过OptionId/value参数写该配置字段；改Difficulty-related字段后ControllerVM重算preset为匹配预设或Custom；Auto Perks与Ironman亦属本页值控件，Ironman可DisabledLater | v1.4.8 `CampaignOptionItemVM.SetValue`/Provider setter源码已确认；Chronicle无此动作；CharacterCreation实际显示/提交时点和每个字段消费者待核 | A01/A06/L09、`CampaignOptionItemVM`、`CampaignOptionsControllerVM.OnOptionChanged` |
 | ACT-A06-03 | 行为 | Campaign Options选择一个DifficultyPreset | 在当前存档上以预设批量覆盖启用的Difficulty-related字段；可能受某设置字段Disabled状态影响 | v1.4.8与CharacterCreation共用OptionsController preset逻辑；Chronicle无动作，菜单时钟/覆盖字段和最终保存时点未知 | A06/L03/L08、`DefaultCampaignOptionsProvider.GetGameplayCampaignOptions`、`CampaignOptionsControllerVM.UpdatePresetData` |
 | ACT-A06-04 | 行为 | Campaign Options修改一个启用的CampaignOptionItem | 按OptionId/value写入当前Campaign选项并更新预设匹配状态；不把Reset Tutorials/Cheats Action items合并进字段修改 | v1.4.8 `CampaignOptionItemVM`/Provider通用setter链确认；选项跨Mod的运行顺序和单项游戏模型消费者待核；Chronicle无此动作 | A06/L03/L08、`CampaignOptionItemVM.SetValue`、`DefaultCampaignOptionsProvider` |
 | ACT-A06-05 | 行为 | Campaign Options→ResetTutorials，Inquiry中确认Yes | 经`ResetTutorials()`触发`ResetAllTutorialsEvent`并显示重置提示；先打开Action项或拒绝确认不产生重置 | v1.4.8 `ActionCampaignOptionData`→Inquiry→event/confirmation message源码已确认；Campaign完整受影响项与UI/取消路径未运行核验；Chronicle无动作 | A06/A08/J12/L06、`DefaultCampaignOptionsProvider.ExecuteResetTutorial`、`ResetAllTutorialsEvent` |
@@ -250,7 +250,7 @@ A06开局与战役内上下文分别拆成“选择Difficulty preset”和“编
 | B04 Hero身份 | `OBS-B04-01` Hero身份/职业/归属信息；婚姻Clan结果见I04，陪伴/封臣/王国变更见H05/C07 | B04/H05/C07/I04；没有通用“设置职业/归属”入口，转换必须映射具体原生流程 |
 | B05 Clan | `OBS-B05-01` Clan Management页；改名、旗帜和财务/领地/成员各是待细分操作 | B05/H02/C；Clan页面本身不等于独立行动，不能将13个Tab/VM方法计入分母 |
 | B06 Kingdom | `OBS-B06-01` Kingdom Management页；决议/战争/和平/联盟/政策映射C域独立行动族 | B06/C01-C10；K键/界面入口别名不是额外动作 |
-| B07 Culture | 创建新Campaign时文化选择别名至`ACT-A01-01`或`ACT-A01-02` | B07/H01/A01；不建立Campaign中普遍存在的“换文化”动作 |
+| B07 Culture | 新Campaign角色创建Culture阶段选择映射`ACT-H01-01`；进入角色创建页面的路径复用`ACT-A01-01/02` | B07/H01/A01；不建立Campaign中普遍存在的“换文化”动作 |
 | B08 Faction/Stance | `OBS-B08-01` Diplomacy/地图敌对状态；战争/和平提案`ACT-C03-01/02`、联盟/援战请求`ACT-C04-01/02`、遭遇主动攻击的敌对/宣战副作用`ACT-G01-01/02` | B08/C；个人Hero关系和Faction Stance不可合并；投票回应复用C02，不重复计数 |
 | B09 Personal Relation | `OBS-B09-01` 对话/Barter中针对当前Hero的关系信息；已确认的关系写入示例为释放俘虏`ACT-F12-03/04/05`与捐赠俘虏`ACT-F12-09`，其他来源映射I/J/F具体结果族 | B09/I01/I09/J08；没有全局关系面板/统一增减关系动作；关系是具体动作副作用，不另建写入ACT |
 | B10 Trait/Crime | Trait展示映射`OBS-B10-01` Character Developer特征页；犯罪指控/可用处罚选项映射`OBS-I08-01` | Trait和Faction Crime Rating是不同数据族，角色开发页与执法菜单也不是同一观察面 |
@@ -261,7 +261,7 @@ A06开局与战役内上下文分别拆成“选择Difficulty preset”和“编
 
 | ID | 类型 | 玩家入口 / 观察语义 | 原版副作用 / 失败边界 | Chronicle / 来源 / 未知 |
 | --- | --- | --- | --- | --- |
-| OBS-B01-01 | 观察 | N→Hero百科页的当前身份/职业/文化等概要；Last Seen与历史日志字段单列到OBS-A07-01 | 页面基于可见/已知资料，不是全部Campaign实时状态 | Chronicle不提供完整Hero页面；B01/B04、A07、L05；页面条件未实机全验 |
+| OBS-B01-01 | 观察 | N→Hero百科页的当前身份/职业/文化等概要；Last Seen与历史日志字段单列到OBS-A07-01 | 页面基于可见/已知资料，不是全部Campaign实时状态 | Chronicle不提供完整Hero页面；B01/B04/H01、A07、L05；页面条件未实机全验 |
 | OBS-B02-01 | 观察 | N→Hero页面家庭、父母/子女/配偶等亲属视图 | 亲属对象引用不等同Clan成员、effective Relation或继承权 | Chronicle无家庭树；B02、I05；所有家庭可见规则未知 |
 | OBS-B03-01 | 观察 | C→Character Developer的Attributes/Skills/Focus/Perks | 仅对VM筛选出的适用Hero显示；角色开发面板非全世界技能表 | Chronicle不读取完整成长字段；B03/E09/H10/L05；同伴适用/禁用条件待测 |
 | OBS-B04-01 | 观察 | Hero百科/对话对象上下文查看Occupation、Clan/Faction/当前归属 | Hero身份/Clan关系和Party所属状态分别显示，不能推断为一个“NPC阵营”字段 | Chronicle提供Main Hero身份和有限Party摘要；不提供周边Hero完整职业/历史归属 | B04、J08、AgentObserver；特例可见性未穷举 |
@@ -519,7 +519,7 @@ G03 Mission直接控制MainHero的身体/装备输入及专用Use结果现登记
 
 | 系统ID | 映射到的观察面/行动族 | 去重/未决 |
 | --- | --- | --- |
-| H01 Player identity | `OBS-B01-01`身份/百科；新档文化选择映射`ACT-A01-01/02` | Character Creator与Campaign中身份管理是不同上下文 |
+| H01 Player identity | `OBS-B01-01`创建后的Hero身份摘要；Campaign入口`ACT-A01-01/02`只进入角色创建。CharacterCreationState的Culture、FaceGen、Narrative、Banner、Clan naming和Review阶段分别暂列`ACT-H01-01..06` | 阶段选择修改新档角色/家族草稿，Review确认后由原版最终效果流程应用；各阶段与既有Campaign改名/换旗行为的关系、撤销/返回行为待进一步核对 |
 | H02 Player Clan | `OBS-B05-01`家族管理面；名称/旗帜`ACT-H02-01/02`；Fiefs Governor复用`ACT-D07-01`；Party create/Leader/Disband/Objective`ACT-F06-01..04`；Garrison AutoRecruit复用`ACT-D07-03`；Party Roles`ACT-H06-01` | Clan Manager按成员/Party/Fief等子VM承载不同领域提交；链接到已有领域ACT，不按Tab重复计；Gold/财务读数共享E07 |
 | H03 Main Party | Party/经济汇总映射`OBS-E06-01`与`OBS-F01-01` | Party对象字段和队伍面板字段需按可见细节继续拆分 |
 | H04 Troop Roster | `OBS-H04-01`Party roster；升级/俘虏招募暂为`ACT-H04-01/02` | 招募新兵、俘虏招募、自动NPC升级各自不同，后者无玩家入口 |
@@ -553,6 +553,12 @@ G03 Mission直接控制MainHero的身体/装备输入及专用Use结果现登记
 | OBS-H09-01 | 观察 | SmithingState显示执行Hero、Stamina、模板/已解锁组件、材料成本/预览 | 当前模式与选中Hero改变可执行Smithing actions | Chronicle无Crafting State/配方观察 | H09/L07、CraftingVM |
 | OBS-H11-01 | 观察 | MainParty/Clan状态栏显示Renown、Influence、Tier及下一门槛 | 仅为当前数值，不包含完整来源历史/未决政治支出 | Chronicle identity/economy Snapshot提供有限数值，无变化原因 | H11/B05/AgentObserver |
 | OBS-H12-01 | 观察 | MainHero俘虏GameMenu/赎金事件与Captor上下文 | 菜单会根据Captor类型、战争和计时检查分支动态切换 | Observer可见PlayerCaptivity State但没有当前菜单细项/处置报价 | H12/F12/I03、PlayerCaptivity |
+| ACT-H01-01 | 行为候选 | 新Campaign的CharacterCreationState→Culture阶段选择一个可用文化 | 更新角色创建草稿；Review确认时由`CharacterCreationManager.ApplyFinalEffects`应用文化及该文化的起始效果/可能起始位置；不是在既有Campaign换文化 | v1.4.8 Culture阶段注册与最终应用链已确认；文化选择的真实界面/确认取消与所有文化差异未视觉或运行穷举；Chronicle无角色创建控制 | A01/B07/H01、`CharacterCreationManager`、`CharacterCreationCampaignBehavior.InitializeCharacterCreationStages/ApplyFinalEffects` |
+| ACT-H01-02 | 行为候选 | 新Campaign Character Creator的FaceGen阶段编辑玩家Hero外观 | 修改待创建PlayerCharacter的FaceGen外观数据；Campaign地图/时间尚未开始 | v1.4.8 CharacterCreation阶段注册已确认；可编辑字段、输入粒度、Reset/Cancel与最终持久化未视觉运行核验；Chronicle无角色创建控制 | H01/B01、`CharacterCreationState`、FaceGen stage；具体VM handler待逐项复核 |
+| ACT-H01-03 | 行为候选 | 新Campaign Character Creator的Narrative阶段选择一个背景/经历选项（各子阶段重复同类选择） | 修改新角色的背景草稿；各内容项可带来技能、属性、装备、特征、起始资源或身份效果，Review后由最终应用链提交；不同选项效果不假定相同 | v1.4.8 Narrative阶段与最终效果应用链已确认；所有子阶段、选项字段/条件/前后值及撤销语义未逐项核实；Chronicle无动作 | H01/B03/B05/H10、`CharacterCreationCampaignBehavior`、角色创建内容定义 |
+| ACT-H01-04 | 行为候选 | 新Campaign Character Creator的Banner阶段选择玩家Clan旗帜 | 修改新建Clan的旗帜草稿，待角色创建Review确认后应用；不是Campaign中打开旗帜编辑器 | v1.4.8 Banner阶段注册已确认；Banner控件实际确认/取消和最终Apply回执未视觉运行核验；与后续`ACT-H02-02`是否同一结果族待M3去重 | H01/B05、`CharacterCreationCampaignBehavior`、`CharacterCreationManager`；Banner阶段VM待逐项复核 |
+| ACT-H01-05 | 行为候选 | 新Campaign Character Creator的Clan naming阶段输入/确认玩家Clan名称 | 修改新建Clan名称草稿，待Review最终应用；与已有Clan在Campaign中重命名的上下文不同 | v1.4.8 Clan naming阶段注册已确认；长度/合法性、取消恢复与最终Apply时点未视觉运行核验；与`ACT-H02-01`是否同一结果族待M3去重 | H01/B05、`CharacterCreationCampaignBehavior`、`CharacterCreationManager`；命名阶段VM待逐项复核 |
+| ACT-H01-06 | 行为候选 | Character Creator Review阶段确认完成角色创建 | 调用CharacterCreation结束链，应用Culture/Narrative等最终效果、初始化MainHero/Clan/Party并离开角色创建；这是完成创建而非进入Sandbox/Story新战役 | v1.4.8 `CharacterCreationManager.ApplyFinalEffects`与FreshCampaign夹具完成创建路径证据；Review按钮视觉点击/确认后状态链未人工核验；Chronicle无创建提交动作 | A01/H01/B07、`CharacterCreationState`、`CharacterCreationManager.ApplyFinalEffects` |
 | ACT-H12-01 | 行为 | Wilderness/Prison ransom offer菜单选择Accept | 检查当前Ransom Amount/主角金币；扣款后经`EndCaptivityAction.ApplyByRansom`解囚 | Chronicle无Captivity菜单/赎金支付动作；源码路径确认、UI未跑 | H12/F12、PlayerCaptivityCampaignBehavior |
 | ACT-H12-02 | 行为 | Ransom offer选择Refuse and wait for a better offer | 不支付本次赎金，接入原生`settlement_wait`并恢复LastTimeControlMode继续时间检查 | Chronicle没有囚禁Wait动作；等待推进依原版当前TimeMode | H12/A02、PlayerCaptivityCampaignBehavior |
 | N/A-H12-01 | N/A | Captor败退、盟友支付、时限随机逃脱等自动释放 | Campaign/MapEvent状态触发EndCaptivityAction，无可选择的玩家按钮 | 不计入ACT分母；后果观察映射F12/OBS-H12-01 | H12/F12、PlayerCaptivityCampaignBehavior |
