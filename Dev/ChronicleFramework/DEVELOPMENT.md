@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 
-Contract version: 5.10
+Contract version: 5.11
 
 ## 目标与边界
 
@@ -69,7 +69,7 @@ Project采用最少任务状态：`Todo`表示尚未开始（是否被阻塞看I
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Dev\ChronicleFramework\Run-Harness.ps1 -Phase All
 ```
 
-按需阶段以同一命令加单个 `-Phase` 运行；可选 Docs、Preflight、Api、Build、Smoke、Campaign、FreshCampaign、FreshCampaignProgression、Protocol、AgentLoop、BattleFixture、PostBattle、Observation、Movement、MoveToPoint、Recruitment、Rest、Pursuit、Conversation、QuestAcceptance、EscortVisibility、TavernMission、TownCenterMission、SettlementOverlayConversation、SettlementOverlayQuestAcceptance、SettlementOverlayQuestGate、VisualCapture、All。Settlement overlay阶段可选`-TargetSettlementId`与`-ApproachSettlementId`：若目标当前不可见，Harness只能先前往观察中安全可达的Approach聚落、通过原生Leave返回地图、再次观察；目标仍须出现在新的`nearbySettlements`内才可前往。这不是全图检索或作弊目标注入。
+按需阶段以同一命令加单个 `-Phase` 运行；可选 Docs、Preflight、Api、Build、Smoke、Campaign、FreshCampaign、FreshCampaignProgression、Protocol、AgentLoop、BattleFixture、PostBattle、Observation、Movement、MoveToPoint、Recruitment、Rest、Pursuit、Conversation、QuestAcceptance、EscortVisibility、TavernMission、TownCenterMission、SettlementOverlayConversation、SettlementOverlayQuestAcceptance、SettlementOverlayQuestGate、VisualCapture、All。Settlement overlay阶段可选`-TargetSettlementId`与`-ApproachSettlementId`：若目标当前不可见，Harness只能先前往观察中安全可达的Approach聚落、通过原生Leave返回地图、再次观察；目标仍须出现在新的`nearbySettlements`内才可前往。这不是全图检索或作弊目标注入。若该路线失败，收据除结构化观察外还会在MapState失败点保存游戏引擎截图，便于查清地图实际呈现；不会改用桌面鼠标/键盘自动化。
 
 `Run-Harness.ps1` 顺序执行阶段、首错停止、把原始输出和 JSON 写入 `TestResults/<run-id>`，并更新 `TestResults/latest.json`。
 

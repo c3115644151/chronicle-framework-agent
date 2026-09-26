@@ -227,6 +227,20 @@ try {
 catch {
     $lastObservedState = if ($postTalk -and $postTalk.state) { $postTalk.state } elseif ($arrived -and $arrived.state) { $arrived.state } elseif ($initial -and $initial.state) { $initial.state } else { $null }
     $observedOverlay = if ($overlayCharacters) { @($overlayCharacters) } elseif ($lastObservedState -and $lastObservedState.settlementOverlayCharacters) { @($lastObservedState.settlementOverlayCharacters) } else { @() }
+    $mapFramePath = $null
+    $mapFrameStatus = $null
+    if ($lastObservedState -and $lastObservedState.context.gameState -eq 'MapState' -and $env:CHRONICLE_HARNESS_TEMP -and (Test-Path -LiteralPath $env:CHRONICLE_HARNESS_TEMP -PathType Container)) {
+        $mapFrameName = 'SettlementOverlayFailure-map.bmp'
+        $mapFramePath = Join-Path $env:CHRONICLE_HARNESS_TEMP $mapFrameName
+        try {
+            $mapFrameReceipt = Invoke-AgentCli 'captureFrame' @('-OutputPath', $mapFramePath, '-CommandId', "$commandPrefix-failure-map-frame") 15
+            $captureDeadline = [DateTime]::UtcNow.AddSeconds(8)
+            while (-not (Test-Path -LiteralPath $mapFramePath) -and [DateTime]::UtcNow -lt $captureDeadline) { Start-Sleep -Milliseconds 100 }
+            if ($mapFrameReceipt.status -eq 'completed' -and (Test-Path -LiteralPath $mapFramePath) -and (Get-Item -LiteralPath $mapFramePath).Length -ge 4096) { $mapFrameStatus = 'captured' }
+            else { $mapFrameStatus = "failed:$($mapFrameReceipt.error)"; $mapFramePath = $null }
+        }
+        catch { $mapFrameStatus = "failed:$($_.Exception.Message)"; $mapFramePath = $null }
+    }
     $failureStop = $null
     if (Test-Path $sessionPath) {
         try { $failureStop = Invoke-AgentCli 'stop' @('-CommandId', "$commandPrefix-failure-cleanup") 20 } catch { }
@@ -238,6 +252,8 @@ catch {
         RouteTrace = $routeTrace
         TargetSettlement = $settlement
         Error = $_.Exception.Message
+        EngineMapFrame = if ($mapFramePath) { Split-Path -Leaf $mapFramePath } else { $null }
+        EngineMapFrameStatus = $mapFrameStatus
         GameState = $lastObservedState.context.gameState
         CurrentSettlementId = $lastObservedState.location.currentSettlementId
         MenuId = $lastObservedState.context.menuId

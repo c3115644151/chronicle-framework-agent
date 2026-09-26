@@ -8,7 +8,9 @@
 
 玩家当前看到的是经过地图可视/侦察/模糊距离/百科等规则筛选的信息，不等于全图Campaign对象清单。`IsVisible`、`IsInspected`、图标、悬停详情、ALT兵力信息及百科“最后发现地点”是不同观察入口；其所有字段与实际玩家UI一一映射尚未完整核实，详见MAINLINE Observation contract。玩家点击移动/队伍的时钟行为也以MAINLINE机制表为准：普通移动是原生导航命令，地图点击根据用户配置改变时间档并让Campaign自然运行，不附加Harness快进。
 
-Chronicle附近队伍观察当前只报告限半径且最多12项的摘要；不包含全图Party census、地图实际视觉层级/鼠标悬停详情或完整标记系统，也不自动截图。证据：本体/客户端 `MapScreen.HandleLeftMouseButtonClick/HandleClickTimeChange/OnHoverMapEntity`、地图实体visual click callbacks、Chronicle `AgentObserver`与MAINLINE。未知：各类MapEntity click与double click的完整优先级/无目标/遮挡分支、玩家地图图标聚焦的完整控制器交接、地图缩放下视野/侦察/ALT信息的实机覆盖。
+Chronicle对附近队伍只报告半径内最多12项摘要；Settlement观察当前实现也不是MapScreen视口的镜像：`AgentObserver`只筛`Settlement.IsActive && Settlement.IsVisible`，再按`max(12, MainParty.SeeingRange)`范围限8项。游戏引擎截图运行`TestResults/20260927-071832/Temp/SettlementOverlayFailure-map.bmp`时，MapState位置为(207.088,386.957)，结构化观察只列Sargot (`town_V1`)；同帧大地图画面则显示Sargot周围多个聚落图标。静态SandBox定义显示Sargot绑定村庄Calioc (`village_V1_1`)在(186.614,391.233)，距主队位置约20.9个地图单位，超出当前observer半径。用户已确认玩家会从大地图进入村庄/聚落互动；因此“未出现在nearbySettlements”不能当作玩家无法点击的证据，也不能通过向Agent/动作输入隐藏全局SettlementId来规避。
+
+具体哪些聚落图标处在当前MapScreen camera viewport、被发现、具备原版点击/hit-test入口，仍需对照MapScreen与MapEntityVisual路径核实；截图本身只证明当前画面有聚落标记，不把每个画面对象误判为可交互。观察器所需数据应对应当前玩家可见、可选择的地图目标，而非全图Campaign对象清单。证据：本体/客户端 `MapScreen.HandleLeftMouseButtonClick/HandleClickTimeChange/OnHoverMapEntity`、地图实体visual callbacks、Chronicle `AgentObserver`、当前1.4.8 SandBox Settlement coordinates与上述Engine screenshot。未知：摄像机视口/缩放/遮挡与Settlement clickability的准确共同条件，以及IsVisible/IsInspected与玩家屏幕呈现的精确映射。
 
 ## K02 Navigation：路径、可达性与移动模式
 
