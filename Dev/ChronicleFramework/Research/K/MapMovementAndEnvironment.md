@@ -18,7 +18,7 @@ Chronicle附近队伍观察当前只报告限半径且最多12项的摘要；不
 
 已从本机安装版 `TaleWorlds.CampaignSystem.dll`（v1.4.8.119303）重新反编译核对 `MobilePartyAi.TickInternal` 与 `GetFollowBehavior`：`TickInternal`仅在主队 `DefaultBehavior == EngageParty` 且目标 `IsVisible == false` 时调用 `SetMoveModeHold`；Escort分支进入 `GetFollowBehavior`，它在目标为null或非active时Hold，目标位于聚落时改设聚落导航，否则继续把目标Party位置作为跟随点。此源码没有对Escort检查目标 `IsVisible`。`MobileParty.IsVisible`属性本身仅读写`_isVisible`标记，不能单独解释成玩家的视野/屏幕可见距离。所以普通追近的不可见停步分支有代码依据；Escort的相应分支仍需辨明玩家实际输入和目标状态，再用一次性运行验证。不能只凭类似中文描述合并行为。
 
-原生移动、追击、Hold及时间副作用以MAINLINE Mechanic Contract为准；直接设置MobileParty目标setter仍会跳过 `MapScreen`可视目标条件与点击流程。Chronicle W2-A目前提供 `follow`白名单动作；`TestResults/20260926-200045/Temp/AgentPursuitResult.json`证明可见有效目标、无效目标拒绝、Escort setter结果、Hold和后续追击遭遇，但还没有执行“Escort目标失去可见性”的专门分支测试。
+原生移动、追击、Hold及时间副作用以MAINLINE Mechanic Contract为准；直接设置MobileParty目标setter仍会跳过 `MapScreen`可视目标条件与点击流程。Chronicle W2-A目前提供 `follow`白名单动作；`TestResults/20260926-200045/Temp/AgentPursuitResult.json`证明可见有效目标、无效目标拒绝、Escort setter结果、Hold和后续追击遭遇。`TestResults/20260926-203358/Temp/AgentPursuitVisibilityResult.json`以原版点击时间模式自然观察45秒（Campaign Day +0.055），目标由7.037距离靠近至0.056，始终留在Chronicle附近队伍观察集中，`DefaultBehavior=EscortParty`和`StoppablePlay`保持；未遇到目标失去附近观察或停步事件。因此该运行仅证明跟随追上目标并持续自然推进，不覆盖真正的失去视野分支。
 
 点击空地图地形点另走位置导航：当鼠标射线取得有效NavMesh面、面间路径存在且允许地图输入时，`MapScreen.HandleLeftMouseButtonClick`调用 `MapState.ProcessTravel`；它复核 `NavigationHelper.CanPlayerNavigateToPosition`后使用 `MobileParty.MainParty.SetMoveGoToPoint` 写入目标坐标。无效面/不可达目标不提交该移动。该操作与点击Settlement（到访交互对象）或MobileParty（Engage/Escort实体）有不同目标语义与抵达后果，不合并为同一Action。空地点击也经过原版 `HandleClickTimeChange`，档位规则与其它有效地图点击共用；精确运行失败/双击分支未在本轮实测。
 

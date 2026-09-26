@@ -1,7 +1,9 @@
 [CmdletBinding()]
 param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
-    [int]$TimeoutSeconds = 180
+    [int]$TimeoutSeconds = 180,
+    [switch]$ProbeEscortVisibilityLoss,
+    [int]$VisibilityProbeSeconds = 30
 )
 
 $ErrorActionPreference = 'Stop'
@@ -39,7 +41,7 @@ try {
     $mapState = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-map-state", '-TimeoutSeconds', $TimeoutSeconds)
     $escortTargets = @($mapState.state.nearbyParties | Where-Object { $_.isMoving -and $null -eq $_.currentSettlementId -and $_.distance -gt 1.0 } | Sort-Object distance)
     if ($escortTargets.Count -eq 0) { throw 'No visible moving party outside a settlement is available in the disposable fixture; refusing to invent or teleport an escort target.' }
-    $escortTarget = $escortTargets[0]
+    $escortTarget = if ($ProbeEscortVisibilityLoss) { $escortTargets[-1] } else { $escortTargets[0] }
 
     $invalidEscort = Invoke-AgentCli 'follow' @('-PartyId', 'chronicle_missing_party', '-CommandId', "$runPrefix-invalid-escort", '-TimeoutSeconds', '15')
     $afterInvalidEscort = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-after-invalid-escort", '-TimeoutSeconds', $TimeoutSeconds)
@@ -49,6 +51,49 @@ try {
     $escortState = $escort.state
     $nativeEscortIssued = ($escort.status -eq 'completed' -and $escortState.location.targetPartyId -eq $escortTarget.id -and $escortState.party.defaultBehavior -eq 'EscortParty')
     $nativeEscortTimePolicyApplied = $escortState.context.timeControlMode -in @('StoppablePlay', 'StoppableFastForward')
+
+    if ($ProbeEscortVisibilityLoss) {
+        $probeDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Max(5, [Math]::Min(120, $VisibilityProbeSeconds)))
+        $probeState = $escort
+        $probeOutcome = 'target-remained-in-nearby-observation-for-window'
+        $probeStartDay = [double]$escort.campaignDay
+        $probeSamples = 0
+        while ([DateTime]::UtcNow -lt $probeDeadline) {
+            $probeState = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-escort-observe-$([guid]::NewGuid().ToString('N'))", '-TimeoutSeconds', $TimeoutSeconds)
+            $probeSamples++
+            if ($probeState.state.context.gameState -ne 'MapState') { $probeOutcome = 'left-campaign-map'; break }
+            $targetInNearbyObservation = @($probeState.state.nearbyParties | Where-Object { $_.id -eq $escortTarget.id }).Count -gt 0
+            if (-not $targetInNearbyObservation) { $probeOutcome = 'target-left-nearby-observation'; break }
+            if ($probeState.state.location.targetPartyId -ne $escortTarget.id -or $probeState.state.party.defaultBehavior -ne 'EscortParty') { $probeOutcome = 'escort-order-ended'; break }
+            if (-not (Get-Process -Id $start.session.processId -ErrorAction SilentlyContinue)) { throw 'Game process exited during the Escort visibility probe.' }
+            Start-Sleep -Milliseconds 250
+        }
+        $stop = Invoke-AgentCli 'stop' @('-CommandId', "$runPrefix-escort-probe-stop", '-TimeoutSeconds', $TimeoutSeconds)
+        $fixtureHashAfter = (Get-FileHash $savePath -Algorithm SHA256).Hash
+        $finalTargetRecord = @($probeState.state.nearbyParties | Where-Object { $_.id -eq $escortTarget.id } | Select-Object -First 1)
+        $targetStillObserved = $finalTargetRecord.Count -gt 0
+        $probeResult = [ordered]@{
+            ProcessId = $start.session.processId
+            Mode = 'natural-campaign-time; no explicit advance/pause during probe'
+            ProbeOutcome = $probeOutcome
+            ProbeSamples = $probeSamples
+            ProbeSeconds = $VisibilityProbeSeconds
+            Target = [ordered]@{ Id = $escortTarget.id; Name = $escortTarget.name; InitialDistance = $escortTarget.distance; FinalObservedParty = if ($finalTargetRecord.Count -gt 0) { $finalTargetRecord[0] } else { $null } }
+            InitialEscort = [ordered]@{ Status = $escort.status; TargetPartyId = $escortState.location.targetPartyId; DefaultBehavior = $escortState.party.defaultBehavior; TimeControlMode = $escortState.context.timeControlMode; NativeMapClickTimePolicy = $nativeEscortTimePolicyApplied }
+            FinalObservation = [ordered]@{ TargetInNearbyObservation = $targetStillObserved; TargetPartyId = $probeState.state.location.targetPartyId; DefaultBehavior = $probeState.state.party.defaultBehavior; TimeControlMode = $probeState.state.context.timeControlMode; CampaignDay = $probeState.campaignDay; DaysElapsed = [double]$probeState.campaignDay - $probeStartDay; GameState = $probeState.state.context.gameState }
+            FixtureUnchanged = $fixtureHashBefore -eq $fixtureHashAfter
+            ProcessStopped = $stop.processStopped
+        }
+        $probeResult.Passed = ($nativeEscortIssued -and $nativeEscortTimePolicyApplied -and $probeResult.FixtureUnchanged -and $probeResult.ProcessStopped)
+        $probeJson = $probeResult | ConvertTo-Json -Depth 8
+        if ($env:CHRONICLE_HARNESS_TEMP -and (Test-Path -LiteralPath $env:CHRONICLE_HARNESS_TEMP -PathType Container)) {
+            Set-Content -LiteralPath (Join-Path $env:CHRONICLE_HARNESS_TEMP 'AgentPursuitVisibilityResult.json') -Value $probeJson -Encoding UTF8
+        }
+        $probeJson
+        if (-not $probeResult.Passed) { exit 1 }
+        return
+    }
+
     $holdAfterEscort = Invoke-AgentCli 'hold' @('-CommandId', "$runPrefix-hold-after-escort", '-TimeoutSeconds', $TimeoutSeconds)
     $mapState = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-hold-settled", '-TimeoutSeconds', $TimeoutSeconds)
     $escortStoppedByNativeHold = ($holdAfterEscort.status -eq 'completed' -and $mapState.state.location.targetPartyId -eq $null -and $mapState.state.party.defaultBehavior -eq 'Hold')
