@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet('start','load','state','captureFrame','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','move','pursue','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','recruit','foodOptions','tradeOptions','trade','provision','save','stop')]
+    [ValidateSet('start','load','state','captureFrame','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','move','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','recruit','foodOptions','tradeOptions','trade','provision','save','stop')]
     [string]$Action,
     [string]$SaveName,
     [string]$SettlementId,
@@ -37,6 +37,7 @@ $responseRoot = Join-Path $protocolRoot 'responses'
 $commandPath = Join-Path $protocolRoot 'command.json'
 $sessionPath = Join-Path $protocolRoot 'session.json'
 New-Item -ItemType Directory -Force -Path $protocolRoot,$responseRoot | Out-Null
+. (Join-Path $PSScriptRoot 'Agent-SaveMetadata.ps1')
 . (Join-Path $PSScriptRoot 'Test-WindowLayout.ps1')
 
 function Set-SafeExitMarker {
@@ -123,7 +124,16 @@ if ($Action -in @('start','load')) {
         Start-Sleep -Milliseconds 250
     } while ((Get-Date) -lt $shutdownDeadline)
     if ($runningGame.Count -gt 0) { throw "Bannerlord is already running: $($runningGame.ProcessName -join ', ')." }
-    $modules = @('Bannerlord.Harmony','Bannerlord.ButterLib','Bannerlord.UIExtenderEx','Bannerlord.MBOptionScreen','Native','SandBoxCore','CustomBattle','SandBox','StoryMode','BirthAndDeath','ChronicleFramework')
+    $modules = @(Get-AgentSaveModuleIds -SavePath $savePath)
+    $installedModuleIds = @()
+    foreach ($moduleDirectory in Get-ChildItem -LiteralPath (Join-Path $gameRoot 'Modules') -Directory) {
+        $moduleManifestPath = Join-Path $moduleDirectory.FullName 'SubModule.xml'
+        if (-not (Test-Path -LiteralPath $moduleManifestPath)) { continue }
+        try { $installedModuleIds += [string]([xml](Get-Content -LiteralPath $moduleManifestPath -Raw -Encoding UTF8)).Module.Id.value }
+        catch { }
+    }
+    $missingSaveModules = @($modules | Where-Object { $_ -notin $installedModuleIds })
+    if ($missingSaveModules.Count -gt 0) { throw "Save requires modules that are not installed in the configured game root: $($missingSaveModules -join ', ')." }
     $moduleArgument = '_MODULES_*' + ($modules -join '*') + '*_MODULES_'
     $diagnosticStartLineCount = if (Test-Path $diagnosticLog) { @(Get-Content $diagnosticLog).Count } else { 0 }
     $expectedHarnessMode = if ([string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_MODE)) { 'normal' } else { $env:CHRONICLE_HARNESS_MODE }
@@ -134,7 +144,14 @@ if ($Action -in @('start','load')) {
     $ready = $false
     $windowLayout = $null
     while ((Get-Date) -lt $deadline) {
-        if (-not (Get-Process -Id $process.Id -ErrorAction SilentlyContinue)) { break }
+        $launchProcess = Get-Process -Id $process.Id -ErrorAction SilentlyContinue
+        if (-not $launchProcess) { break }
+        if ($launchProcess.MainWindowTitle -match '^Mod change detected$') {
+            $blockedWindowTitle = $launchProcess.MainWindowTitle
+            Stop-AgentProcessTree -RootProcessId $process.Id | Out-Null
+            Set-SafeExitMarker
+            throw "Campaign launch is blocked by '$blockedWindowTitle'; no automatic confirmation was sent. Resolve the module-change prompt or use a fixture with the active module set."
+        }
         $candidateLayout = Set-ChronicleTestWindow -ProcessId $process.Id
         if ($candidateLayout -and $candidateLayout.Applied) { $windowLayout = $candidateLayout }
         if (Test-Path $diagnosticLog) {
@@ -152,7 +169,7 @@ if ($Action -in @('start','load')) {
     }
     $windowLayout = Set-ChronicleTestWindow -ProcessId $process.Id
     if (-not $windowLayout -or -not $windowLayout.Applied) { throw 'Windowed test layout was not verified.' }
-    $session = [ordered]@{ protocolVersion = 1; processId = $process.Id; saveName = $SaveName; startedUtc = (Get-Date).ToUniversalTime().ToString('O'); windowLayout = $windowLayout }
+    $session = [ordered]@{ protocolVersion = 1; processId = $process.Id; saveName = $SaveName; moduleSet = $modules; startedUtc = (Get-Date).ToUniversalTime().ToString('O'); windowLayout = $windowLayout }
     $session | ConvertTo-Json | Set-Content -Path $sessionPath -Encoding UTF8
     $configuredTimeout = $TimeoutSeconds
     $TimeoutSeconds = [Math]::Min(30, $TimeoutSeconds)
@@ -194,6 +211,10 @@ switch ($Action) {
     'pursue' {
         if (-not $PartyId) { throw '-PartyId is required for pursue.' }
         $result = Invoke-ProtocolCommand 'pursue' @{ partyId = $PartyId }
+    }
+    'follow' {
+        if (-not $PartyId) { throw '-PartyId is required for follow.' }
+        $result = Invoke-ProtocolCommand 'follow' @{ partyId = $PartyId }
     }
     'hold' { $result = Invoke-ProtocolCommand 'hold' }
     'menu' { $result = Invoke-ProtocolCommand 'menu' }

@@ -175,6 +175,20 @@ internal sealed class ChronicleAgentProtocol
                     ApplyMapClickTimeChange(isDoubleClick: false);
                     WriteResponse(commandId, action, "completed", behavior);
                     break;
+                case "follow":
+                    if (PlayerEncounter.IsActive || MobileParty.MainParty.CurrentSettlement != null || MobileParty.MainParty.MapEvent != null)
+                        throw new InvalidOperationException("escort requires the campaign map with no active encounter");
+                    var escortPartyId = ReadString(command, "partyId");
+                    var escortParty = MobileParty.All.FirstOrDefault(party => party != null && string.Equals(party.StringId, escortPartyId, StringComparison.Ordinal));
+                    if (escortParty == null || escortParty == MobileParty.MainParty || !escortParty.IsActive || !escortParty.IsVisible)
+                        throw new InvalidOperationException("active visible target party not found");
+                    if (escortParty.IsCurrentlyAtSea != MobileParty.MainParty.IsCurrentlyAtSea ||
+                        !Helpers.NavigationHelper.CanPlayerNavigateToPosition(escortParty.Position, out var escortNavigationType))
+                        throw new InvalidOperationException("target party is not currently navigable by the main party");
+                    MobileParty.MainParty.SetMoveEscortParty(escortParty, escortNavigationType, isTargetingPort: false);
+                    ApplyMapClickTimeChange(isDoubleClick: false);
+                    WriteResponse(commandId, action, "completed", behavior);
+                    break;
                 case "hold":
                     MobileParty.MainParty.SetMoveModeHold();
                     ApplyMapClickTimeChange(isDoubleClick: false);

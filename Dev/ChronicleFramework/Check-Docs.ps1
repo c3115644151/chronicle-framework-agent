@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '4.89'
+$contractVersion = '4.92'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -46,6 +46,11 @@ foreach ($scriptFile in $harnessPowerShellFiles) {
 }
 
 $harnessScript = Get-Content (Join-Path $harnessRoot 'Run-Harness.ps1') -Raw -Encoding UTF8
+$agentCliSource = Get-Content (Join-Path $harnessRoot 'Agent-Cli.ps1') -Raw -Encoding UTF8
+if ($agentCliSource -notmatch "MainWindowTitle -match '\^Mod change detected\$'" -or $agentCliSource -notmatch 'no automatic confirmation was sent' -or $agentCliSource -match 'SendKeys|SendInput|press_key|ControlClick') { throw 'The known module-change dialog must fail fast and must not be silently accepted by the Harness.' }
+$saveModuleMetadataSource = Get-Content (Join-Path $harnessRoot 'Agent-SaveMetadata.ps1') -Raw -Encoding UTF8
+$saveModuleMetadataTest = Get-Content (Join-Path $harnessRoot 'Test-AgentSaveMetadata.ps1') -Raw -Encoding UTF8
+if ($agentCliSource -notmatch 'Get-AgentSaveModuleIds -SavePath \$savePath' -or $saveModuleMetadataSource -notmatch 'Save metadata header length is invalid' -or $saveModuleMetadataTest -notmatch 'TruncatedHeaderRejected') { throw 'Save load must honor a validated, fixture-specific module set instead of guessing a default.' }
 $startupEvidenceScript = Join-Path $harnessRoot 'HarnessStartupEvidence.ps1'
 $contextFocusScript = Join-Path $harnessRoot 'Set-ContextFocus.ps1'
 $researchReadinessScript = Join-Path $harnessRoot 'HarnessResearchReadiness.ps1'
@@ -129,7 +134,7 @@ foreach ($requiredText in @('TestResults/latest.json', 'Computer Use', 'ContextS
         throw "DEVELOPMENT.md is missing contract element '$requiredText'."
     }
 }
-foreach ($requiredScript in @('Agent-DecisionLoop.ps1', 'Test-AgentLoop.ps1', 'Test-AgentLoopProvider.ps1', 'Test-AgentBattleFixture.ps1', 'Test-AgentVisualCapture.ps1', 'Test-AgentFreshCampaign.ps1', 'Test-AgentSupport.ps1', 'HarnessVideoCapture.ps1', 'Set-ContextFocus.ps1')) {
+foreach ($requiredScript in @('Agent-DecisionLoop.ps1', 'Agent-SaveMetadata.ps1', 'Test-AgentSaveMetadata.ps1', 'Test-AgentLoop.ps1', 'Test-AgentLoopProvider.ps1', 'Test-AgentBattleFixture.ps1', 'Test-AgentVisualCapture.ps1', 'Test-AgentFreshCampaign.ps1', 'Test-AgentSupport.ps1', 'HarnessVideoCapture.ps1', 'Set-ContextFocus.ps1')) {
     if (-not (Test-Path (Join-Path $harnessRoot $requiredScript))) { throw "Agent loop harness script is missing: $requiredScript" }
 }
 $freshCampaignSource = Get-Content (Join-Path $harnessRoot 'FreshCampaignHarness.cs') -Raw -Encoding UTF8
@@ -221,7 +226,7 @@ if ($catalogSourceErrors.Count -gt 0 -or $uncitedSourceSystemIds.Count -gt 0) {
 if (-not (Test-ChronicleResearchReadiness)) { throw 'Research readiness gate regression checks failed.' }
 if ($mainlineDoc -notmatch '(?m)^#### .*Mechanic Contract\s*$') { throw 'MAINLINE.md is missing the required original-mechanic contract table.' }
 if ($mainlineDoc -notmatch '(?m)^#### .*Coverage and Evidence Contract') { throw 'MAINLINE.md must define durable denominator/acceptance rules without storing current task progress.' }
-foreach ($actionId in @('move', 'pursue', 'hold', 'rest', 'advance', 'autoresolve (research)', 'dialogueSelect (research)', 'dialogueContinue (research)', 'retreat (research)', 'partyLoot (research)')) {
+foreach ($actionId in @('move', 'pursue', 'follow / escort', 'hold', 'rest', 'advance', 'autoresolve (research)', 'dialogueSelect (research)', 'dialogueContinue (research)', 'retreat (research)', 'partyLoot (research)')) {
     if ($mainlineDoc -notmatch "(?m)^\|\s*$([regex]::Escape($actionId))\s*\|") {
         throw "MAINLINE.md mechanic-contract table is missing action '$actionId'."
     }

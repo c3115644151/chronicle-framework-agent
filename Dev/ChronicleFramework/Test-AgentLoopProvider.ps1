@@ -22,6 +22,12 @@ if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'recruitment') {
     [pscustomobject]@{ action = 'recruit'; arguments = @{ OwnerId = [string]$offer[0].ownerId; TroopId = [string]$offer[0].troopId; VolunteerSlot = [int]$offer[0].slot }; rationale = 'Deterministic harness test: select the cheapest affordable native offer.' } | ConvertTo-Json -Compress
     exit 0
 }
+if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'escort') {
+    $parties = @($request.observation.state.nearbyParties | Where-Object { $_.isMoving -and $null -eq $_.currentSettlementId -and $_.distance -gt 1.0 } | Sort-Object distance)
+    if ($parties.Count -eq 0) { throw 'Escort provider received no visible moving party in the native observation.' }
+    [pscustomobject]@{ action = 'follow'; arguments = @{ PartyId = [string]$parties[0].id }; rationale = 'Deterministic harness test: choose a visible map Party and use its native Escort action.' } | ConvertTo-Json -Compress
+    exit 0
+}
 $mode = [string]$request.observation.timeControlMode
 if (-not $mode) { $mode = [string]$request.observation.state.timeControlMode }
 $action = if ($mode -eq 'Stop' -or $mode -eq 'FastForwardStop') { 'resume' } else { 'pause' }

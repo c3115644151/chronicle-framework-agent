@@ -37,8 +37,24 @@ try {
     if ($leaveResult.status -ne 'completed') { throw 'Could not exit the settlement to test campaign-map pursuit.' }
 
     $mapState = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-map-state", '-TimeoutSeconds', $TimeoutSeconds)
+    $escortTargets = @($mapState.state.nearbyParties | Where-Object { $_.isMoving -and $null -eq $_.currentSettlementId -and $_.distance -gt 1.0 } | Sort-Object distance)
+    if ($escortTargets.Count -eq 0) { throw 'No visible moving party outside a settlement is available in the disposable fixture; refusing to invent or teleport an escort target.' }
+    $escortTarget = $escortTargets[0]
+
+    $invalidEscort = Invoke-AgentCli 'follow' @('-PartyId', 'chronicle_missing_party', '-CommandId', "$runPrefix-invalid-escort", '-TimeoutSeconds', '15')
+    $afterInvalidEscort = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-after-invalid-escort", '-TimeoutSeconds', $TimeoutSeconds)
+    $invalidEscortNoMutation = ($invalidEscort.status -eq 'rejected' -and $afterInvalidEscort.state.location.targetPartyId -eq $mapState.state.location.targetPartyId -and $afterInvalidEscort.state.party.moveMode -eq $mapState.state.party.moveMode -and $afterInvalidEscort.state.context.timeControlMode -eq $mapState.state.context.timeControlMode)
+
+    $escort = Invoke-AgentCli 'follow' @('-PartyId', [string]$escortTarget.id, '-CommandId', "$runPrefix-escort", '-TimeoutSeconds', $TimeoutSeconds)
+    $escortState = $escort.state
+    $nativeEscortIssued = ($escort.status -eq 'completed' -and $escortState.location.targetPartyId -eq $escortTarget.id -and $escortState.party.defaultBehavior -eq 'EscortParty')
+    $nativeEscortTimePolicyApplied = $escortState.context.timeControlMode -in @('StoppablePlay', 'StoppableFastForward')
+    $holdAfterEscort = Invoke-AgentCli 'hold' @('-CommandId', "$runPrefix-hold-after-escort", '-TimeoutSeconds', $TimeoutSeconds)
+    $mapState = $holdAfterEscort
+    $escortStoppedByNativeHold = ($holdAfterEscort.status -eq 'completed' -and $mapState.state.location.targetPartyId -eq $null -and $mapState.state.party.defaultBehavior -eq 'Hold')
+
     $targets = @($mapState.state.nearbyParties | Where-Object { $_.isMoving -and $null -eq $_.currentSettlementId -and $_.distance -gt 1.0 } | Sort-Object distance)
-    if ($targets.Count -eq 0) { throw 'No visible moving party outside a settlement is available in the disposable fixture; refusing to invent or teleport a target.' }
+    if ($targets.Count -eq 0) { throw 'No visible moving party outside a settlement is available for pursuit in the disposable fixture; refusing to invent or teleport a target.' }
     $target = $targets[0]
 
     $invalid = Invoke-AgentCli 'pursue' @('-PartyId', 'chronicle_missing_party', '-CommandId', "$runPrefix-invalid", '-TimeoutSeconds', '15')
@@ -72,6 +88,9 @@ try {
     $result = [ordered]@{
         ProcessId = $start.session.processId
         WindowLayout = $start.session.windowLayout
+        InvalidEscort = [ordered]@{ Status = $invalidEscort.status; Error = $invalidEscort.error; NoMutation = $invalidEscortNoMutation }
+        EscortOrder = [ordered]@{ Status = $escort.status; TargetPartyId = $escortState.location.targetPartyId; MoveMode = $escortState.party.moveMode; DefaultBehavior = $escortState.party.defaultBehavior; TimeControlMode = $escortState.context.timeControlMode; NativeMapClickTimePolicy = $nativeEscortTimePolicyApplied }
+        EscortStoppedByNativeHold = $escortStoppedByNativeHold
         Target = $target
         InvalidTarget = [ordered]@{ Status = $invalid.status; Error = $invalid.error; NoMutation = $invalidNoMutation }
         PursuitOrder = [ordered]@{ Status = $pursuit.status; TargetPartyId = $pursuitState.location.targetPartyId; MoveMode = $pursuitState.party.moveMode; DefaultBehavior = $pursuitState.party.defaultBehavior; TimeControlMode = $pursuitState.context.timeControlMode; NativeMapClickTimePolicy = $nativeMapClickTimePolicyApplied }
@@ -80,7 +99,7 @@ try {
         FixtureUnchanged = $fixtureHashBefore -eq $fixtureHashAfter
         ProcessStopped = $stop.processStopped
     }
-    $result.Passed = ($invalidNoMutation -and $nativeOrderIssued -and $nativeMapClickTimePolicyApplied -and $pursuitOutcome -in @('encounter', 'nativeHoldAfterTargetLoss') -and -not $pursuitTimedOut -and $result.FixtureUnchanged -and $result.ProcessStopped)
+    $result.Passed = ($invalidEscortNoMutation -and $nativeEscortIssued -and $nativeEscortTimePolicyApplied -and $escortStoppedByNativeHold -and $invalidNoMutation -and $nativeOrderIssued -and $nativeMapClickTimePolicyApplied -and $pursuitOutcome -in @('encounter', 'nativeHoldAfterTargetLoss') -and -not $pursuitTimedOut -and $result.FixtureUnchanged -and $result.ProcessStopped)
     $result | ConvertTo-Json -Depth 8
     if (-not $result.Passed) { exit 1 }
 }

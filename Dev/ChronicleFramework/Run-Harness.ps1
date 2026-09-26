@@ -11,7 +11,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '4.89'
+$HarnessContractVersion = '4.92'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -33,6 +33,7 @@ $apiScript = Join-Path (Split-Path -Parent $harnessRoot) 'ApiProbe\Inspect-Campa
 $smokeScript = Join-Path $harnessRoot 'Test-Module.ps1'
 $campaignScript = Join-Path $harnessRoot 'Test-Campaign.ps1'
 $freshCampaignScript = Join-Path $harnessRoot 'Test-AgentFreshCampaign.ps1'
+$saveModuleMetadataTestScript = Join-Path $harnessRoot 'Test-AgentSaveMetadata.ps1'
 $protocolScript = Join-Path $harnessRoot 'Test-AgentProtocol.ps1'
 $observationScript = Join-Path $harnessRoot 'Test-AgentObservation.ps1'
 $movementScript = Join-Path $harnessRoot 'Test-AgentMovement.ps1'
@@ -169,6 +170,8 @@ foreach ($stage in $requestedStages) {
                 if (-not (Get-Command ilspycmd -ErrorAction SilentlyContinue)) { throw 'ilspycmd was not found on PATH.' }
                 $templateList = dotnet new list 2>&1 | Out-String
                 if ($templateList -notmatch 'blmodfx') { throw 'Bannerlord.Templates blmodfx template was not found.' }
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $saveModuleMetadataTestScript
+                if ($LASTEXITCODE -ne 0) { throw "Save module metadata test failed with exit code $LASTEXITCODE." }
                 [xml]$manifest = Get-Content $sourceManifestPath
                 if ([string]$manifest.Module.Id.value -ne 'ChronicleFramework') { throw 'Unexpected module id.' }
                 $dependencies = @($manifest.Module.DependedModules.DependedModule | ForEach-Object { [string]$_.Id })

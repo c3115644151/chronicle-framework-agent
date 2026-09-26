@@ -60,6 +60,21 @@ try {
     $orderedDecisions = ($first.decision.action -in @('resume','pause') -and $second.decision.action -in @('resume','pause') -and $first.decision.action -ne $second.decision.action)
     $observedTransition = ($firstAfter -ne $firstState -and $secondAfter -in @('Stop','FastForwardStop'))
     $receiptForwarded = ($second.previousActionReceipt.commandId -eq $first.actionReceipt.commandId -and $second.previousActionReceipt.action -eq $first.actionReceipt.action -and $second.previousActionReceipt.status -eq $first.actionReceipt.status)
+    $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
+    $env:CHRONICLE_TEST_PROVIDER_MODE = 'escort'
+    try {
+        $followLoopOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -MaxDecisions 1 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-escort-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $followLoopExitCode = $LASTEXITCODE
+    }
+    finally {
+        if ($null -eq $priorProviderMode) { Remove-Item Env:CHRONICLE_TEST_PROVIDER_MODE -ErrorAction SilentlyContinue }
+        else { $env:CHRONICLE_TEST_PROVIDER_MODE = $priorProviderMode }
+    }
+    if ($followLoopExitCode -ne 0) { throw "Agent decision loop did not route the native Escort action: $followLoopOutput" }
+    $followTrace = $followLoopOutput | ConvertFrom-Json
+    $followStep = $followTrace.trace[0]
+    $followTargetId = [string]$followStep.decision.arguments.PartyId
+    $escortDecisionAccepted = ($followStep.decision.action -eq 'follow' -and $followStep.actionReceipt.status -eq 'completed' -and $followStep.observationAfter.state.location.targetPartyId -eq $followTargetId -and $followStep.observationAfter.state.party.defaultBehavior -eq 'EscortParty')
     $stop = Invoke-AgentCli 'stop'
     $fixtureHashAfter = (Get-FileHash $savePath -Algorithm SHA256).Hash
     $result = [ordered]@{
@@ -74,13 +89,14 @@ try {
         OrderedDecisions = $orderedDecisions
         ObservationActionObservationVerified = $observedTransition
         PreviousActionReceiptForwarded = $receiptForwarded
+        EscortDecisionRoutedAndObserved = $escortDecisionAccepted
         UnsafeActionRejected = $unsafeActionRejected
         HarnessAdvanceRejected = $harnessClockRejected
         FixtureUnchanged = $fixtureHashBefore -eq $fixtureHashAfter
         ProcessStopped = $stop.processStopped
         Trace = $trace.trace
     }
-    $result.Passed = ($result.DecisionCount -eq 2 -and $orderedDecisions -and $observedTransition -and $receiptForwarded -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
+    $result.Passed = ($result.DecisionCount -eq 2 -and $orderedDecisions -and $observedTransition -and $receiptForwarded -and $escortDecisionAccepted -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
     $result | ConvertTo-Json -Depth 12
     if (-not $result.Passed) { exit 1 }
 }
