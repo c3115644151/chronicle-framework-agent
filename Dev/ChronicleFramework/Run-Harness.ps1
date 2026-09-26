@@ -3,7 +3,9 @@ param(
     [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'BattleFixture', 'PostBattle', 'Observation', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'VisualCapture', 'All')]
     [string]$Phase = 'All',
     [int]$SmokeTimeoutSeconds = 45,
-    [int]$SmokeStabilitySeconds = 8
+    [int]$SmokeStabilitySeconds = 8,
+    [string]$TargetSettlementId = 'town_V1',
+    [string]$ApproachSettlementId = 'town_V1'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -11,7 +13,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '5.08'
+$HarnessContractVersion = '5.10'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -430,13 +432,13 @@ foreach ($stage in $requestedStages) {
         }
         'SettlementOverlayConversation' {
             Invoke-Stage -Name 'SettlementOverlayConversation' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $settlementOverlayConversationScript
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $settlementOverlayConversationScript -TargetSettlementId $TargetSettlementId -ApproachSettlementId $ApproachSettlementId
                 if ($LASTEXITCODE -ne 0) { throw "Native Settlement overlay Conversation test failed with exit code $LASTEXITCODE." }
             }
         }
         'SettlementOverlayQuestAcceptance' {
             Invoke-Stage -Name 'SettlementOverlayQuestAcceptance' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $settlementOverlayConversationScript -ExpectedOutcome QuestAccepted
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $settlementOverlayConversationScript -TargetSettlementId $TargetSettlementId -ApproachSettlementId $ApproachSettlementId -ExpectedOutcome QuestAccepted
                 if ($LASTEXITCODE -ne 0) { throw "Native Settlement overlay Issue Quest acceptance test failed with exit code $LASTEXITCODE." }
             }
         }

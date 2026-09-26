@@ -2,6 +2,8 @@
 param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
     [int]$TimeoutSeconds = 180,
+    [string]$TargetSettlementId = 'town_V1',
+    [string]$ApproachSettlementId = 'town_V1',
     [ValidateSet('ConversationOnly', 'QuestAccepted', 'NativePreconditionBlocked')]
     [string]$ExpectedOutcome = 'ConversationOnly'
 )
@@ -17,6 +19,7 @@ $captureTempPath = if ($env:CHRONICLE_HARNESS_TEMP) { Join-Path $env:CHRONICLE_H
 $capturePath = Join-Path $runDirectory $captureName
 $previousHarnessMode = $env:CHRONICLE_HARNESS_MODE
 $commandPrefix = 'settlement-overlay-' + (Get-Date -Format 'yyyyMMddHHmmssfff')
+$routeTrace = @()
 
 if (-not (Test-Path -LiteralPath $savePath)) { throw "Settlement overlay fixture not found: $savePath" }
 if (Get-Process -Name Bannerlord -ErrorAction SilentlyContinue) { throw 'Bannerlord is already running.' }
@@ -30,27 +33,55 @@ function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @(), [int]$Comm
     catch { throw "Agent CLI '$Action' returned invalid JSON: $output" }
 }
 
+function Wait-ForSettlementMenu([string]$SettlementId) {
+    $arrivalDeadline = [DateTime]::UtcNow.AddSeconds(120)
+    $observation = $null
+    while ([DateTime]::UtcNow -lt $arrivalDeadline) {
+        $observation = Invoke-AgentCli 'state' @('-CommandId', "$commandPrefix-arrival-$([Guid]::NewGuid().ToString('N'))") 30
+        if ($observation.state.location.currentSettlementId -eq $SettlementId -and -not [string]::IsNullOrWhiteSpace([string]$observation.state.context.menuId)) { return $observation }
+        if ($observation.state.context.encounterActive -and $observation.state.context.encounteredPartyId -ne $SettlementId) { throw "Unexpected encounter '$($observation.state.context.encounteredPartyId)' interrupted travel to '$SettlementId'." }
+        if (-not (Get-Process -Id $start.session.processId -ErrorAction SilentlyContinue)) { throw "Game process exited during travel to '$SettlementId'." }
+        Start-Sleep -Milliseconds 500
+    }
+    throw "Natural Campaign travel did not reach settlement menu '$SettlementId'. LastSettlement=$($observation.state.location.currentSettlementId), Menu=$($observation.state.context.menuId)."
+}
+
 try {
     $env:CHRONICLE_HARNESS_MODE = 'visual-capture'
     $start = Invoke-AgentCli 'load' @('-SaveName', $LoadSaveName)
     $initial = Invoke-AgentCli 'state' @('-CommandId', "$commandPrefix-initial")
     if ($initial.state.context.gameState -ne 'MapState') { throw "Settlement overlay fixture must start on Campaign map; got $($initial.state.context.gameState)." }
 
-    $town = @($initial.state.nearbySettlements | Where-Object { $_.id -eq 'town_V1' -and $_.type -eq 'town' -and -not $_.hostile } | Select-Object -First 1)
-    if ($town.Count -ne 1) { throw 'Sargot is not currently a safe visible town target in the disposable fixture.' }
-    $move = Invoke-AgentCli 'move' @('-SettlementId', 'town_V1', '-CommandId', "$commandPrefix-move")
-    if ($move.status -ne 'completed' -or $move.state.location.targetSettlementId -ne 'town_V1') { throw 'Native campaign movement did not accept the Sargot test target.' }
-
-    $arrivalDeadline = [DateTime]::UtcNow.AddSeconds(120)
-    $arrived = $null
-    while ([DateTime]::UtcNow -lt $arrivalDeadline) {
-        $arrived = Invoke-AgentCli 'state' @('-CommandId', "$commandPrefix-arrival-$([Guid]::NewGuid().ToString('N'))") 30
-        if ($arrived.state.location.currentSettlementId -eq 'town_V1' -and $arrived.state.context.menuId -eq 'town') { break }
-        if ($arrived.state.context.encounterActive -and $arrived.state.context.encounteredPartyId -ne 'town_V1') { throw "Unexpected encounter '$($arrived.state.context.encounteredPartyId)' interrupted Sargot travel." }
-        if (-not (Get-Process -Id $start.session.processId -ErrorAction SilentlyContinue)) { throw 'Game process exited during natural Sargot travel.' }
-        Start-Sleep -Milliseconds 500
+    $settlement = @($initial.state.nearbySettlements | Where-Object { $_.id -eq $TargetSettlementId -and -not $_.hostile } | Select-Object -First 1)
+    if ($settlement.Count -ne 1) {
+        $approach = @($initial.state.nearbySettlements | Where-Object { $_.id -eq $ApproachSettlementId -and -not $_.hostile } | Select-Object -First 1)
+        if ($approach.Count -ne 1) { throw "Neither target '$TargetSettlementId' nor safe approach settlement '$ApproachSettlementId' is currently player-observed. Observed=$((@($initial.state.nearbySettlements | ForEach-Object { $_.id }) -join ','))" }
+        $approachMove = Invoke-AgentCli 'move' @('-SettlementId', $ApproachSettlementId, '-CommandId', "$commandPrefix-approach-move")
+        if ($approachMove.status -ne 'completed' -or $approachMove.state.location.targetSettlementId -ne $ApproachSettlementId) { throw "Native Campaign movement did not accept observed approach target '$ApproachSettlementId'." }
+        $approachArrival = Wait-ForSettlementMenu $ApproachSettlementId
+        $routeTrace += [ordered]@{ Step = 'moveToObservedApproach'; SettlementId = $ApproachSettlementId; MenuId = $approachArrival.state.context.menuId; CampaignDay = $approachArrival.campaignDay }
+        $leaveOption = @($approachArrival.state.availableMenuOptions | Where-Object { $_.isLeave -and $_.available } | Select-Object -First 1)
+        if ($leaveOption.Count -ne 1) { throw "Approach settlement '$ApproachSettlementId' has no unique available native Leave option." }
+        $leaveReceipt = Invoke-AgentCli 'menuSelect' @('-MenuId', $approachArrival.state.context.menuId, '-OptionId', $leaveOption[0].id, '-CommandId', "$commandPrefix-approach-leave")
+        if ($leaveReceipt.status -ne 'completed') { throw "Native Leave option '$($leaveOption[0].id)' failed: $($leaveReceipt.error)" }
+        $mapDeadline = [DateTime]::UtcNow.AddSeconds(20)
+        $mapObservation = $null
+        while ([DateTime]::UtcNow -lt $mapDeadline) {
+            $mapObservation = Invoke-AgentCli 'state' @('-CommandId', "$commandPrefix-map-after-leave-$([Guid]::NewGuid().ToString('N'))") 30
+            if ($mapObservation.state.context.gameState -eq 'MapState' -and -not $mapObservation.state.location.currentSettlementId) { break }
+            Start-Sleep -Milliseconds 250
+        }
+        if (-not $mapObservation -or $mapObservation.state.context.gameState -ne 'MapState' -or $mapObservation.state.location.currentSettlementId) { throw "Native Leave from '$ApproachSettlementId' did not return to Campaign Map." }
+        $routeTrace += [ordered]@{ Step = 'leaveApproachAndReobserve'; OptionId = $leaveOption[0].id; GameState = $mapObservation.state.context.gameState; CampaignDay = $mapObservation.campaignDay }
+        $initial = $mapObservation
+        $settlement = @($initial.state.nearbySettlements | Where-Object { $_.id -eq $TargetSettlementId -and -not $_.hostile } | Select-Object -First 1)
     }
-    if (-not $arrived -or $arrived.state.location.currentSettlementId -ne 'town_V1' -or $arrived.state.context.menuId -ne 'town') { throw 'Natural Campaign travel did not reach Sargot town menu.' }
+    if ($settlement.Count -ne 1) { throw "Target settlement '$TargetSettlementId' is not a safe target in the current map observation after the approach. Observed=$((@($initial.state.nearbySettlements | ForEach-Object { $_.id }) -join ','))" }
+
+    $move = Invoke-AgentCli 'move' @('-SettlementId', $TargetSettlementId, '-CommandId', "$commandPrefix-move")
+    if ($move.status -ne 'completed' -or $move.state.location.targetSettlementId -ne $TargetSettlementId) { throw "Native Campaign movement did not accept observed settlement target '$TargetSettlementId'." }
+    $routeTrace += [ordered]@{ Step = 'moveToObservedTarget'; SettlementId = $TargetSettlementId; CampaignDay = $initial.campaignDay }
+    $arrived = Wait-ForSettlementMenu $TargetSettlementId
     if ($arrived.state.schemaVersion -ne 19) { throw "Settlement overlay observation schema changed unexpectedly: $($arrived.state.schemaVersion)." }
 
     $overlayCharacters = @($arrived.state.settlementOverlayCharacters)
@@ -147,6 +178,8 @@ try {
     $questCountAfter = @($postTalk.state.quests).Count
     $result = [ordered]@{
         ProcessId = $start.session.processId
+        TargetSettlement = [ordered]@{ Id = $TargetSettlementId; Name = $settlement[0].name; Type = $settlement[0].type; MenuId = $arrived.state.context.menuId }
+        RouteTrace = $routeTrace
         NativeOverlayCharacterCount = $overlayCharacters.Count
         Target = $targetCharacter
         TargetIssueMarkers = $candidate[0].IssueMarkers
@@ -190,6 +223,34 @@ try {
     }
     $resultJson
     if (-not $result.Passed) { throw "Native settlement overlay validation failed: expectedOutcome=$ExpectedOutcome, expectedOutcomeMet=$($result.ExpectedOutcomeMet), talk=$($talk.status), partner=$($conversation.heroId), expected=$targetHeroId, questAccepted=$questAccepted, nativePreconditionBlocked=$($result.NativePreconditionBlocked), issueOfferObserved=$questOfferObserved, blockedReason=$questBlockedReason." }
+}
+catch {
+    $lastObservedState = if ($postTalk -and $postTalk.state) { $postTalk.state } elseif ($arrived -and $arrived.state) { $arrived.state } elseif ($initial -and $initial.state) { $initial.state } else { $null }
+    $observedOverlay = if ($overlayCharacters) { @($overlayCharacters) } elseif ($lastObservedState -and $lastObservedState.settlementOverlayCharacters) { @($lastObservedState.settlementOverlayCharacters) } else { @() }
+    $failureStop = $null
+    if (Test-Path $sessionPath) {
+        try { $failureStop = Invoke-AgentCli 'stop' @('-CommandId', "$commandPrefix-failure-cleanup") 20 } catch { }
+    }
+    $failure = [ordered]@{
+        ExpectedOutcome = $ExpectedOutcome
+        TargetSettlementId = $TargetSettlementId
+        ApproachSettlementId = $ApproachSettlementId
+        RouteTrace = $routeTrace
+        TargetSettlement = $settlement
+        Error = $_.Exception.Message
+        GameState = $lastObservedState.context.gameState
+        CurrentSettlementId = $lastObservedState.location.currentSettlementId
+        MenuId = $lastObservedState.context.menuId
+        ObservedOverlayCharacters = $observedOverlay
+        IssueMarkedNotables = @($observedOverlay | Where-Object { $_.isNotable -and @($_.questMarkers | Where-Object { [string]$_.type -match 'Issue' }).Count -gt 0 })
+        AvailableMenuOptions = @($lastObservedState.availableMenuOptions)
+        CleanupReceipt = $failureStop
+    }
+    if ($env:CHRONICLE_HARNESS_TEMP -and (Test-Path -LiteralPath $env:CHRONICLE_HARNESS_TEMP -PathType Container)) {
+        $failurePath = [IO.Path]::ChangeExtension($resultName, 'Failure.json')
+        Set-Content -LiteralPath (Join-Path $env:CHRONICLE_HARNESS_TEMP $failurePath) -Value ($failure | ConvertTo-Json -Depth 16) -Encoding UTF8
+    }
+    throw
 }
 finally {
     if (Test-Path $sessionPath) {
