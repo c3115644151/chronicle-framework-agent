@@ -55,7 +55,9 @@ try {
         ProcessStopped = $stop.processStopped
     }
     $result.Passed = (
-        $snapshot.schemaVersion -eq 8 -and
+        $snapshot.schemaVersion -eq 9 -and
+        $snapshot.location.PSObject.Properties['targetPosition'] -and
+        ($null -eq $snapshot.location.targetPosition -or ($null -ne $snapshot.location.targetPosition.x -and $null -ne $snapshot.location.targetPosition.y -and $null -ne $snapshot.location.targetPosition.isOnLand)) -and
         -not [string]::IsNullOrWhiteSpace([string]$snapshot.identity.heroId) -and
         $null -ne $snapshot.identity.mercenaryRequiredTier -and
         ($snapshot.identity.clanTier -ge $snapshot.identity.mercenaryRequiredTier -or $snapshot.identity.nextTierRequiredRenown -ge $snapshot.economy.renown) -and

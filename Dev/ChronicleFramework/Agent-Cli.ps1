@@ -1,10 +1,13 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet('start','load','state','captureFrame','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','move','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','recruit','foodOptions','tradeOptions','trade','provision','save','stop')]
+    [ValidateSet('start','load','state','captureFrame','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','move','moveToPoint','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','recruit','foodOptions','tradeOptions','trade','provision','save','stop')]
     [string]$Action,
     [string]$SaveName,
     [string]$SettlementId,
+    [double]$X,
+    [double]$Y,
+    [ValidateSet('land')][string]$Surface,
     [string]$PartyId,
     [string]$MenuId,
     [string]$OptionId,
@@ -207,6 +210,10 @@ switch ($Action) {
     'move' {
         if (-not $SettlementId) { throw '-SettlementId is required for move.' }
         $result = Invoke-ProtocolCommand 'move' @{ settlementId = $SettlementId }
+    }
+    'moveToPoint' {
+        if (-not $PSBoundParameters.ContainsKey('X') -or -not $PSBoundParameters.ContainsKey('Y') -or -not $Surface) { throw '-X, -Y and -Surface (land|sea) are required for moveToPoint.' }
+        $result = Invoke-ProtocolCommand 'moveToPoint' @{ x = $X; y = $Y; surface = $Surface }
     }
     'pursue' {
         if (-not $PartyId) { throw '-PartyId is required for pursue.' }

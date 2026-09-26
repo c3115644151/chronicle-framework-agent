@@ -56,7 +56,7 @@ function Convert-DecisionToCli {
     param($Decision)
     if ($Decision.action -eq 'advance') { throw 'advance is a Harness-only deterministic time step and is unavailable to Agent decision providers.' }
     $allowed = @{
-        state = @(); pause = @(); resume = @(); move = @('SettlementId');
+        state = @(); pause = @(); resume = @(); move = @('SettlementId'); moveToPoint = @('X','Y','Surface');
         pursue = @('PartyId'); follow = @('PartyId'); hold = @(); menu = @(); menuSelect = @('MenuId','OptionId'); dialogueSelect = @('OptionId'); dialogueContinue = @();
         battlePause = @(); battleSkip = @(); battleFinish = @(); battleRetreat = @(); missionRetreat = @();
         partyTakeAll = @('LootType'); partyScreenDone = @(); inventoryTakeAll = @(); inventoryDone = @();

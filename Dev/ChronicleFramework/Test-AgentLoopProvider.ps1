@@ -28,6 +28,12 @@ if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'escort') {
     [pscustomobject]@{ action = 'follow'; arguments = @{ PartyId = [string]$parties[0].id }; rationale = 'Deterministic harness test: choose a visible map Party and use its native Escort action.' } | ConvertTo-Json -Compress
     exit 0
 }
+if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'point') {
+    $state = $request.observation.state
+    if ($state.party.isAtSea) { throw 'Point provider fixture must begin on land.' }
+    [pscustomobject]@{ action = 'moveToPoint'; arguments = @{ X = [double]$state.location.x + 1.5; Y = [double]$state.location.y; Surface = 'land' }; rationale = 'Deterministic harness test: request one nearby land coordinate from current observed map position.' } | ConvertTo-Json -Compress
+    exit 0
+}
 $mode = [string]$request.observation.timeControlMode
 if (-not $mode) { $mode = [string]$request.observation.state.timeControlMode }
 $action = if ($mode -eq 'Stop' -or $mode -eq 'FastForwardStop') { 'resume' } else { 'pause' }

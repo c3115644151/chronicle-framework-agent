@@ -216,6 +216,35 @@ internal sealed class ChronicleAgentProtocol
                     ApplyMapClickTimeChange(isDoubleClick: false);
                     WriteResponse(commandId, action, "completed", behavior);
                     break;
+                case "moveToPoint":
+                    if (PlayerEncounter.IsActive || MobileParty.MainParty.CurrentSettlement != null || MobileParty.MainParty.MapEvent != null)
+                        throw new InvalidOperationException("point movement requires the campaign map with no active encounter");
+                    var mapStateForPointMove = Game.Current.GameStateManager.ActiveState as MapState;
+                    if (mapStateForPointMove == null || mapStateForPointMove.AtMenu)
+                        throw new InvalidOperationException("point movement requires the unblocked native campaign map state");
+                    var targetX = ReadRequiredFiniteDouble(command, "x");
+                    var targetY = ReadRequiredFiniteDouble(command, "y");
+                    var surface = ReadString(command, "surface");
+                    if (!string.Equals(surface, "land", StringComparison.Ordinal))
+                        throw new InvalidOperationException("moveToPoint currently supports land destinations only; naval/sea transition belongs to a separately tested adapter");
+                    if (!MobileParty.MainParty.Position.IsOnLand)
+                        throw new InvalidOperationException("land point movement requires the main party to be on land");
+                    if (targetX > float.MaxValue || targetX < -float.MaxValue || targetY > float.MaxValue || targetY < -float.MaxValue)
+                        throw new InvalidOperationException("map destination is outside the Campaign coordinate range");
+                    var requestedPoint = new CampaignVec2(new TaleWorlds.Library.Vec2((float)targetX, (float)targetY), isOnLand: true);
+                    if (!requestedPoint.Face.IsValid())
+                        throw new InvalidOperationException("map destination does not resolve to a valid navigation face");
+                    if (!Helpers.NavigationHelper.CanPlayerNavigateToPosition(requestedPoint, out _))
+                        throw new InvalidOperationException("map destination is not currently navigable by the main party");
+                    var mainPartyForPointMove = MobileParty.MainParty;
+                    mapStateForPointMove.ProcessTravel(requestedPoint);
+                    if (mainPartyForPointMove.DefaultBehavior != AiBehavior.GoToPoint)
+                        throw new InvalidOperationException("native MapState.ProcessTravel did not establish a GoToPoint order");
+                    ApplyMapClickTimeChange(isDoubleClick: false);
+                    var actualPoint = mainPartyForPointMove.TargetPosition;
+                    var pointMoveData = "{\"requested\":{\"x\":" + targetX.ToString("R", CultureInfo.InvariantCulture) + ",\"y\":" + targetY.ToString("R", CultureInfo.InvariantCulture) + ",\"surface\":\"" + Escape(surface) + "\"},\"nativeTarget\":{\"x\":" + actualPoint.X.ToString("R", CultureInfo.InvariantCulture) + ",\"y\":" + actualPoint.Y.ToString("R", CultureInfo.InvariantCulture) + ",\"isOnLand\":" + actualPoint.IsOnLand.ToString().ToLowerInvariant() + "},\"nativeBehavior\":\"" + Escape(mainPartyForPointMove.DefaultBehavior.ToString()) + "\"}";
+                    WriteResponse(commandId, action, "completed", behavior, null, pointMoveData);
+                    break;
                 case "menu":
                     if (TaleWorlds.CampaignSystem.Campaign.Current.CurrentMenuContext?.GameMenu == null)
                         throw new InvalidOperationException("no campaign menu is active");
@@ -556,6 +585,21 @@ internal sealed class ChronicleAgentProtocol
         var end = json.IndexOfAny(new[] { ',', '}' }, start);
         var value = json.Substring(start, end < 0 ? json.Length - start : end - start);
         return double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) ? parsed : 0;
+    }
+
+    private static double ReadRequiredFiniteDouble(string json, string key)
+    {
+        var marker = "\"" + key + "\":";
+        var start = json.IndexOf(marker, StringComparison.Ordinal);
+        if (start < 0) throw new InvalidOperationException("Missing required coordinate '" + key + "'");
+        start += marker.Length;
+        var end = json.IndexOfAny(new[] { ',', '}' }, start);
+        var value = json.Substring(start, end < 0 ? json.Length - start : end - start);
+        if (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) || double.IsNaN(parsed) || double.IsInfinity(parsed))
+            throw new InvalidOperationException("Coordinate '" + key + "' must be a finite number");
+        if (parsed > float.MaxValue || parsed < -float.MaxValue)
+            throw new InvalidOperationException("Coordinate '" + key + "' exceeds the Campaign map numeric range");
+        return parsed;
     }
 
     private static string Escape(string value) => (value ?? string.Empty).Replace("\\", "\\\\").Replace("\"", "\\\"");

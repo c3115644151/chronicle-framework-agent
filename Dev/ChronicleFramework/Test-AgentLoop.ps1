@@ -61,6 +61,27 @@ try {
     $observedTransition = ($firstAfter -ne $firstState -and $secondAfter -in @('Stop','FastForwardStop'))
     $receiptForwarded = ($second.previousActionReceipt.commandId -eq $first.actionReceipt.commandId -and $second.previousActionReceipt.action -eq $first.actionReceipt.action -and $second.previousActionReceipt.status -eq $first.actionReceipt.status)
     $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
+    $env:CHRONICLE_TEST_PROVIDER_MODE = 'point'
+    try {
+        $pointLoopOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -MaxDecisions 1 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-point-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $pointLoopExitCode = $LASTEXITCODE
+    }
+    finally {
+        if ($null -eq $priorProviderMode) { Remove-Item Env:CHRONICLE_TEST_PROVIDER_MODE -ErrorAction SilentlyContinue }
+        else { $env:CHRONICLE_TEST_PROVIDER_MODE = $priorProviderMode }
+    }
+    if ($pointLoopExitCode -ne 0) { throw "Agent decision loop did not route the native free-point movement action: $pointLoopOutput" }
+    $pointTrace = $pointLoopOutput | ConvertFrom-Json
+    $pointStep = $pointTrace.trace[0]
+    $pointTarget = $pointStep.actionReceipt.data.nativeTarget
+    $pointDecisionAccepted = (
+        $pointStep.decision.action -eq 'moveToPoint' -and
+        $pointStep.actionReceipt.status -eq 'completed' -and
+        $pointStep.observationAfter.state.party.defaultBehavior -eq 'GoToPoint' -and
+        $pointStep.observationAfter.state.location.targetPosition.x -eq $pointTarget.x -and
+        $pointStep.observationAfter.state.location.targetPosition.y -eq $pointTarget.y
+    )
+    $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
     $env:CHRONICLE_TEST_PROVIDER_MODE = 'escort'
     try {
         $followLoopOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -MaxDecisions 1 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-escort-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
@@ -89,6 +110,7 @@ try {
         OrderedDecisions = $orderedDecisions
         ObservationActionObservationVerified = $observedTransition
         PreviousActionReceiptForwarded = $receiptForwarded
+        PointDecisionRoutedAndObserved = $pointDecisionAccepted
         EscortDecisionRoutedAndObserved = $escortDecisionAccepted
         UnsafeActionRejected = $unsafeActionRejected
         HarnessAdvanceRejected = $harnessClockRejected
@@ -96,7 +118,7 @@ try {
         ProcessStopped = $stop.processStopped
         Trace = $trace.trace
     }
-    $result.Passed = ($result.DecisionCount -eq 2 -and $orderedDecisions -and $observedTransition -and $receiptForwarded -and $escortDecisionAccepted -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
+    $result.Passed = ($result.DecisionCount -eq 2 -and $orderedDecisions -and $observedTransition -and $receiptForwarded -and $pointDecisionAccepted -and $escortDecisionAccepted -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
     $result | ConvertTo-Json -Depth 12
     if (-not $result.Passed) { exit 1 }
 }

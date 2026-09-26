@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'BattleFixture', 'PostBattle', 'Observation', 'Movement', 'Recruitment', 'Rest', 'Pursuit', 'EscortVisibility', 'VisualCapture', 'All')]
+    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'BattleFixture', 'PostBattle', 'Observation', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EscortVisibility', 'VisualCapture', 'All')]
     [string]$Phase = 'All',
     [int]$SmokeTimeoutSeconds = 45,
     [int]$SmokeStabilitySeconds = 8
@@ -11,7 +11,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '4.94'
+$HarnessContractVersion = '4.95'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -37,6 +37,7 @@ $saveModuleMetadataTestScript = Join-Path $harnessRoot 'Test-AgentSaveMetadata.p
 $protocolScript = Join-Path $harnessRoot 'Test-AgentProtocol.ps1'
 $observationScript = Join-Path $harnessRoot 'Test-AgentObservation.ps1'
 $movementScript = Join-Path $harnessRoot 'Test-AgentMovement.ps1'
+$moveToPointScript = Join-Path $harnessRoot 'Test-AgentMoveToPoint.ps1'
 $recruitmentScript = Join-Path $harnessRoot 'Test-AgentRecruitment.ps1'
 $restScript = Join-Path $harnessRoot 'Test-AgentRest.ps1'
 $pursuitScript = Join-Path $harnessRoot 'Test-AgentPursuit.ps1'
@@ -143,12 +144,13 @@ $requestedStages = switch ($Phase) {
     'PostBattle' { @('Preflight', 'Build', 'PostBattle') }
     'Observation' { @('Preflight', 'Build', 'Observation') }
     'Movement' { @('Preflight', 'Build', 'Movement') }
+    'MoveToPoint' { @('Preflight', 'Build', 'MoveToPoint') }
     'Recruitment' { @('Preflight', 'Build', 'Recruitment') }
     'Rest' { @('Preflight', 'Build', 'Rest') }
     'Pursuit' { @('Preflight', 'Build', 'Pursuit') }
     'EscortVisibility' { @('Preflight', 'Build', 'EscortVisibility') }
     'VisualCapture' { @('Preflight', 'Build', 'VisualCapture') }
-    'All' { @('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'Protocol', 'AgentLoop', 'Observation', 'Movement', 'Recruitment', 'Rest', 'Pursuit', 'BattleFixture', 'PostBattle') }
+    'All' { @('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'Protocol', 'AgentLoop', 'Observation', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'BattleFixture', 'PostBattle') }
 }
 
 foreach ($stage in $requestedStages) {
@@ -360,6 +362,12 @@ foreach ($stage in $requestedStages) {
             Invoke-Stage -Name 'Movement' -Action {
                 & powershell -NoProfile -ExecutionPolicy Bypass -File $movementScript
                 if ($LASTEXITCODE -ne 0) { throw "Agent movement test failed with exit code $LASTEXITCODE." }
+            }
+        }
+        'MoveToPoint' {
+            Invoke-Stage -Name 'MoveToPoint' -Action {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $moveToPointScript
+                if ($LASTEXITCODE -ne 0) { throw "Agent point movement test failed with exit code $LASTEXITCODE." }
             }
         }
         'Recruitment' {

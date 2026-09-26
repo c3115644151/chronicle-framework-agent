@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '4.94'
+$contractVersion = '4.95'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -47,7 +47,11 @@ foreach ($scriptFile in $harnessPowerShellFiles) {
 
 $harnessScript = Get-Content (Join-Path $harnessRoot 'Run-Harness.ps1') -Raw -Encoding UTF8
 $agentCliSource = Get-Content (Join-Path $harnessRoot 'Agent-Cli.ps1') -Raw -Encoding UTF8
+$agentProtocolSource = Get-Content (Join-Path $harnessRoot 'AgentProtocol.cs') -Raw -Encoding UTF8
+$agentObserverSource = Get-Content (Join-Path $harnessRoot 'AgentObserver.cs') -Raw -Encoding UTF8
+$agentDecisionLoopSource = Get-Content (Join-Path $harnessRoot 'Agent-DecisionLoop.ps1') -Raw -Encoding UTF8
 if ($agentCliSource -notmatch "MainWindowTitle -match '\^Mod change detected\$'" -or $agentCliSource -notmatch 'shader-cache invalidation notice' -or $agentCliSource -notmatch 'does not prove the save module list is incompatible' -or $agentCliSource -match 'SendKeys|SendInput|press_key|ControlClick') { throw 'The native shader-cache dialog must be classified accurately and never accepted through game-window input.' }
+if ($agentCliSource -notmatch "'moveToPoint'" -or $agentCliSource -notmatch "ValidateSet\('land'\)" -or $agentProtocolSource -notmatch 'case "moveToPoint"' -or $agentProtocolSource -notmatch 'ReadRequiredFiniteDouble' -or $agentProtocolSource -notmatch 'ProcessTravel\(requestedPoint\)' -or $agentProtocolSource -notmatch 'naval/sea transition belongs to a separately tested adapter' -or $agentDecisionLoopSource -notmatch "moveToPoint = @\('X','Y','Surface'\)" -or $agentObserverSource -notmatch 'schemaVersion\\\":9' -or $agentObserverSource -notmatch 'targetPosition') { throw 'W2-B must expose validated land world coordinates through a distinct allowlisted moveToPoint action, separate untested naval movement, and observe its native GoToPoint target.' }
 $saveModuleMetadataSource = Get-Content (Join-Path $harnessRoot 'Agent-SaveMetadata.ps1') -Raw -Encoding UTF8
 $saveModuleMetadataTest = Get-Content (Join-Path $harnessRoot 'Test-AgentSaveMetadata.ps1') -Raw -Encoding UTF8
 if ($agentCliSource -notmatch 'Get-AgentSaveModuleIds -SavePath \$savePath' -or $saveModuleMetadataSource -notmatch 'Save metadata header length is invalid' -or $saveModuleMetadataTest -notmatch 'TruncatedHeaderRejected') { throw 'Save load must honor a validated, fixture-specific module set instead of guessing a default.' }
@@ -135,15 +139,17 @@ foreach ($requiredText in @('TestResults/latest.json', 'Computer Use', 'ContextS
         throw "DEVELOPMENT.md is missing contract element '$requiredText'."
     }
 }
-foreach ($requiredScript in @('Agent-DecisionLoop.ps1', 'Agent-SaveMetadata.ps1', 'Test-AgentSaveMetadata.ps1', 'Test-AgentLoop.ps1', 'Test-AgentLoopProvider.ps1', 'Test-AgentBattleFixture.ps1', 'Test-AgentVisualCapture.ps1', 'Test-AgentFreshCampaign.ps1', 'Test-AgentSupport.ps1', 'HarnessVideoCapture.ps1', 'Set-ContextFocus.ps1')) {
+foreach ($requiredScript in @('Agent-DecisionLoop.ps1', 'Agent-SaveMetadata.ps1', 'Test-AgentSaveMetadata.ps1', 'Test-AgentLoop.ps1', 'Test-AgentLoopProvider.ps1', 'Test-AgentBattleFixture.ps1', 'Test-AgentVisualCapture.ps1', 'Test-AgentFreshCampaign.ps1', 'Test-AgentSupport.ps1', 'Test-AgentMoveToPoint.ps1', 'HarnessVideoCapture.ps1', 'Set-ContextFocus.ps1')) {
     if (-not (Test-Path (Join-Path $harnessRoot $requiredScript))) { throw "Agent loop harness script is missing: $requiredScript" }
 }
 $freshCampaignSource = Get-Content (Join-Path $harnessRoot 'FreshCampaignHarness.cs') -Raw -Encoding UTF8
 $freshCampaignTelemetry = Get-Content (Join-Path $harnessRoot 'SubModule.cs') -Raw -Encoding UTF8
 $freshCampaignTest = Get-Content (Join-Path $harnessRoot 'Test-AgentFreshCampaign.ps1') -Raw -Encoding UTF8
 $pursuitTestSource = Get-Content (Join-Path $harnessRoot 'Test-AgentPursuit.ps1') -Raw -Encoding UTF8
+$moveToPointTestSource = Get-Content (Join-Path $harnessRoot 'Test-AgentMoveToPoint.ps1') -Raw -Encoding UTF8
 $protocolTestSource = Get-Content (Join-Path $harnessRoot 'Test-AgentProtocol.ps1') -Raw -Encoding UTF8
 if ($pursuitTestSource -notmatch 'hold-settled' -or $pursuitTestSource -notmatch 'AgentPursuitResult\.json' -or $pursuitTestSource -notmatch 'PursuitPrecondition' -or $pursuitTestSource -notmatch 'ProbeEscortVisibilityLoss' -or $pursuitTestSource -notmatch 'AgentPursuitVisibilityResult\.json' -or $pursuitTestSource -notmatch 'target-left-nearby-observation' -or $pursuitTestSource -notmatch 'target-remained-in-nearby-observation-for-window' -or $pursuitTestSource -notmatch 'DaysElapsed') { throw 'Pursuit must compare invalid actions against a settled observation and preserve dedicated Escort visibility probe evidence.' }
+if ($moveToPointTestSource -notmatch 'moveToPoint' -or $moveToPointTestSource -notmatch 'AgentMoveToPointResult\.json' -or $moveToPointTestSource -notmatch 'ArrivedWithinTolerance' -or $moveToPointTestSource -notmatch 'InvalidOutOfRangeDestination' -or $moveToPointTestSource -notmatch 'FixtureUnchanged' -or $moveToPointTestSource -notmatch 'ProcessStopped') { throw 'Free-point movement requires an independent disposable fixture test for native target result, arrival, invalid coordinate safety, and cleanup.' }
 if ($freshCampaignTelemetry -notmatch 'Campaign\.Current\?\.CampaignBehaviorManager\?\.GetBehavior<ChronicleCampaignBehavior>\(\)' -or $freshCampaignTelemetry -notmatch 'campaign-agent-behavior-rebound' -or $freshCampaignTelemetry -notmatch 'AgentProtocolReady' -or $freshCampaignTelemetry -match 'fresh-progression-app-tick|fresh-progression-map-tick' -or $protocolSource -notmatch 'fresh-progression-protocol-command-visible' -or $freshCampaignTest -notmatch 'CHRONICLE_FRESH_CAMPAIGN_SKIP_ISSUE_PROBE') { throw 'Progression must skip the native Issue probe without app-tick polling before a campaign exists.' }
 if ($freshCampaignSource -notmatch 'CHRONICLE_HARNESS_MODE' -or $freshCampaignSource -notmatch 'OnNarrativeMenuOptionSelected' -or $freshCampaignSource -notmatch 'adulthood_defeated_enemy_option' -or $freshCampaignSource -notmatch 'manager\.NextStage\(\)' -or $freshCampaignSource -notmatch 'CanUserSkip' -or $freshCampaignSource -notmatch 'OnVideoFinished\(\)' -or $freshCampaignSource -notmatch 'CampaignMapConversation.OpenConversation' -or $freshCampaignSource -notmatch 'hero_give_issue' -or $freshCampaignSource -notmatch 'issueOfferDenied' -or $freshCampaignSource -notmatch 'lord_meet_player_response1' -or $freshCampaignSource -notmatch 'issue_explanation_player_response_pre_quest_solution') { throw 'Fresh campaign test must exercise native creation and classify local Issue offer/precondition outcomes.' }
 if ($freshCampaignTelemetry -notmatch 'ChronicleAgentObserver.BuildSnapshotJson') { throw 'FreshCampaign must capture the post-creation Agent snapshot.' }
@@ -154,6 +160,8 @@ if ($freshCampaignSource -match 'SaveAs\(|SaveGame\(') { throw 'Fresh campaign r
 $freshCampaignTestCompact = $freshCampaignTest -replace '\s+', ' '
 $decisionLoopSource = Get-Content (Join-Path $harnessRoot 'Agent-DecisionLoop.ps1') -Raw -Encoding UTF8
 $agentLoopTest = Get-Content (Join-Path $harnessRoot 'Test-AgentLoop.ps1') -Raw -Encoding UTF8
+$agentLoopProviderSource = Get-Content (Join-Path $harnessRoot 'Test-AgentLoopProvider.ps1') -Raw -Encoding UTF8
+if ($decisionLoopSource -notmatch "moveToPoint = @\('X','Y','Surface'\)" -or $agentLoopTest -notmatch 'PointDecisionRoutedAndObserved' -or $agentLoopProviderSource -notmatch "CHRONICLE_TEST_PROVIDER_MODE -eq 'point'" -or $agentLoopProviderSource -notmatch "action = 'moveToPoint'") { throw 'The Agent decision loop must permit and verify the free-point moveToPoint action.' }
 $agentLoopProvider = Get-Content (Join-Path $harnessRoot 'Test-AgentLoopProvider.ps1') -Raw -Encoding UTF8
 if ($decisionLoopSource -notmatch 'previousActionReceipt' -or $agentLoopTest -notmatch 'PreviousActionReceiptForwarded' -or $agentLoopProvider -notmatch 'Previous native action receipt was not forwarded') { throw 'The next Agent decision must receive and test the preceding native action receipt.' }
 $recruitmentTest = Get-Content (Join-Path $harnessRoot 'Test-AgentRecruitment.ps1') -Raw -Encoding UTF8

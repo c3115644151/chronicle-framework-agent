@@ -45,7 +45,7 @@ internal static class ChronicleAgentObserver
 
         var json = new StringBuilder(4096);
         json.Append('{');
-        json.Append("\"schemaVersion\":8");
+        json.Append("\"schemaVersion\":9");
         json.Append(",\"campaignDay\":").Append(Number(CampaignTime.Now.ToDays));
         json.Append(",\"identity\":{");
         Property(json, "heroId", hero.StringId); Property(json, "heroName", hero.Name?.ToString(), true);
@@ -85,7 +85,19 @@ internal static class ChronicleAgentObserver
         json.Append("\"x\":").Append(Number(position.X)).Append(",\"y\":").Append(Number(position.Y));
         Property(json, "currentSettlementId", party.CurrentSettlement?.StringId, true);
         Property(json, "targetSettlementId", party.TargetSettlement?.StringId, true);
-        Property(json, "targetPartyId", party.TargetParty?.StringId, true).Append('}');
+        Property(json, "targetPartyId", party.TargetParty?.StringId, true);
+        json.Append(",\"targetPosition\":");
+        if (party.DefaultBehavior == AiBehavior.GoToPoint)
+        {
+            var targetPosition = party.TargetPosition;
+            json.Append("{\"x\":").Append(Number(targetPosition.X)).Append(",\"y\":").Append(Number(targetPosition.Y));
+            json.Append(",\"isOnLand\":").Append(Bool(targetPosition.IsOnLand)).Append('}');
+        }
+        else
+        {
+            json.Append("null");
+        }
+        json.Append('}');
         json.Append(",\"context\":{");
         Property(json, "gameState", Game.Current?.GameStateManager?.ActiveState?.GetType().Name);
         Property(json, "timeControlMode", campaign.TimeControlMode.ToString(), true);
