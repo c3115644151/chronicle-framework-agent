@@ -2,7 +2,8 @@
 param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
     [int]$TimeoutSeconds = 180,
-    [switch]$AcceptIssueQuest
+    [ValidateSet('ConversationOnly', 'QuestAccepted', 'NativePreconditionBlocked')]
+    [string]$ExpectedOutcome = 'ConversationOnly'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -10,8 +11,8 @@ $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
 $savePath = Join-Path $env:USERPROFILE "Documents\Mount and Blade II Bannerlord\Game Saves\$LoadSaveName.sav"
 $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\session.json'
 $runDirectory = if ($env:CHRONICLE_HARNESS_TEMP) { Split-Path -Parent $env:CHRONICLE_HARNESS_TEMP } else { Join-Path $PSScriptRoot 'TestResults\ManualSettlementOverlayConversation' }
-$captureName = if ($AcceptIssueQuest) { 'SettlementOverlayQuestAcceptance-frame.bmp' } else { 'SettlementOverlayConversation-frame.bmp' }
-$resultName = if ($AcceptIssueQuest) { 'SettlementOverlayQuestAcceptanceResult.json' } else { 'SettlementOverlayConversationResult.json' }
+$captureName = if ($ExpectedOutcome -eq 'ConversationOnly') { 'SettlementOverlayConversation-frame.bmp' } else { "SettlementOverlayQuest-$ExpectedOutcome-frame.bmp" }
+$resultName = if ($ExpectedOutcome -eq 'ConversationOnly') { 'SettlementOverlayConversationResult.json' } else { "SettlementOverlayQuest-$ExpectedOutcome-Result.json" }
 $captureTempPath = if ($env:CHRONICLE_HARNESS_TEMP) { Join-Path $env:CHRONICLE_HARNESS_TEMP $captureName } else { Join-Path $runDirectory $captureName }
 $capturePath = Join-Path $runDirectory $captureName
 $previousHarnessMode = $env:CHRONICLE_HARNESS_MODE
@@ -85,7 +86,7 @@ try {
     $questAccepted = $false
     $questBlockedReason = $null
     $dialogueTrace = @()
-    if ($AcceptIssueQuest -and $conversationStartedForTarget) {
+    if ($ExpectedOutcome -ne 'ConversationOnly' -and $conversationStartedForTarget) {
         for ($step = 1; $step -le 10; $step++) {
             $currentConversation = $postTalk.state.context.conversation
             if (-not $currentConversation) { $questBlockedReason = 'Native Conversation ended before an Issue Quest option was submitted.'; break }
@@ -157,13 +158,14 @@ try {
         Mission = $postTalk.state.mission
         Conversation = $conversation
         ConversationStartedForTarget = $initialConversationHeroMatchesTarget
-        IssueQuestAcceptanceRequested = [bool]$AcceptIssueQuest
+        ExpectedOutcome = $ExpectedOutcome
+        IssueQuestAcceptanceRequested = [bool]($ExpectedOutcome -ne 'ConversationOnly')
         IssueTopicRequested = $issueTopicRequested
         QuestOfferObserved = $questOfferObserved
         QuestAccepted = $questAccepted
         QuestBlockedReason = $questBlockedReason
-        NativePreconditionBlocked = [bool]($AcceptIssueQuest -and $issueTopicRequested -and -not $questOfferObserved -and -not $questAccepted -and @($postTalk.state.quests).Count -eq $questCountBefore -and $questBlockedReason -like '*returned to its main options after the Issue topic*')
-        NativeRefusalSentence = if ($AcceptIssueQuest -and -not $questAccepted) { $conversation.sentenceText } else { $null }
+        NativePreconditionBlocked = [bool]($ExpectedOutcome -eq 'NativePreconditionBlocked' -and $issueTopicRequested -and -not $questOfferObserved -and -not $questAccepted -and @($postTalk.state.quests).Count -eq $questCountBefore -and $questBlockedReason -like '*returned to its main options after the Issue topic*')
+        NativeRefusalSentence = if ($ExpectedOutcome -ne 'ConversationOnly' -and -not $questAccepted) { $conversation.sentenceText } else { $null }
         DialogueTrace = $dialogueTrace
         QuestCountBefore = $questCountBefore
         QuestCountAfter = $questCountAfter
@@ -176,14 +178,18 @@ try {
         FixtureUnchanged = ($fixtureHashBefore -eq $fixtureHashAfter)
         ProcessStopped = $stop.processStopped
     }
-    $questAcceptanceSatisfied = (-not $AcceptIssueQuest -or $questAccepted -or $result.NativePreconditionBlocked)
-    $result.Passed = ($talk.status -eq 'completed' -and $initialConversationHeroMatchesTarget -and $questAcceptanceSatisfied -and $result.QuestUnchanged -eq (-not $questAccepted) -and $result.CampaignClockUnchangedDuringSceneEntry -and $screenshotValid -and $result.FixtureUnchanged -and $result.ProcessStopped)
+    $result.ExpectedOutcomeMet = switch ($ExpectedOutcome) {
+        'ConversationOnly' { $true }
+        'QuestAccepted' { [bool]$questAccepted }
+        'NativePreconditionBlocked' { [bool]$result.NativePreconditionBlocked }
+    }
+    $result.Passed = ($talk.status -eq 'completed' -and $initialConversationHeroMatchesTarget -and $result.ExpectedOutcomeMet -and $result.QuestUnchanged -eq (-not $questAccepted) -and $result.CampaignClockUnchangedDuringSceneEntry -and $screenshotValid -and $result.FixtureUnchanged -and $result.ProcessStopped)
     $resultJson = $result | ConvertTo-Json -Depth 18
     if ($env:CHRONICLE_HARNESS_TEMP -and (Test-Path -LiteralPath $env:CHRONICLE_HARNESS_TEMP -PathType Container)) {
         Set-Content -LiteralPath (Join-Path $env:CHRONICLE_HARNESS_TEMP $resultName) -Value $resultJson -Encoding UTF8
     }
     $resultJson
-    if (-not $result.Passed) { throw "Native settlement overlay validation failed: talk=$($talk.status), partner=$($conversation.heroId), expected=$targetHeroId, questAccepted=$questAccepted, nativePreconditionBlocked=$($result.NativePreconditionBlocked), issueOfferObserved=$questOfferObserved, blockedReason=$questBlockedReason." }
+    if (-not $result.Passed) { throw "Native settlement overlay validation failed: expectedOutcome=$ExpectedOutcome, expectedOutcomeMet=$($result.ExpectedOutcomeMet), talk=$($talk.status), partner=$($conversation.heroId), expected=$targetHeroId, questAccepted=$questAccepted, nativePreconditionBlocked=$($result.NativePreconditionBlocked), issueOfferObserved=$questOfferObserved, blockedReason=$questBlockedReason." }
 }
 finally {
     if (Test-Path $sessionPath) {

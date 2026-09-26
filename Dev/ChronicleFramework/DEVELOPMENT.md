@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 
-Contract version: 5.07
+Contract version: 5.08
 
 ## 目标与边界
 
@@ -69,7 +69,7 @@ Project采用最少任务状态：`Todo`表示尚未开始（是否被阻塞看I
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Dev\ChronicleFramework\Run-Harness.ps1 -Phase All
 ```
 
-按需阶段以同一命令加单个 `-Phase` 运行；可选 Docs、Preflight、Api、Build、Smoke、Campaign、FreshCampaign、FreshCampaignProgression、Protocol、AgentLoop、BattleFixture、PostBattle、Observation、Movement、MoveToPoint、Recruitment、Rest、Pursuit、Conversation、QuestAcceptance、EscortVisibility、TavernMission、TownCenterMission、VisualCapture、All。
+按需阶段以同一命令加单个 `-Phase` 运行；可选 Docs、Preflight、Api、Build、Smoke、Campaign、FreshCampaign、FreshCampaignProgression、Protocol、AgentLoop、BattleFixture、PostBattle、Observation、Movement、MoveToPoint、Recruitment、Rest、Pursuit、Conversation、QuestAcceptance、EscortVisibility、TavernMission、TownCenterMission、SettlementOverlayConversation、SettlementOverlayQuestAcceptance、SettlementOverlayQuestGate、VisualCapture、All。
 
 `Run-Harness.ps1` 顺序执行阶段、首错停止、把原始输出和 JSON 写入 `TestResults/<run-id>`，并更新 `TestResults/latest.json`。
 
@@ -217,7 +217,7 @@ stop()
 - W2-D的Location观察schema 19会把原版`GameMenuOption.OptionQuestData`作为菜单`questMarkerFlags/questMarkerNames`返回；`GameMenuItemVM`用同一标记生成原版`QuestMarkerVM`。`nearbySceneAgents`仅为主角周围12场景单位内的Agent，不等于视线可见列表；原生`CurrentFocusedObject`同时用`Agent.CanInteractWithAgent`提供原版Focus/交谈可用判定；`settlementOverlayCharacters`复用可见CharacterList和QuestMarkers。`missionNavigateToAgent`在发令时取NPC位置快照，NPC移动后必须重新观察并下达新路径，不能以对旧坐标到达判作追上。
 - `harnessMissionDiagnostics`只在Harness `visual-capture`模式与临时run目录同时有效时返回当前Town/Tavern Mission里已激活的Notable Agent，以及当前`CampaignMission.Location`里已登记的Issue所有者；它只用于区分“菜单有任务标记”“地点登记了任务主人”“人物实际生成/距主角多远”，不进入常规观察快照，也不在`Agent-DecisionLoop.ps1`的模型动作白名单中。当任务主人超出主角当前本地观察半径时，Town Center Harness立即保存诊断并清理，不继续跑固定移动步骤；后续应核实原版造访入口。禁止用诊断遥测代替AI玩家的局部观察。
 - `settlementOverlayCharacters`是schema 19中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。`talkToSettlementHero(HeroId)`只接受这份列表中的当前Hero，复核Overlay的原版TalkPermission后，按`GameMenuOverlay.ExecuteTroopAction(Conversation)`调用`OnPlayerStartTalkFromMenu`和`LocationEncounter.CreateAndOpenMissionController(...,talkToChar)`；`MissionConversationLogic`会把目标Hero作为目标Agent同步到对话距离并打开原生Conversation。不得使用Harness全Notable诊断里的隐藏ID。
-- `SettlementOverlayQuestAcceptance`是独立Harness阶段：仅沿当前Conversation `CurOptions`逐步选择普通问候、Issue入口、Quest解决方案和明确可点击的`issue_offer_player_accept_quest`；不选择Alternative/Lord分支，不调用Quest API。阶段可通过两种互斥的、清楚标注的结果：原版成功产生Ongoing Quest，或原版Issue前置明确拒绝且Quest/存档保持不变；“阶段测试通过”不能简写成“Quest接取成功”。W2-D入口测试与W2-E接受/前置门禁测试不可合并报告。
+- `SettlementOverlayQuestGate`只验证测试fixture中确实被原版前置拒绝、且Quest/存档不变；该阶段纳入`All`用于回归保护。`SettlementOverlayQuestAcceptance`是另一个正向阶段，必须看到一个新Ongoing Quest及对应原版状态变化才通过；前置拒绝、没有offer、对话返回均为失败，不可用负向结果替代。它要求预先存在自然满足条件的disposable Issue fixture，故不纳入通用`All`，直到该fixture稳定存在。W2-D入口、W2-E拒绝保护和W2-E真实Quest接受不可合并报告。
 - 聚落移动的标准夹具还要验证抵达后状态切到目标聚落及原版 `town` 菜单；结构化菜单选项按当前 `GameMenuOption.GetConditionsHold` 计算可用性，选择时重验菜单 ID、选项 ID 与 enabled 条件。离开选项作为菜单原语验收；失败夹具对无效 settlement ID 返回结构化拒绝，且世界位置不变。
 - 招募必须复用本体 `RecruitmentVM` 的志愿者列表、队伍上限和金钱条件；命令显式指定可用 owner、troop 与 volunteer slot，每次只招募一个。完成以兵力 `+1`、金币按本体价格扣除且来源 volunteer 槽清空为准。
 - 食物补给必须经城镇 `InventoryLogic` 交易和 `InventoryListener` 提交市场库存与金币变化；不直接改 roster。动作前检查食品类别、市场库存、交易价格、金币和载重，动作后验证食品库存增长与金币差额。
