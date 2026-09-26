@@ -32,11 +32,11 @@ Mineflayer/MineDojo 等 Agent 以独立玩家为动作和观察主体；这不�
 
 ### Research readiness and current technical focus
 
-Research Gate: **BLOCKED**
+Research Gate: **READY**
 Implementation Gate: **BLOCKED**
-行为总分母：**UNKNOWN**　游戏版本：**1.4.8.119303**
+行为总分母：**178**（核心Campaign ACT族；OBS分母：**73**，23个N/A不计入）　游戏版本：**1.4.8.119303**
 
-当前技术焦点是完整盘点玩家与战役世界的观察和行动接口。逐系统核实玩家入口/输入修饰、被动与按需信息、原版后果和Campaign时间、UI handler/API差异、当前适配、证据及未知，然后跨域去重建立真实行为分母。`SYSTEM_INVENTORY.md`的126项是游戏系统研究入口，不是玩家动作数；开发期Harness不在这126项或玩家行为分母内。行为分母版本基线是本机1.4.8.119303官方Native/SandBox/StoryMode模块；第三方Gameplay模块属于条件扩展，发现其覆盖Model/Scene/Menu或新增玩家入口时须补对应映射，不能静默算进原版分母或宣称已兼容。通用前置依赖本身不扩展玩法分母。多人部署形态指通过多人战役Mod加入共享Campaign，不包含原生PvP赛事模式；Campaign核心行为分母不含Flag Domination的ForfeitSpawn或通用MP语音频道，未来若明确支持语音沟通则作为独立可选通信接口评估。盘点验收、域间依赖和工作次序由GitHub Project维护；本文不保存活动卡片、完成数量或当前工作状态。Research Gate通过前不新增游戏能力；Tier 1仅作为未来成熟度夹具。首个AI战斗接入优先使用战役地图坐镇/BattleSimulation；Mission部署、实时Orders和士兵控制仍属于完整产品目录，但不属于初始战斗支持切片。Minecraft Agent研究作为后续架构参考，不构成绕过全景研究的理由。
+玩家行为目录已完成A-L跨域去重，核心分母基线为本机1.4.8.119303官方Native/SandBox/SandBoxCore/StoryMode模块；`SYSTEM_INVENTORY.md`的126项是系统研究入口，不是动作数量。目录含179条ACT、73条OBS和23条有依据的N/A，其中`ACT-A06-06`仅为打开Cheat菜单的特权入口，另有控制台/作弊命令；全部归入条件特权扩展，不计入标准Campaign行动分母或普通Agent白名单。需要修改游戏状态的作弊能力必须由独立权限层显式授予、与正常规划器隔离并留下审计记录；未获授权时默认不可调用。故标准行动族分母为178，观察面分母为73。第三方Gameplay模块、模型覆写和动态新增入口属于条件扩展，不能静默算进基线或宣称已兼容。多人核心是通过多人战役Mod加入共享Campaign，不包含原生PvP赛事、ForfeitSpawn或通用MP语音；未来支持语音时作为独立通信接口评估。盘点与产品工作次序由GitHub Project维护；本文不保存活动卡片或完成状态。Research Gate通过后仍需按任务板实现、逐项验证；Tier 1仅作为未来成熟度夹具。首个AI战斗接入优先使用Campaign地图坐镇/BattleSimulation；Mission部署、实时Orders和士兵控制仍属完整产品目录，但不属初始战斗切片。Minecraft Agent研究作为架构参考，不构成绕过全景研究的理由。
 
 Minecraft Agent 的环境、规划、技能、记忆和评测研究已沉淀到本文后续架构段落；本文不再把项目目标定义为“测试工具”。
 
@@ -207,7 +207,7 @@ flowchart TD
 
 | 范围 | 分母或判定规则 | 证据规则 |
 | --- | --- | --- |
-| 玩家行为与观察面 | 先审完SYSTEM_INVENTORY A-L全部12个研究域，再跨域去重；真实行为总分母在此之前保持未知 | 每条目录记录在来源列引用有效系统编号，且所有126个A-L编号至少被引用一次；Docs同时验证ID唯一、引用已定义和逐系统有目录映射。领域事实仍以对应Research/源码/运行证据为准 |
+| 玩家行为与观察面 | A-L全域审完并跨域去重后，按核心Campaign ACT族ID计行动分母、按OBS族ID计观察分母；明确排除的特权作弊接口另列，不并入核心分母 | 每条目录记录在来源列引用有效系统编号，且所有126个A-L编号至少被引用一次；Docs同时验证ID唯一、引用已定义和逐系统有目录映射。现行基线178核心ACT/73 OBS；`ACT-A06-06`与其可选作弊命令属单独权限扩展；详细事实见对应Research/源码/运行证据 |
 | GameState接口 | 反编译枚举的状态类型只是接口分母，不等于玩家行为或 Agent 覆盖率 | 按当前安装DLL重新盘点；API Probe和运行时结果分别标记 |
 | 自主 Agent 闭环 | 必须有非测试模型/规划器选择目标、调用白名单动作、验证结果，并在世界变化或失败后重规划 | 确定性Provider、单动作成功或累计动作数量均不能算自主闭环 |
 | 长程成长夹具 | Tier 1用于评测长期规划、资源、风险和恢复，不是产品目标，也不要求通过刷固定奖励达成 | 结果必须来自 disposable campaign、保留状态/动作证据并清理夹具；失败如实保留 |
