@@ -596,8 +596,8 @@ G03 Mission直接控制MainHero的身体/装备输入及专用Use结果现登记
 | L03 Game Menu/L04 Dialogue | L03菜单与L04对话实际选项映射至所属Issue/Quest/政治/聚落/战斗等行为族；通用Menu/Dialogue引擎不另计行为；对话当前项见`OBS-J08-01` | 复用同一点击外壳不代表同一原生后果；对话输入不再单独重复计作J08 ACT |
 | L05 Encyclopedia/L06 Notifications | 观察面映射A07、B及J的已有OBS ID | 显示页面/通知的技术View不额外算对象动作 |
 | L07 Scene/Mission | 场景状态/实时输入映射D/G/J的已有OBS/ACT ID | Scene类型和MissionLogic不是玩家按钮数量 |
-| L08 Localization | N/A玩家行动；文本呈现映射相应Menu/Dialogue/通知OBS | 语言字符串本身不改变Campaign状态 |
-| L09 Module Loading | N/A战役内玩家动作；Launcher选择模块发生在战役前 | Module存在/排序是产品配置，不计入Campaign动作分母 |
+| L08 Localization | `N/A-L08-01`：本地化资源/解析没有独立Campaign动作；实际显示文本映射到相应Menu/Dialogue/通知OBS | 语言字符串本身不改变Campaign状态；客户端语言选择属于战役外配置 |
+| L09 Module Loading | `N/A-L09-01`：Launcher安装/选择/排序模块不属于Campaign动作 | Module存在/排序是产品配置，不计入Campaign动作分母；模块改变的玩法仍映射到实际ACT/OBS |
 | L10 CampaignBehavior/L11 GameModel | `N/A-L10-01`/`N/A-L11-01`标明没有直接玩家动作；行为/模型输出映射到实际应用规则的ACT/OBS | 事件注册、模型调用数不是行为族 |
 | L12 Harmony/BLSE | `N/A-L12-01`标明没有直接游戏动作；仅可能影响外部模块装载/方法执行 | Loader/patch链不计为玩家游戏行为或开发Harness能力 |
 | L13 SaveSystem | Save/SaveAs/Load复用`ACT-A05-01..03` | IDataStore/SaveableTypeDefiner是序列化机制，不另计数据字段数量 |
@@ -630,6 +630,8 @@ G03 Mission直接控制MainHero的身体/装备输入及专用Use结果现登记
 | OBS-J12-01 | 观察 | Story Mode任务/阶段通知、已完成的教程/主线阶段 | StoryMode阶段状态不同于Sandbox共同Quest集合 | Chronicle仅有限Quest摘要，不读主线StoryModeData | J12、StoryMode/MainStoryLine/StoryMode behaviors |
 | N/A-L01-01 | N/A | XML静态对象/内容定义 | XML描述商品、文化、兵种、文本等加载数据；它不是玩家可点击/可执行的独立动作，实际对象交互映射A-K现有ACT/OBS | 排除文件/节点数量；只作为对应原生行为的内容与版本依据 | L01、`Research/L/ContentInterfaceAndModRuntime.md` |
 | N/A-L02-01 | N/A | XSLT模块数据覆盖机制 | XSLT在加载期合并/替换数据，不提供战役内玩家操作入口；效果归于使用被覆盖数据的真实行为/观察项 | 排除补丁条目数量；验证数据来源时保留模块/版本上下文 | L02、`Research/L/ContentInterfaceAndModRuntime.md` |
+| N/A-L08-01 | N/A | Localization字符串资源与运行时文本解析 | 文本本地化决定相应玩家界面/对话/通知如何呈现，不产生独立Campaign状态或行动；实际可见内容仍归属其对应的OBS/ACT | 排除字符串、语言文件与TextObject数量；Launcher/客户端语言切换是战役外配置 | L08、`Research/L/ContentInterfaceAndModRuntime.md` |
+| N/A-L09-01 | N/A | Launcher中的Module安装、启用与加载顺序 | 发生于进入Campaign之前，不是Campaign中可执行的玩家动作；被启用模块改变的内容/规则映射到具体玩法ACT/OBS | 排除模块数、依赖数与加载回调数；活动模块集仍是产品兼容/证据条件 | L09、`Research/L/ContentInterfaceAndModRuntime.md` |
 | N/A-L10-01 | N/A | CampaignBehavior注册、事件订阅与生命周期 | 由引擎启动/保存/加载及Campaign事件调度；玩家不能直接调用某个Behavior作为动作 | 排除Behavior/订阅数量；只记录它承载的具体状态效果及其玩家触发入口 | L10、`Research/L/ContentInterfaceAndModRuntime.md` |
 | N/A-L11-01 | N/A | GameModel规则公式/评分模型 | 模型由引擎在相关玩法结算时调用，不是可独立执行的玩家动作；结果归于触发/观察该结算的具体ACT/OBS | 排除模型数/方法数，避免把幕后公式当玩家可控行为 | L11、`Research/L/ContentInterfaceAndModRuntime.md` |
 | N/A-L12-01 | N/A | Harmony/BLSE补丁与外部加载/调试机制 | 只改变模块装载或代码运行方式，没有战役中玩家交互入口；游戏内结果归属被改变的实际玩法行为 | 排除补丁数/加载器功能；仅作为兼容/证据背景 | L12、`Research/L/ContentInterfaceAndModRuntime.md` |
