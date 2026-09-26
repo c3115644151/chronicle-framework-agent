@@ -26,7 +26,9 @@ Chronicle现有move/pursue/hold是研究桥，使用指定Settlement/Party ID、
 
 已发现足迹的悬停描述具有信息层级：可逐步显示模糊Party Size、经过时间、速度、Mounted Troops、Party Type、Prisoners、Pack Animals、是否敌对、Culture及Party Name；显示的不确定范围会依据玩家Scouting能力修正。这里明确区分玩家通过地图足迹得到的可见情报与全局读取一个NPC Party当前对象状态。证据包括 `DefaultMapTrackModel.GetTrackDescription`和 `MapTracksCampaignBehavior.QuarterHourlyTick`。
 
-玩家入口是主队在地图上发现后悬停/调查脚印，可能得到寻路/技能经验及有限目标信息；追踪被丢失/过期不等于Party消失。Chronicle Observer的Nearby Parties不是Track列表，不报告最后足迹位置、Detected/追踪状态或每个精度层级；没有调查/追踪工具。未知各面板/ALT轨迹显示条件、Tracking skill具体值到所有精度字段的映射及丢失事件视觉提示尚未全部实测。
+玩家通过地图上自动发现的Track悬停读取描述；当前1.4.8 `TrackVisual.OnHover`直接打开Track tooltip。点击调用`TrackVisual.OnMapClick`但该handler返回false，Track没有专用点击效果；MapScreen的Track action按键调用继承的`MapEntityVisual.OnTrackAction`空方法，`TrackVisual.OnOpenEncyclopedia`亦为空。因此本体源码证据目前支持一个被动观察面`OBS-K03-01`，未发现独立的“开始追踪/调查足迹”玩家ACT；地图通用点击回落行为不等于Track专用操作。追踪丢失/过期不代表Party消失。Chronicle Observer的Nearby Parties不是Track列表，不报告最后足迹位置、Detected/追踪状态或每个精度层级。源码未证明悬停或点击会获得Scouting XP；该奖励链仍未知，不据此虚构输入动作。
+
+证据：当前本机v1.4.8.119303的SandBox.View `TrackVisual.OnHover/OnMapClick/OnOpenEncyclopedia`、`MapEntityVisual.OnTrackAction`以及`MapScreen.HandleLeftMouseButtonClick/OnHoverMapEntity`反编译调用链；没有实机视觉核对地图缩放下每个Tooltip字段。未知各面板/ALT轨迹显示条件、Tracking skill具体值到所有精度字段的映射和Track遗失提示尚未全部核实。
 
 ## K04 Weather：天气、季节与地图环境
 
