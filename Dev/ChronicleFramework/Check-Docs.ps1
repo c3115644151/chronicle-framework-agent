@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '4.88'
+$contractVersion = '4.89'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -194,6 +194,29 @@ if ($catalogIdDefinitions.Count -eq 0 -or $duplicateCatalogIds.Count -gt 0 -or $
 }
 if ($unmappedSystemIds.Count -gt 0) {
     throw "SYSTEM_INVENTORY A-L systems must appear in at least one explicit OBS/ACT/N/A directory row. Unmapped=[$($unmappedSystemIds -join ',')]."
+}
+$catalogSourceSystemIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+$catalogSourceErrors = @()
+foreach ($line in $catalogDefinitionLines) {
+    $columns = $line.Trim('|').Split('|')
+    $catalogId = $columns[0].Trim()
+    $sourceColumn = $columns[-1]
+    $sourceIds = @([regex]::Matches($sourceColumn, '(?<![A-Z])[A-L]\d{2}(?!\d)') | ForEach-Object { $_.Value } | Sort-Object -Unique)
+    if ($sourceIds.Count -eq 0) {
+        $catalogSourceErrors += "$catalogId has no A-L source-system citation"
+        continue
+    }
+    foreach ($sourceId in $sourceIds) {
+        if ($sourceId -notin $inventoryIds) {
+            $catalogSourceErrors += "$catalogId cites undefined system $sourceId"
+            continue
+        }
+        [void]$catalogSourceSystemIds.Add($sourceId)
+    }
+}
+$uncitedSourceSystemIds = @($inventoryIds | Where-Object { -not $catalogSourceSystemIds.Contains($_) })
+if ($catalogSourceErrors.Count -gt 0 -or $uncitedSourceSystemIds.Count -gt 0) {
+    throw "SYSTEM_INVENTORY directory source columns must cite defined A-L systems and collectively cover all 126 systems. Errors=[$($catalogSourceErrors -join '; ')], Uncited=[$($uncitedSourceSystemIds -join ',')]."
 }
 if (-not (Test-ChronicleResearchReadiness)) { throw 'Research readiness gate regression checks failed.' }
 if ($mainlineDoc -notmatch '(?m)^#### .*Mechanic Contract\s*$') { throw 'MAINLINE.md is missing the required original-mechanic contract table.' }

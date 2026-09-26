@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 
-Contract version: 4.88
+Contract version: 4.89
 
 ## 目标与边界
 
@@ -31,7 +31,7 @@ Project采用最少任务状态：`Todo`表示尚未开始（是否被阻塞看I
 
 源码仓库位于 Bannerlord 安装目录之外；游戏目录只作为 Harness 的运行时目标。被Git忽略的 `harness.local.json` 仅保存本机仓库与游戏路径；GitHub任务板位置只在 `ContextState.json` 记录一次。新工作区用 `Initialize-ChronicleWorkspace.ps1` 生成本地路径设置。源码、模块清单、Harness和工程规则均由同一Git提交追踪；构建将版本化模块清单与DLL部署到本机 `Modules/ChronicleFramework`。大型`TestResults`不提交Git，证据仍按运行号保留在本地。
 
-文档管理优先保证可读性和信息层级，不以总字数或文件总数强迫压缩。`Check-Docs.ps1` 强制内容文档明确路由、引用目标存在、主线唯一且复核/hash有效；根目录`AGENTS.md`是直接生效的工作规则，不属于内容文档路由，也不应加入`ContextState.json`或`SYSTEM_INVENTORY.md`。检查器会验证 SYSTEM_INVENTORY 的126个A-L系统各自至少落到一个显式OBS/ACT/N/A目录行、观察/行为/N/A目录ID唯一且所有交叉引用都有定义。Docs收据记录当前目录行结构计数，供同一分母口径下比较版本变化；这些计数不代表已核实的玩家行为最终分母。系统本身不是行为分母；有真实原因无玩家入口的引擎项必须用带研究来源的N/A行表示。总文档字节数和默认读取集合的大小只作诊断数据。主题过长时先按概念边界拆分并调整路由；过时内容应修订、删除或移入默认不读取的 Archive，不得为了塞进一个任意容量而写成密文。
+文档管理优先保证可读性和信息层级，不以总字数或文件总数强迫压缩。`Check-Docs.ps1` 强制内容文档明确路由、引用目标存在、主线唯一且复核/hash有效；根目录`AGENTS.md`是直接生效的工作规则，不属于内容文档路由，也不应加入`ContextState.json`或`SYSTEM_INVENTORY.md`。检查器会验证 SYSTEM_INVENTORY 的126个A-L系统各自至少落到一个显式OBS/ACT/N/A目录行、每条目录记录在来源列引用有效A-L系统编号且全体覆盖126个编号、观察/行为/N/A目录ID唯一且所有交叉引用都有定义。Docs收据记录当前目录行结构计数，供同一分母口径下比较版本变化；这些计数不代表已核实的玩家行为最终分母。系统本身不是行为分母；有真实原因无玩家入口的引擎项必须用带研究来源的N/A行表示。总文档字节数和默认读取集合的大小只作诊断数据。主题过长时先按概念边界拆分并调整路由；过时内容应修订、删除或移入默认不读取的 Archive，不得为了塞进一个任意容量而写成密文。
 
 禁止新增 README、Harness 说明、工具链说明、验证报告、状态记录或索引 Markdown。当前项目完成或主线改变时，默认删除旧 `MAINLINE.md` 内容；只有仍具长期追溯价值时才移入 `Archive/`。Archive 不得进入默认上下文。
 

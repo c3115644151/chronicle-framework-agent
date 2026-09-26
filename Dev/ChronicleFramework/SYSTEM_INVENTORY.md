@@ -593,7 +593,7 @@ G03 Mission直接控制MainHero的身体/装备输入及专用Use结果现登记
 | K07 Hideout | 藏身处地图/Encounter观察映射`OBS-K07-01`；攻/等夜/坐镇映射F/G/J实际行动 | Hideout发现、Campaign Wait和Mission战斗是不同路径 |
 | K08 Bandit Density | `OBS-K08-01`可见Bandit Party/Hideout密度线索 | 全图Spawn人口和计时是后台Campaign，玩家无“生成/减少密度”按钮 |
 | L01 XML / L02 XSLT | `N/A-L01-01`/`N/A-L02-01`标明无独立玩家动作；实际被加载对象/内容映射到使用它的行为族 | 数据源/转换手段作为证据与版本约束，不能按XML/XSLT文件数计ACT |
-| L03 Game Menu/L04 Dialogue | L03菜单与L04对话实际选项映射至所属Issue/Quest/政治/聚落/战斗等行为族；通用Menu/Dialogue引擎不另计行为；对话当前项见`OBS-J08-01` | 复用同一点击外壳不代表同一原生后果；对话输入不再单独重复计作J08 ACT |
+| L03 Game Menu/L04 Dialogue | L03菜单与L04对话实际选项映射至所属Issue/Quest/政治/聚落/战斗等行为族；对话直接行动例子为`ACT-J01-02..04`；当前Conversation状态/选项见`OBS-J08-01` | 通用Menu/Dialogue引擎不另计行为；复用同一点击外壳不代表同一原生后果；对话输入不单独重复计作J08 ACT |
 | L05 Encyclopedia/L06 Notifications | 观察面映射A07、B及J的已有OBS ID | 显示页面/通知的技术View不额外算对象动作 |
 | L07 Scene/Mission | 场景状态/实时输入映射D/G/J的已有OBS/ACT ID | Scene类型和MissionLogic不是玩家按钮数量 |
 | L08 Localization | `N/A-L08-01`：本地化资源/解析没有独立Campaign动作；实际显示文本映射到相应Menu/Dialogue/通知OBS | 语言字符串本身不改变Campaign状态；客户端语言选择属于战役外配置 |
