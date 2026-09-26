@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'BattleFixture', 'PostBattle', 'Observation', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'VisualCapture', 'All')]
+    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'BattleFixture', 'PostBattle', 'Observation', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestAcceptance', 'VisualCapture', 'All')]
     [string]$Phase = 'All',
     [int]$SmokeTimeoutSeconds = 45,
     [int]$SmokeStabilitySeconds = 8
@@ -11,7 +11,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '5.05'
+$HarnessContractVersion = '5.07'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -157,8 +157,9 @@ $requestedStages = switch ($Phase) {
     'TavernMission' { @('Preflight', 'Build', 'TavernMission') }
     'TownCenterMission' { @('Preflight', 'Build', 'TownCenterMission') }
     'SettlementOverlayConversation' { @('Preflight', 'Build', 'SettlementOverlayConversation') }
+    'SettlementOverlayQuestAcceptance' { @('Preflight', 'Build', 'SettlementOverlayQuestAcceptance') }
     'VisualCapture' { @('Preflight', 'Build', 'VisualCapture') }
-    'All' { @('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'Protocol', 'AgentLoop', 'Observation', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'QuestAcceptance', 'BattleFixture', 'PostBattle', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation') }
+    'All' { @('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'Protocol', 'AgentLoop', 'Observation', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'QuestAcceptance', 'BattleFixture', 'PostBattle', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestAcceptance') }
 }
 
 foreach ($stage in $requestedStages) {
@@ -430,6 +431,12 @@ foreach ($stage in $requestedStages) {
             Invoke-Stage -Name 'SettlementOverlayConversation' -Action {
                 & powershell -NoProfile -ExecutionPolicy Bypass -File $settlementOverlayConversationScript
                 if ($LASTEXITCODE -ne 0) { throw "Native Settlement overlay Conversation test failed with exit code $LASTEXITCODE." }
+            }
+        }
+        'SettlementOverlayQuestAcceptance' {
+            Invoke-Stage -Name 'SettlementOverlayQuestAcceptance' -Action {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $settlementOverlayConversationScript -AcceptIssueQuest
+                if ($LASTEXITCODE -ne 0) { throw "Native Settlement overlay Issue Quest acceptance test failed with exit code $LASTEXITCODE." }
             }
         }
         'AgentLoop' {
