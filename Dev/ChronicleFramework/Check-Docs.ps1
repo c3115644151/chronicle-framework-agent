@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '4.92'
+$contractVersion = '4.93'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -47,7 +47,7 @@ foreach ($scriptFile in $harnessPowerShellFiles) {
 
 $harnessScript = Get-Content (Join-Path $harnessRoot 'Run-Harness.ps1') -Raw -Encoding UTF8
 $agentCliSource = Get-Content (Join-Path $harnessRoot 'Agent-Cli.ps1') -Raw -Encoding UTF8
-if ($agentCliSource -notmatch "MainWindowTitle -match '\^Mod change detected\$'" -or $agentCliSource -notmatch 'no automatic confirmation was sent' -or $agentCliSource -match 'SendKeys|SendInput|press_key|ControlClick') { throw 'The known module-change dialog must fail fast and must not be silently accepted by the Harness.' }
+if ($agentCliSource -notmatch "MainWindowTitle -match '\^Mod change detected\$'" -or $agentCliSource -notmatch 'shader-cache invalidation notice' -or $agentCliSource -notmatch 'does not prove the save module list is incompatible' -or $agentCliSource -match 'SendKeys|SendInput|press_key|ControlClick') { throw 'The native shader-cache dialog must be classified accurately and never accepted through game-window input.' }
 $saveModuleMetadataSource = Get-Content (Join-Path $harnessRoot 'Agent-SaveMetadata.ps1') -Raw -Encoding UTF8
 $saveModuleMetadataTest = Get-Content (Join-Path $harnessRoot 'Test-AgentSaveMetadata.ps1') -Raw -Encoding UTF8
 if ($agentCliSource -notmatch 'Get-AgentSaveModuleIds -SavePath \$savePath' -or $saveModuleMetadataSource -notmatch 'Save metadata header length is invalid' -or $saveModuleMetadataTest -notmatch 'TruncatedHeaderRejected') { throw 'Save load must honor a validated, fixture-specific module set instead of guessing a default.' }
@@ -60,6 +60,7 @@ $contextFocusSource = Get-Content $contextFocusScript -Raw -Encoding UTF8
 . $researchReadinessScript
 $projectFile = Get-Content (Join-Path $harnessRoot 'ChronicleFramework.csproj') -Raw -Encoding UTF8
 $developmentDoc = Get-Content (Join-Path $harnessRoot 'DEVELOPMENT.md') -Raw -Encoding UTF8
+if ($developmentDoc -notmatch '不使用 Windows Computer Use 向游戏窗口发送鼠标或键盘输入' -or $developmentDoc -notmatch '会自动激活目标窗口' -or $developmentDoc -notmatch '后台窗口输入不会激活窗口') { throw 'Game UI automation must remain disabled until non-activating isolated input is evidenced.' }
 $designDoc = Get-Content (Join-Path $harnessRoot 'DESIGN.md') -Raw -Encoding UTF8
 $inventoryDoc = Get-Content (Join-Path $harnessRoot 'SYSTEM_INVENTORY.md') -Raw -Encoding UTF8
 $rootAgents = Get-Content (Join-Path $projectRoot 'AGENTS.md') -Raw -Encoding UTF8
@@ -140,7 +141,9 @@ foreach ($requiredScript in @('Agent-DecisionLoop.ps1', 'Agent-SaveMetadata.ps1'
 $freshCampaignSource = Get-Content (Join-Path $harnessRoot 'FreshCampaignHarness.cs') -Raw -Encoding UTF8
 $freshCampaignTelemetry = Get-Content (Join-Path $harnessRoot 'SubModule.cs') -Raw -Encoding UTF8
 $freshCampaignTest = Get-Content (Join-Path $harnessRoot 'Test-AgentFreshCampaign.ps1') -Raw -Encoding UTF8
+$pursuitTestSource = Get-Content (Join-Path $harnessRoot 'Test-AgentPursuit.ps1') -Raw -Encoding UTF8
 $protocolTestSource = Get-Content (Join-Path $harnessRoot 'Test-AgentProtocol.ps1') -Raw -Encoding UTF8
+if ($pursuitTestSource -notmatch 'hold-settled' -or $pursuitTestSource -notmatch 'AgentPursuitResult\.json' -or $pursuitTestSource -notmatch 'PursuitPrecondition') { throw 'Pursuit must compare invalid actions against a settled observation and preserve per-assertion result evidence.' }
 if ($freshCampaignTelemetry -notmatch 'Campaign\.Current\?\.CampaignBehaviorManager\?\.GetBehavior<ChronicleCampaignBehavior>\(\)' -or $freshCampaignTelemetry -notmatch 'campaign-agent-behavior-rebound' -or $freshCampaignTelemetry -notmatch 'AgentProtocolReady' -or $freshCampaignTelemetry -match 'fresh-progression-app-tick|fresh-progression-map-tick' -or $protocolSource -notmatch 'fresh-progression-protocol-command-visible' -or $freshCampaignTest -notmatch 'CHRONICLE_FRESH_CAMPAIGN_SKIP_ISSUE_PROBE') { throw 'Progression must skip the native Issue probe without app-tick polling before a campaign exists.' }
 if ($freshCampaignSource -notmatch 'CHRONICLE_HARNESS_MODE' -or $freshCampaignSource -notmatch 'OnNarrativeMenuOptionSelected' -or $freshCampaignSource -notmatch 'adulthood_defeated_enemy_option' -or $freshCampaignSource -notmatch 'manager\.NextStage\(\)' -or $freshCampaignSource -notmatch 'CanUserSkip' -or $freshCampaignSource -notmatch 'OnVideoFinished\(\)' -or $freshCampaignSource -notmatch 'CampaignMapConversation.OpenConversation' -or $freshCampaignSource -notmatch 'hero_give_issue' -or $freshCampaignSource -notmatch 'issueOfferDenied' -or $freshCampaignSource -notmatch 'lord_meet_player_response1' -or $freshCampaignSource -notmatch 'issue_explanation_player_response_pre_quest_solution') { throw 'Fresh campaign test must exercise native creation and classify local Issue offer/precondition outcomes.' }
 if ($freshCampaignTelemetry -notmatch 'ChronicleAgentObserver.BuildSnapshotJson') { throw 'FreshCampaign must capture the post-creation Agent snapshot.' }

@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 
-Contract version: 4.92
+Contract version: 4.93
 
 ## 目标与边界
 
@@ -73,7 +73,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Dev\ChronicleFramework\Run
 
 `Run-Harness.ps1` 顺序执行阶段、首错停止、把原始输出和 JSON 写入 `TestResults/<run-id>`，并更新 `TestResults/latest.json`。
 
-`Agent-Cli.ps1 load`从存档头部读取该存档创建时的有序模块ID，验证这些模块仍安装后再用同一模块集加载；不向旧/不同模组集存档擅自附加当前默认模块。元数据解析在Preflight使用合成存档头回归，遇到损坏或缺模块时启动前失败，不把“Mod change detected”弹窗自动点过。
+`Agent-Cli.ps1 load`从存档头部读取该存档创建时的有序模块ID，验证这些模块仍安装后再用同一模块集加载；不向旧/不同模组集存档擅自附加当前默认模块。元数据解析在Preflight使用合成存档头回归。v1.4.8 的“Mod change detected”原版窗口正文是着色器缓存失效提示；标题本身不能证明存档模组不兼容。Harness 保留快速失败，不自动操作游戏窗口；同一模块集首次需要确认时由人类确认一次，之后在已重建缓存的稳定模块集上重试。
 
 Provider loop 输入观察及上一动作原始回执，再执行 allowlist 动作并复观察；`advance` 仅 Harness 可用。Test provider 不代表 LLM。CLI 需 state 握手；stop 清理进程树/队列。对话与战斗控制分开。
 
@@ -84,7 +84,7 @@ Provider loop 输入观察及上一动作原始回执，再执行 allowlist 动�
 职责按事实来源划分，不复制状态：GitHub 项目板回答“做什么/顺序/当前工作项/是否被依赖阻塞”；Git回答“代码变成了什么”；Harness回答“本机游戏与工具实际上发生了什么”；Agent决策层回答“基于证据下一步做什么”。Harness输出不能覆盖GitHub卡片状态，也不能把测试指标当作产品自主能力；Harness不调用GitHub API/CLI。
 
 ```text
-CLI / Computer Use 启动适配
+CLI 启动适配
             ↓
 进程、模块集与 disposable save
             ↓
@@ -98,9 +98,9 @@ Mod 内状态、命令与事件遥测
 1. 原生 CLI/API；
 2. 进程、日志和存档；
 3. Mod 内遥测与白名单命令；
-4. Computer Use 回退。
+4. 只读窗口截图，仅在不激活/不前置游戏窗口且确有视觉诊断需要时使用。
 
-Computer Use 可创建一次性夹具、处理菜单和已分类弹窗，但不能作为功能真值。截图只能做诊断附件。
+不使用 Windows Computer Use 向游戏窗口发送鼠标或键盘输入：当前 `@oai/sky` 的窗口定向输入会自动激活目标窗口，不能保证不抢占用户前台或物理键鼠。游戏操作一律走 Mod 内版本化协议和 Harness 白名单动作；截图不是功能真值。若未来要恢复窗口输入，必须先证明后台窗口输入不会激活窗口、移动/占用用户鼠标或截获键盘，并以隔离测试验证，不能只因 API 接收了 window 参数就视为隔离。
 
 ## 统一状态与动作
 
@@ -204,6 +204,7 @@ stop()
 - P3 快照来自 Campaign API；schema 8 含战后 InventoryState、双方 item 数量及遭遇待领取 item 数。回执按 UTF-8 读写。
 - P3 分开记录 `IsVisible`/`IsInspected`，不从属性名推断玩家认知。情报策略由产品设计确定；静态面板按需读取。
 - P4 `move/pursue/hold` 复现原版目标 setter 与 MapScreen 点击时钟副作用；运行时间自然推进。W2-A进一步接入`follow/escort`并与普通`pursue`分开验收。无效聚落拒绝，抵达以 `CurrentSettlement` 为准；`rest` 只观察原版 WaitMenu 的 `StartWait/EndWait` 时钟。
+- Pursuit 夹具在 `hold` 后另取一次稳定观察作为无效追击的前置快照，避免把原版命令刚接受时的瞬时移动模式与下一次观察混比；每次结果写入当前运行 `Temp/AgentPursuitResult.json`，即使阶段失败也可核查每项断言。
 - 聚落移动的标准夹具还要验证抵达后状态切到目标聚落及原版 `town` 菜单；结构化菜单选项按当前 `GameMenuOption.GetConditionsHold` 计算可用性，选择时重验菜单 ID、选项 ID 与 enabled 条件。离开选项作为菜单原语验收；失败夹具对无效 settlement ID 返回结构化拒绝，且世界位置不变。
 - 招募必须复用本体 `RecruitmentVM` 的志愿者列表、队伍上限和金钱条件；命令显式指定可用 owner、troop 与 volunteer slot，每次只招募一个。完成以兵力 `+1`、金币按本体价格扣除且来源 volunteer 槽清空为准。
 - 食物补给必须经城镇 `InventoryLogic` 交易和 `InventoryListener` 提交市场库存与金币变化；不直接改 roster。动作前检查食品类别、市场库存、交易价格、金币和载重，动作后验证食品库存增长与金币差额。
@@ -222,7 +223,7 @@ stop()
 | ILSpy CLI | 只读调用链分析 | 反编译实现不是稳定 API |
 | BLSE Standalone | disposable save 自动读档 | 不接管正式存档和模块排序 |
 | Bannerlord.Templates | 新模块结构对照 | 当前项目不因模板存在而迁移 |
-| Computer Use | UI 回退与一次性初始化 | 不替代遥测、日志和断言 |
+| Computer Use | 仅只读窗口截图诊断 | 禁止向游戏窗口发键鼠输入；窗口定向不等于焦点/输入隔离 |
 
 不让中文站管理器、官方启动器和 BLSE 同时修改同一模块排序；不直接改官方 DLL；Harmony 只有在公开接口不足且已有 A/B 证据时才进入方案。
 

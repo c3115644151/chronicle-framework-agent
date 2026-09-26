@@ -150,7 +150,7 @@ if ($Action -in @('start','load')) {
             $blockedWindowTitle = $launchProcess.MainWindowTitle
             Stop-AgentProcessTree -RootProcessId $process.Id | Out-Null
             Set-SafeExitMarker
-            throw "Campaign launch is blocked by '$blockedWindowTitle'; no automatic confirmation was sent. Resolve the module-change prompt or use a fixture with the active module set."
+            throw "Campaign launch stopped at Bannerlord's '$blockedWindowTitle' dialog. In v1.4.8 this is the native shader-cache invalidation notice; it does not prove the save module list is incompatible. The notice requires acknowledging cache regeneration once for this module set. No game-window input was sent."
         }
         $candidateLayout = Set-ChronicleTestWindow -ProcessId $process.Id
         if ($candidateLayout -and $candidateLayout.Applied) { $windowLayout = $candidateLayout }

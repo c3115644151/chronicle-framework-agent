@@ -50,7 +50,7 @@ try {
     $nativeEscortIssued = ($escort.status -eq 'completed' -and $escortState.location.targetPartyId -eq $escortTarget.id -and $escortState.party.defaultBehavior -eq 'EscortParty')
     $nativeEscortTimePolicyApplied = $escortState.context.timeControlMode -in @('StoppablePlay', 'StoppableFastForward')
     $holdAfterEscort = Invoke-AgentCli 'hold' @('-CommandId', "$runPrefix-hold-after-escort", '-TimeoutSeconds', $TimeoutSeconds)
-    $mapState = $holdAfterEscort
+    $mapState = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-hold-settled", '-TimeoutSeconds', $TimeoutSeconds)
     $escortStoppedByNativeHold = ($holdAfterEscort.status -eq 'completed' -and $mapState.state.location.targetPartyId -eq $null -and $mapState.state.party.defaultBehavior -eq 'Hold')
 
     $targets = @($mapState.state.nearbyParties | Where-Object { $_.isMoving -and $null -eq $_.currentSettlementId -and $_.distance -gt 1.0 } | Sort-Object distance)
@@ -94,13 +94,18 @@ try {
         Target = $target
         InvalidTarget = [ordered]@{ Status = $invalid.status; Error = $invalid.error; NoMutation = $invalidNoMutation }
         PursuitOrder = [ordered]@{ Status = $pursuit.status; TargetPartyId = $pursuitState.location.targetPartyId; MoveMode = $pursuitState.party.moveMode; DefaultBehavior = $pursuitState.party.defaultBehavior; TimeControlMode = $pursuitState.context.timeControlMode; NativeMapClickTimePolicy = $nativeMapClickTimePolicyApplied }
+        PursuitPrecondition = [ordered]@{ TargetPartyId = $mapState.state.location.targetPartyId; MoveMode = $mapState.state.party.moveMode; DefaultBehavior = $mapState.state.party.defaultBehavior; TimeControlMode = $mapState.state.context.timeControlMode }
         NaturalPursuitOutcome = [ordered]@{ Outcome = $pursuitOutcome; DaysElapsed = $pursuitElapsedDays; TargetPartyId = $outcomeState.state.location.targetPartyId; MoveMode = $outcomeState.state.party.moveMode; DefaultBehavior = $outcomeState.state.party.defaultBehavior; TimeControlMode = $outcomeState.state.context.timeControlMode; EncounterActive = $outcomeState.state.context.encounterActive; EncounteredPartyId = $outcomeState.state.context.encounteredPartyId }
         TimedOut = $pursuitTimedOut
         FixtureUnchanged = $fixtureHashBefore -eq $fixtureHashAfter
         ProcessStopped = $stop.processStopped
     }
     $result.Passed = ($invalidEscortNoMutation -and $nativeEscortIssued -and $nativeEscortTimePolicyApplied -and $escortStoppedByNativeHold -and $invalidNoMutation -and $nativeOrderIssued -and $nativeMapClickTimePolicyApplied -and $pursuitOutcome -in @('encounter', 'nativeHoldAfterTargetLoss') -and -not $pursuitTimedOut -and $result.FixtureUnchanged -and $result.ProcessStopped)
-    $result | ConvertTo-Json -Depth 8
+    $resultJson = $result | ConvertTo-Json -Depth 8
+    if ($env:CHRONICLE_HARNESS_TEMP -and (Test-Path -LiteralPath $env:CHRONICLE_HARNESS_TEMP -PathType Container)) {
+        Set-Content -LiteralPath (Join-Path $env:CHRONICLE_HARNESS_TEMP 'AgentPursuitResult.json') -Value $resultJson -Encoding UTF8
+    }
+    $resultJson
     if (-not $result.Passed) { exit 1 }
 }
 finally {
