@@ -42,9 +42,11 @@ Chronicle没有主动寻找可婚对象、查看完整RomanceState/兼容拒绝�
 
 Education不是玩家创建主角时的背景选择（H01），而是Campaign内Player Clan子代成长过程。`EducationCampaignBehavior.OnDailyTick`检查玩家家族未成年Hero，按照ChildAgeState处理约2、5、8、11、14、16岁阶段；年龄节点到达时显示 `EducationMapNotification`，玩家由地图通知进入 `EducationState`，按分页回答选项后 `Finalize`对儿童应用属性/技能/Focus等效果并记录阶段。
 
+`EducationVM.OnOptionSelect`把当前选项ID写入本次教育流程的`_selectedOptions`，更新获得项预览并开放下一页；中间页的Next只切换页面。Summary页的按钮文字为Done；`ExecuteNextStage`在最后页调用`EducationCampaignBehavior.Finalize(child, selectedOptions)`后关闭EducationState，形成与单页选择不同的最终提交动作。第一页的Previous/Exit走`onDone(true)`而不调用Finalize；返回前页是流程导航，不是新的学习结果。对应玩家族可重复收到不同年龄通知、同一教育阶段中多个选项按页选择，因此“选项选择”和“最后Done提交”分列ACT，自动补课不计玩家动作。
+
 若Campaign跳过了先前未完成教育阶段，源码先调用 `DoEducationUntil`，按当时可用选项随机补完前序阶段，然后才对最近阶段发玩家通知；角色到成年事件时会自动完成剩余阶段并清理教育历史。Education通知只对父母在PlayerClan的孩子流程开放；同一个Hero一般不能由玩家编辑其他Clan儿童的课程。选择效果会累积在孩子的HeroDeveloper/特征/技能，不是只生成一个文本日志。
 
-Chronicle当前没有EducationNotification/State快照、翻页/选项选择或教育完成结果动作。时间由Campaign每日事件检查；在战斗MapEvent时某些DailyTick可能被跳过；打开教育面板后的父GameState是否冻结世界需运行核实，不用固定快进。证据：`EducationCampaignBehavior.OnDailyTick/DoEducationUntil/OnHeroComesOfAge/Finalize`、`EducationState`、通知VM/类型与B02/H10交叉事实。未知：所有年龄节点默认课程树、模式/Mod增补课程、玩家未点击通知时何时和怎样随机补选、教育面板离开/存档/跳过过程中是否重复发奖励。
+Chronicle当前没有EducationNotification/State快照、翻页/选项选择或教育完成结果动作。时间由Campaign每日事件检查；在战斗MapEvent时某些DailyTick可能被跳过；打开教育面板后的父GameState是否冻结世界需运行核实，不用固定快进。证据：`EducationCampaignBehavior.OnDailyTick/DoEducationUntil/OnHeroComesOfAge/Finalize`、`EducationState`、`EducationVM.OnOptionSelect/ExecuteNextStage/ExecutePreviousStage`、通知VM/类型与B02/H10交叉事实；均为本机v1.4.8.119303静态源码，未跑可视教育界面。未知：所有年龄节点默认课程树、模式/Mod增补课程、玩家未点击通知时何时和怎样随机补选、教育面板离开/存档/跳过过程中是否重复发奖励。
 
 ## I07 Traits 与 Reputation：人格特征和声誉反馈
 

@@ -16,6 +16,8 @@
 
 UI流程会限制阶段顺序、选项条件、FaceGen及Review；直接构造Hero或调用某个最终效果函数不等价于走完原生 CharacterCreationState。角色创建本身不是Campaign内可反复使用的成长动作；最终后果在新Campaign初始状态内生效。Chronicle当前不操控创建界面，Agent从已建立Campaign的 `Hero.MainHero`开始；没有角色创建、文化/经历选择或重开建档能力。来源：`CharacterCreationState/Manager`、`CharacterCreationCampaignBehavior`、当前 Chronicle `AgentObserver`；UI所有选项可视顺序和各模式差异尚未逐项截图核验。
 
+**M3边界核验**：`CharacterCreationContent`本机1.4.8类型持有`MainCharacterName`、`SelectedCulture`、`SelectedBanner`等创建期字段，并有`SetMainCharacterName`、`SetMainClanBanner`、`SetSelectedCulture`入口；`CharacterCreationClanNamingStageVM`把当前Hero Clan name作为编辑初值并显示Banner。`CharacterCreationManager.ApplyFinalEffects`直接应用Culture、Narrative options、Trait XP和起始位置，随后遍历注册的`ICharacterCreationContentHandler.OnCharacterCreationFinalize`。因此Banner/Clan name目前能确认是创建阶段数据，但直接应用到最终Clan对象的handler尚未追出，不能仅因字段同名就与已存在Clan中的改名/换旗动作合并。Review确认与进入Creator的Sandbox/Story菜单动作也不是同一状态节点。来源：当前v1.4.8.119303 `CharacterCreationContent`、`CharacterCreationManager`、`CharacterCreationClanNamingStageVM`；没有运行界面或最终对象回读验证。
+
 ## H02 Player Clan：家族等级、权限与家族面板
 
 玩家Clan持有Renown/Tier、Influence、家族成员、家族领地、家族Party、财务/Workshop等数据；成员的个人Gold/关系/技能仍属于Hero或其他对象。王国成员/雇佣兵状态与Clan本身身份也是不同字段。家族Level并非一个只影响称号的数值：`DefaultClanTierModel`将Renown阈值映射为Tier，Tier又影响家族Party上限、同伴上限、玩家队伍规模加成、Workshop上限，并解锁佣兵、封臣、建国等门槛。当前默认阈值数组为0、50、150、350、900、2350、6150；Mod可能替换模型或配置，不能把这些数值跨版本固化。
