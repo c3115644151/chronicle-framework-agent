@@ -3,6 +3,7 @@ param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
     [int]$TimeoutSeconds = 180,
     [switch]$ProbeEscortVisibilityLoss,
+    [switch]$ProbeConversation,
     [int]$VisibilityProbeSeconds = 30
 )
 
@@ -98,8 +99,11 @@ try {
     $mapState = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-hold-settled", '-TimeoutSeconds', $TimeoutSeconds)
     $escortStoppedByNativeHold = ($holdAfterEscort.status -eq 'completed' -and $mapState.state.location.targetPartyId -eq $null -and $mapState.state.party.defaultBehavior -eq 'Hold')
 
-    $targets = @($mapState.state.nearbyParties | Where-Object { $_.isMoving -and $null -eq $_.currentSettlementId -and $_.distance -gt 1.0 } | Sort-Object distance)
-    if ($targets.Count -eq 0) { throw 'No visible moving party outside a settlement is available for pursuit in the disposable fixture; refusing to invent or teleport a target.' }
+    $targets = @($mapState.state.nearbyParties | Where-Object { $_.isMoving -and $null -eq $_.currentSettlementId -and $_.distance -gt 1.0 -and (-not $ProbeConversation -or $_.type -eq 'lord') } | Sort-Object distance)
+    if ($targets.Count -eq 0) {
+        if ($ProbeConversation) { throw 'No visible moving Lord party exists in this disposable conversation fixture; refusing to substitute another Party or fake the meeting.' }
+        throw 'No visible moving party outside a settlement is available for pursuit in the disposable fixture; refusing to invent or teleport a target.'
+    }
     $target = $targets[0]
 
     $invalid = Invoke-AgentCli 'pursue' @('-PartyId', 'chronicle_missing_party', '-CommandId', "$runPrefix-invalid", '-TimeoutSeconds', '15')
@@ -116,12 +120,79 @@ try {
     $deadline = [DateTime]::UtcNow.AddSeconds([Math]::Min(90, $TimeoutSeconds))
     while ([DateTime]::UtcNow -lt $deadline) {
         $outcomeState = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-observe-$([guid]::NewGuid().ToString('N'))", '-TimeoutSeconds', $TimeoutSeconds)
-        if ($outcomeState.state.context.encounterActive -and $outcomeState.state.context.encounteredPartyId -eq $target.id) { $pursuitOutcome = 'encounter'; break }
+        if ($outcomeState.state.context.encounterActive -and $outcomeState.state.context.encounteredPartyId -eq $target.id) {
+            $pursuitOutcome = if ($outcomeState.state.context.conversation) { 'conversation' } else { 'encounter' }
+            break
+        }
         if ($outcomeState.state.party.defaultBehavior -eq 'Hold' -and $null -eq $outcomeState.state.location.targetPartyId) { $pursuitOutcome = 'nativeHoldAfterTargetLoss'; break }
         if (-not (Get-Process -Id $start.session.processId -ErrorAction SilentlyContinue)) { throw 'Game process exited while the native pursuit order was active.' }
         Start-Sleep -Milliseconds 250
     }
     $pursuitTimedOut = -not $pursuitOutcome
+
+    if ($ProbeConversation) {
+        $conversationBefore = $outcomeState.state.context.conversation
+        if (-not $conversationBefore -or $pursuitOutcome -ne 'conversation') {
+            throw "Pursuit reached '$pursuitOutcome' rather than a map conversation with the selected party."
+        }
+        $introOption = @($conversationBefore.options | Where-Object { $_.id -eq 'lord_meet_player_response1' -and $_.clickable } | Select-Object -First 1)
+        if ($introOption.Count -ne 1) { throw 'The native map-meeting conversation did not expose the expected clickable introduction response.' }
+        $invalidDialogue = Invoke-AgentCli 'dialogueSelect' @('-OptionId', 'chronicle_missing_dialogue_option', '-CommandId', "$runPrefix-invalid-dialogue", '-TimeoutSeconds', '15')
+        $afterInvalidDialogue = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-after-invalid-dialogue", '-TimeoutSeconds', $TimeoutSeconds)
+        $conversationBeforeSignature = $conversationBefore | ConvertTo-Json -Depth 8 -Compress
+        $conversationOptionsBeforeSignature = @($conversationBefore.options) | ConvertTo-Json -Depth 8 -Compress
+        $conversationAfterInvalidSignature = $afterInvalidDialogue.state.context.conversation | ConvertTo-Json -Depth 8 -Compress
+        $invalidDialogueNoMutation = (
+            $invalidDialogue.status -eq 'rejected' -and
+            $conversationBeforeSignature -eq $conversationAfterInvalidSignature -and
+            $afterInvalidDialogue.state.context.encounteredPartyId -eq $outcomeState.state.context.encounteredPartyId -and
+            $afterInvalidDialogue.state.context.timeControlMode -eq $outcomeState.state.context.timeControlMode
+        )
+        $invalidContinue = Invoke-AgentCli 'dialogueContinue' @('-CommandId', "$runPrefix-invalid-continue", '-TimeoutSeconds', '15')
+        $afterInvalidContinue = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-after-invalid-continue", '-TimeoutSeconds', $TimeoutSeconds)
+        $invalidContinueNoMutation = (
+            $invalidContinue.status -eq 'rejected' -and
+            $conversationBeforeSignature -eq ($afterInvalidContinue.state.context.conversation | ConvertTo-Json -Depth 8 -Compress) -and
+            $afterInvalidContinue.state.context.timeControlMode -eq $outcomeState.state.context.timeControlMode
+        )
+        $selectedDialogue = Invoke-AgentCli 'dialogueSelect' @('-OptionId', [string]$introOption[0].id, '-CommandId', "$runPrefix-intro-dialogue", '-TimeoutSeconds', $TimeoutSeconds)
+        $afterSelectedDialogue = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-after-intro-dialogue", '-TimeoutSeconds', $TimeoutSeconds)
+        $continueReceipt = $null
+        if ($afterSelectedDialogue.state.context.conversation -and @($afterSelectedDialogue.state.context.conversation.options).Count -eq 0) {
+            $continueReceipt = Invoke-AgentCli 'dialogueContinue' @('-CommandId', "$runPrefix-dialogue-continue", '-TimeoutSeconds', $TimeoutSeconds)
+            $afterSelectedDialogue = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-after-dialogue-continue", '-TimeoutSeconds', $TimeoutSeconds)
+        }
+        $conversationOptionsAfterSignature = if ($afterSelectedDialogue.state.context.conversation) { @($afterSelectedDialogue.state.context.conversation.options) | ConvertTo-Json -Depth 8 -Compress } else { 'null' }
+        $conversationTransitioned = (
+            $selectedDialogue.status -eq 'completed' -and
+            ($null -eq $afterSelectedDialogue.state.context.conversation -or
+                $afterSelectedDialogue.state.context.conversation.sentenceText -ne $conversationBefore.sentenceText -or
+                $conversationOptionsAfterSignature -ne $conversationOptionsBeforeSignature)
+        )
+        $stop = Invoke-AgentCli 'stop' @('-CommandId', "$runPrefix-conversation-stop", '-TimeoutSeconds', $TimeoutSeconds)
+        $fixtureHashAfter = (Get-FileHash $savePath -Algorithm SHA256).Hash
+        $conversationResult = [ordered]@{
+            ProcessId = $start.session.processId
+            Target = $target
+            Entry = [ordered]@{ PursuitStatus = $pursuit.status; Outcome = $pursuitOutcome; EncounteredPartyId = $outcomeState.state.context.encounteredPartyId; InitialConversation = $conversationBefore }
+            InvalidOption = [ordered]@{ Status = $invalidDialogue.status; Error = $invalidDialogue.error; NoMutation = $invalidDialogueNoMutation }
+            ContinueWithOpenOptions = [ordered]@{ Status = $invalidContinue.status; Error = $invalidContinue.error; NoMutation = $invalidContinueNoMutation }
+            IntroSelection = [ordered]@{ OptionId = $introOption[0].id; Status = $selectedDialogue.status; After = $afterSelectedDialogue.state.context.conversation; Progressed = $conversationTransitioned }
+            ContinueReceipt = $continueReceipt
+            CampaignTimeMode = $outcomeState.state.context.timeControlMode
+            FixtureUnchanged = $fixtureHashBefore -eq $fixtureHashAfter
+            ProcessStopped = $stop.processStopped
+        }
+        $conversationResult.Passed = ($pursuitOutcome -eq 'conversation' -and $invalidDialogueNoMutation -and $invalidContinueNoMutation -and $conversationTransitioned -and $conversationResult.FixtureUnchanged -and $conversationResult.ProcessStopped)
+        $conversationJson = $conversationResult | ConvertTo-Json -Depth 12
+        if ($env:CHRONICLE_HARNESS_TEMP -and (Test-Path -LiteralPath $env:CHRONICLE_HARNESS_TEMP -PathType Container)) {
+            Set-Content -LiteralPath (Join-Path $env:CHRONICLE_HARNESS_TEMP 'AgentConversationResult.json') -Value $conversationJson -Encoding UTF8
+        }
+        $conversationJson
+        if (-not $conversationResult.Passed) { exit 1 }
+        return
+    }
+
     if ($pursuitTimedOut) {
         Invoke-AgentCli 'hold' @('-CommandId', "$runPrefix-timeout-hold", '-TimeoutSeconds', $TimeoutSeconds) | Out-Null
         Invoke-AgentCli 'pause' @('-CommandId', "$runPrefix-timeout-pause", '-TimeoutSeconds', $TimeoutSeconds) | Out-Null
@@ -145,7 +216,7 @@ try {
         FixtureUnchanged = $fixtureHashBefore -eq $fixtureHashAfter
         ProcessStopped = $stop.processStopped
     }
-    $result.Passed = ($invalidEscortNoMutation -and $nativeEscortIssued -and $nativeEscortTimePolicyApplied -and $escortStoppedByNativeHold -and $invalidNoMutation -and $nativeOrderIssued -and $nativeMapClickTimePolicyApplied -and $pursuitOutcome -in @('encounter', 'nativeHoldAfterTargetLoss') -and -not $pursuitTimedOut -and $result.FixtureUnchanged -and $result.ProcessStopped)
+    $result.Passed = ($invalidEscortNoMutation -and $nativeEscortIssued -and $nativeEscortTimePolicyApplied -and $escortStoppedByNativeHold -and $invalidNoMutation -and $nativeOrderIssued -and $nativeMapClickTimePolicyApplied -and $pursuitOutcome -in @('encounter', 'conversation', 'nativeHoldAfterTargetLoss') -and -not $pursuitTimedOut -and $result.FixtureUnchanged -and $result.ProcessStopped)
     $resultJson = $result | ConvertTo-Json -Depth 8
     if ($env:CHRONICLE_HARNESS_TEMP -and (Test-Path -LiteralPath $env:CHRONICLE_HARNESS_TEMP -PathType Container)) {
         Set-Content -LiteralPath (Join-Path $env:CHRONICLE_HARNESS_TEMP 'AgentPursuitResult.json') -Value $resultJson -Encoding UTF8

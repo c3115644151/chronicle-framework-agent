@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'BattleFixture', 'PostBattle', 'Observation', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EscortVisibility', 'VisualCapture', 'All')]
+    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'BattleFixture', 'PostBattle', 'Observation', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'EscortVisibility', 'VisualCapture', 'All')]
     [string]$Phase = 'All',
     [int]$SmokeTimeoutSeconds = 45,
     [int]$SmokeStabilitySeconds = 8
@@ -11,7 +11,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '4.95'
+$HarnessContractVersion = '4.96'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -148,9 +148,10 @@ $requestedStages = switch ($Phase) {
     'Recruitment' { @('Preflight', 'Build', 'Recruitment') }
     'Rest' { @('Preflight', 'Build', 'Rest') }
     'Pursuit' { @('Preflight', 'Build', 'Pursuit') }
+    'Conversation' { @('Preflight', 'Build', 'Conversation') }
     'EscortVisibility' { @('Preflight', 'Build', 'EscortVisibility') }
     'VisualCapture' { @('Preflight', 'Build', 'VisualCapture') }
-    'All' { @('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'Protocol', 'AgentLoop', 'Observation', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'BattleFixture', 'PostBattle') }
+    'All' { @('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'Protocol', 'AgentLoop', 'Observation', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'BattleFixture', 'PostBattle') }
 }
 
 foreach ($stage in $requestedStages) {
@@ -386,6 +387,12 @@ foreach ($stage in $requestedStages) {
             Invoke-Stage -Name 'Pursuit' -Action {
                 & powershell -NoProfile -ExecutionPolicy Bypass -File $pursuitScript
                 if ($LASTEXITCODE -ne 0) { throw "Agent pursuit test failed with exit code $LASTEXITCODE." }
+            }
+        }
+        'Conversation' {
+            Invoke-Stage -Name 'Conversation' -Action {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $pursuitScript -ProbeConversation
+                if ($LASTEXITCODE -ne 0) { throw "Agent conversation lifecycle test failed with exit code $LASTEXITCODE." }
             }
         }
         'EscortVisibility' {
