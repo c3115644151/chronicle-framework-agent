@@ -52,7 +52,9 @@ Chronicle主观察不逐个列出Clan成员/同伴、能力/装备/当前位置/
 
 ## H06 Party Roles：家族成员职责分配
 
-玩家可通过Clan管理页面的Party/角色职责区域，为该Party成员安排军需官、侦察、军医、工程师等职责；Naval Party上下文还存在FirstMate、Navigator等角色。`DefaultClanMemberPartyRoleModel`把四个常规职责分别关联到Steward、Scouting、Medicine、Engineering技能；角色VM读取相关技能/效果与Perk，并根据 Hero 是否在对应Party、能否担任职责及当前资格决定是否启用。面板展示候选人和技能效果；执行后通过MobileParty的角色Setter写入对应职责并触发界面分配事件，不是仅有一个图标变化。
+玩家可通过Clan管理页面的Party/角色职责区域，为该Party成员安排军需官、侦察、军医、工程师等职责；`ClanPartyItemVM`逐一读取`ClanMemberPartyRoleModel.GetAssignablePartyRoles()`并据其生成可见职责行。v1.4.8默认`DefaultClanMemberPartyRoleModel`只返回Quartermaster/Scout/Surgeon/Engineer四项，并分别关联Steward/Scouting/Medicine/Engineering技能；`ClanRoleItemVM/ClanRoleMemberItemVM`基于资格和技能生成候选人，玩家提交后由对应MobileParty setter写入角色并触发界面分配事件。
+
+`MobileParty`另存FirstMate/Navigator，`PartyRole`也定义这两个枚举值，通用Role VM包含其文本标识/effective owner/setter分支；但默认角色模型不把它们返回到`ClanPartyItemVM`职责列表，因此当前1.4.8基础游戏中没有这两个角色的玩家任命入口，记录为`N/A-H06-01`，不扩展行为分母。若Mod替换`ClanMemberPartyRoleModel`后开放这些Role，通用VM有接入能力，需在该Mod实际加载时重查。
 
 角色不是Clan全局的荣誉称号，而是某个MobileParty当前由哪位Hero提供角色能力。Hero死亡、被俘、成为Governor/忙碌、离开Clan或其他无资格状态时，`PartyRolesCampaignBehavior`可清除其Party Roles；角色效果因此可能随队伍/成员状态改变。不同角色是否可由一个Hero兼任、每个版本的技能下限、Naval技能效果与UI限制须按Party Role Model和界面逐项判断，不由“同伴技能最高”直接推导。
 
