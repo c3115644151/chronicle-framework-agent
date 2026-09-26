@@ -272,7 +272,7 @@ Chronicle Observer 不返回玩家所属 Kingdom ID/预算钱包/Tribute、Merce
 
 `DefaultPartyTradeModel.GetTradePenaltyFactor` 通过 `DefaultSkillEffects.TradePenaltyReduction` 计算 Party 的交易惩罚倍率；`DefaultTradeItemPriceFactorModel` 再将它用于 Context TradePenalty。模型还按照买卖方向、Town/Village/Caravan seller、与 Settlement 派系关系、贸易商品/动物/普通装备、战争关系等加入不同惩罚；多个 trade Perk 直接参与其加成/折减，例如 WholeSeller、Appraiser、Granary Accountant、Village/Rumor Network、Caravan Silver Tongue 等。明细规则见 E02，不将“Trade Skill 等级”误当成单一固定价格百分比。
 
-工坊转换速度、Caravan 的买卖决策、村庄生产、Workshop/Trade Rumor 等也会读取 Trade Skill/Perk；有关收益/所有权流分别见 E03-E08。Barter 中 Trade 技能的议价加成及双方接受条件留待 E10，不重复当作 Inventory 交易 XP。
+工坊转换速度、Caravan 的买卖决策、村庄生产、Workshop/Trade Rumor 等也会读取 Trade Skill/Perk；有关收益/所有权流分别见 E03-E08。M3源码复核确认 `DefaultBarterModel.GetBarterPenalty` 的 ItemBarterable分支读取 Trade Perk SelfMadeMan并改变物品条款估值；是否还有Trade Skill等级影响其它Barterable、Barter成交是否触发Trade XP尚无证据，详见E10。Barter报价效果不重复算成Inventory交易XP。
 
 玩家可见的价格辅助有不同消费者：`SPItemVM.UpdateProfitType`在Trade模式下，对玩家库存检查`Appraiser`或`WholeSeller`，用`IPlayerTradeBehavior.GetProjectedProfit`推导利润标记；对聚落市场库存检查`CaravanMaster`或`MarketDealer`，比较当前与平均价格因子。物品详情中的异地买卖价来自另一条`ItemMenuVM`贸易传闻链，显示函数没有统一技能等级门槛；`TravelingRumors`/`Tollgates`分别扩充商队/工坊情报来源，具体过滤、过期与用户实玩依据见J06。不能把所有价格颜色、利润提示和异地情报统一解释为一个“高交易等级解锁”开关。以上为本机1.4.8源码依据，尚未进行无专长/有专长的运行对照。
 
@@ -305,6 +305,8 @@ Barter 是按 Hero/Party/Faction 对方建立的谈判数据。`BarterData` 保�
 ### 价值与失败规则
 
 `Barterable` 保存原始所有者 Hero/Party、所在 BarterGroup、是否上下文依赖、被提出数量及可链接项；各子类提供自己的 `GetUnitValueForFaction` 和 Apply 副作用。一般 offer 是否被接受读取对方视角的净 `GetOfferValue`；`IsOfferAcceptable` 的基础条件是该值不得低于约 0。DefaultBarterModel 还对物品交换应用双方角度不同的交易 Penalty，并影响 overpay→Relation 结果；和平/政治承诺、Marriage、俘虏/赎金与领地另有自定义价值/前置/结果模型，不具有同一通用估值公式。
+
+与E09的Trade Skill连接经本机`DefaultBarterModel.GetBarterPenalty`核对：对`ItemBarterable`计算双方视角的Penalty时，会读取原主/对方领主是否有Trade Perk `SelfMadeMan`，按PrimaryBonus修正该物品条款的估值；这证明Trade Perk会影响Barter盘的物品报价，不代表通用Trade Skill等级作用于所有Barterable。PlayerInventoryExchange/Trade XP属于E02市场交易提交链；目前追到的Barter草稿编辑/接受链没有派发该市场交易事件的证据，因此不把Barter选项编辑计作Trade XP来源；自定义Barterable/Mod扩展仍未知。
 
 失败/拒绝意味着保持原物品/金币/领地状态，仅结束本轮或沿剧情继续对话；接受后多个关联 Barterable 一并生效，故可能同时修改 faction stance、城镇/家族归属、 prisoner状态、角色婚姻和关系。具体前置、取消/协商结果留给 C/I/F/J 域补齐；本节不将“Barter UI 打开”算作交易成功。
 
