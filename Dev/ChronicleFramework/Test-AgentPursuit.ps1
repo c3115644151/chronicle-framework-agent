@@ -4,6 +4,7 @@ param(
     [int]$TimeoutSeconds = 180,
     [switch]$ProbeEscortVisibilityLoss,
     [switch]$ProbeConversation,
+    [switch]$ProbeQuestAcceptance,
     [int]$VisibilityProbeSeconds = 30
 )
 
@@ -25,6 +26,9 @@ function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @()) {
 }
 
 try {
+    if (($ProbeEscortVisibilityLoss -and $ProbeConversation) -or ($ProbeEscortVisibilityLoss -and $ProbeQuestAcceptance) -or ($ProbeConversation -and $ProbeQuestAcceptance)) {
+        throw 'Select exactly one specialized Pursuit probe mode per run.'
+    }
     $start = Invoke-AgentCli 'load' @('-SaveName', $LoadSaveName, '-TimeoutSeconds', $TimeoutSeconds)
     $initial = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-initial", '-TimeoutSeconds', $TimeoutSeconds)
     $settlement = @($initial.state.nearbySettlements | Where-Object { -not $_.hostile -and $_.distance -gt 1.0 } | Sort-Object distance | Select-Object -First 1)
@@ -99,9 +103,9 @@ try {
     $mapState = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-hold-settled", '-TimeoutSeconds', $TimeoutSeconds)
     $escortStoppedByNativeHold = ($holdAfterEscort.status -eq 'completed' -and $mapState.state.location.targetPartyId -eq $null -and $mapState.state.party.defaultBehavior -eq 'Hold')
 
-    $targets = @($mapState.state.nearbyParties | Where-Object { $_.isMoving -and $null -eq $_.currentSettlementId -and $_.distance -gt 1.0 -and (-not $ProbeConversation -or $_.type -eq 'lord') } | Sort-Object distance)
+    $targets = @($mapState.state.nearbyParties | Where-Object { $_.isMoving -and $null -eq $_.currentSettlementId -and $_.distance -gt 1.0 -and (-not ($ProbeConversation -or $ProbeQuestAcceptance) -or $_.type -eq 'lord') } | Sort-Object distance)
     if ($targets.Count -eq 0) {
-        if ($ProbeConversation) { throw 'No visible moving Lord party exists in this disposable conversation fixture; refusing to substitute another Party or fake the meeting.' }
+        if ($ProbeConversation -or $ProbeQuestAcceptance) { throw 'No visible moving Lord party exists in this disposable conversation fixture; refusing to substitute another Party or fake the meeting.' }
         throw 'No visible moving party outside a settlement is available for pursuit in the disposable fixture; refusing to invent or teleport a target.'
     }
     $target = $targets[0]
@@ -190,6 +194,78 @@ try {
         }
         $conversationJson
         if (-not $conversationResult.Passed) { exit 1 }
+        return
+    }
+
+    if ($ProbeQuestAcceptance) {
+        $initialQuests = @($outcomeState.state.quests)
+        $steps = @()
+        $questOptionSelected = $false
+        $issueOfferRequested = $false
+        $questStartState = $outcomeState
+        $questFlowOutcome = 'quest-accept-option-not-reached'
+        for ($flowStep = 1; $flowStep -le 12; $flowStep++) {
+            $conversationState = $questStartState.state.context.conversation
+            if (-not $conversationState) { $questFlowOutcome = 'conversation-ended-before-quest-accept'; break }
+            $options = @($conversationState.options)
+            $questAcceptOption = @($options | Where-Object { $_.id -eq 'issue_offer_player_accept_quest' -and $_.clickable } | Select-Object -First 1)
+            if ($questAcceptOption.Count -eq 1) {
+                $acceptedQuest = Invoke-AgentCli 'dialogueSelect' @('-OptionId', [string]$questAcceptOption[0].id, '-CommandId', "$runPrefix-quest-accept", '-TimeoutSeconds', $TimeoutSeconds)
+                $questStartState = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-after-quest-accept", '-TimeoutSeconds', $TimeoutSeconds)
+                $questOptionSelected = $acceptedQuest.status -eq 'completed'
+                $questFlowOutcome = 'quest-accept-option-selected'
+                $steps += [pscustomobject]@{ Step = $flowStep; Action = 'dialogueSelect'; OptionId = $questAcceptOption[0].id; Status = $acceptedQuest.status; Text = $questAcceptOption[0].text }
+                break
+            }
+            $nextOption = @($options | Where-Object { $_.clickable -and $_.id -in @('lord_meet_player_response1','hero_give_issue','issue_explanation_player_response_pre_quest_solution') } | Select-Object -First 1)
+            if ($nextOption.Count -eq 1) {
+                if ($nextOption[0].id -eq 'hero_give_issue' -and $issueOfferRequested) {
+                    $questFlowOutcome = 'issue-offer-returned-without-quest-option'
+                    $steps += [pscustomobject]@{ Step = $flowStep; Action = 'stop-after-issue-offer-returned'; SentenceText = $conversationState.sentenceText; Options = $options }
+                    break
+                }
+                if ($nextOption[0].id -eq 'hero_give_issue') { $issueOfferRequested = $true }
+                $receipt = Invoke-AgentCli 'dialogueSelect' @('-OptionId', [string]$nextOption[0].id, '-CommandId', "$runPrefix-quest-flow-$flowStep", '-TimeoutSeconds', $TimeoutSeconds)
+                $questStartState = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-quest-flow-observe-$flowStep", '-TimeoutSeconds', $TimeoutSeconds)
+                $steps += [pscustomobject]@{ Step = $flowStep; Action = 'dialogueSelect'; OptionId = $nextOption[0].id; Status = $receipt.status; Text = $nextOption[0].text }
+                continue
+            }
+            if ($options.Count -eq 0) {
+                $receipt = Invoke-AgentCli 'dialogueContinue' @('-CommandId', "$runPrefix-quest-flow-continue-$flowStep", '-TimeoutSeconds', $TimeoutSeconds)
+                $questStartState = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-quest-flow-continue-observe-$flowStep", '-TimeoutSeconds', $TimeoutSeconds)
+                $steps += [pscustomobject]@{ Step = $flowStep; Action = 'dialogueContinue'; Status = $receipt.status }
+                continue
+            }
+            $questFlowOutcome = 'unhandled-solution-options-present'
+            $steps += [pscustomobject]@{ Step = $flowStep; Action = 'stop-without-choosing-unsupported-solution'; Options = $options }
+            break
+        }
+        $newQuests = @($questStartState.state.quests | Where-Object { $_.id -notin @($initialQuests | ForEach-Object { $_.id }) })
+        $questStarted = $questOptionSelected -and $newQuests.Count -gt 0
+        $stop = Invoke-AgentCli 'stop' @('-CommandId', "$runPrefix-quest-probe-stop", '-TimeoutSeconds', $TimeoutSeconds)
+        $fixtureHashAfter = (Get-FileHash $savePath -Algorithm SHA256).Hash
+        $questResult = [ordered]@{
+            ProcessId = $start.session.processId
+            PartyTarget = $target
+            ConversationEntry = $outcomeState.state.context.conversation
+            InitialQuestCount = $initialQuests.Count
+            Steps = $steps
+            Outcome = $questFlowOutcome
+            QuestAcceptanceReceiptObserved = $questOptionSelected
+            NewActiveQuests = $newQuests
+            QuestStarted = $questStarted
+            FinalConversation = $questStartState.state.context.conversation
+            CampaignTimeMode = $questStartState.state.context.timeControlMode
+            FixtureUnchanged = $fixtureHashBefore -eq $fixtureHashAfter
+            ProcessStopped = $stop.processStopped
+        }
+        $questResult.Passed = ($pursuitOutcome -eq 'conversation' -and $questStarted -and $questResult.FixtureUnchanged -and $questResult.ProcessStopped)
+        $questJson = $questResult | ConvertTo-Json -Depth 12
+        if ($env:CHRONICLE_HARNESS_TEMP -and (Test-Path -LiteralPath $env:CHRONICLE_HARNESS_TEMP -PathType Container)) {
+            Set-Content -LiteralPath (Join-Path $env:CHRONICLE_HARNESS_TEMP 'AgentQuestAcceptanceResult.json') -Value $questJson -Encoding UTF8
+        }
+        $questJson
+        if (-not $questResult.Passed) { exit 1 }
         return
     }
 

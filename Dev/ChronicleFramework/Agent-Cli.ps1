@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet('start','load','state','captureFrame','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','move','moveToPoint','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','recruit','foodOptions','tradeOptions','trade','provision','save','stop')]
+    [ValidateSet('start','load','state','captureFrame','harnessMissionDiagnostics','talkToSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','move','moveToPoint','missionInput','missionNavigateToAgent','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','recruit','foodOptions','tradeOptions','trade','provision','save','stop')]
     [string]$Action,
     [string]$SaveName,
     [string]$SettlementId,
@@ -9,6 +9,7 @@ param(
     [double]$Y,
     [ValidateSet('land')][string]$Surface,
     [string]$PartyId,
+    [int]$AgentIndex = -1,
     [string]$MenuId,
     [string]$OptionId,
     [string]$OwnerId,
@@ -18,8 +19,10 @@ param(
     [string]$ItemId,
     [string]$Direction,
     [string]$OutputPath,
+    [string]$HeroId,
     [int]$Amount = 1,
     [double]$Days = 0.01,
+    [double]$DurationSeconds = 0,
     [string]$CommandId,
     [int]$TimeoutSeconds = 180,
     [switch]$ReturnWhenAccepted,
@@ -197,6 +200,11 @@ if ($Action -in @('start','load')) {
 
 switch ($Action) {
     'state' { $result = Invoke-ProtocolCommand 'state' }
+    'harnessMissionDiagnostics' { $result = Invoke-ProtocolCommand 'harnessMissionDiagnostics' }
+    'talkToSettlementHero' {
+        if (-not $HeroId) { throw '-HeroId is required and must come from settlementOverlayCharacters in the current observation.' }
+        $result = Invoke-ProtocolCommand 'talkToSettlementHero' @{ heroId = $HeroId }
+    }
     'captureFrame' {
         if (-not $OutputPath) { throw '-OutputPath is required for captureFrame.' }
         $result = Invoke-ProtocolCommand 'captureFrame' @{ fileName = [IO.Path]::GetFileName($OutputPath) }
@@ -214,6 +222,19 @@ switch ($Action) {
     'moveToPoint' {
         if (-not $PSBoundParameters.ContainsKey('X') -or -not $PSBoundParameters.ContainsKey('Y') -or -not $Surface) { throw '-X, -Y and -Surface (land|sea) are required for moveToPoint.' }
         $result = Invoke-ProtocolCommand 'moveToPoint' @{ x = $X; y = $Y; surface = $Surface }
+    }
+    'missionInput' {
+        if (-not $PSBoundParameters.ContainsKey('X') -or -not $PSBoundParameters.ContainsKey('Y')) { throw '-X and -Y are required for missionInput.' }
+        $result = Invoke-ProtocolCommand 'missionInput' @{ x = $X; y = $Y; durationSeconds = $DurationSeconds }
+    }
+    'missionNavigateToAgent' {
+        if ($AgentIndex -lt 0) { throw '-AgentIndex is required for missionNavigateToAgent.' }
+        $result = Invoke-ProtocolCommand 'missionNavigateToAgent' @{ agentIndex = $AgentIndex }
+    }
+    'missionCancelNavigation' { $result = Invoke-ProtocolCommand 'missionCancelNavigation' }
+    'missionAimAt' {
+        if ($AgentIndex -lt 0) { throw '-AgentIndex is required for missionAimAt.' }
+        $result = Invoke-ProtocolCommand 'missionAimAt' @{ agentIndex = $AgentIndex }
     }
     'pursue' {
         if (-not $PartyId) { throw '-PartyId is required for pursue.' }

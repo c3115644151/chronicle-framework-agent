@@ -286,14 +286,19 @@ Sandbox `AlleyCampaignBehavior` 是该系统的主要生命周期行为。Town �
 | --- | --- | --- |
 | Manage town | `TownManagementVM`：发展/项目队列、日常项目、总督、城镇每日数值、绑定村庄、商店等管理显示 | `SettlementAccessModel.ManageTown`；菜单 option 的 VM 转接由 SandBox View 注册，需从游戏内做完整视觉验证 |
 | Recruit troops | 原生 `RecruitmentVM`/队伍操作，以 Notable volunteers 为来源 | 当前可招募对象、金钱、队伍空间和城镇状态动态决定；不能与村庄入口或 garrison 管理混为一处 |
+| Settlement Characters overlay → choose Hero/Notable → Conversation | `SettlementMenuOverlayVM.CharacterList`只取当前`GameMenuManager.MenuLocations`中由`HeroAgentLocationModel.WillBeListedInOverlay`判定可列出的角色；选择后原版Conversation上下文动作按目标Hero创建其Location Mission | 先发`SettlementOverlayTalkPermissionEvent`；进入场景不等于已接Quest，任务选项/前置仍由该Notable原版Conversation决定 |
 | Trade | `InventoryScreenHelper.OpenScreenAsTrade` 打开城镇市场 | SettlementAccessModel 交易许可/市场状态 |
 | Go to keep | 进入 `town_keep` 聚落菜单，不立即进入 lordshall Mission | AccessModel 可能要求伪装/贿赂/拒绝；敌国或 Crime Rating会改变条件 |
 | Go to the arena → Enter the arena | 先到 `town_arena` 再打开 `arena` Location Mission | 仅白天、不可伪装等条件；不是打开城镇管理面板 |
 | Go to tavern district → Visit the tavern | 先到 `town_backstreet` 再打开 `tavern` Location Mission | 人物/Issue/招募候选由具体地点/任务条件动态决定 |
 | Enter smithy | 打开锻造界面 | Craft 访问权限、角色/耐力等由锻造系统门禁决定 |
-| Take a walk around the town center | 打开 `center` Location Mission | SettlementAccessModel 地点许可、任务/Issue 位置上下文 |
+| Take a walk around the town center | `town_streets`→`LocationComplex.Current.GetLocationWithId("center")`，调用`LocationEncounter.CreateAndOpenMissionController`打开中心 Location Mission | `SettlementAccessModel.CanMainHeroAccessLocation`；Condition为center Locations调用`MenuHelper.SetIssueAndQuestDataForLocations`，该入口对center Locations调用Issue/Quest检查；GameMenuOption.OptionQuestData经GameMenuItemVM生成菜单任务标记，不代表本次必有任务Notable |
 | Wait here | 切换到 `town_wait_menus` 原生 Wait menu | 通过 `StartWait` 推进时间；见 A02/MAINLINE，不等价于驻足查看菜单 |
 | Leave | 退出聚落，返回 Campaign Map | 军团/海上等状态可限制 |
+
+1.4.8运行`TestResults/20260927-014511/Temp/TownCenterMissionResult.json`沿真实菜单选项验证Sargot `town_streets`可用，并进入`vlandia_town_e` MissionState；Campaign时间Stop，MainAgent从镇门外开始。Harness以32次0.35秒有界输入自然移动约18.989单位，输入lease会清零且 Campaign Day不变；局部观察样本找到的两个Agent都是Soldier，无Notable。该运行仅验证Town中心菜单→Location Mission与局部移动/观察起点；其它运行在附近视野里发现过Townsfolk，也仍未找到Notable或进入对话，不能从单个空局部列表推断整场景没有Notable。更详细的Mission Agent/Focusing链由L07与MAINLINE记录。 后续`TestResults/20260927-033506/Temp/TownCenterMissionResult.json`中`town_streets`的原版`OptionQuestData`为`AvailableIssue`（1），表明该样本镇中心存在可用Issue标记；`TestResults/20260927-034201/Temp/TownCenterMissionResult.json`沿44个短步抵达城门口后观察到镇民，但导航期间对方移动到门另一侧，最终Native Focus命中CastleGate而非角色。标记说明存在Issue，不表示主角已到人或成功交谈；场景路径/Focusing细节见L07与MAINLINE。 `TestResults/20260927-040042/Temp/TownCenterMissionNativeFocusState.json`进一步显示引擎导航能让主角到一名普通瓦兰迪亚新兵约1.42单位处，原版Focus命中该Agent，画面出现`F 交谈`提示；不等于向该NPC执行了对话，也不是Issue Notable。
+
+目标式Notable对话的原版后果不需要玩家先自由走完整个场景：`GameMenuOverlay.ExecuteTroopAction(Conversation)`在Settlement/Menu/Location上下文下，按`LocationComplex.GetLocationOfCharacter(hero)`选地点、触发`OnPlayerStartTalkFromMenu(hero)`并调用`LocationEncounter.CreateAndOpenMissionController(location,null,hero.CharacterObject)`。TownEncounter把`talkToChar`传给`SandBoxMissions.OpenTownCenterMission`；`MissionConversationLogic`识别目标Hero Agent、把双方安排到交谈距离并启动原版Conversation。运行`TestResults/20260927-052705/Temp/SettlementOverlayConversationResult.json`从Sargot native Characters overlay选择GangLeader维拉特鲁德（Notable，AvailableIssue“特殊武器订单”），进入`center` Mission后Conversation partner正是该Hero，自动显示原版问候和三个Clickable选项；Campaign保持Stop，Quest数0→0、源档hash不变、进程正常关闭，截图见同目录`SettlementOverlayConversation-frame.bmp`。该轮未选Quest解决方案，接取行为留给J02/W2-E。`AgentObserver.settlementOverlayCharacters`与`talkToSettlementHero`分别复现本体CharacterList与TalkPermission/目标会面调用，不使用Harness的全场景诊断数据。
 
 `town_keep` 另含通往 dungeon、驻军管理、向驻军捐兵、stash、lord’s hall 和返回 town 的选项。Manage Garrison 通过 `PartyScreenHelper.OpenScreenAsManageTroops` 打开真实 troop transfer 界面；Donate troops 是另一种受限的派对捐兵入口。`town_keep_dungeon` 包含捐俘虏、管理俘虏、进入 prison Location 和返回。Lord’s Hall 与 dungeon Location 是进一步打开的物理 Mission，不是名称为 keep/dungeon 的当前菜单本身。
 

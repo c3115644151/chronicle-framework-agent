@@ -3,21 +3,28 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
+using SandBox;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.CampaignSystem.GameState;
+using TaleWorlds.CampaignSystem.GameMenus;
 using TaleWorlds.CampaignSystem.MapEvents;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
+using TaleWorlds.CampaignSystem.Settlements.Locations;
 using TaleWorlds.CampaignSystem.ViewModelCollection.GameMenu.Recruitment;
+using TaleWorlds.CampaignSystem.ViewModelCollection.GameMenu.Events;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
+using TaleWorlds.MountAndBlade.View.MissionViews;
 using EngineTime = TaleWorlds.Engine.Time;
 
 namespace ChronicleFramework;
 
 internal sealed class ChronicleAgentProtocol
 {
+    private static ChronicleAgentProtocol _activeInstance;
     private readonly string _root;
     private readonly string _responseRoot;
     private string _lastCommandId;
@@ -34,9 +41,24 @@ internal sealed class ChronicleAgentProtocol
     private RecruitmentVM _recruitmentViewModel;
     private bool _freshProgressionPollLogged;
     private bool _freshProgressionCommandLogged;
+    private Agent _missionInputAgent;
+    private TaleWorlds.Library.Vec2 _missionInputVector;
+    private float _missionInputExpiresAt;
+    private AgentNavigator _missionNavigator;
+    private Mission _missionNavigationMission;
+    private Agent _missionNavigationOwner;
+    private int _missionNavigationTargetAgentIndex = -1;
+    private TaleWorlds.Library.Vec3 _missionNavigationTargetPosition;
+    private TaleWorlds.Core.AgentControllerType? _missionNavigationOriginalController;
+    private float _missionNavigationStartedAt;
+    private float _missionNavigationExpiresAt;
+    private float _lastMissionNavigationTickAt;
+    private string _missionNavigationStatus;
 
     internal ChronicleAgentProtocol()
     {
+        _activeInstance = this;
+        AgentMissionInputPatch.Install();
         var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
         _root = Path.Combine(documentsPath, "Mount and Blade II Bannerlord", "AgentRuns", "ChronicleAgent");
         _responseRoot = Path.Combine(_root, "responses");
@@ -52,6 +74,8 @@ internal sealed class ChronicleAgentProtocol
         string currentAction = null;
         try
         {
+            UpdateMissionNavigationLease();
+            UpdateMissionInputLease();
             CompleteRestIfReady(behavior);
             CompleteAdvanceIfReady(behavior);
             CompleteDeferredMapClickTimeChange();
@@ -108,6 +132,56 @@ internal sealed class ChronicleAgentProtocol
             {
                 case "state":
                     WriteResponse(commandId, action, "completed", behavior);
+                    break;
+                case "harnessMissionDiagnostics":
+                    var missionDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var missionDiagnosticsRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(missionDiagnosticsMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(missionDiagnosticsRoot) || !Directory.Exists(missionDiagnosticsRoot))
+                        throw new InvalidOperationException("harnessMissionDiagnostics is restricted to a visual Harness run with a Harness temp directory");
+                    var diagnosticMission = Mission.Current;
+                    if (diagnosticMission == null || diagnosticMission.MissionEnded || !AgentMissionInputPatch.IsSupportedLocationMission(diagnosticMission))
+                        throw new InvalidOperationException("harnessMissionDiagnostics requires an active Town or Tavern Location Mission");
+                    WriteResponse(commandId, action, "completed", behavior, null, BuildHarnessMissionDiagnosticsJson(diagnosticMission));
+                    break;
+                case "talkToSettlementHero":
+                    var overlayMenuContext = TaleWorlds.CampaignSystem.Campaign.Current?.CurrentMenuContext;
+                    var overlayGameMenu = overlayMenuContext?.GameMenu;
+                    if (overlayGameMenu == null ||
+                        (overlayGameMenu.OverlayType != GameMenu.MenuOverlayType.SettlementWithCharacters && overlayGameMenu.OverlayType != GameMenu.MenuOverlayType.SettlementWithBoth) ||
+                        Settlement.CurrentSettlement == null)
+                        throw new InvalidOperationException("talkToSettlementHero requires the native settlement menu with a visible Characters overlay");
+                    var settlementHeroId = ReadString(command, "heroId");
+                    if (string.IsNullOrWhiteSpace(settlementHeroId)) throw new InvalidOperationException("talkToSettlementHero requires a HeroId from the current settlement overlay observation");
+                    var settlementOverlayLocationCharacters = TaleWorlds.CampaignSystem.Campaign.Current.GameMenuManager.MenuLocations
+                        .Where(location => location != null)
+                        .SelectMany(location => location.GetCharacterList())
+                        .Where(locationCharacter => locationCharacter != null && locationCharacter.Character?.IsHero == true && TaleWorlds.CampaignSystem.Campaign.Current.Models.HeroAgentLocationModel.WillBeListedInOverlay(locationCharacter))
+                        .ToArray();
+                    var settlementTargetLocationCharacter = settlementOverlayLocationCharacters.FirstOrDefault(locationCharacter =>
+                        locationCharacter.Character?.HeroObject != null &&
+                        string.Equals(locationCharacter.Character.HeroObject.StringId, settlementHeroId, StringComparison.Ordinal));
+                    var settlementTargetHero = settlementTargetLocationCharacter?.Character?.HeroObject;
+                    if (settlementTargetHero == null || !settlementTargetHero.IsAlive || settlementTargetHero.IsPrisoner || settlementTargetHero.CurrentSettlement != Settlement.CurrentSettlement)
+                        throw new InvalidOperationException("talkToSettlementHero target is no longer a living, non-prisoner character in the current native Settlement overlay");
+                    var talkPermissionWasReported = false;
+                    var talkPermissionAllowed = true;
+                    string talkPermissionHint = null;
+                    Game.Current.EventManager.TriggerEvent(new SettlementOverlayTalkPermissionEvent(settlementTargetHero, (isAllowed, hint) =>
+                    {
+                        talkPermissionWasReported = true;
+                        talkPermissionAllowed = isAllowed;
+                        talkPermissionHint = hint?.ToString();
+                    }));
+                    if (talkPermissionWasReported && !talkPermissionAllowed)
+                        throw new InvalidOperationException(string.IsNullOrWhiteSpace(talkPermissionHint) ? "The native Settlement overlay does not currently allow talking to this Hero" : talkPermissionHint);
+                    var targetLocation = LocationComplex.Current?.GetLocationOfCharacter(settlementTargetHero);
+                    if (targetLocation == null) throw new InvalidOperationException("Native LocationComplex has no current Location for the selected Settlement overlay Hero");
+                    if (string.Equals(targetLocation.StringId, "alley", StringComparison.Ordinal))
+                        targetLocation = LocationComplex.Current.GetLocationWithId("center");
+                    TaleWorlds.CampaignSystem.CampaignEventDispatcher.Instance.OnPlayerStartTalkFromMenu(settlementTargetHero);
+                    PlayerEncounter.LocationEncounter.CreateAndOpenMissionController(targetLocation, null, settlementTargetHero.CharacterObject);
+                    var talkData = "{\"heroId\":\"" + Escape(settlementTargetHero.StringId) + "\",\"heroName\":\"" + Escape(settlementTargetHero.Name?.ToString()) + "\",\"locationId\":\"" + Escape(targetLocation.StringId) + "\",\"hasIssue\":" + (settlementTargetHero.Issue != null ? "true" : "false") + ",\"issueType\":\"" + Escape(settlementTargetHero.Issue?.GetType().Name) + "\",\"talkPermissionWasReported\":" + (talkPermissionWasReported ? "true" : "false") + "}";
+                    WriteResponse(commandId, action, "completed", behavior, null, talkData);
                     break;
                 case "captureFrame":
                     var screenshotHarnessMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
@@ -244,6 +318,141 @@ internal sealed class ChronicleAgentProtocol
                     var actualPoint = mainPartyForPointMove.TargetPosition;
                     var pointMoveData = "{\"requested\":{\"x\":" + targetX.ToString("R", CultureInfo.InvariantCulture) + ",\"y\":" + targetY.ToString("R", CultureInfo.InvariantCulture) + ",\"surface\":\"" + Escape(surface) + "\"},\"nativeTarget\":{\"x\":" + actualPoint.X.ToString("R", CultureInfo.InvariantCulture) + ",\"y\":" + actualPoint.Y.ToString("R", CultureInfo.InvariantCulture) + ",\"isOnLand\":" + actualPoint.IsOnLand.ToString().ToLowerInvariant() + "},\"nativeBehavior\":\"" + Escape(mainPartyForPointMove.DefaultBehavior.ToString()) + "\"}";
                     WriteResponse(commandId, action, "completed", behavior, null, pointMoveData);
+                    break;
+                case "missionInput":
+                    var activeMission = Mission.Current;
+                    var missionState = Game.Current.GameStateManager.ActiveState as MissionState;
+                    if (activeMission == null || activeMission.MissionEnded || missionState == null || activeMission.MainAgent == null || !activeMission.MainAgent.IsActive() || !activeMission.MainAgent.IsPlayerControlled)
+                        throw new InvalidOperationException("missionInput requires an active Location Mission with the live player MainAgent");
+                    if (!AgentMissionInputPatch.IsSupportedLocationMission(activeMission))
+                        throw new InvalidOperationException("missionInput requires a supported non-battle town or Tavern Location Mission");
+                    if (Campaign.Current.TimeControlMode != TaleWorlds.CampaignSystem.CampaignTimeControlMode.Stop)
+                        throw new InvalidOperationException("missionInput requires the Campaign clock to remain stopped");
+                    var inputX = ReadRequiredFiniteDouble(command, "x");
+                    var inputY = ReadRequiredFiniteDouble(command, "y");
+                    var durationSeconds = ReadRequiredFiniteDouble(command, "durationSeconds");
+                    if (inputX < -1.0 || inputX > 1.0 || inputY < -1.0 || inputY > 1.0)
+                        throw new InvalidOperationException("missionInput axes must be within [-1,1]");
+                    if (durationSeconds < 0.0 || durationSeconds > 0.5)
+                        throw new InvalidOperationException("missionInput duration must be 0 to 0.5 seconds");
+                    var inputMagnitude = Math.Sqrt(inputX * inputX + inputY * inputY);
+                    if (inputMagnitude > 1.0)
+                    {
+                        inputX /= inputMagnitude;
+                        inputY /= inputMagnitude;
+                    }
+                    ClearMissionNavigationLease("manual-input");
+                    if (inputMagnitude == 0.0)
+                    {
+                        ClearMissionInputLease();
+                        activeMission.MainAgent.MovementInputVector = TaleWorlds.Library.Vec2.Zero;
+                    }
+                    else
+                    {
+                        if (durationSeconds <= 0.0) throw new InvalidOperationException("nonzero missionInput axes require a positive duration");
+                        _missionInputAgent = activeMission.MainAgent;
+                        _missionInputVector = new TaleWorlds.Library.Vec2((float)inputX, (float)inputY);
+                        _missionInputExpiresAt = EngineTime.ApplicationTime + (float)durationSeconds;
+                        _missionInputAgent.MovementInputVector = _missionInputVector;
+                    }
+                    var missionInputData = "{\"x\":" + inputX.ToString("R", CultureInfo.InvariantCulture) + ",\"y\":" + inputY.ToString("R", CultureInfo.InvariantCulture) + ",\"durationSeconds\":" + durationSeconds.ToString("R", CultureInfo.InvariantCulture) + ",\"boundedLease\":true}";
+                    WriteResponse(commandId, action, "completed", behavior, null, missionInputData);
+                    break;
+                case "missionNavigateToAgent":
+                    var navigationMission = Mission.Current;
+                    var navigationState = Game.Current.GameStateManager.ActiveState as MissionState;
+                    if (navigationMission == null || navigationMission.MissionEnded || navigationState == null || navigationMission.MainAgent == null || !navigationMission.MainAgent.IsActive() || !navigationMission.MainAgent.IsPlayerControlled)
+                        throw new InvalidOperationException("missionNavigateToAgent requires an active Location Mission with the live player MainAgent");
+                    if (!AgentMissionInputPatch.IsSupportedLocationMission(navigationMission))
+                        throw new InvalidOperationException("missionNavigateToAgent requires a supported non-battle town or Tavern Location Mission");
+                    if (Campaign.Current.TimeControlMode != CampaignTimeControlMode.Stop)
+                        throw new InvalidOperationException("missionNavigateToAgent requires the Campaign clock to remain stopped");
+                    if (navigationMission.IsTeleportingAgents)
+                        throw new InvalidOperationException("missionNavigateToAgent rejects Mission teleport mode");
+                    var targetIndexValue = ReadRequiredFiniteDouble(command, "agentIndex");
+                    if (targetIndexValue < 0 || targetIndexValue > int.MaxValue || targetIndexValue != Math.Floor(targetIndexValue))
+                        throw new InvalidOperationException("agentIndex must be a nonnegative current-Mission integer index");
+                    var navigationTargetAgentIndex = (int)targetIndexValue;
+                    var navigationTargetAgent = navigationMission.Agents.FirstOrDefault(agent => agent != null && agent.IsActive() && agent.IsHuman && agent != navigationMission.MainAgent && agent.Index == navigationTargetAgentIndex);
+                    if (navigationTargetAgent == null) throw new InvalidOperationException("missionNavigateToAgent requires a live human Agent from the current Mission observation");
+                    if (navigationTargetAgent.IsEnemyOf(navigationMission.MainAgent)) throw new InvalidOperationException("hostile local Agent rejected by scripted navigation");
+                    var navigationStart = navigationMission.MainAgent.Position;
+                    var navigationDestination = navigationTargetAgent.Position;
+                    var navigationDistance = Math.Sqrt(Math.Pow(navigationStart.X - navigationDestination.X, 2) + Math.Pow(navigationStart.Y - navigationDestination.Y, 2) + Math.Pow(navigationStart.Z - navigationDestination.Z, 2));
+                    if (navigationDistance > 12.0) throw new InvalidOperationException("missionNavigateToAgent target is outside the current local Agent observation range");
+                    var startWorldPosition = new TaleWorlds.Engine.WorldPosition(navigationMission.Scene, navigationStart);
+                    var targetWorldPosition = new TaleWorlds.Engine.WorldPosition(navigationMission.Scene, navigationDestination);
+                    if (!navigationMission.Scene.DoesPathExistBetweenPositions(startWorldPosition, targetWorldPosition))
+                        throw new InvalidOperationException("native Mission Scene reports no NavMesh path to the currently observed Agent");
+                    var originalMainAgentController = navigationMission.MainAgent.Controller;
+                    if (originalMainAgentController != AgentControllerType.Player) throw new InvalidOperationException("missionNavigateToAgent can only temporarily hand off the Player-controlled MainAgent");
+                    ClearMissionNavigationLease("replaced");
+                    ClearMissionInputLease();
+                    var directionX = navigationDestination.X - navigationStart.X;
+                    var directionY = navigationDestination.Y - navigationStart.Y;
+                    var scriptedDirection = (float)Math.Atan2(directionY, directionX);
+                    var newMissionNavigator = new SandBox.AgentNavigator(navigationMission.MainAgent);
+                    try
+                    {
+                        navigationMission.MainAgent.Controller = AgentControllerType.AI;
+                        newMissionNavigator.SetTargetFrame(targetWorldPosition, scriptedDirection, rangeThreshold: 1.5f, rotationThreshold: -10f, flags: (Agent.AIScriptedFrameFlags)0, disableClearTargetWhenTargetIsReached: false);
+                    }
+                    catch
+                    {
+                        try { newMissionNavigator.ClearTarget(); } catch { }
+                        navigationMission.MainAgent.Controller = originalMainAgentController;
+                        throw;
+                    }
+                    _missionNavigator = newMissionNavigator;
+                    _missionNavigationOwner = navigationMission.MainAgent;
+                    _missionNavigationTargetAgentIndex = navigationTargetAgentIndex;
+                    _missionNavigationTargetPosition = navigationDestination;
+                    _missionNavigationOriginalController = originalMainAgentController;
+                    _missionNavigationMission = navigationMission;
+                    _missionNavigationStartedAt = EngineTime.ApplicationTime;
+                    _missionNavigationExpiresAt = EngineTime.ApplicationTime + 8f;
+                    _lastMissionNavigationTickAt = EngineTime.ApplicationTime;
+                    _missionNavigationStatus = _missionNavigator._agentState.ToString();
+                    var navigationData = "{\"targetAgentIndex\":" + navigationTargetAgentIndex.ToString(CultureInfo.InvariantCulture) + ",\"targetCharacterId\":\"" + Escape(navigationTargetAgent.Character?.StringId) + "\",\"targetHeroId\":" + ((navigationTargetAgent.Character as CharacterObject)?.HeroObject == null ? "null" : "\"" + Escape((navigationTargetAgent.Character as CharacterObject).HeroObject.StringId) + "\"") + ",\"navState\":\"" + _missionNavigator._agentState + "\",\"targetDistance\":" + navigationDistance.ToString("R", CultureInfo.InvariantCulture) + "}";
+                    WriteResponse(commandId, action, "completed", behavior, null, navigationData);
+                    break;
+                case "missionCancelNavigation":
+                    if (_missionNavigator == null) throw new InvalidOperationException("no native Mission AgentNavigator route is active");
+                    if (Mission.Current?.MainAgent != _missionNavigationOwner) throw new InvalidOperationException("active Mission MainAgent changed; navigation cannot be cancelled through this context");
+                    ClearMissionNavigationLease("cancelled");
+                    var navigationCancelData = "{\"targetAgentIndex\":" + _missionNavigationTargetAgentIndex.ToString(CultureInfo.InvariantCulture) + ",\"controllerRestored\":" + (_missionNavigationOwner?.Controller == AgentControllerType.Player ? "true" : "false") + "}";
+                    WriteResponse(commandId, action, "completed", behavior, null, navigationCancelData);
+                    break;
+                case "missionAimAt":
+                    var aimMission = Mission.Current;
+                    var aimMissionState = Game.Current.GameStateManager.ActiveState as MissionState;
+                    if (aimMission == null || aimMission.MissionEnded || aimMissionState == null || aimMission.MainAgent == null || !aimMission.MainAgent.IsActive() || !aimMission.MainAgent.IsPlayerControlled)
+                        throw new InvalidOperationException("missionAimAt requires an active Location Mission with the live player MainAgent");
+                    if (!AgentMissionInputPatch.IsSupportedLocationMission(aimMission))
+                        throw new InvalidOperationException("missionAimAt requires a supported non-battle town or Tavern Location Mission");
+                    if (Campaign.Current.TimeControlMode != TaleWorlds.CampaignSystem.CampaignTimeControlMode.Stop)
+                        throw new InvalidOperationException("missionAimAt requires the Campaign clock to remain stopped");
+                    var aimAgentIndex = (int)ReadRequiredFiniteDouble(command, "agentIndex");
+                    var aimController = aimMission.MissionBehaviors.OfType<MissionMainAgentController>().FirstOrDefault();
+                    if (aimController?.MissionScreen == null) throw new InvalidOperationException("native Mission camera controller is unavailable");
+                    var aimTarget = aimMission.Agents.FirstOrDefault(agent => agent != null && agent.IsActive() && agent.IsHuman && agent != aimMission.MainAgent && agent.Index == aimAgentIndex);
+                    if (aimTarget == null) throw new InvalidOperationException("missionAimAt requires a live human Agent from the current Mission observation");
+                    if (aimTarget.IsEnemyOf(aimMission.MainAgent)) throw new InvalidOperationException("hostile HeroAgent cannot be selected by the Tavern interaction camera action");
+                    var aimDeltaX = aimTarget.Position.X - aimMission.MainAgent.Position.X;
+                    var aimDeltaY = aimTarget.Position.Y - aimMission.MainAgent.Position.Y;
+                    var aimDeltaZ = aimTarget.Position.Z - aimMission.MainAgent.Position.Z;
+                    var aimDistance = Math.Sqrt(aimDeltaX * aimDeltaX + aimDeltaY * aimDeltaY + aimDeltaZ * aimDeltaZ);
+                    if (aimDistance > 12.0) throw new InvalidOperationException("missionAimAt target is outside the current local Agent observation range");
+                    var horizontalAimDistance = Math.Sqrt(aimDeltaX * aimDeltaX + aimDeltaY * aimDeltaY);
+                    if (horizontalAimDistance < 0.1) throw new InvalidOperationException("HeroAgent target is too close to establish a stable camera bearing");
+                    var cameraBearing = Math.Atan2(-aimDeltaX, aimDeltaY);
+                    cameraBearing = Math.Atan2(Math.Sin(cameraBearing), Math.Cos(cameraBearing));
+                    var previousCameraBearing = aimController.MissionScreen.CameraBearing;
+                    aimController.MissionScreen.CameraBearing = (float)cameraBearing;
+                    var aimCharacter = aimTarget.Character as CharacterObject;
+                    var aimHeroId = aimCharacter?.HeroObject?.StringId;
+                    var cameraAimData = "{\"agentIndex\":" + aimTarget.Index.ToString(CultureInfo.InvariantCulture) + ",\"characterId\":\"" + Escape(aimCharacter?.StringId) + "\",\"heroId\":" + (aimHeroId == null ? "null" : "\"" + Escape(aimHeroId) + "\"") + ",\"cameraBearingBefore\":" + previousCameraBearing.ToString("R", CultureInfo.InvariantCulture) + ",\"cameraBearingAfter\":" + aimController.MissionScreen.CameraBearing.ToString("R", CultureInfo.InvariantCulture) + ",\"distance\":" + aimDistance.ToString("R", CultureInfo.InvariantCulture) + "}";
+                    WriteResponse(commandId, action, "completed", behavior, null, cameraAimData);
                     break;
                 case "menu":
                     if (TaleWorlds.CampaignSystem.Campaign.Current.CurrentMenuContext?.GameMenu == null)
@@ -437,6 +646,8 @@ internal sealed class ChronicleAgentProtocol
                     WriteResponse(commandId, action, "accepted", behavior);
                     break;
                 case "stop":
+                    ClearMissionNavigationLease("stopped");
+                    ClearMissionInputLease();
                     TaleWorlds.CampaignSystem.Campaign.Current.TimeControlMode = TaleWorlds.CampaignSystem.CampaignTimeControlMode.Stop;
                     WriteResponse(commandId, action, "completed", behavior);
                     break;
@@ -454,6 +665,171 @@ internal sealed class ChronicleAgentProtocol
                 catch { }
             }
         }
+    }
+
+    private void UpdateMissionNavigationLease()
+    {
+        if (_missionNavigator == null) return;
+        var mission = Mission.Current;
+        var activeState = Game.Current?.GameStateManager?.ActiveState as MissionState;
+        if (EngineTime.ApplicationTime >= _missionNavigationExpiresAt)
+        {
+            ClearMissionNavigationLease("timed-out");
+            return;
+        }
+        if (mission == null || mission != _missionNavigationMission || mission.MissionEnded || activeState == null || mission.MainAgent != _missionNavigationOwner || !AgentMissionInputPatch.IsSupportedLocationMission(mission))
+        {
+            ClearMissionNavigationLease("scene-changed");
+            return;
+        }
+
+        var currentMissionTime = mission.CurrentTime;
+        var deltaTime = Math.Max(0f, Math.Min(0.25f, currentMissionTime - _lastMissionNavigationTickAt));
+        _lastMissionNavigationTickAt = currentMissionTime;
+        _missionNavigator.Tick(deltaTime);
+        if (_missionNavigator._agentState == AgentNavigator.NavigationState.AtTargetPosition || _missionNavigator._agentState == AgentNavigator.NavigationState.NoTarget)
+            ClearMissionNavigationLease("arrived");
+    }
+
+    private void ClearMissionNavigationLease(string status)
+    {
+        if (_missionNavigator != null)
+        {
+            try { _missionNavigator.ClearTarget(); }
+            catch (Exception exception) { ChronicleDiagnostics.Write($"agent-mission-navigation-clear-failed|type={exception.GetType().Name}|message={exception.Message}"); }
+        }
+        if (_missionNavigationOwner != null && _missionNavigationOriginalController.HasValue && _missionNavigationOwner.IsActive())
+        {
+            try { _missionNavigationOwner.Controller = _missionNavigationOriginalController.Value; }
+            catch (Exception exception) { ChronicleDiagnostics.Write($"agent-mission-controller-restore-failed|type={exception.GetType().Name}|message={exception.Message}"); }
+        }
+        _missionNavigator = null;
+        _missionNavigationStatus = status;
+        _missionNavigationOriginalController = null;
+        _missionNavigationExpiresAt = 0f;
+        _lastMissionNavigationTickAt = 0f;
+    }
+
+    internal static string BuildMissionNavigationObservationJson(Agent mainAgent)
+    {
+        var protocol = _activeInstance;
+        if (protocol == null || mainAgent == null || protocol._missionNavigationMission == null || protocol._missionNavigationMission != Mission.Current || protocol._missionNavigationOwner != mainAgent || protocol._missionNavigationTargetAgentIndex < 0 || string.IsNullOrWhiteSpace(protocol._missionNavigationStatus))
+            return "null";
+        var x = mainAgent.Position.X - protocol._missionNavigationTargetPosition.X;
+        var y = mainAgent.Position.Y - protocol._missionNavigationTargetPosition.Y;
+        var z = mainAgent.Position.Z - protocol._missionNavigationTargetPosition.Z;
+        var distance = Math.Sqrt(x * x + y * y + z * z);
+        var remaining = protocol._missionNavigator == null ? 0.0 : Math.Max(0.0, protocol._missionNavigationExpiresAt - EngineTime.ApplicationTime);
+        return "{\"status\":\"" + Escape(protocol._missionNavigationStatus) + "\",\"active\":" + (protocol._missionNavigator != null ? "true" : "false") + ",\"targetAgentIndex\":" + protocol._missionNavigationTargetAgentIndex.ToString(CultureInfo.InvariantCulture) + ",\"targetPosition\":{\"x\":" + protocol._missionNavigationTargetPosition.X.ToString("R", CultureInfo.InvariantCulture) + ",\"y\":" + protocol._missionNavigationTargetPosition.Y.ToString("R", CultureInfo.InvariantCulture) + ",\"z\":" + protocol._missionNavigationTargetPosition.Z.ToString("R", CultureInfo.InvariantCulture) + "},\"distance\":" + distance.ToString("R", CultureInfo.InvariantCulture) + ",\"secondsRemaining\":" + remaining.ToString("R", CultureInfo.InvariantCulture) + "}";
+    }
+
+    private static string BuildHarnessMissionDiagnosticsJson(Mission mission)
+    {
+        var mainAgent = mission?.MainAgent;
+        var currentCampaignLocation = CampaignMission.Current?.Location;
+        var missionAgents = mission == null ? Enumerable.Empty<Agent>() : mission.Agents.AsEnumerable();
+        var notables = missionAgents
+            .Where(agent => agent != null && agent.IsActive() && agent.IsHuman && agent != mainAgent)
+            .Select(agent => new { Agent = agent, Character = agent.Character as CharacterObject, Hero = (agent.Character as CharacterObject)?.HeroObject })
+            .Where(item => item.Hero != null && item.Hero.IsNotable)
+            .Select(item => new
+            {
+                item.Agent,
+                item.Character,
+                item.Hero,
+                Distance = mainAgent == null ? (double?)null : Math.Sqrt(
+                    Math.Pow(mainAgent.Position.X - item.Agent.Position.X, 2) +
+                    Math.Pow(mainAgent.Position.Y - item.Agent.Position.Y, 2) +
+                    Math.Pow(mainAgent.Position.Z - item.Agent.Position.Z, 2))
+            })
+            .OrderBy(item => item.Distance ?? double.MaxValue)
+            .ToArray();
+        var locationIssueOwners = currentCampaignLocation == null
+            ? Array.Empty<Hero>()
+            : currentCampaignLocation.GetCharacterList()
+                .Where(locationCharacter => locationCharacter?.Character?.HeroObject?.Issue != null)
+                .Select(locationCharacter => locationCharacter.Character.HeroObject)
+                .Distinct()
+                .OrderBy(hero => hero.StringId, StringComparer.Ordinal)
+                .ToArray();
+
+        var json = new StringBuilder(1024);
+        json.Append('{');
+        json.Append("\"sceneName\":\"").Append(Escape(mission.SceneName)).Append('"');
+        json.Append(",\"campaignLocationId\":\"").Append(Escape(currentCampaignLocation?.StringId)).Append('"');
+        json.Append(",\"activeAgentCount\":").Append(mission.Agents.Count(agent => agent != null && agent.IsActive()));
+        json.Append(",\"notableAgentCount\":").Append(notables.Length);
+        json.Append(",\"issueNotableCount\":").Append(notables.Count(item => item.Hero.Issue != null));
+        json.Append(",\"notableAgents\":[");
+        for (var index = 0; index < notables.Length; index++)
+        {
+            if (index > 0) json.Append(',');
+            var item = notables[index];
+            json.Append('{');
+            json.Append("\"agentIndex\":").Append(item.Agent.Index);
+            json.Append(",\"characterId\":\"").Append(Escape(item.Character?.StringId)).Append('"');
+            json.Append(",\"heroId\":\"").Append(Escape(item.Hero.StringId)).Append('"');
+            json.Append(",\"name\":\"").Append(Escape(item.Hero.Name?.ToString())).Append('"');
+            json.Append(",\"occupation\":\"").Append(Escape(item.Hero.Occupation.ToString())).Append('"');
+            json.Append(",\"hasIssue\":").Append(item.Hero.Issue != null ? "true" : "false");
+            json.Append(",\"issueType\":\"").Append(Escape(item.Hero.Issue?.GetType().Name)).Append('"');
+            json.Append(",\"distance\":").Append(item.Distance.HasValue ? item.Distance.Value.ToString("R", CultureInfo.InvariantCulture) : "null");
+            json.Append(",\"position\":{\"x\":").Append(item.Agent.Position.X.ToString("R", CultureInfo.InvariantCulture));
+            json.Append(",\"y\":").Append(item.Agent.Position.Y.ToString("R", CultureInfo.InvariantCulture));
+            json.Append(",\"z\":").Append(item.Agent.Position.Z.ToString("R", CultureInfo.InvariantCulture)).Append("}}");
+        }
+        json.Append(']');
+        json.Append(",\"locationIssueOwnerCount\":").Append(locationIssueOwners.Length);
+        json.Append(",\"locationIssueOwners\":[");
+        for (var index = 0; index < locationIssueOwners.Length; index++)
+        {
+            if (index > 0) json.Append(',');
+            var hero = locationIssueOwners[index];
+            json.Append('{');
+            json.Append("\"heroId\":\"").Append(Escape(hero.StringId)).Append('"');
+            json.Append(",\"name\":\"").Append(Escape(hero.Name?.ToString())).Append('"');
+            json.Append(",\"isNotable\":").Append(hero.IsNotable ? "true" : "false");
+            json.Append(",\"issueType\":\"").Append(Escape(hero.Issue?.GetType().Name)).Append('"');
+            json.Append('}');
+        }
+        json.Append("]}");
+        return json.ToString();
+    }
+
+    private void UpdateMissionInputLease()
+    {
+        if (_missionInputAgent == null) return;
+        var mission = Mission.Current;
+        var activeState = Game.Current?.GameStateManager?.ActiveState as MissionState;
+        if (EngineTime.ApplicationTime >= _missionInputExpiresAt || mission == null || mission.MissionEnded || activeState == null || mission.MainAgent != _missionInputAgent || !_missionInputAgent.IsActive())
+        {
+            ClearMissionInputLease();
+            return;
+        }
+        _missionInputAgent.MovementInputVector = _missionInputVector;
+    }
+
+
+    internal static void ApplyMissionInputAfterNativeControl(Agent agent)
+    {
+        var protocol = _activeInstance;
+        if (protocol == null || agent == null || protocol._missionInputAgent != agent || EngineTime.ApplicationTime >= protocol._missionInputExpiresAt)
+            return;
+
+        var mission = Mission.Current;
+        if (mission == null || mission.MissionEnded || mission.MainAgent != agent || !agent.IsActive()) return;
+        if (!AgentMissionInputPatch.IsSupportedLocationMission(mission))
+            return;
+        agent.MovementInputVector = protocol._missionInputVector;
+    }
+
+    private void ClearMissionInputLease()
+    {
+        if (_missionInputAgent != null && _missionInputAgent.IsActive())
+            _missionInputAgent.MovementInputVector = TaleWorlds.Library.Vec2.Zero;
+        _missionInputAgent = null;
+        _missionInputVector = TaleWorlds.Library.Vec2.Zero;
+        _missionInputExpiresAt = 0f;
     }
 
     private void CompleteRestIfReady(ChronicleCampaignBehavior behavior)

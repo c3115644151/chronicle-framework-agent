@@ -54,9 +54,36 @@ Chronicle当前Observer没有Notification queue/已读标记/待处理调查/场
 
 玩家通过场景内移动、交谈、用物、战斗、控制编队等真实输入行动；实际Mission入口和不同离场结算分别见D/J/G/F。一般单机Mission内Campaign地图时钟停止，Mission的本地dt运行；地图Wait/菜单不能统称为Scene Mission。直接创建/结束Mission会绕过玩家进入点、场景启动行为和Battle结果提交链。
 
-Chronicle已能判定若干GameState/Mission上下文并测试特定Battle Mission retreat；尚无通用场景寻路/角色接近/物件互动/3D操作桥。证据：Campaign `CampaignMission/PlayerEncounter/CampaignMissionFactory`、MountAndBlade `Mission/MissionState`与Mission behaviors、D/F/G/J具体入口。未知所有Scene menu到Mission的转场、同Mission恢复/存读档和战争地图时钟交接矩阵。
+Chronicle已判定若干GameState/Mission上下文并验证过特定Battle Mission retreat；目前另有仅供Startup Town/Tavern Location Mission使用的短输入和同场景原生导航，不是通用3D操作能力。W2-D早期酒馆入口运行`TestResults/20260926-225650/TavernMission.log`通过：不使用桌面键鼠，从Campaign Map自然抵达萨哥特，选择Town菜单`town_backstreet → town_tavern`，等待Mission.MainAgent激活；Campaign时钟为Stop、附近样本是非Notable Wanderer。引擎截图确认进入酒馆，但未验证Notable/Focus/Action/Conversation。
+
+这些运行只证实对应菜单→Location Mission实例化链和附近Agent映射；不证实任务对话。Town菜单的实际交谈入口需按当前Issue位置数据选择；地图门菜单不等价于任务主人已出现。未知完整Scene转场/同Mission恢复矩阵，以及动态Notable进入场景的条件。
+
+本机Native `TaleWorlds.MountAndBlade.View.dll`反编译`MissionMainAgentController.ControlTick`显示原版每帧读取MovementAxis并写入MainAgent的`MovementInputVector`；`TaleWorlds.MountAndBlade.dll`确认该属性有公开setter。早期直接设置向量的测试虽然回执成功，位置却未变（`20260927-232619`）；运行与反编译共同定位到原版ControlTick会覆盖一次性写入。当前受限Harmony补丁仅在有效短lease期间、且原版ControlTick执行后覆写该值；随后Town/Tavern测试已验证实体移动和到期清零。输入仍需有界并逐步重观察，不能靠持续输入让主角失控。原版`MissionMainAgentInteractionComponent.FocusTick/FocusStateCheckTick`负责更新视线命中和Action门禁；直接调用`Agent.OnUse`会跳过前面的视线/焦点测试，不能当作玩家交谈成功。
+
+W2-D后续运行在`MissionMainAgentController.ControlTick`加了受限Harmony postfix：仅当存在同一个MainAgent的短时输入lease时，原生输入控制器先执行，随后在该tick尾部写入有界`MovementInputVector`；lease最多0.5秒，到期由Protocol清零；场景守卫限`MissionMode.StartUp`且SceneName包含`tavern`或`_town_`，不会把它作为战斗输入扩展。`TestResults/20260926-234252/Temp/TavernMissionResult.json`实际复核：deterministic-only测试Provider依据Mission观察到的MainAgent LookDirection和附近Hero位置，计算一小步`missionInput`，持续0.35秒后MainAgent移动0.897游戏单位，目标距离3.039降至2.142；向量自动清零、后续位置漂移为0、Campaign Day与Stop时间不变，fixture/hash与进程清理通过。该样本只证实一位附近Wanderer的单步接近，不是Notable/Issue目标，也不是模型自主完成路线。不得直接调用`Agent.Position`瞬移，也不能拿`missionInput`回执代替移动状态验证。
+
+Observer schema 19提供有限`nearbySceneAgents`：只枚举当前Mission中Human Agents在MainAgent周围12场景单位内的阵营/位置/职业/Notable标记及本次Mission临时`AgentIndex`，不枚举整场景Agents。这个球形邻域**不是**屏幕视线/无遮挡判断；与之分开，`mission.nativeFocus`直接读取`MissionMainAgentController.InteractionComponent.CurrentFocusedObject`，是该原生视线射线当前命中的对象；若焦点为Agent，`isInteractable`按FocusTick相同的`Agent.CanInteractWithAgent`判定返回原生可交谈状态；`mission.navigation`只回报当前AgentNavigator路线状态/临时目标。城镇中心的初始快照即便Mission有142个活动Agent，主角门外的本地12单位名单仍为空；因此必须让AI移动后重观察，不能在初始状态泄露整镇人物列表，也不能把球形列表直接称为“玩家正在看见”。 Campaign菜单`availableMenuOptions`提供原版`GameMenuOption.OptionQuestData`的数值和枚举名，反映菜单条件执行后的Issue/Quest标记，便于识别当前入口是否有关联的任务状态。 Harness工具另有`harnessMissionDiagnostics`，仅在一次性visual-capture临时运行中查询当前Location Mission全体已激活Notable/Issue标记/距离，用于诊断场景生成；这个全场景列表只写Harness收据，不进入Agent状态快照或DecisionLoop白名单。
+
+导航尝试核实了MainAgent控制模式边界。`Sandbox.AgentNavigator.SetTargetFrame`在1.4.8会调用`Agent.SetScriptedPositionAndDirection`并在`Tick`中检测位置/朝向到达。首次对仍处于Player Controller的MainAgent设置脚本目标，状态为`GoToTarget`但8秒位置未变化（`TestResults/20260927-024449/Temp/TownCenterMissionResult.json`）。当前`missionNavigateToAgent`只支持Startup Town/Tavern Location Mission：目标必须是最近12单位观察里的有效非敌Agent且原版NavMesh报告可达；短时把MainAgent交给AI Controller，最多8秒，抵达/超时/取消/场景变化时清目标并尝试恢复原Player Controller。Tavern运行`20260927-030716`对Townsman目标实走0.837单位（2.224→1.435），控制器恢复、Campaign Stop、存档未变。Town Center运行`20260927-031458`对当前局部Townsfolk实走3.507单位，导航返回`arrived`并恢复Player Controller；Campaign Stop、fixture未变、进程正常退出。后一条证明本Town Center区域的局部原生寻路有效，不证明任意障碍/全镇路线或Notable交谈。
+
+Town Notable W2-D运行`TestResults/20260927-014511/Temp/TownCenterMissionResult.json`与菜单源码确认入口：Town `town_streets`→`center`会按center Location附加Issue/Quest位置数据并进入`vlandia_town_e` MissionState。新档样本在镇门外生成，初始局部12单位内没有Human Agent；Campaign停时，确定性Provider做32次≤0.35秒的本地轴输入，主角累计真实移动18.989单位、输入会清零且存档不变。此测试只算探索/感知基线，不算任务人选已发现。不同Town中心样本先后观察到garrison Soldiers和Townsfolk，仍未找到Local Notable/Issue owner。相机bearing公共setter的一次运行将bearing从2.221改到2.748，但FocusedObject仍为空；修改bearing不是命中Focus的等价证明。之后`TestResults/20260927-031458/Temp/TownCenterMissionResult.json`用导航器对当次局部Townsfolk实走3.507单位并到达1.435范围内，证明该Town Center区域局部NavMesh导航已能驱动主角；它不证明穿越任意城门/障碍，也未找到Notable或对话。当前剩余门槛是获得真实Notable样本后验证Focus和原生对话；不要把本地移动、地图Issue提示或全场景对象读取当作完成。
+
+Observer schema 19把当前菜单项的原版`GameMenuOption.OptionQuestData`作为`questMarkerFlags`与`questMarkerNames`输出。菜单VM `GameMenuItemVM.InitializeWith`会把同一Flags转换成玩家菜单的`QuestMarkerVM`，所以这是原版任务标记数据，不是Agent自己推算的可能性。运行`TestResults/20260927-033506/Temp/TownCenterMissionResult.json`实际读到Sargot `town_streets`=`AvailableIssue`（数值1）；这证明该保存样本的镇中心存在可用Issue标记，但不表示已看到Issue主人。
+
+进一步路线测试`TestResults/20260927-034201/Temp/TownCenterMissionResult.json`在44次≤0.35秒输入后从门外墙角侧移到城门口，局部12单位观察到一名非Notable Townsfolk。`missionNavigateToAgent`按下令瞬间的NPC位置设NavMesh目标，结束靠近旧坐标约1.41单位后，NPC已移动到门另一侧、当前距离约6.39；截图的原生Focus为`CastleGate`而非NPC。Campaign时钟保持Stop、fixture hash不变、控制器恢复、进程清理通过。因此原生寻路确实将主角移到城门口，但单次“到达目标快照”不等于追上移动NPC；接下来必须重观察更新的本地目标并继续路径，且穿门、Notable/Focus/Conversation仍未知。
+
+`TestResults/20260927-035523/Temp/TownCenterMissionResult.json`在同一测试路线44步后进入城门道，但附近12单位内无NPC，Campaign时钟保持Stop；`TestResults/20260927-040042/Temp/TownCenterMissionResult.json`把路线延长至52个短步后，于局部观察到瓦兰迪亚新兵（非Notable），原生导航实走3.724单位、终点距目标1.42。配套原始状态`TestResults/20260927-040042/Temp/TownCenterMissionNativeFocusState.json`显示原生CurrentFocusedObject就是该Agent（AgentIndex 36），游戏截图显示原版`F 交谈`提示；未按F、未启动Conversation或Quest。所有运行均恢复Player Controller、Campaign保持Stop、fixture hash不变且进程正常关闭。这验证本地非Notable角色的物理接近+原生Focus提示；Notable和任务对话仍未实现。
+
+
+W2-D的优先对话入口已从“进center后靠移动找人”改为原版Settlement Characters overlay的目标式`Conversation`。`SettlementMenuOverlayVM.UpdateCharacterList`从本次菜单的`GameMenuManager.MenuLocations`中筛选`HeroAgentLocationModel.WillBeListedInOverlay`角色；选中Hero后的UI上下文动作检查`SettlementOverlayTalkPermissionEvent`，随后按Hero实际Location调用`OnPlayerStartTalkFromMenu`和`LocationEncounter.CreateAndOpenMissionController(location,null,hero.CharacterObject)`。TownEncounter/SandBox会把目标传入`MissionConversationLogic`，目标Agent出现后自动开始该Hero Conversation。用户口述的“造访”按钮与这个目标式效果相符；已反编译正式上下文项显示名是`Conversation`，最终视觉按钮文本仍待运行核对。
+
+Observer schema 19只在当前GameMenu实际带Characters/Characters+Parties overlay时返回`settlementOverlayCharacters`，成员筛选直接复用本体`MenuLocations + WillBeListedInOverlay`，questMarkers调用本体`CampaignUIHelper.GetQuestStateOfHero`。CLI动作`talkToSettlementHero(HeroId)`仅接受该当前overlay名单中的Hero，重验Settlement归属和原生TalkPermission；UI无权限回调时沿用原VM默认可用语义。操作通过原生OnPlayerStartTalkFromMenu/targeted LocationMission链，不直改Issue/Quest。Harness全场景Notable诊断是QA专用，绝不进入普通Agent观察或Action allowlist。
+
+运行`TestResults/20260927-052705/Temp/SettlementOverlayConversationResult.json`：Sargot overlay返回五名角色中的唯一Issue Notable“大拳头”维拉特鲁德及`AvailableIssue`“特殊武器订单”；`talkPermissionWasReported=false`，和原VM“无回调时默认enabled”逻辑一致。目标式Talk调用后进入`center` Mission；Conversation partner ID/name与overlay目标一致，自动显示原版问候句和三项可点击回复。Campaign时钟保持Stop，Quest列表仍为0，源档哈希不变且进程正常关闭；`SettlementOverlayConversation-frame.bmp`直接显示目标NPC和原版对话界面。此为真实Notable Conversation进入的通过证据，不证明Quest已接受或解决；Issue链下一步由J02/W2-E处理。
 
 ## L08 Localization：字符串与玩家文本呈现
+
+
 
 UI/对话/日志常通过稳定String ID、语言表、`TextObject`变量和复数/条件格式化生成文本，而不是将最终中文/英文硬编码成世界对象状态。Module通过Languages/字符串XML提供目标语言文本；运行时TextObject将当前上下文变量（Hero、金币、数量、目标等）注入同一Localizable string。缺失ID、format变量或语言文件/模块优先级冲突，可能导致占位文本/回退文案而非状态行动失败。
 

@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'BattleFixture', 'PostBattle', 'Observation', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'EscortVisibility', 'VisualCapture', 'All')]
+    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'BattleFixture', 'PostBattle', 'Observation', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'VisualCapture', 'All')]
     [string]$Phase = 'All',
     [int]$SmokeTimeoutSeconds = 45,
     [int]$SmokeStabilitySeconds = 8
@@ -11,7 +11,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '4.96'
+$HarnessContractVersion = '5.05'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -44,6 +44,9 @@ $pursuitScript = Join-Path $harnessRoot 'Test-AgentPursuit.ps1'
 $agentLoopScript = Join-Path $harnessRoot 'Test-AgentLoop.ps1'
 $battleFixtureScript = Join-Path $harnessRoot 'Test-AgentBattleFixture.ps1'
 $visualCaptureScript = Join-Path $harnessRoot 'Test-AgentVisualCapture.ps1'
+$tavernMissionScript = Join-Path $harnessRoot 'Test-AgentTavernMission.ps1'
+$townCenterMissionScript = Join-Path $harnessRoot 'Test-AgentTownCenterMission.ps1'
+$settlementOverlayConversationScript = Join-Path $harnessRoot 'Test-AgentSettlementOverlayConversation.ps1'
 $docsScript = Join-Path $harnessRoot 'Check-Docs.ps1'
 $contextPackScript = Join-Path $harnessRoot 'Get-ContextPack.ps1'
 
@@ -149,9 +152,13 @@ $requestedStages = switch ($Phase) {
     'Rest' { @('Preflight', 'Build', 'Rest') }
     'Pursuit' { @('Preflight', 'Build', 'Pursuit') }
     'Conversation' { @('Preflight', 'Build', 'Conversation') }
+    'QuestAcceptance' { @('Preflight', 'Build', 'QuestAcceptance') }
     'EscortVisibility' { @('Preflight', 'Build', 'EscortVisibility') }
+    'TavernMission' { @('Preflight', 'Build', 'TavernMission') }
+    'TownCenterMission' { @('Preflight', 'Build', 'TownCenterMission') }
+    'SettlementOverlayConversation' { @('Preflight', 'Build', 'SettlementOverlayConversation') }
     'VisualCapture' { @('Preflight', 'Build', 'VisualCapture') }
-    'All' { @('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'Protocol', 'AgentLoop', 'Observation', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'BattleFixture', 'PostBattle') }
+    'All' { @('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'Protocol', 'AgentLoop', 'Observation', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'QuestAcceptance', 'BattleFixture', 'PostBattle', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation') }
 }
 
 foreach ($stage in $requestedStages) {
@@ -395,10 +402,34 @@ foreach ($stage in $requestedStages) {
                 if ($LASTEXITCODE -ne 0) { throw "Agent conversation lifecycle test failed with exit code $LASTEXITCODE." }
             }
         }
+        'QuestAcceptance' {
+            Invoke-Stage -Name 'QuestAcceptance' -Action {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $pursuitScript -ProbeQuestAcceptance
+                if ($LASTEXITCODE -ne 0) { throw "Agent Quest acceptance test failed with exit code $LASTEXITCODE." }
+            }
+        }
         'EscortVisibility' {
             Invoke-Stage -Name 'EscortVisibility' -Action {
                 & powershell -NoProfile -ExecutionPolicy Bypass -File $pursuitScript -ProbeEscortVisibilityLoss -VisibilityProbeSeconds 45
                 if ($LASTEXITCODE -ne 0) { throw "Escort visibility probe failed with exit code $LASTEXITCODE." }
+            }
+        }
+        'TavernMission' {
+            Invoke-Stage -Name 'TavernMission' -Action {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $tavernMissionScript
+                if ($LASTEXITCODE -ne 0) { throw "Native Tavern Mission entry test failed with exit code $LASTEXITCODE." }
+            }
+        }
+        'TownCenterMission' {
+            Invoke-Stage -Name 'TownCenterMission' -Action {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $townCenterMissionScript
+                if ($LASTEXITCODE -ne 0) { throw "Native Town Center Mission test failed with exit code $LASTEXITCODE." }
+            }
+        }
+        'SettlementOverlayConversation' {
+            Invoke-Stage -Name 'SettlementOverlayConversation' -Action {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $settlementOverlayConversationScript
+                if ($LASTEXITCODE -ne 0) { throw "Native Settlement overlay Conversation test failed with exit code $LASTEXITCODE." }
             }
         }
         'AgentLoop' {
