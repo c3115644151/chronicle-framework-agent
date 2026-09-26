@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '4.87'
+$contractVersion = '4.88'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -18,7 +18,11 @@ $routedPaths = @(
     @($contextState.archives | ForEach-Object { [string]$_ })
 ) | ForEach-Object { ([string]$_).Replace('/', '\') } | Sort-Object -Unique
 
-$actualFiles = @(Get-ChildItem -Path $harnessRoot -Recurse -File -Filter '*.md' | Where-Object { $_.FullName -notmatch '[\\/](TestResults|obj|bin)[\\/]' })
+# AGENTS.md is an injected work-rules file, not a content document routed through ContextState.
+$actualFiles = @(Get-ChildItem -Path $harnessRoot -Recurse -File -Filter '*.md' | Where-Object {
+    $_.FullName -notmatch '[\\/](TestResults|obj|bin)[\\/]' -and
+    $_.FullName -ne (Join-Path $harnessRoot 'AGENTS.md')
+})
 $actualRelativePaths = @($actualFiles | ForEach-Object { $_.FullName.Substring($harnessRoot.Length + 1).Replace('/', '\') })
 $unexpected = @($actualRelativePaths | Where-Object { $_ -notin $routedPaths })
 $missing = @($routedPaths | Where-Object { $_ -notin $actualRelativePaths })
