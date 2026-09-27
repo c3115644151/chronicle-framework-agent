@@ -7,6 +7,7 @@ using TaleWorlds.CampaignSystem.GameMenus;
 using TaleWorlds.CampaignSystem.GameState;
 using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.CampaignSystem.Party;
+using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.CampaignSystem.Settlements.Locations;
 using TaleWorlds.CampaignSystem.ViewModelCollection;
@@ -316,6 +317,68 @@ internal static class ChronicleAgentObserver
         }
         json.Append("]}");
         return json.ToString();
+    }
+
+    internal static string BuildMapPartyCompositionJson(string partyId)
+    {
+        var mainParty = MobileParty.MainParty;
+        var target = MobileParty.All.FirstOrDefault(item => item != null && string.Equals(item.StringId, partyId, StringComparison.Ordinal));
+        if (Campaign.Current == null || mainParty == null || target == null || target == mainParty || !target.IsActive || target.IsGarrison || target.IsMilitia || target.AttachedTo != null || !target.Party.IsVisible)
+            throw new InvalidOperationException("party is not a current visible independent mapPartyTargets candidate");
+
+        var isArmyLeader = target.Army != null && target.Army.LeaderParty == target;
+        if (isArmyLeader)
+            return BuildUnavailablePartyCompositionJson(target, isArmyLeader, "armyTooltipRequiresDedicatedNativeVerification");
+        if (!target.IsInspected || target.IsInfoHidden)
+            return BuildUnavailablePartyCompositionJson(target, isArmyLeader, target.IsInfoHidden ? "nativeTooltipSuppressesDetails" : "notInspected");
+
+        var members = target.MemberRoster;
+        var prisoners = target.PrisonRoster;
+        var json = new StringBuilder(4096);
+        json.Append('{').Append("\"schemaVersion\":1,\"available\":true");
+        Property(json, "partyId", target.StringId, true);
+        Property(json, "name", PartyNameplateName(target), true);
+        Property(json, "type", PartyType(target), true);
+        json.Append(",\"isArmyLeader\":").Append(Bool(isArmyLeader));
+        json.Append(",\"members\":");
+        AppendPartyCompositionRoster(json, members);
+        json.Append(",\"prisoners\":");
+        AppendPartyCompositionRoster(json, prisoners);
+        json.Append('}');
+        return json.ToString();
+    }
+
+    private static string BuildUnavailablePartyCompositionJson(MobileParty target, bool isArmyLeader, string reason)
+    {
+        var json = new StringBuilder(256);
+        json.Append('{').Append("\"schemaVersion\":1,\"available\":false");
+        Property(json, "partyId", target.StringId, true);
+        json.Append(",\"isArmyLeader\":").Append(Bool(isArmyLeader));
+        Property(json, "reason", reason, true);
+        json.Append('}');
+        return json.ToString();
+    }
+
+    private static void AppendPartyCompositionRoster(StringBuilder json, TroopRoster roster)
+    {
+        json.Append('[');
+        var first = true;
+        for (var index = 0; index < roster.Count; index++)
+        {
+            var element = roster.GetElementCopyAtIndex(index);
+            if (element.Character == null || element.Number <= 0) continue;
+            if (!first) json.Append(',');
+            first = false;
+            json.Append('{');
+            Property(json, "characterId", element.Character.StringId);
+            Property(json, "name", element.Character.Name?.ToString(), true);
+            json.Append(",\"totalCount\":").Append(element.Number);
+            json.Append(",\"healthyCount\":").Append(Math.Max(element.Number - element.WoundedNumber, 0));
+            json.Append(",\"woundedCount\":").Append(element.WoundedNumber);
+            json.Append(",\"isHero\":").Append(Bool(element.Character.IsHero));
+            json.Append('}');
+        }
+        json.Append(']');
     }
 
     private static string PartyNameplateName(MobileParty party)

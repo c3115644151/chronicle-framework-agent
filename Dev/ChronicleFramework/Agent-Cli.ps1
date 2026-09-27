@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet('start','load','state','mapSettlementTargets','mapPartyTargets','characterDevelopment','spendSkillFocus','questDetails','partyRoster','captureFrame','harnessMissionDiagnostics','harnessMapDiagnostics','harnessPlayerSkillsDiagnostics','harnessCharacterDevelopmentDiagnostics','harnessQuestDetailsDiagnostics','harnessQuestDeadlinePrivacyDiagnostics','harnessPartyRosterDiagnostics','harnessMapPartyDiagnostics','talkToSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','move','moveToPoint','missionInput','missionNavigateToAgent','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','recruit','foodOptions','tradeOptions','trade','provision','save','stop')]
+    [ValidateSet('start','load','state','mapSettlementTargets','mapPartyTargets','mapPartyComposition','characterDevelopment','spendSkillFocus','questDetails','partyRoster','captureFrame','harnessMissionDiagnostics','harnessMapDiagnostics','harnessPlayerSkillsDiagnostics','harnessCharacterDevelopmentDiagnostics','harnessQuestDetailsDiagnostics','harnessQuestDeadlinePrivacyDiagnostics','harnessPartyRosterDiagnostics','harnessMapPartyDiagnostics','harnessMapPartyCompositionDiagnostics','talkToSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','move','moveToPoint','missionInput','missionNavigateToAgent','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','recruit','foodOptions','tradeOptions','trade','provision','save','stop')]
     [string]$Action,
     [string]$SaveName,
     [string]$SettlementId,
@@ -205,6 +205,10 @@ switch ($Action) {
     'state' { $result = Invoke-ProtocolCommand 'state' }
     'mapSettlementTargets' { $result = Invoke-ProtocolCommand 'mapSettlementTargets' }
     'mapPartyTargets' { $result = Invoke-ProtocolCommand 'mapPartyTargets' }
+    'mapPartyComposition' {
+        if (-not $PartyId) { throw '-PartyId is required and must be selected from a current mapPartyTargets observation.' }
+        $result = Invoke-ProtocolCommand 'mapPartyComposition' @{ partyId = $PartyId }
+    }
     'characterDevelopment' { $result = Invoke-ProtocolCommand 'characterDevelopment' }
     'questDetails' {
         if (-not $QuestId) { throw '-QuestId is required and must come from the current state.quests observation.' }
@@ -226,6 +230,10 @@ switch ($Action) {
     'harnessQuestDeadlinePrivacyDiagnostics' { $result = Invoke-ProtocolCommand 'harnessQuestDeadlinePrivacyDiagnostics' }
     'harnessPartyRosterDiagnostics' { $result = Invoke-ProtocolCommand 'harnessPartyRosterDiagnostics' }
     'harnessMapPartyDiagnostics' { $result = Invoke-ProtocolCommand 'harnessMapPartyDiagnostics' }
+    'harnessMapPartyCompositionDiagnostics' {
+        if (-not $PartyId) { throw '-PartyId is required for Harness-only map party composition diagnostics.' }
+        $result = Invoke-ProtocolCommand 'harnessMapPartyCompositionDiagnostics' @{ partyId = $PartyId }
+    }
     'talkToSettlementHero' {
         if (-not $HeroId) { throw '-HeroId is required and must come from settlementOverlayCharacters in the current observation.' }
         $result = Invoke-ProtocolCommand 'talkToSettlementHero' @{ heroId = $HeroId }

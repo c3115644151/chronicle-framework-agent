@@ -143,6 +143,14 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("mapPartyTargets requires the Campaign Map state");
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentObserver.BuildMapPartyTargetsJson());
                     break;
+                case "mapPartyComposition":
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("mapPartyComposition requires the Campaign Map state");
+                    var compositionPartyId = ReadString(command, "partyId");
+                    if (string.IsNullOrWhiteSpace(compositionPartyId))
+                        throw new InvalidOperationException("mapPartyComposition requires a partyId from the current visible map party list");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentObserver.BuildMapPartyCompositionJson(compositionPartyId));
+                    break;
                 case "characterDevelopment":
                     if (Game.Current?.GameStateManager?.ActiveState is not MapState)
                         throw new InvalidOperationException("characterDevelopment requires the Campaign Map state");
@@ -232,6 +240,18 @@ internal sealed class ChronicleAgentProtocol
                     if (Game.Current?.GameStateManager?.ActiveState is not MapState)
                         throw new InvalidOperationException("harnessMapPartyDiagnostics requires the Campaign Map state");
                     WriteResponse(commandId, action, "completed", behavior, null, BuildHarnessMapPartyDiagnosticsJson());
+                    break;
+                case "harnessMapPartyCompositionDiagnostics":
+                    var mapPartyCompositionDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var mapPartyCompositionDiagnosticsRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(mapPartyCompositionDiagnosticsMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(mapPartyCompositionDiagnosticsRoot) || !Directory.Exists(mapPartyCompositionDiagnosticsRoot))
+                        throw new InvalidOperationException("harnessMapPartyCompositionDiagnostics is restricted to a visual Harness run with a Harness temp directory");
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("harnessMapPartyCompositionDiagnostics requires the Campaign Map state");
+                    var diagnosticPartyId = ReadString(command, "partyId");
+                    if (string.IsNullOrWhiteSpace(diagnosticPartyId))
+                        throw new InvalidOperationException("harnessMapPartyCompositionDiagnostics requires a partyId");
+                    WriteResponse(commandId, action, "completed", behavior, null, BuildHarnessMapPartyCompositionDiagnosticsJson(diagnosticPartyId));
                     break;
                 case "talkToSettlementHero":
                     var overlayMenuContext = TaleWorlds.CampaignSystem.Campaign.Current?.CurrentMenuContext;
@@ -1136,6 +1156,7 @@ internal sealed class ChronicleAgentProtocol
             var distance = Math.Sqrt(distanceX * distanceX + distanceY * distanceY);
             json.Append('{');
             json.Append("\"id\":\"").Append(Escape(party.StringId)).Append('"');
+            json.Append(",\"mapFactionId\":\"").Append(Escape(party.MapFaction?.StringId)).Append('"');
             var partyName = party.Army != null && party.Army.DoesLeaderPartyAndAttachedPartiesContain(party) ? party.ArmyName?.ToString() : party.LeaderHero?.Name?.ToString() ?? party.Name?.ToString();
             json.Append(",\"nameplateName\":\"").Append(Escape(partyName)).Append('"');
             json.Append(",\"type\":\"").Append(Escape(ChronicleAgentObserver.GetPartyTypeForObservation(party))).Append('"');
@@ -1156,6 +1177,98 @@ internal sealed class ChronicleAgentProtocol
         }
         json.Append("]}");
         return json.ToString();
+    }
+
+    private static string BuildHarnessMapPartyCompositionDiagnosticsJson(string partyId)
+    {
+        var mainParty = MobileParty.MainParty;
+        var party = MobileParty.All.FirstOrDefault(item => item != null && string.Equals(item.StringId, partyId, StringComparison.Ordinal));
+        if (mainParty == null || party == null || party == mainParty || !party.IsActive || party.IsGarrison || party.IsMilitia || party.AttachedTo != null || !party.Party.IsVisible)
+            throw new InvalidOperationException("Harness Party composition diagnostic requires a current visible independent map party");
+
+        var isArmyLeader = party.Army != null && party.Army.LeaderParty == party;
+        var rosterParties = isArmyLeader ? new[] { party }.Concat(party.AttachedParties).ToArray() : new[] { party };
+        var partyRows = new System.Collections.Generic.Dictionary<string, (TaleWorlds.CampaignSystem.CharacterObject Character, int Total, int Wounded)>(StringComparer.Ordinal);
+        var prisonerRows = new System.Collections.Generic.Dictionary<string, (TaleWorlds.CampaignSystem.CharacterObject Character, int Total, int Wounded)>(StringComparer.Ordinal);
+        foreach (var rosterParty in rosterParties)
+        {
+            AddDiagnosticRosterRows(partyRows, rosterParty.MemberRoster);
+            AddDiagnosticRosterRows(prisonerRows, rosterParty.PrisonRoster);
+        }
+
+        var tooltipType = isArmyLeader ? typeof(Army) : typeof(MobileParty);
+        var tooltipArguments = new object[] { isArmyLeader ? (object)party.Army : party, false, true };
+        var tooltipVmType = AppDomain.CurrentDomain.GetAssemblies()
+            .Select(assembly => assembly.GetType("TaleWorlds.Core.ViewModelCollection.Information.PropertyBasedTooltipVM", throwOnError: false))
+            .FirstOrDefault(type => type != null);
+        if (tooltipVmType == null) throw new InvalidOperationException("Native PropertyBasedTooltipVM is unavailable for expanded tooltip diagnostics");
+        var nativeTooltip = Activator.CreateInstance(tooltipVmType, new object[] { tooltipType, tooltipArguments });
+        tooltipVmType.GetProperty("IsExtended")?.SetValue(nativeTooltip, true);
+        var properties = tooltipVmType.GetProperty("TooltipPropertyList")?.GetValue(nativeTooltip) as System.Collections.IEnumerable;
+        if (properties == null) throw new InvalidOperationException("Native tooltip property list is unavailable for expanded tooltip diagnostics");
+
+        var json = new StringBuilder(4096);
+        json.Append('{');
+        json.Append("\"partyId\":\"").Append(Escape(party.StringId)).Append('"');
+        json.Append(",\"mapFactionId\":\"").Append(Escape(party.MapFaction?.StringId)).Append('"');
+        json.Append(",\"isInspected\":").Append(party.IsInspected ? "true" : "false");
+        json.Append(",\"isInfoHidden\":").Append(party.IsInfoHidden ? "true" : "false");
+        json.Append(",\"isArmyLeader\":").Append(isArmyLeader ? "true" : "false");
+        json.Append(",\"memberRoster\":");
+        AppendHarnessPartyRosterRows(json, partyRows);
+        json.Append(",\"prisonRoster\":");
+        AppendHarnessPartyRosterRows(json, prisonerRows);
+        json.Append(",\"nativeTooltipProperties\":[");
+        var propertyIndex = 0;
+        foreach (var property in properties)
+        {
+            if (propertyIndex++ > 0) json.Append(',');
+            json.Append('{');
+            var propertyType = property.GetType();
+            json.Append("\"definition\":\"").Append(Escape(propertyType.GetProperty("DefinitionLabel")?.GetValue(property)?.ToString())).Append('"');
+            json.Append(",\"value\":\"").Append(Escape(propertyType.GetProperty("ValueLabel")?.GetValue(property)?.ToString())).Append('"');
+            json.Append('}');
+        }
+        json.Append("]}");
+        return json.ToString();
+    }
+
+    private static void AddDiagnosticRosterRows(
+        System.Collections.Generic.Dictionary<string, (TaleWorlds.CampaignSystem.CharacterObject Character, int Total, int Wounded)> rows,
+        TaleWorlds.CampaignSystem.Roster.TroopRoster roster)
+    {
+        for (var index = 0; index < roster.Count; index++)
+        {
+            var element = roster.GetElementCopyAtIndex(index);
+            if (element.Character == null || element.Number <= 0) continue;
+            var id = element.Character.StringId;
+            if (rows.TryGetValue(id, out var current))
+                rows[id] = (current.Character, current.Total + element.Number, current.Wounded + element.WoundedNumber);
+            else
+                rows[id] = (element.Character, element.Number, element.WoundedNumber);
+        }
+    }
+
+    private static void AppendHarnessPartyRosterRows(
+        StringBuilder json,
+        System.Collections.Generic.Dictionary<string, (TaleWorlds.CampaignSystem.CharacterObject Character, int Total, int Wounded)> rows)
+    {
+        json.Append('[');
+        var first = true;
+        foreach (var row in rows.OrderBy(item => item.Key, StringComparer.Ordinal))
+        {
+            if (!first) json.Append(',');
+            first = false;
+            json.Append('{');
+            json.Append("\"characterId\":\"").Append(Escape(row.Key)).Append('"');
+            json.Append(",\"name\":\"").Append(Escape(row.Value.Character.Name?.ToString())).Append('"');
+            json.Append(",\"totalCount\":").Append(row.Value.Total);
+            json.Append(",\"healthyCount\":").Append(Math.Max(row.Value.Total - row.Value.Wounded, 0));
+            json.Append(",\"woundedCount\":").Append(row.Value.Wounded);
+            json.Append(",\"isHero\":").Append(row.Value.Character.IsHero ? "true" : "false");
+            json.Append('}');
+        }
+        json.Append(']');
     }
 
     private static void AppendHarnessRosterDiagnostics(StringBuilder json, TaleWorlds.CampaignSystem.Roster.TroopRosterElement[] elements)
