@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet('start','load','state','mapSettlementTargets','mapPartyTargets','mapPartyComposition','mapPartyBehavior','partyUpgradeOptions','upgradeTroop','prisonerRecruitmentOptions','recruitPrisoner','characterDevelopment','spendSkillFocus','questDetails','partyRoster','captureFrame','harnessMissionDiagnostics','harnessMapDiagnostics','harnessPlayerSkillsDiagnostics','harnessCharacterDevelopmentDiagnostics','harnessQuestDetailsDiagnostics','harnessQuestDeadlinePrivacyDiagnostics','harnessPartyRosterDiagnostics','harnessMapPartyDiagnostics','harnessMapPartyCompositionDiagnostics','harnessCreateMapArmyFixture','harnessSeedPartyUpgradeFixture','harnessSeedPrisonerRecruitmentFixture','talkToSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','move','moveToPoint','missionInput','missionNavigateToAgent','missionInteract','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','foodOptions','tradeOptions','trade','provision','save','stop')]
+    [ValidateSet('start','load','state','mapSettlementTargets','mapPartyTargets','mapPartyComposition','mapPartyBehavior','partyUpgradeOptions','upgradeTroop','prisonerRecruitmentOptions','recruitPrisoner','characterDevelopment','spendSkillFocus','questDetails','partyRoster','captureFrame','harnessMissionDiagnostics','harnessMapDiagnostics','harnessPlayerSkillsDiagnostics','harnessCharacterDevelopmentDiagnostics','harnessQuestDetailsDiagnostics','harnessQuestDeadlinePrivacyDiagnostics','harnessPartyRosterDiagnostics','harnessMapPartyDiagnostics','harnessMapPartyCompositionDiagnostics','harnessCreateMapArmyFixture','harnessSeedPartyUpgradeFixture','harnessSeedPrisonerRecruitmentFixture','harnessPrepareCompanionHiringFixture','harnessCompanionHiringDiagnostics','talkToSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','move','moveToPoint','missionInput','missionNavigateToAgent','missionInteract','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','foodOptions','tradeOptions','trade','provision','save','stop')]
     [string]$Action,
     [string]$SaveName,
     [string]$SettlementId,
@@ -23,6 +23,7 @@ param(
     [string]$Direction,
     [string]$OutputPath,
     [string]$HeroId,
+    [int]$GoldOffset = 1,
     [string]$SkillId,
     [string]$QuestId,
     [int]$Count = 1,
@@ -260,6 +261,15 @@ switch ($Action) {
     }
     'harnessSeedPartyUpgradeFixture' { $result = Invoke-ProtocolCommand 'harnessSeedPartyUpgradeFixture' }
     'harnessSeedPrisonerRecruitmentFixture' { $result = Invoke-ProtocolCommand 'harnessSeedPrisonerRecruitmentFixture' }
+    'harnessPrepareCompanionHiringFixture' {
+        if (-not $HeroId) { throw '-HeroId is required from the current local Mission observation for this Harness fixture.' }
+        if ($GoldOffset -lt 0 -or $GoldOffset -gt 1) { throw '-GoldOffset must be 0 (at quote price) or 1 (one gold above price) in Harness.' }
+        $result = Invoke-ProtocolCommand 'harnessPrepareCompanionHiringFixture' @{ heroId = $HeroId; goldOffset = $GoldOffset }
+    }
+    'harnessCompanionHiringDiagnostics' {
+        if (-not $HeroId) { throw '-HeroId is required for Harness-only companion hiring diagnostics.' }
+        $result = Invoke-ProtocolCommand 'harnessCompanionHiringDiagnostics' @{ heroId = $HeroId }
+    }
     'talkToSettlementHero' {
         if (-not $HeroId) { throw '-HeroId is required and must come from settlementOverlayCharacters in the current observation.' }
         $result = Invoke-ProtocolCommand 'talkToSettlementHero' @{ heroId = $HeroId }
@@ -288,7 +298,7 @@ switch ($Action) {
     }
     'missionNavigateToAgent' {
         if ($AgentIndex -lt 0) { throw '-AgentIndex is required for missionNavigateToAgent.' }
-        $result = Invoke-ProtocolCommand 'missionNavigateToAgent' @{ agentIndex = $AgentIndex }
+        $result = Invoke-ProtocolCommand 'missionNavigateToAgent' @{ agentIndex = $AgentIndex; durationSeconds = $DurationSeconds }
     }
     'missionInteract' {
         if ($AgentIndex -lt 0) { throw '-AgentIndex is required and must come from nearbySceneAgents in the current Mission observation.' }

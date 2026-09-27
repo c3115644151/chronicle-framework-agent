@@ -209,6 +209,20 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("harnessSeedPrisonerRecruitmentFixture requires the Campaign Map state");
                     WriteResponse(commandId, action, "completed", behavior, null, SeedPrisonerRecruitmentFixture());
                     break;
+                case "harnessPrepareCompanionHiringFixture":
+                    var companionFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var companionFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(companionFixtureMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(companionFixtureRoot) || !Directory.Exists(companionFixtureRoot))
+                        throw new InvalidOperationException("harnessPrepareCompanionHiringFixture is restricted to a visual Harness run with a Harness temp directory");
+                    WriteResponse(commandId, action, "completed", behavior, null, PrepareCompanionHiringFixture(ReadString(command, "heroId"), ReadRequiredInteger(command, "goldOffset")));
+                    break;
+                case "harnessCompanionHiringDiagnostics":
+                    var companionDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var companionDiagnosticsRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(companionDiagnosticsMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(companionDiagnosticsRoot) || !Directory.Exists(companionDiagnosticsRoot))
+                        throw new InvalidOperationException("harnessCompanionHiringDiagnostics is restricted to a visual Harness run with a Harness temp directory");
+                    WriteResponse(commandId, action, "completed", behavior, null, BuildCompanionHiringDiagnosticsJson(ReadString(command, "heroId")));
+                    break;
                 case "questDetails":
                     var questDetailsId = ReadString(command, "questId");
                     var observedQuest = FindObservedOngoingQuest(questDetailsId);
@@ -547,6 +561,10 @@ internal sealed class ChronicleAgentProtocol
                     var navigationDestination = navigationTargetAgent.Position;
                     var navigationDistance = Math.Sqrt(Math.Pow(navigationStart.X - navigationDestination.X, 2) + Math.Pow(navigationStart.Y - navigationDestination.Y, 2) + Math.Pow(navigationStart.Z - navigationDestination.Z, 2));
                     if (navigationDistance > 12.0) throw new InvalidOperationException("missionNavigateToAgent target is outside the current local Agent observation range");
+                    var requestedNavigationSeconds = ReadDouble(command, "durationSeconds");
+                    if (requestedNavigationSeconds == 0) requestedNavigationSeconds = 8.0;
+                    if (requestedNavigationSeconds < 1.0 || requestedNavigationSeconds > 20.0)
+                        throw new InvalidOperationException("missionNavigateToAgent durationSeconds must be between 1 and 20 seconds");
                     var startWorldPosition = new TaleWorlds.Engine.WorldPosition(navigationMission.Scene, navigationStart);
                     var targetWorldPosition = new TaleWorlds.Engine.WorldPosition(navigationMission.Scene, navigationDestination);
                     if (!navigationMission.Scene.DoesPathExistBetweenPositions(startWorldPosition, targetWorldPosition))
@@ -577,10 +595,10 @@ internal sealed class ChronicleAgentProtocol
                     _missionNavigationOriginalController = originalMainAgentController;
                     _missionNavigationMission = navigationMission;
                     _missionNavigationStartedAt = EngineTime.ApplicationTime;
-                    _missionNavigationExpiresAt = EngineTime.ApplicationTime + 8f;
+                    _missionNavigationExpiresAt = EngineTime.ApplicationTime + (float)requestedNavigationSeconds;
                     _lastMissionNavigationTickAt = EngineTime.ApplicationTime;
                     _missionNavigationStatus = _missionNavigator._agentState.ToString();
-                    var navigationData = "{\"targetAgentIndex\":" + navigationTargetAgentIndex.ToString(CultureInfo.InvariantCulture) + ",\"targetCharacterId\":\"" + Escape(navigationTargetAgent.Character?.StringId) + "\",\"targetHeroId\":" + ((navigationTargetAgent.Character as CharacterObject)?.HeroObject == null ? "null" : "\"" + Escape((navigationTargetAgent.Character as CharacterObject).HeroObject.StringId) + "\"") + ",\"navState\":\"" + _missionNavigator._agentState + "\",\"targetDistance\":" + navigationDistance.ToString("R", CultureInfo.InvariantCulture) + "}";
+                    var navigationData = "{\"targetAgentIndex\":" + navigationTargetAgentIndex.ToString(CultureInfo.InvariantCulture) + ",\"targetCharacterId\":\"" + Escape(navigationTargetAgent.Character?.StringId) + "\",\"targetHeroId\":" + ((navigationTargetAgent.Character as CharacterObject)?.HeroObject == null ? "null" : "\"" + Escape((navigationTargetAgent.Character as CharacterObject).HeroObject.StringId) + "\"") + ",\"navState\":\"" + _missionNavigator._agentState + "\",\"targetDistance\":" + navigationDistance.ToString("R", CultureInfo.InvariantCulture) + ",\"durationSeconds\":" + requestedNavigationSeconds.ToString("R", CultureInfo.InvariantCulture) + "}";
                     WriteResponse(commandId, action, "completed", behavior, null, navigationData);
                     break;
                 case "missionInteract":
@@ -1290,6 +1308,80 @@ internal sealed class ChronicleAgentProtocol
         json.Append(",\"partySizeLimit\":").Append(sizeLimit);
         json.Append(",\"fillerTroopId\":\"").Append(Escape(filler.StringId)).Append('"');
         json.Append(",\"fillersAdded\":").Append(fillersAdded);
+        json.Append('}');
+        return json.ToString();
+    }
+
+    private static Hero FindCurrentObservedMissionHero(string heroId)
+    {
+        var mission = Mission.Current;
+        var mainAgent = mission?.MainAgent;
+        if (mission == null || mission.MissionEnded || mainAgent == null || !AgentMissionInputPatch.IsSupportedLocationMission(mission) || string.IsNullOrWhiteSpace(heroId))
+            throw new InvalidOperationException("Companion hiring diagnostics require an observed HeroId in a live Town/Tavern Mission");
+        var targetAgent = mission.Agents.FirstOrDefault(agent =>
+        {
+            var character = agent?.Character as TaleWorlds.CampaignSystem.CharacterObject;
+            var hero = character?.HeroObject;
+            if (agent == null || !agent.IsActive() || !agent.IsHuman || hero == null || !string.Equals(hero.StringId, heroId, StringComparison.Ordinal)) return false;
+            var x = mainAgent.Position.X - agent.Position.X;
+            var y = mainAgent.Position.Y - agent.Position.Y;
+            var z = mainAgent.Position.Z - agent.Position.Z;
+            return Math.Sqrt(x * x + y * y + z * z) <= 12.0;
+        });
+        var result = (targetAgent?.Character as TaleWorlds.CampaignSystem.CharacterObject)?.HeroObject;
+        if (result == null) throw new InvalidOperationException("HeroId is not an active Hero in the current 12-unit local Mission observation");
+        if (targetAgent.IsEnemyOf(mainAgent)) throw new InvalidOperationException("hostile local Hero rejected by companion hiring diagnostics");
+        return result;
+    }
+
+    private static string PrepareCompanionHiringFixture(string heroId, int goldOffset)
+    {
+        var candidate = FindCurrentObservedMissionHero(heroId);
+        var playerClan = Clan.PlayerClan;
+        if (candidate.IsPlayerCompanion || candidate.PartyBelongedTo != null || candidate.Clan != null)
+            throw new InvalidOperationException("Companion hiring fixture target must be an unowned, unparty Wanderer Hero");
+        if (goldOffset < 0 || goldOffset > 1)
+            throw new InvalidOperationException("Companion hiring Harness goldOffset must be exactly 0 (insufficient) or 1 (eligible)");
+        var price = Campaign.Current.Models.CompanionHiringPriceCalculationModel.GetCompanionHiringPrice(candidate);
+        var priceGold = Hero.MainHero.Gold;
+        var desiredGold = price + goldOffset;
+        var goldChange = desiredGold - priceGold;
+        if (goldChange != 0) Hero.MainHero.ChangeHeroGold(goldChange);
+
+        var json = new StringBuilder(768);
+        json.Append('{');
+        json.Append("\"heroId\":\"").Append(Escape(candidate.StringId)).Append('"');
+        json.Append(",\"nativeHiringPrice\":").Append(price);
+        json.Append(",\"goldBeforeSeed\":").Append(priceGold);
+        json.Append(",\"goldChangeForDisposableHarnessFixture\":").Append(goldChange);
+        json.Append(",\"playerGoldAfterSeed\":").Append(Hero.MainHero.Gold);
+        json.Append(",\"goldStrictlyExceedsPrice\":").Append(Hero.MainHero.Gold > price ? "true" : "false");
+        json.Append(",\"playerCompanionCount\":").Append(playerClan.Companions.Count);
+        json.Append(",\"companionLimit\":").Append(playerClan.CompanionLimit);
+        json.Append('}');
+        return json.ToString();
+    }
+
+    private static string BuildCompanionHiringDiagnosticsJson(string heroId)
+    {
+        if (string.IsNullOrWhiteSpace(heroId)) throw new InvalidOperationException("Companion hiring diagnostics requires a HeroId");
+        var candidate = Hero.AllAliveHeroes.FirstOrDefault(hero => hero != null && string.Equals(hero.StringId, heroId, StringComparison.Ordinal));
+        if (candidate == null) throw new InvalidOperationException("Companion hiring diagnostics could not find the live Hero");
+        var playerClan = Clan.PlayerClan;
+        var memberIndex = MobileParty.MainParty?.MemberRoster?.FindIndexOfTroop(candidate.CharacterObject) ?? -1;
+        var inMainParty = memberIndex >= 0;
+        var json = new StringBuilder(768);
+        json.Append('{');
+        json.Append("\"heroId\":\"").Append(Escape(candidate.StringId)).Append('"');
+        json.Append(",\"nativeHiringPrice\":").Append(Campaign.Current.Models.CompanionHiringPriceCalculationModel.GetCompanionHiringPrice(candidate));
+        json.Append(",\"playerGold\":").Append(Hero.MainHero.Gold);
+        json.Append(",\"playerCompanionCount\":").Append(playerClan.Companions.Count);
+        json.Append(",\"companionLimit\":").Append(playerClan.CompanionLimit);
+        json.Append(",\"isPlayerCompanion\":").Append(candidate.IsPlayerCompanion ? "true" : "false");
+        json.Append(",\"isInPlayerClan\":").Append(candidate.Clan == playerClan ? "true" : "false");
+        json.Append(",\"clanId\":\"").Append(Escape(candidate.Clan?.StringId)).Append('"');
+        json.Append(",\"isInMainParty\":").Append(inMainParty ? "true" : "false");
+        json.Append(",\"partyId\":\"").Append(Escape(candidate.PartyBelongedTo?.StringId)).Append('"');
         json.Append('}');
         return json.ToString();
     }

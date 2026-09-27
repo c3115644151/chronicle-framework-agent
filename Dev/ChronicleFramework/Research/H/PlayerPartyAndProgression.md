@@ -50,13 +50,15 @@ Chronicle尚不支持村庄/城镇新兵招募的全部入口、所有升级、�
 
 ## H05 Companion：同伴招募、家族成员与离队
 
+W2-S端到端运行验收：Harness在Tavern本地HeroAgent观察到动态Wanderer `CharacterObject_1604`，其高度比入口地面高5.48，Native `missionNavigateToAgent`用20秒租约自然到达至1.438米；没有传送。`missionInteract`经Native Agent.OnUse启动该Hero对话，继续当前原生选项到雇佣报价。价格模型报价660：Harness将本次GoldFixture设为660时，严格`Gold > price`条件隐藏accept并保留拒绝句；660+1时accept可用，原生Consequences花660、余1 Gold，同伴计数0→1、Hero Clan为PlayerClan且进入MainParty，MainParty人数+1。源存档SHA-256不变、游戏进程正常停止。证据：`TestResults/20260927-201154/Temp/CompanionHiringResult.json`与`CompanionHiring-frame.bmp`。这只证明当前一名动态Wanderer和一套本机Mod/存档，未证明所有生成地点/角色/设备路径均相同，也没有完成解雇/转封臣等其它ACT。
+
 同伴是Hero，通常以可招募Wanderer身份在Settlement出现；加入PlayerClan后不再只是战斗Roster兵种：有个人技能/Perk/装备、关系和忙碌状态，可进入主队、担任角色、创建家族Party、被俘或离队。伴侣模板按周期由 `CompanionsCampaignBehavior`管理，生成/淘汰与Clan上限、世界人口和模板池有关；不是玩家可随时从固定菜单无限抽取的兵种。
 
 原版玩家雇佣入口由 `LordConversationsCampaignBehavior` 注册：与未雇用、不是当前Companion、且不属于某个Party的Wanderer交谈，出现“I can use someone like you in my company”；后续对话先显示 `CompanionHiringPriceCalculationModel.GetCompanionHiringPrice`报价。接受选项要求 Main Hero 金币严格大于报价且未达到 `Clan.PlayerClan.CompanionLimit`，确认后依次调用 `GiveGoldAction`、`AddCompanionAction` 与 `AddHeroToPartyAction`，因此结果是支付后加入Clan并加入MainParty；看报价/拒绝/取消本身不会支付。默认价格按候选Hero军用与民用Equipment在城镇的市场价格之和取一半，再加角色等级价格项及玩家Perk修正；不是只按好感度固定报价。死亡、雇佣解雇、任务结果或同伴转为领主等会走不同 `RemoveCompanionAction` 分支，某些离队还需要结束其Party/当前领导状态；不能把“从主队离开”自动等同“从Clan删除”。
 
 已有玩家Companion若被敌方关押，监狱突围成功时走F12 `ACT-F12-14`：同一Hero结束Captivity、恢复Active并`AddHeroToPartyAction`加回MainParty；这不是新的Wanderer雇佣，不触发雇佣报价/Gold门槛，因此H05交叉表引用F12-14而不另造“救援招募同伴”ACT。救援Mission/选择入口和失败后果由F12/G03负责。
 
-Chronicle主观察不逐个列出Clan成员/同伴、能力/装备/当前位置/忙碌状态，PartyScreen存在成员列表但只在相应PartyState读取；没有Wanderer寻访/对话雇佣、解雇/转封臣、个人状态管理工具。跨入同伴、任务和亲属关系后的变化见B/C/J；家族职责见H06，创建家族Party见F06。来源：`CompanionsCampaignBehavior`、`AddCompanionAction`、`RemoveCompanionAction`、`DefaultCompanionHiringPriceCalculationModel`、`LordConversationsCampaignBehavior`、当前Chronicle Observer/Protocol。本轮源码已核清雇佣句、门槛、扣款和加入Clan/MainParty的提交顺序；仍未知Wanderer生成/出现地点、从地图到酒馆/场景的完整玩家进入流程、Conversation宿主时钟，以及等待失败/取消分支在实际UI中的呈现。
+Chronicle主观察不逐个列出Clan成员/同伴、能力/装备/当前位置/忙碌状态，PartyScreen存在成员列表但只在相应PartyState读取；当前只在玩家自然进入Tavern并且Wanderer位于Mission局部观察后支持对话雇佣，没有全局Wanderer检索/刷新等待、解雇/转封臣或个人状态管理工具。跨入同伴、任务和亲属关系后的变化见B/C/J；家族职责见H06，创建家族Party见F06。来源：`CompanionsCampaignBehavior`、`AddCompanionAction`、`RemoveCompanionAction`、`DefaultCompanionHiringPriceCalculationModel`、`LordConversationsCampaignBehavior`、当前Chronicle Observer/Protocol。本轮源码已核清雇佣句、门槛、扣款和加入Clan/MainParty的提交顺序；运行仅覆盖一名Tavern Wanderer；所有Wanderer生成/出现地点、等待刷新/失败/取消分支、其他场景和设备模块兼容仍未全面验证。
 
 ## H06 Party Roles：家族成员职责分配
 
