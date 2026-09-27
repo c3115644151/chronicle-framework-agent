@@ -62,13 +62,17 @@ Chronicle主观察不逐个列出Clan成员/同伴、能力/装备/当前位置/
 
 ## H06 Party Roles：家族成员职责分配
 
-玩家可通过Clan管理页面的Party/角色职责区域，为该Party成员安排军需官、侦察、军医、工程师等职责；`ClanPartyItemVM`逐一读取`ClanMemberPartyRoleModel.GetAssignablePartyRoles()`并据其生成可见职责行。v1.4.8默认`DefaultClanMemberPartyRoleModel`只返回Quartermaster/Scout/Surgeon/Engineer四项，并分别关联Steward/Scouting/Medicine/Engineering技能；`ClanRoleItemVM/ClanRoleMemberItemVM`基于资格和技能生成候选人，玩家提交后由对应MobileParty setter写入角色并触发界面分配事件。
+玩家可通过Clan管理→Parties→展开某个Party成员/职责区域，为该Party中的家族Hero安排军需官、侦察、军医、工程师等职责。`ClanPartyItemVM`逐一读取`ClanMemberPartyRoleModel.GetAssignablePartyRoles()`建立职责行；点击职责行写入`LastOpenedRoleSelection`并显示候选列表。v1.4.8默认`DefaultClanMemberPartyRoleModel`只返回Quartermaster/Scout/Surgeon/Engineer四项，分别关联Steward/Scouting/Medicine/Engineering技能；候选成员需在该Party roster内、属于PlayerClan、不是Governor，并通过`IsHeroAssignableForPartyRole`的当前角色模型资格检查。Clan Leader单独提供为角色VM，不同于普通可选成员；空成员项代表“Remove assignee”。`ClanPartyItemVM.RefreshMembers`另外读取`CampaignUIHelper.GetMapScreenActionIsEnabledWithReason`，在主角被俘、Mission/Encounter/围城、地图事件或其他禁用情境下禁用该Party的职责控件。
+
+默认模型的`MaximumPartyRoleAssignmentCount`为2。一个Hero已有两个职位时若再调用原生`SetParty*`分配第三项，MobileParty setter会先执行`RemoveOnePartyRoleOfHero`再设置新职位；移除按原生角色枚举检查顺序清除该Hero的第一个职位，并非保持其它旧职位不变。角色赋值由`ClanRoleMemberItemVM.ExecuteAssignHeroToRole`调用对应party setter；非空任命还触发`ClanRoleAssignedThroughClanScreenEvent`，然后`ClanPartyItemVM.OnRoleAssigned`重新刷新职责VM。移除当前行走对应setter写null，再刷新VM。直接调用setter会漏掉UI候选/禁用条件、赋值事件和VM刷新，不能等同玩家入口。
 
 `MobileParty`另存FirstMate/Navigator，`PartyRole`也定义这两个枚举值，通用Role VM包含其文本标识/effective owner/setter分支；但默认角色模型不把它们返回到`ClanPartyItemVM`职责列表，因此当前1.4.8基础游戏中没有这两个角色的玩家任命入口，记录为`N/A-H06-01`，不扩展行为分母。若Mod替换`ClanMemberPartyRoleModel`后开放这些Role，通用VM有接入能力，需在该Mod实际加载时重查。
 
 角色不是Clan全局的荣誉称号，而是某个MobileParty当前由哪位Hero提供角色能力。Hero死亡、被俘、成为Governor/忙碌、离开Clan或其他无资格状态时，`PartyRolesCampaignBehavior`可清除其Party Roles；角色效果因此可能随队伍/成员状态改变。不同角色是否可由一个Hero兼任、每个版本的技能下限、Naval技能效果与UI限制须按Party Role Model和界面逐项判断，不由“同伴技能最高”直接推导。
 
-Chronicle不观察各Party的Surgeon/Quartermaster/Scout/Engineer Hero ID和对应效果，也没有设置角色的动作；当前快照只给MainParty速度、食物/粮食变化、每日工资等结果字段，不足以反推出谁在承担角色。证据：Campaign `DefaultClanMemberPartyRoleModel`、`PartyRolesCampaignBehavior`、ViewModelCollection `ClanManagementVM/ClanRoleItemVM/ClanRoleMemberItemVM`、Chronicle `AgentObserver`。具体玩家从Clan页面进入职责tab、每个空槽/候选的实际UI条件、改派后模型数值与刷新时点、Party离开/角色失效的地图反馈尚未实机视觉验证。
+Chronicle增加按需`partyRoles`读取MainParty职位及可任命候选，不扩充默认`state`；`setPartyRole`对当前VM候选执行`ClanRoleMemberItemVM.ExecuteAssignHeroToRole`，`unassignPartyRole`选择原生Remove assignee VM项；两者随后按`ClanPartyItemVM.OnRoleAssigned`刷新所有职位VM。执行前也复核`CampaignUIHelper.GetMapScreenActionIsEnabledWithReason`；并非直接改MobileParty setter。分成明确的任命/撤职动作，避免需要模型传一个真假开关。Harness夹具注入Wanderer仅用于提供当前PlayerClan/MainParty测试Hero，不是产品路径。
+
+W2-T运行证据 `TestResults/20260927-213318/Temp/PartyRolesResult.json`：一名当前Hero在Native角色VM/候选列表、MainParty职责状态中可见，角色VM任职者与MobileParty原生getter读数一致；Quartermaster+Scout之后给同一Hero设第三职Surgeon，Native setter副作用清除旧Quartermaster、保留Scout及新Surgeon；独立`unassignPartyRole`只移除所选Surgeon。`FirstMate`、不是本队候选的Hero和对未分配职位执行Remove均被拒，无状态修改。Stop模式下连续任命/撤职不改Gold、Party roster、Campaign日或时间档；`UnstoppablePlay`查询/赋值期间TimeControlMode保持原档且Campaign日自然推进。源存档hash一致、进程退出。该Harness从Campaign Map创建对应Native Role ViewModels并调用UI绑定的`ExecuteAssignHeroToRole`提交handler；它没有打开或模拟实际ClanManagement页面的点击/Tab导航。玩家页面的具体可点区域、ClanState打开时钟、第三职旧角色被清除的其他组合顺序、第三方角色Model覆盖仍未运行验证。证据源：Campaign `DefaultClanMemberPartyRoleModel`/`MobileParty`/`PartyRolesCampaignBehavior`，ViewModelCollection `ClanManagementVM/ClanPartyItemVM/ClanRoleItemVM/ClanRoleMemberItemVM/CampaignUIHelper`。
 
 ## H07 Inventory：玩家物品库存与交易容器
 

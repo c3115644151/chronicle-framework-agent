@@ -223,6 +223,16 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("harnessCompanionHiringDiagnostics is restricted to a visual Harness run with a Harness temp directory");
                     WriteResponse(commandId, action, "completed", behavior, null, BuildCompanionHiringDiagnosticsJson(ReadString(command, "heroId")));
                     break;
+                case "harnessSeedPartyRoleFixture":
+                    RequireRoleHarnessMode();
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("harnessSeedPartyRoleFixture requires Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChroniclePartyRoleAdapter.SeedDisposableRoleCompanion());
+                    break;
+                case "harnessPartyRoleDiagnostics":
+                    RequireRoleHarnessMode();
+                    WriteResponse(commandId, action, "completed", behavior, null, ChroniclePartyRoleAdapter.BuildHarnessDiagnosticsJson());
+                    break;
                 case "questDetails":
                     var questDetailsId = ReadString(command, "questId");
                     var observedQuest = FindObservedOngoingQuest(questDetailsId);
@@ -232,6 +242,15 @@ internal sealed class ChronicleAgentProtocol
                     if (Game.Current?.GameStateManager?.ActiveState is not MapState)
                         throw new InvalidOperationException("partyRoster requires the Campaign Map state");
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentObserver.BuildPartyRosterJson());
+                    break;
+                case "partyRoles":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChroniclePartyRoleAdapter.BuildMainPartyRolesJson());
+                    break;
+                case "setPartyRole":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChroniclePartyRoleAdapter.SetMainPartyRoleJson(ReadString(command, "roleId"), ReadString(command, "heroId"), removeAssignee: false));
+                    break;
+                case "unassignPartyRole":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChroniclePartyRoleAdapter.SetMainPartyRoleJson(ReadString(command, "roleId"), null, removeAssignee: true));
                     break;
                 case "harnessMissionDiagnostics":
                     var missionDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
@@ -856,6 +875,14 @@ internal sealed class ChronicleAgentProtocol
                 catch { }
             }
         }
+    }
+
+    private static void RequireRoleHarnessMode()
+    {
+        var mode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+        var root = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+        if (!string.Equals(mode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+            throw new InvalidOperationException("PartyRole fixture/diagnostics are restricted to visual Harness runs with a Harness temp directory");
     }
 
     private void UpdateMissionNavigationLease()

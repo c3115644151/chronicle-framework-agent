@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet('start','load','state','mapSettlementTargets','mapPartyTargets','mapPartyComposition','mapPartyBehavior','partyUpgradeOptions','upgradeTroop','prisonerRecruitmentOptions','recruitPrisoner','characterDevelopment','spendSkillFocus','questDetails','partyRoster','captureFrame','harnessMissionDiagnostics','harnessMapDiagnostics','harnessPlayerSkillsDiagnostics','harnessCharacterDevelopmentDiagnostics','harnessQuestDetailsDiagnostics','harnessQuestDeadlinePrivacyDiagnostics','harnessPartyRosterDiagnostics','harnessMapPartyDiagnostics','harnessMapPartyCompositionDiagnostics','harnessCreateMapArmyFixture','harnessSeedPartyUpgradeFixture','harnessSeedPrisonerRecruitmentFixture','harnessPrepareCompanionHiringFixture','harnessCompanionHiringDiagnostics','talkToSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','move','moveToPoint','missionInput','missionNavigateToAgent','missionInteract','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','foodOptions','tradeOptions','trade','provision','save','stop')]
+    [ValidateSet('start','load','state','mapSettlementTargets','mapPartyTargets','mapPartyComposition','mapPartyBehavior','partyUpgradeOptions','upgradeTroop','prisonerRecruitmentOptions','recruitPrisoner','characterDevelopment','spendSkillFocus','questDetails','partyRoster','partyRoles','setPartyRole','unassignPartyRole','captureFrame','harnessMissionDiagnostics','harnessMapDiagnostics','harnessPlayerSkillsDiagnostics','harnessCharacterDevelopmentDiagnostics','harnessQuestDetailsDiagnostics','harnessQuestDeadlinePrivacyDiagnostics','harnessPartyRosterDiagnostics','harnessMapPartyDiagnostics','harnessMapPartyCompositionDiagnostics','harnessCreateMapArmyFixture','harnessSeedPartyUpgradeFixture','harnessSeedPrisonerRecruitmentFixture','harnessPrepareCompanionHiringFixture','harnessCompanionHiringDiagnostics','harnessSeedPartyRoleFixture','harnessPartyRoleDiagnostics','talkToSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','move','moveToPoint','missionInput','missionNavigateToAgent','missionInteract','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','foodOptions','tradeOptions','trade','provision','save','stop')]
     [string]$Action,
     [string]$SaveName,
     [string]$SettlementId,
@@ -23,6 +23,7 @@ param(
     [string]$Direction,
     [string]$OutputPath,
     [string]$HeroId,
+    [string]$RoleId,
     [int]$GoldOffset = 1,
     [string]$SkillId,
     [string]$QuestId,
@@ -234,6 +235,18 @@ switch ($Action) {
         $result = Invoke-ProtocolCommand 'questDetails' @{ questId = $QuestId }
     }
     'partyRoster' { $result = Invoke-ProtocolCommand 'partyRoster' }
+    'partyRoles' { $result = Invoke-ProtocolCommand 'partyRoles' }
+    'setPartyRole' {
+        if (-not $RoleId) { throw '-RoleId is required for setPartyRole.' }
+        if (-not $HeroId) { throw '-HeroId is required for setPartyRole and must come from the latest partyRoles observation.' }
+        $result = Invoke-ProtocolCommand 'setPartyRole' @{ roleId = $RoleId; heroId = $HeroId }
+    }
+    'unassignPartyRole' {
+        if (-not $RoleId) { throw '-RoleId is required for unassignPartyRole and must come from the latest partyRoles observation.' }
+        $result = Invoke-ProtocolCommand 'unassignPartyRole' @{ roleId = $RoleId }
+    }
+    'harnessSeedPartyRoleFixture' { $result = Invoke-ProtocolCommand 'harnessSeedPartyRoleFixture' }
+    'harnessPartyRoleDiagnostics' { $result = Invoke-ProtocolCommand 'harnessPartyRoleDiagnostics' }
     'spendSkillFocus' {
         if (-not $SkillId) { throw '-SkillId is required and must come from the current characterDevelopment observation.' }
         $result = Invoke-ProtocolCommand 'spendSkillFocus' @{ skillId = $SkillId; count = $Count }
