@@ -5,7 +5,8 @@ param(
     [string]$TargetSettlementId = 'town_V1',
     [string]$ApproachSettlementId = 'town_V1',
     [ValidateSet('ConversationOnly', 'QuestAccepted', 'NativePreconditionBlocked')]
-    [string]$ExpectedOutcome = 'ConversationOnly'
+    [string]$ExpectedOutcome = 'ConversationOnly',
+    [switch]$ValidateQuestDetails
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,7 +15,7 @@ $savePath = Join-Path $env:USERPROFILE "Documents\Mount and Blade II Bannerlord\
 $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\session.json'
 $runDirectory = if ($env:CHRONICLE_HARNESS_TEMP) { Split-Path -Parent $env:CHRONICLE_HARNESS_TEMP } else { Join-Path $PSScriptRoot 'TestResults\ManualSettlementOverlayConversation' }
 $captureName = if ($ExpectedOutcome -eq 'ConversationOnly') { 'SettlementOverlayConversation-frame.bmp' } else { "SettlementOverlayQuest-$ExpectedOutcome-frame.bmp" }
-$resultName = if ($ExpectedOutcome -eq 'ConversationOnly') { 'SettlementOverlayConversationResult.json' } else { "SettlementOverlayQuest-$ExpectedOutcome-Result.json" }
+$resultName = if ($ValidateQuestDetails) { 'SettlementOverlayQuest-QuestDetails-Result.json' } elseif ($ExpectedOutcome -eq 'ConversationOnly') { 'SettlementOverlayConversationResult.json' } else { "SettlementOverlayQuest-$ExpectedOutcome-Result.json" }
 $captureTempPath = if ($env:CHRONICLE_HARNESS_TEMP) { Join-Path $env:CHRONICLE_HARNESS_TEMP $captureName } else { Join-Path $runDirectory $captureName }
 $capturePath = Join-Path $runDirectory $captureName
 $previousHarnessMode = $env:CHRONICLE_HARNESS_MODE
@@ -88,7 +89,7 @@ try {
     if ($move.status -ne 'completed' -or $move.state.location.targetSettlementId -ne $TargetSettlementId) { throw "Native Campaign movement did not accept observed settlement target '$TargetSettlementId'." }
     $routeTrace += [ordered]@{ Step = 'moveToObservedTarget'; SettlementId = $TargetSettlementId; CampaignDay = $initial.campaignDay }
     $arrived = Wait-ForSettlementMenu $TargetSettlementId
-    if ($arrived.state.schemaVersion -ne 20) { throw "Settlement overlay observation schema changed unexpectedly: $($arrived.state.schemaVersion)." }
+    if ($arrived.state.schemaVersion -ne 21) { throw "Settlement overlay observation schema changed unexpectedly: $($arrived.state.schemaVersion)." }
 
     $overlayCharacters = @($arrived.state.settlementOverlayCharacters)
     $issueCandidates = @()
@@ -172,6 +173,67 @@ try {
         }
         if (-not $questAccepted -and -not $questBlockedReason) { $questBlockedReason = 'The safe native Issue Quest dialogue path reached its 10-step Harness limit.' }
     }
+    $questDetailsReceipt = $null
+    $questDetailsNative = $null
+    $questDetailsRepeat = $null
+    $questDetailsValidated = $false
+    if ($ValidateQuestDetails)
+    {
+        if ($ExpectedOutcome -ne 'QuestAccepted' -or -not $questAccepted) { throw 'Quest Journal details validation requires a successfully accepted native Issue Quest.' }
+        $questIdsBeforeTalk = @($arrived.state.quests | ForEach-Object { [string]$_.id })
+        $newlyAcceptedQuests = @($postTalk.state.quests | Where-Object { [string]$_.id -notin $questIdsBeforeTalk })
+        if ($newlyAcceptedQuests.Count -ne 1) { throw "Expected one newly observed active Quest after acceptance; found $($newlyAcceptedQuests.Count)." }
+        $questId = [string]$newlyAcceptedQuests[0].id
+        $questDetailsReceipt = Invoke-AgentCli 'questDetails' @('-QuestId', $questId, '-CommandId', "$commandPrefix-quest-details") 30
+        $questDetailsNative = Invoke-AgentCli 'harnessQuestDetailsDiagnostics' @('-QuestId', $questId, '-CommandId', "$commandPrefix-quest-details-native") 30
+        $questDetailsRepeat = Invoke-AgentCli 'questDetails' @('-QuestId', $questId, '-CommandId', "$commandPrefix-quest-details-repeat") 30
+        $questDetailsUnknown = Invoke-AgentCli 'questDetails' @('-QuestId', '__not_observed_quest__', '-CommandId', "$commandPrefix-quest-details-unknown") 30
+        $questDeadlinePrivacy = Invoke-AgentCli 'harnessQuestDeadlinePrivacyDiagnostics' @('-CommandId', "$commandPrefix-quest-deadline-privacy") 30
+        $detail = $questDetailsReceipt.data
+        $nativeDetail = $questDetailsNative.data
+        $detailStages = @($detail.journalStages)
+        $nativeStages = @($nativeDetail.journalStages)
+        $stagesMatch = ($detailStages.Count -eq $nativeStages.Count)
+        if ($stagesMatch) {
+            for ($stageIndex = 0; $stageIndex -lt $detailStages.Count; $stageIndex++) {
+                $observedStage = $detailStages[$stageIndex]
+                $nativeStage = $nativeStages[$stageIndex]
+                if ([string]$observedStage.logType -ne [string]$nativeStage.logType -or
+                    [string]$observedStage.dateText -ne [string]$nativeStage.dateText -or
+                    [string]$observedStage.description -ne [string]$nativeStage.description -or
+                    [bool]$observedStage.isLastStage -ne [bool]$nativeStage.isLastStage -or
+                    [bool]$observedStage.hasTask -ne [bool]$nativeStage.hasTask) { $stagesMatch = $false; break }
+                if ($observedStage.hasTask -and (
+                    [string]$observedStage.taskName -ne [string]$nativeStage.rawTaskName -or
+                    [int]$observedStage.currentProgress -ne [int]$nativeStage.currentProgress -or
+                    [int]$observedStage.targetProgress -ne [int]$nativeStage.targetProgress -or
+                    [string]$observedStage.progressType -ne [string]$nativeStage.progressType -or
+                    [bool]$observedStage.isTaskCompleted -ne [bool]$nativeStage.isTaskCompleted)) { $stagesMatch = $false; break }
+            }
+        }
+        $visibleQuestSummary = @($postTalk.state.quests | Where-Object { $_.id -eq $questId } | Select-Object -First 1)
+        $dueVisibilityMatches = $false
+        if ($visibleQuestSummary.Count -eq 1 -and [bool]$detail.isRemainingTimeHidden -eq [bool]$nativeDetail.isRemainingTimeHidden)
+        {
+            if ([bool]$detail.isRemainingTimeHidden) { $dueVisibilityMatches = ($null -eq $detail.daysRemaining -and $null -eq $visibleQuestSummary[0].daysRemaining) }
+            else { $dueVisibilityMatches = ([int]$detail.daysRemaining -eq [int]$nativeDetail.daysRemaining -and [int]$visibleQuestSummary[0].daysRemaining -eq [int]$detail.daysRemaining) }
+        }
+        $giverMatches = ([string]$detail.title -eq [string]$nativeDetail.title -and
+            [bool]$detail.questGiverHidden -eq [bool]$nativeDetail.questGiverHidden -and
+            [string]$detail.questGiver.id -eq [string]$nativeDetail.questGiverId -and
+            [string]$detail.questGiver.name -eq [string]$nativeDetail.questGiverName -and
+            [bool]$detail.isTracked -eq [bool]$nativeDetail.isTracked)
+        $repeatStable = ([string](ConvertTo-Json -InputObject $detail -Depth 12 -Compress) -ceq [string](ConvertTo-Json -InputObject $questDetailsRepeat.data -Depth 12 -Compress))
+        $unobservedQuestRejected = ($questDetailsUnknown.status -eq 'rejected')
+        $deadlinePrivacyGateCorrect = ($questDeadlinePrivacy.status -eq 'completed' -and
+            [bool]$questDeadlinePrivacy.data.hidden.isRemainingTimeHidden -and
+            $null -eq $questDeadlinePrivacy.data.hidden.daysRemaining -and
+            -not [bool]$questDeadlinePrivacy.data.visible.isRemainingTimeHidden -and
+            [int]$questDeadlinePrivacy.data.visible.daysRemaining -eq 14)
+        $postDetailsState = Invoke-AgentCli 'state' @('-CommandId', "$commandPrefix-quest-details-state-after") 30
+        $journalReadOnly = ([string](ConvertTo-Json -InputObject @($postTalk.state.quests) -Depth 8 -Compress) -ceq [string](ConvertTo-Json -InputObject @($postDetailsState.state.quests) -Depth 8 -Compress) -and $postTalk.campaignDay -eq $postDetailsState.campaignDay)
+        $questDetailsValidated = ($questDetailsReceipt.status -eq 'completed' -and $questDetailsNative.status -eq 'completed' -and $questDetailsRepeat.status -eq 'completed' -and $stagesMatch -and $dueVisibilityMatches -and $giverMatches -and $repeatStable -and $unobservedQuestRejected -and $deadlinePrivacyGateCorrect -and $journalReadOnly)
+    }
     $screenshot = $null
     $screenshotValid = $false
     if ($conversationStartedForTarget) {
@@ -209,6 +271,11 @@ try {
         QuestOfferObserved = $questOfferObserved
         QuestAccepted = $questAccepted
         QuestBlockedReason = $questBlockedReason
+        QuestDetails = if ($questDetailsReceipt) { $questDetailsReceipt.data } else { $null }
+        QuestDetailsNativeDiagnostics = if ($questDetailsNative) { $questDetailsNative.data } else { $null }
+        UnobservedQuestDetailsStatus = if ($questDetailsUnknown) { $questDetailsUnknown.status } else { $null }
+        QuestDeadlinePrivacyGate = if ($questDeadlinePrivacy) { $questDeadlinePrivacy.data } else { $null }
+        QuestDetailsValidated = [bool]$questDetailsValidated
         NativePreconditionBlocked = [bool]($ExpectedOutcome -eq 'NativePreconditionBlocked' -and $issueTopicRequested -and -not $questOfferObserved -and -not $questAccepted -and @($postTalk.state.quests).Count -eq $questCountBefore -and $questBlockedReason -like '*returned to its main options after the Issue topic*')
         NativeRefusalSentence = if ($ExpectedOutcome -ne 'ConversationOnly' -and -not $questAccepted) { $conversation.sentenceText } else { $null }
         DialogueTrace = $dialogueTrace
@@ -228,7 +295,7 @@ try {
         'QuestAccepted' { [bool]$questAccepted }
         'NativePreconditionBlocked' { [bool]$result.NativePreconditionBlocked }
     }
-    $result.Passed = ($talk.status -eq 'completed' -and $initialConversationHeroMatchesTarget -and $result.ExpectedOutcomeMet -and $result.QuestUnchanged -eq (-not $questAccepted) -and $result.CampaignClockUnchangedDuringSceneEntry -and $screenshotValid -and $result.FixtureUnchanged -and $result.ProcessStopped)
+    $result.Passed = ($talk.status -eq 'completed' -and $initialConversationHeroMatchesTarget -and $result.ExpectedOutcomeMet -and $result.QuestUnchanged -eq (-not $questAccepted) -and $result.CampaignClockUnchangedDuringSceneEntry -and (-not $ValidateQuestDetails -or $questDetailsValidated) -and $screenshotValid -and $result.FixtureUnchanged -and $result.ProcessStopped)
     $resultJson = $result | ConvertTo-Json -Depth 18
     if ($env:CHRONICLE_HARNESS_TEMP -and (Test-Path -LiteralPath $env:CHRONICLE_HARNESS_TEMP -PathType Container)) {
         Set-Content -LiteralPath (Join-Path $env:CHRONICLE_HARNESS_TEMP $resultName) -Value $resultJson -Encoding UTF8

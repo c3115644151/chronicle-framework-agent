@@ -20,7 +20,7 @@ W2-E目前只验证真实原版门槛的拒绝分支，正向接取仍未完成�
 
 玩家可通过Issue/Story/NPC交谈、外交/传闻事件等进入任务，也可在任务面板查看进行中任务并切换追踪、目标人物/聚落标记和进度。接受不等于完成：Quest可能有多个阶段、期限、目标事件、选择、目标消失/死亡、失败和取消；完成时可能产生钱物、关系/声望、身份或世界状态后果。`QuestManager.StartQuest`/直接结束方法和经过Quest giver的UI互动不是同一条玩家过程，必须保留Quest子类的前置与提示。
 
-Campaign时钟驱动Quest期限与事件，玩家进入Battle/Mission/对话/等待等GameState时钟规则由父层决定；任务动作本身不应嵌入隐式快进。Chronicle Observer可读取当前Quest概要与附近可见任务对象，但没有通用接受/选择/提交任何Quest的动作集。来源：`QuestBase`、`QuestManager`、Quest通知与 `QuestsVM`；具体行动跨J03/F/G/H等域。未知：所有Quest的公共/私人隐藏目标区分、日志/任务状态同步顺序、超时与保存加载中断的统一边界以及任务总分母。
+Campaign时钟驱动Quest期限与事件，玩家进入Battle/Mission/对话/等待等GameState时钟规则由父层决定；任务动作本身不应嵌入隐式快进。Chronicle schema21的`state.quests`列出当前观察到的活动Quest ID/标题/可见整日剩余时间；Agent可按需调用`questDetails(QuestId)`读取`QuestItemVM`同一Journal阶段，包括普通记录文字或TaskName/CurrentProgress/Range。查询只接受已观察ID、不读隐藏`QuestTaskBase`清单，不改变任务或日志已读状态。`TestResults/20260927-111022/Temp/SettlementOverlayQuest-QuestDetails-Result.json`在一次真实Issue Quest接受后与1.4.8原生`QuestItemVM`逐阶段对照通过；Sandbox样本期限可见，另以Harness序列化回归检查hidden→null/visible→daysRemaining；真实StoryMode隐藏期限Quest尚未加载验证。该读取能力不构成通用接受/选择/提交任务动作。来源：`QuestBase`、`QuestManager`、`QuestItemVM/QuestStageVM/JournalLog`；具体行动跨J03/F/G/H等域。未知：隐藏Quest目标、Story/Alternative解决方案日志规则、超时/保存加载同步边界以及任务总分母。
 
 ## J03 Quest Tasks：任务子步骤与触发器
 
@@ -36,7 +36,7 @@ Chronicle目前可观察任务摘要及部分菜单/Conversation状态，未实�
 
 玩家可在任务日志面板查看具体Quest记录/当前阶段，也可从N百科的Hero页面查看以Hero为主体的事件历史；这两个“记录”视角不应混为一页。用户已确认百科N能查NPC日志；本体 `JournalLog`/QuestVM是Quest日志与任务进度系统。实际快捷键和全部可见字段还需对当前build做UI核验。
 
-Chronicle Observer仅返回当前Quest摘要，不提供完整Quest Journal、Hero LogEntry检索或历史页筛选/跳转动作；不会把已经出现的日志正文当作全局状态。来源：`JournalLog`、`QuestBase`、`LogEntryHistory`、`QuestsVM`与百科VM。未知：任务/人物日志的持久保留/筛选/删除边界，隐藏信息何时向玩家揭示，日志时间与实际事件提交的延迟分布，以及Journal的最终玩家行为分母。
+Chronicle返回有限活动Quest摘要并可按需查看一个已观察活动Quest的Journal阶段；不提供已完成Quest历史页、Hero `LogEntryHistory`检索或历史页筛选/跳转动作，也不把任务日志当成全局世界真值。来源：`JournalLog`、`QuestBase`、`LogEntryHistory`、`QuestsVM`与百科VM。未知：任务/人物日志的持久保留/筛选/删除边界、隐藏信息何时向玩家揭示、日志时间与实际事件提交的延迟分布，以及Journal的最终玩家行为分母。
 
 ## J05 Incidents：随机/上下文事件
 

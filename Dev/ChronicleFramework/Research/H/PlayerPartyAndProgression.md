@@ -92,7 +92,7 @@ Hero的 `HeroDeveloper`持有Skill XP/Level、Attributes、Focus和未花点数/
 
 玩家从角色发展(Character Developer)面板选择适用Hero，检查技能、升级进度、属性/Focus点数与开放Perks；`CharacterDeveloperVM`先保存拟改值，Done时调用 `ApplyAllChanges`写回`HeroDeveloper`，Cancel会复原未提交更改并关闭面板。另一个独立的Reset控件调用`ExecuteReset`，遍历所有适用Hero执行`ResetChanges(isCancel:false)`并刷新选择器：复原本次面板会话中的未提交编辑，但不关闭页面，玩家可继续分配；因此Reset不等于Done，也不等于Cancel，映射`ACT-H10-02`。直接调用 `HeroDeveloper.AddFocus/AddAttribute/AddPerk`绕过UI可用点数、前置技能、Perk选择提示和取消事务；不能把点数读出或界面打开当成成长发生。
 
-Chronicle常规schema20通过`mainHeroSkills`只读提供MainHero当前SkillObject等级，来源于原版`Hero.GetSkillValue`；Agent需要判断成长条件时，再显式调用`characterDevelopment`读取主角属性/属性点、等级经验、技能等级与经验进度、Focus余额/投入、模型学习率与上限，以及当前技能等级下角色发展面板列出的Perk状态。查询不把完整Perk目录重复放入每轮提示，也不判断某个Issue能否接受；Issue仍以原版对话选项为准。
+Chronicle常规schema21通过`mainHeroSkills`只读提供MainHero当前SkillObject等级，来源于原版`Hero.GetSkillValue`；Agent需要判断成长条件时，再显式调用`characterDevelopment`读取主角属性/属性点、等级经验、技能等级与经验进度、Focus余额/投入、模型学习率与上限，以及当前技能等级下角色发展面板列出的Perk状态。查询不把完整Perk目录重复放入每轮提示，也不判断某个Issue能否接受；Issue仍以原版对话选项为准。
 
 本机1.4.8 `CharacterDeveloperVM`/`CharacterDeveloperHeroItemVM`/`SkillVM`/`CharacterAttributeItemVM`直接构建角色发展面板字段。`TestResults/20260927-095403/Temp/CharacterDevelopmentResult.json`在disposable fixture中对照原生`CharacterDeveloperHeroItemVM`，6个属性与18个动态Skill对象、等级/经验进度/下一等级需求/Focus/学习率/学习上限/可否加Focus/当前等级Perk列表及状态、角色经验和点数余额逐项一致；重复查询稳定、状态未变、Campaign时间与存档文件hash不变、Bannerlord正常停止。该夹具当前有0个等级已解锁Perk，所以非空已解锁Perk分支仍需在后续适合的自然角色状态中补验；此结果不作为Perk选择动作或UI视觉自动化证据。
 

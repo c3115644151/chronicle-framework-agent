@@ -148,6 +148,11 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("spendSkillFocus requires the Campaign Map state");
                     WriteResponse(commandId, action, "completed", behavior, null, SpendMainHeroSkillFocus(command));
                     break;
+                case "questDetails":
+                    var questDetailsId = ReadString(command, "questId");
+                    var observedQuest = FindObservedOngoingQuest(questDetailsId);
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentObserver.BuildQuestDetailsJson(observedQuest));
+                    break;
                 case "harnessMissionDiagnostics":
                     var missionDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
                     var missionDiagnosticsRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
@@ -184,6 +189,21 @@ internal sealed class ChronicleAgentProtocol
                     if (Game.Current?.GameStateManager?.ActiveState is not MapState)
                         throw new InvalidOperationException("harnessCharacterDevelopmentDiagnostics requires the Campaign Map state");
                     WriteResponse(commandId, action, "completed", behavior, null, BuildHarnessCharacterDevelopmentDiagnosticsJson());
+                    break;
+                case "harnessQuestDetailsDiagnostics":
+                    var questDetailsDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var questDetailsDiagnosticsRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(questDetailsDiagnosticsMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(questDetailsDiagnosticsRoot) || !Directory.Exists(questDetailsDiagnosticsRoot))
+                        throw new InvalidOperationException("harnessQuestDetailsDiagnostics is restricted to a visual Harness run with a Harness temp directory");
+                    var diagnosticQuest = FindObservedOngoingQuest(ReadString(command, "questId"));
+                    WriteResponse(commandId, action, "completed", behavior, null, BuildHarnessQuestDetailsDiagnosticsJson(diagnosticQuest));
+                    break;
+                case "harnessQuestDeadlinePrivacyDiagnostics":
+                    var questDeadlineDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var questDeadlineDiagnosticsRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(questDeadlineDiagnosticsMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(questDeadlineDiagnosticsRoot) || !Directory.Exists(questDeadlineDiagnosticsRoot))
+                        throw new InvalidOperationException("harnessQuestDeadlinePrivacyDiagnostics is restricted to a visual Harness run with a Harness temp directory");
+                    WriteResponse(commandId, action, "completed", behavior, null, BuildHarnessQuestDeadlinePrivacyDiagnosticsJson());
                     break;
                 case "talkToSettlementHero":
                     var overlayMenuContext = TaleWorlds.CampaignSystem.Campaign.Current?.CurrentMenuContext;
@@ -949,6 +969,77 @@ internal sealed class ChronicleAgentProtocol
         }
         json.Append("]}");
         return json.ToString();
+    }
+
+    private static string BuildHarnessQuestDetailsDiagnosticsJson(QuestBase quest)
+    {
+        if (quest == null) throw new InvalidOperationException("Active observed Quest is unavailable");
+        var viewModel = new TaleWorlds.CampaignSystem.ViewModelCollection.Quests.QuestItemVM(quest, _ => { });
+        var json = new StringBuilder(2048);
+        json.Append('{');
+        json.Append("\"questId\":\"").Append(Escape(quest.StringId)).Append('"');
+        json.Append(",\"title\":\"").Append(Escape(viewModel.Name)).Append('"');
+        json.Append(",\"isSpecialQuest\":").Append(quest.IsSpecialQuest ? "true" : "false");
+        json.Append(",\"isTracked\":").Append(viewModel.IsTracked ? "true" : "false");
+        json.Append(",\"questGiverHidden\":").Append(viewModel.IsQuestGiverHeroHidden ? "true" : "false");
+        json.Append(",\"questGiverId\":");
+        if (quest.QuestGiver == null) json.Append("null");
+        else json.Append('"').Append(Escape(quest.QuestGiver.StringId)).Append('"');
+        json.Append(",\"questGiverName\":");
+        if (quest.QuestGiver == null) json.Append("null");
+        else json.Append('"').Append(Escape(quest.QuestGiver.Name?.ToString())).Append('"');
+        json.Append(",\"isRemainingTimeHidden\":").Append(viewModel.IsRemainingDaysHidden ? "true" : "false");
+        json.Append(",\"daysRemaining\":");
+        if (viewModel.IsRemainingDaysHidden) json.Append("null");
+        else json.Append(viewModel.RemainingDays);
+        json.Append(",\"journalStages\":[");
+        for (var index = 0; index < viewModel.Stages.Count; index++)
+        {
+            if (index > 0) json.Append(',');
+            var stage = viewModel.Stages[index];
+            json.Append('{');
+            json.Append("\"logType\":\"").Append(Escape(stage.Log?.Type.ToString())).Append('"');
+            json.Append(",\"dateText\":\"").Append(Escape(stage.DateText)).Append('"');
+            json.Append(",\"description\":\"").Append(Escape(stage.DescriptionText)).Append('"');
+            json.Append(",\"isLastStage\":").Append(stage.IsLastStage ? "true" : "false");
+            json.Append(",\"hasTask\":").Append(stage.HasATask ? "true" : "false");
+            if (stage.HasATask)
+            {
+                json.Append(",\"rawTaskName\":");
+                if (stage.Log?.TaskName == null) json.Append("null");
+                else json.Append('"').Append(Escape(stage.Log.TaskName.ToString())).Append('"');
+                json.Append(",\"taskName\":\"").Append(Escape(stage.StageTask.TaskName)).Append('"');
+                json.Append(",\"currentProgress\":").Append(stage.StageTask.CurrentProgress);
+                json.Append(",\"targetProgress\":").Append(stage.StageTask.TargetProgress);
+                json.Append(",\"progressType\":\"").Append(Escape(((LogType)stage.StageTask.ProgressType).ToString())).Append('"');
+                json.Append(",\"isTaskCompleted\":").Append(stage.IsTaskCompleted ? "true" : "false");
+            }
+            json.Append('}');
+        }
+        json.Append("]}");
+        return json.ToString();
+    }
+
+    private static string BuildHarnessQuestDeadlinePrivacyDiagnosticsJson()
+    {
+        var json = new StringBuilder(128);
+        json.Append('{').Append("\"hidden\":{\"available\":true");
+        ChronicleAgentObserver.AppendQuestDeadline(json, true, 14);
+        json.Append("},\"visible\":{\"available\":true");
+        ChronicleAgentObserver.AppendQuestDeadline(json, false, 14);
+        json.Append("}}");
+        return json.ToString();
+    }
+
+    private static QuestBase FindObservedOngoingQuest(string questId)
+    {
+        if (string.IsNullOrWhiteSpace(questId)) throw new InvalidOperationException("questId must come from the current state.quests observation");
+        var campaign = Campaign.Current;
+        if (campaign?.QuestManager == null) throw new InvalidOperationException("Campaign QuestManager is unavailable");
+        var visibleQuests = campaign.QuestManager.Quests.Where(quest => quest != null && quest.IsOngoing).Take(12);
+        var quest = visibleQuests.FirstOrDefault(item => string.Equals(item.StringId, questId, StringComparison.Ordinal));
+        if (quest == null) throw new InvalidOperationException("questId is not among the currently observed ongoing Quest entries");
+        return quest;
     }
 
     private static string SpendMainHeroSkillFocus(string command)

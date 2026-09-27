@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet('start','load','state','mapSettlementTargets','characterDevelopment','spendSkillFocus','captureFrame','harnessMissionDiagnostics','harnessMapDiagnostics','harnessPlayerSkillsDiagnostics','harnessCharacterDevelopmentDiagnostics','talkToSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','move','moveToPoint','missionInput','missionNavigateToAgent','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','recruit','foodOptions','tradeOptions','trade','provision','save','stop')]
+    [ValidateSet('start','load','state','mapSettlementTargets','characterDevelopment','spendSkillFocus','questDetails','captureFrame','harnessMissionDiagnostics','harnessMapDiagnostics','harnessPlayerSkillsDiagnostics','harnessCharacterDevelopmentDiagnostics','harnessQuestDetailsDiagnostics','harnessQuestDeadlinePrivacyDiagnostics','talkToSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','move','moveToPoint','missionInput','missionNavigateToAgent','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','recruit','foodOptions','tradeOptions','trade','provision','save','stop')]
     [string]$Action,
     [string]$SaveName,
     [string]$SettlementId,
@@ -21,6 +21,7 @@ param(
     [string]$OutputPath,
     [string]$HeroId,
     [string]$SkillId,
+    [string]$QuestId,
     [int]$Count = 1,
     [int]$Amount = 1,
     [double]$Days = 0.01,
@@ -204,6 +205,10 @@ switch ($Action) {
     'state' { $result = Invoke-ProtocolCommand 'state' }
     'mapSettlementTargets' { $result = Invoke-ProtocolCommand 'mapSettlementTargets' }
     'characterDevelopment' { $result = Invoke-ProtocolCommand 'characterDevelopment' }
+    'questDetails' {
+        if (-not $QuestId) { throw '-QuestId is required and must come from the current state.quests observation.' }
+        $result = Invoke-ProtocolCommand 'questDetails' @{ questId = $QuestId }
+    }
     'spendSkillFocus' {
         if (-not $SkillId) { throw '-SkillId is required and must come from the current characterDevelopment observation.' }
         $result = Invoke-ProtocolCommand 'spendSkillFocus' @{ skillId = $SkillId; count = $Count }
@@ -212,6 +217,11 @@ switch ($Action) {
     'harnessMapDiagnostics' { $result = Invoke-ProtocolCommand 'harnessMapDiagnostics' }
     'harnessPlayerSkillsDiagnostics' { $result = Invoke-ProtocolCommand 'harnessPlayerSkillsDiagnostics' }
     'harnessCharacterDevelopmentDiagnostics' { $result = Invoke-ProtocolCommand 'harnessCharacterDevelopmentDiagnostics' }
+    'harnessQuestDetailsDiagnostics' {
+        if (-not $QuestId) { throw '-QuestId is required for the Harness-only Quest Journal diagnostic.' }
+        $result = Invoke-ProtocolCommand 'harnessQuestDetailsDiagnostics' @{ questId = $QuestId }
+    }
+    'harnessQuestDeadlinePrivacyDiagnostics' { $result = Invoke-ProtocolCommand 'harnessQuestDeadlinePrivacyDiagnostics' }
     'talkToSettlementHero' {
         if (-not $HeroId) { throw '-HeroId is required and must come from settlementOverlayCharacters in the current observation.' }
         $result = Invoke-ProtocolCommand 'talkToSettlementHero' @{ heroId = $HeroId }

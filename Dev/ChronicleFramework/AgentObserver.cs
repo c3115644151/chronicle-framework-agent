@@ -49,7 +49,7 @@ internal static class ChronicleAgentObserver
 
         var json = new StringBuilder(4096);
         json.Append('{');
-        json.Append("\"schemaVersion\":20");
+        json.Append("\"schemaVersion\":21");
         json.Append(",\"campaignDay\":").Append(Number(CampaignTime.Now.ToDays));
         json.Append(",\"identity\":{");
         Property(json, "heroId", hero.StringId); Property(json, "heroName", hero.Name?.ToString(), true);
@@ -241,7 +241,8 @@ internal static class ChronicleAgentObserver
         {
             if (index > 0) json.Append(',');
             json.Append('{'); Property(json, "id", quests[index].StringId); Property(json, "title", quests[index].Title?.ToString(), true);
-            json.Append(",\"dueDay\":").Append(Number(quests[index].QuestDueTime.ToDays)).Append('}');
+            AppendQuestDeadline(json, quests[index].IsRemainingTimeHidden, (int)(quests[index].QuestDueTime - CampaignTime.Now).ToDays);
+            json.Append('}');
         }
         json.Append(']');
         json.Append(",\"danger\":{");
@@ -373,6 +374,64 @@ internal static class ChronicleAgentObserver
         json.Append(']');
         json.Append("}");
         return json.ToString();
+    }
+
+    internal static string BuildQuestDetailsJson(QuestBase quest)
+    {
+        if (quest == null || !quest.IsOngoing) return "null";
+        var hiddenTime = quest.IsRemainingTimeHidden;
+        var journalEntries = quest.JournalEntries;
+        var json = new StringBuilder(2048);
+        json.Append('{').Append("\"schemaVersion\":1");
+        Property(json, "questId", quest.StringId, true);
+        Property(json, "title", quest.Title?.ToString(), true);
+        json.Append(",\"isSpecialQuest\":").Append(Bool(quest.IsSpecialQuest));
+        json.Append(",\"isTracked\":").Append(Bool(quest.IsTrackEnabled));
+        json.Append(",\"questGiverHidden\":").Append(Bool(quest.QuestGiver == null));
+        json.Append(",\"questGiver\":");
+        if (quest.QuestGiver == null) json.Append("null");
+        else
+        {
+            json.Append('{');
+            Property(json, "id", quest.QuestGiver.StringId);
+            Property(json, "name", quest.QuestGiver.Name?.ToString(), true);
+            json.Append('}');
+        }
+        AppendQuestDeadline(json, hiddenTime, (int)(quest.QuestDueTime - CampaignTime.Now).ToDays);
+        json.Append(",\"journalStages\":[");
+        for (var index = 0; index < journalEntries.Count; index++)
+        {
+            if (index > 0) json.Append(',');
+            var log = journalEntries[index];
+            var hasTask = log.Type != LogType.Text && log.Type != LogType.None;
+            var currentProgress = log.Type == LogType.TwoWayContinuous ? log.CurrentProgress : Math.Max(log.CurrentProgress, 0);
+            var targetProgress = Math.Max(log.Range, 0);
+            json.Append('{');
+            Property(json, "logType", log.Type.ToString());
+            Property(json, "dateText", log.GetTimeText().ToString(), true);
+            Property(json, "description", log.LogText?.ToString(), true);
+            json.Append(",\"isLastStage\":").Append(Bool(index == journalEntries.Count - 1));
+            json.Append(",\"hasTask\":").Append(Bool(hasTask));
+            if (hasTask)
+            {
+                Property(json, "taskName", log.TaskName?.ToString(), true);
+                json.Append(",\"currentProgress\":").Append(currentProgress);
+                json.Append(",\"targetProgress\":").Append(targetProgress);
+                Property(json, "progressType", log.Type.ToString(), true);
+                json.Append(",\"isTaskCompleted\":").Append(Bool(currentProgress == targetProgress));
+            }
+            json.Append('}');
+        }
+        json.Append("]}");
+        return json.ToString();
+    }
+
+    internal static void AppendQuestDeadline(StringBuilder json, bool isHidden, int daysRemaining)
+    {
+        json.Append(",\"isRemainingTimeHidden\":").Append(Bool(isHidden));
+        json.Append(",\"daysRemaining\":");
+        if (isHidden) json.Append("null");
+        else json.Append(daysRemaining);
     }
 
     private static string BuildMissionObservationJson()
