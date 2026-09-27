@@ -119,6 +119,7 @@ try {
     $initialConversationHeroMatchesTarget = [bool]$conversationStartedForTarget
     $questCountBefore = @($arrived.state.quests).Count
     $issueTopicRequested = $false
+    $alternativeExplanationRequested = $false
     $questOfferObserved = $false
     $questAccepted = $false
     $questBlockedReason = $null
@@ -139,11 +140,13 @@ try {
             else {
                 $questSolutionPath = @($currentOptions | Where-Object { $_.id -eq 'issue_explanation_player_response_pre_quest_solution' -and $_.clickable } | Select-Object -First 1)
                 $issueTopic = @($currentOptions | Where-Object { $_.id -eq 'hero_give_issue' -and $_.clickable } | Select-Object -First 1)
+                $alternativeExplanationPath = @($currentOptions | Where-Object { $_.id -eq 'issue_alternative_solution_player_response' -and $_.clickable } | Select-Object -First 1)
                 $introResponse = @($currentOptions | Where-Object { $_.id -eq 'lord_meet_player_response1' -and $_.clickable } | Select-Object -First 1)
                 $alternativeOrLordSolution = @($currentOptions | Where-Object { $_.id -in @('issue_offer_player_accept_alternative','issue_offer_player_accept_lord') -and $_.clickable })
                 if ($questSolutionPath.Count -eq 1) { $selectedOption = 'issue_explanation_player_response_pre_quest_solution' }
                 elseif ($issueTopic.Count -eq 1 -and -not $issueTopicRequested) { $selectedOption = 'hero_give_issue' }
                 elseif ($issueTopic.Count -eq 1 -and $issueTopicRequested) { $questBlockedReason = 'The native conversation returned to its main options after the Issue topic; no legal Quest solution was opened.'; break }
+                elseif ($alternativeExplanationPath.Count -eq 1 -and -not $alternativeExplanationRequested) { $selectedOption = 'issue_alternative_solution_player_response' }
                 elseif ($introResponse.Count -eq 1) { $selectedOption = 'lord_meet_player_response1' }
                 elseif ($alternativeOrLordSolution.Count -gt 0) { $questBlockedReason = 'Only Alternative or Lord Solution options are available; this W2-E test will not select those paths.'; break }
                 elseif ($currentOptions.Count -eq 0) { $selectedAction = 'dialogueContinue' }
@@ -160,6 +163,7 @@ try {
             $dialogueTrace += [ordered]@{ Step = $step; SentenceBefore = $currentConversation.sentenceText; OptionsBefore = $optionListBefore; Action = $selectedAction; OptionId = $selectedOption; ReceiptStatus = $selection.status; ReceiptError = $selection.error }
             if ($selection.status -ne 'completed') { $questBlockedReason = "Native conversation action rejected: $($selection.error)"; break }
             if ($selectedOption -eq 'hero_give_issue') { $issueTopicRequested = $true }
+            if ($selectedOption -eq 'issue_alternative_solution_player_response') { $alternativeExplanationRequested = $true }
             Start-Sleep -Milliseconds 250
             $postTalk = Invoke-AgentCli 'state' @('-CommandId', "$commandPrefix-quest-state-$step") 30
             $questCountAfterStep = @($postTalk.state.quests).Count
@@ -201,6 +205,7 @@ try {
         ExpectedOutcome = $ExpectedOutcome
         IssueQuestAcceptanceRequested = [bool]($ExpectedOutcome -ne 'ConversationOnly')
         IssueTopicRequested = $issueTopicRequested
+        AlternativeExplanationRequested = $alternativeExplanationRequested
         QuestOfferObserved = $questOfferObserved
         QuestAccepted = $questAccepted
         QuestBlockedReason = $questBlockedReason
