@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet('start','load','state','mapSettlementTargets','mapPartyTargets','mapPartyComposition','mapPartyBehavior','partyUpgradeOptions','upgradeTroop','characterDevelopment','spendSkillFocus','questDetails','partyRoster','captureFrame','harnessMissionDiagnostics','harnessMapDiagnostics','harnessPlayerSkillsDiagnostics','harnessCharacterDevelopmentDiagnostics','harnessQuestDetailsDiagnostics','harnessQuestDeadlinePrivacyDiagnostics','harnessPartyRosterDiagnostics','harnessMapPartyDiagnostics','harnessMapPartyCompositionDiagnostics','harnessCreateMapArmyFixture','harnessSeedPartyUpgradeFixture','talkToSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','move','moveToPoint','missionInput','missionNavigateToAgent','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','foodOptions','tradeOptions','trade','provision','save','stop')]
+    [ValidateSet('start','load','state','mapSettlementTargets','mapPartyTargets','mapPartyComposition','mapPartyBehavior','partyUpgradeOptions','upgradeTroop','prisonerRecruitmentOptions','recruitPrisoner','characterDevelopment','spendSkillFocus','questDetails','partyRoster','captureFrame','harnessMissionDiagnostics','harnessMapDiagnostics','harnessPlayerSkillsDiagnostics','harnessCharacterDevelopmentDiagnostics','harnessQuestDetailsDiagnostics','harnessQuestDeadlinePrivacyDiagnostics','harnessPartyRosterDiagnostics','harnessMapPartyDiagnostics','harnessMapPartyCompositionDiagnostics','harnessCreateMapArmyFixture','harnessSeedPartyUpgradeFixture','harnessSeedPrisonerRecruitmentFixture','talkToSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','move','moveToPoint','missionInput','missionNavigateToAgent','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','foodOptions','tradeOptions','trade','provision','save','stop')]
     [string]$Action,
     [string]$SaveName,
     [string]$SettlementId,
@@ -16,6 +16,7 @@ param(
     [string]$OptionId,
     [string]$OwnerId,
     [string]$TroopId,
+    [switch]$ConfirmPartySizeWarning,
     [ValidateSet('members','prisoners')][string]$LootType,
     [int]$VolunteerSlot = -1,
     [string]$ItemId,
@@ -221,6 +222,11 @@ switch ($Action) {
         if ($UpgradeTargetIndex -lt 0) { throw '-UpgradeTargetIndex must be selected from the latest partyUpgradeOptions observation.' }
         $result = Invoke-ProtocolCommand 'upgradeTroop' @{ troopId = $TroopId; upgradeTargetIndex = $UpgradeTargetIndex }
     }
+    'prisonerRecruitmentOptions' { $result = Invoke-ProtocolCommand 'prisonerRecruitmentOptions' }
+    'recruitPrisoner' {
+        if (-not $TroopId) { throw '-TroopId is required and must be selected from the latest prisonerRecruitmentOptions observation.' }
+        $result = Invoke-ProtocolCommand 'recruitPrisoner' @{ troopId = $TroopId; confirmPartySizeWarning = [int]$ConfirmPartySizeWarning.IsPresent }
+    }
     'characterDevelopment' { $result = Invoke-ProtocolCommand 'characterDevelopment' }
     'questDetails' {
         if (-not $QuestId) { throw '-QuestId is required and must come from the current state.quests observation.' }
@@ -253,6 +259,7 @@ switch ($Action) {
         $result = Invoke-ProtocolCommand 'harnessCreateMapArmyFixture' $armyCommand
     }
     'harnessSeedPartyUpgradeFixture' { $result = Invoke-ProtocolCommand 'harnessSeedPartyUpgradeFixture' }
+    'harnessSeedPrisonerRecruitmentFixture' { $result = Invoke-ProtocolCommand 'harnessSeedPrisonerRecruitmentFixture' }
     'talkToSettlementHero' {
         if (-not $HeroId) { throw '-HeroId is required and must come from settlementOverlayCharacters in the current observation.' }
         $result = Invoke-ProtocolCommand 'talkToSettlementHero' @{ heroId = $HeroId }

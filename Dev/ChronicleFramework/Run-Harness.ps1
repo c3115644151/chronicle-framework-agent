@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'BattleFixture', 'PostBattle', 'Observation', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'MapSettlementTargets', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'VisualCapture', 'All')]
+    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'BattleFixture', 'PostBattle', 'Observation', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'MapSettlementTargets', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'VisualCapture', 'All')]
     [string]$Phase = 'All',
     [int]$SmokeTimeoutSeconds = 45,
     [int]$SmokeStabilitySeconds = 8,
@@ -13,7 +13,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '5.28'
+$HarnessContractVersion = '5.29'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -58,6 +58,7 @@ $mapPartyTargetsScript = Join-Path $harnessRoot 'Test-AgentMapPartyTargets.ps1'
 $mapPartyCompositionScript = Join-Path $harnessRoot 'Test-AgentMapPartyComposition.ps1'
 $mapPartyBehaviorScript = Join-Path $harnessRoot 'Test-AgentMapPartyBehavior.ps1'
 $partyUpgradeScript = Join-Path $harnessRoot 'Test-AgentPartyUpgrade.ps1'
+$partyPrisonerRecruitmentScript = Join-Path $harnessRoot 'Test-AgentPartyPrisonerRecruitment.ps1'
 $docsScript = Join-Path $harnessRoot 'Check-Docs.ps1'
 $contextPackScript = Join-Path $harnessRoot 'Get-ContextPack.ps1'
 
@@ -167,6 +168,7 @@ $requestedStages = switch ($Phase) {
     'MapArmyComposition' { @('Preflight', 'Build', 'MapArmyComposition') }
     'MapPartyBehavior' { @('Preflight', 'Build', 'MapPartyBehavior') }
     'PartyUpgrade' { @('Preflight', 'Build', 'PartyUpgrade') }
+    'PartyPrisonerRecruitment' { @('Preflight', 'Build', 'PartyPrisonerRecruitment') }
     'Movement' { @('Preflight', 'Build', 'Movement') }
     'MoveToPoint' { @('Preflight', 'Build', 'MoveToPoint') }
     'Recruitment' { @('Preflight', 'Build', 'Recruitment') }
@@ -182,7 +184,7 @@ $requestedStages = switch ($Phase) {
     'SettlementOverlayQuestGate' { @('Preflight', 'Build', 'SettlementOverlayQuestGate') }
     'MapSettlementTargets' { @('Preflight', 'Build', 'MapSettlementTargets') }
     'VisualCapture' { @('Preflight', 'Build', 'VisualCapture') }
-    'All' { @('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'Protocol', 'AgentLoop', 'Observation', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'MapSettlementTargets', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'QuestAcceptance', 'BattleFixture', 'PostBattle', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestGate') }
+    'All' { @('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'Protocol', 'AgentLoop', 'Observation', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'MapSettlementTargets', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'QuestAcceptance', 'BattleFixture', 'PostBattle', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestGate') }
 }
 
 foreach ($stage in $requestedStages) {
@@ -532,6 +534,12 @@ foreach ($stage in $requestedStages) {
             Invoke-Stage -Name 'PartyUpgrade' -Action {
                 & powershell -NoProfile -ExecutionPolicy Bypass -File $partyUpgradeScript
                 if ($LASTEXITCODE -ne 0) { throw "Native MainParty PartyScreen upgrade transaction failed with exit code $LASTEXITCODE." }
+            }
+        }
+        'PartyPrisonerRecruitment' {
+            Invoke-Stage -Name 'PartyPrisonerRecruitment' -Action {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $partyPrisonerRecruitmentScript
+                if ($LASTEXITCODE -ne 0) { throw "Native MainParty PartyScreen prisoner recruitment transaction failed with exit code $LASTEXITCODE." }
             }
         }
         'AgentLoop' {

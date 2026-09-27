@@ -1,14 +1,11 @@
 using System;
 using System.Linq;
-using System.Reflection;
 using System.Text;
-using Helpers;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.GameState;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.ViewModelCollection.Party;
 using TaleWorlds.Core;
-using TaleWorlds.Localization;
 
 namespace ChronicleFramework;
 
@@ -18,7 +15,7 @@ internal static class ChroniclePartyUpgradeAdapter
     {
         var beforeMode = Campaign.Current.TimeControlMode.ToString();
         var beforeDay = CampaignTime.Now.ToDays;
-        var viewModel = OpenMainPartyScreen();
+        var viewModel = ChroniclePartyScreenAdapter.OpenMainPartyNormal();
         var duringMode = Campaign.Current.TimeControlMode.ToString();
         var json = new StringBuilder(4096);
         json.Append('{').Append("\"schemaVersion\":1");
@@ -75,7 +72,7 @@ internal static class ChroniclePartyUpgradeAdapter
         }
         finally
         {
-            CancelOpenedPartyScreen(viewModel);
+            ChroniclePartyScreenAdapter.CancelAndFinalize(viewModel);
         }
         json.Append("],\"timeControlModeAfter\":\"").Append(Escape(Campaign.Current.TimeControlMode.ToString())).Append('"');
         json.Append(",\"campaignDayAfter\":").Append(CampaignTime.Now.ToDays.ToString("F3", System.Globalization.CultureInfo.InvariantCulture));
@@ -89,7 +86,7 @@ internal static class ChroniclePartyUpgradeAdapter
             throw new InvalidOperationException("upgradeTroop requires a current troopId and non-negative upgradeTargetIndex");
         var timeModeBefore = Campaign.Current.TimeControlMode.ToString();
         var campaignDayBefore = CampaignTime.Now.ToDays;
-        var viewModel = OpenMainPartyScreen();
+        var viewModel = ChroniclePartyScreenAdapter.OpenMainPartyNormal();
         try
         {
             var party = MobileParty.MainParty;
@@ -149,74 +146,21 @@ internal static class ChroniclePartyUpgradeAdapter
         }
         catch
         {
-            CancelActiveNormalPartyScreen();
+            ChroniclePartyScreenAdapter.CancelActiveNormal();
             throw;
         }
         finally
         {
-            viewModel.OnFinalize();
+            ChroniclePartyScreenAdapter.Finalize(viewModel);
         }
     }
 
-    private static PartyVM OpenMainPartyScreen()
-    {
-        if (Game.Current == null || Game.Current.CheatMode || Game.Current.GameStateManager?.ActiveState is not MapState || MobileParty.MainParty == null)
-            throw new InvalidOperationException("Party upgrade options/actions require a non-cheat Campaign Map state with MainParty");
-        PartyScreenHelper.OpenScreenAsNormal();
-        var partyState = Game.Current.GameStateManager.ActiveState as PartyState;
-        if (partyState == null || partyState.PartyScreenMode != PartyScreenHelper.PartyScreenMode.Normal || partyState.PartyScreenLogic?.RightOwnerParty?.MobileParty != MobileParty.MainParty)
-        {
-            CancelActiveNormalPartyScreen();
-            throw new InvalidOperationException("Native PartyScreen did not open in normal MainParty mode");
-        }
-        try
-        {
-            var viewModel = new PartyVM(partyState.PartyScreenLogic);
-            PrepareViewModelFinalization(viewModel);
-            return viewModel;
-        }
-        catch
-        {
-            CancelActiveNormalPartyScreen();
-            throw;
-        }
-    }
-
-    private static void CancelOpenedPartyScreen(PartyVM viewModel)
-    {
-        if (Game.Current?.GameStateManager?.ActiveState is PartyState partyState && partyState.PartyScreenMode == PartyScreenHelper.PartyScreenMode.Normal)
-            PartyScreenHelper.CloseScreen(isForced: false, fromCancel: true);
-        viewModel.OnFinalize();
-    }
-
-    private static void PrepareViewModelFinalization(PartyVM viewModel)
-    {
-        viewModel.SetGetKeyTextFromKeyIDFunc(_ => TextObject.GetEmpty());
-        foreach (var methodName in new[]
-        {
-            "SetCancelInputKey", "SetDoneInputKey", "SetResetInputKey", "SetTakeAllTroopsInputKey",
-            "SetDismissAllTroopsInputKey", "SetTakeAllPrisonersInputKey", "SetDismissAllPrisonersInputKey",
-            "SetOpenUpgradePanelInputKey", "SetOpenRecruitPanelInputKey"
-        })
-        {
-            var setter = viewModel.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public);
-            if (setter == null) throw new MissingMethodException(viewModel.GetType().FullName, methodName);
-            setter.Invoke(viewModel, new object[] { null });
-        }
-    }
-
-    private static void CancelActiveNormalPartyScreen()
-    {
-        if (Game.Current?.GameStateManager?.ActiveState is PartyState partyState && partyState.PartyScreenMode == PartyScreenHelper.PartyScreenMode.Normal)
-            PartyScreenHelper.CloseScreen(isForced: false, fromCancel: true);
-    }
-
-    private static void Property(StringBuilder json, string key, string value, bool addComma = true)
+    internal static void Property(StringBuilder json, string key, string value, bool addComma = true)
     {
         if (addComma) json.Append(',');
         json.Append('"').Append(key).Append("\":\"").Append(Escape(value)).Append('"');
     }
 
-    private static string Escape(string value) => (value ?? string.Empty).Replace("\\", "\\\\").Replace("\"", "\\\"");
-    private static string Bool(bool value) => value ? "true" : "false";
+    internal static string Escape(string value) => (value ?? string.Empty).Replace("\\", "\\\\").Replace("\"", "\\\"");
+    internal static string Bool(bool value) => value ? "true" : "false";
 }

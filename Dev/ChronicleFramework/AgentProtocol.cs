@@ -181,6 +181,16 @@ internal sealed class ChronicleAgentProtocol
                     var upgradeTargetIndex = ReadRequiredInteger(command, "upgradeTargetIndex");
                     WriteResponse(commandId, action, "completed", behavior, null, ChroniclePartyUpgradeAdapter.UpgradeOneTroopJson(upgradeTroopId, upgradeTargetIndex));
                     break;
+                case "prisonerRecruitmentOptions":
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("prisonerRecruitmentOptions requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChroniclePartyPrisonerRecruitmentAdapter.BuildOptionsJson());
+                    break;
+                case "recruitPrisoner":
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("recruitPrisoner requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChroniclePartyPrisonerRecruitmentAdapter.RecruitOneJson(ReadString(command, "troopId"), ReadDouble(command, "confirmPartySizeWarning") > 0.5));
+                    break;
                 case "harnessSeedPartyUpgradeFixture":
                     var upgradeFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
                     var upgradeFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
@@ -189,6 +199,15 @@ internal sealed class ChronicleAgentProtocol
                     if (Game.Current?.GameStateManager?.ActiveState is not MapState)
                         throw new InvalidOperationException("harnessSeedPartyUpgradeFixture requires the Campaign Map state");
                     WriteResponse(commandId, action, "completed", behavior, null, SeedPartyUpgradeFixture());
+                    break;
+                case "harnessSeedPrisonerRecruitmentFixture":
+                    var prisonerFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var prisonerFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(prisonerFixtureMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(prisonerFixtureRoot) || !Directory.Exists(prisonerFixtureRoot))
+                        throw new InvalidOperationException("harnessSeedPrisonerRecruitmentFixture is restricted to a visual Harness run with a Harness temp directory");
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("harnessSeedPrisonerRecruitmentFixture requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, SeedPrisonerRecruitmentFixture());
                     break;
                 case "questDetails":
                     var questDetailsId = ReadString(command, "questId");
@@ -1206,6 +1225,65 @@ internal sealed class ChronicleAgentProtocol
         json.Append(",\"membersAfter\":").Append(party.MemberRoster.TotalManCount);
         json.Append(",\"goldBefore\":").Append(goldBefore);
         json.Append(",\"goldAfter\":").Append(hero.Gold);
+        json.Append('}');
+        return json.ToString();
+    }
+
+    private static string SeedPrisonerRecruitmentFixture()
+    {
+        var party = MobileParty.MainParty;
+        var hero = Hero.MainHero;
+        if (Campaign.Current == null || party == null || hero == null)
+            throw new InvalidOperationException("Prisoner recruitment fixture requires an active MainParty and MainHero");
+        if (party.MemberRoster.TotalManCount > party.Party.PartySizeLimit)
+            throw new InvalidOperationException("Prisoner recruitment fixture cannot establish a clean at-limit roster from an already over-limit party");
+
+        TaleWorlds.CampaignSystem.CharacterObject chosenCharacter = null;
+        var conformityCost = 0;
+        var model = Campaign.Current.Models.PrisonerRecruitmentCalculationModel;
+        var maxTier = Campaign.Current.Models.CharacterStatsModel.MaxCharacterTier;
+        foreach (var character in TaleWorlds.CampaignSystem.CharacterObject.All
+            .Where(item => item != null && !item.IsHero && item.IsRegular && item.Tier >= 2 && item.Tier <= maxTier && item.Culture != null && !item.Culture.IsBandit && item.Culture != hero.Culture && party.PrisonRoster.FindIndexOfTroop(item) < 0)
+            .OrderBy(item => item.Tier).ThenBy(item => item.StringId, StringComparer.Ordinal))
+        {
+            var threshold = model.GetConformityNeededToRecruitPrisoner(character);
+            if (threshold <= 1) continue;
+            chosenCharacter = character;
+            conformityCost = threshold;
+            break;
+        }
+        if (chosenCharacter == null)
+            throw new InvalidOperationException("No non-hero regular troop meets native Tier/Culture constraints for a disposable prisoner fixture");
+
+        var filler = TaleWorlds.CampaignSystem.CharacterObject.All.FirstOrDefault(item => item != null && item != chosenCharacter && !item.IsHero && item.IsRegular && party.MemberRoster.FindIndexOfTroop(item) < 0);
+        if (filler == null) throw new InvalidOperationException("No ordinary CharacterObject is available to seed the at-limit MainParty fixture");
+        var membersBefore = party.MemberRoster.TotalManCount;
+        var sizeLimit = party.Party.PartySizeLimit;
+        var fillersAdded = Math.Max(0, sizeLimit - membersBefore);
+        if (fillersAdded > 0) party.MemberRoster.AddToCounts(filler, fillersAdded);
+
+        const int prisonerCount = 2;
+        var seededConformityXp = conformityCost * prisonerCount - 1;
+        party.PrisonRoster.AddToCounts(chosenCharacter, prisonerCount);
+        var prisonerIndex = party.PrisonRoster.FindIndexOfTroop(chosenCharacter);
+        if (prisonerIndex < 0) throw new InvalidOperationException("Harness could not seed the native MainParty prisoner roster");
+        party.PrisonRoster.SetElementXp(prisonerIndex, seededConformityXp);
+
+        var json = new StringBuilder(768);
+        json.Append('{');
+        json.Append("\"characterId\":\"").Append(Escape(chosenCharacter.StringId)).Append('"');
+        json.Append(",\"characterName\":\"").Append(Escape(chosenCharacter.Name?.ToString())).Append('"');
+        json.Append(",\"cultureId\":\"").Append(Escape(chosenCharacter.Culture.StringId)).Append('"');
+        json.Append(",\"tier\":").Append(chosenCharacter.Tier);
+        json.Append(",\"prisonerCount\":").Append(prisonerCount);
+        json.Append(",\"conformityCostPerRecruit\":").Append(conformityCost);
+        json.Append(",\"conformityXpSeeded\":").Append(seededConformityXp);
+        json.Append(",\"availableCountExpected\":1");
+        json.Append(",\"memberCountBefore\":").Append(membersBefore);
+        json.Append(",\"memberCountAfter\":").Append(party.MemberRoster.TotalManCount);
+        json.Append(",\"partySizeLimit\":").Append(sizeLimit);
+        json.Append(",\"fillerTroopId\":\"").Append(Escape(filler.StringId)).Append('"');
+        json.Append(",\"fillersAdded\":").Append(fillersAdded);
         json.Append('}');
         return json.ToString();
     }
