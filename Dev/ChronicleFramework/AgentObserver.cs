@@ -282,6 +282,99 @@ internal static class ChronicleAgentObserver
         return json.ToString();
     }
 
+    internal static string BuildCharacterDevelopmentJson()
+    {
+        var campaign = Campaign.Current;
+        var hero = Hero.MainHero;
+        var developer = hero?.HeroDeveloper;
+        if (campaign == null || hero == null || developer == null) return "null";
+
+        var skills = TaleWorlds.CampaignSystem.Extensions.Skills.All
+            .Where(skill => skill != null)
+            .OrderBy(skill => skill.StringId, StringComparer.Ordinal)
+            .ToArray();
+        var attributes = TaleWorlds.CampaignSystem.Extensions.Attributes.All
+            .Where(attribute => attribute != null)
+            .OrderBy(attribute => attribute.StringId, StringComparer.Ordinal)
+            .ToArray();
+        var allPerks = TaleWorlds.CampaignSystem.CharacterDevelopment.PerkObject.All
+            .Where(perk => perk != null)
+            .ToArray();
+
+        var json = new StringBuilder(4096);
+        json.Append('{').Append("\"schemaVersion\":1");
+        Property(json, "heroId", hero.StringId, true);
+        json.Append(",\"level\":").Append(hero.Level);
+        json.Append(",\"totalExperience\":").Append(developer.TotalXp);
+        json.Append(",\"experienceForNextLevel\":").Append(campaign.Models.CharacterDevelopmentModel.SkillsRequiredForLevel(hero.Level + 1));
+        json.Append(",\"unspentFocusPoints\":").Append(developer.UnspentFocusPoints);
+        json.Append(",\"unspentAttributePoints\":").Append(developer.UnspentAttributePoints);
+
+        json.Append(",\"attributes\":[");
+        for (var index = 0; index < attributes.Length; index++)
+        {
+            if (index > 0) json.Append(',');
+            var attribute = attributes[index];
+            json.Append('{');
+            Property(json, "id", attribute.StringId);
+            Property(json, "name", attribute.Name?.ToString(), true);
+            json.Append(",\"value\":").Append(hero.GetAttributeValue(attribute)).Append('}');
+        }
+        json.Append(']');
+
+        json.Append(",\"skills\":[");
+        for (var index = 0; index < skills.Length; index++)
+        {
+            if (index > 0) json.Append(',');
+            var skill = skills[index];
+            var level = hero.GetSkillValue(skill);
+            var focus = developer.GetFocus(skill);
+            var model = campaign.Models.CharacterDevelopmentModel;
+            json.Append('{');
+            Property(json, "id", skill.StringId);
+            Property(json, "name", skill.Name?.ToString(), true);
+            json.Append(",\"level\":").Append(level);
+            json.Append(",\"experienceProgress\":").Append(developer.GetSkillXpProgress(skill));
+            json.Append(",\"experienceRequiredForNextLevel\":").Append(model.GetXpRequiredForSkillLevel(level + 1) - model.GetXpRequiredForSkillLevel(level));
+            json.Append(",\"focus\":").Append(focus);
+            json.Append(",\"learningRate\":").Append(Number(model.CalculateLearningRate(hero.CharacterAttributes, focus, level, skill).ResultNumber));
+            json.Append(",\"learningLimit\":").Append(TaleWorlds.Library.MathF.Round(model.CalculateLearningLimit(hero.CharacterAttributes, focus, skill).ResultNumber));
+            json.Append(",\"canAddFocus\":").Append(Bool(developer.CanAddFocusToSkill(skill)));
+
+            var availablePerks = allPerks.Where(perk => perk.Skill == skill && (float)level >= perk.RequiredSkillValue).ToArray();
+            var visiblePerks = availablePerks.OrderBy(perk => perk.RequiredSkillValue).ThenBy(perk => perk.StringId, StringComparer.Ordinal).ToArray();
+            json.Append(",\"perks\":[");
+            for (var perkIndex = 0; perkIndex < visiblePerks.Length; perkIndex++)
+            {
+                if (perkIndex > 0) json.Append(',');
+                var perk = visiblePerks[perkIndex];
+                var previous = allPerks
+                    .Where(candidate => candidate.Skill == perk.Skill && candidate.RequiredSkillValue < perk.RequiredSkillValue)
+                    .OrderByDescending(candidate => candidate.RequiredSkillValue)
+                    .ThenBy(candidate => candidate.StringId, StringComparer.Ordinal)
+                    .FirstOrDefault();
+                var previousOwned = previous == null || hero.GetPerkValue(previous) || (previous.AlternativePerk != null && hero.GetPerkValue(previous.AlternativePerk));
+                var alternativeOwned = perk.AlternativePerk != null && hero.GetPerkValue(perk.AlternativePerk);
+                var owned = hero.GetPerkValue(perk);
+                var choiceState = owned ? "owned" : alternativeOwned ? "alternativeSelected" : previousOwned ? "selectable" : "blockedByPrevious";
+                json.Append('{');
+                Property(json, "id", perk.StringId);
+                Property(json, "name", perk.Name?.ToString(), true);
+                json.Append(",\"requiredSkillLevel\":").Append(Number(perk.RequiredSkillValue));
+                Property(json, "alternativeId", perk.AlternativePerk?.StringId, true);
+                json.Append(",\"owned\":").Append(Bool(owned));
+                json.Append(",\"alternativeOwned\":").Append(Bool(alternativeOwned));
+                json.Append(",\"previousPerkOwned\":").Append(Bool(previousOwned));
+                Property(json, "choiceState", choiceState, true);
+                json.Append('}');
+            }
+            json.Append("]}");
+        }
+        json.Append(']');
+        json.Append("}");
+        return json.ToString();
+    }
+
     private static string BuildMissionObservationJson()
     {
         var mission = Mission.Current;

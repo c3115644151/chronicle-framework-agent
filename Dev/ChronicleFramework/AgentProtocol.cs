@@ -138,6 +138,11 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("mapSettlementTargets requires the Campaign Map state");
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentObserver.BuildMapSettlementTargetsJson());
                     break;
+                case "characterDevelopment":
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("characterDevelopment requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentObserver.BuildCharacterDevelopmentJson());
+                    break;
                 case "harnessMissionDiagnostics":
                     var missionDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
                     var missionDiagnosticsRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
@@ -165,6 +170,15 @@ internal sealed class ChronicleAgentProtocol
                     if (Game.Current?.GameStateManager?.ActiveState is not MapState)
                         throw new InvalidOperationException("harnessPlayerSkillsDiagnostics requires the Campaign Map state");
                     WriteResponse(commandId, action, "completed", behavior, null, BuildHarnessPlayerSkillsDiagnosticsJson());
+                    break;
+                case "harnessCharacterDevelopmentDiagnostics":
+                    var characterDevelopmentDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var characterDevelopmentDiagnosticsRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(characterDevelopmentDiagnosticsMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(characterDevelopmentDiagnosticsRoot) || !Directory.Exists(characterDevelopmentDiagnosticsRoot))
+                        throw new InvalidOperationException("harnessCharacterDevelopmentDiagnostics is restricted to a visual Harness run with a Harness temp directory");
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("harnessCharacterDevelopmentDiagnostics requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, BuildHarnessCharacterDevelopmentDiagnosticsJson());
                     break;
                 case "talkToSettlementHero":
                     var overlayMenuContext = TaleWorlds.CampaignSystem.Campaign.Current?.CurrentMenuContext;
@@ -867,6 +881,66 @@ internal sealed class ChronicleAgentProtocol
             json.Append("\"id\":\"").Append(Escape(skill.StringId)).Append('"');
             json.Append(",\"level\":").Append(hero.GetSkillValue(skill));
             json.Append('}');
+        }
+        json.Append("]}");
+        return json.ToString();
+    }
+
+    private static string BuildHarnessCharacterDevelopmentDiagnosticsJson()
+    {
+        var hero = Hero.MainHero;
+        if (hero == null) throw new InvalidOperationException("MainHero is unavailable");
+        var viewModel = new TaleWorlds.CampaignSystem.ViewModelCollection.CharacterDeveloper.CharacterDeveloperHeroItemVM(hero, () => { });
+        var json = new StringBuilder(4096);
+        json.Append('{');
+        json.Append("\"heroId\":\"").Append(Escape(hero.StringId)).Append('"');
+        json.Append(",\"level\":").Append(hero.Level);
+        json.Append(",\"currentTotalXp\":").Append(viewModel.CurrentTotalXp);
+        json.Append(",\"xpRequiredForNextLevel\":").Append(viewModel.XpRequiredForNextLevel);
+        json.Append(",\"unspentFocusPoints\":").Append(viewModel.UnspentCharacterPoints);
+        json.Append(",\"unspentAttributePoints\":").Append(viewModel.UnspentAttributePoints);
+        json.Append(",\"attributes\":[");
+        for (var index = 0; index < viewModel.Attributes.Count; index++)
+        {
+            if (index > 0) json.Append(',');
+            var attribute = viewModel.Attributes[index];
+            json.Append('{');
+            json.Append("\"id\":\"").Append(Escape(attribute.AttributeType.StringId)).Append('"');
+            json.Append(",\"name\":\"").Append(Escape(attribute.Name)).Append('"');
+            json.Append(",\"value\":").Append(attribute.AttributeValue).Append('}');
+        }
+        json.Append(']');
+        json.Append(",\"skills\":[");
+        for (var index = 0; index < viewModel.Skills.Count; index++)
+        {
+            if (index > 0) json.Append(',');
+            var skill = viewModel.Skills[index];
+            json.Append('{');
+            json.Append("\"id\":\"").Append(Escape(skill.SkillId)).Append('"');
+            json.Append(",\"name\":\"").Append(Escape(skill.NameText)).Append('"');
+            json.Append(",\"level\":").Append(skill.Level);
+            json.Append(",\"experienceProgress\":").Append(skill.CurrentSkillXP);
+            json.Append(",\"experienceRequiredForNextLevel\":").Append(skill.XpRequiredForNextLevel);
+            json.Append(",\"focus\":").Append(skill.CurrentFocusLevel);
+            json.Append(",\"learningRate\":").Append(skill.LearningRate.ToString("R", CultureInfo.InvariantCulture));
+            json.Append(",\"learningLimit\":").Append(skill.FullLearningRateLevel);
+            json.Append(",\"canAddFocus\":").Append(skill.CanAddFocus ? "true" : "false");
+            json.Append(",\"unopenedPerks\":").Append(skill.NumOfUnopenedPerks);
+            json.Append(",\"perks\":[");
+            for (var perkIndex = 0; perkIndex < skill.Perks.Count; perkIndex++)
+            {
+                if (perkIndex > 0) json.Append(',');
+                var perk = skill.Perks[perkIndex];
+                json.Append('{');
+                json.Append("\"id\":\"").Append(Escape(perk.Perk.StringId)).Append('"');
+                json.Append(",\"requiredSkillLevel\":").Append(perk.Level);
+                json.Append(",\"alternativeId\":");
+                if (perk.Perk.AlternativePerk == null) json.Append("null");
+                else json.Append('"').Append(Escape(perk.Perk.AlternativePerk.StringId)).Append('"');
+                json.Append(",\"state\":").Append(perk.PerkState);
+                json.Append(",\"alternativeType\":").Append(perk.AlternativeType).Append('}');
+            }
+            json.Append("]}");
         }
         json.Append("]}");
         return json.ToString();

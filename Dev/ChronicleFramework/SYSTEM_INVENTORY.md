@@ -263,7 +263,7 @@ A06开局与战役内上下文分别拆成“选择Difficulty preset”和“编
 | --- | --- | --- | --- | --- |
 | OBS-B01-01 | 观察 | N→Hero百科页的当前身份/职业/文化等概要；Last Seen与历史日志字段单列到OBS-A07-01 | 页面基于可见/已知资料，不是全部Campaign实时状态 | Chronicle不提供完整Hero页面；B01/B04/H01、A07、L05；页面条件未实机全验 |
 | OBS-B02-01 | 观察 | N→Hero页面家庭、父母/子女/配偶等亲属视图 | 亲属对象引用不等同Clan成员、effective Relation或继承权 | Chronicle无家庭树；B02、I05；所有家庭可见规则未知 |
-| OBS-B03-01 | 观察 | C→Character Developer查看当前适用Hero的Attributes/Skills/Focus/Perks；AI快照另明确主角Skill等级 | Hero的Skills当前Level、XP、Focus投入、属性与已获得Perk是不同值；Character Developer草稿变更只有Done才提交 | Chronicle schema20已在`mainHeroSkills`返回MainHero每个活动SkillObject id/name/Level，不报XP/Focus/Perks/其它Hero技能；B03/E09/H10/L05 |
+| OBS-B03-01 | 观察 | C→Character Developer查看当前适用Hero的Attributes/Skills/Focus/Perks；AI快照另明确主角Skill等级 | Hero的Skills当前Level、XP、Focus投入、属性与已获得Perk是不同值；Character Developer草稿变更只有Done才提交 | `state` schema20常驻提供MainHero技能等级；Agent显式调用`characterDevelopment`才按需返回MainHero属性、点数余额、等级/技能XP进度、Focus、学习率/上限及当前等级已解锁Perk状态；不返回同伴/Trait或未来等级整张Perk目录。W2-H对照原生CharacterDeveloperHeroItemVM通过；C/B03/E09/H10/L05 |
 | OBS-B04-01 | 观察 | Hero百科/对话对象上下文查看Occupation、Clan/Faction/当前归属 | Hero身份/Clan关系和Party所属状态分别显示，不能推断为一个“NPC阵营”字段 | Chronicle提供Main Hero身份和有限Party摘要；不提供周边Hero完整职业/历史归属 | B04、J08、AgentObserver；特例可见性未穷举 |
 | OBS-B05-01 | 观察 | L→Clan Management的成员/Party/Fief/Finance页面 | 页面数据随当前PlayerClan刷新；Tab不等于操作 | Chronicle只输出Clan摘要；B05/H02/L05；领导身份差异待测 |
 | OBS-B06-01 | 观察 | K→Kingdom Management各管理页 | 可用页面受Player Clan所在Faction与身份约束 | Chronicle无Kingdom/决议详情观察；B06/C/L05 |
