@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet('start','load','state','mapSettlementTargets','mapPartyTargets','mapPartyComposition','mapPartyBehavior','partyUpgradeOptions','upgradeTroop','prisonerRecruitmentOptions','recruitPrisoner','characterDevelopment','spendSkillFocus','questDetails','partyRoster','partyRoles','setPartyRole','unassignPartyRole','captureFrame','harnessMissionDiagnostics','harnessMapDiagnostics','harnessPlayerSkillsDiagnostics','harnessCharacterDevelopmentDiagnostics','harnessQuestDetailsDiagnostics','harnessQuestDeadlinePrivacyDiagnostics','harnessPartyRosterDiagnostics','harnessMapPartyDiagnostics','harnessMapPartyCompositionDiagnostics','harnessCreateMapArmyFixture','harnessSeedPartyUpgradeFixture','harnessSeedPrisonerRecruitmentFixture','harnessPrepareCompanionHiringFixture','harnessCompanionHiringDiagnostics','harnessSeedPartyRoleFixture','harnessPartyRoleDiagnostics','talkToSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','move','moveToPoint','missionInput','missionNavigateToAgent','missionInteract','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','foodOptions','tradeOptions','trade','provision','save','stop')]
+    [ValidateSet('start','load','state','mapSettlementTargets','mapPartyTargets','mapPartyComposition','mapPartyBehavior','partyUpgradeOptions','upgradeTroop','prisonerRecruitmentOptions','recruitPrisoner','characterDevelopment','spendSkillFocus','questDetails','partyRoster','partyRoles','inventoryOpen','heroEquipmentOptions','equipHeroItem','unequipHeroItem','inventoryConfirm','inventoryCancel','inventoryCancelChanges','setPartyRole','unassignPartyRole','captureFrame','harnessMissionDiagnostics','harnessMapDiagnostics','harnessPlayerSkillsDiagnostics','harnessCharacterDevelopmentDiagnostics','harnessQuestDetailsDiagnostics','harnessQuestDeadlinePrivacyDiagnostics','harnessPartyRosterDiagnostics','harnessMapPartyDiagnostics','harnessMapPartyCompositionDiagnostics','harnessCreateMapArmyFixture','harnessSeedPartyUpgradeFixture','harnessSeedPrisonerRecruitmentFixture','harnessPrepareCompanionHiringFixture','harnessCompanionHiringDiagnostics','harnessSeedPartyRoleFixture','harnessPartyRoleDiagnostics','harnessOpenInventoryState','harnessCloseInventoryState','harnessInventoryStateDiagnostics','talkToSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','move','moveToPoint','missionInput','missionNavigateToAgent','missionInteract','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','foodOptions','tradeOptions','trade','provision','save','stop')]
     [string]$Action,
     [string]$SaveName,
     [string]$SettlementId,
@@ -24,6 +24,8 @@ param(
     [string]$OutputPath,
     [string]$HeroId,
     [string]$RoleId,
+    [string]$ItemViewModelId,
+    [int]$EquipmentIndex = -1,
     [int]$GoldOffset = 1,
     [string]$SkillId,
     [string]$QuestId,
@@ -236,6 +238,20 @@ switch ($Action) {
     }
     'partyRoster' { $result = Invoke-ProtocolCommand 'partyRoster' }
     'partyRoles' { $result = Invoke-ProtocolCommand 'partyRoles' }
+    'inventoryOpen' { $result = Invoke-ProtocolCommand 'inventoryOpen' }
+    'heroEquipmentOptions' { $result = Invoke-ProtocolCommand 'heroEquipmentOptions' }
+    'equipHeroItem' {
+        if (-not $ItemViewModelId) { throw '-ItemViewModelId is required from the latest heroEquipmentOptions query.' }
+        if ($EquipmentIndex -lt 0) { throw '-EquipmentIndex must come from the latest heroEquipmentOptions query.' }
+        $result = Invoke-ProtocolCommand 'equipHeroItem' @{ itemViewModelId = $ItemViewModelId; equipmentIndex = $EquipmentIndex }
+    }
+    'unequipHeroItem' {
+        if ($EquipmentIndex -lt 0) { throw '-EquipmentIndex must come from the latest heroEquipmentOptions query.' }
+        $result = Invoke-ProtocolCommand 'unequipHeroItem' @{ equipmentIndex = $EquipmentIndex }
+    }
+    'inventoryConfirm' { $result = Invoke-ProtocolCommand 'inventoryConfirm' }
+    'inventoryCancel' { $result = Invoke-ProtocolCommand 'inventoryCancel' }
+    'inventoryCancelChanges' { $result = Invoke-ProtocolCommand 'inventoryCancelChanges' }
     'setPartyRole' {
         if (-not $RoleId) { throw '-RoleId is required for setPartyRole.' }
         if (-not $HeroId) { throw '-HeroId is required for setPartyRole and must come from the latest partyRoles observation.' }
@@ -247,6 +263,9 @@ switch ($Action) {
     }
     'harnessSeedPartyRoleFixture' { $result = Invoke-ProtocolCommand 'harnessSeedPartyRoleFixture' }
     'harnessPartyRoleDiagnostics' { $result = Invoke-ProtocolCommand 'harnessPartyRoleDiagnostics' }
+    'harnessOpenInventoryState' { $result = Invoke-ProtocolCommand 'harnessOpenInventoryState' }
+    'harnessCloseInventoryState' { $result = Invoke-ProtocolCommand 'harnessCloseInventoryState' }
+    'harnessInventoryStateDiagnostics' { $result = Invoke-ProtocolCommand 'harnessInventoryStateDiagnostics' }
     'spendSkillFocus' {
         if (-not $SkillId) { throw '-SkillId is required and must come from the current characterDevelopment observation.' }
         $result = Invoke-ProtocolCommand 'spendSkillFocus' @{ skillId = $SkillId; count = $Count }

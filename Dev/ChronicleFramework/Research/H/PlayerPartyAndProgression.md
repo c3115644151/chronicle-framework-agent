@@ -84,11 +84,17 @@ W2-T运行证据 `TestResults/20260927-213318/Temp/PartyRolesResult.json`：一�
 
 ## H08 Equipment：角色装备、装备集与穿戴限制
 
-玩家可在Inventory的装备区域选择当前Hero与装备模式，将可用Item从库存移入武器、防具、坐骑、马具等槽位；`SPInventoryVM`根据当前Hero、装备集/EquipmentMode、物品要求和槽位判断可否装备。Campaign可能分别管理Battle和Civilian Equipment，某项物品能否装备不只取决于有无库存，还受角色能力、物品类别、装备槽、模式和Mod替换规则影响。NPC同伴/Family Hero的Equipment是其Hero状态的一部分，队伍普通Troop单位则使用Character equipment/template；不能用一个英雄装备槽代表整个Party士兵装备。
+本机1.4.8玩家从Campaign Map导航栏的Inventory入口进入：`MapScreen.TickNavigationInput`按当前绑定调用Inventory项权限与`OpenInventory`，鼠标入口则由`InventoryNavigationElement.OpenView`走相同ScreenHelper。该入口会检查地图导航是否开启、Hero被俘/Raft、已有InventoryState及当前Mission的Inventory access；然后经`MapNavigationHelper.SwitchToANewScreen`调用`InventoryScreenHelper.OpenScreenAsInventory`。Helper创建`InventoryState`/`InventoryLogic`，右侧为`MobileParty.MainParty.ItemRoster`和成员Roster，活动角色为`CharacterObject.PlayerCharacter`，非商店交易，权限允许SpecialActions。Native `GauntletInventoryScreen.OnReady`取得这份`InventoryLogic`，用当前Mission是否要求Civilian模式和原版`GetItemUsageSetFlag`构造`SPInventoryVM`。
+
+`SPInventoryVM`当前定义Civilian/Battle/Stealth三种EquipmentMode并将其映射到各自Equipment库存侧；当前MainHero可切换模式，但本次W2-U首切片只支持当下原生VM模式，不默认三种全覆盖。玩家在UI将可用Item从PlayerInventory拖到具体Equipment槽：Native绑定进入`ExecuteTransferWithParameters(SPItemVM, index, targetTag)`；它判断Item来源/当前装备模式、目标`EquipmentIndex`、`CharacterHelper.CanUseItem`、`Equipment.IsItemFitsToSlot`、性别/民用使用/骑乘Harness条件，再经Equip/Unequip VM处理器创建`TransferCommand`并加入`InventoryLogic`草稿。换槽时原装备按原生ItemRoster/Equipment transaction逻辑返还，武器槽会按Equipment类型/空位选择；装备不是简单把物品写进Equipment数组。装备候选兼顾`EquipmentElement` modifier，普通库存堆叠与每个装备槽单件不是同一数量语义。
+
+确认/取消不同：`GauntletInventoryScreen.ExecuteConfirm`调`SPInventoryVM.ExecuteCompleteTransactions`并由`InventoryLogic.DoneLogic`最终处理原生转移；ESC Cancel调`ExecuteResetAndCompleteTransactions(true)`撤回本次未完成事务。故执行VM Equip handler但未Done只能算草稿，不可报告装备完成。某项物品能否装备除库存外还受角色技能/Perk/Item条件、类别与槽位、Civilian/Stealth模式和Mod规则影响。NPC同伴/Family Hero的Equipment是各自Hero状态；队伍普通Troop单位使用Character equipment/template，不能用一个英雄装备槽代表全Party。
 
 ViewModel会执行选择、预览、装备/卸装、可用性与重量更新；最终由本体Equipment/Inventory容器状态处理。角色可用性与UI比对提示不同于直接设置 `Equipment`元素。是否已保存装备，应观察当前Hero的Battle/Civilian装备及Inventory变动，而不是只看角色纸娃娃预览。
 
-Chronicle当前不提供角色Equipment槽观察、切换装备模式或给英雄穿戴/脱下装备的动作；只观察队伍物品总量/载重。证据：ViewModelCollection `SPInventoryVM`的装备模式、可装备检查、Equip/Unequip流程及Campaign Equipment/InventoryLogic；与 E02交易及 F12俘虏 roster区分。打开装备界面的准确玩家路径、每项物品限制/提示、主角与同伴的装备提交/取消差异、装备造成的即时属性刷新时点和可视映射仍未逐项运行验证。
+W2-U (#48)已有代码切片：`inventoryOpen`走Campaign Map原生Inventory导航项；`heroEquipmentOptions`读取GauntletInventoryScreen当前SPInventoryVM；`equipHeroItem/unequipHeroItem`使用本体`ExecuteTransferWithParameters`建立草稿，`inventoryConfirm`调用当前页面原生Done，`inventoryCancel`和`inventoryCancelChanges`分别实现无草稿离开与明确确认撤回。查询/动作只针对当前被选中的MainHero及当前equipment mode，且一次只操作一个Item/slot；不直接写Equipment/ItemRoster，不包含商店交易、Loot等其他InventoryMode。打开/提交/撤销均不主动调用Campaign时钟API，Inventory State期间的自然时钟行为仍未知。
+
+运行证据仍不足：旧适配版`TestResults/20260927-220236`实开Native InventoryState、观察到Gauntlet Handler并留存引擎截图，但没有读当前SPInventoryVM；新代码构建通过，后续Runtime尝试被启动器/native `Mod change detected` 着色器缓存确认窗口阻止（Harness遵守既有规则未发送Windows输入），所以装备候选/VM私有字段/事务及精确Inventory时钟结果尚未实机核验。下次运行需先让该一次性缓存确认完成，再重复`InventoryNavigation`及`EquipmentTransactions`，不能把Build通过当成游戏功能验收。来源链：当前1.4.8 `MapScreen.TickNavigationInput/OpenInventory`、SandBox.View `InventoryNavigationElement.GetPermission/OpenView`、Campaign `InventoryScreenHelper`/`InventoryLogic`、`GauntletInventoryScreen`、ViewModelCollection `SPInventoryVM`/`SPItemVM`。
 
 ## H09 Crafting：城镇锻造、炼制与熔炼
 

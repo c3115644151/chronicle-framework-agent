@@ -233,6 +233,15 @@ internal sealed class ChronicleAgentProtocol
                     RequireRoleHarnessMode();
                     WriteResponse(commandId, action, "completed", behavior, null, ChroniclePartyRoleAdapter.BuildHarnessDiagnosticsJson());
                     break;
+                case "harnessOpenInventoryState":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleInventoryStateAdapter.OpenThroughNativeMapNavigation(requireHarnessMode: true));
+                    break;
+                case "harnessCloseInventoryState":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleInventoryStateAdapter.CloseAsNativeCancel(requireHarnessMode: true));
+                    break;
+                case "harnessInventoryStateDiagnostics":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleInventoryStateAdapter.BuildHarnessDiagnosticsJson());
+                    break;
                 case "questDetails":
                     var questDetailsId = ReadString(command, "questId");
                     var observedQuest = FindObservedOngoingQuest(questDetailsId);
@@ -245,6 +254,27 @@ internal sealed class ChronicleAgentProtocol
                     break;
                 case "partyRoles":
                     WriteResponse(commandId, action, "completed", behavior, null, ChroniclePartyRoleAdapter.BuildMainPartyRolesJson());
+                    break;
+                case "inventoryOpen":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleInventoryStateAdapter.OpenThroughNativeMapNavigation());
+                    break;
+                case "heroEquipmentOptions":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleInventoryStateAdapter.BuildHeroEquipmentOptionsJson());
+                    break;
+                case "equipHeroItem":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleInventoryStateAdapter.DraftEquipOneMainHeroItem(ReadString(command, "itemViewModelId"), ReadRequiredInteger(command, "equipmentIndex")));
+                    break;
+                case "unequipHeroItem":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleInventoryStateAdapter.DraftUnequipMainHeroItem(ReadRequiredInteger(command, "equipmentIndex")));
+                    break;
+                case "inventoryConfirm":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleInventoryStateAdapter.CommitCurrentNativeTransaction());
+                    break;
+                case "inventoryCancel":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleInventoryStateAdapter.CancelCurrentNativeTransaction(confirmDiscardChanges: false));
+                    break;
+                case "inventoryCancelChanges":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleInventoryStateAdapter.CancelCurrentNativeTransaction(confirmDiscardChanges: true));
                     break;
                 case "setPartyRole":
                     WriteResponse(commandId, action, "completed", behavior, null, ChroniclePartyRoleAdapter.SetMainPartyRoleJson(ReadString(command, "roleId"), ReadString(command, "heroId"), removeAssignee: false));
