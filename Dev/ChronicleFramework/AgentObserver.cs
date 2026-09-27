@@ -283,6 +283,74 @@ internal static class ChronicleAgentObserver
         return json.ToString();
     }
 
+    internal static string BuildMapPartyTargetsJson()
+    {
+        var party = MobileParty.MainParty;
+        if (Campaign.Current == null || party == null) return "null";
+        var position = party.GetPosition2D;
+        var mapPartyTargets = MobileParty.All
+            .Where(item => item != null && item != party && item.IsActive && !item.IsGarrison && !item.IsMilitia && item.AttachedTo == null && item.Party.IsVisible)
+            .Select(item => new { Item = item, Distance = Distance(position.X, position.Y, item.GetPosition2D.X, item.GetPosition2D.Y) })
+            .OrderBy(item => item.Distance)
+            .ThenBy(item => item.Item.StringId, StringComparer.Ordinal)
+            .ToArray();
+        var json = new StringBuilder(2048);
+        json.Append('{').Append("\"schemaVersion\":1,\"mapPartyTargets\":[");
+        for (var index = 0; index < mapPartyTargets.Length; index++)
+        {
+            if (index > 0) json.Append(',');
+            var target = mapPartyTargets[index];
+            var item = target.Item;
+            json.Append('{');
+            Property(json, "id", item.StringId);
+            Property(json, "name", PartyNameplateName(item), true);
+            Property(json, "type", PartyType(item), true);
+            json.Append(",\"distance\":").Append(Number(target.Distance));
+            json.Append(",\"hostile\":").Append(Bool(IsHostile(party.MapFaction, item.MapFaction)));
+            json.Append(",\"isInspected\":").Append(Bool(item.IsInspected));
+            json.Append(",\"isArmyLeader\":").Append(Bool(item.Army != null && item.Army.LeaderParty == item));
+            json.Append(",\"healthyMemberCount\":").Append(GetPartyNameplateHealthyCount(item));
+            json.Append(",\"woundedCount\":").Append(GetPartyNameplateWoundedCount(item));
+            json.Append(",\"prisonerCount\":").Append(GetPartyNameplatePrisonerCount(item));
+            json.Append('}');
+        }
+        json.Append("]}");
+        return json.ToString();
+    }
+
+    private static string PartyNameplateName(MobileParty party)
+    {
+        if (party.Army != null && party.Army.DoesLeaderPartyAndAttachedPartiesContain(party)) return party.ArmyName?.ToString();
+        return party.LeaderHero?.Name?.ToString() ?? party.Name?.ToString();
+    }
+
+    private static int GetPartyNameplateHealthyCount(MobileParty party)
+    {
+        var count = party.Party.NumberOfHealthyMembers;
+        if (party.Army != null && party.Army.LeaderParty == party)
+            foreach (var attachedParty in party.Army.LeaderParty.AttachedParties)
+                count += attachedParty.Party.NumberOfHealthyMembers;
+        return count;
+    }
+
+    private static int GetPartyNameplateWoundedCount(MobileParty party)
+    {
+        var count = party.Party.NumberOfWoundedTotalMembers;
+        if (party.Army != null && party.Army.LeaderParty == party)
+            foreach (var attachedParty in party.Army.LeaderParty.AttachedParties)
+                count += attachedParty.Party.NumberOfWoundedTotalMembers;
+        return count;
+    }
+
+    private static int GetPartyNameplatePrisonerCount(MobileParty party)
+    {
+        var count = party.Party.NumberOfPrisoners;
+        if (party.Army != null && party.Army.LeaderParty == party)
+            foreach (var attachedParty in party.Army.LeaderParty.AttachedParties)
+                count += attachedParty.Party.NumberOfPrisoners;
+        return count;
+    }
+
     internal static string BuildCharacterDevelopmentJson()
     {
         var campaign = Campaign.Current;
@@ -745,6 +813,7 @@ internal static class ChronicleAgentObserver
     }
 
     private static string PartyType(MobileParty party) => party.IsLordParty ? "lord" : party.IsBandit ? "bandit" : party.IsCaravan ? "caravan" : party.IsVillager ? "villager" : party.IsPatrolParty ? "patrol" : party.IsGarrison ? "garrison" : "other";
+    internal static string GetPartyTypeForObservation(MobileParty party) => PartyType(party);
     private static bool IsHostile(IFaction first, IFaction second) => first != null && second != null && FactionManager.IsAtWarAgainstFaction(first, second);
     private static double Distance(float x1, float y1, float x2, float y2) { var x = x1 - x2; var y = y1 - y2; return Math.Sqrt(x * x + y * y); }
     private static double Distance3D(TaleWorlds.Library.Vec3 first, TaleWorlds.Library.Vec3 second) { var x = first.X - second.X; var y = first.Y - second.Y; var z = first.Z - second.Z; return Math.Sqrt(x * x + y * y + z * z); }

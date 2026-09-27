@@ -138,6 +138,11 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("mapSettlementTargets requires the Campaign Map state");
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentObserver.BuildMapSettlementTargetsJson());
                     break;
+                case "mapPartyTargets":
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("mapPartyTargets requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentObserver.BuildMapPartyTargetsJson());
+                    break;
                 case "characterDevelopment":
                     if (Game.Current?.GameStateManager?.ActiveState is not MapState)
                         throw new InvalidOperationException("characterDevelopment requires the Campaign Map state");
@@ -218,6 +223,15 @@ internal sealed class ChronicleAgentProtocol
                     if (Game.Current?.GameStateManager?.ActiveState is not MapState)
                         throw new InvalidOperationException("harnessPartyRosterDiagnostics requires the Campaign Map state");
                     WriteResponse(commandId, action, "completed", behavior, null, BuildHarnessPartyRosterDiagnosticsJson());
+                    break;
+                case "harnessMapPartyDiagnostics":
+                    var mapPartyDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var mapPartyDiagnosticsRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(mapPartyDiagnosticsMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(mapPartyDiagnosticsRoot) || !Directory.Exists(mapPartyDiagnosticsRoot))
+                        throw new InvalidOperationException("harnessMapPartyDiagnostics is restricted to a visual Harness run with a Harness temp directory");
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("harnessMapPartyDiagnostics requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, BuildHarnessMapPartyDiagnosticsJson());
                     break;
                 case "talkToSettlementHero":
                     var overlayMenuContext = TaleWorlds.CampaignSystem.Campaign.Current?.CurrentMenuContext;
@@ -1075,6 +1089,72 @@ internal sealed class ChronicleAgentProtocol
         json.Append(",\"woundedCount\":").Append(party.PrisonRoster.TotalWounded);
         json.Append(",\"sizeLimit\":").Append(party.Party.PrisonerSizeLimit).Append('}');
         json.Append('}');
+        return json.ToString();
+    }
+
+    private static string BuildHarnessMapPartyDiagnosticsJson()
+    {
+        var mainParty = MobileParty.MainParty;
+        if (mainParty == null) throw new InvalidOperationException("MainParty is unavailable");
+        var managerType = AppDomain.CurrentDomain.GetAssemblies()
+            .Select(assembly => assembly.GetType("SandBox.View.Map.Managers.MobilePartyVisualManager", throwOnError: false))
+            .FirstOrDefault(type => type != null);
+        var manager = managerType?.GetProperty("Current", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)?.GetValue(null);
+        var getPartyVisual = managerType?.GetMethod("GetPartyVisual", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+        if (manager == null || getPartyVisual == null) throw new InvalidOperationException("Native MobilePartyVisualManager is unavailable for map target diagnostics");
+        var displayHelperType = AppDomain.CurrentDomain.GetAssemblies()
+            .Select(assembly => assembly.GetType("SandBox.ViewModelCollection.SandBoxUIHelper", throwOnError: false))
+            .FirstOrDefault(type => type != null);
+        var healthyCountMethod = displayHelperType?.GetMethod("GetPartyHealthyCount", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+        var woundedCountMethod = displayHelperType?.GetMethod("GetAllWoundedMembersAmount", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+        var prisonerCountMethod = displayHelperType?.GetMethod("GetAllPrisonerMembersAmount", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+        if (healthyCountMethod == null || woundedCountMethod == null || prisonerCountMethod == null) throw new InvalidOperationException("Native PartyNameplate count helpers are unavailable for map target diagnostics");
+
+        var candidates = MobileParty.All
+            .Where(party => party != null && party != mainParty && party.IsActive && !party.IsGarrison && !party.IsMilitia)
+            .OrderBy(party => party.StringId, StringComparer.Ordinal)
+            .ToArray();
+        var position = mainParty.GetPosition2D;
+        var json = new StringBuilder(4096);
+        json.Append('{');
+        json.Append("\"activePartyEntityCount\":").Append(candidates.Length);
+        json.Append(",\"mapPartyEntities\":[");
+        for (var index = 0; index < candidates.Length; index++)
+        {
+            if (index > 0) json.Append(',');
+            var party = candidates[index];
+            var visual = getPartyVisual.Invoke(manager, new object[] { party.Party });
+            var attachedTo = party.AttachedTo;
+            var isNativeMarkerCandidate = party.Party.IsVisible && attachedTo == null;
+            var visibleOrFading = (bool)(visual.GetType().GetMethod("IsVisibleOrFadingOut", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)?.Invoke(visual, null) ?? false);
+            var healthy = (int)healthyCountMethod.Invoke(null, new object[] { party });
+            var wounded = (int)woundedCountMethod.Invoke(null, new object[] { party });
+            var prisoners = (int)prisonerCountMethod.Invoke(null, new object[] { party });
+            var partyPosition = party.GetPosition2D;
+            var distanceX = position.X - partyPosition.X;
+            var distanceY = position.Y - partyPosition.Y;
+            var distance = Math.Sqrt(distanceX * distanceX + distanceY * distanceY);
+            json.Append('{');
+            json.Append("\"id\":\"").Append(Escape(party.StringId)).Append('"');
+            var partyName = party.Army != null && party.Army.DoesLeaderPartyAndAttachedPartiesContain(party) ? party.ArmyName?.ToString() : party.LeaderHero?.Name?.ToString() ?? party.Name?.ToString();
+            json.Append(",\"nameplateName\":\"").Append(Escape(partyName)).Append('"');
+            json.Append(",\"type\":\"").Append(Escape(ChronicleAgentObserver.GetPartyTypeForObservation(party))).Append('"');
+            json.Append(",\"isActive\":true");
+            json.Append(",\"isGarrison\":false,\"isMilitia\":false");
+            json.Append(",\"partyBaseIsVisible\":").Append(party.Party.IsVisible ? "true" : "false");
+            json.Append(",\"mobilePartyIsVisible\":").Append(party.IsVisible ? "true" : "false");
+            json.Append(",\"isInspected\":").Append(party.IsInspected ? "true" : "false");
+            json.Append(",\"isInfoHidden\":").Append(party.IsInfoHidden ? "true" : "false");
+            json.Append(",\"attachedToLeader\":").Append(attachedTo == null ? "null" : "\"" + Escape(attachedTo.StringId) + "\"");
+            json.Append(",\"isNativeMarkerCandidate\":").Append(isNativeMarkerCandidate ? "true" : "false");
+            json.Append(",\"nativeVisualVisibleOrFading\":").Append(visibleOrFading ? "true" : "false");
+            json.Append(",\"distance\":").Append(distance.ToString("F3", CultureInfo.InvariantCulture));
+            json.Append(",\"nameplateHealthyCount\":").Append(healthy);
+            json.Append(",\"nameplateWoundedCount\":").Append(wounded);
+            json.Append(",\"nameplatePrisonerCount\":").Append(prisoners);
+            json.Append('}');
+        }
+        json.Append("]}");
         return json.ToString();
     }
 
