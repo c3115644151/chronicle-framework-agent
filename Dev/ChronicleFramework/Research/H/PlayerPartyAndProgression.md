@@ -94,7 +94,9 @@ Hero的 `HeroDeveloper`持有Skill XP/Level、Attributes、Focus和未花点数/
 
 Chronicle常规schema20通过`mainHeroSkills`只读提供MainHero当前SkillObject等级，来源于原版`Hero.GetSkillValue`；Agent需要判断成长条件时，再显式调用`characterDevelopment`读取主角属性/属性点、等级经验、技能等级与经验进度、Focus余额/投入、模型学习率与上限，以及当前技能等级下角色发展面板列出的Perk状态。查询不把完整Perk目录重复放入每轮提示，也不判断某个Issue能否接受；Issue仍以原版对话选项为准。
 
-本机1.4.8 `CharacterDeveloperVM`/`CharacterDeveloperHeroItemVM`/`SkillVM`/`CharacterAttributeItemVM`直接构建角色发展面板字段。`TestResults/20260927-095403/Temp/CharacterDevelopmentResult.json`在disposable fixture中对照原生`CharacterDeveloperHeroItemVM`，6个属性与18个动态Skill对象、等级/经验进度/下一等级需求/Focus/学习率/学习上限/可否加Focus/当前等级Perk列表及状态、角色经验和点数余额逐项一致；重复查询稳定、状态未变、Campaign时间与存档文件hash不变、Bannerlord正常停止。该夹具当前有0个等级已解锁Perk，所以非空已解锁Perk分支仍需在后续适合的自然角色状态中补验；此结果不作为“Perk选择动作”或UI视觉自动化证据。Character Developer的草稿Done提交、Cancel撤销和Reset回滚仍没有Agent动作；通用经验获取见战斗/任务/交易/制作各域，不能视作角色面板功能。其它Hero、第三方扩展和人工视觉细节仍未知。来源：当前1.4.8 `HeroDeveloper`与角色发展ViewModel；W2-G和W2-H运行证据。
+本机1.4.8 `CharacterDeveloperVM`/`CharacterDeveloperHeroItemVM`/`SkillVM`/`CharacterAttributeItemVM`直接构建角色发展面板字段。`TestResults/20260927-095403/Temp/CharacterDevelopmentResult.json`在disposable fixture中对照原生`CharacterDeveloperHeroItemVM`，6个属性与18个动态Skill对象、等级/经验进度/下一等级需求/Focus/学习率/学习上限/可否加Focus/当前等级Perk列表及状态、角色经验和点数余额逐项一致；重复查询稳定、状态未变、Campaign时间与存档文件hash不变、Bannerlord正常停止。该夹具当前有0个等级已解锁Perk，所以非空已解锁Perk分支仍需在后续适合的自然角色状态中补验；此结果不作为Perk选择动作或UI视觉自动化证据。
+
+W2-I已实现主角的按需`spendSkillFocus(SkillId, Count)`动作。它接受当前`characterDevelopment`观察中的SkillId，用原生`CharacterDeveloperHeroItemVM/SkillVM`在一个协议命令内起草Focus变化并通过`SkillVM.ApplyChanges`提交；余额不足或技能Focus上限不足时整体拒绝，不保留跨回合编辑草稿。`TestResults/20260927-102057/Temp/SpendSkillFocusResult.json`在Harness显式暂停的disposable fixture中验证Crafting Focus 0→1、余额3→2、更新后学习率及原生VM值；超余额与超技能上限请求均拒绝且状态不变，Quest与技能等级列表不变，Campaign时间/存档hash不变并清理进程。测试不等于玩家实际打开并点击Character Developer界面的视觉验收；属性点、Perk投入、Cancel UI/多回合草稿、同伴与第三方成长仍未适配。技能经验来源见战斗/任务/贸易/制作等域，不能视作角色面板功能。来源：本机当前1.4.8 Character Developer ViewModel及W2-G/H/I运行证据。
 
 ## H11 Renown 与 Influence：声望、权限和政治资源
 

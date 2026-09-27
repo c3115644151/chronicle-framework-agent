@@ -143,6 +143,11 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("characterDevelopment requires the Campaign Map state");
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentObserver.BuildCharacterDevelopmentJson());
                     break;
+                case "spendSkillFocus":
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("spendSkillFocus requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, SpendMainHeroSkillFocus(command));
+                    break;
                 case "harnessMissionDiagnostics":
                     var missionDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
                     var missionDiagnosticsRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
@@ -946,6 +951,72 @@ internal sealed class ChronicleAgentProtocol
         return json.ToString();
     }
 
+    private static string SpendMainHeroSkillFocus(string command)
+    {
+        var skillId = ReadString(command, "skillId");
+        if (string.IsNullOrWhiteSpace(skillId)) throw new InvalidOperationException("skillId must come from the current characterDevelopment observation");
+        var count = ReadRequiredInteger(command, "count");
+        if (count < 1 || count > 100) throw new InvalidOperationException("count must be between 1 and 100");
+
+        var campaign = Campaign.Current;
+        var hero = Hero.MainHero;
+        if (campaign == null || hero?.HeroDeveloper == null) throw new InvalidOperationException("MainHero development is unavailable");
+        var skillObject = TaleWorlds.CampaignSystem.Extensions.Skills.All
+            .FirstOrDefault(skill => skill != null && string.Equals(skill.StringId, skillId, StringComparison.Ordinal));
+        if (skillObject == null) throw new InvalidOperationException("skillId is not an active Campaign SkillObject");
+
+        var viewModel = new TaleWorlds.CampaignSystem.ViewModelCollection.CharacterDeveloper.CharacterDeveloperHeroItemVM(hero, () => { });
+        var skillViewModel = viewModel.Skills.FirstOrDefault(skill => string.Equals(skill.SkillId, skillId, StringComparison.Ordinal));
+        if (skillViewModel == null) throw new InvalidOperationException("skillId is not present in MainHero's Character Developer view");
+
+        var developer = hero.HeroDeveloper;
+        var focusBefore = developer.GetFocus(skillObject);
+        var pointsBefore = developer.UnspentFocusPoints;
+        var maxFocus = campaign.Models.CharacterDevelopmentModel.MaxFocusPerSkill;
+        if (count > maxFocus - focusBefore) throw new InvalidOperationException("requested count exceeds the native maximum Focus for this skill");
+        var focusPointCost = developer.GetRequiredFocusPointsToAddFocus(skillObject);
+        if ((long)count * focusPointCost > pointsBefore) throw new InvalidOperationException("requested count exceeds MainHero's unspent Focus points");
+
+        var learningRateBefore = campaign.Models.CharacterDevelopmentModel.CalculateLearningRate(hero.CharacterAttributes, focusBefore, hero.GetSkillValue(skillObject), skillObject).ResultNumber;
+        skillViewModel.ExecuteInspect();
+        for (var index = 0; index < count; index++)
+        {
+            if (!skillViewModel.CanAddFocus)
+            {
+                viewModel.ResetChanges(isCancel: true);
+                throw new InvalidOperationException("native Character Developer no longer permits the requested Focus allocation");
+            }
+            skillViewModel.ExecuteAddFocus();
+        }
+        if (skillViewModel.CurrentFocusLevel != focusBefore + count)
+        {
+            viewModel.ResetChanges(isCancel: true);
+            throw new InvalidOperationException("native Character Developer did not stage the full requested Focus allocation");
+        }
+
+        skillViewModel.ApplyChanges();
+        var focusAfter = developer.GetFocus(skillObject);
+        var pointsAfter = developer.UnspentFocusPoints;
+        if (focusAfter != focusBefore + count || pointsAfter != pointsBefore - count * focusPointCost)
+            throw new InvalidOperationException("native HeroDeveloper result differs from the staged Character Developer transaction");
+        var learningRateAfter = campaign.Models.CharacterDevelopmentModel.CalculateLearningRate(hero.CharacterAttributes, focusAfter, hero.GetSkillValue(skillObject), skillObject).ResultNumber;
+
+        var json = new StringBuilder(256);
+        json.Append('{');
+        json.Append("\"skillId\":\"").Append(Escape(skillId)).Append('"');
+        json.Append(",\"requestedCount\":").Append(count);
+        json.Append(",\"committedCount\":").Append(focusAfter - focusBefore);
+        json.Append(",\"focusBefore\":").Append(focusBefore);
+        json.Append(",\"focusAfter\":").Append(focusAfter);
+        json.Append(",\"focusPointsBefore\":").Append(pointsBefore);
+        json.Append(",\"focusPointsAfter\":").Append(pointsAfter);
+        json.Append(",\"focusPointCost\":").Append(focusPointCost);
+        json.Append(",\"learningRateBefore\":").Append(learningRateBefore.ToString("R", CultureInfo.InvariantCulture));
+        json.Append(",\"learningRateAfter\":").Append(learningRateAfter.ToString("R", CultureInfo.InvariantCulture));
+        json.Append('}');
+        return json.ToString();
+    }
+
     private void UpdateMissionInputLease()
     {
         if (_missionInputAgent == null) return;
@@ -1126,6 +1197,14 @@ internal sealed class ChronicleAgentProtocol
         if (parsed > float.MaxValue || parsed < -float.MaxValue)
             throw new InvalidOperationException("Coordinate '" + key + "' exceeds the Campaign map numeric range");
         return parsed;
+    }
+
+    private static int ReadRequiredInteger(string json, string key)
+    {
+        var parsed = ReadRequiredFiniteDouble(json, key);
+        if (parsed < int.MinValue || parsed > int.MaxValue || parsed != Math.Truncate(parsed))
+            throw new InvalidOperationException("value '" + key + "' must be an integer");
+        return (int)parsed;
     }
 
     private static string Escape(string value) => (value ?? string.Empty).Replace("\\", "\\\\").Replace("\"", "\\\"");
