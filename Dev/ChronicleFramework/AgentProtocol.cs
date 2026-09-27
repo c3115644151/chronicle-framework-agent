@@ -153,6 +153,11 @@ internal sealed class ChronicleAgentProtocol
                     var observedQuest = FindObservedOngoingQuest(questDetailsId);
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentObserver.BuildQuestDetailsJson(observedQuest));
                     break;
+                case "partyRoster":
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("partyRoster requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentObserver.BuildPartyRosterJson());
+                    break;
                 case "harnessMissionDiagnostics":
                     var missionDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
                     var missionDiagnosticsRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
@@ -204,6 +209,15 @@ internal sealed class ChronicleAgentProtocol
                     if (!string.Equals(questDeadlineDiagnosticsMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(questDeadlineDiagnosticsRoot) || !Directory.Exists(questDeadlineDiagnosticsRoot))
                         throw new InvalidOperationException("harnessQuestDeadlinePrivacyDiagnostics is restricted to a visual Harness run with a Harness temp directory");
                     WriteResponse(commandId, action, "completed", behavior, null, BuildHarnessQuestDeadlinePrivacyDiagnosticsJson());
+                    break;
+                case "harnessPartyRosterDiagnostics":
+                    var partyRosterDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var partyRosterDiagnosticsRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(partyRosterDiagnosticsMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(partyRosterDiagnosticsRoot) || !Directory.Exists(partyRosterDiagnosticsRoot))
+                        throw new InvalidOperationException("harnessPartyRosterDiagnostics is restricted to a visual Harness run with a Harness temp directory");
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("harnessPartyRosterDiagnostics requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, BuildHarnessPartyRosterDiagnosticsJson());
                     break;
                 case "talkToSettlementHero":
                     var overlayMenuContext = TaleWorlds.CampaignSystem.Campaign.Current?.CurrentMenuContext;
@@ -1029,6 +1043,61 @@ internal sealed class ChronicleAgentProtocol
         ChronicleAgentObserver.AppendQuestDeadline(json, false, 14);
         json.Append("}}");
         return json.ToString();
+    }
+
+    private static string BuildHarnessPartyRosterDiagnosticsJson()
+    {
+        var party = MobileParty.MainParty;
+        if (party == null) throw new InvalidOperationException("MainParty is unavailable");
+        var members = party.MemberRoster.GetTroopRoster()
+            .Where(element => element.Character != null && element.Number > 0)
+            .OrderBy(element => element.Character.StringId, StringComparer.Ordinal)
+            .ToArray();
+        var prisoners = party.PrisonRoster.GetTroopRoster()
+            .Where(element => element.Character != null && element.Number > 0)
+            .OrderBy(element => element.Character.StringId, StringComparer.Ordinal)
+            .ToArray();
+        var json = new StringBuilder(4096);
+        json.Append('{');
+        json.Append("\"partyId\":\"").Append(Escape(party.StringId)).Append('"');
+        json.Append(",\"members\":");
+        AppendHarnessRosterDiagnostics(json, members);
+        json.Append(",\"prisoners\":");
+        AppendHarnessRosterDiagnostics(json, prisoners);
+        json.Append(",\"memberTotals\":{");
+        json.Append("\"totalCount\":").Append(party.MemberRoster.TotalManCount);
+        json.Append(",\"healthyCount\":").Append(party.MemberRoster.TotalHealthyCount);
+        json.Append(",\"woundedCount\":").Append(party.MemberRoster.TotalWounded);
+        json.Append(",\"sizeLimit\":").Append(party.Party.PartySizeLimit).Append('}');
+        json.Append(",\"prisonerTotals\":{");
+        json.Append("\"totalCount\":").Append(party.PrisonRoster.TotalManCount);
+        json.Append(",\"healthyCount\":").Append(party.PrisonRoster.TotalHealthyCount);
+        json.Append(",\"woundedCount\":").Append(party.PrisonRoster.TotalWounded);
+        json.Append(",\"sizeLimit\":").Append(party.Party.PrisonerSizeLimit).Append('}');
+        json.Append('}');
+        return json.ToString();
+    }
+
+    private static void AppendHarnessRosterDiagnostics(StringBuilder json, TaleWorlds.CampaignSystem.Roster.TroopRosterElement[] elements)
+    {
+        json.Append('[');
+        for (var index = 0; index < elements.Length; index++)
+        {
+            if (index > 0) json.Append(',');
+            var element = elements[index];
+            var character = element.Character;
+            json.Append('{');
+            json.Append("\"characterId\":\"").Append(Escape(character.StringId)).Append('"');
+            json.Append(",\"name\":\"").Append(Escape(character.Name?.ToString())).Append('"');
+            json.Append(",\"tier\":").Append(character.Tier);
+            json.Append(",\"count\":").Append(element.Number);
+            json.Append(",\"woundedCount\":").Append(element.WoundedNumber);
+            json.Append(",\"healthyCount\":").Append(Math.Max(element.Number - element.WoundedNumber, 0));
+            json.Append(",\"isHero\":").Append(character.IsHero ? "true" : "false");
+            json.Append(",\"isHeroWounded\":").Append(character.IsHero && character.HeroObject != null && character.HeroObject.IsWounded ? "true" : "false");
+            json.Append('}');
+        }
+        json.Append(']');
     }
 
     private static QuestBase FindObservedOngoingQuest(string questId)

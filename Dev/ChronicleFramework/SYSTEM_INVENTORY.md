@@ -548,7 +548,7 @@ G03 Mission直接控制MainHero的身体/装备输入及专用Use结果现登记
 
 | ID | 类型 | 玩家入口 / 观察语义 | 原版结果、前置/时间 | Chronicle覆盖 / 证据 / 未知 | 来源映射 |
 | --- | --- | --- | --- | --- | --- |
-| OBS-H04-01 | 观察 | PartyScreen查看当前成员/伤员/俘虏Roster及升级/招募控件 | 列表按PartyScreen mode/roster side和容量过滤；UI显示不是全Campaign人口表 | Chronicle常驻只报MainParty总量；战后 PartyState 有有限Roster读取 | H04/F11/H12/I03、PartyVM |
+| OBS-H04-01 | 观察 | PartyScreen查看当前成员/伤员/俘虏Roster及升级/招募控件 | 列表按PartyScreen mode/roster side和容量过滤；UI显示不是全Campaign人口表 | Campaign Map可按需调用`partyRoster`读取MainParty成员/俘虏Roster行与总量；普通state仍只报总计数。不包含升级/招募控件与按钮可用条件。W2-K运行对照MemberRoster/PrisonRoster：本fixture无俘虏，因此非空俘虏状态和UI视觉未验证 | H04/F11/H12/I03、PartyVM/PartyCharacterVM/AgentObserver |
 | OBS-H05-01 | 观察 | Clan/Party成员页读取Hero同伴身份/所属Party/可用成员 | 任务/囚禁/领队/忙碌状态会影响能否入队或担任Party职位 | Observer不列完整同伴列表/技能/位置 | H05/B04、AgentObserver |
 | OBS-H06-01 | 观察 | Clan管理Party角色区查看每个职责的当前Hero/技能效果 | 角色资格基于Model及目标MobileParty；角色持有人变化后模型效果更新 | Chronicle不报角色Holder ID | H06、ClanRoleItemVM、AgentObserver |
 | OBS-H08-01 | 观察 | Inventory/Character Equipment显示Battle与Civilian装备槽/选中Hero | 装备候选受物品用途、装备模式、槽位和Hero资格筛选 | Chronicle无Hero装备槽快照；InventoryItem transaction不是穿戴状态证明 | H08/H07、SPInventoryVM |

@@ -426,6 +426,61 @@ internal static class ChronicleAgentObserver
         return json.ToString();
     }
 
+    internal static string BuildPartyRosterJson()
+    {
+        var party = MobileParty.MainParty;
+        if (Campaign.Current == null || party == null) return "null";
+        var memberRoster = party.MemberRoster;
+        var prisonerRoster = party.PrisonRoster;
+        var json = new StringBuilder(4096);
+        json.Append('{').Append("\"schemaVersion\":1");
+        Property(json, "partyId", party.StringId, true);
+        json.Append(",\"members\":");
+        AppendRosterDetails(json, memberRoster);
+        json.Append(",\"prisoners\":");
+        AppendRosterDetails(json, prisonerRoster);
+        json.Append(",\"memberTotals\":{");
+        json.Append("\"totalCount\":").Append(memberRoster.TotalManCount);
+        json.Append(",\"healthyCount\":").Append(memberRoster.TotalHealthyCount);
+        json.Append(",\"woundedCount\":").Append(memberRoster.TotalWounded);
+        json.Append(",\"sizeLimit\":").Append(party.Party.PartySizeLimit).Append('}');
+        json.Append(",\"prisonerTotals\":{");
+        json.Append("\"totalCount\":").Append(prisonerRoster.TotalManCount);
+        json.Append(",\"healthyCount\":").Append(prisonerRoster.TotalHealthyCount);
+        json.Append(",\"woundedCount\":").Append(prisonerRoster.TotalWounded);
+        json.Append(",\"sizeLimit\":").Append(party.Party.PrisonerSizeLimit).Append('}');
+        json.Append('}');
+        return json.ToString();
+    }
+
+    private static void AppendRosterDetails(StringBuilder json, TaleWorlds.CampaignSystem.Roster.TroopRoster roster)
+    {
+        var elements = Enumerable.Range(0, roster.Count)
+            .Select(roster.GetElementCopyAtIndex)
+            .Where(element => element.Character != null && element.Number > 0)
+            .OrderBy(element => element.Character.StringId, StringComparer.Ordinal)
+            .ToArray();
+        json.Append('[');
+        for (var index = 0; index < elements.Length; index++)
+        {
+            if (index > 0) json.Append(',');
+            var element = elements[index];
+            var character = element.Character;
+            var isHero = character.IsHero;
+            json.Append('{');
+            Property(json, "characterId", character.StringId);
+            Property(json, "name", character.Name?.ToString(), true);
+            json.Append(",\"tier\":").Append(character.Tier);
+            json.Append(",\"count\":").Append(element.Number);
+            json.Append(",\"woundedCount\":").Append(element.WoundedNumber);
+            json.Append(",\"healthyCount\":").Append(Math.Max(element.Number - element.WoundedNumber, 0));
+            json.Append(",\"isHero\":").Append(Bool(isHero));
+            json.Append(",\"isHeroWounded\":").Append(Bool(isHero && character.HeroObject != null && character.HeroObject.IsWounded));
+            json.Append('}');
+        }
+        json.Append(']');
+    }
+
     internal static void AppendQuestDeadline(StringBuilder json, bool isHidden, int daysRemaining)
     {
         json.Append(",\"isRemainingTimeHidden\":").Append(Bool(isHidden));

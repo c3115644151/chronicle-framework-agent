@@ -36,11 +36,11 @@ Chronicle主快照已返回Hero/Clan ID与名称、Clan Tier、下一级所需Re
 
 ## H04 Troop Roster：队伍成员、伤员与编制操作
 
-玩家Party Screen的 `PartyVM`按PartyScreen两侧区分成员和俘虏列表，显示健康/伤员、容量和可转移状态，并提供转移、全取/全放、排序、升级弹窗、俘虏招募弹窗等控件。升级或招募会因可用升级分支/兵种、经验与升级成本、玩家资金、双方 roster 容量及当前PartyScreen模式而开放/拒绝。Done会将 `PartyScreenLogic` 命令提交；Cancel/Reset走原生VM回滚/关闭，不等于已提交的TroopRoster写入。
+玩家Party Screen的 `PartyVM`按PartyScreen两侧区分成员和俘虏列表，显示健康/伤员、容量和可转移状态，并提供转移、全取/全放、排序、升级弹窗、俘虏招募弹窗等控件。升级或招募会因可用升级分支/兵种、经验与升级成本、玩家资金、双方 roster 容量及当前PartyScreen模式而开放/拒绝。Done会将 `PartyScreenLogic` 命令提交；Cancel/Reset走原生VM回滚/关闭，不等于已提交的TroopRoster写入。W2-K新增的按需`partyRoster`只复制MainParty成员/俘虏名单及健康伤员语义，不打开PartyState，也不提供转移/升级/招募按钮。
 
 军队人数变化还有战后俘虏转入、聚落志愿兵、招募俘虏、疾病/伤病、逃兵/死亡等来源；不应把升级、招募、伤兵治疗和战争损失压成一个“Roster调整”动作。自动NPC Troop升级、Party训练、恢复/逃兵另见 F11；玩家进入真实UI后的具体交互顺序仍未被Chronicle全自动覆盖。直接修改 `TroopRoster`会绕过UI可用性、价格/经验条件、容量和PartyScreen确认副作用；当前协议只在特定原生招募/战后PartyState入口支持有限提交。
 
-时间：打开PartyScreen的Roster事务本身没有显式推进Campaign小时/日；具体屏幕所在GameState/父菜单管理游戏时钟，不能把显式 `advance`藏入 roster动作。Chronicle当前只返回主队总量和战后PartyState双方成员/俘虏 roster；不常驻枚举完整MainParty troop树，也不支持一般招募、所有升级、伤病治疗/复原和任意Roster拖放。证据：本机 `PartyScreenLogic`、ViewModelCollection `PartyVM/PartyCharacterVM/PartyUpgradeTroopVM/PartyRecruitTroopVM`、Chronicle `AgentObserver/AgentProtocol`；完整升级费用规则、各Roster来源与取消确认的视觉反馈、正常PartyScreen的完整玩家入口、非战后模式事务时钟仍需分别验证。
+时间：打开PartyScreen的Roster事务本身没有显式推进Campaign小时/日；具体屏幕所在GameState/父菜单管理游戏时钟，不能把显式 `advance`藏入 roster动作。Chronicle常规state返回主队汇总，MapState另可按需用`partyRoster`读取MainParty成员与俘虏行。`TestResults/20260927-112940/Temp/PartyRosterResult.json`对比原生TroopRoster数据、汇总与Campaign状态通过；fixture没有俘虏，所以非空俘虏行/实际PartyVM显示未实测。Chronicle不支持一般招募、所有升级、伤病治疗/复原和任意Roster拖放。证据：本机 `PartyScreenLogic`、ViewModelCollection `PartyVM/PartyCharacterVM/PartyUpgradeTroopVM/PartyRecruitTroopVM`、Chronicle `AgentObserver/AgentProtocol`；完整升级费用规则、各Roster来源与取消确认的视觉反馈、正常PartyScreen的完整玩家入口、非战后模式事务时钟仍需分别验证。
 
 ## H05 Companion：同伴招募、家族成员与离队
 
