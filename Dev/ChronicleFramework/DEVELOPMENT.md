@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 
-Contract version: 5.29
+Contract version: 5.30
 
 ## 目标与边界
 
@@ -69,7 +69,7 @@ Project采用最少任务状态：`Todo`表示尚未开始（是否被阻塞看I
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Dev\ChronicleFramework\Run-Harness.ps1 -Phase All
 ```
 
-按需阶段以同一命令加单个 `-Phase` 运行；可选 Docs、Preflight、Api、Build、Smoke、Campaign、FreshCampaign、FreshCampaignProgression、Protocol、AgentLoop、BattleFixture、PostBattle、Observation、MainHeroSkills、CharacterDevelopment、SpendSkillFocus、QuestJournal、PartyRoster、PartyUpgrade、PartyPrisonerRecruitment、MapSettlementTargets、Movement、MoveToPoint、Recruitment、Rest、Pursuit、Conversation、QuestAcceptance、EscortVisibility、TavernMission、TownCenterMission、SettlementOverlayConversation、SettlementOverlayQuestAcceptance、SettlementOverlayQuestGate、VisualCapture、All。Settlement overlay阶段可选`-TargetSettlementId`与`-ApproachSettlementId`：两者必须来自当前`mapSettlementTargets`；Harness若先到Approach聚落，则通过原生Leave返回地图并重新观察后再选目标，不读取隐藏全局ID。若路线失败，收据会保留结构化观察和MapState游戏引擎截图。`MapSettlementTargets`负向回归使用一个visual-capture专用全Settlement显隐诊断找测试样本，仅Harness可调用，不在普通Agent观察或决策白名单中。
+按需阶段以同一命令加单个 `-Phase` 运行；可选 Docs、Preflight、Api、Build、Smoke、Campaign、FreshCampaign、FreshCampaignProgression、Protocol、AgentLoop、BattleFixture、PostBattle、Observation、MainHeroSkills、CharacterDevelopment、SpendSkillFocus、QuestJournal、PartyRoster、PartyUpgrade、PartyPrisonerRecruitment、MissionInteraction、MapPartyTargets、MapPartyComposition、MapArmyComposition、MapPartyBehavior、MapSettlementTargets、Movement、MoveToPoint、Recruitment、Rest、Pursuit、Conversation、QuestAcceptance、EscortVisibility、TavernMission、TownCenterMission、SettlementOverlayConversation、SettlementOverlayQuestAcceptance、SettlementOverlayQuestGate、VisualCapture、All。Settlement overlay阶段可选`-TargetSettlementId`与`-ApproachSettlementId`：两者必须来自当前`mapSettlementTargets`；Harness若先到Approach聚落，则通过原生Leave返回地图并重新观察后再选目标，不读取隐藏全局ID。若路线失败，收据会保留结构化观察和MapState游戏引擎截图。`MapSettlementTargets`负向回归使用一个visual-capture专用全Settlement显隐诊断找测试样本，仅Harness可调用，不在普通Agent观察或决策白名单中。
 
 `Run-Harness.ps1` 顺序执行阶段、首错停止、把原始输出和 JSON 写入 `TestResults/<run-id>`，并更新 `TestResults/latest.json`。
 
@@ -94,6 +94,8 @@ Campaign `state` schema21把活动Quest期限字段限制为原版QuestsVM显示
 `partyRoster`是Campaign Map上的按需只读查询，只列MainParty成员与俘虏的兵种ID/名称、人数、伤员和Hero标志；常规`state.party`继续保持汇总。它不枚举其他阵营Party，不给升级/招募建议或费用，也不改Roster。Harness专用诊断从同一原生TroopRoster但用独立`GetTroopRoster()`枚举路径交叉核对；测试诊断不进决策白名单。
 
 `partyUpgradeOptions`/`upgradeTroop`从MainParty Normal PartyScreen的原生PartyVM读取并提交一个普通兵种升级。`prisonerRecruitmentOptions`/`recruitPrisoner`读Native PartyVM当前可招募的MainParty普通俘虏并提交一个；超PartySize时，选项同时返回完整原版Done确认文案，Agent必须显式传`ConfirmPartySizeWarning`同意超限后果才会调用原生affirmative callback，否则动作拒绝并撤销草稿。两项动作都使用共享MainParty PartyScreen生命周期，临时PartyVM需按原生要求初始化按键回调并调用`OnFinalize`。Harness disposable fixture仅在visual-capture模式下能注入兵种、XP或填满队伍；不会保存这些改动。`PartyUpgrade`/`PartyPrisonerRecruitment`阶段分别核验native结果、拒绝、Campaign时钟和清理。
+
+`missionInteract(AgentIndex)`只在支持的Town/Tavern Location Mission中接受当前局部`nearbySceneAgents`里的有效人类Agent；它先验证原生`MissionConversationLogic.IsThereAgentAction`与`Agent.CanInteractWithAgent`，再调用目标的Native `Agent.OnUse`→`Mission.OnAgentInteraction`链，而不直接启动ConversationManager。动作不模拟Windows键鼠/FocusRay投影，且不对隐藏Agent或通用UsableMissionObject做全局搜索；它只复现通过当前观察Agent触发NPC交互的语义。对话启动后由既有`dialogue`观察及`dialogueSelect`/`dialogueContinue`处理。Harness以Tavern中的Wanderer作为正向代表，核验目标、原生选项、无效索引拒绝、Campaign Stop及截图；Town-center第二场景与真实FocusRay视觉仍未覆盖。
 
 ## Harness 架构
 

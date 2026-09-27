@@ -583,6 +583,12 @@ internal sealed class ChronicleAgentProtocol
                     var navigationData = "{\"targetAgentIndex\":" + navigationTargetAgentIndex.ToString(CultureInfo.InvariantCulture) + ",\"targetCharacterId\":\"" + Escape(navigationTargetAgent.Character?.StringId) + "\",\"targetHeroId\":" + ((navigationTargetAgent.Character as CharacterObject)?.HeroObject == null ? "null" : "\"" + Escape((navigationTargetAgent.Character as CharacterObject).HeroObject.StringId) + "\"") + ",\"navState\":\"" + _missionNavigator._agentState + "\",\"targetDistance\":" + navigationDistance.ToString("R", CultureInfo.InvariantCulture) + "}";
                     WriteResponse(commandId, action, "completed", behavior, null, navigationData);
                     break;
+                case "missionInteract":
+                    var missionInteractionIndex = ReadRequiredFiniteDouble(command, "agentIndex");
+                    if (missionInteractionIndex < 0 || missionInteractionIndex > int.MaxValue || missionInteractionIndex != Math.Floor(missionInteractionIndex))
+                        throw new InvalidOperationException("agentIndex must be a nonnegative integer from the current Mission observation");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleMissionInteraction.InteractWithObservedAgent((int)missionInteractionIndex));
+                    break;
                 case "missionCancelNavigation":
                     if (_missionNavigator == null) throw new InvalidOperationException("no native Mission AgentNavigator route is active");
                     if (Mission.Current?.MainAgent != _missionNavigationOwner) throw new InvalidOperationException("active Mission MainAgent changed; navigation cannot be cancelled through this context");
@@ -1772,5 +1778,5 @@ internal sealed class ChronicleAgentProtocol
         return (int)parsed;
     }
 
-    private static string Escape(string value) => (value ?? string.Empty).Replace("\\", "\\\\").Replace("\"", "\\\"");
+    internal static string Escape(string value) => (value ?? string.Empty).Replace("\\", "\\\\").Replace("\"", "\\\"");
 }

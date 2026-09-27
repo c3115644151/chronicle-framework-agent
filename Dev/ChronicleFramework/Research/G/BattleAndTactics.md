@@ -36,6 +36,12 @@ Chronicle可观察战斗模拟 finished/retreated/MapEvent battle state 等少�
 
 ### Mission 身体与入口
 
+W2-R实现了G03 `ACT-G03-07`中“与当前局部可见的普通友善NPC开始对话”分支；它不新增行为族，不代表全部FocusRay Use对象支持。玩家原版场景入口由聚落/酒馆Mission中的角色近身Interaction/Use触发；Native链`Agent.OnUse`→`Mission.OnAgentInteraction`向MissionBehaviors分派，`MissionConversationLogic.OnAgentInteraction`按GameMode/未在对话/`IsThereAgentAction`资格调用原生ConversationManager。`Agent.CanInteractWithAgent`再核行为Action、近身与可用状态。Chronicle的`missionInteract(AgentIndex)`只允许观察中的附近人类Agent，使用Native `Agent.OnUse`入口而不直接StartConversation；它跳过真实鼠标FocusRay，故不能声称复现相机/射线所见或任意UsableMissionObject/Machine交互。
+
+第二次`TestResults/20260927-184946/Temp/MissionInteractionResult.json`验证RansomBroker（非Hero Agent）也走相同本地Agent.Use分派，目标返回原版RansomBroker Greeting/选项；说明实现可覆盖普通地牢经纪人式场景NPC，并不是只对Hero挂ConversationManager。NativeFocus鼠标投影并未作为动作门槛，也没有测试通用Usable物体或Town-center输入，因此这些范围仍不能宣称覆盖。
+
+运行证据：`TestResults/20260927-182914/Temp/MissionInteractionResult.json`。一次性正常Campaign走到萨哥特酒馆，原版生成Wanderer `CharacterObject_1604`；Agent局部观察该Hero Agent并用2个有界movement steps靠近到1.286米。有效`missionInteract`从Native Agent.OnUse开始其Conversation，返还`dialogue`当前玩家问候/两个原版选项，HeroId与请求目标一致；非法AgentIndex被拒且不启动对话。Campaign日值/Stop模式不变、源存档hash未变、进程停止；同次运行保存了引擎截图。没有模拟真实鼠标/按键，目标FocusRay不同情形仍在边界外。
+
 地图遭遇后，攻击菜单与 `MenuHelper.EncounterAttackConsequence` 接入玩家战斗流程；派生战斗类型决定使用野战、突围/攻城、村庄Raid/防守、Hideout等 Mission 场景。`CampaignMission` 提供不同的 Battle/Siege Mission 开启路径；Mission 中按队伍来源和场景生成双方 Agent/Formation，`DefaultBattleMissionAgentSpawnLogic` 分阶段生成初始部队和后续增援。地图Roster规模、场景可容纳人数与逐波入场并非同一数量。
 
 Mission 内操作通过键盘/鼠标即时控制主角，TAB菜单可打开离场/撤退流程；将领/部队命令则经原生Order UI控制 Formation，而非通过地图Party AI目标。`BattleEndLogic.TryExit` 对离场动作判定其本体结果；不同 Siege攻守状态的离开语义可能是投降或不可撤退，不能只用“Mission结束”推断为安全撤退。当前 Chronicle 的 `missionRetreat` 会检查 Mission 与 BattleEndLogic，读取 `TryExit`，并拒绝把围城守军的 SurrenderSiege 误报为撤退。
