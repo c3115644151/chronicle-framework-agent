@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using Helpers;
 using TaleWorlds.CampaignSystem;
@@ -7,6 +8,7 @@ using TaleWorlds.CampaignSystem.GameState;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.ViewModelCollection.Party;
 using TaleWorlds.Core;
+using TaleWorlds.Localization;
 
 namespace ChronicleFramework;
 
@@ -150,6 +152,10 @@ internal static class ChroniclePartyUpgradeAdapter
             CancelActiveNormalPartyScreen();
             throw;
         }
+        finally
+        {
+            viewModel.OnFinalize();
+        }
     }
 
     private static PartyVM OpenMainPartyScreen()
@@ -165,7 +171,9 @@ internal static class ChroniclePartyUpgradeAdapter
         }
         try
         {
-            return new PartyVM(partyState.PartyScreenLogic);
+            var viewModel = new PartyVM(partyState.PartyScreenLogic);
+            PrepareViewModelFinalization(viewModel);
+            return viewModel;
         }
         catch
         {
@@ -178,6 +186,23 @@ internal static class ChroniclePartyUpgradeAdapter
     {
         if (Game.Current?.GameStateManager?.ActiveState is PartyState partyState && partyState.PartyScreenMode == PartyScreenHelper.PartyScreenMode.Normal)
             PartyScreenHelper.CloseScreen(isForced: false, fromCancel: true);
+        viewModel.OnFinalize();
+    }
+
+    private static void PrepareViewModelFinalization(PartyVM viewModel)
+    {
+        viewModel.SetGetKeyTextFromKeyIDFunc(_ => TextObject.GetEmpty());
+        foreach (var methodName in new[]
+        {
+            "SetCancelInputKey", "SetDoneInputKey", "SetResetInputKey", "SetTakeAllTroopsInputKey",
+            "SetDismissAllTroopsInputKey", "SetTakeAllPrisonersInputKey", "SetDismissAllPrisonersInputKey",
+            "SetOpenUpgradePanelInputKey", "SetOpenRecruitPanelInputKey"
+        })
+        {
+            var setter = viewModel.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public);
+            if (setter == null) throw new MissingMethodException(viewModel.GetType().FullName, methodName);
+            setter.Invoke(viewModel, new object[] { null });
+        }
     }
 
     private static void CancelActiveNormalPartyScreen()
