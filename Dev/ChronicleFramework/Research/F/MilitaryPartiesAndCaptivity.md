@@ -80,6 +80,8 @@ Chronicle 不读取 NPC的候选分数、`ThinkParams`、ObjectiveValue、Rethin
 
 `PartyBase.UpdateVisibilityAndInspected` 为源码所见的 `IsInspected` 写入路径：正常移动 Party 的可见与调查状态受当前地图距离和 `MapVisibilityModel.GetPartySpottingRatioForMainParty` 筛选；同一 Army 的 Attached Party 可跟随 Leader 的可见性，且主队同 Army 的成员 `MobileParty.IsInspected` getter 强制为真。玩家已确认ALT悬停可查看政治Party兵种构成，但这不能证明“行为摘要”也用相同修饰键/同一可见门槛。当前证据确认源码会在满足`IsInspected`时给地图tooltip添加可读队伍行为；该行为字段的具体玩家视觉触发方式及未侦察/不同行为类型表现仍未核全，须与已经确认的ALT兵种详情分开标记。
 
+Chronicle `mapPartyBehavior(partyId)`只对当前可见/inspected Party调用Native `CampaignUIHelper.GetMobilePartyBehaviorText`，不从后台AI字段另做翻译。`TestResults/20260927-143749/Temp/MapArmyBehaviorResult.json`中，普通Lord party返回“正在萨哥特周围巡逻。”，单成员Army leader返回“正在塔利维尔堡附近集结。”；两段结果均与对应普通/Army `PropertyBasedTooltipVM`里的行为行逐字一致。重复读取与无效ID/状态保护通过；测试模块含框架前置，未称人工屏幕视觉核验或完整文本分支统计。
+
 ## F04 决策循环与短期移动状态
 
 Party战略 Think 与 `MobilePartyAi` 的短期地图导航是两个相邻层。前者按 partial-hourly campaign 事件统计 AI Behavior score、选择/保留 DefaultBehavior、管理Army目标；后者结合当前目标与Model重算 ShortTermBehavior、导航Point/Party，处理接近 Settlement/Party、攻击/规避/逃跑、地形路径和海陆转换。

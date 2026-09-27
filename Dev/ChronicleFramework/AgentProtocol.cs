@@ -151,6 +151,14 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("mapPartyComposition requires a partyId from the current visible map party list");
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentObserver.BuildMapPartyCompositionJson(compositionPartyId));
                     break;
+                case "mapPartyBehavior":
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("mapPartyBehavior requires the Campaign Map state");
+                    var behaviorPartyId = ReadString(command, "partyId");
+                    if (string.IsNullOrWhiteSpace(behaviorPartyId))
+                        throw new InvalidOperationException("mapPartyBehavior requires a partyId from the current visible map party list");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentObserver.BuildMapPartyBehaviorJson(behaviorPartyId));
+                    break;
                 case "characterDevelopment":
                     if (Game.Current?.GameStateManager?.ActiveState is not MapState)
                         throw new InvalidOperationException("characterDevelopment requires the Campaign Map state");

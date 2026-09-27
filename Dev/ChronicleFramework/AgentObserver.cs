@@ -357,6 +357,37 @@ internal static class ChronicleAgentObserver
         return json.ToString();
     }
 
+    internal static string BuildMapPartyBehaviorJson(string partyId)
+    {
+        var mainParty = MobileParty.MainParty;
+        var target = MobileParty.All.FirstOrDefault(item => item != null && string.Equals(item.StringId, partyId, StringComparison.Ordinal));
+        if (Campaign.Current == null || mainParty == null || target == null || target == mainParty || !target.IsActive || target.IsGarrison || target.IsMilitia || target.AttachedTo != null || !target.Party.IsVisible)
+            throw new InvalidOperationException("party is not a current visible independent mapPartyTargets candidate");
+        if (!target.IsInspected)
+            return BuildUnavailablePartyBehaviorJson(target, "notInspected");
+
+        var behaviorText = CampaignUIHelper.GetMobilePartyBehaviorText(target);
+        if (string.IsNullOrWhiteSpace(behaviorText))
+            return BuildUnavailablePartyBehaviorJson(target, "nativeTooltipHasNoBehaviorSummary");
+        var json = new StringBuilder(512);
+        json.Append('{').Append("\"schemaVersion\":1,\"available\":true");
+        Property(json, "partyId", target.StringId, true);
+        json.Append(",\"isArmyLeader\":").Append(Bool(target.Army != null && target.Army.LeaderParty == target));
+        Property(json, "behaviorText", behaviorText, true);
+        json.Append('}');
+        return json.ToString();
+    }
+
+    private static string BuildUnavailablePartyBehaviorJson(MobileParty target, string reason)
+    {
+        var json = new StringBuilder(256);
+        json.Append('{').Append("\"schemaVersion\":1,\"available\":false");
+        Property(json, "partyId", target.StringId, true);
+        Property(json, "reason", reason, true);
+        json.Append('}');
+        return json.ToString();
+    }
+
     private static TroopRoster MergeArmyRoster(MobileParty leader, bool prisoners)
     {
         var merged = TroopRoster.CreateDummyTroopRoster();
