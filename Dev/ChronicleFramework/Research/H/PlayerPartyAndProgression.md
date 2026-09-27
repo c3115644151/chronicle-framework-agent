@@ -38,9 +38,13 @@ Chronicle主快照已返回Hero/Clan ID与名称、Clan Tier、下一级所需Re
 
 玩家Party Screen的 `PartyVM`按PartyScreen两侧区分成员和俘虏列表，显示健康/伤员、容量和可转移状态，并提供转移、全取/全放、排序、升级弹窗、俘虏招募弹窗等控件。升级或招募会因可用升级分支/兵种、经验与升级成本、玩家资金、双方 roster 容量及当前PartyScreen模式而开放/拒绝。Done会将 `PartyScreenLogic` 命令提交；Cancel/Reset走原生VM回滚/关闭，不等于已提交的TroopRoster写入。W2-K新增的按需`partyRoster`只复制MainParty成员/俘虏名单及健康伤员语义，不打开PartyState，也不提供转移/升级/招募按钮。
 
-军队人数变化还有战后俘虏转入、聚落志愿兵、招募俘虏、疾病/伤病、逃兵/死亡等来源；不应把升级、招募、伤兵治疗和战争损失压成一个“Roster调整”动作。自动NPC Troop升级、Party训练、恢复/逃兵另见 F11；玩家进入真实UI后的具体交互顺序仍未被Chronicle全自动覆盖。直接修改 `TroopRoster`会绕过UI可用性、价格/经验条件、容量和PartyScreen确认副作用；当前协议只在特定原生招募/战后PartyState入口支持有限提交。
+W2-P MainParty升级适配：`partyUpgradeOptions`仅在Campaign Map打开Normal PartyState，通过`PartyScreenHelper.OpenScreenAsNormal`取得原生`PartyScreenLogic`并构造本体`PartyVM`读取当前升级目标和费用/经验/物品/Perk可用条件；查询后走原生Cancel关闭。`upgradeTroop`要求最近观察到的普通成员ID与升级目标索引，只调用原生`PartyVM.ExecuteUpgrade(troop,index,1)`与`ExecuteDone()`，将单人升级草稿经`PartyScreenLogic.ValidateCommand/DoneLogic`提交；不直接改`TroopRoster`。有效运行夹具`villager_aserai`→`aserai_recruit`：人数1→0/0→1、XP100→0、金币1000→995；无效ID及升级后XP不足的有效兵种/目标均被拒且队伍、金币、Campaign日值无变化。测试暂时把兵种与经验加到内存中的disposable Campaign，未保存，原存档hash不变，进程停止。测试只验证原生VM数据/事务，不是玩家可见UI手动点击；本轮没有物品需求或金币不足的目标负向样本。证据：`TestResults/20260927-163147/Temp/PartyUpgradeResult.json`及`AgentPartyUpgradeAdapter.cs`。
 
-时间：打开PartyScreen的Roster事务本身没有显式推进Campaign小时/日；具体屏幕所在GameState/父菜单管理游戏时钟，不能把显式 `advance`藏入 roster动作。Chronicle常规state返回主队汇总，MapState另可按需用`partyRoster`读取MainParty成员与俘虏行。`TestResults/20260927-112940/Temp/PartyRosterResult.json`对比原生TroopRoster数据、汇总与Campaign状态通过；fixture没有俘虏，所以非空俘虏行/实际PartyVM显示未实测。Chronicle不支持一般招募、所有升级、伤病治疗/复原和任意Roster拖放。证据：本机 `PartyScreenLogic`、ViewModelCollection `PartyVM/PartyCharacterVM/PartyUpgradeTroopVM/PartyRecruitTroopVM`、Chronicle `AgentObserver/AgentProtocol`；完整升级费用规则、各Roster来源与取消确认的视觉反馈、正常PartyScreen的完整玩家入口、非战后模式事务时钟仍需分别验证。
+军队人数变化还有战后俘虏转入、聚落志愿兵、招募俘虏、疾病/伤病、逃兵/死亡等来源；不应把升级、招募、伤兵治疗和战争损失压成一个“Roster调整”动作。自动NPC Troop升级、Party训练、恢复/逃兵另见 F11；玩家进入真实UI后的具体交互顺序仍未被Chronicle全自动覆盖。直接修改 `TroopRoster`会绕过UI可用性、价格/经验条件、容量和PartyScreen确认副作用；当前协议只支持本卡明确记录的MainParty升级和已有特定原生招募/战后PartyState入口，不是通用Roster控制器。
+
+时间：升级事务本身不附加Campaign时间推进或显式改档。原版`PartyState.IsMenuState=true`；Campaign `RealTick/Tick`由`MapState`仅在自身是ActiveState时驱动，因此PartyState压在地图上期间地图Campaign tick不执行。原版`PartyScreenHelper.ClosePartyPresentation`完成或取消后PopState回父State，PartyState/MapState激活关闭路径不会自动改写时间档。W2-P Harness在Stop与UnstoppablePlay下即时打开/关闭均看到各自档位原样保留，Stop下查询前后Campaign日值相同；该测试不是长时间保持实际视觉屏幕的录制，但时间暂停和回到地图后的档位语义已有源码路径支持。
+
+Chronicle不支持一般招募、所有升级、伤病治疗/复原和任意Roster拖放。证据：本机 `PartyScreenLogic`、ViewModelCollection `PartyVM/PartyCharacterVM/PartyUpgradeTroopVM/PartyRecruitTroopVM`、Chronicle `AgentObserver/AgentProtocol/AgentPartyUpgradeAdapter`；非战后模式事务、原生实际屏幕视觉、有效目标的资源不足拒绝与第三方模块覆盖仍需分别验证。
 
 ## H05 Companion：同伴招募、家族成员与离队
 

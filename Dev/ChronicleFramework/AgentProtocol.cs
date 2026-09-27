@@ -169,6 +169,27 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("spendSkillFocus requires the Campaign Map state");
                     WriteResponse(commandId, action, "completed", behavior, null, SpendMainHeroSkillFocus(command));
                     break;
+                case "partyUpgradeOptions":
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("partyUpgradeOptions requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChroniclePartyUpgradeAdapter.BuildOptionsJson());
+                    break;
+                case "upgradeTroop":
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("upgradeTroop requires the Campaign Map state");
+                    var upgradeTroopId = ReadString(command, "troopId");
+                    var upgradeTargetIndex = ReadRequiredInteger(command, "upgradeTargetIndex");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChroniclePartyUpgradeAdapter.UpgradeOneTroopJson(upgradeTroopId, upgradeTargetIndex));
+                    break;
+                case "harnessSeedPartyUpgradeFixture":
+                    var upgradeFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var upgradeFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(upgradeFixtureMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(upgradeFixtureRoot) || !Directory.Exists(upgradeFixtureRoot))
+                        throw new InvalidOperationException("harnessSeedPartyUpgradeFixture is restricted to a visual Harness run with a Harness temp directory");
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("harnessSeedPartyUpgradeFixture requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, SeedPartyUpgradeFixture());
+                    break;
                 case "questDetails":
                     var questDetailsId = ReadString(command, "questId");
                     var observedQuest = FindObservedOngoingQuest(questDetailsId);
@@ -1125,6 +1146,66 @@ internal sealed class ChronicleAgentProtocol
         json.Append(",\"healthyCount\":").Append(party.PrisonRoster.TotalHealthyCount);
         json.Append(",\"woundedCount\":").Append(party.PrisonRoster.TotalWounded);
         json.Append(",\"sizeLimit\":").Append(party.Party.PrisonerSizeLimit).Append('}');
+        json.Append('}');
+        return json.ToString();
+    }
+
+    private static string SeedPartyUpgradeFixture()
+    {
+        var party = MobileParty.MainParty;
+        var hero = Hero.MainHero;
+        if (Campaign.Current == null || party == null || hero == null)
+            throw new InvalidOperationException("Upgrade fixture requires an active MainParty and MainHero");
+
+        TaleWorlds.CampaignSystem.CharacterObject chosenCharacter = null;
+        TaleWorlds.CampaignSystem.CharacterObject chosenTarget = null;
+        var chosenTargetIndex = -1;
+        var chosenXpCost = 0;
+        var chosenGoldCost = 0;
+        foreach (var character in TaleWorlds.CampaignSystem.CharacterObject.All
+            .Where(item => item != null && !item.IsHero && item.UpgradeTargets != null && item.UpgradeTargets.Length > 0 && party.MemberRoster.FindIndexOfTroop(item) < 0)
+            .OrderBy(item => item.Tier).ThenBy(item => item.StringId, StringComparer.Ordinal))
+        {
+            for (var targetIndex = 0; targetIndex < character.UpgradeTargets.Length; targetIndex++)
+            {
+                var target = character.UpgradeTargets[targetIndex];
+                if (target == null || target.UpgradeRequiresItemFromCategory != null) continue;
+                if (!Campaign.Current.Models.PartyTroopUpgradeModel.DoesPartyHaveRequiredPerksForUpgrade(party.Party, character, target, out var _)) continue;
+                var xpCost = character.GetUpgradeXpCost(party.Party, targetIndex);
+                var goldCost = character.GetUpgradeGoldCost(party.Party, targetIndex);
+                if (xpCost <= 0 || goldCost < 0 || goldCost > hero.Gold) continue;
+                chosenCharacter = character;
+                chosenTarget = target;
+                chosenTargetIndex = targetIndex;
+                chosenXpCost = xpCost;
+                chosenGoldCost = goldCost;
+                break;
+            }
+            if (chosenCharacter != null) break;
+        }
+        if (chosenCharacter == null)
+            throw new InvalidOperationException("No disposable troop has an item-free, perk-eligible upgrade target affordable by MainHero");
+
+        var membersBefore = party.MemberRoster.TotalManCount;
+        var goldBefore = hero.Gold;
+        party.MemberRoster.AddToCounts(chosenCharacter, 1);
+        var rosterIndex = party.MemberRoster.FindIndexOfTroop(chosenCharacter);
+        if (rosterIndex < 0) throw new InvalidOperationException("Harness could not seed the native MainParty troop roster");
+        party.MemberRoster.SetElementXp(rosterIndex, chosenXpCost);
+
+        var json = new StringBuilder(512);
+        json.Append('{');
+        json.Append("\"characterId\":\"").Append(Escape(chosenCharacter.StringId)).Append('"');
+        json.Append(",\"characterName\":\"").Append(Escape(chosenCharacter.Name?.ToString())).Append('"');
+        json.Append(",\"upgradeTargetIndex\":").Append(chosenTargetIndex);
+        json.Append(",\"targetId\":\"").Append(Escape(chosenTarget.StringId)).Append('"');
+        json.Append(",\"targetName\":\"").Append(Escape(chosenTarget.Name?.ToString())).Append('"');
+        json.Append(",\"experienceCost\":").Append(chosenXpCost);
+        json.Append(",\"goldCost\":").Append(chosenGoldCost);
+        json.Append(",\"membersBefore\":").Append(membersBefore);
+        json.Append(",\"membersAfter\":").Append(party.MemberRoster.TotalManCount);
+        json.Append(",\"goldBefore\":").Append(goldBefore);
+        json.Append(",\"goldAfter\":").Append(hero.Gold);
         json.Append('}');
         return json.ToString();
     }
