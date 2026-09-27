@@ -157,6 +157,15 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("harnessMapDiagnostics requires the Campaign Map state");
                     WriteResponse(commandId, action, "completed", behavior, null, BuildHarnessMapDiagnosticsJson());
                     break;
+                case "harnessPlayerSkillsDiagnostics":
+                    var skillsDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var skillsDiagnosticsRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(skillsDiagnosticsMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(skillsDiagnosticsRoot) || !Directory.Exists(skillsDiagnosticsRoot))
+                        throw new InvalidOperationException("harnessPlayerSkillsDiagnostics is restricted to a visual Harness run with a Harness temp directory");
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("harnessPlayerSkillsDiagnostics requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, BuildHarnessPlayerSkillsDiagnosticsJson());
+                    break;
                 case "talkToSettlementHero":
                     var overlayMenuContext = TaleWorlds.CampaignSystem.Campaign.Current?.CurrentMenuContext;
                     var overlayGameMenu = overlayMenuContext?.GameMenu;
@@ -833,6 +842,30 @@ internal sealed class ChronicleAgentProtocol
             json.Append(",\"type\":\"").Append(settlementType).Append('"');
             json.Append(",\"isVisible\":").Append(settlement.IsVisible ? "true" : "false");
             json.Append(",\"isInspected\":").Append(settlement.IsInspected ? "true" : "false");
+            json.Append('}');
+        }
+        json.Append("]}");
+        return json.ToString();
+    }
+
+    private static string BuildHarnessPlayerSkillsDiagnosticsJson()
+    {
+        var hero = Hero.MainHero;
+        var skills = TaleWorlds.CampaignSystem.Extensions.Skills.All
+            .Where(skill => skill != null)
+            .OrderBy(skill => skill.StringId, StringComparer.Ordinal)
+            .ToArray();
+        var json = new StringBuilder(1024);
+        json.Append('{');
+        json.Append("\"heroId\":\"").Append(Escape(hero?.StringId)).Append('"');
+        json.Append(",\"skills\":[");
+        for (var index = 0; index < skills.Length; index++)
+        {
+            if (index > 0) json.Append(',');
+            var skill = skills[index];
+            json.Append('{');
+            json.Append("\"id\":\"").Append(Escape(skill.StringId)).Append('"');
+            json.Append(",\"level\":").Append(hero.GetSkillValue(skill));
             json.Append('}');
         }
         json.Append("]}");

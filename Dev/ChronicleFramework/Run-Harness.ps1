@@ -1,6 +1,6 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
-    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'BattleFixture', 'PostBattle', 'Observation', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'MapSettlementTargets', 'VisualCapture', 'All')]
+    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'BattleFixture', 'PostBattle', 'Observation', 'MainHeroSkills', 'MapSettlementTargets', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'VisualCapture', 'All')]
     [string]$Phase = 'All',
     [int]$SmokeTimeoutSeconds = 45,
     [int]$SmokeStabilitySeconds = 8,
@@ -13,7 +13,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '5.16'
+$HarnessContractVersion = '5.18'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -50,6 +50,7 @@ $tavernMissionScript = Join-Path $harnessRoot 'Test-AgentTavernMission.ps1'
 $townCenterMissionScript = Join-Path $harnessRoot 'Test-AgentTownCenterMission.ps1'
 $settlementOverlayConversationScript = Join-Path $harnessRoot 'Test-AgentSettlementOverlayConversation.ps1'
 $mapSettlementTargetsScript = Join-Path $harnessRoot 'Test-AgentMapSettlementTargets.ps1'
+$mainHeroSkillsScript = Join-Path $harnessRoot 'Test-AgentMainHeroSkills.ps1'
 $docsScript = Join-Path $harnessRoot 'Check-Docs.ps1'
 $contextPackScript = Join-Path $harnessRoot 'Get-ContextPack.ps1'
 
@@ -149,6 +150,7 @@ $requestedStages = switch ($Phase) {
     'BattleFixture' { @('Preflight', 'Build', 'BattleFixture') }
     'PostBattle' { @('Preflight', 'Build', 'PostBattle') }
     'Observation' { @('Preflight', 'Build', 'Observation') }
+    'MainHeroSkills' { @('Preflight', 'Build', 'MainHeroSkills') }
     'Movement' { @('Preflight', 'Build', 'Movement') }
     'MoveToPoint' { @('Preflight', 'Build', 'MoveToPoint') }
     'Recruitment' { @('Preflight', 'Build', 'Recruitment') }
@@ -164,7 +166,7 @@ $requestedStages = switch ($Phase) {
     'SettlementOverlayQuestGate' { @('Preflight', 'Build', 'SettlementOverlayQuestGate') }
     'MapSettlementTargets' { @('Preflight', 'Build', 'MapSettlementTargets') }
     'VisualCapture' { @('Preflight', 'Build', 'VisualCapture') }
-    'All' { @('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'Protocol', 'AgentLoop', 'Observation', 'MapSettlementTargets', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'QuestAcceptance', 'BattleFixture', 'PostBattle', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestGate') }
+    'All' { @('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'Protocol', 'AgentLoop', 'Observation', 'MainHeroSkills', 'MapSettlementTargets', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'QuestAcceptance', 'BattleFixture', 'PostBattle', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestGate') }
 }
 
 foreach ($stage in $requestedStages) {
@@ -454,6 +456,12 @@ foreach ($stage in $requestedStages) {
             Invoke-Stage -Name 'MapSettlementTargets' -Action {
                 & powershell -NoProfile -ExecutionPolicy Bypass -File $mapSettlementTargetsScript
                 if ($LASTEXITCODE -ne 0) { throw "Native map settlement visibility and movement guard test failed with exit code $LASTEXITCODE." }
+            }
+        }
+        'MainHeroSkills' {
+            Invoke-Stage -Name 'MainHeroSkills' -Action {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $mainHeroSkillsScript
+                if ($LASTEXITCODE -ne 0) { throw "Native MainHero skills observation test failed with exit code $LASTEXITCODE." }
             }
         }
         'AgentLoop' {

@@ -66,7 +66,7 @@ try {
         Start-Sleep -Milliseconds 500
     }
     if (-not $arrived -or $arrived.state.location.currentSettlementId -ne 'town_V1' -or $arrived.state.context.menuId -ne 'town') { throw 'Natural campaign travel did not reach the Town menu.' }
-    if ($arrived.state.schemaVersion -ne 19) { throw "Town menu observation schema changed unexpectedly: $($arrived.state.schemaVersion)." }
+    if ($arrived.state.schemaVersion -ne 20) { throw "Town menu observation schema changed unexpectedly: $($arrived.state.schemaVersion)." }
 
     $centerOption = @($arrived.state.availableMenuOptions | Where-Object { $_.id -eq 'town_streets' -and $_.available -and $_.enabled })
     if ($centerOption.Count -ne 1) { throw 'Native Town menu does not expose an enabled town_streets option.' }

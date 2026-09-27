@@ -88,7 +88,7 @@ try {
     if ($move.status -ne 'completed' -or $move.state.location.targetSettlementId -ne $TargetSettlementId) { throw "Native Campaign movement did not accept observed settlement target '$TargetSettlementId'." }
     $routeTrace += [ordered]@{ Step = 'moveToObservedTarget'; SettlementId = $TargetSettlementId; CampaignDay = $initial.campaignDay }
     $arrived = Wait-ForSettlementMenu $TargetSettlementId
-    if ($arrived.state.schemaVersion -ne 19) { throw "Settlement overlay observation schema changed unexpectedly: $($arrived.state.schemaVersion)." }
+    if ($arrived.state.schemaVersion -ne 20) { throw "Settlement overlay observation schema changed unexpectedly: $($arrived.state.schemaVersion)." }
 
     $overlayCharacters = @($arrived.state.settlementOverlayCharacters)
     $issueCandidates = @()

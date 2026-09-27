@@ -92,7 +92,7 @@ Hero的 `HeroDeveloper`持有Skill XP/Level、Attributes、Focus和未花点数/
 
 玩家从角色发展(Character Developer)面板选择适用Hero，检查技能、升级进度、属性/Focus点数与开放Perks；`CharacterDeveloperVM`先保存拟改值，Done时调用 `ApplyAllChanges`写回`HeroDeveloper`，Cancel会复原未提交更改并关闭面板。另一个独立的Reset控件调用`ExecuteReset`，遍历所有适用Hero执行`ResetChanges(isCancel:false)`并刷新选择器：复原本次面板会话中的未提交编辑，但不关闭页面，玩家可继续分配；因此Reset不等于Done，也不等于Cancel，映射`ACT-H10-02`。直接调用 `HeroDeveloper.AddFocus/AddAttribute/AddPerk`绕过UI可用点数、前置技能、Perk选择提示和取消事务；不能把点数读出或界面打开当成成长发生。
 
-Chronicle当前没有Character Developer完整观察面或Attribute/Focus/Perk投入动作，也没有通用获取技能经验动作；仅间接观察Clan/Renown等少量发展变量。技能效果来源分散，战斗技能与perk使用分别见F/G，制作技能见H09，任务与交易技能触发见J/E。角色发展页面编辑本身不应主动推进 Campaign；角色数值何时刷新UI显示及跨角色适用规则仍需核验。来源：本机 `HeroDeveloper`、`CharacterDeveloperState`、ViewModelCollection `CharacterDeveloperVM/CharacterDeveloperHeroItemVM/SkillVM/PerkSelectionVM`、Chronicle Observer；未知各技能XP源/倍率全量矩阵、存读档或死亡/角色切换对点数的交接，以及改Mod技能/perk数据的兼容。
+Chronicle schema20已通过`mainHeroSkills`向Agent只读提供MainHero当前SkillObject等级，来源于原版`Hero.GetSkillValue`；这支持AI识别Crafting/Scouting等技能门槛，但不能单独判定Quest可接，因为Issue还检查关系/阵营/世界条件。Chronicle仍没有Character Developer完整观察面或Attribute/Focus/Perk投入动作，也没有通用获得技能经验动作；技能效果来源分散，战斗技能与Perk使用分别见F/G，制作技能见H09，任务与交易技能触发见J/E。Character Developer草稿提交不应推进Campaign；其它角色适用规则、存档/角色切换以及Mod扩展技能的覆盖仍需核验。来源：本机 `HeroDeveloper`、`CharacterDeveloperVM/CharacterDeveloperHeroItemVM/SkillVM`，其中MainHero SkillVM.Level直接读`HeroDeveloper.Hero.GetSkillValue(Skill)`；Chronicle Observer/W2-G证据。
 
 ## H11 Renown 与 Influence：声望、权限和政治资源
 

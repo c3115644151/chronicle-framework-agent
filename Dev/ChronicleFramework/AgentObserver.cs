@@ -49,7 +49,7 @@ internal static class ChronicleAgentObserver
 
         var json = new StringBuilder(4096);
         json.Append('{');
-        json.Append("\"schemaVersion\":19");
+        json.Append("\"schemaVersion\":20");
         json.Append(",\"campaignDay\":").Append(Number(CampaignTime.Now.ToDays));
         json.Append(",\"identity\":{");
         Property(json, "heroId", hero.StringId); Property(json, "heroName", hero.Name?.ToString(), true);
@@ -61,6 +61,21 @@ internal static class ChronicleAgentObserver
         else
             json.Append("null");
         json.Append(",\"mercenaryRequiredTier\":").Append(campaign.Models.ClanTierModel.MercenaryEligibleTier).Append('}');
+        var mainHeroSkills = TaleWorlds.CampaignSystem.Extensions.Skills.All
+            .Where(skill => skill != null)
+            .OrderBy(skill => skill.StringId, StringComparer.Ordinal)
+            .ToArray();
+        json.Append(",\"mainHeroSkills\":[");
+        for (var index = 0; index < mainHeroSkills.Length; index++)
+        {
+            if (index > 0) json.Append(',');
+            var skill = mainHeroSkills[index];
+            json.Append('{');
+            Property(json, "id", skill.StringId);
+            Property(json, "name", skill.Name?.ToString(), true);
+            json.Append(",\"level\":").Append(hero.GetSkillValue(skill)).Append('}');
+        }
+        json.Append(']');
         json.Append(",\"economy\":{");
         json.Append("\"gold\":").Append(hero.Gold);
         json.Append(",\"influence\":").Append(Number(clan?.Influence ?? 0));
