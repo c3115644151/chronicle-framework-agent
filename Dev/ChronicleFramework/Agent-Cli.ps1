@@ -40,6 +40,8 @@ param(
     [switch]$AsJson
 )
 
+. (Join-Path $PSScriptRoot 'HarnessShaderCacheDialog.ps1')
+
 $ErrorActionPreference = 'Stop'
 $gameRoot = if ($env:CHRONICLE_GAME_ROOT -and (Test-Path -LiteralPath $env:CHRONICLE_GAME_ROOT)) { [IO.Path]::GetFullPath($env:CHRONICLE_GAME_ROOT) } else { Split-Path -Parent (Split-Path -Parent $PSScriptRoot) }
 $binDirectory = Join-Path $gameRoot 'bin\Win64_Shipping_Client'
@@ -159,14 +161,35 @@ if ($Action -in @('start','load')) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $ready = $false
     $windowLayout = $null
+    $startupDialogReceipts = [System.Collections.Generic.List[object]]::new()
     while ((Get-Date) -lt $deadline) {
         $launchProcess = Get-Process -Id $process.Id -ErrorAction SilentlyContinue
         if (-not $launchProcess) { break }
         if ($launchProcess.MainWindowTitle -match '^Mod change detected$') {
-            $blockedWindowTitle = $launchProcess.MainWindowTitle
-            Stop-AgentProcessTree -RootProcessId $process.Id | Out-Null
-            Set-SafeExitMarker
-            throw "Campaign launch stopped at Bannerlord's '$blockedWindowTitle' dialog. In v1.4.8 this is the native shader-cache invalidation notice; it does not prove the save module list is incompatible. The notice requires acknowledging cache regeneration once for this module set. No game-window input was sent."
+            try {
+                $dialogResult = Invoke-ChronicleShaderCacheDialogAcknowledgement -ProcessId $process.Id -WindowHandle $launchProcess.MainWindowHandle
+            }
+            catch {
+                $dialogEvidenceDirectory = if (-not [string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) { $env:CHRONICLE_HARNESS_TEMP } else { $protocolRoot }
+                New-Item -ItemType Directory -Force -Path $dialogEvidenceDirectory | Out-Null
+                $dialogEvidencePath = Join-Path $dialogEvidenceDirectory "startup-dialog-$($process.Id).json"
+                [pscustomobject]@{ Handled = $false; ProcessId = $process.Id; WindowTitle = $launchProcess.MainWindowTitle; Error = $_.Exception.Message } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $dialogEvidencePath -Encoding UTF8
+                Stop-AgentProcessTree -RootProcessId $process.Id | Out-Null
+                Set-SafeExitMarker
+                throw "Safe handling of the known shader-cache prompt failed before confirmation. The test-owned game process was stopped; evidence: $dialogEvidencePath. Cause: $($_.Exception.Message)"
+            }
+            $startupDialogReceipts.Add($dialogResult)
+            $dialogEvidenceDirectory = if (-not [string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) { $env:CHRONICLE_HARNESS_TEMP } else { $protocolRoot }
+            New-Item -ItemType Directory -Force -Path $dialogEvidenceDirectory | Out-Null
+            $dialogEvidencePath = Join-Path $dialogEvidenceDirectory "startup-dialog-$($process.Id).json"
+            $dialogResult | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $dialogEvidencePath -Encoding UTF8
+            if (-not $dialogResult.Handled) {
+                Stop-AgentProcessTree -RootProcessId $process.Id | Out-Null
+                Set-SafeExitMarker
+                $actionSummary = @($dialogResult.ActionNames) -join ', '
+                throw "Campaign launch stopped at 'Mod change detected'; this is not evidence of incompatible save modules. Safely captured UIA actions='$actionSummary', reason='$($dialogResult.Reason)'. Full dialog evidence: $dialogEvidencePath. No global keyboard or mouse input was sent."
+            }
+            continue
         }
         $candidateLayout = Set-ChronicleTestWindow -ProcessId $process.Id
         if ($candidateLayout -and $candidateLayout.Applied) { $windowLayout = $candidateLayout }
@@ -185,7 +208,7 @@ if ($Action -in @('start','load')) {
     }
     $windowLayout = Set-ChronicleTestWindow -ProcessId $process.Id
     if (-not $windowLayout -or -not $windowLayout.Applied) { throw 'Windowed test layout was not verified.' }
-    $session = [ordered]@{ protocolVersion = 1; processId = $process.Id; saveName = $SaveName; moduleSet = $modules; startedUtc = (Get-Date).ToUniversalTime().ToString('O'); windowLayout = $windowLayout }
+    $session = [ordered]@{ protocolVersion = 1; processId = $process.Id; saveName = $SaveName; moduleSet = $modules; startedUtc = (Get-Date).ToUniversalTime().ToString('O'); windowLayout = $windowLayout; startupDialogReceipts = @($startupDialogReceipts) }
     $session | ConvertTo-Json | Set-Content -Path $sessionPath -Encoding UTF8
     $configuredTimeout = $TimeoutSeconds
     $TimeoutSeconds = [Math]::Min(30, $TimeoutSeconds)

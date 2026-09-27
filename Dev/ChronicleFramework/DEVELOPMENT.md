@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 
-Contract version: 5.34
+Contract version: 5.35
 
 ## 目标与边界
 
@@ -77,7 +77,7 @@ Campaign Map普通`state`保持轻量，不默认携带全部可见聚落列表�
 
 地图聚落列表通过只读CLI/Agent工具 `mapSettlementTargets`按需查询，而不重复塞进每次`state`快照；只有Campaign Map状态可以调用。数据只含本体`IsVisible`的活动聚落，并附`IsInspected`以区分地图图标与近距离调查。Harness-only的`harnessMapDiagnostics`可用于正/负向测试，但禁止进入Agent决策白名单。
 
-`Agent-Cli.ps1 load`从存档头部读取该存档创建时的有序模块ID，验证这些模块仍安装后再用同一模块集加载；不向旧/不同模组集存档擅自附加当前默认模块。元数据解析在Preflight使用合成存档头回归。v1.4.8 的“Mod change detected”原版窗口正文是着色器缓存失效提示；标题本身不能证明存档模组不兼容。Harness 保留快速失败，不自动操作游戏窗口；同一模块集首次需要确认时由人类确认一次，之后在已重建缓存的稳定模块集上重试。
+`Agent-Cli.ps1 load`从存档头部读取该存档创建时的有序模块ID，验证这些模块仍安装后再用同一模块集加载；不向旧/不同模组集存档擅自附加当前默认模块。元数据解析在Preflight使用合成存档头回归。v1.4.8 的“Mod change detected”原版窗口是着色器缓存提示，不足以证明存档模组不兼容。启动Harness会读取目标游戏进程窗口的UI Automation树；仅当窗口标题、着色器/缓存正文和唯一明确肯定控件都匹配时，才调用该控件的UIA `InvokePattern`/`LegacyIAccessiblePattern`，或对可验证归属进程的Win32 Button发送`BM_CLICK`一次，并记录处理回执。它不发送全局键鼠、不激活窗口；内容/控件不匹配、无法安全调用或一次确认后窗口仍在时快速失败，绝不盲目重试。Docs用正向和三种负向样例锁定这个范围。实测发现RGL提示里的“确定”是Win32 `Button`，但UIA把它标为`Pane`且不提供InvokePattern；改为校验按钮类、控件名、窗口正文和所属PID后发送单控件`BM_CLICK`。随后`InventoryNavigation`实机阶段通过，临时存档hash前后不变、游戏进程正常退出；测试结果现会保留启动弹窗处理回执，供后续回归核验。
 
 Provider loop 输入观察及上一动作原始回执，再执行 allowlist 动作并复观察；`advance` 仅 Harness 可用。Test provider 不代表 LLM。CLI 需 state 握手；stop 清理进程树/队列。对话与战斗控制分开。
 
@@ -168,7 +168,7 @@ stop()
 | Api | 当前 DLL 存在目标签名 | API Probe 输出 |
 | Build | 项目针对当前 DLL 编译 | 构建退出码和 DLL |
 | Smoke | 清单、DLL、`OnSubModuleLoad`、`Finished All` | 同 PID 日志 |
-| Campaign/FreshCampaign | 旧档；FreshCampaign新Sandbox原生创建、跳intro、选+20；Progression用临时存档重载再move/arrival/recruit | 同PID renown20/MapState、非激活840x472；Crash Report仅按明确信号有界重试；已知`Mod change detected`启动确认框应识别并快速失败，不自动确认；临时存档精确清理、非模型Provider |
+| Campaign/FreshCampaign | 旧档；FreshCampaign新Sandbox原生创建、跳intro、选+20；Progression用临时存档重载再move/arrival/recruit | 同PID renown20/MapState、非激活840x472；Crash Report仅按明确信号有界重试；已知`Mod change detected`着色器缓存提示仅可经精确匹配的目标进程UIA按钮确认一次，不用全局输入；临时存档精确清理、非模型Provider |
 | Protocol | CLI 启动/重载、状态、暂停/恢复、独立推进时钟、保存、停止；推进到目标时间或遭遇边界即返回 | 每命令不可变回执、JSONL 轨迹与存档回读；存档往返使用单次唯一测试名，记录回读/源夹具哈希后删除；时间步进不得隐式塞入地图移动/追近命令 |
 | AgentLoop | 外部提供者接收真实观察，选择 allowlisted 原子动作并重观察 | 测试输入/决策/回执、时钟转换、拒绝越权动作、fixture 哈希、退出；不计作模型能力 |
 | BattleFixture | disposable save 内造 hostile looter；用原版 pursue 点击语义接敌 | hostile/party ID、自然时间/encounter 回执、fixture 哈希、进程退出；造敌非 Agent 行为 |

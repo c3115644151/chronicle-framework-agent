@@ -99,6 +99,7 @@ try {
         Paused = [ordered]@{ Open = $pausedOpen.data; InventoryBefore = $nativeInventoryPaused.data; InventoryAfterWait = $nativePausedAfterWait.data; Close = $pausedClose.data; DayBefore = $nativeInventoryPaused.data.campaignDay; DayAfter = $nativePausedAfterWait.data.campaignDay; TimeModeAfterMap = $mapAfterPaused.state.context.timeControlMode }
         Active = [ordered]@{ MapMode = $activeMapBefore.state.context.timeControlMode; Open = $activeOpen.data; InventoryBefore = $nativeInventoryActiveBefore.data; InventoryAfterWait = $nativeInventoryActiveAfter.data; Close = $activeClose.data; DayBefore = $nativeInventoryActiveBefore.data.campaignDay; DayAfter = $nativeInventoryActiveAfter.data.campaignDay; TimeModeAfterMap = $mapAfterActive.state.context.timeControlMode }
         EngineFrame = [ordered]@{ Path = $framePath; Receipt = $frame.data }
+        StartupDialogReceipts = @($start.session.startupDialogReceipts)
         Assertions = $assertions
         FailedAssertions = $failedAssertions
         FixtureHashBefore = $fixtureHashBefore
