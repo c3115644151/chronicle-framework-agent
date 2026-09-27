@@ -133,6 +133,11 @@ internal sealed class ChronicleAgentProtocol
                 case "state":
                     WriteResponse(commandId, action, "completed", behavior);
                     break;
+                case "mapSettlementTargets":
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("mapSettlementTargets requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentObserver.BuildMapSettlementTargetsJson());
+                    break;
                 case "harnessMissionDiagnostics":
                     var missionDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
                     var missionDiagnosticsRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
@@ -142,6 +147,15 @@ internal sealed class ChronicleAgentProtocol
                     if (diagnosticMission == null || diagnosticMission.MissionEnded || !AgentMissionInputPatch.IsSupportedLocationMission(diagnosticMission))
                         throw new InvalidOperationException("harnessMissionDiagnostics requires an active Town or Tavern Location Mission");
                     WriteResponse(commandId, action, "completed", behavior, null, BuildHarnessMissionDiagnosticsJson(diagnosticMission));
+                    break;
+                case "harnessMapDiagnostics":
+                    var mapDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var mapDiagnosticsRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(mapDiagnosticsMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(mapDiagnosticsRoot) || !Directory.Exists(mapDiagnosticsRoot))
+                        throw new InvalidOperationException("harnessMapDiagnostics is restricted to a visual Harness run with a Harness temp directory");
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("harnessMapDiagnostics requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, BuildHarnessMapDiagnosticsJson());
                     break;
                 case "talkToSettlementHero":
                     var overlayMenuContext = TaleWorlds.CampaignSystem.Campaign.Current?.CurrentMenuContext;
@@ -281,7 +295,7 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("settlement movement requires the campaign map with no active encounter");
                     var settlementId = ReadString(command, "settlementId");
                     var settlement = string.IsNullOrWhiteSpace(settlementId) ? null : Settlement.Find(settlementId);
-                    if (settlement == null || !settlement.IsActive) throw new InvalidOperationException("active settlement not found");
+                    if (settlement == null || !settlement.IsActive || !settlement.IsVisible) throw new InvalidOperationException("settlement is not currently exposed as a visible Campaign map target");
                     if (settlement.MapFaction != null && FactionManager.IsAtWarAgainstFaction(MobileParty.MainParty.MapFaction, settlement.MapFaction))
                         throw new InvalidOperationException("hostile settlement rejected by safe movement policy");
                     Helpers.NavigationHelper.GetInteractionDataForMainParty(settlement, out var canNavigateToSettlement, out var navigationType, out var targetingPort);
@@ -790,6 +804,35 @@ internal sealed class ChronicleAgentProtocol
             json.Append(",\"name\":\"").Append(Escape(hero.Name?.ToString())).Append('"');
             json.Append(",\"isNotable\":").Append(hero.IsNotable ? "true" : "false");
             json.Append(",\"issueType\":\"").Append(Escape(hero.Issue?.GetType().Name)).Append('"');
+            json.Append('}');
+        }
+        json.Append("]}");
+        return json.ToString();
+    }
+
+    private static string BuildHarnessMapDiagnosticsJson()
+    {
+        var settlements = Settlement.All
+            .Where(settlement => settlement != null && settlement.IsActive)
+            .OrderBy(settlement => settlement.StringId, StringComparer.Ordinal)
+            .ToArray();
+        var json = new StringBuilder(2048);
+        json.Append('{');
+        json.Append("\"activeSettlementCount\":").Append(settlements.Length);
+        json.Append(",\"visibleSettlementCount\":").Append(settlements.Count(settlement => settlement.IsVisible));
+        json.Append(",\"hiddenSettlementCount\":").Append(settlements.Count(settlement => !settlement.IsVisible));
+        json.Append(",\"settlements\":[");
+        for (var index = 0; index < settlements.Length; index++)
+        {
+            if (index > 0) json.Append(',');
+            var settlement = settlements[index];
+            json.Append('{');
+            json.Append("\"id\":\"").Append(Escape(settlement.StringId)).Append('"');
+            json.Append(",\"name\":\"").Append(Escape(settlement.Name?.ToString())).Append('"');
+            var settlementType = settlement.IsTown ? "town" : settlement.IsCastle ? "castle" : settlement.IsVillage ? "village" : settlement.IsHideout ? "hideout" : "other";
+            json.Append(",\"type\":\"").Append(settlementType).Append('"');
+            json.Append(",\"isVisible\":").Append(settlement.IsVisible ? "true" : "false");
+            json.Append(",\"isInspected\":").Append(settlement.IsInspected ? "true" : "false");
             json.Append('}');
         }
         json.Append("]}");

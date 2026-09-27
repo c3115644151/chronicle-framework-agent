@@ -238,6 +238,35 @@ internal static class ChronicleAgentObserver
         return json.ToString();
     }
 
+    internal static string BuildMapSettlementTargetsJson()
+    {
+        var campaign = Campaign.Current;
+        var party = MobileParty.MainParty;
+        if (campaign == null || party == null) return "null";
+        var position = party.GetPosition2D;
+        var mapSettlementTargets = Settlement.All
+            .Where(item => item != null && item.IsActive && item.IsVisible)
+            .Select(item => new { Item = item, Distance = Distance(position.X, position.Y, item.GetPosition2D.X, item.GetPosition2D.Y) })
+            .OrderBy(item => item.Distance)
+            .ThenBy(item => item.Item.StringId, StringComparer.Ordinal)
+            .ToArray();
+        var json = new StringBuilder(1024);
+        json.Append('{').Append("\"schemaVersion\":1,\"mapSettlementTargets\":[");
+        for (var index = 0; index < mapSettlementTargets.Length; index++)
+        {
+            if (index > 0) json.Append(',');
+            var item = mapSettlementTargets[index].Item;
+            json.Append('{'); Property(json, "id", item.StringId); Property(json, "name", item.Name?.ToString(), true);
+            Property(json, "type", item.IsTown ? "town" : item.IsCastle ? "castle" : item.IsVillage ? "village" : item.IsHideout ? "hideout" : "other", true);
+            json.Append(",\"distance\":").Append(Number(mapSettlementTargets[index].Distance));
+            json.Append(",\"isInspected\":").Append(Bool(item.IsInspected));
+            json.Append(",\"hostile\":").Append(Bool(IsHostile(party.MapFaction, item.MapFaction)));
+            json.Append(",\"underSiege\":").Append(Bool(item.IsUnderSiege)).Append('}');
+        }
+        json.Append("]}");
+        return json.ToString();
+    }
+
     private static string BuildMissionObservationJson()
     {
         var mission = Mission.Current;

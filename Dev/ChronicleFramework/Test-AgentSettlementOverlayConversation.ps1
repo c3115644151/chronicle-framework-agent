@@ -51,11 +51,14 @@ try {
     $start = Invoke-AgentCli 'load' @('-SaveName', $LoadSaveName)
     $initial = Invoke-AgentCli 'state' @('-CommandId', "$commandPrefix-initial")
     if ($initial.state.context.gameState -ne 'MapState') { throw "Settlement overlay fixture must start on Campaign map; got $($initial.state.context.gameState)." }
+    $mapTargetsReceipt = Invoke-AgentCli 'mapSettlementTargets' @('-CommandId', "$commandPrefix-map-targets-initial")
+    if ($mapTargetsReceipt.status -ne 'completed' -or -not $mapTargetsReceipt.data) { throw 'Native map settlement target observation was not available on Campaign Map.' }
+    $mapSettlementTargets = @($mapTargetsReceipt.data.mapSettlementTargets)
 
-    $settlement = @($initial.state.nearbySettlements | Where-Object { $_.id -eq $TargetSettlementId -and -not $_.hostile } | Select-Object -First 1)
+    $settlement = @($mapSettlementTargets | Where-Object { $_.id -eq $TargetSettlementId -and -not $_.hostile } | Select-Object -First 1)
     if ($settlement.Count -ne 1) {
-        $approach = @($initial.state.nearbySettlements | Where-Object { $_.id -eq $ApproachSettlementId -and -not $_.hostile } | Select-Object -First 1)
-        if ($approach.Count -ne 1) { throw "Neither target '$TargetSettlementId' nor safe approach settlement '$ApproachSettlementId' is currently player-observed. Observed=$((@($initial.state.nearbySettlements | ForEach-Object { $_.id }) -join ','))" }
+        $approach = @($mapSettlementTargets | Where-Object { $_.id -eq $ApproachSettlementId -and -not $_.hostile } | Select-Object -First 1)
+        if ($approach.Count -ne 1) { throw "Neither target '$TargetSettlementId' nor safe approach settlement '$ApproachSettlementId' is currently a visible map target. Observed=$((@($mapSettlementTargets | ForEach-Object { $_.id }) -join ','))" }
         $approachMove = Invoke-AgentCli 'move' @('-SettlementId', $ApproachSettlementId, '-CommandId', "$commandPrefix-approach-move")
         if ($approachMove.status -ne 'completed' -or $approachMove.state.location.targetSettlementId -ne $ApproachSettlementId) { throw "Native Campaign movement did not accept observed approach target '$ApproachSettlementId'." }
         $approachArrival = Wait-ForSettlementMenu $ApproachSettlementId
@@ -74,9 +77,12 @@ try {
         if (-not $mapObservation -or $mapObservation.state.context.gameState -ne 'MapState' -or $mapObservation.state.location.currentSettlementId) { throw "Native Leave from '$ApproachSettlementId' did not return to Campaign Map." }
         $routeTrace += [ordered]@{ Step = 'leaveApproachAndReobserve'; OptionId = $leaveOption[0].id; GameState = $mapObservation.state.context.gameState; CampaignDay = $mapObservation.campaignDay }
         $initial = $mapObservation
-        $settlement = @($initial.state.nearbySettlements | Where-Object { $_.id -eq $TargetSettlementId -and -not $_.hostile } | Select-Object -First 1)
+        $mapTargetsReceipt = Invoke-AgentCli 'mapSettlementTargets' @('-CommandId', "$commandPrefix-map-targets-after-approach")
+        if ($mapTargetsReceipt.status -ne 'completed' -or -not $mapTargetsReceipt.data) { throw 'Map settlement targets could not be re-observed after native Leave.' }
+        $mapSettlementTargets = @($mapTargetsReceipt.data.mapSettlementTargets)
+        $settlement = @($mapSettlementTargets | Where-Object { $_.id -eq $TargetSettlementId -and -not $_.hostile } | Select-Object -First 1)
     }
-    if ($settlement.Count -ne 1) { throw "Target settlement '$TargetSettlementId' is not a safe target in the current map observation after the approach. Observed=$((@($initial.state.nearbySettlements | ForEach-Object { $_.id }) -join ','))" }
+    if ($settlement.Count -ne 1) { throw "Target settlement '$TargetSettlementId' is not a safe target in the current map target observation after the approach. Observed=$((@($mapSettlementTargets | ForEach-Object { $_.id }) -join ','))" }
 
     $move = Invoke-AgentCli 'move' @('-SettlementId', $TargetSettlementId, '-CommandId', "$commandPrefix-move")
     if ($move.status -ne 'completed' -or $move.state.location.targetSettlementId -ne $TargetSettlementId) { throw "Native Campaign movement did not accept observed settlement target '$TargetSettlementId'." }
@@ -179,6 +185,7 @@ try {
     $result = [ordered]@{
         ProcessId = $start.session.processId
         TargetSettlement = [ordered]@{ Id = $TargetSettlementId; Name = $settlement[0].name; Type = $settlement[0].type; MenuId = $arrived.state.context.menuId }
+        MapSettlementTargetCount = $mapSettlementTargets.Count
         RouteTrace = $routeTrace
         NativeOverlayCharacterCount = $overlayCharacters.Count
         Target = $targetCharacter

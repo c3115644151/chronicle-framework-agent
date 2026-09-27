@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet('start','load','state','captureFrame','harnessMissionDiagnostics','talkToSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','move','moveToPoint','missionInput','missionNavigateToAgent','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','recruit','foodOptions','tradeOptions','trade','provision','save','stop')]
+    [ValidateSet('start','load','state','mapSettlementTargets','captureFrame','harnessMissionDiagnostics','harnessMapDiagnostics','talkToSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','move','moveToPoint','missionInput','missionNavigateToAgent','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','recruit','foodOptions','tradeOptions','trade','provision','save','stop')]
     [string]$Action,
     [string]$SaveName,
     [string]$SettlementId,
@@ -200,7 +200,9 @@ if ($Action -in @('start','load')) {
 
 switch ($Action) {
     'state' { $result = Invoke-ProtocolCommand 'state' }
+    'mapSettlementTargets' { $result = Invoke-ProtocolCommand 'mapSettlementTargets' }
     'harnessMissionDiagnostics' { $result = Invoke-ProtocolCommand 'harnessMissionDiagnostics' }
+    'harnessMapDiagnostics' { $result = Invoke-ProtocolCommand 'harnessMapDiagnostics' }
     'talkToSettlementHero' {
         if (-not $HeroId) { throw '-HeroId is required and must come from settlementOverlayCharacters in the current observation.' }
         $result = Invoke-ProtocolCommand 'talkToSettlementHero' @{ heroId = $HeroId }

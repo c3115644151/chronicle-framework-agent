@@ -361,7 +361,7 @@ Decision跨域去重规则：`ACT-C02-01/02`是Decision Election中Supporter/Cho
 
 | ID | 类型 | 玩家入口 / 观察语义 | 原版结果、前置/时间 | Chronicle现状 / 证据 / 未知 | 来源映射 |
 | --- | --- | --- | --- | --- | --- |
-| OBS-D01-01 | 观察 | Campaign Map查看当前玩家可见Town/Castle/Village图标、名称与可交互标记 | 可见区域/悬停字段受镜头视口、发现/侦察与MapEntity类型影响，不代表全图数据库 | Chronicle当前`nearbySettlements`另受主队周边半径限制，尚未证明等同MapScreen当前画面可选Settlement；1.4.8运行截图出现萨哥特周围聚落标记，而Agent快照仅列萨哥特。视口与原版点击筛选仍待源码/运行映射，不向Agent泄漏全图对象 | D01、K01、AgentObserver、`MapScreen`/MapEntity visual |
+| OBS-D01-01 | 观察 | Campaign Map查看当前原版`Settlement.IsVisible`的Town/Castle/Village map marker、名称与类型；可用镜头平移/缩放浏览，不是全图对象数据库 | `IsVisible`与近距离调查`IsInspected`不同；实际鼠标点击另需当前camera ray hit-test与MapEntity click handler允许 | Chronicle保留半径≤8项的`nearbySettlements`，另以`mapSettlementTargets`报告active + IsVisible标记/距离/IsInspected；命令不返回IsVisible=false的Settlement | D01/K01、`SettlementVisualManager`、`SettlementVisual`、`PartyBase.UpdateVisibilityAndInspected`、AgentObserver |
 | OBS-D02-01 | 观察 | 进入Town后读取菜单/管理面板的建设、民忠、粮食、繁荣、驻军等 | 面板值来自多来源对象/日tick，不由一条“Settlement summary”统一更新时间 | Chronicle能读当前菜单与局部Settlement字段，但无完整Town管理VM | D02/D05-D08、L03 |
 | OBS-D03-01 | 观察 | Castle访问/领地管理中的城防、村庄绑定、驻军/工程信息 | Castle特有墙体/被围状态会改变选项，不能与Town菜单字段一一等同 | Chronicle有附近Castle摘要/部分Siege状态，不含完整管理VM | D03、F08、L03 |
 | OBS-D04-01 | 观察 | Village列表/地图页面查看绑定Town、产物/村庄状态和生产 | 村庄供应、强征/劫掠/贸易使用不同接口；生产随Campaign tick | Chronicle只限可见Settlements摘要，不展示完整生产链 | D04、E03、F09、L05 |
