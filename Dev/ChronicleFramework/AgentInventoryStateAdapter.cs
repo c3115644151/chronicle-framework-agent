@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
@@ -131,9 +132,10 @@ internal static class ChronicleInventoryStateAdapter
             var item = slots[index].Item;
             json.Append('{');
             ChroniclePartyUpgradeAdapter.Property(json, "slotName", slots[index].Property.Name, addComma: false);
-            json.Append(",\"equipmentIndex\":").Append((int)item.ItemType);
+            json.Append(",\"equipmentIndex\":").Append((int)slots[index].EquipmentIndex);
             ChroniclePartyUpgradeAdapter.Property(json, "viewModelItemId", item?.StringId);
             ChroniclePartyUpgradeAdapter.Property(json, "itemId", item?.ItemRosterElement.EquipmentElement.Item?.StringId);
+            ChroniclePartyUpgradeAdapter.Property(json, "modifierId", item?.ItemRosterElement.EquipmentElement.ItemModifier?.StringId);
             ChroniclePartyUpgradeAdapter.Property(json, "inventorySide", item?.InventorySide.ToString());
             json.Append('}');
         }
@@ -153,7 +155,7 @@ internal static class ChronicleInventoryStateAdapter
         if (item.InventorySide != InventoryLogic.InventorySide.PlayerInventory || item.ItemCount < 1 || !item.IsTransferable)
             throw new InvalidOperationException("itemViewModelId is not a transferable PlayerInventory item in the current native VM");
         if (!item.CanCharacterUseItem) throw new InvalidOperationException("Native SPInventoryVM says MainHero cannot use this item");
-        var targetSlot = GetEquipmentSlotViewModels(viewModel).FirstOrDefault(slot => (int)slot.Item.ItemType == equipmentIndex);
+        var targetSlot = GetEquipmentSlotViewModels(viewModel).FirstOrDefault(slot => (int)slot.EquipmentIndex == equipmentIndex);
         if (targetSlot.Item == null) throw new InvalidOperationException("equipmentIndex is not a current native MainHero equipment slot");
 
         var modeBefore = Campaign.Current.TimeControlMode.ToString();
@@ -202,7 +204,7 @@ internal static class ChronicleInventoryStateAdapter
         var inventoryState = RequireMainHeroDefaultInventoryState(out var viewModel);
         if (inventoryState.InventoryLogic.IsThereAnyChanges())
             throw new InvalidOperationException("Commit or cancel the current native Inventory draft before another equipment change");
-        var targetSlot = GetEquipmentSlotViewModels(viewModel).FirstOrDefault(slot => (int)slot.Item.ItemType == equipmentIndex);
+        var targetSlot = GetEquipmentSlotViewModels(viewModel).FirstOrDefault(slot => (int)slot.EquipmentIndex == equipmentIndex);
         if (targetSlot.Item == null || string.IsNullOrEmpty(targetSlot.Item.StringId) || targetSlot.Item.ItemRosterElement.EquipmentElement.IsEmpty)
             throw new InvalidOperationException("equipmentIndex is not occupied in the current native MainHero Equipment mode");
 
@@ -356,13 +358,25 @@ internal static class ChronicleInventoryStateAdapter
         return field.GetValue(viewModel) as CharacterObject;
     }
 
-    private static (PropertyInfo Property, SPItemVM Item)[] GetEquipmentSlotViewModels(SPInventoryVM viewModel)
+    private static (PropertyInfo Property, SPItemVM Item, EquipmentIndex EquipmentIndex)[] GetEquipmentSlotViewModels(SPInventoryVM viewModel)
     {
-        return viewModel.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public)
+        var slotLookup = viewModel.GetType().GetMethods(BindingFlags.Instance | BindingFlags.NonPublic)
+            .FirstOrDefault(method => method.Name == "GetItemFromIndex" && method.GetParameters().Length == 1 && method.GetParameters()[0].ParameterType == typeof(EquipmentIndex));
+        if (slotLookup == null) throw new MissingMethodException(viewModel.GetType().FullName, "GetItemFromIndex(EquipmentIndex)");
+        var slotProperties = viewModel.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public)
             .Where(property => property.Name.StartsWith("Character", StringComparison.Ordinal) && property.Name.EndsWith("Slot", StringComparison.Ordinal) && property.PropertyType == typeof(SPItemVM))
-            .Select(property => (Property: property, Item: property.GetValue(viewModel, null) as SPItemVM))
-            .Where(slot => slot.Item != null)
             .ToArray();
+        var slots = new List<(PropertyInfo Property, SPItemVM Item, EquipmentIndex EquipmentIndex)>();
+        var seenIndices = new HashSet<int>();
+        foreach (EquipmentIndex equipmentIndex in Enum.GetValues(typeof(EquipmentIndex)))
+        {
+            var equipmentIndexValue = (int)equipmentIndex;
+            if (equipmentIndexValue < 0 || equipmentIndexValue >= (int)EquipmentIndex.NumEquipmentSetSlots || !seenIndices.Add(equipmentIndexValue)) continue;
+            if (slotLookup.Invoke(viewModel, new object[] { equipmentIndex }) is not SPItemVM item) continue;
+            var property = slotProperties.FirstOrDefault(candidate => ReferenceEquals(candidate.GetValue(viewModel, null), item));
+            if (property != null) slots.Add((property, item, equipmentIndex));
+        }
+        return slots.OrderBy(slot => (int)slot.EquipmentIndex).ToArray();
     }
 
     private static int GetExactMainPartyItemCount(EquipmentElement element)
@@ -388,6 +402,7 @@ internal static class ChronicleInventoryStateAdapter
         json.Append('{');
         ChroniclePartyUpgradeAdapter.Property(json, "viewModelItemId", item.StringId, addComma: false);
         ChroniclePartyUpgradeAdapter.Property(json, "itemId", item.ItemRosterElement.EquipmentElement.Item?.StringId);
+        ChroniclePartyUpgradeAdapter.Property(json, "modifierId", item.ItemRosterElement.EquipmentElement.ItemModifier?.StringId);
         ChroniclePartyUpgradeAdapter.Property(json, "name", item.ItemRosterElement.EquipmentElement.GetModifiedItemName().ToString());
         ChroniclePartyUpgradeAdapter.Property(json, "inventorySide", item.InventorySide.ToString());
         json.Append(",\"itemType\":").Append((int)item.ItemType);

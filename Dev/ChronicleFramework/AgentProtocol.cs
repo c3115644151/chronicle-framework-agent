@@ -233,6 +233,18 @@ internal sealed class ChronicleAgentProtocol
                     RequireRoleHarnessMode();
                     WriteResponse(commandId, action, "completed", behavior, null, ChroniclePartyRoleAdapter.BuildHarnessDiagnosticsJson());
                     break;
+                case "harnessSeedEquipmentModifierFixture":
+                    RequireEquipmentModifierFixtureHarnessMode();
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("harnessSeedEquipmentModifierFixture requires Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessEquipmentModifierFixture.SeedMasterworkSword());
+                    break;
+                case "harnessClearEquipmentModifierFixture":
+                    RequireEquipmentModifierFixtureHarnessMode();
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("harnessClearEquipmentModifierFixture requires Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessEquipmentModifierFixture.ClearMasterworkSword());
+                    break;
                 case "harnessOpenInventoryState":
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleInventoryStateAdapter.OpenThroughNativeMapNavigation(requireHarnessMode: true));
                     break;
@@ -913,6 +925,14 @@ internal sealed class ChronicleAgentProtocol
         var root = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
         if (!string.Equals(mode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
             throw new InvalidOperationException("PartyRole fixture/diagnostics are restricted to visual Harness runs with a Harness temp directory");
+    }
+
+    private static void RequireEquipmentModifierFixtureHarnessMode()
+    {
+        var mode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+        var root = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+        if (!string.Equals(mode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+            throw new InvalidOperationException("Equipment modifier fixture seeding/cleanup is restricted to visual Harness runs with a Harness temp directory");
     }
 
     private void UpdateMissionNavigationLease()
