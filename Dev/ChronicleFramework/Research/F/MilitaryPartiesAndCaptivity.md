@@ -22,17 +22,19 @@ Campaign 管理全体 MobileParty 及各类别集合；`MainParty` 是 Campaign 
 
 玩家的主要 Party 是地图上 `MobileParty.MainParty`。创建和管理人员、装备、俘虏的玩家入口分布在 Party Screen、地图遭遇/战后、聚落驻军和战斗队伍界面；具体 PartyScreen 提交、伤兵转移、升级与俘虏操作入口分别由 F11/F12、G/H域深入记录，本节不以 API setter 替代玩家流程。地图移动、追击、Hold、Wait与Campaign时钟的原生玩家行为以 MAINLINE 机制契约为准。
 
-Chronicle 当前常驻 Snapshot 对MainParty输出成员/健康/伤员/俘虏人数、总物品数、粮食、每日FoodChange、DailyWage、速度、士气、cargo weight/capacity、AI MoveMode/DefaultBehavior和目标ID。NearbyParty只枚举可见且活动的队伍、按观察半径排序并最多给前12项，字段含ID/Name/Type/Distance/Hostile/IsMoving/CurrentSettlementId/成员数/估算实力；不列具体Roster、领袖身份、物品/现金/食物、目标Settlement、任务或AI思考评分。另有按需只读 `mapPartyTargets`，列出Campaign Map中active、非Garrison/Militia、未附着其他队伍且`PartyBase.IsVisible`的移动Party marker，不受附近半径/12项限制；输出marker/nameplate摘要。普通已inspection MobileParty的逐兵种行通过`mapPartyComposition(partyId)`按需读取；Army leader因走不同Tooltip聚合路径，目前明确返回不可用，待单独核实。
+Chronicle当前常驻Snapshot对MainParty输出成员/健康/伤员/俘虏人数、总物品数、粮食、每日FoodChange、DailyWage、速度、士气、cargo weight/capacity、AI MoveMode/DefaultBehavior和目标ID。NearbyParty只枚举可见且活动的队伍、按观察半径排序并最多给前12项，字段含ID/Name/Type/Distance/Hostile/IsMoving/CurrentSettlementId/成员数/估算实力；不列具体Roster、领袖身份、物品/现金/食物、目标Settlement、任务或AI思考评分。另有按需只读`mapPartyTargets`，列出Campaign Map中active、非Garrison/Militia、未附着其他队伍且`PartyBase.IsVisible`的移动Party marker，不受附近半径/12项限制；输出marker/nameplate摘要。普通已inspection MobileParty和Army leader分别进入两种原版Tooltip路径，均通过`mapPartyComposition(partyId)`按需读取。
 
-当前观察所以是“一个玩家队伍的较丰富结构化观察 + 附近队伍的有限摘要 + 按需全局可见marker摘要 + 按需读取单一已inspection普通Party组成”，不是全图party roster census，也不是敌方/友方所有战役队伍的完整自省。玩家视觉核对：地图可见队伍显示人数；悬停并按住ALT可查看政治队伍的兵种/人员构成。该入口为用户实际观察确认、未留截图。源码把基础marker可见与`IsInspected`详细侦察区分；不要将ALT界面详情推广到不可见或未inspection对象。Army leader提示在本体源码使用单独的Army聚合ViewModel，Chronicle目前不返回该阵容。
+当前观察所以是“一个玩家队伍的较丰富结构化观察 + 附近队伍有限摘要 + 按需全局可见marker摘要 + 按需单对象组成”，不是全图Party roster census，也不是所有战役队伍完整自省。玩家视觉核对：地图可见队伍显示人数；悬停并按住ALT可查看政治队伍兵种/人员构成。此入口为用户实际观察确认、未留截图。源码把基础marker可见与`IsInspected`详细侦察区分；不要将ALT详情推广到不可见或未inspection对象。Army leader提示使用另一套Native Army Tooltip及聚合VM。
 
 官方 `MobileParty.IsInfoHidden` 字段会被官方 PartyNameplateVM 读取，但用户确认原版不存在这一信息隐藏玩法，只有部分Mod实现；在已检查的官方CampaignSystem/SandBox/StoryMode代码中也未找到赋值点。因此它作为UI兼容钩子/Mod扩展字段处理，不作为Chronicle原版观察过滤条件。Harness一次性战役所用模块包含Harmony、ButterLib、UIExtenderEx、MBOptionScreen等前置；本次六个可见Party样本字段均为false，只能作为该测试模块集证据，不能称为纯净原版运行。
 
 `mapPartyTargets`窄运行 `TestResults/20260927-122102/Temp/MapPartyTargetsResult.json`：六个返回项与本体可见marker候选ID一致；名称、类型、检查状态、健康成员/伤员/俘虏人数及距离逐项匹配；重复稳定、Campaign/存档不变、进程退出。它依据Campaign `IsVisible`定义marker目标，不声称等于当前摄像机屏幕裁切；attached Army子队伍不重复列为独立地图目标。
 
-`mapPartyComposition(partyId)`的窄运行 `TestResults/20260927-131611/Temp/MapPartyCompositionResult.json`：同一disposable Campaign的六个可见/inspected候选均由Harness-only诊断枚举；挑选一支普通Lord Party（`lord_1_21_party_1`）后，13个成员类型的ID、名称、总数、健康数、伤兵数及Hero标志逐项匹配roster读取，且全部13个名称均出现在官方1.4.8 `PropertyBasedTooltipVM(IsExtended=true)`扩展提示中。非目标ID返回`rejected`，重复查询稳定；MainParty状态/时间、存档hash不变且进程退出。它通过原生Tooltip ViewModel而非实际ALT键/人工画面作语义比较。测试模块含Harmony/ButterLib/UIExtenderEx/MBOptionScreen前置，不称纯净原版。
+普通Party `mapPartyComposition(partyId)`窄运行 `TestResults/20260927-131611/Temp/MapPartyCompositionResult.json`：六个可见/inspected候选中挑选一支Lord Party，13种成员类型的ID、名称、数量/健康/伤兵/Hero字段匹配Roster诊断，且名称出现在官方1.4.8 `PropertyBasedTooltipVM(IsExtended=true)`扩展提示中。无效ID `rejected`、重复稳定、Campaign/存档未变、进程退出。不是ALT键输入模拟或玩家画面录屏；测试模块有Harmony/ButterLib/UIExtenderEx/MBOptionScreen等前置，不称纯净原版。
 
-源码显示Army leader tooltip会把leader与AttachedParties Member/Prison roster合并；但六个自然样本没有Army leader、伤兵或俘虏。因此当前工具对Army leader显式返回“需要单独核实”，而非错误地把leader单队Roster说成全Army；伤兵/俘虏非空分支仍为源码依据、运行未知。`IsInfoHidden`仅是Tooltip UI读取的兼容字段，用户确认本体没有对应信息隐藏玩法；不要将其列为原版情报设计。
+Army leader `mapPartyComposition`窄运行 `TestResults/20260927-140439/Temp/MapArmyCompositionResult.json`：Harness通过官方`Kingdom.CreateArmy`并加入一支同Faction Party建立一次性Army；随后使用Army的原生`AddPartyToMergedParties`入口使该Party附着。原生`RefreshArmyTooltip`扩展VM与Agent聚合Roster一致，leader与附属Roster合并后为14种成员行，UI VM逐项匹配。源档未保存、campaign停止、进程退出。此验证测试Native合并方法/tooltip数据，不等价于真实AI部队旅行到达或玩家点Army按钮。
+
+源码显示Army leader tooltip把leader与AttachedParties Member/Prison roster合并；本机Harness以Native `Kingdom.CreateArmy`初始化Army及受邀Party后再调用Native合并入口，避免单独构造Army或绕过CampaignEvent。早前不完整的直接Attach夹具曾在`StatisticsCampaignBehavior.OnPartyAttachedAnotherParty`空引用（`TestResults/20260927-130944`）；根因是夹具未按原生Army邀请/注册顺序建立状态，而不是客户端自然运行崩溃；该次进程关闭、存档未保存。当前一个附属Party的成员聚合已验证，但自然Campaign邀请/移动/抵达及多附属Army、非空伤兵/俘虏输出仍未知。`IsInfoHidden`是Tooltip兼容字段，用户确认本体没有对应信息隐藏玩法。
 
 证据：本机 `TaleWorlds.CampaignSystem.dll` 的 `MobileParty`、`PartyBase`、PartyComponents、Roster与Encounter事件；Chronicle `AgentObserver.cs`、`AgentProtocol.cs` 及 MAINLINE 原版动作契约。静态证据版本 v1.4.8.119303，没有声称各类 Party UI 或 Mission roster 已完整视觉验证。
 

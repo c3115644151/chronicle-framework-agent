@@ -253,6 +253,15 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("harnessMapPartyCompositionDiagnostics requires a partyId");
                     WriteResponse(commandId, action, "completed", behavior, null, BuildHarnessMapPartyCompositionDiagnosticsJson(diagnosticPartyId));
                     break;
+                case "harnessCreateMapArmyFixture":
+                    var createArmyFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var createArmyFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(createArmyFixtureMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(createArmyFixtureRoot) || !Directory.Exists(createArmyFixtureRoot))
+                        throw new InvalidOperationException("harnessCreateMapArmyFixture is restricted to a visual Harness run with a Harness temp directory");
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("harnessCreateMapArmyFixture requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, CreateMapArmyFixture(ReadString(command, "partyId"), ReadString(command, "attachedPartyId")));
+                    break;
                 case "talkToSettlementHero":
                     var overlayMenuContext = TaleWorlds.CampaignSystem.Campaign.Current?.CurrentMenuContext;
                     var overlayGameMenu = overlayMenuContext?.GameMenu;
@@ -1269,6 +1278,42 @@ internal sealed class ChronicleAgentProtocol
             json.Append('}');
         }
         json.Append(']');
+    }
+
+    private static string CreateMapArmyFixture(string leaderPartyId, string attachedPartyId)
+    {
+        var leaderParty = MobileParty.All.FirstOrDefault(item => item != null && string.Equals(item.StringId, leaderPartyId, StringComparison.Ordinal));
+        var kingdom = leaderParty?.MapFaction as Kingdom;
+        if (leaderParty == null || kingdom == null || leaderParty == MobileParty.MainParty || !leaderParty.IsActive || !leaderParty.IsVisible || !leaderParty.IsInspected || leaderParty.IsGarrison || leaderParty.IsMilitia || leaderParty.AttachedTo != null || leaderParty.Army != null || leaderParty.LeaderHero == null)
+            throw new InvalidOperationException("A native Harness Army requires a current visible inspected independent Lord Party without an Army");
+        var attachedParty = string.IsNullOrWhiteSpace(attachedPartyId) ? null : MobileParty.All.FirstOrDefault(item => item != null && string.Equals(item.StringId, attachedPartyId, StringComparison.Ordinal));
+        if (attachedPartyId != null && (attachedParty == null || attachedParty == leaderParty || attachedParty == MobileParty.MainParty || attachedParty.MapFaction != kingdom || !attachedParty.IsActive || !attachedParty.IsVisible || !attachedParty.IsInspected || attachedParty.IsGarrison || attachedParty.IsMilitia || attachedParty.AttachedTo != null || attachedParty.Army != null))
+            throw new InvalidOperationException("A native Harness Army attachment requires a second current visible inspected independent Party in the same Kingdom");
+        var gatheringFocus = leaderParty.TargetSettlement ?? leaderParty.CurrentSettlement ?? kingdom.Settlements.FirstOrDefault(settlement => settlement.IsFortification && !settlement.IsUnderSiege) ?? kingdom.Settlements.FirstOrDefault();
+        if (gatheringFocus == null) throw new InvalidOperationException("A native Harness Army requires an available focus settlement");
+
+        var kingdomArmyCountBefore = kingdom.Armies.Count;
+        var partiesToCall = attachedParty == null ? null : new TaleWorlds.Library.MBList<MobileParty> { attachedParty };
+        kingdom.CreateArmy(leaderParty.LeaderHero, gatheringFocus, Army.ArmyTypes.Patrolling, partiesToCall);
+        var army = leaderParty.Army;
+        if (army == null || army.LeaderParty != leaderParty || !kingdom.Armies.Contains(army))
+            throw new InvalidOperationException("Native Kingdom.CreateArmy did not create a registered Army for the selected Lord Party");
+        if (attachedParty != null)
+        {
+            if (attachedParty.Army != army) throw new InvalidOperationException("Native Kingdom.CreateArmy did not enlist the selected secondary Party");
+            army.AddPartyToMergedParties(attachedParty);
+        }
+        var json = new StringBuilder(512);
+        json.Append('{');
+        json.Append("\"leaderPartyId\":\"").Append(Escape(leaderParty.StringId)).Append('"');
+        json.Append(",\"armyType\":\"").Append(Escape(army.ArmyType.ToString())).Append('"');
+        json.Append(",\"armyRegisteredInKingdom\":true");
+        json.Append(",\"armyCountBefore\":").Append(kingdomArmyCountBefore);
+        json.Append(",\"armyCountAfter\":").Append(kingdom.Armies.Count);
+        json.Append(",\"attachedPartyCount\":").Append(leaderParty.AttachedParties.Count);
+        json.Append(",\"temporaryAttachedPartyEnlisted\":").Append(attachedParty != null && attachedParty.Army == army ? "true" : "false");
+        json.Append('}');
+        return json.ToString();
     }
 
     private static void AppendHarnessRosterDiagnostics(StringBuilder json, TaleWorlds.CampaignSystem.Roster.TroopRosterElement[] elements)

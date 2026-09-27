@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
+    [switch]$ValidateArmyTooltip,
     [int]$TimeoutSeconds = 180
 )
 
@@ -8,7 +9,8 @@ $ErrorActionPreference = 'Stop'
 $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
 $savePath = Join-Path $env:USERPROFILE "Documents\Mount and Blade II Bannerlord\Game Saves\$LoadSaveName.sav"
 $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\session.json'
-$resultPath = if ($env:CHRONICLE_HARNESS_TEMP) { Join-Path $env:CHRONICLE_HARNESS_TEMP 'MapPartyCompositionResult.json' } else { Join-Path $PSScriptRoot 'TestResults\ManualMapPartyComposition\MapPartyCompositionResult.json' }
+$resultFileName = if ($ValidateArmyTooltip) { 'MapArmyCompositionResult.json' } else { 'MapPartyCompositionResult.json' }
+$resultPath = if ($env:CHRONICLE_HARNESS_TEMP) { Join-Path $env:CHRONICLE_HARNESS_TEMP $resultFileName } else { Join-Path $PSScriptRoot "TestResults\ManualMapPartyComposition\$resultFileName" }
 $previousHarnessMode = $env:CHRONICLE_HARNESS_MODE
 $commandPrefix = 'map-party-composition-' + (Get-Date -Format 'yyyyMMddHHmmssfff')
 
@@ -75,6 +77,31 @@ try {
 
     $invalidParty = Invoke-AgentCli 'mapPartyComposition' @('-PartyId', 'chronicle_non_visible_party_test', '-CommandId', "$commandPrefix-invalid")
     $invalidPartyRejected = ($invalidParty.status -eq 'rejected')
+    $armyAssertion = $true
+    $armyEvidence = $null
+    if ($ValidateArmyTooltip) {
+        $armyPair = $null
+        foreach ($leaderCandidate in $nativeCandidates) {
+            if ($leaderCandidate.Native.data.isArmyLeader -or [string]::IsNullOrWhiteSpace([string]$leaderCandidate.Native.data.mapFactionId)) { continue }
+            $attachedCandidate = @($nativeCandidates | Where-Object {
+                -not $_.Native.data.isArmyLeader -and
+                $_.Target.id -ne $leaderCandidate.Target.id -and
+                $_.Native.data.mapFactionId -eq $leaderCandidate.Native.data.mapFactionId
+            } | Select-Object -First 1)
+            if ($attachedCandidate.Count -eq 1) { $armyPair = [pscustomobject]@{ Leader = $leaderCandidate; Attached = $attachedCandidate[0] }; break }
+        }
+        if ($null -eq $armyPair) { throw 'The fixture has no two visible inspected independent Parties of one Kingdom for native Kingdom.CreateArmy verification.' }
+        $armyFixture = Invoke-AgentCli 'harnessCreateMapArmyFixture' @('-PartyId', [string]$armyPair.Leader.Target.id, '-AttachedPartyId', [string]$armyPair.Attached.Target.id, '-CommandId', "$commandPrefix-create-army")
+        $armyNative = Invoke-AgentCli 'harnessMapPartyCompositionDiagnostics' @('-PartyId', [string]$armyFixture.data.leaderPartyId, '-CommandId', "$commandPrefix-native-army")
+        $armyObserved = Invoke-AgentCli 'mapPartyComposition' @('-PartyId', [string]$armyFixture.data.leaderPartyId, '-CommandId', "$commandPrefix-composition-army")
+        $armyMembersMatch = Test-RosterEquality @($armyObserved.data.members) @($armyNative.data.memberRoster)
+        $armyPrisonersMatch = Test-RosterEquality @($armyObserved.data.prisoners) @($armyNative.data.prisonRoster)
+        $armyDefinitions = @($armyNative.data.nativeTooltipProperties | ForEach-Object { [string]$_.definition })
+        $armyMemberNamesDisplayed = @($armyObserved.data.members | Where-Object { $armyDefinitions -ccontains [string]$_.name }).Count -eq @($armyObserved.data.members).Count
+        $armyPrisonerNamesDisplayed = @($armyObserved.data.prisoners | Where-Object { $armyDefinitions -ccontains [string]$_.name }).Count -eq @($armyObserved.data.prisoners).Count
+        $armyAssertion = ([bool]$armyFixture.data.armyRegisteredInKingdom -and [int]$armyFixture.data.attachedPartyCount -eq 1 -and [bool]$armyFixture.data.temporaryAttachedPartyEnlisted -and [bool]$armyNative.data.isArmyLeader -and [bool]$armyObserved.data.isArmyLeader -and [bool]$armyObserved.data.available -and [bool]$armyMembersMatch -and [bool]$armyPrisonersMatch -and [bool]$armyMemberNamesDisplayed -and [bool]$armyPrisonerNamesDisplayed)
+        $armyEvidence = [ordered]@{ LeaderPartyId = [string]$armyFixture.data.leaderPartyId; AttachedPartyId = [string]$armyPair.Attached.Target.id; MemberRowCount = @($armyObserved.data.members).Count; PrisonerRowCount = @($armyObserved.data.prisoners).Count; NativeTooltipPropertyCount = @($armyNative.data.nativeTooltipProperties).Count; IsInfoHidden = [bool]$armyNative.data.isInfoHidden }
+    }
     $after = Invoke-AgentCli 'state' @('-CommandId', "$commandPrefix-after")
     $snapshotUnchanged = (
         $before.state.identity.heroId -eq $after.state.identity.heroId -and
@@ -98,6 +125,7 @@ try {
         NativeExtendedTooltipDisplaysMemberNames = [bool]$memberNamesDisplayed
         NativeExtendedTooltipDisplaysPrisonerNames = [bool]$prisonerNamesDisplayed
         StableAcrossRepeatedReads = [bool]$stableAcrossReads
+        NativeArmyTooltipMatchesWhenRequested = [bool]$armyAssertion
         NonTargetPartyRejected = [bool]$invalidPartyRejected
         SnapshotUnchanged = [bool]$snapshotUnchanged
         FixtureUnchanged = ($fixtureHashBefore -eq $fixtureHashAfter)
@@ -116,6 +144,7 @@ try {
         NativeArmyLeaderCandidateCount = @($nativeCandidates | Where-Object { $_.Native.data.isArmyLeader }).Count
         NativeCandidateWoundedRowCount = (@($nativeCandidates | ForEach-Object { $_.WoundedRowCount }) | Measure-Object -Sum).Sum
         NativeCandidatePrisonerRowCount = (@($nativeCandidates | ForEach-Object { $_.PrisonerRowCount }) | Measure-Object -Sum).Sum
+        ArmyTooltipEvidence = $armyEvidence
         InspectedCandidateCoverage = @($nativeCandidates | ForEach-Object { [ordered]@{ partyId = [string]$_.Target.id; isArmyLeader = [bool]$_.Native.data.isArmyLeader; memberRows = @($_.Native.data.memberRoster).Count; woundedRows = [int]$_.WoundedRowCount; prisonerRows = [int]$_.PrisonerRowCount } })
         Assertions = $assertions
         FailedAssertions = $failedAssertions

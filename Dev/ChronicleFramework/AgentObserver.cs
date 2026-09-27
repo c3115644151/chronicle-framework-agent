@@ -327,13 +327,11 @@ internal static class ChronicleAgentObserver
             throw new InvalidOperationException("party is not a current visible independent mapPartyTargets candidate");
 
         var isArmyLeader = target.Army != null && target.Army.LeaderParty == target;
-        if (isArmyLeader)
-            return BuildUnavailablePartyCompositionJson(target, isArmyLeader, "armyTooltipRequiresDedicatedNativeVerification");
         if (!target.IsInspected || target.IsInfoHidden)
             return BuildUnavailablePartyCompositionJson(target, isArmyLeader, target.IsInfoHidden ? "nativeTooltipSuppressesDetails" : "notInspected");
 
-        var members = target.MemberRoster;
-        var prisoners = target.PrisonRoster;
+        var members = isArmyLeader ? MergeArmyRoster(target, prisoners: false) : target.MemberRoster;
+        var prisoners = isArmyLeader ? MergeArmyRoster(target, prisoners: true) : target.PrisonRoster;
         var json = new StringBuilder(4096);
         json.Append('{').Append("\"schemaVersion\":1,\"available\":true");
         Property(json, "partyId", target.StringId, true);
@@ -357,6 +355,25 @@ internal static class ChronicleAgentObserver
         Property(json, "reason", reason, true);
         json.Append('}');
         return json.ToString();
+    }
+
+    private static TroopRoster MergeArmyRoster(MobileParty leader, bool prisoners)
+    {
+        var merged = TroopRoster.CreateDummyTroopRoster();
+        AddRoster(merged, prisoners ? leader.PrisonRoster : leader.MemberRoster);
+        foreach (var attachedParty in leader.AttachedParties)
+            AddRoster(merged, prisoners ? attachedParty.PrisonRoster : attachedParty.MemberRoster);
+        return merged;
+    }
+
+    private static void AddRoster(TroopRoster target, TroopRoster source)
+    {
+        for (var index = 0; index < source.Count; index++)
+        {
+            var element = source.GetElementCopyAtIndex(index);
+            if (element.Character != null && element.Number > 0)
+                target.AddToCounts(element.Character, element.Number, insertAtFront: false, element.WoundedNumber);
+        }
     }
 
     private static void AppendPartyCompositionRoster(StringBuilder json, TroopRoster roster)
