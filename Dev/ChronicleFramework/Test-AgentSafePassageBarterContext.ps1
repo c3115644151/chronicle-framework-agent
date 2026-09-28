@@ -92,8 +92,8 @@ try {
     $beforeFixture = Get-SafePassageState 'map-before-bandit-fixture'
     if ($beforeFixture.state.context.encounterActive) { throw 'Campaign already has an active encounter before Safe Passage fixture setup.' }
     $fixture = Invoke-AgentCli 'harnessPrepareSafePassageFixture' @('-CommandId', "$prefix-prepare-bandit-fixture") 25
-    if ($fixture.status -ne 'completed' -or $fixture.data.partyId -ne 'chronicle_harness_safe_passage_looters' -or -not [bool]$fixture.data.hostile -or $fixture.data.playerSide -ne 'Defender' -or -not [bool]$fixture.data.encounterActive)
-        { throw 'The Harness did not start a native encounter with the hostile Bandit as attacker and MainParty as defender.' }
+    if ($fixture.status -ne 'completed' -or $fixture.data.partyId -ne 'chronicle_harness_safe_passage_looters' -or -not [bool]$fixture.data.hostile -or $fixture.data.playerSide -ne 'Defender' -or -not [bool]$fixture.data.encounterActive -or [int]$fixture.data.playerSidePartyCount -lt 1 -or [int]$fixture.data.playerSideMemberCount -lt 1 -or [double]$fixture.data.banditStrength -le [double]$fixture.data.playerSideStrength)
+        { throw 'The Harness did not create a native Bandit-attacker/MainParty-defender Encounter with measured joined forces and a stronger hostile party.' }
 
     $currentTestStep = 'native-bandit-meeting'
     $meeting = Wait-ForBanditConversation -PartyId ([string]$fixture.data.partyId) -GameProcessId ([int]$start.session.processId)
@@ -123,6 +123,8 @@ try {
     $fixtureHashAfter = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
     $assertions = [ordered]@{
         NativeBanditDefenderEncounterReached = ($meeting.state.context.gameState -eq 'MapState' -and $meeting.state.context.encounteredPartyId -eq $fixture.data.partyId -and [bool]$meeting.state.context.encounterActive)
+        BanditFixtureOutnumbersNativeJoiningSide = ([double]$fixture.data.banditStrength -gt [double]$fixture.data.playerSideStrength)
+        NativeJoiningPartiesRecorded = ([int]$fixture.data.playerSidePartyCount -ge 1 -and [int]$fixture.data.playerSideMemberCount -ge 1)
         NativeBanditSafePassageDialogueSelected = ($dialogueChoice.status -eq 'completed')
         CapturedActualSafePassageBarterVM = ($context.contextInitializer -eq 'InitializeSafePassageBarterContext' -and $context.context -like 'contextual:*' -and $safePassageClause.Count -eq 1)
         NativeAutoBalanceStayedInSafePassageContext = ($autoBalance.status -eq 'completed' -and $updatedClause.Count -eq 1)
