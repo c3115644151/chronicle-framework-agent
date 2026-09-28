@@ -386,6 +386,15 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("harnessCreateMapArmyFixture requires the Campaign Map state");
                     WriteResponse(commandId, action, "completed", behavior, null, CreateMapArmyFixture(ReadString(command, "partyId"), ReadString(command, "attachedPartyId")));
                     break;
+                case "harnessPrepareSafePassageFixture":
+                    var safePassageFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var safePassageFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(safePassageFixtureMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(safePassageFixtureRoot) || !Directory.Exists(safePassageFixtureRoot))
+                        throw new InvalidOperationException("harnessPrepareSafePassageFixture is restricted to a visual Harness run with a Harness temp directory");
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("harnessPrepareSafePassageFixture requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessSafePassageFixture.CreateAttackingBanditParty());
+                    break;
                 case "talkToSettlementHero":
                     var overlayMenuContext = TaleWorlds.CampaignSystem.Campaign.Current?.CurrentMenuContext;
                     var overlayGameMenu = overlayMenuContext?.GameMenu;
