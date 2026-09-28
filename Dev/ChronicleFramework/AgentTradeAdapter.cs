@@ -112,6 +112,16 @@ internal static class ChronicleAgentTradeAdapter
         if (!logic.IsThereAnyChanges()) throw new InvalidOperationException("Native SPItemVM did not create a Trade Inventory draft");
 
         var transactionAmount = logic.TotalAmount;
+        var lacksGold = direction == "buy" && playerGoldBefore - transactionAmount < 0;
+        if (lacksGold || viewModel.IsDoneDisabled || !logic.CanPlayerCompleteTransaction())
+        {
+            var reason = lacksGold ? "The Native Trade quote exceeds MainHero's current Gold" : "The Native Trade VM says this draft cannot be completed";
+            var rollback = CancelCurrentNativeTradeTransaction(confirmDiscardChanges: true);
+            if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                throw new InvalidOperationException(reason + "; Native Cancel did not restore the Campaign Map");
+            throw new InvalidOperationException(reason + "; the draft was discarded through the Native Trade Cancel inquiry");
+        }
+
         _pendingDraft = new PendingTradeDraft
         {
             Direction = direction,

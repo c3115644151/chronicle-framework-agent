@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 
-Contract version: 5.41
+Contract version: 5.45
 
 ## 目标与边界
 
@@ -75,7 +75,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Dev\ChronicleFramework\Run
 
 Inventory/market专项阶段：`InventoryNavigation`验证玩家Map Inventory入口与Trade之外的原生InventoryState；`EquipmentTransactions`验证MainHero Native SPInventoryVM装备事务；`TradeTransactions`验证Town菜单Trade入口、市场买卖/食物筛选与原生Trade VM提交。Trade与Equipment共用InventoryState壳，但Trade库存、商人Gold监听器和成交规则不同，不能互相代替验收。
 
-`tradeOptions`/`foodOptions`只在当前Native Trade InventoryState读取SPItemVM候选；买卖动作引用最新观察中的`ItemViewModelId + InventorySide + Amount`，以区分同一基础Item在市场侧与玩家侧的重名实例。`tradeConfirm`通过Native Gauntlet Done提交；`tradeCancel`关空白交易页，`tradeCancelChanges`仅在Agent明确选择丢弃草稿时接受原版Inquiry。食品`provision`是买入方向的食品筛选别名，不另建地图态市场交易旁路。所有交易测试通过后仍需区分自定义/模型交易事件与视觉Trade GUI是否一致。
+`tradeOptions`/`foodOptions`只在当前Native Trade InventoryState读取SPItemVM候选；买卖动作引用最新观察中的`ItemViewModelId + InventorySide + Amount`，以区分同一基础Item在市场侧与玩家侧的重名实例。`tradeConfirm`通过Native Gauntlet Done提交；若原生报价高于MainHero当前金币或Native VM拒绝完成，适配器会通过原版Cancel Inquiry清理刚建立的草稿并拒绝该动作，避免挂住不可提交事务。`tradeCancel`关空白交易页，`tradeCancelChanges`仅在Agent明确选择丢弃草稿时接受原版Inquiry。食品`provision`是买入方向的食品筛选别名，不另建地图态市场交易旁路。`TradeTransactions`还从明确的地图`UnstoppablePlay`档验证了Trade VM与买卖动作不写入/切换时钟，且把动作日值与动作之间地图自然推进区分记录。所有交易测试通过后仍需区分自定义/模型交易事件与视觉Trade GUI是否一致。
 
 Campaign Map普通`state`保持轻量，不默认携带全部可见聚落列表；Agent可按需调用只读`mapSettlementTargets`查询当前本体`IsVisible`的Settlement地图标记，该查询只在MapState有效，不改变游戏状态或Campaign时间。隐藏目标真值仅由visual-capture Harness诊断取得，用于负向安全测试，不送入决策Provider。
 
