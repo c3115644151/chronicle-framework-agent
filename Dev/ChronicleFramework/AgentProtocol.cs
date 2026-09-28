@@ -1595,6 +1595,9 @@ internal sealed class ChronicleAgentProtocol
             json.Append(",\"isNativeMarkerCandidate\":").Append(isNativeMarkerCandidate ? "true" : "false");
             json.Append(",\"nativeVisualVisibleOrFading\":").Append(visibleOrFading ? "true" : "false");
             json.Append(",\"distance\":").Append(distance.ToString("F3", CultureInfo.InvariantCulture));
+            json.Append(",\"defaultBehavior\":\"").Append(Escape(party.DefaultBehavior.ToString())).Append('"');
+            json.Append(",\"moveMode\":\"").Append(Escape(party.PartyMoveMode.ToString())).Append('"');
+            json.Append(",\"doNotAttackMainPartyRemainingHours\":").Append((party.Ai?.DoNotAttackMainPartyUntil.RemainingHoursFromNow ?? 0f).ToString("F3", CultureInfo.InvariantCulture));
             json.Append(",\"nameplateHealthyCount\":").Append(healthy);
             json.Append(",\"nameplateWoundedCount\":").Append(wounded);
             json.Append(",\"nameplatePrisonerCount\":").Append(prisoners);

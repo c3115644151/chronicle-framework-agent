@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 
-Contract version: 5.54
+Contract version: 5.56
 
 ## 目标与边界
 
@@ -75,7 +75,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Dev\ChronicleFramework\Run
 
 Inventory/market专项阶段：`InventoryNavigation`验证玩家Map Inventory入口与Trade之外的原生InventoryState；`EquipmentTransactions`验证MainHero Native SPInventoryVM装备事务；`TradeTransactions`验证Town菜单Trade入口、市场买卖/食物筛选与原生Trade VM提交；`BarterTransactions`走真实Lord对话入口，验证原生BarterVM普通物品/金币谈判草稿、Native Auto Balance、Offer/Cancel结果。Barter的普通、Peace/SafePassage/Defection/Marriage UI共用VM适配层，但各Context的初始Barterable与最终世界效果不可混为一谈；Diplomatic/Ransom的AI Barter不属于玩家UI接口。
 
-`BarterContexts` 在独立的visual-capture Harness进程中用本地1.4.8的`BanditPartyComponent.CreateLooterParty`创建一个未保存的敌对BanditFaction party，并按原版`EncounterJoiningRadius`/Faction关系盘点可能加入玩家侧的附近NPC Party及其原生`CustomStrength`；fixture逐步增加劫匪编制，直到其原生强度至少达到玩家侧合计的1.56倍，再调用该队伍的原生`SetMoveEngageParty(MainParty)`。安全门禁先用原版导航检查选出有效的劫匪生成点，再调用原版`SettlementHelper.FindNearestSettlementToMobileParty`确认其能解析最近城镇/村庄；这覆盖原版威胁对话会用到的环境输入，避免无效地形位置让原版条件崩溃。测试不手动创建Encounter，也不强制`UnstoppablePlay`：fixture再在劫匪方向寻找MainParty可走的邻近地图点；Harness随后用原生`moveToPoint`向该点移动，由地图点击副作用进入普通`StoppablePlay`，让主动追击的劫匪自然接近并触发遭遇。选中原生Safe Passage条款后，测试还会通过当前Native BarterVM提交自动平衡后的Offer，在未保存的一次性战役里确认接受结果、扣款和遭遇结束。遭遇阶段的单次状态查询限制为8秒，连续3次无响应就失败并进入截图/清理流程，避免一次原生交互卡住后反复等待180秒；同时启用ButterLib异常捕获，把原生Crash报告里的Exception单独保存在同一Run目录，区分游戏异常与纯UI/协议不响应。该fixture命令仅在visual-capture Harness模式可调用，不加入Agent决策工具；setup记录队伍、潜在加入者/兵力、目标Party、有效生成点/最近定居点、选出的原生导航点/地图移动回执、原始存档hash和Process cleanup。交互及世界结果断言会在stop关进程前执行，失败时可取最后引擎画面；成功后清理并验证原始存档hash未变化。双方离场后的32小时AI回避持续性、Offer拒绝和Lord路线提交仍待单独验证。
+`BarterContexts` 在独立的visual-capture Harness进程中用本地1.4.8的`BanditPartyComponent.CreateLooterParty`创建一个未保存的敌对BanditFaction party，并按原版`EncounterJoiningRadius`/Faction关系盘点可能加入玩家侧的附近NPC Party及其原生`CustomStrength`；fixture逐步增加劫匪编制，直到其原生强度至少达到玩家侧合计的1.56倍，再调用该队伍的原生`SetMoveEngageParty(MainParty)`。安全门禁先用原版导航检查选出有效的劫匪生成点，再调用原版`SettlementHelper.FindNearestSettlementToMobileParty`确认其能解析最近城镇/村庄；这覆盖原版威胁对话会用到的环境输入，避免无效地形位置让原版条件崩溃。测试不手动创建Encounter，也不强制`UnstoppablePlay`：fixture再在劫匪方向寻找MainParty可走的邻近地图点；Harness随后用原生`moveToPoint`向该点移动，由地图点击副作用进入普通`StoppablePlay`，让主动追击的劫匪自然接近并触发遭遇。选中原生Safe Passage条款后，测试还会通过当前Native BarterVM提交自动平衡后的Offer，在未保存的一次性战役里确认接受结果、扣款和遭遇结束；成功后只读检查劫匪Native `DoNotAttackMainPartyUntil`剩余32小时及Hold模式，但不快进完整期限。遭遇阶段的单次状态查询限制为8秒，连续3次无响应就失败并进入截图/清理流程，避免一次原生交互卡住后反复等待180秒；同时启用ButterLib异常捕获，把原生Crash报告里的Exception单独保存在同一Run目录，区分游戏异常与纯UI/协议不响应。该fixture命令仅在visual-capture Harness模式可调用，不加入Agent决策工具；setup记录队伍、潜在加入者/兵力、目标Party、有效生成点/最近定居点、选出的原生导航点/地图移动回执、原始存档hash和Process cleanup。交互及世界结果断言会在stop关进程前执行，失败时可取最后引擎画面；成功后清理并验证原始存档hash未变化。期限内持续回避表现、到期后的AI恢复、Offer拒绝和Lord路线提交仍待单独验证。
 
 UI Harness失败证据：游戏内Agent协议遇到非`InvalidOperationException`异常时，在当前Harness temp里保留首张引擎末帧`protocol-unexpected-failure-frame.bmp`和配套JSON（动作、错误、游戏状态/菜单/时钟）；业务拒绝类`InvalidOperationException`不触发自动截图。带UI转换的测试脚本若在其自身断言失败，则在`finally`清理进程前调用`Capture-HarnessFailureFrame`，该助手只允许对`session.json`中仍存活的Harness进程调用游戏内`captureFrame`，写入`harness-failure-frame.bmp/.json`；若Agent命令通道已卡住，失败收据会回指协议层刚保存的末帧，而不再盲等或伪报“没有截图”。不截Windows桌面、不抢焦点；成功运行不留失败图，失败收据和末帧保留在同一个TestResults run目录供Agent与用户对齐事实。
 
