@@ -126,7 +126,7 @@ try {
         NativeBanditSafePassageDialogueSelected = ($dialogueChoice.status -eq 'completed')
         CapturedActualSafePassageBarterVM = ($context.contextInitializer -eq 'InitializeSafePassageBarterContext' -and $context.context -like 'contextual:*' -and $safePassageClause.Count -eq 1)
         NativeAutoBalanceStayedInSafePassageContext = ($autoBalance.status -eq 'completed' -and $updatedClause.Count -eq 1)
-        NativeAutoBalancePreservedPlayerWorldGold = ([int]$autoBalance.data.playerGoldBefore -eq [int]$autoBalance.data.playerGoldAfter)
+        NativeAutoBalancePreservedWorldAndClock = ([int]$autoBalance.data.playerGoldBefore -eq [int]$autoBalance.data.playerGoldAfter -and [bool]$autoBalance.data.playerPartyFingerprintUnchanged -and [bool]$autoBalance.data.otherPartyFingerprintUnchanged -and [string]$autoBalance.data.timeControlModeBefore -eq [string]$autoBalance.data.timeControlModeAfter -and [double]$autoBalance.data.campaignDayBefore -eq [double]$autoBalance.data.campaignDayAfter)
         NativeEncounterSideWasDefender = ($fixture.data.playerSide -eq 'Defender' -and [bool]$fixture.data.encounterActive)
         FixtureHashUnchanged = ($fixtureHashBefore -eq $fixtureHashAfter)
         ProcessStopped = [bool]$stop.processStopped
