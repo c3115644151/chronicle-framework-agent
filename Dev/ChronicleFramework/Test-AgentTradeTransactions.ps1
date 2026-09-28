@@ -211,6 +211,9 @@ try {
     $staleRejected = ($staleItem.status -eq 'rejected' -and [int]$staleOptions.data.playerGold -eq [int]$afterSell.state.economy.gold)
     $staleClose = Invoke-AgentCli 'tradeCancel' @('-CommandId', "$prefix-stale-close")
     $partyDataAfterTransactions = Get-TradeState 'party-after-transactions'
+    $tradeOutsideNativeState = Invoke-AgentCli 'trade' @('-Direction', 'buy', '-ItemViewModelId', [string]$buyOffer.viewModelItemId, '-InventorySide', 'OtherInventory', '-Amount', '1', '-CommandId', "$prefix-outside-trade-state") 15
+    $afterOutsideNativeState = Get-TradeState 'outside-trade-state-after'
+    $tradeRequiresNativeState = ($tradeOutsideNativeState.status -eq 'rejected' -and $afterOutsideNativeState.state.context.gameState -eq 'MapState' -and [int]$afterOutsideNativeState.state.economy.gold -eq [int]$afterSell.state.economy.gold -and [int]$afterOutsideNativeState.state.party.itemCount -eq [int]$afterSell.state.party.itemCount)
     $pauseEnd = Invoke-AgentCli 'pause' @('-CommandId', "$prefix-pause-end")
     $stop = Invoke-AgentCli 'stop' @('-CommandId', "$prefix-stop") 30
     $fixtureHashAfter = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
@@ -230,6 +233,7 @@ try {
         NativeBuyTransferAndDoneVerified = [bool]$buyCommit.data.postconditionPassed
         NativeSellTransferAndDoneVerified = [bool]$sellCommit.data.postconditionPassed
         StaleSellCandidateRejected = [bool]$staleRejected
+        TradeRequiresActiveNativeTradeState = [bool]$tradeRequiresNativeState
         MapStateRestoredAtTown = ($staleClose.data.returnedToMap -and $partyDataAfterTransactions.state.context.gameState -eq 'MapState' -and $partyDataAfterTransactions.state.location.currentSettlementId -eq $target[0].id)
         FixtureUnchanged = ($fixtureHashBefore -eq $fixtureHashAfter)
         ProcessStopped = [bool]$stop.processStopped
@@ -246,6 +250,7 @@ try {
         CapacityOffer = [ordered]@{ Candidate = $overCapacityOffers[0]; Attempt = $capacityAttempt; Rollback = $capacityRollback; WeightLimit = $capacityBaseline.state.party.cargoCapacity }
         OverstockStatus = [string]$overstock.status
         StaleStatus = [string]$staleItem.status
+        OutsideNativeTradeStateStatus = [string]$tradeOutsideNativeState.status
         Assertions = $assertions
         FailedAssertions = $failedAssertions
         FixtureHashBefore = $fixtureHashBefore
