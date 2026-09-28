@@ -16,6 +16,7 @@ if (-not (Test-Path -LiteralPath $savePath)) { throw "Safe Passage test fixture 
 if (Get-Process -Name Bannerlord -ErrorAction SilentlyContinue) { throw 'Bannerlord is already running.' }
 $fixtureHashBefore = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
 . (Join-Path $PSScriptRoot 'Test-AgentSupport.ps1')
+$previousCrashCaptureFlag = $env:CHRONICLE_CAPTURE_CRASH_EXCEPTION
 
 function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @(), [int]$CommandTimeout = 0) {
     $effectiveTimeout = if ($CommandTimeout -gt 0) { $CommandTimeout } else { $TimeoutSeconds }
@@ -25,19 +26,31 @@ function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @(), [int]$Comm
     catch { throw "Agent CLI '$Action' returned invalid JSON: $output" }
 }
 
-function Get-SafePassageState([string]$Suffix) {
-    return Invoke-AgentCli 'state' @('-CommandId', "$prefix-$Suffix")
+function Get-SafePassageState([string]$Suffix, [int]$CommandTimeout = 8) {
+    return Invoke-AgentCli 'state' @('-CommandId', "$prefix-$Suffix") $CommandTimeout
 }
 
 function Wait-ForBanditConversation([string]$PartyId, [int]$GameProcessId, [int]$WaitSeconds = 90) {
     $deadline = [DateTime]::UtcNow.AddSeconds($WaitSeconds)
     $state = $null
+    $consecutiveTimeouts = 0
     while ([DateTime]::UtcNow -lt $deadline) {
-        $state = Get-SafePassageState "wait-bandit-$([Guid]::NewGuid().ToString('N'))"
+        try {
+            $state = Get-SafePassageState "wait-bandit-$([Guid]::NewGuid().ToString('N'))" 8
+            $consecutiveTimeouts = 0
+        }
+        catch {
+            if ($_.Exception.Message -notmatch 'timed out after') { throw }
+            $consecutiveTimeouts++
+            if ($consecutiveTimeouts -ge 3) { throw "The game stopped answering Harness state requests after Bandit AI pursuit began: $($_.Exception.Message)" }
+            if (-not (Get-Process -Id $GameProcessId -ErrorAction SilentlyContinue)) { throw "Bannerlord process $GameProcessId exited while waiting for the native Bandit conversation." }
+            continue
+        }
         if ($state.state.context.gameState -eq 'MapState' -and
             $state.state.context.encounterActive -and
             $state.state.context.encounteredPartyId -eq $PartyId -and
-            $state.state.context.conversation) { return $state }
+            $state.state.context.conversation -and
+            @($state.state.context.conversation.options | Where-Object { $_.id -eq 'bandit_start_defender_2' -and $_.clickable }).Count -gt 0) { return $state }
         if (-not (Get-Process -Id $GameProcessId -ErrorAction SilentlyContinue)) { throw "Bannerlord process $GameProcessId exited while waiting for the native Bandit conversation." }
         Start-Sleep -Milliseconds 350
     }
@@ -69,8 +82,38 @@ function Wait-ForSafePassageBarter([int]$WaitSeconds = 8) {
     throw "The native Bandit toll route did not open Safe Passage BarterVM. LastContext=$context"
 }
 
+function Get-AutoBalanceWorldFingerprint($StateResponse) {
+    $state = $StateResponse.state
+    $npcParties = @($state.nearbyParties | Sort-Object id | ForEach-Object {
+        [ordered]@{ Id = $_.id; Members = $_.members; Hostile = $_.hostile; Strength = $_.strength }
+    })
+    $fingerprint = [ordered]@{
+        GameState = $state.context.gameState
+        TimeControlMode = $state.context.timeControlMode
+        MenuId = $state.context.menuId
+        EncounterActive = $state.context.encounterActive
+        EncounteredPartyId = $state.context.encounteredPartyId
+        CampaignDay = [double]$state.campaignDay
+        Gold = [int]$state.economy.gold
+        Party = [ordered]@{
+            Id = $state.party.id; Members = $state.party.members; Healthy = $state.party.healthy
+            Wounded = $state.party.wounded; Prisoners = $state.party.prisoners; ItemCount = $state.party.itemCount
+            Morale = $state.party.morale; Speed = [double]$state.party.speed; IsMoving = $state.party.isMoving
+            MoveMode = $state.party.moveMode; DefaultBehavior = $state.party.defaultBehavior
+        }
+        Location = [ordered]@{
+            X = [double]$state.location.x; Y = [double]$state.location.y
+            CurrentSettlementId = $state.location.currentSettlementId; TargetSettlementId = $state.location.targetSettlementId
+            TargetPartyId = $state.location.targetPartyId; TargetPosition = $state.location.targetPosition
+        }
+        NearbyParties = $npcParties
+    }
+    return $fingerprint | ConvertTo-Json -Depth 8 -Compress
+}
+
 try {
     $env:CHRONICLE_HARNESS_MODE = 'visual-capture'
+    $env:CHRONICLE_CAPTURE_CRASH_EXCEPTION = '1'
     $currentTestStep = 'load-fixture'
     $start = Invoke-AgentCli 'load' @('-SaveName', $LoadSaveName)
     $initial = Get-SafePassageState 'initial'
@@ -92,8 +135,13 @@ try {
     $beforeFixture = Get-SafePassageState 'map-before-bandit-fixture'
     if ($beforeFixture.state.context.encounterActive) { throw 'Campaign already has an active encounter before Safe Passage fixture setup.' }
     $fixture = Invoke-AgentCli 'harnessPrepareSafePassageFixture' @('-CommandId', "$prefix-prepare-bandit-fixture") 25
-    if ($fixture.status -ne 'completed' -or $fixture.data.partyId -ne 'chronicle_harness_safe_passage_looters' -or -not [bool]$fixture.data.hostile -or $fixture.data.playerSide -ne 'Defender' -or -not [bool]$fixture.data.encounterActive -or [int]$fixture.data.playerSidePartyCount -lt 1 -or [int]$fixture.data.playerSideMemberCount -lt 1 -or [double]$fixture.data.banditStrength -lt [double]$fixture.data.requiredBanditStrength)
-        { throw 'The Harness did not create a native Bandit-attacker/MainParty-defender Encounter at the required 1.5x side-strength ratio with measured joining forces.' }
+    if ($fixture.status -ne 'completed' -or $fixture.data.partyId -ne 'chronicle_harness_safe_passage_looters' -or -not [bool]$fixture.data.hostile -or [int]$fixture.data.playerSidePartyCount -lt 1 -or [int]$fixture.data.playerSideMemberCount -lt 1 -or [double]$fixture.data.banditStrength -lt [double]$fixture.data.requiredBanditStrength -or [string]::IsNullOrWhiteSpace([string]$fixture.data.targetPartyId) -or $fixture.data.targetPartyId -ne $beforeFixture.state.party.id)
+        { throw 'The Harness did not seed one actively-engaging hostile BanditFaction party with measured local joining forces and a native MainParty target.' }
+
+    $currentTestStep = 'native-player-movement-near-engaging-bandits'
+    $approach = Invoke-AgentCli 'moveToPoint' @('-X', ([double]$fixture.data.playerApproachPoint.x).ToString([Globalization.CultureInfo]::InvariantCulture), '-Y', ([double]$fixture.data.playerApproachPoint.y).ToString([Globalization.CultureInfo]::InvariantCulture), '-Surface', 'land', '-CommandId', "$prefix-native-map-click-toward-bandits")
+    if ($approach.status -ne 'completed' -or $approach.state.party.defaultBehavior -ne 'GoToPoint' -or $approach.timeControlMode -ne 'StoppablePlay')
+        { throw "Native map movement toward the approaching Bandit party did not start under the ordinary StoppablePlay clock mode: status=$($approach.status), clock=$($approach.timeControlMode), behavior=$($approach.state.party.defaultBehavior), error=$($approach.error)" }
 
     $currentTestStep = 'native-bandit-meeting'
     $meeting = Wait-ForBanditConversation -PartyId ([string]$fixture.data.partyId) -GameProcessId ([int]$start.session.processId)
@@ -112,27 +160,42 @@ try {
         { throw 'The live Bandit BarterVM was not identified as a contextual Safe Passage proposal.' }
 
     $currentTestStep = 'native-safe-passage-auto-balance'
+    $worldBeforeAutoBalance = Get-SafePassageState 'world-before-native-safe-passage-auto-balance'
+    $worldFingerprintBeforeAutoBalance = Get-AutoBalanceWorldFingerprint $worldBeforeAutoBalance
     $autoBalance = Invoke-AgentCli 'barterAutoBalance' @('-CommandId', "$prefix-native-safe-passage-auto-balance")
     if ($autoBalance.status -ne 'completed' -or -not $autoBalance.data.autoBalanced -or $autoBalance.data.updatedOptions.contextInitializer -ne 'InitializeSafePassageBarterContext')
         { throw 'Safe Passage Auto Balance did not call through the current Native VM while preserving its context.' }
     $updatedClause = @($autoBalance.data.updatedOptions.candidates | Where-Object { $_.nativeType -eq 'safe_passage_barterable' -and $_.isOffered } | Select-Object -First 1)
     if ($updatedClause.Count -ne 1) { throw 'Native Auto Balance removed the offered Safe Passage clause from the contextual proposal.' }
-
-    $currentTestStep = 'stop-disposable-safe-passage-fixture'
-    $stop = Invoke-AgentCli 'stop' @('-CommandId', "$prefix-stop") 30
+    $worldAfterAutoBalance = Get-SafePassageState 'world-after-native-safe-passage-auto-balance'
+    $worldFingerprintAfterAutoBalance = Get-AutoBalanceWorldFingerprint $worldAfterAutoBalance
+    $worldUnchangedByAutoBalance = ($worldFingerprintBeforeAutoBalance -ceq $worldFingerprintAfterAutoBalance)
     $fixtureHashAfter = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
+
     $assertions = [ordered]@{
         NativeBanditDefenderEncounterReached = ($meeting.state.context.gameState -eq 'MapState' -and $meeting.state.context.encounteredPartyId -eq $fixture.data.partyId -and [bool]$meeting.state.context.encounterActive)
-        BanditFixtureOutnumbersNativeJoiningSide = ([double]$fixture.data.banditStrength -ge [double]$fixture.data.requiredBanditStrength -and [double]$fixture.data.requiredBanditStrength -ge 1.5 * [double]$fixture.data.playerSideStrength)
+        BanditFixtureOutnumbersNativeJoiningSide = ([double]$fixture.data.banditStrength -ge [double]$fixture.data.requiredBanditStrength -and [double]$fixture.data.requiredBanditStrength -ge 1.55 * [double]$fixture.data.playerSideStrength)
         NativeJoiningPartiesRecorded = ([int]$fixture.data.playerSidePartyCount -ge 1 -and [int]$fixture.data.playerSideMemberCount -ge 1)
         NativeBanditSafePassageDialogueSelected = ($dialogueChoice.status -eq 'completed')
         CapturedActualSafePassageBarterVM = ($context.contextInitializer -eq 'InitializeSafePassageBarterContext' -and $context.context -like 'contextual:*' -and $safePassageClause.Count -eq 1)
         NativeAutoBalanceStayedInSafePassageContext = ($autoBalance.status -eq 'completed' -and $updatedClause.Count -eq 1)
-        NativeAutoBalancePreservedWorldAndClock = ([int]$autoBalance.data.playerGoldBefore -eq [int]$autoBalance.data.playerGoldAfter -and [bool]$autoBalance.data.playerPartyFingerprintUnchanged -and [bool]$autoBalance.data.otherPartyFingerprintUnchanged -and [string]$autoBalance.data.timeControlModeBefore -eq [string]$autoBalance.data.timeControlModeAfter -and [double]$autoBalance.data.campaignDayBefore -eq [double]$autoBalance.data.campaignDayAfter)
-        NativeEncounterSideWasDefender = ($fixture.data.playerSide -eq 'Defender' -and [bool]$fixture.data.encounterActive)
+        NativeAutoBalancePreservedWorldAndClock = ([int]$autoBalance.data.playerGoldBefore -eq [int]$autoBalance.data.playerGoldAfter -and [bool]$autoBalance.data.playerPartyFingerprintUnchanged -and $worldUnchangedByAutoBalance -and [string]$autoBalance.data.timeControlModeBefore -eq [string]$autoBalance.data.timeControlModeAfter -and [double]$autoBalance.data.campaignDayBefore -eq [double]$autoBalance.data.campaignDayAfter)
+        BanditAIWasAssignedToEngagePlayer = ($fixture.data.targetPartyId -eq $beforeFixture.state.party.id)
+        NativeMapClickStartedOrdinaryTimeFlow = ($approach.action -eq 'moveToPoint' -and $approach.state.party.defaultBehavior -eq 'GoToPoint' -and $approach.timeControlMode -eq 'StoppablePlay')
         FixtureHashUnchanged = ($fixtureHashBefore -eq $fixtureHashAfter)
-        ProcessStopped = [bool]$stop.processStopped
     }
+    $failedAssertions = @($assertions.Keys | Where-Object { -not [bool]$assertions[$_] })
+    if ($failedAssertions.Count -gt 0) {
+        [ordered]@{ Assertions = $assertions; FailedAssertions = $failedAssertions; WorldFingerprintBeforeAutoBalance = $worldFingerprintBeforeAutoBalance; WorldFingerprintAfterAutoBalance = $worldFingerprintAfterAutoBalance } |
+            ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $env:CHRONICLE_HARNESS_TEMP 'SafePassageBarterContextAssertions.json') -Encoding UTF8
+        throw "Native Safe Passage assertions failed before fixture shutdown: $($failedAssertions -join ', ')"
+    }
+
+    $currentTestStep = 'stop-disposable-safe-passage-fixture'
+    $stop = Invoke-AgentCli 'stop' @('-CommandId', "$prefix-stop") 30
+    $fixtureHashAfter = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
+    $assertions.ProcessStopped = [bool]$stop.processStopped
+    $assertions.FixtureHashUnchanged = ($fixtureHashBefore -eq $fixtureHashAfter)
     $failedAssertions = @($assertions.Keys | Where-Object { -not [bool]$assertions[$_] })
     $result = [ordered]@{
         Fixture = $fixture.data
@@ -141,8 +204,11 @@ try {
         Barter = $context
         SafePassageClause = $safePassageClause[0]
         AutoBalance = $autoBalance.data
+        WorldFingerprintBeforeAutoBalance = $worldFingerprintBeforeAutoBalance
+        WorldFingerprintAfterAutoBalance = $worldFingerprintAfterAutoBalance
         UpdatedSafePassageClause = $updatedClause[0]
         TimeControlModeBeforeFixture = $beforeFixture.state.context.timeControlMode
+        NativePlayerApproachReceipt = $approach
         FixtureEncounter = $fixture.data
         Assertions = $assertions
         FailedAssertions = $failedAssertions
@@ -158,7 +224,10 @@ try {
 catch {
     $failureFrame = Capture-HarnessFailureFrame -CliPath $cli -CommandPrefix $prefix -FailedStep $currentTestStep -FailureReason $_.Exception.ToString()
     if ($env:CHRONICLE_HARNESS_TEMP -and (Test-Path -LiteralPath $env:CHRONICLE_HARNESS_TEMP -PathType Container)) {
-        [ordered]@{ FailedStep = $currentTestStep; Exception = $_.Exception.ToString(); FailureFrame = $failureFrame; TimestampUtc = [DateTime]::UtcNow.ToString('O') } |
+        $sessionAtFailure = if (Test-Path -LiteralPath $sessionPath) { Get-Content -LiteralPath $sessionPath -Raw | ConvertFrom-Json } else { $null }
+        $crashExceptionPath = if ($sessionAtFailure) { Join-Path $env:CHRONICLE_HARNESS_TEMP "CrashException-$($sessionAtFailure.processId).txt" } else { $null }
+        $crashException = if ($crashExceptionPath -and (Test-Path -LiteralPath $crashExceptionPath)) { [System.IO.File]::ReadAllText($crashExceptionPath) } else { $null }
+        [ordered]@{ FailedStep = $currentTestStep; Exception = $_.Exception.ToString(); FailureFrame = $failureFrame; CrashExceptionPath = $crashExceptionPath; CrashExceptionCaptured = ($null -ne $crashException); CrashException = $crashException; TimestampUtc = [DateTime]::UtcNow.ToString('O') } |
             ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $env:CHRONICLE_HARNESS_TEMP 'SafePassageBarterContextFailure.json') -Encoding UTF8
     }
     throw
@@ -173,4 +242,6 @@ finally {
     }
     if ($null -eq $previousHarnessMode) { Remove-Item Env:CHRONICLE_HARNESS_MODE -ErrorAction SilentlyContinue }
     else { $env:CHRONICLE_HARNESS_MODE = $previousHarnessMode }
+    if ($null -eq $previousCrashCaptureFlag) { Remove-Item Env:CHRONICLE_CAPTURE_CRASH_EXCEPTION -ErrorAction SilentlyContinue }
+    else { $env:CHRONICLE_CAPTURE_CRASH_EXCEPTION = $previousCrashCaptureFlag }
 }

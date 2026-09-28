@@ -42,6 +42,7 @@ internal static class ChronicleHarnessSafePassageFixture
 
         var playerFaction = mainParty.MapFaction;
         var banditFaction = hostileClan.MapFaction;
+        var banditSpawnPoint = FindNearbyNavigablePoint(new Vec2(mainParty.Position.X, mainParty.Position.Y));
         var joiningRadius = Campaign.Current.Models.EncounterModel.GetEncounterJoiningRadius;
         var potentialPlayerJoiners = MobileParty.All
             .Where(party => party != null && party != mainParty && party.IsActive && party.MapFaction != null)
@@ -61,14 +62,14 @@ internal static class ChronicleHarnessSafePassageFixture
             homeSettlement,
             isBossParty: false,
             partyTemplate,
-            mainParty.Position + new Vec2(0.5f, 0f));
+            new CampaignVec2(banditSpawnPoint, isOnLand: true));
         ChronicleDiagnostics.Write($"safe-passage-fixture-stage|created|party={enemyParty?.StringId}");
         enemyParty.MemberRoster.Clear();
         enemyParty.MemberRoster.AddToCounts(looter, 1, insertAtFront: false, woundedCount: 0, xpChange: 0, removeDepleted: true, index: -1);
         var singleLooterStrength = enemyParty.Party.GetCustomStrength(BattleSideEnum.Attacker, MapEvent.PowerCalculationContext.PlainBattle);
         if (singleLooterStrength <= 0f || float.IsNaN(singleLooterStrength) || float.IsInfinity(singleLooterStrength))
             throw new InvalidOperationException("Native calculation produced no finite strength for the looter fixture troop.");
-        var requiredBanditStrength = playerSideStrength * 1.5f;
+        var requiredBanditStrength = playerSideStrength * 1.56f;
         var banditMemberCount = Math.Min(10000, Math.Max(10, (int)Math.Ceiling(requiredBanditStrength / singleLooterStrength)));
         var banditStrength = 0f;
         for (var attempt = 0; attempt < 8; attempt++)
@@ -81,25 +82,55 @@ internal static class ChronicleHarnessSafePassageFixture
             banditMemberCount = Math.Min(10000, banditMemberCount * 2);
         }
         if (banditStrength < requiredBanditStrength)
-            throw new InvalidOperationException("Safe Passage fixture could not reach 1.5x the local joined player-side strength without exceeding the 10,000-troop safety cap.");
+            throw new InvalidOperationException("Safe Passage fixture could not reach 1.56x the local joined player-side strength without exceeding the 10,000-troop safety cap.");
         ChronicleDiagnostics.Write($"safe-passage-fixture-stage|members|count={enemyParty.MemberRoster.TotalManCount}|banditStrength={banditStrength:F3}|requiredBanditStrength={requiredBanditStrength:F3}|playerSideStrength={playerSideStrength:F3}");
-        var timeModeBeforeEncounter = Campaign.Current.TimeControlMode;
-        try
-        {
-            ChronicleDiagnostics.Write("safe-passage-fixture-stage|encounter-start");
-            EncounterManager.StartPartyEncounter(enemyParty.Party, mainParty.Party);
-            ChronicleDiagnostics.Write($"safe-passage-fixture-stage|encounter-return|active={PlayerEncounter.Current != null}");
-        }
-        catch (Exception exception)
-        {
-            ChronicleDiagnostics.Write("safe-passage-fixture-encounter-start-failed|" + exception);
-            throw;
-        }
-        if (PlayerEncounter.Current == null || PlayerEncounter.EncounteredMobileParty != enemyParty || PlayerEncounter.Current.PlayerSide != BattleSideEnum.Defender)
-            throw new InvalidOperationException("Native EncounterManager did not create the expected Bandit-attacker/MainParty-defender encounter.");
-
-        ChronicleDiagnostics.Write($"safe-passage-fixture-ready|party={enemyParty.StringId}|faction={enemyParty.MapFaction?.StringId}|hostile={FactionManager.IsAtWarAgainstFaction(mainParty.MapFaction, enemyParty.MapFaction)}|memberCount={enemyParty.MemberRoster.TotalManCount}|banditStrength={banditStrength:F3}|requiredBanditStrength={requiredBanditStrength:F3}|playerSidePartyCount={potentialPlayerJoiners.Count + 1}|playerSideMemberCount={playerSideMemberCount}|playerSideStrength={playerSideStrength:F3}|distance={mainParty.Position.Distance(enemyParty.Position):F3}|playerSide={PlayerEncounter.Current.PlayerSide}|clockBefore={timeModeBeforeEncounter}|clockAfter={Campaign.Current.TimeControlMode}");
+        enemyParty.SetMoveEngageParty(mainParty, MobileParty.NavigationType.Default);
+        var playerApproachPoint = FindApproachPointToward(
+            new Vec2(mainParty.Position.X, mainParty.Position.Y),
+            new Vec2(enemyParty.Position.X, enemyParty.Position.Y));
+        var nearestBanditSettlement = Helpers.SettlementHelper.FindNearestSettlementToMobileParty(
+            enemyParty,
+            MobileParty.NavigationType.All,
+            settlement => settlement.IsTown || settlement.IsVillage);
+        if (nearestBanditSettlement == null)
+            throw new InvalidOperationException("Native Safe Passage dialogue requires the encountered bandit party to resolve a nearest Town/Village; none is reachable from the fixture's navigation-valid spawn point.");
+        var timeModeBeforeEngage = Campaign.Current.TimeControlMode;
+        ChronicleDiagnostics.Write($"safe-passage-fixture-ready|party={enemyParty.StringId}|faction={enemyParty.MapFaction?.StringId}|hostile={FactionManager.IsAtWarAgainstFaction(mainParty.MapFaction, enemyParty.MapFaction)}|memberCount={enemyParty.MemberRoster.TotalManCount}|banditStrength={banditStrength:F3}|requiredBanditStrength={requiredBanditStrength:F3}|playerSidePartyCount={potentialPlayerJoiners.Count + 1}|playerSideMemberCount={playerSideMemberCount}|playerSideStrength={playerSideStrength:F3}|distance={mainParty.Position.Distance(enemyParty.Position):F3}|targetParty={enemyParty.TargetParty?.StringId}|banditSpawnPoint={banditSpawnPoint}|nearestSettlement={nearestBanditSettlement.StringId}|playerApproachPoint={playerApproachPoint}|clockBeforeEngage={timeModeBeforeEngage}");
         var joiningPartyIds = string.Join(",", potentialPlayerJoiners.Select(party => party.StringId));
-        return "{\"schemaVersion\":1,\"partyId\":\"" + enemyParty.StringId + "\",\"factionId\":\"" + enemyParty.MapFaction?.StringId + "\",\"hostile\":" + (FactionManager.IsAtWarAgainstFaction(mainParty.MapFaction, enemyParty.MapFaction) ? "true" : "false") + ",\"memberCount\":" + enemyParty.MemberRoster.TotalManCount.ToString(CultureInfo.InvariantCulture) + ",\"banditStrength\":" + banditStrength.ToString("F3", CultureInfo.InvariantCulture) + ",\"requiredBanditStrength\":" + requiredBanditStrength.ToString("F3", CultureInfo.InvariantCulture) + ",\"playerSidePartyCount\":" + (potentialPlayerJoiners.Count + 1).ToString(CultureInfo.InvariantCulture) + ",\"playerSideMemberCount\":" + playerSideMemberCount.ToString(CultureInfo.InvariantCulture) + ",\"playerSideStrength\":" + playerSideStrength.ToString("F3", CultureInfo.InvariantCulture) + ",\"joiningPartyIds\":\"" + joiningPartyIds + "\",\"distance\":" + mainParty.Position.Distance(enemyParty.Position).ToString("F3", CultureInfo.InvariantCulture) + ",\"playerSide\":\"" + PlayerEncounter.Current.PlayerSide + "\",\"encounterActive\":" + (PlayerEncounter.Current != null ? "true" : "false") + ",\"timeControlModeBefore\":\"" + timeModeBeforeEncounter + "\",\"timeControlModeAfter\":\"" + Campaign.Current.TimeControlMode + "\",\"campaignDay\":" + CampaignTime.Now.ToDays.ToString("F6", CultureInfo.InvariantCulture) + "}";
+        return "{\"schemaVersion\":1,\"partyId\":\"" + enemyParty.StringId + "\",\"factionId\":\"" + enemyParty.MapFaction?.StringId + "\",\"hostile\":" + (FactionManager.IsAtWarAgainstFaction(mainParty.MapFaction, enemyParty.MapFaction) ? "true" : "false") + ",\"memberCount\":" + enemyParty.MemberRoster.TotalManCount.ToString(CultureInfo.InvariantCulture) + ",\"banditStrength\":" + banditStrength.ToString("F3", CultureInfo.InvariantCulture) + ",\"requiredBanditStrength\":" + requiredBanditStrength.ToString("F3", CultureInfo.InvariantCulture) + ",\"playerSidePartyCount\":" + (potentialPlayerJoiners.Count + 1).ToString(CultureInfo.InvariantCulture) + ",\"playerSideMemberCount\":" + playerSideMemberCount.ToString(CultureInfo.InvariantCulture) + ",\"playerSideStrength\":" + playerSideStrength.ToString("F3", CultureInfo.InvariantCulture) + ",\"joiningPartyIds\":\"" + joiningPartyIds + "\",\"distance\":" + mainParty.Position.Distance(enemyParty.Position).ToString("F3", CultureInfo.InvariantCulture) + ",\"partyPosition\":{\"x\":" + enemyParty.Position.X.ToString("R", CultureInfo.InvariantCulture) + ",\"y\":" + enemyParty.Position.Y.ToString("R", CultureInfo.InvariantCulture) + "},\"banditSpawnPoint\":{\"x\":" + enemyParty.Position.X.ToString("R", CultureInfo.InvariantCulture) + ",\"y\":" + enemyParty.Position.Y.ToString("R", CultureInfo.InvariantCulture) + "},\"nearestSettlementId\":\"" + nearestBanditSettlement.StringId + "\",\"playerApproachPoint\":{\"x\":" + playerApproachPoint.X.ToString("R", CultureInfo.InvariantCulture) + ",\"y\":" + playerApproachPoint.Y.ToString("R", CultureInfo.InvariantCulture) + "},\"targetPartyId\":\"" + (enemyParty.TargetParty?.StringId ?? string.Empty) + "\",\"encounterActive\":false,\"timeControlModeBeforeEngage\":\"" + timeModeBeforeEngage + "\",\"campaignDay\":" + CampaignTime.Now.ToDays.ToString("F6", CultureInfo.InvariantCulture) + "}";
+    }
+
+    private static Vec2 FindNearbyNavigablePoint(Vec2 origin)
+    {
+        var distances = new[] { 0.25f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f };
+        for (var distanceIndex = 0; distanceIndex < distances.Length; distanceIndex++)
+        for (var directionIndex = 0; directionIndex < 32; directionIndex++)
+        {
+            var angle = directionIndex * Math.PI / 16.0;
+            var distance = distances[distanceIndex];
+            var candidate = new Vec2(origin.X + distance * (float)Math.Cos(angle), origin.Y + distance * (float)Math.Sin(angle));
+            var campaignPoint = new CampaignVec2(candidate, isOnLand: true);
+            if (campaignPoint.Face.IsValid() && Helpers.NavigationHelper.CanPlayerNavigateToPosition(campaignPoint, out _)) return candidate;
+        }
+        throw new InvalidOperationException("Safe Passage fixture could not find a nearby Native-navigable land point for the Bandit party.");
+    }
+
+    private static Vec2 FindApproachPointToward(Vec2 mainPosition, Vec2 banditPosition)
+    {
+        var delta = banditPosition - mainPosition;
+        var length = delta.Length;
+        if (length <= 0f) throw new InvalidOperationException("Safe Passage fixture bandit overlaps the player; no approach vector can be calculated.");
+        var baseAngle = Math.Atan2(delta.Y, delta.X);
+        var offsets = new[] { 0f, -15f, 15f, -30f, 30f, -45f, 45f, -60f, 60f, -75f, 75f, -90f, 90f };
+        var distances = new[] { 1.0f, 1.5f, 2.0f, 3.0f };
+        foreach (var distance in distances)
+        foreach (var offset in offsets)
+        {
+            var angle = baseAngle + offset * Math.PI / 180.0;
+            var candidate = new Vec2(mainPosition.X + distance * (float)Math.Cos(angle), mainPosition.Y + distance * (float)Math.Sin(angle));
+            var campaignPoint = new CampaignVec2(candidate, isOnLand: true);
+            if (campaignPoint.Face.IsValid() && Helpers.NavigationHelper.CanPlayerNavigateToPosition(campaignPoint, out _)) return candidate;
+        }
+        throw new InvalidOperationException("Safe Passage fixture could not find a nearby Native-navigable Campaign point in the direction of the actively engaging Bandit party.");
     }
 }
