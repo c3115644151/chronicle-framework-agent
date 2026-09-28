@@ -82,6 +82,29 @@ function Wait-ForSafePassageBarter([int]$WaitSeconds = 8) {
     throw "The native Bandit toll route did not open Safe Passage BarterVM. LastContext=$context"
 }
 
+function Wait-ForSafePassageExit([int]$WaitSeconds = 20) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($WaitSeconds)
+    $state = $null
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $state = Get-SafePassageState "wait-safe-passage-exit-$([Guid]::NewGuid().ToString('N'))" 8
+        if (-not [bool]$state.state.context.encounterActive -and -not $state.state.context.conversation) { return $state }
+        if ($state.state.context.conversation) {
+            $options = @($state.state.context.conversation.options | Where-Object { $_.clickable })
+            if ($options.Count -eq 0) {
+                $continue = Invoke-AgentCli 'dialogueContinue' @('-CommandId', "$prefix-safe-passage-conclusion-continue-$([Guid]::NewGuid().ToString('N'))") 8
+                if ($continue.status -ne 'completed') { throw "Native Safe Passage conclusion could not continue: $($continue.error)" }
+            }
+            elseif ($options.Count -eq 1 -and $options[0].id -eq 'close_window') {
+                $close = Invoke-AgentCli 'dialogueSelect' @('-OptionId', 'close_window', '-CommandId', "$prefix-safe-passage-conclusion-close-$([Guid]::NewGuid().ToString('N'))") 8
+                if ($close.status -ne 'completed') { throw "Native Safe Passage conclusion could not close: $($close.error)" }
+            }
+            else { throw "Unexpected player choices appeared after accepted Safe Passage: $(($options | ForEach-Object { $_.id }) -join ',')" }
+        }
+        Start-Sleep -Milliseconds 150
+    }
+    throw "The accepted Safe Passage did not end the native Encounter/conversation within $WaitSeconds seconds. LastContext=$($state.state.context | ConvertTo-Json -Depth 7 -Compress)"
+}
+
 function Get-AutoBalanceWorldFingerprint($StateResponse) {
     $state = $StateResponse.state
     $npcParties = @($state.nearbyParties | Sort-Object id | ForEach-Object {
@@ -191,11 +214,29 @@ try {
         throw "Native Safe Passage assertions failed before fixture shutdown: $($failedAssertions -join ', ')"
     }
 
+    $currentTestStep = 'native-safe-passage-offer-acceptance'
+    $offer = Invoke-AgentCli 'barterOffer' @('-CommandId', "$prefix-native-safe-passage-offer") 15
+    if ($offer.status -ne 'completed' -or -not [bool]$offer.data.submitted -or -not [bool]$offer.data.accepted)
+        { throw "Native Safe Passage offer was not accepted by the current BarterVM: status=$($offer.status), submitted=$($offer.data.submitted), accepted=$($offer.data.accepted), error=$($offer.error)" }
+    $safePassageResolution = Wait-ForSafePassageExit
+    $offerOutcomeAssertions = [ordered]@{
+        NativeSafePassageOfferCommitted144 = ([int]$offer.data.offererGoldBefore -eq 1000 -and [int]$offer.data.offererGoldAfter -eq 856 -and [int]$safePassageResolution.state.economy.gold -eq 856)
+        NativeEncounterEndedAfterAcceptedSafePassage = (-not [bool]$safePassageResolution.state.context.encounterActive -and -not $safePassageResolution.state.context.conversation)
+        NativeSafePassageOfferDidNotAdvanceClock = ([string]$offer.data.timeControlModeBefore -eq [string]$offer.data.timeControlModeAfter -and [double]$offer.data.campaignDayBefore -eq [double]$offer.data.campaignDayAfter)
+    }
+    $offerOutcomeFailures = @($offerOutcomeAssertions.Keys | Where-Object { -not [bool]$offerOutcomeAssertions[$_] })
+    if ($offerOutcomeFailures.Count -gt 0) {
+        [ordered]@{ OutcomeAssertions = $offerOutcomeAssertions; FailedAssertions = $offerOutcomeFailures; Offer = $offer.data; Resolution = $safePassageResolution.state } |
+            ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $env:CHRONICLE_HARNESS_TEMP 'SafePassageBarterContextOutcomeAssertions.json') -Encoding UTF8
+        throw "Native Safe Passage outcome assertions failed before fixture shutdown: $($offerOutcomeFailures -join ', ')"
+    }
+
     $currentTestStep = 'stop-disposable-safe-passage-fixture'
     $stop = Invoke-AgentCli 'stop' @('-CommandId', "$prefix-stop") 30
     $fixtureHashAfter = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
     $assertions.ProcessStopped = [bool]$stop.processStopped
     $assertions.FixtureHashUnchanged = ($fixtureHashBefore -eq $fixtureHashAfter)
+    foreach ($outcomeName in $offerOutcomeAssertions.Keys) { $assertions[$outcomeName] = [bool]$offerOutcomeAssertions[$outcomeName] }
     $failedAssertions = @($assertions.Keys | Where-Object { -not [bool]$assertions[$_] })
     $result = [ordered]@{
         Fixture = $fixture.data
@@ -204,6 +245,8 @@ try {
         Barter = $context
         SafePassageClause = $safePassageClause[0]
         AutoBalance = $autoBalance.data
+        NativeOffer = $offer.data
+        SafePassageResolution = $safePassageResolution.state
         WorldFingerprintBeforeAutoBalance = $worldFingerprintBeforeAutoBalance
         WorldFingerprintAfterAutoBalance = $worldFingerprintAfterAutoBalance
         UpdatedSafePassageClause = $updatedClause[0]
