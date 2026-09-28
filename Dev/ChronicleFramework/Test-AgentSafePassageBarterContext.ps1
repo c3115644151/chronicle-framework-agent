@@ -91,7 +91,7 @@ try {
     $currentTestStep = 'prepare-bandit-fixture'
     $beforeFixture = Get-SafePassageState 'map-before-bandit-fixture'
     if ($beforeFixture.state.context.encounterActive) { throw 'Campaign already has an active encounter before Safe Passage fixture setup.' }
-    $fixture = Invoke-AgentCli 'harnessPrepareSafePassageFixture' @('-CommandId', "$prefix-prepare-bandit-fixture")
+    $fixture = Invoke-AgentCli 'harnessPrepareSafePassageFixture' @('-CommandId', "$prefix-prepare-bandit-fixture") 25
     if ($fixture.status -ne 'completed' -or $fixture.data.partyId -ne 'chronicle_harness_safe_passage_looters' -or -not [bool]$fixture.data.hostile -or $fixture.data.playerSide -ne 'Defender' -or -not [bool]$fixture.data.encounterActive)
         { throw 'The Harness did not start a native encounter with the hostile Bandit as attacker and MainParty as defender.' }
 
@@ -154,8 +154,9 @@ try {
     if (-not $result.Passed) { throw 'Native Safe Passage Barter context regression failed.' }
 }
 catch {
+    $failureFrame = Capture-HarnessFailureFrame -CliPath $cli -CommandPrefix $prefix -FailedStep $currentTestStep -FailureReason $_.Exception.ToString()
     if ($env:CHRONICLE_HARNESS_TEMP -and (Test-Path -LiteralPath $env:CHRONICLE_HARNESS_TEMP -PathType Container)) {
-        [ordered]@{ FailedStep = $currentTestStep; Exception = $_.Exception.ToString(); TimestampUtc = [DateTime]::UtcNow.ToString('O') } |
+        [ordered]@{ FailedStep = $currentTestStep; Exception = $_.Exception.ToString(); FailureFrame = $failureFrame; TimestampUtc = [DateTime]::UtcNow.ToString('O') } |
             ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $env:CHRONICLE_HARNESS_TEMP 'SafePassageBarterContextFailure.json') -Encoding UTF8
     }
     throw

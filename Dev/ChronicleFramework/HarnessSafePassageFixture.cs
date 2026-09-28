@@ -17,6 +17,7 @@ internal static class ChronicleHarnessSafePassageFixture
 
     internal static string CreateAttackingBanditParty()
     {
+        ChronicleDiagnostics.Write("safe-passage-fixture-stage|validate-start");
         var mainParty = MobileParty.MainParty;
         if (mainParty == null || mainParty.MapEvent != null || PlayerEncounter.Current != null)
             throw new InvalidOperationException("Safe Passage fixture requires the player Campaign Map without an active encounter.");
@@ -37,6 +38,7 @@ internal static class ChronicleHarnessSafePassageFixture
             .FirstOrDefault();
         if (hostileClan == null || partyTemplate == null || looter == null || homeSettlement == null)
             throw new InvalidOperationException("Native hostile bandit clan, looter template, troop, or nearby home settlement is unavailable.");
+        ChronicleDiagnostics.Write($"safe-passage-fixture-stage|selected|clan={hostileClan.StringId}|leader={hostileClan.Leader?.StringId}|template={partyTemplate.StringId}|settlement={homeSettlement.StringId}");
 
         var enemyParty = BanditPartyComponent.CreateLooterParty(
             PartyId,
@@ -45,10 +47,22 @@ internal static class ChronicleHarnessSafePassageFixture
             isBossParty: false,
             partyTemplate,
             mainParty.Position + new Vec2(0.5f, 0f));
+        ChronicleDiagnostics.Write($"safe-passage-fixture-stage|created|party={enemyParty?.StringId}");
         enemyParty.MemberRoster.Clear();
         enemyParty.MemberRoster.AddToCounts(looter, 1, insertAtFront: false, woundedCount: 0, xpChange: 0, removeDepleted: true, index: -1);
+        ChronicleDiagnostics.Write($"safe-passage-fixture-stage|members|count={enemyParty.MemberRoster.TotalManCount}");
         var timeModeBeforeEncounter = Campaign.Current.TimeControlMode;
-        EncounterManager.StartPartyEncounter(enemyParty.Party, mainParty.Party);
+        try
+        {
+            ChronicleDiagnostics.Write("safe-passage-fixture-stage|encounter-start");
+            EncounterManager.StartPartyEncounter(enemyParty.Party, mainParty.Party);
+            ChronicleDiagnostics.Write($"safe-passage-fixture-stage|encounter-return|active={PlayerEncounter.Current != null}");
+        }
+        catch (Exception exception)
+        {
+            ChronicleDiagnostics.Write("safe-passage-fixture-encounter-start-failed|" + exception);
+            throw;
+        }
         if (PlayerEncounter.Current == null || PlayerEncounter.EncounteredMobileParty != enemyParty || PlayerEncounter.Current.PlayerSide != BattleSideEnum.Defender)
             throw new InvalidOperationException("Native EncounterManager did not create the expected Bandit-attacker/MainParty-defender encounter.");
 

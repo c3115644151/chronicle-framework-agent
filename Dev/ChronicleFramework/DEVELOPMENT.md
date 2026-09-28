@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 
-Contract version: 5.51
+Contract version: 5.52
 
 ## 目标与边界
 
@@ -76,6 +76,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Dev\ChronicleFramework\Run
 Inventory/market专项阶段：`InventoryNavigation`验证玩家Map Inventory入口与Trade之外的原生InventoryState；`EquipmentTransactions`验证MainHero Native SPInventoryVM装备事务；`TradeTransactions`验证Town菜单Trade入口、市场买卖/食物筛选与原生Trade VM提交；`BarterTransactions`走真实Lord对话入口，验证原生BarterVM普通物品/金币谈判草稿、Native Auto Balance、Offer/Cancel结果。Barter的普通、Peace/SafePassage/Defection/Marriage UI共用VM适配层，但各Context的初始Barterable与最终世界效果不可混为一谈；Diplomatic/Ransom的AI Barter不属于玩家UI接口。
 
 `BarterContexts` 在独立的visual-capture Harness进程中用本地1.4.8的`BanditPartyComponent.CreateLooterParty`创建未保存的敌对Bandit party，并由原版`EncounterManager.StartPartyEncounter`建立Bandit attacker/MainParty defender的真实PlayerEncounter，再走游戏自带Defender对话选项进入Safe Passage BarterVM。该fixture命令仅在Harness visual-capture模式可调用，不加入Agent决策工具；setup不控制时钟、不模拟AI走位，记录原始存档hash/Process cleanup。该阶段只验证专用`SafePassageBarterable`能否正确进入通用VM/Auto Balance接口，不把fixture注入包装成产品玩家动作，也不替代Safe Passage成功/拒绝后完整世界后果的单独验收。
+
+UI Harness失败证据：游戏内Agent协议遇到非`InvalidOperationException`异常时，在当前Harness temp里保留首张引擎末帧`protocol-unexpected-failure-frame.bmp`和配套JSON（动作、错误、游戏状态/菜单/时钟）；业务拒绝类`InvalidOperationException`不触发自动截图。带UI转换的测试脚本若在其自身断言失败，则在`finally`清理进程前调用`Capture-HarnessFailureFrame`，该助手只允许对`session.json`中仍存活的Harness进程调用游戏内`captureFrame`，写入`harness-failure-frame.bmp/.json`；若Agent命令通道已卡住，失败收据会回指协议层刚保存的末帧，而不再盲等或伪报“没有截图”。不截Windows桌面、不抢焦点；成功运行不留失败图，失败收据和末帧保留在同一个TestResults run目录供Agent与用户对齐事实。
 
 `tradeOptions`/`foodOptions`只在当前Native Trade InventoryState读取SPItemVM候选；买卖动作引用最新观察中的`ItemViewModelId + InventorySide + Amount`，以区分同一基础Item在市场侧与玩家侧的重名实例。`tradeConfirm`通过Native Gauntlet Done提交；若原生报价高于MainHero当前金币或Native VM拒绝完成，适配器会通过原版Cancel Inquiry清理刚建立的草稿并拒绝该动作，避免挂住不可提交事务。`tradeCancel`关空白交易页，`tradeCancelChanges`仅在Agent明确选择丢弃草稿时接受原版Inquiry。食品`provision`是买入方向的食品筛选别名，不另建地图态市场交易旁路。`TradeTransactions`还从明确的地图`UnstoppablePlay`档验证了Trade VM与买卖动作不写入/切换时钟，且把动作日值与动作之间地图自然推进区分记录。所有交易测试通过后仍需区分自定义/模型交易事件与视觉Trade GUI是否一致。
 

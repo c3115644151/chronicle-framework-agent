@@ -249,8 +249,9 @@ try {
     if (-not $result.Passed) { throw 'Native ordinary Lord barter transaction regression failed.' }
 }
 catch {
+    $failureFrame = Capture-HarnessFailureFrame -CliPath $cli -CommandPrefix $prefix -FailedStep $currentTestStep -FailureReason $_.Exception.ToString()
     if ($env:CHRONICLE_HARNESS_TEMP -and (Test-Path -LiteralPath $env:CHRONICLE_HARNESS_TEMP -PathType Container)) {
-        [ordered]@{ FailedStep = $currentTestStep; Exception = $_.Exception.ToString(); TimestampUtc = [DateTime]::UtcNow.ToString('O') } |
+        [ordered]@{ FailedStep = $currentTestStep; Exception = $_.Exception.ToString(); FailureFrame = $failureFrame; TimestampUtc = [DateTime]::UtcNow.ToString('O') } |
             ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $env:CHRONICLE_HARNESS_TEMP 'BarterTransactionFailure.json') -Encoding UTF8
     }
     throw

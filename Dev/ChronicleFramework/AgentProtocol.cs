@@ -25,6 +25,7 @@ namespace ChronicleFramework;
 internal sealed class ChronicleAgentProtocol
 {
     private static ChronicleAgentProtocol _activeInstance;
+    private static bool _unexpectedProtocolFailureFrameCaptured;
     private readonly string _root;
     private readonly string _responseRoot;
     private string _lastCommandId;
@@ -951,12 +952,44 @@ internal sealed class ChronicleAgentProtocol
         }
         catch (Exception exception)
         {
+            TryCaptureUnexpectedProtocolFailureFrame(currentCommandId, currentAction, exception);
             ChronicleDiagnostics.Write($"agent-protocol-error|type={exception.GetType().Name}|message={exception.Message}");
             if (!string.IsNullOrWhiteSpace(currentCommandId))
             {
                 try { WriteResponse(currentCommandId, currentAction ?? "unknown", "rejected", behavior, exception.ToString()); }
                 catch { }
             }
+        }
+    }
+
+    private static void TryCaptureUnexpectedProtocolFailureFrame(string commandId, string action, Exception exception)
+    {
+        if (_unexpectedProtocolFailureFrameCaptured || exception is InvalidOperationException) return;
+        var mode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+        var rootValue = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+        if ((mode != "visual-capture" && mode != "visual-battle-fixture") || string.IsNullOrWhiteSpace(rootValue) || !Directory.Exists(rootValue)) return;
+
+        _unexpectedProtocolFailureFrameCaptured = true;
+        try
+        {
+            var root = Path.GetFullPath(rootValue).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var imagePath = Path.GetFullPath(Path.Combine(root, "protocol-unexpected-failure-frame.bmp"));
+            if (!imagePath.StartsWith(root, StringComparison.OrdinalIgnoreCase)) return;
+            TaleWorlds.Engine.Utilities.TakeScreenshot(imagePath);
+
+            var gameState = Game.Current?.GameStateManager?.ActiveState?.GetType().Name ?? string.Empty;
+            var menuId = Campaign.Current?.CurrentMenuContext?.GameMenu?.StringId ?? string.Empty;
+            var timeMode = Campaign.Current?.TimeControlMode.ToString() ?? string.Empty;
+            var campaignDayJson = Campaign.Current != null ? CampaignTime.Now.ToDays.ToString("R", CultureInfo.InvariantCulture) : "null";
+            var stack = (exception.StackTrace ?? string.Empty).Replace("\r", " ").Replace("\n", " | ");
+            var message = (exception.Message ?? string.Empty).Replace("\r", " ").Replace("\n", " | ");
+            var metadata = "{\"commandId\":\"" + Escape(commandId) + "\",\"action\":\"" + Escape(action) + "\",\"exceptionType\":\"" + Escape(exception.GetType().FullName) + "\",\"message\":\"" + Escape(message) + "\",\"stackTrace\":\"" + Escape(stack) + "\",\"gameState\":\"" + Escape(gameState) + "\",\"menuId\":\"" + Escape(menuId) + "\",\"timeControlMode\":\"" + Escape(timeMode) + "\",\"campaignDay\":" + campaignDayJson + "}";
+            File.WriteAllText(Path.Combine(root, "protocol-unexpected-failure-frame.json"), metadata, Encoding.UTF8);
+            ChronicleDiagnostics.Write("protocol-unexpected-failure-frame-captured|action=" + Escape(action) + "|path=" + imagePath);
+        }
+        catch (Exception captureException)
+        {
+            ChronicleDiagnostics.Write("protocol-unexpected-failure-frame-capture-failed|type=" + captureException.GetType().Name + "|message=" + captureException.Message);
         }
     }
 
