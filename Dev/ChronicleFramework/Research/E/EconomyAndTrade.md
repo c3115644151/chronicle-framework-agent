@@ -298,13 +298,45 @@ Barter 是按 Hero/Party/Faction 对方建立的谈判数据。`BarterData` 保�
 
 普通领主谈判来源是与 Hero 进行地图/定居点 Conversation，进入对话的 Speak Diplomacy/谈判分支并选择“我有一个可能让双方受益的提议”。原版条件要求对象是非囚犯 Lord、不是 Minor Faction Hero、且不与玩家阵营交战；同一 Hero 受 BarterManager 的冷却计时限制。特殊的 Peace、Safe Passage、Prisoner、Marriage、Join/Leave Faction 等系统可以传入自定义 Context和初始 Barterables，故并非全部从同一个通用对话按钮产生。
 
-`BarterManager.StartBarterOffer` 建立 BarterData、添加当前基础/上下文 Barterables，再派发可扩展请求事件并开启 `BarterVM`。玩家在面板调整两侧项目与金额、查看 offer validity 后选择 Offer/Accept 或 Cancel；接受时执行全部所选 `Barterable.Apply`，发 `OnBarterAccepted`，关闭谈判并延续原对话；取消则不执行交易效果，关闭并发 `OnBarterCanceled`。超额补偿可能按 BarterModel 给非敌方 Hero 加个人关系，冷却在接受后更新。
+`BarterManager.StartBarterOffer` 建立 BarterData、添加当前基础/上下文 Barterables，再派发可扩展请求事件并开启 `BarterVM`。Map原生 `GauntletMapConversationView.InitializeConversation` 将`BarterBegin`绑定到`GauntletMapConversationBarterView.CreateBarterView`，该View在同一Gauntlet层创建实际`BarterVM(args)`并加载`BarterScreen`；Mission宿主则由`MissionGauntletBarterView.OnBarterBegin`建立当前ViewModel。玩家在面板调整两侧项目与金额、查看 offer validity 后选择 Offer/Accept 或 Cancel；接受时执行全部所选 `Barterable.Apply`，发 `OnBarterAccepted`，关闭谈判并延续原对话；取消则不执行交易效果，关闭并发 `OnBarterCanceled`。UI的Offer输入先检查`BarterVM.IsOfferDisabled`，但`BarterVM.ExecuteOffer`自身会直接调用`ApplyAndFinalizePlayerBarter`而不重复检查；Agent必须保留该UI门槛。超额补偿可能按BarterModel给非敌方Hero加个人关系，冷却在接受后更新。
+
+### 官方调用点全景与统一界面边界
+
+对本机v1.4.8官方CampaignSystem程序集中`StartBarterOffer`和`ExecuteAiBarter`调用者进行检索后，玩家与Agent真正共用Barter UI的路径分为以下上下文族。它们都会由`StartBarterOffer(... isAIBarter:false)`→`BeginPlayerBarter`→`BarterBegin(BarterData)`进入Map/Mission BarterView，并创建同一个原生`BarterVM`类；不能因此推断初始条款和Apply结果一样。
+
+| 玩家入口族 | 官方调用来源/Context | 原生提案/最终效果差异 | Chronicle统一接口处理 |
+| --- | --- | --- | --- |
+| 普通Lord提案 | `LordConversationsCampaignBehavior.hero_barter` → `conversation_set_up_generic_barter_on_consequence`；`ContextInitializer=null` | 普通Item/Gold候选；提交适用各`Barterable.Apply`，超额可能改关系 | 普通入口的VM观察、条款编辑、Auto Balance、Offer/Cancel已做运行验收 |
+| Safe Passage/过路费 | Lord hostile/encounter会谈与`BanditInteractionsCampaignBehavior`入口 → `InitializeSafePassageBarterContext`；部分附默认`SafePassageBarterable`和`NoAttackBarterable` | 付费/互不攻击/通行结果基于遭遇、双方Party和持续期；不能按普通市场价格推演 | 捕获同类活动BarterVM并携带`contextInitializer`与fixed Barterable type；对Context dependent/Native nontransferable条款只观察、不可编辑；Offer受原生IsOfferDisabled门禁。安全通行结果尚未实测 |
+| 和平议和 | `LordConversationsCampaignBehavior`和平谈判分支 → `InitializeMakePeaceBarterContext` | 有Kingdom/战争/贡金状态结果，可能伴随特殊价格/冷却 | 使用相同VM接口但保留context/type标记；和平结算与时钟仍未运行核验 |
+| 领主归附/倒戈 | `LordDefectionCampaignBehavior` → `InitializeJoinFactionBarterContext` | `JoinKingdomAsClanBarterable`和阵营成员/身份变更 | 共用观察和Native Offer门控，不直改Clan/Kingdom；归附结算未运行核验 |
+| 婚姻/配偶与亲属婚姻 | `RomanceCampaignBehavior`多个起始流程，及`LordConversationsCampaignBehavior`家庭提案 → `InitializeMarriageBarterContext` | `MarriageBarterable`需配合亲属/浪漫/Clan/年龄等前置，Apply会写婚姻/关系/家族身份 | 同VM候选/流程结构，Context/特殊对象不误标为普通物品；婚姻结算仍属于I04且未由本任务运行核验 |
+| AI自治谈判，不是玩家入口 | `DiplomaticBartersBehavior`和`RansomOfferCampaignBehavior`调用`ExecuteAiBarter` | AI直接构造、自动平衡并调用Manager交易；不触发玩家`BarterBegin`/UI | 明确排除在BarterVM动作接口之外；不把后台AI Barter算成Agent正在操作谈判界面 |
+
+以上源代码调用检索覆盖到的玩家UI族与AI-only族共存于`TaleWorlds.CampaignSystem.dll`。统一技术接口用当前BarterVM暴露的所有native分类/上下文标记，依照其`IsItemTransferrable`和`IsOfferDisabled`实施编辑/提交门槛；它不是把婚姻、和平、过路费等都压成一种GenericItem交易，也不宣称每种特殊Context的World outcome已经过运行验证。第三方BarterManager/BarterVM替换与非官方Barterable需要额外兼容验证。
 
 跨域目录将活跃BarterVM视为独立观察面（`OBS-E10-01`）：玩家需要看到谈判双方、当前加入两侧的条款和Offer有效状态，才知道能否提交。玩家在该VM的另一个共同操作是编辑临时提案草稿：通过兼容检查加入/移除Barterables、改变可分数量或Reset草稿，映射`ACT-E10-01`；这会写入当前`BarterData`并更新报价，但尚不改变World roster/Gold/关系。`ExecuteOffer`触发接受/拒绝并关闭谈判；接受后的持久后果仍映射到婚姻、家族归附、俘虏等上下文ACT，不创建重复的通用成交ACT。完整候选集合、报价解释和屏幕/时间语义仍需按各上下文核验。
 
+### 本体1.4.8 Barter入口分布
+
+针对本机官方 Native/SandBox/SandBoxCore/StoryMode 程序集中搜索 `StartBarterOffer` 与 `ExecuteAiBarter`，玩家发起且显示 BarterVM 的调用按 context 分组如下。多处调用共享VM，不代表它们共享同一个 Barterable 集、价值模型或 `Apply` 副作用。
+
+| 玩家流程族 | 官方入口/调用源 | Data初始化差异 | 可见谈判VM / W2分类 |
+| --- | --- | --- | --- |
+| 普通领主物品/金币提案 | `LordConversationsCampaignBehavior.hero_barter` → `conversation_set_up_generic_barter_on_consequence` | `ContextInitializer=null`；Barterables由 `OnBarterablesRequested`补普通物品/金币；要求非囚犯Lord、非Minor Faction、双方不处战争且Barter冷却结束 | 原版 `GauntletMapConversationBarterView`建同一BarterVM；W2-W本次全链运行验收的首入口 |
+| 议和/Peace | Lord Politics/War 对话选项 → `InitializeMakePeaceBarterContext` | 初始`PeaceBarterable`与特殊接受/拒绝对话后果；Offer效果是王国和平/贡金而非普通金币买卖 | 走原生BarterVM/Offer护栏；和平模型及后果本卡只源码映射，运行差异待特殊context测试 |
+| Safe Passage/过路费 | Lord遇敌对话、`BanditInteractionsCampaignBehavior`逃离/付费分支 → `InitializeSafePassageBarterContext` | 默认含`SafePassageBarterable`/`NoAttackBarterable`，对话方/Party与持续期由遭遇上下文提供 | 原生BarterVM/Offer链共用，但安全通行前置和`NoAttack`世界结果单列；当前未运行验收 |
+| 加入或脱离王国/领主归附 | `LordDefectionCampaignBehavior`对话发起 → `InitializeJoinFactionBarterContext` | `JoinKingdomAsClanBarterable`及Clan/Faction上下文 | 原生BarterVM相同、Offer后果改变王国归属；当前未运行验收 |
+| 结婚/婚约交易 | `LordConversationsCampaignBehavior`与`RomanceCampaignBehavior`数个求婚/家族提案入口 → `InitializeMarriageBarterContext` | 默认`MarriageBarterable`，tuple中的双方Hero/亲属与浪漫状态决定婚配/归属 | 原生BarterVM相同，提交最终触发Marriage/Clan后果；当前未运行验收，详见I04 |
+| AI自动政治协商/赎回被俘Hero | `DiplomaticBartersBehavior`与`RansomOfferCampaignBehavior`调用`ExecuteAiBarter` | 直接由AI构造/平衡/执行BarterData；不经过玩家`StartBarterOffer`/`BeginPlayerBarter`视图事件 | 没有玩家BarterVM入口，不纳入“AI代理操作界面”共同适配器；其世界结果属于后台模拟 |
+
+当前UI共用层验证事实是：普通或特殊玩家context只要走`StartBarterOffer`并`BeginPlayerBarter`，都会经BarterManager `BarterBegin`交给Map/Mission宿主创建同一类Native `BarterVM`。共同候选/Offer/Cancel控制可以统一，context分类、默认固定条款、VM兼容性和提交后的领域效果必须保留。Chronicle当前capture可识别全部非AI玩家BarterVM，并向决策器输出当前`contextInitializer`方法线索及固定Barterable类型；是否已覆盖所有官方加载场景/第三方替换仍有运行门禁。
+
+`BarterVM.ExecuteAutoBalance`是议价窗中间的原生自动平衡按钮入口；Chronicle的`barterAutoBalance`直接调用当前捕获VM的这个方法，不另算价格、不保证对方接受，也不提交世界交易。它按当前Barterable各方估值补/移报价，VM同时更新双方进度百分比与`IsOfferDisabled`。本机1.4.8实际地图Lord窗口中提出2匹大陆骑乘马（领主侧对该提案估值3260）后，按自动平衡，原版把玩家可用的1000第纳尔全加进提案，保留2匹马；因仍不足以满足原生接受条件，报价保持禁用。调用前后玩家金币/物品roster、Stop档和Campaign日值均不变。这个测试存档没有玩家自有可交易物品，因此“现金不足时自动补入玩家物品”的具体组合尚未实机覆盖；不能把可见进度条解释成精确接受概率或成交保证。
+
 ### 价值与失败规则
 
-`Barterable` 保存原始所有者 Hero/Party、所在 BarterGroup、是否上下文依赖、被提出数量及可链接项；各子类提供自己的 `GetUnitValueForFaction` 和 Apply 副作用。一般 offer 是否被接受读取对方视角的净 `GetOfferValue`；`IsOfferAcceptable` 的基础条件是该值不得低于约 0。DefaultBarterModel 还对物品交换应用双方角度不同的交易 Penalty，并影响 overpay→Relation 结果；和平/政治承诺、Marriage、俘虏/赎金与领地另有自定义价值/前置/结果模型，不具有同一通用估值公式。
+`Barterable` 保存原始所有者 Hero/Party、所在 BarterGroup、是否上下文依赖、被提出数量及可链接项；各子类提供自己的 `GetUnitValueForFaction` 和 Apply 副作用。普通View的提案列表是当前`BarterData`的原生VM投影；`BarterItemVM.ExecuteAddOffered/ExecuteRemoveOffered`调用当前VM处理器，`CurrentOfferedAmount` setter写对应Barterable并触发VM报价/兼容性刷新。一般 offer 是否被接受读取对方视角的净 `GetOfferValue`；`IsOfferAcceptable` 的基础条件是该值不得低于约 0。UI在Offer按钮禁用时不会调用VM的`ExecuteOffer`，直接API若绕过该检查可能提交不应允许的条款。DefaultBarterModel还对物品交换应用双方角度不同的交易Penalty，并影响overpay→Relation结果；和平/政治承诺、Marriage、俘虏/赎金与领地另有自定义价值/前置/结果模型，不具有同一通用估值公式。
 
 与E09的Trade Skill连接经本机`DefaultBarterModel.GetBarterPenalty`核对：对`ItemBarterable`计算双方视角的Penalty时，会读取原主/对方领主是否有Trade Perk `SelfMadeMan`，按PrimaryBonus修正该物品条款的估值；这证明Trade Perk会影响Barter盘的物品报价，不代表通用Trade Skill等级作用于所有Barterable。PlayerInventoryExchange/Trade XP属于E02市场交易提交链；目前追到的Barter草稿编辑/接受链没有派发该市场交易事件的证据，因此不把Barter选项编辑计作Trade XP来源；自定义Barterable/Mod扩展仍未知。
 
@@ -312,9 +344,11 @@ Barter 是按 Hero/Party/Faction 对方建立的谈判数据。`BarterData` 保�
 
 ### Chronicle 当前覆盖与未知
 
-Chronicle `dialogueSelect` 可选择当前原生 Conversation 的可点击选项；若后续原版对话触发 BarterVM，这只证明进入下一 UI 状态，AgentProtocol 目前没有观察两侧 Barterable/金额/offer score、调数量/平衡/拒绝/接受 Barter 的命令，也没有提交后状态差验收。Observer 未将当前 Barter Data 加入快照。因此 Agent 当前不具备经济谈判行为覆盖。
+Chronicle现通过Harmony在原生`BarterVM(BarterData)`构造后捕获实际VM引用，并在BarterManager.Close/VM finalize时释放。观察与提案编辑共用同一接口，面向所有`StartBarterOffer`创建且由MainHero发起的当前玩家BarterVM；枚举VM全部原生分类，返回上下文初始化器、固定条款类型、双方进度比例和Offer有效状态。普通可转条款用原生BarterItemVM handler/selector编辑；上下文固定/不可转条款只观察，不伪造编辑。`barterReset`、`barterAutoBalance`、`barterCancel`、`barterOffer`分别复用同一VM的原生方法。AI决策接口使用最新观察产生的candidate ID，不创建第二个BarterVM，也不直接执行Barterable.Apply。普通物品/金币完成Map运行验收；和平/政治归附/婚姻/安全通行/俘虏等入口和领域结果已有官方源码调用链盘点，但各特殊上下文尚未逐一运行验收。
 
-证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `BarterManager`、`BarterData`、`Barterable`/各子类、`DefaultBarterModel`、`LordConversationsCampaignBehavior`、BarterBehaviors；`TaleWorlds.CampaignSystem.ViewModelCollection.dll` `BarterVM`/`BarterItemVM`；Chronicle `AgentObserver.cs`、`AgentProtocol.cs`。源码版本 v1.4.8.119303；未运行玩家 UI barter、接受/取消/模型差异和特殊 Barterable 结算。
+`TestResults/20260928-120336/Temp/BarterTransactionResult.json`真实地图Lord对话`hero_barter`→原版回应/继续→捕获实际BarterVM。普通路线中验证双方候选、普通Item 2匹提案、自动平衡把玩家全部1000 Denar加入且报价仍禁用、进度条模型字段更新；调用未改玩家现金/物品roster、Stop档或Campaign日值。原版Reset清空该草稿，最新candidate可继续编辑而旧candidate被拒；原版Cancel后双方party物品指纹、Gold和Hero基础关系不变。第二次从当前Conversation打开普通Barter，以Native Offer提交1 Denar，原版接受且Gold精确转为玩家999/领主10001，Barter关闭后恢复MapState。源存档hash相同、游戏进程停止。无玩家自有可交易物品，不证明以物抵价；也未覆盖不同金额/商品、原生拒绝Offer、活动时钟、MissionBarter或特殊Context运行结果。
+
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `BarterManager`、`BarterData`、`Barterable`/各子类、`DefaultBarterModel`、`LordConversationsCampaignBehavior`、BarterBehaviors；`TaleWorlds.CampaignSystem.ViewModelCollection.dll` `BarterVM`/`BarterItemVM`；`Modules/SandBox/bin/Win64_Shipping_Client/SandBox.GauntletUI.dll` 的`GauntletMapConversationView`、`GauntletMapConversationBarterView`、`MissionGauntletBarterView`；Chronicle `AgentBarterAdapter.cs`、`AgentBarterViewCapture.cs`、`AgentProtocol.cs`。源码版本v1.4.8.119303；普通Lord Item/Gold runtime范围及限制见`TestResults/20260928-112520`，MissionBarter和特殊Barterable结算仍未知。
 
 未知项：全部玩家触发入口（NPC/Encounter/监狱/婚姻/政治等）的条件矩阵；各 Barterable 的具体报价算法、计算视角、数量限制、链路兼容和取消恢复；BarterVM 活跃期间 Campaign clock 与对话生命周期；协议可观察 offer 值与现有 tooltip/动画/AI接受判断一致性的验证；跨 C/F/I/J 域的 Barter 对话/关系/战俘结局须按各类系统继续研究。
 

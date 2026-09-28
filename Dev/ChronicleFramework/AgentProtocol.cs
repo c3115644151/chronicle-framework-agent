@@ -59,6 +59,7 @@ internal sealed class ChronicleAgentProtocol
     {
         _activeInstance = this;
         AgentMissionInputPatch.Install();
+        ChronicleAgentBarterViewCapture.Install();
         var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
         _root = Path.Combine(documentsPath, "Mount and Blade II Bannerlord", "AgentRuns", "ChronicleAgent");
         _responseRoot = Path.Combine(_root, "responses");
@@ -751,6 +752,27 @@ internal sealed class ChronicleAgentProtocol
                     break;
                 case "tradeCancelChanges":
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentTradeAdapter.CancelCurrentNativeTradeTransaction(confirmDiscardChanges: true));
+                    break;
+                case "barterOptions":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBarterAdapter.BuildOptionsJson());
+                    break;
+                case "barterEdit":
+                    var barterCandidateId = ReadString(command, "barterCandidateId");
+                    var barterOperation = ReadString(command, "barterOperation");
+                    var barterAmount = (int)ReadDouble(command, "amount");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBarterAdapter.EditProposal(barterCandidateId, barterOperation, barterAmount));
+                    break;
+                case "barterReset":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBarterAdapter.ResetProposal());
+                    break;
+                case "barterAutoBalance":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBarterAdapter.AutoBalanceProposal());
+                    break;
+                case "barterOffer":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBarterAdapter.SubmitOffer());
+                    break;
+                case "barterCancel":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBarterAdapter.CancelProposal());
                     break;
                 case "menuSelect":
                     var menuContext = TaleWorlds.CampaignSystem.Campaign.Current.CurrentMenuContext;

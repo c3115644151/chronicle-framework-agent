@@ -6,7 +6,7 @@
 
 玩家在领主/同伴对话、说服、婚姻Barter、政治支持、任务结果、释放俘虏等原生社交过程与各Hero互动；许多关系变化是选择结果，不存在通用“关系+1”菜单。详细数据读写见 [B09关系模型](../B/WorldEntitiesIdentity.md#b09-个人关系的基础值与有效值)：基础关系、有效关系、Trait/身份映射和 `ChangeRelationAction` 是不同层；来源样本和消费者已在B/J整理。
 
-玩家能观察到的反馈散布在关系提示、对话态度/选项、Barter估值、百科/日志等，不是一个永久关系历史面板；当前Chronicle不提供raw/effective Hero relation、近期关系来源历史或修改动作。常规对话是玩家入口，Story/Map/Barter当前上下文会限制选项；直接写 `CharacterRelationManager` 绕过有效关系模型、魅力增益/随机取整、事件和UI结果。Campaign时间遵循具体对话/Barter宿主GameState，不由关系动作隐式快进；各宿主的时钟差异见J/MAINLINE。未知：完整关系写入/读取调用点分母、玩家每个界面如何显示当前对象的关系、关系改变消息与历史日志的完整对应表。
+玩家能观察到的反馈散布在关系提示、对话态度/选项、Barter估值、百科/日志等，不是一个永久关系历史面板；当前Chronicle不提供raw/effective Hero relation、近期关系来源历史或修改动作。普通Barter接受后，`BarterManager.ApplyOverpayBonus`仅在主角与对方非敌对且模型算出正关系收益时调用`ChangeRelationAction.ApplyRelationChangeBetweenHeroes`；这是交易谈判后果，不是对话“礼貌释放”等固定加好感按钮。常规对话是玩家入口，Story/Map/Barter当前上下文会限制选项；直接写 `CharacterRelationManager` 绕过有效关系模型、魅力增益/随机取整、事件和UI结果。Campaign时间遵循具体对话/Barter宿主GameState，不由关系动作隐式快进；各宿主的时钟差异见J/MAINLINE。未知：完整关系写入/读取调用点分母、玩家每个界面如何显示当前对象的关系、关系改变消息与历史日志的完整对应表。
 
 ## I02 Faction Relation：阵营关系、敌对与和平
 
