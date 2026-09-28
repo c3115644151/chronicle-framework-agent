@@ -320,6 +320,9 @@ Barter 是按 Hero/Party/Faction 对方建立的谈判数据。`BarterData` 保�
 
 选择Safe Passage后捕获到真实`InitializeSafePassageBarterContext` BarterVM。Auto Balance显示玩家支付144第纳尔的提案，并保留不可转让的`SafePassageBarterable`离场条款；自动平衡前后玩家/附近队伍状态、Campaign时间档和时间均未变化。测试随后调用原生Offer，`LastBarterIsAccepted=true`：金币从1000降到856，遭遇与谈话均结束；成交动作自身不推进Campaign时间/改变时间档。Offer后Harness只读查询Bandit `MobilePartyAi.DoNotAttackMainPartyUntil.RemainingHoursFromNow=32.0`，并观察到劫匪队伍仍活动且`DefaultBehavior/PartyMoveMode`均为Hold。这确认原版Apply即时写入了32小时非攻击期限/停留模式；未推进完整时限，因此该时限期间的行为及到期后AI恢复仍未运行验证。原始存档SHA-256一致，Harness进程正常清理。证据：`TestResults/20260928-161518/Temp/SafePassageBarterContextResult.json`。
 
+独立Cancel分支已用未保存fixture运行通过。Native `barterCancel`回执显示它返回Encounter对话，金币/双方Roster/Campaign时间档和时值均未变化；继续原版回应对白后，游戏回到仍活动的Encounter菜单（`menuId=encounter`），其中`attack`选项可用，而不是重新显示Safe Passage威胁选择。这里验证的是取消原生谈判草稿并返回遭遇菜单，不执行Fight。证据：`TestResults/20260928-170916/Temp/SafePassageBarterCancelResult.json`。
+
+
 夹具曾用`MainParty.Position + (0.5, 0)`生成劫匪，该点未经原版导航验证。真实触发遭遇时，Native `bandit_start_defender_condition`抛出`NullReferenceException`；源码显示该方法会查找劫匪最近的Town/Village，随后不做空值保护地读取SettlementComponent。这使无效Party位置/最近定居点查找成为有源码依据的嫌疑，但异常堆栈没有行号，旧夹具也未记录该查询结果，因此精确的空对象尚未证实。新夹具现在先用原版导航选有效生成点、确认`FindNearestSettlementToMobileParty`可返回定居点，再触发原生AI遭遇；完整对白和BarterVM流程随之通过。我们消除了夹具的未验证环境前置，没有改写原版条件。异常原件：`TestResults/20260928-150648/Temp/CrashException-18860.txt`。
 
 以上源代码调用检索覆盖到的玩家UI族与AI-only族共存于`TaleWorlds.CampaignSystem.dll`。统一技术接口用当前BarterVM暴露的所有native分类/上下文标记，依照其`IsItemTransferrable`和`IsOfferDisabled`实施编辑/提交门槛；它不是把婚姻、和平、过路费等都压成一种GenericItem交易，也不宣称每种特殊Context的World outcome已经过运行验证。第三方BarterManager/BarterVM替换与非官方Barterable需要额外兼容验证。

@@ -1,14 +1,16 @@
 [CmdletBinding()]
 param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
-    [int]$TimeoutSeconds = 180
+    [int]$TimeoutSeconds = 180,
+    [switch]$CancelOnly
 )
 
 $ErrorActionPreference = 'Stop'
 $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
 $savePath = Join-Path $env:USERPROFILE "Documents\Mount and Blade II Bannerlord\Game Saves\$LoadSaveName.sav"
 $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\session.json'
-$resultPath = if ($env:CHRONICLE_HARNESS_TEMP) { Join-Path $env:CHRONICLE_HARNESS_TEMP 'SafePassageBarterContextResult.json' } else { Join-Path $PSScriptRoot 'TestResults\ManualSafePassageBarterContext\SafePassageBarterContextResult.json' }
+$resultFile = if ($CancelOnly) { 'SafePassageBarterCancelResult.json' } else { 'SafePassageBarterContextResult.json' }
+$resultPath = if ($env:CHRONICLE_HARNESS_TEMP) { Join-Path $env:CHRONICLE_HARNESS_TEMP $resultFile } else { Join-Path $PSScriptRoot "TestResults\ManualSafePassageBarterContext\$resultFile" }
 $prefix = 'safe-passage-barter-' + (Get-Date -Format 'yyyyMMddHHmmssfff')
 $currentTestStep = 'preflight'
 
@@ -181,6 +183,54 @@ try {
     $safePassageClause = @($context.candidates | Where-Object { $_.nativeType -eq 'safe_passage_barterable' -and $_.isOffered } | Select-Object -First 1)
     if ($context.context -notlike 'contextual:*' -or $context.contextInitializer -ne 'InitializeSafePassageBarterContext' -or $safePassageClause.Count -ne 1)
         { throw 'The live Bandit BarterVM was not identified as a contextual Safe Passage proposal.' }
+
+    if ($CancelOnly) {
+        $currentTestStep = 'native-safe-passage-cancel'
+        $cancel = Invoke-AgentCli 'barterCancel' @('-CommandId', "$prefix-native-safe-passage-cancel") 15
+        if ($cancel.status -ne 'completed' -or -not [bool]$cancel.data.cancelled -or -not [bool]$cancel.data.returnedToConversation)
+            { throw "Native Safe Passage Cancel did not return to its Encounter conversation: status=$($cancel.status), cancelled=$($cancel.data.cancelled), returned=$($cancel.data.returnedToConversation), error=$($cancel.error)" }
+        $currentTestStep = 'native-safe-passage-cancel-response'
+        $cancelContinue = Invoke-AgentCli 'dialogueContinue' @('-CommandId', "$prefix-native-safe-passage-cancel-continue") 10
+        if ($cancelContinue.status -ne 'completed') { throw "Native Safe Passage Cancel response line could not continue: $($cancelContinue.error)" }
+        $afterCancel = Get-SafePassageState 'after-native-safe-passage-cancel'
+        $attackOption = @($afterCancel.state.availableMenuOptions | Where-Object { $_.id -eq 'attack' -and $_.available -and $_.enabled } | Select-Object -First 1)
+        $cancelAssertions = [ordered]@{
+            NativeCancelReturnedToConversation = [bool]$cancel.data.returnedToConversation
+            NativeCancelChangedNoResourcesOrClock = ([int]$cancel.data.playerGoldBefore -eq [int]$cancel.data.playerGoldAfter -and [bool]$cancel.data.playerPartyFingerprintUnchanged -and [bool]$cancel.data.otherPartyFingerprintUnchanged -and [string]$cancel.data.timeControlModeBefore -eq [string]$cancel.data.timeControlModeAfter -and [double]$cancel.data.campaignDayBefore -eq [double]$cancel.data.campaignDayAfter)
+            NativeContinueRestoredEncounterMenu = ($afterCancel.state.context.gameState -eq 'MapState' -and [bool]$afterCancel.state.context.encounterActive -and $afterCancel.state.context.encounteredPartyId -eq $fixture.data.partyId -and $afterCancel.state.context.menuId -eq 'encounter' -and -not $afterCancel.state.context.conversation)
+            NativeFightOptionAvailableAfterCancel = ($attackOption.Count -eq 1)
+            FixtureHashUnchangedBeforeCleanup = ((Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash -eq $fixtureHashBefore)
+        }
+        $cancelFailures = @($cancelAssertions.Keys | Where-Object { -not [bool]$cancelAssertions[$_] })
+        if ($cancelFailures.Count -gt 0) {
+            [ordered]@{ Assertions = $cancelAssertions; FailedAssertions = $cancelFailures; Cancel = $cancel.data; AfterContinue = $afterCancel.state } |
+                ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $env:CHRONICLE_HARNESS_TEMP 'SafePassageBarterCancelAssertions.json') -Encoding UTF8
+            throw "Native Safe Passage cancel assertions failed before fixture shutdown: $($cancelFailures -join ', ')"
+        }
+        $currentTestStep = 'stop-disposable-safe-passage-cancel-fixture'
+        $cancelStop = Invoke-AgentCli 'stop' @('-CommandId', "$prefix-cancel-stop") 30
+        $cancelHashAfter = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
+        $cancelAssertions.ProcessStopped = [bool]$cancelStop.processStopped
+        $cancelAssertions.FixtureHashUnchanged = ($fixtureHashBefore -eq $cancelHashAfter)
+        $cancelFailures = @($cancelAssertions.Keys | Where-Object { -not [bool]$cancelAssertions[$_] })
+        $cancelResult = [ordered]@{
+            Fixture = $fixture.data
+            Encounter = $meeting.state.context.conversation
+            NativeCancel = $cancel.data
+            NativeContinue = $cancelContinue
+            AfterContinue = $afterCancel.state
+            Assertions = $cancelAssertions
+            FailedAssertions = $cancelFailures
+            FixtureHashBefore = $fixtureHashBefore
+            FixtureHashAfter = $cancelHashAfter
+            ProcessStopped = [bool]$cancelStop.processStopped
+            Passed = ($cancelFailures.Count -eq 0)
+        }
+        $cancelResult | ConvertTo-Json -Depth 14 | Set-Content -LiteralPath $resultPath -Encoding UTF8
+        $cancelResult | ConvertTo-Json -Depth 14
+        if (-not $cancelResult.Passed) { throw 'Native Safe Passage cancel/encounter-menu regression failed.' }
+        return
+    }
 
     $currentTestStep = 'native-safe-passage-auto-balance'
     $worldBeforeAutoBalance = Get-SafePassageState 'world-before-native-safe-passage-auto-balance'

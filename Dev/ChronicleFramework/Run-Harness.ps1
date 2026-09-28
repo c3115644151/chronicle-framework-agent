@@ -13,7 +13,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '5.56'
+$HarnessContractVersion = '5.58'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -289,6 +289,11 @@ foreach ($stage in $requestedStages) {
         }
         'Build' {
             Invoke-Stage -Name 'Build' -Action {
+                $runningBannerlordClients = @(Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue)
+                if ($runningBannerlordClients.Count -gt 0) {
+                    $runningClientSummary = ($runningBannerlordClients | ForEach-Object { "$($_.ProcessName)#$($_.Id)" }) -join ', '
+                    throw "Refusing to build or deploy ChronicleFramework while a Bannerlord client is running ($runningClientSummary). Close the game normally and retry; Harness will not stop a live client or overwrite its loaded DLL."
+                }
                 $mainlinePath = Join-Path $harnessRoot 'Focus\MAINLINE.md'
                 $mainlineText = Get-Content -LiteralPath $mainlinePath -Raw -Encoding UTF8
                 $researchGateReady = $mainlineText -match '(?m)^Research Gate: \*\*READY\*\*\s*$'
@@ -604,6 +609,8 @@ foreach ($stage in $requestedStages) {
             Invoke-Stage -Name 'BarterContexts' -Action {
                 & powershell -NoProfile -ExecutionPolicy Bypass -File $barterContextsScript
                 if ($LASTEXITCODE -ne 0) { throw "Native Safe Passage Barter context test failed with exit code $LASTEXITCODE." }
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $barterContextsScript -CancelOnly
+                if ($LASTEXITCODE -ne 0) { throw "Native Safe Passage Cancel/encounter-menu test failed with exit code $LASTEXITCODE." }
             }
         }
         'AgentLoop' {
