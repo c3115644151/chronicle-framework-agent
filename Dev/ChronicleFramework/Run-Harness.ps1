@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'BattleFixture', 'PostBattle', 'Observation', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'VisualCapture', 'All')]
+    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'BattleFixture', 'PostBattle', 'Observation', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'VisualCapture', 'All')]
     [string]$Phase = 'All',
     [int]$SmokeTimeoutSeconds = 45,
     [int]$SmokeStabilitySeconds = 8,
@@ -13,7 +13,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '5.37'
+$HarnessContractVersion = '5.41'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -64,6 +64,7 @@ $companionHiringScript = Join-Path $harnessRoot 'Test-AgentCompanionHiring.ps1'
 $partyRolesScript = Join-Path $harnessRoot 'Test-AgentPartyRoles.ps1'
 $inventoryNavigationScript = Join-Path $harnessRoot 'Test-AgentInventoryNavigation.ps1'
 $equipmentTransactionsScript = Join-Path $harnessRoot 'Test-AgentEquipmentTransactions.ps1'
+$tradeTransactionsScript = Join-Path $harnessRoot 'Test-AgentTradeTransactions.ps1'
 $docsScript = Join-Path $harnessRoot 'Check-Docs.ps1'
 $contextPackScript = Join-Path $harnessRoot 'Get-ContextPack.ps1'
 
@@ -177,6 +178,7 @@ $requestedStages = switch ($Phase) {
     'PartyRoles' { @('Preflight', 'Build', 'PartyRoles') }
     'InventoryNavigation' { @('Preflight', 'Build', 'InventoryNavigation') }
     'EquipmentTransactions' { @('Preflight', 'Build', 'EquipmentTransactions') }
+    'TradeTransactions' { @('Preflight', 'Build', 'TradeTransactions') }
     'MissionInteraction' { @('Preflight', 'Build', 'MissionInteraction') }
     'CompanionHiring' { @('Preflight', 'Build', 'CompanionHiring') }
     'Movement' { @('Preflight', 'Build', 'Movement') }
@@ -194,7 +196,7 @@ $requestedStages = switch ($Phase) {
     'SettlementOverlayQuestGate' { @('Preflight', 'Build', 'SettlementOverlayQuestGate') }
     'MapSettlementTargets' { @('Preflight', 'Build', 'MapSettlementTargets') }
     'VisualCapture' { @('Preflight', 'Build', 'VisualCapture') }
-    'All' { @('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'Protocol', 'AgentLoop', 'Observation', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'QuestAcceptance', 'BattleFixture', 'PostBattle', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestGate') }
+    'All' { @('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'Protocol', 'AgentLoop', 'Observation', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'QuestAcceptance', 'BattleFixture', 'PostBattle', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestGate') }
 }
 
 foreach ($stage in $requestedStages) {
@@ -580,6 +582,12 @@ foreach ($stage in $requestedStages) {
             Invoke-Stage -Name 'EquipmentTransactions' -Action {
                 & powershell -NoProfile -ExecutionPolicy Bypass -File $equipmentTransactionsScript
                 if ($LASTEXITCODE -ne 0) { throw "Native MainHero equip/unequip transaction test failed with exit code $LASTEXITCODE." }
+            }
+        }
+        'TradeTransactions' {
+            Invoke-Stage -Name 'TradeTransactions' -Action {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $tradeTransactionsScript
+                if ($LASTEXITCODE -ne 0) { throw "Native Town Trade transaction test failed with exit code $LASTEXITCODE." }
             }
         }
         'AgentLoop' {

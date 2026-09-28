@@ -724,23 +724,33 @@ internal sealed class ChronicleAgentProtocol
                     WriteResponse(commandId, action, "completed", behavior, null, recruitmentResult);
                     break;
                 case "foodOptions":
-                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentProvisioning.GetFoodOptionsJson());
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentTradeAdapter.BuildFoodOptionsJson());
                     break;
                 case "tradeOptions":
-                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentProvisioning.GetTradeOptionsJson());
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentTradeAdapter.BuildTradeOptionsJson());
                     break;
                 case "trade":
                     var tradeDirection = ReadString(command, "direction");
-                    var tradeItemId = ReadString(command, "itemId");
+                    var tradeItemViewModelId = ReadString(command, "itemViewModelId");
+                    var tradeInventorySide = ReadString(command, "inventorySide");
                     var tradeAmount = (int)ReadDouble(command, "amount");
-                    var tradeResult = ChronicleAgentProvisioning.TradeItem(tradeDirection, tradeItemId, tradeAmount);
+                    var tradeResult = ChronicleAgentTradeAdapter.DraftTradeItem(tradeDirection, tradeItemViewModelId, tradeInventorySide, tradeAmount);
                     WriteResponse(commandId, action, "completed", behavior, null, tradeResult);
                     break;
                 case "provision":
-                    var foodItemId = ReadString(command, "itemId");
+                    var foodItemViewModelId = ReadString(command, "itemViewModelId");
                     var foodAmount = (int)ReadDouble(command, "amount");
-                    var provisionResult = ChronicleAgentProvisioning.BuyFood(foodItemId, foodAmount);
+                    var provisionResult = ChronicleAgentTradeAdapter.DraftTradeItem("buy", foodItemViewModelId, "OtherInventory", foodAmount, requireFood: true);
                     WriteResponse(commandId, action, "completed", behavior, null, provisionResult);
+                    break;
+                case "tradeConfirm":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentTradeAdapter.CommitCurrentNativeTradeTransaction());
+                    break;
+                case "tradeCancel":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentTradeAdapter.CancelCurrentNativeTradeTransaction(confirmDiscardChanges: false));
+                    break;
+                case "tradeCancelChanges":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentTradeAdapter.CancelCurrentNativeTradeTransaction(confirmDiscardChanges: true));
                     break;
                 case "menuSelect":
                     var menuContext = TaleWorlds.CampaignSystem.Campaign.Current.CurrentMenuContext;

@@ -34,9 +34,9 @@
 
 `AgentObserver` 当前对主队只返回 `itemCount`、Food库存、Food总量变化、cargoWeight 和 cargoCapacity；不会列出普通 Party ItemRoster 的 item ID、名称、类别、数量、modifier、装备槽或转移条件。战后活动 `InventoryState` 仅输出模式、双方物品数量及是否有 Inventory Handler，不输出逐物品清单。故 Agent 的常驻观察不足以识别背包里具体有什么非食物商品。
 
-已有独立交易查询 `AgentProvisioning.GetTradeOptionsJson` 可在城镇环境下使用原生 `InventoryLogic` 列出当前市场买入项与 Party 出售项的 ID、名称、数量、当前方向价格、重量及是否食物；当前 Protocol 还有按 ItemId/数量提交交易和食品购买的窄接口。这是本地按需交易适配，不是常驻库存观察，也不是玩家在原生交易 GUI 里逐格操作的证据。相关成交价格、库存变化和 UI/API 差异继续见 E02/E07。
+W2-V用原版 Town `trade` 菜单进入 Trade `InventoryState`，按需读取当前 `SPInventoryVM` 左右候选及Native item cost；买卖暂存分别走 `SPItemVM.ExecuteBuy/ExecuteSell(amount)`，Done/Cancel复用活动Trade Inventory的Gauntlet handler。它不把旧的Map态独立报价/InventoryLogic快路径当作玩家Trade GUI已验证。专门的交易事务运行结果留在W2-V测试回执；市场时间序列/可视UI仍不在此静态研究结论内。
 
-证据：本机 `TaleWorlds.Core.dll`（`ItemObject`、`ItemCategory`、`EquipmentElement`、`ItemRosterElement`）、`TaleWorlds.CampaignSystem.dll`（`ItemRoster`）；官方 `Modules/SandBoxCore/ModuleData/items/*.xml`、StoryMode物品XML；Chronicle `AgentObserver.cs`、`AgentProtocol.cs`、`AgentProvisioning.cs`。结论为当前 v1.4.8.119303 安装源码/数据及本地适配静态核对，未视觉验证背包/交易各页。
+证据：本机 `TaleWorlds.Core.dll`（`ItemObject`、`ItemCategory`、`EquipmentElement`、`ItemRosterElement`）、`TaleWorlds.CampaignSystem.dll`（`ItemRoster`）；官方 `Modules/SandBoxCore/ModuleData/items/*.xml`、StoryMode物品XML；Chronicle `AgentObserver.cs`、`AgentProtocol.cs`、`AgentTradeAdapter.cs`。结论基于当前 v1.4.8.119303 安装源码/数据和当前Native Trade VM adapter；当前玩家Trade入口运行验收见W2-V。
 
 未知项：当前加载模块顺序下的完整可用 ItemObject/ItemCategory 集合及 Mod 覆盖；ItemCategory demand 数据进入 E02 价格模型的全部公式；全部装备/修改器/任务物品在各 InventoryMode 下的限制；Chronicle 未打开 InventoryState 时是否存在其它可核验的逐物品观察源；玩家在正式库存和交易屏幕内的实际排序、筛选、修饰键和 Commit/取消副作用。
 
@@ -62,11 +62,11 @@
 
 ### 玩家入口与 Chronicle 当前适配
 
-城镇玩家菜单 `trade` 通过 `InventoryScreenHelper.OpenScreenAsTrade` 打开原生 Trade InventoryState；点击报价和完成事务属于 InventoryLogic/View 路径（菜单入口见 D09）。本地 `AgentProvisioning.GetTradeOptionsJson` 以 `InventoryLogic`、Town MarketData 和 `useBasePrices:false` 列买入/卖出报价；`TradeItem` 创建 TransferCommand，检查数量/金币/负重和 `CanPlayerCompleteTransaction`，调用 `DoneLogic` 后核对双方库存数量与金币差。它是在 Harness/Protocol 中直接驱动本体交易逻辑的适配，不等同于已自动操作可视 Trade Inventory UI。
+城镇玩家菜单 `trade` 由 `InventoryScreenHelper.OpenScreenAsTrade` 建立 Trade `InventoryState`。Native Trade `SPInventoryVM` 持有这份 `InventoryLogic`；市场/玩家候选用实际 `InventorySide` 分别显示，`SPItemVM.ExecuteBuy(amount)`与`ExecuteSell(amount)`分别进入绑定的VM回调，设置 TransferCommand 草稿。Gauntlet Done 调 `SPInventoryVM.ExecuteCompleteTranstactions`并由`HandleDone`提交/处理商人资金提示；Cancel调用`ExecuteResetAndCompleteTranstactions`，有未提交草稿时原生Inquiry决定是否丢弃。Chronicle W2-V现从活动Trade VM读取候选和modifier，调用SPItemVM买卖回调与当前屏幕Done/Cancel handler；此与原先新建独立InventoryLogic的快路径是不同的路径，分别保留证据等级。
 
-当前 Observer 常驻状态不列出市场 item price/stock 表；玩家在 Town 环境请求 tradeOptions 才能获取具名报价。对不同 Settlement、被俘/战争、特殊交易品、商队、村庄市场、修改器装备和事件影响的动态报价，未声称已全覆盖。
+当前 Observer 常驻状态不列出市场 item price/stock 表；玩家在 Town 环境请求 tradeOptions 才能获取具名报价。`TestResults/20260928-090808/Temp/TradeTransactionResult.json`实测萨哥特Town：活动Native Trade VM的碎裂箭报价60，与同一InventoryLogic单位价格相符；候选区分OtherInventory/PlayerInventory及modifier。此次覆盖一个城镇、一种带modifier商品和一件交易，不代表其它聚落/特殊交易模式全覆盖；对不同Settlement、被俘/战争、商队、村庄市场及事件影响的动态报价仍未声称全覆盖。
 
-证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `TownMarketData`、`ItemData`、`TradeCampaignBehavior`、`DefaultSettlementEconomyModel`、`DefaultTradeItemPriceFactorModel`、`Town.GetItemPrice`；`TaleWorlds.CampaignSystem.dll` InventoryLogic/Trade；Chronicle `AgentProvisioning.cs`、`AgentObserver.cs`、`AgentProtocol.cs`。静态证据版本 v1.4.8.119303；本节未实机跑市场价格/供需时间序列。
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `TownMarketData`、`ItemData`、`TradeCampaignBehavior`、`DefaultSettlementEconomyModel`、`DefaultTradeItemPriceFactorModel`、`Town.GetItemPrice`；`TaleWorlds.CampaignSystem.ViewModelCollection.dll` 的`SPInventoryVM.ProcessBuyItem/ProcessSellItem/HandleDone`、`SPItemVM.ExecuteBuy/ExecuteSell`；Chronicle `AgentTradeAdapter.cs`、`AgentProtocol.cs`。静态证据版本 v1.4.8.119303。运行收据`TradeTransactions`验证Native Trade VM报价、带modifier物品的买卖事务、Cancel/Done、双方库存与Gold后置条件和Stop时间边界；不推定市场供需时间序列已完成。
 
 未知项：默认 supply/demand 模型的完整消费者与每日/每周更新链；Caravan/商队/商人买卖对 MarketData Supply、Demand、InStore 的全部写入；各项 TradePenalty 全部规则与真实 UI 展示；Modified EquipmentElement、交易数量对阶梯报价和单笔合计的完整差异；其他 Mod 替换 Model/交易逻辑后的当前实际加载表现。
 
@@ -96,7 +96,7 @@ Villager Party 到达 Town 时由 `VillagerCampaignBehavior.OnSettlementEntered`
 
 Observer 的附近 Party 列表可能识别可见的 `villager` Party 类型和部分人数/位置状态，但没有输出其 Home Village、TradeBound、携带物品、PartyTradeGold 或目的地商品清单；Settlement 快照也不返回 Village TradeBound 和库存。当前 Agent 能从 Town `tradeOptions` 看到当前城镇市场买卖项，但看不到完整村庄生产量、在途商品、运输失联和交付税收链。Protocol 没有建立商路、指挥 Villager Party 或修改 TradeBound 的动作。
 
-证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `Village`、`DefaultVillageTradeModel`、`VillageTradeBoundCampaignBehavior`、`VillagerCampaignBehavior`、`SellGoodsForTradeAction`、`TownMarketData`、`SettlementTaxModel`；Chronicle `AgentObserver.cs`、`AgentProvisioning.cs`。村庄生产上游细节依 D04；本节为 v1.4.8.119303 源码链核对，未在战役中运行长周期村庄商队观察。
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `Village`、`DefaultVillageTradeModel`、`VillageTradeBoundCampaignBehavior`、`VillagerCampaignBehavior`、`SellGoodsForTradeAction`、`TownMarketData`、`SettlementTaxModel`；Chronicle `AgentObserver.cs`、`AgentTradeAdapter.cs`仅查询Town当前Trade Inventory VM，不控制/观察完整村庄商路。村庄生产上游细节依 D04；本节为 v1.4.8.119303源码链核对，未在战役中运行长周期村庄商队观察。
 
 未知项：默认 VillageTradeBound 在关系/海路/封锁/地图连接变化下的所有重算条件；村民贸易 Party 负载量、路程中被劫后恢复/重生及具体到货时间分布；村庄交易税从 Accumulated 到 Clan 财政的全部调用链；玩家/商队同一小时买卖对村庄商路库存的竞争顺序；其他 Mod 添加生产类型或贸易点时的兼容与当前启用情况。
 
@@ -194,7 +194,7 @@ Party `ItemRoster` 同时承载食品、贸易物、动物与战利品；缓存�
 
 Observer 当前主队输出 Gold、Party人数/健康/伤兵/囚犯、Item总量、食物库存/变化、总工资、速度/士气、cargo weight/capacity；它不列具体普通物品、各 troop 的单兵工资、可用工资预算、欠薪比例、动物细分、非食物载货价值或全部战利品详情。若战后 Loot InventoryState 正在打开，Observer只计数左右物品数和有无 UI handler；Protocol有领取当前战后物品的专用处理，不是任意背包移动工具。玩家可以在城镇市场按菜单购买粮，且当前适配复用InventoryLogic交易；截图级的玩家 UI 路径与返回结果不据此宣称完成。
 
-证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `MobileParty`、`DefaultPartyWageModel`、`DefaultMobilePartyFoodConsumptionModel`、`DefaultPartyDesertionModel`、`FoodConsumptionBehavior`、`PartiesBuyFoodCampaignBehavior`、`DefaultClanFinanceModel`；Chronicle `AgentObserver.cs`、`AgentProtocol.cs`、`AgentProvisioning.cs`；相关战后 Loot 路径见现有 G/H研究/MAINLINE。此处为 v1.4.8.119303 静态源码与本地协议对照，未运行欠薪、粮尽、牲畜宰杀或债务时间序列。
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `MobileParty`、`DefaultPartyWageModel`、`DefaultMobilePartyFoodConsumptionModel`、`DefaultPartyDesertionModel`、`FoodConsumptionBehavior`、`PartiesBuyFoodCampaignBehavior`、`DefaultClanFinanceModel`；Chronicle `AgentObserver.cs`、`AgentProtocol.cs`、`AgentTradeAdapter.cs`；相关战后 Loot 路径见现有 G/H研究/MAINLINE。该适配仅在活动Trade InventoryState提供食物候选/原生购买草稿，不直接改粮食/库存；本节仍未运行欠薪、粮尽、牲畜宰杀或债务时间序列。
 
 未知项：Player/MainParty的每日实际工资扣款事件/调用顺序和与 ClanFinance 的精确钱包切分；各 trooper/wounded/hero/mercenary/garrison/daily-payment policy 的全部工资细节；背包重量/马匹分类影响速度上限和交易容量的完整公式；Army食物分享和债务/破产处理边缘条件；Player UI在 roster/item transfer中所有键鼠/提交/取消和失败恢复副作用。
 
@@ -280,9 +280,9 @@ Chronicle Observer 不返回玩家所属 Kingdom ID/预算钱包/Tribute、Merce
 
 玩家在 Town `trade` 菜单进入原生 InventoryState 执行交易，完成 Transaction 后才触发 PlayerInventoryExchangeEvent；对话 barter、任务奖励、Party loot、Workshop 自动产出及 Caravan 自动买卖是不同来源，不能因为改变 Gold 就推定 Trade XP。该入口路径见 D09/E02。
 
-Chronicle `AgentProvisioning.TradeItem` 用 InventoryLogic 的 TransferCommand/DoneLogic执行城镇市场买卖，回执核对库存、金币与食物差额；理论上交易提交会接入原版 PlayerInventoryExchangeEvent，但当前回执并不核验 Trade Skill XP、ItemsTradeData 或 `OnPlayerTradeProfit`，所以只能记作可能经过原版事件链，不标为已测试 XP 成长。Observer 不输出 Trade 技能等级、学习率、Perk/XP或 ItemTradeData，Protocol 也没有 Trade技能分配/查询命令。
+Chronicle `AgentTradeAdapter` 通过活动Native `SPItemVM.ExecuteBuy/ExecuteSell`产生TransferCommand草稿，再经原生Trade Gauntlet Done提交。`TestResults/20260928-090808/Temp/TradeTransactionResult.json`实测一组`default_arrows/splintered_arrows`按60买入、按21卖回；双方库存和双方Gold均与提交回执一致，modifier身份保持，Stop时Campaign日不变。如果原版提交触发 `PlayerInventoryExchangeEvent`/`OnPlayerTradeProfit`，仍须从这次原生交易结果独立核验XP差值，不因交易成功自动声称Trade XP成长。Observer 不输出完整Trade技能经验/Perk/ItemTradeData的常驻历史字段，也没有单独的技能训练规划动作。
 
-证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `TradeSkillCampaignBehavior`、`DefaultPartyTradeModel`、`DefaultTradeItemPriceFactorModel`、`SkillLevelingManager.OnTradeProfitMade`；`TaleWorlds.CampaignSystem.ViewModelCollection.dll` Trade Skill/Character VM；Chronicle `AgentProvisioning.cs`、`AgentObserver.cs`、`AgentProtocol.cs`。版本 v1.4.8.119303 静态源码核对；没有跑实际交易后Trade XP增量及存档重载验证。
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `TradeSkillCampaignBehavior`、`DefaultPartyTradeModel`、`DefaultTradeItemPriceFactorModel`、`SkillLevelingManager.OnTradeProfitMade`；`TaleWorlds.CampaignSystem.ViewModelCollection.dll` Trade Skill/Character VM；Chronicle `AgentTradeAdapter.cs`、`AgentObserver.cs`、`AgentProtocol.cs`。版本 v1.4.8.119303 源码链已核；交易XP增量/Trade XP条件和存档重载仍未由W2-V买卖测试验收。
 
 未知项：所有 Trade Perk 对价格/XP/结算的写入点和副作用；多个交易订单/部分卖出/回购/市场退货等情况下平均买入成本数据如何更正；NPC Caravan/贸易委托、Workshop 产出的价格变化是否给主角 Trade XP；Trade XP 最终调用和 CharacterDeveloper UI 增长显示间的用户可见结果；存在其他 Mod 交易监听器时事件顺序。
 

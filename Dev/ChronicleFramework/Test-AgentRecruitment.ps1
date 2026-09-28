@@ -21,6 +21,18 @@ function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @()) {
     return $output | ConvertFrom-Json
 }
 
+function Open-NativeTownTrade([string]$Suffix) {
+    $menu = Invoke-AgentCli 'menu' @('-CommandId', "$runPrefix-$Suffix-menu", '-TimeoutSeconds', $TimeoutSeconds)
+    if ($menu.state.context.menuId -ne 'town') { throw "Native market test expected the Town menu, got '$($menu.state.context.menuId)'" }
+    $tradeOption = @($menu.state.availableMenuOptions | Where-Object { $_.id -eq 'trade' -and $_.available -and $_.enabled } | Select-Object -First 1)
+    if ($tradeOption.Count -ne 1) { throw 'The current Town menu did not expose an enabled Native Trade option.' }
+    $open = Invoke-AgentCli 'menuSelect' @('-MenuId', 'town', '-OptionId', [string]$tradeOption[0].id, '-CommandId', "$runPrefix-$Suffix-open-trade", '-TimeoutSeconds', $TimeoutSeconds)
+    $state = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-$Suffix-trade-state", '-TimeoutSeconds', $TimeoutSeconds)
+    if ($open.status -ne 'completed' -or $state.state.context.gameState -ne 'InventoryState' -or $state.state.inventoryScreen.mode -ne 'Trade')
+        { throw 'Native Town trade did not open its Trade-mode InventoryState.' }
+    return [pscustomobject]@{ Menu = $menu; Open = $open; State = $state }
+}
+
 try {
     $start = Invoke-AgentCli 'load' @('-SaveName', $LoadSaveName, '-TimeoutSeconds', $TimeoutSeconds)
     $beforeMove = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-before-move", '-TimeoutSeconds', $TimeoutSeconds)
@@ -57,18 +69,24 @@ try {
     $invalidRecruit = Invoke-AgentCli 'recruit' @('-OwnerId', 'chronicle_missing_owner', '-TroopId', 'chronicle_missing_troop', '-VolunteerSlot', '0', '-CommandId', "$runPrefix-invalid-recruit", '-TimeoutSeconds', 15)
     $afterInvalid = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-after-invalid", '-TimeoutSeconds', $TimeoutSeconds)
 
+    $provisionTradeState = Open-NativeTownTrade 'provision-food'
     $foodOptions = Invoke-AgentCli 'foodOptions' @('-CommandId', "$runPrefix-food-options", '-TimeoutSeconds', $TimeoutSeconds)
-    $foodOffer = @($foodOptions.data.offers | Where-Object { $_.stock -gt 0 -and $_.unitPrice -le $afterInvalid.state.economy.gold } | Sort-Object unitPrice | Select-Object -First 1)
+    $foodOffer = @($foodOptions.data.offers | Where-Object { $_.stock -gt 0 -and $_.isTransferable -and $_.inventoryLogicUnitPrice -le $afterInvalid.state.economy.gold } | Sort-Object inventoryLogicUnitPrice | Select-Object -First 1)
     if ($foodOffer.Count -ne 1) { throw 'Native trade inventory contains no affordable food item.' }
-    $provision = Invoke-AgentCli 'provision' @('-ItemId', [string]$foodOffer[0].itemId, '-Amount', '1', '-CommandId', "$runPrefix-provision", '-TimeoutSeconds', $TimeoutSeconds)
+    $provision = Invoke-AgentCli 'provision' @('-ItemViewModelId', [string]$foodOffer[0].viewModelItemId, '-Amount', '1', '-CommandId', "$runPrefix-provision", '-TimeoutSeconds', $TimeoutSeconds)
+    $provisionCommit = Invoke-AgentCli 'tradeConfirm' @('-CommandId', "$runPrefix-provision-confirm", '-TimeoutSeconds', $TimeoutSeconds)
     $afterProvision = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-after-provision", '-TimeoutSeconds', $TimeoutSeconds)
+    $sellTradeState = Open-NativeTownTrade 'sell-food'
     $tradeOptions = Invoke-AgentCli 'tradeOptions' @('-CommandId', "$runPrefix-trade-options", '-TimeoutSeconds', $TimeoutSeconds)
-    $sellOffer = @($tradeOptions.data.sellOffers | Where-Object { $_.itemId -eq $foodOffer[0].itemId -and $_.stock -gt 0 } | Select-Object -First 1)
+    $sellOffer = @($tradeOptions.data.sellOffers | Where-Object { $_.itemId -eq $foodOffer[0].itemId -and $_.modifierId -eq $foodOffer[0].modifierId -and $_.stock -gt 0 -and $_.isTransferable } | Select-Object -First 1)
     if ($sellOffer.Count -ne 1) { throw 'The acquired food item was not exposed as a player sell offer.' }
-    $sell = Invoke-AgentCli 'trade' @('-Direction', 'sell', '-ItemId', [string]$sellOffer[0].itemId, '-Amount', '1', '-CommandId', "$runPrefix-sell", '-TimeoutSeconds', $TimeoutSeconds)
+    $sell = Invoke-AgentCli 'trade' @('-Direction', 'sell', '-ItemViewModelId', [string]$sellOffer[0].viewModelItemId, '-InventorySide', [string]$sellOffer[0].inventorySide, '-Amount', '1', '-CommandId', "$runPrefix-sell", '-TimeoutSeconds', $TimeoutSeconds)
+    $sellCommit = Invoke-AgentCli 'tradeConfirm' @('-CommandId', "$runPrefix-sell-confirm", '-TimeoutSeconds', $TimeoutSeconds)
     $afterSell = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-after-sell", '-TimeoutSeconds', $TimeoutSeconds)
-    $invalidTrade = Invoke-AgentCli 'trade' @('-Direction', 'sell', '-ItemId', 'chronicle_missing_item', '-Amount', '1', '-CommandId', "$runPrefix-invalid-trade", '-TimeoutSeconds', '15')
+    $invalidTradeState = Open-NativeTownTrade 'stale-sell'
+    $invalidTrade = Invoke-AgentCli 'trade' @('-Direction', 'sell', '-ItemViewModelId', [string]$sellOffer[0].viewModelItemId, '-InventorySide', [string]$sellOffer[0].inventorySide, '-Amount', '1', '-CommandId', "$runPrefix-invalid-trade", '-TimeoutSeconds', '15')
     $afterInvalidTrade = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-after-invalid-trade", '-TimeoutSeconds', $TimeoutSeconds)
+    $invalidTradeClose = Invoke-AgentCli 'tradeCancel' @('-CommandId', "$runPrefix-invalid-trade-close", '-TimeoutSeconds', $TimeoutSeconds)
 
     $menu = Invoke-AgentCli 'menu' @('-CommandId', "$runPrefix-menu", '-TimeoutSeconds', $TimeoutSeconds)
     $leave = Invoke-AgentCli 'menuSelect' @('-MenuId', [string]$menu.state.context.menuId, '-OptionId', 'town_leave', '-CommandId', "$runPrefix-leave", '-TimeoutSeconds', $TimeoutSeconds)
@@ -79,9 +97,9 @@ try {
     $expectedGold = [int]$beforeRecruit.state.economy.gold - [int]$offer[0].cost
     $successVerified = $recruit.data.verified -and [int]$afterRecruit.state.party.members -eq $expectedMembers -and [int]$afterRecruit.state.economy.gold -eq $expectedGold
     $failureNoMutation = $invalidRecruit.status -eq 'rejected' -and [int]$afterInvalid.state.party.members -eq [int]$afterRecruit.state.party.members -and [int]$afterInvalid.state.economy.gold -eq [int]$afterRecruit.state.economy.gold
-    $provisionVerified = $provision.data.verified -and [int]$afterProvision.state.party.foodInventory -gt [int]$afterInvalid.state.party.foodInventory -and [int]$afterInvalid.state.economy.gold - [int]$afterProvision.state.economy.gold -eq [int]$provision.data.transactionAmount
-    $tradeVerified = $sell.data.verified -and [int]$afterSell.state.party.foodInventory -eq [int]$afterProvision.state.party.foodInventory - 1 -and [int]$afterSell.state.economy.gold -gt [int]$afterProvision.state.economy.gold
-    $invalidTradeNoMutation = $invalidTrade.status -eq 'rejected' -and [int]$afterInvalidTrade.state.party.foodInventory -eq [int]$afterSell.state.party.foodInventory -and [int]$afterInvalidTrade.state.economy.gold -eq [int]$afterSell.state.economy.gold
+    $provisionVerified = ($provision.status -eq 'completed' -and $provisionCommit.data.postconditionPassed -and [int]$afterProvision.state.party.foodInventory -gt [int]$afterInvalid.state.party.foodInventory -and [int]$afterInvalid.state.economy.gold - [int]$afterProvision.state.economy.gold -eq [int]$provision.data.nativeTransactionAmount)
+    $tradeVerified = ($sell.status -eq 'completed' -and $sellCommit.data.postconditionPassed -and [int]$afterSell.state.party.foodInventory -eq [int]$afterProvision.state.party.foodInventory - 1 -and [int]$afterProvision.state.economy.gold - [int]$afterSell.state.economy.gold -eq [int]$sellCommit.data.nativeTransactionAmount)
+    $invalidTradeNoMutation = ($invalidTrade.status -eq 'rejected' -and [int]$afterInvalidTrade.state.party.foodInventory -eq [int]$afterSell.state.party.foodInventory -and [int]$afterInvalidTrade.state.economy.gold -eq [int]$afterSell.state.economy.gold -and $invalidTradeClose.data.returnedToMap)
     $result = [ordered]@{
         ProcessId = $start.session.processId
         WindowLayout = $start.session.windowLayout
@@ -98,11 +116,13 @@ try {
         InvalidAttemptNoMutation = $failureNoMutation
         FoodOffer = $foodOffer[0]
         ProvisionReceipt = $provision.data
+        ProvisionCommit = $provisionCommit.data
         AfterProvision = [ordered]@{ FoodInventory = $afterProvision.state.party.foodInventory; Gold = $afterProvision.state.economy.gold }
         SellOffer = $sellOffer[0]
         SellReceipt = $sell.data
+        SellCommit = $sellCommit.data
         AfterSell = [ordered]@{ FoodInventory = $afterSell.state.party.foodInventory; Gold = $afterSell.state.economy.gold }
-        InvalidTrade = [ordered]@{ Status = $invalidTrade.status; Error = $invalidTrade.error }
+        InvalidTrade = [ordered]@{ Status = $invalidTrade.status; Error = $invalidTrade.error; Close = $invalidTradeClose.data }
         InvalidTradeNoMutation = $invalidTradeNoMutation
         ProvisionVerified = $provisionVerified
         TradeVerified = $tradeVerified

@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet('start','load','state','mapSettlementTargets','mapPartyTargets','mapPartyComposition','mapPartyBehavior','partyUpgradeOptions','upgradeTroop','prisonerRecruitmentOptions','recruitPrisoner','characterDevelopment','spendSkillFocus','questDetails','partyRoster','partyRoles','inventoryOpen','heroEquipmentOptions','equipHeroItem','unequipHeroItem','inventoryConfirm','inventoryCancel','inventoryCancelChanges','setPartyRole','unassignPartyRole','captureFrame','harnessMissionDiagnostics','harnessMapDiagnostics','harnessPlayerSkillsDiagnostics','harnessCharacterDevelopmentDiagnostics','harnessQuestDetailsDiagnostics','harnessQuestDeadlinePrivacyDiagnostics','harnessPartyRosterDiagnostics','harnessMapPartyDiagnostics','harnessMapPartyCompositionDiagnostics','harnessCreateMapArmyFixture','harnessSeedPartyUpgradeFixture','harnessSeedPrisonerRecruitmentFixture','harnessPrepareCompanionHiringFixture','harnessCompanionHiringDiagnostics','harnessSeedPartyRoleFixture','harnessPartyRoleDiagnostics','harnessSeedEquipmentModifierFixture','harnessClearEquipmentModifierFixture','harnessOpenInventoryState','harnessCloseInventoryState','harnessInventoryStateDiagnostics','talkToSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','move','moveToPoint','missionInput','missionNavigateToAgent','missionInteract','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','foodOptions','tradeOptions','trade','provision','save','stop')]
+    [ValidateSet('start','load','state','mapSettlementTargets','mapPartyTargets','mapPartyComposition','mapPartyBehavior','partyUpgradeOptions','upgradeTroop','prisonerRecruitmentOptions','recruitPrisoner','characterDevelopment','spendSkillFocus','questDetails','partyRoster','partyRoles','inventoryOpen','heroEquipmentOptions','equipHeroItem','unequipHeroItem','inventoryConfirm','inventoryCancel','inventoryCancelChanges','tradeConfirm','tradeCancel','tradeCancelChanges','setPartyRole','unassignPartyRole','captureFrame','harnessMissionDiagnostics','harnessMapDiagnostics','harnessPlayerSkillsDiagnostics','harnessCharacterDevelopmentDiagnostics','harnessQuestDetailsDiagnostics','harnessQuestDeadlinePrivacyDiagnostics','harnessPartyRosterDiagnostics','harnessMapPartyDiagnostics','harnessMapPartyCompositionDiagnostics','harnessCreateMapArmyFixture','harnessSeedPartyUpgradeFixture','harnessSeedPrisonerRecruitmentFixture','harnessPrepareCompanionHiringFixture','harnessCompanionHiringDiagnostics','harnessSeedPartyRoleFixture','harnessPartyRoleDiagnostics','harnessSeedEquipmentModifierFixture','harnessClearEquipmentModifierFixture','harnessOpenInventoryState','harnessCloseInventoryState','harnessInventoryStateDiagnostics','talkToSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','move','moveToPoint','missionInput','missionNavigateToAgent','missionInteract','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','recruit','foodOptions','tradeOptions','trade','provision','save','stop')]
     [string]$Action,
     [string]$SaveName,
     [string]$SettlementId,
@@ -25,6 +25,7 @@ param(
     [string]$HeroId,
     [string]$RoleId,
     [string]$ItemViewModelId,
+    [ValidateSet('PlayerInventory','OtherInventory')][string]$InventorySide,
     [int]$EquipmentIndex = -1,
     [int]$GoldOffset = 1,
     [string]$SkillId,
@@ -404,13 +405,16 @@ switch ($Action) {
     'foodOptions' { $result = Invoke-ProtocolCommand 'foodOptions' }
     'tradeOptions' { $result = Invoke-ProtocolCommand 'tradeOptions' }
     'trade' {
-        if ($Direction -notin @('buy','sell') -or -not $ItemId -or $Amount -le 0) { throw '-Direction (buy/sell), -ItemId and positive -Amount are required for trade.' }
-        $result = Invoke-ProtocolCommand 'trade' @{ direction = $Direction; itemId = $ItemId; amount = $Amount }
+        if ($Direction -notin @('buy','sell') -or -not $ItemViewModelId -or -not $InventorySide -or $Amount -le 0) { throw '-Direction, -ItemViewModelId, -InventorySide and positive -Amount from the current native tradeOptions result are required for trade.' }
+        $result = Invoke-ProtocolCommand 'trade' @{ direction = $Direction; itemViewModelId = $ItemViewModelId; inventorySide = $InventorySide; amount = $Amount }
     }
     'provision' {
-        if (-not $ItemId -or $Amount -le 0) { throw '-ItemId and a positive -Amount are required for provision.' }
-        $result = Invoke-ProtocolCommand 'provision' @{ itemId = $ItemId; amount = $Amount }
+        if (-not $ItemViewModelId -or $Amount -le 0) { throw '-ItemViewModelId and a positive -Amount from the current native foodOptions result are required for provision.' }
+        $result = Invoke-ProtocolCommand 'provision' @{ itemViewModelId = $ItemViewModelId; amount = $Amount }
     }
+    'tradeConfirm' { $result = Invoke-ProtocolCommand 'tradeConfirm' }
+    'tradeCancel' { $result = Invoke-ProtocolCommand 'tradeCancel' }
+    'tradeCancelChanges' { $result = Invoke-ProtocolCommand 'tradeCancelChanges' }
     'save' {
         if (-not $SaveName) { throw '-SaveName is required for save.' }
         $result = Invoke-ProtocolCommand 'save' @{ name = $SaveName }

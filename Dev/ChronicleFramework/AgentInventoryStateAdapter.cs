@@ -351,7 +351,7 @@ internal static class ChronicleInventoryStateAdapter
         return inventoryState;
     }
 
-    private static CharacterObject GetCurrentCharacter(SPInventoryVM viewModel)
+    internal static CharacterObject GetCurrentCharacter(SPInventoryVM viewModel)
     {
         var field = typeof(SPInventoryVM).GetField("_currentCharacter", BindingFlags.Instance | BindingFlags.NonPublic);
         if (field == null || field.FieldType != typeof(CharacterObject)) throw new MissingFieldException(typeof(SPInventoryVM).FullName, "_currentCharacter");
