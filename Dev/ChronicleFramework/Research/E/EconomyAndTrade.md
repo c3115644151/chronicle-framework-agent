@@ -322,7 +322,7 @@ Barter 是按 Hero/Party/Faction 对方建立的谈判数据。`BarterData` 保�
 
 独立Cancel分支已用未保存fixture运行通过。Native `barterCancel`回执显示它返回Encounter对话，金币/双方Roster/Campaign时间档和时值均未变化；继续原版回应对白后，游戏回到仍活动的Encounter菜单（`menuId=encounter`），其中`attack`选项可用，而不是重新显示Safe Passage威胁选择。这里验证的是取消原生谈判草稿并返回遭遇菜单，不执行Fight。证据：`TestResults/20260928-170916/Temp/SafePassageBarterCancelResult.json`。
 
-独立Fight分支从威胁对话仍活动时选择原生`bandit_start_defender_1`（“够胆就过来动手吧！”）。原版回应/Continue后回到同一Bandit Encounter菜单，`attack`（玩家进入战斗）与`str_order_attack`（交由部队作战）均启用；仅选择威胁回应不会扣金币、推进Campaign日或改变Stop档。该测试没有启动/结算战斗，所以只证明谈判以外的原生Fight路由仍开放，不等于坐镇模拟结果已经覆盖。夹具hash不变且进程已停。证据：`TestResults/20260928-174327/Temp/FightOnly/SafePassageFightResult.json`。
+独立Fight分支从威胁对话仍活动时选择原生`bandit_start_defender_1`（“够胆就过来动手吧！”）。原版回应/Continue后回到同一Bandit Encounter菜单，`attack`（玩家进入战斗）与`str_order_attack`（交由部队作战）均启用；仅选择威胁回应不会扣金币、推进Campaign日或改变Stop档。该测试没有启动/结算战斗，所以只证明谈判以外的原生Fight路由仍开放，不等于坐镇模拟结果已经覆盖。夹具hash不变且进程已停。证据：`TestResults/20260928-175833/Temp/SafePassageFightResult.json`（Harness独立阶段`BarterFightRoute`，Preflight/Build/游戏验证均通过）。
 
 
 夹具曾用`MainParty.Position + (0.5, 0)`生成劫匪，该点未经原版导航验证。真实触发遭遇时，Native `bandit_start_defender_condition`抛出`NullReferenceException`；源码显示该方法会查找劫匪最近的Town/Village，随后不做空值保护地读取SettlementComponent。这使无效Party位置/最近定居点查找成为有源码依据的嫌疑，但异常堆栈没有行号，旧夹具也未记录该查询结果，因此精确的空对象尚未证实。新夹具现在先用原版导航选有效生成点、确认`FindNearestSettlementToMobileParty`可返回定居点，再触发原生AI遭遇；完整对白和BarterVM流程随之通过。我们消除了夹具的未验证环境前置，没有改写原版条件。异常原件：`TestResults/20260928-150648/Temp/CrashException-18860.txt`。
