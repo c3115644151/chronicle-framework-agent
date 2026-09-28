@@ -3,14 +3,15 @@ param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
     [int]$TimeoutSeconds = 180,
     [switch]$CancelOnly,
-    [switch]$FightOnly
+    [switch]$FightOnly,
+    [switch]$ObserveExpiry
 )
 
 $ErrorActionPreference = 'Stop'
 $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
 $savePath = Join-Path $env:USERPROFILE "Documents\Mount and Blade II Bannerlord\Game Saves\$LoadSaveName.sav"
 $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\session.json'
-$resultFile = if ($FightOnly) { 'SafePassageFightResult.json' } elseif ($CancelOnly) { 'SafePassageBarterCancelResult.json' } else { 'SafePassageBarterContextResult.json' }
+$resultFile = if ($ObserveExpiry) { 'SafePassageCooldownExpiryResult.json' } elseif ($FightOnly) { 'SafePassageFightResult.json' } elseif ($CancelOnly) { 'SafePassageBarterCancelResult.json' } else { 'SafePassageBarterContextResult.json' }
 $resultPath = if ($env:CHRONICLE_HARNESS_TEMP) { Join-Path $env:CHRONICLE_HARNESS_TEMP $resultFile } else { Join-Path $PSScriptRoot "TestResults\ManualSafePassageBarterContext\$resultFile" }
 $prefix = 'safe-passage-barter-' + (Get-Date -Format 'yyyyMMddHHmmssfff')
 $currentTestStep = 'preflight'
@@ -317,27 +318,36 @@ try {
     $safePassageResolution = Wait-ForSafePassageExit
     $postSafePassageDiagnostics = Invoke-AgentCli 'harnessMapPartyDiagnostics' @('-CommandId', "$prefix-safe-passage-native-cooldown-diagnostics") 12
     $banditCooldownParty = @($postSafePassageDiagnostics.data.mapPartyEntities | Where-Object { $_.id -eq $fixture.data.partyId } | Select-Object -First 1)
-    $cooldownDayBeforeAdvance = [double]$safePassageResolution.state.campaignDay
-    $currentTestStep = 'explicitly-advance-beyond-safe-passage-cooldown'
-    $cooldownAdvance = Invoke-AgentCli 'advance' @('-Days', '1.35', '-CommandId', "$prefix-explicit-safe-passage-cooldown-expiry") 150
-    if ($cooldownAdvance.status -ne 'completed') { throw "Harness-only explicit 1.35-day fast-forward did not complete: $($cooldownAdvance.error)" }
-    $cooldownAdvanceHours = ([double]$cooldownAdvance.campaignDay - $cooldownDayBeforeAdvance) * 24.0
-    $expiryWasInterruptedByFixtureBandit = ($cooldownAdvance.data.completedBy -eq 'encounter' -and [bool]$cooldownAdvance.state.context.encounterActive -and $cooldownAdvance.state.context.encounteredPartyId -eq $fixture.data.partyId)
-    $postExpiryDiagnostics = Invoke-AgentCli 'harnessMapPartyDiagnostics' @('-CommandId', "$prefix-safe-passage-after-cooldown-diagnostics") 12
-    $expiredCooldownParty = @($postExpiryDiagnostics.data.mapPartyEntities | Where-Object { $_.id -eq $fixture.data.partyId } | Select-Object -First 1)
+    $cooldownAdvance = $null
+    $cooldownAdvanceHours = $null
+    $expiryWasInterruptedByFixtureBandit = $false
+    $postExpiryDiagnostics = $null
+    $expiredCooldownParty = @()
+    if ($ObserveExpiry) {
+        $cooldownDayBeforeAdvance = [double]$safePassageResolution.state.campaignDay
+        $currentTestStep = 'explicitly-advance-beyond-safe-passage-cooldown'
+        $cooldownAdvance = Invoke-AgentCli 'advance' @('-Days', '1.35', '-CommandId', "$prefix-explicit-safe-passage-cooldown-expiry") 150
+        if ($cooldownAdvance.status -ne 'completed') { throw "Harness-only explicit 1.35-day fast-forward did not complete: $($cooldownAdvance.error)" }
+        $cooldownAdvanceHours = ([double]$cooldownAdvance.campaignDay - $cooldownDayBeforeAdvance) * 24.0
+        $expiryWasInterruptedByFixtureBandit = ($cooldownAdvance.data.completedBy -eq 'encounter' -and [bool]$cooldownAdvance.state.context.encounterActive -and $cooldownAdvance.state.context.encounteredPartyId -eq $fixture.data.partyId)
+        $postExpiryDiagnostics = Invoke-AgentCli 'harnessMapPartyDiagnostics' @('-CommandId', "$prefix-safe-passage-after-cooldown-diagnostics") 12
+        $expiredCooldownParty = @($postExpiryDiagnostics.data.mapPartyEntities | Where-Object { $_.id -eq $fixture.data.partyId } | Select-Object -First 1)
+    }
     $offerOutcomeAssertions = [ordered]@{
         NativeSafePassageOfferCommitted144 = ([int]$offer.data.offererGoldBefore -eq 1000 -and [int]$offer.data.offererGoldAfter -eq 856 -and [int]$safePassageResolution.state.economy.gold -eq 856)
         NativeEncounterEndedAfterAcceptedSafePassage = (-not [bool]$safePassageResolution.state.context.encounterActive -and -not $safePassageResolution.state.context.conversation)
         NativeSafePassageOfferDidNotAdvanceClock = ([string]$offer.data.timeControlModeBefore -eq [string]$offer.data.timeControlModeAfter -and [double]$offer.data.campaignDayBefore -eq [double]$offer.data.campaignDayAfter)
         Native32HourDoNotAttackCooldownSet = ($banditCooldownParty.Count -eq 1 -and [double]$banditCooldownParty[0].doNotAttackMainPartyRemainingHours -ge 31.5 -and [double]$banditCooldownParty[0].doNotAttackMainPartyRemainingHours -le 32.0)
         NativeSafePassageHoldModeObserved = ($banditCooldownParty.Count -eq 1 -and $banditCooldownParty[0].defaultBehavior -eq 'Hold' -and $banditCooldownParty[0].moveMode -eq 'Hold')
-        HarnessExplicitAdvanceCrossed32HourCooldownBoundary = ($cooldownAdvance.data.completedBy -in @('requestedDuration', 'encounter') -and $cooldownAdvanceHours -ge 31.9 -and $cooldownAdvance.timeControlMode -eq 'Stop')
-        EarlyExpiryEncounterWasCausedByFixtureBandit = ($cooldownAdvance.data.completedBy -ne 'encounter' -or $expiryWasInterruptedByFixtureBandit)
-        NativeSafePassageCooldownExpiredAfterAdvance = ($expiredCooldownParty.Count -eq 1 -and [double]$expiredCooldownParty[0].doNotAttackMainPartyRemainingHours -le 0.001)
+    }
+    if ($ObserveExpiry) {
+        $offerOutcomeAssertions.HarnessExplicitAdvanceCrossed32HourCooldownBoundary = ($cooldownAdvance.data.completedBy -in @('requestedDuration', 'encounter') -and $cooldownAdvanceHours -ge 31.9 -and $cooldownAdvance.timeControlMode -eq 'Stop')
+        $offerOutcomeAssertions.EarlyExpiryEncounterWasCausedByFixtureBandit = ($cooldownAdvance.data.completedBy -ne 'encounter' -or $expiryWasInterruptedByFixtureBandit)
+        $offerOutcomeAssertions.NativeSafePassageCooldownExpiredAfterAdvance = ($expiredCooldownParty.Count -eq 1 -and [double]$expiredCooldownParty[0].doNotAttackMainPartyRemainingHours -le 0.001)
     }
     $offerOutcomeFailures = @($offerOutcomeAssertions.Keys | Where-Object { -not [bool]$offerOutcomeAssertions[$_] })
     if ($offerOutcomeFailures.Count -gt 0) {
-        [ordered]@{ OutcomeAssertions = $offerOutcomeAssertions; FailedAssertions = $offerOutcomeFailures; Offer = $offer.data; Resolution = $safePassageResolution.state } |
+        [ordered]@{ OutcomeAssertions = $offerOutcomeAssertions; FailedAssertions = $offerOutcomeFailures; Offer = $offer.data; Resolution = $safePassageResolution.state; CooldownAdvance = $cooldownAdvance; CooldownAdvanceHours = $cooldownAdvanceHours; PostCooldownExpiryDiagnostics = if ($postExpiryDiagnostics) { $postExpiryDiagnostics.data } else { $null } } |
             ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $env:CHRONICLE_HARNESS_TEMP 'SafePassageBarterContextOutcomeAssertions.json') -Encoding UTF8
         throw "Native Safe Passage outcome assertions failed before fixture shutdown: $($offerOutcomeFailures -join ', ')"
     }
