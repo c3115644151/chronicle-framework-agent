@@ -2,14 +2,15 @@
 param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
     [int]$TimeoutSeconds = 180,
-    [switch]$CancelOnly
+    [switch]$CancelOnly,
+    [switch]$FightOnly
 )
 
 $ErrorActionPreference = 'Stop'
 $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
 $savePath = Join-Path $env:USERPROFILE "Documents\Mount and Blade II Bannerlord\Game Saves\$LoadSaveName.sav"
 $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\session.json'
-$resultFile = if ($CancelOnly) { 'SafePassageBarterCancelResult.json' } else { 'SafePassageBarterContextResult.json' }
+$resultFile = if ($FightOnly) { 'SafePassageFightResult.json' } elseif ($CancelOnly) { 'SafePassageBarterCancelResult.json' } else { 'SafePassageBarterContextResult.json' }
 $resultPath = if ($env:CHRONICLE_HARNESS_TEMP) { Join-Path $env:CHRONICLE_HARNESS_TEMP $resultFile } else { Join-Path $PSScriptRoot "TestResults\ManualSafePassageBarterContext\$resultFile" }
 $prefix = 'safe-passage-barter-' + (Get-Date -Format 'yyyyMMddHHmmssfff')
 $currentTestStep = 'preflight'
@@ -173,6 +174,51 @@ try {
     $tollOption = @($meeting.state.context.conversation.options | Where-Object { $_.id -eq 'bandit_start_defender_2' -and $_.clickable } | Select-Object -First 1)
     if ($tollOption.Count -ne 1) {
         throw "Native Bandit encounter did not expose its Safe Passage dialogue option. Options=$(($meeting.state.context.conversation.options | ForEach-Object { $_.id }) -join ',')"
+    }
+
+    if ($FightOnly) {
+        $currentTestStep = 'native-bandit-fight-choice'
+        $worldBeforeFightChoice = Get-SafePassageState 'before-native-bandit-fight-choice'
+        $fightChoice = Invoke-AgentCli 'dialogueSelect' @('-OptionId', 'bandit_start_defender_1', '-CommandId', "$prefix-native-bandit-fight-choice") 15
+        if ($fightChoice.status -ne 'completed') { throw "Native Bandit Fight choice was rejected: $($fightChoice.error)" }
+        $fightMenu = $null
+        $fightDeadline = [DateTime]::UtcNow.AddSeconds(15)
+        while ([DateTime]::UtcNow -lt $fightDeadline) {
+            $fightMenu = Get-SafePassageState "wait-fight-menu-$([Guid]::NewGuid().ToString('N'))" 8
+            if ($fightMenu.state.context.menuId -eq 'encounter' -and [bool]$fightMenu.state.context.encounterActive -and $fightMenu.state.context.encounteredPartyId -eq $fixture.data.partyId) { break }
+            $conversationNow = $fightMenu.state.context.conversation
+            if ($conversationNow -and @($conversationNow.options | Where-Object { $_.clickable }).Count -eq 0 -and -not [string]::IsNullOrWhiteSpace([string]$conversationNow.sentenceText)) {
+                $continueFight = Invoke-AgentCli 'dialogueContinue' @('-CommandId', "$prefix-fight-response-continue") 10
+                if ($continueFight.status -ne 'completed') { throw "Native Fight response line could not continue: $($continueFight.error)" }
+            }
+            elseif ($conversationNow -and @($conversationNow.options | Where-Object { $_.clickable }).Count -gt 0) {
+                throw "Native Fight choice unexpectedly exposed more player dialogue choices: $(($conversationNow.options | Where-Object { $_.clickable } | ForEach-Object id) -join ',')"
+            }
+            Start-Sleep -Milliseconds 150
+        }
+        $fightAction = @($fightMenu.state.availableMenuOptions | Where-Object { $_.id -eq 'attack' -and $_.available -and $_.enabled } | Select-Object -First 1)
+        $sendTroopsAction = @($fightMenu.state.availableMenuOptions | Where-Object { $_.id -eq 'str_order_attack' -and $_.available -and $_.enabled } | Select-Object -First 1)
+        $fightAssertions = [ordered]@{
+            NativeFightDialogueChoiceAccepted = ($fightChoice.status -eq 'completed')
+            NativeEncounterMenuRemainsActive = ($fightMenu.state.context.menuId -eq 'encounter' -and [bool]$fightMenu.state.context.encounterActive -and $fightMenu.state.context.encounteredPartyId -eq $fixture.data.partyId)
+            NativePlayerBattleEntryAvailable = ($fightAction.Count -eq 1)
+            NativeSendTroopsEntryAvailable = ($sendTroopsAction.Count -eq 1)
+            NoGoldSpentBeforeSelectingBattleMode = ([int]$worldBeforeFightChoice.state.economy.gold -eq [int]$fightMenu.state.economy.gold)
+            NoCampaignAdvanceFromFightDialogue = ([Math]::Abs([double]$worldBeforeFightChoice.state.campaignDay - [double]$fightMenu.state.campaignDay) -lt 0.00001 -and [string]$worldBeforeFightChoice.state.context.timeControlMode -eq [string]$fightMenu.state.context.timeControlMode)
+            FixtureHashUnchangedBeforeCleanup = ((Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash -eq $fixtureHashBefore)
+        }
+        $fightFailures = @($fightAssertions.Keys | Where-Object { -not [bool]$fightAssertions[$_] })
+        if ($fightFailures.Count -gt 0) { throw "Native Fight branch assertions failed before fixture shutdown: $($fightFailures -join ', ')" }
+        $fightStop = Invoke-AgentCli 'stop' @('-CommandId', "$prefix-fight-stop") 30
+        $fightHashAfter = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
+        $fightAssertions.ProcessStopped = [bool]$fightStop.processStopped
+        $fightAssertions.FixtureHashUnchanged = ($fixtureHashBefore -eq $fightHashAfter)
+        $fightFailures = @($fightAssertions.Keys | Where-Object { -not [bool]$fightAssertions[$_] })
+        $fightResult = [ordered]@{ Fixture = $fixture.data; InitialThreatDialogue = $meeting.state.context.conversation; FightChoice = $fightChoice; ResultingEncounterMenu = $fightMenu.state; Assertions = $fightAssertions; FailedAssertions = $fightFailures; FixtureHashBefore = $fixtureHashBefore; FixtureHashAfter = $fightHashAfter; ProcessStopped = [bool]$fightStop.processStopped; Passed = ($fightFailures.Count -eq 0) }
+        $fightResult | ConvertTo-Json -Depth 14 | Set-Content -LiteralPath $resultPath -Encoding UTF8
+        $fightResult | ConvertTo-Json -Depth 14
+        if (-not $fightResult.Passed) { throw 'Native Safe Passage Fight/encounter-menu regression failed.' }
+        return
     }
 
     $currentTestStep = 'native-bandit-toll-dialogue'
