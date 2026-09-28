@@ -180,6 +180,9 @@ try {
     $inventoryPlayerItemCountAfter = 0
     $inventoryItemsTransferred = 0
     $inventoryDoneStatus = $null
+    $prematureInventoryDoneRejected = $false
+    $prematureInventoryDoneError = $null
+    $prematureInventoryDonePreservedLoot = $false
     $inventoryReturnedToMap = $false
     $partyLootBefore = $null
     $partyLootAfterTransfer = $null
@@ -282,6 +285,32 @@ try {
             $inventoryPlayerItemCountBefore = [int]$postBattleState.state.inventoryScreen.playerItemCount
             if ($inventoryLootItemCountBefore -le 0) { throw 'Loot InventoryState opened without any item loot to observe.' }
             Capture-BattleFrame 'loot-03-inventory-screen' $postBattleState
+            try {
+                $prematureInventoryDone = Invoke-AgentCli 'inventoryDone' @('-CommandId', "$prefix-premature-inventory-done-with-loot")
+            }
+            catch {
+                $prematureInventoryDoneError = $_.Exception.Message
+            }
+            $prematureDoneReceiptPath = Join-Path (Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\responses') "$prefix-premature-inventory-done-with-loot.rejected.json"
+            if (Test-Path -LiteralPath $prematureDoneReceiptPath) {
+                $prematureDoneReceipt = Get-Content -LiteralPath $prematureDoneReceiptPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                $prematureInventoryDoneError = [string]$prematureDoneReceipt.error
+                $prematureInventoryDoneRejected = ([string]$prematureDoneReceipt.status -eq 'rejected' -and $prematureInventoryDoneError -match 'inventoryDone refuses to skip the Native')
+            }
+            $afterPrematureInventoryDone = Invoke-AgentCli 'state' @('-CommandId', "$prefix-after-rejected-inventory-done")
+            $prematureInventoryDonePreservedLoot = ($prematureInventoryDoneRejected -and $afterPrematureInventoryDone.state.context.gameState -eq 'InventoryState' -and $afterPrematureInventoryDone.state.inventoryScreen.mode -eq 'Loot' -and [int]$afterPrematureInventoryDone.state.inventoryScreen.lootItemCount -eq $inventoryLootItemCountBefore -and [int]$afterPrematureInventoryDone.state.inventoryScreen.playerItemCount -eq $inventoryPlayerItemCountBefore)
+            if (-not $prematureInventoryDonePreservedLoot) {
+                [ordered]@{
+                    RejectedByExpectedGuard = $prematureInventoryDoneRejected
+                    Error = $prematureInventoryDoneError
+                    LootBefore = $inventoryLootItemCountBefore
+                    PlayerItemsBefore = $inventoryPlayerItemCountBefore
+                    StateAfter = $afterPrematureInventoryDone.state
+                    PreservedBothRostersAndScreen = $prematureInventoryDonePreservedLoot
+                } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $env:CHRONICLE_HARNESS_TEMP 'PostBattleUnclaimedLootGuardFailure.json') -Encoding UTF8
+                throw "inventoryDone with unclaimed battle loot did not safely reject while preserving the current screen and both inventories: rejected=$prematureInventoryDoneRejected, lootBefore=$inventoryLootItemCountBefore, lootAfter=$($afterPrematureInventoryDone.state.inventoryScreen.lootItemCount), playerBefore=$inventoryPlayerItemCountBefore, playerAfter=$($afterPrematureInventoryDone.state.inventoryScreen.playerItemCount)"
+            }
+            $postBattleState = $afterPrematureInventoryDone
             $inventoryTakeAll = Invoke-AgentCli 'inventoryTakeAll' @('-CommandId', "$prefix-inventory-take-all")
             if ($inventoryTakeAll.status -ne 'completed') { throw 'Native InventoryState Loot All handler did not complete.' }
             $afterInventoryTakeAll = Invoke-AgentCli 'state' @('-CommandId', "$prefix-after-inventory-take-all")
@@ -347,6 +376,12 @@ try {
         MissionReturnedToCampaign = $missionReturnedToCampaign
         NativeSimulationFinished = $simulationFinished
         NativeSimulationFinishReceipt = if ($simulationFinish) { $simulationFinish.status } else { $null }
+        CampaignDayAtBattleSimulationStart = if ($simulationStart) { [double]$simulationStart.campaignDay } else { $null }
+        TimeControlModeAtBattleSimulationStart = if ($simulationStart) { [string]$simulationStart.timeControlMode } else { $null }
+        CampaignDayAtSimulationFinish = if ($simulationFinish) { [double]$simulationFinish.campaignDay } else { $null }
+        TimeControlModeAtSimulationFinish = if ($simulationFinish) { [string]$simulationFinish.timeControlMode } else { $null }
+        CampaignDayAtPostBattleMapReturn = if ($postBattleState -and $postBattleState.state) { [double]$postBattleState.campaignDay } else { $null }
+        TimeControlModeAtPostBattleMapReturn = if ($postBattleState -and $postBattleState.state) { [string]$postBattleState.timeControlMode } else { $null }
         BattleRewardTelemetry = $battleRewardTelemetry
         BattleRewardTelemetryPassed = $battleRewardTelemetryPassed
         PostBattleTransitionObserved = $postBattleTransition
@@ -364,6 +399,9 @@ try {
         InventoryPlayerItemCountAfter = $inventoryPlayerItemCountAfter
         InventoryItemsTransferred = $inventoryItemsTransferred
         InventoryDoneStatus = $inventoryDoneStatus
+        InventoryDoneRejectsUnclaimedLoot = $prematureInventoryDoneRejected
+        InventoryDoneRejectionPreservesLoot = $prematureInventoryDonePreservedLoot
+        InventoryDoneRejection = $prematureInventoryDoneError
         InventoryReturnedToMap = $inventoryReturnedToMap
         VisualFrames = $script:VisualFrames
         ContinuousVideoCapture = $videoCaptureResult
@@ -374,7 +412,7 @@ try {
     $scenarioPassed = if ($Scenario -eq 'Retreat') {
         $result.NativeSimulationRetreat -and $result.EncounterReturnedAfterRetreat -and $missionEntered -and $result.NativeMissionEnded -and $missionReturnedToCampaign
     } else {
-        $simulationFinished -and $null -ne $simulationFinish -and $partyLootTransfersVerified -and $inventoryScreenObserved -and $inventoryItemsTransferred -gt 0 -and $inventoryDoneStatus -eq 'completed' -and $postBattleTransition
+        $simulationFinished -and $null -ne $simulationFinish -and $partyLootTransfersVerified -and $inventoryScreenObserved -and $prematureInventoryDoneRejected -and $prematureInventoryDonePreservedLoot -and $inventoryItemsTransferred -gt 0 -and $inventoryDoneStatus -eq 'completed' -and $postBattleTransition
     }
     $videoCapturePassed = ($Scenario -ne 'PostBattle' -or -not $CaptureFrames -or ($videoCaptureResult -and $videoCaptureResult.Passed -and $videoCaptureResult.FrameCoverageRatio -ge 0.9))
     $renownProgressionPassed = $Scenario -ne 'PostBattle' -or ($null -ne $result.ClanRenownDelta -and [double]$result.ClanRenownDelta -gt 0)

@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '5.64'
+$contractVersion = '5.65'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -195,6 +195,7 @@ $videoCaptureSource = Get-Content (Join-Path $harnessRoot 'HarnessVideoCapture.p
 if ($videoCaptureSource -notmatch 'gfxcapture=hwnd=' -or $videoCaptureSource -notmatch 'FrameCoverageRatio' -or $videoCaptureSource -notmatch 'TimelineIndexPath' -or $videoCaptureSource -notmatch 'Remove-Item -LiteralPath \$Capture\.OutputPath' -or $videoCaptureSource -notmatch 'Explicit Bannerlord HWND') { throw 'Continuous capture must target one Bannerlord HWND, validate/index frames, and delete successful source video.' }
 $battleFixtureSource = Get-Content (Join-Path $harnessRoot 'Test-AgentBattleFixture.ps1') -Raw -Encoding UTF8
 if ($battleFixtureSource -notmatch 'BattleRewardTelemetry = if \(\$simulationFinish -and \$simulationFinish\.data\)') { throw 'PostBattle evidence must preserve the returned renown telemetry object.' }
+if ($protocolSource -notmatch 'inventoryDone refuses to skip the Native' -or $protocolSource -notmatch 'GetElementCountOnSide\(TaleWorlds\.CampaignSystem\.Inventory\.InventoryLogic\.InventorySide\.OtherInventory\) > 0' -or $battleFixtureSource -notmatch 'prematureInventoryDoneRejected' -or $battleFixtureSource -notmatch 'prematureInventoryDonePreservedLoot' -or $battleFixtureSource -notmatch 'CampaignDayAtBattleSimulationStart' -or $battleFixtureSource -notmatch 'TimeControlModeAtPostBattleMapReturn') { throw 'Loot Done must not bypass the Native remaining-loot inquiry: guard unclaimed loot, test no-mutation refusal, then verify Take All/Done and record campaign clock around BattleSimulation.' }
 if ($battleFixtureSource -notmatch 'Start-ChronicleWindowVideoCapture' -or $battleFixtureSource -notmatch 'BattleToLoot-events\.jsonl' -or $battleFixtureSource -notmatch 'videoCapturePassed') { throw 'PostBattle must collect continuous HWND video, aligned action/state events, and enforce capture coverage.' }
 if ($battleFixtureSource -notmatch 'RenownProgressionPassed' -or $battleFixtureSource -notmatch 'ClanRenownDelta -gt 0' -or $battleFixtureSource -notmatch 'BattleRewardTelemetryPassed' -or $battleFixtureSource -notmatch 'playerContribution' -or $battleFixtureSource -notmatch 'winnerPartyAwards') { throw 'PostBattle must require both a positive renown delta and complete player reward telemetry for the P5 battle progression check.' }
 if ($battleFixtureSource -notmatch 'IO\.File\]::Open\(\$script:VideoCaptureEventsPath' -or $battleFixtureSource -notmatch 'FileShare\]::ReadWrite' -or $battleFixtureSource -notmatch 'for \(\$attempt = 0; \$attempt -lt 6; \$attempt\+\+\)') { throw 'Battle event trace appends must tolerate transient readers/locks with bounded retry and shared access.' }
@@ -360,6 +361,11 @@ $unmappedSystemIds = @($inventoryIds | Where-Object { $_ -notin $catalogMappedSy
 if ($catalogIdDefinitions.Count -eq 0 -or $duplicateCatalogIds.Count -gt 0 -or $undefinedCatalogIds.Count -gt 0) {
     throw "SYSTEM_INVENTORY observation/action IDs must be unique and every reference defined. Duplicate=[$($duplicateCatalogIds.Name -join ',')], undefined=[$($undefinedCatalogIds -join ',')]."
 }
+$catalogActionRows = @($catalogIdDefinitions | Where-Object { $_.StartsWith('ACT-', [System.StringComparison]::Ordinal) }).Count
+$coreActionRows = $catalogActionRows - 1
+if ($catalogIdSet.Contains('ACT-G10-01') -and ($mainlineDoc -notmatch "当前目录含$($catalogActionRows)条ACT" -or $mainlineDoc -notmatch "标准行动族分母为$coreActionRows")) {
+    throw "Player-action denominator in MAINLINE does not match unique catalog IDs: catalog ACT=$catalogActionRows, core ACT=$coreActionRows."
+}
 if ($unmappedSystemIds.Count -gt 0) {
     throw "SYSTEM_INVENTORY A-L systems must appear in at least one explicit OBS/ACT/N/A directory row. Unmapped=[$($unmappedSystemIds -join ',')]."
 }
@@ -389,7 +395,7 @@ if ($catalogSourceErrors.Count -gt 0 -or $uncitedSourceSystemIds.Count -gt 0) {
 if (-not (Test-ChronicleResearchReadiness)) { throw 'Research readiness gate regression checks failed.' }
 if ($mainlineDoc -notmatch '(?m)^#### .*Mechanic Contract\s*$') { throw 'MAINLINE.md is missing the required original-mechanic contract table.' }
 if ($mainlineDoc -notmatch '(?m)^#### .*Coverage and Evidence Contract') { throw 'MAINLINE.md must define durable denominator/acceptance rules without storing current task progress.' }
-foreach ($actionId in @('moveToPoint（自由地点移动，陆地）', 'move', 'pursue', 'follow / escort', 'hold', 'rest', 'advance', 'autoresolve (research)', 'dialogueSelect / dialogueContinue', 'retreat (research)', 'partyLoot (research)')) {
+foreach ($actionId in @('moveToPoint（自由地点移动，陆地）', 'move', 'pursue', 'follow / escort', 'hold', 'rest', 'advance', 'ACT-G01-02 send troops / native BattleSimulation（W2-X）', 'dialogueSelect / dialogueContinue', 'retreat (research)', 'ACT-G10-01 battle loot items / take all and commit（新目录项；W2-X）')) {
     if ($mainlineDoc -notmatch "(?m)^\|\s*$([regex]::Escape($actionId))\s*\|") {
         throw "MAINLINE.md mechanic-contract table is missing action '$actionId'."
     }

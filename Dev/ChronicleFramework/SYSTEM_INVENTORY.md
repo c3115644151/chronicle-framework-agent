@@ -449,7 +449,7 @@ E03、E06、E08、E09、E10的大量变化由每日模型、其它玩家动作�
 | G07 Morale | Mission Order中的玩家Formation平均士气`OBS-G07-01`；坐镇Scoreboard中双方整侧Morale `OBS-G07-02` | 前者来自PlayerTeam formations，后者来自BattleSimulation双方MapEventSide；粒度不能合并；坐镇BattleSimulation优先于Mission Orders接入AI |
 | G08 Siege Mission | 实时攻城器械/城门/双方状态观察`OBS-G08-01`；器械点部署`ACT-G08-01`、Auto Deploy`ACT-G08-02`；StonePile取石和CastleGate开/关门MainAgent交互映射`ACT-G03-34/36`；RangedSiegeWeapon瞄准/开火/装填映射G03 `ACT-G03-30..32` | SiegeEvent、部署菜单、门控/弹药点、战术菜单和玩家操纵器械分层；部署结束转换复用G04 `ACT-G04-05`，攻城未放置器械时多一确认分支 |
 | G09 Combat Resolution | 战后伤亡/俘虏/战利品结果复用`OBS-G10-01`；战后Hero处决/捕获/放行与普通兵俘Roster分配映射`ACT-F12-03/06/11/12`，主角被俘选择复用H12 | 战斗结算本身不是玩家直接“结算”动作；捕获和战后Roster选择是结果后的原生玩家步骤，与遭遇菜单投降分开 |
-| G10 Battle Rewards | 领奖结果复用`OBS-G10-01`；经验/声望/影响力/物品均作为触发行为的后果 | 奖励模型不是独立玩家按钮；Simulation夹具不能代替自然战斗奖励证据 |
+| G10 Battle Rewards | 领奖结果复用`OBS-G10-01`；坐镇后的Loot物品领取映射`ACT-G10-01`；经验/声望/影响力是触发战斗行为的结果 | 奖励模型不是独立玩家按钮；战后物品从Loot Inventory转入主队ItemRoster是单独的玩家提交，不与坐镇/战斗奖励公式或普通市场交易混为一族；Simulation夹具不能代替自然物品掉落证据 |
 
 #### F-G域首轮行动/观察定义
 
@@ -467,6 +467,7 @@ E03、E06、E08、E09、E10的大量变化由每日模型、其它玩家动作�
 | ACT-G08-01 | 行为 | 在Siege Mission用地图/Orders界面选择DeploymentPoint，再分配、更换或撤下一个合法Siege weapon | 检查该武器可部署库存后，对当前点调用`Deploy`/`Disband`，改变本次Mission器械放置 | 1.4.8 `ISiegeDeploymentView.OnEntitySelection`到VM/DeploymentPoint handler调用链确认真实玩家选择入口；具体鼠标交互/取消恢复未视觉验证；Chronicle无动作 | G08、`MissionGauntletSingleplayerOrderUIHandler`、`MissionOrderDeploymentControllerVM.OnEntitySelect/OnSelectDeploymentSiegeMachine`、`DeploymentPoint`、`SiegeDeploymentHandler` |
 | ACT-G08-02 | 行为 | 在Siege deployment控制面选择Auto Deploy | 重算当前Mission deployment plan，并自动部署可用Siege weapon与攻防Team | 1.4.8 UI handler→VM回调链确认玩家操作；与G04 Formation Auto Deploy对象/结果不同；实际部署结果、撤销恢复和玩家视觉未运行核实；Chronicle无动作 | G04/G08、`MissionGauntletSingleplayerOrderUIHandler.OnAutoDeploy`、`MissionOrderDeploymentControllerVM.ExecuteAutoDeploy`、`IMissionDeploymentPlan`、`SiegeDeploymentHandler` |
 | OBS-G10-01 | 观察 | Battle end/Post-battle party/Inventory结果 | 贡献/战斗模型决定XP、Renown/Influence、loot和capture；领奖屏幕与Campaign state提交分开 | Chronicle对Simulation PostBattle有有限结构化验收，不覆盖所有自然Mission | G10/F10、MAINLINE PostBattle |
+| ACT-G10-01 | 行为 | 战斗结算后进入Loot Inventory，在`Take All`或单物品转移后选择Native Done，把战利品ItemRoster提交给主队；当前W2-X只支持Take All | `InventoryMode.Loot`的左侧为该战斗分给MainParty的Loot ItemRoster、右侧为玩家MainParty ItemRoster。原生`GauntletInventoryScreen.ExecuteTakeAll`→`SPInventoryVM.ExecuteBuyAllItems/TransferAll`建立转移；Done经`SPInventoryVM.ExecuteCompleteTranstactions`调用Native Inquiry，若左侧仍有物品会询问是否留下战利品；确认后`InventoryScreenHelper.CloseScreen(false)`/`InventoryLogic.DoneLogic`提交。不同于ACT-F12-11普通俘虏Roster和ACT-E02市场买卖 | Loot InventoryState叠在Campaign战后状态上，不附加Campaign时间推进；BattleSimulation自己的进度不能当作Campaign日期。Native UI Done可有“留下战利品”Inquiry；当前适配在OtherInventory剩余物品非空时拒绝Done并保持Loot页面/双方Roster不变，Take All后才以原生Done事务关闭 | 本机v1.4.8 handler/Inquiry源码已核。旧`TestResults/20260924-154639/PostBattle.log`通过原生坐镇和Harness注入`wool`验证Take All/Done回Map，但未覆盖剩余Loot警告。最新`TestResults/20260928-194555/PostBattle.log`现证明未收Loot时Done被拒、Loot Inventory与两侧条目计数保持；Take All后OtherInventory条目清零、PlayerInventory条目0→6并Done返回Map。MainParty BattleSimulation/Finish/Aftermath/Inventory前后CampaignDay均为91077.379、时间档为Stop，源存档hash不变且进程停止。该Fixture用Harness注入`wool`作可见Loot，`naturalDrop=false`，不声称证明自然掉落/数量分布 | G10/H07/F10、`InventoryScreenHelper.OpenScreenAsLoot`、`GauntletInventoryScreen`、`SPInventoryVM`、`InventoryLogic`、`AgentProtocol` |
 | ACT-F05-01 | 行为 | K→Kingdom Armies→Manage，编辑己方Army成员名单（加入/移除Party；无己方Army时可建军）并Done | 按Army/Leader/Party资格和Influence成本计算；Done提交Army创建及Party membership，Cancel撤回草稿/退还预扣Influence；只剩MainParty时转入F05-02主动解散分支 | v1.4.8 `ArmyManagementVM`草稿篮、Done/Cancel回调源码确认；Kingdom管理页面视觉/不同取消条件未运行；Chronicle无Army管理动作 | F05/F13、`ArmyManagementVM.ExecuteDone/ExecuteCancel`、`Kingdom.CreateArmy` |
 | ACT-F05-02 | 行为 | Kingdom Army panel/战后上下文主动解散玩家Army | 玩家解散消耗Influence并可能扣参与者关系；自动解散不是同一action | Chronicle无解散Army命令 | F05/F13、DisbandArmyAction |
 | ACT-F05-03 | 行为 | 已有玩家Army时，在ArmyManagement中用Boost Cohesion逐次增加10点并Done提交 | 受当前Cohesion上限100、玩家是Army Owner且Influence足够限制；费用由`GetCohesionBoostInfluenceCost`计算；Done调用`Army.BoostCohesionWithInfluence`提交并扣Influence，可与Party roster编辑同批保存但不是同一目标 | v1.4.8 `ArmyManagementVM.OnBoostCohesion/ExecuteDone/ApplyCohesionChange`与Army VM源码确认；成本/失败提示可源查，实际按钮/Influence/Army值回执未运行；Chronicle无动作 | F05/F13、`ArmyManagementVM.OnBoostCohesion/ExecuteDone/ApplyCohesionChange`、`Army.BoostCohesionWithInfluence`、`ArmyManagementCalculationModel.GetCohesionBoostInfluenceCost` |
@@ -527,7 +528,7 @@ G03 Mission直接控制MainHero的身体/装备输入及专用Use结果现登记
 | H04 Troop Roster | `OBS-H04-01`Party roster；升级/俘虏招募暂为`ACT-H04-01/02` | 招募新兵、俘虏招募、自动NPC升级各自不同，后者无玩家入口 |
 | H05 Companion | `OBS-H05-01`玩家Clan/Party同伴信息；`ACT-H05-01`游荡者付费招募；被俘的既有Companion经监狱营救恢复队伍`ACT-F12-14` | 救回既有玩家同伴是F12捕获/营救闭环，不重复计成雇佣游荡者；战斗临时加入、Clan membership和建Party仍是不同动作 |
 | H06 Party Roles | `OBS-H06-01`Quartermaster/Scout/Surgeon/Engineer等可任命职责状态；`ACT-H06-01`四种默认职责的任命/撤销；FirstMate/Navigator base game无直接玩家入口依据列`N/A-H06-01` | `ClanPartyItemVM`按当前`ClanMemberPartyRoleModel.GetAssignablePartyRoles()`生成职责行；角色setter相同但外部Mod替换Model后须重新核验可用分母 |
-| H07 Inventory | `OBS-E01-01`当前Inventory Mode物品列表，交易动作复用`ACT-E02-01/02` | 普通买卖、Battle Loot、囚犯Roster不是同一容器/动作 |
+| H07 Inventory | `OBS-E01-01`当前Inventory Mode物品列表，交易动作复用`ACT-E02-01/02`；Battle Loot物品领取`ACT-G10-01` | 普通买卖、Battle Loot、囚犯Roster不是同一容器/动作。Loot Mode以Native `InventoryLogic`/Done handler处理Battle ItemRoster，市场Buy/Sell价格与Gold listener不适用 |
 | H08 Equipment | `OBS-H08-01`MainHero当前EquipmentMode/装备槽/装备候选；`ACT-H08-01`原生InventoryState单物品装备/卸装 | `InventoryNavigationElement`打开Native InventoryState；SPInventoryVM将PlayerInventory物品转入Equipment side/slot的transaction；装备VM事务不是Town买卖或普通Party roster操作 |
 | H09 Crafting | `OBS-H09-01`CraftingVM当前Hero/材料/配方/耐力；`ACT-H09-01..03`锻造/熔炼/炼制 | 三类材料/技能/XP效果不同，不按CraftingVM按钮数合计 |
 | H10 Skills/Perks | `OBS-B03-01`成长面板；`ACT-H10-01`属性/Focus/Perk事务，`ACT-H10-02`Reset草稿 | 战斗/任务/交易/锻造获得经验是各来源行为结果 |
@@ -701,7 +702,7 @@ G03 Mission直接控制MainHero的身体/装备输入及专用Use结果现登记
 
 ### 其余类别映射状态
 
-A-L系统均已映射到有来源的唯一ACT/OBS/N/A目录项，跨域去重、引用与重复ID由W1-M验收及Docs门禁验证；Research Gate为READY。部分目录项标为“候选”表示其实际运行结果、失败恢复、视觉路径或Chronicle覆盖仍未验证，并不代表该行为族尚未计入目录。官方核心基线当前按178个Campaign行动族与73个观察面统计；一个作弊菜单特权入口及作弊/控制台命令明确留在权限隔离的条件扩展，不进入普通Agent分母。具体类别仍保留未穷尽的选项/子类、UI与运行未知；若W2执行中发现新的原生玩家入口或独立结果，须有证据后再开放对应目录边界，而不能以“候选”标签静默增删分母。
+A-L系统均已映射到有来源的唯一ACT/OBS/N/A目录项，跨域去重、引用与重复ID由W1-M验收及Docs门禁验证；W2覆盖审计又从Native Loot transaction链发现并补入独立动作`ACT-G10-01`，故目录现有180 ACT、其中179个标准Campaign行动族、73 OBS与23 N/A。研究Gate按新分母重核；一个作弊菜单特权入口及作弊/控制台命令仍留在权限隔离的条件扩展，不进入普通Agent分母。部分目录项标为“候选”表示其实际运行结果、失败恢复、视觉路径或Chronicle覆盖仍未验证，并不代表行为族缺少来源/目录入口。具体类别仍保留未穷尽的选项/子类、UI与运行未知；若W2执行中发现新的原生玩家入口或独立结果，须有证据后再开放对应目录边界，而不能以“候选”标签静默增删分母。
 
 ## 研究路由
 

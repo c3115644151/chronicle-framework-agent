@@ -468,6 +468,8 @@ internal sealed class ChronicleAgentProtocol
                     var lootInventoryStateToClose = Game.Current.GameStateManager.ActiveState as InventoryState;
                     if (lootInventoryStateToClose?.InventoryLogic == null || lootInventoryStateToClose.InventoryMode != Helpers.InventoryScreenHelper.InventoryMode.Loot)
                         throw new InvalidOperationException("inventoryDone requires the native postbattle Loot InventoryState");
+                    if (lootInventoryStateToClose.InventoryLogic.GetElementCountOnSide(TaleWorlds.CampaignSystem.Inventory.InventoryLogic.InventorySide.OtherInventory) > 0)
+                        throw new InvalidOperationException("inventoryDone refuses to skip the Native 'leave loot behind' confirmation; take all remaining battle loot first");
                     Helpers.InventoryScreenHelper.CloseScreen(fromCancel: false);
                     WriteResponse(commandId, action, "completed", behavior);
                     break;
