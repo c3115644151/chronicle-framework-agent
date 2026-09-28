@@ -109,6 +109,8 @@ try {
     $env:CHRONICLE_HARNESS_MODE = 'visual-capture'
     $currentTestStep = 'load-fixture'
     $start = Invoke-AgentCli 'load' @('-SaveName', $LoadSaveName)
+    $barterAssetFixtureSeed = Invoke-AgentCli 'harnessSeedEquipmentModifierFixture' @('-CommandId', "$prefix-seed-player-barter-asset")
+    if ($barterAssetFixtureSeed.status -ne 'completed' -or [int]$barterAssetFixtureSeed.data.countAfter -ne 1) { throw 'The Harness could not add its exact tradeable MainParty item for Auto Balance validation.' }
     $initial = Get-BarterState 'initial'
     if ($initial.state.context.gameState -ne 'MapState') { throw "Barter fixture must start on Campaign Map; got '$($initial.state.context.gameState)'" }
     $safeSettlement = @($initial.state.nearbySettlements | Where-Object { $_.type -eq 'town' -and -not $_.hostile -and $_.distance -gt 1.0 } | Sort-Object distance | Select-Object -First 1)
@@ -137,6 +139,8 @@ try {
     $baseline = Get-BarterState 'native-barter-baseline'
     $goldCandidate = Find-PlayerGoldCandidate $firstBarter.Options.data.candidates
     if ($null -eq $goldCandidate) { throw 'The active ordinary Native Lord BarterVM exposed no transferable MainHero GoldBarterable.' }
+    $playerItemCandidate = @($firstBarter.Options.data.candidates | Where-Object { $_.nativeType -eq 'item_barterable' -and $_.originalOwnerHeroId -eq 'main_hero' -and $_.itemId -eq 'vlandia_sword_1_t2' -and -not $_.isOffered -and $_.isTransferable } | Select-Object -First 1)
+    if ($playerItemCandidate.Count -ne 1) { throw 'The ordinary Native Lord BarterVM did not expose the Harness-seeded player-owned tradeable item.' }
     $lordItemCandidate = @($firstBarter.Options.data.candidates | Where-Object {
         $_.nativeType -eq 'item_barterable' -and $_.originalOwnerHeroId -eq $firstBarter.Options.data.otherHeroId -and
         -not [bool]$_.isOffered -and [int]$_.maxAmount -ge 2 -and [int]$_.valueForOtherFaction -lt (0 - [int]$firstBarter.Options.data.playerGold) -and [bool]$_.isTransferable
@@ -153,8 +157,9 @@ try {
     if ($offeredItem.Count -ne 1 -or [int]$offeredItem[0].currentAmount -ne 2) { throw 'Native Barter proposal did not preserve the requested two-item amount.' }
     $autoBalance = Invoke-AgentCli 'barterAutoBalance' @('-CommandId', "$prefix-barter-auto-balance")
     $autoGoldOffer = @($autoBalance.data.updatedOptions.candidates | Where-Object { $_.nativeType -eq 'gold_barterable' -and $_.originalOwnerHeroId -eq 'main_hero' -and $_.isOffered } | Select-Object -First 1)
-    $autoBalanceVerified = ($autoBalance.status -eq 'completed' -and $autoGoldOffer.Count -eq 1 -and [int]$autoGoldOffer[0].currentAmount -eq [int]$autoBalance.data.updatedOptions.playerGold -and [bool]$autoBalance.data.playerPartyFingerprintUnchanged -and [int]$autoBalance.data.playerGoldBefore -eq [int]$autoBalance.data.playerGoldAfter)
-    if (-not $autoBalanceVerified) { throw 'Native Barter Auto Balance did not use the available MainHero Gold for the unaffordable item proposal without changing world resources.' }
+    $autoOwnedItemOffer = @($autoBalance.data.updatedOptions.candidates | Where-Object { $_.nativeType -eq 'item_barterable' -and $_.originalOwnerHeroId -eq 'main_hero' -and $_.itemId -eq 'vlandia_sword_1_t2' -and $_.isOffered } | Select-Object -First 1)
+    $autoBalanceVerified = ($autoBalance.status -eq 'completed' -and $autoGoldOffer.Count -eq 1 -and [int]$autoGoldOffer[0].currentAmount -eq [int]$autoBalance.data.updatedOptions.playerGold -and $autoOwnedItemOffer.Count -eq 1 -and [bool]$autoBalance.data.playerPartyFingerprintUnchanged -and [int]$autoBalance.data.playerGoldBefore -eq [int]$autoBalance.data.playerGoldAfter)
+    if (-not $autoBalanceVerified) { throw 'Native Barter Auto Balance did not add both the available MainHero Gold and the tradeable player item to the unaffordable proposal without changing world resources.' }
     $itemAfterBalance = @($autoBalance.data.updatedOptions.candidates | Where-Object { $_.nativeType -eq 'item_barterable' -and $_.originalOwnerHeroId -eq $firstBarter.Options.data.otherHeroId -and $_.itemId -eq $lordItemCandidate[0].itemId -and $_.isOffered } | Select-Object -First 1)
     if ($itemAfterBalance.Count -ne 1 -or [int]$itemAfterBalance[0].currentAmount -ne 2) { throw 'Native Auto Balance unexpectedly changed the offered ItemBarterable amount.' }
 
@@ -194,16 +199,20 @@ try {
     $offerApplied = ($offer.status -eq 'completed' -and [bool]$offer.data.submitted -and [bool]$offer.data.accepted -and [int]$offer.data.offererGoldAfter -eq ([int]$offer.data.offererGoldBefore - 1) -and [int]$offer.data.otherGoldAfter -eq ([int]$offer.data.otherGoldBefore + 1) -and $afterOffer.state.context.gameState -eq 'MapState')
     if (-not $offerApplied) { throw 'Native Barter Offer did not produce the expected accepted one-denar gold transfer and return to the Campaign Map.' }
 
+    $currentTestStep = 'clear-disposable-barter-asset-fixture'
+    $barterAssetFixtureClear = Invoke-AgentCli 'harnessClearEquipmentModifierFixture' @('-CommandId', "$prefix-clear-player-barter-asset")
+    if ($barterAssetFixtureClear.status -ne 'completed' -or [int]$barterAssetFixtureClear.data.countAfter -ne 0) { throw 'The disposable player-owned barter asset could not be removed before test shutdown.' }
     $stop = Invoke-AgentCli 'stop' @('-CommandId', "$prefix-stop") 30
     $fixtureHashAfter = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
     $assertions = [ordered]@{
         PursuitReachedOrdinaryLordConversation = ($meeting.state.context.gameState -eq 'MapState' -and $meeting.state.context.encounteredPartyId -eq $target.id -and -not [string]::IsNullOrWhiteSpace([string]$meeting.state.context.conversation.heroId))
         NativeHeroBarterEntryOpenedLiveBarterVM = ($firstBarter.Options.status -eq 'completed' -and $firstBarter.Options.data.context -eq 'ordinary')
-        NativeItemAndAutoBalanceUsesWholeAvailableGold = ($itemOffer.status -eq 'completed' -and [bool]$autoBalanceVerified -and [int]$itemAfterBalance[0].currentAmount -eq 2)
+        NativeItemAndAutoBalanceUsesCashAndOwnedItem = ($itemOffer.status -eq 'completed' -and [bool]$autoBalanceVerified -and [int]$itemAfterBalance[0].currentAmount -eq 2)
         NativeAddResetAndStaleCandidateValidated = ($edit.status -eq 'completed' -and $staleEdit.status -eq 'rejected' -and $resetIsEmpty)
         NativeCancelDiscardsGoldDraft = [bool]$cancelNoMutation
         NativeOfferAcceptedAndTransfersExactlyOneGold = [bool]$offerApplied
         FixtureHashUnchanged = ($fixtureHashBefore -eq $fixtureHashAfter)
+        DisposableBarterAssetFixtureCleared = ($barterAssetFixtureClear.status -eq 'completed' -and [int]$barterAssetFixtureClear.data.countAfter -eq 0)
         ProcessStopped = [bool]$stop.processStopped
     }
     $failedAssertions = @($assertions.Keys | Where-Object { -not [bool]$assertions[$_] })
@@ -212,10 +221,14 @@ try {
         Pursuit = [ordered]@{ Status = $pursuit.status; Outcome = $meeting.state.context.conversation.sentenceText; CampaignDay = $meeting.campaignDay }
         FirstBarter = $firstBarter.Options.data
         InitialGoldCandidate = $goldCandidate[0]
+        InitialPlayerItemCandidate = $playerItemCandidate[0]
         PostAutoBalanceGoldCandidate = $currentGoldCandidate
         AutoBalance = $autoBalance.data
         AutoBalanceItem = $itemAfterBalance[0]
+        AutoBalancePlayerOwnedItem = $autoOwnedItemOffer[0]
         AutoBalanceReset = $autoReset.data
+        BarterAssetFixtureSeed = $barterAssetFixtureSeed.data
+        BarterAssetFixtureClear = $barterAssetFixtureClear.data
         Edit = $edit.data
         StaleEditStatus = [string]$staleEdit.status
         Reset = $reset.data

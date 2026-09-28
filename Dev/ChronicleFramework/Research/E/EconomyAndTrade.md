@@ -332,7 +332,7 @@ Barter 是按 Hero/Party/Faction 对方建立的谈判数据。`BarterData` 保�
 
 当前UI共用层验证事实是：普通或特殊玩家context只要走`StartBarterOffer`并`BeginPlayerBarter`，都会经BarterManager `BarterBegin`交给Map/Mission宿主创建同一类Native `BarterVM`。共同候选/Offer/Cancel控制可以统一，context分类、默认固定条款、VM兼容性和提交后的领域效果必须保留。Chronicle当前capture可识别全部非AI玩家BarterVM，并向决策器输出当前`contextInitializer`方法线索及固定Barterable类型；是否已覆盖所有官方加载场景/第三方替换仍有运行门禁。
 
-`BarterVM.ExecuteAutoBalance`是议价窗中间的原生自动平衡按钮入口；Chronicle的`barterAutoBalance`直接调用当前捕获VM的这个方法，不另算价格、不保证对方接受，也不提交世界交易。它按当前Barterable各方估值补/移报价，VM同时更新双方进度百分比与`IsOfferDisabled`。本机1.4.8实际地图Lord窗口中提出2匹大陆骑乘马（领主侧对该提案估值3260）后，按自动平衡，原版把玩家可用的1000第纳尔全加进提案，保留2匹马；因仍不足以满足原生接受条件，报价保持禁用。调用前后玩家金币/物品roster、Stop档和Campaign日值均不变。这个测试存档没有玩家自有可交易物品，因此“现金不足时自动补入玩家物品”的具体组合尚未实机覆盖；不能把可见进度条解释成精确接受概率或成交保证。
+`BarterVM.ExecuteAutoBalance`是议价窗中间的原生自动平衡按钮入口；Chronicle的`barterAutoBalance`直接调用当前捕获VM的这个方法，不另算价格、不保证对方接受，也不提交世界交易。它按当前Barterable各方估值补/移报价，VM同时更新双方进度条字段与`IsOfferDisabled`。`TestResults/20260928-121703/Temp/BarterTransactionResult.json`在真实地图Lord谈判中提出2匹大陆骑乘马（领主侧估值3260），Harness仅在未保存的运行内注入一把可交易武器后按原生自动平衡；原版把玩家全部1000第纳尔和该武器加入提案，保留2匹马，双方进度字段变为offerer -1 / other 37，Offer仍禁用。调用前后World金币/物品roster、Stop档和Campaign日值均不变；夹具物品在关闭进程前按精确物品+modifier删除，原始存档hash未变。这证明现金不足时原生可把可用玩家现金和需要的自有物品纳入草案，但该有限夹具不证明有多种贵重物品时会无差别地“全放进去”；也不能把进度条当精确接受概率或成交保证。
 
 ### 价值与失败规则
 
@@ -346,7 +346,7 @@ Barter 是按 Hero/Party/Faction 对方建立的谈判数据。`BarterData` 保�
 
 Chronicle现通过Harmony在原生`BarterVM(BarterData)`构造后捕获实际VM引用，并在BarterManager.Close/VM finalize时释放。观察与提案编辑共用同一接口，面向所有`StartBarterOffer`创建且由MainHero发起的当前玩家BarterVM；枚举VM全部原生分类，返回上下文初始化器、固定条款类型、双方进度比例和Offer有效状态。普通可转条款用原生BarterItemVM handler/selector编辑；上下文固定/不可转条款只观察，不伪造编辑。`barterReset`、`barterAutoBalance`、`barterCancel`、`barterOffer`分别复用同一VM的原生方法。AI决策接口使用最新观察产生的candidate ID，不创建第二个BarterVM，也不直接执行Barterable.Apply。普通物品/金币完成Map运行验收；和平/政治归附/婚姻/安全通行/俘虏等入口和领域结果已有官方源码调用链盘点，但各特殊上下文尚未逐一运行验收。
 
-`TestResults/20260928-120336/Temp/BarterTransactionResult.json`真实地图Lord对话`hero_barter`→原版回应/继续→捕获实际BarterVM。普通路线中验证双方候选、普通Item 2匹提案、自动平衡把玩家全部1000 Denar加入且报价仍禁用、进度条模型字段更新；调用未改玩家现金/物品roster、Stop档或Campaign日值。原版Reset清空该草稿，最新candidate可继续编辑而旧candidate被拒；原版Cancel后双方party物品指纹、Gold和Hero基础关系不变。第二次从当前Conversation打开普通Barter，以Native Offer提交1 Denar，原版接受且Gold精确转为玩家999/领主10001，Barter关闭后恢复MapState。源存档hash相同、游戏进程停止。无玩家自有可交易物品，不证明以物抵价；也未覆盖不同金额/商品、原生拒绝Offer、活动时钟、MissionBarter或特殊Context运行结果。
+`TestResults/20260928-121703/Temp/BarterTransactionResult.json`真实地图Lord对话`hero_barter`→原版回应/继续→捕获实际BarterVM。测试在只读入内存的Harness模式注入一把可交易武器；普通Item 2匹提案执行原生自动平衡，报价加入全部1000 Denar和该把武器，报价仍禁用且进度条字段更新；世界金币/roster、Stop档或Campaign日值不变。原版Reset清空该草稿，最新candidate可继续编辑而旧candidate被拒；原版Cancel后双方party物品指纹、Gold和Hero基础关系不变。第二次从当前Conversation打开普通Barter，以Native Offer提交1 Denar，原版接受且Gold精确转为玩家999/领主10001；夹具武器已精确清除，Barter关闭后恢复MapState。源存档hash相同、游戏进程停止。只测试一类玩家物品与普通Lord；不同物品挑选、原生拒绝Offer、活动时钟、MissionBarter及特殊Context运行结果未覆盖。
 
 证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `BarterManager`、`BarterData`、`Barterable`/各子类、`DefaultBarterModel`、`LordConversationsCampaignBehavior`、BarterBehaviors；`TaleWorlds.CampaignSystem.ViewModelCollection.dll` `BarterVM`/`BarterItemVM`；`Modules/SandBox/bin/Win64_Shipping_Client/SandBox.GauntletUI.dll` 的`GauntletMapConversationView`、`GauntletMapConversationBarterView`、`MissionGauntletBarterView`；Chronicle `AgentBarterAdapter.cs`、`AgentBarterViewCapture.cs`、`AgentProtocol.cs`。源码版本v1.4.8.119303；普通Lord Item/Gold runtime范围及限制见`TestResults/20260928-112520`，MissionBarter和特殊Barterable结算仍未知。
 
