@@ -64,6 +64,12 @@ Chronicle仅在指定Harness研究接口中能读取/选择有限Incident，产�
 
 通知常是玩家获知新任务/结果/选择权的引导，但通知本身并不必然产生游戏后果；例如点“跳转”会定位对象，不等于自动完成任务。玩家是否能关掉、过期、再次点开或标记已读要由该通知VM决定。
 
+`OBS-J07-02` QuickInformation是另一条短暂显示链：`MBInformationManager.AddQuickInformation`同步触发`FiringQuickInformation`，`GauntletGameNotification.RegisterEvents`把它送给`GameNotificationVM.AddGameNotification`。该VM把当前项放在`CurrentNotification`，其他尚未轮到的项放入私有`_items`；重复文字会合并/忽略，所以队列不是玩家已看见的消息历史。当前显示秒数由固定0.6秒、Native `ExtraTimeInMs`、超过4词的延时和队列数量共同计算；还必须区分`IsDialog`语音项，它也复用同一个VM但不是QuickInfo。`GauntletGameNotification.OnTick`根据SceneNotification/加载窗口等判断是否Suspended，并同步写`GameNotificationVM.IsPaused`。完整画面链从`InformationManager.DisplayMessage`/普通信息栏另行分流，不能和QuickInformation合并。
+
+W2-AG实现按需`quickInformation`观察，Campaign Map下反射读取本机Native `TaleWorlds.MountAndBlade.GauntletUI.GauntletGameNotification.Current._dataSource`。只有Native layer存在、`GotNotification=true`、UI未Paused且current项不是Dialog时才返回当前气泡原文、说话者、ExtraTime、VM duration/fade值；UI unavailable时明确回`available=false`。它不订阅 `FiringQuickInformation`，也不缓存新历史、不枚举私有排队`_items`，因而AI若没有在短时窗口采样就会错过，与“这条消息当前是否仍显示”语义一致。VM公开的`CurrentNotificationDurationInSeconds`是原版显示周期值，不宣称是动画中剩余秒数。
+
+`TestResults/20260930-064259/Temp/QuickInformationResult.json`通过Native `MBInformationManager.ClearQuickInformations/AddQuickInformation`清空disposable UI并发两条原版消息：当前项和排队项；Chronicle连续两次只返回当前项，完整原文与说话者/ExtraTime/VM时长一致，排队文本未泄漏；当前VM ID与文本未变，Campaign/Gold/Roster/时间/存档均不变，进程退出。该测试是一次性Client UI事件链验证，不是桌面截图或鼠标操作；Suspended Dialog/SceneNotification分支、Native UI层缺失情形和不同Mods替换还未实测。
+
 跨域去重：`OBS-J07-03`覆盖Mission/Scene局部消息及Campaign中以`SceneNotificationData`呈现的确认面；特定弹窗之后果归属对应领域动作（例如俘虏处决为`ACT-F12-12`），不新增通用Scene弹窗观察/确认ACT。确认前可见目标/动作与最终回执必须分开记录；全量视觉确认、宿主时钟与Close/Proceed键鼠路径仍待运行核实。
 
 Chronicle新增按需`mapNotifications`，仅在Campaign Map状态读取`Campaign.CampaignInformationManager`的Notice队列。1.4.8没有公开枚举接口，当前适配通过版本内反射读取`_mapNotices`，先检查`InformationData.IsValid()`，再用Native `MapNotificationVM.AddMapNotification`经过其注册表生成对应`MapNotificationItemBaseVM`；向Agent只返回原版ItemVM提供的类型、标题、描述、NotificationIdentifier、ForceInspection，不枚举底层对象/额外目标字段。临时VM只为映射Notice数据，在finally中逐个`OnFinalize`并自身`OnFinalize`，不触发点击、相机跳转、焦点、移除或Proceed回调。因为这不是活动UI中的具体焦点控件，不返回`IsFocused`。
