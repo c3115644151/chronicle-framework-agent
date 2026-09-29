@@ -44,6 +44,49 @@ function Invoke-AgentCli {
     return $output | ConvertFrom-Json
 }
 
+function Get-PersistedCampaignFingerprint($Response) {
+    $snapshot = $Response.state
+    if ($null -eq $snapshot) { throw 'Save/load fingerprint requires a structured Campaign snapshot.' }
+    $quests = @($snapshot.quests | ForEach-Object { '{0}:{1}:{2}' -f $_.id, $_.name, $_.isActive } | Sort-Object)
+    $targetPosition = $snapshot.location.targetPosition
+    $targetPositionX = $null
+    $targetPositionY = $null
+    $targetPositionIsOnLand = $null
+    if ($null -ne $targetPosition) {
+        $targetPositionX = [double]$targetPosition.x
+        $targetPositionY = [double]$targetPosition.y
+        $targetPositionIsOnLand = [bool]$targetPosition.isOnLand
+    }
+    return [ordered]@{
+        HeroId = [string]$snapshot.identity.heroId
+        ClanId = [string]$snapshot.identity.clanId
+        ClanTier = [int]$snapshot.identity.clanTier
+        Gold = [int]$snapshot.economy.gold
+        Influence = [int]$snapshot.economy.influence
+        Renown = [double]$snapshot.economy.renown
+        MainPartyId = [string]$snapshot.party.id
+        PartyMembers = [int]$snapshot.party.members
+        PartyHealthy = [int]$snapshot.party.healthy
+        PartyWounded = [int]$snapshot.party.wounded
+        PartyPrisoners = [int]$snapshot.party.prisoners
+        PartyItems = [int]$snapshot.party.itemCount
+        Food = [double]$snapshot.party.food
+        FoodInventory = [int]$snapshot.party.foodInventory
+        LocationX = [double]$snapshot.location.x
+        LocationY = [double]$snapshot.location.y
+        CurrentSettlementId = [string]$snapshot.location.currentSettlementId
+        TargetSettlementId = [string]$snapshot.location.targetSettlementId
+        TargetPartyId = [string]$snapshot.location.targetPartyId
+        TargetPositionX = $targetPositionX
+        TargetPositionY = $targetPositionY
+        TargetPositionIsOnLand = $targetPositionIsOnLand
+        Quests = $quests
+        TimeControlMode = [string]$snapshot.context.timeControlMode
+        GameState = [string]$snapshot.context.gameState
+        EncounterActive = [bool]$snapshot.context.encounterActive
+    }
+}
+
 try {
     $start = Invoke-AgentCli 'load' @('-SaveName', $LoadSaveName, '-TimeoutSeconds', $TimeoutSeconds)
     $state = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-state", '-TimeoutSeconds', $TimeoutSeconds)
@@ -51,11 +94,13 @@ try {
     $pause = Invoke-AgentCli 'pause' @('-CommandId', "$runPrefix-pause", '-TimeoutSeconds', $TimeoutSeconds)
     $resume = Invoke-AgentCli 'resume' @('-CommandId', "$runPrefix-resume", '-TimeoutSeconds', $TimeoutSeconds)
     $advance = Invoke-AgentCli 'advance' @('-Days', '0.01', '-CommandId', "$runPrefix-advance", '-TimeoutSeconds', $TimeoutSeconds)
+    $preSaveFingerprint = Get-PersistedCampaignFingerprint $advance
     $save = Invoke-AgentCli 'save' @('-SaveName', $protocolSaveNameForRun, '-CommandId', "$runPrefix-save", '-TimeoutSeconds', $TimeoutSeconds)
     $firstStop = Invoke-AgentCli 'stop' @('-CommandId', "$runPrefix-stop-1", '-TimeoutSeconds', $TimeoutSeconds)
 
     $reload = Invoke-AgentCli 'load' @('-SaveName', $protocolSaveNameForRun, '-TimeoutSeconds', $TimeoutSeconds)
     $reloadedState = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-reload-state", '-TimeoutSeconds', $TimeoutSeconds)
+    $reloadedFingerprint = Get-PersistedCampaignFingerprint $reloadedState
     $secondStop = Invoke-AgentCli 'stop' @('-CommandId', "$runPrefix-stop-2", '-TimeoutSeconds', $TimeoutSeconds)
 
     $fixtureHashAfter = (Get-FileHash $loadSavePath -Algorithm SHA256).Hash
@@ -71,6 +116,9 @@ try {
         FirstStop = $firstStop
         Reload = $reload
         ReloadedState = $reloadedState
+        PreSaveCampaignFingerprint = $preSaveFingerprint
+        ReloadedCampaignFingerprint = $reloadedFingerprint
+        PersistentCampaignStateMatchesAfterProcessRestart = (($preSaveFingerprint | ConvertTo-Json -Depth 6 -Compress) -ceq ($reloadedFingerprint | ConvertTo-Json -Depth 6 -Compress))
         SecondStop = $secondStop
         AdvanceDeltaDays = [double]$advance.campaignDay - $startDay
         ProtocolSaveExists = Test-Path $protocolSavePath
@@ -88,6 +136,8 @@ try {
         $firstStop.processStopped -and
         [int]$reloadedState.dailyTickCount -eq [int]$save.dailyTickCount -and
         [math]::Abs([double]$reloadedState.campaignDay - [double]$save.campaignDay) -lt 0.002 -and
+        $result.PersistentCampaignStateMatchesAfterProcessRestart -and
+        $reloadedState.timeControlMode -eq 'Stop' -and
         $secondStop.processStopped -and
         $result.FixtureUnchanged
     )

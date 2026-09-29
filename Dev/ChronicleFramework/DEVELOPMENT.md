@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 
-Contract version: 5.65
+Contract version: 5.66
 
 ## 目标与边界
 
@@ -181,7 +181,7 @@ stop()
 | Build | 项目针对当前 DLL 编译 | 构建退出码和 DLL |
 | Smoke | 清单、DLL、`OnSubModuleLoad`、`Finished All` | 同 PID 日志 |
 | Campaign/FreshCampaign | 旧档；FreshCampaign新Sandbox原生创建、跳intro、选+20；Progression用临时存档重载再move/arrival/recruit | 同PID renown20/MapState、非激活840x472；Crash Report仅按明确信号有界重试；已知`Mod change detected`着色器缓存提示仅可经精确匹配的目标进程UIA按钮确认一次，不用全局输入；临时存档精确清理、非模型Provider |
-| Protocol | CLI 启动/重载、状态、暂停/恢复、独立推进时钟、保存、停止；推进到目标时间或遭遇边界即返回 | 每命令不可变回执、JSONL 轨迹与存档回读；存档往返使用单次唯一测试名，记录回读/源夹具哈希后删除；时间步进不得隐式塞入地图移动/追近命令 |
+| Protocol | CLI 启动/重载、状态、暂停/恢复、独立推进时钟、保存、停止；推进到目标时间或遭遇边界即返回 | 每命令不可变回执、JSONL 轨迹与存档回读；存档往返使用单次唯一测试名，比较Save前与新进程读档后的结构化Campaign指纹及Chronicle SyncData计数，记录回读/源夹具哈希后删除；时间步进不得隐式塞入地图移动/追近命令 |
 | AgentLoop | 外部提供者接收真实观察，选择 allowlisted 原子动作并重观察 | 测试输入/决策/回执、时钟转换、拒绝越权动作、fixture 哈希、退出；不计作模型能力 |
 | BattleFixture | disposable save 内造 hostile looter；用原版 pursue 点击语义接敌 | hostile/party ID、自然时间/encounter 回执、fixture 哈希、进程退出；造敌非 Agent 行为 |
 | BattleSimulation | 原版 `Send troops` 启动；pause/skip/finish/retreat；Mission TAB retreat | 模拟状态、结算/loot、Mission end、fixture hash；不等同即时战斗 |
