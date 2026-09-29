@@ -42,11 +42,14 @@ W2-P MainParty升级适配：`partyUpgradeOptions`仅在Campaign Map打开Normal
 
 W2-Q MainParty普通俘虏招募：按需`prisonerRecruitmentOptions`从Normal PartyScreen原生PartyVM读取右侧MainParty普通俘虏与当前Conformity可招数；`recruitPrisoner(TroopId)`只调用当前 `PartyCharacterVM.ExecuteRecruitTroop()`（原版默认一人）、原生Done及Campaign招聘事件，不直接改Roster。成功从PrisonRoster扣一人和每人Conformity XP、MemberRoster增一人、RecentEventsMorale改变；不扣金币。Harness动态选原生Tier 2非Bandit regular，设置XP为279*2-1，实际可招1人。`TestResults/20260927-174107/Temp/PartyPrisonerRecruitmentResult.json`确认：在MainParty已经20/20满员时，VM仍显示可招1人，但原版提示将超限；Done弹出“超出上限”询问，文本说明士兵暂留、之后离队且移动变慢。接口先将完整原生文案暴露给Agent；未明确提供`confirmPartySizeWarning=true`就拒绝并重置草稿、保持Roster不变，明确确认后才调用原生 affirmative callback，结果人数20→21、俘虏2→1/XP557→278、RecentEventsMorale0→-1、金币不变。剩余278 XP不足279门槛时再次招募被拒且无变化。这里记录的是版本本机原版的超额规则，不自行添加容量硬限制。Campaign Stop和UnstoppablePlay档位均保持；存档hash不变、游戏进程停止。
 
-军队人数变化还有战后俘虏转入、聚落志愿兵、招募俘虏、疾病/伤病、逃兵/死亡等来源；不应把升级、招募、伤兵治疗和战争损失压成一个“Roster调整”动作。自动NPC Troop升级、Party训练、恢复/逃兵另见 F11；玩家进入真实UI后的具体交互顺序仍未被Chronicle全自动覆盖。直接修改 `TroopRoster`会绕过UI可用性、价格/经验条件、容量和PartyScreen确认副作用；当前协议只支持本卡明确记录的MainParty升级和已有特定原生招募/战后PartyState入口，不是通用Roster控制器。
+W2目录复核发现H04遗漏了 `ACT-H04-03`普通聚落志愿兵招募：本机1.4.8 `PlayerTownVisit.game_menu_recruit_volunteers_on_consequence`在`town`、`town_backstreet`、`village`共用`MenuContext.OpenRecruitVolunteers`，Gauntlet视图会创建自己的`RecruitmentVM`。Done消费Notable一个`VolunteerTypes`槽、将兵加入MainParty并按原生Gold cost扣款；超容量会进入独立Inquiry，不同于H04-02俘虏Conformity招募、D08 Alley周招募与F09强征。当前CLI `recruitOptions/recruit`先核MapState/Settlement和同一个Native `recruit_volunteers`菜单项确实存在且可用，再用Native `RecruitmentVM`提供offer/调用Done；它不打开Gauntlet View、不模拟焦点，但在每个请求结束后使用与Native Gauntlet View一致的HotKey/KeyText初始化并调用`OnFinalize`清理VM事件订阅。满员时不确认会捕获/隐藏Native `InquiryData`并回滚草稿，只有决策显式带`ConfirmPartySizeWarning=true`才调用该Inquiry原始affirmative callback；没有直接写Roster/Gold。
+
+运行`TestResults/20260930-042631/Recruitment.log`在Sargot `town`菜单确认可用项，确定性Provider正常招一名瓦兰迪亚新兵（Gold 1000→980、MainParty +1）；离开Settlement再查询被拒且roster/gold不变。Harness只为capacity分支在disposable内存Campaign填入普通兵至20/20：无显式确认时出现本体“超过上限”警告、拒绝且volunteer slot/Gold/MainParty不变；带显式确认后提交原生Inquiry回调，增至21/20并扣20 Gold。源fixture hash不变，进程退出；Docs/Build/Recruitment均Passed。此次选项/询价/交易阶段raw时钟均Stop、day 91077.403保持，但Gauntlet UI View未真正打开，不能据此声称UI视图的时钟语义已实测。
+
+军队人数变化还有战后俘虏转入、聚落志愿兵、招募俘虏、疾病/伤病、逃兵/死亡等来源；不应把升级、招募、伤兵治疗和战争损失压成一个“Roster调整”动作。自动NPC Troop升级、Party训练、恢复/逃兵另见 F11；玩家进入真实UI后的具体交互顺序仍未被Chronicle全自动覆盖。直接修改 `TroopRoster`会绕过UI可用性、价格/经验条件、容量和PartyScreen确认副作用；当前协议仅对MainParty升级、普通俘虏招募、聚落志愿兵招募及战后PartyState等明确范围提供原生VM事务适配，不是通用Roster控制器。
 
 时间：升级事务本身不附加Campaign时间推进或显式改档。原版`PartyState.IsMenuState=true`；Campaign `RealTick/Tick`由`MapState`仅在自身是ActiveState时驱动，因此PartyState压在地图上期间地图Campaign tick不执行。原版`PartyScreenHelper.ClosePartyPresentation`完成或取消后PopState回父State，PartyState/MapState激活关闭路径不会自动改写时间档。W2-P Harness在Stop与UnstoppablePlay下即时打开/关闭均看到各自档位原样保留，Stop下查询前后Campaign日值相同；该测试不是长时间保持实际视觉屏幕的录制，但时间暂停和回到地图后的档位语义已有源码路径支持。
 
-Chronicle尚不支持村庄/城镇新兵招募的全部入口、所有升级、伤病治疗/复原、俘虏移交与任意Roster拖放。证据：本机 `PartyScreenLogic`、ViewModelCollection `PartyVM/PartyCharacterVM/PartyUpgradeTroopVM/PartyRecruitTroopVM`、Chronicle `AgentObserver/AgentProtocol/AgentPartyUpgradeAdapter/AgentPartyPrisonerRecruitmentAdapter`；其他PartyScreen模式、原生实际屏幕视觉和第三方模块覆盖仍需分别验证。
 
 ## H05 Companion：同伴招募、家族成员与离队
 

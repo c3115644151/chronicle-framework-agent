@@ -211,6 +211,11 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("harnessSeedPrisonerRecruitmentFixture requires the Campaign Map state");
                     WriteResponse(commandId, action, "completed", behavior, null, SeedPrisonerRecruitmentFixture());
                     break;
+                case "harnessSeedRecruitmentCapacityFixture":
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("harnessSeedRecruitmentCapacityFixture requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, HarnessRecruitmentCapacityFixture.SeedMainPartyToCapacity());
+                    break;
                 case "harnessPrepareCompanionHiringFixture":
                     var companionFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
                     var companionFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
@@ -736,15 +741,30 @@ internal sealed class ChronicleAgentProtocol
                     break;
                 case "recruitOptions":
                     _recruitmentViewModel = ChronicleAgentRecruitment.CreateOrRefresh(_recruitmentViewModel);
-                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentRecruitment.BuildOptionsJson(_recruitmentViewModel));
+                    try
+                    {
+                        WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentRecruitment.BuildOptionsJson(_recruitmentViewModel));
+                    }
+                    finally
+                    {
+                        FinalizeVolunteerRecruitmentViewModel();
+                    }
                     break;
                 case "recruit":
                     _recruitmentViewModel = ChronicleAgentRecruitment.CreateOrRefresh(_recruitmentViewModel);
                     var recruitOwnerId = ReadString(command, "ownerId");
                     var recruitTroopId = ReadString(command, "troopId");
                     var recruitSlot = (int)ReadDouble(command, "slot");
-                    var recruitmentResult = ChronicleAgentRecruitment.Recruit(_recruitmentViewModel, recruitOwnerId, recruitTroopId, recruitSlot);
-                    WriteResponse(commandId, action, "completed", behavior, null, recruitmentResult);
+                    var recruitConfirmCapacity = ReadDouble(command, "confirmPartySizeWarning") > 0.5;
+                    try
+                    {
+                        var recruitmentResult = ChronicleAgentRecruitment.Recruit(_recruitmentViewModel, recruitOwnerId, recruitTroopId, recruitSlot, recruitConfirmCapacity);
+                        WriteResponse(commandId, action, "completed", behavior, null, recruitmentResult);
+                    }
+                    finally
+                    {
+                        FinalizeVolunteerRecruitmentViewModel();
+                    }
                     break;
                 case "foodOptions":
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentTradeAdapter.BuildFoodOptionsJson());
@@ -1929,6 +1949,13 @@ internal sealed class ChronicleAgentProtocol
                 campaign.TimeControlMode = campaign.TimeControlMode == CampaignTimeControlMode.StoppableFastForward ? CampaignTimeControlMode.StoppableFastForward : CampaignTimeControlMode.StoppablePlay;
                 break;
         }
+    }
+
+    private void FinalizeVolunteerRecruitmentViewModel()
+    {
+        var viewModel = _recruitmentViewModel;
+        _recruitmentViewModel = null;
+        viewModel?.OnFinalize();
     }
 
     private static string SetNativeTimeSpeed(int selectedTimeSpeed)

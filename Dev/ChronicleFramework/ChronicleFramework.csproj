@@ -36,6 +36,10 @@
       <HintPath>$(ChronicleGameRoot)\bin\Win64_Shipping_Client\TaleWorlds.Core.ViewModelCollection.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="TaleWorlds.InputSystem">
+      <HintPath>$(ChronicleGameRoot)\bin\Win64_Shipping_Client\TaleWorlds.InputSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="TaleWorlds.MountAndBlade">
       <HintPath>$(ChronicleGameRoot)\bin\Win64_Shipping_Client\TaleWorlds.MountAndBlade.dll</HintPath>
       <Private>false</Private>
@@ -80,5 +84,6 @@
   <Target Name="ValidateChronicleGameRoot" BeforeTargets="ResolveReferences">
     <Error Condition="'$(ChronicleGameRoot)' == ''" Text="Set ChronicleGameRoot to the Bannerlord 1.4.8 installation path." />
     <Error Condition="!Exists('$(ChronicleGameRoot)\bin\Win64_Shipping_Client\TaleWorlds.CampaignSystem.dll')" Text="Configured ChronicleGameRoot does not contain the Bannerlord campaign assemblies." />
+    <Error Condition="!Exists('$(ChronicleGameRoot)\bin\Win64_Shipping_Client\TaleWorlds.InputSystem.dll')" Text="Configured ChronicleGameRoot does not contain the Bannerlord input-system assembly required by Native RecruitmentVM lifecycle bindings." />
   </Target>
 </Project>

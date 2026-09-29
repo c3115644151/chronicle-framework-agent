@@ -1,15 +1,43 @@
 using System;
 using System.Linq;
 using System.Text;
+using TaleWorlds.Core;
 using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.GameState;
+using TaleWorlds.CampaignSystem.GameMenus;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.CampaignSystem.ViewModelCollection.GameMenu.Recruitment;
+using TaleWorlds.InputSystem;
+using TaleWorlds.Library;
+using TaleWorlds.Localization;
+using TaleWorlds.MountAndBlade;
 
 namespace ChronicleFramework;
 
 internal static class ChronicleAgentRecruitment
 {
+    internal static void EnsureNativeVolunteerRecruitmentEntryIsAvailable()
+    {
+        var campaign = Campaign.Current;
+        var settlement = Settlement.CurrentSettlement;
+        var menuContext = campaign?.CurrentMenuContext;
+        var menu = menuContext?.GameMenu;
+        if (campaign == null || settlement == null || Game.Current?.GameStateManager?.ActiveState is not MapState || menu == null)
+            throw new InvalidOperationException("volunteer recruitment requires an active Settlement GameMenu on the Campaign Map");
+
+        var menuId = menu.StringId;
+        var menuMatchesSettlement =
+            (settlement.IsTown && (menuId == "town" || menuId == "town_backstreet")) ||
+            (settlement.IsVillage && menuId == "village");
+        if (!menuMatchesSettlement)
+            throw new InvalidOperationException("volunteer recruitment is not available from this Settlement menu");
+
+        var option = menu.MenuOptions.FirstOrDefault(candidate => candidate.IdString == "recruit_volunteers");
+        if (option == null || !option.IsEnabled || !option.GetConditionsHold(Game.Current, menuContext))
+            throw new InvalidOperationException("the native recruit_volunteers menu option is not currently available");
+    }
+
     internal static string BuildOptionsJson(RecruitmentVM viewModel)
     {
         var settlement = Settlement.CurrentSettlement;
@@ -25,6 +53,13 @@ internal static class ChronicleAgentRecruitment
         json.Append(",\"gold\":").Append(Hero.MainHero.Gold);
         json.Append(",\"partySize\":").Append(viewModel.CurrentPartySize);
         json.Append(",\"partyCapacity\":").Append(viewModel.PartyCapacity);
+        var nextVolunteerWouldExceedLimit = viewModel.CurrentPartySize + 1 > viewModel.PartyCapacity;
+        json.Append(",\"partySizeWarningForOne\":").Append(nextVolunteerWouldExceedLimit ? "true" : "false");
+        if (nextVolunteerWouldExceedLimit)
+        {
+            Property(json, "nativeCapacityWarningTitle", new TextObject("{=uJro3Bua}Over Limit").ToString(), prependComma: true);
+            Property(json, "nativeCapacityWarningText", GameTexts.FindText("str_party_over_limit_troops").ToString(), prependComma: true);
+        }
         json.Append(",\"offers\":[");
         for (var index = 0; index < options.Length; index++)
         {
@@ -47,15 +82,27 @@ internal static class ChronicleAgentRecruitment
 
     internal static RecruitmentVM CreateOrRefresh(RecruitmentVM current)
     {
-        if (Settlement.CurrentSettlement == null) throw new InvalidOperationException("recruitment requires an active settlement");
-        if (current == null) return new RecruitmentVM();
+        EnsureNativeVolunteerRecruitmentEntryIsAvailable();
+        if (current == null) return CreateNativeRecruitmentViewModel();
         current.ExecuteReset();
         current.RefreshScreen();
         current.Enabled = true;
         return current;
     }
 
-    internal static string Recruit(RecruitmentVM viewModel, string ownerId, string troopId, int slot)
+    private static RecruitmentVM CreateNativeRecruitmentViewModel()
+    {
+        var viewModel = new RecruitmentVM();
+        var keyCategory = HotKeyManager.GetCategory("GenericPanelGameKeyCategory");
+        viewModel.SetCancelInputKey(keyCategory.GetHotKey("Exit"));
+        viewModel.SetDoneInputKey(keyCategory.GetHotKey("Confirm"));
+        viewModel.SetResetInputKey(keyCategory.GetHotKey("Reset"));
+        viewModel.SetRecruitAllInputKey(keyCategory.GetHotKey("TakeAll"));
+        viewModel.SetGetKeyTextFromKeyIDFunc(keyId => GameKeyTextExtensions.GetHotKeyGameTextFromKeyID(Game.Current.GameTextManager, keyId));
+        return viewModel;
+    }
+
+    internal static string Recruit(RecruitmentVM viewModel, string ownerId, string troopId, int slot, bool confirmPartySizeWarning)
     {
         var selected = viewModel.VolunteerList
             .Where(owner => string.Equals(owner.OwnerHero.StringId, ownerId, StringComparison.Ordinal))
@@ -73,18 +120,32 @@ internal static class ChronicleAgentRecruitment
         var expectedCost = selected.Troop.Cost;
         selected.Troop.ExecuteRecruit();
         if (!selected.Troop.IsInCart) throw new InvalidOperationException("native recruitment view model did not accept the offer");
-        if (viewModel.CurrentPartySize > viewModel.PartyCapacity)
-        {
-            viewModel.ExecuteReset();
-            throw new InvalidOperationException("party capacity would be exceeded");
-        }
         if (!viewModel.IsDoneEnabled)
         {
             viewModel.ExecuteReset();
             throw new InvalidOperationException("insufficient gold for recruit");
         }
 
-        viewModel.ExecuteDone();
+        var requiresCapacityConfirmation = viewModel.CurrentPartySize > viewModel.PartyCapacity;
+        InquiryData nativeCapacityInquiry = null;
+        if (requiresCapacityConfirmation)
+        {
+            nativeCapacityInquiry = ExecuteDoneAndConfirmNativeOverLimit(viewModel, confirmPartySizeWarning);
+            if (nativeCapacityInquiry == null)
+            {
+                viewModel.ExecuteReset();
+                throw new InvalidOperationException("native RecruitmentVM did not open its Over Limit confirmation inquiry");
+            }
+            if (!confirmPartySizeWarning)
+            {
+                viewModel.ExecuteReset();
+                throw new InvalidOperationException("native RecruitmentVM requires explicit ConfirmPartySizeWarning=true: " + nativeCapacityInquiry.Text);
+            }
+        }
+        else
+        {
+            viewModel.ExecuteDone();
+        }
 
         var afterMembers = MobileParty.MainParty.MemberRoster.TotalManCount;
         var afterGold = Hero.MainHero.Gold;
@@ -97,11 +158,35 @@ internal static class ChronicleAgentRecruitment
         json.Append(",\"cost\":").Append(expectedCost);
         json.Append(",\"beforeMembers\":").Append(beforeMembers);
         json.Append(",\"afterMembers\":").Append(afterMembers);
+        json.Append(",\"partySizeLimit\":").Append(viewModel.PartyCapacity);
+        json.Append(",\"nativeCapacityWarningRequired\":").Append(requiresCapacityConfirmation ? "true" : "false");
+        json.Append(",\"nativeCapacityConfirmationAccepted\":").Append((requiresCapacityConfirmation && confirmPartySizeWarning && nativeCapacityInquiry != null) ? "true" : "false");
+        Property(json, "nativeCapacityConfirmationTitle", nativeCapacityInquiry?.TitleText, prependComma: true);
+        Property(json, "nativeCapacityConfirmationText", nativeCapacityInquiry?.Text, prependComma: true);
         json.Append(",\"beforeGold\":").Append(beforeGold);
         json.Append(",\"afterGold\":").Append(afterGold);
         json.Append(",\"verified\":").Append(completed ? "true" : "false");
         json.Append('}');
         return json.ToString();
+    }
+
+    private static InquiryData ExecuteDoneAndConfirmNativeOverLimit(RecruitmentVM viewModel, bool confirmPartySizeWarning)
+    {
+        InquiryData confirmation = null;
+        var expectedTitle = new TextObject("{=uJro3Bua}Over Limit").ToString();
+        Action<InquiryData, bool, bool> handler = (inquiry, pauseGameActiveState, prioritize) =>
+        {
+            if (inquiry == null || confirmation != null || !inquiry.IsAffirmativeOptionShown || inquiry.AffirmativeAction == null || !string.Equals(inquiry.TitleText, expectedTitle, StringComparison.Ordinal))
+                return;
+            confirmation = inquiry;
+            InformationManager.HideInquiry();
+            if (confirmPartySizeWarning) inquiry.AffirmativeAction.Invoke();
+        };
+
+        InformationManager.OnShowInquiry += handler;
+        try { viewModel.ExecuteDone(); }
+        finally { InformationManager.OnShowInquiry -= handler; }
+        return confirmation;
     }
 
     private static StringBuilder Property(StringBuilder json, string key, string value, bool prependComma = false)

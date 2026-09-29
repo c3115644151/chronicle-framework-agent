@@ -34,11 +34,11 @@ Mineflayer/MineDojo 等 Agent 以独立玩家为动作和观察主体；这不�
 
 Research Gate: **READY**
 Implementation Gate: **READY**
-行为总分母：**179**（核心Campaign ACT族；OBS分母：**73**，23个N/A不计入）　游戏版本：**1.4.8.119303**
+行为总分母：**180**（核心Campaign ACT族；OBS分母：**73**，23个N/A不计入）　游戏版本：**1.4.8.119303**
 
-玩家行为目录以本机1.4.8.119303官方Native/SandBox/SandBoxCore/StoryMode为基线；`SYSTEM_INVENTORY.md`的126项是系统研究入口，不是动作数量。当前目录含180条ACT、73条OBS和23条N/A，其中`ACT-A06-06`仅为打开Cheat菜单的特权入口，另有控制台/作弊命令；它们留在条件特权扩展，不计入标准Campaign行动分母或普通Agent白名单。故标准行动族分母为179，观察面分母为73。W2覆盖审计发现原行动目录漏记了战后Loot Inventory将物品提交到主队ItemRoster的独立玩家动作`ACT-G10-01`，现已补入目录并有Native Loot屏幕/事务与Done保护的运行证据；标准TakeAll/Done路径可用，但部分Loot/自然掉落边界仍有明确限制。其他全游戏系统不因本分母变更而宣称已实现。第三方Gameplay模块、模型覆写和动态新增入口属于条件扩展，不能静默算进基线或宣称已兼容。多人核心是通过多人战役Mod加入共享Campaign，不包含原生PvP赛事、ForfeitSpawn或通用MP语音；未来支持语音时作为独立通信接口评估。盘点与产品工作次序由GitHub Project维护；本文不保存活动Issue/完成状态。Research Gate通过后仍需按任务板实现、逐项验证；Tier 1仅作为未来成熟度夹具。首个AI战斗接入优先使用Campaign地图坐镇/BattleSimulation；Mission部署、实时Orders和士兵控制仍属完整产品目录，但不属初始战斗切片。Minecraft Agent研究作为架构参考，不构成绕过全景研究的理由。
+玩家行为目录以本机1.4.8.119303官方Native/SandBox/SandBoxCore/StoryMode为基线；`SYSTEM_INVENTORY.md`的126项是系统研究入口，不是动作数量。当前目录含181条ACT、73条OBS和23条N/A，其中`ACT-A06-06`仅为打开Cheat菜单的特权入口，另有控制台/作弊命令；它们留在条件特权扩展，不计入标准Campaign行动分母或普通Agent白名单。故标准行动族分母为180，观察面分母为73。W2覆盖审计先发现原行动目录漏记战后Loot Inventory将物品提交到主队ItemRoster的独立玩家动作`ACT-G10-01`，后又从1.4.8 Settlement菜单与Gauntlet源链确认漏记聚落志愿兵招募`ACT-H04-03`；它与普通俘虏Conformity招募、玩家对Notable接Quest及村庄强征志愿兵不同，已据菜单入口和提交后果补入分母。`ACT-G10-01`标准TakeAll/Done路径已有Native屏幕事务与Done保护运行证据，但自然掉落仍未完整；`ACT-H04-03`现有测试仅直接构造RecruitmentVM，没有覆盖当前菜单入口/视图/时间，专用W2验收待做。其他全游戏系统不因本分母变更而宣称已实现。第三方Gameplay模块、模型覆写和动态新增入口属于条件扩展，不能静默算进基线或宣称已兼容。多人核心是通过多人战役Mod加入共享Campaign，不包含原生PvP赛事、ForfeitSpawn或通用MP语音；未来支持语音时作为独立通信接口评估。盘点与产品工作次序由GitHub Project维护；本文不保存活动Issue/完成状态。Research Gate通过后仍需按任务板实现、逐项验证；Tier 1仅作为未来成熟度夹具。首个AI战斗接入优先使用Campaign地图坐镇/BattleSimulation；Mission部署、实时Orders和士兵控制仍属完整产品目录，但不属初始战斗切片。Minecraft Agent研究作为架构参考，不构成绕过全景研究的理由。
 
-Implementation Gate READY仅表示允许推进当前单一、边界清楚且已有当前版本机制契约/重复验收路径的W2工作项；不表示179个核心动作已实现或任意功能都可开工。任何变更仍须先有对应玩家入口、前置/副作用/时间与后置条件，限定在GitHub唯一In Progress事项内，运行最窄的原生结果测试；无法复现的分支必须留下明确未知，不能据API调用成功宣称完成。
+Implementation Gate READY仅表示允许推进当前单一、边界清楚且已有当前版本机制契约/重复验收路径的W2工作项；不表示180个核心动作已实现或任意功能都可开工。任何变更仍须先有对应玩家入口、前置/副作用/时间与后置条件，限定在GitHub唯一In Progress事项内，运行最窄的原生结果测试；无法复现的分支必须留下明确未知，不能据API调用成功宣称完成。
 
 Minecraft Agent 的环境、规划、技能、记忆和评测研究已沉淀到本文后续架构段落；本文不再把项目目标定义为“测试工具”。
 
@@ -209,7 +209,7 @@ flowchart TD
 
 | 范围 | 分母或判定规则 | 证据规则 |
 | --- | --- | --- |
-| 玩家行为与观察面 | A-L全域审完并跨域去重后，按核心Campaign ACT族ID计行动分母、按OBS族ID计观察分母；明确排除的特权作弊接口另列，不并入核心分母 | 每条目录记录在来源列引用有效系统编号，且所有126个A-L编号至少被引用一次；Docs同时验证ID唯一、引用已定义和逐系统有目录映射。当前含180条ACT（含1条权限隔离入口），基线179核心ACT/73 OBS；`ACT-A06-06`与其可选作弊命令属单独权限扩展；详细事实见对应Research/源码/运行证据 |
+| 玩家行为与观察面 | A-L全域审完并跨域去重后，按核心Campaign ACT族ID计行动分母、按OBS族ID计观察分母；明确排除的特权作弊接口另列，不并入核心分母 | 每条目录记录在来源列引用有效系统编号，且所有126个A-L编号至少被引用一次；Docs同时验证ID唯一、引用已定义和逐系统有目录映射。当前含181条ACT（含1条权限隔离入口），基线180核心ACT/73 OBS；`ACT-A06-06`与其可选作弊命令属单独权限扩展；详细事实见对应Research/源码/运行证据 |
 | GameState接口 | 反编译枚举的状态类型只是接口分母，不等于玩家行为或 Agent 覆盖率 | 按当前安装DLL重新盘点；API Probe和运行时结果分别标记 |
 | 自主 Agent 闭环 | 必须有非测试模型/规划器选择目标、调用白名单动作、验证结果，并在世界变化或失败后重规划 | 确定性Provider、单动作成功或累计动作数量均不能算自主闭环 |
 | 长程成长夹具 | Tier 1用于评测长期规划、资源、风险和恢复，不是产品目标，也不要求通过刷固定奖励达成 | 结果必须来自 disposable campaign、保留状态/动作证据并清理夹具；失败如实保留 |
@@ -263,6 +263,7 @@ W2-AA实现修订（优先于下方较早的ACT-A02-01实现记录）：CLI `pau
 | dialogueContinue (research) | 地图对话无选项时 Continue/继续 | Gauntlet `ExecuteContinue`→`ConversationManager.ContinueConversation` | 对话/遭遇时间待核实 | 仅 `CurOptions` 为空时调用 | 运行后要确认对话阶段和遭遇迁移；时钟语义未知 |
 | retreat (research) | Mission TAB→Quit；模拟结果→Quit确认 | `TryExit`→RetreatMission；Simulation→XP/encounter | Mission暂停；Simulation未知 | Adapter绕过HUD确认 | 分开验证UI确认副作用与API结果结算，不相互替代 |
 | ACT-G10-01 battle loot items / take all and commit（新目录项；W2-X） | Campaign BattleSimulation/MapEvent正常结算后，进入`InventoryMode.Loot`，Native UI从Loot侧选择/Take All物品，再Done提交到MainParty ItemRoster。PartyAftermath中普通俘虏转移是独立`ACT-F12-11` | `InventoryScreenHelper.OpenScreenAsLoot`以战斗分配的ItemRoster建Loot `InventoryState`；Gauntlet Take All→`SPInventoryVM.ExecuteBuyAllItems/TransferAll(true)`草稿；Native Done→`ExecuteCompleteTranstactions`，剩余物品时弹`str_leaving_loot_behind`确认，最后`InventoryLogic.DoneLogic`提交。Chronicle `inventoryDone`仍以`CloseScreen(false)`退出，但现在在OtherInventory有Loot条目时先拒绝，不再跳过原生确认 | BattleSimulation开始/Finish与Battle Loot/Done过程中，W2-X运行验证CampaignDay均为91077.379、TimeControlMode维持Stop；测试不加`advance/pause`。其他Party/host/活动档时钟仍未知 | 当前适配只提供原生Take All、不支持Loot部分选择/主动放弃。Done仅当OtherInventory Loot条目清空才调用Native `CloseScreen(false)`/`InventoryLogic.DoneLogic`; 尚有Loot时拒绝且保持InventoryState、两侧Roster不变，避免静默丢失；玩家原生Warning的按钮交互不模拟 | 本机v1.4.8 native Loot/Done链见H07；`TestResults/20260928-194555/PostBattle.log`通过：Send Troops→Simulation Skip/Finish→Native战后Party/Inventory；未取Loot时Done被拒，Loot和Player sides及页面保持；Take All转移6个Roster条目，Done回Map。Battle/Finish/Map Return前后CampaignDay/TimeControlMode数值不变，存档hash与游戏进程清理通过。视觉战利品使用`seedVisualLoot`注入测试wool，`naturalDrop=false`；自然掉落统计、Inventory剩余Loot警告的真实鼠标确认、部分选择未覆盖 |
+| ACT-H04-03 settlement volunteer recruitment / `recruitOptions` + `recruit` | 当前Settlement GameMenu (`town`/`town_backstreet`/`village`)存在且启用`recruit_volunteers`时，玩家可从本地Notable volunteer slots选择新兵并Done | `PlayerTownVisit.game_menu_recruit_volunteers_on_consequence`→`MenuContext.OpenRecruitVolunteers`→Gauntlet RecruitmentVM；Native Done清volunteer slot、MainParty成员+1、派发`OnUnitRecruited`并扣当前troop cost；超容量触发Native Inquiry，Yes回调允许临时超额 | 适配器不打开Gauntlet overlay、不写Campaign时钟。1.4.8 Handler自身无显式时钟操作；Settlement菜单当前Campaign tick行为仍未独立确认，测试须记录日期/raw mode但不能据此推广至真实可视overlay | `recruitOptions/recruit`仅在Campaign Map的Town/Backstreet/Village当前Native `recruit_volunteers` option存在、conditions成立且enabled时运行，使用Native `RecruitmentVM`/`ExecuteDone`；每次查询/事务后调用Native `OnFinalize`清理事件订阅；不是通过Focus/鼠标打开UI。容量警告需Agent明确设置`ConfirmPartySizeWarning=true`才调用捕获的Native Inquiry affirmative callback；未确认先Native VM回滚并拒绝。正常Garrison/俘虏/强征/Alley路径不同 | 当前1.4.8源链见`Research/H/PlayerPartyAndProgression.md`、`Research/D/SettlementsAndTerritory.md`。`TestResults/20260930-042631/Recruitment.log`：Sargot菜单option可用，瓦兰迪亚新兵正常招募Gold1000→980/人数+1；满员后未授权的Over Limit被拒、槽/人数/Gold不变，明确确认则Native callback提交并招一人至21/20、扣20 Gold，提示为中文“超过上限”。流程时钟保持Stop/CampaignDay91077.403；off-menu尝试拒绝无数据变更；capacity filler仅Harness内存注入，源fixture hash不变且进程清理。未做Recruitment Gauntlet实际焦点/画面核对、Town/Village三类菜单逐一实跑及真实overlay自然时钟测试 |
 
 ```mermaid
 flowchart LR

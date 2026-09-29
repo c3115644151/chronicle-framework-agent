@@ -14,7 +14,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '5.76'
+$HarnessContractVersion = '5.88'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -317,8 +317,10 @@ foreach ($stage in $requestedStages) {
                 $sourceManifestHash = (Get-FileHash -LiteralPath $sourceManifestPath -Algorithm SHA256).Hash
                 $runtimeManifestHash = if (Test-Path -LiteralPath $manifestPath) { (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash } else { '' }
                 if ($sourceManifestHash -ne $runtimeManifestHash) { Copy-Item -LiteralPath $sourceManifestPath -Destination $manifestPath -Force }
-                & dotnet build $projectPath --configuration Release --no-restore "-p:ChronicleGameRoot=$gameRoot"
-                if ($LASTEXITCODE -ne 0) { throw "Build failed with exit code $LASTEXITCODE." }
+                $buildOutput = & dotnet build $projectPath --configuration Release --no-restore "-p:ChronicleGameRoot=$gameRoot" 2>&1 | Out-String
+                $buildExitCode = $LASTEXITCODE
+                if ($buildExitCode -ne 0) { throw "Build failed with exit code $buildExitCode.`n$buildOutput" }
+                $buildOutput
             }
         }
         'Smoke' {
@@ -444,8 +446,10 @@ foreach ($stage in $requestedStages) {
         }
         'Recruitment' {
             Invoke-Stage -Name 'Recruitment' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $recruitmentScript
-                if ($LASTEXITCODE -ne 0) { throw "Agent recruitment test failed with exit code $LASTEXITCODE." }
+                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $recruitmentScript 2>&1 | Out-String
+                $testExitCode = $LASTEXITCODE
+                if ($testExitCode -ne 0) { throw "Agent recruitment test failed with exit code $testExitCode.`n$testOutput" }
+                $testOutput
             }
         }
         'Rest' {

@@ -15,6 +15,10 @@ function Invoke-AgentCli {
     param([string]$Action, [hashtable]$Arguments = @{}, [string]$CommandId)
     $cliArguments = @($Action, '-CommandId', $CommandId, '-TimeoutSeconds', [string]$TimeoutSeconds, '-AsJson')
     foreach ($key in $Arguments.Keys) {
+        if ($key -eq 'ConfirmPartySizeWarning') {
+            if ([bool]$Arguments[$key]) { $cliArguments += '-ConfirmPartySizeWarning' }
+            continue
+        }
         $cliArguments += "-$key"
         $cliArguments += [string]$Arguments[$key]
     }
@@ -60,7 +64,7 @@ function Convert-DecisionToCli {
         pursue = @('PartyId'); follow = @('PartyId'); hold = @(); menu = @(); menuSelect = @('MenuId','OptionId'); talkToSettlementHero = @('HeroId'); dialogueSelect = @('OptionId'); dialogueContinue = @();
         battlePause = @(); battleSkip = @(); battleFinish = @(); battleRetreat = @(); missionRetreat = @();
         partyTakeAll = @('LootType'); partyScreenDone = @(); inventoryTakeAll = @(); inventoryDone = @();
-        rest = @('Days'); recruitOptions = @(); recruit = @('OwnerId','TroopId','VolunteerSlot');
+        rest = @('Days'); recruitOptions = @(); recruit = @('OwnerId','TroopId','VolunteerSlot','ConfirmPartySizeWarning');
         foodOptions = @(); tradeOptions = @(); trade = @('Direction','ItemViewModelId','InventorySide','Amount'); provision = @('ItemViewModelId','Amount'); tradeConfirm = @(); tradeCancel = @(); tradeCancelChanges = @(); barterOptions = @(); barterEdit = @('BarterCandidateId','BarterOperation','Amount'); barterReset = @(); barterAutoBalance = @(); barterOffer = @(); barterCancel = @()
     }
     if (-not $Decision -or $Decision.action -notin $allowed.Keys) { throw 'Decision action is not in the Agent CLI allowlist.' }

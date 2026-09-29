@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 
-Contract version: 5.76
+Contract version: 5.88
 
 ## 目标与边界
 
@@ -31,7 +31,7 @@ Project采用最少任务状态：`Todo`表示尚未开始（是否被阻塞看I
 
 源码仓库位于 Bannerlord 安装目录之外；游戏目录只作为 Harness 的运行时目标。被Git忽略的 `harness.local.json` 仅保存本机仓库与游戏路径；GitHub任务板位置只在 `ContextState.json` 记录一次。新工作区用 `Initialize-ChronicleWorkspace.ps1` 生成本地路径设置。源码、模块清单、Harness和工程规则均由同一Git提交追踪；构建将版本化模块清单与DLL部署到本机 `Modules/ChronicleFramework`。Build阶段部署前检查`Bannerlord*`进程；若用户游戏已运行则明确拒绝，Harness不终止该进程也不覆盖正在加载的DLL。大型`TestResults`不提交Git，证据仍按运行号保留在本地。
 
-文档管理优先保证可读性和信息层级，不以总字数或文件总数强迫压缩。`Check-Docs.ps1` 强制内容文档明确路由、引用目标存在、主线唯一且复核/hash有效；根目录`AGENTS.md`是直接生效的工作规则，不属于内容文档路由，也不应加入`ContextState.json`或`SYSTEM_INVENTORY.md`。检查器会验证 SYSTEM_INVENTORY 的126个A-L系统各自至少落到一个显式OBS/ACT/N/A目录行、每条目录记录在来源列引用有效A-L系统编号且全体覆盖126个编号、观察/行为/N/A目录ID唯一且所有交叉引用都有定义。Docs收据记录当前目录行结构计数，供同一分母口径下比较版本变化；这些计数不代表已核实的玩家行为最终分母。系统本身不是行为分母；有真实原因无玩家入口的引擎项必须用带研究来源的N/A行表示。总文档字节数和默认读取集合的大小只作诊断数据。主题过长时先按概念边界拆分并调整路由；过时内容应修订、删除或移入默认不读取的 Archive，不得为了塞进一个任意容量而写成密文。
+文档管理优先保证可读性和信息层级，不以总字数或文件总数强迫压缩。`Check-Docs.ps1` 强制内容文档明确路由、引用目标存在、主线唯一且复核/hash有效；根目录`AGENTS.md`是直接生效的工作规则，不属于内容文档路由，也不应加入`ContextState.json`或`SYSTEM_INVENTORY.md`。检查器会验证 SYSTEM_INVENTORY 的126个A-L系统各自至少落到一个显式OBS/ACT/N/A目录行、每条目录记录在来源列引用有效A-L系统编号且全体覆盖126个编号、观察/行为/N/A目录ID唯一且所有交叉引用都有定义；同时按目录中显式标注的特权ACT分类，核对Mainline声明的ACT总量/核心分母，避免目录增删后分母脱节。Docs收据记录当前目录行结构计数，供同一分母口径下比较版本变化；这些计数不代表已核实的玩家行为最终分母。系统本身不是行为分母；有真实原因无玩家入口的引擎项必须用带研究来源的N/A行表示。总文档字节数和默认读取集合的大小只作诊断数据。主题过长时先按概念边界拆分并调整路由；过时内容应修订、删除或移入默认不读取的 Archive，不得为了塞进一个任意容量而写成密文。
 
 禁止新增 README、Harness 说明、工具链说明、验证报告、状态记录或索引 Markdown。当前项目完成或主线改变时，默认删除旧 `MAINLINE.md` 内容；只有仍具长期追溯价值时才移入 `Archive/`。Archive 不得进入默认上下文。
 
@@ -182,7 +182,7 @@ stop()
 | Docs | 文档路由、主线层级、引用/hash/复核和契约一致 | `Check-Docs.ps1`；Harness收据另记Git commit/脏树 |
 | Preflight | 本体、项目、清单和工具存在；存档头模块列表的解析、顺序保留、损坏拒绝 | JSON 清单与合成存档元数据回归 |
 | Api | 当前 DLL 存在目标签名 | API Probe 输出 |
-| Build | 项目针对当前 DLL 编译 | 构建退出码和 DLL |
+| Build | 项目针对当前 DLL 编译 | Build阶段run收据保留dotnet build完整编译输出、退出码与DLL，失败能定位源行 |
 | Smoke | 清单、DLL、`OnSubModuleLoad`、`Finished All` | 同 PID 日志 |
 | Campaign/FreshCampaign | 旧档；FreshCampaign新Sandbox原生创建、跳intro、选+20；Progression用临时存档重载再move/arrival/recruit | 同PID renown20/MapState、非激活840x472；Crash Report仅按明确信号有界重试；已知`Mod change detected`着色器缓存提示仅可经精确匹配的目标进程UIA按钮确认一次，不用全局输入；临时存档精确清理、非模型Provider |
 | Protocol | CLI 启动/重载、状态、Native Pause/Play/FastForward、Harness-only独立推进时钟、Campaign保存/跨进程读档、停止 | Native时间选择对照`Campaign.SetTimeSpeed(0/1/2)`，检查raw/effective模式和waiting状态；固定advance仅用于Harness测试并按日目标或Encounter返回；存档往返使用唯一测试名，比较Save前与新进程读档后的结构化Campaign指纹及Chronicle SyncData计数、源夹具哈希后删除；时间步进不得隐式塞入地图移动/追近命令 |
@@ -197,7 +197,7 @@ stop()
 | Movement | 从原版可见聚落marker观察选择Settlement ID，下达原版路径目标并复现普通地图单击时间档位；Harness独立显式步进至抵达，并复用抵达回执中的原生菜单观察 | 目标/菜单/时钟轨迹、失败拒绝、fixture hash；子测试stdout/stderr原文保存在父Harness阶段失败收据，若游戏仍响应则捕获引擎末帧 |
 | Hold | 按原版Map点击语义从正在移动主队切到Hold；动作后不发Pause/Resume/advance，观察Native waiting与CampaignDay | 当前目标清除、defaultBehavior、raw时间档/isWaiting和短自然窗口的日期差；disposable fixture hash、进程清理；失败尽可能留游戏引擎末帧 |
 | MoveToPoint | W2-B仅在陆地用Campaign世界坐标请求有效自由地形点导航；适配层验证CampaignVec2/Face与原版导航模型，通过MapState.ProcessTravel而非直接写位置；Harness可显式步进至目的地 | GoToPoint与location.targetPosition对齐、初末坐标变化/到达、无效Face拒绝且不移主队/切时钟、原版点击时钟模式、fixture hash/进程清理；海上/港口另行验收 |
-| Recruitment | 调用本体招募 ViewModel，按指定 owner/troop/slot 招募；用原版 InventoryLogic 完成买入、卖出和食品补给往返 | 实际 roster、双方库存与金币差额；无效报价不改状态；fixture 哈希 |
+| Recruitment | 仅当当前Settlement菜单有`recruit_volunteers`可用项时，读取/招入指定Native RecruitmentVM offer；通过显式 `ConfirmPartySizeWarning` 选择是否接受原版超限Inquiry；Detached VM按原生Gauntlet hotkey/GetKeyText绑定初始化并在每次查询/事务后Finalize；同一运行复验Town Trade买卖/食物补给 | menu ID/option/Native VM offer、Roster/Gold、原版Over Limit提示及affirmative回调、off-menu/invalid报价无副作用、容量边界的raw time/date、受限Harness fixture/hash/进程清理；不模拟点击焦点；失败收据保留子测试原始stdout/stderr |
 | Rest | 通过原版 `town_wait` 进入 native Wait menu（`StartWait` 自行启动时间），观察指定时长后由原版 `wait_leave/EndWait` 退出 | Wait menu/time mode、native 持续时长、离开后 Stop、非法/中断路径和 fixture 哈希 |
 | Pursuit | 在大地图对当前可见且可导航Party分别下达原版 `EngageParty`/`EscortParty`；`hold` 复现点击玩家队伍。Escort等价于按住`MapFollowModifier`点击Party；所有有效点击复现同一原版点击时间档位规则 | 正确TargetParty/DefaultBehavior、native click time mode、Escort目标/无效目标和无副作用拒绝、Engage自然前进到遭遇或目标丢失Hold、fixture哈希 |
 | EngageVisibility | 在一次性运行中显式暂停Campaign以稳定准备场景；用Native `BanditPartyComponent`生成初始位置有效、原版`IsVisible`自然判定的弱劫匪目标，只为场景测试临时增加主队普通兵力差。确认目标可见并截图后由产品`pursue`发出Engage，观察自然移动、主队Hold及`Campaign.IsMainPartyWaiting`；Hold后再观察稳定窗口，区分原始TimeControlMode与引擎有效暂停 | 目标原生可见性消失前后快照、`isWaiting`、原始时钟档/日期、Hold稳定窗口、前后引擎关键帧和源fixture hash/进程清理；初始位置和兵力差属于明确标注的测试夹具，不在追击中传送/改AI/改`IsVisible`/脚本推进或暂停时钟 |

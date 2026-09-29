@@ -28,7 +28,8 @@ if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'recruitment') {
     $gold = [int]$request.observation.state.economy.gold
     $offer = @($receipt.data.offers | Where-Object { $_.available -and [int]$_.cost -le $gold } | Sort-Object cost | Select-Object -First 1)
     if ($offer.Count -ne 1) { throw 'Recruitment provider received no affordable volunteer offer.' }
-    [pscustomobject]@{ action = 'recruit'; arguments = @{ OwnerId = [string]$offer[0].ownerId; TroopId = [string]$offer[0].troopId; VolunteerSlot = [int]$offer[0].slot }; rationale = 'Deterministic harness test: select the cheapest affordable native offer.' } | ConvertTo-Json -Compress
+    $confirmCapacity = ([int]$receipt.data.partySize + 1 -gt [int]$receipt.data.partyCapacity)
+    [pscustomobject]@{ action = 'recruit'; arguments = @{ OwnerId = [string]$offer[0].ownerId; TroopId = [string]$offer[0].troopId; VolunteerSlot = [int]$offer[0].slot; ConfirmPartySizeWarning = $confirmCapacity }; rationale = 'Deterministic harness test: select the cheapest affordable native offer and make the native over-limit choice explicit.' } | ConvertTo-Json -Compress
     exit 0
 }
 if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'escort') {
