@@ -105,7 +105,21 @@ try {
     $mapState = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-hold-settled", '-TimeoutSeconds', $TimeoutSeconds)
     $escortStoppedByNativeHold = ($holdAfterEscort.status -eq 'completed' -and $mapState.state.location.targetPartyId -eq $null -and $mapState.state.party.defaultBehavior -eq 'Hold')
 
-    $targets = @($mapState.state.nearbyParties | Where-Object { $_.isMoving -and $null -eq $_.currentSettlementId -and $_.distance -gt 1.0 -and (-not ($ProbeConversation -or $ProbeQuestAcceptance) -or $_.type -eq 'lord') } | Sort-Object distance)
+    $pursuitVisibilityFixture = $null
+    $pursuitVisibilitySetupPause = $null
+    if ($ProbeEngageVisibilityLoss) {
+        $pursuitVisibilitySetupPause = Invoke-AgentCli 'pause' @('-CommandId', "$runPrefix-pause-for-visibility-fixture", '-TimeoutSeconds', $TimeoutSeconds)
+        if ($pursuitVisibilitySetupPause.timeControlMode -ne 'Stop') { throw 'Visibility fixture setup did not reach Native Stop before target creation.' }
+        $pursuitVisibilityFixture = Invoke-AgentCli 'harnessPreparePursuitVisibilityFixture' @('-CommandId', "$runPrefix-prepare-visibility-fixture", '-TimeoutSeconds', $TimeoutSeconds)
+        $mapState = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-after-visibility-fixture", '-TimeoutSeconds', $TimeoutSeconds)
+        $visibleParties = Invoke-AgentCli 'mapPartyTargets' @('-CommandId', "$runPrefix-visibility-fixture-targets", '-TimeoutSeconds', $TimeoutSeconds)
+        $fixtureTarget = @($visibleParties.data.mapPartyTargets | Where-Object { $_.id -eq $pursuitVisibilityFixture.data.partyId } | Select-Object -First 1)
+        if ($fixtureTarget.Count -ne 1) { throw 'The Native-spawned weak Bandit Party was not naturally present in the IsVisible map-target set; refusing to force visibility or substitute another target.' }
+        $targets = @($fixtureTarget[0])
+    }
+    else {
+        $targets = @($mapState.state.nearbyParties | Where-Object { $_.isMoving -and $null -eq $_.currentSettlementId -and $_.distance -gt 1.0 -and (-not ($ProbeConversation -or $ProbeQuestAcceptance) -or $_.type -eq 'lord') } | Sort-Object distance)
+    }
     if ($targets.Count -eq 0) {
         if ($ProbeConversation -or $ProbeQuestAcceptance) { throw 'No visible moving Lord party exists in this disposable conversation fixture; refusing to substitute another Party or fake the meeting.' }
         throw 'No visible moving party outside a settlement is available for pursuit in the disposable fixture; refusing to invent or teleport a target.'
@@ -116,10 +130,24 @@ try {
         $targetVisibleBeforePursuit = @((Invoke-AgentCli 'mapPartyTargets' @('-CommandId', "$runPrefix-pursuit-visible-before", '-TimeoutSeconds', $TimeoutSeconds)).data.mapPartyTargets | Where-Object { $_.id -eq $target.id }).Count -gt 0
         if (-not $targetVisibleBeforePursuit) { throw 'The selected Pursuit target was not present in the native visible-party marker set before the action.' }
     }
+    $initialScreenshot = $null
+    $initialScreenshotError = $null
+    if ($ProbeEngageVisibilityLoss) {
+        try {
+            $framePath = Join-Path $env:CHRONICLE_HARNESS_TEMP 'engage-target-initial-map.bmp'
+            $capture = Invoke-AgentCli 'captureFrame' @('-OutputPath', $framePath, '-CommandId', "$runPrefix-engage-initial-frame", '-TimeoutSeconds', $TimeoutSeconds)
+            $initialScreenshot = if ($capture.status -eq 'completed' -and (Test-Path -LiteralPath $framePath -PathType Leaf)) { $framePath } else { $null }
+        }
+        catch { $initialScreenshotError = $_.Exception.Message }
+    }
 
-    $invalid = Invoke-AgentCli 'pursue' @('-PartyId', 'chronicle_missing_party', '-CommandId', "$runPrefix-invalid", '-TimeoutSeconds', '15')
-    $afterInvalid = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-after-invalid", '-TimeoutSeconds', $TimeoutSeconds)
-    $invalidNoMutation = ($invalid.status -eq 'rejected' -and $afterInvalid.state.location.targetPartyId -eq $mapState.state.location.targetPartyId -and $afterInvalid.state.party.moveMode -eq $mapState.state.party.moveMode)
+    $invalid = $null
+    $invalidNoMutation = $null
+    if (-not $ProbeEngageVisibilityLoss) {
+        $invalid = Invoke-AgentCli 'pursue' @('-PartyId', 'chronicle_missing_party', '-CommandId', "$runPrefix-invalid", '-TimeoutSeconds', '15')
+        $afterInvalid = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-after-invalid", '-TimeoutSeconds', $TimeoutSeconds)
+        $invalidNoMutation = ($invalid.status -eq 'rejected' -and $afterInvalid.state.location.targetPartyId -eq $mapState.state.location.targetPartyId -and $afterInvalid.state.party.moveMode -eq $mapState.state.party.moveMode)
+    }
 
     $pursuit = Invoke-AgentCli 'pursue' @('-PartyId', [string]$target.id, '-CommandId', "$runPrefix-pursue", '-TimeoutSeconds', $TimeoutSeconds)
     $pursuitState = $pursuit.state
@@ -134,12 +162,15 @@ try {
         $probeSamples = [System.Collections.Generic.List[object]]::new()
         $probeOutcome = 'target-remained-visible-through-window'
         $targetLostAtUtc = $null
+        $targetLostCampaignDay = $null
+        $holdObservedAtUtc = $null
         $lossScreenshot = $null
         $encounterScreenshot = $null
         $encounterScreenshotError = $null
         $lastVisible = $true
         $lossScreenshotError = $null
-
+        $stableHoldScreenshot = $null
+        $stableHoldScreenshotError = $null
         while ([DateTime]::UtcNow -lt $probeDeadline) {
             $outcomeState = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-engage-observe-$([guid]::NewGuid().ToString('N'))", '-TimeoutSeconds', $TimeoutSeconds)
             if ($outcomeState.state.context.gameState -ne 'MapState') {
@@ -167,12 +198,14 @@ try {
                 MainPartyMoveMode = $outcomeState.state.party.moveMode
                 MainPartyDefaultBehavior = $outcomeState.state.party.defaultBehavior
                 TimeControlMode = $outcomeState.state.context.timeControlMode
+                IsMainPartyWaiting = [bool]$outcomeState.state.context.isWaiting
                 EncounterActive = [bool]$outcomeState.state.context.encounterActive
             }
             $probeSamples.Add($sample)
 
             if ($lastVisible -and -not $targetVisible) {
                 $targetLostAtUtc = $sample.Utc
+                $targetLostCampaignDay = [double]$sample.CampaignDay
                 $probeOutcome = 'native-visible-map-marker-lost'
                 $framePath = Join-Path $env:CHRONICLE_HARNESS_TEMP 'engage-target-lost-map.bmp'
                 try {
@@ -195,6 +228,15 @@ try {
             }
             if ($probeOutcome -eq 'native-visible-map-marker-lost' -and $outcomeState.state.party.defaultBehavior -eq 'Hold' -and $null -eq $outcomeState.state.location.targetPartyId) {
                 $probeOutcome = 'visible-target-lost-and-native-hold'
+                if ($null -eq $holdObservedAtUtc) { $holdObservedAtUtc = [DateTime]::UtcNow }
+            }
+            if ($null -ne $holdObservedAtUtc -and ([DateTime]::UtcNow - $holdObservedAtUtc).TotalSeconds -ge 5) {
+                try {
+                    $framePath = Join-Path $env:CHRONICLE_HARNESS_TEMP 'engage-target-lost-stable-hold.bmp'
+                    $capture = Invoke-AgentCli 'captureFrame' @('-OutputPath', $framePath, '-CommandId', "$runPrefix-engage-stable-hold-frame", '-TimeoutSeconds', $TimeoutSeconds)
+                    $stableHoldScreenshot = if ($capture.status -eq 'completed' -and (Test-Path -LiteralPath $framePath -PathType Leaf)) { $framePath } else { $null }
+                }
+                catch { $stableHoldScreenshotError = $_.Exception.Message }
                 break
             }
             if (-not (Get-Process -Id $start.session.processId -ErrorAction SilentlyContinue)) { throw 'Game process exited during the native Engage visibility probe.' }
@@ -205,23 +247,32 @@ try {
         $fixtureHashAfter = (Get-FileHash $savePath -Algorithm SHA256).Hash
         $probeResult = [ordered]@{
             ProcessId = $start.session.processId
-            Mode = 'native Engage target; natural Campaign time; no scripted advance, pause, hold, teleport, or visibility mutation'
+            Mode = 'Explicit setup pause stabilizes a controlled initial Native Bandit fixture; pursue then applies its ordinary click time policy; all post-action movement, AI, visibility, and Campaign time are Native/natural'
             Target = $target
+            FixtureSetup = if ($pursuitVisibilityFixture) { $pursuitVisibilityFixture.data } else { $null }
+            SetupPause = $pursuitVisibilitySetupPause
             Initial = [ordered]@{ Status = $pursuit.status; TargetPartyId = $pursuitState.location.targetPartyId; DefaultBehavior = $pursuitState.party.defaultBehavior; TimeControlMode = $pursuitState.context.timeControlMode; CampaignDay = [double]$pursuit.campaignDay; VisibleMapMarker = $targetVisibleBeforePursuit }
             Outcome = $probeOutcome
+            InitialMapScreenshot = $initialScreenshot
+            InitialMapScreenshotError = $initialScreenshotError
             TargetLostAtUtc = $targetLostAtUtc
+            TargetLostCampaignDay = $targetLostCampaignDay
+            HoldStableForSeconds = if ($null -ne $holdObservedAtUtc) { ([DateTime]::UtcNow - $holdObservedAtUtc).TotalSeconds } else { 0 }
             TargetLossScreenshot = $lossScreenshot
             TargetLossScreenshotError = $lossScreenshotError
+            StableHoldScreenshot = $stableHoldScreenshot
+            StableHoldScreenshotError = $stableHoldScreenshotError
             EncounterScreenshot = $encounterScreenshot
             EncounterScreenshotError = $encounterScreenshotError
             Samples = @($probeSamples.ToArray())
-            FinalState = [ordered]@{ TargetPartyId = $outcomeState.state.location.targetPartyId; MoveMode = $outcomeState.state.party.moveMode; DefaultBehavior = $outcomeState.state.party.defaultBehavior; TimeControlMode = $outcomeState.state.context.timeControlMode; CampaignDay = [double]$outcomeState.campaignDay; GameState = $outcomeState.state.context.gameState }
+            FinalState = [ordered]@{ TargetPartyId = $outcomeState.state.location.targetPartyId; MoveMode = $outcomeState.state.party.moveMode; DefaultBehavior = $outcomeState.state.party.defaultBehavior; TimeControlMode = $outcomeState.state.context.timeControlMode; IsMainPartyWaiting = [bool]$outcomeState.state.context.isWaiting; CampaignDay = [double]$outcomeState.campaignDay; GameState = $outcomeState.state.context.gameState }
             DaysElapsed = [double]$outcomeState.campaignDay - $pursuitStartDay
+            DaysElapsedAfterTargetLoss = if ($null -ne $targetLostCampaignDay) { [double]$outcomeState.campaignDay - $targetLostCampaignDay } else { $null }
             FixtureUnchanged = $fixtureHashBefore -eq $fixtureHashAfter
             ProcessStopped = $stop.processStopped
         }
         $probeResult.TargetLossAndHoldReproduced = $probeOutcome -eq 'visible-target-lost-and-native-hold'
-        $probeResult.CampaignClockStoppedAfterTargetLoss = ($probeResult.TargetLossAndHoldReproduced -and $outcomeState.state.context.timeControlMode -eq 'Stop')
+        $probeResult.CampaignClockStoppedAfterTargetLoss = ($probeResult.TargetLossAndHoldReproduced -and $outcomeState.state.context.isWaiting -and [math]::Abs([double]$probeResult.DaysElapsedAfterTargetLoss) -lt 0.002)
         $probeResult.Passed = ($nativeOrderIssued -and $nativeMapClickTimePolicyApplied -and $probeResult.FixtureUnchanged -and $probeResult.ProcessStopped)
         $probeJson = $probeResult | ConvertTo-Json -Depth 10
         if ($env:CHRONICLE_HARNESS_TEMP -and (Test-Path -LiteralPath $env:CHRONICLE_HARNESS_TEMP -PathType Container)) {

@@ -14,7 +14,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '5.67'
+$HarnessContractVersion = '5.70'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -452,8 +452,9 @@ foreach ($stage in $requestedStages) {
                 $previousHarnessMode = $env:CHRONICLE_HARNESS_MODE
                 $env:CHRONICLE_HARNESS_MODE = 'visual-capture'
                 try {
-                    & powershell -NoProfile -ExecutionPolicy Bypass -File $pursuitScript -ProbeEngageVisibilityLoss -VisibilityProbeSeconds $VisibilityProbeSeconds
-                    if ($LASTEXITCODE -ne 0) { throw "Agent Engage visibility probe failed with exit code $LASTEXITCODE." }
+                    $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $pursuitScript -ProbeEngageVisibilityLoss -VisibilityProbeSeconds $VisibilityProbeSeconds -TimeoutSeconds 240 2>&1 | Out-String
+                    $testExitCode = $LASTEXITCODE
+                    if ($testExitCode -ne 0) { throw "Agent Engage visibility probe failed with exit code $testExitCode.`n$testOutput" }
                 }
                 finally {
                     if ($null -eq $previousHarnessMode) { Remove-Item Env:CHRONICLE_HARNESS_MODE -ErrorAction SilentlyContinue }
