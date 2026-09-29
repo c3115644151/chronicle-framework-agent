@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Text;
 using Helpers;
 using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.CampaignBehaviors;
 using TaleWorlds.CampaignSystem.GameState;
 using TaleWorlds.CampaignSystem.Inventory;
 using TaleWorlds.CampaignSystem.Party;
@@ -13,6 +14,7 @@ using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.CampaignSystem.ViewModelCollection.Inventory;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
+using TaleWorlds.Localization;
 
 namespace ChronicleFramework;
 
@@ -74,6 +76,183 @@ internal static class ChronicleAgentTradeAdapter
         json.Append(",\"hasPendingChanges\":").Append(ChroniclePartyUpgradeAdapter.Bool(inventoryState.InventoryLogic.IsThereAnyChanges()));
         AppendOffers(json, "offers", offers, inventoryState.InventoryLogic, isBuying: true);
         return json.Append('}').ToString();
+    }
+
+    internal static string BuildTradeRumorOptionsJson(string itemViewModelId, string inventorySide)
+    {
+        if (string.IsNullOrWhiteSpace(itemViewModelId))
+            throw new InvalidOperationException("itemViewModelId must come from the current native tradeOptions result");
+        if (inventorySide != InventoryLogic.InventorySide.OtherInventory.ToString() && inventorySide != InventoryLogic.InventorySide.PlayerInventory.ToString())
+            throw new InvalidOperationException("trade rumor lookup requires a current OtherInventory or PlayerInventory candidate");
+
+        var inventoryState = RequireNativeTradeState(out var viewModel);
+        if (inventoryState.InventoryLogic.IsThereAnyChanges())
+            throw new InvalidOperationException("Resolve the current Native Trade draft before reading a new item tooltip");
+
+        var side = inventorySide == InventoryLogic.InventorySide.OtherInventory.ToString()
+            ? InventoryLogic.InventorySide.OtherInventory
+            : InventoryLogic.InventorySide.PlayerInventory;
+        var candidates = GetTradeItems(viewModel)
+            .Where(item => item.InventorySide == side && string.Equals(item.StringId, itemViewModelId, StringComparison.Ordinal))
+            .ToArray();
+        if (candidates.Length != 1)
+            throw new InvalidOperationException("itemViewModelId is stale, missing or ambiguous in the current Native Trade VM");
+
+        var candidate = candidates[0];
+        var element = candidate.ItemRosterElement.EquipmentElement;
+        var item = element.Item;
+        var inventoryItemType = InventoryScreenHelper.GetInventoryItemTypeOfItem(item);
+        var currentSettlement = Settlement.CurrentSettlement;
+        var timeModeBefore = Campaign.Current.TimeControlMode.ToString();
+        var campaignDayBefore = CampaignTime.Now.ToDays;
+        var json = new StringBuilder(2048);
+        json.Append('{').Append("\"schemaVersion\":1");
+        ChroniclePartyUpgradeAdapter.Property(json, "itemViewModelId", candidate.StringId);
+        ChroniclePartyUpgradeAdapter.Property(json, "inventorySide", candidate.InventorySide.ToString());
+        ChroniclePartyUpgradeAdapter.Property(json, "itemId", item.StringId);
+        ChroniclePartyUpgradeAdapter.Property(json, "name", element.GetModifiedItemName().ToString());
+        ChroniclePartyUpgradeAdapter.Property(json, "inventoryItemType", inventoryItemType.ToString());
+        ChroniclePartyUpgradeAdapter.Property(json, "settlementId", currentSettlement.StringId);
+        ChroniclePartyUpgradeAdapter.Property(json, "timeControlModeBefore", timeModeBefore);
+        json.Append(",\"campaignDayBefore\":").Append(campaignDayBefore.ToString("F6", System.Globalization.CultureInfo.InvariantCulture));
+
+        if (inventoryItemType != InventoryScreenHelper.InventoryItemType.Goods)
+        {
+            json.Append(",\"applicable\":false,\"hints\":[]");
+        }
+        else
+        {
+            var marketData = inventoryState.InventoryLogic.MarketData;
+            var localSellingPrice = marketData.GetPrice(item, MobileParty.MainParty, isSelling: true, inventoryState.InventoryLogic.OtherParty);
+            var localBuyingPrice = marketData.GetPrice(item, MobileParty.MainParty, isSelling: false, inventoryState.InventoryLogic.OtherParty);
+            var rumorBehavior = Campaign.Current.GetCampaignBehavior<ITradeRumorCampaignBehavior>();
+            var rumors = rumorBehavior?.TradeRumors
+                .Where(rumor => rumor.ItemCategory == item && rumor.Settlement != currentSettlement)
+                .OrderByDescending(rumor => rumor.SellPrice)
+                .ThenByDescending(rumor => rumor.BuyPrice)
+                .ToArray() ?? Array.Empty<TradeRumor>();
+
+            json.Append(",\"applicable\":true,\"localMarketPriceForSell\":").Append(localSellingPrice);
+            json.Append(",\"localMarketPriceForBuy\":").Append(localBuyingPrice);
+            json.Append(",\"hints\":[");
+            var firstHint = true;
+            foreach (var rumor in rumors)
+            {
+                var canBuyHere = rumor.BuyPrice < 0.9f * localSellingPrice;
+                var canSellHere = rumor.SellPrice > 1.1f * localBuyingPrice;
+                if (!canBuyHere && !canSellHere) continue;
+                if (!firstHint) json.Append(',');
+                firstHint = false;
+                // ItemMenuVM prefers its buy wording if both native price thresholds pass.
+                var direction = canBuyHere ? "buy" : "sell";
+                var nativeTextObject = GameTexts.FindText(direction == "buy" ? "str_trade_rumors_text_buy" : "str_trade_rumors_text_sell");
+                nativeTextObject.SetTextVariable("SETTLEMENT_NAME", rumor.Settlement.Name);
+                nativeTextObject.SetTextVariable("SELL_PRICE", rumor.SellPrice);
+                nativeTextObject.SetTextVariable("BUY_PRICE", rumor.BuyPrice);
+                var nativeText = nativeTextObject.ToString();
+                var remainingDays = (int)rumor.RumorEndTime.RemainingDaysFromNow;
+                var displayAlpha = TaleWorlds.Library.MathF.Clamp(remainingDays / 5f, 0.5f, 1f);
+
+                json.Append('{');
+                ChroniclePartyUpgradeAdapter.Property(json, "direction", direction, addComma: false);
+                ChroniclePartyUpgradeAdapter.Property(json, "nativeText", nativeText);
+                ChroniclePartyUpgradeAdapter.Property(json, "settlementId", rumor.Settlement.StringId);
+                ChroniclePartyUpgradeAdapter.Property(json, "settlementName", rumor.Settlement.Name.ToString());
+                json.Append(",\"buyPrice\":").Append(rumor.BuyPrice);
+                json.Append(",\"sellPrice\":").Append(rumor.SellPrice);
+                json.Append(",\"buySignal\":").Append(canBuyHere ? "true" : "false");
+                json.Append(",\"sellSignal\":").Append(canSellHere ? "true" : "false");
+                json.Append(",\"remainingDays\":").Append(remainingDays);
+                json.Append(",\"displayAlpha\":").Append(displayAlpha.ToString("F2", System.Globalization.CultureInfo.InvariantCulture));
+                json.Append('}');
+            }
+            json.Append(']');
+        }
+
+        ChroniclePartyUpgradeAdapter.Property(json, "timeControlModeAfter", Campaign.Current.TimeControlMode.ToString());
+        json.Append(",\"campaignDayAfter\":").Append(CampaignTime.Now.ToDays.ToString("F6", System.Globalization.CultureInfo.InvariantCulture));
+        return json.Append('}').ToString();
+    }
+
+    internal static string SeedHarnessTradeRumorFixture(string itemViewModelId, string inventorySide)
+    {
+        RequireVisualHarnessTradeRumorFixture();
+        if (string.IsNullOrWhiteSpace(itemViewModelId) || (inventorySide != "OtherInventory" && inventorySide != "PlayerInventory"))
+            throw new InvalidOperationException("Harness trade rumor fixture requires a current observed candidate and side");
+        var inventoryState = RequireNativeTradeState(out var viewModel);
+        if (inventoryState.InventoryLogic.IsThereAnyChanges()) throw new InvalidOperationException("Harness trade rumor fixture requires an empty Trade draft");
+        var side = inventorySide == "OtherInventory" ? InventoryLogic.InventorySide.OtherInventory : InventoryLogic.InventorySide.PlayerInventory;
+        var candidates = GetTradeItems(viewModel).Where(item => item.InventorySide == side && item.StringId == itemViewModelId).ToArray();
+        if (candidates.Length != 1) throw new InvalidOperationException("Harness fixture item must come from the current Native tradeOptions candidate list");
+        var item = candidates[0].ItemRosterElement.EquipmentElement.Item;
+        if (InventoryScreenHelper.GetInventoryItemTypeOfItem(item) != InventoryScreenHelper.InventoryItemType.Goods)
+            throw new InvalidOperationException("Harness trade rumor fixture only supports a Native Goods candidate");
+
+        var localSellPrice = inventoryState.InventoryLogic.MarketData.GetPrice(item, MobileParty.MainParty, isSelling: true, inventoryState.InventoryLogic.OtherParty);
+        var localBuyPrice = inventoryState.InventoryLogic.MarketData.GetPrice(item, MobileParty.MainParty, isSelling: false, inventoryState.InventoryLogic.OtherParty);
+        if (localSellPrice <= 0 || localBuyPrice <= 0) throw new InvalidOperationException("Harness fixture candidate must have positive native buy and sell prices");
+        var behavior = Campaign.Current.GetCampaignBehavior<ITradeRumorCampaignBehavior>();
+        if (behavior == null) throw new InvalidOperationException("Native Trade Rumor campaign behavior is unavailable");
+        var existingRumors = behavior?.TradeRumors.ToArray() ?? Array.Empty<TradeRumor>();
+        var remoteTowns = Settlement.All.Where(settlement => settlement.IsTown)
+            .Where(settlement => settlement != Settlement.CurrentSettlement && !existingRumors.Any(rumor => rumor.ItemCategory == item && rumor.Settlement == settlement))
+            .Take(3).ToArray();
+        if (remoteTowns.Length != 3) throw new InvalidOperationException("Harness could not find three rumor-free remote Towns for this Goods item");
+
+        var addRumors = behavior.GetType().GetMethod("AddTradeRumors", BindingFlags.Instance | BindingFlags.Public, null,
+            new[] { typeof(List<TradeRumor>), typeof(Settlement) }, null);
+        if (addRumors == null) throw new MissingMethodException("Native TradeRumorsCampaignBehavior.AddTradeRumors(List<TradeRumor>, Settlement) was not found");
+        var buyRumorBuyPrice = Math.Max(0, (int)Math.Floor(localSellPrice * 0.2f));
+        var sellRumorSellPrice = Math.Max((int)Math.Ceiling(localBuyPrice * 2f), localBuyPrice + 1);
+        var buyRumor = new TradeRumor(remoteTowns[0], item, buyRumorBuyPrice, localBuyPrice, 10);
+        var sellRumor = new TradeRumor(remoteTowns[1], item, localSellPrice, sellRumorSellPrice, 10);
+        var expiredRumor = new TradeRumor(remoteTowns[2], item, buyRumorBuyPrice, localBuyPrice, 10);
+        typeof(TradeRumor).GetProperty(nameof(TradeRumor.RumorEndTime))?.SetValue(expiredRumor, CampaignTime.DaysFromNow(-1f), null);
+        addRumors.Invoke(behavior, new object[] { new List<TradeRumor> { buyRumor }, Settlement.CurrentSettlement });
+        addRumors.Invoke(behavior, new object[] { new List<TradeRumor> { sellRumor }, Settlement.CurrentSettlement });
+        addRumors.Invoke(behavior, new object[] { new List<TradeRumor> { expiredRumor }, Settlement.CurrentSettlement });
+
+        return "{\"schemaVersion\":1,\"testOnly\":true,\"itemId\":\"" + ChroniclePartyUpgradeAdapter.Escape(item.StringId) + "\"" +
+            ",\"localSellPrice\":" + localSellPrice + ",\"localBuyPrice\":" + localBuyPrice +
+            ",\"buyRumorTownId\":\"" + ChroniclePartyUpgradeAdapter.Escape(remoteTowns[0].StringId) + "\"" +
+            ",\"buyRumorPrice\":" + buyRumorBuyPrice + ",\"sellRumorTownId\":\"" + ChroniclePartyUpgradeAdapter.Escape(remoteTowns[1].StringId) + "\"" +
+            ",\"sellRumorPrice\":" + sellRumorSellPrice + ",\"expiredRumorTownId\":\"" + ChroniclePartyUpgradeAdapter.Escape(remoteTowns[2].StringId) + "\"}";
+    }
+
+    internal static string ReadHarnessNativeTradeRumorTooltip(string itemViewModelId, string inventorySide)
+    {
+        RequireVisualHarnessTradeRumorFixture();
+        var inventoryState = RequireNativeTradeState(out var viewModel);
+        var side = inventorySide == "OtherInventory" ? InventoryLogic.InventorySide.OtherInventory : InventoryLogic.InventorySide.PlayerInventory;
+        var candidates = GetTradeItems(viewModel).Where(item => item.InventorySide == side && item.StringId == itemViewModelId).ToArray();
+        if (candidates.Length != 1) throw new InvalidOperationException("Native tooltip diagnostic requires a current observed candidate");
+        var candidate = candidates[0];
+        var nativeTooltip = new ItemMenuVM((_, _) => { }, inventoryState.InventoryLogic, _ => default, _ => null);
+        nativeTooltip.SetItem(candidate, candidate.InventorySide);
+        var rumorSettlements = Campaign.Current.GetCampaignBehavior<ITradeRumorCampaignBehavior>()?.TradeRumors
+            .Where(rumor => rumor.ItemCategory == candidate.ItemRosterElement.EquipmentElement.Item && rumor.Settlement != Settlement.CurrentSettlement)
+            .Select(rumor => rumor.Settlement.Name.ToString()).Distinct(StringComparer.Ordinal).ToArray() ?? Array.Empty<string>();
+        var texts = nativeTooltip.TargetItemProperties.Select(property => property.ValueLabel)
+            .Where(value => !string.IsNullOrEmpty(value) && rumorSettlements.Any(name => value.IndexOf(name, StringComparison.Ordinal) >= 0))
+            .ToArray();
+        var json = new StringBuilder(1024);
+        json.Append('{').Append("\"schemaVersion\":1,\"testOnly\":true");
+        ChroniclePartyUpgradeAdapter.Property(json, "itemViewModelId", candidate.StringId);
+        ChroniclePartyUpgradeAdapter.Property(json, "inventorySide", candidate.InventorySide.ToString());
+        json.Append(",\"hintTexts\":[");
+        for (var index = 0; index < texts.Length; index++)
+        {
+            if (index > 0) json.Append(',');
+            json.Append('"').Append(ChroniclePartyUpgradeAdapter.Escape(texts[index])).Append('"');
+        }
+        return json.Append("]}").ToString();
+    }
+
+    private static void RequireVisualHarnessTradeRumorFixture()
+    {
+        if (!string.Equals(Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE"), "visual-capture", StringComparison.Ordinal) ||
+            string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP")))
+            throw new InvalidOperationException("Trade rumor fixtures and Native tooltip diagnostics are restricted to visual Harness runs");
     }
 
     internal static string DraftTradeItem(string direction, string itemViewModelId, string inventorySide, int amount, bool requireFood = false)
@@ -286,6 +465,7 @@ internal static class ChronicleAgentTradeAdapter
             ChroniclePartyUpgradeAdapter.Property(json, "modifierId", element.ItemModifier?.StringId);
             ChroniclePartyUpgradeAdapter.Property(json, "name", element.GetModifiedItemName().ToString());
             ChroniclePartyUpgradeAdapter.Property(json, "inventorySide", item.InventorySide.ToString());
+            ChroniclePartyUpgradeAdapter.Property(json, "nativeTooltipType", InventoryScreenHelper.GetInventoryItemTypeOfItem(element.Item).ToString());
             json.Append(",\"stock\":").Append(item.ItemCount);
             json.Append(",\"nativeItemCost\":").Append(item.ItemCost);
             json.Append(",\"inventoryLogicUnitPrice\":").Append(logic.GetItemPrice(element, isBuying));

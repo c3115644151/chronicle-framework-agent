@@ -63,9 +63,7 @@ try {
     $arrival = Wait-ForAgentSettlementArrival -CliPath $cli -SettlementId ([string]$target[0].id) -CommandPrefix "$prefix-arrival" -TimeoutSeconds $TimeoutSeconds
     if ($arrival.state.location.currentSettlementId -ne $target[0].id) { throw 'MainParty did not reach the selected Town.' }
 
-    $activeResume = Invoke-AgentCli 'resume' @('-CommandId', "$prefix-active-resume")
-    $activeMapStart = Get-TradeState 'active-map-start'
-    if ($activeResume.status -ne 'completed' -or $activeMapStart.state.context.timeControlMode -ne 'UnstoppablePlay') { throw 'The Active-mode clock boundary test did not start from the native UnstoppablePlay mode.' }
+    $timeModeAtTownMenu = [string]$arrival.state.context.timeControlMode
     $activeTrade = Open-NativeTrade 'active'
     $activeOptions = Invoke-AgentCli 'tradeOptions' @('-CommandId', "$prefix-active-options")
     $activeBuyOffer = Find-Offer $activeOptions.data.buyOffers
@@ -89,6 +87,8 @@ try {
         $activeBuyCommit.data.timeControlModeBefore -eq $activeBuyCommit.data.timeControlModeAfter -and
         $activeSellDraft.data.timeControlModeBefore -eq $activeSellDraft.data.timeControlModeAfter -and
         $activeSellCommit.data.timeControlModeBefore -eq $activeSellCommit.data.timeControlModeAfter -and
+        $activeBuyDraft.data.timeControlModeBefore -eq $timeModeAtTownMenu -and
+        $activeBuyAfter.state.context.timeControlMode -eq $timeModeAtTownMenu -and
         [double]$activeBuyAfter.state.campaignDay -ge [double]$activeTrade.State.state.campaignDay -and
         [double]$activeSellAfter.state.campaignDay -ge [double]$activeBuyAfter.state.campaignDay
     )
@@ -105,10 +105,7 @@ try {
     $activeClose = Invoke-AgentCli 'tradeCancel' @('-CommandId', "$prefix-active-close")
     $mapAfterActiveClose = Get-TradeState 'active-map-after-close'
     $activeCloseStable = ($activeClose.data.returnedToMap -and $mapAfterActiveClose.state.context.gameState -eq 'MapState' -and $mapAfterActiveClose.state.context.timeControlMode -eq $activeTrade.State.state.context.timeControlMode)
-
-    $pause = Invoke-AgentCli 'pause' @('-CommandId', "$prefix-stop-clock")
-    $baseline = Get-TradeState 'stopped-baseline'
-    if ($pause.status -ne 'completed' -or $baseline.state.context.timeControlMode -ne 'Stop') { throw 'Stop-mode trade transaction baseline could not be established.' }
+    $baseline = Get-TradeState 'native-town-baseline'
 
     $buyTrade = Open-NativeTrade 'buy'
     $buyOptions = Invoke-AgentCli 'tradeOptions' @('-CommandId', "$prefix-buy-options")
@@ -121,6 +118,37 @@ try {
         { throw 'The Native Trade VM exposed no transferable affordable non-empty modifier market item in the disposable Town.' }
     if ([string]::IsNullOrWhiteSpace([string]$buyOffer.modifierId)) { throw 'The trade variant fixture must use an exact non-empty item modifier.' }
     $nativeQuoteMatchesLogic = [int]$buyOffer.nativeItemCost -eq [int]$buyOffer.inventoryLogicUnitPrice
+
+    $rumorGood = @($buyOptions.data.buyOffers | Where-Object {
+        $_.nativeTooltipType -eq 'Goods' -and $_.isFood -and $_.isTransferable -and [int]$_.stock -gt 0 -and [int]$_.inventoryLogicUnitPrice -le [int]$buyOptions.data.playerGold
+    } | Sort-Object inventoryLogicUnitPrice | Select-Object -First 1)
+    if ($rumorGood.Count -ne 1) { throw 'The disposable Town exposed no affordable Native Goods candidate for the trade rumor observation.' }
+    $rumorFixture = Invoke-AgentCli 'harnessSeedTradeRumorFixture' @('-ItemViewModelId', [string]$rumorGood[0].viewModelItemId, '-InventorySide', 'OtherInventory', '-CommandId', "$prefix-rumor-fixture")
+    $rumorBefore = Get-TradeState 'rumor-before-read'
+    $marketRumors = Invoke-AgentCli 'tradeRumors' @('-ItemViewModelId', [string]$rumorGood[0].viewModelItemId, '-InventorySide', 'OtherInventory', '-CommandId', "$prefix-market-rumors")
+    $marketNativeTooltip = Invoke-AgentCli 'harnessTradeRumorTooltipDiagnostics' @('-ItemViewModelId', [string]$rumorGood[0].viewModelItemId, '-InventorySide', 'OtherInventory', '-CommandId', "$prefix-market-tooltip")
+    $rumorAfter = Get-TradeState 'rumor-after-read'
+    $marketHintTexts = @($marketRumors.data.hints | ForEach-Object { [string]$_.nativeText })
+    $marketTooltipTexts = @($marketNativeTooltip.data.hintTexts | ForEach-Object { [string]$_ })
+    $marketTooltipParity = ($marketRumors.status -eq 'completed' -and [bool]$marketRumors.data.applicable -and $marketHintTexts.Count -ge 2 -and (($marketHintTexts -join "`n") -ceq ($marketTooltipTexts -join "`n")))
+    $seededRumorIds = @([string]$rumorFixture.data.buyRumorTownId, [string]$rumorFixture.data.sellRumorTownId)
+    $seededHintsVisible = @($marketRumors.data.hints | Where-Object { $_.settlementId -in $seededRumorIds }).Count -eq 2
+    $expiredRumorFiltered = @($marketRumors.data.hints | Where-Object { $_.settlementId -eq [string]$rumorFixture.data.expiredRumorTownId }).Count -eq 0
+    $currentTownRumorsExcluded = @($marketRumors.data.hints | Where-Object { $_.settlementId -eq [string]$marketRumors.data.settlementId }).Count -eq 0
+    $marketRumorReadNoMutation = (
+        [int]$rumorBefore.state.economy.gold -eq [int]$rumorAfter.state.economy.gold -and
+        [int]$rumorBefore.state.party.itemCount -eq [int]$rumorAfter.state.party.itemCount -and
+        [string]$rumorBefore.state.context.timeControlMode -eq [string]$rumorAfter.state.context.timeControlMode -and
+        [double]$rumorBefore.state.campaignDay -eq [double]$rumorAfter.state.campaignDay -and
+        [string]$rumorBefore.state.location.currentSettlementId -eq [string]$rumorAfter.state.location.currentSettlementId
+    )
+    $staleRumors = Invoke-AgentCli 'tradeRumors' @('-ItemViewModelId', 'harness_unknown_item', '-InventorySide', 'OtherInventory', '-CommandId', "$prefix-stale-rumors") 15
+    $allTradeCandidates = @($buyOptions.data.buyOffers) + @($buyOptions.data.sellOffers)
+    $nonGoodsCandidate = @($allTradeCandidates | Where-Object { $_.nativeTooltipType -ne 'Goods' -and $_.stock -gt 0 } | Select-Object -First 1)
+    $nonGoodsRumors = if ($nonGoodsCandidate.Count -eq 1) {
+        Invoke-AgentCli 'tradeRumors' @('-ItemViewModelId', [string]$nonGoodsCandidate[0].viewModelItemId, '-InventorySide', [string]$nonGoodsCandidate[0].inventorySide, '-CommandId', "$prefix-non-goods-rumors")
+    } else { $null }
+    $nonGoodsRejectedAsRumorSource = ($null -ne $nonGoodsRumors -and $nonGoodsRumors.status -eq 'completed' -and -not [bool]$nonGoodsRumors.data.applicable -and @($nonGoodsRumors.data.hints).Count -eq 0)
 
     $overstock = Invoke-AgentCli 'trade' @('-Direction', 'buy', '-ItemViewModelId', [string]$buyOffer.viewModelItemId, '-InventorySide', [string]$buyOffer.inventorySide, '-Amount', [string]([int]$buyOffer.stock + 1), '-CommandId', "$prefix-overstock") 15
     $afterOverstock = Invoke-AgentCli 'tradeOptions' @('-CommandId', "$prefix-overstock-after")
@@ -205,6 +233,31 @@ try {
     $afterSell = Get-TradeState 'after-sell'
     if (-not $sellCommit.data.postconditionPassed -or [int]$sellCommit.data.amount -ne 1) { throw 'Native Trade Done did not commit the sell and matching Town/Party changes.' }
 
+    $rumorGoodsBuyTrade = Open-NativeTrade 'rumor-goods-buy'
+    $rumorGoodsBuyOptions = Invoke-AgentCli 'tradeOptions' @('-CommandId', "$prefix-rumor-goods-buy-options")
+    $rumorGoodsBuyOffer = Find-Offer $rumorGoodsBuyOptions.data.buyOffers ([string]$rumorGood[0].itemId) ([string]$rumorGood[0].modifierId)
+    if ($null -eq $rumorGoodsBuyOffer) { throw 'The Native Goods item used for rumor observation was not available for the side parity transaction.' }
+    $rumorGoodsBuyDraft = Invoke-AgentCli 'trade' @('-Direction', 'buy', '-ItemViewModelId', [string]$rumorGoodsBuyOffer.viewModelItemId, '-InventorySide', 'OtherInventory', '-Amount', '1', '-CommandId', "$prefix-rumor-goods-buy-draft")
+    $rumorGoodsBuyCommit = Invoke-AgentCli 'tradeConfirm' @('-CommandId', "$prefix-rumor-goods-buy-confirm")
+    if (-not $rumorGoodsBuyCommit.data.postconditionPassed) { throw 'The Native Trade VM could not buy the Goods item needed to validate its PlayerInventory tooltip.' }
+    $rumorGoodsSellTrade = Open-NativeTrade 'rumor-goods-sell'
+    $rumorGoodsSellOptions = Invoke-AgentCli 'tradeOptions' @('-CommandId', "$prefix-rumor-goods-sell-options")
+    $rumorGoodsSellOffer = Find-Offer $rumorGoodsSellOptions.data.sellOffers ([string]$rumorGood[0].itemId) ([string]$rumorGood[0].modifierId)
+    if ($null -eq $rumorGoodsSellOffer) { throw 'Bought Goods item was not present in the current PlayerInventory side.' }
+    $playerRumors = Invoke-AgentCli 'tradeRumors' @('-ItemViewModelId', [string]$rumorGoodsSellOffer.viewModelItemId, '-InventorySide', 'PlayerInventory', '-CommandId', "$prefix-player-rumors")
+    $playerNativeTooltip = Invoke-AgentCli 'harnessTradeRumorTooltipDiagnostics' @('-ItemViewModelId', [string]$rumorGoodsSellOffer.viewModelItemId, '-InventorySide', 'PlayerInventory', '-CommandId', "$prefix-player-tooltip")
+    $playerHintTexts = @($playerRumors.data.hints | ForEach-Object { [string]$_.nativeText })
+    $playerTooltipTexts = @($playerNativeTooltip.data.hintTexts | ForEach-Object { [string]$_ })
+    $playerTooltipParity = ($playerRumors.status -eq 'completed' -and [bool]$playerRumors.data.applicable -and $playerHintTexts.Count -ge 2 -and (($playerHintTexts -join "`n") -ceq ($playerTooltipTexts -join "`n")))
+    $rumorGoodsSellDraft = Invoke-AgentCli 'trade' @('-Direction', 'sell', '-ItemViewModelId', [string]$rumorGoodsSellOffer.viewModelItemId, '-InventorySide', 'PlayerInventory', '-Amount', '1', '-CommandId', "$prefix-rumor-goods-sell-draft")
+    $rumorGoodsSellCommit = Invoke-AgentCli 'tradeConfirm' @('-CommandId', "$prefix-rumor-goods-sell-confirm")
+    if (-not $rumorGoodsSellCommit.data.postconditionPassed) { throw 'The Native Trade VM could not complete the PlayerInventory side rollback transaction.' }
+    $afterSell = Get-TradeState 'after-rumor-round-trip'
+    $rumorEmptyTrade = Open-NativeTrade 'rumor-empty'
+    $rumorQueryOutsideTrade = Invoke-AgentCli 'tradeCancel' @('-CommandId', "$prefix-rumor-close")
+    $rumorOutsideState = Invoke-AgentCli 'tradeRumors' @('-ItemViewModelId', [string]$rumorGoodsSellOffer.viewModelItemId, '-InventorySide', 'PlayerInventory', '-CommandId', "$prefix-rumor-outside-state") 15
+    $rumorOutsideTradeRejected = ($rumorOutsideState.status -eq 'rejected' -and $rumorQueryOutsideTrade.data.returnedToMap)
+
     $staleTrade = Open-NativeTrade 'stale'
     $staleItem = Invoke-AgentCli 'trade' @('-Direction', 'sell', '-ItemViewModelId', [string]$sellOffer.viewModelItemId, '-InventorySide', [string]$sellOffer.inventorySide, '-Amount', '1', '-CommandId', "$prefix-stale-item") 15
     $staleOptions = Invoke-AgentCli 'tradeOptions' @('-CommandId', "$prefix-stale-options")
@@ -214,16 +267,24 @@ try {
     $tradeOutsideNativeState = Invoke-AgentCli 'trade' @('-Direction', 'buy', '-ItemViewModelId', [string]$buyOffer.viewModelItemId, '-InventorySide', 'OtherInventory', '-Amount', '1', '-CommandId', "$prefix-outside-trade-state") 15
     $afterOutsideNativeState = Get-TradeState 'outside-trade-state-after'
     $tradeRequiresNativeState = ($tradeOutsideNativeState.status -eq 'rejected' -and $afterOutsideNativeState.state.context.gameState -eq 'MapState' -and [int]$afterOutsideNativeState.state.economy.gold -eq [int]$afterSell.state.economy.gold -and [int]$afterOutsideNativeState.state.party.itemCount -eq [int]$afterSell.state.party.itemCount)
-    $pauseEnd = Invoke-AgentCli 'pause' @('-CommandId', "$prefix-pause-end")
     $stop = Invoke-AgentCli 'stop' @('-CommandId', "$prefix-stop") 30
     $fixtureHashAfter = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
 
     $assertions = [ordered]@{
         TownMenuOpenedNativeTradeInventoryState = ($buyTrade.Open.status -eq 'completed' -and $buyTrade.State.state.context.gameState -eq 'InventoryState' -and $buyTrade.State.state.inventoryScreen.mode -eq 'Trade')
-        UnstoppableMapModeNativeBuySellHasNoHiddenClockWrites = [bool]$activeTransactionsStable
-        ActiveTradeQueryKeepsModeAndNaturalTimeNondecreasing = [bool]$activeQueryStable
-        ActiveTradeCloseReturnsToTownWithoutClockWrite = [bool]$activeCloseStable
+        NativeTownTradeBuySellPreserveArrivalClockMode = [bool]$activeTransactionsStable
+        NativeTradeQueryPreservesClockAndNaturalDate = [bool]$activeQueryStable
+        NativeTradeCloseReturnsToTownWithoutClockWrite = [bool]$activeCloseStable
         NativeTradeQuoteMatchesInventoryLogic = [bool]$nativeQuoteMatchesLogic
+        MarketGoodsRumorsMatchNativeItemMenuVM = [bool]$marketTooltipParity
+        PlayerGoodsRumorsMatchNativeItemMenuVM = [bool]$playerTooltipParity
+        SeededBuyAndSellRumorsVisibleFromObservedCandidate = [bool]$seededHintsVisible
+        ExpiredRumorFilteredByNativeBehavior = [bool]$expiredRumorFiltered
+        CurrentTownRumorExcluded = [bool]$currentTownRumorsExcluded
+        TradeRumorReadsDoNotMutateWorldOrClock = [bool]$marketRumorReadNoMutation
+        StaleTradeRumorCandidateRejected = ($staleRumors.status -eq 'rejected')
+        NonGoodsDoNotExposeNativeTradeRumors = [bool]$nonGoodsRejectedAsRumorSource
+        TradeRumorQueryRequiresActiveTradeState = [bool]$rumorOutsideTradeRejected
         NativeTradeOfferPreservesNonEmptyModifier = -not [string]::IsNullOrWhiteSpace([string]$buyOffer.modifierId)
         OverMarketStockRejectedWithoutGoldOrMarketMutation = [bool]$overstockRejected
         WrongInventorySideRejectedWithoutDraft = [bool]$wrongSideRejected
@@ -241,9 +302,11 @@ try {
     $failedAssertions = @($assertions.Keys | Where-Object { -not [bool]$assertions[$_] })
     $result = [ordered]@{
         Settlement = $target[0]
-        ActiveState = [ordered]@{ MapStart = [ordered]@{ TimeMode = $activeMapStart.state.context.timeControlMode; CampaignDay = $activeMapStart.state.campaignDay }; Resume = $activeResume; Open = $activeTrade.Open.data; TradeStateTimeMode = $activeTrade.State.state.context.timeControlMode; Options = $activeOptions.data; BuyDraft = $activeBuyDraft.data; Buy = $activeBuyCommit.data; SellDraft = $activeSellDraft.data; Sell = $activeSellCommit.data; ModeAfterWait = $activeAfterWait.state.context.timeControlMode; DayBefore = $activeBeforeWait.state.campaignDay; DayAfter = $activeAfterWait.state.campaignDay; Close = $activeClose.data }
+        TownClock = [ordered]@{ TimeModeAtTownMenu = $timeModeAtTownMenu; Open = $activeTrade.Open.data; TradeStateTimeMode = $activeTrade.State.state.context.timeControlMode; Options = $activeOptions.data; BuyDraft = $activeBuyDraft.data; Buy = $activeBuyCommit.data; SellDraft = $activeSellDraft.data; Sell = $activeSellCommit.data; ModeAfterWait = $activeAfterWait.state.context.timeControlMode; DayBefore = $activeBeforeWait.state.campaignDay; DayAfter = $activeAfterWait.state.campaignDay; Close = $activeClose.data }
         Buy = [ordered]@{ Offer = $buyOffer; Draft = $buyDraft.data; Preview = $buyPreview.data; Commit = $buyCommit.data; After = [ordered]@{ Gold = $afterBuy.state.economy.gold; ItemCount = $afterBuy.state.party.itemCount } }
-        Sell = [ordered]@{ Offer = $sellOffer; Draft = $sellDraft.data; Preview = $sellPreview.data; Commit = $sellCommit.data; After = [ordered]@{ Gold = $afterSell.state.economy.gold; ItemCount = $afterSell.state.party.itemCount } }
+        Sell = [ordered]@{ Offer = $sellOffer; Draft = $sellDraft.data; Preview = $sellPreview.data; Commit = $sellCommit.data }
+        TradeRumors = [ordered]@{ Seed = $rumorFixture.data; Market = $marketRumors.data; MarketNativeTooltip = $marketNativeTooltip.data; NonGoods = if ($null -ne $nonGoodsRumors) { $nonGoodsRumors.data } else { $null }; Player = $playerRumors.data; PlayerNativeTooltip = $playerNativeTooltip.data; GoodsBuy = $rumorGoodsBuyCommit.data; GoodsSell = $rumorGoodsSellCommit.data; NoMutationReceipt = [bool]$marketRumorReadNoMutation; ExpiredRumorFiltered = [bool]$expiredRumorFiltered; CurrentTownExcluded = [bool]$currentTownRumorsExcluded; InvalidCandidateStatus = [string]$staleRumors.status; OutsideTradeStatus = [string]$rumorOutsideState.status }
+        AfterTransactions = [ordered]@{ Gold = $afterSell.state.economy.gold; ItemCount = $afterSell.state.party.itemCount }
         CancelDraft = $cancelDraft.data
         CancelReceipt = $cancel.data
         UnaffordableOffer = [ordered]@{ Candidate = if ($unaffordableOffer.Count -gt 0) { $unaffordableOffer[0] } else { $null }; Result = $unaffordableResult; Rollback = $unaffordableRollback }

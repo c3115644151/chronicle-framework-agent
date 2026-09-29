@@ -48,13 +48,15 @@ Chronicle仅在指定Harness研究接口中能读取/选择有限Incident，产�
 
 ## J06 Rumors：传闻和流言信息
 
-玩家入口是Inventory/市场物品的悬停详情。用户在2026-09-25确认：市场栏与玩家物品栏的商品条目可显示异地便宜买入/有利卖出地点，举例有谷物、贵重品、木材和葡萄酒；武器不会显示。马匹是否显示尚不确定。这是玩家实玩报告，本轮没有Agent截图/运行复核。本机源码独立确认 `SPInventoryVM`把当前物品交给`ItemMenuVM.SetItem`，界面归类为Goods的物品进入`SetMerchandiseComponentTooltip`；该方法对两侧共用，不按玩家栏/市场栏另建观察族。
+玩家入口是Inventory/市场物品的悬停详情。用户在2026-09-25确认：市场栏与玩家物品栏的商品条目可显示异地便宜买入/有利卖出地点，举例有谷物、贵重品、木材和葡萄酒；武器不会显示。马匹方面，本机源码独立确认 tooltip 入口只处理 `InventoryItemType.Goods`，不会处理`Horse`；W2-AE运行查询也返回Horse `applicable=false`且无提示。生成器包含Horse记录不代表悬停界面展示Horse传闻。`SPInventoryVM`把当前物品交给`ItemMenuVM.SetItem`，两侧商品都进入同一个`SetMerchandiseComponentTooltip`，不按玩家栏/市场栏另建观察族。
 
 `TradeRumor`保存Settlement、具体`ItemObject`、BuyPrice、SellPrice和RumorEndTime。字段虽然名为`ItemCategory`，实际类型是`ItemObject`，消费者按具体物品对象相等匹配，不能写成按物品类别匹配。`TradeRumorsCampaignBehavior.TradeRumors`过滤已过期记录；物品详情排除当前聚落，并把记录价格与当前`MarketData.GetPrice`比较：BuyPrice低于当前卖价的0.9倍或SellPrice高于当前买价的1.1倍才显示相应文字。两条件同时成立时该行优先使用便宜买入文字；条目透明度随剩余有效天数变化。这些价格是已收集的记录，不保证玩家抵达时仍可按原价成交；界面也未直接显示全部内部时间字段。
 
 已确认的获取/寿命链包括：主队进入城镇后记录贸易商品价格（同城采集间隔至少1天，记录有效10天）；DailyTick请求一条随机城镇/物品传闻（有效10至19天），同时清理过期记录；`OnTradeRumorIsTakenEvent`接收其他来源。`TravelingRumors`专长允许玩家家族商队进城采集，`Tollgates`专长让自有工坊所在地参与每日采集。该tooltip显示函数及基础进城/每日来源没有统一Trade技能等级检查；技能专长扩充情报来源，与E09记录的利润/行情颜色提示分别核对。各来源最终仍受`AddTradeRumors`接纳/去重逻辑约束，不能把一次采集请求视为所有记录均已更新。
 
-源码依据为本机v1.4.8.119303的`TradeRumor`、`TradeRumorsCampaignBehavior`、`ItemMenuVM.SetItem/SetMerchandiseComponentTooltip/CalculateTradeRumorOldnessFactor`与`SPInventoryVM`。观察入口已得到源码与用户报告两类证据；Chronicle目前无对应观察适配。玩家报告与源码Goods筛选相符；马匹由传闻生成器纳入，但实际物品提示是否显示仍待核验。查看提示本身不写库存/金币或显式切换Campaign时间，价格记录采集/过期依赖原版Campaign事件；宿主Inventory状态的完整暂停/恢复仍待运行核验。剩余未知是外部传闻事件的全部发起者、采集去重/旧记录更新边缘、当前Mod替换及各界面/语言的视觉表现。非贸易闲谈与世界消息仍归B/J08，不能从本对象推导出统一的全世界传闻网络。
+源码依据为本机v1.4.8.119303的`TradeRumor`、`TradeRumorsCampaignBehavior`、`ItemMenuVM.SetItem/SetMerchandiseComponentTooltip/CalculateTradeRumorOldnessFactor`与`SPInventoryVM`。W2-AE实现按需CLI观察`tradeRumors(ItemViewModelId, InventorySide)`，限定当前Town Trade VM最近返回的候选；它不枚举整个传闻库、不调用`ItemMenuVM.SetItem`，以免把观察命令当成玩家悬停触发`InventoryItemInspectedEvent`。`TestResults/20260930-054055/Temp/TradeTransactionResult.json`使用Harness-only的一次性Campaign传闻样本分别核对市场侧与玩家侧候选：结构化方向/报价/地点/新鲜度和Native本地化提示文本逐条及顺序与`ItemMenuVM.TargetItemProperties`一致；正常买/卖提示存在，已过期与当前城镇传闻不返回，Horse候选无提示，无效ItemVM候选被拒绝。商品查询不改变Gold、队伍物品、聚落、时钟档或CampaignDay；源存档哈希相同且进程退出。测试样本注入只改disposable Campaign的内存状态，不进入Agent决策输入。
+
+查看提示本身不写库存/金币或显式切换Campaign时间，价格记录采集/过期依赖原版Campaign事件；当前Trade Inventory宿主状态的时间效果以具体上下文为准。剩余未知是外部传闻事件的全部发起者、采集去重/旧记录更新边缘、第三方Mod对ViewModel的替换及实际鼠标悬停画面/焦点表现。非贸易闲谈与世界消息仍归B/J08，不能从本对象推导出统一的全世界传闻网络。
 
 ## J07 Notifications：地图提示、事件通知和操作入口
 

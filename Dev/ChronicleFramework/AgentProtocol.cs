@@ -772,6 +772,17 @@ internal sealed class ChronicleAgentProtocol
                 case "tradeOptions":
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentTradeAdapter.BuildTradeOptionsJson());
                     break;
+                case "tradeRumors":
+                    var tradeRumorItemViewModelId = ReadString(command, "itemViewModelId");
+                    var tradeRumorInventorySide = ReadString(command, "inventorySide");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentTradeAdapter.BuildTradeRumorOptionsJson(tradeRumorItemViewModelId, tradeRumorInventorySide));
+                    break;
+                case "harnessSeedTradeRumorFixture":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentTradeAdapter.SeedHarnessTradeRumorFixture(ReadString(command, "itemViewModelId"), ReadString(command, "inventorySide")));
+                    break;
+                case "harnessTradeRumorTooltipDiagnostics":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentTradeAdapter.ReadHarnessNativeTradeRumorTooltip(ReadString(command, "itemViewModelId"), ReadString(command, "inventorySide")));
+                    break;
                 case "trade":
                     var tradeDirection = ReadString(command, "direction");
                     var tradeItemViewModelId = ReadString(command, "itemViewModelId");
