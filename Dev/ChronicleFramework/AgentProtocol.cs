@@ -533,12 +533,13 @@ internal sealed class ChronicleAgentProtocol
                     WriteResponse(commandId, action, "completed", behavior);
                     break;
                 case "pause":
-                    TaleWorlds.CampaignSystem.Campaign.Current.TimeControlMode = TaleWorlds.CampaignSystem.CampaignTimeControlMode.Stop;
-                    WriteResponse(commandId, action, "completed", behavior);
+                    WriteResponse(commandId, action, "completed", behavior, null, SetNativeTimeSpeed(0));
                     break;
                 case "resume":
-                    TaleWorlds.CampaignSystem.Campaign.Current.TimeControlMode = TaleWorlds.CampaignSystem.CampaignTimeControlMode.UnstoppablePlay;
-                    WriteResponse(commandId, action, "completed", behavior);
+                    WriteResponse(commandId, action, "completed", behavior, null, SetNativeTimeSpeed(1));
+                    break;
+                case "fastForward":
+                    WriteResponse(commandId, action, "completed", behavior, null, SetNativeTimeSpeed(2));
                     break;
                 case "move":
                     if (PlayerEncounter.IsActive || MobileParty.MainParty.CurrentSettlement != null || MobileParty.MainParty.MapEvent != null)
@@ -1928,6 +1929,36 @@ internal sealed class ChronicleAgentProtocol
                 campaign.TimeControlMode = campaign.TimeControlMode == CampaignTimeControlMode.StoppableFastForward ? CampaignTimeControlMode.StoppableFastForward : CampaignTimeControlMode.StoppablePlay;
                 break;
         }
+    }
+
+    private static string SetNativeTimeSpeed(int selectedTimeSpeed)
+    {
+        var campaign = TaleWorlds.CampaignSystem.Campaign.Current;
+        if (campaign == null || Game.Current?.GameStateManager?.ActiveState is not MapState)
+            throw new InvalidOperationException("explicit time control requires the Campaign Map state");
+        if (campaign.TimeControlModeLock)
+            throw new InvalidOperationException("native Campaign time control is currently locked");
+        var activeMenu = campaign.CurrentMenuContext?.GameMenu;
+        if (campaign.CurrentMenuContext != null && (activeMenu == null || !activeMenu.IsWaitActive))
+            throw new InvalidOperationException("native time controls are disabled in this Campaign menu");
+        if (selectedTimeSpeed < 0 || selectedTimeSpeed > 2)
+            throw new ArgumentOutOfRangeException(nameof(selectedTimeSpeed), "Native map time speed must be Stop(0), Play(1), or FastForward(2).");
+
+        var modeBefore = campaign.TimeControlMode;
+        var simplifiedBefore = campaign.GetSimplifiedTimeControlMode();
+        var waitingBefore = campaign.IsMainPartyWaiting;
+        var dayBefore = CampaignTime.Now.ToDays;
+        campaign.SetTimeSpeed(selectedTimeSpeed);
+        var modeAfter = campaign.TimeControlMode;
+        var simplifiedAfter = campaign.GetSimplifiedTimeControlMode();
+        var waitingAfter = campaign.IsMainPartyWaiting;
+        var dayAfter = CampaignTime.Now.ToDays;
+        var requestedMode = selectedTimeSpeed == 0 ? "pause" : selectedTimeSpeed == 1 ? "play" : "fastForward";
+        return "{\"requestedMode\":\"" + requestedMode + "\",\"selectedTimeSpeed\":" + selectedTimeSpeed.ToString(CultureInfo.InvariantCulture) +
+            ",\"rawModeBefore\":\"" + modeBefore + "\",\"rawModeAfter\":\"" + modeAfter + "\",\"effectiveModeBefore\":\"" + simplifiedBefore +
+            "\",\"effectiveModeAfter\":\"" + simplifiedAfter + "\",\"isMainPartyWaitingBefore\":" + waitingBefore.ToString().ToLowerInvariant() +
+            ",\"isMainPartyWaitingAfter\":" + waitingAfter.ToString().ToLowerInvariant() + ",\"campaignDayBefore\":" + dayBefore.ToString("F3", CultureInfo.InvariantCulture) +
+            ",\"campaignDayAfter\":" + dayAfter.ToString("F3", CultureInfo.InvariantCulture) + "}";
     }
 
     private void CompleteDeferredMapClickTimeChange()

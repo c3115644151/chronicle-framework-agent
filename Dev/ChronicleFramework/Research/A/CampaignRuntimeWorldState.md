@@ -30,7 +30,7 @@ Chronicle 当前覆盖：`ChronicleCampaignBehavior` 在 `OnGameStart` 加入 `C
 
 `Campaign.TickMapTime` 根据 Campaign 时间模式决定自然推进量：Stop/FastForwardStop 不推进；StoppablePlay 与 UnstoppablePlay 使用 `0.25 × realDt`；快进模式再乘 `SpeedUpMultiplier`（当前默认值4）。Stoppable 模式在主队等待时不推进，Unstoppable 模式仍推进。推进后的 `_dt` 被 Campaign 实体、事件和周期系统使用；小时、日、周等计时不是每个Agent动作附带的单独开关。周期的分发粒度见 A03。
 
-Agent 覆盖：快照给出 `campaignDay`、`timeControlMode`；`pause`/`resume` 直接赋模式，`advance` 是 Harness 固定步进，不是玩家动作。源码：当前安装 v1.4.8 `Modules/SandBox/GUI/Prefabs/Map/MapBar.xml`、`TaleWorlds.CampaignSystem.ViewModelCollection.dll`（`MapTimeControlVM`）与 `TaleWorlds.CampaignSystem.dll`（`Campaign.TickMapTime`、`SetTimeSpeed`）；运行证据见 MAINLINE 机制契约所列 Movement、Rest、Protocol 阶段。自动状态证据已覆盖；本节未验证键鼠物理绑定、等待期间不同锁定状态的画面反馈以及各禁用状态恢复后的UI焦点。
+Agent 覆盖：快照分别给出 `campaignDay`、raw `timeControlMode` 与 `context.isWaiting`；显式 `pause`/`resume`/`fastForward` 现在都调用Native `Campaign.SetTimeSpeed(0/1/2)`，回执同时保留raw/effective前后模式、waiting与调用时CampaignDay。仅允许Campaign Map、时钟未锁定且无禁用菜单（可允许原生Wait菜单）；`advance` 仍是Harness固定步进，不是玩家动作。运行证据：`TestResults/20260930-020009/Temp/AgentTimeControlLoopResult.json`验证真实Agent循环下Play/FastForward自然推进信号、Pause后日期稳定，以及主队Hold导致waiting后调用Play选中`UnstoppablePlay`并在仍waiting时自然推进；同一run两次进程均退出、源fixture hash不变。源码：当前安装v1.4.8 `Modules/SandBox/GUI/Prefabs/Map/MapBar.xml`、`TaleWorlds.CampaignSystem.ViewModelCollection.dll`（`MapTimeControlVM`）与`TaleWorlds.CampaignSystem.dll`（`Campaign.TickMapTime`、`SetTimeSpeed`）。仍未视觉核对精确热键/按键提示、全部禁用状态恢复后的UI焦点；Harness `advance`并不模拟原版玩家入口。
 
 ## A03 周期事件与调度粒度
 

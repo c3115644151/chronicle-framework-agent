@@ -93,6 +93,8 @@ try {
     $startDay = [double]$state.campaignDay
     $pause = Invoke-AgentCli 'pause' @('-CommandId', "$runPrefix-pause", '-TimeoutSeconds', $TimeoutSeconds)
     $resume = Invoke-AgentCli 'resume' @('-CommandId', "$runPrefix-resume", '-TimeoutSeconds', $TimeoutSeconds)
+    $fastForward = Invoke-AgentCli 'fastForward' @('-CommandId', "$runPrefix-fast-forward", '-TimeoutSeconds', $TimeoutSeconds)
+    $pauseFastForward = Invoke-AgentCli 'pause' @('-CommandId', "$runPrefix-pause-fast-forward", '-TimeoutSeconds', $TimeoutSeconds)
     $advance = Invoke-AgentCli 'advance' @('-Days', '0.01', '-CommandId', "$runPrefix-advance", '-TimeoutSeconds', $TimeoutSeconds)
     $preSaveFingerprint = Get-PersistedCampaignFingerprint $advance
     $save = Invoke-AgentCli 'save' @('-SaveName', $protocolSaveNameForRun, '-CommandId', "$runPrefix-save", '-TimeoutSeconds', $TimeoutSeconds)
@@ -111,6 +113,14 @@ try {
         State = $state
         Pause = $pause
         Resume = $resume
+        FastForward = $fastForward
+        PauseFastForward = $pauseFastForward
+        TimeControlTransitions = [ordered]@{
+            Pause = $pause.data
+            Resume = $resume.data
+            FastForward = $fastForward.data
+            PauseFastForward = $pauseFastForward.data
+        }
         Advance = $advance
         Save = $save
         FirstStop = $firstStop
@@ -129,6 +139,9 @@ try {
         $state.status -eq 'completed' -and
         $pause.timeControlMode -eq 'Stop' -and
         $resume.timeControlMode -ne 'Stop' -and
+        $fastForward.status -eq 'completed' -and
+        $fastForward.data.rawModeAfter -in @('StoppableFastForward','UnstoppableFastForward') -and
+        $pauseFastForward.data.rawModeAfter -eq 'FastForwardStop' -and
         $advance.status -eq 'completed' -and
         $result.AdvanceDeltaDays -ge 0.01 -and
         $save.status -eq 'completed' -and

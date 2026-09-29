@@ -1,5 +1,14 @@
 $ErrorActionPreference = 'Stop'
-$requestJson = [Console]::In.ReadToEnd()
+$requestReader = New-Object System.IO.StreamReader -ArgumentList @([Console]::OpenStandardInput(), [System.Text.Encoding]::UTF8, $true)
+try { $requestJson = $requestReader.ReadToEnd() }
+finally { $requestReader.Dispose() }
+$jsonStart = $requestJson.IndexOf('{')
+if ($jsonStart -lt 0) { throw 'Provider input does not contain a JSON object.' }
+if ($jsonStart -gt 0) {
+    $prefix = $requestJson.Substring(0, $jsonStart)
+    if ($prefix -notmatch '^[\s\p{C}]*$') { throw 'Provider input has non-whitespace data before its JSON object.' }
+    $requestJson = $requestJson.Substring($jsonStart)
+}
 $request = $requestJson | ConvertFrom-Json
 if ($request.schemaVersion -ne 1) { throw 'Unsupported Agent loop request schema.' }
 if ($request.iteration -gt 1 -and -not $request.previousActionReceipt) { throw 'Previous native action receipt was not forwarded to the next decision.' }
@@ -27,6 +36,36 @@ if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'escort') {
     if ($parties.Count -eq 0) { throw 'Escort provider received no visible moving party in the native observation.' }
     [pscustomobject]@{ action = 'follow'; arguments = @{ PartyId = [string]$parties[0].id }; rationale = 'Deterministic harness test: choose a visible map Party and use its native Escort action.' } | ConvertTo-Json -Compress
     exit 0
+}
+if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'timeModes') {
+    $action = switch ([int]$request.iteration) {
+        1 { 'resume' }
+        2 { 'fastForward' }
+        3 { 'pause' }
+        default { throw "Unexpected timeModes provider iteration $($request.iteration)." }
+    }
+    [pscustomobject]@{ action = $action; arguments = @{}; rationale = "Deterministic harness test: select Native Campaign time control '$action' as a separate world-time action." } | ConvertTo-Json -Compress
+    exit 0
+}
+if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'waitingResume') {
+    $action = switch ([int]$request.iteration) {
+        1 { 'hold' }
+        2 { 'resume' }
+        default { throw "Unexpected waitingResume provider iteration $($request.iteration)." }
+    }
+    [pscustomobject]@{ action = $action; arguments = @{}; rationale = "Deterministic harness test: verify native '$action' while the MainParty is waiting." } | ConvertTo-Json -Compress
+    exit 0
+}
+if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'observationLoop') {
+    if ($request.iteration -eq 1) {
+        [pscustomobject]@{ action = 'state'; arguments = @{}; rationale = 'Deterministic Harness loop check: request a read-only Campaign state.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if ($request.iteration -eq 2 -and $request.previousActionReceipt.action -eq 'state') {
+        [pscustomobject]@{ action = 'mapPartyTargets'; arguments = @{}; rationale = 'Deterministic Harness loop check: continue from the prior receipt with a read-only Native map target query.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    throw 'Observation loop provider received an unexpected iteration or prior receipt.'
 }
 if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'point') {
     $state = $request.observation.state

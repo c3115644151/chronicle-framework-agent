@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 
-Contract version: 5.70
+Contract version: 5.74
 
 ## 目标与边界
 
@@ -70,6 +70,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Dev\ChronicleFramework\Run
 ```
 
 按需阶段以同一命令加单个 `-Phase` 运行；可选 Docs、Preflight、Api、Build、Smoke、Campaign、FreshCampaign、FreshCampaignProgression、Protocol、AgentLoop、BattleFixture、PostBattle、Observation、MainHeroSkills、CharacterDevelopment、SpendSkillFocus、QuestJournal、PartyRoster、PartyUpgrade、PartyPrisonerRecruitment、MissionInteraction、CompanionHiring、MapPartyTargets、MapPartyComposition、MapArmyComposition、MapPartyBehavior、MapSettlementTargets、Movement、MoveToPoint、Recruitment、Rest、Pursuit、EngageVisibility、Conversation、QuestAcceptance、EscortVisibility、TavernMission、TownCenterMission、SettlementOverlayConversation、SettlementOverlayQuestAcceptance、SettlementOverlayQuestGate、BarterTransactions、BarterContexts、BarterFightRoute、BarterSafePassage、VisualCapture、All。`EngageVisibility`在临时运行中通过Native `BanditPartyComponent.CreateLooterParty`生成一个弱劫匪Party，并仅为测试强弱差异临时加入普通兵；要求它先自然出现在`mapPartyTargets`后才执行Engage。之后目标移动、原版IsVisible、AI选择、遭遇与时钟都由引擎自然运行；不直接修改可见标志/移动位置，也不在追击中脚本推进/暂停。关键状态变化时保存游戏引擎截图，并把“探测成功”与“是否复现目标丢失行为”分开记录。该阶段为慢速1.4.8启动客户端使用240秒启动超时，并将子测试原始stderr/stdout写入失败收据。临时Party/士兵不写入源存档。`BarterFightRoute`单独复跑Safe Passage Fight路线；`BarterSafePassage`单独复跑接受路径并显式跨过非攻击时限。32小时自然期间可能有其他NPC劫匪触发Encounter，故该长程模拟与不依赖长时间推进的完整`BarterContexts`阶段分开运行；如果被其他队伍打断，收据应保留实际打断实体，不得把它误报为目标冷却到期。Settlement overlay阶段可选`-TargetSettlementId`与`-ApproachSettlementId`：两者必须来自当前`mapSettlementTargets`；Harness若先到Approach聚落，则通过原生Leave返回地图并重新观察后再选目标，不读取隐藏全局ID。若路线失败，收据会保留结构化观察和MapState游戏引擎截图。`MapSettlementTargets`负向回归使用一个visual-capture专用全Settlement显隐诊断找测试样本，仅Harness可调用，不在普通Agent观察或决策白名单中。
+
+`TimeControlLoop` 是独立可选阶段，专门验证测试Provider通过Agent循环选择原版时间档；通用 `AgentLoop` 保持只读观察循环，避免Encounter随机状态污染时间控件断言。
 
 `Run-Harness.ps1` 顺序执行阶段、首错停止、把原始输出和 JSON 写入 `TestResults/<run-id>`，并更新 `TestResults/latest.json`。
 
@@ -181,8 +183,9 @@ stop()
 | Build | 项目针对当前 DLL 编译 | 构建退出码和 DLL |
 | Smoke | 清单、DLL、`OnSubModuleLoad`、`Finished All` | 同 PID 日志 |
 | Campaign/FreshCampaign | 旧档；FreshCampaign新Sandbox原生创建、跳intro、选+20；Progression用临时存档重载再move/arrival/recruit | 同PID renown20/MapState、非激活840x472；Crash Report仅按明确信号有界重试；已知`Mod change detected`着色器缓存提示仅可经精确匹配的目标进程UIA按钮确认一次，不用全局输入；临时存档精确清理、非模型Provider |
-| Protocol | CLI 启动/重载、状态、暂停/恢复、独立推进时钟、保存、停止；推进到目标时间或遭遇边界即返回 | 每命令不可变回执、JSONL 轨迹与存档回读；存档往返使用单次唯一测试名，比较Save前与新进程读档后的结构化Campaign指纹及Chronicle SyncData计数，记录回读/源夹具哈希后删除；时间步进不得隐式塞入地图移动/追近命令 |
-| AgentLoop | 外部提供者接收真实观察，选择 allowlisted 原子动作并重观察 | 测试输入/决策/回执、时钟转换、拒绝越权动作、fixture 哈希、退出；不计作模型能力 |
+| Protocol | CLI 启动/重载、状态、Native Pause/Play/FastForward、Harness-only独立推进时钟、Campaign保存/跨进程读档、停止 | Native时间选择对照`Campaign.SetTimeSpeed(0/1/2)`，检查raw/effective模式和waiting状态；固定advance仅用于Harness测试并按日目标或Encounter返回；存档往返使用唯一测试名，比较Save前与新进程读档后的结构化Campaign指纹及Chronicle SyncData计数、源夹具哈希后删除；时间步进不得隐式塞入地图移动/追近命令 |
+| AgentLoop | 外部提供者接收真实观察，选择只读白名单原子动作并重观察 | 两轮 `state → mapPartyTargets` 观察循环、前序回执传递、越权动作及Harness-only `advance` 拒绝、fixture哈希和进程退出；Provider以UTF-8/BOM检测读取标准输入；不计作模型能力，也不承担移动/时间动作验收 |
+| TimeControlLoop | 确定性测试Provider在真实Agent循环内依次选择原生Play、Fast Forward、Pause，再用第二个临时进程验证Hold→Play | 验证动作经CLI/协议调用Native `Campaign.SetTimeSpeed(1/2/0)`、raw/effective档回执；比较各时钟档间的自然CampaignDay推进与Pause稳定性；Hold使主队等待后，显式Play应恢复`UnstoppablePlay`并自然推进而保持waiting；Harness advance隔离、fixture哈希和所有进程清理；与只读AgentLoop分离，避免遭遇状态污染 |
 | BattleFixture | disposable save 内造 hostile looter；用原版 pursue 点击语义接敌 | hostile/party ID、自然时间/encounter 回执、fixture 哈希、进程退出；造敌非 Agent 行为 |
 | BattleSimulation | 原版 `Send troops` 启动；pause/skip/finish/retreat；Mission TAB retreat | 模拟状态、结算/loot、Mission end、fixture hash；不等同即时战斗 |
 | PostBattle | Simulation skip/finish→encounter leave→PartyState transfers→conditional InventoryState loot/Done→MapState | troop/item counts, state timeline screenshots, fixture hash, process cleanup |
