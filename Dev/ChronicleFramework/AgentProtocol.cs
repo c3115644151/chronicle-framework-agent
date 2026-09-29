@@ -146,11 +146,17 @@ internal sealed class ChronicleAgentProtocol
                 case "quickInformation":
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentQuickInformation.BuildJson());
                     break;
+                case "sceneNotification":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentSceneNotification.BuildJson());
+                    break;
                 case "harnessSeedMapNotificationFixture":
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentMapNotifications.SeedHarnessFixture());
                     break;
                 case "harnessSeedQuickInformationFixture":
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentQuickInformation.SeedHarnessFixture());
+                    break;
+                case "harnessSeedSceneNotificationFixture":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentSceneNotification.SeedHarnessFixture());
                     break;
                 case "mapPartyTargets":
                     if (Game.Current?.GameStateManager?.ActiveState is not MapState)
