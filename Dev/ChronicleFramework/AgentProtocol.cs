@@ -140,6 +140,12 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("mapSettlementTargets requires the Campaign Map state");
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentObserver.BuildMapSettlementTargetsJson());
                     break;
+                case "mapNotifications":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentMapNotifications.BuildJson());
+                    break;
+                case "harnessSeedMapNotificationFixture":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentMapNotifications.SeedHarnessFixture());
+                    break;
                 case "mapPartyTargets":
                     if (Game.Current?.GameStateManager?.ActiveState is not MapState)
                         throw new InvalidOperationException("mapPartyTargets requires the Campaign Map state");

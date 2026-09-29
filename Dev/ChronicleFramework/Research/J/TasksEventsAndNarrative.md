@@ -66,7 +66,11 @@ Chronicle仅在指定Harness研究接口中能读取/选择有限Incident，产�
 
 跨域去重：`OBS-J07-03`覆盖Mission/Scene局部消息及Campaign中以`SceneNotificationData`呈现的确认面；特定弹窗之后果归属对应领域动作（例如俘虏处决为`ACT-F12-12`），不新增通用Scene弹窗观察/确认ACT。确认前可见目标/动作与最终回执必须分开记录；全量视觉确认、宿主时钟与Close/Proceed键鼠路径仍待运行核实。
 
-Chronicle当前未观察通知队列、优先级/已读/过期/目标点击行为；Observer的Campaign state/Quest摘要也不能说明通知是否显示。来源：`CampaignInformationManager`、`MapNotificationVM/MapNotificationItemBaseVM`、`DefaultNotificationsCampaignBehavior`和各通知类。未知各种类型的完整快捷入口/过期规则、窗口被遮挡或事件已失效时的响应与单帧通知/日志对应关系。
+Chronicle新增按需`mapNotifications`，仅在Campaign Map状态读取`Campaign.CampaignInformationManager`的Notice队列。1.4.8没有公开枚举接口，当前适配通过版本内反射读取`_mapNotices`，先检查`InformationData.IsValid()`，再用Native `MapNotificationVM.AddMapNotification`经过其注册表生成对应`MapNotificationItemBaseVM`；向Agent只返回原版ItemVM提供的类型、标题、描述、NotificationIdentifier、ForceInspection，不枚举底层对象/额外目标字段。临时VM只为映射Notice数据，在finally中逐个`OnFinalize`并自身`OnFinalize`，不触发点击、相机跳转、焦点、移除或Proceed回调。因为这不是活动UI中的具体焦点控件，不返回`IsFocused`。
+
+`TestResults/20260930-061737/Temp/MapNotificationsResult.json`在disposable Campaign中经Native `CampaignInformationManager.NewMapNoticeAdded`加入一个Harness-only已注册`TraitChangedMapNotification`、一个未注册自定义InformationData和一个`IsValid=false`自定义InformationData；查询只返回注册类型，具体ItemVM为`TraitChangedNotificationItemVM`，本地化标题“获得特质”、描述文本、NotificationIdentifier保真。重复读取保持顺序/内容稳定， invalid/unregistered都不泄漏；Gold/Roster/Quest/位置/时钟/日期无变化，源fixture哈希相同且进程退出。此运行只验证一个受注册类型；未验证真实自然通知产生频率、每个Notice子类的专属字段、实际屏幕焦点/鼠标跳转/移除按钮、通知过期后现存UI的清理，也不覆盖QuickInfo、SceneNotification、Quest Journal与百科日志。
+
+来源：`CampaignInformationManager._mapNotices/OnGameLoaded/NewMapNoticeAdded/MapNoticeRemoved`、`MapNotificationVM.PopulateTypeDictionary/AddMapNotification/GetNotificationFromData`、`MapNotificationItemBaseVM`、`DefaultNotificationsCampaignBehavior`及各通知类。未知各notice类型对同一物件的目标摘要如何表达、模态覆盖时UI可见范围、优先级/已读/失效边缘和第三方注册通知兼容。
 
 ## J08 Conversations：NPC对话流程
 
