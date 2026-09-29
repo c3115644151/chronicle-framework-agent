@@ -30,6 +30,8 @@ W2-B仅实现陆地目标：`moveToPoint(X,Y,Surface=land)`在AgentProtocol验�
 
 Chronicle现有move/pursue/hold是研究桥，使用指定Settlement/Party ID、目标校验、原版目标setter与地图点击时间语义，再独立等待自然路径/遭遇结果；不代表完整NavMesh/路径故障/海陆迁移或任意地图点击覆盖。证据：`MapScreen`、`DefaultPartyNavigationModel`、`NavigationHelper`、`MobilePartyAi`、Protocol主队动作及MAINLINE机制运行记录。未知：所有陆地Navmesh孔洞/港口/地形障碍/移动速度影响，玩家输入锁定与模型可达性的全部分支，Mods对导航模型与PathDistance的更改。
 
+W2-AC运行补证：`TestResults/20260930-025002/Temp/AgentHoldResult.json`在一次性Campaign中先让主队进入可见Settlement导航，再调用产品`hold`。Hold清除了目标并使`DefaultBehavior=Hold`；`timeControlMode`原始值仍为`StoppablePlay`，但`context.isWaiting=true`。无Pause/advance命令经过4秒自然观察，Party稳定为`isMoving=false`且CampaignDay精确保持91077.387；源fixture hash未变、进程正常退出。此证据只说明当前Stoppable mode下的Hold有效停表，不能推广到Unstoppable mode或玩家双击速度档。
+
 ## K03 Tracking：足迹、发现与侦察信息
 
 `MapTracksCampaignBehavior`对符合 `MapTrackModel.CanPartyLeaveTrack` 的移动Party按小时记录行进轨迹；只有位置变化超过阈值并通过track drop检查才生成Track。主队由QuarterHourly tick尝试发现一定半径内的未发现Track：有效Scout/Scouting作用达到模型难度门槛后才标为Detected；Track还受寿命、距离、目标Party规模、夜间、侦察Skill/Perk等影响。玩家未侦察到的Track不应被显示成已知敌人坐标。

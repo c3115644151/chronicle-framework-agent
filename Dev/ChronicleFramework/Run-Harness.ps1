@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'TimeControlLoop', 'BattleFixture', 'PostBattle', 'Observation', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'BarterFightRoute', 'BarterSafePassage', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EngageVisibility', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'VisualCapture', 'All')]
+    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'TimeControlLoop', 'BattleFixture', 'PostBattle', 'Observation', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'BarterFightRoute', 'BarterSafePassage', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EngageVisibility', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'VisualCapture', 'All')]
     [string]$Phase = 'All',
     [int]$SmokeTimeoutSeconds = 45,
     [int]$SmokeStabilitySeconds = 8,
@@ -14,7 +14,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '5.75'
+$HarnessContractVersion = '5.76'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -40,6 +40,7 @@ $saveModuleMetadataTestScript = Join-Path $harnessRoot 'Test-AgentSaveMetadata.p
 $protocolScript = Join-Path $harnessRoot 'Test-AgentProtocol.ps1'
 $observationScript = Join-Path $harnessRoot 'Test-AgentObservation.ps1'
 $movementScript = Join-Path $harnessRoot 'Test-AgentMovement.ps1'
+$holdScript = Join-Path $harnessRoot 'Test-AgentHold.ps1'
 $moveToPointScript = Join-Path $harnessRoot 'Test-AgentMoveToPoint.ps1'
 $recruitmentScript = Join-Path $harnessRoot 'Test-AgentRecruitment.ps1'
 $restScript = Join-Path $harnessRoot 'Test-AgentRest.ps1'
@@ -190,6 +191,7 @@ $requestedStages = switch ($Phase) {
     'MissionInteraction' { @('Preflight', 'Build', 'MissionInteraction') }
     'CompanionHiring' { @('Preflight', 'Build', 'CompanionHiring') }
     'Movement' { @('Preflight', 'Build', 'Movement') }
+    'Hold' { @('Preflight', 'Build', 'Hold') }
     'MoveToPoint' { @('Preflight', 'Build', 'MoveToPoint') }
     'Recruitment' { @('Preflight', 'Build', 'Recruitment') }
     'Rest' { @('Preflight', 'Build', 'Rest') }
@@ -205,7 +207,7 @@ $requestedStages = switch ($Phase) {
     'SettlementOverlayQuestGate' { @('Preflight', 'Build', 'SettlementOverlayQuestGate') }
     'MapSettlementTargets' { @('Preflight', 'Build', 'MapSettlementTargets') }
     'VisualCapture' { @('Preflight', 'Build', 'VisualCapture') }
-    'All' { @('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'Protocol', 'AgentLoop', 'TimeControlLoop', 'Observation', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'QuestAcceptance', 'BattleFixture', 'PostBattle', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestGate') }
+    'All' { @('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'Protocol', 'AgentLoop', 'TimeControlLoop', 'Observation', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'QuestAcceptance', 'BattleFixture', 'PostBattle', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestGate') }
 }
 
 foreach ($stage in $requestedStages) {
@@ -423,6 +425,14 @@ foreach ($stage in $requestedStages) {
                 $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $movementScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Agent movement test failed with exit code $testExitCode.`n$testOutput" }
+                $testOutput
+            }
+        }
+        'Hold' {
+            Invoke-Stage -Name 'Hold' -Action {
+                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $holdScript 2>&1 | Out-String
+                $testExitCode = $LASTEXITCODE
+                if ($testExitCode -ne 0) { throw "Native Hold behavior test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
             }
         }

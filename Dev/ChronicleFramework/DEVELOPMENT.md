@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 
-Contract version: 5.75
+Contract version: 5.76
 
 ## 目标与边界
 
@@ -72,6 +72,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Dev\ChronicleFramework\Run
 按需阶段以同一命令加单个 `-Phase` 运行；可选 Docs、Preflight、Api、Build、Smoke、Campaign、FreshCampaign、FreshCampaignProgression、Protocol、AgentLoop、BattleFixture、PostBattle、Observation、MainHeroSkills、CharacterDevelopment、SpendSkillFocus、QuestJournal、PartyRoster、PartyUpgrade、PartyPrisonerRecruitment、MissionInteraction、CompanionHiring、MapPartyTargets、MapPartyComposition、MapArmyComposition、MapPartyBehavior、MapSettlementTargets、Movement、MoveToPoint、Recruitment、Rest、Pursuit、EngageVisibility、Conversation、QuestAcceptance、EscortVisibility、TavernMission、TownCenterMission、SettlementOverlayConversation、SettlementOverlayQuestAcceptance、SettlementOverlayQuestGate、BarterTransactions、BarterContexts、BarterFightRoute、BarterSafePassage、VisualCapture、All。`EngageVisibility`在临时运行中通过Native `BanditPartyComponent.CreateLooterParty`生成一个弱劫匪Party，并仅为测试强弱差异临时加入普通兵；要求它先自然出现在`mapPartyTargets`后才执行Engage。之后目标移动、原版IsVisible、AI选择、遭遇与时钟都由引擎自然运行；不直接修改可见标志/移动位置，也不在追击中脚本推进/暂停。关键状态变化时保存游戏引擎截图，并把“探测成功”与“是否复现目标丢失行为”分开记录。该阶段为慢速1.4.8启动客户端使用240秒启动超时，并将子测试原始stderr/stdout写入失败收据。临时Party/士兵不写入源存档。`BarterFightRoute`单独复跑Safe Passage Fight路线；`BarterSafePassage`单独复跑接受路径并显式跨过非攻击时限。32小时自然期间可能有其他NPC劫匪触发Encounter，故该长程模拟与不依赖长时间推进的完整`BarterContexts`阶段分开运行；如果被其他队伍打断，收据应保留实际打断实体，不得把它误报为目标冷却到期。Settlement overlay阶段可选`-TargetSettlementId`与`-ApproachSettlementId`：两者必须来自当前`mapSettlementTargets`；Harness若先到Approach聚落，则通过原生Leave返回地图并重新观察后再选目标，不读取隐藏全局ID。若路线失败，收据会保留结构化观察和MapState游戏引擎截图。`MapSettlementTargets`负向回归使用一个visual-capture专用全Settlement显隐诊断找测试样本，仅Harness可调用，不在普通Agent观察或决策白名单中。
 
 `TimeControlLoop` 是独立可选阶段，专门验证测试Provider通过Agent循环选择原版时间档；通用 `AgentLoop` 保持只读观察循环，避免Encounter随机状态污染时间控件断言。
+
+`Hold` 是独立可选阶段（`Run-Harness.ps1 -Phase Hold`），验证先执行原版聚落导航、再调用玩家主队停步动作后，目标确实清除，并在没有显式时钟命令的自然观察窗口记录Campaign是否有效暂停。
 
 `Run-Harness.ps1` 顺序执行阶段、首错停止、把原始输出和 JSON 写入 `TestResults/<run-id>`，并更新 `TestResults/latest.json`。
 
@@ -193,6 +195,7 @@ stop()
 | Conversation | 观察原版句/选项；`DoOption/ContinueConversation` 需满足原生条件 | 选项/回执/菜单迁移；不预测未开放选项 |
 | Observation | 玩家身份、队伍、资源、坐标、移动模式/目标、上下文、附近实体与其移动/定居状态、任务与危险；记录数据来源、原版可见/侦察标记和所采用的情报策略 | 两次暂停快照、稳定 ID/位置、字段新鲜度和 fixture 哈希 |
 | Movement | 从原版可见聚落marker观察选择Settlement ID，下达原版路径目标并复现普通地图单击时间档位；Harness独立显式步进至抵达，并复用抵达回执中的原生菜单观察 | 目标/菜单/时钟轨迹、失败拒绝、fixture hash；子测试stdout/stderr原文保存在父Harness阶段失败收据，若游戏仍响应则捕获引擎末帧 |
+| Hold | 按原版Map点击语义从正在移动主队切到Hold；动作后不发Pause/Resume/advance，观察Native waiting与CampaignDay | 当前目标清除、defaultBehavior、raw时间档/isWaiting和短自然窗口的日期差；disposable fixture hash、进程清理；失败尽可能留游戏引擎末帧 |
 | MoveToPoint | W2-B仅在陆地用Campaign世界坐标请求有效自由地形点导航；适配层验证CampaignVec2/Face与原版导航模型，通过MapState.ProcessTravel而非直接写位置；Harness可显式步进至目的地 | GoToPoint与location.targetPosition对齐、初末坐标变化/到达、无效Face拒绝且不移主队/切时钟、原版点击时钟模式、fixture hash/进程清理；海上/港口另行验收 |
 | Recruitment | 调用本体招募 ViewModel，按指定 owner/troop/slot 招募；用原版 InventoryLogic 完成买入、卖出和食品补给往返 | 实际 roster、双方库存与金币差额；无效报价不改状态；fixture 哈希 |
 | Rest | 通过原版 `town_wait` 进入 native Wait menu（`StartWait` 自行启动时间），观察指定时长后由原版 `wait_leave/EndWait` 退出 | Wait menu/time mode、native 持续时长、离开后 Stop、非法/中断路径和 fixture 哈希 |
