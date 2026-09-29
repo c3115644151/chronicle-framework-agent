@@ -14,6 +14,8 @@ Chronicle对附近队伍只报告半径内最多12项摘要；Settlement局部�
 
 ## K02 Navigation：路径、可达性与移动模式
 
+当前运行补证（1.4.8.119303）：`TestResults/20260930-023203/Temp/MapSettlementTargetsResult.json`中Native诊断493个active settlements、Observer返回的393个活动且`IsVisible`聚落marker集合完全一致；100个不可见聚落没有泄漏，试图对隐藏藏身处调用`move`被拒，位置/目标/CampaignDay/源存档均不变。`TestResults/20260930-022948/Movement.log`在同一一次性Campaign中从Agent的`mapSettlementTargets`列表选中可见非敌对Sargot，距离6.467，调用`move`后通过Harness独立显式步进让原生地图AI自然抵达`town_V1`的`town`菜单；CampaignDay自然增加0.024日，源存档hash不变、进程退出。此证据连接“地图观察候选→移动命令→自然抵达”；Harness时钟步进不属于`move`动作，不证明玩家鼠标/相机射线的像素级点击命中。
+
 地图点击地点首先经过当前队伍导航类型、位置NavMesh面、陆海地形与可行路径检查；默认 `DefaultPartyNavigationModel.CanPlayerNavigateToPosition`要求有效面、当前/目标陆地等条件，而 `NavigationHelper`提供Land/port/embark-transition路径辅助。有效请求将目标/MoveMode存入MobileParty，之后Campaign地图AI按tick沿可导航路径更新；它不是一次传送。碰到路径无效、目标消失/失明、目标出海、遇到队伍或遭遇时，短期AI可Hold、绕行、逃离或切换Interaction/Encounter状态。
 
 点击队伍视觉实体时，普通点击调用 `MobileParty.MainParty.SetMoveEngageParty`，按住 `MapFollowModifier`调用 `SetMoveEscortParty`；后者写入 `TargetParty`、当前目标位置、导航类型并设置 `DefaultBehavior = EscortParty`，不是敌对接近。地图Screen对两者使用同一有效点击后的 `HandleClickTimeChange`，所以点击时间档副作用来自原版地图点击策略，而不是跟随动作额外快进。

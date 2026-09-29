@@ -22,13 +22,17 @@ function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @()) {
 try {
     $start = Invoke-AgentCli 'load' @('-SaveName', $LoadSaveName, '-TimeoutSeconds', $TimeoutSeconds)
     $before = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-before", '-TimeoutSeconds', $TimeoutSeconds)
-    $target = @($before.state.nearbySettlements | Where-Object { -not $_.hostile -and $_.distance -gt 1.0 } | Sort-Object distance | Select-Object -First 1)
+    $mapTargets = Invoke-AgentCli 'mapSettlementTargets' @('-CommandId', "$runPrefix-map-targets", '-TimeoutSeconds', $TimeoutSeconds)
+    if ($mapTargets.status -ne 'completed' -or -not $mapTargets.data) { throw 'Native visible map-settlement marker observation was not completed.' }
+    $nearbySettlementIds = @($before.state.nearbySettlements | ForEach-Object { [string]$_.id })
+    $target = @($mapTargets.data.mapSettlementTargets | Where-Object { $_.id -in $nearbySettlementIds -and -not $_.hostile -and -not $_.underSiege -and $_.type -ne 'hideout' -and $_.distance -gt 1.0 } | Sort-Object distance | Select-Object -First 1)
     if ($target.Count -ne 1) { throw 'No safe visible settlement target exists in the disposable fixture.' }
     $moved = Invoke-AgentCli 'move' @('-SettlementId', [string]$target[0].id, '-CommandId', "$runPrefix-move", '-TimeoutSeconds', $TimeoutSeconds)
     if ($moved.status -ne 'completed' -or $moved.state.location.targetSettlementId -ne $target[0].id) { throw 'Native move order did not target the selected settlement.' }
     $nativeMapClickTimePolicyApplied = $moved.state.context.timeControlMode -in @('StoppablePlay', 'StoppableFastForward')
     $arrivalState = Wait-ForAgentSettlementArrival -CliPath $cli -SettlementId ([string]$target[0].id) -CommandPrefix "$runPrefix-travel" -TimeoutSeconds $TimeoutSeconds
-    $menu = Invoke-AgentCli 'menu' @('-CommandId', "$runPrefix-menu", '-TimeoutSeconds', $TimeoutSeconds)
+    # Arrival polling already returned the final Native map/menu snapshot; reuse it instead of issuing a second identical read.
+    $menu = $arrivalState
     $leaveOption = @($menu.state.availableMenuOptions | Where-Object { $_.isLeave -and $_.available -and $_.enabled } | Select-Object -First 1)
     if ($leaveOption.Count -ne 1) { throw 'No currently enabled leave option was reported for the active settlement menu.' }
     $leave = Invoke-AgentCli 'menuSelect' @('-MenuId', [string]$menu.state.context.menuId, '-OptionId', [string]$leaveOption[0].id, '-CommandId', "$runPrefix-leave", '-TimeoutSeconds', $TimeoutSeconds)
@@ -46,6 +50,8 @@ try {
         ProcessId = $start.session.processId
         WindowLayout = $start.session.windowLayout
         Target = $target[0]
+        TargetSource = 'mapSettlementTargets'
+        MapSettlementTargetsSchemaVersion = $mapTargets.data.schemaVersion
         Before = $before.state.location
         MoveReceipt = $moved
         TimeModeAfterMapClick = $moved.state.context.timeControlMode
@@ -66,6 +72,7 @@ try {
     $result.Passed = (
         $moved.action -eq 'move' -and
         $moved.status -eq 'completed' -and
+        $target[0].id -in @($mapTargets.data.mapSettlementTargets | ForEach-Object { [string]$_.id }) -and
         $moved.state.location.targetSettlementId -eq $target[0].id -and
         $nativeMapClickTimePolicyApplied -and
         $arrivalObserved -and
@@ -73,7 +80,7 @@ try {
         $afterLeave.state.location.currentSettlementId -eq $null -and
         $afterLeave.state.context.menuId -ne 'town' -and
         $invalidMove.status -eq 'rejected' -and
-        $invalidMove.error -match 'settlement not found' -and
+        $invalidMove.error -match 'not currently exposed as a visible Campaign map target' -and
         $afterRejectedMove.state.location.currentSettlementId -eq $null -and
         $nativeHoldObserved -and $holdClickTimeModeObserved -and
         $result.CampaignDayElapsed -ge 0 -and
@@ -81,7 +88,14 @@ try {
         $result.ProcessStopped
     )
     $result | ConvertTo-Json -Depth 10
-    if (-not $result.Passed) { exit 1 }
+    if (-not $result.Passed) { throw 'Native settlement movement assertions failed; see the structured result and failure-frame receipt.' }
+}
+catch {
+    try {
+        Capture-HarnessFailureFrame -CliPath $cli -CommandPrefix $runPrefix -FailedStep 'movement' -FailureReason $_.Exception.Message -TimeoutSeconds 15 | Out-Null
+    }
+    catch { }
+    throw
 }
 finally {
     if (Test-Path $sessionPath) {

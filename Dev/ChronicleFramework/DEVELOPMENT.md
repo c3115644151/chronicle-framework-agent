@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 
-Contract version: 5.74
+Contract version: 5.75
 
 ## 目标与边界
 
@@ -192,7 +192,7 @@ stop()
 | VisualCapture | 引擎单帧参考图 + 按 Bannerlord HWND 连续采集 30fps；只验证采集链，不是玩法真值 | MP4/contact sheet、帧覆盖率、fixture hash、进程清理；不录全桌面，不进默认 All |
 | Conversation | 观察原版句/选项；`DoOption/ContinueConversation` 需满足原生条件 | 选项/回执/菜单迁移；不预测未开放选项 |
 | Observation | 玩家身份、队伍、资源、坐标、移动模式/目标、上下文、附近实体与其移动/定居状态、任务与危险；记录数据来源、原版可见/侦察标记和所采用的情报策略 | 两次暂停快照、稳定 ID/位置、字段新鲜度和 fixture 哈希 |
-| Movement | 依据目标聚落 ID 下达原版路径目标，并复现普通地图单击的时间档位规则；Harness 独立步进时间至目标聚落 | 目标/菜单/离开状态、MapScreen 等价时间模式、每步时间证据、失败输入拒绝、fixture 哈希 |
+| Movement | 从原版可见聚落marker观察选择Settlement ID，下达原版路径目标并复现普通地图单击时间档位；Harness独立显式步进至抵达，并复用抵达回执中的原生菜单观察 | 目标/菜单/时钟轨迹、失败拒绝、fixture hash；子测试stdout/stderr原文保存在父Harness阶段失败收据，若游戏仍响应则捕获引擎末帧 |
 | MoveToPoint | W2-B仅在陆地用Campaign世界坐标请求有效自由地形点导航；适配层验证CampaignVec2/Face与原版导航模型，通过MapState.ProcessTravel而非直接写位置；Harness可显式步进至目的地 | GoToPoint与location.targetPosition对齐、初末坐标变化/到达、无效Face拒绝且不移主队/切时钟、原版点击时钟模式、fixture hash/进程清理；海上/港口另行验收 |
 | Recruitment | 调用本体招募 ViewModel，按指定 owner/troop/slot 招募；用原版 InventoryLogic 完成买入、卖出和食品补给往返 | 实际 roster、双方库存与金币差额；无效报价不改状态；fixture 哈希 |
 | Rest | 通过原版 `town_wait` 进入 native Wait menu（`StartWait` 自行启动时间），观察指定时长后由原版 `wait_leave/EndWait` 退出 | Wait menu/time mode、native 持续时长、离开后 Stop、非法/中断路径和 fixture 哈希 |

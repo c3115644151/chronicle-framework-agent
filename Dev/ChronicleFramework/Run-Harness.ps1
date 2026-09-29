@@ -14,7 +14,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '5.74'
+$HarnessContractVersion = '5.75'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -420,8 +420,10 @@ foreach ($stage in $requestedStages) {
         }
         'Movement' {
             Invoke-Stage -Name 'Movement' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $movementScript
-                if ($LASTEXITCODE -ne 0) { throw "Agent movement test failed with exit code $LASTEXITCODE." }
+                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $movementScript 2>&1 | Out-String
+                $testExitCode = $LASTEXITCODE
+                if ($testExitCode -ne 0) { throw "Agent movement test failed with exit code $testExitCode.`n$testOutput" }
+                $testOutput
             }
         }
         'MoveToPoint' {
