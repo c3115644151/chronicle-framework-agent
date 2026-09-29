@@ -3,6 +3,7 @@ param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
     [int]$TimeoutSeconds = 180,
     [switch]$ProbeEscortVisibilityLoss,
+    [switch]$ProbeEngageVisibilityLoss,
     [switch]$ProbeConversation,
     [switch]$ProbeQuestAcceptance,
     [int]$VisibilityProbeSeconds = 30
@@ -26,7 +27,8 @@ function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @()) {
 }
 
 try {
-    if (($ProbeEscortVisibilityLoss -and $ProbeConversation) -or ($ProbeEscortVisibilityLoss -and $ProbeQuestAcceptance) -or ($ProbeConversation -and $ProbeQuestAcceptance)) {
+    $specializedProbeCount = @(@($ProbeEscortVisibilityLoss, $ProbeEngageVisibilityLoss, $ProbeConversation, $ProbeQuestAcceptance) | Where-Object { $_ }).Count
+    if ($specializedProbeCount -gt 1) {
         throw 'Select exactly one specialized Pursuit probe mode per run.'
     }
     $start = Invoke-AgentCli 'load' @('-SaveName', $LoadSaveName, '-TimeoutSeconds', $TimeoutSeconds)
@@ -108,7 +110,12 @@ try {
         if ($ProbeConversation -or $ProbeQuestAcceptance) { throw 'No visible moving Lord party exists in this disposable conversation fixture; refusing to substitute another Party or fake the meeting.' }
         throw 'No visible moving party outside a settlement is available for pursuit in the disposable fixture; refusing to invent or teleport a target.'
     }
-    $target = $targets[0]
+    $target = if ($ProbeEngageVisibilityLoss) { $targets[-1] } else { $targets[0] }
+    $targetVisibleBeforePursuit = $null
+    if ($ProbeEngageVisibilityLoss) {
+        $targetVisibleBeforePursuit = @((Invoke-AgentCli 'mapPartyTargets' @('-CommandId', "$runPrefix-pursuit-visible-before", '-TimeoutSeconds', $TimeoutSeconds)).data.mapPartyTargets | Where-Object { $_.id -eq $target.id }).Count -gt 0
+        if (-not $targetVisibleBeforePursuit) { throw 'The selected Pursuit target was not present in the native visible-party marker set before the action.' }
+    }
 
     $invalid = Invoke-AgentCli 'pursue' @('-PartyId', 'chronicle_missing_party', '-CommandId', "$runPrefix-invalid", '-TimeoutSeconds', '15')
     $afterInvalid = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-after-invalid", '-TimeoutSeconds', $TimeoutSeconds)
@@ -121,6 +128,110 @@ try {
     $pursuitStartDay = [double]$pursuit.campaignDay
     $outcomeState = $pursuitState
     $pursuitOutcome = $null
+
+    if ($ProbeEngageVisibilityLoss) {
+        $probeDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Max(10, [Math]::Min(180, $VisibilityProbeSeconds)))
+        $probeSamples = [System.Collections.Generic.List[object]]::new()
+        $probeOutcome = 'target-remained-visible-through-window'
+        $targetLostAtUtc = $null
+        $lossScreenshot = $null
+        $encounterScreenshot = $null
+        $encounterScreenshotError = $null
+        $lastVisible = $true
+        $lossScreenshotError = $null
+
+        while ([DateTime]::UtcNow -lt $probeDeadline) {
+            $outcomeState = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-engage-observe-$([guid]::NewGuid().ToString('N'))", '-TimeoutSeconds', $TimeoutSeconds)
+            if ($outcomeState.state.context.gameState -ne 'MapState') {
+                $probeOutcome = if ($outcomeState.state.context.encounterActive) { 'encounter-before-visible-target-loss' } else { 'left-campaign-map' }
+                if ($outcomeState.state.context.encounterActive) {
+                    try {
+                        $framePath = Join-Path $env:CHRONICLE_HARNESS_TEMP 'engage-encounter-before-target-loss.bmp'
+                        $capture = Invoke-AgentCli 'captureFrame' @('-OutputPath', $framePath, '-CommandId', "$runPrefix-engage-encounter-frame", '-TimeoutSeconds', $TimeoutSeconds)
+                        $encounterScreenshot = if ($capture.status -eq 'completed' -and (Test-Path -LiteralPath $framePath -PathType Leaf)) { $framePath } else { $null }
+                    }
+                    catch { $encounterScreenshotError = $_.Exception.Message }
+                }
+                break
+            }
+
+            $visibleSnapshot = Invoke-AgentCli 'mapPartyTargets' @('-CommandId', "$runPrefix-engage-visible-$([guid]::NewGuid().ToString('N'))", '-TimeoutSeconds', $TimeoutSeconds)
+            $targetVisible = @($visibleSnapshot.data.mapPartyTargets | Where-Object { $_.id -eq $target.id }).Count -gt 0
+            $targetNearby = @($outcomeState.state.nearbyParties | Where-Object { $_.id -eq $target.id }).Count -gt 0
+            $sample = [ordered]@{
+                Utc = [DateTime]::UtcNow.ToString('o')
+                CampaignDay = [double]$outcomeState.campaignDay
+                TargetVisibleMapMarker = $targetVisible
+                TargetInNearbyObservation = $targetNearby
+                MainPartyTargetId = $outcomeState.state.location.targetPartyId
+                MainPartyMoveMode = $outcomeState.state.party.moveMode
+                MainPartyDefaultBehavior = $outcomeState.state.party.defaultBehavior
+                TimeControlMode = $outcomeState.state.context.timeControlMode
+                EncounterActive = [bool]$outcomeState.state.context.encounterActive
+            }
+            $probeSamples.Add($sample)
+
+            if ($lastVisible -and -not $targetVisible) {
+                $targetLostAtUtc = $sample.Utc
+                $probeOutcome = 'native-visible-map-marker-lost'
+                $framePath = Join-Path $env:CHRONICLE_HARNESS_TEMP 'engage-target-lost-map.bmp'
+                try {
+                    $capture = Invoke-AgentCli 'captureFrame' @('-OutputPath', $framePath, '-CommandId', "$runPrefix-engage-loss-frame", '-TimeoutSeconds', $TimeoutSeconds)
+                    $lossScreenshot = if ($capture.status -eq 'completed' -and (Test-Path -LiteralPath $framePath -PathType Leaf)) { $framePath } else { $null }
+                }
+                catch { $lossScreenshotError = $_.Exception.Message }
+            }
+            $lastVisible = $targetVisible
+
+            if ($outcomeState.state.context.encounterActive -and $outcomeState.state.context.encounteredPartyId -eq $target.id) {
+                $probeOutcome = 'encounter-before-visible-target-loss'
+                try {
+                    $framePath = Join-Path $env:CHRONICLE_HARNESS_TEMP 'engage-encounter-before-target-loss.bmp'
+                    $capture = Invoke-AgentCli 'captureFrame' @('-OutputPath', $framePath, '-CommandId', "$runPrefix-engage-encounter-frame", '-TimeoutSeconds', $TimeoutSeconds)
+                    $encounterScreenshot = if ($capture.status -eq 'completed' -and (Test-Path -LiteralPath $framePath -PathType Leaf)) { $framePath } else { $null }
+                }
+                catch { $encounterScreenshotError = $_.Exception.Message }
+                break
+            }
+            if ($probeOutcome -eq 'native-visible-map-marker-lost' -and $outcomeState.state.party.defaultBehavior -eq 'Hold' -and $null -eq $outcomeState.state.location.targetPartyId) {
+                $probeOutcome = 'visible-target-lost-and-native-hold'
+                break
+            }
+            if (-not (Get-Process -Id $start.session.processId -ErrorAction SilentlyContinue)) { throw 'Game process exited during the native Engage visibility probe.' }
+            Start-Sleep -Milliseconds 750
+        }
+
+        $stop = Invoke-AgentCli 'stop' @('-CommandId', "$runPrefix-engage-probe-stop", '-TimeoutSeconds', $TimeoutSeconds)
+        $fixtureHashAfter = (Get-FileHash $savePath -Algorithm SHA256).Hash
+        $probeResult = [ordered]@{
+            ProcessId = $start.session.processId
+            Mode = 'native Engage target; natural Campaign time; no scripted advance, pause, hold, teleport, or visibility mutation'
+            Target = $target
+            Initial = [ordered]@{ Status = $pursuit.status; TargetPartyId = $pursuitState.location.targetPartyId; DefaultBehavior = $pursuitState.party.defaultBehavior; TimeControlMode = $pursuitState.context.timeControlMode; CampaignDay = [double]$pursuit.campaignDay; VisibleMapMarker = $targetVisibleBeforePursuit }
+            Outcome = $probeOutcome
+            TargetLostAtUtc = $targetLostAtUtc
+            TargetLossScreenshot = $lossScreenshot
+            TargetLossScreenshotError = $lossScreenshotError
+            EncounterScreenshot = $encounterScreenshot
+            EncounterScreenshotError = $encounterScreenshotError
+            Samples = @($probeSamples.ToArray())
+            FinalState = [ordered]@{ TargetPartyId = $outcomeState.state.location.targetPartyId; MoveMode = $outcomeState.state.party.moveMode; DefaultBehavior = $outcomeState.state.party.defaultBehavior; TimeControlMode = $outcomeState.state.context.timeControlMode; CampaignDay = [double]$outcomeState.campaignDay; GameState = $outcomeState.state.context.gameState }
+            DaysElapsed = [double]$outcomeState.campaignDay - $pursuitStartDay
+            FixtureUnchanged = $fixtureHashBefore -eq $fixtureHashAfter
+            ProcessStopped = $stop.processStopped
+        }
+        $probeResult.TargetLossAndHoldReproduced = $probeOutcome -eq 'visible-target-lost-and-native-hold'
+        $probeResult.CampaignClockStoppedAfterTargetLoss = ($probeResult.TargetLossAndHoldReproduced -and $outcomeState.state.context.timeControlMode -eq 'Stop')
+        $probeResult.Passed = ($nativeOrderIssued -and $nativeMapClickTimePolicyApplied -and $probeResult.FixtureUnchanged -and $probeResult.ProcessStopped)
+        $probeJson = $probeResult | ConvertTo-Json -Depth 10
+        if ($env:CHRONICLE_HARNESS_TEMP -and (Test-Path -LiteralPath $env:CHRONICLE_HARNESS_TEMP -PathType Container)) {
+            Set-Content -LiteralPath (Join-Path $env:CHRONICLE_HARNESS_TEMP 'AgentEngageVisibilityResult.json') -Value $probeJson -Encoding UTF8
+        }
+        $probeJson
+        if (-not $probeResult.Passed) { exit 1 }
+        return
+    }
+
     $deadline = [DateTime]::UtcNow.AddSeconds([Math]::Min(90, $TimeoutSeconds))
     while ([DateTime]::UtcNow -lt $deadline) {
         $outcomeState = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-observe-$([guid]::NewGuid().ToString('N'))", '-TimeoutSeconds', $TimeoutSeconds)

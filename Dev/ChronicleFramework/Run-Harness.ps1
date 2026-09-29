@@ -1,11 +1,12 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'BattleFixture', 'PostBattle', 'Observation', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'BarterFightRoute', 'BarterSafePassage', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'VisualCapture', 'All')]
+    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'BattleFixture', 'PostBattle', 'Observation', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'BarterFightRoute', 'BarterSafePassage', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EngageVisibility', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'VisualCapture', 'All')]
     [string]$Phase = 'All',
     [int]$SmokeTimeoutSeconds = 45,
     [int]$SmokeStabilitySeconds = 8,
     [string]$TargetSettlementId = 'town_V1',
-    [string]$ApproachSettlementId = 'town_V1'
+    [string]$ApproachSettlementId = 'town_V1',
+    [int]$VisibilityProbeSeconds = 120
 )
 
 $ErrorActionPreference = 'Stop'
@@ -13,7 +14,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '5.66'
+$HarnessContractVersion = '5.67'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -192,6 +193,7 @@ $requestedStages = switch ($Phase) {
     'Recruitment' { @('Preflight', 'Build', 'Recruitment') }
     'Rest' { @('Preflight', 'Build', 'Rest') }
     'Pursuit' { @('Preflight', 'Build', 'Pursuit') }
+    'EngageVisibility' { @('Preflight', 'Build', 'EngageVisibility') }
     'Conversation' { @('Preflight', 'Build', 'Conversation') }
     'QuestAcceptance' { @('Preflight', 'Build', 'QuestAcceptance') }
     'EscortVisibility' { @('Preflight', 'Build', 'EscortVisibility') }
@@ -443,6 +445,20 @@ foreach ($stage in $requestedStages) {
             Invoke-Stage -Name 'Pursuit' -Action {
                 & powershell -NoProfile -ExecutionPolicy Bypass -File $pursuitScript
                 if ($LASTEXITCODE -ne 0) { throw "Agent pursuit test failed with exit code $LASTEXITCODE." }
+            }
+        }
+        'EngageVisibility' {
+            Invoke-Stage -Name 'EngageVisibility' -Action {
+                $previousHarnessMode = $env:CHRONICLE_HARNESS_MODE
+                $env:CHRONICLE_HARNESS_MODE = 'visual-capture'
+                try {
+                    & powershell -NoProfile -ExecutionPolicy Bypass -File $pursuitScript -ProbeEngageVisibilityLoss -VisibilityProbeSeconds $VisibilityProbeSeconds
+                    if ($LASTEXITCODE -ne 0) { throw "Agent Engage visibility probe failed with exit code $LASTEXITCODE." }
+                }
+                finally {
+                    if ($null -eq $previousHarnessMode) { Remove-Item Env:CHRONICLE_HARNESS_MODE -ErrorAction SilentlyContinue }
+                    else { $env:CHRONICLE_HARNESS_MODE = $previousHarnessMode }
+                }
             }
         }
         'Conversation' {
