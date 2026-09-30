@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 
-Contract version: 5.92
+Contract version: 5.93
 
 ## 目标与边界
 
@@ -62,6 +62,8 @@ Project采用最少任务状态：`Todo`表示尚未开始（是否被阻塞看I
 - 正式整合包模块集、Chronicle 最小模块集和官方基线必须分别记录，不能互相替代。
 
 ## 开发入口
+
+`MissionExit`为Location Mission返回地图提供本地按需验收阶段：从一次性Campaign夹具进入Town中心Mission，只枚举当前场景的原版`PassageUsePoint(IsMissionExit)`/`ExitDoor`，保存使用前后的游戏引擎帧；用有界Native `AgentNavigator`走到出口，再调用`Agent.HandleStartUsingAction`并验证回到原Settlement菜单。该阶段拒绝无效/陈旧Mission对象ID；绝不直接调用`Mission.EndMission`、不以ESC/战斗撤退冒充原版地点出口，不保存夹具。若场景内无符合条件的原版出口，会输出失败/阻塞证据；在玩家返回地图的原版路径核明、专项阶段通过前，`MissionExit`不纳入`All`，避免把已知的产品缺口变成整套回归的预期必败项。当前已知实测仅覆盖Town中心，不能据此宣称Village/Tavern覆盖。
 
 默认入口：
 

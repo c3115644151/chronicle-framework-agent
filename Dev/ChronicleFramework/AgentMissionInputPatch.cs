@@ -15,7 +15,9 @@ internal static class AgentMissionInputPatch
     {
         if (mission == null || mission.MissionEnded || !string.Equals(mission.Mode.ToString(), "StartUp", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(mission.SceneName))
             return false;
-        return mission.SceneName.IndexOf("tavern", StringComparison.OrdinalIgnoreCase) >= 0 || mission.SceneName.IndexOf("_town_", StringComparison.OrdinalIgnoreCase) >= 0;
+        return mission.SceneName.IndexOf("tavern", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            mission.SceneName.IndexOf("_town_", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            (mission.SceneName.IndexOf("village", StringComparison.OrdinalIgnoreCase) >= 0 && mission.SceneName.IndexOf("hideout", StringComparison.OrdinalIgnoreCase) < 0);
     }
 
     internal static void Install()

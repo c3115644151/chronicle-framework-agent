@@ -807,6 +807,7 @@ internal static class ChronicleAgentObserver
             json.Append(",\"y\":").Append(Number(item.Agent.Position.Y)).Append(",\"z\":").Append(Number(item.Agent.Position.Z)).Append("}}");
         }
         json.Append(']');
+        json.Append(",\"exitTargets\":").Append(ChronicleAgentMissionExit.BuildTargetsJson(mission, mainAgent));
         json.Append(",\"navigation\":").Append(ChronicleAgentProtocol.BuildMissionNavigationObservationJson(mainAgent));
         json.Append('}');
         return json.ToString();

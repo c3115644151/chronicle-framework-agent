@@ -86,6 +86,8 @@ Action键对普通Agent还有另一结果路径：当焦点目标不是Mount且�
 - `StonePile`出现在官方围城场景。其AmmoPickUpPoint显示“Pick Up”，通过`StandingPointWithWeaponRequirement.InitGivenWeapon`给出该场景配置的投掷石块；不能并入SpawnedItemEntity拾取，作为MainAgent Mission动作列`ACT-G03-34`并交叉映射G08。StonePile剩余ammo对站点可用性有限制，具体MainAgent装备槽/动画结果未运行验证。
 - `CastleGate`在官方SandBoxCore围城Scene有实际实例，站点标签显示Open/Close；玩家完成StandingPoint交互后ServerTick按tag切换GateState、动画与通行NavMesh，守方Team/AutoOpen/当前状态会限制可用性，作为MainAgent Mission动作列`ACT-G03-36`并交叉映射G08。
 - StoryMode `training_field_2`有`ExitDoor`，其StandingPoint显示Leave Area，使用动画结束调用`Mission.EndMission`；与`PassageUsePoint.IsMissionExit`相同Mission结束结果，作为`ACT-G03-24`另一对象入口别名。Story TrainingField的`TrainingIcon`显示Action/Select，`TutorialArea.GetActiveTrainingIcon`将激活tag交给`TrainingFieldMissionController`选择训练子类型、换装备并开始对应练习，列`ACT-G03-35`并跨到A08/J12。
+
+W2-AJ用一次性Campaign夹具实测Sargot TownCenter：正常进入Native `town_streets`后场景名为`vlandia_town_e`，可见游戏引擎帧`TestResults/20260930-084727/Temp/mission-exit-before.bmp`；`OBS-G03-01`中的严格出口候选为空。仅在Harness诊断里枚举本Scene出口类附近对象：存在多个`PassageUsePoint`，其中7项的Native ActionText为“离开”，但它们的`IsMissionExit=false`且`ToLocationId=house_4`至`house_10`，属于Location内部屋门而非Campaign出口；该帧没有`ExitDoor`实例。完整诊断见同run `MissionExitResult.json`。这证据不能证明所有Settlement Location都缺出口；它反证的是“TownCenter里任何写着离开的Passage都能离开战役地图”。Village、Tavern及玩家实际离开该TownCenter的入口仍需不同玩家路径证据，本项不能用直接`Mission.EndMission`补洞。
 - `UsablePlace`继承`UsableMachine`，其Description/Action文案转交PilotStandingPoint；效果归实际机器或StandingPoint目标，不因外层容器类额外增加玩家动作。`PlayMusicPoint`在`OnInit`将`IsDisabledForPlayers=true`，Scene里出现不构成MainAgent玩家入口。`FlagCapturePoint`只在Native Multiplayer地图Scene发现，本项目不支持标准PvP模式；它不加入Campaign行为分母。
 
 以上只把有活跃官方Scene对象、真实玩家Use入口和可区分原版后果的类型补入目录；场景文件/脚本类别总量不是行为族分母。
