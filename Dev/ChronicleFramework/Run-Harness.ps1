@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'TimeControlLoop', 'BattleFixture', 'PostBattle', 'Observation', 'MapNotifications', 'QuickInformation', 'SceneNotification', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'BarterFightRoute', 'BarterSafePassage', 'MissionInteraction', 'MissionExit', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EngageVisibility', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'VisualCapture', 'All')]
+    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'TimeControlLoop', 'BattleFixture', 'PostBattle', 'Observation', 'MapNotifications', 'QuickInformation', 'SceneNotification', 'MissionLeave', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'BarterFightRoute', 'BarterSafePassage', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EngageVisibility', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'VisualCapture', 'All')]
     [string]$Phase = 'All',
     [int]$SmokeTimeoutSeconds = 45,
     [int]$SmokeStabilitySeconds = 8,
@@ -14,7 +14,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '5.93'
+$HarnessContractVersion = '5.94'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -42,7 +42,7 @@ $observationScript = Join-Path $harnessRoot 'Test-AgentObservation.ps1'
 $mapNotificationsScript = Join-Path $harnessRoot 'Test-AgentMapNotifications.ps1'
 $quickInformationScript = Join-Path $harnessRoot 'Test-AgentQuickInformation.ps1'
 $sceneNotificationScript = Join-Path $harnessRoot 'Test-AgentSceneNotification.ps1'
-$missionExitScript = Join-Path $harnessRoot 'Test-AgentMissionExit.ps1'
+$missionLeaveScript = Join-Path $harnessRoot 'Test-AgentMissionLeave.ps1'
 $movementScript = Join-Path $harnessRoot 'Test-AgentMovement.ps1'
 $holdScript = Join-Path $harnessRoot 'Test-AgentHold.ps1'
 $moveToPointScript = Join-Path $harnessRoot 'Test-AgentMoveToPoint.ps1'
@@ -176,7 +176,7 @@ $requestedStages = switch ($Phase) {
     'MapNotifications' { @('Preflight', 'Build', 'MapNotifications') }
     'QuickInformation' { @('Preflight', 'Build', 'QuickInformation') }
     'SceneNotification' { @('Preflight', 'Build', 'SceneNotification') }
-    'MissionExit' { @('Preflight', 'Build', 'MissionExit') }
+    'MissionLeave' { @('Preflight', 'Build', 'MissionLeave') }
     'MainHeroSkills' { @('Preflight', 'Build', 'MainHeroSkills') }
     'CharacterDevelopment' { @('Preflight', 'Build', 'CharacterDevelopment') }
     'SpendSkillFocus' { @('Preflight', 'Build', 'SpendSkillFocus') }
@@ -215,7 +215,7 @@ $requestedStages = switch ($Phase) {
     'SettlementOverlayQuestGate' { @('Preflight', 'Build', 'SettlementOverlayQuestGate') }
     'MapSettlementTargets' { @('Preflight', 'Build', 'MapSettlementTargets') }
     'VisualCapture' { @('Preflight', 'Build', 'VisualCapture') }
-    'All' { @('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'Protocol', 'AgentLoop', 'TimeControlLoop', 'Observation', 'MapNotifications', 'QuickInformation', 'SceneNotification', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'QuestAcceptance', 'BattleFixture', 'PostBattle', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestGate') }
+    'All' { @('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'Protocol', 'AgentLoop', 'TimeControlLoop', 'Observation', 'MapNotifications', 'QuickInformation', 'SceneNotification', 'MissionLeave', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'QuestAcceptance', 'BattleFixture', 'PostBattle', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestGate') }
 }
 
 foreach ($stage in $requestedStages) {
@@ -454,11 +454,11 @@ foreach ($stage in $requestedStages) {
                 $testOutput
             }
         }
-        'MissionExit' {
-            Invoke-Stage -Name 'MissionExit' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $missionExitScript 2>&1 | Out-String
+        'MissionLeave' {
+            Invoke-Stage -Name 'MissionLeave' -Action {
+                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $missionLeaveScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
-                if ($testExitCode -ne 0) { throw "Native Mission Exit runtime test failed with exit code $testExitCode.`n$testOutput" }
+                if ($testExitCode -ne 0) { throw "Native Mission Leave runtime test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
             }
         }

@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 
-Contract version: 5.93
+Contract version: 5.94
 
 ## 目标与边界
 
@@ -63,7 +63,7 @@ Project采用最少任务状态：`Todo`表示尚未开始（是否被阻塞看I
 
 ## 开发入口
 
-`MissionExit`为Location Mission返回地图提供本地按需验收阶段：从一次性Campaign夹具进入Town中心Mission，只枚举当前场景的原版`PassageUsePoint(IsMissionExit)`/`ExitDoor`，保存使用前后的游戏引擎帧；用有界Native `AgentNavigator`走到出口，再调用`Agent.HandleStartUsingAction`并验证回到原Settlement菜单。该阶段拒绝无效/陈旧Mission对象ID；绝不直接调用`Mission.EndMission`、不以ESC/战斗撤退冒充原版地点出口，不保存夹具。若场景内无符合条件的原版出口，会输出失败/阻塞证据；在玩家返回地图的原版路径核明、专项阶段通过前，`MissionExit`不纳入`All`，避免把已知的产品缺口变成整套回归的预期必败项。当前已知实测仅覆盖Town中心，不能据此宣称Village/Tavern覆盖。
+`MissionLeave`验收使用一次性Campaign夹具经Town菜单进入真实Location Mission，先保存引擎帧，再用一个限时Mission专属`IInputContext`让本场景的`Mission.Tick`读到Leave Area game key处于按住状态；它继续走原版`Mission.OnEndMissionRequest`、MissionLogic veto/Inquiry与Mission计时，不直接调用`Mission.EndMission`，也不发送OS全局键鼠事件。测试等待真实Mission→Campaign MapState和原Settlement菜单，并保留前后引擎帧/时钟/存档哈希/清理收据。该测试已加入`All`：当前实测证明了Sargot TownCenter路径，不等于所有Town/Village/Tavern和其他Mission条件都已覆盖。用户当前键鼠实测长按Tab约两秒，但产品代码虚拟的是Native Leave Area game action，不硬编码物理键位。
 
 默认入口：
 

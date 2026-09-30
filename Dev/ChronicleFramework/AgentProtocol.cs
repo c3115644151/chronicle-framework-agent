@@ -16,6 +16,7 @@ using TaleWorlds.CampaignSystem.Settlements.Locations;
 using TaleWorlds.CampaignSystem.ViewModelCollection.GameMenu.Recruitment;
 using TaleWorlds.CampaignSystem.ViewModelCollection.GameMenu.Events;
 using TaleWorlds.Core;
+using TaleWorlds.InputSystem;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.View.MissionViews;
 using EngineTime = TaleWorlds.Engine.Time;
@@ -49,13 +50,20 @@ internal sealed class ChronicleAgentProtocol
     private Mission _missionNavigationMission;
     private Agent _missionNavigationOwner;
     private int _missionNavigationTargetAgentIndex = -1;
-    private string _missionNavigationTargetExitObjectId;
     private TaleWorlds.Library.Vec3 _missionNavigationTargetPosition;
     private TaleWorlds.Core.AgentControllerType? _missionNavigationOriginalController;
     private float _missionNavigationStartedAt;
     private float _missionNavigationExpiresAt;
     private float _lastMissionNavigationTickAt;
     private string _missionNavigationStatus;
+    private const int LeaveAreaGameKeyId = 4;
+    private const float LeaveAreaHoldSeconds = 2.5f;
+    private Mission _missionLeaveMission;
+    private IInputContext _missionLeaveOriginalInputContext;
+    private ChronicleMissionLeaveInputContext _missionLeaveInputContext;
+    private float _missionLeaveStartedAt;
+    private float _missionLeaveExpiresAt;
+    private string _missionLeaveStatus;
 
     internal ChronicleAgentProtocol()
     {
@@ -79,6 +87,7 @@ internal sealed class ChronicleAgentProtocol
         {
             UpdateMissionNavigationLease();
             UpdateMissionInputLease();
+            UpdateMissionLeaveLease();
             CompleteRestIfReady(behavior);
             CompleteAdvanceIfReady(behavior);
             CompleteDeferredMapClickTimeChange();
@@ -699,7 +708,6 @@ internal sealed class ChronicleAgentProtocol
                     _missionNavigator = newMissionNavigator;
                     _missionNavigationOwner = navigationMission.MainAgent;
                     _missionNavigationTargetAgentIndex = navigationTargetAgentIndex;
-                    _missionNavigationTargetExitObjectId = null;
                     _missionNavigationTargetPosition = navigationDestination;
                     _missionNavigationOriginalController = originalMainAgentController;
                     _missionNavigationMission = navigationMission;
@@ -710,84 +718,28 @@ internal sealed class ChronicleAgentProtocol
                     var navigationData = "{\"targetAgentIndex\":" + navigationTargetAgentIndex.ToString(CultureInfo.InvariantCulture) + ",\"targetCharacterId\":\"" + Escape(navigationTargetAgent.Character?.StringId) + "\",\"targetHeroId\":" + ((navigationTargetAgent.Character as CharacterObject)?.HeroObject == null ? "null" : "\"" + Escape((navigationTargetAgent.Character as CharacterObject).HeroObject.StringId) + "\"") + ",\"navState\":\"" + _missionNavigator._agentState + "\",\"targetDistance\":" + navigationDistance.ToString("R", CultureInfo.InvariantCulture) + ",\"durationSeconds\":" + requestedNavigationSeconds.ToString("R", CultureInfo.InvariantCulture) + "}";
                     WriteResponse(commandId, action, "completed", behavior, null, navigationData);
                     break;
-                case "missionNavigateToExit":
-                    var exitMission = Mission.Current;
-                    var exitMissionState = Game.Current?.GameStateManager?.ActiveState as MissionState;
-                    var exitMainAgent = exitMission?.MainAgent;
-                    if (exitMission == null || exitMission.MissionEnded || exitMissionState == null || exitMainAgent == null || !exitMainAgent.IsActive() || !exitMainAgent.IsPlayerControlled)
-                        throw new InvalidOperationException("missionNavigateToExit requires an active Location Mission with the Player-controlled MainAgent");
-                    if (!AgentMissionInputPatch.IsSupportedLocationMission(exitMission))
-                        throw new InvalidOperationException("missionNavigateToExit requires a supported non-battle Town, Tavern or Village Location Mission");
-                    if (Campaign.Current.TimeControlMode != CampaignTimeControlMode.Stop)
-                        throw new InvalidOperationException("missionNavigateToExit requires the Campaign clock to remain stopped");
-                    if (exitMission.IsTeleportingAgents)
-                        throw new InvalidOperationException("missionNavigateToExit rejects Mission teleport mode");
-                    var exitObjectId = ReadString(command, "missionObjectId");
-                    var exitCandidate = ChronicleAgentMissionExit.FindCandidate(exitMission, exitMainAgent, exitObjectId);
-                    if (exitCandidate == null) throw new InvalidOperationException("missionObjectId must be a current observed active Native Mission exit");
-                    if (!exitCandidate.HasPath) throw new InvalidOperationException("Native Mission Scene reports no NavMesh path to this exit");
-                    var exitNavigationSeconds = ReadDouble(command, "durationSeconds");
-                    if (exitNavigationSeconds == 0) exitNavigationSeconds = 8.0;
-                    if (exitNavigationSeconds < 1.0 || exitNavigationSeconds > 20.0)
-                        throw new InvalidOperationException("missionNavigateToExit durationSeconds must be between 1 and 20 seconds");
-                    var exitNavigationStart = exitMainAgent.Position;
-                    var exitNavigationTargetWorld = exitCandidate.UserFrame.Origin;
-                    var exitNavigationTarget = exitNavigationTargetWorld.GetNavMeshVec3();
-                    var exitStartWorld = new TaleWorlds.Engine.WorldPosition(exitMission.Scene, exitNavigationStart);
-                    var exitTargetWorld = exitNavigationTargetWorld;
-                    var exitOriginalController = exitMainAgent.Controller;
-                    if (exitOriginalController != AgentControllerType.Player) throw new InvalidOperationException("missionNavigateToExit can only temporarily hand off the Player-controlled MainAgent");
-                    ClearMissionNavigationLease("replaced");
-                    ClearMissionInputLease();
-                    var exitNavigator = new SandBox.AgentNavigator(exitMainAgent);
-                    var exitDirection = (float)Math.Atan2(exitNavigationTarget.Y - exitNavigationStart.Y, exitNavigationTarget.X - exitNavigationStart.X);
-                    try
-                    {
-                        exitMainAgent.Controller = AgentControllerType.AI;
-                        exitNavigator.SetTargetFrame(exitTargetWorld, exitDirection, rangeThreshold: 1.5f, rotationThreshold: -10f, flags: (Agent.AIScriptedFrameFlags)0, disableClearTargetWhenTargetIsReached: false);
-                    }
-                    catch
-                    {
-                        try { exitNavigator.ClearTarget(); } catch { }
-                        exitMainAgent.Controller = exitOriginalController;
-                        throw;
-                    }
-                    _missionNavigator = exitNavigator;
-                    _missionNavigationMission = exitMission;
-                    _missionNavigationOwner = exitMainAgent;
-                    _missionNavigationTargetAgentIndex = -1;
-                    _missionNavigationTargetExitObjectId = exitCandidate.ObjectId;
-                    _missionNavigationTargetPosition = exitNavigationTarget;
-                    _missionNavigationOriginalController = exitOriginalController;
-                    _missionNavigationStartedAt = EngineTime.ApplicationTime;
-                    _missionNavigationExpiresAt = EngineTime.ApplicationTime + (float)exitNavigationSeconds;
-                    _lastMissionNavigationTickAt = EngineTime.ApplicationTime;
-                    _missionNavigationStatus = _missionNavigator._agentState.ToString();
-                    var exitNavigationResult = "{\"missionObjectId\":\"" + Escape(exitCandidate.ObjectId) + "\",\"navState\":\"" + Escape(_missionNavigationStatus) + "\",\"targetDistance\":" + exitCandidate.Distance.ToString("R", CultureInfo.InvariantCulture) + ",\"durationSeconds\":" + exitNavigationSeconds.ToString("R", CultureInfo.InvariantCulture) + "}";
-                    WriteResponse(commandId, action, "completed", behavior, null, exitNavigationResult);
-                    break;
-                case "missionUseExit":
-                    var useExitMission = Mission.Current;
-                    var useExitState = Game.Current?.GameStateManager?.ActiveState as MissionState;
-                    var useExitAgent = useExitMission?.MainAgent;
-                    if (useExitMission == null || useExitMission.MissionEnded || useExitState == null || useExitAgent == null || !useExitAgent.IsActive() || !useExitAgent.IsPlayerControlled)
-                        throw new InvalidOperationException("missionUseExit requires an active Location Mission with the Player-controlled MainAgent");
-                    if (!AgentMissionInputPatch.IsSupportedLocationMission(useExitMission))
-                        throw new InvalidOperationException("missionUseExit requires a supported non-battle Town, Tavern or Village Location Mission");
-                    if (Campaign.Current.TimeControlMode != CampaignTimeControlMode.Stop)
-                        throw new InvalidOperationException("missionUseExit requires the Campaign clock to remain stopped");
-                    if (_missionNavigator != null) throw new InvalidOperationException("Wait for the bounded exit navigation lease to finish before using the exit");
-                    var useExitObjectId = ReadString(command, "missionObjectId");
-                    var useExitCandidate = ChronicleAgentMissionExit.FindCandidate(useExitMission, useExitAgent, useExitObjectId);
-                    if (useExitCandidate == null) throw new InvalidOperationException("missionObjectId must be a current observed active Native Mission exit");
-                    if (useExitCandidate.Distance > 2.5) throw new InvalidOperationException("MainAgent must reach the Native Mission exit before using it");
-                    if (useExitCandidate.MissionObject.IsDisabled || useExitCandidate.UsableObject.IsDisabledForAgent(useExitAgent) || !useExitCandidate.UsableObject.IsUsableByAgent(useExitAgent))
-                        throw new InvalidOperationException("Native Mission exit is currently disabled for the MainAgent");
-                    var useExitTimeModeBefore = Campaign.Current.TimeControlMode.ToString();
-                    var useExitDayBefore = CampaignTime.Now.ToDays;
-                    useExitAgent.HandleStartUsingAction(useExitCandidate.UsableObject, -1);
-                    var useExitReceipt = ChronicleAgentMissionExit.BuildUseReceipt(useExitAgent, useExitCandidate, useExitTimeModeBefore, useExitDayBefore, useExitMission.MissionEnded);
-                    WriteResponse(commandId, action, "completed", behavior, null, useExitReceipt);
+                case "missionLeave":
+                    var leaveMission = Mission.Current;
+                    var leaveMissionState = Game.Current?.GameStateManager?.ActiveState as MissionState;
+                    var leaveMainAgent = leaveMission?.MainAgent;
+                    if (leaveMission == null || leaveMission.MissionEnded || leaveMissionState == null || leaveMainAgent == null || !leaveMainAgent.IsActive() || !leaveMainAgent.IsPlayerControlled)
+                        throw new InvalidOperationException("missionLeave requires an active Location Mission with the Player-controlled MainAgent");
+                    if (!AgentMissionInputPatch.IsSupportedLocationMission(leaveMission) || !leaveMission.IsFriendlyMission)
+                        throw new InvalidOperationException("missionLeave requires a supported friendly Town, Tavern or Village Location Mission");
+                    if (Campaign.Current?.TimeControlMode != CampaignTimeControlMode.Stop)
+                        throw new InvalidOperationException("missionLeave requires the Campaign clock to remain stopped");
+                    if (leaveMission.IsTeleportingAgents) throw new InvalidOperationException("missionLeave rejects Mission teleport mode");
+                    if (_missionLeaveMission != null) throw new InvalidOperationException("a native Leave Area hold lease is already active");
+                    if (leaveMission.InputManager == null) throw new InvalidOperationException("Native Mission input context is unavailable");
+                    _missionLeaveMission = leaveMission;
+                    _missionLeaveOriginalInputContext = leaveMission.InputManager;
+                    _missionLeaveInputContext = new ChronicleMissionLeaveInputContext(_missionLeaveOriginalInputContext, LeaveAreaGameKeyId);
+                    leaveMission.InputManager = _missionLeaveInputContext;
+                    _missionLeaveStartedAt = EngineTime.ApplicationTime;
+                    _missionLeaveExpiresAt = _missionLeaveStartedAt + LeaveAreaHoldSeconds;
+                    _missionLeaveStatus = "holding-native-leave-area";
+                    var leaveReceipt = "{\"schemaVersion\":1,\"nativeInputContext\":\"Mission.InputManager.IsGameKeyDown(LeaveArea)\",\"holdSeconds\":" + LeaveAreaHoldSeconds.ToString("R", CultureInfo.InvariantCulture) + ",\"missionEndTimeInSeconds\":" + leaveMission.GetMissionEndTimeInSeconds().ToString("R", CultureInfo.InvariantCulture) + ",\"campaignDay\":" + CampaignTime.Now.ToDays.ToString("F6", CultureInfo.InvariantCulture) + ",\"timeControlMode\":\"" + Campaign.Current.TimeControlMode + "\"}";
+                    WriteResponse(commandId, action, "completed", behavior, null, leaveReceipt);
                     break;
                 case "missionInteract":
                     var missionInteractionIndex = ReadRequiredFiniteDouble(command, "agentIndex");
@@ -1151,6 +1103,45 @@ internal sealed class ChronicleAgentProtocol
             throw new InvalidOperationException("Equipment modifier fixture seeding/cleanup is restricted to visual Harness runs with a Harness temp directory");
     }
 
+    private void UpdateMissionLeaveLease()
+    {
+        var mission = _missionLeaveMission;
+        if (mission == null) return;
+        if (mission.MissionEnded || Mission.Current != mission || Game.Current?.GameStateManager?.ActiveState is not MissionState)
+        {
+            ClearMissionLeaveLease("mission-ended-or-changed");
+            return;
+        }
+        if (EngineTime.ApplicationTime >= _missionLeaveExpiresAt)
+            ClearMissionLeaveLease("hold-timeout");
+    }
+
+    private void ClearMissionLeaveLease(string status)
+    {
+        var mission = _missionLeaveMission;
+        if (mission != null && ReferenceEquals(mission.InputManager, _missionLeaveInputContext))
+        {
+            try { mission.InputManager = _missionLeaveOriginalInputContext; }
+            catch (Exception exception) { ChronicleDiagnostics.Write($"agent-mission-leave-context-restore-failed|type={exception.GetType().Name}|message={exception.Message}"); }
+        }
+        _missionLeaveMission = null;
+        _missionLeaveOriginalInputContext = null;
+        _missionLeaveInputContext = null;
+        _missionLeaveExpiresAt = 0f;
+        _missionLeaveStartedAt = 0f;
+        _missionLeaveStatus = status;
+    }
+
+    internal static string BuildMissionLeaveObservationJson(Mission mission)
+    {
+        var protocol = _activeInstance;
+        if (protocol == null || mission == null || protocol._missionLeaveMission != mission || mission != Mission.Current)
+            return "null";
+        var remaining = Math.Max(0.0, protocol._missionLeaveExpiresAt - EngineTime.ApplicationTime);
+        var nativeProgress = mission.GetMissionEndTimerValue();
+        return "{\"status\":\"" + Escape(protocol._missionLeaveStatus) + "\",\"active\":true,\"secondsRemaining\":" + remaining.ToString("R", CultureInfo.InvariantCulture) + ",\"nativeLeaveProgressSeconds\":" + nativeProgress.ToString("R", CultureInfo.InvariantCulture) + ",\"nativeLeaveThresholdSeconds\":" + mission.GetMissionEndTimeInSeconds().ToString("R", CultureInfo.InvariantCulture) + "}";
+    }
+
     private void UpdateMissionNavigationLease()
     {
         if (_missionNavigator == null) return;
@@ -1197,7 +1188,7 @@ internal sealed class ChronicleAgentProtocol
     internal static string BuildMissionNavigationObservationJson(Agent mainAgent)
     {
         var protocol = _activeInstance;
-        if (protocol == null || mainAgent == null || protocol._missionNavigationMission == null || protocol._missionNavigationMission != Mission.Current || protocol._missionNavigationOwner != mainAgent || (protocol._missionNavigationTargetAgentIndex < 0 && string.IsNullOrWhiteSpace(protocol._missionNavigationTargetExitObjectId)) || string.IsNullOrWhiteSpace(protocol._missionNavigationStatus))
+        if (protocol == null || mainAgent == null || protocol._missionNavigationMission == null || protocol._missionNavigationMission != Mission.Current || protocol._missionNavigationOwner != mainAgent || protocol._missionNavigationTargetAgentIndex < 0 || string.IsNullOrWhiteSpace(protocol._missionNavigationStatus))
             return "null";
         var x = mainAgent.Position.X - protocol._missionNavigationTargetPosition.X;
         var y = mainAgent.Position.Y - protocol._missionNavigationTargetPosition.Y;
@@ -1205,8 +1196,7 @@ internal sealed class ChronicleAgentProtocol
         var distance = Math.Sqrt(x * x + y * y + z * z);
         var remaining = protocol._missionNavigator == null ? 0.0 : Math.Max(0.0, protocol._missionNavigationExpiresAt - EngineTime.ApplicationTime);
         var targetAgentJson = protocol._missionNavigationTargetAgentIndex < 0 ? "null" : protocol._missionNavigationTargetAgentIndex.ToString(CultureInfo.InvariantCulture);
-        var targetExitJson = string.IsNullOrWhiteSpace(protocol._missionNavigationTargetExitObjectId) ? "null" : "\"" + Escape(protocol._missionNavigationTargetExitObjectId) + "\"";
-        return "{\"status\":\"" + Escape(protocol._missionNavigationStatus) + "\",\"active\":" + (protocol._missionNavigator != null ? "true" : "false") + ",\"targetAgentIndex\":" + targetAgentJson + ",\"targetMissionObjectId\":" + targetExitJson + ",\"targetPosition\":{\"x\":" + protocol._missionNavigationTargetPosition.X.ToString("R", CultureInfo.InvariantCulture) + ",\"y\":" + protocol._missionNavigationTargetPosition.Y.ToString("R", CultureInfo.InvariantCulture) + ",\"z\":" + protocol._missionNavigationTargetPosition.Z.ToString("R", CultureInfo.InvariantCulture) + "},\"distance\":" + distance.ToString("R", CultureInfo.InvariantCulture) + ",\"secondsRemaining\":" + remaining.ToString("R", CultureInfo.InvariantCulture) + "}";
+        return "{\"status\":\"" + Escape(protocol._missionNavigationStatus) + "\",\"active\":" + (protocol._missionNavigator != null ? "true" : "false") + ",\"targetAgentIndex\":" + targetAgentJson + ",\"targetPosition\":{\"x\":" + protocol._missionNavigationTargetPosition.X.ToString("R", CultureInfo.InvariantCulture) + ",\"y\":" + protocol._missionNavigationTargetPosition.Y.ToString("R", CultureInfo.InvariantCulture) + ",\"z\":" + protocol._missionNavigationTargetPosition.Z.ToString("R", CultureInfo.InvariantCulture) + "},\"distance\":" + distance.ToString("R", CultureInfo.InvariantCulture) + ",\"secondsRemaining\":" + remaining.ToString("R", CultureInfo.InvariantCulture) + "}";
     }
 
     private static string BuildHarnessMissionDiagnosticsJson(Mission mission)
@@ -1230,12 +1220,6 @@ internal sealed class ChronicleAgentProtocol
             })
             .OrderBy(item => item.Distance ?? double.MaxValue)
             .ToArray();
-        var exitLikeObjects = mission == null
-            ? Array.Empty<MissionObject>()
-            : mission.ActiveMissionObjects
-                .Where(item => item != null && (item.GetType().Name.IndexOf("exit", StringComparison.OrdinalIgnoreCase) >= 0 || item.GetType().Name.IndexOf("passage", StringComparison.OrdinalIgnoreCase) >= 0 || item.GetType().Name.IndexOf("door", StringComparison.OrdinalIgnoreCase) >= 0))
-                .Take(80)
-                .ToArray();
         var locationIssueOwners = currentCampaignLocation == null
             ? Array.Empty<Hero>()
             : currentCampaignLocation.GetCharacterList()
@@ -1285,57 +1269,6 @@ internal sealed class ChronicleAgentProtocol
             json.Append('}');
         }
         json.Append(']');
-        json.Append(",\"exitLikeObjects\":[");
-        for (var index = 0; index < exitLikeObjects.Length; index++)
-        {
-            if (index > 0) json.Append(',');
-            var missionObject = exitLikeObjects[index];
-            var usableObject = missionObject as UsableMissionObject;
-            var missionExitProperty = missionObject.GetType().GetProperty("IsMissionExit", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
-            var missionExitField = missionObject.GetType().GetField("IsMissionExit", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
-            bool? isMissionExit = null;
-            try
-            {
-                if (missionExitProperty != null && missionExitProperty.PropertyType == typeof(bool)) isMissionExit = (bool)missionExitProperty.GetValue(missionObject, null);
-                else if (missionExitField != null && missionExitField.FieldType == typeof(bool)) isMissionExit = (bool)missionExitField.GetValue(missionObject);
-            }
-            catch { }
-            var frameAvailable = false;
-            var frameError = string.Empty;
-            var distance = (double?)null;
-            var isDisabledForPlayer = (bool?)null;
-            var destinationId = string.Empty;
-            if (usableObject != null && mainAgent != null)
-            {
-                try
-                {
-                    var userFrame = usableObject.GetUserFrameForAgent(mainAgent);
-                    frameAvailable = true;
-                    distance = ChronicleAgentMissionExit.Distance(mainAgent.Position, userFrame.Origin.GetNavMeshVec3());
-                    isDisabledForPlayer = usableObject.IsDisabledForAgent(mainAgent);
-                }
-                catch (Exception exception) { frameError = exception.GetType().Name + ":" + exception.Message; }
-            }
-            try
-            {
-                var toLocationId = missionObject.GetType().GetField("ToLocationId", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
-                if (toLocationId != null) destinationId = toLocationId.GetValue(missionObject)?.ToString() ?? string.Empty;
-            }
-            catch (Exception exception) { frameError = string.IsNullOrEmpty(frameError) ? exception.GetType().Name + ":" + exception.Message : frameError; }
-            json.Append('{');
-            json.Append("\"type\":\"").Append(Escape(missionObject.GetType().Name)).Append('"');
-            json.Append(",\"objectId\":\"").Append(missionObject.Id.Id.ToString(CultureInfo.InvariantCulture)).Append(':').Append(missionObject.Id.CreatedAtRuntime ? '1' : '0').Append('"');
-            json.Append(",\"entityName\":\"").Append(Escape(missionObject.GameEntity.Name)).Append('"');
-            json.Append(",\"isDisabled\":").Append(missionObject.IsDisabled ? "true" : "false");
-            json.Append(",\"isMissionExit\":").Append(isMissionExit.HasValue ? (isMissionExit.Value ? "true" : "false") : "null");
-            json.Append(",\"isUsable\":").Append(usableObject != null && mainAgent != null && usableObject.IsUsableByAgent(mainAgent) ? "true" : "false");
-            json.Append(",\"userFrameAvailable\":").Append(frameAvailable ? "true" : "false");
-            json.Append(",\"userFrameError\":\"").Append(Escape(frameError)).Append('"');
-            json.Append(",\"distance\":").Append(distance.HasValue ? distance.Value.ToString("R", CultureInfo.InvariantCulture) : "null");
-            json.Append(",\"isDisabledForPlayer\":").Append(isDisabledForPlayer.HasValue ? (isDisabledForPlayer.Value ? "true" : "false") : "null");
-            json.Append(",\"toLocationId\":\"").Append(Escape(destinationId)).Append('"');
-            json.Append(",\"actionText\":\"").Append(Escape(usableObject?.ActionMessage?.ToString())).Append("\"}");
-        }
         json.Append("]}");
         return json.ToString();
     }

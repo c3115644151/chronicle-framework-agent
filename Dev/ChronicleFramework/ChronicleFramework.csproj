@@ -12,6 +12,10 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Remove="TestResults/**/*.cs" />
+    <Reference Include="System.Numerics.Vectors">
+      <HintPath>$(ChronicleGameRoot)\bin\Win64_Shipping_Client\System.Numerics.Vectors.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="TaleWorlds.Library">
       <HintPath>$(ChronicleGameRoot)\bin\Win64_Shipping_Client\TaleWorlds.Library.dll</HintPath>
       <Private>false</Private>
