@@ -68,6 +68,15 @@ if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'observationLoop') {
     }
     throw 'Observation loop provider received an unexpected iteration or prior receipt.'
 }
+if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'unicodeRoundTrip') {
+    $observedHeroName = [string]$request.observation.state.identity.heroName
+    $expectedHeroName = [string]$env:CHRONICLE_TEST_EXPECTED_HERO_NAME
+    if ([string]::IsNullOrEmpty($expectedHeroName) -or $observedHeroName -cne $expectedHeroName) {
+        throw "Unicode observation did not round-trip through the Agent transport. Expected '$expectedHeroName'; received '$observedHeroName'."
+    }
+    [pscustomobject]@{ action = 'state'; arguments = @{}; rationale = 'Unicode Agent transport round-trip matched the live Native hero name.' } | ConvertTo-Json -Compress
+    exit 0
+}
 if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'doneSignal') {
     if ($request.iteration -eq 1) {
         [pscustomobject]@{ action = 'state'; arguments = @{}; rationale = 'Deterministic Harness termination check: acquire one fresh observation before stopping.' } | ConvertTo-Json -Compress

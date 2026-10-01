@@ -2,7 +2,7 @@
 param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
     [int]$TimeoutSeconds = 180,
-    [int]$MaxDecisions = 100,
+    [int]$MaxDecisions = 320,
     [string]$ScenarioSettlementId = 'village_V1_1'
 )
 
@@ -119,6 +119,7 @@ try {
     $actionNames = @($loop.trace | Where-Object { $_.actionExecuted } | ForEach-Object { [string]$_.decision.action })
     $activeQuestAfter = if ($memory) { @($finalState.quests | Where-Object { [string]$_.id -eq [string]$memory.questId }) } else { @() }
     $deliverySuccess = ($null -ne $memory -and [string]$memory.verification -eq 'passed' -and $activeQuestAfter.Count -eq 0)
+    $returnedToGiverSettlementMenu = ($finalState.context.gameState -eq 'MapState' -and $finalState.context.menuId -eq 'village' -and $finalState.location.currentSettlementId -eq [string]$memory.homeVillageId -and $null -eq $finalState.context.conversation)
     $result = [ordered]@{
         ProviderKind = 'deterministic-observation-driven-agent'
         ScenarioSettlementId = $ScenarioSettlementId
@@ -144,11 +145,21 @@ try {
         RewardCountAfterDelivery = $memory.rewardCountAfterDelivery
         GoldBeforeDelivery = $memory.preDeliveryGold
         GoldAfterDelivery = $memory.postDeliveryGold
+        PartyItemCountBeforeDelivery = $memory.preDeliveryPartyItemCount
+        PartyItemCountAfterDelivery = $memory.postDeliveryPartyItemCount
+        QuestRewardNetItemDelta = $memory.questRewardNetItemDelta
+        RewardTradeVmCountMatched = ($memory.rewardCountAfterDelivery -ge $memory.rewardCountBeforeDelivery + $memory.rewardItemCount)
+        RewardInventoryCountMatched = [bool]$memory.rewardInventoryCountMatched
+        RewardInventoryRowCount = $memory.rewardInventoryRowCount
+        NativePlayerInventoryVerified = ((@($actionNames | Where-Object { $_ -eq 'inventoryOpen' }).Count -gt 0) -and (@($actionNames | Where-Object { $_ -eq 'heroEquipmentOptions' }).Count -gt 0) -and (@($actionNames | Where-Object { $_ -eq 'inventoryCancel' }).Count -gt 0))
+        RewardPartyRosterDeltaMatched = [bool]$memory.questRewardRosterDeltaMatches
+        VerificationEvidence = $memory.verificationEvidence
         TradeTownsObserved = @($memory.visitedMarkets)
         VillagesObserved = @($memory.visitedVillages)
         CurrentGameState = $finalState.context.gameState
         CurrentSettlementId = $finalState.location.currentSettlementId
         CurrentMenuId = $finalState.context.menuId
+        ReturnedToGiverSettlementMenu = [bool]$returnedToGiverSettlementMenu
         CurrentVisibleMenuOptions = @($finalState.availableMenuOptions | Where-Object { $_.available -and $_.enabled } | ForEach-Object { [ordered]@{ Id = [string]$_.id; Text = [string]$_.text } })
         CampaignDayAtStart = $initial.campaignDay
         CampaignDayAtEnd = $finalObservation.campaignDay
@@ -165,7 +176,8 @@ try {
     $fixtureHashAfter = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
     $result.SourceFixtureUnchanged = ($fixtureHashBefore -eq $fixtureHashAfter)
     $result.ProcessStopped = [bool]$stop.processStopped
-    $result.Passed = ($deliverySuccess -and $memory.questMarkerObserved -and $memory.questAcceptanceOptionObserved -and $memory.deliveryOptionObserved -and $loop.termination.completedByProvider -and $finalState.context.gameState -eq 'MapState' -and $result.SourceFixtureUnchanged -and $result.ProcessStopped -and (@($actionNames | Where-Object { $_ -eq 'trade' }).Count -gt 0) -and (@($actionNames | Where-Object { $_ -eq 'tradeConfirm' }).Count -gt 0) -and (@($actionNames | Where-Object { $_ -eq 'talkToSettlementHero' }).Count -ge 2))
+    $rewardPostconditionVerified = ([bool]$result.RewardInventoryCountMatched -or [bool]$result.RewardTradeVmCountMatched)
+    $result.Passed = ($deliverySuccess -and $memory.questMarkerObserved -and $memory.questAcceptanceOptionObserved -and $memory.deliveryOptionObserved -and $rewardPostconditionVerified -and $result.NativePlayerInventoryVerified -and $returnedToGiverSettlementMenu -and $loop.termination.completedByProvider -and $finalState.context.gameState -eq 'MapState' -and $result.SourceFixtureUnchanged -and $result.ProcessStopped -and (@($actionNames | Where-Object { $_ -eq 'trade' }).Count -gt 0) -and (@($actionNames | Where-Object { $_ -eq 'tradeConfirm' }).Count -gt 0) -and (@($actionNames | Where-Object { $_ -eq 'talkToSettlementHero' }).Count -ge 2))
     $json = $result | ConvertTo-Json -Depth 12
     if ($tempPath -and (Test-Path -LiteralPath $tempPath -PathType Container)) { Set-Content -LiteralPath (Join-Path $tempPath 'VillageToolsDeliveryResult.json') -Value $json -Encoding UTF8 }
     $json

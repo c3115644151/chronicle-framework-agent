@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet('start','load','state','mapSettlementTargets','mapNotifications','quickInformation','sceneNotification','mapPartyTargets','mapPartyComposition','mapPartyBehavior','partyUpgradeOptions','upgradeTroop','prisonerRecruitmentOptions','recruitPrisoner','characterDevelopment','spendSkillFocus','questDetails','partyRoster','partyRoles','inventoryOpen','heroEquipmentOptions','equipHeroItem','unequipHeroItem','inventoryConfirm','inventoryCancel','inventoryCancelChanges','tradeConfirm','tradeCancel','tradeCancelChanges','barterOptions','barterEdit','barterReset','barterAutoBalance','barterOffer','barterCancel','setPartyRole','unassignPartyRole','captureFrame','harnessMissionDiagnostics','harnessMapDiagnostics','harnessPlayerSkillsDiagnostics','harnessCharacterDevelopmentDiagnostics','harnessQuestDetailsDiagnostics','harnessQuestDeadlinePrivacyDiagnostics','harnessPartyRosterDiagnostics','harnessMapPartyDiagnostics','harnessMapPartyCompositionDiagnostics','harnessCreateMapArmyFixture','harnessPrepareSafePassageFixture','harnessPreparePursuitVisibilityFixture','harnessSeedPartyUpgradeFixture','harnessSeedPrisonerRecruitmentFixture','harnessSeedRecruitmentCapacityFixture','harnessPrepareCompanionHiringFixture','harnessCompanionHiringDiagnostics','harnessSeedPartyRoleFixture','harnessPartyRoleDiagnostics','harnessSeedEquipmentModifierFixture','harnessClearEquipmentModifierFixture','harnessSeedTradeRumorFixture','harnessTradeRumorTooltipDiagnostics','harnessSeedMapNotificationFixture','harnessSeedQuickInformationFixture','harnessSeedSceneNotificationFixture','harnessOpenInventoryState','harnessCloseInventoryState','harnessInventoryStateDiagnostics','talkToSettlementHero','visitSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','fastForward','move','moveToPoint','missionInput','missionNavigateToAgent','missionLeave','missionInteract','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','recruit','foodOptions','tradeOptions','tradeRumors','trade','provision','save','stop')]
+    [ValidateSet('start','load','recoverTestConfig','state','mapSettlementTargets','mapNotifications','quickInformation','sceneNotification','mapPartyTargets','mapPartyComposition','mapPartyBehavior','partyUpgradeOptions','upgradeTroop','prisonerRecruitmentOptions','recruitPrisoner','characterDevelopment','spendSkillFocus','questDetails','partyRoster','partyRoles','inventoryOpen','heroEquipmentOptions','equipHeroItem','unequipHeroItem','inventoryConfirm','inventoryCancel','inventoryCancelChanges','tradeConfirm','tradeCancel','tradeCancelChanges','barterOptions','barterEdit','barterReset','barterAutoBalance','barterOffer','barterCancel','setPartyRole','unassignPartyRole','captureFrame','harnessMissionDiagnostics','harnessMapDiagnostics','harnessPlayerSkillsDiagnostics','harnessCharacterDevelopmentDiagnostics','harnessQuestDetailsDiagnostics','harnessQuestDeadlinePrivacyDiagnostics','harnessPartyRosterDiagnostics','harnessMapPartyDiagnostics','harnessMapPartyCompositionDiagnostics','harnessCreateMapArmyFixture','harnessPrepareSafePassageFixture','harnessPreparePursuitVisibilityFixture','harnessSeedPartyUpgradeFixture','harnessSeedPrisonerRecruitmentFixture','harnessSeedRecruitmentCapacityFixture','harnessPrepareCompanionHiringFixture','harnessCompanionHiringDiagnostics','harnessSeedPartyRoleFixture','harnessPartyRoleDiagnostics','harnessSeedEquipmentModifierFixture','harnessClearEquipmentModifierFixture','harnessSeedTradeRumorFixture','harnessTradeRumorTooltipDiagnostics','harnessSeedMapNotificationFixture','harnessSeedQuickInformationFixture','harnessSeedSceneNotificationFixture','harnessOpenInventoryState','harnessCloseInventoryState','harnessInventoryStateDiagnostics','talkToSettlementHero','visitSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','fastForward','move','moveToPoint','missionInput','missionNavigateToAgent','missionLeave','missionInteract','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','recruit','foodOptions','tradeOptions','tradeRumors','trade','provision','save','stop')]
     [string]$Action,
     [string]$SaveName,
     [string]$SettlementId,
@@ -49,6 +49,8 @@ $ErrorActionPreference = 'Stop'
 $gameRoot = if ($env:CHRONICLE_GAME_ROOT -and (Test-Path -LiteralPath $env:CHRONICLE_GAME_ROOT)) { [IO.Path]::GetFullPath($env:CHRONICLE_GAME_ROOT) } else { Split-Path -Parent (Split-Path -Parent $PSScriptRoot) }
 $binDirectory = Join-Path $gameRoot 'bin\Win64_Shipping_Client'
 $launcher = Join-Path $binDirectory 'Bannerlord.BLSE.Standalone.exe'
+$steamRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $gameRoot))
+$steamExe = Join-Path $steamRoot 'steam.exe'
 $documentsRoot = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord'
 $saveDirectory = Join-Path $documentsRoot 'Game Saves'
 $diagnosticLog = Join-Path $documentsRoot 'Configs\ModLogs\chronicle-framework.log'
@@ -81,8 +83,48 @@ function Restore-ChronicleTestEngineConfig([string]$BackupPath) {
     return $true
 }
 
+function Ensure-ChronicleSteamClient([int]$TimeoutSeconds = 45) {
+    $existingSteam = @(Get-Process -Name 'steam' -ErrorAction SilentlyContinue)
+    if ($existingSteam.Count -gt 0) {
+        return [ordered]@{ available = $true; startedByHarness = $false; processIds = @($existingSteam | ForEach-Object { [int]$_.Id }) }
+    }
+    if (-not (Test-Path -LiteralPath $steamExe -PathType Leaf)) {
+        throw "Steam client is not running and the expected Steam executable is not present at '$steamExe'."
+    }
+    Start-Process -FilePath $steamExe -ArgumentList '-silent' -WorkingDirectory $steamRoot -WindowStyle Hidden | Out-Null
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $steamProcesses = @()
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $steamProcesses = @(Get-Process -Name 'steam' -ErrorAction SilentlyContinue)
+        if ($steamProcesses.Count -gt 0) {
+            Start-Sleep -Seconds 5
+            $steamProcesses = @(Get-Process -Name 'steam' -ErrorAction SilentlyContinue)
+            if ($steamProcesses.Count -gt 0) {
+                return [ordered]@{ available = $true; startedByHarness = $true; processIds = @($steamProcesses | ForEach-Object { [int]$_.Id }) }
+            }
+        }
+        Start-Sleep -Milliseconds 500
+    }
+    throw "Steam was launched silently but its client process did not become available within $TimeoutSeconds seconds."
+}
+
 function Write-Result($Value) {
-    $Value | ConvertTo-Json -Depth 8
+    $json = $Value | ConvertTo-Json -Depth 8
+    $builder = New-Object System.Text.StringBuilder
+    foreach ($character in $json.ToCharArray()) {
+        if ([int]$character -gt 127) { [void]$builder.AppendFormat('\u{0:X4}', [int]$character) }
+        else { [void]$builder.Append($character) }
+    }
+    $builder.ToString()
+}
+
+if ($Action -eq 'recoverTestConfig') {
+    if (Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue) { throw 'Refusing to restore test engine settings while a Bannerlord client is running.' }
+    $restored = Restore-ChronicleTestEngineConfig -BackupPath $engineConfigBackupPath
+    $engineText = if (Test-Path -LiteralPath $engineConfig) { Get-Content -LiteralPath $engineConfig -Raw } else { '' }
+    $maxFrameMatch = [regex]::Match($engineText, '(?m)^max_framerate\s*=\s*(\d+)')
+    Write-Result ([ordered]@{ action = 'recoverTestConfig'; status = 'completed'; restored = [bool]$restored; maxFramerate = if ($maxFrameMatch.Success) { [int]$maxFrameMatch.Groups[1].Value } else { $null } })
+    exit 0
 }
 
 function Get-Session {
@@ -171,8 +213,14 @@ if ($Action -in @('start','load')) {
     }
     $missingSaveModules = @($modules | Where-Object { $_ -notin $installedModuleIds })
     if ($missingSaveModules.Count -gt 0) { throw "Save requires modules that are not installed in the configured game root: $($missingSaveModules -join ', ')." }
+    $steamStatus = Ensure-ChronicleSteamClient
     $moduleArgument = '_MODULES_*' + ($modules -join '*') + '*_MODULES_'
     $diagnosticStartLineCount = if (Test-Path $diagnosticLog) { @(Get-Content $diagnosticLog).Count } else { 0 }
+    $diagnosticReadOffset = if (Test-Path -LiteralPath $diagnosticLog -PathType Leaf) { [long](Get-Item -LiteralPath $diagnosticLog).Length } else { 0L }
+    $diagnosticPendingText = ''
+    $startupTelemetry = [System.Collections.Generic.List[string]]::new()
+    $startupDialogSnapshots = [System.Collections.Generic.List[object]]::new()
+    $startupFault = $null
     $expectedHarnessMode = if ([string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_MODE)) { 'normal' } else { $env:CHRONICLE_HARNESS_MODE }
     if (Test-Path -LiteralPath $engineConfig -PathType Leaf) {
         Copy-Item -LiteralPath $engineConfig -Destination $engineConfigBackupPath -Force
@@ -222,21 +270,93 @@ if ($Action -in @('start','load')) {
             }
             continue
         }
+        if ($launchProcess.MainWindowTitle -ceq 'Warning') {
+            try {
+                $warningSnapshot = Get-ChronicleWindowAutomationSnapshot -ProcessId $process.Id -WindowHandle $launchProcess.MainWindowHandle
+                $startupDialogSnapshots.Add($warningSnapshot)
+                $startupFault = if ($warningSnapshot.DialogText -match '(?i)Unable to initialize Steam API') { 'Bannerlord reports that the Steam API could not initialize; see startup dialog evidence.' } else { 'Bannerlord is blocked by an unclassified Warning dialog; no button was pressed.' }
+            }
+            catch { $startupFault = "Bannerlord Warning dialog could not be read safely: $($_.Exception.Message)" }
+            break
+        }
         $candidateLayout = Set-ChronicleTestWindow -ProcessId $process.Id
         if ($candidateLayout -and $candidateLayout.Applied) { $windowLayout = $candidateLayout }
         if (Test-Path $diagnosticLog) {
-            $lines = @(Get-Content $diagnosticLog)
-            $newLines = @($lines | Select-Object -Skip $diagnosticStartLineCount)
-            $ready = [bool]($newLines | Where-Object { $_ -match "\|pid=$($process.Id)\|campaign-loaded\|mode=$([regex]::Escape($expectedHarnessMode))\|" })
+            $diagnosticStream = $null
+            $diagnosticReader = $null
+            try {
+                $diagnosticStream = [IO.File]::Open($diagnosticLog, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+                if ($diagnosticStream.Length -lt $diagnosticReadOffset) { $diagnosticReadOffset = 0; $diagnosticPendingText = '' }
+                if ($diagnosticStream.Length -gt $diagnosticReadOffset) {
+                    $diagnosticStream.Position = $diagnosticReadOffset
+                    $diagnosticReader = [IO.StreamReader]::new($diagnosticStream, [Text.Encoding]::UTF8, $true, 1024, $true)
+                    $appendedText = $diagnosticReader.ReadToEnd()
+                    $diagnosticReadOffset = $diagnosticStream.Length
+                    $combinedTelemetry = [string]$diagnosticPendingText + [string]$appendedText
+                    $telemetryParts = @($combinedTelemetry -split "`r?`n")
+                    if ($combinedTelemetry.EndsWith("`n") -or $combinedTelemetry.EndsWith("`r")) {
+                        $newLines = $telemetryParts
+                        $diagnosticPendingText = ''
+                    }
+                    elseif ($telemetryParts.Count -gt 1) {
+                        $newLines = @($telemetryParts | Select-Object -First ($telemetryParts.Count - 1))
+                        $diagnosticPendingText = [string]$telemetryParts[-1]
+                    }
+                    else {
+                        $newLines = @()
+                        $diagnosticPendingText = $combinedTelemetry
+                    }
+                    foreach ($line in $newLines) { if (-not [string]::IsNullOrWhiteSpace([string]$line)) { $startupTelemetry.Add([string]$line) } }
+                    if (@($newLines | Where-Object { $_ -match "\|pid=$($process.Id)\|campaign-loaded\|mode=$([regex]::Escape($expectedHarnessMode))\|" }).Count -gt 0) { $ready = $true }
+                }
+            }
+            catch { }
+            finally {
+                if ($diagnosticReader) { $diagnosticReader.Dispose() }
+                if ($diagnosticStream) { $diagnosticStream.Dispose() }
+            }
         }
         if ($ready) { break }
         Start-Sleep -Milliseconds 250
     }
     if (-not $ready) {
+        $startupProcess = Get-Process -Id $process.Id -ErrorAction SilentlyContinue
+        $programDataLogs = Join-Path $env:ProgramData 'Mount and Blade II Bannerlord\logs'
+        $rglPath = Join-Path $programDataLogs "rgl_log_$($process.Id).txt"
+        $rglErrorPath = Join-Path $programDataLogs "rgl_log_errors_$($process.Id).txt"
+        $watchdogPath = Join-Path $programDataLogs "watchdog_log_$($process.Id).txt"
+        $telemetryLines = @()
+        if (Test-Path -LiteralPath $diagnosticLog) {
+            $allTelemetry = @(Get-Content -LiteralPath $diagnosticLog -Encoding UTF8)
+            $telemetryLines = @($allTelemetry | Select-Object -Skip $diagnosticStartLineCount)
+        }
+        $startupEvidence = [ordered]@{
+            ProcessId = $process.Id
+            SaveName = $SaveName
+            MainWindowTitle = if ($startupProcess) { [string]$startupProcess.MainWindowTitle } else { $null }
+            MainWindowHandle = if ($startupProcess) { [string]$startupProcess.MainWindowHandle } else { $null }
+            ProcessRunningAtTimeout = [bool]$startupProcess
+            ProcessCpuSeconds = if ($startupProcess) { [double]$startupProcess.CPU } else { $null }
+            ExpectedHarnessMode = $expectedHarnessMode
+            SteamClient = $steamStatus
+            StartupFault = $startupFault
+            StartupDialogReceipts = @($startupDialogReceipts)
+            StartupDialogSnapshots = @($startupDialogSnapshots)
+            ChronicleTelemetryAfterLaunch = $telemetryLines
+            RglLogTail = if (Test-Path -LiteralPath $rglPath) { @(Get-Content -LiteralPath $rglPath -Tail 60 -Encoding UTF8) } else { @() }
+            RglErrorLogTail = if (Test-Path -LiteralPath $rglErrorPath) { @(Get-Content -LiteralPath $rglErrorPath -Tail 60 -Encoding UTF8) } else { @() }
+            WatchdogLogTail = if (Test-Path -LiteralPath $watchdogPath) { @(Get-Content -LiteralPath $watchdogPath -Tail 60 -Encoding UTF8) } else { @() }
+            EngineConfigBackupPending = [bool]$engineConfigBackupCreated
+        }
+        $startupEvidenceDirectory = if (-not [string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) { $env:CHRONICLE_HARNESS_TEMP } else { $protocolRoot }
+        New-Item -ItemType Directory -Force -Path $startupEvidenceDirectory | Out-Null
+        $startupEvidencePath = Join-Path $startupEvidenceDirectory "startup-timeout-$($process.Id).json"
+        $startupEvidence | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $startupEvidencePath -Encoding UTF8
         $launchStopped = Stop-AgentProcessTree -RootProcessId $process.Id
         Set-SafeExitMarker
         if ($launchStopped -and $engineConfigBackupCreated) { Restore-ChronicleTestEngineConfig -BackupPath $engineConfigBackupPath | Out-Null }
-        throw 'Campaign did not reach protocol-ready state.'
+        $startupFailureMessage = if ($startupFault) { [string]$startupFault } else { 'Campaign did not reach protocol-ready state.' }
+        throw "$startupFailureMessage Startup evidence: $startupEvidencePath"
     }
     $windowLayout = Set-ChronicleTestWindow -ProcessId $process.Id
     if (-not $windowLayout -or -not $windowLayout.Applied) {
@@ -246,7 +366,7 @@ if ($Action -in @('start','load')) {
         throw 'Windowed test layout was not verified.'
     }
     $performanceProfile = [ordered]@{ maxFramerate = 30; width = [int]$windowLayout.Width; height = [int]$windowLayout.Height; configRestoredAfterStop = [bool]$engineConfigBackupCreated }
-    $session = [ordered]@{ protocolVersion = 1; processId = $process.Id; saveName = $SaveName; moduleSet = $modules; startedUtc = (Get-Date).ToUniversalTime().ToString('O'); windowLayout = $windowLayout; performanceProfile = $performanceProfile; engineConfigBackupPath = if ($engineConfigBackupCreated) { $engineConfigBackupPath } else { $null }; startupDialogReceipts = @($startupDialogReceipts) }
+    $session = [ordered]@{ protocolVersion = 1; processId = $process.Id; saveName = $SaveName; moduleSet = $modules; startedUtc = (Get-Date).ToUniversalTime().ToString('O'); windowLayout = $windowLayout; performanceProfile = $performanceProfile; steamClient = $steamStatus; engineConfigBackupPath = if ($engineConfigBackupCreated) { $engineConfigBackupPath } else { $null }; startupDialogReceipts = @($startupDialogReceipts) }
     $session | ConvertTo-Json | Set-Content -Path $sessionPath -Encoding UTF8
     $configuredTimeout = $TimeoutSeconds
     $TimeoutSeconds = [Math]::Min(30, $TimeoutSeconds)

@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 
-Contract version: 5.98
+Contract version: 6.0
 
 ## 目标与边界
 
@@ -65,9 +65,11 @@ Project采用最少任务状态：`Todo`表示尚未开始（是否被阻塞看I
 
 `MissionLeave`验收使用一次性Campaign夹具经Town菜单进入真实Location Mission，先保存引擎帧，再用一个限时Mission专属`IInputContext`让本场景的`Mission.Tick`读到Leave Area game key处于按住状态；它继续走原版`Mission.OnEndMissionRequest`、MissionLogic veto/Inquiry与Mission计时，不直接调用`Mission.EndMission`，也不发送OS全局键鼠事件。测试等待真实Mission→Campaign MapState和原Settlement菜单，并保留前后引擎帧/时钟/存档哈希/清理收据。该测试已加入`All`：当前实测证明了Sargot TownCenter路径，不等于所有Town/Village/Tavern和其他Mission条件都已覆盖。用户当前键鼠实测长按Tab约两秒，但产品代码虚拟的是Native Leave Area game action，不硬编码物理键位。
 
-Harness启动Native游戏客户端前将`engine_config.txt`里的`max_framerate`临时限制为30，并使用已核验的840×472非激活窗口布局；该配置快照放在Agent运行目录，Stop后原样恢复（仅保留`safely_exited=1`安全退出标志）。若测试中异常退出，后续安全启动会先恢复遗留快照；游戏进程仍在时绝不覆盖配置。这样减少测试渲染负载但保留真实UI/引擎路径，且不把低画质设置留给玩家日常游戏。
+Harness启动Native游戏客户端前先确认Steam Client进程运行；若未运行，仅从本机安装目录用`-silent`启动，不发送账号凭据/全局键鼠，之后留在后台供游戏API连接。若启动需要登录，或Bannerlord仍弹Steam API Warning，则失败收据保留目标窗口控件内容，不自动点确认。启动还会把`engine_config.txt`里的`max_framerate`临时限制为30，并使用已核验的840×472非激活窗口布局；该配置快照放在Agent运行目录，Stop后恢复（保留`safely_exited=1`安全退出标志）。若测试中异常退出，后续安全启动会先恢复遗留快照；无Bannerlord进程时也可显式运行`Agent-Cli.ps1 recoverTestConfig`恢复一次性快照；游戏进程仍在时绝不覆盖配置。这样减少测试渲染负载但保留真实UI/引擎路径，且不把低画质设置留给玩家日常游戏。启动等待只读取Chronicle日志新追加的字节，不再每250毫秒重复解析整份日志；若协议未就绪，`startup-timeout-<pid>.json`记录Window Title、Steam状态、增量Chronicle遥测、RGL/watchdog末尾和弹窗快照，未知警告不被假定为崩溃，也不自动确认。
 
-`VillageToolsDelivery`是W2-AI单项端到端Harness阶段：有限轮数内由确定性Provider只看本轮Native `state`、当前Settlement overlay人物与Issue marker、QuickConversation当前选项、公开QuestJournal任务文本及Trade VM报价。玩家可见交谈使用`talkToSettlementHero` QuickConversation；Visit使用分离的`visitSettlementHero`，不混入W2-AI的快速交谈闭环。测试验证Quest不再活动、请求物品消耗和Native Trade奖励；Provider的`done`只结束循环，仍由测试脚本核验实际结果/存档哈希/进程清理。不注入任务/物品/库存，不读取私有Quest字段。此专项阶段通过前不加入`All`。
+若Bannerlord已加载模块但未达到Campaign协议就超时，Agent-Cli会在清理进程前保留`startup-timeout-<pid>.json`：窗口标题/句柄、进程是否仍在及CPU秒数、当次Chronicle启动遥测、RGL错误日志/watchdog尾部、已确认的启动弹窗回执和待恢复配置标志。该失败只能判作“协议未就绪”；若日志没有故障信号，不宣称崩溃或兼容性根因。下次安全启动恢复未完成的配置快照。
+
+`VillageToolsDelivery`是W2-AI单项端到端Harness阶段：至多320轮内由确定性Provider只看本轮Native `state`、当前Settlement overlay人物与Issue marker、QuickConversation当前选项、公开QuestJournal任务文本及Trade VM报价；通用Agent循环的硬上限为400轮。这个路线需要真实跨城购买、返回委托人并交付。玩家可见交谈使用`talkToSettlementHero` QuickConversation；Visit使用分离的`visitSettlementHero`，不混入W2-AI的快速交谈闭环。任务提示结束后，Provider继续推进原版QuickConversation，验收回到同一村庄Settlement菜单且conversation为空，不把尚未关掉的提示面板当作闭环。该环节暴露并修复了Agent JSON跨Windows PowerShell进程的中文乱码、单个对话选项被误当成数组、空对话节点未继续、Trade模式从错误字段读取、空市场重复访问、原版`hero_task_given`分层交付入口未继续，以及Provider变量名`$home`碰撞PowerShell只读变量的问题；AgentLoop回归现用真实Campaign中的中文主角名验证完整往返。每个市场只查一次、无合适商品才转到下一个已观察市场；移动订单完成后，Provider另发显式Native `fastForward`以缩短自然行程，不把时间控制藏入`move`动作。为避免让只有主角一人的测试队伍陷入无法使用Native Send Troops的遭遇，Provider在委托村庄尝试用当前Native志愿兵报价组成最多5人的护卫，同时至少保留450第纳尔；遇到主动劫匪先选择当前可见的和平方案，战斗菜单仅在原版Send Troops可用时使用BattleSimulation及Native战后界面；若Send Troops不可用则保留遭遇并停止，不进入实时战场或擅自投降。Captivity界面只继续单一可见的`mno_continue`阶段；到达赎金/逃脱等有后果选项时保留状态等待用户的玩家策略事实，不快进、不猜着选择。以上是该测试Provider的有界策略，不表示产品Agent已实现完整战斗/战后AI。完成判定基于Native任务从活动Quest列表移除、Turn-in前原生市场可见的工具数量，以及Turn-in后经玩家原生MainHero Inventory VM按需读取的精确Tools/奖励物品ID与数量；先前的Roster总物品数变化只作交叉检查，不冒充物品类型明细。由于Native TradeVM的可出售Flax数量可能小于MainParty完整Roster数量，不为二次确认而冒险再次穿越战区。测试还核验QuickConversation返回同一Settlement菜单、源存档哈希和进程清理；Provider的`done`只结束循环，不代表成功。不注入任务/物品/库存，不读取私有Quest字段。此专项阶段通过前不加入`All`。
 
 `SettlementOverlayQuickTalk`对已确认存在自然Issue marker的可见Settlement运行Native QuickConversation专项回归：通过QuickTalk权限事件与CampaignMapConversation进入地图对话，按当前可见原版选项结束，并验证回到同一Settlement菜单、任务/存档/时间证据和进程清理。测试目标Settlement是已验证的一次性Campaign夹具参数，不是Provider得到的隐藏Quest字段，也不代表全地图自主Issue发现能力。`SettlementOverlayConversation`继续验证不同的Visit/Location Mission路线。
 
@@ -198,7 +200,7 @@ stop()
 | Smoke | 清单、DLL、`OnSubModuleLoad`、`Finished All` | 同 PID 日志 |
 | Campaign/FreshCampaign | 旧档；FreshCampaign新Sandbox原生创建、跳intro、选+20；Progression用临时存档重载再move/arrival/recruit | 同PID renown20/MapState、非激活840x472；Crash Report仅按明确信号有界重试；已知`Mod change detected`着色器缓存提示仅可经精确匹配的目标进程UIA按钮确认一次，不用全局输入；临时存档精确清理、非模型Provider |
 | Protocol | CLI 启动/重载、状态、Native Pause/Play/FastForward、Harness-only独立推进时钟、Campaign保存/跨进程读档、停止 | Native时间选择对照`Campaign.SetTimeSpeed(0/1/2)`，检查raw/effective模式和waiting状态；固定advance仅用于Harness测试并按日目标或Encounter返回；存档往返使用唯一测试名，比较Save前与新进程读档后的结构化Campaign指纹及Chronicle SyncData计数、源夹具哈希后删除；时间步进不得隐式塞入地图移动/追近命令 |
-| AgentLoop | 外部提供者接收真实观察，选择只读白名单原子动作并重观察 | 两轮 `state → mapPartyTargets` 观察循环、前序回执传递、越权动作及Harness-only `advance` 拒绝、fixture哈希和进程退出；Provider以UTF-8/BOM检测读取标准输入；不计作模型能力，也不承担移动/时间动作验收 |
+| AgentLoop | 外部提供者接收真实观察，选择只读白名单原子动作并重观察 | 两轮 `state → mapPartyTargets` 观察循环、前序回执传递、真实Campaign中文主角名穿过CLI输出与Provider输入后逐字一致、越权动作及Harness-only `advance` 拒绝、fixture哈希和进程退出；Windows进程管道传输JSON前转成ASCII `\uXXXX`，Provider仍以UTF-8/BOM检测读取；不计作模型能力，也不承担移动/时间动作验收 |
 | TimeControlLoop | 确定性测试Provider在真实Agent循环内依次选择原生Play、Fast Forward、Pause，再用第二个临时进程验证Hold→Play | 验证动作经CLI/协议调用Native `Campaign.SetTimeSpeed(1/2/0)`、raw/effective档回执；比较各时钟档间的自然CampaignDay推进与Pause稳定性；Hold使主队等待后，显式Play应恢复`UnstoppablePlay`并自然推进而保持waiting；Harness advance隔离、fixture哈希和所有进程清理；与只读AgentLoop分离，避免遭遇状态污染 |
 | BattleFixture | disposable save 内造 hostile looter；用原版 pursue 点击语义接敌 | hostile/party ID、自然时间/encounter 回执、fixture 哈希、进程退出；造敌非 Agent 行为 |
 | BattleSimulation | 原版 `Send troops` 启动；pause/skip/finish/retreat；Mission TAB retreat | 模拟状态、结算/loot、Mission end、fixture hash；不等同即时战斗 |

@@ -23,6 +23,27 @@ function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @()) {
 
 try {
     $start = Invoke-AgentCli 'load' @('-SaveName', $LoadSaveName)
+    $unicodeBaseline = Invoke-AgentCli 'state'
+    $expectedHeroName = [string]$unicodeBaseline.state.identity.heroName
+    if ([string]::IsNullOrWhiteSpace($expectedHeroName)) { throw 'Unicode Agent transport regression requires the live Native MainHero name.' }
+    $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
+    $priorExpectedHeroName = $env:CHRONICLE_TEST_EXPECTED_HERO_NAME
+    $env:CHRONICLE_TEST_PROVIDER_MODE = 'unicodeRoundTrip'
+    $env:CHRONICLE_TEST_EXPECTED_HERO_NAME = $expectedHeroName
+    try {
+        $unicodeOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -MaxDecisions 1 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-unicode-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $unicodeExitCode = $LASTEXITCODE
+    }
+    finally {
+        if ($null -eq $priorProviderMode) { Remove-Item Env:CHRONICLE_TEST_PROVIDER_MODE -ErrorAction SilentlyContinue }
+        else { $env:CHRONICLE_TEST_PROVIDER_MODE = $priorProviderMode }
+        if ($null -eq $priorExpectedHeroName) { Remove-Item Env:CHRONICLE_TEST_EXPECTED_HERO_NAME -ErrorAction SilentlyContinue }
+        else { $env:CHRONICLE_TEST_EXPECTED_HERO_NAME = $priorExpectedHeroName }
+    }
+    if ($unicodeExitCode -ne 0) { throw "Agent loop corrupted the live Unicode hero name across its process boundary: $unicodeOutput" }
+    $unicodeTrace = $unicodeOutput | ConvertFrom-Json
+    $unicodeRoundTripVerified = (@($unicodeTrace.trace).Count -eq 1 -and $unicodeTrace.trace[0].decision.action -eq 'state' -and $unicodeTrace.trace[0].actionReceipt.status -eq 'completed')
+    if (-not $unicodeRoundTripVerified) { throw 'Agent loop did not complete the Unicode round-trip regression action.' }
     if ($TimeControlOnly) {
         $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
         $env:CHRONICLE_TEST_PROVIDER_MODE = 'timeModes'
@@ -180,6 +201,7 @@ try {
         FirstDecision = $first.decision.action
         SecondDecision = $second.decision.action
         PreviousActionReceiptForwarded = $receiptForwarded
+        UnicodeHeroNameRoundTripVerified = $unicodeRoundTripVerified
         ExplicitGoalStopHonoredWithoutIssuingAnotherAction = $doneSignalVerified
         GoalStopTrace = $doneTrace.trace
         UnsafeActionRejected = $unsafeActionRejected
@@ -188,7 +210,7 @@ try {
         ProcessStopped = $stop.processStopped
         Trace = $trace.trace
     }
-    $result.Passed = ($result.DecisionCount -eq 2 -and $observationLoopVerified -and $receiptForwarded -and $doneSignalVerified -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
+    $result.Passed = ($result.DecisionCount -eq 2 -and $observationLoopVerified -and $receiptForwarded -and $unicodeRoundTripVerified -and $doneSignalVerified -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
     $result | ConvertTo-Json -Depth 12
     if (-not $result.Passed) { exit 1 }
 }

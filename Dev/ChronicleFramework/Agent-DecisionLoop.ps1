@@ -9,7 +9,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $cliPath = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
 $providerPath = (Resolve-Path -LiteralPath $DecisionProviderPath).Path
-if ($MaxDecisions -lt 1 -or $MaxDecisions -gt 100) { throw 'MaxDecisions must be between 1 and 100.' }
+if ($MaxDecisions -lt 1 -or $MaxDecisions -gt 400) { throw 'MaxDecisions must be between 1 and 400.' }
 
 function Invoke-AgentCli {
     param([string]$Action, [hashtable]$Arguments = @{}, [string]$CommandId)
@@ -56,6 +56,15 @@ function Invoke-DecisionProvider {
     catch { throw "Decision provider returned invalid JSON: $stdout $stderr" }
 }
 
+function ConvertTo-AsciiJson([string]$Json) {
+    $builder = New-Object System.Text.StringBuilder
+    foreach ($character in $Json.ToCharArray()) {
+        if ([int]$character -gt 127) { [void]$builder.AppendFormat('\u{0:X4}', [int]$character) }
+        else { [void]$builder.Append($character) }
+    }
+    return $builder.ToString()
+}
+
 function Convert-DecisionToCli {
     param($Decision)
     if ($Decision.action -eq 'advance') { throw 'advance is a Harness-only deterministic time step and is unavailable to Agent decision providers.' }
@@ -98,7 +107,8 @@ try {
             observation = $observation
             previousActionReceipt = $previousActionReceipt
         }
-        $decision = Invoke-DecisionProvider ($request | ConvertTo-Json -Depth 16 -Compress)
+        $requestJson = ConvertTo-AsciiJson ($request | ConvertTo-Json -Depth 16 -Compress)
+        $decision = Invoke-DecisionProvider $requestJson
         if ($decision -and $decision.done -eq $true) {
             $doneReason = [string]$decision.reason
             if ([string]::IsNullOrWhiteSpace($doneReason)) { throw 'A provider stop decision must include a non-empty reason.' }

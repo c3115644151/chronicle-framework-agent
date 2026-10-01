@@ -7,7 +7,8 @@ param(
     [string]$TargetSettlementId = 'town_V1',
     [string]$ApproachSettlementId = 'town_V1',
     [string]$QuickTalkTargetSettlementId = 'village_V1_1',
-    [int]$VisibilityProbeSeconds = 120
+    [int]$VisibilityProbeSeconds = 120,
+    [int]$VillageToolsMaxDecisions = 320
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,7 +16,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '5.98'
+$HarnessContractVersion = '6.0'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -468,7 +469,7 @@ foreach ($stage in $requestedStages) {
         }
         'VillageToolsDelivery' {
             Invoke-Stage -Name 'VillageToolsDelivery' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $villageToolsDeliveryScript 2>&1 | Out-String
+                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $villageToolsDeliveryScript -MaxDecisions $VillageToolsMaxDecisions 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Autonomous Native Village Tools delivery test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
