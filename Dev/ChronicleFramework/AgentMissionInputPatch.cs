@@ -13,8 +13,19 @@ internal static class AgentMissionInputPatch
 
     internal static bool IsSupportedLocationMission(Mission mission)
     {
-        if (mission == null || mission.MissionEnded || !string.Equals(mission.Mode.ToString(), "StartUp", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(mission.SceneName))
-            return false;
+        return mission != null && string.Equals(mission.Mode.ToString(), "StartUp", StringComparison.Ordinal) && IsSupportedLocationScene(mission);
+    }
+
+    internal static bool IsSupportedLocationLeaveMission(Mission mission)
+    {
+        if (mission == null || mission.MissionEnded) return false;
+        var mode = mission.Mode.ToString();
+        return (string.Equals(mode, "StartUp", StringComparison.Ordinal) || string.Equals(mode, "Conversation", StringComparison.Ordinal)) && IsSupportedLocationScene(mission);
+    }
+
+    private static bool IsSupportedLocationScene(Mission mission)
+    {
+        if (mission == null || string.IsNullOrWhiteSpace(mission.SceneName)) return false;
         return mission.SceneName.IndexOf("tavern", StringComparison.OrdinalIgnoreCase) >= 0 ||
             mission.SceneName.IndexOf("_town_", StringComparison.OrdinalIgnoreCase) >= 0 ||
             (mission.SceneName.IndexOf("village", StringComparison.OrdinalIgnoreCase) >= 0 && mission.SceneName.IndexOf("hideout", StringComparison.OrdinalIgnoreCase) < 0);

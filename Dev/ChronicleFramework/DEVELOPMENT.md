@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 
-Contract version: 5.94
+Contract version: 5.98
 
 ## 目标与边界
 
@@ -64,6 +64,14 @@ Project采用最少任务状态：`Todo`表示尚未开始（是否被阻塞看I
 ## 开发入口
 
 `MissionLeave`验收使用一次性Campaign夹具经Town菜单进入真实Location Mission，先保存引擎帧，再用一个限时Mission专属`IInputContext`让本场景的`Mission.Tick`读到Leave Area game key处于按住状态；它继续走原版`Mission.OnEndMissionRequest`、MissionLogic veto/Inquiry与Mission计时，不直接调用`Mission.EndMission`，也不发送OS全局键鼠事件。测试等待真实Mission→Campaign MapState和原Settlement菜单，并保留前后引擎帧/时钟/存档哈希/清理收据。该测试已加入`All`：当前实测证明了Sargot TownCenter路径，不等于所有Town/Village/Tavern和其他Mission条件都已覆盖。用户当前键鼠实测长按Tab约两秒，但产品代码虚拟的是Native Leave Area game action，不硬编码物理键位。
+
+Harness启动Native游戏客户端前将`engine_config.txt`里的`max_framerate`临时限制为30，并使用已核验的840×472非激活窗口布局；该配置快照放在Agent运行目录，Stop后原样恢复（仅保留`safely_exited=1`安全退出标志）。若测试中异常退出，后续安全启动会先恢复遗留快照；游戏进程仍在时绝不覆盖配置。这样减少测试渲染负载但保留真实UI/引擎路径，且不把低画质设置留给玩家日常游戏。
+
+`VillageToolsDelivery`是W2-AI单项端到端Harness阶段：有限轮数内由确定性Provider只看本轮Native `state`、当前Settlement overlay人物与Issue marker、QuickConversation当前选项、公开QuestJournal任务文本及Trade VM报价。玩家可见交谈使用`talkToSettlementHero` QuickConversation；Visit使用分离的`visitSettlementHero`，不混入W2-AI的快速交谈闭环。测试验证Quest不再活动、请求物品消耗和Native Trade奖励；Provider的`done`只结束循环，仍由测试脚本核验实际结果/存档哈希/进程清理。不注入任务/物品/库存，不读取私有Quest字段。此专项阶段通过前不加入`All`。
+
+`SettlementOverlayQuickTalk`对已确认存在自然Issue marker的可见Settlement运行Native QuickConversation专项回归：通过QuickTalk权限事件与CampaignMapConversation进入地图对话，按当前可见原版选项结束，并验证回到同一Settlement菜单、任务/存档/时间证据和进程清理。测试目标Settlement是已验证的一次性Campaign夹具参数，不是Provider得到的隐藏Quest字段，也不代表全地图自主Issue发现能力。`SettlementOverlayConversation`继续验证不同的Visit/Location Mission路线。
+
+Agent decision provider may terminate a bounded loop with an explicit `{done: true, reason: ...}` response; the loop records this as `provider-stop` and issues no further game action. This only means the provider claims its objective is met, not that the game objective is verified; the owning Harness test must assert the actual native postconditions separately. Reaching the decision budget is recorded as `decision-budget-exhausted`, never as success.
 
 默认入口：
 
@@ -259,7 +267,7 @@ stop()
 - `TavernMission`保留为酒馆场景的通用移动输入回归；W2-D实际Notable验证只以当前产品工作项指定的Town Center `center` Location Mission为准。
 - W2-D的Location观察schema 21会把原版`GameMenuOption.OptionQuestData`作为菜单`questMarkerFlags/questMarkerNames`返回；`GameMenuItemVM`用同一标记生成原版`QuestMarkerVM`。`nearbySceneAgents`仅为主角周围12场景单位内的Agent，不等于视线可见列表；原生`CurrentFocusedObject`同时用`Agent.CanInteractWithAgent`提供原版Focus/交谈可用判定；`settlementOverlayCharacters`复用可见CharacterList和QuestMarkers。`missionNavigateToAgent`在发令时取NPC位置快照，NPC移动后必须重新观察并下达新路径，不能以对旧坐标到达判作追上。
 - `harnessMissionDiagnostics`只在Harness `visual-capture`模式与临时run目录同时有效时返回当前Town/Tavern Mission里已激活的Notable Agent，以及当前`CampaignMission.Location`里已登记的Issue所有者；它只用于区分“菜单有任务标记”“地点登记了任务主人”“人物实际生成/距主角多远”，不进入常规观察快照，也不在`Agent-DecisionLoop.ps1`的模型动作白名单中。当任务主人超出主角当前本地观察半径时，Town Center Harness立即保存诊断并清理，不继续跑固定移动步骤；后续应核实原版造访入口。禁止用诊断遥测代替AI玩家的局部观察。
-- `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。`mapSettlementTargets`只列本体`IsVisible`的地图聚落标记；它不替代`nearbySettlements`局部摘要，也不枚举未发现的全局Settlement。`talkToSettlementHero(HeroId)`只接受overlay列表中的当前Hero，复核原版TalkPermission后通过目标式Conversation链交谈；不得使用Harness全场景Notable诊断里的隐藏ID。
+- `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落右上人物列表的蓝色感叹号及地图贵族名字蓝标语义；当前Observer只覆盖聚落人物，`mapPartyTargets`的贵族Leader任务标记尚未暴露。`talkToSettlementHero(HeroId)`校验QuickTalkPermission并通过CampaignMapConversation原生QuickConversation在地图上快速交谈；`visitSettlementHero(HeroId)`校验Visit权限并进入NPC Location Mission，不能混称。两者都只接受当前可见overlay名单，不使用Harness全场景Notable诊断里的隐藏ID。
 - `SettlementOverlayQuestGate`只验证测试fixture中确实被原版前置拒绝、且Quest/存档不变；该阶段纳入`All`用于回归保护。`SettlementOverlayQuestAcceptance`是另一个正向阶段，必须看到一个新Ongoing Quest及对应原版状态变化才通过；前置拒绝、没有offer、对话返回均为失败，不可用负向结果替代。Harness可跟随原版提供的Alternative方案说明对话节点，但不能点击最终Alternative/Lord接受选项。它要求自然满足条件的disposable Issue fixture，故不纳入通用`All`，直到该fixture稳定存在。
 - 聚落移动的标准夹具还要验证抵达后状态切到目标聚落及原版 `town` 菜单；结构化菜单选项按当前 `GameMenuOption.GetConditionsHold` 计算可用性，选择时重验菜单 ID、选项 ID 与 enabled 条件。离开选项作为菜单原语验收；失败夹具对无效 settlement ID 返回结构化拒绝，且世界位置不变。
 - 招募必须复用本体 `RecruitmentVM` 的志愿者列表、队伍上限和金钱条件；命令显式指定可用 owner、troop 与 volunteer slot，每次只招募一个。完成以兵力 `+1`、金币按本体价格扣除且来源 volunteer 槽清空为准。

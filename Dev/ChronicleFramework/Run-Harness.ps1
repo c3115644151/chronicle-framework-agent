@@ -1,11 +1,12 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'TimeControlLoop', 'BattleFixture', 'PostBattle', 'Observation', 'MapNotifications', 'QuickInformation', 'SceneNotification', 'MissionLeave', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'BarterFightRoute', 'BarterSafePassage', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EngageVisibility', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'VisualCapture', 'All')]
+    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'TimeControlLoop', 'BattleFixture', 'PostBattle', 'Observation', 'MapNotifications', 'QuickInformation', 'SceneNotification', 'MissionLeave', 'VillageToolsDelivery', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'BarterFightRoute', 'BarterSafePassage', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EngageVisibility', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuickTalk', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'VisualCapture', 'All')]
     [string]$Phase = 'All',
     [int]$SmokeTimeoutSeconds = 45,
     [int]$SmokeStabilitySeconds = 8,
     [string]$TargetSettlementId = 'town_V1',
     [string]$ApproachSettlementId = 'town_V1',
+    [string]$QuickTalkTargetSettlementId = 'village_V1_1',
     [int]$VisibilityProbeSeconds = 120
 )
 
@@ -14,7 +15,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '5.94'
+$HarnessContractVersion = '5.98'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -43,6 +44,7 @@ $mapNotificationsScript = Join-Path $harnessRoot 'Test-AgentMapNotifications.ps1
 $quickInformationScript = Join-Path $harnessRoot 'Test-AgentQuickInformation.ps1'
 $sceneNotificationScript = Join-Path $harnessRoot 'Test-AgentSceneNotification.ps1'
 $missionLeaveScript = Join-Path $harnessRoot 'Test-AgentMissionLeave.ps1'
+$villageToolsDeliveryScript = Join-Path $harnessRoot 'Test-AgentVillageToolsDelivery.ps1'
 $movementScript = Join-Path $harnessRoot 'Test-AgentMovement.ps1'
 $holdScript = Join-Path $harnessRoot 'Test-AgentHold.ps1'
 $moveToPointScript = Join-Path $harnessRoot 'Test-AgentMoveToPoint.ps1'
@@ -177,6 +179,7 @@ $requestedStages = switch ($Phase) {
     'QuickInformation' { @('Preflight', 'Build', 'QuickInformation') }
     'SceneNotification' { @('Preflight', 'Build', 'SceneNotification') }
     'MissionLeave' { @('Preflight', 'Build', 'MissionLeave') }
+    'VillageToolsDelivery' { @('Preflight', 'Build', 'VillageToolsDelivery') }
     'MainHeroSkills' { @('Preflight', 'Build', 'MainHeroSkills') }
     'CharacterDevelopment' { @('Preflight', 'Build', 'CharacterDevelopment') }
     'SpendSkillFocus' { @('Preflight', 'Build', 'SpendSkillFocus') }
@@ -211,11 +214,12 @@ $requestedStages = switch ($Phase) {
     'TavernMission' { @('Preflight', 'Build', 'TavernMission') }
     'TownCenterMission' { @('Preflight', 'Build', 'TownCenterMission') }
     'SettlementOverlayConversation' { @('Preflight', 'Build', 'SettlementOverlayConversation') }
+    'SettlementOverlayQuickTalk' { @('Preflight', 'Build', 'SettlementOverlayQuickTalk') }
     'SettlementOverlayQuestAcceptance' { @('Preflight', 'Build', 'SettlementOverlayQuestAcceptance') }
     'SettlementOverlayQuestGate' { @('Preflight', 'Build', 'SettlementOverlayQuestGate') }
     'MapSettlementTargets' { @('Preflight', 'Build', 'MapSettlementTargets') }
     'VisualCapture' { @('Preflight', 'Build', 'VisualCapture') }
-    'All' { @('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'Protocol', 'AgentLoop', 'TimeControlLoop', 'Observation', 'MapNotifications', 'QuickInformation', 'SceneNotification', 'MissionLeave', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'QuestAcceptance', 'BattleFixture', 'PostBattle', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuestGate') }
+    'All' { @('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'Protocol', 'AgentLoop', 'TimeControlLoop', 'Observation', 'MapNotifications', 'QuickInformation', 'SceneNotification', 'MissionLeave', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'Conversation', 'QuestAcceptance', 'BattleFixture', 'PostBattle', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuickTalk', 'SettlementOverlayQuestGate') }
 }
 
 foreach ($stage in $requestedStages) {
@@ -462,6 +466,14 @@ foreach ($stage in $requestedStages) {
                 $testOutput
             }
         }
+        'VillageToolsDelivery' {
+            Invoke-Stage -Name 'VillageToolsDelivery' -Action {
+                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $villageToolsDeliveryScript 2>&1 | Out-String
+                $testExitCode = $LASTEXITCODE
+                if ($testExitCode -ne 0) { throw "Autonomous Native Village Tools delivery test failed with exit code $testExitCode.`n$testOutput" }
+                $testOutput
+            }
+        }
         'Movement' {
             Invoke-Stage -Name 'Movement' -Action {
                 $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $movementScript 2>&1 | Out-String
@@ -553,6 +565,12 @@ foreach ($stage in $requestedStages) {
             Invoke-Stage -Name 'SettlementOverlayConversation' -Action {
                 & powershell -NoProfile -ExecutionPolicy Bypass -File $settlementOverlayConversationScript -TargetSettlementId $TargetSettlementId -ApproachSettlementId $ApproachSettlementId
                 if ($LASTEXITCODE -ne 0) { throw "Native Settlement overlay Conversation test failed with exit code $LASTEXITCODE." }
+            }
+        }
+        'SettlementOverlayQuickTalk' {
+            Invoke-Stage -Name 'SettlementOverlayQuickTalk' -Action {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $settlementOverlayConversationScript -TargetSettlementId $QuickTalkTargetSettlementId -ApproachSettlementId $QuickTalkTargetSettlementId -InteractionMode QuickTalk -ExpectedOutcome ConversationOnly
+                if ($LASTEXITCODE -ne 0) { throw "Native Settlement overlay QuickConversation test failed with exit code $LASTEXITCODE." }
             }
         }
         'SettlementOverlayQuestAcceptance' {

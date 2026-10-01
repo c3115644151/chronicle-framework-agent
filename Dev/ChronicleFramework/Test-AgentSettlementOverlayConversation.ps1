@@ -4,6 +4,8 @@ param(
     [int]$TimeoutSeconds = 180,
     [string]$TargetSettlementId = 'town_V1',
     [string]$ApproachSettlementId = 'town_V1',
+    [ValidateSet('QuickTalk', 'Visit')]
+    [string]$InteractionMode = 'Visit',
     [ValidateSet('ConversationOnly', 'QuestAccepted', 'NativePreconditionBlocked')]
     [string]$ExpectedOutcome = 'ConversationOnly',
     [switch]$ValidateQuestDetails
@@ -14,8 +16,9 @@ $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
 $savePath = Join-Path $env:USERPROFILE "Documents\Mount and Blade II Bannerlord\Game Saves\$LoadSaveName.sav"
 $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\session.json'
 $runDirectory = if ($env:CHRONICLE_HARNESS_TEMP) { Split-Path -Parent $env:CHRONICLE_HARNESS_TEMP } else { Join-Path $PSScriptRoot 'TestResults\ManualSettlementOverlayConversation' }
-$captureName = if ($ExpectedOutcome -eq 'ConversationOnly') { 'SettlementOverlayConversation-frame.bmp' } else { "SettlementOverlayQuest-$ExpectedOutcome-frame.bmp" }
-$resultName = if ($ValidateQuestDetails) { 'SettlementOverlayQuest-QuestDetails-Result.json' } elseif ($ExpectedOutcome -eq 'ConversationOnly') { 'SettlementOverlayConversationResult.json' } else { "SettlementOverlayQuest-$ExpectedOutcome-Result.json" }
+$captureName = if ($InteractionMode -eq 'QuickTalk') { 'SettlementOverlayQuickTalk-frame.bmp' } elseif ($ExpectedOutcome -eq 'ConversationOnly') { 'SettlementOverlayVisit-frame.bmp' } else { "SettlementOverlayQuest-$ExpectedOutcome-frame.bmp" }
+$resultName = if ($ValidateQuestDetails) { 'SettlementOverlayQuest-QuestDetails-Result.json' } elseif ($InteractionMode -eq 'QuickTalk') { 'SettlementOverlayQuickTalk-Result.json' } elseif ($ExpectedOutcome -eq 'ConversationOnly') { 'SettlementOverlayVisit-Result.json' } else { "SettlementOverlayQuest-$ExpectedOutcome-Result.json" }
+$interactionAction = if ($InteractionMode -eq 'QuickTalk') { 'talkToSettlementHero' } else { 'visitSettlementHero' }
 $captureTempPath = if ($env:CHRONICLE_HARNESS_TEMP) { Join-Path $env:CHRONICLE_HARNESS_TEMP $captureName } else { Join-Path $runDirectory $captureName }
 $capturePath = Join-Path $runDirectory $captureName
 $previousHarnessMode = $env:CHRONICLE_HARNESS_MODE
@@ -104,19 +107,21 @@ try {
 
     $targetCharacter = $candidate[0].Character
     $targetHeroId = [string]$targetCharacter.heroId
-    $talk = Invoke-AgentCli 'talkToSettlementHero' @('-HeroId', $targetHeroId, '-CommandId', "$commandPrefix-talk") 30
+    $talk = Invoke-AgentCli $interactionAction @('-HeroId', $targetHeroId, '-CommandId', "$commandPrefix-$($InteractionMode.ToLowerInvariant())") 30
     $postTalk = $talk
     $conversationDeadline = [DateTime]::UtcNow.AddSeconds(30)
     while ($talk.status -eq 'completed' -and [DateTime]::UtcNow -lt $conversationDeadline) {
         $conversation = $postTalk.state.context.conversation
-        if ($postTalk.state.context.gameState -eq 'MissionState' -and $postTalk.state.mission.mainAgent -and $conversation -and $conversation.heroId -eq $targetHeroId) { break }
+        $interactionContextReady = if ($InteractionMode -eq 'QuickTalk') { $postTalk.state.context.gameState -eq 'MapState' } else { $postTalk.state.context.gameState -eq 'MissionState' -and $postTalk.state.mission.mainAgent }
+        if ($interactionContextReady -and $conversation -and $conversation.heroId -eq $targetHeroId) { break }
         if (-not (Get-Process -Id $start.session.processId -ErrorAction SilentlyContinue)) { break }
         Start-Sleep -Milliseconds 300
         $postTalk = Invoke-AgentCli 'state' @('-CommandId', "$commandPrefix-conversation-$([Guid]::NewGuid().ToString('N'))") 30
     }
 
     $conversation = $postTalk.state.context.conversation
-    $conversationStartedForTarget = ($postTalk.state.context.gameState -eq 'MissionState' -and $postTalk.state.mission.mainAgent -and $conversation -and $conversation.heroId -eq $targetHeroId)
+    $interactionContextReady = if ($InteractionMode -eq 'QuickTalk') { $postTalk.state.context.gameState -eq 'MapState' } else { $postTalk.state.context.gameState -eq 'MissionState' -and $postTalk.state.mission.mainAgent }
+    $conversationStartedForTarget = ($interactionContextReady -and $conversation -and $conversation.heroId -eq $targetHeroId)
     $initialConversationHeroMatchesTarget = [bool]$conversationStartedForTarget
     $questCountBefore = @($arrived.state.quests).Count
     $issueTopicRequested = $false
@@ -172,6 +177,40 @@ try {
             if ($selectedOption -eq 'issue_offer_player_accept_quest') { $questOfferObserved = $true; $questBlockedReason = 'Native Quest acceptance option executed, but no new Ongoing Quest appeared in the latest observation.'; break }
         }
         if (-not $questAccepted -and -not $questBlockedReason) { $questBlockedReason = 'The safe native Issue Quest dialogue path reached its 10-step Harness limit.' }
+    }
+    $quickTalkReturnedToSettlementMenu = $false
+    if ($InteractionMode -eq 'QuickTalk' -and $conversationStartedForTarget) {
+        for ($quickStep = 1; $quickStep -le 10; $quickStep++) {
+            $activeQuickConversation = $postTalk.state.context.conversation
+            if (-not $activeQuickConversation) { break }
+            $quickOptions = @($activeQuickConversation.options)
+            $quickLeaveOption = @($quickOptions | Where-Object { $_.clickable -and [string]$_.id -eq 'player_is_leaving_neutral_or_friendly' } | Select-Object -First 1)
+            if ($quickLeaveOption.Count -eq 1) {
+                $quickAction = Invoke-AgentCli 'dialogueSelect' @('-OptionId', [string]$quickLeaveOption[0].id, '-CommandId', "$commandPrefix-quick-leave-$quickStep") 30
+                if ($quickAction.status -ne 'completed') { throw "Native QuickConversation leave option failed: $($quickAction.error)" }
+            }
+            elseif ($quickOptions.Count -eq 0) {
+                $quickAction = Invoke-AgentCli 'dialogueContinue' @('-CommandId', "$commandPrefix-quick-continue-$quickStep") 30
+                if ($quickAction.status -ne 'completed') { throw "Native QuickConversation continue failed: $($quickAction.error)" }
+            }
+            else {
+                $introduction = @($quickOptions | Where-Object { $_.clickable -and [string]$_.id -eq 'lord_meet_player_response1' } | Select-Object -First 1)
+                if ($introduction.Count -ne 1) { throw "QuickConversation exposes no leave or introductory option the test is scoped to: $((@($quickOptions | ForEach-Object id) -join ','))" }
+                $quickAction = Invoke-AgentCli 'dialogueSelect' @('-OptionId', [string]$introduction[0].id, '-CommandId', "$commandPrefix-quick-intro-$quickStep") 30
+                if ($quickAction.status -ne 'completed') { throw "Native QuickConversation introduction failed: $($quickAction.error)" }
+            }
+            Start-Sleep -Milliseconds 200
+            $postTalk = Invoke-AgentCli 'state' @('-CommandId', "$commandPrefix-quick-state-$quickStep") 30
+            if ($postTalk.state.context.gameState -eq 'MapState' -and
+                $postTalk.state.location.currentSettlementId -eq $TargetSettlementId -and
+                -not $postTalk.state.context.conversation -and
+                -not [string]::IsNullOrWhiteSpace([string]$postTalk.state.context.menuId)) { break }
+        }
+        $quickTalkReturnedToSettlementMenu = ($postTalk.state.context.gameState -eq 'MapState' -and
+            $postTalk.state.location.currentSettlementId -eq $TargetSettlementId -and
+            -not $postTalk.state.context.conversation -and
+            -not [string]::IsNullOrWhiteSpace([string]$postTalk.state.context.menuId))
+        if (-not $quickTalkReturnedToSettlementMenu) { throw 'Native QuickConversation did not end back at the original Campaign Map settlement menu.' }
     }
     $questDetailsReceipt = $null
     $questDetailsNative = $null
@@ -250,20 +289,21 @@ try {
     $questCountAfter = @($postTalk.state.quests).Count
     $result = [ordered]@{
         ProcessId = $start.session.processId
+        InteractionMode = $InteractionMode
         TargetSettlement = [ordered]@{ Id = $TargetSettlementId; Name = $settlement[0].name; Type = $settlement[0].type; MenuId = $arrived.state.context.menuId }
         MapSettlementTargetCount = $mapSettlementTargets.Count
         RouteTrace = $routeTrace
         NativeOverlayCharacterCount = $overlayCharacters.Count
         Target = $targetCharacter
         TargetIssueMarkers = $candidate[0].IssueMarkers
-        TalkPermissionWasReported = $talk.data.talkPermissionWasReported
         TalkStatus = $talk.status
         TalkError = $talk.error
-        TalkData = $talk.data
+        TalkActionReceipt = $talk.data
         PostTalkContext = $postTalk.state.context
         Mission = $postTalk.state.mission
         Conversation = $conversation
         ConversationStartedForTarget = $initialConversationHeroMatchesTarget
+        QuickTalkReturnedToSettlementMenu = $quickTalkReturnedToSettlementMenu
         ExpectedOutcome = $ExpectedOutcome
         IssueQuestAcceptanceRequested = [bool]($ExpectedOutcome -ne 'ConversationOnly')
         IssueTopicRequested = $issueTopicRequested
@@ -285,17 +325,24 @@ try {
         CampaignDayBeforeTalk = $arrived.campaignDay
         CampaignDayAfterTalk = $postTalk.campaignDay
         CampaignClockUnchangedDuringSceneEntry = ($arrived.campaignDay -eq $postTalk.campaignDay)
+        CampaignDayDeltaDuringInteraction = [Math]::Round(([double]$postTalk.campaignDay - [double]$arrived.campaignDay), 6)
+        TimeControlModeBeforeInteraction = $arrived.state.context.timeControlMode
+        TimeControlModeAfterInteraction = $postTalk.state.context.timeControlMode
         EngineScreenshot = if ($screenshotValid) { $capturePath } else { $null }
         ScreenshotValid = $screenshotValid
         FixtureUnchanged = ($fixtureHashBefore -eq $fixtureHashAfter)
         ProcessStopped = $stop.processStopped
+        TestMaximumFramerate = $start.session.performanceProfile.maxFramerate
+        EngineConfigRestored = [bool]$stop.engineConfigRestored
     }
     $result.ExpectedOutcomeMet = switch ($ExpectedOutcome) {
         'ConversationOnly' { $true }
         'QuestAccepted' { [bool]$questAccepted }
         'NativePreconditionBlocked' { [bool]$result.NativePreconditionBlocked }
     }
-    $result.Passed = ($talk.status -eq 'completed' -and $initialConversationHeroMatchesTarget -and $result.ExpectedOutcomeMet -and $result.QuestUnchanged -eq (-not $questAccepted) -and $result.CampaignClockUnchangedDuringSceneEntry -and (-not $ValidateQuestDetails -or $questDetailsValidated) -and $screenshotValid -and $result.FixtureUnchanged -and $result.ProcessStopped)
+    $interactionReturnValidated = ($InteractionMode -ne 'QuickTalk' -or $quickTalkReturnedToSettlementMenu)
+    $clockAssertionValid = ($InteractionMode -eq 'QuickTalk' -or $result.CampaignClockUnchangedDuringSceneEntry)
+    $result.Passed = ($talk.status -eq 'completed' -and $initialConversationHeroMatchesTarget -and $interactionReturnValidated -and $result.ExpectedOutcomeMet -and $result.QuestUnchanged -eq (-not $questAccepted) -and $clockAssertionValid -and (-not $ValidateQuestDetails -or $questDetailsValidated) -and $screenshotValid -and $result.FixtureUnchanged -and $result.ProcessStopped -and [int]$result.TestMaximumFramerate -eq 30 -and $result.EngineConfigRestored)
     $resultJson = $result | ConvertTo-Json -Depth 18
     if ($env:CHRONICLE_HARNESS_TEMP -and (Test-Path -LiteralPath $env:CHRONICLE_HARNESS_TEMP -PathType Container)) {
         Set-Content -LiteralPath (Join-Path $env:CHRONICLE_HARNESS_TEMP $resultName) -Value $resultJson -Encoding UTF8

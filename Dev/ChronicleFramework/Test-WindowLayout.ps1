@@ -72,6 +72,7 @@ function Set-ChronicleTestDisplayConfig([string]$EngineConfigPath) {
     $text = $text -replace '(?m)^display_mode\s*=.*$', 'display_mode = 0'
     $text = $text -replace '(?m)^display_width\s*=.*$', "display_width = $script:ChronicleTestWindowWidth"
     $text = $text -replace '(?m)^display_height\s*=.*$', "display_height = $script:ChronicleTestWindowHeight"
+    $text = $text -replace '(?m)^max_framerate\s*=.*$', 'max_framerate = 30'
     $text = $text -replace '(?m)^safely_exited\s*=\s*0$', 'safely_exited = 1'
     Set-Content -Path $EngineConfigPath -Value $text -NoNewline
 }

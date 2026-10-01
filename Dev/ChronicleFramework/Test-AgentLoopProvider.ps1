@@ -68,6 +68,17 @@ if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'observationLoop') {
     }
     throw 'Observation loop provider received an unexpected iteration or prior receipt.'
 }
+if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'doneSignal') {
+    if ($request.iteration -eq 1) {
+        [pscustomobject]@{ action = 'state'; arguments = @{}; rationale = 'Deterministic Harness termination check: acquire one fresh observation before stopping.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if ($request.iteration -eq 2 -and $request.previousActionReceipt.action -eq 'state') {
+        [pscustomobject]@{ done = $true; reason = 'Harness termination check observed its required state.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    throw 'Done-signal provider received an unexpected iteration or missing state receipt.'
+}
 if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'point') {
     $state = $request.observation.state
     if ($state.party.isAtSea) { throw 'Point provider fixture must begin on land.' }

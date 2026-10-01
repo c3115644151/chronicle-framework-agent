@@ -157,6 +157,19 @@ try {
     $second = $trace.trace[1]
     $observationLoopVerified = ($trace.trace.Count -eq 2 -and $first.decision.action -eq 'state' -and $first.actionReceipt.status -eq 'completed' -and $second.decision.action -eq 'mapPartyTargets' -and $second.actionReceipt.status -eq 'completed')
     $receiptForwarded = ($second.previousActionReceipt.commandId -eq $first.actionReceipt.commandId -and $second.previousActionReceipt.action -eq $first.actionReceipt.action -and $second.previousActionReceipt.status -eq $first.actionReceipt.status)
+    $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
+    $env:CHRONICLE_TEST_PROVIDER_MODE = 'doneSignal'
+    try {
+        $doneOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -MaxDecisions 4 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-done-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $doneExitCode = $LASTEXITCODE
+    }
+    finally {
+        if ($null -eq $priorProviderMode) { Remove-Item Env:CHRONICLE_TEST_PROVIDER_MODE -ErrorAction SilentlyContinue }
+        else { $env:CHRONICLE_TEST_PROVIDER_MODE = $priorProviderMode }
+    }
+    if ($doneExitCode -ne 0) { throw "Agent loop did not stop on the provider's explicit goal-complete signal: $doneOutput" }
+    $doneTrace = $doneOutput | ConvertFrom-Json
+    $doneSignalVerified = ($doneTrace.trace.Count -eq 2 -and $doneTrace.actionsExecuted -eq 1 -and $doneTrace.termination.completedByProvider -and $doneTrace.termination.reason -eq 'provider-stop' -and -not $doneTrace.trace[1].actionExecuted -and $doneTrace.trace[1].decision.done)
     $stop = Invoke-AgentCli 'stop'
     $fixtureHashAfter = (Get-FileHash $savePath -Algorithm SHA256).Hash
     $result = [ordered]@{
@@ -167,13 +180,15 @@ try {
         FirstDecision = $first.decision.action
         SecondDecision = $second.decision.action
         PreviousActionReceiptForwarded = $receiptForwarded
+        ExplicitGoalStopHonoredWithoutIssuingAnotherAction = $doneSignalVerified
+        GoalStopTrace = $doneTrace.trace
         UnsafeActionRejected = $unsafeActionRejected
         HarnessAdvanceRejected = $harnessClockRejected
         FixtureUnchanged = $fixtureHashBefore -eq $fixtureHashAfter
         ProcessStopped = $stop.processStopped
         Trace = $trace.trace
     }
-    $result.Passed = ($result.DecisionCount -eq 2 -and $observationLoopVerified -and $receiptForwarded -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
+    $result.Passed = ($result.DecisionCount -eq 2 -and $observationLoopVerified -and $receiptForwarded -and $doneSignalVerified -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
     $result | ConvertTo-Json -Depth 12
     if (-not $result.Passed) { exit 1 }
 }

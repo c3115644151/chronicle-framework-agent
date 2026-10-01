@@ -439,45 +439,86 @@ internal sealed class ChronicleAgentProtocol
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessPursuitFixture.CreateWeakHostileLooterParty());
                     break;
                 case "talkToSettlementHero":
-                    var overlayMenuContext = TaleWorlds.CampaignSystem.Campaign.Current?.CurrentMenuContext;
-                    var overlayGameMenu = overlayMenuContext?.GameMenu;
-                    if (overlayGameMenu == null ||
-                        (overlayGameMenu.OverlayType != GameMenu.MenuOverlayType.SettlementWithCharacters && overlayGameMenu.OverlayType != GameMenu.MenuOverlayType.SettlementWithBoth) ||
+                {
+                    var quickOverlayMenuContext = TaleWorlds.CampaignSystem.Campaign.Current?.CurrentMenuContext;
+                    var quickOverlayGameMenu = quickOverlayMenuContext?.GameMenu;
+                    if (quickOverlayGameMenu == null ||
+                        (quickOverlayGameMenu.OverlayType != GameMenu.MenuOverlayType.SettlementWithCharacters && quickOverlayGameMenu.OverlayType != GameMenu.MenuOverlayType.SettlementWithBoth) ||
                         Settlement.CurrentSettlement == null)
                         throw new InvalidOperationException("talkToSettlementHero requires the native settlement menu with a visible Characters overlay");
-                    var settlementHeroId = ReadString(command, "heroId");
-                    if (string.IsNullOrWhiteSpace(settlementHeroId)) throw new InvalidOperationException("talkToSettlementHero requires a HeroId from the current settlement overlay observation");
-                    var settlementOverlayLocationCharacters = TaleWorlds.CampaignSystem.Campaign.Current.GameMenuManager.MenuLocations
+                    var quickSettlementHeroId = ReadString(command, "heroId");
+                    if (string.IsNullOrWhiteSpace(quickSettlementHeroId)) throw new InvalidOperationException("talkToSettlementHero requires a HeroId from the current settlement overlay observation");
+                    var quickOverlayLocationCharacters = TaleWorlds.CampaignSystem.Campaign.Current.GameMenuManager.MenuLocations
                         .Where(location => location != null)
                         .SelectMany(location => location.GetCharacterList())
                         .Where(locationCharacter => locationCharacter != null && locationCharacter.Character?.IsHero == true && TaleWorlds.CampaignSystem.Campaign.Current.Models.HeroAgentLocationModel.WillBeListedInOverlay(locationCharacter))
                         .ToArray();
-                    var settlementTargetLocationCharacter = settlementOverlayLocationCharacters.FirstOrDefault(locationCharacter =>
+                    var quickSettlementTargetCharacter = quickOverlayLocationCharacters.FirstOrDefault(locationCharacter =>
                         locationCharacter.Character?.HeroObject != null &&
-                        string.Equals(locationCharacter.Character.HeroObject.StringId, settlementHeroId, StringComparison.Ordinal));
-                    var settlementTargetHero = settlementTargetLocationCharacter?.Character?.HeroObject;
-                    if (settlementTargetHero == null || !settlementTargetHero.IsAlive || settlementTargetHero.IsPrisoner || settlementTargetHero.CurrentSettlement != Settlement.CurrentSettlement)
+                        string.Equals(locationCharacter.Character.HeroObject.StringId, quickSettlementHeroId, StringComparison.Ordinal));
+                    var quickSettlementTargetHero = quickSettlementTargetCharacter?.Character?.HeroObject;
+                    if (quickSettlementTargetHero == null || !quickSettlementTargetHero.IsAlive || quickSettlementTargetHero.IsPrisoner || quickSettlementTargetHero.CurrentSettlement != Settlement.CurrentSettlement)
                         throw new InvalidOperationException("talkToSettlementHero target is no longer a living, non-prisoner character in the current native Settlement overlay");
-                    var talkPermissionWasReported = false;
-                    var talkPermissionAllowed = true;
-                    string talkPermissionHint = null;
-                    Game.Current.EventManager.TriggerEvent(new SettlementOverlayTalkPermissionEvent(settlementTargetHero, (isAllowed, hint) =>
+                    var quickTalkPermissionWasReported = false;
+                    var quickTalkPermissionAllowed = true;
+                    string quickTalkPermissionHint = null;
+                    Game.Current.EventManager.TriggerEvent(new SettlementOverylayQuickTalkPermissionEvent(quickSettlementTargetHero, (isAllowed, hint) =>
                     {
-                        talkPermissionWasReported = true;
-                        talkPermissionAllowed = isAllowed;
-                        talkPermissionHint = hint?.ToString();
+                        quickTalkPermissionWasReported = true;
+                        quickTalkPermissionAllowed = isAllowed;
+                        quickTalkPermissionHint = hint?.ToString();
                     }));
-                    if (talkPermissionWasReported && !talkPermissionAllowed)
-                        throw new InvalidOperationException(string.IsNullOrWhiteSpace(talkPermissionHint) ? "The native Settlement overlay does not currently allow talking to this Hero" : talkPermissionHint);
-                    var targetLocation = LocationComplex.Current?.GetLocationOfCharacter(settlementTargetHero);
-                    if (targetLocation == null) throw new InvalidOperationException("Native LocationComplex has no current Location for the selected Settlement overlay Hero");
-                    if (string.Equals(targetLocation.StringId, "alley", StringComparison.Ordinal))
-                        targetLocation = LocationComplex.Current.GetLocationWithId("center");
-                    TaleWorlds.CampaignSystem.CampaignEventDispatcher.Instance.OnPlayerStartTalkFromMenu(settlementTargetHero);
-                    PlayerEncounter.LocationEncounter.CreateAndOpenMissionController(targetLocation, null, settlementTargetHero.CharacterObject);
-                    var talkData = "{\"heroId\":\"" + Escape(settlementTargetHero.StringId) + "\",\"heroName\":\"" + Escape(settlementTargetHero.Name?.ToString()) + "\",\"locationId\":\"" + Escape(targetLocation.StringId) + "\",\"hasIssue\":" + (settlementTargetHero.Issue != null ? "true" : "false") + ",\"issueType\":\"" + Escape(settlementTargetHero.Issue?.GetType().Name) + "\",\"talkPermissionWasReported\":" + (talkPermissionWasReported ? "true" : "false") + "}";
-                    WriteResponse(commandId, action, "completed", behavior, null, talkData);
+                    if (quickTalkPermissionWasReported && !quickTalkPermissionAllowed)
+                        throw new InvalidOperationException(string.IsNullOrWhiteSpace(quickTalkPermissionHint) ? "The native Settlement overlay does not currently allow quick talking to this Hero" : quickTalkPermissionHint);
+                    TaleWorlds.CampaignSystem.Conversation.CampaignMapConversation.OpenConversation(
+                        new TaleWorlds.CampaignSystem.Conversation.ConversationCharacterData(CharacterObject.PlayerCharacter, null, noHorse: false, noWeapon: false, spawnAfterFight: false, isCivilianEquipmentRequiredForLeader: true),
+                        new TaleWorlds.CampaignSystem.Conversation.ConversationCharacterData(quickSettlementTargetCharacter.Character, null, noHorse: false, noWeapon: false, spawnAfterFight: false, isCivilianEquipmentRequiredForLeader: true));
+                    var quickTalkData = "{\"heroId\":\"" + Escape(quickSettlementTargetHero.StringId) + "\",\"heroName\":\"" + Escape(quickSettlementTargetHero.Name?.ToString()) + "\"}";
+                    WriteResponse(commandId, action, "completed", behavior, null, quickTalkData);
                     break;
+                }
+                case "visitSettlementHero":
+                {
+                    var visitOverlayMenuContext = TaleWorlds.CampaignSystem.Campaign.Current?.CurrentMenuContext;
+                    var visitOverlayGameMenu = visitOverlayMenuContext?.GameMenu;
+                    if (visitOverlayGameMenu == null ||
+                        (visitOverlayGameMenu.OverlayType != GameMenu.MenuOverlayType.SettlementWithCharacters && visitOverlayGameMenu.OverlayType != GameMenu.MenuOverlayType.SettlementWithBoth) ||
+                        Settlement.CurrentSettlement == null)
+                        throw new InvalidOperationException("visitSettlementHero requires the native settlement menu with a visible Characters overlay");
+                    var visitSettlementHeroId = ReadString(command, "heroId");
+                    if (string.IsNullOrWhiteSpace(visitSettlementHeroId)) throw new InvalidOperationException("visitSettlementHero requires a HeroId from the current settlement overlay observation");
+                    var visitOverlayLocationCharacters = TaleWorlds.CampaignSystem.Campaign.Current.GameMenuManager.MenuLocations
+                        .Where(location => location != null)
+                        .SelectMany(location => location.GetCharacterList())
+                        .Where(locationCharacter => locationCharacter != null && locationCharacter.Character?.IsHero == true && TaleWorlds.CampaignSystem.Campaign.Current.Models.HeroAgentLocationModel.WillBeListedInOverlay(locationCharacter))
+                        .ToArray();
+                    var visitSettlementTargetCharacter = visitOverlayLocationCharacters.FirstOrDefault(locationCharacter =>
+                        locationCharacter.Character?.HeroObject != null &&
+                        string.Equals(locationCharacter.Character.HeroObject.StringId, visitSettlementHeroId, StringComparison.Ordinal));
+                    var visitSettlementTargetHero = visitSettlementTargetCharacter?.Character?.HeroObject;
+                    if (visitSettlementTargetHero == null || !visitSettlementTargetHero.IsAlive || visitSettlementTargetHero.IsPrisoner || visitSettlementTargetHero.CurrentSettlement != Settlement.CurrentSettlement)
+                        throw new InvalidOperationException("visitSettlementHero target is no longer a living, non-prisoner character in the current native Settlement overlay");
+                    var visitPermissionWasReported = false;
+                    var visitPermissionAllowed = true;
+                    string visitPermissionHint = null;
+                    Game.Current.EventManager.TriggerEvent(new SettlementOverlayTalkPermissionEvent(visitSettlementTargetHero, (isAllowed, hint) =>
+                    {
+                        visitPermissionWasReported = true;
+                        visitPermissionAllowed = isAllowed;
+                        visitPermissionHint = hint?.ToString();
+                    }));
+                    if (visitPermissionWasReported && !visitPermissionAllowed)
+                        throw new InvalidOperationException(string.IsNullOrWhiteSpace(visitPermissionHint) ? "The native Settlement overlay does not currently allow visiting this Hero" : visitPermissionHint);
+                    var visitTargetLocation = LocationComplex.Current?.GetLocationOfCharacter(visitSettlementTargetHero);
+                    if (visitTargetLocation == null) throw new InvalidOperationException("Native LocationComplex has no current Location for the selected Settlement overlay Hero");
+                    if (string.Equals(visitTargetLocation.StringId, "alley", StringComparison.Ordinal))
+                        visitTargetLocation = LocationComplex.Current.GetLocationWithId("center");
+                    TaleWorlds.CampaignSystem.CampaignEventDispatcher.Instance.OnPlayerStartTalkFromMenu(visitSettlementTargetHero);
+                    PlayerEncounter.LocationEncounter.CreateAndOpenMissionController(visitTargetLocation, null, visitSettlementTargetHero.CharacterObject);
+                    var visitData = "{\"heroId\":\"" + Escape(visitSettlementTargetHero.StringId) + "\",\"heroName\":\"" + Escape(visitSettlementTargetHero.Name?.ToString()) + "\"}";
+                    WriteResponse(commandId, action, "completed", behavior, null, visitData);
+                    break;
+                }
                 case "captureFrame":
                     var screenshotHarnessMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
                     if (!string.Equals(screenshotHarnessMode, "visual-capture", StringComparison.Ordinal) &&
@@ -724,8 +765,8 @@ internal sealed class ChronicleAgentProtocol
                     var leaveMainAgent = leaveMission?.MainAgent;
                     if (leaveMission == null || leaveMission.MissionEnded || leaveMissionState == null || leaveMainAgent == null || !leaveMainAgent.IsActive() || !leaveMainAgent.IsPlayerControlled)
                         throw new InvalidOperationException("missionLeave requires an active Location Mission with the Player-controlled MainAgent");
-                    if (!AgentMissionInputPatch.IsSupportedLocationMission(leaveMission) || !leaveMission.IsFriendlyMission)
-                        throw new InvalidOperationException("missionLeave requires a supported friendly Town, Tavern or Village Location Mission");
+                    if (!AgentMissionInputPatch.IsSupportedLocationLeaveMission(leaveMission) || !leaveMission.IsFriendlyMission)
+                        throw new InvalidOperationException("missionLeave requires a supported friendly Town, Tavern or Village Mission, including its active native Conversation mode");
                     if (Campaign.Current?.TimeControlMode != CampaignTimeControlMode.Stop)
                         throw new InvalidOperationException("missionLeave requires the Campaign clock to remain stopped");
                     if (leaveMission.IsTeleportingAgents) throw new InvalidOperationException("missionLeave rejects Mission teleport mode");

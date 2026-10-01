@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet('start','load','state','mapSettlementTargets','mapNotifications','quickInformation','sceneNotification','mapPartyTargets','mapPartyComposition','mapPartyBehavior','partyUpgradeOptions','upgradeTroop','prisonerRecruitmentOptions','recruitPrisoner','characterDevelopment','spendSkillFocus','questDetails','partyRoster','partyRoles','inventoryOpen','heroEquipmentOptions','equipHeroItem','unequipHeroItem','inventoryConfirm','inventoryCancel','inventoryCancelChanges','tradeConfirm','tradeCancel','tradeCancelChanges','barterOptions','barterEdit','barterReset','barterAutoBalance','barterOffer','barterCancel','setPartyRole','unassignPartyRole','captureFrame','harnessMissionDiagnostics','harnessMapDiagnostics','harnessPlayerSkillsDiagnostics','harnessCharacterDevelopmentDiagnostics','harnessQuestDetailsDiagnostics','harnessQuestDeadlinePrivacyDiagnostics','harnessPartyRosterDiagnostics','harnessMapPartyDiagnostics','harnessMapPartyCompositionDiagnostics','harnessCreateMapArmyFixture','harnessPrepareSafePassageFixture','harnessPreparePursuitVisibilityFixture','harnessSeedPartyUpgradeFixture','harnessSeedPrisonerRecruitmentFixture','harnessSeedRecruitmentCapacityFixture','harnessPrepareCompanionHiringFixture','harnessCompanionHiringDiagnostics','harnessSeedPartyRoleFixture','harnessPartyRoleDiagnostics','harnessSeedEquipmentModifierFixture','harnessClearEquipmentModifierFixture','harnessSeedTradeRumorFixture','harnessTradeRumorTooltipDiagnostics','harnessSeedMapNotificationFixture','harnessSeedQuickInformationFixture','harnessSeedSceneNotificationFixture','harnessOpenInventoryState','harnessCloseInventoryState','harnessInventoryStateDiagnostics','talkToSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','fastForward','move','moveToPoint','missionInput','missionNavigateToAgent','missionLeave','missionInteract','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','recruit','foodOptions','tradeOptions','tradeRumors','trade','provision','save','stop')]
+    [ValidateSet('start','load','state','mapSettlementTargets','mapNotifications','quickInformation','sceneNotification','mapPartyTargets','mapPartyComposition','mapPartyBehavior','partyUpgradeOptions','upgradeTroop','prisonerRecruitmentOptions','recruitPrisoner','characterDevelopment','spendSkillFocus','questDetails','partyRoster','partyRoles','inventoryOpen','heroEquipmentOptions','equipHeroItem','unequipHeroItem','inventoryConfirm','inventoryCancel','inventoryCancelChanges','tradeConfirm','tradeCancel','tradeCancelChanges','barterOptions','barterEdit','barterReset','barterAutoBalance','barterOffer','barterCancel','setPartyRole','unassignPartyRole','captureFrame','harnessMissionDiagnostics','harnessMapDiagnostics','harnessPlayerSkillsDiagnostics','harnessCharacterDevelopmentDiagnostics','harnessQuestDetailsDiagnostics','harnessQuestDeadlinePrivacyDiagnostics','harnessPartyRosterDiagnostics','harnessMapPartyDiagnostics','harnessMapPartyCompositionDiagnostics','harnessCreateMapArmyFixture','harnessPrepareSafePassageFixture','harnessPreparePursuitVisibilityFixture','harnessSeedPartyUpgradeFixture','harnessSeedPrisonerRecruitmentFixture','harnessSeedRecruitmentCapacityFixture','harnessPrepareCompanionHiringFixture','harnessCompanionHiringDiagnostics','harnessSeedPartyRoleFixture','harnessPartyRoleDiagnostics','harnessSeedEquipmentModifierFixture','harnessClearEquipmentModifierFixture','harnessSeedTradeRumorFixture','harnessTradeRumorTooltipDiagnostics','harnessSeedMapNotificationFixture','harnessSeedQuickInformationFixture','harnessSeedSceneNotificationFixture','harnessOpenInventoryState','harnessCloseInventoryState','harnessInventoryStateDiagnostics','talkToSettlementHero','visitSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','fastForward','move','moveToPoint','missionInput','missionNavigateToAgent','missionLeave','missionInteract','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','recruit','foodOptions','tradeOptions','tradeRumors','trade','provision','save','stop')]
     [string]$Action,
     [string]$SaveName,
     [string]$SettlementId,
@@ -54,6 +54,7 @@ $saveDirectory = Join-Path $documentsRoot 'Game Saves'
 $diagnosticLog = Join-Path $documentsRoot 'Configs\ModLogs\chronicle-framework.log'
 $engineConfig = Join-Path $documentsRoot 'Configs\engine_config.txt'
 $protocolRoot = Join-Path $documentsRoot 'AgentRuns\ChronicleAgent'
+$engineConfigBackupPath = Join-Path $protocolRoot 'engine_config.chronicle-backup'
 $responseRoot = Join-Path $protocolRoot 'responses'
 $commandPath = Join-Path $protocolRoot 'command.json'
 $sessionPath = Join-Path $protocolRoot 'session.json'
@@ -69,6 +70,17 @@ function Set-SafeExitMarker {
     }
 }
 
+function Restore-ChronicleTestEngineConfig([string]$BackupPath) {
+    if ([string]::IsNullOrWhiteSpace($BackupPath) -or -not (Test-Path -LiteralPath $BackupPath -PathType Leaf)) { return $false }
+    $allowedRoot = [IO.Path]::GetFullPath($protocolRoot).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    $backupFullPath = [IO.Path]::GetFullPath($BackupPath)
+    if (-not $backupFullPath.StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Engine-config recovery snapshot must remain inside the Chronicle Agent protocol directory.' }
+    Copy-Item -LiteralPath $backupFullPath -Destination $engineConfig -Force
+    Set-SafeExitMarker
+    Remove-Item -LiteralPath $backupFullPath -Force
+    return $true
+}
+
 function Write-Result($Value) {
     $Value | ConvertTo-Json -Depth 8
 }
@@ -77,6 +89,8 @@ function Get-Session {
     if (-not (Test-Path $sessionPath)) { throw 'No active Chronicle Agent session.' }
     $session = Get-Content $sessionPath -Raw | ConvertFrom-Json
     if (-not (Get-Process -Id $session.processId -ErrorAction SilentlyContinue)) {
+        if ($session.engineConfigBackupPath) { Restore-ChronicleTestEngineConfig -BackupPath ([string]$session.engineConfigBackupPath) | Out-Null }
+        Remove-Item -LiteralPath $sessionPath -Force -ErrorAction SilentlyContinue
         throw "Chronicle Agent session process $($session.processId) is not running."
     }
     return $session
@@ -145,6 +159,8 @@ if ($Action -in @('start','load')) {
         Start-Sleep -Milliseconds 250
     } while ((Get-Date) -lt $shutdownDeadline)
     if ($runningGame.Count -gt 0) { throw "Bannerlord is already running: $($runningGame.ProcessName -join ', ')." }
+    if (Test-Path -LiteralPath $engineConfigBackupPath -PathType Leaf) { Restore-ChronicleTestEngineConfig -BackupPath $engineConfigBackupPath | Out-Null }
+    $engineConfigBackupCreated = $false
     $modules = @(Get-AgentSaveModuleIds -SavePath $savePath)
     $installedModuleIds = @()
     foreach ($moduleDirectory in Get-ChildItem -LiteralPath (Join-Path $gameRoot 'Modules') -Directory) {
@@ -158,9 +174,19 @@ if ($Action -in @('start','load')) {
     $moduleArgument = '_MODULES_*' + ($modules -join '*') + '*_MODULES_'
     $diagnosticStartLineCount = if (Test-Path $diagnosticLog) { @(Get-Content $diagnosticLog).Count } else { 0 }
     $expectedHarnessMode = if ([string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_MODE)) { 'normal' } else { $env:CHRONICLE_HARNESS_MODE }
-    Set-ChronicleTestDisplayConfig -EngineConfigPath $engineConfig
-    Set-SafeExitMarker
-    $process = Start-Process -FilePath $launcher -ArgumentList "/continuesave $SaveName $moduleArgument /anticheat" -WorkingDirectory $binDirectory -WindowStyle Minimized -PassThru
+    if (Test-Path -LiteralPath $engineConfig -PathType Leaf) {
+        Copy-Item -LiteralPath $engineConfig -Destination $engineConfigBackupPath -Force
+        $engineConfigBackupCreated = $true
+    }
+    try {
+        Set-ChronicleTestDisplayConfig -EngineConfigPath $engineConfig
+        Set-SafeExitMarker
+        $process = Start-Process -FilePath $launcher -ArgumentList "/continuesave $SaveName $moduleArgument /anticheat" -WorkingDirectory $binDirectory -WindowStyle Minimized -PassThru
+    }
+    catch {
+        if ($engineConfigBackupCreated) { Restore-ChronicleTestEngineConfig -BackupPath $engineConfigBackupPath | Out-Null }
+        throw
+    }
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $ready = $false
     $windowLayout = $null
@@ -177,8 +203,9 @@ if ($Action -in @('start','load')) {
                 New-Item -ItemType Directory -Force -Path $dialogEvidenceDirectory | Out-Null
                 $dialogEvidencePath = Join-Path $dialogEvidenceDirectory "startup-dialog-$($process.Id).json"
                 [pscustomobject]@{ Handled = $false; ProcessId = $process.Id; WindowTitle = $launchProcess.MainWindowTitle; Error = $_.Exception.Message } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $dialogEvidencePath -Encoding UTF8
-                Stop-AgentProcessTree -RootProcessId $process.Id | Out-Null
+                $launchStopped = Stop-AgentProcessTree -RootProcessId $process.Id
                 Set-SafeExitMarker
+                if ($launchStopped -and $engineConfigBackupCreated) { Restore-ChronicleTestEngineConfig -BackupPath $engineConfigBackupPath | Out-Null }
                 throw "Safe handling of the known shader-cache prompt failed before confirmation. The test-owned game process was stopped; evidence: $dialogEvidencePath. Cause: $($_.Exception.Message)"
             }
             $startupDialogReceipts.Add($dialogResult)
@@ -187,8 +214,9 @@ if ($Action -in @('start','load')) {
             $dialogEvidencePath = Join-Path $dialogEvidenceDirectory "startup-dialog-$($process.Id).json"
             $dialogResult | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $dialogEvidencePath -Encoding UTF8
             if (-not $dialogResult.Handled) {
-                Stop-AgentProcessTree -RootProcessId $process.Id | Out-Null
+                $launchStopped = Stop-AgentProcessTree -RootProcessId $process.Id
                 Set-SafeExitMarker
+                if ($launchStopped -and $engineConfigBackupCreated) { Restore-ChronicleTestEngineConfig -BackupPath $engineConfigBackupPath | Out-Null }
                 $actionSummary = @($dialogResult.ActionNames) -join ', '
                 throw "Campaign launch stopped at 'Mod change detected'; this is not evidence of incompatible save modules. Safely captured UIA actions='$actionSummary', reason='$($dialogResult.Reason)'. Full dialog evidence: $dialogEvidencePath. No global keyboard or mouse input was sent."
             }
@@ -205,13 +233,20 @@ if ($Action -in @('start','load')) {
         Start-Sleep -Milliseconds 250
     }
     if (-not $ready) {
-        Stop-AgentProcessTree -RootProcessId $process.Id | Out-Null
+        $launchStopped = Stop-AgentProcessTree -RootProcessId $process.Id
         Set-SafeExitMarker
+        if ($launchStopped -and $engineConfigBackupCreated) { Restore-ChronicleTestEngineConfig -BackupPath $engineConfigBackupPath | Out-Null }
         throw 'Campaign did not reach protocol-ready state.'
     }
     $windowLayout = Set-ChronicleTestWindow -ProcessId $process.Id
-    if (-not $windowLayout -or -not $windowLayout.Applied) { throw 'Windowed test layout was not verified.' }
-    $session = [ordered]@{ protocolVersion = 1; processId = $process.Id; saveName = $SaveName; moduleSet = $modules; startedUtc = (Get-Date).ToUniversalTime().ToString('O'); windowLayout = $windowLayout; startupDialogReceipts = @($startupDialogReceipts) }
+    if (-not $windowLayout -or -not $windowLayout.Applied) {
+        $launchStopped = Stop-AgentProcessTree -RootProcessId $process.Id
+        Set-SafeExitMarker
+        if ($launchStopped -and $engineConfigBackupCreated) { Restore-ChronicleTestEngineConfig -BackupPath $engineConfigBackupPath | Out-Null }
+        throw 'Windowed test layout was not verified.'
+    }
+    $performanceProfile = [ordered]@{ maxFramerate = 30; width = [int]$windowLayout.Width; height = [int]$windowLayout.Height; configRestoredAfterStop = [bool]$engineConfigBackupCreated }
+    $session = [ordered]@{ protocolVersion = 1; processId = $process.Id; saveName = $SaveName; moduleSet = $modules; startedUtc = (Get-Date).ToUniversalTime().ToString('O'); windowLayout = $windowLayout; performanceProfile = $performanceProfile; engineConfigBackupPath = if ($engineConfigBackupCreated) { $engineConfigBackupPath } else { $null }; startupDialogReceipts = @($startupDialogReceipts) }
     $session | ConvertTo-Json | Set-Content -Path $sessionPath -Encoding UTF8
     $configuredTimeout = $TimeoutSeconds
     $TimeoutSeconds = [Math]::Min(30, $TimeoutSeconds)
@@ -221,8 +256,9 @@ if ($Action -in @('start','load')) {
     }
     catch {
         $handshakeError = $_.Exception.Message
-        Stop-AgentProcessTree -RootProcessId $process.Id | Out-Null
+        $launchStopped = Stop-AgentProcessTree -RootProcessId $process.Id
         Set-SafeExitMarker
+        if ($launchStopped -and $engineConfigBackupCreated) { Restore-ChronicleTestEngineConfig -BackupPath $engineConfigBackupPath | Out-Null }
         Remove-Item -LiteralPath $sessionPath -Force -ErrorAction SilentlyContinue
         if (Test-Path -LiteralPath $commandPath) {
             try { if ((Get-Content -LiteralPath $commandPath -Raw -Encoding UTF8 | ConvertFrom-Json).action -eq 'state') { Remove-Item -LiteralPath $commandPath -Force -ErrorAction SilentlyContinue } } catch { }
@@ -340,6 +376,10 @@ switch ($Action) {
         if (-not $HeroId) { throw '-HeroId is required and must come from settlementOverlayCharacters in the current observation.' }
         $result = Invoke-ProtocolCommand 'talkToSettlementHero' @{ heroId = $HeroId }
     }
+    'visitSettlementHero' {
+        if (-not $HeroId) { throw '-HeroId is required and must come from settlementOverlayCharacters in the current observation.' }
+        $result = Invoke-ProtocolCommand 'visitSettlementHero' @{ heroId = $HeroId }
+    }
     'captureFrame' {
         if (-not $OutputPath) { throw '-OutputPath is required for captureFrame.' }
         $result = Invoke-ProtocolCommand 'captureFrame' @{ fileName = [IO.Path]::GetFileName($OutputPath) }
@@ -455,11 +495,14 @@ switch ($Action) {
         catch { $commandError = $_.Exception.Message }
         $processStopped = Stop-AgentProcessTree -RootProcessId ([int]$session.processId)
         Set-SafeExitMarker
+        $engineConfigRestored = $false
+        if ($processStopped -and $session.engineConfigBackupPath) { $engineConfigRestored = Restore-ChronicleTestEngineConfig -BackupPath ([string]$session.engineConfigBackupPath) }
+        elseif ($processStopped -and (Test-Path -LiteralPath $engineConfigBackupPath -PathType Leaf)) { $engineConfigRestored = Restore-ChronicleTestEngineConfig -BackupPath $engineConfigBackupPath }
         Remove-Item -LiteralPath $sessionPath -Force -ErrorAction SilentlyContinue
         if (Test-Path -LiteralPath $commandPath) {
             try { if ((Get-Content -LiteralPath $commandPath -Raw -Encoding UTF8 | ConvertFrom-Json).action -eq 'stop') { Remove-Item -LiteralPath $commandPath -Force -ErrorAction SilentlyContinue } } catch { }
         }
-        $result = [ordered]@{ protocolVersion = 1; action = 'stop'; status = if ($processStopped) { 'completed' } else { 'failed' }; processId = $session.processId; processStopped = $processStopped; receipt = $receipt; commandError = $commandError }
+        $result = [ordered]@{ protocolVersion = 1; action = 'stop'; status = if ($processStopped) { 'completed' } else { 'failed' }; processId = $session.processId; processStopped = $processStopped; engineConfigRestored = $engineConfigRestored; receipt = $receipt; commandError = $commandError }
     }
 }
 

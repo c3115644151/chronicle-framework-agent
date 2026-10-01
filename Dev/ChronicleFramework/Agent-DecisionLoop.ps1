@@ -61,7 +61,7 @@ function Convert-DecisionToCli {
     if ($Decision.action -eq 'advance') { throw 'advance is a Harness-only deterministic time step and is unavailable to Agent decision providers.' }
     $allowed = @{
         state = @(); mapSettlementTargets = @(); mapNotifications = @(); quickInformation = @(); sceneNotification = @(); mapPartyTargets = @(); mapPartyComposition = @('PartyId'); mapPartyBehavior = @('PartyId'); partyUpgradeOptions = @(); upgradeTroop = @('TroopId','UpgradeTargetIndex'); prisonerRecruitmentOptions = @(); recruitPrisoner = @('TroopId','ConfirmPartySizeWarning'); characterDevelopment = @(); spendSkillFocus = @('SkillId','Count'); questDetails = @('QuestId'); partyRoster = @(); partyRoles = @(); setPartyRole = @('RoleId','HeroId'); unassignPartyRole = @('RoleId'); inventoryOpen = @(); heroEquipmentOptions = @(); equipHeroItem = @('ItemViewModelId','EquipmentIndex'); unequipHeroItem = @('EquipmentIndex'); inventoryConfirm = @(); inventoryCancel = @(); inventoryCancelChanges = @(); pause = @(); resume = @(); fastForward = @(); move = @('SettlementId'); moveToPoint = @('X','Y','Surface'); missionInput = @('X','Y','DurationSeconds'); missionNavigateToAgent = @('AgentIndex','DurationSeconds'); missionLeave = @(); missionInteract = @('AgentIndex'); missionCancelNavigation = @(); missionAimAt = @('AgentIndex');
-        pursue = @('PartyId'); follow = @('PartyId'); hold = @(); menu = @(); menuSelect = @('MenuId','OptionId'); talkToSettlementHero = @('HeroId'); dialogueSelect = @('OptionId'); dialogueContinue = @();
+        pursue = @('PartyId'); follow = @('PartyId'); hold = @(); menu = @(); menuSelect = @('MenuId','OptionId'); talkToSettlementHero = @('HeroId'); visitSettlementHero = @('HeroId'); dialogueSelect = @('OptionId'); dialogueContinue = @();
         battlePause = @(); battleSkip = @(); battleFinish = @(); battleRetreat = @(); missionRetreat = @();
         partyTakeAll = @('LootType'); partyScreenDone = @(); inventoryTakeAll = @(); inventoryDone = @();
         rest = @('Days'); recruitOptions = @(); recruit = @('OwnerId','TroopId','VolunteerSlot','ConfirmPartySizeWarning');
@@ -84,8 +84,11 @@ function Convert-DecisionToCli {
 try {
     $trace = @()
     $loopRunId = [Guid]::NewGuid().ToString('N')
+    $observation = $null
+    $previousActionReceipt = $null
     $observation = Invoke-AgentCli 'state' @{} "$CommandPrefix-observe-0"
     $previousActionReceipt = $null
+    $termination = [ordered]@{ reason = 'decision-budget-exhausted'; providerReason = $null; completedByProvider = $false }
     if ($observation.status -ne 'completed' -or -not $observation.state) { throw 'Initial game observation was not completed.' }
     for ($index = 1; $index -le $MaxDecisions; $index++) {
         $request = [ordered]@{
@@ -96,10 +99,37 @@ try {
             previousActionReceipt = $previousActionReceipt
         }
         $decision = Invoke-DecisionProvider ($request | ConvertTo-Json -Depth 16 -Compress)
+        if ($decision -and $decision.done -eq $true) {
+            $doneReason = [string]$decision.reason
+            if ([string]::IsNullOrWhiteSpace($doneReason)) { throw 'A provider stop decision must include a non-empty reason.' }
+            $trace += [pscustomobject]@{
+                iteration = $index
+                observationBefore = $observation
+                previousActionReceipt = $previousActionReceipt
+                decision = $decision
+                actionReceipt = $null
+                observationAfter = $observation
+                actionExecuted = $false
+            }
+            $termination = [ordered]@{ reason = 'provider-stop'; providerReason = $doneReason; completedByProvider = $true }
+            break
+        }
         $validated = Convert-DecisionToCli $decision
         $commandId = "$CommandPrefix-act-$index"
         $actionResult = Invoke-AgentCli $validated.Action $validated.Arguments $commandId
-        if ($actionResult.status -notin @('completed','accepted')) { throw "Action '$($validated.Action)' returned '$($actionResult.status)': $($actionResult.error)" }
+        if ($actionResult.status -notin @('completed','accepted')) {
+            $trace += [pscustomobject]@{
+                iteration = $index
+                observationBefore = $observation
+                previousActionReceipt = $previousActionReceipt
+                decision = $decision
+                actionReceipt = $actionResult
+                observationAfter = $null
+                actionAttempted = $true
+                actionExecuted = $false
+            }
+            throw "Action '$($validated.Action)' returned '$($actionResult.status)': $($actionResult.error)"
+        }
         $nextObservation = Invoke-AgentCli 'state' @{} "$CommandPrefix-observe-$index"
         if ($nextObservation.status -ne 'completed' -or -not $nextObservation.state) { throw 'Post-action observation was not completed.' }
         $trace += [pscustomobject]@{
@@ -109,6 +139,8 @@ try {
             decision = $decision
             actionReceipt = $actionResult
             observationAfter = $nextObservation
+            actionAttempted = $true
+            actionExecuted = $true
         }
         $previousActionReceipt = $actionResult
         $observation = $nextObservation
@@ -118,11 +150,19 @@ try {
         schemaVersion = 1
         runId = $loopRunId
         provider = $providerPath
-        decisions = $MaxDecisions
+        decisions = $trace.Count
+        actionsExecuted = @($trace | Where-Object { $_.actionExecuted }).Count
+        termination = $termination
         trace = $trace
     } | ConvertTo-Json -Depth 20
 }
 catch {
-    [pscustomobject]@{ status = 'failed'; error = $_.Exception.Message } | ConvertTo-Json -Compress
+    [pscustomobject]@{
+        status = 'failed'
+        runId = $loopRunId
+        error = $_.Exception.Message
+        lastObservation = $observation
+        trace = @($trace)
+    } | ConvertTo-Json -Depth 20 -Compress
     exit 1
 }
