@@ -456,6 +456,16 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("harnessPrepareSurrenderCondition requires the Campaign Map state");
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessEncounterSurrenderFixture.PrepareNativeSurrenderCondition());
                     break;
+                case "harnessSeedTryGetAwayFixture":
+                    var tryGetAwayFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var tryGetAwayFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(tryGetAwayFixtureMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(tryGetAwayFixtureRoot) || !Directory.Exists(tryGetAwayFixtureRoot))
+                        throw new InvalidOperationException("harnessSeedTryGetAwayFixture is restricted to a visual Harness run with a Harness temp directory");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessEncounterEscapeFixture.SeedMainPartyForNativeEscape());
+                    break;
+                case "harnessTryGetAwayDiagnostics":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessEncounterEscapeFixture.BuildNativeEscapeDiagnostics());
+                    break;
                 case "harnessSwitchCaptivityObservationMenu":
                     var captivityMenuFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
                     var captivityMenuFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");

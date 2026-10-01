@@ -20,6 +20,8 @@
 
 Harness运行`TestResults/20261002-064814/Temp/EncounterSurrenderResult.json`从Native Bandit map encounter路径验收：先以Native可见的Bandit defender Fight对话选项进入当前`encounter`菜单，再只在真实MapEvent内用Harness-only `Hero.MakeWounded()`和`MainParty.RecentEventsMorale=-100` fixture满足上述前置；重读Native菜单后才确认`surrender`启用并通过`menuSelect`提交。前帧显示Battle encounter菜单的三个当前选项（Fight、Try to get away、Surrender），后帧显示原版被劫匪俘虏等待界面；结构化结果确认MainHero `IsPrisoner`、Bandit PrisonRoster+1、MainParty停止活动、Campaign没有BattleSimulation/Gold未改、Captivity成立。原版源代码短暂调用`ActivateGameMenu("taken_prisoner")`，但测试第一张后帧与Observer看到的已是`prisoner_wait`，没有声称已视觉观察瞬态`taken_prisoner`中间菜单。模式Stop→UnstoppableFastForward、首个后验日期91077.379→91077.406；这是进入Captivity等待后的自然世界时间，不是`menuSelect`隐式快进。`fixture save hash`不变且游戏进程退出。之前一次测试未识别Bandit专属的`encounter_meeting` toll对话，依据Native可见Fight选项补上这层真实入口后复测通过。
 
+W2-AO运行`TestResults/20261002-071124/Temp/EncounterEscapeResult.json`在两个独立Campaign进程中分别走Reject/Accept。Harness只以文化基础兵+20 grain临时满足原版Escape门槛，创建Native hostile Bandit，并经玩家可见Fight对话进入Defender Encounter。Native `TroopSacrificeModel.CanPlayerGetAwayFromEncounter`允许、模型显示损失7人；warning Engine帧实际列出当前战术技能成员、预测士兵损失和商品风险。Reject用当前Native“Think of something else”option，返回Encounter，成员13→13、grain20→20、Gold/日期/时钟均不变。Accept用当前“Go ahead”option，原生模型结果为士兵13→6、Grain20→17（`floor(20×15%)=3`），进入`try_to_get_away_debrief`并显示逃离说明；再选择当前Continue，Encounter结束回到Campaign Map。Whole chain time remained `Stop`, day91077.378787; fixture Gold1000未变，源档hash不变，两个进程退出，Harness阶段通过。这里测试注入只有初始本体Party roster/物资，不手工写入逃离或损失结果。
+
 Campaign时间边界取决于进入的 GameState/Menu：玩家实际进入战斗 Mission 时战役时钟停止；地图等待菜单（例如部分围城准备）可能继续自然推进；遭遇菜单/会面也不能与 Wait menu 的时间规则混为一谈。接敌和创建 MapEvent 本身不是 Agent 隐式 `advance`。F10 记录的 BattleSimulation 使用独立战斗结算进度，不应伪装成 Campaign 日期快进。
 
 ### Chronicle 当前适配、证据与未知
