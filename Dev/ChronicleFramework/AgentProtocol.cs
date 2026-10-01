@@ -466,6 +466,16 @@ internal sealed class ChronicleAgentProtocol
                 case "harnessTryGetAwayDiagnostics":
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessEncounterEscapeFixture.BuildNativeEscapeDiagnostics());
                     break;
+                case "harnessSeedNpcBattleForPlayerJoin":
+                    var joinEncounterFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var joinEncounterFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(joinEncounterFixtureMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(joinEncounterFixtureRoot) || !Directory.Exists(joinEncounterFixtureRoot))
+                        throw new InvalidOperationException("harnessSeedNpcBattleForPlayerJoin is restricted to a visual Harness run with a Harness temp directory");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessJoinEncounterFixture.CreateNpcBattleForPlayerJoin());
+                    break;
+                case "harnessJoinEncounterDiagnostics":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessJoinEncounterFixture.BuildJoinEncounterDiagnostics());
+                    break;
                 case "harnessSwitchCaptivityObservationMenu":
                     var captivityMenuFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
                     var captivityMenuFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
