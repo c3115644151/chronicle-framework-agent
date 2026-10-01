@@ -438,6 +438,15 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("harnessSeedCaptivityObservationFixture requires the Campaign Map state");
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessCaptivityObservationFixture.StartWithNativeWildernessRansomOffer(ReadString(command, "partyId")));
                     break;
+                case "harnessSeedPrisonCaptivityFixture":
+                    var prisonCaptivityFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var prisonCaptivityFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(prisonCaptivityFixtureMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(prisonCaptivityFixtureRoot) || !Directory.Exists(prisonCaptivityFixtureRoot))
+                        throw new InvalidOperationException("harnessSeedPrisonCaptivityFixture is restricted to a visual Harness run with a Harness temp directory");
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("harnessSeedPrisonCaptivityFixture requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessCaptivityObservationFixture.StartWithNativePrisonRansomOffer(ReadString(command, "settlementId")));
+                    break;
                 case "harnessSwitchCaptivityObservationMenu":
                     var captivityMenuFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
                     var captivityMenuFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");

@@ -8,6 +8,7 @@ using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.CampaignSystem.GameMenus;
 using TaleWorlds.CampaignSystem.GameState;
 using TaleWorlds.CampaignSystem.Party;
+using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Core;
 
 namespace ChronicleFramework;
@@ -26,6 +27,8 @@ internal static class ChronicleHarnessCaptivityObservationFixture
         TaleWorlds.CampaignSystem.Party.PartyBase captorParty = null;
         if (!string.IsNullOrWhiteSpace(captorPartyId))
             captorParty = MobileParty.All.FirstOrDefault(party => party != null && string.Equals(party.StringId, captorPartyId, StringComparison.Ordinal))?.Party;
+        if (captorParty == null && !string.IsNullOrWhiteSpace(captorPartyId))
+            captorParty = Settlement.All.FirstOrDefault(settlement => settlement != null && string.Equals(settlement.StringId, captorPartyId, StringComparison.Ordinal))?.Party;
         if (captorParty == null && PlayerCaptivity.IsCaptive) captorParty = PlayerCaptivity.CaptorParty;
         var prisonerParty = Hero.MainHero.PartyBelongedToAsPrisoner;
         var menuId = Campaign.Current.CurrentMenuContext?.GameMenu?.StringId;
@@ -122,6 +125,63 @@ internal static class ChronicleHarnessCaptivityObservationFixture
         json.Append(",\"campaignDayAfterCapture\":").Append(CampaignTime.Now.ToDays.ToString("F6", CultureInfo.InvariantCulture));
         ChroniclePartyUpgradeAdapter.Property(json, "timeControlModeBefore", previousTimeMode);
         ChroniclePartyUpgradeAdapter.Property(json, "timeControlModeAfter", Campaign.Current.TimeControlMode.ToString());
+        return json.Append('}').ToString();
+    }
+
+    internal static string StartWithNativePrisonRansomOffer(string captorSettlementId)
+    {
+        var mode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+        var root = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+        if (!string.Equals(mode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(root) || !System.IO.Directory.Exists(root))
+            throw new InvalidOperationException("Prison captivity fixture is restricted to a visual Harness run with a Harness temp directory.");
+        if (Game.Current?.GameStateManager?.ActiveState is not MapState mapState || Campaign.Current == null || Hero.MainHero == null || MobileParty.MainParty == null)
+            throw new InvalidOperationException("Prison captivity fixture requires a live Campaign Map and MainHero.");
+        if (PlayerCaptivity.IsCaptive || PlayerEncounter.IsActive || MobileParty.MainParty.IsCurrentlyAtSea)
+            throw new InvalidOperationException("Prison captivity fixture requires a free MainHero on land with no active encounter.");
+        if (Hero.MainHero.IsPrisoner || Hero.MainHero.PartyBelongedToAsPrisoner != null)
+            throw new InvalidOperationException("MainHero already belongs to a prisoner roster.");
+
+        var captorSettlement = Settlement.All.FirstOrDefault(settlement => settlement != null && settlement.IsActive &&
+            (settlement.IsTown || settlement.IsCastle) && string.Equals(settlement.StringId, captorSettlementId, StringComparison.Ordinal));
+        if (captorSettlement?.Party == null)
+            throw new InvalidOperationException("Prison captivity fixture requires an active Town or Castle settlement ID from the current Campaign.");
+
+        var dayBefore = CampaignTime.Now.ToDays;
+        var goldBeforeFixture = Hero.MainHero.Gold;
+        var wasAtWarBeforeFixture = FactionManager.IsAtWarAgainstFaction(captorSettlement.MapFaction, Hero.MainHero.MapFaction);
+        if (!wasAtWarBeforeFixture)
+            DeclareWarAction.ApplyByDefault(captorSettlement.MapFaction, Hero.MainHero.MapFaction);
+        const int fixtureGoldFloor = 10000;
+        if (Hero.MainHero.Gold < fixtureGoldFloor)
+            GiveGoldAction.ApplyBetweenCharacters(null, Hero.MainHero, fixtureGoldFloor - Hero.MainHero.Gold);
+
+        TakePrisonerAction.Apply(captorSettlement.Party, Hero.MainHero);
+        PlayerCaptivity.CaptorParty = captorSettlement.Party;
+        if (!mapState.AtMenu || !string.Equals(Campaign.Current.CurrentMenuContext?.GameMenu?.StringId, "settlement_wait", StringComparison.Ordinal))
+            throw new InvalidOperationException("Native MainHero captivity did not enter the settlement_wait menu for the settlement-captor fixture.");
+        Campaign.Current.PlayerCaptivity.SetRansomAmount();
+        var ransomAmount = Campaign.Current.PlayerCaptivity.CurrentRansomAmount;
+        if (ransomAmount <= 0 || ransomAmount > Hero.MainHero.Gold)
+            throw new InvalidOperationException("Native PlayerCaptivity produced an unusable ransom quote for the prison fixture.");
+
+        GameMenu.SwitchToMenu("menu_captivity_end_propose_ransom_in_prison");
+        var actualMenuId = Campaign.Current.CurrentMenuContext?.GameMenu?.StringId;
+        if (!string.Equals(actualMenuId, "menu_captivity_end_propose_ransom_in_prison", StringComparison.Ordinal))
+            throw new InvalidOperationException("Native captivity prison ransom GameMenu was not activated as requested by the Harness fixture.");
+
+        var json = new StringBuilder(512);
+        json.Append('{').Append("\"schemaVersion\":1,\"testOnly\":true,\"mainHeroCapturedByNativeAction\":true,\"captorIsSettlement\":true");
+        ChroniclePartyUpgradeAdapter.Property(json, "captorSettlementId", captorSettlement.StringId);
+        ChroniclePartyUpgradeAdapter.Property(json, "captorSettlementType", captorSettlement.IsTown ? "town" : "castle");
+        json.Append(",\"captorAtWarWithPlayerBeforeFixture\":").Append(ChroniclePartyUpgradeAdapter.Bool(wasAtWarBeforeFixture));
+        json.Append(",\"captorAtWarWithPlayerAtRansomMenu\":").Append(ChroniclePartyUpgradeAdapter.Bool(FactionManager.IsAtWarAgainstFaction(captorSettlement.MapFaction, Hero.MainHero.MapFaction)));
+        ChroniclePartyUpgradeAdapter.Property(json, "previousMenuId", "settlement_wait");
+        ChroniclePartyUpgradeAdapter.Property(json, "menuId", actualMenuId);
+        json.Append(",\"goldBeforeFixture\":").Append(goldBeforeFixture);
+        json.Append(",\"goldAtRansomMenu\":").Append(Hero.MainHero.Gold);
+        json.Append(",\"nativeRansomAmount\":").Append(ransomAmount);
+        json.Append(",\"campaignDayBeforeCapture\":").Append(dayBefore.ToString("F6", CultureInfo.InvariantCulture));
+        json.Append(",\"campaignDayAtRansomMenu\":").Append(CampaignTime.Now.ToDays.ToString("F6", CultureInfo.InvariantCulture));
         return json.Append('}').ToString();
     }
 }

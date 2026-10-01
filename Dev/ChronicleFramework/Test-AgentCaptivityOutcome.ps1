@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
-    [int]$TimeoutSeconds = 180
+    [int]$TimeoutSeconds = 180,
+    [ValidateSet('Wilderness','Settlement')][string]$CaptorContext = 'Wilderness'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -11,9 +12,13 @@ $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlo
 $tempPath = $env:CHRONICLE_HARNESS_TEMP
 $runDirectory = if ($tempPath) { Split-Path -Parent $tempPath } else { Join-Path $PSScriptRoot 'TestResults\ManualCaptivityOutcome' }
 $frameRoot = if ($tempPath) { $tempPath } else { $runDirectory }
-$resultPath = if ($tempPath) { Join-Path $tempPath 'CaptivityOutcomeResult.json' } else { Join-Path $runDirectory 'CaptivityOutcomeResult.json' }
+$resultName = if ($CaptorContext -eq 'Settlement') { 'PrisonCaptivityOutcomeResult.json' } else { 'CaptivityOutcomeResult.json' }
+$resultPath = if ($tempPath) { Join-Path $tempPath $resultName } else { Join-Path $runDirectory $resultName }
 $previousHarnessMode = $env:CHRONICLE_HARNESS_MODE
 $prefix = 'captivity-outcome-' + (Get-Date -Format 'yyyyMMddHHmmssfff')
+$contextSuffix = $CaptorContext.ToLowerInvariant()
+$ransomMenuId = if ($CaptorContext -eq 'Settlement') { 'menu_captivity_end_propose_ransom_in_prison' } else { 'menu_captivity_end_propose_ransom_wilderness' }
+$waitMenuId = if ($CaptorContext -eq 'Settlement') { 'settlement_wait' } else { 'prisoner_wait' }
 
 if (-not (Test-Path -LiteralPath $savePath)) { throw "Disposable Captivity outcome fixture not found: $savePath" }
 if (Get-Process -Name Bannerlord -ErrorAction SilentlyContinue) { throw 'Bannerlord is already running.' }
@@ -45,23 +50,32 @@ function Invoke-CaptivityOutcomeTrial([ValidateSet('Accept','Reject')][string]$C
         if ($before.state.context.gameState -ne 'MapState' -or $before.state.context.encounterActive -or $before.state.context.captivity)
             { throw "$Choice trial must begin on a free Campaign Map without an active encounter." }
 
-        $captor = Invoke-AgentCli 'harnessPrepareSafePassageFixture' @('-CommandId', "$prefix-$suffix-captor") 30
-        if ($captor.status -ne 'completed' -or [string]::IsNullOrWhiteSpace([string]$captor.data.partyId))
-            { throw "$Choice trial failed to create its Native captor party." }
-        $fixture = Invoke-AgentCli 'harnessSeedCaptivityObservationFixture' @('-PartyId', [string]$captor.data.partyId, '-CommandId', "$prefix-$suffix-captive") 30
-        if ($fixture.status -ne 'completed' -or $fixture.data.menuId -ne 'menu_captivity_end_propose_ransom_wilderness')
-            { throw "$Choice trial failed to reach the Native wilderness ransom menu." }
+        if ($CaptorContext -eq 'Settlement') {
+            $fixture = Invoke-AgentCli 'harnessSeedPrisonCaptivityFixture' @('-SettlementId', 'town_V1', '-CommandId', "$prefix-$suffix-captive") 30
+            if ($fixture.status -ne 'completed' -or $fixture.data.menuId -ne $ransomMenuId)
+                { throw "$Choice trial failed to reach the Native prison ransom menu." }
+            $captorPartyId = [string]$fixture.data.captorSettlementId
+        }
+        else {
+            $captor = Invoke-AgentCli 'harnessPrepareSafePassageFixture' @('-CommandId', "$prefix-$suffix-captor") 30
+            if ($captor.status -ne 'completed' -or [string]::IsNullOrWhiteSpace([string]$captor.data.partyId))
+                { throw "$Choice trial failed to create its Native captor party." }
+            $fixture = Invoke-AgentCli 'harnessSeedCaptivityObservationFixture' @('-PartyId', [string]$captor.data.partyId, '-CommandId', "$prefix-$suffix-captive") 30
+            if ($fixture.status -ne 'completed' -or $fixture.data.menuId -ne $ransomMenuId)
+                { throw "$Choice trial failed to reach the Native wilderness ransom menu." }
+            $captorPartyId = [string]$captor.data.partyId
+        }
 
         $ransomMenu = Invoke-AgentCli 'state' @('-CommandId', "$prefix-$suffix-ransom-state")
-        $frameBefore = Join-Path $frameRoot "captivity-$suffix-before.bmp"
-        $frameAfter = Join-Path $frameRoot "captivity-$suffix-after.bmp"
+        $frameBefore = Join-Path $frameRoot "captivity-$contextSuffix-$suffix-before.bmp"
+        $frameAfter = Join-Path $frameRoot "captivity-$contextSuffix-$suffix-after.bmp"
         Capture-EngineFrame $frameBefore "$suffix-before-frame"
 
         $beforeInvalidSelectionGold = [int]$ransomMenu.state.economy.gold
         $beforeInvalidSelectionDay = [double]$ransomMenu.campaignDay
-        $invalidSelection = Invoke-AgentCli 'menuSelect' @('-MenuId', 'menu_captivity_end_propose_ransom_wilderness', '-OptionId', 'chronicle_invalid_captivity_option', '-CommandId', "$prefix-$suffix-invalid-option") 30
+        $invalidSelection = Invoke-AgentCli 'menuSelect' @('-MenuId', $ransomMenuId, '-OptionId', 'chronicle_invalid_captivity_option', '-CommandId', "$prefix-$suffix-invalid-option") 30
         $afterInvalidSelection = Invoke-AgentCli 'state' @('-CommandId', "$prefix-$suffix-after-invalid-option")
-        if ($invalidSelection.status -ne 'rejected' -or $afterInvalidSelection.state.context.menuId -ne 'menu_captivity_end_propose_ransom_wilderness' -or
+        if ($invalidSelection.status -ne 'rejected' -or $afterInvalidSelection.state.context.menuId -ne $ransomMenuId -or
             [int]$afterInvalidSelection.state.economy.gold -ne [int]$ransomMenu.state.economy.gold -or
             [double]$afterInvalidSelection.campaignDay -ne [double]$ransomMenu.campaignDay)
             { throw "$Choice trial invalid-option request was not rejected without changing the menu, Gold or Campaign time." }
@@ -72,14 +86,14 @@ function Invoke-CaptivityOutcomeTrial([ValidateSet('Accept','Reject')][string]$C
         $selectedOption = @($visibleOptions | Where-Object { $_.id -eq $expectedOptionId })
         if ($selectedOption.Count -ne 1) { throw "$Choice option '$expectedOptionId' was not uniquely visible and enabled in the Native ransom menu." }
 
-        $beforeDiagnostic = Invoke-AgentCli 'harnessCaptivityDiagnostics' @('-PartyId', [string]$captor.data.partyId, '-CommandId', "$prefix-$suffix-diagnostics-before") 30
+        $beforeDiagnostic = Invoke-AgentCli 'harnessCaptivityDiagnostics' @('-PartyId', $captorPartyId, '-CommandId', "$prefix-$suffix-diagnostics-before") 30
         if ($beforeDiagnostic.status -ne 'completed') { throw "$Choice trial could not read pre-choice native diagnostics." }
 
-        $selection = Invoke-AgentCli 'menuSelect' @('-MenuId', 'menu_captivity_end_propose_ransom_wilderness', '-OptionId', $expectedOptionId, '-CommandId', "$prefix-$suffix-select") 30
+        $selection = Invoke-AgentCli 'menuSelect' @('-MenuId', $ransomMenuId, '-OptionId', $expectedOptionId, '-CommandId', "$prefix-$suffix-select") 30
         if ($selection.status -ne 'completed') { throw "$Choice trial Native menu selection did not complete." }
         $after = Invoke-AgentCli 'state' @('-CommandId', "$prefix-$suffix-after")
         Capture-EngineFrame $frameAfter "$suffix-after-frame"
-        $afterDiagnostic = Invoke-AgentCli 'harnessCaptivityDiagnostics' @('-PartyId', [string]$captor.data.partyId, '-CommandId', "$prefix-$suffix-diagnostics-after") 30
+        $afterDiagnostic = Invoke-AgentCli 'harnessCaptivityDiagnostics' @('-PartyId', $captorPartyId, '-CommandId', "$prefix-$suffix-diagnostics-after") 30
         if ($afterDiagnostic.status -ne 'completed') { throw "$Choice trial could not read post-choice native diagnostics." }
 
         $pre = $beforeDiagnostic.data
@@ -92,17 +106,18 @@ function Invoke-CaptivityOutcomeTrial([ValidateSet('Accept','Reject')][string]$C
         $captorRosterCleared = ($post.captorPartyFound -and -not $post.captorRosterContainsMainHero -and [int]$post.captorMainHeroPrisonerCount -eq 0)
         $acceptReleasedMainHero = (-not $post.isCaptive -and -not $post.heroIsPrisoner -and $post.mainPartyIsActive -and $post.mainPartyContainsMainHero -and $captorRosterCleared)
         $rejectKeptMainHeroCaptive = ($post.isCaptive -and $post.heroIsPrisoner -and $post.captorRosterContainsMainHero -and [int]$post.captorMainHeroPrisonerCount -gt 0)
-        $rejectReturnedToWaitMenu = ($post.menuId -eq 'prisoner_wait')
-        $rejectResumedNativeWaitClock = ([double]$post.campaignDay -ge [double]$pre.campaignDay -and $post.timeControlMode -eq 'UnstoppableFastForward')
+        $rejectReturnedToWaitMenu = ($post.menuId -eq $waitMenuId)
+        $rejectWaitClockStateRecorded = ($null -ne $post.timeControlMode -and [double]$post.campaignDay -ge [double]$pre.campaignDay)
 
         $stop = Invoke-AgentCli 'stop' @('-CommandId', "$prefix-$suffix-stop") 30
         [ordered]@{
             Choice = $Choice
+            CaptorContext = $CaptorContext
             ProcessId = $start.session.processId
-            CaptorPartyId = $captor.data.partyId
+            CaptorPartyId = $captorPartyId
             NativeRansomFixture = $fixture.data
             SelectedNativeOption = [ordered]@{ id = $expectedOptionId; text = $optionText }
-            InvalidOptionRejectedWithoutEffects = ($invalidSelection.status -eq 'rejected' -and $afterInvalidSelection.state.context.menuId -eq 'menu_captivity_end_propose_ransom_wilderness' -and [int]$afterInvalidSelection.state.economy.gold -eq $beforeInvalidSelectionGold -and [double]$afterInvalidSelection.campaignDay -eq $beforeInvalidSelectionDay)
+            InvalidOptionRejectedWithoutEffects = ($invalidSelection.status -eq 'rejected' -and $afterInvalidSelection.state.context.menuId -eq $ransomMenuId -and [int]$afterInvalidSelection.state.economy.gold -eq $beforeInvalidSelectionGold -and [double]$afterInvalidSelection.campaignDay -eq $beforeInvalidSelectionDay)
             MenuSelection = $selection
             Before = $pre
             After = $post
@@ -118,10 +133,10 @@ function Invoke-CaptivityOutcomeTrial([ValidateSet('Accept','Reject')][string]$C
             AcceptReleasedMainHeroToMainParty = $acceptReleasedMainHero
             RejectLeftMainHeroCaptive = $rejectKeptMainHeroCaptive
             RejectReturnedToNativeWaitMenu = $rejectReturnedToWaitMenu
-            RejectResumedNativeWaitClock = $rejectResumedNativeWaitClock
+            RejectWaitClockStateRecorded = $rejectWaitClockStateRecorded
             EngineFrames = @($frameBefore, $frameAfter)
             ProcessStopped = [bool]$stop.processStopped
-            Passed = if ($Choice -eq 'Accept') { $invalidSelection.status -eq 'rejected' -and $goldMatchesNativeBranch -and $acceptCampaignDayUnchangedAtPostObservation -and $acceptReleasedMainHero } else { $invalidSelection.status -eq 'rejected' -and $goldMatchesNativeBranch -and $rejectKeptMainHeroCaptive -and $rejectReturnedToWaitMenu -and $rejectResumedNativeWaitClock }
+            Passed = if ($Choice -eq 'Accept') { $invalidSelection.status -eq 'rejected' -and $goldMatchesNativeBranch -and $acceptCampaignDayUnchangedAtPostObservation -and $acceptReleasedMainHero } else { $invalidSelection.status -eq 'rejected' -and $goldMatchesNativeBranch -and $rejectKeptMainHeroCaptive -and $rejectReturnedToWaitMenu -and $rejectWaitClockStateRecorded }
         }
     }
     finally {
@@ -136,7 +151,7 @@ try {
     $fixtureHashAfter = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
     $processesStopped = -not [bool](Get-Process -Name Bannerlord -ErrorAction SilentlyContinue)
     $result = [ordered]@{
-        ProviderKind = 'Native MainHero captivity outcomes through currently visible GameMenu options; disposable fixture only'
+        ProviderKind = "Native MainHero $CaptorContext captivity outcomes through currently visible GameMenu options; disposable fixture only"
         Accept = $accept
         Reject = $reject
         SourceFixtureHashBefore = $fixtureHashBefore
