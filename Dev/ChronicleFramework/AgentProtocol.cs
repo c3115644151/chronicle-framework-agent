@@ -447,6 +447,15 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("harnessSeedPrisonCaptivityFixture requires the Campaign Map state");
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessCaptivityObservationFixture.StartWithNativePrisonRansomOffer(ReadString(command, "settlementId")));
                     break;
+                case "harnessPrepareSurrenderCondition":
+                    var surrenderFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var surrenderFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(surrenderFixtureMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(surrenderFixtureRoot) || !Directory.Exists(surrenderFixtureRoot))
+                        throw new InvalidOperationException("harnessPrepareSurrenderCondition is restricted to a visual Harness run with a Harness temp directory");
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("harnessPrepareSurrenderCondition requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessEncounterSurrenderFixture.PrepareNativeSurrenderCondition());
+                    break;
                 case "harnessSwitchCaptivityObservationMenu":
                     var captivityMenuFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
                     var captivityMenuFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");

@@ -16,11 +16,15 @@
 
 攻击的敌对后果需与“已经处于战争”的遭遇区分。当前 `Helpers.MenuHelper.EncounterAttackConsequence` 与 `EncounterOrderAttack` 都会调用 `BeHostileAction.ApplyEncounterHostileAction`；当主队和对方属于不同Faction、之前不在战争中且 `EncounterModel.IsEncounterExemptFromHostileActions` 未豁免时，原版会对双方Leader关系写入惩罚并调用 `DeclareWarAction.ApplyByPlayerHostility`。前者继续进入Mission，后者继续坐镇模拟，因此是两个战斗处理ACT共享同一宣战副作用，不是另一个可独立点的“Declare War”按钮。源码：当前 v1.4.8.119303 `TaleWorlds.CampaignSystem` 的 `Helpers.MenuHelper`、`BeHostileAction`、`DeclareWarAction`。
 
+`encounter`中的Surrender是有Native门槛的玩家选项，不是每次遇敌都可点：`game_menu_encounter_surrender_on_condition`在MainParty处于raft、特定防守方不能脱离条件，或`Hero.MainHero.IsWounded`且`MobilePartyHelper.CanPartyAttackWithCurrentMorale(MainParty)==false`时才开放。当前源码里`CanPartyAttackWithCurrentMorale`要求计算出的Party Morale大于0。可用后，菜单callback设`PlayerEncounter.PlayerSurrender=true`并调用`PlayerEncounter.Update()`；其Native setter触发`PlayerSurrenderInternal`→必要时`StartBattle()`→`MapEvent.DoSurrender(MainParty.Side)`。失败结算走`DoPlayerDefeat`，源码请求激活`taken_prisoner`，再进入MainHero `PlayerCaptivity`/Captor roster流程；这与普通攻击后败北的`defeated_and_taken_prisoner`路径分开。源码依据本机1.4.8 `EncounterGameMenuBehavior.game_menu_encounter_surrender_on_condition/consequence`、`PlayerEncounter.PlayerSurrenderInternal/DoPlayerDefeat`、`MapEvent.DoSurrender`。
+
+Harness运行`TestResults/20261002-064814/Temp/EncounterSurrenderResult.json`从Native Bandit map encounter路径验收：先以Native可见的Bandit defender Fight对话选项进入当前`encounter`菜单，再只在真实MapEvent内用Harness-only `Hero.MakeWounded()`和`MainParty.RecentEventsMorale=-100` fixture满足上述前置；重读Native菜单后才确认`surrender`启用并通过`menuSelect`提交。前帧显示Battle encounter菜单的三个当前选项（Fight、Try to get away、Surrender），后帧显示原版被劫匪俘虏等待界面；结构化结果确认MainHero `IsPrisoner`、Bandit PrisonRoster+1、MainParty停止活动、Campaign没有BattleSimulation/Gold未改、Captivity成立。原版源代码短暂调用`ActivateGameMenu("taken_prisoner")`，但测试第一张后帧与Observer看到的已是`prisoner_wait`，没有声称已视觉观察瞬态`taken_prisoner`中间菜单。模式Stop→UnstoppableFastForward、首个后验日期91077.379→91077.406；这是进入Captivity等待后的自然世界时间，不是`menuSelect`隐式快进。`fixture save hash`不变且游戏进程退出。之前一次测试未识别Bandit专属的`encounter_meeting` toll对话，依据Native可见Fight选项补上这层真实入口后复测通过。
+
 Campaign时间边界取决于进入的 GameState/Menu：玩家实际进入战斗 Mission 时战役时钟停止；地图等待菜单（例如部分围城准备）可能继续自然推进；遭遇菜单/会面也不能与 Wait menu 的时间规则混为一谈。接敌和创建 MapEvent 本身不是 Agent 隐式 `advance`。F10 记录的 BattleSimulation 使用独立战斗结算进度，不应伪装成 Campaign 日期快进。
 
 ### Chronicle 当前适配、证据与未知
 
-Chronicle 有地图 Party 点击/追近入口、通用原生菜单选项读取/选择、战役坐镇模拟 pause/skip/finish/retreat，以及 Mission 内撤退探针；目前没有完整的遭遇类型/菜单迁移矩阵。源证据：本机 `DefaultEncounterGameMenuModel.GetEncounterMenu`、`EncounterGameMenuBehavior.AddGameMenus`、`PlayerEncounter.StartBattleInternal/DoMeetingInternal`、`StartBattleAction`。UI逐步视觉核对、各遇敌状态的按钮条件、离开/投降失败结果和不同 GameState 的精确时钟回执仍未知。
+Chronicle 有地图 Party 点击/追近入口、通用原生菜单选项读取/选择、战役坐镇模拟 pause/skip/finish/retreat，以及 Mission 内撤退探针；仍没有完整的遭遇类型/菜单迁移矩阵。`EncounterSurrender`已验证一个Bandit Fight→Native `encounter`→条件启用Surrender→Captor captivity切片，包括当前屏幕和主角被俘结果。其他遭遇分支、Surrender门槛的raft/围城条件、失败/逃脱结果、各host GameState的精确时钟回执仍未知。源证据：本机 `DefaultEncounterGameMenuModel.GetEncounterMenu`、`EncounterGameMenuBehavior.AddGameMenus`、`PlayerEncounter.StartBattleInternal/DoMeetingInternal`、`StartBattleAction`及`TestResults/20261002-064814/Temp/EncounterSurrenderResult.json`。
 
 ## G02 MapEvent：交战双方、参战队伍与事件生命周期
 
