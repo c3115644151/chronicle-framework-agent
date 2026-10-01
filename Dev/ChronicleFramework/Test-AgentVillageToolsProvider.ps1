@@ -408,12 +408,15 @@ if ($gameState -eq 'InventoryState') {
 if ($gameState -eq 'MapState') {
     if ($memory.verification -eq 'inventory-check-needed' -and -not $conversation) { Emit-Action 'inventoryOpen' @{} 'Open the Native MainHero inventory after the QuickConversation returns to Campaign so exact reward items can be verified without another market trip.' }
     if ($menuId -eq 'menu_escape_captivity_during_battle') {
+        $memory.captivityMenuObserved = $menuId
+        $memory.captivityDetailsObserved = $state.context.captivity
         $continueCaptivity = @($state.availableMenuOptions | Where-Object { $_.id -eq 'mno_continue' -and $_.available -and $_.enabled } | Select-Object -First 1)
         if ($continueCaptivity.Count -eq 1) { Emit-Action 'menuSelect' @{ MenuId = $menuId; OptionId = 'mno_continue' } 'Advance the single currently visible Native captivity-result Continue choice to observe the next campaign state.' }
         Emit-Done 'The Native battle-captivity continuation has no currently visible enabled choice; preserve its state.'
     }
     if ($menuId -like 'menu_captivity_end_*') {
         $memory.captivityMenuObserved = $menuId
+        $memory.captivityDetailsObserved = $state.context.captivity
         $memory.captivityOptionsObserved = @($state.availableMenuOptions | Where-Object { $_.available -and $_.enabled } | ForEach-Object { [ordered]@{ id = [string]$_.id; text = [string]$_.text } })
         $continueCaptivity = @($state.availableMenuOptions | Where-Object { $_.id -eq 'mno_continue' -and $_.available -and $_.enabled } | Select-Object -First 1)
         if ($continueCaptivity.Count -eq 1 -and @($state.availableMenuOptions | Where-Object { $_.available -and $_.enabled }).Count -eq 1) { Emit-Action 'menuSelect' @{ MenuId = $menuId; OptionId = 'mno_continue' } 'Advance the single currently visible Native captivity continuation, without choosing its later ransom/escape outcome.' }

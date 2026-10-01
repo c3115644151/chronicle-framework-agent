@@ -44,6 +44,7 @@ try {
         InventoryScreen = $snapshot.inventoryScreen
         Location = $snapshot.location
         Context = $snapshot.context
+        CaptivityContextNullWhenNotCaptive = ($null -eq $snapshot.context.captivity)
         BattleSimulation = $snapshot.context.battleSimulation
         NearbySettlementCount = @($snapshot.nearbySettlements).Count
         NearbyPartyCount = @($snapshot.nearbyParties).Count
@@ -55,7 +56,7 @@ try {
         ProcessStopped = $stop.processStopped
     }
     $result.Passed = (
-        $snapshot.schemaVersion -eq 19 -and
+        $snapshot.schemaVersion -eq 21 -and
         $null -eq $snapshot.mission -and
         $snapshot.location.PSObject.Properties['targetPosition'] -and
         ($null -eq $snapshot.location.targetPosition -or ($null -ne $snapshot.location.targetPosition.x -and $null -ne $snapshot.location.targetPosition.y -and $null -ne $snapshot.location.targetPosition.isOnLand)) -and
@@ -70,6 +71,7 @@ try {
         $null -ne $snapshot.context.encounterActive -and
         $null -eq $snapshot.context.lootItemCount -and
         $null -eq $snapshot.context.battleSimulation -and
+        $null -eq $snapshot.context.captivity -and
         $null -eq $snapshot.inventoryScreen -and
         $null -ne $snapshot.danger.hostilePartyCount -and
         $stableIdentity -and $stablePosition -and

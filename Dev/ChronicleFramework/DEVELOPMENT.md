@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 
-Contract version: 6.0
+Contract version: 6.4
 
 ## 目标与边界
 
@@ -84,6 +84,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Dev\ChronicleFramework\Run
 按需阶段以同一命令加单个 `-Phase` 运行；可选 Docs、Preflight、Api、Build、Smoke、Campaign、FreshCampaign、FreshCampaignProgression、Protocol、AgentLoop、BattleFixture、PostBattle、Observation、MapNotifications、QuickInformation、SceneNotification、MainHeroSkills、CharacterDevelopment、SpendSkillFocus、QuestJournal、PartyRoster、PartyUpgrade、PartyPrisonerRecruitment、MissionInteraction、CompanionHiring、MapPartyTargets、MapPartyComposition、MapArmyComposition、MapPartyBehavior、MapSettlementTargets、Movement、MoveToPoint、Recruitment、Rest、Pursuit、EngageVisibility、Conversation、QuestAcceptance、EscortVisibility、TavernMission、TownCenterMission、SettlementOverlayConversation、SettlementOverlayQuestAcceptance、SettlementOverlayQuestGate、BarterTransactions、BarterContexts、BarterFightRoute、BarterSafePassage、VisualCapture、All。`MapNotifications`在disposable Campaign中添加一个Harness专用的有效Native `InformationData`及无效/未注册负向项，产品观察器按原版`MapNotificationVM`注册表生成可见数据并确认无副作用；全为临时内存信息，不保存。`QuickInformation`清空一次性测试客户端原有提示，再经Native `MBInformationManager.AddQuickInformation`提交当前与排队提示，核对AI只看到当前Native UI提示而不泄漏未显示队列。`SceneNotification`用Native非执行型HeroExecution信息弹窗建立一个真实Native SceneNotification画面，检查按钮/文本VM并保留引擎帧；不点击、不执行、不改正式存档。三类Notice观察均不模拟Windows键鼠，也不声称覆盖所有类型/实际鼠标焦点。`EngageVisibility`在临时运行中通过Native `BanditPartyComponent.CreateLooterParty`生成一个弱劫匪Party，并仅为测试强弱差异临时加入普通兵；要求它先自然出现在`mapPartyTargets`后才执行Engage。之后目标移动、原版IsVisible、AI选择、遭遇与时钟都由引擎自然运行；不直接修改可见标志/移动位置，也不在追击中脚本推进/暂停。关键状态变化时保存游戏引擎截图，并把“探测成功”与“是否复现目标丢失行为”分开记录。该阶段为慢速1.4.8启动客户端使用240秒启动超时，并将子测试原始stderr/stdout写入失败收据。临时Party/士兵不写入源存档。`BarterFightRoute`单独复跑Safe Passage Fight路线；`BarterSafePassage`单独复跑接受路径并显式跨过非攻击时限。32小时自然期间可能有其他NPC劫匪触发Encounter，故该长程模拟与不依赖长时间推进的完整`BarterContexts`阶段分开运行；如果被其他队伍打断，收据应保留实际打断实体，不得把它误报为目标冷却到期。Settlement overlay阶段可选`-TargetSettlementId`与`-ApproachSettlementId`：两者必须来自当前`mapSettlementTargets`；Harness若先到Approach聚落，则通过原生Leave返回地图并重新观察后再选目标，不读取隐藏全局ID。若路线失败，收据会保留结构化观察和MapState游戏引擎截图。`MapSettlementTargets`负向回归使用一个visual-capture专用全Settlement显隐诊断找测试样本，仅Harness可调用，不在普通Agent观察或决策白名单中。
 
 `MapNotifications`还在同一disposable Campaign放入`IsValid=false`和未被Native UI注册的负向`InformationData`，确认这些没有进入AI观察；只有原生能够显示的测试通知回传。观察适配器重建的VM是原版类型映射，不等同窗口当前的鼠标焦点或人工视觉操作。
+
+`CaptivityObservation`可单独以`Run-Harness.ps1 -Phase CaptivityObservation`运行，作为额外Harness阶段且不加入All：它用临时Native bandit captor和`TakePrisonerAction`建立只存在于本次进程内的PlayerCaptivity，再打开原版Wilderness Ransom GameMenu；为核对报价字段只在应显示的页面可见，Harness再经受限Fixture切到原版Wilderness Escape Continue GameMenu，不按任何选项。Agent仅读取新增的条件性`context.captivity`、当前菜单选项和两张游戏引擎帧，不选择接受/拒绝/逃脱。测试同时确认非俘虏state中字段为null、Captive赎金报价来自`PlayerCaptivity.CurrentRansomAmount`且与菜单可见金额一致、离开报价页后金额隐藏；重复读取不改Gold/时间/存档。Harness通过Native`TakePrisonerAction`和GameMenu阶段切换制作观察Fixture，不伪称覆盖自然战斗失败/定时检查进入这些菜单，也不决定捕俘后的Agent策略。
+
+`CaptivityOutcome`是独立可选阶段，不加入`All`：分别在两次隔离游戏进程中从同一个不变的disposable Campaign存档加载，以Native `TakePrisonerAction`建立临时捕获；测试只从当前赎金菜单观察到的启用选项中选择Accept或Reject，并记录前后引擎截图、MainHero金币/囚禁状态、主队成员、Captor囚犯名册、菜单与Campaign时间。Accept须扣除本轮原生报价并让MainHero回归MainParty、从Captor名册移除；Reject须不扣钱/不解囚，且返回`prisoner_wait`。它验证原版当前菜单结算，不代表Chronicle已选择何时赎人、拒绝或尝试逃跑；也不模拟自然战败、关押、绑架或AI政策。
 
 `TimeControlLoop` 是独立可选阶段，专门验证测试Provider通过Agent循环选择原版时间档；通用 `AgentLoop` 保持只读观察循环，避免Encounter随机状态污染时间控件断言。
 
@@ -208,6 +212,8 @@ stop()
 | VisualCapture | 引擎单帧参考图 + 按 Bannerlord HWND 连续采集 30fps；只验证采集链，不是玩法真值 | MP4/contact sheet、帧覆盖率、fixture hash、进程清理；不录全桌面，不进默认 All |
 | Conversation | 观察原版句/选项；`DoOption/ContinueConversation` 需满足原生条件 | 选项/回执/菜单迁移；不预测未开放选项 |
 | Observation | 玩家身份、队伍、资源、坐标、移动模式/目标、上下文、附近实体与其移动/定居状态、任务与危险；记录数据来源、原版可见/侦察标记和所采用的情报策略 | 两次暂停快照、稳定 ID/位置、字段新鲜度和 fixture 哈希 |
+| CaptivityObservation | Harness-only Native `TakePrisonerAction`置入MainHero Captivity；打开原版Wilderness ransom菜单并将当前Menu切到Native Wilderness Escape Continue屏，两个阶段都只读、不点击选择 | `TestResults/20261002-051747/Temp/CaptivityObservationResult.json`通过：`context.captivity`在Captive为真/非Captive为null；菜单报价188与Native `CurrentRansomAmount`一致、Accept/Decline Option ID匹配；Escape Continue阶段报价为null且唯一`mno_continue`可见；重复读数稳定、菜单切换不改CampaignDay/Gold/Roster，双引擎截图、源存档hash和清理收据；不声称复现自然战败或逃脱概率/结果 |
+| CaptivityOutcome | 两个新Campaign进程加载同一个不变fixture；各自先验证无效菜单项被安全拒绝，再从当前Native赎金菜单提交可见的Accept/Reject；核对Gold、MainHero囚禁/主队/Captor roster、菜单与原生时间档、前后引擎截图和清理 | `TestResults/20261002-055501/Temp/CaptivityOutcomeResult.json`通过：两个无效Option均拒绝且菜单/金币/时间未变；Accept 244报价使Gold 1000→756，MainHero恢复并回主队、Captor roster归零，日期不变；Reject报价244，Gold不变且仍被Captor拘押，回到`prisoner_wait`后时钟Stop→UnstoppableFastForward并自然推进0.104924日；四张Native引擎帧、原Campaign fixture hash不变、两次进程清理。结果不覆盖自然战败/入狱过程与后续Captor政策 |
 | Movement | 从原版可见聚落marker观察选择Settlement ID，下达原版路径目标并复现普通地图单击时间档位；Harness独立显式步进至抵达，并复用抵达回执中的原生菜单观察 | 目标/菜单/时钟轨迹、失败拒绝、fixture hash；子测试stdout/stderr原文保存在父Harness阶段失败收据，若游戏仍响应则捕获引擎末帧 |
 | Hold | 按原版Map点击语义从正在移动主队切到Hold；动作后不发Pause/Resume/advance，观察Native waiting与CampaignDay | 当前目标清除、defaultBehavior、raw时间档/isWaiting和短自然窗口的日期差；disposable fixture hash、进程清理；失败尽可能留游戏引擎末帧 |
 | MoveToPoint | W2-B仅在陆地用Campaign世界坐标请求有效自由地形点导航；适配层验证CampaignVec2/Face与原版导航模型，通过MapState.ProcessTravel而非直接写位置；Harness可显式步进至目的地 | GoToPoint与location.targetPosition对齐、初末坐标变化/到达、无效Face拒绝且不移主队/切时钟、原版点击时钟模式、fixture hash/进程清理；海上/港口另行验收 |

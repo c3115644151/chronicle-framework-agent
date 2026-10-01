@@ -429,6 +429,27 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("harnessPrepareSafePassageFixture requires the Campaign Map state");
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessSafePassageFixture.CreateAttackingBanditParty());
                     break;
+                case "harnessSeedCaptivityObservationFixture":
+                    var captivityFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var captivityFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(captivityFixtureMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(captivityFixtureRoot) || !Directory.Exists(captivityFixtureRoot))
+                        throw new InvalidOperationException("harnessSeedCaptivityObservationFixture is restricted to a visual Harness run with a Harness temp directory");
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("harnessSeedCaptivityObservationFixture requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessCaptivityObservationFixture.StartWithNativeWildernessRansomOffer(ReadString(command, "partyId")));
+                    break;
+                case "harnessSwitchCaptivityObservationMenu":
+                    var captivityMenuFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var captivityMenuFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(captivityMenuFixtureMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(captivityMenuFixtureRoot) || !Directory.Exists(captivityMenuFixtureRoot))
+                        throw new InvalidOperationException("harnessSwitchCaptivityObservationMenu is restricted to a visual Harness run with a Harness temp directory");
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("harnessSwitchCaptivityObservationMenu requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessCaptivityObservationFixture.SwitchToNativeWildernessEscapeMenu());
+                    break;
+                case "harnessCaptivityDiagnostics":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessCaptivityObservationFixture.BuildCaptivityDiagnostics(ReadString(command, "partyId")));
+                    break;
                 case "harnessPreparePursuitVisibilityFixture":
                     var pursuitFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
                     var pursuitFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");

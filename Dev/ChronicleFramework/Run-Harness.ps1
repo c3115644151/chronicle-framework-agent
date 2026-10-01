@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'TimeControlLoop', 'BattleFixture', 'PostBattle', 'Observation', 'MapNotifications', 'QuickInformation', 'SceneNotification', 'MissionLeave', 'VillageToolsDelivery', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'BarterFightRoute', 'BarterSafePassage', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EngageVisibility', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuickTalk', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'VisualCapture', 'All')]
+    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'TimeControlLoop', 'BattleFixture', 'PostBattle', 'Observation', 'CaptivityObservation', 'CaptivityOutcome', 'MapNotifications', 'QuickInformation', 'SceneNotification', 'MissionLeave', 'VillageToolsDelivery', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'BarterFightRoute', 'BarterSafePassage', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EngageVisibility', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuickTalk', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'VisualCapture', 'All')]
     [string]$Phase = 'All',
     [int]$SmokeTimeoutSeconds = 45,
     [int]$SmokeStabilitySeconds = 8,
@@ -16,7 +16,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '6.0'
+$HarnessContractVersion = '6.4'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -41,6 +41,8 @@ $freshCampaignScript = Join-Path $harnessRoot 'Test-AgentFreshCampaign.ps1'
 $saveModuleMetadataTestScript = Join-Path $harnessRoot 'Test-AgentSaveMetadata.ps1'
 $protocolScript = Join-Path $harnessRoot 'Test-AgentProtocol.ps1'
 $observationScript = Join-Path $harnessRoot 'Test-AgentObservation.ps1'
+$captivityObservationScript = Join-Path $harnessRoot 'Test-AgentCaptivityObservation.ps1'
+$captivityOutcomeScript = Join-Path $harnessRoot 'Test-AgentCaptivityOutcome.ps1'
 $mapNotificationsScript = Join-Path $harnessRoot 'Test-AgentMapNotifications.ps1'
 $quickInformationScript = Join-Path $harnessRoot 'Test-AgentQuickInformation.ps1'
 $sceneNotificationScript = Join-Path $harnessRoot 'Test-AgentSceneNotification.ps1'
@@ -176,6 +178,8 @@ $requestedStages = switch ($Phase) {
     'BattleFixture' { @('Preflight', 'Build', 'BattleFixture') }
     'PostBattle' { @('Preflight', 'Build', 'PostBattle') }
     'Observation' { @('Preflight', 'Build', 'Observation') }
+    'CaptivityObservation' { @('Preflight', 'Build', 'CaptivityObservation') }
+    'CaptivityOutcome' { @('Preflight', 'Build', 'CaptivityOutcome') }
     'MapNotifications' { @('Preflight', 'Build', 'MapNotifications') }
     'QuickInformation' { @('Preflight', 'Build', 'QuickInformation') }
     'SceneNotification' { @('Preflight', 'Build', 'SceneNotification') }
@@ -433,6 +437,22 @@ foreach ($stage in $requestedStages) {
             Invoke-Stage -Name 'Observation' -Action {
                 & powershell -NoProfile -ExecutionPolicy Bypass -File $observationScript
                 if ($LASTEXITCODE -ne 0) { throw "Agent observation test failed with exit code $LASTEXITCODE." }
+            }
+        }
+        'CaptivityObservation' {
+            Invoke-Stage -Name 'CaptivityObservation' -Action {
+                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $captivityObservationScript 2>&1 | Out-String
+                $testExitCode = $LASTEXITCODE
+                if ($testExitCode -ne 0) { throw "Native MainHero captivity observation test failed with exit code $testExitCode.`n$testOutput" }
+                $testOutput
+            }
+        }
+        'CaptivityOutcome' {
+            Invoke-Stage -Name 'CaptivityOutcome' -Action {
+                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $captivityOutcomeScript 2>&1 | Out-String
+                $testExitCode = $LASTEXITCODE
+                if ($testExitCode -ne 0) { throw "Native MainHero captivity outcome test failed with exit code $testExitCode.`n$testOutput" }
+                $testOutput
             }
         }
         'MapNotifications' {

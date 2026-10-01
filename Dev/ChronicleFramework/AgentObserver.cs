@@ -129,6 +129,8 @@ internal static class ChronicleAgentObserver
         Property(json, "encounteredPartyId", encounteredParty?.Id, true);
         Property(json, "encounteredPartyName", encounteredParty?.Name?.ToString(), true);
         json.Append(",\"isWaiting\":").Append(Bool(campaign.IsMainPartyWaiting));
+        json.Append(",\"captivity\":");
+        AppendPlayerCaptivityContext(json, campaign, menu?.StringId);
         var battleSimulation = PlayerEncounter.CurrentBattleSimulation;
         json.Append(",\"battleSimulation\":");
         if (battleSimulation == null)
@@ -925,6 +927,26 @@ internal static class ChronicleAgentObserver
     }
 
     private static string PartyType(MobileParty party) => party.IsLordParty ? "lord" : party.IsBandit ? "bandit" : party.IsCaravan ? "caravan" : party.IsVillager ? "villager" : party.IsPatrolParty ? "patrol" : party.IsGarrison ? "garrison" : "other";
+    private static void AppendPlayerCaptivityContext(StringBuilder json, Campaign campaign, string menuId)
+    {
+        var playerCaptivity = campaign?.PlayerCaptivity;
+        if (playerCaptivity == null || !PlayerCaptivity.IsCaptive)
+        {
+            json.Append("null");
+            return;
+        }
+
+        var ransomOfferVisible = string.Equals(menuId, "menu_captivity_end_propose_ransom_wilderness", StringComparison.Ordinal) ||
+            string.Equals(menuId, "menu_captivity_end_propose_ransom_in_prison", StringComparison.Ordinal);
+        json.Append('{').Append("\"isCaptive\":true");
+        Property(json, "currentMenuId", menuId, true);
+        json.Append(",\"ransomOfferVisible\":").Append(Bool(ransomOfferVisible));
+        json.Append(",\"currentVisibleRansomAmount\":");
+        if (ransomOfferVisible) json.Append(playerCaptivity.CurrentRansomAmount);
+        else json.Append("null");
+        json.Append('}');
+    }
+
     internal static string GetPartyTypeForObservation(MobileParty party) => PartyType(party);
     private static bool IsHostile(IFaction first, IFaction second) => first != null && second != null && FactionManager.IsAtWarAgainstFaction(first, second);
     private static double Distance(float x1, float y1, float x2, float y2) { var x = x1 - x2; var y = y1 - y2; return Math.Sqrt(x * x + y * y); }
