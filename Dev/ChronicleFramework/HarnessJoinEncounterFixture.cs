@@ -7,6 +7,7 @@ using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Actions;
 using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.CampaignSystem.GameState;
+using TaleWorlds.CampaignSystem.GameMenus;
 using TaleWorlds.CampaignSystem.MapEvents;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Party.PartyComponents;
@@ -146,7 +147,59 @@ internal static class ChronicleHarnessJoinEncounterFixture
         return json.Append('}').ToString();
     }
 
-    internal static string BuildJoinEncounterDiagnostics(string mapEventPartyId = null)
+    internal static string PrepareArmyMemberForCurrentJoinEncounter()
+    {
+        RequireVisualMapFixture();
+        if (!PlayerEncounter.IsActive || Campaign.Current.CurrentMenuContext?.GameMenu?.StringId != "join_encounter" || MobileParty.MainParty.Army != null)
+            throw new InvalidOperationException("Army-member fixture requires the current Native join_encounter menu and a MainParty not already assigned to an Army.");
+        var battle = PlayerEncounter.EncounteredBattle ?? MobileParty.MainParty.MapEvent;
+        if (battle == null || battle.HasWinner || battle.IsPlayerMapEvent || battle.AttackerSide.Parties.Any(entry => entry.Party == PartyBase.MainParty) || battle.DefenderSide.Parties.Any(entry => entry.Party == PartyBase.MainParty))
+            throw new InvalidOperationException("Army-member fixture requires the ongoing NPC-vs-NPC MapEvent before the player joins either side.");
+
+        var eventParties = battle.AttackerSide.Parties.Concat(battle.DefenderSide.Parties).Select(entry => entry.Party.MobileParty).Where(party => party != null).ToArray();
+        var armyLeaderParty = MobileParty.All
+            .Where(party => party != null && party != MobileParty.MainParty && party.IsActive && party.IsVisible && party.IsLordParty && party.LeaderHero != null &&
+                party.MapEvent == null && party.SiegeEvent == null && party.Army == null && party.AttachedTo == null && party.CurrentSettlement == null &&
+                eventParties.All(eventParty => eventParty != party))
+            .OrderByDescending(party => party.Position.Distance(MobileParty.MainParty.Position))
+            .FirstOrDefault();
+        var kingdom = armyLeaderParty?.MapFaction as Kingdom;
+        var gatheringFocus = armyLeaderParty?.TargetSettlement ?? armyLeaderParty?.CurrentSettlement ??
+            kingdom?.Settlements.FirstOrDefault(settlement => settlement.IsFortification && !settlement.IsUnderSiege) ?? kingdom?.Settlements.FirstOrDefault();
+        if (kingdom == null || armyLeaderParty == null || gatheringFocus == null)
+            throw new InvalidOperationException("A separate Native kingdom LordParty and gathering focus are required for the disposable Army-member fixture.");
+
+        var eventIdBefore = battle.Id.ToString();
+        var timeModeBefore = Campaign.Current.TimeControlMode;
+        var campaignDayBefore = CampaignTime.Now.ToDays;
+        var leaderInfluenceBefore = armyLeaderParty.LeaderHero.Clan.Influence;
+        kingdom.CreateArmy(armyLeaderParty.LeaderHero, gatheringFocus, Army.ArmyTypes.Patrolling, new MBList<MobileParty> { MobileParty.MainParty });
+        var army = MobileParty.MainParty.Army;
+        if (army == null || army.LeaderParty != armyLeaderParty || !army.Parties.Contains(MobileParty.MainParty) || army.LeaderParty == MobileParty.MainParty)
+            throw new InvalidOperationException("Native Kingdom.CreateArmy did not establish MainParty as a non-leader member of its registered Army.");
+        GameMenu.SwitchToMenu("join_encounter");
+        if (Campaign.Current.CurrentMenuContext?.GameMenu?.StringId != "join_encounter" || !PlayerEncounter.IsActive ||
+            PlayerEncounter.EncounteredBattle?.Id.ToString() != eventIdBefore || armyLeaderParty.AttachedParties.Contains(MobileParty.MainParty))
+            throw new InvalidOperationException("Native JoinEncounter was not safely refreshed after Army membership preparation.");
+
+        var json = new StringBuilder(768);
+        json.Append('{').Append("\"schemaVersion\":1,\"testOnly\":true,\"nativeArmyMembershipPrepared\":true");
+        ChroniclePartyUpgradeAdapter.Property(json, "eventId", eventIdBefore);
+        ChroniclePartyUpgradeAdapter.Property(json, "armyLeaderPartyId", armyLeaderParty.StringId);
+        ChroniclePartyUpgradeAdapter.Property(json, "armyKingdomId", kingdom.StringId);
+        json.Append(",\"armyPartyCount\":").Append(army.Parties.Count);
+        json.Append(",\"armyContainsMainParty\":true");
+        json.Append(",\"mainPartyAttachedToLeaderBeforeApproach\":false");
+        json.Append(",\"leaderInfluenceBefore\":").Append(leaderInfluenceBefore.ToString("F3", CultureInfo.InvariantCulture));
+        json.Append(",\"leaderInfluenceAfter\":").Append(armyLeaderParty.LeaderHero.Clan.Influence.ToString("F3", CultureInfo.InvariantCulture));
+        json.Append(",\"campaignDayBefore\":").Append(campaignDayBefore.ToString("F6", CultureInfo.InvariantCulture));
+        json.Append(",\"campaignDayAfter\":").Append(CampaignTime.Now.ToDays.ToString("F6", CultureInfo.InvariantCulture));
+        ChroniclePartyUpgradeAdapter.Property(json, "timeControlModeBefore", timeModeBefore.ToString());
+        ChroniclePartyUpgradeAdapter.Property(json, "timeControlModeAfter", Campaign.Current.TimeControlMode.ToString());
+        return json.Append('}').ToString();
+    }
+
+    internal static string BuildJoinEncounterDiagnostics(string mapEventPartyId = null, string armyLeaderPartyId = null)
     {
         RequireVisualMapFixture();
         MapEvent battle = null;
@@ -160,6 +213,9 @@ internal static class ChronicleHarnessJoinEncounterFixture
         var menuId = Campaign.Current.CurrentMenuContext?.GameMenu?.StringId;
         var mainParty = PartyBase.MainParty;
         var playerSide = PlayerEncounter.IsActive ? PlayerEncounter.Current.PlayerSide.ToString() : "None";
+        var playerArmy = MobileParty.MainParty.Army;
+        if (playerArmy == null && !string.IsNullOrWhiteSpace(armyLeaderPartyId))
+            playerArmy = MobileParty.All.FirstOrDefault(party => party != null && string.Equals(party.StringId, armyLeaderPartyId, StringComparison.Ordinal))?.Army;
         var mainPartyOnAttackerSide = battle.AttackerSide.Parties.Any(entry => entry.Party == mainParty);
         var mainPartyOnDefenderSide = battle.DefenderSide.Parties.Any(entry => entry.Party == mainParty);
         var json = new StringBuilder(1024);
@@ -176,6 +232,16 @@ internal static class ChronicleHarnessJoinEncounterFixture
         json.Append(",\"battleSimulationExists\":").Append(ChroniclePartyUpgradeAdapter.Bool(PlayerEncounter.IsActive && PlayerEncounter.Current.BattleSimulation != null));
         json.Append(",\"mainPartyCanJoinAttacker\":").Append(ChroniclePartyUpgradeAdapter.Bool(battle.CanPartyJoinBattle(mainParty, BattleSideEnum.Attacker)));
         json.Append(",\"mainPartyCanJoinDefender\":").Append(ChroniclePartyUpgradeAdapter.Bool(battle.CanPartyJoinBattle(mainParty, BattleSideEnum.Defender)));
+        json.Append(",\"playerAtWarWithAttacker\":").Append(ChroniclePartyUpgradeAdapter.Bool(FactionManager.IsAtWarAgainstFaction(battle.GetLeaderParty(BattleSideEnum.Attacker).MapFaction, MobileParty.MainParty.MapFaction)));
+        json.Append(",\"playerAtWarWithDefender\":").Append(ChroniclePartyUpgradeAdapter.Bool(FactionManager.IsAtWarAgainstFaction(battle.GetLeaderParty(BattleSideEnum.Defender).MapFaction, MobileParty.MainParty.MapFaction)));
+        json.Append(",\"mainPartyArmyMember\":").Append(ChroniclePartyUpgradeAdapter.Bool(MobileParty.MainParty.Army != null && MobileParty.MainParty.Army.LeaderParty != MobileParty.MainParty && MobileParty.MainParty.Army.Parties.Contains(MobileParty.MainParty)));
+        json.Append(",\"mainPartyArmyContainsPlayer\":").Append(ChroniclePartyUpgradeAdapter.Bool(playerArmy != null && playerArmy.Parties.Contains(MobileParty.MainParty)));
+        json.Append(",\"mainPartyArmyPartyCount\":").Append(playerArmy?.Parties.Count ?? 0);
+        json.Append(",\"mainPartyArmyAttachedPartyCount\":").Append(playerArmy?.LeaderParty.AttachedParties.Count ?? 0);
+        json.Append(",\"playerClanInfluence\":").Append(Clan.PlayerClan.Influence.ToString("F3", CultureInfo.InvariantCulture));
+        json.Append(",\"armyLeaderClanInfluence\":").Append((playerArmy?.LeaderParty?.LeaderHero?.Clan?.Influence ?? 0f).ToString("F3", CultureInfo.InvariantCulture));
+        ChroniclePartyUpgradeAdapter.Property(json, "playerArmyLeaderPartyId", playerArmy?.LeaderParty?.StringId);
+        ChroniclePartyUpgradeAdapter.Property(json, "mainPartyAttachedToPartyId", MobileParty.MainParty.AttachedTo?.StringId);
         json.Append(",\"attackerPartyIds\":[").Append(string.Join(",", battle.AttackerSide.Parties.Select(entry => "\"" + ChroniclePartyUpgradeAdapter.Escape(entry.Party.Id.ToString()) + "\""))).Append(']');
         json.Append(",\"defenderPartyIds\":[").Append(string.Join(",", battle.DefenderSide.Parties.Select(entry => "\"" + ChroniclePartyUpgradeAdapter.Escape(entry.Party.Id.ToString()) + "\""))).Append(']');
         json.Append(",\"gold\":").Append(Hero.MainHero.Gold);

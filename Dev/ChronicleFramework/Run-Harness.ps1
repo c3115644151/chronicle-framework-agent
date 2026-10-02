@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'TimeControlLoop', 'BattleFixture', 'PostBattle', 'Observation', 'CaptivityObservation', 'CaptivityOutcome', 'PrisonCaptivityOutcome', 'EncounterSurrender', 'EncounterEscape', 'JoinEncounterDefenders', 'JoinEncounterEligibility', 'MapNotifications', 'QuickInformation', 'SceneNotification', 'MissionLeave', 'VillageToolsDelivery', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'BarterFightRoute', 'BarterSafePassage', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EngageVisibility', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuickTalk', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'VisualCapture', 'All')]
+    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'TimeControlLoop', 'BattleFixture', 'PostBattle', 'Observation', 'CaptivityObservation', 'CaptivityOutcome', 'PrisonCaptivityOutcome', 'EncounterSurrender', 'EncounterEscape', 'JoinEncounterDefenders', 'JoinEncounterEligibility', 'JoinEncounterAbandonArmy', 'MapNotifications', 'QuickInformation', 'SceneNotification', 'MissionLeave', 'VillageToolsDelivery', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'BarterFightRoute', 'BarterSafePassage', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EngageVisibility', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuickTalk', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'VisualCapture', 'All')]
     [string]$Phase = 'All',
     [int]$SmokeTimeoutSeconds = 45,
     [int]$SmokeStabilitySeconds = 8,
@@ -16,7 +16,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '6.9'
+$HarnessContractVersion = '7.0'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -47,6 +47,7 @@ $encounterSurrenderScript = Join-Path $harnessRoot 'Test-AgentEncounterSurrender
 $encounterEscapeScript = Join-Path $harnessRoot 'Test-AgentEncounterEscape.ps1'
 $joinEncounterScript = Join-Path $harnessRoot 'Test-AgentJoinEncounterDefenders.ps1'
 $joinEncounterEligibilityScript = Join-Path $harnessRoot 'Test-AgentJoinEncounterEligibility.ps1'
+$joinEncounterAbandonArmyScript = Join-Path $harnessRoot 'Test-AgentJoinEncounterAbandonArmy.ps1'
 $mapNotificationsScript = Join-Path $harnessRoot 'Test-AgentMapNotifications.ps1'
 $quickInformationScript = Join-Path $harnessRoot 'Test-AgentQuickInformation.ps1'
 $sceneNotificationScript = Join-Path $harnessRoot 'Test-AgentSceneNotification.ps1'
@@ -189,6 +190,7 @@ $requestedStages = switch ($Phase) {
     'EncounterEscape' { @('Preflight', 'Build', 'EncounterEscape') }
     'JoinEncounterDefenders' { @('Preflight', 'Build', 'JoinEncounterDefenders') }
     'JoinEncounterEligibility' { @('Preflight', 'Build', 'JoinEncounterEligibility') }
+    'JoinEncounterAbandonArmy' { @('Preflight', 'Build', 'JoinEncounterAbandonArmy') }
     'MapNotifications' { @('Preflight', 'Build', 'MapNotifications') }
     'QuickInformation' { @('Preflight', 'Build', 'QuickInformation') }
     'SceneNotification' { @('Preflight', 'Build', 'SceneNotification') }
@@ -504,6 +506,14 @@ foreach ($stage in $requestedStages) {
                     if ($testExitCode -ne 0) { throw "Native Join Encounter $relationProfile eligibility test failed with exit code $testExitCode.`n$testOutput" }
                     $testOutput
                 }
+            }
+        }
+        'JoinEncounterAbandonArmy' {
+            Invoke-Stage -Name 'JoinEncounterAbandonArmy' -Action {
+                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $joinEncounterAbandonArmyScript 2>&1 | Out-String
+                $testExitCode = $LASTEXITCODE
+                if ($testExitCode -ne 0) { throw "Native Join Encounter Abandon Army test failed with exit code $testExitCode.`n$testOutput" }
+                $testOutput
             }
         }
         'MapNotifications' {

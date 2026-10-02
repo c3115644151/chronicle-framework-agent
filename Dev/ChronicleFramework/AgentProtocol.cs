@@ -473,8 +473,18 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("harnessSeedNpcBattleForPlayerJoin is restricted to a visual Harness run with a Harness temp directory");
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessJoinEncounterFixture.CreateNpcBattleForPlayerJoin(ReadString(command, "relationProfile") ?? "HelpDefenders"));
                     break;
+                case "harnessPrepareArmyMemberForCurrentJoinEncounter":
+                    var joinArmyFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var joinArmyFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(joinArmyFixtureMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(joinArmyFixtureRoot) || !Directory.Exists(joinArmyFixtureRoot))
+                        throw new InvalidOperationException("harnessPrepareArmyMemberForCurrentJoinEncounter is restricted to a visual Harness run with a Harness temp directory");
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState || !PlayerEncounter.IsActive || Campaign.Current.CurrentMenuContext?.GameMenu?.StringId != "join_encounter")
+                        throw new InvalidOperationException("harnessPrepareArmyMemberForCurrentJoinEncounter requires the current Native join_encounter menu in MapState");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessJoinEncounterFixture.PrepareArmyMemberForCurrentJoinEncounter());
+                    break;
                 case "harnessJoinEncounterDiagnostics":
-                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessJoinEncounterFixture.BuildJoinEncounterDiagnostics(ReadString(command, "partyId")));
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessJoinEncounterFixture.BuildJoinEncounterDiagnostics(
+                        ReadString(command, "partyId"), ReadString(command, "armyLeaderPartyId")));
                     break;
                 case "harnessSwitchCaptivityObservationMenu":
                     var captivityMenuFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
