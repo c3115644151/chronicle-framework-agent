@@ -26,6 +26,8 @@ JoinEncounter帮助侧的玩家可见语义：用户确认通常只有一个由�
 
 W2-AR运行`TestResults/20261002-090646/Temp/JoinEncounterAbandonArmyResult.json`确认普通`join_encounter`下的Army弃置页：先经正常地图目标+pursue进入该页，再由visual Harness调用Native `Kingdom.CreateArmy`准备非Leader成员并重进同一注册菜单。该准备不是玩家Army Management UI的入军流程；它只隔离验证当前UI条件和选项结果。屏幕仅显示“帮助防守方”与“抛弃军团”，普通“不参与”Leave被条件过滤。点击/选择Native `join_encounter_abandon`后，MainParty从`Army.Parties`移除，`AttachedTo=null`，`PlayerEncounter`结束回Campaign Map，`isWaiting=true`；Npc MapEvent仍同为ID0、未决且无胜者，主队`DefaultBehavior/MoveMode=Hold`。前后CampaignDay=91077.402299、TimeControlMode=Stop、Gold=1000、玩家Influence=0、军团领袖Influence=696、战争关系均不变。两帧Engine截图与结构化前后状态对应，源档Hash不变、进程退出。预置Army成员后再从地图追近未能复现join_encounter，因此不能宣称已验证“先加入Army再自然追近”的玩家端到端路线；确切机制原因仍未判定。普通`encounter`注册的另一个`abandon_army`分支、Army UI入军、Raid/围城/海战和战斗中撤退仍未覆盖。
 
+Army加入与Army战斗援助必须按Army是否正在交战区分。用户于2026-10-02确认：交战Army按玩家与两侧的阵营关系显示“加入战斗/不管”或“离开”，没有加入军团选项；双方都与玩家中立时只剩离开。未交战且在Campaign地图行军的Army才有加入成为成员的入口；Army围城时走“加入围城”的另一分支。W2-AS只研究未交战行军Army的入军入口与结果；不要把`army_encounter`源码菜单中的Talk/Join/Attack/Leave集合直接推广成Army正在战斗时的玩家界面。围城与战斗援助保持独立任务/机制契约。
+
 Campaign时间边界取决于进入的 GameState/Menu：玩家实际进入战斗 Mission 时战役时钟停止；地图等待菜单（例如部分围城准备）可能继续自然推进；遭遇菜单/会面也不能与 Wait menu 的时间规则混为一谈。接敌和创建 MapEvent 本身不是 Agent 隐式 `advance`。F10 记录的 BattleSimulation 使用独立战斗结算进度，不应伪装成 Campaign 日期快进。
 
 ### Chronicle 当前适配、证据与未知

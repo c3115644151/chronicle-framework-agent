@@ -102,6 +102,13 @@ Party战略 Think 与 `MobilePartyAi` 的短期地图导航是两个相邻层。
 
 玩家入口至少包含 Kingdom Armies 管理页中的 `KingdomArmyVM`（列表、选择、地点、Manage/Disband/Create）与 `ArmyManagementVM`（邀请/移除 Party、估算 Strength/Influence Cost、提升 Cohesion）。实际界面入口的按键与可视交接仍未运行验证；VM源码显示玩家主要从 Kingdom Army 上下文管理自己的主军团，不能假设拥有同阵营每一支军团的同等权限。
 
+### 地图加入未交战的行军Army（ACT-F05-04；W2-AS）
+
+用户确认Army场景边界：正在战斗的友军Army显示JoinBattle/Leave，双方中立时只显示离开；未交战且在地图行军的Army可以加入成为成员；围城加入另属攻城入口。这与Kingdom Armies管理页编辑Army roster不同。
+
+源码链：`PlayerEncounter.DoMeetingInternal`可在合格Army Leader会面时转入`army_encounter`；`game_menu_army_join_on_condition`要求MainParty与Army同`MapFaction`、MainParty未属于该Army，并检查Safe Passage限制。Native consequence设置`MainParty.Army`、调用`Army.AddPartyToMergedParties`建立AttachedTo并结束PlayerEncounter；直接设置`Party.Army`不能复现全部成员事件/地图状态。
+
+Native Runtime `TestResults/20261002-165845/Temp/MovingArmyJoinResult.json`确认：Army Leader处于`GoToPoint`并移动、没有MapEvent/SiegeEvent；玩家经原版地图接近进入`army_encounter`。Engine帧显示“与军团领袖交谈 / 加入军团 / 离开…”。选择当前Enabled的`army_join_army`后，MainParty进入Army.Parties并AttachedTo Leader、PlayerEncounter关闭，随后进入Native `army_wait`。Join前CampaignDay=91077.405429/Stop；Join命令即时回执Day=91077.405/Stop，之后`army_wait`切`UnstoppableFastForward`并自然推进至Day约91077.516。Join命令本身没有显式时间动作，等待菜单推进属于原版后续状态。Gold/双方Influence不变。夹具在disposable memory中用Native `ChangeKingdomAction.ApplyByJoinToKingdom`准备同Faction、`Kingdom.CreateArmy`建立行军Army；不代表玩家政治加入/Army Management UI已视觉核验。前后截图、结构化收据、源档hash不变、进程退出。SafePassage禁用条件、围城Join、Army Management编辑仍待后续核验。
 ### 玩家建军与召集条件
 
 `DefaultArmyManagementCalculationModel.CanPlayerCreateArmy` 拦截玩家未加入 Kingdom、作为 Mercenary、已作为 Leader 指挥另一支 Army、在海上、囚禁、raft、Mission、地图遭遇、对村庄掠夺或被围城等情况。管理 VM 的篮子必须保留玩家 MainParty，至少需一个可加入/现存的额外 Party 才能创建；ArmyMembership influence cost 经 Model 计算而非固定创建费。被邀 Party 还要求适配阵营、未加入另一 Army、不是 Kingdom Ruler Party、未在战斗/围城/解散等待，队伍规模通常高于 PartySizeLimit 的指定比例、在召集距离内且有可用导航/船只。关系、Party Strength/Size/距离、Clan政策、LeaderPerk和文化特性都会修正影响力成本。

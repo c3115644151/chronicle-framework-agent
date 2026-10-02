@@ -199,6 +199,117 @@ internal static class ChronicleHarnessJoinEncounterFixture
         return json.Append('}').ToString();
     }
 
+    internal static string PrepareMovingArmyEncounter(string armyLeaderPartyId)
+    {
+        RequireVisualMapFixture();
+        var mainParty = MobileParty.MainParty;
+        if (PlayerEncounter.IsActive || mainParty.MapEvent != null || mainParty.Army != null || mainParty.IsCurrentlyAtSea || PlayerCaptivity.IsCaptive)
+            throw new InvalidOperationException("Moving-Army encounter fixture requires a free land Campaign Map MainParty without an Army.");
+        if (string.IsNullOrWhiteSpace(armyLeaderPartyId))
+            throw new InvalidOperationException("armyLeaderPartyId must come from the current visible/inspected mapPartyTargets observation.");
+
+        var leaderParty = MobileParty.All.FirstOrDefault(party => party != null && string.Equals(party.StringId, armyLeaderPartyId, StringComparison.Ordinal));
+        var kingdom = leaderParty?.MapFaction as Kingdom;
+        if (leaderParty == null || kingdom == null || leaderParty == mainParty || !leaderParty.IsActive || !leaderParty.IsVisible || !leaderParty.IsInspected || !leaderParty.IsLordParty ||
+            leaderParty.MapEvent != null || leaderParty.SiegeEvent != null || leaderParty.CurrentSettlement != null || leaderParty.Army != null || leaderParty.AttachedTo != null || leaderParty.LeaderHero == null)
+            throw new InvalidOperationException("armyLeaderPartyId must resolve to a currently visible, inspected, independent, non-engaged LordParty of a Kingdom.");
+
+        var timeModeBefore = Campaign.Current.TimeControlMode;
+        var campaignDayBefore = CampaignTime.Now.ToDays;
+        var playerKingdomBefore = Clan.PlayerClan.Kingdom;
+        if (Clan.PlayerClan.Kingdom != kingdom)
+            ChangeKingdomAction.ApplyByJoinToKingdom(Clan.PlayerClan, kingdom, CampaignTime.Zero, showNotification: false);
+        if (mainParty.MapFaction != kingdom || Clan.PlayerClan.Kingdom != kingdom)
+            throw new InvalidOperationException("Native ChangeKingdomAction did not align the disposable MainParty faction with the target Army Kingdom.");
+
+        var auxiliaryParty = MobileParty.All
+            .Where(party => party != null && party != mainParty && party != leaderParty && party.IsActive && party.IsLordParty && party.MapFaction == kingdom &&
+                party.MapEvent == null && party.SiegeEvent == null && party.CurrentSettlement == null && party.Army == null && party.AttachedTo == null && party.LeaderHero != null)
+            .OrderBy(party => party.Position.Distance(leaderParty.Position))
+            .FirstOrDefault();
+        var gatheringFocus = kingdom.Settlements
+            .Where(settlement => settlement != null && settlement.IsActive && settlement != leaderParty.CurrentSettlement && settlement.IsFortification && !settlement.IsUnderSiege)
+            .OrderByDescending(settlement => leaderParty.Position.Distance(settlement.Position))
+            .FirstOrDefault() ?? kingdom.Settlements.FirstOrDefault(settlement => settlement != null && settlement.IsActive && settlement != leaderParty.CurrentSettlement);
+        if (gatheringFocus == null)
+            throw new InvalidOperationException("A native Kingdom settlement is required as a moving Army gathering focus.");
+
+        var armyLeaderClanInfluenceBefore = leaderParty.LeaderHero.Clan.Influence;
+        var partiesToCall = auxiliaryParty == null ? null : new MBList<MobileParty> { auxiliaryParty };
+        kingdom.CreateArmy(leaderParty.LeaderHero, gatheringFocus, Army.ArmyTypes.Patrolling, partiesToCall);
+        var army = leaderParty.Army;
+        if (army == null || army.LeaderParty != leaderParty || !kingdom.Armies.Contains(army))
+            throw new InvalidOperationException("Native Kingdom.CreateArmy did not produce a registered Army for the observed map Party.");
+        if (auxiliaryParty != null && auxiliaryParty.Army != army)
+            throw new InvalidOperationException("Native Kingdom.CreateArmy did not enlist the disposable auxiliary Party.");
+        if (leaderParty.MapEvent != null || leaderParty.SiegeEvent != null)
+            throw new InvalidOperationException("The created moving Army Leader unexpectedly entered a battle or siege event.");
+
+        var json = new StringBuilder(1024);
+        json.Append('{').Append("\"schemaVersion\":1,\"testOnly\":true,\"nativeMovingArmyFixtureCreated\":true");
+        ChroniclePartyUpgradeAdapter.Property(json, "armyLeaderPartyId", leaderParty.StringId);
+        ChroniclePartyUpgradeAdapter.Property(json, "armyKingdomId", kingdom.StringId);
+        ChroniclePartyUpgradeAdapter.Property(json, "gatheringTargetSettlementId", army.AiBehaviorObject is Settlement settlement ? settlement.StringId : null);
+        ChroniclePartyUpgradeAdapter.Property(json, "playerKingdomBefore", playerKingdomBefore?.StringId);
+        ChroniclePartyUpgradeAdapter.Property(json, "playerKingdomAfter", Clan.PlayerClan.Kingdom?.StringId);
+        ChroniclePartyUpgradeAdapter.Property(json, "playerMapFactionAfter", mainParty.MapFaction?.StringId);
+        ChroniclePartyUpgradeAdapter.Property(json, "armyBehavior", leaderParty.DefaultBehavior.ToString());
+        json.Append(",\"leaderMoving\":").Append(ChroniclePartyUpgradeAdapter.Bool(leaderParty.IsMoving));
+        json.Append(",\"leaderPartyCount\":").Append(army.Parties.Count);
+        json.Append(",\"leaderMapEventActive\":").Append(ChroniclePartyUpgradeAdapter.Bool(leaderParty.MapEvent != null));
+        json.Append(",\"leaderSiegeEventActive\":").Append(ChroniclePartyUpgradeAdapter.Bool(leaderParty.SiegeEvent != null));
+        json.Append(",\"mainPartyInitiallyInArmy\":false");
+        json.Append(",\"leaderClanInfluenceBefore\":").Append(armyLeaderClanInfluenceBefore.ToString("F3", CultureInfo.InvariantCulture));
+        json.Append(",\"leaderClanInfluenceAfter\":").Append(leaderParty.LeaderHero.Clan.Influence.ToString("F3", CultureInfo.InvariantCulture));
+        json.Append(",\"campaignDayBefore\":").Append(campaignDayBefore.ToString("F6", CultureInfo.InvariantCulture));
+        json.Append(",\"campaignDayAfter\":").Append(CampaignTime.Now.ToDays.ToString("F6", CultureInfo.InvariantCulture));
+        ChroniclePartyUpgradeAdapter.Property(json, "timeControlModeBefore", timeModeBefore.ToString());
+        ChroniclePartyUpgradeAdapter.Property(json, "timeControlModeAfter", Campaign.Current.TimeControlMode.ToString());
+        return json.Append('}').ToString();
+    }
+
+    internal static string BuildMovingArmyEncounterDiagnostics(string armyLeaderPartyId)
+    {
+        RequireVisualMapFixture();
+        if (string.IsNullOrWhiteSpace(armyLeaderPartyId))
+            throw new InvalidOperationException("armyLeaderPartyId must come from the current Native mapPartyTargets observation or this run's Army fixture receipt.");
+        var armyLeaderParty = MobileParty.All.FirstOrDefault(party => party != null && string.Equals(party.StringId, armyLeaderPartyId, StringComparison.Ordinal));
+        var army = armyLeaderParty?.Army;
+        if (armyLeaderParty == null || army == null || army.LeaderParty != armyLeaderParty)
+            throw new InvalidOperationException("Army encounter diagnostics could not resolve the active Native Army Leader.");
+
+        var mainParty = MobileParty.MainParty;
+        var json = new StringBuilder(1024);
+        json.Append('{').Append("\"schemaVersion\":1");
+        ChroniclePartyUpgradeAdapter.Property(json, "menuId", Campaign.Current.CurrentMenuContext?.GameMenu?.StringId);
+        ChroniclePartyUpgradeAdapter.Property(json, "armyLeaderPartyId", armyLeaderParty.StringId);
+        ChroniclePartyUpgradeAdapter.Property(json, "armyKingdomId", army.Kingdom?.StringId);
+        ChroniclePartyUpgradeAdapter.Property(json, "playerKingdomId", Clan.PlayerClan.Kingdom?.StringId);
+        ChroniclePartyUpgradeAdapter.Property(json, "playerMapFactionId", mainParty.MapFaction?.StringId);
+        json.Append(",\"playerEncounterActive\":").Append(ChroniclePartyUpgradeAdapter.Bool(PlayerEncounter.IsActive));
+        json.Append(",\"mainPartyArmyMember\":").Append(ChroniclePartyUpgradeAdapter.Bool(mainParty.Army == army && army.Parties.Contains(mainParty)));
+        json.Append(",\"mainPartyIsArmyLeader\":").Append(ChroniclePartyUpgradeAdapter.Bool(army.LeaderParty == mainParty));
+        json.Append(",\"mainPartyAttachedToLeader\":").Append(ChroniclePartyUpgradeAdapter.Bool(ReferenceEquals(mainParty.AttachedTo, armyLeaderParty)));
+        json.Append(",\"armyPartyCount\":").Append(army.Parties.Count);
+        json.Append(",\"leaderAttachedPartyCount\":").Append(armyLeaderParty.AttachedParties.Count);
+        json.Append(",\"armyLeaderIsMoving\":").Append(ChroniclePartyUpgradeAdapter.Bool(armyLeaderParty.IsMoving));
+        json.Append(",\"armyLeaderMapEventActive\":").Append(ChroniclePartyUpgradeAdapter.Bool(armyLeaderParty.MapEvent != null));
+        json.Append(",\"armyLeaderSiegeEventActive\":").Append(ChroniclePartyUpgradeAdapter.Bool(armyLeaderParty.SiegeEvent != null));
+        ChroniclePartyUpgradeAdapter.Property(json, "armyLeaderDefaultBehavior", armyLeaderParty.DefaultBehavior.ToString());
+        ChroniclePartyUpgradeAdapter.Property(json, "armyLeaderTargetSettlementId", armyLeaderParty.TargetSettlement?.StringId);
+        ChroniclePartyUpgradeAdapter.Property(json, "mainPartyDefaultBehavior", mainParty.DefaultBehavior.ToString());
+        json.Append(",\"gold\":").Append(Hero.MainHero.Gold);
+        json.Append(",\"playerClanInfluence\":").Append(Clan.PlayerClan.Influence.ToString("F3", CultureInfo.InvariantCulture));
+        json.Append(",\"armyLeaderClanInfluence\":").Append((armyLeaderParty.LeaderHero?.Clan?.Influence ?? 0f).ToString("F3", CultureInfo.InvariantCulture));
+        json.Append(",\"campaignDay\":").Append(CampaignTime.Now.ToDays.ToString("F6", CultureInfo.InvariantCulture));
+        ChroniclePartyUpgradeAdapter.Property(json, "timeControlMode", Campaign.Current.TimeControlMode.ToString());
+        json.Append(",\"mainPartyPosition\":{\"x\":").Append(mainParty.Position.X.ToString("R", CultureInfo.InvariantCulture));
+        json.Append(",\"y\":").Append(mainParty.Position.Y.ToString("R", CultureInfo.InvariantCulture)).Append('}');
+        json.Append(",\"armyLeaderPosition\":{\"x\":").Append(armyLeaderParty.Position.X.ToString("R", CultureInfo.InvariantCulture));
+        json.Append(",\"y\":").Append(armyLeaderParty.Position.Y.ToString("R", CultureInfo.InvariantCulture)).Append('}');
+        return json.Append('}').ToString();
+    }
+
     internal static string BuildJoinEncounterDiagnostics(string mapEventPartyId = null, string armyLeaderPartyId = null)
     {
         RequireVisualMapFixture();

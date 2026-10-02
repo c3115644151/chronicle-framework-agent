@@ -420,6 +420,24 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("harnessCreateMapArmyFixture requires the Campaign Map state");
                     WriteResponse(commandId, action, "completed", behavior, null, CreateMapArmyFixture(ReadString(command, "partyId"), ReadString(command, "attachedPartyId")));
                     break;
+                case "harnessPrepareMovingArmyEncounter":
+                    var movingArmyFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var movingArmyFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(movingArmyFixtureMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(movingArmyFixtureRoot) || !Directory.Exists(movingArmyFixtureRoot))
+                        throw new InvalidOperationException("harnessPrepareMovingArmyEncounter is restricted to a visual Harness run with a Harness temp directory");
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState || Campaign.Current == null)
+                        throw new InvalidOperationException("harnessPrepareMovingArmyEncounter requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessJoinEncounterFixture.PrepareMovingArmyEncounter(ReadString(command, "partyId")));
+                    break;
+                case "harnessArmyEncounterDiagnostics":
+                    var armyEncounterDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var armyEncounterDiagnosticsRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(armyEncounterDiagnosticsMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(armyEncounterDiagnosticsRoot) || !Directory.Exists(armyEncounterDiagnosticsRoot))
+                        throw new InvalidOperationException("harnessArmyEncounterDiagnostics is restricted to a visual Harness run with a Harness temp directory");
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState || Campaign.Current == null)
+                        throw new InvalidOperationException("harnessArmyEncounterDiagnostics requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessJoinEncounterFixture.BuildMovingArmyEncounterDiagnostics(ReadString(command, "partyId")));
+                    break;
                 case "harnessPrepareSafePassageFixture":
                     var safePassageFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
                     var safePassageFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
