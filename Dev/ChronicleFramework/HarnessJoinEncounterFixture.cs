@@ -13,6 +13,7 @@ using TaleWorlds.CampaignSystem.Party.PartyComponents;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
+using TaleWorlds.Localization;
 
 namespace ChronicleFramework;
 
@@ -20,9 +21,11 @@ internal static class ChronicleHarnessJoinEncounterFixture
 {
     private const string BanditPartyId = "chronicle_harness_join_encounter_looters";
 
-    internal static string CreateNpcBattleForPlayerJoin()
+    internal static string CreateNpcBattleForPlayerJoin(string playerRelationProfile = "HelpDefenders")
     {
         RequireVisualMapFixture();
+        if (playerRelationProfile != "HelpDefenders" && playerRelationProfile != "HelpAttackers" && playerRelationProfile != "Neutral")
+            throw new InvalidOperationException("JoinEncounter fixture relation profile must be HelpDefenders, HelpAttackers or Neutral.");
         var mainParty = MobileParty.MainParty;
         if (PlayerEncounter.IsActive || mainParty.MapEvent != null || PlayerCaptivity.IsCaptive || mainParty.IsCurrentlyAtSea)
             throw new InvalidOperationException("JoinEncounter fixture requires a free land Campaign Map without a current MapEvent.");
@@ -39,33 +42,50 @@ internal static class ChronicleHarnessJoinEncounterFixture
         if (defender == null)
             throw new InvalidOperationException("No active independent LordParty is close enough for a controlled Native NPC battle join fixture.");
 
-        var hostileClan = Clan.BanditFactions.FirstOrDefault(clan => clan?.MapFaction != null && clan.DefaultPartyTemplate != null &&
+        var banditClan = Clan.BanditFactions.FirstOrDefault(clan => clan?.MapFaction != null && clan.DefaultPartyTemplate != null &&
             clan.MapFaction != defender.MapFaction && FactionManager.IsAtWarAgainstFaction(clan.MapFaction, defender.MapFaction));
-        hostileClan ??= Clan.BanditFactions.FirstOrDefault(clan => clan?.MapFaction != null && clan.DefaultPartyTemplate != null && clan.MapFaction != defender.MapFaction);
+        banditClan ??= Clan.BanditFactions.FirstOrDefault(clan => clan?.MapFaction != null && clan.DefaultPartyTemplate != null && clan.MapFaction != defender.MapFaction);
+        var playerFaction = mainParty.MapFaction;
+        var attackerClan = playerRelationProfile == "HelpDefenders"
+            ? banditClan
+            : Clan.All.Where(clan => clan != null && clan.MapFaction != null && clan.DefaultPartyTemplate != null && clan.Kingdom != null &&
+                    clan.MapFaction != playerFaction && clan.MapFaction != defender.MapFaction && clan.Kingdom != Clan.PlayerClan.Kingdom &&
+                    !clan.IsEliminated && !Campaign.Current.Models.DiplomacyModel.IsAtConstantWar(playerFaction, clan.MapFaction))
+                .OrderBy(clan => clan.MapFaction.StringId, StringComparer.Ordinal)
+                .FirstOrDefault();
         var partyTemplate = Game.Current?.ObjectManager?.GetObject<PartyTemplateObject>("looters_template");
         var looter = Game.Current?.ObjectManager?.GetObject<CharacterObject>("looter");
         var homeSettlement = Settlement.All
             .Where(settlement => settlement != null && settlement.IsActive && (settlement.IsTown || settlement.IsVillage))
             .OrderBy(settlement => defender.Position.Distance(settlement.Position))
             .FirstOrDefault();
-        if (hostileClan == null || partyTemplate == null || looter == null || homeSettlement == null)
-            throw new InvalidOperationException("Native Bandit faction/template/troop or a nearby Town/Village is unavailable for the JoinEncounter fixture.");
+        if (attackerClan == null || partyTemplate == null || looter == null || homeSettlement == null)
+            throw new InvalidOperationException("A compatible Native attacker faction/template/troop or a nearby Town/Village is unavailable for the JoinEncounter fixture.");
 
-        var playerFaction = mainParty.MapFaction;
-        var banditFaction = hostileClan.MapFaction;
-        if (!FactionManager.IsAtWarAgainstFaction(banditFaction, defender.MapFaction))
-            DeclareWarAction.ApplyByDefault(banditFaction, defender.MapFaction);
-        if (!FactionManager.IsAtWarAgainstFaction(playerFaction, banditFaction))
-            DeclareWarAction.ApplyByDefault(playerFaction, banditFaction);
+        var attackerFaction = attackerClan.MapFaction;
+        SetFactionWar(attackerFaction, defender.MapFaction, true);
+        switch (playerRelationProfile)
+        {
+            case "HelpDefenders":
+                SetFactionWar(playerFaction, attackerFaction, true);
+                SetFactionWar(playerFaction, defender.MapFaction, false);
+                break;
+            case "HelpAttackers":
+                SetFactionWar(playerFaction, attackerFaction, false);
+                SetFactionWar(playerFaction, defender.MapFaction, true);
+                break;
+            case "Neutral":
+                SetFactionWar(playerFaction, attackerFaction, false);
+                SetFactionWar(playerFaction, defender.MapFaction, false);
+                break;
+        }
 
         var spawnPosition = FindNearbyNavigablePoint(new Vec2(defender.Position.X, defender.Position.Y));
-        var attacker = BanditPartyComponent.CreateLooterParty(
-            BanditPartyId,
-            hostileClan,
-            homeSettlement,
-            isBossParty: false,
-            partyTemplate,
-            new CampaignVec2(spawnPosition, isOnLand: true));
+        var attacker = playerRelationProfile == "HelpDefenders"
+            ? BanditPartyComponent.CreateLooterParty(BanditPartyId, attackerClan, homeSettlement, isBossParty: false, partyTemplate,
+                new CampaignVec2(spawnPosition, isOnLand: true))
+            : CustomPartyComponent.CreateCustomPartyWithPartyTemplate(new CampaignVec2(spawnPosition, isOnLand: true), 0f, homeSettlement,
+                new TextObject("{=!}Chronicle Harness Join Encounter Attacker"), attackerClan, partyTemplate, owner: null);
         if (attacker == null || !attacker.IsActive)
             throw new InvalidOperationException("Native NPC attacker party was not created.");
         attacker.MemberRoster.Clear();
@@ -92,9 +112,13 @@ internal static class ChronicleHarnessJoinEncounterFixture
 
         var json = new StringBuilder(512);
         json.Append('{').Append("\"schemaVersion\":1,\"testOnly\":true,\"nativeNpcMapEventCreated\":true");
+        ChroniclePartyUpgradeAdapter.Property(json, "playerRelationProfile", playerRelationProfile);
         ChroniclePartyUpgradeAdapter.Property(json, "eventId", mapEvent.Id.ToString());
         ChroniclePartyUpgradeAdapter.Property(json, "attackerPartyId", attacker.StringId);
         ChroniclePartyUpgradeAdapter.Property(json, "defenderPartyId", defender.StringId);
+        ChroniclePartyUpgradeAdapter.Property(json, "playerFactionId", playerFaction.StringId);
+        ChroniclePartyUpgradeAdapter.Property(json, "attackerFactionId", attackerFaction.StringId);
+        ChroniclePartyUpgradeAdapter.Property(json, "defenderFactionId", defender.MapFaction.StringId);
         ChroniclePartyUpgradeAdapter.Property(json, "eventType", mapEvent.EventType.ToString());
         json.Append(",\"attackerStrength\":").Append(mapEvent.StrengthOfSide[(int)BattleSideEnum.Attacker].ToString("F3", CultureInfo.InvariantCulture));
         json.Append(",\"defenderStrength\":").Append(mapEvent.StrengthOfSide[(int)BattleSideEnum.Defender].ToString("F3", CultureInfo.InvariantCulture));
@@ -104,6 +128,12 @@ internal static class ChronicleHarnessJoinEncounterFixture
         json.Append(",\"attackerPartyCount\":").Append(mapEvent.AttackerSide.Parties.Count);
         json.Append(",\"defenderPartyCount\":").Append(mapEvent.DefenderSide.Parties.Count);
         json.Append(",\"mainPartyJoined\":false");
+        json.Append(",\"playerAtWarWithAttacker\":").Append(ChroniclePartyUpgradeAdapter.Bool(FactionManager.IsAtWarAgainstFaction(playerFaction, attackerFaction)));
+        json.Append(",\"playerAtWarWithDefender\":").Append(ChroniclePartyUpgradeAdapter.Bool(FactionManager.IsAtWarAgainstFaction(playerFaction, defender.MapFaction)));
+        json.Append(",\"playerAtConstantWarWithAttacker\":").Append(ChroniclePartyUpgradeAdapter.Bool(Campaign.Current.Models.DiplomacyModel.IsAtConstantWar(playerFaction, attackerFaction)));
+        json.Append(",\"playerAtConstantWarWithDefender\":").Append(ChroniclePartyUpgradeAdapter.Bool(Campaign.Current.Models.DiplomacyModel.IsAtConstantWar(playerFaction, defender.MapFaction)));
+        json.Append(",\"mainPartyCanJoinAttacker\":").Append(ChroniclePartyUpgradeAdapter.Bool(mapEvent.CanPartyJoinBattle(mainParty.Party, BattleSideEnum.Attacker)));
+        json.Append(",\"mainPartyCanJoinDefender\":").Append(ChroniclePartyUpgradeAdapter.Bool(mapEvent.CanPartyJoinBattle(mainParty.Party, BattleSideEnum.Defender)));
         json.Append(",\"battleHasWinner\":").Append(ChroniclePartyUpgradeAdapter.Bool(mapEvent.HasWinner));
         json.Append(",\"campaignDayBefore\":").Append(campaignDayBefore.ToString("F6", CultureInfo.InvariantCulture));
         json.Append(",\"campaignDayAfter\":").Append(CampaignTime.Now.ToDays.ToString("F6", CultureInfo.InvariantCulture));
@@ -116,18 +146,20 @@ internal static class ChronicleHarnessJoinEncounterFixture
         return json.Append('}').ToString();
     }
 
-    internal static string BuildJoinEncounterDiagnostics()
+    internal static string BuildJoinEncounterDiagnostics(string mapEventPartyId = null)
     {
         RequireVisualMapFixture();
-        if (!PlayerEncounter.IsActive)
-            throw new InvalidOperationException("JoinEncounter diagnostics require the player to be in an active Native Encounter/JoinEncounter state.");
-        var battle = PlayerEncounter.EncounteredBattle ?? MobileParty.MainParty.MapEvent;
+        MapEvent battle = null;
+        if (PlayerEncounter.IsActive)
+            battle = PlayerEncounter.EncounteredBattle ?? MobileParty.MainParty.MapEvent;
+        else if (!string.IsNullOrWhiteSpace(mapEventPartyId))
+            battle = MobileParty.All.FirstOrDefault(party => party != null && string.Equals(party.StringId, mapEventPartyId, StringComparison.Ordinal))?.MapEvent;
         if (battle == null)
-            throw new InvalidOperationException("JoinEncounter diagnostics could not resolve the current Native MapEvent.");
+            throw new InvalidOperationException("JoinEncounter diagnostics could not resolve the active Native MapEvent.");
 
         var menuId = Campaign.Current.CurrentMenuContext?.GameMenu?.StringId;
         var mainParty = PartyBase.MainParty;
-        var playerSide = PlayerEncounter.Current.PlayerSide;
+        var playerSide = PlayerEncounter.IsActive ? PlayerEncounter.Current.PlayerSide.ToString() : "None";
         var mainPartyOnAttackerSide = battle.AttackerSide.Parties.Any(entry => entry.Party == mainParty);
         var mainPartyOnDefenderSide = battle.DefenderSide.Parties.Any(entry => entry.Party == mainParty);
         var json = new StringBuilder(1024);
@@ -135,12 +167,15 @@ internal static class ChronicleHarnessJoinEncounterFixture
         ChroniclePartyUpgradeAdapter.Property(json, "menuId", menuId);
         ChroniclePartyUpgradeAdapter.Property(json, "eventId", battle.Id.ToString());
         ChroniclePartyUpgradeAdapter.Property(json, "eventType", battle.EventType.ToString());
-        ChroniclePartyUpgradeAdapter.Property(json, "playerSide", playerSide.ToString());
-        json.Append(",\"isJoinedBattle\":").Append(ChroniclePartyUpgradeAdapter.Bool(PlayerEncounter.Current.IsJoinedBattle));
+        ChroniclePartyUpgradeAdapter.Property(json, "playerSide", playerSide);
+        json.Append(",\"playerEncounterActive\":").Append(ChroniclePartyUpgradeAdapter.Bool(PlayerEncounter.IsActive));
+        json.Append(",\"isJoinedBattle\":").Append(ChroniclePartyUpgradeAdapter.Bool(PlayerEncounter.IsActive && PlayerEncounter.Current.IsJoinedBattle));
         json.Append(",\"mainPartyOnAttackerSide\":").Append(ChroniclePartyUpgradeAdapter.Bool(mainPartyOnAttackerSide));
         json.Append(",\"mainPartyOnDefenderSide\":").Append(ChroniclePartyUpgradeAdapter.Bool(mainPartyOnDefenderSide));
         json.Append(",\"battleHasWinner\":").Append(ChroniclePartyUpgradeAdapter.Bool(battle.HasWinner));
-        json.Append(",\"battleSimulationExists\":").Append(ChroniclePartyUpgradeAdapter.Bool(PlayerEncounter.Current.BattleSimulation != null));
+        json.Append(",\"battleSimulationExists\":").Append(ChroniclePartyUpgradeAdapter.Bool(PlayerEncounter.IsActive && PlayerEncounter.Current.BattleSimulation != null));
+        json.Append(",\"mainPartyCanJoinAttacker\":").Append(ChroniclePartyUpgradeAdapter.Bool(battle.CanPartyJoinBattle(mainParty, BattleSideEnum.Attacker)));
+        json.Append(",\"mainPartyCanJoinDefender\":").Append(ChroniclePartyUpgradeAdapter.Bool(battle.CanPartyJoinBattle(mainParty, BattleSideEnum.Defender)));
         json.Append(",\"attackerPartyIds\":[").Append(string.Join(",", battle.AttackerSide.Parties.Select(entry => "\"" + ChroniclePartyUpgradeAdapter.Escape(entry.Party.Id.ToString()) + "\""))).Append(']');
         json.Append(",\"defenderPartyIds\":[").Append(string.Join(",", battle.DefenderSide.Parties.Select(entry => "\"" + ChroniclePartyUpgradeAdapter.Escape(entry.Party.Id.ToString()) + "\""))).Append(']');
         json.Append(",\"gold\":").Append(Hero.MainHero.Gold);
@@ -148,6 +183,15 @@ internal static class ChronicleHarnessJoinEncounterFixture
         json.Append(",\"campaignDay\":").Append(CampaignTime.Now.ToDays.ToString("F6", CultureInfo.InvariantCulture));
         ChroniclePartyUpgradeAdapter.Property(json, "timeControlMode", Campaign.Current.TimeControlMode.ToString());
         return json.Append('}').ToString();
+    }
+
+    private static void SetFactionWar(IFaction first, IFaction second, bool shouldBeAtWar)
+    {
+        var currentlyAtWar = FactionManager.IsAtWarAgainstFaction(first, second);
+        if (shouldBeAtWar && !currentlyAtWar)
+            DeclareWarAction.ApplyByDefault(first, second);
+        else if (!shouldBeAtWar && currentlyAtWar)
+            MakePeaceAction.Apply(first, second);
     }
 
     private static Vec2 FindNearbyNavigablePoint(Vec2 origin)

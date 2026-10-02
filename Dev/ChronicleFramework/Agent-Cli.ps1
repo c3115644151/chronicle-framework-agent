@@ -9,6 +9,7 @@ param(
     [double]$Y,
     [ValidateSet('land')][string]$Surface,
     [string]$PartyId,
+    [ValidateSet('HelpDefenders','HelpAttackers','Neutral')][string]$RelationProfile,
     [int]$UpgradeTargetIndex = -1,
     [string]$AttachedPartyId,
     [int]$AgentIndex = -1,
@@ -490,8 +491,8 @@ switch ($Action) {
     'harnessPrepareSurrenderCondition' { $result = Invoke-ProtocolCommand 'harnessPrepareSurrenderCondition' }
     'harnessSeedTryGetAwayFixture' { $result = Invoke-ProtocolCommand 'harnessSeedTryGetAwayFixture' }
     'harnessTryGetAwayDiagnostics' { $result = Invoke-ProtocolCommand 'harnessTryGetAwayDiagnostics' }
-    'harnessSeedNpcBattleForPlayerJoin' { $result = Invoke-ProtocolCommand 'harnessSeedNpcBattleForPlayerJoin' }
-    'harnessJoinEncounterDiagnostics' { $result = Invoke-ProtocolCommand 'harnessJoinEncounterDiagnostics' }
+    'harnessSeedNpcBattleForPlayerJoin' { $result = Invoke-ProtocolCommand 'harnessSeedNpcBattleForPlayerJoin' @{ relationProfile = if ($RelationProfile) { $RelationProfile } else { 'HelpDefenders' } } }
+    'harnessJoinEncounterDiagnostics' { $result = Invoke-ProtocolCommand 'harnessJoinEncounterDiagnostics' @{ partyId = $PartyId } }
     'harnessSwitchCaptivityObservationMenu' { $result = Invoke-ProtocolCommand 'harnessSwitchCaptivityObservationMenu' }
     'harnessCaptivityDiagnostics' { $result = Invoke-ProtocolCommand 'harnessCaptivityDiagnostics' @{ partyId = $PartyId } }
     'harnessPreparePursuitVisibilityFixture' { $result = Invoke-ProtocolCommand 'harnessPreparePursuitVisibilityFixture' }

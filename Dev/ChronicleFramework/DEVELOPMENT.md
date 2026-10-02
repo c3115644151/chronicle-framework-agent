@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 
-Contract version: 6.8
+Contract version: 6.9
 
 ## 目标与边界
 
@@ -96,6 +96,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Dev\ChronicleFramework\Run
 `EncounterEscape`是独立可选阶段，不加入`All`：Harness在两个独立disposable Campaign进程中，把MainParty填入Native文化新兵/Grain，再以原版Fight会面路径进入MapEvent，观察Native `leave_soldiers_behind`并打开Try-to-get-away warning。Reject进程只能选择Native Think again，并核验回原Encounter且资源/时间不变；Accept进程只能选择Go ahead，核验Native `TroopSacrificeModel`显示的损失、实际伤兵/货物损失、escape debrief及Continue返回流程。测试诊断仅Visual Harness允许读取当前TroopSacrificeModel结果、Roster和Inventory；不会修改BattleEvent胜负或接受后结果。
 
 `JoinEncounterDefenders`是独立可选阶段，不加入`All`。为提供可重复的NPC对NPC在途战斗，Harness-only fixture调用Native `StartBattleAction.Apply`建立一个BattleEvent，并确保MainParty未加入；玩家自身仍经Native地图点移动接近，再由原版Join Encounter菜单决定是否可参与。接着仅选择当前可见的Help Defenders option，并核验MainParty加入同一 MapEvent 的Defender side及后续Encounter菜单；不调用PlayerEncounter.JoinBattle，不攻击或坐镇结算。若NPC battle在玩家抵达前自然结束、join选项因原版过滤被禁或MapEvent ID变化，则记录失败原因而不是改为直接注入玩家入场。
+
+`JoinEncounterEligibility`是独立可选阶段，不加入`All`，作为`JoinEncounterDefenders`的关系筛选补充。fixture只在disposable Campaign用Native战争/和平动作设置玩家关系，分别测“只可帮助攻击方”及“双侧中立不可加入”。攻击方正向必须经过本轮可见`join_encounter`的唯一Help Attackers选项并确认MainParty进入同一MapEvent的AttackerSide；双中立分支绝不提交Help选择，只记录原版到达状态、当前可用选项与Native `CanPartyJoinBattle`结果。如果自然NPC战斗先结束，或测试需要直接构造玩家Encounter才能显示菜单，则作为失败收据保留，不伪造UI路径。
 
 `TimeControlLoop` 是独立可选阶段，专门验证测试Provider通过Agent循环选择原版时间档；通用 `AgentLoop` 保持只读观察循环，避免Encounter随机状态污染时间控件断言。
 
@@ -227,6 +229,7 @@ stop()
 | EncounterSurrender | Native hostile Bandit meeting→当前可见Fight选项→MapEvent/Encounter菜单→Native条件启用的Surrender；核验前后Party/Captor/Captivity/时间与引擎帧；不调用私有后果或伪造MapEvent结果 | `TestResults/20261002-064814/Temp/EncounterSurrenderResult.json`通过：复用Native Bandit meeting/Fight到`encounter`；在该活动Encounter里Native Hero伤病+Morale=0门槛成立后，真实菜单显示Fight/逃跑/投降并由当前`surrender` option结算；Captured状态结构字段确认MainHero加入Bandit PrisonRoster、主队inactive、Gold未变，屏幕后帧为原生`prisoner_wait`且没有Continue选项；Stop→UnstoppableFastForward为等待阶段自然推进，三张引擎帧（Bandit meeting/Encounter前/ Captivity后）、源存档hash不变、进程退出。测试只覆盖一种原版可用条件/野外Bandit遭遇；没有捕捉瞬态`taken_prisoner`菜单、没有模拟其他条件/围城或逃离失败 |
 | EncounterEscape | 两个独立Campaign进程通过Native Bandit fight进入Defender Encounter；从当前`leave_soldiers_behind`和warning屏可用选项分别走Reject/Accept，核验Native TroopSacrificeModel/兵员/商品/时钟/debrief/清理 | `TestResults/20261002-071124/Temp/EncounterEscapeResult.json`通过：原生警告模型预测失去7人；Reject回到当前Encounter且Party 13人/grain20/Gold1000/时钟/日期全无变化；Accept后Native party 13→6、商品grain20→17（15%向下取整为3），debrief画面显示原版脱离说明，按Native Continue后Encounter关闭。风险说明/选项/脱离结果共8引擎帧，两分支均源存档hash不变、进程清理；CampaignDay=91077.378787、TimeControlMode=Stop保持不变。Troop/Grain仅在disposable进程中用Native roster写入，测试未预置loss结果 |
 | JoinEncounterDefenders | Harness Native `StartBattleAction`只构造NPC-vs-NPC持续MapEvent；MainParty未加入时以可见Party目标执行原版pursue，选择当前菜单唯一可用Help Defender后核验同一Event的DefenderSide与Encounter菜单，不开始战斗 | `TestResults/20261002-074242/Temp/JoinEncounterDefendersResult.json`通过：当前玩家对Bandit攻击方敌对、对Lord防守方中立；引擎帧显示“帮助防守方/不参与”，无双侧选择。通过原生可见 Party target + `pursue`抵达`join_encounter`；Native `menuSelect`后仍为EventID0，MainParty只在DefenderSide、`IsJoinedBattle=true`，当前回到`encounter`选择Fight/坐镇，未启动BattleSimulation。Gold/成员/日期91077.402347/时钟Stop不变；前后截图、源存档hash、进程清理。NPC对NPC MapEvent只由Harness Native `StartBattleAction`准备，玩家Join本人完整走菜单；第一轮Event因攻守强弱悬殊在到达前自然结束，第二轮将测试双方力量调至接近后通过。中立双方“不可加入”尚只由用户事实与Native CanPartyJoinBattle条件推导，未实跑 |
+| JoinEncounterEligibility | 独立disposable进程分别测试Help Attackers与双方Neutral；Native事件和NPC faction关系由Harness fixture准备，玩家以当前可见地图目标和原版pursue接近；仅攻击方正向提交实际可用Help，双中立只观察 | `TestResults/20261002-081603/Temp/JoinEncounterEligibility-HelpAttackers.json`与`...-Neutral.json`通过：攻击方正向UI只开放Help Attackers/Leave，选择后MainParty在同一MapEvent AttackerSide并回通用Encounter菜单；双中立页面只开放Leave，双方Native `CanPartyJoinBattle=false`且MainParty未入场。三张原生游戏帧保留；Campaign时间只在途中自然推进，选项前后Day/Stop不变。两轮源档hash不变、Agent停止且无Bannerlord残留进程 |
 | Movement | 从原版可见聚落marker观察选择Settlement ID，下达原版路径目标并复现普通地图单击时间档位；Harness独立显式步进至抵达，并复用抵达回执中的原生菜单观察 | 目标/菜单/时钟轨迹、失败拒绝、fixture hash；子测试stdout/stderr原文保存在父Harness阶段失败收据，若游戏仍响应则捕获引擎末帧 |
 | Hold | 按原版Map点击语义从正在移动主队切到Hold；动作后不发Pause/Resume/advance，观察Native waiting与CampaignDay | 当前目标清除、defaultBehavior、raw时间档/isWaiting和短自然窗口的日期差；disposable fixture hash、进程清理；失败尽可能留游戏引擎末帧 |
 | MoveToPoint | W2-B仅在陆地用Campaign世界坐标请求有效自由地形点导航；适配层验证CampaignVec2/Face与原版导航模型，通过MapState.ProcessTravel而非直接写位置；Harness可显式步进至目的地 | GoToPoint与location.targetPosition对齐、初末坐标变化/到达、无效Face拒绝且不移主队/切时钟、原版点击时钟模式、fixture hash/进程清理；海上/港口另行验收 |
