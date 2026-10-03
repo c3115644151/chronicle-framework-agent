@@ -48,6 +48,12 @@ N/百科交互通常只改变当前界面/筛选/书签，不写Campaign主体�
 
 Chronicle当前Observer没有Notification queue/已读标记/待处理调查/场景弹窗字段；J07已有通知系统消费者盘点。证据：`CampaignInformationManager`、ViewModelCollection `MapNotificationVM/MapNotificationItemBaseVM`、Sandbox `DefaultNotificationsCampaignBehavior`。未知每类菜单点击/过期/重复推送/离线恢复和GameState锁时钟策略全矩阵。
 
+### 原生 Inquiry 数据入口与当前弹窗边界
+
+本机1.4.8.119303 `TaleWorlds.Library.InformationManager`公开`OnShowInquiry(InquiryData, pauseGameActiveState, prioritize)`与`OnHideInquiry`事件、`ShowInquiry/HideInquiry`发出事件，并以UI注册的`IsAnyInquiryActiveInternal`委托提供“是否存在活动Inquiry”的布尔查询；没有公开的CurrentInquiry/当前队列读取器。`InquiryData`保存Title/Text、Yes/No按钮的显示标志与文本、两个可用性谓词、Affirmative/Negative/Timeout委托和过期时长。它本身没有稳定ID；按钮回调属于当前询问的一次性业务后果，不能序列化或拿字段内容推断按钮安全性。`TextInquiryData`及`MBInformationManager.OnShowMultiSelectionInquiry`是不同协议，不能用Yes/No契约代替。
+
+Chronicle现有Party/Recruitment/Trade/Inventory VM适配器只在自己发起Native `Done`期间临时监听`OnShowInquiry`，取得这一条操作所触发的确认并按当次显式确认策略调用其原始回调；这不能说明Agent能观察稍后仍留在屏幕上的活动询问，也不能证明最近一次`OnShowInquiry`必然是当前绘制项（参数含`prioritize`，UI可能延后处理）。因此新能力至少要以当前UI层的`IsAnyInquiryActive`和实际Native Inquiry ViewModel共同证明正在显示的对象，且通过随机每次展示生成的运行期令牌限制回调；否则排队询问、过期对象或其他Inquiry遮挡时不得执行。其真实UI类型、排队/替换顺序、隐藏/超时和GameState/时钟行为仍待1.4.8运行观察。`
+
 ## L07 Scene 与 Mission：战役场景实例化
 
 玩家从地图进入聚落、藏身处、会话/任务互动或战斗时，Campaign对象/WorldMap状态切换为相应Scene/Mission交互。进入后按Scene资源、地点模板、MissionInitializerRecord、MissionLogic和Agent数据构造实际场景；离场/任务完成经各Mission结束逻辑返回Campaign/Encounter/GameMenu并提交相应后果。Campaign层的Settlement/Hero/Party对象与Mission内的Agents、Formations、Scene props不是同一生命周期对象。
