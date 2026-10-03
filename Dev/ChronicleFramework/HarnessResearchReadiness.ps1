@@ -1,5 +1,5 @@
 ﻿$script:AuditedHarnessDiagnosticSource = 'SubModule.cs'
-$script:AuditedHarnessDiagnosticSha256 = '714bde7336710cfcbe2ef4726d8275e495afacbb7966b1bfde563a4fbb490449'
+$script:AuditedHarnessDiagnosticSha256 = '3b3a49f1860603f8aedddf476ffa03de8916a1188aab9be421a7ea4307947a76'
 
 function Get-ChronicleCanonicalTextSha256 {
     [CmdletBinding()]
@@ -41,7 +41,7 @@ function Get-ChronicleResearchReadiness {
     }
     if ($changed.Count -eq 1 -and $changed[0] -eq $script:AuditedHarnessDiagnosticSource -and
         $AuditedHarnessDiagnosticSha256 -eq $script:AuditedHarnessDiagnosticSha256) {
-        return [pscustomobject]@{ Allowed = $true; ChangedSources = $changed; Reason = 'exactly hashed P5 harness-only change; vanilla mechanics unchanged' }
+        return [pscustomobject]@{ Allowed = $true; ChangedSources = $changed; Reason = 'exactly hashed Harness-only change; vanilla mechanics unchanged' }
     }
     [pscustomobject]@{
         Allowed = $false
@@ -68,7 +68,7 @@ function Test-ChronicleResearchReadiness {
     if ($mismatchedReady.Allowed) { throw 'Both research and implementation gates must be READY.' }
 
     $diagnosticCleanup = Get-ChronicleResearchReadiness -ResearchReady:$false -ImplementationReady:$false -ChangedFeatureSources @($script:AuditedHarnessDiagnosticSource) -AuditedHarnessDiagnosticSha256 $script:AuditedHarnessDiagnosticSha256
-    if (-not $diagnosticCleanup.Allowed) { throw 'The exact audited P5 harness-only change should remain buildable while gameplay research is blocked.' }
+    if (-not $diagnosticCleanup.Allowed) { throw 'The exact audited Harness-only change should remain buildable while gameplay research is blocked.' }
 
     $modifiedDiagnostic = Get-ChronicleResearchReadiness -ResearchReady:$false -ImplementationReady:$false -ChangedFeatureSources @($script:AuditedHarnessDiagnosticSource) -AuditedHarnessDiagnosticSha256 'not-the-approved-hash'
     if ($modifiedDiagnostic.Allowed) { throw 'Any further SubModule.cs change must be blocked unless re-audited.' }

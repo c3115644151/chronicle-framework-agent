@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using SandBox;
+using SandBox.View.Map;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.CampaignSystem.GameState;
@@ -688,6 +689,9 @@ internal sealed class ChronicleAgentProtocol
                     WriteResponse(commandId, action, "accepted", behavior);
                     break;
                 case "pursue":
+                    var mapStateForPursuit = Game.Current?.GameStateManager?.ActiveState as MapState;
+                    if (mapStateForPursuit == null || mapStateForPursuit.AtMenu || MapScreen.Instance?.IsEscapeMenuOpened == true)
+                        throw new InvalidOperationException("pursuit requires the unobstructed Campaign Map; a native Map menu/Escape menu is open");
                     if (PlayerEncounter.IsActive || MobileParty.MainParty.CurrentSettlement != null || MobileParty.MainParty.MapEvent != null)
                         throw new InvalidOperationException("pursuit requires the campaign map with no active encounter");
                     var targetPartyId = ReadString(command, "partyId");
@@ -1434,13 +1438,17 @@ internal sealed class ChronicleAgentProtocol
 
     private static string BuildHarnessMapDiagnosticsJson()
     {
+        var activeMapState = Game.Current?.GameStateManager?.ActiveState as MapState;
+        var escapeMenuOpen = MapScreen.Instance?.IsEscapeMenuOpened ?? false;
         var settlements = Settlement.All
             .Where(settlement => settlement != null && settlement.IsActive)
             .OrderBy(settlement => settlement.StringId, StringComparer.Ordinal)
             .ToArray();
         var json = new StringBuilder(2048);
-        json.Append('{');
-        json.Append("\"activeSettlementCount\":").Append(settlements.Length);
+        json.Append('{').Append("\"mapStateAtMenu\":").Append((activeMapState?.AtMenu ?? false).ToString().ToLowerInvariant());
+        json.Append(",\"escapeMenuOpen\":").Append(escapeMenuOpen.ToString().ToLowerInvariant());
+        json.Append(",\"harnessFocusLossEscapeMenuGuardInstalled\":").Append(SubModule.HarnessFocusLossEscapeMenuGuardInstalled.ToString().ToLowerInvariant());
+        json.Append(",\"activeSettlementCount\":").Append(settlements.Length);
         json.Append(",\"visibleSettlementCount\":").Append(settlements.Count(settlement => settlement.IsVisible));
         json.Append(",\"hiddenSettlementCount\":").Append(settlements.Count(settlement => !settlement.IsVisible));
         json.Append(",\"settlements\":[");

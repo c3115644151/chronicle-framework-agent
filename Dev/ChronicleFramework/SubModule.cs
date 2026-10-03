@@ -20,12 +20,15 @@ public sealed class SubModule : MBSubModuleBase
     private ChronicleCampaignBehavior _campaignBehavior;
     private bool _freshCampaignMusicWaitLogged;
     private bool _freshCampaignMusicReadyLogged;
+    private static bool _harnessFocusLossEscapeMenuGuardInstalled;
+    private static bool _harnessFocusLossEscapeMenuGuardWaitLogged;
 
     protected override void OnSubModuleLoad()
     {
         base.OnSubModuleLoad();
         ChronicleDiagnostics.Write("submodule-load");
         InstallCrashExceptionCaptureIfRequested();
+        TryInstallHarnessFocusLossEscapeMenuGuard();
     }
 
     private static void InstallCrashExceptionCaptureIfRequested()
@@ -50,6 +53,47 @@ public sealed class SubModule : MBSubModuleBase
             ChronicleDiagnostics.Write($"crash-report-exception-capture-install-failed|type={exception.GetType().FullName}|message={exception.Message}");
         }
     }
+
+    private static void TryInstallHarnessFocusLossEscapeMenuGuard()
+    {
+        if (_harnessFocusLossEscapeMenuGuardInstalled || Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") != "visual-capture") return;
+        var harnessTemp = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+        if (string.IsNullOrWhiteSpace(harnessTemp) || !Directory.Exists(harnessTemp)) return;
+        try
+        {
+            var managerType = AccessTools.TypeByName("SandBox.View.Map.MapViewsContainer");
+            var nativeMethod = managerType == null ? null : AccessTools.Method(managerType, "IsOpeningEscapeMenuOnFocusChangeAllowedForAll", Type.EmptyTypes);
+            if (nativeMethod == null)
+            {
+                if (!_harnessFocusLossEscapeMenuGuardWaitLogged)
+                {
+                    _harnessFocusLossEscapeMenuGuardWaitLogged = true;
+                    ChronicleDiagnostics.Write("harness-focus-loss-escape-guard-wait|reason=native-map-views-container-not-loaded");
+                }
+                return;
+            }
+
+            var prefix = AccessTools.Method(typeof(SubModule), nameof(KeepNativeEscapeMenuClosedWhenHarnessLosesFocus));
+            new Harmony("ChronicleFramework.HarnessFocusLossEscapeMenuGuard").Patch(nativeMethod, prefix: new HarmonyMethod(prefix));
+            _harnessFocusLossEscapeMenuGuardInstalled = true;
+            ChronicleDiagnostics.Write("harness-focus-loss-escape-guard-installed|scope=visual-capture");
+        }
+        catch (Exception exception)
+        {
+            ChronicleDiagnostics.Write($"harness-focus-loss-escape-guard-install-failed|type={exception.GetType().FullName}|message={exception.Message}");
+        }
+    }
+
+    private static bool KeepNativeEscapeMenuClosedWhenHarnessLosesFocus(ref bool __result)
+    {
+        if (Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") != "visual-capture") return true;
+        var harnessTemp = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+        if (string.IsNullOrWhiteSpace(harnessTemp) || !Directory.Exists(harnessTemp)) return true;
+        __result = false;
+        return false;
+    }
+
+    internal static bool HarnessFocusLossEscapeMenuGuardInstalled => _harnessFocusLossEscapeMenuGuardInstalled;
 
     private static void CaptureCrashExceptionBeforeReport(Exception exception)
     {
@@ -119,6 +163,7 @@ public sealed class SubModule : MBSubModuleBase
     protected override void OnApplicationTick(float dt)
     {
         base.OnApplicationTick(dt);
+        TryInstallHarnessFocusLossEscapeMenuGuard();
         if (Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") == FreshCampaignHarness.Mode && !IsNativeCampaignMusicInitialized())
         {
             if (!_freshCampaignMusicWaitLogged)

@@ -72,6 +72,11 @@ try {
     $initial = Invoke-AgentCli 'state' @('-CommandId', "$prefix-initial")
     if ($initial.state.context.gameState -ne 'MapState' -or $initial.state.context.encounterActive -or $initial.state.context.captivity)
         { throw 'Fixture must start as a free Campaign Map party with no active Encounter.' }
+    $mapStartupDiagnostics = Invoke-AgentCli 'harnessMapDiagnostics' @('-CommandId', "$prefix-map-startup-diagnostics") 30
+    if ($mapStartupDiagnostics.status -ne 'completed' -or -not [bool]$mapStartupDiagnostics.data.harnessFocusLossEscapeMenuGuardInstalled)
+        { throw "visual Harness did not install its focus-loss Escape-menu guard before gameplay input: $($mapStartupDiagnostics.data | ConvertTo-Json -Compress)" }
+    if ([bool]$mapStartupDiagnostics.data.escapeMenuOpen -or [bool]$mapStartupDiagnostics.data.mapStateAtMenu)
+        { throw "Native Escape/Map menu blocks Campaign map input before test actions: $($mapStartupDiagnostics.data | ConvertTo-Json -Compress)" }
     $questCountBefore = @($initial.state.quests).Count
     $goldBefore = [int]$initial.state.economy.gold
     $relationSummary = [ordered]@{}
@@ -189,6 +194,12 @@ try {
     if ($questCountAfter -ne ($questCountBefore + 1)) { throw "Native acceptance did not add exactly one active Quest. before=$questCountBefore after=$questCountAfter" }
     $newQuest = @($state.state.quests | Where-Object { $_.id -notin @($initial.state.quests | ForEach-Object id) } | Select-Object -First 1)
     if ($newQuest.Count -ne 1) { throw 'The newly started Quest could not be distinguished from the initially observed Quest IDs.' }
+    $afterQuestPartyTargets = Invoke-AgentCli 'mapPartyTargets' @('-CommandId', "$prefix-party-markers-after-quest") 30
+    $partyAfterQuest = @($afterQuestPartyTargets.data.mapPartyTargets | Where-Object { $_.id -eq $seededPartyId } | Select-Object -First 1)
+    $questMarkerAdvancedToActive = ($afterQuestPartyTargets.status -eq 'completed' -and $partyAfterQuest.Count -eq 1 -and
+        @($partyAfterQuest[0].questMarkers | Where-Object { $_ -eq 'ActiveIssue' }).Count -gt 0 -and -not [bool]$partyAfterQuest[0].hasAvailableIssueMarker)
+    if (-not $questMarkerAdvancedToActive)
+        { throw "Accepted Quest did not update the current map Party marker from AvailableIssue to ActiveIssue: $($partyAfterQuest | ConvertTo-Json -Compress)" }
     Capture-EngineFrame $afterFrame 'native-map-lord-quest-started'
 
     $fixtureHashAfter = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
@@ -197,6 +208,12 @@ try {
     $result = [ordered]@{
         ProviderKind = 'Native current mapPartyTargets marker -> pursue -> map Lord Conversation -> enabled Issue Quest option'
         ProcessId = $start.session.processId
+        SeededPartyId = $seededPartyId
+        HarnessWindowDiagnostics = [ordered]@{
+            mapStateAtMenu = [bool]$mapStartupDiagnostics.data.mapStateAtMenu
+            escapeMenuOpen = [bool]$mapStartupDiagnostics.data.escapeMenuOpen
+            focusLossEscapeMenuGuardInstalled = [bool]$mapStartupDiagnostics.data.harnessFocusLossEscapeMenuGuardInstalled
+        }
         IssueFixture = $issueFixture.data
         Target = $sourceParty
         MapApproach = $approach
@@ -208,6 +225,8 @@ try {
         NativeMapPartyMarkerObserved = [bool]$targetAfterIssue[0].hasAvailableIssueMarker
         QuestAcceptedFromMapParty = $accepted
         ActiveQuestAdded = ($questCountAfter -eq ($questCountBefore + 1))
+        QuestMarkerAdvancedToActive = $questMarkerAdvancedToActive
+        PartyMarkerAfterQuest = $partyAfterQuest[0]
         QuestTextNotInjectedIntoObservation = $state.state.quests.Count -eq $questCountAfter
         EngineFrames = @($beforeFrame, $meetingFrame, $afterFrame)
         SourceFixtureHashBefore = $fixtureHashBefore
@@ -215,7 +234,7 @@ try {
         SourceFixtureUnchanged = ($fixtureHashBefore -eq $fixtureHashAfter)
         ProcessStopped = [bool]$stop.processStopped
         AllGameProcessesStopped = $allProcessesStopped
-        Passed = ($accepted -and $questCountAfter -eq ($questCountBefore + 1) -and $fixtureHashBefore -eq $fixtureHashAfter -and [bool]$stop.processStopped -and $allProcessesStopped)
+        Passed = ($accepted -and $questCountAfter -eq ($questCountBefore + 1) -and $questMarkerAdvancedToActive -and $fixtureHashBefore -eq $fixtureHashAfter -and [bool]$stop.processStopped -and $allProcessesStopped)
     }
     $json = $result | ConvertTo-Json -Depth 18
     if ($tempPath -and (Test-Path -LiteralPath $tempPath -PathType Container)) { Set-Content -LiteralPath $resultPath -Value $json -Encoding UTF8 }
