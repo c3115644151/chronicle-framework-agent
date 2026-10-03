@@ -16,7 +16,7 @@ namespace ChronicleFramework;
 
 internal static class HarnessAlleyRosterFixture
 {
-    internal static string PrepareTownAlleyRoster(string settlementId)
+    internal static string PrepareTownAlleyRoster(string settlementId, string destinationMenuId = "manage_alley")
     {
         var mode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
         var root = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
@@ -27,6 +27,8 @@ internal static class HarnessAlleyRosterFixture
         var settlement = Settlement.Find(settlementId);
         if (settlement == null || !settlement.IsTown || !settlement.IsVisible || settlement.Party?.MapEvent != null || settlement.IsUnderSiege)
             throw new InvalidOperationException("Alley roster fixture requires a visible, non-besieged Town without an active battle.");
+        if (destinationMenuId != "manage_alley" && destinationMenuId != "town")
+            throw new InvalidOperationException("Alley fixture destination must be the Native Town or manage_alley menu.");
         var alley = settlement.Alleys?.FirstOrDefault(item => item != null && item.Owner == null);
         if (alley == null) throw new InvalidOperationException("No unowned Native Alley is available in this disposable Town.");
 
@@ -62,10 +64,11 @@ internal static class HarnessAlleyRosterFixture
         var addCharacters = typeof(AlleyCampaignBehavior).GetMethod("AddPlayerAlleyCharacters", BindingFlags.Instance | BindingFlags.NonPublic);
         if (addCharacters == null) throw new MissingMethodException(typeof(AlleyCampaignBehavior).FullName, "AddPlayerAlleyCharacters(Alley)");
         addCharacters.Invoke(behavior, new object[] { alley });
-        GameMenu.SwitchToMenu("manage_alley");
-        var option = Campaign.Current.CurrentMenuContext?.GameMenu?.MenuOptions.FirstOrDefault(item => item.IdString == "manage_alley_troops");
-        if (Campaign.Current.CurrentMenuContext?.GameMenu?.StringId != "manage_alley" || option == null || !option.IsEnabled || !option.GetConditionsHold(Game.Current, Campaign.Current.CurrentMenuContext))
-            throw new InvalidOperationException("Native manage_alley_troops is not available after preparing the in-memory player Alley.");
+        GameMenu.SwitchToMenu(destinationMenuId);
+        var expectedOptionId = destinationMenuId == "manage_alley" ? "manage_alley_troops" : "manage_alley";
+        var option = Campaign.Current.CurrentMenuContext?.GameMenu?.MenuOptions.FirstOrDefault(item => item.IdString == expectedOptionId);
+        if (Campaign.Current.CurrentMenuContext?.GameMenu?.StringId != destinationMenuId || option == null || !option.IsEnabled || !option.GetConditionsHold(Game.Current, Campaign.Current.CurrentMenuContext))
+            throw new InvalidOperationException("Expected Native Alley option is not available after preparing the in-memory player Alley.");
 
         var json = new StringBuilder(768);
         json.Append('{');
@@ -73,6 +76,7 @@ internal static class HarnessAlleyRosterFixture
         Property(json, "alleyTag", alley.Tag, true);
         Property(json, "assignedHeroId", assignedHero.StringId, true);
         Property(json, "troopId", baseTroop.StringId, true);
+        Property(json, "destinationMenuId", destinationMenuId, true);
         json.Append(",\"initialAlleyCount\":").Append(minimum + 1);
         json.Append(",\"minimumTroops\":").Append(minimum);
         json.Append(",\"maximumTroops\":").Append(maximum);

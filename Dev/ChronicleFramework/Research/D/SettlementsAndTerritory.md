@@ -236,7 +236,7 @@ Nearby Settlement 快照不返回 Governor ID、GovernorOf、Garrison Party ID�
 
 每座城镇的 `Settlement.Alleys` 保存若干 `Alley` 区域。Alley 保存所属 Settlement、tag、名称、AreaState 和当前 Owner Hero；这是 Town 中的区域/派系状态，不是独立的城堡或村庄，也不等同于整个 Clan 所有权。城镇中的 gang leader Notable 可以拥有多条 Alley，原版每日聚落 tick 会按随机概率尝试让帮派占有未分配 Alley 或失去已有 Alley；概率随当前 Alley 数量改变。
 
-Sandbox `AlleyCampaignBehavior` 是该系统的主要生命周期行为。Town 的玩家入口来自 `town` 菜单新增的“Go to alley”，并进入 `manage_alley` 菜单/聚落 Alley 场景；在 Alley 内与人物对话还能触发打斗、离开、招募或管理选项。具体玩家移动、对话交互、战斗 Mission 和结算细节归 D09/G 类继续交叉盘点，本节只记录已有来源链。
+Sandbox `AlleyCampaignBehavior` 是该系统的主要生命周期行为。Town 的玩家入口来自 `town` 菜单新增的“Go to alley”，并进入 `manage_alley` 原版管理GameMenu；菜单初始化注册`alley` MenuLocation，但W2-BB当前运行确认此入口仍在Campaign Map，无Location Mission/3D场景。Alley Leader的实际人物对话若存在独立Scene入口须另行验证；不要把MenuLocation字段推断成玩家已进入场景。战斗、招募等具体后果继续交叉引用相应D/G/H域。
 
 ### 玩家经营 Alley 的状态循环
 
@@ -250,7 +250,7 @@ Sandbox `AlleyCampaignBehavior` 是该系统的主要生命周期行为。Town �
 
 ### Alley 的玩家操作链与跨域动作边界
 
-在拥有玩家 Alley 的 Town 菜单，`go_to_alley`选项以`GameMenu.SwitchToMenu("manage_alley")`进入 Alley location；此为访问 Alley 场景的独立玩家入口，菜单时钟/Location状态的运行回执尚未核实。进入后 Alley owner 可以在 Town GameMenu 选择管理项，也可以与指定 Alley leader 对话，部分管理选项两处入口共用同一 handler：
+在拥有玩家 Alley 的 Town 菜单，`go_to_alley`选项以`GameMenu.SwitchToMenu("manage_alley")`进入 Alley管理GameMenu；其仍是Campaign Map菜单，不是3D Alley Location Mission。Native菜单将Alley Location注册到`GameMenuManager.MenuLocations`，但该字段不意味着运行中Mission已打开。W2-BB验证此Town菜单进入与`back`返回；两者CampaignDay/raw Stop/waiting稳定。Town GameMenu管理项可在此原版管理界面操作；指定Alley leader对话则需另一个能真正实例化Alley NPC的入口，来源/场景流程尚未验证：
 
 - **更换 Alley leader**：`change_leader_of_alley`或 manager 对话打开 `AlleyHelper.CreateMultiSelectionInquiryForSelectingClanMemberToAlley`；`AlleyModel.GetClanMembersAndAvailabilityDetailsForLeadingAnAlley`筛掉无资格者，选中后`ChangeTheLeaderOfAlleyInternal`更新AssignedClanMember、替换守军Roster中的Hero并延迟传送新Leader到Settlement。Alley受攻击时菜单此项禁用。此处改变责任Hero，不等同占领/改Owner。
 - **管理 Alley 打手Roster**：Town GameMenu或 manager 对话打开专用 PartyScreen；Helper只允许Troop transfer，禁止传Hero/Prisoner，Done条件检查一般打手人数处于Model给定最小/最大值。Done回调把左侧Roster保存到PlayerAlleyData，Scene已开启时刷新 Alley Agents。W2-AZ 已实测Town `manage_alley_troops`路线，通过当前Native `PartyCharacterVM`逐名转移、PartyVM Done/Cancel处理；取消草稿不改两侧真实Roster，Done提交后左右成员按原生结果变化，越过Alley最小/最大兵数时Done禁用。只覆盖Campaign Map菜单入口；负责人3D对话中同一PartyScreen入口及Scene已有时刷新Agent尚未运行测试。

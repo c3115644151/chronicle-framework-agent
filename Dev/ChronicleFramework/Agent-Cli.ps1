@@ -482,7 +482,9 @@ switch ($Action) {
     }
     'harnessPrepareAlleyRosterFixture' {
         if (-not $SettlementId) { throw '-SettlementId must come from the current visible settlement observation.' }
-        $result = Invoke-ProtocolCommand 'harnessPrepareAlleyRosterFixture' @{ settlementId = $SettlementId }
+        $arguments = @{ settlementId = $SettlementId }
+        if ($MenuId) { $arguments.menuId = $MenuId }
+        $result = Invoke-ProtocolCommand 'harnessPrepareAlleyRosterFixture' $arguments
     }
     'harnessAlleyRosterDiagnostics' {
         if (-not $SettlementId) { throw '-SettlementId is required for Alley roster fixture diagnostics.' }
