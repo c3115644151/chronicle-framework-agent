@@ -41,6 +41,23 @@ internal static class ChroniclePartyScreenAdapter
         }
     }
 
+    internal static PartyVM AttachToActivePartyScreen(PartyState partyState)
+    {
+        if (partyState?.PartyScreenLogic == null)
+            throw new InvalidOperationException("A live Native PartyState/PartyScreenLogic is required");
+        var viewModel = new PartyVM(partyState.PartyScreenLogic);
+        try
+        {
+            PrepareFinalization(viewModel);
+            return viewModel;
+        }
+        catch
+        {
+            Finalize(viewModel);
+            throw;
+        }
+    }
+
     internal static void CancelAndFinalize(PartyVM viewModel)
     {
         try

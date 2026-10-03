@@ -426,6 +426,20 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("harnessAlleyLeaderDiagnostics is restricted to a visual Harness run with a Harness temp directory");
                     WriteResponse(commandId, action, "completed", behavior, null, HarnessAlleyLeaderFixture.BuildDiagnostics(ReadString(command, "settlementId")));
                     break;
+                case "harnessPrepareAlleyRosterFixture":
+                    var alleyRosterFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var alleyRosterFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(alleyRosterFixtureMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(alleyRosterFixtureRoot) || !Directory.Exists(alleyRosterFixtureRoot))
+                        throw new InvalidOperationException("harnessPrepareAlleyRosterFixture is restricted to a visual Harness run with a Harness temp directory");
+                    WriteResponse(commandId, action, "completed", behavior, null, HarnessAlleyRosterFixture.PrepareTownAlleyRoster(ReadString(command, "settlementId")));
+                    break;
+                case "harnessAlleyRosterDiagnostics":
+                    var alleyRosterDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var alleyRosterDiagnosticsRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(alleyRosterDiagnosticsMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(alleyRosterDiagnosticsRoot) || !Directory.Exists(alleyRosterDiagnosticsRoot))
+                        throw new InvalidOperationException("harnessAlleyRosterDiagnostics is restricted to a visual Harness run with a Harness temp directory");
+                    WriteResponse(commandId, action, "completed", behavior, null, HarnessAlleyRosterFixture.BuildDiagnostics(ReadString(command, "settlementId")));
+                    break;
                 case "harnessPlayerSkillsDiagnostics":
                     var skillsDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
                     var skillsDiagnosticsRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
@@ -1256,6 +1270,12 @@ internal sealed class ChronicleAgentProtocol
                     WriteResponse(commandId, action, "completed", behavior);
                     break;
                 case "partyScreenDone":
+                    if (ChronicleAlleyRosterAdapter.IsCurrentNativeAlleyPartyScreen())
+                    {
+                        var alleyRosterDone = ChronicleAlleyRosterAdapter.Done();
+                        WriteResponse(commandId, action, "completed", behavior, null, alleyRosterDone);
+                        break;
+                    }
                     var lootPartyStateToClose = Game.Current.GameStateManager.ActiveState as PartyState;
                     if (lootPartyStateToClose?.PartyScreenLogic == null || lootPartyStateToClose.PartyScreenMode.ToString() != "Loot")
                         throw new InvalidOperationException("partyScreenDone requires the native postbattle loot PartyState");
@@ -1264,6 +1284,13 @@ internal sealed class ChronicleAgentProtocol
                     if (partyScreenHandler == null) throw new InvalidOperationException("native PartyScreen Done handler is unavailable");
                     partyScreenHandler.ExecuteDoneScript();
                     WriteResponse(commandId, action, "completed", behavior);
+                    break;
+                case "alleyRosterTransfer":
+                    WriteResponse(commandId, action, "completed", behavior, null,
+                        ChronicleAlleyRosterAdapter.TransferOne(ReadString(command, "troopId"), ReadString(command, "sourceSide")));
+                    break;
+                case "alleyRosterCancel":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAlleyRosterAdapter.Cancel());
                     break;
                 case "save":
                     var saveName = ReadString(command, "name");

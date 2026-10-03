@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet('start','load','recoverTestConfig','state','closeEscapeMenu','respondInquiry','respondMultiSelectionInquiry','mapSettlementTargets','mapNotifications','quickInformation','sceneNotification','mapPartyTargets','mapPartyComposition','mapPartyBehavior','partyUpgradeOptions','upgradeTroop','prisonerRecruitmentOptions','recruitPrisoner','characterDevelopment','spendSkillFocus','questDetails','partyRoster','partyRoles','inventoryOpen','heroEquipmentOptions','equipHeroItem','unequipHeroItem','inventoryConfirm','inventoryCancel','inventoryCancelChanges','tradeConfirm','tradeCancel','tradeCancelChanges','barterOptions','barterEdit','barterReset','barterAutoBalance','barterOffer','barterCancel','setPartyRole','unassignPartyRole','captureFrame','harnessMissionDiagnostics','harnessMapDiagnostics','harnessOpenMapEscapeMenu','harnessOpenNativeInquiry','harnessOpenRecruitmentInquiry','harnessNativeInquiryDiagnostics','harnessPrepareAlleyLeaderFixture','harnessAlleyLeaderDiagnostics','harnessPlayerSkillsDiagnostics','harnessCharacterDevelopmentDiagnostics','harnessQuestDetailsDiagnostics','harnessQuestDeadlinePrivacyDiagnostics','harnessPartyRosterDiagnostics','harnessMapPartyDiagnostics','harnessMapPartyCompositionDiagnostics','harnessCreateMapArmyFixture','harnessPrepareMovingArmyEncounter','harnessArmyEncounterDiagnostics','harnessPrepareSiegeJoinFixture','harnessSiegeJoinDiagnostics','harnessSeedMapPartyIssueMarker','harnessPrepareSafePassageFixture','harnessSeedCaptivityObservationFixture','harnessSeedPrisonCaptivityFixture','harnessSwitchCaptivityObservationMenu','harnessCaptivityDiagnostics','harnessPrepareSurrenderCondition','harnessSeedTryGetAwayFixture','harnessTryGetAwayDiagnostics','harnessSeedNpcBattleForPlayerJoin','harnessPrepareArmyMemberForCurrentJoinEncounter','harnessJoinEncounterDiagnostics','harnessPreparePursuitVisibilityFixture','harnessSeedPartyUpgradeFixture','harnessSeedPrisonerRecruitmentFixture','harnessSeedRecruitmentCapacityFixture','harnessPrepareCompanionHiringFixture','harnessCompanionHiringDiagnostics','harnessSeedPartyRoleFixture','harnessPartyRoleDiagnostics','harnessSeedEquipmentModifierFixture','harnessClearEquipmentModifierFixture','harnessSeedTradeRumorFixture','harnessTradeRumorTooltipDiagnostics','harnessSeedMapNotificationFixture','harnessSeedQuickInformationFixture','harnessSeedSceneNotificationFixture','harnessOpenInventoryState','harnessCloseInventoryState','harnessInventoryStateDiagnostics','talkToSettlementHero','visitSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','fastForward','move','moveToPoint','missionInput','missionNavigateToAgent','missionLeave','missionInteract','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','rest','recruitOptions','recruit','foodOptions','tradeOptions','tradeRumors','trade','provision','save','stop')]
+    [ValidateSet('start','load','recoverTestConfig','state','closeEscapeMenu','respondInquiry','respondMultiSelectionInquiry','mapSettlementTargets','mapNotifications','quickInformation','sceneNotification','mapPartyTargets','mapPartyComposition','mapPartyBehavior','partyUpgradeOptions','upgradeTroop','prisonerRecruitmentOptions','recruitPrisoner','characterDevelopment','spendSkillFocus','questDetails','partyRoster','partyRoles','inventoryOpen','heroEquipmentOptions','equipHeroItem','unequipHeroItem','inventoryConfirm','inventoryCancel','inventoryCancelChanges','tradeConfirm','tradeCancel','tradeCancelChanges','barterOptions','barterEdit','barterReset','barterAutoBalance','barterOffer','barterCancel','setPartyRole','unassignPartyRole','captureFrame','harnessMissionDiagnostics','harnessMapDiagnostics','harnessOpenMapEscapeMenu','harnessOpenNativeInquiry','harnessOpenRecruitmentInquiry','harnessNativeInquiryDiagnostics','harnessPrepareAlleyLeaderFixture','harnessAlleyLeaderDiagnostics','harnessPrepareAlleyRosterFixture','harnessAlleyRosterDiagnostics','harnessPlayerSkillsDiagnostics','harnessCharacterDevelopmentDiagnostics','harnessQuestDetailsDiagnostics','harnessQuestDeadlinePrivacyDiagnostics','harnessPartyRosterDiagnostics','harnessMapPartyDiagnostics','harnessMapPartyCompositionDiagnostics','harnessCreateMapArmyFixture','harnessPrepareMovingArmyEncounter','harnessArmyEncounterDiagnostics','harnessPrepareSiegeJoinFixture','harnessSiegeJoinDiagnostics','harnessSeedMapPartyIssueMarker','harnessPrepareSafePassageFixture','harnessSeedCaptivityObservationFixture','harnessSeedPrisonCaptivityFixture','harnessSwitchCaptivityObservationMenu','harnessCaptivityDiagnostics','harnessPrepareSurrenderCondition','harnessSeedTryGetAwayFixture','harnessTryGetAwayDiagnostics','harnessSeedNpcBattleForPlayerJoin','harnessPrepareArmyMemberForCurrentJoinEncounter','harnessJoinEncounterDiagnostics','harnessPreparePursuitVisibilityFixture','harnessSeedPartyUpgradeFixture','harnessSeedPrisonerRecruitmentFixture','harnessSeedRecruitmentCapacityFixture','harnessPrepareCompanionHiringFixture','harnessCompanionHiringDiagnostics','harnessSeedPartyRoleFixture','harnessPartyRoleDiagnostics','harnessSeedEquipmentModifierFixture','harnessClearEquipmentModifierFixture','harnessSeedTradeRumorFixture','harnessTradeRumorTooltipDiagnostics','harnessSeedMapNotificationFixture','harnessSeedQuickInformationFixture','harnessSeedSceneNotificationFixture','harnessOpenInventoryState','harnessCloseInventoryState','harnessInventoryStateDiagnostics','talkToSettlementHero','visitSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','fastForward','move','moveToPoint','missionInput','missionNavigateToAgent','missionLeave','missionInteract','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','alleyRosterTransfer','alleyRosterCancel','rest','recruitOptions','recruit','foodOptions','tradeOptions','tradeRumors','trade','provision','save','stop')]
     [string]$Action,
     [string]$SaveName,
     [string]$SettlementId,
@@ -22,6 +22,7 @@ param(
     [string]$TroopId,
     [switch]$ConfirmPartySizeWarning,
     [ValidateSet('members','prisoners')][string]$LootType,
+    [ValidateSet('alley','mainParty')][string]$RosterSide,
     [int]$VolunteerSlot = -1,
     [string]$ItemId,
     [string]$Direction,
@@ -478,6 +479,14 @@ switch ($Action) {
         if (-not $SettlementId) { throw '-SettlementId is required for Alley fixture diagnostics.' }
         $result = Invoke-ProtocolCommand 'harnessAlleyLeaderDiagnostics' @{ settlementId = $SettlementId }
     }
+    'harnessPrepareAlleyRosterFixture' {
+        if (-not $SettlementId) { throw '-SettlementId must come from the current visible settlement observation.' }
+        $result = Invoke-ProtocolCommand 'harnessPrepareAlleyRosterFixture' @{ settlementId = $SettlementId }
+    }
+    'harnessAlleyRosterDiagnostics' {
+        if (-not $SettlementId) { throw '-SettlementId is required for Alley roster fixture diagnostics.' }
+        $result = Invoke-ProtocolCommand 'harnessAlleyRosterDiagnostics' @{ settlementId = $SettlementId }
+    }
     'harnessPlayerSkillsDiagnostics' { $result = Invoke-ProtocolCommand 'harnessPlayerSkillsDiagnostics' }
     'harnessCharacterDevelopmentDiagnostics' { $result = Invoke-ProtocolCommand 'harnessCharacterDevelopmentDiagnostics' }
     'harnessQuestDetailsDiagnostics' {
@@ -632,6 +641,11 @@ switch ($Action) {
         $result = Invoke-ProtocolCommand 'partyTakeAll' @{ troopType = $LootType }
     }
     'partyScreenDone' { $result = Invoke-ProtocolCommand 'partyScreenDone' }
+    'alleyRosterTransfer' {
+        if (-not $TroopId -or -not $RosterSide) { throw '-TroopId and -RosterSide from the current Native Alley PartyScreen are required for alleyRosterTransfer.' }
+        $result = Invoke-ProtocolCommand 'alleyRosterTransfer' @{ troopId = $TroopId; sourceSide = $RosterSide }
+    }
+    'alleyRosterCancel' { $result = Invoke-ProtocolCommand 'alleyRosterCancel' }
     'rest' { $result = Invoke-ProtocolCommand 'rest' @{ days = $Days } -ReturnWhenAccepted:$ReturnWhenAccepted }
     'recruitOptions' { $result = Invoke-ProtocolCommand 'recruitOptions' }
     'recruit' {

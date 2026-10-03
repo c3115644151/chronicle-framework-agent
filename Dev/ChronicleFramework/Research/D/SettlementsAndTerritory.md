@@ -253,12 +253,12 @@ Sandbox `AlleyCampaignBehavior` 是该系统的主要生命周期行为。Town �
 在拥有玩家 Alley 的 Town 菜单，`go_to_alley`选项以`GameMenu.SwitchToMenu("manage_alley")`进入 Alley location；此为访问 Alley 场景的独立玩家入口，菜单时钟/Location状态的运行回执尚未核实。进入后 Alley owner 可以在 Town GameMenu 选择管理项，也可以与指定 Alley leader 对话，部分管理选项两处入口共用同一 handler：
 
 - **更换 Alley leader**：`change_leader_of_alley`或 manager 对话打开 `AlleyHelper.CreateMultiSelectionInquiryForSelectingClanMemberToAlley`；`AlleyModel.GetClanMembersAndAvailabilityDetailsForLeadingAnAlley`筛掉无资格者，选中后`ChangeTheLeaderOfAlleyInternal`更新AssignedClanMember、替换守军Roster中的Hero并延迟传送新Leader到Settlement。Alley受攻击时菜单此项禁用。此处改变责任Hero，不等同占领/改Owner。
-- **管理 Alley 打手Roster**：Town GameMenu或 manager 对话打开专用 PartyScreen；Helper只允许Troop transfer，禁止传Hero/Prisoner，Done条件检查一般打手人数处于Model给定最小/最大值。Done回调把左侧Roster保存到PlayerAlleyData，Scene已开启时刷新 Alley Agents。Chronicle未做通用巷道Roster事务适配。
+- **管理 Alley 打手Roster**：Town GameMenu或 manager 对话打开专用 PartyScreen；Helper只允许Troop transfer，禁止传Hero/Prisoner，Done条件检查一般打手人数处于Model给定最小/最大值。Done回调把左侧Roster保存到PlayerAlleyData，Scene已开启时刷新 Alley Agents。W2-AZ 已实测Town `manage_alley_troops`路线，通过当前Native `PartyCharacterVM`逐名转移、PartyVM Done/Cancel处理；取消草稿不改两侧真实Roster，Done提交后左右成员按原生结果变化，越过Alley最小/最大兵数时Done禁用。只覆盖Campaign Map菜单入口；负责人3D对话中同一PartyScreen入口及Scene已有时刷新Agent尚未运行测试。
 - **放弃 Alley**：Town菜单确认或 manager 对话确认都会`PlayerAlleyData.AbandonTheAlley`，将非Hero守军转回MainParty、清空PlayerAlleyData并移除Owner；对话Scene路径额外清理非玩家Alley Agents。受攻击状态会在到期或放弃时交接/销毁。它和放弃聚落Fief不是同一行为。
 - **领取本周打手**：与指定 Alley leader 对话询问志愿者；按`RandomFloatWeekly`选出可能为空的Roster，玩家确认后直接加入MainParty并更新LastRecruitTime；这不是免费的Town volunteer菜单，也未发现此Handler扣Gold。
 - **回应 Alley attack**：仅在PlayerAlleyData.IsUnderAttack时出现与敌对帮派首领对话；可选Confront会结束当前Conversation并启动专用`OpenAlleyFightMission`。它不是地图 `MapEvent` 坐镇指挥入口，战斗后以胜/败更新 Alley Owner 与Roster，战役时钟按 Mission规则停走。
 
-以上核心入口及状态写入由当前 `SandBox.CampaignBehaviors.AlleyCampaignBehavior` 与 `Helpers.AlleyHelper` 源码确认；多菜单/对话别名按同一个最终提交动作合并。Chronicle没有这些Alley观察/动作适配。具体菜单时钟、对话到Mission的视觉顺序、Roster取消/提交确认和不同Alley类型的运行效果仍未做玩家视觉回归。
+以上核心入口及状态写入由当前 `SandBox.CampaignBehaviors.AlleyCampaignBehavior` 与 `Helpers.AlleyHelper` 源码确认；多菜单/对话别名按同一个最终提交动作合并。AlleyLeader选择的Town菜单入口、管理Roster的Town菜单入口和原生Roster写入均已有本机1.4.8测试；Chronicle只支持对应MAINLINE行列出的窄菜单上下文，并非所有Alley交互已适配。负责人对话上下文、对话进入Scene、已有Alley Mission时刷新Agent及不同Alley生命周期的运行效果仍未做视觉回归。
 
 ### Faction 犯罪值与处置
 

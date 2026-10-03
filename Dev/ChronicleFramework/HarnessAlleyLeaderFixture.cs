@@ -113,7 +113,7 @@ internal static class HarnessAlleyLeaderFixture
         return json.ToString();
     }
 
-    private static Hero CreateEligibleAlleyClanHero(Settlement settlement, Clan playerClan)
+    internal static Hero CreateEligibleAlleyClanHero(Settlement settlement, Clan playerClan)
     {
         var template = Campaign.Current.Models.HeroCreationModel.GetRandomTemplateByOccupation(Occupation.Wanderer, settlement) ??
             Hero.AllAliveHeroes.FirstOrDefault(hero => hero != null && hero.Occupation == Occupation.Wanderer && hero.Clan == null && hero.PartyBelongedTo == null)?.CharacterObject ??

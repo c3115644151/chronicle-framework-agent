@@ -199,6 +199,15 @@ internal static class ChronicleAgentObserver
             AppendPartyRoster(json, "leftPrisoners", screen, PartyScreenLogic.PartyRosterSide.Left, PartyScreenLogic.TroopType.Prisoner);
             AppendPartyRoster(json, "rightMembers", screen, PartyScreenLogic.PartyRosterSide.Right, PartyScreenLogic.TroopType.Member);
             AppendPartyRoster(json, "rightPrisoners", screen, PartyScreenLogic.PartyRosterSide.Right, PartyScreenLogic.TroopType.Prisoner);
+            if (ChronicleAlleyRosterAdapter.IsCurrentNativeAlleyPartyScreen())
+            {
+                var alleyModel = Campaign.Current.Models.AlleyModel;
+                var currentAlleyTroops = screen.GetRoster(PartyScreenLogic.PartyRosterSide.Left, PartyScreenLogic.TroopType.Member).TotalRegulars;
+                json.Append(",\"alleyRoster\":{\"minimumTroops\":").Append(alleyModel.MinimumTroopCountInPlayerOwnedAlley);
+                json.Append(",\"maximumTroops\":").Append(alleyModel.MaximumTroopCountInPlayerOwnedAlley);
+                json.Append(",\"currentTroops\":").Append(currentAlleyTroops);
+                json.Append(",\"doneAvailable\":").Append(Bool(screen.IsDoneActive())).Append('}');
+            }
             json.Append('}');
         }
         var activeInventoryState = Game.Current.GameStateManager.ActiveState as InventoryState;
