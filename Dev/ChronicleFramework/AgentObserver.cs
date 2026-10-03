@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using Helpers;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.GameMenus;
 using TaleWorlds.CampaignSystem.GameState;
@@ -315,10 +317,76 @@ internal static class ChronicleAgentObserver
             json.Append(",\"healthyMemberCount\":").Append(GetPartyNameplateHealthyCount(item));
             json.Append(",\"woundedCount\":").Append(GetPartyNameplateWoundedCount(item));
             json.Append(",\"prisonerCount\":").Append(GetPartyNameplatePrisonerCount(item));
+            var questMarkers = GetMapPartyNameplateQuestMarkers(item);
+            json.Append(",\"questMarkers\":");
+            if (questMarkers == null)
+            {
+                json.Append("null");
+            }
+            else
+            {
+                json.Append('[');
+                for (var markerIndex = 0; markerIndex < questMarkers.Count; markerIndex++)
+                {
+                    if (markerIndex > 0) json.Append(',');
+                    json.Append('"').Append(questMarkers[markerIndex].ToString()).Append('"');
+                }
+                json.Append(']');
+            }
+            json.Append(",\"hasAvailableIssueMarker\":").Append(questMarkers == null ? "null" : Bool(questMarkers.Contains(CampaignUIHelper.IssueQuestFlags.AvailableIssue)));
             json.Append('}');
         }
         json.Append("]}");
         return json.ToString();
+    }
+
+    private static List<CampaignUIHelper.IssueQuestFlags> GetMapPartyNameplateQuestMarkers(MobileParty party)
+    {
+        if (party == null || !party.IsSpotted() || party.CurrentSettlement != null) return null;
+        var markers = new HashSet<CampaignUIHelper.IssueQuestFlags>();
+        if (party == null || party == MobileParty.MainParty) return new List<CampaignUIHelper.IssueQuestFlags>();
+
+        var leader = party.LeaderHero;
+        if (leader?.Issue != null) markers.Add(CampaignUIHelper.GetIssueType(leader.Issue));
+        AddPartyQuestMarkers(markers, party, leader);
+
+        if (party.Army != null && party.Army.LeaderParty == party)
+        {
+            foreach (var attachedParty in party.Army.LeaderParty.AttachedParties)
+                AddArmyAggregateQuestMarkers(markers, attachedParty, party);
+        }
+
+        var result = new List<CampaignUIHelper.IssueQuestFlags>(markers);
+        result.Sort((left, right) => ((int)left).CompareTo((int)right));
+        return result;
+    }
+
+    private static void AddArmyAggregateQuestMarkers(HashSet<CampaignUIHelper.IssueQuestFlags> markers, MobileParty party, MobileParty nameplateParty)
+    {
+        if (party == null || party == MobileParty.MainParty || party == nameplateParty) return;
+
+        var leader = party.LeaderHero;
+        if (leader?.Issue != null && !markers.Contains(CampaignUIHelper.IssueQuestFlags.TrackedIssue) &&
+            (!markers.Contains(CampaignUIHelper.IssueQuestFlags.AvailableIssue) || !markers.Contains(CampaignUIHelper.IssueQuestFlags.ActiveIssue)))
+            markers.Add(CampaignUIHelper.GetIssueType(leader.Issue));
+
+        if ((markers.Contains(CampaignUIHelper.IssueQuestFlags.TrackedStoryQuest) || markers.Contains(CampaignUIHelper.IssueQuestFlags.ActiveIssue)) &&
+            markers.Contains(CampaignUIHelper.IssueQuestFlags.ActiveStoryQuest))
+            return;
+
+        AddPartyQuestMarkers(markers, party, leader);
+    }
+
+    private static void AddPartyQuestMarkers(HashSet<CampaignUIHelper.IssueQuestFlags> markers, MobileParty party, Hero leader)
+    {
+        foreach (var quest in CampaignUIHelper.GetQuestsRelatedToParty(party))
+        {
+            var isLeaderQuestGiver = leader != null && quest.QuestGiver == leader;
+            var marker = isLeaderQuestGiver
+                ? (quest.IsSpecialQuest ? CampaignUIHelper.IssueQuestFlags.ActiveStoryQuest : CampaignUIHelper.IssueQuestFlags.ActiveIssue)
+                : (quest.IsSpecialQuest ? CampaignUIHelper.IssueQuestFlags.TrackedStoryQuest : CampaignUIHelper.IssueQuestFlags.TrackedIssue);
+            markers.Add(marker);
+        }
     }
 
     internal static string BuildMapPartyCompositionJson(string partyId)

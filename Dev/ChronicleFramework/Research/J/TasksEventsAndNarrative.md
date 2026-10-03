@@ -127,3 +127,8 @@ StoryMode是独立Campaign mode内容，不是所有Sandbox战役必有的任务
 传统关系数据、家庭和Trait的规则以B/C/I为准；对话、说服、Quest/Incident/日志在此描述它们出现的消费者，不将关系变成一个全局活动清单。Evidence等级区分：本机反编译/数据资源、结构化State运行、自动UI动作/结果和人工视觉确认；本篇大量分支目前只有本机源码链，没有完整Campaign实测。
 
 Chronicle Observer目前重点覆盖Campaign状态、附近对象和Quest摘要；Protocol能读部分GameMenu/Conversation选项和走过的特定Issue/战斗流程，但不是通用Story/Quest/Incident/Journaling/Notification/Tournament/BoardGame Agent。当前没有任何因分类编号而自动推断“已支持”的结论。各域未决玩家行为/观察分母留待W1-M与A-L类别交叉去重，不在此复制完整日志或项目状态。
+
+地图贵族Party上的委托图标来源进一步确认：本机1.4.8 `PartyNameplateVM.RefreshDynamicProperties`在Nameplate处于地图显示状态时，把LeaderHero当前`Issue`经`CampaignUIHelper.GetIssueType`编码到`IssueQuestFlags`，并合并`GetQuestsRelatedToParty`返回的活动/追踪Quest；Army leader还会汇总自身与附属Party的标记。`QuestMarkerVM`从flags显示图标；它拥有Quest标题/提示文本字段不代表玩家仅看地图标记就能读到这些信息。Flag区分AvailableIssue、ActiveIssue、ActiveStoryQuest、TrackedIssue、TrackedStoryQuest；只有AvailableIssue对应待接委托提示，活动/追踪旗标不得一概解释为新任务。
+
+用户于2026-10-01确认地图贵族部队领主名字旁的蓝色感叹号是委托标记。当前`mapPartyTargets`只返回可见独立Party的名称、身份、距离、关系和人数摘要，没有暴露Native nameplate marker；Settlement人物Overlay已有独立局部视图。W2-AU范围仅在现有地图候选里补回有限marker类别，不返回Quest title/description、期限、QuestManager全局清单或隐藏Hero。仍待验证Native UI视觉标记同结构flag、Natural Issue fixture/Army聚合、以及当前`MobileParty.IsVisible`候选和玩家摄像机屏幕显示范围的差异；不把全地图API查询声称为当前镜头截图。
+运行证据：`TestResults/20261003-101114/Temp/MapPartyQuestMarkersResult.json`。从当前`mapPartyTargets`中选择一名本地可见、已Spotted且不在Settlement的Lord Party；Harness通过Native `IssueManager.CheckForIssues`获得该Hero的41个候选之一，并由`CreateNewIssue`创建有效`TheSpyPartyIssue`。创建前该Party `questMarkers=[]`，创建后Native `GetQuestStateOfHero`与观察器均含`AvailableIssue`；第二个Lord Party保持空数组，重复读取稳定，Quest标题/描述/期限未泄漏。Engine帧对照蓝色叹号、源存档hash不变、进程退出。当前只运行AvailableIssue正向/无标记负向；story/active/tracked flags的具体UI与Army nameplate汇总仍未知。此测试Issue只在disposable Campaign内存，不代表玩家接取或接受任务。

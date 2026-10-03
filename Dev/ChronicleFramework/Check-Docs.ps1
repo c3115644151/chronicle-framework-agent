@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.2'
+$contractVersion = '7.3'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -250,6 +250,12 @@ foreach ($barterContextPath in @('Test-AgentSafePassageBarterContext.ps1', 'Harn
 }
 if (-not (Test-Path (Join-Path $harnessRoot 'Test-AgentMapPartyTargets.ps1'))) { throw 'MapPartyTargets regression script is missing.' }
 if (-not (Test-Path (Join-Path $harnessRoot 'Test-AgentMapPartyComposition.ps1'))) { throw 'MapPartyComposition regression script is missing.' }
+if (-not (Test-Path (Join-Path $harnessRoot 'HarnessMapPartyIssueMarkerFixture.cs')) -or -not (Test-Path (Join-Path $harnessRoot 'Test-AgentMapPartyQuestMarkers.ps1'))) { throw 'MapPartyQuestMarkers requires its Native Issue fixture and visual-capture regression script.' }
+if ($harnessScript -notmatch "'MapPartyQuestMarkers'\s*\{\s*@\('Preflight', 'Build', 'MapPartyQuestMarkers'\)" -or $harnessScript -notmatch "Invoke-Stage -Name 'MapPartyQuestMarkers'" -or $harnessScript -notmatch 'Test-AgentMapPartyQuestMarkers\.ps1') { throw 'MapPartyQuestMarkers must remain a separate opt-in Native observation phase with Preflight and Build.' }
+$mapPartyQuestMarkerTest = Get-Content (Join-Path $harnessRoot 'Test-AgentMapPartyQuestMarkers.ps1') -Raw -Encoding UTF8
+$mapPartyQuestMarkerFixture = Get-Content (Join-Path $harnessRoot 'HarnessMapPartyIssueMarkerFixture.cs') -Raw -Encoding UTF8
+if ($mapPartyQuestMarkerTest -notmatch 'harnessSeedMapPartyIssueMarker' -or $mapPartyQuestMarkerTest -notmatch 'AvailableIssueMarkerExposed' -or $mapPartyQuestMarkerTest -notmatch 'NoMarkerPartyRemainsEmpty' -or $mapPartyQuestMarkerTest -notmatch 'ObservationRepeatStable' -or $mapPartyQuestMarkerTest -notmatch 'QuestTextNotLeaked' -or $mapPartyQuestMarkerTest -notmatch 'SourceFixtureUnchanged' -or $mapPartyQuestMarkerTest -notmatch 'ProcessStopped' -or $mapPartyQuestMarkerTest -notmatch 'EngineFrames') { throw 'MapPartyQuestMarkers must test a Native available Issue, a no-marker target, information scope, repeat stability, screenshots, fixture/hash, and process cleanup.' }
+if ($mapPartyQuestMarkerFixture -notmatch 'issueManager\.CheckForIssues' -or $mapPartyQuestMarkerFixture -notmatch 'issueManager\.CreateNewIssue' -or $mapPartyQuestMarkerFixture -match 'leader\.Issue\s*=(?!=)' -or $agentObserverSource -notmatch 'GetMapPartyNameplateQuestMarkers' -or $agentObserverSource -notmatch 'hasAvailableIssueMarker' -or $agentObserverSource -notmatch 'IsSpotted\(\)' -or $agentObserverSource -notmatch 'CurrentSettlement != null' -or $agentCliSource -notmatch "'harnessSeedMapPartyIssueMarker'" -or $agentProtocolSource -notmatch 'case "harnessSeedMapPartyIssueMarker"') { throw 'Map Party Issue marker observation must use Native marker-state rules, distinguish ineligible targets, and keep Issue fixture creation Harness-only.' }
 $mainHeroSkillsTest = Get-Content (Join-Path $harnessRoot 'Test-AgentMainHeroSkills.ps1') -Raw -Encoding UTF8
 if ($mainHeroSkillsTest -notmatch 'mainHeroSkills' -or $mainHeroSkillsTest -notmatch 'harnessPlayerSkillsDiagnostics' -or $mainHeroSkillsTest -notmatch 'LevelsMatchNative' -or $mainHeroSkillsTest -notmatch 'SnapshotUnchanged' -or $mainHeroSkillsTest -notmatch 'FixtureUnchanged' -or $mainHeroSkillsTest -notmatch 'ProcessStopped') { throw 'MainHeroSkills must compare the read-only state snapshot to native Hero.GetSkillValue values and prove state/fixture/process safety.' }
 $characterDevelopmentTest = Get-Content (Join-Path $harnessRoot 'Test-AgentCharacterDevelopment.ps1') -Raw -Encoding UTF8

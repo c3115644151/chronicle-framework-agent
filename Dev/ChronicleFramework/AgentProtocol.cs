@@ -456,6 +456,15 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("harnessSiegeJoinDiagnostics requires the Campaign Map state");
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessSiegeJoinFixture.BuildSiegeJoinDiagnostics(ReadString(command, "settlementId"), ReadString(command, "armyLeaderPartyId")));
                     break;
+                case "harnessSeedMapPartyIssueMarker":
+                    var mapPartyIssueMarkerMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var mapPartyIssueMarkerRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(mapPartyIssueMarkerMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(mapPartyIssueMarkerRoot) || !Directory.Exists(mapPartyIssueMarkerRoot))
+                        throw new InvalidOperationException("harnessSeedMapPartyIssueMarker is restricted to a visual Harness run with a Harness temp directory");
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState || Campaign.Current == null)
+                        throw new InvalidOperationException("harnessSeedMapPartyIssueMarker requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessMapPartyIssueMarkerFixture.PrepareNativeAvailableIssueMarker(ReadString(command, "partyId")));
+                    break;
                 case "harnessPrepareSafePassageFixture":
                     var safePassageFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
                     var safePassageFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
