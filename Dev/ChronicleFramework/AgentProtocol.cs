@@ -146,6 +146,17 @@ internal sealed class ChronicleAgentProtocol
                 case "state":
                     WriteResponse(commandId, action, "completed", behavior);
                     break;
+                case "closeEscapeMenu":
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState mapStateForEscape || mapStateForEscape.AtMenu)
+                        throw new InvalidOperationException("closeEscapeMenu requires the unobstructed Campaign Map state");
+                    var mapScreenForEscape = MapScreen.Instance;
+                    if (mapScreenForEscape == null || !mapScreenForEscape.IsEscapeMenuOpened)
+                        throw new InvalidOperationException("closeEscapeMenu requires the Native Campaign Map Escape menu to be open");
+                    mapScreenForEscape.CloseEscapeMenu();
+                    if (mapScreenForEscape.IsEscapeMenuOpened)
+                        throw new InvalidOperationException("Native MapScreen did not close its Escape menu");
+                    WriteResponse(commandId, action, "completed", behavior);
+                    break;
                 case "mapSettlementTargets":
                     if (Game.Current?.GameStateManager?.ActiveState is not MapState)
                         throw new InvalidOperationException("mapSettlementTargets requires the Campaign Map state");
@@ -347,6 +358,20 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("harnessMapDiagnostics is restricted to a visual Harness run with a Harness temp directory");
                     if (Game.Current?.GameStateManager?.ActiveState is not MapState)
                         throw new InvalidOperationException("harnessMapDiagnostics requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, BuildHarnessMapDiagnosticsJson());
+                    break;
+                case "harnessOpenMapEscapeMenu":
+                    var escapeFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var escapeFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(escapeFixtureMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(escapeFixtureRoot) || !Directory.Exists(escapeFixtureRoot))
+                        throw new InvalidOperationException("harnessOpenMapEscapeMenu is restricted to a visual Harness run with a Harness temp directory");
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState mapStateForEscapeFixture || mapStateForEscapeFixture.AtMenu)
+                        throw new InvalidOperationException("harnessOpenMapEscapeMenu requires an unobstructed Campaign Map");
+                    if (MapScreen.Instance == null || MapScreen.Instance.IsEscapeMenuOpened)
+                        throw new InvalidOperationException("harnessOpenMapEscapeMenu requires a closed Native MapScreen Escape menu");
+                    MapScreen.Instance.OpenEscapeMenu();
+                    if (!MapScreen.Instance.IsEscapeMenuOpened)
+                        throw new InvalidOperationException("Native MapScreen did not open its Escape menu");
                     WriteResponse(commandId, action, "completed", behavior, null, BuildHarnessMapDiagnosticsJson());
                     break;
                 case "harnessPlayerSkillsDiagnostics":

@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 using Helpers;
+using SandBox.View.Map;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.GameMenus;
 using TaleWorlds.CampaignSystem.GameState;
@@ -124,6 +125,7 @@ internal static class ChronicleAgentObserver
         Property(json, "gameState", Game.Current?.GameStateManager?.ActiveState?.GetType().Name);
         Property(json, "timeControlMode", campaign.TimeControlMode.ToString(), true);
         Property(json, "menuId", menu?.StringId, true);
+        json.Append(",\"escapeMenuOpen\":").Append(Bool(Game.Current?.GameStateManager?.ActiveState is MapState && MapScreen.Instance?.IsEscapeMenuOpened == true));
         json.Append(",\"encounterActive\":").Append(Bool(PlayerEncounter.IsActive));
         json.Append(",\"lootItemCount\":");
         if (PlayerEncounter.Current == null) json.Append("null");
