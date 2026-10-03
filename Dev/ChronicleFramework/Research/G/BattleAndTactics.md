@@ -28,6 +28,14 @@ W2-AR运行`TestResults/20261002-090646/Temp/JoinEncounterAbandonArmyResult.json
 
 Army加入与Army战斗援助必须按Army是否正在交战区分。用户于2026-10-02确认：交战Army按玩家与两侧的阵营关系显示“加入战斗/不管”或“离开”，没有加入军团选项；双方都与玩家中立时只剩离开。未交战且在Campaign地图行军的Army才有加入成为成员的入口；Army围城时走“加入围城”的另一分支。W2-AS只研究未交战行军Army的入军入口与结果；不要把`army_encounter`源码菜单中的Talk/Join/Attack/Leave集合直接推广成Army正在战斗时的玩家界面。围城与战斗援助保持独立任务/机制契约。
 
+Campaign地图Settlement若已有SiegeEvent，原版另可进入`join_siege_event`。用户说明Army围城时玩家可以加入围城；本机1.4.8源码注册的页面选项分别是Join the continuing siege、Assault the siege camp、Break in to help the defenders和Don't get involved，含义和条件不同。W2-AT只验证原版`join_siege_event`的主加入攻城方选项：condition按`SiegeEvent.CanPartyJoinSide(MainParty,Attacker)`与玩家对Besieger的SafePassage约束筛选；若没有当前Settlement `MapEvent`，其callback设置`BesiegerCamp`、StartPlayerSiege(Attacker)、StartSiegePreparation并置Campaign时钟为UnstoppablePlay；若存在MapEvent则转当前战斗加入分支，不等价于留在围城准备。此路径不是Army membership，也不是友军Army的战斗援助，三者需分开计数与验收。
+
+运行证据：`TestResults/20261003-091025/Temp/JoinSiegeEventResult.json`。Harness在disposable Campaign用Native `SiegeEventManager.StartSiegeEvent`与围城Army准备萨哥特，MainParty通过`move`原生导航进入`join_siege_event`，没有手动打开菜单。Native帧显示当前实际选项“加入继续围城/不参与”；加入前Settlement SiegeEvent有效、双方MapEvent空、MainParty未在BesiegerCamp，Native Attack join条件为真。只选择原版`join_siege_event`后转至`menu_siege_strategies`等待界面，`PlayerSiege.PlayerSide=Attacker`、PlayerSiegeEvent与Settlement SiegeEvent一致、主队加入BesiegerCamp、Encounter关闭且Mission未启动。导航自然将时钟从Stop设为StoppablePlay；选择后原版StartSiegePreparation设`UnstoppablePlay`并自然推进CampaignDay 91077.400375→91077.431638；Gold保持1000，政治夹具完成后的Influence -1保持不变。前后截图、源存档hash不变、进程清理通过。
+
+另一轮同Issue运行`TestResults/20261003-091720/Temp/JoinSiegeEventFailure.json`在地图接近途中收到Native `join_encounter`而非围城准备页；失败帧显示“帮助正在作战的军团/不参与”。该运行没有选择帮助，也未把它记作加入围城成功；它说明接近目标期间可能被另一条遭遇入口截获，测试需按实际菜单分流，而不是把出现的任意遭遇页当成`join_siege_event`。该帧/状态不足以判定生成该菜单的完整MapEvent关系细节；此替代结果仍作为W2后续JoinEncounter/围城相交情境的未覆盖项。
+
+首轮失败`TestResults/20261003-090333/Temp/JoinSiegeEventFailure.json`显示`move`在执行Native Settlement导航前按Chronicle通用安全策略拒绝了敌对萨哥特（当时已有可加入的SiegeEvent）；引擎末帧仍在活动围城图上。该策略差异已修正：普通敌对聚落仍拒绝，只有无Blockade/Settlement MapEvent且Native允许加入Attacker的可见SiegeEvent目标可以导航，未直接写主队围城身份。当前证据不覆盖已有Settlement MapEvent分支、守方Break in、Assault siege camp、Blockade、海战和后续攻城战/Mission。
+
 Campaign时间边界取决于进入的 GameState/Menu：玩家实际进入战斗 Mission 时战役时钟停止；地图等待菜单（例如部分围城准备）可能继续自然推进；遭遇菜单/会面也不能与 Wait menu 的时间规则混为一谈。接敌和创建 MapEvent 本身不是 Agent 隐式 `advance`。F10 记录的 BattleSimulation 使用独立战斗结算进度，不应伪装成 Campaign 日期快进。
 
 ### Chronicle 当前适配、证据与未知

@@ -438,6 +438,24 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("harnessArmyEncounterDiagnostics requires the Campaign Map state");
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessJoinEncounterFixture.BuildMovingArmyEncounterDiagnostics(ReadString(command, "partyId")));
                     break;
+                case "harnessPrepareSiegeJoinFixture":
+                    var siegeJoinFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var siegeJoinFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(siegeJoinFixtureMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(siegeJoinFixtureRoot) || !Directory.Exists(siegeJoinFixtureRoot))
+                        throw new InvalidOperationException("harnessPrepareSiegeJoinFixture is restricted to a visual Harness run with a Harness temp directory");
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState || Campaign.Current == null)
+                        throw new InvalidOperationException("harnessPrepareSiegeJoinFixture requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessSiegeJoinFixture.PrepareNativeSiegeJoin(ReadString(command, "settlementId")));
+                    break;
+                case "harnessSiegeJoinDiagnostics":
+                    var siegeJoinDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var siegeJoinDiagnosticsRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(siegeJoinDiagnosticsMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(siegeJoinDiagnosticsRoot) || !Directory.Exists(siegeJoinDiagnosticsRoot))
+                        throw new InvalidOperationException("harnessSiegeJoinDiagnostics is restricted to a visual Harness run with a Harness temp directory");
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState || Campaign.Current == null)
+                        throw new InvalidOperationException("harnessSiegeJoinDiagnostics requires the Campaign Map state");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleHarnessSiegeJoinFixture.BuildSiegeJoinDiagnostics(ReadString(command, "settlementId"), ReadString(command, "armyLeaderPartyId")));
+                    break;
                 case "harnessPrepareSafePassageFixture":
                     var safePassageFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
                     var safePassageFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
@@ -708,7 +726,11 @@ internal sealed class ChronicleAgentProtocol
                     var settlementId = ReadString(command, "settlementId");
                     var settlement = string.IsNullOrWhiteSpace(settlementId) ? null : Settlement.Find(settlementId);
                     if (settlement == null || !settlement.IsActive || !settlement.IsVisible) throw new InvalidOperationException("settlement is not currently exposed as a visible Campaign map target");
-                    if (settlement.MapFaction != null && FactionManager.IsAtWarAgainstFaction(MobileParty.MainParty.MapFaction, settlement.MapFaction))
+                    var canJoinExistingSiegeAsAttacker = settlement.SiegeEvent != null &&
+                        !settlement.SiegeEvent.IsBlockadeActive && settlement.Party?.MapEvent == null &&
+                        MobileParty.MainParty.SiegeEvent == null && MobileParty.MainParty.BesiegerCamp == null &&
+                        settlement.SiegeEvent.CanPartyJoinSide(PartyBase.MainParty, BattleSideEnum.Attacker);
+                    if (settlement.MapFaction != null && FactionManager.IsAtWarAgainstFaction(MobileParty.MainParty.MapFaction, settlement.MapFaction) && !canJoinExistingSiegeAsAttacker)
                         throw new InvalidOperationException("hostile settlement rejected by safe movement policy");
                     Helpers.NavigationHelper.GetInteractionDataForMainParty(settlement, out var canNavigateToSettlement, out var navigationType, out var targetingPort);
                     if (!canNavigateToSettlement) throw new InvalidOperationException("settlement is not currently navigable by the main party");

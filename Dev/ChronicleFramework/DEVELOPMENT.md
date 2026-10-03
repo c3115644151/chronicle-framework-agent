@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 
-Contract version: 7.1
+Contract version: 7.2
 
 ## 目标与边界
 
@@ -102,6 +102,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Dev\ChronicleFramework\Run
 `JoinEncounterAbandonArmy`是独立可选阶段，不加入`All`。玩家先用本轮可见地图目标与原版`pursue`进入真实`join_encounter`；为隔离弃军菜单条件，visual Harness随后在当前活动事件中用Native `Kingdom.CreateArmy`将MainParty准备成非Leader Army成员，再重新激活同一注册菜单让原版条件重算。只提交当前页面Native `join_encounter_abandon`菜单项。收据必须显式说明成员是Harness准备而非玩家点击Army Management界面建立；验收核对MapEvent/PlayerEncounter、Army内部成员/附属Party、主队Hold、资源/关系/影响力、Campaign时间和退出界面；不得用直接清除`Army`引用替代玩家菜单回调。
 
 `MovingArmyJoin`是独立可选阶段，不加入`All`。它仅测试没有MapEvent/SiegeEvent的Campaign行军Army；先由本轮可见目标创建Native Army，disposable fixture内通过Native ChangeKingdomAction让MainParty和Army处于同Faction，再以原版地图目标交互接近。仅在当前Native `army_encounter`菜单确实开放`army_join_army`时提交；不手动触发Army encounter或直接把MainParty写进Army。Army战斗援助/中立离开走G01，围城加入是另一个上下文，均不混进本阶段。政治Faction切换仅为测试前置，收据必须将其与菜单结果/原版副作用分开。
+
+`JoinSiegeEvent`是独立可选阶段，不加入`All`。Harness在disposable Campaign以Native `SiegeEventManager.StartSiegeEvent`和BesiegerCamp/AI目标路径建立当前可见Fortification SiegeEvent；玩家用地图Settlement目标和原版导航进入`join_siege_event`，只提交实际Enabled的“Join the continuing siege”。结果需区分Native `PlayerSiege`/Siege preparation、Active MapEvent分支和之后Mission；围城WaitMenu造成的Campaign自然时钟推进需单独记录，不作为Join命令隐藏快进。Army行军成员加入、Battle help/leave和Siege join保持独立能力/验收。
 
 `TimeControlLoop` 是独立可选阶段，专门验证测试Provider通过Agent循环选择原版时间档；通用 `AgentLoop` 保持只读观察循环，避免Encounter随机状态污染时间控件断言。
 
@@ -236,6 +238,7 @@ stop()
 | JoinEncounterEligibility | 独立disposable进程分别测试Help Attackers与双方Neutral；Native事件和NPC faction关系由Harness fixture准备，玩家以当前可见地图目标和原版pursue接近；仅攻击方正向提交实际可用Help，双中立只观察 | `TestResults/20261002-081603/Temp/JoinEncounterEligibility-HelpAttackers.json`与`...-Neutral.json`通过：攻击方正向UI只开放Help Attackers/Leave，选择后MainParty在同一MapEvent AttackerSide并回通用Encounter菜单；双中立页面只开放Leave，双方Native `CanPartyJoinBattle=false`且MainParty未入场。三张原生游戏帧保留；Campaign时间只在途中自然推进，选项前后Day/Stop不变。两轮源档hash不变、Agent停止且无Bannerlord残留进程 |
 | JoinEncounterAbandonArmy | 玩家先经可见地图目标与原版pursue进入JoinEncounter；visual Harness在该原生页面通过Native Kingdom.CreateArmy准备MainParty非Leader成员并刷新同一注册菜单，再提交实际Abandon Army选项 | `TestResults/20261002-090646/Temp/JoinEncounterAbandonArmyResult.json`通过：Army成员页面仅显示Help Defender和Abandon Army、普通Leave被过滤；选择弃军后MainParty从Army成员移除/AttachedTo清空，PlayerEncounter关闭回MapState等待，NPC MapEvent EventID0仍未决且无胜者、主队Hold。Day91077.402299/Stop、Gold与双方Influence/战争关系不变；前后Native帧，存档hash不变且进程退出。成员准备是Harness Native `Kingdom.CreateArmy`，非Army Management视觉流程；先入Army再自然追近未复现，属于未覆盖路径 |
 | MovingArmyJoin | 针对用户确认的未交战地图行军Army：Harness用Native ChangeKingdomAction/Kingdom.CreateArmy准备Disposable同Faction Army，玩家经当前可见marker与原版pursue进入`army_encounter`，再提交原版Join Army | `TestResults/20261002-165845/Temp/MovingArmyJoinResult.json`通过：Native Army leader处于GoToPoint行军、无MapEvent/SiegeEvent；`army_encounter`显示Talk/Join Army/Leave，加入后MainParty成为Army member且AttachedTo Leader、PlayerEncounter关闭，回`army_wait`。Join命令即时回执为Stop/Day91077.405；后续原版WaitMenu切`UnstoppableFastForward`，世界日期自然推进至约91077.516。Gold/玩家及Army Leader Influence不变；前后引擎帧、源档hash与进程清理通过。政治加入/Army Management视觉流程和围城Join未覆盖 |
+| JoinSiegeEvent | 在disposable Campaign中准备当前可见Town/Castle的Native SiegeEvent；通过`move`到原版`join_siege_event`，只选择当前可用的“Join the continuing siege”；核验PlayerSiege、BesiegerCamp、菜单、资源、时钟、存档hash与清理 | `TestResults/20261003-091025/Temp/JoinSiegeEventResult.json`通过：旧`move`安全策略拒绝所有敌对Settlement，导致第一次尝试在测试夹具的萨哥特原生攻城事件处被拦，失败留据`20261003-090333`；修正为仅当非Blockade、无Settlement MapEvent且Native `CanPartyJoinSide(Attacker)`为真才允许地图导航后，菜单截图显示“加入继续围城/不参与”，选择前状态为SiegeEvent active、双方MapEvent空、MainParty尚未加入；Native选择后进入`menu_siege_strategies`，`PlayerSiege.PlayerSide=Attacker`、主队在BesiegerCamp、PlayerEncounter结束、没有自动启动Mission。途中地图导航将时间档自然变为StoppablePlay；Native围城准备将档置`UnstoppablePlay`，CampaignDay 91077.400375→91077.431638；Gold 1000不变、fixture前后Influence -1不变（入场时政治转换为Battania仅为Harness夹具）。保存before/after游戏引擎帧；源档hash一致、测试进程已停止。加强资源断言后`20261003-091720`第二轮在地图接近中进入`join_encounter`而不是围城页；失败帧显示Native“帮助作战军团/不参与”选项，未提交选择；具体关系/MapEvent细节未单独记录，因此作为可能遭遇分流而非本验收成功。已通过的结果可计算资源不变断言为真。未覆盖已存在Settlement MapEvent的战斗加入、守方Break in、攻营、Blockade、海战及之后围城战斗/Mission |
 | Movement | 从原版可见聚落marker观察选择Settlement ID，下达原版路径目标并复现普通地图单击时间档位；Harness独立显式步进至抵达，并复用抵达回执中的原生菜单观察 | 目标/菜单/时钟轨迹、失败拒绝、fixture hash；子测试stdout/stderr原文保存在父Harness阶段失败收据，若游戏仍响应则捕获引擎末帧 |
 | Hold | 按原版Map点击语义从正在移动主队切到Hold；动作后不发Pause/Resume/advance，观察Native waiting与CampaignDay | 当前目标清除、defaultBehavior、raw时间档/isWaiting和短自然窗口的日期差；disposable fixture hash、进程清理；失败尽可能留游戏引擎末帧 |
 | MoveToPoint | W2-B仅在陆地用Campaign世界坐标请求有效自由地形点导航；适配层验证CampaignVec2/Face与原版导航模型，通过MapState.ProcessTravel而非直接写位置；Harness可显式步进至目的地 | GoToPoint与location.targetPosition对齐、初末坐标变化/到达、无效Face拒绝且不移主队/切时钟、原版点击时钟模式、fixture hash/进程清理；海上/港口另行验收 |
