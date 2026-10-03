@@ -162,6 +162,12 @@ internal sealed class ChronicleAgentProtocol
                     var inquiryToken = ReadString(command, "token");
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleInquiryAdapter.Respond(inquiryToken, inquiryChoice));
                     break;
+                case "respondMultiSelectionInquiry":
+                    var multiInquiryChoice = ReadString(command, "choice");
+                    var multiInquiryToken = ReadString(command, "token");
+                    var multiInquirySelectedIds = ReadStringArray(command, "selectedIds");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleInquiryAdapter.RespondAlleyMultiSelection(multiInquiryToken, multiInquiryChoice, multiInquirySelectedIds));
+                    break;
                 case "mapSettlementTargets":
                     if (Game.Current?.GameStateManager?.ActiveState is not MapState)
                         throw new InvalidOperationException("mapSettlementTargets requires the Campaign Map state");
@@ -405,6 +411,20 @@ internal sealed class ChronicleAgentProtocol
                     if (!string.Equals(inquiryDiagnosticsMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(inquiryDiagnosticsRoot) || !Directory.Exists(inquiryDiagnosticsRoot))
                         throw new InvalidOperationException("harnessNativeInquiryDiagnostics is restricted to a visual Harness run with a Harness temp directory");
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleInquiryAdapter.BuildHarnessInquiryDiagnosticsJson());
+                    break;
+                case "harnessPrepareAlleyLeaderFixture":
+                    var alleyFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var alleyFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(alleyFixtureMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(alleyFixtureRoot) || !Directory.Exists(alleyFixtureRoot))
+                        throw new InvalidOperationException("harnessPrepareAlleyLeaderFixture is restricted to a visual Harness run with a Harness temp directory");
+                    WriteResponse(commandId, action, "completed", behavior, null, HarnessAlleyLeaderFixture.PrepareTownAlleyLeaderInquiry(ReadString(command, "settlementId")));
+                    break;
+                case "harnessAlleyLeaderDiagnostics":
+                    var alleyDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var alleyDiagnosticsRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(alleyDiagnosticsMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(alleyDiagnosticsRoot) || !Directory.Exists(alleyDiagnosticsRoot))
+                        throw new InvalidOperationException("harnessAlleyLeaderDiagnostics is restricted to a visual Harness run with a Harness temp directory");
+                    WriteResponse(commandId, action, "completed", behavior, null, HarnessAlleyLeaderFixture.BuildDiagnostics(ReadString(command, "settlementId")));
                     break;
                 case "harnessPlayerSkillsDiagnostics":
                     var skillsDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
@@ -2384,6 +2404,28 @@ internal sealed class ChronicleAgentProtocol
         start += marker.Length;
         var end = json.IndexOf('"', start);
         return end < 0 ? null : json.Substring(start, end - start);
+    }
+
+    private static string[] ReadStringArray(string json, string key)
+    {
+        var marker = "\"" + key + "\":[";
+        var start = json.IndexOf(marker, StringComparison.Ordinal);
+        if (start < 0) return Array.Empty<string>();
+        start += marker.Length;
+        var end = json.IndexOf(']', start);
+        if (end < 0) throw new InvalidOperationException("Array value '" + key + "' is not closed");
+        var contents = json.Substring(start, end - start).Trim();
+        if (contents.Length == 0) return Array.Empty<string>();
+        var values = contents.Split(',');
+        var result = new string[values.Length];
+        for (var index = 0; index < values.Length; index++)
+        {
+            var value = values[index].Trim();
+            if (value.Length < 2 || value[0] != '"' || value[value.Length - 1] != '"' || value.Substring(1, value.Length - 2).Contains('\\'))
+                throw new InvalidOperationException("Array value '" + key + "' must contain plain string IDs without escape sequences");
+            result[index] = value.Substring(1, value.Length - 2);
+        }
+        return result;
     }
 
     private static double ReadDouble(string json, string key)
