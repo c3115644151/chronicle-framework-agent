@@ -82,23 +82,32 @@ internal static class HarnessAlleyRosterFixture
         return json.ToString();
     }
 
-    internal static string BuildDiagnostics(string settlementId)
+    internal static string BuildDiagnostics(string settlementId, string alleyTag = null)
     {
         var settlement = Settlement.Find(settlementId);
         var behavior = Campaign.Current?.GetCampaignBehavior<AlleyCampaignBehavior>();
         var listField = typeof(AlleyCampaignBehavior).GetField("_playerOwnedCommonAreaData", BindingFlags.Instance | BindingFlags.NonPublic);
         var rows = listField?.GetValue(behavior) as IList;
-        var data = rows?.Cast<object>().FirstOrDefault(item => (HarnessAlleyLeaderFixture.ReadMember(item, "Alley") as Alley)?.Settlement == settlement);
-        var alley = HarnessAlleyLeaderFixture.ReadMember(data, "Alley") as Alley;
+        var data = rows?.Cast<object>().FirstOrDefault(item =>
+        {
+            var itemAlley = HarnessAlleyLeaderFixture.ReadMember(item, "Alley") as Alley;
+            return itemAlley?.Settlement == settlement && (string.IsNullOrWhiteSpace(alleyTag) || string.Equals(itemAlley.Tag, alleyTag, StringComparison.Ordinal));
+        });
+        var alley = (HarnessAlleyLeaderFixture.ReadMember(data, "Alley") as Alley) ??
+            settlement?.Alleys?.FirstOrDefault(item => item != null &&
+                (string.IsNullOrWhiteSpace(alleyTag) ? item.Owner == Hero.MainHero : string.Equals(item.Tag, alleyTag, StringComparison.Ordinal)));
         var assigned = HarnessAlleyLeaderFixture.ReadMember(data, "AssignedClanMember") as Hero;
         var roster = HarnessAlleyLeaderFixture.ReadMember(data, "TroopRoster") as TroopRoster;
-        if (alley == null || assigned == null || roster == null)
+        if (alley == null)
             throw new InvalidOperationException("Could not read the Native PlayerAlleyData for the test Town.");
+        roster ??= TroopRoster.CreateDummyTroopRoster();
         var json = new StringBuilder(1024);
         json.Append('{');
         Property(json, "settlementId", settlement.StringId);
         Property(json, "alleyOwnerId", alley.Owner?.StringId, true);
-        Property(json, "assignedHeroId", assigned.StringId, true);
+        Property(json, "assignedHeroId", assigned?.StringId, true);
+        json.Append(",\"playerAlleyDataPresent\":").Append(data == null ? "false" : "true");
+        json.Append(",\"underAttack\":").Append(HarnessAlleyLeaderFixture.ReadMember(data, "IsUnderAttack") is bool underAttack && underAttack ? "true" : "false");
         json.Append(",\"alleyRoster\":");
         AppendRoster(json, roster);
         json.Append(",\"mainPartyRoster\":");

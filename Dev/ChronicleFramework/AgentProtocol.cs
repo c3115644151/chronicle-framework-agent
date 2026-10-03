@@ -438,7 +438,7 @@ internal sealed class ChronicleAgentProtocol
                     var alleyRosterDiagnosticsRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
                     if (!string.Equals(alleyRosterDiagnosticsMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(alleyRosterDiagnosticsRoot) || !Directory.Exists(alleyRosterDiagnosticsRoot))
                         throw new InvalidOperationException("harnessAlleyRosterDiagnostics is restricted to a visual Harness run with a Harness temp directory");
-                    WriteResponse(commandId, action, "completed", behavior, null, HarnessAlleyRosterFixture.BuildDiagnostics(ReadString(command, "settlementId")));
+                    WriteResponse(commandId, action, "completed", behavior, null, HarnessAlleyRosterFixture.BuildDiagnostics(ReadString(command, "settlementId"), ReadString(command, "alleyTag")));
                     break;
                 case "harnessPlayerSkillsDiagnostics":
                     var skillsDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");

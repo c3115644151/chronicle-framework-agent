@@ -5,6 +5,7 @@ param(
     [string]$Action,
     [string]$SaveName,
     [string]$SettlementId,
+    [string]$AlleyTag,
     [double]$X,
     [double]$Y,
     [ValidateSet('land')][string]$Surface,
@@ -485,7 +486,7 @@ switch ($Action) {
     }
     'harnessAlleyRosterDiagnostics' {
         if (-not $SettlementId) { throw '-SettlementId is required for Alley roster fixture diagnostics.' }
-        $result = Invoke-ProtocolCommand 'harnessAlleyRosterDiagnostics' @{ settlementId = $SettlementId }
+        $result = Invoke-ProtocolCommand 'harnessAlleyRosterDiagnostics' @{ settlementId = $SettlementId; alleyTag = $AlleyTag }
     }
     'harnessPlayerSkillsDiagnostics' { $result = Invoke-ProtocolCommand 'harnessPlayerSkillsDiagnostics' }
     'harnessCharacterDevelopmentDiagnostics' { $result = Invoke-ProtocolCommand 'harnessCharacterDevelopmentDiagnostics' }
