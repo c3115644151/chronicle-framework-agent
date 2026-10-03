@@ -170,6 +170,59 @@ internal static class ChronicleAgentRecruitment
         return json.ToString();
     }
 
+    internal static string BeginHarnessNativeCapacityInquiry(RecruitmentVM current, string ownerId, string troopId, int slot, out RecruitmentVM preparedViewModel)
+    {
+        var mode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+        var root = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+        if (!string.Equals(mode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(root) || !System.IO.Directory.Exists(root))
+            throw new InvalidOperationException("Native Recruitment Inquiry fixture is restricted to a visual Harness run.");
+        EnsureNativeVolunteerRecruitmentEntryIsAvailable();
+        var viewModel = CreateOrRefresh(current);
+        var selected = viewModel.VolunteerList
+            .Where(owner => string.Equals(owner.OwnerHero.StringId, ownerId, StringComparison.Ordinal))
+            .SelectMany(owner => owner.Troops.Select(troop => new { Owner = owner, Troop = troop }))
+            .FirstOrDefault(option => option.Troop.Character != null && string.Equals(option.Troop.Character.StringId, troopId, StringComparison.Ordinal) && option.Troop.Index == slot);
+        if (selected == null || !selected.Troop.CanBeRecruited)
+            throw new InvalidOperationException("Harness Native Recruitment Inquiry requires a currently available Native volunteer offer.");
+
+        var membersBefore = MobileParty.MainParty.MemberRoster.TotalManCount;
+        var goldBefore = Hero.MainHero.Gold;
+        selected.Troop.ExecuteRecruit();
+        if (!selected.Troop.IsInCart || !viewModel.IsDoneEnabled)
+        {
+            viewModel.ExecuteReset();
+            throw new InvalidOperationException("Native RecruitmentVM could not prepare an affordable volunteer transaction.");
+        }
+        if (viewModel.CurrentPartySize <= viewModel.PartyCapacity)
+        {
+            viewModel.ExecuteReset();
+            throw new InvalidOperationException("Native RecruitmentVM did not exceed capacity; the Native confirmation would be an invalid fixture.");
+        }
+
+        viewModel.ExecuteDone();
+        if (!InformationManager.IsAnyInquiryActive())
+        {
+            viewModel.ExecuteReset();
+            throw new InvalidOperationException("Native RecruitmentVM.ExecuteDone did not display its party capacity Inquiry.");
+        }
+        preparedViewModel = viewModel;
+        var json = new StringBuilder(384);
+        var warningTitle = new TextObject("{=uJro3Bua}Over Limit").ToString();
+        json.Append('{');
+        Property(json, "source", "Native RecruitmentVM.ExecuteDone");
+        Property(json, "warningTitle", warningTitle, true);
+        Property(json, "ownerId", ownerId, true);
+        Property(json, "troopId", troopId, true);
+        json.Append(",\"slot\":").Append(slot);
+        json.Append(",\"membersBefore\":").Append(membersBefore);
+        json.Append(",\"membersWithUncommittedOffer\":").Append(viewModel.CurrentPartySize);
+        json.Append(",\"partyCapacity\":").Append(viewModel.PartyCapacity);
+        json.Append(",\"goldBefore\":").Append(goldBefore);
+        json.Append(",\"goldStillBeforeResponse\":").Append(Hero.MainHero.Gold);
+        json.Append('}');
+        return json.ToString();
+    }
+
     private static InquiryData ExecuteDoneAndConfirmNativeOverLimit(RecruitmentVM viewModel, bool confirmPartySizeWarning)
     {
         InquiryData confirmation = null;

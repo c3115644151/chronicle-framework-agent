@@ -52,7 +52,9 @@ Chronicle当前Observer没有Notification queue/已读标记/待处理调查/场
 
 本机1.4.8.119303 `TaleWorlds.Library.InformationManager`公开`OnShowInquiry(InquiryData, pauseGameActiveState, prioritize)`与`OnHideInquiry`事件、`ShowInquiry/HideInquiry`发出事件，并以UI注册的`IsAnyInquiryActiveInternal`委托提供“是否存在活动Inquiry”的布尔查询；没有公开的CurrentInquiry/当前队列读取器。`InquiryData`保存Title/Text、Yes/No按钮的显示标志与文本、两个可用性谓词、Affirmative/Negative/Timeout委托和过期时长。它本身没有稳定ID；按钮回调属于当前询问的一次性业务后果，不能序列化或拿字段内容推断按钮安全性。`TextInquiryData`及`MBInformationManager.OnShowMultiSelectionInquiry`是不同协议，不能用Yes/No契约代替。
 
-Chronicle现有Party/Recruitment/Trade/Inventory VM适配器只在自己发起Native `Done`期间临时监听`OnShowInquiry`，取得这一条操作所触发的确认并按当次显式确认策略调用其原始回调；这不能说明Agent能观察稍后仍留在屏幕上的活动询问，也不能证明最近一次`OnShowInquiry`必然是当前绘制项（参数含`prioritize`，UI可能延后处理）。因此新能力至少要以当前UI层的`IsAnyInquiryActive`和实际Native Inquiry ViewModel共同证明正在显示的对象，且通过随机每次展示生成的运行期令牌限制回调；否则排队询问、过期对象或其他Inquiry遮挡时不得执行。其真实UI类型、排队/替换顺序、隐藏/超时和GameState/时钟行为仍待1.4.8运行观察。`
+Chronicle现有Party/Recruitment/Trade/Inventory VM适配器只在自己发起Native `Done`期间临时监听`OnShowInquiry`，取得这一条操作所触发的确认并按当次显式确认策略调用其原始回调；这只能证明当前VM操作引发过Inquiry，不能说明Agent能读取屏幕上此刻活动的那一条。源码已确认事件到达GauntletQueryManager后可能直接显示或加入队列，`prioritize`会改变活动/排队顺序，所以不能将最近的OnShow事件等同于当前弹窗。通用观察需同时读取当前活动VM/InquiryData并以Native `IsAnyInquiryActive`核对；每次显示生成新的运行期令牌来拒绝过期按钮调用。Inquiry/SingleQuery/MultiSelection的UI类型和显示/队列/回调链已有静态来源核验；未核的是更多真实玩家操作会产生哪些具体Inquiry，以及它们在不同Campaign时钟/菜单情况下的运行后果。
+
+Native `TaleWorlds.MountAndBlade.GauntletUI.GauntletQueryManager`把`OnShowInquiry`同步交给`CreateQuery`：无活动VM时设置`SingleQueryPopUpVM`/加载`SingleQueryPopup`，再把`InquiryData`记为私有静态`_activeQueryData`；已有活动VM时普通请求进入`_inquiryQueue`，`prioritize=true`则先把新请求和旧active按顺序入队，再关旧询问。`InformationManager.IsAnyInquiryActive()`最终对应active ViewModel非空，不包括单纯队列。关闭时先清当前VM/`_activeQueryData`，再启动队列首项。当前Native `SingleQueryPopUpVM.ExecuteAffirmativeAction/ExecuteNegativeAction`顺序是先调用当前`InquiryData`回调，再关闭窗口；已存在的Agent内部事务适配器为捕获VM触发的容量/撤销提示，使用Hide再Invoke，并非用户按下按钮的准确顺序，不能直接当作通用响应动作。最贴近玩家按钮的受限实现应在活动条件为真时，从版本锁定的GauntletQueryManager读取active VM/数据，并调用Native VM对应`Execute*Action`；类型/字段不匹配必须安全拒绝。以上是安装版源码静态事实；玩家焦点、按键关闭、pause标志与各弹窗VM的运行时呈现仍需当前任务窄测试。
 
 ## L07 Scene 与 Mission：战役场景实例化
 

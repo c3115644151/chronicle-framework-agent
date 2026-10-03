@@ -157,6 +157,11 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("Native MapScreen did not close its Escape menu");
                     WriteResponse(commandId, action, "completed", behavior);
                     break;
+                case "respondInquiry":
+                    var inquiryChoice = ReadString(command, "choice");
+                    var inquiryToken = ReadString(command, "token");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleInquiryAdapter.Respond(inquiryToken, inquiryChoice));
+                    break;
                 case "mapSettlementTargets":
                     if (Game.Current?.GameStateManager?.ActiveState is not MapState)
                         throw new InvalidOperationException("mapSettlementTargets requires the Campaign Map state");
@@ -373,6 +378,33 @@ internal sealed class ChronicleAgentProtocol
                     if (!MapScreen.Instance.IsEscapeMenuOpened)
                         throw new InvalidOperationException("Native MapScreen did not open its Escape menu");
                     WriteResponse(commandId, action, "completed", behavior, null, BuildHarnessMapDiagnosticsJson());
+                    break;
+                case "harnessOpenNativeInquiry":
+                    var inquiryFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var inquiryFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(inquiryFixtureMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(inquiryFixtureRoot) || !Directory.Exists(inquiryFixtureRoot))
+                        throw new InvalidOperationException("harnessOpenNativeInquiry is restricted to a visual Harness run with a Harness temp directory");
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState inquiryFixtureMap || inquiryFixtureMap.AtMenu || MapScreen.Instance?.IsEscapeMenuOpened == true)
+                        throw new InvalidOperationException("harnessOpenNativeInquiry requires an unobstructed Campaign Map without an Escape menu");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleInquiryAdapter.BeginHarnessInquiryFixture());
+                    break;
+                case "harnessOpenRecruitmentInquiry":
+                    var recruitmentInquiryMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var recruitmentInquiryRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(recruitmentInquiryMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(recruitmentInquiryRoot) || !Directory.Exists(recruitmentInquiryRoot))
+                        throw new InvalidOperationException("harnessOpenRecruitmentInquiry is restricted to a visual Harness run with a Harness temp directory");
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState || ChronicleInquiryAdapter.IsInquiryOpen || MapScreen.Instance?.IsEscapeMenuOpened == true)
+                        throw new InvalidOperationException("harnessOpenRecruitmentInquiry requires a clear Campaign Map without another modal");
+                    var recruitmentInquiryData = ChronicleAgentRecruitment.BeginHarnessNativeCapacityInquiry(_recruitmentViewModel, ReadString(command, "ownerId"), ReadString(command, "troopId"), ReadRequiredInteger(command, "slot"), out var recruitmentInquiryViewModel);
+                    _recruitmentViewModel = recruitmentInquiryViewModel;
+                    WriteResponse(commandId, action, "completed", behavior, null, recruitmentInquiryData);
+                    break;
+                case "harnessNativeInquiryDiagnostics":
+                    var inquiryDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var inquiryDiagnosticsRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(inquiryDiagnosticsMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(inquiryDiagnosticsRoot) || !Directory.Exists(inquiryDiagnosticsRoot))
+                        throw new InvalidOperationException("harnessNativeInquiryDiagnostics is restricted to a visual Harness run with a Harness temp directory");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleInquiryAdapter.BuildHarnessInquiryDiagnosticsJson());
                     break;
                 case "harnessPlayerSkillsDiagnostics":
                     var skillsDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
@@ -715,8 +747,8 @@ internal sealed class ChronicleAgentProtocol
                     break;
                 case "pursue":
                     var mapStateForPursuit = Game.Current?.GameStateManager?.ActiveState as MapState;
-                    if (mapStateForPursuit == null || mapStateForPursuit.AtMenu || MapScreen.Instance?.IsEscapeMenuOpened == true)
-                        throw new InvalidOperationException("pursuit requires the unobstructed Campaign Map; a native Map menu/Escape menu is open");
+                    if (mapStateForPursuit == null || mapStateForPursuit.AtMenu || MapScreen.Instance?.IsEscapeMenuOpened == true || ChronicleInquiryAdapter.IsInquiryOpen)
+                        throw new InvalidOperationException("pursuit requires the unobstructed Campaign Map; a native Map menu, Escape menu, or Inquiry is open");
                     if (PlayerEncounter.IsActive || MobileParty.MainParty.CurrentSettlement != null || MobileParty.MainParty.MapEvent != null)
                         throw new InvalidOperationException("pursuit requires the campaign map with no active encounter");
                     var targetPartyId = ReadString(command, "partyId");
@@ -759,8 +791,8 @@ internal sealed class ChronicleAgentProtocol
                     WriteResponse(commandId, action, "completed", behavior, null, SetNativeTimeSpeed(2));
                     break;
                 case "move":
-                    if (PlayerEncounter.IsActive || MobileParty.MainParty.CurrentSettlement != null || MobileParty.MainParty.MapEvent != null)
-                        throw new InvalidOperationException("settlement movement requires the campaign map with no active encounter");
+                    if (ChronicleInquiryAdapter.IsInquiryOpen || MapScreen.Instance?.IsEscapeMenuOpened == true || PlayerEncounter.IsActive || MobileParty.MainParty.CurrentSettlement != null || MobileParty.MainParty.MapEvent != null)
+                        throw new InvalidOperationException("settlement movement requires the unobstructed Campaign Map with no Native menu, Escape menu, Inquiry, or active Encounter");
                     var settlementId = ReadString(command, "settlementId");
                     var settlement = string.IsNullOrWhiteSpace(settlementId) ? null : Settlement.Find(settlementId);
                     if (settlement == null || !settlement.IsActive || !settlement.IsVisible) throw new InvalidOperationException("settlement is not currently exposed as a visible Campaign map target");
@@ -777,8 +809,8 @@ internal sealed class ChronicleAgentProtocol
                     WriteResponse(commandId, action, "completed", behavior);
                     break;
                 case "moveToPoint":
-                    if (PlayerEncounter.IsActive || MobileParty.MainParty.CurrentSettlement != null || MobileParty.MainParty.MapEvent != null)
-                        throw new InvalidOperationException("point movement requires the campaign map with no active encounter");
+                    if (ChronicleInquiryAdapter.IsInquiryOpen || MapScreen.Instance?.IsEscapeMenuOpened == true || PlayerEncounter.IsActive || MobileParty.MainParty.CurrentSettlement != null || MobileParty.MainParty.MapEvent != null)
+                        throw new InvalidOperationException("point movement requires the unobstructed Campaign Map with no Native menu, Escape menu, Inquiry, or active Encounter");
                     var mapStateForPointMove = Game.Current.GameStateManager.ActiveState as MapState;
                     if (mapStateForPointMove == null || mapStateForPointMove.AtMenu)
                         throw new InvalidOperationException("point movement requires the unblocked native campaign map state");
