@@ -80,6 +80,8 @@ try {
         { throw "Native manage_alley menu option did not enter the Alley menu: $($entry.state.context | ConvertTo-Json -Depth 5 -Compress)" }
     Capture-EngineFrame $frameAlley 'manage-alley'
     $alleyMenu = Invoke-AgentCli 'menu' @('-CommandId', "$prefix-alley-options")
+    $alleyOverlayCharacters = @($alleyMenu.state.settlementOverlayCharacters)
+    $assignedLeaderInAlleyOverlay = @($alleyOverlayCharacters | Where-Object { $_.heroId -eq [string]$fixture.data.assignedHeroId } | Select-Object -First 1)
     $backOption = @($alleyMenu.state.availableMenuOptions | Where-Object { $_.id -eq 'back' -and $_.available -and $_.enabled } | Select-Object -First 1)
     if ($backOption.Count -ne 1) { throw 'Current Native manage_alley did not expose its enabled back option.' }
 
@@ -110,6 +112,9 @@ try {
         Fixture = $fixture.data
         TownEntryOption = $entryOption[0]
         AlleyMenuOptions = $alleyMenu.state.availableMenuOptions
+        AlleyMenuCharacters = $alleyOverlayCharacters
+        AssignedLeaderInAlleyMenuCharacters = ($assignedLeaderInAlleyOverlay.Count -eq 1)
+        AssignedLeaderAlleyMenuCharacter = $assignedLeaderInAlleyOverlay
         ResultMenuId = [string]$leave.state.context.menuId
         GameStateStayedMap = $nativeEntryReturn
         ActiveMissionAfterEntry = $entry.state.mission

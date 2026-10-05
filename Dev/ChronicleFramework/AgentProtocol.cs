@@ -1495,6 +1495,23 @@ internal sealed class ChronicleAgentProtocol
                 .Distinct()
                 .OrderBy(hero => hero.StringId, StringComparer.Ordinal)
                 .ToArray();
+        var activeHeroAgents = missionAgents
+            .Where(agent => agent != null && agent.IsActive() && agent.IsHuman)
+            .Select(agent => new { Agent = agent, Character = agent.Character as CharacterObject, Hero = (agent.Character as CharacterObject)?.HeroObject })
+            .Where(item => item.Hero != null)
+            .Select(item => new
+            {
+                item.Agent,
+                item.Character,
+                item.Hero,
+                Distance = mainAgent == null ? (double?)null : Math.Sqrt(
+                    Math.Pow(mainAgent.Position.X - item.Agent.Position.X, 2) +
+                    Math.Pow(mainAgent.Position.Y - item.Agent.Position.Y, 2) +
+                    Math.Pow(mainAgent.Position.Z - item.Agent.Position.Z, 2)),
+                LocationId = Settlement.CurrentSettlement?.LocationComplex?.GetLocationOfCharacter(item.Hero)?.StringId
+            })
+            .OrderBy(item => item.Distance ?? double.MaxValue)
+            .ToArray();
 
         var json = new StringBuilder(1024);
         json.Append('{');
@@ -1522,6 +1539,22 @@ internal sealed class ChronicleAgentProtocol
             json.Append(",\"z\":").Append(item.Agent.Position.Z.ToString("R", CultureInfo.InvariantCulture)).Append("}}");
         }
         json.Append(']');
+        json.Append(",\"activeHeroAgents\":[");
+        for (var index = 0; index < activeHeroAgents.Length; index++)
+        {
+            if (index > 0) json.Append(',');
+            var item = activeHeroAgents[index];
+            json.Append('{');
+            json.Append("\"agentIndex\":").Append(item.Agent.Index);
+            json.Append(",\"characterId\":\"").Append(Escape(item.Character?.StringId)).Append('"');
+            json.Append(",\"heroId\":\"").Append(Escape(item.Hero.StringId)).Append('"');
+            json.Append(",\"name\":\"").Append(Escape(item.Hero.Name?.ToString())).Append('"');
+            json.Append(",\"isNotable\":").Append(item.Hero.IsNotable ? "true" : "false");
+            json.Append(",\"locationId\":\"").Append(Escape(item.LocationId)).Append('"');
+            json.Append(",\"distance\":").Append(item.Distance.HasValue ? item.Distance.Value.ToString("R", CultureInfo.InvariantCulture) : "null");
+            json.Append('}');
+        }
+        json.Append(']');
         json.Append(",\"locationIssueOwnerCount\":").Append(locationIssueOwners.Length);
         json.Append(",\"locationIssueOwners\":[");
         for (var index = 0; index < locationIssueOwners.Length; index++)
@@ -1536,7 +1569,7 @@ internal sealed class ChronicleAgentProtocol
             json.Append('}');
         }
         json.Append(']');
-        json.Append("]}");
+        json.Append('}');
         return json.ToString();
     }
 
