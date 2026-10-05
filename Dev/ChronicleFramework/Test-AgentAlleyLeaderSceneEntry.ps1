@@ -17,7 +17,7 @@ $prefix = 'alley-leader-entry-' + (Get-Date -Format 'yyyyMMddHHmmssfff')
 $failedStep = 'preflight'
 $frameTown = Join-Path $frameRoot 'alley-leader-entry-town-menu.bmp'
 $frameMission = Join-Path $frameRoot 'alley-leader-entry-town-streets.bmp'
-$frameAfterWalk = Join-Path $frameRoot 'alley-leader-entry-after-walk.bmp'
+$frameAfterNavigation = Join-Path $frameRoot 'alley-leader-entry-after-navigation.bmp'
 $frameConversation = Join-Path $frameRoot 'alley-leader-entry-conversation.bmp'
 
 if (-not (Test-Path -LiteralPath $savePath)) { throw "Disposable Campaign fixture not found: $LoadSaveName" }
@@ -70,6 +70,7 @@ try {
     if ($entryMenu.state.context.menuId -ne 'town' -or $walkOption.Count -ne 1)
         { throw "Native Town did not expose its enabled 'town_streets' option: $($entryMenu.state.availableMenuOptions | ConvertTo-Json -Depth 4 -Compress)" }
     $assignedHeroId = [string]$fixture.data.assignedHeroId
+    $alleyBaseline = Invoke-AgentCli 'harnessAlleyRosterDiagnostics' @('-SettlementId', $TargetSettlementId, '-AlleyTag', [string]$fixture.data.alleyTag, '-CommandId', "$prefix-alley-baseline") 30
     $overlayCharacters = @($entryMenu.state.settlementOverlayCharacters)
     $assignedHeroOverlayEntry = @($overlayCharacters | Where-Object { $_.heroId -eq $assignedHeroId } | Select-Object -First 1)
     Capture-EngineFrame $frameTown 'town'
@@ -92,53 +93,92 @@ try {
     Capture-EngineFrame $frameMission 'town-streets'
     $nearbyAssignedHero = @($entered.state.mission.nearbySceneAgents | Where-Object { $_.characterId -eq $assignedHeroId } | Select-Object -First 1)
     $missionAssignedHero = @($nativeMissionDiagnostics.data.activeHeroAgents | Where-Object { $_.heroId -eq $assignedHeroId } | Select-Object -First 1)
-    $walkSamples = [System.Collections.Generic.List[object]]::new()
-    $walkStart = $entered.state.mission.mainAgent.position
-    for ($step = 0; $step -lt 24; $step++) {
-        $walkReceipt = Invoke-AgentCli 'missionInput' @('-X', '0', '-Y', '1', '-DurationSeconds', '0.5', '-CommandId', "$prefix-walk-$step") 30
-        if ($walkReceipt.status -ne 'completed') { throw "Native bounded forward input failed at step ${step}: $($walkReceipt.error)" }
-        $walkSamples.Add([ordered]@{ Step = $step + 1; ReceiptStatus = $walkReceipt.status })
-        Start-Sleep -Milliseconds 150
+    $remoteNavigationRejectedWithoutSceneObservation = $null
+    $initialAssignedLeader = if ($missionAssignedHero.Count -eq 1) { $missionAssignedHero[0] } else { $null }
+    if ($initialAssignedLeader -and [double]$initialAssignedLeader.distance -gt 12.0) {
+        $positionBeforeUnobservedNavigation = $entered.state.mission.mainAgent.position
+        $unobservedNavigation = Invoke-AgentCli 'missionNavigateToAgent' @('-AgentIndex', [string]$initialAssignedLeader.agentIndex, '-DurationSeconds', '8', '-CommandId', "$prefix-reject-unobserved-remote") 30
+        $positionAfterUnobservedNavigation = $unobservedNavigation.state.mission.mainAgent.position
+        $remoteNavigationRejectedWithoutSceneObservation = ($unobservedNavigation.status -eq 'rejected' -and
+            [double]$positionBeforeUnobservedNavigation.x -eq [double]$positionAfterUnobservedNavigation.x -and
+            [double]$positionBeforeUnobservedNavigation.y -eq [double]$positionAfterUnobservedNavigation.y -and
+            [double]$positionBeforeUnobservedNavigation.z -eq [double]$positionAfterUnobservedNavigation.z)
+        if (-not $remoteNavigationRejectedWithoutSceneObservation) { throw 'Remote navigation succeeded without an ordinary local or explicit scene-level observation.' }
     }
-    Start-Sleep -Milliseconds 500
-    $afterWalk = Invoke-AgentCli 'state' @('-CommandId', "$prefix-after-walk") 30
-    $afterWalkDiagnostics = Invoke-AgentCli 'harnessMissionDiagnostics' @('-CommandId', "$prefix-after-walk-diagnostics") 30
-    Capture-EngineFrame $frameAfterWalk 'after-walk'
-    $approachState = $afterWalk
-    $nearbyLeaderAfterWalk = @($approachState.state.mission.nearbySceneAgents | Where-Object { $_.characterId -eq $assignedHeroId } | Select-Object -First 1)
-    $leaderAfterWalk = @($afterWalkDiagnostics.data.activeHeroAgents | Where-Object { $_.heroId -eq $assignedHeroId } | Select-Object -First 1)
-    $approachSteps = 0
-    $approachDeadline = [DateTime]::UtcNow.AddSeconds(20)
-    while ($nearbyLeaderAfterWalk.Count -eq 1 -and [double]$nearbyLeaderAfterWalk[0].distance -gt 1.8 -and $approachSteps -lt 32 -and [DateTime]::UtcNow -lt $approachDeadline) {
-        $mainAgent = $approachState.state.mission.mainAgent
-        $forwardX = [double]$mainAgent.lookDirection.x
-        $forwardY = [double]$mainAgent.lookDirection.y
-        $forwardLength = [Math]::Sqrt($forwardX * $forwardX + $forwardY * $forwardY)
-        if ($forwardLength -lt 0.01) { throw 'Town MainAgent look direction became degenerate during observed Alley leader approach.' }
-        $forwardX /= $forwardLength
-        $forwardY /= $forwardLength
-        $deltaX = [double]$nearbyLeaderAfterWalk[0].position.x - [double]$mainAgent.position.x
-        $deltaY = [double]$nearbyLeaderAfterWalk[0].position.y - [double]$mainAgent.position.y
-        $axisX = ($deltaX * $forwardY) - ($deltaY * $forwardX)
-        $axisY = ($deltaX * $forwardX) + ($deltaY * $forwardY)
-        $axisLength = [Math]::Sqrt($axisX * $axisX + $axisY * $axisY)
-        if ($axisLength -lt 0.01) { throw 'Observed Town Alley leader has no horizontal approach direction.' }
-        $moveStep = Invoke-AgentCli 'missionInput' @('-X', [string]($axisX / $axisLength), '-Y', [string]($axisY / $axisLength), '-DurationSeconds', '0.35', '-CommandId', "$prefix-approach-$approachSteps")
-        if ($moveStep.status -ne 'completed') { throw 'Native bounded Mission movement input was rejected during observed Alley leader approach.' }
-        Start-Sleep -Milliseconds 300
-        $approachState = Invoke-AgentCli 'state' @('-CommandId', "$prefix-approach-state-$approachSteps") 30
-        $nearbyLeaderAfterWalk = @($approachState.state.mission.nearbySceneAgents | Where-Object { $_.characterId -eq $assignedHeroId } | Select-Object -First 1)
-        $approachSteps++
+
+    $failedStep = 'query-current-Location-Mission-scene-agents'
+    $sceneObservation = Invoke-AgentCli 'missionSceneAgents' @('-CommandId', "$prefix-scene-agents") 30
+    if ($sceneObservation.status -ne 'completed' -or -not $sceneObservation.data -or $sceneObservation.data.sceneName -ne $entered.state.mission.sceneName)
+        { throw "Current Mission scene-agent query failed or reported a different scene: $($sceneObservation | ConvertTo-Json -Depth 5 -Compress)" }
+    $assignedSceneAgent = @($sceneObservation.data.agents | Where-Object { $_.heroId -eq $assignedHeroId } | Select-Object -First 1)
+    if ($assignedSceneAgent.Count -ne 1) { throw "Assigned Alley leader was in the Harness-only Mission census but missing from the Agent's current-scene observation: $($sceneObservation.data | ConvertTo-Json -Depth 5 -Compress)" }
+
+    $navigationAttempts = [System.Collections.Generic.List[object]]::new()
+    $navigationState = $sceneObservation
+    $navigationError = $null
+    $navigationLimit = 10
+    for ($attempt = 0; $attempt -lt $navigationLimit -and [double]$assignedSceneAgent[0].distance -gt 1.8; $attempt++) {
+        $failedStep = "native-navmesh-approach-$attempt"
+        $navigationStart = $navigationState
+        $distanceBefore = [double]$assignedSceneAgent[0].distance
+        try {
+            $navigationReceipt = Invoke-AgentCli 'missionNavigateToAgent' @('-AgentIndex', [string]$assignedSceneAgent[0].agentIndex, '-DurationSeconds', '20', '-CommandId', "$prefix-navigate-$attempt") 30
+        }
+        catch { $navigationError = $_.Exception.Message; break }
+        if ($navigationReceipt.status -ne 'completed') { $navigationError = [string]$navigationReceipt.error; break }
+        $navigationEnd = $navigationReceipt
+        $navigationDeadline = [DateTime]::UtcNow.AddSeconds(23)
+        while ([DateTime]::UtcNow -lt $navigationDeadline) {
+            Start-Sleep -Milliseconds 750
+            $navigationEnd = Invoke-AgentCli 'state' @('-CommandId', "$prefix-navigation-state-$attempt-$([Guid]::NewGuid().ToString('N'))") 30
+            if (-not $navigationEnd.state.mission.navigation -or -not $navigationEnd.state.mission.navigation.active) { break }
+        }
+        $positionBefore = $navigationStart.state.mission.mainAgent.position
+        $positionAfter = $navigationEnd.state.mission.mainAgent.position
+        $movementDistance = [Math]::Sqrt([Math]::Pow(([double]$positionAfter.x - [double]$positionBefore.x), 2) + [Math]::Pow(([double]$positionAfter.y - [double]$positionBefore.y), 2) + [Math]::Pow(([double]$positionAfter.z - [double]$positionBefore.z), 2))
+        $failedStep = "refresh-scene-agent-target-$attempt"
+        $navigationState = Invoke-AgentCli 'missionSceneAgents' @('-CommandId', "$prefix-refresh-scene-agents-$attempt") 30
+        if ($navigationState.status -ne 'completed' -or -not $navigationState.data) { $navigationError = 'Could not refresh the current Mission scene-agent observation after a navigation lease.'; break }
+        $assignedSceneAgent = @($navigationState.data.agents | Where-Object { $_.heroId -eq $assignedHeroId } | Select-Object -First 1)
+        $distanceAfter = if ($assignedSceneAgent.Count -eq 1) { [Math]::Round([double]$assignedSceneAgent[0].distance, 3) } else { $null }
+        $navigationAttempts.Add([ordered]@{ Attempt = $attempt + 1; TargetAgentIndex = [int]$navigationReceipt.data.targetAgentIndex; DistanceBefore = [Math]::Round($distanceBefore, 3); DistanceAfter = $distanceAfter; MainAgentDistanceMoved = [Math]::Round($movementDistance, 3); Navigation = $navigationEnd.state.mission.navigation; ControllerRestored = [bool]$navigationEnd.state.mission.mainAgent.isPlayerControlled })
+        if ($assignedSceneAgent.Count -ne 1) { $navigationError = 'Assigned Alley leader left the active Mission during navigation.'; break }
     }
+    $afterNavigation = Invoke-AgentCli 'state' @('-CommandId', "$prefix-after-navigation") 30
+    Capture-EngineFrame $frameAfterNavigation 'after-navigation'
+    $nearbyLeaderAfterNavigation = @($afterNavigation.state.mission.nearbySceneAgents | Where-Object { $_.characterId -eq $assignedHeroId } | Select-Object -First 1)
     $interaction = $null
-    $afterInteraction = $approachState
-    if ($nearbyLeaderAfterWalk.Count -eq 1 -and [double]$nearbyLeaderAfterWalk[0].distance -le 1.8) {
-        $interaction = Invoke-AgentCli 'missionInteract' @('-AgentIndex', [string]$nearbyLeaderAfterWalk[0].agentIndex, '-CommandId', "$prefix-interact")
+    $afterInteraction = $afterNavigation
+    if ($nearbyLeaderAfterNavigation.Count -eq 1 -and [double]$nearbyLeaderAfterNavigation[0].distance -le 1.8) {
+        $failedStep = 'start-native-Alley-leader-conversation'
+        $interaction = Invoke-AgentCli 'missionInteract' @('-AgentIndex', [string]$nearbyLeaderAfterNavigation[0].agentIndex, '-CommandId', "$prefix-interact")
         $afterInteraction = Invoke-AgentCli 'state' @('-CommandId', "$prefix-after-interact") 30
         if ($interaction.status -eq 'completed' -and [bool]$interaction.data.conversationStarted) { Capture-EngineFrame $frameConversation 'conversation' }
     }
-    $walkEnd = $afterWalk.state.mission.mainAgent.position
-    $walkDistance = [Math]::Sqrt([Math]::Pow(([double]$walkEnd.x - [double]$walkStart.x), 2) + [Math]::Pow(([double]$walkEnd.y - [double]$walkStart.y), 2) + [Math]::Pow(([double]$walkEnd.z - [double]$walkStart.z), 2))
+    $alleyAfter = Invoke-AgentCli 'harnessAlleyRosterDiagnostics' @('-SettlementId', $TargetSettlementId, '-AlleyTag', [string]$fixture.data.alleyTag, '-CommandId', "$prefix-alley-after") 30
+    $alleyBusinessStable = ([bool]$alleyBaseline.data.playerAlleyDataPresent -eq [bool]$alleyAfter.data.playerAlleyDataPresent -and
+        [string]$alleyBaseline.data.alleyOwnerId -eq [string]$alleyAfter.data.alleyOwnerId -and
+        [string]$alleyBaseline.data.assignedHeroId -eq [string]$alleyAfter.data.assignedHeroId -and
+        ($alleyBaseline.data.alleyRoster | ConvertTo-Json -Compress) -eq ($alleyAfter.data.alleyRoster | ConvertTo-Json -Compress) -and
+        ($alleyBaseline.data.mainPartyRoster | ConvertTo-Json -Compress) -eq ($alleyAfter.data.mainPartyRoster | ConvertTo-Json -Compress) -and
+        [int]$alleyBaseline.data.gold -eq [int]$alleyAfter.data.gold -and
+        [double]$alleyBaseline.data.influence -eq [double]$alleyAfter.data.influence)
+    $conversation = $afterInteraction.state.context.conversation
+    $remoteTargetWasObserved = ($null -eq $initialAssignedLeader -or [double]$initialAssignedLeader.distance -le 12.0 -or [bool]$remoteNavigationRejectedWithoutSceneObservation)
+    $conversationIdentityMatches = ($interaction -and $conversation -and
+        $interaction.status -eq 'completed' -and [bool]$interaction.data.conversationStarted -and
+        [string]$interaction.data.conversationHeroId -eq $assignedHeroId -and
+        [string]$conversation.heroId -eq $assignedHeroId)
+    $volunteerQuestionOption = @($conversation.options | Where-Object { $_.id -eq 'alley_talk_start_player_owned_alley_manager_answer_2' -and $_.clickable } | Select-Object -First 1)
+    $campaignClockStable = ([double]$entered.campaignDay -eq [double]$afterInteraction.campaignDay -and
+        [string]$entered.state.context.timeControlMode -eq 'Stop' -and
+        [string]$afterInteraction.state.context.timeControlMode -eq 'Stop' -and
+        [double]$alleyBaseline.data.campaignDay -eq [double]$alleyAfter.data.campaignDay -and
+        [string]$alleyBaseline.data.timeControlMode -eq [string]$alleyAfter.data.timeControlMode -and
+        [bool]$alleyBaseline.data.isWaiting -eq [bool]$alleyAfter.data.isWaiting)
+    $navigationReachedLeader = ($assignedSceneAgent.Count -eq 1 -and [double]$assignedSceneAgent[0].distance -le 1.8 -and
+        $nearbyLeaderAfterNavigation.Count -eq 1 -and [double]$nearbyLeaderAfterNavigation[0].distance -le 1.8)
+    $conversationPathSucceeded = ([bool]$navigationReachedLeader -and [bool]$conversationIdentityMatches -and $volunteerQuestionOption.Count -eq 1)
     $fixtureHashAfter = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
     $stop = Invoke-AgentCli 'stop' @('-CommandId', "$prefix-stop") 30
     $allProcessesStopped = -not [bool](Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue)
@@ -158,14 +198,26 @@ try {
         AssignedLeaderNearbyData = $nearbyAssignedHero
         AssignedLeaderInMissionScene = ($missionAssignedHero.Count -eq 1)
         AssignedLeaderMissionData = $missionAssignedHero
-        NativeMovementProbe = [ordered]@{ ProviderKind = 'Harness-only bounded Native forward exploration followed only by target-relative movement after the assigned Hero entered ordinary local observation'; Steps = @($walkSamples); DistanceMoved = [Math]::Round($walkDistance, 3); MainAgentAfterExploration = $afterWalk.state.mission.mainAgent; AssignedLeaderInNearbyObservation = ($nearbyLeaderAfterWalk.Count -eq 1); AssignedLeaderDistanceAfterExploration = if ($leaderAfterWalk.Count -eq 1) { $leaderAfterWalk[0].distance } else { $null }; AssignedLeaderNearbyData = $nearbyLeaderAfterWalk; ObservedTargetApproachSteps = $approachSteps; FinalApproachedTarget = if ($nearbyLeaderAfterWalk.Count -eq 1) { $nearbyLeaderAfterWalk[0] } else { $null }; InteractionReceipt = if ($interaction) { $interaction.data } else { $null }; Conversation = $afterInteraction.state.context.conversation }
-        EngineFrames = @($frameTown, $frameMission, $frameAfterWalk) + $(if (Test-Path -LiteralPath $frameConversation) { @($frameConversation) } else { @() })
+        RemoteNavigationRejectedWithoutSceneObservation = $remoteNavigationRejectedWithoutSceneObservation
+        RemoteTargetGuardVerified = [bool]$remoteTargetWasObserved
+        MissionSceneAgentCount = @($sceneObservation.data.agents).Count
+        SceneScope = [string]$sceneObservation.data.scope
+        AssignedLeaderInSceneObservation = $assignedSceneAgent.Count -eq 1
+        InitialAssignedLeaderSceneDistance = if ($missionAssignedHero.Count -eq 1) { [double]$missionAssignedHero[0].distance } else { $null }
+        NativeSceneNavigation = [ordered]@{ ProviderKind = 'On-demand active Mission agent observation followed by fresh same-Mission target validation and native SandBox.AgentNavigator/NavMesh leases'; Attempts = @($navigationAttempts); Error = $navigationError; FinalAssignedLeaderDistance = if ($assignedSceneAgent.Count -eq 1) { [double]$assignedSceneAgent[0].distance } else { $null }; AssignedLeaderInNearbyObservation = ($nearbyLeaderAfterNavigation.Count -eq 1); NearbyLeader = $nearbyLeaderAfterNavigation; FinalMainAgent = $afterNavigation.state.mission.mainAgent; Conversation = $afterInteraction.state.context.conversation; InteractionReceipt = if ($interaction) { $interaction.data } else { $null } }
+        ConversationPathSucceeded = [bool]$conversationPathSucceeded
+        VolunteerQuestionOption = $volunteerQuestionOption
+        AlleyBusinessStableBeforeAnyDialogueChoice = [bool]$alleyBusinessStable
+        CampaignClockStable = [bool]$campaignClockStable
+        AlleyBaseline = $alleyBaseline.data
+        AlleyAfter = $alleyAfter.data
+        EngineFrames = @($frameTown, $frameMission, $frameAfterNavigation) + $(if (Test-Path -LiteralPath $frameConversation) { @($frameConversation) } else { @() })
         SourceFixtureHashBefore = $fixtureHashBefore
         SourceFixtureHashAfter = $fixtureHashAfter
         SourceFixtureUnchanged = ($fixtureHashBefore -eq $fixtureHashAfter)
         ProcessStopped = [bool]$stop.processStopped
         AllGameProcessesStopped = $allProcessesStopped
-        ProbeSucceeded = ($entered.status -eq 'completed' -and $fixtureHashBefore -eq $fixtureHashAfter -and [bool]$stop.processStopped -and $allProcessesStopped)
+        ProbeSucceeded = ($entered.status -eq 'completed' -and [bool]$remoteTargetWasObserved -and [bool]$conversationPathSucceeded -and [bool]$alleyBusinessStable -and [bool]$campaignClockStable -and $fixtureHashBefore -eq $fixtureHashAfter -and [bool]$stop.processStopped -and $allProcessesStopped)
     }
     $json = $result | ConvertTo-Json -Depth 16
     if ($tempPath -and (Test-Path -LiteralPath $tempPath -PathType Container)) { Set-Content -LiteralPath $resultPath -Value $json -Encoding UTF8 }

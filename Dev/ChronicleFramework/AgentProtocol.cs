@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -57,6 +58,10 @@ internal sealed class ChronicleAgentProtocol
     private float _missionNavigationExpiresAt;
     private float _lastMissionNavigationTickAt;
     private string _missionNavigationStatus;
+    private Mission _missionSceneAgentsObservationMission;
+    private Dictionary<int, Agent> _missionSceneAgentsObservation;
+    private float _missionSceneAgentsObservationAt;
+    private const float MissionSceneAgentsObservationLeaseSeconds = 60f;
     private const int LeaveAreaGameKeyId = 4;
     private const float LeaveAreaHoldSeconds = 2.5f;
     private Mission _missionLeaveMission;
@@ -871,6 +876,17 @@ internal sealed class ChronicleAgentProtocol
                     var pointMoveData = "{\"requested\":{\"x\":" + targetX.ToString("R", CultureInfo.InvariantCulture) + ",\"y\":" + targetY.ToString("R", CultureInfo.InvariantCulture) + ",\"surface\":\"" + Escape(surface) + "\"},\"nativeTarget\":{\"x\":" + actualPoint.X.ToString("R", CultureInfo.InvariantCulture) + ",\"y\":" + actualPoint.Y.ToString("R", CultureInfo.InvariantCulture) + ",\"isOnLand\":" + actualPoint.IsOnLand.ToString().ToLowerInvariant() + "},\"nativeBehavior\":\"" + Escape(mainPartyForPointMove.DefaultBehavior.ToString()) + "\"}";
                     WriteResponse(commandId, action, "completed", behavior, null, pointMoveData);
                     break;
+                case "missionSceneAgents":
+                    var sceneAgentsMission = Mission.Current;
+                    var sceneAgentsMissionState = Game.Current?.GameStateManager?.ActiveState as MissionState;
+                    if (sceneAgentsMissionState == null)
+                        throw new InvalidOperationException("missionSceneAgents requires the current Location MissionState");
+                    var sceneAgentsJson = ChronicleAgentObserver.BuildMissionSceneAgentsJson(sceneAgentsMission, out var observedSceneAgents);
+                    _missionSceneAgentsObservationMission = sceneAgentsMission;
+                    _missionSceneAgentsObservation = observedSceneAgents.ToDictionary(agent => agent.Index);
+                    _missionSceneAgentsObservationAt = EngineTime.ApplicationTime;
+                    WriteResponse(commandId, action, "completed", behavior, null, sceneAgentsJson);
+                    break;
                 case "missionInput":
                     var activeMission = Mission.Current;
                     var missionState = Game.Current.GameStateManager.ActiveState as MissionState;
@@ -931,7 +947,16 @@ internal sealed class ChronicleAgentProtocol
                     var navigationStart = navigationMission.MainAgent.Position;
                     var navigationDestination = navigationTargetAgent.Position;
                     var navigationDistance = Math.Sqrt(Math.Pow(navigationStart.X - navigationDestination.X, 2) + Math.Pow(navigationStart.Y - navigationDestination.Y, 2) + Math.Pow(navigationStart.Z - navigationDestination.Z, 2));
-                    if (navigationDistance > 12.0) throw new InvalidOperationException("missionNavigateToAgent target is outside the current local Agent observation range");
+                    if (navigationDistance > 12.0)
+                    {
+                        var observationIsCurrent = _missionSceneAgentsObservationMission == navigationMission &&
+                            _missionSceneAgentsObservation != null &&
+                            EngineTime.ApplicationTime - _missionSceneAgentsObservationAt <= MissionSceneAgentsObservationLeaseSeconds &&
+                            _missionSceneAgentsObservation.TryGetValue(navigationTargetAgentIndex, out var observedNavigationTarget) &&
+                            ReferenceEquals(observedNavigationTarget, navigationTargetAgent);
+                        if (!observationIsCurrent)
+                            throw new InvalidOperationException("remote missionNavigateToAgent target requires a recent missionSceneAgents observation from this same Mission");
+                    }
                     var requestedNavigationSeconds = ReadDouble(command, "durationSeconds");
                     if (requestedNavigationSeconds == 0) requestedNavigationSeconds = 8.0;
                     if (requestedNavigationSeconds < 1.0 || requestedNavigationSeconds > 20.0)

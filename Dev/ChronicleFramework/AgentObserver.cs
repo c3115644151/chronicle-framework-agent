@@ -897,6 +897,49 @@ internal static class ChronicleAgentObserver
         return json.ToString();
     }
 
+    internal static string BuildMissionSceneAgentsJson(Mission mission, out Agent[] observedAgents)
+    {
+        if (mission == null || mission.MissionEnded || mission.MainAgent == null || !mission.MainAgent.IsActive())
+            throw new InvalidOperationException("missionSceneAgents requires an active Mission with the live player MainAgent");
+        if (!AgentMissionInputPatch.IsSupportedLocationMission(mission) || !mission.IsFriendlyMission)
+            throw new InvalidOperationException("missionSceneAgents supports friendly Town, Tavern, or Village Location Missions only");
+        if (Campaign.Current?.TimeControlMode != TaleWorlds.CampaignSystem.CampaignTimeControlMode.Stop)
+            throw new InvalidOperationException("missionSceneAgents requires the Campaign clock to remain stopped");
+
+        var mainAgent = mission.MainAgent;
+        observedAgents = mission.Agents
+            .Where(agent => agent != null && agent != mainAgent && agent.IsActive() && agent.IsHuman && agent.Character != null)
+            .OrderBy(agent => Distance3D(mainAgent.Position, agent.Position))
+            .ThenBy(agent => agent.Index)
+            .ToArray();
+
+        var json = new StringBuilder(Math.Max(512, observedAgents.Length * 192));
+        json.Append("{\"schemaVersion\":1,\"scope\":\"active human Agents instantiated in the current friendly Location Mission; not a Campaign/global list or camera-visibility claim\"");
+        Property(json, "sceneName", mission.SceneName, true);
+        json.Append(",\"activeAgentCount\":").Append(observedAgents.Length);
+        json.Append(",\"agents\":[");
+        for (var index = 0; index < observedAgents.Length; index++)
+        {
+            if (index > 0) json.Append(',');
+            var agent = observedAgents[index];
+            var character = agent.Character as CharacterObject;
+            var hero = character?.HeroObject;
+            json.Append('{');
+            json.Append("\"agentIndex\":").Append(agent.Index);
+            Property(json, "characterId", character?.StringId, true);
+            Property(json, "heroId", hero?.StringId, true);
+            Property(json, "name", hero?.Name?.ToString() ?? character?.Name?.ToString() ?? agent.Name, true);
+            Property(json, "occupation", hero?.Occupation.ToString() ?? character?.Occupation.ToString(), true);
+            json.Append(",\"isNotable\":").Append(Bool(hero?.IsNotable ?? false));
+            json.Append(",\"isEnemy\":").Append(Bool(agent.IsEnemyOf(mainAgent)));
+            json.Append(",\"distance\":").Append(Number(Distance3D(mainAgent.Position, agent.Position)));
+            json.Append(",\"position\":{\"x\":").Append(Number(agent.Position.X));
+            json.Append(",\"y\":").Append(Number(agent.Position.Y)).Append(",\"z\":").Append(Number(agent.Position.Z)).Append("}}");
+        }
+        json.Append("]}");
+        return json.ToString();
+    }
+
     private static void AppendPartyRoster(StringBuilder json, string propertyName, PartyScreenLogic logic, PartyScreenLogic.PartyRosterSide side, PartyScreenLogic.TroopType type)
     {
         json.Append(",\"").Append(propertyName).Append("\":[");
