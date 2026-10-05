@@ -6,6 +6,7 @@ param(
     [string]$SaveName,
     [string]$SettlementId,
     [string]$AlleyTag,
+    [ValidateSet('natural','noVolunteers','availableVolunteers')][string]$AlleyVolunteerScenario = 'natural',
     [double]$X,
     [double]$Y,
     [ValidateSet('land')][string]$Surface,
@@ -482,7 +483,7 @@ switch ($Action) {
     }
     'harnessPrepareAlleyRosterFixture' {
         if (-not $SettlementId) { throw '-SettlementId must come from the current visible settlement observation.' }
-        $arguments = @{ settlementId = $SettlementId }
+        $arguments = @{ settlementId = $SettlementId; volunteerScenario = $AlleyVolunteerScenario }
         if ($MenuId) { $arguments.menuId = $MenuId }
         $result = Invoke-ProtocolCommand 'harnessPrepareAlleyRosterFixture' $arguments
     }

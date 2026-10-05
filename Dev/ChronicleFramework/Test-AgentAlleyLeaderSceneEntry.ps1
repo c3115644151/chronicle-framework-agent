@@ -2,6 +2,7 @@
 param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
     [string]$TargetSettlementId = 'town_V1',
+    [ValidateSet('natural','noVolunteers','availableVolunteers')][string]$VolunteerScenario = 'natural',
     [int]$TimeoutSeconds = 180
 )
 
@@ -15,10 +16,16 @@ $resultPath = if ($tempPath) { Join-Path $tempPath 'AlleyLeaderSceneEntryResult.
 $previousHarnessMode = $env:CHRONICLE_HARNESS_MODE
 $prefix = 'alley-leader-entry-' + (Get-Date -Format 'yyyyMMddHHmmssfff')
 $failedStep = 'preflight'
-$frameTown = Join-Path $frameRoot 'alley-leader-entry-town-menu.bmp'
-$frameMission = Join-Path $frameRoot 'alley-leader-entry-town-streets.bmp'
-$frameAfterNavigation = Join-Path $frameRoot 'alley-leader-entry-after-navigation.bmp'
-$frameConversation = Join-Path $frameRoot 'alley-leader-entry-conversation.bmp'
+$scenarioSuffix = if ($VolunteerScenario -eq 'natural') { '' } else { "-$VolunteerScenario" }
+$resultFileName = if ($VolunteerScenario -eq 'natural') { 'AlleyLeaderSceneEntryResult.json' } else { "AlleyLeaderVolunteer-$VolunteerScenario-Result.json" }
+$resultPath = if ($tempPath) { Join-Path $tempPath $resultFileName } else { Join-Path $frameRoot $resultFileName }
+$frameTown = Join-Path $frameRoot "alley-leader-entry-town-menu$scenarioSuffix.bmp"
+$frameMission = Join-Path $frameRoot "alley-leader-entry-town-streets$scenarioSuffix.bmp"
+$frameAfterNavigation = Join-Path $frameRoot "alley-leader-entry-after-navigation$scenarioSuffix.bmp"
+$frameConversation = Join-Path $frameRoot "alley-leader-entry-conversation$scenarioSuffix.bmp"
+$frameVolunteerReply = Join-Path $frameRoot "alley-leader-volunteer-reply$scenarioSuffix.bmp"
+$frameVolunteerDecline = Join-Path $frameRoot "alley-leader-volunteer-decline$scenarioSuffix.bmp"
+$frameVolunteerAccepted = Join-Path $frameRoot "alley-leader-volunteer-accepted$scenarioSuffix.bmp"
 
 if (-not (Test-Path -LiteralPath $savePath)) { throw "Disposable Campaign fixture not found: $LoadSaveName" }
 if (Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue) { throw 'Bannerlord is already running.' }
@@ -45,6 +52,44 @@ function Capture-EngineFrame([string]$Path, [string]$Suffix) {
         { throw "Alley Scene-entry frame was not captured: $Path" }
 }
 
+function Continue-AutomaticConversationNodes($Snapshot, [string]$Suffix) {
+    $current = $Snapshot
+    for ($index = 0; $index -lt 6 -and $current.state.context.conversation; $index++) {
+        $clickableOptions = @($current.state.context.conversation.options | Where-Object { $_.clickable })
+        if ($clickableOptions.Count -gt 0) { break }
+        $continue = Invoke-AgentCli 'dialogueContinue' @('-CommandId', "$prefix-continue-$Suffix-$index") 30
+        if ($continue.status -ne 'completed') { break }
+        $current = $continue
+    }
+    return $current
+}
+
+function Test-AlleyBusinessStateUnchanged($Before, $After) {
+    return ([bool]$Before.playerAlleyDataPresent -eq [bool]$After.playerAlleyDataPresent -and
+        [string]$Before.alleyOwnerId -eq [string]$After.alleyOwnerId -and
+        [string]$Before.assignedHeroId -eq [string]$After.assignedHeroId -and
+        ($Before.alleyRoster | ConvertTo-Json -Compress) -eq ($After.alleyRoster | ConvertTo-Json -Compress) -and
+        ($Before.mainPartyRoster | ConvertTo-Json -Compress) -eq ($After.mainPartyRoster | ConvertTo-Json -Compress) -and
+        [int]$Before.gold -eq [int]$After.gold -and
+        [double]$Before.influence -eq [double]$After.influence -and
+        [double]$Before.lastRecruitDay -eq [double]$After.lastRecruitDay)
+}
+
+function Get-MainPartyRosterDelta($Before, $After) {
+    $beforeCounts = @{}
+    foreach ($item in @($Before.mainPartyRoster)) { $beforeCounts[[string]$item.troopId] = [int]$item.count }
+    $result = [System.Collections.Generic.List[object]]::new()
+    foreach ($item in @($After.mainPartyRoster)) {
+        $troopId = [string]$item.troopId
+        $oldCount = if ($beforeCounts.ContainsKey($troopId)) { [int]$beforeCounts[$troopId] } else { 0 }
+        $delta = [int]$item.count - $oldCount
+        if ($delta -ne 0) { $result.Add([pscustomobject]@{ TroopId = $troopId; Before = $oldCount; After = [int]$item.count; Delta = $delta }) }
+        $beforeCounts.Remove($troopId)
+    }
+    foreach ($troopId in @($beforeCounts.Keys)) { $result.Add([pscustomobject]@{ TroopId = [string]$troopId; Before = [int]$beforeCounts[$troopId]; After = 0; Delta = 0 - [int]$beforeCounts[$troopId] }) }
+    return @($result)
+}
+
 try {
     $env:CHRONICLE_HARNESS_MODE = 'visual-capture'
     $failedStep = 'load-disposable-campaign'
@@ -62,7 +107,7 @@ try {
         { throw 'The Campaign Map Party did not reach the Town menu.' }
 
     $failedStep = 'prepare-player-Alley-and-Town-entry'
-    $fixture = Invoke-AgentCli 'harnessPrepareAlleyRosterFixture' @('-SettlementId', $TargetSettlementId, '-MenuId', 'town', '-CommandId', "$prefix-fixture") 60
+    $fixture = Invoke-AgentCli 'harnessPrepareAlleyRosterFixture' @('-SettlementId', $TargetSettlementId, '-MenuId', 'town', '-AlleyVolunteerScenario', $VolunteerScenario, '-CommandId', "$prefix-fixture") 60
     if ($fixture.status -ne 'completed' -or $fixture.state.context.menuId -ne 'town')
         { throw 'Native player-Alley fixture did not leave the Campaign on its Town menu.' }
     $entryMenu = Invoke-AgentCli 'menu' @('-CommandId', "$prefix-town-menu")
@@ -155,14 +200,8 @@ try {
         $afterInteraction = Invoke-AgentCli 'state' @('-CommandId', "$prefix-after-interact") 30
         if ($interaction.status -eq 'completed' -and [bool]$interaction.data.conversationStarted) { Capture-EngineFrame $frameConversation 'conversation' }
     }
-    $alleyAfter = Invoke-AgentCli 'harnessAlleyRosterDiagnostics' @('-SettlementId', $TargetSettlementId, '-AlleyTag', [string]$fixture.data.alleyTag, '-CommandId', "$prefix-alley-after") 30
-    $alleyBusinessStable = ([bool]$alleyBaseline.data.playerAlleyDataPresent -eq [bool]$alleyAfter.data.playerAlleyDataPresent -and
-        [string]$alleyBaseline.data.alleyOwnerId -eq [string]$alleyAfter.data.alleyOwnerId -and
-        [string]$alleyBaseline.data.assignedHeroId -eq [string]$alleyAfter.data.assignedHeroId -and
-        ($alleyBaseline.data.alleyRoster | ConvertTo-Json -Compress) -eq ($alleyAfter.data.alleyRoster | ConvertTo-Json -Compress) -and
-        ($alleyBaseline.data.mainPartyRoster | ConvertTo-Json -Compress) -eq ($alleyAfter.data.mainPartyRoster | ConvertTo-Json -Compress) -and
-        [int]$alleyBaseline.data.gold -eq [int]$alleyAfter.data.gold -and
-        [double]$alleyBaseline.data.influence -eq [double]$alleyAfter.data.influence)
+    $alleyAfterConversation = Invoke-AgentCli 'harnessAlleyRosterDiagnostics' @('-SettlementId', $TargetSettlementId, '-AlleyTag', [string]$fixture.data.alleyTag, '-CommandId', "$prefix-alley-after-conversation") 30
+    $alleyBusinessStableBeforeAnyDialogueChoice = Test-AlleyBusinessStateUnchanged $alleyBaseline.data $alleyAfterConversation.data
     $conversation = $afterInteraction.state.context.conversation
     $remoteTargetWasObserved = ($null -eq $initialAssignedLeader -or [double]$initialAssignedLeader.distance -le 12.0 -or [bool]$remoteNavigationRejectedWithoutSceneObservation)
     $conversationIdentityMatches = ($interaction -and $conversation -and
@@ -170,15 +209,104 @@ try {
         [string]$interaction.data.conversationHeroId -eq $assignedHeroId -and
         [string]$conversation.heroId -eq $assignedHeroId)
     $volunteerQuestionOption = @($conversation.options | Where-Object { $_.id -eq 'alley_talk_start_player_owned_alley_manager_answer_2' -and $_.clickable } | Select-Object -First 1)
+    $navigationReachedLeader = ($assignedSceneAgent.Count -eq 1 -and [double]$assignedSceneAgent[0].distance -le 1.8 -and
+        $nearbyLeaderAfterNavigation.Count -eq 1 -and [double]$nearbyLeaderAfterNavigation[0].distance -le 1.8)
+    $conversationPathSucceeded = ([bool]$navigationReachedLeader -and [bool]$conversationIdentityMatches -and $volunteerQuestionOption.Count -eq 1)
+
+    $branchPassed = ($VolunteerScenario -eq 'natural')
+    $branchEvidence = $null
+    $rosterDelta = @()
+    $alleyAfter = $alleyAfterConversation
+    if ($VolunteerScenario -ne 'natural') {
+        if (-not $conversationPathSucceeded) { throw 'A seeded volunteer branch cannot run until the Native Alley leader Conversation path is active and identity-matched.' }
+        if ($VolunteerScenario -eq 'noVolunteers' -and [double]$fixture.data.weeklyRandomForFixture -ne 2.0) { throw 'The Native no-volunteer fixture did not use its within-week sentinel.' }
+        if ($VolunteerScenario -eq 'availableVolunteers' -and [double]$fixture.data.weeklyRandomForFixture -ge 0.5) { throw 'The Native available-volunteer fixture did not seed a non-empty roster result.' }
+
+        $failedStep = "select-volunteer-question-$VolunteerScenario"
+        $askReceipt = Invoke-AgentCli 'dialogueSelect' @('-OptionId', 'alley_talk_start_player_owned_alley_manager_answer_2', '-CommandId', "$prefix-ask-volunteers")
+        if ($askReceipt.status -ne 'completed') { throw "Native volunteer question option was not selected: $($askReceipt.error)" }
+        $afterQuestion = Continue-AutomaticConversationNodes (Invoke-AgentCli 'state' @('-CommandId', "$prefix-after-volunteer-question") 30) 'volunteer-question'
+        $questionConversation = $afterQuestion.state.context.conversation
+        $questionText = [string]$questionConversation.sentenceText
+        $questionOptions = @($questionConversation.options | Where-Object { $_.clickable })
+        Capture-EngineFrame $frameVolunteerReply 'volunteer-reply'
+        $alleyAfterQuestion = Invoke-AgentCli 'harnessAlleyRosterDiagnostics' @('-SettlementId', $TargetSettlementId, '-AlleyTag', [string]$fixture.data.alleyTag, '-CommandId', "$prefix-after-question-diagnostics") 30
+
+        if ($VolunteerScenario -eq 'noVolunteers') {
+            $noVolunteerReplyShown = -not [string]::IsNullOrWhiteSpace($questionText)
+            $noRecruitmentConfirmationVisible = @($questionOptions | Where-Object { $_.id -in @('alley_talk_start_player_owned_alley_manager_volunteers_3','alley_talk_start_player_owned_alley_manager_volunteers_5') }).Count -gt 0
+            $noVolunteerStateUnchanged = Test-AlleyBusinessStateUnchanged $alleyBaseline.data $alleyAfterQuestion.data
+            $branchPassed = ([double]$fixture.data.weeklyRandomForFixture -eq 2.0 -and $noVolunteerReplyShown -and -not $noRecruitmentConfirmationVisible -and $noVolunteerStateUnchanged)
+            $branchEvidence = [ordered]@{ Scenario = $VolunteerScenario; HarnessSeed = [double]$fixture.data.weeklyRandomForFixture; NativeReply = $questionText; CurrentClickableOptions = $questionOptions; NoRecruitmentConfirmationVisible = (-not $noRecruitmentConfirmationVisible); BusinessStateUnchanged = $noVolunteerStateUnchanged }
+            $afterInteraction = $afterQuestion
+            $alleyAfter = $alleyAfterQuestion
+        }
+        else {
+            $yesOption = @($questionOptions | Where-Object { $_.id -eq 'alley_talk_start_player_owned_alley_manager_volunteers_3' } | Select-Object -First 1)
+            $noNeedOption = @($questionOptions | Where-Object { $_.id -eq 'alley_talk_start_player_owned_alley_manager_volunteers_5' } | Select-Object -First 1)
+            if ($yesOption.Count -ne 1 -or $noNeedOption.Count -ne 1) { throw "The Native available-volunteer branch did not expose both current Yes/No options: $($questionConversation | ConvertTo-Json -Depth 8 -Compress)" }
+
+            $failedStep = 'decline-current-volunteers-without-mutating-roster'
+            $declineReceipt = Invoke-AgentCli 'dialogueSelect' @('-OptionId', 'alley_talk_start_player_owned_alley_manager_volunteers_5', '-CommandId', "$prefix-decline-volunteers")
+            if ($declineReceipt.status -ne 'completed') { throw "Native no-need option was not selected: $($declineReceipt.error)" }
+            $afterDecline = Continue-AutomaticConversationNodes (Invoke-AgentCli 'state' @('-CommandId', "$prefix-after-decline") 30) 'after-decline'
+            $alleyAfterDecline = Invoke-AgentCli 'harnessAlleyRosterDiagnostics' @('-SettlementId', $TargetSettlementId, '-AlleyTag', [string]$fixture.data.alleyTag, '-CommandId', "$prefix-after-decline-diagnostics") 30
+            $declineStateUnchanged = Test-AlleyBusinessStateUnchanged $alleyBaseline.data $alleyAfterDecline.data
+            Capture-EngineFrame $frameVolunteerDecline 'volunteer-decline'
+            $askAgainOption = @($afterDecline.state.context.conversation.options | Where-Object { $_.id -eq 'alley_talk_start_player_owned_alley_manager_answer_2' -and $_.clickable } | Select-Object -First 1)
+            if ($askAgainOption.Count -ne 1) { throw 'Native no-need branch did not return to the manager options with the volunteer question available.' }
+
+            $failedStep = 'reobserve-volunteer-offer-after-decline'
+            $askAgain = Invoke-AgentCli 'dialogueSelect' @('-OptionId', 'alley_talk_start_player_owned_alley_manager_answer_2', '-CommandId', "$prefix-reask-volunteers")
+            $afterReask = Continue-AutomaticConversationNodes (Invoke-AgentCli 'state' @('-CommandId', "$prefix-after-reask") 30) 'after-reask'
+            $reaskOptions = @($afterReask.state.context.conversation.options | Where-Object { $_.clickable })
+            $reaskYesOption = @($reaskOptions | Where-Object { $_.id -eq 'alley_talk_start_player_owned_alley_manager_volunteers_3' } | Select-Object -First 1)
+            if ($askAgain.status -ne 'completed' -or $reaskYesOption.Count -ne 1) { throw 'The same current Native volunteer offer was not visible after declining without mutation.' }
+            $alleyBeforeAccept = Invoke-AgentCli 'harnessAlleyRosterDiagnostics' @('-SettlementId', $TargetSettlementId, '-AlleyTag', [string]$fixture.data.alleyTag, '-CommandId', "$prefix-before-accept-diagnostics") 30
+            Capture-EngineFrame $frameVolunteerReply 'volunteer-reply-again'
+
+            $failedStep = 'accept-current-Native-volunteer-offer'
+            $acceptReceipt = Invoke-AgentCli 'dialogueSelect' @('-OptionId', 'alley_talk_start_player_owned_alley_manager_volunteers_3', '-CommandId', "$prefix-accept-volunteers")
+            if ($acceptReceipt.status -ne 'completed') { throw "Native volunteer acceptance line was not selected: $($acceptReceipt.error)" }
+            $afterAccept = Continue-AutomaticConversationNodes (Invoke-AgentCli 'state' @('-CommandId', "$prefix-after-accept") 30) 'after-accept'
+            $alleyAfter = Invoke-AgentCli 'harnessAlleyRosterDiagnostics' @('-SettlementId', $TargetSettlementId, '-AlleyTag', [string]$fixture.data.alleyTag, '-CommandId', "$prefix-after-accept-diagnostics") 30
+            $rosterDelta = Get-MainPartyRosterDelta $alleyBeforeAccept.data $alleyAfter.data
+            $positiveRosterDeltas = @($rosterDelta | Where-Object { [int]$_.Delta -gt 0 })
+            $addedCount = 0
+            if ($positiveRosterDeltas.Count -gt 0) { $addedCount = [int]($positiveRosterDeltas | Measure-Object -Property Delta -Sum).Sum }
+            $lastRecruitTimeUpdated = [Math]::Abs([double]$alleyAfter.data.lastRecruitDay - [double]$alleyAfter.data.campaignDay) -lt 0.001
+            $goldInfluenceStable = ([int]$alleyBeforeAccept.data.gold -eq [int]$alleyAfter.data.gold -and [double]$alleyBeforeAccept.data.influence -eq [double]$alleyAfter.data.influence)
+            $partySizeLimit = [int]$afterAccept.state.party.sizeLimit
+            $partyMembersBeforeAccept = [int]$afterReask.state.party.members
+            $partyMembersAfterAccept = [int]$afterAccept.state.party.members
+            $overCapacityObserved = ($partyMembersBeforeAccept -eq ($partySizeLimit - 1) -and $partyMembersAfterAccept -gt $partySizeLimit -and -not [bool]$afterAccept.state.context.inquiryOpen)
+            $branchPassed = ([double]$fixture.data.weeklyRandomForFixture -lt 0.5 -and $declineStateUnchanged -and $addedCount -gt 0 -and $lastRecruitTimeUpdated -and $goldInfluenceStable -and $overCapacityObserved)
+            $branchEvidence = [ordered]@{ Scenario = $VolunteerScenario; HarnessSeed = [double]$fixture.data.weeklyRandomForFixture; NativeVolunteerOfferText = [string]$questionConversation.sentenceText; NoNeedOption = $noNeedOption[0]; DeclineStateUnchanged = $declineStateUnchanged; ReaskedAfterDecline = $askAgain.status -eq 'completed'; AcceptanceOption = $reaskYesOption[0]; AcceptReceipt = $acceptReceipt.data; MainPartyRosterDelta = @($rosterDelta); AddedTroopCount = [int]$addedCount; LastRecruitDayBefore = [double]$alleyBeforeAccept.data.lastRecruitDay; LastRecruitTimeUpdatedToCurrentCampaignDay = $lastRecruitTimeUpdated; GoldBefore = [int]$alleyBeforeAccept.data.gold; GoldAfter = [int]$alleyAfter.data.gold; InfluenceBefore = [double]$alleyBeforeAccept.data.influence; InfluenceAfter = [double]$alleyAfter.data.influence; GoldAndInfluenceUnchanged = $goldInfluenceStable; PartyMembersBeforeAccept = $partyMembersBeforeAccept; PartyMembersAfterAccept = $partyMembersAfterAccept; PartySizeLimit = $partySizeLimit; OverCapacityWithoutInquiry = $overCapacityObserved }
+            $afterInteraction = $afterAccept
+            Capture-EngineFrame $frameVolunteerAccepted 'volunteer-accepted'
+        }
+    }
+    $conversationReturnSucceeded = $true
+    if ($VolunteerScenario -ne 'natural') {
+        $closeOption = @($afterInteraction.state.context.conversation.options | Where-Object { $_.id -eq 'alley_talk_start_player_owned_alley_manager_answer_5' -and $_.clickable } | Select-Object -First 1)
+        if ($closeOption.Count -ne 1) { throw "The Native manager conversation had no current 'Never mind' return option: $($afterInteraction.state.context.conversation | ConvertTo-Json -Depth 6 -Compress)" }
+        $closeConversationReceipt = Invoke-AgentCli 'dialogueSelect' @('-OptionId', 'alley_talk_start_player_owned_alley_manager_answer_5', '-CommandId', "$prefix-close-conversation")
+        $afterInteraction = Invoke-AgentCli 'state' @('-CommandId', "$prefix-after-close-conversation") 30
+        $conversationReturnSucceeded = ($closeConversationReceipt.status -eq 'completed' -and $afterInteraction.state.context.gameState -eq 'MissionState' -and $null -eq $afterInteraction.state.context.conversation)
+    }
+    $alleyAfter = Invoke-AgentCli 'harnessAlleyRosterDiagnostics' @('-SettlementId', $TargetSettlementId, '-AlleyTag', [string]$fixture.data.alleyTag, '-CommandId', "$prefix-alley-final") 30
+    $alleyBusinessStable = Test-AlleyBusinessStateUnchanged $alleyBaseline.data $alleyAfter.data
     $campaignClockStable = ([double]$entered.campaignDay -eq [double]$afterInteraction.campaignDay -and
         [string]$entered.state.context.timeControlMode -eq 'Stop' -and
         [string]$afterInteraction.state.context.timeControlMode -eq 'Stop' -and
         [double]$alleyBaseline.data.campaignDay -eq [double]$alleyAfter.data.campaignDay -and
         [string]$alleyBaseline.data.timeControlMode -eq [string]$alleyAfter.data.timeControlMode -and
         [bool]$alleyBaseline.data.isWaiting -eq [bool]$alleyAfter.data.isWaiting)
-    $navigationReachedLeader = ($assignedSceneAgent.Count -eq 1 -and [double]$assignedSceneAgent[0].distance -le 1.8 -and
-        $nearbyLeaderAfterNavigation.Count -eq 1 -and [double]$nearbyLeaderAfterNavigation[0].distance -le 1.8)
-    $conversationPathSucceeded = ([bool]$navigationReachedLeader -and [bool]$conversationIdentityMatches -and $volunteerQuestionOption.Count -eq 1)
+    if ($VolunteerScenario -eq 'natural') { $branchPassed = $true }
+    elseif ($VolunteerScenario -eq 'availableVolunteers') { $branchPassed = ([bool]$branchPassed -and [bool]$conversationReturnSucceeded) }
+    else { $branchPassed = ([bool]$branchPassed -and [bool]$conversationReturnSucceeded) }
+    $allNavigationControllersRestored = (@($navigationAttempts | Where-Object { -not [bool]$_.ControllerRestored }).Count -eq 0)
+    $expectedAlleyOutcomePassed = if ($VolunteerScenario -eq 'availableVolunteers') { [bool]$branchPassed } else { ([bool]$branchPassed -and [bool]$alleyBusinessStable) }
     $fixtureHashAfter = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
     $stop = Invoke-AgentCli 'stop' @('-CommandId', "$prefix-stop") 30
     $allProcessesStopped = -not [bool](Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue)
@@ -207,17 +335,24 @@ try {
         NativeSceneNavigation = [ordered]@{ ProviderKind = 'On-demand active Mission agent observation followed by fresh same-Mission target validation and native SandBox.AgentNavigator/NavMesh leases'; Attempts = @($navigationAttempts); Error = $navigationError; FinalAssignedLeaderDistance = if ($assignedSceneAgent.Count -eq 1) { [double]$assignedSceneAgent[0].distance } else { $null }; AssignedLeaderInNearbyObservation = ($nearbyLeaderAfterNavigation.Count -eq 1); NearbyLeader = $nearbyLeaderAfterNavigation; FinalMainAgent = $afterNavigation.state.mission.mainAgent; Conversation = $afterInteraction.state.context.conversation; InteractionReceipt = if ($interaction) { $interaction.data } else { $null } }
         ConversationPathSucceeded = [bool]$conversationPathSucceeded
         VolunteerQuestionOption = $volunteerQuestionOption
-        AlleyBusinessStableBeforeAnyDialogueChoice = [bool]$alleyBusinessStable
+        VolunteerScenario = $VolunteerScenario
+        VolunteerBranchPassed = [bool]$branchPassed
+        VolunteerBranchEvidence = $branchEvidence
+        ConversationReturnedToMission = [bool]$conversationReturnSucceeded
+        AlleyBusinessStableBeforeAnyDialogueChoice = [bool]$alleyBusinessStableBeforeAnyDialogueChoice
+        FinalAlleyBusinessMatchesBaseline = [bool]$alleyBusinessStable
+        MainPartyRosterDelta = @($rosterDelta)
         CampaignClockStable = [bool]$campaignClockStable
+        AllNavigationControllersRestored = [bool]$allNavigationControllersRestored
         AlleyBaseline = $alleyBaseline.data
         AlleyAfter = $alleyAfter.data
-        EngineFrames = @($frameTown, $frameMission, $frameAfterNavigation) + $(if (Test-Path -LiteralPath $frameConversation) { @($frameConversation) } else { @() })
+        EngineFrames = @($frameTown, $frameMission, $frameAfterNavigation, $frameConversation, $frameVolunteerReply, $frameVolunteerDecline, $frameVolunteerAccepted) | Where-Object { Test-Path -LiteralPath $_ }
         SourceFixtureHashBefore = $fixtureHashBefore
         SourceFixtureHashAfter = $fixtureHashAfter
         SourceFixtureUnchanged = ($fixtureHashBefore -eq $fixtureHashAfter)
         ProcessStopped = [bool]$stop.processStopped
         AllGameProcessesStopped = $allProcessesStopped
-        ProbeSucceeded = ($entered.status -eq 'completed' -and [bool]$remoteTargetWasObserved -and [bool]$conversationPathSucceeded -and [bool]$alleyBusinessStable -and [bool]$campaignClockStable -and $fixtureHashBefore -eq $fixtureHashAfter -and [bool]$stop.processStopped -and $allProcessesStopped)
+        ProbeSucceeded = ($entered.status -eq 'completed' -and [bool]$remoteTargetWasObserved -and [bool]$conversationPathSucceeded -and [bool]$alleyBusinessStableBeforeAnyDialogueChoice -and [bool]$expectedAlleyOutcomePassed -and [bool]$campaignClockStable -and [bool]$allNavigationControllersRestored -and $fixtureHashBefore -eq $fixtureHashAfter -and [bool]$stop.processStopped -and $allProcessesStopped)
     }
     $json = $result | ConvertTo-Json -Depth 16
     if ($tempPath -and (Test-Path -LiteralPath $tempPath -PathType Container)) { Set-Content -LiteralPath $resultPath -Value $json -Encoding UTF8 }

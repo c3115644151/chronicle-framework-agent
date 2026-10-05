@@ -16,7 +16,7 @@ namespace ChronicleFramework;
 
 internal static class HarnessAlleyRosterFixture
 {
-    internal static string PrepareTownAlleyRoster(string settlementId, string destinationMenuId = "manage_alley")
+    internal static string PrepareTownAlleyRoster(string settlementId, string destinationMenuId = "manage_alley", string volunteerScenario = "natural")
     {
         var mode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
         var root = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
@@ -29,7 +29,12 @@ internal static class HarnessAlleyRosterFixture
             throw new InvalidOperationException("Alley roster fixture requires a visible, non-besieged Town without an active battle.");
         if (destinationMenuId != "manage_alley" && destinationMenuId != "town")
             throw new InvalidOperationException("Alley fixture destination must be the Native Town or manage_alley menu.");
-        var alley = settlement.Alleys?.FirstOrDefault(item => item != null && item.Owner == null);
+        if (volunteerScenario != "natural" && volunteerScenario != "noVolunteers" && volunteerScenario != "availableVolunteers")
+            throw new InvalidOperationException("Alley volunteer fixture scenario must be natural, noVolunteers, or availableVolunteers.");
+        var unownedAlleys = settlement.Alleys?.Where(item => item != null && item.Owner == null).ToArray() ?? Array.Empty<Alley>();
+        var alley = volunteerScenario == "availableVolunteers"
+            ? unownedAlleys.FirstOrDefault(item => MBRandom.RandomFloatWithSeed((uint)CampaignTime.Now.ToWeeks, unchecked((uint)item.Tag.GetHashCode())) < 0.5f)
+            : unownedAlleys.FirstOrDefault();
         if (alley == null) throw new InvalidOperationException("No unowned Native Alley is available in this disposable Town.");
 
         var behavior = Campaign.Current.GetCampaignBehavior<AlleyCampaignBehavior>();
@@ -52,12 +57,31 @@ internal static class HarnessAlleyRosterFixture
         // Test-only seed: make the current MainParty troop type available on both sides and
         // provide a legal Left roster that can cross the Native minimum by one transfer.
         MobileParty.MainParty.MemberRoster.AddToCounts(baseTroop, minimum + 2);
+        var partySizeLimit = MobileParty.MainParty.Party.PartySizeLimit;
+        var membersBeforeCapacityFill = MobileParty.MainParty.MemberRoster.TotalManCount;
+        var capacityFillerAdded = 0;
+        if (volunteerScenario == "availableVolunteers")
+        {
+            var targetMembers = partySizeLimit - 1;
+            if (membersBeforeCapacityFill > targetMembers)
+                throw new InvalidOperationException("Available-volunteer fixture cannot demonstrate the native over-capacity result because the disposable MainParty already exceeds the limit-minus-one target.");
+            capacityFillerAdded = targetMembers - membersBeforeCapacityFill;
+            if (capacityFillerAdded > 0)
+                MobileParty.MainParty.MemberRoster.AddToCounts(baseTroop, capacityFillerAdded, insertAtFront: false, woundedCount: 0, xpChange: 0, removeDepleted: true, index: -1);
+        }
         var alleyRoster = TroopRoster.CreateDummyTroopRoster();
         alleyRoster.AddToCounts(assignedHero.CharacterObject, 1);
         alleyRoster.AddToCounts(baseTroop, minimum + 1);
         var constructor = dataType.GetConstructor(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(Alley), typeof(TroopRoster) }, null);
         if (constructor == null) throw new MissingMethodException(dataType.FullName, ".ctor(Alley, TroopRoster)");
         var nativeData = constructor.Invoke(new object[] { alley, alleyRoster });
+        var lastRecruitTimeField = dataType.GetField("LastRecruitTime", BindingFlags.Instance | BindingFlags.NonPublic);
+        if (lastRecruitTimeField == null) throw new MissingFieldException(dataType.FullName, "LastRecruitTime");
+        if (volunteerScenario == "noVolunteers") lastRecruitTimeField.SetValue(nativeData, CampaignTime.Now);
+        var weeklyRandomProperty = dataType.GetProperty("RandomFloatWeekly", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        if (weeklyRandomProperty?.GetValue(nativeData) is not float weeklyRandom) throw new MissingMemberException(dataType.FullName, "RandomFloatWeekly");
+        if (volunteerScenario == "noVolunteers" && weeklyRandom != 2f) throw new InvalidOperationException("Harness no-volunteer branch did not resolve to the Native within-week sentinel.");
+        if (volunteerScenario == "availableVolunteers" && weeklyRandom >= 0.5f) throw new InvalidOperationException("Harness available-volunteer Alley seed did not produce a non-empty Native roster branch.");
         alley.SetOwner(Hero.MainHero);
         playerAlleyData.Add(nativeData);
 
@@ -77,9 +101,16 @@ internal static class HarnessAlleyRosterFixture
         Property(json, "assignedHeroId", assignedHero.StringId, true);
         Property(json, "troopId", baseTroop.StringId, true);
         Property(json, "destinationMenuId", destinationMenuId, true);
+        Property(json, "volunteerScenario", volunteerScenario, true);
+        json.Append(",\"weeklyRandomForFixture\":").Append(weeklyRandom.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+        Property(json, "volunteerScenario", volunteerScenario, true);
         json.Append(",\"initialAlleyCount\":").Append(minimum + 1);
         json.Append(",\"minimumTroops\":").Append(minimum);
         json.Append(",\"maximumTroops\":").Append(maximum);
+        json.Append(",\"partySizeLimit\":").Append(partySizeLimit);
+        json.Append(",\"membersBeforeCapacityFill\":").Append(membersBeforeCapacityFill);
+        json.Append(",\"capacityFillerAdded\":").Append(capacityFillerAdded);
+        json.Append(",\"membersAfterCapacityFill\":").Append(MobileParty.MainParty.MemberRoster.TotalManCount);
         json.Append(",\"initialMainPartyCount\":").Append(MobileParty.MainParty.MemberRoster.GetTroopCount(baseTroop));
         Property(json, "optionId", option.IdString, true);
         json.Append(",\"playerAlleyDataPreparedInMemory\":true}");
@@ -118,6 +149,17 @@ internal static class HarnessAlleyRosterFixture
         AppendRoster(json, MobileParty.MainParty.MemberRoster);
         json.Append(",\"gold\":").Append(Hero.MainHero.Gold);
         json.Append(",\"influence\":").Append(Clan.PlayerClan.Influence.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+        json.Append(",\"lastRecruitDay\":");
+        if (HarnessAlleyLeaderFixture.ReadMember(data, "LastRecruitTime") is CampaignTime lastRecruitTime)
+            json.Append(lastRecruitTime.ToDays.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+        else
+            json.Append("null");
+        json.Append(",\"randomFloatWeekly\":");
+        var weeklyRandomProperty = data?.GetType().GetProperty("RandomFloatWeekly", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        if (weeklyRandomProperty?.GetValue(data) is float randomFloatWeekly)
+            json.Append(randomFloatWeekly.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+        else
+            json.Append("null");
         json.Append(",\"campaignDay\":").Append(CampaignTime.Now.ToDays.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
         Property(json, "timeControlMode", Campaign.Current.TimeControlMode.ToString(), true);
         json.Append(",\"isWaiting\":").Append(Campaign.Current.IsMainPartyWaiting ? "true" : "false");
