@@ -438,12 +438,19 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("harnessPrepareAlleyRosterFixture is restricted to a visual Harness run with a Harness temp directory");
                     WriteResponse(commandId, action, "completed", behavior, null, HarnessAlleyRosterFixture.PrepareTownAlleyRoster(ReadString(command, "settlementId"), ReadString(command, "menuId") ?? "manage_alley", ReadString(command, "volunteerScenario") ?? "natural"));
                     break;
+                case "harnessSeedAlleyAttackFixture":
+                    var alleyAttackFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var alleyAttackFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(alleyAttackFixtureMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(alleyAttackFixtureRoot) || !Directory.Exists(alleyAttackFixtureRoot))
+                        throw new InvalidOperationException("harnessSeedAlleyAttackFixture is restricted to a visual Harness run with a Harness temp directory");
+                    WriteResponse(commandId, action, "completed", behavior, null, HarnessAlleyRosterFixture.SeedAlleyAttack(ReadString(command, "settlementId"), ReadString(command, "alleyTag")));
+                    break;
                 case "harnessAlleyRosterDiagnostics":
                     var alleyRosterDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
                     var alleyRosterDiagnosticsRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
                     if (!string.Equals(alleyRosterDiagnosticsMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(alleyRosterDiagnosticsRoot) || !Directory.Exists(alleyRosterDiagnosticsRoot))
                         throw new InvalidOperationException("harnessAlleyRosterDiagnostics is restricted to a visual Harness run with a Harness temp directory");
-                    WriteResponse(commandId, action, "completed", behavior, null, HarnessAlleyRosterFixture.BuildDiagnostics(ReadString(command, "settlementId"), ReadString(command, "alleyTag")));
+                    WriteResponse(commandId, action, "completed", behavior, null, HarnessAlleyRosterFixture.BuildDiagnostics(ReadString(command, "settlementId"), ReadString(command, "alleyTag"), ReadString(command, "referenceHeroId")));
                     break;
                 case "harnessPlayerSkillsDiagnostics":
                     var skillsDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");

@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Text;
 using SandBox.CampaignBehaviors;
 using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.Actions;
 using TaleWorlds.CampaignSystem.GameMenus;
 using TaleWorlds.CampaignSystem.GameState;
 using TaleWorlds.CampaignSystem.Party;
@@ -117,7 +118,7 @@ internal static class HarnessAlleyRosterFixture
         return json.ToString();
     }
 
-    internal static string BuildDiagnostics(string settlementId, string alleyTag = null)
+    internal static string BuildDiagnostics(string settlementId, string alleyTag = null, string referenceHeroId = null)
     {
         var settlement = Settlement.Find(settlementId);
         var behavior = Campaign.Current?.GetCampaignBehavior<AlleyCampaignBehavior>();
@@ -132,6 +133,8 @@ internal static class HarnessAlleyRosterFixture
             settlement?.Alleys?.FirstOrDefault(item => item != null &&
                 (string.IsNullOrWhiteSpace(alleyTag) ? item.Owner == Hero.MainHero : string.Equals(item.Tag, alleyTag, StringComparison.Ordinal)));
         var assigned = HarnessAlleyLeaderFixture.ReadMember(data, "AssignedClanMember") as Hero;
+        var attackedBy = HarnessAlleyLeaderFixture.ReadMember(data, "UnderAttackBy") as Alley;
+        var referenceHero = string.IsNullOrWhiteSpace(referenceHeroId) ? null : Hero.AllAliveHeroes.FirstOrDefault(hero => string.Equals(hero.StringId, referenceHeroId, StringComparison.Ordinal));
         var roster = HarnessAlleyLeaderFixture.ReadMember(data, "TroopRoster") as TroopRoster;
         if (alley == null)
             throw new InvalidOperationException("Could not read the Native PlayerAlleyData for the test Town.");
@@ -141,6 +144,10 @@ internal static class HarnessAlleyRosterFixture
         Property(json, "settlementId", settlement.StringId);
         Property(json, "alleyOwnerId", alley.Owner?.StringId, true);
         Property(json, "assignedHeroId", assigned?.StringId, true);
+        Property(json, "attackingAlleyTag", attackedBy?.Tag, true);
+        Property(json, "attackingOwnerId", attackedBy?.Owner?.StringId, true);
+        Property(json, "referenceHeroId", referenceHero?.StringId, true);
+        json.Append(",\"mainHeroRelationToReferenceHero\":").Append(referenceHero == null ? "null" : Hero.MainHero.GetRelation(referenceHero).ToString(System.Globalization.CultureInfo.InvariantCulture));
         json.Append(",\"playerAlleyDataPresent\":").Append(data == null ? "false" : "true");
         json.Append(",\"underAttack\":").Append(HarnessAlleyLeaderFixture.ReadMember(data, "IsUnderAttack") is bool underAttack && underAttack ? "true" : "false");
         json.Append(",\"alleyRoster\":");
@@ -164,6 +171,65 @@ internal static class HarnessAlleyRosterFixture
         Property(json, "timeControlMode", Campaign.Current.TimeControlMode.ToString(), true);
         json.Append(",\"isWaiting\":").Append(Campaign.Current.IsMainPartyWaiting ? "true" : "false");
         json.Append('}');
+        return json.ToString();
+    }
+
+    internal static string SeedAlleyAttack(string settlementId, string alleyTag)
+    {
+        var mode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+        var root = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+        if (!string.Equals(mode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(root) || !System.IO.Directory.Exists(root))
+            throw new InvalidOperationException("Alley attack fixtures are restricted to a visual Harness run with its temporary evidence directory.");
+        if (Game.Current?.GameStateManager?.ActiveState is not MapState || Campaign.Current?.CurrentMenuContext?.GameMenu?.StringId != "town")
+            throw new InvalidOperationException("Alley attack fixture setup requires a Native Town Map menu.");
+
+        var settlement = Settlement.Find(settlementId);
+        var behavior = Campaign.Current?.GetCampaignBehavior<AlleyCampaignBehavior>();
+        if (settlement == null || !settlement.IsTown || behavior == null)
+            throw new InvalidOperationException("Alley attack fixture requires a current Town and Native AlleyCampaignBehavior.");
+        var dataType = typeof(AlleyCampaignBehavior).GetNestedType("PlayerAlleyData", BindingFlags.Public | BindingFlags.NonPublic);
+        var listField = typeof(AlleyCampaignBehavior).GetField("_playerOwnedCommonAreaData", BindingFlags.Instance | BindingFlags.NonPublic);
+        var rows = listField?.GetValue(behavior) as IList;
+        var data = rows?.Cast<object>().FirstOrDefault(item =>
+        {
+            var playerAlley = HarnessAlleyLeaderFixture.ReadMember(item, "Alley") as Alley;
+            return playerAlley?.Settlement == settlement && string.Equals(playerAlley.Tag, alleyTag, StringComparison.Ordinal);
+        });
+        var playerAlleyData = HarnessAlleyLeaderFixture.ReadMember(data, "Alley") as Alley;
+        var playerRoster = HarnessAlleyLeaderFixture.ReadMember(data, "TroopRoster") as TroopRoster;
+        if (data == null || playerAlleyData == null || playerRoster == null || playerAlleyData.Owner != Hero.MainHero)
+            throw new InvalidOperationException("Alley attack fixture requires the specified Native PlayerAlleyData.");
+        if (HarnessAlleyLeaderFixture.ReadMember(data, "UnderAttackBy") is Alley)
+            throw new InvalidOperationException("Selected PlayerAlleyData is already under attack.");
+
+        var hostileLeader = settlement.Notables.FirstOrDefault(hero => hero != null && hero.IsGangLeader && !hero.IsDead && hero != Hero.MainHero);
+        if (hostileLeader == null) throw new InvalidOperationException("Town has no living Native gang leader to use as the attacking Alley owner.");
+        var attackingAlley = settlement.Alleys?.FirstOrDefault(item => item != null && item != playerAlleyData && item.Owner != Hero.MainHero);
+        if (attackingAlley == null) throw new InvalidOperationException("Town has no second Native Alley for the attacking GangLeader fixture.");
+        if (attackingAlley.Owner != hostileLeader) attackingAlley.SetOwner(hostileLeader);
+
+        var underAttackField = dataType?.GetField("UnderAttackBy", BindingFlags.Instance | BindingFlags.NonPublic);
+        var dueDateField = dataType?.GetField("AttackResponseDueDate", BindingFlags.Instance | BindingFlags.NonPublic);
+        if (underAttackField == null || dueDateField == null)
+            throw new MissingMemberException(dataType?.FullName, "UnderAttackBy/AttackResponseDueDate");
+        var responseDays = Campaign.Current.Models.AlleyModel.GetAlleyAttackResponseTimeInDays(playerRoster);
+        underAttackField.SetValue(data, attackingAlley);
+        dueDateField.SetValue(data, CampaignTime.DaysFromNow(responseDays));
+        ChangeRelationAction.ApplyPlayerRelation(hostileLeader, -5, true, true);
+
+        if (HarnessAlleyLeaderFixture.ReadMember(data, "IsUnderAttack") is not bool isUnderAttack || !isUnderAttack)
+            throw new InvalidOperationException("Native PlayerAlleyData did not enter its under-attack state.");
+        var json = new StringBuilder(512);
+        json.Append('{');
+        Property(json, "settlementId", settlement.StringId);
+        Property(json, "playerAlleyTag", playerAlleyData.Tag, true);
+        Property(json, "attackingAlleyTag", attackingAlley.Tag, true);
+        Property(json, "attackingHeroId", hostileLeader.StringId, true);
+        Property(json, "attackingHeroName", hostileLeader.Name?.ToString(), true);
+        json.Append(",\"responseDueDay\":").Append(CampaignTime.DaysFromNow(responseDays).ToDays.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+        json.Append(",\"responseDays\":").Append(responseDays.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+        json.Append(",\"relationAfterNativeAttackFixture\":").Append(Hero.MainHero.GetRelation(hostileLeader));
+        json.Append(",\"playerAlleyUnderAttack\":true}");
         return json.ToString();
     }
 
