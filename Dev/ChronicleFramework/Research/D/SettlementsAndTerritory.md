@@ -238,6 +238,8 @@ Nearby Settlement 快照不返回 Governor ID、GovernorOf、Garrison Party ID�
 
 Sandbox `AlleyCampaignBehavior` 是该系统的主要生命周期行为。Town 的玩家入口来自 `town` 菜单新增的“Go to alley”，并进入 `manage_alley` 原版管理GameMenu；菜单初始化注册`alley` MenuLocation，但W2-BB运行确认此入口仍在Campaign Map，无Location Mission/3D场景。已在同一disposable PlayerAlley夹具下逐项检查Native菜单：可见的是应对袭击、更换负责人、管理守军、放弃、返回；不存在负责人的对话选项，管理页人物overlay为空。独立`town_streets`入口会启动`center` Location Mission，原版`AddPlayerAlleyCharacters`把当前Assigned Clan Hero生成在镇中心，负责人对话条件要求该Hero确为`Hero.OneToOneConversationHero`。故玩家要进入其对话至少需要在Mission中接触这名角色；测试发现他并不在城镇菜单可快速交谈的人物overlay里。用户回忆“进入巷子”或许也能对话，但与当前1.4.8已截取的原版管理面板不符，尚不按事实采纳。不要把`MenuLocations`字段推断成已进入物理场景/建立对话。战斗、招募等具体后果继续交叉引用相应D/G/H域。
 
+进入中心场景后，Native `MissionMainAgentInteractionComponent.FocusTick`从当前`MissionScreen.CombatCamera`沿准星方向进行最多10单位的Agent/Focusable射线检查，再由`CurrentFocusedObject`给出当前焦点对象和原生可交谈资格；这是单一准星焦点，不是全城角色清单。Chronicle常规`nearbySceneAgents`是主角周围12单位的局部Agent集合，也不是全屏可见名单。两者都不能单独告知Agent远处城镇角色在哪里；未观察到当前焦点或人物以前，不应用Harness-only Mission census执行导航。
+
 ### 玩家经营 Alley 的状态循环
 
 玩家在 Alley 战斗中获胜后，`AlleyOccupiedByPlayer` 事件让主 Hero 成为 Alley Owner、保存驻守 roster 与指定 Clan Member，并添加 Alley 经验。占领会降低原帮派首领关系；若该镇不属于玩家 Clan，还会降低镇主和部分非帮派 notable 关系。清除/放弃玩家 Alley 会移除 Owner，改变与原 gang leader/notables 的关系并可解除对方的攻击状态。
