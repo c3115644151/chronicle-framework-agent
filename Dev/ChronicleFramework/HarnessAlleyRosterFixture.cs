@@ -155,6 +155,7 @@ internal static class HarnessAlleyRosterFixture
         json.Append(",\"mainPartyRoster\":");
         AppendRoster(json, MobileParty.MainParty.MemberRoster);
         json.Append(",\"gold\":").Append(Hero.MainHero.Gold);
+        json.Append(",\"mainHeroHitPoints\":").Append(Hero.MainHero.HitPoints);
         json.Append(",\"influence\":").Append(Clan.PlayerClan.Influence.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
         json.Append(",\"lastRecruitDay\":");
         if (HarnessAlleyLeaderFixture.ReadMember(data, "LastRecruitTime") is CampaignTime lastRecruitTime)

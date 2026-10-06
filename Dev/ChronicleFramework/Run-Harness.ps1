@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'TimeControlLoop', 'BattleFixture', 'PostBattle', 'Observation', 'CaptivityObservation', 'CaptivityOutcome', 'PrisonCaptivityOutcome', 'EncounterSurrender', 'EncounterEscape', 'JoinEncounterDefenders', 'JoinEncounterEligibility', 'JoinEncounterAbandonArmy', 'MovingArmyJoin', 'JoinSiegeEvent', 'MapNotifications', 'QuickInformation', 'SceneNotification', 'MissionLeave', 'VillageToolsDelivery', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyQuestMarkers', 'MapPartyQuestAcceptance', 'MapEscapeMenu', 'MapInquiry', 'AlleyLeaderInquiry', 'AlleyRosterManagement', 'AlleyAbandonment', 'AlleyEntryMenu', 'MissionSceneNavigation', 'AlleyVolunteerBranches', 'AlleyAttackYield', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'BarterFightRoute', 'BarterSafePassage', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EngageVisibility', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuickTalk', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'VisualCapture', 'All')]
+    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'Protocol', 'AgentLoop', 'TimeControlLoop', 'BattleFixture', 'PostBattle', 'Observation', 'CaptivityObservation', 'CaptivityOutcome', 'PrisonCaptivityOutcome', 'EncounterSurrender', 'EncounterEscape', 'JoinEncounterDefenders', 'JoinEncounterEligibility', 'JoinEncounterAbandonArmy', 'MovingArmyJoin', 'JoinSiegeEvent', 'MapNotifications', 'QuickInformation', 'SceneNotification', 'MissionLeave', 'VillageToolsDelivery', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyQuestMarkers', 'MapPartyQuestAcceptance', 'MapEscapeMenu', 'MapInquiry', 'AlleyLeaderInquiry', 'AlleyRosterManagement', 'AlleyAbandonment', 'AlleyEntryMenu', 'MissionSceneNavigation', 'AlleyVolunteerBranches', 'AlleyAttackYield', 'AlleyAttackFightMission', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'BarterFightRoute', 'BarterSafePassage', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EngageVisibility', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuickTalk', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'VisualCapture', 'All')]
     [string]$Phase = 'All',
     [int]$SmokeTimeoutSeconds = 45,
     [int]$SmokeStabilitySeconds = 8,
@@ -16,7 +16,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.18'
+$HarnessContractVersion = '7.19'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -83,6 +83,7 @@ $alleyAbandonmentScript = Join-Path $harnessRoot 'Test-AgentAlleyAbandonment.ps1
 $alleyEntryMenuScript = Join-Path $harnessRoot 'Test-AgentAlleyEntryMenu.ps1'
 $missionSceneNavigationScript = Join-Path $harnessRoot 'Test-AgentAlleyLeaderSceneEntry.ps1'
 $alleyAttackYieldScript = Join-Path $harnessRoot 'Test-AgentAlleyAttackYield.ps1'
+$alleyAttackFightMissionScript = Join-Path $harnessRoot 'Test-AgentAlleyAttackFightMission.ps1'
 $mapPartyCompositionScript = Join-Path $harnessRoot 'Test-AgentMapPartyComposition.ps1'
 $mapPartyBehaviorScript = Join-Path $harnessRoot 'Test-AgentMapPartyBehavior.ps1'
 $partyUpgradeScript = Join-Path $harnessRoot 'Test-AgentPartyUpgrade.ps1'
@@ -227,6 +228,7 @@ $requestedStages = switch ($Phase) {
     'MissionSceneNavigation' { @('Preflight', 'Build', 'MissionSceneNavigation') }
     'AlleyVolunteerBranches' { @('Preflight', 'Build', 'AlleyVolunteerBranches') }
     'AlleyAttackYield' { @('Preflight', 'Build', 'AlleyAttackYield') }
+    'AlleyAttackFightMission' { @('Preflight', 'Build', 'AlleyAttackFightMission') }
     'MapPartyComposition' { @('Preflight', 'Build', 'MapPartyComposition') }
     'MapArmyComposition' { @('Preflight', 'Build', 'MapArmyComposition') }
     'MapPartyBehavior' { @('Preflight', 'Build', 'MapPartyBehavior') }
@@ -844,6 +846,14 @@ foreach ($stage in $requestedStages) {
                     $outputs.Add("scenario=$scenario`n$testOutput")
                 }
                 $outputs -join "`n"
+            }
+        }
+        'AlleyAttackFightMission' {
+            Invoke-Stage -Name 'AlleyAttackFightMission' -Action {
+                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $alleyAttackFightMissionScript 2>&1 | Out-String
+                $testExitCode = $LASTEXITCODE
+                if ($testExitCode -ne 0) { throw "Native Alley Fight Mission entry/retreat failed with exit code $testExitCode.`n$testOutput" }
+                $testOutput
             }
         }
         'MapPartyComposition' {
