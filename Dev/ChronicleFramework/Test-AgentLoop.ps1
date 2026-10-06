@@ -138,6 +138,31 @@ try {
         return
     }
 
+    $contextGoal = 'Harness contract check: inspect the current visible settlement list and stop after receiving its Native receipt.'
+    $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
+    $priorExpectedGoal = $env:CHRONICLE_TEST_EXPECTED_GOAL
+    $env:CHRONICLE_TEST_PROVIDER_MODE = 'decisionContext'
+    $env:CHRONICLE_TEST_EXPECTED_GOAL = $contextGoal
+    try {
+        $contextOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -Goal $contextGoal -MaxDecisions 3 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-context-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $contextExitCode = $LASTEXITCODE
+    }
+    finally {
+        if ($null -eq $priorProviderMode) { Remove-Item Env:CHRONICLE_TEST_PROVIDER_MODE -ErrorAction SilentlyContinue }
+        else { $env:CHRONICLE_TEST_PROVIDER_MODE = $priorProviderMode }
+        if ($null -eq $priorExpectedGoal) { Remove-Item Env:CHRONICLE_TEST_EXPECTED_GOAL -ErrorAction SilentlyContinue }
+        else { $env:CHRONICLE_TEST_EXPECTED_GOAL = $priorExpectedGoal }
+    }
+    if ($contextExitCode -ne 0) { throw "Agent provider request lost its explicit goal or product action catalog: $contextOutput" }
+    $contextTrace = $contextOutput | ConvertFrom-Json
+    $goalAndCatalogForwarded = (@($contextTrace.trace).Count -eq 2 -and
+        $contextTrace.trace[0].decision.action -eq 'mapSettlementTargets' -and
+        $contextTrace.trace[0].decision.rationale -match 'Context contract accepted goal' -and
+        $contextTrace.trace[1].decision.done -and
+        $contextTrace.trace[1].previousActionReceipt.action -eq 'mapSettlementTargets' -and
+        $contextTrace.trace[1].decision.reason -match 'prior Native receipt')
+    if (-not $goalAndCatalogForwarded) { throw "Goal/action-catalog request regression failed: $($contextTrace | ConvertTo-Json -Depth 8 -Compress)" }
+
     $priorInvalidDecision = $env:CHRONICLE_TEST_INVALID_DECISION
     $env:CHRONICLE_TEST_INVALID_DECISION = '1'
     try {
@@ -204,13 +229,15 @@ try {
         UnicodeHeroNameRoundTripVerified = $unicodeRoundTripVerified
         ExplicitGoalStopHonoredWithoutIssuingAnotherAction = $doneSignalVerified
         GoalStopTrace = $doneTrace.trace
+        GoalAndActionCatalogForwarded = $goalAndCatalogForwarded
+        DecisionContextTrace = $contextTrace.trace
         UnsafeActionRejected = $unsafeActionRejected
         HarnessAdvanceRejected = $harnessClockRejected
         FixtureUnchanged = $fixtureHashBefore -eq $fixtureHashAfter
         ProcessStopped = $stop.processStopped
         Trace = $trace.trace
     }
-    $result.Passed = ($result.DecisionCount -eq 2 -and $observationLoopVerified -and $receiptForwarded -and $unicodeRoundTripVerified -and $doneSignalVerified -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
+    $result.Passed = ($result.DecisionCount -eq 2 -and $observationLoopVerified -and $receiptForwarded -and $unicodeRoundTripVerified -and $doneSignalVerified -and $goalAndCatalogForwarded -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
     $result | ConvertTo-Json -Depth 12
     if (-not $result.Passed) { exit 1 }
 }

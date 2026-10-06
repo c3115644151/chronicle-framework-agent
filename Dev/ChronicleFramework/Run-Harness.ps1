@@ -16,7 +16,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.24'
+$HarnessContractVersion = '7.27'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -62,6 +62,7 @@ $recruitmentScript = Join-Path $harnessRoot 'Test-AgentRecruitment.ps1'
 $restScript = Join-Path $harnessRoot 'Test-AgentRest.ps1'
 $pursuitScript = Join-Path $harnessRoot 'Test-AgentPursuit.ps1'
 $agentLoopScript = Join-Path $harnessRoot 'Test-AgentLoop.ps1'
+$agentModelProviderScript = Join-Path $harnessRoot 'Test-AgentOpenAICompatibleProvider.ps1'
 $battleFixtureScript = Join-Path $harnessRoot 'Test-AgentBattleFixture.ps1'
 $visualCaptureScript = Join-Path $harnessRoot 'Test-AgentVisualCapture.ps1'
 $tavernMissionScript = Join-Path $harnessRoot 'Test-AgentTavernMission.ps1'
@@ -962,10 +963,13 @@ foreach ($stage in $requestedStages) {
         }
         'AgentLoop' {
             Invoke-Stage -Name 'AgentLoop' -Action {
+                $providerOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentModelProviderScript 2>&1 | Out-String
+                $providerExitCode = $LASTEXITCODE
+                if ($providerExitCode -ne 0) { throw "OpenAI-compatible provider protocol test failed with exit code $providerExitCode.`n$providerOutput" }
                 $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentLoopScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Agent decision loop test failed with exit code $testExitCode.`n$testOutput" }
-                $testOutput
+                "Provider Protocol Stub:`n$providerOutput`nAgent Loop:`n$testOutput"
             }
         }
         'TimeControlLoop' {

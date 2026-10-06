@@ -10,13 +10,33 @@ if ($jsonStart -gt 0) {
     $requestJson = $requestJson.Substring($jsonStart)
 }
 $request = $requestJson | ConvertFrom-Json
-if ($request.schemaVersion -ne 1) { throw 'Unsupported Agent loop request schema.' }
+if ($request.schemaVersion -ne 2) { throw 'Unsupported Agent loop request schema.' }
 if ($request.iteration -gt 1 -and -not $request.previousActionReceipt) { throw 'Previous native action receipt was not forwarded to the next decision.' }
 if ($env:CHRONICLE_TEST_INVALID_DECISION) {
     $invalidAction = [string]$env:CHRONICLE_TEST_INVALID_DECISION
     $arguments = if ($invalidAction -eq 'start') { @{ SaveName = 'must_not_execute' } } else { @{} }
     [pscustomobject]@{ action = $invalidAction; arguments = $arguments; rationale = 'Intentional Agent decision boundary regression test.' } | ConvertTo-Json -Compress
     exit 0
+}
+if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'decisionContext') {
+    $expectedGoal = [string]$env:CHRONICLE_TEST_EXPECTED_GOAL
+    if ([string]::IsNullOrWhiteSpace($expectedGoal) -or [string]$request.goal -cne $expectedGoal)
+        { throw 'Decision request did not preserve the explicit task goal.' }
+    $catalog = @($request.allowedActions)
+    $move = @($catalog | Where-Object { $_.action -eq 'move' } | Select-Object -First 1)
+    $settlementTargets = @($catalog | Where-Object { $_.action -eq 'mapSettlementTargets' } | Select-Object -First 1)
+    if ($move.Count -ne 1 -or 'SettlementId' -notin @($move[0].arguments) -or $settlementTargets.Count -ne 1 -or
+        @($catalog | Where-Object { $_.action -eq 'advance' -or $_.action -like 'harness*' }).Count -gt 0)
+        { throw 'Decision request did not expose the expected product allowlist boundary.' }
+    if ($request.iteration -eq 1) {
+        [pscustomobject]@{ action = 'mapSettlementTargets'; arguments = @{}; rationale = "Context contract accepted goal '$expectedGoal' and $($catalog.Count) product actions; Harness-only advance/tools are absent." } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if ($request.iteration -eq 2 -and $request.previousActionReceipt.action -eq 'mapSettlementTargets') {
+        [pscustomobject]@{ done = $true; reason = 'Context and prior Native receipt remained present on the next model turn.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    throw 'Decision-context provider received an unexpected iteration or missing Native action receipt.'
 }
 if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'recruitment') {
     if ($request.iteration -eq 1) {
