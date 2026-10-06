@@ -25,6 +25,9 @@ try {
     $endpointUri = [Uri]::new($endpoint)
     if (-not $endpointUri.IsAbsoluteUri -or $endpointUri.Scheme -notin @('https','http')) { throw 'CHRONICLE_LLM_BASE_URL must be an absolute HTTP(S) endpoint.' }
     if ($endpointUri.Scheme -eq 'http' -and -not $endpointUri.IsLoopback) { throw 'Plain HTTP is permitted only for a loopback test provider.' }
+    $endpointBuilder = [UriBuilder]::new($endpointUri)
+    $endpointBuilder.Path = $endpointBuilder.Path.TrimEnd('/') + '/chat/completions'
+    $requestUri = $endpointBuilder.Uri
 
     $timeoutSeconds = 60
     if ($env:CHRONICLE_LLM_TIMEOUT_SECONDS) {
@@ -62,7 +65,7 @@ To stop, return: {"done":true,"reason":"brief evidence-based reason"}
     if (-not [string]::IsNullOrWhiteSpace($apiKey)) { $headers.Authorization = "Bearer $apiKey" }
 
     try {
-        $response = Invoke-RestMethod -Method Post -Uri $endpointUri -Headers $headers -Body $body -ContentType 'application/json' -TimeoutSec $timeoutSeconds
+        $response = Invoke-RestMethod -Method Post -Uri $requestUri -Headers $headers -Body $body -ContentType 'application/json' -TimeoutSec $timeoutSeconds
     }
     catch {
         $status = $null

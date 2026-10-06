@@ -43,7 +43,7 @@ try {
     $listener = [System.Net.HttpListener]::new()
     $null = $listener.Prefixes.Add("http://127.0.0.1:$port/")
     $listener.Start()
-    $env:CHRONICLE_LLM_BASE_URL = "http://127.0.0.1:$port/v1/chat/completions"
+    $env:CHRONICLE_LLM_BASE_URL = "http://127.0.0.1:$port/v1"
     $env:CHRONICLE_LLM_MODEL = 'harness-contract-model'
     $env:CHRONICLE_LLM_API_KEY = $harnessSecret
     $env:CHRONICLE_LLM_TIMEOUT_SECONDS = [string]$TimeoutSeconds
@@ -70,6 +70,7 @@ try {
     $acceptTask = $listener.GetContextAsync()
     if (-not $acceptTask.Wait([Math]::Max(5000, $TimeoutSeconds * 1000))) { throw 'Local HTTP stub did not receive the provider request before timeout.' }
     $context = $acceptTask.GetAwaiter().GetResult()
+    $endpointPathCorrect = ($context.Request.Url.AbsolutePath -ceq '/v1/chat/completions')
     $reader = New-Object System.IO.StreamReader($context.Request.InputStream, $context.Request.ContentEncoding)
     $requestBody = $reader.ReadToEnd()
     $reader.Dispose()
@@ -172,6 +173,7 @@ try {
         AllowedActionCatalogForwarded = $actionCatalogForwarded
         PriorReceiptFieldPresent = ($null -eq $modelInput.previousActionReceipt)
         AuthorizationHeaderSent = $authorizationSent
+        BaseUrlResolvedToChatCompletionsPath = $endpointPathCorrect
         RequestFormatCorrect = $payloadModeCorrect
         ProviderOutputCredentialFree = $providerOutputClean
         StructuredDecisionReturned = $decisionValidated
@@ -179,7 +181,7 @@ try {
         HttpErrorFailsClosedWithoutCredentialLeak = $httpErrorFailedClosed
         DisallowedActionFailsClosed = $invalidActionFailedClosed
         TimeoutFailsClosedWithoutCredentialLeak = $timeoutFailedClosed
-        Passed = ($requestGoalForwarded -and $actionCatalogForwarded -and $authorizationSent -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $invalidActionFailedClosed -and $httpErrorFailedClosed -and $timeoutFailedClosed)
+        Passed = ($requestGoalForwarded -and $actionCatalogForwarded -and $authorizationSent -and $endpointPathCorrect -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $invalidActionFailedClosed -and $httpErrorFailedClosed -and $timeoutFailedClosed)
     }
     $result | ConvertTo-Json -Depth 8
     if (-not $result.Passed) { exit 1 }
