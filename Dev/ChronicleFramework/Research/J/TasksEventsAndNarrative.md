@@ -98,9 +98,9 @@ Chronicle新增按需`mapNotifications`，仅在Campaign Map状态读取`Campaig
 
 ## J09 Persuasion Dialogues：说服过程
 
-Persuasion是J08对话内的一种状态化子流程。`PersuasionTask`保存当前目标、目标值/成功值、难度、可用Argument与已尝试情况；`DefaultPersuasionModel`以目标Trait、关系、ArgumentStrength、玩家Skill/Perk和difficulty multiplier等参数计算success/critical/failure概率和下一阶段/封锁选项效果。实际尝试以当前Conversation开放的argument为入口，结果再由该Task/Conversation consequences决定增加进度、继续、失败、关系变化或Quest后果。
+Persuasion是J08对话内的一种状态化子流程。`PersuasionTask`包含任务预备的`Options`及对话文本字段；它没有独立的“剩余尝试次数”字段。`DefaultPersuasionModel`以目标Trait、关系、ArgumentStrength、玩家Skill/Perk和difficulty multiplier等参数计算success/critical/failure概率和下一阶段/封锁选项效果。实际尝试以当前Conversation开放的argument为入口，结果再由该Task/Conversation consequences决定增加进度、继续、失败、关系变化或Quest后果。
 
-求偶、说服领主、Quest谈判等会分别初始化不同task，不能将一项Persuasion成功率输出到所有NPC。UI必须显示合法选项和条件提示；直接反复调用概率模型不会生成合法对话尝试或完整失败后果。当前Chronicle只尝试选择真实开放选项，无专用Persuasion状态/机会/剩余尝试观测。数值数据与社交入口见I04/I10。来源：`Persuasion/PersuasionTask/PersuasionAttempt`、`DefaultPersuasionModel`、`PersuasionVM`和Romance/Issue相关behaviors；未知不同Task建立源/概率公式全部权重、重复点选/关闭对话后的持久状态、测试seed与真实随机分布。
+求偶、说服领主、Quest谈判等会分别初始化不同task，不能将一项Persuasion成功率输出到所有NPC。UI必须显示当前合法选项和对应风险；直接反复调用概率模型不会生成合法对话尝试或完整失败后果。玩家确认：成功、失败、大成功、大失败概率写在每个当前对话选项中；进度用圆圈表现，某任务看到三个圆圈就表示要积累三次进度，实际目标随任务变化。源码将`MissionConversationVM.PersuasionProgress`的圆圈数量绑定`GetPersuasionGoalValue()`，每个当前`ConversationItemVM.PersuasionItem`绑定四类机率、推进/阻断标记；Native `SPConversation.xml`和`ConversationItem.xml`将这些数据绑定到当前会话画面。Task没有剩余attempt计数，不应输出。当前Chronicle新增按需`persuasionDetails`，仅从当前MapConversation Native ViewModel/AnswerList读取并与当前option索引核对；Persuasion argument的`dialogueSelect`只有匹配当前可见且可用AnswerList时才提交，绝不从Task.Options补隐藏候选。`TestResults/20261006-204936`用视觉Harness临时Task验证：VM读取0/2与2个空圆圈；但当时是一个没有当前玩家AnswerList的对话阶段，适配器正确返回空argument数组；通过的回归是阻止一个存在于内部CurOptions但未显示在AnswerList中的说服选项，且未改变会话/资源/时间/源档。它没有覆盖自然任务触发，也没有证明Native界面实际列出论证时，概率字段和选项逐项匹配或成功提交。后两项仍为实测未知。数值数据与社交入口见I04/I10。来源：`Persuasion/PersuasionTask/PersuasionAttempt`、`DefaultPersuasionModel`、`PersuasionVM`、`MissionConversationVM`、`ConversationItemVM`、Native GUI Prefabs及Romance/Issue相关behaviors；未知不同Task建立源/概率公式全部权重、重复点选/关闭对话后的持久状态、测试seed与真实随机分布。
 
 ## J10 Tournament：城镇竞技比赛
 

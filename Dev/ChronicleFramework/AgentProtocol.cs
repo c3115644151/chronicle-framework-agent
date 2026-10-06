@@ -445,6 +445,13 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("harnessSeedAlleyAttackFixture is restricted to a visual Harness run with a Harness temp directory");
                     WriteResponse(commandId, action, "completed", behavior, null, HarnessAlleyRosterFixture.SeedAlleyAttack(ReadString(command, "settlementId"), ReadString(command, "alleyTag")));
                     break;
+                case "harnessSeedPersuasionFixture":
+                    var persuasionFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var persuasionFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(persuasionFixtureMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(persuasionFixtureRoot) || !Directory.Exists(persuasionFixtureRoot))
+                        throw new InvalidOperationException("harnessSeedPersuasionFixture is restricted to a visual Harness run with a Harness temp directory");
+                    WriteResponse(commandId, action, "completed", behavior, null, HarnessPersuasionFixture.SeedPersuasionForCurrentNativeOption(ReadString(command, "optionId")));
+                    break;
                 case "harnessAlleyRosterDiagnostics":
                     var alleyRosterDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
                     var alleyRosterDiagnosticsRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
@@ -1189,8 +1196,13 @@ internal sealed class ChronicleAgentProtocol
                     var dialogueOption = conversationManager.CurOptions.FirstOrDefault(option => string.Equals(option.Id, dialogueOptionId, StringComparison.Ordinal));
                     if (string.IsNullOrWhiteSpace(dialogueOption.Id) || !dialogueOption.IsClickable)
                         throw new InvalidOperationException("conversation option is missing or not clickable");
+                    if (dialogueOption.HasPersuasion && !ChroniclePersuasionAdapter.IsVisiblePersuasionOption(dialogueOptionId))
+                        throw new InvalidOperationException("Persuasion argument is not present in the active Native conversation answer list");
                     conversationManager.DoOption(dialogueOptionId);
                     WriteResponse(commandId, action, "completed", behavior);
+                    break;
+                case "persuasionDetails":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChroniclePersuasionAdapter.ReadCurrentPersuasion());
                     break;
                 case "dialogueContinue":
                     var conversationToContinue = Campaign.Current.ConversationManager;

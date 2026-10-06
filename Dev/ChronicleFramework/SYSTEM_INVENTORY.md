@@ -545,7 +545,7 @@ G03 Mission直接控制MainHero的身体/装备输入及专用Use结果现登记
 | I07 Traits | `OBS-B10-01`Character Developer Trait展示；行为写入来自其它Action结果 | 玩家通常不能直接编辑Trait |
 | I08 Crime/Reputation | 当前执法/指控菜单可见信息映射`OBS-I08-01`；`ACT-I08-01..06`支付/处罚/忽略不同分支 | 不从选项可用性反推玩家能读取精确CrimeRating数值；处罚类型和自动Crime decay分开 |
 | I09 Dialogue Relation | 关系反馈映射`OBS-B09-01`；当前Conversation参与者/阶段/开放句复用`OBS-J08-01`，关系专属选择归属于各自行为ID | I09/J08描述同一原生Conversation观察面，不重复建第二个Observation ID；不能把每个string/关系文本条件单独计行为 |
-| I10 Persuasion | 当前Task/target/progress/attempt/argument probability观察复用`OBS-J09-01`；argument提交为`ACT-J09-01`，恋爱语境复用`ACT-I04-02` | I10与J09读取同一PersuasionVM/Task观察面，合并一个ID；各Task语境的成功/失败后果仍保留其领域映射 |
+| I10 Persuasion | 当前Task进度与Native对话答复列表中的论证及概率复用`OBS-J09-01`；提交复用`ACT-J09-01`，恋爱语境复用`ACT-I04-02` | I10与J09读取同一PersuasionVM/Task观察面，合并一个ID；Task没有单独剩余attempt计数，各Task语境成功/失败后果仍留在其领域 |
 
 #### H-I新增目录项
 
@@ -590,7 +590,7 @@ G03 Mission直接控制MainHero的身体/装备输入及专用Use结果现登记
 | J06 Rumor | `OBS-J06-01`市场/玩家物品悬停中的异地买卖价格提示 | 同一ItemMenu消费者服务两侧；已有情报、具体物品、时效和价差共同筛选，专长可扩充来源；Chronicle W2-AE有当前交易候选按需观察接口与Native提示结果验收 |
 | J07 Notifications | Campaign Map Notice队列`OBS-J07-01`、QuickInfo瞬时提示`OBS-J07-02`、Scene通知`OBS-J07-03`分别观察 | A07记载LogEntry/百科日志；通知类分属不同存储/时间/宿主，不能与Log或彼此合并 |
 | J08 Conversations | `OBS-J08-01`当前Conversation Flow/参与者/选项；选项导致的有效世界行为映射到Quest/政治/关系/Barter等所属ACT | `dialogueSelect`是通用输入操作而非独立玩家行为族：若某选项提交了有领域后果的状态变化，只计具体ACT；仅导航/读取文本造成的对话刷新并入OBS-J08-01，不按Sentence/API数计ACT |
-| J09 Persuasion | `OBS-J09-01`当前Persuasion task/进度/风险信息；`ACT-J09-01`提交Persuasion argument | 说服尝试是Conversation option的特殊子族，任务/求偶/政治用相同模型但不同后果 |
+| J09 Persuasion | `OBS-J09-01`当前Persuasion进度与Native界面当前论证/风险信息；`ACT-J09-01`提交当前Native答复列表中的Persuasion argument | 说服尝试是Conversation option的特殊子族，任务/求偶/政治用相同模型但不同后果；进度圈数量由各Task目标决定 |
 | J10 Tournament | `OBS-J10-01`赛事/对手/排行榜；`ACT-J10-01/02`参与或观看 | Join真实Mission与Watch模拟不同；奖励引用G10/H11，不能固定当Renown按钮 |
 | J11 Board Games | `OBS-J11-01`对手/棋盘/当前局面；`ACT-J11-01/02`下注开局/棋盘落子 | Tavern dialog下注与Mission中棋盘走子是不同上下文；模型没有Campaign自主控制 |
 | J12 Story Mode | `OBS-J12-01`主线阶段/任务提示；Story选择沿J02/J03/J08映射；《Villagers in Need》救Headman的Mission出口映射`ACT-G03-24` | Story quest及Sandbox通用任务分开，不能因Story mode存在而计入Sandbox默认行为；Mission内设置救援flag与Quest后续结算是不同环节 |
@@ -629,8 +629,8 @@ G03 Mission直接控制MainHero的身体/装备输入及专用Use结果现登记
 | OBS-J07-02 | 观察 | Campaign Map原版GameNotification浮层当前显示的QuickInformation文字/说话者/Native ExtraTime | `MBInformationManager.AddQuickInformation`发`FiringQuickInformation`，当前消息由`GameNotificationVM.CurrentNotification`呈现；私有待播队列、Dialog语音、Map Notice和普通`InformationManager.DisplayMessage`均是另一语义 | Chronicle `quickInformation`只在NativeUI层存在、GotNotification、非Paused且Current不是Dialog时读取当前项，不读取私有队列/历史；W2-AG `TestResults/20260930-064259/Temp/QuickInformationResult.json`验证当前提示和Native时长，排队消息未泄漏且不改Campaign/时钟。视觉淡出/暂停边缘与第三方替换未跑 | A07/J07/L06、`MBInformationManager.AddQuickInformation/FiringQuickInformation`、`GauntletGameNotification._dataSource`、`GameNotificationVM`、W2-AG #61 |
 | OBS-J07-03 | 观察 | Mission/Scene中当前激活的Native SceneNotification modal标题/说明/按钮可见性与就绪状态；战后/处决等确认面不等同完成 | `SceneNotificationData`将当前上下文按钮和正/负/Close后果显式区分；部分子类把提交延迟到Close。当前通知经过Native RelevantContext与独立场景加载才能Shown/Ready；不等同Map Notice或QuickInfo | Chronicle `sceneNotification`只读取Current Native VM ActiveData/界面字段，不调用任何结果回调或揭露回调目标。`TestResults/20260930-071127/Temp/SceneNotificationResult.json`以无执行后果的HeroExecution informational Map通知核对Native VM字段并生成实际游戏引擎modal截图；按钮从未按下，Campaign资源/任务/时间/源存档不变。仅该一通知跑过，其他通知/宿主时钟/用户实际按钮动作仍未知 | J07/F12/G03/L06/L07、`SceneNotificationData`、`GauntletSceneNotification`、`SceneNotificationVM`、W2-AH #62 |
 | OBS-J08-01 | 观察 | 活跃Conversation的发言人/Flow阶段/当下开放Option，包括由当前Courtship/Romance状态筛选出的开始/重试/Marriage Barter选项 | sentence condition、身份token、Task与关系筛选，不能扫描未开放Option；Romance选项不代表原始Romance数值 | Protocol提供有限Conversation state/option读取；这是J08/I09/I04共享的同一观察面 | I04/J08/I09/L04、ConversationManager/AgentObserver/Protocol、RomanceCampaignBehavior |
-| OBS-J09-01 | 观察 | 当前PersuasionVM/Task的参与目标、阶段、剩余attempt、可用argument及其成功概率/当前进度 | options/chance依Task类型、Trait/Skill/Relation/difficulty；显示机会不等于最终检定结果 | Chronicle不输出完整PersuasionTask对象；I10/J09为同源信息，不重复计Observation | I10/J09、`PersuasionVM`、`PersuasionTask` |
-| ACT-J09-01 | 行为 | 在当前Persuasion task中选择一个真实可用argument | 单次尝试会提交随机/模型概率结果和进度/失败效果；不等于一般`dialogueSelect`不加上下文 | Chronicle没有专用Persuasion观察/回执及重规划 | J09/I10、DefaultPersuasionModel |
+| OBS-J09-01 | 观察 | 当前PersuasionVM的参与目标/阶段/进度与目标，以及Native Conversation AnswerList实际展示的论证及其成功/失败/暴击概率、推进/阻断提示；不输出假想剩余attempt | options/chance依Task类型、Trait/Skill/Relation/difficulty；圈数由Native goal生成；显示概率不等于最终检定结果；Task无独立剩余attempt字段 | Chronicle提供按需`persuasionDetails`，只读MapConversationVM当前Persuasion/AnswerList；`TestResults/20261006-204936`以Harness合成Task证明0/2及空圆圈可见而空AnswerList不泄露CurOptions候选。真实任务出现可见论证时的正向逐项概率核对仍待测 | I10/J09、`PersuasionVM`、`MissionConversationVM.AnswerList`、`PersuasionTask`、Native SPConversation Prefab |
+| ACT-J09-01 | 行为 | 在当前Native Conversation AnswerList选择一个真实可见且可用的Persuasion argument；继续走通用`dialogueSelect` | 一次尝试由`ConversationManager.DoOption`运行原句及Native随机/模型后果；结果/后续关系或任务效果属于宿主对话，不预测成功 | Persuasion argument若未出现在当前Native AnswerList会在调用前拒绝。`TestResults/20261006-204936`以后台存在但未显示的候选验证拒绝且不改变时间/资源/对话/源档；未完成实际可见选项的成功提交证据 | J09/I10、`DefaultPersuasionModel`、`ConversationManager.DoOption`、Native `AnswerList` |
 | OBS-J10-01 | 观察 | Arena/Tournament菜单或TournamentLeaderboard查看可加入赛事/对手/排名 | 赛事随Town每日模拟生成/结束；观看排名不是参加Mission | Chronicle无Tournament state/list/player visual | J10、TournamentCampaignBehavior/Manager |
 | ACT-J10-01 | 行为 | Town Arena选项加入一场Tournament并进入比赛Mission | 进入实时比赛、可获得奖励/排名；Campaign地图时钟在Mission停止 | Chronicle无赛事列表/格斗输入；三维动作未覆盖 | J10/G03、TournamentMissionStarter |
 | ACT-J10-02 | 行为 | Arena菜单选择Watch tournament | NPC模拟比赛结算Tournament状态/奖品显示；与玩家参赛不等价 | Chronicle不支持观战/赛事Simulation接口 | J10、TournamentManager |
