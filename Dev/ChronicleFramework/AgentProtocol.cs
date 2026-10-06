@@ -452,6 +452,13 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("harnessSeedPersuasionFixture is restricted to a visual Harness run with a Harness temp directory");
                     WriteResponse(commandId, action, "completed", behavior, null, HarnessPersuasionFixture.SeedPersuasionForCurrentNativeOption(ReadString(command, "optionId")));
                     break;
+                case "harnessCurrentConversationAnswers":
+                    var persuasionIntroMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var persuasionIntroRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(persuasionIntroMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(persuasionIntroRoot) || !Directory.Exists(persuasionIntroRoot))
+                        throw new InvalidOperationException("harnessCurrentConversationAnswers is restricted to a visual Harness run with a Harness temp directory");
+                    WriteResponse(commandId, action, "completed", behavior, null, HarnessPersuasionFixture.ReadCurrentNativeAnswerList());
+                    break;
                 case "harnessAlleyRosterDiagnostics":
                     var alleyRosterDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
                     var alleyRosterDiagnosticsRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");

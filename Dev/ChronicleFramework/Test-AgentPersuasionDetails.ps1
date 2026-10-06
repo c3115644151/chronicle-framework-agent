@@ -16,6 +16,8 @@ $prefix = 'persuasion-details-' + (Get-Date -Format 'yyyyMMddHHmmssfff')
 $resultName = 'PersuasionDetails-Result.json'
 $frameConversation = Join-Path $frameRoot 'persuasion-conversation.bmp'
 $framePersuasion = Join-Path $frameRoot 'persuasion-native-panel.bmp'
+$frameAnswerList = Join-Path $frameRoot 'persuasion-answer-list-before-task.bmp'
+$frameAfterArgument = Join-Path $frameRoot 'persuasion-after-argument.bmp'
 $failedStep = 'preflight'
 
 if (-not (Test-Path -LiteralPath $savePath)) { throw "Disposable Campaign fixture not found: $LoadSaveName" }
@@ -76,10 +78,25 @@ try {
     if ($withoutTask.status -ne 'completed' -or [bool]$withoutTask.data.available)
         { throw "persuasionDetails exposed a task when Native ConversationManager has no active Persuasion: $($withoutTask.data | ConvertTo-Json -Depth 6 -Compress)" }
 
-    $conversationOptions = @($conversation.options | Where-Object { $_.clickable } | Select-Object -First 1)
-    if ($conversationOptions.Count -ne 1) { throw 'Current Native Conversation has no selectable option for a Harness-only Persuasion VM fixture.' }
+    $failedStep = 'wait-for-Native-answer-list'
+    $answerListDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    $nativeAnswers = $null
+    do {
+        $nativeAnswers = Invoke-AgentCli 'harnessCurrentConversationAnswers' @('-CommandId', "$prefix-answer-list") 30
+        if ($nativeAnswers.status -ne 'completed') { throw "Native Conversation answer-list query failed: $($nativeAnswers.error)" }
+        if ([bool]$nativeAnswers.data.isLoadingOver -and [int]$nativeAnswers.data.answerCount -gt 0) { break }
+        Start-Sleep -Milliseconds 200
+    } while ([DateTime]::UtcNow -lt $answerListDeadline)
+    if (-not [bool]$nativeAnswers.data.isLoadingOver -or [int]$nativeAnswers.data.answerCount -le 0) {
+        Capture-EngineFrame $frameAnswerList 'answer-list-timeout'
+        throw "Native UI never rendered a player answer row after conversation startup: $($nativeAnswers.data | ConvertTo-Json -Depth 7 -Compress)"
+    }
+    $visibleNativeAnswers = @($nativeAnswers.data.visibleOptions | Where-Object { $_.enabled } | Select-Object -First 1)
+    if ($visibleNativeAnswers.Count -ne 1) { throw "Native AnswerList contains no enabled row: $($nativeAnswers.data | ConvertTo-Json -Depth 7 -Compress)" }
+    Capture-EngineFrame $frameAnswerList 'answer-list-before-persuasion'
+
     $failedStep = 'seed-temporary-Native-Persuasion-on-current-option'
-    $fixture = Invoke-AgentCli 'harnessSeedPersuasionFixture' @('-OptionId', [string]$conversationOptions[0].id, '-CommandId', "$prefix-seed") 30
+    $fixture = Invoke-AgentCli 'harnessSeedPersuasionFixture' @('-OptionId', [string]$visibleNativeAnswers[0].optionId, '-CommandId', "$prefix-seed") 30
     if ($fixture.status -ne 'completed' -or -not [bool]$fixture.data.persuasionActive)
         { throw "Native Persuasion fixture did not activate: $($fixture | ConvertTo-Json -Depth 6 -Compress)" }
     Capture-EngineFrame $framePersuasion 'persuasion'
@@ -89,11 +106,18 @@ try {
     $persuasion = Invoke-AgentCli 'persuasionDetails' @('-CommandId', "$prefix-details") 30
     if ($persuasion.status -ne 'completed' -or -not [bool]$persuasion.data.available -or $persuasion.data.nativeViewModel -ne 'MapConversationVM.DialogController.Persuasion')
         { throw "persuasionDetails did not read the active Native Persuasion view model: $($persuasion.data | ConvertTo-Json -Depth 7 -Compress)" }
-    if (@($persuasion.data.options).Count -ne 0 -or [int]$fixture.data.nativeAnswerCount -ne 0)
-        { throw "The adapter exposed an argument that the active Native answer list does not display: $($persuasion.data | ConvertTo-Json -Depth 7 -Compress); Harness fixture VM: $($fixture.data | ConvertTo-Json -Depth 6 -Compress)" }
+    $visiblePersuasionOptions = @($persuasion.data.options | Where-Object { $_.clickable })
+    if ($visiblePersuasionOptions.Count -eq 0 -or [int]$fixture.data.nativeAnswerCount -le 0)
+        { throw "The Native Persuasion argument did not remain in the rendered answer list: $($persuasion.data | ConvertTo-Json -Depth 7 -Compress); Harness fixture VM: $($fixture.data | ConvertTo-Json -Depth 6 -Compress)" }
+    $matchingOption = @($visiblePersuasionOptions | Where-Object { $_.optionId -eq [string]$visibleNativeAnswers[0].optionId } | Select-Object -First 1)
+    if ($matchingOption.Count -ne 1) { throw "Native answer list and PersuasionVM did not map the same option ID: $($persuasion.data | ConvertTo-Json -Depth 7 -Compress)" }
     if ([double]$persuasion.data.progress -lt 0 -or [double]$persuasion.data.progress -gt [double]$persuasion.data.goal -or
         $persuasion.data.progressIndicators.Count -ne [int][Math]::Round([double]$persuasion.data.goal))
         { throw "Native Persuasion progress/goal indicators do not match: $($persuasion.data | ConvertTo-Json -Depth 7 -Compress)" }
+    foreach ($chanceName in @('successChance','failChance','criticalSuccessChance','criticalFailChance')) {
+        $chance = [int]$matchingOption[0].$chanceName
+        if ($chance -lt 0 -or $chance -gt 100) { throw "Native Persuasion $chanceName is outside the 0-100 range: $chance" }
+    }
     $repeat = Invoke-AgentCli 'persuasionDetails' @('-CommandId', "$prefix-repeat") 30
     $afterRead = Invoke-AgentCli 'state' @('-CommandId', "$prefix-after-read")
     $readOnlyStable = ([double]$beforeRead.campaignDay -eq [double]$afterRead.campaignDay -and
@@ -104,16 +128,12 @@ try {
         ($persuasion.data | ConvertTo-Json -Depth 10 -Compress) -eq ($repeat.data | ConvertTo-Json -Depth 10 -Compress))
     if (-not $readOnlyStable) { throw 'Persuasion query changed the conversation/world state or returned unstable native VM data.' }
 
-    $failedStep = 'reject-Persuasion-option-not-present-in-Native-answer-list'
-    $dialogueSelection = Invoke-AgentCli 'dialogueSelect' @('-OptionId', [string]$conversationOptions[0].id, '-CommandId', "$prefix-hidden-persuasion-choice") 30
-    if ($dialogueSelection.status -ne 'rejected' -or $dialogueSelection.error -notmatch 'not present in the active Native conversation answer list')
-        { throw "A persuasion argument absent from the active Native answer list was not rejected: $($dialogueSelection | ConvertTo-Json -Depth 8 -Compress)" }
-    $afterSelection = Invoke-AgentCli 'state' @('-CommandId', "$prefix-after-rejected-selection") 30
-    $rejectedSelectionNoMutation = ([double]$afterRead.campaignDay -eq [double]$afterSelection.campaignDay -and
-        [int]$afterRead.state.economy.gold -eq [int]$afterSelection.state.economy.gold -and
-        [double]$afterRead.state.economy.influence -eq [double]$afterSelection.state.economy.influence -and
-        [string]$afterRead.state.context.conversation.sentenceText -eq [string]$afterSelection.state.context.conversation.sentenceText)
-    if (-not $rejectedSelectionNoMutation) { throw 'Rejected hidden Persuasion option changed the active Conversation or Campaign resources/time.' }
+    $failedStep = 'submit-current-visible-Native-Persuasion-option'
+    $dialogueSelection = Invoke-AgentCli 'dialogueSelect' @('-OptionId', [string]$matchingOption[0].optionId, '-CommandId', "$prefix-visible-persuasion-choice") 30
+    if ($dialogueSelection.status -ne 'completed') { throw "Visible Native Persuasion option was rejected: $($dialogueSelection.error)" }
+    $afterSelection = Invoke-AgentCli 'state' @('-CommandId', "$prefix-after-visible-selection") 30
+    $persuasionAfterSelection = Invoke-AgentCli 'persuasionDetails' @('-CommandId', "$prefix-after-visible-selection-details") 30
+    Capture-EngineFrame $frameAfterArgument 'after-visible-argument'
 
     $sourceHashAfter = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
     $result = [ordered]@{
@@ -122,25 +142,27 @@ try {
         ProcessId = $start.session.processId
         TargetHero = $overlayCharacters[0]
         InitialConversation = $conversation
+        NativeAnswerListBeforeTask = $nativeAnswers.data
+        VisibleNativeAnswerSeeded = $visibleNativeAnswers[0]
         NoActivePersuasion = $withoutTask.data
         HarnessSeed = $fixture.data
         PersuasionDetails = $persuasion.data
-        HiddenOptionIdAttempted = [string]$conversationOptions[0].id
+        VisibleNativePersuasionOption = $matchingOption[0]
         RepeatPersuasionDetails = $repeat.data
         ReadOnlyStable = $readOnlyStable
-        HiddenCurrentPersuasionOptionRejected = ($dialogueSelection.status -eq 'rejected')
-        RejectedSelectionNoMutation = $rejectedSelectionNoMutation
+        VisibleCurrentPersuasionOptionAccepted = ($dialogueSelection.status -eq 'completed')
         DialogueSelectReceipt = $dialogueSelection
-        StateAfterRejectedArgument = $afterSelection.state.context
+        StateAfterVisibleArgument = $afterSelection.state.context
+        PersuasionAfterVisibleArgument = $persuasionAfterSelection.data
         FixtureHashBefore = $sourceHashBefore
         FixtureHashAfter = $sourceHashAfter
         FixtureUnchanged = ($sourceHashBefore -eq $sourceHashAfter)
-        EngineFrames = @($frameConversation, $framePersuasion)
+        EngineFrames = @($frameConversation, $frameAnswerList, $framePersuasion, $frameAfterArgument)
     }
     $stop = Invoke-AgentCli 'stop' @('-CommandId', "$prefix-stop") 30
     $result.ProcessStopped = [bool]$stop.processStopped
     $result.AllGameProcessesStopped = -not [bool](Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue)
-    $result.Passed = ([bool]$result.ReadOnlyStable -and [bool]$result.HiddenCurrentPersuasionOptionRejected -and [bool]$result.RejectedSelectionNoMutation -and [bool]$result.FixtureUnchanged -and [bool]$result.ProcessStopped -and [bool]$result.AllGameProcessesStopped)
+    $result.Passed = ([bool]$result.ReadOnlyStable -and [bool]$result.VisibleCurrentPersuasionOptionAccepted -and [bool]$result.FixtureUnchanged -and [bool]$result.ProcessStopped -and [bool]$result.AllGameProcessesStopped)
     if ($tempPath -and (Test-Path -LiteralPath $tempPath -PathType Container)) {
         $result | ConvertTo-Json -Depth 18 | Set-Content -LiteralPath (Join-Path $tempPath $resultName) -Encoding UTF8
     }
