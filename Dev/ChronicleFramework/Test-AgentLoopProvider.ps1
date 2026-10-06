@@ -25,11 +25,12 @@ if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'decisionContext') {
     $catalog = @($request.allowedActions)
     $move = @($catalog | Where-Object { $_.action -eq 'move' } | Select-Object -First 1)
     $settlementTargets = @($catalog | Where-Object { $_.action -eq 'mapSettlementTargets' } | Select-Object -First 1)
-    if ($move.Count -ne 1 -or 'SettlementId' -notin @($move[0].arguments) -or $settlementTargets.Count -ne 1 -or
-        @($catalog | Where-Object { $_.action -eq 'advance' -or $_.action -like 'harness*' }).Count -gt 0)
-        { throw 'Decision request did not expose the expected product allowlist boundary.' }
+    $catalogNames = @($catalog | ForEach-Object { [string]$_.action } | Sort-Object)
+    if ($catalog.Count -ne 2 -or $move.Count -ne 1 -or 'SettlementId' -notin @($move[0].arguments) -or $settlementTargets.Count -ne 1 -or
+        ($catalogNames -join ',') -cne 'mapSettlementTargets,move')
+        { throw 'Decision request did not enforce the exact requested map-action scope.' }
     if ($request.iteration -eq 1) {
-        [pscustomobject]@{ action = 'mapSettlementTargets'; arguments = @{}; rationale = "Context contract accepted goal '$expectedGoal' and $($catalog.Count) product actions; Harness-only advance/tools are absent." } | ConvertTo-Json -Compress
+        [pscustomobject]@{ action = 'mapSettlementTargets'; arguments = @{}; rationale = "Context contract accepted goal '$expectedGoal' with only the two requested map actions." } | ConvertTo-Json -Compress
         exit 0
     }
     if ($request.iteration -eq 2 -and $request.previousActionReceipt.action -eq 'mapSettlementTargets') {
