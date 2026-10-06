@@ -36,6 +36,9 @@ try {
         if (-not [int]::TryParse([string]$env:CHRONICLE_LLM_MAX_TOKENS, [ref]$maxTokens) -or $maxTokens -lt 64 -or $maxTokens -gt 4096)
             { throw 'CHRONICLE_LLM_MAX_TOKENS must be between 64 and 4096.' }
     }
+    $maxTokenParameter = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER)) { 'max_completion_tokens' } else { [string]$env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER }
+    if ($maxTokenParameter -notin @('max_completion_tokens','max_tokens'))
+        { throw 'CHRONICLE_LLM_MAX_TOKEN_PARAMETER must be max_completion_tokens or max_tokens.' }
 
     $systemPrompt = @'
 You are the decision maker for a Bannerlord Campaign Agent. Use only the task goal, current observation, previous native action receipt, and action catalog in the request. Select at most one listed action with only its listed argument names. Use IDs and values only when present in the current observation or receipt. Never invent unseen people, settlements, options, or game state. Never request or output code, tools, shell commands, or direct game API calls. If the goal is already met or no safe legal action is supported by the current evidence, return a done decision with a concise reason. Return exactly one JSON object and no Markdown.
@@ -51,8 +54,9 @@ To stop, return: {"done":true,"reason":"brief evidence-based reason"}
             [ordered]@{ role = 'user'; content = [string]$userContent }
         )
         response_format = [ordered]@{ type = 'json_object' }
-        max_tokens = $maxTokens
+        store = $false
     }
+    $payload[$maxTokenParameter] = $maxTokens
     $body = $payload | ConvertTo-Json -Depth 28 -Compress
     $headers = @{}
     if (-not [string]::IsNullOrWhiteSpace($apiKey)) { $headers.Authorization = "Bearer $apiKey" }

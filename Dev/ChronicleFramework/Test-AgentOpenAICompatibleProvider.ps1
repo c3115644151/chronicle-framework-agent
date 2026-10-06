@@ -8,6 +8,7 @@ $priorModel = $env:CHRONICLE_LLM_MODEL
 $priorApiKey = $env:CHRONICLE_LLM_API_KEY
 $priorTimeout = $env:CHRONICLE_LLM_TIMEOUT_SECONDS
 $priorTokens = $env:CHRONICLE_LLM_MAX_TOKENS
+$priorTokenParameter = $env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER
 $harnessSecret = 'chronicle-local-provider-test-secret'
 $listener = $null
 $process = $null
@@ -47,6 +48,7 @@ try {
     $env:CHRONICLE_LLM_API_KEY = $harnessSecret
     $env:CHRONICLE_LLM_TIMEOUT_SECONDS = [string]$TimeoutSeconds
     $env:CHRONICLE_LLM_MAX_TOKENS = '512'
+    $env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER = 'max_completion_tokens'
 
     $goal = 'Inspect currently visible safe settlements and then stop with the Native receipt.'
     $request = [ordered]@{
@@ -77,7 +79,8 @@ try {
     $allowedNames = @($modelInput.allowedActions | ForEach-Object { [string]$_.action })
     $actionCatalogForwarded = ('mapSettlementTargets' -in $allowedNames -and 'move' -in $allowedNames -and 'advance' -notin $allowedNames)
     $authorizationSent = ($context.Request.Headers['Authorization'] -ceq "Bearer $harnessSecret")
-    $payloadModeCorrect = ($apiRequest.model -eq 'harness-contract-model' -and $apiRequest.response_format.type -eq 'json_object' -and $apiRequest.stream -ne $true)
+    $payloadModeCorrect = ($apiRequest.model -eq 'harness-contract-model' -and $apiRequest.response_format.type -eq 'json_object' -and
+        [int]$apiRequest.max_completion_tokens -eq 512 -and [bool]($apiRequest.store -eq $false) -and $apiRequest.stream -ne $true)
 
     $modelDecision = [ordered]@{
         action = 'mapSettlementTargets'
@@ -170,4 +173,5 @@ finally {
     if ($null -eq $priorApiKey) { Remove-Item Env:CHRONICLE_LLM_API_KEY -ErrorAction SilentlyContinue } else { $env:CHRONICLE_LLM_API_KEY = $priorApiKey }
     if ($null -eq $priorTimeout) { Remove-Item Env:CHRONICLE_LLM_TIMEOUT_SECONDS -ErrorAction SilentlyContinue } else { $env:CHRONICLE_LLM_TIMEOUT_SECONDS = $priorTimeout }
     if ($null -eq $priorTokens) { Remove-Item Env:CHRONICLE_LLM_MAX_TOKENS -ErrorAction SilentlyContinue } else { $env:CHRONICLE_LLM_MAX_TOKENS = $priorTokens }
+    if ($null -eq $priorTokenParameter) { Remove-Item Env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER -ErrorAction SilentlyContinue } else { $env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER = $priorTokenParameter }
 }
