@@ -18,6 +18,8 @@ $frameTown = Join-Path $frameRoot 'alley-fight-town.bmp'
 $frameMenu = Join-Path $frameRoot 'alley-fight-manage-menu.bmp'
 $frameDialogue = Join-Path $frameRoot 'alley-fight-confront-dialogue.bmp'
 $frameMission = Join-Path $frameRoot 'alley-fight-mission.bmp'
+$frameExitInquiry = Join-Path $frameRoot 'alley-fight-exit-inquiry.bmp'
+$frameAfterCancel = Join-Path $frameRoot 'alley-fight-after-exit-cancel.bmp'
 $frameAfterRetreat = Join-Path $frameRoot 'alley-fight-after-retreat.bmp'
 $failedStep = 'preflight'
 
@@ -153,9 +155,43 @@ try {
         -not [string]::IsNullOrWhiteSpace([string]$missionObservation.sceneName))
     if (-not $missionEntryVerified) { throw "Alley Fight Mission did not show the expected live player combat state: $($missionState.state | ConvertTo-Json -Depth 6 -Compress)" }
 
-    $failedStep = 'use-current-Native-Mission-retreat'
-    $retreatReceipt = Invoke-AgentCli 'missionRetreat' @('-CommandId', "$prefix-retreat") 30
-    if ($retreatReceipt.status -ne 'completed') { throw "Existing missionRetreat action did not use the current Native Mission exit path: $($retreatReceipt.error)" }
+    $failedStep = 'read-combat-Mission-exit-baseline'
+    $alleyDuringMissionBeforeExit = Invoke-AgentCli 'harnessAlleyRosterDiagnostics' @('-SettlementId', $TargetSettlementId, '-AlleyTag', $alleyTag, '-HeroId', [string]$seed.data.attackingHeroId, '-CommandId', "$prefix-before-native-exit") 30
+    $failedStep = 'request-Native-Mission-exit'
+    $retreatRequest = Invoke-AgentCli 'missionRetreat' @('-CommandId', "$prefix-retreat-request") 30
+    if ($retreatRequest.status -ne 'completed' -or -not [bool]$retreatRequest.state.context.inquiryOpen -or
+        -not [bool]$retreatRequest.state.context.inquiry.supported -or $retreatRequest.state.context.gameState -ne 'MissionState')
+        { throw "Native Mission exit did not expose its active confirmation Inquiry to the Agent: $($retreatRequest.state.context | ConvertTo-Json -Depth 6 -Compress)" }
+    $exitInquiry = $retreatRequest.state.context.inquiry
+    if (-not [bool]$exitInquiry.affirmative.visible -or -not [bool]$exitInquiry.affirmative.enabled -or
+        -not [bool]$exitInquiry.negative.visible -or -not [bool]$exitInquiry.negative.enabled)
+        { throw "Native exit Inquiry did not expose both current enabled choices: $($exitInquiry | ConvertTo-Json -Depth 5 -Compress)" }
+    Capture-EngineFrame $frameExitInquiry 'exit-inquiry'
+    $alleyWithExitInquiry = Invoke-AgentCli 'harnessAlleyRosterDiagnostics' @('-SettlementId', $TargetSettlementId, '-AlleyTag', $alleyTag, '-HeroId', [string]$seed.data.attackingHeroId, '-CommandId', "$prefix-inquiry-alley") 30
+
+    $failedStep = 'cancel-Native-Mission-exit-confirmation'
+    $cancelExit = Invoke-AgentCli 'respondInquiry' @('-InquiryToken', [string]$exitInquiry.token, '-InquiryChoice', 'negative', '-CommandId', "$prefix-cancel-exit") 30
+    if ($cancelExit.status -ne 'completed') { throw "Native exit confirmation cancel callback failed: $($cancelExit.error)" }
+    $afterCancel = Invoke-AgentCli 'state' @('-CommandId', "$prefix-after-exit-cancel") 30
+    $alleyAfterCancel = Invoke-AgentCli 'harnessAlleyRosterDiagnostics' @('-SettlementId', $TargetSettlementId, '-AlleyTag', $alleyTag, '-HeroId', [string]$seed.data.attackingHeroId, '-CommandId', "$prefix-cancel-alley") 30
+    $cancelPreservedMission = ($afterCancel.state.context.gameState -eq 'MissionState' -and -not [bool]$afterCancel.state.context.inquiryOpen -and
+        [bool]$afterCancel.state.mission.active -and [bool]$afterCancel.state.mission.mainAgent.isPlayerControlled)
+    $alleyUnchangedUntilNativeConfirmation = ([bool]$alleyDuringMissionBeforeExit.data.playerAlleyDataPresent -eq [bool]$alleyAfterCancel.data.playerAlleyDataPresent -and
+        [string]$alleyDuringMissionBeforeExit.data.alleyOwnerId -eq [string]$alleyAfterCancel.data.alleyOwnerId -and
+        ($alleyDuringMissionBeforeExit.data.alleyRoster | ConvertTo-Json -Compress) -eq ($alleyAfterCancel.data.alleyRoster | ConvertTo-Json -Compress) -and
+        ($alleyDuringMissionBeforeExit.data.mainPartyRoster | ConvertTo-Json -Compress) -eq ($alleyAfterCancel.data.mainPartyRoster | ConvertTo-Json -Compress) -and
+        [int]$alleyDuringMissionBeforeExit.data.mainHeroHitPoints -eq [int]$alleyAfterCancel.data.mainHeroHitPoints)
+    if (-not $cancelPreservedMission -or -not $alleyUnchangedUntilNativeConfirmation)
+        { throw 'Native exit cancel did not preserve the active Mission, player control, Alley state, roster, and Hero health.' }
+    Capture-EngineFrame $frameAfterCancel 'after-exit-cancel'
+
+    $failedStep = 'reopen-and-confirm-Native-Mission-exit'
+    $confirmedRequest = Invoke-AgentCli 'missionRetreat' @('-CommandId', "$prefix-retreat-confirm-request") 30
+    if ($confirmedRequest.status -ne 'completed' -or -not [bool]$confirmedRequest.state.context.inquiryOpen -or
+        -not [bool]$confirmedRequest.state.context.inquiry.supported -or $confirmedRequest.state.context.gameState -ne 'MissionState')
+        { throw "Native exit Inquiry did not reopen for the explicit affirmative choice: $($confirmedRequest.state.context | ConvertTo-Json -Depth 6 -Compress)" }
+    $confirmExit = Invoke-AgentCli 'respondInquiry' @('-InquiryToken', [string]$confirmedRequest.state.context.inquiry.token, '-InquiryChoice', 'affirmative', '-CommandId', "$prefix-confirm-exit") 30
+    if ($confirmExit.status -ne 'completed') { throw "Native exit confirmation affirmative callback failed: $($confirmExit.error)" }
     $afterRetreat = $null
     for ($attempt = 0; $attempt -lt 60; $attempt++) {
         $afterRetreat = Invoke-AgentCli 'state' @('-CommandId', "$prefix-after-retreat-$attempt") 30
@@ -170,8 +206,8 @@ try {
     $clockStable = ([double]$alleyBefore.data.campaignDay -eq [double]$afterAlley.data.campaignDay -and
         [string]$alleyBefore.data.timeControlMode -eq [string]$afterAlley.data.timeControlMode -and [bool]$alleyBefore.data.isWaiting -eq [bool]$afterAlley.data.isWaiting)
     $result = [ordered]@{
-        Scenario = 'fightMissionRetreat'
-        ProviderKind = 'Native attacked-Alley conversation→Fight line→AlleyFight Mission→Native missionRetreat'
+        Scenario = 'fightMissionNativeExitInquiry'
+        ProviderKind = 'Native attacked-Alley conversation→Fight line→AlleyFight Mission→Mission.OnEndMissionRequest→Native Inquiry cancel/affirmative callbacks'
         ProcessId = $start.session.processId
         AttackFixture = $seed.data
         NativeFightOption = $fightOption[0]
@@ -179,7 +215,12 @@ try {
         NativeFirstMeetingOptions = @($initiallyVisibleOptions)
         MissionEntry = [ordered]@{ GameState = $missionState.state.context.gameState; SceneName = $missionObservation.sceneName; CombatType = $missionObservation.combatType; Mode = $missionObservation.mode; ActiveAgentCount = $missionObservation.activeAgentCount; MainAgent = $missionObservation.mainAgent; Leave = $missionObservation.leave }
         MissionEntryVerified = $missionEntryVerified
-        NativeRetreatReceipt = $retreatReceipt.data
+        NativeExitRequest = $retreatRequest.data
+        NativeExitInquiry = $exitInquiry
+        NativeCancelReceipt = $cancelExit.data
+        NativeCancelPreservedMission = $cancelPreservedMission
+        AlleyUnchangedUntilNativeConfirmation = $alleyUnchangedUntilNativeConfirmation
+        NativeAffirmativeReceipt = $confirmExit.data
         ReturnedToMap = ($afterRetreat.state.context.gameState -eq 'MapState' -and -not $afterRetreat.state.mission)
         MenuAfterRetreat = $afterRetreat.state.context.menuId
         AlleyBefore = $alleyBefore.data
@@ -191,12 +232,15 @@ try {
         SourceFixtureHashBefore = $sourceHashBefore
         SourceFixtureHashAfter = $sourceHashAfter
         SourceFixtureUnchanged = ($sourceHashBefore -eq $sourceHashAfter)
-        EngineFrames = @($frameTown, $frameMenu, $frameDialogue, $frameMission, $frameAfterRetreat)
+        EngineFrames = @($frameTown, $frameMenu, $frameDialogue, $frameMission, $frameExitInquiry, $frameAfterCancel, $frameAfterRetreat)
     }
     $stop = Invoke-AgentCli 'stop' @('-CommandId', "$prefix-stop") 30
     $result.ProcessStopped = [bool]$stop.processStopped
     $result.AllGameProcessesStopped = -not [bool](Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue)
-    $result.Passed = ([bool]$result.MissionEntryVerified -and [bool]$result.ReturnedToMap -and [bool]$result.AlleyLostAfterRetreat -and
+    $result.MissionExitInquiryVisible = ([bool]$exitInquiry.supported -and $exitInquiry.kind -eq 'YesNoInquiry' -and
+        [bool]$exitInquiry.affirmative.visible -and [bool]$exitInquiry.negative.visible)
+    $result.Passed = ([bool]$result.MissionEntryVerified -and [bool]$result.MissionExitInquiryVisible -and [bool]$result.NativeCancelPreservedMission -and
+        [bool]$result.AlleyUnchangedUntilNativeConfirmation -and [bool]$result.ReturnedToMap -and [bool]$result.AlleyLostAfterRetreat -and
         [int]$result.MainHeroHitPointsAfterRetreat -eq 1 -and [bool]$result.GoldAndInfluenceStable -and [bool]$result.CampaignClockStable -and
         [bool]$result.SourceFixtureUnchanged -and [bool]$result.ProcessStopped -and [bool]$result.AllGameProcessesStopped)
     if ($tempPath -and (Test-Path -LiteralPath $tempPath -PathType Container)) {

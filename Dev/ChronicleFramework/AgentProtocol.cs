@@ -1271,16 +1271,19 @@ internal sealed class ChronicleAgentProtocol
                     break;
                 case "missionRetreat":
                     var missionToRetreat = Mission.Current;
-                    if (missionToRetreat == null || missionToRetreat.MissionEnded) throw new InvalidOperationException("missionRetreat requires an active battle mission");
+                    var missionRetreatState = Game.Current?.GameStateManager?.ActiveState as MissionState;
+                    if (missionToRetreat == null || missionToRetreat.MissionEnded || missionRetreatState == null)
+                        throw new InvalidOperationException("missionRetreat requires an active battle MissionState");
+                    if (missionToRetreat.MainAgent == null || !missionToRetreat.MainAgent.IsActive() || !missionToRetreat.MainAgent.IsPlayerControlled)
+                        throw new InvalidOperationException("missionRetreat requires the active Player-controlled MainAgent");
                     var battleEndLogic = missionToRetreat.GetMissionBehavior<BattleEndLogic>();
                     if (battleEndLogic == null) throw new InvalidOperationException("active mission does not expose native BattleEndLogic");
                     var exitResult = battleEndLogic.TryExit();
                     if (exitResult == BattleEndLogic.ExitResult.SurrenderSiege)
                         throw new InvalidOperationException("native TAB exit is surrender for a siege defender, not retreat");
-                    if (exitResult == BattleEndLogic.ExitResult.True)
-                        throw new InvalidOperationException("battle mission already ended; retreat is not applicable");
-                    missionToRetreat.RetreatMission();
-                    var retreatData = "{\"tryExit\":\"" + Escape(exitResult.ToString()) + "\",\"missionEnded\":" + (missionToRetreat.MissionEnded ? "true" : "false") + "}";
+                    if (exitResult != BattleEndLogic.ExitResult.True)
+                        missionToRetreat.OnEndMissionRequest();
+                    var retreatData = "{\"nativeRequest\":\"Mission.OnEndMissionRequest\",\"tryExit\":\"" + Escape(exitResult.ToString()) + "\",\"inquiryOpen\":" + (ChronicleInquiryAdapter.IsInquiryOpen ? "true" : "false") + ",\"missionEnded\":" + (missionToRetreat.MissionEnded ? "true" : "false") + "}";
                     WriteResponse(commandId, action, "completed", behavior, null, retreatData);
                     break;
                 case "partyTakeAll":

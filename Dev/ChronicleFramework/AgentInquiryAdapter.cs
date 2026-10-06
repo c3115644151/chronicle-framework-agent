@@ -8,6 +8,7 @@ using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.GameState;
 using TaleWorlds.Core;
 using TaleWorlds.Library;
+using TaleWorlds.MountAndBlade;
 
 namespace ChronicleFramework;
 
@@ -87,8 +88,9 @@ internal static class ChronicleInquiryAdapter
     internal static string Respond(string token, string choice)
     {
         EnsureLifecycleTracking();
-        if (Game.Current?.GameStateManager?.ActiveState is not MapState)
-            throw new InvalidOperationException("respondInquiry supports Native Campaign Map inquiries only");
+        var activeState = Game.Current?.GameStateManager?.ActiveState;
+        if (activeState is not MapState && activeState is not MissionState)
+            throw new InvalidOperationException("respondInquiry supports active Native Campaign Map or Mission inquiries only");
         if (!IsInquiryOpen) throw new InvalidOperationException("respondInquiry requires a currently active Native Inquiry");
         if (!TryReadNativeActiveQuery(out var queryData, out var dataSource, out _, out var failure))
             throw new InvalidOperationException("Current Native Inquiry is unavailable: " + failure);
