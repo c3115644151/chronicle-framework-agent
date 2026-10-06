@@ -107,6 +107,28 @@ try {
     $providerOutputClean = ($stdout -notmatch [regex]::Escape($harnessSecret) -and $stderr -notmatch [regex]::Escape($harnessSecret))
     $decisionValidated = ($decision.action -eq 'mapSettlementTargets' -and $decision.rationale -eq $expectedDecision.rationale)
 
+    $failureStep = 'reject-action-outside-current-catalog'
+    $invalidActionProvider = Start-ProviderProcess $requestJson
+    $process = $invalidActionProvider.Process
+    $invalidActionAcceptTask = $listener.GetContextAsync()
+    if (-not $invalidActionAcceptTask.Wait(5000)) { throw 'Local HTTP stub did not receive the invalid-action test request.' }
+    $invalidActionContext = $invalidActionAcceptTask.GetAwaiter().GetResult()
+    $invalidActionReader = New-Object System.IO.StreamReader($invalidActionContext.Request.InputStream, $invalidActionContext.Request.ContentEncoding)
+    $null = $invalidActionReader.ReadToEnd()
+    $invalidActionReader.Dispose()
+    $invalidActionDecision = [ordered]@{ action = 'advance'; arguments = @{}; rationale = 'The model requested a Harness-only time step.' } | ConvertTo-Json -Compress
+    $invalidActionResponse = [ordered]@{ choices = @([ordered]@{ index = 0; message = [ordered]@{ role = 'assistant'; content = $invalidActionDecision }; finish_reason = 'stop' }) } | ConvertTo-Json -Depth 8 -Compress
+    $invalidActionBytes = [System.Text.Encoding]::UTF8.GetBytes($invalidActionResponse)
+    $invalidActionContext.Response.StatusCode = 200
+    $invalidActionContext.Response.ContentType = 'application/json; charset=utf-8'
+    $invalidActionContext.Response.ContentLength64 = $invalidActionBytes.Length
+    $invalidActionContext.Response.OutputStream.Write($invalidActionBytes, 0, $invalidActionBytes.Length)
+    $invalidActionContext.Response.OutputStream.Close()
+    if (-not $process.WaitForExit(($TimeoutSeconds + 5) * 1000)) { try { $process.Kill() } catch { }; throw 'Provider did not exit after returning a disallowed action.' }
+    $invalidActionStdout = $invalidActionProvider.StdoutTask.Result.Trim()
+    $invalidActionStderr = $invalidActionProvider.StderrTask.Result.Trim()
+    $invalidActionFailedClosed = ($process.ExitCode -ne 0 -and $invalidActionStdout -notmatch '"action"' -and $invalidActionStderr -notmatch [regex]::Escape($harnessSecret))
+
     $failureStep = 'fail-closed-on-provider-http-error'
     $httpErrorProvider = Start-ProviderProcess $requestJson
     $process = $httpErrorProvider.Process
@@ -155,8 +177,9 @@ try {
         StructuredDecisionReturned = $decisionValidated
         ProviderExitCode = $successfulProviderExitCode
         HttpErrorFailsClosedWithoutCredentialLeak = $httpErrorFailedClosed
+        DisallowedActionFailsClosed = $invalidActionFailedClosed
         TimeoutFailsClosedWithoutCredentialLeak = $timeoutFailedClosed
-        Passed = ($requestGoalForwarded -and $actionCatalogForwarded -and $authorizationSent -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $httpErrorFailedClosed -and $timeoutFailedClosed)
+        Passed = ($requestGoalForwarded -and $actionCatalogForwarded -and $authorizationSent -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $invalidActionFailedClosed -and $httpErrorFailedClosed -and $timeoutFailedClosed)
     }
     $result | ConvertTo-Json -Depth 8
     if (-not $result.Passed) { exit 1 }
