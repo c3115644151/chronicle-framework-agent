@@ -11,6 +11,9 @@ $provider = Join-Path $PSScriptRoot 'Agent-OpenAICompatibleProvider.ps1'
 $savePath = Join-Path $env:USERPROFILE "Documents\Mount and Blade II Bannerlord\Game Saves\$LoadSaveName.sav"
 $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\session.json'
 
+if (Get-Process -Name Bannerlord* -ErrorAction SilentlyContinue) {
+    throw 'Refusing to start a live-model Campaign test while any Bannerlord client is already running.'
+}
 foreach ($setting in @('CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL')) {
     if ([string]::IsNullOrWhiteSpace([string][Environment]::GetEnvironmentVariable($setting))) {
         throw "Live-model verification requires local $setting configuration; the value is never printed by this test."
