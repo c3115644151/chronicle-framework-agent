@@ -390,11 +390,11 @@ try {
             $partyMoving = [bool]$observation.state.party.isMoving
             $currentSettlementId = [string]$observation.state.location.currentSettlementId
             if ([string]$observation.state.context.gameState -cne 'MapState' -or
-                [string]$moveReceipt.action -cne 'move' -or [string]$moveReceipt.status -cne 'completed' -or
+                [string]$moveReceipt.action -notin @('move','resume') -or [string]$moveReceipt.status -cne 'completed' -or
                 [string]$observation.state.location.targetSettlementId -cne $targetSettlementId -or
                 [string]::IsNullOrWhiteSpace($targetSettlementId) -or -not $partyMoving -or
                 $currentSettlementId -ceq $targetSettlementId) {
-                throw 'observeAgain is allowed only while a completed Native move is still active on the Campaign map and its target has not yet been reached.'
+                throw 'observeAgain is allowed only while a completed Native move/resume is still active on the Campaign map and its target has not yet been reached.'
             }
             $waitStartedUtc = [DateTime]::UtcNow.ToString('O')
             $waitStartedTicks = [Diagnostics.Stopwatch]::GetTimestamp()
