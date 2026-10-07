@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.52
+Contract version: 7.53
 
 ## 目标与边界
 
@@ -383,9 +383,9 @@ Agent决策循环的Harness原型使用请求schema v2：每轮把明确Goal、�
 
 `CheckpointValidation` 是 opt-in 的 checkpoint输入安全回归：对一个接入于disposable Campaign存档的损坏JSON、未知schema版本和错Campaign身份逐个尝试Resume；每类都应在Provider启动或任何Native写动作前失败，且当前地图/队伍/金币/日期/时间档保持不变。专用seed action只在visual Harness模式可用，不能进入产品白名单。
 
-`RecruitmentBaseline`（`Run-Harness.ps1 -Phase RecruitmentBaseline`）是W5的确定性Native对照：对同一个未修改的disposable Campaign模板独立重载5次，执行地图移动与招募一人，记录原生结果、自然游戏日、墙钟成本、失败分类与清理。固定起点只测Harness/本体重复性，不代表独立随机seed或真实模型成功率；它不进入 `All`，并为后续真实模型候选评测提供预先冻结样本数/成本预算的依据。
-
 `RecruitmentBaseline` 是W5的确定性原版对照阶段：它从同一个未修改的Campaign模板分别重载5个Runtime，完成地图移动与招募一人，按Native receipt/Party/Gold/Volunteer slot验证成功，同时记录CampaignDay、raw time mode与墙钟成本。它明确只有同一Campaign起点重复，不是5个独立随机seed，也不测试真实LLM；结果用于冻结后续候选模型评测的重复数和阈值，阶段不进入 `All`。
+
+`LiveModelRecruitmentEvaluation` 是基于该Native基线的真实本地模型opt-in阶段：固定同一seed、真实Provider、五次独立Runtime运行，预先要求5/5成功、每次墙钟≤180秒/CampaignDay≤0.1、一次move与一次recruit、无重复或越权副作用、Visual覆盖≥90%、模板hash不变且进程清理；候选模型结果不得反向改阈值。它只评估当前地图→志愿兵目标，不代表跨seed或整个产品成熟度。
 
 ## 当前执行焦点
 
