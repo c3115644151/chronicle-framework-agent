@@ -9,6 +9,8 @@ $priorApiKey = $env:CHRONICLE_LLM_API_KEY
 $priorTimeout = $env:CHRONICLE_LLM_TIMEOUT_SECONDS
 $priorTokens = $env:CHRONICLE_LLM_MAX_TOKENS
 $priorTokenParameter = $env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER
+$priorReasoningEffort = $env:CHRONICLE_LLM_REASONING_EFFORT
+$priorTemperature = $env:CHRONICLE_LLM_TEMPERATURE
 $harnessSecret = 'chronicle-local-provider-test-secret'
 $listener = $null
 $process = $null
@@ -81,7 +83,7 @@ try {
     $actionCatalogForwarded = ('mapSettlementTargets' -in $allowedNames -and 'move' -in $allowedNames -and 'advance' -notin $allowedNames)
     $authorizationSent = ($context.Request.Headers['Authorization'] -ceq "Bearer $harnessSecret")
     $payloadModeCorrect = ($apiRequest.model -eq 'harness-contract-model' -and $apiRequest.response_format.type -eq 'json_object' -and
-        [int]$apiRequest.max_completion_tokens -eq 512 -and [bool]($apiRequest.store -eq $false) -and $apiRequest.stream -ne $true)
+        [int]$apiRequest.max_completion_tokens -eq 512 -and [bool]($apiRequest.store -eq $false) -and $apiRequest.stream -ne $true -and $null -eq $apiRequest.reasoning_effort -and $null -eq $apiRequest.temperature)
 
     $modelDecision = [ordered]@{
         action = 'mapSettlementTargets'
@@ -111,7 +113,29 @@ try {
     $failureStep = 'verify-local-openai-compatible-service-contract'
     $env:CHRONICLE_LLM_API_KEY = ''
     $env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER = 'max_tokens'
-    $localProvider = Start-ProviderProcess $requestJson
+    $env:CHRONICLE_LLM_REASONING_EFFORT = 'none'
+    $env:CHRONICLE_LLM_TEMPERATURE = '0'
+    $largeMapTargets = @(1..40 | ForEach-Object {
+        [ordered]@{ id = "town_test_$_"; name = "Test settlement $_"; type = 'town'; distance = [double]$_; hostile = ($_ -gt 30); underSiege = $false }
+    })
+    $localRequest = [ordered]@{
+        schemaVersion = 2
+        runId = 'provider-large-receipt-test'
+        iteration = 2
+        goal = $goal
+        allowedActions = $request.allowedActions
+        observation = $request.observation
+        previousActionReceipt = [ordered]@{
+            protocolVersion = 1
+            commandId = 'large-map-query-receipt'
+            action = 'mapSettlementTargets'
+            status = 'completed'
+            campaignDay = 1234.5
+            state = [ordered]@{ context = [ordered]@{ gameState = 'MapState' }; location = [ordered]@{ currentSettlementId = 'town_V1' } }
+            data = [ordered]@{ mapSettlementTargets = $largeMapTargets }
+        }
+    }
+    $localProvider = Start-ProviderProcess ($localRequest | ConvertTo-Json -Depth 16 -Compress)
     $process = $localProvider.Process
     $localAcceptTask = $listener.GetContextAsync()
     if (-not $localAcceptTask.Wait(5000)) { throw 'Local HTTP stub did not receive the local-model compatibility request.' }
@@ -120,7 +144,13 @@ try {
     $localRequestBody = $localReader.ReadToEnd()
     $localReader.Dispose()
     $localApiRequest = $localRequestBody | ConvertFrom-Json
+    $localModelInput = [string]$localApiRequest.messages[1].content | ConvertFrom-Json
     $localTokenParameterCorrect = ([int]$localApiRequest.max_tokens -eq 512 -and $null -eq $localApiRequest.max_completion_tokens)
+    $localReasoningEffortForwarded = ($localApiRequest.reasoning_effort -ceq 'none')
+    $localTemperatureForwarded = ([double]$localApiRequest.temperature -eq 0)
+    $localPromptTargets = @($localModelInput.previousActionReceipt.data.mapSettlementTargets)
+    $localReceiptSummary = $localModelInput.previousActionReceipt.data.mapSettlementTargetsSummary
+    $localReceiptCompacted = ($localPromptTargets.Count -eq 16 -and [int]$localReceiptSummary.totalCount -eq 40 -and [int]$localReceiptSummary.includedCount -eq 16 -and [int]$localReceiptSummary.omittedCount -eq 24 -and $null -eq $localModelInput.previousActionReceipt.state)
     $localNoAuthorizationHeader = [string]::IsNullOrWhiteSpace([string]$localContext.Request.Headers['Authorization'])
     $localResponseBytes = [System.Text.Encoding]::UTF8.GetBytes($responseJson)
     $localContext.Response.StatusCode = 200
@@ -133,7 +163,7 @@ try {
     $localStderr = $localProvider.StderrTask.Result.Trim()
     if ($process.ExitCode -ne 0) { throw "Provider rejected the local-compatible response (exit=$($process.ExitCode)): $localStderr" }
     $localDecision = $localStdout | ConvertFrom-Json
-    $localCompatibilityPassed = ($localTokenParameterCorrect -and $localNoAuthorizationHeader -and $localDecision.action -eq 'mapSettlementTargets' -and $localStdout -notmatch [regex]::Escape($harnessSecret) -and $localStderr -notmatch [regex]::Escape($harnessSecret))
+    $localCompatibilityPassed = ($localTokenParameterCorrect -and $localReasoningEffortForwarded -and $localTemperatureForwarded -and $localReceiptCompacted -and $localNoAuthorizationHeader -and $localDecision.action -eq 'mapSettlementTargets' -and $localStdout -notmatch [regex]::Escape($harnessSecret) -and $localStderr -notmatch [regex]::Escape($harnessSecret))
     $env:CHRONICLE_LLM_API_KEY = $harnessSecret
     $env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER = 'max_completion_tokens'
 
@@ -203,6 +233,9 @@ try {
         PriorReceiptFieldPresent = ($null -eq $modelInput.previousActionReceipt)
         AuthorizationHeaderSent = $authorizationSent
         LocalCompatibleMaxTokensWithoutAuthorization = $localCompatibilityPassed
+        LocalReasoningEffortForwarded = $localReasoningEffortForwarded
+        LocalTemperatureForwarded = $localTemperatureForwarded
+        LargeMapReceiptCompacted = $localReceiptCompacted
         BaseUrlResolvedToChatCompletionsPath = $endpointPathCorrect
         RequestFormatCorrect = $payloadModeCorrect
         ProviderOutputCredentialFree = $providerOutputClean
@@ -229,4 +262,6 @@ finally {
     if ($null -eq $priorTimeout) { Remove-Item Env:CHRONICLE_LLM_TIMEOUT_SECONDS -ErrorAction SilentlyContinue } else { $env:CHRONICLE_LLM_TIMEOUT_SECONDS = $priorTimeout }
     if ($null -eq $priorTokens) { Remove-Item Env:CHRONICLE_LLM_MAX_TOKENS -ErrorAction SilentlyContinue } else { $env:CHRONICLE_LLM_MAX_TOKENS = $priorTokens }
     if ($null -eq $priorTokenParameter) { Remove-Item Env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER -ErrorAction SilentlyContinue } else { $env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER = $priorTokenParameter }
+    if ($null -eq $priorReasoningEffort) { Remove-Item Env:CHRONICLE_LLM_REASONING_EFFORT -ErrorAction SilentlyContinue } else { $env:CHRONICLE_LLM_REASONING_EFFORT = $priorReasoningEffort }
+    if ($null -eq $priorTemperature) { Remove-Item Env:CHRONICLE_LLM_TEMPERATURE -ErrorAction SilentlyContinue } else { $env:CHRONICLE_LLM_TEMPERATURE = $priorTemperature }
 }

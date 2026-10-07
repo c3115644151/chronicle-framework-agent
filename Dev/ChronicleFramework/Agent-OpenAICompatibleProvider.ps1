@@ -42,14 +42,56 @@ try {
     $maxTokenParameter = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER)) { 'max_completion_tokens' } else { [string]$env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER }
     if ($maxTokenParameter -notin @('max_completion_tokens','max_tokens'))
         { throw 'CHRONICLE_LLM_MAX_TOKEN_PARAMETER must be max_completion_tokens or max_tokens.' }
+    $reasoningEffort = [string]$env:CHRONICLE_LLM_REASONING_EFFORT
+    if (-not [string]::IsNullOrWhiteSpace($reasoningEffort) -and $reasoningEffort -notin @('none','low','medium','high'))
+        { throw 'CHRONICLE_LLM_REASONING_EFFORT must be omitted or one of: none, low, medium, high.' }
+    $temperature = 0.0
+    $hasTemperature = -not [string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_TEMPERATURE)
+    if ($hasTemperature -and (-not [double]::TryParse([string]$env:CHRONICLE_LLM_TEMPERATURE, [ref]$temperature) -or $temperature -lt 0 -or $temperature -gt 2))
+        { throw 'CHRONICLE_LLM_TEMPERATURE must be a number between 0 and 2.' }
 
     $systemPrompt = @'
-You are the decision maker for a Bannerlord Campaign Agent. Use only the task goal, current observation, previous native action receipt, and action catalog in the request. Select at most one listed action with only its listed argument names. Use IDs and values only when present in the current observation or receipt. Never invent unseen people, settlements, options, or game state. Never request or output code, tools, shell commands, or direct game API calls. If the goal is already met or no safe legal action is supported by the current evidence, return a done decision with a concise reason. Return exactly one JSON object and no Markdown.
+You are the decision maker for a Bannerlord Campaign Agent. Use only the task goal, current observation, previous native action receipt, and action catalog in the request. Select at most one listed action with only its listed argument names. Use IDs and values only when present in the current observation or receipt. Never invent unseen people, settlements, options, or game state. Never echo or reproduce input observations/receipts as output; return only one decision object. Treat ordered goal words such as "first", "then", and "before" as hard preconditions: do not skip an earlier required action just because a later action appears possible from the observation; require a completed prior-action receipt before advancing to the later step. Once the completed previous-action receipt satisfies the final required action in the goal, return done instead of repeating or starting another action. A receipt with mapSettlementTargetsSummary contains a bounded candidate subset; omittedCount means some query results are not shown, so choose only from the included IDs. If the goal is already met or no safe legal action is supported by the current evidence, return a done decision with a concise reason. Return exactly one JSON object and no Markdown.
 
 For an action, return: {"action":"listed action name","arguments":{},"rationale":"brief evidence-based reason"}
 To stop, return: {"done":true,"reason":"brief evidence-based reason"}
 '@
-    $userContent = $request | ConvertTo-Json -Depth 24 -Compress
+    $modelRequest = $request
+    $previousReceipt = $request.previousActionReceipt
+    if ($previousReceipt -and [string]$previousReceipt.action -ceq 'mapSettlementTargets' -and $previousReceipt.data) {
+        $mapTargets = @($previousReceipt.data.mapSettlementTargets)
+        if ($mapTargets.Count -gt 16) {
+            $safeTargets = @($mapTargets | Where-Object { -not [bool]$_.hostile -and -not [bool]$_.underSiege } | Sort-Object { [double]$_.distance } | Select-Object -First 12)
+            $atRiskTargets = @($mapTargets | Where-Object { [bool]$_.hostile -or [bool]$_.underSiege } | Sort-Object { [double]$_.distance } | Select-Object -First 4)
+            $candidateTargets = @($safeTargets + $atRiskTargets)
+            $compactReceiptData = [ordered]@{}
+            foreach ($property in $previousReceipt.data.PSObject.Properties) {
+                if ($property.Name -cne 'mapSettlementTargets') { $compactReceiptData[$property.Name] = $property.Value }
+            }
+            $compactReceiptData.mapSettlementTargets = $candidateTargets
+            $compactReceiptData.mapSettlementTargetsSummary = [ordered]@{
+                totalCount = $mapTargets.Count
+                includedCount = $candidateTargets.Count
+                omittedCount = ($mapTargets.Count - $candidateTargets.Count)
+                selectionPolicy = 'nearest safe candidates plus nearest at-risk candidates'
+            }
+            $compactReceipt = [ordered]@{}
+            foreach ($property in $previousReceipt.PSObject.Properties) {
+                if ($property.Name -cnotin @('state','data')) { $compactReceipt[$property.Name] = $property.Value }
+            }
+            $compactReceipt.data = $compactReceiptData
+            $modelRequest = [ordered]@{
+                schemaVersion = $request.schemaVersion
+                runId = $request.runId
+                iteration = $request.iteration
+                goal = $request.goal
+                allowedActions = $request.allowedActions
+                observation = $request.observation
+                previousActionReceipt = $compactReceipt
+            }
+        }
+    }
+    $userContent = $modelRequest | ConvertTo-Json -Depth 24 -Compress
     $payload = [ordered]@{
         model = $model
         messages = @(
@@ -60,6 +102,8 @@ To stop, return: {"done":true,"reason":"brief evidence-based reason"}
         store = $false
     }
     $payload[$maxTokenParameter] = $maxTokens
+    if (-not [string]::IsNullOrWhiteSpace($reasoningEffort)) { $payload.reasoning_effort = $reasoningEffort }
+    if ($hasTemperature) { $payload.temperature = $temperature }
     $body = $payload | ConvertTo-Json -Depth 28 -Compress
     $headers = @{}
     if (-not [string]::IsNullOrWhiteSpace($apiKey)) { $headers.Authorization = "Bearer $apiKey" }

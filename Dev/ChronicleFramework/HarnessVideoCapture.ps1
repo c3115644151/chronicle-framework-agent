@@ -105,7 +105,8 @@ function Stop-ChronicleWindowVideoCapture {
             $isBoundary = [string]$event.event -in @('capture-start','capture-end')
             $isImportantAction = [string]$event.action -in $importantActions
             if (-not $stateChanged -and -not $isBoundary -and -not $isImportantAction) { continue }
-            $lastFrameSeconds = [Math]::Max([double]0.0, [double]$duration - 0.05)
+            $frameDuration = 1.0 / [Math]::Max(1.0, [double]$Capture.FrameRate)
+            $lastFrameSeconds = [Math]::Max([double]0.0, [double]$duration - $frameDuration)
             $centerSeconds = [Math]::Max([double]0.0, [Math]::Min([double]$lastFrameSeconds, [double]$event.offsetMilliseconds / 1000.0))
             $stateTag = ([string]$event.gameState + '-' + [string]$event.partyScreenMode + '-' + [string]$event.inventoryMode) -replace '[^A-Za-z0-9_-]','_'
             if ([string]::IsNullOrWhiteSpace($stateTag)) { $stateTag = 'unknown' }
@@ -137,7 +138,7 @@ function Stop-ChronicleWindowVideoCapture {
                     $frameOrdinal++
                     $seconds = [double]$selection[($edge + 'FrameSeconds')]
                     $framePath = Join-Path $timelineDirectory ('{0:D3}-{1}-{2}-{3}.jpg' -f $frameOrdinal,$selection.actionTag,$selection.stateTag,$edge)
-                    & (Get-Command ffmpeg.exe -ErrorAction Stop).Source -hide_banner -loglevel error -y -i $Capture.OutputPath -ss $seconds -frames:v 1 -q:v 2 $framePath
+                    & (Get-Command ffmpeg.exe -ErrorAction Stop).Source -hide_banner -loglevel error -y -i $Capture.OutputPath -ss $seconds -vf 'format=yuvj420p' -frames:v 1 -q:v 2 $framePath
                     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $framePath)) { throw "Could not extract $edge frame at ${seconds}s for event '$($selection.commandId)'." }
                     $selection[($edge + 'FramePath')] = $framePath
                 }
