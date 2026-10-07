@@ -2,7 +2,8 @@
 param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
     [int]$TimeoutSeconds = 180,
-    [ValidateRange(5,30)][int]$FrameRate = 10
+    [ValidateRange(5,30)][int]$FrameRate = 10,
+    [switch]$RuntimeOnlyResume
 )
 
 $ErrorActionPreference = 'Stop'
@@ -19,7 +20,7 @@ $resumeBackupPath = $resumeSavePath + '.bak'
 $runDirectory = if ($env:CHRONICLE_HARNESS_TEMP) { Split-Path -Parent $env:CHRONICLE_HARNESS_TEMP } else { $null }
 if (-not $runDirectory -or -not (Test-Path -LiteralPath $runDirectory -PathType Container)) { throw 'Live checkpoint resume requires the active Harness TestResults directory.' }
 $prefix = 'live-resume-' + [Guid]::NewGuid().ToString('N')
-$goal = 'Recruit one affordable volunteer at a safe settlement. First query visible settlement targets and move once to the nearest safe target. If the saved Native move is still in progress after loading and Campaign time is stopped, use the separate resume action, then reobserve with observeAgain; do not issue the same move again. After arrival, inspect the current recruit_volunteers option, choose one currently available offer that fits capacity and gold, recruit it once, and stop after the Native receipt and fresh state verify members plus one and gold minus the offer cost.'
+    $goal = 'Recruit one affordable volunteer at a safe settlement. First query visible settlement targets and move once to the nearest safe target. If the confirmed Native move is still in progress after the Agent or Campaign restart and Campaign time is stopped, use the separate resume action, then reobserve with observeAgain; do not issue the same move again. After arrival, inspect the current recruit_volunteers option, choose one currently available offer that fits capacity and gold, recruit it once, and stop after the Native receipt and fresh state verify members plus one and gold minus the offer cost.'
 $allowedActions = 'mapSettlementTargets,move,resume,recruitOptions,recruit'
 $fixtureHashBefore = (Get-FileHash -LiteralPath $sourceSavePath -Algorithm SHA256).Hash
 $priorHarnessMode = $env:CHRONICLE_HARNESS_MODE
@@ -137,24 +138,34 @@ try {
     Capture-EngineFrame 'LiveResume-before-save-checkpoint' $frameBeforeSave
     $firstCaptureResult = Stop-CaptureIfRunning $firstCapture $firstContactSheet $firstEvents
     $firstCapture = $null
-    Write-ResumeEvent $firstEvents 'save-begin' ([DateTime]::UtcNow.ToString('O')) 'save' $initialSteps[-1].observationAfter.state $null
-    $save = Invoke-AgentCli 'save' @('-SaveName', $resumeSaveName, '-CommandId', ($prefix + '-save')) $TimeoutSeconds
-    if ($save.status -ne 'completed' -or -not (Test-Path -LiteralPath $resumeSavePath -PathType Leaf)) { throw 'Campaign checkpoint save did not complete into its disposable save file.' }
-    Write-ResumeEvent $firstEvents 'save-complete' ([DateTime]::UtcNow.ToString('O')) 'save' $save.state $save
-    $firstStop = Invoke-AgentCli 'stop' @('-CommandId', ($prefix + '-stop-before-reload'))
-    $sessionStarted = $false
-    if (-not $firstStop.processStopped -or (Get-Process -Name Bannerlord* -ErrorAction SilentlyContinue)) { throw 'Initial Bannerlord/Agent process remained active before checkpoint reload.' }
-
-    $resumeStart = Invoke-AgentCli 'load' @('-SaveName', $resumeSaveName)
-    $sessionStarted = $true
-    $resumeBaseline = Invoke-AgentCli 'state' @('-CommandId', ($prefix + '-resume-baseline'))
-    $checkpointAfterLoad = Invoke-AgentCli 'agentCheckpointGet' @('-CommandId', ($prefix + '-checkpoint-after-load'))
-    if ($checkpointAfterLoad.status -ne 'completed' -or [string]$checkpointAfterLoad.data.campaignInstanceId -cne [string]$checkpointBeforeSave.data.campaignInstanceId) { throw 'Campaign instance identity did not survive Native save/load.' }
+    if ($RuntimeOnlyResume) {
+        Write-ResumeEvent $firstEvents 'agent-runtime-loop-ended' ([DateTime]::UtcNow.ToString('O')) 'decisionLoop' $initialSteps[-1].observationAfter.state $initialSteps[-1].actionReceipt
+        $resumeBaseline = Invoke-AgentCli 'state' @('-CommandId', ($prefix + '-runtime-restart-baseline'))
+        $checkpointAfterLoad = Invoke-AgentCli 'agentCheckpointGet' @('-CommandId', ($prefix + '-runtime-restart-checkpoint'))
+        if ([int]$resumeBaseline.processId -ne [int]$start.session.processId) { throw 'Bannerlord PID changed across the Agent-only runtime restart.' }
+        if ($checkpointAfterLoad.status -ne 'completed' -or [string]$checkpointAfterLoad.data.campaignInstanceId -cne [string]$checkpointBeforeSave.data.campaignInstanceId) { throw 'In-memory Campaign checkpoint did not survive the Agent-only restart.' }
+        $resumeStart = $start
+        Capture-EngineFrame 'LiveResume-after-load' $frameAfterLoad
+    }
+    else {
+        Write-ResumeEvent $firstEvents 'save-begin' ([DateTime]::UtcNow.ToString('O')) 'save' $initialSteps[-1].observationAfter.state $null
+        $save = Invoke-AgentCli 'save' @('-SaveName', $resumeSaveName, '-CommandId', ($prefix + '-save')) $TimeoutSeconds
+        if ($save.status -ne 'completed' -or -not (Test-Path -LiteralPath $resumeSavePath -PathType Leaf)) { throw 'Campaign checkpoint save did not complete into its disposable save file.' }
+        Write-ResumeEvent $firstEvents 'save-complete' ([DateTime]::UtcNow.ToString('O')) 'save' $save.state $save
+        $firstStop = Invoke-AgentCli 'stop' @('-CommandId', ($prefix + '-stop-before-reload'))
+        $sessionStarted = $false
+        if (-not $firstStop.processStopped -or (Get-Process -Name Bannerlord* -ErrorAction SilentlyContinue)) { throw 'Initial Bannerlord/Agent process remained active before checkpoint reload.' }
+        $resumeStart = Invoke-AgentCli 'load' @('-SaveName', $resumeSaveName)
+        $sessionStarted = $true
+        $resumeBaseline = Invoke-AgentCli 'state' @('-CommandId', ($prefix + '-resume-baseline'))
+        $checkpointAfterLoad = Invoke-AgentCli 'agentCheckpointGet' @('-CommandId', ($prefix + '-checkpoint-after-load'))
+        if ($checkpointAfterLoad.status -ne 'completed' -or [string]$checkpointAfterLoad.data.campaignInstanceId -cne [string]$checkpointBeforeSave.data.campaignInstanceId) { throw 'Campaign instance identity did not survive Native save/load.' }
+        Capture-EngineFrame 'LiveResume-after-load' $frameAfterLoad
+    }
     $checkpointAfterLoadJson = [Text.UTF8Encoding]::new($false, $true).GetString([Convert]::FromBase64String([string]$checkpointAfterLoad.data.checkpointBase64))
     $checkpointAfterLoadObject = $checkpointAfterLoadJson | ConvertFrom-Json
     $goalRestored = ([string]$checkpointAfterLoadObject.goal -ceq $goal -and [string]$checkpointAfterLoadObject.status -eq 'active' -and [string]$checkpointAfterLoadObject.campaignInstanceId -ceq [string]$checkpointBeforeSave.data.campaignInstanceId)
     if ([string]$checkpointAfterLoadObject.goal -cne $goal -or [string]$checkpointAfterLoadObject.lastActionReceipt.action -cne 'move') { throw 'Saved goal or last confirmed move receipt was not restored.' }
-    Capture-EngineFrame 'LiveResume-after-load' $frameAfterLoad
     $secondCapture = Start-ChronicleWindowVideoCapture -ProcessId ([int]$resumeStart.session.processId) -OutputPath $secondVideo -FrameRate $FrameRate
     Write-ResumeEvent $secondEvents 'capture-start-after-reload' $secondCapture.StartedUtc 'capture' $resumeBaseline.state $resumeBaseline
 
@@ -219,7 +230,9 @@ $sourceFixtureUnchanged = ($fixtureHashBefore -ceq $fixtureHashAfter)
 $processStopped = ([bool]$finalStop.processStopped -and -not (Test-Path -LiteralPath $sessionPath -PathType Leaf) -and -not (Get-Process -Name Bannerlord* -ErrorAction SilentlyContinue))
 $firstCapturePassed = ($firstCaptureResult -and $firstCaptureResult.Passed -and [double]$firstCaptureResult.FrameCoverageRatio -ge 0.9)
 $secondCapturePassed = ($secondCaptureResult -and $secondCaptureResult.Passed -and [double]$secondCaptureResult.FrameCoverageRatio -ge 0.9)
-$passed = (-not $failure -and $firstLoopTrace -and $resumeLoopTrace -and $sourceFixtureUnchanged -and $processStopped -and $firstCapturePassed -and $secondCapturePassed -and $goalRestored -and $moveNotRepeated -and $recruitmentVerified)
+$runtimeRunIdChanged = ($firstLoopTrace -and $resumeLoopTrace -and [string]$firstLoopTrace.runId -cne [string]$resumeLoopTrace.runId)
+$runtimeBoundaryVerified = if ($RuntimeOnlyResume) { ([int]$start.session.processId -eq [int]$resumeStart.session.processId -and $runtimeRunIdChanged) } else { $true }
+$passed = (-not $failure -and $firstLoopTrace -and $resumeLoopTrace -and $sourceFixtureUnchanged -and $processStopped -and $firstCapturePassed -and $secondCapturePassed -and $goalRestored -and $moveNotRepeated -and $recruitmentVerified -and $runtimeBoundaryVerified)
 
 foreach ($clip in @(@{ Video = $firstVideo; Index = $firstTimeline; Capture = $firstCaptureResult }, @{ Video = $secondVideo; Index = $secondTimeline; Capture = $secondCaptureResult })) {
     if ($passed -and $clip.Capture -and (Test-Path -LiteralPath $clip.Video -PathType Leaf)) {
@@ -252,6 +265,10 @@ $result = [ordered]@{
     GoalRestored = $goalRestored
     MoveNotRepeated = $moveNotRepeated
     RecruitmentVerified = $recruitmentVerified
+    RuntimeOnlyResume = [bool]$RuntimeOnlyResume
+    BannerlordProcessUnchangedAcrossResume = if ($RuntimeOnlyResume) { [int]$resumeStart.session.processId -eq [int]$start.session.processId } else { $null }
+    RuntimeRunIdChanged = $runtimeRunIdChanged
+    SaveReloadPerformed = (-not [bool]$RuntimeOnlyResume)
     SourceFixtureUnchanged = $sourceFixtureUnchanged
     ProcessStopped = $processStopped
     FirstCapture = $firstCaptureResult

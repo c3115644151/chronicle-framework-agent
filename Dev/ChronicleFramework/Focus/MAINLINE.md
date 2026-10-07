@@ -141,6 +141,8 @@ Mindcraft 将命令路由、ActionManager、SelfPrompter、History、SkillLibrar
 
 `TestResults/20261008-053911`证明checkpoint和move receipt随Native SaveAs/跨进程Load保存并恢复，Campaign GUID与目标匹配；源模板档不变，测试另存档已删除。真实模型阶段`TestResults/20261008-054805`保存了一个尚未招募的活动目标，关闭首个客户端，再不提供Goal文本重载并恢复；模型从已确认move receipt和当前Settlement menu继续，通过现有RecruitmentVM招募一次（队伍1→2、金币1000→980），没有重复move或招募。两段窗口视频均完整覆盖、生成关键帧后删除，源档hash与进程清理通过。恢复窗口只验证“已确认动作+正常保存/关闭/重新载入”；游戏/Agent在Native副作用提交中途崩溃、checkpoint损坏/迁移、存档模块更换、严格Exactly-once均未证明，失败应重观察/安全重规划而不能盲目重发。
 
+`TestResults/20261008-060006`另外验证Agent Runtime自己退出/重启而Bannerlord Campaign进程保持同一PID：首段真实模型完成目标查询和move并将checkpoint写在当前Campaign内存中；第二段使用新Loop RunId，从同一Campaign实例的Native checkpoint恢复目标与move receipt，不执行Save/Load，未重复move，随后通过当前Town菜单招募一名志愿兵。两段窗口帧覆盖率均100%，关键帧和索引保留、源MP4删除、源存档模板不变及最终进程清理通过。这证明顺序完成动作后的Agent-only Runtime重启；硬杀Runtime、游戏进程崩溃或Native副作用提交中的断点仍未验证。
+
 ## 迁移与拒绝
 
 采用：
