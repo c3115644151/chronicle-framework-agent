@@ -266,10 +266,15 @@ try {
         $checkpointRead = Invoke-AgentCli 'agentCheckpointGet' @{} "$CommandPrefix-checkpoint-read"
         if ($checkpointRead.status -ne 'completed' -or [string]::IsNullOrWhiteSpace([string]$checkpointRead.data.checkpointBase64))
             { throw 'No Campaign-saved Agent checkpoint is available to resume.' }
-        $checkpointJson = [Text.UTF8Encoding]::new($false, $true).GetString([Convert]::FromBase64String([string]$checkpointRead.data.checkpointBase64))
-        $script:AgentCheckpoint = $checkpointJson | ConvertFrom-Json
-        if ([int]$script:AgentCheckpoint.schemaVersion -ne 1 -or [string]$script:AgentCheckpoint.campaignInstanceId -cne [string]$checkpointRead.data.campaignInstanceId)
-            { throw 'Campaign-saved Agent checkpoint schema or Campaign identity does not match.' }
+        try {
+            $checkpointJson = [Text.UTF8Encoding]::new($false, $true).GetString([Convert]::FromBase64String([string]$checkpointRead.data.checkpointBase64))
+            $script:AgentCheckpoint = $checkpointJson | ConvertFrom-Json -ErrorAction Stop
+        }
+        catch { throw 'Campaign Agent checkpoint is corrupt or unreadable; stopping before any provider call or Native action.' }
+        if ([int]$script:AgentCheckpoint.schemaVersion -ne 1)
+            { throw "Campaign Agent checkpoint schema version '$($script:AgentCheckpoint.schemaVersion)' is unsupported; stopping before provider/actions." }
+        if ([string]$script:AgentCheckpoint.campaignInstanceId -cne [string]$checkpointRead.data.campaignInstanceId)
+            { throw 'Campaign Agent checkpoint belongs to a different Campaign instance; stopping before provider/actions.' }
         if ([string]$script:AgentCheckpoint.status -notin @('active','provider-stopped'))
             { throw "Checkpoint status '$($script:AgentCheckpoint.status)' is not resumable." }
         if ([string]::IsNullOrWhiteSpace([string]$script:AgentCheckpoint.goal)) { throw 'Campaign checkpoint has no resumable goal.' }

@@ -174,6 +174,34 @@ internal sealed class ChronicleAgentProtocol
                     var checkpointWriteJson = "{\"campaignInstanceId\":\"" + Escape(behavior.AgentCampaignInstanceId) + "\",\"checkpointChars\":" + checkpointJson.Length + "}";
                     WriteResponse(commandId, action, "completed", behavior, null, checkpointWriteJson);
                     break;
+                case "harnessSeedAgentCheckpointFailure":
+                    var checkpointFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var checkpointFixtureRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(checkpointFixtureMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(checkpointFixtureRoot) || !Directory.Exists(checkpointFixtureRoot))
+                        throw new InvalidOperationException("harnessSeedAgentCheckpointFailure is restricted to a visual Harness run with a Harness temp directory");
+                    RequireCampaignMapState("harnessSeedAgentCheckpointFailure");
+                    var checkpointFailureMode = ReadString(command, "mode");
+                    string invalidCheckpointJson;
+                    if (string.Equals(checkpointFailureMode, "corrupt-json", StringComparison.Ordinal))
+                    {
+                        invalidCheckpointJson = "{not-json}";
+                    }
+                    else if (string.Equals(checkpointFailureMode, "unsupported-schema", StringComparison.Ordinal))
+                    {
+                        invalidCheckpointJson = "{\"schemaVersion\":99,\"campaignInstanceId\":\"" + Escape(behavior.AgentCampaignInstanceId) + "\",\"taskId\":\"harness-invalid-schema\",\"goal\":\"must not run\",\"status\":\"active\"}";
+                    }
+                    else if (string.Equals(checkpointFailureMode, "wrong-campaign", StringComparison.Ordinal))
+                    {
+                        invalidCheckpointJson = "{\"schemaVersion\":1,\"campaignInstanceId\":\"chronicle_wrong_campaign\",\"taskId\":\"harness-wrong-campaign\",\"goal\":\"must not run\",\"status\":\"active\"}";
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException("Harness checkpoint failure mode must be corrupt-json, unsupported-schema, or wrong-campaign");
+                    }
+                    behavior.StoreAgentCheckpoint(behavior.AgentCampaignInstanceId, invalidCheckpointJson);
+                    var checkpointFixtureResult = "{\"mode\":\"" + Escape(checkpointFailureMode) + "\",\"campaignInstanceId\":\"" + Escape(behavior.AgentCampaignInstanceId) + "\",\"payloadChars\":" + invalidCheckpointJson.Length + "}";
+                    WriteResponse(commandId, action, "completed", behavior, null, checkpointFixtureResult);
+                    break;
                 case "closeEscapeMenu":
                     if (Game.Current?.GameStateManager?.ActiveState is not MapState mapStateForEscape || mapStateForEscape.AtMenu)
                         throw new InvalidOperationException("closeEscapeMenu requires the unobstructed Campaign Map state");

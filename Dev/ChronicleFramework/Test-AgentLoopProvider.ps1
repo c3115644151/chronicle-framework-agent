@@ -11,6 +11,8 @@ if ($jsonStart -gt 0) {
 }
 $request = $requestJson | ConvertFrom-Json
 if ($request.schemaVersion -ne 2) { throw 'Unsupported Agent loop request schema.' }
+if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'checkpointMustNotCall') { throw 'checkpoint-provider-was-called' }
+if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'checkpointMustNotCall') { throw 'checkpoint-provider-was-called' }
 if ($request.iteration -gt 1 -and -not $request.previousActionReceipt) { throw 'Previous native action receipt was not forwarded to the next decision.' }
 if ($env:CHRONICLE_TEST_INVALID_DECISION) {
     $invalidAction = [string]$env:CHRONICLE_TEST_INVALID_DECISION

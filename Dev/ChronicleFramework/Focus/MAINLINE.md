@@ -145,6 +145,8 @@ Mindcraft 将命令路由、ActionManager、SelfPrompter、History、SkillLibrar
 
 招募存在“Native成功、Agent回执尚未写回checkpoint”窄中断窗口。checkpoint v1对此动作先写pending command、精确owner/troop/slot、当前人数/Gold、预期人数+1与成本；Runtime重启后仅当新Native状态精确满足预期人数和Gold后置条件时合成已恢复receipt并清pending，否则安全停止且不重放非幂等招募。`TestResults/20261008-062205`使用真实模型+Native RecruitmentVM触发Harness-only Agent进程退出（Bannerlord同一PID保持），确认Party/Gold与Volunteer slot已变但checkpoint last confirmed receipt仍是recruitOptions；新Runtime根据fresh state恢复，不再提交招募，并正常停止。该可恢复规则目前只覆盖RecruitmentVM这个具备明确人数/成本后置条件的动作；其他事务、单独Native Engine崩溃及更宽的并发写入情形未知。
 
+checkpoint输入失败安全边界已由`TestResults/20261008-063503`通过：对disposable Campaign分别放入损坏JSON、schemaVersion=99、外来Campaign实例ID三类Native存档字符串；重载后`ResumeCheckpoint`均在Provider调用前分类失败，决策轨迹零条、Party/位置/Gold/CampaignDay/TimeControlMode不变，模板档哈希一致且所有测试另存档已清理。Harness seed只在visual-capture测试运行，未开放给LLM或普通CLI用户动作。版本迁移和自动修复仍未知/不支持。
+
 ## 迁移与拒绝
 
 采用：
