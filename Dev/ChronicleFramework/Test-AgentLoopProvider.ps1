@@ -20,6 +20,21 @@ if ($env:CHRONICLE_TEST_INVALID_DECISION) {
     [pscustomobject]@{ action = $invalidAction; arguments = $arguments; rationale = 'Intentional Agent decision boundary regression test.' } | ConvertTo-Json -Compress
     exit 0
 }
+if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'dynamicAvailabilityRecovery') {
+    $catalogNames = @($request.allowedActions | ForEach-Object { [string]$_.action })
+    if ($request.iteration -eq 1) {
+        if ($catalogNames -contains 'recruit') { throw 'Recruit leaked into the current map action catalog.' }
+        [pscustomobject]@{ action = 'recruit'; arguments = @{ OwnerId = 'town_V1'; TroopId = 'volunteers'; VolunteerSlot = 1; ConfirmPartySizeWarning = $false }; rationale = 'Intentional unavailable-action recovery regression.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if ([string]$request.decisionFeedback.kind -cne 'action-unavailable' -or -not [bool]$request.decisionFeedback.noNativeActionSent -or
+        [string]$request.previousActionReceipt.status -cne 'rejected-before-native' -or $catalogNames -contains 'recruit' -or
+        [int]$request.observation.state.party.members -ne 1 -or [int]$request.observation.state.economy.gold -ne 1000) {
+        throw 'Unavailable decision feedback did not include a fresh unchanged Native state and a restricted current action catalog.'
+    }
+    [pscustomobject]@{ action = 'mapSettlementTargets'; arguments = @{}; rationale = 'Recover from the unavailable recruitment proposal using a currently listed map action.' } | ConvertTo-Json -Compress
+    exit 0
+}
 if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'decisionContext') {
     $expectedGoal = [string]$env:CHRONICLE_TEST_EXPECTED_GOAL
     if ([string]::IsNullOrWhiteSpace($expectedGoal) -or [string]$request.goal -cne $expectedGoal)

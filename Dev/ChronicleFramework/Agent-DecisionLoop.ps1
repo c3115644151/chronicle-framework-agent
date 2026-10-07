@@ -98,6 +98,60 @@ function ConvertTo-AsciiJson([string]$Json) {
     return $builder.ToString()
 }
 
+function Get-EffectiveActionCatalog($Observation, $PreviousActionReceipt) {
+    $catalog = @{}
+    foreach ($entry in $script:AllowedActions.GetEnumerator()) { $catalog[$entry.Key] = @($entry.Value) }
+    if ($catalog.ContainsKey('recruitOptions') -or $catalog.ContainsKey('recruit')) {
+        $state = $Observation.state
+        $settlementMenuActive = (
+            [string]$state.context.gameState -ceq 'MapState' -and
+            -not [string]::IsNullOrWhiteSpace([string]$state.location.currentSettlementId) -and
+            [string]$state.context.menuId -in @('town','town_backstreet','village') -and
+            @($state.availableMenuOptions | Where-Object { $_.id -ceq 'recruit_volunteers' -and $_.available -and $_.enabled }).Count -eq 1
+        )
+        if (-not $settlementMenuActive) {
+            $catalog.Remove('recruitOptions')
+            $catalog.Remove('recruit')
+        }
+        elseif ($catalog.ContainsKey('recruit')) {
+            $hasCurrentOfferReceipt = (
+                [string]$PreviousActionReceipt.action -ceq 'recruitOptions' -and
+                [string]$PreviousActionReceipt.status -ceq 'completed' -and
+                [string]$PreviousActionReceipt.data.settlementId -ceq [string]$state.location.currentSettlementId -and
+                [int]$state.party.members -lt [int]$state.party.sizeLimit -and
+                @($PreviousActionReceipt.data.offers | Where-Object { $_.available -and [int]$_.cost -le [int]$state.economy.gold }).Count -gt 0
+            )
+            if (-not $hasCurrentOfferReceipt) { $catalog.Remove('recruit') }
+        }
+    }
+    return $catalog
+}
+
+function Convert-ReceiptForDecision($Receipt, $Observation) {
+    if (-not $Receipt -or [string]$Receipt.action -cne 'recruitOptions' -or -not $Receipt.data) { return $Receipt }
+    $hasCapacity = [int]$Observation.state.party.members -lt [int]$Observation.state.party.sizeLimit
+    $safeOffers = @($Receipt.data.offers | Where-Object { $hasCapacity -and $_.available -and [int]$_.cost -le [int]$Observation.state.economy.gold } | ForEach-Object {
+        [ordered]@{ ownerId = $_.ownerId; ownerName = $_.ownerName; troopId = $_.troopId; troopName = $_.troopName; slot = $_.slot; cost = $_.cost; wage = $_.wage; available = $_.available }
+    })
+    return [ordered]@{
+        protocolVersion = $Receipt.protocolVersion
+        commandId = $Receipt.commandId
+        action = $Receipt.action
+        status = $Receipt.status
+        campaignDay = $Receipt.campaignDay
+        state = $null
+        data = [ordered]@{
+            settlementId = $Receipt.data.settlementId
+            gold = [int]$Observation.state.economy.gold
+            partySize = [int]$Observation.state.party.members
+            partyCapacity = [int]$Observation.state.party.sizeLimit
+            partySizeWarningForOne = -not $hasCapacity
+            offers = $safeOffers
+            recruitOptionsSummary = [ordered]@{ includedCount = $safeOffers.Count; selectionPolicy = 'current Native offers that are available, affordable, and within current MainParty capacity' }
+        }
+    }
+}
+
 function Convert-ObservationForDecision($Observation) {
     $actionNames = @($script:AllowedActions.Keys | Sort-Object)
     $actionProfile = switch ($actionNames -join ',') {
@@ -230,10 +284,12 @@ function ConvertTo-CheckpointObservationSummary($Observation) {
 }
 
 function Convert-DecisionToCli {
-    param($Decision)
+    param($Decision, $ActionCatalog, $Observation, $PreviousActionReceipt)
     if ($Decision.action -eq 'advance') { throw 'advance is a Harness-only deterministic time step and is unavailable to Agent decision providers.' }
-    $allowed = $script:AllowedActions
-    if (-not $Decision -or $Decision.action -notin $allowed.Keys) { throw 'Decision action is not in the Agent CLI allowlist.' }
+    $allowed = $ActionCatalog
+    if (-not $Decision) { throw 'Provider decision was empty.' }
+    if ($Decision.action -notin $script:AllowedActions.Keys) { throw 'Decision action is not in the Agent CLI allowlist.' }
+    if ($Decision.action -notin $allowed.Keys) { throw "Decision action '$($Decision.action)' is not currently available from the latest Native observation." }
     $arguments = @{}
     if ($Decision.arguments) {
         if ($Decision.arguments -is [Array]) {
@@ -247,6 +303,21 @@ function Convert-DecisionToCli {
     foreach ($required in $allowed[[string]$Decision.action]) {
         if (-not $arguments.ContainsKey($required)) { throw "Missing '$required' for action '$($Decision.action)'." }
     }
+    if ([string]$Decision.action -ceq 'recruit') {
+        $currentMenuOption = @($Observation.state.availableMenuOptions | Where-Object { $_.id -ceq 'recruit_volunteers' -and $_.available -and $_.enabled })
+        $currentOffer = @($PreviousActionReceipt.data.offers | Where-Object { $_.available -and [string]$_.ownerId -ceq [string]$arguments.OwnerId -and [string]$_.troopId -ceq [string]$arguments.TroopId -and [int]$_.slot -eq [int]$arguments.VolunteerSlot -and [int]$_.cost -le [int]$Observation.state.economy.gold } | Select-Object -First 1)
+        $recruitContextCurrent = (
+            [string]$Observation.state.context.gameState -ceq 'MapState' -and
+            [string]$Observation.state.context.menuId -in @('town','town_backstreet','village') -and
+            -not [string]::IsNullOrWhiteSpace([string]$Observation.state.location.currentSettlementId) -and
+            [string]$PreviousActionReceipt.action -ceq 'recruitOptions' -and
+            [string]$PreviousActionReceipt.data.settlementId -ceq [string]$Observation.state.location.currentSettlementId -and
+            $currentMenuOption.Count -eq 1 -and $currentOffer.Count -eq 1 -and
+            [int]$Observation.state.party.members -lt [int]$Observation.state.party.sizeLimit -and
+            -not [bool]$arguments.ConfirmPartySizeWarning
+        )
+        if (-not $recruitContextCurrent) { throw "Decision action 'recruit' is not currently available from the latest Native observation or its current affordable offer receipt." }
+    }
     return [pscustomobject]@{ Action = [string]$Decision.action; Arguments = $arguments }
 }
 
@@ -257,6 +328,8 @@ try {
     $loopStartedUtc = [DateTime]::UtcNow
     $observation = $null
     $previousActionReceipt = $null
+    $decisionFeedback = $null
+    $consecutiveDecisionRejections = 0
     $initialObservationStartedUtc = [DateTime]::UtcNow.ToString('O')
     $observation = Invoke-AgentCli 'state' @{} "$CommandPrefix-observe-0"
     $initialObservationCompletedUtc = [DateTime]::UtcNow.ToString('O')
@@ -337,6 +410,7 @@ try {
         if ($MaxElapsedSeconds -gt 0 -and ([DateTime]::UtcNow - $loopStartedUtc).TotalSeconds -ge $MaxElapsedSeconds)
             { throw "Agent decision loop exceeded its $MaxElapsedSeconds-second wall-clock budget." }
         $nativeMoveArrival = $null
+        $actionCatalog = Get-EffectiveActionCatalog $observation $previousActionReceipt
         $arrivalActions = @($script:AllowedActions.Keys | Sort-Object)
         if (($arrivalActions -join ',') -ceq 'mapSettlementTargets,move' -and [string]$previousActionReceipt.action -ceq 'move') {
             $moveTargetId = [string]$previousActionReceipt.state.location.targetSettlementId
@@ -350,12 +424,13 @@ try {
             runId = $loopRunId
             iteration = $index
             goal = $Goal
-            allowedActions = @($script:AllowedActions.GetEnumerator() | Sort-Object -Property Key | ForEach-Object { [ordered]@{ action = [string]$_.Key; arguments = @($_.Value) } })
+            allowedActions = @($actionCatalog.GetEnumerator() | Sort-Object -Property Key | ForEach-Object { [ordered]@{ action = [string]$_.Key; arguments = @($_.Value) } })
             allowedControls = @([ordered]@{ control = 'observeAgain'; waitSecondsMinimum = 1; waitSecondsMaximum = 10; description = 'Wait briefly outside the game, then read fresh Native state without issuing a game action.' })
             nativeMoveArrival = $nativeMoveArrival
             checkpointContext = if ($script:AgentCheckpoint) { [ordered]@{ schemaVersion = $script:AgentCheckpoint.schemaVersion; campaignInstanceId = $script:AgentCheckpoint.campaignInstanceId; taskId = $script:AgentCheckpoint.taskId; status = $script:AgentCheckpoint.status; lastObservedSummary = $script:AgentCheckpoint.lastObservedSummary; pendingAction = $script:AgentCheckpoint.pendingAction; lastRecovery = $script:AgentCheckpoint.lastRecovery } } else { $null }
             observation = (Convert-ObservationForDecision $observation)
-            previousActionReceipt = $previousActionReceipt
+            previousActionReceipt = (Convert-ReceiptForDecision $previousActionReceipt $observation)
+            decisionFeedback = $decisionFeedback
         }
         $requestJson = ConvertTo-AsciiJson ($request | ConvertTo-Json -Depth 16 -Compress)
         $providerStartedUtc = [DateTime]::UtcNow.ToString('O')
@@ -459,7 +534,22 @@ try {
             $termination = [ordered]@{ reason = 'provider-stop'; providerReason = $doneReason; completedByProvider = $true }
             break
         }
-        $validated = Convert-DecisionToCli $decision
+        try { $validated = Convert-DecisionToCli $decision $actionCatalog $observation $previousActionReceipt }
+        catch {
+            if ($_.Exception.Message -notmatch 'is not currently available from the latest Native observation') { throw }
+            $consecutiveDecisionRejections++
+            if ($consecutiveDecisionRejections -gt 2) { throw 'Provider repeated actions that are unavailable in the latest Native state; stopping after two safe pre-Native rejections.' }
+            $feedbackReason = $_.Exception.Message
+            $nextObservation = Invoke-AgentCli 'state' @{} "$CommandPrefix-rejected-decision-observe-$index"
+            if ($nextObservation.status -ne 'completed' -or -not $nextObservation.state) { throw 'Fresh Native observation after an unavailable decision was not completed.' }
+            $decisionFeedback = [ordered]@{ kind = 'action-unavailable'; requestedAction = [string]$decision.action; message = $feedbackReason; noNativeActionSent = $true }
+            $rejectionReceipt = [ordered]@{ protocolVersion = 1; action = [string]$decision.action; status = 'rejected-before-native'; error = $feedbackReason; noNativeActionSent = $true; campaignDay = $nextObservation.campaignDay }
+            $trace += [pscustomobject]@{ iteration = $index; observationBefore = $observation; previousActionReceipt = $previousActionReceipt; decision = $decision; timing = $stepTiming; actionReceipt = $rejectionReceipt; observationAfter = $nextObservation; actionAttempted = $false; actionExecuted = $false; control = [ordered]@{ kind = 'decision-rejected-before-native' } }
+            $previousActionReceipt = $rejectionReceipt
+            $observation = $nextObservation
+            continue
+        }
+        $consecutiveDecisionRejections = 0
         $commandId = "$CommandPrefix-act-$index"
         if ($script:AgentCheckpoint -and $validated.Action -eq 'recruit') {
             $matchingRecruitOffer = @($previousActionReceipt.data.offers | Where-Object { $_.available -and [string]$_.ownerId -ceq [string]$validated.Arguments.OwnerId -and [string]$_.troopId -ceq [string]$validated.Arguments.TroopId -and [int]$_.slot -eq [int]$validated.Arguments.VolunteerSlot -and [int]$_.cost -le [int]$observation.state.economy.gold } | Select-Object -First 1)
@@ -487,6 +577,7 @@ try {
             [Environment]::Exit(93)
         }
         if ($actionResult.status -notin @('completed','accepted')) {
+            $consecutiveDecisionRejections++
             $trace += [pscustomobject]@{
                 iteration = $index
                 observationBefore = $observation
@@ -498,7 +589,19 @@ try {
                 actionAttempted = $true
                 actionExecuted = $false
             }
-            throw "Action '$($validated.Action)' returned '$($actionResult.status)': $($actionResult.error)"
+            $nextObservation = Invoke-AgentCli 'state' @{} "$CommandPrefix-rejected-native-observe-$index"
+            if ($nextObservation.status -ne 'completed' -or -not $nextObservation.state) { throw 'Fresh Native observation after a rejected action was not completed.' }
+            $decisionFeedback = [ordered]@{ kind = 'native-action-rejected'; requestedAction = $validated.Action; message = [string]$actionResult.error; noWorldChangeConfirmed = $false }
+            $previousActionReceipt = $actionResult
+            $observation = $nextObservation
+            if ($script:AgentCheckpoint) {
+                $script:AgentCheckpoint.status = 'active'
+                $script:AgentCheckpoint.pendingAction = $null
+                $script:AgentCheckpoint.lastActionReceipt = ConvertTo-CheckpointReceipt $actionResult
+                Write-AgentCheckpoint "$CommandPrefix-checkpoint-rejected-$index"
+            }
+            if ($consecutiveDecisionRejections -gt 2) { throw 'Provider repeated actions rejected by Native; stopping after two bounded recovery attempts.' }
+            continue
         }
         $stepTiming.observationStartedUtc = [DateTime]::UtcNow.ToString('O')
         $observationStartedTicks = [Diagnostics.Stopwatch]::GetTimestamp()
@@ -518,6 +621,7 @@ try {
             actionExecuted = $true
         }
         $previousActionReceipt = $actionResult
+        $decisionFeedback = $null
         $observation = $nextObservation
         if ($script:AgentCheckpoint) {
             $script:AgentCheckpoint.status = 'active'

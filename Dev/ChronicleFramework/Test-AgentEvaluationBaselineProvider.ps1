@@ -8,6 +8,16 @@ if ([int]$request.schemaVersion -ne 2) { throw 'Unsupported evaluation baseline 
 $state = $request.observation.state
 $receipt = $request.previousActionReceipt
 if ([string]::IsNullOrWhiteSpace([string]$request.goal) -or -not $state) { throw 'Evaluation baseline requires the explicit task goal and current Native observation.' }
+$availableActions = @($request.allowedActions | ForEach-Object { [string]$_.action })
+$settlementMenuActive = ([string]$state.context.gameState -ceq 'MapState' -and [string]$state.context.menuId -in @('town','town_backstreet','village') -and @($state.availableMenuOptions | Where-Object { $_.id -ceq 'recruit_volunteers' -and $_.available -and $_.enabled }).Count -eq 1)
+if (-not $settlementMenuActive -and ($availableActions -contains 'recruitOptions' -or $availableActions -contains 'recruit')) { throw 'Native recruitment actions leaked into a map observation without an active Settlement menu.' }
+if ($settlementMenuActive -and $availableActions -notcontains 'recruitOptions') { throw 'Active enabled Native recruit_volunteers menu did not expose recruitOptions.' }
+if ($availableActions -contains 'recruit' -and [string]$receipt.action -cne 'recruitOptions') { throw 'recruit was exposed without the immediately preceding Native offer receipt.' }
+if ($receipt -and [string]$receipt.action -ceq 'recruitOptions') {
+    $safeOffers = @($receipt.data.offers | Where-Object { $_.available -and [int]$_.cost -le [int]$state.economy.gold -and [int]$state.party.members -lt [int]$state.party.sizeLimit })
+    if ($safeOffers.Count -ne @($receipt.data.offers).Count) { throw 'Decision context exposed an offer that is unaffordable or exceeds current party capacity.' }
+    if ($safeOffers.Count -gt 0 -and $availableActions -notcontains 'recruit') { throw 'A current affordable in-capacity offer receipt did not expose recruit.' }
+}
 
 $decision = $null
 if (-not $receipt) {

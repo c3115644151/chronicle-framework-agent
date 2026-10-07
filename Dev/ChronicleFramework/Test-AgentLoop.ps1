@@ -176,6 +176,29 @@ try {
     $scopedActionRejected = ($scopedInvalidExitCode -ne 0 -and $scopedInvalidOutput -match 'not in the Agent CLI allowlist')
     if (-not $scopedActionRejected) { throw "Scoped action catalog did not restrict execution (exit=$scopedInvalidExitCode): $scopedInvalidOutput" }
 
+    $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
+    $env:CHRONICLE_TEST_PROVIDER_MODE = 'dynamicAvailabilityRecovery'
+    try {
+        $recoveryOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -Goal 'Recover from unavailable volunteer recruitment by selecting a currently available map action.' -AllowedActionNames 'mapSettlementTargets,move,recruitOptions,recruit' -MaxDecisions 2 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-action-recovery-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $recoveryExitCode = $LASTEXITCODE
+    }
+    finally {
+        if ($null -eq $priorProviderMode) { Remove-Item Env:CHRONICLE_TEST_PROVIDER_MODE -ErrorAction SilentlyContinue }
+        else { $env:CHRONICLE_TEST_PROVIDER_MODE = $priorProviderMode }
+    }
+    if ($recoveryExitCode -ne 0) { throw "Dynamic action availability did not recover after a safe pre-Native rejection: $recoveryOutput" }
+    $recoveryTrace = $recoveryOutput | ConvertFrom-Json
+    $dynamicActionRecoveryVerified = (
+        @($recoveryTrace.trace).Count -eq 2 -and
+        $recoveryTrace.trace[0].control.kind -eq 'decision-rejected-before-native' -and
+        $recoveryTrace.trace[0].actionAttempted -eq $false -and
+        $recoveryTrace.trace[0].actionReceipt.status -eq 'rejected-before-native' -and
+        $recoveryTrace.trace[1].decision.action -eq 'mapSettlementTargets' -and
+        $recoveryTrace.trace[1].actionReceipt.status -eq 'completed' -and
+        $recoveryTrace.actionsExecuted -eq 1
+    )
+    if (-not $dynamicActionRecoveryVerified) { throw "Decision loop did not block the unavailable action before Native and recover using the current catalog: $($recoveryTrace | ConvertTo-Json -Depth 8 -Compress)" }
+
     $priorInvalidDecision = $env:CHRONICLE_TEST_INVALID_DECISION
     $env:CHRONICLE_TEST_INVALID_DECISION = '1'
     try {
@@ -249,6 +272,8 @@ try {
         GoalStopTrace = $doneTrace.trace
         GoalAndActionCatalogForwarded = $goalAndCatalogForwarded
         ScopedActionRejected = $scopedActionRejected
+        DynamicActionCatalogRecoveryVerified = $dynamicActionRecoveryVerified
+        DynamicActionRecoveryTrace = $recoveryTrace.trace
         DecisionContextTrace = $contextTrace.trace
         UnsafeActionRejected = $unsafeActionRejected
         HarnessAdvanceRejected = $harnessClockRejected
@@ -256,7 +281,7 @@ try {
         ProcessStopped = $stop.processStopped
         Trace = $trace.trace
     }
-    $result.Passed = ($result.DecisionCount -eq 2 -and $observationLoopVerified -and $receiptForwarded -and $decisionTimingCaptured -and $unicodeRoundTripVerified -and $doneSignalVerified -and $goalAndCatalogForwarded -and $scopedActionRejected -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
+    $result.Passed = ($result.DecisionCount -eq 2 -and $observationLoopVerified -and $receiptForwarded -and $decisionTimingCaptured -and $unicodeRoundTripVerified -and $doneSignalVerified -and $goalAndCatalogForwarded -and $scopedActionRejected -and $dynamicActionRecoveryVerified -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
     $result | ConvertTo-Json -Depth 12
     if (-not $result.Passed) { exit 1 }
 }
