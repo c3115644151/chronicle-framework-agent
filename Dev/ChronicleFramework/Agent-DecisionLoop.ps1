@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory = $true)][string]$DecisionProviderPath,
     [int]$MaxDecisions = 1,
     [int]$TimeoutSeconds = 180,
+    [ValidateRange(0,3600)][int]$MaxElapsedSeconds = 0,
     [string]$CommandPrefix = 'loop',
     [string]$Goal,
     [string[]]$AllowedActionNames
@@ -91,6 +92,59 @@ function ConvertTo-AsciiJson([string]$Json) {
     return $builder.ToString()
 }
 
+function Convert-ObservationForDecision($Observation) {
+    $actionNames = @($script:AllowedActions.Keys | Sort-Object)
+    if (($actionNames -join ',') -cne 'mapSettlementTargets,move' -or -not $Observation.state) { return $Observation }
+    $state = $Observation.state
+    $party = $state.party
+    $location = $state.location
+    $context = $state.context
+    return [ordered]@{
+        protocolVersion = $Observation.protocolVersion
+        commandId = $Observation.commandId
+        action = $Observation.action
+        status = $Observation.status
+        campaignDay = $Observation.campaignDay
+        dailyTickCount = $Observation.dailyTickCount
+        timeControlMode = $Observation.timeControlMode
+        modelView = 'campaign-map-travel'
+        state = [ordered]@{
+            schemaVersion = $state.schemaVersion
+            campaignDay = $state.campaignDay
+            party = [ordered]@{
+                id = $party.id
+                members = $party.members
+                healthy = $party.healthy
+                wounded = $party.wounded
+                prisoners = $party.prisoners
+                speed = $party.speed
+                food = $party.food
+                isMoving = $party.isMoving
+                defaultBehavior = $party.defaultBehavior
+                isAtSea = $party.isAtSea
+            }
+            location = [ordered]@{
+                x = $location.x
+                y = $location.y
+                currentSettlementId = $location.currentSettlementId
+                targetSettlementId = $location.targetSettlementId
+                targetPartyId = $location.targetPartyId
+                targetPosition = $location.targetPosition
+            }
+            context = [ordered]@{
+                gameState = $context.gameState
+                timeControlMode = $context.timeControlMode
+                menuId = $context.menuId
+                encounterActive = $context.encounterActive
+                isWaiting = $context.isWaiting
+            }
+            nearbySettlements = $state.nearbySettlements
+            nearbyParties = @($state.nearbyParties | Where-Object { $_.hostile })
+            danger = $state.danger
+        }
+    }
+}
+
 function Convert-DecisionToCli {
     param($Decision)
     if ($Decision.action -eq 'advance') { throw 'advance is a Harness-only deterministic time step and is unavailable to Agent decision providers.' }
@@ -98,10 +152,13 @@ function Convert-DecisionToCli {
     if (-not $Decision -or $Decision.action -notin $allowed.Keys) { throw 'Decision action is not in the Agent CLI allowlist.' }
     $arguments = @{}
     if ($Decision.arguments) {
-        foreach ($property in $Decision.arguments.PSObject.Properties) {
+        if ($Decision.arguments -is [Array]) {
+            if ($Decision.arguments.Count -gt 0) { throw 'Decision arguments must be an object; non-empty arrays are not accepted.' }
+        }
+        else { foreach ($property in $Decision.arguments.PSObject.Properties) {
             if ($property.Name -notin $allowed[[string]$Decision.action]) { throw "Unexpected argument '$($property.Name)' for action '$($Decision.action)'." }
             $arguments[$property.Name] = $property.Value
-        }
+        } }
     }
     foreach ($required in $allowed[[string]$Decision.action]) {
         if (-not $arguments.ContainsKey($required)) { throw "Missing '$required' for action '$($Decision.action)'." }
@@ -112,6 +169,7 @@ function Convert-DecisionToCli {
 try {
     $trace = @()
     $loopRunId = [Guid]::NewGuid().ToString('N')
+    $loopStartedUtc = [DateTime]::UtcNow
     $observation = $null
     $previousActionReceipt = $null
     $initialObservationStartedUtc = [DateTime]::UtcNow.ToString('O')
@@ -121,13 +179,25 @@ try {
     $termination = [ordered]@{ reason = 'decision-budget-exhausted'; providerReason = $null; completedByProvider = $false }
     if ($observation.status -ne 'completed' -or -not $observation.state) { throw 'Initial game observation was not completed.' }
     for ($index = 1; $index -le $MaxDecisions; $index++) {
+        if ($MaxElapsedSeconds -gt 0 -and ([DateTime]::UtcNow - $loopStartedUtc).TotalSeconds -ge $MaxElapsedSeconds)
+            { throw "Agent decision loop exceeded its $MaxElapsedSeconds-second wall-clock budget." }
+        $nativeMoveArrival = $null
+        if ($script:AllowedActions.ContainsKey('move') -and [string]$previousActionReceipt.action -ceq 'move') {
+            $moveTargetId = [string]$previousActionReceipt.state.location.targetSettlementId
+            $observedSettlementId = [string]$observation.state.location.currentSettlementId
+            if (-not [string]::IsNullOrWhiteSpace($moveTargetId) -and $observedSettlementId -ceq $moveTargetId) {
+                $nativeMoveArrival = [ordered]@{ targetSettlementId = $moveTargetId; currentSettlementId = $observedSettlementId; status = 'arrived'; evidence = 'current Native Campaign observation' }
+            }
+        }
         $request = [ordered]@{
             schemaVersion = 2
             runId = $loopRunId
             iteration = $index
             goal = $Goal
             allowedActions = @($script:AllowedActions.GetEnumerator() | Sort-Object -Property Key | ForEach-Object { [ordered]@{ action = [string]$_.Key; arguments = @($_.Value) } })
-            observation = $observation
+            allowedControls = @([ordered]@{ control = 'observeAgain'; waitSecondsMinimum = 1; waitSecondsMaximum = 10; description = 'Wait briefly outside the game, then read fresh Native state without issuing a game action.' })
+            nativeMoveArrival = $nativeMoveArrival
+            observation = (Convert-ObservationForDecision $observation)
             previousActionReceipt = $previousActionReceipt
         }
         $requestJson = ConvertTo-AsciiJson ($request | ConvertTo-Json -Depth 16 -Compress)
@@ -149,6 +219,55 @@ try {
         finally {
             $stepTiming.providerCompletedUtc = [DateTime]::UtcNow.ToString('O')
             $stepTiming.providerElapsedMilliseconds = [Math]::Round(([Diagnostics.Stopwatch]::GetTimestamp() - $providerStartedTicks) * 1000.0 / [Diagnostics.Stopwatch]::Frequency, 2)
+        }
+        if ($decision -and $decision.observeAgain -eq $true) {
+            $waitSeconds = 0
+            if (-not [int]::TryParse([string]$decision.waitSeconds, [ref]$waitSeconds) -or $waitSeconds -lt 1 -or $waitSeconds -gt 10)
+                { throw 'An observeAgain decision must request a bounded waitSeconds value between 1 and 10.' }
+            $waitReason = [string]$decision.reason
+            if ([string]::IsNullOrWhiteSpace($waitReason)) { throw 'An observeAgain decision must include a non-empty reason.' }
+            if ($decision.PSObject.Properties.Name -contains 'action' -or $decision.PSObject.Properties.Name -contains 'done')
+                { throw 'An observeAgain decision cannot include an action or done signal.' }
+            $moveReceipt = $previousActionReceipt
+            $targetSettlementId = [string]$moveReceipt.state.location.targetSettlementId
+            $partyMoving = [bool]$observation.state.party.isMoving
+            $currentSettlementId = [string]$observation.state.location.currentSettlementId
+            if ([string]$observation.state.context.gameState -cne 'MapState' -or
+                [string]$moveReceipt.action -cne 'move' -or [string]$moveReceipt.status -cne 'completed' -or
+                [string]$observation.state.location.targetSettlementId -cne $targetSettlementId -or
+                [string]::IsNullOrWhiteSpace($targetSettlementId) -or -not $partyMoving -or
+                $currentSettlementId -ceq $targetSettlementId) {
+                throw 'observeAgain is allowed only while a completed Native move is still active on the Campaign map and its target has not yet been reached.'
+            }
+            $waitStartedUtc = [DateTime]::UtcNow.ToString('O')
+            $waitStartedTicks = [Diagnostics.Stopwatch]::GetTimestamp()
+            Start-Sleep -Seconds $waitSeconds
+            $waitCompletedUtc = [DateTime]::UtcNow.ToString('O')
+            $stepTiming.schedulerWaitStartedUtc = $waitStartedUtc
+            $stepTiming.schedulerWaitCompletedUtc = $waitCompletedUtc
+            $stepTiming.schedulerWaitElapsedMilliseconds = [Math]::Round(([Diagnostics.Stopwatch]::GetTimestamp() - $waitStartedTicks) * 1000.0 / [Diagnostics.Stopwatch]::Frequency, 2)
+            $stepTiming.observationStartedUtc = [DateTime]::UtcNow.ToString('O')
+            if ($MaxElapsedSeconds -gt 0 -and ([DateTime]::UtcNow - $loopStartedUtc).TotalSeconds -ge $MaxElapsedSeconds)
+                { throw "Agent decision loop exceeded its $MaxElapsedSeconds-second wall-clock budget during scheduler wait." }
+            $observationStartedTicks = [Diagnostics.Stopwatch]::GetTimestamp()
+            $nextObservation = Invoke-AgentCli 'state' @{} "$CommandPrefix-observe-$index"
+            $stepTiming.observationCompletedUtc = [DateTime]::UtcNow.ToString('O')
+            $stepTiming.observationElapsedMilliseconds = [Math]::Round(([Diagnostics.Stopwatch]::GetTimestamp() - $observationStartedTicks) * 1000.0 / [Diagnostics.Stopwatch]::Frequency, 2)
+            if ($nextObservation.status -ne 'completed' -or -not $nextObservation.state) { throw 'Post-wait Native observation was not completed.' }
+            $trace += [pscustomobject]@{
+                iteration = $index
+                observationBefore = $observation
+                previousActionReceipt = $previousActionReceipt
+                decision = $decision
+                timing = $stepTiming
+                actionReceipt = $null
+                observationAfter = $nextObservation
+                actionAttempted = $false
+                actionExecuted = $false
+                control = [ordered]@{ kind = 'bounded-observe-again'; waitSeconds = $waitSeconds; reason = $waitReason; targetSettlementId = $targetSettlementId }
+            }
+            $observation = $nextObservation
+            continue
         }
         if ($decision -and $decision.done -eq $true) {
             $doneReason = [string]$decision.reason

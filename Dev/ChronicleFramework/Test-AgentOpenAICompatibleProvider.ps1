@@ -87,7 +87,7 @@ try {
 
     $modelDecision = [ordered]@{
         action = 'mapSettlementTargets'
-        arguments = @{}
+        arguments = @()
         rationale = 'The current Campaign Map permits a read-only query of visible settlement targets.'
     } | ConvertTo-Json -Compress
     $responseJson = [ordered]@{
@@ -108,7 +108,32 @@ try {
     $decision = $stdout | ConvertFrom-Json
     $expectedDecision = $modelDecision | ConvertFrom-Json
     $providerOutputClean = ($stdout -notmatch [regex]::Escape($harnessSecret) -and $stderr -notmatch [regex]::Escape($harnessSecret))
-    $decisionValidated = ($decision.action -eq 'mapSettlementTargets' -and $decision.rationale -eq $expectedDecision.rationale)
+    $decisionValidated = ($decision.action -eq 'mapSettlementTargets' -and $decision.rationale -eq $expectedDecision.rationale -and $decision.arguments -is [System.Management.Automation.PSCustomObject] -and @($decision.arguments.PSObject.Properties).Count -eq 0)
+
+    $failureStep = 'validate-bounded-observe-again-control-response'
+    $observeAgainRequest = $request | ConvertTo-Json -Depth 12 -Compress
+    $observeAgainProvider = Start-ProviderProcess $observeAgainRequest
+    $process = $observeAgainProvider.Process
+    $observeAcceptTask = $listener.GetContextAsync()
+    if (-not $observeAcceptTask.Wait(5000)) { throw 'Local HTTP stub did not receive the observeAgain provider request.' }
+    $observeContext = $observeAcceptTask.GetAwaiter().GetResult()
+    $observeReader = New-Object System.IO.StreamReader($observeContext.Request.InputStream, $observeContext.Request.ContentEncoding)
+    $null = $observeReader.ReadToEnd()
+    $observeReader.Dispose()
+    $observeDecisionJson = [ordered]@{ action = 'observeAgain'; arguments = @{ waitSeconds = 3 }; rationale = 'Native party remains en route; take a fresh bounded observation.' } | ConvertTo-Json -Compress
+    $observeResponseJson = [ordered]@{ choices = @([ordered]@{ index = 0; message = [ordered]@{ role = 'assistant'; content = $observeDecisionJson }; finish_reason = 'stop' }) } | ConvertTo-Json -Depth 8 -Compress
+    $observeBytes = [System.Text.Encoding]::UTF8.GetBytes($observeResponseJson)
+    $observeContext.Response.StatusCode = 200
+    $observeContext.Response.ContentType = 'application/json; charset=utf-8'
+    $observeContext.Response.ContentLength64 = $observeBytes.Length
+    $observeContext.Response.OutputStream.Write($observeBytes, 0, $observeBytes.Length)
+    $observeContext.Response.OutputStream.Close()
+    if (-not $process.WaitForExit(($TimeoutSeconds + 5) * 1000)) { try { $process.Kill() } catch { }; throw 'Provider did not exit after the observeAgain response.' }
+    $observeStdout = $observeAgainProvider.StdoutTask.Result.Trim()
+    $observeStderr = $observeAgainProvider.StderrTask.Result.Trim()
+    if ($process.ExitCode -ne 0) { throw "Provider rejected a valid observeAgain response (exit=$($process.ExitCode)): $observeStderr" }
+    $observeDecision = $observeStdout | ConvertFrom-Json
+    $observeAgainValidated = ([bool]$observeDecision.observeAgain -and [int]$observeDecision.waitSeconds -eq 3 -and -not $observeDecision.action -and -not $observeDecision.done -and -not [string]::IsNullOrWhiteSpace([string]$observeDecision.reason))
 
     $failureStep = 'verify-local-openai-compatible-service-contract'
     $env:CHRONICLE_LLM_API_KEY = ''
@@ -150,7 +175,7 @@ try {
     $localTemperatureForwarded = ([double]$localApiRequest.temperature -eq 0)
     $localPromptTargets = @($localModelInput.previousActionReceipt.data.mapSettlementTargets)
     $localReceiptSummary = $localModelInput.previousActionReceipt.data.mapSettlementTargetsSummary
-    $localReceiptCompacted = ($localPromptTargets.Count -eq 16 -and [int]$localReceiptSummary.totalCount -eq 40 -and [int]$localReceiptSummary.includedCount -eq 16 -and [int]$localReceiptSummary.omittedCount -eq 24 -and $null -eq $localModelInput.previousActionReceipt.state)
+    $localReceiptCompacted = ($localPromptTargets.Count -eq 16 -and [int]$localReceiptSummary.totalCount -eq 40 -and [int]$localReceiptSummary.includedCount -eq 16 -and [int]$localReceiptSummary.omittedCount -eq 24 -and $null -eq $localModelInput.previousActionReceipt.state -and [string]$localModelInput.previousActionReceipt.stateSummary.location.currentSettlementId -ceq 'town_V1' -and [string]$localModelInput.previousActionReceipt.stateSummary.context.gameState -ceq 'MapState')
     $localNoAuthorizationHeader = [string]::IsNullOrWhiteSpace([string]$localContext.Request.Headers['Authorization'])
     $localResponseBytes = [System.Text.Encoding]::UTF8.GetBytes($responseJson)
     $localContext.Response.StatusCode = 200
@@ -240,11 +265,12 @@ try {
         RequestFormatCorrect = $payloadModeCorrect
         ProviderOutputCredentialFree = $providerOutputClean
         StructuredDecisionReturned = $decisionValidated
+        BoundedObserveAgainControlValidated = $observeAgainValidated
         ProviderExitCode = $successfulProviderExitCode
         HttpErrorFailsClosedWithoutCredentialLeak = $httpErrorFailedClosed
         DisallowedActionFailsClosed = $invalidActionFailedClosed
         TimeoutFailsClosedWithoutCredentialLeak = $timeoutFailedClosed
-        Passed = ($requestGoalForwarded -and $actionCatalogForwarded -and $authorizationSent -and $localCompatibilityPassed -and $endpointPathCorrect -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $invalidActionFailedClosed -and $httpErrorFailedClosed -and $timeoutFailedClosed)
+        Passed = ($requestGoalForwarded -and $actionCatalogForwarded -and $authorizationSent -and $localCompatibilityPassed -and $endpointPathCorrect -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $observeAgainValidated -and $invalidActionFailedClosed -and $httpErrorFailedClosed -and $timeoutFailedClosed)
     }
     $result | ConvertTo-Json -Depth 8
     if (-not $result.Passed) { exit 1 }
