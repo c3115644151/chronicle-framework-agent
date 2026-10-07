@@ -108,6 +108,35 @@ try {
     $providerOutputClean = ($stdout -notmatch [regex]::Escape($harnessSecret) -and $stderr -notmatch [regex]::Escape($harnessSecret))
     $decisionValidated = ($decision.action -eq 'mapSettlementTargets' -and $decision.rationale -eq $expectedDecision.rationale)
 
+    $failureStep = 'verify-local-openai-compatible-service-contract'
+    $env:CHRONICLE_LLM_API_KEY = ''
+    $env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER = 'max_tokens'
+    $localProvider = Start-ProviderProcess $requestJson
+    $process = $localProvider.Process
+    $localAcceptTask = $listener.GetContextAsync()
+    if (-not $localAcceptTask.Wait(5000)) { throw 'Local HTTP stub did not receive the local-model compatibility request.' }
+    $localContext = $localAcceptTask.GetAwaiter().GetResult()
+    $localReader = New-Object System.IO.StreamReader($localContext.Request.InputStream, $localContext.Request.ContentEncoding)
+    $localRequestBody = $localReader.ReadToEnd()
+    $localReader.Dispose()
+    $localApiRequest = $localRequestBody | ConvertFrom-Json
+    $localTokenParameterCorrect = ([int]$localApiRequest.max_tokens -eq 512 -and $null -eq $localApiRequest.max_completion_tokens)
+    $localNoAuthorizationHeader = [string]::IsNullOrWhiteSpace([string]$localContext.Request.Headers['Authorization'])
+    $localResponseBytes = [System.Text.Encoding]::UTF8.GetBytes($responseJson)
+    $localContext.Response.StatusCode = 200
+    $localContext.Response.ContentType = 'application/json; charset=utf-8'
+    $localContext.Response.ContentLength64 = $localResponseBytes.Length
+    $localContext.Response.OutputStream.Write($localResponseBytes, 0, $localResponseBytes.Length)
+    $localContext.Response.OutputStream.Close()
+    if (-not $process.WaitForExit(($TimeoutSeconds + 5) * 1000)) { try { $process.Kill() } catch { }; throw 'Local-compatible provider did not exit after the HTTP response.' }
+    $localStdout = $localProvider.StdoutTask.Result.Trim()
+    $localStderr = $localProvider.StderrTask.Result.Trim()
+    if ($process.ExitCode -ne 0) { throw "Provider rejected the local-compatible response (exit=$($process.ExitCode)): $localStderr" }
+    $localDecision = $localStdout | ConvertFrom-Json
+    $localCompatibilityPassed = ($localTokenParameterCorrect -and $localNoAuthorizationHeader -and $localDecision.action -eq 'mapSettlementTargets' -and $localStdout -notmatch [regex]::Escape($harnessSecret) -and $localStderr -notmatch [regex]::Escape($harnessSecret))
+    $env:CHRONICLE_LLM_API_KEY = $harnessSecret
+    $env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER = 'max_completion_tokens'
+
     $failureStep = 'reject-action-outside-current-catalog'
     $invalidActionProvider = Start-ProviderProcess $requestJson
     $process = $invalidActionProvider.Process
@@ -173,6 +202,7 @@ try {
         AllowedActionCatalogForwarded = $actionCatalogForwarded
         PriorReceiptFieldPresent = ($null -eq $modelInput.previousActionReceipt)
         AuthorizationHeaderSent = $authorizationSent
+        LocalCompatibleMaxTokensWithoutAuthorization = $localCompatibilityPassed
         BaseUrlResolvedToChatCompletionsPath = $endpointPathCorrect
         RequestFormatCorrect = $payloadModeCorrect
         ProviderOutputCredentialFree = $providerOutputClean
@@ -181,7 +211,7 @@ try {
         HttpErrorFailsClosedWithoutCredentialLeak = $httpErrorFailedClosed
         DisallowedActionFailsClosed = $invalidActionFailedClosed
         TimeoutFailsClosedWithoutCredentialLeak = $timeoutFailedClosed
-        Passed = ($requestGoalForwarded -and $actionCatalogForwarded -and $authorizationSent -and $endpointPathCorrect -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $invalidActionFailedClosed -and $httpErrorFailedClosed -and $timeoutFailedClosed)
+        Passed = ($requestGoalForwarded -and $actionCatalogForwarded -and $authorizationSent -and $localCompatibilityPassed -and $endpointPathCorrect -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $invalidActionFailedClosed -and $httpErrorFailedClosed -and $timeoutFailedClosed)
     }
     $result | ConvertTo-Json -Depth 8
     if (-not $result.Passed) { exit 1 }

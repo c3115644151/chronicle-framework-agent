@@ -125,6 +125,12 @@ Mindcraft 将命令路由、ActionManager、SelfPrompter、History、SkillLibrar
 
 这些工程保护比“让模型多思考”更重要。
 
+### 参考项目的模型角色与本地基准候选
+
+这些项目没有共同固定的LLM，也不应把论文使用的旧模型名当成今天的性能基线：Voyager论文/代码以GPT-4为主要Action/Curriculum/Critic模型、GPT-3.5承担技能管理；DEPS Minecraft实验用`code-davinci-002`，并比较Codex、GPT-3、ChatGPT、GPT-4及LLaMA2变体；GITM论文使用`gpt-3.5-turbo`承担分解、规划、结构化动作生成和经验摘要；JARVIS-1组合GPT系规划、MineCLIP感知与STEVE-I控制，并用ChatGPT/GPT-4、LLaMA2-70B和Minecraft微调LLaMA2-13B作对照。Mindcraft是持续变化的多Provider项目：截至2026-10-07，develop默认profile为`gpt-5.4-mini`，支持分离chat/code/vision/embedding模型，也列出Ollama和专用Andy-4-Micro本地选项。以上仅是角色/接口证据，不意味着这些旧版本优劣可直接迁移到Bannerlord。
+
+本项目当前仍以可替换OpenAI-Compatible Chat Completions Provider作为W3-A真实模型基线，不因为参考项目而改成代码生成、Minecraft键鼠动作、VLM截图驾驶或固定云厂商。部署在本机的初步通用模型候选是Qwen3.5-4B Q4_K_M；较小Qwen3.5-2B Q4_K_M作低资源下限。Mindcraft的Andy-4-Micro（Qwen2 1.78B Q8）只作Minecraft领域微调对照，不能直接代表Bannerlord能力。Ollama的OpenAI兼容端点是API子集，使用`max_tokens`而非Provider默认的`max_completion_tokens`；Harness只已通过本地HTTP stub验证loopback无密钥与`max_tokens`请求格式。当前机器尚无本地LLM服务或权重，未下载、未推理、未测游戏和模型并发显存；以上均为待验证基准候选，不是已选用或已证明可运行的产品默认模型。[Voyager](https://github.com/MineDojo/Voyager) · [DEPS](https://arxiv.org/abs/2302.01560) · [GITM](https://github.com/OpenGVLab/GITM) · [JARVIS-1](https://github.com/CraftJarvis/JARVIS-1) · [Mindcraft](https://github.com/mindcraft-bots/mindcraft) · [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) · [Ollama Qwen3.5 quantizations](https://ollama.com/library/qwen3.5/tags)
+
 ## 迁移与拒绝
 
 采用：
