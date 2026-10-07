@@ -96,7 +96,7 @@ function Stop-ChronicleWindowVideoCapture {
     $timelineSelections = @()
     if (Test-Path -LiteralPath $EventTracePath) {
         $eventRows = @(Get-Content -LiteralPath $EventTracePath -Encoding UTF8 | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_ | ConvertFrom-Json })
-        $importantActions = @('menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','partyTakeAll','partyScreenDone','inventoryTakeAll','inventoryDone','crashReport','crashReportExpanded','crashReportScroll','crashObserved')
+        $importantActions = @('menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','partyTakeAll','partyScreenDone','inventoryTakeAll','inventoryDone','mapSettlementTargets','move','providerDone','modelLoopFailure','crashReport','crashReportExpanded','crashReportScroll','crashObserved')
         $priorSignature = $null
         foreach ($event in $eventRows) {
             $signature = @([string]$event.gameState,[string]$event.menuId,[string]$event.partyScreenMode,[string]$event.inventoryMode) -join '|'

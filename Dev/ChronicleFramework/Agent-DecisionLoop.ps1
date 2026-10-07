@@ -114,7 +114,9 @@ try {
     $loopRunId = [Guid]::NewGuid().ToString('N')
     $observation = $null
     $previousActionReceipt = $null
+    $initialObservationStartedUtc = [DateTime]::UtcNow.ToString('O')
     $observation = Invoke-AgentCli 'state' @{} "$CommandPrefix-observe-0"
+    $initialObservationCompletedUtc = [DateTime]::UtcNow.ToString('O')
     $previousActionReceipt = $null
     $termination = [ordered]@{ reason = 'decision-budget-exhausted'; providerReason = $null; completedByProvider = $false }
     if ($observation.status -ne 'completed' -or -not $observation.state) { throw 'Initial game observation was not completed.' }
@@ -129,7 +131,25 @@ try {
             previousActionReceipt = $previousActionReceipt
         }
         $requestJson = ConvertTo-AsciiJson ($request | ConvertTo-Json -Depth 16 -Compress)
-        $decision = Invoke-DecisionProvider $requestJson
+        $providerStartedUtc = [DateTime]::UtcNow.ToString('O')
+        $providerStartedTicks = [Diagnostics.Stopwatch]::GetTimestamp()
+        $stepTiming = [ordered]@{
+            providerStartedUtc = $providerStartedUtc
+            providerCompletedUtc = $null
+            providerElapsedMilliseconds = $null
+            actionStartedUtc = $null
+            actionCompletedUtc = $null
+            actionElapsedMilliseconds = $null
+            observationStartedUtc = $null
+            observationCompletedUtc = $null
+            observationElapsedMilliseconds = $null
+        }
+        $script:LastLoopTiming = $stepTiming
+        try { $decision = Invoke-DecisionProvider $requestJson }
+        finally {
+            $stepTiming.providerCompletedUtc = [DateTime]::UtcNow.ToString('O')
+            $stepTiming.providerElapsedMilliseconds = [Math]::Round(([Diagnostics.Stopwatch]::GetTimestamp() - $providerStartedTicks) * 1000.0 / [Diagnostics.Stopwatch]::Frequency, 2)
+        }
         if ($decision -and $decision.done -eq $true) {
             $doneReason = [string]$decision.reason
             if ([string]::IsNullOrWhiteSpace($doneReason)) { throw 'A provider stop decision must include a non-empty reason.' }
@@ -138,6 +158,7 @@ try {
                 observationBefore = $observation
                 previousActionReceipt = $previousActionReceipt
                 decision = $decision
+                timing = $stepTiming
                 actionReceipt = $null
                 observationAfter = $observation
                 actionExecuted = $false
@@ -147,13 +168,18 @@ try {
         }
         $validated = Convert-DecisionToCli $decision
         $commandId = "$CommandPrefix-act-$index"
+        $stepTiming.actionStartedUtc = [DateTime]::UtcNow.ToString('O')
+        $actionStartedTicks = [Diagnostics.Stopwatch]::GetTimestamp()
         $actionResult = Invoke-AgentCli $validated.Action $validated.Arguments $commandId
+        $stepTiming.actionCompletedUtc = [DateTime]::UtcNow.ToString('O')
+        $stepTiming.actionElapsedMilliseconds = [Math]::Round(([Diagnostics.Stopwatch]::GetTimestamp() - $actionStartedTicks) * 1000.0 / [Diagnostics.Stopwatch]::Frequency, 2)
         if ($actionResult.status -notin @('completed','accepted')) {
             $trace += [pscustomobject]@{
                 iteration = $index
                 observationBefore = $observation
                 previousActionReceipt = $previousActionReceipt
                 decision = $decision
+                timing = $stepTiming
                 actionReceipt = $actionResult
                 observationAfter = $null
                 actionAttempted = $true
@@ -161,13 +187,18 @@ try {
             }
             throw "Action '$($validated.Action)' returned '$($actionResult.status)': $($actionResult.error)"
         }
+        $stepTiming.observationStartedUtc = [DateTime]::UtcNow.ToString('O')
+        $observationStartedTicks = [Diagnostics.Stopwatch]::GetTimestamp()
         $nextObservation = Invoke-AgentCli 'state' @{} "$CommandPrefix-observe-$index"
+        $stepTiming.observationCompletedUtc = [DateTime]::UtcNow.ToString('O')
+        $stepTiming.observationElapsedMilliseconds = [Math]::Round(([Diagnostics.Stopwatch]::GetTimestamp() - $observationStartedTicks) * 1000.0 / [Diagnostics.Stopwatch]::Frequency, 2)
         if ($nextObservation.status -ne 'completed' -or -not $nextObservation.state) { throw 'Post-action observation was not completed.' }
         $trace += [pscustomobject]@{
             iteration = $index
             observationBefore = $observation
             previousActionReceipt = $previousActionReceipt
             decision = $decision
+            timing = $stepTiming
             actionReceipt = $actionResult
             observationAfter = $nextObservation
             actionAttempted = $true
@@ -181,6 +212,7 @@ try {
         schemaVersion = 1
         runId = $loopRunId
         provider = $providerPath
+        initialObservation = [ordered]@{ startedUtc = $initialObservationStartedUtc; completedUtc = $initialObservationCompletedUtc }
         decisions = $trace.Count
         actionsExecuted = @($trace | Where-Object { $_.actionExecuted }).Count
         termination = $termination
@@ -192,6 +224,7 @@ catch {
         status = 'failed'
         runId = $loopRunId
         error = $_.Exception.Message
+        timing = $script:LastLoopTiming
         lastObservation = $observation
         trace = @($trace)
     } | ConvertTo-Json -Depth 20 -Compress

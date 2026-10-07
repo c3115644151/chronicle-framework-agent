@@ -215,6 +215,10 @@ try {
     $first = $trace.trace[0]
     $second = $trace.trace[1]
     $observationLoopVerified = ($trace.trace.Count -eq 2 -and $first.decision.action -eq 'state' -and $first.actionReceipt.status -eq 'completed' -and $second.decision.action -eq 'mapPartyTargets' -and $second.actionReceipt.status -eq 'completed')
+    $decisionTimingCaptured = ($trace.initialObservation.startedUtc -and $trace.initialObservation.completedUtc -and
+        $first.timing.providerStartedUtc -and $first.timing.providerCompletedUtc -and
+        $first.timing.actionStartedUtc -and $first.timing.actionCompletedUtc -and $first.timing.actionElapsedMilliseconds -ge 0 -and
+        $first.timing.observationStartedUtc -and $first.timing.observationCompletedUtc -and $first.timing.observationElapsedMilliseconds -ge 0)
     $receiptForwarded = ($second.previousActionReceipt.commandId -eq $first.actionReceipt.commandId -and $second.previousActionReceipt.action -eq $first.actionReceipt.action -and $second.previousActionReceipt.status -eq $first.actionReceipt.status)
     $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
     $env:CHRONICLE_TEST_PROVIDER_MODE = 'doneSignal'
@@ -239,6 +243,7 @@ try {
         FirstDecision = $first.decision.action
         SecondDecision = $second.decision.action
         PreviousActionReceiptForwarded = $receiptForwarded
+        DecisionTimingCaptured = $decisionTimingCaptured
         UnicodeHeroNameRoundTripVerified = $unicodeRoundTripVerified
         ExplicitGoalStopHonoredWithoutIssuingAnotherAction = $doneSignalVerified
         GoalStopTrace = $doneTrace.trace
@@ -251,7 +256,7 @@ try {
         ProcessStopped = $stop.processStopped
         Trace = $trace.trace
     }
-    $result.Passed = ($result.DecisionCount -eq 2 -and $observationLoopVerified -and $receiptForwarded -and $unicodeRoundTripVerified -and $doneSignalVerified -and $goalAndCatalogForwarded -and $scopedActionRejected -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
+    $result.Passed = ($result.DecisionCount -eq 2 -and $observationLoopVerified -and $receiptForwarded -and $decisionTimingCaptured -and $unicodeRoundTripVerified -and $doneSignalVerified -and $goalAndCatalogForwarded -and $scopedActionRejected -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
     $result | ConvertTo-Json -Depth 12
     if (-not $result.Passed) { exit 1 }
 }
