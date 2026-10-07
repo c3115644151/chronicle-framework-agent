@@ -8,7 +8,8 @@ param(
     [string]$Goal,
     [string[]]$AllowedActionNames,
     [switch]$PersistCheckpoint,
-    [switch]$ResumeCheckpoint
+    [switch]$ResumeCheckpoint,
+    [ValidateSet('recruit')][string]$HarnessCrashAfterAction
 )
 
 $ErrorActionPreference = 'Stop'
@@ -38,6 +39,9 @@ if ($PSBoundParameters.ContainsKey('AllowedActionNames')) {
         $restrictedActions[$canonicalName[0]] = $script:ProductAllowedActions[$canonicalName[0]]
     }
     $script:AllowedActions = $restrictedActions
+}
+if ($HarnessCrashAfterAction -and (-not $PersistCheckpoint -or $env:CHRONICLE_HARNESS_MODE -ne 'visual-capture' -or -not $env:CHRONICLE_HARNESS_TEMP)) {
+    throw 'HarnessCrashAfterAction requires PersistCheckpoint plus an active visual-capture Harness run.'
 }
 
 function Invoke-AgentCli {
@@ -211,6 +215,20 @@ function Write-AgentCheckpoint([string]$CheckpointCommandId) {
         { throw 'Native Campaign checkpoint write did not confirm the active Campaign identity.' }
 }
 
+function ConvertTo-CheckpointObservationSummary($Observation) {
+    return [ordered]@{
+        campaignDay = $Observation.campaignDay
+        currentSettlementId = $Observation.state.location.currentSettlementId
+        targetSettlementId = $Observation.state.location.targetSettlementId
+        isMoving = $Observation.state.party.isMoving
+        members = $Observation.state.party.members
+        gold = $Observation.state.economy.gold
+        menuId = $Observation.state.context.menuId
+        gameState = $Observation.state.context.gameState
+        encounterActive = $Observation.state.context.encounterActive
+    }
+}
+
 function Convert-DecisionToCli {
     param($Decision)
     if ($Decision.action -eq 'advance') { throw 'advance is a Harness-only deterministic time step and is unavailable to Agent decision providers.' }
@@ -260,6 +278,29 @@ try {
         $Goal = [string]$script:AgentCheckpoint.goal
         $previousActionReceipt = $script:AgentCheckpoint.lastActionReceipt
         if ($previousActionReceipt -and [string]$previousActionReceipt.action -ceq 'mapSettlementTargets') { $previousActionReceipt = $null }
+        if ($script:AgentCheckpoint.pendingAction) {
+            $pendingAction = $script:AgentCheckpoint.pendingAction
+            if ([string]$pendingAction.action -cne 'recruit') { throw "Pending action '$($pendingAction.action)' has no implemented recovery verifier; refusing to replay it." }
+            $beforeMembers = [int]$pendingAction.preActionSummary.members
+            $beforeGold = [int]$pendingAction.preActionSummary.gold
+            $expectedCost = [int]$pendingAction.expectedCost
+            $effectConfirmed = ($expectedCost -gt 0 -and [int]$observation.state.party.members -eq [int]$pendingAction.expectedMembersAfter -and [int]$observation.state.economy.gold -eq [int]$pendingAction.expectedGoldAfter)
+            if (-not $effectConfirmed) { throw 'Pending Native recruitment outcome is unknown in the fresh Campaign observation; refusing to repeat the non-idempotent action.' }
+            $previousActionReceipt = [ordered]@{
+                protocolVersion = 1
+                commandId = [string]$pendingAction.commandId
+                action = 'recruit'
+                status = 'completed'
+                campaignDay = $observation.campaignDay
+                state = $observation.state
+                data = [ordered]@{ verified = $true; recoveredAfterRuntimeInterruption = $true; ownerId = [string]$pendingAction.arguments.OwnerId; troopId = [string]$pendingAction.arguments.TroopId; slot = [int]$pendingAction.arguments.VolunteerSlot; cost = $expectedCost; beforeMembers = $beforeMembers; afterMembers = [int]$observation.state.party.members; beforeGold = $beforeGold; afterGold = [int]$observation.state.economy.gold }
+            }
+            $script:AgentCheckpoint.lastActionReceipt = ConvertTo-CheckpointReceipt $previousActionReceipt
+            $script:AgentCheckpoint.pendingAction = $null
+            $script:AgentCheckpoint.lastRecovery = [ordered]@{ action = 'recruit'; status = 'verified'; commandId = [string]$pendingAction.commandId; membersAfter = [int]$observation.state.party.members; goldAfter = [int]$observation.state.economy.gold; expectedCost = $expectedCost; verifiedAgainst = 'fresh Native Campaign observation'; recoveredUtc = [DateTime]::UtcNow.ToString('O') }
+            $script:AgentCheckpoint.lastObservedSummary = ConvertTo-CheckpointObservationSummary $observation
+            Write-AgentCheckpoint "$CommandPrefix-checkpoint-reconciled-recruit"
+        }
     }
     elseif ($PersistCheckpoint) {
         if ([string]::IsNullOrWhiteSpace($Goal)) { throw 'PersistCheckpoint requires an explicit non-empty goal.' }
@@ -279,6 +320,8 @@ try {
             goal = $Goal
             status = 'active'
             lastActionReceipt = $null
+            pendingAction = $null
+            lastRecovery = $null
             lastObservedSummary = $null
             lastStopReason = $null
             updatedUtc = [DateTime]::UtcNow.ToString('O')
@@ -305,6 +348,7 @@ try {
             allowedActions = @($script:AllowedActions.GetEnumerator() | Sort-Object -Property Key | ForEach-Object { [ordered]@{ action = [string]$_.Key; arguments = @($_.Value) } })
             allowedControls = @([ordered]@{ control = 'observeAgain'; waitSecondsMinimum = 1; waitSecondsMaximum = 10; description = 'Wait briefly outside the game, then read fresh Native state without issuing a game action.' })
             nativeMoveArrival = $nativeMoveArrival
+            checkpointContext = if ($script:AgentCheckpoint) { [ordered]@{ schemaVersion = $script:AgentCheckpoint.schemaVersion; campaignInstanceId = $script:AgentCheckpoint.campaignInstanceId; taskId = $script:AgentCheckpoint.taskId; status = $script:AgentCheckpoint.status; lastObservedSummary = $script:AgentCheckpoint.lastObservedSummary; pendingAction = $script:AgentCheckpoint.pendingAction; lastRecovery = $script:AgentCheckpoint.lastRecovery } } else { $null }
             observation = (Convert-ObservationForDecision $observation)
             previousActionReceipt = $previousActionReceipt
         }
@@ -412,11 +456,31 @@ try {
         }
         $validated = Convert-DecisionToCli $decision
         $commandId = "$CommandPrefix-act-$index"
+        if ($script:AgentCheckpoint -and $validated.Action -eq 'recruit') {
+            $matchingRecruitOffer = @($previousActionReceipt.data.offers | Where-Object { $_.available -and [string]$_.ownerId -ceq [string]$validated.Arguments.OwnerId -and [string]$_.troopId -ceq [string]$validated.Arguments.TroopId -and [int]$_.slot -eq [int]$validated.Arguments.VolunteerSlot -and [int]$_.cost -le [int]$observation.state.economy.gold } | Select-Object -First 1)
+            if ($matchingRecruitOffer.Count -ne 1 -or [bool]$validated.Arguments.ConfirmPartySizeWarning) { throw 'Persistent Native recruit requires one current affordable non-over-capacity offer receipt.' }
+            $preActionSummary = ConvertTo-CheckpointObservationSummary $observation
+            $script:AgentCheckpoint.pendingAction = [ordered]@{
+                commandId = $commandId
+                action = 'recruit'
+                arguments = [ordered]@{ OwnerId = [string]$validated.Arguments.OwnerId; TroopId = [string]$validated.Arguments.TroopId; VolunteerSlot = [int]$validated.Arguments.VolunteerSlot }
+                expectedCost = [int]$matchingRecruitOffer[0].cost
+                expectedMembersAfter = [int]$preActionSummary.members + 1
+                expectedGoldAfter = [int]$preActionSummary.gold - [int]$matchingRecruitOffer[0].cost
+                preActionSummary = $preActionSummary
+                status = 'pending'
+                createdUtc = [DateTime]::UtcNow.ToString('O')
+            }
+            Write-AgentCheckpoint "$CommandPrefix-checkpoint-pending-$index"
+        }
         $stepTiming.actionStartedUtc = [DateTime]::UtcNow.ToString('O')
         $actionStartedTicks = [Diagnostics.Stopwatch]::GetTimestamp()
         $actionResult = Invoke-AgentCli $validated.Action $validated.Arguments $commandId
         $stepTiming.actionCompletedUtc = [DateTime]::UtcNow.ToString('O')
         $stepTiming.actionElapsedMilliseconds = [Math]::Round(([Diagnostics.Stopwatch]::GetTimestamp() - $actionStartedTicks) * 1000.0 / [Diagnostics.Stopwatch]::Frequency, 2)
+        if ($HarnessCrashAfterAction -and $validated.Action -ceq $HarnessCrashAfterAction -and $actionResult.status -in @('completed','accepted')) {
+            [Environment]::Exit(93)
+        }
         if ($actionResult.status -notin @('completed','accepted')) {
             $trace += [pscustomobject]@{
                 iteration = $index
@@ -452,6 +516,7 @@ try {
         $observation = $nextObservation
         if ($script:AgentCheckpoint) {
             $script:AgentCheckpoint.status = 'active'
+            $script:AgentCheckpoint.pendingAction = $null
             $script:AgentCheckpoint.lastActionReceipt = ConvertTo-CheckpointReceipt $actionResult
             $script:AgentCheckpoint.lastObservedSummary = [ordered]@{
                 campaignDay = $observation.campaignDay

@@ -143,6 +143,8 @@ Mindcraft 将命令路由、ActionManager、SelfPrompter、History、SkillLibrar
 
 `TestResults/20261008-060006`另外验证Agent Runtime自己退出/重启而Bannerlord Campaign进程保持同一PID：首段真实模型完成目标查询和move并将checkpoint写在当前Campaign内存中；第二段使用新Loop RunId，从同一Campaign实例的Native checkpoint恢复目标与move receipt，不执行Save/Load，未重复move，随后通过当前Town菜单招募一名志愿兵。两段窗口帧覆盖率均100%，关键帧和索引保留、源MP4删除、源存档模板不变及最终进程清理通过。这证明顺序完成动作后的Agent-only Runtime重启；硬杀Runtime、游戏进程崩溃或Native副作用提交中的断点仍未验证。
 
+招募存在“Native成功、Agent回执尚未写回checkpoint”窄中断窗口。checkpoint v1对此动作先写pending command、精确owner/troop/slot、当前人数/Gold、预期人数+1与成本；Runtime重启后仅当新Native状态精确满足预期人数和Gold后置条件时合成已恢复receipt并清pending，否则安全停止且不重放非幂等招募。`TestResults/20261008-062205`使用真实模型+Native RecruitmentVM触发Harness-only Agent进程退出（Bannerlord同一PID保持），确认Party/Gold与Volunteer slot已变但checkpoint last confirmed receipt仍是recruitOptions；新Runtime根据fresh state恢复，不再提交招募，并正常停止。该可恢复规则目前只覆盖RecruitmentVM这个具备明确人数/成本后置条件的动作；其他事务、单独Native Engine崩溃及更宽的并发写入情形未知。
+
 ## 迁移与拒绝
 
 采用：

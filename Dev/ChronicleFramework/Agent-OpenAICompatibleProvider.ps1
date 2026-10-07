@@ -51,7 +51,7 @@ try {
         { throw 'CHRONICLE_LLM_TEMPERATURE must be a number between 0 and 2.' }
 
     $systemPrompt = @'
-You are the decision maker for a Bannerlord Campaign Agent. Use only the task goal, current observation, previous Native receipt, and action catalog. Select at most one listed action with only listed arguments. Use only observed IDs/values; never invent game state. Never echo input data. Keep rationale/reason short (at most 20 words); do not output analysis. Ordered goal steps are hard preconditions. A mapSettlementTargetsSummary or recruitOptionsSummary is a bounded receipt subset; choose only included IDs/offers. `campaign-map-travel` and `campaign-settlement-recruitment` are deliberately scoped observations; omitted state is unknown, not evidence. Action arguments should be an object keyed by listed argument names. A positional array is accepted only when its length exactly matches the listed argument-name sequence; the executor still revalidates every value. Return done only when the goal is met or no safe legal action is supported. Return exactly one JSON object and no Markdown.
+You are the decision maker for a Bannerlord Campaign Agent. Use only the task goal, current observation, previous Native receipt, checkpoint context, and action catalog. Select at most one listed action with only listed arguments. Use only observed IDs/values; never invent game state. Never echo input data. Keep rationale/reason short (at most 20 words); do not output analysis. Ordered goal steps are hard preconditions. A mapSettlementTargetsSummary or recruitOptionsSummary is a bounded receipt subset; choose only included IDs/offers. `campaign-map-travel` and `campaign-settlement-recruitment` are deliberately scoped observations; omitted state is unknown, not evidence. If checkpointContext has a pending Native action, compare it with the fresh observation and do not blindly repeat a non-idempotent action. If checkpointContext.lastRecovery.status is `verified`, its action effect is confirmed by fresh Native state; do not repeat that action, and return done when the one-action goal is thereby met. Action arguments should be an object keyed by listed argument names. A positional array is accepted only when its length exactly matches the listed argument-name sequence; the executor still revalidates every value. Return done only when the goal is met or no safe legal action is supported. Return exactly one JSON object and no Markdown.
 
 For an action, return: {"action":"listed action name","arguments":{},"rationale":"brief evidence-based reason"}
 To stop, return: {"done":true,"reason":"brief evidence-based reason"}
@@ -125,6 +125,7 @@ When `nativeMoveArrival.status` is `arrived`, the current Native observation con
             allowedActions = $request.allowedActions
             allowedControls = $request.allowedControls
             nativeMoveArrival = $request.nativeMoveArrival
+            checkpointContext = $request.checkpointContext
             observation = $request.observation
             previousActionReceipt = $compactReceipt
         }

@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.48
+Contract version: 7.50
 
 ## 目标与边界
 
@@ -378,6 +378,8 @@ Agent决策循环的Harness原型使用请求schema v2：每轮把明确Goal、�
 `AlleyEntryMenu`是独立可选阶段，不加入`All`：从到达Town后的Native当前`town`菜单观察启用的`manage_alley`（显示“进入巷子”），通过产品`menuSelect`走真实`GameMenuOption`后果进入`manage_alley`；再观察当前菜单并选择Native `back`返回Town。`20261004-052453`的Native帧与state均显示进入后仍是MapState且没有Mission，背景是Campaign地图上的Alley菜单/图板，不是可走动3D巷道场景；返回时menuId是`town`。两次菜单转换前后`PlayerAlleyData`、Owner/负责人/左右Roster、Gold/Influence、CampaignDay=91077.400065/raw Stop/`isWaiting=true`和存档hash不变；三张引擎帧及进程退出保留。此菜单注册的`MenuLocations`不能代替对Assigned Leader人物对话Scene入口的实测。
 
 `LiveModelRuntimeResume` 是可选的 `Run-Harness.ps1 -Phase LiveModelRuntimeResume` 阶段：它验证Agent决策循环/Provider进程重启时，Bannerlord Campaign仍维持同一PID和Native内存checkpoint；与 `LiveModelResume` 的Native存档重新加载分开记录。两者均不加入 `All`。
+
+`LiveModelActionRecovery`（`Run-Harness.ps1 -Phase LiveModelActionRecovery`）是独立 opt-in 阶段，用一个仅Harness可启用的故障注入点，在Native recruit已提交且CLI回执返回、但DecisionLoop尚未把动作结果写回Campaign checkpoint时终止该loop进程。Campaign保持运行；恢复时只在新Native状态精确满足本次招募人数+1及按Native成本扣金后，才把pending action标为已恢复，否则拒绝重放并保留失败证据。此逻辑目前只实现RecruitmentVM这一已知非幂等动作，不是所有游戏动作的通用事务协议；阶段不进入 `All`。
 
 ## 当前执行焦点
 
