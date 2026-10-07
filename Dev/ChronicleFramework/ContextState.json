@@ -1,171 +1,173 @@
-{
-  "schemaVersion": 2,
-  "current": {
-    "path": "Focus/MAINLINE.md",
-    "reviewedUtc": "2026-10-07T19:46:00.7435770Z",
-    "reviewAfterUtc": "2026-10-21T19:46:00.7435770Z",
-    "mainlineSha256": "09f975c2762165dce5b50673a3b0080579ca49bfa248404b1ad04f27ced7048b"
-  },
-  "taskTracker": {
-    "projectUrl": "https://github.com/users/c3115644151/projects/5"
-  },
-  "defaultRead": [
-    "DEVELOPMENT.md",
-    "Focus/MAINLINE.md"
-  ],
-  "references": [
-    {
-      "path": "Research/A/CampaignRuntimeWorldState.md",
-      "tags": [
-        "campaign-runtime",
-        "time",
-        "events",
-        "save"
-      ]
-    },
-    {
-      "path": "Research/B/WorldEntitiesIdentity.md",
-      "tags": [
-        "hero",
-        "clan",
-        "kingdom",
-        "identity",
-        "relation"
-      ]
-    },
-    {
-      "path": "Research/C/PoliticalDiplomacyAndRelationConsumers.md",
-      "tags": [
-        "politics",
-        "diplomacy",
-        "kingdom",
-        "relation"
-      ]
-    },
-    {
-      "path": "Research/D/SettlementsAndTerritory.md",
-      "tags": [
-        "settlement",
-        "territory",
-        "town",
-        "village"
-      ]
-    },
-    {
-      "path": "Research/E/EconomyAndTrade.md",
-      "tags": [
-        "economy",
-        "trade",
-        "items",
-        "inventory"
-      ]
-    },
-    {
-      "path": "Research/F/MilitaryPartiesAndCaptivity.md",
-      "tags": [
-        "party",
-        "military",
-        "army",
-        "ai",
-        "captivity",
-        "release",
-        "prisoner",
-        "relation"
-      ]
-    },
-    {
-      "path": "Research/G/BattleAndTactics.md",
-      "tags": [
-        "encounter",
-        "battle",
-        "mission",
-        "formation",
-        "orders",
-        "tactics",
-        "morale",
-        "combat"
-      ]
-    },
-    {
-      "path": "Research/H/PlayerPartyAndProgression.md",
-      "tags": [
-        "player",
-        "character",
-        "clan",
-        "party",
-        "roster",
-        "growth",
-        "renown",
-        "captivity"
-      ]
-    },
-    {
-      "path": "Research/I/RelationsAndSocialSystems.md",
-      "tags": [
-        "relation",
-        "marriage",
-        "family",
-        "education",
-        "traits",
-        "crime",
-        "dialogue",
-        "persuasion"
-      ]
-    },
-    {
-      "path": "Research/J/TasksEventsAndNarrative.md",
-      "tags": [
-        "issue",
-        "dialogue",
-        "quest",
-        "journal",
-        "incident",
-        "rumor",
-        "notification",
-        "persuasion",
-        "tournament",
-        "board-game",
-        "story-mode"
-      ]
-    },
-    {
-      "path": "Research/K/MapMovementAndEnvironment.md",
-      "tags": [
-        "world-map",
-        "navigation",
-        "tracking",
-        "weather",
-        "naval",
-        "ports",
-        "hideout",
-        "bandits"
-      ]
-    },
-    {
-      "path": "Research/L/ContentInterfaceAndModRuntime.md",
-      "tags": [
-        "xml",
-        "xslt",
-        "menu",
-        "dialogue",
-        "encyclopedia",
-        "notifications",
-        "mission",
-        "localization",
-        "module-loading",
-        "campaign-behavior",
-        "game-model",
-        "harmony",
-        "save-system"
-      ]
-    }
-  ],
-  "archives": [],
-  "lifecyclePolicy": {
-    "maxActiveMainlines": 1,
-    "reviewIntervalDays": 14,
-    "defaultCompletedDisposition": "delete",
-    "archiveDirectory": "Archive",
-    "archiveReadByDefault": false
-  }
+﻿{
+    "schemaVersion":  2,
+    "current":  {
+                    "path":  "Focus/MAINLINE.md",
+                    "reviewedUtc":  "2026-10-07T21:52:42.3965595Z",
+                    "reviewAfterUtc":  "2026-10-21T21:52:42.3965595Z",
+                    "mainlineSha256":  "e7ba90f5a325d682eefa912499ff241ccbca0fc49651b13987e758d172983521"
+                },
+    "taskTracker":  {
+                        "projectUrl":  "https://github.com/users/c3115644151/projects/5"
+                    },
+    "defaultRead":  [
+                        "DEVELOPMENT.md",
+                        "Focus/MAINLINE.md"
+                    ],
+    "references":  [
+                       {
+                           "path":  "Research/A/CampaignRuntimeWorldState.md",
+                           "tags":  [
+                                        "campaign-runtime",
+                                        "time",
+                                        "events",
+                                        "save"
+                                    ]
+                       },
+                       {
+                           "path":  "Research/B/WorldEntitiesIdentity.md",
+                           "tags":  [
+                                        "hero",
+                                        "clan",
+                                        "kingdom",
+                                        "identity",
+                                        "relation"
+                                    ]
+                       },
+                       {
+                           "path":  "Research/C/PoliticalDiplomacyAndRelationConsumers.md",
+                           "tags":  [
+                                        "politics",
+                                        "diplomacy",
+                                        "kingdom",
+                                        "relation"
+                                    ]
+                       },
+                       {
+                           "path":  "Research/D/SettlementsAndTerritory.md",
+                           "tags":  [
+                                        "settlement",
+                                        "territory",
+                                        "town",
+                                        "village"
+                                    ]
+                       },
+                       {
+                           "path":  "Research/E/EconomyAndTrade.md",
+                           "tags":  [
+                                        "economy",
+                                        "trade",
+                                        "items",
+                                        "inventory"
+                                    ]
+                       },
+                       {
+                           "path":  "Research/F/MilitaryPartiesAndCaptivity.md",
+                           "tags":  [
+                                        "party",
+                                        "military",
+                                        "army",
+                                        "ai",
+                                        "captivity",
+                                        "release",
+                                        "prisoner",
+                                        "relation"
+                                    ]
+                       },
+                       {
+                           "path":  "Research/G/BattleAndTactics.md",
+                           "tags":  [
+                                        "encounter",
+                                        "battle",
+                                        "mission",
+                                        "formation",
+                                        "orders",
+                                        "tactics",
+                                        "morale",
+                                        "combat"
+                                    ]
+                       },
+                       {
+                           "path":  "Research/H/PlayerPartyAndProgression.md",
+                           "tags":  [
+                                        "player",
+                                        "character",
+                                        "clan",
+                                        "party",
+                                        "roster",
+                                        "growth",
+                                        "renown",
+                                        "captivity"
+                                    ]
+                       },
+                       {
+                           "path":  "Research/I/RelationsAndSocialSystems.md",
+                           "tags":  [
+                                        "relation",
+                                        "marriage",
+                                        "family",
+                                        "education",
+                                        "traits",
+                                        "crime",
+                                        "dialogue",
+                                        "persuasion"
+                                    ]
+                       },
+                       {
+                           "path":  "Research/J/TasksEventsAndNarrative.md",
+                           "tags":  [
+                                        "issue",
+                                        "dialogue",
+                                        "quest",
+                                        "journal",
+                                        "incident",
+                                        "rumor",
+                                        "notification",
+                                        "persuasion",
+                                        "tournament",
+                                        "board-game",
+                                        "story-mode"
+                                    ]
+                       },
+                       {
+                           "path":  "Research/K/MapMovementAndEnvironment.md",
+                           "tags":  [
+                                        "world-map",
+                                        "navigation",
+                                        "tracking",
+                                        "weather",
+                                        "naval",
+                                        "ports",
+                                        "hideout",
+                                        "bandits"
+                                    ]
+                       },
+                       {
+                           "path":  "Research/L/ContentInterfaceAndModRuntime.md",
+                           "tags":  [
+                                        "xml",
+                                        "xslt",
+                                        "menu",
+                                        "dialogue",
+                                        "encyclopedia",
+                                        "notifications",
+                                        "mission",
+                                        "localization",
+                                        "module-loading",
+                                        "campaign-behavior",
+                                        "game-model",
+                                        "harmony",
+                                        "save-system"
+                                    ]
+                       }
+                   ],
+    "archives":  [
+
+                 ],
+    "lifecyclePolicy":  {
+                            "maxActiveMainlines":  1,
+                            "reviewIntervalDays":  14,
+                            "defaultCompletedDisposition":  "delete",
+                            "archiveDirectory":  "Archive",
+                            "archiveReadByDefault":  false
+                        }
 }

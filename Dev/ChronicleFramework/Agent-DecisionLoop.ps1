@@ -6,7 +6,9 @@ param(
     [ValidateRange(0,3600)][int]$MaxElapsedSeconds = 0,
     [string]$CommandPrefix = 'loop',
     [string]$Goal,
-    [string[]]$AllowedActionNames
+    [string[]]$AllowedActionNames,
+    [switch]$PersistCheckpoint,
+    [switch]$ResumeCheckpoint
 )
 
 $ErrorActionPreference = 'Stop'
@@ -152,6 +154,63 @@ function Convert-ObservationForDecision($Observation) {
     }
 }
 
+function ConvertTo-CheckpointReceipt($Receipt) {
+    if (-not $Receipt -or [string]$Receipt.status -ne 'completed') { return $null }
+    $stateSummary = $null
+    if ($Receipt.state) {
+        $stateSummary = [ordered]@{
+            campaignDay = $Receipt.state.campaignDay
+            location = $Receipt.state.location
+            party = [ordered]@{
+                id = $Receipt.state.party.id
+                members = $Receipt.state.party.members
+                healthy = $Receipt.state.party.healthy
+                wounded = $Receipt.state.party.wounded
+                prisoners = $Receipt.state.party.prisoners
+                speed = $Receipt.state.party.speed
+                isMoving = $Receipt.state.party.isMoving
+                defaultBehavior = $Receipt.state.party.defaultBehavior
+            }
+            context = [ordered]@{
+                gameState = $Receipt.state.context.gameState
+                menuId = $Receipt.state.context.menuId
+                timeControlMode = $Receipt.state.context.timeControlMode
+                encounterActive = $Receipt.state.context.encounterActive
+            }
+        }
+    }
+    $dataSummary = $null
+    if ($Receipt.action -eq 'recruitOptions' -and $Receipt.data) {
+        $dataSummary = [ordered]@{
+            settlementId = $Receipt.data.settlementId
+            gold = $Receipt.data.gold
+            partySize = $Receipt.data.partySize
+            partyCapacity = $Receipt.data.partyCapacity
+            offers = @($Receipt.data.offers | Where-Object { $_.available } | ForEach-Object { [ordered]@{ ownerId = $_.ownerId; ownerName = $_.ownerName; troopId = $_.troopId; troopName = $_.troopName; slot = $_.slot; cost = $_.cost; wage = $_.wage; available = $_.available } })
+        }
+    }
+    return [ordered]@{
+        protocolVersion = $Receipt.protocolVersion
+        commandId = $Receipt.commandId
+        action = $Receipt.action
+        status = $Receipt.status
+        campaignDay = $Receipt.campaignDay
+        state = $stateSummary
+        data = $dataSummary
+    }
+}
+
+function Write-AgentCheckpoint([string]$CheckpointCommandId) {
+    if (-not $script:AgentCheckpoint) { return }
+    $script:AgentCheckpoint.updatedUtc = [DateTime]::UtcNow.ToString('O')
+    $checkpointJson = $script:AgentCheckpoint | ConvertTo-Json -Depth 16 -Compress
+    if ($checkpointJson.Length -gt 60000) { throw 'Agent checkpoint exceeded the 60,000-character runtime limit.' }
+    $checkpointBase64 = [Convert]::ToBase64String([Text.UTF8Encoding]::new($false).GetBytes($checkpointJson))
+    $receipt = Invoke-AgentCli 'agentCheckpointSet' @{ CheckpointBase64 = $checkpointBase64 } $CheckpointCommandId
+    if ($receipt.status -ne 'completed' -or [string]$receipt.data.campaignInstanceId -cne [string]$script:AgentCheckpoint.campaignInstanceId)
+        { throw 'Native Campaign checkpoint write did not confirm the active Campaign identity.' }
+}
+
 function Convert-DecisionToCli {
     param($Decision)
     if ($Decision.action -eq 'advance') { throw 'advance is a Harness-only deterministic time step and is unavailable to Agent decision providers.' }
@@ -176,15 +235,56 @@ function Convert-DecisionToCli {
 try {
     $trace = @()
     $loopRunId = [Guid]::NewGuid().ToString('N')
+    $script:AgentCheckpoint = $null
     $loopStartedUtc = [DateTime]::UtcNow
     $observation = $null
     $previousActionReceipt = $null
     $initialObservationStartedUtc = [DateTime]::UtcNow.ToString('O')
     $observation = Invoke-AgentCli 'state' @{} "$CommandPrefix-observe-0"
     $initialObservationCompletedUtc = [DateTime]::UtcNow.ToString('O')
-    $previousActionReceipt = $null
     $termination = [ordered]@{ reason = 'decision-budget-exhausted'; providerReason = $null; completedByProvider = $false }
     if ($observation.status -ne 'completed' -or -not $observation.state) { throw 'Initial game observation was not completed.' }
+    if ($ResumeCheckpoint) {
+        $checkpointRead = Invoke-AgentCli 'agentCheckpointGet' @{} "$CommandPrefix-checkpoint-read"
+        if ($checkpointRead.status -ne 'completed' -or [string]::IsNullOrWhiteSpace([string]$checkpointRead.data.checkpointBase64))
+            { throw 'No Campaign-saved Agent checkpoint is available to resume.' }
+        $checkpointJson = [Text.UTF8Encoding]::new($false, $true).GetString([Convert]::FromBase64String([string]$checkpointRead.data.checkpointBase64))
+        $script:AgentCheckpoint = $checkpointJson | ConvertFrom-Json
+        if ([int]$script:AgentCheckpoint.schemaVersion -ne 1 -or [string]$script:AgentCheckpoint.campaignInstanceId -cne [string]$checkpointRead.data.campaignInstanceId)
+            { throw 'Campaign-saved Agent checkpoint schema or Campaign identity does not match.' }
+        if ([string]$script:AgentCheckpoint.status -notin @('active','provider-stopped'))
+            { throw "Checkpoint status '$($script:AgentCheckpoint.status)' is not resumable." }
+        if ([string]::IsNullOrWhiteSpace([string]$script:AgentCheckpoint.goal)) { throw 'Campaign checkpoint has no resumable goal.' }
+        if (-not [string]::IsNullOrWhiteSpace($Goal) -and [string]$Goal -cne [string]$script:AgentCheckpoint.goal)
+            { throw 'A resume request cannot replace the goal stored in the Campaign checkpoint.' }
+        $Goal = [string]$script:AgentCheckpoint.goal
+        $previousActionReceipt = $script:AgentCheckpoint.lastActionReceipt
+        if ($previousActionReceipt -and [string]$previousActionReceipt.action -ceq 'mapSettlementTargets') { $previousActionReceipt = $null }
+    }
+    elseif ($PersistCheckpoint) {
+        if ([string]::IsNullOrWhiteSpace($Goal)) { throw 'PersistCheckpoint requires an explicit non-empty goal.' }
+        $checkpointRead = Invoke-AgentCli 'agentCheckpointGet' @{} "$CommandPrefix-checkpoint-read"
+        if ($checkpointRead.status -ne 'completed' -or [string]::IsNullOrWhiteSpace([string]$checkpointRead.data.campaignInstanceId))
+            { throw 'The Native Campaign did not provide a checkpoint identity.' }
+        if (-not [string]::IsNullOrWhiteSpace([string]$checkpointRead.data.checkpointBase64)) {
+            $existingCheckpointJson = [Text.UTF8Encoding]::new($false, $true).GetString([Convert]::FromBase64String([string]$checkpointRead.data.checkpointBase64))
+            $existingCheckpoint = $existingCheckpointJson | ConvertFrom-Json
+            if ([string]$existingCheckpoint.status -in @('active','provider-stopped'))
+                { throw 'An unfinished Campaign goal checkpoint already exists; resume it instead of overwriting it.' }
+        }
+        $script:AgentCheckpoint = [ordered]@{
+            schemaVersion = 1
+            campaignInstanceId = [string]$checkpointRead.data.campaignInstanceId
+            taskId = [Guid]::NewGuid().ToString('N')
+            goal = $Goal
+            status = 'active'
+            lastActionReceipt = $null
+            lastObservedSummary = $null
+            lastStopReason = $null
+            updatedUtc = [DateTime]::UtcNow.ToString('O')
+        }
+        Write-AgentCheckpoint "$CommandPrefix-checkpoint-start"
+    }
     for ($index = 1; $index -le $MaxDecisions; $index++) {
         if ($MaxElapsedSeconds -gt 0 -and ([DateTime]::UtcNow - $loopStartedUtc).TotalSeconds -ge $MaxElapsedSeconds)
             { throw "Agent decision loop exceeded its $MaxElapsedSeconds-second wall-clock budget." }
@@ -275,6 +375,18 @@ try {
                 control = [ordered]@{ kind = 'bounded-observe-again'; waitSeconds = $waitSeconds; reason = $waitReason; targetSettlementId = $targetSettlementId }
             }
             $observation = $nextObservation
+            if ($script:AgentCheckpoint) {
+                $script:AgentCheckpoint.lastObservedSummary = [ordered]@{
+                    campaignDay = $observation.campaignDay
+                    currentSettlementId = $observation.state.location.currentSettlementId
+                    targetSettlementId = $observation.state.location.targetSettlementId
+                    isMoving = $observation.state.party.isMoving
+                    members = $observation.state.party.members
+                    gold = $observation.state.economy.gold
+                    menuId = $observation.state.context.menuId
+                }
+                Write-AgentCheckpoint "$CommandPrefix-checkpoint-observe-$index"
+            }
             continue
         }
         if ($decision -and $decision.done -eq $true) {
@@ -289,6 +401,11 @@ try {
                 actionReceipt = $null
                 observationAfter = $observation
                 actionExecuted = $false
+            }
+            if ($script:AgentCheckpoint) {
+                $script:AgentCheckpoint.status = 'provider-stopped'
+                $script:AgentCheckpoint.lastStopReason = $doneReason
+                Write-AgentCheckpoint "$CommandPrefix-checkpoint-stop-$index"
             }
             $termination = [ordered]@{ reason = 'provider-stop'; providerReason = $doneReason; completedByProvider = $true }
             break
@@ -333,6 +450,20 @@ try {
         }
         $previousActionReceipt = $actionResult
         $observation = $nextObservation
+        if ($script:AgentCheckpoint) {
+            $script:AgentCheckpoint.status = 'active'
+            $script:AgentCheckpoint.lastActionReceipt = ConvertTo-CheckpointReceipt $actionResult
+            $script:AgentCheckpoint.lastObservedSummary = [ordered]@{
+                campaignDay = $observation.campaignDay
+                currentSettlementId = $observation.state.location.currentSettlementId
+                targetSettlementId = $observation.state.location.targetSettlementId
+                isMoving = $observation.state.party.isMoving
+                members = $observation.state.party.members
+                gold = $observation.state.economy.gold
+                menuId = $observation.state.context.menuId
+            }
+            Write-AgentCheckpoint "$CommandPrefix-checkpoint-action-$index"
+        }
     }
 
     [pscustomobject]@{

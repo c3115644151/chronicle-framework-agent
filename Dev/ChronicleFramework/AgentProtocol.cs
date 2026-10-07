@@ -151,6 +151,29 @@ internal sealed class ChronicleAgentProtocol
                 case "state":
                     WriteResponse(commandId, action, "completed", behavior);
                     break;
+                case "agentCheckpointGet":
+                    RequireCampaignMapState("agentCheckpointGet");
+                    WriteResponse(commandId, action, "completed", behavior, null, behavior.BuildAgentCheckpointDataJson());
+                    break;
+                case "agentCheckpointSet":
+                    RequireCampaignMapState("agentCheckpointSet");
+                    var encodedCheckpoint = ReadString(command, "checkpointBase64");
+                    if (string.IsNullOrWhiteSpace(encodedCheckpoint) || encodedCheckpoint.Length > 100000)
+                        throw new InvalidOperationException("Checkpoint base64 is missing or oversized");
+                    byte[] checkpointBytes;
+                    try { checkpointBytes = Convert.FromBase64String(encodedCheckpoint); }
+                    catch (FormatException) { throw new InvalidOperationException("Checkpoint payload is not valid base64"); }
+                    if (checkpointBytes.Length > 65536) throw new InvalidOperationException("Checkpoint payload exceeds the 65536-byte save-data limit");
+                    string checkpointJson;
+                    try { checkpointJson = new UTF8Encoding(false, true).GetString(checkpointBytes); }
+                    catch (DecoderFallbackException) { throw new InvalidOperationException("Checkpoint payload is not valid UTF-8"); }
+                    if (ReadRequiredInteger(checkpointJson, "schemaVersion") != 1)
+                        throw new InvalidOperationException("Unsupported Agent checkpoint schema version");
+                    var checkpointCampaignId = ReadString(checkpointJson, "campaignInstanceId");
+                    behavior.StoreAgentCheckpoint(checkpointCampaignId, checkpointJson);
+                    var checkpointWriteJson = "{\"campaignInstanceId\":\"" + Escape(behavior.AgentCampaignInstanceId) + "\",\"checkpointChars\":" + checkpointJson.Length + "}";
+                    WriteResponse(commandId, action, "completed", behavior, null, checkpointWriteJson);
+                    break;
                 case "closeEscapeMenu":
                     if (Game.Current?.GameStateManager?.ActiveState is not MapState mapStateForEscape || mapStateForEscape.AtMenu)
                         throw new InvalidOperationException("closeEscapeMenu requires the unobstructed Campaign Map state");
@@ -2477,6 +2500,12 @@ internal sealed class ChronicleAgentProtocol
         _pendingSaveName = null;
         WriteResponse(_pendingSaveCommandId, "save", successful ? "completed" : "rejected", behavior, successful ? null : "save failed");
         _pendingSaveCommandId = null;
+    }
+
+    private static void RequireCampaignMapState(string action)
+    {
+        if (TaleWorlds.CampaignSystem.Campaign.Current == null || Game.Current?.GameStateManager?.ActiveState is not MapState)
+            throw new InvalidOperationException(action + " requires the active Campaign Map state");
     }
 
     private void WriteResponse(string commandId, string action, string status, ChronicleCampaignBehavior behavior, string error = null, string dataJson = null)

@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using HarmonyLib;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Party;
@@ -219,6 +220,8 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
     private int _stateVersion = 1;
     private int _dailyTickCount;
     private double _lastDailyTickDay;
+    private string _agentCampaignInstanceId = string.Empty;
+    private string _agentCheckpointJson = string.Empty;
     private bool _harnessSaveRequested;
     private bool _harnessTimeControlApplied;
     private bool _freshProgressionSavePending;
@@ -228,6 +231,35 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
     internal int DailyTickCount => _dailyTickCount;
     internal bool AgentProtocolReady => _agentProtocol != null;
     internal void PollAgentProtocol() => _agentProtocol?.Poll(this);
+    internal string AgentCampaignInstanceId
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(_agentCampaignInstanceId)) _agentCampaignInstanceId = Guid.NewGuid().ToString("N");
+            return _agentCampaignInstanceId;
+        }
+    }
+    internal string AgentCheckpointJson => _agentCheckpointJson ?? string.Empty;
+
+    internal string BuildAgentCheckpointDataJson()
+    {
+        var checkpointBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(AgentCheckpointJson));
+        return "{\"campaignInstanceId\":\"" + EscapeJsonString(AgentCampaignInstanceId) + "\",\"checkpointBase64\":\"" + checkpointBase64 + "\"}";
+    }
+
+    internal void StoreAgentCheckpoint(string campaignInstanceId, string checkpointJson)
+    {
+        if (string.IsNullOrWhiteSpace(campaignInstanceId) || !string.Equals(campaignInstanceId, AgentCampaignInstanceId, StringComparison.Ordinal))
+            throw new InvalidOperationException("Checkpoint Campaign identity does not match the active Campaign save.");
+        if (string.IsNullOrWhiteSpace(checkpointJson) || checkpointJson.Length > 65536 || checkpointJson[0] != '{' || checkpointJson[checkpointJson.Length - 1] != '}')
+            throw new InvalidOperationException("Checkpoint payload is empty, oversized, or not a JSON object.");
+        _agentCheckpointJson = checkpointJson;
+    }
+
+    private static string EscapeJsonString(string value)
+    {
+        return (value ?? string.Empty).Replace("\\", "\\\\").Replace("\"", "\\\"");
+    }
 
     public override void RegisterEvents()
     {
@@ -304,8 +336,10 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
         dataStore.SyncData("chronicle_state_version", ref _stateVersion);
         dataStore.SyncData("chronicle_daily_tick_count", ref _dailyTickCount);
         dataStore.SyncData("chronicle_last_daily_tick_day", ref _lastDailyTickDay);
+        dataStore.SyncData("chronicle_agent_campaign_instance_v1", ref _agentCampaignInstanceId);
+        dataStore.SyncData("chronicle_agent_checkpoint_json_v1", ref _agentCheckpointJson);
         var mode = dataStore.IsSaving ? "save" : dataStore.IsLoading ? "load" : "unknown";
-        ChronicleDiagnostics.Write($"campaign-sync|mode={mode}|version={_stateVersion}|count={_dailyTickCount}|day={_lastDailyTickDay:F3}");
+        ChronicleDiagnostics.Write($"campaign-sync|mode={mode}|version={_stateVersion}|count={_dailyTickCount}|day={_lastDailyTickDay:F3}|agentCampaignIdPresent={!string.IsNullOrWhiteSpace(_agentCampaignInstanceId)}|agentCheckpointChars={(_agentCheckpointJson ?? string.Empty).Length}");
     }
 
     private void OnDailyTick()

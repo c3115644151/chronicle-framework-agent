@@ -135,6 +135,12 @@ Mindcraft 将命令路由、ActionManager、SelfPrompter、History、SkillLibrar
 
 本机Chronicle Provider配置为loopback `/v1`、`max_tokens`、`reasoning_effort=none`、temperature 0。Reasoning关闭是针对Qwen3.5该模型在本切片上结构化输出预算的本地设置，不代表所有模型的默认策略。Provider输入会在模型视图中把大型`mapSettlementTargets`上一回执压缩为最近12个安全目标和最多4个风险目标，并明确总数/省略数；原始Native回执、Harness追踪与执行白名单不变。LiveModel运行`TestResults/20261008-034029`通过：模型先调用地图聚落查询（本次原生回执有393个结果），再选观察到的安全萨哥特`town_V1`发出一次Native移动，并在后验状态后主动停止；查询/移动回执完成、模板存档hash不变、Bannerlord与Agent进程清理完成。明确窗口视频以10fps完整覆盖，事件帧/联系表生成后成功剪除原始MP4。一次成功仅证明此模型配置和该Campaign切片可运行，不证明长期规划、Quest闭环、一般决策稳定性或与游戏并发显存/FPS的统计稳定；Qwen3.5-2B仍是可比较的低资源候选，模型选择和性能仍需重复测量。[Ollama Windows配置](https://docs.ollama.com/windows) · [Ollama OpenAI兼容端点](https://docs.ollama.com/api/openai-compatibility)
 
+### Campaign存档内的Agent目标Checkpoint
+
+本机1.4.8的`CampaignBehaviorBase.SyncData(IDataStore)`会随Native Campaign存档序列化行为字段；Chronicle用这一入口保存Campaign实例GUID和受限大小的Agent checkpoint JSON。`agentCheckpointGet/Set`是Mod/Host内部协议，不暴露给LLM动作白名单，并且只允许Campaign Map上下文；原版世界状态始终以读档后的新Observer结果为准，旧观察快照不是恢复真值。当前checkpoint v1包含目标、`schemaVersion`、Campaign实例ID、provider停止状态、最后一个已确认Native动作回执的紧凑摘要及最近状态摘要；`done`只记为`provider-stopped`，并不等同成功判定。`Agent-DecisionLoop -PersistCheckpoint`在新的Agent运行时写入目标并于每个原生动作/后验观察后更新；`-ResumeCheckpoint`先获取新Native state，再核对Campaign实例和checkpoint版本，将目标与receipt送回模型。若最后receipt只是只读`mapSettlementTargets`，恢复时安全地重新查询而不重复世界副作用。
+
+`TestResults/20261008-053911`证明checkpoint和move receipt随Native SaveAs/跨进程Load保存并恢复，Campaign GUID与目标匹配；源模板档不变，测试另存档已删除。真实模型阶段`TestResults/20261008-054805`保存了一个尚未招募的活动目标，关闭首个客户端，再不提供Goal文本重载并恢复；模型从已确认move receipt和当前Settlement menu继续，通过现有RecruitmentVM招募一次（队伍1→2、金币1000→980），没有重复move或招募。两段窗口视频均完整覆盖、生成关键帧后删除，源档hash与进程清理通过。恢复窗口只验证“已确认动作+正常保存/关闭/重新载入”；游戏/Agent在Native副作用提交中途崩溃、checkpoint损坏/迁移、存档模块更换、严格Exactly-once均未证明，失败应重观察/安全重规划而不能盲目重发。
+
 ## 迁移与拒绝
 
 采用：
