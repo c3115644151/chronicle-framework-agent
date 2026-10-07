@@ -94,7 +94,12 @@ function ConvertTo-AsciiJson([string]$Json) {
 
 function Convert-ObservationForDecision($Observation) {
     $actionNames = @($script:AllowedActions.Keys | Sort-Object)
-    if (($actionNames -join ',') -cne 'mapSettlementTargets,move' -or -not $Observation.state) { return $Observation }
+    $actionProfile = switch ($actionNames -join ',') {
+        'mapSettlementTargets,move' { 'campaign-map-travel'; break }
+        'mapSettlementTargets,move,recruit,recruitOptions' { 'campaign-settlement-recruitment'; break }
+        default { $null }
+    }
+    if (-not $actionProfile -or -not $Observation.state) { return $Observation }
     $state = $Observation.state
     $party = $state.party
     $location = $state.location
@@ -107,7 +112,7 @@ function Convert-ObservationForDecision($Observation) {
         campaignDay = $Observation.campaignDay
         dailyTickCount = $Observation.dailyTickCount
         timeControlMode = $Observation.timeControlMode
-        modelView = 'campaign-map-travel'
+        modelView = $actionProfile
         state = [ordered]@{
             schemaVersion = $state.schemaVersion
             campaignDay = $state.campaignDay
@@ -123,6 +128,7 @@ function Convert-ObservationForDecision($Observation) {
                 defaultBehavior = $party.defaultBehavior
                 isAtSea = $party.isAtSea
             }
+            economy = if ($actionProfile -eq 'campaign-settlement-recruitment') { [ordered]@{ gold = $state.economy.gold } } else { $null }
             location = [ordered]@{
                 x = $location.x
                 y = $location.y
@@ -141,6 +147,7 @@ function Convert-ObservationForDecision($Observation) {
             nearbySettlements = $state.nearbySettlements
             nearbyParties = @($state.nearbyParties | Where-Object { $_.hostile })
             danger = $state.danger
+            availableMenuOptions = if ($actionProfile -eq 'campaign-settlement-recruitment') { @($state.availableMenuOptions | Where-Object { $_.id -eq 'recruit_volunteers' -or $_.isLeave }) } else { $null }
         }
     }
 }
@@ -182,7 +189,8 @@ try {
         if ($MaxElapsedSeconds -gt 0 -and ([DateTime]::UtcNow - $loopStartedUtc).TotalSeconds -ge $MaxElapsedSeconds)
             { throw "Agent decision loop exceeded its $MaxElapsedSeconds-second wall-clock budget." }
         $nativeMoveArrival = $null
-        if ($script:AllowedActions.ContainsKey('move') -and [string]$previousActionReceipt.action -ceq 'move') {
+        $arrivalActions = @($script:AllowedActions.Keys | Sort-Object)
+        if (($arrivalActions -join ',') -ceq 'mapSettlementTargets,move' -and [string]$previousActionReceipt.action -ceq 'move') {
             $moveTargetId = [string]$previousActionReceipt.state.location.targetSettlementId
             $observedSettlementId = [string]$observation.state.location.currentSettlementId
             if (-not [string]::IsNullOrWhiteSpace($moveTargetId) -and $observedSettlementId -ceq $moveTargetId) {

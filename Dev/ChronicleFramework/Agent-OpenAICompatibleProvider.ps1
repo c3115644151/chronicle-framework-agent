@@ -51,7 +51,7 @@ try {
         { throw 'CHRONICLE_LLM_TEMPERATURE must be a number between 0 and 2.' }
 
     $systemPrompt = @'
-You are the decision maker for a Bannerlord Campaign Agent. Use only the task goal, current observation, previous Native receipt, and action catalog. Select at most one listed action with only listed arguments. Use only observed IDs/values; never invent game state. Never echo input data. Keep rationale/reason short (at most 20 words); do not output analysis. Ordered goal steps are hard preconditions. A mapSettlementTargetsSummary is only a bounded subset; choose only included IDs. `campaign-map-travel` is a deliberately scoped observation with travel-relevant map fields only; omitted state is unknown, not evidence. Return done only when the goal is met or no safe legal action is supported. Return exactly one JSON object and no Markdown.
+You are the decision maker for a Bannerlord Campaign Agent. Use only the task goal, current observation, previous Native receipt, and action catalog. Select at most one listed action with only listed arguments. Use only observed IDs/values; never invent game state. Never echo input data. Keep rationale/reason short (at most 20 words); do not output analysis. Ordered goal steps are hard preconditions. A mapSettlementTargetsSummary or recruitOptionsSummary is a bounded receipt subset; choose only included IDs/offers. `campaign-map-travel` and `campaign-settlement-recruitment` are deliberately scoped observations; omitted state is unknown, not evidence. Action arguments should be an object keyed by listed argument names. A positional array is accepted only when its length exactly matches the listed argument-name sequence; the executor still revalidates every value. Return done only when the goal is met or no safe legal action is supported. Return exactly one JSON object and no Markdown.
 
 For an action, return: {"action":"listed action name","arguments":{},"rationale":"brief evidence-based reason"}
 To stop, return: {"done":true,"reason":"brief evidence-based reason"}
@@ -83,6 +83,22 @@ When `nativeMoveArrival.status` is `arrived`, the current Native observation con
                         omittedCount = ($mapTargets.Count - $candidateTargets.Count)
                         selectionPolicy = 'nearest safe candidates plus nearest at-risk candidates'
                     }
+                }
+            }
+            elseif ([string]$previousReceipt.action -ceq 'recruitOptions' -and $previousReceipt.data.offers) {
+                $allOffers = @($previousReceipt.data.offers)
+                $availableOffers = @($allOffers | Where-Object { [bool]$_.available })
+                $compactOffers = @($availableOffers | Select-Object -First 12 | ForEach-Object {
+                    [ordered]@{ ownerId = $_.ownerId; ownerName = $_.ownerName; troopId = $_.troopId; troopName = $_.troopName; slot = $_.slot; cost = $_.cost; wage = $_.wage; available = $_.available }
+                })
+                $compactReceiptData = [ordered]@{
+                    settlementId = $previousReceipt.data.settlementId
+                    gold = $previousReceipt.data.gold
+                    partySize = $previousReceipt.data.partySize
+                    partyCapacity = $previousReceipt.data.partyCapacity
+                    partySizeWarningForOne = $previousReceipt.data.partySizeWarningForOne
+                    offers = $compactOffers
+                    recruitOptionsSummary = [ordered]@{ totalCount = $allOffers.Count; availableCount = $availableOffers.Count; includedCount = $compactOffers.Count; omittedCount = [Math]::Max(0, $availableOffers.Count - $compactOffers.Count); selectionPolicy = 'currently available native volunteer offers only' }
                 }
             }
             $compactReceipt.data = $compactReceiptData
@@ -127,11 +143,12 @@ When `nativeMoveArrival.status` is `arrived`, the current Native observation con
     if (-not [string]::IsNullOrWhiteSpace($reasoningEffort)) { $payload.reasoning_effort = $reasoningEffort }
     if ($hasTemperature) { $payload.temperature = $temperature }
     $body = $payload | ConvertTo-Json -Depth 28 -Compress
+    $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($body)
     $headers = @{}
     if (-not [string]::IsNullOrWhiteSpace($apiKey)) { $headers.Authorization = "Bearer $apiKey" }
 
     try {
-        $response = Invoke-RestMethod -Method Post -Uri $requestUri -Headers $headers -Body $body -ContentType 'application/json' -TimeoutSec $timeoutSeconds
+        $response = Invoke-RestMethod -Method Post -Uri $requestUri -Headers $headers -Body $bodyBytes -ContentType 'application/json; charset=utf-8' -TimeoutSec $timeoutSeconds
     }
     catch {
         $status = $null
@@ -204,16 +221,22 @@ When `nativeMoveArrival.status` is `arrived`, the current Native observation con
         # Some local models copy the empty argument-list shape or omit it. Normalize only for zero-argument actions.
         if ($allowedArguments.Count -gt 0) { throw "Model returned an empty argument list for '$actionName', which requires: $($allowedArguments -join ', ')." }
     }
-    elseif ($decision.arguments -is [Array] -and $decision.arguments.Count -eq 1 -and $allowedArguments.Count -eq 1) {
-        # A local model may emit a one-value tuple matching the one-parameter action catalog. Name it explicitly before CLI validation.
-        $normalizedArguments[$allowedArguments[0]] = $decision.arguments[0]
+    elseif ($decision.arguments -is [Array] -and $decision.arguments.Count -gt 0 -and $decision.arguments.Count -eq $allowedArguments.Count) {
+        # Some local models return a positional tuple; map it only against the exact ordered parameter list in this request.
+        for ($argumentIndex = 0; $argumentIndex -lt $allowedArguments.Count; $argumentIndex++) {
+            $normalizedArguments[$allowedArguments[$argumentIndex]] = $decision.arguments[$argumentIndex]
+        }
     }
     else {
         throw "Model action decision arguments for '$actionName' must be an object (or an empty list only for a zero-argument action)."
     }
     $rationale = [string]$decision.rationale
-    if ([string]::IsNullOrWhiteSpace($rationale)) { throw 'Model action decision is missing its evidence-based rationale.' }
-    $normalized = [ordered]@{ action = $actionName; arguments = $normalizedArguments; rationale = $rationale }
+    $rationaleSource = 'model'
+    if ([string]::IsNullOrWhiteSpace($rationale)) {
+        $rationale = "The model omitted its rationale; '$actionName' is still subject to the Native action's live preconditions."
+        $rationaleSource = 'provider-fallback'
+    }
+    $normalized = [ordered]@{ action = $actionName; arguments = $normalizedArguments; rationale = $rationale; rationaleSource = $rationaleSource }
     [Console]::Out.WriteLine(($normalized | ConvertTo-Json -Depth 16 -Compress))
     exit 0
 }

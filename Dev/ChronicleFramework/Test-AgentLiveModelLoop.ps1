@@ -3,7 +3,8 @@ param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
     [int]$TimeoutSeconds = 180,
     [ValidateRange(5,30)][int]$FrameRate = 10,
-    [switch]$ArrivalLoop
+    [switch]$ArrivalLoop,
+    [switch]$RecruitmentLoop
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,6 +18,7 @@ $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlo
 if (Get-Process -Name Bannerlord* -ErrorAction SilentlyContinue) {
     throw 'Refusing to start a live-model Campaign test while any Bannerlord client is already running.'
 }
+if ($ArrivalLoop -and $RecruitmentLoop) { throw 'Select only one LiveModel test goal per run.' }
 foreach ($setting in @('CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL','CHRONICLE_LLM_API_KEY','CHRONICLE_LLM_TIMEOUT_SECONDS','CHRONICLE_LLM_MAX_TOKENS','CHRONICLE_LLM_MAX_TOKEN_PARAMETER','CHRONICLE_LLM_REASONING_EFFORT','CHRONICLE_LLM_TEMPERATURE')) {
     $configuredValue = [string][Environment]::GetEnvironmentVariable($setting, 'Process')
     if ([string]::IsNullOrWhiteSpace($configuredValue)) {
@@ -130,20 +132,30 @@ try {
     $capture = Start-ChronicleWindowVideoCapture -ProcessId ([int]$start.session.processId) -OutputPath $videoPath -FrameRate $FrameRate
     Write-LiveModelCaptureEvent 'capture-start' $capture.StartedUtc 'capture' $null $baseline.state $baseline $capture
 
-    if ($ArrivalLoop) {
+    if ($RecruitmentLoop) {
+        $goal = 'Autonomously recruit one affordable local volunteer. First query mapSettlementTargets. Choose the nearest observed safe target that is not the current settlement and issue one move. While still moving, use observeAgain with waitSeconds 5; never send move again or change clock controls. Once a fresh Native observation shows arrival, inspect the current settlement menu. If recruit_volunteers is currently available, call recruitOptions. Select one currently available offer that is affordable and fits party capacity; call recruit with its observed ownerId, troopId and slot, and ConfirmPartySizeWarning=false. After the Native receipt and fresh state show members increased by one and gold decreased by that offer cost, return done. If the current settlement has no eligible offer, use only newly observed safe settlement targets to replan; never invent inventory or force an over-capacity choice.'
+        $maxDecisions = 24
+        $maxElapsedSeconds = 600
+        $allowedActions = 'mapSettlementTargets,move,recruitOptions,recruit'
+        $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '180'
+        $env:CHRONICLE_LLM_MAX_TOKENS = '512'
+    }
+    elseif ($ArrivalLoop) {
         $goal = 'First query mapSettlementTargets. Then choose the nearest observed safe target (not hostile, not under siege, not the current settlement) and issue one move. While party.isMoving toward that target and currentSettlementId differs, use observeAgain with waitSeconds 5; do not send move again or use clock controls. When nativeMoveArrival.status is arrived, return done immediately and issue no further game action.'
         $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '180'
         # The four-step arrival loop emits compact JSON; reserve only 256 completion tokens to keep the 4K context available for observed state.
         $env:CHRONICLE_LLM_MAX_TOKENS = '256'
         $maxDecisions = 30
         $maxElapsedSeconds = 600
+        $allowedActions = 'mapSettlementTargets,move'
     }
     else {
         $goal = 'This is a strict three-decision state machine. If previousActionReceipt is null, choose mapSettlementTargets. If previousActionReceipt.action is mapSettlementTargets and previousActionReceipt.status is completed, choose exactly one target from its receipt whose hostile=false and underSiege=false and issue one Native move order to that id. If previousActionReceipt.action is move and previousActionReceipt.status is completed, return done immediately; do not query or move again. Do not skip, repeat, or change Campaign time mode explicitly.'
         $maxDecisions = 3
         $maxElapsedSeconds = 0
+        $allowedActions = 'mapSettlementTargets,move'
     }
-    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -Goal $goal -AllowedActionNames 'mapSettlementTargets,move' -MaxDecisions $maxDecisions -MaxElapsedSeconds $maxElapsedSeconds -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('live-model-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -Goal $goal -AllowedActionNames $allowedActions -MaxDecisions $maxDecisions -MaxElapsedSeconds $maxElapsedSeconds -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('live-model-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) {
         try { $loopTrace = $output | ConvertFrom-Json } catch { }
         throw "Real-model decision loop failed: $output"
@@ -175,7 +187,8 @@ try {
     $observedTargets = @($targetQuery[0].actionReceipt.data.mapSettlementTargets)
     $chosenId = [string]$moveStep[0].decision.arguments.SettlementId
     $chosenTarget = @($observedTargets | Where-Object { [string]$_.id -ceq $chosenId } | Select-Object -First 1)
-    $chosenObservedSafeTarget = ($chosenTarget.Count -eq 1 -and -not [bool]$chosenTarget[0].hostile -and -not [bool]$chosenTarget[0].underSiege)
+    $currentSettlementBeforeMove = [string]$targetQuery[0].observationBefore.state.location.currentSettlementId
+    $chosenObservedSafeTarget = ($chosenTarget.Count -eq 1 -and [string]$chosenTarget[0].id -cne $currentSettlementBeforeMove -and [double]$chosenTarget[0].distance -gt 1.0 -and -not [bool]$chosenTarget[0].hostile -and -not [bool]$chosenTarget[0].underSiege)
     $nativeMovementObserved = ([string]$moveStep[0].observationAfter.state.location.targetSettlementId -ceq $chosenId)
     $observeSteps = @($steps | Where-Object { $_.control.kind -eq 'bounded-observe-again' -and -not $_.actionExecuted -and $_.observationAfter.status -eq 'completed' })
     $finalObservation = if ($steps.Count -gt 0 -and $steps[-1].observationAfter) { $steps[-1].observationAfter } else { $baseline }
@@ -183,11 +196,34 @@ try {
     $campaignDayAdvancedDuringTravel = ([double]$finalObservation.campaignDay -gt [double]$moveStep[0].observationAfter.campaignDay)
     $providerStoppedAfterGoalAction = ([bool]$loopTrace.termination.completedByProvider -and [bool]$steps[-1].decision.done -and [int]$loopTrace.actionsExecuted -eq 2)
     if (-not $chosenObservedSafeTarget -or -not $nativeMovementObserved) { throw 'Native move did not match a safe settlement id returned by the visible-target query.' }
-    if (-not $providerStoppedAfterGoalAction) { throw 'Live model did not stop after its goal decision.' }
-    if ($ArrivalLoop -and (-not $arrivalConfirmed -or $observeSteps.Count -lt 1 -or -not $campaignDayAdvancedDuringTravel)) {
+    if (($ArrivalLoop -or $RecruitmentLoop) -and (-not $arrivalConfirmed -or $observeSteps.Count -lt 1 -or -not $campaignDayAdvancedDuringTravel)) {
         throw 'Live-model arrival slice lacked a verified target settlement, at least one bounded re-observation, or natural Campaign-time advancement.'
     }
-    if (-not $ArrivalLoop -and -not $providerStoppedAfterGoalAction) { throw 'Live model did not stop after the single requested Native move order.' }
+    if ($RecruitmentLoop) {
+        $offerStep = @($steps | Where-Object { $_.decision.action -eq 'recruitOptions' -and $_.actionReceipt.status -eq 'completed' } | Select-Object -First 1)
+        $recruitStep = @($steps | Where-Object { $_.decision.action -eq 'recruit' -and $_.actionReceipt.status -eq 'completed' } | Select-Object -First 1)
+        if ($offerStep.Count -ne 1 -or $recruitStep.Count -ne 1) { throw 'Real model did not inspect one Native recruitment offer and submit one recruitment transaction.' }
+        $recruitMenuOption = @($offerStep[0].observationBefore.state.availableMenuOptions | Where-Object { $_.id -eq 'recruit_volunteers' -and $_.available -and $_.enabled } | Select-Object -First 1)
+        $offerReceipt = $offerStep[0].actionReceipt
+        $chosenOffer = @($offerReceipt.data.offers | Where-Object { $_.available -and [string]$_.ownerId -ceq [string]$recruitStep[0].decision.arguments.OwnerId -and [string]$_.troopId -ceq [string]$recruitStep[0].decision.arguments.TroopId -and [int]$_.slot -eq [int]$recruitStep[0].decision.arguments.VolunteerSlot -and [int]$_.cost -le [int]$offerStep[0].observationBefore.state.economy.gold } | Select-Object -First 1)
+        $recruitBefore = $recruitStep[0].observationBefore.state
+        $recruitAfter = $recruitStep[0].observationAfter.state
+        $nativeRecruitmentVerified = (
+            $recruitMenuOption.Count -eq 1 -and
+            $offerStep[0].observationBefore.state.location.currentSettlementId -ceq $chosenId -and
+            $offerStep[0].observationBefore.state.context.menuId -in @('town','town_backstreet','village') -and
+            $chosenOffer.Count -eq 1 -and
+            -not [bool]$recruitStep[0].decision.arguments.ConfirmPartySizeWarning -and
+            [bool]$recruitStep[0].actionReceipt.data.verified -and
+            [int]$recruitAfter.party.members -eq ([int]$recruitBefore.party.members + 1) -and
+            [int]$recruitBefore.economy.gold - [int]$recruitAfter.economy.gold -eq [int]$chosenOffer[0].cost
+        )
+        if (-not $nativeRecruitmentVerified) { throw 'Native volunteer recruitment did not match the current enabled menu option, observed offer, party-size delta, and Gold cost.' }
+        $providerStoppedAfterGoalAction = ([bool]$loopTrace.termination.completedByProvider -and [bool]$steps[-1].decision.done -and [int]$loopTrace.actionsExecuted -eq 4)
+        if (-not $providerStoppedAfterGoalAction) { throw 'Live model did not stop after Native recruitment postconditions were observed.' }
+    }
+    elseif (-not $ArrivalLoop -and -not $providerStoppedAfterGoalAction) { throw 'Live model did not stop after the single requested Native move order.' }
+    if ($ArrivalLoop -and -not $providerStoppedAfterGoalAction) { throw 'Live model did not stop after Native arrival was observed.' }
 
     $null = Capture-EngineFrame 'LiveModelEngine-after'
     Write-LiveModelCaptureEvent 'capture-end' ([DateTime]::UtcNow.ToString('O')) 'capture' $null $finalObservation.state $null $capture
@@ -197,7 +233,7 @@ try {
     $liveModelTrace = [ordered]@{
         ProviderKind = 'configured OpenAI-compatible live model'
         Goal = $goal
-        AcceptanceSlice = if ($ArrivalLoop) { 'Native movement arrival' } else { 'Native movement order accepted' }
+        AcceptanceSlice = if ($RecruitmentLoop) { 'Native movement plus volunteer recruitment' } elseif ($ArrivalLoop) { 'Native movement arrival' } else { 'Native movement order accepted' }
         ChosenSettlementId = $chosenId
         ChosenSettlementName = [string]$chosenTarget[0].name
         ObservedTargetCount = $observedTargets.Count
@@ -205,6 +241,7 @@ try {
         ArrivalConfirmed = $arrivalConfirmed
         BoundedReobservations = $observeSteps.Count
         CampaignDayAdvancedDuringTravel = $campaignDayAdvancedDuringTravel
+        RecruitmentVerified = if ($RecruitmentLoop) { [bool]$nativeRecruitmentVerified } else { $null }
         ProviderStoppedAfterGoalAction = $providerStoppedAfterGoalAction
         Decisions = $steps.Count
         NativeActionReceipts = @($steps | Where-Object { $_.actionExecuted } | ForEach-Object { [ordered]@{ action = $_.actionReceipt.action; status = $_.actionReceipt.status; campaignDay = $_.actionReceipt.campaignDay; timing = $_.timing } })

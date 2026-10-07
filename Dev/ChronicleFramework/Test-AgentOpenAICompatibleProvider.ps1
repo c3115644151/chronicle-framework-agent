@@ -53,6 +53,7 @@ try {
     $env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER = 'max_completion_tokens'
 
     $goal = 'Inspect currently visible safe settlements and then stop with the Native receipt.'
+    $expectedHeroName = -join @([char]0x6CD5,[char]0x5C14,[char]0x585E,[char]0x6C83)
     $request = [ordered]@{
         schemaVersion = 2
         runId = 'provider-contract-test'
@@ -62,7 +63,7 @@ try {
             [ordered]@{ action = 'mapSettlementTargets'; arguments = @() }
             [ordered]@{ action = 'move'; arguments = @('SettlementId') }
         )
-        observation = [ordered]@{ state = [ordered]@{ context = [ordered]@{ gameState = 'MapState' }; location = [ordered]@{ currentSettlementId = 'town_V1' } } }
+        observation = [ordered]@{ state = [ordered]@{ identity = [ordered]@{ heroName = $expectedHeroName }; context = [ordered]@{ gameState = 'MapState' }; location = [ordered]@{ currentSettlementId = 'town_V1' } } }
         previousActionReceipt = $null
     }
     $requestJson = $request | ConvertTo-Json -Depth 12 -Compress
@@ -79,6 +80,7 @@ try {
     $apiRequest = $requestBody | ConvertFrom-Json
     $modelInput = [string]$apiRequest.messages[1].content | ConvertFrom-Json
     $requestGoalForwarded = ([string]$modelInput.goal -ceq $goal)
+    $unicodeObservationForwarded = ([string]$modelInput.observation.state.identity.heroName -ceq $expectedHeroName)
     $allowedNames = @($modelInput.allowedActions | ForEach-Object { [string]$_.action })
     $actionCatalogForwarded = ('mapSettlementTargets' -in $allowedNames -and 'move' -in $allowedNames -and 'advance' -notin $allowedNames)
     $authorizationSent = ($context.Request.Headers['Authorization'] -ceq "Bearer $harnessSecret")
@@ -88,7 +90,6 @@ try {
     $modelDecision = [ordered]@{
         action = 'mapSettlementTargets'
         arguments = @()
-        rationale = 'The current Campaign Map permits a read-only query of visible settlement targets.'
     } | ConvertTo-Json -Compress
     $responseJson = [ordered]@{
         id = 'chatcmpl-harness-provider-test'
@@ -108,7 +109,7 @@ try {
     $decision = $stdout | ConvertFrom-Json
     $expectedDecision = $modelDecision | ConvertFrom-Json
     $providerOutputClean = ($stdout -notmatch [regex]::Escape($harnessSecret) -and $stderr -notmatch [regex]::Escape($harnessSecret))
-    $decisionValidated = ($decision.action -eq 'mapSettlementTargets' -and $decision.rationale -eq $expectedDecision.rationale -and $decision.arguments -is [System.Management.Automation.PSCustomObject] -and @($decision.arguments.PSObject.Properties).Count -eq 0)
+    $decisionValidated = ($decision.action -eq 'mapSettlementTargets' -and $decision.rationaleSource -eq 'provider-fallback' -and $decision.rationale -match 'omitted its rationale' -and $decision.arguments -is [System.Management.Automation.PSCustomObject] -and @($decision.arguments.PSObject.Properties).Count -eq 0)
 
     $failureStep = 'validate-bounded-observe-again-control-response'
     $observeAgainRequest = $request | ConvertTo-Json -Depth 12 -Compress
@@ -134,6 +135,41 @@ try {
     if ($process.ExitCode -ne 0) { throw "Provider rejected a valid observeAgain response (exit=$($process.ExitCode)): $observeStderr" }
     $observeDecision = $observeStdout | ConvertFrom-Json
     $observeAgainValidated = ([bool]$observeDecision.observeAgain -and [int]$observeDecision.waitSeconds -eq 3 -and -not $observeDecision.action -and -not $observeDecision.done -and -not [string]::IsNullOrWhiteSpace([string]$observeDecision.reason))
+
+    $failureStep = 'normalize-exact-positional-action-arguments'
+    $tupleRequest = [ordered]@{
+        schemaVersion = 2
+        runId = 'provider-positional-tuple-test'
+        iteration = 2
+        goal = 'Submit one current native recruitment offer.'
+        allowedActions = @([ordered]@{ action = 'recruit'; arguments = @('OwnerId','TroopId','VolunteerSlot','ConfirmPartySizeWarning') })
+        allowedControls = @()
+        nativeMoveArrival = $null
+        observation = $request.observation
+        previousActionReceipt = $null
+    }
+    $tupleProvider = Start-ProviderProcess ($tupleRequest | ConvertTo-Json -Depth 12 -Compress)
+    $process = $tupleProvider.Process
+    $tupleAcceptTask = $listener.GetContextAsync()
+    if (-not $tupleAcceptTask.Wait(5000)) { throw 'Local HTTP stub did not receive the positional-argument normalization request.' }
+    $tupleContext = $tupleAcceptTask.GetAwaiter().GetResult()
+    $tupleReader = New-Object System.IO.StreamReader($tupleContext.Request.InputStream, $tupleContext.Request.ContentEncoding)
+    $null = $tupleReader.ReadToEnd()
+    $tupleReader.Dispose()
+    $tupleModelDecision = [ordered]@{ action = 'recruit'; arguments = @('CharacterObject_1642','vlandian_recruit',3,$false) } | ConvertTo-Json -Compress
+    $tupleResponseJson = [ordered]@{ choices = @([ordered]@{ index = 0; message = [ordered]@{ role = 'assistant'; content = $tupleModelDecision }; finish_reason = 'stop' }) } | ConvertTo-Json -Depth 8 -Compress
+    $tupleResponseBytes = [System.Text.Encoding]::UTF8.GetBytes($tupleResponseJson)
+    $tupleContext.Response.StatusCode = 200
+    $tupleContext.Response.ContentType = 'application/json; charset=utf-8'
+    $tupleContext.Response.ContentLength64 = $tupleResponseBytes.Length
+    $tupleContext.Response.OutputStream.Write($tupleResponseBytes, 0, $tupleResponseBytes.Length)
+    $tupleContext.Response.OutputStream.Close()
+    if (-not $process.WaitForExit(($TimeoutSeconds + 5) * 1000)) { try { $process.Kill() } catch { }; throw 'Provider did not exit after the positional action response.' }
+    $tupleStdout = $tupleProvider.StdoutTask.Result.Trim()
+    $tupleStderr = $tupleProvider.StderrTask.Result.Trim()
+    if ($process.ExitCode -ne 0) { throw "Provider rejected an exact ordered argument tuple (exit=$($process.ExitCode)): $tupleStderr" }
+    $tupleDecision = $tupleStdout | ConvertFrom-Json
+    $positionalArgumentsNormalized = ($tupleDecision.action -eq 'recruit' -and $tupleDecision.arguments.OwnerId -eq 'CharacterObject_1642' -and $tupleDecision.arguments.TroopId -eq 'vlandian_recruit' -and [int]$tupleDecision.arguments.VolunteerSlot -eq 3 -and -not [bool]$tupleDecision.arguments.ConfirmPartySizeWarning -and $tupleDecision.rationaleSource -eq 'provider-fallback')
 
     $failureStep = 'verify-local-openai-compatible-service-contract'
     $env:CHRONICLE_LLM_API_KEY = ''
@@ -254,6 +290,7 @@ try {
     $result = [ordered]@{
         ProviderKind = 'local HTTP stub; not a real model call'
         RequestGoalForwarded = $requestGoalForwarded
+        UnicodeObservationForwarded = $unicodeObservationForwarded
         AllowedActionCatalogForwarded = $actionCatalogForwarded
         PriorReceiptFieldPresent = ($null -eq $modelInput.previousActionReceipt)
         AuthorizationHeaderSent = $authorizationSent
@@ -266,11 +303,12 @@ try {
         ProviderOutputCredentialFree = $providerOutputClean
         StructuredDecisionReturned = $decisionValidated
         BoundedObserveAgainControlValidated = $observeAgainValidated
+        ExactPositionalArgumentsNormalized = $positionalArgumentsNormalized
         ProviderExitCode = $successfulProviderExitCode
         HttpErrorFailsClosedWithoutCredentialLeak = $httpErrorFailedClosed
         DisallowedActionFailsClosed = $invalidActionFailedClosed
         TimeoutFailsClosedWithoutCredentialLeak = $timeoutFailedClosed
-        Passed = ($requestGoalForwarded -and $actionCatalogForwarded -and $authorizationSent -and $localCompatibilityPassed -and $endpointPathCorrect -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $observeAgainValidated -and $invalidActionFailedClosed -and $httpErrorFailedClosed -and $timeoutFailedClosed)
+        Passed = ($requestGoalForwarded -and $unicodeObservationForwarded -and $actionCatalogForwarded -and $authorizationSent -and $localCompatibilityPassed -and $endpointPathCorrect -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $observeAgainValidated -and $positionalArgumentsNormalized -and $invalidActionFailedClosed -and $httpErrorFailedClosed -and $timeoutFailedClosed)
     }
     $result | ConvertTo-Json -Depth 8
     if (-not $result.Passed) { exit 1 }
