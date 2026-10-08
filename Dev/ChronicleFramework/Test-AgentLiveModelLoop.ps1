@@ -235,6 +235,7 @@ try {
 
     $liveModelTrace = [ordered]@{
         ProviderKind = 'configured OpenAI-compatible live model'
+        StartupDialogReceipts = @($start.session.startupDialogReceipts)
         Goal = $goal
         AcceptanceSlice = if ($RecruitmentLoop) { 'Native movement plus volunteer recruitment' } elseif ($ArrivalLoop) { 'Native movement arrival' } else { 'Native movement order accepted' }
         ChosenSettlementId = $chosenId

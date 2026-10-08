@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [int]$TimeoutSeconds = 240,
-    [switch]$ValidateRecruitmentProgression
+    [switch]$ValidateRecruitmentProgression,
+    [switch]$RealModelRecruitment
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,6 +17,7 @@ $saveDirectory = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Banner
 $agentCli = Join-Path $harnessRoot 'Agent-Cli.ps1'
 $agentDecisionLoop = Join-Path $harnessRoot 'Agent-DecisionLoop.ps1'
 $agentLoopProvider = Join-Path $harnessRoot 'Test-AgentLoopProvider.ps1'
+$agentLiveModelLoop = Join-Path $harnessRoot 'Test-AgentLiveModelLoop.ps1'
 $agentProtocolRoot = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent'
 $agentSessionPath = Join-Path $agentProtocolRoot 'session.json'
 $agentCommandPath = Join-Path $agentProtocolRoot 'command.json'
@@ -27,6 +29,7 @@ $disposableSaveOwned = $false
 $previousSessionExisted = Test-Path -LiteralPath $agentSessionPath
 $previousSessionBytes = if ($previousSessionExisted) { [IO.File]::ReadAllBytes($agentSessionPath) } else { $null }
 if ($ValidateRecruitmentProgression -and (Test-Path -LiteralPath $agentCommandPath)) { throw 'A pending Agent command exists; refusing to overwrite it for FreshCampaign progression.' }
+if ($RealModelRecruitment -and -not $ValidateRecruitmentProgression) { throw 'RealModelRecruitment requires ValidateRecruitmentProgression so the new Campaign is saved as a protected disposable fixture before the model starts.' }
 if ($progressionSavePath -and (Test-Path -LiteralPath $progressionSavePath)) { throw 'Generated disposable-save name already exists; refusing to overwrite.' }
 . (Join-Path $harnessRoot 'Test-WindowLayout.ps1')
 
@@ -377,6 +380,88 @@ if ($ValidateRecruitmentProgression) {
         if ($checkpointIdentity.status -ne 'completed' -or [string]::IsNullOrWhiteSpace([string]$checkpointIdentity.data.campaignInstanceId)) { throw 'Native Campaign did not expose its Chronicle campaign-instance identifier for the fresh-start baseline.' }
         $campaignInstanceId = [string]$checkpointIdentity.data.campaignInstanceId
         if ($loadedState.state.economy.renown -ne 20 -or $loadedState.state.party.members -ne 1 -or $loadedState.state.economy.gold -ne 1000) { throw 'Reloaded fresh save did not preserve the expected 20-Renown/solo/1000-gold baseline.' }
+        if ($RealModelRecruitment) {
+            $identityLoadStartupDialogs = @($load.session.startupDialogReceipts)
+            $identityLoadStop = Invoke-FreshCampaignAgentCli 'stop' @('-CommandId', "$progressionCommandPrefix-identity-stop") -CommandTimeout 30
+            if ($identityLoadStop.status -ne 'completed' -or -not $identityLoadStop.processStopped) { throw 'Fresh-Campaign identity read did not stop its temporary Agent session before the live-model runtime.' }
+            $modelName = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL', 'Process')
+            if ([string]::IsNullOrWhiteSpace($modelName)) { $modelName = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL', 'User') }
+            if ([string]::IsNullOrWhiteSpace($modelName)) { throw 'Real-model fresh-Campaign evaluation requires a locally configured model name; credentials are never printed.' }
+            $modelRunStartedUtc = [DateTime]::UtcNow
+            $modelOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $agentLiveModelLoop -LoadSaveName $progressionSaveName -RecruitmentLoop -FrameRate 10 -TimeoutSeconds $TimeoutSeconds 2>&1 | Out-String
+            $modelExitCode = $LASTEXITCODE
+            $modelRunWallClockSeconds = ([DateTime]::UtcNow - $modelRunStartedUtc).TotalSeconds
+            try { $liveModelResult = $modelOutput | ConvertFrom-Json }
+            catch { throw "Fresh-Campaign real-model loop did not return structured JSON (exit=$modelExitCode): $modelOutput" }
+            if ($modelExitCode -ne 0 -or -not $liveModelResult.Passed) {
+                throw "Fresh-Campaign real-model loop failed (exit=$modelExitCode): $($liveModelResult.Failure)"
+            }
+            $liveTrace = @($liveModelResult.Trace.Trace)
+            $liveMoveSteps = @($liveTrace | Where-Object { $_.decision.action -eq 'move' -and $_.actionExecuted -and $_.actionReceipt.status -eq 'completed' })
+            $liveOfferSteps = @($liveTrace | Where-Object { $_.decision.action -eq 'recruitOptions' -and $_.actionExecuted -and $_.actionReceipt.status -eq 'completed' })
+            $liveRecruitSteps = @($liveTrace | Where-Object { $_.decision.action -eq 'recruit' -and $_.actionExecuted -and $_.actionReceipt.status -eq 'completed' })
+            if ($liveMoveSteps.Count -ne 1 -or $liveOfferSteps.Count -ne 1 -or $liveRecruitSteps.Count -ne 1) { throw 'Real-model fresh-Campaign result did not contain exactly one completed Native Move, offer read, and Recruit.' }
+            $liveRecruitBefore = $liveRecruitSteps[0].observationBefore.state
+            $liveRecruitAfter = $liveRecruitSteps[0].observationAfter.state
+            $liveOfferReceipt = $liveOfferSteps[0].actionReceipt.data
+            $selectedOffer = @($liveOfferReceipt.offers | Where-Object { $_.available -and [string]$_.ownerId -ceq [string]$liveRecruitSteps[0].decision.arguments.OwnerId -and [string]$_.troopId -ceq [string]$liveRecruitSteps[0].decision.arguments.TroopId -and [int]$_.slot -eq [int]$liveRecruitSteps[0].decision.arguments.VolunteerSlot -and [int]$_.cost -le [int]$liveRecruitBefore.economy.gold -and [int]$liveRecruitBefore.party.members -lt [int]$liveRecruitBefore.party.sizeLimit } | Select-Object -First 1)
+            $recruitVerified = (
+                $selectedOffer.Count -eq 1 -and
+                [bool]$liveRecruitSteps[0].actionReceipt.data.verified -and
+                [int]$liveRecruitAfter.party.members -eq ([int]$liveRecruitBefore.party.members + 1) -and
+                ([int]$liveRecruitBefore.economy.gold - [int]$liveRecruitAfter.economy.gold) -eq [int]$selectedOffer[0].cost -and
+                -not [bool]$liveRecruitSteps[0].decision.arguments.ConfirmPartySizeWarning
+            )
+            $initialModelObservation = $liveTrace[0].observationBefore
+            $finalModelObservation = if ($liveTrace.Count -gt 0 -and $liveTrace[-1].observationAfter) { $liveTrace[-1].observationAfter } else { $null }
+            $campaignDaysElapsed = if ($finalModelObservation) { [double]$finalModelObservation.campaignDay - [double]$initialModelObservation.campaignDay } else { $null }
+            $preNativeRejectedDecisions = @($liveTrace | Where-Object { $_.control.kind -eq 'decision-rejected-before-native' }).Count
+            $rejectedNativeActions = @($liveTrace | Where-Object { $_.actionAttempted -and -not $_.actionExecuted }).Count
+            $captureEvidence = $liveModelResult.Trace.VisualEvidence
+            $captureReceipt = $liveModelResult.Capture
+            $recruitmentProgressionPassed = (
+                [bool]$liveModelResult.Passed -and $recruitVerified -and
+                [bool]$liveModelResult.FixtureUnchanged -and [bool]$liveModelResult.ProcessStopped -and
+                $rejectedNativeActions -eq 0 -and $null -ne $campaignDaysElapsed -and $campaignDaysElapsed -le 0.1 -and
+                [double]$captureEvidence.FrameCoverageRatio -ge 0.9 -and [bool]$captureReceipt.VideoRemovedAfterEvidence
+            )
+            $recruitmentProgression = [ordered]@{
+                ProviderKind = [string]$liveModelResult.Trace.ProviderKind
+                Model = $modelName
+                DisposableSaveName = $progressionSaveName
+                ChronicleCampaignInstanceId = $campaignInstanceId
+                InitialRenown = [double]$initialModelObservation.state.economy.renown
+                InitialMembers = [int]$initialModelObservation.state.party.members
+                InitialGold = [int]$initialModelObservation.state.economy.gold
+                InitialLocation = $initialModelObservation.state.location
+                VisibleSafeSettlements = $initialModelObservation.state.nearbySettlements
+                TargetSettlementId = [string]$liveModelResult.Trace.ChosenSettlementId
+                TargetSource = [string]$liveModelResult.Trace.ChosenTargetSource
+                MoveCount = $liveMoveSteps.Count
+                RecruitmentCount = $liveRecruitSteps.Count
+                RecruitmentOfferCount = @($liveOfferReceipt.offers).Count
+                SelectedOffer = $selectedOffer[0]
+                RecruitReceipt = $liveRecruitSteps[0].actionReceipt.data
+                MembersAfter = [int]$liveRecruitAfter.party.members
+                GoldAfter = [int]$liveRecruitAfter.economy.gold
+                RenownAfter = [double]$liveRecruitAfter.economy.renown
+                CampaignDaysElapsed = $campaignDaysElapsed
+                WallClockSeconds = [Math]::Round($modelRunWallClockSeconds, 3)
+                Decisions = $liveTrace.Count
+                RecruitmentVerified = $recruitVerified
+                PreNativeRejectedDecisions = $preNativeRejectedDecisions
+                RejectedNativeActions = $rejectedNativeActions
+                VisualCoverageRatio = [double]$captureEvidence.FrameCoverageRatio
+                VideoRemovedAfterEvidence = [bool]$captureReceipt.VideoRemovedAfterEvidence
+                RuntimeStartupDialogReceipts = @($liveModelResult.Trace.StartupDialogReceipts)
+                StartupDialogReceipts = $identityLoadStartupDialogs + @($liveModelResult.Trace.StartupDialogReceipts)
+                FixtureUnchanged = [bool]$liveModelResult.FixtureUnchanged
+                ProcessStopped = [bool]$liveModelResult.ProcessStopped
+                Passed = $recruitmentProgressionPassed
+            }
+            if (-not $recruitmentProgressionPassed) { throw 'Real-model fresh-Campaign candidate violated its predeclared result, no-rejection, time, video, fixture, or process-cleanup conditions.' }
+        }
+        else {
         $target = @($loadedState.state.nearbySettlements | Where-Object { -not $_.hostile -and $_.distance -gt 1.0 } | Sort-Object distance | Select-Object -First 1)
         if ($target.Count -ne 1) { throw 'No safe visible settlement exists for the recruitment progression step.' }
         $move = Invoke-FreshCampaignAgentCli 'move' @('-SettlementId', [string]$target[0].id, '-CommandId', "$progressionCommandPrefix-move")
@@ -423,6 +508,7 @@ if ($ValidateRecruitmentProgression) {
             RenownAfter = $afterRecruit.state.economy.renown
             ProcessStopped = $stop.processStopped
             Passed = $recruitmentProgressionPassed
+        }
         }
     }
     catch {

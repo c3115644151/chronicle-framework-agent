@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'FreshCampaignBaselineMatrix', 'Protocol', 'AgentLoop', 'LiveModel', 'LiveModelArrival', 'LiveModelRecruitment', 'LiveModelRecruitmentEvaluation', 'CheckpointPersistence', 'LiveModelResume', 'LiveModelRuntimeResume', 'LiveModelActionRecovery', 'CheckpointValidation', 'RecruitmentBaseline', 'TimeControlLoop', 'BattleFixture', 'PostBattle', 'Observation', 'CaptivityObservation', 'CaptivityOutcome', 'PrisonCaptivityOutcome', 'EncounterSurrender', 'EncounterEscape', 'JoinEncounterDefenders', 'JoinEncounterEligibility', 'JoinEncounterAbandonArmy', 'MovingArmyJoin', 'JoinSiegeEvent', 'MapNotifications', 'QuickInformation', 'SceneNotification', 'MissionLeave', 'VillageToolsDelivery', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyQuestMarkers', 'MapPartyQuestAcceptance', 'MapEscapeMenu', 'MapInquiry', 'AlleyLeaderInquiry', 'AlleyRosterManagement', 'AlleyAbandonment', 'AlleyEntryMenu', 'MissionSceneNavigation', 'AlleyVolunteerBranches', 'AlleyAttackYield', 'AlleyAttackFightMission', 'PersuasionDetails', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'BarterFightRoute', 'BarterSafePassage', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EngageVisibility', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuickTalk', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'VisualCapture', 'All')]
+    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'Campaign', 'FreshCampaign', 'FreshCampaignProgression', 'FreshCampaignBaselineMatrix', 'FreshCampaignLiveModelEvaluation', 'Protocol', 'AgentLoop', 'LiveModel', 'LiveModelArrival', 'LiveModelRecruitment', 'LiveModelRecruitmentEvaluation', 'CheckpointPersistence', 'LiveModelResume', 'LiveModelRuntimeResume', 'LiveModelActionRecovery', 'CheckpointValidation', 'RecruitmentBaseline', 'TimeControlLoop', 'BattleFixture', 'PostBattle', 'Observation', 'CaptivityObservation', 'CaptivityOutcome', 'PrisonCaptivityOutcome', 'EncounterSurrender', 'EncounterEscape', 'JoinEncounterDefenders', 'JoinEncounterEligibility', 'JoinEncounterAbandonArmy', 'MovingArmyJoin', 'JoinSiegeEvent', 'MapNotifications', 'QuickInformation', 'SceneNotification', 'MissionLeave', 'VillageToolsDelivery', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyQuestMarkers', 'MapPartyQuestAcceptance', 'MapEscapeMenu', 'MapInquiry', 'AlleyLeaderInquiry', 'AlleyRosterManagement', 'AlleyAbandonment', 'AlleyEntryMenu', 'MissionSceneNavigation', 'AlleyVolunteerBranches', 'AlleyAttackYield', 'AlleyAttackFightMission', 'PersuasionDetails', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'BarterFightRoute', 'BarterSafePassage', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EngageVisibility', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuickTalk', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'VisualCapture', 'All')]
     [string]$Phase = 'All',
     [int]$SmokeTimeoutSeconds = 45,
     [int]$SmokeStabilitySeconds = 8,
@@ -16,7 +16,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.57'
+$HarnessContractVersion = '7.58'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -39,6 +39,7 @@ $smokeScript = Join-Path $harnessRoot 'Test-Module.ps1'
 $campaignScript = Join-Path $harnessRoot 'Test-Campaign.ps1'
 $freshCampaignScript = Join-Path $harnessRoot 'Test-AgentFreshCampaign.ps1'
 $freshCampaignBaselineMatrixScript = Join-Path $harnessRoot 'Test-AgentEvaluationFreshCampaignBaseline.ps1'
+$freshCampaignLiveModelEvaluationScript = Join-Path $harnessRoot 'Test-AgentEvaluationFreshCampaignLiveModel.ps1'
 $saveModuleMetadataTestScript = Join-Path $harnessRoot 'Test-AgentSaveMetadata.ps1'
 $protocolScript = Join-Path $harnessRoot 'Test-AgentProtocol.ps1'
 $observationScript = Join-Path $harnessRoot 'Test-AgentObservation.ps1'
@@ -200,6 +201,7 @@ $requestedStages = switch ($Phase) {
     'FreshCampaign' { @('Preflight', 'Build', 'FreshCampaign') }
     'FreshCampaignProgression' { @('Preflight', 'Build', 'FreshCampaignProgression') }
     'FreshCampaignBaselineMatrix' { @('Preflight', 'Build', 'FreshCampaignBaselineMatrix') }
+    'FreshCampaignLiveModelEvaluation' { @('Preflight', 'Build', 'FreshCampaignLiveModelEvaluation') }
     'Protocol' { @('Preflight', 'Build', 'Protocol') }
     'AgentLoop' { @('Preflight', 'Build', 'AgentLoop') }
     'LiveModel' { @('Preflight', 'Build', 'LiveModel') }
@@ -491,6 +493,13 @@ foreach ($stage in $requestedStages) {
             Invoke-Stage -Name 'FreshCampaignBaselineMatrix' -Action {
                 $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $freshCampaignBaselineMatrixScript 2>&1 | Out-String
                 if ($LASTEXITCODE -ne 0) { throw "Five-instance fresh-campaign baseline matrix failed with exit code $LASTEXITCODE.`n$testOutput" }
+                $testOutput
+            }
+        }
+        'FreshCampaignLiveModelEvaluation' {
+            Invoke-Stage -Name 'FreshCampaignLiveModelEvaluation' -Action {
+                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $freshCampaignLiveModelEvaluationScript 2>&1 | Out-String
+                if ($LASTEXITCODE -ne 0) { throw "Five-instance fresh-campaign real-model evaluation failed with exit code $LASTEXITCODE.`n$testOutput" }
                 $testOutput
             }
         }

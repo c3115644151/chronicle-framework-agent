@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.57
+Contract version: 7.58
 
 ## 目标与边界
 
@@ -386,6 +386,8 @@ Agent决策循环的Harness原型使用请求schema v2：每轮把明确Goal、�
 `RecruitmentBaseline` 是W5的确定性原版对照阶段：它从同一个未修改的Campaign模板分别重载5个Runtime，完成地图移动与招募一人，按Native receipt/Party/Gold/Volunteer slot验证成功，同时记录CampaignDay、raw time mode与墙钟成本。它明确只有同一Campaign起点重复，不是5个独立随机seed，也不测试真实LLM；结果用于冻结后续候选模型评测的重复数和阈值，阶段不进入 `All`。
 
 `FreshCampaignBaselineMatrix` 是单独opt-in的多新档Native基线：5次分别走本机1.4.8原版New Campaign/角色创建入口，在相同模块/难度/背景条件下创建全新Campaign；每次记录初始Native状态、可见安全Settlement、RecruitmentVM结果、Campaign实例标识、耗时和清理。`ChronicleCampaignInstanceId` 是Mod Campaign实例身份，不等同Native随机Seed；若本体没有可验证Seed，结果明示Seed未知。每个新进程遇到已识别的“Mod change detected”着色器缓存提示时，FreshCampaign调用同一精确UIA/所属进程按钮处理器并保留回执；不使用全局键鼠，也不把弹窗误认成存档模组不兼容。该基线衡量新档起点和机会变化，不含真实模型通过率，也不能用“5次新档”冒充5个已验证Seed；它不进入 `All`。
+
+`FreshCampaignLiveModelEvaluation` 是#101 Native基线后的opt-in候选评测：每轮新建Campaign并由真实本地模型从该新档第一条决策观察开始，自行选择当前可见安全Settlement、移动、读取当前RecruitmentVM报价、招募并核验停止。固定5轮实例，阈值为完整新档到目标≤180秒、自然Campaign推进≤0.1日、每轮恰好一次Native Move/Recruit、无被Native拒绝的动作、录像覆盖≥90%、临时保存与进程清理；模型/服务器/模块/源码提交随结果记录。首轮目标结束后清除测试保存，不改已有正式存档。该阶段不加入 `All`，结果只证明这一成长切片的五实例重复性。
 
 `LiveModelRecruitmentEvaluation` 是基于该Native基线的真实本地模型opt-in阶段：固定同一seed、真实Provider、五次独立Runtime运行，预先要求5/5成功、每次墙钟≤180秒/CampaignDay≤0.1、一次move与一次recruit、无重复或越权副作用、Visual覆盖≥90%、模板hash不变且进程清理；候选模型结果不得反向改阈值。它只评估当前地图→志愿兵目标，不代表跨seed或整个产品成熟度。
 
