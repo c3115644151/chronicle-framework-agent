@@ -13,6 +13,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$decisionLoopPolicyPath = Join-Path $PSScriptRoot 'Agent-DecisionLoopPolicy.ps1'
+. $decisionLoopPolicyPath
 $cliPath = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
 $providerPath = (Resolve-Path -LiteralPath $DecisionProviderPath).Path
 if ($MaxDecisions -lt 1 -or $MaxDecisions -gt 400) { throw 'MaxDecisions must be between 1 and 400.' }
@@ -474,16 +476,33 @@ try {
             if ($decision.PSObject.Properties.Name -contains 'action' -or $decision.PSObject.Properties.Name -contains 'done')
                 { throw 'An observeAgain decision cannot include an action or done signal.' }
             $moveReceipt = $previousActionReceipt
-            $targetSettlementId = [string]$moveReceipt.state.location.targetSettlementId
-            $partyMoving = [bool]$observation.state.party.isMoving
-            $currentSettlementId = [string]$observation.state.location.currentSettlementId
-            if ([string]$observation.state.context.gameState -cne 'MapState' -or
-                [string]$moveReceipt.action -notin @('move','resume') -or [string]$moveReceipt.status -cne 'completed' -or
-                [string]$observation.state.location.targetSettlementId -cne $targetSettlementId -or
-                [string]::IsNullOrWhiteSpace($targetSettlementId) -or -not $partyMoving -or
-                $currentSettlementId -ceq $targetSettlementId) {
-                throw 'observeAgain is allowed only while a completed Native move/resume is still active on the Campaign map and its target has not yet been reached.'
+            $observeAgainPolicy = Get-ObserveAgainPolicy -Observation $observation -PreviousActionReceipt $moveReceipt
+            if (-not $observeAgainPolicy.Allowed) {
+                if (-not $observeAgainPolicy.Recoverable) { throw $observeAgainPolicy.Reason }
+                $consecutiveDecisionRejections++
+                if ($consecutiveDecisionRejections -gt 2) { throw 'Provider repeated observeAgain while Native movement was unavailable; stopping after two safe pre-action rejections.' }
+                $feedbackReason = [string]$observeAgainPolicy.Reason + ' No wait or game action was sent.'
+                $nextObservation = Invoke-AgentCli 'state' @{} "$CommandPrefix-rejected-control-observe-$index"
+                if ($nextObservation.status -ne 'completed' -or -not $nextObservation.state) { throw 'Fresh Native observation after stale observeAgain was not completed.' }
+                $decisionFeedback = [ordered]@{ kind = 'control-unavailable'; requestedControl = 'observeAgain'; message = $feedbackReason; noNativeActionSent = $true }
+                $rejectionReceipt = [ordered]@{ protocolVersion = 1; control = 'observeAgain'; status = 'rejected-before-native'; error = $feedbackReason; noNativeActionSent = $true; campaignDay = $nextObservation.campaignDay }
+                $trace += [pscustomobject]@{
+                    iteration = $index
+                    observationBefore = $observation
+                    previousActionReceipt = $previousActionReceipt
+                    decisionFeedback = $decisionFeedbackBeforeStep
+                    decision = $decision
+                    timing = $stepTiming
+                    actionReceipt = $rejectionReceipt
+                    observationAfter = $nextObservation
+                    actionAttempted = $false
+                    actionExecuted = $false
+                    control = [ordered]@{ kind = 'control-rejected-before-native'; requestedControl = 'observeAgain'; reason = $feedbackReason }
+                }
+                $observation = $nextObservation
+                continue
             }
+            $targetSettlementId = [string]$moveReceipt.state.location.targetSettlementId
             $waitStartedUtc = [DateTime]::UtcNow.ToString('O')
             $waitStartedTicks = [Diagnostics.Stopwatch]::GetTimestamp()
             Start-Sleep -Seconds $waitSeconds
@@ -610,12 +629,13 @@ try {
             $nextObservation = Invoke-AgentCli 'state' @{} "$CommandPrefix-rejected-native-observe-$index"
             if ($nextObservation.status -ne 'completed' -or -not $nextObservation.state) { throw 'Fresh Native observation after a rejected action was not completed.' }
             $decisionFeedback = [ordered]@{ kind = 'native-action-rejected'; requestedAction = $validated.Action; message = [string]$actionResult.error; noWorldChangeConfirmed = $false }
-            $previousActionReceipt = $actionResult
+            # Keep the last completed Native receipt available for the next replan.
+            # The rejected attempt is already present in this trace entry and decisionFeedback;
+            # replacing a valid Move receipt here would make an encounter-paused party look contextless.
             $observation = $nextObservation
             if ($script:AgentCheckpoint) {
                 $script:AgentCheckpoint.status = 'active'
                 $script:AgentCheckpoint.pendingAction = $null
-                $script:AgentCheckpoint.lastActionReceipt = ConvertTo-CheckpointReceipt $actionResult
                 Write-AgentCheckpoint "$CommandPrefix-checkpoint-rejected-$index"
             }
             if ($consecutiveDecisionRejections -gt 2) { throw 'Provider repeated actions rejected by Native; stopping after two bounded recovery attempts.' }

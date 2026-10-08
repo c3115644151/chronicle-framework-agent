@@ -193,14 +193,25 @@ try {
     $chosenObservedSafeTarget = ($chosenTarget.Count -eq 1 -and [string]$chosenTarget[0].id -cne $currentSettlementBeforeMove -and [double]$chosenTarget[0].distance -gt 1.0 -and -not [bool]$chosenTarget[0].hostile -and -not [bool]$chosenTarget[0].underSiege)
     $nativeMovementObserved = ([string]$moveStep[0].observationAfter.state.location.targetSettlementId -ceq $chosenId)
     $observeSteps = @($steps | Where-Object { $_.control.kind -eq 'bounded-observe-again' -and -not $_.actionExecuted -and $_.observationAfter.status -eq 'completed' })
-    $finalObservation = if ($steps.Count -gt 0 -and $steps[-1].observationAfter) { $steps[-1].observationAfter } else { $baseline }
+    # A completed provider decision (for example, `done` after a verified arrival)
+    # has no observationAfter. Use the latest actual Native observation in the trace,
+    # not the initial baseline, when checking arrival and naturally elapsed Campaign time.
+    $lastObservedStep = @($steps | Where-Object { $_.observationAfter -and $_.observationAfter.state } | Select-Object -Last 1)
+    $finalObservation = if ($lastObservedStep.Count -gt 0) { $lastObservedStep[0].observationAfter } else { $baseline }
     $arrivalConfirmed = ([string]$finalObservation.state.location.currentSettlementId -ceq $chosenId)
     $campaignDayAdvancedDuringTravel = ([double]$finalObservation.campaignDay -gt [double]$moveStep[0].observationAfter.campaignDay)
     $expectedGoalActionCount = if ($RecruitmentLoop) { $null } else { 2 }
     $providerStoppedAfterGoalAction = ([bool]$loopTrace.termination.completedByProvider -and [bool]$steps[-1].decision.done -and ($null -eq $expectedGoalActionCount -or [int]$loopTrace.actionsExecuted -eq $expectedGoalActionCount))
     if (-not $chosenObservedSafeTarget -or -not $nativeMovementObserved) { throw 'Native move did not match a safe settlement id returned by the visible-target query.' }
-    if (($ArrivalLoop -or $RecruitmentLoop) -and (-not $arrivalConfirmed -or $observeSteps.Count -lt 1 -or -not $campaignDayAdvancedDuringTravel)) {
-        throw 'Live-model arrival slice lacked a verified target settlement, at least one bounded re-observation, or natural Campaign-time advancement.'
+    $preNativeTravelReobservations = @($steps | Where-Object {
+        $_.control.kind -eq 'decision-rejected-before-native' -and
+        $_.observationAfter.status -eq 'completed' -and
+        [string]$_.observationAfter.state.location.currentSettlementId -ceq $chosenId -and
+        [double]$_.observationAfter.campaignDay -gt [double]$moveStep[0].actionReceipt.campaignDay
+    })
+    $travelReobserved = ($observeSteps.Count -gt 0 -or $preNativeTravelReobservations.Count -gt 0)
+    if (($ArrivalLoop -or $RecruitmentLoop) -and (-not $arrivalConfirmed -or -not $travelReobserved -or -not $campaignDayAdvancedDuringTravel)) {
+        throw 'Live-model arrival slice lacked a verified target settlement, a fresh Native re-observation during travel, or natural Campaign-time advancement.'
     }
     if ($RecruitmentLoop) {
         $offerStep = @($steps | Where-Object { $_.decision.action -eq 'recruitOptions' -and $_.actionReceipt.status -eq 'completed' } | Select-Object -First 1)
@@ -245,6 +256,7 @@ try {
         ChosenTargetSource = $targetSource
         ArrivalConfirmed = $arrivalConfirmed
         BoundedReobservations = $observeSteps.Count
+        NativeTravelReobservations = ($observeSteps.Count + $preNativeTravelReobservations.Count)
         CampaignDayAdvancedDuringTravel = $campaignDayAdvancedDuringTravel
         RecruitmentVerified = if ($RecruitmentLoop) { [bool]$nativeRecruitmentVerified } else { $null }
         ProviderStoppedAfterGoalAction = $providerStoppedAfterGoalAction
@@ -268,6 +280,19 @@ try {
 }
 catch {
     $failure = $_.Exception.Message
+    # Preserve the decision/action trace even when a later acceptance assertion fails.
+    # This is diagnostic evidence, not a pass result.
+    if ($loopTrace -and -not $liveModelTrace) {
+        $liveModelTrace = [ordered]@{
+            Trace = $loopTrace.trace
+            Termination = $loopTrace.termination
+            LastObservation = $loopTrace.lastObservation
+            ActionsExecuted = $loopTrace.actionsExecuted
+            DecisionCount = $loopTrace.decisions
+            Failure = $failure
+            VisualEvidence = $null
+        }
+    }
     if ($capture) {
         try {
             $failedState = if ($loopTrace -and $loopTrace.lastObservation -and $loopTrace.lastObservation.state) { $loopTrace.lastObservation.state } else { $baseline.state }

@@ -6,6 +6,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$harnessRoot = $PSScriptRoot
 $freshCampaignScript = Join-Path $PSScriptRoot 'Test-AgentFreshCampaign.ps1'
 $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\session.json'
 $saveDirectory = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\Game Saves'
@@ -23,6 +24,30 @@ $modelDigest = $null
 try { $modelEntry = (Invoke-RestMethod -Uri 'http://127.0.0.1:11434/api/tags' -TimeoutSec 3).models | Where-Object { [string]$_.name -ceq $modelName } | Select-Object -First 1; if (-not $modelEntry) { throw 'The configured candidate model is not present in Ollama tags.' }; $modelDigest = [string]$modelEntry.digest } catch { throw "Could not verify configured model metadata without reading or printing credentials: $($_.Exception.Message)" }
 $modules = @('Bannerlord.Harmony','Bannerlord.ButterLib','Bannerlord.UIExtenderEx','Bannerlord.MBOptionScreen','Native','SandBoxCore','CustomBattle','SandBox','StoryMode','BirthAndDeath','ChronicleFramework')
 $results = [System.Collections.Generic.List[object]]::new()
+$gitRoot = ([string](& git -C $harnessRoot rev-parse --show-toplevel)).Trim()
+if ([string]::IsNullOrWhiteSpace($gitRoot)) { throw 'Could not resolve the repository root for the candidate-evaluation source manifest.' }
+
+function Get-HarnessSourceManifestHash {
+    $relativeFiles = @(& git -C $harnessRoot ls-files --cached --others --exclude-standard)
+    if ($LASTEXITCODE -ne 0) { throw 'Could not list tracked and non-ignored Harness source files for the evaluation manifest.' }
+    $gitRootPrefix = $gitRoot.TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
+    $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
+    $localSettingsRelative = $localSettingsPath.Substring($gitRootPrefix.Length).Replace('\','/')
+    if (Test-Path -LiteralPath $localSettingsPath -PathType Leaf) { $relativeFiles += $localSettingsRelative }
+    $entries = foreach ($relativePath in @($relativeFiles | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique)) {
+        $normalized = ([string]$relativePath).Replace('\','/')
+        if ($normalized -match '(^|/)AGENTS\.md$') { continue }
+        $absolutePath = Join-Path $gitRoot $normalized.Replace('/', [IO.Path]::DirectorySeparatorChar)
+        if (Test-Path -LiteralPath $absolutePath -PathType Leaf) {
+            $hash = (Get-FileHash -LiteralPath $absolutePath -Algorithm SHA256).Hash
+            "$normalized|$hash"
+        }
+    }
+    $payload = [Text.Encoding]::UTF8.GetBytes(($entries -join "`n"))
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { [BitConverter]::ToString($sha.ComputeHash($payload)).Replace('-', '') }
+    finally { $sha.Dispose() }
+}
 
 function Get-SaveManifestHash {
     if (-not (Test-Path -LiteralPath $saveDirectory -PathType Container)) { return 'no-save-directory' }
@@ -36,7 +61,14 @@ function Get-SaveManifestHash {
 }
 
 $sourceSaveManifestHash = Get-SaveManifestHash
+$sourceManifestAtEvaluationStart = Get-HarnessSourceManifestHash
+$sourceChangedDuringEvaluation = $false
 for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
+    $sourceManifestBeforeRun = Get-HarnessSourceManifestHash
+    if ($sourceManifestBeforeRun -cne $sourceManifestAtEvaluationStart) {
+        $sourceChangedDuringEvaluation = $true
+        break
+    }
     if (Get-Process -Name Bannerlord* -ErrorAction SilentlyContinue) { throw "Fresh-Campaign live-model run $runIndex found a Bannerlord client left by the preceding run." }
     $sessionHashBefore = if (Test-Path -LiteralPath $sessionPath -PathType Leaf) { (Get-FileHash -LiteralPath $sessionPath -Algorithm SHA256).Hash } else { $null }
     $runDirectory = Join-Path $evaluationRoot ('FreshCampaignLiveModelRun-' + $runIndex.ToString('00'))
@@ -69,6 +101,12 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
     $sessionRestored = $sessionHashBefore -ceq $sessionHashAfter
     $saveManifestHashAfter = Get-SaveManifestHash
     $saveFilesUnchanged = $sourceSaveManifestHash -ceq $saveManifestHashAfter
+    $sourceManifestAfterRun = Get-HarnessSourceManifestHash
+    $sourceManifestUnchanged = ($sourceManifestBeforeRun -ceq $sourceManifestAfterRun -and $sourceManifestAfterRun -ceq $sourceManifestAtEvaluationStart)
+    if (-not $sourceManifestUnchanged) {
+        $sourceChangedDuringEvaluation = $true
+        $failure = if ($failure) { "$failure; Harness source changed during the candidate matrix, so this result cannot be treated as one code revision." } else { 'Harness source changed during the candidate matrix; refusing to combine runs from different revisions.' }
+    }
     if (-not $processStopped) { $failure = if ($failure) { "$failure; Bannerlord process leaked." } else { 'Bannerlord process leaked.' } }
     if (-not $sessionRestored) { $failure = if ($failure) { "$failure; pre-existing Agent session was not restored exactly." } else { 'Pre-existing Agent session was not restored exactly.' } }
     if (-not $saveFilesUnchanged) { $failure = if ($failure) { "$failure; existing Game Saves changed." } else { 'Existing Game Saves changed.' } }
@@ -76,7 +114,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
     $progression = if ($childResult) { $childResult.RecruitmentProgression } else { $null }
     $campaignInstanceId = if ($childResult) { [string]$childResult.ChronicleCampaignInstanceId } else { '' }
     $campaignCreated = [bool]($childResult -and $childResult.GameStarted -and $childResult.NativeNewCampaignRequested -and $childResult.CharacterCreationCompleted -and $childResult.InitialAgentObservationCaptured)
-    $classification = if (-not $campaignCreated) { 'new-campaign-or-startup-tool-failure' } elseif ($progression -and $progression.Passed) { 'live-model-native-recruitment-completed' } else { 'campaign-created-live-model-progression-failed' }
+    $classification = if (-not $sourceManifestUnchanged) { 'harness-source-changed-during-evaluation' } elseif (-not $campaignCreated) { 'new-campaign-or-startup-tool-failure' } elseif ($progression -and $progression.Passed) { 'live-model-native-recruitment-completed' } else { 'campaign-created-live-model-progression-failed' }
     $loopWallClock = if ($progression -and $progression.WallClockSeconds -ne $null) { [double]$progression.WallClockSeconds } else { $null }
     $campaignDays = if ($progression -and $progression.CampaignDaysElapsed -ne $null) { [double]$progression.CampaignDaysElapsed } else { $null }
     $nativeActionExact = ($progression -and [int]$progression.MoveCount -eq 1 -and [int]$progression.RecruitmentCount -eq 1 -and [int]$progression.RejectedNativeActions -eq 0)
@@ -84,7 +122,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
     $campaignDaysPassed = ($null -ne $campaignDays -and $campaignDays -le $CampaignDayLimit)
     $visualPassed = ($progression -and [double]$progression.VisualCoverageRatio -ge 0.9 -and [bool]$progression.VideoRemovedAfterEvidence)
     $runPassed = (
-        -not $failure -and $childResult -and $childResult.CharacterCreationCompleted -and
+        -not $failure -and $sourceManifestUnchanged -and $childResult -and $childResult.CharacterCreationCompleted -and
         -not [string]::IsNullOrWhiteSpace($campaignInstanceId) -and [bool]$progression.Passed -and
         $nativeActionExact -and $wallClockPassed -and $campaignDaysPassed -and $visualPassed -and
         $processStopped -and $sessionRestored -and $saveFilesUnchanged
@@ -100,6 +138,9 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         Passed = $runPassed
         Classification = $classification
         Failure = $failure
+        HarnessSourceManifestBefore = $sourceManifestBeforeRun
+        HarnessSourceManifestAfter = $sourceManifestAfterRun
+        HarnessSourceIntegrityPassed = $sourceManifestUnchanged
         Model = $modelName
         ModelDigest = $modelDigest
         OllamaVersion = $ollamaVersion
@@ -130,6 +171,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         ExistingSaveFilesUnchanged = $saveFilesUnchanged
         HarnessRunDirectory = $runDirectory
     })
+    if ($sourceChangedDuringEvaluation) { break }
 }
 
 $resultsArray = @($results)
@@ -142,13 +184,17 @@ $result = [ordered]@{
     OllamaVersion = $ollamaVersion
     HarnessCommit = $harnessCommit
     HarnessDirtyFileCountAtStart = $harnessDirtyFileCount
+    HarnessSourceManifestAtStart = $sourceManifestAtEvaluationStart
+    HarnessSourceManifestAtEnd = Get-HarnessSourceManifestHash
+    SourceChangedDuringEvaluation = $sourceChangedDuringEvaluation
+    CompletedRuns = $results.Count
     Modules = $modules
     RunCount = $Runs
     DistinctCampaignInstances = $campaignIds.Count
     CampaignRngSeedExposure = 'unknown; instance IDs are not represented as Native RNG seeds'
     PredeclaredThreshold = [ordered]@{ successRuns = $Runs; maxEndToEndSeconds = $WallClockLimitSeconds; maxCampaignDays = $CampaignDayLimit; requiredMoveCount = 1; requiredRecruitCount = 1; minVisualCoverage = 0.9; existingSavesUnchanged = $true; processStopped = $true }
     SuccessfulRuns = $passedRuns
-    Passed = ($passedRuns -eq $Runs -and $campaignIds.Count -eq $Runs)
+    Passed = (-not $sourceChangedDuringEvaluation -and $results.Count -eq $Runs -and $passedRuns -eq $Runs -and $campaignIds.Count -eq $Runs)
     Results = $resultsArray
 }
 $json = $result | ConvertTo-Json -Depth 20

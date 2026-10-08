@@ -9,10 +9,32 @@ $ErrorActionPreference = 'Stop'
 $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
 $loop = Join-Path $PSScriptRoot 'Agent-DecisionLoop.ps1'
 $provider = Join-Path $PSScriptRoot 'Test-AgentLoopProvider.ps1'
+$policy = Join-Path $PSScriptRoot 'Agent-DecisionLoopPolicy.ps1'
+. $policy
 $savePath = Join-Path $env:USERPROFILE "Documents\Mount and Blade II Bannerlord\Game Saves\$LoadSaveName.sav"
 $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\session.json'
 if (-not (Test-Path $savePath)) { throw "Agent loop fixture not found: $savePath" }
 $fixtureHashBefore = (Get-FileHash $savePath -Algorithm SHA256).Hash
+
+function New-ObserveAgainPolicyFixture {
+    param([string]$TimeMode = 'StoppablePlay', [bool]$Moving = $true, [bool]$EncounterActive = $false, [string]$MenuId = '', [string]$CurrentSettlementId = '')
+    return [pscustomobject]@{
+        status = 'completed'
+        state = [pscustomobject]@{
+            context = [pscustomobject]@{ gameState = 'MapState'; timeControlMode = $TimeMode; encounterActive = $EncounterActive; menuId = $MenuId; escapeMenuOpen = $false; inquiryOpen = $false }
+            party = [pscustomobject]@{ isMoving = $Moving }
+            location = [pscustomobject]@{ currentSettlementId = $CurrentSettlementId; targetSettlementId = 'village_test' }
+        }
+    }
+}
+$policyReceipt = [pscustomobject]@{ action = 'move'; status = 'completed'; state = [pscustomobject]@{ location = [pscustomobject]@{ targetSettlementId = 'village_test' } } }
+$activeTravelPolicy = Get-ObserveAgainPolicy -Observation (New-ObserveAgainPolicyFixture) -PreviousActionReceipt $policyReceipt
+$pausedTravelPolicy = Get-ObserveAgainPolicy -Observation (New-ObserveAgainPolicyFixture -TimeMode 'Stop') -PreviousActionReceipt $policyReceipt
+$encounterTravelPolicy = Get-ObserveAgainPolicy -Observation (New-ObserveAgainPolicyFixture -TimeMode 'Stop' -Moving $true -EncounterActive $true -MenuId 'encounter_meeting') -PreviousActionReceipt $policyReceipt
+$arrivedTravelPolicy = Get-ObserveAgainPolicy -Observation (New-ObserveAgainPolicyFixture -TimeMode 'Stop' -Moving $false -MenuId 'town' -CurrentSettlementId 'village_test') -PreviousActionReceipt $policyReceipt
+$invalidTravelPolicy = Get-ObserveAgainPolicy -Observation (New-ObserveAgainPolicyFixture) -PreviousActionReceipt ([pscustomobject]@{ action = 'recruit'; status = 'completed'; state = [pscustomobject]@{ location = [pscustomobject]@{ targetSettlementId = 'village_test' } } })
+$observeAgainPolicyVerified = ($activeTravelPolicy.Allowed -and -not $pausedTravelPolicy.Allowed -and $pausedTravelPolicy.Recoverable -and -not $encounterTravelPolicy.Allowed -and $encounterTravelPolicy.Recoverable -and -not $arrivedTravelPolicy.Allowed -and $arrivedTravelPolicy.Recoverable -and -not $invalidTravelPolicy.Allowed -and -not $invalidTravelPolicy.Recoverable)
+if (-not $observeAgainPolicyVerified) { throw 'observeAgain policy must permit naturally advancing travel only, recover when time is stopped or an encounter/menu is active, and hard-reject requests without a matching Native move receipt.' }
 
 function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @()) {
     $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli $Action @Arguments -TimeoutSeconds $TimeoutSeconds -AsJson 2>&1 | Out-String
@@ -260,21 +282,30 @@ try {
     $resumeRejection = @($resumeRecoveryTrace.trace | Where-Object { $_.control.kind -eq 'decision-rejected-before-native' -and $_.decision.requestedAction -ceq 'resume' } | Select-Object -First 1)
     $resumeRecoveryObserve = @($resumeRecoveryTrace.trace | Where-Object { $_.control.kind -eq 'bounded-observe-again' })
     $resumeFeedbackConsumed = @($resumeRecoveryTrace.trace | Where-Object { $_.decisionFeedback.kind -eq 'action-unavailable' -and $_.decisionFeedback.requestedAction -ceq 'resume' })
+    $staleObserveRejection = @($resumeRecoveryTrace.trace | Where-Object { $_.control.kind -eq 'control-rejected-before-native' -and $_.control.requestedControl -ceq 'observeAgain' } | Select-Object -First 1)
+    $staleObserveFeedbackConsumed = @($resumeRecoveryTrace.trace | Where-Object { $_.decisionFeedback.kind -eq 'control-unavailable' -and $_.decisionFeedback.requestedControl -ceq 'observeAgain' })
+    $staleObserveAgainRejectedWithoutNativeAction = (
+        $staleObserveRejection.Count -eq 1 -and -not [bool]$staleObserveRejection[0].actionAttempted -and
+        [bool]$staleObserveRejection[0].actionReceipt.noNativeActionSent -and $staleObserveFeedbackConsumed.Count -ge 1
+    )
     $nativeTimeActions = @($resumeRecoveryTrace.trace | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -in @('resume','pause','fastForward') })
     $moveActions = @($resumeRecoveryTrace.trace | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -eq 'move' })
     $moveReceiptStep = @($resumeRecoveryTrace.trace | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -eq 'move' } | Select-Object -First 1)
     $finalResumeObservation = if ($resumeRecoveryTrace.trace.Count -gt 0 -and $resumeRecoveryTrace.trace[-1].observationAfter) { $resumeRecoveryTrace.trace[-1].observationAfter } else { $null }
-    $arrivalAfterResumeRecovery = ($resumeRecoveryTrace.termination.completedByProvider -and $null -ne $finalResumeObservation -and [string]$finalResumeObservation.state.location.currentSettlementId -ceq [string]$moveReceiptStep[0].actionReceipt.state.location.targetSettlementId)
+    $arrivalAfterResumeRecovery = ($moveReceiptStep.Count -eq 1 -and $resumeRecoveryTrace.termination.completedByProvider -and $null -ne $finalResumeObservation -and [string]$finalResumeObservation.state.location.currentSettlementId -ceq [string]$moveReceiptStep[0].actionReceipt.state.location.targetSettlementId)
     $unlistedResumeRecoveryVerified = (
         $resumeRejection.Count -eq 1 -and $resumeRejection[0].actionAttempted -eq $false -and
         [bool]$resumeRejection[0].actionReceipt.noNativeActionSent -and $moveActions.Count -eq 1 -and
-        $resumeFeedbackConsumed.Count -ge 1 -and ($resumeRecoveryObserve.Count -ge 1 -or $arrivalAfterResumeRecovery) -and $nativeTimeActions.Count -eq 0 -and
+        $resumeFeedbackConsumed.Count -ge 1 -and $resumeRecoveryObserve.Count -ge 1 -and
+        $staleObserveAgainRejectedWithoutNativeAction -and
+        [string]$staleObserveRejection[0].observationBefore.state.location.currentSettlementId -ceq [string]$moveReceiptStep[0].actionReceipt.state.location.targetSettlementId -and
+        $nativeTimeActions.Count -eq 0 -and
         [string]$resumeRejection[0].observationBefore.state.context.timeControlMode -ceq 'StoppablePlay' -and
         [string]$resumeRejection[0].observationAfter.state.context.timeControlMode -in @('StoppablePlay','Stop') -and
         $null -ne $finalResumeObservation -and $null -ne $moveReceiptStep -and
         [double]$finalResumeObservation.campaignDay -gt [double]$moveReceiptStep[0].actionReceipt.campaignDay
     )
-    if (-not $unlistedResumeRecoveryVerified) { throw "The unsupported resume proposal was not rejected before Native and recovered through natural movement/observeAgain: $($resumeRecoveryTrace | ConvertTo-Json -Depth 8 -Compress)" }
+    if (-not $unlistedResumeRecoveryVerified) { throw "The unsupported resume and stale post-arrival observeAgain proposals were safely rejected, surfaced as feedback, and recovered without clock-control Native actions: $($resumeRecoveryTrace | ConvertTo-Json -Depth 8 -Compress)" }
 
     $priorInvalidDecision = $env:CHRONICLE_TEST_INVALID_DECISION
     $env:CHRONICLE_TEST_INVALID_DECISION = '1'
@@ -345,6 +376,7 @@ try {
         PreviousActionReceiptForwarded = $receiptForwarded
         DecisionTimingCaptured = $decisionTimingCaptured
         UnicodeHeroNameRoundTripVerified = $unicodeRoundTripVerified
+        ObserveAgainPolicySeparatesNaturalTimeFromStoppedEncounter = $observeAgainPolicyVerified
         ExplicitGoalStopHonoredWithoutIssuingAnotherAction = $doneSignalVerified
         GoalStopTrace = $doneTrace.trace
         GoalAndActionCatalogForwarded = $goalAndCatalogForwarded
@@ -355,6 +387,7 @@ try {
         StaleOfferBlockedWithoutNativeMutation = $staleOfferBlockedWithoutMutation
         StaleOfferRecoveryTrace = $staleOfferTrace.trace
         UnlistedResumeRejectedWithoutNativeAction = $unlistedResumeRecoveryVerified
+        StaleObserveAgainRejectedWithoutNativeAction = $staleObserveAgainRejectedWithoutNativeAction
         UnlistedResumeRecoveryTrace = $resumeRecoveryTrace.trace
         DecisionContextTrace = $contextTrace.trace
         UnsafeActionRejected = $unsafeActionRejected
@@ -363,7 +396,7 @@ try {
         ProcessStopped = $stop.processStopped
         Trace = $trace.trace
     }
-    $result.Passed = ($result.DecisionCount -eq 2 -and $observationLoopVerified -and $receiptForwarded -and $decisionTimingCaptured -and $unicodeRoundTripVerified -and $doneSignalVerified -and $goalAndCatalogForwarded -and $scopedActionRejected -and $dynamicActionRecoveryVerified -and $staleOfferRecoveryVerified -and $unlistedResumeRecoveryVerified -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
+    $result.Passed = ($result.DecisionCount -eq 2 -and $observationLoopVerified -and $receiptForwarded -and $decisionTimingCaptured -and $unicodeRoundTripVerified -and $observeAgainPolicyVerified -and $doneSignalVerified -and $goalAndCatalogForwarded -and $scopedActionRejected -and $dynamicActionRecoveryVerified -and $staleOfferRecoveryVerified -and $unlistedResumeRecoveryVerified -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
     $result | ConvertTo-Json -Depth 12
     if (-not $result.Passed) { exit 1 }
 }
