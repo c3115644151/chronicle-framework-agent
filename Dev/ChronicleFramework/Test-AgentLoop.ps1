@@ -33,8 +33,38 @@ $pausedTravelPolicy = Get-ObserveAgainPolicy -Observation (New-ObserveAgainPolic
 $encounterTravelPolicy = Get-ObserveAgainPolicy -Observation (New-ObserveAgainPolicyFixture -TimeMode 'Stop' -Moving $true -EncounterActive $true -MenuId 'encounter_meeting') -PreviousActionReceipt $policyReceipt
 $arrivedTravelPolicy = Get-ObserveAgainPolicy -Observation (New-ObserveAgainPolicyFixture -TimeMode 'Stop' -Moving $false -MenuId 'town' -CurrentSettlementId 'village_test') -PreviousActionReceipt $policyReceipt
 $invalidTravelPolicy = Get-ObserveAgainPolicy -Observation (New-ObserveAgainPolicyFixture) -PreviousActionReceipt ([pscustomobject]@{ action = 'recruit'; status = 'completed'; state = [pscustomobject]@{ location = [pscustomobject]@{ targetSettlementId = 'village_test' } } })
+$activeTravelControls = @(Get-EffectiveControlCatalog -Observation (New-ObserveAgainPolicyFixture) -PreviousActionReceipt $policyReceipt)
+$encounterTravelControls = @(Get-EffectiveControlCatalog -Observation (New-ObserveAgainPolicyFixture -TimeMode 'Stop' -Moving $true -EncounterActive $true -MenuId 'encounter_meeting') -PreviousActionReceipt $policyReceipt)
+$stoppedTravelControls = @(Get-EffectiveControlCatalog -Observation (New-ObserveAgainPolicyFixture -TimeMode 'Stop') -PreviousActionReceipt $policyReceipt)
+$initialStateControls = @(Get-EffectiveControlCatalog -Observation (New-ObserveAgainPolicyFixture) -PreviousActionReceipt $null)
+$observeAgainControlCatalogVerified = ($activeTravelControls.Count -eq 1 -and $activeTravelControls[0].control -ceq 'observeAgain' -and $encounterTravelControls.Count -eq 0 -and $stoppedTravelControls.Count -eq 0 -and $initialStateControls.Count -eq 0)
+if (-not $observeAgainControlCatalogVerified) { throw 'The scheduler wait control must only be offered during confirmed, naturally advancing Native travel, not at encounters or stopped time.' }
+$barterOptionsFixture = [pscustomobject]@{ sessionId = 'safe-passage-test-session'; context = 'contextual:safe_passage_barterable'; isOfferDisabled = $false }
+$barterReadReceiptFixture = [pscustomobject]@{ action = 'barterOptions'; status = 'completed'; data = $barterOptionsFixture }
+$barterAutoBalanceReceiptFixture = [pscustomobject]@{ action = 'barterAutoBalance'; status = 'completed'; data = [pscustomobject]@{ updatedOptions = $barterOptionsFixture } }
+$barterNoSessionGate = Get-BarterActionGate -BarterOptions $null -PreviousActionReceipt $null -BalancedBarterSessionId $null
+$barterNeedsBalanceGate = Get-BarterActionGate -BarterOptions $barterOptionsFixture -PreviousActionReceipt $barterReadReceiptFixture -BalancedBarterSessionId $null
+$barterBalancedGate = Get-BarterActionGate -BarterOptions $barterOptionsFixture -PreviousActionReceipt $barterAutoBalanceReceiptFixture -BalancedBarterSessionId $barterOptionsFixture.sessionId
+$barterActionPhaseGateVerified = (
+    -not $barterNoSessionGate.SessionAvailable -and
+    'barterAutoBalance' -in $barterNoSessionGate.HideActions -and 'barterOffer' -in $barterNoSessionGate.HideActions -and
+    $barterNeedsBalanceGate.SessionAvailable -and 'barterOptions' -in $barterNeedsBalanceGate.HideActions -and 'barterOffer' -in $barterNeedsBalanceGate.HideActions -and 'barterAutoBalance' -notin $barterNeedsBalanceGate.HideActions -and
+    $barterBalancedGate.SessionAvailable -and 'barterOptions' -in $barterBalancedGate.HideActions -and 'barterAutoBalance' -in $barterBalancedGate.HideActions -and 'barterOffer' -notin $barterBalancedGate.HideActions
+)
+if (-not $barterActionPhaseGateVerified) { throw 'A current barter session must expose one useful phase at a time: inspect, auto-balance, then submit without repeating reads or balancing.' }
 $observeAgainPolicyVerified = ($activeTravelPolicy.Allowed -and -not $pausedTravelPolicy.Allowed -and $pausedTravelPolicy.Recoverable -and -not $encounterTravelPolicy.Allowed -and $encounterTravelPolicy.Recoverable -and -not $arrivedTravelPolicy.Allowed -and $arrivedTravelPolicy.Recoverable -and -not $invalidTravelPolicy.Allowed -and -not $invalidTravelPolicy.Recoverable)
 if (-not $observeAgainPolicyVerified) { throw 'observeAgain policy must permit naturally advancing travel only, recover when time is stopped or an encounter/menu is active, and hard-reject requests without a matching Native move receipt.' }
+$unobstructedMapFixture = (New-ObserveAgainPolicyFixture).state
+$encounterMapFixture = (New-ObserveAgainPolicyFixture -TimeMode 'Stop' -Moving $true -EncounterActive $true -MenuId 'encounter_meeting').state
+$settlementMenuFixture = (New-ObserveAgainPolicyFixture -TimeMode 'Stop' -Moving $false -MenuId 'town' -CurrentSettlementId 'town_test').state
+$missionFixture = (New-ObserveAgainPolicyFixture -TimeMode 'Stop' -Moving $false).state
+$missionFixture.context.gameState = 'MissionState'
+$freeCampaignMapAllowsMovement = Test-UnobstructedCampaignMap $unobstructedMapFixture
+$encounterBlocksMovement = -not (Test-UnobstructedCampaignMap $encounterMapFixture)
+$settlementMenuBlocksMovement = -not (Test-UnobstructedCampaignMap $settlementMenuFixture)
+$missionBlocksMovement = -not (Test-UnobstructedCampaignMap $missionFixture)
+$unobstructedCampaignMapPolicyVerified = ($freeCampaignMapAllowsMovement -and $encounterBlocksMovement -and $settlementMenuBlocksMovement -and $missionBlocksMovement)
+if (-not $unobstructedCampaignMapPolicyVerified) { throw 'Map movement actions must only be exposed on an unobstructed Campaign Map without an encounter, menu, Escape menu, or inquiry.' }
 
 function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @()) {
     $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli $Action @Arguments -TimeoutSeconds $TimeoutSeconds -AsJson 2>&1 | Out-String
@@ -221,6 +251,64 @@ try {
     )
     if (-not $dynamicActionRecoveryVerified) { throw "Decision loop did not block the unavailable action before Native and recover using the current catalog: $($recoveryTrace | ConvertTo-Json -Depth 8 -Compress)" }
 
+    $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
+    $env:CHRONICLE_TEST_PROVIDER_MODE = 'invalidArgumentRecovery'
+    try {
+        $invalidArgumentRecoveryOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -Goal 'Recover from a rejected extra argument without sending a Native action, then read state.' -AllowedActionNames 'state' -MaxDecisions 2 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-invalid-argument-recovery-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $invalidArgumentRecoveryExitCode = $LASTEXITCODE
+    }
+    finally {
+        if ($null -eq $priorProviderMode) { Remove-Item Env:CHRONICLE_TEST_PROVIDER_MODE -ErrorAction SilentlyContinue }
+        else { $env:CHRONICLE_TEST_PROVIDER_MODE = $priorProviderMode }
+    }
+    if ($invalidArgumentRecoveryExitCode -ne 0) { throw "Decision loop did not safely recover from unsupported action arguments: $invalidArgumentRecoveryOutput" }
+    $invalidArgumentRecoveryTrace = $invalidArgumentRecoveryOutput | ConvertFrom-Json
+    $invalidArgumentRecoveryVerified = (
+        @($invalidArgumentRecoveryTrace.trace).Count -eq 2 -and
+        $invalidArgumentRecoveryTrace.trace[0].control.kind -eq 'decision-rejected-before-native' -and
+        $invalidArgumentRecoveryTrace.trace[0].actionReceipt.status -eq 'rejected-before-native' -and
+        $invalidArgumentRecoveryTrace.trace[0].actionAttempted -eq $false -and
+        $invalidArgumentRecoveryTrace.trace[0].decisionFeedback.kind -eq $null -and
+        $invalidArgumentRecoveryTrace.trace[1].decisionFeedback.kind -eq 'invalid-action-arguments' -and
+        $invalidArgumentRecoveryTrace.trace[1].decisionFeedback.noNativeActionSent -eq $true -and
+        $invalidArgumentRecoveryTrace.trace[1].decision.action -eq 'state' -and
+        $invalidArgumentRecoveryTrace.trace[1].actionReceipt.status -eq 'completed' -and
+        $invalidArgumentRecoveryTrace.actionsExecuted -eq 1
+    )
+    if (-not $invalidArgumentRecoveryVerified) { throw "Invalid-argument rejection did not recover with fresh state and no attempted Native action: $($invalidArgumentRecoveryTrace | ConvertTo-Json -Depth 8 -Compress)" }
+
+    $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
+    $priorDialogueErrorActionPreference = $ErrorActionPreference
+    $env:CHRONICLE_TEST_PROVIDER_MODE = 'unavailableDialogueRecovery'
+    try {
+        $ErrorActionPreference = 'Continue'
+        $dialogueRecoveryOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -Goal 'Reject a dialogue selection when no Native conversation options are currently visible, then continue with a current map observation.' -AllowedActionNames 'dialogueSelect,mapSettlementTargets,move' -MaxDecisions 2 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-dialogue-recovery-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $dialogueRecoveryExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $priorDialogueErrorActionPreference
+        if ($null -eq $priorProviderMode) { Remove-Item Env:CHRONICLE_TEST_PROVIDER_MODE -ErrorAction SilentlyContinue }
+        else { $env:CHRONICLE_TEST_PROVIDER_MODE = $priorProviderMode }
+    }
+    if ($dialogueRecoveryExitCode -ne 0) {
+        if ($env:CHRONICLE_HARNESS_TEMP -and (Test-Path -LiteralPath $env:CHRONICLE_HARNESS_TEMP -PathType Container)) {
+            Set-Content -LiteralPath (Join-Path $env:CHRONICLE_HARNESS_TEMP 'UnavailableDialogueRecoveryFailure.log') -Value $dialogueRecoveryOutput -Encoding UTF8
+        }
+        throw "Unavailable dialogue action was not blocked before Native and recovered: $dialogueRecoveryOutput"
+    }
+    $dialogueRecoveryTrace = $dialogueRecoveryOutput | ConvertFrom-Json
+    $dialogueRejectedStep = @($dialogueRecoveryTrace.trace | Where-Object { $_.control.kind -eq 'decision-rejected-before-native' -and $_.decision.action -eq 'dialogueSelect' } | Select-Object -First 1)
+    $dialogueCatalogRecoveryVerified = (
+        $dialogueRejectedStep.Count -eq 1 -and -not [bool]$dialogueRejectedStep[0].actionAttempted -and
+        [bool]$dialogueRejectedStep[0].actionReceipt.noNativeActionSent -and
+        [string]$dialogueRejectedStep[0].observationBefore.state.context.gameState -ceq 'MapState' -and
+        $null -eq $dialogueRejectedStep[0].observationBefore.state.context.conversation -and
+        $null -eq $dialogueRejectedStep[0].observationAfter.state.context.conversation -and
+        [double]$dialogueRejectedStep[0].observationBefore.campaignDay -eq [double]$dialogueRejectedStep[0].observationAfter.campaignDay -and
+        @($dialogueRecoveryTrace.trace | Where-Object { $_.decision.action -eq 'mapSettlementTargets' -and $_.actionExecuted }).Count -eq 1
+    )
+    if (-not $dialogueCatalogRecoveryVerified) { throw "Dialogue selection was not safely removed from the map action catalog: $($dialogueRecoveryTrace | ConvertTo-Json -Depth 8 -Compress)" }
+
     $markerRoot = if ($env:CHRONICLE_HARNESS_TEMP -and (Test-Path -LiteralPath $env:CHRONICLE_HARNESS_TEMP -PathType Container)) { $env:CHRONICLE_HARNESS_TEMP } else { [IO.Path]::GetTempPath() }
     $staleOfferMarker = Join-Path $markerRoot ('stale-offer-recovery-' + [Guid]::NewGuid().ToString('N') + '.txt')
     $priorStaleOfferMarker = $env:CHRONICLE_TEST_STALE_OFFER_MARKER
@@ -293,16 +381,23 @@ try {
     $moveReceiptStep = @($resumeRecoveryTrace.trace | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -eq 'move' } | Select-Object -First 1)
     $finalResumeObservation = if ($resumeRecoveryTrace.trace.Count -gt 0 -and $resumeRecoveryTrace.trace[-1].observationAfter) { $resumeRecoveryTrace.trace[-1].observationAfter } else { $null }
     $arrivalAfterResumeRecovery = ($moveReceiptStep.Count -eq 1 -and $resumeRecoveryTrace.termination.completedByProvider -and $null -ne $finalResumeObservation -and [string]$finalResumeObservation.state.location.currentSettlementId -ceq [string]$moveReceiptStep[0].actionReceipt.state.location.targetSettlementId)
+    $stoppedEncounterAfterResumeRecovery = ($resumeRecoveryTrace.termination.completedByProvider -and $null -ne $finalResumeObservation -and [bool]$finalResumeObservation.state.context.encounterActive -and [string]$finalResumeObservation.state.context.timeControlMode -ceq 'Stop')
+    $safeTravelInterruptionResolved = ($arrivalAfterResumeRecovery -or $stoppedEncounterAfterResumeRecovery)
+    $staleControlWasAppropriate = (
+        $staleObserveRejection.Count -eq 1 -and
+        (([string]$staleObserveRejection[0].observationBefore.state.location.currentSettlementId -ceq [string]$moveReceiptStep[0].actionReceipt.state.location.targetSettlementId) -or
+            ([bool]$staleObserveRejection[0].observationBefore.state.context.encounterActive -and [string]$staleObserveRejection[0].observationBefore.state.context.timeControlMode -ceq 'Stop'))
+    )
     $unlistedResumeRecoveryVerified = (
         $resumeRejection.Count -eq 1 -and $resumeRejection[0].actionAttempted -eq $false -and
         [bool]$resumeRejection[0].actionReceipt.noNativeActionSent -and $moveActions.Count -eq 1 -and
-        $resumeFeedbackConsumed.Count -ge 1 -and $resumeRecoveryObserve.Count -ge 1 -and
+        $resumeFeedbackConsumed.Count -ge 1 -and ($resumeRecoveryObserve.Count -ge 1 -or $stoppedEncounterAfterResumeRecovery) -and
         $staleObserveAgainRejectedWithoutNativeAction -and
-        [string]$staleObserveRejection[0].observationBefore.state.location.currentSettlementId -ceq [string]$moveReceiptStep[0].actionReceipt.state.location.targetSettlementId -and
+        $staleControlWasAppropriate -and
         $nativeTimeActions.Count -eq 0 -and
         [string]$resumeRejection[0].observationBefore.state.context.timeControlMode -ceq 'StoppablePlay' -and
         [string]$resumeRejection[0].observationAfter.state.context.timeControlMode -in @('StoppablePlay','Stop') -and
-        $null -ne $finalResumeObservation -and $null -ne $moveReceiptStep -and
+        $null -ne $finalResumeObservation -and $null -ne $moveReceiptStep -and $safeTravelInterruptionResolved -and
         [double]$finalResumeObservation.campaignDay -gt [double]$moveReceiptStep[0].actionReceipt.campaignDay
     )
     if (-not $unlistedResumeRecoveryVerified) { throw "The unsupported resume and stale post-arrival observeAgain proposals were safely rejected, surfaced as feedback, and recovered without clock-control Native actions: $($resumeRecoveryTrace | ConvertTo-Json -Depth 8 -Compress)" }
@@ -377,11 +472,16 @@ try {
         DecisionTimingCaptured = $decisionTimingCaptured
         UnicodeHeroNameRoundTripVerified = $unicodeRoundTripVerified
         ObserveAgainPolicySeparatesNaturalTimeFromStoppedEncounter = $observeAgainPolicyVerified
+        ObserveAgainControlIsExposedOnlyWhenSafe = $observeAgainControlCatalogVerified
+        BarterActionCatalogStagesCurrentNativeQuote = $barterActionPhaseGateVerified
+        MapMovementCatalogRequiresUnobstructedCampaignMap = $unobstructedCampaignMapPolicyVerified
         ExplicitGoalStopHonoredWithoutIssuingAnotherAction = $doneSignalVerified
         GoalStopTrace = $doneTrace.trace
         GoalAndActionCatalogForwarded = $goalAndCatalogForwarded
         ScopedActionRejected = $scopedActionRejected
         DynamicActionCatalogRecoveryVerified = $dynamicActionRecoveryVerified
+        InvalidActionArgumentsRecoverWithoutNativeMutation = $invalidArgumentRecoveryVerified
+        UnavailableDialogueRejectedWithoutNativeAction = $dialogueCatalogRecoveryVerified
         DynamicActionRecoveryTrace = $recoveryTrace.trace
         StaleOfferRecoveryVerified = $staleOfferRecoveryVerified
         StaleOfferBlockedWithoutNativeMutation = $staleOfferBlockedWithoutMutation
@@ -396,7 +496,7 @@ try {
         ProcessStopped = $stop.processStopped
         Trace = $trace.trace
     }
-    $result.Passed = ($result.DecisionCount -eq 2 -and $observationLoopVerified -and $receiptForwarded -and $decisionTimingCaptured -and $unicodeRoundTripVerified -and $observeAgainPolicyVerified -and $doneSignalVerified -and $goalAndCatalogForwarded -and $scopedActionRejected -and $dynamicActionRecoveryVerified -and $staleOfferRecoveryVerified -and $unlistedResumeRecoveryVerified -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
+    $result.Passed = ($result.DecisionCount -eq 2 -and $observationLoopVerified -and $receiptForwarded -and $decisionTimingCaptured -and $unicodeRoundTripVerified -and $observeAgainPolicyVerified -and $observeAgainControlCatalogVerified -and $barterActionPhaseGateVerified -and $unobstructedCampaignMapPolicyVerified -and $doneSignalVerified -and $goalAndCatalogForwarded -and $scopedActionRejected -and $dynamicActionRecoveryVerified -and $invalidArgumentRecoveryVerified -and $dialogueCatalogRecoveryVerified -and $staleOfferRecoveryVerified -and $unlistedResumeRecoveryVerified -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
     $result | ConvertTo-Json -Depth 12
     if (-not $result.Passed) { exit 1 }
 }

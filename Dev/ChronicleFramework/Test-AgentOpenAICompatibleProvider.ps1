@@ -260,6 +260,47 @@ try {
         $invalidActionStderr -notmatch [regex]::Escape($harnessSecret)
     )
 
+    $failureStep = 'recover-from-unsupported-native-action-argument'
+    $barterRequest = [ordered]@{
+        schemaVersion = 2
+        runId = 'provider-invalid-argument-test'
+        iteration = 1
+        goal = 'Submit the current Native barter offer.'
+        allowedActions = @([ordered]@{ action = 'barterOffer'; arguments = @() })
+        allowedControls = @()
+        observation = $request.observation
+        previousActionReceipt = $null
+    }
+    $invalidArgumentProvider = Start-ProviderProcess ($barterRequest | ConvertTo-Json -Depth 12 -Compress)
+    $process = $invalidArgumentProvider.Process
+    $invalidArgumentAcceptTask = $listener.GetContextAsync()
+    if (-not $invalidArgumentAcceptTask.Wait(5000)) { throw 'Local HTTP stub did not receive the invalid-argument test request.' }
+    $invalidArgumentContext = $invalidArgumentAcceptTask.GetAwaiter().GetResult()
+    $invalidArgumentReader = New-Object System.IO.StreamReader($invalidArgumentContext.Request.InputStream, $invalidArgumentContext.Request.ContentEncoding)
+    $null = $invalidArgumentReader.ReadToEnd()
+    $invalidArgumentReader.Dispose()
+    $badBarterDecision = [ordered]@{ action = 'barterOffer'; arguments = @{ candidateId = 'not-a-native-offer-parameter' }; rationale = 'Intentional extra-argument recovery regression.' } | ConvertTo-Json -Compress
+    $badBarterResponse = [ordered]@{ choices = @([ordered]@{ index = 0; message = [ordered]@{ role = 'assistant'; content = $badBarterDecision }; finish_reason = 'stop' }) } | ConvertTo-Json -Depth 8 -Compress
+    $badBarterBytes = [System.Text.Encoding]::UTF8.GetBytes($badBarterResponse)
+    $invalidArgumentContext.Response.StatusCode = 200
+    $invalidArgumentContext.Response.ContentType = 'application/json; charset=utf-8'
+    $invalidArgumentContext.Response.ContentLength64 = $badBarterBytes.Length
+    $invalidArgumentContext.Response.OutputStream.Write($badBarterBytes, 0, $badBarterBytes.Length)
+    $invalidArgumentContext.Response.OutputStream.Close()
+    if (-not $process.WaitForExit(($TimeoutSeconds + 5) * 1000)) { try { $process.Kill() } catch { }; throw 'Provider did not return after an unsupported action argument.' }
+    $invalidArgumentStdout = $invalidArgumentProvider.StdoutTask.Result.Trim()
+    $invalidArgumentStderr = $invalidArgumentProvider.StderrTask.Result.Trim()
+    $invalidArgumentDecision = $null
+    try { $invalidArgumentDecision = $invalidArgumentStdout | ConvertFrom-Json } catch { }
+    $unsupportedActionArgumentRecoverable = (
+        $process.ExitCode -eq 0 -and [bool]$invalidArgumentDecision.decisionRejected -and
+        [string]$invalidArgumentDecision.reason -ceq 'invalid-action-arguments' -and
+        [string]$invalidArgumentDecision.requestedAction -ceq 'barterOffer' -and
+        @($invalidArgumentDecision.invalidArguments).Count -eq 1 -and [string]$invalidArgumentDecision.invalidArguments[0] -ceq 'candidateId' -and
+        @($invalidArgumentDecision.allowedArguments).Count -eq 0 -and [bool]$invalidArgumentDecision.noNativeActionSent -and
+        $invalidArgumentStdout -notmatch [regex]::Escape($harnessSecret) -and $invalidArgumentStderr -notmatch [regex]::Escape($harnessSecret)
+    )
+
     $failureStep = 'fail-closed-on-provider-http-error'
     $httpErrorProvider = Start-ProviderProcess $requestJson
     $process = $httpErrorProvider.Process
@@ -314,11 +355,12 @@ try {
         StructuredDecisionReturned = $decisionValidated
         BoundedObserveAgainControlValidated = $observeAgainValidated
         ExactPositionalArgumentsNormalized = $positionalArgumentsNormalized
+        UnsupportedActionArgumentReturnsRecoverableRejection = $unsupportedActionArgumentRecoverable
         ProviderExitCode = $successfulProviderExitCode
         HttpErrorFailsClosedWithoutCredentialLeak = $httpErrorFailedClosed
         DisallowedActionFailsClosed = $invalidActionFailedClosed
         TimeoutFailsClosedWithoutCredentialLeak = $timeoutFailedClosed
-        Passed = ($requestGoalForwarded -and $unicodeObservationForwarded -and $actionCatalogForwarded -and $authorizationSent -and $localCompatibilityPassed -and $endpointPathCorrect -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $observeAgainValidated -and $positionalArgumentsNormalized -and $invalidActionFailedClosed -and $httpErrorFailedClosed -and $timeoutFailedClosed)
+        Passed = ($requestGoalForwarded -and $unicodeObservationForwarded -and $actionCatalogForwarded -and $authorizationSent -and $localCompatibilityPassed -and $endpointPathCorrect -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $observeAgainValidated -and $positionalArgumentsNormalized -and $invalidActionFailedClosed -and $unsupportedActionArgumentRecoverable -and $httpErrorFailedClosed -and $timeoutFailedClosed)
     }
     $result | ConvertTo-Json -Depth 8
     if (-not $result.Passed) { exit 1 }

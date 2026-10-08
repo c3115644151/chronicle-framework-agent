@@ -9,7 +9,8 @@ param(
     [string[]]$AllowedActionNames,
     [switch]$PersistCheckpoint,
     [switch]$ResumeCheckpoint,
-    [ValidateSet('recruit')][string]$HarnessCrashAfterAction
+    [ValidateSet('recruit')][string]$HarnessCrashAfterAction,
+    [switch]$HarnessPrepareSafePassageAfterMove
 )
 
 $ErrorActionPreference = 'Stop'
@@ -41,6 +42,10 @@ if ($PSBoundParameters.ContainsKey('AllowedActionNames')) {
         $restrictedActions[$canonicalName[0]] = $script:ProductAllowedActions[$canonicalName[0]]
     }
     $script:AllowedActions = $restrictedActions
+}
+if ($HarnessPrepareSafePassageAfterMove -and
+    ($env:CHRONICLE_HARNESS_MODE -ne 'visual-capture' -or [string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP) -or -not $script:AllowedActions.ContainsKey('move'))) {
+    throw 'HarnessPrepareSafePassageAfterMove is restricted to a visual Harness run whose decision allowlist includes Native move.'
 }
 if ($HarnessCrashAfterAction -and (-not $PersistCheckpoint -or $env:CHRONICLE_HARNESS_MODE -ne 'visual-capture' -or -not $env:CHRONICLE_HARNESS_TEMP)) {
     throw 'HarnessCrashAfterAction requires PersistCheckpoint plus an active visual-capture Harness run.'
@@ -100,11 +105,17 @@ function ConvertTo-AsciiJson([string]$Json) {
     return $builder.ToString()
 }
 
-function Get-EffectiveActionCatalog($Observation, $PreviousActionReceipt) {
+function Get-EffectiveActionCatalog($Observation, $PreviousActionReceipt, $DecisionFeedback) {
     $catalog = @{}
     foreach ($entry in $script:AllowedActions.GetEnumerator()) { $catalog[$entry.Key] = @($entry.Value) }
+    $state = if ($Observation) { $Observation.state } else { $null }
+    $unobstructedCampaignMap = ($state -and (Test-UnobstructedCampaignMap $state))
+    if (-not $unobstructedCampaignMap) {
+        foreach ($mapMovementAction in @('move','moveToPoint','pursue','follow','hold')) { $catalog.Remove($mapMovementAction) }
+    }
+    # During a hostile encounter, expose the active conversation/barter route rather than map target queries.
+    if ($state -and [bool]$state.context.encounterActive) { $catalog.Remove('mapSettlementTargets') }
     if ($catalog.ContainsKey('recruitOptions') -or $catalog.ContainsKey('recruit')) {
-        $state = $Observation.state
         $settlementMenuActive = (
             [string]$state.context.gameState -ceq 'MapState' -and
             -not [string]::IsNullOrWhiteSpace([string]$state.location.currentSettlementId) -and
@@ -124,6 +135,47 @@ function Get-EffectiveActionCatalog($Observation, $PreviousActionReceipt) {
                 @($PreviousActionReceipt.data.offers | Where-Object { $_.available -and [int]$_.cost -le [int]$state.economy.gold }).Count -gt 0
             )
             if (-not $hasCurrentOfferReceipt) { $catalog.Remove('recruit') }
+        }
+    }
+    if ($catalog.ContainsKey('dialogueSelect') -or $catalog.ContainsKey('dialogueContinue')) {
+        $conversation = if ($state) { $state.context.conversation } else { $null }
+        $clickableDialogueOptions = if ($conversation) { @($conversation.options | Where-Object { $_.clickable }) } else { @() }
+        if ($catalog.ContainsKey('dialogueSelect') -and $clickableDialogueOptions.Count -eq 0) { $catalog.Remove('dialogueSelect') }
+        if ($catalog.ContainsKey('dialogueContinue') -and (-not $conversation -or $clickableDialogueOptions.Count -gt 0)) { $catalog.Remove('dialogueContinue') }
+        $encounteredPartyIsObservedBandit = @($state.nearbyParties | Where-Object { [string]$_.id -ceq [string]$state.context.encounteredPartyId -and [string]$_.type -ceq 'bandit' }).Count -eq 1
+        $banditWaitingForBarterProbe = (
+            [bool]$state.context.encounterActive -and [string]$state.context.menuId -ceq 'encounter_meeting' -and
+            $encounteredPartyIsObservedBandit -and $conversation -and $clickableDialogueOptions.Count -eq 0 -and $catalog.ContainsKey('barterOptions')
+        )
+        $nativeBarterProbeWasRejected = (
+            ([string]$DecisionFeedback.kind -ceq 'native-action-rejected' -and [string]$DecisionFeedback.requestedAction -ceq 'barterOptions') -or
+            ([string]$DecisionFeedback.priorFeedback.kind -ceq 'native-action-rejected' -and [string]$DecisionFeedback.priorFeedback.requestedAction -ceq 'barterOptions')
+        )
+        $nativeSafePassageOfferAccepted = (
+            $PreviousActionReceipt -and [string]$PreviousActionReceipt.action -ceq 'barterOffer' -and
+            [string]$PreviousActionReceipt.status -ceq 'completed' -and [bool]$PreviousActionReceipt.data.accepted
+        )
+        if ($banditWaitingForBarterProbe) {
+            if ($nativeBarterProbeWasRejected -or $nativeSafePassageOfferAccepted) { $catalog.Remove('barterOptions') }
+            else { $catalog.Remove('dialogueContinue') }
+        }
+    }
+    $barterMutationRequested = $false
+    foreach ($barterActionName in @('barterEdit','barterReset','barterAutoBalance','barterOffer','barterCancel')) {
+        if ($catalog.ContainsKey($barterActionName)) { $barterMutationRequested = $true; break }
+    }
+    if ($barterMutationRequested) {
+        $barterOptions = $null
+        if ($PreviousActionReceipt -and [string]$PreviousActionReceipt.status -ceq 'completed') {
+            if ([string]$PreviousActionReceipt.action -ceq 'barterOptions') { $barterOptions = $PreviousActionReceipt.data }
+            elseif ($PreviousActionReceipt.data.updatedOptions) { $barterOptions = $PreviousActionReceipt.data.updatedOptions }
+        }
+        $barterActionGate = Get-BarterActionGate -BarterOptions $barterOptions -PreviousActionReceipt $PreviousActionReceipt -BalancedBarterSessionId $script:BalancedBarterSessionId
+        if (-not $barterActionGate.SessionAvailable) {
+            foreach ($name in @('barterEdit','barterReset','barterAutoBalance','barterOffer','barterCancel')) { $catalog.Remove($name) }
+        }
+        else {
+            foreach ($name in $barterActionGate.HideActions) { $catalog.Remove([string]$name) }
         }
     }
     return $catalog
@@ -326,6 +378,9 @@ function Convert-DecisionToCli {
 
 try {
     $trace = @()
+    $script:HarnessEvents = @()
+    $script:BalancedBarterSessionId = $null
+    $safePassageFixtureInjected = $false
     $loopRunId = [Guid]::NewGuid().ToString('N')
     $script:AgentCheckpoint = $null
     $loopStartedUtc = [DateTime]::UtcNow
@@ -414,7 +469,8 @@ try {
             { throw "Agent decision loop exceeded its $MaxElapsedSeconds-second wall-clock budget." }
         $nativeMoveArrival = $null
         $decisionFeedbackBeforeStep = $decisionFeedback
-        $actionCatalog = Get-EffectiveActionCatalog $observation $previousActionReceipt
+        $actionCatalog = Get-EffectiveActionCatalog $observation $previousActionReceipt $decisionFeedback
+        $controlCatalog = @(Get-EffectiveControlCatalog -Observation $observation -PreviousActionReceipt $previousActionReceipt)
         $arrivalActions = @($script:AllowedActions.Keys | Sort-Object)
         if (($arrivalActions -join ',') -ceq 'mapSettlementTargets,move' -and [string]$previousActionReceipt.action -ceq 'move') {
             $moveTargetId = [string]$previousActionReceipt.state.location.targetSettlementId
@@ -429,7 +485,7 @@ try {
             iteration = $index
             goal = $Goal
             allowedActions = @($actionCatalog.GetEnumerator() | Sort-Object -Property Key | ForEach-Object { [ordered]@{ action = [string]$_.Key; arguments = @($_.Value) } })
-            allowedControls = @([ordered]@{ control = 'observeAgain'; waitSecondsMinimum = 1; waitSecondsMaximum = 10; description = 'Wait briefly outside the game, then read fresh Native state without issuing a game action.' })
+            allowedControls = $controlCatalog
             nativeMoveArrival = $nativeMoveArrival
             checkpointContext = if ($script:AgentCheckpoint) { [ordered]@{ schemaVersion = $script:AgentCheckpoint.schemaVersion; campaignInstanceId = $script:AgentCheckpoint.campaignInstanceId; taskId = $script:AgentCheckpoint.taskId; status = $script:AgentCheckpoint.status; lastObservedSummary = $script:AgentCheckpoint.lastObservedSummary; pendingAction = $script:AgentCheckpoint.pendingAction; lastRecovery = $script:AgentCheckpoint.lastRecovery } } else { $null }
             observation = (Convert-ObservationForDecision $observation)
@@ -458,14 +514,29 @@ try {
         }
         $providerRejectedDecision = ($decision -and $decision.decisionRejected -eq $true)
         $rejectedRequestedAction = if ($providerRejectedDecision) { [string]$decision.requestedAction } else { [string]$decision.action }
+        $providerRejectionMessage = $null
         if ($providerRejectedDecision) {
             if ([string]::IsNullOrWhiteSpace($rejectedRequestedAction) -or [string]::IsNullOrWhiteSpace([string]$decision.reason))
                 { throw 'Provider decisionRejected response must include requestedAction and reason.' }
             if ($rejectedRequestedAction -ceq 'advance') { throw 'advance is a Harness-only deterministic time step and is unavailable to Agent decision providers.' }
-            if ([string]$decision.reason -cne 'not-in-current-action-catalog') { throw 'Provider decisionRejected response used an unrecognized rejection reason.' }
             $reportedCatalog = @($decision.availableActions | ForEach-Object { [string]$_ } | Sort-Object -Unique)
             $actualCatalog = @($actionCatalog.Keys | ForEach-Object { [string]$_ } | Sort-Object -Unique)
             if (($reportedCatalog -join ',') -cne ($actualCatalog -join ',')) { throw 'Provider decisionRejected response did not preserve the current validated action catalog.' }
+            if ([string]$decision.reason -ceq 'not-in-current-action-catalog') {
+                $providerRejectionMessage = "Decision action '$rejectedRequestedAction' is not currently available from the latest Native observation. Provider reason='$($decision.reason)'."
+            }
+            elseif ([string]$decision.reason -ceq 'invalid-action-arguments') {
+                if (-not $actionCatalog.ContainsKey($rejectedRequestedAction)) { throw 'Provider reported invalid arguments for an action absent from the current catalog.' }
+                $actualArguments = @($actionCatalog[$rejectedRequestedAction] | ForEach-Object { [string]$_ })
+                $reportedArguments = @($decision.allowedArguments | ForEach-Object { [string]$_ })
+                $invalidArguments = @($decision.invalidArguments | ForEach-Object { [string]$_ } | Sort-Object -Unique)
+                if (($reportedArguments -join ',') -cne ($actualArguments -join ',') -or $invalidArguments.Count -eq 0 -or @($invalidArguments | Where-Object { $_ -in $actualArguments }).Count -gt 0 -or -not [bool]$decision.noNativeActionSent) {
+                    throw 'Provider invalid-argument rejection did not match the current action parameter list or confirm that no Native action was sent.'
+                }
+                $allowedArgumentText = if ($actualArguments.Count -gt 0) { $actualArguments -join ', ' } else { 'none' }
+                $providerRejectionMessage = "Decision action '$rejectedRequestedAction' supplied unsupported argument(s): $($invalidArguments -join ', '). Allowed arguments: $allowedArgumentText. No Native action was sent."
+            }
+            else { throw 'Provider decisionRejected response used an unrecognized rejection reason.' }
         }
         if ($decision -and $decision.observeAgain -eq $true) {
             $waitSeconds = 0
@@ -484,12 +555,14 @@ try {
                 $feedbackReason = [string]$observeAgainPolicy.Reason + ' No wait or game action was sent.'
                 $nextObservation = Invoke-AgentCli 'state' @{} "$CommandPrefix-rejected-control-observe-$index"
                 if ($nextObservation.status -ne 'completed' -or -not $nextObservation.state) { throw 'Fresh Native observation after stale observeAgain was not completed.' }
-                $decisionFeedback = [ordered]@{ kind = 'control-unavailable'; requestedControl = 'observeAgain'; message = $feedbackReason; noNativeActionSent = $true }
+                $decisionFeedback = [ordered]@{ kind = 'control-unavailable'; requestedControl = 'observeAgain'; message = $feedbackReason; noNativeActionSent = $true; priorFeedback = $decisionFeedbackBeforeStep }
                 $rejectionReceipt = [ordered]@{ protocolVersion = 1; control = 'observeAgain'; status = 'rejected-before-native'; error = $feedbackReason; noNativeActionSent = $true; campaignDay = $nextObservation.campaignDay }
                 $trace += [pscustomobject]@{
                     iteration = $index
                     observationBefore = $observation
                     previousActionReceipt = $previousActionReceipt
+                    allowedActions = @($actionCatalog.Keys | Sort-Object)
+                    allowedControls = $controlCatalog
                     decisionFeedback = $decisionFeedbackBeforeStep
                     decision = $decision
                     timing = $stepTiming
@@ -522,6 +595,8 @@ try {
                 iteration = $index
                 observationBefore = $observation
                 previousActionReceipt = $previousActionReceipt
+                allowedActions = @($actionCatalog.Keys | Sort-Object)
+                allowedControls = $controlCatalog
                 decisionFeedback = $decisionFeedbackBeforeStep
                 decision = $decision
                 timing = $stepTiming
@@ -553,6 +628,8 @@ try {
                 iteration = $index
                 observationBefore = $observation
                 previousActionReceipt = $previousActionReceipt
+                allowedActions = @($actionCatalog.Keys | Sort-Object)
+                allowedControls = $controlCatalog
                 decisionFeedback = $decisionFeedbackBeforeStep
                 decision = $decision
                 timing = $stepTiming
@@ -569,19 +646,23 @@ try {
             break
         }
         try {
-            if ($providerRejectedDecision) { throw "Decision action '$rejectedRequestedAction' is not currently available from the latest Native observation. Provider reason='$($decision.reason)'." }
+            if ($providerRejectedDecision) { throw $providerRejectionMessage }
             $validated = Convert-DecisionToCli $decision $actionCatalog $observation $previousActionReceipt
         }
         catch {
-            if ($_.Exception.Message -notmatch 'is not currently available from the latest Native observation') { throw }
+            $recoverableProviderRejection = ($providerRejectedDecision -and [string]$decision.reason -in @('not-in-current-action-catalog','invalid-action-arguments'))
+            if (-not $recoverableProviderRejection -and $_.Exception.Message -notmatch 'is not currently available from the latest Native observation') { throw }
             $consecutiveDecisionRejections++
             if ($consecutiveDecisionRejections -gt 2) { throw 'Provider repeated actions that are unavailable in the latest Native state; stopping after two safe pre-Native rejections.' }
             $feedbackReason = $_.Exception.Message
             $nextObservation = Invoke-AgentCli 'state' @{} "$CommandPrefix-rejected-decision-observe-$index"
             if ($nextObservation.status -ne 'completed' -or -not $nextObservation.state) { throw 'Fresh Native observation after an unavailable decision was not completed.' }
-            $decisionFeedback = [ordered]@{ kind = 'action-unavailable'; requestedAction = $rejectedRequestedAction; message = $feedbackReason; noNativeActionSent = $true; availableActions = @($actionCatalog.Keys | Sort-Object) }
+            if ($providerRejectedDecision -and [string]$decision.reason -ceq 'invalid-action-arguments') {
+                $decisionFeedback = [ordered]@{ kind = 'invalid-action-arguments'; requestedAction = $rejectedRequestedAction; invalidArguments = @($decision.invalidArguments); allowedArguments = @($decision.allowedArguments); message = $feedbackReason; noNativeActionSent = $true; availableActions = @($actionCatalog.Keys | Sort-Object) }
+            }
+            else { $decisionFeedback = [ordered]@{ kind = 'action-unavailable'; requestedAction = $rejectedRequestedAction; message = $feedbackReason; noNativeActionSent = $true; availableActions = @($actionCatalog.Keys | Sort-Object) } }
             $rejectionReceipt = [ordered]@{ protocolVersion = 1; action = $rejectedRequestedAction; status = 'rejected-before-native'; error = $feedbackReason; noNativeActionSent = $true; campaignDay = $nextObservation.campaignDay }
-            $trace += [pscustomobject]@{ iteration = $index; observationBefore = $observation; previousActionReceipt = $previousActionReceipt; decisionFeedback = $decisionFeedbackBeforeStep; decision = $decision; timing = $stepTiming; actionReceipt = $rejectionReceipt; observationAfter = $nextObservation; actionAttempted = $false; actionExecuted = $false; control = [ordered]@{ kind = 'decision-rejected-before-native' } }
+            $trace += [pscustomobject]@{ iteration = $index; observationBefore = $observation; previousActionReceipt = $previousActionReceipt; allowedActions = @($actionCatalog.Keys | Sort-Object); allowedControls = $controlCatalog; decisionFeedback = $decisionFeedbackBeforeStep; decision = $decision; timing = $stepTiming; actionReceipt = $rejectionReceipt; observationAfter = $nextObservation; actionAttempted = $false; actionExecuted = $false; control = [ordered]@{ kind = 'decision-rejected-before-native' } }
             $observation = $nextObservation
             continue
         }
@@ -618,6 +699,8 @@ try {
                 iteration = $index
                 observationBefore = $observation
                 previousActionReceipt = $previousActionReceipt
+                allowedActions = @($actionCatalog.Keys | Sort-Object)
+                allowedControls = $controlCatalog
                 decisionFeedback = $decisionFeedbackBeforeStep
                 decision = $decision
                 timing = $stepTiming
@@ -641,9 +724,51 @@ try {
             if ($consecutiveDecisionRejections -gt 2) { throw 'Provider repeated actions rejected by Native; stopping after two bounded recovery attempts.' }
             continue
         }
+        if ($validated.Action -ceq 'barterAutoBalance' -and [bool]$actionResult.data.autoBalanced) {
+            $script:BalancedBarterSessionId = [string]$actionResult.data.updatedOptions.sessionId
+        }
+        elseif ($validated.Action -in @('barterEdit','barterReset','barterOffer','barterCancel')) {
+            $script:BalancedBarterSessionId = $null
+        }
         $stepTiming.observationStartedUtc = [DateTime]::UtcNow.ToString('O')
         $observationStartedTicks = [Diagnostics.Stopwatch]::GetTimestamp()
-        $nextObservation = Invoke-AgentCli 'state' @{} "$CommandPrefix-observe-$index"
+        if ($HarnessPrepareSafePassageAfterMove -and -not $safePassageFixtureInjected -and $validated.Action -ceq 'move') {
+            $fixtureCreatedUtc = [DateTime]::UtcNow.ToString('O')
+            $banditFixture = Invoke-AgentCli 'harnessPrepareSafePassageFixture' @{} "$CommandPrefix-harness-safe-passage-$index"
+            if ($banditFixture.status -ne 'completed' -or -not [bool]$banditFixture.data.hostile -or [string]$banditFixture.data.targetPartyId -cne [string]$observation.state.party.id) {
+                throw "The Native Safe Passage Harness fixture failed to create an actively hostile bandit targeting the MainParty: $($banditFixture.error)"
+            }
+            $script:HarnessEvents += [ordered]@{
+                kind = 'native-safe-passage-bandit-prepared'
+                createdUtc = $fixtureCreatedUtc
+                partyId = [string]$banditFixture.data.partyId
+                memberCount = [int]$banditFixture.data.memberCount
+                banditStrength = [double]$banditFixture.data.banditStrength
+                requiredBanditStrength = [double]$banditFixture.data.requiredBanditStrength
+                playerSidePartyCount = [int]$banditFixture.data.playerSidePartyCount
+                playerSideMemberCount = [int]$banditFixture.data.playerSideMemberCount
+            }
+            $safePassageFixtureInjected = $true
+            $encounterDeadline = [DateTime]::UtcNow.AddSeconds(30)
+            $nextObservation = $null
+            while ([DateTime]::UtcNow -lt $encounterDeadline) {
+                $encounterProbe = Invoke-AgentCli 'state' @{} "$CommandPrefix-harness-safe-passage-observe-$index-$([Guid]::NewGuid().ToString('N'))"
+                $talkOption = @($encounterProbe.state.context.conversation.options | Where-Object { $_.clickable -and $_.id -eq 'bandit_start_defender_2' } | Select-Object -First 1)
+                if ($encounterProbe.status -eq 'completed' -and [bool]$encounterProbe.state.context.encounterActive -and $talkOption.Count -eq 1) {
+                    $nextObservation = $encounterProbe
+                    $script:HarnessEvents += [ordered]@{
+                        kind = 'native-safe-passage-conversation-observed'
+                        observedUtc = [DateTime]::UtcNow.ToString('O')
+                        partyId = [string]$encounterProbe.state.context.encounteredPartyId
+                        menuId = [string]$encounterProbe.state.context.menuId
+                    }
+                    break
+                }
+                Start-Sleep -Milliseconds 200
+            }
+            if (-not $nextObservation) { throw 'The Native hostile bandit fixture did not produce its visible Safe Passage conversation within 30 seconds.' }
+        }
+        else { $nextObservation = Invoke-AgentCli 'state' @{} "$CommandPrefix-observe-$index" }
         $stepTiming.observationCompletedUtc = [DateTime]::UtcNow.ToString('O')
         $stepTiming.observationElapsedMilliseconds = [Math]::Round(([Diagnostics.Stopwatch]::GetTimestamp() - $observationStartedTicks) * 1000.0 / [Diagnostics.Stopwatch]::Frequency, 2)
         if ($nextObservation.status -ne 'completed' -or -not $nextObservation.state) { throw 'Post-action observation was not completed.' }
@@ -651,6 +776,8 @@ try {
             iteration = $index
             observationBefore = $observation
             previousActionReceipt = $previousActionReceipt
+            allowedActions = @($actionCatalog.Keys | Sort-Object)
+            allowedControls = $controlCatalog
             decisionFeedback = $decisionFeedbackBeforeStep
             decision = $decision
             timing = $stepTiming
@@ -687,6 +814,7 @@ try {
         decisions = $trace.Count
         actionsExecuted = @($trace | Where-Object { $_.actionExecuted }).Count
         termination = $termination
+        harnessEvents = @($script:HarnessEvents)
         trace = $trace
     } | ConvertTo-Json -Depth 20
 }
@@ -697,6 +825,7 @@ catch {
         error = $_.Exception.Message
         timing = $script:LastLoopTiming
         lastObservation = $observation
+        harnessEvents = @($script:HarnessEvents)
         trace = @($trace)
     } | ConvertTo-Json -Depth 20 -Compress
     exit 1

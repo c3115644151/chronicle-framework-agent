@@ -35,28 +35,64 @@ if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'dynamicAvailabilityRecovery') {
     [pscustomobject]@{ action = 'mapSettlementTargets'; arguments = @{}; rationale = 'Recover from the unavailable recruitment proposal using a currently listed map action.' } | ConvertTo-Json -Compress
     exit 0
 }
+if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'invalidArgumentRecovery') {
+    $catalogNames = @($request.allowedActions | ForEach-Object { [string]$_.action } | Sort-Object -Unique)
+    if ($request.iteration -eq 1) {
+        if ($catalogNames.Count -ne 1 -or $catalogNames[0] -cne 'state') { throw 'Invalid-argument recovery regression must be scoped to the read-only state action.' }
+        [pscustomobject]@{ decisionRejected = $true; requestedAction = 'state'; reason = 'invalid-action-arguments'; invalidArguments = @('candidateId'); allowedArguments = @(); availableActions = $catalogNames; noNativeActionSent = $true } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if ([string]$request.decisionFeedback.kind -cne 'invalid-action-arguments' -or
+        [string]$request.decisionFeedback.requestedAction -cne 'state' -or
+        @($request.decisionFeedback.invalidArguments).Count -ne 1 -or [string]$request.decisionFeedback.invalidArguments[0] -cne 'candidateId' -or
+        @($request.decisionFeedback.allowedArguments).Count -ne 0 -or -not [bool]$request.decisionFeedback.noNativeActionSent -or
+        $request.previousActionReceipt -or [string]$request.observation.state.identity.heroId -cne 'main_hero') {
+        throw 'Invalid-argument feedback did not provide a fresh unchanged Native observation, the exact allowed parameters, and confirmation that no action was sent.'
+    }
+    [pscustomobject]@{ action = 'state'; arguments = @{}; rationale = 'Retry the listed zero-argument observation without the rejected candidateId.' } | ConvertTo-Json -Compress
+    exit 0
+}
+if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'unavailableDialogueRecovery') {
+    $catalogNames = @($request.allowedActions | ForEach-Object { [string]$_.action } | Sort-Object -Unique)
+    if ($catalogNames -notcontains 'mapSettlementTargets' -or $catalogNames -notcontains 'move') { throw 'Current Native map observation/movement actions must remain available on an unobstructed map.' }
+    if ($request.iteration -eq 1) {
+        if ($catalogNames -contains 'dialogueSelect' -or $request.observation.state.context.conversation) { throw 'Dialogue selection leaked into a state with no current Native conversation option.' }
+        [pscustomobject]@{ action = 'dialogueSelect'; arguments = @{ OptionId = 'bandit_start_defender_2' }; rationale = 'Intentional unavailable-dialogue recovery regression.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if ([string]$request.decisionFeedback.kind -cne 'action-unavailable' -or
+        [string]$request.decisionFeedback.requestedAction -cne 'dialogueSelect' -or
+        -not [bool]$request.decisionFeedback.noNativeActionSent -or
+        $catalogNames -contains 'dialogueSelect' -or $request.previousActionReceipt) {
+        throw 'Unavailable dialogue feedback did not report a Native pre-call rejection and the restricted fresh action catalog.'
+    }
+    [pscustomobject]@{ action = 'mapSettlementTargets'; arguments = @{}; rationale = 'Recover from the unavailable dialogue action using a currently visible read tool.' } | ConvertTo-Json -Compress
+    exit 0
+}
 if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'unlistedResumeRecovery') {
     $state = $request.observation.state
     $receipt = $request.previousActionReceipt
     $catalogNames = @($request.allowedActions | ForEach-Object { [string]$_.action } | Sort-Object -Unique)
     if ($catalogNames -contains 'resume') { throw 'The narrowly scoped travel goal must not expose explicit clock control.' }
     if ([string]$request.decisionFeedback.kind -ceq 'control-unavailable') {
+        $arrived = ([string]$state.location.currentSettlementId -ceq [string]$receipt.state.location.targetSettlementId -and -not [bool]$state.party.isMoving)
+        $encounterStoppedTime = ([bool]$state.context.encounterActive -and [string]$state.context.timeControlMode -ceq 'Stop')
         if ([string]$request.decisionFeedback.requestedControl -cne 'observeAgain' -or -not [bool]$request.decisionFeedback.noNativeActionSent -or
-            [string]$receipt.action -cne 'move' -or [string]$state.location.currentSettlementId -cne [string]$receipt.state.location.targetSettlementId -or
-            [bool]$state.party.isMoving) { throw 'Stale observeAgain rejection did not return the arrived Native state and prior move receipt.' }
-        [pscustomobject]@{ done = $true; reason = 'The stale wait was rejected without an action; fresh Native state confirms arrival.' } | ConvertTo-Json -Compress
+            [string]$receipt.action -cne 'move' -or (-not $arrived -and -not $encounterStoppedTime) -or @($request.allowedControls).Count -ne 0) { throw 'Stale observeAgain rejection did not return a reached target or paused encounter, preserve the prior Move receipt, and hide the unavailable scheduler control.' }
+        [pscustomobject]@{ done = $true; reason = if ($arrived) { 'The stale wait was rejected without an action; fresh Native state confirms arrival.' } else { 'The stale wait was rejected without an action; a Native encounter stopped Campaign time and requires a separate strategy.' } } | ConvertTo-Json -Compress
         exit 0
     }
     if ([string]$request.decisionFeedback.kind -ceq 'action-unavailable') {
         $arrivalAfterRejection = [string]$request.nativeMoveArrival.status -ceq 'arrived'
+        $encounterAfterRejection = ([bool]$state.context.encounterActive -and [string]$state.context.timeControlMode -ceq 'Stop')
         if ([string]$request.decisionFeedback.requestedAction -cne 'resume' -or -not [bool]$request.decisionFeedback.noNativeActionSent -or
             [string]$receipt.action -cne 'move' -or [string]$receipt.status -cne 'completed' -or
             [string]$receipt.state.context.timeControlMode -cne 'StoppablePlay' -or
-            (-not $arrivalAfterRejection -and ([string]$state.context.timeControlMode -cne 'StoppablePlay' -or -not [bool]$state.party.isMoving))) {
+            (-not $arrivalAfterRejection -and -not $encounterAfterRejection -and ([string]$state.context.timeControlMode -cne 'StoppablePlay' -or -not [bool]$state.party.isMoving))) {
             throw 'Resume rejection did not preserve the Native move receipt and either ongoing natural movement or arrival after consuming feedback.'
         }
-        if ($arrivalAfterRejection) {
-            [pscustomobject]@{ observeAgain = $true; waitSeconds = 5; reason = 'Intentional stale-control regression: request one wait after Native arrival so the loop must reject it safely.' } | ConvertTo-Json -Compress
+        if ($arrivalAfterRejection -or $encounterAfterRejection) {
+            [pscustomobject]@{ observeAgain = $true; waitSeconds = 5; reason = 'Intentional stale-control regression: request one wait after arrival or a stopped encounter so the loop must reject it safely.' } | ConvertTo-Json -Compress
             exit 0
         }
         [pscustomobject]@{ observeAgain = $true; waitSeconds = 5; reason = 'The Native move continues in StoppablePlay; naturally advancing time needs no resume action.' } | ConvertTo-Json -Compress
@@ -74,6 +110,10 @@ if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'unlistedResumeRecovery') {
     }
     if ([string]$request.nativeMoveArrival.status -ceq 'arrived' -and [string]$receipt.action -ceq 'move') {
         [pscustomobject]@{ observeAgain = $true; waitSeconds = 5; reason = 'Intentional stale-control regression: ask to wait after Native arrival.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if ([string]$receipt.action -ceq 'move' -and [bool]$state.context.encounterActive -and [string]$state.context.timeControlMode -ceq 'Stop') {
+        [pscustomobject]@{ observeAgain = $true; waitSeconds = 5; reason = 'Intentional paused-encounter regression: the party movement flag may remain true while Native Campaign time is stopped.' } | ConvertTo-Json -Compress
         exit 0
     }
     if ([string]$receipt.action -ceq 'move' -and [bool]$state.party.isMoving -and [string]$state.context.timeControlMode -ceq 'StoppablePlay') {

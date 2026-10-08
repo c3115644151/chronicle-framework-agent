@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.64
+Contract version: 7.79
 
 ## 目标与边界
 
@@ -81,7 +81,7 @@ Agent decision provider may terminate a bounded loop with an explicit `{done: tr
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Dev\ChronicleFramework\Run-Harness.ps1 -Phase All
 ```
 
-AgentLoop 的 `observeAgain` 是循环调度控制，不属于游戏动作：只允许在 Native `move` 已完成、Campaign Map仍在自然运行、主队仍移动且目标尚未抵达时，请求 1–10 秒的宿主侧等待；允许的Native时间档是 `StoppablePlay` 或 `UnstoppableFastForward`。遭遇、菜单、弹窗或停止时间都不能靠宿主等待解决，执行器会拒绝该等待、刷新Native观察并把 `control-unavailable` 反馈给模型，不发送暂停/快进/时间步进命令，也不重复下达移动。若模型推理期间主队已自然抵达目标，同样将过期等待作为无副作用拒绝反馈；没有匹配的已完成Move回执则失败关闭。Native拒绝一个动作后，循环把失败动作和原因放在本步回执/反馈中，但保留上一个已完成的Native回执供重规划使用，不能把失败提案当成最后一次成功游戏状态。执行器会检查条件，Native `currentSettlementId` 与移动回执的目标一致时，只有“移动到达”这一窄目标会把 `nativeMoveArrival` 送给模型；循环另可设墙钟总时限，超限失败并留收据。为了避免无关背包/技能内容和上一回执的完整状态副本挤占短上下文，地图旅行白名单严格为 `mapSettlementTargets,move` 时，模型输入使用 `campaign-map-travel` 字段视图；地图旅行+招募白名单时使用 `campaign-settlement-recruitment`，只传相关位置、队伍/金币、时间、危险和当前招募菜单入口。两种视图都将模型侧上一回执压为有限的 `stateSummary`，聚落目标/招募报价也各自摘要；原生观察/回执、执行器校验和游戏状态不被裁剪。Provider将UTF-8 JSON作为字节发送；面对模型输出的 positional array，只在元素数精确等于当前动作参数列表长度时按列表顺序映射，最终仍由执行器检查参数名/值。缺少模型 rationale 时会明确标为 `rationaleSource=provider-fallback`，不会伪称为模型理由。`LiveModelArrival` 与 `LiveModelRecruitment` 是显式、耗时的选择性阶段（不进入 `All`），使用真实配置Provider和disposable战役。前者验收地图移动、限界重新观察、Native抵达与模型停止；后者继续检查当前Settlement菜单中可用的 `recruit_volunteers` 入口，再通过既有适配器的Native RecruitmentVM offer/transaction招入一名志愿兵，验证主队/金币/offer变化。`recruitOptions/recruit` 不打开Gauntlet招募窗口、不模拟焦点，因此不能声称已经验证玩家可视招募弹窗路径。两阶段均验证Campaign自然时间、窗口视频关键帧、源存档hash及进程清理。LiveModel Harness优先从进程环境读取服务配置，缺项时才继承已有的用户级环境值；阶段内的超时/输出Token覆盖只作用于测试子进程并在结束恢复。
+AgentLoop 的 `observeAgain` 是循环调度控制，不属于游戏动作：只允许在 Native `move` 已完成、Campaign Map仍在自然运行、主队仍移动且目标尚未抵达时，请求 1–10 秒的宿主侧等待；允许的Native时间档是 `StoppablePlay` 或 `UnstoppableFastForward`。遭遇、菜单、弹窗或停止时间都不能靠宿主等待解决，执行器会拒绝该等待、刷新Native观察并把 `control-unavailable` 反馈给模型，不发送暂停/快进/时间步进命令，也不重复下达移动。若模型推理期间主队已自然抵达目标，同样将过期等待作为无副作用拒绝反馈；没有匹配的已完成Move回执则失败关闭。Native拒绝一个动作后，循环把失败动作和原因放在本步回执/反馈中，但保留上一个已完成的Native回执供重规划使用，不能把失败提案当成最后一次成功游戏状态。执行器会检查条件，Native `currentSettlementId` 与移动回执的目标一致时，只有“移动到达”这一窄目标会把 `nativeMoveArrival` 送给模型；循环另可设墙钟总时限，超限失败并留收据。为了避免无关背包/技能内容和上一回执的完整状态副本挤占短上下文，地图旅行白名单严格为 `mapSettlementTargets,move` 时，模型输入使用 `campaign-map-travel` 字段视图；地图旅行+招募白名单时使用 `campaign-settlement-recruitment`，只传相关位置、队伍/金币、时间、危险和当前招募菜单入口。两种视图都将模型侧上一回执压为有限的 `stateSummary`，聚落目标/招募报价也各自摘要；原生观察/回执、执行器校验和游戏状态不被裁剪。Provider将UTF-8 JSON作为字节发送；面对模型输出的 positional array，只在元素数精确等于当前动作参数列表长度时按列表顺序映射，最终仍由执行器检查参数名/值。缺少模型 rationale 时会明确标为 `rationaleSource=provider-fallback`，不会伪称为模型理由。`LiveModelArrival`、`LiveModelRecruitment` 与 `LiveModelSafePassageRecruitment` 是显式、耗时的选择性阶段（不进入 `All`），使用真实配置Provider和disposable战役。`LiveModelSafePassageRecruitment`用视觉Harness专用的Native Bandit fixture，在一次Move后创建当前可观察的hostile party，等待原版`encounter_meeting`真实出现，再让模型通过`dialogueSelect`与Native BarterVM完成和平通行并继续招募；夹具详情只进Harness收据，不进入模型观察。`recruitOptions/recruit` 不打开Gauntlet招募窗口、不模拟焦点，因此不能声称已经验证玩家可视招募弹窗路径。各阶段均验证Campaign自然时间、窗口视频关键帧、源存档hash及进程清理。LiveModel Harness优先从进程环境读取服务配置，缺项时才继承已有的用户级环境值；阶段内的超时/输出Token覆盖只作用于测试子进程并在结束恢复。
 
 Campaign checkpoint v1把Agent目标与最后一个**已确认**的Native动作回执作为短JSON字符串交给现有`ChronicleCampaignBehavior.SyncData(IDataStore)`随Native Campaign存档保存；本体另保存一个Campaign实例ID，防止Checkpoint错配到不同存档。`agentCheckpointGet/Set`仅在Campaign Map读写且限定checkpoint最大65,536字节；Checkpoint只表示存档状态，不替代当前观察。`Agent-DecisionLoop -PersistCheckpoint`先写目标并在每个已完成动作+后观察后更新紧凑receipt；`-ResumeCheckpoint`先获取全新的Native `state`，校验schema和Campaign ID，再加载goal/receipt供真实模型继续。Provider返回`done`只标记为`provider-stopped`，不是Evaluator证明目标成功。已确认receipt用于避免重放Move/Recruit；真正的“游戏或Agent在Native副作用提交中途崩溃”尚无Exactly-once保证，本阶段不覆盖。`CheckpointPersistence`确定性阶段只验证Native Save/Load的字段往返；`LiveModelResume`才验证无重新输入goal的真实模型恢复，两者均用专属opt-in阶段，禁止写正式存档或伪装成全生命周期崩溃恢复。
 
@@ -218,6 +218,18 @@ stop()
 每个动作必须有命令 ID、前置条件、完成证据、超时、中断、失败分类和幂等边界。命令送达不等于动作成功，动作后必须重新观察。
 
 Agent决策循环的Harness原型使用请求schema v2：每轮把明确Goal、由执行器同一白名单生成的可用动作/参数名、当前结构化观察以及上一Native action receipt一起发送给Provider。每步记录Provider响应、原版动作和后验观察的UTC时点与耗时，供真实游戏窗体视频按同一时间轴抽取关键帧。`AllowedActionNames`可选地同时缩窄模型可见目录与执行端许可；W3-A首个真实模型尝试只开放只读`mapSettlementTargets`和原版移动`move`。决定仍在Provider返回后由本地白名单/参数校验，模型不直接调用游戏API；Harness确定性Provider只验证上下文契约，不算模型自主能力，也不是玩家交付运行时。
+
+Agent决策循环的 `allowedControls` 与游戏动作目录分离，但同样按当前Native状态动态生成。只有执行器确认上一条成功移动仍在地图上自然推进、主队仍在移动且目标未到达时，才向模型暴露宿主侧 `observeAgain`；遭遇、对话/菜单、询问弹窗、暂停时间或无有效移动回执时，控制目录为空。执行器仍会在模型返回后重新核验，因此目录是决策约束和清晰反馈，不是安全边界本身。每轮收据同时记录交给模型的动作与控制目录，便于判断模型是选择了错误动作，还是当时根本没有看到可用操作。
+
+移动中的新鲜观察不要求模型专门发起等待：若模型在下一轮直接调用一个允许的只读原版观察动作，且该轮输入明确看到主队仍在目标路上、Campaign时间自然推进，则这是有效的旅途观察；它和宿主侧 `observeAgain` 一样，只读状态、不改变游戏时钟。若短途移动在下一次决策前已到达，则目标Settlement的Native菜单观察与移动期间Campaign时间增量共同构成有效后验观察，不要求再发起多余等待。
+
+在劫匪无选项对话阶段，执行器按状态区分两种转换：当前BarterVM尚未建立时先检查一次原生报价；该检查被Native拒绝后开放 `dialogueContinue`，让原版对话继续建立谈判界面。当前Native BarterOffer已接受后若对话仍暂时没有选项，则直接开放Continue并隐藏过期报价查询，避免在交易已完成后重新探测失效BarterVM。
+
+Provider发现模型选择了当前合法动作、但参数名超出该动作当轮的白名单时，不得静默删掉额外参数，也不应把它伪装成游戏内动作失败。它返回带当前动作目录、合法参数名、非法参数名且明确标注“未发送给Native”的结构化拒绝；循环重新读取原版状态，把拒绝原因交还模型，并限制连续重试次数。其它参数形状错误或缺少必填参数继续失败关闭，直到建立对应的可验证恢复契约。
+
+Native Barter目录按当前VM会话和成功回执逐阶段开放：没有当前BarterVM时只允许读取选项；读到当前Safe Passage报价后开放自动平衡，暂不允许提交；自动平衡成功后在同一会话中隐藏重复读取/重复平衡，开放当前可用的Offer。报价编辑、重置、取消或提交会使已平衡标记失效；Offer成功则清除会话标记并转回原版谈话阶段。这样模型仍决定是否调整/提交，但不会被反复可用的“读取/自动平衡”按钮困在无进展循环。
+
+真实模型验收收据记录配置中的模型标识、Git源码提交、被跟踪文件是否干净、Campaign日区间与运行UTC区间；不记录API密钥或服务端点。用于结束产品Issue的真实模型结果应在已提交源码上复跑，使收据提交号就是实际被测试的代码版本。
 
 时间模式运行时世界自然推进；移动不补发 `advance`。地图点击副作用和 WaitMenu 自管时钟按原版复现。`advance/pause/resume` 仅显式 Harness 时钟工具，不嵌入普通动作。
 
@@ -391,7 +403,15 @@ Agent决策循环的Harness原型使用请求schema v2：每轮把明确Goal、�
 
 `LiveModelRecruitmentEvaluation` 是基于该Native基线的真实本地模型opt-in阶段：固定同一seed、真实Provider、五次独立Runtime运行，预先要求5/5成功、每次墙钟≤180秒/CampaignDay≤0.1、一次move与一次recruit、无重复或越权副作用、Visual覆盖≥90%、模板hash不变且进程清理；候选模型结果不得反向改阈值。它只评估当前地图→志愿兵目标，不代表跨seed或整个产品成熟度。
 
-DecisionLoop 的动作白名单仍是产品能力上限，但模型每轮看到的是当前Native观察决定的有效动作目录。地图状态/无可用Settlement菜单时不暴露 `recruitOptions`/`recruit`；当前Settlement菜单启用原版 `recruit_volunteers` 后才开放报价读取；仅上一回执属于同一Settlement的Native报价、且当前主队有容量和可支付选项时才开放 `recruit`。提交参数还会与当前菜单、最新报价、Gold及队伍容量二次比对。模型选了未开放动作时，执行器不把它发给Native，会刷新观察、提供明确反馈并允许有限重规划；Provider将目录外动作转换成带动作名和目录的结构化拒绝回执，DecisionLoop保留上一条已确认Native回执并安全重规划；Native自身拒绝同样会记录回执、重新观察再决定，重复拒绝有上限并安全停止。AgentLoop确定性回归不仅在地图上故意提出不可用招募，也在报价环节故意提交不存在的offer ID；另在 `StoppablePlay` 的原版地图移动中故意提出目录外 `resume`，确认没有Native时钟命令、Move重复或Campaign时钟档修改，收到拒绝反馈后仅用有限 `observeAgain`继续。还会在主队已自然抵达目标时故意提出一次过期 `observeAgain`，确认它被安全拒绝、没有宿主等待/Native动作，并将当前抵达状态反馈给Provider。该目录用于精确表达动作前置条件，不替代Native最终校验。
+DecisionLoop 的动作白名单仍是产品能力上限，但模型每轮看到的是当前Native观察决定的有效动作目录。地图状态/无可用Settlement菜单时不暴露 `recruitOptions`/`recruit`；当前Settlement菜单启用原版 `recruit_volunteers` 后才开放报价读取；仅上一回执属于同一Settlement的Native报价、且当前主队有容量和可支付选项时才开放 `recruit`。对话层只在当前Native Conversation有可点击选项时开放 `dialogueSelect`，没有选项时才开放 `dialogueContinue`；Barter修改/平衡/提交只在最近的`barterOptions`/更新回执对应有效Native VM会话时开放。提交参数还会与当前菜单、最新报价、Gold及队伍容量二次比对。模型选了未开放动作时，执行器不把它发给Native，会刷新观察、提供明确反馈并允许有限重规划；Provider将目录外动作转换成带动作名和目录的结构化拒绝回执，DecisionLoop保留上一条已确认Native回执并安全重规划；Native自身拒绝同样会记录回执、重新观察再决定，重复拒绝有上限并安全停止。AgentLoop确定性回归不仅在地图上故意提出不可用招募，也在报价环节故意提交不存在的offer ID；另在 `StoppablePlay` 的原版地图移动中故意提出目录外 `resume`，确认没有Native时钟命令、Move重复或Campaign时钟档修改，收到拒绝反馈后仅用有限 `observeAgain`继续。还会在主队已自然抵达目标时故意提出一次过期 `observeAgain`，确认它被安全拒绝、没有宿主等待/Native动作，并将当前抵达状态反馈给Provider。该目录用于精确表达动作前置条件，不替代Native最终校验。
+
+`LiveModelSafePassageRecruitment` 是独立 opt-in 的真实模型分支评测，不进入 `All`：从一次实际 Native Move 后由 Harness 在视觉测试客户端内创建敌对Looters并等待原版`encounter_meeting`；夹具回执单独存于Harness trace，不进入模型prompt。模型仅按当前Conversation选非战斗谈判，通过Native Safe Passage BarterVM当前报价、Auto Balance与Offer流程清除拦截，重新观察地图、继续移动并完成一名志愿兵招募。遇到没有可点击对话选项的Bandit会面时，先用只读`barterOptions`探测Safe Passage BarterVM；仅当该VM尚未就绪且Native会话仍处于无选项阶段时才继续一次对话，然后重新探测。此顺序避免把BarterVM动作误当成Conversation选项或在停止时钟下重复等待。测试核对敌对强度/本地joiner、选项、Barter金额、移动恢复、Party/Gold变化、Campaign时间、连续视觉关键帧与清理；这一切不授权Agent在正式游戏创建敌队，也不代表实时战斗能力。
+
+`LiveModelSafePassageRecruitment` 也是一个耗时、需显式指定的独立阶段，不进入 `All`；它验证上述原版劫匪拦截恢复路线。
+
+动作目录会镜像Native入口的前置条件：`move`/`pursue`/`follow`/`hold`/`moveToPoint`只在无Encounter、无当前GameMenu、Escape或Inquiry的Campaign Map出现；Native遭遇期间隐藏`mapSettlementTargets`以避免把地图导航误作当前交互。当前对话没有可点击选项时不暴露`dialogueSelect`。在Bandit无选项过渡句中先探测`barterOptions`；仅当Native表明Safe Passage BarterVM尚未就绪且会话仍无可点击选项时，才放开一次`dialogueContinue`，随后重新探测Barter。Barter修改/自动平衡/Offer只在同一Native BarterVM最近的查询或草稿回执存在时开放；每次Native handler仍复核自己的上下文条件。
+
+遇到遭遇阻塞时，`control-unavailable`反馈另保留上一条`native-action-rejected`的原因；这样模型在同一轮重规划中不会丢失“Barter探测尚未就绪，需要按当前无选项Conversation继续”的信息。
 
 ## 当前执行焦点
 

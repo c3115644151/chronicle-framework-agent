@@ -51,7 +51,7 @@ try {
         { throw 'CHRONICLE_LLM_TEMPERATURE must be a number between 0 and 2.' }
 
     $systemPrompt = @'
-You are the decision maker for a Bannerlord Campaign Agent. Use only the task goal, current observation, previous Native receipt, checkpoint context, decision feedback, and action catalog. Select at most one listed action with only listed arguments. The action catalog is recalculated from the latest Native game state; a missing action is not currently available and must not be guessed or requested. If decisionFeedback says an action was unavailable or rejected, treat it as authoritative, use the fresh observation and current catalog, and choose a different legal next step or stop safely; do not repeat the rejected action without new evidence. Use only observed IDs/values; never invent game state. Never echo input data. Keep rationale/reason short (at most 20 words); do not output analysis. Ordered goal steps are hard preconditions. A mapSettlementTargetsSummary or recruitOptionsSummary is a bounded receipt subset; choose only included IDs/offers. `campaign-map-travel` and `campaign-settlement-recruitment` are deliberately scoped observations; omitted state is unknown, not evidence. If checkpointContext has a pending Native action, compare it with the fresh observation and do not blindly repeat a non-idempotent action. If checkpointContext.lastRecovery.status is `verified`, its action effect is confirmed by fresh Native state; do not repeat that action, and return done when the one-action goal is thereby met. Action arguments should be an object keyed by listed argument names. A positional array is accepted only when its length exactly matches the listed argument-name sequence; the executor still revalidates every value. Return done only when the goal is met or no safe legal action is supported. Return exactly one JSON object and no Markdown.
+You are the decision maker for a Bannerlord Campaign Agent. Use only the task goal, current observation, previous Native receipt, checkpoint context, decision feedback, and current action/control catalogs. Select at most one listed action with only listed arguments. The action catalog is recalculated from the latest Native game state; a missing action is not currently available and must not be guessed or requested. Controls are separate from game actions and are also recalculated from the current state; use only controls in `allowedControls`, and do not request an omitted control. If decisionFeedback says an action or control was unavailable or rejected, treat it as authoritative, use the fresh observation and current catalogs, and choose a different legal next step or stop safely; do not repeat the rejected action/control without new evidence. Use only observed IDs/values; never invent game state. Never echo input data. Keep rationale/reason short (at most 20 words); do not output analysis. Ordered goal steps are hard preconditions. A mapSettlementTargetsSummary or recruitOptionsSummary is a bounded receipt subset; choose only included IDs/offers. `campaign-map-travel` and `campaign-settlement-recruitment` are deliberately scoped observations; omitted state is unknown, not evidence. If checkpointContext has a pending Native action, compare it with the fresh observation and do not blindly repeat a non-idempotent action. If checkpointContext.lastRecovery.status is `verified`, its action effect is confirmed by fresh Native state; do not repeat that action, and return done when the one-action goal is thereby met. Action arguments must use only the listed names; for an action with an empty argument list, omit `arguments` or return `{}`. If the provider reports `invalid-action-arguments`, do not repeat the rejected argument names; rebuild the arguments from the current catalog and retry only if a safe, complete action is possible. A positional array is accepted only when its length exactly matches the listed argument-name sequence; the executor still revalidates every value. Return done only when the goal is met or no safe legal action is supported. Return exactly one JSON object and no Markdown.
 
 For an action, return: {"action":"listed action name","arguments":{},"rationale":"brief evidence-based reason"}
 To stop, return: {"done":true,"reason":"brief evidence-based reason"}
@@ -217,9 +217,10 @@ When `nativeMoveArrival.status` is `arrived`, the current Native observation con
     }
     $allowedArguments = @($allowedAction[0].arguments | ForEach-Object { [string]$_ })
     $normalizedArguments = [ordered]@{}
+    $unsupportedArguments = @()
     if ($decision.arguments -is [System.Management.Automation.PSCustomObject]) {
         foreach ($property in $decision.arguments.PSObject.Properties) {
-            if ($property.Name -notin $allowedArguments) { throw "Model supplied unsupported argument '$($property.Name)' for action '$actionName'." }
+            if ($property.Name -notin $allowedArguments) { $unsupportedArguments += [string]$property.Name; continue }
             $normalizedArguments[$property.Name] = $property.Value
         }
     }
@@ -235,6 +236,19 @@ When `nativeMoveArrival.status` is `arrived`, the current Native observation con
     }
     else {
         throw "Model action decision arguments for '$actionName' must be an object (or an empty list only for a zero-argument action)."
+    }
+    if ($unsupportedArguments.Count -gt 0) {
+        $currentCatalog = @($request.allowedActions | ForEach-Object { [string]$_.action } | Sort-Object -Unique)
+        [Console]::Out.WriteLine(([ordered]@{
+            decisionRejected = $true
+            requestedAction = $actionName
+            reason = 'invalid-action-arguments'
+            invalidArguments = @($unsupportedArguments | Sort-Object -Unique)
+            allowedArguments = $allowedArguments
+            availableActions = $currentCatalog
+            noNativeActionSent = $true
+        } | ConvertTo-Json -Compress))
+        exit 0
     }
     $rationale = [string]$decision.rationale
     $rationaleSource = 'model'

@@ -4,7 +4,8 @@ param(
     [int]$TimeoutSeconds = 180,
     [ValidateRange(5,30)][int]$FrameRate = 10,
     [switch]$ArrivalLoop,
-    [switch]$RecruitmentLoop
+    [switch]$RecruitmentLoop,
+    [switch]$RoadsideBanditNegotiationLoop
 )
 
 $ErrorActionPreference = 'Stop'
@@ -18,7 +19,8 @@ $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlo
 if (Get-Process -Name Bannerlord* -ErrorAction SilentlyContinue) {
     throw 'Refusing to start a live-model Campaign test while any Bannerlord client is already running.'
 }
-if ($ArrivalLoop -and $RecruitmentLoop) { throw 'Select only one LiveModel test goal per run.' }
+if ($ArrivalLoop -and ($RecruitmentLoop -or $RoadsideBanditNegotiationLoop)) { throw 'Select only one LiveModel test goal per run.' }
+if ($RoadsideBanditNegotiationLoop -and -not $RecruitmentLoop) { throw 'RoadsideBanditNegotiationLoop requires RecruitmentLoop so the encounter resolves into the existing growth goal.' }
 foreach ($setting in @('CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL','CHRONICLE_LLM_API_KEY','CHRONICLE_LLM_TIMEOUT_SECONDS','CHRONICLE_LLM_MAX_TOKENS','CHRONICLE_LLM_MAX_TOKEN_PARAMETER','CHRONICLE_LLM_REASONING_EFFORT','CHRONICLE_LLM_TEMPERATURE')) {
     $configuredValue = [string][Environment]::GetEnvironmentVariable($setting, 'Process')
     if ([string]::IsNullOrWhiteSpace($configuredValue)) {
@@ -29,6 +31,13 @@ foreach ($setting in @('CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL','CHRONICLE
         throw "Live-model verification requires local $setting configuration; the value is never printed by this test."
     }
 }
+$sourceCommitOutput = & git.exe -C $PSScriptRoot rev-parse HEAD 2>&1
+if ($LASTEXITCODE -ne 0) { throw 'Live-model verification could not record the source commit.' }
+$sourceCommit = ([string]($sourceCommitOutput | Out-String)).Trim()
+if ([string]::IsNullOrWhiteSpace($sourceCommit)) { throw 'Live-model verification received an empty source commit identifier.' }
+$sourceStatusOutput = & git.exe -C $PSScriptRoot status --short --untracked-files=no 2>&1
+if ($LASTEXITCODE -ne 0) { throw 'Live-model verification could not determine whether tracked source files were modified.' }
+$sourceTrackedTreeClean = @($sourceStatusOutput | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -eq 0
 if (-not (Test-Path -LiteralPath $savePath -PathType Leaf)) { throw "Disposable AgentLoop fixture not found: $savePath" }
 if (Test-Path -LiteralPath $sessionPath -PathType Leaf) { throw 'Refusing to replace an existing Chronicle Agent session; stop or recover it before the live-model test.' }
 if (-not $env:CHRONICLE_HARNESS_TEMP -or -not (Test-Path -LiteralPath $env:CHRONICLE_HARNESS_TEMP -PathType Container)) {
@@ -130,9 +139,18 @@ try {
     }
     $null = Capture-EngineFrame 'LiveModelEngine-before'
     $capture = Start-ChronicleWindowVideoCapture -ProcessId ([int]$start.session.processId) -OutputPath $videoPath -FrameRate $FrameRate
+    $modelRunStartedUtc = [string]$capture.StartedUtc
     Write-LiveModelCaptureEvent 'capture-start' $capture.StartedUtc 'capture' $null $baseline.state $baseline $capture
 
-    if ($RecruitmentLoop) {
+    if ($RoadsideBanditNegotiationLoop) {
+        $goal = 'Autonomously recruit one currently affordable local volunteer from a safe Native Settlement. Select a target from current nearbySettlements; issue one Native move. A hostile looter may interrupt travel. If a current Native bandit conversation appears and the observed bandit side is stronger than the player side, choose the currently visible non-fight compromise option; never choose to start a tactical battle in this one-member growth slice. After selecting compromise, do not use dialogueSelect unless the fresh observation contains a clickable option. When the bandit conversation has no clickable options, call barterOptions first to check whether the Native Safe Passage BarterVM is ready. Only if that read is rejected and the fresh Native observation still has an active no-option conversation should you call dialogueContinue once, then query barterOptions again; never repeat Continue without rechecking. Only after barterOptions returns the Safe Passage context may you call barterAutoBalance; submit barterOffer only if the Native quote is enabled and the remaining Gold stays positive. After accepting safe passage, re-observe the Campaign Map because the Native party may be Holding with no target; select a newly observed safe settlement and move again if needed. Do not use pause/resume/fastForward, do not reuse a stale target, and do not invent offers. At a settlement, use the currently enabled recruit_volunteers option, choose one affordable offer within capacity, recruit it with ConfirmPartySizeWarning=false, verify Party +1 and exact Gold cost, then stop.'
+        $maxDecisions = 36
+        $maxElapsedSeconds = 600
+        $allowedActions = 'mapSettlementTargets,move,dialogueSelect,dialogueContinue,barterOptions,barterAutoBalance,barterOffer,barterCancel,recruitOptions,recruit'
+        $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '180'
+        $env:CHRONICLE_LLM_MAX_TOKENS = '768'
+    }
+    elseif ($RecruitmentLoop) {
         $goal = 'Autonomously recruit one affordable local volunteer. Choose one safe target from current Native nearbySettlements observation; query mapSettlementTargets only if the current observation does not provide enough target information. The target must not be the current settlement, hostile, or under siege. Issue one move only. While still moving, use observeAgain with waitSeconds 5; never send move again or change clock controls. Once a fresh Native observation shows arrival, inspect the current settlement menu. If recruit_volunteers is currently available, call recruitOptions. Select one currently available offer that is affordable and fits party capacity; call recruit with its observed ownerId, troopId and slot, and ConfirmPartySizeWarning=false. After the Native receipt and fresh state show members increased by one and gold decreased by that offer cost, return done. If the current settlement has no eligible offer, use only newly observed safe settlement targets to replan; never invent inventory or force an over-capacity choice.'
         $maxDecisions = 24
         $maxElapsedSeconds = 600
@@ -155,7 +173,9 @@ try {
         $maxElapsedSeconds = 0
         $allowedActions = 'mapSettlementTargets,move'
     }
-    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -Goal $goal -AllowedActionNames $allowedActions -MaxDecisions $maxDecisions -MaxElapsedSeconds $maxElapsedSeconds -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('live-model-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+    $loopArguments = @('-DecisionProviderPath', $provider, '-Goal', $goal, '-AllowedActionNames', $allowedActions, '-MaxDecisions', [string]$maxDecisions, '-MaxElapsedSeconds', [string]$maxElapsedSeconds, '-TimeoutSeconds', [string]$TimeoutSeconds, '-CommandPrefix', ('live-model-' + [Guid]::NewGuid().ToString('N')))
+    if ($RoadsideBanditNegotiationLoop) { $loopArguments += '-HarnessPrepareSafePassageAfterMove' }
+    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop @loopArguments 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) {
         try { $loopTrace = $output | ConvertFrom-Json } catch { }
         throw "Real-model decision loop failed: $output"
@@ -164,6 +184,49 @@ try {
     if ($loopTrace.status -eq 'failed') { throw "Real-model decision loop failed: $($loopTrace.error)" }
 
     $steps = @($loopTrace.trace)
+    $safePassageRoute = $null
+    if ($RoadsideBanditNegotiationLoop) {
+        $banditFixture = @($loopTrace.harnessEvents | Where-Object { $_.kind -eq 'native-safe-passage-bandit-prepared' } | Select-Object -First 1)
+        $banditConversation = @($steps | Where-Object {
+            [bool]$_.observationBefore.state.context.encounterActive -and
+            [string]$_.observationBefore.state.context.encounteredPartyId -ceq [string]$banditFixture[0].partyId -and
+            @($_.observationBefore.state.context.conversation.options | Where-Object { $_.clickable }).Count -gt 0
+        } | Select-Object -First 1)
+        $peacefulDialogue = @($steps | Where-Object { $_.decision.action -eq 'dialogueSelect' } | Select-Object -First 1)
+        if ($banditFixture.Count -ne 1 -or $banditFixture[0].banditStrength -le $banditFixture[0].requiredBanditStrength -or $banditConversation.Count -ne 1 -or $peacefulDialogue.Count -ne 1) {
+            throw 'A measured hostile Native Safe Passage fixture did not reach the live model as a current encounter dialogue with a player response.'
+        }
+        $selectedDialogueOption = @($peacefulDialogue[0].observationBefore.state.context.conversation.options | Where-Object { [string]$_.id -ceq [string]$peacefulDialogue[0].decision.arguments.OptionId -and $_.clickable } | Select-Object -First 1)
+        if ($selectedDialogueOption.Count -ne 1 -or [string]$peacefulDialogue[0].observationBefore.state.context.encounteredPartyId -cne [string]$banditFixture[0].partyId -or [string]$selectedDialogueOption[0].text -notmatch '\u4E24\u5168\u5176\u7F8E|\u529E\u6CD5|\u89E3\u51B3') {
+            throw 'The model did not select the current Native non-combat compromise option from the observed hostile encounter.'
+        }
+        $safePassageBarterOptions = @($steps | Where-Object { $_.decision.action -eq 'barterOptions' -and $_.actionReceipt.status -eq 'completed' -and $_.actionReceipt.data.contextInitializer -eq 'InitializeSafePassageBarterContext' } | Select-Object -First 1)
+        $safePassageAutoBalance = @($steps | Where-Object { $_.decision.action -eq 'barterAutoBalance' -and $_.actionReceipt.status -eq 'completed' } | Select-Object -First 1)
+        $safePassageOffer = @($steps | Where-Object { $_.decision.action -eq 'barterOffer' -and $_.actionReceipt.status -eq 'completed' } | Select-Object -First 1)
+        $safePassageGoldOffer = @()
+        if ($safePassageAutoBalance.Count -eq 1) {
+            $safePassageGoldOffer = @($safePassageAutoBalance[0].actionReceipt.data.updatedOptions.candidates | Where-Object { $_.nativeType -eq 'gold_barterable' -and $_.list -eq 'rightGold' -and $_.isOffered } | Select-Object -First 1)
+        }
+        $nativeClockActionsDuringRecovery = @($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -in @('pause','resume','fastForward') })
+        if ($safePassageBarterOptions.Count -ne 1 -or $safePassageAutoBalance.Count -ne 1 -or -not [bool]$safePassageAutoBalance[0].actionReceipt.data.autoBalanced -or
+            $safePassageOffer.Count -ne 1 -or -not [bool]$safePassageOffer[0].actionReceipt.data.accepted -or [int]$safePassageOffer[0].observationAfter.state.economy.gold -le 0) {
+            throw 'The model did not use the current Native Safe Passage BarterVM, auto-balance its live quote, and complete an affordable non-combat offer.'
+        }
+        if ($safePassageGoldOffer.Count -ne 1 -or [int]$safePassageGoldOffer[0].currentAmount -le 0 -or $nativeClockActionsDuringRecovery.Count -gt 0 -or
+            [string]$safePassageOffer[0].observationBefore.state.context.timeControlMode -cne 'Stop' -or [string]$safePassageOffer[0].observationAfter.state.context.timeControlMode -cne 'Stop') {
+            throw 'Safe Passage must use the current positive Native gold quote, submit it while the Native encounter clock is stopped, and never execute an explicit time-control action.'
+        }
+        $safePassageRoute = [ordered]@{
+            BanditFixture = $banditFixture[0]
+            Conversation = $banditConversation[0].observationBefore.state.context.conversation
+            SelectedOption = [ordered]@{ id = [string]$peacefulDialogue[0].decision.arguments.OptionId; text = [string]$selectedDialogueOption[0].text }
+            BarterAutoBalance = $safePassageAutoBalance[0].actionReceipt.data
+            OfferResult = $safePassageOffer[0].actionReceipt.data
+            OfferedDenars = [int]$safePassageGoldOffer[0].currentAmount
+            GoldAfterOffer = [int]$safePassageOffer[0].observationAfter.state.economy.gold
+            NativeClockActions = $nativeClockActionsDuringRecovery.Count
+        }
+    }
     foreach ($step in $steps) {
         $stepAction = if ($step.decision.done -eq $true) { 'providerDone' } elseif ($step.decision.observeAgain -eq $true) { 'observeAgain' } else { [string]$step.decision.action }
         $beforeState = if ($step.observationBefore.state) { $step.observationBefore.state } else { $baseline.state }
@@ -179,19 +242,27 @@ try {
         }
     }
 
-    $targetQuery = @($steps | Where-Object { $_.decision.action -eq 'mapSettlementTargets' -and $_.actionReceipt.status -eq 'completed' } | Select-Object -First 1)
-    $moveStep = @($steps | Where-Object { $_.decision.action -eq 'move' -and $_.actionReceipt.status -eq 'completed' } | Select-Object -First 1)
-    if ($moveStep.Count -ne 1 -or $targetQuery.Count -gt 1 -or ($targetQuery.Count -eq 1 -and [int]$targetQuery[0].iteration -ge [int]$moveStep[0].iteration)) {
-        throw 'Live model did not make exactly one valid Native move from observed safe map information.'
+    $targetQueries = @($steps | Where-Object { $_.decision.action -eq 'mapSettlementTargets' -and $_.actionReceipt.status -eq 'completed' })
+    $moveSteps = @($steps | Where-Object { $_.decision.action -eq 'move' -and $_.actionReceipt.status -eq 'completed' })
+    $finalMoveStep = @($moveSteps | Select-Object -Last 1)
+    $allowedMoveCount = if ($RoadsideBanditNegotiationLoop) { 2 } else { 1 }
+    if ($moveSteps.Count -lt 1 -or $moveSteps.Count -gt $allowedMoveCount -or ($RoadsideBanditNegotiationLoop -and $moveSteps.Count -ne 2)) {
+        throw "Live model issued $($moveSteps.Count) successful Native moves; the selected goal permits $(if($RoadsideBanditNegotiationLoop){'exactly two after the interrupted target is cleared'}else{"at most $allowedMoveCount"})."
     }
-    if ($targetQuery.Count -eq 0 -and -not $RecruitmentLoop) { throw 'This acceptance slice requires an on-demand mapSettlementTargets receipt before moving.' }
-    $targetSource = if ($targetQuery.Count -eq 1) { 'mapSettlementTargets receipt' } else { 'current native nearbySettlements observation' }
-    $observedTargets = if ($targetQuery.Count -eq 1) { @($targetQuery[0].actionReceipt.data.mapSettlementTargets) } else { @($moveStep[0].observationBefore.state.nearbySettlements) }
-    $chosenId = [string]$moveStep[0].decision.arguments.SettlementId
+    if ($targetQueries.Count -eq 0 -and -not $RecruitmentLoop) { throw 'This acceptance slice requires an on-demand mapSettlementTargets receipt before moving.' }
+    $moveSafetyResults = foreach ($candidateMove in $moveSteps) {
+        $moveTargetId = [string]$candidateMove.decision.arguments.SettlementId
+        $currentTargets = @($candidateMove.observationBefore.state.nearbySettlements)
+        $target = @($currentTargets | Where-Object { [string]$_.id -ceq $moveTargetId } | Select-Object -First 1)
+        $currentId = [string]$candidateMove.observationBefore.state.location.currentSettlementId
+        [bool]($target.Count -eq 1 -and [string]$target[0].id -cne $currentId -and [double]$target[0].distance -gt 1.0 -and -not [bool]$target[0].hostile -and -not [bool]$target[0].underSiege -and [string]$candidateMove.observationAfter.state.location.targetSettlementId -ceq $moveTargetId)
+    }
+    $chosenId = [string]$finalMoveStep[0].decision.arguments.SettlementId
+    $observedTargets = @($finalMoveStep[0].observationBefore.state.nearbySettlements)
     $chosenTarget = @($observedTargets | Where-Object { [string]$_.id -ceq $chosenId } | Select-Object -First 1)
-    $currentSettlementBeforeMove = if ($targetQuery.Count -eq 1) { [string]$targetQuery[0].observationBefore.state.location.currentSettlementId } else { [string]$moveStep[0].observationBefore.state.location.currentSettlementId }
-    $chosenObservedSafeTarget = ($chosenTarget.Count -eq 1 -and [string]$chosenTarget[0].id -cne $currentSettlementBeforeMove -and [double]$chosenTarget[0].distance -gt 1.0 -and -not [bool]$chosenTarget[0].hostile -and -not [bool]$chosenTarget[0].underSiege)
-    $nativeMovementObserved = ([string]$moveStep[0].observationAfter.state.location.targetSettlementId -ceq $chosenId)
+    $chosenObservedSafeTarget = ($chosenTarget.Count -eq 1 -and [string]$chosenTarget[0].id -cne [string]$finalMoveStep[0].observationBefore.state.location.currentSettlementId -and [double]$chosenTarget[0].distance -gt 1.0 -and -not [bool]$chosenTarget[0].hostile -and -not [bool]$chosenTarget[0].underSiege)
+    $nativeMovementObserved = @($moveSafetyResults | Where-Object { -not $_ }).Count -eq 0
+    $targetSource = if ($targetQueries.Count -gt 0) { 'current Native nearbySettlements observations; mapSettlementTargets queried on demand' } else { 'current native nearbySettlements observations' }
     $observeSteps = @($steps | Where-Object { $_.control.kind -eq 'bounded-observe-again' -and -not $_.actionExecuted -and $_.observationAfter.status -eq 'completed' })
     # A completed provider decision (for example, `done` after a verified arrival)
     # has no observationAfter. Use the latest actual Native observation in the trace,
@@ -199,7 +270,7 @@ try {
     $lastObservedStep = @($steps | Where-Object { $_.observationAfter -and $_.observationAfter.state } | Select-Object -Last 1)
     $finalObservation = if ($lastObservedStep.Count -gt 0) { $lastObservedStep[0].observationAfter } else { $baseline }
     $arrivalConfirmed = ([string]$finalObservation.state.location.currentSettlementId -ceq $chosenId)
-    $campaignDayAdvancedDuringTravel = ([double]$finalObservation.campaignDay -gt [double]$moveStep[0].observationAfter.campaignDay)
+    $campaignDayAdvancedDuringTravel = ([double]$finalObservation.campaignDay -gt [double]$finalMoveStep[0].actionReceipt.campaignDay)
     $expectedGoalActionCount = if ($RecruitmentLoop) { $null } else { 2 }
     $providerStoppedAfterGoalAction = ([bool]$loopTrace.termination.completedByProvider -and [bool]$steps[-1].decision.done -and ($null -eq $expectedGoalActionCount -or [int]$loopTrace.actionsExecuted -eq $expectedGoalActionCount))
     if (-not $chosenObservedSafeTarget -or -not $nativeMovementObserved) { throw 'Native move did not match a safe settlement id returned by the visible-target query.' }
@@ -207,9 +278,17 @@ try {
         $_.control.kind -eq 'decision-rejected-before-native' -and
         $_.observationAfter.status -eq 'completed' -and
         [string]$_.observationAfter.state.location.currentSettlementId -ceq $chosenId -and
-        [double]$_.observationAfter.campaignDay -gt [double]$moveStep[0].actionReceipt.campaignDay
+        [double]$_.observationAfter.campaignDay -gt [double]$finalMoveStep[0].actionReceipt.campaignDay
     })
-    $travelReobserved = ($observeSteps.Count -gt 0 -or $preNativeTravelReobservations.Count -gt 0)
+    $nativeReadObservationsAfterMove = @($steps | Where-Object {
+        [int]$_.iteration -gt [int]$finalMoveStep[0].iteration -and
+        [double]$_.observationBefore.campaignDay -gt [double]$finalMoveStep[0].actionReceipt.campaignDay -and
+        (
+            ([bool]$_.observationBefore.state.party.isMoving -and [string]$_.observationBefore.state.location.targetSettlementId -ceq $chosenId -and [string]$_.observationBefore.state.context.timeControlMode -in @('StoppablePlay','UnstoppableFastForward')) -or
+            ([string]$_.observationBefore.state.location.currentSettlementId -ceq $chosenId -and [string]$_.observationBefore.state.context.menuId -in @('town','town_backstreet','village'))
+        )
+    })
+    $travelReobserved = ($observeSteps.Count -gt 0 -or $preNativeTravelReobservations.Count -gt 0 -or $nativeReadObservationsAfterMove.Count -gt 0)
     if (($ArrivalLoop -or $RecruitmentLoop) -and (-not $arrivalConfirmed -or -not $travelReobserved -or -not $campaignDayAdvancedDuringTravel)) {
         throw 'Live-model arrival slice lacked a verified target settlement, a fresh Native re-observation during travel, or natural Campaign-time advancement.'
     }
@@ -233,7 +312,9 @@ try {
             [int]$recruitBefore.economy.gold - [int]$recruitAfter.economy.gold -eq [int]$chosenOffer[0].cost
         )
         if (-not $nativeRecruitmentVerified) { throw 'Native volunteer recruitment did not match the current enabled menu option, observed offer, party-size delta, and Gold cost.' }
-        $providerStoppedAfterGoalAction = ([bool]$loopTrace.termination.completedByProvider -and [bool]$steps[-1].decision.done -and [int]$loopTrace.actionsExecuted -eq 3)
+        $actionsAfterRecruitment = @($steps | Where-Object { $_.actionExecuted -and [int]$_.iteration -gt [int]$recruitStep[0].iteration })
+        $expectedActionCount = if ($RoadsideBanditNegotiationLoop) { $null } else { 3 }
+        $providerStoppedAfterGoalAction = ([bool]$loopTrace.termination.completedByProvider -and [bool]$steps[-1].decision.done -and $actionsAfterRecruitment.Count -eq 0 -and ($null -eq $expectedActionCount -or [int]$loopTrace.actionsExecuted -eq $expectedActionCount))
         if (-not $providerStoppedAfterGoalAction) { throw 'Live model did not stop after Native recruitment postconditions were observed.' }
     }
     elseif (-not $ArrivalLoop -and -not $providerStoppedAfterGoalAction) { throw 'Live model did not stop after the single requested Native move order.' }
@@ -246,9 +327,18 @@ try {
 
     $liveModelTrace = [ordered]@{
         ProviderKind = 'configured OpenAI-compatible live model'
+        ModelId = [string]$env:CHRONICLE_LLM_MODEL
+        SourceCommit = $sourceCommit
+        SourceTrackedTreeClean = $sourceTrackedTreeClean
+        RunStartedUtc = $modelRunStartedUtc
+        RunCompletedUtc = [DateTime]::UtcNow.ToString('O')
+        CampaignDayStart = [double]$baseline.campaignDay
+        CampaignDayEnd = [double]$finalObservation.campaignDay
         StartupDialogReceipts = @($start.session.startupDialogReceipts)
         Goal = $goal
-        AcceptanceSlice = if ($RecruitmentLoop) { 'Native movement plus volunteer recruitment' } elseif ($ArrivalLoop) { 'Native movement arrival' } else { 'Native movement order accepted' }
+        AcceptanceSlice = if ($RoadsideBanditNegotiationLoop) { 'Native roadside Safe Passage, recovery, and volunteer recruitment' } elseif ($RecruitmentLoop) { 'Native movement plus volunteer recruitment' } elseif ($ArrivalLoop) { 'Native movement arrival' } else { 'Native movement order accepted' }
+        SafePassageRoute = $safePassageRoute
+        HarnessWorldEvents = @($loopTrace.harnessEvents)
         ChosenSettlementId = $chosenId
         ChosenSettlementName = [string]$chosenTarget[0].name
         ObservedTargetCount = $observedTargets.Count
@@ -256,12 +346,14 @@ try {
         ChosenTargetSource = $targetSource
         ArrivalConfirmed = $arrivalConfirmed
         BoundedReobservations = $observeSteps.Count
+        NativeReadObservationsAfterMove = $nativeReadObservationsAfterMove.Count
         NativeTravelReobservations = ($observeSteps.Count + $preNativeTravelReobservations.Count)
         CampaignDayAdvancedDuringTravel = $campaignDayAdvancedDuringTravel
         RecruitmentVerified = if ($RecruitmentLoop) { [bool]$nativeRecruitmentVerified } else { $null }
         ProviderStoppedAfterGoalAction = $providerStoppedAfterGoalAction
         Decisions = $steps.Count
         NativeActionReceipts = @($steps | Where-Object { $_.actionExecuted } | ForEach-Object { [ordered]@{ action = $_.actionReceipt.action; status = $_.actionReceipt.status; campaignDay = $_.actionReceipt.campaignDay; timing = $_.timing } })
+        HarnessEvents = @($loopTrace.harnessEvents)
         Trace = $loopTrace.trace
         VisualEvidence = [ordered]@{
             Provider = $captureResult.Provider
@@ -289,6 +381,7 @@ catch {
             LastObservation = $loopTrace.lastObservation
             ActionsExecuted = $loopTrace.actionsExecuted
             DecisionCount = $loopTrace.decisions
+            HarnessEvents = @($loopTrace.harnessEvents)
             Failure = $failure
             VisualEvidence = $null
         }
