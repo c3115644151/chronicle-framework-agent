@@ -35,6 +35,53 @@ if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'dynamicAvailabilityRecovery') {
     [pscustomobject]@{ action = 'mapSettlementTargets'; arguments = @{}; rationale = 'Recover from the unavailable recruitment proposal using a currently listed map action.' } | ConvertTo-Json -Compress
     exit 0
 }
+if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'staleOfferRecovery') {
+    $state = $request.observation.state
+    $receipt = $request.previousActionReceipt
+    $offerMarker = [string]$env:CHRONICLE_TEST_STALE_OFFER_MARKER
+    if (-not $receipt) {
+        [pscustomobject]@{ action = 'mapSettlementTargets'; arguments = @{}; rationale = 'Start from current native map targets.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if ([string]$request.decisionFeedback.kind -ceq 'action-unavailable' -and [string]$request.decisionFeedback.requestedAction -ceq 'recruit') {
+        [pscustomobject]@{ action = 'recruitOptions'; arguments = @{}; rationale = 'The previous offer selection was rejected before Native; refresh the current settlement offers.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if ([string]$receipt.action -ceq 'mapSettlementTargets') {
+        $target = @($receipt.data.mapSettlementTargets | Where-Object { -not $_.hostile -and -not $_.underSiege -and [string]$_.type -in @('town','village') } | Sort-Object { [double]$_.distance } | Select-Object -First 1)
+        if ($target.Count -ne 1) { throw 'Stale-offer recovery test received no safe visible Settlement target.' }
+        [pscustomobject]@{ action = 'move'; arguments = @{ SettlementId = [string]$target[0].id }; rationale = 'Move to the nearest safe visible settlement.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if ([string]$receipt.action -in @('move','resume')) {
+        if ([string]$state.location.currentSettlementId -ceq [string]$state.location.targetSettlementId -and [string]$state.context.menuId -in @('town','town_backstreet','village')) {
+            [pscustomobject]@{ action = 'recruitOptions'; arguments = @{}; rationale = 'Read volunteers only from the active Native settlement menu.' } | ConvertTo-Json -Compress
+        }
+        elseif ([bool]$state.party.isMoving -and -not [string]::IsNullOrWhiteSpace([string]$state.location.targetSettlementId)) {
+            [pscustomobject]@{ observeAgain = $true; waitSeconds = 5; reason = 'The Native party is still travelling; wait briefly and observe again.' } | ConvertTo-Json -Compress
+        }
+        else { [pscustomobject]@{ done = $true; reason = 'The party did not arrive at the observed settlement.' } | ConvertTo-Json -Compress }
+        exit 0
+    }
+    if ([string]$receipt.action -ceq 'recruitOptions') {
+        if (Test-Path -LiteralPath $offerMarker -PathType Leaf) {
+            $offer = @($receipt.data.offers | Where-Object { $_.available -and [int]$_.cost -le [int]$state.economy.gold -and [int]$state.party.members -lt [int]$state.party.sizeLimit } | Select-Object -First 1)
+            if ($offer.Count -ne 1) { throw 'Refreshed Native receipt contained no safe recruit offer.' }
+            [pscustomobject]@{ action = 'recruit'; arguments = @{ OwnerId = [string]$offer[0].ownerId; TroopId = [string]$offer[0].troopId; VolunteerSlot = [int]$offer[0].slot; ConfirmPartySizeWarning = $false }; rationale = 'Select an affordable current Native offer that fits party capacity.' } | ConvertTo-Json -Compress
+        }
+        else {
+            Set-Content -LiteralPath $offerMarker -Value 'stale-offer-sent' -Encoding UTF8
+            [pscustomobject]@{ action = 'recruit'; arguments = @{ OwnerId = 'stale-owner'; TroopId = 'stale-troop'; VolunteerSlot = 999; ConfirmPartySizeWarning = $false }; rationale = 'Intentional stale-offer test: request a nonexistent offer to verify pre-Native rejection.' } | ConvertTo-Json -Compress
+        }
+        exit 0
+    }
+    if ([string]$receipt.action -ceq 'recruit') {
+        if (-not [bool]$receipt.data.verified -or [int]$state.party.members -ne [int]$receipt.data.afterMembers -or [int]$state.economy.gold -ne [int]$receipt.data.afterGold) { throw 'Recovered Native recruitment did not match the fresh state.' }
+        [pscustomobject]@{ done = $true; reason = 'One refreshed Native offer completed and the fresh state confirms its result.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    throw "Unexpected receipt '$($receipt.action)' in stale offer recovery test."
+}
 if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'decisionContext') {
     $expectedGoal = [string]$env:CHRONICLE_TEST_EXPECTED_GOAL
     if ([string]::IsNullOrWhiteSpace($expectedGoal) -or [string]$request.goal -cne $expectedGoal)

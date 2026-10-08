@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.54
+Contract version: 7.55
 
 ## 目标与边界
 
@@ -387,7 +387,7 @@ Agent决策循环的Harness原型使用请求schema v2：每轮把明确Goal、�
 
 `LiveModelRecruitmentEvaluation` 是基于该Native基线的真实本地模型opt-in阶段：固定同一seed、真实Provider、五次独立Runtime运行，预先要求5/5成功、每次墙钟≤180秒/CampaignDay≤0.1、一次move与一次recruit、无重复或越权副作用、Visual覆盖≥90%、模板hash不变且进程清理；候选模型结果不得反向改阈值。它只评估当前地图→志愿兵目标，不代表跨seed或整个产品成熟度。
 
-DecisionLoop 的动作白名单仍是产品能力上限，但模型每轮看到的是当前Native观察决定的有效动作目录。地图状态/无可用Settlement菜单时不暴露 `recruitOptions`/`recruit`；当前Settlement菜单启用原版 `recruit_volunteers` 后才开放报价读取；仅上一回执属于同一Settlement的Native报价、且当前主队有容量和可支付选项时才开放 `recruit`。提交参数还会与当前菜单、最新报价、Gold及队伍容量二次比对。模型选了未开放动作时，执行器不把它发给Native，会刷新观察、提供明确反馈并允许有限重规划；Native自身拒绝同样会记录回执、重新观察再决定，重复拒绝有上限并安全停止。这个目录用于精确表达动作前置条件，不替代Native最终校验。
+DecisionLoop 的动作白名单仍是产品能力上限，但模型每轮看到的是当前Native观察决定的有效动作目录。地图状态/无可用Settlement菜单时不暴露 `recruitOptions`/`recruit`；当前Settlement菜单启用原版 `recruit_volunteers` 后才开放报价读取；仅上一回执属于同一Settlement的Native报价、且当前主队有容量和可支付选项时才开放 `recruit`。提交参数还会与当前菜单、最新报价、Gold及队伍容量二次比对。模型选了未开放动作时，执行器不把它发给Native，会刷新观察、提供明确反馈并允许有限重规划；Native自身拒绝同样会记录回执、重新观察再决定，重复拒绝有上限并安全停止。AgentLoop确定性回归不仅在地图上故意提出不可用招募，也在到达后的当前Settlement报价环节故意提交不存在的offer ID；两者都必须在Native调用前拒绝、观察不变，再重规划并完成一次合法招募。这个目录用于精确表达动作前置条件，不替代Native最终校验。
 
 ## 当前执行焦点
 

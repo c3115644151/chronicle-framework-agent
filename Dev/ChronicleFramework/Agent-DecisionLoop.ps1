@@ -179,6 +179,7 @@ function Convert-ObservationForDecision($Observation) {
             party = [ordered]@{
                 id = $party.id
                 members = $party.members
+                sizeLimit = $party.sizeLimit
                 healthy = $party.healthy
                 wounded = $party.wounded
                 prisoners = $party.prisoners

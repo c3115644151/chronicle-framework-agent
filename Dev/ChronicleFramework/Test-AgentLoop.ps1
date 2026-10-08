@@ -199,6 +199,48 @@ try {
     )
     if (-not $dynamicActionRecoveryVerified) { throw "Decision loop did not block the unavailable action before Native and recover using the current catalog: $($recoveryTrace | ConvertTo-Json -Depth 8 -Compress)" }
 
+    $markerRoot = if ($env:CHRONICLE_HARNESS_TEMP -and (Test-Path -LiteralPath $env:CHRONICLE_HARNESS_TEMP -PathType Container)) { $env:CHRONICLE_HARNESS_TEMP } else { [IO.Path]::GetTempPath() }
+    $staleOfferMarker = Join-Path $markerRoot ('stale-offer-recovery-' + [Guid]::NewGuid().ToString('N') + '.txt')
+    $priorStaleOfferMarker = $env:CHRONICLE_TEST_STALE_OFFER_MARKER
+    $env:CHRONICLE_TEST_STALE_OFFER_MARKER = $staleOfferMarker
+    $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
+    $env:CHRONICLE_TEST_PROVIDER_MODE = 'staleOfferRecovery'
+    try {
+        $staleOfferOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -Goal 'Reach a safe visible settlement, recover from a stale volunteer offer without Native mutation, refresh offers, and recruit one affordable volunteer within capacity.' -AllowedActionNames 'mapSettlementTargets,move,recruitOptions,recruit' -MaxDecisions 24 -MaxElapsedSeconds 600 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-stale-offer-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $staleOfferExitCode = $LASTEXITCODE
+    }
+    finally {
+        if ($null -eq $priorProviderMode) { Remove-Item Env:CHRONICLE_TEST_PROVIDER_MODE -ErrorAction SilentlyContinue }
+        else { $env:CHRONICLE_TEST_PROVIDER_MODE = $priorProviderMode }
+        if ($null -eq $priorStaleOfferMarker) { Remove-Item Env:CHRONICLE_TEST_STALE_OFFER_MARKER -ErrorAction SilentlyContinue }
+        else { $env:CHRONICLE_TEST_STALE_OFFER_MARKER = $priorStaleOfferMarker }
+        Remove-Item -LiteralPath $staleOfferMarker -Force -ErrorAction SilentlyContinue
+    }
+    if ($staleOfferExitCode -ne 0) { throw "Stale Native offer did not fail closed and recover: $staleOfferOutput" }
+    $staleOfferTrace = $staleOfferOutput | ConvertFrom-Json
+    $staleRejection = @($staleOfferTrace.trace | Where-Object { $_.control.kind -eq 'decision-rejected-before-native' -and $_.decision.action -eq 'recruit' } | Select-Object -First 1)
+    $recoveredRecruitment = @($staleOfferTrace.trace | Where-Object { $_.decision.action -eq 'recruit' -and $_.actionExecuted -and $_.actionReceipt.status -eq 'completed' } | Select-Object -First 1)
+    $staleOfferBlockedWithoutMutation = $false
+    if ($staleRejection.Count -eq 1 -and $staleRejection[0].observationAfter.state) {
+        $rejectedBefore = $staleRejection[0].observationBefore
+        $rejectedAfter = $staleRejection[0].observationAfter
+        $staleOfferBlockedWithoutMutation = (
+            $staleRejection[0].actionAttempted -eq $false -and
+            [bool]$staleRejection[0].actionReceipt.noNativeActionSent -and
+            [string]$rejectedBefore.state.location.currentSettlementId -ceq [string]$rejectedAfter.state.location.currentSettlementId -and
+            [string]$rejectedBefore.state.context.menuId -ceq [string]$rejectedAfter.state.context.menuId -and
+            [int]$rejectedBefore.state.party.members -eq [int]$rejectedAfter.state.party.members -and
+            [int]$rejectedBefore.state.economy.gold -eq [int]$rejectedAfter.state.economy.gold
+        )
+    }
+    $staleOfferRecoveryVerified = (
+        $staleOfferBlockedWithoutMutation -and $recoveredRecruitment.Count -eq 1 -and
+        @($staleOfferTrace.trace | Where-Object { $_.decision.action -eq 'recruitOptions' -and $_.actionExecuted }).Count -eq 2 -and
+        @($staleOfferTrace.trace | Where-Object { $_.decision.action -eq 'move' -and $_.actionExecuted }).Count -eq 1 -and
+        $staleOfferTrace.termination.completedByProvider
+    )
+    if (-not $staleOfferRecoveryVerified) { throw "Stale offer was not blocked without a world change and followed by fresh Native offers/recruitment: $($staleOfferTrace | ConvertTo-Json -Depth 10 -Compress)" }
+
     $priorInvalidDecision = $env:CHRONICLE_TEST_INVALID_DECISION
     $env:CHRONICLE_TEST_INVALID_DECISION = '1'
     try {
@@ -274,6 +316,9 @@ try {
         ScopedActionRejected = $scopedActionRejected
         DynamicActionCatalogRecoveryVerified = $dynamicActionRecoveryVerified
         DynamicActionRecoveryTrace = $recoveryTrace.trace
+        StaleOfferRecoveryVerified = $staleOfferRecoveryVerified
+        StaleOfferBlockedWithoutNativeMutation = $staleOfferBlockedWithoutMutation
+        StaleOfferRecoveryTrace = $staleOfferTrace.trace
         DecisionContextTrace = $contextTrace.trace
         UnsafeActionRejected = $unsafeActionRejected
         HarnessAdvanceRejected = $harnessClockRejected
@@ -281,7 +326,7 @@ try {
         ProcessStopped = $stop.processStopped
         Trace = $trace.trace
     }
-    $result.Passed = ($result.DecisionCount -eq 2 -and $observationLoopVerified -and $receiptForwarded -and $decisionTimingCaptured -and $unicodeRoundTripVerified -and $doneSignalVerified -and $goalAndCatalogForwarded -and $scopedActionRejected -and $dynamicActionRecoveryVerified -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
+    $result.Passed = ($result.DecisionCount -eq 2 -and $observationLoopVerified -and $receiptForwarded -and $decisionTimingCaptured -and $unicodeRoundTripVerified -and $doneSignalVerified -and $goalAndCatalogForwarded -and $scopedActionRejected -and $dynamicActionRecoveryVerified -and $staleOfferRecoveryVerified -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
     $result | ConvertTo-Json -Depth 12
     if (-not $result.Passed) { exit 1 }
 }
