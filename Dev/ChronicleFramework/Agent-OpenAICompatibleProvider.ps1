@@ -210,7 +210,11 @@ When `nativeMoveArrival.status` is `arrived`, the current Native observation con
     $actionName = [string]$decision.action
     if ([string]::IsNullOrWhiteSpace($actionName)) { throw 'Model action decision must contain a non-empty action.' }
     $allowedAction = @($request.allowedActions | Where-Object { [string]$_.action -ceq $actionName } | Select-Object -First 1)
-    if ($allowedAction.Count -ne 1) { throw 'Model selected an action not present in the current decision request catalog.' }
+    if ($allowedAction.Count -ne 1) {
+        $currentCatalog = @($request.allowedActions | ForEach-Object { [string]$_.action } | Sort-Object -Unique)
+        [Console]::Out.WriteLine(([ordered]@{ decisionRejected = $true; requestedAction = $actionName; reason = 'not-in-current-action-catalog'; availableActions = $currentCatalog } | ConvertTo-Json -Compress))
+        exit 0
+    }
     $allowedArguments = @($allowedAction[0].arguments | ForEach-Object { [string]$_ })
     $normalizedArguments = [ordered]@{}
     if ($decision.arguments -is [System.Management.Automation.PSCustomObject]) {

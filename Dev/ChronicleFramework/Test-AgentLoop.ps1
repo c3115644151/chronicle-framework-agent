@@ -241,6 +241,41 @@ try {
     )
     if (-not $staleOfferRecoveryVerified) { throw "Stale offer was not blocked without a world change and followed by fresh Native offers/recruitment: $($staleOfferTrace | ConvertTo-Json -Depth 10 -Compress)" }
 
+    $resetBeforeResumeTest = Invoke-AgentCli 'stop'
+    if ($resetBeforeResumeTest.status -ne 'completed' -or -not $resetBeforeResumeTest.processStopped) { throw 'Could not cleanly stop the stale-offer scenario before the isolated Native movement/clock recovery regression.' }
+    $start = Invoke-AgentCli 'load' @('-SaveName', $LoadSaveName)
+    if ($start.status -ne 'completed' -or -not $start.session.processId) { throw 'Could not reload the disposable Campaign fixture for the isolated Native movement/clock recovery regression.' }
+    $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
+    $env:CHRONICLE_TEST_PROVIDER_MODE = 'unlistedResumeRecovery'
+    try {
+        $resumeRecoveryOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -Goal 'Move to one currently visible safe Settlement. Native map movement advances time naturally; never issue resume/pause/fastForward. If the provider proposes an unavailable clock action, recover with a fresh observation and observeAgain.' -AllowedActionNames 'mapSettlementTargets,move' -MaxDecisions 12 -MaxElapsedSeconds 600 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-unlisted-resume-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $resumeRecoveryExitCode = $LASTEXITCODE
+    }
+    finally {
+        if ($null -eq $priorProviderMode) { Remove-Item Env:CHRONICLE_TEST_PROVIDER_MODE -ErrorAction SilentlyContinue }
+        else { $env:CHRONICLE_TEST_PROVIDER_MODE = $priorProviderMode }
+    }
+    if ($resumeRecoveryExitCode -ne 0) { throw "Unlisted resume proposal did not recover into Native bounded observation: $resumeRecoveryOutput" }
+    $resumeRecoveryTrace = $resumeRecoveryOutput | ConvertFrom-Json
+    $resumeRejection = @($resumeRecoveryTrace.trace | Where-Object { $_.control.kind -eq 'decision-rejected-before-native' -and $_.decision.requestedAction -ceq 'resume' } | Select-Object -First 1)
+    $resumeRecoveryObserve = @($resumeRecoveryTrace.trace | Where-Object { $_.control.kind -eq 'bounded-observe-again' })
+    $resumeFeedbackConsumed = @($resumeRecoveryTrace.trace | Where-Object { $_.decisionFeedback.kind -eq 'action-unavailable' -and $_.decisionFeedback.requestedAction -ceq 'resume' })
+    $nativeTimeActions = @($resumeRecoveryTrace.trace | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -in @('resume','pause','fastForward') })
+    $moveActions = @($resumeRecoveryTrace.trace | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -eq 'move' })
+    $moveReceiptStep = @($resumeRecoveryTrace.trace | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -eq 'move' } | Select-Object -First 1)
+    $finalResumeObservation = if ($resumeRecoveryTrace.trace.Count -gt 0 -and $resumeRecoveryTrace.trace[-1].observationAfter) { $resumeRecoveryTrace.trace[-1].observationAfter } else { $null }
+    $arrivalAfterResumeRecovery = ($resumeRecoveryTrace.termination.completedByProvider -and $null -ne $finalResumeObservation -and [string]$finalResumeObservation.state.location.currentSettlementId -ceq [string]$moveReceiptStep[0].actionReceipt.state.location.targetSettlementId)
+    $unlistedResumeRecoveryVerified = (
+        $resumeRejection.Count -eq 1 -and $resumeRejection[0].actionAttempted -eq $false -and
+        [bool]$resumeRejection[0].actionReceipt.noNativeActionSent -and $moveActions.Count -eq 1 -and
+        $resumeFeedbackConsumed.Count -ge 1 -and ($resumeRecoveryObserve.Count -ge 1 -or $arrivalAfterResumeRecovery) -and $nativeTimeActions.Count -eq 0 -and
+        [string]$resumeRejection[0].observationBefore.state.context.timeControlMode -ceq 'StoppablePlay' -and
+        [string]$resumeRejection[0].observationAfter.state.context.timeControlMode -in @('StoppablePlay','Stop') -and
+        $null -ne $finalResumeObservation -and $null -ne $moveReceiptStep -and
+        [double]$finalResumeObservation.campaignDay -gt [double]$moveReceiptStep[0].actionReceipt.campaignDay
+    )
+    if (-not $unlistedResumeRecoveryVerified) { throw "The unsupported resume proposal was not rejected before Native and recovered through natural movement/observeAgain: $($resumeRecoveryTrace | ConvertTo-Json -Depth 8 -Compress)" }
+
     $priorInvalidDecision = $env:CHRONICLE_TEST_INVALID_DECISION
     $env:CHRONICLE_TEST_INVALID_DECISION = '1'
     try {
@@ -319,6 +354,8 @@ try {
         StaleOfferRecoveryVerified = $staleOfferRecoveryVerified
         StaleOfferBlockedWithoutNativeMutation = $staleOfferBlockedWithoutMutation
         StaleOfferRecoveryTrace = $staleOfferTrace.trace
+        UnlistedResumeRejectedWithoutNativeAction = $unlistedResumeRecoveryVerified
+        UnlistedResumeRecoveryTrace = $resumeRecoveryTrace.trace
         DecisionContextTrace = $contextTrace.trace
         UnsafeActionRejected = $unsafeActionRejected
         HarnessAdvanceRejected = $harnessClockRejected
@@ -326,7 +363,7 @@ try {
         ProcessStopped = $stop.processStopped
         Trace = $trace.trace
     }
-    $result.Passed = ($result.DecisionCount -eq 2 -and $observationLoopVerified -and $receiptForwarded -and $decisionTimingCaptured -and $unicodeRoundTripVerified -and $doneSignalVerified -and $goalAndCatalogForwarded -and $scopedActionRejected -and $dynamicActionRecoveryVerified -and $staleOfferRecoveryVerified -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
+    $result.Passed = ($result.DecisionCount -eq 2 -and $observationLoopVerified -and $receiptForwarded -and $decisionTimingCaptured -and $unicodeRoundTripVerified -and $doneSignalVerified -and $goalAndCatalogForwarded -and $scopedActionRejected -and $dynamicActionRecoveryVerified -and $staleOfferRecoveryVerified -and $unlistedResumeRecoveryVerified -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
     $result | ConvertTo-Json -Depth 12
     if (-not $result.Passed) { exit 1 }
 }

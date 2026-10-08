@@ -248,7 +248,17 @@ try {
     if (-not $process.WaitForExit(($TimeoutSeconds + 5) * 1000)) { try { $process.Kill() } catch { }; throw 'Provider did not exit after returning a disallowed action.' }
     $invalidActionStdout = $invalidActionProvider.StdoutTask.Result.Trim()
     $invalidActionStderr = $invalidActionProvider.StderrTask.Result.Trim()
-    $invalidActionFailedClosed = ($process.ExitCode -ne 0 -and $invalidActionStdout -notmatch '"action"' -and $invalidActionStderr -notmatch [regex]::Escape($harnessSecret))
+    $invalidActionDecision = $null
+    try { $invalidActionDecision = $invalidActionStdout | ConvertFrom-Json } catch { }
+    $invalidActionFailedClosed = (
+        $process.ExitCode -eq 0 -and
+        [bool]$invalidActionDecision.decisionRejected -and
+        [string]$invalidActionDecision.requestedAction -ceq 'advance' -and
+        [string]$invalidActionDecision.reason -ceq 'not-in-current-action-catalog' -and
+        @($invalidActionDecision.availableActions).Count -gt 0 -and
+        $invalidActionStdout -notmatch [regex]::Escape($harnessSecret) -and
+        $invalidActionStderr -notmatch [regex]::Escape($harnessSecret)
+    )
 
     $failureStep = 'fail-closed-on-provider-http-error'
     $httpErrorProvider = Start-ProviderProcess $requestJson

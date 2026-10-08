@@ -13,7 +13,7 @@ $request = $requestJson | ConvertFrom-Json
 if ($request.schemaVersion -ne 2) { throw 'Unsupported Agent loop request schema.' }
 if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'checkpointMustNotCall') { throw 'checkpoint-provider-was-called' }
 if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'checkpointMustNotCall') { throw 'checkpoint-provider-was-called' }
-if ($request.iteration -gt 1 -and -not $request.previousActionReceipt) { throw 'Previous native action receipt was not forwarded to the next decision.' }
+if ($request.iteration -gt 1 -and -not $request.previousActionReceipt -and -not $request.decisionFeedback) { throw 'Neither the previous Native receipt nor safe pre-Native rejection feedback was forwarded to the next decision.' }
 if ($env:CHRONICLE_TEST_INVALID_DECISION) {
     $invalidAction = [string]$env:CHRONICLE_TEST_INVALID_DECISION
     $arguments = if ($invalidAction -eq 'start') { @{ SaveName = 'must_not_execute' } } else { @{} }
@@ -28,11 +28,90 @@ if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'dynamicAvailabilityRecovery') {
         exit 0
     }
     if ([string]$request.decisionFeedback.kind -cne 'action-unavailable' -or -not [bool]$request.decisionFeedback.noNativeActionSent -or
-        [string]$request.previousActionReceipt.status -cne 'rejected-before-native' -or $catalogNames -contains 'recruit' -or
+        [string]$request.decisionFeedback.requestedAction -cne 'recruit' -or $request.previousActionReceipt -or $catalogNames -contains 'recruit' -or
         [int]$request.observation.state.party.members -ne 1 -or [int]$request.observation.state.economy.gold -ne 1000) {
         throw 'Unavailable decision feedback did not include a fresh unchanged Native state and a restricted current action catalog.'
     }
     [pscustomobject]@{ action = 'mapSettlementTargets'; arguments = @{}; rationale = 'Recover from the unavailable recruitment proposal using a currently listed map action.' } | ConvertTo-Json -Compress
+    exit 0
+}
+if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'unlistedResumeRecovery') {
+    $state = $request.observation.state
+    $receipt = $request.previousActionReceipt
+    $catalogNames = @($request.allowedActions | ForEach-Object { [string]$_.action } | Sort-Object -Unique)
+    if ($catalogNames -contains 'resume') { throw 'The narrowly scoped travel goal must not expose explicit clock control.' }
+    if ([string]$request.nativeMoveArrival.status -ceq 'arrived') {
+        [pscustomobject]@{ done = $true; reason = 'Native observation confirms settlement arrival; no clock control or repeated move is needed.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if ([string]$request.decisionFeedback.kind -ceq 'action-unavailable') {
+        if ([string]$request.decisionFeedback.requestedAction -cne 'resume' -or -not [bool]$request.decisionFeedback.noNativeActionSent -or
+            [string]$receipt.action -cne 'move' -or [string]$receipt.status -cne 'completed' -or
+            [string]$receipt.state.context.timeControlMode -cne 'StoppablePlay' -or [string]$state.context.timeControlMode -cne 'StoppablePlay' -or
+            -not [bool]$state.party.isMoving) { throw 'Resume rejection did not preserve the Native move receipt, natural StoppablePlay mode, and moving-party state.' }
+        [pscustomobject]@{ observeAgain = $true; waitSeconds = 5; reason = 'The Native move continues in StoppablePlay; naturally advancing time needs no resume action.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if (-not $receipt) {
+        [pscustomobject]@{ action = 'mapSettlementTargets'; arguments = @{}; rationale = 'Read current visible Native settlement targets.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if ([string]$receipt.action -ceq 'mapSettlementTargets') {
+        $target = @($receipt.data.mapSettlementTargets | Where-Object { -not $_.hostile -and -not $_.underSiege -and [string]$_.type -in @('town','village') } | Sort-Object { [double]$_.distance } | Select-Object -First 1)
+        if ($target.Count -ne 1) { throw 'No currently visible safe settlement exists for the clock-boundary regression.' }
+        [pscustomobject]@{ action = 'move'; arguments = @{ SettlementId = [string]$target[0].id }; rationale = 'Use one Native move toward the selected safe visible Settlement.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if ([string]$receipt.action -ceq 'move' -and [bool]$state.party.isMoving -and [string]$state.context.timeControlMode -ceq 'StoppablePlay') {
+        [pscustomobject]@{ decisionRejected = $true; requestedAction = 'resume'; reason = 'not-in-current-action-catalog'; availableActions = $catalogNames } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if ([string]$receipt.action -ceq 'move' -and [bool]$state.party.isMoving) {
+        [pscustomobject]@{ observeAgain = $true; waitSeconds = 5; reason = 'Observe the existing Native movement without changing the Campaign clock.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    [pscustomobject]@{ done = $true; reason = 'No further safe Native travel action is supported.' } | ConvertTo-Json -Compress
+    exit 0
+}
+if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'unlistedResumeRecovery') {
+    $state = $request.observation.state
+    $receipt = $request.previousActionReceipt
+    $catalogNames = @($request.allowedActions | ForEach-Object { [string]$_.action } | Sort-Object -Unique)
+    if ($catalogNames -contains 'resume') { throw 'The travel action catalog must not add explicit resume as a workaround for Native StoppablePlay movement.' }
+    if ([string]$request.nativeMoveArrival.status -ceq 'arrived') {
+        [pscustomobject]@{ done = $true; reason = 'Fresh Native observation confirms arrival; no clock control or repeated movement is needed.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if ([string]$request.decisionFeedback.kind -ceq 'action-unavailable') {
+        if ([string]$request.decisionFeedback.requestedAction -cne 'resume' -or -not [bool]$request.decisionFeedback.noNativeActionSent -or
+            [string]$receipt.action -cne 'move' -or [string]$receipt.status -cne 'completed' -or
+            [string]$receipt.state.context.timeControlMode -cne 'StoppablePlay' -or [string]$state.context.timeControlMode -cne 'StoppablePlay' -or
+            -not [bool]$state.party.isMoving -or [string]$state.location.targetSettlementId -cne [string]$receipt.state.location.targetSettlementId) {
+            throw 'The unavailable resume proposal did not retain the valid Native move receipt, StoppablePlay clock, and active movement context.'
+        }
+        [pscustomobject]@{ observeAgain = $true; waitSeconds = 5; reason = 'The Native party is moving in StoppablePlay; observe again without changing the clock.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if (-not $receipt) {
+        [pscustomobject]@{ action = 'mapSettlementTargets'; arguments = @{}; rationale = 'Read current visible Native settlement targets.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if ([string]$receipt.action -ceq 'mapSettlementTargets') {
+        $currentId = [string]$state.location.currentSettlementId
+        $target = @($receipt.data.mapSettlementTargets | Where-Object { [string]$_.id -cne $currentId -and [double]$_.distance -gt 1.0 -and -not $_.hostile -and -not $_.underSiege -and [string]$_.type -in @('town','village') } | Sort-Object { [double]$_.distance } | Select-Object -First 1)
+        if ($target.Count -ne 1) { throw 'No currently visible safe Settlement exists for the unlisted-resume regression.' }
+        [pscustomobject]@{ action = 'move'; arguments = @{ SettlementId = [string]$target[0].id }; rationale = 'Use one Native move to a currently visible safe Settlement.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if ([string]$receipt.action -ceq 'move' -and [bool]$state.party.isMoving -and [string]$state.context.timeControlMode -ceq 'StoppablePlay') {
+        [pscustomobject]@{ decisionRejected = $true; requestedAction = 'resume'; reason = 'not-in-current-action-catalog'; availableActions = $catalogNames } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if ([string]$receipt.action -ceq 'move' -and [bool]$state.party.isMoving) {
+        [pscustomobject]@{ observeAgain = $true; waitSeconds = 5; reason = 'Continue observing the already-issued Native movement.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    [pscustomobject]@{ done = $true; reason = 'No further safe Native travel action is supported.' } | ConvertTo-Json -Compress
     exit 0
 }
 if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'staleOfferRecovery') {
@@ -81,6 +160,51 @@ if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'staleOfferRecovery') {
         exit 0
     }
     throw "Unexpected receipt '$($receipt.action)' in stale offer recovery test."
+}
+if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'unlistedResumeRecovery') {
+    $state = $request.observation.state
+    $receipt = $request.previousActionReceipt
+    $catalogNames = @($request.allowedActions | ForEach-Object { [string]$_.action } | Sort-Object -Unique)
+    if ($catalogNames -contains 'resume') { throw 'The scoped travel action catalog must not add explicit resume as a workaround for Native movement.' }
+    if ([string]$request.decisionFeedback.kind -ceq 'action-unavailable') {
+        $arrivalAfterRejection = [string]$request.nativeMoveArrival.status -ceq 'arrived'
+        $stillNaturallyMoving = ([bool]$state.party.isMoving -and [string]$state.context.timeControlMode -ceq 'StoppablePlay')
+        if ([string]$request.decisionFeedback.requestedAction -cne 'resume' -or -not [bool]$request.decisionFeedback.noNativeActionSent -or
+            [string]$receipt.action -cne 'move' -or [string]$receipt.status -cne 'completed' -or
+            [string]$receipt.state.context.timeControlMode -cne 'StoppablePlay' -or
+            (-not $arrivalAfterRejection -and -not $stillNaturallyMoving) -or
+            [string]$state.location.targetSettlementId -cne [string]$receipt.state.location.targetSettlementId) {
+            throw 'The unavailable resume proposal feedback did not preserve the valid Native move receipt, natural time mode, and movement/arrival state.'
+        }
+        if ($arrivalAfterRejection) { [pscustomobject]@{ done = $true; reason = 'The rejection feedback was consumed and fresh Native state shows arrival occurred naturally.' } | ConvertTo-Json -Compress; exit 0 }
+        [pscustomobject]@{ observeAgain = $true; waitSeconds = 5; reason = 'Native movement already advances time in StoppablePlay; observe again without changing the clock.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if ([string]$request.nativeMoveArrival.status -ceq 'arrived') {
+        [pscustomobject]@{ done = $true; reason = 'Fresh Native observation confirms arrival; no clock control or repeated movement is needed.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if (-not $receipt) {
+        [pscustomobject]@{ action = 'mapSettlementTargets'; arguments = @{}; rationale = 'Read current visible Native settlements.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if ([string]$receipt.action -ceq 'mapSettlementTargets') {
+        $currentId = [string]$state.location.currentSettlementId
+        $target = @($receipt.data.mapSettlementTargets | Where-Object { [string]$_.id -cne $currentId -and [double]$_.distance -gt 1.0 -and -not $_.hostile -and -not $_.underSiege -and [string]$_.type -in @('town','village') } | Sort-Object { [double]$_.distance } | Select-Object -First 1)
+        if ($target.Count -ne 1) { throw 'No currently visible safe Settlement exists for the unlisted-resume recovery test.' }
+        [pscustomobject]@{ action = 'move'; arguments = @{ SettlementId = [string]$target[0].id }; rationale = 'Issue one Native map move to the nearest safe visible Settlement.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if ([string]$receipt.action -ceq 'move' -and [bool]$state.party.isMoving -and [string]$state.context.timeControlMode -ceq 'StoppablePlay') {
+        [pscustomobject]@{ decisionRejected = $true; requestedAction = 'resume'; reason = 'not-in-current-action-catalog'; availableActions = $catalogNames } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if ([string]$receipt.action -ceq 'move' -and [bool]$state.party.isMoving) {
+        [pscustomobject]@{ observeAgain = $true; waitSeconds = 5; reason = 'Continue observing an already-issued Native move.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    [pscustomobject]@{ done = $true; reason = 'No additional safe map travel action is supported.' } | ConvertTo-Json -Compress
+    exit 0
 }
 if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'decisionContext') {
     $expectedGoal = [string]$env:CHRONICLE_TEST_EXPECTED_GOAL

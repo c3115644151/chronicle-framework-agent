@@ -411,6 +411,7 @@ try {
         if ($MaxElapsedSeconds -gt 0 -and ([DateTime]::UtcNow - $loopStartedUtc).TotalSeconds -ge $MaxElapsedSeconds)
             { throw "Agent decision loop exceeded its $MaxElapsedSeconds-second wall-clock budget." }
         $nativeMoveArrival = $null
+        $decisionFeedbackBeforeStep = $decisionFeedback
         $actionCatalog = Get-EffectiveActionCatalog $observation $previousActionReceipt
         $arrivalActions = @($script:AllowedActions.Keys | Sort-Object)
         if (($arrivalActions -join ',') -ceq 'mapSettlementTargets,move' -and [string]$previousActionReceipt.action -ceq 'move') {
@@ -453,6 +454,17 @@ try {
             $stepTiming.providerCompletedUtc = [DateTime]::UtcNow.ToString('O')
             $stepTiming.providerElapsedMilliseconds = [Math]::Round(([Diagnostics.Stopwatch]::GetTimestamp() - $providerStartedTicks) * 1000.0 / [Diagnostics.Stopwatch]::Frequency, 2)
         }
+        $providerRejectedDecision = ($decision -and $decision.decisionRejected -eq $true)
+        $rejectedRequestedAction = if ($providerRejectedDecision) { [string]$decision.requestedAction } else { [string]$decision.action }
+        if ($providerRejectedDecision) {
+            if ([string]::IsNullOrWhiteSpace($rejectedRequestedAction) -or [string]::IsNullOrWhiteSpace([string]$decision.reason))
+                { throw 'Provider decisionRejected response must include requestedAction and reason.' }
+            if ($rejectedRequestedAction -ceq 'advance') { throw 'advance is a Harness-only deterministic time step and is unavailable to Agent decision providers.' }
+            if ([string]$decision.reason -cne 'not-in-current-action-catalog') { throw 'Provider decisionRejected response used an unrecognized rejection reason.' }
+            $reportedCatalog = @($decision.availableActions | ForEach-Object { [string]$_ } | Sort-Object -Unique)
+            $actualCatalog = @($actionCatalog.Keys | ForEach-Object { [string]$_ } | Sort-Object -Unique)
+            if (($reportedCatalog -join ',') -cne ($actualCatalog -join ',')) { throw 'Provider decisionRejected response did not preserve the current validated action catalog.' }
+        }
         if ($decision -and $decision.observeAgain -eq $true) {
             $waitSeconds = 0
             if (-not [int]::TryParse([string]$decision.waitSeconds, [ref]$waitSeconds) -or $waitSeconds -lt 1 -or $waitSeconds -gt 10)
@@ -491,6 +503,7 @@ try {
                 iteration = $index
                 observationBefore = $observation
                 previousActionReceipt = $previousActionReceipt
+                decisionFeedback = $decisionFeedbackBeforeStep
                 decision = $decision
                 timing = $stepTiming
                 actionReceipt = $null
@@ -521,6 +534,7 @@ try {
                 iteration = $index
                 observationBefore = $observation
                 previousActionReceipt = $previousActionReceipt
+                decisionFeedback = $decisionFeedbackBeforeStep
                 decision = $decision
                 timing = $stepTiming
                 actionReceipt = $null
@@ -535,7 +549,10 @@ try {
             $termination = [ordered]@{ reason = 'provider-stop'; providerReason = $doneReason; completedByProvider = $true }
             break
         }
-        try { $validated = Convert-DecisionToCli $decision $actionCatalog $observation $previousActionReceipt }
+        try {
+            if ($providerRejectedDecision) { throw "Decision action '$rejectedRequestedAction' is not currently available from the latest Native observation. Provider reason='$($decision.reason)'." }
+            $validated = Convert-DecisionToCli $decision $actionCatalog $observation $previousActionReceipt
+        }
         catch {
             if ($_.Exception.Message -notmatch 'is not currently available from the latest Native observation') { throw }
             $consecutiveDecisionRejections++
@@ -543,10 +560,9 @@ try {
             $feedbackReason = $_.Exception.Message
             $nextObservation = Invoke-AgentCli 'state' @{} "$CommandPrefix-rejected-decision-observe-$index"
             if ($nextObservation.status -ne 'completed' -or -not $nextObservation.state) { throw 'Fresh Native observation after an unavailable decision was not completed.' }
-            $decisionFeedback = [ordered]@{ kind = 'action-unavailable'; requestedAction = [string]$decision.action; message = $feedbackReason; noNativeActionSent = $true }
-            $rejectionReceipt = [ordered]@{ protocolVersion = 1; action = [string]$decision.action; status = 'rejected-before-native'; error = $feedbackReason; noNativeActionSent = $true; campaignDay = $nextObservation.campaignDay }
-            $trace += [pscustomobject]@{ iteration = $index; observationBefore = $observation; previousActionReceipt = $previousActionReceipt; decision = $decision; timing = $stepTiming; actionReceipt = $rejectionReceipt; observationAfter = $nextObservation; actionAttempted = $false; actionExecuted = $false; control = [ordered]@{ kind = 'decision-rejected-before-native' } }
-            $previousActionReceipt = $rejectionReceipt
+            $decisionFeedback = [ordered]@{ kind = 'action-unavailable'; requestedAction = $rejectedRequestedAction; message = $feedbackReason; noNativeActionSent = $true; availableActions = @($actionCatalog.Keys | Sort-Object) }
+            $rejectionReceipt = [ordered]@{ protocolVersion = 1; action = $rejectedRequestedAction; status = 'rejected-before-native'; error = $feedbackReason; noNativeActionSent = $true; campaignDay = $nextObservation.campaignDay }
+            $trace += [pscustomobject]@{ iteration = $index; observationBefore = $observation; previousActionReceipt = $previousActionReceipt; decisionFeedback = $decisionFeedbackBeforeStep; decision = $decision; timing = $stepTiming; actionReceipt = $rejectionReceipt; observationAfter = $nextObservation; actionAttempted = $false; actionExecuted = $false; control = [ordered]@{ kind = 'decision-rejected-before-native' } }
             $observation = $nextObservation
             continue
         }
@@ -583,6 +599,7 @@ try {
                 iteration = $index
                 observationBefore = $observation
                 previousActionReceipt = $previousActionReceipt
+                decisionFeedback = $decisionFeedbackBeforeStep
                 decision = $decision
                 timing = $stepTiming
                 actionReceipt = $actionResult
@@ -614,6 +631,7 @@ try {
             iteration = $index
             observationBefore = $observation
             previousActionReceipt = $previousActionReceipt
+            decisionFeedback = $decisionFeedbackBeforeStep
             decision = $decision
             timing = $stepTiming
             actionReceipt = $actionResult
