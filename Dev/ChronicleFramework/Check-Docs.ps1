@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.55'
+$contractVersion = '7.57'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -63,6 +63,8 @@ $agentCheckpointValidationSource = Get-Content (Join-Path $harnessRoot 'Test-Age
 $agentEvaluationRecruitmentBaselineSource = Get-Content (Join-Path $harnessRoot 'Test-AgentEvaluationRecruitmentBaseline.ps1') -Raw -Encoding UTF8
 $agentEvaluationRecruitmentBaselineProviderSource = Get-Content (Join-Path $harnessRoot 'Test-AgentEvaluationBaselineProvider.ps1') -Raw -Encoding UTF8
 $agentEvaluationLiveModelRecruitmentSource = Get-Content (Join-Path $harnessRoot 'Test-AgentEvaluationLiveModelRecruitment.ps1') -Raw -Encoding UTF8
+$freshCampaignSource = Get-Content (Join-Path $harnessRoot 'Test-AgentFreshCampaign.ps1') -Raw -Encoding UTF8
+$freshCampaignBaselineMatrixSource = Get-Content (Join-Path $harnessRoot 'Test-AgentEvaluationFreshCampaignBaseline.ps1') -Raw -Encoding UTF8
 $agentActionLoopSource = Get-Content (Join-Path $harnessRoot 'Agent-DecisionLoop.ps1') -Raw -Encoding UTF8
 $agentOpenAiProviderSource = Get-Content (Join-Path $harnessRoot 'Agent-OpenAICompatibleProvider.ps1') -Raw -Encoding UTF8
 $agentLiveModelResumeSource = Get-Content (Join-Path $harnessRoot 'Test-AgentLiveModelResume.ps1') -Raw -Encoding UTF8
@@ -242,6 +244,10 @@ if ($settlementOverlayConversationTest -notmatch 'ExpectedOutcome' -or $settleme
 if ($settlementOverlayConversationTest -notmatch 'issue_alternative_solution_player_response' -or $settlementOverlayConversationTest -notmatch 'AlternativeExplanationRequested') { throw 'A narrative Alternative-Solution explanation line may be followed safely, but the final Alternative/Lord acceptance actions must remain out of the Quest test.' }
 if ($harnessScript -notmatch "FreshCampaign'\s*\{\s*@\('Preflight', 'Build', 'FreshCampaign'\)") { throw 'FreshCampaign phase must run Preflight and Build before its test.' }
 if ($harnessScript -notmatch "FreshCampaignProgression'\s*\{\s*@\('Preflight', 'Build', 'FreshCampaignProgression'\)") { throw 'FreshCampaignProgression phase must run Preflight and Build before its test.' }
+if ($harnessScript -notmatch "FreshCampaignBaselineMatrix'\s*\{\s*@\('Preflight', 'Build', 'FreshCampaignBaselineMatrix'\)" -or $harnessScript -match "'All'\s*\{[^\r\n]*'FreshCampaignBaselineMatrix'") { throw 'FreshCampaignBaselineMatrix must remain a selective five-instance evaluation phase outside All.' }
+if ($freshCampaignBaselineMatrixSource -notmatch '\$Runs = 5' -or $freshCampaignBaselineMatrixSource -notmatch 'ChronicleCampaignInstanceId' -or $freshCampaignBaselineMatrixSource -notmatch 'CampaignSeed = ''unknown; instance ID is not the Native RNG seed''' -or $freshCampaignBaselineMatrixSource -notmatch 'SourceSaveFilesUnchanged' -or $freshCampaignBaselineMatrixSource -notmatch 'RecruitmentProgression') { throw 'Fresh-campaign matrix must repeat five independently created Campaigns, record each opportunity/outcome and cleanup, and never present the Chronicle instance ID as an RNG seed.' }
+if ($freshCampaignSource -notmatch "'agentCheckpointGet'" -or $freshCampaignSource -notmatch 'ChronicleCampaignInstanceId') { throw 'FreshCampaign progression must capture the Chronicle Campaign instance identity through the read-only Native checkpoint endpoint.' }
+if ($freshCampaignSource -notmatch 'HarnessShaderCacheDialog\.ps1' -or $freshCampaignSource -notmatch 'Invoke-ChronicleShaderCacheDialogAcknowledgement' -or $freshCampaignSource -notmatch 'StartupDialogReceipts' -or $freshCampaignBaselineMatrixSource -notmatch 'FreshCampaignChildResult\.json' -or $freshCampaignBaselineMatrixSource -notmatch 'StartupDialogReceipts') { throw 'FreshCampaign tests must use the exact process-owned shader-cache dialog handler, retain its receipt, and preserve per-instance child evidence.' }
 if ($harnessScript -notmatch 'FreshCampaignProgressionAttempt\$attempt' -or $harnessScript -notmatch '\$attempt -le 2' -or $harnessScript -notmatch 'Get-ChronicleStartupAssessment' -or $harnessScript -notmatch 'startupClassification' -or $harnessScript -notmatch 'progressionFailureDetail' -or $harnessScript -notmatch 'characterCreationCompleted' -or $harnessScript -notmatch 'Get-Content -LiteralPath \$testResult\.RglLog -Tail 8' -or $harnessScript -notmatch 'ConvertTo-ChronicleLogTail -Lines \$rglLogLines' -or -not (Test-Path -LiteralPath $startupEvidenceScript)) { throw 'FreshCampaignProgression must retain stage/failure detail and normalize its short RGL tail.' }
 if ($harnessScript -notmatch 'recruitmentProgression = \$testResult\.RecruitmentProgression' -or $harnessScript -notmatch 'progressionSaveCycleVerified' -or $harnessScript -notmatch 'freshClanRenown = \$testResult\.ClanRenown') { throw 'FreshCampaignProgression must preserve the measurable baseline, save cycle, and recruit receipt summary.' }
 . $startupEvidenceScript

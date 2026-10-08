@@ -7,6 +7,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $harnessRoot = $PSScriptRoot
 . (Join-Path $harnessRoot 'Test-AgentSupport.ps1')
+. (Join-Path $harnessRoot 'HarnessShaderCacheDialog.ps1')
 $gameRoot = if ($env:CHRONICLE_GAME_ROOT -and (Test-Path -LiteralPath $env:CHRONICLE_GAME_ROOT)) { [IO.Path]::GetFullPath($env:CHRONICLE_GAME_ROOT) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
 $gameExe = Join-Path $gameRoot 'bin\Win64_Shipping_Client\Bannerlord.exe'
 $engineConfig = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\Configs\engine_config.txt'
@@ -108,10 +109,13 @@ $bannerlordPid = 0
 $gameStarted = $false
 $startRequested = $false
 $introSkippedObserved = $false
+$startupDialogReceipts = [System.Collections.Generic.List[object]]::new()
+$startupDialogFailure = $null
 $creationCompleted = $false
 $initialSnapshotCaptured = $false
 $snapshotArtifactPath = if ([string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) { $null } else { Join-Path $env:CHRONICLE_HARNESS_TEMP 'FreshCampaign.initial-state.json' }
 $renown = $null
+$campaignInstanceId = $null
 $mapState = $null
 $clock = $null
 $stageIndices = [System.Collections.Generic.HashSet[int]]::new()
@@ -165,6 +169,30 @@ try {
             $bannerlordPid = $candidate.Id
             $crashWindowTitle = [string]$candidate.MainWindowTitle
             if ($crashWindowTitle -match '(?i)Crash Report|CrashReporter') { $crashDetected = $true }
+            if ($candidate.MainWindowTitle -ceq 'Mod change detected') {
+                try {
+                    $dialogResult = Invoke-ChronicleShaderCacheDialogAcknowledgement -ProcessId $bannerlordPid -WindowHandle $candidate.MainWindowHandle
+                }
+                catch {
+                    $dialogEvidencePath = if (-not [string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) { Join-Path $env:CHRONICLE_HARNESS_TEMP "startup-dialog-$bannerlordPid.json" } else { $null }
+                    if ($dialogEvidencePath) { [pscustomobject]@{ Handled = $false; ProcessId = $bannerlordPid; WindowTitle = $candidate.MainWindowTitle; Error = $_.Exception.Message } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $dialogEvidencePath -Encoding UTF8 }
+                    $startupDialogFailure = "Safe handling of the known shader-cache prompt failed before confirmation. No global keyboard or mouse input was sent. Cause: $($_.Exception.Message)"
+                    $harnessFailureObserved = $true
+                    break
+                }
+                $startupDialogReceipts.Add($dialogResult)
+                if (-not [string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) {
+                    $dialogEvidencePath = Join-Path $env:CHRONICLE_HARNESS_TEMP "startup-dialog-$bannerlordPid.json"
+                    $dialogResult | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $dialogEvidencePath -Encoding UTF8
+                }
+                if (-not $dialogResult.Handled) {
+                    $startupDialogFailure = "Known shader-cache prompt did not satisfy its exact UIA/Button process-ownership checks. No button was pressed; evidence: $dialogEvidencePath"
+                    $harnessFailureObserved = $true
+                    break
+                }
+                Start-Sleep -Milliseconds 200
+                continue
+            }
             $windowLayout = Set-ChronicleTestWindow -ProcessId $bannerlordPid
             if ($windowLayout) { $windowLayoutApplied = [bool]$windowLayout.Applied }
             if ($crashWindowTitle -match '(?i)Crash Report|CrashReporter' -and -not $crashWindowCaptureAttempted) {
@@ -335,7 +363,7 @@ finally {
 
 if ($ValidateRecruitmentProgression) {
     try {
-        if (-not $gameStarted) { throw "FreshCampaign process did not reach game-start; crashDetected=$crashDetected window='$crashWindowTitle'." }
+        if (-not $gameStarted) { throw "FreshCampaign process did not reach game-start; crashDetected=$crashDetected window='$crashWindowTitle' startupDialog='$startupDialogFailure'." }
         if (-not $creationCompleted -or -not $initialSnapshotCaptured) { throw "FreshCampaign did not reach an observed character-created MapState; crashDetected=$crashDetected window='$crashWindowTitle'." }
         if (-not $disposableSaveRequested) { throw 'FreshCampaign character creation completed but did not request the uniquely named disposable save.' }
         if (-not $disposableSaveCompleted -or -not $disposableSaveSuccessful) { throw 'Fresh campaign did not confirm completion of its isolated disposable save.' }
@@ -345,6 +373,9 @@ if ($ValidateRecruitmentProgression) {
         $load = Invoke-FreshCampaignAgentCli 'load' @('-SaveName', $progressionSaveName) -CommandTimeout $TimeoutSeconds
         if ($load.status -ne 'completed' -or -not $load.session.processId) { throw 'Standard Agent CLI could not load the fresh-created disposable save.' }
         $loadedState = Invoke-FreshCampaignAgentCli 'state' @('-CommandId', "$progressionCommandPrefix-observe-start")
+        $checkpointIdentity = Invoke-FreshCampaignAgentCli 'agentCheckpointGet' @('-CommandId', "$progressionCommandPrefix-campaign-identity")
+        if ($checkpointIdentity.status -ne 'completed' -or [string]::IsNullOrWhiteSpace([string]$checkpointIdentity.data.campaignInstanceId)) { throw 'Native Campaign did not expose its Chronicle campaign-instance identifier for the fresh-start baseline.' }
+        $campaignInstanceId = [string]$checkpointIdentity.data.campaignInstanceId
         if ($loadedState.state.economy.renown -ne 20 -or $loadedState.state.party.members -ne 1 -or $loadedState.state.economy.gold -ne 1000) { throw 'Reloaded fresh save did not preserve the expected 20-Renown/solo/1000-gold baseline.' }
         $target = @($loadedState.state.nearbySettlements | Where-Object { -not $_.hostile -and $_.distance -gt 1.0 } | Sort-Object distance | Select-Object -First 1)
         if ($target.Count -ne 1) { throw 'No safe visible settlement exists for the recruitment progression step.' }
@@ -447,6 +478,8 @@ $result = [ordered]@{
     GameStarted = $gameStarted
     NativeNewCampaignRequested = $startRequested
     OptionalIntroSkipped = $introSkippedObserved
+    StartupDialogReceipts = @($startupDialogReceipts)
+    StartupDialogFailure = $startupDialogFailure
     AutoSelectedHighRenownBackground = $backgroundChoiceObserved
     VisibleIssueTypesBySettlement = $visibleIssueTypes
     IssueConversationProbeStatus = $issueConversationProbeStatus
@@ -465,6 +498,7 @@ $result = [ordered]@{
     CharacterCreationCompleted = $creationCompleted
     InitialAgentObservationCaptured = $initialSnapshotCaptured
     InitialAgentObservationPath = if ($initialSnapshotCaptured) { $snapshotArtifactPath } else { $null }
+    ChronicleCampaignInstanceId = $campaignInstanceId
     ClanRenown = $renown
     ExpectedClanRenown = 20
     MapState = $mapState
