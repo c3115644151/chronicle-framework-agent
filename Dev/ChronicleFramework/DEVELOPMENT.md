@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.81
+Contract version: 7.82
 
 ## 目标与边界
 
@@ -396,6 +396,8 @@ Native Barter目录按当前VM会话和成功回执逐阶段开放：没有当�
 `CheckpointValidation` 是 opt-in 的 checkpoint输入安全回归：对一个接入于disposable Campaign存档的损坏JSON、未知schema版本和错Campaign身份逐个尝试Resume；每类都应在Provider启动或任何Native写动作前失败，且当前地图/队伍/金币/日期/时间档保持不变。专用seed action只在visual Harness模式可用，不能进入产品白名单。
 
 `RecruitmentBaseline` 是W5的确定性原版对照阶段：它从同一个未修改的Campaign模板分别重载5个Runtime，完成地图移动与招募一人，按Native receipt/Party/Gold/Volunteer slot验证成功，同时记录CampaignDay、raw time mode与墙钟成本。它明确只有同一Campaign起点重复，不是5个独立随机seed，也不测试真实LLM；结果用于冻结后续候选模型评测的重复数和阈值，阶段不进入 `All`。
+
+`MultiDaySupplyBaseline` 是W5-H的确定性Native配对基线，显式opt-in且不进入 `All`：从同一个disposable Campaign模板建立固定MainParty，分别执行无补给/原生市场补给两条支路，在Town Wait Menu通过原版等待跨过至少三个日周期。它记录Food/FoodInventory/FoodChange、日工资字段、Gold、daily tick与原始时间档，判断是否存在可观察的资源压力及Native补给是否缓解；移动只使用当前可见安全Town并让Campaign时间自然推进，等待只调用原版Town Wait/`rest`，不发Harness `advance`。该Native对照先用于校准变量/方差和真实模型阈值，不代表LLM已会规划补给。
 
 `FreshCampaignBaselineMatrix` 是单独opt-in的多新档Native基线：5次分别走本机1.4.8原版New Campaign/角色创建入口，在相同模块/难度/背景条件下创建全新Campaign；每次记录初始Native状态、可见安全Settlement、RecruitmentVM结果、Campaign实例标识、耗时和清理。`ChronicleCampaignInstanceId` 是Mod Campaign实例身份，不等同Native随机Seed；若本体没有可验证Seed，结果明示Seed未知。每个新进程遇到已识别的“Mod change detected”着色器缓存提示时，FreshCampaign调用同一精确UIA/所属进程按钮处理器并保留回执；不使用全局键鼠，也不把弹窗误认成存档模组不兼容。该基线衡量新档起点和机会变化，不含真实模型通过率，也不能用“5次新档”冒充5个已验证Seed；它不进入 `All`。
 

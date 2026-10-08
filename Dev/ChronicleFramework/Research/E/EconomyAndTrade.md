@@ -186,6 +186,10 @@ Party component 可限制每天工资支付额，`PaymentLimit` 未有限额时�
 
 原版 `PartiesBuyFoodCampaignBehavior` 在 Party 进入 Settlement/小时检查后，给适用的非玩家 Party 自动补买粮食；调用分支显式跳过 MainParty，所以玩家不能依赖它替自己自动补粮。Town/Village 的可买食品来源与买入结算由 `PartyFoodBuyingModel`、SettlementComponent/MarketData、`SellItemsAction` 等处理。Chronicle 已有的 Town food options/`provision` 是一次按需查询/交易；Observer 会持续输出主 Party `food`、`foodInventory`、`foodChange`，但不输出全部 food roster。
 
+W5-H 的 `MultiDaySupplyBaseline` 在本机1.4.8 disposable Campaign中做了三轮配对原版对照（每轮从同一模板分别重载无补给/补给支路，非三个独立随机Seed）。主队由1人经Native招募到6人，随后在萨哥特按Native `town_wait`/`rest` 跨过daily tick 2→5，实际Campaign推进约3.1日。三轮无补给均从 Gold 900 / Food 0.95 / FoodInventory 0 开始，结束为 Gold 870 / Food 0.05 / FoodInventory 0、FoodChange -0.3、DailyWage 10、Morale 49；三轮补给均通过当轮Native TradeVM购买4个橄榄（当轮报价9/个、共36），等待前 Gold 864、Food 4.95、FoodInventory 4，等待后 Gold 834 / Food 4.05 / FoodInventory 4，其余上述状态一致。两支均自然经过相同三个每日边界，无Harness时钟命令；Town Wait 墙钟耗时每轮60–61秒。配对起始日偏差最大0.009日，资源结果三轮完全一致，源Campaign文件SHA-256前后相同，所有游戏进程已停止。证据：`TestResults/20261009-022936/Temp/MultiDaySupplyBaselineResult.json`；Harness阶段通过。
+
+这证明当前固定队伍与Town Wait场景下，MainParty的Gold确实每跨一个Daily tick减少10，且4件该次报价的粮食购买可使三日后Food从0.05提高到4.05；这是限定条件下的实测，不是任意队伍规模、兵种、市场或战役的通用工资/消耗公式。`foodInventory`保持4而`Food`减少0.9，报告两个字段时不可互相替代或据此推导未观察的库存消费细节。该场景足以作为下一步真实模型测试的单个可证伪候选，不代表模型已通过长期补给规划。
+
 ### 货物、负重、动物与战后物资
 
 Party `ItemRoster` 同时承载食品、贸易物、动物与战利品；缓存的 `TotalFoodAtInventory`、`TotalWeightCarried`、`InventoryCapacity`、动物数量会分别影响食物、载重、速度或交易判断。战后 ItemRoster 可能先进入 Encounter 的待领取 Loot Roster，再经原生 InventoryState 领取到 Party；那不是“战斗奖励已到账”的同义词，处理链见 G/H 域及 MAINLINE 的 partyLoot 契约。队伍内囚犯、受伤/健康成员、战利品/库存的转移则由对应 PartyScreen、InventoryLogic 和结算动作分别提交。
@@ -196,7 +200,7 @@ Observer 当前主队输出 Gold、Party人数/健康/伤兵/囚犯、Item总量
 
 证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `MobileParty`、`DefaultPartyWageModel`、`DefaultMobilePartyFoodConsumptionModel`、`DefaultPartyDesertionModel`、`FoodConsumptionBehavior`、`PartiesBuyFoodCampaignBehavior`、`DefaultClanFinanceModel`；Chronicle `AgentObserver.cs`、`AgentProtocol.cs`、`AgentTradeAdapter.cs`；相关战后 Loot 路径见现有 G/H研究/MAINLINE。该适配仅在活动Trade InventoryState提供食物候选/原生购买草稿，不直接改粮食/库存；本节仍未运行欠薪、粮尽、牲畜宰杀或债务时间序列。
 
-未知项：Player/MainParty的每日实际工资扣款事件/调用顺序和与 ClanFinance 的精确钱包切分；各 trooper/wounded/hero/mercenary/garrison/daily-payment policy 的全部工资细节；背包重量/马匹分类影响速度上限和交易容量的完整公式；Army食物分享和债务/破产处理边缘条件；Player UI在 roster/item transfer中所有键鼠/提交/取消和失败恢复副作用。
+未知项：上述固定6人Native招募主队以外的工资写入事件/调用顺序、ClanFinance钱包切分及不同队伍组成/支付策略下的实际Gold后果；各 trooper/wounded/hero/mercenary/garrison/daily-payment policy 的全部工资细节；背包重量/马匹分类影响速度上限和交易容量的完整公式；Army食物分享和债务/破产处理边缘条件；Player UI在 roster/item transfer中所有键鼠/提交/取消和失败恢复副作用。
 
 ## E07 Clan 财政与玩家财务页
 
