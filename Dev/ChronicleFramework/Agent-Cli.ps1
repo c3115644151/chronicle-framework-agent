@@ -53,6 +53,7 @@ param(
 )
 
 . (Join-Path $PSScriptRoot 'HarnessShaderCacheDialog.ps1')
+. (Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1')
 
 $ErrorActionPreference = 'Stop'
 $gameRoot = if ($env:CHRONICLE_GAME_ROOT -and (Test-Path -LiteralPath $env:CHRONICLE_GAME_ROOT)) { [IO.Path]::GetFullPath($env:CHRONICLE_GAME_ROOT) } else { Split-Path -Parent (Split-Path -Parent $PSScriptRoot) }
@@ -93,28 +94,49 @@ function Restore-ChronicleTestEngineConfig([string]$BackupPath) {
 }
 
 function Ensure-ChronicleSteamClient([int]$TimeoutSeconds = 45) {
+    $startedByHarness = $false
     $existingSteam = @(Get-Process -Name 'steam' -ErrorAction SilentlyContinue)
-    if ($existingSteam.Count -gt 0) {
-        return [ordered]@{ available = $true; startedByHarness = $false; processIds = @($existingSteam | ForEach-Object { [int]$_.Id }) }
+    if ($existingSteam.Count -eq 0) {
+        if (-not (Test-Path -LiteralPath $steamExe -PathType Leaf)) {
+            throw "Steam client is not running and the expected Steam executable is not present at '$steamExe'."
+        }
+        Start-Process -FilePath $steamExe -ArgumentList '-silent' -WorkingDirectory $steamRoot -WindowStyle Hidden | Out-Null
+        $startedByHarness = $true
     }
-    if (-not (Test-Path -LiteralPath $steamExe -PathType Leaf)) {
-        throw "Steam client is not running and the expected Steam executable is not present at '$steamExe'."
-    }
-    Start-Process -FilePath $steamExe -ArgumentList '-silent' -WorkingDirectory $steamRoot -WindowStyle Hidden | Out-Null
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     $steamProcesses = @()
+    $webHelperProcesses = @()
+    $webHelperSignature = ''
+    $webHelperStableSinceUtc = $null
+    $readiness = $null
     while ([DateTime]::UtcNow -lt $deadline) {
         $steamProcesses = @(Get-Process -Name 'steam' -ErrorAction SilentlyContinue)
-        if ($steamProcesses.Count -gt 0) {
-            Start-Sleep -Seconds 5
-            $steamProcesses = @(Get-Process -Name 'steam' -ErrorAction SilentlyContinue)
-            if ($steamProcesses.Count -gt 0) {
-                return [ordered]@{ available = $true; startedByHarness = $true; processIds = @($steamProcesses | ForEach-Object { [int]$_.Id }) }
+        $webHelperProcesses = @(Get-Process -Name 'steamwebhelper' -ErrorAction SilentlyContinue)
+        $currentWebHelperSignature = (@($webHelperProcesses | ForEach-Object { [int]$_.Id } | Sort-Object) -join ',')
+        if ([string]::IsNullOrWhiteSpace($currentWebHelperSignature)) {
+            $webHelperSignature = ''
+            $webHelperStableSinceUtc = $null
+        }
+        elseif ($currentWebHelperSignature -cne $webHelperSignature) {
+            $webHelperSignature = $currentWebHelperSignature
+            $webHelperStableSinceUtc = [DateTime]::UtcNow
+        }
+        $stableSeconds = if ($webHelperStableSinceUtc) { ([DateTime]::UtcNow - $webHelperStableSinceUtc).TotalSeconds } else { 0 }
+        $readiness = Get-ChronicleSteamClientReadiness -SteamProcessCount $steamProcesses.Count -WebHelperProcessCount $webHelperProcesses.Count -WebHelperStableSeconds $stableSeconds -RequiredStableSeconds 5
+        if ($readiness.Ready) {
+            return [ordered]@{
+                available = $true
+                startedByHarness = $startedByHarness
+                processIds = @($steamProcesses | ForEach-Object { [int]$_.Id })
+                webHelperProcessIds = @($webHelperProcesses | ForEach-Object { [int]$_.Id })
+                readyUtc = [DateTime]::UtcNow.ToString('O')
+                readiness = $readiness
             }
         }
         Start-Sleep -Milliseconds 500
     }
-    throw "Steam was launched silently but its client process did not become available within $TimeoutSeconds seconds."
+    $reason = if ($readiness) { [string]$readiness.Reason } else { 'no-readiness-sample' }
+    throw "Steam client did not reach stable local API readiness within $TimeoutSeconds seconds (reason='$reason', steamProcesses=$($steamProcesses.Count), webHelperProcesses=$($webHelperProcesses.Count)). Bannerlord was not launched."
 }
 
 function Write-Result($Value) {
@@ -282,7 +304,7 @@ if ($Action -in @('start','load')) {
         if ($launchProcess.MainWindowTitle -ceq 'Warning') {
             try {
                 $warningSnapshot = Get-ChronicleWindowAutomationSnapshot -ProcessId $process.Id -WindowHandle $launchProcess.MainWindowHandle
-                $startupDialogSnapshots.Add($warningSnapshot)
+                $startupDialogSnapshots.Add((ConvertTo-ChronicleStartupDialogEvidence -Snapshot $warningSnapshot))
                 $startupFault = if ($warningSnapshot.DialogText -match '(?i)Unable to initialize Steam API') { 'Bannerlord reports that the Steam API could not initialize; see startup dialog evidence.' } else { 'Bannerlord is blocked by an unclassified Warning dialog; no button was pressed.' }
             }
             catch { $startupFault = "Bannerlord Warning dialog could not be read safely: $($_.Exception.Message)" }

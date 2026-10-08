@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.79
+Contract version: 7.81
 
 ## 目标与边界
 
@@ -65,7 +65,7 @@ Project采用最少任务状态：`Todo`表示尚未开始（是否被阻塞看I
 
 `MissionLeave`验收使用一次性Campaign夹具经Town菜单进入真实Location Mission，先保存引擎帧，再用一个限时Mission专属`IInputContext`让本场景的`Mission.Tick`读到Leave Area game key处于按住状态；它继续走原版`Mission.OnEndMissionRequest`、MissionLogic veto/Inquiry与Mission计时，不直接调用`Mission.EndMission`，也不发送OS全局键鼠事件。测试等待真实Mission→Campaign MapState和原Settlement菜单，并保留前后引擎帧/时钟/存档哈希/清理收据。该测试已加入`All`：当前实测证明了Sargot TownCenter路径，不等于所有Town/Village/Tavern和其他Mission条件都已覆盖。用户当前键鼠实测长按Tab约两秒，但产品代码虚拟的是Native Leave Area game action，不硬编码物理键位。
 
-Harness启动Native游戏客户端前先确认Steam Client进程运行；若未运行，仅从本机安装目录用`-silent`启动，不发送账号凭据/全局键鼠，之后留在后台供游戏API连接。若启动需要登录，或Bannerlord仍弹Steam API Warning，则失败收据保留目标窗口控件内容，不自动点确认。启动还会把`engine_config.txt`里的`max_framerate`临时限制为30，并使用已核验的840×472非激活窗口布局；该配置快照放在Agent运行目录，Stop后恢复；在 visual-capture 模式下，1.4.8 `MapScreen.OnGameWindowFocusChange`会在非激活窗口自动打开Escape菜单，Harness通过Harness-only Harmony前缀抑制该自动Overlay并在地图操作前断言Map/Escape菜单未挡输入；普通游戏行为与Agent白名单不变。（保留`safely_exited=1`安全退出标志）。若测试中异常退出，后续安全启动会先恢复遗留快照；无Bannerlord进程时也可显式运行`Agent-Cli.ps1 recoverTestConfig`恢复一次性快照；游戏进程仍在时绝不覆盖配置。这样减少测试渲染负载但保留真实UI/引擎路径，且不把低画质设置留给玩家日常游戏。启动等待只读取Chronicle日志新追加的字节，不再每250毫秒重复解析整份日志；若协议未就绪，`startup-timeout-<pid>.json`记录Window Title、Steam状态、增量Chronicle遥测、RGL/watchdog末尾和弹窗快照，未知警告不被假定为崩溃，也不自动确认。
+Harness启动Native游戏客户端前先确认Steam Client和Steam WebHelper都稳定运行；若Steam未运行，仅从本机安装目录用`-silent`启动，不发送账号凭据/全局键鼠，并等待WebHelper进程集合稳定5秒后才启动Bannerlord。这样避免只看到`steam.exe`进程就过早启动游戏。若启动需要登录，或Bannerlord仍弹`Unable to initialize Steam API`警告，则失败收据保留目标窗口控件内容，不自动点确认、不伪装为Mod/存档兼容故障。启动还会把`engine_config.txt`里的`max_framerate`临时限制为30，并使用已核验的840×472非激活窗口布局；该配置快照放在Agent运行目录，Stop后恢复；在 visual-capture 模式下，1.4.8 `MapScreen.OnGameWindowFocusChange`会在非激活窗口自动打开Escape菜单，Harness通过Harness-only Harmony前缀抑制该自动Overlay并在地图操作前断言Map/Escape菜单未挡输入；普通游戏行为与Agent白名单不变。（保留`safely_exited=1`安全退出标志）。若测试中异常退出，后续安全启动会先恢复遗留快照；无Bannerlord进程时也可显式运行`Agent-Cli.ps1 recoverTestConfig`恢复一次性快照；游戏进程仍在时绝不覆盖配置。这样减少测试渲染负载但不把低画质设置留给玩家日常游戏。启动等待只读取Chronicle日志新追加的字节，不再每250毫秒重复解析整份日志；若协议未就绪，`startup-timeout-<pid>.json`记录Window Title、Steam状态、增量Chronicle遥测、RGL/watchdog末尾和弹窗快照。UI Automation返回的窗口/控件代理必须先投影为纯文本/数值字段再写收据，避免序列化卡住；未知警告不被假定为崩溃，也不自动确认。
 
 若Bannerlord已加载模块但未达到Campaign协议就超时，Agent-Cli会在清理进程前保留`startup-timeout-<pid>.json`：窗口标题/句柄、进程是否仍在及CPU秒数、当次Chronicle启动遥测、RGL错误日志/watchdog尾部、已确认的启动弹窗回执和待恢复配置标志。该失败只能判作“协议未就绪”；若日志没有故障信号，不宣称崩溃或兼容性根因。下次安全启动恢复未完成的配置快照。
 
