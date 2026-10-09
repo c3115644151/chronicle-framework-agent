@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.82
+Contract version: 7.97
 
 ## 目标与边界
 
@@ -399,6 +399,10 @@ Native Barter目录按当前VM会话和成功回执逐阶段开放：没有当�
 
 `MultiDaySupplyBaseline` 是W5-H的确定性Native配对基线，显式opt-in且不进入 `All`：从同一个disposable Campaign模板建立固定MainParty，分别执行无补给/原生市场补给两条支路，在Town Wait Menu通过原版等待跨过至少三个日周期。它记录Food/FoodInventory/FoodChange、日工资字段、Gold、daily tick与原始时间档，判断是否存在可观察的资源压力及Native补给是否缓解；移动只使用当前可见安全Town并让Campaign时间自然推进，等待只调用原版Town Wait/`rest`，不发Harness `advance`。该Native对照先用于校准变量/方差和真实模型阈值，不代表LLM已会规划补给。
 
+`LiveModelSupplyEvaluation` 是W5-I的opt-in真实本地模型测试，默认同一disposable模板重复3次，不加入 `All`：Harness先用原版移动/招募将场景准备到萨哥特的6人主队状态，再把决策交给模型；预处理不计入模型成绩，且必须用Native收据确认固定起点。模型需依当前TradeVM报价补给、使用Town Wait/`rest`自然跨过3个daily tick、再次观察并离开等待菜单。门槛固定为每轮最多24次模型决策/300秒、模型3/3完成、结束Food≥1且Gold>0/队伍6人、录像≥90%并在关键帧/时间线生成后删除成功原片；每轮记录Native交易、等待、资源/时间后果、源档hash和清理。三次运行只是一个相同Campaign模板上的模型重复性，不是跨Seed泛化或完整生涯能力。
+
+`menuSelect` 的模型参数必须引用当前Native观察中启用选项的精确 `id`，不能把参数名或显示文本当作ID。`provision` 则须把最新报价里的 `viewModelItemId` 映射到 `ItemViewModelId`，并提供该报价允许的整数数量；它只创建TradeVM草稿，须再用当前提供的 `tradeConfirm` 提交，才能退出交易并进入后续等待流程。TradeVM取到有效食物报价后，会隐藏重复报价读取，只保留基于该报价的有效交易动作，直至Native事务成功、取消或拒绝。未提交交易期间的 `observeAgain` 会被安全拒绝并反馈，让模型根据当前仅开放的确认/取消动作重新决策。决策或 `observeAgain` 在Native调用/宿主等待前校验失败时，失败收据保留归一化后的模型决策、当时的原版观察以及“未发送Native动作/未开始宿主等待”证明，便于区分模型选值错误与游戏执行错误。
+
 `FreshCampaignBaselineMatrix` 是单独opt-in的多新档Native基线：5次分别走本机1.4.8原版New Campaign/角色创建入口，在相同模块/难度/背景条件下创建全新Campaign；每次记录初始Native状态、可见安全Settlement、RecruitmentVM结果、Campaign实例标识、耗时和清理。`ChronicleCampaignInstanceId` 是Mod Campaign实例身份，不等同Native随机Seed；若本体没有可验证Seed，结果明示Seed未知。每个新进程遇到已识别的“Mod change detected”着色器缓存提示时，FreshCampaign调用同一精确UIA/所属进程按钮处理器并保留回执；不使用全局键鼠，也不把弹窗误认成存档模组不兼容。该基线衡量新档起点和机会变化，不含真实模型通过率，也不能用“5次新档”冒充5个已验证Seed；它不进入 `All`。
 
 `FreshCampaignLiveModelEvaluation` 是#101 Native基线后的opt-in候选评测：每轮新建Campaign并由真实本地模型从该新档第一条决策观察开始，自行选择当前可见安全Settlement、移动、读取当前RecruitmentVM报价、招募并核验停止。固定5轮实例，阈值为完整新档到目标≤180秒、自然Campaign推进≤0.1日、每轮恰好一次Native Move/Recruit、无被Native拒绝的动作、录像覆盖≥90%、临时保存与进程清理；动作未列入当轮目录时可被Native前安全拦截并重新观察，该拦截不计作Native拒绝，但必须记录且不得造成世界副作用。途中可以是显式有限 `observeAgain`，也可以是安全拦截后的新Native观察；到达时延迟模型给出的过期等待请求应被反馈处理，不能让已完成的成长路径假阴性。候选五轮启动前生成当前Tracked/非忽略Harness源文件和本地Harness设置的SHA-256清单；每轮前后复核，若清单变化就停止/判失败，避免把不同代码版本的运行合并成同一个矩阵。模型/服务器/模块/源码提交与源清单状态随结果记录。首轮目标结束后清除测试保存，不改已有正式存档。该阶段不加入 `All`，结果只证明这一成长切片的五实例重复性。
@@ -414,6 +418,16 @@ DecisionLoop 的动作白名单仍是产品能力上限，但模型每轮看到�
 动作目录会镜像Native入口的前置条件：`move`/`pursue`/`follow`/`hold`/`moveToPoint`只在无Encounter、无当前GameMenu、Escape或Inquiry的Campaign Map出现；Native遭遇期间隐藏`mapSettlementTargets`以避免把地图导航误作当前交互。当前对话没有可点击选项时不暴露`dialogueSelect`。在Bandit无选项过渡句中先探测`barterOptions`；仅当Native表明Safe Passage BarterVM尚未就绪且会话仍无可点击选项时，才放开一次`dialogueContinue`，随后重新探测Barter。Barter修改/自动平衡/Offer只在同一Native BarterVM最近的查询或草稿回执存在时开放；每次Native handler仍复核自己的上下文条件。
 
 遇到遭遇阻塞时，`control-unavailable`反馈另保留上一条`native-action-rejected`的原因；这样模型在同一轮重规划中不会丢失“Barter探测尚未就绪，需要按当前无选项Conversation继续”的信息。
+
+真实模型的三日补给试跑显示：即便 Native 会安全拒绝过期的 foodOptions/menuSelect，静态允许列表仍会反复把模型送进失效上下文。因此决策目录现进一步随当前状态分阶段：menuSelect只让模型传当前 enabled 的OptionId，执行器从同一观察绑定Native context.menuId；食品/交易工具只在Trade InventoryState开放，provision须有当前foodOptions回执，提交后只开放确认/取消；rest只在实际Town Wait菜单与等待状态开放。它们仅缩小Agent可调用工具/参数，并在原生 handler 前核对，不替代、改写或绕开本体菜单、交易或时间后果。相关确定性门禁在AgentLoop阶段验证，真实模型三日目标仍以独立W5-I收据验收。
+
+rest通过Native返回accepted后，AgentLoop不阻塞等待三天，而是以有界observeAgain继续读当前Campaign状态；只有上一条rest已接受、Native Wait菜单仍打开且原版时间正在推进时，才开放此宿主侧短暂等待。rest在同一Wait菜单内只允许提交一次，接受/完成后隐藏重复rest，直到离开Wait菜单。该观察和等待不调用游戏时钟开关；未接受rest、等待菜单已退出或原版游戏时间停止时不开放。
+
+Supply循环的本地Qwen3.5 4B校准在输出上限768和1536时均收到finish_reason=length、未得到完整第二步决策；本轮将上限提高到Provider允许的4096并写入每轮收据。目标文本已缩短以减少不必要推理，但模型仍受决策/墙钟硬预算约束；这只说明该模型/任务目前需要更高输出上限，不能据此推断其他模型都需相同配置或把截断记成Agent失败结果。
+
+本地模型还曾把一个结构化动作的arguments包成JSON字符串或单项嵌套数组，并把单参数rest压成数字；Provider现只解包有限层数的单项string/array包装，且仅在动作 schema 确有一个字段时接受标量作为该字段，之后仍逐字段执行当前工具参数白名单。多字段动作的标量/数组、未知字段和无效JSON仍拒绝，并有本地HTTP回归测试。
+
+campaign-multiday-supply只将当前菜单OptionId、主队人数/粮食/日工资、Gold、当前Settlement/菜单/Inventory模式、Campaign日与tick，以及当前Trade/Wait选项传给模型；不重复放入NPC、邻近队伍、任务标记或角色技能。Native完整状态仍保留在Harness轨迹中，供开发者诊断；模型看到的窄视图是场景所需事实的呈现方式，不代表隐藏的Native状态被改写。
 
 ## 当前执行焦点
 

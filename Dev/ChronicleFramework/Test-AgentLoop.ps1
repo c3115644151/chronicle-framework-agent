@@ -39,6 +39,25 @@ $stoppedTravelControls = @(Get-EffectiveControlCatalog -Observation (New-Observe
 $initialStateControls = @(Get-EffectiveControlCatalog -Observation (New-ObserveAgainPolicyFixture) -PreviousActionReceipt $null)
 $observeAgainControlCatalogVerified = ($activeTravelControls.Count -eq 1 -and $activeTravelControls[0].control -ceq 'observeAgain' -and $encounterTravelControls.Count -eq 0 -and $stoppedTravelControls.Count -eq 0 -and $initialStateControls.Count -eq 0)
 if (-not $observeAgainControlCatalogVerified) { throw 'The scheduler wait control must only be offered during confirmed, naturally advancing Native travel, not at encounters or stopped time.' }
+$nativeTownWaitObservation = [pscustomobject]@{
+    status = 'completed'
+    state = [pscustomobject]@{
+        context = [pscustomobject]@{ gameState = 'MapState'; timeControlMode = 'UnstoppableFastForward'; encounterActive = $false; menuId = 'town_wait_menus'; escapeMenuOpen = $false; inquiryOpen = $false; isWaiting = $true }
+        party = [pscustomobject]@{ isMoving = $false }
+        location = [pscustomobject]@{ currentSettlementId = 'town_test'; targetSettlementId = 'town_test' }
+    }
+}
+$nativeRestAcceptedReceipt = [pscustomobject]@{ action = 'rest'; status = 'accepted'; state = $nativeTownWaitObservation.state }
+$nativeRestWaitPolicy = Get-ObserveAgainPolicy -Observation $nativeTownWaitObservation -PreviousActionReceipt $nativeRestAcceptedReceipt
+$nativeRestWaitControls = @(Get-EffectiveControlCatalog -Observation $nativeTownWaitObservation -PreviousActionReceipt $nativeRestAcceptedReceipt)
+$unownedNativeWaitPolicy = Get-ObserveAgainPolicy -Observation $nativeTownWaitObservation -PreviousActionReceipt ([pscustomobject]@{ action = 'menuSelect'; status = 'completed' })
+$nativeWaitEntryReceipt = [pscustomobject]@{ action = 'menuSelect'; status = 'completed' }
+$nativeWaitBeforeRestGate = Get-NativeRestActionGate -State $nativeTownWaitObservation.state -PreviousActionReceipt $nativeWaitEntryReceipt
+$nativeWaitAfterAcceptedRestGate = Get-NativeRestActionGate -State $nativeTownWaitObservation.state -PreviousActionReceipt $nativeRestAcceptedReceipt
+$nativeWaitAfterCompletedRestGate = Get-NativeRestActionGate -State $nativeTownWaitObservation.state -PreviousActionReceipt ([pscustomobject]@{ action = 'rest'; status = 'completed' })
+$observeAgainSupportsNativeTownWait = ($nativeRestWaitPolicy.Allowed -and $nativeRestWaitControls.Count -eq 1 -and $nativeRestWaitControls[0].control -ceq 'observeAgain' -and -not $unownedNativeWaitPolicy.Allowed -and $unownedNativeWaitPolicy.Recoverable)
+$nativeRestMayBeRequestedOnlyOnce = ($nativeWaitBeforeRestGate.HideActions.Count -eq 0 -and 'rest' -in $nativeWaitAfterAcceptedRestGate.HideActions -and 'rest' -in $nativeWaitAfterCompletedRestGate.HideActions)
+if (-not $observeAgainSupportsNativeTownWait -or -not $nativeRestMayBeRequestedOnlyOnce) { throw 'observeAgain may monitor an accepted Native Town Wait while its native clock advances, but must not create/advance the wait or permit a duplicate rest request.' }
 $barterOptionsFixture = [pscustomobject]@{ sessionId = 'safe-passage-test-session'; context = 'contextual:safe_passage_barterable'; isOfferDisabled = $false }
 $barterReadReceiptFixture = [pscustomobject]@{ action = 'barterOptions'; status = 'completed'; data = $barterOptionsFixture }
 $barterAutoBalanceReceiptFixture = [pscustomobject]@{ action = 'barterAutoBalance'; status = 'completed'; data = [pscustomobject]@{ updatedOptions = $barterOptionsFixture } }
@@ -52,8 +71,68 @@ $barterActionPhaseGateVerified = (
     $barterBalancedGate.SessionAvailable -and 'barterOptions' -in $barterBalancedGate.HideActions -and 'barterAutoBalance' -in $barterBalancedGate.HideActions -and 'barterOffer' -notin $barterBalancedGate.HideActions
 )
 if (-not $barterActionPhaseGateVerified) { throw 'A current barter session must expose one useful phase at a time: inspect, auto-balance, then submit without repeating reads or balancing.' }
-$observeAgainPolicyVerified = ($activeTravelPolicy.Allowed -and -not $pausedTravelPolicy.Allowed -and $pausedTravelPolicy.Recoverable -and -not $encounterTravelPolicy.Allowed -and $encounterTravelPolicy.Recoverable -and -not $arrivedTravelPolicy.Allowed -and $arrivedTravelPolicy.Recoverable -and -not $invalidTravelPolicy.Allowed -and -not $invalidTravelPolicy.Recoverable)
-if (-not $observeAgainPolicyVerified) { throw 'observeAgain policy must permit naturally advancing travel only, recover when time is stopped or an encounter/menu is active, and hard-reject requests without a matching Native move receipt.' }
+$townMenuState = [pscustomobject]@{
+    context = [pscustomobject]@{ gameState = 'MapState'; menuId = 'town' }
+    availableMenuOptions = @(
+        [pscustomobject]@{ id = 'trade'; available = $true; enabled = $true }
+        [pscustomobject]@{ id = 'town_wait'; available = $true; enabled = $true }
+    )
+}
+$townMenuObservation = [pscustomobject]@{ state = $townMenuState }
+$currentTownWaitSelection = Get-CurrentMenuSelectionContext -Observation $townMenuObservation -OptionId 'town_wait'
+$staleTownMenuSelection = Get-CurrentMenuSelectionContext -Observation $townMenuObservation -OptionId 'town_keep'
+$tradeNoSessionGate = Get-TradeActionGate -State $townMenuState -PreviousActionReceipt $null
+$tradeInventoryState = [pscustomobject]@{ context = [pscustomobject]@{ gameState = 'InventoryState' }; inventoryScreen = [pscustomobject]@{ mode = 'Trade' } }
+$tradeInventoryGate = Get-TradeActionGate -State $tradeInventoryState -PreviousActionReceipt $null
+$foodOptionsReceiptFixture = [pscustomobject]@{ action = 'foodOptions'; status = 'completed'; data = [pscustomobject]@{ offers = @([pscustomobject]@{ viewModelItemId = 'olives' }) } }
+$foodQuotedTradeGate = Get-TradeActionGate -State $tradeInventoryState -PreviousActionReceipt $foodOptionsReceiptFixture
+$provisionReceiptFixture = [pscustomobject]@{ action = 'provision'; status = 'completed'; data = [pscustomobject]@{ nativeTransactionAmount = 9 } }
+$pendingNativeTradeGate = Get-TradeActionGate -State $tradeInventoryState -PreviousActionReceipt $provisionReceiptFixture
+$tradeInventoryObserveAgain = Get-ObserveAgainPolicy -Observation ([pscustomobject]@{ state = [pscustomobject]@{ context = [pscustomobject]@{ gameState = 'InventoryState'; menuId = 'town'; timeControlMode = 'Stop'; encounterActive = $true; escapeMenuOpen = $false; inquiryOpen = $false; isWaiting = $true }; party = [pscustomobject]@{ isMoving = $false }; location = [pscustomobject]@{ currentSettlementId = 'town_V1'; targetSettlementId = 'town_V1' } } }) -PreviousActionReceipt $provisionReceiptFixture
+$tradeInventoryObserveAgainRejectedSafely = (-not $tradeInventoryObserveAgain.Allowed -and $tradeInventoryObserveAgain.Recoverable)
+$nativeMenuAndTradeCatalogVerified = (
+    $currentTownWaitSelection.Allowed -and $currentTownWaitSelection.MenuId -ceq 'town' -and
+    -not $staleTownMenuSelection.Allowed -and
+    'foodOptions' -in $tradeNoSessionGate.HideActions -and
+    'foodOptions' -notin $tradeInventoryGate.HideActions -and 'provision' -in $tradeInventoryGate.HideActions -and
+    'provision' -notin $foodQuotedTradeGate.HideActions -and 'foodOptions' -in $foodQuotedTradeGate.HideActions -and 'tradeConfirm' -in $foodQuotedTradeGate.HideActions -and
+    'tradeConfirm' -notin $pendingNativeTradeGate.HideActions -and 'foodOptions' -in $pendingNativeTradeGate.HideActions -and
+    $tradeInventoryObserveAgainRejectedSafely
+)
+$supplyProfileState = [pscustomobject]@{
+    schemaVersion = 23
+    identity = [pscustomobject]@{ heroId = 'main_hero' }
+    party = [pscustomobject]@{ members = 6; sizeLimit = 20; food = 0.95; foodInventory = 0; foodChange = -0.3; dailyWage = 10; morale = 49; isMoving = $false }
+    economy = [pscustomobject]@{ gold = 900; influence = 0; renown = 20 }
+    location = [pscustomobject]@{ currentSettlementId = 'town_V1'; targetSettlementId = 'town_V1' }
+    context = [pscustomobject]@{ gameState = 'MapState'; timeControlMode = 'Stop'; menuId = 'town'; isWaiting = $false; encounterActive = $true }
+    inventoryScreen = $null
+    availableMenuOptions = @(
+        [pscustomobject]@{ id = 'trade'; text = 'Trade'; available = $true; enabled = $true; isLeave = $false }
+        [pscustomobject]@{ id = 'town_wait'; text = 'Wait'; available = $true; enabled = $true; isLeave = $false }
+        [pscustomobject]@{ id = 'town_keep'; text = 'Keep'; available = $true; enabled = $true; isLeave = $false }
+    )
+    nearbyParties = @([pscustomobject]@{ id = 'unrelated-party' })
+    settlementOverlayCharacters = @([pscustomobject]@{ heroId = 'unrelated-hero' })
+}
+$supplyFullObservation = [pscustomobject]@{ protocolVersion = 1; commandId = 'supply-profile'; action = 'state'; status = 'completed'; campaignDay = 91077.4; dailyTickCount = 2; timeControlMode = 'Stop'; state = $supplyProfileState }
+$supplyModelObservation = Convert-SupplyObservationForDecision $supplyFullObservation
+$supplyPreviousReceipt = [pscustomobject]@{ protocolVersion = 1; commandId = 'supply-food-options'; action = 'foodOptions'; status = 'completed'; campaignDay = 91077.4; timeControlMode = 'Stop'; data = [pscustomobject]@{ offers = @([pscustomobject]@{ itemId = 'olives'; inventoryLogicUnitPrice = 9 }) }; state = $supplyFullObservation.state }
+$supplyModelReceipt = Convert-SupplyReceiptForDecision -Receipt $supplyPreviousReceipt -Observation $supplyFullObservation
+$supplyObservationProfileVerified = (
+    $supplyModelObservation.modelView -ceq 'campaign-multiday-supply' -and
+    -not ($supplyModelObservation.state.PSObject.Properties.Name -contains 'identity') -and
+    -not ($supplyModelObservation.state.PSObject.Properties.Name -contains 'nearbyParties') -and
+    -not ($supplyModelObservation.state.PSObject.Properties.Name -contains 'settlementOverlayCharacters') -and
+    (@($supplyModelObservation.state.availableMenuOptions.id) -join ',') -ceq 'trade,town_wait' -and
+    [int]$supplyModelObservation.state.party.members -eq 6 -and [double]$supplyModelObservation.state.party.foodChange -eq -0.3 -and
+    $null -eq $supplyModelReceipt.state -and @($supplyModelReceipt.data.offers).Count -eq 1 -and
+    [string]$supplyModelReceipt.stateSummary.menuId -ceq 'town' -and [int]$supplyModelReceipt.stateSummary.gold -eq 900
+)
+if (-not $supplyObservationProfileVerified) { throw 'The multi-day supply model view must preserve task-relevant Native resources/options and the current receipt while excluding unrelated world data.' }
+if (-not $nativeMenuAndTradeCatalogVerified) { throw 'Menu selection must bind to a current enabled OptionId, and Trade actions must appear only in the active native InventoryState at the correct quote/commit phase.' }
+$observeAgainPolicyVerified = ($activeTravelPolicy.Allowed -and -not $pausedTravelPolicy.Allowed -and $pausedTravelPolicy.Recoverable -and -not $encounterTravelPolicy.Allowed -and $encounterTravelPolicy.Recoverable -and -not $arrivedTravelPolicy.Allowed -and $arrivedTravelPolicy.Recoverable -and -not $invalidTravelPolicy.Allowed -and $invalidTravelPolicy.Recoverable)
+if (-not $observeAgainPolicyVerified) { throw 'observeAgain policy must permit naturally advancing travel only, and return safe recovery feedback when time is stopped, a menu/encounter is active, the party arrived, or no matching Native move/wait receipt exists.' }
 $unobstructedMapFixture = (New-ObserveAgainPolicyFixture).state
 $encounterMapFixture = (New-ObserveAgainPolicyFixture -TimeMode 'Stop' -Moving $true -EncounterActive $true -MenuId 'encounter_meeting').state
 $settlementMenuFixture = (New-ObserveAgainPolicyFixture -TimeMode 'Stop' -Moving $false -MenuId 'town' -CurrentSettlementId 'town_test').state
@@ -473,7 +552,12 @@ try {
         UnicodeHeroNameRoundTripVerified = $unicodeRoundTripVerified
         ObserveAgainPolicySeparatesNaturalTimeFromStoppedEncounter = $observeAgainPolicyVerified
         ObserveAgainControlIsExposedOnlyWhenSafe = $observeAgainControlCatalogVerified
+        ObserveAgainCanMonitorAcceptedNativeTownWait = $observeAgainSupportsNativeTownWait
+        ObserveAgainDuringUncommittedTradeIsRecoverable = $tradeInventoryObserveAgainRejectedSafely
+        NativeRestRequestIsSingleUsePerWait = $nativeRestMayBeRequestedOnlyOnce
         BarterActionCatalogStagesCurrentNativeQuote = $barterActionPhaseGateVerified
+        MenuAndTradeActionCatalogFollowsCurrentNativeContext = $nativeMenuAndTradeCatalogVerified
+        SupplyObservationProfileCompactsAndKeepsNativeContext = $supplyObservationProfileVerified
         MapMovementCatalogRequiresUnobstructedCampaignMap = $unobstructedCampaignMapPolicyVerified
         ExplicitGoalStopHonoredWithoutIssuingAnotherAction = $doneSignalVerified
         GoalStopTrace = $doneTrace.trace
@@ -496,7 +580,7 @@ try {
         ProcessStopped = $stop.processStopped
         Trace = $trace.trace
     }
-    $result.Passed = ($result.DecisionCount -eq 2 -and $observationLoopVerified -and $receiptForwarded -and $decisionTimingCaptured -and $unicodeRoundTripVerified -and $observeAgainPolicyVerified -and $observeAgainControlCatalogVerified -and $barterActionPhaseGateVerified -and $unobstructedCampaignMapPolicyVerified -and $doneSignalVerified -and $goalAndCatalogForwarded -and $scopedActionRejected -and $dynamicActionRecoveryVerified -and $invalidArgumentRecoveryVerified -and $dialogueCatalogRecoveryVerified -and $staleOfferRecoveryVerified -and $unlistedResumeRecoveryVerified -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
+    $result.Passed = ($result.DecisionCount -eq 2 -and $observationLoopVerified -and $receiptForwarded -and $decisionTimingCaptured -and $unicodeRoundTripVerified -and $observeAgainPolicyVerified -and $observeAgainControlCatalogVerified -and $observeAgainSupportsNativeTownWait -and $tradeInventoryObserveAgainRejectedSafely -and $nativeRestMayBeRequestedOnlyOnce -and $barterActionPhaseGateVerified -and $nativeMenuAndTradeCatalogVerified -and $supplyObservationProfileVerified -and $unobstructedCampaignMapPolicyVerified -and $doneSignalVerified -and $goalAndCatalogForwarded -and $scopedActionRejected -and $dynamicActionRecoveryVerified -and $invalidArgumentRecoveryVerified -and $dialogueCatalogRecoveryVerified -and $staleOfferRecoveryVerified -and $unlistedResumeRecoveryVerified -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
     $result | ConvertTo-Json -Depth 12
     if (-not $result.Passed) { exit 1 }
 }

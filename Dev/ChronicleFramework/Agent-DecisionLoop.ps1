@@ -22,7 +22,7 @@ if ($MaxDecisions -lt 1 -or $MaxDecisions -gt 400) { throw 'MaxDecisions must be
 
 $script:ProductAllowedActions = @{
     state = @(); closeEscapeMenu = @(); respondInquiry = @('InquiryToken','InquiryChoice'); respondMultiSelectionInquiry = @('InquiryToken','InquiryChoice','SelectedIds'); mapSettlementTargets = @(); mapNotifications = @(); quickInformation = @(); sceneNotification = @(); mapPartyTargets = @(); mapPartyComposition = @('PartyId'); mapPartyBehavior = @('PartyId'); partyUpgradeOptions = @(); upgradeTroop = @('TroopId','UpgradeTargetIndex'); prisonerRecruitmentOptions = @(); recruitPrisoner = @('TroopId','ConfirmPartySizeWarning'); characterDevelopment = @(); spendSkillFocus = @('SkillId','Count'); questDetails = @('QuestId'); partyRoster = @(); partyRoles = @(); setPartyRole = @('RoleId','HeroId'); unassignPartyRole = @('RoleId'); inventoryOpen = @(); heroEquipmentOptions = @(); equipHeroItem = @('ItemViewModelId','EquipmentIndex'); unequipHeroItem = @('EquipmentIndex'); inventoryConfirm = @(); inventoryCancel = @(); inventoryCancelChanges = @(); pause = @(); resume = @(); fastForward = @(); move = @('SettlementId'); moveToPoint = @('X','Y','Surface'); missionSceneAgents = @(); missionInput = @('X','Y','DurationSeconds'); missionNavigateToAgent = @('AgentIndex','DurationSeconds'); missionLeave = @(); missionInteract = @('AgentIndex'); missionCancelNavigation = @(); missionAimAt = @('AgentIndex');
-    pursue = @('PartyId'); follow = @('PartyId'); hold = @(); menu = @(); menuSelect = @('MenuId','OptionId'); talkToSettlementHero = @('HeroId'); visitSettlementHero = @('HeroId'); dialogueSelect = @('OptionId'); dialogueContinue = @();
+    pursue = @('PartyId'); follow = @('PartyId'); hold = @(); menu = @(); menuSelect = @('OptionId'); talkToSettlementHero = @('HeroId'); visitSettlementHero = @('HeroId'); dialogueSelect = @('OptionId'); dialogueContinue = @();
     battlePause = @(); battleSkip = @(); battleFinish = @(); battleRetreat = @(); missionRetreat = @();
     partyTakeAll = @('LootType'); partyScreenDone = @(); inventoryTakeAll = @(); inventoryDone = @();
     rest = @('Days'); recruitOptions = @(); recruit = @('OwnerId','TroopId','VolunteerSlot','ConfirmPartySizeWarning');
@@ -52,8 +52,9 @@ if ($HarnessCrashAfterAction -and (-not $PersistCheckpoint -or $env:CHRONICLE_HA
 }
 
 function Invoke-AgentCli {
-    param([string]$Action, [hashtable]$Arguments = @{}, [string]$CommandId)
+    param([string]$Action, [hashtable]$Arguments = @{}, [string]$CommandId, [switch]$ReturnWhenAccepted)
     $cliArguments = @($Action, '-CommandId', $CommandId, '-TimeoutSeconds', [string]$TimeoutSeconds, '-AsJson')
+    if ($ReturnWhenAccepted) { $cliArguments += '-ReturnWhenAccepted' }
     foreach ($key in $Arguments.Keys) {
         if ($key -eq 'ConfirmPartySizeWarning') {
             if ([bool]$Arguments[$key]) { $cliArguments += '-ConfirmPartySizeWarning' }
@@ -110,6 +111,24 @@ function Get-EffectiveActionCatalog($Observation, $PreviousActionReceipt, $Decis
     foreach ($entry in $script:AllowedActions.GetEnumerator()) { $catalog[$entry.Key] = @($entry.Value) }
     $state = if ($Observation) { $Observation.state } else { $null }
     $unobstructedCampaignMap = ($state -and (Test-UnobstructedCampaignMap $state))
+    if ($catalog.ContainsKey('menuSelect')) {
+        $currentMenuActive = (
+            $state -and [string]$state.context.gameState -ceq 'MapState' -and
+            -not [string]::IsNullOrWhiteSpace([string]$state.context.menuId) -and
+            @($state.availableMenuOptions).Count -gt 0
+        )
+        if (-not $currentMenuActive) { $catalog.Remove('menuSelect') }
+        else { $catalog['menuSelect'] = @('OptionId') }
+    }
+    if ($catalog.ContainsKey('rest')) {
+        $nativeRestGate = Get-NativeRestActionGate -State $state -PreviousActionReceipt $PreviousActionReceipt
+        foreach ($restActionName in $nativeRestGate.HideActions) { $catalog.Remove([string]$restActionName) }
+    }
+    $tradeActionsPresent = @($catalog.Keys | Where-Object { $_ -in @('foodOptions','tradeOptions','tradeRumors','trade','provision','tradeConfirm','tradeCancel','tradeCancelChanges') }).Count -gt 0
+    if ($tradeActionsPresent) {
+        $tradeActionGate = Get-TradeActionGate -State $state -PreviousActionReceipt $PreviousActionReceipt
+        foreach ($tradeActionName in $tradeActionGate.HideActions) { $catalog.Remove([string]$tradeActionName) }
+    }
     if (-not $unobstructedCampaignMap) {
         foreach ($mapMovementAction in @('move','moveToPoint','pursue','follow','hold')) { $catalog.Remove($mapMovementAction) }
     }
@@ -182,6 +201,11 @@ function Get-EffectiveActionCatalog($Observation, $PreviousActionReceipt, $Decis
 }
 
 function Convert-ReceiptForDecision($Receipt, $Observation) {
+    $actionNames = @($script:AllowedActions.Keys | Sort-Object)
+    if (($actionNames -join ',') -ceq 'foodOptions,menuSelect,provision,rest,tradeConfirm') {
+        if (-not $Receipt) { return $null }
+        return Convert-SupplyReceiptForDecision -Receipt $Receipt -Observation $Observation
+    }
     if (-not $Receipt -or [string]$Receipt.action -cne 'recruitOptions' -or -not $Receipt.data) { return $Receipt }
     $hasCapacity = [int]$Observation.state.party.members -lt [int]$Observation.state.party.sizeLimit
     $safeOffers = @($Receipt.data.offers | Where-Object { $hasCapacity -and $_.available -and [int]$_.cost -le [int]$Observation.state.economy.gold } | ForEach-Object {
@@ -211,9 +235,11 @@ function Convert-ObservationForDecision($Observation) {
     $actionProfile = switch ($actionNames -join ',') {
         'mapSettlementTargets,move' { 'campaign-map-travel'; break }
         'mapSettlementTargets,move,recruit,recruitOptions' { 'campaign-settlement-recruitment'; break }
+        'foodOptions,menuSelect,provision,rest,tradeConfirm' { 'campaign-multiday-supply'; break }
         default { $null }
     }
     if (-not $actionProfile -or -not $Observation.state) { return $Observation }
+    if ($actionProfile -eq 'campaign-multiday-supply') { return Convert-SupplyObservationForDecision $Observation }
     $state = $Observation.state
     $party = $state.party
     $location = $state.location
@@ -351,6 +377,7 @@ function Convert-DecisionToCli {
             if ($Decision.arguments.Count -gt 0) { throw 'Decision arguments must be an object; non-empty arrays are not accepted.' }
         }
         else { foreach ($property in $Decision.arguments.PSObject.Properties) {
+            if ([string]$Decision.action -ceq 'menuSelect' -and [string]$property.Name -ceq 'MenuId') { continue }
             if ($property.Name -notin $allowed[[string]$Decision.action]) { throw "Unexpected argument '$($property.Name)' for action '$($Decision.action)'." }
             $arguments[$property.Name] = $property.Value
         } }
@@ -372,6 +399,11 @@ function Convert-DecisionToCli {
             -not [bool]$arguments.ConfirmPartySizeWarning
         )
         if (-not $recruitContextCurrent) { throw "Decision action 'recruit' is not currently available from the latest Native observation or its current affordable offer receipt." }
+    }
+    if ([string]$Decision.action -ceq 'menuSelect') {
+        $menuSelection = Get-CurrentMenuSelectionContext -Observation $Observation -OptionId ([string]$arguments.OptionId)
+        if (-not $menuSelection.Allowed) { throw $menuSelection.Reason }
+        $arguments.MenuId = $menuSelection.MenuId
     }
     return [pscustomobject]@{ Action = [string]$Decision.action; Arguments = $arguments }
 }
@@ -549,7 +581,25 @@ try {
             $moveReceipt = $previousActionReceipt
             $observeAgainPolicy = Get-ObserveAgainPolicy -Observation $observation -PreviousActionReceipt $moveReceipt
             if (-not $observeAgainPolicy.Allowed) {
-                if (-not $observeAgainPolicy.Recoverable) { throw $observeAgainPolicy.Reason }
+                if (-not $observeAgainPolicy.Recoverable) {
+                    $controlError = [string]$observeAgainPolicy.Reason
+                    $trace += [pscustomobject]@{
+                        iteration = $index
+                        observationBefore = $observation
+                        previousActionReceipt = $previousActionReceipt
+                        allowedActions = @($actionCatalog.Keys | Sort-Object)
+                        allowedControls = $controlCatalog
+                        decisionFeedback = $decisionFeedbackBeforeStep
+                        decision = $decision
+                        timing = $stepTiming
+                        actionReceipt = [ordered]@{ protocolVersion = 1; status = 'control-validation-failed-before-wait'; error = $controlError; noNativeActionSent = $true; schedulerWaitStarted = $false; campaignDay = $observation.campaignDay }
+                        observationAfter = $observation
+                        actionAttempted = $false
+                        actionExecuted = $false
+                        control = [ordered]@{ kind = 'control-validation-failed-before-wait'; requestedControl = 'observeAgain'; reason = $controlError }
+                    }
+                    throw $controlError
+                }
                 $consecutiveDecisionRejections++
                 if ($consecutiveDecisionRejections -gt 2) { throw 'Provider repeated observeAgain while Native movement was unavailable; stopping after two safe pre-action rejections.' }
                 $feedbackReason = [string]$observeAgainPolicy.Reason + ' No wait or game action was sent.'
@@ -651,7 +701,25 @@ try {
         }
         catch {
             $recoverableProviderRejection = ($providerRejectedDecision -and [string]$decision.reason -in @('not-in-current-action-catalog','invalid-action-arguments'))
-            if (-not $recoverableProviderRejection -and $_.Exception.Message -notmatch 'is not currently available from the latest Native observation') { throw }
+            if (-not $recoverableProviderRejection -and $_.Exception.Message -notmatch 'is not currently available from the latest Native observation') {
+                $validationError = $_.Exception.Message
+                $trace += [pscustomobject]@{
+                    iteration = $index
+                    observationBefore = $observation
+                    previousActionReceipt = $previousActionReceipt
+                    allowedActions = @($actionCatalog.Keys | Sort-Object)
+                    allowedControls = $controlCatalog
+                    decisionFeedback = $decisionFeedbackBeforeStep
+                    decision = $decision
+                    timing = $stepTiming
+                    actionReceipt = [ordered]@{ protocolVersion = 1; status = 'decision-validation-failed-before-native'; error = $validationError; noNativeActionSent = $true; campaignDay = $observation.campaignDay }
+                    observationAfter = $observation
+                    actionAttempted = $false
+                    actionExecuted = $false
+                    control = [ordered]@{ kind = 'decision-validation-failed-before-native'; reason = $validationError }
+                }
+                throw
+            }
             $consecutiveDecisionRejections++
             if ($consecutiveDecisionRejections -gt 2) { throw 'Provider repeated actions that are unavailable in the latest Native state; stopping after two safe pre-Native rejections.' }
             $feedbackReason = $_.Exception.Message
@@ -687,7 +755,32 @@ try {
         }
         $stepTiming.actionStartedUtc = [DateTime]::UtcNow.ToString('O')
         $actionStartedTicks = [Diagnostics.Stopwatch]::GetTimestamp()
-        $actionResult = Invoke-AgentCli $validated.Action $validated.Arguments $commandId
+        try {
+            if ($validated.Action -ceq 'rest') { $actionResult = Invoke-AgentCli $validated.Action $validated.Arguments $commandId -ReturnWhenAccepted }
+            else { $actionResult = Invoke-AgentCli $validated.Action $validated.Arguments $commandId }
+        }
+        catch {
+            $stepTiming.actionCompletedUtc = [DateTime]::UtcNow.ToString('O')
+            $stepTiming.actionElapsedMilliseconds = [Math]::Round(([Diagnostics.Stopwatch]::GetTimestamp() - $actionStartedTicks) * 1000.0 / [Diagnostics.Stopwatch]::Frequency, 2)
+            $cliError = $_.Exception.Message
+            $knownNoNativeDispatch = ($cliError -match 'Cannot process argument transformation|Mandatory parameter|parameter.*could not be found')
+            $trace += [pscustomobject]@{
+                iteration = $index
+                observationBefore = $observation
+                previousActionReceipt = $previousActionReceipt
+                allowedActions = @($actionCatalog.Keys | Sort-Object)
+                allowedControls = $controlCatalog
+                decisionFeedback = $decisionFeedbackBeforeStep
+                decision = $decision
+                timing = $stepTiming
+                actionReceipt = [ordered]@{ protocolVersion = 1; commandId = $commandId; action = [string]$validated.Action; status = 'agent-cli-failed'; error = $cliError; nativeDispatchConfirmed = $false; noNativeDispatchConfirmed = $knownNoNativeDispatch }
+                observationAfter = $null
+                actionAttempted = $true
+                actionExecuted = $false
+                control = [ordered]@{ kind = 'agent-cli-invocation-failed'; nativeOutcome = if ($knownNoNativeDispatch) { 'not-dispatched' } else { 'unknown' } }
+            }
+            throw
+        }
         $stepTiming.actionCompletedUtc = [DateTime]::UtcNow.ToString('O')
         $stepTiming.actionElapsedMilliseconds = [Math]::Round(([Diagnostics.Stopwatch]::GetTimestamp() - $actionStartedTicks) * 1000.0 / [Diagnostics.Stopwatch]::Frequency, 2)
         if ($HarnessCrashAfterAction -and $validated.Action -ceq $HarnessCrashAfterAction -and $actionResult.status -in @('completed','accepted')) {

@@ -190,6 +190,10 @@ W5-H 的 `MultiDaySupplyBaseline` 在本机1.4.8 disposable Campaign中做了三
 
 这证明当前固定队伍与Town Wait场景下，MainParty的Gold确实每跨一个Daily tick减少10，且4件该次报价的粮食购买可使三日后Food从0.05提高到4.05；这是限定条件下的实测，不是任意队伍规模、兵种、市场或战役的通用工资/消耗公式。`foodInventory`保持4而`Food`减少0.9，报告两个字段时不可互相替代或据此推导未观察的库存消费细节。该场景足以作为下一步真实模型测试的单个可证伪候选，不代表模型已通过长期补给规划。
 
+W5-I候选目标的食品下限另以一轮配对Native实测（同模板、不是新Seed，ProvisionAmount=1）：购买1个橄榄，当前报价9，Gold 900→891、Food 0.95→1.95、FoodInventory 0→1；自然跨过三个daily tick后 Gold 861、Food 1.05、FoodInventory 1、DailyWage 10、Morale 49。对应无补给分支三日后 Food 0.05、Gold 870。收据TestResults/20261009-123759/Temp/MultiDaySupplyBaselineResult.json通过，源档哈希不变、进程清理。由此只确认在该固定6人Town场景、该类报价下购买1单位已达到“3日后Food≥1.0”的候选门槛；不能推广到别的队伍组成/市场，也不代表真实模型已能规划。
+
+W5-I食品下限另以一轮配对Native实测（同模板、不是新Seed，ProvisionAmount=1）：购买1个橄榄，当前报价9，Gold 900→891、Food 0.95→1.95、FoodInventory 0→1；自然跨过三个daily tick后 Gold 861、Food 1.05、FoodInventory 1、DailyWage 10、Morale 49。对应无补给分支三日后 Food 0.05、Gold 870。收据TestResults/20261009-123759/Temp/MultiDaySupplyBaselineResult.json通过，源档哈希不变、进程清理。由此只确认在该固定6人Town场景、该类报价下购买1单位已达到“三日后Food≥1.0”的候选门槛；不能推广到别的队伍组成/市场，也不代表真实模型已能规划。
+
 ### 货物、负重、动物与战后物资
 
 Party `ItemRoster` 同时承载食品、贸易物、动物与战利品；缓存的 `TotalFoodAtInventory`、`TotalWeightCarried`、`InventoryCapacity`、动物数量会分别影响食物、载重、速度或交易判断。战后 ItemRoster 可能先进入 Encounter 的待领取 Loot Roster，再经原生 InventoryState 领取到 Party；那不是“战斗奖励已到账”的同义词，处理链见 G/H 域及 MAINLINE 的 partyLoot 契约。队伍内囚犯、受伤/健康成员、战利品/库存的转移则由对应 PartyScreen、InventoryLogic 和结算动作分别提交。

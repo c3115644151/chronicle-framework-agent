@@ -53,6 +53,8 @@ try {
     $systemPrompt = @'
 You are the decision maker for a Bannerlord Campaign Agent. Use only the task goal, current observation, previous Native receipt, checkpoint context, decision feedback, and current action/control catalogs. Select at most one listed action with only listed arguments. The action catalog is recalculated from the latest Native game state; a missing action is not currently available and must not be guessed or requested. Controls are separate from game actions and are also recalculated from the current state; use only controls in `allowedControls`, and do not request an omitted control. If decisionFeedback says an action or control was unavailable or rejected, treat it as authoritative, use the fresh observation and current catalogs, and choose a different legal next step or stop safely; do not repeat the rejected action/control without new evidence. Use only observed IDs/values; never invent game state. Never echo input data. Keep rationale/reason short (at most 20 words); do not output analysis. Ordered goal steps are hard preconditions. A mapSettlementTargetsSummary or recruitOptionsSummary is a bounded receipt subset; choose only included IDs/offers. `campaign-map-travel` and `campaign-settlement-recruitment` are deliberately scoped observations; omitted state is unknown, not evidence. If checkpointContext has a pending Native action, compare it with the fresh observation and do not blindly repeat a non-idempotent action. If checkpointContext.lastRecovery.status is `verified`, its action effect is confirmed by fresh Native state; do not repeat that action, and return done when the one-action goal is thereby met. Action arguments must use only the listed names; for an action with an empty argument list, omit `arguments` or return `{}`. If the provider reports `invalid-action-arguments`, do not repeat the rejected argument names; rebuild the arguments from the current catalog and retry only if a safe, complete action is possible. A positional array is accepted only when its length exactly matches the listed argument-name sequence; the executor still revalidates every value. Return done only when the goal is met or no safe legal action is supported. Return exactly one JSON object and no Markdown.
 
+For `menuSelect`, set `arguments.OptionId` to the exact `id` value of one currently enabled entry in `observation.state.availableMenuOptions`. Do not use the field name `OptionId`, the displayed text, or an option that is absent/disabled. For `provision`, set `arguments.ItemViewModelId` to the exact `viewModelItemId` from the latest successful `foodOptions` receipt and set `arguments.Amount` to an integer amount permitted by that offer; never copy a field name as an ID. `provision` only drafts a TradeVM transaction; while still in Trade InventoryState, use the currently listed `tradeConfirm` to commit it or `tradeCancelChanges` to cancel. Do not wait/observeAgain until a committed receipt and a Native context that permits waiting are observed.
+
 For an action, return: {"action":"listed action name","arguments":{},"rationale":"brief evidence-based reason"}
 To stop, return: {"done":true,"reason":"brief evidence-based reason"}
 When `nativeMoveArrival.status` is `arrived`, the current Native observation confirms the previous move's target; return done immediately and issue no more game actions. While the previous native move is visibly still in progress and its target has not been reached, you may request bounded re-observation without a game action. Preferred: {"observeAgain":true,"waitSeconds":5,"reason":"brief evidence-based reason"}. Also accepted: {"action":"observeAgain","arguments":{"waitSeconds":5},"rationale":"brief evidence-based reason"}. Use 1-10 seconds only; this is scheduler polling, not a game-time command. Do not request it outside an active visible move. The execution layer revalidates this control independently of the game-action catalog.
@@ -218,24 +220,52 @@ When `nativeMoveArrival.status` is `arrived`, the current Native observation con
     $allowedArguments = @($allowedAction[0].arguments | ForEach-Object { [string]$_ })
     $normalizedArguments = [ordered]@{}
     $unsupportedArguments = @()
-    if ($decision.arguments -is [System.Management.Automation.PSCustomObject]) {
-        foreach ($property in $decision.arguments.PSObject.Properties) {
+    $argumentObject = $decision.arguments
+    for ($argumentShapeDepth = 0; $argumentShapeDepth -lt 4; $argumentShapeDepth++) {
+        if ($argumentObject -is [string]) {
+            try { $argumentObject = [string]$argumentObject | ConvertFrom-Json -ErrorAction Stop }
+            catch {
+                if ($allowedArguments.Count -eq 1) { break }
+                throw "Model returned string-encoded arguments for '$actionName' that are not valid JSON."
+            }
+            continue
+        }
+        if ($argumentObject -is [Array] -and $argumentObject.Count -eq 1 -and ($argumentObject[0] -is [string] -or $argumentObject[0] -is [Array] -or $argumentObject[0] -is [System.Management.Automation.PSCustomObject] -or $argumentObject[0] -is [System.Collections.IDictionary])) {
+            $argumentObject = $argumentObject[0]
+            continue
+        }
+        break
+    }
+    if ($argumentObject -is [System.Management.Automation.PSCustomObject]) {
+        foreach ($property in $argumentObject.PSObject.Properties) {
             if ($property.Name -notin $allowedArguments) { $unsupportedArguments += [string]$property.Name; continue }
             $normalizedArguments[$property.Name] = $property.Value
         }
     }
-    elseif ($null -eq $decision.arguments -or ($decision.arguments -is [Array] -and $decision.arguments.Count -eq 0)) {
+    elseif ($argumentObject -is [System.Collections.IDictionary]) {
+        foreach ($key in $argumentObject.Keys) {
+            if ([string]$key -notin $allowedArguments) { $unsupportedArguments += [string]$key; continue }
+            $normalizedArguments[[string]$key] = $argumentObject[$key]
+        }
+    }
+    elseif ($null -eq $argumentObject -or ($argumentObject -is [Array] -and $argumentObject.Count -eq 0)) {
         # Some local models copy the empty argument-list shape or omit it. Normalize only for zero-argument actions.
         if ($allowedArguments.Count -gt 0) { throw "Model returned an empty argument list for '$actionName', which requires: $($allowedArguments -join ', ')." }
     }
-    elseif ($decision.arguments -is [Array] -and $decision.arguments.Count -gt 0 -and $decision.arguments.Count -eq $allowedArguments.Count) {
+    elseif ($argumentObject -is [Array] -and $argumentObject.Count -gt 0 -and $argumentObject.Count -eq $allowedArguments.Count) {
         # Some local models return a positional tuple; map it only against the exact ordered parameter list in this request.
         for ($argumentIndex = 0; $argumentIndex -lt $allowedArguments.Count; $argumentIndex++) {
-            $normalizedArguments[$allowedArguments[$argumentIndex]] = $decision.arguments[$argumentIndex]
+            $normalizedArguments[$allowedArguments[$argumentIndex]] = $argumentObject[$argumentIndex]
         }
     }
+    elseif ($allowedArguments.Count -eq 1 -and $null -ne $argumentObject -and $argumentObject -isnot [System.Management.Automation.PSCustomObject] -and $argumentObject -isnot [System.Collections.IDictionary] -and $argumentObject -isnot [Array]) {
+        # Some local models collapse a one-field object to its scalar value. Bind it only when the current action schema has exactly one field.
+        $normalizedArguments[$allowedArguments[0]] = $argumentObject
+    }
     else {
-        throw "Model action decision arguments for '$actionName' must be an object (or an empty list only for a zero-argument action)."
+        $argumentShape = if ($null -eq $argumentObject) { 'null' } else { $argumentObject.GetType().FullName }
+        if ($argumentObject -is [Array]) { $argumentShape += "[count=$($argumentObject.Count)]" }
+        throw "Model action decision arguments for '$actionName' must be an object (or an empty list only for a zero-argument action); received $argumentShape."
     }
     if ($unsupportedArguments.Count -gt 0) {
         $currentCatalog = @($request.allowedActions | ForEach-Object { [string]$_.action } | Sort-Object -Unique)

@@ -79,6 +79,7 @@ try {
     $reader.Dispose()
     $apiRequest = $requestBody | ConvertFrom-Json
     $modelInput = [string]$apiRequest.messages[1].content | ConvertFrom-Json
+    $nativeArgumentPromptBindingsPresent = ([string]$apiRequest.messages[0].content -match 'For `menuSelect`, set `arguments\.OptionId` to the exact `id` value' -and [string]$apiRequest.messages[0].content -match 'For `provision`, set `arguments\.ItemViewModelId` to the exact `viewModelItemId`' -and [string]$apiRequest.messages[0].content -match '`provision` only drafts a TradeVM transaction')
     $requestGoalForwarded = ([string]$modelInput.goal -ceq $goal)
     $unicodeObservationForwarded = ([string]$modelInput.observation.state.identity.heroName -ceq $expectedHeroName)
     $allowedNames = @($modelInput.allowedActions | ForEach-Object { [string]$_.action })
@@ -170,6 +171,125 @@ try {
     if ($process.ExitCode -ne 0) { throw "Provider rejected an exact ordered argument tuple (exit=$($process.ExitCode)): $tupleStderr" }
     $tupleDecision = $tupleStdout | ConvertFrom-Json
     $positionalArgumentsNormalized = ($tupleDecision.action -eq 'recruit' -and $tupleDecision.arguments.OwnerId -eq 'CharacterObject_1642' -and $tupleDecision.arguments.TroopId -eq 'vlandian_recruit' -and [int]$tupleDecision.arguments.VolunteerSlot -eq 3 -and -not [bool]$tupleDecision.arguments.ConfirmPartySizeWarning -and $tupleDecision.rationaleSource -eq 'provider-fallback')
+
+    $failureStep = 'normalize-string-encoded-object-action-arguments'
+    $encodedArgumentsRequest = [ordered]@{
+        schemaVersion = 2
+        runId = 'provider-string-encoded-arguments-test'
+        iteration = 1
+        goal = 'Submit the current observed Native food offer.'
+        allowedActions = @([ordered]@{ action = 'provision'; arguments = @('ItemViewModelId','Amount') })
+        allowedControls = @()
+        observation = $request.observation
+        previousActionReceipt = $null
+    }
+    $encodedArgumentsProvider = Start-ProviderProcess ($encodedArgumentsRequest | ConvertTo-Json -Depth 12 -Compress)
+    $process = $encodedArgumentsProvider.Process
+    $encodedArgumentsAcceptTask = $listener.GetContextAsync()
+    if (-not $encodedArgumentsAcceptTask.Wait(5000)) { throw 'Local HTTP stub did not receive the string-encoded action-argument request.' }
+    $encodedArgumentsContext = $encodedArgumentsAcceptTask.GetAwaiter().GetResult()
+    $encodedArgumentsReader = New-Object System.IO.StreamReader($encodedArgumentsContext.Request.InputStream, $encodedArgumentsContext.Request.ContentEncoding)
+    $null = $encodedArgumentsReader.ReadToEnd()
+    $encodedArgumentsReader.Dispose()
+    $encodedObject = [ordered]@{ ItemViewModelId = 'olives'; Amount = 4 } | ConvertTo-Json -Compress
+    $encodedModelDecision = [ordered]@{ action = 'provision'; arguments = $encodedObject; rationale = 'Buy four units from the current Native food offer.' } | ConvertTo-Json -Compress
+    $encodedResponseJson = [ordered]@{ choices = @([ordered]@{ index = 0; message = [ordered]@{ role = 'assistant'; content = $encodedModelDecision }; finish_reason = 'stop' }) } | ConvertTo-Json -Depth 8 -Compress
+    $encodedResponseBytes = [System.Text.Encoding]::UTF8.GetBytes($encodedResponseJson)
+    $encodedArgumentsContext.Response.StatusCode = 200
+    $encodedArgumentsContext.Response.ContentType = 'application/json; charset=utf-8'
+    $encodedArgumentsContext.Response.ContentLength64 = $encodedResponseBytes.Length
+    $encodedArgumentsContext.Response.OutputStream.Write($encodedResponseBytes, 0, $encodedResponseBytes.Length)
+    $encodedArgumentsContext.Response.OutputStream.Close()
+    if (-not $process.WaitForExit(($TimeoutSeconds + 5) * 1000)) { try { $process.Kill() } catch { }; throw 'Provider did not exit after string-encoded action arguments.' }
+    $encodedArgumentsStdout = $encodedArgumentsProvider.StdoutTask.Result.Trim()
+    $encodedArgumentsStderr = $encodedArgumentsProvider.StderrTask.Result.Trim()
+    if ($process.ExitCode -ne 0) { throw "Provider rejected a valid JSON-object string for action arguments (exit=$($process.ExitCode)): $encodedArgumentsStderr" }
+    $encodedArgumentsDecision = $encodedArgumentsStdout | ConvertFrom-Json
+    $stringEncodedArgumentsNormalized = ($encodedArgumentsDecision.action -ceq 'provision' -and $encodedArgumentsDecision.arguments -is [System.Management.Automation.PSCustomObject] -and [string]$encodedArgumentsDecision.arguments.ItemViewModelId -ceq 'olives' -and [int]$encodedArgumentsDecision.arguments.Amount -eq 4)
+
+    $failureStep = 'normalize-single-string-array-action-arguments'
+    $singleArrayProvider = Start-ProviderProcess ($encodedArgumentsRequest | ConvertTo-Json -Depth 12 -Compress)
+    $process = $singleArrayProvider.Process
+    $singleArrayAcceptTask = $listener.GetContextAsync()
+    if (-not $singleArrayAcceptTask.Wait(5000)) { throw 'Local HTTP stub did not receive the single-string-array argument request.' }
+    $singleArrayContext = $singleArrayAcceptTask.GetAwaiter().GetResult()
+    $singleArrayReader = New-Object System.IO.StreamReader($singleArrayContext.Request.InputStream, $singleArrayContext.Request.ContentEncoding)
+    $null = $singleArrayReader.ReadToEnd()
+    $singleArrayReader.Dispose()
+    $singleArrayModelDecision = [ordered]@{ action = 'provision'; arguments = @($encodedObject) } | ConvertTo-Json -Compress
+    $singleArrayResponseJson = [ordered]@{ choices = @([ordered]@{ index = 0; message = [ordered]@{ role = 'assistant'; content = $singleArrayModelDecision }; finish_reason = 'stop' }) } | ConvertTo-Json -Depth 8 -Compress
+    $singleArrayResponseBytes = [System.Text.Encoding]::UTF8.GetBytes($singleArrayResponseJson)
+    $singleArrayContext.Response.StatusCode = 200
+    $singleArrayContext.Response.ContentType = 'application/json; charset=utf-8'
+    $singleArrayContext.Response.ContentLength64 = $singleArrayResponseBytes.Length
+    $singleArrayContext.Response.OutputStream.Write($singleArrayResponseBytes, 0, $singleArrayResponseBytes.Length)
+    $singleArrayContext.Response.OutputStream.Close()
+    if (-not $process.WaitForExit(($TimeoutSeconds + 5) * 1000)) { try { $process.Kill() } catch { }; throw 'Provider did not exit after single-string-array action arguments.' }
+    $singleArrayStdout = $singleArrayProvider.StdoutTask.Result.Trim()
+    $singleArrayStderr = $singleArrayProvider.StderrTask.Result.Trim()
+    if ($process.ExitCode -ne 0) { throw "Provider rejected a single-element JSON-object string array (exit=$($process.ExitCode)): $singleArrayStderr" }
+    $singleArrayDecision = $singleArrayStdout | ConvertFrom-Json
+    $singleStringArrayArgumentsNormalized = ($singleArrayDecision.action -ceq 'provision' -and $singleArrayDecision.arguments -is [System.Management.Automation.PSCustomObject] -and [string]$singleArrayDecision.arguments.ItemViewModelId -ceq 'olives' -and [int]$singleArrayDecision.arguments.Amount -eq 4)
+
+    $failureStep = 'normalize-nested-single-string-array-action-arguments'
+    $nestedArgumentArray = [System.Array]::CreateInstance([object], 1)
+    $nestedArgumentArray.SetValue([object[]]@($encodedObject), 0)
+    $nestedArrayProvider = Start-ProviderProcess ($encodedArgumentsRequest | ConvertTo-Json -Depth 12 -Compress)
+    $process = $nestedArrayProvider.Process
+    $nestedArrayAcceptTask = $listener.GetContextAsync()
+    if (-not $nestedArrayAcceptTask.Wait(5000)) { throw 'Local HTTP stub did not receive the nested-string-array argument request.' }
+    $nestedArrayContext = $nestedArrayAcceptTask.GetAwaiter().GetResult()
+    $nestedArrayReader = New-Object System.IO.StreamReader($nestedArrayContext.Request.InputStream, $nestedArrayContext.Request.ContentEncoding)
+    $null = $nestedArrayReader.ReadToEnd()
+    $nestedArrayReader.Dispose()
+    $nestedArrayModelDecision = [ordered]@{ action = 'provision'; arguments = $nestedArgumentArray } | ConvertTo-Json -Compress -Depth 8
+    $nestedArrayResponseJson = [ordered]@{ choices = @([ordered]@{ index = 0; message = [ordered]@{ role = 'assistant'; content = $nestedArrayModelDecision }; finish_reason = 'stop' }) } | ConvertTo-Json -Depth 8 -Compress
+    $nestedArrayResponseBytes = [System.Text.Encoding]::UTF8.GetBytes($nestedArrayResponseJson)
+    $nestedArrayContext.Response.StatusCode = 200
+    $nestedArrayContext.Response.ContentType = 'application/json; charset=utf-8'
+    $nestedArrayContext.Response.ContentLength64 = $nestedArrayResponseBytes.Length
+    $nestedArrayContext.Response.OutputStream.Write($nestedArrayResponseBytes, 0, $nestedArrayResponseBytes.Length)
+    $nestedArrayContext.Response.OutputStream.Close()
+    if (-not $process.WaitForExit(($TimeoutSeconds + 5) * 1000)) { try { $process.Kill() } catch { }; throw 'Provider did not exit after nested-string-array action arguments.' }
+    $nestedArrayStdout = $nestedArrayProvider.StdoutTask.Result.Trim()
+    $nestedArrayStderr = $nestedArrayProvider.StderrTask.Result.Trim()
+    if ($process.ExitCode -ne 0) { throw "Provider rejected a nested single-string-array action argument (exit=$($process.ExitCode)): $nestedArrayStderr" }
+    $nestedArrayDecision = $nestedArrayStdout | ConvertFrom-Json
+    $nestedStringArrayArgumentsNormalized = ($nestedArrayDecision.action -ceq 'provision' -and $nestedArrayDecision.arguments -is [System.Management.Automation.PSCustomObject] -and [string]$nestedArrayDecision.arguments.ItemViewModelId -ceq 'olives' -and [int]$nestedArrayDecision.arguments.Amount -eq 4)
+
+    $failureStep = 'normalize-single-parameter-scalar-arguments'
+    $scalarRequest = [ordered]@{
+        schemaVersion = 2
+        runId = 'provider-single-scalar-argument-test'
+        iteration = 1
+        goal = 'Wait three Campaign days in the active Native Town Wait menu.'
+        allowedActions = @([ordered]@{ action = 'rest'; arguments = @('Days') })
+        allowedControls = @()
+        observation = $request.observation
+        previousActionReceipt = $null
+    }
+    $scalarProvider = Start-ProviderProcess ($scalarRequest | ConvertTo-Json -Depth 12 -Compress)
+    $process = $scalarProvider.Process
+    $scalarAcceptTask = $listener.GetContextAsync()
+    if (-not $scalarAcceptTask.Wait(5000)) { throw 'Local HTTP stub did not receive the single-scalar argument request.' }
+    $scalarContext = $scalarAcceptTask.GetAwaiter().GetResult()
+    $scalarReader = New-Object System.IO.StreamReader($scalarContext.Request.InputStream, $scalarContext.Request.ContentEncoding)
+    $null = $scalarReader.ReadToEnd()
+    $scalarReader.Dispose()
+    $scalarModelDecision = [ordered]@{ action = 'rest'; arguments = 3 } | ConvertTo-Json -Compress
+    $scalarResponseJson = [ordered]@{ choices = @([ordered]@{ index = 0; message = [ordered]@{ role = 'assistant'; content = $scalarModelDecision }; finish_reason = 'stop' }) } | ConvertTo-Json -Depth 8 -Compress
+    $scalarResponseBytes = [System.Text.Encoding]::UTF8.GetBytes($scalarResponseJson)
+    $scalarContext.Response.StatusCode = 200
+    $scalarContext.Response.ContentType = 'application/json; charset=utf-8'
+    $scalarContext.Response.ContentLength64 = $scalarResponseBytes.Length
+    $scalarContext.Response.OutputStream.Write($scalarResponseBytes, 0, $scalarResponseBytes.Length)
+    $scalarContext.Response.OutputStream.Close()
+    if (-not $process.WaitForExit(($TimeoutSeconds + 5) * 1000)) { try { $process.Kill() } catch { }; throw 'Provider did not exit after single-scalar action arguments.' }
+    $scalarStdout = $scalarProvider.StdoutTask.Result.Trim()
+    $scalarStderr = $scalarProvider.StderrTask.Result.Trim()
+    if ($process.ExitCode -ne 0) { throw "Provider rejected a scalar for an unambiguous one-argument action (exit=$($process.ExitCode)): $scalarStderr" }
+    $scalarDecision = $scalarStdout | ConvertFrom-Json
+    $singleScalarArgumentsNormalized = ($scalarDecision.action -ceq 'rest' -and [int]$scalarDecision.arguments.Days -eq 3)
 
     $failureStep = 'verify-local-openai-compatible-service-contract'
     $env:CHRONICLE_LLM_API_KEY = ''
@@ -341,6 +461,7 @@ try {
     $result = [ordered]@{
         ProviderKind = 'local HTTP stub; not a real model call'
         RequestGoalForwarded = $requestGoalForwarded
+        NativeArgumentPromptBindingsPresent = $nativeArgumentPromptBindingsPresent
         UnicodeObservationForwarded = $unicodeObservationForwarded
         AllowedActionCatalogForwarded = $actionCatalogForwarded
         PriorReceiptFieldPresent = ($null -eq $modelInput.previousActionReceipt)
@@ -355,12 +476,16 @@ try {
         StructuredDecisionReturned = $decisionValidated
         BoundedObserveAgainControlValidated = $observeAgainValidated
         ExactPositionalArgumentsNormalized = $positionalArgumentsNormalized
+        StringEncodedObjectArgumentsNormalized = $stringEncodedArgumentsNormalized
+        SingleStringArrayArgumentsNormalized = $singleStringArrayArgumentsNormalized
+        NestedStringArrayArgumentsNormalized = $nestedStringArrayArgumentsNormalized
+        SingleScalarArgumentsNormalized = $singleScalarArgumentsNormalized
         UnsupportedActionArgumentReturnsRecoverableRejection = $unsupportedActionArgumentRecoverable
         ProviderExitCode = $successfulProviderExitCode
         HttpErrorFailsClosedWithoutCredentialLeak = $httpErrorFailedClosed
         DisallowedActionFailsClosed = $invalidActionFailedClosed
         TimeoutFailsClosedWithoutCredentialLeak = $timeoutFailedClosed
-        Passed = ($requestGoalForwarded -and $unicodeObservationForwarded -and $actionCatalogForwarded -and $authorizationSent -and $localCompatibilityPassed -and $endpointPathCorrect -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $observeAgainValidated -and $positionalArgumentsNormalized -and $invalidActionFailedClosed -and $unsupportedActionArgumentRecoverable -and $httpErrorFailedClosed -and $timeoutFailedClosed)
+        Passed = ($requestGoalForwarded -and $nativeArgumentPromptBindingsPresent -and $unicodeObservationForwarded -and $actionCatalogForwarded -and $authorizationSent -and $localCompatibilityPassed -and $endpointPathCorrect -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $observeAgainValidated -and $positionalArgumentsNormalized -and $stringEncodedArgumentsNormalized -and $singleStringArrayArgumentsNormalized -and $nestedStringArrayArgumentsNormalized -and $singleScalarArgumentsNormalized -and $invalidActionFailedClosed -and $unsupportedActionArgumentRecoverable -and $httpErrorFailedClosed -and $timeoutFailedClosed)
     }
     $result | ConvertTo-Json -Depth 8
     if (-not $result.Passed) { exit 1 }

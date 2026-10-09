@@ -5,7 +5,8 @@ param(
     [ValidateRange(5,30)][int]$FrameRate = 10,
     [switch]$ArrivalLoop,
     [switch]$RecruitmentLoop,
-    [switch]$RoadsideBanditNegotiationLoop
+    [switch]$RoadsideBanditNegotiationLoop,
+    [switch]$SupplyManagementLoop
 )
 
 $ErrorActionPreference = 'Stop'
@@ -19,7 +20,7 @@ $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlo
 if (Get-Process -Name Bannerlord* -ErrorAction SilentlyContinue) {
     throw 'Refusing to start a live-model Campaign test while any Bannerlord client is already running.'
 }
-if ($ArrivalLoop -and ($RecruitmentLoop -or $RoadsideBanditNegotiationLoop)) { throw 'Select only one LiveModel test goal per run.' }
+if (@($ArrivalLoop, $RecruitmentLoop, $RoadsideBanditNegotiationLoop, $SupplyManagementLoop | Where-Object { $_ }).Count -gt 1) { throw 'Select only one LiveModel test goal per run.' }
 if ($RoadsideBanditNegotiationLoop -and -not $RecruitmentLoop) { throw 'RoadsideBanditNegotiationLoop requires RecruitmentLoop so the encounter resolves into the existing growth goal.' }
 foreach ($setting in @('CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL','CHRONICLE_LLM_API_KEY','CHRONICLE_LLM_TIMEOUT_SECONDS','CHRONICLE_LLM_MAX_TOKENS','CHRONICLE_LLM_MAX_TOKEN_PARAMETER','CHRONICLE_LLM_REASONING_EFFORT','CHRONICLE_LLM_TEMPERATURE')) {
     $configuredValue = [string][Environment]::GetEnvironmentVariable($setting, 'Process')
@@ -69,6 +70,11 @@ $fixtureUnchanged = $false
 $processStopped = $false
 $failureEngineFrameCaptured = $false
 $failureEvidenceError = $null
+$supplySetup = $null
+$supplyVerified = $null
+$supplyVerification = $null
+$chosenSettlementId = ''
+$chosenSettlementName = ''
 
 function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @(), [int]$CommandTimeout = 0) {
     $effectiveTimeout = if ($CommandTimeout -gt 0) { $CommandTimeout } else { $TimeoutSeconds }
@@ -142,6 +148,61 @@ try {
     $modelRunStartedUtc = [string]$capture.StartedUtc
     Write-LiveModelCaptureEvent 'capture-start' $capture.StartedUtc 'capture' $null $baseline.state $baseline $capture
 
+    if ($SupplyManagementLoop) {
+        $target = @($baseline.state.nearbySettlements | Where-Object { $_.type -eq 'town' -and -not $_.hostile -and -not $_.underSiege -and [double]$_.distance -gt 1.0 } | Sort-Object { [double]$_.distance } | Select-Object -First 1)
+        if ($target.Count -ne 1) { throw 'Supply fixture preparation found no safe, visible Native Town target.' }
+        $chosenSettlementId = [string]$target[0].id
+        $chosenSettlementName = [string]$target[0].name
+        $move = Invoke-AgentCli 'move' @('-SettlementId', $chosenSettlementId, '-CommandId', ('supply-setup-move-' + [Guid]::NewGuid().ToString('N')))
+        if ($move.status -ne 'completed' -or [string]$move.state.location.targetSettlementId -cne $chosenSettlementId) { throw 'Supply fixture Native movement did not accept the currently visible safe Town.' }
+        $arrivalDeadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+        $arrival = $null
+        while ([DateTime]::UtcNow -lt $arrivalDeadline) {
+            $arrival = Invoke-AgentCli 'state' @('-CommandId', ('supply-setup-arrival-' + [Guid]::NewGuid().ToString('N')))
+            if ([string]$arrival.state.location.currentSettlementId -ceq $chosenSettlementId -and [string]$arrival.state.context.menuId -eq 'town') { break }
+            if ([bool]$arrival.state.context.encounterActive) { throw 'An encounter interrupted deterministic supply-scene setup; this is not a model trial.' }
+            if (-not [bool]$arrival.state.party.isMoving) { throw 'Native movement stopped before the supply-scene Town was reached.' }
+            if ([string]$arrival.state.context.timeControlMode -notin @('StoppablePlay','UnstoppableFastForward')) { throw 'Campaign time stopped during deterministic supply-scene setup.' }
+            Start-Sleep -Seconds 1
+        }
+        if (-not $arrival -or [string]$arrival.state.location.currentSettlementId -cne $chosenSettlementId -or [string]$arrival.state.context.menuId -ne 'town') { throw 'Deterministic supply-scene setup timed out before reaching the Town menu.' }
+
+        $setupGold = [int]$arrival.state.economy.gold
+        $recruitReceipts = [System.Collections.Generic.List[object]]::new()
+        while ([int]$arrival.state.party.members -lt 6) {
+            $offers = Invoke-AgentCli 'recruitOptions' @('-CommandId', ('supply-setup-offers-' + [Guid]::NewGuid().ToString('N')))
+            if ($offers.status -ne 'completed') { throw 'Native volunteer offers were not available to establish the fixed six-person supply fixture.' }
+            $offer = @($offers.data.offers | Where-Object { $_.available -and [int]$_.cost -le [int]$arrival.state.economy.gold } | Sort-Object { [int]$_.cost }, { [int]$_.slot } | Select-Object -First 1)
+            if ($offer.Count -ne 1) { throw 'Native Town volunteers could not establish the fixed six-person supply fixture.' }
+            $recruit = Invoke-AgentCli 'recruit' @('-OwnerId', [string]$offer[0].ownerId, '-TroopId', [string]$offer[0].troopId, '-VolunteerSlot', [string]$offer[0].slot, '-CommandId', ('supply-setup-recruit-' + [Guid]::NewGuid().ToString('N')))
+            $arrival = Invoke-AgentCli 'state' @('-CommandId', ('supply-setup-post-recruit-' + [Guid]::NewGuid().ToString('N')))
+            if ($recruit.status -ne 'completed' -or -not [bool]$recruit.data.verified -or [int]$arrival.state.party.members -ne ([int]$recruitReceipts.Count + [int]$baseline.state.party.members + 1) -or [int]$arrival.state.economy.gold -ne ($setupGold - [int]$offer[0].cost)) {
+                throw 'Native recruitment did not match the fixed supply-fixture setup receipt.'
+            }
+            $setupGold -= [int]$offer[0].cost
+            $recruitReceipts.Add([pscustomobject]@{ Cost = [int]$offer[0].cost; Receipt = $recruit.data })
+        }
+        if ([int]$arrival.state.party.members -ne 6 -or [int]$arrival.state.economy.gold -ne 900 -or [Math]::Abs([double]$arrival.state.party.food - 0.95) -gt 0.01 -or [int]$arrival.state.party.foodInventory -ne 0 -or [Math]::Abs([double]$arrival.state.party.foodChange - (-0.3)) -gt 0.01 -or [int]$arrival.state.party.dailyWage -ne 10 -or [int]$arrival.dailyTickCount -ne 2) {
+            throw 'Native prelude did not establish the measured six-member supply baseline; no state will be injected to force it.'
+        }
+        $baseline = $arrival
+        $supplySetup = [ordered]@{
+            TargetSettlementId = $chosenSettlementId
+            TargetSettlementName = $chosenSettlementName
+            CampaignDay = [double]$arrival.campaignDay
+            DailyTickCount = [int]$arrival.dailyTickCount
+            Members = [int]$arrival.state.party.members
+            Gold = [int]$arrival.state.economy.gold
+            Food = [double]$arrival.state.party.food
+            FoodInventory = [int]$arrival.state.party.foodInventory
+            FoodChange = [double]$arrival.state.party.foodChange
+            DailyWage = [int]$arrival.state.party.dailyWage
+            NativeRecruitmentReceipts = @($recruitReceipts)
+            IsHarnessSetupNotModelEvidence = $true
+        }
+        Write-LiveModelCaptureEvent 'supply-fixture-prepared' ([DateTime]::UtcNow.ToString('O')) 'nativeSetup' $null $baseline.state $supplySetup $capture
+    }
+
     if ($RoadsideBanditNegotiationLoop) {
         $goal = 'Autonomously recruit one currently affordable local volunteer from a safe Native Settlement. Select a target from current nearbySettlements; issue one Native move. A hostile looter may interrupt travel. If a current Native bandit conversation appears and the observed bandit side is stronger than the player side, choose the currently visible non-fight compromise option; never choose to start a tactical battle in this one-member growth slice. After selecting compromise, do not use dialogueSelect unless the fresh observation contains a clickable option. When the bandit conversation has no clickable options, call barterOptions first to check whether the Native Safe Passage BarterVM is ready. Only if that read is rejected and the fresh Native observation still has an active no-option conversation should you call dialogueContinue once, then query barterOptions again; never repeat Continue without rechecking. Only after barterOptions returns the Safe Passage context may you call barterAutoBalance; submit barterOffer only if the Native quote is enabled and the remaining Gold stays positive. After accepting safe passage, re-observe the Campaign Map because the Native party may be Holding with no target; select a newly observed safe settlement and move again if needed. Do not use pause/resume/fastForward, do not reuse a stale target, and do not invent offers. At a settlement, use the currently enabled recruit_volunteers option, choose one affordable offer within capacity, recruit it with ConfirmPartySizeWarning=false, verify Party +1 and exact Gold cost, then stop.'
         $maxDecisions = 36
@@ -157,6 +218,14 @@ try {
         $allowedActions = 'mapSettlementTargets,move,recruitOptions,recruit'
         $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '180'
         $env:CHRONICLE_LLM_MAX_TOKENS = '512'
+    }
+    elseif ($SupplyManagementLoop) {
+        $goal = 'Supply objective: keep this six-member MainParty at Sargot supplied for three real Campaign daily ticks. Starting dailyTickCount is 2; do not leave Town Wait until a fresh observation shows dailyTickCount >= 5. Starting Food is 0.95 and FoodChange is -0.3/day. The measured one-unit Native baseline is: one cheapest food item costs 9, Food becomes 1.95, and after three daily ticks Food is 1.05. Therefore buy exactly one unit total, using the current lowest-priced affordable Native foodOptions offer; never reopen Trade after the first successful tradeConfirm, even if you think extra food is safer. Keep the party size six. Use only currently enabled OptionIds. menuSelect accepts only OptionId and binds the current Native menu. First: select trade, query foodOptions, and buy one unit. A successful provision only drafts the transfer; while the Trade InventoryState is open, select the currently listed tradeConfirm exactly once to commit it. Do not wait or use observeAgain before the committed tradeConfirm receipt. Only after completed tradeConfirm, select town_wait. Then request rest Days=3. A rest receipt with status accepted means the requested wait is still running, not finished. While dailyTickCount < 5, the only correct next step is observeAgain waitSeconds=5; do not choose wait_leave, any other menu/game action, or a second rest. When a fresh observation reaches dailyTickCount >= 5, select the currently enabled wait_leave option once. Return done only after fresh state shows Town menu, six members, Gold >= 861, and Food >= 1.0. If any action is rejected, use the new state and available action catalog; never reuse an unavailable action. Never call explicit clock controls or claim unverified outcomes.'
+        $maxDecisions = 24
+        $maxElapsedSeconds = 300
+        $allowedActions = 'menuSelect,foodOptions,provision,tradeConfirm,rest'
+        $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '180'
+        $env:CHRONICLE_LLM_MAX_TOKENS = '4096'
     }
     elseif ($ArrivalLoop) {
         $goal = 'First query mapSettlementTargets. Then choose the nearest observed safe target (not hostile, not under siege, not the current settlement) and issue one move. While party.isMoving toward that target and currentSettlementId differs, use observeAgain with waitSeconds 5; do not send move again or use clock controls. When nativeMoveArrival.status is arrived, return done immediately and issue no further game action.'
@@ -178,7 +247,9 @@ try {
     $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop @loopArguments 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) {
         try { $loopTrace = $output | ConvertFrom-Json } catch { }
-        throw "Real-model decision loop failed: $output"
+        $loopError = if ($loopTrace -and $loopTrace.error) { [string]$loopTrace.error } else { [string]$output }
+        if ($loopError.Length -gt 1200) { $loopError = $loopError.Substring(0, 1200) + '...[truncated; full structured trace retained separately]' }
+        throw "Real-model decision loop failed: $loopError"
     }
     $loopTrace = $output | ConvertFrom-Json
     if ($loopTrace.status -eq 'failed') { throw "Real-model decision loop failed: $($loopTrace.error)" }
@@ -242,6 +313,115 @@ try {
         }
     }
 
+    if ($SupplyManagementLoop) {
+        $chosenId = $chosenSettlementId
+        $chosenTarget = @([pscustomobject]@{ id = $chosenSettlementId; name = $chosenSettlementName })
+        $observedTargets = @($chosenTarget)
+        $targetSource = 'Native prelude; excluded from model actions'
+        $targetQueries = @()
+        $moveSteps = @()
+        $observeSteps = @($steps | Where-Object { $_.control.kind -eq 'bounded-observe-again' -and -not $_.actionExecuted -and $_.observationAfter.status -eq 'completed' })
+        $preNativeTravelReobservations = @()
+        $nativeReadObservationsAfterMove = @()
+        $arrivalConfirmed = ([string]$baseline.state.location.currentSettlementId -ceq $chosenId)
+        $campaignDayAdvancedDuringTravel = $false
+
+        $tradeEntrySteps = @($steps | Where-Object { $_.decision.action -eq 'menuSelect' -and [string]$_.decision.arguments.OptionId -eq 'trade' -and $_.actionReceipt.status -eq 'completed' })
+        $tradeEntry = @($tradeEntrySteps | Select-Object -First 1)
+        $foodReadSteps = @($steps | Where-Object { $_.decision.action -eq 'foodOptions' -and $_.actionReceipt.status -eq 'completed' })
+        $foodRead = @($foodReadSteps | Select-Object -First 1)
+        $provisionSteps = @($steps | Where-Object { $_.decision.action -eq 'provision' -and $_.actionReceipt.status -eq 'completed' })
+        $provisionStep = @($provisionSteps | Select-Object -First 1)
+        $tradeCommitSteps = @($steps | Where-Object { $_.decision.action -eq 'tradeConfirm' -and $_.actionReceipt.status -eq 'completed' })
+        $tradeCommit = @($tradeCommitSteps | Select-Object -First 1)
+        $waitEntrySteps = @($steps | Where-Object { $_.decision.action -eq 'menuSelect' -and [string]$_.decision.arguments.OptionId -eq 'town_wait' -and $_.actionReceipt.status -eq 'completed' })
+        $waitEntry = @($waitEntrySteps | Select-Object -First 1)
+        $restSteps = @($steps | Where-Object { $_.decision.action -eq 'rest' -and $_.actionExecuted -and $_.actionReceipt.status -in @('accepted','completed') })
+        $restStep = @($restSteps | Select-Object -First 1)
+        $leaveWaitSteps = @($steps | Where-Object { $_.decision.action -eq 'menuSelect' -and [string]$_.decision.arguments.OptionId -eq 'wait_leave' -and $_.actionReceipt.status -eq 'completed' })
+        $leaveWait = @($leaveWaitSteps | Select-Object -Last 1)
+        $latestObservation = @($steps | Where-Object { $_.observationBefore -and $_.observationBefore.state } | Select-Object -Last 1)
+        $finalObservation = if ($latestObservation.Count -eq 1) { $latestObservation[0].observationBefore } else { $baseline }
+        $nativeClockActions = @($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -in @('advance','pause','resume','fastForward') })
+        $rejectedSteps = @($steps | Where-Object {
+            $_.control.kind -eq 'decision-rejected-before-native' -or
+            ($_.actionAttempted -and [string]$_.actionReceipt.status -eq 'rejected')
+        })
+        $rejectedStatePreserved = @($rejectedSteps | ForEach-Object {
+            $before = $_.observationBefore
+            $after = if ($_.control.kind -eq 'decision-rejected-before-native') { $_.observationAfter } else { $_.actionReceipt }
+            if (-not $before -or -not $after -or -not $before.state -or -not $after.state) { $false }
+            else {
+                $beforeState = $before.state
+                $afterState = $after.state
+                ([Math]::Abs([double]$before.campaignDay - [double]$after.campaignDay) -le 0.000001 -and
+                    [int]$before.dailyTickCount -eq [int]$after.dailyTickCount -and
+                    [int]$beforeState.economy.gold -eq [int]$afterState.economy.gold -and
+                    [int]$beforeState.party.members -eq [int]$afterState.party.members -and
+                    [double]$beforeState.party.food -eq [double]$afterState.party.food -and
+                    [int]$beforeState.party.foodInventory -eq [int]$afterState.party.foodInventory -and
+                    [string]$beforeState.location.currentSettlementId -ceq [string]$afterState.location.currentSettlementId -and
+                    [string]$beforeState.location.targetSettlementId -ceq [string]$afterState.location.targetSettlementId -and
+                    [string]$beforeState.context.gameState -ceq [string]$afterState.context.gameState -and
+                    [string]$beforeState.context.menuId -ceq [string]$afterState.context.menuId -and
+                    [string]$beforeState.context.timeControlMode -ceq [string]$afterState.context.timeControlMode)
+            }
+        })
+        $rejectedActionsDidNotChangeWorld = ($rejectedStatePreserved.Count -eq $rejectedSteps.Count -and @($rejectedStatePreserved | Where-Object { -not $_ }).Count -eq 0)
+        $selectedFoodOffer = @()
+        $cheapestFoodOffer = @()
+        $tradeOption = @()
+        $waitOption = @()
+        $leaveOption = @()
+        if ($tradeEntry.Count -eq 1) { $tradeOption = @($tradeEntry[0].observationBefore.state.availableMenuOptions | Where-Object { $_.id -eq 'trade' -and $_.available -and $_.enabled } | Select-Object -First 1) }
+        if ($waitEntry.Count -eq 1) { $waitOption = @($waitEntry[0].observationBefore.state.availableMenuOptions | Where-Object { $_.id -eq 'town_wait' -and $_.available -and $_.enabled } | Select-Object -First 1) }
+        if ($leaveWait.Count -eq 1) { $leaveOption = @($leaveWait[0].observationBefore.state.availableMenuOptions | Where-Object { $_.id -eq 'wait_leave' -and $_.available -and $_.enabled } | Select-Object -First 1) }
+        if ($foodRead.Count -eq 1 -and $provisionStep.Count -eq 1) {
+            $selectedFoodOffer = @($foodRead[0].actionReceipt.data.offers | Where-Object { [string]$_.viewModelItemId -ceq [string]$provisionStep[0].decision.arguments.ItemViewModelId -and [bool]$_.isFood -and [bool]$_.isTransferable -and [int]$_.stock -ge [int]$provisionStep[0].decision.arguments.Amount -and [double]$_.inventoryLogicUnitPrice -le [int]$foodRead[0].observationBefore.state.economy.gold } | Select-Object -First 1)
+            $cheapestFoodOffer = @($foodRead[0].actionReceipt.data.offers | Where-Object { [bool]$_.isFood -and [bool]$_.isTransferable -and [int]$_.stock -gt 0 -and [double]$_.inventoryLogicUnitPrice -le [int]$foodRead[0].observationBefore.state.economy.gold } | Sort-Object { [double]$_.inventoryLogicUnitPrice } | Select-Object -First 1)
+        }
+        $naturalTicksElapsed = [int]$finalObservation.dailyTickCount - [int]$supplySetup.DailyTickCount
+        $providerStoppedAfterGoalAction = ([bool]$loopTrace.termination.completedByProvider -and [bool]$steps[-1].decision.done)
+        $supplyVerified = (
+            $tradeEntrySteps.Count -eq 1 -and $tradeEntry.Count -eq 1 -and $tradeOption.Count -eq 1 -and [string]$tradeEntry[0].observationBefore.state.context.menuId -eq 'town' -and
+            $foodReadSteps.Count -eq 1 -and
+            $foodRead.Count -eq 1 -and [string]$foodRead[0].observationBefore.state.context.gameState -eq 'InventoryState' -and
+            $provisionSteps.Count -eq 1 -and $provisionStep.Count -eq 1 -and [int]$provisionStep[0].decision.arguments.Amount -eq 1 -and $selectedFoodOffer.Count -eq 1 -and $cheapestFoodOffer.Count -eq 1 -and [string]$selectedFoodOffer[0].viewModelItemId -ceq [string]$cheapestFoodOffer[0].viewModelItemId -and [int]$provisionStep[0].actionReceipt.data.nativeTransactionAmount -le [double]$cheapestFoodOffer[0].inventoryLogicUnitPrice -and
+            $tradeCommitSteps.Count -eq 1 -and $tradeCommit.Count -eq 1 -and [bool]$tradeCommit[0].actionReceipt.data.committed -and [bool]$tradeCommit[0].actionReceipt.data.postconditionPassed -and
+            $waitEntrySteps.Count -eq 1 -and $waitEntry.Count -eq 1 -and $waitOption.Count -eq 1 -and [string]$waitEntry[0].observationBefore.state.context.menuId -eq 'town' -and
+            $restSteps.Count -eq 1 -and [int]$restStep[0].decision.arguments.Days -eq 3 -and $leaveWaitSteps.Count -eq 1 -and $leaveWait.Count -eq 1 -and $leaveOption.Count -eq 1 -and [string]$leaveWait[0].observationBefore.state.context.menuId -eq 'town_wait_menus' -and
+            $naturalTicksElapsed -ge 3 -and [double]$finalObservation.campaignDay -ge ([double]$supplySetup.CampaignDay + 3.0) -and
+            [string]$finalObservation.state.context.menuId -eq 'town' -and [int]$finalObservation.state.party.members -eq 6 -and
+            [int]$finalObservation.state.economy.gold -ge 861 -and [double]$finalObservation.state.party.food -ge 1.0 -and
+            $nativeClockActions.Count -eq 0 -and $rejectedSteps.Count -le 2 -and $rejectedActionsDidNotChangeWorld -and $providerStoppedAfterGoalAction
+        )
+        if ($finalObservation -and $finalObservation.state) {
+            $supplyVerification = [ordered]@{
+                Members = [int]$finalObservation.state.party.members
+                Gold = [int]$finalObservation.state.economy.gold
+                Food = [double]$finalObservation.state.party.food
+                FoodInventory = [int]$finalObservation.state.party.foodInventory
+                CampaignDayStart = [double]$supplySetup.CampaignDay
+                CampaignDayEnd = [double]$finalObservation.campaignDay
+                DailyTickStart = [int]$supplySetup.DailyTickCount
+                DailyTickEnd = [int]$finalObservation.dailyTickCount
+                DailyTicksElapsed = $naturalTicksElapsed
+                ModelDecisionCount = $steps.Count
+                FoodItemId = if ($provisionStep.Count -eq 1) { [string]$provisionStep[0].actionReceipt.data.itemId } else { '' }
+                FoodAmount = if ($provisionStep.Count -eq 1) { [int]$provisionStep[0].decision.arguments.Amount } else { 0 }
+                FoodUnitPrice = if ($selectedFoodOffer.Count -eq 1) { [double]$selectedFoodOffer[0].inventoryLogicUnitPrice } else { 0.0 }
+                NativeTransactionAmount = if ($provisionStep.Count -eq 1) { [int]$provisionStep[0].actionReceipt.data.nativeTransactionAmount } else { 0 }
+                NativeRestDaysRequested = if ($restStep.Count -eq 1) { [int]$restStep[0].decision.arguments.Days } else { 0 }
+                NativeRestRequestCount = $restSteps.Count
+                NativeClockActions = @($nativeClockActions | ForEach-Object { [string]$_.actionReceipt.action })
+                RejectedDecisions = $rejectedSteps.Count
+                RejectedActionsPreservedWorldState = $rejectedActionsDidNotChangeWorld
+                Passed = [bool]$supplyVerified
+            }
+        }
+        if (-not $supplyVerified) { throw 'Real model failed the frozen Native multi-day supply postconditions; preserve the captured trace and engine frame.' }
+    }
+    else {
     $targetQueries = @($steps | Where-Object { $_.decision.action -eq 'mapSettlementTargets' -and $_.actionReceipt.status -eq 'completed' })
     $moveSteps = @($steps | Where-Object { $_.decision.action -eq 'move' -and $_.actionReceipt.status -eq 'completed' })
     $finalMoveStep = @($moveSteps | Select-Object -Last 1)
@@ -319,6 +499,7 @@ try {
     }
     elseif (-not $ArrivalLoop -and -not $providerStoppedAfterGoalAction) { throw 'Live model did not stop after the single requested Native move order.' }
     if ($ArrivalLoop -and -not $providerStoppedAfterGoalAction) { throw 'Live model did not stop after Native arrival was observed.' }
+    }
 
     $null = Capture-EngineFrame 'LiveModelEngine-after'
     Write-LiveModelCaptureEvent 'capture-end' ([DateTime]::UtcNow.ToString('O')) 'capture' $null $finalObservation.state $null $capture
@@ -328,6 +509,7 @@ try {
     $liveModelTrace = [ordered]@{
         ProviderKind = 'configured OpenAI-compatible live model'
         ModelId = [string]$env:CHRONICLE_LLM_MODEL
+        ModelMaxOutputTokens = [int]$env:CHRONICLE_LLM_MAX_TOKENS
         SourceCommit = $sourceCommit
         SourceTrackedTreeClean = $sourceTrackedTreeClean
         RunStartedUtc = $modelRunStartedUtc
@@ -336,13 +518,13 @@ try {
         CampaignDayEnd = [double]$finalObservation.campaignDay
         StartupDialogReceipts = @($start.session.startupDialogReceipts)
         Goal = $goal
-        AcceptanceSlice = if ($RoadsideBanditNegotiationLoop) { 'Native roadside Safe Passage, recovery, and volunteer recruitment' } elseif ($RecruitmentLoop) { 'Native movement plus volunteer recruitment' } elseif ($ArrivalLoop) { 'Native movement arrival' } else { 'Native movement order accepted' }
+        AcceptanceSlice = if ($SupplyManagementLoop) { 'Real-model Native food purchase and three-day Town Wait' } elseif ($RoadsideBanditNegotiationLoop) { 'Native roadside Safe Passage, recovery, and volunteer recruitment' } elseif ($RecruitmentLoop) { 'Native movement plus volunteer recruitment' } elseif ($ArrivalLoop) { 'Native movement arrival' } else { 'Native movement order accepted' }
         SafePassageRoute = $safePassageRoute
         HarnessWorldEvents = @($loopTrace.harnessEvents)
         ChosenSettlementId = $chosenId
         ChosenSettlementName = [string]$chosenTarget[0].name
         ObservedTargetCount = $observedTargets.Count
-        QueryThenNativeMoveVerified = $true
+        QueryThenNativeMoveVerified = (-not $SupplyManagementLoop)
         ChosenTargetSource = $targetSource
         ArrivalConfirmed = $arrivalConfirmed
         BoundedReobservations = $observeSteps.Count
@@ -350,6 +532,10 @@ try {
         NativeTravelReobservations = ($observeSteps.Count + $preNativeTravelReobservations.Count)
         CampaignDayAdvancedDuringTravel = $campaignDayAdvancedDuringTravel
         RecruitmentVerified = if ($RecruitmentLoop) { [bool]$nativeRecruitmentVerified } else { $null }
+        SupplyFixtureSetup = $supplySetup
+        SupplyVerified = if ($SupplyManagementLoop) { [bool]$supplyVerified } else { $null }
+        SupplyVerification = $supplyVerification
+        SupplyNativeClockActions = if ($SupplyManagementLoop) { @($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -in @('advance','pause','resume','fastForward') } | ForEach-Object { [string]$_.actionReceipt.action }) } else { @() }
         ProviderStoppedAfterGoalAction = $providerStoppedAfterGoalAction
         Decisions = $steps.Count
         NativeActionReceipts = @($steps | Where-Object { $_.actionExecuted } | ForEach-Object { [ordered]@{ action = $_.actionReceipt.action; status = $_.actionReceipt.status; campaignDay = $_.actionReceipt.campaignDay; timing = $_.timing } })
@@ -376,11 +562,45 @@ catch {
     # This is diagnostic evidence, not a pass result.
     if ($loopTrace -and -not $liveModelTrace) {
         $liveModelTrace = [ordered]@{
+            ProviderKind = 'configured OpenAI-compatible live model; failed before acceptance'
+            ModelId = [string]$env:CHRONICLE_LLM_MODEL
+            ModelMaxOutputTokens = [int]$env:CHRONICLE_LLM_MAX_TOKENS
+            SourceCommit = $sourceCommit
+            SourceTrackedTreeClean = $sourceTrackedTreeClean
+            RunStartedUtc = $modelRunStartedUtc
+            RunCompletedUtc = [DateTime]::UtcNow.ToString('O')
+            CampaignDayStart = if ($baseline) { [double]$baseline.campaignDay } else { $null }
+            CampaignDayEnd = if ($loopTrace.lastObservation) { [double]$loopTrace.lastObservation.campaignDay } else { $null }
+            Goal = $goal
+            AcceptanceSlice = if ($SupplyManagementLoop) { 'Real-model Native food purchase and three-day Town Wait' } else { 'Failed live-model decision loop' }
+            SupplyFixtureSetup = $supplySetup
+            SupplyVerified = $false
+            SupplyVerification = if ($SupplyManagementLoop -and $loopTrace.lastObservation) {
+                [ordered]@{
+                    Members = [int]$loopTrace.lastObservation.state.party.members
+                    Gold = [int]$loopTrace.lastObservation.state.economy.gold
+                    Food = [double]$loopTrace.lastObservation.state.party.food
+                    FoodInventory = [int]$loopTrace.lastObservation.state.party.foodInventory
+                    CampaignDayStart = if ($supplySetup) { [double]$supplySetup.CampaignDay } else { $null }
+                    CampaignDayEnd = [double]$loopTrace.lastObservation.campaignDay
+                    DailyTickStart = if ($supplySetup) { [int]$supplySetup.DailyTickCount } else { $null }
+                    DailyTickEnd = [int]$loopTrace.lastObservation.dailyTickCount
+                    DailyTicksElapsed = if ($supplySetup) { [int]$loopTrace.lastObservation.dailyTickCount - [int]$supplySetup.DailyTickCount } else { 0 }
+                    ModelDecisionCount = [int]$loopTrace.decisions
+                    NativeActionCount = [int]$loopTrace.actionsExecuted
+                    RejectedDecisions = @($loopTrace.trace | Where-Object { $_.control.kind -eq 'decision-rejected-before-native' -or ($_.actionAttempted -and [string]$_.actionReceipt.status -eq 'rejected') }).Count
+                    RejectedActionsPreservedWorldState = $null
+                    FailureStatus = [string]$loopTrace.status
+                    Failure = [string]$loopTrace.error
+                    Passed = $false
+                }
+            } else { $null }
             Trace = $loopTrace.trace
             Termination = $loopTrace.termination
             LastObservation = $loopTrace.lastObservation
             ActionsExecuted = $loopTrace.actionsExecuted
             DecisionCount = $loopTrace.decisions
+            Decisions = $loopTrace.decisions
             HarnessEvents = @($loopTrace.harnessEvents)
             Failure = $failure
             VisualEvidence = $null
