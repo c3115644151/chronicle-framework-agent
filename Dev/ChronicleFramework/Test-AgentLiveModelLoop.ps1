@@ -32,6 +32,21 @@ foreach ($setting in @('CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL','CHRONICLE
         throw "Live-model verification requires local $setting configuration; the value is never printed by this test."
     }
 }
+$configuredProtocol = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_PROTOCOL)) { 'openai-compatible' } else { [string]$env:CHRONICLE_LLM_PROTOCOL }
+if ($configuredProtocol -ceq 'ollama-native') {
+    $ollamaEndpoint = $null
+    if (-not [Uri]::TryCreate([string]$env:CHRONICLE_LLM_BASE_URL, [UriKind]::Absolute, [ref]$ollamaEndpoint) -or -not $ollamaEndpoint.IsLoopback) {
+        throw 'Ollama-native live-model preflight requires a loopback HTTP endpoint; no Campaign fixture was started.'
+    }
+    $ollamaTagsUri = [UriBuilder]::new($ollamaEndpoint)
+    $ollamaTagsUri.Path = '/api/tags'
+    try { $ollamaTags = Invoke-RestMethod -Uri $ollamaTagsUri.Uri -Method Get -TimeoutSec 5 }
+    catch { throw "Configured local Ollama service is unreachable before Campaign launch (host=$($ollamaEndpoint.Host)); no fixture was started." }
+    $availableLocalModels = @($ollamaTags.models | ForEach-Object { [string]$_.name })
+    if ([string]$env:CHRONICLE_LLM_MODEL -notin $availableLocalModels) {
+        throw "Configured local Ollama model '$($env:CHRONICLE_LLM_MODEL)' is not installed on the reachable service; no Campaign fixture was started."
+    }
+}
 $sourceCommitOutput = & git.exe -C $PSScriptRoot rev-parse HEAD 2>&1
 if ($LASTEXITCODE -ne 0) { throw 'Live-model verification could not record the source commit.' }
 $sourceCommit = ([string]($sourceCommitOutput | Out-String)).Trim()
