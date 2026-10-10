@@ -7,9 +7,13 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
-$saveDirectory = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\Game Saves'
+$documentsPath = [Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)
+if ([string]::IsNullOrWhiteSpace($documentsPath)) { throw 'Windows Documents directory could not be resolved for the protocol fixture.' }
+$documentsRoot = Join-Path $documentsPath 'Mount and Blade II Bannerlord'
+$saveDirectory = Join-Path $documentsRoot 'Game Saves'
 $loadSavePath = Join-Path $saveDirectory "$LoadSaveName.sav"
-$sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\session.json'
+$sessionPath = Join-Path $documentsRoot 'AgentRuns\ChronicleAgent\session.json'
+$agentHostDllPath = Join-Path $PSScriptRoot 'AgentHost\bin\Release\net8.0\ChronicleAgentHost.dll'
 $runPrefix = 'p2-' + (Get-Date -Format 'yyyyMMddHHmmssfff')
 $protocolSavePrefix = $ProtocolSaveName -replace '[^A-Za-z0-9_-]', ''
 if ([string]::IsNullOrWhiteSpace($protocolSavePrefix)) { $protocolSavePrefix = 'ChronicleProtocol' }
@@ -42,6 +46,14 @@ function Invoke-AgentCli {
     $output = & powershell -NoProfile -ExecutionPolicy Bypass -File $cli $Action @Arguments 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Agent CLI '$Action' failed: $output" }
     return $output | ConvertFrom-Json
+}
+
+function Invoke-AgentHostState {
+    if (-not (Test-Path -LiteralPath $agentHostDllPath -PathType Leaf)) { throw "Agent Host DLL not found: $agentHostDllPath" }
+    $output = & dotnet $agentHostDllPath --state-once --timeout-seconds $TimeoutSeconds 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) { throw "Local Agent Host state request failed with exit code ${LASTEXITCODE}: $output" }
+    try { return $output | ConvertFrom-Json }
+    catch { throw "Local Agent Host returned invalid JSON: $output" }
 }
 
 function Get-PersistedCampaignFingerprint($Response) {
@@ -90,6 +102,34 @@ function Get-PersistedCampaignFingerprint($Response) {
 try {
     $start = Invoke-AgentCli 'load' @('-SaveName', $LoadSaveName, '-TimeoutSeconds', $TimeoutSeconds)
     $state = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-state", '-TimeoutSeconds', $TimeoutSeconds)
+    $campaignBeforeHost = Get-PersistedCampaignFingerprint $state
+    $hostStateCalls = @()
+    for ($hostCall = 1; $hostCall -le 3; $hostCall++) {
+        $hostState = Invoke-AgentHostState
+        $hostStateCalls += [ordered]@{
+            commandId = [string]$hostState.commandId
+            bannerlordProcessId = [int]$hostState.bannerlordProcessId
+            mainHeroId = [string]$hostState.mainHeroId
+            playerClanId = [string]$hostState.playerClanId
+            mainPartyId = [string]$hostState.mainPartyId
+            gameState = [string]$hostState.gameState
+            timeControlMode = [string]$hostState.timeControlMode
+        }
+        if ([int]$hostState.bannerlordProcessId -ne [int]$state.processId -or
+            [string]$hostState.mainHeroId -cne [string]$state.state.identity.heroId -or
+            [string]$hostState.playerClanId -cne [string]$state.state.identity.clanId -or
+            [string]$hostState.mainPartyId -cne [string]$state.state.party.id -or
+            [string]$hostState.timeControlMode -cne [string]$state.timeControlMode) {
+            throw "Agent Host read did not match the active Native Campaign state on repetition $hostCall."
+        }
+    }
+    $stateAfterHost = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-state-after-host", '-TimeoutSeconds', $TimeoutSeconds)
+    $campaignAfterHost = Get-PersistedCampaignFingerprint $stateAfterHost
+    $hostObservationsDidNotMutateCampaign = (
+        ($campaignBeforeHost | ConvertTo-Json -Depth 6 -Compress) -ceq
+        ($campaignAfterHost | ConvertTo-Json -Depth 6 -Compress)
+    )
+    if (-not $hostObservationsDidNotMutateCampaign) { throw 'Read-only Agent Host handshakes changed the Native Campaign fingerprint.' }
     $startDay = [double]$state.campaignDay
     $pause = Invoke-AgentCli 'pause' @('-CommandId', "$runPrefix-pause", '-TimeoutSeconds', $TimeoutSeconds)
     $resume = Invoke-AgentCli 'resume' @('-CommandId', "$runPrefix-resume", '-TimeoutSeconds', $TimeoutSeconds)
@@ -109,6 +149,8 @@ try {
     $result = [ordered]@{
         ProtocolVersion = $state.protocolVersion
         ProtocolSaveName = $protocolSaveNameForRun
+        AgentHostStateCalls = $hostStateCalls
+        AgentHostObservationsDidNotMutateCampaign = $hostObservationsDidNotMutateCampaign
         Start = $start
         State = $state
         Pause = $pause
@@ -137,6 +179,8 @@ try {
     }
     $result.Passed = (
         $state.status -eq 'completed' -and
+        $hostStateCalls.Count -eq 3 -and
+        $hostObservationsDidNotMutateCampaign -and
         $pause.timeControlMode -eq 'Stop' -and
         $resume.timeControlMode -ne 'Stop' -and
         $fastForward.status -eq 'completed' -and

@@ -12,6 +12,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Remove="TestResults/**/*.cs" />
+    <Compile Remove="AgentHost/**/*.cs" />
     <Reference Include="System.Numerics.Vectors">
       <HintPath>$(ChronicleGameRoot)\bin\Win64_Shipping_Client\System.Numerics.Vectors.dll</HintPath>
       <Private>false</Private>

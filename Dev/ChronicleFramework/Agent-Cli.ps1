@@ -61,7 +61,9 @@ $binDirectory = Join-Path $gameRoot 'bin\Win64_Shipping_Client'
 $launcher = Join-Path $binDirectory 'Bannerlord.BLSE.Standalone.exe'
 $steamRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $gameRoot))
 $steamExe = Join-Path $steamRoot 'steam.exe'
-$documentsRoot = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord'
+$documentsPath = [Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)
+if ([string]::IsNullOrWhiteSpace($documentsPath)) { throw 'Windows Documents directory could not be resolved for the Native protocol.' }
+$documentsRoot = Join-Path $documentsPath 'Mount and Blade II Bannerlord'
 $saveDirectory = Join-Path $documentsRoot 'Game Saves'
 $diagnosticLog = Join-Path $documentsRoot 'Configs\ModLogs\chronicle-framework.log'
 $engineConfig = Join-Path $documentsRoot 'Configs\engine_config.txt'

@@ -21,7 +21,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.110'
+$HarnessContractVersion = '7.111'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -39,6 +39,8 @@ $manifestPath = Join-Path $gameRoot 'Modules\ChronicleFramework\SubModule.xml'
 $sourceManifestPath = Join-Path $repositoryRoot 'Modules\ChronicleFramework\SubModule.xml'
 $gameExe = Join-Path $gameRoot 'bin\Win64_Shipping_Client\Bannerlord.exe'
 $projectPath = Join-Path $harnessRoot 'ChronicleFramework.csproj'
+$agentHostProjectPath = Join-Path $harnessRoot 'AgentHost\ChronicleAgentHost.csproj'
+$agentHostDllPath = Join-Path $harnessRoot 'AgentHost\bin\Release\net8.0\ChronicleAgentHost.dll'
 $apiScript = Join-Path (Split-Path -Parent $harnessRoot) 'ApiProbe\Inspect-CampaignApi.ps1'
 $smokeScript = Join-Path $harnessRoot 'Test-Module.ps1'
 $campaignScript = Join-Path $harnessRoot 'Test-Campaign.ps1'
@@ -413,7 +415,10 @@ foreach ($stage in $requestedStages) {
                 $buildOutput = & dotnet build $projectPath --configuration Release --no-restore "-p:ChronicleGameRoot=$gameRoot" 2>&1 | Out-String
                 $buildExitCode = $LASTEXITCODE
                 if ($buildExitCode -ne 0) { throw "Build failed with exit code $buildExitCode.`n$buildOutput" }
-                $buildOutput
+                $agentHostBuildOutput = & dotnet build $agentHostProjectPath --configuration Release 2>&1 | Out-String
+                $agentHostBuildExitCode = $LASTEXITCODE
+                if ($agentHostBuildExitCode -ne 0) { throw "Local Agent Host build failed with exit code $agentHostBuildExitCode.`n$agentHostBuildOutput" }
+                [ordered]@{ gameModBuild = $buildOutput; localAgentHostBuild = $agentHostBuildOutput } | ConvertTo-Json -Depth 4
             }
         }
         'Smoke' {
@@ -533,8 +538,13 @@ foreach ($stage in $requestedStages) {
         }
         'Protocol' {
             Invoke-Stage -Name 'Protocol' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $protocolScript
-                if ($LASTEXITCODE -ne 0) { throw "Agent protocol test failed with exit code $LASTEXITCODE." }
+                $fakeBridgeEvidence = Join-Path $harnessTempDirectory 'AgentHostProtocolContract'
+                $fakeBridgeOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $harnessRoot 'Test-AgentHostProtocol.ps1') -HostDllPath $agentHostDllPath -EvidenceDirectory $fakeBridgeEvidence 2>&1 | Out-String
+                if ($LASTEXITCODE -ne 0) { throw "Agent Host mailbox contract test failed with exit code $LASTEXITCODE.`n$fakeBridgeOutput" }
+                $nativeProtocolOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $protocolScript 2>&1 | Out-String
+                $nativeProtocolExitCode = $LASTEXITCODE
+                if ($nativeProtocolExitCode -ne 0) { throw "Agent protocol test failed with exit code $nativeProtocolExitCode.`n$nativeProtocolOutput" }
+                [ordered]@{ hostMailboxContract = $fakeBridgeOutput; nativeProtocol = $nativeProtocolOutput; nativeHostHandshakes = '3 read-only state requests; checked same Native PID, MainHero, Clan, MainParty, time mode and unchanged Campaign fingerprint.' } | ConvertTo-Json -Depth 8
             }
         }
         'Observation' {
