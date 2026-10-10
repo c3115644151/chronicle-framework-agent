@@ -54,7 +54,25 @@ Minecraft Agent 的环境、规划、技能、记忆和评测研究已沉淀到�
 | Mod + 隐藏 Host | 故障隔离、模型/记忆独立升级、批量测试和多代理更自然 | 安装与生命周期复杂、IPC 和进程管理成本 |
 | 混合式 | Mod 保留身体与轻量循环，Host 承担可选重型能力 | 边界设计和兼容测试要求更高 |
 
+### 单机当前客户端候选：已证实的原型边界
+
+当前单机候选不是“AI 控制另一个 NPC”，而是游戏内 Mod 通过 Native 接口操作当前 Campaign 的 `Hero.MainHero`、`MobileParty.MainParty` 和玩家家族。现有原型已在一个本地单机客户端中让真实本地模型完成萨哥特市场购买、原版等待三次日结算并返回 Town 菜单；运行收据记录主队人数、金币、食物、Campaign 日期与 Native 交易/等待结果。它使用当前游戏客户端和当前玩家身份，没有启动第二个 Bannerlord 客户端，也没有第二个 Steam 身份需求。该证据只证明这一段 Campaign 地图/城镇流程，不等于完整战役自主能力。
+
+| 边界 | 已核实的当前形态 | 证据与边界 |
+| --- | --- | --- |
+| 游戏内身体与动作执行 | `SubModule.OnGameStart` 注册 `ChronicleCampaignBehavior`；`OnApplicationTick` 找到当前 Campaign Behavior 并轮询协议。`AgentProtocol.cs` 的玩家动作直接读取/操作 Native `Hero.MainHero`、`MobileParty.MainParty`；响应里的进程号取自游戏进程。 | 源码：`SubModule.cs`、`AgentProtocol.cs`、`AgentObserver.cs`。这是游戏内 Mod 适配层，不是外部脚本模拟一个第二玩家。 |
+| 游戏与外部进程的连接 | Mod 从用户文档目录下的 Chronicle AgentRuns 文件夹领取 `command.json`，将响应写入 `responses` 并追加事件记录。命令轮询发生在游戏的 Application Tick；Mod 保留 Native 调用及上下文校验。 | 源码：`AgentProtocol.cs`。这是本机文件邮箱协议；目前没有证据表明它已经是公开稳定的玩家接口或多人网络协议。 |
+| 真实模型循环 | `Agent-DecisionLoop.ps1` 在 Harness 外部执行观察—模型决策—动作—再观察；每次 Provider 调用由 PowerShell 子进程启动，CLI 也以子 PowerShell 进程向游戏协议发命令。本机 Ollama 在 loopback 提供 Qwen3.5 4B。 | 源码：`Agent-DecisionLoop.ps1`、`Agent-Cli.ps1`、`Agent-OpenAICompatibleProvider.ps1`；运行：`TestResults/20261011-023122/` 两轮均通过，使用同一 disposable Campaign 起点，不是两个独立随机 Seed。它是开发 Harness 驱动，不是随 Mod 交付的 Agent Host。 |
+| 当前身份与效果 | Native 回执显示六人 `MainParty` 在萨哥特通过当前原版 TradeVM 买入一单位橄榄，金币由900降至861，食物从0.95升至1.95；原版 Town Wait 跨三个 Daily Tick 后食物为1.05。模型随后在满足验收的 Town 状态停止。 | 收据：`TestResults/20261011-023122/SupplyModelRun-01/Temp/LiveModelLoopResult.json` 与 `SupplyModelRun-02/...`。来源模板不变、游戏进程清理成功、录像覆盖完整并已转关键帧后删除；同模板重复不能证明跨新档泛化。 |
+| 保存与恢复 | Campaign Behavior 的 `SyncData` 保存 Campaign 实例身份和受限 checkpoint；Harness 的 DecisionLoop 有显式写入/恢复路径，恢复时先取新 Native 状态。 | 源码存在不等于玩家体验已打通：当前证据证明的是可调用的 Harness 恢复能力，不证明游戏崩溃后会自动重启 Host、自动重连或无人工恢复。 |
+| 游戏内场景与时间边界 | 同一个 Mod 协议含 Map 与 Mission 相关动作；玩家当前单机 Campaign 的原版时间/场景生命周期仍由 Bannerlord 控制。 | 本次 W5 真实模型验收覆盖 Campaign/Town Wait，不覆盖模型在战斗、Town/Village 3D Mission 中持续运行，也不证明 Mission 内外同时推进 Campaign。保持这些分支为待验证，不从动作代码存在推断闭环。 |
+| 玩家安装与启动 | 现在要复现测试需开发环境、Harness 脚本、游戏 Mod、Provider 配置及本机 Ollama；模型地址/协议等通过本地环境配置供测试使用。 | 这不是可交付安装流程。当前没有已验收的玩家启动/停止界面、Host 安装/升级/卸载、崩溃监督或对 Harness 的产品化封装。玩家“一次安装、一次配置、游戏内启动”的原则仍有效，但没有完成。 |
+
+由此可确认：单机当前玩家客户端是已跑通的技术候选，并且在测试中不需要第二游戏账号；尚未确认的是最终 Mod/Host 分界及玩家交付方式。不能把“游戏内 C# 适配层 + 外部测试循环”直接称为已经部署好的产品 Runtime，也不能把代码中存在 Mission 动作称为真实模型已能跨场景自主游玩。W6-B 仍需独立核验多人客户端/共享 Campaign 的身份、服务器和授权要求，W6 Epic 再用两条证据决定首发部署形态。
+
 冻结部署边界前必须完成同一 Agent 循环的对照原型，至少测量：游戏线程占用、模型超时行为、断网恢复、游戏/模型进程崩溃隔离、存档大小、长期记忆规模、多代理并发、版本升级和安装步骤。玩家体验要求始终是单入口；即使内部存在 Host，也必须由安装器和启动器透明管理。
+
+单机候选最小产品化原型还须从真实玩家启动路径运行同一 Native 行为切片，并记录 Map、Town菜单/等待、战斗和3D聚落Mission各自的观察/动作有效区间；分别中断模型Host与游戏客户端，验证是否能安全停止、回到当前存档后恢复到新Native观察、避免重放已提交动作。对源码已存在但无运行收据的场景标注未验，不能用Harness动作白名单代替玩家闭环。该原型要求用于W6/W7验收，不是宣布当前单机切片已支持所有这些场景。
 
 ## 现实参考：AI 效应 + Player2
 
