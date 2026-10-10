@@ -3,6 +3,8 @@ param([int]$TimeoutSeconds = 20)
 
 $ErrorActionPreference = 'Stop'
 $providerPath = Join-Path $PSScriptRoot 'Agent-OpenAICompatibleProvider.ps1'
+$budgetPolicyPath = Join-Path $PSScriptRoot 'Agent-ProviderBudget.ps1'
+. $budgetPolicyPath
 $priorBaseUrl = $env:CHRONICLE_LLM_BASE_URL
 $priorModel = $env:CHRONICLE_LLM_MODEL
 $priorApiKey = $env:CHRONICLE_LLM_API_KEY
@@ -66,6 +68,7 @@ try {
             [ordered]@{ action = 'mapSettlementTargets'; arguments = @() }
             [ordered]@{ action = 'move'; arguments = @('SettlementId') }
         )
+        providerBudget = [ordered]@{ budgetId = 'provider-test-budget'; mode = 'token-only-local'; maxRequestBodyBytes = 65536; maxOutputTokensPerRequest = 128 }
         observation = [ordered]@{ state = [ordered]@{ identity = [ordered]@{ heroName = $expectedHeroName }; context = [ordered]@{ gameState = 'MapState' }; location = [ordered]@{ currentSettlementId = 'town_V1' } } }
         previousActionReceipt = $null
     }
@@ -90,7 +93,7 @@ try {
     $actionCatalogForwarded = ('mapSettlementTargets' -in $allowedNames -and 'move' -in $allowedNames -and 'advance' -notin $allowedNames)
     $authorizationSent = ($context.Request.Headers['Authorization'] -ceq "Bearer $harnessSecret")
     $payloadModeCorrect = ($apiRequest.model -eq 'harness-contract-model' -and $apiRequest.response_format.type -eq 'json_object' -and
-        [int]$apiRequest.max_completion_tokens -eq 512 -and [bool]($apiRequest.store -eq $false) -and $apiRequest.stream -ne $true -and $apiRequest.thinking.type -ceq 'disabled' -and $null -eq $apiRequest.reasoning_effort -and $null -eq $apiRequest.temperature)
+        [int]$apiRequest.max_completion_tokens -eq 128 -and [bool]($apiRequest.store -eq $false) -and $apiRequest.stream -ne $true -and $apiRequest.thinking.type -ceq 'disabled' -and $null -eq $apiRequest.reasoning_effort -and $null -eq $apiRequest.temperature)
 
     $modelDecision = [ordered]@{
         action = 'mapSettlementTargets'
@@ -98,6 +101,14 @@ try {
     } | ConvertTo-Json -Compress
     $responseJson = [ordered]@{
         id = 'chatcmpl-harness-provider-test'
+        model = 'harness-contract-model'
+        usage = [ordered]@{
+            prompt_tokens = 1200
+            completion_tokens = 42
+            total_tokens = 1242
+            prompt_tokens_details = [ordered]@{ prompt_cache_hit_tokens = 900; prompt_cache_miss_tokens = 300; cached_tokens = 900 }
+            completion_tokens_details = [ordered]@{ reasoning_tokens = 0 }
+        }
         choices = @([ordered]@{ index = 0; message = [ordered]@{ role = 'assistant'; content = $modelDecision }; finish_reason = 'stop' })
     } | ConvertTo-Json -Depth 8 -Compress
     $responseBytes = [System.Text.Encoding]::UTF8.GetBytes($responseJson)
@@ -115,6 +126,18 @@ try {
     $expectedDecision = $modelDecision | ConvertFrom-Json
     $providerOutputClean = ($stdout -notmatch [regex]::Escape($harnessSecret) -and $stderr -notmatch [regex]::Escape($harnessSecret))
     $decisionValidated = ($decision.action -eq 'mapSettlementTargets' -and $decision.rationaleSource -eq 'provider-fallback' -and $decision.rationale -match 'omitted its rationale' -and $decision.arguments -is [System.Management.Automation.PSCustomObject] -and @($decision.arguments.PSObject.Properties).Count -eq 0)
+    $usageReceiptAccurate = ($decision.providerUsage.status -ceq 'reported' -and [bool]$decision.providerUsage.totalTokensConsistent -and [string]$decision.providerUsage.responseId -ceq 'chatcmpl-harness-provider-test' -and [int]$decision.providerUsage.promptTokens -eq 1200 -and [int]$decision.providerUsage.completionTokens -eq 42 -and [int]$decision.providerUsage.totalTokens -eq 1242 -and [int]$decision.providerUsage.promptCacheHitTokens -eq 900 -and [int]$decision.providerUsage.promptCacheMissTokens -eq 300 -and [int]$decision.providerUsage.reasoningTokens -eq 0 -and [int]$decision.providerUsage.requestAttempts -eq 1 -and [int]$decision.providerUsage.maxOutputTokens -eq 128 -and [int]$decision.providerUsage.requestBodyBytes -gt 0)
+
+    $failureStep = 'enforce-provider-request-body-budget-before-http'
+    $oversizeRequest = $request | ConvertTo-Json -Depth 12 | ConvertFrom-Json
+    $oversizeRequest.providerBudget.maxRequestBodyBytes = 1024
+    $oversizeProvider = Start-ProviderProcess ($oversizeRequest | ConvertTo-Json -Depth 12 -Compress)
+    $process = $oversizeProvider.Process
+    if (-not $process.WaitForExit(($TimeoutSeconds + 5) * 1000)) { try { $process.Kill() } catch { }; throw 'Provider did not stop when the request-body budget was exceeded.' }
+    $oversizeStdout = $oversizeProvider.StdoutTask.Result.Trim()
+    $oversizeStderr = $oversizeProvider.StderrTask.Result.Trim()
+    $oversizeReceipt = $oversizeStdout | ConvertFrom-Json
+    $requestBodyBudgetRejectedBeforeHttp = ($process.ExitCode -eq 0 -and [bool]$oversizeReceipt.providerBudgetRejected -and [bool]$oversizeReceipt.noHttpRequestSent -and [int]$oversizeReceipt.providerUsage.requestBodyBytes -gt 1024 -and $oversizeStderr -notmatch [regex]::Escape($harnessSecret))
 
     $failureStep = 'validate-bounded-observe-again-control-response'
     $observeAgainRequest = $request | ConvertTo-Json -Depth 12 -Compress
@@ -140,6 +163,7 @@ try {
     if ($process.ExitCode -ne 0) { throw "Provider rejected a valid observeAgain response (exit=$($process.ExitCode)): $observeStderr" }
     $observeDecision = $observeStdout | ConvertFrom-Json
     $observeAgainValidated = ([bool]$observeDecision.observeAgain -and [int]$observeDecision.waitSeconds -eq 3 -and -not $observeDecision.action -and -not $observeDecision.done -and -not [string]::IsNullOrWhiteSpace([string]$observeDecision.reason))
+    $missingUsageNotZero = ([string]$observeDecision.providerUsage.status -ceq 'unavailable' -and $null -eq $observeDecision.providerUsage.promptTokens -and $null -eq $observeDecision.providerUsage.completionTokens)
 
     $failureStep = 'normalize-exact-positional-action-arguments'
     $tupleRequest = [ordered]@{
@@ -354,6 +378,18 @@ try {
     if ($process.ExitCode -ne 0) { throw "Provider rejected the local-compatible response (exit=$($process.ExitCode)): $localStderr" }
     $localDecision = $localStdout | ConvertFrom-Json
     $localCompatibilityPassed = ($localTokenParameterCorrect -and $localReasoningEffortForwarded -and $localTemperatureForwarded -and $localReceiptCompacted -and $localNoAuthorizationHeader -and $localDecision.action -eq 'mapSettlementTargets' -and $localStdout -notmatch [regex]::Escape($harnessSecret) -and $localStderr -notmatch [regex]::Escape($harnessSecret))
+
+    $deepSeekBudget = New-AgentProviderBudget -ModelId 'deepseek-flash' -BaseUrl 'https://api.deepseek.com/v1' -MaxProviderCalls 20 -MaxRequestBodyBytes 10000 -MaxOutputTokensPerRequest 256
+    $localTokenOnlyBudget = New-AgentProviderBudget -ModelId 'qwen3.5:4b-q4_K_M' -BaseUrl 'http://127.0.0.1:11434/v1'
+    $unknownRemoteBudgetRejected = $false
+    try { $null = New-AgentProviderBudget -ModelId 'unpriced-model' -BaseUrl 'https://provider.example/v1' } catch { $unknownRemoteBudgetRejected = $_.Exception.Message -match 'No verified price profile exists' }
+    $deepSeekPerRequestUpperCny = Get-AgentProviderRequestCostUpperBound -Budget $deepSeekBudget
+    $deepSeekRunUpperCny = [Math]::Round($deepSeekPerRequestUpperCny * [int]$deepSeekBudget.maxProviderCalls, 8)
+    $deepSeekThreeRunUpperCny = [Math]::Round($deepSeekRunUpperCny * 3, 8)
+    $usageCostCheck = [ordered]@{ status = 'reported'; promptTokens = 1000; promptCacheHitTokens = 600; promptCacheMissTokens = 400; completionTokens = 100 }
+    $estimatedUsageCostCny = Get-AgentProviderActualCostEstimate -Budget $deepSeekBudget -Usage $usageCostCheck
+    $estimatedUsageBreakdown = Get-AgentProviderActualCostBreakdown -Budget $deepSeekBudget -Usage $usageCostCheck
+    $providerBudgetMathVerified = ($deepSeekBudget.priceProfileId -ceq 'deepseek-v4.1-flash-peak-cny-upper-bound-2026-10' -and $localTokenOnlyBudget.mode -ceq 'token-only-local' -and $null -eq $localTokenOnlyBudget.maxEstimatedCost -and $unknownRemoteBudgetRejected -and [long]$deepSeekBudget.maxTotalInputTokens -eq 202560 -and [Math]::Abs($deepSeekRunUpperCny - 0.535296) -lt 0.000001 -and $deepSeekRunUpperCny -le [double]$deepSeekBudget.maxEstimatedCost -and $deepSeekThreeRunUpperCny -le 1.95 -and [Math]::Abs($estimatedUsageCostCny - 0.0019488) -lt 0.0000001 -and [Math]::Abs([double]$estimatedUsageBreakdown.inputCacheHitCny - 0.0000288) -lt 0.0000001 -and [Math]::Abs([double]$estimatedUsageBreakdown.inputCacheMissCny - 0.00096) -lt 0.0000001 -and [Math]::Abs([double]$estimatedUsageBreakdown.outputCny - 0.00096) -lt 0.0000001 -and $null -eq (Get-AgentProviderActualCostEstimate -Budget $deepSeekBudget -Usage ([ordered]@{ status = 'unavailable' })))
     $env:CHRONICLE_LLM_API_KEY = $harnessSecret
     $env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER = 'max_completion_tokens'
 
@@ -477,6 +513,16 @@ try {
     $connectionStderr = $connectionProvider.StderrTask.Result.Trim()
     $connectionFailureClassified = ($process.ExitCode -ne 0 -and $connectionStdout -notmatch '"action"' -and $connectionStderr -match 'WebException \(status=(ConnectFailure|NameResolutionFailure|ProxyNameResolutionFailure); host=127\.0\.0\.1; attempt=2/2;' -and $connectionStderr -notmatch [regex]::Escape($harnessSecret))
 
+    $failureStep = 'disable-retries-for-priced-provider'
+    $paidRetryRequest = $request | ConvertTo-Json -Depth 12 | ConvertFrom-Json
+    $paidRetryRequest.providerBudget.mode = 'priced-provider'
+    $paidRetryProvider = Start-ProviderProcess ($paidRetryRequest | ConvertTo-Json -Depth 12 -Compress)
+    $process = $paidRetryProvider.Process
+    if (-not $process.WaitForExit(10000)) { try { $process.Kill() } catch { }; throw 'Priced-provider request retried despite the cost guard.' }
+    $paidRetryStdout = $paidRetryProvider.StdoutTask.Result.Trim()
+    $paidRetryStderr = $paidRetryProvider.StderrTask.Result.Trim()
+    $paidProviderRetryDisabled = ($process.ExitCode -ne 0 -and $paidRetryStdout -notmatch '"action"' -and $paidRetryStderr -match 'attempt=1/1' -and $paidRetryStderr -notmatch 'attempt=2/' -and $paidRetryStderr -notmatch [regex]::Escape($harnessSecret))
+
     $result = [ordered]@{
         ProviderKind = 'local HTTP stub; not a real model call'
         RequestGoalForwarded = $requestGoalForwarded
@@ -487,6 +533,11 @@ try {
         PriorReceiptFieldPresent = ($null -eq $modelInput.previousActionReceipt)
         AuthorizationHeaderSent = $authorizationSent
         LocalCompatibleMaxTokensWithoutAuthorization = $localCompatibilityPassed
+        ProviderBudgetMathAndUnknownPriceFailClosed = $providerBudgetMathVerified
+        DeepSeekWorstCasePerRunCny = $deepSeekRunUpperCny
+        DeepSeekWorstCaseThreeRunsCny = $deepSeekThreeRunUpperCny
+        ProviderReportedUsageCostCny = $estimatedUsageCostCny
+        ProviderReportedUsageCostBreakdown = $estimatedUsageBreakdown
         LocalReasoningEffortForwarded = $localReasoningEffortForwarded
         LocalTemperatureForwarded = $localTemperatureForwarded
         LargeMapReceiptCompacted = $localReceiptCompacted
@@ -494,7 +545,11 @@ try {
         RequestFormatCorrect = $payloadModeCorrect
         ProviderOutputCredentialFree = $providerOutputClean
         StructuredDecisionReturned = $decisionValidated
+        UsageReceiptAccurate = $usageReceiptAccurate
+        RequestBodyBudgetRejectedBeforeHttp = $requestBodyBudgetRejectedBeforeHttp
+        PerRequestOutputBudgetApplied = ([int]$decision.providerUsage.maxOutputTokens -eq 128)
         BoundedObserveAgainControlValidated = $observeAgainValidated
+        MissingUsageNotTreatedAsZero = $missingUsageNotZero
         ExactPositionalArgumentsNormalized = $positionalArgumentsNormalized
         StringEncodedObjectArgumentsNormalized = $stringEncodedArgumentsNormalized
         SingleStringArrayArgumentsNormalized = $singleStringArrayArgumentsNormalized
@@ -506,7 +561,8 @@ try {
         DisallowedActionFailsClosed = $invalidActionFailedClosed
         TimeoutFailsClosedWithoutCredentialLeak = $timeoutFailedClosed
         PreResponseConnectionFailureRetriesOnceAndClassifies = $connectionFailureClassified
-        Passed = ($requestGoalForwarded -and $recentDecisionHistoryForwarded -and $nativeArgumentPromptBindingsPresent -and $unicodeObservationForwarded -and $actionCatalogForwarded -and $authorizationSent -and $localCompatibilityPassed -and $endpointPathCorrect -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $observeAgainValidated -and $positionalArgumentsNormalized -and $stringEncodedArgumentsNormalized -and $singleStringArrayArgumentsNormalized -and $nestedStringArrayArgumentsNormalized -and $singleScalarArgumentsNormalized -and $invalidActionFailedClosed -and $unsupportedActionArgumentRecoverable -and $httpErrorFailedClosed -and $timeoutFailedClosed -and $connectionFailureClassified)
+        PaidProviderBudgetDisablesRetry = $paidProviderRetryDisabled
+        Passed = ($requestGoalForwarded -and $recentDecisionHistoryForwarded -and $nativeArgumentPromptBindingsPresent -and $unicodeObservationForwarded -and $actionCatalogForwarded -and $authorizationSent -and $localCompatibilityPassed -and $providerBudgetMathVerified -and $endpointPathCorrect -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $usageReceiptAccurate -and $requestBodyBudgetRejectedBeforeHttp -and $observeAgainValidated -and $missingUsageNotZero -and $positionalArgumentsNormalized -and $stringEncodedArgumentsNormalized -and $singleStringArrayArgumentsNormalized -and $nestedStringArrayArgumentsNormalized -and $singleScalarArgumentsNormalized -and $invalidActionFailedClosed -and $unsupportedActionArgumentRecoverable -and $httpErrorFailedClosed -and $timeoutFailedClosed -and $connectionFailureClassified -and $paidProviderRetryDisabled)
     }
     $result | ConvertTo-Json -Depth 8
     if (-not $result.Passed) { exit 1 }

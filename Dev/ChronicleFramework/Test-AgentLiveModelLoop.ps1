@@ -242,7 +242,7 @@ try {
         $completionContractJson = $completionContract | ConvertTo-Json -Depth 8 -Compress
         $completionContractBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($completionContractJson))
         $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '180'
-        $env:CHRONICLE_LLM_MAX_TOKENS = '4096'
+        $env:CHRONICLE_LLM_MAX_TOKENS = '256'
     }
     elseif ($ArrivalLoop) {
         $goal = 'First query mapSettlementTargets. Then choose the nearest observed safe target (not hostile, not under siege, not the current settlement) and issue one move. While party.isMoving toward that target and currentSettlementId differs, use observeAgain with waitSeconds 5; do not send move again or use clock controls. When nativeMoveArrival.status is arrived, return done immediately and issue no further game action.'
@@ -528,7 +528,7 @@ try {
     $liveModelTrace = [ordered]@{
         ProviderKind = 'configured OpenAI-compatible live model'
         ModelId = [string]$env:CHRONICLE_LLM_MODEL
-        ModelMaxOutputTokens = [int]$env:CHRONICLE_LLM_MAX_TOKENS
+        ModelMaxOutputTokens = if ($loopTrace.providerBudget) { [int]$loopTrace.providerBudget.maxOutputTokensPerCall } else { [int]$env:CHRONICLE_LLM_MAX_TOKENS }
         ModelThinkingMode = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_THINKING_MODE)) { 'provider-default' } else { [string]$env:CHRONICLE_LLM_THINKING_MODE }
         ModelReasoningEffort = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_REASONING_EFFORT)) { 'provider-default' } else { [string]$env:CHRONICLE_LLM_REASONING_EFFORT }
         SourceCommit = $sourceCommit
@@ -558,6 +558,7 @@ try {
         SupplyVerification = $supplyVerification
         SupplyNativeClockActions = if ($SupplyManagementLoop) { @($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -in @('advance','pause','resume','fastForward') } | ForEach-Object { [string]$_.actionReceipt.action }) } else { @() }
         ProviderStoppedAfterGoalAction = $providerStoppedAfterGoalAction
+        ProviderBudget = $loopTrace.providerBudget
         Decisions = $steps.Count
         NativeActionReceipts = @($steps | Where-Object { $_.actionExecuted } | ForEach-Object { [ordered]@{ action = $_.actionReceipt.action; status = $_.actionReceipt.status; campaignDay = $_.actionReceipt.campaignDay; timing = $_.timing } })
         HarnessEvents = @($loopTrace.harnessEvents)
@@ -585,11 +586,12 @@ catch {
         $liveModelTrace = [ordered]@{
             ProviderKind = 'configured OpenAI-compatible live model; failed before acceptance'
             ModelId = [string]$env:CHRONICLE_LLM_MODEL
-            ModelMaxOutputTokens = [int]$env:CHRONICLE_LLM_MAX_TOKENS
+            ModelMaxOutputTokens = if ($loopTrace.providerBudget) { [int]$loopTrace.providerBudget.maxOutputTokensPerCall } else { [int]$env:CHRONICLE_LLM_MAX_TOKENS }
             ModelThinkingMode = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_THINKING_MODE)) { 'provider-default' } else { [string]$env:CHRONICLE_LLM_THINKING_MODE }
             ModelReasoningEffort = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_REASONING_EFFORT)) { 'provider-default' } else { [string]$env:CHRONICLE_LLM_REASONING_EFFORT }
             SourceCommit = $sourceCommit
             SourceTrackedTreeClean = $sourceTrackedTreeClean
+            ProviderBudget = $loopTrace.providerBudget
             RunStartedUtc = $modelRunStartedUtc
             RunCompletedUtc = [DateTime]::UtcNow.ToString('O')
             CampaignDayStart = if ($baseline) { [double]$baseline.campaignDay } else { $null }

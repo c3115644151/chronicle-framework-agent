@@ -47,11 +47,15 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
     $supply = if ($trace -and $trace.SupplyVerification) { $trace.SupplyVerification } else { $null }
     $visualCoverage = if ($liveResult -and $liveResult.Capture) { [double]$liveResult.Capture.FrameCoverageRatio } else { 0.0 }
     $sourceClipRemoved = [bool]($liveResult -and $liveResult.Capture -and $liveResult.Capture.VideoRemovedAfterEvidence)
+    $providerBudget = if ($trace -and $trace.ProviderBudget) { $trace.ProviderBudget } else { $null }
+    $budgetWithinCeiling = if ($providerBudget -and [string]$providerBudget.mode -eq 'priced-provider') { [double]$providerBudget.reservedCostUpperBoundCny -le 0.65 } elseif ($providerBudget -and [string]$providerBudget.mode -eq 'token-only-local') { $true } else { $false }
+    $providerUsageAuditComplete = if ($providerBudget -and [string]$providerBudget.mode -eq 'priced-provider') { [int]$providerBudget.usageReportedCalls -eq [int]$providerBudget.reservedProviderCalls -and [int]$providerBudget.usagePartialCalls -eq 0 -and [int]$providerBudget.usageUnavailableCalls -eq 0 } elseif ($providerBudget -and [string]$providerBudget.mode -eq 'token-only-local') { $true } else { $false }
     $runPassed = (
         -not $failure -and $exitCode -eq 0 -and [bool]$liveResult.Passed -and [bool]$trace.SupplyVerified -and
         [bool]$liveResult.FixtureUnchanged -and [bool]$liveResult.ProcessStopped -and
         $stopwatch.Elapsed.TotalSeconds -le $WallClockLimitSeconds -and
-        [int]$trace.Decisions -le 24 -and $visualCoverage -ge 0.9 -and $sourceClipRemoved
+        [int]$trace.Decisions -le 24 -and $visualCoverage -ge 0.9 -and $sourceClipRemoved -and
+        $providerBudget -and [int]$providerBudget.reservedProviderCalls -le 20 -and [long]$providerBudget.reservedInputTokenUpperBound -le 202560 -and [int]$providerBudget.reservedOutputTokens -le 5120 -and [long]$providerBudget.reservedRequestBodyBytes -le 200000 -and $budgetWithinCeiling -and $providerUsageAuditComplete
     )
     if (-not $runPassed -and -not $failure) { $failure = 'Candidate run failed one or more predeclared supply, resource, visual, cleanup, or budget thresholds.' }
     $results.Add([pscustomobject]@{
@@ -62,6 +66,20 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         ModelMaxOutputTokens = if ($trace) { [int]$trace.ModelMaxOutputTokens } else { $null }
         ModelThinkingMode = if ($trace) { [string]$trace.ModelThinkingMode } else { $null }
         ModelReasoningEffort = if ($trace) { [string]$trace.ModelReasoningEffort } else { $null }
+        ProviderBudgetMode = if ($providerBudget) { [string]$providerBudget.mode } else { 'missing' }
+        ProviderBudgetId = if ($providerBudget) { [string]$providerBudget.budgetId } else { $null }
+        ProviderCallsReserved = if ($providerBudget) { [int]$providerBudget.reservedProviderCalls } else { $null }
+        RequestBodyBytesReserved = if ($providerBudget) { [long]$providerBudget.reservedRequestBodyBytes } else { $null }
+        InputTokenUpperBoundReserved = if ($providerBudget) { [long]$providerBudget.reservedInputTokenUpperBound } else { $null }
+        InputTokensReported = if ($providerBudget) { [long]$providerBudget.promptTokensReported } else { $null }
+        OutputTokensReported = if ($providerBudget) { [long]$providerBudget.completionTokensReported } else { $null }
+        UsageReportedCalls = if ($providerBudget) { [int]$providerBudget.usageReportedCalls } else { $null }
+        UsagePartialCalls = if ($providerBudget) { [int]$providerBudget.usagePartialCalls } else { $null }
+        UsageUnavailableCalls = if ($providerBudget) { [int]$providerBudget.usageUnavailableCalls } else { $null }
+        ReservedCostUpperBoundCny = if ($providerBudget -and [string]$providerBudget.mode -eq 'priced-provider') { [double]$providerBudget.reservedCostUpperBoundCny } else { $null }
+        ActualEstimatedCostCny = if ($providerBudget -and [string]$providerBudget.mode -eq 'priced-provider' -and [int]$providerBudget.usageUnavailableCalls -eq 0 -and [int]$providerBudget.usagePartialCalls -eq 0) { [double]$providerBudget.actualEstimatedCostCny } else { $null }
+        BudgetWithinCeiling = $budgetWithinCeiling
+        ProviderUsageAuditComplete = $providerUsageAuditComplete
         SourceCommit = if ($trace) { [string]$trace.SourceCommit } else { $null }
         SourceTrackedTreeClean = if ($trace) { [bool]$trace.SourceTrackedTreeClean } else { $false }
         HarnessRunDirectory = $runDirectory
@@ -94,7 +112,16 @@ $result = [ordered]@{
         successfulRuns = $Runs
         maxSecondsPerRun = $WallClockLimitSeconds
         maxDecisionsPerRun = 24
-        modelMaxOutputTokens = 4096
+        modelMaxOutputTokens = 256
+        budgetMaxProviderCalls = 20
+        budgetMaxRequestBodyBytes = 10000
+        budgetMaxInputTokensPerCall = 10128
+        budgetTotalMaxInputTokens = 202560
+        budgetMaxOutputTokensPerCall = 256
+        budgetTotalMaxRequestBodyBytes = 200000
+        budgetTotalMaxOutputTokens = 5120
+        maxEstimatedCostCnyPerRun = 0.65
+        maxEstimatedCostCnyForThreeRuns = 1.95
         maxFoodTransactionsPerRun = 1
         maxFoodUnitsPerRun = 1
         maxNativeRestRequestsPerRun = 1
@@ -110,6 +137,11 @@ $result = [ordered]@{
         processStopped = $true
     }
     SuccessfulRuns = $successfulRuns
+    CostBudgetMode = 'peak-rate reservation; all input treated as cache miss; provider-reported usage retained separately'
+    ReservedCostUpperBoundCny = if (@($resultsArray | Where-Object { $null -eq $_.ReservedCostUpperBoundCny }).Count -eq 0) { [Math]::Round([double](($resultsArray | Measure-Object -Property ReservedCostUpperBoundCny -Sum).Sum), 6) } else { $null }
+    ActualEstimatedCostCny = if (@($resultsArray | Where-Object { $null -eq $_.ActualEstimatedCostCny }).Count -eq 0) { [Math]::Round([double](($resultsArray | Measure-Object -Property ActualEstimatedCostCny -Sum).Sum), 6) } else { $null }
+    UsageReportedRequests = [int](($resultsArray | Measure-Object -Property UsageReportedCalls -Sum).Sum)
+    UsageUnavailableRequests = [int](($resultsArray | Measure-Object -Property UsageUnavailableCalls -Sum).Sum)
     Passed = ($successfulRuns -eq $Runs)
     Results = $resultsArray
 }

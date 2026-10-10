@@ -10,7 +10,9 @@ $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
 $loop = Join-Path $PSScriptRoot 'Agent-DecisionLoop.ps1'
 $provider = Join-Path $PSScriptRoot 'Test-AgentLoopProvider.ps1'
 $policy = Join-Path $PSScriptRoot 'Agent-DecisionLoopPolicy.ps1'
+$providerBudgetPolicy = Join-Path $PSScriptRoot 'Agent-ProviderBudget.ps1'
 . $policy
+. $providerBudgetPolicy
 $savePath = Join-Path $env:USERPROFILE "Documents\Mount and Blade II Bannerlord\Game Saves\$LoadSaveName.sav"
 $saveDirectory = Split-Path -Parent $savePath
 $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\session.json'
@@ -175,6 +177,18 @@ $goalVerifierBoundedAndFailClosed = (
     $unknownSupplyVerification.Status -eq 'unknown' -and @($unknownSupplyVerification.UnknownConditions.id) -contains 'daily-ticks'
 )
 if (-not $goalVerifierBoundedAndFailClosed) { throw 'The finite Native completion contract must detect unmet and unknown conditions and only pass when every predicate is satisfied.' }
+$deepSeekProviderBudget = New-AgentProviderBudget -ModelId 'deepseek-flash' -BaseUrl 'https://api.deepseek.com/v1'
+$deepSeekBudgetValidated = Test-AgentProviderBudget -Budget $deepSeekProviderBudget
+$deepSeekMaxRequestCostCny = Get-AgentProviderRequestCostUpperBound -Budget $deepSeekProviderBudget
+$threeRunCostUpperBoundCny = [Math]::Round($deepSeekMaxRequestCostCny * [int]$deepSeekProviderBudget.maxProviderCalls * 3, 6)
+$localProviderBudget = New-AgentProviderBudget -ModelId 'qwen3.5:4b-q4_K_M' -BaseUrl 'http://127.0.0.1:11434/v1'
+$unknownRemotePricingRejected = $false
+try { $null = New-AgentProviderBudget -ModelId 'unknown-paid-model' -BaseUrl 'https://provider.example/v1' } catch { $unknownRemotePricingRejected = $_.Exception.Message -match 'No verified price profile' }
+$providerBudgetPricingVerified = ($deepSeekBudgetValidated.Valid -and $deepSeekProviderBudget.mode -ceq 'priced-provider' -and $localProviderBudget.mode -ceq 'token-only-local' -and $threeRunCostUpperBoundCny -le 2.0 -and $threeRunCostUpperBoundCny -gt 0 -and $unknownRemotePricingRejected)
+if (-not $providerBudgetPricingVerified) { throw 'Provider budget pricing must use a conservative known DeepSeek profile, never claim local or unknown remote service prices, and keep three maximum W5 runs below CNY 2.' }
+$underfundedProviderBudget = $deepSeekProviderBudget | ConvertTo-Json -Depth 8 | ConvertFrom-Json
+$underfundedProviderBudget.maxEstimatedCost = 0.001
+$underfundedProviderBudgetBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($underfundedProviderBudget | ConvertTo-Json -Depth 8 -Compress)))
 
 function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @()) {
     $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli $Action @Arguments -TimeoutSeconds $TimeoutSeconds -AsJson 2>&1 | Out-String
@@ -411,6 +425,55 @@ try {
         if (Test-Path -LiteralPath ($goalCheckpointSavePath + '.bak') -PathType Leaf) { Remove-Item -LiteralPath ($goalCheckpointSavePath + '.bak') -Force }
         if (-not (Get-Process -Name Bannerlord* -ErrorAction SilentlyContinue)) { $null = Invoke-AgentCli 'load' @('-SaveName', $LoadSaveName) }
     }
+
+    $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
+    $env:CHRONICLE_TEST_PROVIDER_MODE = 'checkpointMustNotCall'
+    try {
+        $budgetOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -Goal 'Cost guard test: stop before making a model call when its maximum reserved cost exceeds the task budget.' -AllowedActionNames 'state' -ProviderBudgetBase64 $underfundedProviderBudgetBase64 -MaxDecisions 2 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-budget-preflight-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $budgetExitCode = $LASTEXITCODE
+    }
+    finally {
+        if ($null -eq $priorProviderMode) { Remove-Item Env:CHRONICLE_TEST_PROVIDER_MODE -ErrorAction SilentlyContinue }
+        else { $env:CHRONICLE_TEST_PROVIDER_MODE = $priorProviderMode }
+    }
+    if ($budgetExitCode -ne 0) { throw "Provider cost budget did not stop before the first model call: $budgetOutput" }
+    $budgetTrace = $budgetOutput | ConvertFrom-Json
+    $providerBudgetStoppedBeforeRequest = (
+        $budgetTrace.termination.reason -eq 'provider-budget-exhausted' -and
+        @($budgetTrace.trace).Count -eq 1 -and
+        $budgetTrace.trace[0].actionReceipt.status -eq 'provider-budget-exhausted' -and
+        [bool]$budgetTrace.trace[0].actionReceipt.noProviderRequestSent -and
+        [int]$budgetTrace.providerBudget.reservedProviderCalls -eq 0 -and
+        [double]$budgetTrace.providerBudget.reservedCostUpperBoundCny -eq 0.0
+    )
+    if (-not $providerBudgetStoppedBeforeRequest) { throw "Provider budget was not enforced before a model request: $($budgetTrace | ConvertTo-Json -Depth 8 -Compress)" }
+
+    $usageBudget = New-AgentProviderBudget -ModelId 'deepseek-flash' -BaseUrl 'https://api.deepseek.com/v1' -MaxProviderCalls 1
+    $usageBudgetBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($usageBudget | ConvertTo-Json -Depth 8 -Compress)))
+    $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
+    $env:CHRONICLE_TEST_PROVIDER_MODE = 'reportedUsageOverBudget'
+    try {
+        $usageBudgetOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -Goal 'Harness test: the provider receipt exceeds the input token reservation and must be suppressed before any Native action.' -AllowedActionNames 'state' -ProviderBudgetBase64 $usageBudgetBase64 -MaxDecisions 2 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-budget-usage-overrun-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $usageBudgetExitCode = $LASTEXITCODE
+    }
+    finally {
+        if ($null -eq $priorProviderMode) { Remove-Item Env:CHRONICLE_TEST_PROVIDER_MODE -ErrorAction SilentlyContinue }
+        else { $env:CHRONICLE_TEST_PROVIDER_MODE = $priorProviderMode }
+    }
+    if ($usageBudgetExitCode -ne 0) { throw "Reported over-budget usage did not stop safely before Native: $usageBudgetOutput" }
+    $usageBudgetTrace = $usageBudgetOutput | ConvertFrom-Json
+    $providerUsageOverBudgetStoppedBeforeNative = (
+        $usageBudgetTrace.termination.reason -eq 'provider-reported-usage-exceeded-budget' -and
+        @($usageBudgetTrace.trace).Count -eq 1 -and
+        [string]$usageBudgetTrace.trace[0].actionReceipt.status -ceq 'provider-usage-over-budget' -and
+        [bool]$usageBudgetTrace.trace[0].actionReceipt.noNativeActionSent -and
+        -not [bool]$usageBudgetTrace.trace[0].actionAttempted -and
+        -not [bool]$usageBudgetTrace.trace[0].actionExecuted -and
+        [int]$usageBudgetTrace.providerBudget.usageReportedCalls -eq 1 -and
+        [long]$usageBudgetTrace.providerBudget.promptTokensReported -gt [long]$usageBudgetTrace.providerBudget.maxInputTokensPerCall -and
+        [double]$usageBudgetTrace.trace[0].observationBefore.campaignDay -eq [double]$usageBudgetTrace.trace[0].observationAfter.campaignDay
+    )
+    if (-not $providerUsageOverBudgetStoppedBeforeNative) { throw "Reported usage did not prevent Native dispatch: $($usageBudgetTrace | ConvertTo-Json -Depth 8 -Compress)" }
 
     $priorInvalidDecision = $env:CHRONICLE_TEST_INVALID_DECISION
     $env:CHRONICLE_TEST_INVALID_DECISION = 'recruit'
@@ -680,6 +743,10 @@ try {
         ExplicitGoalStopHonoredWithoutIssuingAnotherAction = $doneSignalVerified
         NativeGoalVerifierRejectsPrematureDone = $goalVerifierEarlyDoneRecoveryVerified
         NativeGoalContractPersistsAndReverifiesAfterLoad = $goalCheckpointRoundtripResumeVerified
+        ProviderBudgetUsesKnownRatesAndBoundsThreeDeepSeekRuns = $providerBudgetPricingVerified
+        ProviderBudgetStopsBeforeUnaffordableRequest = $providerBudgetStoppedBeforeRequest
+        ProviderReportedUsageOverrunStopsBeforeNativeAction = $providerUsageOverBudgetStoppedBeforeNative
+        DeepSeekThreeRunWorstCaseCostCny = $threeRunCostUpperBoundCny
         GoalStopTrace = $doneTrace.trace
         GoalAndActionCatalogForwarded = $goalAndCatalogForwarded
         ScopedActionRejected = $scopedActionRejected
@@ -700,7 +767,7 @@ try {
         ProcessStopped = $stop.processStopped
         Trace = $trace.trace
     }
-    $result.Passed = ($result.DecisionCount -eq 2 -and $observationLoopVerified -and $receiptForwarded -and $decisionTimingCaptured -and $unicodeRoundTripVerified -and $observeAgainPolicyVerified -and $observeAgainControlCatalogVerified -and $observeAgainSupportsNativeTownWait -and $tradeInventoryObserveAgainRejectedSafely -and $nativeRestMayBeRequestedOnlyOnce -and $barterActionPhaseGateVerified -and $nativeMenuAndTradeCatalogVerified -and $supplyObservationProfileVerified -and $unobstructedCampaignMapPolicyVerified -and $doneSignalVerified -and $goalVerifierEarlyDoneRecoveryVerified -and $goalCheckpointRoundtripResumeVerified -and $goalAndCatalogForwarded -and $scopedActionRejected -and $dynamicActionRecoveryVerified -and $invalidArgumentRecoveryVerified -and $dialogueCatalogRecoveryVerified -and $staleOfferRecoveryVerified -and $unlistedResumeRecoveryVerified -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
+    $result.Passed = ($result.DecisionCount -eq 2 -and $observationLoopVerified -and $receiptForwarded -and $decisionTimingCaptured -and $unicodeRoundTripVerified -and $observeAgainPolicyVerified -and $observeAgainControlCatalogVerified -and $observeAgainSupportsNativeTownWait -and $tradeInventoryObserveAgainRejectedSafely -and $nativeRestMayBeRequestedOnlyOnce -and $barterActionPhaseGateVerified -and $nativeMenuAndTradeCatalogVerified -and $supplyObservationProfileVerified -and $unobstructedCampaignMapPolicyVerified -and $doneSignalVerified -and $goalVerifierEarlyDoneRecoveryVerified -and $goalCheckpointRoundtripResumeVerified -and $providerBudgetPricingVerified -and $providerBudgetStoppedBeforeRequest -and $providerUsageOverBudgetStoppedBeforeNative -and $goalAndCatalogForwarded -and $scopedActionRejected -and $dynamicActionRecoveryVerified -and $invalidArgumentRecoveryVerified -and $dialogueCatalogRecoveryVerified -and $staleOfferRecoveryVerified -and $unlistedResumeRecoveryVerified -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
     $result | ConvertTo-Json -Depth 12
     if (-not $result.Passed) { exit 1 }
 }

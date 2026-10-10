@@ -14,6 +14,26 @@ if ($request.schemaVersion -ne 3) { throw 'Unsupported Agent loop request schema
 if ($null -eq $request.recentDecisionHistory -or @($request.recentDecisionHistory).Count -gt 8) { throw 'Recent decision history is missing or exceeds its bound.' }
 if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'checkpointMustNotCall') { throw 'checkpoint-provider-was-called' }
 if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'checkpointMustNotCall') { throw 'checkpoint-provider-was-called' }
+if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'reportedUsageOverBudget') {
+    if (-not $request.providerBudget -or [string]$request.providerBudget.mode -cne 'priced-provider') { throw 'Usage-over-budget regression requires a priced-provider reservation in the request.' }
+    $promptTokens = [int]$request.providerBudget.maxInputTokensPerRequest + 1
+    [pscustomobject]@{
+        action = 'state'
+        arguments = @{}
+        rationale = 'Return a deliberately over-budget usage receipt; the loop must suppress this decision before Native.'
+        providerUsage = [ordered]@{
+            status = 'reported'
+            promptTokens = $promptTokens
+            completionTokens = 1
+            totalTokens = ($promptTokens + 1)
+            promptCacheHitTokens = 0
+            promptCacheMissTokens = $promptTokens
+            requestAttempts = 1
+            requestBodyBytes = 512
+        }
+    } | ConvertTo-Json -Depth 6 -Compress
+    exit 0
+}
 if ($request.iteration -gt 1 -and -not $request.previousActionReceipt -and -not $request.decisionFeedback) { throw 'Neither the previous Native receipt nor safe pre-Native rejection feedback was forwarded to the next decision.' }
 if ($env:CHRONICLE_TEST_INVALID_DECISION) {
     $invalidAction = [string]$env:CHRONICLE_TEST_INVALID_DECISION

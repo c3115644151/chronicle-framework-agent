@@ -2,10 +2,20 @@
 param()
 
 $ErrorActionPreference = 'Stop'
+$script:LastProviderUsage = $null
 
 function Write-ProviderError([string]$Message) {
     [Console]::Error.WriteLine($Message)
     exit 1
+}
+
+function Get-OptionalNonNegativeInt($Source, [string]$Name) {
+    if (-not $Source) { return $null }
+    $property = @($Source.PSObject.Properties | Where-Object { $_.Name -ceq $Name } | Select-Object -First 1)
+    if ($property.Count -ne 1) { return $null }
+    $parsed = 0
+    if (-not [int]::TryParse([string]$property[0].Value, [ref]$parsed) -or $parsed -lt 0) { return $null }
+    return $parsed
 }
 
 try {
@@ -150,17 +160,51 @@ When `nativeMoveArrival.status` is `arrived`, the current Native observation con
         response_format = [ordered]@{ type = 'json_object' }
         store = $false
     }
-    $payload[$maxTokenParameter] = $maxTokens
+    $effectiveMaxTokens = $maxTokens
+    $requestBudget = $request.providerBudget
+    if ($requestBudget) {
+        $budgetOutputLimit = 0
+        $budgetBodyLimit = 0
+        if (-not [int]::TryParse([string]$requestBudget.maxOutputTokensPerRequest, [ref]$budgetOutputLimit) -or $budgetOutputLimit -lt 1 -or
+            -not [int]::TryParse([string]$requestBudget.maxRequestBodyBytes, [ref]$budgetBodyLimit) -or $budgetBodyLimit -lt 1024) {
+            throw 'Provider budget request limits are invalid.'
+        }
+        $effectiveMaxTokens = [Math]::Min($maxTokens, $budgetOutputLimit)
+    }
+    $payload[$maxTokenParameter] = $effectiveMaxTokens
     if (-not [string]::IsNullOrWhiteSpace($thinkingMode)) { $payload.thinking = [ordered]@{ type = $thinkingMode } }
     if (-not [string]::IsNullOrWhiteSpace($reasoningEffort) -and $thinkingMode -cne 'disabled') { $payload.reasoning_effort = $reasoningEffort }
     if ($hasTemperature) { $payload.temperature = $temperature }
     $body = $payload | ConvertTo-Json -Depth 28 -Compress
     $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($body)
+    if ($requestBudget -and $bodyBytes.Length -gt $budgetBodyLimit) {
+        $preflightUsage = [ordered]@{
+            status = 'unavailable'
+            modelId = $model
+            responseId = $null
+            finishReason = $null
+            requestAttempts = 0
+            requestBodyBytes = [int]$bodyBytes.Length
+            systemPromptBytes = [int][System.Text.Encoding]::UTF8.GetByteCount($systemPrompt)
+            userPayloadBytes = [int][System.Text.Encoding]::UTF8.GetByteCount($userContent)
+            promptTokens = $null
+            completionTokens = $null
+            totalTokens = $null
+            promptCacheHitTokens = $null
+            promptCacheMissTokens = $null
+            reasoningTokens = $null
+            httpRequestSent = $false
+            maxOutputTokens = $effectiveMaxTokens
+        }
+        [Console]::Out.WriteLine(([ordered]@{ providerBudgetRejected = $true; reason = 'request-body-bytes'; noHttpRequestSent = $true; providerUsage = $preflightUsage } | ConvertTo-Json -Compress))
+        exit 0
+    }
     $headers = @{}
     if (-not [string]::IsNullOrWhiteSpace($apiKey)) { $headers.Authorization = "Bearer $apiKey" }
 
     $response = $null
-    for ($attempt = 1; $attempt -le 2; $attempt++) {
+    $maxAttempts = if ($requestBudget -and $requestBudget.mode -eq 'priced-provider') { 1 } else { 2 }
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         try {
             $response = Invoke-RestMethod -Method Post -Uri $requestUri -Headers $headers -Body $bodyBytes -ContentType 'application/json; charset=utf-8' -TimeoutSec $timeoutSeconds
             break
@@ -168,7 +212,7 @@ When `nativeMoveArrival.status` is `arrived`, the current Native observation con
         catch {
         $webStatus = if ($_.Exception -is [System.Net.WebException]) { $_.Exception.Status } else { $null }
         $preResponseConnectionFailure = ($webStatus -in @([System.Net.WebExceptionStatus]::ConnectFailure,[System.Net.WebExceptionStatus]::NameResolutionFailure,[System.Net.WebExceptionStatus]::ProxyNameResolutionFailure))
-        if ($attempt -eq 1 -and $preResponseConnectionFailure) {
+        if ($attempt -lt $maxAttempts -and $preResponseConnectionFailure) {
             Start-Sleep -Milliseconds 400
             continue
         }
@@ -197,13 +241,47 @@ When `nativeMoveArrival.status` is `arrived`, the current Native observation con
             { throw "Model provider request timed out after $timeoutSeconds seconds." }
         if ($_.Exception -is [System.Net.WebException]) {
             $innerType = if ($_.Exception.InnerException) { $_.Exception.InnerException.GetType().Name } else { 'none' }
-            throw "Model provider request failed with WebException (status=$($_.Exception.Status); host=$($endpointUri.Host); attempt=$attempt/2; inner=$innerType)."
+            throw "Model provider request failed with WebException (status=$($_.Exception.Status); host=$($endpointUri.Host); attempt=$attempt/$maxAttempts; inner=$innerType)."
         }
-        throw "Model provider request failed with $($_.Exception.GetType().Name) (attempt=$attempt/2; host=$($endpointUri.Host))."
+        throw "Model provider request failed with $($_.Exception.GetType().Name) (attempt=$attempt/$maxAttempts; host=$($endpointUri.Host))."
         }
     }
 
+    $script:LastProviderUsage = $null
     $choices = @($response.choices)
+    $usage = $response.usage
+    $promptTokens = Get-OptionalNonNegativeInt $usage 'prompt_tokens'
+    $completionTokens = Get-OptionalNonNegativeInt $usage 'completion_tokens'
+    $totalTokens = Get-OptionalNonNegativeInt $usage 'total_tokens'
+    $promptDetails = if ($usage -and $usage.prompt_tokens_details) { $usage.prompt_tokens_details } else { $null }
+    $completionDetails = if ($usage -and $usage.completion_tokens_details) { $usage.completion_tokens_details } else { $null }
+    $cacheHitTokens = Get-OptionalNonNegativeInt $promptDetails 'prompt_cache_hit_tokens'
+    if ($null -eq $cacheHitTokens) { $cacheHitTokens = Get-OptionalNonNegativeInt $promptDetails 'cached_tokens' }
+    $cacheMissTokens = Get-OptionalNonNegativeInt $promptDetails 'prompt_cache_miss_tokens'
+    $reasoningTokens = Get-OptionalNonNegativeInt $completionDetails 'reasoning_tokens'
+    $usageFieldsComplete = ($null -ne $promptTokens -and $null -ne $completionTokens -and $null -ne $totalTokens)
+    $usageTotalsConsistent = if ($usageFieldsComplete) { [long]$totalTokens -eq ([long]$promptTokens + [long]$completionTokens) } else { $null }
+    $usageStatus = if ($usageFieldsComplete -and $usageTotalsConsistent) { 'reported' } elseif ($null -ne $promptTokens -or $null -ne $completionTokens -or $null -ne $totalTokens) { 'partial' } else { 'unavailable' }
+    $providerUsage = [ordered]@{
+        status = $usageStatus
+        modelId = if (-not [string]::IsNullOrWhiteSpace([string]$response.model)) { [string]$response.model } else { $model }
+        responseId = [string]$response.id
+        finishReason = if ($choices.Count -eq 1) { [string]$choices[0].finish_reason } else { $null }
+        requestAttempts = [int]$attempt
+        requestBodyBytes = [int]$bodyBytes.Length
+        systemPromptBytes = [int][System.Text.Encoding]::UTF8.GetByteCount($systemPrompt)
+        userPayloadBytes = [int][System.Text.Encoding]::UTF8.GetByteCount($userContent)
+        promptTokens = $promptTokens
+        completionTokens = $completionTokens
+        totalTokens = $totalTokens
+        totalTokensConsistent = $usageTotalsConsistent
+        promptCacheHitTokens = $cacheHitTokens
+        promptCacheMissTokens = $cacheMissTokens
+        reasoningTokens = $reasoningTokens
+        httpRequestSent = $true
+        maxOutputTokens = $effectiveMaxTokens
+    }
+    $script:LastProviderUsage = $providerUsage
     if ($choices.Count -ne 1 -or $null -eq $choices[0].message) { throw 'Model provider returned no single Chat Completion choice.' }
     if (-not [string]::IsNullOrWhiteSpace([string]$choices[0].message.refusal)) { throw 'Model provider refused the decision request.' }
     if ($choices[0].finish_reason -eq 'length') { throw 'Model provider response was truncated by its output-token limit.' }
@@ -220,14 +298,14 @@ When `nativeMoveArrival.status` is `arrived`, the current Native observation con
             { throw 'Model observeAgain decision must request only a waitSeconds value between 1 and 10.' }
         $reason = if ($decision.observeAgain -eq $true) { [string]$decision.reason } else { [string]$decision.rationale }
         if ([string]::IsNullOrWhiteSpace($reason)) { throw 'Model observeAgain decision is missing a reason.' }
-        [Console]::Out.WriteLine(([ordered]@{ observeAgain = $true; waitSeconds = $waitSeconds; reason = $reason } | ConvertTo-Json -Compress))
+        [Console]::Out.WriteLine(([ordered]@{ observeAgain = $true; waitSeconds = $waitSeconds; reason = $reason; providerUsage = $providerUsage } | ConvertTo-Json -Compress))
         exit 0
     }
 
     if ($decision.done -eq $true) {
         $reason = [string]$decision.reason
         if ([string]::IsNullOrWhiteSpace($reason)) { throw 'Model stop decision is missing a reason.' }
-        [Console]::Out.WriteLine(([ordered]@{ done = $true; reason = $reason } | ConvertTo-Json -Compress))
+        [Console]::Out.WriteLine(([ordered]@{ done = $true; reason = $reason; providerUsage = $providerUsage } | ConvertTo-Json -Compress))
         exit 0
     }
 
@@ -236,7 +314,7 @@ When `nativeMoveArrival.status` is `arrived`, the current Native observation con
     $allowedAction = @($request.allowedActions | Where-Object { [string]$_.action -ceq $actionName } | Select-Object -First 1)
     if ($allowedAction.Count -ne 1) {
         $currentCatalog = @($request.allowedActions | ForEach-Object { [string]$_.action } | Sort-Object -Unique)
-        [Console]::Out.WriteLine(([ordered]@{ decisionRejected = $true; requestedAction = $actionName; reason = 'not-in-current-action-catalog'; availableActions = $currentCatalog } | ConvertTo-Json -Compress))
+        [Console]::Out.WriteLine(([ordered]@{ decisionRejected = $true; requestedAction = $actionName; reason = 'not-in-current-action-catalog'; availableActions = $currentCatalog; providerUsage = $providerUsage } | ConvertTo-Json -Compress))
         exit 0
     }
     $allowedArguments = @($allowedAction[0].arguments | ForEach-Object { [string]$_ })
@@ -299,6 +377,7 @@ When `nativeMoveArrival.status` is `arrived`, the current Native observation con
             allowedArguments = $allowedArguments
             availableActions = $currentCatalog
             noNativeActionSent = $true
+            providerUsage = $providerUsage
         } | ConvertTo-Json -Compress))
         exit 0
     }
@@ -308,10 +387,15 @@ When `nativeMoveArrival.status` is `arrived`, the current Native observation con
         $rationale = "The model omitted its rationale; '$actionName' is still subject to the Native action's live preconditions."
         $rationaleSource = 'provider-fallback'
     }
-    $normalized = [ordered]@{ action = $actionName; arguments = $normalizedArguments; rationale = $rationale; rationaleSource = $rationaleSource }
+    $normalized = [ordered]@{ action = $actionName; arguments = $normalizedArguments; rationale = $rationale; rationaleSource = $rationaleSource; providerUsage = $providerUsage }
     [Console]::Out.WriteLine(($normalized | ConvertTo-Json -Depth 16 -Compress))
     exit 0
 }
 catch {
+    if ($script:LastProviderUsage) {
+        [Console]::Error.WriteLine('Model response could not be normalized; token-usage metadata was retained without storing response content.')
+        [Console]::Out.WriteLine(([ordered]@{ providerFailed = $true; failureKind = 'response-unusable'; providerUsage = $script:LastProviderUsage } | ConvertTo-Json -Compress))
+        exit 0
+    }
     Write-ProviderError $_.Exception.Message
 }

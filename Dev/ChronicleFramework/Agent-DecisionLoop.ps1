@@ -8,6 +8,7 @@ param(
     [string]$Goal,
     [string]$CompletionContractJson,
     [string]$CompletionContractBase64,
+    [string]$ProviderBudgetBase64,
     [string[]]$AllowedActionNames,
     [switch]$PersistCheckpoint,
     [switch]$ResumeCheckpoint,
@@ -18,6 +19,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $decisionLoopPolicyPath = Join-Path $PSScriptRoot 'Agent-DecisionLoopPolicy.ps1'
 . $decisionLoopPolicyPath
+$providerBudgetPolicyPath = Join-Path $PSScriptRoot 'Agent-ProviderBudget.ps1'
+. $providerBudgetPolicyPath
 $cliPath = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
 $providerPath = (Resolve-Path -LiteralPath $DecisionProviderPath).Path
 if ($MaxDecisions -lt 1 -or $MaxDecisions -gt 400) { throw 'MaxDecisions must be between 1 and 400.' }
@@ -90,11 +93,19 @@ function Invoke-DecisionProvider {
     $process.StandardInput.Close()
     if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
         try { $process.Kill() } catch { }
+        if ($script:AgentProviderBudget) {
+            return [ordered]@{ providerFailed = $true; failureKind = 'provider-timeout'; providerUsage = [ordered]@{ status = 'unavailable'; requestAttempts = 0; requestBodyBytes = $null; httpRequestSent = 'unknown'; usageReason = 'Provider timed out; the request may have reached the endpoint.' } }
+        }
         throw "Decision provider timed out after $TimeoutSeconds seconds."
     }
     $stdout = $stdoutTask.Result.Trim()
     $stderr = $stderrTask.Result.Trim()
-    if ($process.ExitCode -ne 0) { throw "Decision provider exited $($process.ExitCode): $stderr" }
+    if ($process.ExitCode -ne 0) {
+        if ($script:AgentProviderBudget) {
+            return [ordered]@{ providerFailed = $true; failureKind = 'provider-process-failed'; providerExitCode = [int]$process.ExitCode; providerUsage = [ordered]@{ status = 'unavailable'; requestAttempts = 0; requestBodyBytes = $null; httpRequestSent = 'unknown'; usageReason = 'Provider exited without usage metadata; worst-case request reservation remains charged.' } }
+        }
+        throw "Decision provider exited $($process.ExitCode): $stderr"
+    }
     try { return $stdout | ConvertFrom-Json }
     catch { throw "Decision provider returned invalid JSON: $stdout $stderr" }
 }
@@ -405,6 +416,45 @@ function ConvertTo-CheckpointObservationSummary($Observation) {
     }
 }
 
+function Get-AgentProviderBudgetSummary($State, $Budget) {
+    if (-not $State -or -not $Budget) { return $null }
+    $usageCoverage = if ($State.reservedProviderCalls -gt 0) { [Math]::Round([double]$State.usageReportedCalls / [double]$State.reservedProviderCalls, 4) } else { 0.0 }
+    $costStatus = if ([string]$State.mode -eq 'token-only-local') { 'local-provider-no-api-price' } elseif ($State.usageUnavailableCalls -gt 0 -or $State.usagePartialCalls -gt 0) { 'partial; reserved upper bound remains authoritative' } elseif ($State.usageReportedCalls -gt 0) { 'provider usage priced at peak reservation rates; invoice may differ' } else { 'no provider request sent' }
+    return [ordered]@{
+        budgetId = [string]$State.budgetId
+        mode = [string]$State.mode
+        currency = $State.currency
+        maxEstimatedCost = $State.maxEstimatedCost
+        priceProfileId = [string]$Budget.priceProfileId
+        reservedProviderCalls = [int]$State.reservedProviderCalls
+        maxProviderCalls = [int]$State.maxProviderCalls
+        maxRequestBodyBytesPerCall = [int]$Budget.maxRequestBodyBytes
+        reservedRequestBodyBytes = [long]$State.reservedRequestBodyBytes
+        actualRequestBodyBytes = [long]$State.actualRequestBodyBytes
+        maxInputTokensPerCall = [int]$Budget.maxInputTokensPerRequest
+        reservedInputTokenUpperBound = [long]$State.reservedInputTokenUpperBound
+        maxTotalInputTokens = [long]$Budget.maxTotalInputTokens
+        maxOutputTokensPerCall = [int]$Budget.maxOutputTokensPerRequest
+        reservedOutputTokens = [long]$State.reservedOutputTokens
+        maxTotalOutputTokens = [long]$Budget.maxTotalOutputTokens
+        reservedCostUpperBoundCny = if ([string]$State.mode -eq 'priced-provider') { [double]$State.reservedCostUpperBound } else { $null }
+        actualEstimatedCostCny = if ([string]$State.mode -eq 'priced-provider' -and $State.usageReportedCalls -gt 0) { [double]$State.actualEstimatedCostCny } else { $null }
+        estimatedInputCacheHitCostCny = if ([string]$State.mode -eq 'priced-provider' -and $State.usageReportedCalls -gt 0) { [double]$State.estimatedInputCacheHitCostCny } else { $null }
+        estimatedInputCacheMissCostCny = if ([string]$State.mode -eq 'priced-provider' -and $State.usageReportedCalls -gt 0) { [double]$State.estimatedInputCacheMissCostCny } else { $null }
+        estimatedOutputCostCny = if ([string]$State.mode -eq 'priced-provider' -and $State.usageReportedCalls -gt 0) { [double]$State.estimatedOutputCostCny } else { $null }
+        actualEstimatedCostStatus = $costStatus
+        promptTokensReported = [long]$State.promptTokensReported
+        completionTokensReported = [long]$State.completionTokensReported
+        cacheHitTokensReported = [long]$State.cacheHitTokensReported
+        cacheMissTokensReported = [long]$State.cacheMissTokensReported
+        usageReportedCalls = [int]$State.usageReportedCalls
+        usagePartialCalls = [int]$State.usagePartialCalls
+        usageUnavailableCalls = [int]$State.usageUnavailableCalls
+        providerRetries = [int]$State.providerRetries
+        usageCoverage = $usageCoverage
+    }
+}
+
 function Convert-DecisionToCli {
     param($Decision, $ActionCatalog, $Observation, $PreviousActionReceipt)
     if ($Decision.action -eq 'advance') { throw 'advance is a Harness-only deterministic time step and is unavailable to Agent decision providers.' }
@@ -459,6 +509,7 @@ try {
     $loopStartedUtc = [DateTime]::UtcNow
     $observation = $null
     $script:AgentCompletionContract = $null
+    $script:AgentProviderBudget = $null
     if (-not [string]::IsNullOrWhiteSpace($CompletionContractJson) -and -not [string]::IsNullOrWhiteSpace($CompletionContractBase64)) { throw 'Provide the Native completion contract as JSON or Base64, not both.' }
     $providedCompletionContractJson = $CompletionContractJson
     if (-not [string]::IsNullOrWhiteSpace($CompletionContractBase64)) {
@@ -469,6 +520,16 @@ try {
         try { $script:AgentCompletionContract = $providedCompletionContractJson | ConvertFrom-Json -ErrorAction Stop }
         catch { throw 'Completion contract JSON is invalid.' }
     }
+    if (-not [string]::IsNullOrWhiteSpace($ProviderBudgetBase64)) {
+        try {
+            $providerBudgetJson = [Text.UTF8Encoding]::new($false, $true).GetString([Convert]::FromBase64String($ProviderBudgetBase64))
+            $script:AgentProviderBudget = $providerBudgetJson | ConvertFrom-Json -ErrorAction Stop
+        }
+        catch { throw 'Provider budget Base64/JSON is invalid.' }
+    }
+    if (-not $script:AgentProviderBudget -and [IO.Path]::GetFileName($providerPath) -ceq 'Agent-OpenAICompatibleProvider.ps1') {
+        $script:AgentProviderBudget = New-AgentProviderBudget -ModelId ([string]$env:CHRONICLE_LLM_MODEL) -BaseUrl ([string]$env:CHRONICLE_LLM_BASE_URL) -MaxProviderCalls ([Math]::Min([int]$MaxDecisions, 20))
+    }
     $previousActionReceipt = $null
     $decisionFeedback = $null
     $consecutiveDecisionRejections = 0
@@ -478,6 +539,37 @@ try {
     $termination = [ordered]@{ reason = 'decision-budget-exhausted'; providerReason = $null; completedByProvider = $false; goalVerified = $false; completionContractId = if ($script:AgentCompletionContract) { [string]$script:AgentCompletionContract.contractId } else { $null } }
     if ($observation.status -ne 'completed' -or -not $observation.state) { throw 'Initial game observation was not completed.' }
     if ($script:AgentCompletionContract) { $null = Test-AgentGoalCompletion -Contract $script:AgentCompletionContract -Observation $observation -ValidateOnly }
+    $providerBudgetState = $null
+    $providerBudgetCostPerRequestCny = 0.0
+    if ($script:AgentProviderBudget) {
+        $null = Test-AgentProviderBudget -Budget $script:AgentProviderBudget
+        $providerBudgetCostPerRequestCny = Get-AgentProviderRequestCostUpperBound -Budget $script:AgentProviderBudget
+        $providerBudgetState = [ordered]@{
+            budgetId = [string]$script:AgentProviderBudget.budgetId
+            mode = [string]$script:AgentProviderBudget.mode
+            currency = [string]$script:AgentProviderBudget.currency
+            maxEstimatedCost = $script:AgentProviderBudget.maxEstimatedCost
+            maxProviderCalls = [int]$script:AgentProviderBudget.maxProviderCalls
+            reservedProviderCalls = 0
+            reservedRequestBodyBytes = 0L
+            reservedInputTokenUpperBound = 0L
+            reservedOutputTokens = 0L
+            reservedCostUpperBound = 0.0
+            actualRequestBodyBytes = 0L
+            promptTokensReported = 0L
+            completionTokensReported = 0L
+            cacheHitTokensReported = 0L
+            cacheMissTokensReported = 0L
+            usageReportedCalls = 0
+            usagePartialCalls = 0
+            usageUnavailableCalls = 0
+            providerRetries = 0
+            actualEstimatedCostCny = 0.0
+            estimatedInputCacheHitCostCny = 0.0
+            estimatedInputCacheMissCostCny = 0.0
+            estimatedOutputCostCny = 0.0
+        }
+    }
     if ($ResumeCheckpoint) {
         $checkpointRead = Invoke-AgentCli 'agentCheckpointGet' @{} "$CommandPrefix-checkpoint-read"
         if ($checkpointRead.status -ne 'completed' -or [string]::IsNullOrWhiteSpace([string]$checkpointRead.data.checkpointBase64))
@@ -600,6 +692,39 @@ try {
             $script:AgentCheckpoint.lastGoalVerification = [ordered]@{ status = [string]$resumeVerification.Status; contractId = $resumeVerification.ContractId; verifiedUtc = [DateTime]::UtcNow.ToString('O'); source = 'fresh Native Campaign observation on checkpoint resume'; result = $resumeVerification }
             Write-AgentCheckpoint "$CommandPrefix-checkpoint-goal-unmet-on-resume"
         }
+        if ($providerBudgetState) {
+            $wouldExceed = (
+                [int]$providerBudgetState.reservedProviderCalls -ge [int]$script:AgentProviderBudget.maxProviderCalls -or
+                ([long]$providerBudgetState.reservedRequestBodyBytes + [long]$script:AgentProviderBudget.maxRequestBodyBytes) -gt [long]$script:AgentProviderBudget.maxTotalRequestBodyBytes -or
+                ([long]$providerBudgetState.reservedInputTokenUpperBound + [long]$script:AgentProviderBudget.maxInputTokensPerRequest) -gt [long]$script:AgentProviderBudget.maxTotalInputTokens -or
+                ([long]$providerBudgetState.reservedOutputTokens + [long]$script:AgentProviderBudget.maxOutputTokensPerRequest) -gt [long]$script:AgentProviderBudget.maxTotalOutputTokens -or
+                ([string]$script:AgentProviderBudget.mode -eq 'priced-provider' -and ([double]$providerBudgetState.reservedCostUpperBound + $providerBudgetCostPerRequestCny) -gt [double]$script:AgentProviderBudget.maxEstimatedCost)
+            )
+            if ($wouldExceed) {
+                $trace += [pscustomobject]@{
+                    iteration = $index
+                    observationBefore = $observation
+                    previousActionReceipt = $previousActionReceipt
+                    allowedActions = @()
+                    allowedControls = @()
+                    decisionFeedback = $decisionFeedback
+                    decision = $null
+                    timing = $null
+                    actionReceipt = [ordered]@{ status = 'provider-budget-exhausted'; noProviderRequestSent = $true; campaignDay = $observation.campaignDay }
+                    observationAfter = $observation
+                    actionAttempted = $false
+                    actionExecuted = $false
+                    control = [ordered]@{ kind = 'provider-budget-exhausted-before-request'; budgetId = [string]$providerBudgetState.budgetId; reservedProviderCalls = [int]$providerBudgetState.reservedProviderCalls; reservedCostUpperBound = [double]$providerBudgetState.reservedCostUpperBound }
+                }
+                $termination = [ordered]@{ reason = 'provider-budget-exhausted'; providerReason = 'No budget remained for another fully reserved model request.'; completedByProvider = $false; goalVerified = $false; completionContractId = if ($script:AgentCompletionContract) { [string]$script:AgentCompletionContract.contractId } else { $null } }
+                break
+            }
+            $providerBudgetState.reservedProviderCalls = [int]$providerBudgetState.reservedProviderCalls + 1
+            $providerBudgetState.reservedRequestBodyBytes = [long]$providerBudgetState.reservedRequestBodyBytes + [long]$script:AgentProviderBudget.maxRequestBodyBytes
+            $providerBudgetState.reservedInputTokenUpperBound = [long]$providerBudgetState.reservedInputTokenUpperBound + [long]$script:AgentProviderBudget.maxInputTokensPerRequest
+            $providerBudgetState.reservedOutputTokens = [long]$providerBudgetState.reservedOutputTokens + [long]$script:AgentProviderBudget.maxOutputTokensPerRequest
+            $providerBudgetState.reservedCostUpperBound = [Math]::Round(([double]$providerBudgetState.reservedCostUpperBound + $providerBudgetCostPerRequestCny), 8)
+        }
         if ($MaxElapsedSeconds -gt 0 -and ([DateTime]::UtcNow - $loopStartedUtc).TotalSeconds -ge $MaxElapsedSeconds)
             { throw "Agent decision loop exceeded its $MaxElapsedSeconds-second wall-clock budget." }
         $nativeMoveArrival = $null
@@ -625,6 +750,7 @@ try {
             nativeMoveArrival = $nativeMoveArrival
             completionContract = $script:AgentCompletionContract
             checkpointContext = if ($script:AgentCheckpoint) { [ordered]@{ schemaVersion = $script:AgentCheckpoint.schemaVersion; campaignInstanceId = $script:AgentCheckpoint.campaignInstanceId; taskId = $script:AgentCheckpoint.taskId; status = $script:AgentCheckpoint.status; lastObservedSummary = $script:AgentCheckpoint.lastObservedSummary; pendingAction = $script:AgentCheckpoint.pendingAction; lastRecovery = $script:AgentCheckpoint.lastRecovery } } else { $null }
+            providerBudget = if ($script:AgentProviderBudget) { [ordered]@{ budgetId = [string]$script:AgentProviderBudget.budgetId; mode = [string]$script:AgentProviderBudget.mode; maxRequestBodyBytes = [int]$script:AgentProviderBudget.maxRequestBodyBytes; maxInputTokensPerRequest = [int]$script:AgentProviderBudget.maxInputTokensPerRequest; maxOutputTokensPerRequest = [int]$script:AgentProviderBudget.maxOutputTokensPerRequest } } else { $null }
             observation = (Convert-ObservationForDecision $observation)
             previousActionReceipt = (Convert-ReceiptForDecision $previousActionReceipt $observation)
             decisionFeedback = $decisionFeedback
@@ -645,9 +771,136 @@ try {
         }
         $script:LastLoopTiming = $stepTiming
         try { $decision = Invoke-DecisionProvider $requestJson }
+        catch {
+            if (-not $providerBudgetState) { throw }
+            $decision = [ordered]@{
+                providerFailed = $true
+                failureKind = 'provider-process-failed'
+                failureType = $_.Exception.GetType().Name
+                providerUsage = [ordered]@{ status = 'unavailable'; requestAttempts = 0; requestBodyBytes = $null; httpRequestSent = 'unknown'; usageReason = 'Provider process failed before returning response usage.' }
+            }
+        }
         finally {
             $stepTiming.providerCompletedUtc = [DateTime]::UtcNow.ToString('O')
             $stepTiming.providerElapsedMilliseconds = [Math]::Round(([Diagnostics.Stopwatch]::GetTimestamp() - $providerStartedTicks) * 1000.0 / [Diagnostics.Stopwatch]::Frequency, 2)
+        }
+        if ($decision -and [bool]$decision.providerBudgetRejected) {
+            if ($providerBudgetState) {
+                $providerBudgetState.reservedProviderCalls = [Math]::Max(0, [int]$providerBudgetState.reservedProviderCalls - 1)
+                $providerBudgetState.reservedRequestBodyBytes = [Math]::Max(0, [long]$providerBudgetState.reservedRequestBodyBytes - [long]$script:AgentProviderBudget.maxRequestBodyBytes)
+                $providerBudgetState.reservedInputTokenUpperBound = [Math]::Max(0, [long]$providerBudgetState.reservedInputTokenUpperBound - [long]$script:AgentProviderBudget.maxInputTokensPerRequest)
+                $providerBudgetState.reservedOutputTokens = [Math]::Max(0, [long]$providerBudgetState.reservedOutputTokens - [long]$script:AgentProviderBudget.maxOutputTokensPerRequest)
+                $providerBudgetState.reservedCostUpperBound = [Math]::Max(0, [double]$providerBudgetState.reservedCostUpperBound - $providerBudgetCostPerRequestCny)
+            }
+            $trace += [pscustomobject]@{
+                iteration = $index
+                observationBefore = $observation
+                previousActionReceipt = $previousActionReceipt
+                allowedActions = @($actionCatalog.Keys | Sort-Object)
+                allowedControls = $controlCatalog
+                decisionFeedback = $decisionFeedbackBeforeStep
+                decision = $decision
+                timing = $stepTiming
+                actionReceipt = [ordered]@{ status = 'provider-budget-rejected'; noProviderRequestSent = $true; providerUsage = $decision.providerUsage; reason = [string]$decision.reason; campaignDay = $observation.campaignDay }
+                observationAfter = $observation
+                actionAttempted = $false
+                actionExecuted = $false
+                control = [ordered]@{ kind = 'provider-budget-rejected-before-http'; budgetId = if ($script:AgentProviderBudget) { [string]$script:AgentProviderBudget.budgetId } else { $null } }
+            }
+            $termination = [ordered]@{ reason = 'provider-request-budget-exceeded'; providerReason = [string]$decision.reason; completedByProvider = $false; goalVerified = $false; completionContractId = if ($script:AgentCompletionContract) { [string]$script:AgentCompletionContract.contractId } else { $null } }
+            break
+        }
+        if ($providerBudgetState) {
+            $providerUsage = if ($decision) { $decision.providerUsage } else { $null }
+            if ($providerUsage) {
+                $providerBudgetState.providerRetries = [int]$providerBudgetState.providerRetries + [Math]::Max(0, ([int]$providerUsage.requestAttempts - 1))
+                if ($null -ne $providerUsage.requestBodyBytes) { $providerBudgetState.actualRequestBodyBytes = [long]$providerBudgetState.actualRequestBodyBytes + [long]$providerUsage.requestBodyBytes }
+                switch ([string]$providerUsage.status) {
+                    'reported' {
+                        $providerBudgetState.usageReportedCalls = [int]$providerBudgetState.usageReportedCalls + 1
+                        $providerBudgetState.promptTokensReported = [long]$providerBudgetState.promptTokensReported + [long]$providerUsage.promptTokens
+                        $providerBudgetState.completionTokensReported = [long]$providerBudgetState.completionTokensReported + [long]$providerUsage.completionTokens
+                        if ($null -ne $providerUsage.promptCacheHitTokens) { $providerBudgetState.cacheHitTokensReported = [long]$providerBudgetState.cacheHitTokensReported + [long]$providerUsage.promptCacheHitTokens }
+                        if ($null -ne $providerUsage.promptCacheMissTokens) { $providerBudgetState.cacheMissTokensReported = [long]$providerBudgetState.cacheMissTokensReported + [long]$providerUsage.promptCacheMissTokens }
+                        $actualRequestCost = Get-AgentProviderActualCostBreakdown -Budget $script:AgentProviderBudget -Usage $providerUsage
+                        if ($null -ne $actualRequestCost) {
+                            $providerBudgetState.actualEstimatedCostCny = [Math]::Round(([double]$providerBudgetState.actualEstimatedCostCny + [double]$actualRequestCost.totalCny), 8)
+                            $providerBudgetState.estimatedInputCacheHitCostCny = [Math]::Round(([double]$providerBudgetState.estimatedInputCacheHitCostCny + [double]$actualRequestCost.inputCacheHitCny), 8)
+                            $providerBudgetState.estimatedInputCacheMissCostCny = [Math]::Round(([double]$providerBudgetState.estimatedInputCacheMissCostCny + [double]$actualRequestCost.inputCacheMissCny), 8)
+                            $providerBudgetState.estimatedOutputCostCny = [Math]::Round(([double]$providerBudgetState.estimatedOutputCostCny + [double]$actualRequestCost.outputCny), 8)
+                        }
+                    }
+                    'partial' { $providerBudgetState.usagePartialCalls = [int]$providerBudgetState.usagePartialCalls + 1 }
+                    default { $providerBudgetState.usageUnavailableCalls = [int]$providerBudgetState.usageUnavailableCalls + 1 }
+                }
+            }
+            else { $providerBudgetState.usageUnavailableCalls = [int]$providerBudgetState.usageUnavailableCalls + 1 }
+            $reportedUsageOverBudget = $false
+            if ($providerUsage -and [string]$providerUsage.status -eq 'reported') {
+                $reportedUsageOverBudget = (
+                    [long]$providerUsage.promptTokens -gt [long]$script:AgentProviderBudget.maxInputTokensPerRequest -or
+                    [long]$providerUsage.completionTokens -gt [long]$script:AgentProviderBudget.maxOutputTokensPerRequest -or
+                    [long]$providerBudgetState.promptTokensReported -gt [long]$script:AgentProviderBudget.maxTotalInputTokens -or
+                    [long]$providerBudgetState.completionTokensReported -gt [long]$script:AgentProviderBudget.maxTotalOutputTokens
+                )
+            }
+            if ($reportedUsageOverBudget) {
+                $trace += [pscustomobject]@{
+                    iteration = $index
+                    observationBefore = $observation
+                    previousActionReceipt = $previousActionReceipt
+                    allowedActions = @($actionCatalog.Keys | Sort-Object)
+                    allowedControls = $controlCatalog
+                    decisionFeedback = $decisionFeedbackBeforeStep
+                    decision = $decision
+                    timing = $stepTiming
+                    actionReceipt = [ordered]@{ status = 'provider-usage-over-budget'; noNativeActionSent = $true; providerUsage = $providerUsage; campaignDay = $observation.campaignDay }
+                    observationAfter = $observation
+                    actionAttempted = $false
+                    actionExecuted = $false
+                    control = [ordered]@{ kind = 'reported-usage-exceeded-budget'; budgetId = [string]$providerBudgetState.budgetId }
+                }
+                $termination = [ordered]@{ reason = 'provider-reported-usage-exceeded-budget'; providerReason = 'Reported token usage exceeded a request or run ceiling; no Native action or next request was sent.'; completedByProvider = $false; goalVerified = $false; completionContractId = if ($script:AgentCompletionContract) { [string]$script:AgentCompletionContract.contractId } else { $null } }
+                break
+            }
+            if ($decision -and [bool]$decision.providerFailed) {
+                $trace += [pscustomobject]@{
+                    iteration = $index
+                    observationBefore = $observation
+                    previousActionReceipt = $previousActionReceipt
+                    allowedActions = @($actionCatalog.Keys | Sort-Object)
+                    allowedControls = $controlCatalog
+                    decisionFeedback = $decisionFeedbackBeforeStep
+                    decision = $decision
+                    timing = $stepTiming
+                    actionReceipt = [ordered]@{ status = 'provider-failed'; noNativeActionSent = $true; providerUsage = $providerUsage; requestCostReservedCny = $providerBudgetCostPerRequestCny; campaignDay = $observation.campaignDay }
+                    observationAfter = $observation
+                    actionAttempted = $false
+                    actionExecuted = $false
+                    control = [ordered]@{ kind = 'provider-failed-no-native-action'; budgetId = $providerBudgetState.budgetId }
+                }
+                $termination = [ordered]@{ reason = 'provider-failed'; providerReason = [string]$decision.failureKind; completedByProvider = $false; goalVerified = $false; completionContractId = if ($script:AgentCompletionContract) { [string]$script:AgentCompletionContract.contractId } else { $null } }
+                break
+            }
+            if ([string]$script:AgentProviderBudget.mode -eq 'priced-provider' -and [double]$providerBudgetState.actualEstimatedCostCny -gt [double]$script:AgentProviderBudget.maxEstimatedCost) {
+                $trace += [pscustomobject]@{
+                    iteration = $index
+                    observationBefore = $observation
+                    previousActionReceipt = $previousActionReceipt
+                    allowedActions = @($actionCatalog.Keys | Sort-Object)
+                    allowedControls = $controlCatalog
+                    decisionFeedback = $decisionFeedbackBeforeStep
+                    decision = [ordered]@{ providerUsage = $providerUsage; providerDecisionSuppressed = $true }
+                    timing = $stepTiming
+                    actionReceipt = [ordered]@{ status = 'provider-cost-overrun'; noNativeActionSent = $true; actualEstimatedCostCny = [double]$providerBudgetState.actualEstimatedCostCny; budgetCny = [double]$script:AgentProviderBudget.maxEstimatedCost }
+                    observationAfter = $observation
+                    actionAttempted = $false
+                    actionExecuted = $false
+                    control = [ordered]@{ kind = 'provider-cost-overrun-before-native-action'; budgetId = [string]$providerBudgetState.budgetId }
+                }
+                $termination = [ordered]@{ reason = 'provider-cost-budget-exceeded'; providerReason = 'Reported token usage exceeded the configured cost ceiling; no Native action was dispatched.'; completedByProvider = $false; goalVerified = $false; completionContractId = if ($script:AgentCompletionContract) { [string]$script:AgentCompletionContract.contractId } else { $null } }
+                break
+            }
         }
         $providerRejectedDecision = ($decision -and $decision.decisionRejected -eq $true)
         $rejectedRequestedAction = if ($providerRejectedDecision) { [string]$decision.requestedAction } else { [string]$decision.action }
@@ -1054,6 +1307,7 @@ try {
         decisions = $trace.Count
         actionsExecuted = @($trace | Where-Object { $_.actionExecuted }).Count
         termination = $termination
+        providerBudget = Get-AgentProviderBudgetSummary -State $providerBudgetState -Budget $script:AgentProviderBudget
         harnessEvents = @($script:HarnessEvents)
         trace = $trace
     } | ConvertTo-Json -Depth 20
@@ -1065,6 +1319,7 @@ catch {
         error = $_.Exception.Message
         timing = $script:LastLoopTiming
         lastObservation = $observation
+        providerBudget = Get-AgentProviderBudgetSummary -State $providerBudgetState -Budget $script:AgentProviderBudget
         harnessEvents = @($script:HarnessEvents)
         trace = @($trace)
     } | ConvertTo-Json -Depth 20 -Compress
