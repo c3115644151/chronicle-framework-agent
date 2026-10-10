@@ -14,6 +14,7 @@ $priorTokenParameter = $env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER
 $priorReasoningEffort = $env:CHRONICLE_LLM_REASONING_EFFORT
 $priorThinkingMode = $env:CHRONICLE_LLM_THINKING_MODE
 $priorTemperature = $env:CHRONICLE_LLM_TEMPERATURE
+$priorProtocol = $env:CHRONICLE_LLM_PROTOCOL
 $harnessSecret = 'chronicle-local-provider-test-secret'
 $listener = $null
 $process = $null
@@ -49,6 +50,7 @@ try {
     $listener = [System.Net.HttpListener]::new()
     $null = $listener.Prefixes.Add("http://127.0.0.1:$port/")
     $listener.Start()
+    $env:CHRONICLE_LLM_PROTOCOL = 'openai-compatible'
     $env:CHRONICLE_LLM_BASE_URL = "http://127.0.0.1:$port/v1"
     $env:CHRONICLE_LLM_MODEL = 'harness-contract-model'
     $env:CHRONICLE_LLM_API_KEY = $harnessSecret
@@ -128,6 +130,122 @@ try {
     $providerOutputClean = ($stdout -notmatch [regex]::Escape($harnessSecret) -and $stderr -notmatch [regex]::Escape($harnessSecret))
     $decisionValidated = ($decision.action -eq 'mapSettlementTargets' -and $decision.rationaleSource -eq 'provider-fallback' -and $decision.rationale -match 'omitted its rationale' -and $decision.arguments -is [System.Management.Automation.PSCustomObject] -and @($decision.arguments.PSObject.Properties).Count -eq 0)
     $usageReceiptAccurate = ($decision.providerUsage.status -ceq 'reported' -and [bool]$decision.providerUsage.totalTokensConsistent -and [string]$decision.providerUsage.responseId -ceq 'chatcmpl-harness-provider-test' -and [int]$decision.providerUsage.promptTokens -eq 1200 -and [int]$decision.providerUsage.completionTokens -eq 42 -and [int]$decision.providerUsage.totalTokens -eq 1242 -and [int]$decision.providerUsage.promptCacheHitTokens -eq 900 -and [int]$decision.providerUsage.promptCacheMissTokens -eq 300 -and [int]$decision.providerUsage.reasoningTokens -eq 0 -and [int]$decision.providerUsage.requestAttempts -eq 1 -and [int]$decision.providerUsage.maxOutputTokens -eq 128 -and [int]$decision.providerUsage.requestBodyBytes -gt 0)
+
+    $failureStep = 'compact-current-native-trade-observation-within-provider-budget'
+    $tradeRequest = $request | ConvertTo-Json -Depth 12 | ConvertFrom-Json
+    $tradeRequest.runId = 'provider-trade-scope-test'
+    $tradeRequest.providerBudget.maxRequestBodyBytes = 10000
+    $tradeRequest.allowedActions = @(
+        [ordered]@{ action = 'foodOptions'; arguments = @() }
+        [ordered]@{ action = 'provision'; arguments = @('ItemViewModelId','Amount') }
+        [ordered]@{ action = 'tradeConfirm'; arguments = @() }
+        [ordered]@{ action = 'tradeCancelChanges'; arguments = @() }
+    )
+    $tradeState = [ordered]@{
+        schemaVersion = 23
+        campaignDay = 91077.401
+        identity = [ordered]@{ heroId = 'main_hero'; heroName = $expectedHeroName; clanTier = 0 }
+        economy = [ordered]@{ gold = 900; influence = 0; renown = 20 }
+        party = [ordered]@{ members = 6; food = 0.95; foodChange = -0.3; dailyWage = 10; sizeLimit = 20 }
+        location = [ordered]@{ currentSettlementId = 'town_V1'; targetSettlementId = 'town_V1' }
+        context = [ordered]@{ gameState = 'InventoryState'; timeControlMode = 'Stop'; menuId = 'town'; escapeMenuOpen = $false; inquiryOpen = $false; encounterActive = $true; isWaiting = $true }
+        inventoryScreen = [ordered]@{ mode = 'Trade'; lootItemCount = 0; playerItemCount = 0; hasHandler = $true }
+        availableMenuOptions = @([ordered]@{ id = 'town_leave'; text = 'Leave'; available = $true; enabled = $true; isLeave = $true })
+        mainHeroSkills = @([ordered]@{ id = 'Trade'; name = 'Trade'; level = 0 })
+        settlementOverlayCharacters = @()
+        nearbySettlements = @()
+        nearbyParties = @()
+        quests = @()
+        danger = [ordered]@{ hostilePartyCount = 0; nearestHostileDistance = $null }
+        mission = $null
+        partyScreen = $null
+    }
+    $tradeState.settlementOverlayCharacters = @(1..8 | ForEach-Object { [ordered]@{ heroId = "hero_$_"; name = ('Notable ' + $_ + ' ' + ('x' * 80)); questMarkers = @() } })
+    $tradeState.nearbyParties = @(1..8 | ForEach-Object { [ordered]@{ id = "party_$_"; name = ('Party ' + $_ + ' ' + ('y' * 80)); members = 100; strength = 100; hostile = $false } })
+    $tradeRequest.observation.state = $tradeState
+    $tradeRequest.previousActionReceipt = [ordered]@{
+        protocolVersion = 1
+        commandId = 'provider-trade-scope-options'
+        action = 'foodOptions'
+        status = 'completed'
+        campaignDay = 91077.401
+        dailyTickCount = 2
+        timeControlMode = 'Stop'
+        data = [ordered]@{ settlementId = 'town_V1'; gold = 900; offers = @([ordered]@{ viewModelItemId = 'olives'; itemId = 'olives'; name = 'Olives'; stock = 166; unitPrice = 9; isFood = $true; isTransferable = $true }) }
+        state = $tradeState
+    }
+    $tradeProvider = Start-ProviderProcess ($tradeRequest | ConvertTo-Json -Depth 16 -Compress)
+    $process = $tradeProvider.Process
+    $tradeAcceptTask = $listener.GetContextAsync()
+    if (-not $tradeAcceptTask.Wait(5000)) { throw 'Local HTTP stub did not receive the scoped Native trade request.' }
+    $tradeContext = $tradeAcceptTask.GetAwaiter().GetResult()
+    $tradeReader = New-Object System.IO.StreamReader($tradeContext.Request.InputStream, $tradeContext.Request.ContentEncoding)
+    $tradeRequestBody = $tradeReader.ReadToEnd()
+    $tradeReader.Dispose()
+    $tradeApiRequest = $tradeRequestBody | ConvertFrom-Json
+    $tradeModelInput = [string]$tradeApiRequest.messages[1].content | ConvertFrom-Json
+    $tradeBodyWithinBudget = ([int]$tradeRequest.providerBudget.maxRequestBodyBytes -ge [System.Text.Encoding]::UTF8.GetByteCount($tradeRequestBody))
+    $tradeObservationScoped = ([string]$tradeModelInput.observation.scope -ceq 'trade-transaction' -and 'settlementOverlayCharacters' -in @($tradeModelInput.observation.omittedStateFields) -and 'nearbyParties' -in @($tradeModelInput.observation.omittedStateFields) -and $null -eq $tradeModelInput.observation.state.settlementOverlayCharacters -and $null -eq $tradeModelInput.observation.state.nearbyParties)
+    $tradeRequiredContextPreserved = ([string]$tradeModelInput.observation.state.context.gameState -ceq 'InventoryState' -and [string]$tradeModelInput.observation.state.inventoryScreen.mode -ceq 'Trade' -and [int]$tradeModelInput.observation.state.economy.gold -eq 900 -and [int]$tradeModelInput.observation.state.party.members -eq 6 -and [string]$tradeModelInput.previousActionReceipt.data.offers[0].viewModelItemId -ceq 'olives' -and [int]$tradeModelInput.previousActionReceipt.data.offers[0].unitPrice -eq 9 -and 'provision' -in @($tradeModelInput.allowedActions | ForEach-Object { [string]$_.action }))
+    $tradeDecisionJson = [ordered]@{ action = 'provision'; arguments = [ordered]@{ ItemViewModelId = 'olives'; Amount = 1 }; rationale = 'Use the observed lowest-cost food offer.' } | ConvertTo-Json -Compress
+    $tradeResponseJson = [ordered]@{ id = 'chatcmpl-harness-trade-scope'; model = 'harness-contract-model'; choices = @([ordered]@{ index = 0; message = [ordered]@{ role = 'assistant'; content = $tradeDecisionJson }; finish_reason = 'stop' }); usage = [ordered]@{ prompt_tokens = 500; completion_tokens = 24; total_tokens = 524 } } | ConvertTo-Json -Depth 8 -Compress
+    $tradeResponseBytes = [System.Text.Encoding]::UTF8.GetBytes($tradeResponseJson)
+    $tradeContext.Response.StatusCode = 200
+    $tradeContext.Response.ContentType = 'application/json; charset=utf-8'
+    $tradeContext.Response.ContentLength64 = $tradeResponseBytes.Length
+    $tradeContext.Response.OutputStream.Write($tradeResponseBytes, 0, $tradeResponseBytes.Length)
+    $tradeContext.Response.OutputStream.Close()
+    if (-not $process.WaitForExit(($TimeoutSeconds + 5) * 1000)) { try { $process.Kill() } catch { }; throw 'Trade-scope provider did not exit after its local HTTP response.' }
+    $tradeStdout = $tradeProvider.StdoutTask.Result.Trim()
+    $tradeStderr = $tradeProvider.StderrTask.Result.Trim()
+    if ($process.ExitCode -ne 0) { throw "Scoped Native trade request exceeded or failed the provider budget: $tradeStderr" }
+    $tradeDecision = $tradeStdout | ConvertFrom-Json
+    $tradeObservationCompactionVerified = ($tradeDecision.action -ceq 'provision' -and [string]$tradeDecision.arguments.ItemViewModelId -ceq 'olives' -and [int]$tradeDecision.arguments.Amount -eq 1 -and [string]$tradeDecision.providerUsage.responseId -ceq 'chatcmpl-harness-trade-scope' -and $tradeBodyWithinBudget -and $tradeObservationScoped -and $tradeRequiredContextPreserved -and $tradeStdout -notmatch [regex]::Escape($harnessSecret) -and $tradeStderr -notmatch [regex]::Escape($harnessSecret))
+
+    $failureStep = 'normalize-ollama-native-provider-usage'
+    $env:CHRONICLE_LLM_PROTOCOL = 'ollama-native'
+    $env:CHRONICLE_LLM_BASE_URL = "http://127.0.0.1:$port"
+    $env:CHRONICLE_LLM_MODEL = 'harness-ollama-native-model'
+    $env:CHRONICLE_LLM_API_KEY = ''
+    $nativeProvider = Start-ProviderProcess $requestJson
+    $process = $nativeProvider.Process
+    $nativeAcceptTask = $listener.GetContextAsync()
+    if (-not $nativeAcceptTask.Wait(5000)) { throw 'Local HTTP stub did not receive the Ollama-native provider request.' }
+    $nativeContext = $nativeAcceptTask.GetAwaiter().GetResult()
+    $nativeReader = New-Object System.IO.StreamReader($nativeContext.Request.InputStream, $nativeContext.Request.ContentEncoding)
+    $nativeRequestBody = $nativeReader.ReadToEnd()
+    $nativeReader.Dispose()
+    $nativeApiRequest = $nativeRequestBody | ConvertFrom-Json
+    $nativeRequestShapeCorrect = ($nativeContext.Request.Url.AbsolutePath -ceq '/api/chat' -and $nativeApiRequest.format -ceq 'json' -and -not [bool]$nativeApiRequest.stream -and [int]$nativeApiRequest.options.num_predict -eq 128 -and $nativeApiRequest.messages.Count -eq 2 -and [string]$nativeApiRequest.model -ceq 'harness-ollama-native-model' -and [string]::IsNullOrWhiteSpace([string]$nativeContext.Request.Headers['Authorization']))
+    $nativeDecisionJson = [ordered]@{ action = 'mapSettlementTargets'; arguments = @{}; rationale = 'Return the currently observed settlement targets.' } | ConvertTo-Json -Compress
+    $nativeResponseJson = [ordered]@{ model = 'harness-ollama-native-model'; message = [ordered]@{ role = 'assistant'; content = $nativeDecisionJson }; done = $true; done_reason = 'stop'; prompt_eval_count = 77; eval_count = 14 } | ConvertTo-Json -Depth 8 -Compress
+    $nativeResponseBytes = [System.Text.Encoding]::UTF8.GetBytes($nativeResponseJson)
+    $nativeContext.Response.StatusCode = 200
+    $nativeContext.Response.ContentType = 'application/json; charset=utf-8'
+    $nativeContext.Response.ContentLength64 = $nativeResponseBytes.Length
+    $nativeContext.Response.OutputStream.Write($nativeResponseBytes, 0, $nativeResponseBytes.Length)
+    $nativeContext.Response.OutputStream.Close()
+    if (-not $process.WaitForExit(($TimeoutSeconds + 5) * 1000)) { try { $process.Kill() } catch { }; throw 'Ollama-native provider did not exit after its local HTTP response.' }
+    $nativeStdout = $nativeProvider.StdoutTask.Result.Trim()
+    $nativeStderr = $nativeProvider.StderrTask.Result.Trim()
+    if ($process.ExitCode -ne 0) { throw "Ollama-native provider failed to normalize its local response: $nativeStderr" }
+    $nativeDecision = $nativeStdout | ConvertFrom-Json
+    $ollamaNativeUsageReceiptChecks = [ordered]@{
+        DecisionAction = ($nativeDecision.action -ceq 'mapSettlementTargets')
+        Protocol = ($nativeDecision.providerUsage.protocol -ceq 'ollama-native')
+        UsageReported = ($nativeDecision.providerUsage.status -ceq 'reported')
+        UsageConsistent = [bool]$nativeDecision.providerUsage.totalTokensConsistent
+        TokenCounts = ([int]$nativeDecision.providerUsage.promptTokens -eq 77 -and [int]$nativeDecision.providerUsage.completionTokens -eq 14 -and [int]$nativeDecision.providerUsage.totalTokens -eq 91)
+        FinishReason = ([string]$nativeDecision.providerUsage.finishReason -ceq 'stop')
+        CacheMissOmitted = ($null -eq $nativeDecision.providerUsage.promptCacheMissTokens)
+        RequestShape = $nativeRequestShapeCorrect
+        NoCredentialLeak = ($nativeStdout -notmatch [regex]::Escape($harnessSecret) -and $nativeStderr -notmatch [regex]::Escape($harnessSecret))
+    }
+    $ollamaNativeUsageReceiptCorrect = -not [bool]@($ollamaNativeUsageReceiptChecks.Values | Where-Object { -not $_ }).Count
+    $env:CHRONICLE_LLM_PROTOCOL = 'openai-compatible'
+    $env:CHRONICLE_LLM_BASE_URL = "http://127.0.0.1:$port/v1"
+    $env:CHRONICLE_LLM_MODEL = 'harness-contract-model'
+    $env:CHRONICLE_LLM_API_KEY = $harnessSecret
 
     $failureStep = 'enforce-provider-request-body-budget-before-http'
     $oversizeRequest = $request | ConvertTo-Json -Depth 12 | ConvertFrom-Json
@@ -564,6 +682,13 @@ try {
         AuthorizationHeaderSent = $authorizationSent
         LocalCompatibleMaxTokensWithoutAuthorization = $localCompatibilityPassed
         ProviderBudgetMathAndUnknownPriceFailClosed = $providerBudgetMathVerified
+        OllamaNativeRequestShapeCorrect = $nativeRequestShapeCorrect
+        OllamaNativeUsageStatus = [string]$nativeDecision.providerUsage.status
+        OllamaNativeTokenCounts = [ordered]@{ prompt = $nativeDecision.providerUsage.promptTokens; completion = $nativeDecision.providerUsage.completionTokens; total = $nativeDecision.providerUsage.totalTokens; consistent = $nativeDecision.providerUsage.totalTokensConsistent; finishReason = $nativeDecision.providerUsage.finishReason; protocol = $nativeDecision.providerUsage.protocol }
+        OllamaNativeProtocolNormalizesUsage = $ollamaNativeUsageReceiptCorrect
+        OllamaNativeProtocolChecks = $ollamaNativeUsageReceiptChecks
+        OllamaNativeDecisionAction = [string]$nativeDecision.action
+        TradeObservationCompactionWithinBudget = $tradeObservationCompactionVerified
         BudgetFingerprintSurvivesRoundtripAndDetectsChanges = ($budgetFingerprintStableAcrossRoundtrip -and $changedBudgetProfileDetected)
         DurableBudgetLedgerPersistsPendingSpend = $budgetLedgerPersistsCumulativeStateAndFailsClosed
         DeepSeekWorstCasePerRunCny = $deepSeekRunUpperCny
@@ -594,7 +719,7 @@ try {
         TimeoutFailsClosedWithoutCredentialLeak = $timeoutFailedClosed
         PreResponseConnectionFailureRetriesOnceAndClassifies = $connectionFailureClassified
         PaidProviderBudgetDisablesRetry = $paidProviderRetryDisabled
-        Passed = ($requestGoalForwarded -and $recentDecisionHistoryForwarded -and $nativeArgumentPromptBindingsPresent -and $unicodeObservationForwarded -and $actionCatalogForwarded -and $authorizationSent -and $localCompatibilityPassed -and $providerBudgetMathVerified -and $budgetLedgerPersistsCumulativeStateAndFailsClosed -and $endpointPathCorrect -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $usageReceiptAccurate -and $requestBodyBudgetRejectedBeforeHttp -and $observeAgainValidated -and $missingUsageNotZero -and $positionalArgumentsNormalized -and $stringEncodedArgumentsNormalized -and $singleStringArrayArgumentsNormalized -and $nestedStringArrayArgumentsNormalized -and $singleScalarArgumentsNormalized -and $invalidActionFailedClosed -and $unsupportedActionArgumentRecoverable -and $httpErrorFailedClosed -and $timeoutFailedClosed -and $connectionFailureClassified -and $paidProviderRetryDisabled)
+        Passed = ($requestGoalForwarded -and $recentDecisionHistoryForwarded -and $nativeArgumentPromptBindingsPresent -and $unicodeObservationForwarded -and $actionCatalogForwarded -and $authorizationSent -and $localCompatibilityPassed -and $providerBudgetMathVerified -and $ollamaNativeUsageReceiptCorrect -and $tradeObservationCompactionVerified -and $budgetLedgerPersistsCumulativeStateAndFailsClosed -and $endpointPathCorrect -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $usageReceiptAccurate -and $requestBodyBudgetRejectedBeforeHttp -and $observeAgainValidated -and $missingUsageNotZero -and $positionalArgumentsNormalized -and $stringEncodedArgumentsNormalized -and $singleStringArrayArgumentsNormalized -and $nestedStringArrayArgumentsNormalized -and $singleScalarArgumentsNormalized -and $invalidActionFailedClosed -and $unsupportedActionArgumentRecoverable -and $httpErrorFailedClosed -and $timeoutFailedClosed -and $connectionFailureClassified -and $paidProviderRetryDisabled)
     }
     $result | ConvertTo-Json -Depth 8
     if (-not $result.Passed) { exit 1 }
@@ -621,4 +746,5 @@ finally {
     if ($null -eq $priorReasoningEffort) { Remove-Item Env:CHRONICLE_LLM_REASONING_EFFORT -ErrorAction SilentlyContinue } else { $env:CHRONICLE_LLM_REASONING_EFFORT = $priorReasoningEffort }
     if ($null -eq $priorThinkingMode) { Remove-Item Env:CHRONICLE_LLM_THINKING_MODE -ErrorAction SilentlyContinue } else { $env:CHRONICLE_LLM_THINKING_MODE = $priorThinkingMode }
     if ($null -eq $priorTemperature) { Remove-Item Env:CHRONICLE_LLM_TEMPERATURE -ErrorAction SilentlyContinue } else { $env:CHRONICLE_LLM_TEMPERATURE = $priorTemperature }
+    if ($null -eq $priorProtocol) { Remove-Item Env:CHRONICLE_LLM_PROTOCOL -ErrorAction SilentlyContinue } else { $env:CHRONICLE_LLM_PROTOCOL = $priorProtocol }
 }

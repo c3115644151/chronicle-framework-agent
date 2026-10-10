@@ -74,6 +74,13 @@ function Invoke-AgentCli {
     catch { throw "Agent CLI '$Action' returned invalid JSON: $output" }
 }
 
+function Get-SafeProviderErrorSummary([string]$ProviderStderr, [int]$ExitCode) {
+    if ($ProviderStderr -match 'Model provider HTTP request failed with status (\d{3})') { return "Provider HTTP status $($Matches[1]); response body omitted." }
+    if ($ProviderStderr -match 'Model provider request timed out after (\d+) seconds') { return "Provider timed out after $($Matches[1]) seconds; request delivery is unknown." }
+    if ($ProviderStderr -match 'Model provider request failed with WebException \(status=([A-Za-z]+); host=([A-Za-z0-9.:-]+); attempt=([0-9/]+);') { return "Provider connection failure status=$($Matches[1]), host=$($Matches[2]), attempt=$($Matches[3])." }
+    return "Provider process exited with code $ExitCode; stderr details omitted."
+}
+
 function Invoke-DecisionProvider {
     param([string]$RequestJson)
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
@@ -102,7 +109,7 @@ function Invoke-DecisionProvider {
     $stderr = $stderrTask.Result.Trim()
     if ($process.ExitCode -ne 0) {
         if ($script:AgentProviderBudget) {
-            return [ordered]@{ providerFailed = $true; failureKind = 'provider-process-failed'; providerExitCode = [int]$process.ExitCode; providerUsage = [ordered]@{ status = 'unavailable'; requestAttempts = $null; requestAttemptsStatus = 'unknown'; requestBodyBytes = $null; httpRequestSent = 'unknown'; usageReason = 'Provider exited without usage metadata; worst-case request reservation remains charged.' } }
+            return [ordered]@{ providerFailed = $true; failureKind = 'provider-process-failed'; providerExitCode = [int]$process.ExitCode; providerErrorSummary = Get-SafeProviderErrorSummary -ProviderStderr $stderr -ExitCode ([int]$process.ExitCode); providerUsage = [ordered]@{ status = 'unavailable'; requestAttempts = $null; requestAttemptsStatus = 'unknown'; requestBodyBytes = $null; httpRequestSent = 'unknown'; usageReason = 'Provider exited without usage metadata; worst-case request reservation remains charged.' } }
         }
         throw "Decision provider exited $($process.ExitCode): $stderr"
     }

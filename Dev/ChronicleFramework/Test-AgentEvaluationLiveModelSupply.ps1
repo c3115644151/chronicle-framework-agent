@@ -63,6 +63,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         Passed = $runPassed
         Failure = $failure
         Model = if ($trace) { [string]$trace.ModelId } else { $modelName }
+        ProviderProtocol = if ($trace) { [string]$trace.ProviderProtocol } else { $null }
         ModelMaxOutputTokens = if ($trace) { [int]$trace.ModelMaxOutputTokens } else { $null }
         ModelThinkingMode = if ($trace) { [string]$trace.ModelThinkingMode } else { $null }
         ModelReasoningEffort = if ($trace) { [string]$trace.ModelReasoningEffort } else { $null }

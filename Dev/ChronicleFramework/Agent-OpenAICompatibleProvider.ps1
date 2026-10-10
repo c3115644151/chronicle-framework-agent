@@ -11,10 +11,18 @@ function Write-ProviderError([string]$Message) {
 
 function Get-OptionalNonNegativeInt($Source, [string]$Name) {
     if (-not $Source) { return $null }
-    $property = @($Source.PSObject.Properties | Where-Object { $_.Name -ceq $Name } | Select-Object -First 1)
-    if ($property.Count -ne 1) { return $null }
+    $value = $null
+    if ($Source -is [System.Collections.IDictionary]) {
+        if (-not $Source.Contains($Name)) { return $null }
+        $value = $Source[$Name]
+    }
+    else {
+        $property = @($Source.PSObject.Properties | Where-Object { $_.Name -ceq $Name } | Select-Object -First 1)
+        if ($property.Count -ne 1) { return $null }
+        $value = $property[0].Value
+    }
     $parsed = 0
-    if (-not [int]::TryParse([string]$property[0].Value, [ref]$parsed) -or $parsed -lt 0) { return $null }
+    if (-not [int]::TryParse([string]$value, [ref]$parsed) -or $parsed -lt 0) { return $null }
     return $parsed
 }
 
@@ -33,11 +41,15 @@ try {
     $apiKey = [string]$env:CHRONICLE_LLM_API_KEY
     if ([string]::IsNullOrWhiteSpace($endpoint)) { throw 'CHRONICLE_LLM_BASE_URL is required.' }
     if ([string]::IsNullOrWhiteSpace($model)) { throw 'CHRONICLE_LLM_MODEL is required.' }
+    $protocol = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_PROTOCOL)) { 'openai-compatible' } else { [string]$env:CHRONICLE_LLM_PROTOCOL }
+    if ($protocol -notin @('openai-compatible','ollama-native')) { throw 'CHRONICLE_LLM_PROTOCOL must be openai-compatible or ollama-native.' }
     $endpointUri = [Uri]::new($endpoint)
     if (-not $endpointUri.IsAbsoluteUri -or $endpointUri.Scheme -notin @('https','http')) { throw 'CHRONICLE_LLM_BASE_URL must be an absolute HTTP(S) endpoint.' }
     if ($endpointUri.Scheme -eq 'http' -and -not $endpointUri.IsLoopback) { throw 'Plain HTTP is permitted only for a loopback test provider.' }
+    if ($protocol -eq 'ollama-native' -and -not $endpointUri.IsLoopback) { throw 'ollama-native protocol is restricted to a loopback Ollama service.' }
     $endpointBuilder = [UriBuilder]::new($endpointUri)
-    $endpointBuilder.Path = $endpointBuilder.Path.TrimEnd('/') + '/chat/completions'
+    if ($protocol -eq 'ollama-native') { $endpointBuilder.Path = '/api/chat' }
+    else { $endpointBuilder.Path = $endpointBuilder.Path.TrimEnd('/') + '/chat/completions' }
     $requestUri = $endpointBuilder.Uri
 
     $timeoutSeconds = 60
@@ -65,7 +77,7 @@ try {
         { throw 'CHRONICLE_LLM_TEMPERATURE must be a number between 0 and 2.' }
 
     $systemPrompt = @'
-You are the decision maker for a Bannerlord Campaign Agent. Use only the task goal, current observation, previous Native receipt, bounded recentDecisionHistory, checkpoint context, decision feedback, and current action/control catalogs. Recent history contains only your previous selected actions and execution outcomes, not game-state truth; the current Native observation and previous receipt remain authoritative. Use history to track completed goal steps and avoid repeating a non-idempotent action when its effect is already present. Select at most one listed action with only listed arguments. The action catalog is recalculated from the latest Native game state; a missing action is not currently available and must not be guessed or requested. Controls are separate from game actions and are also recalculated from the current state; use only controls in `allowedControls`, and do not request an omitted control. If decisionFeedback says an action or control was unavailable or rejected, treat it as authoritative, use the fresh observation and current catalogs, and choose a different legal next step or stop safely; do not repeat the rejected action/control without new evidence. If a Native completion contract is present, its predicates are checked by the execution layer, not by you. A `goal-not-satisfied` or `goal-verification-unknown` feedback means your `done` proposal was not accepted; use its exact Native condition IDs/values, the fresh observation, and current catalogs to continue safely. Never claim completion while the contract is unmet or unknown. Use only observed IDs/values; never invent game state. Never echo input data. Keep rationale/reason short (at most 20 words); do not output analysis. Ordered goal steps are hard preconditions. A mapSettlementTargetsSummary or recruitOptionsSummary is a bounded receipt subset; choose only included IDs/offers. `campaign-map-travel` and `campaign-settlement-recruitment` are deliberately scoped observations; omitted state is unknown, not evidence. If checkpointContext has a pending Native action, compare it with the fresh observation and do not blindly repeat a non-idempotent action. If checkpointContext.lastRecovery.status is `verified`, its action effect is confirmed by fresh Native state; do not repeat that action, and return done when the one-action goal is thereby met. Action arguments must use only the listed names; for an action with an empty argument list, omit `arguments` or return `{}`. If the provider reports `invalid-action-arguments`, do not repeat the rejected argument names; rebuild the arguments from the current catalog and retry only if a safe, complete action is possible. A positional array is accepted only when its length exactly matches the listed argument-name sequence; the executor still revalidates every value. Return done only when the goal is met or no safe legal action is supported. Return exactly one JSON object and no Markdown.
+You are the decision maker for a Bannerlord Campaign Agent. Use only the task goal, current observation, previous Native receipt, bounded recentDecisionHistory, checkpoint context, decision feedback, and current action/control catalogs. Recent history contains only your previous selected actions and execution outcomes, not game-state truth; the current Native observation and previous receipt remain authoritative. Use history to track completed goal steps and avoid repeating a non-idempotent action when its effect is already present. Select at most one listed action with only listed arguments. The action catalog is recalculated from the latest Native game state; a missing action is not currently available and must not be guessed or requested. Controls are separate from game actions and are also recalculated from the current state; use only controls in `allowedControls`, and do not request an omitted control. If decisionFeedback says an action or control was unavailable or rejected, treat it as authoritative, use the fresh observation and current catalogs, and choose a different legal next step or stop safely; do not repeat the rejected action/control without new evidence. If a Native completion contract is present, its predicates are checked by the execution layer, not by you. A `goal-not-satisfied` or `goal-verification-unknown` feedback means your `done` proposal was not accepted; use its exact Native condition IDs/values, the fresh observation, and current catalogs to continue safely. Never claim completion while the contract is unmet or unknown. Use only observed IDs/values; never invent game state. Never echo input data. Keep rationale/reason short (at most 20 words); do not output analysis. Ordered goal steps are hard preconditions. A mapSettlementTargetsSummary or recruitOptionsSummary is a bounded receipt subset; choose only included IDs/offers. `campaign-map-travel`, `campaign-settlement-recruitment`, and `trade-transaction` are deliberately scoped observations; any field listed in `omittedStateFields` is unknown, not evidence that the value or event is absent. If checkpointContext has a pending Native action, compare it with the fresh observation and do not blindly repeat a non-idempotent action. If checkpointContext.lastRecovery.status is `verified`, its action effect is confirmed by fresh Native state; do not repeat that action, and return done when the one-action goal is thereby met. Action arguments must use only the listed names; for an action with an empty argument list, omit `arguments` or return `{}`. If the provider reports `invalid-action-arguments`, do not repeat the rejected argument names; rebuild the arguments from the current catalog and retry only if a safe, complete action is possible. A positional array is accepted only when its length exactly matches the listed argument-name sequence; the executor still revalidates every value. Return done only when the goal is met or no safe legal action is supported. Return exactly one JSON object and no Markdown.
 
 For `menuSelect`, set `arguments.OptionId` to the exact `id` value of one currently enabled entry in `observation.state.availableMenuOptions`. Do not use the field name `OptionId`, the displayed text, or an option that is absent/disabled. For `provision`, set `arguments.ItemViewModelId` to the exact `viewModelItemId` from the latest successful `foodOptions` receipt and set `arguments.Amount` to an integer amount permitted by that offer; never copy a field name as an ID. `provision` only drafts a TradeVM transaction; while still in Trade InventoryState, use the currently listed `tradeConfirm` to commit it or `tradeCancelChanges` to cancel. Do not wait/observeAgain until a committed receipt and a Native context that permits waiting are observed.
 
@@ -150,16 +162,23 @@ When `nativeMoveArrival.status` is `arrived`, the current Native observation con
             decisionFeedback = $request.decisionFeedback
         }
     }
-    $userContent = $modelRequest | ConvertTo-Json -Depth 24 -Compress
-    $payload = [ordered]@{
-        model = $model
-        messages = @(
-            [ordered]@{ role = 'system'; content = $systemPrompt }
-            [ordered]@{ role = 'user'; content = [string]$userContent }
-        )
-        response_format = [ordered]@{ type = 'json_object' }
-        store = $false
+    $state = $request.observation.state
+    $tradeOfferCount = @($previousReceipt.data.offers).Count
+    if ([string]$state.context.gameState -ceq 'InventoryState' -and [string]$state.inventoryScreen.mode -ceq 'Trade' -and [string]$previousReceipt.action -ceq 'foodOptions' -and [string]$previousReceipt.status -ceq 'completed' -and $tradeOfferCount -gt 0) {
+        $retainedStateFields = @('schemaVersion','campaignDay','identity','economy','party','location','context','partyScreen','inventoryScreen','availableMenuOptions')
+        $scopedState = [ordered]@{}
+        foreach ($field in $retainedStateFields) {
+            $property = @($state.PSObject.Properties | Where-Object { $_.Name -ceq $field } | Select-Object -First 1)
+            if ($property.Count -eq 1) { $scopedState[$field] = $property[0].Value }
+        }
+        $omittedStateFields = @($state.PSObject.Properties | Where-Object { $_.Name -cnotin $retainedStateFields } | ForEach-Object { [string]$_.Name } | Sort-Object -Unique)
+        $modelRequest.observation = [ordered]@{
+            scope = 'trade-transaction'
+            omittedStateFields = $omittedStateFields
+            state = $scopedState
+        }
     }
+    $userContent = $modelRequest | ConvertTo-Json -Depth 24 -Compress
     $effectiveMaxTokens = $maxTokens
     $requestBudget = $request.providerBudget
     if ($requestBudget) {
@@ -171,10 +190,23 @@ When `nativeMoveArrival.status` is `arrived`, the current Native observation con
         }
         $effectiveMaxTokens = [Math]::Min($maxTokens, $budgetOutputLimit)
     }
-    $payload[$maxTokenParameter] = $effectiveMaxTokens
-    if (-not [string]::IsNullOrWhiteSpace($thinkingMode)) { $payload.thinking = [ordered]@{ type = $thinkingMode } }
-    if (-not [string]::IsNullOrWhiteSpace($reasoningEffort) -and $thinkingMode -cne 'disabled') { $payload.reasoning_effort = $reasoningEffort }
-    if ($hasTemperature) { $payload.temperature = $temperature }
+    $messages = @(
+        [ordered]@{ role = 'system'; content = $systemPrompt }
+        [ordered]@{ role = 'user'; content = [string]$userContent }
+    )
+    if ($protocol -eq 'ollama-native') {
+        $ollamaOptions = [ordered]@{ num_predict = $effectiveMaxTokens }
+        if ($hasTemperature) { $ollamaOptions.temperature = $temperature }
+        $payload = [ordered]@{ model = $model; messages = $messages; stream = $false; format = 'json'; options = $ollamaOptions }
+        if (-not [string]::IsNullOrWhiteSpace($thinkingMode)) { $payload.think = ($thinkingMode -ceq 'enabled') }
+    }
+    else {
+        $payload = [ordered]@{ model = $model; messages = $messages; response_format = [ordered]@{ type = 'json_object' }; store = $false }
+        $payload[$maxTokenParameter] = $effectiveMaxTokens
+        if (-not [string]::IsNullOrWhiteSpace($thinkingMode)) { $payload.thinking = [ordered]@{ type = $thinkingMode } }
+        if (-not [string]::IsNullOrWhiteSpace($reasoningEffort) -and $thinkingMode -cne 'disabled') { $payload.reasoning_effort = $reasoningEffort }
+        if ($hasTemperature) { $payload.temperature = $temperature }
+    }
     $body = $payload | ConvertTo-Json -Depth 28 -Compress
     $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($body)
     if ($requestBudget -and $bodyBytes.Length -gt $budgetBodyLimit) {
@@ -247,6 +279,19 @@ When `nativeMoveArrival.status` is `arrived`, the current Native observation con
         }
     }
 
+    if ($protocol -eq 'ollama-native') {
+        $ollamaResponse = $response
+        $ollamaPromptTokens = Get-OptionalNonNegativeInt $ollamaResponse 'prompt_eval_count'
+        $ollamaCompletionTokens = Get-OptionalNonNegativeInt $ollamaResponse 'eval_count'
+        $ollamaTotalTokens = if ($null -ne $ollamaPromptTokens -and $null -ne $ollamaCompletionTokens) { [int]$ollamaPromptTokens + [int]$ollamaCompletionTokens } else { $null }
+        $ollamaFinishReason = if ([string]$ollamaResponse.done_reason -in @('length','max_tokens') -or $ollamaResponse.done -eq $false) { 'length' } else { 'stop' }
+        $response = [ordered]@{
+            id = $null
+            model = [string]$ollamaResponse.model
+            choices = @([ordered]@{ index = 0; message = [ordered]@{ role = [string]$ollamaResponse.message.role; content = [string]$ollamaResponse.message.content; refusal = $null }; finish_reason = $ollamaFinishReason })
+            usage = [ordered]@{ prompt_tokens = $ollamaPromptTokens; completion_tokens = $ollamaCompletionTokens; total_tokens = $ollamaTotalTokens }
+        }
+    }
     $script:LastProviderUsage = $null
     $choices = @($response.choices)
     $usage = $response.usage
@@ -265,6 +310,7 @@ When `nativeMoveArrival.status` is `arrived`, the current Native observation con
     $providerUsage = [ordered]@{
         status = $usageStatus
         modelId = if (-not [string]::IsNullOrWhiteSpace([string]$response.model)) { [string]$response.model } else { $model }
+        protocol = $protocol
         responseId = [string]$response.id
         finishReason = if ($choices.Count -eq 1) { [string]$choices[0].finish_reason } else { $null }
         requestAttempts = [int]$attempt
