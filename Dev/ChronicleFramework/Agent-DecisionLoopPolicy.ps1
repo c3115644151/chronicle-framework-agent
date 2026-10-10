@@ -309,6 +309,25 @@ function Convert-SupplyReceiptForDecision {
     )
 
     $state = if ($Observation) { $Observation.state } else { $null }
+    $receiptData = $Receipt.data
+    if ([string]$Receipt.action -ceq 'foodOptions' -and $Receipt.data) {
+        $receiptData = [ordered]@{
+            hasPendingChanges = [bool]$Receipt.data.hasPendingChanges
+            offers = @($Receipt.data.offers | ForEach-Object {
+                [ordered]@{
+                    viewModelItemId = $_.viewModelItemId
+                    itemId = $_.itemId
+                    modifierId = $_.modifierId
+                    name = $_.name
+                    stock = $_.stock
+                    nativeItemCost = $_.nativeItemCost
+                    inventoryLogicUnitPrice = $_.inventoryLogicUnitPrice
+                    isFood = $_.isFood
+                    isTransferable = $_.isTransferable
+                }
+            })
+        }
+    }
     return [ordered]@{
         protocolVersion = $Receipt.protocolVersion
         commandId = $Receipt.commandId
@@ -316,7 +335,7 @@ function Convert-SupplyReceiptForDecision {
         status = $Receipt.status
         campaignDay = $Receipt.campaignDay
         timeControlMode = $Receipt.timeControlMode
-        data = $Receipt.data
+        data = $receiptData
         error = $Receipt.error
         state = $null
         stateSummary = if ($state) {

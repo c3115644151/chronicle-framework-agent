@@ -87,6 +87,15 @@ For an action, return: {"action":"listed action name","arguments":{},"rationale"
 To stop, return: {"done":true,"reason":"brief evidence-based reason"}
 When `nativeMoveArrival.status` is `arrived`, the current Native observation confirms the previous move's target; return done immediately and issue no more game actions. While the previous native move is visibly still in progress and its target has not been reached, you may request bounded re-observation without a game action. Preferred: {"observeAgain":true,"waitSeconds":5,"reason":"brief evidence-based reason"}. Also accepted: {"action":"observeAgain","arguments":{"waitSeconds":5},"rationale":"brief evidence-based reason"}. Use 1-10 seconds only; this is scheduler polling, not a game-time command. Do not request it outside an active visible move. The execution layer revalidates this control independently of the game-action catalog.
 '@
+if ([string]$request.observation.modelView -ceq 'campaign-multiday-supply') {
+    $systemPrompt = @'
+You decide one action at a time for the scoped Bannerlord multi-day supply task. Use the goal, latest Native observation, latest Native receipt, bounded recent action history, checkpoint context, decision feedback, and current action/control catalogs. The observation is intentionally limited to supply-relevant fields; anything omitted is unknown. Only currently listed actions, controls, exact observed IDs, and argument names are valid. The execution layer validates actions and the Native completion contract. If completion is rejected as unmet or unknown, follow the exact missing conditions and fresh observation. Never invent facts or claim completion before Native verification. Return one JSON object only, with no analysis or Markdown; rationale/reason must be 20 words or fewer.
+
+For `menuSelect`, use an exact currently enabled menu option ID. In Trade InventoryState, use a successful current `foodOptions` receipt. `provision` must use an exact listed `viewModelItemId` and permitted integer amount; it only drafts the transaction. Then use currently listed `tradeConfirm` to commit or `tradeCancelChanges` to discard. A draft is not a completed purchase; trust the post-action Native receipt. From the Town menu, `town_wait` enters the wait screen but does not schedule a duration; use the listed `rest` action only while Native shows active waiting. An accepted rest request is still running, not complete. Use only a listed `observeAgain` control and wait for a fresh Native observation before stopping. Do not hide clock control inside movement, trade, or other actions.
+
+Return one action as `{"action":"listed action","arguments":{},"rationale":"brief evidence-based reason"}`. Return a stop only as `{"done":true,"reason":"brief evidence-based reason"}`.
+'@
+}
     $modelRequest = $request
     $previousReceipt = $request.previousActionReceipt
     if ($previousReceipt) {
@@ -163,8 +172,9 @@ When `nativeMoveArrival.status` is `arrived`, the current Native observation con
         }
     }
     $state = $request.observation.state
+    $observationScope = if ([string]::IsNullOrWhiteSpace([string]$request.observation.modelView)) { 'full-observation' } else { [string]$request.observation.modelView }
     $tradeOfferCount = @($previousReceipt.data.offers).Count
-    if ([string]$state.context.gameState -ceq 'InventoryState' -and [string]$state.inventoryScreen.mode -ceq 'Trade' -and [string]$previousReceipt.action -ceq 'foodOptions' -and [string]$previousReceipt.status -ceq 'completed' -and $tradeOfferCount -gt 0) {
+    if ($observationScope -cne 'campaign-multiday-supply' -and [string]$state.context.gameState -ceq 'InventoryState' -and [string]$state.inventoryScreen.mode -ceq 'Trade' -and [string]$previousReceipt.action -ceq 'foodOptions' -and [string]$previousReceipt.status -ceq 'completed' -and $tradeOfferCount -gt 0) {
         $retainedStateFields = @('schemaVersion','campaignDay','identity','economy','party','location','context','partyScreen','inventoryScreen','availableMenuOptions')
         $scopedState = [ordered]@{}
         foreach ($field in $retainedStateFields) {
@@ -177,6 +187,7 @@ When `nativeMoveArrival.status` is `arrived`, the current Native observation con
             omittedStateFields = $omittedStateFields
             state = $scopedState
         }
+        $observationScope = 'trade-transaction'
     }
     $userContent = $modelRequest | ConvertTo-Json -Depth 24 -Compress
     $effectiveMaxTokens = $maxTokens
@@ -311,6 +322,7 @@ When `nativeMoveArrival.status` is `arrived`, the current Native observation con
         status = $usageStatus
         modelId = if (-not [string]::IsNullOrWhiteSpace([string]$response.model)) { [string]$response.model } else { $model }
         protocol = $protocol
+        observationScope = $observationScope
         responseId = [string]$response.id
         finishReason = if ($choices.Count -eq 1) { [string]$choices[0].finish_reason } else { $null }
         requestAttempts = [int]$attempt

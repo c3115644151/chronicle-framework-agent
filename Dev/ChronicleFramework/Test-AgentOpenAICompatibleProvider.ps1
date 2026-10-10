@@ -4,7 +4,9 @@ param([int]$TimeoutSeconds = 20)
 $ErrorActionPreference = 'Stop'
 $providerPath = Join-Path $PSScriptRoot 'Agent-OpenAICompatibleProvider.ps1'
 $budgetPolicyPath = Join-Path $PSScriptRoot 'Agent-ProviderBudget.ps1'
+$decisionLoopPolicyPath = Join-Path $PSScriptRoot 'Agent-DecisionLoopPolicy.ps1'
 . $budgetPolicyPath
+. $decisionLoopPolicyPath
 $priorBaseUrl = $env:CHRONICLE_LLM_BASE_URL
 $priorModel = $env:CHRONICLE_LLM_MODEL
 $priorApiKey = $env:CHRONICLE_LLM_API_KEY
@@ -200,7 +202,51 @@ try {
     $tradeStderr = $tradeProvider.StderrTask.Result.Trim()
     if ($process.ExitCode -ne 0) { throw "Scoped Native trade request exceeded or failed the provider budget: $tradeStderr" }
     $tradeDecision = $tradeStdout | ConvertFrom-Json
-    $tradeObservationCompactionVerified = ($tradeDecision.action -ceq 'provision' -and [string]$tradeDecision.arguments.ItemViewModelId -ceq 'olives' -and [int]$tradeDecision.arguments.Amount -eq 1 -and [string]$tradeDecision.providerUsage.responseId -ceq 'chatcmpl-harness-trade-scope' -and $tradeBodyWithinBudget -and $tradeObservationScoped -and $tradeRequiredContextPreserved -and $tradeStdout -notmatch [regex]::Escape($harnessSecret) -and $tradeStderr -notmatch [regex]::Escape($harnessSecret))
+    $tradeObservationCompactionVerified = ($tradeDecision.action -ceq 'provision' -and [string]$tradeDecision.arguments.ItemViewModelId -ceq 'olives' -and [int]$tradeDecision.arguments.Amount -eq 1 -and [string]$tradeDecision.providerUsage.responseId -ceq 'chatcmpl-harness-trade-scope' -and [string]$tradeDecision.providerUsage.observationScope -ceq 'trade-transaction' -and $tradeBodyWithinBudget -and $tradeObservationScoped -and $tradeRequiredContextPreserved -and $tradeStdout -notmatch [regex]::Escape($harnessSecret) -and $tradeStderr -notmatch [regex]::Escape($harnessSecret))
+
+    $failureStep = 'fit-native-supply-view-and-nine-food-quotes-within-provider-budget'
+    $supplyRequest = $tradeRequest | ConvertTo-Json -Depth 16 | ConvertFrom-Json
+    $supplyRequest.runId = 'provider-multiday-supply-scope-test'
+    $supplyRequest.observation | Add-Member -NotePropertyName modelView -NotePropertyValue 'campaign-multiday-supply' -Force
+    $supplyRequest.previousActionReceipt.data.offers = @(
+        [ordered]@{ viewModelItemId = 'olives'; itemId = 'olives'; modifierId = ''; name = 'Olives'; stock = 166; nativeItemCost = 9; inventoryLogicUnitPrice = 9; unitWeight = 10; isFood = $true; isTransferable = $true; inventorySide = 'OtherInventory'; nativeTooltipType = 'Goods' }
+        [ordered]@{ viewModelItemId = 'grain'; itemId = 'grain'; modifierId = ''; name = 'Grain'; stock = 155; nativeItemCost = 17; inventoryLogicUnitPrice = 17; unitWeight = 10; isFood = $true; isTransferable = $true; inventorySide = 'OtherInventory'; nativeTooltipType = 'Goods' }
+        [ordered]@{ viewModelItemId = 'fish'; itemId = 'fish'; modifierId = ''; name = 'Fish'; stock = 38; nativeItemCost = 25; inventoryLogicUnitPrice = 25; unitWeight = 10; isFood = $true; isTransferable = $true; inventorySide = 'OtherInventory'; nativeTooltipType = 'Goods' }
+        [ordered]@{ viewModelItemId = 'meat'; itemId = 'meat'; modifierId = ''; name = 'Meat'; stock = 64; nativeItemCost = 31; inventoryLogicUnitPrice = 31; unitWeight = 10; isFood = $true; isTransferable = $true; inventorySide = 'OtherInventory'; nativeTooltipType = 'Goods' }
+        [ordered]@{ viewModelItemId = 'grape'; itemId = 'grape'; modifierId = ''; name = 'Grape'; stock = 31; nativeItemCost = 35; inventoryLogicUnitPrice = 35; unitWeight = 10; isFood = $true; isTransferable = $true; inventorySide = 'OtherInventory'; nativeTooltipType = 'Goods' }
+        [ordered]@{ viewModelItemId = 'butter'; itemId = 'butter'; modifierId = ''; name = 'Butter'; stock = 6; nativeItemCost = 61; inventoryLogicUnitPrice = 61; unitWeight = 10; isFood = $true; isTransferable = $true; inventorySide = 'OtherInventory'; nativeTooltipType = 'Goods' }
+        [ordered]@{ viewModelItemId = 'beer'; itemId = 'beer'; modifierId = ''; name = 'Beer'; stock = 8; nativeItemCost = 137; inventoryLogicUnitPrice = 137; unitWeight = 10; isFood = $true; isTransferable = $true; inventorySide = 'OtherInventory'; nativeTooltipType = 'Goods' }
+        [ordered]@{ viewModelItemId = 'date_fruit'; itemId = 'date_fruit'; modifierId = ''; name = 'Date fruit'; stock = 2; nativeItemCost = 142; inventoryLogicUnitPrice = 142; unitWeight = 10; isFood = $true; isTransferable = $true; inventorySide = 'OtherInventory'; nativeTooltipType = 'Goods' }
+        [ordered]@{ viewModelItemId = 'cheese'; itemId = 'cheese'; modifierId = ''; name = 'Cheese'; stock = 1; nativeItemCost = 176; inventoryLogicUnitPrice = 176; unitWeight = 10; isFood = $true; isTransferable = $true; inventorySide = 'OtherInventory'; nativeTooltipType = 'Goods' }
+    )
+    $supplyRequest.observation = Convert-SupplyObservationForDecision -Observation $supplyRequest.observation
+    $supplyRequest.previousActionReceipt = Convert-SupplyReceiptForDecision -Receipt $supplyRequest.previousActionReceipt -Observation $supplyRequest.observation
+    $supplyProvider = Start-ProviderProcess ($supplyRequest | ConvertTo-Json -Depth 20 -Compress)
+    $process = $supplyProvider.Process
+    $supplyAcceptTask = $listener.GetContextAsync()
+    if (-not $supplyAcceptTask.Wait(5000)) { throw 'Local HTTP stub did not receive the scoped supply request.' }
+    $supplyContext = $supplyAcceptTask.GetAwaiter().GetResult()
+    $supplyReader = New-Object System.IO.StreamReader($supplyContext.Request.InputStream, $supplyContext.Request.ContentEncoding)
+    $supplyRequestBody = $supplyReader.ReadToEnd()
+    $supplyReader.Dispose()
+    $supplyApiRequest = $supplyRequestBody | ConvertFrom-Json
+    $supplyModelInput = [string]$supplyApiRequest.messages[1].content | ConvertFrom-Json
+    $supplyBodyWithinBudget = ([int]$supplyRequest.providerBudget.maxRequestBodyBytes -ge [System.Text.Encoding]::UTF8.GetByteCount($supplyRequestBody))
+    $supplyDecisionJson = [ordered]@{ action = 'provision'; arguments = [ordered]@{ ItemViewModelId = 'olives'; Amount = 1 }; rationale = 'Use the observed cheapest food quote.' } | ConvertTo-Json -Compress
+    $supplyResponseJson = [ordered]@{ id = 'chatcmpl-harness-supply-scope'; model = 'harness-contract-model'; choices = @([ordered]@{ index = 0; message = [ordered]@{ role = 'assistant'; content = $supplyDecisionJson }; finish_reason = 'stop' }); usage = [ordered]@{ prompt_tokens = 800; completion_tokens = 25; total_tokens = 825 } } | ConvertTo-Json -Depth 8 -Compress
+    $supplyResponseBytes = [System.Text.Encoding]::UTF8.GetBytes($supplyResponseJson)
+    $supplyContext.Response.StatusCode = 200
+    $supplyContext.Response.ContentType = 'application/json; charset=utf-8'
+    $supplyContext.Response.ContentLength64 = $supplyResponseBytes.Length
+    $supplyContext.Response.OutputStream.Write($supplyResponseBytes, 0, $supplyResponseBytes.Length)
+    $supplyContext.Response.OutputStream.Close()
+    if (-not $process.WaitForExit(($TimeoutSeconds + 5) * 1000)) { try { $process.Kill() } catch { }; throw 'Scoped supply provider did not exit after its local HTTP response.' }
+    $supplyStdout = $supplyProvider.StdoutTask.Result.Trim()
+    $supplyStderr = $supplyProvider.StderrTask.Result.Trim()
+    if ($process.ExitCode -ne 0) { throw "Scoped supply request failed its provider budget: $supplyStderr" }
+    $supplyDecision = $supplyStdout | ConvertFrom-Json
+    $supplyReceiptRetainsActionFacts = (@($supplyModelInput.previousActionReceipt.data.offers).Count -eq 9 -and [string]$supplyModelInput.previousActionReceipt.data.offers[0].viewModelItemId -ceq 'olives' -and [int]$supplyModelInput.previousActionReceipt.data.offers[0].stock -eq 166 -and [int]$supplyModelInput.previousActionReceipt.data.offers[0].inventoryLogicUnitPrice -eq 9 -and $null -eq $supplyModelInput.previousActionReceipt.data.offers[0].unitWeight -and [string]$supplyModelInput.observation.modelView -ceq 'campaign-multiday-supply')
+    $supplyProfileFitsBudget = ($supplyDecision.action -ceq 'provision' -and [string]$supplyDecision.providerUsage.observationScope -ceq 'campaign-multiday-supply' -and [int]$supplyDecision.providerUsage.systemPromptBytes -lt 3000 -and $supplyBodyWithinBudget -and $supplyReceiptRetainsActionFacts -and $supplyStdout -notmatch [regex]::Escape($harnessSecret) -and $supplyStderr -notmatch [regex]::Escape($harnessSecret))
 
     $failureStep = 'normalize-ollama-native-provider-usage'
     $env:CHRONICLE_LLM_PROTOCOL = 'ollama-native'
@@ -689,6 +735,11 @@ try {
         OllamaNativeProtocolChecks = $ollamaNativeUsageReceiptChecks
         OllamaNativeDecisionAction = [string]$nativeDecision.action
         TradeObservationCompactionWithinBudget = $tradeObservationCompactionVerified
+        TradeObservationScope = [string]$tradeDecision.providerUsage.observationScope
+        MultiDaySupplyProfileFitsRequestBudget = $supplyProfileFitsBudget
+        NativeFoodQuoteFieldsRetained = $supplyReceiptRetainsActionFacts
+        MultiDaySupplySystemPromptBytes = [int]$supplyDecision.providerUsage.systemPromptBytes
+        MultiDaySupplyRequestBodyBytes = [int]$supplyDecision.providerUsage.requestBodyBytes
         BudgetFingerprintSurvivesRoundtripAndDetectsChanges = ($budgetFingerprintStableAcrossRoundtrip -and $changedBudgetProfileDetected)
         DurableBudgetLedgerPersistsPendingSpend = $budgetLedgerPersistsCumulativeStateAndFailsClosed
         DeepSeekWorstCasePerRunCny = $deepSeekRunUpperCny
@@ -719,7 +770,7 @@ try {
         TimeoutFailsClosedWithoutCredentialLeak = $timeoutFailedClosed
         PreResponseConnectionFailureRetriesOnceAndClassifies = $connectionFailureClassified
         PaidProviderBudgetDisablesRetry = $paidProviderRetryDisabled
-        Passed = ($requestGoalForwarded -and $recentDecisionHistoryForwarded -and $nativeArgumentPromptBindingsPresent -and $unicodeObservationForwarded -and $actionCatalogForwarded -and $authorizationSent -and $localCompatibilityPassed -and $providerBudgetMathVerified -and $ollamaNativeUsageReceiptCorrect -and $tradeObservationCompactionVerified -and $budgetLedgerPersistsCumulativeStateAndFailsClosed -and $endpointPathCorrect -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $usageReceiptAccurate -and $requestBodyBudgetRejectedBeforeHttp -and $observeAgainValidated -and $missingUsageNotZero -and $positionalArgumentsNormalized -and $stringEncodedArgumentsNormalized -and $singleStringArrayArgumentsNormalized -and $nestedStringArrayArgumentsNormalized -and $singleScalarArgumentsNormalized -and $invalidActionFailedClosed -and $unsupportedActionArgumentRecoverable -and $httpErrorFailedClosed -and $timeoutFailedClosed -and $connectionFailureClassified -and $paidProviderRetryDisabled)
+        Passed = ($requestGoalForwarded -and $recentDecisionHistoryForwarded -and $nativeArgumentPromptBindingsPresent -and $unicodeObservationForwarded -and $actionCatalogForwarded -and $authorizationSent -and $localCompatibilityPassed -and $providerBudgetMathVerified -and $ollamaNativeUsageReceiptCorrect -and $tradeObservationCompactionVerified -and $supplyProfileFitsBudget -and $supplyReceiptRetainsActionFacts -and $budgetLedgerPersistsCumulativeStateAndFailsClosed -and $endpointPathCorrect -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $usageReceiptAccurate -and $requestBodyBudgetRejectedBeforeHttp -and $observeAgainValidated -and $missingUsageNotZero -and $positionalArgumentsNormalized -and $stringEncodedArgumentsNormalized -and $singleStringArrayArgumentsNormalized -and $nestedStringArrayArgumentsNormalized -and $singleScalarArgumentsNormalized -and $invalidActionFailedClosed -and $unsupportedActionArgumentRecoverable -and $httpErrorFailedClosed -and $timeoutFailedClosed -and $connectionFailureClassified -and $paidProviderRetryDisabled)
     }
     $result | ConvertTo-Json -Depth 8
     if (-not $result.Passed) { exit 1 }

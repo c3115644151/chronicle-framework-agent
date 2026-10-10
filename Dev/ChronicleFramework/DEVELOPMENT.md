@@ -89,7 +89,7 @@ Agent决策循环可选接收schema v1的Native完成契约（JSON经Base64参�
 
 真实模型Provider返回的用量只记录计数元数据：请求/响应ID、模型、输入/输出/总token、缓存命中/未命中、重试和HTTP body字节；不保存提示词、回复正文或鉴权头。用量缺失标为`unavailable`，不当成0。预算门限制最多20次请求、每次body≤10,000字节、每次输入保守额度10,128 token、累计输入202,560 token、每次输出≤256 token、累计输出≤5,120 token。付费模式关闭自动重试；loopback本地模式只对尚未得到HTTP响应的连接失败重试一次。
 
-Provider默认使用OpenAI-compatible协议；仅支持Ollama原生`/api/chat`的本地服务可显式设置`CHRONICLE_LLM_PROTOCOL=ollama-native`。适配器把Ollama的`prompt_eval_count/eval_count`转换成相同用量收据，并在loopback token/body预算下运行，不套用远程服务价格。当前TradeVM步骤发现：完整地图观察连同本地食品报价回执会超过10,000字节请求上限。为避免提高限额或丢掉交易所需证据，当Native上下文明确处于Trade InventoryState且上一条成功回执是`foodOptions`时，模型请求改用`trade-transaction`视图，只保留当前身份、金币、队伍、地点、Native上下文、交易界面、菜单和当前报价；地图人物/队伍/任务等字段在该视图中显式列入`omittedStateFields`，模型必须把它们视为未知。该缩减只发生在模型输入序列化，不改变Native观察、回执、执行器验收或游戏状态；不符合精确上下文条件时维持原观察，超限仍失败关闭。
+Provider默认使用OpenAI-compatible协议；仅支持Ollama原生`/api/chat`的本地服务可显式设置`CHRONICLE_LLM_PROTOCOL=ollama-native`。适配器把Ollama的`prompt_eval_count/eval_count`转换成相同用量收据，并在loopback token/body预算下运行，不套用远程服务价格。一次真实供给切片发现，10KB请求上限会挡在“读取食品报价”之后：模型拿到完整食品报价后，通用系统提示加后续请求超限；预算门确实阻止了下一次HTTP请求和Native动作。原始Native观察/回执仍完整保存给执行器和验收层，但模型侧使用`campaign-multiday-supply`专用提示与结构化观察/回执视图。食品报价保留当前物品ViewModel ID、物品/修饰符ID、名称、库存、Native报价、交易逻辑单价及食品/可交易标记，去掉不影响选择与动作参数的提示类型、重量等字段；作用域明确，未传字段视为未知。这样不放宽请求/费用上限，也不裁掉`provision`验证必需数据；其它任务继续使用通用提示和各自视图。
 
 官方DeepSeek `deepseek-flash`（官方文档当前对应V4.1-Flash）使用有日期/来源的峰值安全费率；汇率暂按8 CNY/USD，输入预留按body字节数加128个消息封装token且一律按缓存未命中计，输出按256 token/次预留。当前配置20次请求的预留上界约¥0.535296，单次任务上限¥0.65；三轮评测预留上界约¥1.605888，三轮总限额¥1.95。响应超出单次或累计Token边界时立即停止，不再执行Native动作或发出后续模型请求。此估算依赖当前费率、服务端遵守输出上限及保守输入换算；它不是DeepSeek账户级消费限额。代理/自托管服务没有经核实的价格时只报告token/body，不借用DeepSeek费率。Harness收据不得包含密钥或完整提示词/回复。
 
