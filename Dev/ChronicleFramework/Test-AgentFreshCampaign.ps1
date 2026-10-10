@@ -2,7 +2,8 @@
 param(
     [int]$TimeoutSeconds = 240,
     [switch]$ValidateRecruitmentProgression,
-    [switch]$RealModelRecruitment
+    [switch]$RealModelRecruitment,
+    [switch]$RetainDisposableSave
 )
 
 $ErrorActionPreference = 'Stop'
@@ -30,6 +31,7 @@ $previousSessionExisted = Test-Path -LiteralPath $agentSessionPath
 $previousSessionBytes = if ($previousSessionExisted) { [IO.File]::ReadAllBytes($agentSessionPath) } else { $null }
 if ($ValidateRecruitmentProgression -and (Test-Path -LiteralPath $agentCommandPath)) { throw 'A pending Agent command exists; refusing to overwrite it for FreshCampaign progression.' }
 if ($RealModelRecruitment -and -not $ValidateRecruitmentProgression) { throw 'RealModelRecruitment requires ValidateRecruitmentProgression so the new Campaign is saved as a protected disposable fixture before the model starts.' }
+if ($RetainDisposableSave -and -not $ValidateRecruitmentProgression) { throw 'RetainDisposableSave requires ValidateRecruitmentProgression so only a verified Native New Campaign save can be retained.' }
 if ($progressionSavePath -and (Test-Path -LiteralPath $progressionSavePath)) { throw 'Generated disposable-save name already exists; refusing to overwrite.' }
 . (Join-Path $harnessRoot 'Test-WindowLayout.ps1')
 
@@ -65,9 +67,10 @@ function Set-SafeExitMarker {
     Set-Content -LiteralPath $engineConfig -Value $text -NoNewline
 }
 
-function Get-SaveManifestDigest {
+function Get-SaveManifestDigest([string]$ExcludeSaveName = '') {
     if (-not (Test-Path -LiteralPath $saveDirectory)) { return 'no-save-directory' }
-    $manifest = @(Get-ChildItem -LiteralPath $saveDirectory -File -Filter '*.sav' | Sort-Object Name | ForEach-Object {
+    $excludedFileName = if ([string]::IsNullOrWhiteSpace($ExcludeSaveName)) { $null } else { "$ExcludeSaveName.sav" }
+    $manifest = @(Get-ChildItem -LiteralPath $saveDirectory -File -Filter '*.sav' | Where-Object { $_.Name -cne $excludedFileName } | Sort-Object Name | ForEach-Object {
         "$($_.Name)|$($_.Length)|$($_.LastWriteTimeUtc.Ticks)"
     }) -join "`n"
     $bytes = [Text.Encoding]::UTF8.GetBytes($manifest)
@@ -90,7 +93,7 @@ $previousFreshSaveName = $env:CHRONICLE_FRESH_CAMPAIGN_SAVE_NAME
 $previousCrashCaptureFlag = $env:CHRONICLE_CAPTURE_CRASH_EXCEPTION
 $env:CHRONICLE_HARNESS_MODE = 'fresh-campaign-renown'
 $env:CHRONICLE_CAPTURE_CRASH_EXCEPTION = '1'
-if ($ValidateRecruitmentProgression) {
+if ($ValidateRecruitmentProgression -or $RetainDisposableSave) {
     $env:CHRONICLE_FRESH_CAMPAIGN_SKIP_ISSUE_PROBE = '1'
     $env:CHRONICLE_FRESH_CAMPAIGN_SAVE_NAME = $progressionSaveName
 }
@@ -102,7 +105,7 @@ finally {
     $env:CHRONICLE_HARNESS_MODE = $previousMode
     if ($null -eq $previousCrashCaptureFlag) { Remove-Item Env:CHRONICLE_CAPTURE_CRASH_EXCEPTION -ErrorAction SilentlyContinue }
     else { $env:CHRONICLE_CAPTURE_CRASH_EXCEPTION = $previousCrashCaptureFlag }
-    if ($null -eq $previousIssueProbeFlag) { Remove-Item Env:CHRONICLE_FRESH_CAMPAIGN_SKIP_ISSUE_PROBE -ErrorAction SilentlyContinue }
+            if ($null -eq $previousIssueProbeFlag) { Remove-Item Env:CHRONICLE_FRESH_CAMPAIGN_SKIP_ISSUE_PROBE -ErrorAction SilentlyContinue }
     else { $env:CHRONICLE_FRESH_CAMPAIGN_SKIP_ISSUE_PROBE = $previousIssueProbeFlag }
     if ($null -eq $previousFreshSaveName) { Remove-Item Env:CHRONICLE_FRESH_CAMPAIGN_SAVE_NAME -ErrorAction SilentlyContinue }
     else { $env:CHRONICLE_FRESH_CAMPAIGN_SAVE_NAME = $previousFreshSaveName }
@@ -537,7 +540,8 @@ if ($ValidateRecruitmentProgression) {
         if (Test-Path -LiteralPath $agentResponseRoot) {
             Get-ChildItem -LiteralPath $agentResponseRoot -File -Filter "$progressionCommandPrefix*.json" | Remove-Item -Force -ErrorAction SilentlyContinue
         }
-        if ($disposableSaveOwned -and (Test-Path -LiteralPath $progressionSavePath)) {
+        $keepVerifiedFixture = $RetainDisposableSave -and $recruitmentProgressionPassed -and (Test-Path -LiteralPath $progressionSavePath)
+        if ($disposableSaveOwned -and -not $keepVerifiedFixture -and (Test-Path -LiteralPath $progressionSavePath)) {
             $saveRoot = [IO.Path]::GetFullPath($saveDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
             $fullDisposableSavePath = [IO.Path]::GetFullPath($progressionSavePath)
             if (-not $fullDisposableSavePath.StartsWith($saveRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Disposable save cleanup path escaped Game Saves.' }
@@ -547,7 +551,9 @@ if ($ValidateRecruitmentProgression) {
 }
 
 $saveDigestAfter = Get-SaveManifestDigest
-$saveStateUnchanged = $saveDigestBefore -eq $saveDigestAfter
+$saveDigestForComparison = if ($RetainDisposableSave -and $progressionSaveName) { Get-SaveManifestDigest -ExcludeSaveName $progressionSaveName } else { $saveDigestAfter }
+$saveStateUnchanged = $saveDigestBefore -eq $saveDigestForComparison
+$retainedDisposableSave = [bool]($RetainDisposableSave -and $disposableSaveOwned -and $progressionSaveName -and (Test-Path -LiteralPath $progressionSavePath))
 $issueProbeExpected = -not $ValidateRecruitmentProgression -and [bool]($visibleIssueTypes -match ':[^,]+')
 $issueConversationProbeApplicable = $issueProbeExpected
 $issueConversationProbePassed = if ($issueProbeExpected) {
@@ -557,6 +563,25 @@ $issueConversationProbePassed = if ($issueProbeExpected) {
 }
 $issueConversationProbeSkipped = -not $issueProbeExpected -and $issueConversationProbeStatus -like 'skipped*'
 $issueConversationProbeOutcomeValid = ($issueConversationProbeApplicable -and $issueConversationProbePassed) -or $issueConversationProbeSkipped
+$acceptanceChecks = [ordered]@{
+    gameStarted = $gameStarted
+    nativeNewCampaignRequested = $startRequested
+    introSkipped = $introSkippedObserved
+    backgroundSelected = $backgroundChoiceObserved
+    characterCreationCompleted = $creationCompleted
+    initialObservationCaptured = $initialSnapshotCaptured
+    visibleIssuePoolObserved = $visibleIssuePoolObserved
+    issueProbeOutcomeValid = $issueConversationProbeOutcomeValid
+    progressionPassed = $recruitmentProgressionPassed
+    expectedRenown = ($renown -eq 20)
+    mapState = ($mapState -eq 'MapState')
+    noCrash = (-not $crashDetected)
+    noHarnessFailure = (-not $harnessFailureObserved)
+    noUnplannedCampaignSave = (-not $campaignSaveRequested)
+    unrelatedSaveManifestUnchanged = $saveStateUnchanged
+    requestedDisposableSaveRetained = (-not $RetainDisposableSave -or $retainedDisposableSave)
+    windowLayout = ($windowLayoutApplied -and $windowLayout.Width -eq 840 -and $windowLayout.Height -eq 472)
+}
 $result = [ordered]@{
     Scenario = 'FreshCampaignCharacterCreationRenown'
     Launcher = $gameExe
@@ -580,6 +605,9 @@ $result = [ordered]@{
     IssueConversationClockAfter = $issueConversationClockAfter
     IssueConversationOptionIds = $issueConversationOptions
     RecruitmentProgression = $recruitmentProgression
+    DisposableSaveName = $progressionSaveName
+    DisposableSavePath = if ($progressionSavePath -and (Test-Path -LiteralPath $progressionSavePath)) { $progressionSavePath } else { $null }
+    DisposableSaveRetained = $retainedDisposableSave
     RecruitmentProgressionError = $recruitmentProgressionError
     CharacterCreationCompleted = $creationCompleted
     InitialAgentObservationCaptured = $initialSnapshotCaptured
@@ -598,6 +626,7 @@ $result = [ordered]@{
     WindowHeight = if ($windowLayout) { $windowLayout.Height } else { $null }
     NoSaveRequested = -not $campaignSaveRequested
     SaveDirectoryMetadataUnchanged = $saveStateUnchanged
+    AcceptanceChecks = $acceptanceChecks
     RglLog = $rglLog
     WatchdogLog = $watchdogLog
     CrashWindowTitle = $crashWindowTitle
@@ -610,7 +639,7 @@ $result = [ordered]@{
     CrashFaultModule = $crashFaultModule
     CrashModuleInventory = $crashModuleInventory
     CrashModuleCaptureError = $crashModuleCaptureError
-    Passed = ($gameStarted -and $startRequested -and $introSkippedObserved -and $backgroundChoiceObserved -and $creationCompleted -and $initialSnapshotCaptured -and $visibleIssuePoolObserved -and $issueConversationProbeOutcomeValid -and $recruitmentProgressionPassed -and $renown -eq 20 -and $mapState -eq 'MapState' -and -not $crashDetected -and -not $harnessFailureObserved -and -not $campaignSaveRequested -and $saveStateUnchanged -and $windowLayoutApplied -and $windowLayout.Width -eq 840 -and $windowLayout.Height -eq 472)
+    Passed = (@($acceptanceChecks.Values | Where-Object { -not [bool]$_ }).Count -eq 0)
 }
 $result | ConvertTo-Json -Depth 6
 if (-not $result.Passed) { exit 1 }

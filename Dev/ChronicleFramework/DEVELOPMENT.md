@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.101
+Contract version: 7.103
 
 ## 目标与边界
 
@@ -406,6 +406,8 @@ Native Barter目录按当前VM会话和成功回执逐阶段开放：没有当�
 `menuSelect` 的模型参数必须引用当前Native观察中启用选项的精确 `id`，不能把参数名或显示文本当作ID。`provision` 则须把最新报价里的 `viewModelItemId` 映射到 `ItemViewModelId`，并提供该报价允许的整数数量；它只创建TradeVM草稿，须再用当前提供的 `tradeConfirm` 提交，才能退出交易并进入后续等待流程。TradeVM取到有效食物报价后，会隐藏重复报价读取，只保留基于该报价的有效交易动作，直至Native事务成功、取消或拒绝。未提交交易期间的 `observeAgain` 会被安全拒绝并反馈，让模型根据当前仅开放的确认/取消动作重新决策。决策或 `observeAgain` 在Native调用/宿主等待前校验失败时，失败收据保留归一化后的模型决策、当时的原版观察以及“未发送Native动作/未开始宿主等待”证明，便于区分模型选值错误与游戏执行错误。
 
 `FreshCampaignBaselineMatrix` 是单独opt-in的多新档Native基线：5次分别走本机1.4.8原版New Campaign/角色创建入口，在相同模块/难度/背景条件下创建全新Campaign；每次记录初始Native状态、可见安全Settlement、RecruitmentVM结果、Campaign实例标识、耗时和清理。`ChronicleCampaignInstanceId` 是Mod Campaign实例身份，不等同Native随机Seed；若本体没有可验证Seed，结果明示Seed未知。每个新进程遇到已识别的“Mod change detected”着色器缓存提示时，FreshCampaign调用同一精确UIA/所属进程按钮处理器并保留回执；不使用全局键鼠，也不把弹窗误认成存档模组不兼容。该基线衡量新档起点和机会变化，不含真实模型通过率，也不能用“5次新档”冒充5个已验证Seed；它不进入 `All`。
+
+`FreshCampaignSupplyBaseline` 是后续单独opt-in的W5-J原版对照矩阵，不进入 `All`：每轮从原版New Campaign创建并验证一个独立Campaign，再仅保留一份由该Campaign实际生成的disposable临时存档。它从两个新加载副本分别执行无补给/一单位当轮最低价可购食物的Native分支，均用原版城镇等待自然推进三个Daily tick；每个分支记录当轮Native报价/资源后果及Campaign运行时ID。运行时ID可能在跨进程重载时重建，所以配对必须核对同一源存档SHA-256和对齐起始资源/日期/tick，不得把ID当作Seed。实际游戏窗口录像保留连续视频用于回看，并由契约工具生成约每4秒一帧的总览联系表和动作边界前/中/后关键帧索引；成功提取后删除MP4，完整覆盖以解码帧数/期望帧数计算。临时存档由外层统一清理并复核既有保存清单；创建、加载、录像或清理任何一步失败均留下分类收据，不代表真实模型自主能力，也不重用W5-I固定模板成功门槛。
 
 `FreshCampaignLiveModelEvaluation` 是#101 Native基线后的opt-in候选评测：每轮新建Campaign并由真实本地模型从该新档第一条决策观察开始，自行选择当前可见安全Settlement、移动、读取当前RecruitmentVM报价、招募并核验停止。固定5轮实例，阈值为完整新档到目标≤180秒、自然Campaign推进≤0.1日、每轮恰好一次Native Move/Recruit、无被Native拒绝的动作、录像覆盖≥90%、临时保存与进程清理；动作未列入当轮目录时可被Native前安全拦截并重新观察，该拦截不计作Native拒绝，但必须记录且不得造成世界副作用。途中可以是显式有限 `observeAgain`，也可以是安全拦截后的新Native观察；到达时延迟模型给出的过期等待请求应被反馈处理，不能让已完成的成长路径假阴性。候选五轮启动前生成当前Tracked/非忽略Harness源文件和本地Harness设置的SHA-256清单；每轮前后复核，若清单变化就停止/判失败，避免把不同代码版本的运行合并成同一个矩阵。模型/服务器/模块/源码提交与源清单状态随结果记录。首轮目标结束后清除测试保存，不改已有正式存档。该阶段不加入 `All`，结果只证明这一成长切片的五实例重复性。
 

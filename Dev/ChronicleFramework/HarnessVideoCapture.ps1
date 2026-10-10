@@ -86,7 +86,7 @@ function Stop-ChronicleWindowVideoCapture {
     $expectedFrames = [Math]::Floor($duration * $Capture.FrameRate)
     $coverage = if ($expectedFrames -gt 0) { $frames / [double]$expectedFrames } else { 0 }
     if ($frames -lt ($expectedFrames * 0.9) -or $duration -lt 1) { throw "Captured clip is incomplete: duration=${duration}s frames=$frames expected~$expectedFrames coverage=$coverage." }
-    $contactRate = 1
+    $contactRate = 0.25
     $contactRows = [Math]::Max(1, [Math]::Ceiling($duration * $contactRate / 4))
     & (Get-Command ffmpeg.exe -ErrorAction Stop).Source -hide_banner -loglevel error -y -i $Capture.OutputPath -vf "fps=$contactRate,scale=480:-1,tile=4x$contactRows" -frames:v 1 -q:v 3 $ContactSheetPath
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $ContactSheetPath)) { throw 'Could not extract contact sheet from captured clip.' }
@@ -96,7 +96,7 @@ function Stop-ChronicleWindowVideoCapture {
     $timelineSelections = @()
     if (Test-Path -LiteralPath $EventTracePath) {
         $eventRows = @(Get-Content -LiteralPath $EventTracePath -Encoding UTF8 | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_ | ConvertFrom-Json })
-        $importantActions = @('menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','partyTakeAll','partyScreenDone','inventoryTakeAll','inventoryDone','mapSettlementTargets','move','providerDone','modelLoopFailure','crashReport','crashReportExpanded','crashReportScroll','crashObserved')
+        $importantActions = @('menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','partyTakeAll','partyScreenDone','inventoryTakeAll','inventoryDone','mapSettlementTargets','move','provision','tradeConfirm','rest','providerDone','modelLoopFailure','crashReport','crashReportExpanded','crashReportScroll','crashObserved')
         $priorSignature = $null
         foreach ($event in $eventRows) {
             $signature = @([string]$event.gameState,[string]$event.menuId,[string]$event.partyScreenMode,[string]$event.inventoryMode) -join '|'

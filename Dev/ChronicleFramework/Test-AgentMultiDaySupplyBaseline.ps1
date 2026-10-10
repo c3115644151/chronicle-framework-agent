@@ -6,7 +6,9 @@ param(
     [ValidateRange(4,20)][int]$TargetPartyMembers = 6,
     [ValidateRange(1,20)][int]$ProvisionAmount = 4,
     [ValidateRange(30,600)][int]$RestWallClockLimitSeconds = 180,
-    [ValidateRange(1,5)][int]$Repetitions = 1
+    [ValidateRange(1,5)][int]$Repetitions = 1,
+    [switch]$CaptureVisualEvidence,
+    [ValidateRange(5,30)][int]$FrameRate = 10
 )
 
 $ErrorActionPreference = 'Stop'
@@ -19,6 +21,7 @@ if (Test-Path -LiteralPath $sessionPath -PathType Leaf) { throw 'Refusing to rep
 $fixtureHashBefore = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
 $scenarioResults = [System.Collections.Generic.List[object]]::new()
 $script:ScenarioClockCommands = @()
+$videoLibrary = Join-Path $PSScriptRoot 'HarnessVideoCapture.ps1'
 $failure = $null
 
 function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @(), [int]$CommandTimeout = 0) {
@@ -43,6 +46,28 @@ function Wait-NativeSettlementArrival([string]$SettlementId, [int]$ArrivalTimeou
         Start-Sleep -Seconds 1
     }
     throw "Native travel did not reach '$SettlementId' within $ArrivalTimeoutSeconds seconds; no Harness time step was used."
+}
+
+function Write-SupplyCaptureEvent($Capture, [string]$EventName, [string]$Action, [string]$CommandId, $Observation, $Receipt) {
+    if (-not $Capture) { return }
+    $now = [DateTimeOffset]::UtcNow
+    $started = [DateTimeOffset]::Parse([string]$Capture.StartedUtc).ToUniversalTime()
+    $state = if ($Observation -and $Observation.state) { $Observation.state } else { $null }
+    $context = if ($state -and $state.context) { $state.context } else { $null }
+    $event = [ordered]@{
+        event = $EventName
+        utc = $now.ToString('O')
+        offsetMilliseconds = [Math]::Round(($now - $started).TotalMilliseconds,2)
+        commandId = $CommandId
+        action = $Action
+        decisionAction = ''
+        gameState = if ($context) { [string]$context.gameState } else { $null }
+        menuId = if ($context) { [string]$context.menuId } else { $null }
+        partyScreenMode = if ($state -and $state.partyScreen) { [string]$state.partyScreen.mode } else { $null }
+        inventoryMode = if ($state -and $state.inventoryScreen) { [string]$state.inventoryScreen.mode } else { $null }
+        campaignDay = if ($Receipt) { $Receipt.campaignDay } elseif ($Observation) { $Observation.campaignDay } else { $null }
+    }
+    Add-Content -LiteralPath $script:CaptureEventTracePath -Value ($event | ConvertTo-Json -Compress -Depth 6) -Encoding UTF8
 }
 
 function Wait-NativeRestCompletion([string]$CommandId, [double]$TargetDay, [int]$WallClockLimitSeconds = 180) {
@@ -101,16 +126,34 @@ function Invoke-SupplyScenario([string]$Branch, [int]$Repetition) {
     if ($Branch -notin @('noProvision','provision')) { throw "Unsupported supply scenario branch '$Branch'." }
     $script:ScenarioClockCommands = @()
     $prefix = "$runPrefix-$Branch-$Repetition"
+    $capture = $null
+    $captureResult = $null
+    $script:CaptureEventTracePath = $null
     $start = Invoke-AgentCli 'load' @('-SaveName', $LoadSaveName, '-CommandId', "$prefix-load")
     try {
         if ($start.status -ne 'completed' -or [string]$start.session.processId -eq '') { throw "Native supply scenario '$Branch' failed to load its disposable Campaign." }
+        if ($CaptureVisualEvidence) {
+            . $videoLibrary
+            $captureRoot = if ($env:CHRONICLE_HARNESS_TEMP -and (Test-Path -LiteralPath $env:CHRONICLE_HARNESS_TEMP -PathType Container)) { $env:CHRONICLE_HARNESS_TEMP } else { throw 'Visual supply evidence requires the active Harness TestResults temp directory.' }
+            $videoPath = Join-Path $captureRoot "$prefix.mp4"
+            $contactSheetPath = Join-Path $captureRoot "$prefix-contact.jpg"
+            $script:CaptureEventTracePath = Join-Path $captureRoot "$prefix-events.jsonl"
+            Set-Content -LiteralPath $script:CaptureEventTracePath -Value '' -Encoding UTF8
+            $capture = Start-ChronicleWindowVideoCapture -ProcessId ([int]$start.session.processId) -OutputPath $videoPath -FrameRate $FrameRate
+        }
+        $campaignIdentity = Invoke-AgentCli 'agentCheckpointGet' @('-CommandId', "$prefix-campaign-identity")
+        if ($campaignIdentity.status -ne 'completed' -or [string]::IsNullOrWhiteSpace([string]$campaignIdentity.data.campaignInstanceId)) { throw 'Native supply fixture did not expose its Campaign instance identity.' }
+        $campaignInstanceId = [string]$campaignIdentity.data.campaignInstanceId
         $beforeMove = Invoke-AgentCli 'state' @('-CommandId', "$prefix-before-move")
+        Write-SupplyCaptureEvent $capture 'capture-start' 'capture' $null $beforeMove $null
         if ($beforeMove.state.context.gameState -ne 'MapState' -or $beforeMove.state.context.encounterActive) { throw 'Supply baseline must begin on an unobstructed Campaign Map.' }
         $target = @($beforeMove.state.nearbySettlements | Where-Object { $_.type -eq 'town' -and -not $_.hostile -and -not $_.underSiege -and [double]$_.distance -gt 1.0 } | Sort-Object { [double]$_.distance } | Select-Object -First 1)
         if ($target.Count -ne 1) { throw 'No safe visible Town exists for the supply baseline.' }
         $move = Invoke-AgentCli 'move' @('-SettlementId', [string]$target[0].id, '-CommandId', "$prefix-move")
+        Write-SupplyCaptureEvent $capture 'native-action' 'move' "$prefix-move" $beforeMove $move
         if ($move.status -ne 'completed' -or [string]$move.state.location.targetSettlementId -cne [string]$target[0].id) { throw 'Native map movement did not accept the current visible Town target.' }
         $arrival = Wait-NativeSettlementArrival -SettlementId ([string]$target[0].id) -ArrivalTimeoutSeconds $TimeoutSeconds
+        Write-SupplyCaptureEvent $capture 'settlement-arrived' 'state' "$prefix-arrival" $arrival $null
         $recruitMenuOption = @($arrival.state.availableMenuOptions | Where-Object { $_.id -eq 'recruit_volunteers' -and $_.available -and $_.enabled } | Select-Object -First 1)
         if ([string]$arrival.state.context.menuId -ne 'town' -or $recruitMenuOption.Count -ne 1) { throw 'The arrival Town did not expose a current Native volunteer-recruitment menu option for the fixed starting roster.' }
 
@@ -137,6 +180,7 @@ function Invoke-SupplyScenario([string]$Branch, [int]$Repetition) {
             if ($townMenu.state.context.menuId -ne 'town' -or $tradeMenuOption.Count -ne 1) { throw 'Native Town Trade option was unavailable for the provision branch.' }
             $tradeOpen = Invoke-AgentCli 'menuSelect' @('-MenuId', 'town', '-OptionId', 'trade', '-CommandId', "$prefix-open-trade")
             $tradeState = Invoke-AgentCli 'state' @('-CommandId', "$prefix-trade-state")
+            Write-SupplyCaptureEvent $capture 'native-action' 'menuSelect' "$prefix-open-trade" $tradeState $tradeOpen
             if ($tradeOpen.status -ne 'completed' -or $tradeState.state.context.gameState -ne 'InventoryState' -or $tradeState.state.inventoryScreen.mode -ne 'Trade') { throw 'Native Trade InventoryState did not open for the provision branch.' }
             $foodOptions = Invoke-AgentCli 'foodOptions' @('-CommandId', "$prefix-food-options")
             $foodOffer = @($foodOptions.data.offers | Where-Object { $_.stock -gt 0 -and $_.isTransferable -and [double]$_.inventoryLogicUnitPrice -le [int]$tradeState.state.economy.gold } | Sort-Object { [double]$_.inventoryLogicUnitPrice } | Select-Object -First 1)
@@ -145,8 +189,10 @@ function Invoke-SupplyScenario([string]$Branch, [int]$Repetition) {
             $amount = [Math]::Min($ProvisionAmount, [Math]::Min([int]$foodOffer[0].stock, $affordableAmount))
             if ($amount -lt 1) { throw 'The current Native food offer had no affordable positive purchase amount.' }
             $provision = Invoke-AgentCli 'provision' @('-ItemViewModelId', [string]$foodOffer[0].viewModelItemId, '-Amount', [string]$amount, '-CommandId', "$prefix-provision")
+            Write-SupplyCaptureEvent $capture 'native-action' 'provision' "$prefix-provision" $tradeState $provision
             $provisionCommit = Invoke-AgentCli 'tradeConfirm' @('-CommandId', "$prefix-provision-confirm")
             $beforeRest = Invoke-AgentCli 'state' @('-CommandId', "$prefix-after-provision")
+            Write-SupplyCaptureEvent $capture 'native-action' 'tradeConfirm' "$prefix-provision-confirm" $beforeRest $provisionCommit
             if ($provision.status -ne 'completed' -or -not [bool]$provisionCommit.data.postconditionPassed -or
                 [int]$beforeRest.state.party.foodInventory -le [int]$afterRecruit.state.party.foodInventory -or
                 [int]$afterRecruit.state.economy.gold - [int]$beforeRest.state.economy.gold -ne [int]$provision.data.nativeTransactionAmount) {
@@ -160,9 +206,11 @@ function Invoke-SupplyScenario([string]$Branch, [int]$Repetition) {
         if ($townMenuForWait.state.context.menuId -ne 'town' -or $waitOption.Count -ne 1) { throw 'Native Town Wait option was unavailable in the supply scenario.' }
         $waitEntry = Invoke-AgentCli 'menuSelect' @('-MenuId', 'town', '-OptionId', 'town_wait', '-CommandId', "$prefix-enter-wait")
         $waitStart = Invoke-AgentCli 'state' @('-CommandId', "$prefix-wait-start")
+        Write-SupplyCaptureEvent $capture 'native-action' 'menuSelect' "$prefix-enter-wait" $waitStart $waitEntry
         if ($waitEntry.status -ne 'completed' -or $waitStart.state.context.menuId -ne 'town_wait_menus' -or -not [bool]$waitStart.state.context.isWaiting) { throw 'The Native Town Wait menu did not enter its actual waiting state.' }
         $restCommandId = "$prefix-native-rest"
         $restAccepted = Invoke-AgentCli 'rest' @('-Days', [string]$RestDays, '-CommandId', $restCommandId, '-ReturnWhenAccepted') 20
+        Write-SupplyCaptureEvent $capture 'native-action' 'rest' $restCommandId $waitStart $restAccepted
         if ($restAccepted.status -ne 'accepted') { throw "Native rest did not accept the requested $RestDays-day wait: $($restAccepted.error)" }
         $restMonitor = Wait-NativeRestCompletion -CommandId $restCommandId -TargetDay ([double]$restAccepted.campaignDay + $RestDays) -WallClockLimitSeconds $RestWallClockLimitSeconds
         $rest = $restMonitor.Receipt
@@ -172,6 +220,12 @@ function Invoke-SupplyScenario([string]$Branch, [int]$Repetition) {
         if ($leaveOption.Count -ne 1) { throw 'The Native Wait menu did not expose an enabled leave option after rest elapsed.' }
         $leave = Invoke-AgentCli 'menuSelect' @('-MenuId', 'town_wait_menus', '-OptionId', 'wait_leave', '-CommandId', "$prefix-leave-wait")
         $final = Invoke-AgentCli 'state' @('-CommandId', "$prefix-final-state")
+        Write-SupplyCaptureEvent $capture 'native-action' 'menuSelect' "$prefix-leave-wait" $final $leave
+        Write-SupplyCaptureEvent $capture 'capture-end' 'capture' $null $final $null
+        if ($capture) {
+            $captureResult = Stop-ChronicleWindowVideoCapture -Capture $capture -ContactSheetPath $contactSheetPath -EventTracePath $script:CaptureEventTracePath
+            $capture = $null
+        }
         $stop = Invoke-AgentCli 'stop' @('-CommandId', "$prefix-stop") 30
         $elapsedDays = [double]$afterRest.campaignDay - [double]$waitStart.campaignDay
         $scenarioPassed = (
@@ -181,9 +235,12 @@ function Invoke-SupplyScenario([string]$Branch, [int]$Repetition) {
             [string]$afterRest.state.context.timeControlMode -eq [string]$waitStart.state.context.timeControlMode -and
             $leave.status -eq 'completed' -and [string]$final.state.context.menuId -eq 'town'
         )
+        if ($CaptureVisualEvidence) { $scenarioPassed = $scenarioPassed -and $captureResult -and [double]$captureResult.FrameCoverageRatio -ge 0.9 -and [bool]$captureResult.VideoRemovedAfterEvidence }
         $result = [ordered]@{
             Branch = $Branch
             Repetition = $Repetition
+            CampaignInstanceId = $campaignInstanceId
+            Capture = $captureResult
             TemplateSaveHash = $fixtureHashBefore
             ModuleSet = @($start.session.moduleSet)
             TargetSettlement = $target[0]
@@ -202,6 +259,13 @@ function Invoke-SupplyScenario([string]$Branch, [int]$Repetition) {
         return $result
     }
     finally {
+        if ($capture) {
+            try {
+                $fallbackEvent = [ordered]@{ event = 'capture-end'; utc = [DateTimeOffset]::UtcNow.ToString('O'); offsetMilliseconds = 0; commandId = $null; action = 'capture'; decisionAction = ''; gameState = $null; menuId = $null; partyScreenMode = $null; inventoryMode = $null; campaignDay = $null }
+                Add-Content -LiteralPath $script:CaptureEventTracePath -Value ($fallbackEvent | ConvertTo-Json -Compress) -Encoding UTF8
+                $null = Stop-ChronicleWindowVideoCapture -Capture $capture -ContactSheetPath (Join-Path $env:CHRONICLE_HARNESS_TEMP "$prefix-contact.jpg") -EventTracePath $script:CaptureEventTracePath
+            } catch { }
+        }
         if (Test-Path -LiteralPath $sessionPath -PathType Leaf) { try { Invoke-AgentCli 'stop' @('-CommandId', "$prefix-cleanup") 15 | Out-Null } catch { } }
     }
 }
@@ -224,6 +288,7 @@ finally {
         $treated = $provisionRun[0]
         $startingDayDelta = [Math]::Abs([double]$treated.BeforeRest.CampaignDay - [double]$control.BeforeRest.CampaignDay)
         $startingDayMatched = ($startingDayDelta -le 0.05 -and [int]$treated.BeforeRest.DailyTickCount -eq [int]$control.BeforeRest.DailyTickCount)
+        $sameCampaignInstance = [string]$treated.CampaignInstanceId -ceq [string]$control.CampaignInstanceId
         $startingSetupMatched = ([int]$treated.PartyAfterNativeRecruitment.Members -eq [int]$control.PartyAfterNativeRecruitment.Members -and
             [int]$treated.PartyAfterNativeRecruitment.Gold -eq [int]$control.PartyAfterNativeRecruitment.Gold -and
             [int]$treated.PartyAfterNativeRecruitment.FoodInventory -eq [int]$control.PartyAfterNativeRecruitment.FoodInventory -and
@@ -242,6 +307,7 @@ finally {
         )
         $pairedComparisons += [ordered]@{
             Repetition = $repetition
+            CampaignInstanceMatched = $sameCampaignInstance
             StartingSetupMatched = $startingSetupMatched
             StartingCampaignDayDelta = [Math]::Round(([double]$treated.BeforeRest.CampaignDay - [double]$control.BeforeRest.CampaignDay),6)
             StartingCampaignDayMatched = $startingDayMatched
