@@ -10,7 +10,8 @@ if ($jsonStart -gt 0) {
     $requestJson = $requestJson.Substring($jsonStart)
 }
 $request = $requestJson | ConvertFrom-Json
-if ($request.schemaVersion -ne 2) { throw 'Unsupported Agent loop request schema.' }
+if ($request.schemaVersion -ne 3) { throw 'Unsupported Agent loop request schema.' }
+if ($null -eq $request.recentDecisionHistory -or @($request.recentDecisionHistory).Count -gt 8) { throw 'Recent decision history is missing or exceeds its bound.' }
 if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'checkpointMustNotCall') { throw 'checkpoint-provider-was-called' }
 if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'checkpointMustNotCall') { throw 'checkpoint-provider-was-called' }
 if ($request.iteration -gt 1 -and -not $request.previousActionReceipt -and -not $request.decisionFeedback) { throw 'Neither the previous Native receipt nor safe pre-Native rejection feedback was forwarded to the next decision.' }
@@ -29,7 +30,10 @@ if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'dynamicAvailabilityRecovery') {
     }
     if ([string]$request.decisionFeedback.kind -cne 'action-unavailable' -or -not [bool]$request.decisionFeedback.noNativeActionSent -or
         [string]$request.decisionFeedback.requestedAction -cne 'recruit' -or $request.previousActionReceipt -or $catalogNames -contains 'recruit' -or
-        [int]$request.observation.state.party.members -ne 1 -or [int]$request.observation.state.economy.gold -ne 1000) {
+        [int]$request.observation.state.party.members -ne 1 -or [int]$request.observation.state.economy.gold -ne 1000 -or
+        @($request.recentDecisionHistory).Count -ne 1 -or [string]$request.recentDecisionHistory[0].action -cne 'recruit' -or
+        [bool]$request.recentDecisionHistory[0].decisionRejected -or [string]$request.recentDecisionHistory[0].nativeOutcome.status -cne 'rejected-before-native' -or
+        -not [bool]$request.recentDecisionHistory[0].nativeOutcome.noNativeActionSent) {
         throw 'Unavailable decision feedback did not include a fresh unchanged Native state and a restricted current action catalog.'
     }
     [pscustomobject]@{ action = 'mapSettlementTargets'; arguments = @{}; rationale = 'Recover from the unavailable recruitment proposal using a currently listed map action.' } | ConvertTo-Json -Compress

@@ -4,7 +4,8 @@ $reader = New-Object System.IO.StreamReader -ArgumentList @([Console]::OpenStand
 try { $requestJson = $reader.ReadToEnd() }
 finally { $reader.Dispose() }
 $request = $requestJson | ConvertFrom-Json
-if ([int]$request.schemaVersion -ne 2) { throw 'Unsupported evaluation baseline decision request schema.' }
+if ([int]$request.schemaVersion -ne 3) { throw 'Unsupported evaluation baseline decision request schema.' }
+if ($null -eq $request.recentDecisionHistory -or @($request.recentDecisionHistory).Count -gt 8) { throw 'Evaluation baseline requires the bounded recent decision history.' }
 $state = $request.observation.state
 $receipt = $request.previousActionReceipt
 if ([string]::IsNullOrWhiteSpace([string]$request.goal) -or -not $state) { throw 'Evaluation baseline requires the explicit task goal and current Native observation.' }

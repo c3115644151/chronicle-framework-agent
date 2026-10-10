@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.97
+Contract version: 7.98
 
 ## 目标与边界
 
@@ -217,7 +217,7 @@ stop()
 
 每个动作必须有命令 ID、前置条件、完成证据、超时、中断、失败分类和幂等边界。命令送达不等于动作成功，动作后必须重新观察。
 
-Agent决策循环的Harness原型使用请求schema v2：每轮把明确Goal、由执行器同一白名单生成的可用动作/参数名、当前结构化观察以及上一Native action receipt一起发送给Provider。每步记录Provider响应、原版动作和后验观察的UTC时点与耗时，供真实游戏窗体视频按同一时间轴抽取关键帧。`AllowedActionNames`可选地同时缩窄模型可见目录与执行端许可；W3-A首个真实模型尝试只开放只读`mapSettlementTargets`和原版移动`move`。决定仍在Provider返回后由本地白名单/参数校验，模型不直接调用游戏API；Harness确定性Provider只验证上下文契约，不算模型自主能力，也不是玩家交付运行时。
+Agent决策循环的Harness原型使用请求schema v3：每轮把明确Goal、由执行器同一白名单生成的可用动作/参数名、当前结构化观察、上一Native action receipt，以及最多8条只含“模型所选动作/参数与原版执行结果”的近期决策历史发送给Provider。历史不携带过去完整观察或自由文本理由；当前Native观察和最新receipt始终是游戏状态真值。它用于帮助模型跟踪已完成的目标步骤，而不能扩大动作白名单。每步记录Provider响应、原版动作和后验观察的UTC时点与耗时，供真实游戏窗体视频按同一时间轴抽取关键帧。`AllowedActionNames`可选地同时缩窄模型可见目录与执行端许可；W3-A首个真实模型尝试只开放只读`mapSettlementTargets`和原版移动`move`。决定仍在Provider返回后由本地白名单/参数校验，模型不直接调用游戏API；Harness确定性Provider只验证上下文契约，不算模型自主能力，也不是玩家交付运行时。
 
 Agent决策循环的 `allowedControls` 与游戏动作目录分离，但同样按当前Native状态动态生成。只有执行器确认上一条成功移动仍在地图上自然推进、主队仍在移动且目标未到达时，才向模型暴露宿主侧 `observeAgain`；遭遇、对话/菜单、询问弹窗、暂停时间或无有效移动回执时，控制目录为空。执行器仍会在模型返回后重新核验，因此目录是决策约束和清晰反馈，不是安全边界本身。每轮收据同时记录交给模型的动作与控制目录，便于判断模型是选择了错误动作，还是当时根本没有看到可用操作。
 

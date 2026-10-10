@@ -97,6 +97,45 @@ function Invoke-DecisionProvider {
     catch { throw "Decision provider returned invalid JSON: $stdout $stderr" }
 }
 
+function Get-DecisionHistoryValue($InputObject, [string]$Name) {
+    if ($null -eq $InputObject) { return $null }
+    if ($InputObject -is [System.Collections.IDictionary]) {
+        if ($InputObject.Contains($Name)) { return $InputObject[$Name] }
+        return $null
+    }
+    $property = $InputObject.PSObject.Properties[$Name]
+    if ($property) { return $property.Value }
+    return $null
+}
+
+function Get-RecentDecisionHistory([object[]]$Trace, [int]$MaxEntries = 8) {
+    $history = [System.Collections.Generic.List[object]]::new()
+    foreach ($step in @($Trace | Select-Object -Last $MaxEntries)) {
+        $decision = $step.decision
+        if (-not $decision) { continue }
+        $decisionRejected = [bool](Get-DecisionHistoryValue $decision 'decisionRejected')
+        $decisionAction = if ($decisionRejected) { [string](Get-DecisionHistoryValue $decision 'requestedAction') } else { [string](Get-DecisionHistoryValue $decision 'action') }
+        $arguments = Get-DecisionHistoryValue $decision 'arguments'
+        if ($null -eq $arguments) { $arguments = [ordered]@{} }
+        $receipt = $step.actionReceipt
+        $control = $step.control
+        $history.Add([ordered]@{
+            iteration = [int]$step.iteration
+            action = $decisionAction
+            arguments = $arguments
+            decisionRejected = $decisionRejected
+            rejectionReason = if ($decisionRejected) { [string](Get-DecisionHistoryValue $decision 'reason') } else { $null }
+            nativeOutcome = [ordered]@{
+                action = if ($receipt) { [string](Get-DecisionHistoryValue $receipt 'action') } else { $null }
+                status = if ($receipt) { [string](Get-DecisionHistoryValue $receipt 'status') } elseif ($control) { [string](Get-DecisionHistoryValue $control 'kind') } else { 'not-dispatched' }
+                actionExecuted = [bool]$step.actionExecuted
+                noNativeActionSent = [bool](Get-DecisionHistoryValue $receipt 'noNativeActionSent')
+            }
+        })
+    }
+    return @($history)
+}
+
 function ConvertTo-AsciiJson([string]$Json) {
     $builder = New-Object System.Text.StringBuilder
     foreach ($character in $Json.ToCharArray()) {
@@ -512,10 +551,11 @@ try {
             }
         }
         $request = [ordered]@{
-            schemaVersion = 2
+            schemaVersion = 3
             runId = $loopRunId
             iteration = $index
             goal = $Goal
+            recentDecisionHistory = @(Get-RecentDecisionHistory -Trace $trace)
             allowedActions = @($actionCatalog.GetEnumerator() | Sort-Object -Property Key | ForEach-Object { [ordered]@{ action = [string]$_.Key; arguments = @($_.Value) } })
             allowedControls = $controlCatalog
             nativeMoveArrival = $nativeMoveArrival

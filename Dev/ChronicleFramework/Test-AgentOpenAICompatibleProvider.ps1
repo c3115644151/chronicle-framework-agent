@@ -55,10 +55,11 @@ try {
     $goal = 'Inspect currently visible safe settlements and then stop with the Native receipt.'
     $expectedHeroName = -join @([char]0x6CD5,[char]0x5C14,[char]0x585E,[char]0x6C83)
     $request = [ordered]@{
-        schemaVersion = 2
+        schemaVersion = 3
         runId = 'provider-contract-test'
         iteration = 1
         goal = $goal
+        recentDecisionHistory = @([ordered]@{ iteration = 0; action = 'menuSelect'; arguments = [ordered]@{ OptionId = 'town_wait' }; decisionRejected = $false; rejectionReason = $null; nativeOutcome = [ordered]@{ action = 'menuSelect'; status = 'completed'; actionExecuted = $true; noNativeActionSent = $false } })
         allowedActions = @(
             [ordered]@{ action = 'mapSettlementTargets'; arguments = @() }
             [ordered]@{ action = 'move'; arguments = @('SettlementId') }
@@ -79,8 +80,9 @@ try {
     $reader.Dispose()
     $apiRequest = $requestBody | ConvertFrom-Json
     $modelInput = [string]$apiRequest.messages[1].content | ConvertFrom-Json
-    $nativeArgumentPromptBindingsPresent = ([string]$apiRequest.messages[0].content -match 'For `menuSelect`, set `arguments\.OptionId` to the exact `id` value' -and [string]$apiRequest.messages[0].content -match 'For `provision`, set `arguments\.ItemViewModelId` to the exact `viewModelItemId`' -and [string]$apiRequest.messages[0].content -match '`provision` only drafts a TradeVM transaction')
+    $nativeArgumentPromptBindingsPresent = ([string]$apiRequest.messages[0].content -match 'For `menuSelect`, set `arguments\.OptionId` to the exact `id` value' -and [string]$apiRequest.messages[0].content -match 'For `provision`, set `arguments\.ItemViewModelId` to the exact `viewModelItemId`' -and [string]$apiRequest.messages[0].content -match '`provision` only drafts a TradeVM transaction' -and [string]$apiRequest.messages[0].content -match 'bounded recentDecisionHistory')
     $requestGoalForwarded = ([string]$modelInput.goal -ceq $goal)
+    $recentDecisionHistoryForwarded = (@($modelInput.recentDecisionHistory).Count -eq 1 -and [string]$modelInput.recentDecisionHistory[0].action -ceq 'menuSelect' -and [string]$modelInput.recentDecisionHistory[0].arguments.OptionId -ceq 'town_wait' -and [string]$modelInput.recentDecisionHistory[0].nativeOutcome.status -ceq 'completed')
     $unicodeObservationForwarded = ([string]$modelInput.observation.state.identity.heroName -ceq $expectedHeroName)
     $allowedNames = @($modelInput.allowedActions | ForEach-Object { [string]$_.action })
     $actionCatalogForwarded = ('mapSettlementTargets' -in $allowedNames -and 'move' -in $allowedNames -and 'advance' -notin $allowedNames)
@@ -139,10 +141,11 @@ try {
 
     $failureStep = 'normalize-exact-positional-action-arguments'
     $tupleRequest = [ordered]@{
-        schemaVersion = 2
+        schemaVersion = 3
         runId = 'provider-positional-tuple-test'
         iteration = 2
         goal = 'Submit one current native recruitment offer.'
+        recentDecisionHistory = @()
         allowedActions = @([ordered]@{ action = 'recruit'; arguments = @('OwnerId','TroopId','VolunteerSlot','ConfirmPartySizeWarning') })
         allowedControls = @()
         nativeMoveArrival = $null
@@ -174,10 +177,11 @@ try {
 
     $failureStep = 'normalize-string-encoded-object-action-arguments'
     $encodedArgumentsRequest = [ordered]@{
-        schemaVersion = 2
+        schemaVersion = 3
         runId = 'provider-string-encoded-arguments-test'
         iteration = 1
         goal = 'Submit the current observed Native food offer.'
+        recentDecisionHistory = @()
         allowedActions = @([ordered]@{ action = 'provision'; arguments = @('ItemViewModelId','Amount') })
         allowedControls = @()
         observation = $request.observation
@@ -259,10 +263,11 @@ try {
 
     $failureStep = 'normalize-single-parameter-scalar-arguments'
     $scalarRequest = [ordered]@{
-        schemaVersion = 2
+        schemaVersion = 3
         runId = 'provider-single-scalar-argument-test'
         iteration = 1
         goal = 'Wait three Campaign days in the active Native Town Wait menu.'
+        recentDecisionHistory = @()
         allowedActions = @([ordered]@{ action = 'rest'; arguments = @('Days') })
         allowedControls = @()
         observation = $request.observation
@@ -300,10 +305,11 @@ try {
         [ordered]@{ id = "town_test_$_"; name = "Test settlement $_"; type = 'town'; distance = [double]$_; hostile = ($_ -gt 30); underSiege = $false }
     })
     $localRequest = [ordered]@{
-        schemaVersion = 2
+        schemaVersion = 3
         runId = 'provider-large-receipt-test'
         iteration = 2
         goal = $goal
+        recentDecisionHistory = @()
         allowedActions = $request.allowedActions
         observation = $request.observation
         previousActionReceipt = [ordered]@{
@@ -382,10 +388,11 @@ try {
 
     $failureStep = 'recover-from-unsupported-native-action-argument'
     $barterRequest = [ordered]@{
-        schemaVersion = 2
+        schemaVersion = 3
         runId = 'provider-invalid-argument-test'
         iteration = 1
         goal = 'Submit the current Native barter offer.'
+        recentDecisionHistory = @()
         allowedActions = @([ordered]@{ action = 'barterOffer'; arguments = @() })
         allowedControls = @()
         observation = $request.observation
@@ -461,6 +468,7 @@ try {
     $result = [ordered]@{
         ProviderKind = 'local HTTP stub; not a real model call'
         RequestGoalForwarded = $requestGoalForwarded
+        RecentDecisionHistoryForwarded = $recentDecisionHistoryForwarded
         NativeArgumentPromptBindingsPresent = $nativeArgumentPromptBindingsPresent
         UnicodeObservationForwarded = $unicodeObservationForwarded
         AllowedActionCatalogForwarded = $actionCatalogForwarded
@@ -485,7 +493,7 @@ try {
         HttpErrorFailsClosedWithoutCredentialLeak = $httpErrorFailedClosed
         DisallowedActionFailsClosed = $invalidActionFailedClosed
         TimeoutFailsClosedWithoutCredentialLeak = $timeoutFailedClosed
-        Passed = ($requestGoalForwarded -and $nativeArgumentPromptBindingsPresent -and $unicodeObservationForwarded -and $actionCatalogForwarded -and $authorizationSent -and $localCompatibilityPassed -and $endpointPathCorrect -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $observeAgainValidated -and $positionalArgumentsNormalized -and $stringEncodedArgumentsNormalized -and $singleStringArrayArgumentsNormalized -and $nestedStringArrayArgumentsNormalized -and $singleScalarArgumentsNormalized -and $invalidActionFailedClosed -and $unsupportedActionArgumentRecoverable -and $httpErrorFailedClosed -and $timeoutFailedClosed)
+        Passed = ($requestGoalForwarded -and $recentDecisionHistoryForwarded -and $nativeArgumentPromptBindingsPresent -and $unicodeObservationForwarded -and $actionCatalogForwarded -and $authorizationSent -and $localCompatibilityPassed -and $endpointPathCorrect -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $observeAgainValidated -and $positionalArgumentsNormalized -and $stringEncodedArgumentsNormalized -and $singleStringArrayArgumentsNormalized -and $nestedStringArrayArgumentsNormalized -and $singleScalarArgumentsNormalized -and $invalidActionFailedClosed -and $unsupportedActionArgumentRecoverable -and $httpErrorFailedClosed -and $timeoutFailedClosed)
     }
     $result | ConvertTo-Json -Depth 8
     if (-not $result.Passed) { exit 1 }
