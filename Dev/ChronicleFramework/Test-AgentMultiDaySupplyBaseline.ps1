@@ -8,6 +8,7 @@ param(
     [ValidateRange(30,600)][int]$RestWallClockLimitSeconds = 180,
     [ValidateRange(1,5)][int]$Repetitions = 1,
     [switch]$CaptureVisualEvidence,
+    [switch]$StartAtCurrentTown,
     [ValidateRange(5,30)][int]$FrameRate = 10
 )
 
@@ -147,15 +148,37 @@ function Invoke-SupplyScenario([string]$Branch, [int]$Repetition) {
         $beforeMove = Invoke-AgentCli 'state' @('-CommandId', "$prefix-before-move")
         Write-SupplyCaptureEvent $capture 'capture-start' 'capture' $null $beforeMove $null
         if ($beforeMove.state.context.gameState -ne 'MapState' -or $beforeMove.state.context.encounterActive) { throw 'Supply baseline must begin on an unobstructed Campaign Map.' }
-        $target = @($beforeMove.state.nearbySettlements | Where-Object { $_.type -eq 'town' -and -not $_.hostile -and -not $_.underSiege -and [double]$_.distance -gt 1.0 } | Sort-Object { [double]$_.distance } | Select-Object -First 1)
-        if ($target.Count -ne 1) { throw 'No safe visible Town exists for the supply baseline.' }
-        $move = Invoke-AgentCli 'move' @('-SettlementId', [string]$target[0].id, '-CommandId', "$prefix-move")
-        Write-SupplyCaptureEvent $capture 'native-action' 'move' "$prefix-move" $beforeMove $move
-        if ($move.status -ne 'completed' -or [string]$move.state.location.targetSettlementId -cne [string]$target[0].id) { throw 'Native map movement did not accept the current visible Town target.' }
-        $arrival = Wait-NativeSettlementArrival -SettlementId ([string]$target[0].id) -ArrivalTimeoutSeconds $TimeoutSeconds
-        Write-SupplyCaptureEvent $capture 'settlement-arrived' 'state' "$prefix-arrival" $arrival $null
+        $move = $null
+        $arrival = $null
+        $target = @()
+        if ($StartAtCurrentTown -and [string]$beforeMove.state.context.menuId -eq 'town' -and -not [string]::IsNullOrWhiteSpace([string]$beforeMove.state.location.currentSettlementId)) {
+            $visibleTargets = Invoke-AgentCli 'mapSettlementTargets' @('-CommandId', "$prefix-current-settlement-targets")
+            $target = @($visibleTargets.data.mapSettlementTargets | Where-Object { [string]$_.id -ceq [string]$beforeMove.state.location.currentSettlementId -and $_.type -eq 'town' -and -not $_.hostile -and -not $_.underSiege } | Select-Object -First 1)
+            if ($target.Count -ne 1) { throw 'Prepared supply fixture is not at a currently visible, safe Native Town.' }
+            $arrival = $beforeMove
+            Write-SupplyCaptureEvent $capture 'settlement-already-current' 'state' "$prefix-before-move" $arrival $null
+        }
+        elseif ($StartAtCurrentTown) {
+            $visibleTargets = Invoke-AgentCli 'mapSettlementTargets' @('-CommandId', "$prefix-prepared-map-towns")
+            $target = @($visibleTargets.data.mapSettlementTargets | Where-Object { $_.type -eq 'town' -and -not $_.hostile -and -not $_.underSiege } | Sort-Object { [double]$_.distance }, { [string]$_.id } | Select-Object -First 1)
+            if ($visibleTargets.status -ne 'completed' -or $target.Count -ne 1) { throw 'Prepared Campaign Map has no currently visible, safe Native Town.' }
+            $move = Invoke-AgentCli 'move' @('-SettlementId', [string]$target[0].id, '-CommandId', "$prefix-move-prepared-town")
+            Write-SupplyCaptureEvent $capture 'native-action' 'move' "$prefix-move-prepared-town" $beforeMove $move
+            if ($move.status -ne 'completed' -or [string]$move.state.location.targetSettlementId -cne [string]$target[0].id) { throw 'Native movement did not accept the nearest currently visible safe Town target from the prepared Campaign Map.' }
+            $arrival = Wait-NativeSettlementArrival -SettlementId ([string]$target[0].id) -ArrivalTimeoutSeconds $TimeoutSeconds
+            Write-SupplyCaptureEvent $capture 'settlement-arrived' 'state' "$prefix-arrival-prepared-town" $arrival $null
+        }
+        else {
+            $target = @($beforeMove.state.nearbySettlements | Where-Object { $_.type -eq 'town' -and -not $_.hostile -and -not $_.underSiege -and [double]$_.distance -gt 1.0 } | Sort-Object { [double]$_.distance } | Select-Object -First 1)
+            if ($target.Count -ne 1) { throw 'No safe visible Town exists for the supply baseline.' }
+            $move = Invoke-AgentCli 'move' @('-SettlementId', [string]$target[0].id, '-CommandId', "$prefix-move")
+            Write-SupplyCaptureEvent $capture 'native-action' 'move' "$prefix-move" $beforeMove $move
+            if ($move.status -ne 'completed' -or [string]$move.state.location.targetSettlementId -cne [string]$target[0].id) { throw 'Native map movement did not accept the current visible Town target.' }
+            $arrival = Wait-NativeSettlementArrival -SettlementId ([string]$target[0].id) -ArrivalTimeoutSeconds $TimeoutSeconds
+            Write-SupplyCaptureEvent $capture 'settlement-arrived' 'state' "$prefix-arrival" $arrival $null
+        }
         $recruitMenuOption = @($arrival.state.availableMenuOptions | Where-Object { $_.id -eq 'recruit_volunteers' -and $_.available -and $_.enabled } | Select-Object -First 1)
-        if ([string]$arrival.state.context.menuId -ne 'town' -or $recruitMenuOption.Count -ne 1) { throw 'The arrival Town did not expose a current Native volunteer-recruitment menu option for the fixed starting roster.' }
+        if ([string]$arrival.state.context.menuId -ne 'town' -or ([int]$arrival.state.party.members -lt $TargetPartyMembers -and $recruitMenuOption.Count -ne 1)) { throw 'The arrival must be a Native Town; a recruitment option is required only when the roster still needs recruits.' }
 
         $recruitReceipts = [System.Collections.Generic.List[object]]::new()
         while ([int]$arrival.state.party.members -lt $TargetPartyMembers) {
@@ -240,6 +263,8 @@ function Invoke-SupplyScenario([string]$Branch, [int]$Repetition) {
             Branch = $Branch
             Repetition = $Repetition
             CampaignInstanceId = $campaignInstanceId
+            StartAtCurrentTown = $StartAtCurrentTown
+            NativeMoveIssued = ($null -ne $move)
             Capture = $captureResult
             TemplateSaveHash = $fixtureHashBefore
             ModuleSet = @($start.session.moduleSet)
