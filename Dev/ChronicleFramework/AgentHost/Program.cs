@@ -13,20 +13,37 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && string.Equals(args[0], "--provider-self-test", StringComparison.Ordinal))
+            {
+                var providerTests = await ProviderContractSelfTest.RunAsync();
+                Console.Out.WriteLine(JsonSerializer.Serialize(providerTests, OutputJsonOptions));
+                return 0;
+            }
+
             var options = HostOptions.Parse(args);
+            if (options.DecisionOnce)
+            {
+                var requestJson = await Console.In.ReadToEndAsync();
+                using var requestDocument = JsonDocument.Parse(requestJson);
+                using var provider = OllamaNativeProvider.FromEnvironment();
+                var decision = await provider.DecideAsync(requestDocument.RootElement, CancellationToken.None);
+                Console.Out.WriteLine(JsonSerializer.Serialize(decision, OutputJsonOptions));
+                return 0;
+            }
+
             var protocolRoot = GetProtocolRoot(options.ProtocolRoot);
             Directory.CreateDirectory(protocolRoot);
             Directory.CreateDirectory(Path.Combine(protocolRoot, "responses"));
 
             using var mutex = new Mutex(initiallyOwned: true, GetMutexName(protocolRoot), out var createdNew);
             if (!createdNew)
-                throw new HostException("host-already-running", "A Chronicle Agent Host already owns this protocol root.");
+                throw new AgentHostException("host-already-running", "A Chronicle Agent Host already owns this protocol root.");
 
             var result = await RequestCurrentStateAsync(protocolRoot, options.Timeout, CancellationToken.None);
             Console.Out.WriteLine(JsonSerializer.Serialize(result, OutputJsonOptions));
             return 0;
         }
-        catch (HostException exception)
+        catch (AgentHostException exception)
         {
             Console.Error.WriteLine(JsonSerializer.Serialize(new
             {
@@ -68,7 +85,7 @@ internal static class Program
             }
             catch (IOException exception) when (File.Exists(commandPath))
             {
-                throw new HostException("protocol-command-busy", "The Native protocol mailbox already has an owner.", exception);
+                throw new AgentHostException("protocol-command-busy", "The Native protocol mailbox already has an owner.", exception);
             }
 
             var deadline = Stopwatch.GetTimestamp() + (long)(timeout.TotalSeconds * Stopwatch.Frequency);
@@ -89,7 +106,7 @@ internal static class Program
                 await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken);
             }
 
-            throw new HostException("native-state-timeout", $"The current Bannerlord client did not answer the read-only state request within {timeout.TotalSeconds:0} seconds.");
+            throw new AgentHostException("native-state-timeout", $"The current Bannerlord client did not answer the read-only state request within {timeout.TotalSeconds:0} seconds.");
         }
         catch
         {
@@ -125,30 +142,30 @@ internal static class Program
     private static void ValidateResponse(JsonElement response, string commandId, string responseStatus)
     {
         if (ReadInt(response, "protocolVersion") != 1)
-            throw new HostException("protocol-version-mismatch", "The Native bridge returned an unsupported protocol version.");
+                throw new AgentHostException("protocol-version-mismatch", "The Native bridge returned an unsupported protocol version.");
         if (!string.Equals(ReadString(response, "commandId"), commandId, StringComparison.Ordinal))
-            throw new HostException("protocol-correlation-mismatch", "The Native bridge response did not match this request.");
+            throw new AgentHostException("protocol-correlation-mismatch", "The Native bridge response did not match this request.");
         if (!string.Equals(ReadString(response, "action"), "state", StringComparison.Ordinal))
-            throw new HostException("protocol-action-mismatch", "The Native bridge answered with a different action.");
+            throw new AgentHostException("protocol-action-mismatch", "The Native bridge answered with a different action.");
         if (!string.Equals(ReadString(response, "status"), responseStatus, StringComparison.Ordinal))
-            throw new HostException("protocol-status-mismatch", "The Native bridge response status did not match its response file.");
+            throw new AgentHostException("protocol-status-mismatch", "The Native bridge response status did not match its response file.");
         if (responseStatus != "completed")
         {
             var error = ReadString(response, "error");
-            throw new HostException("native-state-rejected", string.IsNullOrWhiteSpace(error) ? "The Native bridge rejected the state request." : "The Native bridge rejected the state request: " + error);
+            throw new AgentHostException("native-state-rejected", string.IsNullOrWhiteSpace(error) ? "The Native bridge rejected the state request." : "The Native bridge rejected the state request: " + error);
         }
         if (ReadInt(response, "processId") <= 0)
-            throw new HostException("native-process-id-invalid", "The Native bridge returned an invalid game process ID.");
+            throw new AgentHostException("native-process-id-invalid", "The Native bridge returned an invalid game process ID.");
         if (!response.TryGetProperty("state", out var state) || state.ValueKind != JsonValueKind.Object)
-            throw new HostException("native-state-missing", "The Native bridge response did not contain a state object.");
+            throw new AgentHostException("native-state-missing", "The Native bridge response did not contain a state object.");
         if (!state.TryGetProperty("identity", out var identity) || identity.ValueKind != JsonValueKind.Object ||
             string.IsNullOrWhiteSpace(ReadString(identity, "heroId")))
-            throw new HostException("native-player-identity-missing", "The Native state did not identify the current MainHero.");
+            throw new AgentHostException("native-player-identity-missing", "The Native state did not identify the current MainHero.");
         if (!state.TryGetProperty("party", out var party) || party.ValueKind != JsonValueKind.Object ||
             string.IsNullOrWhiteSpace(ReadString(party, "id")))
-            throw new HostException("native-main-party-missing", "The Native state did not identify the current MainParty.");
+            throw new AgentHostException("native-main-party-missing", "The Native state did not identify the current MainParty.");
         if (!state.TryGetProperty("context", out var context) || context.ValueKind != JsonValueKind.Object)
-            throw new HostException("native-game-context-missing", "The Native state did not contain the current game context.");
+            throw new AgentHostException("native-game-context-missing", "The Native state did not contain the current game context.");
     }
 
     private static async Task<JsonDocument> ReadJsonAsync(string path, CancellationToken cancellationToken)
@@ -171,7 +188,7 @@ internal static class Program
             }
         }
 
-        throw new HostException("native-response-unreadable", "The Native bridge response could not be read as complete JSON.");
+        throw new AgentHostException("native-response-unreadable", "The Native bridge response could not be read as complete JSON.");
     }
 
     private static async Task WriteAtomicallyAsync(string path, string contents, CancellationToken cancellationToken)
@@ -210,7 +227,7 @@ internal static class Program
         {
             var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
             if (string.IsNullOrWhiteSpace(documents))
-                throw new HostException("documents-path-unavailable", "The Windows Documents directory could not be resolved.");
+                throw new AgentHostException("documents-path-unavailable", "The Windows Documents directory could not be resolved.");
             root = Path.Combine(documents, "Mount and Blade II Bannerlord", "AgentRuns", "ChronicleAgent");
         }
 
@@ -247,12 +264,13 @@ internal static class Program
         int MainPartyMembers,
         string GameState);
 
-    private sealed record HostOptions(string? ProtocolRoot, TimeSpan Timeout)
+    private sealed record HostOptions(string? ProtocolRoot, TimeSpan Timeout, bool DecisionOnce)
     {
         internal static HostOptions Parse(string[] args)
         {
             string? root = null;
             var timeoutSeconds = 15;
+            var decisionOnce = false;
             for (var index = 0; index < args.Length; index++)
             {
                 switch (args[index])
@@ -266,20 +284,17 @@ internal static class Program
                         break;
                     case "--state-once":
                         break;
+                    case "--decision-once":
+                        decisionOnce = true;
+                        break;
                     default:
-                        throw new HostException("host-arguments-invalid", "Agent Host arguments were not recognized.");
+                        throw new AgentHostException("host-arguments-invalid", "Agent Host arguments were not recognized.");
                 }
             }
 
             if (timeoutSeconds is < 1 or > 300)
-                throw new HostException("host-timeout-invalid", "Host timeout must be from 1 to 300 seconds.");
-            return new HostOptions(root, TimeSpan.FromSeconds(timeoutSeconds));
+                throw new AgentHostException("host-timeout-invalid", "Host timeout must be from 1 to 300 seconds.");
+            return new HostOptions(root, TimeSpan.FromSeconds(timeoutSeconds), decisionOnce);
         }
-    }
-
-    private sealed class HostException : Exception
-    {
-        internal HostException(string code, string message, Exception? innerException = null) : base(message, innerException) => Code = code;
-        internal string Code { get; }
     }
 }
