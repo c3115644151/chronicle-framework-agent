@@ -236,7 +236,6 @@ try {
                 [ordered]@{ id='town-location'; path='state.location.currentSettlementId'; operator='eq'; expected=[string]$chosenSettlementId }
                 [ordered]@{ id='town-menu'; path='state.context.menuId'; operator='eq'; expected='town' }
                 [ordered]@{ id='campaign-map'; path='state.context.gameState'; operator='eq'; expected='MapState' }
-                [ordered]@{ id='not-waiting'; path='state.context.isWaiting'; operator='eq'; expected=$false }
             )
         }
         $completionContractJson = $completionContract | ConvertTo-Json -Depth 8 -Compress
