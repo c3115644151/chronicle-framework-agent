@@ -345,10 +345,12 @@ try {
         conditions = @([ordered]@{ id = 'daily-ticks'; path = 'dailyTickCount'; operator = 'gte'; expected = 999999 })
     } | ConvertTo-Json -Depth 8 -Compress
     $impossibleCompletionContractBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($impossibleCompletionContractJson))
+    $checkpointProviderBudget = New-AgentProviderBudget -ModelId 'qwen3.5:4b-q4_K_M' -BaseUrl 'http://127.0.0.1:11434/v1' -MaxProviderCalls 4 -MaxOutputTokensPerRequest 128
+    $checkpointProviderBudgetBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($checkpointProviderBudget | ConvertTo-Json -Depth 8 -Compress)))
     $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
     $env:CHRONICLE_TEST_PROVIDER_MODE = 'goalVerifierRejectedDone'
     try {
-        $goalVerifierOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -Goal 'Harness verifier test: do not stop before the deliberately unreachable Native daily tick condition.' -CompletionContractBase64 $impossibleCompletionContractBase64 -AllowedActionNames 'state' -PersistCheckpoint -MaxDecisions 3 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-goal-verifier-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $goalVerifierOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -Goal 'Harness verifier test: do not stop before the deliberately unreachable Native daily tick condition.' -CompletionContractBase64 $impossibleCompletionContractBase64 -ProviderBudgetBase64 $checkpointProviderBudgetBase64 -AllowedActionNames 'state' -PersistCheckpoint -MaxDecisions 3 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-goal-verifier-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
         $goalVerifierExitCode = $LASTEXITCODE
     }
     finally {
@@ -379,6 +381,7 @@ try {
         $checkpointBeforeSaveJson = [Text.UTF8Encoding]::new($false, $true).GetString([Convert]::FromBase64String([string]$checkpointBeforeSaveReceipt.data.checkpointBase64))
         $checkpointBeforeSave = $checkpointBeforeSaveJson | ConvertFrom-Json
         if ([string]$checkpointBeforeSave.status -cne 'active' -or [string]$checkpointBeforeSave.completionContract.contractId -cne 'harness-impossible-tick-goal-v1' -or [string]$checkpointBeforeSave.lastGoalVerification.status -cne 'unmet') { throw 'Unverified provider stop was not kept distinct from an active checkpoint with its saved Native contract and unmet result.' }
+        if ([int]$checkpointBeforeSave.providerBudgetState.reservedProviderCalls -ne [int]$goalVerifierTrace.providerBudget.reservedProviderCalls -or (Get-AgentProviderBudgetFingerprint -Budget $checkpointBeforeSave.providerBudgetProfile) -cne (Get-AgentProviderBudgetFingerprint -Budget $checkpointProviderBudget)) { throw 'Cumulative budget state/profile was not captured in the active Campaign task checkpoint.' }
         $checkpointSaveReceipt = Invoke-AgentCli 'save' @('-SaveName', $goalCheckpointSaveName, '-CommandId', ('goal-checkpoint-save-' + [Guid]::NewGuid().ToString('N')))
         if ($checkpointSaveReceipt.status -ne 'completed' -or -not (Test-Path -LiteralPath $goalCheckpointSavePath -PathType Leaf)) { throw 'Native save of the disposable goal-verification checkpoint did not complete.' }
         $checkpointStopReceipt = Invoke-AgentCli 'stop' @('-CommandId', ('goal-checkpoint-stop-' + [Guid]::NewGuid().ToString('N')))
@@ -389,11 +392,13 @@ try {
         $checkpointAfterLoadJson = [Text.UTF8Encoding]::new($false, $true).GetString([Convert]::FromBase64String([string]$checkpointAfterLoadReceipt.data.checkpointBase64))
         $checkpointAfterLoad = $checkpointAfterLoadJson | ConvertFrom-Json
         if ([string]$checkpointAfterLoad.completionContract.contractId -cne 'harness-impossible-tick-goal-v1' -or [string]$checkpointAfterLoad.status -cne 'active') { throw 'Native save/load did not preserve the still-incomplete goal contract.' }
+        $checkpointBudgetRoundtripVerified = ([int]$checkpointAfterLoad.providerBudgetState.reservedProviderCalls -eq [int]$checkpointBeforeSave.providerBudgetState.reservedProviderCalls -and [string]$checkpointAfterLoad.providerBudgetFingerprint -ceq [string]$checkpointBeforeSave.providerBudgetFingerprint)
+        if (-not $checkpointBudgetRoundtripVerified) { throw 'Native save/load reset or changed the cumulative provider budget.' }
 
         $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
         $env:CHRONICLE_TEST_PROVIDER_MODE = 'goalVerifierResume'
         try {
-            $goalResumeOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -ResumeCheckpoint -AllowedActionNames 'state' -MaxDecisions 1 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-goal-verifier-resume-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+            $goalResumeOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -ProviderBudgetBase64 $checkpointProviderBudgetBase64 -ResumeCheckpoint -AllowedActionNames 'state' -MaxDecisions 1 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-goal-verifier-resume-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
             $goalResumeExitCode = $LASTEXITCODE
         }
         finally {
@@ -412,7 +417,8 @@ try {
         if (-not $resumeFeedbackVerified) { throw "Goal checkpoint resume did not preserve the unmet result and safely continue: $($goalResumeTrace | ConvertTo-Json -Depth 8 -Compress)" }
         $goalCheckpointRoundtripResumeVerified = (
             [string]$checkpointBeforeSave.completionContract.contractId -ceq [string]$checkpointAfterLoad.completionContract.contractId -and
-            [string]$checkpointAfterLoad.status -ceq 'active' -and $resumeFeedbackVerified
+            [string]$checkpointAfterLoad.status -ceq 'active' -and $resumeFeedbackVerified -and $checkpointBudgetRoundtripVerified -and
+            [int]$goalResumeTrace.providerBudget.reservedProviderCalls -eq ([int]$checkpointBeforeSave.providerBudgetState.reservedProviderCalls + 1)
         )
     }
     finally {
@@ -743,6 +749,9 @@ try {
         ExplicitGoalStopHonoredWithoutIssuingAnotherAction = $doneSignalVerified
         NativeGoalVerifierRejectsPrematureDone = $goalVerifierEarlyDoneRecoveryVerified
         NativeGoalContractPersistsAndReverifiesAfterLoad = $goalCheckpointRoundtripResumeVerified
+        ProviderBudgetCheckpointLedgerRoundtripVerified = $checkpointBudgetRoundtripVerified
+        ProviderBudgetCallsReservedBeforeResume = [int]$checkpointBeforeSave.providerBudgetState.reservedProviderCalls
+        ProviderBudgetCallsReservedAfterResume = [int]$goalResumeTrace.providerBudget.reservedProviderCalls
         ProviderBudgetUsesKnownRatesAndBoundsThreeDeepSeekRuns = $providerBudgetPricingVerified
         ProviderBudgetStopsBeforeUnaffordableRequest = $providerBudgetStoppedBeforeRequest
         ProviderReportedUsageOverrunStopsBeforeNativeAction = $providerUsageOverBudgetStoppedBeforeNative

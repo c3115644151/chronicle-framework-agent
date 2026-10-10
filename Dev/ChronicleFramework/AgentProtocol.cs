@@ -167,7 +167,8 @@ internal sealed class ChronicleAgentProtocol
                     string checkpointJson;
                     try { checkpointJson = new UTF8Encoding(false, true).GetString(checkpointBytes); }
                     catch (DecoderFallbackException) { throw new InvalidOperationException("Checkpoint payload is not valid UTF-8"); }
-                    if (ReadRequiredInteger(checkpointJson, "schemaVersion") != 1)
+                    var checkpointSchemaVersion = ReadRequiredInteger(checkpointJson, "schemaVersion");
+                    if (checkpointSchemaVersion != 1 && checkpointSchemaVersion != 2)
                         throw new InvalidOperationException("Unsupported Agent checkpoint schema version");
                     var checkpointCampaignId = ReadString(checkpointJson, "campaignInstanceId");
                     behavior.StoreAgentCheckpoint(checkpointCampaignId, checkpointJson);

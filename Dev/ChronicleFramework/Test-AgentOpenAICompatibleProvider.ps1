@@ -17,6 +17,7 @@ $priorTemperature = $env:CHRONICLE_LLM_TEMPERATURE
 $harnessSecret = 'chronicle-local-provider-test-secret'
 $listener = $null
 $process = $null
+$ledgerTestRoot = $null
 $failureStep = 'preflight'
 
 if (-not (Test-Path -LiteralPath $providerPath)) { throw "OpenAI-compatible provider not found: $providerPath" }
@@ -381,6 +382,12 @@ try {
 
     $deepSeekBudget = New-AgentProviderBudget -ModelId 'deepseek-flash' -BaseUrl 'https://api.deepseek.com/v1' -MaxProviderCalls 20 -MaxRequestBodyBytes 10000 -MaxOutputTokensPerRequest 256
     $localTokenOnlyBudget = New-AgentProviderBudget -ModelId 'qwen3.5:4b-q4_K_M' -BaseUrl 'http://127.0.0.1:11434/v1'
+    $deepSeekBudgetFingerprint = Get-AgentProviderBudgetFingerprint -Budget $deepSeekBudget
+    $deepSeekBudgetRoundtrip = $deepSeekBudget | ConvertTo-Json -Depth 8 | ConvertFrom-Json
+    $budgetFingerprintStableAcrossRoundtrip = (Get-AgentProviderBudgetFingerprint -Budget $deepSeekBudgetRoundtrip) -ceq $deepSeekBudgetFingerprint
+    $changedBudgetProfile = $deepSeekBudget | ConvertTo-Json -Depth 8 | ConvertFrom-Json
+    $changedBudgetProfile.maxEstimatedCost = [double]$changedBudgetProfile.maxEstimatedCost - 0.01
+    $changedBudgetProfileDetected = (Get-AgentProviderBudgetFingerprint -Budget $changedBudgetProfile) -cne $deepSeekBudgetFingerprint
     $unknownRemoteBudgetRejected = $false
     try { $null = New-AgentProviderBudget -ModelId 'unpriced-model' -BaseUrl 'https://provider.example/v1' } catch { $unknownRemoteBudgetRejected = $_.Exception.Message -match 'No verified price profile exists' }
     $deepSeekPerRequestUpperCny = Get-AgentProviderRequestCostUpperBound -Budget $deepSeekBudget
@@ -389,7 +396,30 @@ try {
     $usageCostCheck = [ordered]@{ status = 'reported'; promptTokens = 1000; promptCacheHitTokens = 600; promptCacheMissTokens = 400; completionTokens = 100 }
     $estimatedUsageCostCny = Get-AgentProviderActualCostEstimate -Budget $deepSeekBudget -Usage $usageCostCheck
     $estimatedUsageBreakdown = Get-AgentProviderActualCostBreakdown -Budget $deepSeekBudget -Usage $usageCostCheck
-    $providerBudgetMathVerified = ($deepSeekBudget.priceProfileId -ceq 'deepseek-v4.1-flash-peak-cny-upper-bound-2026-10' -and $localTokenOnlyBudget.mode -ceq 'token-only-local' -and $null -eq $localTokenOnlyBudget.maxEstimatedCost -and $unknownRemoteBudgetRejected -and [long]$deepSeekBudget.maxTotalInputTokens -eq 202560 -and [Math]::Abs($deepSeekRunUpperCny - 0.535296) -lt 0.000001 -and $deepSeekRunUpperCny -le [double]$deepSeekBudget.maxEstimatedCost -and $deepSeekThreeRunUpperCny -le 1.95 -and [Math]::Abs($estimatedUsageCostCny - 0.0019488) -lt 0.0000001 -and [Math]::Abs([double]$estimatedUsageBreakdown.inputCacheHitCny - 0.0000288) -lt 0.0000001 -and [Math]::Abs([double]$estimatedUsageBreakdown.inputCacheMissCny - 0.00096) -lt 0.0000001 -and [Math]::Abs([double]$estimatedUsageBreakdown.outputCny - 0.00096) -lt 0.0000001 -and $null -eq (Get-AgentProviderActualCostEstimate -Budget $deepSeekBudget -Usage ([ordered]@{ status = 'unavailable' })))
+    $providerBudgetMathVerified = ($deepSeekBudget.priceProfileId -ceq 'deepseek-v4.1-flash-peak-cny-upper-bound-2026-10' -and $localTokenOnlyBudget.mode -ceq 'token-only-local' -and $null -eq $localTokenOnlyBudget.maxEstimatedCost -and $unknownRemoteBudgetRejected -and $budgetFingerprintStableAcrossRoundtrip -and $changedBudgetProfileDetected -and [long]$deepSeekBudget.maxTotalInputTokens -eq 202560 -and [Math]::Abs($deepSeekRunUpperCny - 0.535296) -lt 0.000001 -and $deepSeekRunUpperCny -le [double]$deepSeekBudget.maxEstimatedCost -and $deepSeekThreeRunUpperCny -le 1.95 -and [Math]::Abs($estimatedUsageCostCny - 0.0019488) -lt 0.0000001 -and [Math]::Abs([double]$estimatedUsageBreakdown.inputCacheHitCny - 0.0000288) -lt 0.0000001 -and [Math]::Abs([double]$estimatedUsageBreakdown.inputCacheMissCny - 0.00096) -lt 0.0000001 -and [Math]::Abs([double]$estimatedUsageBreakdown.outputCny - 0.00096) -lt 0.0000001 -and $null -eq (Get-AgentProviderActualCostEstimate -Budget $deepSeekBudget -Usage ([ordered]@{ status = 'unavailable' })))
+
+    $failureStep = 'persist-cumulative-budget-ledger-without-secret-or-prompt'
+    $ledgerTestRoot = Join-Path ([IO.Path]::GetTempPath()) ('chronicle-provider-budget-ledger-' + [Guid]::NewGuid().ToString('N'))
+    $ledgerTaskId = [Guid]::NewGuid().ToString('N')
+    $ledgerPath = Get-AgentProviderBudgetLedgerPath -Root $ledgerTestRoot -TaskId $ledgerTaskId
+    $ledgerState = New-AgentProviderBudgetState -Budget $deepSeekBudget
+    $ledgerState.taskId = $ledgerTaskId
+    $ledgerState.reservedProviderCalls = 1
+    $ledgerState.reservedRequestBodyBytes = [long]$deepSeekBudget.maxRequestBodyBytes
+    $ledgerState.reservedInputTokenUpperBound = [long]$deepSeekBudget.maxInputTokensPerRequest
+    $ledgerState.reservedOutputTokens = [long]$deepSeekBudget.maxOutputTokensPerRequest
+    $ledgerState.reservedCostUpperBound = Get-AgentProviderRequestCostUpperBound -Budget $deepSeekBudget
+    $ledgerState.pendingProviderCall = [ordered]@{ iteration = 1; reservedUtc = [DateTime]::UtcNow.ToString('O'); costUpperBoundCny = $ledgerState.reservedCostUpperBound }
+    Write-AgentProviderBudgetLedger -Path $ledgerPath -TaskId $ledgerTaskId -CampaignInstanceId 'campaign-ledger-test' -Budget $deepSeekBudget -State $ledgerState
+    $ledgerRead = Read-AgentProviderBudgetLedger -Path $ledgerPath -TaskId $ledgerTaskId -CampaignInstanceId 'campaign-ledger-test' -Budget $deepSeekBudget
+    $staleCheckpointBudgetState = New-AgentProviderBudgetState -Budget $deepSeekBudget
+    $staleCheckpointBudgetState.taskId = $ledgerTaskId
+    $mergedBudgetState = Merge-AgentProviderBudgetStates -CheckpointState $staleCheckpointBudgetState -LedgerState $ledgerRead.state -Budget $deepSeekBudget
+    $ledgerChangedProfileRejected = $false
+    try { $null = Read-AgentProviderBudgetLedger -Path $ledgerPath -TaskId $ledgerTaskId -CampaignInstanceId 'campaign-ledger-test' -Budget $changedBudgetProfile } catch { $ledgerChangedProfileRejected = $_.Exception.Message -match 'identity/profile mismatch' }
+    $ledgerText = Get-Content -LiteralPath $ledgerPath -Raw -Encoding UTF8
+    $budgetLedgerPersistsCumulativeStateAndFailsClosed = ([int]$ledgerRead.state.reservedProviderCalls -eq 1 -and [bool]$ledgerRead.state.pendingProviderCall -and [int]$mergedBudgetState.reservedProviderCalls -eq 1 -and $ledgerChangedProfileRejected -and $ledgerText -notmatch [regex]::Escape($harnessSecret) -and $ledgerText -notmatch [regex]::Escape($goal))
+    if (-not $budgetLedgerPersistsCumulativeStateAndFailsClosed) { throw 'Durable budget ledger failed to retain a pending reservation, merge it over a stale checkpoint, reject a changed profile, or keep prompt/credential data out.' }
     $env:CHRONICLE_LLM_API_KEY = $harnessSecret
     $env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER = 'max_completion_tokens'
 
@@ -534,6 +564,8 @@ try {
         AuthorizationHeaderSent = $authorizationSent
         LocalCompatibleMaxTokensWithoutAuthorization = $localCompatibilityPassed
         ProviderBudgetMathAndUnknownPriceFailClosed = $providerBudgetMathVerified
+        BudgetFingerprintSurvivesRoundtripAndDetectsChanges = ($budgetFingerprintStableAcrossRoundtrip -and $changedBudgetProfileDetected)
+        DurableBudgetLedgerPersistsPendingSpend = $budgetLedgerPersistsCumulativeStateAndFailsClosed
         DeepSeekWorstCasePerRunCny = $deepSeekRunUpperCny
         DeepSeekWorstCaseThreeRunsCny = $deepSeekThreeRunUpperCny
         ProviderReportedUsageCostCny = $estimatedUsageCostCny
@@ -562,7 +594,7 @@ try {
         TimeoutFailsClosedWithoutCredentialLeak = $timeoutFailedClosed
         PreResponseConnectionFailureRetriesOnceAndClassifies = $connectionFailureClassified
         PaidProviderBudgetDisablesRetry = $paidProviderRetryDisabled
-        Passed = ($requestGoalForwarded -and $recentDecisionHistoryForwarded -and $nativeArgumentPromptBindingsPresent -and $unicodeObservationForwarded -and $actionCatalogForwarded -and $authorizationSent -and $localCompatibilityPassed -and $providerBudgetMathVerified -and $endpointPathCorrect -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $usageReceiptAccurate -and $requestBodyBudgetRejectedBeforeHttp -and $observeAgainValidated -and $missingUsageNotZero -and $positionalArgumentsNormalized -and $stringEncodedArgumentsNormalized -and $singleStringArrayArgumentsNormalized -and $nestedStringArrayArgumentsNormalized -and $singleScalarArgumentsNormalized -and $invalidActionFailedClosed -and $unsupportedActionArgumentRecoverable -and $httpErrorFailedClosed -and $timeoutFailedClosed -and $connectionFailureClassified -and $paidProviderRetryDisabled)
+        Passed = ($requestGoalForwarded -and $recentDecisionHistoryForwarded -and $nativeArgumentPromptBindingsPresent -and $unicodeObservationForwarded -and $actionCatalogForwarded -and $authorizationSent -and $localCompatibilityPassed -and $providerBudgetMathVerified -and $budgetLedgerPersistsCumulativeStateAndFailsClosed -and $endpointPathCorrect -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $usageReceiptAccurate -and $requestBodyBudgetRejectedBeforeHttp -and $observeAgainValidated -and $missingUsageNotZero -and $positionalArgumentsNormalized -and $stringEncodedArgumentsNormalized -and $singleStringArrayArgumentsNormalized -and $nestedStringArrayArgumentsNormalized -and $singleScalarArgumentsNormalized -and $invalidActionFailedClosed -and $unsupportedActionArgumentRecoverable -and $httpErrorFailedClosed -and $timeoutFailedClosed -and $connectionFailureClassified -and $paidProviderRetryDisabled)
     }
     $result | ConvertTo-Json -Depth 8
     if (-not $result.Passed) { exit 1 }
@@ -574,6 +606,12 @@ catch {
 finally {
     if ($listener) { try { if ($listener.IsListening) { $listener.Stop() }; $listener.Close() } catch { } }
     if ($process) { try { if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit(3000) } } catch { } }
+    if ($ledgerTestRoot -and (Test-Path -LiteralPath $ledgerTestRoot -PathType Container)) {
+        $resolvedLedgerTestRoot = [IO.Path]::GetFullPath($ledgerTestRoot)
+        $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+        if (-not $resolvedLedgerTestRoot.StartsWith($tempRoot,[StringComparison]::OrdinalIgnoreCase) -or -not (Split-Path -Leaf $resolvedLedgerTestRoot).StartsWith('chronicle-provider-budget-ledger-',[StringComparison]::Ordinal)) { throw 'Provider budget test cleanup target escaped its exact temporary ledger directory.' }
+        Remove-Item -LiteralPath $resolvedLedgerTestRoot -Recurse -Force
+    }
     if ($null -eq $priorBaseUrl) { Remove-Item Env:CHRONICLE_LLM_BASE_URL -ErrorAction SilentlyContinue } else { $env:CHRONICLE_LLM_BASE_URL = $priorBaseUrl }
     if ($null -eq $priorModel) { Remove-Item Env:CHRONICLE_LLM_MODEL -ErrorAction SilentlyContinue } else { $env:CHRONICLE_LLM_MODEL = $priorModel }
     if ($null -eq $priorApiKey) { Remove-Item Env:CHRONICLE_LLM_API_KEY -ErrorAction SilentlyContinue } else { $env:CHRONICLE_LLM_API_KEY = $priorApiKey }

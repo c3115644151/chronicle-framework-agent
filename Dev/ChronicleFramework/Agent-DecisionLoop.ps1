@@ -94,7 +94,7 @@ function Invoke-DecisionProvider {
     if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
         try { $process.Kill() } catch { }
         if ($script:AgentProviderBudget) {
-            return [ordered]@{ providerFailed = $true; failureKind = 'provider-timeout'; providerUsage = [ordered]@{ status = 'unavailable'; requestAttempts = 0; requestBodyBytes = $null; httpRequestSent = 'unknown'; usageReason = 'Provider timed out; the request may have reached the endpoint.' } }
+            return [ordered]@{ providerFailed = $true; failureKind = 'provider-timeout'; providerUsage = [ordered]@{ status = 'unavailable'; requestAttempts = $null; requestAttemptsStatus = 'unknown'; requestBodyBytes = $null; httpRequestSent = 'unknown'; usageReason = 'Provider timed out; the request may have reached the endpoint.' } }
         }
         throw "Decision provider timed out after $TimeoutSeconds seconds."
     }
@@ -102,7 +102,7 @@ function Invoke-DecisionProvider {
     $stderr = $stderrTask.Result.Trim()
     if ($process.ExitCode -ne 0) {
         if ($script:AgentProviderBudget) {
-            return [ordered]@{ providerFailed = $true; failureKind = 'provider-process-failed'; providerExitCode = [int]$process.ExitCode; providerUsage = [ordered]@{ status = 'unavailable'; requestAttempts = 0; requestBodyBytes = $null; httpRequestSent = 'unknown'; usageReason = 'Provider exited without usage metadata; worst-case request reservation remains charged.' } }
+            return [ordered]@{ providerFailed = $true; failureKind = 'provider-process-failed'; providerExitCode = [int]$process.ExitCode; providerUsage = [ordered]@{ status = 'unavailable'; requestAttempts = $null; requestAttemptsStatus = 'unknown'; requestBodyBytes = $null; httpRequestSent = 'unknown'; usageReason = 'Provider exited without usage metadata; worst-case request reservation remains charged.' } }
         }
         throw "Decision provider exited $($process.ExitCode): $stderr"
     }
@@ -393,6 +393,19 @@ function ConvertTo-CheckpointReceipt($Receipt) {
 
 function Write-AgentCheckpoint([string]$CheckpointCommandId) {
     if (-not $script:AgentCheckpoint) { return }
+    $script:AgentCheckpoint.schemaVersion = 2
+    $script:AgentCheckpoint.providerName = [IO.Path]::GetFileName($providerPath)
+    if ($script:AgentProviderBudget) {
+        $script:AgentCheckpoint.providerBudgetProfile = $script:AgentProviderBudget
+        $script:AgentCheckpoint.providerBudgetFingerprint = Get-AgentProviderBudgetFingerprint -Budget $script:AgentProviderBudget
+        $script:AgentCheckpoint.providerBudgetState = $script:AgentProviderBudgetState
+        Sync-AgentProviderBudgetLedger
+    }
+    else {
+        $script:AgentCheckpoint.providerBudgetProfile = $null
+        $script:AgentCheckpoint.providerBudgetFingerprint = $null
+        $script:AgentCheckpoint.providerBudgetState = $null
+    }
     $script:AgentCheckpoint.updatedUtc = [DateTime]::UtcNow.ToString('O')
     $checkpointJson = $script:AgentCheckpoint | ConvertTo-Json -Depth 16 -Compress
     if ($checkpointJson.Length -gt 60000) { throw 'Agent checkpoint exceeded the 60,000-character runtime limit.' }
@@ -400,6 +413,25 @@ function Write-AgentCheckpoint([string]$CheckpointCommandId) {
     $receipt = Invoke-AgentCli 'agentCheckpointSet' @{ CheckpointBase64 = $checkpointBase64 } $CheckpointCommandId
     if ($receipt.status -ne 'completed' -or [string]$receipt.data.campaignInstanceId -cne [string]$script:AgentCheckpoint.campaignInstanceId)
         { throw 'Native Campaign checkpoint write did not confirm the active Campaign identity.' }
+}
+
+function Initialize-AgentProviderBudgetLedger([string]$TaskId, [string]$CampaignInstanceId) {
+    if (-not $script:AgentProviderBudget) { return }
+    $script:AgentProviderBudgetTaskId = $TaskId
+    $script:AgentProviderBudgetCampaignInstanceId = $CampaignInstanceId
+    $script:AgentProviderBudgetLedgerPath = Get-AgentProviderBudgetLedgerPath -Root $script:AgentProviderBudgetLedgerRoot -TaskId $TaskId
+    $script:AgentProviderBudgetState.taskId = $TaskId
+    $existingLedger = Read-AgentProviderBudgetLedger -Path $script:AgentProviderBudgetLedgerPath -TaskId $TaskId -CampaignInstanceId $CampaignInstanceId -Budget $script:AgentProviderBudget
+    if ($existingLedger) {
+        $script:AgentProviderBudgetState = Merge-AgentProviderBudgetStates -CheckpointState $script:AgentProviderBudgetState -LedgerState $existingLedger.state -Budget $script:AgentProviderBudget
+    }
+    $script:AgentProviderBudgetState.taskId = $TaskId
+    Write-AgentProviderBudgetLedger -Path $script:AgentProviderBudgetLedgerPath -TaskId $TaskId -CampaignInstanceId $CampaignInstanceId -Budget $script:AgentProviderBudget -State $script:AgentProviderBudgetState
+}
+
+function Sync-AgentProviderBudgetLedger {
+    if (-not $script:AgentProviderBudget -or [string]::IsNullOrWhiteSpace([string]$script:AgentProviderBudgetLedgerPath)) { return }
+    Write-AgentProviderBudgetLedger -Path $script:AgentProviderBudgetLedgerPath -TaskId $script:AgentProviderBudgetTaskId -CampaignInstanceId $script:AgentProviderBudgetCampaignInstanceId -Budget $script:AgentProviderBudget -State $script:AgentProviderBudgetState
 }
 
 function ConvertTo-CheckpointObservationSummary($Observation) {
@@ -421,6 +453,7 @@ function Get-AgentProviderBudgetSummary($State, $Budget) {
     $usageCoverage = if ($State.reservedProviderCalls -gt 0) { [Math]::Round([double]$State.usageReportedCalls / [double]$State.reservedProviderCalls, 4) } else { 0.0 }
     $costStatus = if ([string]$State.mode -eq 'token-only-local') { 'local-provider-no-api-price' } elseif ($State.usageUnavailableCalls -gt 0 -or $State.usagePartialCalls -gt 0) { 'partial; reserved upper bound remains authoritative' } elseif ($State.usageReportedCalls -gt 0) { 'provider usage priced at peak reservation rates; invoice may differ' } else { 'no provider request sent' }
     return [ordered]@{
+        taskId = [string]$State.taskId
         budgetId = [string]$State.budgetId
         mode = [string]$State.mode
         currency = $State.currency
@@ -451,6 +484,7 @@ function Get-AgentProviderBudgetSummary($State, $Budget) {
         usagePartialCalls = [int]$State.usagePartialCalls
         usageUnavailableCalls = [int]$State.usageUnavailableCalls
         providerRetries = [int]$State.providerRetries
+        requestAttemptsUnavailableCalls = [int]$State.requestAttemptsUnavailableCalls
         usageCoverage = $usageCoverage
     }
 }
@@ -510,6 +544,19 @@ try {
     $observation = $null
     $script:AgentCompletionContract = $null
     $script:AgentProviderBudget = $null
+    $script:AgentProviderBudgetState = $null
+    $script:AgentProviderBudgetTaskId = $null
+    $script:AgentProviderBudgetCampaignInstanceId = $null
+    $script:AgentProviderBudgetLedgerPath = $null
+    $script:AgentProviderBudgetLedgerRoot = if (-not [string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_PROVIDER_BUDGET_LEDGER_ROOT)) {
+        [IO.Path]::GetFullPath([string]$env:CHRONICLE_PROVIDER_BUDGET_LEDGER_ROOT)
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_HARNESS_TEMP)) {
+        Join-Path ([IO.Path]::GetFullPath([string]$env:CHRONICLE_HARNESS_TEMP)) 'ProviderBudgetLedger'
+    }
+    else {
+        Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) 'ChronicleFramework\ProviderBudgetLedger'
+    }
     if (-not [string]::IsNullOrWhiteSpace($CompletionContractJson) -and -not [string]::IsNullOrWhiteSpace($CompletionContractBase64)) { throw 'Provide the Native completion contract as JSON or Base64, not both.' }
     $providedCompletionContractJson = $CompletionContractJson
     if (-not [string]::IsNullOrWhiteSpace($CompletionContractBase64)) {
@@ -528,7 +575,7 @@ try {
         catch { throw 'Provider budget Base64/JSON is invalid.' }
     }
     if (-not $script:AgentProviderBudget -and [IO.Path]::GetFileName($providerPath) -ceq 'Agent-OpenAICompatibleProvider.ps1') {
-        $script:AgentProviderBudget = New-AgentProviderBudget -ModelId ([string]$env:CHRONICLE_LLM_MODEL) -BaseUrl ([string]$env:CHRONICLE_LLM_BASE_URL) -MaxProviderCalls ([Math]::Min([int]$MaxDecisions, 20))
+        $script:AgentProviderBudget = New-AgentProviderBudget -ModelId ([string]$env:CHRONICLE_LLM_MODEL) -BaseUrl ([string]$env:CHRONICLE_LLM_BASE_URL)
     }
     $previousActionReceipt = $null
     $decisionFeedback = $null
@@ -544,31 +591,8 @@ try {
     if ($script:AgentProviderBudget) {
         $null = Test-AgentProviderBudget -Budget $script:AgentProviderBudget
         $providerBudgetCostPerRequestCny = Get-AgentProviderRequestCostUpperBound -Budget $script:AgentProviderBudget
-        $providerBudgetState = [ordered]@{
-            budgetId = [string]$script:AgentProviderBudget.budgetId
-            mode = [string]$script:AgentProviderBudget.mode
-            currency = [string]$script:AgentProviderBudget.currency
-            maxEstimatedCost = $script:AgentProviderBudget.maxEstimatedCost
-            maxProviderCalls = [int]$script:AgentProviderBudget.maxProviderCalls
-            reservedProviderCalls = 0
-            reservedRequestBodyBytes = 0L
-            reservedInputTokenUpperBound = 0L
-            reservedOutputTokens = 0L
-            reservedCostUpperBound = 0.0
-            actualRequestBodyBytes = 0L
-            promptTokensReported = 0L
-            completionTokensReported = 0L
-            cacheHitTokensReported = 0L
-            cacheMissTokensReported = 0L
-            usageReportedCalls = 0
-            usagePartialCalls = 0
-            usageUnavailableCalls = 0
-            providerRetries = 0
-            actualEstimatedCostCny = 0.0
-            estimatedInputCacheHitCostCny = 0.0
-            estimatedInputCacheMissCostCny = 0.0
-            estimatedOutputCostCny = 0.0
-        }
+        $providerBudgetState = New-AgentProviderBudgetState -Budget $script:AgentProviderBudget
+        $script:AgentProviderBudgetState = $providerBudgetState
     }
     if ($ResumeCheckpoint) {
         $checkpointRead = Invoke-AgentCli 'agentCheckpointGet' @{} "$CommandPrefix-checkpoint-read"
@@ -579,10 +603,30 @@ try {
             $script:AgentCheckpoint = $checkpointJson | ConvertFrom-Json -ErrorAction Stop
         }
         catch { throw 'Campaign Agent checkpoint is corrupt or unreadable; stopping before any provider call or Native action.' }
-        if ([int]$script:AgentCheckpoint.schemaVersion -ne 1)
+        if ([int]$script:AgentCheckpoint.schemaVersion -notin @(1,2))
             { throw "Campaign Agent checkpoint schema version '$($script:AgentCheckpoint.schemaVersion)' is unsupported; stopping before provider/actions." }
         if ([string]$script:AgentCheckpoint.campaignInstanceId -cne [string]$checkpointRead.data.campaignInstanceId)
             { throw 'Campaign Agent checkpoint belongs to a different Campaign instance; stopping before provider/actions.' }
+        if ($script:AgentCheckpoint.providerBudgetProfile) {
+            $savedBudget = $script:AgentCheckpoint.providerBudgetProfile
+            $savedFingerprint = Get-AgentProviderBudgetFingerprint -Budget $savedBudget
+            if ([string]$script:AgentCheckpoint.providerBudgetFingerprint -cne $savedFingerprint) { throw 'Saved provider budget profile fingerprint is invalid; refusing to resume with an unverified cost ceiling.' }
+            if ($script:AgentProviderBudget -and (Get-AgentProviderBudgetFingerprint -Budget $script:AgentProviderBudget) -cne $savedFingerprint) { throw 'Resume provider budget differs from the saved task budget; refusing to reset or change its cumulative ceiling.' }
+            if (-not $script:AgentProviderBudget) { $script:AgentProviderBudget = $savedBudget }
+            if ([string]$script:AgentCheckpoint.providerName -and [string]$script:AgentCheckpoint.providerName -cne [IO.Path]::GetFileName($providerPath)) { throw 'Resume provider differs from the one bound to the saved budget; refusing to apply the wrong usage profile.' }
+            if (-not $script:AgentCheckpoint.providerBudgetState) { throw 'Saved priced task checkpoint has no cumulative provider budget state; refusing to resume.' }
+            $null = Test-AgentProviderBudgetState -State $script:AgentCheckpoint.providerBudgetState -Budget $script:AgentProviderBudget
+            $providerBudgetState = $script:AgentCheckpoint.providerBudgetState
+            $script:AgentProviderBudgetState = $providerBudgetState
+            Initialize-AgentProviderBudgetLedger -TaskId ([string]$script:AgentCheckpoint.taskId) -CampaignInstanceId ([string]$script:AgentCheckpoint.campaignInstanceId)
+            $providerBudgetState = $script:AgentProviderBudgetState
+            if ($providerBudgetState.pendingProviderCall) {
+                $providerBudgetState.usageUnavailableCalls = [int]$providerBudgetState.usageUnavailableCalls + 1
+                $providerBudgetState.pendingProviderCall = $null
+                Write-AgentCheckpoint "$CommandPrefix-checkpoint-recovered-uncertain-provider-call"
+            }
+        }
+        elseif ($script:AgentProviderBudget) { throw 'This saved task predates cumulative provider budgeting; refusing to resume it with a fresh budget that could reset prior spend.' }
         if ([string]$script:AgentCheckpoint.status -notin @('active','provider-stopped'))
             { throw "Checkpoint status '$($script:AgentCheckpoint.status)' is not resumable." }
         $checkpointContract = $script:AgentCheckpoint.completionContract
@@ -638,9 +682,13 @@ try {
                 { throw 'An unfinished Campaign goal checkpoint already exists; resume it instead of overwriting it.' }
         }
         $script:AgentCheckpoint = [ordered]@{
-            schemaVersion = 1
+            schemaVersion = 2
             campaignInstanceId = [string]$checkpointRead.data.campaignInstanceId
             taskId = [Guid]::NewGuid().ToString('N')
+            providerName = [IO.Path]::GetFileName($providerPath)
+            providerBudgetProfile = $script:AgentProviderBudget
+            providerBudgetFingerprint = if ($script:AgentProviderBudget) { Get-AgentProviderBudgetFingerprint -Budget $script:AgentProviderBudget } else { $null }
+            providerBudgetState = $script:AgentProviderBudgetState
             goal = $Goal
             status = 'active'
             lastActionReceipt = $null
@@ -652,7 +700,13 @@ try {
             lastGoalVerification = $null
             updatedUtc = [DateTime]::UtcNow.ToString('O')
         }
+        Initialize-AgentProviderBudgetLedger -TaskId ([string]$script:AgentCheckpoint.taskId) -CampaignInstanceId ([string]$script:AgentCheckpoint.campaignInstanceId)
+        $providerBudgetState = $script:AgentProviderBudgetState
         Write-AgentCheckpoint "$CommandPrefix-checkpoint-start"
+    }
+    elseif (-not $script:AgentCheckpoint -and $script:AgentProviderBudget) {
+        Initialize-AgentProviderBudgetLedger -TaskId $loopRunId -CampaignInstanceId ([string]$observation.campaignInstanceId)
+        $providerBudgetState = $script:AgentProviderBudgetState
     }
     for ($index = 1; $index -le $MaxDecisions; $index++) {
         if ($ResumeCheckpoint -and $index -eq 1 -and $script:AgentCompletionContract) {
@@ -724,6 +778,10 @@ try {
             $providerBudgetState.reservedInputTokenUpperBound = [long]$providerBudgetState.reservedInputTokenUpperBound + [long]$script:AgentProviderBudget.maxInputTokensPerRequest
             $providerBudgetState.reservedOutputTokens = [long]$providerBudgetState.reservedOutputTokens + [long]$script:AgentProviderBudget.maxOutputTokensPerRequest
             $providerBudgetState.reservedCostUpperBound = [Math]::Round(([double]$providerBudgetState.reservedCostUpperBound + $providerBudgetCostPerRequestCny), 8)
+            $providerBudgetState.pendingProviderCall = [ordered]@{ iteration = $index; reservedUtc = [DateTime]::UtcNow.ToString('O'); costUpperBoundCny = $providerBudgetCostPerRequestCny }
+            $script:AgentProviderBudgetState = $providerBudgetState
+            if ($script:AgentCheckpoint) { Write-AgentCheckpoint "$CommandPrefix-checkpoint-provider-reserved-$index" }
+            else { Sync-AgentProviderBudgetLedger }
         }
         if ($MaxElapsedSeconds -gt 0 -and ([DateTime]::UtcNow - $loopStartedUtc).TotalSeconds -ge $MaxElapsedSeconds)
             { throw "Agent decision loop exceeded its $MaxElapsedSeconds-second wall-clock budget." }
@@ -777,7 +835,7 @@ try {
                 providerFailed = $true
                 failureKind = 'provider-process-failed'
                 failureType = $_.Exception.GetType().Name
-                providerUsage = [ordered]@{ status = 'unavailable'; requestAttempts = 0; requestBodyBytes = $null; httpRequestSent = 'unknown'; usageReason = 'Provider process failed before returning response usage.' }
+                providerUsage = [ordered]@{ status = 'unavailable'; requestAttempts = $null; requestAttemptsStatus = 'unknown'; requestBodyBytes = $null; httpRequestSent = 'unknown'; usageReason = 'Provider process failed before returning response usage.' }
             }
         }
         finally {
@@ -791,6 +849,10 @@ try {
                 $providerBudgetState.reservedInputTokenUpperBound = [Math]::Max(0, [long]$providerBudgetState.reservedInputTokenUpperBound - [long]$script:AgentProviderBudget.maxInputTokensPerRequest)
                 $providerBudgetState.reservedOutputTokens = [Math]::Max(0, [long]$providerBudgetState.reservedOutputTokens - [long]$script:AgentProviderBudget.maxOutputTokensPerRequest)
                 $providerBudgetState.reservedCostUpperBound = [Math]::Max(0, [double]$providerBudgetState.reservedCostUpperBound - $providerBudgetCostPerRequestCny)
+                $providerBudgetState.pendingProviderCall = $null
+                $script:AgentProviderBudgetState = $providerBudgetState
+                if ($script:AgentCheckpoint) { Write-AgentCheckpoint "$CommandPrefix-checkpoint-provider-rejected-$index" }
+                else { Sync-AgentProviderBudgetLedger }
             }
             $trace += [pscustomobject]@{
                 iteration = $index
@@ -813,7 +875,8 @@ try {
         if ($providerBudgetState) {
             $providerUsage = if ($decision) { $decision.providerUsage } else { $null }
             if ($providerUsage) {
-                $providerBudgetState.providerRetries = [int]$providerBudgetState.providerRetries + [Math]::Max(0, ([int]$providerUsage.requestAttempts - 1))
+                if ($null -eq $providerUsage.requestAttempts) { $providerBudgetState.requestAttemptsUnavailableCalls = [int]$providerBudgetState.requestAttemptsUnavailableCalls + 1 }
+                else { $providerBudgetState.providerRetries = [int]$providerBudgetState.providerRetries + [Math]::Max(0, ([int]$providerUsage.requestAttempts - 1)) }
                 if ($null -ne $providerUsage.requestBodyBytes) { $providerBudgetState.actualRequestBodyBytes = [long]$providerBudgetState.actualRequestBodyBytes + [long]$providerUsage.requestBodyBytes }
                 switch ([string]$providerUsage.status) {
                     'reported' {
@@ -834,7 +897,14 @@ try {
                     default { $providerBudgetState.usageUnavailableCalls = [int]$providerBudgetState.usageUnavailableCalls + 1 }
                 }
             }
-            else { $providerBudgetState.usageUnavailableCalls = [int]$providerBudgetState.usageUnavailableCalls + 1 }
+            else {
+                $providerBudgetState.usageUnavailableCalls = [int]$providerBudgetState.usageUnavailableCalls + 1
+                $providerBudgetState.requestAttemptsUnavailableCalls = [int]$providerBudgetState.requestAttemptsUnavailableCalls + 1
+            }
+            $providerBudgetState.pendingProviderCall = $null
+            $script:AgentProviderBudgetState = $providerBudgetState
+            if ($script:AgentCheckpoint) { Write-AgentCheckpoint "$CommandPrefix-checkpoint-provider-receipt-$index" }
+            else { Sync-AgentProviderBudgetLedger }
             $reportedUsageOverBudget = $false
             if ($providerUsage -and [string]$providerUsage.status -eq 'reported') {
                 $reportedUsageOverBudget = (

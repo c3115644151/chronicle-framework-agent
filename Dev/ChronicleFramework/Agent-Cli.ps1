@@ -735,7 +735,7 @@ switch ($Action) {
             $checkpointJson = [Text.UTF8Encoding]::new($false, $true).GetString([Convert]::FromBase64String($CheckpointBase64))
             if ($checkpointJson.Length -gt 65536) { throw 'Checkpoint payload exceeds the 65,536-character limit.' }
             $checkpointObject = $checkpointJson | ConvertFrom-Json
-            if ([int]$checkpointObject.schemaVersion -ne 1 -or [string]::IsNullOrWhiteSpace([string]$checkpointObject.campaignInstanceId)) { throw 'Checkpoint schemaVersion 1 and campaignInstanceId are required.' }
+            if ([int]$checkpointObject.schemaVersion -notin @(1,2) -or [string]::IsNullOrWhiteSpace([string]$checkpointObject.campaignInstanceId)) { throw 'Checkpoint schemaVersion 1 or 2 and campaignInstanceId are required.' }
         }
         catch { throw "Checkpoint payload is invalid: $($_.Exception.Message)" }
         $result = Invoke-ProtocolCommand 'agentCheckpointSet' @{ checkpointBase64 = $CheckpointBase64 }
