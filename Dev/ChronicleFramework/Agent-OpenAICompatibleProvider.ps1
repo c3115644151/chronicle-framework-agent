@@ -155,10 +155,19 @@ When `nativeMoveArrival.status` is `arrived`, the current Native observation con
     $headers = @{}
     if (-not [string]::IsNullOrWhiteSpace($apiKey)) { $headers.Authorization = "Bearer $apiKey" }
 
-    try {
-        $response = Invoke-RestMethod -Method Post -Uri $requestUri -Headers $headers -Body $bodyBytes -ContentType 'application/json; charset=utf-8' -TimeoutSec $timeoutSeconds
-    }
-    catch {
+    $response = $null
+    for ($attempt = 1; $attempt -le 2; $attempt++) {
+        try {
+            $response = Invoke-RestMethod -Method Post -Uri $requestUri -Headers $headers -Body $bodyBytes -ContentType 'application/json; charset=utf-8' -TimeoutSec $timeoutSeconds
+            break
+        }
+        catch {
+        $webStatus = if ($_.Exception -is [System.Net.WebException]) { $_.Exception.Status } else { $null }
+        $preResponseConnectionFailure = ($webStatus -in @([System.Net.WebExceptionStatus]::ConnectFailure,[System.Net.WebExceptionStatus]::NameResolutionFailure,[System.Net.WebExceptionStatus]::ProxyNameResolutionFailure))
+        if ($attempt -eq 1 -and $preResponseConnectionFailure) {
+            Start-Sleep -Milliseconds 400
+            continue
+        }
         $status = $null
         try { $status = [int]$_.Exception.Response.StatusCode } catch { }
         if ($status) {
@@ -184,9 +193,10 @@ When `nativeMoveArrival.status` is `arrived`, the current Native observation con
             { throw "Model provider request timed out after $timeoutSeconds seconds." }
         if ($_.Exception -is [System.Net.WebException]) {
             $innerType = if ($_.Exception.InnerException) { $_.Exception.InnerException.GetType().Name } else { 'none' }
-            throw "Model provider request failed with WebException (status=$($_.Exception.Status); host=$($endpointUri.Host); inner=$innerType)."
+            throw "Model provider request failed with WebException (status=$($_.Exception.Status); host=$($endpointUri.Host); attempt=$attempt/2; inner=$innerType)."
         }
-        throw "Model provider request failed with $($_.Exception.GetType().Name)."
+        throw "Model provider request failed with $($_.Exception.GetType().Name) (attempt=$attempt/2; host=$($endpointUri.Host))."
+        }
     }
 
     $choices = @($response.choices)

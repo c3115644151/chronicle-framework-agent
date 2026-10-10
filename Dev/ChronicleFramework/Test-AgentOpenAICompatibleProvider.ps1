@@ -465,6 +465,15 @@ try {
     $timeoutFailedClosed = ($process.ExitCode -ne 0 -and $timeoutStdout -notmatch '"action"' -and $timeoutStderr -notmatch [regex]::Escape($harnessSecret))
     try { $timeoutContext.Response.Close() } catch { }
 
+    $failureStep = 'bounded-retry-for-pre-response-connection-failure'
+    $env:CHRONICLE_LLM_BASE_URL = 'http://127.0.0.1:1/v1'
+    $connectionProvider = Start-ProviderProcess $requestJson
+    $process = $connectionProvider.Process
+    if (-not $process.WaitForExit(10000)) { try { $process.Kill() } catch { }; throw 'Provider did not stop after its bounded connection retry.' }
+    $connectionStdout = $connectionProvider.StdoutTask.Result.Trim()
+    $connectionStderr = $connectionProvider.StderrTask.Result.Trim()
+    $connectionFailureClassified = ($process.ExitCode -ne 0 -and $connectionStdout -notmatch '"action"' -and $connectionStderr -match 'WebException \(status=(ConnectFailure|NameResolutionFailure|ProxyNameResolutionFailure); host=127\.0\.0\.1; attempt=2/2;' -and $connectionStderr -notmatch [regex]::Escape($harnessSecret))
+
     $result = [ordered]@{
         ProviderKind = 'local HTTP stub; not a real model call'
         RequestGoalForwarded = $requestGoalForwarded
@@ -493,7 +502,8 @@ try {
         HttpErrorFailsClosedWithoutCredentialLeak = $httpErrorFailedClosed
         DisallowedActionFailsClosed = $invalidActionFailedClosed
         TimeoutFailsClosedWithoutCredentialLeak = $timeoutFailedClosed
-        Passed = ($requestGoalForwarded -and $recentDecisionHistoryForwarded -and $nativeArgumentPromptBindingsPresent -and $unicodeObservationForwarded -and $actionCatalogForwarded -and $authorizationSent -and $localCompatibilityPassed -and $endpointPathCorrect -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $observeAgainValidated -and $positionalArgumentsNormalized -and $stringEncodedArgumentsNormalized -and $singleStringArrayArgumentsNormalized -and $nestedStringArrayArgumentsNormalized -and $singleScalarArgumentsNormalized -and $invalidActionFailedClosed -and $unsupportedActionArgumentRecoverable -and $httpErrorFailedClosed -and $timeoutFailedClosed)
+        PreResponseConnectionFailureRetriesOnceAndClassifies = $connectionFailureClassified
+        Passed = ($requestGoalForwarded -and $recentDecisionHistoryForwarded -and $nativeArgumentPromptBindingsPresent -and $unicodeObservationForwarded -and $actionCatalogForwarded -and $authorizationSent -and $localCompatibilityPassed -and $endpointPathCorrect -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $observeAgainValidated -and $positionalArgumentsNormalized -and $stringEncodedArgumentsNormalized -and $singleStringArrayArgumentsNormalized -and $nestedStringArrayArgumentsNormalized -and $singleScalarArgumentsNormalized -and $invalidActionFailedClosed -and $unsupportedActionArgumentRecoverable -and $httpErrorFailedClosed -and $timeoutFailedClosed -and $connectionFailureClassified)
     }
     $result | ConvertTo-Json -Depth 8
     if (-not $result.Passed) { exit 1 }
