@@ -415,10 +415,32 @@ try {
             $goalResumeTrace.termination.reason -eq 'decision-budget-exhausted'
         )
         if (-not $resumeFeedbackVerified) { throw "Goal checkpoint resume did not preserve the unmet result and safely continue: $($goalResumeTrace | ConvertTo-Json -Depth 8 -Compress)" }
+        $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
+        $env:CHRONICLE_TEST_PROVIDER_MODE = 'checkpointMustNotCall'
+        try {
+            $budgetExhaustedResumeOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -ProviderBudgetBase64 $checkpointProviderBudgetBase64 -ResumeCheckpoint -AllowedActionNames 'state' -MaxDecisions 1 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-goal-verifier-budget-exhausted-resume-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+            $budgetExhaustedResumeExitCode = $LASTEXITCODE
+        }
+        finally {
+            if ($null -eq $priorProviderMode) { Remove-Item Env:CHRONICLE_TEST_PROVIDER_MODE -ErrorAction SilentlyContinue }
+            else { $env:CHRONICLE_TEST_PROVIDER_MODE = $priorProviderMode }
+        }
+        if ($budgetExhaustedResumeExitCode -ne 0) { throw "Cumulative task budget resume check failed: $budgetExhaustedResumeOutput" }
+        $budgetExhaustedResumeTrace = $budgetExhaustedResumeOutput | ConvertFrom-Json
+        $providerBudgetExhaustedAcrossCheckpointResume = (
+            $budgetExhaustedResumeTrace.termination.reason -eq 'provider-budget-exhausted' -and
+            @($budgetExhaustedResumeTrace.trace).Count -eq 1 -and
+            [string]$budgetExhaustedResumeTrace.trace[0].actionReceipt.status -ceq 'provider-budget-exhausted' -and
+            [bool]$budgetExhaustedResumeTrace.trace[0].actionReceipt.noProviderRequestSent -and
+            [int]$budgetExhaustedResumeTrace.providerBudget.reservedProviderCalls -eq 4 -and
+            -not [bool]$budgetExhaustedResumeTrace.trace[0].actionAttempted -and
+            -not [bool]$budgetExhaustedResumeTrace.trace[0].actionExecuted
+        )
+        if (-not $providerBudgetExhaustedAcrossCheckpointResume) { throw "The cumulative budget was reset or a Provider call crossed its ceiling after checkpoint resume: $($budgetExhaustedResumeTrace | ConvertTo-Json -Depth 8 -Compress)" }
         $goalCheckpointRoundtripResumeVerified = (
             [string]$checkpointBeforeSave.completionContract.contractId -ceq [string]$checkpointAfterLoad.completionContract.contractId -and
             [string]$checkpointAfterLoad.status -ceq 'active' -and $resumeFeedbackVerified -and $checkpointBudgetRoundtripVerified -and
-            [int]$goalResumeTrace.providerBudget.reservedProviderCalls -eq ([int]$checkpointBeforeSave.providerBudgetState.reservedProviderCalls + 1)
+            [int]$goalResumeTrace.providerBudget.reservedProviderCalls -eq ([int]$checkpointBeforeSave.providerBudgetState.reservedProviderCalls + 1) -and $providerBudgetExhaustedAcrossCheckpointResume
         )
     }
     finally {
@@ -752,6 +774,7 @@ try {
         ProviderBudgetCheckpointLedgerRoundtripVerified = $checkpointBudgetRoundtripVerified
         ProviderBudgetCallsReservedBeforeResume = [int]$checkpointBeforeSave.providerBudgetState.reservedProviderCalls
         ProviderBudgetCallsReservedAfterResume = [int]$goalResumeTrace.providerBudget.reservedProviderCalls
+        ProviderBudgetExhaustedAcrossCheckpointResume = $providerBudgetExhaustedAcrossCheckpointResume
         ProviderBudgetUsesKnownRatesAndBoundsThreeDeepSeekRuns = $providerBudgetPricingVerified
         ProviderBudgetStopsBeforeUnaffordableRequest = $providerBudgetStoppedBeforeRequest
         ProviderReportedUsageOverrunStopsBeforeNativeAction = $providerUsageOverBudgetStoppedBeforeNative
