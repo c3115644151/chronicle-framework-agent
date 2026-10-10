@@ -89,7 +89,7 @@ When `nativeMoveArrival.status` is `arrived`, the current Native observation con
 '@
 if ([string]$request.observation.modelView -ceq 'campaign-multiday-supply') {
     $systemPrompt = @'
-You decide one action at a time for the scoped Bannerlord multi-day supply task. Use the goal, latest Native observation, latest Native receipt, bounded recent action history, checkpoint context, decision feedback, and current action/control catalogs. The observation is intentionally limited to supply-relevant fields; anything omitted is unknown. Only currently listed actions, controls, exact observed IDs, and argument names are valid. The execution layer validates actions and the Native completion contract. If completion is rejected as unmet or unknown, follow the exact missing conditions and fresh observation. Never invent facts or claim completion before Native verification. Return one JSON object only, with no analysis or Markdown; rationale/reason must be 20 words or fewer.
+You decide one action at a time for the scoped Bannerlord multi-day supply task. Use the goal, exact Native completion contract, latest Native observation, latest Native receipt, bounded recent action history, checkpoint context, decision feedback, and current action/control catalogs. The observation is intentionally limited to supply-relevant fields; anything omitted is unknown. Only currently listed actions, controls, exact observed IDs, and argument names are valid. The execution layer validates actions and the Native completion contract. Compare each current Native value to the contract before buying more supplies or stopping. If completion is rejected as unmet or unknown, follow the exact missing conditions and fresh observation. Never invent facts or claim completion before Native verification. Return one JSON object only, with no analysis or Markdown; rationale/reason must be 20 words or fewer.
 
 For `menuSelect`, use an exact currently enabled menu option ID. In Trade InventoryState, use a successful current `foodOptions` receipt. `provision` must use an exact listed `viewModelItemId` and permitted integer amount; it only drafts the transaction. Then use currently listed `tradeConfirm` to commit or `tradeCancelChanges` to discard. A draft is not a completed purchase; trust the post-action Native receipt. From the Town menu, `town_wait` enters the wait screen but does not schedule a duration; use the listed `rest` action only while Native shows active waiting. An accepted rest request is still running, not complete. Use only a listed `observeAgain` control and wait for a fresh Native observation before stopping. Do not hide clock control inside movement, trade, or other actions.
 
@@ -165,6 +165,7 @@ Return one action as `{"action":"listed action","arguments":{},"rationale":"brie
             allowedActions = $request.allowedActions
             allowedControls = $request.allowedControls
             nativeMoveArrival = $request.nativeMoveArrival
+            completionContract = $request.completionContract
             checkpointContext = $request.checkpointContext
             observation = $request.observation
             previousActionReceipt = $compactReceipt
@@ -360,6 +361,16 @@ Return one action as `{"action":"listed action","arguments":{},"rationale":"brie
         exit 0
     }
 
+    if ([string]$decision.action -ceq 'done' -and $decision.done -ne $true) {
+        $hasStopArguments = $false
+        if ($decision.arguments -is [System.Management.Automation.PSCustomObject]) { $hasStopArguments = @($decision.arguments.PSObject.Properties).Count -gt 0 }
+        elseif ($decision.arguments -is [System.Collections.IDictionary]) { $hasStopArguments = $decision.arguments.Count -gt 0 }
+        elseif ($decision.arguments -is [Array]) { $hasStopArguments = $decision.arguments.Count -gt 0 }
+        if ($hasStopArguments) { throw 'A stop proposal cannot include action arguments.' }
+        $stopReason = if (-not [string]::IsNullOrWhiteSpace([string]$decision.reason)) { [string]$decision.reason } else { [string]$decision.rationale }
+        if ([string]::IsNullOrWhiteSpace($stopReason)) { $stopReason = 'Provider requested stop using the done action alias; the Native completion verifier remains authoritative.' }
+        $decision = [pscustomobject]@{ done = $true; reason = $stopReason; providerUsage = $providerUsage }
+    }
     if ($decision.done -eq $true) {
         $reason = [string]$decision.reason
         if ([string]::IsNullOrWhiteSpace($reason)) { throw 'Model stop decision is missing a reason.' }

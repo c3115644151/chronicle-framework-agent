@@ -208,6 +208,18 @@ try {
     $supplyRequest = $tradeRequest | ConvertTo-Json -Depth 16 | ConvertFrom-Json
     $supplyRequest.runId = 'provider-multiday-supply-scope-test'
     $supplyRequest.observation | Add-Member -NotePropertyName modelView -NotePropertyValue 'campaign-multiday-supply' -Force
+    $supplyContract = [ordered]@{
+        schemaVersion = 1
+        contractId = 'sargot-three-day-food-v1'
+        conditions = @(
+            [ordered]@{ id = 'party-members'; path = 'state.party.members'; operator = 'eq'; expected = 6 }
+            [ordered]@{ id = 'daily-ticks'; path = 'dailyTickCount'; operator = 'gte'; expected = 5 }
+            [ordered]@{ id = 'party-food'; path = 'state.party.food'; operator = 'gte'; expected = 1 }
+            [ordered]@{ id = 'minimum-gold'; path = 'state.economy.gold'; operator = 'gte'; expected = 861 }
+            [ordered]@{ id = 'town-menu'; path = 'state.context.menuId'; operator = 'eq'; expected = 'town' }
+        )
+    }
+    $supplyRequest | Add-Member -NotePropertyName completionContract -NotePropertyValue $supplyContract -Force
     $supplyRequest.previousActionReceipt.data.offers = @(
         [ordered]@{ viewModelItemId = 'olives'; itemId = 'olives'; modifierId = ''; name = 'Olives'; stock = 166; nativeItemCost = 9; inventoryLogicUnitPrice = 9; unitWeight = 10; isFood = $true; isTransferable = $true; inventorySide = 'OtherInventory'; nativeTooltipType = 'Goods' }
         [ordered]@{ viewModelItemId = 'grain'; itemId = 'grain'; modifierId = ''; name = 'Grain'; stock = 155; nativeItemCost = 17; inventoryLogicUnitPrice = 17; unitWeight = 10; isFood = $true; isTransferable = $true; inventorySide = 'OtherInventory'; nativeTooltipType = 'Goods' }
@@ -245,8 +257,32 @@ try {
     $supplyStderr = $supplyProvider.StderrTask.Result.Trim()
     if ($process.ExitCode -ne 0) { throw "Scoped supply request failed its provider budget: $supplyStderr" }
     $supplyDecision = $supplyStdout | ConvertFrom-Json
-    $supplyReceiptRetainsActionFacts = (@($supplyModelInput.previousActionReceipt.data.offers).Count -eq 9 -and [string]$supplyModelInput.previousActionReceipt.data.offers[0].viewModelItemId -ceq 'olives' -and [int]$supplyModelInput.previousActionReceipt.data.offers[0].stock -eq 166 -and [int]$supplyModelInput.previousActionReceipt.data.offers[0].inventoryLogicUnitPrice -eq 9 -and $null -eq $supplyModelInput.previousActionReceipt.data.offers[0].unitWeight -and [string]$supplyModelInput.observation.modelView -ceq 'campaign-multiday-supply')
+    $supplyReceiptRetainsActionFacts = (@($supplyModelInput.previousActionReceipt.data.offers).Count -eq 9 -and [string]$supplyModelInput.previousActionReceipt.data.offers[0].viewModelItemId -ceq 'olives' -and [int]$supplyModelInput.previousActionReceipt.data.offers[0].stock -eq 166 -and [int]$supplyModelInput.previousActionReceipt.data.offers[0].inventoryLogicUnitPrice -eq 9 -and $null -eq $supplyModelInput.previousActionReceipt.data.offers[0].unitWeight -and [string]$supplyModelInput.observation.modelView -ceq 'campaign-multiday-supply' -and [string]$supplyModelInput.completionContract.contractId -ceq 'sargot-three-day-food-v1' -and [int]$supplyModelInput.completionContract.conditions[3].expected -eq 861)
     $supplyProfileFitsBudget = ($supplyDecision.action -ceq 'provision' -and [string]$supplyDecision.providerUsage.observationScope -ceq 'campaign-multiday-supply' -and [int]$supplyDecision.providerUsage.systemPromptBytes -lt 3000 -and $supplyBodyWithinBudget -and $supplyReceiptRetainsActionFacts -and $supplyStdout -notmatch [regex]::Escape($harnessSecret) -and $supplyStderr -notmatch [regex]::Escape($harnessSecret))
+
+    $failureStep = 'normalize-action-done-as-native-verifiable-stop-proposal'
+    $doneAliasProvider = Start-ProviderProcess $requestJson
+    $process = $doneAliasProvider.Process
+    $doneAliasAcceptTask = $listener.GetContextAsync()
+    if (-not $doneAliasAcceptTask.Wait(5000)) { throw 'Local HTTP stub did not receive the done-alias provider request.' }
+    $doneAliasContext = $doneAliasAcceptTask.GetAwaiter().GetResult()
+    $doneAliasReader = New-Object System.IO.StreamReader($doneAliasContext.Request.InputStream, $doneAliasContext.Request.ContentEncoding)
+    $doneAliasRequestBody = $doneAliasReader.ReadToEnd()
+    $doneAliasReader.Dispose()
+    $doneAliasDecisionJson = [ordered]@{ action = 'done'; arguments = @{}; rationale = 'The objective appears satisfied; ask the Native verifier to confirm.' } | ConvertTo-Json -Compress
+    $doneAliasResponseJson = [ordered]@{ id = 'chatcmpl-harness-done-alias'; model = 'harness-contract-model'; choices = @([ordered]@{ index = 0; message = [ordered]@{ role = 'assistant'; content = $doneAliasDecisionJson }; finish_reason = 'stop' }); usage = [ordered]@{ prompt_tokens = 310; completion_tokens = 22; total_tokens = 332 } } | ConvertTo-Json -Depth 8 -Compress
+    $doneAliasResponseBytes = [System.Text.Encoding]::UTF8.GetBytes($doneAliasResponseJson)
+    $doneAliasContext.Response.StatusCode = 200
+    $doneAliasContext.Response.ContentType = 'application/json; charset=utf-8'
+    $doneAliasContext.Response.ContentLength64 = $doneAliasResponseBytes.Length
+    $doneAliasContext.Response.OutputStream.Write($doneAliasResponseBytes, 0, $doneAliasResponseBytes.Length)
+    $doneAliasContext.Response.OutputStream.Close()
+    if (-not $process.WaitForExit(($TimeoutSeconds + 5) * 1000)) { try { $process.Kill() } catch { }; throw 'Done-alias provider did not exit after its local HTTP response.' }
+    $doneAliasStdout = $doneAliasProvider.StdoutTask.Result.Trim()
+    $doneAliasStderr = $doneAliasProvider.StderrTask.Result.Trim()
+    if ($process.ExitCode -ne 0) { throw "Done-alias provider failed to return a stop proposal: $doneAliasStderr" }
+    $doneAliasDecision = $doneAliasStdout | ConvertFrom-Json
+    $doneAliasNormalizesToStop = ([bool]$doneAliasDecision.done -and [string]$doneAliasDecision.reason -match 'Native verifier' -and $null -eq $doneAliasDecision.action -and [string]$doneAliasDecision.providerUsage.responseId -ceq 'chatcmpl-harness-done-alias' -and [int]$doneAliasDecision.providerUsage.totalTokens -eq 332 -and $doneAliasStdout -notmatch [regex]::Escape($harnessSecret) -and $doneAliasStderr -notmatch [regex]::Escape($harnessSecret))
 
     $failureStep = 'normalize-ollama-native-provider-usage'
     $env:CHRONICLE_LLM_PROTOCOL = 'ollama-native'
@@ -740,6 +776,7 @@ try {
         NativeFoodQuoteFieldsRetained = $supplyReceiptRetainsActionFacts
         MultiDaySupplySystemPromptBytes = [int]$supplyDecision.providerUsage.systemPromptBytes
         MultiDaySupplyRequestBodyBytes = [int]$supplyDecision.providerUsage.requestBodyBytes
+        ActionDoneAliasNormalizesToStopProposal = $doneAliasNormalizesToStop
         BudgetFingerprintSurvivesRoundtripAndDetectsChanges = ($budgetFingerprintStableAcrossRoundtrip -and $changedBudgetProfileDetected)
         DurableBudgetLedgerPersistsPendingSpend = $budgetLedgerPersistsCumulativeStateAndFailsClosed
         DeepSeekWorstCasePerRunCny = $deepSeekRunUpperCny
@@ -770,7 +807,7 @@ try {
         TimeoutFailsClosedWithoutCredentialLeak = $timeoutFailedClosed
         PreResponseConnectionFailureRetriesOnceAndClassifies = $connectionFailureClassified
         PaidProviderBudgetDisablesRetry = $paidProviderRetryDisabled
-        Passed = ($requestGoalForwarded -and $recentDecisionHistoryForwarded -and $nativeArgumentPromptBindingsPresent -and $unicodeObservationForwarded -and $actionCatalogForwarded -and $authorizationSent -and $localCompatibilityPassed -and $providerBudgetMathVerified -and $ollamaNativeUsageReceiptCorrect -and $tradeObservationCompactionVerified -and $supplyProfileFitsBudget -and $supplyReceiptRetainsActionFacts -and $budgetLedgerPersistsCumulativeStateAndFailsClosed -and $endpointPathCorrect -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $usageReceiptAccurate -and $requestBodyBudgetRejectedBeforeHttp -and $observeAgainValidated -and $missingUsageNotZero -and $positionalArgumentsNormalized -and $stringEncodedArgumentsNormalized -and $singleStringArrayArgumentsNormalized -and $nestedStringArrayArgumentsNormalized -and $singleScalarArgumentsNormalized -and $invalidActionFailedClosed -and $unsupportedActionArgumentRecoverable -and $httpErrorFailedClosed -and $timeoutFailedClosed -and $connectionFailureClassified -and $paidProviderRetryDisabled)
+        Passed = ($requestGoalForwarded -and $recentDecisionHistoryForwarded -and $nativeArgumentPromptBindingsPresent -and $unicodeObservationForwarded -and $actionCatalogForwarded -and $authorizationSent -and $localCompatibilityPassed -and $providerBudgetMathVerified -and $ollamaNativeUsageReceiptCorrect -and $tradeObservationCompactionVerified -and $supplyProfileFitsBudget -and $supplyReceiptRetainsActionFacts -and $doneAliasNormalizesToStop -and $budgetLedgerPersistsCumulativeStateAndFailsClosed -and $endpointPathCorrect -and $payloadModeCorrect -and $providerOutputClean -and $decisionValidated -and $usageReceiptAccurate -and $requestBodyBudgetRejectedBeforeHttp -and $observeAgainValidated -and $missingUsageNotZero -and $positionalArgumentsNormalized -and $stringEncodedArgumentsNormalized -and $singleStringArrayArgumentsNormalized -and $nestedStringArrayArgumentsNormalized -and $singleScalarArgumentsNormalized -and $invalidActionFailedClosed -and $unsupportedActionArgumentRecoverable -and $httpErrorFailedClosed -and $timeoutFailedClosed -and $connectionFailureClassified -and $paidProviderRetryDisabled)
     }
     $result | ConvertTo-Json -Depth 8
     if (-not $result.Passed) { exit 1 }
