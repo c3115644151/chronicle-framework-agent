@@ -70,6 +70,24 @@ Minecraft Agent 的环境、规划、技能、记忆和评测研究已沉淀到�
 
 由此可确认：单机当前玩家客户端是已跑通的技术候选，并且在测试中不需要第二游戏账号；尚未确认的是最终 Mod/Host 分界及玩家交付方式。不能把“游戏内 C# 适配层 + 外部测试循环”直接称为已经部署好的产品 Runtime，也不能把代码中存在 Mission 动作称为真实模型已能跨场景自主游玩。W6-B 仍需独立核验多人客户端/共享 Campaign 的身份、服务器和授权要求，W6 Epic 再用两条证据决定首发部署形态。
 
+### 多人独立客户端候选：共享战役 Mod 的实际边界
+
+当前能对上产品目标的公开参照是 **Bannerlord Coop**，不是 Bannerlord Online，也不是原版多人战斗模式。它把单机 Campaign 改成共享持久战役：每位连接玩家有自己的角色、Party、Clan、部队和资源；服务器维持共享世界。项目当前说明支持 Bannerlord 1.4.8、推荐专用服务器、要求参与者使用相同 Mod 版本，并明确不保证与其它 Mod 兼容。项目路线图将 Quests 列为计划内容，因此不能假定它已经提供本项目所需的任务生态。它的代码是 source-available 而非开源，项目禁止未经许可复制、重分发或再许可代码；我们只能借鉴公开架构契约，不能复用其实现。
+
+| 边界 | 已核实事实 | 对 Chronicle 的含义 / 未知 |
+| --- | --- | --- |
+| 原版能力基线 | TaleWorlds 官方 Dedicated Server 指南讲的是配置 GameType、启动游戏与 Mission；其示例为 TeamDeathmatch，官方指南没有提供持久 Campaign 中独立玩家角色/Party 的服务器接口。Steam 上的 Bannerlord Coop 被标为 Native 设置下的 Singleplayer/Partial Conversion；它是把 Campaign 改造成共享多人世界的 Mod，不是原版战役自带联机。 | “AI独立玩家”不能只开原版多人战斗服，也不能把同进程 NPC 当成第二玩家。需要选定并兼容共享 Campaign Mod，或自己承担同量级的Campaign网络同步工程。 |
+| 服务器与玩家身份 | Bannerlord Coop 的服务器端是世界权威，不是玩家：其开发约定说明 Server 没有 MainHero/Party；实际玩家以客户端连接，各自控制角色、Party、Clan。公开服务器说明支持从游戏托管或专用服务器运行，并让其他玩家 Join；共享战役的存档还伴随记录玩家角色/进度的 `.json`。 | 若 AI 必须是真正独立玩家，它需要一个独立的玩家客户端身份和自己的 Native 玩家状态。把 Chronicle 当前单机 Mod 装到专服进程上，或让服务器代替 AI 玩家，都不符合该项目的身份模型。 |
+| 权威与线程 | 该项目公开框架约定服务器权威；客户端收到同步，网络处理器触发世界变更时要切回 GameThread 修改游戏状态。 | Chronicle 目前的 C# 协议在游戏 `OnApplicationTick` 中处理本机文件邮箱并直接操作当前 Campaign Native 对象；源码未检出 Multiplayer 网络消息、玩家会话身份或服务器权威同步适配。当前桥不能直接视为多人客户端桥。 |
+| 世界时间与断线 | Bannerlord Coop 对外说明共享移动、遭遇、战斗和Campaign进展，并称退出/断线由战役/战斗同步处理；服务端进程独立于连接客户端持续运行。 | 多人服务器给出“玩家进入Mission时，世界由服务器托管而非单机客户端暂停”的架构条件，但公开资料没有逐项说明各类 Mission/战斗期间 Campaign Clock 的精确推进与暂停规则，也没有证明 Chronicle Agent 断线后能自动重连/续跑；这些仍要在隔离测试环境确认。 |
+| Steam账号与授权 | 项目要求每位参与者有合法 Bannerlord 游戏副本，使用 Steam 集成并能以 Steam64 身份管理服务器封禁。Steam 官方家庭库说明：同一游戏若要同时由家庭成员游玩，家庭内必须有多份该游戏副本；一个副本不能同时提供两个独立玩家会话。 | 技术上第二个真人/AI玩家必须表现为第二个客户端会话；如果当前玩家也同时在线，就不能让同一份副本同时支撑两份会话。工程成本应按“独立客户端身份 + 第二份可同时使用的游戏授权”估算；第二份授权是否由家庭共享提供，取决于Steam当前规则/游戏资格，不等于一定要为AI账号单独购买。协作Mod对自动化账户是否有限制、同机双客户端是否正式支持，公开资料未完全回答；本卡不购买或注册账号。 |
+| Mod兼容与本机状态 | 公开兼容建议要求关闭其它 Mod、关闭 War Sails，并让所有玩家运行相同协作Mod版本；项目当前页面称其它Mod兼容未保证。对照本机 1.4.8 `Modules` 目录仅见原版 `Multiplayer`，未见 Bannerlord Coop 模块；Steam common目录也没有独立 Bannerlord Dedicated Server 安装。 | 现有本机安装和当前大量Campaign Mod列表不能作为已具备共享战役测试环境的证据。若选这条路，须单独安装固定版本及服务器到隔离环境，并验证 Chronicle 与其模块集兼容；不能在当前正式/主力模组环境里直接尝试。 |
+| 玩家使用步骤 | 当前公开入门步骤至少要订阅并启用协作Mod；创建/选择 Campaign 保存；启动 Host 或专服；每个玩家另启客户端 Join；确认游戏/Mod版本一致，主机需要保持服务端运行。 | 这比单机需要更多安装、联机和服务端概念；玩家如何把 AI 模型 Runtime 绑定到自己的第二客户端、如何自动启动/看护客户端，尚无 Chronicle 产品路径，也不能要求玩家安装 Codex/MCP。 |
+
+参照来源： [Bannerlord Coop 项目说明/版本/许可](https://github.com/Bannerlord-Coop-Team/BannerlordCoop)、[其多人身份/服务器约定](https://github.com/Bannerlord-Coop-Team/BannerlordCoop/blob/development/AGENTS.md)、[服务器部署与连接说明](https://github.com/Bannerlord-Coop-Team/BannerlordCoop/blob/development/deploy/Server%20Instructions.md)、[其权威同步/线程约定](https://github.com/Bannerlord-Coop-Team/BannerlordCoop/wiki/Framework-Definitions)、[Steam Workshop 项目类型/版本标记](https://steamcommunity.com/sharedfiles/filedetails/?id=3770450698)、[TaleWorlds Dedicated Server 指南](https://moddocs.bannerlord.com/multiplayer/hosting_server/)、[Steam Families 并发游戏规则](https://help.steampowered.com/en/faqs/view/054C-3167-DD7F-49D4)。这些公开文件可证明项目自述和架构约定，不是 Chronicle 在本机安装后通过运行测试得到的兼容性证据。
+
+阶段判断：多人路线确实能提供“AI作为独立Hero/Party进入同一个Campaign”的产品形态，但它不是轻量地给Chronicle加一个联机开关，而是依赖一个独立共享战役服务器、客户端身份与同步协议；AI仍须占用一个真实游戏客户端。它解决了单机 NPC 路线的身份和世界推进问题，却带来第二个客户端授权、服务端部署、版本兼容以及目前共享战役Mod不承诺兼容其它Mod等成本。现阶段只确认其概念/公开契约匹配，并未在本机运行该Mod，也未验证 Chronicle 可连接；W6 Epic 需要结合单机候选和这些成本再决定首发路线，不能由“技术上可想象”直接定案。
+
 冻结部署边界前必须完成同一 Agent 循环的对照原型，至少测量：游戏线程占用、模型超时行为、断网恢复、游戏/模型进程崩溃隔离、存档大小、长期记忆规模、多代理并发、版本升级和安装步骤。玩家体验要求始终是单入口；即使内部存在 Host，也必须由安装器和启动器透明管理。
 
 单机候选最小产品化原型还须从真实玩家启动路径运行同一 Native 行为切片，并记录 Map、Town菜单/等待、战斗和3D聚落Mission各自的观察/动作有效区间；分别中断模型Host与游戏客户端，验证是否能安全停止、回到当前存档后恢复到新Native观察、避免重放已提交动作。对源码已存在但无运行收据的场景标注未验，不能用Harness动作白名单代替玩家闭环。该原型要求用于W6/W7验收，不是宣布当前单机切片已支持所有这些场景。
