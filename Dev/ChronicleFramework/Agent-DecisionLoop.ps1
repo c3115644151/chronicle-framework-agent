@@ -1342,6 +1342,38 @@ try {
         $stepTiming.observationCompletedUtc = [DateTime]::UtcNow.ToString('O')
         $stepTiming.observationElapsedMilliseconds = [Math]::Round(([Diagnostics.Stopwatch]::GetTimestamp() - $observationStartedTicks) * 1000.0 / [Diagnostics.Stopwatch]::Frequency, 2)
         if ($nextObservation.status -ne 'completed' -or -not $nextObservation.state) { throw 'Post-action observation was not completed.' }
+        $restMonitorTarget = Get-NativeRestMonitorTarget -Action $validated.Action -Arguments $validated.Arguments -Receipt $actionResult
+        if ($restMonitorTarget -and (Test-NativeRestMonitorNeeded -Observation $nextObservation -MonitorTarget $restMonitorTarget)) {
+            $restMonitorStartedUtc = [DateTime]::UtcNow.ToString('O')
+            $restMonitorStartedTicks = [Diagnostics.Stopwatch]::GetTimestamp()
+            $restMonitorPollCount = 0
+            while (Test-NativeRestMonitorNeeded -Observation $nextObservation -MonitorTarget $restMonitorTarget) {
+                if ($MaxElapsedSeconds -gt 0 -and ([DateTime]::UtcNow - $loopStartedUtc).TotalSeconds -ge $MaxElapsedSeconds) {
+                    throw 'Agent decision loop exceeded its wall-clock budget while monitoring an accepted Native rest; no game clock control was issued.'
+                }
+                Start-Sleep -Seconds 5
+                $restMonitorObservation = Invoke-AgentCli 'state' @{} "$CommandPrefix-native-rest-monitor-$index-$($restMonitorPollCount + 1)"
+                $restMonitorPollCount++
+                if ($restMonitorObservation.status -ne 'completed' -or -not $restMonitorObservation.state) { throw 'Native observation during accepted-rest monitoring was not completed.' }
+                $nextObservation = $restMonitorObservation
+            }
+            $stepTiming.schedulerWaitStartedUtc = $restMonitorStartedUtc
+            $stepTiming.schedulerWaitCompletedUtc = [DateTime]::UtcNow.ToString('O')
+            $stepTiming.schedulerWaitElapsedMilliseconds = [Math]::Round(([Diagnostics.Stopwatch]::GetTimestamp() - $restMonitorStartedTicks) * 1000.0 / [Diagnostics.Stopwatch]::Frequency, 2)
+            $restMonitorExitReason = if ([int]$nextObservation.dailyTickCount -ge [int]$restMonitorTarget.TargetDailyTickCount) { 'requested-native-daily-tick-reached' } elseif (-not [bool]$nextObservation.state.context.isWaiting) { 'native-wait-ended-before-target' } else { 'native-wait-clock-stopped-before-target' }
+            $actionResult | Add-Member -NotePropertyName nativeRestMonitor -NotePropertyValue ([ordered]@{
+                kind = 'host-observation-only';
+                startingDailyTickCount = [int]$restMonitorTarget.StartingDailyTickCount;
+                requestedDays = [int]$restMonitorTarget.RequestedDays;
+                targetDailyTickCount = [int]$restMonitorTarget.TargetDailyTickCount;
+                finalDailyTickCount = [int]$nextObservation.dailyTickCount;
+                observationPollCount = $restMonitorPollCount;
+                elapsedMilliseconds = [Math]::Round(([Diagnostics.Stopwatch]::GetTimestamp() - $restMonitorStartedTicks) * 1000.0 / [Diagnostics.Stopwatch]::Frequency, 2);
+                exitReason = $restMonitorExitReason;
+                nativeClockControlSent = $false;
+                nativeGameActionsSent = 0
+            }) -Force
+        }
         $trace += [pscustomobject]@{
             iteration = $index
             observationBefore = $observation

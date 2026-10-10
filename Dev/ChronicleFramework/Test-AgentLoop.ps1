@@ -61,6 +61,15 @@ $nativeWaitAfterCompletedRestGate = Get-NativeRestActionGate -State $nativeTownW
 $observeAgainSupportsNativeTownWait = ($nativeRestWaitPolicy.Allowed -and $nativeRestWaitControls.Count -eq 1 -and $nativeRestWaitControls[0].control -ceq 'observeAgain' -and -not $unownedNativeWaitPolicy.Allowed -and $unownedNativeWaitPolicy.Recoverable)
 $nativeRestMayBeRequestedOnlyOnce = ($nativeWaitBeforeRestGate.HideActions.Count -eq 0 -and 'rest' -in $nativeWaitAfterAcceptedRestGate.HideActions -and 'rest' -in $nativeWaitAfterCompletedRestGate.HideActions)
 if (-not $observeAgainSupportsNativeTownWait -or -not $nativeRestMayBeRequestedOnlyOnce) { throw 'observeAgain may monitor an accepted Native Town Wait while its native clock advances, but must not create/advance the wait or permit a duplicate rest request.' }
+$nativeRestMonitorTarget = Get-NativeRestMonitorTarget -Action 'rest' -Arguments ([pscustomobject]@{ Days = 3 }) -Receipt ([pscustomobject]@{ status = 'accepted'; dailyTickCount = 2 })
+$nativeRestMonitorObservation = [pscustomobject]@{ dailyTickCount = 2; state = $nativeTownWaitObservation.state }
+$nativeRestMonitorReachedObservation = [pscustomobject]@{ dailyTickCount = 5; state = $nativeTownWaitObservation.state }
+$nativeRestMonitorPausedState = [pscustomobject]@{ context = [pscustomobject]@{ gameState = 'MapState'; timeControlMode = 'Stop'; menuId = 'town_wait_menus'; isWaiting = $true } }
+$nativeRestMonitorActive = Test-NativeRestMonitorNeeded -Observation $nativeRestMonitorObservation -MonitorTarget $nativeRestMonitorTarget
+$nativeRestMonitorReached = Test-NativeRestMonitorNeeded -Observation $nativeRestMonitorReachedObservation -MonitorTarget $nativeRestMonitorTarget
+$nativeRestMonitorPaused = Test-NativeRestMonitorNeeded -Observation ([pscustomobject]@{ dailyTickCount = 2; state = $nativeRestMonitorPausedState }) -MonitorTarget $nativeRestMonitorTarget
+$nativeRestMonitorVerified = ($nativeRestMonitorTarget.StartingDailyTickCount -eq 2 -and $nativeRestMonitorTarget.TargetDailyTickCount -eq 5 -and $nativeRestMonitorActive -and -not $nativeRestMonitorReached -and -not $nativeRestMonitorPaused)
+if (-not $nativeRestMonitorVerified) { throw 'An accepted Native rest request must let the host observe the existing Native wait to its requested daily tick, without changing clock state or polling after the wait stops.' }
 $barterOptionsFixture = [pscustomobject]@{ sessionId = 'safe-passage-test-session'; context = 'contextual:safe_passage_barterable'; isOfferDisabled = $false }
 $barterReadReceiptFixture = [pscustomobject]@{ action = 'barterOptions'; status = 'completed'; data = $barterOptionsFixture }
 $barterAutoBalanceReceiptFixture = [pscustomobject]@{ action = 'barterAutoBalance'; status = 'completed'; data = [pscustomobject]@{ updatedOptions = $barterOptionsFixture } }
@@ -762,6 +771,7 @@ try {
         ObserveAgainPolicySeparatesNaturalTimeFromStoppedEncounter = $observeAgainPolicyVerified
         ObserveAgainControlIsExposedOnlyWhenSafe = $observeAgainControlCatalogVerified
         ObserveAgainCanMonitorAcceptedNativeTownWait = $observeAgainSupportsNativeTownWait
+        NativeRestMonitorCoalescesWaitPolling = $nativeRestMonitorVerified
         ObserveAgainDuringUncommittedTradeIsRecoverable = $tradeInventoryObserveAgainRejectedSafely
         NativeRestRequestIsSingleUsePerWait = $nativeRestMayBeRequestedOnlyOnce
         BarterActionCatalogStagesCurrentNativeQuote = $barterActionPhaseGateVerified
@@ -799,7 +809,7 @@ try {
         ProcessStopped = $stop.processStopped
         Trace = $trace.trace
     }
-    $result.Passed = ($result.DecisionCount -eq 2 -and $observationLoopVerified -and $receiptForwarded -and $decisionTimingCaptured -and $unicodeRoundTripVerified -and $observeAgainPolicyVerified -and $observeAgainControlCatalogVerified -and $observeAgainSupportsNativeTownWait -and $tradeInventoryObserveAgainRejectedSafely -and $nativeRestMayBeRequestedOnlyOnce -and $barterActionPhaseGateVerified -and $nativeMenuAndTradeCatalogVerified -and $supplyObservationProfileVerified -and $unobstructedCampaignMapPolicyVerified -and $doneSignalVerified -and $goalVerifierEarlyDoneRecoveryVerified -and $goalCheckpointRoundtripResumeVerified -and $providerBudgetPricingVerified -and $providerBudgetStoppedBeforeRequest -and $providerUsageOverBudgetStoppedBeforeNative -and $goalAndCatalogForwarded -and $scopedActionRejected -and $dynamicActionRecoveryVerified -and $invalidArgumentRecoveryVerified -and $dialogueCatalogRecoveryVerified -and $staleOfferRecoveryVerified -and $unlistedResumeRecoveryVerified -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
+    $result.Passed = ($result.DecisionCount -eq 2 -and $observationLoopVerified -and $receiptForwarded -and $decisionTimingCaptured -and $unicodeRoundTripVerified -and $observeAgainPolicyVerified -and $observeAgainControlCatalogVerified -and $observeAgainSupportsNativeTownWait -and $nativeRestMonitorVerified -and $tradeInventoryObserveAgainRejectedSafely -and $nativeRestMayBeRequestedOnlyOnce -and $barterActionPhaseGateVerified -and $nativeMenuAndTradeCatalogVerified -and $supplyObservationProfileVerified -and $unobstructedCampaignMapPolicyVerified -and $doneSignalVerified -and $goalVerifierEarlyDoneRecoveryVerified -and $goalCheckpointRoundtripResumeVerified -and $providerBudgetPricingVerified -and $providerBudgetStoppedBeforeRequest -and $providerUsageOverBudgetStoppedBeforeNative -and $goalAndCatalogForwarded -and $scopedActionRejected -and $dynamicActionRecoveryVerified -and $invalidArgumentRecoveryVerified -and $dialogueCatalogRecoveryVerified -and $staleOfferRecoveryVerified -and $unlistedResumeRecoveryVerified -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
     $result | ConvertTo-Json -Depth 12
     if (-not $result.Passed) { exit 1 }
 }

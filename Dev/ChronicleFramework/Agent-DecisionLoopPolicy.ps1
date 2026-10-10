@@ -94,6 +94,44 @@ function Get-ObserveAgainPolicy {
     return [pscustomobject]@{ Allowed = $true; Recoverable = $false; Reason = 'Native movement is active and Campaign time is advancing.' }
 }
 
+function Get-NativeRestMonitorTarget {
+    param(
+        [Parameter(Mandatory = $true)][string]$Action,
+        [Parameter(Mandatory = $true)]$Arguments,
+        [Parameter(Mandatory = $true)]$Receipt
+    )
+
+    $days = 0
+    $startingDailyTickCount = 0
+    if ($Action -cne 'rest' -or [string]$Receipt.status -cne 'accepted' -or
+        -not [int]::TryParse([string]$Arguments.Days, [ref]$days) -or $days -lt 1 -or
+        -not [int]::TryParse([string]$Receipt.dailyTickCount, [ref]$startingDailyTickCount) -or $startingDailyTickCount -lt 0) {
+        return $null
+    }
+    return [pscustomobject]@{
+        StartingDailyTickCount = $startingDailyTickCount
+        RequestedDays = $days
+        TargetDailyTickCount = $startingDailyTickCount + $days
+    }
+}
+
+function Test-NativeRestMonitorNeeded {
+    param(
+        [Parameter(Mandatory = $true)]$Observation,
+        [Parameter(Mandatory = $true)]$MonitorTarget
+    )
+
+    $state = $Observation.state
+    $dailyTickCount = 0
+    $hasDailyTickCount = [int]::TryParse([string]$Observation.dailyTickCount, [ref]$dailyTickCount)
+    return (
+        $hasDailyTickCount -and $dailyTickCount -lt [int]$MonitorTarget.TargetDailyTickCount -and
+        [string]$state.context.gameState -ceq 'MapState' -and
+        [string]$state.context.menuId -ceq 'town_wait_menus' -and [bool]$state.context.isWaiting -and
+        [string]$state.context.timeControlMode -in @('UnstoppableFastForward','UnstoppableFastForwardForPartyWaitTime')
+    )
+}
+
 function Get-EffectiveControlCatalog {
     param(
         [Parameter(Mandatory = $true)]$Observation,
