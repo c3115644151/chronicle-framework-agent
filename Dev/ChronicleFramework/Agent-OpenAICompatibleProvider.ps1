@@ -46,6 +46,9 @@ try {
     $reasoningEffort = [string]$env:CHRONICLE_LLM_REASONING_EFFORT
     if (-not [string]::IsNullOrWhiteSpace($reasoningEffort) -and $reasoningEffort -notin @('none','low','medium','high'))
         { throw 'CHRONICLE_LLM_REASONING_EFFORT must be omitted or one of: none, low, medium, high.' }
+    $thinkingMode = [string]$env:CHRONICLE_LLM_THINKING_MODE
+    if (-not [string]::IsNullOrWhiteSpace($thinkingMode) -and $thinkingMode -notin @('enabled','disabled'))
+        { throw 'CHRONICLE_LLM_THINKING_MODE must be omitted or one of: enabled, disabled.' }
     $temperature = 0.0
     $hasTemperature = -not [string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_TEMPERATURE)
     if ($hasTemperature -and (-not [double]::TryParse([string]$env:CHRONICLE_LLM_TEMPERATURE, [ref]$temperature) -or $temperature -lt 0 -or $temperature -gt 2))
@@ -148,7 +151,8 @@ When `nativeMoveArrival.status` is `arrived`, the current Native observation con
         store = $false
     }
     $payload[$maxTokenParameter] = $maxTokens
-    if (-not [string]::IsNullOrWhiteSpace($reasoningEffort)) { $payload.reasoning_effort = $reasoningEffort }
+    if (-not [string]::IsNullOrWhiteSpace($thinkingMode)) { $payload.thinking = [ordered]@{ type = $thinkingMode } }
+    if (-not [string]::IsNullOrWhiteSpace($reasoningEffort) -and $thinkingMode -cne 'disabled') { $payload.reasoning_effort = $reasoningEffort }
     if ($hasTemperature) { $payload.temperature = $temperature }
     $body = $payload | ConvertTo-Json -Depth 28 -Compress
     $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($body)

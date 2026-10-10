@@ -510,6 +510,8 @@ try {
         ProviderKind = 'configured OpenAI-compatible live model'
         ModelId = [string]$env:CHRONICLE_LLM_MODEL
         ModelMaxOutputTokens = [int]$env:CHRONICLE_LLM_MAX_TOKENS
+        ModelThinkingMode = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_THINKING_MODE)) { 'provider-default' } else { [string]$env:CHRONICLE_LLM_THINKING_MODE }
+        ModelReasoningEffort = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_REASONING_EFFORT)) { 'provider-default' } else { [string]$env:CHRONICLE_LLM_REASONING_EFFORT }
         SourceCommit = $sourceCommit
         SourceTrackedTreeClean = $sourceTrackedTreeClean
         RunStartedUtc = $modelRunStartedUtc
@@ -565,6 +567,8 @@ catch {
             ProviderKind = 'configured OpenAI-compatible live model; failed before acceptance'
             ModelId = [string]$env:CHRONICLE_LLM_MODEL
             ModelMaxOutputTokens = [int]$env:CHRONICLE_LLM_MAX_TOKENS
+            ModelThinkingMode = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_THINKING_MODE)) { 'provider-default' } else { [string]$env:CHRONICLE_LLM_THINKING_MODE }
+            ModelReasoningEffort = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_REASONING_EFFORT)) { 'provider-default' } else { [string]$env:CHRONICLE_LLM_REASONING_EFFORT }
             SourceCommit = $sourceCommit
             SourceTrackedTreeClean = $sourceTrackedTreeClean
             RunStartedUtc = $modelRunStartedUtc

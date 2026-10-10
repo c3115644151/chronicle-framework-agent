@@ -10,6 +10,7 @@ $priorTimeout = $env:CHRONICLE_LLM_TIMEOUT_SECONDS
 $priorTokens = $env:CHRONICLE_LLM_MAX_TOKENS
 $priorTokenParameter = $env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER
 $priorReasoningEffort = $env:CHRONICLE_LLM_REASONING_EFFORT
+$priorThinkingMode = $env:CHRONICLE_LLM_THINKING_MODE
 $priorTemperature = $env:CHRONICLE_LLM_TEMPERATURE
 $harnessSecret = 'chronicle-local-provider-test-secret'
 $listener = $null
@@ -51,6 +52,7 @@ try {
     $env:CHRONICLE_LLM_TIMEOUT_SECONDS = [string]$TimeoutSeconds
     $env:CHRONICLE_LLM_MAX_TOKENS = '512'
     $env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER = 'max_completion_tokens'
+    $env:CHRONICLE_LLM_THINKING_MODE = 'disabled'
 
     $goal = 'Inspect currently visible safe settlements and then stop with the Native receipt.'
     $expectedHeroName = -join @([char]0x6CD5,[char]0x5C14,[char]0x585E,[char]0x6C83)
@@ -88,7 +90,7 @@ try {
     $actionCatalogForwarded = ('mapSettlementTargets' -in $allowedNames -and 'move' -in $allowedNames -and 'advance' -notin $allowedNames)
     $authorizationSent = ($context.Request.Headers['Authorization'] -ceq "Bearer $harnessSecret")
     $payloadModeCorrect = ($apiRequest.model -eq 'harness-contract-model' -and $apiRequest.response_format.type -eq 'json_object' -and
-        [int]$apiRequest.max_completion_tokens -eq 512 -and [bool]($apiRequest.store -eq $false) -and $apiRequest.stream -ne $true -and $null -eq $apiRequest.reasoning_effort -and $null -eq $apiRequest.temperature)
+        [int]$apiRequest.max_completion_tokens -eq 512 -and [bool]($apiRequest.store -eq $false) -and $apiRequest.stream -ne $true -and $apiRequest.thinking.type -ceq 'disabled' -and $null -eq $apiRequest.reasoning_effort -and $null -eq $apiRequest.temperature)
 
     $modelDecision = [ordered]@{
         action = 'mapSettlementTargets'
@@ -299,6 +301,7 @@ try {
     $failureStep = 'verify-local-openai-compatible-service-contract'
     $env:CHRONICLE_LLM_API_KEY = ''
     $env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER = 'max_tokens'
+    Remove-Item Env:CHRONICLE_LLM_THINKING_MODE -ErrorAction SilentlyContinue
     $env:CHRONICLE_LLM_REASONING_EFFORT = 'none'
     $env:CHRONICLE_LLM_TEMPERATURE = '0'
     $largeMapTargets = @(1..40 | ForEach-Object {
@@ -522,5 +525,6 @@ finally {
     if ($null -eq $priorTokens) { Remove-Item Env:CHRONICLE_LLM_MAX_TOKENS -ErrorAction SilentlyContinue } else { $env:CHRONICLE_LLM_MAX_TOKENS = $priorTokens }
     if ($null -eq $priorTokenParameter) { Remove-Item Env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER -ErrorAction SilentlyContinue } else { $env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER = $priorTokenParameter }
     if ($null -eq $priorReasoningEffort) { Remove-Item Env:CHRONICLE_LLM_REASONING_EFFORT -ErrorAction SilentlyContinue } else { $env:CHRONICLE_LLM_REASONING_EFFORT = $priorReasoningEffort }
+    if ($null -eq $priorThinkingMode) { Remove-Item Env:CHRONICLE_LLM_THINKING_MODE -ErrorAction SilentlyContinue } else { $env:CHRONICLE_LLM_THINKING_MODE = $priorThinkingMode }
     if ($null -eq $priorTemperature) { Remove-Item Env:CHRONICLE_LLM_TEMPERATURE -ErrorAction SilentlyContinue } else { $env:CHRONICLE_LLM_TEMPERATURE = $priorTemperature }
 }

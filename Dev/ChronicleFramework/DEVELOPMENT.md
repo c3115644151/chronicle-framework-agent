@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.99
+Contract version: 7.101
 
 ## 目标与边界
 
@@ -227,7 +227,7 @@ Agent决策循环的 `allowedControls` 与游戏动作目录分离，但同样�
 
 Provider发现模型选择了当前合法动作、但参数名超出该动作当轮的白名单时，不得静默删掉额外参数，也不应把它伪装成游戏内动作失败。它返回带当前动作目录、合法参数名、非法参数名且明确标注“未发送给Native”的结构化拒绝；循环重新读取原版状态，把拒绝原因交还模型，并限制连续重试次数。其它参数形状错误或缺少必填参数继续失败关闭，直到建立对应的可验证恢复契约。
 
-真实Provider只对尚未收到HTTP响应的TCP连接/名称解析失败自动重试一次，随后停止并记录安全的HTTP状态、主机和内层异常类型；不重试超时或已收到的HTTP错误响应，以免结果不确定时重复生成并产生重复费用。外部服务响应正文、Authorization头和密钥不进入失败日志。
+真实Provider只对尚未收到HTTP响应的TCP连接/名称解析失败自动重试一次，随后停止并记录安全的HTTP状态、主机和内层异常类型；不重试超时或已收到的HTTP错误响应，以免结果不确定时重复生成并产生重复费用。外部服务响应正文、Authorization头和密钥不进入失败日志。`CHRONICLE_LLM_THINKING_MODE`可选地把OpenAI-compatible `thinking.type`设为`enabled`或`disabled`；未配置时不改Provider原来的默认值。DeepSeek Flash默认为Thinking模式，这个选项用于针对结构化动作评测控制推理模式，不更换模型或改游戏动作。
 
 Native Barter目录按当前VM会话和成功回执逐阶段开放：没有当前BarterVM时只允许读取选项；读到当前Safe Passage报价后开放自动平衡，暂不允许提交；自动平衡成功后在同一会话中隐藏重复读取/重复平衡，开放当前可用的Offer。报价编辑、重置、取消或提交会使已平衡标记失效；Offer成功则清除会话标记并转回原版谈话阶段。这样模型仍决定是否调整/提交，但不会被反复可用的“读取/自动平衡”按钮困在无进展循环。
 
