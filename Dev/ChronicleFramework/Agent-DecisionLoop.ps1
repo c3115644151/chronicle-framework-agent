@@ -6,6 +6,8 @@ param(
     [ValidateRange(0,3600)][int]$MaxElapsedSeconds = 0,
     [string]$CommandPrefix = 'loop',
     [string]$Goal,
+    [string]$CompletionContractJson,
+    [string]$CompletionContractBase64,
     [string[]]$AllowedActionNames,
     [switch]$PersistCheckpoint,
     [switch]$ResumeCheckpoint,
@@ -456,14 +458,26 @@ try {
     $script:AgentCheckpoint = $null
     $loopStartedUtc = [DateTime]::UtcNow
     $observation = $null
+    $script:AgentCompletionContract = $null
+    if (-not [string]::IsNullOrWhiteSpace($CompletionContractJson) -and -not [string]::IsNullOrWhiteSpace($CompletionContractBase64)) { throw 'Provide the Native completion contract as JSON or Base64, not both.' }
+    $providedCompletionContractJson = $CompletionContractJson
+    if (-not [string]::IsNullOrWhiteSpace($CompletionContractBase64)) {
+        try { $providedCompletionContractJson = [Text.UTF8Encoding]::new($false, $true).GetString([Convert]::FromBase64String($CompletionContractBase64)) }
+        catch { throw 'Completion contract Base64 is invalid.' }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($providedCompletionContractJson)) {
+        try { $script:AgentCompletionContract = $providedCompletionContractJson | ConvertFrom-Json -ErrorAction Stop }
+        catch { throw 'Completion contract JSON is invalid.' }
+    }
     $previousActionReceipt = $null
     $decisionFeedback = $null
     $consecutiveDecisionRejections = 0
     $initialObservationStartedUtc = [DateTime]::UtcNow.ToString('O')
     $observation = Invoke-AgentCli 'state' @{} "$CommandPrefix-observe-0"
     $initialObservationCompletedUtc = [DateTime]::UtcNow.ToString('O')
-    $termination = [ordered]@{ reason = 'decision-budget-exhausted'; providerReason = $null; completedByProvider = $false }
+    $termination = [ordered]@{ reason = 'decision-budget-exhausted'; providerReason = $null; completedByProvider = $false; goalVerified = $false; completionContractId = if ($script:AgentCompletionContract) { [string]$script:AgentCompletionContract.contractId } else { $null } }
     if ($observation.status -ne 'completed' -or -not $observation.state) { throw 'Initial game observation was not completed.' }
+    if ($script:AgentCompletionContract) { $null = Test-AgentGoalCompletion -Contract $script:AgentCompletionContract -Observation $observation -ValidateOnly }
     if ($ResumeCheckpoint) {
         $checkpointRead = Invoke-AgentCli 'agentCheckpointGet' @{} "$CommandPrefix-checkpoint-read"
         if ($checkpointRead.status -ne 'completed' -or [string]::IsNullOrWhiteSpace([string]$checkpointRead.data.checkpointBase64))
@@ -479,6 +493,17 @@ try {
             { throw 'Campaign Agent checkpoint belongs to a different Campaign instance; stopping before provider/actions.' }
         if ([string]$script:AgentCheckpoint.status -notin @('active','provider-stopped'))
             { throw "Checkpoint status '$($script:AgentCheckpoint.status)' is not resumable." }
+        $checkpointContract = $script:AgentCheckpoint.completionContract
+        if ($checkpointContract) {
+            if ($script:AgentCompletionContract) {
+                $checkpointContractJson = $checkpointContract | ConvertTo-Json -Depth 12 -Compress
+                $requestedContractJson = $script:AgentCompletionContract | ConvertTo-Json -Depth 12 -Compress
+                if ($checkpointContractJson -cne $requestedContractJson) { throw 'A resume request cannot replace the Native completion contract stored in the Campaign checkpoint.' }
+            }
+            else { $script:AgentCompletionContract = $checkpointContract }
+        }
+        elseif ($script:AgentCompletionContract) { throw 'A resume request cannot add a completion contract to a Campaign checkpoint that was created without one.' }
+        if ($script:AgentCompletionContract) { $termination.completionContractId = [string]$script:AgentCompletionContract.contractId }
         if ([string]::IsNullOrWhiteSpace([string]$script:AgentCheckpoint.goal)) { throw 'Campaign checkpoint has no resumable goal.' }
         if (-not [string]::IsNullOrWhiteSpace($Goal) -and [string]$Goal -cne [string]$script:AgentCheckpoint.goal)
             { throw 'A resume request cannot replace the goal stored in the Campaign checkpoint.' }
@@ -531,11 +556,50 @@ try {
             lastRecovery = $null
             lastObservedSummary = $null
             lastStopReason = $null
+            completionContract = $script:AgentCompletionContract
+            lastGoalVerification = $null
             updatedUtc = [DateTime]::UtcNow.ToString('O')
         }
         Write-AgentCheckpoint "$CommandPrefix-checkpoint-start"
     }
     for ($index = 1; $index -le $MaxDecisions; $index++) {
+        if ($ResumeCheckpoint -and $index -eq 1 -and $script:AgentCompletionContract) {
+            $resumeVerification = Test-AgentGoalCompletion -Contract $script:AgentCompletionContract -Observation $observation
+            if ($resumeVerification.Satisfied) {
+                $verifiedUtc = [DateTime]::UtcNow.ToString('O')
+                $trace += [pscustomobject]@{
+                    iteration = 0
+                    observationBefore = $observation
+                    previousActionReceipt = $previousActionReceipt
+                    allowedActions = @()
+                    allowedControls = @()
+                    decisionFeedback = $null
+                    decision = $null
+                    actionReceipt = [ordered]@{ status = 'goal-verified-on-resume'; noNativeActionSent = $true; goalVerification = $resumeVerification; verifiedUtc = $verifiedUtc }
+                    observationAfter = $observation
+                    actionAttempted = $false
+                    actionExecuted = $false
+                    control = [ordered]@{ kind = 'goal-already-satisfied-on-resume'; contractId = $resumeVerification.ContractId }
+                }
+                $script:AgentCheckpoint.status = 'verified-complete'
+                $script:AgentCheckpoint.lastGoalVerification = [ordered]@{ status = 'satisfied'; contractId = $resumeVerification.ContractId; verifiedUtc = $verifiedUtc; source = 'fresh Native Campaign observation on checkpoint resume'; result = $resumeVerification }
+                $script:AgentCheckpoint.lastStopReason = 'Native goal contract verified on resume.'
+                Write-AgentCheckpoint "$CommandPrefix-checkpoint-verified-resume"
+                $termination = [ordered]@{ reason = 'native-goal-verified-on-resume'; providerReason = $null; completedByProvider = $false; goalVerified = $true; completionContractId = $resumeVerification.ContractId }
+                break
+            }
+            $decisionFeedback = [ordered]@{
+                kind = if ($resumeVerification.Status -eq 'unknown') { 'goal-verification-unknown-after-resume' } else { 'goal-not-satisfied-after-resume' }
+                contractId = $resumeVerification.ContractId
+                missingConditions = @($resumeVerification.MissingConditions)
+                unknownConditions = @($resumeVerification.UnknownConditions)
+                noNativeActionSent = $true
+                message = if ($resumeVerification.Status -eq 'unknown') { 'Fresh Native Campaign state does not contain every field required to verify this saved goal; do not claim completion.' } else { 'Fresh Native Campaign state does not yet meet these saved goal conditions; continue only through currently allowed actions.' }
+            }
+            $script:AgentCheckpoint.status = 'active'
+            $script:AgentCheckpoint.lastGoalVerification = [ordered]@{ status = [string]$resumeVerification.Status; contractId = $resumeVerification.ContractId; verifiedUtc = [DateTime]::UtcNow.ToString('O'); source = 'fresh Native Campaign observation on checkpoint resume'; result = $resumeVerification }
+            Write-AgentCheckpoint "$CommandPrefix-checkpoint-goal-unmet-on-resume"
+        }
         if ($MaxElapsedSeconds -gt 0 -and ([DateTime]::UtcNow - $loopStartedUtc).TotalSeconds -ge $MaxElapsedSeconds)
             { throw "Agent decision loop exceeded its $MaxElapsedSeconds-second wall-clock budget." }
         $nativeMoveArrival = $null
@@ -559,6 +623,7 @@ try {
             allowedActions = @($actionCatalog.GetEnumerator() | Sort-Object -Property Key | ForEach-Object { [ordered]@{ action = [string]$_.Key; arguments = @($_.Value) } })
             allowedControls = $controlCatalog
             nativeMoveArrival = $nativeMoveArrival
+            completionContract = $script:AgentCompletionContract
             checkpointContext = if ($script:AgentCheckpoint) { [ordered]@{ schemaVersion = $script:AgentCheckpoint.schemaVersion; campaignInstanceId = $script:AgentCheckpoint.campaignInstanceId; taskId = $script:AgentCheckpoint.taskId; status = $script:AgentCheckpoint.status; lastObservedSummary = $script:AgentCheckpoint.lastObservedSummary; pendingAction = $script:AgentCheckpoint.pendingAction; lastRecovery = $script:AgentCheckpoint.lastRecovery } } else { $null }
             observation = (Convert-ObservationForDecision $observation)
             previousActionReceipt = (Convert-ReceiptForDecision $previousActionReceipt $observation)
@@ -714,6 +779,44 @@ try {
         if ($decision -and $decision.done -eq $true) {
             $doneReason = [string]$decision.reason
             if ([string]::IsNullOrWhiteSpace($doneReason)) { throw 'A provider stop decision must include a non-empty reason.' }
+            $goalVerification = $null
+            if ($script:AgentCompletionContract) {
+                $goalVerification = Test-AgentGoalCompletion -Contract $script:AgentCompletionContract -Observation $observation
+                if (-not $goalVerification.Satisfied) {
+                    $verificationStatus = [string]$goalVerification.Status
+                    $verificationFeedback = [ordered]@{
+                        kind = if ($verificationStatus -eq 'unknown') { 'goal-verification-unknown' } else { 'goal-not-satisfied' }
+                        contractId = $goalVerification.ContractId
+                        missingConditions = @($goalVerification.MissingConditions)
+                        unknownConditions = @($goalVerification.UnknownConditions)
+                        noNativeActionSent = $true
+                        message = if ($verificationStatus -eq 'unknown') { 'Current Native observation is missing fields required by the goal contract; completion is unverified.' } else { 'Current Native observation does not meet the goal contract; complete the listed Native conditions before stopping.' }
+                    }
+                    $trace += [pscustomobject]@{
+                        iteration = $index
+                        observationBefore = $observation
+                        previousActionReceipt = $previousActionReceipt
+                        allowedActions = @($actionCatalog.Keys | Sort-Object)
+                        allowedControls = $controlCatalog
+                        decisionFeedback = $decisionFeedbackBeforeStep
+                        decision = $decision
+                        timing = $stepTiming
+                        actionReceipt = [ordered]@{ status = 'goal-verification-rejected'; noNativeActionSent = $true; goalVerification = $goalVerification; providerReason = $doneReason; campaignDay = $observation.campaignDay }
+                        observationAfter = $observation
+                        actionAttempted = $false
+                        actionExecuted = $false
+                        control = [ordered]@{ kind = 'goal-verification-rejected'; contractId = $goalVerification.ContractId; status = $verificationStatus }
+                    }
+                    $decisionFeedback = $verificationFeedback
+                    if ($script:AgentCheckpoint) {
+                        $script:AgentCheckpoint.status = 'active'
+                        $script:AgentCheckpoint.lastGoalVerification = [ordered]@{ status = $verificationStatus; contractId = $goalVerification.ContractId; verifiedUtc = [DateTime]::UtcNow.ToString('O'); result = $goalVerification }
+                        $script:AgentCheckpoint.lastStopReason = $null
+                        Write-AgentCheckpoint "$CommandPrefix-checkpoint-goal-unmet-$index"
+                    }
+                    continue
+                }
+            }
             $trace += [pscustomobject]@{
                 iteration = $index
                 observationBefore = $observation
@@ -723,16 +826,20 @@ try {
                 decisionFeedback = $decisionFeedbackBeforeStep
                 decision = $decision
                 timing = $stepTiming
-                actionReceipt = $null
+                actionReceipt = if ($goalVerification) { [ordered]@{ status = 'goal-verified-complete'; noNativeActionSent = $true; goalVerification = $goalVerification; providerReason = $doneReason; campaignDay = $observation.campaignDay } } else { $null }
                 observationAfter = $observation
                 actionExecuted = $false
             }
             if ($script:AgentCheckpoint) {
-                $script:AgentCheckpoint.status = 'provider-stopped'
+                $script:AgentCheckpoint.status = if ($goalVerification) { 'verified-complete' } else { 'provider-stopped' }
                 $script:AgentCheckpoint.lastStopReason = $doneReason
+                if ($goalVerification) { $script:AgentCheckpoint.lastGoalVerification = [ordered]@{ status = 'satisfied'; contractId = $goalVerification.ContractId; verifiedUtc = [DateTime]::UtcNow.ToString('O'); result = $goalVerification } }
                 Write-AgentCheckpoint "$CommandPrefix-checkpoint-stop-$index"
             }
-            $termination = [ordered]@{ reason = 'provider-stop'; providerReason = $doneReason; completedByProvider = $true }
+            $termination = if ($goalVerification) {
+                [ordered]@{ reason = 'native-goal-verified'; providerReason = $doneReason; completedByProvider = $true; goalVerified = $true; completionContractId = $goalVerification.ContractId }
+            }
+            else { [ordered]@{ reason = 'provider-stop'; providerReason = $doneReason; completedByProvider = $true; goalVerified = $false; completionContractId = $null } }
             break
         }
         try {

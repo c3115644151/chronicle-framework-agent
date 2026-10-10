@@ -199,6 +199,43 @@ if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'decisionContext') {
     }
     throw 'Decision-context provider received an unexpected iteration or missing Native action receipt.'
 }
+if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'goalVerifierRejectedDone') {
+    if ([string]$request.completionContract.contractId -cne 'harness-impossible-tick-goal-v1') { throw 'The Native completion contract was not forwarded intact to the deterministic Provider.' }
+    $catalogNames = @($request.allowedActions | ForEach-Object { [string]$_.action } | Sort-Object -Unique)
+    if (($catalogNames -join ',') -cne 'state') { throw 'Goal verification feedback test must expose only the requested read-only Native state action.' }
+    if ($request.iteration -eq 1) {
+        [pscustomobject]@{ done = $true; reason = 'Intentional early completion proposal for the Native goal verifier regression.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if ($request.iteration -eq 2) {
+        $tickFailure = @($request.decisionFeedback.missingConditions | Where-Object { $_.id -ceq 'daily-ticks' })
+        if ([string]$request.decisionFeedback.kind -cne 'goal-not-satisfied' -or -not [bool]$request.decisionFeedback.noNativeActionSent -or $tickFailure.Count -ne 1 -or [int]$tickFailure[0].actual -ge [int]$tickFailure[0].expected -or $request.previousActionReceipt) {
+            throw 'Rejected done feedback did not name the current unmet Native tick requirement without sending an action.'
+        }
+        [pscustomobject]@{ action = 'state'; arguments = @{}; rationale = 'Re-read current Native state after the verifier rejected a premature stop.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    if ($request.iteration -eq 3) {
+        if ([string]$request.previousActionReceipt.action -cne 'state' -or [string]$request.decisionFeedback.kind -cne '' -or [int]$request.observation.dailyTickCount -ge 999999) {
+            throw 'The loop did not continue with a fresh Native state after an incomplete done proposal.'
+        }
+        [pscustomobject]@{ done = $true; reason = 'Intentional second early completion proposal; the contract must continue to reject it.' } | ConvertTo-Json -Compress
+        exit 0
+    }
+    throw "Unexpected goal verifier test iteration '$($request.iteration)'."
+}
+if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'goalVerifierResume') {
+    $tickFailure = @($request.decisionFeedback.missingConditions | Where-Object { $_.id -ceq 'daily-ticks' })
+    if ([string]$request.completionContract.contractId -cne 'harness-impossible-tick-goal-v1' -or
+        [string]$request.checkpointContext.status -cne 'active' -or
+        [string]$request.decisionFeedback.kind -cne 'goal-not-satisfied-after-resume' -or
+        -not [bool]$request.decisionFeedback.noNativeActionSent -or $tickFailure.Count -ne 1 -or
+        [int]$request.observation.dailyTickCount -ge 999999) {
+        throw 'Checkpoint resume did not re-read Native state and return the persisted goal contract with exact unmet conditions.'
+    }
+    [pscustomobject]@{ action = 'state'; arguments = @{}; rationale = 'Re-observe the saved Native Campaign after goal verification feedback on resume.' } | ConvertTo-Json -Compress
+    exit 0
+}
 if ($env:CHRONICLE_TEST_PROVIDER_MODE -eq 'recruitment') {
     if ($request.iteration -eq 1) {
         [pscustomobject]@{ action = 'recruitOptions'; arguments = @{}; rationale = 'Deterministic harness test: request native volunteer offers.' } | ConvertTo-Json -Compress

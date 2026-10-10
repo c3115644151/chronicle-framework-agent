@@ -145,6 +145,8 @@ W5-K在`TestResults/20261010-181412`以两次独立New Campaign完成：第1次�
 
 架构核对参照了Minecraft项目的实际执行环，而不是只借用名称：Mindcraft任务文件把goal、目标物品/数量、timeout作为可机器评估的任务条件，其evaluation脚本读取任务结束分数；Voyager每轮执行动作、记录Native环境事件，由独立`CriticAgent.check_task_success`判定是否完成，并把事件/critique重新提供给下一轮。源码：[Mindcraft evaluation_script.py](https://github.com/mindcraft-bots/mindcraft/blob/develop/tasks/evaluation_script.py) · [Voyager voyager.py](https://github.com/MineDojo/Voyager/blob/main/voyager/voyager.py)。Chronicle的schema v3有限动作历史解决了模型丢失较早动作上下文的问题，但模型`done`仍只是声明；W5-I的后验门禁能拒绝不达标结果，却没有把缺失条件交回同一个循环恢复。后续架构应评估通用目标完成契约/独立Verifier反馈，使不完整声明能基于当前Native状态被拒绝并返回精确缺项，而不是为补给任务编写硬编码路线。
 
+上文末尾关于“后续架构应评估”的表述是本次实现前的差距记录，现已由第一版受限Native完成契约实现：Provider报`done`后，本地只读Verifier核对最多24项允许Native字段与`eq`/`gte`条件；未满足或未知会把逐项条件和当前值反馈给同一循环，不发Native动作，也不把Provider停止冒充成功。契约随Campaign Agent checkpoint保存，重载先重读Native状态；目标已满足则记录`verified-complete`，未满足则带缺项继续。`TestResults/20261010-194136`的AgentLoop阶段通过：确定性Provider两次故意过早报done均未被当成成功，循环收到缺项后继续；不完整契约经disposable Native存档保存/重载后仍被重新判定为未完成。该证据覆盖循环和checkpoint路径，不替代真实模型三次供给目标验收；有限比较器不是任意脚本或通用无限DSL。
+
 ### Campaign存档内的Agent目标Checkpoint
 
 本机1.4.8的`CampaignBehaviorBase.SyncData(IDataStore)`会随Native Campaign存档序列化行为字段；Chronicle用这一入口保存Campaign实例GUID和受限大小的Agent checkpoint JSON。`agentCheckpointGet/Set`是Mod/Host内部协议，不暴露给LLM动作白名单，并且只允许Campaign Map上下文；原版世界状态始终以读档后的新Observer结果为准，旧观察快照不是恢复真值。当前checkpoint v1包含目标、`schemaVersion`、Campaign实例ID、provider停止状态、最后一个已确认Native动作回执的紧凑摘要及最近状态摘要；`done`只记为`provider-stopped`，并不等同成功判定。`Agent-DecisionLoop -PersistCheckpoint`在新的Agent运行时写入目标并于每个原生动作/后验观察后更新；`-ResumeCheckpoint`先获取新Native state，再核对Campaign实例和checkpoint版本，将目标与receipt送回模型。若最后receipt只是只读`mapSettlementTargets`，恢复时安全地重新查询而不重复世界副作用。

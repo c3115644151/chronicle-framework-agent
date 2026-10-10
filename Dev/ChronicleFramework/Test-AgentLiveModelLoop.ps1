@@ -73,6 +73,7 @@ $failureEvidenceError = $null
 $supplySetup = $null
 $supplyVerified = $null
 $supplyVerification = $null
+$completionContractBase64 = $null
 $chosenSettlementId = ''
 $chosenSettlementName = ''
 
@@ -224,6 +225,22 @@ try {
         $maxDecisions = 24
         $maxElapsedSeconds = 300
         $allowedActions = 'menuSelect,foodOptions,provision,tradeConfirm,rest'
+        $completionContract = [ordered]@{
+            schemaVersion = 1
+            contractId = 'sargot-three-day-food-v1'
+            conditions = @(
+                [ordered]@{ id='party-size'; path='state.party.members'; operator='eq'; expected=6 }
+                [ordered]@{ id='daily-ticks'; path='dailyTickCount'; operator='gte'; expected=([int]$supplySetup.DailyTickCount + 3) }
+                [ordered]@{ id='gold-minimum'; path='state.economy.gold'; operator='gte'; expected=861 }
+                [ordered]@{ id='food-minimum'; path='state.party.food'; operator='gte'; expected=1.0 }
+                [ordered]@{ id='town-location'; path='state.location.currentSettlementId'; operator='eq'; expected=[string]$chosenSettlementId }
+                [ordered]@{ id='town-menu'; path='state.context.menuId'; operator='eq'; expected='town' }
+                [ordered]@{ id='campaign-map'; path='state.context.gameState'; operator='eq'; expected='MapState' }
+                [ordered]@{ id='not-waiting'; path='state.context.isWaiting'; operator='eq'; expected=$false }
+            )
+        }
+        $completionContractJson = $completionContract | ConvertTo-Json -Depth 8 -Compress
+        $completionContractBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($completionContractJson))
         $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '180'
         $env:CHRONICLE_LLM_MAX_TOKENS = '4096'
     }
@@ -243,6 +260,7 @@ try {
         $allowedActions = 'mapSettlementTargets,move'
     }
     $loopArguments = @('-DecisionProviderPath', $provider, '-Goal', $goal, '-AllowedActionNames', $allowedActions, '-MaxDecisions', [string]$maxDecisions, '-MaxElapsedSeconds', [string]$maxElapsedSeconds, '-TimeoutSeconds', [string]$TimeoutSeconds, '-CommandPrefix', ('live-model-' + [Guid]::NewGuid().ToString('N')))
+    if ($completionContractBase64) { $loopArguments += @('-CompletionContractBase64', $completionContractBase64) }
     if ($RoadsideBanditNegotiationLoop) { $loopArguments += '-HarnessPrepareSafePassageAfterMove' }
     $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop @loopArguments 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) {
@@ -381,7 +399,7 @@ try {
             $cheapestFoodOffer = @($foodRead[0].actionReceipt.data.offers | Where-Object { [bool]$_.isFood -and [bool]$_.isTransferable -and [int]$_.stock -gt 0 -and [double]$_.inventoryLogicUnitPrice -le [int]$foodRead[0].observationBefore.state.economy.gold } | Sort-Object { [double]$_.inventoryLogicUnitPrice } | Select-Object -First 1)
         }
         $naturalTicksElapsed = [int]$finalObservation.dailyTickCount - [int]$supplySetup.DailyTickCount
-        $providerStoppedAfterGoalAction = ([bool]$loopTrace.termination.completedByProvider -and [bool]$steps[-1].decision.done)
+        $providerStoppedAfterGoalAction = ([bool]$loopTrace.termination.completedByProvider -and [bool]$loopTrace.termination.goalVerified -and [bool]$steps[-1].decision.done)
         $supplyVerified = (
             $tradeEntrySteps.Count -eq 1 -and $tradeEntry.Count -eq 1 -and $tradeOption.Count -eq 1 -and [string]$tradeEntry[0].observationBefore.state.context.menuId -eq 'town' -and
             $foodReadSteps.Count -eq 1 -and
@@ -393,7 +411,7 @@ try {
             $naturalTicksElapsed -ge 3 -and [double]$finalObservation.campaignDay -ge ([double]$supplySetup.CampaignDay + 3.0) -and
             [string]$finalObservation.state.context.menuId -eq 'town' -and [int]$finalObservation.state.party.members -eq 6 -and
             [int]$finalObservation.state.economy.gold -ge 861 -and [double]$finalObservation.state.party.food -ge 1.0 -and
-            $nativeClockActions.Count -eq 0 -and $rejectedSteps.Count -le 2 -and $rejectedActionsDidNotChangeWorld -and $providerStoppedAfterGoalAction
+            $nativeClockActions.Count -eq 0 -and $rejectedSteps.Count -le 2 -and $rejectedActionsDidNotChangeWorld -and $providerStoppedAfterGoalAction -and [bool]$loopTrace.termination.goalVerified
         )
         if ($finalObservation -and $finalObservation.state) {
             $supplyVerification = [ordered]@{
@@ -413,6 +431,7 @@ try {
                 NativeTransactionAmount = if ($provisionStep.Count -eq 1) { [int]$provisionStep[0].actionReceipt.data.nativeTransactionAmount } else { 0 }
                 NativeRestDaysRequested = if ($restStep.Count -eq 1) { [int]$restStep[0].decision.arguments.Days } else { 0 }
                 NativeRestRequestCount = $restSteps.Count
+                NativeGoalVerified = [bool]$loopTrace.termination.goalVerified
                 NativeClockActions = @($nativeClockActions | ForEach-Object { [string]$_.actionReceipt.action })
                 RejectedDecisions = $rejectedSteps.Count
                 RejectedActionsPreservedWorldState = $rejectedActionsDidNotChangeWorld

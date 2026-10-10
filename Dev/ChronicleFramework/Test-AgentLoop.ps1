@@ -12,6 +12,7 @@ $provider = Join-Path $PSScriptRoot 'Test-AgentLoopProvider.ps1'
 $policy = Join-Path $PSScriptRoot 'Agent-DecisionLoopPolicy.ps1'
 . $policy
 $savePath = Join-Path $env:USERPROFILE "Documents\Mount and Blade II Bannerlord\Game Saves\$LoadSaveName.sav"
+$saveDirectory = Split-Path -Parent $savePath
 $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\session.json'
 if (-not (Test-Path $savePath)) { throw "Agent loop fixture not found: $savePath" }
 $fixtureHashBefore = (Get-FileHash $savePath -Algorithm SHA256).Hash
@@ -144,6 +145,36 @@ $settlementMenuBlocksMovement = -not (Test-UnobstructedCampaignMap $settlementMe
 $missionBlocksMovement = -not (Test-UnobstructedCampaignMap $missionFixture)
 $unobstructedCampaignMapPolicyVerified = ($freeCampaignMapAllowsMovement -and $encounterBlocksMovement -and $settlementMenuBlocksMovement -and $missionBlocksMovement)
 if (-not $unobstructedCampaignMapPolicyVerified) { throw 'Map movement actions must only be exposed on an unobstructed Campaign Map without an encounter, menu, Escape menu, or inquiry.' }
+
+$supplyCompletionContract = [ordered]@{
+    schemaVersion = 1
+    contractId = 'sargot-three-day-food-v1'
+    conditions = @(
+        [ordered]@{ id = 'party-size'; path = 'state.party.members'; operator = 'eq'; expected = 6 }
+        [ordered]@{ id = 'daily-ticks'; path = 'dailyTickCount'; operator = 'gte'; expected = 5 }
+        [ordered]@{ id = 'gold-minimum'; path = 'state.economy.gold'; operator = 'gte'; expected = 861 }
+        [ordered]@{ id = 'food-minimum'; path = 'state.party.food'; operator = 'gte'; expected = 1.0 }
+        [ordered]@{ id = 'town-location'; path = 'state.location.currentSettlementId'; operator = 'eq'; expected = 'town_V1' }
+        [ordered]@{ id = 'town-menu'; path = 'state.context.menuId'; operator = 'eq'; expected = 'town' }
+        [ordered]@{ id = 'campaign-map'; path = 'state.context.gameState'; operator = 'eq'; expected = 'MapState' }
+        [ordered]@{ id = 'not-waiting'; path = 'state.context.isWaiting'; operator = 'eq'; expected = $false }
+    )
+}
+$null = Test-AgentGoalCompletion -Contract $supplyCompletionContract -Observation $supplyFullObservation -ValidateOnly
+$unmetSupplyVerification = Test-AgentGoalCompletion -Contract $supplyCompletionContract -Observation $supplyFullObservation
+$satisfiedSupplyObservation = $supplyFullObservation | ConvertTo-Json -Depth 12 | ConvertFrom-Json
+$satisfiedSupplyObservation.dailyTickCount = 5
+$satisfiedSupplyObservation.state.party.food = 1.05
+$satisfiedSupplyVerification = Test-AgentGoalCompletion -Contract $supplyCompletionContract -Observation $satisfiedSupplyObservation
+$unknownSupplyObservation = $supplyFullObservation | ConvertTo-Json -Depth 12 | ConvertFrom-Json
+$unknownSupplyObservation.PSObject.Properties.Remove('dailyTickCount')
+$unknownSupplyVerification = Test-AgentGoalCompletion -Contract $supplyCompletionContract -Observation $unknownSupplyObservation
+$goalVerifierBoundedAndFailClosed = (
+    $unmetSupplyVerification.Status -eq 'unmet' -and @($unmetSupplyVerification.MissingConditions.id) -contains 'daily-ticks' -and @($unmetSupplyVerification.MissingConditions.id) -contains 'food-minimum' -and
+    $satisfiedSupplyVerification.Status -eq 'satisfied' -and [bool]$satisfiedSupplyVerification.Satisfied -and
+    $unknownSupplyVerification.Status -eq 'unknown' -and @($unknownSupplyVerification.UnknownConditions.id) -contains 'daily-ticks'
+)
+if (-not $goalVerifierBoundedAndFailClosed) { throw 'The finite Native completion contract must detect unmet and unknown conditions and only pass when every predicate is satisfied.' }
 
 function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @()) {
     $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli $Action @Arguments -TimeoutSeconds $TimeoutSeconds -AsJson 2>&1 | Out-String
@@ -293,6 +324,93 @@ try {
         $contextTrace.trace[1].previousActionReceipt.action -eq 'mapSettlementTargets' -and
         $contextTrace.trace[1].decision.reason -match 'prior Native receipt')
     if (-not $goalAndCatalogForwarded) { throw "Goal/action-catalog request regression failed: $($contextTrace | ConvertTo-Json -Depth 8 -Compress)" }
+
+    $impossibleCompletionContractJson = [ordered]@{
+        schemaVersion = 1
+        contractId = 'harness-impossible-tick-goal-v1'
+        conditions = @([ordered]@{ id = 'daily-ticks'; path = 'dailyTickCount'; operator = 'gte'; expected = 999999 })
+    } | ConvertTo-Json -Depth 8 -Compress
+    $impossibleCompletionContractBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($impossibleCompletionContractJson))
+    $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
+    $env:CHRONICLE_TEST_PROVIDER_MODE = 'goalVerifierRejectedDone'
+    try {
+        $goalVerifierOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -Goal 'Harness verifier test: do not stop before the deliberately unreachable Native daily tick condition.' -CompletionContractBase64 $impossibleCompletionContractBase64 -AllowedActionNames 'state' -PersistCheckpoint -MaxDecisions 3 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-goal-verifier-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $goalVerifierExitCode = $LASTEXITCODE
+    }
+    finally {
+        if ($null -eq $priorProviderMode) { Remove-Item Env:CHRONICLE_TEST_PROVIDER_MODE -ErrorAction SilentlyContinue }
+        else { $env:CHRONICLE_TEST_PROVIDER_MODE = $priorProviderMode }
+    }
+    if ($goalVerifierExitCode -ne 0) { throw "Native completion verifier failed its deterministic early-done recovery path: $goalVerifierOutput" }
+    $goalVerifierTrace = $goalVerifierOutput | ConvertFrom-Json
+    $firstDoneRejected = @($goalVerifierTrace.trace | Where-Object { $_.decision.done -and $_.actionReceipt.status -eq 'goal-verification-rejected' } | Select-Object -First 1)
+    $secondDoneRejected = @($goalVerifierTrace.trace | Where-Object { $_.decision.done -and $_.actionReceipt.status -eq 'goal-verification-rejected' } | Select-Object -Skip 1 -First 1)
+    $goalVerifierEarlyDoneRecoveryVerified = (
+        $firstDoneRejected.Count -eq 1 -and $secondDoneRejected.Count -eq 1 -and
+        -not [bool]$firstDoneRejected[0].actionAttempted -and -not [bool]$firstDoneRejected[0].actionExecuted -and [bool]$firstDoneRejected[0].actionReceipt.noNativeActionSent -and
+        $firstDoneRejected[0].decisionFeedback.kind -eq $null -and
+        @($goalVerifierTrace.trace | Where-Object { $_.decisionFeedback.kind -eq 'goal-not-satisfied' -and $_.decision.action -eq 'state' -and $_.actionReceipt.status -eq 'completed' }).Count -eq 1 -and
+        [string]$secondDoneRejected[0].decisionFeedback.kind -eq '' -and
+        $goalVerifierTrace.termination.reason -eq 'decision-budget-exhausted' -and -not [bool]$goalVerifierTrace.termination.goalVerified -and
+        [int]$goalVerifierTrace.actionsExecuted -eq 1
+    )
+    if (-not $goalVerifierEarlyDoneRecoveryVerified) { throw "The loop accepted an unverified done proposal or failed to return exact missing-constraint feedback: $($goalVerifierTrace | ConvertTo-Json -Depth 10 -Compress)" }
+
+    $goalCheckpointSaveName = 'ChronicleGoalVerifier-' + [Guid]::NewGuid().ToString('N')
+    $goalCheckpointSavePath = Join-Path $saveDirectory ($goalCheckpointSaveName + '.sav')
+    $goalCheckpointSaveRoot = [IO.Path]::GetFullPath($saveDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    try {
+        $checkpointBeforeSaveReceipt = Invoke-AgentCli 'agentCheckpointGet' @('-CommandId', ('goal-checkpoint-before-save-' + [Guid]::NewGuid().ToString('N')))
+        if ($checkpointBeforeSaveReceipt.status -ne 'completed' -or [string]::IsNullOrWhiteSpace([string]$checkpointBeforeSaveReceipt.data.checkpointBase64)) { throw 'Premature-done recovery did not leave a resumable Native Campaign checkpoint.' }
+        $checkpointBeforeSaveJson = [Text.UTF8Encoding]::new($false, $true).GetString([Convert]::FromBase64String([string]$checkpointBeforeSaveReceipt.data.checkpointBase64))
+        $checkpointBeforeSave = $checkpointBeforeSaveJson | ConvertFrom-Json
+        if ([string]$checkpointBeforeSave.status -cne 'active' -or [string]$checkpointBeforeSave.completionContract.contractId -cne 'harness-impossible-tick-goal-v1' -or [string]$checkpointBeforeSave.lastGoalVerification.status -cne 'unmet') { throw 'Unverified provider stop was not kept distinct from an active checkpoint with its saved Native contract and unmet result.' }
+        $checkpointSaveReceipt = Invoke-AgentCli 'save' @('-SaveName', $goalCheckpointSaveName, '-CommandId', ('goal-checkpoint-save-' + [Guid]::NewGuid().ToString('N')))
+        if ($checkpointSaveReceipt.status -ne 'completed' -or -not (Test-Path -LiteralPath $goalCheckpointSavePath -PathType Leaf)) { throw 'Native save of the disposable goal-verification checkpoint did not complete.' }
+        $checkpointStopReceipt = Invoke-AgentCli 'stop' @('-CommandId', ('goal-checkpoint-stop-' + [Guid]::NewGuid().ToString('N')))
+        if (-not $checkpointStopReceipt.processStopped -or (Get-Process -Name Bannerlord* -ErrorAction SilentlyContinue)) { throw 'Native/Agent processes were not stopped before goal checkpoint reload.' }
+        $checkpointReload = Invoke-AgentCli 'load' @('-SaveName', $goalCheckpointSaveName)
+        $checkpointAfterLoadReceipt = Invoke-AgentCli 'agentCheckpointGet' @('-CommandId', ('goal-checkpoint-after-load-' + [Guid]::NewGuid().ToString('N')))
+        if ($checkpointReload.status -ne 'completed' -or $checkpointAfterLoadReceipt.status -ne 'completed') { throw 'The saved goal-verification checkpoint could not be reloaded.' }
+        $checkpointAfterLoadJson = [Text.UTF8Encoding]::new($false, $true).GetString([Convert]::FromBase64String([string]$checkpointAfterLoadReceipt.data.checkpointBase64))
+        $checkpointAfterLoad = $checkpointAfterLoadJson | ConvertFrom-Json
+        if ([string]$checkpointAfterLoad.completionContract.contractId -cne 'harness-impossible-tick-goal-v1' -or [string]$checkpointAfterLoad.status -cne 'active') { throw 'Native save/load did not preserve the still-incomplete goal contract.' }
+
+        $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
+        $env:CHRONICLE_TEST_PROVIDER_MODE = 'goalVerifierResume'
+        try {
+            $goalResumeOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -ResumeCheckpoint -AllowedActionNames 'state' -MaxDecisions 1 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-goal-verifier-resume-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+            $goalResumeExitCode = $LASTEXITCODE
+        }
+        finally {
+            if ($null -eq $priorProviderMode) { Remove-Item Env:CHRONICLE_TEST_PROVIDER_MODE -ErrorAction SilentlyContinue }
+            else { $env:CHRONICLE_TEST_PROVIDER_MODE = $priorProviderMode }
+        }
+        if ($goalResumeExitCode -ne 0) { throw "Checkpoint resume did not reverify the Native completion contract: $goalResumeOutput" }
+        $goalResumeTrace = $goalResumeOutput | ConvertFrom-Json
+        $resumeFeedbackVerified = (
+            $goalResumeTrace.trace.Count -eq 1 -and
+            $goalResumeTrace.trace[0].decisionFeedback.kind -eq 'goal-not-satisfied-after-resume' -and
+            $goalResumeTrace.trace[0].actionReceipt.status -eq 'completed' -and
+            -not [bool]$goalResumeTrace.termination.goalVerified -and
+            $goalResumeTrace.termination.reason -eq 'decision-budget-exhausted'
+        )
+        if (-not $resumeFeedbackVerified) { throw "Goal checkpoint resume did not preserve the unmet result and safely continue: $($goalResumeTrace | ConvertTo-Json -Depth 8 -Compress)" }
+        $goalCheckpointRoundtripResumeVerified = (
+            [string]$checkpointBeforeSave.completionContract.contractId -ceq [string]$checkpointAfterLoad.completionContract.contractId -and
+            [string]$checkpointAfterLoad.status -ceq 'active' -and $resumeFeedbackVerified
+        )
+    }
+    finally {
+        if (Test-Path -LiteralPath $sessionPath -PathType Leaf) { try { $null = Invoke-AgentCli 'stop' @('-CommandId', ('goal-checkpoint-cleanup-stop-' + [Guid]::NewGuid().ToString('N'))) } catch { } }
+        if (Test-Path -LiteralPath $goalCheckpointSavePath -PathType Leaf) {
+            $resolvedGoalCheckpointSavePath = [IO.Path]::GetFullPath($goalCheckpointSavePath)
+            if (-not $resolvedGoalCheckpointSavePath.StartsWith($goalCheckpointSaveRoot, [StringComparison]::OrdinalIgnoreCase) -or -not $goalCheckpointSaveName.StartsWith('ChronicleGoalVerifier-', [StringComparison]::Ordinal)) { throw 'Goal verifier cleanup target escaped the exact disposable save scope.' }
+            Remove-Item -LiteralPath $resolvedGoalCheckpointSavePath -Force
+        }
+        if (Test-Path -LiteralPath ($goalCheckpointSavePath + '.bak') -PathType Leaf) { Remove-Item -LiteralPath ($goalCheckpointSavePath + '.bak') -Force }
+        if (-not (Get-Process -Name Bannerlord* -ErrorAction SilentlyContinue)) { $null = Invoke-AgentCli 'load' @('-SaveName', $LoadSaveName) }
+    }
 
     $priorInvalidDecision = $env:CHRONICLE_TEST_INVALID_DECISION
     $env:CHRONICLE_TEST_INVALID_DECISION = 'recruit'
@@ -560,6 +678,8 @@ try {
         SupplyObservationProfileCompactsAndKeepsNativeContext = $supplyObservationProfileVerified
         MapMovementCatalogRequiresUnobstructedCampaignMap = $unobstructedCampaignMapPolicyVerified
         ExplicitGoalStopHonoredWithoutIssuingAnotherAction = $doneSignalVerified
+        NativeGoalVerifierRejectsPrematureDone = $goalVerifierEarlyDoneRecoveryVerified
+        NativeGoalContractPersistsAndReverifiesAfterLoad = $goalCheckpointRoundtripResumeVerified
         GoalStopTrace = $doneTrace.trace
         GoalAndActionCatalogForwarded = $goalAndCatalogForwarded
         ScopedActionRejected = $scopedActionRejected
@@ -580,7 +700,7 @@ try {
         ProcessStopped = $stop.processStopped
         Trace = $trace.trace
     }
-    $result.Passed = ($result.DecisionCount -eq 2 -and $observationLoopVerified -and $receiptForwarded -and $decisionTimingCaptured -and $unicodeRoundTripVerified -and $observeAgainPolicyVerified -and $observeAgainControlCatalogVerified -and $observeAgainSupportsNativeTownWait -and $tradeInventoryObserveAgainRejectedSafely -and $nativeRestMayBeRequestedOnlyOnce -and $barterActionPhaseGateVerified -and $nativeMenuAndTradeCatalogVerified -and $supplyObservationProfileVerified -and $unobstructedCampaignMapPolicyVerified -and $doneSignalVerified -and $goalAndCatalogForwarded -and $scopedActionRejected -and $dynamicActionRecoveryVerified -and $invalidArgumentRecoveryVerified -and $dialogueCatalogRecoveryVerified -and $staleOfferRecoveryVerified -and $unlistedResumeRecoveryVerified -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
+    $result.Passed = ($result.DecisionCount -eq 2 -and $observationLoopVerified -and $receiptForwarded -and $decisionTimingCaptured -and $unicodeRoundTripVerified -and $observeAgainPolicyVerified -and $observeAgainControlCatalogVerified -and $observeAgainSupportsNativeTownWait -and $tradeInventoryObserveAgainRejectedSafely -and $nativeRestMayBeRequestedOnlyOnce -and $barterActionPhaseGateVerified -and $nativeMenuAndTradeCatalogVerified -and $supplyObservationProfileVerified -and $unobstructedCampaignMapPolicyVerified -and $doneSignalVerified -and $goalVerifierEarlyDoneRecoveryVerified -and $goalCheckpointRoundtripResumeVerified -and $goalAndCatalogForwarded -and $scopedActionRejected -and $dynamicActionRecoveryVerified -and $invalidArgumentRecoveryVerified -and $dialogueCatalogRecoveryVerified -and $staleOfferRecoveryVerified -and $unlistedResumeRecoveryVerified -and $unsafeActionRejected -and $harnessClockRejected -and $result.FixtureUnchanged -and $result.ProcessStopped)
     $result | ConvertTo-Json -Depth 12
     if (-not $result.Passed) { exit 1 }
 }

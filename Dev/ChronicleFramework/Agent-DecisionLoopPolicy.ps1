@@ -151,6 +151,108 @@ function Get-CurrentMenuSelectionContext {
     return [pscustomobject]@{ Allowed = $true; MenuId = [string]$state.context.menuId; OptionId = $OptionId; Reason = 'OptionId is current and enabled; bind selection to the observed Native menu.' }
 }
 
+function Get-AgentCompletionObservationValue {
+    param(
+        [Parameter(Mandatory = $true)]$Observation,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    $value = $null
+    switch -CaseSensitive ($Path) {
+        'campaignDay' { $value = $Observation.campaignDay; break }
+        'dailyTickCount' { $value = $Observation.dailyTickCount; break }
+        'state.context.gameState' { $value = $Observation.state.context.gameState; break }
+        'state.context.menuId' { $value = $Observation.state.context.menuId; break }
+        'state.context.isWaiting' { $value = $Observation.state.context.isWaiting; break }
+        'state.location.currentSettlementId' { $value = $Observation.state.location.currentSettlementId; break }
+        'state.party.members' { $value = $Observation.state.party.members; break }
+        'state.party.food' { $value = $Observation.state.party.food; break }
+        'state.economy.gold' { $value = $Observation.state.economy.gold; break }
+        default { return [pscustomobject]@{ Known = $false; Value = $null } }
+    }
+
+    $parts = $Path.Split('.')
+    $cursor = $Observation
+    foreach ($part in $parts) {
+        if ($null -eq $cursor) { return [pscustomobject]@{ Known = $false; Value = $null } }
+        $property = @($cursor.PSObject.Properties | Where-Object { $_.Name -ceq $part } | Select-Object -First 1)
+        if ($property.Count -ne 1) { return [pscustomobject]@{ Known = $false; Value = $null } }
+        $cursor = $property[0].Value
+    }
+    if ($null -eq $cursor) { return [pscustomobject]@{ Known = $false; Value = $null } }
+    return [pscustomobject]@{ Known = $true; Value = $cursor }
+}
+
+function Test-AgentGoalCompletion {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Contract,
+        [Parameter(Mandatory = $true)]$Observation,
+        [switch]$ValidateOnly
+    )
+
+    if ([int]$Contract.schemaVersion -ne 1 -or [string]::IsNullOrWhiteSpace([string]$Contract.contractId)) {
+        throw 'Completion contract must have schemaVersion 1 and a non-empty contractId.'
+    }
+    $conditions = @($Contract.conditions)
+    if ($conditions.Count -lt 1 -or $conditions.Count -gt 24) { throw 'Completion contract must contain between 1 and 24 bounded conditions.' }
+    $allowedPaths = @('campaignDay','dailyTickCount','state.context.gameState','state.context.menuId','state.context.isWaiting','state.location.currentSettlementId','state.party.members','state.party.food','state.economy.gold')
+    $conditionIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($condition in $conditions) {
+        $id = [string]$condition.id
+        $path = [string]$condition.path
+        $operator = [string]$condition.operator
+        if ([string]::IsNullOrWhiteSpace($id) -or -not $conditionIds.Add($id)) { throw 'Completion contract condition IDs must be non-empty and unique.' }
+        if ($path -notin $allowedPaths) { throw "Completion contract path '$path' is not in the Native observation allowlist." }
+        if ($operator -notin @('eq','gte')) { throw "Completion contract operator '$operator' is not supported." }
+        $hasExpectedValue = if ($condition -is [System.Collections.IDictionary]) { $condition.Contains('expected') } else { 'expected' -in @($condition.PSObject.Properties.Name) }
+        if (-not $hasExpectedValue) { throw "Completion contract condition '$id' has no expected value." }
+        if ($operator -eq 'gte' -and ($condition.expected -is [string] -or $condition.expected -is [bool] -or -not ($condition.expected -is [ValueType]))) {
+            throw "Completion contract condition '$id' uses gte with a non-numeric expected value."
+        }
+    }
+    if ($ValidateOnly) { return [pscustomobject]@{ Valid = $true; ContractId = [string]$Contract.contractId; ConditionCount = $conditions.Count } }
+
+    $evaluated = [System.Collections.Generic.List[object]]::new()
+    foreach ($condition in $conditions) {
+        $read = Get-AgentCompletionObservationValue -Observation $Observation -Path ([string]$condition.path)
+        $status = 'unknown'
+        if ($read.Known) {
+            if ([string]$condition.operator -eq 'gte') {
+                $status = if ([double]$read.Value -ge [double]$condition.expected) { 'satisfied' } else { 'unmet' }
+            }
+            elseif ($condition.expected -is [bool]) {
+                $status = if ($read.Value -is [bool] -and [bool]$read.Value -eq [bool]$condition.expected) { 'satisfied' } else { 'unmet' }
+            }
+            elseif ($condition.expected -is [ValueType] -and $condition.expected -isnot [string]) {
+                $status = if ($read.Value -is [ValueType] -and $read.Value -isnot [bool] -and [double]$read.Value -eq [double]$condition.expected) { 'satisfied' } else { 'unmet' }
+            }
+            else {
+                $status = if ([string]$read.Value -ceq [string]$condition.expected) { 'satisfied' } else { 'unmet' }
+            }
+        }
+        $evaluated.Add([ordered]@{
+            id = [string]$condition.id
+            path = [string]$condition.path
+            operator = [string]$condition.operator
+            expected = $condition.expected
+            actual = if ($read.Known) { $read.Value } else { $null }
+            status = $status
+        })
+    }
+    $missing = @($evaluated | Where-Object { $_.status -eq 'unmet' })
+    $unknown = @($evaluated | Where-Object { $_.status -eq 'unknown' })
+    $resultStatus = if ($missing.Count -eq 0 -and $unknown.Count -eq 0) { 'satisfied' } elseif ($unknown.Count -gt 0) { 'unknown' } else { 'unmet' }
+    return [pscustomobject]@{
+        ContractId = [string]$Contract.contractId
+        Status = $resultStatus
+        Satisfied = ($resultStatus -eq 'satisfied')
+        Conditions = @($evaluated)
+        MissingConditions = @($missing)
+        UnknownConditions = @($unknown)
+    }
+}
+
 function Convert-SupplyObservationForDecision {
     param([Parameter(Mandatory = $true)]$Observation)
 
