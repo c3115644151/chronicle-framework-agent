@@ -271,6 +271,7 @@ if ($Action -in @('start','load')) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $ready = $false
     $windowLayout = $null
+    $lastWindowLayoutAttemptUtc = [DateTime]::MinValue
     $startupDialogReceipts = [System.Collections.Generic.List[object]]::new()
     while ((Get-Date) -lt $deadline) {
         $launchProcess = Get-Process -Id $process.Id -ErrorAction SilentlyContinue
@@ -312,8 +313,12 @@ if ($Action -in @('start','load')) {
             catch { $startupFault = "Bannerlord Warning dialog could not be read safely: $($_.Exception.Message)" }
             break
         }
-        $candidateLayout = Set-ChronicleTestWindow -ProcessId $process.Id
-        if ($candidateLayout -and $candidateLayout.Applied) { $windowLayout = $candidateLayout }
+        $windowAttemptDue = ([DateTime]::UtcNow - $lastWindowLayoutAttemptUtc).TotalSeconds -ge 2
+        if ((-not $windowLayout -or -not $windowLayout.Applied) -and $windowAttemptDue) {
+            $lastWindowLayoutAttemptUtc = [DateTime]::UtcNow
+            $candidateLayout = Set-ChronicleTestWindow -ProcessId $process.Id
+            if ($candidateLayout -and $candidateLayout.Applied) { $windowLayout = $candidateLayout }
+        }
         if (Test-Path $diagnosticLog) {
             $diagnosticStream = $null
             $diagnosticReader = $null
