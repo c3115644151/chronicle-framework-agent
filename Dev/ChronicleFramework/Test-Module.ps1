@@ -86,6 +86,9 @@ $crashDetected = $false
 $processExitedUnexpectedly = $false
 $lifecycleLoadObserved = $WithoutChronicle.IsPresent
 $gameStartObserved = $WithoutChronicle.IsPresent
+$mcmSettingsRegistered = $WithoutChronicle.IsPresent
+$mcmSettingPropertyIds = @()
+$validationButtonType = if ($WithoutChronicle) { 'not-tested' } else { 'missing' }
 $startupFault = $null
 $startupDialogReceipts = [System.Collections.Generic.List[object]]::new()
 $startupDialogSnapshots = [System.Collections.Generic.List[object]]::new()
@@ -137,6 +140,15 @@ while ((Get-Date) -lt $deadline) {
         $newDiagnosticLines = if ($diagnosticLines.Count -gt $diagnosticStartLineCount) { $diagnosticLines[$diagnosticStartLineCount..($diagnosticLines.Count - 1)] } else { @() }
         $lifecycleLoadObserved = [bool]($newDiagnosticLines -match '\|submodule-load$')
         $gameStartObserved = [bool]($newDiagnosticLines -match '\|game-start$')
+        $mcmSettingsLines = @($newDiagnosticLines | Where-Object { $_ -match '\|harness-mcm-settings\|' })
+        if ($mcmSettingsLines.Count -gt 0) {
+            $mcmSettingsLine = [string]$mcmSettingsLines[-1]
+            if ($mcmSettingsLine -match '\|propertyIds=([^|]*)\|validationButtonType=([^|\r\n]*)') {
+                $mcmSettingPropertyIds = @($Matches[1] -split ',' | Where-Object { $_ })
+                $validationButtonType = [string]$Matches[2]
+            }
+            $mcmSettingsRegistered = [bool]($mcmSettingsLine -match '\|loaded=True\|definition=True\|')
+        }
         if ($lifecycleLoadObserved -and -not $assemblyLoaded) { $assemblyLoaded = $true }
     }
     if (Test-Path $watchdogLog) {
@@ -199,6 +211,9 @@ $result = [ordered]@{
     AssemblyLoaded = $assemblyLoaded
     LifecycleLoadObserved = $lifecycleLoadObserved
     GameStartObserved = $gameStartObserved
+    McmSettingsRegistered = $mcmSettingsRegistered
+    McmSettingPropertyIds = $mcmSettingPropertyIds
+    McmValidationButtonType = $validationButtonType
     FinishedAll = $finishedAll
     CrashDetected = $crashDetected
     ProcessExitedUnexpectedly = $processExitedUnexpectedly
@@ -220,6 +235,8 @@ $result.EvidenceResultPath = $resultPath
 $result | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $resultPath -Encoding UTF8
 $result | ConvertTo-Json
 
-if (-not $finishedAll -or $crashDetected -or $processExitedUnexpectedly -or (-not $WithoutChronicle -and (-not $assemblyLoaded -or -not $lifecycleLoadObserved))) {
+$requiredMcmPropertyIds = @('OllamaBaseUrl', 'ModelId', 'ValidateLocalConfiguration')
+$mcmDefinitionComplete = $mcmSettingsRegistered -and $validationButtonType -eq 'Button' -and @($requiredMcmPropertyIds | Where-Object { $_ -notin $mcmSettingPropertyIds }).Count -eq 0
+if (-not $finishedAll -or $crashDetected -or $processExitedUnexpectedly -or (-not $WithoutChronicle -and (-not $assemblyLoaded -or -not $lifecycleLoadObserved -or -not $mcmDefinitionComplete))) {
     exit 1
 }

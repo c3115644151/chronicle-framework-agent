@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ChronicleFramework;
 
 namespace ChronicleFramework.AgentHost;
 
@@ -50,14 +51,25 @@ internal sealed record AgentProviderProfile(string BaseUrl, string ModelId, stri
 
         var baseUrl = ReadString(root, "OllamaBaseUrl");
         var modelId = ReadString(root, "ModelId");
-        if (string.IsNullOrWhiteSpace(baseUrl) || !Uri.TryCreate(baseUrl.Trim(), UriKind.Absolute, out var uri) ||
-            uri.Scheme is not ("http" or "https") || !uri.IsLoopback || !string.IsNullOrEmpty(uri.UserInfo) ||
-            !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment))
-            throw new AgentHostException("provider-profile-endpoint-invalid", "The configured local Ollama base URL must be a loopback HTTP(S) address without credentials, query, or fragment.");
-        if (string.IsNullOrWhiteSpace(modelId) || modelId.Trim().Length > 160)
-            throw new AgentHostException("provider-profile-model-invalid", "The configured Ollama model identifier is missing or too long.");
+        return ParseValues(baseUrl, modelId, source);
+    }
 
-        return new AgentProviderProfile(uri.ToString().TrimEnd('/'), modelId.Trim(), source);
+    internal static string? GetSettingsValidationError(string? baseUrl, string? modelId)
+    {
+        return AgentProviderConfigurationValidator.GetErrorCode(baseUrl, modelId);
+    }
+
+    private static AgentProviderProfile ParseValues(string? baseUrl, string? modelId, string source)
+    {
+        var errorCode = AgentProviderConfigurationValidator.GetErrorCode(baseUrl, modelId);
+        if (errorCode == "provider-profile-endpoint-invalid")
+            throw new AgentHostException(errorCode, "The configured local Ollama base URL must be a loopback HTTP(S) address without credentials, query, or fragment.");
+        if (errorCode == "provider-profile-model-invalid")
+            throw new AgentHostException(errorCode, "The configured Ollama model identifier is missing or too long.");
+
+        var uri = new Uri(baseUrl!.Trim(), UriKind.Absolute);
+
+        return new AgentProviderProfile(uri.ToString().TrimEnd('/'), modelId!.Trim(), source);
     }
 
     private static string? ReadString(JsonElement root, string propertyName)

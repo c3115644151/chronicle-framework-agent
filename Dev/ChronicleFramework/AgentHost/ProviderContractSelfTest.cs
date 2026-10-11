@@ -14,24 +14,37 @@ internal static class ProviderContractSelfTest
     internal static async Task<object> RunAsync()
     {
         var results = new List<object>();
+        var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        var expectedGlobalProfilePath = Path.Combine(documents, "Mount and Blade II Bannerlord", "Configs", "ModSettings", "Global", "ChronicleFramework", "ChronicleAgentSettings.json");
+        if (!string.Equals(AgentProviderProfile.GetDefaultPath(), expectedGlobalProfilePath, StringComparison.OrdinalIgnoreCase))
+            throw new AgentHostException("provider-profile-path-self-test-failed", "The Host global profile path does not match the MCM Global folder/id convention.");
+        results.Add(new { scenario = "host-default-path-matches-mcm-global-folder-and-id", passed = true });
+
         using (var validProfile = JsonDocument.Parse("{\"OllamaBaseUrl\":\"http://127.0.0.1:11434/v1\",\"ModelId\":\"qwen3.5:4b-q4_K_M\"}"))
         {
             var profile = AgentProviderProfile.Parse(validProfile.RootElement);
             if (profile.BaseUrl != "http://127.0.0.1:11434/v1" || profile.ModelId != "qwen3.5:4b-q4_K_M")
                 throw new AgentHostException("provider-profile-self-test-normalization-failed", "The global MCM profile did not load the saved loopback URL and model identifier.");
+            if (AgentProviderProfile.GetSettingsValidationError(profile.BaseUrl, profile.ModelId) is not null)
+                throw new AgentHostException("provider-profile-self-test-settings-check-failed", "The MCM configuration check rejected valid local model settings.");
             results.Add(new { scenario = "mcm-global-profile-values-normalized", passed = true });
         }
 
         ExpectInvalidProfile("{\"OllamaBaseUrl\":\"https://example.com/v1\",\"ModelId\":\"test\"}", "provider-profile-endpoint-invalid", "mcm-profile-rejects-remote-endpoint");
+        if (AgentProviderProfile.GetSettingsValidationError("https://example.com/v1", "test") != "provider-profile-endpoint-invalid")
+            throw new AgentHostException("provider-profile-self-test-settings-check-failed", "The MCM configuration check accepted a remote endpoint.");
         results.Add(new { scenario = "mcm-profile-rejects-remote-endpoint", passed = true });
         ExpectInvalidProfile("{\"OllamaBaseUrl\":\"http://user:pass@127.0.0.1:11434/v1\",\"ModelId\":\"test\"}", "provider-profile-endpoint-invalid", "mcm-profile-rejects-credentials");
         results.Add(new { scenario = "mcm-profile-rejects-credentials", passed = true });
         ExpectInvalidProfile("{\"OllamaBaseUrl\":\"http://127.0.0.1:11434/v1?token=not-used\",\"ModelId\":\"test\"}", "provider-profile-endpoint-invalid", "mcm-profile-rejects-query-string");
         results.Add(new { scenario = "mcm-profile-rejects-query-string", passed = true });
         ExpectInvalidProfile("{\"OllamaBaseUrl\":\"http://127.0.0.1:11434/v1\",\"ModelId\":\" \"}", "provider-profile-model-invalid", "mcm-profile-rejects-empty-model");
+        if (AgentProviderProfile.GetSettingsValidationError("http://127.0.0.1:11434/v1", " ") != "provider-profile-model-invalid")
+            throw new AgentHostException("provider-profile-self-test-settings-check-failed", "The MCM configuration check accepted an empty model identifier.");
         results.Add(new { scenario = "mcm-profile-rejects-empty-model", passed = true });
         ExpectProfileFileError("{", "provider-profile-invalid-json", "mcm-profile-rejects-corrupt-json");
         results.Add(new { scenario = "mcm-profile-rejects-corrupt-json", passed = true });
+        TestConfiguredProfileOverride(results);
 
         var settings = new OllamaProviderSettings(
             FakeEndpoint,
@@ -169,6 +182,50 @@ internal static class ProviderContractSelfTest
         {
             File.Delete(profilePath);
             Directory.Delete(testDirectory);
+        }
+    }
+
+    private static void TestConfiguredProfileOverride(List<object> results)
+    {
+        var harnessRoot = Path.Combine(Path.GetTempPath(), "ChronicleMcmProfileHarness-" + Guid.NewGuid().ToString("N"));
+        var profileDirectory = Path.Combine(harnessRoot, "MCM", "Global", "ChronicleFramework");
+        Directory.CreateDirectory(profileDirectory);
+        var profilePath = Path.Combine(profileDirectory, "ChronicleAgentSettings.json");
+        var outsideProfilePath = Path.Combine(Path.GetTempPath(), "ChronicleMcmProfileOutside-" + Guid.NewGuid().ToString("N") + ".json");
+        var previousMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+        var previousHarnessRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+        var previousProfilePath = Environment.GetEnvironmentVariable("CHRONICLE_AGENT_PROFILE_PATH");
+        try
+        {
+            File.WriteAllText(profilePath, "{\"OllamaBaseUrl\":\"http://127.0.0.1:11434/v1\",\"ModelId\":\"test-local-model\"}");
+            Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "visual-capture");
+            Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_TEMP", harnessRoot);
+            Environment.SetEnvironmentVariable("CHRONICLE_AGENT_PROFILE_PATH", profilePath);
+            using (var provider = OllamaNativeProvider.FromConfiguredProfile())
+            {
+                if (provider.ModelId != "test-local-model" || provider.ConfigurationSource != "harness-mcm-profile-fixture")
+                    throw new AgentHostException("provider-profile-override-self-test-failed", "The Host did not load the authorized MCM profile fixture.");
+                results.Add(new { scenario = "host-loads-authorized-harness-mcm-profile", passed = true });
+            }
+
+            Environment.SetEnvironmentVariable("CHRONICLE_AGENT_PROFILE_PATH", outsideProfilePath);
+            try
+            {
+                using var unauthorizedProvider = OllamaNativeProvider.FromConfiguredProfile();
+                throw new AgentHostException("provider-profile-override-self-test-failed", "The Host accepted a profile outside its disposable Harness directory.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-profile-override-not-authorized")
+            {
+                results.Add(new { scenario = "host-rejects-profile-outside-harness-root", passed = true });
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", previousMode);
+            Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_TEMP", previousHarnessRoot);
+            Environment.SetEnvironmentVariable("CHRONICLE_AGENT_PROFILE_PATH", previousProfilePath);
+            File.Delete(profilePath);
+            Directory.Delete(harnessRoot, recursive: true);
         }
     }
 

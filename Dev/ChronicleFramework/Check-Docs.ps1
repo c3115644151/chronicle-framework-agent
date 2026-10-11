@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.117'
+$contractVersion = '7.120'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -247,24 +247,39 @@ if ($harnessScript -notmatch 'GitCommit' -or $harnessScript -notmatch 'SourceCon
 if ($projectFile -notmatch 'ChronicleGameRoot' -or $harnessScript -notmatch 'ChronicleGameRoot=\$gameRoot' -or -not (Test-Path -LiteralPath (Join-Path $harnessRoot 'Initialize-ChronicleWorkspace.ps1'))) { throw 'Cloned repositories must accept a local game path and provide a repeatable workspace initializer.' }
 if ($projectFile -notmatch 'Reference Include="SandBox\.View"' -or $projectFile -notmatch 'Modules\\SandBox\\bin\\Win64_Shipping_Client\\SandBox\.View\.dll' -or $projectFile -notmatch 'Reference Include="TaleWorlds\.Core\.ViewModelCollection"' -or $projectFile -notmatch 'TaleWorlds\.Core\.ViewModelCollection\.dll' -or $projectFile -notmatch 'Reference Include="TaleWorlds\.InputSystem"' -or $projectFile -notmatch 'TaleWorlds\.InputSystem\.dll') { throw 'Native map inventory/menu and RecruitmentVM lifecycle support must bind to the installed 1.4.8 View, ViewModel, and InputSystem assemblies.' }
 $providerSettingsSource = Get-Content (Join-Path $harnessRoot 'AgentProviderSettings.cs') -Raw -Encoding UTF8
+$providerValidatorSource = Get-Content (Join-Path $harnessRoot 'AgentProviderConfigurationValidator.cs') -Raw -Encoding UTF8
+$agentHostProjectSource = Get-Content (Join-Path $harnessRoot 'AgentHost\ChronicleAgentHost.csproj') -Raw -Encoding UTF8
 $providerProfileSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentProviderProfile.cs') -Raw -Encoding UTF8
+$providerProfileTestSource = Get-Content (Join-Path $harnessRoot 'AgentHost\ProviderContractSelfTest.cs') -Raw -Encoding UTF8
 $providerHostSource = Get-Content (Join-Path $harnessRoot 'AgentHost\OllamaNativeProvider.cs') -Raw -Encoding UTF8
 $supplyHostSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostSupplyLoop.cs') -Raw -Encoding UTF8
 $sourceModuleManifest = Get-Content $sourceManifestPath -Raw -Encoding UTF8
 if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $sourceModuleManifest -notmatch 'DependedModule Id="Bannerlord\.MBOptionScreen"' -or
     $providerSettingsSource -notmatch 'AttributeGlobalSettings<ChronicleAgentProviderSettings>' -or $providerSettingsSource -notmatch 'FormatType => "json"' -or
     $providerSettingsSource -notmatch 'OllamaBaseUrl' -or $providerSettingsSource -notmatch 'ModelId' -or
+    $providerSettingsSource -notmatch 'SettingPropertyButton' -or $providerSettingsSource -notmatch 'AgentProviderConfigurationValidator\.GetErrorCode' -or
+    $providerSettingsSource -notmatch 'MBInformationManager\.AddQuickInformation' -or
+    $providerSettingsSource -notmatch '(?s)public Action ValidateLocalConfiguration\s*\{\s*get => ShowConfigurationValidation;\s*set \{\s*\}\s*\}' -or
+    $providerValidatorSource -notmatch 'Uri\.IsLoopback' -or $agentHostProjectSource -notmatch 'AgentProviderConfigurationValidator\.cs' -or
+    $providerProfileSource -notmatch 'AgentProviderConfigurationValidator\.GetErrorCode' -or
+    $providerProfileTestSource -notmatch 'mcm-profile-rejects-remote-endpoint' -or
+    $providerProfileTestSource -notmatch 'host-loads-authorized-harness-mcm-profile' -or
+    $providerProfileTestSource -notmatch 'host-rejects-profile-outside-harness-root' -or
     $providerProfileSource -notmatch 'Configs.*ModSettings.*Global.*ChronicleFramework.*ChronicleAgentSettings\.json' -or
-    $providerProfileSource -notmatch 'Uri\.IsLoopback' -or $providerHostSource -notmatch 'FromConfiguredProfile' -or
+    $providerHostSource -notmatch 'FromConfiguredProfile' -or
     $supplyHostSource -notmatch 'OllamaNativeProvider\.FromConfiguredProfile') {
-    throw 'Player model settings must use a persistent MCM Global JSON profile and the Agent Host must consume the same loopback-only profile outside Harness overrides.'
+    throw 'Player model settings must expose MCM Global JSON fields with an explicit safe format check, and the Agent Host must consume that same loopback-only profile outside Harness overrides.'
 }
 $smokeModuleSource = Get-Content (Join-Path $harnessRoot 'Test-Module.ps1') -Raw -Encoding UTF8
+$subModuleSource = Get-Content (Join-Path $harnessRoot 'SubModule.cs') -Raw -Encoding UTF8
 if ($harnessScript -notmatch "HarnessContractVersion\s*=\s*'$contractVersion'" -or
     $smokeModuleSource -notmatch 'HarnessShaderCacheDialog\.ps1' -or $smokeModuleSource -notmatch 'Invoke-ChronicleShaderCacheDialogAcknowledgement' -or
     $smokeModuleSource -notmatch 'StartupDialogSnapshots' -or $smokeModuleSource -notmatch 'SmokeResult\.json' -or
+    $smokeModuleSource -notmatch 'McmSettingsRegistered' -or $subModuleSource -notmatch 'ProbeHarnessMcmSettingsRegistration' -or
+    $subModuleSource -notmatch 'BaseSettingsProvider\.Instance' -or $subModuleSource -notmatch 'ValidateLocalConfiguration' -or
+    $subModuleSource -notmatch 'harness-smoke-mode-active' -or
     $harnessScript -notmatch 'Smoke test failed with exit code \$smokeExitCode\. Evidence: \$smokeOutput') {
-    throw 'Smoke startup checks must handle only the verified shader-cache prompt, preserve unknown warning evidence and persist child diagnostics on failure.'
+    throw 'Smoke startup checks must preserve dialog evidence and verify MCM registered Chronicle settings and the validation button.'
 }
 $initializerSource = Get-Content (Join-Path $harnessRoot 'Initialize-ChronicleWorkspace.ps1') -Raw -Encoding UTF8
 if ($initializerSource -notmatch 'git -C \$PSScriptRoot rev-parse --show-toplevel' -or $initializerSource -notmatch 'not a Chronicle Framework source repository') { throw 'Workspace initialization must resolve and validate the Git root, including when invoked through an install-directory junction.' }

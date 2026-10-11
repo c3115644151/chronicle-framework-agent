@@ -6,6 +6,7 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using HarmonyLib;
+using MCM.Abstractions;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Party.PartyComponents;
@@ -21,6 +22,8 @@ public sealed class SubModule : MBSubModuleBase
     private ChronicleCampaignBehavior _campaignBehavior;
     private bool _freshCampaignMusicWaitLogged;
     private bool _freshCampaignMusicReadyLogged;
+    private bool _harnessMcmSettingsProbeCompleted;
+    private float _harnessMcmSettingsProbeElapsed;
     private static bool _harnessFocusLossEscapeMenuGuardInstalled;
     private static bool _harnessFocusLossEscapeMenuGuardWaitLogged;
 
@@ -28,6 +31,7 @@ public sealed class SubModule : MBSubModuleBase
     {
         base.OnSubModuleLoad();
         ChronicleDiagnostics.Write("submodule-load");
+        if (Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") == "smoke") ChronicleDiagnostics.Write("harness-smoke-mode-active");
         InstallCrashExceptionCaptureIfRequested();
         TryInstallHarnessFocusLossEscapeMenuGuard();
     }
@@ -147,6 +151,11 @@ public sealed class SubModule : MBSubModuleBase
     {
         base.OnBeforeInitialModuleScreenSetAsRoot();
         FreshCampaignHarness.ArmIfRequested();
+        if (Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") == "smoke")
+        {
+            _harnessMcmSettingsProbeElapsed = 15f;
+            ProbeHarnessMcmSettingsRegistration(0f);
+        }
     }
 
     protected override void OnGameStart(Game game, IGameStarter gameStarterObject)
@@ -164,6 +173,7 @@ public sealed class SubModule : MBSubModuleBase
     protected override void OnApplicationTick(float dt)
     {
         base.OnApplicationTick(dt);
+        ProbeHarnessMcmSettingsRegistration(dt);
         TryInstallHarnessFocusLossEscapeMenuGuard();
         if (Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") == FreshCampaignHarness.Mode && !IsNativeCampaignMusicInitialized())
         {
@@ -203,6 +213,35 @@ public sealed class SubModule : MBSubModuleBase
         catch
         {
             return false;
+        }
+    }
+
+    private void ProbeHarnessMcmSettingsRegistration(float dt)
+    {
+        if (_harnessMcmSettingsProbeCompleted || Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") != "smoke") return;
+        _harnessMcmSettingsProbeElapsed += dt;
+        try
+        {
+            var settingsProvider = BaseSettingsProvider.Instance;
+            var settings = settingsProvider?.GetSettings("ChronicleAgentSettings") as ChronicleAgentProviderSettings;
+            var definition = settingsProvider?.SettingsDefinitions.FirstOrDefault(item => item.SettingsId == "ChronicleAgentSettings");
+            if (settings == null && definition == null && _harnessMcmSettingsProbeElapsed < 30f) return;
+
+            var propertyIds = definition?.SettingPropertyGroups
+                .SelectMany(group => group.SettingProperties)
+                .Select(property => property.Id)
+                .OrderBy(id => id, StringComparer.Ordinal)
+                .ToArray() ?? Array.Empty<string>();
+            var validationButtonType = definition?.SettingPropertyGroups
+                .SelectMany(group => group.SettingProperties)
+                .FirstOrDefault(property => property.Id == "ValidateLocalConfiguration")?.SettingType.ToString() ?? "missing";
+            ChronicleDiagnostics.Write($"harness-mcm-settings|loaded={(settings != null)}|definition={(definition != null)}|propertyIds={string.Join(",", propertyIds)}|validationButtonType={validationButtonType}");
+            _harnessMcmSettingsProbeCompleted = true;
+        }
+        catch (Exception exception)
+        {
+            ChronicleDiagnostics.Write($"harness-mcm-settings-probe-failed|type={exception.GetType().FullName}|message={exception.Message}");
+            _harnessMcmSettingsProbeCompleted = true;
         }
     }
 

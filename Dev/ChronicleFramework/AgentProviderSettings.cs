@@ -2,6 +2,8 @@ using System;
 using MCM.Abstractions.Attributes;
 using MCM.Abstractions.Attributes.v2;
 using MCM.Abstractions.Base.Global;
+using TaleWorlds.Core;
+using TaleWorlds.Localization;
 
 namespace ChronicleFramework;
 
@@ -41,5 +43,26 @@ internal sealed class ChronicleAgentProviderSettings : AttributeGlobalSettings<C
             _modelId = next;
             OnPropertyChanged();
         }
+    }
+
+    [SettingPropertyButton("检查本地配置", Order = 2, RequireRestart = false, HintText = "只检查地址格式与本机服务限制，不会发送网络请求；服务连通性将在启动 AI 时确认。", Content = "检查")]
+    [SettingPropertyGroup("本地模型", GroupOrder = 0)]
+    public Action ValidateLocalConfiguration
+    {
+        get => ShowConfigurationValidation;
+        set { }
+    }
+
+    private void ShowConfigurationValidation()
+    {
+        var errorCode = AgentProviderConfigurationValidator.GetErrorCode(OllamaBaseUrl, ModelId);
+        var message = errorCode switch
+        {
+            null => "本地模型配置格式有效。保存设置后，启动 AI 时会再检查 Ollama 服务是否可连接、模型是否可用。",
+            "provider-profile-endpoint-invalid" => "地址无效：请输入不带账号密码、查询参数或片段的本机 HTTP(S) 服务地址。",
+            "provider-profile-model-invalid" => "模型名称无效：请填写已安装模型的名称。",
+            _ => "本地模型配置无效；请检查地址和模型名称。"
+        };
+        MBInformationManager.AddQuickInformation(new TextObject(message), 7000);
     }
 }

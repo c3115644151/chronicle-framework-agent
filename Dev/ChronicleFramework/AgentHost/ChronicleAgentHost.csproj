@@ -8,4 +8,7 @@
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\AgentProviderConfigurationValidator.cs" Link="AgentProviderConfigurationValidator.cs" />
+  </ItemGroup>
 </Project>

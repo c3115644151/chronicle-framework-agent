@@ -22,7 +22,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.117'
+$HarnessContractVersion = '7.120'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -426,9 +426,17 @@ foreach ($stage in $requestedStages) {
         }
         'Smoke' {
             Invoke-Stage -Name 'Smoke' -Action {
-                $smokeOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $smokeScript -TimeoutSeconds $SmokeTimeoutSeconds -StabilitySeconds $SmokeStabilitySeconds 2>&1 | Out-String
-                $smokeExitCode = $LASTEXITCODE
-                if ($smokeExitCode -ne 0) { throw "Smoke test failed with exit code $smokeExitCode. Evidence: $smokeOutput" }
+                $priorHarnessMode = $env:CHRONICLE_HARNESS_MODE
+                $env:CHRONICLE_HARNESS_MODE = 'smoke'
+                try {
+                    $smokeOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $smokeScript -TimeoutSeconds $SmokeTimeoutSeconds -StabilitySeconds $SmokeStabilitySeconds 2>&1 | Out-String
+                    $smokeExitCode = $LASTEXITCODE
+                    if ($smokeExitCode -ne 0) { throw "Smoke test failed with exit code $smokeExitCode. Evidence: $smokeOutput" }
+                }
+                finally {
+                    if ($null -eq $priorHarnessMode) { Remove-Item Env:CHRONICLE_HARNESS_MODE -ErrorAction SilentlyContinue }
+                    else { $env:CHRONICLE_HARNESS_MODE = $priorHarnessMode }
+                }
                 $smokeOutput
             }
         }
