@@ -312,6 +312,7 @@ internal static class AgentHostCampaignLoop
             ["contractId"] = "native-map-arrival-v1",
             ["providerModelId"] = provider.ModelId,
             ["providerConfigurationSource"] = provider.ConfigurationSource,
+            ["decisions"] = decisionCount,
             ["decisionCount"] = decisionCount,
             ["actionsExecuted"] = actionsExecuted,
             ["promptTokens"] = promptTokens,

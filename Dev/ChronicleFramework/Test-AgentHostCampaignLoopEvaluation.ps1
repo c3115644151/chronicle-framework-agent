@@ -81,7 +81,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         [string]$trace.ModelConfigurationSource -eq 'harness-mcm-profile-fixture' -and
         [string]$trace.AcceptanceSlice -eq 'Native movement arrival' -and
         [bool]$trace.ArrivalConfirmed -and [bool]$trace.CampaignDayAdvancedDuringTravel -and
-        [bool]$trace.ProviderStoppedAfterGoalAction -and [int]$trace.Decisions -le 30 -and
+        [bool]$trace.ProviderStoppedAfterGoalAction -and [int]$trace.Decisions -ge 3 -and [int]$trace.Decisions -le 30 -and
         $nativeActions.Count -eq 2 -and @($nativeActions | Where-Object { $_.actionReceipt.action -eq 'mapSettlementTargets' }).Count -eq 1 -and
         @($nativeActions | Where-Object { $_.actionReceipt.action -eq 'move' }).Count -eq 1 -and $observeAgainSteps.Count -gt 0 -and
         [bool]$trace.SourceTrackedTreeClean -and [string]$trace.SourceCommit -eq (git.exe -C $PSScriptRoot rev-parse HEAD).Trim() -and
