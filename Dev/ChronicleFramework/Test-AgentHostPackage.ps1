@@ -30,9 +30,10 @@ if ($packageRootFull.StartsWith($repositoryRoot, [StringComparison]::OrdinalIgno
     throw 'Self-contained package staging must be outside the source repository so binary runtime files cannot contaminate normal source builds.'
 }
 $publishRoot = Join-Path $packageRoot 'publish'
+$buildOutputRoot = Join-Path $packageRoot 'build'
 $consumerWorkingDirectory = Join-Path $evidenceRoot 'AgentHostPackageConsumerWorkingDirectory'
 $nugetRoot = 'D:\ChronicleFramework\BuildCache\NuGetPackages'
-New-Item -ItemType Directory -Path $publishRoot,$consumerWorkingDirectory,$nugetRoot -Force | Out-Null
+New-Item -ItemType Directory -Path $publishRoot,$buildOutputRoot,$consumerWorkingDirectory,$nugetRoot -Force | Out-Null
 
 $previousEnvironment = @{}
 foreach ($name in @('NUGET_PACKAGES', 'HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy')) {
@@ -45,7 +46,8 @@ try {
     foreach ($name in @('HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy')) {
         [Environment]::SetEnvironmentVariable($name, $proxyUri, 'Process')
     }
-    $buildLog = & dotnet publish $project --configuration Release --runtime win-x64 --self-contained true -p:UseAppHost=true -o $publishRoot 2>&1 | Out-String
+    $baseOutputArgument = "-p:BaseOutputPath=$buildOutputRoot\"
+    $buildLog = & dotnet publish $project --configuration Release --runtime win-x64 --self-contained true -p:UseAppHost=true $baseOutputArgument -o $publishRoot 2>&1 | Out-String
     $buildExitCode = $LASTEXITCODE
 }
 finally {

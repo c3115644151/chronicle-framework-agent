@@ -15,6 +15,8 @@
     <Content Remove="TestResults/**/*" />
     <None Remove="TestResults/**/*" />
     <Compile Remove="AgentHost/**/*.cs" />
+    <Content Remove="AgentHost/**/*" />
+    <None Remove="AgentHost/**/*" />
     <Reference Include="System.Numerics.Vectors">
       <HintPath>$(ChronicleGameRoot)\bin\Win64_Shipping_Client\System.Numerics.Vectors.dll</HintPath>
       <Private>false</Private>

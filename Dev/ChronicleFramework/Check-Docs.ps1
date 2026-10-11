@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.123'
+$contractVersion = '7.124'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -245,7 +245,10 @@ if ($harnessScript -notmatch "HarnessContractVersion\s*=\s*'$contractVersion'") 
 }
 if ($harnessScript -notmatch 'GitCommit' -or $harnessScript -notmatch 'SourceControl' -or $harnessScript -notmatch 'status --porcelain' -or $harnessScript -match 'TaskBoard|CensusDomainDoneCount|gh project|gh api|githubProjectNumber') { throw 'Harness receipts must record Git provenance and remain independent of GitHub task tracking.' }
 if ($projectFile -notmatch 'ChronicleGameRoot' -or $harnessScript -notmatch 'ChronicleGameRoot=\$gameRoot' -or -not (Test-Path -LiteralPath (Join-Path $harnessRoot 'Initialize-ChronicleWorkspace.ps1'))) { throw 'Cloned repositories must accept a local game path and provide a repeatable workspace initializer.' }
-if ($projectFile -notmatch '<Content Remove="TestResults/\*\*/\*"' -or $projectFile -notmatch '<None Remove="TestResults/\*\*/\*"') { throw 'Harness TestResults artifacts must be excluded from project candidate assembly search paths so packaged runtimes cannot shadow game references.' }
+if ($projectFile -notmatch '<Content Remove="TestResults/\*\*/\*"' -or $projectFile -notmatch '<None Remove="TestResults/\*\*/\*"' -or
+    $projectFile -notmatch '<Content Remove="AgentHost/\*\*/\*"' -or $projectFile -notmatch '<None Remove="AgentHost/\*\*/\*"') {
+    throw 'Harness TestResults and AgentHost runtime outputs must be excluded from Mod project candidate assembly search paths so packaged runtimes cannot shadow game references.'
+}
 if ($projectFile -notmatch 'Reference Include="SandBox\.View"' -or $projectFile -notmatch 'Modules\\SandBox\\bin\\Win64_Shipping_Client\\SandBox\.View\.dll' -or $projectFile -notmatch 'Reference Include="TaleWorlds\.Core\.ViewModelCollection"' -or $projectFile -notmatch 'TaleWorlds\.Core\.ViewModelCollection\.dll' -or $projectFile -notmatch 'Reference Include="TaleWorlds\.InputSystem"' -or $projectFile -notmatch 'TaleWorlds\.InputSystem\.dll') { throw 'Native map inventory/menu and RecruitmentVM lifecycle support must bind to the installed 1.4.8 View, ViewModel, and InputSystem assemblies.' }
 $providerSettingsSource = Get-Content (Join-Path $harnessRoot 'AgentProviderSettings.cs') -Raw -Encoding UTF8
 $providerValidatorSource = Get-Content (Join-Path $harnessRoot 'AgentProviderConfigurationValidator.cs') -Raw -Encoding UTF8
@@ -289,6 +292,7 @@ if ($harnessScript -notmatch "'AgentHostPackage'\s*\{ @\('Preflight', 'Build', '
     $agentHostPackageSource -notmatch 'win-x64' -or $agentHostPackageSource -notmatch '--self-contained true' -or
     $agentHostPackageSource -notmatch 'NUGET_PACKAGES' -or $agentHostPackageSource -notmatch '127\.0\.0\.1:7890' -or
     $agentHostPackageSource -notmatch 'D:\\ChronicleFramework\\BuildCache\\Packages' -or $agentHostPackageSource -notmatch 'package staging must be outside the source repository' -or
+    $agentHostPackageSource -notmatch 'BaseOutputPath' -or
     $agentHostPackageSource -notmatch 'ChronicleAgentHost\.exe' -or $agentHostPackageSource -notmatch 'AgentHostPackageManifest\.json' -or
     $agentHostProgramSource -notmatch '--package-health' -or $agentHostProgramSource -notmatch '--version') {
     throw 'Agent Host packaging must be an opt-in win-x64 self-contained publish, use D: NuGet cache/proxy port 7890, and directly verify the packaged Host without the .NET CLI.'
