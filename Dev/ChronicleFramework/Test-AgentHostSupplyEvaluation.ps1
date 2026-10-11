@@ -65,7 +65,8 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
     $runPassed = (
         $childExitCode -eq 0 -and $liveResult -and [bool]$liveResult.Passed -and
         [bool]$supply.Passed -and [bool]$liveResult.FixtureUnchanged -and [bool]$liveResult.ProcessStopped -and
-        [bool]$supply.NativeGoalVerified -and [int]$supply.DailyTicksElapsed -ge 3 -and
+        [bool]$supply.NativeGoalVerified -and [int]$supply.DailyTicksElapsed -eq 3 -and
+        [int]$supply.HostRestPollCount -gt 0 -and [bool]$supply.HostWaitLeaveActionCompleted -and
         [int]$supply.ModelDecisionCount -le 24 -and [int]$supply.NativeRestRequestCount -eq 1 -and
         [int]$supply.FoodAmount -eq 1 -and [int]$supply.Members -eq 6 -and
         [int]$supply.Gold -ge 861 -and [double]$supply.Food -ge 1.0 -and

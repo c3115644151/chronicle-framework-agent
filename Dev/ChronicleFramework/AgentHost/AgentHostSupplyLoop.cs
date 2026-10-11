@@ -55,6 +55,8 @@ internal static class AgentHostSupplyLoop
         var goalVerified = false;
         JsonObject? currentNative = null;
         int startingDailyTick = 0;
+        var acceptedFoodPurchase = false;
+        var completedRequestedRest = false;
         var loopStage = "read-start-state";
         string? lastSelectedAction = null;
 
@@ -74,10 +76,16 @@ internal static class AgentHostSupplyLoop
                 loopStage = "evaluate-completion-contract";
                 var nativeObservation = currentNative ?? throw new AgentHostException("native-observation-missing", "The Host lost its current Native observation.");
                 var contractResult = EvaluateCompletionContract(nativeObservation, contract);
+                if (completedRequestedRest && !contractResult.Passed)
+                {
+                    failure = "The requested Native rest finished, but the frozen supply conditions were not met; Host stopped instead of repeating the food purchase.";
+                    terminationReason = "rest-completed-contract-failed";
+                    break;
+                }
                 loopStage = "build-action-catalog";
-                var catalog = BuildActionCatalog(nativeObservation, previousReceipt, targetSettlementId, startingDailyTick, contractResult.Passed);
+                var catalog = BuildActionCatalog(nativeObservation, previousReceipt, targetSettlementId, startingDailyTick, contractResult.Passed, acceptedFoodPurchase);
                 loopStage = "build-control-catalog";
-                var controls = BuildControlCatalog(nativeObservation, previousReceipt, startingDailyTick, contractResult.Passed);
+                var controls = BuildControlCatalog(contractResult.Passed);
                 if (catalog.Count == 0 && controls.Count == 0)
                 {
                     failure = "No safe action or scheduler control is available in the current Native context.";
@@ -86,7 +94,7 @@ internal static class AgentHostSupplyLoop
                 }
 
                 loopStage = "build-model-request";
-                var modelRequest = BuildModelRequest(runId, iteration, goal!, nativeObservation, previousReceipt, feedback, contract, catalog, controls, targetSettlementId!, startingDailyTick);
+                var modelRequest = BuildModelRequest(runId, iteration, goal!, nativeObservation, previousReceipt, feedback, contract, catalog, controls, targetSettlementId!, startingDailyTick, acceptedFoodPurchase);
                 var decisionStartedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
                 var providerStarted = Stopwatch.GetTimestamp();
                 ProviderDecisionResult providerResult;
@@ -165,25 +173,10 @@ internal static class AgentHostSupplyLoop
 
                 if (decision["observeAgain"]?.GetValue<bool>() == true)
                 {
-                    if (!CanObserveAgain(nativeObservation, previousReceipt, startingDailyTick, decision, out var waitSeconds, out var waitError))
-                    {
-                        failure = waitError;
-                        terminationReason = "invalid-scheduler-control";
-                        trace.Add(BuildDecisionOnlyStep(iteration, decisionStartedUtc, providerCompletedUtc, nativeObservation, decision, new JsonObject { ["kind"] = "control-rejected-before-wait", ["nativeActionSent"] = false }, Stopwatch.GetTimestamp() - providerStarted));
-                        break;
-                    }
-
-                    var waitStarted = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
-                    await Task.Delay(TimeSpan.FromSeconds(waitSeconds), elapsed.Token);
-                    using var afterWait = await client.ReadStateAsync(elapsed.Token);
-                    var freshObservation = CloneObject(afterWait.RootElement);
-                    VerifySameNativeOwner(freshObservation, nativeGameProcessId, startingIdentity);
-                    var waitCompleted = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
-                    trace.Add(BuildObserveAgainStep(iteration, decisionStartedUtc, providerCompletedUtc, waitStarted, waitCompleted, nativeObservation, freshObservation, decision, waitSeconds));
-                    currentNative = freshObservation;
-                    feedback = null;
-                    rejectedCount = 0;
-                    continue;
+                    failure = "The Host does not expose model-driven polling during an accepted Native rest; the Host owns that asynchronous action until it completes.";
+                    terminationReason = "model-poll-during-native-rest-rejected";
+                    trace.Add(BuildDecisionOnlyStep(iteration, decisionStartedUtc, providerCompletedUtc, nativeObservation, decision, new JsonObject { ["kind"] = "control-rejected-before-wait", ["nativeActionSent"] = false }, Stopwatch.GetTimestamp() - providerStarted));
+                    break;
                 }
 
                 var actionName = ReadString(decision, "action");
@@ -191,7 +184,7 @@ internal static class AgentHostSupplyLoop
                 JsonObject? nativeArguments = null;
                 string? validationError = null;
                 var actionValid = !string.IsNullOrWhiteSpace(actionName) &&
-                    TryBuildNativeArguments(actionName!, decision["arguments"] as JsonObject, nativeObservation, previousReceipt, targetSettlementId!, startingDailyTick, contractResult.Passed, out nativeArguments, out validationError);
+                    TryBuildNativeArguments(actionName!, decision["arguments"] as JsonObject, nativeObservation, previousReceipt, targetSettlementId!, startingDailyTick, contractResult.Passed, acceptedFoodPurchase, out nativeArguments, out validationError);
                 if (!actionValid)
                 {
                     rejectedCount++;
@@ -261,6 +254,43 @@ internal static class AgentHostSupplyLoop
 
                 previousReceipt = actionReceipt;
                 currentNative = afterAction;
+
+                if (actionName == "tradeConfirm" && actionStatus == "completed")
+                    acceptedFoodPurchase = true;
+
+                if (actionName == "rest" && actionStatus == "accepted")
+                {
+                    loopStage = "await-native-rest-completion";
+                    var restCompletion = await AwaitNativeRestCompletionAsync(
+                        client,
+                        actionReceipt,
+                        iteration,
+                        startingDailyTick + 3,
+                        nativeGameProcessId,
+                        startingIdentity,
+                        elapsed.Token);
+                    trace.Add(restCompletion.MonitorStep);
+                    currentNative = restCompletion.CurrentObservation;
+                    previousReceipt = restCompletion.FinalReceipt;
+                    if (restCompletion.LeaveReceipt is not null)
+                    {
+                        trace.Add(restCompletion.LeaveStep!);
+                        nativeActionsExecuted++;
+                    }
+                    if (restCompletion.RequestedRestCompleted)
+                    {
+                        completedRequestedRest = true;
+                        var afterRestContract = EvaluateCompletionContract(currentNative, contract);
+                        if (!afterRestContract.Passed)
+                        {
+                            failure = "The requested Native rest finished, but the frozen supply conditions were not met; Host stopped instead of repeating the food purchase.";
+                            terminationReason = "rest-completed-contract-failed";
+                            break;
+                        }
+                    }
+                    feedback = null;
+                    rejectedCount = 0;
+                }
             }
 
             if (!completedByProvider && failure is null)
@@ -326,6 +356,199 @@ internal static class AgentHostSupplyLoop
             throw new AgentHostException("supply-start-fixture-mismatch", "The Native Campaign did not match the prepared W5 supply fixture; Host made no action.");
     }
 
+    private sealed record NativeRestCompletion(
+        JsonObject CurrentObservation,
+        JsonObject FinalReceipt,
+        JsonObject? LeaveReceipt,
+        JsonObject MonitorStep,
+        JsonObject? LeaveStep,
+        bool RequestedRestCompleted);
+
+    private sealed record NativeRestStop(JsonObject? BeforeObservation, JsonObject? Receipt);
+
+    private static async Task<NativeRestCompletion> AwaitNativeRestCompletionAsync(
+        NativeMailboxClient client,
+        JsonObject acceptedRestReceipt,
+        int iteration,
+        int targetDailyTick,
+        int nativeGameProcessId,
+        JsonObject startingIdentity,
+        CancellationToken cancellationToken)
+    {
+        const int pollIntervalMilliseconds = 500;
+        var waitStartedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+        var waitStartedTicks = Stopwatch.GetTimestamp();
+        var tickSamples = new JsonArray();
+        var current = (JsonObject)acceptedRestReceipt.DeepClone();
+        var lastRecordedTick = int.MinValue;
+        var pollCount = 0;
+        RecordTickSample(current, tickSamples, ref lastRecordedTick, "accepted");
+
+        try
+        {
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var tick = ReadInt(current, "dailyTickCount", -1);
+                var state = current["state"] as JsonObject ?? throw new AgentHostException("native-rest-state-missing", "The accepted Native rest receipt omitted Campaign state.");
+                var context = state["context"] as JsonObject ?? throw new AgentHostException("native-rest-context-missing", "The accepted Native rest receipt omitted Campaign context.");
+                var waitIsActive = ReadString(context, "gameState") == "MapState" &&
+                    ReadString(context, "menuId") == "town_wait_menus" &&
+                    ReadBool(context, "isWaiting");
+
+                if (tick >= targetDailyTick && waitIsActive && IsEnabledMenuOption(state, "wait_leave"))
+                {
+                    var nativeArguments = new JsonObject
+                    {
+                        ["optionId"] = "wait_leave",
+                        ["menuId"] = ReadString(context, "menuId")
+                    };
+                    var actionStartedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+                    using var leaveResponse = await client.ExecuteSupplyActionAsync("menuSelect", nativeArguments, cancellationToken);
+                    var leaveReceipt = CloneObject(leaveResponse.RootElement);
+                    VerifySameNativeOwner(leaveReceipt, nativeGameProcessId, startingIdentity);
+                    var actionCompletedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+                    if (ReadString(leaveReceipt, "status") != "completed")
+                        throw new AgentHostException("native-rest-leave-rejected", "The current Native wait_leave option was rejected after the requested daily ticks.");
+                    var postState = leaveReceipt["state"] as JsonObject ?? throw new AgentHostException("native-rest-leave-state-missing", "Native wait_leave omitted its post-action state.");
+                    var postContext = postState["context"] as JsonObject ?? throw new AgentHostException("native-rest-leave-context-missing", "Native wait_leave omitted its post-action Campaign context.");
+                    if (ReadString(postContext, "gameState") != "MapState" || ReadString(postContext, "menuId") != "town" ||
+                        ReadString(postContext, "timeControlMode") != "Stop")
+                        throw new AgentHostException("native-rest-leave-postcondition-failed", "Native wait_leave did not return to the Town menu with time stopped.");
+
+                    var monitorStep = BuildNativeRestMonitorStep(iteration, acceptedRestReceipt, leaveReceipt, waitStartedUtc, actionCompletedUtc, waitStartedTicks, pollCount, targetDailyTick, tickSamples, requestedRestCompleted: true, interrupted: false);
+                    var leaveStep = BuildNativeRestLeaveStep(iteration, current, leaveReceipt, actionStartedUtc, actionCompletedUtc, requestedRestCompleted: true);
+                    return new NativeRestCompletion(leaveReceipt, leaveReceipt, leaveReceipt, monitorStep, leaveStep, RequestedRestCompleted: true);
+                }
+
+                if (!waitIsActive)
+                {
+                    var completedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+                    var monitorStep = BuildNativeRestMonitorStep(iteration, acceptedRestReceipt, current, waitStartedUtc, completedUtc, waitStartedTicks, pollCount, targetDailyTick, tickSamples, requestedRestCompleted: false, interrupted: true);
+                    return new NativeRestCompletion(current, acceptedRestReceipt, null, monitorStep, null, RequestedRestCompleted: false);
+                }
+
+                await Task.Delay(pollIntervalMilliseconds, cancellationToken);
+                using var observationResponse = await client.ReadStateAsync(cancellationToken);
+                current = CloneObject(observationResponse.RootElement);
+                VerifySameNativeOwner(current, nativeGameProcessId, startingIdentity);
+                pollCount++;
+                RecordTickSample(current, tickSamples, ref lastRecordedTick, "native-state-poll");
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            var safeStop = await TryStopNativeTownWaitAsync(client, nativeGameProcessId, startingIdentity);
+            if (safeStop.Receipt is not null && safeStop.BeforeObservation is not null)
+            {
+                var stoppedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+                var leaveStep = BuildNativeRestLeaveStep(iteration, safeStop.BeforeObservation, safeStop.Receipt, waitStartedUtc, stoppedUtc, requestedRestCompleted: false);
+                var monitorStep = BuildNativeRestMonitorStep(iteration, acceptedRestReceipt, safeStop.Receipt, waitStartedUtc, stoppedUtc, waitStartedTicks, pollCount, targetDailyTick, tickSamples, requestedRestCompleted: false, interrupted: true);
+                return new NativeRestCompletion(safeStop.Receipt, safeStop.Receipt, safeStop.Receipt, monitorStep, leaveStep, RequestedRestCompleted: false);
+            }
+            throw;
+        }
+    }
+
+    private static async Task<NativeRestStop> TryStopNativeTownWaitAsync(NativeMailboxClient client, int nativeGameProcessId, JsonObject startingIdentity)
+    {
+        using var cleanupTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        try
+        {
+            using var stateResponse = await client.ReadStateAsync(cleanupTimeout.Token);
+            var state = CloneObject(stateResponse.RootElement);
+            VerifySameNativeOwner(state, nativeGameProcessId, startingIdentity);
+            var campaignState = state["state"] as JsonObject;
+            var context = campaignState?["context"] as JsonObject;
+            if (ReadString(context, "gameState") != "MapState" || ReadString(context, "menuId") != "town_wait_menus" ||
+                !ReadBool(context, "isWaiting") || campaignState is null || !IsEnabledMenuOption(campaignState, "wait_leave"))
+                return new NativeRestStop(state, null);
+
+            var args = new JsonObject { ["menuId"] = "town_wait_menus", ["optionId"] = "wait_leave" };
+            using var stopResponse = await client.ExecuteSupplyActionAsync("menuSelect", args, cleanupTimeout.Token);
+            var receipt = CloneObject(stopResponse.RootElement);
+            VerifySameNativeOwner(receipt, nativeGameProcessId, startingIdentity);
+            return new NativeRestStop(state, ReadString(receipt, "status") == "completed" ? receipt : null);
+        }
+        catch
+        {
+            return new NativeRestStop(null, null);
+        }
+    }
+
+    private static void RecordTickSample(JsonObject response, JsonArray samples, ref int lastRecordedTick, string source)
+    {
+        var tick = ReadInt(response, "dailyTickCount", -1);
+        if (tick == lastRecordedTick) return;
+        lastRecordedTick = tick;
+        samples.Add(new JsonObject
+        {
+            ["utc"] = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+            ["source"] = source,
+            ["dailyTickCount"] = tick,
+            ["campaignDay"] = response["campaignDay"]?.DeepClone(),
+            ["timeControlMode"] = response["timeControlMode"]?.DeepClone()
+        });
+    }
+
+    private static JsonObject BuildNativeRestMonitorStep(
+        int iteration,
+        JsonObject acceptedRestReceipt,
+        JsonObject finalObservation,
+        string startedUtc,
+        string completedUtc,
+        long startedTicks,
+        int pollCount,
+        int targetDailyTick,
+        JsonArray tickSamples,
+        bool requestedRestCompleted,
+        bool interrupted) =>
+        new()
+        {
+            ["iteration"] = iteration,
+            ["decision"] = new JsonObject { ["hostExecution"] = "await-native-rest", ["requestedDays"] = 3 },
+            ["actionAttempted"] = false,
+            ["actionExecuted"] = false,
+            ["observationBefore"] = acceptedRestReceipt.DeepClone(),
+            ["observationAfter"] = finalObservation.DeepClone(),
+            ["control"] = new JsonObject
+            {
+                ["kind"] = "host-await-native-rest",
+                ["pollIntervalMilliseconds"] = 500,
+                ["pollCount"] = pollCount,
+                ["targetDailyTick"] = targetDailyTick,
+                ["tickSamples"] = tickSamples.DeepClone(),
+                ["requestedRestCompleted"] = requestedRestCompleted,
+                ["interrupted"] = interrupted,
+                ["explicitClockActions"] = new JsonArray()
+            },
+            ["timing"] = new JsonObject
+            {
+                ["startedUtc"] = startedUtc,
+                ["completedUtc"] = completedUtc,
+                ["elapsedMilliseconds"] = ElapsedMilliseconds(startedTicks)
+            }
+        };
+
+    private static JsonObject BuildNativeRestLeaveStep(int iteration, JsonObject before, JsonObject receipt, string startedUtc, string completedUtc, bool requestedRestCompleted) =>
+        new()
+        {
+            ["iteration"] = iteration,
+            ["decision"] = new JsonObject
+            {
+                ["hostExecution"] = "finish-accepted-native-rest",
+                ["action"] = "menuSelect",
+                ["arguments"] = new JsonObject { ["OptionId"] = "wait_leave" }
+            },
+            ["actionAttempted"] = true,
+            ["actionExecuted"] = ReadString(receipt, "status") == "completed",
+            ["observationBefore"] = before.DeepClone(),
+            ["observationAfter"] = receipt.DeepClone(),
+            ["actionReceipt"] = receipt.DeepClone(),
+            ["control"] = new JsonObject { ["kind"] = requestedRestCompleted ? "host-rest-completed" : "host-rest-safely-stopped", ["requestedRestCompleted"] = requestedRestCompleted },
+            ["timing"] = new JsonObject { ["actionStartedUtc"] = startedUtc, ["actionCompletedUtc"] = completedUtc }
+        };
+
     private static JsonObject BuildModelRequest(
         string runId,
         int iteration,
@@ -337,13 +560,14 @@ internal static class AgentHostSupplyLoop
         JsonArray allowedActions,
         JsonArray allowedControls,
         string targetSettlementId,
-        int startingDailyTick)
+        int startingDailyTick,
+        bool foodPurchaseCommitted)
     {
         var state = nativeResponse["state"]!.AsObject();
         var context = state["context"]!.AsObject();
         var menuId = ReadString(context, "menuId") ?? string.Empty;
         var party = state["party"]!.AsObject();
-        var hasPurchasedFood = ReadInt(party, "foodInventory", 0) > 0 || ReadString(previousReceipt, "action") == "tradeConfirm";
+        var hasPurchasedFood = foodPurchaseCommitted || ReadInt(party, "foodInventory", 0) > 0 || ReadString(previousReceipt, "action") == "tradeConfirm";
         var dailyTick = ReadInt(nativeResponse, "dailyTickCount", -1);
         var relevantMenuIds = menuId switch
         {
@@ -424,7 +648,7 @@ internal static class AgentHostSupplyLoop
         return request;
     }
 
-    private static JsonArray BuildActionCatalog(JsonObject nativeResponse, JsonObject? previousReceipt, string targetSettlementId, int startingDailyTick, bool goalMet)
+    private static JsonArray BuildActionCatalog(JsonObject nativeResponse, JsonObject? previousReceipt, string targetSettlementId, int startingDailyTick, bool goalMet, bool foodPurchaseCommitted)
     {
         var catalog = new JsonArray();
         var state = nativeResponse["state"]!.AsObject();
@@ -435,7 +659,7 @@ internal static class AgentHostSupplyLoop
         var tick = ReadInt(nativeResponse, "dailyTickCount", -1);
         if (gameState == "MapState" && menuId == "town")
         {
-            var hasPurchased = ReadInt(state["party"]!.AsObject(), "foodInventory", 0) > 0 || ReadString(previousReceipt, "action") == "tradeConfirm";
+            var hasPurchased = foodPurchaseCommitted || ReadInt(state["party"]!.AsObject(), "foodInventory", 0) > 0 || ReadString(previousReceipt, "action") == "tradeConfirm";
             var targetOption = hasPurchased ? "town_wait" : "trade";
             if (IsEnabledMenuOption(state, targetOption)) catalog.Add(Action("menuSelect", "OptionId"));
         }
@@ -465,22 +689,11 @@ internal static class AgentHostSupplyLoop
         return catalog;
     }
 
-    private static JsonArray BuildControlCatalog(JsonObject nativeResponse, JsonObject? previousReceipt, int startingDailyTick, bool goalMet)
+    private static JsonArray BuildControlCatalog(bool goalMet)
     {
         var controls = new JsonArray();
         if (goalMet)
-        {
             controls.Add("done");
-            return controls;
-        }
-        var state = nativeResponse["state"]!.AsObject();
-        var context = state["context"]!.AsObject();
-        var waitModes = new[] { "UnstoppableFastForward", "UnstoppableFastForwardForPartyWaitTime" };
-        var tick = ReadInt(nativeResponse, "dailyTickCount", -1);
-        if (ReadString(context, "gameState") == "MapState" && ReadString(context, "menuId") == "town_wait_menus" &&
-            ReadBool(context, "isWaiting") && tick < startingDailyTick + 3 && waitModes.Contains(ReadString(context, "timeControlMode"), StringComparer.Ordinal) &&
-            ReadString(previousReceipt, "action") == "rest" && ReadString(previousReceipt, "status") == "accepted")
-            controls.Add("observeAgain");
         return controls;
     }
 
@@ -526,6 +739,7 @@ internal static class AgentHostSupplyLoop
         string targetSettlementId,
         int startingDailyTick,
         bool goalMet,
+        bool foodPurchaseCommitted,
         out JsonObject? nativeArguments,
         out string? error)
     {
@@ -539,6 +753,7 @@ internal static class AgentHostSupplyLoop
             case "menuSelect":
                 var optionId = ReadString(arguments, "OptionId");
                 if (string.IsNullOrWhiteSpace(optionId) || !IsEnabledMenuOption(state, optionId)) { error = "OptionId is not an enabled current Native option."; return false; }
+                if (foodPurchaseCommitted && menuId == "town" && optionId == "trade") { error = "The frozen supply slice permits one committed food purchase; Trade cannot be reopened."; return false; }
                 if (menuId == "town" && optionId != (ReadInt(state["party"]!.AsObject(), "foodInventory", 0) > 0 ? "town_wait" : "trade")) { error = "Town option violates the prepared supply step order."; return false; }
                 if (menuId == "town_wait_menus" && (optionId != "wait_leave" || ReadInt(nativeResponse, "dailyTickCount", -1) < startingDailyTick + 3)) { error = "Wait may be exited only after three Native daily ticks."; return false; }
                 nativeArguments["optionId"] = optionId;
@@ -624,9 +839,9 @@ internal static class AgentHostSupplyLoop
         if (gameState == "MapState" && menuId == "town" && ReadString(state?["location"] as JsonObject, "currentSettlementId") == settlementId && ReadInt(state?["party"] as JsonObject, "foodInventory", 0) > 0 && tick < startingDailyTick + 3)
             return "Select the currently enabled town_wait menu option, then schedule one Native rest of three days.";
         if (gameState == "MapState" && menuId == "town_wait_menus" && tick < startingDailyTick + 3 && ReadBool(context, "isWaiting") && ReadString(previousReceipt, "action") != "rest")
-            return "Town Wait has begun but no Native rest request has been accepted; choose the listed rest action with Days=3 before requesting observeAgain.";
+            return "Town Wait has begun but no Native rest request has been accepted; choose the listed rest action with Days=3.";
         if (gameState == "MapState" && menuId == "town_wait_menus" && tick < startingDailyTick + 3 && ReadString(previousReceipt, "action") == "rest" && ReadString(previousReceipt, "status") == "accepted")
-            return "The accepted Native Town Wait is still running; use only the allowed observeAgain scheduler control until a fresh dailyTickCount reaches its target.";
+            return "The Host is passively monitoring the accepted Native Town Wait and will return a fresh observation after the requested ticks; do not issue another wait or time-control action.";
         if (gameState == "MapState" && menuId == "town_wait_menus" && tick >= startingDailyTick + 3)
             return "Select the currently enabled wait_leave option once, then verify the Town menu and completion contract.";
         return "Use a currently listed Native action/control to satisfy the remaining exact completion conditions; do not stop early.";
@@ -675,36 +890,6 @@ internal static class AgentHostSupplyLoop
         return ReadString(before["location"] as JsonObject, "currentSettlementId") == ReadString(after["location"] as JsonObject, "currentSettlementId") &&
             ReadString(before["context"] as JsonObject, "menuId") == ReadString(after["context"] as JsonObject, "menuId");
     }
-
-    private static bool CanObserveAgain(JsonObject nativeResponse, JsonObject? previousReceipt, int startTick, JsonObject decision, out int waitSeconds, out string? error)
-    {
-        waitSeconds = ReadInt(decision, "waitSeconds", 0);
-        error = null;
-        var state = nativeResponse["state"] as JsonObject;
-        var context = state?["context"] as JsonObject;
-        var modes = new[] { "UnstoppableFastForward", "UnstoppableFastForwardForPartyWaitTime" };
-        if (previousReceipt is null || ReadString(previousReceipt, "action") != "rest" || ReadString(previousReceipt, "status") != "accepted" ||
-            ReadString(context, "gameState") != "MapState" || ReadString(context, "menuId") != "town_wait_menus" || !ReadBool(context, "isWaiting") ||
-            !modes.Contains(ReadString(context, "timeControlMode"), StringComparer.Ordinal) || ReadInt(nativeResponse, "dailyTickCount", -1) >= startTick + 3 || waitSeconds is < 1 or > 10)
-        {
-            error = "observeAgain requires an accepted, actively advancing Native Town Wait and a 1-10 second scheduler delay.";
-            return false;
-        }
-        return true;
-    }
-
-    private static JsonObject BuildObserveAgainStep(int iteration, string providerStarted, string providerCompleted, string waitStarted, string waitCompleted, JsonObject before, JsonObject after, JsonObject decision, int waitSeconds) =>
-        new JsonObject
-        {
-            ["iteration"] = iteration,
-            ["decision"] = decision.DeepClone(),
-            ["actionExecuted"] = false,
-            ["actionAttempted"] = false,
-            ["observationBefore"] = before.DeepClone(),
-            ["observationAfter"] = after.DeepClone(),
-            ["control"] = new JsonObject { ["kind"] = "bounded-observe-again", ["waitSeconds"] = waitSeconds },
-            ["timing"] = new JsonObject { ["providerStartedUtc"] = providerStarted, ["providerCompletedUtc"] = providerCompleted, ["schedulerWaitStartedUtc"] = waitStarted, ["schedulerWaitCompletedUtc"] = waitCompleted, ["observationCompletedUtc"] = waitCompleted }
-        };
 
     private static JsonObject BuildRejectedDecisionStep(int iteration, string providerStarted, string providerCompleted, JsonObject observation, JsonObject feedback, long providerStartedTicks) =>
         new()

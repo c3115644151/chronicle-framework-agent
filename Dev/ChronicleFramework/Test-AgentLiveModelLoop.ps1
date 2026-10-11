@@ -241,7 +241,7 @@ try {
         $env:CHRONICLE_LLM_MAX_TOKENS = '512'
     }
     elseif ($SupplyManagementLoop) {
-        $goal = 'Supply objective: keep this six-member MainParty at Sargot supplied for three real Campaign daily ticks. Starting dailyTickCount is 2; do not leave Town Wait until a fresh observation shows dailyTickCount >= 5. Starting Food is 0.95 and FoodChange is -0.3/day. The measured one-unit Native baseline is: one cheapest food item costs 9, Food becomes 1.95, and after three daily ticks Food is 1.05. Therefore buy exactly one unit total, using the current lowest-priced affordable Native foodOptions offer; never reopen Trade after the first successful tradeConfirm, even if you think extra food is safer. Keep the party size six. Use only currently enabled OptionIds. menuSelect accepts only OptionId and binds the current Native menu. First: select trade, query foodOptions, and buy one unit. A successful provision only drafts the transfer; while the Trade InventoryState is open, select the currently listed tradeConfirm exactly once to commit it. Do not wait or use observeAgain before the committed tradeConfirm receipt. Only after completed tradeConfirm, select town_wait. Then request rest Days=3. A rest receipt with status accepted means the requested wait is still running, not finished. While dailyTickCount < 5, the only correct next step is observeAgain waitSeconds=5; do not choose wait_leave, any other menu/game action, or a second rest. When a fresh observation reaches dailyTickCount >= 5, select the currently enabled wait_leave option once. Return done only after fresh state shows Town menu, six members, Gold >= 861, and Food >= 1.0. If any action is rejected, use the new state and available action catalog; never reuse an unavailable action. Never call explicit clock controls or claim unverified outcomes.'
+        $goal = 'Supply objective: keep this six-member MainParty at Sargot supplied for three real Campaign daily ticks. Starting dailyTickCount is 2; the required target is tick 5. Starting Food is 0.95 and FoodChange is -0.3/day. The measured one-unit Native baseline is: one cheapest food item costs 9, Food becomes 1.95, and after three daily ticks Food is 1.05. Therefore buy exactly one unit total, using the current lowest-priced affordable Native foodOptions offer; never reopen Trade after the first successful tradeConfirm, even if you think extra food is safer. Keep the party size six. Use only currently enabled OptionIds. menuSelect accepts only OptionId and binds the current Native menu. First: select trade, query foodOptions, and buy one unit. A successful provision only drafts the transfer; while the Trade InventoryState is open, select the currently listed tradeConfirm exactly once to commit it. Do not wait, request observeAgain, or act before the committed tradeConfirm receipt. Only after completed tradeConfirm, select town_wait, then request rest Days=3. Once rest is accepted, the Host passively polls Native state and selects the currently enabled wait_leave option exactly once when tick 5 is reached; do not issue more waits, trades, or time-control actions during that pending Native rest. Continue from the fresh Native state returned by the Host. Return done only after fresh state shows Town menu, six members, Gold >= 861, and Food >= 1.0. If any action is rejected, use the new state and available action catalog; never reuse an unavailable action. Never call explicit clock controls or claim unverified outcomes.'
         $maxDecisions = 24
         $maxElapsedSeconds = 300
         $allowedActions = 'menuSelect,foodOptions,provision,tradeConfirm,rest'
@@ -416,6 +416,11 @@ try {
         $waitEntry = @($waitEntrySteps | Select-Object -First 1)
         $restSteps = @($steps | Where-Object { $_.decision.action -eq 'rest' -and $_.actionExecuted -and $_.actionReceipt.status -in @('accepted','completed') })
         $restStep = @($restSteps | Select-Object -First 1)
+        $hostRestMonitorSteps = @($steps | Where-Object { $_.control.kind -eq 'host-await-native-rest' })
+        $hostRestMonitor = @($hostRestMonitorSteps | Select-Object -First 1)
+        $hostRestLeaveSteps = @($steps | Where-Object { $_.decision.hostExecution -eq 'finish-accepted-native-rest' -and $_.actionReceipt.action -eq 'menuSelect' -and $_.actionReceipt.status -eq 'completed' })
+        $hostRestLeaveOption = @()
+        if ($hostRestLeaveSteps.Count -eq 1) { $hostRestLeaveOption = @($hostRestLeaveSteps[0].observationBefore.state.availableMenuOptions | Where-Object { $_.id -eq 'wait_leave' -and $_.available -and $_.enabled } | Select-Object -First 1) }
         $leaveWaitSteps = @($steps | Where-Object { $_.decision.action -eq 'menuSelect' -and [string]$_.decision.arguments.OptionId -eq 'wait_leave' -and $_.actionReceipt.status -eq 'completed' })
         $leaveWait = @($leaveWaitSteps | Select-Object -Last 1)
         $latestObservation = @($steps | Where-Object { $_.observationBefore -and $_.observationBefore.state } | Select-Object -Last 1)
@@ -467,8 +472,10 @@ try {
             $provisionSteps.Count -eq 1 -and $provisionStep.Count -eq 1 -and [int]$provisionStep[0].decision.arguments.Amount -eq 1 -and $selectedFoodOffer.Count -eq 1 -and $cheapestFoodOffer.Count -eq 1 -and [string]$selectedFoodOffer[0].viewModelItemId -ceq [string]$cheapestFoodOffer[0].viewModelItemId -and [int]$provisionStep[0].actionReceipt.data.nativeTransactionAmount -le [double]$cheapestFoodOffer[0].inventoryLogicUnitPrice -and
             $tradeCommitSteps.Count -eq 1 -and $tradeCommit.Count -eq 1 -and [bool]$tradeCommit[0].actionReceipt.data.committed -and [bool]$tradeCommit[0].actionReceipt.data.postconditionPassed -and
             $waitEntrySteps.Count -eq 1 -and $waitEntry.Count -eq 1 -and $waitOption.Count -eq 1 -and [string]$waitEntry[0].observationBefore.state.context.menuId -eq 'town' -and
-            $restSteps.Count -eq 1 -and [int]$restStep[0].decision.arguments.Days -eq 3 -and $leaveWaitSteps.Count -eq 1 -and $leaveWait.Count -eq 1 -and $leaveOption.Count -eq 1 -and [string]$leaveWait[0].observationBefore.state.context.menuId -eq 'town_wait_menus' -and
-            $naturalTicksElapsed -ge 3 -and [double]$finalObservation.campaignDay -ge ([double]$supplySetup.CampaignDay + 3.0) -and
+            $restSteps.Count -eq 1 -and [int]$restStep[0].decision.arguments.Days -eq 3 -and $hostRestMonitorSteps.Count -eq 1 -and [bool]$hostRestMonitor[0].control.requestedRestCompleted -and [int]$hostRestMonitor[0].control.pollCount -gt 0 -and
+            $hostRestLeaveSteps.Count -eq 1 -and $hostRestLeaveOption.Count -eq 1 -and
+            $leaveWaitSteps.Count -eq 1 -and $leaveWait.Count -eq 1 -and $leaveOption.Count -eq 1 -and [string]$leaveWait[0].observationBefore.state.context.menuId -eq 'town_wait_menus' -and
+            $naturalTicksElapsed -eq 3 -and [double]$finalObservation.campaignDay -ge ([double]$supplySetup.CampaignDay + 3.0) -and
             [string]$finalObservation.state.context.menuId -eq 'town' -and [int]$finalObservation.state.party.members -eq 6 -and
             [int]$finalObservation.state.economy.gold -ge 861 -and [double]$finalObservation.state.party.food -ge 1.0 -and
             $nativeClockActions.Count -eq 0 -and $rejectedSteps.Count -le 2 -and $rejectedActionsDidNotChangeWorld -and $providerStoppedAfterGoalAction -and [bool]$loopTrace.termination.goalVerified
@@ -484,7 +491,10 @@ try {
                 DailyTickStart = [int]$supplySetup.DailyTickCount
                 DailyTickEnd = [int]$finalObservation.dailyTickCount
                 DailyTicksElapsed = $naturalTicksElapsed
-                ModelDecisionCount = $steps.Count
+                HostRestPollCount = if ($hostRestMonitor.Count -eq 1) { [int]$hostRestMonitor[0].control.pollCount } else { 0 }
+                HostRestTickSamples = if ($hostRestMonitor.Count -eq 1) { $hostRestMonitor[0].control.tickSamples } else { @() }
+                HostWaitLeaveActionCompleted = ($hostRestLeaveSteps.Count -eq 1)
+                ModelDecisionCount = [int]$loopTrace.decisions
                 FoodItemId = if ($provisionStep.Count -eq 1) { [string]$provisionStep[0].actionReceipt.data.itemId } else { '' }
                 FoodAmount = if ($provisionStep.Count -eq 1) { [int]$provisionStep[0].decision.arguments.Amount } else { 0 }
                 FoodUnitPrice = if ($selectedFoodOffer.Count -eq 1) { [double]$selectedFoodOffer[0].inventoryLogicUnitPrice } else { 0.0 }
@@ -625,7 +635,7 @@ try {
         HostFailureDetail = $loopTrace.failureDetail
         HostFailureStack = $loopTrace.failureStack
         HostLastSelectedAction = $loopTrace.lastSelectedAction
-        Decisions = $steps.Count
+        Decisions = [int]$loopTrace.decisions
         NativeActionReceipts = @($steps | Where-Object { $_.actionExecuted } | ForEach-Object { [ordered]@{ action = $_.actionReceipt.action; status = $_.actionReceipt.status; campaignDay = $_.actionReceipt.campaignDay; timing = $_.timing } })
         HarnessEvents = @($loopTrace.harnessEvents)
         Trace = $loopTrace.trace
