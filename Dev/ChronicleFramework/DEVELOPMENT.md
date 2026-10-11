@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.116
+Contract version: 7.117
 
 ## 目标与边界
 
@@ -255,7 +255,7 @@ Native Barter目录按当前VM会话和成功回执逐阶段开放：没有当�
 | Preflight | 本体、项目、清单和工具存在；存档头模块列表的解析、顺序保留、损坏拒绝 | JSON 清单与合成存档元数据回归 |
 | Api | 当前 DLL 存在目标签名 | API Probe 输出 |
 | Build | 游戏内Mod针对当前DLL编译；外置本地Agent Host单独构建为.NET 8进程 | Build收据分别保留Mod与Host构建输出/退出码；Bannerlord运行时不编译或覆盖已加载DLL |
-| Smoke | 清单、DLL、`OnSubModuleLoad`、`Finished All` | 同 PID 日志 |
+| Smoke | 清单、DLL、`OnSubModuleLoad`、`Finished All`；只对严格匹配的着色器缓存弹窗执行一次进程内原生确认，对未知 Warning 只读采集、不乱点 | 同 PID RGL/错误/Watchdog日志副本、结构化Smoke结果及安全识别的UIA弹窗信息；失败时保留子测试输出，超时与实际崩溃分开 |
 | Campaign/FreshCampaign | 旧档；FreshCampaign新Sandbox原生创建、跳intro、选+20；Progression用临时存档重载再move/arrival/recruit | 同PID renown20/MapState、非激活840x472；Crash Report仅按明确信号有界重试；已知`Mod change detected`着色器缓存提示仅可经精确匹配的目标进程UIA按钮确认一次，不用全局输入；临时存档精确清理、非模型Provider |
 | Protocol | CLI 启动/重载、状态、Native Pause/Play/FastForward、Harness-only独立推进时钟、Campaign保存/跨进程读档、外置Host只读Native状态握手与Native拒绝回执、停止 | Native时间选择对照`Campaign.SetTimeSpeed(0/1/2)`，检查raw/effective模式和waiting状态；固定advance仅用于Harness测试并按日目标或Encounter返回；存档往返使用唯一测试名，比较Save前与新进程读档后的结构化Campaign指纹及Chronicle SyncData计数、源夹具哈希后删除；外置Host三次读状态须与同一PID/MainHero/Clan/MainParty回执一致，且前后Campaign指纹不变；假邮箱覆盖繁忙/错关联ID/超时；一次故意无效的Native Menu option必须获得严格JSON可读的拒绝回执且不改变Campaign。`AgentProtocol.Escape`转义所有JSON控制字符，避免异常堆栈的CR/LF破坏IPC响应。时间步进不得隐式塞入地图移动/追近命令 |
 | AgentHostProvider | 本地Host的IPC邮箱回归、MCM Global Provider profile校验与Ollama结构化决策Provider | 可单独 opt-in；假Mailbox测繁忙/关联ID/超时，假HTTP Handler覆盖请求schema、格式/解析错误、截断、越权动作、HTTP失败及超时；profile回归核对Global JSON字段、loopback URL和模型标识拒绝路径；最后真实Qwen Smoke只读取Harness显式环境覆盖，不启动Bannerlord/不发Native命令/不访问付费API，且不记录模型提示词/原始回复/凭证；不加入`All` |
@@ -324,7 +324,7 @@ Native Barter目录按当前VM会话和成功回执逐阶段开放：没有当�
 - 最多进行一次自动恢复，重复确定性故障转入模块二分或代码定位；
 - 测试器主动结束进程不算崩溃；
 - 任何正式存档都不得被测试器覆盖。
-- Smoke 必须按本次启动新增的诊断行和实际 Bannerlord 子进程 PID 归因；不得用启动器返回 PID 或旧日志推断模块生命周期。
+- Smoke 必须按本次启动新增的诊断行和实际 Bannerlord 子进程 PID 归因；不得用启动器返回 PID 或旧日志推断模块生命周期。失败时持久化`SmokeResult.json`及同PID日志；已知着色器弹窗只允许使用经UIA识别的进程所有控件确认一次，其他警告只读取证据、不通过全局键鼠输入。
 - Campaign 阶段必须使用版本化 disposable fixture；第一轮通过必须包含 `campaign-sync mode=save`、每日事件、另存文件、第二进程 `campaign-sync mode=load` 和未改动 fixture 哈希。
 - ButterLib DLL 报告含托管栈/模块及可选 MiniDump；Harness 在报告 UI 阻塞前复制异常栈与 MBMusicManager/CampaignMusic 状态。FreshCampaign 等 native music 初始化后再开档；progression skip flag 到 MapState 后不再调用 Issue probe。保留fault-IP映射/关键帧，不点报告窗。
 - ButterLib 当前回退到 1.4.7 implementation；同样回退见通过的 `Fresh 215022`，是兼容风险但不是本次根因证据。

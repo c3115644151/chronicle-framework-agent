@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.116'
+$contractVersion = '7.117'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -258,6 +258,13 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $sourceModuleManifest
     $providerProfileSource -notmatch 'Uri\.IsLoopback' -or $providerHostSource -notmatch 'FromConfiguredProfile' -or
     $supplyHostSource -notmatch 'OllamaNativeProvider\.FromConfiguredProfile') {
     throw 'Player model settings must use a persistent MCM Global JSON profile and the Agent Host must consume the same loopback-only profile outside Harness overrides.'
+}
+$smokeModuleSource = Get-Content (Join-Path $harnessRoot 'Test-Module.ps1') -Raw -Encoding UTF8
+if ($harnessScript -notmatch "HarnessContractVersion\s*=\s*'$contractVersion'" -or
+    $smokeModuleSource -notmatch 'HarnessShaderCacheDialog\.ps1' -or $smokeModuleSource -notmatch 'Invoke-ChronicleShaderCacheDialogAcknowledgement' -or
+    $smokeModuleSource -notmatch 'StartupDialogSnapshots' -or $smokeModuleSource -notmatch 'SmokeResult\.json' -or
+    $harnessScript -notmatch 'Smoke test failed with exit code \$smokeExitCode\. Evidence: \$smokeOutput') {
+    throw 'Smoke startup checks must handle only the verified shader-cache prompt, preserve unknown warning evidence and persist child diagnostics on failure.'
 }
 $initializerSource = Get-Content (Join-Path $harnessRoot 'Initialize-ChronicleWorkspace.ps1') -Raw -Encoding UTF8
 if ($initializerSource -notmatch 'git -C \$PSScriptRoot rev-parse --show-toplevel' -or $initializerSource -notmatch 'not a Chronicle Framework source repository') { throw 'Workspace initialization must resolve and validate the Git root, including when invoked through an install-directory junction.' }

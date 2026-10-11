@@ -22,7 +22,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.116'
+$HarnessContractVersion = '7.117'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -426,8 +426,10 @@ foreach ($stage in $requestedStages) {
         }
         'Smoke' {
             Invoke-Stage -Name 'Smoke' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $smokeScript -TimeoutSeconds $SmokeTimeoutSeconds -StabilitySeconds $SmokeStabilitySeconds
-                if ($LASTEXITCODE -ne 0) { throw "Smoke test failed with exit code $LASTEXITCODE." }
+                $smokeOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $smokeScript -TimeoutSeconds $SmokeTimeoutSeconds -StabilitySeconds $SmokeStabilitySeconds 2>&1 | Out-String
+                $smokeExitCode = $LASTEXITCODE
+                if ($smokeExitCode -ne 0) { throw "Smoke test failed with exit code $smokeExitCode. Evidence: $smokeOutput" }
+                $smokeOutput
             }
         }
         'Campaign' {

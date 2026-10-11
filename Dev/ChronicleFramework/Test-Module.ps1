@@ -14,6 +14,8 @@ $modulePath = Join-Path $gameRoot 'Modules\ChronicleFramework'
 $engineConfig = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\Configs\engine_config.txt'
 $diagnosticLog = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\Configs\ModLogs\chronicle-framework.log'
 . (Join-Path $PSScriptRoot 'Test-WindowLayout.ps1')
+. (Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1')
+. (Join-Path $PSScriptRoot 'HarnessShaderCacheDialog.ps1')
 
 $existing = Get-Process Bannerlord -ErrorAction SilentlyContinue
 if ($existing) {
@@ -84,6 +86,9 @@ $crashDetected = $false
 $processExitedUnexpectedly = $false
 $lifecycleLoadObserved = $WithoutChronicle.IsPresent
 $gameStartObserved = $WithoutChronicle.IsPresent
+$startupFault = $null
+$startupDialogReceipts = [System.Collections.Generic.List[object]]::new()
+$startupDialogSnapshots = [System.Collections.Generic.List[object]]::new()
 
 while ((Get-Date) -lt $deadline) {
     $candidateProcesses = @(Get-Process Bannerlord -ErrorAction SilentlyContinue | Where-Object { $_.StartTime -ge $launchStart })
@@ -93,6 +98,33 @@ while ((Get-Date) -lt $deadline) {
         $watchdogLog = Join-Path $env:ProgramData "Mount and Blade II Bannerlord\logs\watchdog_log_$trackedProcessId.txt"
     }
     Set-ChronicleTestWindow -ProcessId $trackedProcessId | Out-Null
+    $trackedProcess = Get-Process -Id $trackedProcessId -ErrorAction SilentlyContinue
+    if ($trackedProcess -and $trackedProcess.MainWindowTitle -ceq 'Mod change detected') {
+        try {
+            $dialogReceipt = Invoke-ChronicleShaderCacheDialogAcknowledgement -ProcessId $trackedProcessId -WindowHandle $trackedProcess.MainWindowHandle
+            $startupDialogReceipts.Add($dialogReceipt)
+            if (-not $dialogReceipt.Handled) {
+                $startupFault = "Unverified 'Mod change detected' startup dialog; no button was pressed. Dialog evidence: $($dialogReceipt.DialogText)"
+                break
+            }
+        }
+        catch {
+            $startupFault = "The known shader-cache dialog could not be inspected safely: $($_.Exception.Message)"
+            break
+        }
+        continue
+    }
+    if ($trackedProcess -and $trackedProcess.MainWindowTitle -ceq 'Warning') {
+        try {
+            $warningSnapshot = Get-ChronicleWindowAutomationSnapshot -ProcessId $trackedProcessId -WindowHandle $trackedProcess.MainWindowHandle
+            $startupDialogSnapshots.Add((ConvertTo-ChronicleStartupDialogEvidence -Snapshot $warningSnapshot))
+            $startupFault = if ($warningSnapshot.DialogText -match '(?i)Unable to initialize Steam API') {
+                'Bannerlord reports that the Steam API could not initialize; see startup dialog evidence.'
+            } else { 'Bannerlord is blocked by an unclassified Warning dialog; no button was pressed.' }
+        }
+        catch { $startupFault = "Bannerlord Warning dialog could not be read safely: $($_.Exception.Message)" }
+        break
+    }
     if (Test-Path $rglLog) {
         $rglText = Get-Content $rglLog -Raw
         $finishedAll = $rglText -match 'Finished All'
@@ -171,10 +203,21 @@ $result = [ordered]@{
     CrashDetected = $crashDetected
     ProcessExitedUnexpectedly = $processExitedUnexpectedly
     StableAfterFinishedAll = ($finishedAll -and -not $crashDetected)
+    StartupFault = $startupFault
+    StartupDialogReceipts = @($startupDialogReceipts)
+    StartupDialogSnapshots = @($startupDialogSnapshots)
     RglLog = $rglLog
     WatchdogLog = $watchdogLog
     GameProcessId = $trackedProcessId
 }
+$harnessEvidenceDirectory = if ($env:CHRONICLE_HARNESS_TEMP -and (Test-Path -LiteralPath $env:CHRONICLE_HARNESS_TEMP -PathType Container)) { $env:CHRONICLE_HARNESS_TEMP } else { Join-Path $PSScriptRoot 'TestResults\Smoke' }
+New-Item -ItemType Directory -Path $harnessEvidenceDirectory -Force | Out-Null
+$result.RglLogCopy = if (Test-Path -LiteralPath $rglLog -PathType Leaf) { $copy = Join-Path $harnessEvidenceDirectory "Smoke-rgl-$trackedProcessId.txt"; Copy-Item -LiteralPath $rglLog -Destination $copy -Force; $copy } else { $null }
+$result.RglErrorLogCopy = if (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $rglLog) "rgl_log_errors_$trackedProcessId.txt") -PathType Leaf) { $copy = Join-Path $harnessEvidenceDirectory "Smoke-rgl-errors-$trackedProcessId.txt"; Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $rglLog) "rgl_log_errors_$trackedProcessId.txt") -Destination $copy -Force; $copy } else { $null }
+$result.WatchdogLogCopy = if (Test-Path -LiteralPath $watchdogLog -PathType Leaf) { $copy = Join-Path $harnessEvidenceDirectory "Smoke-watchdog-$trackedProcessId.txt"; Copy-Item -LiteralPath $watchdogLog -Destination $copy -Force; $copy } else { $null }
+$resultPath = Join-Path $harnessEvidenceDirectory 'SmokeResult.json'
+$result.EvidenceResultPath = $resultPath
+$result | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $resultPath -Encoding UTF8
 $result | ConvertTo-Json
 
 if (-not $finishedAll -or $crashDetected -or $processExitedUnexpectedly -or (-not $WithoutChronicle -and (-not $assemblyLoaded -or -not $lifecycleLoadObserved))) {
