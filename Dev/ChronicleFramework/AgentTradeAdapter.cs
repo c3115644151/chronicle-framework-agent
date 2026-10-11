@@ -324,7 +324,6 @@ internal static class ChronicleAgentTradeAdapter
         ChroniclePartyUpgradeAdapter.Property(json, "inventorySide", item.InventorySide.ToString());
         ChroniclePartyUpgradeAdapter.Property(json, "itemId", element.Item.StringId);
         ChroniclePartyUpgradeAdapter.Property(json, "modifierId", element.ItemModifier?.StringId);
-        ChroniclePartyUpgradeAdapter.Property(json, "inventorySide", item.InventorySide.ToString());
         ChroniclePartyUpgradeAdapter.Property(json, "settlementId", settlement.StringId);
         json.Append(",\"amount\":").Append(amount);
         json.Append(",\"itemCountAvailable\":").Append(item.ItemCount);

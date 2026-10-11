@@ -58,6 +58,40 @@ internal static class ProviderContractSelfTest
             results.Add(new { scenario = "native-ollama-request-and-response", passed = true });
         }
 
+        var controlAliasHandler = new StubHandler((_, _) => Task.FromResult(JsonResponse(BuildChatResponse("{\"control\":\"tradeConfirm\",\"rationale\":\"confirm the current Native draft\"}", "stop"))));
+        using (var aliasClient = new HttpClient(controlAliasHandler) { Timeout = settings.Timeout })
+        using (var provider = new OllamaNativeProvider(settings, aliasClient))
+        using (var request = JsonDocument.Parse(BuildActionDecisionRequest()))
+        {
+            var result = await provider.DecideAsync(request.RootElement, CancellationToken.None);
+            if (ReadDecisionString(result.Decision, "action") != "tradeConfirm")
+                throw new AgentHostException("provider-self-test-action-alias-failed", "An action named in the current action catalog was not normalized safely.");
+            results.Add(new { scenario = "listed-action-returned-through-control-field", passed = true });
+        }
+
+        var earlyStopHandler = new StubHandler((_, _) => Task.FromResult(JsonResponse(BuildChatResponse(ValidDecision, "stop"))));
+        using (var earlyStopClient = new HttpClient(earlyStopHandler) { Timeout = settings.Timeout })
+        using (var provider = new OllamaNativeProvider(settings, earlyStopClient))
+        using (var request = JsonDocument.Parse(BuildDecisionRequestWithoutDoneControl()))
+        {
+            var result = await provider.DecideAsync(request.RootElement, CancellationToken.None);
+            if (result.Decision["done"]?.GetValue<bool>() != true)
+                throw new AgentHostException("provider-self-test-stop-proposal-failed", "A done proposal must reach the Host completion verifier even when not yet allowed to stop.");
+            results.Add(new { scenario = "premature-done-is-a-verifiable-proposal-not-a-game-action", passed = true });
+        }
+
+        var menuAliasHandler = new StubHandler((_, _) => Task.FromResult(JsonResponse(BuildChatResponse("{\"action\":\"trade\",\"arguments\":{},\"rationale\":\"Select the visible trade menu.\"}", "stop"))));
+        using (var menuAliasClient = new HttpClient(menuAliasHandler) { Timeout = settings.Timeout })
+        using (var provider = new OllamaNativeProvider(settings, menuAliasClient))
+        using (var request = JsonDocument.Parse(BuildMenuAliasDecisionRequest()))
+        {
+            var result = await provider.DecideAsync(request.RootElement, CancellationToken.None);
+            if (ReadDecisionString(result.Decision, "action") != "menuSelect" ||
+                result.Decision["arguments"]?["OptionId"]?.GetValue<string>() != "trade")
+                throw new AgentHostException("provider-self-test-menu-alias-failed", "An exact enabled Native menu-option alias was not safely bound to menuSelect.OptionId.");
+            results.Add(new { scenario = "enabled-menu-option-alias-binds-observed-id", passed = true });
+        }
+
         await ExpectProviderErrorAsync(settings, "not-json", "provider-response-invalid-json", "malformed-http-json");
         results.Add(new { scenario = "malformed-http-json", passed = true });
         await ExpectProviderErrorAsync(settings, BuildChatResponse("not-json", "stop"), "provider-decision-invalid-json", "malformed-decision-json");
@@ -165,6 +199,39 @@ internal static class ProviderContractSelfTest
         }
         """;
 
+    private static string BuildActionDecisionRequest() => """
+        {
+          "goal": "Use only the currently listed Native action.",
+          "observation": { "scope": "provider-action-alias-test", "state": { "gameState": "InventoryState" } },
+          "allowedActions": [{ "action": "tradeConfirm", "arguments": [] }],
+          "allowedControls": []
+        }
+        """;
+
+    private static string BuildDecisionRequestWithoutDoneControl() => """
+        {
+          "goal": "The Host will verify this stop proposal against an unmet Native completion contract.",
+          "observation": { "scope": "provider-stop-proposal-test", "state": { "gameState": "InventoryState" } },
+          "allowedActions": [],
+          "allowedControls": []
+        }
+        """;
+
+    private static string BuildMenuAliasDecisionRequest() => """
+        {
+          "goal": "Choose the currently enabled trade menu option.",
+          "observation": {
+            "scope": "provider-menu-alias-test",
+            "state": {
+              "context": { "gameState": "MapState", "menuId": "town" },
+              "availableMenuOptions": [{ "id": "trade", "available": true, "enabled": true }]
+            }
+          },
+          "allowedActions": [{ "action": "menuSelect", "arguments": ["OptionId"] }],
+          "allowedControls": []
+        }
+        """;
+
     private static string BuildChatResponse(string content, string finishReason) => JsonSerializer.Serialize(new
     {
         model = "test-local-model",
@@ -203,6 +270,9 @@ internal static class ProviderContractSelfTest
         if (uri is null || !uri.IsLoopback || uri.Scheme != "http")
             throw new AgentHostException("provider-self-test-endpoint-failed", "Provider attempted to use a non-local HTTP endpoint.");
     }
+
+    private static string? ReadDecisionString(JsonObject decision, string propertyName) =>
+        decision.TryGetPropertyValue(propertyName, out var node) && node is JsonValue value && value.TryGetValue<string>(out var result) ? result : null;
 
     private static void ValidateNativeRequestShape(string? body, Uri? uri, AuthenticationHeaderValue? authorization)
     {

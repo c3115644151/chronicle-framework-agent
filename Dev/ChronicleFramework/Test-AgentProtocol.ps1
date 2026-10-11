@@ -48,6 +48,25 @@ function Invoke-AgentCli {
     return $output | ConvertFrom-Json
 }
 
+function Invoke-AgentHostProtocolRejectionProbe {
+    if (-not (Test-Path -LiteralPath $agentHostDllPath -PathType Leaf)) { throw "Agent Host DLL not found: $agentHostDllPath" }
+    if ([string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP) -or -not (Test-Path -LiteralPath $env:CHRONICLE_HARNESS_TEMP -PathType Container)) {
+        throw 'Agent Host error-escaping probe requires the active Harness temp directory.'
+    }
+    $previousMode = $env:CHRONICLE_HARNESS_MODE
+    $env:CHRONICLE_HARNESS_MODE = 'agent-host-protocol-test'
+    try {
+        $output = & dotnet $agentHostDllPath --protocol-rejection-test 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) { throw "Agent Host Native rejection/JSON escaping probe failed: $output" }
+        $probe = $output | ConvertFrom-Json
+        if (-not [bool]$probe.passed -or $probe.status -ne 'rejected' -or -not [bool]$probe.escapedControlCharactersParse -or -not [bool]$probe.campaignStateUnchanged) {
+            throw 'Agent Host rejection response did not pass strict JSON parsing and no-mutation checks.'
+        }
+        return $probe
+    }
+    finally { $env:CHRONICLE_HARNESS_MODE = $previousMode }
+}
+
 function Invoke-AgentHostState {
     if (-not (Test-Path -LiteralPath $agentHostDllPath -PathType Leaf)) { throw "Agent Host DLL not found: $agentHostDllPath" }
     $output = & dotnet $agentHostDllPath --state-once --timeout-seconds $TimeoutSeconds 2>&1 | Out-String
@@ -102,6 +121,7 @@ function Get-PersistedCampaignFingerprint($Response) {
 try {
     $start = Invoke-AgentCli 'load' @('-SaveName', $LoadSaveName, '-TimeoutSeconds', $TimeoutSeconds)
     $state = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-state", '-TimeoutSeconds', $TimeoutSeconds)
+    $agentHostRejectionProbe = Invoke-AgentHostProtocolRejectionProbe
     $campaignBeforeHost = Get-PersistedCampaignFingerprint $state
     $hostStateCalls = @()
     for ($hostCall = 1; $hostCall -le 3; $hostCall++) {
@@ -149,6 +169,13 @@ try {
     $result = [ordered]@{
         ProtocolVersion = $state.protocolVersion
         ProtocolSaveName = $protocolSaveNameForRun
+        AgentHostNativeRejectionEscapeProbe = [ordered]@{
+            Passed = [bool]$agentHostRejectionProbe.passed
+            Status = [string]$agentHostRejectionProbe.status
+            ErrorType = [string]$agentHostRejectionProbe.errorType
+            ControlCharactersEscaped = [bool]$agentHostRejectionProbe.escapedControlCharactersParse
+            CampaignStateUnchanged = [bool]$agentHostRejectionProbe.campaignStateUnchanged
+        }
         AgentHostStateCalls = $hostStateCalls
         AgentHostObservationsDidNotMutateCampaign = $hostObservationsDidNotMutateCampaign
         Start = $start
@@ -179,6 +206,7 @@ try {
     }
     $result.Passed = (
         $state.status -eq 'completed' -and
+        [bool]$agentHostRejectionProbe.passed -and
         $hostStateCalls.Count -eq 3 -and
         $hostObservationsDidNotMutateCampaign -and
         $pause.timeControlMode -eq 'Stop' -and

@@ -6,7 +6,8 @@ param(
     [switch]$ArrivalLoop,
     [switch]$RecruitmentLoop,
     [switch]$RoadsideBanditNegotiationLoop,
-    [switch]$SupplyManagementLoop
+    [switch]$SupplyManagementLoop,
+    [switch]$AgentHostRuntime
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,13 +15,17 @@ $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
 $loop = Join-Path $PSScriptRoot 'Agent-DecisionLoop.ps1'
 $provider = Join-Path $PSScriptRoot 'Agent-OpenAICompatibleProvider.ps1'
 $videoLibrary = Join-Path $PSScriptRoot 'HarnessVideoCapture.ps1'
-$savePath = Join-Path $env:USERPROFILE "Documents\Mount and Blade II Bannerlord\Game Saves\$LoadSaveName.sav"
-$sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\session.json'
+$documentsPath = [Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)
+if ([string]::IsNullOrWhiteSpace($documentsPath)) { throw 'Windows Documents directory could not be resolved for the live-model fixture.' }
+$documentsRoot = Join-Path $documentsPath 'Mount and Blade II Bannerlord'
+$savePath = Join-Path $documentsRoot "Game Saves\$LoadSaveName.sav"
+$sessionPath = Join-Path $documentsRoot 'AgentRuns\ChronicleAgent\session.json'
 
 if (Get-Process -Name Bannerlord* -ErrorAction SilentlyContinue) {
     throw 'Refusing to start a live-model Campaign test while any Bannerlord client is already running.'
 }
 if (@($ArrivalLoop, $RecruitmentLoop, $RoadsideBanditNegotiationLoop, $SupplyManagementLoop | Where-Object { $_ }).Count -gt 1) { throw 'Select only one LiveModel test goal per run.' }
+if ($AgentHostRuntime -and -not $SupplyManagementLoop) { throw 'AgentHostRuntime is currently limited to the frozen Native supply slice.' }
 if ($RoadsideBanditNegotiationLoop -and -not $RecruitmentLoop) { throw 'RoadsideBanditNegotiationLoop requires RecruitmentLoop so the encounter resolves into the existing growth goal.' }
 foreach ($setting in @('CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL','CHRONICLE_LLM_API_KEY','CHRONICLE_LLM_TIMEOUT_SECONDS','CHRONICLE_LLM_MAX_TOKENS','CHRONICLE_LLM_MAX_TOKEN_PARAMETER','CHRONICLE_LLM_REASONING_EFFORT','CHRONICLE_LLM_THINKING_MODE','CHRONICLE_LLM_TEMPERATURE','CHRONICLE_LLM_PROTOCOL')) {
     $configuredValue = [string][Environment]::GetEnvironmentVariable($setting, 'Process')
@@ -273,15 +278,56 @@ try {
         $maxElapsedSeconds = 0
         $allowedActions = 'mapSettlementTargets,move'
     }
-    $loopArguments = @('-DecisionProviderPath', $provider, '-Goal', $goal, '-AllowedActionNames', $allowedActions, '-MaxDecisions', [string]$maxDecisions, '-MaxElapsedSeconds', [string]$maxElapsedSeconds, '-TimeoutSeconds', [string]$TimeoutSeconds, '-CommandPrefix', ('live-model-' + [Guid]::NewGuid().ToString('N')))
-    if ($completionContractBase64) { $loopArguments += @('-CompletionContractBase64', $completionContractBase64) }
-    if ($RoadsideBanditNegotiationLoop) { $loopArguments += '-HarnessPrepareSafePassageAfterMove' }
-    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop @loopArguments 2>&1 | Out-String
-    if ($LASTEXITCODE -ne 0) {
+    $loopExitCode = 0
+    if ($AgentHostRuntime) {
+        $agentHostDll = Join-Path $PSScriptRoot 'AgentHost\bin\Release\net8.0\ChronicleAgentHost.dll'
+        $supplyRequest = [ordered]@{
+            runId = ('agenthost-supply-' + [Guid]::NewGuid().ToString('N'))
+            goal = $goal
+            targetSettlementId = $chosenSettlementId
+            maxDecisions = $maxDecisions
+            maxElapsedSeconds = $maxElapsedSeconds
+            allowedActionNames = @($allowedActions.Split(',') | ForEach-Object { $_.Trim() })
+            completionContract = $completionContractJson | ConvertFrom-Json
+        }
+        $hostStartInfo = [Diagnostics.ProcessStartInfo]::new()
+        $hostStartInfo.FileName = (Get-Command dotnet -ErrorAction Stop).Source
+        $hostStartInfo.Arguments = '"{0}" --supply-loop' -f $agentHostDll
+        $hostStartInfo.UseShellExecute = $false
+        $hostStartInfo.CreateNoWindow = $true
+        $hostStartInfo.RedirectStandardInput = $true
+        $hostStartInfo.RedirectStandardOutput = $true
+        $hostStartInfo.RedirectStandardError = $true
+        $hostProcess = [Diagnostics.Process]::new()
+        $hostProcess.StartInfo = $hostStartInfo
+        if (-not $hostProcess.Start()) { throw 'Could not start the local Agent Host supply loop.' }
+        $hostStdoutTask = $hostProcess.StandardOutput.ReadToEndAsync()
+        $hostStderrTask = $hostProcess.StandardError.ReadToEndAsync()
+        $hostProcess.StandardInput.WriteLine(($supplyRequest | ConvertTo-Json -Depth 12 -Compress))
+        $hostProcess.StandardInput.Close()
+        $hostTimeoutMilliseconds = [int](($maxElapsedSeconds + 60) * 1000)
+        if (-not $hostProcess.WaitForExit($hostTimeoutMilliseconds)) {
+            try { $hostProcess.Kill() } catch { }
+            throw 'Local Agent Host supply loop exceeded the bounded process timeout.'
+        }
+        $output = $hostStdoutTask.GetAwaiter().GetResult()
+        $hostStderr = $hostStderrTask.GetAwaiter().GetResult()
+        $loopExitCode = [int]$hostProcess.ExitCode
+        if ($loopExitCode -ne 0 -and [string]::IsNullOrWhiteSpace($output)) { $output = $hostStderr }
+    }
+    else {
+        $loopArguments = @('-DecisionProviderPath', $provider, '-Goal', $goal, '-AllowedActionNames', $allowedActions, '-MaxDecisions', [string]$maxDecisions, '-MaxElapsedSeconds', [string]$maxElapsedSeconds, '-TimeoutSeconds', [string]$TimeoutSeconds, '-CommandPrefix', ('live-model-' + [Guid]::NewGuid().ToString('N')))
+        if ($completionContractBase64) { $loopArguments += @('-CompletionContractBase64', $completionContractBase64) }
+        if ($RoadsideBanditNegotiationLoop) { $loopArguments += '-HarnessPrepareSafePassageAfterMove' }
+        $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop @loopArguments 2>&1 | Out-String
+        $loopExitCode = $LASTEXITCODE
+    }
+    if ($loopExitCode -ne 0) {
         try { $loopTrace = $output | ConvertFrom-Json } catch { }
         $loopError = if ($loopTrace -and $loopTrace.error) { [string]$loopTrace.error } else { [string]$output }
         if ($loopError.Length -gt 1200) { $loopError = $loopError.Substring(0, 1200) + '...[truncated; full structured trace retained separately]' }
-        throw "Real-model decision loop failed: $loopError"
+        $runnerName = if ($AgentHostRuntime) { 'Local Agent Host' } else { 'PowerShell decision loop' }
+        throw "Real-model decision loop failed in ${runnerName}: $loopError"
     }
     $loopTrace = $output | ConvertFrom-Json
     if ($loopTrace.status -eq 'failed') { throw "Real-model decision loop failed: $($loopTrace.error)" }
@@ -574,6 +620,11 @@ try {
         SupplyNativeClockActions = if ($SupplyManagementLoop) { @($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -in @('advance','pause','resume','fastForward') } | ForEach-Object { [string]$_.actionReceipt.action }) } else { @() }
         ProviderStoppedAfterGoalAction = $providerStoppedAfterGoalAction
         ProviderBudget = $loopTrace.providerBudget
+        HostFailureStage = $loopTrace.failureStage
+        HostFailureExceptionType = $loopTrace.failureExceptionType
+        HostFailureDetail = $loopTrace.failureDetail
+        HostFailureStack = $loopTrace.failureStack
+        HostLastSelectedAction = $loopTrace.lastSelectedAction
         Decisions = $steps.Count
         NativeActionReceipts = @($steps | Where-Object { $_.actionExecuted } | ForEach-Object { [ordered]@{ action = $_.actionReceipt.action; status = $_.actionReceipt.status; campaignDay = $_.actionReceipt.campaignDay; timing = $_.timing } })
         HarnessEvents = @($loopTrace.harnessEvents)
@@ -608,6 +659,11 @@ catch {
             SourceCommit = $sourceCommit
             SourceTrackedTreeClean = $sourceTrackedTreeClean
             ProviderBudget = $loopTrace.providerBudget
+            HostFailureStage = $loopTrace.failureStage
+            HostFailureExceptionType = $loopTrace.failureExceptionType
+            HostFailureDetail = $loopTrace.failureDetail
+            HostFailureStack = $loopTrace.failureStack
+            HostLastSelectedAction = $loopTrace.lastSelectedAction
             RunStartedUtc = $modelRunStartedUtc
             RunCompletedUtc = [DateTime]::UtcNow.ToString('O')
             CampaignDayStart = if ($baseline) { [double]$baseline.campaignDay } else { $null }

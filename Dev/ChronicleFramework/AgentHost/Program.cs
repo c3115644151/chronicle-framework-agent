@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace ChronicleFramework.AgentHost;
 
@@ -38,6 +39,25 @@ internal static class Program
             using var mutex = new Mutex(initiallyOwned: true, GetMutexName(protocolRoot), out var createdNew);
             if (!createdNew)
                 throw new AgentHostException("host-already-running", "A Chronicle Agent Host already owns this protocol root.");
+
+            if (options.ProtocolRejectionTest)
+            {
+                if (Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") != "agent-host-protocol-test" ||
+                    string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP")))
+                    throw new AgentHostException("protocol-test-not-authorized", "The invalid-option protocol probe is restricted to its disposable Harness phase.");
+                var rejection = await RunProtocolRejectionTestAsync(protocolRoot, CancellationToken.None);
+                Console.Out.WriteLine(JsonSerializer.Serialize(rejection, OutputJsonOptions));
+                return rejection["passed"]?.GetValue<bool>() == true ? 0 : 1;
+            }
+
+            if (options.SupplyLoop)
+            {
+                var requestJson = await Console.In.ReadToEndAsync();
+                using var requestDocument = JsonDocument.Parse(requestJson);
+                var loopResult = await AgentHostSupplyLoop.RunAsync(requestDocument.RootElement, protocolRoot, CancellationToken.None);
+                Console.Out.WriteLine(JsonSerializer.Serialize(loopResult, OutputJsonOptions));
+                return loopResult["status"]?.GetValue<string>() == "completed" ? 0 : 1;
+            }
 
             var result = await RequestCurrentStateAsync(protocolRoot, options.Timeout, CancellationToken.None);
             Console.Out.WriteLine(JsonSerializer.Serialize(result, OutputJsonOptions));
@@ -234,6 +254,64 @@ internal static class Program
         return Path.GetFullPath(root);
     }
 
+    private static async Task<JsonObject> RunProtocolRejectionTestAsync(string protocolRoot, CancellationToken cancellationToken)
+    {
+        var client = new NativeMailboxClient(protocolRoot, TimeSpan.FromSeconds(15));
+        using var before = await client.ReadStateAsync(cancellationToken);
+        var beforeState = CloneObject(before.RootElement);
+        var invalidArguments = new JsonObject
+        {
+            ["menuId"] = "__chronicle_invalid_menu__",
+            ["optionId"] = "__chronicle_invalid_option__"
+        };
+        using var rejected = await client.ExecuteSupplyActionAsync("menuSelect", invalidArguments, cancellationToken);
+        var rejection = CloneObject(rejected.RootElement);
+        using var after = await client.ReadStateAsync(cancellationToken);
+        var afterState = CloneObject(after.RootElement);
+        var errorText = rejection["error"]?.GetValue<string>() ?? string.Empty;
+        var beforeFingerprint = BuildProtocolTestFingerprint(beforeState);
+        var afterFingerprint = BuildProtocolTestFingerprint(afterState);
+        return new JsonObject
+        {
+            ["passed"] = rejection["status"]?.GetValue<string>() == "rejected" &&
+                errorText.Contains('\n') &&
+                (beforeState["processId"]?.GetValue<int>() ?? -1) == (rejection["processId"]?.GetValue<int>() ?? -2) &&
+                (beforeState["processId"]?.GetValue<int>() ?? -1) == (afterState["processId"]?.GetValue<int>() ?? -2) &&
+                beforeFingerprint.ToJsonString() == afterFingerprint.ToJsonString(),
+            ["action"] = "menuSelect",
+            ["status"] = rejection["status"]?.GetValue<string>(),
+            ["errorType"] = errorText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Split(':')[0],
+            ["escapedControlCharactersParse"] = errorText.Contains('\n'),
+            ["campaignStateUnchanged"] = beforeFingerprint.ToJsonString() == afterFingerprint.ToJsonString(),
+            ["gameProcessId"] = beforeState["processId"]?.GetValue<int>() ?? -1
+        };
+    }
+
+    private static JsonObject BuildProtocolTestFingerprint(JsonObject response)
+    {
+        var state = response["state"]!.AsObject();
+        var identity = state["identity"]!.AsObject();
+        var party = state["party"]!.AsObject();
+        var economy = state["economy"]!.AsObject();
+        var location = state["location"]!.AsObject();
+        var context = state["context"]!.AsObject();
+        return new JsonObject
+        {
+            ["heroId"] = identity["heroId"]?.DeepClone(),
+            ["clanId"] = identity["clanId"]?.DeepClone(),
+            ["partyId"] = party["id"]?.DeepClone(),
+            ["members"] = party["members"]?.DeepClone(),
+            ["gold"] = economy["gold"]?.DeepClone(),
+            ["food"] = party["food"]?.DeepClone(),
+            ["foodInventory"] = party["foodInventory"]?.DeepClone(),
+            ["settlementId"] = location["currentSettlementId"]?.DeepClone(),
+            ["menuId"] = context["menuId"]?.DeepClone(),
+            ["timeControlMode"] = context["timeControlMode"]?.DeepClone()
+        };
+    }
+
+    private static JsonObject CloneObject(JsonElement value) => JsonNode.Parse(value.GetRawText())!.AsObject();
+
     private static string GetMutexName(string protocolRoot)
     {
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(protocolRoot.ToUpperInvariant())));
@@ -264,13 +342,15 @@ internal static class Program
         int MainPartyMembers,
         string GameState);
 
-    private sealed record HostOptions(string? ProtocolRoot, TimeSpan Timeout, bool DecisionOnce)
+    private sealed record HostOptions(string? ProtocolRoot, TimeSpan Timeout, bool DecisionOnce, bool SupplyLoop, bool ProtocolRejectionTest)
     {
         internal static HostOptions Parse(string[] args)
         {
             string? root = null;
             var timeoutSeconds = 15;
             var decisionOnce = false;
+            var supplyLoop = false;
+            var protocolRejectionTest = false;
             for (var index = 0; index < args.Length; index++)
             {
                 switch (args[index])
@@ -287,6 +367,12 @@ internal static class Program
                     case "--decision-once":
                         decisionOnce = true;
                         break;
+                    case "--supply-loop":
+                        supplyLoop = true;
+                        break;
+                    case "--protocol-rejection-test":
+                        protocolRejectionTest = true;
+                        break;
                     default:
                         throw new AgentHostException("host-arguments-invalid", "Agent Host arguments were not recognized.");
                 }
@@ -294,7 +380,9 @@ internal static class Program
 
             if (timeoutSeconds is < 1 or > 300)
                 throw new AgentHostException("host-timeout-invalid", "Host timeout must be from 1 to 300 seconds.");
-            return new HostOptions(root, TimeSpan.FromSeconds(timeoutSeconds), decisionOnce);
+            if ((decisionOnce ? 1 : 0) + (supplyLoop ? 1 : 0) + (protocolRejectionTest ? 1 : 0) > 1)
+                throw new AgentHostException("host-mode-conflict", "Select one Host execution mode.");
+            return new HostOptions(root, TimeSpan.FromSeconds(timeoutSeconds), decisionOnce, supplyLoop, protocolRejectionTest);
         }
     }
 }
