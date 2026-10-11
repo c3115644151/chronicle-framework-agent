@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -18,6 +20,18 @@ internal static class Program
             {
                 var providerTests = await ProviderContractSelfTest.RunAsync();
                 Console.Out.WriteLine(JsonSerializer.Serialize(providerTests, OutputJsonOptions));
+                return 0;
+            }
+
+            if (args.Length == 1 && string.Equals(args[0], "--version", StringComparison.Ordinal))
+            {
+                Console.Out.WriteLine(JsonSerializer.Serialize(GetPackageHealth(), OutputJsonOptions));
+                return 0;
+            }
+
+            if (args.Length == 1 && string.Equals(args[0], "--package-health", StringComparison.Ordinal))
+            {
+                Console.Out.WriteLine(JsonSerializer.Serialize(GetPackageHealth(), OutputJsonOptions));
                 return 0;
             }
 
@@ -83,6 +97,22 @@ internal static class Program
             }, OutputJsonOptions));
             return 3;
         }
+    }
+
+    private static object GetPackageHealth()
+    {
+        return new
+        {
+            status = "ready",
+            product = "ChronicleAgentHost",
+            version = typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+                ?? typeof(Program).Assembly.GetName().Version?.ToString(3)
+                ?? "unknown",
+            protocolVersion = 1,
+            processArchitecture = RuntimeInformation.ProcessArchitecture.ToString(),
+            is64BitProcess = Environment.Is64BitProcess,
+            runtime = RuntimeInformation.FrameworkDescription
+        };
     }
 
     private static async Task<HostStateResult> RequestCurrentStateAsync(
