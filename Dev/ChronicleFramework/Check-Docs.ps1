@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.115'
+$contractVersion = '7.116'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -246,6 +246,19 @@ if ($harnessScript -notmatch "HarnessContractVersion\s*=\s*'$contractVersion'") 
 if ($harnessScript -notmatch 'GitCommit' -or $harnessScript -notmatch 'SourceControl' -or $harnessScript -notmatch 'status --porcelain' -or $harnessScript -match 'TaskBoard|CensusDomainDoneCount|gh project|gh api|githubProjectNumber') { throw 'Harness receipts must record Git provenance and remain independent of GitHub task tracking.' }
 if ($projectFile -notmatch 'ChronicleGameRoot' -or $harnessScript -notmatch 'ChronicleGameRoot=\$gameRoot' -or -not (Test-Path -LiteralPath (Join-Path $harnessRoot 'Initialize-ChronicleWorkspace.ps1'))) { throw 'Cloned repositories must accept a local game path and provide a repeatable workspace initializer.' }
 if ($projectFile -notmatch 'Reference Include="SandBox\.View"' -or $projectFile -notmatch 'Modules\\SandBox\\bin\\Win64_Shipping_Client\\SandBox\.View\.dll' -or $projectFile -notmatch 'Reference Include="TaleWorlds\.Core\.ViewModelCollection"' -or $projectFile -notmatch 'TaleWorlds\.Core\.ViewModelCollection\.dll' -or $projectFile -notmatch 'Reference Include="TaleWorlds\.InputSystem"' -or $projectFile -notmatch 'TaleWorlds\.InputSystem\.dll') { throw 'Native map inventory/menu and RecruitmentVM lifecycle support must bind to the installed 1.4.8 View, ViewModel, and InputSystem assemblies.' }
+$providerSettingsSource = Get-Content (Join-Path $harnessRoot 'AgentProviderSettings.cs') -Raw -Encoding UTF8
+$providerProfileSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentProviderProfile.cs') -Raw -Encoding UTF8
+$providerHostSource = Get-Content (Join-Path $harnessRoot 'AgentHost\OllamaNativeProvider.cs') -Raw -Encoding UTF8
+$supplyHostSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostSupplyLoop.cs') -Raw -Encoding UTF8
+$sourceModuleManifest = Get-Content $sourceManifestPath -Raw -Encoding UTF8
+if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $sourceModuleManifest -notmatch 'DependedModule Id="Bannerlord\.MBOptionScreen"' -or
+    $providerSettingsSource -notmatch 'AttributeGlobalSettings<ChronicleAgentProviderSettings>' -or $providerSettingsSource -notmatch 'FormatType => "json"' -or
+    $providerSettingsSource -notmatch 'OllamaBaseUrl' -or $providerSettingsSource -notmatch 'ModelId' -or
+    $providerProfileSource -notmatch 'Configs.*ModSettings.*Global.*ChronicleFramework.*ChronicleAgentSettings\.json' -or
+    $providerProfileSource -notmatch 'Uri\.IsLoopback' -or $providerHostSource -notmatch 'FromConfiguredProfile' -or
+    $supplyHostSource -notmatch 'OllamaNativeProvider\.FromConfiguredProfile') {
+    throw 'Player model settings must use a persistent MCM Global JSON profile and the Agent Host must consume the same loopback-only profile outside Harness overrides.'
+}
 $initializerSource = Get-Content (Join-Path $harnessRoot 'Initialize-ChronicleWorkspace.ps1') -Raw -Encoding UTF8
 if ($initializerSource -notmatch 'git -C \$PSScriptRoot rev-parse --show-toplevel' -or $initializerSource -notmatch 'not a Chronicle Framework source repository') { throw 'Workspace initialization must resolve and validate the Git root, including when invoked through an install-directory junction.' }
 foreach ($ignoredPath in @('TestResults', 'obj', 'bin', 'harness.local.json')) { if ($gitIgnore -notmatch [regex]::Escape($ignoredPath)) { throw "Repository .gitignore must exclude generated/local data '$ignoredPath'." } }

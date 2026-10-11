@@ -26,6 +26,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
     $priorHarnessTemp = $env:CHRONICLE_HARNESS_TEMP
     $priorTemp = $env:TEMP
     $priorTmp = $env:TMP
+    $priorProviderProfilePath = $env:CHRONICLE_AGENT_PROFILE_PATH
     $env:CHRONICLE_HARNESS_TEMP = $runTemp
     $env:TEMP = $runTemp
     $env:TMP = $runTemp
@@ -36,6 +37,16 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
     $liveResult = $null
     $failure = $null
     try {
+        $providerBaseUrl = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_BASE_URL', 'Process')
+        if ([string]::IsNullOrWhiteSpace($providerBaseUrl)) { $providerBaseUrl = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_BASE_URL', 'User') }
+        $providerModelId = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL', 'Process')
+        if ([string]::IsNullOrWhiteSpace($providerModelId)) { $providerModelId = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL', 'User') }
+        if ([string]::IsNullOrWhiteSpace($providerBaseUrl) -or [string]::IsNullOrWhiteSpace($providerModelId)) { throw 'Agent Host supply evaluation requires existing local loopback model settings; no user credential is read or written.' }
+        $mcmFixtureDirectory = Join-Path $runTemp 'MCM\Global\ChronicleFramework'
+        New-Item -ItemType Directory -Path $mcmFixtureDirectory -Force | Out-Null
+        $profilePath = Join-Path $mcmFixtureDirectory 'ChronicleAgentSettings.json'
+        [ordered]@{ OllamaBaseUrl = $providerBaseUrl; ModelId = $providerModelId } | ConvertTo-Json -Compress | Set-Content -LiteralPath $profilePath -Encoding UTF8
+        $env:CHRONICLE_AGENT_PROFILE_PATH = $profilePath
         $childOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $liveTest -SupplyManagementLoop -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
         $childExitCode = $LASTEXITCODE
         $resultPath = Join-Path $runTemp 'LiveModelLoopResult.json'
@@ -54,6 +65,8 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         $env:CHRONICLE_HARNESS_TEMP = $priorHarnessTemp
         $env:TEMP = $priorTemp
         $env:TMP = $priorTmp
+        if ($null -eq $priorProviderProfilePath) { Remove-Item Env:CHRONICLE_AGENT_PROFILE_PATH -ErrorAction SilentlyContinue }
+        else { $env:CHRONICLE_AGENT_PROFILE_PATH = $priorProviderProfilePath }
     }
 
     $hostTrace = if ($liveResult) { $liveResult.Trace } else { $null }
@@ -65,6 +78,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
     $runPassed = (
         $childExitCode -eq 0 -and $liveResult -and [bool]$liveResult.Passed -and
         [bool]$supply.Passed -and [bool]$liveResult.FixtureUnchanged -and [bool]$liveResult.ProcessStopped -and
+        [string]$hostTrace.ModelConfigurationSource -eq 'harness-mcm-profile-fixture' -and
         [bool]$supply.NativeGoalVerified -and [int]$supply.DailyTicksElapsed -eq 3 -and
         [int]$supply.HostRestPollCount -gt 0 -and [bool]$supply.HostWaitLeaveActionCompleted -and
         [int]$supply.ModelDecisionCount -le 24 -and [int]$supply.NativeRestRequestCount -eq 1 -and
@@ -80,6 +94,8 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         run = $runIndex
         passed = [bool]$runPassed
         sourceCommit = if ($hostTrace) { [string]$hostTrace.SourceCommit } else { $null }
+        modelId = if ($hostTrace) { [string]$hostTrace.ModelId } else { $null }
+        modelConfigurationSource = if ($hostTrace) { [string]$hostTrace.ModelConfigurationSource } else { $null }
         trackedTreeClean = if ($hostTrace) { [bool]$hostTrace.SourceTrackedTreeClean } else { $false }
         wallClockSeconds = [Math]::Round($watch.Elapsed.TotalSeconds, 2)
         decisions = if ($supply) { [int]$supply.ModelDecisionCount } else { $null }

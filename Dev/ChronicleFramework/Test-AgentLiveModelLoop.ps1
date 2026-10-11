@@ -600,7 +600,8 @@ try {
     $liveModelTrace = [ordered]@{
         ProviderKind = 'configured live model provider'
         ProviderProtocol = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_PROTOCOL)) { 'openai-compatible' } else { [string]$env:CHRONICLE_LLM_PROTOCOL }
-        ModelId = [string]$env:CHRONICLE_LLM_MODEL
+        ModelId = if ($AgentHostRuntime -and $loopTrace.providerModelId) { [string]$loopTrace.providerModelId } else { [string]$env:CHRONICLE_LLM_MODEL }
+        ModelConfigurationSource = if ($AgentHostRuntime) { [string]$loopTrace.providerConfigurationSource } else { 'environment-provider' }
         ModelMaxOutputTokens = if ($loopTrace.providerBudget) { [int]$loopTrace.providerBudget.maxOutputTokensPerCall } else { [int]$env:CHRONICLE_LLM_MAX_TOKENS }
         ModelThinkingMode = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_THINKING_MODE)) { 'provider-default' } else { [string]$env:CHRONICLE_LLM_THINKING_MODE }
         ModelReasoningEffort = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_REASONING_EFFORT)) { 'provider-default' } else { [string]$env:CHRONICLE_LLM_REASONING_EFFORT }

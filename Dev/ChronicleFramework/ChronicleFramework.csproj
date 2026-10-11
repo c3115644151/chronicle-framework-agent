@@ -85,6 +85,10 @@
       <HintPath>$(ChronicleGameRoot)\Modules\Bannerlord.Harmony\bin\Win64_Shipping_Client\0Harmony.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="MCMv5">
+      <HintPath>$(ChronicleGameRoot)\Modules\Bannerlord.MBOptionScreen\bin\Win64_Shipping_Client\MCMv5.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
   <Target Name="ValidateChronicleGameRoot" BeforeTargets="ResolveReferences">
     <Error Condition="'$(ChronicleGameRoot)' == ''" Text="Set ChronicleGameRoot to the Bannerlord 1.4.8 installation path." />

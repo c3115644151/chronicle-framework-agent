@@ -15,12 +15,15 @@ internal sealed class OllamaNativeProvider : IDisposable
     private readonly OllamaProviderSettings _settings;
     private readonly HttpClient _client;
     private readonly bool _ownsClient;
+    internal string ModelId => _settings.Model;
+    internal string ConfigurationSource { get; }
 
-    internal OllamaNativeProvider(OllamaProviderSettings settings, HttpClient? client = null)
+    internal OllamaNativeProvider(OllamaProviderSettings settings, HttpClient? client = null, string configurationSource = "direct")
     {
         _settings = settings;
         _client = client ?? new HttpClient { Timeout = settings.Timeout };
         _ownsClient = client is null;
+        ConfigurationSource = configurationSource;
     }
 
     internal static OllamaNativeProvider FromEnvironment()
@@ -73,6 +76,40 @@ internal sealed class OllamaNativeProvider : IDisposable
             thinking,
             reasoningEffort,
             maxTokenParameter));
+    }
+
+    internal static OllamaNativeProvider FromConfiguredProfile()
+    {
+        if (string.Equals(Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE"), "visual-capture", StringComparison.Ordinal) &&
+            !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CHRONICLE_AGENT_PROFILE_PATH")))
+        {
+            var overridePath = Path.GetFullPath(Environment.GetEnvironmentVariable("CHRONICLE_AGENT_PROFILE_PATH")!);
+            var tempRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+            if (string.IsNullOrWhiteSpace(tempRoot))
+                throw new AgentHostException("provider-profile-override-not-authorized", "A temporary profile override requires a Harness-owned directory.");
+            var root = Path.GetFullPath(tempRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            if (!overridePath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                throw new AgentHostException("provider-profile-override-not-authorized", "The Harness provider profile must stay inside its disposable evidence directory.");
+            return FromProfile(AgentProviderProfile.Load(overridePath, "harness-mcm-profile-fixture"));
+        }
+
+        return FromProfile(AgentProviderProfile.LoadDefault());
+    }
+
+    private static OllamaNativeProvider FromProfile(AgentProviderProfile profile)
+    {
+        var endpoint = new Uri(profile.BaseUrl.TrimEnd('/') + "/chat/completions", UriKind.Absolute);
+        return new OllamaNativeProvider(new OllamaProviderSettings(
+            endpoint,
+            profile.ModelId,
+            NativeOllama: false,
+            Timeout: TimeSpan.FromSeconds(60),
+            MaxOutputTokens: 256,
+            Temperature: 0d,
+            Thinking: null,
+            ReasoningEffort: "none",
+            MaxTokenParameter: "max_completion_tokens"),
+            configurationSource: profile.Source);
     }
 
     internal async Task<ProviderDecisionResult> DecideAsync(JsonElement request, CancellationToken cancellationToken)

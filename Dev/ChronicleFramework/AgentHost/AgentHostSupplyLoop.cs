@@ -33,7 +33,7 @@ internal static class AgentHostSupplyLoop
             throw new AgentHostException("supply-loop-action-scope-invalid", "The Host supply loop only accepts the five previously verified Native actions.");
         var nativeTimeoutSeconds = ReadIntEnvironment("CHRONICLE_LLM_TIMEOUT_SECONDS", 180, 5, 240);
         var client = new NativeMailboxClient(protocolRoot, TimeSpan.FromSeconds(nativeTimeoutSeconds));
-        using var provider = OllamaNativeProvider.FromEnvironment();
+        using var provider = OllamaNativeProvider.FromConfiguredProfile();
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxElapsedSeconds));
 
@@ -328,6 +328,8 @@ internal static class AgentHostSupplyLoop
             ["actionsExecuted"] = nativeActionsExecuted,
             ["decisions"] = decisionCount,
             ["providerBudget"] = new JsonObject { ["mode"] = "token-only-local", ["maxOutputTokensPerCall"] = ReadIntEnvironment("CHRONICLE_LLM_MAX_TOKENS", 256, 64, 4096), ["maxProviderCalls"] = maxDecisions },
+            ["providerModelId"] = provider.ModelId,
+            ["providerConfigurationSource"] = provider.ConfigurationSource,
             ["providerUsage"] = new JsonObject { ["promptTokens"] = inputTokens, ["completionTokens"] = outputTokens, ["cost"] = (JsonNode?)null },
             ["timing"] = new JsonObject { ["providerCompletedUtc"] = lastProviderCompletedUtc },
             ["termination"] = new JsonObject

@@ -6,6 +6,7 @@
   <SingleplayerModule value="true" />
   <MultiplayerModule value="false" />
   <DependedModules>
+    <DependedModule Id="Bannerlord.MBOptionScreen" />
     <DependedModule Id="Native" />
     <DependedModule Id="SandBoxCore" />
     <DependedModule Id="SandBox" />

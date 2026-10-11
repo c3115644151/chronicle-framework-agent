@@ -14,6 +14,19 @@ internal static class ProviderContractSelfTest
     internal static async Task<object> RunAsync()
     {
         var results = new List<object>();
+        using (var validProfile = JsonDocument.Parse("{\"OllamaBaseUrl\":\"http://127.0.0.1:11434/v1\",\"ModelId\":\"qwen3.5:4b-q4_K_M\"}"))
+        {
+            var profile = AgentProviderProfile.Parse(validProfile.RootElement);
+            if (profile.BaseUrl != "http://127.0.0.1:11434/v1" || profile.ModelId != "qwen3.5:4b-q4_K_M")
+                throw new AgentHostException("provider-profile-self-test-normalization-failed", "The global MCM profile did not load the saved loopback URL and model identifier.");
+            results.Add(new { scenario = "mcm-global-profile-values-normalized", passed = true });
+        }
+
+        ExpectInvalidProfile("{\"OllamaBaseUrl\":\"https://example.com/v1\",\"ModelId\":\"test\"}", "provider-profile-endpoint-invalid", "mcm-profile-rejects-remote-endpoint");
+        results.Add(new { scenario = "mcm-profile-rejects-remote-endpoint", passed = true });
+        ExpectInvalidProfile("{\"OllamaBaseUrl\":\"http://127.0.0.1:11434/v1\",\"ModelId\":\" \"}", "provider-profile-model-invalid", "mcm-profile-rejects-empty-model");
+        results.Add(new { scenario = "mcm-profile-rejects-empty-model", passed = true });
+
         var settings = new OllamaProviderSettings(
             FakeEndpoint,
             "test-local-model",
@@ -112,6 +125,20 @@ internal static class ProviderContractSelfTest
             nativeCommands = 0,
             scenarios = results
         };
+    }
+
+    private static void ExpectInvalidProfile(string json, string expectedCode, string scenario)
+    {
+        using var document = JsonDocument.Parse(json);
+        try
+        {
+            _ = AgentProviderProfile.Parse(document.RootElement);
+        }
+        catch (AgentHostException exception) when (exception.Code == expectedCode)
+        {
+            return;
+        }
+        throw new AgentHostException("provider-profile-self-test-failed", $"Global profile validation did not reject {scenario}.");
     }
 
     private static async Task ExpectProviderErrorAsync(
