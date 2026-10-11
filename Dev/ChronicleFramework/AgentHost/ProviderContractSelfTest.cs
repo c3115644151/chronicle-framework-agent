@@ -24,8 +24,14 @@ internal static class ProviderContractSelfTest
 
         ExpectInvalidProfile("{\"OllamaBaseUrl\":\"https://example.com/v1\",\"ModelId\":\"test\"}", "provider-profile-endpoint-invalid", "mcm-profile-rejects-remote-endpoint");
         results.Add(new { scenario = "mcm-profile-rejects-remote-endpoint", passed = true });
+        ExpectInvalidProfile("{\"OllamaBaseUrl\":\"http://user:pass@127.0.0.1:11434/v1\",\"ModelId\":\"test\"}", "provider-profile-endpoint-invalid", "mcm-profile-rejects-credentials");
+        results.Add(new { scenario = "mcm-profile-rejects-credentials", passed = true });
+        ExpectInvalidProfile("{\"OllamaBaseUrl\":\"http://127.0.0.1:11434/v1?token=not-used\",\"ModelId\":\"test\"}", "provider-profile-endpoint-invalid", "mcm-profile-rejects-query-string");
+        results.Add(new { scenario = "mcm-profile-rejects-query-string", passed = true });
         ExpectInvalidProfile("{\"OllamaBaseUrl\":\"http://127.0.0.1:11434/v1\",\"ModelId\":\" \"}", "provider-profile-model-invalid", "mcm-profile-rejects-empty-model");
         results.Add(new { scenario = "mcm-profile-rejects-empty-model", passed = true });
+        ExpectProfileFileError("{", "provider-profile-invalid-json", "mcm-profile-rejects-corrupt-json");
+        results.Add(new { scenario = "mcm-profile-rejects-corrupt-json", passed = true });
 
         var settings = new OllamaProviderSettings(
             FakeEndpoint,
@@ -139,6 +145,31 @@ internal static class ProviderContractSelfTest
             return;
         }
         throw new AgentHostException("provider-profile-self-test-failed", $"Global profile validation did not reject {scenario}.");
+    }
+
+    private static void ExpectProfileFileError(string json, string expectedCode, string scenario)
+    {
+        var testDirectory = Path.Combine(Path.GetTempPath(), "ChronicleProviderProfileTest-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(testDirectory);
+        var profilePath = Path.Combine(testDirectory, "ChronicleAgentSettings.json");
+        try
+        {
+            File.WriteAllText(profilePath, json);
+            try
+            {
+                _ = AgentProviderProfile.Load(profilePath, "provider-profile-self-test");
+                throw new AgentHostException("provider-profile-self-test-expected-error", $"Scenario '{scenario}' unexpectedly accepted a corrupt profile.");
+            }
+            catch (AgentHostException exception) when (exception.Code == expectedCode)
+            {
+                // Expected safe parse failure.
+            }
+        }
+        finally
+        {
+            File.Delete(profilePath);
+            Directory.Delete(testDirectory);
+        }
     }
 
     private static async Task ExpectProviderErrorAsync(

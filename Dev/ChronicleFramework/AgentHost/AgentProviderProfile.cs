@@ -51,8 +51,9 @@ internal sealed record AgentProviderProfile(string BaseUrl, string ModelId, stri
         var baseUrl = ReadString(root, "OllamaBaseUrl");
         var modelId = ReadString(root, "ModelId");
         if (string.IsNullOrWhiteSpace(baseUrl) || !Uri.TryCreate(baseUrl.Trim(), UriKind.Absolute, out var uri) ||
-            uri.Scheme is not ("http" or "https") || !uri.IsLoopback || !string.IsNullOrEmpty(uri.UserInfo))
-            throw new AgentHostException("provider-profile-endpoint-invalid", "The configured local Ollama URL must be a loopback HTTP(S) address without credentials.");
+            uri.Scheme is not ("http" or "https") || !uri.IsLoopback || !string.IsNullOrEmpty(uri.UserInfo) ||
+            !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment))
+            throw new AgentHostException("provider-profile-endpoint-invalid", "The configured local Ollama base URL must be a loopback HTTP(S) address without credentials, query, or fragment.");
         if (string.IsNullOrWhiteSpace(modelId) || modelId.Trim().Length > 160)
             throw new AgentHostException("provider-profile-model-invalid", "The configured Ollama model identifier is missing or too long.");
 
