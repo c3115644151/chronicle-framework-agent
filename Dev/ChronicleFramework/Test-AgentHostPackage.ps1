@@ -108,8 +108,8 @@ if ($providerSelfTest.status -ne 'ready' -and $providerSelfTest.passed -ne $true
     throw 'The packaged Host did not pass its provider/decision-loop contract self-test.'
 }
 if ([int]$providerSelfTest.modelCalls -ne 0 -or [int]$providerSelfTest.nativeCommands -ne 0 -or
-    @($providerSelfTest.scenarios | Where-Object { $_.scenario -like 'campaign-loop-*' -and -not $_.passed }).Count -gt 0) {
-    throw 'The packaged Host campaign-loop regression must complete without a live model or Native game command.'
+    @($providerSelfTest.scenarios | Where-Object { -not $_.passed }).Count -gt 0) {
+    throw 'The packaged Host provider/decision-loop regression must complete without a live model or Native game command.'
 }
 
 $files = @(Get-ChildItem -LiteralPath $publishRoot -Recurse -File | Sort-Object FullName | ForEach-Object {
@@ -145,6 +145,7 @@ $result = [ordered]@{
     ProviderContractSelfTestPassed = [bool]$providerSelfTest.passed
     ProviderContractSelfTestScenarioCount = @($providerSelfTest.scenarios).Count
     CampaignLoopSelfTestScenarioCount = @($providerSelfTest.scenarios | Where-Object { $_.scenario -like 'campaign-loop-*' }).Count
+    SharedDecisionCycleScenarioCount = @($providerSelfTest.scenarios | Where-Object { $_.scenario -like 'shared-agent-host-decision-cycle-*' }).Count
     SelfTestModelCalls = [int]$providerSelfTest.modelCalls
     SelfTestNativeCommands = [int]$providerSelfTest.nativeCommands
     RestoreProxy = '127.0.0.1:7890'

@@ -58,6 +58,9 @@ internal static class ProviderContractSelfTest
             ReasoningEffort: "none",
             MaxTokenParameter: "max_completion_tokens");
 
+        await VerifySharedDecisionCycleAsync(settings, "mapSettlementTargets", "CampaignSystemPrompt", AgentHostDecisionCycle.DecideCampaignAsync, results);
+        await VerifySharedDecisionCycleAsync(settings, "foodOptions", "SupplySystemPrompt", AgentHostDecisionCycle.DecideSupplyAsync, results);
+
         var successHandler = new StubHandler((_, _) => Task.FromResult(JsonResponse(BuildChatResponse(ValidDecision, "stop"))));
         using (var successClient = new HttpClient(successHandler) { Timeout = settings.Timeout })
         using (var provider = new OllamaNativeProvider(settings, successClient))
@@ -347,6 +350,32 @@ internal static class ProviderContractSelfTest
           "allowedControls": []
         }
         """;
+
+    private static async Task VerifySharedDecisionCycleAsync(
+        OllamaProviderSettings settings,
+        string actionName,
+        string expectedPromptMember,
+        Func<OllamaNativeProvider, JsonObject, CancellationToken, Task<ProviderDecisionResult>> decide,
+        List<object> results)
+    {
+        var handler = new StubHandler((_, _) => Task.FromResult(JsonResponse(BuildChatResponse(
+            JsonSerializer.Serialize(new { action = actionName, arguments = new { }, rationale = "Use the currently listed action." }),
+            "stop"))));
+        using var client = new HttpClient(handler) { Timeout = settings.Timeout };
+        using var provider = new OllamaNativeProvider(settings, client);
+        using var promptRequest = JsonDocument.Parse("{\"goal\":\"Use a single Native action within a fixed scope.\",\"observation\":{\"status\":\"completed\",\"state\":{\"gameState\":\"MapState\"}},\"previousActionReceipt\":null,\"decisionFeedback\":null,\"allowedActions\":[{\"action\":\"" + actionName + "\",\"arguments\":[]}],\"allowedControls\":[]}");
+        var request = JsonNode.Parse(promptRequest.RootElement.GetRawText())!.AsObject();
+        var decision = await decide(provider, request, CancellationToken.None);
+        if (decision.Status != "completed" || ReadDecisionString(decision.Decision, "action") != actionName || string.IsNullOrWhiteSpace(handler.LastRequestBody))
+            throw new AgentHostException("agent-host-shared-decision-cycle-failed", $"The shared Host decision cycle failed for {actionName}.");
+
+        using var sentRequest = JsonDocument.Parse(handler.LastRequestBody);
+        var systemContent = sentRequest.RootElement.GetProperty("messages")[0].GetProperty("content").GetString();
+        var expectedPrompt = expectedPromptMember == "SupplySystemPrompt" ? AgentHostDecisionCycle.SupplySystemPrompt : AgentHostDecisionCycle.CampaignSystemPrompt;
+        if (!string.Equals(systemContent, expectedPrompt, StringComparison.Ordinal))
+            throw new AgentHostException("agent-host-shared-decision-prompt-failed", $"The shared Host decision cycle did not apply the {expectedPromptMember} policy.");
+        results.Add(new { scenario = "shared-agent-host-decision-cycle-" + (expectedPromptMember == "SupplySystemPrompt" ? "supply" : "campaign"), passed = true, action = actionName });
+    }
 
     private static string BuildChatResponse(string content, string finishReason) => JsonSerializer.Serialize(new
     {
