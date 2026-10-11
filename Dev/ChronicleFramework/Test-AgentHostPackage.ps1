@@ -96,12 +96,20 @@ function Invoke-PackagedHost([string]$ExecutablePath, [string]$Argument)
 
 $packageHealth = Invoke-PackagedHost -ExecutablePath $hostExe -Argument '--package-health'
 $version = Invoke-PackagedHost -ExecutablePath $hostExe -Argument '--version'
+$providerSelfTest = Invoke-PackagedHost -ExecutablePath $hostExe -Argument '--provider-self-test'
 foreach ($receipt in @($packageHealth, $version)) {
     if ($receipt.status -ne 'ready' -or $receipt.product -ne 'ChronicleAgentHost' -or
         $receipt.processArchitecture -ne 'X64' -or -not [bool]$receipt.is64BitProcess -or
         [int]$receipt.protocolVersion -ne 1 -or [string]$receipt.version -notmatch '^0\.1\.0') {
         throw 'Packaged Host version/health receipt did not match the expected Windows x64 product contract.'
     }
+}
+if ($providerSelfTest.status -ne 'ready' -and $providerSelfTest.passed -ne $true) {
+    throw 'The packaged Host did not pass its provider/decision-loop contract self-test.'
+}
+if ([int]$providerSelfTest.modelCalls -ne 0 -or [int]$providerSelfTest.nativeCommands -ne 0 -or
+    @($providerSelfTest.scenarios | Where-Object { $_.scenario -like 'campaign-loop-*' -and -not $_.passed }).Count -gt 0) {
+    throw 'The packaged Host campaign-loop regression must complete without a live model or Native game command.'
 }
 
 $files = @(Get-ChildItem -LiteralPath $publishRoot -Recurse -File | Sort-Object FullName | ForEach-Object {
@@ -134,6 +142,11 @@ $result = [ordered]@{
     PackageBytes = $totalBytes
     PackageHealth = $packageHealth
     VersionReceipt = $version
+    ProviderContractSelfTestPassed = [bool]$providerSelfTest.passed
+    ProviderContractSelfTestScenarioCount = @($providerSelfTest.scenarios).Count
+    CampaignLoopSelfTestScenarioCount = @($providerSelfTest.scenarios | Where-Object { $_.scenario -like 'campaign-loop-*' }).Count
+    SelfTestModelCalls = [int]$providerSelfTest.modelCalls
+    SelfTestNativeCommands = [int]$providerSelfTest.nativeCommands
     RestoreProxy = '127.0.0.1:7890'
     NuGetCacheRoot = $nugetRoot
     ConsumerWorkingDirectorySeparatedFromPackage = ($consumerWorkingDirectory -ne $publishRoot)
