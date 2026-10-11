@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.127'
+$contractVersion = '7.128'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -194,6 +194,9 @@ if ($harnessScript -notmatch "'AgentHostCampaignLoopEvaluation' \{ @\('Preflight
     $agentHostCampaignLoopSource -notmatch 'BuildControlCatalog\(movingToTarget, targetReached\)' -or
     $agentHostCampaignLoopSource -notmatch 'campaign-loop-starts-with-read-only-map-observation' -or
     $agentHostCampaignLoopSource -notmatch 'campaign-loop-rejects-unobserved-targets-and-clock-actions' -or
+    $agentHostCampaignLoopSource -notmatch 'RunTransportSelfTestsAsync' -or
+    $agentHostCampaignLoopSource -notmatch 'campaign-loop-runtime-observe-decide-act-observe-arrival' -or
+    $agentHostCampaignLoopSource -notmatch 'campaign-loop-runtime-native-timeout-is-not-replayed' -or
     $agentHostCampaignLoopEvaluationSource -notmatch '\-ArrivalLoop' -or
     $agentHostCampaignLoopEvaluationSource -notmatch '\-AgentHostRuntime' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'CampaignDayAdvancedDuringTravel' -or

@@ -15,6 +15,7 @@ internal static class ProviderContractSelfTest
     {
         var results = new List<object>();
         results.AddRange(AgentHostCampaignLoop.RunContractSelfTests());
+        results.AddRange(await AgentHostCampaignLoop.RunTransportSelfTestsAsync());
         var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
         var expectedGlobalProfilePath = Path.Combine(documents, "Mount and Blade II Bannerlord", "Configs", "ModSettings", "Global", "ChronicleFramework", "ChronicleAgentSettings.json");
         if (!string.Equals(AgentProviderProfile.GetDefaultPath(), expectedGlobalProfilePath, StringComparison.OrdinalIgnoreCase))
@@ -355,7 +356,7 @@ internal static class ProviderContractSelfTest
         OllamaProviderSettings settings,
         string actionName,
         string expectedPromptMember,
-        Func<OllamaNativeProvider, JsonObject, CancellationToken, Task<ProviderDecisionResult>> decide,
+        Func<IAgentHostDecisionProvider, JsonObject, CancellationToken, Task<ProviderDecisionResult>> decide,
         List<object> results)
     {
         var handler = new StubHandler((_, _) => Task.FromResult(JsonResponse(BuildChatResponse(

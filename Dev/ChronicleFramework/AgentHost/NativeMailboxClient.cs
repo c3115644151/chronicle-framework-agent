@@ -5,7 +5,7 @@ using System.Text.Json.Nodes;
 
 namespace ChronicleFramework.AgentHost;
 
-internal sealed class NativeMailboxClient
+internal sealed class NativeMailboxClient : IAgentHostCampaignNativeClient
 {
     private static readonly HashSet<string> SupplySliceActions = new(StringComparer.Ordinal)
     {
@@ -36,6 +36,8 @@ internal sealed class NativeMailboxClient
     internal Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken) =>
         SendAsync("state", new JsonObject(), acceptedResponseExpected: false, cancellationToken);
 
+    Task<JsonDocument> IAgentHostCampaignNativeClient.ReadStateAsync(CancellationToken cancellationToken) => ReadStateAsync(cancellationToken);
+
     internal Task<JsonDocument> ExecuteSupplyActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
     {
         if (!SupplySliceActions.Contains(action) || action == "state")
@@ -65,6 +67,9 @@ internal sealed class NativeMailboxClient
 
         return SendAsync(action, arguments, acceptedResponseExpected: false, cancellationToken);
     }
+
+    Task<JsonDocument> IAgentHostCampaignNativeClient.ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken) =>
+        ExecuteCampaignActionAsync(action, arguments, cancellationToken);
 
     private async Task<JsonDocument> SendAsync(
         string action,

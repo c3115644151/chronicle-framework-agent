@@ -7,7 +7,7 @@ using System.Text.Json.Nodes;
 
 namespace ChronicleFramework.AgentHost;
 
-internal sealed class OllamaNativeProvider : IDisposable
+internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
 {
     private const int MaxRequestBytes = 512 * 1024;
     private const int MaxResponseBytes = 1024 * 1024;
@@ -17,6 +17,9 @@ internal sealed class OllamaNativeProvider : IDisposable
     private readonly bool _ownsClient;
     internal string ModelId => _settings.Model;
     internal string ConfigurationSource { get; }
+
+    string IAgentHostDecisionProvider.ModelId => ModelId;
+    string IAgentHostDecisionProvider.ConfigurationSource => ConfigurationSource;
 
     internal OllamaNativeProvider(OllamaProviderSettings settings, HttpClient? client = null, string configurationSource = "direct")
     {
@@ -114,6 +117,9 @@ internal sealed class OllamaNativeProvider : IDisposable
 
     internal Task<ProviderDecisionResult> DecideAsync(JsonElement request, CancellationToken cancellationToken) =>
         DecideAsync(request, AgentHostDecisionCycle.CampaignSystemPrompt, cancellationToken);
+
+    Task<ProviderDecisionResult> IAgentHostDecisionProvider.DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken) =>
+        DecideAsync(request, systemPrompt, cancellationToken);
 
     internal async Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
     {

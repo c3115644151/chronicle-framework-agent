@@ -69,7 +69,48 @@ internal static class AgentHostCampaignLoop
         return results;
     }
 
+    internal static async Task<IReadOnlyList<object>> RunTransportSelfTestsAsync()
+    {
+        var requestJson = "{\"runId\":\"selftest-arrival\",\"goal\":\"Reach the observed safe settlement.\",\"maxDecisions\":8,\"maxElapsedSeconds\":10,\"allowedActionNames\":[\"mapSettlementTargets\",\"move\"]}";
+        using var request = JsonDocument.Parse(requestJson);
+        var results = new List<object>();
+
+        var arrivalClient = new FakeCampaignNativeClient(timeoutOnMove: false);
+        var arrivalProvider = new FakeCampaignDecisionProvider(timeoutOnMove: false);
+        var arrival = await RunAsync(request.RootElement, arrivalClient, arrivalProvider, CancellationToken.None);
+        if (ReadString(arrival, "status") != "completed" ||
+            ReadInt(arrival, "decisions", 0) != 4 ||
+            ReadInt(arrival, "actionsExecuted", 0) != 2 ||
+            arrivalClient.MapQueryCount != 1 || arrivalClient.MoveCount != 1 || arrivalProvider.CallCount != 4 ||
+            arrival["termination"] is not JsonObject arrivalTermination || ReadBoolean(arrivalTermination, "goalVerified") != true)
+            throw new AgentHostException("campaign-loop-self-test-arrival-runtime-failed", "The injected Native/Provider loop did not observe, move once, passively re-observe, and verify arrival.");
+        results.Add(new { scenario = "campaign-loop-runtime-observe-decide-act-observe-arrival", passed = true });
+
+        var timeoutClient = new FakeCampaignNativeClient(timeoutOnMove: true);
+        var timeoutProvider = new FakeCampaignDecisionProvider(timeoutOnMove: true);
+        var timeout = await RunAsync(request.RootElement, timeoutClient, timeoutProvider, CancellationToken.None);
+        if (ReadString(timeout, "status") != "failed" ||
+            timeout["termination"] is not JsonObject timeoutTermination || ReadString(timeoutTermination, "reason") != "native-action-result-ambiguous" ||
+            ReadInt(timeout, "actionsExecuted", 0) != 1 || timeoutClient.MapQueryCount != 1 || timeoutClient.MoveCount != 1 || timeoutProvider.CallCount != 2 ||
+            timeout["trace"] is not JsonArray timeoutTrace || timeoutTrace.OfType<JsonObject>().Count(step => ReadString(step["actionReceipt"] as JsonObject, "status") == "timeout-ambiguous") != 1)
+            throw new AgentHostException("campaign-loop-self-test-timeout-replay-failed", "An ambiguous Native move timeout was not surfaced safely or the action was replayed.");
+        results.Add(new { scenario = "campaign-loop-runtime-native-timeout-is-not-replayed", passed = true });
+        return results;
+    }
+
     internal static async Task<JsonObject> RunAsync(JsonElement request, string protocolRoot, CancellationToken cancellationToken)
+    {
+        var nativeTimeoutSeconds = ReadIntEnvironment("CHRONICLE_LLM_TIMEOUT_SECONDS", 180, 5, 240);
+        var client = new NativeMailboxClient(protocolRoot, TimeSpan.FromSeconds(nativeTimeoutSeconds));
+        var provider = OllamaNativeProvider.FromConfiguredProfile();
+        return await RunAsync(request, client, provider, cancellationToken);
+    }
+
+    internal static async Task<JsonObject> RunAsync(
+        JsonElement request,
+        IAgentHostCampaignNativeClient client,
+        IAgentHostDecisionProvider provider,
+        CancellationToken cancellationToken)
     {
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
         var goal = ReadString(request, "goal");
@@ -82,9 +123,8 @@ internal static class AgentHostCampaignLoop
             !requestedActions.SetEquals(CampaignActions))
             throw new AgentHostException("campaign-loop-request-invalid", "The Host requires a bounded Campaign-map goal and the two approved map-query/movement actions.");
 
-        var nativeTimeoutSeconds = ReadIntEnvironment("CHRONICLE_LLM_TIMEOUT_SECONDS", 180, 5, 240);
-        var client = new NativeMailboxClient(protocolRoot, TimeSpan.FromSeconds(nativeTimeoutSeconds));
-        using var provider = OllamaNativeProvider.FromConfiguredProfile();
+        using (provider)
+        {
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxElapsedSeconds));
 
@@ -323,6 +363,7 @@ internal static class AgentHostCampaignLoop
             ["hostFailureStack"] = hostFailureStack,
             ["trace"] = trace
         };
+        }
     }
 
     private static JsonArray BuildActionCatalog(JsonArray? targets, bool moving, bool goalVerified)
@@ -549,6 +590,94 @@ internal static class AgentHostCampaignLoop
         if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) || parsed < minimum || parsed > maximum)
             throw new AgentHostException("campaign-loop-configuration-invalid", "The configured Host timeout is outside its supported range.");
         return parsed;
+    }
+
+    private sealed class FakeCampaignNativeClient(bool timeoutOnMove) : IAgentHostCampaignNativeClient
+    {
+        private int _readCount;
+        internal int MapQueryCount { get; private set; }
+        internal int MoveCount { get; private set; }
+
+        public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _readCount++;
+            var arrived = _readCount >= 4;
+            var moving = _readCount == 3 && !timeoutOnMove;
+            var response = new JsonObject
+            {
+                ["processId"] = 321,
+                ["campaignDay"] = arrived ? 1.1 : 1.0,
+                ["dailyTickCount"] = 1,
+                ["timeControlMode"] = "StoppablePlay",
+                ["state"] = new JsonObject
+                {
+                    ["context"] = new JsonObject { ["gameState"] = "MapState", ["menuId"] = "", ["timeControlMode"] = "StoppablePlay" },
+                    ["location"] = new JsonObject
+                    {
+                        ["currentSettlementId"] = arrived ? "safe" : "origin",
+                        ["targetSettlementId"] = moving ? "safe" : null
+                    },
+                    ["party"] = new JsonObject { ["isMoving"] = moving }
+                }
+            };
+            return Task.FromResult(Parse(response));
+        }
+
+        public Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (action == "mapSettlementTargets")
+            {
+                MapQueryCount++;
+                return Task.FromResult(Parse(new JsonObject
+                {
+                    ["status"] = "completed",
+                    ["commandId"] = "fake-map",
+                    ["data"] = new JsonObject
+                    {
+                        ["mapSettlementTargets"] = new JsonArray(new JsonObject
+                        {
+                            ["id"] = "safe", ["name"] = "Safe Town", ["type"] = "town", ["distance"] = 4.0,
+                            ["hostile"] = false, ["underSiege"] = false, ["isInspected"] = true
+                        })
+                    }
+                }));
+            }
+            if (action == "move")
+            {
+                MoveCount++;
+                if (timeoutOnMove) throw new AgentHostException("native-command-timeout", "Injected ambiguous Native timeout.");
+                return Task.FromResult(Parse(new JsonObject { ["status"] = "completed", ["commandId"] = "fake-move" }));
+            }
+            throw new AgentHostException("native-action-not-in-campaign-loop-scope", "The fake Native client received an out-of-scope action.");
+        }
+
+        private static JsonDocument Parse(JsonObject value) => JsonDocument.Parse(value.ToJsonString());
+    }
+
+    private sealed class FakeCampaignDecisionProvider(bool timeoutOnMove) : IAgentHostDecisionProvider
+    {
+        internal int CallCount { get; private set; }
+        public string ModelId => "deterministic-campaign-loop-self-test";
+        public string ConfigurationSource => "harness-fake-provider";
+
+        public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CallCount++;
+            var decision = CallCount switch
+            {
+                1 => new JsonObject { ["action"] = "mapSettlementTargets", ["arguments"] = new JsonObject(), ["rationale"] = "Read current safe destinations." },
+                2 => new JsonObject { ["action"] = "move", ["arguments"] = new JsonObject { ["SettlementId"] = "safe" }, ["rationale"] = "Move to the observed safe destination." },
+                3 when !timeoutOnMove => new JsonObject { ["observeAgain"] = true, ["waitSeconds"] = 1, ["reason"] = "Observe natural movement." },
+                4 when !timeoutOnMove => new JsonObject { ["done"] = true, ["reason"] = "Fresh Native state confirms arrival." },
+                _ => throw new AgentHostException("campaign-loop-self-test-provider-sequence-invalid", "The runtime test requested more decisions than its scripted sequence.")
+            };
+            return Task.FromResult(new ProviderDecisionResult("completed", ModelId, null, null, "stop", decision));
+        }
+
+        public void Dispose() { }
     }
 
     private sealed record CampaignTarget(string Id, string Name, string Type);
