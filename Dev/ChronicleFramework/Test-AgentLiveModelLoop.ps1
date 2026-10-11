@@ -25,7 +25,7 @@ if (Get-Process -Name Bannerlord* -ErrorAction SilentlyContinue) {
     throw 'Refusing to start a live-model Campaign test while any Bannerlord client is already running.'
 }
 if (@($ArrivalLoop, $RecruitmentLoop, $RoadsideBanditNegotiationLoop, $SupplyManagementLoop | Where-Object { $_ }).Count -gt 1) { throw 'Select only one LiveModel test goal per run.' }
-if ($AgentHostRuntime -and -not $SupplyManagementLoop) { throw 'AgentHostRuntime is currently limited to the frozen Native supply slice.' }
+if ($AgentHostRuntime -and -not ($SupplyManagementLoop -or $ArrivalLoop)) { throw 'AgentHostRuntime supports only the frozen Native supply and safe map-arrival slices.' }
 if ($RoadsideBanditNegotiationLoop -and -not $RecruitmentLoop) { throw 'RoadsideBanditNegotiationLoop requires RecruitmentLoop so the encounter resolves into the existing growth goal.' }
 foreach ($setting in @('CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL','CHRONICLE_LLM_API_KEY','CHRONICLE_LLM_TIMEOUT_SECONDS','CHRONICLE_LLM_MAX_TOKENS','CHRONICLE_LLM_MAX_TOKEN_PARAMETER','CHRONICLE_LLM_REASONING_EFFORT','CHRONICLE_LLM_THINKING_MODE','CHRONICLE_LLM_TEMPERATURE','CHRONICLE_LLM_PROTOCOL')) {
     $configuredValue = [string][Environment]::GetEnvironmentVariable($setting, 'Process')
@@ -281,18 +281,31 @@ try {
     $loopExitCode = 0
     if ($AgentHostRuntime) {
         $agentHostDll = Join-Path $PSScriptRoot 'AgentHost\bin\Release\net8.0\ChronicleAgentHost.dll'
-        $supplyRequest = [ordered]@{
-            runId = ('agenthost-supply-' + [Guid]::NewGuid().ToString('N'))
-            goal = $goal
-            targetSettlementId = $chosenSettlementId
-            maxDecisions = $maxDecisions
-            maxElapsedSeconds = $maxElapsedSeconds
-            allowedActionNames = @($allowedActions.Split(',') | ForEach-Object { $_.Trim() })
-            completionContract = $completionContractJson | ConvertFrom-Json
+        if ($SupplyManagementLoop) {
+            $hostRunMode = 'supply-loop'
+            $hostRequest = [ordered]@{
+                runId = ('agenthost-supply-' + [Guid]::NewGuid().ToString('N'))
+                goal = $goal
+                targetSettlementId = $chosenSettlementId
+                maxDecisions = $maxDecisions
+                maxElapsedSeconds = $maxElapsedSeconds
+                allowedActionNames = @($allowedActions.Split(',') | ForEach-Object { $_.Trim() })
+                completionContract = $completionContractJson | ConvertFrom-Json
+            }
+        }
+        else {
+            $hostRunMode = 'campaign-loop'
+            $hostRequest = [ordered]@{
+                runId = ('agenthost-campaign-' + [Guid]::NewGuid().ToString('N'))
+                goal = $goal
+                maxDecisions = $maxDecisions
+                maxElapsedSeconds = $maxElapsedSeconds
+                allowedActionNames = @($allowedActions.Split(',') | ForEach-Object { $_.Trim() })
+            }
         }
         $hostStartInfo = [Diagnostics.ProcessStartInfo]::new()
         $hostStartInfo.FileName = (Get-Command dotnet -ErrorAction Stop).Source
-        $hostStartInfo.Arguments = '"{0}" --supply-loop' -f $agentHostDll
+        $hostStartInfo.Arguments = '"{0}" --{1}' -f $agentHostDll, $hostRunMode
         $hostStartInfo.UseShellExecute = $false
         $hostStartInfo.CreateNoWindow = $true
         $hostStartInfo.RedirectStandardInput = $true
@@ -300,15 +313,15 @@ try {
         $hostStartInfo.RedirectStandardError = $true
         $hostProcess = [Diagnostics.Process]::new()
         $hostProcess.StartInfo = $hostStartInfo
-        if (-not $hostProcess.Start()) { throw 'Could not start the local Agent Host supply loop.' }
+        if (-not $hostProcess.Start()) { throw "Could not start the local Agent Host $hostRunMode." }
         $hostStdoutTask = $hostProcess.StandardOutput.ReadToEndAsync()
         $hostStderrTask = $hostProcess.StandardError.ReadToEndAsync()
-        $hostProcess.StandardInput.WriteLine(($supplyRequest | ConvertTo-Json -Depth 12 -Compress))
+        $hostProcess.StandardInput.WriteLine(($hostRequest | ConvertTo-Json -Depth 12 -Compress))
         $hostProcess.StandardInput.Close()
         $hostTimeoutMilliseconds = [int](($maxElapsedSeconds + 60) * 1000)
         if (-not $hostProcess.WaitForExit($hostTimeoutMilliseconds)) {
             try { $hostProcess.Kill() } catch { }
-            throw 'Local Agent Host supply loop exceeded the bounded process timeout.'
+            throw "Local Agent Host $hostRunMode exceeded the bounded process timeout."
         }
         $output = $hostStdoutTask.GetAwaiter().GetResult()
         $hostStderr = $hostStderrTask.GetAwaiter().GetResult()

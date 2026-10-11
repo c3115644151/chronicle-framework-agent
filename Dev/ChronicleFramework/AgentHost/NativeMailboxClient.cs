@@ -43,6 +43,29 @@ internal sealed class NativeMailboxClient
         return SendAsync(action, arguments, acceptedResponseExpected: action == "rest", cancellationToken);
     }
 
+    internal Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+    {
+        switch (action)
+        {
+            case "mapSettlementTargets" when arguments.Count == 0:
+                break;
+            case "move" when arguments.Count == 1 &&
+                              arguments.TryGetPropertyValue("settlementId", out var settlementIdNode) &&
+                              settlementIdNode is JsonValue settlementIdValue &&
+                              settlementIdValue.TryGetValue<string>(out var settlementId) &&
+                              !string.IsNullOrWhiteSpace(settlementId):
+                break;
+            case "mapSettlementTargets":
+                throw new AgentHostException("native-map-target-arguments-invalid", "mapSettlementTargets does not accept arguments.");
+            case "move":
+                throw new AgentHostException("native-move-arguments-invalid", "move requires only a non-empty observed settlementId.");
+            default:
+                throw new AgentHostException("native-action-not-in-campaign-loop-scope", "The Agent Host action is outside the current Campaign loop scope.");
+        }
+
+        return SendAsync(action, arguments, acceptedResponseExpected: false, cancellationToken);
+    }
+
     private async Task<JsonDocument> SendAsync(
         string action,
         JsonObject arguments,

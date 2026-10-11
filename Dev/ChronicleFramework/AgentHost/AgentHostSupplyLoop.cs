@@ -101,8 +101,7 @@ internal static class AgentHostSupplyLoop
                 try
                 {
                     loopStage = "provider-call";
-                    using var decisionDocument = JsonDocument.Parse(modelRequest.ToJsonString());
-                    providerResult = await provider.DecideAsync(decisionDocument.RootElement, elapsed.Token);
+                    providerResult = await AgentHostDecisionCycle.DecideSupplyAsync(provider, modelRequest, elapsed.Token);
                     decisionCount++;
                     lastProviderCompletedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
                     if (providerResult.PromptTokens.HasValue) inputTokens += providerResult.PromptTokens.Value;

@@ -64,6 +64,15 @@ internal static class Program
                 return rejection["passed"]?.GetValue<bool>() == true ? 0 : 1;
             }
 
+            if (options.CampaignLoop)
+            {
+                var requestJson = await Console.In.ReadToEndAsync();
+                using var requestDocument = JsonDocument.Parse(requestJson);
+                var loopResult = await AgentHostCampaignLoop.RunAsync(requestDocument.RootElement, protocolRoot, CancellationToken.None);
+                Console.Out.WriteLine(JsonSerializer.Serialize(loopResult, OutputJsonOptions));
+                return loopResult["status"]?.GetValue<string>() == "completed" ? 0 : 1;
+            }
+
             if (options.SupplyLoop)
             {
                 var requestJson = await Console.In.ReadToEndAsync();
@@ -372,13 +381,14 @@ internal static class Program
         int MainPartyMembers,
         string GameState);
 
-    private sealed record HostOptions(string? ProtocolRoot, TimeSpan Timeout, bool DecisionOnce, bool SupplyLoop, bool ProtocolRejectionTest)
+    private sealed record HostOptions(string? ProtocolRoot, TimeSpan Timeout, bool DecisionOnce, bool CampaignLoop, bool SupplyLoop, bool ProtocolRejectionTest)
     {
         internal static HostOptions Parse(string[] args)
         {
             string? root = null;
             var timeoutSeconds = 15;
             var decisionOnce = false;
+            var campaignLoop = false;
             var supplyLoop = false;
             var protocolRejectionTest = false;
             for (var index = 0; index < args.Length; index++)
@@ -397,6 +407,9 @@ internal static class Program
                     case "--decision-once":
                         decisionOnce = true;
                         break;
+                    case "--campaign-loop":
+                        campaignLoop = true;
+                        break;
                     case "--supply-loop":
                         supplyLoop = true;
                         break;
@@ -410,9 +423,9 @@ internal static class Program
 
             if (timeoutSeconds is < 1 or > 300)
                 throw new AgentHostException("host-timeout-invalid", "Host timeout must be from 1 to 300 seconds.");
-            if ((decisionOnce ? 1 : 0) + (supplyLoop ? 1 : 0) + (protocolRejectionTest ? 1 : 0) > 1)
+            if ((decisionOnce ? 1 : 0) + (campaignLoop ? 1 : 0) + (supplyLoop ? 1 : 0) + (protocolRejectionTest ? 1 : 0) > 1)
                 throw new AgentHostException("host-mode-conflict", "Select one Host execution mode.");
-            return new HostOptions(root, TimeSpan.FromSeconds(timeoutSeconds), decisionOnce, supplyLoop, protocolRejectionTest);
+            return new HostOptions(root, TimeSpan.FromSeconds(timeoutSeconds), decisionOnce, campaignLoop, supplyLoop, protocolRejectionTest);
         }
     }
 }
