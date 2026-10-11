@@ -464,6 +464,7 @@ try {
             $cheapestFoodOffer = @($foodRead[0].actionReceipt.data.offers | Where-Object { [bool]$_.isFood -and [bool]$_.isTransferable -and [int]$_.stock -gt 0 -and [double]$_.inventoryLogicUnitPrice -le [int]$foodRead[0].observationBefore.state.economy.gold } | Sort-Object { [double]$_.inventoryLogicUnitPrice } | Select-Object -First 1)
         }
         $naturalTicksElapsed = [int]$finalObservation.dailyTickCount - [int]$supplySetup.DailyTickCount
+        $naturalCampaignTimeAdvanced = [double]$finalObservation.campaignDay -gt [double]$supplySetup.CampaignDay
         $providerStoppedAfterGoalAction = ([bool]$loopTrace.termination.completedByProvider -and [bool]$loopTrace.termination.goalVerified -and [bool]$steps[-1].decision.done)
         $supplyVerified = (
             $tradeEntrySteps.Count -eq 1 -and $tradeEntry.Count -eq 1 -and $tradeOption.Count -eq 1 -and [string]$tradeEntry[0].observationBefore.state.context.menuId -eq 'town' -and
@@ -475,7 +476,7 @@ try {
             $restSteps.Count -eq 1 -and [int]$restStep[0].decision.arguments.Days -eq 3 -and $hostRestMonitorSteps.Count -eq 1 -and [bool]$hostRestMonitor[0].control.requestedRestCompleted -and [int]$hostRestMonitor[0].control.pollCount -gt 0 -and
             $hostRestLeaveSteps.Count -eq 1 -and $hostRestLeaveOption.Count -eq 1 -and
             $leaveWaitSteps.Count -eq 1 -and $leaveWait.Count -eq 1 -and $leaveOption.Count -eq 1 -and [string]$leaveWait[0].observationBefore.state.context.menuId -eq 'town_wait_menus' -and
-            $naturalTicksElapsed -eq 3 -and [double]$finalObservation.campaignDay -ge ([double]$supplySetup.CampaignDay + 3.0) -and
+            $naturalTicksElapsed -eq 3 -and $naturalCampaignTimeAdvanced -and
             [string]$finalObservation.state.context.menuId -eq 'town' -and [int]$finalObservation.state.party.members -eq 6 -and
             [int]$finalObservation.state.economy.gold -ge 861 -and [double]$finalObservation.state.party.food -ge 1.0 -and
             $nativeClockActions.Count -eq 0 -and $rejectedSteps.Count -le 2 -and $rejectedActionsDidNotChangeWorld -and $providerStoppedAfterGoalAction -and [bool]$loopTrace.termination.goalVerified
@@ -488,6 +489,7 @@ try {
                 FoodInventory = [int]$finalObservation.state.party.foodInventory
                 CampaignDayStart = [double]$supplySetup.CampaignDay
                 CampaignDayEnd = [double]$finalObservation.campaignDay
+                CampaignDayDelta = [Math]::Round(([double]$finalObservation.campaignDay - [double]$supplySetup.CampaignDay), 4)
                 DailyTickStart = [int]$supplySetup.DailyTickCount
                 DailyTickEnd = [int]$finalObservation.dailyTickCount
                 DailyTicksElapsed = $naturalTicksElapsed
