@@ -21,6 +21,7 @@ $failure = $null
 $prepared = $false
 $marker = $null
 $markerSettlementId = $null
+$encounterActiveWhileSettlementMenuVisible = $false
 $preludeActions = [System.Collections.Generic.List[object]]::new()
 $tempRoot = $env:CHRONICLE_HARNESS_TEMP
 $previousHarnessMode = $env:CHRONICLE_HARNESS_MODE
@@ -71,8 +72,10 @@ try {
                 do {
                     Start-Sleep -Seconds 1
                     $state = Invoke-NativeCli 'state' @() 45
-                    if ([bool]$state.state.context.encounterActive -or [string]$state.state.context.menuId -eq 'encounter_meeting') { throw 'A Native encounter interrupted escort preparation; no encounter option was selected.' }
-                    if ([string]$state.state.location.currentSettlementId -ceq $townId -and [string]$state.state.context.menuId -eq 'town') { break }
+                    $atTargetTownMenu = [string]$state.state.location.currentSettlementId -ceq $townId -and [string]$state.state.context.menuId -eq 'town'
+                    if ([string]$state.state.context.menuId -eq 'encounter_meeting' -or ([bool]$state.state.context.encounterActive -and -not $atTargetTownMenu)) { throw 'A Native encounter menu interrupted escort preparation; no encounter option was selected.' }
+                    if ($atTargetTownMenu -and [bool]$state.state.context.encounterActive) { $encounterActiveWhileSettlementMenuVisible = $true }
+                    if ($atTargetTownMenu) { break }
                     if (-not [bool]$state.state.party.isMoving) { throw "Native escort preparation travel to '$townId' stopped before arrival." }
                 } while ([DateTime]::UtcNow -lt $townDeadline)
 
@@ -131,10 +134,12 @@ try {
         do {
             Start-Sleep -Seconds 1
             $state = Invoke-NativeCli 'state' @() 45
-            if ([bool]$state.state.context.encounterActive -or [string]$state.state.context.menuId -eq 'encounter_meeting') {
-                throw 'A Native encounter interrupted the bounded fixture-preparation travel; no encounter option was selected.'
+            $atTargetVillageMenu = [string]$state.state.location.currentSettlementId -ceq $villageId -and [string]$state.state.context.menuId -eq 'village'
+            if ([string]$state.state.context.menuId -eq 'encounter_meeting' -or ([bool]$state.state.context.encounterActive -and -not $atTargetVillageMenu)) {
+                throw 'A Native encounter menu interrupted the bounded fixture-preparation travel; no encounter option was selected.'
             }
-            if ([string]$state.state.location.currentSettlementId -ceq $villageId -and [string]$state.state.context.menuId -eq 'village') { break }
+            if ($atTargetVillageMenu -and [bool]$state.state.context.encounterActive) { $encounterActiveWhileSettlementMenuVisible = $true }
+            if ($atTargetVillageMenu) { break }
             if (-not [bool]$state.state.party.isMoving) { throw "Native movement to '$villageId' stopped before village arrival." }
         } while ([DateTime]::UtcNow -lt $deadline)
 
@@ -186,6 +191,7 @@ $result = [ordered]@{
     SourceHashAfter = $sourceHashAfter
     SourceFixtureUnchanged = ($sourceHashBefore -ceq $sourceHashAfter)
     VisibleMarker = if ($marker) { [ordered]@{ settlementId=$markerSettlementId; heroId=$marker.HeroId; heroName=$marker.HeroName; title=$marker.Title; hint=$marker.Hint } } else { $null }
+    EncounterActiveWhileSettlementMenuVisible = $encounterActiveWhileSettlementMenuVisible
     PreludeActions = @($preludeActions)
     TimeActionsAreFixturePreparationOnly = @($preludeActions | Where-Object { $_.action -in @('resume') } | ForEach-Object action)
     EngineFramePath = if (Test-Path -LiteralPath (Join-Path $tempRoot 'VillageToolsQuest-prepared-visible-marker.bmp')) { Join-Path $tempRoot 'VillageToolsQuest-prepared-visible-marker.bmp' } else { $null }

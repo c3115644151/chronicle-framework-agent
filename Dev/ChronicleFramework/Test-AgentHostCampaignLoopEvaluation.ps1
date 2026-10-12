@@ -192,15 +192,29 @@ $result = [ordered]@{
     ProviderKind = 'Local Agent Host decision loop; no billed provider'
     RunCount = $Runs
     DistinctCampaignSeeds = 1
-    Threshold = [ordered]@{
-        successfulRuns = $Runs
-        maxDecisionsPerRun = 30
-        nativeActions = 2
-        requiredNativeActions = @('mapSettlementTargets', 'move')
-        naturalCampaignTimeAdvance = $true
-        requiredPassiveObservationsDuringMovement = $true
-        explicitClockActions = 0
-        visualCoverageRatio = 0.9
+    Threshold = if ($VillageToolsQuest) {
+        [ordered]@{
+            successfulRuns = $Runs
+            maximumTotalDecisions = 100
+            requiredModelNativeActions = @('talkToSettlementHero','dialogueSelect','questDetails','tradeOptions','trade','tradeConfirm','inventoryOpen','heroEquipmentOptions','inventoryCancel')
+            requiresVisibleNativeIssueMarker = $true
+            requiresRealLocalModel = $true
+            exactJournalInventoryDelta = $true
+            explicitClockActions = 0
+            visualCoverageRatio = 0.9
+        }
+    }
+    else {
+        [ordered]@{
+            successfulRuns = $Runs
+            maxDecisionsPerRun = 30
+            nativeActions = 2
+            requiredNativeActions = @('mapSettlementTargets', 'move')
+            naturalCampaignTimeAdvance = $true
+            requiredPassiveObservationsDuringMovement = $true
+            explicitClockActions = 0
+            visualCoverageRatio = 0.9
+        }
     }
     Runs = @($results)
     EvidenceDirectory = $evaluationRoot
