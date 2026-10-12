@@ -442,7 +442,10 @@ internal static class AgentHostCampaignLoop
             ["previousActionReceipt"] = previousReceipt?.DeepClone(),
             ["decisionFeedback"] = feedback?.DeepClone(),
             ["allowedActions"] = actions.DeepClone(),
-            ["allowedControls"] = controls.DeepClone()
+            ["allowedControls"] = controls.DeepClone(),
+            ["controlArguments"] = controls.Any(control => control?.GetValue<string>() == "observeAgain")
+                ? new JsonObject { ["observeAgain"] = new JsonObject { ["waitSeconds"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 10 } } }
+                : new JsonObject()
         };
 
     private static JsonArray BuildSafeVisibleTargets(JsonObject receipt)
