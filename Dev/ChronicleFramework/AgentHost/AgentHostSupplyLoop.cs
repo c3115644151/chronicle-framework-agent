@@ -62,6 +62,7 @@ internal static class AgentHostSupplyLoop
 
         try
         {
+            await provider.CheckConfiguredModelAsync(elapsed.Token);
             using (var initial = await client.ReadStateAsync(elapsed.Token)) currentNative = CloneObject(initial.RootElement);
             var nativeGameProcessId = ReadInt(currentNative, "processId", -1);
             if (nativeGameProcessId <= 0) throw new AgentHostException("native-process-id-invalid", "The active Native response did not identify its game process.");

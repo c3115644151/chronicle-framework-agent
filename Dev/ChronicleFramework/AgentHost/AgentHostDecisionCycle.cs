@@ -7,6 +7,7 @@ internal interface IAgentHostDecisionProvider : IDisposable
 {
     string ModelId { get; }
     string ConfigurationSource { get; }
+    Task CheckConfiguredModelAsync(CancellationToken cancellationToken);
     Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken);
 }
 

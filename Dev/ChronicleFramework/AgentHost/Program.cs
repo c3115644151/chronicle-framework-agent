@@ -16,6 +16,12 @@ internal static class Program
     {
         try
         {
+            if (args.Length == 1 && string.Equals(args[0], "--parent-process-self-test-probe", StringComparison.Ordinal))
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1));
+                return 0;
+            }
+
             if (args.Length == 1 && string.Equals(args[0], "--provider-self-test", StringComparison.Ordinal))
             {
                 var providerTests = await ProviderContractSelfTest.RunAsync();
@@ -66,11 +72,44 @@ internal static class Program
 
             if (options.CampaignLoop)
             {
-                var requestJson = await Console.In.ReadToEndAsync();
+                var requestJson = await Console.In.ReadLineAsync();
+                if (string.IsNullOrWhiteSpace(requestJson))
+                    throw new AgentHostException("campaign-loop-request-missing", "Agent Host received no Campaign goal request.");
                 using var requestDocument = JsonDocument.Parse(requestJson);
-                var loopResult = await AgentHostCampaignLoop.RunAsync(requestDocument.RootElement, protocolRoot, CancellationToken.None);
+                using var parentProcess = OpenBoundParentProcess(requestDocument.RootElement);
+                using var parentMonitorCancellation = new CancellationTokenSource();
+                using var stopToken = new CancellationTokenSource();
+                using var stopInputToken = new CancellationTokenSource();
+                var parentExited = false;
+                var loopTask = AgentHostCampaignLoop.RunAsync(
+                    requestDocument.RootElement,
+                    protocolRoot,
+                    stopToken.Token,
+                    nativeProcessId => EmitReady(requestDocument.RootElement, nativeProcessId));
+                var stopTask = WaitForStopSignalAsync(Console.In, stopInputToken.Token);
+                var parentExitTask = WaitForParentExitAsync(parentProcess, parentMonitorCancellation.Token);
+                var completedTask = await Task.WhenAny(loopTask, stopTask, parentExitTask);
+                if (completedTask == stopTask)
+                {
+                    if (await stopTask) stopToken.Cancel();
+                    else stopInputToken.Cancel();
+                    completedTask = await Task.WhenAny(loopTask, parentExitTask);
+                }
+                if (completedTask == parentExitTask && await parentExitTask)
+                {
+                    parentExited = true;
+                    stopToken.Cancel();
+                }
+                else
+                {
+                    stopInputToken.Cancel();
+                    parentMonitorCancellation.Cancel();
+                }
+                var loopResult = await loopTask;
+                if (parentExited) MarkParentExited(loopResult);
                 Console.Out.WriteLine(JsonSerializer.Serialize(loopResult, OutputJsonOptions));
-                return loopResult["status"]?.GetValue<string>() == "completed" ? 0 : 1;
+                var terminationReason = (loopResult["termination"] as JsonObject)?["reason"]?.GetValue<string>();
+                return loopResult["status"]?.GetValue<string>() == "completed" || terminationReason == "host-stop-requested" ? 0 : 1;
             }
 
             if (options.SupplyLoop)
@@ -106,6 +145,175 @@ internal static class Program
             }, OutputJsonOptions));
             return 3;
         }
+    }
+
+    internal static async Task<bool> WaitForStopSignalAsync(TextReader input, CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            string? line;
+            try { line = await input.ReadLineAsync(cancellationToken); }
+            catch (OperationCanceledException) { return false; }
+            if (line is null) return false;
+            try
+            {
+                using var document = JsonDocument.Parse(line);
+                if (ReadString(document.RootElement, "control") == "stop") return true;
+            }
+            catch (JsonException) { }
+        }
+        return false;
+    }
+
+    internal static Process OpenBoundParentProcess(JsonElement request)
+    {
+        var processId = ReadInt(request, "parentProcessId");
+        var startTimeTicks = request.TryGetProperty("parentProcessStartTimeUtcTicks", out var startTimeValue) && startTimeValue.TryGetInt64(out var ticks)
+            ? ticks
+            : 0L;
+        if (processId <= 0 || processId == Environment.ProcessId || startTimeTicks <= 0)
+            throw new AgentHostException("campaign-parent-identity-invalid", "The Campaign Host requires the launching Bannerlord process ID and start time.");
+
+        Process parent;
+        try { parent = Process.GetProcessById(processId); }
+        catch (ArgumentException exception) { throw new AgentHostException("campaign-parent-not-running", "The launching Bannerlord process is no longer running.", exception); }
+        catch (InvalidOperationException exception) { throw new AgentHostException("campaign-parent-not-running", "The launching Bannerlord process is no longer running.", exception); }
+
+        try
+        {
+            if (parent.HasExited || parent.StartTime.ToUniversalTime().Ticks != startTimeTicks)
+                throw new AgentHostException("campaign-parent-identity-mismatch", "The Host could not verify the original Bannerlord process identity.");
+            return parent;
+        }
+        catch (AgentHostException)
+        {
+            parent.Dispose();
+            throw;
+        }
+        catch (Exception exception)
+        {
+            parent.Dispose();
+            throw new AgentHostException("campaign-parent-not-running", "The original Bannerlord process identity could not be verified.", exception);
+        }
+    }
+
+    internal static async Task<IReadOnlyList<object>> RunParentProcessContractSelfTestsAsync()
+    {
+        var results = new List<object>();
+        var hostPath = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(hostPath) || !string.Equals(Path.GetFileName(hostPath), "ChronicleAgentHost.exe", StringComparison.OrdinalIgnoreCase))
+        {
+            results.Add(new { scenario = "campaign-parent-process-identity-tests-require-packaged-windows-host", passed = true, skipped = true });
+            return results;
+        }
+
+        Process? probe = null;
+        try
+        {
+            var startInfo = new ProcessStartInfo(hostPath) { UseShellExecute = false, CreateNoWindow = true };
+            startInfo.ArgumentList.Add("--parent-process-self-test-probe");
+            probe = Process.Start(startInfo) ?? throw new AgentHostException("campaign-parent-self-test-start-failed", "Could not start the disposable parent process probe.");
+            var parentStartTicks = probe.StartTime.ToUniversalTime().Ticks;
+            var requestJson = JsonSerializer.Serialize(new { parentProcessId = probe.Id, parentProcessStartTimeUtcTicks = parentStartTicks });
+            using var request = JsonDocument.Parse(requestJson);
+            using var boundParent = OpenBoundParentProcess(request.RootElement);
+            if (boundParent.Id != probe.Id)
+                throw new AgentHostException("campaign-parent-self-test-binding-failed", "The Host guard returned a different parent process.");
+            results.Add(new { scenario = "campaign-host-binds-parent-pid-and-start-time", passed = true });
+
+            var mismatchedJson = JsonSerializer.Serialize(new { parentProcessId = probe.Id, parentProcessStartTimeUtcTicks = parentStartTicks + 1 });
+            using var mismatchedRequest = JsonDocument.Parse(mismatchedJson);
+            try
+            {
+                using var unexpectedParent = OpenBoundParentProcess(mismatchedRequest.RootElement);
+                throw new AgentHostException("campaign-parent-self-test-reuse-accepted", "The Host accepted a mismatched parent process start time.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "campaign-parent-identity-mismatch") { }
+            results.Add(new { scenario = "campaign-host-rejects-parent-pid-reuse", passed = true });
+
+            using (var cancelledMonitor = new CancellationTokenSource())
+            {
+                cancelledMonitor.CancelAfter(TimeSpan.FromMilliseconds(100));
+                if (await WaitForParentExitAsync(boundParent, cancelledMonitor.Token))
+                    throw new AgentHostException("campaign-parent-self-test-cancel-failed", "Cancelling parent monitoring falsely reported that the parent exited.");
+            }
+
+            await probe.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            if (!await WaitForParentExitAsync(boundParent, CancellationToken.None))
+                throw new AgentHostException("campaign-parent-self-test-exit-missed", "The Host did not observe the bound parent process exit.");
+            results.Add(new { scenario = "campaign-host-detects-parent-process-exit", passed = true });
+        }
+        finally
+        {
+            if (probe is { HasExited: false })
+            {
+                try { probe.Kill(entireProcessTree: true); await probe.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(3)); }
+                catch { }
+            }
+            probe?.Dispose();
+        }
+
+        return results;
+    }
+
+    internal static IAgentHostDecisionProvider CreateCampaignDecisionProvider() =>
+        IsAuthorizedLifecycleNoModelMode() ? new LifecycleIdleDecisionProvider() : OllamaNativeProvider.FromConfiguredProfile();
+
+    private static bool IsAuthorizedLifecycleNoModelMode()
+    {
+        if (Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") != "agent-host-lifecycle-test" ||
+            Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_NO_MODEL") != "1")
+            return false;
+
+        var repositoryRoot = Environment.GetEnvironmentVariable("CHRONICLE_REPOSITORY_ROOT");
+        var evidenceTemp = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+        if (string.IsNullOrWhiteSpace(repositoryRoot) || string.IsNullOrWhiteSpace(evidenceTemp)) return false;
+
+        try
+        {
+            var fullTemp = Path.GetFullPath(evidenceTemp).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var testResultsRoots = new[]
+            {
+                Path.Combine(Path.GetFullPath(repositoryRoot), "TestResults"),
+                Path.Combine(Path.GetFullPath(repositoryRoot), "Dev", "ChronicleFramework", "TestResults")
+            };
+            return testResultsRoots.Any(root => fullTemp.StartsWith(
+                Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar,
+                StringComparison.OrdinalIgnoreCase));
+        }
+        catch { return false; }
+    }
+
+    internal static async Task<bool> WaitForParentExitAsync(Process parent, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (parent.HasExited) return true;
+            await parent.WaitForExitAsync(cancellationToken);
+            return true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return false; }
+        catch { return true; }
+    }
+
+    private static void EmitReady(JsonElement request, int nativeProcessId)
+    {
+        var version = typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            ?? typeof(Program).Assembly.GetName().Version?.ToString(3)
+            ?? "unknown";
+        Console.Out.WriteLine(AgentHostReadyProtocol.Format(nativeProcessId, ReadString(request, "runId") ?? string.Empty, version));
+        Console.Out.Flush();
+    }
+
+    private static void MarkParentExited(JsonObject result)
+    {
+        if (result["termination"] is not JsonObject termination) return;
+        result["parentProcessExited"] = true;
+        if (string.Equals(termination["reason"]?.GetValue<string>(), "native-action-result-ambiguous", StringComparison.Ordinal)) return;
+        termination["reason"] = "parent-process-exited";
+        result["status"] = "failed";
+        result["failureCode"] = "campaign-parent-exited";
+        result["failure"] = "The launching Bannerlord process exited; the Host stopped without replaying any Native action.";
     }
 
     private static object GetPackageHealth()
@@ -380,6 +588,26 @@ internal static class Program
         string MainPartyId,
         int MainPartyMembers,
         string GameState);
+
+    private sealed class LifecycleIdleDecisionProvider : IAgentHostDecisionProvider
+    {
+        public string ModelId => "harness-lifecycle-idle-provider";
+        public string ConfigurationSource => "harness-only-no-model-lifecycle-test";
+
+        public Task CheckConfiguredModelAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        }
+
+        public async Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            throw new OperationCanceledException(cancellationToken);
+        }
+
+        public void Dispose() { }
+    }
 
     private sealed record HostOptions(string? ProtocolRoot, TimeSpan Timeout, bool DecisionOnce, bool CampaignLoop, bool SupplyLoop, bool ProtocolRejectionTest)
     {

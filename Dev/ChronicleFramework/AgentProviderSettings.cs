@@ -11,6 +11,7 @@ internal sealed class ChronicleAgentProviderSettings : AttributeGlobalSettings<C
 {
     private string _ollamaBaseUrl = "http://127.0.0.1:11434/v1";
     private string _modelId = "qwen3.5:4b-q4_K_M";
+    private string _campaignGoal = "前往一个当前可见且安全的聚落。";
 
     public override string Id => "ChronicleAgentSettings";
     public override string DisplayName => "Chronicle Framework Agent";
@@ -50,6 +51,44 @@ internal sealed class ChronicleAgentProviderSettings : AttributeGlobalSettings<C
     public Action ValidateLocalConfiguration
     {
         get => ShowConfigurationValidation;
+        set { }
+    }
+
+    [SettingPropertyText("本次战役目标", Order = 0, RequireRestart = false, HintText = "用自然语言说明本次目标。Host只会提供已经接入并验证的动作；当前首个范围是地图安全移动。")]
+    [SettingPropertyGroup("自主Agent", GroupOrder = 1)]
+    public string CampaignGoal
+    {
+        get => _campaignGoal;
+        set
+        {
+            var next = value?.Trim() ?? string.Empty;
+            if (string.Equals(_campaignGoal, next, StringComparison.Ordinal)) return;
+            _campaignGoal = next;
+            OnPropertyChanged();
+        }
+    }
+
+    [SettingPropertyButton("启动自主Agent", Order = 1, RequireRestart = false, HintText = "在当前Campaign地图启动本地Agent Host。", Content = "启动")]
+    [SettingPropertyGroup("自主Agent", GroupOrder = 1)]
+    public Action StartAgent
+    {
+        get => ChronicleAgentRuntimeController.RequestStart;
+        set { }
+    }
+
+    [SettingPropertyButton("停止自主Agent", Order = 2, RequireRestart = false, HintText = "发送有界停止请求；不会结束Bannerlord或杀死其他程序。", Content = "停止")]
+    [SettingPropertyGroup("自主Agent", GroupOrder = 1)]
+    public Action StopAgent
+    {
+        get => ChronicleAgentRuntimeController.RequestStop;
+        set { }
+    }
+
+    [SettingPropertyButton("查看Agent状态", Order = 3, RequireRestart = false, HintText = "查看自主Agent当前状态；状态变化时也会显示游戏内通知。", Content = "查看")]
+    [SettingPropertyGroup("自主Agent", GroupOrder = 1)]
+    public Action ViewAgentStatus
+    {
+        get => ChronicleAgentRuntimeController.RequestStatus;
         set { }
     }
 

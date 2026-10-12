@@ -88,6 +88,7 @@ $lifecycleLoadObserved = $WithoutChronicle.IsPresent
 $gameStartObserved = $WithoutChronicle.IsPresent
 $mcmSettingsRegistered = $WithoutChronicle.IsPresent
 $mcmSettingPropertyIds = @()
+$mcmButtonPropertyIds = @()
 $validationButtonType = if ($WithoutChronicle) { 'not-tested' } else { 'missing' }
 $startupFault = $null
 $startupDialogReceipts = [System.Collections.Generic.List[object]]::new()
@@ -143,9 +144,10 @@ while ((Get-Date) -lt $deadline) {
         $mcmSettingsLines = @($newDiagnosticLines | Where-Object { $_ -match '\|harness-mcm-settings\|' })
         if ($mcmSettingsLines.Count -gt 0) {
             $mcmSettingsLine = [string]$mcmSettingsLines[-1]
-            if ($mcmSettingsLine -match '\|propertyIds=([^|]*)\|validationButtonType=([^|\r\n]*)') {
+            if ($mcmSettingsLine -match '\|propertyIds=([^|]*)\|buttonPropertyIds=([^|]*)\|validationButtonType=([^|\r\n]*)') {
                 $mcmSettingPropertyIds = @($Matches[1] -split ',' | Where-Object { $_ })
-                $validationButtonType = [string]$Matches[2]
+                $mcmButtonPropertyIds = @($Matches[2] -split ',' | Where-Object { $_ })
+                $validationButtonType = [string]$Matches[3]
             }
             $mcmSettingsRegistered = [bool]($mcmSettingsLine -match '\|loaded=True\|definition=True\|')
         }
@@ -213,6 +215,7 @@ $result = [ordered]@{
     GameStartObserved = $gameStartObserved
     McmSettingsRegistered = $mcmSettingsRegistered
     McmSettingPropertyIds = $mcmSettingPropertyIds
+    McmButtonPropertyIds = $mcmButtonPropertyIds
     McmValidationButtonType = $validationButtonType
     FinishedAll = $finishedAll
     CrashDetected = $crashDetected
@@ -235,8 +238,11 @@ $result.EvidenceResultPath = $resultPath
 $result | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $resultPath -Encoding UTF8
 $result | ConvertTo-Json
 
-$requiredMcmPropertyIds = @('OllamaBaseUrl', 'ModelId', 'ValidateLocalConfiguration')
-$mcmDefinitionComplete = $mcmSettingsRegistered -and $validationButtonType -eq 'Button' -and @($requiredMcmPropertyIds | Where-Object { $_ -notin $mcmSettingPropertyIds }).Count -eq 0
+$requiredMcmPropertyIds = @('OllamaBaseUrl', 'ModelId', 'ValidateLocalConfiguration', 'CampaignGoal', 'StartAgent', 'StopAgent', 'ViewAgentStatus')
+$requiredMcmButtonPropertyIds = @('ValidateLocalConfiguration', 'StartAgent', 'StopAgent', 'ViewAgentStatus')
+$mcmDefinitionComplete = $mcmSettingsRegistered -and $validationButtonType -eq 'Button' -and
+    @($requiredMcmPropertyIds | Where-Object { $_ -notin $mcmSettingPropertyIds }).Count -eq 0 -and
+    @($requiredMcmButtonPropertyIds | Where-Object { $_ -notin $mcmButtonPropertyIds }).Count -eq 0
 if (-not $finishedAll -or $crashDetected -or $processExitedUnexpectedly -or (-not $WithoutChronicle -and (-not $assemblyLoaded -or -not $lifecycleLoadObserved -or -not $mcmDefinitionComplete))) {
     exit 1
 }

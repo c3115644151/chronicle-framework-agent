@@ -24,6 +24,8 @@ public sealed class SubModule : MBSubModuleBase
     private bool _freshCampaignMusicReadyLogged;
     private bool _harnessMcmSettingsProbeCompleted;
     private float _harnessMcmSettingsProbeElapsed;
+    private bool _harnessAgentLifecycleStartRequested;
+    private float _harnessAgentLifecycleStartDelay;
     private static bool _harnessFocusLossEscapeMenuGuardInstalled;
     private static bool _harnessFocusLossEscapeMenuGuardWaitLogged;
 
@@ -173,6 +175,20 @@ public sealed class SubModule : MBSubModuleBase
     protected override void OnApplicationTick(float dt)
     {
         base.OnApplicationTick(dt);
+        ChronicleAgentRuntimeController.Tick();
+        if (!_harnessAgentLifecycleStartRequested &&
+            Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") == "agent-host-lifecycle-test" &&
+            Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_AUTO_START") == "1" &&
+            Campaign.Current != null && Game.Current?.GameStateManager?.ActiveState?.GetType().Name == "MapState")
+        {
+            _harnessAgentLifecycleStartDelay += dt;
+            if (_harnessAgentLifecycleStartDelay >= 2.5f)
+            {
+                _harnessAgentLifecycleStartRequested = true;
+                ChronicleDiagnostics.Write("harness-agent-lifecycle-auto-start");
+                  ChronicleAgentProviderSettings.Instance?.StartAgent?.Invoke();
+            }
+        }
         ProbeHarnessMcmSettingsRegistration(dt);
         TryInstallHarnessFocusLossEscapeMenuGuard();
         if (Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") == FreshCampaignHarness.Mode && !IsNativeCampaignMusicInitialized())
@@ -235,7 +251,13 @@ public sealed class SubModule : MBSubModuleBase
             var validationButtonType = definition?.SettingPropertyGroups
                 .SelectMany(group => group.SettingProperties)
                 .FirstOrDefault(property => property.Id == "ValidateLocalConfiguration")?.SettingType.ToString() ?? "missing";
-            ChronicleDiagnostics.Write($"harness-mcm-settings|loaded={(settings != null)}|definition={(definition != null)}|propertyIds={string.Join(",", propertyIds)}|validationButtonType={validationButtonType}");
+            var buttonPropertyIds = definition?.SettingPropertyGroups
+                .SelectMany(group => group.SettingProperties)
+                .Where(property => property.SettingType.ToString() == "Button")
+                .Select(property => property.Id)
+                .OrderBy(id => id, StringComparer.Ordinal)
+                .ToArray() ?? Array.Empty<string>();
+            ChronicleDiagnostics.Write($"harness-mcm-settings|loaded={(settings != null)}|definition={(definition != null)}|propertyIds={string.Join(",", propertyIds)}|buttonPropertyIds={string.Join(",", buttonPropertyIds)}|validationButtonType={validationButtonType}");
             _harnessMcmSettingsProbeCompleted = true;
         }
         catch (Exception exception)
@@ -248,6 +270,7 @@ public sealed class SubModule : MBSubModuleBase
     protected override void OnSubModuleUnloaded()
     {
         ChronicleDiagnostics.Write("submodule-unload");
+        ChronicleAgentRuntimeController.StopForSubModuleUnload();
         base.OnSubModuleUnloaded();
     }
 }

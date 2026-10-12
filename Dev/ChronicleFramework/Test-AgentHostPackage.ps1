@@ -94,9 +94,61 @@ function Invoke-PackagedHost([string]$ExecutablePath, [string]$Argument)
     catch { throw "Packaged Host command '$Argument' did not return JSON." }
 }
 
+function Invoke-PackagedHostUnboundParentProbe([string]$ExecutablePath)
+{
+    $probeRoot = Join-Path $evidenceRoot 'AgentHostUnboundParentProbe'
+    New-Item -ItemType Directory -Path $probeRoot -Force | Out-Null
+    $commandPath = Join-Path $probeRoot 'command.json'
+    $responseRoot = Join-Path $probeRoot 'responses'
+    $arguments = '--campaign-loop --protocol-root "' + $probeRoot + '"'
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $ExecutablePath
+    $startInfo.Arguments = $arguments
+    $startInfo.WorkingDirectory = $consumerWorkingDirectory
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardInput = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    if (-not $process.Start()) { throw 'Could not start packaged Host parent-identity probe.' }
+    try {
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $request = [ordered]@{
+            runId = 'parent-identity-negative-probe'
+            parentProcessId = 2147483000
+            parentProcessStartTimeUtcTicks = 1
+            goal = 'This request must be rejected before any Native or model work.'
+            maxDecisions = 1
+            maxElapsedSeconds = 1
+            allowedActionNames = @('mapSettlementTargets','move')
+        }
+        $process.StandardInput.WriteLine(($request | ConvertTo-Json -Compress))
+        $process.StandardInput.Close()
+        if (-not $process.WaitForExit(10000)) { throw 'Packaged Host did not reject an unbound Bannerlord parent within 10 seconds.' }
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        try { $errorReceipt = $stderr | ConvertFrom-Json }
+        catch { throw 'Packaged Host parent-identity rejection did not produce a readable error receipt.' }
+        if ($process.ExitCode -ne 2 -or $errorReceipt.error -ne 'campaign-parent-not-running' -or
+            (Test-Path -LiteralPath $commandPath) -or @(Get-ChildItem -LiteralPath $responseRoot -File -ErrorAction SilentlyContinue).Count -gt 0 -or
+            -not [string]::IsNullOrWhiteSpace($stdout)) {
+            throw 'An unbound parent must be rejected before Host writes a Native command, response, or normal output.'
+        }
+        return [ordered]@{ Passed = $true; ErrorCode = [string]$errorReceipt.error; NativeCommandWritten = $false; ResponseFilesWritten = $false }
+    }
+    finally {
+        if (-not $process.HasExited) { try { $process.Kill($true); $process.WaitForExit(1000) } catch { } }
+        $process.Dispose()
+    }
+}
+
 $packageHealth = Invoke-PackagedHost -ExecutablePath $hostExe -Argument '--package-health'
 $version = Invoke-PackagedHost -ExecutablePath $hostExe -Argument '--version'
 $providerSelfTest = Invoke-PackagedHost -ExecutablePath $hostExe -Argument '--provider-self-test'
+$unboundParentProbe = Invoke-PackagedHostUnboundParentProbe -ExecutablePath $hostExe
 foreach ($receipt in @($packageHealth, $version)) {
     if ($receipt.status -ne 'ready' -or $receipt.product -ne 'ChronicleAgentHost' -or
         $receipt.processArchitecture -ne 'X64' -or -not [bool]$receipt.is64BitProcess -or
@@ -111,6 +163,7 @@ if ([int]$providerSelfTest.modelCalls -ne 0 -or [int]$providerSelfTest.nativeCom
     @($providerSelfTest.scenarios | Where-Object { -not $_.passed }).Count -gt 0) {
     throw 'The packaged Host provider/decision-loop regression must complete without a live model or Native game command.'
 }
+if (-not [bool]$unboundParentProbe.Passed) { throw 'Packaged Host did not enforce its Bannerlord parent process identity before starting a campaign loop.' }
 
 $files = @(Get-ChildItem -LiteralPath $publishRoot -Recurse -File | Sort-Object FullName | ForEach-Object {
     [ordered]@{
@@ -148,6 +201,9 @@ $result = [ordered]@{
     SharedDecisionCycleScenarioCount = @($providerSelfTest.scenarios | Where-Object { $_.scenario -like 'shared-agent-host-decision-cycle-*' }).Count
     SelfTestModelCalls = [int]$providerSelfTest.modelCalls
     SelfTestNativeCommands = [int]$providerSelfTest.nativeCommands
+    UnboundParentRejected = [bool]$unboundParentProbe.Passed
+    UnboundParentErrorCode = [string]$unboundParentProbe.ErrorCode
+    UnboundParentNativeCommandWritten = [bool]$unboundParentProbe.NativeCommandWritten
     RestoreProxy = '127.0.0.1:7890'
     NuGetCacheRoot = $nugetRoot
     ConsumerWorkingDirectorySeparatedFromPackage = ($consumerWorkingDirectory -ne $publishRoot)

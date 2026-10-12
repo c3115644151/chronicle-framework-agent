@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.128'
+$contractVersion = '7.131'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -62,6 +62,8 @@ $agentOpenAiProviderSource = Get-Content (Join-Path $harnessRoot 'Agent-OpenAICo
 $agentOpenAiProviderTestSource = Get-Content (Join-Path $harnessRoot 'Test-AgentOpenAICompatibleProvider.ps1') -Raw -Encoding UTF8
 $agentEvaluationLiveModelSupplySource = Get-Content (Join-Path $harnessRoot 'Test-AgentEvaluationLiveModelSupply.ps1') -Raw -Encoding UTF8
 $agentHostCampaignLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostCampaignLoop.cs') -Raw -Encoding UTF8
+$agentHostRuntimeControllerSource = Get-Content (Join-Path $harnessRoot 'AgentHostRuntimeController.cs') -Raw -Encoding UTF8
+$agentHostLifecycleEvaluationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostLifecycleEvaluation.ps1') -Raw -Encoding UTF8
 $agentHostDecisionCycleSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostDecisionCycle.cs') -Raw -Encoding UTF8
 $agentHostCampaignLoopEvaluationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostCampaignLoopEvaluation.ps1') -Raw -Encoding UTF8
 $agentHostPackageSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostPackage.ps1') -Raw -Encoding UTF8
@@ -295,6 +297,13 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $sourceModuleManifest
     $providerSettingsSource -notmatch 'SettingPropertyButton' -or $providerSettingsSource -notmatch 'AgentProviderConfigurationValidator\.GetErrorCode' -or
     $providerSettingsSource -notmatch 'MBInformationManager\.AddQuickInformation' -or
     $providerSettingsSource -notmatch '(?s)public Action ValidateLocalConfiguration\s*\{\s*get => ShowConfigurationValidation;\s*set \{\s*\}\s*\}' -or
+    $providerSettingsSource -notmatch 'CampaignGoal' -or $providerSettingsSource -notmatch 'StartAgent' -or $providerSettingsSource -notmatch 'StopAgent' -or $providerSettingsSource -notmatch 'ViewAgentStatus' -or
+    $agentHostRuntimeControllerSource -notmatch 'ChronicleAgentHost\.exe' -or $agentHostRuntimeControllerSource -notmatch 'ResolveModuleRoot' -or
+    $agentHostRuntimeControllerSource -notmatch 'RequestStart' -or $agentHostRuntimeControllerSource -notmatch 'RequestStop' -or $agentHostRuntimeControllerSource -notmatch 'host-stop-requested' -or
+    $agentHostRuntimeControllerSource -notmatch 'Kill\(\)' -or $agentHostRuntimeControllerSource -notmatch 'IsOwnedLiveProcess' -or
+    $agentHostRuntimeControllerSource -notmatch 'CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS' -or
+    $agentHostLifecycleEvaluationSource -notmatch 'AgentHostPackage\.log' -or $agentHostLifecycleEvaluationSource -notmatch 'agent-host-process-started' -or
+    $agentHostLifecycleEvaluationSource -notmatch 'agent-host-process-exit' -or $agentHostLifecycleEvaluationSource -notmatch 'FixtureUnchanged' -or
     $providerValidatorSource -notmatch 'Uri\.IsLoopback' -or $agentHostProjectSource -notmatch 'AgentProviderConfigurationValidator\.cs' -or
     $providerProfileSource -notmatch 'AgentProviderConfigurationValidator\.GetErrorCode' -or
     $providerProfileTestSource -notmatch 'mcm-profile-rejects-remote-endpoint' -or
@@ -310,11 +319,44 @@ $subModuleSource = Get-Content (Join-Path $harnessRoot 'SubModule.cs') -Raw -Enc
 if ($harnessScript -notmatch "HarnessContractVersion\s*=\s*'$contractVersion'" -or
     $smokeModuleSource -notmatch 'HarnessShaderCacheDialog\.ps1' -or $smokeModuleSource -notmatch 'Invoke-ChronicleShaderCacheDialogAcknowledgement' -or
     $smokeModuleSource -notmatch 'StartupDialogSnapshots' -or $smokeModuleSource -notmatch 'SmokeResult\.json' -or
-    $smokeModuleSource -notmatch 'McmSettingsRegistered' -or $subModuleSource -notmatch 'ProbeHarnessMcmSettingsRegistration' -or
+    $smokeModuleSource -notmatch 'McmSettingsRegistered' -or $smokeModuleSource -notmatch 'requiredMcmButtonPropertyIds' -or
+    $smokeModuleSource -notmatch 'CampaignGoal' -or $smokeModuleSource -notmatch 'ViewAgentStatus' -or
+    $subModuleSource -notmatch 'ProbeHarnessMcmSettingsRegistration' -or
     $subModuleSource -notmatch 'BaseSettingsProvider\.Instance' -or $subModuleSource -notmatch 'ValidateLocalConfiguration' -or
+    $subModuleSource -notmatch 'ChronicleAgentRuntimeController\.Tick\(\)' -or $subModuleSource -notmatch 'StopForSubModuleUnload' -or
+    $subModuleSource -notmatch 'agent-host-lifecycle-test' -or
     $subModuleSource -notmatch 'harness-smoke-mode-active' -or
     $harnessScript -notmatch 'Smoke test failed with exit code \$smokeExitCode\. Evidence: \$smokeOutput') {
     throw 'Smoke startup checks must preserve dialog evidence and verify MCM registered Chronicle settings and the validation button.'
+}
+$agentHostProviderSource = Get-Content (Join-Path $harnessRoot 'AgentHost\OllamaNativeProvider.cs') -Raw -Encoding UTF8
+$agentHostProgramSource = Get-Content (Join-Path $harnessRoot 'AgentHost\Program.cs') -Raw -Encoding UTF8
+$agentHostCampaignLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostCampaignLoop.cs') -Raw -Encoding UTF8
+$agentHostSupplyLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostSupplyLoop.cs') -Raw -Encoding UTF8
+if ($agentHostProviderSource -notmatch 'CheckConfiguredModelAsync' -or $agentHostProviderSource -notmatch '/models' -or
+    $agentHostCampaignLoopSource -notmatch 'provider\.CheckConfiguredModelAsync' -or $agentHostSupplyLoopSource -notmatch 'provider\.CheckConfiguredModelAsync' -or
+    $agentHostProgramSource -notmatch 'WaitForStopSignalAsync' -or $agentHostProgramSource -notmatch 'ReadLineAsync\(cancellationToken\)' -or
+    $agentHostProgramSource -notmatch 'control.*stop' -or $agentHostCampaignLoopSource -notmatch 'native-action-result-ambiguous' -or
+    $agentHostCampaignLoopSource -notmatch 'host-stop-requested' -or
+    $agentHostProgramSource -notmatch 'OpenBoundParentProcess' -or $agentHostProgramSource -notmatch 'WaitForParentExitAsync' -or
+    $agentHostProgramSource -notmatch 'MarkParentExited' -or $agentHostCampaignLoopSource -notmatch 'native-parent-process-mismatch' -or
+    $agentHostCampaignLoopSource -notmatch 'onReady\?\.Invoke\(nativeProcessId\)') {
+    throw 'Host lifecycle must bind to the launching Bannerlord PID/start time, handshake against the current Native PID before ready, monitor game exit, accept only explicit stop control, and fail safely without replay after an ambiguous action.'
+}
+$agentHostLifecycleHarness = Get-Content (Join-Path $harnessRoot 'Test-AgentHostLifecycleEvaluation.ps1') -Raw -Encoding UTF8
+if ($harnessScript -notmatch "'AgentHostLifecycleEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostLifecycleEvaluation'\) \}" -or
+    $harnessScript -match "'All' \{[^\r\n]*'AgentHostLifecycleEvaluation'" -or
+    $agentHostLifecycleHarness -notmatch 'agent-host-lifecycle-test' -or $agentHostLifecycleHarness -notmatch 'AgentBridgeLifecycle' -or
+    $agentHostLifecycleHarness -notmatch 'NativeGoalActionsBeforeStop' -or $agentHostLifecycleHarness -notmatch 'NativeHandshakeVerified' -or
+    $agentHostLifecycleHarness -notmatch 'CHRONICLE_HARNESS_AGENT_NO_MODEL' -or $agentHostLifecycleHarness -notmatch 'CliSessionCleaned' -or
+    $agentHostProgramSource -notmatch 'IsAuthorizedLifecycleNoModelMode' -or $agentHostProgramSource -notmatch 'LifecycleIdleDecisionProvider' -or
+    $agentHostRuntimeControllerSource -notmatch 'AgentHostReadyProtocol\.TryParse' -or
+    $agentHostProgramSource -notmatch 'AgentHostReadyProtocol\.Format' -or
+    $agentHostRuntimeControllerSource -notmatch 'ReadLineAsync\(\)\.ConfigureAwait\(false\)' -or
+    $agentHostRuntimeControllerSource -notmatch '!_hostOutput\.IsCompleted' -or
+    $subModuleSource -notmatch 'Instance\?\.StartAgent\?\.Invoke\(\)' -or
+    $agentHostRuntimeControllerSource -notmatch 'Instance\?\.StopAgent') {
+    throw 'Agent Host lifecycle verification must remain opt-in, use a disposable Campaign, exercise the registered MCM action delegates, require a versioned Native-PID handshake before Running, stop safely, and preserve source fixture/process cleanup.'
 }
 $agentHostPackageSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostPackage.ps1') -Raw -Encoding UTF8
 $agentHostProgramSource = Get-Content (Join-Path $harnessRoot 'AgentHost\Program.cs') -Raw -Encoding UTF8
@@ -325,6 +367,8 @@ if ($harnessScript -notmatch "'AgentHostPackage'\s*\{ @\('Preflight', 'Build', '
     $agentHostPackageSource -notmatch 'D:\\ChronicleFramework\\BuildCache\\Packages' -or $agentHostPackageSource -notmatch 'package staging must be outside the source repository' -or
     $agentHostPackageSource -notmatch 'BaseOutputPath' -or
     $agentHostPackageSource -notmatch 'ChronicleAgentHost\.exe' -or $agentHostPackageSource -notmatch 'AgentHostPackageManifest\.json' -or
+    $agentHostPackageSource -notmatch 'Invoke-PackagedHostUnboundParentProbe' -or $agentHostPackageSource -notmatch 'UnboundParentRejected' -or
+    $agentHostProviderSelfTestSource -notmatch 'RunParentProcessContractSelfTestsAsync' -or $agentHostProgramSource -notmatch 'campaign-parent-not-running' -or
     $agentHostProgramSource -notmatch '--package-health' -or $agentHostProgramSource -notmatch '--version') {
     throw 'Agent Host packaging must be an opt-in win-x64 self-contained publish, use D: NuGet cache/proxy port 7890, and directly verify the packaged Host without the .NET CLI.'
 }

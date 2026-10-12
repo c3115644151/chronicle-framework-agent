@@ -16,6 +16,18 @@ internal static class ProviderContractSelfTest
         var results = new List<object>();
         results.AddRange(AgentHostCampaignLoop.RunContractSelfTests());
         results.AddRange(await AgentHostCampaignLoop.RunTransportSelfTestsAsync());
+        results.AddRange(await Program.RunParentProcessContractSelfTestsAsync());
+        var readyLine = AgentHostReadyProtocol.Format(321, "mcm-test", "0.1.0+test");
+        if (!AgentHostReadyProtocol.TryParse(readyLine, out var readyPid, out var readyRunId, out var readyVersion) ||
+            readyPid != 321 || readyRunId != "mcm-test" || readyVersion != "0.1.0+test" ||
+            AgentHostReadyProtocol.TryParse(readyLine.Replace("|1|", "|2|"), out _, out _, out _) ||
+            AgentHostReadyProtocol.TryParse(readyLine + "|extra", out _, out _, out _))
+            throw new AgentHostException("host-ready-protocol-self-test-failed", "Shared Mod/Host readiness framing failed identity round-trip or accepted an invalid frame.");
+        results.Add(new { scenario = "shared-mod-host-ready-identity-roundtrip-and-invalid-frame-rejection", passed = true });
+        if (!await Program.WaitForStopSignalAsync(new StringReader("not-json\n{\"control\":\"stop\"}\n"), CancellationToken.None) ||
+            await Program.WaitForStopSignalAsync(new StringReader("{\"control\":\"pause\"}\n"), CancellationToken.None))
+            throw new AgentHostException("agent-host-stop-control-self-test-failed", "Only an explicit stop control line may cancel the persistent Campaign Host.");
+        results.Add(new { scenario = "agent-host-stdin-accepts-only-explicit-stop-control", passed = true });
         var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
         var expectedGlobalProfilePath = Path.Combine(documents, "Mount and Blade II Bannerlord", "Configs", "ModSettings", "Global", "ChronicleFramework", "ChronicleAgentSettings.json");
         if (!string.Equals(AgentProviderProfile.GetDefaultPath(), expectedGlobalProfilePath, StringComparison.OrdinalIgnoreCase))
@@ -58,6 +70,29 @@ internal static class ProviderContractSelfTest
             Thinking: false,
             ReasoningEffort: "none",
             MaxTokenParameter: "max_completion_tokens");
+
+        var healthHandler = new StubHandler((_, _) => Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"test-local-model\"}]}")));
+        using (var healthClient = new HttpClient(healthHandler) { Timeout = settings.Timeout })
+        using (var provider = new OllamaNativeProvider(settings, healthClient))
+        {
+            await provider.CheckConfiguredModelAsync(CancellationToken.None);
+            if (healthHandler.LastRequestMethod != HttpMethod.Get || healthHandler.LastRequestUri?.AbsolutePath != "/v1/models")
+                throw new AgentHostException("provider-health-self-test-request-failed", "Startup health check must make a read-only GET to the local model catalog, not generate model output.");
+            results.Add(new { scenario = "local-provider-health-check-is-read-only-model-list", passed = true });
+        }
+
+        await ExpectProviderHealthErrorAsync(settings, JsonResponse("{\"data\":[{\"id\":\"different-model\"}]}"), "provider-model-unavailable", "local-provider-health-rejects-missing-model");
+        using (var unavailableClient = new HttpClient(new StubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)))) { Timeout = settings.Timeout })
+        using (var provider = new OllamaNativeProvider(settings, unavailableClient))
+        {
+            try
+            {
+                await provider.CheckConfiguredModelAsync(CancellationToken.None);
+                throw new AgentHostException("provider-health-self-test-http-accepted", "The local health check accepted an HTTP error.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-unavailable") { }
+            results.Add(new { scenario = "local-provider-health-distinguishes-http-rejection", passed = true });
+        }
 
         await VerifySharedDecisionCycleAsync(settings, "mapSettlementTargets", "CampaignSystemPrompt", AgentHostDecisionCycle.DecideCampaignAsync, results);
         await VerifySharedDecisionCycleAsync(settings, "foodOptions", "SupplySystemPrompt", AgentHostDecisionCycle.DecideSupplyAsync, results);
@@ -211,6 +246,14 @@ internal static class ProviderContractSelfTest
                 if (provider.ModelId != "test-local-model" || provider.ConfigurationSource != "harness-mcm-profile-fixture")
                     throw new AgentHostException("provider-profile-override-self-test-failed", "The Host did not load the authorized MCM profile fixture.");
                 results.Add(new { scenario = "host-loads-authorized-harness-mcm-profile", passed = true });
+            }
+
+            Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "agent-host-lifecycle-test");
+            using (var lifecycleProvider = OllamaNativeProvider.FromConfiguredProfile())
+            {
+                if (lifecycleProvider.ModelId != "test-local-model" || lifecycleProvider.ConfigurationSource != "harness-mcm-profile-fixture")
+                    throw new AgentHostException("provider-profile-override-self-test-failed", "The Host lifecycle test did not load its authorized temporary MCM profile.");
+                results.Add(new { scenario = "lifecycle-test-loads-only-its-authorized-temporary-profile", passed = true });
             }
 
             Environment.SetEnvironmentVariable("CHRONICLE_AGENT_PROFILE_PATH", outsideProfilePath);
@@ -378,6 +421,19 @@ internal static class ProviderContractSelfTest
         results.Add(new { scenario = "shared-agent-host-decision-cycle-" + (expectedPromptMember == "SupplySystemPrompt" ? "supply" : "campaign"), passed = true, action = actionName });
     }
 
+    private static async Task ExpectProviderHealthErrorAsync(OllamaProviderSettings settings, HttpResponseMessage response, string expectedCode, string scenario)
+    {
+        using var handler = new StubHandler((_, _) => Task.FromResult(response));
+        using var client = new HttpClient(handler) { Timeout = settings.Timeout };
+        using var provider = new OllamaNativeProvider(settings, client);
+        try
+        {
+            await provider.CheckConfiguredModelAsync(CancellationToken.None);
+            throw new AgentHostException("provider-health-self-test-error-missing", $"The provider health check did not reject {scenario}.");
+        }
+        catch (AgentHostException exception) when (exception.Code == expectedCode) { }
+    }
+
     private static string BuildChatResponse(string content, string finishReason) => JsonSerializer.Serialize(new
     {
         model = "test-local-model",
@@ -436,6 +492,7 @@ internal static class ProviderContractSelfTest
     {
         private readonly Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _responseFactory;
         internal string? LastRequestBody { get; private set; }
+        internal HttpMethod? LastRequestMethod { get; private set; }
         internal Uri? LastRequestUri { get; private set; }
         internal AuthenticationHeaderValue? LastAuthorization { get; private set; }
 
@@ -443,6 +500,7 @@ internal static class ProviderContractSelfTest
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            LastRequestMethod = request.Method;
             LastRequestUri = request.RequestUri;
             LastAuthorization = request.Headers.Authorization;
             LastRequestBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);

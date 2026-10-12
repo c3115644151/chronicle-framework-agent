@@ -71,7 +71,7 @@ internal static class AgentHostCampaignLoop
 
     internal static async Task<IReadOnlyList<object>> RunTransportSelfTestsAsync()
     {
-        var requestJson = "{\"runId\":\"selftest-arrival\",\"goal\":\"Reach the observed safe settlement.\",\"maxDecisions\":8,\"maxElapsedSeconds\":10,\"allowedActionNames\":[\"mapSettlementTargets\",\"move\"]}";
+        var requestJson = "{\"runId\":\"selftest-arrival\",\"goal\":\"Reach the observed safe settlement.\",\"parentProcessId\":321,\"maxDecisions\":8,\"maxElapsedSeconds\":10,\"allowedActionNames\":[\"mapSettlementTargets\",\"move\"]}";
         using var request = JsonDocument.Parse(requestJson);
         var results = new List<object>();
 
@@ -98,21 +98,27 @@ internal static class AgentHostCampaignLoop
         return results;
     }
 
-    internal static async Task<JsonObject> RunAsync(JsonElement request, string protocolRoot, CancellationToken cancellationToken)
+    internal static async Task<JsonObject> RunAsync(
+        JsonElement request,
+        string protocolRoot,
+        CancellationToken cancellationToken,
+        Action<int>? onReady = null)
     {
         var nativeTimeoutSeconds = ReadIntEnvironment("CHRONICLE_LLM_TIMEOUT_SECONDS", 180, 5, 240);
         var client = new NativeMailboxClient(protocolRoot, TimeSpan.FromSeconds(nativeTimeoutSeconds));
-        var provider = OllamaNativeProvider.FromConfiguredProfile();
-        return await RunAsync(request, client, provider, cancellationToken);
+        var provider = Program.CreateCampaignDecisionProvider();
+        return await RunAsync(request, client, provider, cancellationToken, onReady);
     }
 
     internal static async Task<JsonObject> RunAsync(
         JsonElement request,
         IAgentHostCampaignNativeClient client,
         IAgentHostDecisionProvider provider,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<int>? onReady = null)
     {
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
+        var expectedParentProcessId = ReadInt(request, "parentProcessId", 0);
         var goal = ReadString(request, "goal");
         var maxDecisions = ReadInt(request, "maxDecisions", 30);
         var maxElapsedSeconds = ReadInt(request, "maxElapsedSeconds", 600);
@@ -144,15 +150,22 @@ internal static class AgentHostCampaignLoop
         var completedByProvider = false;
         string? terminationReason = null;
         string? failure = null;
+        string? failureCode = null;
         string? failureExceptionType = null;
         string? hostFailureStack = null;
+        string? nativeActionInFlight = null;
         var loopStartedTicks = Stopwatch.GetTimestamp();
 
         try
         {
+            await provider.CheckConfiguredModelAsync(elapsed.Token);
             using (var initial = await client.ReadStateAsync(elapsed.Token)) currentNative = CloneObject(initial.RootElement);
-            if (ReadInt(currentNative, "processId", -1) <= 0)
+            var nativeProcessId = ReadInt(currentNative, "processId", -1);
+            if (nativeProcessId <= 0)
                 throw new AgentHostException("native-process-id-invalid", "The active Native state did not identify its Bannerlord process.");
+            if (expectedParentProcessId > 0 && nativeProcessId != expectedParentProcessId)
+                throw new AgentHostException("native-parent-process-mismatch", "The Native mailbox answered from a different Bannerlord process than the Host owner.");
+            onReady?.Invoke(nativeProcessId);
 
             for (var iteration = 1; iteration <= maxDecisions; iteration++)
             {
@@ -291,6 +304,7 @@ internal static class AgentHostCampaignLoop
                 var priorReceiptForStep = previousReceipt?.DeepClone() as JsonObject;
                 var actionStartedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
                 JsonObject nativeReceipt;
+                nativeActionInFlight = nativeAction;
                 try
                 {
                     using var response = await client.ExecuteCampaignActionAsync(nativeAction!, nativeArguments!, elapsed.Token);
@@ -298,6 +312,7 @@ internal static class AgentHostCampaignLoop
                 }
                 catch (AgentHostException exception) when (exception.Code == "native-command-timeout")
                 {
+                    nativeActionInFlight = null;
                     failure = "The Native action result timed out and may be ambiguous; Host stopped without resubmitting it.";
                     terminationReason = "native-action-result-ambiguous";
                     nativeReceipt = new JsonObject { ["action"] = nativeAction, ["status"] = "timeout-ambiguous", ["error"] = exception.Code };
@@ -305,6 +320,7 @@ internal static class AgentHostCampaignLoop
                     break;
                 }
 
+                nativeActionInFlight = null;
                 var actionDoneUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
                 var actionCompleted = string.Equals(ReadString(nativeReceipt, "status"), "completed", StringComparison.Ordinal);
                 actionsExecuted += actionCompleted ? 1 : 0;
@@ -332,13 +348,18 @@ internal static class AgentHostCampaignLoop
         }
         catch (OperationCanceledException)
         {
-            failure = "The bounded Campaign loop was canceled or exceeded its time limit.";
-            terminationReason = "campaign-loop-timeout";
+            var stopRequested = cancellationToken.IsCancellationRequested;
+            var actionResultIsAmbiguous = stopRequested && nativeActionInFlight != null;
+            failure = actionResultIsAmbiguous
+                ? "Stop arrived while a Native action was in flight; its result is uncertain and Host will not replay it."
+                : stopRequested ? "Host stop was requested; no further Native action will be issued." : "The bounded Campaign loop exceeded its time limit.";
+            terminationReason = actionResultIsAmbiguous ? "native-action-result-ambiguous" : stopRequested ? "host-stop-requested" : "campaign-loop-timeout";
             failureExceptionType = nameof(OperationCanceledException);
         }
         catch (Exception exception)
         {
             failure = exception.Message;
+            failureCode = exception is AgentHostException hostException ? hostException.Code : null;
             terminationReason = "campaign-loop-failed";
             failureExceptionType = exception.GetType().Name;
             hostFailureStack = exception.StackTrace;
@@ -359,6 +380,7 @@ internal static class AgentHostCampaignLoop
             ["completionTokens"] = completionTokens,
             ["termination"] = new JsonObject { ["reason"] = terminationReason, ["completedByProvider"] = completedByProvider, ["goalVerified"] = goalVerified },
             ["failure"] = failure,
+            ["failureCode"] = failureCode,
             ["failureExceptionType"] = failureExceptionType,
             ["hostFailureStack"] = hostFailureStack,
             ["trace"] = trace
@@ -661,6 +683,12 @@ internal static class AgentHostCampaignLoop
         internal int CallCount { get; private set; }
         public string ModelId => "deterministic-campaign-loop-self-test";
         public string ConfigurationSource => "harness-fake-provider";
+
+        public Task CheckConfiguredModelAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        }
 
         public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
         {

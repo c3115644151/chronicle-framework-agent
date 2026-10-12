@@ -83,7 +83,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
 
     internal static OllamaNativeProvider FromConfiguredProfile()
     {
-        if (string.Equals(Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE"), "visual-capture", StringComparison.Ordinal) &&
+        if (Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") is string harnessMode &&
+            (string.Equals(harnessMode, "visual-capture", StringComparison.Ordinal) || string.Equals(harnessMode, "agent-host-lifecycle-test", StringComparison.Ordinal)) &&
             !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CHRONICLE_AGENT_PROFILE_PATH")))
         {
             var overridePath = Path.GetFullPath(Environment.GetEnvironmentVariable("CHRONICLE_AGENT_PROFILE_PATH")!);
@@ -120,6 +121,60 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
 
     Task<ProviderDecisionResult> IAgentHostDecisionProvider.DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken) =>
         DecideAsync(request, systemPrompt, cancellationToken);
+
+    Task IAgentHostDecisionProvider.CheckConfiguredModelAsync(CancellationToken cancellationToken) => CheckConfiguredModelAsync(cancellationToken);
+
+    internal async Task CheckConfiguredModelAsync(CancellationToken cancellationToken)
+    {
+        var endpointPath = _settings.Endpoint.AbsolutePath;
+        const string completionSuffix = "/chat/completions";
+        if (!endpointPath.EndsWith(completionSuffix, StringComparison.OrdinalIgnoreCase))
+            throw new AgentHostException("provider-health-endpoint-invalid", "The configured local provider URL does not have the supported chat-completions path.");
+
+        var modelsUriBuilder = new UriBuilder(_settings.Endpoint)
+        {
+            Path = endpointPath[..^completionSuffix.Length] + "/models",
+            Query = string.Empty,
+            Fragment = string.Empty
+        };
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(8));
+        try
+        {
+            using var response = await _client.GetAsync(modelsUriBuilder.Uri, HttpCompletionOption.ResponseContentRead, timeout.Token);
+            if (!response.IsSuccessStatusCode)
+                throw new AgentHostException("provider-unavailable", "The local model service rejected its model-list health check.");
+
+            var bytes = await response.Content.ReadAsByteArrayAsync(timeout.Token);
+            if (bytes.Length is <= 0 or > 128 * 1024)
+                throw new AgentHostException("provider-health-response-invalid", "The local model service returned an empty or oversized model-list response.");
+
+            using var document = JsonDocument.Parse(bytes);
+            if (!document.RootElement.TryGetProperty("data", out var models) || models.ValueKind != JsonValueKind.Array)
+                throw new AgentHostException("provider-health-response-invalid", "The local model service returned an unsupported model-list response.");
+
+            var modelFound = models.EnumerateArray().Any(model => string.Equals(ReadString(model, "id"), _settings.Model, StringComparison.Ordinal));
+            if (!modelFound)
+                throw new AgentHostException("provider-model-unavailable", "The configured model is not listed by the local model service.");
+        }
+        catch (AgentHostException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new AgentHostException("provider-health-timeout", "The local model service did not answer its bounded health check.", exception);
+        }
+        catch (HttpRequestException exception)
+        {
+            throw new AgentHostException("provider-unavailable", "The configured local model service could not be reached.", exception);
+        }
+        catch (JsonException exception)
+        {
+            throw new AgentHostException("provider-health-response-invalid", "The local model service returned malformed model-list data.", exception);
+        }
+    }
 
     internal async Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
     {
