@@ -194,15 +194,22 @@ internal static class ProviderContractSelfTest
             results.Add(new { scenario = "listed-action-returned-through-control-field", passed = true });
         }
 
-        var earlyStopHandler = new StubHandler((_, _) => Task.FromResult(JsonResponse(BuildChatResponse(ValidDecision, "stop"))));
-        using (var earlyStopClient = new HttpClient(earlyStopHandler) { Timeout = settings.Timeout })
-        using (var provider = new OllamaNativeProvider(settings, earlyStopClient))
+        var emptyCatalogHandler = new StubHandler((_, _) => Task.FromResult(JsonResponse(BuildChatResponse(ValidDecision, "stop"))));
+        using (var emptyCatalogClient = new HttpClient(emptyCatalogHandler) { Timeout = settings.Timeout })
+        using (var provider = new OllamaNativeProvider(settings, emptyCatalogClient))
         using (var request = JsonDocument.Parse(BuildDecisionRequestWithoutDoneControl()))
         {
-            var result = await provider.DecideAsync(request.RootElement, CancellationToken.None);
-            if (result.Decision["done"]?.GetValue<bool>() != true)
-                throw new AgentHostException("provider-self-test-stop-proposal-failed", "A done proposal must reach the Host completion verifier even when not yet allowed to stop.");
-            results.Add(new { scenario = "premature-done-is-a-verifiable-proposal-not-a-game-action", passed = true });
+            try
+            {
+                _ = await provider.DecideAsync(request.RootElement, CancellationToken.None);
+                throw new AgentHostException("provider-self-test-empty-catalog-accepted", "The Provider attempted a model call without a Native action or control.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-decision-catalog-empty")
+            {
+                if (emptyCatalogHandler.LastRequestBody is not null)
+                    throw new AgentHostException("provider-self-test-empty-catalog-requested", "An empty Native catalog must not produce a model request.");
+            }
+            results.Add(new { scenario = "empty-native-catalog-stops-before-model-call", passed = true });
         }
 
         var menuAliasHandler = new StubHandler((_, _) => Task.FromResult(JsonResponse(BuildChatResponse("{\"action\":\"trade\",\"arguments\":{},\"rationale\":\"Select the visible trade menu.\"}", "stop"))));
@@ -635,10 +642,12 @@ internal static class ProviderContractSelfTest
         using var document = JsonDocument.Parse(body);
         var root = document.RootElement;
         if (root.GetProperty("model").GetString() != "test-local-model" ||
-            root.GetProperty("response_format").GetProperty("type").GetString() != "json_object" ||
+            root.GetProperty("response_format").GetProperty("type").GetString() != "json_schema" ||
+            root.GetProperty("response_format").GetProperty("json_schema").GetProperty("schema").GetProperty("oneOf").GetArrayLength() != 1 ||
+            root.GetProperty("response_format").GetProperty("json_schema").GetProperty("schema").GetProperty("oneOf")[0].GetProperty("properties").GetProperty("control").GetProperty("const").GetString() != "done" ||
             root.GetProperty("max_completion_tokens").GetInt32() != 128 ||
             root.GetProperty("store").GetBoolean())
-            throw new AgentHostException("provider-self-test-request-failed", "Provider request did not retain the bounded local structured-output contract.");
+            throw new AgentHostException("provider-self-test-request-failed", "Provider request did not constrain its local response to the current decision catalog.");
     }
 
     private static void ValidateLocalEndpoint(Uri? uri)
@@ -657,9 +666,9 @@ internal static class ProviderContractSelfTest
         using var document = JsonDocument.Parse(body);
         var root = document.RootElement;
         if (root.GetProperty("model").GetString() != "test-local-model" ||
-            root.GetProperty("stream").GetBoolean() || root.GetProperty("format").GetString() != "json" ||
+            root.GetProperty("stream").GetBoolean() || root.GetProperty("format").GetProperty("oneOf").GetArrayLength() != 1 ||
             root.GetProperty("options").GetProperty("num_predict").GetInt32() != 128)
-            throw new AgentHostException("provider-self-test-native-request-failed", "Native Ollama request did not preserve the bounded structured-output contract.");
+            throw new AgentHostException("provider-self-test-native-request-failed", "Native Ollama request did not constrain output to the current decision catalog.");
     }
 
     private sealed class StubHandler : HttpMessageHandler

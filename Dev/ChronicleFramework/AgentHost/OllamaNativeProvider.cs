@@ -201,7 +201,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         if (_settings.NativeOllama)
         {
             payload["stream"] = false;
-            payload["format"] = "json";
+            payload["format"] = BuildDecisionSchema(request);
             var options = new Dictionary<string, object?> { ["num_predict"] = _settings.MaxOutputTokens };
             if (_settings.Temperature.HasValue) options["temperature"] = _settings.Temperature.Value;
             payload["options"] = options;
@@ -209,7 +209,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         }
         else
         {
-            payload["response_format"] = new { type = "json_object" };
+            payload["response_format"] = new { type = "json_schema", json_schema = new { schema = BuildDecisionSchema(request) } };
             payload["store"] = false;
             payload[_settings.MaxTokenParameter] = _settings.MaxOutputTokens;
             if (_settings.Thinking.HasValue) payload["thinking"] = new { type = _settings.Thinking.Value ? "enabled" : "disabled" };
@@ -321,6 +321,80 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     public void Dispose()
     {
         if (_ownsClient) _client.Dispose();
+    }
+
+    private static JsonObject BuildDecisionSchema(JsonElement request)
+    {
+        var alternatives = new JsonArray();
+        if (request.TryGetProperty("allowedActions", out var actions) && actions.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var action in actions.EnumerateArray())
+            {
+                var actionName = ReadString(action, "action");
+                if (string.IsNullOrWhiteSpace(actionName)) continue;
+                var argumentNames = action.TryGetProperty("arguments", out var arguments) && arguments.ValueKind == JsonValueKind.Array
+                    ? arguments.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String).Select(item => item.GetString()!).Distinct(StringComparer.Ordinal).ToArray()
+                    : Array.Empty<string>();
+                var argumentProperties = new JsonObject();
+                foreach (var argumentName in argumentNames)
+                {
+                    var valueType = argumentName switch
+                    {
+                        "ConfirmPartySizeWarning" => "boolean",
+                        "Days" or "Count" or "VolunteerSlot" or "Amount" => "integer",
+                        _ => "string"
+                    };
+                    argumentProperties[argumentName] = new JsonObject { ["type"] = valueType };
+                }
+                var requiredArgumentNames = new JsonArray();
+                foreach (var argumentName in argumentNames) requiredArgumentNames.Add(argumentName);
+                var branch = new JsonObject
+                {
+                    ["type"] = "object",
+                    ["properties"] = new JsonObject
+                    {
+                        ["action"] = new JsonObject { ["type"] = "string", ["const"] = actionName },
+                        ["arguments"] = new JsonObject { ["type"] = "object", ["properties"] = argumentProperties, ["required"] = requiredArgumentNames, ["additionalProperties"] = false },
+                        ["rationale"] = new JsonObject { ["type"] = "string" }
+                    },
+                    ["required"] = new JsonArray("action", "arguments", "rationale"),
+                    ["additionalProperties"] = false
+                };
+                alternatives.Add(branch);
+            }
+        }
+
+        if (request.TryGetProperty("allowedControls", out var controls) && controls.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var controlItem in controls.EnumerateArray())
+            {
+                if (controlItem.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(controlItem.GetString())) continue;
+                var controlName = controlItem.GetString()!;
+                var properties = new JsonObject
+                {
+                    ["control"] = new JsonObject { ["type"] = "string", ["const"] = controlName }
+                };
+                var required = new JsonArray("control");
+                if (string.Equals(controlName, "observeAgain", StringComparison.Ordinal))
+                {
+                    properties["waitSeconds"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 10 };
+                    required.Add("waitSeconds");
+                }
+                properties["reason"] = new JsonObject { ["type"] = "string" };
+                required.Add("reason");
+                alternatives.Add(new JsonObject
+                {
+                    ["type"] = "object",
+                    ["properties"] = properties,
+                    ["required"] = required,
+                    ["additionalProperties"] = false
+                });
+            }
+        }
+
+        if (alternatives.Count == 0)
+            throw new AgentHostException("provider-decision-catalog-empty", "The local model was not called because Native listed no action or control.");
+        return new JsonObject { ["oneOf"] = alternatives };
     }
 
     internal static JsonObject NormalizeDecision(JsonElement decision, JsonElement request)
