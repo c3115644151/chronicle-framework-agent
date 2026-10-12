@@ -323,7 +323,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         if (_ownsClient) _client.Dispose();
     }
 
-    private static JsonObject BuildDecisionSchema(JsonElement request)
+    internal static JsonObject BuildDecisionSchema(JsonElement request)
     {
         var alternatives = new JsonArray();
         if (request.TryGetProperty("allowedActions", out var actions) && actions.ValueKind == JsonValueKind.Array)
@@ -344,7 +344,14 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                         "Days" or "Count" or "VolunteerSlot" or "Amount" => "integer",
                         _ => "string"
                     };
-                    argumentProperties[argumentName] = new JsonObject { ["type"] = valueType };
+                    var argumentSchema = new JsonObject { ["type"] = valueType };
+                    if (action.TryGetProperty("argumentValues", out var argumentValues) &&
+                        argumentValues.ValueKind == JsonValueKind.Object && argumentValues.TryGetProperty(argumentName, out var values) &&
+                        values.ValueKind == JsonValueKind.Array && values.EnumerateArray().All(item => item.ValueKind == JsonValueKind.String))
+                    {
+                        argumentSchema["enum"] = JsonNode.Parse(values.GetRawText());
+                    }
+                    argumentProperties[argumentName] = argumentSchema;
                 }
                 var requiredArgumentNames = new JsonArray();
                 foreach (var argumentName in argumentNames) requiredArgumentNames.Add(argumentName);

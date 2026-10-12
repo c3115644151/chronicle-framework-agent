@@ -68,7 +68,21 @@ internal static class AgentHostVillageToolsQuestPolicy
                 .Where(option => IsTrue(option, "available") && IsTrue(option, "enabled") &&
                     (IsTrue(option, "isLeave") || (hasToolsQuest && IsTradeOption(option))))
                 .ToArray();
-            if (allowedMenuOptions.Length > 0) catalogWithQuestDetails.Add(new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonArray("OptionId") });
+            if (allowedMenuOptions.Length > 0)
+            {
+                var optionIds = new JsonArray();
+                foreach (var option in allowedMenuOptions)
+                {
+                    var optionId = ReadString(option, "id");
+                    if (!string.IsNullOrWhiteSpace(optionId)) optionIds.Add(optionId);
+                }
+                catalogWithQuestDetails.Add(new JsonObject
+                {
+                    ["action"] = "menuSelect",
+                    ["arguments"] = new JsonArray("OptionId"),
+                    ["argumentValues"] = new JsonObject { ["OptionId"] = optionIds }
+                });
+            }
             if (hasToolsQuest && !preDeliveryInventoryCaptured && IsToolsTaskSatisfied(previousReceipt))
                 catalogWithQuestDetails.Add(new JsonObject { ["action"] = "inventoryOpen", ["arguments"] = new JsonArray() });
             return catalogWithQuestDetails;
@@ -285,6 +299,19 @@ internal static class AgentHostVillageToolsQuestPolicy
             TryResolveAction(villageMenu, null, new JsonObject { ["action"] = "talkToSettlementHero", ["arguments"] = new JsonObject { ["HeroId"] = "hero-unrelated" } }, out _, out _, out _))
             throw new AgentHostException("village-tools-policy-self-test-visible-issue-marker-gate-failed", "The Host must only offer quick conversation for an observed available issue visibly matching the tools request.");
         results.Add(new { scenario = "village-tools-policy-talks-only-to-current-visible-tools-issue", passed = true });
+
+        var acceptedQuestMenu = State("MapState", "village", "village-1", quests: new JsonArray(new JsonObject { ["id"] = "quest-tools", ["title"] = "Village Needs Tools" }));
+        acceptedQuestMenu["state"]!["availableMenuOptions"] = new JsonArray(
+            new JsonObject { ["id"] = "village_center", ["available"] = true, ["enabled"] = true, ["isLeave"] = false },
+            new JsonObject { ["id"] = "trade", ["text"] = "Trade", ["available"] = true, ["enabled"] = true, ["isLeave"] = false },
+            new JsonObject { ["id"] = "leave", ["available"] = true, ["enabled"] = true, ["isLeave"] = true });
+        var acceptedMenuCatalog = BuildActionCatalog(acceptedQuestMenu, null);
+        var menuSelect = acceptedMenuCatalog.OfType<JsonObject>().FirstOrDefault(item => ReadString(item, "action") == "menuSelect");
+        var permittedMenuIds = (menuSelect?["argumentValues"]?["OptionId"] as JsonArray)?.Select(item => item?.GetValue<string>()).ToArray() ?? Array.Empty<string?>();
+        if (menuSelect is null || permittedMenuIds.Contains("village_center", StringComparer.Ordinal) ||
+            !permittedMenuIds.Contains("trade", StringComparer.Ordinal) || !permittedMenuIds.Contains("leave", StringComparer.Ordinal))
+            throw new AgentHostException("village-tools-policy-self-test-menu-option-catalog-failed", "The model schema must receive only the current menu options that the quest policy permits, not every visible option.");
+        results.Add(new { scenario = "village-tools-policy-exposes-exact-menu-option-ids", passed = true });
 
         var emptyConversation = State("MapState", null, null, null, conversation: new JsonObject { ["options"] = new JsonArray() });
         if (ReadString(BuildActionCatalog(emptyConversation, null)[0] as JsonObject, "action") != "dialogueContinue" ||

@@ -149,6 +149,7 @@ internal static class ProviderContractSelfTest
         await VerifyGoalClassificationAsync(settings, "supportedMapArrivalGoal", "provider-goal-classification-unavailable", ["unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "supportedVillageToolsQuestGoal", "provider-goal-classification-unavailable", ["supportedMapArrivalGoal", "unsupportedGoal"], results);
         VerifyProductionGoalClassificationCatalogNormalization(results);
+        VerifyDecisionSchemaBindsCurrentArgumentValues(results);
 
         var successHandler = new StubHandler((_, _) => Task.FromResult(JsonResponse(BuildChatResponse(ValidDecision, "stop"))));
         using (var successClient = new HttpClient(successHandler) { Timeout = settings.Timeout })
@@ -417,6 +418,19 @@ internal static class ProviderContractSelfTest
         }
         catch (AgentHostException exception) when (exception.Code == "provider-goal-classification-unavailable") { }
         results.Add(new { scenario = "production-json-goal-classification-catalog-normalization", passed = true });
+    }
+
+    private static void VerifyDecisionSchemaBindsCurrentArgumentValues(List<object> results)
+    {
+        using var request = JsonDocument.Parse("""
+            {"allowedActions":[{"action":"menuSelect","arguments":["OptionId"],"argumentValues":{"OptionId":["trade","leave"]}}],"allowedControls":[]}
+            """);
+        var schema = OllamaNativeProvider.BuildDecisionSchema(request.RootElement);
+        var enumValues = schema["oneOf"]![0]!["properties"]!["arguments"]!["properties"]!["OptionId"]!["enum"] as JsonArray;
+        if (enumValues is null || enumValues.Count != 2 || enumValues.Select(item => item?.GetValue<string>()).Any(value => value == "village_center") ||
+            !enumValues.Any(item => item?.GetValue<string>() == "trade") || !enumValues.Any(item => item?.GetValue<string>() == "leave"))
+            throw new AgentHostException("provider-decision-schema-value-gate-failed", "Structured output must constrain action arguments to values permitted by the current Native policy.");
+        results.Add(new { scenario = "decision-schema-constrains-arguments-to-current-native-policy-values", passed = true });
     }
 
     private static async Task ExpectProviderErrorAsync(
