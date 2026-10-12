@@ -202,6 +202,10 @@ W5-K在`TestResults/20261010-181412`以两次独立New Campaign完成：第1次�
 
 本地Provider需区分模型目录存在与推理可用。本机Ollama 0.40.1曾缺少`lib/ollama/llama-server.exe`及配套库，目录查询成功但推理进程无法创建。使用同版本官方Windows包修复，包SHA-256为`b394d14436d38032f23190e3f14eb2c6dad5ebbe4e192414f74c8fdca01703ab`，主程序与原安装文件哈希一致；旧库保留于`D:\Ollama\App\lib-incomplete-20261012`，未重下模型。原`qwen3.5:4b-q4_K_M`短推理返回OK（5.19秒、17 tokens），日志确认33/33层GPU加载；服务以`OLLAMA_NO_CLOUD=true`运行，日志在D盘BuildCache/OllamaRepair。此证据仅证明本机推理恢复。单次Provider时限现覆盖响应头与正文，无模型回归验证正文停滞返回`provider-timeout`；真实生命周期完成测试先做有界一token推理预检，避免运行库失效时启动游戏。目录探测本身仍只证明模型登记/服务可达。
 
+游戏内Start启动真实模型Host的地图到达切片已由`TestResults/20261012-184435`核验：commit `da02a1e`，本地4B Provider读取`mcm-start-request`当前快照，4次模型决策、2个Native命令（查询/移动），实际到达`town_V1`，模型done与Native目标一致，控制器进入Completed且Host退出码0。生命周期场景48.85秒，CampaignDay 91077.378→91077.400自然推进；9017输入/90输出tokens，源档hash未变、游戏/Host/session清理通过。早先正常终态曾被Console.In同步等待阻塞；包回归保持stdin打开验证修复，旧调用对照`183747`超时，修复`183822`通过。控制目录补齐observeAgain的整数waitSeconds 1–10约束后上述真实场景通过。该证据只覆盖一次附近聚落到达，不证明任意自由文本目标、完整生涯能力或实际MCM鼠标点击。
+
+游戏内Provider错误路径有独立运行证据：`TestResults/20261012-185348`的缺失模型与`185544`的无人监听loopback端口均只经过Starting→Failed，Host退出码1；对应脱敏failureCode为`provider-model-unavailable`与`provider-unavailable`。两者零生成tokens/零决策/零Host Native命令，无Ready事件，停止后游戏可查询、源档不变及进程/session清理通过。故障设置由严格生命周期Harness模式下的独立MCM设置对象传入，不修改或保存已注册的玩家设置；只写临时profile不能覆盖游戏内Start的当前快照，前一次`184954`夹具正因此未注入故障，已保留为失败证据。
+
 ### Campaign存档内的Agent目标Checkpoint
 
 本机1.4.8的`CampaignBehaviorBase.SyncData(IDataStore)`会随Native Campaign存档序列化行为字段；Chronicle用这一入口保存Campaign实例GUID和受限大小的Agent checkpoint JSON。`agentCheckpointGet/Set`是Mod/Host内部协议，不暴露给LLM动作白名单，并且只允许Campaign Map上下文；原版世界状态始终以读档后的新Observer结果为准，旧观察快照不是恢复真值。当前checkpoint v1包含目标、`schemaVersion`、Campaign实例ID、provider停止状态、最后一个已确认Native动作回执的紧凑摘要及最近状态摘要；`done`只记为`provider-stopped`，并不等同成功判定。`Agent-DecisionLoop -PersistCheckpoint`在新的Agent运行时写入目标并于每个原生动作/后验观察后更新；`-ResumeCheckpoint`先获取新Native state，再核对Campaign实例和checkpoint版本，将目标与receipt送回模型。若最后receipt只是只读`mapSettlementTargets`，恢复时安全地重新查询而不重复世界副作用。

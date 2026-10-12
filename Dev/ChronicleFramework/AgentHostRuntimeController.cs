@@ -237,6 +237,21 @@ internal static class ChronicleAgentRuntimeController
             FailStart("无法读取MCM配置");
             return;
         }
+        if (harnessSettings == null && IsLifecycleHarnessMode())
+        {
+            var failureFixture = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_FAILURE_CASE");
+            if (failureFixture == "MissingModel" || failureFixture == "ServiceUnavailable")
+            {
+                // Disposable settings instance: never alter or save the registered MCM singleton.
+                settings = new ChronicleAgentProviderSettings
+                {
+                    OllamaBaseUrl = failureFixture == "ServiceUnavailable" ? "http://127.0.0.1:11433/v1" : settings.OllamaBaseUrl,
+                    ModelId = failureFixture == "MissingModel" ? "chronicle-harness-model-not-installed" : settings.ModelId,
+                    CampaignGoal = settings.CampaignGoal
+                };
+                ChronicleDiagnostics.Write("harness-agent-provider-failure-case|case=" + failureFixture);
+            }
+        }
         var goal = settings.CampaignGoal;
         var harnessGoal = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_GOAL");
         if (harnessSettings == null && IsLifecycleHarnessMode() && !string.IsNullOrWhiteSpace(harnessGoal)) goal = harnessGoal;

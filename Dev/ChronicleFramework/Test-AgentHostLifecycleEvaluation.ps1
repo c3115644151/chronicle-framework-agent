@@ -2,7 +2,7 @@
 param(
     [ValidateRange(90,300)][int]$TimeoutSeconds = 180,
     [ValidateRange(250,10000)][int]$AutoStopAfterMilliseconds = 250,
-    [ValidateSet('Stop','Complete')][string]$Scenario = 'Stop',
+    [ValidateSet('Stop','Complete','MissingModel','ServiceUnavailable')][string]$Scenario = 'Stop',
     [string]$SaveName = 'AgentBridgeLifecycle'
 )
 
@@ -31,8 +31,16 @@ if (-not (Test-Path -LiteralPath $hostPath -PathType Leaf)) { throw 'The package
 if (Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue) { throw 'Refusing to start the lifecycle fixture while another Bannerlord process is running.' }
 if (Test-Path -LiteralPath $sessionPath -PathType Leaf) { throw 'Refusing to replace a stale Agent CLI session.' }
 
-$providerBaseUrl = 'http://127.0.0.1:11434/v1'
-$providerModelId = if ($Scenario -eq 'Complete') { 'qwen3.5:4b-q4_K_M' } else { 'harness-lifecycle-no-model' }
+$expectsFailure = $Scenario -in @('MissingModel','ServiceUnavailable')
+$providerBaseUrl = if ($Scenario -eq 'ServiceUnavailable') { 'http://127.0.0.1:11433/v1' } else { 'http://127.0.0.1:11434/v1' }
+$providerModelId = if ($Scenario -eq 'Stop') { 'harness-lifecycle-no-model' } elseif ($Scenario -eq 'MissingModel') { 'chronicle-harness-model-not-installed' } else { 'qwen3.5:4b-q4_K_M' }
+if ($Scenario -eq 'MissingModel') {
+    $catalog = Invoke-RestMethod -Uri ($providerBaseUrl + '/models') -TimeoutSec 5
+    if ($providerModelId -in $catalog.data.id) { throw 'Missing-model fixture unexpectedly exists; no game was started.' }
+}
+if ($Scenario -eq 'ServiceUnavailable' -and (Get-NetTCPConnection -LocalPort 11433 -State Listen -ErrorAction SilentlyContinue)) {
+    throw 'The unavailable-service fixture port is occupied; no game was started.'
+}
 if ($Scenario -eq 'Complete') {
     $catalog = Invoke-RestMethod -Uri ($providerBaseUrl + '/models') -TimeoutSec 5
     if ($providerModelId -notin $catalog.data.id) { throw 'The existing local 4b baseline model is unavailable; no game was started.' }
@@ -59,7 +67,7 @@ $profilePath = Join-Path $profileDirectory 'ChronicleAgentSettings.json'
 $fixtureHashBefore = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
 $hostResponseFilesBefore = @(Get-ChildItem -LiteralPath $responseRoot -File -Filter 'host-*.json' -ErrorAction SilentlyContinue | ForEach-Object Name)
 $priorValues = @{}
-foreach ($name in @('CHRONICLE_HARNESS_MODE','CHRONICLE_AGENT_PROFILE_PATH','CHRONICLE_AGENT_HOST_TEST_PATH','CHRONICLE_HARNESS_AGENT_AUTO_START','CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS','CHRONICLE_HARNESS_AGENT_GOAL','CHRONICLE_HARNESS_AGENT_NO_MODEL')) {
+foreach ($name in @('CHRONICLE_HARNESS_MODE','CHRONICLE_AGENT_PROFILE_PATH','CHRONICLE_AGENT_HOST_TEST_PATH','CHRONICLE_HARNESS_AGENT_AUTO_START','CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS','CHRONICLE_HARNESS_AGENT_GOAL','CHRONICLE_HARNESS_AGENT_NO_MODEL','CHRONICLE_HARNESS_AGENT_FAILURE_CASE')) {
     $priorValues[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
 $gameProcessId = 0
@@ -97,6 +105,7 @@ try {
     $env:CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS = if ($Scenario -eq 'Stop') { [string]$AutoStopAfterMilliseconds } else { '0' }
     $env:CHRONICLE_HARNESS_AGENT_GOAL = if ($Scenario -eq 'Stop') { 'Inspect the current Native Campaign state and wait for the explicit stop request without changing the Campaign.' } else { 'Reach a currently visible safe nearby settlement. Finish only when fresh Native state confirms arrival.' }
     $env:CHRONICLE_HARNESS_AGENT_NO_MODEL = if ($Scenario -eq 'Stop') { '1' } else { '0' }
+    $env:CHRONICLE_HARNESS_AGENT_FAILURE_CASE = if ($expectsFailure) { $Scenario } else { '' }
 
     $loadReceipt = Invoke-LifecycleCli 'load' @('-SaveName', $SaveName)
     if ($loadReceipt.status -ne 'completed' -or -not $loadReceipt.session.processId) { throw 'The lifecycle fixture did not reach its Native Campaign handshake.' }
@@ -135,20 +144,22 @@ try {
     }
     $duplicateStartVerified = (@($duplicateStartLines | Where-Object { $_ -match "\|hostPid=$hostProcessId\|unchanged=True" }).Count -eq 1 -and
         @($gameLines | Where-Object { $_ -match '\|agent-host-process-started\|' }).Count -eq 1)
-    if (-not $duplicateStartVerified) { throw 'Repeated MCM Start did not preserve exactly one owned Host process.' }
+    if (-not $expectsFailure -and -not $duplicateStartVerified) { throw 'Repeated MCM Start did not preserve exactly one owned Host process.' }
     $nativeHandshakeVerified = @($hostReadyEvents | Where-Object {
         $_ -match "\|agent-host-ready\|hostPid=$hostProcessId\|protocol=1\|version=.+"
     }).Count -eq 1
-    if (-not $nativeHandshakeVerified) { throw 'The controller did not verify a versioned Host handshake bound to the current Native Bannerlord process.' }
-    $expectedStates = if ($Scenario -eq 'Stop') { @('Starting','Running','Stopping','Stopped') } else { @('Starting','Running','Completed') }
+    if (-not $expectsFailure -and -not $nativeHandshakeVerified) { throw 'The controller did not verify a versioned Host handshake bound to the current Native Bannerlord process.' }
+    if ($expectsFailure -and $hostReadyEvents.Count -gt 0) { throw 'Host reported Ready before its failing provider health check.' }
+    $expectedStates = if ($expectsFailure) { @('Starting','Failed') } elseif ($Scenario -eq 'Stop') { @('Starting','Running','Stopping','Stopped') } else { @('Starting','Running','Completed') }
     foreach ($expectedState in $expectedStates) {
         if (@($states | Where-Object { $_ -match "\|state=$expectedState\|" }).Count -eq 0) {
             throw "The lifecycle controller did not report expected state: $expectedState"
         }
     }
     if (@(Get-Process -Id $hostProcessId -ErrorAction SilentlyContinue).Count -gt 0) { throw 'The Agent Host remained alive after its Stop result.' }
-    $expectedTerminalState = if ($Scenario -eq 'Stop') { 'Stopped' } else { 'Completed' }
-    if (@($hostExitEvents | Where-Object { $_ -match "\|pid=$hostProcessId\|exitCode=0\|state=$expectedTerminalState" }).Count -ne 1) {
+    $expectedTerminalState = if ($expectsFailure) { 'Failed' } elseif ($Scenario -eq 'Stop') { 'Stopped' } else { 'Completed' }
+    $expectedExitCode = if ($expectsFailure) { 1 } else { 0 }
+    if (@($hostExitEvents | Where-Object { $_ -match "\|pid=$hostProcessId\|exitCode=$expectedExitCode\|state=$expectedTerminalState" }).Count -ne 1) {
         throw 'The owned Host did not exit with its expected successful terminal state.'
     }
     $hostReceiptPath = Join-Path $harnessTemp 'AgentHostLifecycleHostReceipt.json'
@@ -159,7 +170,7 @@ try {
     if ($endingState.status -ne 'completed' -or [string]$endingState.state.context.gameState -cne [string]$baseline.state.context.gameState) {
         throw 'Native Campaign could not be observed after Host exit.'
     }
-    if ($Scenario -eq 'Stop' -and
+    if (($Scenario -eq 'Stop' -or $expectsFailure) -and
         ([string]$endingState.state.location.currentSettlementId -cne [string]$baseline.state.location.currentSettlementId -or
         [string]$endingState.state.location.targetSettlementId -cne [string]$baseline.state.location.targetSettlementId)) {
         throw 'Stopping the Host changed the active Native location/movement state in this cancellation-window test.'
@@ -179,7 +190,14 @@ try {
         if ($response.action -in @('mapSettlementTargets','move')) { $nativeWriteActions += [string]$response.action }
         if ($response.action -eq 'move' -and $response.status -eq 'completed') { $lastMoveTargetId = [string]$response.state.location.targetSettlementId }
     }
-    if ($Scenario -eq 'Stop') {
+    if ($expectsFailure) {
+        $expectedFailureCode = if ($Scenario -eq 'MissingModel') { 'provider-model-unavailable' } else { 'provider-unavailable' }
+        if ($hostReceipt.status -ne 'failed' -or $hostReceipt.failureCode -ne $expectedFailureCode -or
+            $hostReceipt.decisionCount -ne 0 -or $hostReceipt.actionsExecuted -ne 0 -or $responseFiles.Count -ne 0) {
+            throw 'Provider failure did not terminate before decisions and Native commands with its expected failure classification.'
+        }
+    }
+    elseif ($Scenario -eq 'Stop') {
         if ($nativeWriteActions.Count -gt 0 -or $hostReceipt.decisionCount -ne 0 -or $hostReceipt.actionsExecuted -ne 0 -or
             $hostReceipt.providerConfigurationSource -ne 'harness-only-no-model-lifecycle-test') {
             throw 'Stop fixture must remain an idle-provider lifecycle test with zero decisions and goal actions.'
@@ -214,7 +232,7 @@ $passed = ($null -eq $failure -and $gameProcessId -gt 0 -and $hostProcessId -gt 
 $result = [pscustomobject][ordered]@{
     Passed = [bool]$passed
     Scenario = $Scenario
-    ProviderKind = if ($Scenario -eq 'Stop') { 'Harness-only idle provider; no model service or generation' } else { 'Real local 4b model through the game-launched Host' }
+    ProviderKind = if ($expectsFailure) { 'Local provider health rejection; zero generation and Native commands' } elseif ($Scenario -eq 'Stop') { 'Harness-only idle provider; no model service or generation' } else { 'Real local 4b model through the game-launched Host' }
     GameProcessId = $gameProcessId
     AgentHostProcessId = $hostProcessId
     ModelId = if ($hostReceipt) { $hostReceipt.providerModelId } else { $providerModelId }

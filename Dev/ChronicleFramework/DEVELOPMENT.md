@@ -1,10 +1,12 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.138
+Contract version: 7.139
 
 本地Provider的单次请求时限覆盖接收响应头与读取完整响应正文；`ResponseHeadersRead`不能使正文等待脱离该时限。只读模型目录探测仅证明服务可达且模型已登记，不证明推理进程可启动。实际推理失败先核查本地运行组件与服务日志，再归因模型或游戏。相关无模型回归覆盖“响应头立即返回、正文停滞”的超时分支。
 
 Host控制输入读取放在后台任务：`Console.In`同步Reader的异步接口可能阻塞调用线程。游戏保持stdin打开时，主流程仍必须能收到决策循环终态或父进程退出。自包含包回归以有效父进程身份、故意无效动作目录验证“stdin保持打开，拒绝结果仍按时返回”，不调用模型或Native；旧同步调用方式在该回归超时，修复版通过。
+
+`AgentHostLifecycleEvaluation -LifecycleScenario MissingModel|ServiceUnavailable`复用同一一次性Campaign启停夹具，分别指定确认不在本地目录的模型名、确认没有监听者的loopback端口。两种错误必须在模型生成和任何Host Native命令前退出，控制器只经过Starting→Failed，无Ready事件，脱敏收据分类正确，游戏仍可查询且源档/进程/session干净；不修改或关闭玩家现有模型服务。
 
 ## 目标与边界
 
