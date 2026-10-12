@@ -2,7 +2,7 @@
 param(
     [ValidateRange(90,300)][int]$TimeoutSeconds = 180,
     [ValidateRange(250,10000)][int]$AutoStopAfterMilliseconds = 250,
-    [ValidateSet('Stop','Complete','MissingModel','ServiceUnavailable')][string]$Scenario = 'Stop',
+    [ValidateSet('Stop','Complete','MissingModel','ServiceUnavailable','ParentExited')][string]$Scenario = 'Stop',
     [string]$SaveName = 'AgentBridgeLifecycle'
 )
 
@@ -32,8 +32,9 @@ if (Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue) { throw 'Refu
 if (Test-Path -LiteralPath $sessionPath -PathType Leaf) { throw 'Refusing to replace a stale Agent CLI session.' }
 
 $expectsFailure = $Scenario -in @('MissingModel','ServiceUnavailable')
+$usesIdleProvider = $Scenario -in @('Stop','ParentExited')
 $providerBaseUrl = if ($Scenario -eq 'ServiceUnavailable') { 'http://127.0.0.1:11433/v1' } else { 'http://127.0.0.1:11434/v1' }
-$providerModelId = if ($Scenario -eq 'Stop') { 'harness-lifecycle-no-model' } elseif ($Scenario -eq 'MissingModel') { 'chronicle-harness-model-not-installed' } else { 'qwen3.5:4b-q4_K_M' }
+$providerModelId = if ($usesIdleProvider) { 'harness-lifecycle-no-model' } elseif ($Scenario -eq 'MissingModel') { 'chronicle-harness-model-not-installed' } else { 'qwen3.5:4b-q4_K_M' }
 if ($Scenario -eq 'MissingModel') {
     $catalog = Invoke-RestMethod -Uri ($providerBaseUrl + '/models') -TimeoutSec 5
     if ($providerModelId -in $catalog.data.id) { throw 'Missing-model fixture unexpectedly exists; no game was started.' }
@@ -85,6 +86,9 @@ $startupRejectionCases = @()
 $duplicateStartVerified = $false
 $hostReceipt = $null
 $completionVerified = $false
+$parentExitVerified = $false
+$parentExitHostExitCode = $null
+$parentExitSeconds = $null
 $lastMoveTargetId = $null
 $nativeWriteActions = @()
 $hostExitEvents = @()
@@ -104,7 +108,7 @@ try {
     $env:CHRONICLE_HARNESS_AGENT_AUTO_START = '1'
     $env:CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS = if ($Scenario -eq 'Stop') { [string]$AutoStopAfterMilliseconds } else { '0' }
     $env:CHRONICLE_HARNESS_AGENT_GOAL = if ($Scenario -eq 'Stop') { 'Inspect the current Native Campaign state and wait for the explicit stop request without changing the Campaign.' } else { 'Reach a currently visible safe nearby settlement. Finish only when fresh Native state confirms arrival.' }
-    $env:CHRONICLE_HARNESS_AGENT_NO_MODEL = if ($Scenario -eq 'Stop') { '1' } else { '0' }
+    $env:CHRONICLE_HARNESS_AGENT_NO_MODEL = if ($usesIdleProvider) { '1' } else { '0' }
     $env:CHRONICLE_HARNESS_AGENT_FAILURE_CASE = if ($expectsFailure) { $Scenario } else { '' }
 
     $loadReceipt = Invoke-LifecycleCli 'load' @('-SaveName', $SaveName)
@@ -132,6 +136,7 @@ try {
         $sawStopped = @($states | Where-Object { $_ -match '\|state=Stopped\|' }).Count -gt 0
         $sawCompleted = @($states | Where-Object { $_ -match '\|state=Completed\|' }).Count -gt 0
         $sawFailed = @($states | Where-Object { $_ -match '\|state=Failed\|' }).Count -gt 0
+        if ($Scenario -eq 'ParentExited' -and $hostProcessId -gt 0 -and $hostReadyEvents.Count -gt 0) { break }
         if ((($sawStopped -or $sawCompleted) -and $hostExitEvents.Count -gt 0) -or ($sawFailed -and $startedLine.Count -gt 0)) { break }
     } while ([DateTime]::UtcNow -lt $deadline)
 
@@ -150,6 +155,31 @@ try {
     }).Count -eq 1
     if (-not $expectsFailure -and -not $nativeHandshakeVerified) { throw 'The controller did not verify a versioned Host handshake bound to the current Native Bannerlord process.' }
     if ($expectsFailure -and $hostReadyEvents.Count -gt 0) { throw 'Host reported Ready before its failing provider health check.' }
+    if ($Scenario -eq 'ParentExited') {
+        $ownedGame = Get-Process -Id $gameProcessId -ErrorAction Stop
+        $ownedHost = Get-Process -Id $hostProcessId -ErrorAction Stop
+        $installedGameRoot = [IO.Path]::GetFullPath([string](Get-Content (Join-Path $harnessRoot 'harness.local.json') -Raw | ConvertFrom-Json).gameRoot).TrimEnd('\') + '\'
+        if (-not $ownedGame.Path.StartsWith($installedGameRoot, [StringComparison]::OrdinalIgnoreCase) -or
+            [IO.Path]::GetFullPath($ownedHost.Path) -cne [IO.Path]::GetFullPath($hostPath)) {
+            throw 'Disposable game/Host process identity differs from the loaded fixture; refusing forced exit.'
+        }
+        $null = $ownedHost.Handle
+        $exitClock = [Diagnostics.Stopwatch]::StartNew()
+        Stop-Process -Id $gameProcessId -Force -ErrorAction Stop
+        $parentExitVerified = $ownedHost.WaitForExit(10000)
+        $parentExitSeconds = [Math]::Round($exitClock.Elapsed.TotalSeconds, 3)
+        if (-not $parentExitVerified) { throw 'Host did not independently exit after its disposable Bannerlord parent was terminated.' }
+        $parentExitHostExitCode = $ownedHost.ExitCode
+        $ownedHost.Dispose()
+        $ownedGame.Dispose()
+        $newResponses = @(Get-ChildItem -LiteralPath $responseRoot -File -Filter 'host-*.json' | Where-Object { $_.Name -notin $hostResponseFilesBefore })
+        foreach ($responseFile in $newResponses) {
+            try { $response = Get-Content -LiteralPath $responseFile.FullName -Raw -Encoding UTF8 | ConvertFrom-Json }
+            catch { throw 'The parent-exit Native response file could not be read as UTF-8 JSON.' }
+            if ($response.action -ne 'state') { throw 'Parent-exit idle fixture issued a Native world action.' }
+        }
+    }
+    else {
     $expectedStates = if ($expectsFailure) { @('Starting','Failed') } elseif ($Scenario -eq 'Stop') { @('Starting','Running','Stopping','Stopped') } else { @('Starting','Running','Completed') }
     foreach ($expectedState in $expectedStates) {
         if (@($states | Where-Object { $_ -match "\|state=$expectedState\|" }).Count -eq 0) {
@@ -211,11 +241,27 @@ try {
             -not [string]::IsNullOrWhiteSpace($lastMoveTargetId) -and $endingState.state.location.currentSettlementId -ceq $lastMoveTargetId)
         if (-not $completionVerified) { throw 'Real game-launched Host did not verify Native arrival and report Completed using the current MCM model snapshot.' }
     }
+    }
 }
 catch { $failure = $_.Exception.Message }
 finally {
     if (Test-Path -LiteralPath $sessionPath -PathType Leaf) {
-        try { $stopReceipt = Invoke-LifecycleCli 'stop' } catch { if (-not $failure) { $failure = $_.Exception.Message } }
+        try {
+            if ($Scenario -eq 'ParentExited' -and -not (Get-Process -Id $gameProcessId -ErrorAction SilentlyContinue)) {
+                $remainingHost = Get-Process -Id $hostProcessId -ErrorAction SilentlyContinue
+                if ($remainingHost -and [IO.Path]::GetFullPath($remainingHost.Path) -ceq [IO.Path]::GetFullPath($hostPath)) {
+                    Stop-Process -Id $hostProcessId -Force
+                }
+                $cleanup = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli recoverTestConfig -AsJson 2>&1 | Out-String
+                if ($LASTEXITCODE -ne 0) { throw 'Parent-exit fixture session/config cleanup failed.' }
+                $stopReceipt = $cleanup | ConvertFrom-Json
+                if (-not $stopReceipt.restored) { throw 'Parent-exit fixture did not restore its original engine configuration.' }
+                $staleSession = Get-Content -LiteralPath $sessionPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                if ([int]$staleSession.processId -ne $gameProcessId) { throw 'Refusing to remove a different Campaign session during parent-exit cleanup.' }
+                Remove-Item -LiteralPath $sessionPath -Force
+            }
+            else { $stopReceipt = Invoke-LifecycleCli 'stop' }
+        } catch { if (-not $failure) { $failure = $_.Exception.Message } }
     }
     $watch.Stop()
     foreach ($name in $priorValues.Keys) {
@@ -228,16 +274,20 @@ $processesStopped = @(Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyConti
 $sessionClean = -not (Test-Path -LiteralPath $sessionPath -PathType Leaf)
 $fixtureHashAfter = if (Test-Path -LiteralPath $savePath -PathType Leaf) { (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash } else { $null }
 $fixtureUnchanged = $fixtureHashBefore -eq $fixtureHashAfter
-$passed = ($null -eq $failure -and $gameProcessId -gt 0 -and $hostProcessId -gt 0 -and $processesStopped -and $sessionClean -and $fixtureUnchanged -and ($Scenario -ne 'Stop' -or $nativeWriteActions.Count -eq 0))
+$passed = ($null -eq $failure -and $gameProcessId -gt 0 -and $hostProcessId -gt 0 -and $processesStopped -and $sessionClean -and $fixtureUnchanged -and ($Scenario -ne 'Stop' -or $nativeWriteActions.Count -eq 0) -and ($Scenario -ne 'ParentExited' -or $parentExitVerified))
 $result = [pscustomobject][ordered]@{
     Passed = [bool]$passed
     Scenario = $Scenario
-    ProviderKind = if ($expectsFailure) { 'Local provider health rejection; zero generation and Native commands' } elseif ($Scenario -eq 'Stop') { 'Harness-only idle provider; no model service or generation' } else { 'Real local 4b model through the game-launched Host' }
+    ProviderKind = if ($expectsFailure) { 'Local provider health rejection; zero generation and Native commands' } elseif ($usesIdleProvider) { 'Harness-only idle provider; no model service or generation' } else { 'Real local 4b model through the game-launched Host' }
     GameProcessId = $gameProcessId
     AgentHostProcessId = $hostProcessId
     ModelId = if ($hostReceipt) { $hostReceipt.providerModelId } else { $providerModelId }
     HostReceipt = $hostReceipt
     NativeArrivalCompleted = [bool]$completionVerified
+    HostIndependentlyExitedAfterParentTermination = [bool]$parentExitVerified
+    ParentExitHostExitCode = $parentExitHostExitCode
+    ParentExitSeconds = $parentExitSeconds
+    EngineConfigRestoredAfterParentExit = if ($Scenario -eq 'ParentExited') { [bool]($stopReceipt -and $stopReceipt.restored) } else { $null }
     LastMoveTargetId = $lastMoveTargetId
     AutoStopAfterMilliseconds = $AutoStopAfterMilliseconds
     LifecycleStates = @($states | ForEach-Object { [string]$_ })

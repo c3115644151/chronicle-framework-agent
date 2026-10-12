@@ -206,6 +206,8 @@ W5-K在`TestResults/20261010-181412`以两次独立New Campaign完成：第1次�
 
 游戏内Provider错误路径有独立运行证据：`TestResults/20261012-185348`的缺失模型与`185544`的无人监听loopback端口均只经过Starting→Failed，Host退出码1；对应脱敏failureCode为`provider-model-unavailable`与`provider-unavailable`。两者零生成tokens/零决策/零Host Native命令，无Ready事件，停止后游戏可查询、源档不变及进程/session清理通过。故障设置由严格生命周期Harness模式下的独立MCM设置对象传入，不修改或保存已注册的玩家设置；只写临时profile不能覆盖游戏内Start的当前快照，前一次`184954`夹具正因此未注入故障，已保留为失败证据。
 
+实际游戏父进程异常退出由`TestResults/20261012-192012`核验：受限idle Provider下，在Native PID/Ready握手后仅终止本轮一次性Bannerlord进程，Host在外层清理前0.435秒内自行退出（退出码1）；源档未变，测试显示配置恢复、session清理、游戏/Host均结束。该场景不生成模型回复、无世界动作，不证明在途写动作的恢复，也无法在已关闭的游戏中显示Failed或接收Host终态JSON。早先同场景的UTF-8读取与失效session清理失败保留为工具失败证据，不能混算成功。
+
 ### Campaign存档内的Agent目标Checkpoint
 
 本机1.4.8的`CampaignBehaviorBase.SyncData(IDataStore)`会随Native Campaign存档序列化行为字段；Chronicle用这一入口保存Campaign实例GUID和受限大小的Agent checkpoint JSON。`agentCheckpointGet/Set`是Mod/Host内部协议，不暴露给LLM动作白名单，并且只允许Campaign Map上下文；原版世界状态始终以读档后的新Observer结果为准，旧观察快照不是恢复真值。当前checkpoint v1包含目标、`schemaVersion`、Campaign实例ID、provider停止状态、最后一个已确认Native动作回执的紧凑摘要及最近状态摘要；`done`只记为`provider-stopped`，并不等同成功判定。`Agent-DecisionLoop -PersistCheckpoint`在新的Agent运行时写入目标并于每个原生动作/后验观察后更新；`-ResumeCheckpoint`先获取新Native state，再核对Campaign实例和checkpoint版本，将目标与receipt送回模型。若最后receipt只是只读`mapSettlementTargets`，恢复时安全地重新查询而不重复世界副作用。

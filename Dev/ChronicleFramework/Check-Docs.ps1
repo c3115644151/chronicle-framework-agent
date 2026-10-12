@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.139'
+$contractVersion = '7.140'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -472,6 +472,7 @@ if ($harnessScript -notmatch 'recruitmentProgression = \$testResult\.Recruitment
 if (-not (Test-ChronicleStartupAssessment)) { throw 'Startup evidence regression checks failed.' }
 if (-not (Test-ChronicleSteamClientReadiness)) { throw 'Steam API readiness regression checks failed.' }
 if (-not (Test-ChronicleStartupDialogEvidenceSerialization)) { throw 'Startup dialog evidence retained a live UI Automation object instead of a serializable snapshot.' }
+if (-not (Test-ChronicleReceiptSerialization)) { throw 'Receipt normalization changed primitive/list data or retained PowerShell object metadata.' }
 if (-not (Test-ChronicleLogTailNormalization -Path $startupEvidenceScript)) { throw 'Get-Content log-tail normalization regression checks failed.' }
 $protocolSource = Get-Content (Join-Path (Split-Path -Parent $harnessRoot) 'ChronicleFramework\AgentProtocol.cs') -Raw -Encoding UTF8
 if ($protocolSource -notmatch 'postbattle-renown-telemetry-failed' -or $protocolSource -notmatch 'visual-battle-fixture' -or $protocolSource -notmatch 'winnerRenownValue' -or $protocolSource -notmatch 'loserStrengthReductionFactorAfterFinish') { throw 'PostBattle renown telemetry must remain fixture-only and report model inputs/results without changing battle rules.' }

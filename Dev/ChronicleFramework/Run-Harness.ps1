@@ -4,7 +4,7 @@ param(
     [string]$Phase = 'All',
     [int]$SmokeTimeoutSeconds = 45,
     [int]$SmokeStabilitySeconds = 8,
-    [ValidateSet('Stop','Complete','MissingModel','ServiceUnavailable')][string]$LifecycleScenario = 'Stop',
+    [ValidateSet('Stop','Complete','MissingModel','ServiceUnavailable','ParentExited')][string]$LifecycleScenario = 'Stop',
     [string]$TargetSettlementId = 'town_V1',
     [string]$ApproachSettlementId = 'town_V1',
     [string]$QuickTalkTargetSettlementId = 'village_V1_1',
@@ -23,7 +23,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.139'
+$HarnessContractVersion = '7.140'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -437,9 +437,31 @@ foreach ($stage in $requestedStages) {
                 $priorHarnessMode = $env:CHRONICLE_HARNESS_MODE
                 $env:CHRONICLE_HARNESS_MODE = 'smoke'
                 try {
-                    $smokeOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $smokeScript -TimeoutSeconds $SmokeTimeoutSeconds -StabilitySeconds $SmokeStabilitySeconds 2>&1 | Out-String
-                    $smokeExitCode = $LASTEXITCODE
+                    $smokeStdout = Join-Path $harnessTempDirectory 'SmokeWorker.stdout.log'
+                    $smokeStderr = Join-Path $harnessTempDirectory 'SmokeWorker.stderr.log'
+                    $smokeWorker = Start-Process -FilePath (Get-Command powershell -ErrorAction Stop).Source -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"' + $smokeScript + '"'),'-TimeoutSeconds',$SmokeTimeoutSeconds,'-StabilitySeconds',$SmokeStabilitySeconds) -WindowStyle Hidden -RedirectStandardOutput $smokeStdout -RedirectStandardError $smokeStderr -PassThru
+                    try {
+                        if (-not $smokeWorker.WaitForExit(($SmokeTimeoutSeconds + $SmokeStabilitySeconds + 30) * 1000)) {
+                            $ownedGameExe = [IO.Path]::GetFullPath((Join-Path $gameRoot 'bin\Win64_Shipping_Client\Bannerlord.exe'))
+                            $ownedChildren = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($smokeWorker.Id)")
+                            foreach ($ownedChild in $ownedChildren) {
+                                if ($ownedChild.ExecutablePath -and [IO.Path]::GetFullPath($ownedChild.ExecutablePath) -eq $ownedGameExe) {
+                                    Stop-Process -Id $ownedChild.ProcessId -Force -ErrorAction SilentlyContinue
+                                }
+                            }
+                            $smokeWorker.Kill()
+                            $smokeWorker.WaitForExit()
+                            throw "Smoke worker exceeded its startup/stability/receipt deadline; worker logs and receipt-stage markers are retained in $harnessTempDirectory."
+                        }
+                        $smokeExitCode = $smokeWorker.ExitCode
+                    }
+                    finally { $smokeWorker.Dispose() }
+                    $smokeOutput = (Get-Content -LiteralPath $smokeStdout -Raw) + (Get-Content -LiteralPath $smokeStderr -Raw)
                     if ($smokeExitCode -ne 0) { throw "Smoke test failed with exit code $smokeExitCode. Evidence: $smokeOutput" }
+                    $smokeReceipt = Get-Content -LiteralPath (Join-Path $harnessTempDirectory 'SmokeResult.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+                    foreach ($flagName in @('FinishedAll','AssemblyLoaded','CrashDetected','McmSettingsRegistered','StableAfterFinishedAll','ProcessExitedUnexpectedly')) {
+                        if ($smokeReceipt.$flagName -isnot [bool]) { throw "Smoke receipt field '$flagName' must be a Boolean; collection/string truthiness is not verification." }
+                    }
                 }
                 finally {
                     if ($null -eq $priorHarnessMode) { Remove-Item Env:CHRONICLE_HARNESS_MODE -ErrorAction SilentlyContinue }

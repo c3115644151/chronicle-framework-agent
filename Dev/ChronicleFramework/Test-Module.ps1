@@ -136,10 +136,10 @@ while ((Get-Date) -lt $deadline) {
         break
     }
     if (Test-Path $rglLog) {
-        $rglText = Get-Content $rglLog -Raw
-        $finishedAll = $rglText -match 'Finished All'
+        [string]$rglText = Get-Content $rglLog -Raw
+        $finishedAll = [bool]($rglText -match 'Finished All')
         if (-not $WithoutChronicle) {
-            $assemblyLoaded = $rglText -match 'ChronicleFramework\.dll'
+            $assemblyLoaded = [bool]($rglText -match 'ChronicleFramework\.dll')
         }
     }
     if (-not $WithoutChronicle -and (Test-Path $diagnosticLog)) {
@@ -160,7 +160,7 @@ while ((Get-Date) -lt $deadline) {
         if ($lifecycleLoadObserved -and -not $assemblyLoaded) { $assemblyLoaded = $true }
     }
     if (Test-Path $watchdogLog) {
-        $crashDetected = (Get-Content $watchdogLog -Raw) -match 'Crash occurred|ExceptionCode:'
+        $crashDetected = [bool]([string](Get-Content $watchdogLog -Raw) -match 'Crash occurred|ExceptionCode:')
     }
     $mcmDefinitionComplete = $WithoutChronicle.IsPresent -or ($mcmSettingsRegistered -and $validationButtonType -eq 'Button' -and
         @($requiredMcmPropertyIds | Where-Object { $_ -notin $mcmSettingPropertyIds }).Count -eq 0 -and
@@ -255,8 +255,13 @@ $result.RglErrorLogCopy = if (Test-Path -LiteralPath (Join-Path (Split-Path -Par
 $result.WatchdogLogCopy = if (Test-Path -LiteralPath $watchdogLog -PathType Leaf) { $copy = Join-Path $harnessEvidenceDirectory "Smoke-watchdog-$trackedProcessId.txt"; Copy-Item -LiteralPath $watchdogLog -Destination $copy -Force; $copy } else { $null }
 $resultPath = Join-Path $harnessEvidenceDirectory 'SmokeResult.json'
 $result.EvidenceResultPath = $resultPath
-$result | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $resultPath -Encoding UTF8
-$result | ConvertTo-Json
+$receiptStagePath = Join-Path $harnessEvidenceDirectory 'SmokeReceiptStages.log'
+Add-Content -LiteralPath $receiptStagePath -Value 'serialize-start'
+$receiptJson = ConvertTo-ChronicleReceiptJson -Value $result
+Add-Content -LiteralPath $receiptStagePath -Value 'serialize-complete'
+$receiptJson | Set-Content -LiteralPath $resultPath -Encoding UTF8
+Add-Content -LiteralPath $receiptStagePath -Value 'write-complete'
+Write-Output $receiptJson
 
 if (-not $finishedAll -or -not $stabilityCompleted -or $crashDetected -or $processExitedUnexpectedly -or (-not $WithoutChronicle -and (-not $assemblyLoaded -or -not $lifecycleLoadObserved -or -not $mcmDefinitionComplete))) {
     exit 1

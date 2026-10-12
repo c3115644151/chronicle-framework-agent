@@ -1,3 +1,41 @@
+function ConvertTo-ChronicleReceiptValue {
+    param([AllowNull()][object]$Value, [int]$Depth = 0)
+    if ($Depth -gt 12) { throw 'Receipt data exceeds its supported nesting depth.' }
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [string]) { return [string]::new($Value.ToCharArray()) }
+    if ($Value.GetType().IsPrimitive -or $Value -is [decimal]) { return $Value }
+    if ($Value -is [System.Collections.IDictionary]) {
+        $plain = [ordered]@{}
+        foreach ($key in $Value.Keys) { $plain[[string]$key] = ConvertTo-ChronicleReceiptValue -Value $Value[$key] -Depth ($Depth + 1) }
+        return $plain
+    }
+    if ($Value -is [System.Collections.IEnumerable]) {
+        $items = @($Value | ForEach-Object { ConvertTo-ChronicleReceiptValue -Value $_ -Depth ($Depth + 1) })
+        return ,$items
+    }
+    if ($Value -is [pscustomobject]) {
+        $plain = [ordered]@{}
+        foreach ($property in $Value.PSObject.Properties) {
+            if ($property.MemberType -eq 'NoteProperty') { $plain[$property.Name] = ConvertTo-ChronicleReceiptValue -Value $property.Value -Depth ($Depth + 1) }
+        }
+        return $plain
+    }
+    throw "Unsupported live receipt value type: $($Value.GetType().FullName)"
+}
+
+function ConvertTo-ChronicleReceiptJson {
+    param([Parameter(Mandatory)][object]$Value)
+    $plain = ConvertTo-ChronicleReceiptValue -Value $Value
+    if ($PSVersionTable.PSVersion.Major -le 5) {
+        Add-Type -AssemblyName System.Web.Extensions
+        $serializer = [System.Web.Script.Serialization.JavaScriptSerializer]::new()
+        $serializer.MaxJsonLength = 1048576
+        $serializer.RecursionLimit = 16
+        return $serializer.Serialize($plain)
+    }
+    return ConvertTo-Json -InputObject $plain -Depth 16 -Compress
+}
+
 function ConvertTo-ChronicleLogTail {
     [CmdletBinding()]
     param([object[]]$Lines = @())
@@ -72,9 +110,20 @@ function Test-ChronicleStartupDialogEvidenceSerialization {
         Controls = @([pscustomobject]@{ Name = (-join @([char]0x786E,[char]0x5B9A)); ControlType = 'ControlType.Pane'; ClassName = 'Button'; AutomationId = '2'; NativeWindowHandle = 99; Patterns = @() })
     }
     $safeEvidence = ConvertTo-ChronicleStartupDialogEvidence -Snapshot $snapshot
-    $json = ConvertTo-Json -InputObject $safeEvidence -Depth 8 -Compress
+    $json = ConvertTo-ChronicleReceiptJson -Value $safeEvidence
     return ([int]$safeEvidence.ProcessId -eq 42 -and [string]$safeEvidence.DialogText -match 'Steam API' -and
         @($safeEvidence.Controls).Count -eq 1 -and $json -notmatch 'ActionElements|live UIA proxy' -and $json.Length -lt 2048)
+}
+
+function Test-ChronicleReceiptSerialization {
+    $annotated = 'plain text' | Add-Member -NotePropertyName UnrelatedMetadata -NotePropertyValue ([pscustomobject]@{ nested = 'must not enter receipt' }) -PassThru
+    $receipt = [ordered]@{ flag = $true; count = 0; nullable = $null; empty = @(); text = $annotated; nested = @([pscustomobject]@{ name = 'OK'; patterns = @('InvokePattern') }) }
+    $json = ConvertTo-ChronicleReceiptJson -Value $receipt
+    $back = $json | ConvertFrom-Json
+    return ($back.flag -eq $true -and $back.count -eq 0 -and $null -eq $back.nullable -and
+        @($back.empty).Count -eq 0 -and $back.text -eq 'plain text' -and
+        $back.nested[0].name -eq 'OK' -and $back.nested[0].patterns[0] -eq 'InvokePattern' -and
+        $json -notmatch 'UnrelatedMetadata|must not enter receipt')
 }
 
 function Test-ChronicleLogTailNormalization {
