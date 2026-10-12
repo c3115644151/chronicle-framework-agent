@@ -146,6 +146,12 @@ internal sealed class ChronicleAgentProtocol
 
             var action = ReadString(command, "action") ?? "unknown";
             currentAction = action;
+            var expectedNativeSessionId = ReadString(command, "expectedNativeSessionId");
+            if (expectedNativeSessionId != null && !string.Equals(expectedNativeSessionId, behavior.AgentRuntimeSessionId, StringComparison.Ordinal))
+            {
+                WriteResponse(commandId, action, "rejected", behavior, "native-session-mismatch");
+                return;
+            }
             switch (action)
             {
                 case "state":
@@ -2539,7 +2545,7 @@ internal sealed class ChronicleAgentProtocol
 
     private void WriteResponse(string commandId, string action, string status, ChronicleCampaignBehavior behavior, string error = null, string dataJson = null)
     {
-        var response = "{\"protocolVersion\":1,\"commandId\":\"" + Escape(commandId) + "\",\"action\":\"" + Escape(action) + "\",\"status\":\"" + Escape(status) + "\",\"processId\":" + Process.GetCurrentProcess().Id + ",\"campaignDay\":" + CampaignTime.Now.ToDays.ToString("F3", CultureInfo.InvariantCulture) + ",\"dailyTickCount\":" + behavior.DailyTickCount + ",\"timeControlMode\":\"" + Escape(TaleWorlds.CampaignSystem.Campaign.Current.TimeControlMode.ToString()) + "\",\"state\":" + ChronicleAgentObserver.BuildSnapshotJson() + (dataJson == null ? "" : ",\"data\":" + dataJson) + (error == null ? "" : ",\"error\":\"" + Escape(error) + "\"") + "}";
+        var response = "{\"nativeSessionId\":\"" + Escape(behavior.AgentRuntimeSessionId) + "\",\"protocolVersion\":1,\"commandId\":\"" + Escape(commandId) + "\",\"action\":\"" + Escape(action) + "\",\"status\":\"" + Escape(status) + "\",\"processId\":" + Process.GetCurrentProcess().Id + ",\"campaignDay\":" + CampaignTime.Now.ToDays.ToString("F3", CultureInfo.InvariantCulture) + ",\"dailyTickCount\":" + behavior.DailyTickCount + ",\"timeControlMode\":\"" + Escape(TaleWorlds.CampaignSystem.Campaign.Current.TimeControlMode.ToString()) + "\",\"state\":" + ChronicleAgentObserver.BuildSnapshotJson() + (dataJson == null ? "" : ",\"data\":" + dataJson) + (error == null ? "" : ",\"error\":\"" + Escape(error) + "\"") + "}";
         var safeCommandId = SanitizeFileName(commandId);
         var safeStatus = SanitizeFileName(status);
         var responsePath = Path.Combine(_responseRoot, safeCommandId + "." + safeStatus + ".json");

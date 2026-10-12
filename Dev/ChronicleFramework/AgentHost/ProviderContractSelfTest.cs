@@ -24,6 +24,29 @@ internal static class ProviderContractSelfTest
             AgentHostReadyProtocol.TryParse(readyLine + "|extra", out _, out _, out _))
             throw new AgentHostException("host-ready-protocol-self-test-failed", "Shared Mod/Host readiness framing failed identity round-trip or accepted an invalid frame.");
         results.Add(new { scenario = "shared-mod-host-ready-identity-roundtrip-and-invalid-frame-rejection", passed = true });
+        var sessionMailboxRoot = Path.Combine(Path.GetTempPath(), "ChronicleNativeSessionTest-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var sessionClient = new NativeMailboxClient(sessionMailboxRoot, TimeSpan.FromSeconds(1), 321, "session-a");
+            using var matching = JsonDocument.Parse("{\"protocolVersion\":1,\"commandId\":\"test\",\"action\":\"state\",\"status\":\"completed\",\"processId\":321,\"nativeSessionId\":\"session-a\"}");
+            sessionClient.ValidateResponse(matching.RootElement, "test", "state", "completed");
+            foreach (var mismatch in new[] { (ProcessId: 322, SessionId: "session-a", Code: "native-response-process-mismatch"), (ProcessId: 321, SessionId: "session-b", Code: "native-response-session-mismatch") })
+            {
+                using var response = JsonDocument.Parse(JsonSerializer.Serialize(new { protocolVersion = 1, commandId = "test", action = "state", status = "completed", processId = mismatch.ProcessId, nativeSessionId = mismatch.SessionId }));
+                try
+                {
+                    sessionClient.ValidateResponse(response.RootElement, "test", "state", "completed");
+                    throw new AgentHostException("native-session-self-test-mismatch-accepted", "The Host accepted a response from a different loaded Native session.");
+                }
+                catch (AgentHostException exception) when (exception.Code == mismatch.Code) { }
+            }
+            results.Add(new { scenario = "native-mailbox-binds-every-response-to-game-process-and-loaded-session", passed = true });
+        }
+        finally
+        {
+            Directory.Delete(Path.Combine(sessionMailboxRoot, "responses"));
+            Directory.Delete(sessionMailboxRoot);
+        }
         if (!await Program.WaitForStopSignalAsync(new StringReader("not-json\n{\"control\":\"stop\"}\n"), CancellationToken.None) ||
             await Program.WaitForStopSignalAsync(new StringReader("{\"control\":\"pause\"}\n"), CancellationToken.None))
             throw new AgentHostException("agent-host-stop-control-self-test-failed", "Only an explicit stop control line may cancel the persistent Campaign Host.");

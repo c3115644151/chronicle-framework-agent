@@ -105,7 +105,11 @@ internal static class AgentHostCampaignLoop
         Action<int>? onReady = null)
     {
         var nativeTimeoutSeconds = ReadIntEnvironment("CHRONICLE_LLM_TIMEOUT_SECONDS", 180, 5, 240);
-        var client = new NativeMailboxClient(protocolRoot, TimeSpan.FromSeconds(nativeTimeoutSeconds));
+        var expectedProcessId = ReadInt(request, "parentProcessId", 0);
+        var nativeSessionId = ReadString(request, "nativeSessionId");
+        if (expectedProcessId <= 0 || string.IsNullOrWhiteSpace(nativeSessionId))
+            throw new AgentHostException("campaign-native-session-missing", "The Campaign Host requires the launching game process and loaded Native session identity.");
+        var client = new NativeMailboxClient(protocolRoot, TimeSpan.FromSeconds(nativeTimeoutSeconds), expectedProcessId, nativeSessionId);
         var provider = Program.CreateCampaignDecisionProvider(request);
         return await RunAsync(request, client, provider, cancellationToken, onReady);
     }

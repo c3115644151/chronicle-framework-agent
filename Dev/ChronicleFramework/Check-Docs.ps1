@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.132'
+$contractVersion = '7.133'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -204,6 +204,8 @@ if ($harnessScript -notmatch "'AgentHostCampaignLoopEvaluation' \{ @\('Preflight
     $agentHostCampaignLoopEvaluationSource -notmatch 'CampaignDayAdvancedDuringTravel' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'VideoRemovedAfterEvidence' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'SourceTrackedTreeClean' -or
+    $agentLiveModelLoopSource -notmatch 'parentProcessStartTimeUtcTicks' -or $agentLiveModelLoopSource -notmatch 'nativeSessionId' -or
+    $agentLiveModelLoopSource -notmatch 'HostReadyMessages' -or
     $agentHostPackageSource -notmatch '--provider-self-test' -or
     $agentHostPackageSource -notmatch 'CampaignLoopSelfTestScenarioCount' -or
     $agentHostPackageSource -notmatch 'SharedDecisionCycleScenarioCount' -or
@@ -333,6 +335,7 @@ $agentHostProviderSource = Get-Content (Join-Path $harnessRoot 'AgentHost\Ollama
 $agentHostProgramSource = Get-Content (Join-Path $harnessRoot 'AgentHost\Program.cs') -Raw -Encoding UTF8
 $agentHostCampaignLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostCampaignLoop.cs') -Raw -Encoding UTF8
 $agentHostSupplyLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostSupplyLoop.cs') -Raw -Encoding UTF8
+$agentHostMailboxSource = Get-Content (Join-Path $harnessRoot 'AgentHost\NativeMailboxClient.cs') -Raw -Encoding UTF8
 if ($agentHostProviderSource -notmatch 'CheckConfiguredModelAsync' -or $agentHostProviderSource -notmatch '/models' -or
     $agentHostCampaignLoopSource -notmatch 'provider\.CheckConfiguredModelAsync' -or $agentHostSupplyLoopSource -notmatch 'provider\.CheckConfiguredModelAsync' -or
     $agentHostProgramSource -notmatch 'WaitForStopSignalAsync' -or $agentHostProgramSource -notmatch 'ReadLineAsync\(cancellationToken\)' -or
@@ -342,6 +345,9 @@ if ($agentHostProviderSource -notmatch 'CheckConfiguredModelAsync' -or $agentHos
     $agentHostProgramSource -notmatch 'MarkParentExited' -or $agentHostCampaignLoopSource -notmatch 'native-parent-process-mismatch' -or
     $agentHostProviderSource -notmatch 'FromCampaignRequest' -or $agentHostProviderSource -notmatch 'mcm-start-request' -or
     $agentHostRuntimeControllerSource -notmatch 'providerConfiguration' -or
+    $agentHostMailboxSource -notmatch 'native-response-session-mismatch' -or $agentHostMailboxSource -notmatch 'expectedNativeSessionId' -or
+    $agentProtocolSource -notmatch 'native-session-mismatch' -or $subModuleSource -notmatch 'AgentRuntimeSessionId' -or
+    $agentHostRuntimeControllerSource -notmatch 'ReferenceEquals.*_ownedCampaign' -or
     $agentHostCampaignLoopSource -notmatch 'onReady\?\.Invoke\(nativeProcessId\)') {
     throw 'Host lifecycle must bind to the launching Bannerlord PID/start time, handshake against the current Native PID before ready, monitor game exit, accept only explicit stop control, and fail safely without replay after an ambiguous action.'
 }
@@ -351,6 +357,7 @@ if ($harnessScript -notmatch "'AgentHostLifecycleEvaluation' \{ @\('Preflight', 
     $agentHostLifecycleHarness -notmatch 'agent-host-lifecycle-test' -or $agentHostLifecycleHarness -notmatch 'AgentBridgeLifecycle' -or
     $agentHostLifecycleHarness -notmatch 'NativeGoalActionsBeforeStop' -or $agentHostLifecycleHarness -notmatch 'NativeHandshakeVerified' -or
     $agentHostLifecycleHarness -notmatch 'CHRONICLE_HARNESS_AGENT_NO_MODEL' -or $agentHostLifecycleHarness -notmatch 'CliSessionCleaned' -or
+    $agentHostLifecycleHarness -notmatch 'NativeSessionGuardVerified' -or $agentCliSource -notmatch 'ExpectedNativeSessionId' -or
     $agentHostProgramSource -notmatch 'IsAuthorizedLifecycleNoModelMode' -or $agentHostProgramSource -notmatch 'LifecycleIdleDecisionProvider' -or
     $agentHostRuntimeControllerSource -notmatch 'AgentHostReadyProtocol\.TryParse' -or
     $agentHostProgramSource -notmatch 'AgentHostReadyProtocol\.Format' -or

@@ -46,6 +46,7 @@ param(
     [double]$Days = 0.01,
     [double]$DurationSeconds = 0,
     [string]$CommandId,
+    [string]$ExpectedNativeSessionId,
     [int]$TimeoutSeconds = 180,
     [switch]$ReturnWhenAccepted,
     [Alias('json')]
@@ -197,6 +198,7 @@ function Invoke-ProtocolCommand([string]$ProtocolAction, [hashtable]$Arguments =
     $session = Get-Session
     $id = if ($CommandId) { $CommandId } else { 'cli-' + [Guid]::NewGuid().ToString('N') }
     $payload = [ordered]@{ id = $id; action = $ProtocolAction }
+    if (-not [string]::IsNullOrEmpty($ExpectedNativeSessionId)) { $payload.expectedNativeSessionId = $ExpectedNativeSessionId }
     foreach ($key in $Arguments.Keys) { $payload[$key] = $Arguments[$key] }
     $expectedStatus = if ($ReturnWhenAccepted) { 'accepted' } else { 'completed' }
     $responsePath = Join-Path $responseRoot "$id.$expectedStatus.json"

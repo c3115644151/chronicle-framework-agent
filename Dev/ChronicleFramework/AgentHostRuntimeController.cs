@@ -40,6 +40,7 @@ internal static class ChronicleAgentRuntimeController
     private static DateTime _hostReadyUtc;
     private static string _runId = string.Empty;
     private static string _forcedFailureDetail = string.Empty;
+    private static TaleWorlds.CampaignSystem.Campaign _ownedCampaign;
 
     internal static string StatusText => _state switch
     {
@@ -103,6 +104,12 @@ internal static class ChronicleAgentRuntimeController
         {
             CompleteExitedHost();
             return;
+        }
+
+        if (!_stopRequested && !ReferenceEquals(TaleWorlds.CampaignSystem.Campaign.Current, _ownedCampaign))
+        {
+            _forcedFailureDetail = "战役已关闭或切换；旧Host已请求停止，不会在新战役重放行动";
+            RequestStop();
         }
 
         if (!_stopRequested && _state == RuntimeState.Running && IsLifecycleHarnessMode() &&
@@ -210,6 +217,13 @@ internal static class ChronicleAgentRuntimeController
         }
 
         var moduleRoot = ResolveModuleRoot();
+        var campaignBehavior = TaleWorlds.CampaignSystem.Campaign.Current.GetCampaignBehavior<ChronicleCampaignBehavior>();
+        if (campaignBehavior == null || !campaignBehavior.AgentProtocolReady)
+        {
+            FailStart("当前战役的Agent桥接尚未就绪");
+            return;
+        }
+        var nativeSessionId = campaignBehavior.AgentRuntimeSessionId;
         using var gameProcess = Process.GetCurrentProcess();
         var gameProcessId = gameProcess.Id;
         var gameProcessStartTimeTicks = gameProcess.StartTime.ToUniversalTime().Ticks;
@@ -238,6 +252,7 @@ internal static class ChronicleAgentRuntimeController
 
             _process = process;
             _ownedProcessId = process.Id;
+            _ownedCampaign = TaleWorlds.CampaignSystem.Campaign.Current;
             _ownedProcessStartTimeUtc = process.StartTime.ToUniversalTime();
             _hostReadyUtc = DateTime.MinValue;
             _hostExecutablePath = Path.GetFullPath(hostPath);
@@ -247,6 +262,7 @@ internal static class ChronicleAgentRuntimeController
             _hostError = process.StandardError.ReadToEndAsync();
             var requestJson = "{\"runId\":\"" + _runId + "\",\"parentProcessId\":" + gameProcessId.ToString(CultureInfo.InvariantCulture) +
                               ",\"parentProcessStartTimeUtcTicks\":" + gameProcessStartTimeTicks.ToString(CultureInfo.InvariantCulture) +
+                              ",\"nativeSessionId\":\"" + EscapeJson(nativeSessionId) + "\"" +
                               ",\"providerConfiguration\":{\"OllamaBaseUrl\":\"" + EscapeJson(settings.OllamaBaseUrl) +
                               "\",\"ModelId\":\"" + EscapeJson(settings.ModelId) + "\"}" +
                               ",\"goal\":\"" + EscapeJson(goal.Trim()) +
@@ -335,6 +351,8 @@ internal static class ChronicleAgentRuntimeController
             SetState(RuntimeState.Failed, "原Bannerlord战役进程已关闭或连接不匹配；Host已停止，未重放任何行动");
         else if (ContainsAny(output, errorOutput, "native-state-timeout", "native-command-timeout"))
             SetState(RuntimeState.Failed, "游戏内连接未能及时回应；行动结果可能不确定，未重放，请检查当前战役状态");
+        else if (ContainsAny(output, errorOutput, "native-response-session-mismatch", "native-response-process-mismatch", "native-session-mismatch"))
+            SetState(RuntimeState.Failed, "战役会话已变化；Host已停止，未重放行动");
         else if (ContainsAny(output, errorOutput, "host-already-running"))
             SetState(RuntimeState.Failed, "已有Host占用当前协议会话");
         else if (_stopRequested && exitCode == 0)
@@ -483,6 +501,7 @@ internal static class ChronicleAgentRuntimeController
         _hostOutput = null;
         _hostError = null;
         _runId = string.Empty;
+        _ownedCampaign = null;
         _hostReadyUtc = DateTime.MinValue;
         _ownedProcessId = 0;
         _ownedProcessStartTimeUtc = default;

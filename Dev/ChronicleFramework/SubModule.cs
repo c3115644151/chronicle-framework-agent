@@ -283,6 +283,7 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
     private int _dailyTickCount;
     private double _lastDailyTickDay;
     private string _agentCampaignInstanceId = string.Empty;
+    private readonly string _agentRuntimeSessionId = Guid.NewGuid().ToString("N");
     private string _agentCheckpointJson = string.Empty;
     private bool _harnessSaveRequested;
     private bool _harnessTimeControlApplied;
@@ -291,6 +292,7 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
     private ChronicleAgentProtocol _agentProtocol;
 
     internal int DailyTickCount => _dailyTickCount;
+    internal string AgentRuntimeSessionId => _agentRuntimeSessionId;
     internal bool AgentProtocolReady => _agentProtocol != null;
     internal void PollAgentProtocol() => _agentProtocol?.Poll(this);
     internal string AgentCampaignInstanceId

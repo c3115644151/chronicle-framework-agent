@@ -15,12 +15,16 @@ internal sealed class NativeMailboxClient : IAgentHostCampaignNativeClient
     private readonly string _root;
     private readonly string _responseRoot;
     private readonly TimeSpan _timeout;
+    private readonly int? _expectedProcessId;
+    private readonly string? _expectedNativeSessionId;
 
-    internal NativeMailboxClient(string protocolRoot, TimeSpan timeout)
+    internal NativeMailboxClient(string protocolRoot, TimeSpan timeout, int? expectedProcessId = null, string? expectedNativeSessionId = null)
     {
         _root = Path.GetFullPath(protocolRoot);
         _responseRoot = Path.Combine(_root, "responses");
         _timeout = timeout;
+        _expectedProcessId = expectedProcessId;
+        _expectedNativeSessionId = expectedNativeSessionId;
         Directory.CreateDirectory(_root);
         Directory.CreateDirectory(_responseRoot);
     }
@@ -82,6 +86,7 @@ internal sealed class NativeMailboxClient : IAgentHostCampaignNativeClient
         var temporaryPath = commandPath + "." + commandId + ".tmp";
         var command = new JsonObject { ["id"] = commandId, ["action"] = action };
         foreach (var property in arguments) command[property.Key] = property.Value?.DeepClone();
+        if (_expectedNativeSessionId != null) command["expectedNativeSessionId"] = _expectedNativeSessionId;
         var json = command.ToJsonString();
 
         await using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
@@ -112,7 +117,8 @@ internal sealed class NativeMailboxClient : IAgentHostCampaignNativeClient
                     var responsePath = Path.Combine(_responseRoot, commandId + "." + status + ".json");
                     if (!File.Exists(responsePath)) continue;
                     var response = await ReadJsonAsync(responsePath, cancellationToken);
-                    ValidateResponse(response.RootElement, commandId, action, status);
+                    try { ValidateResponse(response.RootElement, commandId, action, status); }
+                    catch { response.Dispose(); throw; }
                     return response;
                 }
                 await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken);
@@ -144,13 +150,18 @@ internal sealed class NativeMailboxClient : IAgentHostCampaignNativeClient
         throw new AgentHostException("native-response-unreadable", "A Native mailbox response was not readable as complete JSON.");
     }
 
-    private static void ValidateResponse(JsonElement response, string commandId, string action, string fileStatus)
+    internal void ValidateResponse(JsonElement response, string commandId, string action, string fileStatus)
     {
         if (!response.TryGetProperty("protocolVersion", out var version) || !version.TryGetInt32(out var protocolVersion) || protocolVersion != 1 ||
             !string.Equals(ReadString(response, "commandId"), commandId, StringComparison.Ordinal) ||
             !string.Equals(ReadString(response, "action"), action, StringComparison.Ordinal) ||
             !string.Equals(ReadString(response, "status"), fileStatus, StringComparison.Ordinal))
             throw new AgentHostException("native-response-correlation-invalid", "Native response did not match the Host command and protocol version.");
+        if (_expectedProcessId.HasValue && (!response.TryGetProperty("processId", out var processId) ||
+            !processId.TryGetInt32(out var receivedProcessId) || receivedProcessId != _expectedProcessId.Value))
+            throw new AgentHostException("native-response-process-mismatch", "Native response came from a different Bannerlord process.");
+        if (_expectedNativeSessionId != null && !string.Equals(ReadString(response, "nativeSessionId"), _expectedNativeSessionId, StringComparison.Ordinal))
+            throw new AgentHostException("native-response-session-mismatch", "Native response came from a different loaded Campaign session.");
     }
 
     private static string? ReadString(JsonElement element, string name) =>

@@ -81,6 +81,7 @@ $sessionStarted = $false
 $capture = $null
 $captureResult = $null
 $loopTrace = $null
+$hostReadyMessages = @()
 $failure = $null
 $start = $null
 $stop = $null
@@ -295,8 +296,16 @@ try {
         }
         else {
             $hostRunMode = 'campaign-loop'
+            $hostNativeHandshake = Invoke-AgentCli 'state'
+            if ($hostNativeHandshake.status -ne 'completed' -or [string]::IsNullOrWhiteSpace([string]$hostNativeHandshake.nativeSessionId)) {
+                throw 'Campaign Host evaluation requires a fresh Native session handshake.'
+            }
+            $hostGameProcess = Get-Process -Id ([int]$start.session.processId) -ErrorAction Stop
             $hostRequest = [ordered]@{
                 runId = ('agenthost-campaign-' + [Guid]::NewGuid().ToString('N'))
+                parentProcessId = [int]$hostGameProcess.Id
+                parentProcessStartTimeUtcTicks = $hostGameProcess.StartTime.ToUniversalTime().Ticks
+                nativeSessionId = [string]$hostNativeHandshake.nativeSessionId
                 goal = $goal
                 maxDecisions = $maxDecisions
                 maxElapsedSeconds = $maxElapsedSeconds
@@ -324,8 +333,17 @@ try {
             throw "Local Agent Host $hostRunMode exceeded the bounded process timeout."
         }
         $output = $hostStdoutTask.GetAwaiter().GetResult()
+        $outputLines = @($output -split '\r?\n')
+        $hostReadyMessages = @($outputLines | Where-Object { $_.StartsWith('CHRONICLE_AGENT_HOST_READY|') })
+        $output = ($outputLines | Where-Object { -not $_.StartsWith('CHRONICLE_AGENT_HOST_READY|') }) -join [Environment]::NewLine
         $hostStderr = $hostStderrTask.GetAwaiter().GetResult()
         $loopExitCode = [int]$hostProcess.ExitCode
+        if ($loopExitCode -eq 0 -and $hostRunMode -eq 'campaign-loop') {
+            $expectedReadyPrefix = 'CHRONICLE_AGENT_HOST_READY|1|' + $hostRequest.parentProcessId + '|' + $hostRequest.runId + '|'
+            if (@($hostReadyMessages | Where-Object { $_.StartsWith($expectedReadyPrefix) }).Count -ne 1) {
+                throw 'Campaign Host did not return exactly one readiness receipt bound to the current game and run.'
+            }
+        }
         if ($loopExitCode -ne 0 -and [string]::IsNullOrWhiteSpace($output)) { $output = $hostStderr }
     }
     else {
@@ -794,6 +812,7 @@ $result = [ordered]@{
     FailureEvidenceError = $failureEvidenceError
     FailureEngineFramePath = if ($failureEngineFrameCaptured) { $engineFrameFailurePath } else { $null }
     ProcessId = if ($start -and $start.session) { $start.session.processId } else { $null }
+    HostReadyMessages = @($hostReadyMessages)
     Capture = $captureResult
     Trace = $liveModelTrace
 }

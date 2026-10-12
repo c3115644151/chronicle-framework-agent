@@ -53,6 +53,7 @@ $failure = $null
 $states = @()
 $hostReadyEvents = @()
 $nativeHandshakeVerified = $false
+$nativeSessionGuardVerified = $false
 $nativeWriteActions = @()
 $hostExitEvents = @()
 $watch = [Diagnostics.Stopwatch]::StartNew()
@@ -118,6 +119,13 @@ try {
         [string]$endingState.state.location.targetSettlementId -cne [string]$baseline.state.location.targetSettlementId) {
         throw 'Stopping the Host changed the active Native location/movement state in this cancellation-window test.'
     }
+    if ([string]::IsNullOrWhiteSpace([string]$endingState.nativeSessionId)) { throw 'Native observation did not identify its loaded Campaign bridge session.' }
+    $staleSessionReceipt = Invoke-LifecycleCli 'state' @('-ExpectedNativeSessionId','harness-stale-native-session')
+    $nativeSessionGuardVerified = ($staleSessionReceipt.status -eq 'rejected' -and $staleSessionReceipt.error -eq 'native-session-mismatch' -and
+        $staleSessionReceipt.nativeSessionId -ceq $endingState.nativeSessionId -and
+        $staleSessionReceipt.state.economy.gold -eq $endingState.state.economy.gold -and
+        $staleSessionReceipt.state.location.currentSettlementId -ceq $endingState.state.location.currentSettlementId)
+    if (-not $nativeSessionGuardVerified) { throw 'The Native bridge did not safely reject a command bound to a stale loaded Campaign session.' }
 
     $responseFiles = @(Get-ChildItem -LiteralPath $responseRoot -File -Filter 'host-*.json' -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin $hostResponseFilesBefore })
     foreach ($responseFile in $responseFiles) {
@@ -155,6 +163,7 @@ $result = [pscustomobject][ordered]@{
     AutoStopAfterMilliseconds = $AutoStopAfterMilliseconds
     LifecycleStates = @($states | ForEach-Object { [string]$_ })
     NativeHandshakeVerified = [bool]$nativeHandshakeVerified
+    NativeSessionGuardVerified = [bool]$nativeSessionGuardVerified
     HostReadyEvents = @($hostReadyEvents | ForEach-Object { [string]$_ })
     HostExitEvents = @($hostExitEvents | ForEach-Object { [string]$_ })
     NativeGoalActionsBeforeStop = @($nativeWriteActions | ForEach-Object { [string]$_ })
