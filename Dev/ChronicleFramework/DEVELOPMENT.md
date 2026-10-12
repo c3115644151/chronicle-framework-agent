@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.134
+Contract version: 7.135
 
 ## 目标与边界
 
@@ -255,7 +255,7 @@ Native Barter目录按当前VM会话和成功回执逐阶段开放：没有当�
 | Preflight | 本体、项目、清单和工具存在；存档头模块列表的解析、顺序保留、损坏拒绝 | JSON 清单与合成存档元数据回归 |
 | Api | 当前 DLL 存在目标签名 | API Probe 输出 |
 | Build | 游戏内Mod针对当前DLL编译；外置本地Agent Host单独构建为.NET 8进程 | Build收据分别保留Mod与Host构建输出/退出码；Bannerlord运行时不编译或覆盖已加载DLL |
-| Smoke | 清单、DLL、`OnSubModuleLoad`、`Finished All`与MCM已注册的Chronicle设置定义（模型URL/名称、战役目标、配置检查、启动/停止/状态按钮）；只对严格匹配的着色器缓存弹窗执行一次进程内原生确认，对未知 Warning 只读采集、不乱点 | 同 PID RGL/错误/Watchdog日志副本、结构化Smoke结果及MCM属性ID/按钮ID；Harness模式从游戏启动/主界面阶段显式传入并核验Start/Stop/Status为Button；安全识别的UIA弹窗信息，失败时保留子测试输出，超时与实际崩溃分开 |
+| Smoke | 清单、DLL、`OnSubModuleLoad`、`Finished All`与MCM已注册的Chronicle设置定义（模型URL/名称、战役目标、配置检查、启动/停止/状态按钮）；只对严格匹配的着色器缓存弹窗执行一次进程内原生确认，对未知 Warning 只读采集、不乱点 | 同 PID RGL/错误/Watchdog日志副本、结构化Smoke结果及MCM属性ID/按钮ID；Harness模式从游戏启动/主界面阶段显式传入并核验Start/Stop/Status为Button；Native初始化、程序集生命周期和MCM完整注册均就绪后立即结束启动等待，再单独完成稳定性窗口；收据记录StartupReadySeconds/ElapsedSeconds/超时上限及实际ModuleIds。安全识别的UIA弹窗信息，失败时保留子测试输出，超时与实际崩溃分开 |
 | Campaign/FreshCampaign | 旧档；FreshCampaign新Sandbox原生创建、跳intro、选+20；Progression用临时存档重载再move/arrival/recruit | 同PID renown20/MapState、非激活840x472；Crash Report仅按明确信号有界重试；已知`Mod change detected`着色器缓存提示仅可经精确匹配的目标进程UIA按钮确认一次，不用全局输入；临时存档精确清理、非模型Provider |
 | Protocol | CLI 启动/重载、状态、Native Pause/Play/FastForward、Harness-only独立推进时钟、Campaign保存/跨进程读档、外置Host只读Native状态握手与Native拒绝回执、停止 | Native时间选择对照`Campaign.SetTimeSpeed(0/1/2)`，检查raw/effective模式和waiting状态；固定advance仅用于Harness测试并按日目标或Encounter返回；存档往返使用唯一测试名，比较Save前与新进程读档后的结构化Campaign指纹及Chronicle SyncData计数、源夹具哈希后删除；外置Host三次读状态须与同一PID/MainHero/Clan/MainParty回执一致，且前后Campaign指纹不变；假邮箱覆盖繁忙/错关联ID/超时；一次故意无效的Native Menu option必须获得严格JSON可读的拒绝回执且不改变Campaign。`AgentProtocol.Escape`转义所有JSON控制字符，避免异常堆栈的CR/LF破坏IPC响应。时间步进不得隐式塞入地图移动/追近命令 |
 | AgentHostProvider | 本地Host的IPC邮箱回归、MCM Global Provider profile校验与Ollama结构化决策Provider | 可单独 opt-in；假Mailbox测繁忙/关联ID/超时，假HTTP Handler覆盖请求schema、格式/解析错误、截断、越权动作、HTTP失败及超时；Host在任何Native动作前以只读`GET /v1/models`区分模型缺失/服务不可达，不生成模型响应；确定性Provider用Campaign与补给目录验证共享决策循环；Global profile与Start配置快照共用URL/模型校验；回归检查Host使用当前快照，坏快照被拒后不回退旧profile；不加入`All` |

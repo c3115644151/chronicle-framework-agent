@@ -74,6 +74,7 @@ if (Test-Path $engineConfig) {
 }
 
 $launchStart = Get-Date
+$startupWatch = [Diagnostics.Stopwatch]::StartNew()
 $diagnosticStartLineCount = if (Test-Path $diagnosticLog) { @(Get-Content $diagnosticLog).Count } else { 0 }
 $process = Start-Process -FilePath $gameExe -ArgumentList $arguments -WorkingDirectory (Split-Path $gameExe) -WindowStyle Minimized -PassThru
 $trackedProcessId = $process.Id
@@ -90,6 +91,11 @@ $mcmSettingsRegistered = $WithoutChronicle.IsPresent
 $mcmSettingPropertyIds = @()
 $mcmButtonPropertyIds = @()
 $validationButtonType = if ($WithoutChronicle) { 'not-tested' } else { 'missing' }
+$requiredMcmPropertyIds = @('OllamaBaseUrl', 'ModelId', 'ValidateLocalConfiguration', 'CampaignGoal', 'StartAgent', 'StopAgent', 'ViewAgentStatus')
+$requiredMcmButtonPropertyIds = @('ValidateLocalConfiguration', 'StartAgent', 'StopAgent', 'ViewAgentStatus')
+$mcmDefinitionComplete = $WithoutChronicle.IsPresent
+$startupReadySeconds = $null
+$stabilityCompleted = $false
 $startupFault = $null
 $startupDialogReceipts = [System.Collections.Generic.List[object]]::new()
 $startupDialogSnapshots = [System.Collections.Generic.List[object]]::new()
@@ -156,6 +162,13 @@ while ((Get-Date) -lt $deadline) {
     if (Test-Path $watchdogLog) {
         $crashDetected = (Get-Content $watchdogLog -Raw) -match 'Crash occurred|ExceptionCode:'
     }
+    $mcmDefinitionComplete = $WithoutChronicle.IsPresent -or ($mcmSettingsRegistered -and $validationButtonType -eq 'Button' -and
+        @($requiredMcmPropertyIds | Where-Object { $_ -notin $mcmSettingPropertyIds }).Count -eq 0 -and
+        @($requiredMcmButtonPropertyIds | Where-Object { $_ -notin $mcmButtonPropertyIds }).Count -eq 0)
+    if ($finishedAll -and -not $crashDetected -and $assemblyLoaded -and $lifecycleLoadObserved -and $mcmDefinitionComplete) {
+        $startupReadySeconds = [Math]::Round($startupWatch.Elapsed.TotalSeconds, 2)
+        break
+    }
     if ($finishedAll -and $crashDetected) {
         break
     }
@@ -166,7 +179,7 @@ while ((Get-Date) -lt $deadline) {
     Start-Sleep -Milliseconds 500
 }
 
-if ($finishedAll -and -not $crashDetected) {
+if ($null -ne $startupReadySeconds -and -not $crashDetected) {
     $stabilityDeadline = (Get-Date).AddSeconds($StabilitySeconds)
     while ((Get-Date) -lt $stabilityDeadline) {
         if (-not (Get-Process -Id $process.Id -ErrorAction SilentlyContinue)) {
@@ -182,6 +195,7 @@ if ($finishedAll -and -not $crashDetected) {
         }
         Start-Sleep -Milliseconds 500
     }
+    $stabilityCompleted = (-not $crashDetected -and -not $processExitedUnexpectedly -and (Get-Date) -ge $stabilityDeadline)
 }
 
 function Get-DescendantProcessIds([int]$parentId) {
@@ -206,6 +220,7 @@ if (Test-Path $engineConfig) {
     Set-Content -Path $engineConfig -Value $engineText -NoNewline
 }
 
+$startupWatch.Stop()
 $result = [ordered]@{
     ManifestId = $manifestId
     Build = 'passed'
@@ -220,7 +235,12 @@ $result = [ordered]@{
     FinishedAll = $finishedAll
     CrashDetected = $crashDetected
     ProcessExitedUnexpectedly = $processExitedUnexpectedly
-    StableAfterFinishedAll = ($finishedAll -and -not $crashDetected)
+    StableAfterFinishedAll = [bool]$stabilityCompleted
+    StartupReadySeconds = $startupReadySeconds
+    StartupTimeoutSeconds = $TimeoutSeconds
+    StabilitySeconds = $StabilitySeconds
+    ElapsedSeconds = [Math]::Round($startupWatch.Elapsed.TotalSeconds, 2)
+    ModuleIds = @($modules)
     StartupFault = $startupFault
     StartupDialogReceipts = @($startupDialogReceipts)
     StartupDialogSnapshots = @($startupDialogSnapshots)
@@ -238,11 +258,6 @@ $result.EvidenceResultPath = $resultPath
 $result | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $resultPath -Encoding UTF8
 $result | ConvertTo-Json
 
-$requiredMcmPropertyIds = @('OllamaBaseUrl', 'ModelId', 'ValidateLocalConfiguration', 'CampaignGoal', 'StartAgent', 'StopAgent', 'ViewAgentStatus')
-$requiredMcmButtonPropertyIds = @('ValidateLocalConfiguration', 'StartAgent', 'StopAgent', 'ViewAgentStatus')
-$mcmDefinitionComplete = $mcmSettingsRegistered -and $validationButtonType -eq 'Button' -and
-    @($requiredMcmPropertyIds | Where-Object { $_ -notin $mcmSettingPropertyIds }).Count -eq 0 -and
-    @($requiredMcmButtonPropertyIds | Where-Object { $_ -notin $mcmButtonPropertyIds }).Count -eq 0
-if (-not $finishedAll -or $crashDetected -or $processExitedUnexpectedly -or (-not $WithoutChronicle -and (-not $assemblyLoaded -or -not $lifecycleLoadObserved -or -not $mcmDefinitionComplete))) {
+if (-not $finishedAll -or -not $stabilityCompleted -or $crashDetected -or $processExitedUnexpectedly -or (-not $WithoutChronicle -and (-not $assemblyLoaded -or -not $lifecycleLoadObserved -or -not $mcmDefinitionComplete))) {
     exit 1
 }
