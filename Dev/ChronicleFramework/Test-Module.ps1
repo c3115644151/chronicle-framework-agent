@@ -2,6 +2,7 @@
 param(
     [switch]$WithoutChronicle,
     [switch]$WithoutPrerequisites,
+    [switch]$SkipBuild,
     [int]$TimeoutSeconds = 45,
     [int]$StabilitySeconds = 8
 )
@@ -22,9 +23,11 @@ if ($existing) {
     throw 'Bannerlord is already running. Close it before running the automated module test.'
 }
 
-dotnet build $project --configuration Release --no-restore | Out-Host
-if ($LASTEXITCODE -ne 0) {
-    throw 'ChronicleFramework build failed.'
+if (-not $SkipBuild) {
+    dotnet build $project --configuration Release --no-restore | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw 'ChronicleFramework build failed.'
+    }
 }
 
 [xml]$manifest = Get-Content (Join-Path $modulePath 'SubModule.xml')
@@ -33,9 +36,20 @@ if ($manifestId -ne 'ChronicleFramework') {
     throw "Manifest Id '$manifestId' does not match the module directory and test target."
 }
 $manifestDependencies = @($manifest.Module.DependedModules.DependedModule | ForEach-Object { [string]$_.Id })
-foreach ($requiredDependency in @('Native', 'SandBoxCore', 'SandBox')) {
+foreach ($requiredDependency in @('Bannerlord.Harmony','Bannerlord.ButterLib','Bannerlord.UIExtenderEx','Bannerlord.MBOptionScreen','Native','SandBoxCore','SandBox')) {
     if ($requiredDependency -notin $manifestDependencies) {
         throw "Manifest is missing required dependency '$requiredDependency'."
+    }
+}
+foreach ($dependency in @($manifest.Module.DependedModules.DependedModule)) {
+    $dependencyId = [string]$dependency.Id
+    $minimumVersion = [string]$dependency.DependentVersion
+    $dependencyManifestPath = Join-Path $gameRoot ("Modules\{0}\SubModule.xml" -f $dependencyId)
+    if (-not (Test-Path -LiteralPath $dependencyManifestPath -PathType Leaf)) { throw "Required module manifest is missing: $dependencyId" }
+    [xml]$dependencyManifest = Get-Content -LiteralPath $dependencyManifestPath -Encoding UTF8
+    $installedVersion = ([string]$dependencyManifest.Module.Version.value).TrimStart('v')
+    if (-not [string]::IsNullOrWhiteSpace($minimumVersion) -and [version]$installedVersion -lt [version]$minimumVersion.TrimStart('v')) {
+        throw "Installed prerequisite $dependencyId version $installedVersion is below declared minimum $minimumVersion."
     }
 }
 $dll = Join-Path $modulePath 'bin\Win64_Shipping_Client\ChronicleFramework.dll'
@@ -223,6 +237,9 @@ if (Test-Path $engineConfig) {
 $startupWatch.Stop()
 $result = [ordered]@{
     ManifestId = $manifestId
+    GameRoot = $gameRoot
+    ModuleDirectory = $modulePath
+    GameExecutable = $gameExe
     Build = 'passed'
     ChronicleIncluded = (-not $WithoutChronicle.IsPresent)
     AssemblyLoaded = $assemblyLoaded

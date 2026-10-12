@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.149'
+$contractVersion = '7.151'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -303,7 +303,14 @@ $providerProfileTestSource = Get-Content (Join-Path $harnessRoot 'AgentHost\Prov
 $providerHostSource = Get-Content (Join-Path $harnessRoot 'AgentHost\OllamaNativeProvider.cs') -Raw -Encoding UTF8
 $supplyHostSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostSupplyLoop.cs') -Raw -Encoding UTF8
 $sourceModuleManifest = Get-Content $sourceManifestPath -Raw -Encoding UTF8
-if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $sourceModuleManifest -notmatch 'DependedModule Id="Bannerlord\.MBOptionScreen"' -or
+if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatch 'Reference Include="0Harmony"' -or
+    $sourceModuleManifest -notmatch 'DependedModule Id="Bannerlord\.Harmony" DependentVersion="[^"]+" Optional="false"' -or
+    $sourceModuleManifest -notmatch 'DependedModule Id="Bannerlord\.ButterLib" DependentVersion="[^"]+" Optional="false"' -or
+    $sourceModuleManifest -notmatch 'DependedModule Id="Bannerlord\.UIExtenderEx" DependentVersion="[^"]+" Optional="false"' -or
+    $sourceModuleManifest -notmatch 'DependedModule Id="Bannerlord\.MBOptionScreen" DependentVersion="[^"]+" Optional="false"' -or
+    $sourceModuleManifest -notmatch 'DependedModule Id="Native" DependentVersion="[^"]+" Optional="false"' -or
+    $sourceModuleManifest -notmatch 'DependedModule Id="SandBoxCore" DependentVersion="[^"]+" Optional="false"' -or
+    $sourceModuleManifest -notmatch 'DependedModule Id="SandBox" DependentVersion="[^"]+" Optional="false"' -or
     $providerSettingsSource -notmatch 'AttributeGlobalSettings<ChronicleAgentProviderSettings>' -or $providerSettingsSource -notmatch 'FormatType => "json"' -or
     $providerSettingsSource -notmatch 'OllamaBaseUrl' -or $providerSettingsSource -notmatch 'ModelId' -or
     $providerSettingsSource -notmatch 'SettingPropertyButton' -or $providerSettingsSource -notmatch 'AgentProviderConfigurationValidator\.GetErrorCode' -or
@@ -327,6 +334,29 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $sourceModuleManifest
     throw 'Player model settings must expose MCM Global JSON fields with an explicit safe format check, and the Agent Host must consume that same loopback-only profile outside Harness overrides.'
 }
 $smokeModuleSource = Get-Content (Join-Path $harnessRoot 'Test-Module.ps1') -Raw -Encoding UTF8
+$releasePackageSource = Get-Content (Join-Path $harnessRoot 'New-ChronicleReleasePackage.ps1') -Raw -Encoding UTF8
+$releasePackageTestSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostReleasePackage.ps1') -Raw -Encoding UTF8
+if ($harnessScript -notmatch "'ReleasePackage' \{ @\('Preflight', 'AgentHostPackage', 'ReleasePackage'\) \}" -or
+    $harnessScript -match "'All' \{[^\r\n]*'ReleasePackage'" -or
+    $releasePackageSource -notmatch 'D:\\ChronicleFramework\\BuildCache\\ReleasePackages' -or
+    $releasePackageSource -notmatch 'IO\.Compression\.ZipArchive' -or
+    $releasePackageSource -notmatch 'sourceTreeClean' -or
+    $releasePackageSource -notmatch 'ChronicleAgentHost\.exe' -or
+    $releasePackageSource -notmatch 'release-manifest\.json' -or
+    $releasePackageSource -notmatch 'SHA256' -or
+    $releasePackageSource -notmatch 'LICENSE\.txt' -or
+    $releasePackageTestSource -notmatch 'PackageReproducible' -or
+    $releasePackageTestSource -notmatch 'ManifestValidated' -or
+    $releasePackageTestSource -notmatch 'New-IsolatedGameRoot' -or
+    $releasePackageTestSource -notmatch 'Test-Module\.ps1' -or
+    $releasePackageTestSource -notmatch 'FormalSaveHashesUnchanged' -or
+    $releasePackageTestSource -notmatch 'Get-DirectorySnapshotSha256' -or
+    $releasePackageTestSource -notmatch 'UserMcmConfigurationUnchanged' -or
+    $releasePackageTestSource -notmatch 'Remove-IsolatedTree' -or
+    $smokeModuleSource -notmatch 'Bannerlord\.Harmony' -or $smokeModuleSource -notmatch 'Bannerlord\.MBOptionScreen' -or
+    $smokeModuleSource -notmatch '\[switch\]\$SkipBuild') {
+    throw 'W7-I must build a deterministic D: release archive, verify its inventory/checksum, install into a separate isolated game root and Smoke it without deploying into the user''s module directory.'
+}
 $subModuleSource = Get-Content (Join-Path $harnessRoot 'SubModule.cs') -Raw -Encoding UTF8
 if ($harnessScript -notmatch "HarnessContractVersion\s*=\s*'$contractVersion'" -or
     $smokeModuleSource -notmatch 'HarnessShaderCacheDialog\.ps1' -or $smokeModuleSource -notmatch 'Invoke-ChronicleShaderCacheDialogAcknowledgement' -or
