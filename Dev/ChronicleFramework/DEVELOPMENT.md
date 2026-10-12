@@ -367,7 +367,7 @@ Native Barter目录按当前VM会话和成功回执逐阶段开放：没有当�
 - Progression证据保留初始Renown、招募回执/净变化、存档周期验证；清理后存档哈希不变。
 - Protocol 若暂时无法读取 `.processing` 命令，保留 claim 并延迟重试，不删失/丢弃命令；Docs 检查此恢复契约。
 - W7-B 的 `AgentHost/` 是目标玩家产品的本地 .NET 8 Host，不属于游戏线程，也不是Harness决策器。当前只提供一次只读 `state` 握手：写入独立关联ID，拒绝覆盖已有`command.json`，只接受关联ID/动作/状态都匹配的Native响应；超时仅删除仍能证明归属自身的未领取命令。它只返回PID、Hero/Clan/MainParty摘要，不输出整份快照、不发送世界动作。Protocol Harness先用假桥验证邮箱繁忙、旧/错响应与超时清理，再在一次性Campaign里连续调用三次Host，并与同一PID的原生CLI只读状态、前后Campaign指纹比较；这证明通信和零世界副作用，不代表模型循环已迁移或玩家入口已交付。
-- W7-K 的村庄工具委托为 Host 邮箱新增独立的封闭传输边界：只接受地图查询/移动、当前菜单/聚落人物QuickConversation、当前对话选项、已观察任务查询及Native Trade动作，并逐项校验参数形状；不含时间控制、Quest写入或库存/金币快捷写入。该白名单只是传输层安全边界；每轮可见动作、实体ID绑定、任务成功后验与真实模型完整闭环仍须由任务循环另行实现/验证，不能把白名单自测写成游戏能力完成。
+- W7-K 的村庄工具委托为 Host 邮箱新增独立的封闭传输边界：只接受地图查询/移动、当前菜单/聚落人物QuickConversation、当前对话选项、已观察任务查询、Native Trade及主角Inventory核验/取消动作，并逐项校验参数形状；不含时间控制、Quest写入或库存/金币快捷写入。对标检查MineDojo Voyager公开的“环境反馈/错误/自验证”循环与Mineflayer的原生控制API后，本项目采用逐轮Native观察→模型选一个原版动作→读取原版结果/后验的可审计结构，不让模型生成可直接执行的任意游戏代码；理由是本Mod只需要有限原版入口，而错误的直调代码可能越过当前界面条件并直接改战役状态。该白名单只是传输层安全边界；每轮可见动作、实体ID绑定、任务成功后验与真实模型完整闭环仍须由任务循环另行实现/验证，不能把白名单自测写成游戏能力完成。
 - 自动启动用本体 `DisplayMode_0`，840×472 无抢焦点置左上；结构化断言坐标/尺寸，禁止把 `DisplayMode_2` 当窗口模式。
 - P3快照来自Campaign API；schema 9含战后InventoryState、双方item数量、遭遇待领取item数和仅在主队GoToPoint时提供的`location.targetPosition{x,y,isOnLand}`。该目标坐标用于恢复Agent移动意图，不是对其他Party/全图隐匿坐标的授权；回执按UTF-8读写。
 - W2-B陆地自由地点移动使用`moveToPoint(X,Y,Surface=land)`世界坐标意图，不发送桌面像素。原生`MapState.ProcessTravel`/CampaignVec2校验为准；写入GoToPoint后回执给出实际原生目标，位置自然变化，不传送。Naval/海上过渡是独立未测边界，不由本动作宣称支持。

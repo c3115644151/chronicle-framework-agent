@@ -15,7 +15,8 @@ internal sealed class NativeMailboxClient : IAgentHostCampaignNativeClient
     private static readonly HashSet<string> VillageToolsQuestActions = new(StringComparer.Ordinal)
     {
         "mapSettlementTargets", "move", "menuSelect", "talkToSettlementHero", "dialogueSelect",
-        "dialogueContinue", "questDetails", "tradeOptions", "trade", "tradeConfirm", "tradeCancelChanges"
+        "dialogueContinue", "questDetails", "tradeOptions", "trade", "tradeConfirm", "tradeCancelChanges",
+        "inventoryOpen", "heroEquipmentOptions", "inventoryCancel"
     };
 
     private readonly string _root;
@@ -101,7 +102,8 @@ internal sealed class NativeMailboxClient : IAgentHostCampaignNativeClient
 
         var valid = action switch
         {
-            "mapSettlementTargets" or "dialogueContinue" or "tradeOptions" or "tradeConfirm" or "tradeCancelChanges" => arguments.Count == 0,
+            "mapSettlementTargets" or "dialogueContinue" or "tradeOptions" or "tradeConfirm" or "tradeCancelChanges" or
+                "inventoryOpen" or "heroEquipmentOptions" or "inventoryCancel" => arguments.Count == 0,
             "move" => HasOnlyKeys(arguments, "settlementId") && HasText(arguments, "settlementId"),
             "menuSelect" => HasOnlyKeys(arguments, "menuId", "optionId") && HasText(arguments, "menuId") && HasText(arguments, "optionId"),
             "talkToSettlementHero" => HasOnlyKeys(arguments, "heroId") && HasText(arguments, "heroId"),
@@ -132,7 +134,10 @@ internal sealed class NativeMailboxClient : IAgentHostCampaignNativeClient
             ("tradeOptions", "{}"),
             ("trade", "{\"direction\":\"buy\",\"itemViewModelId\":\"tools\",\"inventorySide\":\"OtherInventory\",\"amount\":1}"),
             ("tradeConfirm", "{}"),
-            ("tradeCancelChanges", "{}")
+            ("tradeCancelChanges", "{}"),
+            ("inventoryOpen", "{}"),
+            ("heroEquipmentOptions", "{}"),
+            ("inventoryCancel", "{}")
         };
         foreach (var item in validCases)
         {
@@ -146,7 +151,8 @@ internal sealed class NativeMailboxClient : IAgentHostCampaignNativeClient
             ("talkToSettlementHero", "{\"heroId\":\"\"}"),
             ("trade", "{\"direction\":\"buy\",\"itemViewModelId\":\"tools\",\"inventorySide\":\"OtherInventory\",\"amount\":0}"),
             ("trade", "{\"direction\":\"delete\",\"itemViewModelId\":\"tools\",\"inventorySide\":\"OtherInventory\",\"amount\":1}"),
-            ("tradeConfirm", "{\"questId\":\"quest-1\"}")
+            ("tradeConfirm", "{\"questId\":\"quest-1\"}"),
+            ("inventoryCancelChanges", "{}")
         };
         foreach (var item in invalidCases)
         {
