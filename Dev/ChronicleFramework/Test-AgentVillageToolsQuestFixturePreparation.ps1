@@ -56,6 +56,48 @@ try {
     $state = Invoke-NativeCli 'state'
     if ($state.status -ne 'completed' -or $state.state.context.gameState -ne 'MapState') { throw 'Source fixture did not load into Campaign Map state.' }
 
+    if ([int]$state.state.party.members -lt 5) {
+        $initialTargets = Invoke-NativeCli 'mapSettlementTargets'
+        if ($initialTargets.status -ne 'completed') { throw 'Native map query failed while seeking an observed Town for ordinary escort preparation.' }
+        $safeTown = @($initialTargets.data.mapSettlementTargets |
+            Where-Object { $_.type -eq 'town' -and -not $_.hostile -and -not $_.underSiege -and [double]$_.distance -gt 1.0 } |
+            Sort-Object { [double]$_.distance } | Select-Object -First 1)
+        if ($safeTown.Count -eq 1) {
+            $townId = [string]$safeTown[0].id
+            $townMove = Invoke-NativeCli 'move' @('-SettlementId', $townId)
+            if ($townMove.status -eq 'completed' -and [string]$townMove.state.location.targetSettlementId -ceq $townId) {
+                $preludeActions.Add([ordered]@{ action='move'; settlementId=$townId; purpose='ordinary Native escort preparation before quest travel'; status=[string]$townMove.status })
+                $townDeadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+                do {
+                    Start-Sleep -Seconds 1
+                    $state = Invoke-NativeCli 'state' @() 45
+                    if ([bool]$state.state.context.encounterActive -or [string]$state.state.context.menuId -eq 'encounter_meeting') { throw 'A Native encounter interrupted escort preparation; no encounter option was selected.' }
+                    if ([string]$state.state.location.currentSettlementId -ceq $townId -and [string]$state.state.context.menuId -eq 'town') { break }
+                    if (-not [bool]$state.state.party.isMoving) { throw "Native escort preparation travel to '$townId' stopped before arrival." }
+                } while ([DateTime]::UtcNow -lt $townDeadline)
+
+                if ([string]$state.state.location.currentSettlementId -ceq $townId -and [string]$state.state.context.menuId -eq 'town') {
+                    while ([int]$state.state.party.members -lt 5) {
+                        $offers = Invoke-NativeCli 'recruitOptions'
+                        if ($offers.status -ne 'completed') { break }
+                        $offer = @($offers.data.offers | Where-Object { $_.available -and [int]$_.cost -le ([int]$state.state.economy.gold - 500) } | Sort-Object { [int]$_.cost }, { [int]$_.slot } | Select-Object -First 1)
+                        if ($offer.Count -ne 1) { break }
+                        $recruit = Invoke-NativeCli 'recruit' @('-OwnerId', [string]$offer[0].ownerId, '-TroopId', [string]$offer[0].troopId, '-VolunteerSlot', [string]$offer[0].slot, '-CommandId', ('w7k-prelude-recruit-' + [Guid]::NewGuid().ToString('N')))
+                        if ($recruit.status -ne 'completed' -or -not [bool]$recruit.data.verified) { throw 'Native volunteer recruitment failed during the excluded fixture-safety prelude.' }
+                        $state = Invoke-NativeCli 'state'
+                        $preludeActions.Add([ordered]@{ action='recruit'; ownerId=[string]$offer[0].ownerId; troopId=[string]$offer[0].troopId; cost=[int]$offer[0].cost; isolatedFixtureSetup=$true; status=[string]$recruit.status })
+                    }
+                    $leaveTown = @($state.state.availableMenuOptions | Where-Object { $_.isLeave -and $_.available -and $_.enabled } | Select-Object -First 1)
+                    if ($leaveTown.Count -eq 1) {
+                        $leaveReceipt = Invoke-NativeCli 'menuSelect' @('-MenuId', [string]$state.state.context.menuId, '-OptionId', [string]$leaveTown[0].id)
+                        $state = Invoke-NativeCli 'state'
+                        $preludeActions.Add([ordered]@{ action='menuSelect'; optionId=[string]$leaveTown[0].id; status=[string]$leaveReceipt.status })
+                    }
+                }
+            }
+        }
+    }
+
     for ($attempt = 1; $attempt -le $MaxVillages; $attempt++) {
         if ($state.state.context.menuId -and [string]$state.state.location.currentSettlementId) {
             if ([string]$state.state.context.menuId -notin @('village','town','town_backstreet')) {

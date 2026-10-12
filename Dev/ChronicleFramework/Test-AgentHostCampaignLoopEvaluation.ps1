@@ -116,6 +116,17 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         foreach ($requiredAction in $requiredActions) {
             if (@($nativeActions | Where-Object { [string]$_.actionReceipt.action -eq $requiredAction }).Count -eq 0) { $requiredActionsObserved = $false; break }
         }
+        $talkStep = @($modelSteps | Where-Object { [string]$_.decision.action -eq 'talkToSettlementHero' } | Select-Object -First 1)
+        $visibleIssueMarkerVerified = $false
+        if ($talkStep.Count -eq 1) {
+            $talkHeroId = [string]$talkStep[0].decision.arguments.HeroId
+            $observedGiver = @($talkStep[0].observationBefore.state.settlementOverlayCharacters | Where-Object { [string]$_.heroId -ceq $talkHeroId })
+            $visibleIssueMarkerVerified = ($observedGiver.Count -eq 1 -and @($observedGiver[0].questMarkers | Where-Object {
+                [string]$_.type -eq 'AvailableIssue' -and
+                (([string]$_.title + ' ' + [string]$_.hint) -match '(?i)tools?' -or (([string]$_.title + ' ' + [string]$_.hint).Contains(([char]0x5DE5).ToString() + ([char]0x5177).ToString())))
+            }).Count -gt 0)
+        }
+        $tradeCommits = @($nativeActions | Where-Object { [string]$_.actionReceipt.action -eq 'tradeConfirm' -and $_.actionReceipt.data.committed -eq $true })
         $clockActions = @($nativeActions | Where-Object { $_.actionReceipt.action -in @('advance','pause','resume','fastForward') })
         $passed = (
             $childExitCode -eq 0 -and $liveResult -and [bool]$liveResult.Passed -and
@@ -124,6 +135,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
             [string]$trace.AcceptanceSlice -eq 'Real-model Native VillageNeedsTools quest acceptance, delivery and exact inventory delta' -and
             [bool]$trace.VillageToolsQuestVerified -and [bool]$trace.VillageToolsQuestInventoryDeltaVerified -and
             [bool]$trace.ProviderStoppedAfterGoalAction -and [int]$trace.Decisions -le 100 -and
+            $visibleIssueMarkerVerified -and $tradeCommits.Count -eq 1 -and [string]$tradeCommits[0].actionReceipt.data.itemId -ceq 'tools' -and
             [bool]$fixturePreparation.Prepared -and [bool]$fixturePreparation.SourceFixtureUnchanged -and [bool]$preparedSaveRemoved -and
             $requiredActionsObserved -and $clockActions.Count -eq 0 -and
             [bool]$trace.SourceTrackedTreeClean -and [string]$trace.SourceCommit -eq (git.exe -C $PSScriptRoot rev-parse HEAD).Trim() -and
@@ -156,6 +168,8 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         modelConfigurationSource = if ($trace) { [string]$trace.ModelConfigurationSource } else { $null }
         fixturePreparedFromNaturalVisibleIssue = if ($fixturePreparation) { [bool]$fixturePreparation.Prepared } else { $null }
         preparedIssueGiver = if ($fixturePreparation) { $fixturePreparation.VisibleMarker } else { $null }
+        observedIssueMarkerMatchedTalkTarget = if ($VillageToolsQuest) { [bool]$visibleIssueMarkerVerified } else { $null }
+        nativeToolTradeCommits = if ($VillageToolsQuest) { @($tradeCommits | ForEach-Object { $_.actionReceipt.data }) } else { @() }
         preparedSaveRemoved = $preparedSaveRemoved
         trackedTreeClean = if ($trace) { [bool]$trace.SourceTrackedTreeClean } else { $false }
         decisions = if ($trace) { [int]$trace.Decisions } else { $null }
