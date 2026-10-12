@@ -129,6 +129,8 @@ W2-I已实现主角的按需`spendSkillFocus(SkillId, Count)`动作。它接受�
 
 默认系统中Clan Renown决定Clan Tier；Clan Influence是可增减的政治/军团资源。Renown不会直接等同金钱、Hero关系或影响力。当前1.4.8默认Tier下限为0/50/150/350/900/2350/6150，Tier 1可达佣兵资格，Tier 2可达封臣资格；家族Party上限、同伴上限、主队规模和Workshop上限也会受Tier与Perks等模型修正。实际条件应由当前TierModel重新计算，不能用旧版本固定数值。
 
+本机安装版1.4.8.119303 `StoryMode.dll` 的 `StoryMode.Quests.PlayerClanQuests.RebuildPlayerClanQuest` 将主线“Establish Your Clan”（简中标题“建立你的家族”）实现为四项同时满足的进度门槛，而非只检查Tier 1：MainHero当前金币达到2000、MainParty达到当前`BanditDensityModel.GetMinimumTroopCountForHideoutMission(MainParty,false)`动态人数、Clan Renown达到50、Clan Companions目标达到1名同伴。Clan源码显示`Companions`独立缓存只由`OnCompanionAdded/Removed`维护，玩家Hero本身经`OnHeroAdded`进入Clan Heroes，不会自动计为同伴。`UpdateProgresses()`全部满足才调用`CompleteQuestWithSuccess()`；`OnCompleteWithSuccess()`随后增加25 Renown。日志文案“增加1000第纳尔”不等同代码要求净赚1000：Quest用起始当前金币作为进度、目标常量2000。其人数门槛依当前Native模型/Party状态计算，不应常量化。`FirstPhaseCampaignBehavior.OnStoryModeTutorialEnded()`通过原版`StartQuest()`启动该目标；执行评测需要自然激活此任务的StoryMode存档。来源为已安装1.4.8 StoryMode.dll与CampaignSystem.dll的反编译类型；教程事件后的实际运行态触发仍需运行时验证。该任务现用作单机自主游玩的必要端到端门禁；Sandbox没有这条StoryMode任务，不能混作相同验收。
+
 Renown来源不是一个单独按钮；已源核实的野战/模拟战斗奖励按战力、贡献份额、敌方伤亡比例、奖励模型和Perk等变化，见MAINLINE Tier 1证据与F/G10。其他战斗、任务、锦标赛和政治行为有各自前置/路径，须按H11行为来源去重，不能把RewardModel调用点数当成玩家可达途径数。Influence收入/消耗见E07/F13/C：例如军团召集、凝聚力与政治决策是不同支出，不应该合并成一个“声望系统”行为。战役时钟不因读取数值或打开相关面板而快进；来源动作各自遵循原版Campaign事件/行动。
 
 Chronicle主观察已返回Clan Renown、Influence、Tier、下一级Renown需求和佣兵门槛，但不解释变化因果，也无Renown主动增减、政治决策或通用Influence交易动作。证据：`DefaultClanTierModel`、`DefaultBattleRewardModel`、F/G战斗及E/C政治经济资料、Chronicle `AgentObserver`。未知为全部自然玩家Renown来源/前置/收益的去重分母、不同模式或Mod修改阈值、Influence自动收入和支出事件的完整覆盖、收益在UI/日志可见时点及失败重试后果；不得因此把Tier 1测试当成已掌握全部成长闭环。

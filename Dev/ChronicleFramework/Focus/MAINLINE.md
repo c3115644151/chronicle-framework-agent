@@ -36,7 +36,7 @@ Research Gate: **READY**
 Implementation Gate: **READY**
 行为总分母：**182**（核心Campaign ACT族；OBS分母：**73**，23个N/A不计入）　游戏版本：**1.4.8.119303**
 
-玩家行为目录以本机1.4.8.119303官方Native/SandBox/SandBoxCore/StoryMode为基线；`SYSTEM_INVENTORY.md`的126项是系统研究入口，不是动作数量。当前目录含183条ACT、73条OBS和23条N/A，其中`ACT-A06-06`仅为打开Cheat菜单的特权入口，另有控制台/作弊命令；它们留在条件特权扩展，不计入标准Campaign行动分母或普通Agent白名单。故标准行动族分母为182，观察面分母为73。本轮根据用户玩家观察补入两个此前未拆开的成员加入入口：`ACT-F05-04`未交战的地图行军Army成员加入，以及`ACT-G01-06`在已有SiegeEvent中加入攻城方；两者和Army管理页Roster事务、Army战斗援助均区分。W2覆盖审计此前补入`ACT-G10-01`战后Loot提交和`ACT-H04-03`聚落志愿兵招募。前者不代表自然掉落全覆盖；招募不代表Town、Backstreet、Village三种入口及真实Gauntlet界面都已视觉验收。其他全游戏系统不因这些局部工作而宣称已实现。第三方Gameplay模块、模型覆写和动态新增入口属于条件扩展，不能静默算进基线或宣称已兼容。多人核心是通过多人战役Mod加入共享Campaign，不包含原生PvP赛事、ForfeitSpawn或通用MP语音；未来支持语音时作为独立通信接口评估。盘点与产品工作次序由GitHub Project维护；本文不保存活动Issue/完成状态。Research Gate通过后仍需按任务板实现、逐项验证；Tier 1仅作为未来成熟度夹具。首个AI战斗接入优先使用Campaign地图坐镇/BattleSimulation；Mission部署、实时Orders和士兵控制仍属完整产品目录，但不属初始战斗切片。Minecraft Agent研究作为架构参考，不构成绕过全景研究的理由。
+玩家行为目录以本机1.4.8.119303官方Native/SandBox/SandBoxCore/StoryMode为基线；`SYSTEM_INVENTORY.md`的126项是系统研究入口，不是动作数量。当前目录含183条ACT、73条OBS和23条N/A，其中`ACT-A06-06`仅为打开Cheat菜单的特权入口，另有控制台/作弊命令；它们留在条件特权扩展，不计入标准Campaign行动分母或普通Agent白名单。故标准行动族分母为182，观察面分母为73。本轮根据用户玩家观察补入两个此前未拆开的成员加入入口：`ACT-F05-04`未交战的地图行军Army成员加入，以及`ACT-G01-06`在已有SiegeEvent中加入攻城方；两者和Army管理页Roster事务、Army战斗援助均区分。W2覆盖审计此前补入`ACT-G10-01`战后Loot提交和`ACT-H04-03`聚落志愿兵招募。前者不代表自然掉落全覆盖；招募不代表Town、Backstreet、Village三种入口及真实Gauntlet界面都已视觉验收。其他全游戏系统不因这些局部工作而宣称已实现。第三方Gameplay模块、模型覆写和动态新增入口属于条件扩展，不能静默算进基线或宣称已兼容。多人核心是通过多人战役Mod加入共享Campaign，不包含原生PvP赛事、ForfeitSpawn或通用MP语音；未来支持语音时作为独立通信接口评估。盘点与产品工作次序由GitHub Project维护；本文不保存活动Issue/完成状态。Research Gate通过后仍需按任务板实现、逐项验证；单独Tier 1不算通过，单机自主成长的必要门禁是StoryMode原版`Establish Your Clan`四项目标全完成。首个AI战斗接入优先使用Campaign地图坐镇/BattleSimulation；Mission部署、实时Orders和士兵控制仍属完整产品目录，但不属初始战斗切片。Minecraft Agent研究作为架构参考，不构成绕过全景研究的理由。
 
 Implementation Gate READY仅表示允许推进当前单一、边界清楚且已有当前版本机制契约/重复验收路径的W2工作项；不表示182个核心动作已实现或任意功能都可开工。任何变更仍须先有对应玩家入口、前置/副作用/时间与后置条件，限定在GitHub唯一In Progress事项内，运行最窄的原生结果测试；无法复现的分支必须留下明确未知，不能据API调用成功宣称完成。
 
@@ -312,7 +312,7 @@ flowchart TD
 | 玩家行为与观察面 | A-L全域审完并跨域去重后，按核心Campaign ACT族ID计行动分母、按OBS族ID计观察分母；明确排除的特权作弊接口另列，不并入核心分母 | 每条目录记录在来源列引用有效系统编号，且所有126个A-L编号至少被引用一次；Docs同时验证ID唯一、引用已定义和逐系统有目录映射。当前含183条ACT（含1条权限隔离入口），基线182核心ACT/73 OBS；`ACT-A06-06`与其可选作弊命令属单独权限扩展；详细事实见对应Research/源码/运行证据 |
 | GameState接口 | 反编译枚举的状态类型只是接口分母，不等于玩家行为或 Agent 覆盖率 | 按当前安装DLL重新盘点；API Probe和运行时结果分别标记 |
 | 自主 Agent 闭环 | 必须有非测试模型/规划器选择目标、调用白名单动作、验证结果，并在世界变化或失败后重规划 | 确定性Provider、单动作成功或累计动作数量均不能算自主闭环 |
-| 长程成长夹具 | Tier 1用于评测长期规划、资源、风险和恢复，不是产品目标，也不要求通过刷固定奖励达成 | 结果必须来自 disposable campaign、保留状态/动作证据并清理夹具；失败如实保留 |
+| 长程自主游玩门禁 | 以StoryMode原版`Establish Your Clan`（`RebuildPlayerClanQuest`）完整成功作为单机自主玩家必须通过的端到端门禁；Tier 1/50 Renown只是其中一项，不能单独代替完成任务 | 使用一个经原版StoryMode Tutorial结束事件自然激活该Quest的disposable Campaign起点，模型只在Quest真实活动后接管并推进。四项目标为：MainHero当前金币达到2000、MainParty达到当前`BanditDensityModel.GetMinimumTroopCountForHideoutMission(MainParty,false)`人数门槛、Clan Renown达到50、至少招募1名同伴。以原版Quest成功结束及四项后验为完成证据；禁止注入Quest/资源/进度或固定脚本冒充模型自主。成功奖励25 Renown是完成后的原版后果，不计入前置达标。这个最低门禁不宣称AI已能从新档完成Tutorial前置，后者仍需独立纳入完整产品行为范围。保留失败/重规划与状态证据并清理fixture |
 | 视觉证据 | 仅用于结构化遥测不能判明的真实界面迁移；采集窗口、帧覆盖、索引和源视频清理均需验证 | 关键帧与事件时间线可追溯至同一run；不将截图替代游戏状态真值 |
 
 新增动作族先更新完整行为分母和验收定义；命令数、Issue数量和测试运行次数都不代表 Agent 能力进度。
@@ -416,9 +416,20 @@ flowchart LR
 
 证据等级统一标为：源码/资源核实、运行时状态核实、自动动作/结果核实、人工视觉核实。高等级不自动替代低等级；尤其“VM 调用成功”不等于“已验证玩家从界面入口走通”。
 
-## Tier 1 long-horizon evaluation fixture
+## StoryMode “Establish Your Clan” end-to-end gate
 
-本阶段定位：Tier 1 是衡量新档 Agent 成长/资源/风险闭环的验证场景，不是产品目标或必须“过关”的交付承诺。不得为凑足 50 Renown 临时堆一次性功能；若通用能力不足，记录证据与缺口，按产品主线判断是否值得补齐。
+这不是“Tier 1 单条件演示”，而是单机自主玩家的必要长程门禁。最小验收输入是可丢弃的StoryMode存档：由原版教程自然结束并启动`RebuildPlayerClanQuest`，不是注入任务的造档；Agent在Quest自然活动后开始决策。它只证明任务段闭环，不证明Agent能从新档完成教程前置。测试不得注入目标/资源或用预设动作脚本冒充模型自主通过。
+
+本机 Bannerlord `1.4.8.119303` 安装版 `StoryMode.dll` 反编译 `RebuildPlayerClanQuest` 已核到：Quest 标题为 `Establish Your Clan`；`FirstPhaseCampaignBehavior.OnStoryModeTutorialEnded()`会在StoryMode教程结束时通过原版`StartQuest()`自然启动它。必要门禁从一个真实流程自然激活该Quest的disposable StoryMode存档开始，不得预注入Quest/进度/资源；这只验证该长程目标闭环，不声称AI已经能从新档开始完成前置教程。成功条件由`UpdateProgresses()`同时检查以下四项：
+
+1. MainHero 当前金币达到 2000。日志文本说“增加 1000 第纳尔”，但代码将初始当前金币作为进度、目标常量设为 2000；验收以运行时 Native Journal/Quest 状态为准，不把措辞误读成净赚1000。
+2. MainParty人数达到当前模型动态门槛 `_partySizeGoal = BanditDensityModel.GetMinimumTroopCountForHideoutMission(MainParty, false)`；不得把它硬编码成一个跨档案恒定值。
+3. Clan Renown达到50；这是Tier 1相关条件，但不是整个任务。
+4. 至少招募1名同伴；Quest将Clan Companions列表计数截顶为目标1，玩家Hero不会因身为Clan Leader而自动满足该项。
+
+四项全部满足后原版才调用 `CompleteQuestWithSuccess()`；`OnCompleteWithSuccess()`再给予25点Renown。因此要分别记录任务未完成期间四项进度和原版完成/奖励后果，不能把奖励倒灌成前置目标。
+
+该门禁现在取代“只测50 Renown/Tier 1”的旧口径。成长路径研究要同时覆盖资金、队伍规模、同伴、Renown四个耦合目标以及它们共享的玩家入口/副作用；当前的地图移动、招募、任务、交易、战斗、同伴等能力只能按实际覆盖证明，不得因单项数值达标就宣称通过。每次运行以新鲜Native观察→模型选择当前可用的原版动作→原版结果收据→Native后验复核为循环，失败分支不得固定重放动作；每项动作仍遵守各自机制契约和Campaign自然时间规则。
 
 1.4.8新档与成长证据
 
