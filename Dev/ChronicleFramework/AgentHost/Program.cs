@@ -86,7 +86,10 @@ internal static class Program
                     protocolRoot,
                     stopToken.Token,
                     nativeProcessId => EmitReady(requestDocument.RootElement, nativeProcessId));
-                var stopTask = WaitForStopSignalAsync(Console.In, stopInputToken.Token);
+                // Console.In is a synchronized TextReader and may perform an async
+                // line read synchronously. Keep an open stdin pipe from blocking
+                // the owner that observes loop completion and parent exit.
+                var stopTask = Task.Run(() => WaitForStopSignalAsync(Console.In, stopInputToken.Token));
                 var parentExitTask = WaitForParentExitAsync(parentProcess, parentMonitorCancellation.Token);
                 var completedTask = await Task.WhenAny(loopTask, stopTask, parentExitTask);
                 if (completedTask == stopTask)
@@ -253,7 +256,64 @@ internal static class Program
             probe?.Dispose();
         }
 
+        await VerifyOpenInputDoesNotBlockTerminalResultAsync(hostPath);
+        results.Add(new { scenario = "campaign-host-open-stdin-does-not-block-terminal-error", passed = true });
         return results;
+    }
+
+    private static async Task VerifyOpenInputDoesNotBlockTerminalResultAsync(string hostPath)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ChronicleHostInputProbe-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        using var owner = Process.GetCurrentProcess();
+        using var child = new Process
+        {
+            StartInfo = new ProcessStartInfo(hostPath)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            }
+        };
+        child.StartInfo.ArgumentList.Add("--campaign-loop");
+        child.StartInfo.ArgumentList.Add("--protocol-root");
+        child.StartInfo.ArgumentList.Add(root);
+        var childStarted = false;
+        try
+        {
+            childStarted = child.Start();
+            if (!childStarted) throw new AgentHostException("open-input-probe-start-failed", "Could not start the open-input lifecycle probe.");
+            var outputTask = child.StandardOutput.ReadToEndAsync();
+            var errorTask = child.StandardError.ReadToEndAsync();
+            var request = new
+            {
+                parentProcessId = owner.Id,
+                parentProcessStartTimeUtcTicks = owner.StartTime.ToUniversalTime().Ticks,
+                nativeSessionId = "no-native-command-probe",
+                goal = "Reject the invalid action catalog before contacting any service.",
+                allowedActionNames = Array.Empty<string>(),
+                providerConfiguration = new { OllamaBaseUrl = "http://127.0.0.1:11434/v1", ModelId = "unused-local-probe" }
+            };
+            await child.StandardInput.WriteLineAsync(JsonSerializer.Serialize(request));
+            await child.StandardInput.FlushAsync();
+            // Deliberately leave stdin open, as the game does during ordinary play.
+            await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            var error = await errorTask;
+            await outputTask;
+            if (child.ExitCode != 2 || !error.Contains("campaign-loop-request-invalid", StringComparison.Ordinal))
+                throw new AgentHostException("open-input-probe-result-invalid", "An open input pipe prevented the expected pre-action failure result.");
+        }
+        finally
+        {
+            if (childStarted && !child.HasExited)
+            {
+                child.Kill(entireProcessTree: true);
+                await child.WaitForExitAsync();
+            }
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     internal static IAgentHostDecisionProvider CreateCampaignDecisionProvider(JsonElement request)
