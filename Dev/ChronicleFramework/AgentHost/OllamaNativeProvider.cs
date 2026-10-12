@@ -227,9 +227,11 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             Content = new StringContent(body, new UTF8Encoding(false), "application/json")
         };
         HttpResponseMessage response;
+        using var requestTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        requestTimeout.CancelAfter(_settings.Timeout);
         try
         {
-            response = await _client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            response = await _client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, requestTimeout.Token);
         }
         catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
@@ -251,7 +253,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             byte[] responseBytes;
             try
             {
-                responseBytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+                responseBytes = await response.Content.ReadAsByteArrayAsync(requestTimeout.Token);
             }
             catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
             {

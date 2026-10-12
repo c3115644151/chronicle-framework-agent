@@ -198,6 +198,10 @@ W5-K在`TestResults/20261010-181412`以两次独立New Campaign完成：第1次�
 
 上文末尾关于“后续架构应评估”的表述是本次实现前的差距记录，现已由第一版受限Native完成契约实现：Provider报`done`后，本地只读Verifier核对最多24项允许Native字段与`eq`/`gte`条件；未满足或未知会把逐项条件和当前值反馈给同一循环，不发Native动作，也不把Provider停止冒充成功。契约随Campaign Agent checkpoint保存，重载先重读Native状态；目标已满足则记录`verified-complete`，未满足则带缺项继续。`TestResults/20261010-194136`的AgentLoop阶段通过：确定性Provider两次故意过早报done均未被当成成功，循环收到缺项后继续；不完整契约经disposable Native存档保存/重载后仍被重新判定为未完成。该证据覆盖循环和checkpoint路径，不替代真实模型三次供给目标验收；有限比较器不是任意脚本或通用无限DSL。
 
+### 本地Provider运行核验
+
+本地Provider需区分模型目录存在与推理可用。本机Ollama 0.40.1曾缺少`lib/ollama/llama-server.exe`及配套库，目录查询成功但推理进程无法创建。使用同版本官方Windows包修复，包SHA-256为`b394d14436d38032f23190e3f14eb2c6dad5ebbe4e192414f74c8fdca01703ab`，主程序与原安装文件哈希一致；旧库保留于`D:\Ollama\App\lib-incomplete-20261012`，未重下模型。原`qwen3.5:4b-q4_K_M`短推理返回OK（5.19秒、17 tokens），日志确认33/33层GPU加载；服务以`OLLAMA_NO_CLOUD=true`运行，日志在D盘BuildCache/OllamaRepair。此证据仅证明本机推理恢复。单次Provider时限现覆盖响应头与正文，无模型回归验证正文停滞返回`provider-timeout`；真实生命周期完成测试先做有界一token推理预检，避免运行库失效时启动游戏。目录探测本身仍只证明模型登记/服务可达。
+
 ### Campaign存档内的Agent目标Checkpoint
 
 本机1.4.8的`CampaignBehaviorBase.SyncData(IDataStore)`会随Native Campaign存档序列化行为字段；Chronicle用这一入口保存Campaign实例GUID和受限大小的Agent checkpoint JSON。`agentCheckpointGet/Set`是Mod/Host内部协议，不暴露给LLM动作白名单，并且只允许Campaign Map上下文；原版世界状态始终以读档后的新Observer结果为准，旧观察快照不是恢复真值。当前checkpoint v1包含目标、`schemaVersion`、Campaign实例ID、provider停止状态、最后一个已确认Native动作回执的紧凑摘要及最近状态摘要；`done`只记为`provider-stopped`，并不等同成功判定。`Agent-DecisionLoop -PersistCheckpoint`在新的Agent运行时写入目标并于每个原生动作/后验观察后更新；`-ResumeCheckpoint`先获取新Native state，再核对Campaign实例和checkpoint版本，将目标与receipt送回模型。若最后receipt只是只读`mapSettlementTargets`，恢复时安全地重新查询而不重复世界副作用。

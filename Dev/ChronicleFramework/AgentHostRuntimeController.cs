@@ -388,6 +388,7 @@ internal static class ChronicleAgentRuntimeController
             if (_hostError != null) errorOutput = _hostError.GetAwaiter().GetResult();
         }
         catch { }
+        AgentHostLifecycleReceipt.CaptureForHarness(output, errorOutput);
         if (!string.IsNullOrWhiteSpace(_forcedFailureDetail))
             SetState(RuntimeState.Failed, _forcedFailureDetail);
         else if (output.IndexOf("\"reason\":\"native-action-result-ambiguous\"", StringComparison.Ordinal) >= 0)
@@ -400,6 +401,10 @@ internal static class ChronicleAgentRuntimeController
             SetState(RuntimeState.Failed, "本地服务中没有配置的模型");
         else if (ContainsAny(output, errorOutput, "provider-unavailable", "could not be reached"))
             SetState(RuntimeState.Failed, "本地模型服务不可连接");
+        else if (ContainsAny(output, errorOutput, "provider-timeout"))
+            SetState(RuntimeState.Failed, "本地模型回复超时；Host已停止，请检查模型服务");
+        else if (ContainsAny(output, errorOutput, "provider-http-error", "provider-unreachable"))
+            SetState(RuntimeState.Failed, "本地模型推理请求失败；请检查服务日志与运行组件");
         else if (ContainsAny(output, errorOutput, "provider-profile-missing", "profile-missing"))
             SetState(RuntimeState.Failed, "未找到已保存的MCM本地模型设置");
         else if (ContainsAny(output, errorOutput, "campaign-parent-exited", "campaign-parent-not-running", "campaign-parent-identity-mismatch", "native-parent-process-mismatch"))

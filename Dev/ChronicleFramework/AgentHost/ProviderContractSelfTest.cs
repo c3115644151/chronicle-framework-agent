@@ -216,6 +216,8 @@ internal static class ProviderContractSelfTest
         results.Add(new { scenario = "http-unavailable", passed = true });
         await ExpectTimeoutAsync(settings);
         results.Add(new { scenario = "provider-timeout", passed = true });
+        await ExpectResponseBodyTimeoutAsync(settings);
+        results.Add(new { scenario = "provider-response-body-timeout", passed = true });
 
         return new
         {
@@ -391,6 +393,45 @@ internal static class ProviderContractSelfTest
             return;
         }
         throw new AgentHostException("provider-self-test-timeout-failed", "Provider timeout was not bounded.");
+    }
+
+    private static async Task ExpectResponseBodyTimeoutAsync(OllamaProviderSettings settings)
+    {
+        var timeoutSettings = settings with { Timeout = TimeSpan.FromMilliseconds(50) };
+        using var handler = new StubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new DelayedBodyContent()
+        }));
+        using var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        using var provider = new OllamaNativeProvider(timeoutSettings, client);
+        using var request = JsonDocument.Parse(BuildDecisionRequest());
+        try
+        {
+            await provider.DecideAsync(request.RootElement, CancellationToken.None);
+        }
+        catch (AgentHostException exception) when (exception.Code == "provider-timeout")
+        {
+            return;
+        }
+        throw new AgentHostException("provider-self-test-body-timeout-failed", "Response headers bypassed the configured body deadline.");
+    }
+
+    private sealed class DelayedBodyContent : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) =>
+            SerializeToStreamAsync(stream, context, CancellationToken.None);
+
+        protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context, CancellationToken cancellationToken)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+            await stream.WriteAsync(Encoding.UTF8.GetBytes("{}"), cancellationToken);
+        }
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
+        }
     }
 
     private static string BuildDecisionRequest() => """

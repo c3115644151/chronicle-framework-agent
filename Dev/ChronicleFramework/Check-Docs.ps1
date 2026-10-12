@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.135'
+$contractVersion = '7.137'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -326,6 +326,8 @@ if ($harnessScript -notmatch "HarnessContractVersion\s*=\s*'$contractVersion'" -
     $smokeModuleSource -notmatch 'StartupTimeoutSeconds' -or $smokeModuleSource -notmatch 'ModuleIds = @\(\$modules\)' -or
     $smokeModuleSource -notmatch 'CampaignGoal' -or $smokeModuleSource -notmatch 'ViewAgentStatus' -or
     $subModuleSource -notmatch 'ProbeHarnessMcmSettingsRegistration' -or
+    $subModuleSource -notmatch 'TrySkipHarnessStartupVideo' -or $subModuleSource -notmatch 'state\.CanUserSkip' -or
+    $subModuleSource -notmatch 'player\.StopVideo\(\)' -or $subModuleSource -notmatch 'harness-mcm-settings-wait' -or
     $subModuleSource -notmatch 'BaseSettingsProvider\.Instance' -or $subModuleSource -notmatch 'ValidateLocalConfiguration' -or
     $subModuleSource -notmatch 'ChronicleAgentRuntimeController\.Tick\(\)' -or $subModuleSource -notmatch 'StopForSubModuleUnload' -or
     $subModuleSource -notmatch 'agent-host-lifecycle-test' -or
@@ -357,7 +359,7 @@ $agentHostLifecycleHarness = Get-Content (Join-Path $harnessRoot 'Test-AgentHost
 if ($harnessScript -notmatch "'AgentHostLifecycleEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostLifecycleEvaluation'\) \}" -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostLifecycleEvaluation'" -or
     $agentHostLifecycleHarness -notmatch 'agent-host-lifecycle-test' -or $agentHostLifecycleHarness -notmatch 'AgentBridgeLifecycle' -or
-    $agentHostLifecycleHarness -notmatch 'NativeGoalActionsBeforeStop' -or $agentHostLifecycleHarness -notmatch 'NativeHandshakeVerified' -or
+    $agentHostLifecycleHarness -notmatch 'NativeGoalActions' -or $agentHostLifecycleHarness -notmatch 'NativeHandshakeVerified' -or
     $agentHostLifecycleHarness -notmatch 'CHRONICLE_HARNESS_AGENT_NO_MODEL' -or $agentHostLifecycleHarness -notmatch 'CliSessionCleaned' -or
     $agentHostLifecycleHarness -notmatch 'NativeSessionGuardVerified' -or $agentCliSource -notmatch 'ExpectedNativeSessionId' -or
     $agentHostLifecycleHarness -notmatch 'StartupRejectionCases' -or $agentHostLifecycleHarness -notmatch 'DuplicateStartVerified' -or
@@ -370,6 +372,13 @@ if ($harnessScript -notmatch "'AgentHostLifecycleEvaluation' \{ @\('Preflight', 
     $subModuleSource -notmatch 'Instance\?\.StartAgent\?\.Invoke\(\)' -or
     $agentHostRuntimeControllerSource -notmatch 'Instance\?\.StopAgent') {
     throw 'Agent Host lifecycle verification must remain opt-in, use a disposable Campaign, exercise the registered MCM action delegates, require a versioned Native-PID handshake before Running, stop safely, and preserve source fixture/process cleanup.'
+}
+if ($harnessScript -notmatch "'AgentHostLifecycleCompletionEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostLifecycleCompletionEvaluation'\) \}" -or
+    $harnessScript -match "'All' \{[^\r\n]*'AgentHostLifecycleCompletionEvaluation'" -or
+    $harnessScript -notmatch '\-Scenario Complete' -or $agentHostLifecycleHarness -notmatch 'NativeArrivalCompleted' -or
+    $agentHostLifecycleHarness -notmatch 'AgentHostLifecycleHostReceipt\.json' -or
+    $agentHostRuntimeControllerSource -notmatch 'AgentHostLifecycleReceipt\.CaptureForHarness') {
+    throw 'Real game-launched Host completion must remain opt-in, use the local model and Native arrival postcondition, and keep a sanitized lifecycle receipt without full model prompts or responses.'
 }
 $agentHostPackageSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostPackage.ps1') -Raw -Encoding UTF8
 $agentHostProgramSource = Get-Content (Join-Path $harnessRoot 'AgentHost\Program.cs') -Raw -Encoding UTF8

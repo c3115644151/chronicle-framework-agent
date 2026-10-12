@@ -24,6 +24,8 @@ public sealed class SubModule : MBSubModuleBase
     private bool _freshCampaignMusicReadyLogged;
     private bool _harnessMcmSettingsProbeCompleted;
     private float _harnessMcmSettingsProbeElapsed;
+    private bool _harnessMcmSettingsWaitLogged;
+    private object _harnessLastStartupVideoScreen;
     private bool _harnessAgentLifecycleStartRequested;
     private float _harnessAgentLifecycleStartDelay;
     private static bool _harnessFocusLossEscapeMenuGuardInstalled;
@@ -175,6 +177,7 @@ public sealed class SubModule : MBSubModuleBase
     protected override void OnApplicationTick(float dt)
     {
         base.OnApplicationTick(dt);
+        TrySkipHarnessStartupVideo();
         ChronicleAgentRuntimeController.Tick();
         if (!_harnessAgentLifecycleStartRequested &&
             Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") == "agent-host-lifecycle-test" &&
@@ -242,7 +245,15 @@ public sealed class SubModule : MBSubModuleBase
             var settingsProvider = BaseSettingsProvider.Instance;
             var settings = settingsProvider?.GetSettings("ChronicleAgentSettings") as ChronicleAgentProviderSettings;
             var definition = settingsProvider?.SettingsDefinitions.FirstOrDefault(item => item.SettingsId == "ChronicleAgentSettings");
-            if (settings == null && definition == null && _harnessMcmSettingsProbeElapsed < 30f) return;
+            if (settings == null || definition == null)
+            {
+                if (!_harnessMcmSettingsWaitLogged && _harnessMcmSettingsProbeElapsed >= 30f)
+                {
+                    _harnessMcmSettingsWaitLogged = true;
+                    ChronicleDiagnostics.Write("harness-mcm-settings-wait|reason=registration-not-ready");
+                }
+                return;
+            }
 
             var propertyIds = definition?.SettingPropertyGroups
                 .SelectMany(group => group.SettingProperties)
@@ -265,6 +276,30 @@ public sealed class SubModule : MBSubModuleBase
         {
             ChronicleDiagnostics.Write($"harness-mcm-settings-probe-failed|type={exception.GetType().FullName}|message={exception.Message}");
             _harnessMcmSettingsProbeCompleted = true;
+        }
+    }
+
+    private void TrySkipHarnessStartupVideo()
+    {
+        var mode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+        if ((mode != "smoke" && mode != "agent-host-lifecycle-test") || Campaign.Current != null) return;
+        var screen = TaleWorlds.ScreenSystem.ScreenManager.TopScreen;
+        if (screen == null || ReferenceEquals(screen, _harnessLastStartupVideoScreen) ||
+            screen.GetType().FullName != "TaleWorlds.MountAndBlade.GauntletUI.GauntletVideoPlaybackScreen") return;
+        try
+        {
+            var screenType = typeof(TaleWorlds.MountAndBlade.View.Screens.VideoPlaybackScreen);
+            var state = screenType.GetField("_videoPlaybackState", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(screen) as VideoPlaybackState;
+            var player = screenType.GetField("_videoPlayerView", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(screen) as TaleWorlds.Engine.VideoPlayerView;
+            if (state == null || !state.CanUserSkip || player == null) return;
+            player.StopVideo();
+            _harnessLastStartupVideoScreen = screen;
+            ChronicleDiagnostics.Write("harness-startup-video-skipped|entry=Native CanUserSkip StopVideo|video=" + Path.GetFileName(state.VideoPath));
+        }
+        catch (Exception exception)
+        {
+            _harnessLastStartupVideoScreen = screen;
+            ChronicleDiagnostics.Write("harness-startup-video-skip-failed|type=" + exception.GetType().Name);
         }
     }
 
