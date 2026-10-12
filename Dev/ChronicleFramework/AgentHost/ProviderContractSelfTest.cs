@@ -645,6 +645,7 @@ internal static class ProviderContractSelfTest
             root.GetProperty("response_format").GetProperty("type").GetString() != "json_schema" ||
             root.GetProperty("response_format").GetProperty("json_schema").GetProperty("schema").GetProperty("oneOf").GetArrayLength() != 1 ||
             root.GetProperty("response_format").GetProperty("json_schema").GetProperty("schema").GetProperty("oneOf")[0].GetProperty("properties").GetProperty("control").GetProperty("const").GetString() != "done" ||
+            root.GetProperty("response_format").GetProperty("json_schema").GetProperty("schema").GetProperty("oneOf")[0].GetProperty("properties").GetProperty("reason").GetProperty("maxLength").GetInt32() != 120 ||
             root.GetProperty("max_completion_tokens").GetInt32() != 128 ||
             root.GetProperty("store").GetBoolean())
             throw new AgentHostException("provider-self-test-request-failed", "Provider request did not constrain its local response to the current decision catalog.");

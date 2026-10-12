@@ -23,7 +23,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.157'
+$HarnessContractVersion = '7.158'
 $effectiveSmokeTimeoutSeconds = if ($Phase -eq 'AgentHostVillageToolsQuestEvaluation') { [Math]::Max($SmokeTimeoutSeconds, 240) } else { $SmokeTimeoutSeconds }
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'

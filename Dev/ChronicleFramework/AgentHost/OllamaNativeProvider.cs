@@ -355,7 +355,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     {
                         ["action"] = new JsonObject { ["type"] = "string", ["const"] = actionName },
                         ["arguments"] = new JsonObject { ["type"] = "object", ["properties"] = argumentProperties, ["required"] = requiredArgumentNames, ["additionalProperties"] = false },
-                        ["rationale"] = new JsonObject { ["type"] = "string" }
+                        ["rationale"] = new JsonObject { ["type"] = "string", ["maxLength"] = 120 }
                     },
                     ["required"] = new JsonArray("action", "arguments", "rationale"),
                     ["additionalProperties"] = false
@@ -380,7 +380,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     properties["waitSeconds"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 10 };
                     required.Add("waitSeconds");
                 }
-                properties["reason"] = new JsonObject { ["type"] = "string" };
+                properties["reason"] = new JsonObject { ["type"] = "string", ["maxLength"] = 120 };
                 required.Add("reason");
                 alternatives.Add(new JsonObject
                 {
