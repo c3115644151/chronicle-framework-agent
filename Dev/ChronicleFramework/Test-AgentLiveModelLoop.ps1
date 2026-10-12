@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
     [int]$TimeoutSeconds = 180,
@@ -7,6 +7,7 @@ param(
     [switch]$RecruitmentLoop,
     [switch]$RoadsideBanditNegotiationLoop,
     [switch]$SupplyManagementLoop,
+    [switch]$VillageToolsQuestLoop,
     [switch]$AgentHostRuntime
 )
 
@@ -24,8 +25,9 @@ $sessionPath = Join-Path $documentsRoot 'AgentRuns\ChronicleAgent\session.json'
 if (Get-Process -Name Bannerlord* -ErrorAction SilentlyContinue) {
     throw 'Refusing to start a live-model Campaign test while any Bannerlord client is already running.'
 }
-if (@($ArrivalLoop, $RecruitmentLoop, $RoadsideBanditNegotiationLoop, $SupplyManagementLoop | Where-Object { $_ }).Count -gt 1) { throw 'Select only one LiveModel test goal per run.' }
-if ($AgentHostRuntime -and -not ($SupplyManagementLoop -or $ArrivalLoop)) { throw 'AgentHostRuntime supports only the frozen Native supply and safe map-arrival slices.' }
+if (@($ArrivalLoop, $RecruitmentLoop, $RoadsideBanditNegotiationLoop, $SupplyManagementLoop, $VillageToolsQuestLoop | Where-Object { $_ }).Count -gt 1) { throw 'Select only one LiveModel test goal per run.' }
+if ($AgentHostRuntime -and -not ($SupplyManagementLoop -or $ArrivalLoop -or $VillageToolsQuestLoop)) { throw 'AgentHostRuntime supports only the frozen Native supply, map-arrival and VillageNeedsTools quest slices.' }
+if ($VillageToolsQuestLoop -and -not $AgentHostRuntime) { throw 'VillageToolsQuestLoop requires the in-game .NET Agent Host route; the older PowerShell decision loop is not product evidence.' }
 if ($RoadsideBanditNegotiationLoop -and -not $RecruitmentLoop) { throw 'RoadsideBanditNegotiationLoop requires RecruitmentLoop so the encounter resolves into the existing growth goal.' }
 foreach ($setting in @('CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL','CHRONICLE_LLM_API_KEY','CHRONICLE_LLM_TIMEOUT_SECONDS','CHRONICLE_LLM_MAX_TOKENS','CHRONICLE_LLM_MAX_TOKEN_PARAMETER','CHRONICLE_LLM_REASONING_EFFORT','CHRONICLE_LLM_THINKING_MODE','CHRONICLE_LLM_TEMPERATURE','CHRONICLE_LLM_PROTOCOL')) {
     $configuredValue = [string][Environment]::GetEnvironmentVariable($setting, 'Process')
@@ -162,8 +164,22 @@ try {
     $start = Invoke-AgentCli 'load' @('-SaveName', $LoadSaveName)
     $sessionStarted = $true
     $baseline = Invoke-AgentCli 'state'
-    if ($baseline.status -ne 'completed' -or $baseline.state.context.gameState -ne 'MapState' -or $baseline.state.location.currentSettlementId) {
-        throw 'Live-model fixture must load into an unobstructed Campaign Map state.'
+    if ($baseline.status -ne 'completed' -or $baseline.state.context.gameState -ne 'MapState') {
+        throw 'Live-model fixture must load into Native Campaign Map state.'
+    }
+    if ($VillageToolsQuestLoop) {
+        $visibleToolsMarker = @($baseline.state.settlementOverlayCharacters | Where-Object {
+            @($_.questMarkers | Where-Object {
+                [string]$_.type -eq 'AvailableIssue' -and
+                (([string]$_.title + ' ' + [string]$_.hint) -match '(?i)tools?' -or (([string]$_.title + ' ' + [string]$_.hint).Contains(([char]0x5DE5).ToString() + ([char]0x5177).ToString())))
+            }).Count -gt 0
+        })
+        if ([string]$baseline.state.context.menuId -ne 'village' -or [string]::IsNullOrWhiteSpace([string]$baseline.state.location.currentSettlementId) -or $visibleToolsMarker.Count -eq 0) {
+            throw 'VillageToolsQuestLoop requires a disposable save loaded at a village menu with the current Native blue tools-issue marker visible; no model action was sent.'
+        }
+    }
+    elseif ($baseline.state.location.currentSettlementId) {
+        throw 'Non-quest live-model map fixtures must remain unobstructed with no current settlement.'
     }
     $null = Capture-EngineFrame 'LiveModelEngine-before'
     $capture = Start-ChronicleWindowVideoCapture -ProcessId ([int]$start.session.processId) -OutputPath $videoPath -FrameRate $FrameRate
@@ -263,6 +279,14 @@ try {
         $completionContractBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($completionContractJson))
         $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '180'
         $env:CHRONICLE_LLM_MAX_TOKENS = '256'
+    }
+    elseif ($VillageToolsQuestLoop) {
+        $goal = '完成当前可见的村庄工具委托。只用原版当前可见的任务标记、对话、交易、任务日志与物品栏入口；先理解Journal的请求数量和奖励，不要猜。若当前地图尚未接取，找到安全可见村庄并与当前蓝色工具委托交谈、选择当前可用接受项。之后按Journal达到目标、用Native交易买工具并确认，回到委托人交付。交付前在Journal任务进度达标后、当前Conversation外，用原版Inventory记录目标物品当前数量；交付后再次核对目标物品准确减少请求量，奖励物品准确增加Journal显示数量。任何中立遭遇/劫匪遭遇/缺少可见入口都安全停止，不得用时钟命令、作弊、脚本或直接数据写入。仅当原版Quest不再活动、Journal奖励与物品栏差值精确匹配、Host开放done时才完成。'
+        $maxDecisions = 100
+        $maxElapsedSeconds = 1800
+        $allowedActions = 'mapSettlementTargets,move,menuSelect,talkToSettlementHero,dialogueSelect,dialogueContinue,questDetails,tradeOptions,trade,tradeConfirm,tradeCancel,tradeCancelChanges,inventoryOpen,heroEquipmentOptions,inventoryCancel'
+        $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '180'
+        $env:CHRONICLE_LLM_MAX_TOKENS = '512'
     }
     elseif ($ArrivalLoop) {
         $goal = 'First query mapSettlementTargets. Then choose the nearest observed safe target (not hostile, not under siege, not the current settlement) and issue one move. While party.isMoving toward that target and currentSettlementId differs, use observeAgain with waitSeconds 5; do not send move again or use clock controls. When nativeMoveArrival.status is arrived, return done immediately and issue no further game action.'
@@ -422,7 +446,31 @@ try {
         }
     }
 
-    if ($SupplyManagementLoop) {
+    if ($VillageToolsQuestLoop) {
+        $lastObservedStep = @($steps | Where-Object { $_.observationAfter -and $_.observationAfter.state } | Select-Object -Last 1)
+        $finalObservation = if ($lastObservedStep.Count -eq 1) { $lastObservedStep[0].observationAfter } else { $baseline }
+        $questActions = @($steps | Where-Object { $_.actionExecuted } | ForEach-Object { [string]$_.actionReceipt.action })
+        $nativeClockActions = @($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -in @('advance','pause','resume','fastForward') })
+        $questVerified = ([string]$loopTrace.status -eq 'completed' -and [bool]$loopTrace.questWasObservedActive -and
+            [bool]$loopTrace.inventoryVerifiedAfterTurnIn -and [bool]$loopTrace.termination.goalVerified -and $nativeClockActions.Count -eq 0 -and
+            $questActions.Contains('questDetails') -and $questActions.Contains('tradeOptions') -and $questActions.Contains('trade') -and
+            $questActions.Contains('tradeConfirm') -and $questActions.Contains('talkToSettlementHero') -and $questActions.Contains('dialogueSelect') -and
+            $questActions.Contains('inventoryOpen') -and $questActions.Contains('heroEquipmentOptions') -and $questActions.Contains('inventoryCancel'))
+        $providerStoppedAfterGoalAction = $questVerified
+        $chosenId = [string]$loopTrace.questId
+        $chosenTarget = @([pscustomobject]@{ id = $chosenId; name = 'Native VillageNeedsTools issue' })
+        $observedTargets = @()
+        $targetQueries = @($steps | Where-Object { $_.decision.action -eq 'mapSettlementTargets' -and $_.actionReceipt.status -eq 'completed' })
+        $observeSteps = @($steps | Where-Object { $_.control.kind -eq 'bounded-observe-again' })
+        $arrivalConfirmed = $questVerified
+        $campaignDayAdvancedDuringTravel = $null
+        $nativeMovementObserved = ($questActions -contains 'move')
+        $nativeReadObservationsAfterMove = @()
+        $preNativeTravelReobservations = @()
+        $chosenObservedSafeTarget = $null
+        if (-not $questVerified) { throw 'Host live-model VillageNeedsTools task lacked the complete Native Quest plus exact Inventory delta postconditions.' }
+    }
+    elseif ($SupplyManagementLoop) {
         $chosenId = $chosenSettlementId
         $chosenTarget = @([pscustomobject]@{ id = $chosenSettlementId; name = $chosenSettlementName })
         $observedTargets = @($chosenTarget)
@@ -644,13 +692,13 @@ try {
         CampaignDayEnd = [double]$finalObservation.campaignDay
         StartupDialogReceipts = @($start.session.startupDialogReceipts)
         Goal = $goal
-        AcceptanceSlice = if ($SupplyManagementLoop) { 'Real-model Native food purchase and three-day Town Wait' } elseif ($RoadsideBanditNegotiationLoop) { 'Native roadside Safe Passage, recovery, and volunteer recruitment' } elseif ($RecruitmentLoop) { 'Native movement plus volunteer recruitment' } elseif ($ArrivalLoop) { 'Native movement arrival' } else { 'Native movement order accepted' }
+        AcceptanceSlice = if ($VillageToolsQuestLoop) { 'Real-model Native VillageNeedsTools quest acceptance, delivery and exact inventory delta' } elseif ($SupplyManagementLoop) { 'Real-model Native food purchase and three-day Town Wait' } elseif ($RoadsideBanditNegotiationLoop) { 'Native roadside Safe Passage, recovery, and volunteer recruitment' } elseif ($RecruitmentLoop) { 'Native movement plus volunteer recruitment' } elseif ($ArrivalLoop) { 'Native movement arrival' } else { 'Native movement order accepted' }
         SafePassageRoute = $safePassageRoute
         HarnessWorldEvents = @($loopTrace.harnessEvents)
         ChosenSettlementId = $chosenId
         ChosenSettlementName = [string]$chosenTarget[0].name
         ObservedTargetCount = $observedTargets.Count
-        QueryThenNativeMoveVerified = (-not $SupplyManagementLoop)
+        QueryThenNativeMoveVerified = (-not ($SupplyManagementLoop -or $VillageToolsQuestLoop))
         ChosenTargetSource = $targetSource
         ArrivalConfirmed = $arrivalConfirmed
         BoundedReobservations = $observeSteps.Count
@@ -658,6 +706,10 @@ try {
         NativeTravelReobservations = ($observeSteps.Count + $preNativeTravelReobservations.Count)
         CampaignDayAdvancedDuringTravel = $campaignDayAdvancedDuringTravel
         RecruitmentVerified = if ($RecruitmentLoop) { [bool]$nativeRecruitmentVerified } else { $null }
+        VillageToolsQuestVerified = if ($VillageToolsQuestLoop) { [bool]$questVerified } else { $null }
+        VillageToolsQuestId = if ($VillageToolsQuestLoop) { [string]$loopTrace.questId } else { $null }
+        VillageToolsQuestInventoryDeltaVerified = if ($VillageToolsQuestLoop) { [bool]$loopTrace.inventoryVerifiedAfterTurnIn } else { $null }
+        NativeClockActions = if ($VillageToolsQuestLoop) { @($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -in @('advance','pause','resume','fastForward') } | ForEach-Object { [string]$_.actionReceipt.action }) } else { @() }
         SupplyFixtureSetup = $supplySetup
         SupplyVerified = if ($SupplyManagementLoop) { [bool]$supplyVerified } else { $null }
         SupplyVerification = $supplyVerification
@@ -713,7 +765,7 @@ catch {
             CampaignDayStart = if ($baseline) { [double]$baseline.campaignDay } else { $null }
             CampaignDayEnd = if ($loopTrace.lastObservation) { [double]$loopTrace.lastObservation.campaignDay } else { $null }
             Goal = $goal
-            AcceptanceSlice = if ($SupplyManagementLoop) { 'Real-model Native food purchase and three-day Town Wait' } else { 'Failed live-model decision loop' }
+            AcceptanceSlice = if ($VillageToolsQuestLoop) { 'Failed real-model Native VillageNeedsTools Quest' } elseif ($SupplyManagementLoop) { 'Real-model Native food purchase and three-day Town Wait' } else { 'Failed live-model decision loop' }
             SupplyFixtureSetup = $supplySetup
             SupplyVerified = $false
             SupplyVerification = if ($SupplyManagementLoop -and $loopTrace.lastObservation) {

@@ -15,6 +15,10 @@ internal static class ProviderContractSelfTest
     {
         var results = new List<object>();
         results.AddRange(NativeMailboxClient.RunVillageToolsQuestActionContractSelfTests());
+        try { results.AddRange(AgentHostVillageToolsQuestPolicy.RunContractSelfTests()); }
+        catch (Exception exception) { throw new AgentHostException("village-tools-policy-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
+        try { results.AddRange(await AgentHostVillageToolsQuestLoop.RunContractSelfTestsAsync()); }
+        catch (Exception exception) { throw new AgentHostException("village-tools-loop-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
         results.AddRange(AgentHostCampaignLoop.RunContractSelfTests());
         results.AddRange(await AgentHostCampaignLoop.RunTransportSelfTestsAsync());
         results.AddRange(await Program.RunParentProcessContractSelfTestsAsync());
@@ -140,8 +144,10 @@ internal static class ProviderContractSelfTest
         await VerifySharedDecisionCycleAsync(settings, "foodOptions", "SupplySystemPrompt", AgentHostDecisionCycle.DecideSupplyAsync, results);
 
         await VerifyGoalClassificationAsync(settings, "supportedMapArrivalGoal", "supported-map-arrival", ["supportedMapArrivalGoal", "unsupportedGoal"], results);
+        await VerifyGoalClassificationAsync(settings, "supportedVillageToolsQuestGoal", "supported-village-tools-quest", ["supportedMapArrivalGoal", "supportedVillageToolsQuestGoal", "unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "unsupportedGoal", "unsupported", ["supportedMapArrivalGoal", "unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "supportedMapArrivalGoal", "provider-goal-classification-unavailable", ["unsupportedGoal"], results);
+        await VerifyGoalClassificationAsync(settings, "supportedVillageToolsQuestGoal", "provider-goal-classification-unavailable", ["supportedMapArrivalGoal", "unsupportedGoal"], results);
         VerifyProductionGoalClassificationCatalogNormalization(results);
 
         var successHandler = new StubHandler((_, _) => Task.FromResult(JsonResponse(BuildChatResponse(ValidDecision, "stop"))));
@@ -349,7 +355,7 @@ internal static class ProviderContractSelfTest
         using var provider = new OllamaNativeProvider(settings, client);
         using var request = JsonDocument.Parse(JsonSerializer.Serialize(new
         {
-            goal = "Move to any visible safe settlement.",
+            goal = control == "supportedVillageToolsQuestGoal" ? "Complete the currently visible village tools quest." : "Move to any visible safe settlement.",
             goalScopeClassificationRequired = expectedClassification != "provider-goal-classification-unavailable",
             goalScopeContract = "native-map-arrival-v1",
             observation = new { scope = "goal-classification-test", state = new { gameState = "MapState" } },
@@ -365,7 +371,7 @@ internal static class ProviderContractSelfTest
                 throw new AgentHostException("provider-goal-classification-self-test-failed", "Goal classification did not stay within its listed control catalog.");
             using var body = JsonDocument.Parse(handler.LastRequestBody ?? throw new AgentHostException("provider-goal-classification-prompt-missing", "The classification request was not sent."));
             var system = body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString() ?? string.Empty;
-            if (!system.Contains("complete user goal", StringComparison.Ordinal) || !system.Contains("named destination", StringComparison.Ordinal) || !system.Contains("clan tier", StringComparison.Ordinal) || !system.Contains("do not reject the goal because no candidate is listed yet", StringComparison.Ordinal))
+            if (!system.Contains("complete user goal", StringComparison.Ordinal) || !system.Contains("VillageNeedsToolsIssue", StringComparison.Ordinal) || !system.Contains("named destination", StringComparison.Ordinal) || !system.Contains("do not reject either goal because no target or quest is listed yet", StringComparison.Ordinal))
                 throw new AgentHostException("provider-goal-classification-prompt-incomplete", "The classifier prompt omitted the exact limits of the supported goal.");
             results.Add(new { scenario = "provider-goal-classification-before-action", control, passed = true });
         }

@@ -1,6 +1,8 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.155
+Contract version: 7.156
+
+W7-K的真实模型长程验证为独立opt-in `AgentHostVillageToolsQuestEvaluation`，不并入`All`：它先从disposable `AgentBridgeLifecycle` 以本体可见安全村庄移动前往，只有在右上聚落人物列表自然出现蓝色工具委托后，才经原版SaveAs制作独立临时的“村庄菜单+蓝色marker”起点；不创建/注入Quest、物品、进度或隐藏ID。随后真实本地模型通过Agent Host Campaign loop完成委托，核对Native交易购买与提交、对话交付、Quest结束及交付前后Inventory按Journal文本精确差值；留存原生状态/决策轨迹和游戏窗口连续帧，seed存档hash不变，并删除派生存档、Host/CLI/Game进程。若有限预处理村庄内没有自然可见工具委托、遭遇未支持中立/敌对交涉、奖励文本无法解析或物品差值不一致，均失败关闭，不遍历全图制造任务，也不把确定性`VillageToolsDelivery`证据算成真实模型通过。
 
 本地Provider的单次请求时限覆盖接收响应头与读取完整响应正文；`ResponseHeadersRead`不能使正文等待脱离该时限。只读模型目录探测仅证明服务可达且模型已登记，不证明推理进程可启动。实际推理失败先核查本地运行组件与服务日志，再归因模型或游戏。相关无模型回归覆盖“响应头立即返回、正文停滞”的超时分支。
 
@@ -367,7 +369,9 @@ Native Barter目录按当前VM会话和成功回执逐阶段开放：没有当�
 - Progression证据保留初始Renown、招募回执/净变化、存档周期验证；清理后存档哈希不变。
 - Protocol 若暂时无法读取 `.processing` 命令，保留 claim 并延迟重试，不删失/丢弃命令；Docs 检查此恢复契约。
 - W7-B 的 `AgentHost/` 是目标玩家产品的本地 .NET 8 Host，不属于游戏线程，也不是Harness决策器。当前只提供一次只读 `state` 握手：写入独立关联ID，拒绝覆盖已有`command.json`，只接受关联ID/动作/状态都匹配的Native响应；超时仅删除仍能证明归属自身的未领取命令。它只返回PID、Hero/Clan/MainParty摘要，不输出整份快照、不发送世界动作。Protocol Harness先用假桥验证邮箱繁忙、旧/错响应与超时清理，再在一次性Campaign里连续调用三次Host，并与同一PID的原生CLI只读状态、前后Campaign指纹比较；这证明通信和零世界副作用，不代表模型循环已迁移或玩家入口已交付。
-- W7-K 的村庄工具委托为 Host 邮箱新增独立的封闭传输边界：只接受地图查询/移动、当前菜单/聚落人物QuickConversation、当前对话选项、已观察任务查询、Native Trade及主角Inventory核验/取消动作，并逐项校验参数形状；不含时间控制、Quest写入或库存/金币快捷写入。对标检查MineDojo Voyager公开的“环境反馈/错误/自验证”循环与Mineflayer的原生控制API后，本项目采用逐轮Native观察→模型选一个原版动作→读取原版结果/后验的可审计结构，不让模型生成可直接执行的任意游戏代码；理由是本Mod只需要有限原版入口，而错误的直调代码可能越过当前界面条件并直接改战役状态。该白名单只是传输层安全边界；每轮可见动作、实体ID绑定、任务成功后验与真实模型完整闭环仍须由任务循环另行实现/验证，不能把白名单自测写成游戏能力完成。
+- W7-K 把村庄工具委托接入游戏内 Agent Host 的 Campaign Loop：第一轮模型只分类目标；准确命中“当前可见的VillageNeedsToolsIssue”后转入专用循环，否则不发游戏动作。专用循环每轮读取Native状态，按当前GameState/菜单/对话/可见Issue marker/可见聚落/TradeVM/InventoryVM构建动作目录，并由执行器再次按同一状态核对参数与实体ID。它支持地图查询/移动、当前菜单与聚落人物QuickConversation、当前对话选项、`questDetails`、Native Trade，以及主角Native Inventory的查询和取消；不含时间控制、Quest写入、直接库存/金币修改。地图目标必须来自本轮安全可见列表；蓝色任务入口必须是当前Settlement overlay中的匹配任务marker；对话项必须仍可点击；交易项必须来自最新VM报价、交易草稿必须再次原版确认；无工具货的市场可经无草稿的原版`tradeCancel`退出以继续寻找；当前遭遇战对话会安全停止。
+- W7-K的完成门槛不依赖模型自报：任务Journal达到请求数量后，模型先通过Native主角Inventory取得交付前物品数；任务消失后再次读取Inventory，Host只在可见Journal描述可解析奖励数量/物品，且工具净消耗数与任务目标、奖励净增加数与日志完全相等时开放`done`。无法解析、物品同名歧义、无法确定前置库存或当前入口失效均失败关闭，不宣称成功；Inventory以原版Cancel关闭，不提交无关改动。该对照规则的中/英文奖励文本模式和错误计数案例由Host自测覆盖，尚未由真实模型在游戏中验收。
+- 参考MineDojo Voyager公开的环境反馈、错误反馈与自验证结构，以及Mineflayer的原生游戏控制API后，当前采用“一次模型动作→Native后态→下一轮重观察”的工具循环，不允许模型生成直接改Campaign的代码。Host/Native传输合同回归覆盖当前动作目录、安全目标过滤、过期/越权参数拒绝、无时钟动作、准确任务物品差异验证和Quest开始切片的假的Native/Provider闭环；这些不是实际游戏任务成功证据。下一项验证仍必须是disposable Campaign中的真实本地模型闭环，保留视觉转场与原生状态收据，禁止正式存档。
 - 自动启动用本体 `DisplayMode_0`，840×472 无抢焦点置左上；结构化断言坐标/尺寸，禁止把 `DisplayMode_2` 当窗口模式。
 - P3快照来自Campaign API；schema 9含战后InventoryState、双方item数量、遭遇待领取item数和仅在主队GoToPoint时提供的`location.targetPosition{x,y,isOnLand}`。该目标坐标用于恢复Agent移动意图，不是对其他Party/全图隐匿坐标的授权；回执按UTF-8读写。
 - W2-B陆地自由地点移动使用`moveToPoint(X,Y,Surface=land)`世界坐标意图，不发送桌面像素。原生`MapState.ProcessTravel`/CampaignVec2校验为准；写入GoToPoint后回执给出实际原生目标，位置自然变化，不传送。Naval/海上过渡是独立未测边界，不由本动作宣称支持。

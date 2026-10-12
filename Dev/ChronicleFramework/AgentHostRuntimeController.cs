@@ -338,7 +338,7 @@ internal static class ChronicleAgentRuntimeController
                               ",\"providerConfiguration\":{\"OllamaBaseUrl\":\"" + EscapeJson(settings.OllamaBaseUrl) +
                               "\",\"ModelId\":\"" + EscapeJson(settings.ModelId) + "\"}" +
                               ",\"goal\":\"" + EscapeJson(goal.Trim()) +
-                              "\",\"maxDecisions\":30,\"maxElapsedSeconds\":600,\"allowedActionNames\":[\"mapSettlementTargets\",\"move\"]}";
+                              "\",\"maxDecisions\":100,\"maxElapsedSeconds\":1800,\"allowedActionNames\":[\"mapSettlementTargets\",\"move\",\"menuSelect\",\"talkToSettlementHero\",\"dialogueSelect\",\"dialogueContinue\",\"questDetails\",\"tradeOptions\",\"trade\",\"tradeConfirm\",\"tradeCancel\",\"tradeCancelChanges\",\"inventoryOpen\",\"heroEquipmentOptions\",\"inventoryCancel\"]}";
             _hostInput.WriteLine(requestJson);
             _hostInput.Flush();
             _stopSignalSent = false;

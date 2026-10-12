@@ -5,7 +5,7 @@ using System.Text.Json.Nodes;
 
 namespace ChronicleFramework.AgentHost;
 
-internal sealed class NativeMailboxClient : IAgentHostCampaignNativeClient
+internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeClient
 {
     private static readonly HashSet<string> SupplySliceActions = new(StringComparer.Ordinal)
     {
@@ -15,7 +15,7 @@ internal sealed class NativeMailboxClient : IAgentHostCampaignNativeClient
     private static readonly HashSet<string> VillageToolsQuestActions = new(StringComparer.Ordinal)
     {
         "mapSettlementTargets", "move", "menuSelect", "talkToSettlementHero", "dialogueSelect",
-        "dialogueContinue", "questDetails", "tradeOptions", "trade", "tradeConfirm", "tradeCancelChanges",
+        "dialogueContinue", "questDetails", "tradeOptions", "trade", "tradeConfirm", "tradeCancel", "tradeCancelChanges",
         "inventoryOpen", "heroEquipmentOptions", "inventoryCancel"
     };
 
@@ -82,7 +82,7 @@ internal sealed class NativeMailboxClient : IAgentHostCampaignNativeClient
     Task<JsonDocument> IAgentHostCampaignNativeClient.ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken) =>
         ExecuteCampaignActionAsync(action, arguments, cancellationToken);
 
-    internal Task<JsonDocument> ExecuteVillageToolsQuestActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+    public Task<JsonDocument> ExecuteVillageToolsQuestActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
     {
         // This is only the transport's closed action/argument boundary. The quest loop must still
         // construct its per-decision catalog from fresh Native observations and bind every ID to it.
@@ -102,7 +102,7 @@ internal sealed class NativeMailboxClient : IAgentHostCampaignNativeClient
 
         var valid = action switch
         {
-            "mapSettlementTargets" or "dialogueContinue" or "tradeOptions" or "tradeConfirm" or "tradeCancelChanges" or
+            "mapSettlementTargets" or "dialogueContinue" or "tradeOptions" or "tradeConfirm" or "tradeCancel" or "tradeCancelChanges" or
                 "inventoryOpen" or "heroEquipmentOptions" or "inventoryCancel" => arguments.Count == 0,
             "move" => HasOnlyKeys(arguments, "settlementId") && HasText(arguments, "settlementId"),
             "menuSelect" => HasOnlyKeys(arguments, "menuId", "optionId") && HasText(arguments, "menuId") && HasText(arguments, "optionId"),
@@ -134,6 +134,7 @@ internal sealed class NativeMailboxClient : IAgentHostCampaignNativeClient
             ("tradeOptions", "{}"),
             ("trade", "{\"direction\":\"buy\",\"itemViewModelId\":\"tools\",\"inventorySide\":\"OtherInventory\",\"amount\":1}"),
             ("tradeConfirm", "{}"),
+            ("tradeCancel", "{}"),
             ("tradeCancelChanges", "{}"),
             ("inventoryOpen", "{}"),
             ("heroEquipmentOptions", "{}"),
