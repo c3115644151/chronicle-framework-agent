@@ -64,9 +64,10 @@ internal static class AgentHostVillageToolsQuestPolicy
             }
 
             var menuOptions = state["availableMenuOptions"] as JsonArray ?? new JsonArray();
+            var tradeContextSupported = hasToolsQuest && string.Equals(GetCurrentSettlementType(state), "town", StringComparison.Ordinal);
             var allowedMenuOptions = menuOptions.OfType<JsonObject>()
                 .Where(option => IsTrue(option, "available") && IsTrue(option, "enabled") &&
-                    (IsTrue(option, "isLeave") || (hasToolsQuest && IsTradeOption(option))))
+                    (IsTrue(option, "isLeave") || (tradeContextSupported && IsTradeOption(option))))
                 .ToArray();
             if (allowedMenuOptions.Length > 0)
             {
@@ -300,18 +301,27 @@ internal static class AgentHostVillageToolsQuestPolicy
             throw new AgentHostException("village-tools-policy-self-test-visible-issue-marker-gate-failed", "The Host must only offer quick conversation for an observed available issue visibly matching the tools request.");
         results.Add(new { scenario = "village-tools-policy-talks-only-to-current-visible-tools-issue", passed = true });
 
-        var acceptedQuestMenu = State("MapState", "village", "village-1", quests: new JsonArray(new JsonObject { ["id"] = "quest-tools", ["title"] = "Village Needs Tools" }));
-        acceptedQuestMenu["state"]!["availableMenuOptions"] = new JsonArray(
+        var acceptedVillageMenu = State("MapState", "village", "village-1", quests: new JsonArray(new JsonObject { ["id"] = "quest-tools", ["title"] = "Village Needs Tools" }));
+        acceptedVillageMenu["state"]!["nearbySettlements"] = new JsonArray(new JsonObject { ["id"] = "village-1", ["type"] = "village" });
+        acceptedVillageMenu["state"]!["availableMenuOptions"] = new JsonArray(
             new JsonObject { ["id"] = "village_center", ["available"] = true, ["enabled"] = true, ["isLeave"] = false },
             new JsonObject { ["id"] = "trade", ["text"] = "Trade", ["available"] = true, ["enabled"] = true, ["isLeave"] = false },
             new JsonObject { ["id"] = "leave", ["available"] = true, ["enabled"] = true, ["isLeave"] = true });
-        var acceptedMenuCatalog = BuildActionCatalog(acceptedQuestMenu, null);
-        var menuSelect = acceptedMenuCatalog.OfType<JsonObject>().FirstOrDefault(item => ReadString(item, "action") == "menuSelect");
-        var permittedMenuIds = (menuSelect?["argumentValues"]?["OptionId"] as JsonArray)?.Select(item => item?.GetValue<string>()).ToArray() ?? Array.Empty<string?>();
-        if (menuSelect is null || permittedMenuIds.Contains("village_center", StringComparer.Ordinal) ||
-            !permittedMenuIds.Contains("trade", StringComparer.Ordinal) || !permittedMenuIds.Contains("leave", StringComparer.Ordinal))
-            throw new AgentHostException("village-tools-policy-self-test-menu-option-catalog-failed", "The model schema must receive only the current menu options that the quest policy permits, not every visible option.");
-        results.Add(new { scenario = "village-tools-policy-exposes-exact-menu-option-ids", passed = true });
+        var villageMenuCatalog = BuildActionCatalog(acceptedVillageMenu, null);
+        var villageMenuSelect = villageMenuCatalog.OfType<JsonObject>().FirstOrDefault(item => ReadString(item, "action") == "menuSelect");
+        var villageMenuIds = (villageMenuSelect?["argumentValues"]?["OptionId"] as JsonArray)?.Select(item => item?.GetValue<string>()).ToArray() ?? Array.Empty<string?>();
+        if (villageMenuSelect is null || villageMenuIds.Contains("village_center", StringComparer.Ordinal) ||
+            villageMenuIds.Contains("trade", StringComparer.Ordinal) || !villageMenuIds.Contains("leave", StringComparer.Ordinal))
+            throw new AgentHostException("village-tools-policy-self-test-village-trade-gate-failed", "Village Trade is visible to the player but is not a supported Town merchant transaction.");
+        var acceptedTownMenu = State("MapState", "town", "town-1", quests: new JsonArray(new JsonObject { ["id"] = "quest-tools", ["title"] = "Village Needs Tools" }));
+        acceptedTownMenu["state"]!["nearbySettlements"] = new JsonArray(new JsonObject { ["id"] = "town-1", ["type"] = "town" });
+        acceptedTownMenu["state"]!["availableMenuOptions"] = acceptedVillageMenu["state"]!["availableMenuOptions"]!.DeepClone();
+        var townMenuCatalog = BuildActionCatalog(acceptedTownMenu, null);
+        var townMenuSelect = townMenuCatalog.OfType<JsonObject>().FirstOrDefault(item => ReadString(item, "action") == "menuSelect");
+        var townMenuIds = (townMenuSelect?["argumentValues"]?["OptionId"] as JsonArray)?.Select(item => item?.GetValue<string>()).ToArray() ?? Array.Empty<string?>();
+        if (townMenuSelect is null || !townMenuIds.Contains("trade", StringComparer.Ordinal) || !townMenuIds.Contains("leave", StringComparer.Ordinal))
+            throw new AgentHostException("village-tools-policy-self-test-town-trade-gate-failed", "A currently enabled Town merchant option must remain available for tool procurement.");
+        results.Add(new { scenario = "village-tools-policy-gates-trade-to-town-native-merchant", passed = true });
 
         var emptyConversation = State("MapState", null, null, null, conversation: new JsonObject { ["options"] = new JsonArray() });
         if (ReadString(BuildActionCatalog(emptyConversation, null)[0] as JsonObject, "action") != "dialogueContinue" ||
@@ -533,6 +543,16 @@ internal static class AgentHostVillageToolsQuestPolicy
                 ids.Add(giverId);
         }
         return ids.ToArray();
+    }
+
+    private static string? GetCurrentSettlementType(JsonObject state)
+    {
+        var currentSettlementId = ReadString(state["location"] as JsonObject, "currentSettlementId");
+        if (string.IsNullOrWhiteSpace(currentSettlementId)) return null;
+        return (state["nearbySettlements"] as JsonArray)?.OfType<JsonObject>()
+            .FirstOrDefault(settlement => string.Equals(ReadString(settlement, "id"), currentSettlementId, StringComparison.Ordinal)) is JsonObject current
+            ? ReadString(current, "type")
+            : null;
     }
 
     private static bool IsToolsMarker(JsonObject marker)
