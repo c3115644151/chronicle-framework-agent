@@ -59,6 +59,23 @@ internal static class ProviderContractSelfTest
         ExpectProfileFileError("{", "provider-profile-invalid-json", "mcm-profile-rejects-corrupt-json");
         results.Add(new { scenario = "mcm-profile-rejects-corrupt-json", passed = true });
         TestConfiguredProfileOverride(results);
+        using (var launch = JsonDocument.Parse("{\"providerConfiguration\":{\"OllamaBaseUrl\":\"http://127.0.0.1:11434/v1\",\"ModelId\":\"current-page-model\"}}"))
+        using (var currentProvider = OllamaNativeProvider.FromCampaignRequest(launch.RootElement))
+        {
+            if (currentProvider.ModelId != "current-page-model" || currentProvider.ConfigurationSource != "mcm-start-request")
+                throw new AgentHostException("mcm-launch-snapshot-self-test-failed", "Host did not use the model snapshot supplied by the Start button.");
+            results.Add(new { scenario = "mcm-start-request-uses-current-page-model-without-saved-profile", passed = true });
+        }
+        using (var invalidLaunch = JsonDocument.Parse("{\"providerConfiguration\":{\"OllamaBaseUrl\":\"https://example.com/v1\",\"ModelId\":\"test\"}}"))
+        {
+            try
+            {
+                using var unexpectedProvider = OllamaNativeProvider.FromCampaignRequest(invalidLaunch.RootElement);
+                throw new AgentHostException("mcm-launch-snapshot-invalid-accepted", "Host accepted an invalid inline provider configuration.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-profile-endpoint-invalid") { }
+            results.Add(new { scenario = "mcm-start-request-rejects-invalid-snapshot-without-profile-fallback", passed = true });
+        }
 
         var settings = new OllamaProviderSettings(
             FakeEndpoint,

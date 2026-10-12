@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.131'
+$contractVersion = '7.132'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -340,6 +340,8 @@ if ($agentHostProviderSource -notmatch 'CheckConfiguredModelAsync' -or $agentHos
     $agentHostCampaignLoopSource -notmatch 'host-stop-requested' -or
     $agentHostProgramSource -notmatch 'OpenBoundParentProcess' -or $agentHostProgramSource -notmatch 'WaitForParentExitAsync' -or
     $agentHostProgramSource -notmatch 'MarkParentExited' -or $agentHostCampaignLoopSource -notmatch 'native-parent-process-mismatch' -or
+    $agentHostProviderSource -notmatch 'FromCampaignRequest' -or $agentHostProviderSource -notmatch 'mcm-start-request' -or
+    $agentHostRuntimeControllerSource -notmatch 'providerConfiguration' -or
     $agentHostCampaignLoopSource -notmatch 'onReady\?\.Invoke\(nativeProcessId\)') {
     throw 'Host lifecycle must bind to the launching Bannerlord PID/start time, handshake against the current Native PID before ready, monitor game exit, accept only explicit stop control, and fail safely without replay after an ambiguous action.'
 }
@@ -368,7 +370,9 @@ if ($harnessScript -notmatch "'AgentHostPackage'\s*\{ @\('Preflight', 'Build', '
     $agentHostPackageSource -notmatch 'BaseOutputPath' -or
     $agentHostPackageSource -notmatch 'ChronicleAgentHost\.exe' -or $agentHostPackageSource -notmatch 'AgentHostPackageManifest\.json' -or
     $agentHostPackageSource -notmatch 'Invoke-PackagedHostUnboundParentProbe' -or $agentHostPackageSource -notmatch 'UnboundParentRejected' -or
-    $agentHostProviderSelfTestSource -notmatch 'RunParentProcessContractSelfTestsAsync' -or $agentHostProgramSource -notmatch 'campaign-parent-not-running' -or
+    $agentHostProviderSelfTestSource -notmatch 'RunParentProcessContractSelfTestsAsync' -or
+    $agentHostProviderSelfTestSource -notmatch 'mcm-start-request-rejects-invalid-snapshot-without-profile-fallback' -or
+    $agentHostProgramSource -notmatch 'campaign-parent-not-running' -or
     $agentHostProgramSource -notmatch '--package-health' -or $agentHostProgramSource -notmatch '--version') {
     throw 'Agent Host packaging must be an opt-in win-x64 self-contained publish, use D: NuGet cache/proxy port 7890, and directly verify the packaged Host without the .NET CLI.'
 }

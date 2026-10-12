@@ -256,8 +256,16 @@ internal static class Program
         return results;
     }
 
-    internal static IAgentHostDecisionProvider CreateCampaignDecisionProvider() =>
-        IsAuthorizedLifecycleNoModelMode() ? new LifecycleIdleDecisionProvider() : OllamaNativeProvider.FromConfiguredProfile();
+    internal static IAgentHostDecisionProvider CreateCampaignDecisionProvider(JsonElement request)
+    {
+        if (IsAuthorizedLifecycleNoModelMode())
+        {
+            if (request.TryGetProperty("providerConfiguration", out var configuration))
+                AgentProviderProfile.Parse(configuration, "mcm-start-request");
+            return new LifecycleIdleDecisionProvider();
+        }
+        return OllamaNativeProvider.FromCampaignRequest(request);
+    }
 
     private static bool IsAuthorizedLifecycleNoModelMode()
     {

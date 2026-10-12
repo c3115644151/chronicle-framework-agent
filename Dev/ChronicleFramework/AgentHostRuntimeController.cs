@@ -247,6 +247,8 @@ internal static class ChronicleAgentRuntimeController
             _hostError = process.StandardError.ReadToEndAsync();
             var requestJson = "{\"runId\":\"" + _runId + "\",\"parentProcessId\":" + gameProcessId.ToString(CultureInfo.InvariantCulture) +
                               ",\"parentProcessStartTimeUtcTicks\":" + gameProcessStartTimeTicks.ToString(CultureInfo.InvariantCulture) +
+                              ",\"providerConfiguration\":{\"OllamaBaseUrl\":\"" + EscapeJson(settings.OllamaBaseUrl) +
+                              "\",\"ModelId\":\"" + EscapeJson(settings.ModelId) + "\"}" +
                               ",\"goal\":\"" + EscapeJson(goal.Trim()) +
                               "\",\"maxDecisions\":30,\"maxElapsedSeconds\":600,\"allowedActionNames\":[\"mapSettlementTargets\",\"move\"]}";
             _hostInput.WriteLine(requestJson);

@@ -100,6 +100,13 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         return FromProfile(AgentProviderProfile.LoadDefault());
     }
 
+    internal static OllamaNativeProvider FromCampaignRequest(JsonElement request)
+    {
+        if (request.TryGetProperty("providerConfiguration", out var configuration))
+            return FromProfile(AgentProviderProfile.Parse(configuration, "mcm-start-request"));
+        return FromConfiguredProfile();
+    }
+
     private static OllamaNativeProvider FromProfile(AgentProviderProfile profile)
     {
         var endpoint = new Uri(profile.BaseUrl.TrimEnd('/') + "/chat/completions", UriKind.Absolute);

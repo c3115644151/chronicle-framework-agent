@@ -106,7 +106,7 @@ internal static class AgentHostCampaignLoop
     {
         var nativeTimeoutSeconds = ReadIntEnvironment("CHRONICLE_LLM_TIMEOUT_SECONDS", 180, 5, 240);
         var client = new NativeMailboxClient(protocolRoot, TimeSpan.FromSeconds(nativeTimeoutSeconds));
-        var provider = Program.CreateCampaignDecisionProvider();
+        var provider = Program.CreateCampaignDecisionProvider(request);
         return await RunAsync(request, client, provider, cancellationToken, onReady);
     }
 
