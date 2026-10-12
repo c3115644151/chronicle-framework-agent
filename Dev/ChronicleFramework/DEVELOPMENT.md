@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.140
+Contract version: 7.141
 
 本地Provider的单次请求时限覆盖接收响应头与读取完整响应正文；`ResponseHeadersRead`不能使正文等待脱离该时限。只读模型目录探测仅证明服务可达且模型已登记，不证明推理进程可启动。实际推理失败先核查本地运行组件与服务日志，再归因模型或游戏。相关无模型回归覆盖“响应头立即返回、正文停滞”的超时分支。
 
@@ -9,6 +9,8 @@ Host控制输入读取放在后台任务：`Console.In`同步Reader的异步接�
 `AgentHostLifecycleEvaluation -LifecycleScenario MissingModel|ServiceUnavailable`复用同一一次性Campaign启停夹具，分别指定确认不在本地目录的模型名、确认没有监听者的loopback端口。两种错误必须在模型生成和任何Host Native命令前退出，控制器只经过Starting→Failed，无Ready事件，脱敏收据分类正确，游戏仍可查询且源档/进程/session干净；不修改或关闭玩家现有模型服务。
 
 同阶段的`ParentExited`使用受限idle Provider，在Native会话/Host Ready与PID、可执行文件路径核对后，仅强制结束本轮disposable游戏进程；不连带杀子进程。Host须在十秒内自行退出，测量发生在外层清理之前，并记录退出码/耗时、零世界动作、源档hash及最终session/config清理。父进程已关闭，不能据此声称游戏内Failed通知显示或终态JSON已被Mod接收；这些字段明确不适用。该场景不生成模型响应，不改正式存档。
+
+`StopTimeout`仅在已授权的临时生命周期/no-model模式下让idle Host忽略停止输入；普通Provider不会进入该分支。游戏仍发送产品Stop协议，至少经过五秒停止等待后由身份校验清理自己的Host，状态Starting→Running→Stopping→Failed；验证游戏仍可查询、没有世界动作或重复行动、源档与会话/进程干净。被强制结束的Host没有终态JSON，不用正常退出收据伪装超时结果。此场景不验证在途非幂等动作或其他同名Host并行隔离。
 
 Smoke子脚本有独立墙钟上限（启动时限+稳定窗口+30秒收据余量），stdout/stderr写入本次Temp。超过上限时只清理该worker及其直接创建、路径核对过的Bannerlord客户端，保留失败证据；不再无限阻塞整个Harness。结果JSON只序列化一次，`SmokeReceiptStages.log`分别标记序列化开始/完成和写入完成，区分游戏启动与测试收据生成卡点；这些标记不是游戏结果的替代证据。
 

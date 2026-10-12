@@ -4,7 +4,7 @@ param(
     [string]$Phase = 'All',
     [int]$SmokeTimeoutSeconds = 45,
     [int]$SmokeStabilitySeconds = 8,
-    [ValidateSet('Stop','Complete','MissingModel','ServiceUnavailable','ParentExited')][string]$LifecycleScenario = 'Stop',
+    [ValidateSet('Stop','Complete','MissingModel','ServiceUnavailable','ParentExited','StopTimeout')][string]$LifecycleScenario = 'Stop',
     [string]$TargetSettlementId = 'town_V1',
     [string]$ApproachSettlementId = 'town_V1',
     [string]$QuickTalkTargetSettlementId = 'village_V1_1',
@@ -23,7 +23,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.140'
+$HarnessContractVersion = '7.141'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }

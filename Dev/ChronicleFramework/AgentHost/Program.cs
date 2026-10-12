@@ -161,7 +161,11 @@ internal static class Program
             try
             {
                 using var document = JsonDocument.Parse(line);
-                if (ReadString(document.RootElement, "control") == "stop") return true;
+                if (ReadString(document.RootElement, "control") == "stop")
+                {
+                    if (IsAuthorizedLifecycleNoModelMode() && Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_IGNORE_STOP") == "1") continue;
+                    return true;
+                }
             }
             catch (JsonException) { }
         }

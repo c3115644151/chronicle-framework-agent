@@ -2,7 +2,7 @@
 param(
     [ValidateRange(90,300)][int]$TimeoutSeconds = 180,
     [ValidateRange(250,10000)][int]$AutoStopAfterMilliseconds = 250,
-    [ValidateSet('Stop','Complete','MissingModel','ServiceUnavailable','ParentExited')][string]$Scenario = 'Stop',
+    [ValidateSet('Stop','Complete','MissingModel','ServiceUnavailable','ParentExited','StopTimeout')][string]$Scenario = 'Stop',
     [string]$SaveName = 'AgentBridgeLifecycle'
 )
 
@@ -32,7 +32,7 @@ if (Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue) { throw 'Refu
 if (Test-Path -LiteralPath $sessionPath -PathType Leaf) { throw 'Refusing to replace a stale Agent CLI session.' }
 
 $expectsFailure = $Scenario -in @('MissingModel','ServiceUnavailable')
-$usesIdleProvider = $Scenario -in @('Stop','ParentExited')
+$usesIdleProvider = $Scenario -in @('Stop','ParentExited','StopTimeout')
 $providerBaseUrl = if ($Scenario -eq 'ServiceUnavailable') { 'http://127.0.0.1:11433/v1' } else { 'http://127.0.0.1:11434/v1' }
 $providerModelId = if ($usesIdleProvider) { 'harness-lifecycle-no-model' } elseif ($Scenario -eq 'MissingModel') { 'chronicle-harness-model-not-installed' } else { 'qwen3.5:4b-q4_K_M' }
 if ($Scenario -eq 'MissingModel') {
@@ -68,7 +68,7 @@ $profilePath = Join-Path $profileDirectory 'ChronicleAgentSettings.json'
 $fixtureHashBefore = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
 $hostResponseFilesBefore = @(Get-ChildItem -LiteralPath $responseRoot -File -Filter 'host-*.json' -ErrorAction SilentlyContinue | ForEach-Object Name)
 $priorValues = @{}
-foreach ($name in @('CHRONICLE_HARNESS_MODE','CHRONICLE_AGENT_PROFILE_PATH','CHRONICLE_AGENT_HOST_TEST_PATH','CHRONICLE_HARNESS_AGENT_AUTO_START','CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS','CHRONICLE_HARNESS_AGENT_GOAL','CHRONICLE_HARNESS_AGENT_NO_MODEL','CHRONICLE_HARNESS_AGENT_FAILURE_CASE')) {
+foreach ($name in @('CHRONICLE_HARNESS_MODE','CHRONICLE_AGENT_PROFILE_PATH','CHRONICLE_AGENT_HOST_TEST_PATH','CHRONICLE_HARNESS_AGENT_AUTO_START','CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS','CHRONICLE_HARNESS_AGENT_GOAL','CHRONICLE_HARNESS_AGENT_NO_MODEL','CHRONICLE_HARNESS_AGENT_FAILURE_CASE','CHRONICLE_HARNESS_AGENT_IGNORE_STOP')) {
     $priorValues[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
 $gameProcessId = 0
@@ -89,6 +89,7 @@ $completionVerified = $false
 $parentExitVerified = $false
 $parentExitHostExitCode = $null
 $parentExitSeconds = $null
+$stopTimeoutVerified = $false
 $lastMoveTargetId = $null
 $nativeWriteActions = @()
 $hostExitEvents = @()
@@ -106,10 +107,11 @@ try {
     $env:CHRONICLE_AGENT_PROFILE_PATH = $profilePath
     $env:CHRONICLE_AGENT_HOST_TEST_PATH = $hostPath
     $env:CHRONICLE_HARNESS_AGENT_AUTO_START = '1'
-    $env:CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS = if ($Scenario -eq 'Stop') { [string]$AutoStopAfterMilliseconds } else { '0' }
+    $env:CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS = if ($Scenario -in @('Stop','StopTimeout')) { [string]$AutoStopAfterMilliseconds } else { '0' }
     $env:CHRONICLE_HARNESS_AGENT_GOAL = if ($Scenario -eq 'Stop') { 'Inspect the current Native Campaign state and wait for the explicit stop request without changing the Campaign.' } else { 'Reach a currently visible safe nearby settlement. Finish only when fresh Native state confirms arrival.' }
     $env:CHRONICLE_HARNESS_AGENT_NO_MODEL = if ($usesIdleProvider) { '1' } else { '0' }
     $env:CHRONICLE_HARNESS_AGENT_FAILURE_CASE = if ($expectsFailure) { $Scenario } else { '' }
+    $env:CHRONICLE_HARNESS_AGENT_IGNORE_STOP = if ($Scenario -eq 'StopTimeout') { '1' } else { '' }
 
     $loadReceipt = Invoke-LifecycleCli 'load' @('-SaveName', $SaveName)
     if ($loadReceipt.status -ne 'completed' -or -not $loadReceipt.session.processId) { throw 'The lifecycle fixture did not reach its Native Campaign handshake.' }
@@ -180,13 +182,21 @@ try {
         }
     }
     else {
-    $expectedStates = if ($expectsFailure) { @('Starting','Failed') } elseif ($Scenario -eq 'Stop') { @('Starting','Running','Stopping','Stopped') } else { @('Starting','Running','Completed') }
+    $expectedStates = if ($expectsFailure) { @('Starting','Failed') } elseif ($Scenario -eq 'StopTimeout') { @('Starting','Running','Stopping','Failed') } elseif ($Scenario -eq 'Stop') { @('Starting','Running','Stopping','Stopped') } else { @('Starting','Running','Completed') }
     foreach ($expectedState in $expectedStates) {
         if (@($states | Where-Object { $_ -match "\|state=$expectedState\|" }).Count -eq 0) {
             throw "The lifecycle controller did not report expected state: $expectedState"
         }
     }
     if (@(Get-Process -Id $hostProcessId -ErrorAction SilentlyContinue).Count -gt 0) { throw 'The Agent Host remained alive after its Stop result.' }
+    if ($Scenario -eq 'StopTimeout') {
+        $timeoutStates = @($states | Where-Object { $_ -match '\|state=Failed\|detail=Host' })
+        $stoppingStates = @($states | Where-Object { $_ -match '\|state=Stopping\|' })
+        $stopTimeoutVerified = ($timeoutStates.Count -eq 1 -and $stoppingStates.Count -eq 1 -and $hostExitEvents.Count -eq 0 -and
+            ([DateTime]::Parse($timeoutStates[0].Split('|')[0]) - [DateTime]::Parse($stoppingStates[0].Split('|')[0])).TotalSeconds -ge 5)
+        if (-not $stopTimeoutVerified) { throw 'Stop timeout did not end the owned Host and report its explicit timeout failure.' }
+    }
+    else {
     $expectedTerminalState = if ($expectsFailure) { 'Failed' } elseif ($Scenario -eq 'Stop') { 'Stopped' } else { 'Completed' }
     $expectedExitCode = if ($expectsFailure) { 1 } else { 0 }
     if (@($hostExitEvents | Where-Object { $_ -match "\|pid=$hostProcessId\|exitCode=$expectedExitCode\|state=$expectedTerminalState" }).Count -ne 1) {
@@ -195,12 +205,13 @@ try {
     $hostReceiptPath = Join-Path $harnessTemp 'AgentHostLifecycleHostReceipt.json'
     if (-not (Test-Path -LiteralPath $hostReceiptPath -PathType Leaf)) { throw 'Game-owned Host did not leave its sanitized lifecycle receipt.' }
     $hostReceipt = Get-Content -LiteralPath $hostReceiptPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    }
 
     $endingState = Invoke-LifecycleCli 'state'
     if ($endingState.status -ne 'completed' -or [string]$endingState.state.context.gameState -cne [string]$baseline.state.context.gameState) {
         throw 'Native Campaign could not be observed after Host exit.'
     }
-    if (($Scenario -eq 'Stop' -or $expectsFailure) -and
+    if (($usesIdleProvider -or $expectsFailure) -and
         ([string]$endingState.state.location.currentSettlementId -cne [string]$baseline.state.location.currentSettlementId -or
         [string]$endingState.state.location.targetSettlementId -cne [string]$baseline.state.location.targetSettlementId)) {
         throw 'Stopping the Host changed the active Native location/movement state in this cancellation-window test.'
@@ -220,7 +231,10 @@ try {
         if ($response.action -in @('mapSettlementTargets','move')) { $nativeWriteActions += [string]$response.action }
         if ($response.action -eq 'move' -and $response.status -eq 'completed') { $lastMoveTargetId = [string]$response.state.location.targetSettlementId }
     }
-    if ($expectsFailure) {
+    if ($Scenario -eq 'StopTimeout') {
+        if ($nativeWriteActions.Count -gt 0) { throw 'Stop-timeout idle fixture issued a world action.' }
+    }
+    elseif ($expectsFailure) {
         $expectedFailureCode = if ($Scenario -eq 'MissingModel') { 'provider-model-unavailable' } else { 'provider-unavailable' }
         if ($hostReceipt.status -ne 'failed' -or $hostReceipt.failureCode -ne $expectedFailureCode -or
             $hostReceipt.decisionCount -ne 0 -or $hostReceipt.actionsExecuted -ne 0 -or $responseFiles.Count -ne 0) {
@@ -285,6 +299,7 @@ $result = [pscustomobject][ordered]@{
     HostReceipt = $hostReceipt
     NativeArrivalCompleted = [bool]$completionVerified
     HostIndependentlyExitedAfterParentTermination = [bool]$parentExitVerified
+    OwnedHostStopTimeoutVerified = [bool]$stopTimeoutVerified
     ParentExitHostExitCode = $parentExitHostExitCode
     ParentExitSeconds = $parentExitSeconds
     EngineConfigRestoredAfterParentExit = if ($Scenario -eq 'ParentExited') { [bool]($stopReceipt -and $stopReceipt.restored) } else { $null }
