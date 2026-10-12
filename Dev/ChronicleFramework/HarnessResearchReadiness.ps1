@@ -1,5 +1,5 @@
 ﻿$script:AuditedHarnessDiagnosticSource = 'SubModule.cs'
-$script:AuditedHarnessDiagnosticSha256 = 'c98cf239cbd8fc39cfbd0440e25b46719c010a9bc9b84f5b7783ac3103545717'
+$script:AuditedHarnessDiagnosticSha256 = '6d3304b13f0c1f22a9a1ae92455005d5292d9e2a68886b9fb4fd3ecea07c5e15'
 
 function Get-ChronicleCanonicalTextSha256 {
     [CmdletBinding()]

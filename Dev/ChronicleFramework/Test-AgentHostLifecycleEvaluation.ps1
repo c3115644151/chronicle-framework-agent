@@ -2,7 +2,7 @@
 param(
     [ValidateRange(90,300)][int]$TimeoutSeconds = 180,
     [ValidateRange(250,10000)][int]$AutoStopAfterMilliseconds = 250,
-    [ValidateSet('Stop','Complete','MissingModel','ServiceUnavailable','ParentExited','StopTimeout','NonMap')][string]$Scenario = 'Stop',
+    [ValidateSet('Stop','Complete','UnsupportedGoal','MissingModel','ServiceUnavailable','ParentExited','StopTimeout','NonMap','CampaignRoundtrip')][string]$Scenario = 'Stop',
     [string]$SaveName = 'AgentBridgeLifecycle'
 )
 
@@ -17,6 +17,7 @@ $cli = Join-Path $harnessRoot 'Agent-Cli.ps1'
 $documents = [Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)
 $documentsRoot = Join-Path $documents 'Mount and Blade II Bannerlord'
 $savePath = Join-Path $documentsRoot "Game Saves\$SaveName.sav"
+$saveDirectory = Join-Path $documentsRoot 'Game Saves'
 $protocolRoot = Join-Path $documentsRoot 'AgentRuns\ChronicleAgent'
 $sessionPath = Join-Path $protocolRoot 'session.json'
 $responseRoot = Join-Path $protocolRoot 'responses'
@@ -31,8 +32,10 @@ if (-not (Test-Path -LiteralPath $hostPath -PathType Leaf)) { throw 'The package
 if (Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue) { throw 'Refusing to start the lifecycle fixture while another Bannerlord process is running.' }
 if (Test-Path -LiteralPath $sessionPath -PathType Leaf) { throw 'Refusing to replace a stale Agent CLI session.' }
 
-$expectsFailure = $Scenario -in @('MissingModel','ServiceUnavailable')
-$usesIdleProvider = $Scenario -in @('Stop','ParentExited','StopTimeout','NonMap')
+$expectsFailure = $Scenario -in @('MissingModel','ServiceUnavailable','UnsupportedGoal')
+$expectsUnsupportedGoal = $Scenario -eq 'UnsupportedGoal'
+$expectsProviderPreflightFailure = $Scenario -in @('MissingModel','ServiceUnavailable')
+$usesIdleProvider = $Scenario -in @('Stop','ParentExited','StopTimeout','NonMap','CampaignRoundtrip')
 $providerBaseUrl = if ($Scenario -eq 'ServiceUnavailable') { 'http://127.0.0.1:11433/v1' } else { 'http://127.0.0.1:11434/v1' }
 $providerModelId = if ($usesIdleProvider) { 'harness-lifecycle-no-model' } elseif ($Scenario -eq 'MissingModel') { 'chronicle-harness-model-not-installed' } else { 'qwen3.5:4b-q4_K_M' }
 if ($Scenario -eq 'MissingModel') {
@@ -68,7 +71,7 @@ $profilePath = Join-Path $profileDirectory 'ChronicleAgentSettings.json'
 $fixtureHashBefore = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
 $hostResponseFilesBefore = @(Get-ChildItem -LiteralPath $responseRoot -File -Filter 'host-*.json' -ErrorAction SilentlyContinue | ForEach-Object Name)
 $priorValues = @{}
-foreach ($name in @('CHRONICLE_HARNESS_MODE','CHRONICLE_AGENT_PROFILE_PATH','CHRONICLE_AGENT_HOST_TEST_PATH','CHRONICLE_HARNESS_AGENT_AUTO_START','CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS','CHRONICLE_HARNESS_AGENT_GOAL','CHRONICLE_HARNESS_AGENT_NO_MODEL','CHRONICLE_HARNESS_AGENT_FAILURE_CASE','CHRONICLE_HARNESS_AGENT_IGNORE_STOP','CHRONICLE_HARNESS_AGENT_START_STATE')) {
+foreach ($name in @('CHRONICLE_HARNESS_MODE','CHRONICLE_AGENT_PROFILE_PATH','CHRONICLE_AGENT_HOST_TEST_PATH','CHRONICLE_HARNESS_AGENT_AUTO_START','CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS','CHRONICLE_HARNESS_AGENT_GOAL','CHRONICLE_HARNESS_AGENT_NO_MODEL','CHRONICLE_HARNESS_AGENT_FAILURE_CASE','CHRONICLE_HARNESS_AGENT_IGNORE_STOP','CHRONICLE_HARNESS_AGENT_START_STATE','CHRONICLE_HARNESS_AGENT_ROUNDTRIP','CHRONICLE_HARNESS_AGENT_ROUNDTRIP_SAVE_ID')) {
     $priorValues[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
 $gameProcessId = 0
@@ -91,6 +94,14 @@ $parentExitHostExitCode = $null
 $parentExitSeconds = $null
 $stopTimeoutVerified = $false
 $nonMapRejected = $false
+$campaignRoundtripVerified = $false
+$oldNativeSession = $null
+$newNativeSession = $null
+$roundtripSaveName = if ($Scenario -eq 'CampaignRoundtrip') { 'ChronicleRT-' + [Guid]::NewGuid().ToString('N') } else { $null }
+$roundtripSavePath = if ($roundtripSaveName) { Join-Path $saveDirectory ($roundtripSaveName + '.sav') } else { $null }
+$roundtripSaveCreationRequested = $false
+$roundtripSaveCreated = $false
+$roundtripSaveHash = $null
 $lastMoveTargetId = $null
 $nativeWriteActions = @()
 $hostExitEvents = @()
@@ -109,11 +120,13 @@ try {
     $env:CHRONICLE_AGENT_HOST_TEST_PATH = $hostPath
     $env:CHRONICLE_HARNESS_AGENT_AUTO_START = '1'
     $env:CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS = if ($Scenario -in @('Stop','StopTimeout')) { [string]$AutoStopAfterMilliseconds } else { '0' }
-    $env:CHRONICLE_HARNESS_AGENT_GOAL = if ($Scenario -eq 'Stop') { 'Inspect the current Native Campaign state and wait for the explicit stop request without changing the Campaign.' } else { 'Reach a currently visible safe nearby settlement. Finish only when fresh Native state confirms arrival.' }
+    $env:CHRONICLE_HARNESS_AGENT_GOAL = if ($Scenario -eq 'Stop') { 'Inspect the current Native Campaign state and wait for the explicit stop request without changing the Campaign.' } elseif ($expectsUnsupportedGoal) { 'Become clan tier 1 (50 renown).' } else { 'Move the current party to any one currently visible safe settlement.' }
     $env:CHRONICLE_HARNESS_AGENT_NO_MODEL = if ($usesIdleProvider) { '1' } else { '0' }
     $env:CHRONICLE_HARNESS_AGENT_FAILURE_CASE = if ($expectsFailure) { $Scenario } else { '' }
     $env:CHRONICLE_HARNESS_AGENT_IGNORE_STOP = if ($Scenario -eq 'StopTimeout') { '1' } else { '' }
     $env:CHRONICLE_HARNESS_AGENT_START_STATE = if ($Scenario -eq 'NonMap') { 'InventoryState' } else { 'MapState' }
+    $env:CHRONICLE_HARNESS_AGENT_ROUNDTRIP = if ($Scenario -eq 'CampaignRoundtrip') { '1' } else { '' }
+    $env:CHRONICLE_HARNESS_AGENT_ROUNDTRIP_SAVE_ID = if ($Scenario -eq 'CampaignRoundtrip') { $roundtripSaveName.Substring('ChronicleRT-'.Length) } else { '' }
 
     $loadReceipt = Invoke-LifecycleCli 'load' @('-SaveName', $SaveName)
     if ($loadReceipt.status -ne 'completed' -or -not $loadReceipt.session.processId) { throw 'The lifecycle fixture did not reach its Native Campaign handshake.' }
@@ -123,6 +136,35 @@ try {
     if ($Scenario -eq 'NonMap') {
         $inventoryReceipt = Invoke-LifecycleCli 'inventoryOpen'
         if ($inventoryReceipt.status -ne 'completed') { throw 'The non-map fixture could not open the existing Native inventory entry.' }
+    }
+    if ($Scenario -eq 'CampaignRoundtrip') {
+        if (Test-Path -LiteralPath $roundtripSavePath) { throw 'The one-time Campaign roundtrip save name already exists; no save was attempted.' }
+        $spaceRequired = (Get-Item -LiteralPath $savePath).Length + 1073741824
+        $saveDrive = [IO.Path]::GetPathRoot($saveDirectory).TrimEnd('\').TrimEnd(':')
+        if ((Get-PSDrive -Name $saveDrive).Free -lt $spaceRequired) { throw 'Insufficient free space for one temporary native roundtrip save; no save was attempted.' }
+        $saveRequest = Invoke-LifecycleCli 'save' @('-SaveName', $roundtripSaveName)
+        if ($saveRequest.status -ne 'accepted' -or [string]::IsNullOrWhiteSpace([string]$saveRequest.commandId)) {
+            throw 'Native did not accept creation of the isolated roundtrip test save.'
+        }
+        $roundtripSaveCreationRequested = $true
+        $saveResponsePath = Join-Path $responseRoot ($saveRequest.commandId + '.completed.json')
+        $saveRejectedPath = Join-Path $responseRoot ($saveRequest.commandId + '.rejected.json')
+        $saveDeadline = [DateTime]::UtcNow.AddSeconds(120)
+        while (-not (Test-Path -LiteralPath $saveResponsePath -PathType Leaf) -and -not (Test-Path -LiteralPath $saveRejectedPath -PathType Leaf) -and [DateTime]::UtcNow -lt $saveDeadline) {
+            Start-Sleep -Milliseconds 250
+        }
+        if (Test-Path -LiteralPath $saveRejectedPath -PathType Leaf) { throw 'Native rejected creation of the isolated roundtrip test save.' }
+        if (-not (Test-Path -LiteralPath $saveResponsePath -PathType Leaf) -or -not (Test-Path -LiteralPath $roundtripSavePath -PathType Leaf)) {
+            throw 'Native did not finish the isolated roundtrip test save within two minutes.'
+        }
+        $roundtripSaveCreated = $true
+        $completedSave = Get-Content -LiteralPath $saveResponsePath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($completedSave.action -ne 'save' -or $completedSave.status -ne 'completed' -or
+            $completedSave.processId -ne $gameProcessId -or $completedSave.nativeSessionId -ne $baseline.nativeSessionId) {
+            throw 'Temporary SaveAs completion did not match the current disposable Campaign PID/session.'
+        }
+        $roundtripSaveHash = (Get-FileHash -LiteralPath $roundtripSavePath -Algorithm SHA256).Hash
+        [IO.File]::WriteAllText((Join-Path $harnessTemp 'CampaignRoundtrip.proceed'), 'Baseline Native handshake verified.')
     }
 
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
@@ -140,14 +182,22 @@ try {
         $hostReadyEvents = @($gameLines | Where-Object { $_ -match '\|agent-host-ready\|' })
         $startedLine = @($gameLines | Where-Object { $_ -match '\|agent-host-process-started\|' } | Select-Object -Last 1)
         $hostExitEvents = @($gameLines | Where-Object { $_ -match '\|agent-host-process-exit\|' })
+        $roundtripLines = @($lines | Where-Object { $_ -match "\|pid=$gameProcessId\|harness-agent-campaign-roundtrip-complete\|" })
+        if (@($lines | Where-Object { $_ -match "\|pid=$gameProcessId\|harness-agent-campaign-roundtrip-failed\|" }).Count -gt 0) { throw 'Native Campaign roundtrip fixture failed; see the game diagnostics.' }
+        if ($Scenario -eq 'CampaignRoundtrip' -and $roundtripLines.Count -eq 1) { break }
         if ($startedLine.Count -gt 0 -and $startedLine[0] -match '\|agent-host-process-started\|pid=(\d+)\|') { $hostProcessId = [int]$Matches[1] }
         $sawStopped = @($states | Where-Object { $_ -match '\|state=Stopped\|' }).Count -gt 0
         $sawCompleted = @($states | Where-Object { $_ -match '\|state=Completed\|' }).Count -gt 0
         $sawFailed = @($states | Where-Object { $_ -match '\|state=Failed\|' }).Count -gt 0
         if ($Scenario -eq 'NonMap' -and $sawFailed) { break }
         if ($Scenario -eq 'ParentExited' -and $hostProcessId -gt 0 -and $hostReadyEvents.Count -gt 0) { break }
-        if ((($sawStopped -or $sawCompleted) -and $hostExitEvents.Count -gt 0) -or ($sawFailed -and $startedLine.Count -gt 0)) { break }
+        if ($Scenario -ne 'CampaignRoundtrip' -and ((($sawStopped -or $sawCompleted) -and $hostExitEvents.Count -gt 0) -or ($sawFailed -and $startedLine.Count -gt 0))) { break }
     } while ([DateTime]::UtcNow -lt $deadline)
+
+    $hostReceiptPath = Join-Path $harnessTemp 'AgentHostLifecycleHostReceipt.json'
+    if (Test-Path -LiteralPath $hostReceiptPath -PathType Leaf) {
+        $hostReceipt = Get-Content -LiteralPath $hostReceiptPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    }
 
     if ($Scenario -eq 'NonMap') {
         $nonMapState = Invoke-LifecycleCli 'state'
@@ -174,13 +224,32 @@ try {
     }
     $duplicateStartVerified = (@($duplicateStartLines | Where-Object { $_ -match "\|hostPid=$hostProcessId\|unchanged=True" }).Count -eq 1 -and
         @($gameLines | Where-Object { $_ -match '\|agent-host-process-started\|' }).Count -eq 1)
-    if (-not $expectsFailure -and -not $duplicateStartVerified) { throw 'Repeated MCM Start did not preserve exactly one owned Host process.' }
+    if (-not $expectsProviderPreflightFailure -and -not $duplicateStartVerified) { throw 'Repeated MCM Start did not preserve exactly one owned Host process.' }
     $nativeHandshakeVerified = @($hostReadyEvents | Where-Object {
         $_ -match "\|agent-host-ready\|hostPid=$hostProcessId\|protocol=1\|version=.+"
     }).Count -eq 1
-    if (-not $expectsFailure -and -not $nativeHandshakeVerified) { throw 'The controller did not verify a versioned Host handshake bound to the current Native Bannerlord process.' }
-    if ($expectsFailure -and $hostReadyEvents.Count -gt 0) { throw 'Host reported Ready before its failing provider health check.' }
-    if ($Scenario -eq 'ParentExited') {
+    if (-not $expectsProviderPreflightFailure -and -not $nativeHandshakeVerified) { throw 'The controller did not verify a versioned Host handshake bound to the current Native Bannerlord process.' }
+    if ($expectsProviderPreflightFailure -and $hostReadyEvents.Count -gt 0) { throw 'Host reported Ready before its failing provider health check.' }
+    if ($Scenario -eq 'CampaignRoundtrip') {
+        if ($roundtripLines.Count -ne 1 -or $roundtripLines[0] -notmatch '\|oldSession=([^|]+)\|newSession=([^|\r\n]+)') { throw 'Native same-process Campaign reload did not complete.' }
+        $oldNativeSession = $Matches[1]
+        $newNativeSession = $Matches[2]
+        $endingState = Invoke-LifecycleCli 'state'
+        $target = @($endingState.state.nearbySettlements | Where-Object { -not $_.hostile -and -not $_.underSiege } | Select-Object -First 1)
+        if ($target.Count -ne 1) { throw 'Reloaded fixture has no observed safe settlement for the stale-command rejection probe.' }
+        $staleMove = Invoke-LifecycleCli 'move' @('-SettlementId',[string]$target[0].id,'-ExpectedNativeSessionId',$oldNativeSession)
+        $nativeSessionGuardVerified = ($staleMove.status -eq 'rejected' -and $staleMove.error -eq 'native-session-mismatch' -and
+            $staleMove.nativeSessionId -eq $newNativeSession -and $staleMove.state.economy.gold -eq $endingState.state.economy.gold -and
+            $staleMove.state.location.targetSettlementId -ceq $endingState.state.location.targetSettlementId -and $staleMove.timeControlMode -eq $endingState.timeControlMode)
+        $campaignRoundtripVerified = ($oldNativeSession -eq $baseline.nativeSessionId -and $oldNativeSession -ne $newNativeSession -and
+            $endingState.processId -eq $gameProcessId -and $endingState.nativeSessionId -eq $newNativeSession -and
+            $endingState.state.context.gameState -eq 'MapState' -and $nativeSessionGuardVerified -and
+            @(Get-Process -Id $hostProcessId -ErrorAction SilentlyContinue).Count -eq 0 -and
+            @($gameLines | Where-Object { $_ -match '\|agent-host-process-started\|' }).Count -eq 1 -and $hostExitEvents.Count -eq 1)
+        if (-not $campaignRoundtripVerified) { throw 'Same-process reload did not preserve game PID, end the old Host, or reject its stale-session move without side effects.' }
+        $roundtripSaveHash = (Get-FileHash -LiteralPath $roundtripSavePath -Algorithm SHA256).Hash
+    }
+    elseif ($Scenario -eq 'ParentExited') {
         $ownedGame = Get-Process -Id $gameProcessId -ErrorAction Stop
         $ownedHost = Get-Process -Id $hostProcessId -ErrorAction Stop
         $installedGameRoot = [IO.Path]::GetFullPath([string](Get-Content (Join-Path $harnessRoot 'harness.local.json') -Raw | ConvertFrom-Json).gameRoot).TrimEnd('\') + '\'
@@ -205,7 +274,7 @@ try {
         }
     }
     else {
-    $expectedStates = if ($expectsFailure) { @('Starting','Failed') } elseif ($Scenario -eq 'StopTimeout') { @('Starting','Running','Stopping','Failed') } elseif ($Scenario -eq 'Stop') { @('Starting','Running','Stopping','Stopped') } else { @('Starting','Running','Completed') }
+    $expectedStates = if ($expectsFailure -and -not $expectsUnsupportedGoal) { @('Starting','Failed') } elseif ($expectsUnsupportedGoal) { @('Starting','Running','Failed') } elseif ($Scenario -eq 'StopTimeout') { @('Starting','Running','Stopping','Failed') } elseif ($Scenario -eq 'Stop') { @('Starting','Running','Stopping','Stopped') } else { @('Starting','Running','Completed') }
     foreach ($expectedState in $expectedStates) {
         if (@($states | Where-Object { $_ -match "\|state=$expectedState\|" }).Count -eq 0) {
             throw "The lifecycle controller did not report expected state: $expectedState"
@@ -225,9 +294,7 @@ try {
     if (@($hostExitEvents | Where-Object { $_ -match "\|pid=$hostProcessId\|exitCode=$expectedExitCode\|state=$expectedTerminalState" }).Count -ne 1) {
         throw 'The owned Host did not exit with its expected successful terminal state.'
     }
-    $hostReceiptPath = Join-Path $harnessTemp 'AgentHostLifecycleHostReceipt.json'
-    if (-not (Test-Path -LiteralPath $hostReceiptPath -PathType Leaf)) { throw 'Game-owned Host did not leave its sanitized lifecycle receipt.' }
-    $hostReceipt = Get-Content -LiteralPath $hostReceiptPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (-not $hostReceipt) { throw 'Game-owned Host did not leave its sanitized lifecycle receipt.' }
     }
 
     $endingState = Invoke-LifecycleCli 'state'
@@ -258,10 +325,12 @@ try {
         if ($nativeWriteActions.Count -gt 0) { throw 'Stop-timeout idle fixture issued a world action.' }
     }
     elseif ($expectsFailure) {
-        $expectedFailureCode = if ($Scenario -eq 'MissingModel') { 'provider-model-unavailable' } else { 'provider-unavailable' }
+        $expectedFailureCode = if ($Scenario -eq 'MissingModel') { 'provider-model-unavailable' } elseif ($Scenario -eq 'ServiceUnavailable') { 'provider-unavailable' } else { 'campaign-goal-unsupported' }
+        $expectedDecisionCount = if ($expectsUnsupportedGoal) { 1 } else { 0 }
+        $unapprovedNativeActions = @($responseFiles | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 | ConvertFrom-Json } | Where-Object { $_.action -notin @('state') })
         if ($hostReceipt.status -ne 'failed' -or $hostReceipt.failureCode -ne $expectedFailureCode -or
-            $hostReceipt.decisionCount -ne 0 -or $hostReceipt.actionsExecuted -ne 0 -or $responseFiles.Count -ne 0) {
-            throw 'Provider failure did not terminate before decisions and Native commands with its expected failure classification.'
+            $hostReceipt.decisionCount -ne $expectedDecisionCount -or $hostReceipt.actionsExecuted -ne 0 -or $unapprovedNativeActions.Count -gt 0) {
+            throw 'Provider or goal-scope failure did not stop before a Native action with its expected classification.'
         }
     }
     elseif ($Scenario -eq 'Stop') {
@@ -298,7 +367,11 @@ finally {
                 if ([int]$staleSession.processId -ne $gameProcessId) { throw 'Refusing to remove a different Campaign session during parent-exit cleanup.' }
                 Remove-Item -LiteralPath $sessionPath -Force
             }
-            else { $stopReceipt = Invoke-LifecycleCli 'stop' }
+            else {
+                $cleanup = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli stop -TimeoutSeconds 5 -AsJson 2>&1 | Out-String
+                if ($LASTEXITCODE -ne 0) { throw 'Lifecycle fixture cleanup failed.' }
+                $stopReceipt = $cleanup | ConvertFrom-Json
+            }
         } catch { if (-not $failure) { $failure = $_.Exception.Message } }
     }
     $watch.Stop()
@@ -312,19 +385,37 @@ $processesStopped = @(Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyConti
 $sessionClean = -not (Test-Path -LiteralPath $sessionPath -PathType Leaf)
 $fixtureHashAfter = if (Test-Path -LiteralPath $savePath -PathType Leaf) { (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash } else { $null }
 $fixtureUnchanged = $fixtureHashBefore -eq $fixtureHashAfter
-$passed = ($null -eq $failure -and $gameProcessId -gt 0 -and ($hostProcessId -gt 0 -or $nonMapRejected) -and $processesStopped -and $sessionClean -and $fixtureUnchanged -and ($Scenario -ne 'Stop' -or $nativeWriteActions.Count -eq 0) -and ($Scenario -ne 'ParentExited' -or $parentExitVerified))
+$roundtripSaveRemoved = ($Scenario -ne 'CampaignRoundtrip')
+if ($Scenario -eq 'CampaignRoundtrip' -and $roundtripSaveCreationRequested -and $processesStopped -and (Test-Path -LiteralPath $roundtripSavePath -PathType Leaf)) {
+    $allowedSaveRoot = [IO.Path]::GetFullPath($saveDirectory).TrimEnd('\') + '\'
+    $actualRoundtripPath = [IO.Path]::GetFullPath($roundtripSavePath)
+    if ($roundtripSaveName -and $actualRoundtripPath.StartsWith($allowedSaveRoot, [StringComparison]::OrdinalIgnoreCase) -and
+        [IO.Path]::GetFileName($actualRoundtripPath) -ceq ($roundtripSaveName + '.sav')) {
+        Remove-Item -LiteralPath $actualRoundtripPath -Force
+    }
+    $roundtripSaveRemoved = -not (Test-Path -LiteralPath $roundtripSavePath -PathType Leaf)
+}
+$passed = ($null -eq $failure -and $gameProcessId -gt 0 -and ($hostProcessId -gt 0 -or $nonMapRejected) -and $processesStopped -and $sessionClean -and $fixtureUnchanged -and ($Scenario -ne 'Stop' -or $nativeWriteActions.Count -eq 0) -and ($Scenario -ne 'ParentExited' -or $parentExitVerified) -and ($Scenario -ne 'CampaignRoundtrip' -or ($campaignRoundtripVerified -and $roundtripSaveCreated -and $roundtripSaveRemoved)))
 $result = [pscustomobject][ordered]@{
     Passed = [bool]$passed
     Scenario = $Scenario
-    ProviderKind = if ($expectsFailure) { 'Local provider health rejection; zero generation and Native commands' } elseif ($usesIdleProvider) { 'Harness-only idle provider; no model service or generation' } else { 'Real local 4b model through the game-launched Host' }
+    ProviderKind = if ($expectsProviderPreflightFailure) { 'Local provider health rejection; zero generation and Native commands' } elseif ($expectsUnsupportedGoal) { 'Real local 4b goal classification through the game-launched Host' } elseif ($usesIdleProvider) { 'Harness-only idle provider; no model service or generation' } else { 'Real local 4b model through the game-launched Host' }
     GameProcessId = $gameProcessId
     AgentHostProcessId = $hostProcessId
     ModelId = if ($hostReceipt) { $hostReceipt.providerModelId } else { $providerModelId }
     HostReceipt = $hostReceipt
+    HostFailure = if ($hostReceipt) { [string]$hostReceipt.failure } else { $null }
     NativeArrivalCompleted = [bool]$completionVerified
     HostIndependentlyExitedAfterParentTermination = [bool]$parentExitVerified
     OwnedHostStopTimeoutVerified = [bool]$stopTimeoutVerified
     NonMapStartRejectedBeforeHostCreation = [bool]$nonMapRejected
+    SameProcessCampaignRoundtripVerified = [bool]$campaignRoundtripVerified
+    OldNativeSessionId = $oldNativeSession
+    NewNativeSessionId = $newNativeSession
+    RoundtripSaveName = $roundtripSaveName
+    RoundtripSaveHash = $roundtripSaveHash
+    RoundtripSaveCreated = [bool]$roundtripSaveCreated
+    RoundtripSaveRemoved = [bool]$roundtripSaveRemoved
     ParentExitHostExitCode = $parentExitHostExitCode
     ParentExitSeconds = $parentExitSeconds
     EngineConfigRestoredAfterParentExit = if ($Scenario -eq 'ParentExited') { [bool]($stopReceipt -and $stopReceipt.restored) } else { $null }

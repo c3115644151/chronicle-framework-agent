@@ -16,11 +16,22 @@ internal static class AgentHostCampaignLoop
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
         var results = new List<object>();
-        var initialActions = BuildActionCatalog(null, moving: false, goalVerified: false);
-        var initialControls = BuildControlCatalog(moving: false, goalVerified: false);
-        if (initialActions.Count != 1 || ReadString(initialActions[0] as JsonObject, "action") != "mapSettlementTargets" || initialControls.Count != 0)
-            throw new AgentHostException("campaign-loop-self-test-catalog-failed", "The first Host decision must be a read-only map query.");
-        results.Add(new { scenario = "campaign-loop-starts-with-read-only-map-observation", passed = true });
+        var initialActions = new JsonArray();
+        var initialControls = BuildGoalScopeClassificationControls();
+        if (initialActions.Count != 0 || initialControls.Count != 2 ||
+            !initialControls.Any(control => control?.GetValue<string>() == "supportedMapArrivalGoal") ||
+            !initialControls.Any(control => control?.GetValue<string>() == "unsupportedGoal"))
+            throw new AgentHostException("campaign-loop-self-test-goal-scope-gate-failed", "The first decision must classify the complete user goal before any Native action is available.");
+        results.Add(new { scenario = "campaign-loop-requires-goal-scope-classification-before-native-actions", passed = true });
+        if (!AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("do not reject the goal because no candidate is listed yet", StringComparison.Ordinal))
+            throw new AgentHostException("campaign-loop-self-test-classifier-confuses-scope-with-availability", "Goal scope classification must not depend on whether the world-target query has already run.");
+        results.Add(new { scenario = "campaign-loop-classification-is-independent-of-target-availability", passed = true });
+        var postClassificationActions = BuildActionCatalog(null, moving: false, goalVerified: false);
+        var postClassificationControls = BuildControlCatalog(moving: false, goalVerified: false);
+        if (postClassificationActions.Count != 1 || ReadString(postClassificationActions[0] as JsonObject, "action") != "mapSettlementTargets" || postClassificationControls.Count != 0 ||
+            !AgentHostDecisionCycle.CampaignSystemPrompt.Contains("MUST choose that action before any other action or completion proposal", StringComparison.Ordinal))
+            throw new AgentHostException("campaign-loop-self-test-target-query-not-required", "After supported scope, the Native target query must precede all other actions and completion proposals.");
+        results.Add(new { scenario = "campaign-loop-target-query-precedes-move-and-completion", passed = true });
 
         var safeTargets = BuildSafeVisibleTargets(new JsonObject
         {
@@ -42,9 +53,12 @@ internal static class AgentHostCampaignLoop
         results.Add(new { scenario = "campaign-loop-filters-unsafe-current-and-unknown-risk-targets", passed = true });
 
         var targetActions = BuildActionCatalog(safeTargets, moving: false, goalVerified: false);
-        if (targetActions.Count != 2 || ReadString(targetActions[1] as JsonObject, "action") != "move")
-            throw new AgentHostException("campaign-loop-self-test-move-catalog-failed", "Movement must be offered only after a safe observed target exists.");
+        if (targetActions.Count != 1 || ReadString(targetActions[0] as JsonObject, "action") != "move")
+            throw new AgentHostException("campaign-loop-self-test-move-catalog-failed", "Once safe targets are observed, movement must be offered without repeating the map query.");
         results.Add(new { scenario = "campaign-loop-move-requires-current-safe-observation", passed = true });
+        if (BuildActionCatalog(new JsonArray(), moving: false, goalVerified: false).Count != 0)
+            throw new AgentHostException("campaign-loop-self-test-empty-target-requery-accepted", "An empty safe-target result must stop rather than repeat the same read-only query indefinitely.");
+        results.Add(new { scenario = "campaign-loop-does-not-repeat-map-query-after-empty-result", passed = true });
 
         var movingActions = BuildActionCatalog(safeTargets, moving: true, goalVerified: false);
         var movingControls = BuildControlCatalog(moving: true, goalVerified: false);
@@ -79,9 +93,16 @@ internal static class AgentHostCampaignLoop
         var arrivalProvider = new FakeCampaignDecisionProvider(timeoutOnMove: false);
         var arrival = await RunAsync(request.RootElement, arrivalClient, arrivalProvider, CancellationToken.None);
         if (ReadString(arrival, "status") != "completed" ||
-            ReadInt(arrival, "decisions", 0) != 4 ||
+            ReadInt(arrival, "decisions", 0) != 5 ||
             ReadInt(arrival, "actionsExecuted", 0) != 2 ||
-            arrivalClient.MapQueryCount != 1 || arrivalClient.MoveCount != 1 || arrivalProvider.CallCount != 4 ||
+            arrivalClient.MapQueryCount != 1 || arrivalClient.MoveCount != 1 || arrivalProvider.CallCount != 5 ||
+            arrivalProvider.FirstRequest?["goalScopeClassificationRequired"]?.GetValue<bool>() != true ||
+            arrivalProvider.FirstRequest?["observation"]?["scope"]?.GetValue<string>() != "goal-classification-only" ||
+            arrivalProvider.FirstRequest?["observation"]?["state"] is not null ||
+            arrivalProvider.FirstRequest?["allowedActions"] is not JsonArray firstAllowedActions || firstAllowedActions.Count != 0 ||
+            arrivalProvider.FirstRequest?["allowedControls"] is not JsonArray firstAllowedControls || firstAllowedControls.Count != 2 ||
+            !firstAllowedControls.Any(control => control?.GetValue<string>() == "supportedMapArrivalGoal") ||
+            !firstAllowedControls.Any(control => control?.GetValue<string>() == "unsupportedGoal") ||
             arrival["termination"] is not JsonObject arrivalTermination || ReadBoolean(arrivalTermination, "goalVerified") != true)
             throw new AgentHostException("campaign-loop-self-test-arrival-runtime-failed", "The injected Native/Provider loop did not observe, move once, passively re-observe, and verify arrival.");
         results.Add(new { scenario = "campaign-loop-runtime-observe-decide-act-observe-arrival", passed = true });
@@ -91,10 +112,20 @@ internal static class AgentHostCampaignLoop
         var timeout = await RunAsync(request.RootElement, timeoutClient, timeoutProvider, CancellationToken.None);
         if (ReadString(timeout, "status") != "failed" ||
             timeout["termination"] is not JsonObject timeoutTermination || ReadString(timeoutTermination, "reason") != "native-action-result-ambiguous" ||
-            ReadInt(timeout, "actionsExecuted", 0) != 1 || timeoutClient.MapQueryCount != 1 || timeoutClient.MoveCount != 1 || timeoutProvider.CallCount != 2 ||
+            ReadInt(timeout, "actionsExecuted", 0) != 1 || timeoutClient.MapQueryCount != 1 || timeoutClient.MoveCount != 1 || timeoutProvider.CallCount != 3 ||
             timeout["trace"] is not JsonArray timeoutTrace || timeoutTrace.OfType<JsonObject>().Count(step => ReadString(step["actionReceipt"] as JsonObject, "status") == "timeout-ambiguous") != 1)
             throw new AgentHostException("campaign-loop-self-test-timeout-replay-failed", "An ambiguous Native move timeout was not surfaced safely or the action was replayed.");
         results.Add(new { scenario = "campaign-loop-runtime-native-timeout-is-not-replayed", passed = true });
+
+        var unsupportedClient = new FakeCampaignNativeClient(timeoutOnMove: false);
+        var unsupportedProvider = new FakeCampaignDecisionProvider(timeoutOnMove: false, unsupportedGoal: true);
+        var unsupported = await RunAsync(request.RootElement, unsupportedClient, unsupportedProvider, CancellationToken.None);
+        if (ReadString(unsupported, "status") != "failed" ||
+            ReadString(unsupported, "failureCode") != "campaign-goal-unsupported" ||
+            ReadInt(unsupported, "actionsExecuted", 0) != 0 || unsupportedClient.MapQueryCount != 0 ||
+            unsupportedClient.MoveCount != 0 || unsupportedProvider.CallCount != 1)
+            throw new AgentHostException("campaign-loop-self-test-unsupported-goal-action-leaked", "An unsupported task must terminate after classification and before any Native game action.");
+        results.Add(new { scenario = "campaign-loop-unsupported-goal-stops-before-native-actions", passed = true });
         return results;
     }
 
@@ -152,6 +183,10 @@ internal static class AgentHostCampaignLoop
         string? moveTargetId = null;
         string? moveTargetName = null;
         var completedByProvider = false;
+        var goalScopeClassified = false;
+        bool? firstDecisionRequiresGoalClassification = null;
+        bool? firstDecisionListsSupportedGoalClassification = null;
+        bool? firstDecisionListsUnsupportedGoalClassification = null;
         string? terminationReason = null;
         string? failure = null;
         string? failureCode = null;
@@ -199,8 +234,12 @@ internal static class AgentHostCampaignLoop
                 }
 
                 targetReached = moveTargetId != null && string.Equals(ReadStateString(before, "location", "currentSettlementId"), moveTargetId, StringComparison.Ordinal);
-                var actionCatalog = BuildActionCatalog(visibleTargets, movingToTarget, targetReached);
-                var controls = BuildControlCatalog(movingToTarget, targetReached);
+                var actionCatalog = goalScopeClassified
+                    ? BuildActionCatalog(visibleTargets, movingToTarget, targetReached)
+                    : new JsonArray();
+                var controls = goalScopeClassified
+                    ? BuildControlCatalog(movingToTarget, targetReached)
+                    : BuildGoalScopeClassificationControls();
                 if (actionCatalog.Count == 0 && controls.Count == 0)
                 {
                     failure = "No safe map query, movement action or waiting control is available in the current Native state.";
@@ -210,6 +249,14 @@ internal static class AgentHostCampaignLoop
 
                 var observation = BuildObservation(before, visibleTargets, moveTargetId, moveTargetName, targetReached);
                 var modelRequest = BuildModelRequest(runId, iteration, goal!, observation, previousReceipt, feedback, actionCatalog, controls);
+                if (firstDecisionRequiresGoalClassification is null)
+                {
+                    firstDecisionRequiresGoalClassification = modelRequest["goalScopeClassificationRequired"]?.GetValue<bool>() ?? false;
+                    firstDecisionListsSupportedGoalClassification = modelRequest["allowedControls"] is JsonArray firstControls &&
+                        firstControls.Any(control => control?.GetValue<string>() == "supportedMapArrivalGoal");
+                    firstDecisionListsUnsupportedGoalClassification = modelRequest["allowedControls"] is JsonArray firstControlsForUnsupported &&
+                        firstControlsForUnsupported.Any(control => control?.GetValue<string>() == "unsupportedGoal");
+                }
                 var providerStartedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
                 var providerStartedTicks = Stopwatch.GetTimestamp();
                 ProviderDecisionResult providerResult;
@@ -231,7 +278,13 @@ internal static class AgentHostCampaignLoop
                         ["kind"] = "decision-rejected-before-native",
                         ["code"] = exception.Code,
                         ["message"] = exception.Message,
-                        ["requiredNextStep"] = "Use exactly one action or control from the latest catalog; do not repeat the rejected response."
+                        ["requiredNextStep"] = exception.Code switch
+                        {
+                            "provider-goal-classification-unavailable" when goalScopeClassified => "Goal scope was already classified. Do not classify again; choose the currently listed mapSettlementTargets action.",
+                            "provider-action-unavailable" when movingToTarget => "Native move is already active. Do not repeat move; choose the listed observeAgain control to obtain fresh state without changing the game clock.",
+                            "provider-arguments-invalid-json" => "Return arguments as a JSON object, not a string; use exactly the listed names and current observed IDs.",
+                            _ => "Use exactly one action or control from the latest catalog; do not repeat the rejected response."
+                        }
                     };
                     trace.Add(BuildRejectedDecisionStep(iteration, observation, previousReceipt, actionCatalog, controls, feedback, providerStartedUtc, providerCompletedUtc, providerStartedTicks));
                     continue;
@@ -239,6 +292,43 @@ internal static class AgentHostCampaignLoop
 
                 var providerDoneUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
                 var decision = providerResult.Decision;
+                var goalClassification = ReadNodeString(decision["goalClassification"]);
+                if (goalClassification == "unsupported")
+                {
+                    failure = "The configured goal exceeds the implemented Native map-arrival scope; no game action was issued.";
+                    failureCode = "campaign-goal-unsupported";
+                    terminationReason = "campaign-goal-unsupported";
+                    trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
+                        providerStartedUtc, providerDoneUtc, providerStartedTicks, new JsonObject { ["kind"] = "goal-out-of-scope" }));
+                    break;
+                }
+                if (goalClassification == "supported-map-arrival")
+                {
+                    if (goalScopeClassified)
+                    {
+                        failure = "The Host received a repeated goal-scope declaration after classification.";
+                        failureCode = "campaign-goal-classification-repeated";
+                        terminationReason = "campaign-loop-failed";
+                        break;
+                    }
+                    goalScopeClassified = true;
+                    feedback = new JsonObject
+                    {
+                        ["kind"] = "goal-scope-accepted",
+                        ["contractId"] = "native-map-arrival-v1",
+                        ["message"] = "This goal is handled only as arrival at any one currently visible safe settlement. The Native arrival verifier checks that limited outcome."
+                    };
+                    trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
+                        providerStartedUtc, providerDoneUtc, providerStartedTicks, null));
+                    continue;
+                }
+                if (!goalScopeClassified)
+                {
+                    failure = "The model did not classify the configured goal before the Native action gate.";
+                    failureCode = "campaign-goal-classification-missing";
+                    terminationReason = "campaign-goal-classification-missing";
+                    break;
+                }
                 var decisionAction = ReadNodeString(decision["action"]);
                 var decisionDone = ReadNodeBoolean(decision["done"]);
                 var observeAgain = ReadNodeBoolean(decision["observeAgain"]);
@@ -380,6 +470,9 @@ internal static class AgentHostCampaignLoop
             ["decisions"] = decisionCount,
             ["decisionCount"] = decisionCount,
             ["actionsExecuted"] = actionsExecuted,
+            ["firstDecisionRequiresGoalClassification"] = firstDecisionRequiresGoalClassification,
+            ["firstDecisionListsSupportedGoalClassification"] = firstDecisionListsSupportedGoalClassification,
+            ["firstDecisionListsUnsupportedGoalClassification"] = firstDecisionListsUnsupportedGoalClassification,
             ["promptTokens"] = promptTokens,
             ["completionTokens"] = completionTokens,
             ["termination"] = new JsonObject { ["reason"] = terminationReason, ["completedByProvider"] = completedByProvider, ["goalVerified"] = goalVerified },
@@ -396,8 +489,10 @@ internal static class AgentHostCampaignLoop
     {
         var catalog = new JsonArray();
         if (moving || goalVerified) return catalog;
-        catalog.Add(new JsonObject { ["action"] = "mapSettlementTargets", ["arguments"] = new JsonArray() });
-        if (targets is { Count: > 0 }) catalog.Add(new JsonObject { ["action"] = "move", ["arguments"] = new JsonArray(JsonValue.Create("SettlementId")) });
+        if (targets is null)
+            catalog.Add(new JsonObject { ["action"] = "mapSettlementTargets", ["arguments"] = new JsonArray() });
+        else if (targets.Count > 0)
+            catalog.Add(new JsonObject { ["action"] = "move", ["arguments"] = new JsonArray(JsonValue.Create("SettlementId")) });
         return catalog;
     }
 
@@ -408,6 +503,9 @@ internal static class AgentHostCampaignLoop
         if (goalVerified) controls.Add("done");
         return controls;
     }
+
+    private static JsonArray BuildGoalScopeClassificationControls() =>
+        new("supportedMapArrivalGoal", "unsupportedGoal");
 
     private static JsonObject BuildObservation(JsonObject native, JsonArray? targets, string? targetId, string? targetName, bool goalVerified)
     {
@@ -431,14 +529,26 @@ internal static class AgentHostCampaignLoop
         };
     }
 
-    private static JsonObject BuildModelRequest(string runId, int iteration, string goal, JsonObject observation, JsonObject? previousReceipt, JsonObject? feedback, JsonArray actions, JsonArray controls) =>
-        new()
+    private static JsonObject BuildModelRequest(string runId, int iteration, string goal, JsonObject observation, JsonObject? previousReceipt, JsonObject? feedback, JsonArray actions, JsonArray controls)
+    {
+        var classificationRequired = actions.Count == 0 && controls.Any(control =>
+            control?.GetValue<string>() is "supportedMapArrivalGoal" or "unsupportedGoal");
+        var modelObservation = classificationRequired
+            ? new JsonObject
+            {
+                ["scope"] = "goal-classification-only",
+                ["message"] = "No Native map-target query has run yet. Classify the requested outcome only; target availability will be checked after this gate."
+            }
+            : observation.DeepClone();
+        return new JsonObject
         {
             ["schemaVersion"] = 1,
             ["runId"] = runId,
             ["iteration"] = iteration,
             ["goal"] = goal,
-            ["observation"] = observation.DeepClone(),
+            ["goalScopeClassificationRequired"] = classificationRequired,
+            ["goalScopeContract"] = "native-map-arrival-v1",
+            ["observation"] = modelObservation,
             ["previousActionReceipt"] = previousReceipt?.DeepClone(),
             ["decisionFeedback"] = feedback?.DeepClone(),
             ["allowedActions"] = actions.DeepClone(),
@@ -447,6 +557,7 @@ internal static class AgentHostCampaignLoop
                 ? new JsonObject { ["observeAgain"] = new JsonObject { ["waitSeconds"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 10 } } }
                 : new JsonObject()
         };
+    }
 
     private static JsonArray BuildSafeVisibleTargets(JsonObject receipt)
     {
@@ -591,7 +702,7 @@ internal static class AgentHostCampaignLoop
         };
 
     private static bool IsRecoverableProviderDecisionError(string code) => code is
-        "provider-response-invalid-json" or "provider-decision-invalid-json" or "provider-decision-ambiguous" or
+        "provider-response-invalid-json" or "provider-decision-invalid-json" or "provider-arguments-invalid-json" or "provider-decision-ambiguous" or "provider-goal-classification-unavailable" or
         "provider-action-unavailable" or "provider-arguments-missing" or "provider-argument-unavailable" or
         "provider-arguments-shape-invalid" or "provider-control-unavailable" or "provider-control-arguments-invalid" or
         "provider-stop-arguments-invalid" or "provider-reason-missing" or "provider-reason-too-long" or
@@ -685,11 +796,21 @@ internal static class AgentHostCampaignLoop
         private static JsonDocument Parse(JsonObject value) => JsonDocument.Parse(value.ToJsonString());
     }
 
-    private sealed class FakeCampaignDecisionProvider(bool timeoutOnMove) : IAgentHostDecisionProvider
+    private sealed class FakeCampaignDecisionProvider : IAgentHostDecisionProvider
     {
+        private readonly bool _timeoutOnMove;
+        private readonly bool _unsupportedGoal;
+
         internal int CallCount { get; private set; }
+        internal JsonObject? FirstRequest { get; private set; }
         public string ModelId => "deterministic-campaign-loop-self-test";
         public string ConfigurationSource => "harness-fake-provider";
+
+        internal FakeCampaignDecisionProvider(bool timeoutOnMove, bool unsupportedGoal = false)
+        {
+            _timeoutOnMove = timeoutOnMove;
+            _unsupportedGoal = unsupportedGoal;
+        }
 
         public Task CheckConfiguredModelAsync(CancellationToken cancellationToken)
         {
@@ -701,12 +822,16 @@ internal static class AgentHostCampaignLoop
         {
             cancellationToken.ThrowIfCancellationRequested();
             CallCount++;
-            var decision = CallCount switch
+            if (CallCount == 1) FirstRequest = JsonNode.Parse(request.GetRawText())?.AsObject();
+            if (CallCount == 1)
+                return Task.FromResult(new ProviderDecisionResult("completed", ModelId, null, null, "stop",
+                    new JsonObject { ["goalClassification"] = _unsupportedGoal ? "unsupported" : "supported-map-arrival" }));
+            var decision = (CallCount - 1) switch
             {
                 1 => new JsonObject { ["action"] = "mapSettlementTargets", ["arguments"] = new JsonObject(), ["rationale"] = "Read current safe destinations." },
                 2 => new JsonObject { ["action"] = "move", ["arguments"] = new JsonObject { ["SettlementId"] = "safe" }, ["rationale"] = "Move to the observed safe destination." },
-                3 when !timeoutOnMove => new JsonObject { ["observeAgain"] = true, ["waitSeconds"] = 1, ["reason"] = "Observe natural movement." },
-                4 when !timeoutOnMove => new JsonObject { ["done"] = true, ["reason"] = "Fresh Native state confirms arrival." },
+                3 when !_timeoutOnMove => new JsonObject { ["observeAgain"] = true, ["waitSeconds"] = 1, ["reason"] = "Observe natural movement." },
+                4 when !_timeoutOnMove => new JsonObject { ["done"] = true, ["reason"] = "Fresh Native state confirms arrival." },
                 _ => throw new AgentHostException("campaign-loop-self-test-provider-sequence-invalid", "The runtime test requested more decisions than its scripted sequence.")
             };
             return Task.FromResult(new ProviderDecisionResult("completed", ModelId, null, null, "stop", decision));

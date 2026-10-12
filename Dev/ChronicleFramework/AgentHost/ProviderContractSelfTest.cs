@@ -137,6 +137,11 @@ internal static class ProviderContractSelfTest
         await VerifySharedDecisionCycleAsync(settings, "mapSettlementTargets", "CampaignSystemPrompt", AgentHostDecisionCycle.DecideCampaignAsync, results);
         await VerifySharedDecisionCycleAsync(settings, "foodOptions", "SupplySystemPrompt", AgentHostDecisionCycle.DecideSupplyAsync, results);
 
+        await VerifyGoalClassificationAsync(settings, "supportedMapArrivalGoal", "supported-map-arrival", ["supportedMapArrivalGoal", "unsupportedGoal"], results);
+        await VerifyGoalClassificationAsync(settings, "unsupportedGoal", "unsupported", ["supportedMapArrivalGoal", "unsupportedGoal"], results);
+        await VerifyGoalClassificationAsync(settings, "supportedMapArrivalGoal", "provider-goal-classification-unavailable", ["unsupportedGoal"], results);
+        VerifyProductionGoalClassificationCatalogNormalization(results);
+
         var successHandler = new StubHandler((_, _) => Task.FromResult(JsonResponse(BuildChatResponse(ValidDecision, "stop"))));
         using (var successClient = new HttpClient(successHandler) { Timeout = settings.Timeout })
         using (var provider = new OllamaNativeProvider(settings, successClient))
@@ -317,6 +322,77 @@ internal static class ProviderContractSelfTest
             File.Delete(profilePath);
             Directory.Delete(harnessRoot, recursive: true);
         }
+    }
+
+    private static async Task VerifyGoalClassificationAsync(
+        OllamaProviderSettings settings,
+        string control,
+        string expectedClassification,
+        string[] allowedControls,
+        List<object> results)
+    {
+        const string reason = "The full goal matches the available scope.";
+        var response = JsonResponse(BuildChatResponse(JsonSerializer.Serialize(new { control, reason }), "stop"));
+        var handler = new StubHandler((_, _) => Task.FromResult(response));
+        using var client = new HttpClient(handler) { Timeout = settings.Timeout };
+        using var provider = new OllamaNativeProvider(settings, client);
+        using var request = JsonDocument.Parse(JsonSerializer.Serialize(new
+        {
+            goal = "Move to any visible safe settlement.",
+            goalScopeClassificationRequired = expectedClassification != "provider-goal-classification-unavailable",
+            goalScopeContract = "native-map-arrival-v1",
+            observation = new { scope = "goal-classification-test", state = new { gameState = "MapState" } },
+            allowedActions = Array.Empty<object>(),
+            allowedControls
+        }));
+        try
+        {
+            var result = await AgentHostDecisionCycle.DecideCampaignAsync(provider, JsonNode.Parse(request.RootElement.GetRawText())!.AsObject(), CancellationToken.None);
+            if (expectedClassification == "provider-goal-classification-unavailable" ||
+                ReadDecisionString(result.Decision, "goalClassification") != expectedClassification ||
+                result.Decision.ContainsKey("action"))
+                throw new AgentHostException("provider-goal-classification-self-test-failed", "Goal classification did not stay within its listed control catalog.");
+            using var body = JsonDocument.Parse(handler.LastRequestBody ?? throw new AgentHostException("provider-goal-classification-prompt-missing", "The classification request was not sent."));
+            var system = body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString() ?? string.Empty;
+            if (!system.Contains("complete user goal", StringComparison.Ordinal) || !system.Contains("named destination", StringComparison.Ordinal) || !system.Contains("clan tier", StringComparison.Ordinal) || !system.Contains("do not reject the goal because no candidate is listed yet", StringComparison.Ordinal))
+                throw new AgentHostException("provider-goal-classification-prompt-incomplete", "The classifier prompt omitted the exact limits of the supported goal.");
+            results.Add(new { scenario = "provider-goal-classification-before-action", control, passed = true });
+        }
+        catch (AgentHostException exception) when (exception.Code == expectedClassification)
+        {
+            ValidateLocalEndpoint(handler.LastRequestUri);
+            results.Add(new { scenario = "provider-rejects-unlisted-goal-classification", control, passed = true });
+        }
+        ValidateLocalEndpoint(handler.LastRequestUri);
+    }
+
+    private static void VerifyProductionGoalClassificationCatalogNormalization(List<object> results)
+    {
+        using var request = JsonDocument.Parse("""
+            {"goal":"Move the current party to any one currently visible safe settlement.","goalScopeClassificationRequired":true,"goalScopeContract":"native-map-arrival-v1","observation":{"scope":"goal-classification-only"},"allowedActions":[],"allowedControls":["supportedMapArrivalGoal","unsupportedGoal"]}
+            """);
+        using var acceptedDecision = JsonDocument.Parse("""
+            {"control":"supportedMapArrivalGoal","reason":"This request exactly matches the supported map-arrival scope."}
+            """);
+        var normalized = OllamaNativeProvider.NormalizeDecision(acceptedDecision.RootElement, request.RootElement);
+        if (ReadDecisionString(normalized, "goalClassification") != "supported-map-arrival")
+            throw new AgentHostException("provider-production-goal-catalog-normalization-failed", "The production JSON catalog did not authorize its listed supported-goal control.");
+        using var gateOnlyRequest = JsonDocument.Parse("""
+            {"goal":"Move to any safe settlement.","goalScopeClassificationRequired":true,"observation":{"scope":"goal-classification-only"},"allowedActions":[],"allowedControls":[]}
+            """);
+        var gateOnlyNormalized = OllamaNativeProvider.NormalizeDecision(acceptedDecision.RootElement, gateOnlyRequest.RootElement);
+        if (ReadDecisionString(gateOnlyNormalized, "goalClassification") != "supported-map-arrival")
+            throw new AgentHostException("provider-goal-classification-phase-gate-failed", "The exact no-action classification phase must authorize only the two fixed classification controls.");
+        using var unlistedRequest = JsonDocument.Parse("""
+            {"goal":"Move to any safe settlement.","observation":{"scope":"ordinary-decision"},"allowedActions":[],"allowedControls":[]}
+            """);
+        try
+        {
+            _ = OllamaNativeProvider.NormalizeDecision(acceptedDecision.RootElement, unlistedRequest.RootElement);
+            throw new AgentHostException("provider-goal-classification-phase-gate-overbroad", "A supported-goal declaration escaped its explicitly marked no-action classification phase.");
+        }
+        catch (AgentHostException exception) when (exception.Code == "provider-goal-classification-unavailable") { }
+        results.Add(new { scenario = "production-json-goal-classification-catalog-normalization", passed = true });
     }
 
     private static async Task ExpectProviderErrorAsync(

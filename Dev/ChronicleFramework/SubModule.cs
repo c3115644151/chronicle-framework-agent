@@ -179,6 +179,7 @@ public sealed class SubModule : MBSubModuleBase
         base.OnApplicationTick(dt);
         TrySkipHarnessStartupVideo();
         ChronicleAgentRuntimeController.Tick();
+        if (AgentHostCampaignTransitionHarness.Tick()) return;
         var harnessStartState = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_START_STATE") == "InventoryState" ? "InventoryState" : "MapState";
         if (!_harnessAgentLifecycleStartRequested &&
             Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") == "agent-host-lifecycle-test" &&

@@ -14,9 +14,13 @@ internal sealed class AgentHostLifecycleReceipt
     [DataMember(Name = "providerConfigurationSource")] public string ConfigurationSource { get; set; }
     [DataMember(Name = "decisionCount")] public int DecisionCount { get; set; }
     [DataMember(Name = "actionsExecuted")] public int ActionsExecuted { get; set; }
+    [DataMember(Name = "firstDecisionRequiresGoalClassification")] public bool FirstDecisionRequiresGoalClassification { get; set; }
+    [DataMember(Name = "firstDecisionListsSupportedGoalClassification")] public bool FirstDecisionListsSupportedGoalClassification { get; set; }
+    [DataMember(Name = "firstDecisionListsUnsupportedGoalClassification")] public bool FirstDecisionListsUnsupportedGoalClassification { get; set; }
     [DataMember(Name = "promptTokens")] public long PromptTokens { get; set; }
     [DataMember(Name = "completionTokens")] public long CompletionTokens { get; set; }
     [DataMember(Name = "failureCode")] public string FailureCode { get; set; }
+    [DataMember(Name = "failure")] public string Failure { get; set; }
     [DataMember(Name = "error")] public string ErrorCode { get; set; }
     [DataMember(Name = "termination")] public AgentHostLifecycleTermination Termination { get; set; }
 

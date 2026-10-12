@@ -187,6 +187,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     {
         ValidateDecisionRequest(request);
         var userContent = JsonSerializer.Serialize(request, JsonOptions);
+        using var decisionRequestSnapshot = JsonDocument.Parse(userContent);
         var messages = new[]
         {
             new { role = "system", content = systemPrompt },
@@ -305,7 +306,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             if (string.IsNullOrWhiteSpace(content))
                 throw new AgentHostException("provider-content-empty", "The local model provider returned empty decision content.");
             using var decisionDocument = ParseJson(Encoding.UTF8.GetBytes(content), "provider-decision-invalid-json");
-            var decision = NormalizeDecision(decisionDocument.RootElement, request);
+            var decision = NormalizeDecision(decisionDocument.RootElement, decisionRequestSnapshot.RootElement);
 
             return new ProviderDecisionResult(
                 "completed",
@@ -322,7 +323,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         if (_ownsClient) _client.Dispose();
     }
 
-    private static JsonObject NormalizeDecision(JsonElement decision, JsonElement request)
+    internal static JsonObject NormalizeDecision(JsonElement decision, JsonElement request)
     {
         if (decision.ValueKind != JsonValueKind.Object)
             throw new AgentHostException("provider-decision-shape-invalid", "The local model decision must be a JSON object.");
@@ -375,6 +376,37 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             {
                 ["observeAgain"] = true,
                 ["waitSeconds"] = waitSeconds,
+                ["reason"] = ValidateReason(ReadString(decision, "reason") ?? ReadString(decision, "rationale"))
+            };
+        }
+
+        if (hasControl && controlName is "supportedMapArrivalGoal" or "unsupportedGoal")
+        {
+            EnsureOnlyProperties(decision, "control", "reason", "rationale");
+            var classificationPhase = ReadBoolean(request, "goalScopeClassificationRequired") == true &&
+                request.TryGetProperty("allowedActions", out var classificationActions) &&
+                classificationActions.ValueKind == JsonValueKind.Array && classificationActions.GetArrayLength() == 0;
+            if (!ContainsString(request, "allowedControls", controlName) && !classificationPhase)
+            {
+                var supportedListed = ContainsString(request, "allowedControls", "supportedMapArrivalGoal");
+                var unsupportedListed = ContainsString(request, "allowedControls", "unsupportedGoal");
+                var controlsKind = request.TryGetProperty("allowedControls", out var controls) ? controls.ValueKind.ToString() : "missing";
+                var controlsItems = controls.ValueKind == JsonValueKind.Array
+                    ? string.Join(",", controls.EnumerateArray().Select(item => item.ValueKind.ToString()))
+                    : "none";
+                var classificationRequired = ReadBoolean(request, "goalScopeClassificationRequired") == true;
+                var actionCount = request.TryGetProperty("allowedActions", out var actions) && actions.ValueKind == JsonValueKind.Array
+                    ? actions.GetArrayLength()
+                    : -1;
+                var iteration = request.TryGetProperty("iteration", out var iterationValue) && iterationValue.TryGetInt32(out var requestIteration)
+                    ? requestIteration
+                    : -1;
+                throw new AgentHostException("provider-goal-classification-unavailable",
+                    $"Goal classification is not currently listed in the decision catalog (catalog={controlsKind}[{controlsItems}], supported={supportedListed}, unsupported={unsupportedListed}, gate={classificationRequired}, actions={actionCount}, iteration={iteration}).");
+            }
+            return new JsonObject
+            {
+                ["goalClassification"] = controlName == "supportedMapArrivalGoal" ? "supported-map-arrival" : "unsupported",
                 ["reason"] = ValidateReason(ReadString(decision, "reason") ?? ReadString(decision, "rationale"))
             };
         }

@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.142'
+$contractVersion = '7.149'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -62,6 +62,8 @@ $agentOpenAiProviderSource = Get-Content (Join-Path $harnessRoot 'Agent-OpenAICo
 $agentOpenAiProviderTestSource = Get-Content (Join-Path $harnessRoot 'Test-AgentOpenAICompatibleProvider.ps1') -Raw -Encoding UTF8
 $agentEvaluationLiveModelSupplySource = Get-Content (Join-Path $harnessRoot 'Test-AgentEvaluationLiveModelSupply.ps1') -Raw -Encoding UTF8
 $agentHostCampaignLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostCampaignLoop.cs') -Raw -Encoding UTF8
+$agentHostDecisionCycleSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostDecisionCycle.cs') -Raw -Encoding UTF8
+$agentHostProviderSource = Get-Content (Join-Path $harnessRoot 'AgentHost\OllamaNativeProvider.cs') -Raw -Encoding UTF8
 $agentHostRuntimeControllerSource = Get-Content (Join-Path $harnessRoot 'AgentHostRuntimeController.cs') -Raw -Encoding UTF8
 $agentHostLifecycleEvaluationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostLifecycleEvaluation.ps1') -Raw -Encoding UTF8
 $agentHostDecisionCycleSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostDecisionCycle.cs') -Raw -Encoding UTF8
@@ -194,7 +196,15 @@ if ($harnessScript -notmatch "'AgentHostCampaignLoopEvaluation' \{ @\('Preflight
     $agentHostCampaignLoopSource -notmatch 'mapSettlementTargets' -or
     $agentHostCampaignLoopSource -notmatch 'ExecuteCampaignActionAsync' -or
     $agentHostCampaignLoopSource -notmatch 'BuildControlCatalog\(movingToTarget, targetReached\)' -or
-    $agentHostCampaignLoopSource -notmatch 'campaign-loop-starts-with-read-only-map-observation' -or
+    $agentHostCampaignLoopSource -notmatch 'campaign-loop-requires-goal-scope-classification-before-native-actions' -or
+    $agentHostCampaignLoopSource -notmatch 'campaign-loop-unsupported-goal-stops-before-native-actions' -or
+    $agentHostCampaignLoopSource -notmatch 'campaign-loop-target-query-precedes-move-and-completion' -or
+    $agentHostCampaignLoopSource -notmatch 'campaign-loop-does-not-repeat-map-query-after-empty-result' -or
+    $agentHostCampaignLoopSource -notmatch 'provider-goal-classification-unavailable' -or
+    $agentHostCampaignLoopSource -notmatch 'provider-arguments-invalid-json' -or
+    $agentHostCampaignLoopSource -notmatch 'Native move is already active' -or
+    $agentHostDecisionCycleSource -notmatch 'When the fresh Native state confirms the move to that selected target is active and observeAgain is listed' -or
+    $agentHostDecisionCycleSource -notmatch 'After the Host accepts classification, never emit either classification control again' -or
     $agentHostCampaignLoopSource -notmatch 'campaign-loop-rejects-unobserved-targets-and-clock-actions' -or
     $agentHostCampaignLoopSource -notmatch 'RunTransportSelfTestsAsync' -or
     $agentHostCampaignLoopSource -notmatch 'campaign-loop-runtime-observe-decide-act-observe-arrival' -or
@@ -356,6 +366,15 @@ if ($agentHostProviderSource -notmatch 'CheckConfiguredModelAsync' -or $agentHos
     throw 'Host lifecycle must bind to the launching Bannerlord PID/start time, handshake against the current Native PID before ready, monitor game exit, accept only explicit stop control, and fail safely without replay after an ambiguous action.'
 }
 $agentHostLifecycleHarness = Get-Content (Join-Path $harnessRoot 'Test-AgentHostLifecycleEvaluation.ps1') -Raw -Encoding UTF8
+$agentHostRuntimeControllerSource = Get-Content (Join-Path $harnessRoot 'AgentHostRuntimeController.cs') -Raw -Encoding UTF8
+if ($agentHostLifecycleHarness -notmatch "'UnsupportedGoal'" -or
+    $agentHostCampaignLoopSource -notmatch 'BuildGoalScopeClassificationControls' -or
+    $agentHostCampaignLoopSource -notmatch 'campaign-goal-unsupported' -or
+    $agentHostDecisionCycleSource -notmatch 'CampaignGoalClassificationPrompt' -or
+    $agentHostProviderSource -notmatch 'supportedMapArrivalGoal' -or
+    $agentHostRuntimeControllerSource -notmatch 'campaign-goal-unsupported') {
+    throw 'The bounded map Host must classify the complete user goal before offering Native actions and safely report unsupported objectives.'
+}
 if ($harnessScript -notmatch "'AgentHostLifecycleEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostLifecycleEvaluation'\) \}" -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostLifecycleEvaluation'" -or
     $agentHostLifecycleHarness -notmatch 'agent-host-lifecycle-test' -or $agentHostLifecycleHarness -notmatch 'AgentBridgeLifecycle' -or
@@ -380,11 +399,34 @@ if ($harnessScript -notmatch "'AgentHostLifecycleCompletionEvaluation' \{ @\('Pr
     $agentHostRuntimeControllerSource -notmatch 'AgentHostLifecycleReceipt\.CaptureForHarness') {
     throw 'Real game-launched Host completion must remain opt-in, use the local model and Native arrival postcondition, and keep a sanitized lifecycle receipt without full model prompts or responses.'
 }
+$agentHostCampaignTransitionSource = Get-Content (Join-Path $harnessRoot 'AgentHostCampaignTransitionHarness.cs') -Raw -Encoding UTF8
+if ($agentHostLifecycleHarness -notmatch "'CampaignRoundtrip'" -or
+    $agentCliSource -notmatch "'save'" -or $agentCliSource -notmatch "Invoke-ProtocolCommand 'save'" -or
+    $agentCliSource -notmatch '\-ReturnWhenAccepted' -or
+    $agentHostCampaignTransitionSource -notmatch 'MapScreen\.Instance' -or
+    $agentHostCampaignTransitionSource -notmatch 'MapScreen\.OnExit' -or
+    $agentHostCampaignTransitionSource -notmatch 'SandBoxSaveHelper\.TryLoadSave' -or
+    $agentHostCampaignTransitionSource -notmatch 'CheckMetaDataCompatibilityErrors' -or
+    $agentHostCampaignTransitionSource -notmatch 'native-save-helper-inquiry' -or
+    $agentHostCampaignTransitionSource -notmatch 'CheckMetaDataCompatibilityErrors' -or
+    $agentHostCampaignTransitionSource -notmatch 'OnNativeSaveStateChanged' -or
+    $agentHostCampaignTransitionSource -notmatch 'native-save-helper-inquiry' -or
+    $agentHostCampaignTransitionSource -notmatch 'AgentBridgeLifecycle' -or
+    $agentHostCampaignTransitionSource -notmatch 'CampaignRoundtrip\.proceed' -or
+    $agentHostCampaignTransitionSource -notmatch 'agent-host-lifecycle-test' -or
+    $agentHostCampaignTransitionSource -notmatch 'CHRONICLE_HARNESS_AGENT_NO_MODEL' -or
+    $agentHostCampaignTransitionSource -notmatch 'CHRONICLE_REPOSITORY_ROOT') {
+    throw 'The same-process Campaign roundtrip must use the installed Native exit/load path, the fixed disposable fixture, and strict lifecycle/no-model/TestResults gates.'
+}
 $agentHostPackageSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostPackage.ps1') -Raw -Encoding UTF8
 $agentHostProgramSource = Get-Content (Join-Path $harnessRoot 'AgentHost\Program.cs') -Raw -Encoding UTF8
+if ($agentHostPackageSource -notmatch 'NU1900' -or $agentHostPackageSource -notmatch 'NuGetAudit=false' -or
+    $agentHostPackageSource -notmatch 'PackageReference') {
+    throw 'NuGet audit fallback must be limited to a failed NU1900 vulnerability feed and a Host project with no third-party package references.'
+}
 if ($harnessScript -notmatch "'AgentHostPackage'\s*\{ @\('Preflight', 'Build', 'AgentHostPackage'\) \}" -or
     $harnessScript -match "'All'\s*\{[^\r\n]*'AgentHostPackage'" -or
-    $agentHostPackageSource -notmatch 'win-x64' -or $agentHostPackageSource -notmatch '--self-contained true' -or
+    $agentHostPackageSource -notmatch 'win-x64' -or $agentHostPackageSource -notmatch "'--self-contained',\s*'true'" -or
     $agentHostPackageSource -notmatch 'NUGET_PACKAGES' -or $agentHostPackageSource -notmatch '127\.0\.0\.1:7890' -or
     $agentHostPackageSource -notmatch 'D:\\ChronicleFramework\\BuildCache\\Packages' -or $agentHostPackageSource -notmatch 'package staging must be outside the source repository' -or
     $agentHostPackageSource -notmatch 'BaseOutputPath' -or

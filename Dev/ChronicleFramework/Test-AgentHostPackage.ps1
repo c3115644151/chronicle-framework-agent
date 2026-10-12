@@ -46,9 +46,21 @@ try {
     foreach ($name in @('HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy')) {
         [Environment]::SetEnvironmentVariable($name, $proxyUri, 'Process')
     }
-    $baseOutputArgument = "-p:BaseOutputPath=$buildOutputRoot\"
-    $buildLog = & dotnet publish $project --configuration Release --runtime win-x64 --self-contained true -p:UseAppHost=true $baseOutputArgument -o $publishRoot 2>&1 | Out-String
-    $buildExitCode = $LASTEXITCODE
+$baseOutputArgument = "-p:BaseOutputPath=$buildOutputRoot\"
+$publishArguments = @('publish',$project,'--configuration','Release','--runtime','win-x64','--self-contained','true','-p:UseAppHost=true',$baseOutputArgument,'-o',$publishRoot)
+$buildLog = & dotnet @publishArguments 2>&1 | Out-String
+$buildExitCode = $LASTEXITCODE
+if ($buildExitCode -ne 0 -and $buildLog -match 'NU1900') {
+    [xml]$hostProject = Get-Content -LiteralPath $project -Raw -Encoding UTF8
+    if (@($hostProject.Project.ItemGroup.PackageReference).Count -gt 0) {
+        throw "NuGet audit metadata was unreachable and this Host project contains package dependencies; refusing an unaudited fallback. $buildLog"
+    }
+    $auditFallbackArguments = @($publishArguments[0..($publishArguments.Count - 1)]) + '-p:NuGetAudit=false'
+    $auditFallbackLog = & dotnet @auditFallbackArguments 2>&1 | Out-String
+    $auditFallbackExitCode = $LASTEXITCODE
+    $buildLog = "Initial NuGet vulnerability-feed request failed with NU1900; retrying package restore without that unavailable audit endpoint. Dependency restore remains enabled.`n$buildLog`nAudit-metadata fallback publish:`n$auditFallbackLog"
+    $buildExitCode = $auditFallbackExitCode
+}
 }
 finally {
     foreach ($name in $previousEnvironment.Keys) {

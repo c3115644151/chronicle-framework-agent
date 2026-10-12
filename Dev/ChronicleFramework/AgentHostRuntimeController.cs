@@ -109,6 +109,8 @@ internal static class ChronicleAgentRuntimeController
     };
 
     internal static string StatusMessage => string.IsNullOrWhiteSpace(_detail) ? StatusText : StatusText + "：" + _detail;
+    internal static bool IsHostRunning => _state == RuntimeState.Running && _process != null && !_process.HasExited;
+    internal static bool OwnsHost => _process != null;
 
     internal static void RequestStatus() => ShowMessage(StatusMessage);
 
@@ -420,6 +422,8 @@ internal static class ChronicleAgentRuntimeController
             SetState(RuntimeState.Failed, "本地模型回复超时；Host已停止，请检查模型服务");
         else if (ContainsAny(output, errorOutput, "provider-http-error", "provider-unreachable"))
             SetState(RuntimeState.Failed, "本地模型推理请求失败；请检查服务日志与运行组件");
+        else if (ContainsAny(output, errorOutput, "campaign-goal-unsupported"))
+            SetState(RuntimeState.Failed, "当前目标超出Agent已接入范围；未执行战役行动");
         else if (ContainsAny(output, errorOutput, "provider-profile-missing", "profile-missing"))
             SetState(RuntimeState.Failed, "未找到已保存的MCM本地模型设置");
         else if (ContainsAny(output, errorOutput, "campaign-parent-exited", "campaign-parent-not-running", "campaign-parent-identity-mismatch", "native-parent-process-mismatch"))
