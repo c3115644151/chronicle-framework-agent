@@ -24,6 +24,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
 $HarnessContractVersion = '7.156'
+$effectiveSmokeTimeoutSeconds = if ($Phase -eq 'AgentHostVillageToolsQuestEvaluation') { [Math]::Max($SmokeTimeoutSeconds, 240) } else { $SmokeTimeoutSeconds }
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 if (-not (Test-Path -LiteralPath $localSettingsPath)) { throw "Local harness settings not found: $localSettingsPath. Run Initialize-ChronicleWorkspace.ps1 first." }
@@ -442,9 +443,9 @@ foreach ($stage in $requestedStages) {
                 try {
                     $smokeStdout = Join-Path $harnessTempDirectory 'SmokeWorker.stdout.log'
                     $smokeStderr = Join-Path $harnessTempDirectory 'SmokeWorker.stderr.log'
-                    $smokeWorker = Start-Process -FilePath (Get-Command powershell -ErrorAction Stop).Source -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"' + $smokeScript + '"'),'-TimeoutSeconds',$SmokeTimeoutSeconds,'-StabilitySeconds',$SmokeStabilitySeconds) -WindowStyle Hidden -RedirectStandardOutput $smokeStdout -RedirectStandardError $smokeStderr -PassThru
+                    $smokeWorker = Start-Process -FilePath (Get-Command powershell -ErrorAction Stop).Source -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"' + $smokeScript + '"'),'-TimeoutSeconds',$effectiveSmokeTimeoutSeconds,'-StabilitySeconds',$SmokeStabilitySeconds) -WindowStyle Hidden -RedirectStandardOutput $smokeStdout -RedirectStandardError $smokeStderr -PassThru
                     try {
-                        if (-not $smokeWorker.WaitForExit(($SmokeTimeoutSeconds + $SmokeStabilitySeconds + 30) * 1000)) {
+                        if (-not $smokeWorker.WaitForExit(($effectiveSmokeTimeoutSeconds + $SmokeStabilitySeconds + 30) * 1000)) {
                             $ownedGameExe = [IO.Path]::GetFullPath((Join-Path $gameRoot 'bin\Win64_Shipping_Client\Bannerlord.exe'))
                             $ownedChildren = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($smokeWorker.Id)")
                             foreach ($ownedChild in $ownedChildren) {

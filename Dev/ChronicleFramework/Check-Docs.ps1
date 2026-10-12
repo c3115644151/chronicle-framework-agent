@@ -229,6 +229,7 @@ if ($harnessScript -notmatch "'AgentHostCampaignLoopEvaluation' \{ @\('Preflight
     throw 'The Host campaign loop must remain opt-in and prove its bounded Native map-arrival contract, natural time progression, real local-model path, visual evidence and cleanup.'
 }
 if ($harnessScript -notmatch "'AgentHostVillageToolsQuestEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostVillageToolsQuestEvaluation'\) \}" -or
+    -not $harnessScript.Contains('effectiveSmokeTimeoutSeconds = if ($Phase -eq ''AgentHostVillageToolsQuestEvaluation'') { [Math]::Max($SmokeTimeoutSeconds, 240) }') -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostVillageToolsQuestEvaluation'" -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'VerifyQuestInventoryDelta' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'inventoryVerifiedAfterTurnIn' -or
