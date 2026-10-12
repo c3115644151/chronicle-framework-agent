@@ -179,17 +179,18 @@ public sealed class SubModule : MBSubModuleBase
         base.OnApplicationTick(dt);
         TrySkipHarnessStartupVideo();
         ChronicleAgentRuntimeController.Tick();
+        var harnessStartState = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_START_STATE") == "InventoryState" ? "InventoryState" : "MapState";
         if (!_harnessAgentLifecycleStartRequested &&
             Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") == "agent-host-lifecycle-test" &&
             Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_AUTO_START") == "1" &&
-            Campaign.Current != null && Game.Current?.GameStateManager?.ActiveState?.GetType().Name == "MapState")
+            Campaign.Current != null && Game.Current?.GameStateManager?.ActiveState?.GetType().Name == harnessStartState)
         {
             _harnessAgentLifecycleStartDelay += dt;
             if (_harnessAgentLifecycleStartDelay >= 2.5f)
             {
                 _harnessAgentLifecycleStartRequested = true;
                 ChronicleDiagnostics.Write("harness-agent-lifecycle-auto-start");
-                  if (ChronicleAgentRuntimeController.ProbeHarnessStartRejections())
+                  if (harnessStartState != "MapState" || ChronicleAgentRuntimeController.ProbeHarnessStartRejections())
                       ChronicleAgentProviderSettings.Instance?.StartAgent?.Invoke();
             }
         }

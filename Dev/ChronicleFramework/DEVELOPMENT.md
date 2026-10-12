@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.141
+Contract version: 7.142
 
 本地Provider的单次请求时限覆盖接收响应头与读取完整响应正文；`ResponseHeadersRead`不能使正文等待脱离该时限。只读模型目录探测仅证明服务可达且模型已登记，不证明推理进程可启动。实际推理失败先核查本地运行组件与服务日志，再归因模型或游戏。相关无模型回归覆盖“响应头立即返回、正文停滞”的超时分支。
 
@@ -12,18 +12,20 @@ Host控制输入读取放在后台任务：`Console.In`同步Reader的异步接�
 
 `StopTimeout`仅在已授权的临时生命周期/no-model模式下让idle Host忽略停止输入；普通Provider不会进入该分支。游戏仍发送产品Stop协议，至少经过五秒停止等待后由身份校验清理自己的Host，状态Starting→Running→Stopping→Failed；验证游戏仍可查询、没有世界动作或重复行动、源档与会话/进程干净。被强制结束的Host没有终态JSON，不用正常退出收据伪装超时结果。此场景不验证在途非幂等动作或其他同名Host并行隔离。
 
+`NonMap`从同一一次性Campaign通过现有Native库存入口打开InventoryState，再在该状态调用注册Start委托；要求Starting→Failed且零Host进程/Ready事件，库存保持打开。随后经现有Native Cancel回Map，核对Gold/位置、源档与清理。Harness自动Start状态只允许MapState或InventoryState，普通运行不读取该测试启动分支；不新增Agent玩家动作或模拟鼠标点击。
+
 Smoke子脚本有独立墙钟上限（启动时限+稳定窗口+30秒收据余量），stdout/stderr写入本次Temp。超过上限时只清理该worker及其直接创建、路径核对过的Bannerlord客户端，保留失败证据；不再无限阻塞整个Harness。结果JSON只序列化一次，`SmokeReceiptStages.log`分别标记序列化开始/完成和写入完成，区分游戏启动与测试收据生成卡点；这些标记不是游戏结果的替代证据。
 
 Smoke的FinishedAll/AssemblyLoaded/CrashDetected必须是Boolean；日志先转换为单一字符串，再做布尔匹配，防止集合匹配把完整日志作为结果。收据经有限层级的纯数据投影，保留空数组/null/数值/文本和快照字段，拒绝未知运行时对象；Windows PowerShell使用Framework JSON serializer，PS7使用规范化后的ConvertTo-Json。两种宿主的离线回归检查带PowerShell扩展属性的字符串、嵌套按钮快照、空数组和null；不把文本附带的运行元数据带进JSON。`191336`曾产生599274字节且两项字段为数组；修复后`191708`的启动收据2533字节，两字段均为Boolean且启动检查通过。
 
 ## 目标与边界
 
-Chronicle 当前服务两个目标：
+Chronicle 当前服务自主战役Agent产品及其验证工具链：
 
-1. 建立可无人值守验证 Bannerlord Mod 的本地 Harness；
-2. 在充分拆解原版系统后实施原版增强/优化。
+1. 交付玩家可安装、在游戏内配置和启动的Agent Mod，让AI自主观察当前战役、决定行动、通过原版入口执行并核对结果；产品范围、机制事实和未验证边界见`Focus/MAINLINE.md`，工作次序由GitHub Project维护。
+2. 维护可无人值守验证上述产品的本地Harness，隔离一次性夹具与正式存档，提供可信的原生状态、进程、日志及必要视觉证据。
 
-Campaign Agent Bridge 是验证基础设施，不是新玩法。它负责把战役层变成可观察、可控制、可恢复和可评测的环境；关系、长期目标和叙事优化仍必须先进入 `SYSTEM_INVENTORY.md` 对应研究，再由双方确认后写入 `DESIGN.md`。
+Campaign Agent Bridge是产品的游戏内适配层，负责观察、原版动作执行和会话绑定；外部Host负责模型决策与运行监护。Harness专用诊断、造景和故障注入只服务验证，不能进入普通Agent动作目录。具体玩法设计按相关研究与`DESIGN.md`的职责维护，工程测试夹具不能替代玩家产品目标。
 
 ## 单一事实来源
 

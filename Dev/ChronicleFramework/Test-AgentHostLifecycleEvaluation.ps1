@@ -2,7 +2,7 @@
 param(
     [ValidateRange(90,300)][int]$TimeoutSeconds = 180,
     [ValidateRange(250,10000)][int]$AutoStopAfterMilliseconds = 250,
-    [ValidateSet('Stop','Complete','MissingModel','ServiceUnavailable','ParentExited','StopTimeout')][string]$Scenario = 'Stop',
+    [ValidateSet('Stop','Complete','MissingModel','ServiceUnavailable','ParentExited','StopTimeout','NonMap')][string]$Scenario = 'Stop',
     [string]$SaveName = 'AgentBridgeLifecycle'
 )
 
@@ -32,7 +32,7 @@ if (Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue) { throw 'Refu
 if (Test-Path -LiteralPath $sessionPath -PathType Leaf) { throw 'Refusing to replace a stale Agent CLI session.' }
 
 $expectsFailure = $Scenario -in @('MissingModel','ServiceUnavailable')
-$usesIdleProvider = $Scenario -in @('Stop','ParentExited','StopTimeout')
+$usesIdleProvider = $Scenario -in @('Stop','ParentExited','StopTimeout','NonMap')
 $providerBaseUrl = if ($Scenario -eq 'ServiceUnavailable') { 'http://127.0.0.1:11433/v1' } else { 'http://127.0.0.1:11434/v1' }
 $providerModelId = if ($usesIdleProvider) { 'harness-lifecycle-no-model' } elseif ($Scenario -eq 'MissingModel') { 'chronicle-harness-model-not-installed' } else { 'qwen3.5:4b-q4_K_M' }
 if ($Scenario -eq 'MissingModel') {
@@ -68,7 +68,7 @@ $profilePath = Join-Path $profileDirectory 'ChronicleAgentSettings.json'
 $fixtureHashBefore = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
 $hostResponseFilesBefore = @(Get-ChildItem -LiteralPath $responseRoot -File -Filter 'host-*.json' -ErrorAction SilentlyContinue | ForEach-Object Name)
 $priorValues = @{}
-foreach ($name in @('CHRONICLE_HARNESS_MODE','CHRONICLE_AGENT_PROFILE_PATH','CHRONICLE_AGENT_HOST_TEST_PATH','CHRONICLE_HARNESS_AGENT_AUTO_START','CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS','CHRONICLE_HARNESS_AGENT_GOAL','CHRONICLE_HARNESS_AGENT_NO_MODEL','CHRONICLE_HARNESS_AGENT_FAILURE_CASE','CHRONICLE_HARNESS_AGENT_IGNORE_STOP')) {
+foreach ($name in @('CHRONICLE_HARNESS_MODE','CHRONICLE_AGENT_PROFILE_PATH','CHRONICLE_AGENT_HOST_TEST_PATH','CHRONICLE_HARNESS_AGENT_AUTO_START','CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS','CHRONICLE_HARNESS_AGENT_GOAL','CHRONICLE_HARNESS_AGENT_NO_MODEL','CHRONICLE_HARNESS_AGENT_FAILURE_CASE','CHRONICLE_HARNESS_AGENT_IGNORE_STOP','CHRONICLE_HARNESS_AGENT_START_STATE')) {
     $priorValues[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
 $gameProcessId = 0
@@ -90,6 +90,7 @@ $parentExitVerified = $false
 $parentExitHostExitCode = $null
 $parentExitSeconds = $null
 $stopTimeoutVerified = $false
+$nonMapRejected = $false
 $lastMoveTargetId = $null
 $nativeWriteActions = @()
 $hostExitEvents = @()
@@ -112,12 +113,17 @@ try {
     $env:CHRONICLE_HARNESS_AGENT_NO_MODEL = if ($usesIdleProvider) { '1' } else { '0' }
     $env:CHRONICLE_HARNESS_AGENT_FAILURE_CASE = if ($expectsFailure) { $Scenario } else { '' }
     $env:CHRONICLE_HARNESS_AGENT_IGNORE_STOP = if ($Scenario -eq 'StopTimeout') { '1' } else { '' }
+    $env:CHRONICLE_HARNESS_AGENT_START_STATE = if ($Scenario -eq 'NonMap') { 'InventoryState' } else { 'MapState' }
 
     $loadReceipt = Invoke-LifecycleCli 'load' @('-SaveName', $SaveName)
     if ($loadReceipt.status -ne 'completed' -or -not $loadReceipt.session.processId) { throw 'The lifecycle fixture did not reach its Native Campaign handshake.' }
     $gameProcessId = [int]$loadReceipt.session.processId
     $baseline = Invoke-LifecycleCli 'state'
     if ($baseline.status -ne 'completed' -or $baseline.state.context.gameState -ne 'MapState') { throw 'Lifecycle baseline was not a current Campaign Map observation.' }
+    if ($Scenario -eq 'NonMap') {
+        $inventoryReceipt = Invoke-LifecycleCli 'inventoryOpen'
+        if ($inventoryReceipt.status -ne 'completed') { throw 'The non-map fixture could not open the existing Native inventory entry.' }
+    }
 
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     do {
@@ -138,10 +144,27 @@ try {
         $sawStopped = @($states | Where-Object { $_ -match '\|state=Stopped\|' }).Count -gt 0
         $sawCompleted = @($states | Where-Object { $_ -match '\|state=Completed\|' }).Count -gt 0
         $sawFailed = @($states | Where-Object { $_ -match '\|state=Failed\|' }).Count -gt 0
+        if ($Scenario -eq 'NonMap' -and $sawFailed) { break }
         if ($Scenario -eq 'ParentExited' -and $hostProcessId -gt 0 -and $hostReadyEvents.Count -gt 0) { break }
         if ((($sawStopped -or $sawCompleted) -and $hostExitEvents.Count -gt 0) -or ($sawFailed -and $startedLine.Count -gt 0)) { break }
     } while ([DateTime]::UtcNow -lt $deadline)
 
+    if ($Scenario -eq 'NonMap') {
+        $nonMapState = Invoke-LifecycleCli 'state'
+        $nonMapRejected = ($hostProcessId -eq 0 -and $startedLine.Count -eq 0 -and $hostReadyEvents.Count -eq 0 -and
+            $nonMapState.state.context.gameState -eq 'InventoryState' -and
+            @($states | Where-Object { $_ -match '\|state=Starting\|' }).Count -eq 1 -and
+            @($states | Where-Object { $_ -match '\|state=Failed\|' }).Count -eq 1)
+        if (-not $nonMapRejected) { throw 'Non-map Start was not rejected before creating a Host while Native inventory remained open.' }
+        $inventoryCancel = Invoke-LifecycleCli 'inventoryCancel'
+        $endingState = Invoke-LifecycleCli 'state'
+        if ($inventoryCancel.status -ne 'completed' -or $endingState.state.context.gameState -ne 'MapState' -or
+            $endingState.state.economy.gold -ne $baseline.state.economy.gold -or
+            $endingState.state.location.currentSettlementId -cne $baseline.state.location.currentSettlementId) {
+            throw 'Non-map fixture did not return through Native inventory cancel without changing location/gold.'
+        }
+    }
+    else {
     if ($hostProcessId -le 0) { throw 'The game did not start a child Agent Host process.' }
     foreach ($case in $(if ($Scenario -eq 'Stop') { @('empty-goal','oversized-goal','remote-endpoint','empty-model','missing-host') } else { @() })) {
         if (@($rejectionLines | Where-Object { $_ -match "\|case=$case\|state=Failed\|hostCreated=False" }).Count -ne 1) {
@@ -256,6 +279,7 @@ try {
         if (-not $completionVerified) { throw 'Real game-launched Host did not verify Native arrival and report Completed using the current MCM model snapshot.' }
     }
     }
+    }
 }
 catch { $failure = $_.Exception.Message }
 finally {
@@ -288,7 +312,7 @@ $processesStopped = @(Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyConti
 $sessionClean = -not (Test-Path -LiteralPath $sessionPath -PathType Leaf)
 $fixtureHashAfter = if (Test-Path -LiteralPath $savePath -PathType Leaf) { (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash } else { $null }
 $fixtureUnchanged = $fixtureHashBefore -eq $fixtureHashAfter
-$passed = ($null -eq $failure -and $gameProcessId -gt 0 -and $hostProcessId -gt 0 -and $processesStopped -and $sessionClean -and $fixtureUnchanged -and ($Scenario -ne 'Stop' -or $nativeWriteActions.Count -eq 0) -and ($Scenario -ne 'ParentExited' -or $parentExitVerified))
+$passed = ($null -eq $failure -and $gameProcessId -gt 0 -and ($hostProcessId -gt 0 -or $nonMapRejected) -and $processesStopped -and $sessionClean -and $fixtureUnchanged -and ($Scenario -ne 'Stop' -or $nativeWriteActions.Count -eq 0) -and ($Scenario -ne 'ParentExited' -or $parentExitVerified))
 $result = [pscustomobject][ordered]@{
     Passed = [bool]$passed
     Scenario = $Scenario
@@ -300,6 +324,7 @@ $result = [pscustomobject][ordered]@{
     NativeArrivalCompleted = [bool]$completionVerified
     HostIndependentlyExitedAfterParentTermination = [bool]$parentExitVerified
     OwnedHostStopTimeoutVerified = [bool]$stopTimeoutVerified
+    NonMapStartRejectedBeforeHostCreation = [bool]$nonMapRejected
     ParentExitHostExitCode = $parentExitHostExitCode
     ParentExitSeconds = $parentExitSeconds
     EngineConfigRestoredAfterParentExit = if ($Scenario -eq 'ParentExited') { [bool]($stopReceipt -and $stopReceipt.restored) } else { $null }
