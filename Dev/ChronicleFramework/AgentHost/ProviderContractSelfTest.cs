@@ -14,6 +14,7 @@ internal static class ProviderContractSelfTest
     internal static async Task<object> RunAsync()
     {
         var results = new List<object>();
+        results.AddRange(NativeMailboxClient.RunVillageToolsQuestActionContractSelfTests());
         results.AddRange(AgentHostCampaignLoop.RunContractSelfTests());
         results.AddRange(await AgentHostCampaignLoop.RunTransportSelfTestsAsync());
         results.AddRange(await Program.RunParentProcessContractSelfTestsAsync());

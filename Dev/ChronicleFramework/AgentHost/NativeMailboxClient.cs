@@ -12,6 +12,12 @@ internal sealed class NativeMailboxClient : IAgentHostCampaignNativeClient
         "state", "menuSelect", "foodOptions", "provision", "tradeConfirm", "tradeCancelChanges", "rest"
     };
 
+    private static readonly HashSet<string> VillageToolsQuestActions = new(StringComparer.Ordinal)
+    {
+        "mapSettlementTargets", "move", "menuSelect", "talkToSettlementHero", "dialogueSelect",
+        "dialogueContinue", "questDetails", "tradeOptions", "trade", "tradeConfirm", "tradeCancelChanges"
+    };
+
     private readonly string _root;
     private readonly string _responseRoot;
     private readonly TimeSpan _timeout;
@@ -74,6 +80,87 @@ internal sealed class NativeMailboxClient : IAgentHostCampaignNativeClient
 
     Task<JsonDocument> IAgentHostCampaignNativeClient.ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken) =>
         ExecuteCampaignActionAsync(action, arguments, cancellationToken);
+
+    internal Task<JsonDocument> ExecuteVillageToolsQuestActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+    {
+        // This is only the transport's closed action/argument boundary. The quest loop must still
+        // construct its per-decision catalog from fresh Native observations and bind every ID to it.
+        ValidateVillageToolsQuestAction(action, arguments);
+        return SendAsync(action, arguments, acceptedResponseExpected: false, cancellationToken);
+    }
+
+    internal static void ValidateVillageToolsQuestAction(string action, JsonObject arguments)
+    {
+        if (!VillageToolsQuestActions.Contains(action))
+            throw new AgentHostException("native-action-not-in-village-tools-scope", "The action is outside the bounded village-tools quest transport scope.");
+
+        static bool HasOnlyKeys(JsonObject value, params string[] keys) =>
+            value.Count == keys.Length && keys.All(value.ContainsKey);
+        static bool HasText(JsonObject value, string key) =>
+            value[key] is JsonValue node && node.TryGetValue<string>(out var text) && !string.IsNullOrWhiteSpace(text);
+
+        var valid = action switch
+        {
+            "mapSettlementTargets" or "dialogueContinue" or "tradeOptions" or "tradeConfirm" or "tradeCancelChanges" => arguments.Count == 0,
+            "move" => HasOnlyKeys(arguments, "settlementId") && HasText(arguments, "settlementId"),
+            "menuSelect" => HasOnlyKeys(arguments, "menuId", "optionId") && HasText(arguments, "menuId") && HasText(arguments, "optionId"),
+            "talkToSettlementHero" => HasOnlyKeys(arguments, "heroId") && HasText(arguments, "heroId"),
+            "dialogueSelect" => HasOnlyKeys(arguments, "optionId") && HasText(arguments, "optionId"),
+            "questDetails" => HasOnlyKeys(arguments, "questId") && HasText(arguments, "questId"),
+            "trade" => HasOnlyKeys(arguments, "direction", "itemViewModelId", "inventorySide", "amount") &&
+                HasText(arguments, "direction") && HasText(arguments, "itemViewModelId") && HasText(arguments, "inventorySide") &&
+                arguments["amount"] is JsonValue amountNode && amountNode.TryGetValue<int>(out var amount) && amount > 0 &&
+                arguments["direction"]!.GetValue<string>() is "buy" or "sell",
+            _ => false
+        };
+
+        if (!valid)
+            throw new AgentHostException("native-village-tools-arguments-invalid", $"The Native '{action}' arguments do not match the bounded village-tools protocol contract.");
+    }
+
+    internal static IReadOnlyList<object> RunVillageToolsQuestActionContractSelfTests()
+    {
+        var validCases = new (string Action, string Json)[]
+        {
+            ("mapSettlementTargets", "{}"),
+            ("move", "{\"settlementId\":\"village-1\"}"),
+            ("menuSelect", "{\"menuId\":\"village\",\"optionId\":\"town_visit\"}"),
+            ("talkToSettlementHero", "{\"heroId\":\"hero-1\"}"),
+            ("dialogueSelect", "{\"optionId\":\"quest_accept\"}"),
+            ("dialogueContinue", "{}"),
+            ("questDetails", "{\"questId\":\"quest-1\"}"),
+            ("tradeOptions", "{}"),
+            ("trade", "{\"direction\":\"buy\",\"itemViewModelId\":\"tools\",\"inventorySide\":\"OtherInventory\",\"amount\":1}"),
+            ("tradeConfirm", "{}"),
+            ("tradeCancelChanges", "{}")
+        };
+        foreach (var item in validCases)
+        {
+            ValidateVillageToolsQuestAction(item.Action, JsonNode.Parse(item.Json)!.AsObject());
+        }
+
+        var invalidCases = new (string Action, string Json)[]
+        {
+            ("pause", "{}"),
+            ("move", "{\"settlementId\":\"village-1\",\"pause\":true}"),
+            ("talkToSettlementHero", "{\"heroId\":\"\"}"),
+            ("trade", "{\"direction\":\"buy\",\"itemViewModelId\":\"tools\",\"inventorySide\":\"OtherInventory\",\"amount\":0}"),
+            ("trade", "{\"direction\":\"delete\",\"itemViewModelId\":\"tools\",\"inventorySide\":\"OtherInventory\",\"amount\":1}"),
+            ("tradeConfirm", "{\"questId\":\"quest-1\"}")
+        };
+        foreach (var item in invalidCases)
+        {
+            var arguments = JsonNode.Parse(item.Json)!.AsObject();
+            try
+            {
+                ValidateVillageToolsQuestAction(item.Action, arguments);
+                throw new AgentHostException("native-village-tools-contract-self-test-invalid-accepted", "An invalid action, argument, transaction, or clock request passed validation.");
+            }
+            catch (AgentHostException exception) when (exception.Code is "native-action-not-in-village-tools-scope" or "native-village-tools-arguments-invalid") { }
+        }
+
+        return [new { scenario = "village-tools-mailbox-action-contract-allows-only-observed-native-action-shapes-and-no-clock-control", validCases = validCases.Length, invalidCases = invalidCases.Length, passed = true }];
+    }
 
     private async Task<JsonDocument> SendAsync(
         string action,
