@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.151'
+$contractVersion = '7.152'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -326,6 +326,12 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerValidatorSource -notmatch 'Uri\.IsLoopback' -or $agentHostProjectSource -notmatch 'AgentProviderConfigurationValidator\.cs' -or
     $providerProfileSource -notmatch 'AgentProviderConfigurationValidator\.GetErrorCode' -or
     $providerProfileTestSource -notmatch 'mcm-profile-rejects-remote-endpoint' -or
+    $providerProfileTestSource -notmatch 'mcm-global-profile-tolerates-legacy-and-unknown-fields' -or
+    $providerProfileTestSource -notmatch 'provider-profile-reads-without-migrating-user-file' -or
+    $providerProfileTestSource -notmatch 'provider-profile-error-path-mutated-file' -or
+    $providerProfileTestSource -notmatch 'mcm-global-profile-tolerates-legacy-and-unknown-fields' -or
+    $providerProfileTestSource -notmatch 'provider-profile-reads-without-migrating-user-file' -or
+    $providerProfileTestSource -notmatch 'provider-profile-error-path-mutated-file' -or
     $providerProfileTestSource -notmatch 'host-loads-authorized-harness-mcm-profile' -or
     $providerProfileTestSource -notmatch 'host-rejects-profile-outside-harness-root' -or
     $providerProfileSource -notmatch 'Configs.*ModSettings.*Global.*ChronicleFramework.*ChronicleAgentSettings\.json' -or

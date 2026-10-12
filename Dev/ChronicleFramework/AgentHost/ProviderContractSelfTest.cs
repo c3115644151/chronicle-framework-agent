@@ -57,7 +57,7 @@ internal static class ProviderContractSelfTest
             throw new AgentHostException("provider-profile-path-self-test-failed", "The Host global profile path does not match the MCM Global folder/id convention.");
         results.Add(new { scenario = "host-default-path-matches-mcm-global-folder-and-id", passed = true });
 
-        using (var validProfile = JsonDocument.Parse("{\"OllamaBaseUrl\":\"http://127.0.0.1:11434/v1\",\"ModelId\":\"qwen3.5:4b-q4_K_M\"}"))
+        using (var validProfile = JsonDocument.Parse("{\"OllamaBaseUrl\":\"http://127.0.0.1:11434/v1\",\"ModelId\":\"qwen3.5:4b-q4_K_M\",\"schemaVersion\":0,\"LegacySetting\":true,\"CampaignGoal\":\"older-MCM-key\"}"))
         {
             var profile = AgentProviderProfile.Parse(validProfile.RootElement);
             if (profile.BaseUrl != "http://127.0.0.1:11434/v1" || profile.ModelId != "qwen3.5:4b-q4_K_M")
@@ -65,6 +65,7 @@ internal static class ProviderContractSelfTest
             if (AgentProviderProfile.GetSettingsValidationError(profile.BaseUrl, profile.ModelId) is not null)
                 throw new AgentHostException("provider-profile-self-test-settings-check-failed", "The MCM configuration check rejected valid local model settings.");
             results.Add(new { scenario = "mcm-global-profile-values-normalized", passed = true });
+            results.Add(new { scenario = "mcm-global-profile-tolerates-legacy-and-unknown-fields", passed = true });
         }
 
         ExpectInvalidProfile("{\"OllamaBaseUrl\":\"https://example.com/v1\",\"ModelId\":\"test\"}", "provider-profile-endpoint-invalid", "mcm-profile-rejects-remote-endpoint");
@@ -255,6 +256,7 @@ internal static class ProviderContractSelfTest
         try
         {
             File.WriteAllText(profilePath, json);
+            var profileHashBefore = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(profilePath)));
             try
             {
                 _ = AgentProviderProfile.Load(profilePath, "provider-profile-self-test");
@@ -264,6 +266,9 @@ internal static class ProviderContractSelfTest
             {
                 // Expected safe parse failure.
             }
+            var profileHashAfter = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(profilePath)));
+            if (!string.Equals(profileHashBefore, profileHashAfter, StringComparison.Ordinal))
+                throw new AgentHostException("provider-profile-error-path-mutated-file", $"Scenario '{scenario}' changed the saved profile while rejecting it.");
         }
         finally
         {
@@ -285,6 +290,7 @@ internal static class ProviderContractSelfTest
         try
         {
             File.WriteAllText(profilePath, "{\"OllamaBaseUrl\":\"http://127.0.0.1:11434/v1\",\"ModelId\":\"test-local-model\"}");
+            var profileHashBefore = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(profilePath)));
             Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "visual-capture");
             Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_TEMP", harnessRoot);
             Environment.SetEnvironmentVariable("CHRONICLE_AGENT_PROFILE_PATH", profilePath);
@@ -302,6 +308,10 @@ internal static class ProviderContractSelfTest
                     throw new AgentHostException("provider-profile-override-self-test-failed", "The Host lifecycle test did not load its authorized temporary MCM profile.");
                 results.Add(new { scenario = "lifecycle-test-loads-only-its-authorized-temporary-profile", passed = true });
             }
+            var profileHashAfter = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(profilePath)));
+            if (!string.Equals(profileHashBefore, profileHashAfter, StringComparison.Ordinal))
+                throw new AgentHostException("provider-profile-read-mutated-file", "Loading the existing MCM profile must never rewrite or migrate user-owned configuration.");
+            results.Add(new { scenario = "provider-profile-reads-without-migrating-user-file", passed = true });
 
             Environment.SetEnvironmentVariable("CHRONICLE_AGENT_PROFILE_PATH", outsideProfilePath);
             try
