@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.133'
+$contractVersion = '7.134'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -358,6 +358,8 @@ if ($harnessScript -notmatch "'AgentHostLifecycleEvaluation' \{ @\('Preflight', 
     $agentHostLifecycleHarness -notmatch 'NativeGoalActionsBeforeStop' -or $agentHostLifecycleHarness -notmatch 'NativeHandshakeVerified' -or
     $agentHostLifecycleHarness -notmatch 'CHRONICLE_HARNESS_AGENT_NO_MODEL' -or $agentHostLifecycleHarness -notmatch 'CliSessionCleaned' -or
     $agentHostLifecycleHarness -notmatch 'NativeSessionGuardVerified' -or $agentCliSource -notmatch 'ExpectedNativeSessionId' -or
+    $agentHostLifecycleHarness -notmatch 'StartupRejectionCases' -or $agentHostLifecycleHarness -notmatch 'DuplicateStartVerified' -or
+    $agentHostRuntimeControllerSource -notmatch 'ProbeHarnessStartRejections' -or
     $agentHostProgramSource -notmatch 'IsAuthorizedLifecycleNoModelMode' -or $agentHostProgramSource -notmatch 'LifecycleIdleDecisionProvider' -or
     $agentHostRuntimeControllerSource -notmatch 'AgentHostReadyProtocol\.TryParse' -or
     $agentHostProgramSource -notmatch 'AgentHostReadyProtocol\.Format' -or

@@ -54,6 +54,8 @@ $states = @()
 $hostReadyEvents = @()
 $nativeHandshakeVerified = $false
 $nativeSessionGuardVerified = $false
+$startupRejectionCases = @()
+$duplicateStartVerified = $false
 $nativeWriteActions = @()
 $hostExitEvents = @()
 $watch = [Diagnostics.Stopwatch]::StartNew()
@@ -86,6 +88,11 @@ try {
         if (-not (Test-Path -LiteralPath $diagnosticLog -PathType Leaf)) { continue }
         $lines = @(Get-Content -LiteralPath $diagnosticLog -Encoding UTF8)
         $gameLines = @($lines | Where-Object { $_ -match "\|pid=$gameProcessId\|agent-host-" })
+        $rejectionLines = @($lines | Where-Object { $_ -match "\|pid=$gameProcessId\|harness-agent-start-rejection\|" })
+        if (@($lines | Where-Object { $_ -match "\|pid=$gameProcessId\|harness-agent-start-rejection-failed\|" }).Count -gt 0) {
+            throw 'A startup rejection fixture failed; no normal Host launch was attempted.'
+        }
+        $duplicateStartLines = @($lines | Where-Object { $_ -match "\|pid=$gameProcessId\|harness-agent-duplicate-start\|" })
         $states = @($gameLines | Where-Object { $_ -match '\|agent-host-state\|' })
         $hostReadyEvents = @($gameLines | Where-Object { $_ -match '\|agent-host-ready\|' })
         $startedLine = @($gameLines | Where-Object { $_ -match '\|agent-host-process-started\|' } | Select-Object -Last 1)
@@ -93,10 +100,19 @@ try {
         if ($startedLine.Count -gt 0 -and $startedLine[0] -match '\|agent-host-process-started\|pid=(\d+)\|') { $hostProcessId = [int]$Matches[1] }
         $sawStopped = @($states | Where-Object { $_ -match '\|state=Stopped\|' }).Count -gt 0
         $sawFailed = @($states | Where-Object { $_ -match '\|state=Failed\|' }).Count -gt 0
-        if ($sawStopped -or $sawFailed) { break }
+        if (($sawStopped -and $hostExitEvents.Count -gt 0) -or ($sawFailed -and $startedLine.Count -gt 0)) { break }
     } while ([DateTime]::UtcNow -lt $deadline)
 
     if ($hostProcessId -le 0) { throw 'The game did not start a child Agent Host process.' }
+    foreach ($case in @('empty-goal','oversized-goal','remote-endpoint','empty-model','missing-host')) {
+        if (@($rejectionLines | Where-Object { $_ -match "\|case=$case\|state=Failed\|hostCreated=False" }).Count -ne 1) {
+            throw "Startup rejection fixture was not verified exactly once: $case"
+        }
+        $startupRejectionCases += $case
+    }
+    $duplicateStartVerified = (@($duplicateStartLines | Where-Object { $_ -match "\|hostPid=$hostProcessId\|unchanged=True" }).Count -eq 1 -and
+        @($gameLines | Where-Object { $_ -match '\|agent-host-process-started\|' }).Count -eq 1)
+    if (-not $duplicateStartVerified) { throw 'Repeated MCM Start did not preserve exactly one owned Host process.' }
     $nativeHandshakeVerified = @($hostReadyEvents | Where-Object {
         $_ -match "\|agent-host-ready\|hostPid=$hostProcessId\|protocol=1\|version=.+"
     }).Count -eq 1
@@ -164,6 +180,8 @@ $result = [pscustomobject][ordered]@{
     LifecycleStates = @($states | ForEach-Object { [string]$_ })
     NativeHandshakeVerified = [bool]$nativeHandshakeVerified
     NativeSessionGuardVerified = [bool]$nativeSessionGuardVerified
+    StartupRejectionCases = @($startupRejectionCases)
+    DuplicateStartVerified = [bool]$duplicateStartVerified
     HostReadyEvents = @($hostReadyEvents | ForEach-Object { [string]$_ })
     HostExitEvents = @($hostExitEvents | ForEach-Object { [string]$_ })
     NativeGoalActionsBeforeStop = @($nativeWriteActions | ForEach-Object { [string]$_ })

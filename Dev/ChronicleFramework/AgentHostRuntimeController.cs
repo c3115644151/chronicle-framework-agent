@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -41,6 +42,60 @@ internal static class ChronicleAgentRuntimeController
     private static string _runId = string.Empty;
     private static string _forcedFailureDetail = string.Empty;
     private static TaleWorlds.CampaignSystem.Campaign _ownedCampaign;
+    private static bool _harnessStartProbeActive;
+    private static bool _harnessDuplicateStartProbed;
+
+    internal static bool ProbeHarnessStartRejections()
+    {
+        if (!IsLifecycleHarnessMode() || Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_NO_MODEL") != "1") return true;
+        var priorHostPath = Environment.GetEnvironmentVariable("CHRONICLE_AGENT_HOST_TEST_PATH");
+        var cases = new[]
+        {
+            new KeyValuePair<string, Action<ChronicleAgentProviderSettings>>("empty-goal", settings => settings.CampaignGoal = string.Empty),
+            new KeyValuePair<string, Action<ChronicleAgentProviderSettings>>("oversized-goal", settings => settings.CampaignGoal = new string('x', 1001)),
+            new KeyValuePair<string, Action<ChronicleAgentProviderSettings>>("remote-endpoint", settings => settings.OllamaBaseUrl = "https://example.com/v1"),
+            new KeyValuePair<string, Action<ChronicleAgentProviderSettings>>("empty-model", settings => settings.ModelId = string.Empty),
+            new KeyValuePair<string, Action<ChronicleAgentProviderSettings>>("missing-host", settings => { })
+        };
+        _harnessStartProbeActive = true;
+        try
+        {
+            foreach (var testCase in cases)
+            {
+                var settings = new ChronicleAgentProviderSettings
+                {
+                    OllamaBaseUrl = "http://127.0.0.1:11434/v1",
+                    ModelId = "harness-lifecycle-no-model",
+                    CampaignGoal = "Harness rejection fixture"
+                };
+                testCase.Value(settings);
+                Environment.SetEnvironmentVariable("CHRONICLE_AGENT_HOST_TEST_PATH", testCase.Key == "missing-host"
+                    ? "D:\\ChronicleFramework\\BuildCache\\Packages\\__missing_" + Guid.NewGuid().ToString("N") + "\\ChronicleAgentHost.exe"
+                    : priorHostPath);
+                SetState(RuntimeState.Starting, "Harness startup rejection probe");
+                StartOwnedHost(settings);
+                if (_state != RuntimeState.Failed || _process != null)
+                {
+                    if (_process != null) RequestStop();
+                    ChronicleDiagnostics.Write("harness-agent-start-rejection-failed|case=" + testCase.Key);
+                    return false;
+                }
+                ChronicleDiagnostics.Write("harness-agent-start-rejection|case=" + testCase.Key + "|state=Failed|hostCreated=False");
+            }
+            SetState(RuntimeState.Stopped, string.Empty);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            ChronicleDiagnostics.Write("harness-agent-start-rejection-failed|type=" + exception.GetType().Name);
+            return false;
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CHRONICLE_AGENT_HOST_TEST_PATH", priorHostPath);
+            _harnessStartProbeActive = false;
+        }
+    }
 
     internal static string StatusText => _state switch
     {
@@ -168,7 +223,7 @@ internal static class ChronicleAgentRuntimeController
         }
     }
 
-    private static void StartOwnedHost()
+    private static void StartOwnedHost(ChronicleAgentProviderSettings harnessSettings = null)
     {
         if (_process != null && !_process.HasExited)
         {
@@ -176,7 +231,7 @@ internal static class ChronicleAgentRuntimeController
             return;
         }
 
-        var settings = ChronicleAgentProviderSettings.Instance;
+        var settings = IsLifecycleHarnessMode() && harnessSettings != null ? harnessSettings : ChronicleAgentProviderSettings.Instance;
         if (settings == null)
         {
             FailStart("无法读取MCM配置");
@@ -184,7 +239,7 @@ internal static class ChronicleAgentRuntimeController
         }
         var goal = settings.CampaignGoal;
         var harnessGoal = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_GOAL");
-        if (IsLifecycleHarnessMode() && !string.IsNullOrWhiteSpace(harnessGoal)) goal = harnessGoal;
+        if (harnessSettings == null && IsLifecycleHarnessMode() && !string.IsNullOrWhiteSpace(harnessGoal)) goal = harnessGoal;
         if (string.IsNullOrWhiteSpace(goal) || goal.Trim().Length > 1000)
         {
             FailStart("请填写不超过1000字的本次战役目标");
@@ -384,6 +439,19 @@ internal static class ChronicleAgentRuntimeController
             _hostReadyUtc = DateTime.UtcNow;
             ShowMessage("自主Agent已连接当前Campaign并开始执行目标");
             ChronicleDiagnostics.Write("agent-host-ready|hostPid=" + _ownedProcessId + "|protocol=1|version=" + Shorten(version, 64));
+            if (IsLifecycleHarnessMode() && !_harnessDuplicateStartProbed)
+            {
+                _harnessDuplicateStartProbed = true;
+                var priorPid = _ownedProcessId;
+                ChronicleAgentProviderSettings.Instance?.StartAgent?.Invoke();
+                var unchanged = _ownedProcessId == priorPid && _state == RuntimeState.Running && !_startRequested;
+                ChronicleDiagnostics.Write("harness-agent-duplicate-start|hostPid=" + priorPid + "|unchanged=" + unchanged);
+                if (!unchanged)
+                {
+                    _forcedFailureDetail = "重复启动测试改变了Host身份；已请求停止";
+                    RequestStop();
+                }
+            }
         }
     }
 
@@ -444,6 +512,7 @@ internal static class ChronicleAgentRuntimeController
         if (_state == state && string.Equals(_detail, detail, StringComparison.Ordinal)) return;
         _state = state;
         _detail = detail ?? string.Empty;
+        if (_harnessStartProbeActive) return;
         try { ChronicleDiagnostics.Write("agent-host-state|state=" + state + "|detail=" + Shorten(_detail, 180)); }
         catch { }
         try { ShowMessage(StatusMessage); }
@@ -452,6 +521,7 @@ internal static class ChronicleAgentRuntimeController
 
     private static void ShowMessage(string message)
     {
+        if (_harnessStartProbeActive) return;
         if (Game.Current == null) return;
         MBInformationManager.AddQuickInformation(new TextObject(Shorten(message, 180)), 6000);
     }

@@ -186,7 +186,8 @@ public sealed class SubModule : MBSubModuleBase
             {
                 _harnessAgentLifecycleStartRequested = true;
                 ChronicleDiagnostics.Write("harness-agent-lifecycle-auto-start");
-                  ChronicleAgentProviderSettings.Instance?.StartAgent?.Invoke();
+                  if (ChronicleAgentRuntimeController.ProbeHarnessStartRejections())
+                      ChronicleAgentProviderSettings.Instance?.StartAgent?.Invoke();
             }
         }
         ProbeHarnessMcmSettingsRegistration(dt);
