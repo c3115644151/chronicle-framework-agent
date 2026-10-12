@@ -122,6 +122,8 @@ Supported/tested game: Mount & Blade II: Bannerlord 1.4.8.119303. Other game ver
 
 Install: extract this archive and place the top-level ChronicleFramework folder under the game's Modules directory. Enable the required modules in the order reported by the game's module manager; Chronicle's SubModule.xml declares the required modules and minimum versions.
 
+Before installing an update, rolling back, or uninstalling Chronicle, fully close Bannerlord. Replacing a game DLL or Host while the game is running is not supported; there is no hot-update path.
+
 The package contains the Chronicle game module and its self-contained Windows x64 Agent Host. It does not include Ollama, model weights, user MCM settings, saves, or development Harness files. Configure an already installed local loopback Ollama service in Chronicle's MCM settings before starting the Agent.
 
 This is not a public release and has not been tested through a third-party mod manager installation flow. The W7 Epic remains the final player installation/launch acceptance.

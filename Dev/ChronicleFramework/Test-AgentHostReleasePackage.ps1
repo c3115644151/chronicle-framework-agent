@@ -47,6 +47,29 @@ function Get-DirectorySnapshotSha256([string]$DirectoryPath) {
     finally { $sha.Dispose() }
 }
 
+function Get-CurrentSaveHashes {
+    $hashes = @{}
+    if (Test-Path -LiteralPath $sourceCampaignDirectory -PathType Container) {
+        Get-ChildItem -LiteralPath $sourceCampaignDirectory -File -Filter '*.sav' | ForEach-Object { $hashes[$_.Name] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
+    }
+    return $hashes
+}
+
+function Test-FormalSaveSetUnchanged([hashtable]$Baseline) {
+    $current = Get-CurrentSaveHashes
+    return ($Baseline.Count -eq $current.Count -and @($Baseline.Keys | Where-Object { -not $current.ContainsKey($_) -or $current[$_] -cne $Baseline[$_] }).Count -eq 0)
+}
+
+function Test-McmConfigUnchanged {
+    if ($mcmHashBefore) { return (Test-Path -LiteralPath $mcmSettings -PathType Leaf) -and (Get-FileHash -LiteralPath $mcmSettings -Algorithm SHA256).Hash -ceq $mcmHashBefore }
+    return -not (Test-Path -LiteralPath $mcmSettings -PathType Leaf)
+}
+
+function Assert-GameClosedForModuleFileChange([string]$Operation) {
+    $running = @(Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue)
+    if ($running.Count -gt 0) { throw "Cannot $Operation while a Bannerlord game process is running; package module files stay untouched." }
+}
+
 if (-not [string]::IsNullOrWhiteSpace($CleanupGeneratedRoot)) {
     $cleanupParent = 'D:\ChronicleFramework\BuildCache\ReleasePackageTests'
     Remove-IsolatedTree -Path $CleanupGeneratedRoot -AllowedParent $cleanupParent -ExpectedLeafPattern '^test-[0-9a-f]{32}$'
@@ -200,6 +223,18 @@ $evidence = [ordered]@{
     PackageSha256 = $null
     ManifestValidated = $false
     IsolatedSmokePassed = $false
+    UninstallRemovedOnlyChronicleModule = $false
+    RequiredModulesRemainAfterUninstall = $false
+    UpdateRollbackCycleVerified = $false
+    UpdateFixtureMode = 'manifest-only synthetic 0.1.0-to-0.1.1 fixture; binary/config schema intentionally unchanged'
+    InstalledVersionBeforeUpdate = $null
+    InstalledVersionAfterUpdate = $null
+    InstalledVersionAfterRollback = $null
+    UpdatePreservedUserData = $false
+    RollbackPreservedUserData = $false
+    UserMcmConfigurationUnchangedAfterUninstall = $false
+    FormalSavesUnchangedAfterUninstall = $false
+    NoGameProcessesDuringUninstall = $false
     IsolatedGameRoot = $overlayRoot
     ModuleDependencyIds = @()
     ModuleDependencyMinimumVersions = @()
@@ -270,6 +305,10 @@ try {
         foreach ($requiredPackagePath in @('ChronicleFramework/bin/Win64_Shipping_Client/ChronicleFramework.dll','ChronicleFramework/AgentHost/ChronicleAgentHost.exe','ChronicleFramework/AgentHost/ChronicleAgentHost.dll','ChronicleFramework/README.txt','ChronicleFramework/LICENSE.txt')) {
             if ($requiredPackagePath -notin $entryNames) { throw "Release archive is missing required player/install file '$requiredPackagePath'." }
         }
+        $readmeEntry = $zip.GetEntry('ChronicleFramework/README.txt')
+        $readmeReader = [IO.StreamReader]::new($readmeEntry.Open(), [Text.Encoding]::UTF8)
+        try { $packageReadme = $readmeReader.ReadToEnd() } finally { $readmeReader.Dispose() }
+        if ($packageReadme -notmatch 'close Bannerlord' -or $packageReadme -notmatch 'no hot-update path') { throw 'Player packaging instructions must require closing the game before update/rollback/uninstall and reject hot replacement.' }
         $dependencyMinimumVersions = @($packageManifest.dependencies | ForEach-Object { [pscustomobject]@{ id=$_.id; minimumVersion=$_.minimumVersion; required=[bool]$_.required; installedTestVersion=$_.installedTestVersion } })
         if (@($dependencyMinimumVersions | Where-Object { -not [bool]$_.required -or [string]::IsNullOrWhiteSpace($_.minimumVersion) -or [string]::IsNullOrWhiteSpace($_.installedTestVersion) }).Count -gt 0) { throw 'Every declared module prerequisite must be required and record its minimum and tested installed version.' }
         $evidence.ModuleDependencyIds = $dependencyIds
@@ -286,6 +325,69 @@ try {
         -not [bool]$smokeResult.ProcessExitedUnexpectedly -and 'ChronicleFramework' -in @($smokeResult.ModuleIds) -and
         @($smokeResult.McmButtonPropertyIds).Count -eq 4 -and [string]$smokeResult.GameRoot -eq [IO.Path]::GetFullPath($overlayRoot))
     if (-not $smokePassed) { throw 'The isolated package Smoke did not prove that the archived module loaded and registered the expected MCM settings/buttons.' }
+    $gameShutdownDeadline = (Get-Date).AddSeconds(15)
+    while (@(Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue).Count -gt 0 -and (Get-Date) -lt $gameShutdownDeadline) { Start-Sleep -Milliseconds 250 }
+    if (@(Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue).Count -gt 0) { throw 'The isolated Bannerlord process did not exit before package file-maintenance fixtures; preserving the mounted test root.' }
+    $isolatedModulesPath = Join-Path $overlayRoot 'Modules'
+    $isolatedChroniclePath = Join-Path $isolatedModulesPath 'ChronicleFramework'
+    if (-not (Test-Path -LiteralPath (Join-Path $isolatedChroniclePath 'SubModule.xml') -PathType Leaf)) { throw 'The isolated release module is missing before uninstall verification.' }
+    [xml]$installedManifestBeforeUpdate = Get-Content -LiteralPath (Join-Path $isolatedChroniclePath 'SubModule.xml') -Encoding UTF8
+    $versionBeforeUpdate = [string]$installedManifestBeforeUpdate.Module.Version.value
+    if ($versionBeforeUpdate -ne 'v0.1.0') { throw "Synthetic update fixture expected package version v0.1.0; found $versionBeforeUpdate." }
+    $oldInstalledModuleHash = Get-DirectorySnapshotSha256 $isolatedChroniclePath
+
+    $updateFixtureModule = Join-Path $runRoot 'SyntheticUpdateFixture\ChronicleFramework'
+    New-Item -ItemType Directory -Path (Split-Path -Parent $updateFixtureModule) -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $extractRoot 'ChronicleFramework') -Destination $updateFixtureModule -Recurse
+    $updateSubModulePath = Join-Path $updateFixtureModule 'SubModule.xml'
+    [xml]$updateManifest = Get-Content -LiteralPath $updateSubModulePath -Encoding UTF8
+    $updateManifest.Module.Version.value = 'v0.1.1'
+    $updateManifest.Save($updateSubModulePath)
+    $updateReleaseManifestPath = Join-Path $updateFixtureModule 'release-manifest.json'
+    $updateReleaseManifest = Get-Content -LiteralPath $updateReleaseManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $updateReleaseManifest.moduleVersion = 'v0.1.1'
+    $subModuleFileRow = @($updateReleaseManifest.files | Where-Object { $_.path -eq 'SubModule.xml' })
+    if ($subModuleFileRow.Count -ne 1) { throw 'Synthetic update fixture could not locate its SubModule.xml file-hash entry.' }
+    $subModuleFileRow[0].sizeBytes = (Get-Item -LiteralPath $updateSubModulePath).Length
+    $subModuleFileRow[0].sha256 = (Get-FileHash -LiteralPath $updateSubModulePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    [IO.File]::WriteAllText($updateReleaseManifestPath, ($updateReleaseManifest | ConvertTo-Json -Depth 10) + "`r`n", [Text.UTF8Encoding]::new($false))
+
+    Assert-GameClosedForModuleFileChange 'update'
+    Remove-IsolatedTree -Path $isolatedChroniclePath -AllowedParent $isolatedModulesPath -ExpectedLeafPattern '^ChronicleFramework$'
+    Copy-Item -LiteralPath $updateFixtureModule -Destination $isolatedChroniclePath -Recurse
+    [xml]$installedManifestAfterUpdate = Get-Content -LiteralPath (Join-Path $isolatedChroniclePath 'SubModule.xml') -Encoding UTF8
+    $evidence.InstalledVersionBeforeUpdate = $versionBeforeUpdate
+    $evidence.InstalledVersionAfterUpdate = [string]$installedManifestAfterUpdate.Module.Version.value
+    if ($evidence.InstalledVersionAfterUpdate -ne 'v0.1.1' -or (Get-DirectorySnapshotSha256 $isolatedChroniclePath) -ceq $oldInstalledModuleHash) {
+        throw 'Synthetic package update did not install the newer manifest version and corresponding file hash.'
+    }
+    $evidence.UpdatePreservedUserData = (Test-McmConfigUnchanged) -and (Test-FormalSaveSetUnchanged $saveHashesBefore)
+    if (-not $evidence.UpdatePreservedUserData) { throw 'Synthetic package update changed user MCM settings or Campaign saves.' }
+
+    Assert-GameClosedForModuleFileChange 'rollback'
+    Remove-IsolatedTree -Path $isolatedChroniclePath -AllowedParent $isolatedModulesPath -ExpectedLeafPattern '^ChronicleFramework$'
+    Copy-Item -LiteralPath (Join-Path $extractRoot 'ChronicleFramework') -Destination $isolatedChroniclePath -Recurse
+    [xml]$installedManifestAfterRollback = Get-Content -LiteralPath (Join-Path $isolatedChroniclePath 'SubModule.xml') -Encoding UTF8
+    $evidence.InstalledVersionAfterRollback = [string]$installedManifestAfterRollback.Module.Version.value
+    $evidence.RollbackPreservedUserData = (Test-McmConfigUnchanged) -and (Test-FormalSaveSetUnchanged $saveHashesBefore)
+    if ($evidence.InstalledVersionAfterRollback -ne $versionBeforeUpdate -or (Get-DirectorySnapshotSha256 $isolatedChroniclePath) -cne $oldInstalledModuleHash -or -not $evidence.RollbackPreservedUserData) {
+        throw 'Rollback did not restore the original package files/version while preserving user data.'
+    }
+    $evidence.UpdateRollbackCycleVerified = $true
+
+    Assert-GameClosedForModuleFileChange 'uninstall'
+    Remove-IsolatedTree -Path $isolatedChroniclePath -AllowedParent $isolatedModulesPath -ExpectedLeafPattern '^ChronicleFramework$'
+    $evidence.UninstallRemovedOnlyChronicleModule = -not (Test-Path -LiteralPath $isolatedChroniclePath)
+    $evidence.RequiredModulesRemainAfterUninstall = @('Bannerlord.Harmony','Bannerlord.ButterLib','Bannerlord.UIExtenderEx','Bannerlord.MBOptionScreen','Native','SandBoxCore','SandBox') |
+        ForEach-Object { Test-Path -LiteralPath (Join-Path $isolatedModulesPath ($_ + '\SubModule.xml')) -PathType Leaf } |
+        Where-Object { -not $_ } | Measure-Object | ForEach-Object { $_.Count -eq 0 }
+    $evidence.UserMcmConfigurationUnchangedAfterUninstall = Test-McmConfigUnchanged
+    $evidence.FormalSavesUnchangedAfterUninstall = Test-FormalSaveSetUnchanged $saveHashesBefore
+    $evidence.NoGameProcessesDuringUninstall = @(Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue).Count -eq 0
+    if (-not $evidence.UpdateRollbackCycleVerified -or -not $evidence.UninstallRemovedOnlyChronicleModule -or -not $evidence.RequiredModulesRemainAfterUninstall -or
+        -not $evidence.UserMcmConfigurationUnchangedAfterUninstall -or -not $evidence.FormalSavesUnchangedAfterUninstall -or -not $evidence.NoGameProcessesDuringUninstall) {
+        throw 'Simulated uninstall did not remove only the Chronicle module folder while preserving prerequisites, user settings and Campaign saves.'
+    }
     $evidence.PackageReproducible = $packageReproducible
     $evidence.PackageSha256 = [string]$packageReceipts[0].Sha256
     $evidence.IsolatedSmokePassed = $true
@@ -307,9 +409,17 @@ finally {
     if ($engineConfigOriginallyExists) { [IO.File]::WriteAllBytes($engineConfig, $engineConfigBytes) }
     elseif (Test-Path -LiteralPath $engineConfig -PathType Leaf) { Remove-Item -LiteralPath $engineConfig -Force }
     try {
-        Remove-IsolatedTree -Path $overlayRoot -AllowedParent $runRoot -ExpectedLeafPattern '^IsolatedGameRoot$'
-        $evidence.IsolatedWorkerCleaned = @(Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue).Count -eq 0
-        if (Test-Path -LiteralPath $runRoot) {
+        $activeGameProcesses = @(Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue)
+        if ($activeGameProcesses.Count -eq 0) {
+            Remove-IsolatedTree -Path $overlayRoot -AllowedParent $runRoot -ExpectedLeafPattern '^IsolatedGameRoot$'
+            $evidence.IsolatedWorkerCleaned = $true
+        }
+        else {
+            $evidence.IsolatedWorkerCleaned = $false
+            $evidence.PackageTestFilesRemoved = $false
+            if (-not $evidence.Failure) { $evidence.Failure = 'A Bannerlord process is still active; isolated package files were preserved rather than deleting a mounted game tree.' }
+        }
+        if ($activeGameProcesses.Count -eq 0 -and (Test-Path -LiteralPath $runRoot)) {
             $runFull = [IO.Path]::GetFullPath($runRoot)
             $allowed = [IO.Path]::GetFullPath($buildCacheRoot).TrimEnd('\') + '\'
             if (-not $runFull.StartsWith($allowed,[StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($runFull) -notmatch '^test-[0-9a-f]{32}$') { throw 'Refusing package test cleanup outside its generated D: root.' }
@@ -321,4 +431,7 @@ finally {
 }
 $evidence | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $harnessTemp 'AgentHostReleasePackageResult.json') -Encoding UTF8
 $evidence | ConvertTo-Json -Depth 10
-if (-not $evidence.Passed -or -not $evidence.PackageReproducible -or -not $evidence.ManifestValidated -or -not $evidence.IsolatedSmokePassed -or -not $evidence.IsolatedWorkerCleaned -or -not $evidence.PackageTestFilesRemoved) { exit 1 }
+if (-not $evidence.Passed -or -not $evidence.PackageReproducible -or -not $evidence.ManifestValidated -or -not $evidence.IsolatedSmokePassed -or -not $evidence.UpdateRollbackCycleVerified -or
+    -not $evidence.UninstallRemovedOnlyChronicleModule -or -not $evidence.RequiredModulesRemainAfterUninstall -or
+    -not $evidence.UserMcmConfigurationUnchangedAfterUninstall -or -not $evidence.FormalSavesUnchangedAfterUninstall -or
+    -not $evidence.NoGameProcessesDuringUninstall -or -not $evidence.IsolatedWorkerCleaned -or -not $evidence.PackageTestFilesRemoved) { exit 1 }

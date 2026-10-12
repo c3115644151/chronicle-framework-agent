@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.152'
+$contractVersion = '7.155'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -356,6 +356,17 @@ if ($harnessScript -notmatch "'ReleasePackage' \{ @\('Preflight', 'AgentHostPack
     $releasePackageTestSource -notmatch 'New-IsolatedGameRoot' -or
     $releasePackageTestSource -notmatch 'Test-Module\.ps1' -or
     $releasePackageTestSource -notmatch 'FormalSaveHashesUnchanged' -or
+    $releasePackageTestSource -notmatch 'UpdateRollbackCycleVerified' -or
+    $releasePackageTestSource -notmatch 'SyntheticUpdateFixture' -or
+    $releasePackageTestSource -notmatch 'manifest-only synthetic 0.1.0-to-0.1.1 fixture' -or
+    $releasePackageTestSource -notmatch 'no hot-update path' -or
+    $releasePackageTestSource -notmatch 'Assert-GameClosedForModuleFileChange' -or
+    $releasePackageTestSource -notmatch 'RollbackPreservedUserData' -or
+    $releasePackageTestSource -notmatch 'UninstallRemovedOnlyChronicleModule' -or
+    $releasePackageTestSource -notmatch 'RequiredModulesRemainAfterUninstall' -or
+    $releasePackageTestSource -notmatch 'UserMcmConfigurationUnchangedAfterUninstall' -or
+    $releasePackageTestSource -notmatch 'FormalSavesUnchangedAfterUninstall' -or
+    $releasePackageTestSource -notmatch 'NoGameProcessesDuringUninstall' -or
     $releasePackageTestSource -notmatch 'Get-DirectorySnapshotSha256' -or
     $releasePackageTestSource -notmatch 'UserMcmConfigurationUnchanged' -or
     $releasePackageTestSource -notmatch 'Remove-IsolatedTree' -or
