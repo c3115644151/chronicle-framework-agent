@@ -4,7 +4,7 @@ namespace ChronicleFramework.AgentHost;
 
 internal static class AgentHostVillageToolsQuestPolicy
 {
-    internal static JsonArray BuildActionCatalog(JsonObject native, JsonObject? previousReceipt, bool preDeliveryInventoryCaptured = false, bool questDetailsObserved = false)
+    internal static JsonArray BuildActionCatalog(JsonObject native, JsonObject? previousReceipt, bool preDeliveryInventoryCaptured = false, bool questDetailsObserved = false, IReadOnlySet<string>? marketsWithoutTools = null)
     {
         var state = native["state"] as JsonObject;
         var context = state?["context"] as JsonObject;
@@ -105,8 +105,12 @@ internal static class AgentHostVillageToolsQuestPolicy
                 return catalogWithQuestDetails;
             }
 
-            var candidates = FilterSafeTargets(observedTargets, "town");
-            if (candidates.Count > 0)
+            var candidates = FilterSafeTargets(observedTargets, "town")
+                .OfType<JsonObject>()
+                .Where(candidate => marketsWithoutTools is null || !marketsWithoutTools.Contains(ReadString(candidate, "id") ?? string.Empty))
+                .Select(candidate => (JsonObject)candidate.DeepClone())
+                .ToArray();
+            if (candidates.Length > 0)
             {
                 var settlementIds = new JsonArray();
                 foreach (var candidate in candidates.OfType<JsonObject>())
@@ -307,6 +311,10 @@ internal static class AgentHostVillageToolsQuestPolicy
             TryResolveAction(activeMap, activeTargets, new JsonObject { ["action"] = "move", ["arguments"] = new JsonObject { ["SettlementId"] = "town-danger" } }, out _, out _, out _))
             throw new AgentHostException("village-tools-policy-self-test-map-target-gate-failed", "Only a safe town from the latest Native target query may be selected after the current tools Quest is active.");
         results.Add(new { scenario = "village-tools-policy-requires-current-safe-town-before-procuring-items", passed = true });
+        var excludingCheckedMarketCatalog = BuildActionCatalog(activeMap, activeTargets, marketsWithoutTools: new HashSet<string>(["town-1"], StringComparer.Ordinal));
+        if (excludingCheckedMarketCatalog.OfType<JsonObject>().Any(item => ReadString(item, "action") == "move"))
+            throw new AgentHostException("village-tools-policy-self-test-market-exclusion-failed", "The route policy must not target a Town already observed to have no tools.");
+        results.Add(new { scenario = "village-tools-policy-excludes-empty-market-from-route-catalog", passed = true });
 
         var overlay = new JsonArray
         {
@@ -576,7 +584,7 @@ internal static class AgentHostVillageToolsQuestPolicy
         return ids.ToArray();
     }
 
-    private static string? GetCurrentSettlementType(JsonObject state)
+    internal static string? GetCurrentSettlementType(JsonObject state)
     {
         var currentSettlementId = ReadString(state["location"] as JsonObject, "currentSettlementId");
         if (string.IsNullOrWhiteSpace(currentSettlementId)) return null;
@@ -629,7 +637,7 @@ internal static class AgentHostVillageToolsQuestPolicy
             catalog.Add(new JsonObject { ["action"] = "questDetails", ["arguments"] = new JsonArray("QuestId") });
     }
 
-    private static bool HasCurrentToolsBuyOffer(JsonObject? receipt) =>
+    internal static bool HasCurrentToolsBuyOffer(JsonObject? receipt) =>
         (receipt?["data"]?["buyOffers"] as JsonArray)?.OfType<JsonObject>().Any(IsCurrentToolsOffer) == true;
 
     private static bool IsCurrentToolsOffer(JsonObject offer)

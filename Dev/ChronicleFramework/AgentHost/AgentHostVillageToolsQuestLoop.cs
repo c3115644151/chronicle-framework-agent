@@ -9,6 +9,21 @@ internal static class AgentHostVillageToolsQuestLoop
 {
     internal static async Task<IReadOnlyList<object>> RunContractSelfTestsAsync()
     {
+        using (var targetResponse = JsonDocument.Parse("""
+        {"status":"completed","data":{"mapSettlementTargets":[
+          {"id":"town-1","type":"town","hostile":false,"underSiege":false},
+          {"id":"town-2","type":"town","hostile":false,"underSiege":false},
+          {"id":"village-1","type":"village","hostile":false,"underSiege":false},
+          {"id":"town-danger","type":"town","hostile":true,"underSiege":false}
+        ]}}
+        """))
+        {
+            var safeReceipt = BuildSafeReceipt("mapSettlementTargets", targetResponse.RootElement, new HashSet<string>(["town-1"], StringComparer.Ordinal));
+            var targetIds = (safeReceipt["data"]?["mapSettlementTargets"] as JsonArray)?.OfType<JsonObject>().Select(item => ReadString(item, "id")).ToArray() ?? Array.Empty<string?>();
+            if (!targetIds.SequenceEqual(new string?[] { "town-2" }, StringComparer.Ordinal))
+                throw new AgentHostException("village-tools-loop-self-test-market-fallback-failed", "Map replanning must expose only fresh safe towns and exclude a town whose tools market was already checked empty.");
+        }
+
         var questReceipt = new JsonObject
         {
             ["action"] = "questDetails", ["status"] = "completed", ["data"] = new JsonObject
@@ -86,6 +101,7 @@ internal static class AgentHostVillageToolsQuestLoop
         var questId = string.Empty;
         var sawQuestActive = false;
         var questDetailsObservedForActiveQuest = false;
+        var marketsWithoutTools = new HashSet<string>(StringComparer.Ordinal);
         var preDeliveryInventoryCaptured = false;
         var inventoryVerifiedAfterTurnIn = false;
         JsonObject? questDetailsReceipt = null;
@@ -128,7 +144,7 @@ internal static class AgentHostVillageToolsQuestLoop
                         inventoryVerifiedAfterTurnIn = true;
                 }
 
-                var catalog = AgentHostVillageToolsQuestPolicy.BuildActionCatalog(currentNative!, previousReceipt, preDeliveryInventoryCaptured, questDetailsObservedForActiveQuest);
+                var catalog = AgentHostVillageToolsQuestPolicy.BuildActionCatalog(currentNative!, previousReceipt, preDeliveryInventoryCaptured, questDetailsObservedForActiveQuest, marketsWithoutTools);
                 var controls = AgentHostVillageToolsQuestPolicy.BuildControlCatalog(currentNative!, sawQuestActive, inventoryVerifiedAfterTurnIn);
                 if (catalog.Count == 0 && controls.Count == 0)
                 {
@@ -234,7 +250,7 @@ internal static class AgentHostVillageToolsQuestLoop
                     using var actionResponse = await client.ExecuteVillageToolsQuestActionAsync(action!, arguments!, elapsed.Token);
                     if (ReadInt(actionResponse.RootElement, "processId", -1) != gameProcessId)
                         throw new AgentHostException("native-process-mismatch", "Native action receipt came from a different Bannerlord process.");
-                    receipt = BuildSafeReceipt(action!, actionResponse.RootElement);
+                    receipt = BuildSafeReceipt(action!, actionResponse.RootElement, marketsWithoutTools);
                 }
                 catch (AgentHostException exception) when (exception.Code == "native-command-timeout")
                 {
@@ -251,6 +267,14 @@ internal static class AgentHostVillageToolsQuestLoop
                 {
                     questDetailsReceipt = receipt.DeepClone() as JsonObject;
                     questDetailsObservedForActiveQuest = true;
+                }
+                if (action == "tradeOptions" && ReadString(receipt, "status") == "completed" && !AgentHostVillageToolsQuestPolicy.HasCurrentToolsBuyOffer(receipt))
+                {
+                    var location = currentNative?["state"]?["location"] as JsonObject;
+                    var currentTownId = ReadString(location, "currentSettlementId");
+                    if (!string.IsNullOrWhiteSpace(currentTownId) &&
+                        string.Equals(AgentHostVillageToolsQuestPolicy.GetCurrentSettlementType(currentNative!["state"]!.AsObject()), "town", StringComparison.Ordinal))
+                        marketsWithoutTools.Add(currentTownId);
                 }
                 if (action == "heroEquipmentOptions" && ReadString(receipt, "status") == "completed")
                 {
@@ -328,7 +352,7 @@ internal static class AgentHostVillageToolsQuestLoop
         }
     };
 
-    private static JsonObject BuildSafeReceipt(string action, JsonElement response)
+    internal static JsonObject BuildSafeReceipt(string action, JsonElement response, IReadOnlySet<string>? marketsWithoutTools = null)
     {
         var receipt = new JsonObject { ["action"] = action, ["status"] = ReadString(response, "status"), ["processId"] = ReadInt(response, "processId", -1) };
         if (ReadString(response, "error") is string error) receipt["error"] = error;
@@ -336,7 +360,12 @@ internal static class AgentHostVillageToolsQuestLoop
         {
             var parsed = JsonNode.Parse(data.GetRawText())!.AsObject();
             if (action == "mapSettlementTargets" && parsed["mapSettlementTargets"] is JsonArray targets)
-                parsed["mapSettlementTargets"] = new JsonArray(targets.OfType<JsonObject>().Where(IsSafeVisibleTarget).Take(32).Select(item => (JsonNode?)item.DeepClone()).ToArray());
+                parsed["mapSettlementTargets"] = new JsonArray(targets.OfType<JsonObject>()
+                    .Where(IsSafeVisibleTarget)
+                    .Where(item => ReadString(item, "type") == "town")
+                    .Where(item => marketsWithoutTools is null || !marketsWithoutTools.Contains(ReadString(item, "id") ?? string.Empty))
+                    .Take(32)
+                    .Select(item => (JsonNode?)item.DeepClone()).ToArray());
             if (action == "tradeOptions" && parsed["buyOffers"] is JsonArray offers)
                 parsed["buyOffers"] = new JsonArray(offers.OfType<JsonObject>().Where(IsToolsOffer).Take(8).Select(item => (JsonNode?)item.DeepClone()).ToArray());
             if (action == "heroEquipmentOptions" && parsed["rightItems"] is JsonArray inventoryRows)
