@@ -16,6 +16,7 @@ internal static class ProviderContractSelfTest
         var results = new List<object>();
         var villageQuestPrompt = AgentHostDecisionCycle.VillageToolsQuestSystemPrompt;
         if (!villageQuestPrompt.Contains("talkToSettlementHero", StringComparison.Ordinal) ||
+            !villageQuestPrompt.Contains("only before a conversation is open, and only if talkToSettlementHero is currently listed", StringComparison.Ordinal) ||
             !villageQuestPrompt.Contains("conversation is already open: never talk to that hero again", StringComparison.Ordinal) ||
             !villageQuestPrompt.Contains("never repeat the rejected action/control", StringComparison.Ordinal) ||
             villageQuestPrompt.Contains("quickConversation", StringComparison.OrdinalIgnoreCase))
