@@ -14,6 +14,11 @@ internal static class ProviderContractSelfTest
     internal static async Task<object> RunAsync()
     {
         var results = new List<object>();
+        var villageQuestPrompt = AgentHostDecisionCycle.VillageToolsQuestSystemPrompt;
+        if (!villageQuestPrompt.Contains("talkToSettlementHero", StringComparison.Ordinal) ||
+            villageQuestPrompt.Contains("quickConversation", StringComparison.OrdinalIgnoreCase))
+            throw new AgentHostException("village-tools-prompt-native-action-id-mismatch", "The quest prompt must name the exact Native talkToSettlementHero action ID, not a UI description as a callable action.");
+        results.Add(new { scenario = "village-tools-prompt-uses-exact-native-action-id", passed = true });
         results.AddRange(NativeMailboxClient.RunVillageToolsQuestActionContractSelfTests());
         try { results.AddRange(AgentHostVillageToolsQuestPolicy.RunContractSelfTests()); }
         catch (Exception exception) { throw new AgentHostException("village-tools-policy-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
