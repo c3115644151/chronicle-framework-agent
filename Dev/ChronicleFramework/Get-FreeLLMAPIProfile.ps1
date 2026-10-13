@@ -31,6 +31,37 @@ function Initialize-FreeLLMAPIProfile {
     [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_API_KEY', $apiKey, 'Process')
     $apiKey = $null
 
+    function Test-FreeLLMAPIListener([Uri]$BaseEndpoint)
+    {
+        $pingUri = [UriBuilder]::new($BaseEndpoint)
+        $pingUri.Path = '/api/ping'
+        $pingUri.Query = ''
+        try {
+            $ping = Invoke-RestMethod -Uri $pingUri.Uri -Method Get -TimeoutSec 3
+            return [string]$ping.status -eq 'ok'
+        }
+        catch { return $false }
+    }
+
+    if (-not (Test-FreeLLMAPIListener $endpoint)) {
+        $desktopPath = Join-Path $env:LOCALAPPDATA 'Programs\freellmapi-desktop\FreeLLMAPI.exe'
+        if (-not (Get-Process -Name 'FreeLLMAPI' -ErrorAction SilentlyContinue)) {
+            if (-not (Test-Path -LiteralPath $desktopPath -PathType Leaf)) {
+                throw 'FreeLLMAPI gateway is stopped and its desktop executable was not found; no inference request was sent.'
+            }
+            Start-Process -FilePath $desktopPath -WindowStyle Hidden
+        }
+        $listenerReady = $false
+        $listenerDeadline = (Get-Date).AddSeconds(30)
+        do {
+            if (Test-FreeLLMAPIListener $endpoint) { $listenerReady = $true; break }
+            Start-Sleep -Seconds 1
+        } while ((Get-Date) -lt $listenerDeadline)
+        if (-not $listenerReady) {
+            throw 'FreeLLMAPI desktop was started or already running, but its loopback API did not become ready within 30 seconds; no inference request was sent.'
+        }
+    }
+
     $modelsUri = [UriBuilder]::new($endpoint)
     $modelsUri.Path = '/v1/models'
     $modelsUri.Query = 'available=true'

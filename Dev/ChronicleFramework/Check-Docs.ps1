@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.187'
+$contractVersion = '7.188'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -91,7 +91,11 @@ if ($agentProviderBudgetSource -notmatch 'File\]::Replace' -or $agentDecisionLoo
 $agentLiveModelLoopSource = Get-Content (Join-Path $harnessRoot 'Test-AgentLiveModelLoop.ps1') -Raw -Encoding UTF8
 $agentHostCampaignLoopEvaluationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostCampaignLoopEvaluation.ps1') -Raw -Encoding UTF8
 if ($agentLiveModelLoopSource -notmatch 'ProviderProtocol' -or $agentLiveModelLoopSource -notmatch 'CHRONICLE_LLM_PROTOCOL' -or $agentLiveModelLoopSource -notmatch '31415' -or $agentLiveModelLoopSource -notmatch 'FREELLMAPI_API_KEY' -or $agentLiveModelLoopSource -notmatch 'available=true' -or $agentLiveModelLoopSource -notmatch 'Local Ollama inference.*refused before Campaign launch' -or $agentLiveModelLoopSource -notmatch 'no inference request was sent' -or $agentLiveModelLoopSource -notmatch 'ProviderRouteHistory' -or $agentLiveModelLoopSource -notmatch 'sargot-three-day-food-v1' -or $agentLiveModelLoopSource -notmatch 'CompletionContractBase64' -or $agentLiveModelLoopSource -notmatch 'termination.goalVerified') { throw 'Live Campaign evaluation must require the configured FreeLLMAPI gateway and bearer key, preflight only currently available models, refuse local model inference before Campaign launch, record actual routing, and preserve Native goal verification.' }
-if ($freeLlmApiProfileSource -notmatch 'Initialize-FreeLLMAPIProfile' -or $freeLlmApiProfileSource -notmatch 'FREELLMAPI_API_KEY' -or $freeLlmApiProfileSource -notmatch 'CHRONICLE_LLM_API_KEY' -or $freeLlmApiProfileSource -notmatch '31415' -or $freeLlmApiProfileSource -notmatch 'available=true' -or $freeLlmApiProfileSource -notmatch 'never read from UI or printed') { throw 'Shared FreeLLMAPI profile preflight must reject local inference, retrieve credentials only from process/user environment, and never expose the key.' }
+if ($freeLlmApiProfileSource -notmatch 'Initialize-FreeLLMAPIProfile' -or $freeLlmApiProfileSource -notmatch 'FREELLMAPI_API_KEY' -or $freeLlmApiProfileSource -notmatch 'CHRONICLE_LLM_API_KEY' -or $freeLlmApiProfileSource -notmatch '31415' -or $freeLlmApiProfileSource -notmatch 'available=true' -or $freeLlmApiProfileSource -notmatch 'api/ping' -or $freeLlmApiProfileSource -notmatch 'Start-Process -FilePath \$desktopPath -WindowStyle Hidden' -or $freeLlmApiProfileSource -notmatch 'listenerDeadline' -or $freeLlmApiProfileSource -notmatch 'never read from UI or printed') { throw 'Shared FreeLLMAPI preflight must reject local inference, start the installed desktop gateway hidden if stopped, wait for its local ping, retrieve credentials only from process/user environment, and never expose the key.' }
+$freeLlmApiProfileTokens = $null
+$freeLlmApiProfileParseErrors = $null
+[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $harnessRoot 'Get-FreeLLMAPIProfile.ps1'), [ref]$freeLlmApiProfileTokens, [ref]$freeLlmApiProfileParseErrors) | Out-Null
+if (@($freeLlmApiProfileParseErrors).Count -gt 0) { throw 'Get-FreeLLMAPIProfile.ps1 must parse before Harness can start or query the FreeLLMAPI service.' }
 $agentCheckpointPersistenceSource = Get-Content (Join-Path $harnessRoot 'Test-AgentCheckpointPersistence.ps1') -Raw -Encoding UTF8
 $agentCheckpointValidationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentCheckpointValidation.ps1') -Raw -Encoding UTF8
 $agentEvaluationRecruitmentBaselineSource = Get-Content (Join-Path $harnessRoot 'Test-AgentEvaluationRecruitmentBaseline.ps1') -Raw -Encoding UTF8
