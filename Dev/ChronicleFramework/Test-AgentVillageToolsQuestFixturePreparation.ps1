@@ -155,7 +155,7 @@ try {
     if ($frame.status -ne 'completed' -or -not (Test-Path -LiteralPath $framePath) -or (Get-Item -LiteralPath $framePath).Length -lt 4096) { throw 'The game-engine frame for the naturally visible blue tools marker was not captured.' }
 
     $saveRequest = Invoke-NativeCli 'save' @('-SaveName', $saveName) 120
-    if ($saveRequest.status -ne 'accepted' -or [string]::IsNullOrWhiteSpace([string]$saveRequest.commandId)) { throw 'Native did not accept the unique disposable StoryMode quest fixture SaveAs.' }
+    if ($saveRequest.status -notin @('accepted', 'completed') -or [string]::IsNullOrWhiteSpace([string]$saveRequest.commandId)) { throw 'Native did not accept the unique disposable StoryMode quest fixture SaveAs.' }
     $responsePath = Join-Path $documentsRoot "AgentRuns\ChronicleAgent\responses\$($saveRequest.commandId).completed.json"
     $saveDeadline = [DateTime]::UtcNow.AddSeconds(120)
     while (-not (Test-Path -LiteralPath $responsePath -PathType Leaf) -and [DateTime]::UtcNow -lt $saveDeadline) { Start-Sleep -Milliseconds 250 }
