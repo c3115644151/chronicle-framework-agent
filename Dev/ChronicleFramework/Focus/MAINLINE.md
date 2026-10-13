@@ -85,6 +85,8 @@ W7-K当前对话模型纠错实测（`TestResults/20261014-043939`）：`auto:no
 
 W7-K FreeLLMAPI限流响应核验：真实自动路由在6次Host决策、2条Native动作后，经三次Native前拒绝终于生成合法`dialogueSelect`，下一模型调用遇HTTP 429（`TestResults/20261014-044829`）；真实Provider冒烟后续在OVH Qwen3Guard及Poolside候选连续上游错误后返回HTTP 502（`TestResults/20261014-050415`）。FreeLLMAPI官方API文档区分`ready`/`exhausted`目录状态，并约定只有明确`Retry-After`才能表明适合等待的429；链路同时出现非限流错误时可返回无Retry-After的502（[FreeLLMAPI REST API](https://github.com/tashfeenahmed/freellmapi/blob/main/docs/en/api/01-rest-api.md)）。Host现在只对带`keyN=error/upstream_error`的502最多按5秒/15秒重试两次；对429仅在明确Retry-After为正且≤60秒时等待并重试一次，其它429 fail-closed。两条恢复均由自托管Provider测试通过（`TestResults/20261014-050234`）；仍未完成真实任务。`GET /v1/models?execution_status=ready`实测可显示本机网关当下可调用/耗尽的模型行，但不证明`auto:noema-free` profile内的所有候选可用，因此全局ready数量不能代替本次响应路由证据。
 
+W7-K当前外部网络边界（2026-10-14）：`AgentHostProvider`运行`TestResults/20261014-050655`的Build与Preflight通过，真实请求经FreeLLMAPI自动链候选`custom/cohere/north-mini-code`后收到HTTP 502 `key1=error`。随后以只读请求验证用户指定的`127.0.0.1:7890`：`curl --proxy http://127.0.0.1:7890`访问`blockrun.ai`和`api.github.com`均在TLS握手失败；普通HTTP `example.com`通过同端口返回502；该监听端口属于`XingchenCore`。这证明本轮远程推理和GitHub同步受当前代理出口影响，并非模型输出或Native动作回归；不尝试绕过用户指定代理。需待7890代理恢复可连外后再继续真实Provider/整局验证与Push。
+
 单机当前玩家客户端以及“游戏内Native Mod身体 + 游戏外本地Agent Host模型循环”已有3/3可重复的技术原型；设置注册、Native-PID/会话绑定及游戏内正常启停另有上述运行证据，不需要第二游戏账号。可重建的首装zip及隔离游戏根Smoke已有证据；第三方Mod管理器实际安装、升级/回滚/卸载由发行后续工作及Epic验收处理。现有证据没有覆盖完整Campaign或跨3D场景持续游玩。多人客户端/共享Campaign由W6另行研究，首发单机证据不能替代多人验收。
 
 ### 多人独立客户端候选：共享战役 Mod 的实际边界
