@@ -65,9 +65,13 @@ internal static class AgentHostVillageToolsQuestPolicy
 
             var menuOptions = state["availableMenuOptions"] as JsonArray ?? new JsonArray();
             var tradeContextSupported = hasToolsQuest && string.Equals(GetCurrentSettlementType(state), "town", StringComparison.Ordinal);
+            var townMarketAttemptFinished = ReadString(previousReceipt, "status") == "completed" &&
+                ReadString(previousReceipt, "action") is "tradeCancel" or "tradeCancelChanges" or "tradeConfirm";
             var allowedMenuOptions = menuOptions.OfType<JsonObject>()
                 .Where(option => IsTrue(option, "available") && IsTrue(option, "enabled") &&
-                    (IsTrue(option, "isLeave") || (tradeContextSupported && IsTradeOption(option))))
+                    (IsTrue(option, "isLeave")
+                        ? (!tradeContextSupported || townMarketAttemptFinished)
+                        : (tradeContextSupported && !townMarketAttemptFinished && IsTradeOption(option))))
                 .ToArray();
             if (allowedMenuOptions.Length > 0)
             {
@@ -335,8 +339,14 @@ internal static class AgentHostVillageToolsQuestPolicy
         var townMenuCatalog = BuildActionCatalog(acceptedTownMenu, null);
         var townMenuSelect = townMenuCatalog.OfType<JsonObject>().FirstOrDefault(item => ReadString(item, "action") == "menuSelect");
         var townMenuIds = (townMenuSelect?["argumentValues"]?["OptionId"] as JsonArray)?.Select(item => item?.GetValue<string>()).ToArray() ?? Array.Empty<string?>();
-        if (townMenuSelect is null || !townMenuIds.Contains("trade", StringComparer.Ordinal) || !townMenuIds.Contains("leave", StringComparer.Ordinal))
-            throw new AgentHostException("village-tools-policy-self-test-town-trade-gate-failed", "A currently enabled Town merchant option must remain available for tool procurement.");
+        if (townMenuSelect is null || !townMenuIds.Contains("trade", StringComparer.Ordinal) || townMenuIds.Contains("leave", StringComparer.Ordinal))
+            throw new AgentHostException("village-tools-policy-self-test-town-trade-gate-failed", "Before checking the Town merchant, the model must trade first rather than leave and revisit the same Town.");
+        var noMarketReceipt = new JsonObject { ["action"] = "tradeCancel", ["status"] = "completed" };
+        var afterEmptyMarket = BuildActionCatalog(acceptedTownMenu, noMarketReceipt);
+        var afterEmptyMarketSelect = afterEmptyMarket.OfType<JsonObject>().FirstOrDefault(item => ReadString(item, "action") == "menuSelect");
+        var afterEmptyMarketIds = (afterEmptyMarketSelect?["argumentValues"]?["OptionId"] as JsonArray)?.Select(item => item?.GetValue<string>()).ToArray() ?? Array.Empty<string?>();
+        if (afterEmptyMarketSelect is null || afterEmptyMarketIds.Contains("trade", StringComparer.Ordinal) || !afterEmptyMarketIds.Contains("leave", StringComparer.Ordinal))
+            throw new AgentHostException("village-tools-policy-self-test-empty-town-market-gate-failed", "After the current Town market has no tools, the model must leave and replan rather than reopen the same market.");
         results.Add(new { scenario = "village-tools-policy-gates-trade-to-town-native-merchant", passed = true });
 
         var emptyConversation = State("MapState", null, null, null, conversation: new JsonObject { ["options"] = new JsonArray() });
