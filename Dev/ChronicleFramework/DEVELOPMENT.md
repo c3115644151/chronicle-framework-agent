@@ -1,8 +1,9 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.174
+Contract version: 7.175
 
 Agent Host为每次模型决策按Native当前`allowedActions`/`allowedControls`生成JSON Schema互斥分支；对话、菜单、地图移动等动作还把策略允许的当前ID编码成参数枚举，避免从可见但不允许的选项中重复选择。每个活动Quest只读一次任务日志；城镇工具采购前先尝试当前市场，无货城镇会从本轮后续目标中排除，交易结束后才允许离开，避免在同一城镇循环。无动作目录时Host不调用模型，理由文本在schema中限制为64字符；村庄Quest目标另要求理由最多8个短词。FreeLLMAPI使用OpenAI兼容`response_format.json_schema`；无游戏的真实Provider冒烟测试要求模型返回唯一合成Native动作及精确目标参数，并记录实际`X-Routed-Via`与token；测试不执行Native命令。原生Ollama协议仍只留在隔离协议回归，不作为本项目真实模型推理路径。
+Agent Host为每次模型决策按Native当前`allowedActions`/`allowedControls`生成JSON Schema互斥分支；对话、菜单、地图移动等动作还把策略允许的当前ID编码成参数枚举，避免从可见但不允许的选项中重复选择。每个活动Quest只读一次任务日志；城镇工具采购前先尝试当前市场，无货城镇会从本轮后续目标中排除，交易结束后才允许离开，避免在同一城镇循环。无动作目录时Host不调用模型，理由文本在schema中限制为64字符；村庄Quest目标另要求理由最多8个短词。FreeLLMAPI使用OpenAI兼容`response_format.json_schema`；无游戏的真实Provider冒烟测试要求模型返回唯一合成Native动作及精确目标参数，并记录实际`X-Routed-Via`与token；测试不执行Native命令。FreeLLMAPI错误收据只保存`X-Routed-Via`、`X-Fallback-Attempts`、`X-Fallback-Trail`等路由头，不保存响应正文/可能含凭据的错误内容。原生Ollama协议仍只留在隔离协议回归，不作为本项目真实模型推理路径。
 
 Prompt中写到的动作名必须是当前Native协议目录中的确切ID；玩家熟悉的界面/过程术语只能解释动作效果，不能替代可调用ID。W7-K回归锁定 `talkToSettlementHero` 而不是玩家界面描述词，避免模型从提示词学到不存在的动作名。
 

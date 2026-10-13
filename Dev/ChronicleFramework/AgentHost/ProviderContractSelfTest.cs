@@ -304,6 +304,38 @@ internal static class ProviderContractSelfTest
         results.Add(new { scenario = "action-outside-catalog", passed = true });
         await ExpectProviderErrorAsync(settings, statusCode: HttpStatusCode.ServiceUnavailable, expectedCode: "provider-http-error", scenario: "http-unavailable");
         results.Add(new { scenario = "http-unavailable", passed = true });
+
+        var routedFailureResponse = new HttpResponseMessage(HttpStatusCode.BadGateway);
+        routedFailureResponse.Headers.TryAddWithoutValidation("X-Routed-Via", "custom/nvidia/test-model");
+        routedFailureResponse.Headers.TryAddWithoutValidation("X-Fallback-Attempts", "2");
+        routedFailureResponse.Headers.TryAddWithoutValidation("X-Fallback-Trail", "nvidia/test-model=upstream_502; kilo/model=rate_limited");
+        routedFailureResponse.Content = new StringContent("sensitive-error-body-marker");
+        using (var routedFailureClient = new HttpClient(new StubHandler((_, _) => Task.FromResult(routedFailureResponse))) { Timeout = settings.Timeout })
+        using (var routedFailureProvider = new OllamaNativeProvider(settings with
+        {
+            Endpoint = new Uri("http://127.0.0.1:31415/v1/chat/completions"),
+            Model = "auto:noema-free",
+            ApiKey = "freellmapi-self-test-secret"
+        }, routedFailureClient))
+        using (var request = JsonDocument.Parse(BuildDecisionRequest()))
+        {
+            try
+            {
+                await routedFailureProvider.DecideAsync(request.RootElement, CancellationToken.None);
+                throw new AgentHostException("provider-self-test-routed-failure-accepted", "The FreeLLMAPI error response unexpectedly succeeded.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-http-error")
+            {
+                if (!exception.Message.Contains("FreeLLMAPI returned HTTP 502", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("routedVia=custom/nvidia/test-model", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("fallbackAttempts=2", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("fallbackTrail=nvidia/test-model=upstream_502", StringComparison.Ordinal) ||
+                    exception.Message.Contains("sensitive-error-body-marker", StringComparison.Ordinal))
+                    throw new AgentHostException("provider-self-test-routed-failure-diagnostics-unsafe", "FreeLLMAPI failure diagnostics must retain route headers while omitting response bodies.");
+            }
+            results.Add(new { scenario = "freellmapi-http-error-keeps-safe-route-fallback-headers-without-response-body", passed = true });
+        }
+
         await ExpectTimeoutAsync(settings);
         results.Add(new { scenario = "provider-timeout", passed = true });
         await ExpectResponseBodyTimeoutAsync(settings);

@@ -263,7 +263,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         using (response)
         {
             if (!response.IsSuccessStatusCode)
-                throw new AgentHostException("provider-http-error", $"The local model provider returned HTTP {(int)response.StatusCode}.");
+                throw new AgentHostException("provider-http-error", BuildHttpFailureMessage(response));
 
             if (response.Content.Headers.ContentLength is > MaxResponseBytes)
                 throw new AgentHostException("provider-response-too-large", "The local model response exceeds the Host size limit.");
@@ -349,6 +349,20 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         if (!response.Headers.TryGetValues(headerName, out var values)) return null;
         var value = values.FirstOrDefault()?.Trim();
         return string.IsNullOrWhiteSpace(value) ? null : value[..Math.Min(value.Length, 160)];
+    }
+
+    private string BuildHttpFailureMessage(HttpResponseMessage response)
+    {
+        var providerName = IsFreeLlmApi(_settings.Endpoint) ? "FreeLLMAPI" : "model provider";
+        var details = new List<string>();
+        var routedVia = ReadResponseHeader(response, "X-Routed-Via");
+        var fallbackAttempts = ReadResponseHeader(response, "X-Fallback-Attempts");
+        var fallbackTrail = ReadResponseHeader(response, "X-Fallback-Trail");
+        if (!string.IsNullOrWhiteSpace(routedVia)) details.Add("routedVia=" + routedVia);
+        if (!string.IsNullOrWhiteSpace(fallbackAttempts)) details.Add("fallbackAttempts=" + fallbackAttempts);
+        if (!string.IsNullOrWhiteSpace(fallbackTrail)) details.Add("fallbackTrail=" + fallbackTrail);
+        return $"{providerName} returned HTTP {(int)response.StatusCode}." +
+               (details.Count == 0 ? string.Empty : " " + string.Join("; ", details));
     }
 
     public void Dispose()
