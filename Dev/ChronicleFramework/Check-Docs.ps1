@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.170'
+$contractVersion = '7.171'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -514,6 +514,7 @@ $agentHostCampaignTransitionSource = Get-Content (Join-Path $harnessRoot 'AgentH
 if ($agentHostLifecycleHarness -notmatch "'CampaignRoundtrip'" -or
     $agentCliSource -notmatch "'save'" -or $agentCliSource -notmatch "Invoke-ProtocolCommand 'save'" -or
     $agentCliSource -notmatch '\-ReturnWhenAccepted' -or
+    $agentCliSource -notmatch 'Invoke-ProtocolCommand ''save''.*-ReturnWhenAccepted:\$ReturnWhenAccepted' -or
     $agentHostCampaignTransitionSource -notmatch 'MapScreen\.Instance' -or
     $agentHostCampaignTransitionSource -notmatch 'MapScreen\.OnExit' -or
     $agentHostCampaignTransitionSource -notmatch 'SandBoxSaveHelper\.TryLoadSave' -or

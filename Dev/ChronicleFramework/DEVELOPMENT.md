@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.170
+Contract version: 7.171
 
 Agent Host为每次模型决策按Native当前`allowedActions`/`allowedControls`生成JSON Schema互斥分支；对话、菜单、地图移动等动作还把策略允许的当前ID编码成参数枚举，避免从可见但不允许的选项中重复选择。每个活动Quest只读一次任务日志；城镇工具采购前先尝试当前市场，无货城镇会从本轮后续目标中排除，交易结束后才允许离开，避免在同一城镇循环。无动作目录时Host不调用模型，理由文本在schema中限制为64字符；村庄Quest目标另要求理由最多8个短词。FreeLLMAPI使用OpenAI兼容`response_format.json_schema`；Provider回归检查鉴权、当前可用模型目录、结构化输出及实际`X-Routed-Via`服务商/模型记录。原生Ollama协议仍只留在隔离协议回归，不作为本项目真实模型推理路径。
 
@@ -494,3 +494,5 @@ campaign-multiday-supply只将当前菜单OptionId、主队人数/粮食/日工�
 ## 当前执行焦点
 
 `ContextState.json.current.path`只定位当前技术焦点；GitHub Project及活动Issue决定工作项和执行次序；`Focus/MAINLINE.md`保存跨任务有效的技术约束、机制事实和研究门槛。不得从单个来源推导另外两个来源的动态状态。
+
+Native存档是异步的：`Agent-Cli.ps1 save`默认等待`OnSaveOver`最终`completed`回执；只有显式传`-ReturnWhenAccepted`才提前返回`accepted`。任何需立刻reload或验证落盘文件的Harness步骤必须等待`completed`，不能把`accepted`当成存档已写完。

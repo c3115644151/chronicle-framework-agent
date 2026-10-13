@@ -742,7 +742,7 @@ switch ($Action) {
     'barterCancel' { $result = Invoke-ProtocolCommand 'barterCancel' }
     'save' {
         if (-not $SaveName) { throw '-SaveName is required for save.' }
-        $result = Invoke-ProtocolCommand 'save' @{ name = $SaveName } -ReturnWhenAccepted
+        $result = Invoke-ProtocolCommand 'save' @{ name = $SaveName } -ReturnWhenAccepted:$ReturnWhenAccepted
     }
     'agentCheckpointGet' { $result = Invoke-ProtocolCommand 'agentCheckpointGet' }
     'agentCheckpointSet' {
