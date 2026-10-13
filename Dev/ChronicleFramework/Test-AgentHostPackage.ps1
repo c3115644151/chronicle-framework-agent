@@ -80,7 +80,7 @@ if (@(Get-ChildItem -LiteralPath $publishRoot -Recurse -File -Filter 'ChronicleA
     throw 'The publish output unexpectedly contains a user MCM provider profile.'
 }
 
-function Invoke-PackagedHost([string]$ExecutablePath, [string]$Argument)
+function Invoke-PackagedHost([string]$ExecutablePath, [string]$Argument, [int]$TimeoutMilliseconds = 20000)
 {
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $ExecutablePath
@@ -95,9 +95,9 @@ function Invoke-PackagedHost([string]$ExecutablePath, [string]$Argument)
     if (-not $process.Start()) { throw "Could not start packaged Host command '$Argument'." }
     $stdoutTask = $process.StandardOutput.ReadToEndAsync()
     $stderrTask = $process.StandardError.ReadToEndAsync()
-    if (-not $process.WaitForExit(20000)) {
+    if (-not $process.WaitForExit($TimeoutMilliseconds)) {
         try { $process.Kill($true) } catch { }
-        throw "Packaged Host command '$Argument' exceeded its 20 second bound."
+        throw "Packaged Host command '$Argument' exceeded its $([int]($TimeoutMilliseconds / 1000)) second bound."
     }
     $stdout = $stdoutTask.GetAwaiter().GetResult()
     $stderr = $stderrTask.GetAwaiter().GetResult()
@@ -159,7 +159,7 @@ function Invoke-PackagedHostUnboundParentProbe([string]$ExecutablePath)
 
 $packageHealth = Invoke-PackagedHost -ExecutablePath $hostExe -Argument '--package-health'
 $version = Invoke-PackagedHost -ExecutablePath $hostExe -Argument '--version'
-$providerSelfTest = Invoke-PackagedHost -ExecutablePath $hostExe -Argument '--provider-self-test'
+$providerSelfTest = Invoke-PackagedHost -ExecutablePath $hostExe -Argument '--provider-self-test' -TimeoutMilliseconds 45000
 $unboundParentProbe = Invoke-PackagedHostUnboundParentProbe -ExecutablePath $hostExe
 foreach ($receipt in @($packageHealth, $version)) {
     if ($receipt.status -ne 'ready' -or $receipt.product -ne 'ChronicleAgentHost' -or

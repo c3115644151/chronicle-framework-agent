@@ -408,13 +408,14 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerProfileTestSource -notmatch 'freellmapi-json-schema-provider-rejection-falls-back-to-validated-json-object' -or
     $providerProfileTestSource -notmatch 'freellmapi-json-object-fallback-recognizes-explicit-400-422-and-fallback-502-schema-rejection-only' -or
     $providerProfileTestSource -notmatch 'freellmapi-transient-upstream-502-retried-once-before-native-action' -or
+    $providerProfileTestSource -notmatch 'freellmapi-two-transient-upstream-retries-bounded-before-native-action' -or
     $providerProfileTestSource -notmatch 'freellmapi-schema-fallback-then-transient-upstream-retry-is-bounded' -or
     $providerProfileTestSource -notmatch 'observedTokenParameters' -or
     $providerProfileTestSource -notmatch 'freellmapi-mistral-uses-validated-json-object-compatibility-mode' -or
     $providerProfileTestSource -notmatch 'freellmapi-ovh-model-rate-window-is-route-specific' -or
     $providerProfileTestSource -notmatch 'max_tokens' -or
     $providerProfileTestSource -notmatch 'mistralRequestShapeValid' -or
-    $providerHostSource -notmatch 'IsMistralSmall32' -or $providerHostSource -notmatch 'GetMinimumRequestInterval' -or $providerHostSource -notmatch 'WaitForProviderRateWindowAsync' -or $providerHostSource -notmatch 'ShouldRetryTransientFreeLlmApiFailure' -or $providerHostSource -notmatch 'transientProviderRetryUsed' -or $providerHostSource -notmatch 'failedRoute.Contains\("ovh/Mistral-Small"' -or $providerHostSource -notmatch 'payload.Remove\("max_completion_tokens"\)' -or
+    $providerHostSource -notmatch 'IsMistralSmall32' -or $providerHostSource -notmatch 'GetMinimumRequestInterval' -or $providerHostSource -notmatch 'WaitForProviderRateWindowAsync' -or $providerHostSource -notmatch 'ShouldRetryTransientFreeLlmApiFailure' -or $providerHostSource -notmatch 'transientProviderRetriesUsed' -or $providerHostSource -notmatch 'retryDelaySeconds = transientProviderRetriesUsed == 0 \? 5 : 15' -or $providerHostSource -notmatch 'failedRoute.Contains\("ovh/Mistral-Small"' -or $providerHostSource -notmatch 'payload.Remove\("max_completion_tokens"\)' -or
     $providerProfileTestSource -notmatch 'freellmapi-missing-key-fails-before-network-request' -or
     $providerSmokeSource -notmatch 'Synthetic provider-contract probe only' -or
     $providerSmokeSource -notmatch 'talkToSettlementHero' -or

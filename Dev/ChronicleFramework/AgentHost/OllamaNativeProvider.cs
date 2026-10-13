@@ -245,7 +245,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
 
         using var requestTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         requestTimeout.CancelAfter(_settings.Timeout);
-        var transientProviderRetryUsed = false;
+        var transientProviderRetriesUsed = 0;
         async Task<HttpResponseMessage> SendProviderRequestAsync(string requestBody)
         {
             await WaitForProviderRateWindowAsync(cancellationToken);
@@ -271,14 +271,18 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         async Task<HttpResponseMessage> SendProviderRequestWithTransientRetryAsync(string requestBody)
         {
             var response = await SendProviderRequestAsync(requestBody);
-            if (transientProviderRetryUsed || !ShouldRetryTransientFreeLlmApiFailure(_settings.Endpoint, response)) return response;
-            transientProviderRetryUsed = true;
-            var fallbackTrail = ReadResponseHeader(response, "X-Fallback-Trail");
-            if (!string.IsNullOrWhiteSpace(fallbackTrail) && fallbackTrail.Contains("ovh/", StringComparison.OrdinalIgnoreCase))
-                _lastProviderRoute = "ovh";
-            response.Dispose();
-            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
-            return await SendProviderRequestAsync(requestBody);
+            while (transientProviderRetriesUsed < 2 && ShouldRetryTransientFreeLlmApiFailure(_settings.Endpoint, response))
+            {
+                var retryDelaySeconds = transientProviderRetriesUsed == 0 ? 5 : 15;
+                transientProviderRetriesUsed++;
+                var fallbackTrail = ReadResponseHeader(response, "X-Fallback-Trail");
+                if (!string.IsNullOrWhiteSpace(fallbackTrail) && fallbackTrail.Contains("ovh/", StringComparison.OrdinalIgnoreCase))
+                    _lastProviderRoute = "ovh";
+                response.Dispose();
+                await Task.Delay(TimeSpan.FromSeconds(retryDelaySeconds), cancellationToken);
+                response = await SendProviderRequestAsync(requestBody);
+            }
+            return response;
         }
 
         var responseFormatMode = _settings.NativeOllama

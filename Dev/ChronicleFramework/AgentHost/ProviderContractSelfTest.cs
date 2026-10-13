@@ -409,6 +409,32 @@ internal static class ProviderContractSelfTest
             results.Add(new { scenario = "freellmapi-transient-upstream-502-retried-once-before-native-action", passed = true, providerCalls = transientRetryCalls, nativeCommands = 0 });
         }
 
+        var boundedTransientRetryCalls = 0;
+        var boundedTransientRetryHandler = new StubHandler((httpRequest, cancellationToken) =>
+        {
+            boundedTransientRetryCalls++;
+            if (boundedTransientRetryCalls < 3)
+            {
+                var unavailable = new HttpResponseMessage(HttpStatusCode.BadGateway);
+                unavailable.Headers.TryAddWithoutValidation("X-Fallback-Trail", "custom/nvidia/model key1=upstream_error");
+                return Task.FromResult(unavailable);
+            }
+            var recovered = JsonResponse(BuildChatResponse("{\"action\":\"tradeConfirm\",\"arguments\":{},\"rationale\":\"Confirm the current Native draft.\"}", "stop"));
+            recovered.Headers.TryAddWithoutValidation("X-Routed-Via", "custom/nvidia/test-model");
+            return Task.FromResult(recovered);
+        });
+        var boundedTransientRetrySettings = transientRetrySettings with { Timeout = TimeSpan.FromSeconds(60) };
+        using (var boundedTransientRetryClient = new HttpClient(boundedTransientRetryHandler) { Timeout = boundedTransientRetrySettings.Timeout })
+        using (var boundedTransientRetryProvider = new OllamaNativeProvider(boundedTransientRetrySettings, boundedTransientRetryClient))
+        using (var request = JsonDocument.Parse(BuildActionDecisionRequest()))
+        {
+            var result = await boundedTransientRetryProvider.DecideAsync(request.RootElement, CancellationToken.None);
+            if (result.Decision["action"]?.GetValue<string>() != "tradeConfirm" ||
+                result.RoutedVia != "custom/nvidia/test-model" || boundedTransientRetryCalls != 3)
+                throw new AgentHostException("provider-self-test-bounded-transient-free-gateway-retry-failed", "The Host must make at most two bounded retries for explicitly marked FreeLLMAPI upstream failures before issuing any Native action.");
+            results.Add(new { scenario = "freellmapi-two-transient-upstream-retries-bounded-before-native-action", passed = true, providerCalls = boundedTransientRetryCalls, nativeCommands = 0 });
+        }
+
         var schemaTransientCalls = 0;
         var schemaTransientFormats = new List<string>();
         var schemaThenTransientHandler = new StubHandler((httpRequest, cancellationToken) =>

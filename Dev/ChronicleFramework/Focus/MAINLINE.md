@@ -73,11 +73,13 @@ FreeLLMAPI 模型服务边界（2026-10-13实现约束）：当前真实模型�
 
 Harness FreeLLMAPI服务启动（2026-10-14）：真实模型预检先用本机`/api/ping`探测桌面网关；没有监听时若默认安装路径含FreeLLMAPI.exe，就用隐藏窗口启动一次并最多等待30秒，仍不就绪则在游戏启动/推理前明确失败。该Harness动作不通过computer-use操作UI、不读UI中的密钥、也不写入密钥；服务保持运行供后续测试复用。
 
-FreeLLMAPI模型请求恢复边界（2026-10-14）：若网关以HTTP 502及回退链`keyN=error`/`keyN=upstream_error`标识临时上游故障，Host仅在当前决定尚未转成Native动作前，对同一模型决定延迟5秒重试一次；两次均失败则安全终止本轮，不重放已执行游戏操作。该路径由本地假Provider合同测试覆盖，真实免费上游网络仍可能持续不可用。JSON Schema的`provider_bad_request`回退是不同的单次JSON对象兼容规则。
+FreeLLMAPI模型请求恢复边界（2026-10-14）：若网关以HTTP 502及回退链`keyN=error`/`keyN=upstream_error`标识临时上游故障，Host仅在当前决定尚未转成Native动作前，对同一模型决定最多重试两次，分别延迟5秒、15秒；第三次失败则安全终止本轮，不重放已执行游戏操作。HTTP 429不在重试范围内，避免加重配额限制。该路径由本地假Provider合同测试覆盖；真实免费上游网络仍可能持续不可用。JSON Schema的`provider_bad_request`回退是不同的单次JSON对象兼容规则。
 
 W7-K Quest交谈策略修正（2026-10-14）：真实模型回归显示，Quest接取后对话会在玩家离开前继续出现多个交谈节点；若任务仍欠工具，Host现在只允许当前Native对话中的离开选项，聚落菜单不再开放重复`talkToSettlementHero`，引导Agent转向Town市场；只有Journal显示数量满足且已采集交付前Inventory基线后，才重新开放Quest给予者对话。此为Chronicle动作目录策略，不改原版对话/任务机制；动作目录/拒绝非法选项由策略自测覆盖，真实模型运行仍待复验。
 
 W7-K真实模型运行与接口故障（`TestResults/20261014-033349`）：模型实际接取“卡利奥克需要工具”，从玩家可见城镇市场购入1单位工具（扣款866第纳尔，持有金从912降至46），Journal随后确认任务要求1/1。任务尚未交付，Host在读取Native `heroEquipmentOptions` 响应后因`mainHeroId`重复字段触发`ArgumentException`并终止；5fps原生窗口录像完整覆盖1400秒，失败片段及末帧保留用于诊断。已从`AgentInventoryStateAdapter.BuildHeroEquipmentOptionsJson`删除重复写入；`AgentHostPackage`和`Docs`阶段通过（`20261014-040706`、`20261014-040742`）。这是已修复的接口根因，不是任务成功证据；尚需下一轮真实模型从持有工具继续返回村庄、完成交付，并核实奖励与最终库存变化。
+
+W7-K后续模型路由实测（`TestResults/20261014-041201`、`042359`、`042545`）：直连Mistral完整运行在7次Host决策/6条Native动作前遇HTTP 429；`auto:noema-free`无游戏Provider冒烟通过，实际回退路由为`custom/nvidia/llama-3.2-11b-vision`，703输入/39输出tokens，精确返回单一可见`talkToSettlementHero`动作且NativeCommands=0。该自动路由完整运行仅完成7次Host决策/4条Native动作，随后FreeLLMAPI回退后仍HTTP 502并终止；源档未变、游戏进程清理成功。两轮都未证明任务完成。根据该网关对临时上游断连的真实响应，Host已将有明确`keyN=error/upstream_error`标记的502恢复从一次扩为最多两次（5秒、15秒），429仍不重试；自托管包/provider合同测试及Docs随后通过（`20261014-043559`、`043751`），完整真实模型闭环仍须在这套恢复逻辑下复验。
 
 单机当前玩家客户端以及“游戏内Native Mod身体 + 游戏外本地Agent Host模型循环”已有3/3可重复的技术原型；设置注册、Native-PID/会话绑定及游戏内正常启停另有上述运行证据，不需要第二游戏账号。可重建的首装zip及隔离游戏根Smoke已有证据；第三方Mod管理器实际安装、升级/回滚/卸载由发行后续工作及Epic验收处理。现有证据没有覆盖完整Campaign或跨3D场景持续游玩。多人客户端/共享Campaign由W6另行研究，首发单机证据不能替代多人验收。
 
