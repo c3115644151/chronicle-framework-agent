@@ -382,6 +382,32 @@ internal static class ProviderContractSelfTest
             results.Add(new { scenario = "freellmapi-json-schema-provider-rejection-falls-back-to-validated-json-object", passed = true });
         }
 
+        var transientRetryCalls = 0;
+        var transientRetryHandler = new StubHandler((httpRequest, cancellationToken) =>
+        {
+            transientRetryCalls++;
+            if (transientRetryCalls == 1)
+            {
+                var unavailable = new HttpResponseMessage(HttpStatusCode.BadGateway);
+                unavailable.Headers.TryAddWithoutValidation("X-Fallback-Trail", "custom/nvidia/model key1=error");
+                return Task.FromResult(unavailable);
+            }
+            var recovered = JsonResponse(BuildChatResponse("{\"action\":\"tradeConfirm\",\"arguments\":{},\"rationale\":\"Confirm the current Native draft.\"}", "stop"));
+            recovered.Headers.TryAddWithoutValidation("X-Routed-Via", "custom/nvidia/test-model");
+            return Task.FromResult(recovered);
+        });
+        var transientRetrySettings = freeLlmApiSettings with { Model = "auto:noema-free", Timeout = TimeSpan.FromSeconds(20) };
+        using (var transientRetryClient = new HttpClient(transientRetryHandler) { Timeout = transientRetrySettings.Timeout })
+        using (var transientRetryProvider = new OllamaNativeProvider(transientRetrySettings, transientRetryClient))
+        using (var request = JsonDocument.Parse(BuildActionDecisionRequest()))
+        {
+            var result = await transientRetryProvider.DecideAsync(request.RootElement, CancellationToken.None);
+            if (result.Decision["action"]?.GetValue<string>() != "tradeConfirm" ||
+                result.RoutedVia != "custom/nvidia/test-model" || transientRetryCalls != 2)
+                throw new AgentHostException("provider-self-test-transient-free-gateway-retry-failed", "A FreeLLMAPI upstream transport failure must retry the model decision exactly once before any Native action can be issued.");
+            results.Add(new { scenario = "freellmapi-transient-upstream-502-retried-once-before-native-action", passed = true, providerCalls = transientRetryCalls, nativeCommands = 0 });
+        }
+
         var compatibilityFormats = new List<string>();
         var mistralRequestShapeValid = true;
         var mistralCompatibilityHandler = new StubHandler((httpRequest, cancellationToken) =>
@@ -434,10 +460,13 @@ internal static class ProviderContractSelfTest
             using var nonGatewayBadRequest = new HttpResponseMessage(HttpStatusCode.BadRequest);
             nonGatewayBadRequest.Headers.TryAddWithoutValidation("X-Fallback-Trail", "ovh/Mistral-Small key1=provider_bad_request");
             if (OllamaNativeProvider.ShouldRetryWithJsonObject(rateWindowEndpoint, transientGatewayFailure) ||
+                !OllamaNativeProvider.ShouldRetryTransientFreeLlmApiFailure(rateWindowEndpoint, transientGatewayFailure) ||
+                OllamaNativeProvider.ShouldRetryTransientFreeLlmApiFailure(rateWindowEndpoint, nonGatewayBadRequest) ||
                 OllamaNativeProvider.ShouldRetryWithJsonObject(new Uri("http://127.0.0.1:11434/v1/chat/completions"), nonGatewayBadRequest))
                 throw new AgentHostException("provider-self-test-retried-non-schema-failure", "JSON-object compatibility retry must be limited to explicit FreeLLMAPI provider_bad_request responses.");
         }
         results.Add(new { scenario = "freellmapi-json-object-fallback-recognizes-explicit-400-422-and-fallback-502-schema-rejection-only", passed = true });
+
         }
         catch (KeyNotFoundException exception)
         {

@@ -71,6 +71,8 @@ Minecraft Agent 的环境、规划、技能、记忆和评测研究已沉淀到�
 
 FreeLLMAPI 模型服务边界（2026-10-13实现约束）：当前真实模型测试改走本机`http://127.0.0.1:31415/v1` OpenAI兼容接口，默认路由`auto`，请求经FreeLLMAPI当前启用的免费上游服务商；MCM保留历史JSON字段`OllamaBaseUrl`以避免设置迁移，但新默认指向网关，实时Start在非Harness运行下拒绝其它端点、本地推理和缺少统一API key的情况。key只从启动游戏前继承的`FREELLMAPI_API_KEY`或`CHRONICLE_LLM_API_KEY`进程环境读取，不写MCM配置、命令行或日志；Host通过只读`/v1/models?available=true`校验路由，再记录每次回复的`X-Routed-Via`、响应模型和token数及格式模式；HTTP失败仅将`X-Routed-Via`、`X-Fallback-Attempts`、`X-Fallback-Trail`和安全错误码保存在诊断轨迹，不保留响应正文。FreeLLMAPI在HTTP 400/422或带`provider_bad_request`回退链的502时，Host仅对该次决策退回JSON对象模式一次；若轨迹表明回退到OVH Mistral Small，则同时切换为其已验证的`max_tokens`并按OVH请求节奏等待。仍在Native操作前验证结构与当前动作/参数目录，其它HTTP失败不重试。当前Mistral Small 3.2→OVH路由直接使用JSON对象模式、`max_tokens`，不发送已测会触发该上游拒绝的额外字段。FreeLLMAPI服务商目录为OVH匿名Mistral注明每模型每分钟2请求，但本轮真实游戏闭环在31秒请求间隔下仍观察到网关`rpm/rpd-limit`拒绝；因此Host对直连Mistral以及最近成功路由为`ovh/`的请求保守地按开始时间间隔45秒，后续若仍被限流再按响应头/路由证据细化。其它FreeLLMAPI路由不延迟。无游戏的真实Provider冒烟测试用唯一合成Native动作和参数检验模型是否服从当前动作目录，且断言没有发送游戏命令；实时回归另记录真实路由。Quest提示须使用协议目录中的精确动作ID（当前联系人动作是`talkToSettlementHero`），不能把界面术语当调用名。FreeLLMAPI官方CLI用于客户端配置/Provider key管理，逐轮推理直接调用官方OpenAI兼容HTTP API，不通过CLI子进程。过去Qwen/Ollama收据仍是历史原型证据，不代表当前W7-K模型路径；实时游戏闭环必须经FreeLLMAPI实际外部路由验收。
 
+FreeLLMAPI模型请求恢复边界（2026-10-14）：若网关以HTTP 502及回退链`keyN=error`/`keyN=upstream_error`标识临时上游故障，Host仅在当前决定尚未转成Native动作前，对同一模型决定延迟5秒重试一次；两次均失败则安全终止本轮，不重放已执行游戏操作。该路径由本地假Provider合同测试覆盖，真实免费上游网络仍可能持续不可用。JSON Schema的`provider_bad_request`回退是不同的单次JSON对象兼容规则。
+
 单机当前玩家客户端以及“游戏内Native Mod身体 + 游戏外本地Agent Host模型循环”已有3/3可重复的技术原型；设置注册、Native-PID/会话绑定及游戏内正常启停另有上述运行证据，不需要第二游戏账号。可重建的首装zip及隔离游戏根Smoke已有证据；第三方Mod管理器实际安装、升级/回滚/卸载由发行后续工作及Epic验收处理。现有证据没有覆盖完整Campaign或跨3D场景持续游玩。多人客户端/共享Campaign由W6另行研究，首发单机证据不能替代多人验收。
 
 ### 多人独立客户端候选：共享战役 Mod 的实际边界

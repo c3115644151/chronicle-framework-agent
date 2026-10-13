@@ -245,6 +245,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
 
         using var requestTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         requestTimeout.CancelAfter(_settings.Timeout);
+        var transientProviderRetryUsed = false;
         async Task<HttpResponseMessage> SendProviderRequestAsync(string requestBody)
         {
             await WaitForProviderRateWindowAsync(cancellationToken);
@@ -267,10 +268,23 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             }
         }
 
+        async Task<HttpResponseMessage> SendProviderRequestWithTransientRetryAsync(string requestBody)
+        {
+            var response = await SendProviderRequestAsync(requestBody);
+            if (transientProviderRetryUsed || !ShouldRetryTransientFreeLlmApiFailure(_settings.Endpoint, response)) return response;
+            transientProviderRetryUsed = true;
+            var fallbackTrail = ReadResponseHeader(response, "X-Fallback-Trail");
+            if (!string.IsNullOrWhiteSpace(fallbackTrail) && fallbackTrail.Contains("ovh/", StringComparison.OrdinalIgnoreCase))
+                _lastProviderRoute = "ovh";
+            response.Dispose();
+            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            return await SendProviderRequestAsync(requestBody);
+        }
+
         var responseFormatMode = _settings.NativeOllama
             ? "ollama-native"
             : useJsonObjectCompatibilityMode ? "json_object_compatibility" : "json_schema";
-        var response = await SendProviderRequestAsync(body);
+        var response = await SendProviderRequestWithTransientRetryAsync(body);
         if (!_settings.NativeOllama && responseFormatMode == "json_schema" && ShouldRetryWithJsonObject(_settings.Endpoint, response))
         {
             var failedRoute = ReadResponseHeader(response, "X-Fallback-Trail");
@@ -287,7 +301,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             if (Encoding.UTF8.GetByteCount(body) > MaxRequestBytes)
                 throw new AgentHostException("provider-request-too-large", "The JSON-mode model request exceeds the Host size limit.");
             responseFormatMode = "json_object_fallback";
-            response = await SendProviderRequestAsync(body);
+            response = await SendProviderRequestWithTransientRetryAsync(body);
         }
 
         using (response)
@@ -402,6 +416,17 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     {
         if (!IsFreeLlmApi(endpoint) || response.StatusCode is not (HttpStatusCode.BadRequest or HttpStatusCode.UnprocessableEntity or HttpStatusCode.BadGateway)) return false;
         return ReadResponseHeader(response, "X-Fallback-Trail")?.Contains("provider_bad_request", StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    internal static bool ShouldRetryTransientFreeLlmApiFailure(Uri endpoint, HttpResponseMessage response)
+    {
+        if (!IsFreeLlmApi(endpoint) || response.StatusCode != HttpStatusCode.BadGateway) return false;
+        var fallbackTrail = ReadResponseHeader(response, "X-Fallback-Trail");
+        return !string.IsNullOrWhiteSpace(fallbackTrail) &&
+               fallbackTrail.Contains("key", StringComparison.OrdinalIgnoreCase) &&
+               (fallbackTrail.Contains("=error", StringComparison.OrdinalIgnoreCase) ||
+                fallbackTrail.Contains("=upstream_error", StringComparison.OrdinalIgnoreCase)) &&
+               !fallbackTrail.Contains("provider_bad_request", StringComparison.OrdinalIgnoreCase);
     }
 
     private bool UsesJsonObjectCompatibilityMode() =>
