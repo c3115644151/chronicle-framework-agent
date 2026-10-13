@@ -408,6 +408,38 @@ internal static class ProviderContractSelfTest
             results.Add(new { scenario = "freellmapi-transient-upstream-502-retried-once-before-native-action", passed = true, providerCalls = transientRetryCalls, nativeCommands = 0 });
         }
 
+        var schemaTransientCalls = 0;
+        var schemaTransientFormats = new List<string>();
+        var schemaThenTransientHandler = new StubHandler((httpRequest, cancellationToken) =>
+        {
+            schemaTransientCalls++;
+            using var requestBody = JsonDocument.Parse(httpRequest.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            schemaTransientFormats.Add(requestBody.RootElement.GetProperty("response_format").GetProperty("type").GetString() ?? "missing");
+            if (schemaTransientCalls == 1)
+            {
+                var schemaRejected = new HttpResponseMessage(HttpStatusCode.BadGateway);
+                schemaRejected.Headers.TryAddWithoutValidation("X-Fallback-Trail", "custom/provider/model key1=provider_bad_request");
+                return Task.FromResult(schemaRejected);
+            }
+            if (schemaTransientCalls == 2)
+            {
+                var upstreamFailed = new HttpResponseMessage(HttpStatusCode.BadGateway);
+                upstreamFailed.Headers.TryAddWithoutValidation("X-Fallback-Trail", "custom/provider/model key1=error");
+                return Task.FromResult(upstreamFailed);
+            }
+            return Task.FromResult(JsonResponse(BuildChatResponse("{\"action\":\"tradeConfirm\",\"arguments\":{},\"rationale\":\"Confirm the current Native draft.\"}", "stop")));
+        });
+        using (var schemaTransientClient = new HttpClient(schemaThenTransientHandler) { Timeout = transientRetrySettings.Timeout })
+        using (var schemaTransientProvider = new OllamaNativeProvider(transientRetrySettings, schemaTransientClient))
+        using (var request = JsonDocument.Parse(BuildActionDecisionRequest()))
+        {
+            var result = await schemaTransientProvider.DecideAsync(request.RootElement, CancellationToken.None);
+            if (result.Decision["action"]?.GetValue<string>() != "tradeConfirm" || schemaTransientCalls != 3 ||
+                !schemaTransientFormats.SequenceEqual(new[] { "json_schema", "json_object", "json_object" }, StringComparer.Ordinal))
+                throw new AgentHostException("provider-self-test-schema-fallback-transient-retry-failed", "The bounded transport retry must remain available after the single structured-schema compatibility fallback.");
+            results.Add(new { scenario = "freellmapi-schema-fallback-then-transient-upstream-retry-is-bounded", passed = true, providerCalls = schemaTransientCalls, nativeCommands = 0 });
+        }
+
         var compatibilityFormats = new List<string>();
         var mistralRequestShapeValid = true;
         var mistralCompatibilityHandler = new StubHandler((httpRequest, cancellationToken) =>

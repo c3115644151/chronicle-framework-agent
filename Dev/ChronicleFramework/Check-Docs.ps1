@@ -397,6 +397,7 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerProfileTestSource -notmatch 'freellmapi-json-schema-provider-rejection-falls-back-to-validated-json-object' -or
     $providerProfileTestSource -notmatch 'freellmapi-json-object-fallback-recognizes-explicit-400-422-and-fallback-502-schema-rejection-only' -or
     $providerProfileTestSource -notmatch 'freellmapi-transient-upstream-502-retried-once-before-native-action' -or
+    $providerProfileTestSource -notmatch 'freellmapi-schema-fallback-then-transient-upstream-retry-is-bounded' -or
     $providerProfileTestSource -notmatch 'observedTokenParameters' -or
     $providerProfileTestSource -notmatch 'freellmapi-mistral-uses-validated-json-object-compatibility-mode' -or
     $providerProfileTestSource -notmatch 'freellmapi-ovh-model-rate-window-is-route-specific' -or
