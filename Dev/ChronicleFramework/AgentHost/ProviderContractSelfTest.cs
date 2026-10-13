@@ -407,8 +407,8 @@ internal static class ProviderContractSelfTest
         }
 
         var rateWindowEndpoint = new Uri("http://127.0.0.1:31415/v1/chat/completions");
-        if (OllamaNativeProvider.GetMinimumRequestInterval(rateWindowEndpoint, "mistral-small-3.2-24b", null) != TimeSpan.FromSeconds(31) ||
-            OllamaNativeProvider.GetMinimumRequestInterval(rateWindowEndpoint, "auto:noema-free", "ovh/Mistral-Small-3.2-24B-Instruct-2506") != TimeSpan.FromSeconds(31) ||
+        if (OllamaNativeProvider.GetMinimumRequestInterval(rateWindowEndpoint, "mistral-small-3.2-24b", null) != TimeSpan.FromSeconds(45) ||
+            OllamaNativeProvider.GetMinimumRequestInterval(rateWindowEndpoint, "auto:noema-free", "ovh/Mistral-Small-3.2-24B-Instruct-2506") != TimeSpan.FromSeconds(45) ||
             OllamaNativeProvider.GetMinimumRequestInterval(rateWindowEndpoint, "auto:noema-free", "kilo/openrouter/free") != TimeSpan.Zero ||
             OllamaNativeProvider.GetMinimumRequestInterval(new Uri("http://127.0.0.1:11434/v1/chat/completions"), "mistral-small-3.2-24b", null) != TimeSpan.Zero)
             throw new AgentHostException("provider-self-test-rate-window-policy-failed", "Only the known FreeLLMAPI-to-OVH Mistral route should receive the conservative 31-second request spacing.");

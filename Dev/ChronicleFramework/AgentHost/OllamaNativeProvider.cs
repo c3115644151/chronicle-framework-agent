@@ -413,7 +413,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     {
         if (!IsFreeLlmApi(endpoint)) return TimeSpan.Zero;
         return IsMistralSmall32(model) || previousRoute?.StartsWith("ovh/", StringComparison.OrdinalIgnoreCase) == true
-            ? TimeSpan.FromSeconds(31)
+            ? TimeSpan.FromSeconds(45)
             : TimeSpan.Zero;
     }
 

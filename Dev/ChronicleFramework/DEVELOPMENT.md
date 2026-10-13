@@ -1,10 +1,10 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.180
+Contract version: 7.181
 
 Agent Host为每次模型决策按Native当前`allowedActions`/`allowedControls`生成JSON Schema互斥分支；对话、菜单、地图移动等动作还把策略允许的当前ID编码成参数枚举，避免从可见但不允许的选项中重复选择。每个活动Quest只读一次任务日志；城镇工具采购前先尝试当前市场，无货城镇会从本轮后续目标中排除，交易结束后才允许离开，避免在同一城镇循环。无动作目录时Host不调用模型，理由文本在schema中限制为64字符；村庄Quest目标另要求理由最多8个短词。FreeLLMAPI使用OpenAI兼容`response_format.json_schema`；无游戏的真实Provider冒烟测试要求模型返回唯一合成Native动作及精确目标参数，并记录实际`X-Routed-Via`与token；测试不执行Native命令。原生Ollama协议仍只留在隔离协议回归，不作为本项目真实模型推理路径。
 FreeLLMAPI Mistral Small 3.2→OVH当前使用JSON对象模式与`max_tokens`，并省略该上游不接受的OpenAI专属`store`及空`reasoning_effort`字段；输出仍由本地Host按Native动作目录逐项验证。若其它FreeLLMAPI路由明确以`provider_bad_request`拒绝JSON Schema，则仅对该次决策尝试一次JSON对象模式，并严格后验验证；Provider回归锁定两条路径。
-已实测的OVH匿名服务商限制为每模型每分钟2次；Host对该Mistral路由，以及最近一次响应明确由`ovh/`处理的FreeLLMAPI模型，按请求开始时间至少间隔31秒。其它路由和本地端点不额外等待；等待可被当前取消令牌中断。Provider回归分别覆盖模型直连、自动路由命中OVH、非OVH及非FreeLLMAPI端点。
+OVH匿名Mistral路由的免费请求上限为每模型每分钟2次；真实游戏闭环在31秒节奏下仍观察到第三个请求被网关按`rpm/rpd-limit`拒绝，因此Host对该Mistral路由，以及最近一次响应明确由`ovh/`处理的FreeLLMAPI模型，保守地按请求开始时间至少间隔45秒。其它路由和本地端点不额外等待；等待可被当前取消令牌中断。Provider回归分别覆盖模型直连、自动路由命中OVH、非OVH及非FreeLLMAPI端点。
 Agent Host为每次模型决策按Native当前`allowedActions`/`allowedControls`生成JSON Schema互斥分支；对话、菜单、地图移动等动作还把策略允许的当前ID编码成参数枚举，避免从可见但不允许的选项中重复选择。每个活动Quest只读一次任务日志；城镇工具采购前先尝试当前市场，无货城镇会从本轮后续目标中排除，交易结束后才允许离开，避免在同一城镇循环。无动作目录时Host不调用模型，理由文本在schema中限制为64字符；村庄Quest目标另要求理由最多8个短词。FreeLLMAPI优先使用OpenAI兼容`response_format.json_schema`；若FreeLLMAPI明确回报某上游以`provider_bad_request`拒绝该格式，只对该次决策重试一次`json_object`，再由本地Host逐字段验证动作ID、参数名、当前可见ID和完成条件，验证失败不会执行Native动作。每条模型收据记录实际`X-Routed-Via`、token数及格式模式；无游戏的真实Provider冒烟测试还要求模型返回唯一合成Native动作及精确目标参数。FreeLLMAPI错误收据只保存`X-Routed-Via`、`X-Fallback-Attempts`、`X-Fallback-Trail`等路由头和安全错误码，不保存响应正文/可能含凭据的错误内容。原生Ollama协议仍只留在隔离协议回归，不作为本项目真实模型推理路径。
 
 Prompt中写到的动作名必须是当前Native协议目录中的确切ID；玩家熟悉的界面/过程术语只能解释动作效果，不能替代可调用ID。W7-K回归锁定 `talkToSettlementHero` 而不是玩家界面描述词，避免模型从提示词学到不存在的动作名。
