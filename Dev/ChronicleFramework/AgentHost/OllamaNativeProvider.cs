@@ -271,6 +271,13 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         async Task<HttpResponseMessage> SendProviderRequestWithTransientRetryAsync(string requestBody)
         {
             var response = await SendProviderRequestAsync(requestBody);
+            var retryAfter = GetBoundedRateLimitRetryAfter(_settings.Endpoint, response);
+            if (retryAfter.HasValue)
+            {
+                response.Dispose();
+                await Task.Delay(retryAfter.Value, cancellationToken);
+                response = await SendProviderRequestAsync(requestBody);
+            }
             while (transientProviderRetriesUsed < 2 && ShouldRetryTransientFreeLlmApiFailure(_settings.Endpoint, response))
             {
                 var retryDelaySeconds = transientProviderRetriesUsed == 0 ? 5 : 15;
@@ -409,9 +416,11 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         var routedVia = ReadResponseHeader(response, "X-Routed-Via");
         var fallbackAttempts = ReadResponseHeader(response, "X-Fallback-Attempts");
         var fallbackTrail = ReadResponseHeader(response, "X-Fallback-Trail");
+        var retryAfter = response.Headers.RetryAfter?.ToString();
         if (!string.IsNullOrWhiteSpace(routedVia)) details.Add("routedVia=" + routedVia);
         if (!string.IsNullOrWhiteSpace(fallbackAttempts)) details.Add("fallbackAttempts=" + fallbackAttempts);
         if (!string.IsNullOrWhiteSpace(fallbackTrail)) details.Add("fallbackTrail=" + fallbackTrail);
+        if (!string.IsNullOrWhiteSpace(retryAfter)) details.Add("retryAfter=" + retryAfter[..Math.Min(retryAfter.Length, 40)]);
         return $"{providerName} returned HTTP {(int)response.StatusCode}." +
                (details.Count == 0 ? string.Empty : " " + string.Join("; ", details));
     }
@@ -431,6 +440,15 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                (fallbackTrail.Contains("=error", StringComparison.OrdinalIgnoreCase) ||
                 fallbackTrail.Contains("=upstream_error", StringComparison.OrdinalIgnoreCase)) &&
                !fallbackTrail.Contains("provider_bad_request", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static TimeSpan? GetBoundedRateLimitRetryAfter(Uri endpoint, HttpResponseMessage response)
+    {
+        if (!IsFreeLlmApi(endpoint) || response.StatusCode != HttpStatusCode.TooManyRequests || response.Headers.RetryAfter is null)
+            return null;
+        var delay = response.Headers.RetryAfter.Delta ?? response.Headers.RetryAfter.Date - DateTimeOffset.UtcNow;
+        if (!delay.HasValue || delay.Value <= TimeSpan.Zero || delay.Value > TimeSpan.FromSeconds(60)) return null;
+        return delay.Value;
     }
 
     private bool UsesJsonObjectCompatibilityMode() =>
