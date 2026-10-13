@@ -4,7 +4,7 @@ namespace ChronicleFramework.AgentHost;
 
 internal static class AgentHostVillageToolsQuestPolicy
 {
-    internal static JsonArray BuildActionCatalog(JsonObject native, JsonObject? previousReceipt, bool preDeliveryInventoryCaptured = false)
+    internal static JsonArray BuildActionCatalog(JsonObject native, JsonObject? previousReceipt, bool preDeliveryInventoryCaptured = false, bool questDetailsObserved = false)
     {
         var state = native["state"] as JsonObject;
         var context = state?["context"] as JsonObject;
@@ -17,7 +17,7 @@ internal static class AgentHostVillageToolsQuestPolicy
         {
             if (string.Equals(menuId, "encounter_meeting", StringComparison.Ordinal)) return new JsonArray();
             var catalog = new JsonArray();
-            AddQuestDetailsAction(state, catalog);
+            AddQuestDetailsAction(state, catalog, questDetailsObserved);
             var options = conversation["options"] as JsonArray ?? new JsonArray();
             if (options.OfType<JsonObject>().Any(option => ReadBoolean(option, "clickable")))
                 catalog.Add(new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonArray("OptionId") });
@@ -39,7 +39,7 @@ internal static class AgentHostVillageToolsQuestPolicy
         if (!hasToolsQuest && visibleToolsIssueGivers.Count == 0)
             return new JsonArray();
         var catalogWithQuestDetails = new JsonArray();
-        AddQuestDetailsAction(state, catalogWithQuestDetails);
+        AddQuestDetailsAction(state, catalogWithQuestDetails, questDetailsObserved);
 
         if (hasToolsQuest && !preDeliveryInventoryCaptured && context["conversation"] is not JsonObject && IsToolsTaskSatisfied(previousReceipt))
         {
@@ -336,6 +336,11 @@ internal static class AgentHostVillageToolsQuestPolicy
             TryResolveAction(questState, null, new JsonObject { ["action"] = "questDetails", ["arguments"] = new JsonObject { ["QuestId"] = "hidden-quest" } }, out _, out _, out _))
             throw new AgentHostException("village-tools-policy-self-test-quest-id-gate-failed", "Quest details may target only the currently observed supported quest ID.");
         results.Add(new { scenario = "village-tools-policy-quest-details-bind-current-visible-quest-id", passed = true });
+        var afterJournalCatalog = BuildActionCatalog(questState, null, questDetailsObserved: true);
+        if (afterJournalCatalog.OfType<JsonObject>().Any(action => ReadString(action, "action") == "questDetails") ||
+            !afterJournalCatalog.OfType<JsonObject>().Any(action => ReadString(action, "action") == "menuSelect"))
+            throw new AgentHostException("village-tools-policy-self-test-quest-details-once-failed", "After the active Quest journal has been observed, the model must not loop on the same query and should receive the current leave option.");
+        results.Add(new { scenario = "village-tools-policy-removes-redundant-journal-query-after-observation", passed = true });
 
         var tradeState = State("InventoryState", null, "town-1", quests: new JsonArray(new JsonObject { ["id"] = "quest-tools", ["title"] = "Village Needs Tools" }));
         tradeState["state"]!["inventoryScreen"] = new JsonObject { ["mode"] = "Trade" };
@@ -590,9 +595,9 @@ internal static class AgentHostVillageToolsQuestPolicy
             .Cast<string>()
             .ToArray() ?? Array.Empty<string>();
 
-    private static void AddQuestDetailsAction(JsonObject state, JsonArray catalog)
+    private static void AddQuestDetailsAction(JsonObject state, JsonArray catalog, bool questDetailsObserved)
     {
-        if (ActiveToolsQuestIds(state).Count > 0)
+        if (!questDetailsObserved && ActiveToolsQuestIds(state).Count > 0)
             catalog.Add(new JsonObject { ["action"] = "questDetails", ["arguments"] = new JsonArray("QuestId") });
     }
 

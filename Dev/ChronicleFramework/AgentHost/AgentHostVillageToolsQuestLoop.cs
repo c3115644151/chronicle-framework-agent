@@ -85,6 +85,7 @@ internal static class AgentHostVillageToolsQuestLoop
         var completionTokens = priorCompletionTokens;
         var questId = string.Empty;
         var sawQuestActive = false;
+        var questDetailsObservedForActiveQuest = false;
         var preDeliveryInventoryCaptured = false;
         var inventoryVerifiedAfterTurnIn = false;
         JsonObject? questDetailsReceipt = null;
@@ -127,7 +128,7 @@ internal static class AgentHostVillageToolsQuestLoop
                         inventoryVerifiedAfterTurnIn = true;
                 }
 
-                var catalog = AgentHostVillageToolsQuestPolicy.BuildActionCatalog(currentNative!, previousReceipt, preDeliveryInventoryCaptured);
+                var catalog = AgentHostVillageToolsQuestPolicy.BuildActionCatalog(currentNative!, previousReceipt, preDeliveryInventoryCaptured, questDetailsObservedForActiveQuest);
                 var controls = AgentHostVillageToolsQuestPolicy.BuildControlCatalog(currentNative!, sawQuestActive, inventoryVerifiedAfterTurnIn);
                 if (catalog.Count == 0 && controls.Count == 0)
                 {
@@ -246,7 +247,11 @@ internal static class AgentHostVillageToolsQuestLoop
                 }
 
                 if (ReadString(receipt, "status") == "completed") actionsExecuted++;
-                if (action == "questDetails" && activeQuest is not null) questDetailsReceipt = receipt.DeepClone() as JsonObject;
+                if (action == "questDetails" && activeQuest is not null && ReadString(receipt, "status") == "completed")
+                {
+                    questDetailsReceipt = receipt.DeepClone() as JsonObject;
+                    questDetailsObservedForActiveQuest = true;
+                }
                 if (action == "heroEquipmentOptions" && ReadString(receipt, "status") == "completed")
                 {
                     if (activeQuest is not null)
