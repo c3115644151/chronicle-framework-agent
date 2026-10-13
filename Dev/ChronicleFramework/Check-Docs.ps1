@@ -249,6 +249,8 @@ if ($harnessScript -notmatch "'AgentHostVillageToolsQuestEvaluation' \{ @\('Pref
     $agentHostVillageToolsQuestPolicySource -notmatch 'village-tools-policy-self-test-delivery-giver-gate-failed' -or
     $agentHostVillageToolsQuestPolicySource -notmatch 'GetAllowedDialogueOptions' -or $agentHostVillageToolsQuestPolicySource -notmatch 'IsConversationLeaveOption' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'village-tools-host-routes-classified-goal-through-native-observe-decide-act-loop' -or
+    $agentHostVillageToolsQuestLoopSource -notmatch 'village-tools-host-recovers-from-bounded-invalid-actions-in-open-native-dialogue' -or
+    $agentHostVillageToolsQuestLoopSource -notmatch 'Native conversation is open\. Use dialogueSelect' -or
     $agentHostVillageToolsFixturePreparationSource -notmatch 'Get-ToolsIssueMarker' -or
     $agentHostVillageToolsFixturePreparationSource -notmatch "Invoke-NativeCli 'save'" -or
     $agentHostVillageToolsFixturePreparationSource -notmatch 'SourceFixtureUnchanged' -or

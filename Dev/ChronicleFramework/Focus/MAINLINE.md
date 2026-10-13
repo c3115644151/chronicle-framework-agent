@@ -81,6 +81,8 @@ W7-K真实模型运行与接口故障（`TestResults/20261014-033349`）：模�
 
 W7-K后续模型路由实测（`TestResults/20261014-041201`、`042359`、`042545`）：直连Mistral完整运行在7次Host决策/6条Native动作前遇HTTP 429；`auto:noema-free`无游戏Provider冒烟通过，实际回退路由为`custom/nvidia/llama-3.2-11b-vision`，703输入/39输出tokens，精确返回单一可见`talkToSettlementHero`动作且NativeCommands=0。该自动路由完整运行仅完成7次Host决策/4条Native动作，随后FreeLLMAPI回退后仍HTTP 502并终止；源档未变、游戏进程清理成功。两轮都未证明任务完成。根据该网关对临时上游断连的真实响应，Host已将有明确`keyN=error/upstream_error`标记的502恢复从一次扩为最多两次（5秒、15秒），429仍不重试；自托管包/provider合同测试及Docs随后通过（`20261014-043559`、`043751`），完整真实模型闭环仍须在这套恢复逻辑下复验。
 
+W7-K当前对话模型纠错实测（`TestResults/20261014-043939`）：`auto:noema-free`经Native `talkToSettlementHero`进入真实对话后，NVIDIA Llama 11B返回未列入目录的动作名`leave_settlement`；当时唯一允许动作是`dialogueSelect`。Host两次在Native前拒绝该无效响应后，模型又返回过期的`talkToSettlementHero`，回归上限触发；没有把无效响应发送给游戏，也未造成世界动作，源档未变且进程清理成功。已为“当前确处于Native对话”的拒绝增加精确`dialogueSelect`/可点击OptionId反馈，并把此类无副作用恢复上限从2次提高到3次；确定性Host测试让模型先连续3次返回无效动作，再返回正确的当前选项，验证仅执行`talkToSettlementHero → dialogueSelect → questDetails`，测试通过（`20261014-044619`，Docs `20261014-044711`）。该修复尚未经过真实模型复验。
+
 单机当前玩家客户端以及“游戏内Native Mod身体 + 游戏外本地Agent Host模型循环”已有3/3可重复的技术原型；设置注册、Native-PID/会话绑定及游戏内正常启停另有上述运行证据，不需要第二游戏账号。可重建的首装zip及隔离游戏根Smoke已有证据；第三方Mod管理器实际安装、升级/回滚/卸载由发行后续工作及Epic验收处理。现有证据没有覆盖完整Campaign或跨3D场景持续游玩。多人客户端/共享Campaign由W6另行研究，首发单机证据不能替代多人验收。
 
 ### 多人独立客户端候选：共享战役 Mod 的实际边界

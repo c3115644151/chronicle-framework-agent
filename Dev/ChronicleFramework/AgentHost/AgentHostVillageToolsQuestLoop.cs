@@ -55,6 +55,27 @@ internal static class AgentHostVillageToolsQuestLoop
             !client.Actions.SequenceEqual(new[] { "talkToSettlementHero", "dialogueSelect", "questDetails" }) || client.ClockActionCount != 0 || client.ProcessId != 321)
             throw new AgentHostException("village-tools-loop-self-test-observe-decide-act-failed", "Quest loop contract mismatch: status=" + ReadString(result, "status") + "; termination=" + ReadString(result["termination"] as JsonObject, "reason") + "; decisions=" + ReadInt(result, "decisions", -1) + "; actions=" + string.Join(",", client.Actions) + "; providerCalls=" + provider.Calls + "; clockActions=" + client.ClockActionCount + "; active=" + ReadBoolean(result, "questWasObservedActive") + ".");
 
+        var recoveryClient = new FakeVillageQuestNativeClient();
+        var recoveryProvider = new FakeVillageQuestRecoverableDecisionProvider();
+        using var recoveryRequest = JsonDocument.Parse(JsonSerializer.Serialize(new
+        {
+            runId = "selftest-village-tools-dialogue-recovery",
+            goal = "Complete the currently visible village tools quest.",
+            parentProcessId = 321,
+            maxDecisions = 6,
+            maxElapsedSeconds = 10,
+            allowedActionNames = AgentHostCampaignLoop.ApprovedActions.ToArray()
+        }));
+        var recoveryResult = await RunAsync(recoveryRequest.RootElement, recoveryClient, recoveryProvider, CancellationToken.None);
+        var recoveryTrace = recoveryResult["trace"] as JsonArray ?? new JsonArray();
+        var recoveryFeedback = recoveryProvider.FeedbackRequiredNextSteps;
+        if (ReadString(recoveryResult, "status") != "failed" ||
+            ReadString(recoveryResult["termination"] as JsonObject, "reason") != "decision-budget-exhausted" ||
+            !recoveryClient.Actions.SequenceEqual(new[] { "talkToSettlementHero", "dialogueSelect", "questDetails" }) ||
+            recoveryProvider.Calls != 6 || recoveryTrace.OfType<JsonObject>().Count(step => ReadString(step, "stage") == "decision-rejected-before-native") != 3 ||
+            recoveryFeedback.Count != 3 || recoveryFeedback.Any(text => !text.Contains("Native conversation is open", StringComparison.Ordinal) || !text.Contains("dialogueSelect", StringComparison.Ordinal)))
+            throw new AgentHostException("village-tools-loop-self-test-dialogue-provider-recovery-failed", "Repeated unavailable actions during an open conversation must receive precise feedback, remain Native-side-effect-free, and allow a later listed dialogue action.");
+
         var passageClient = new FakeSafePassageNativeClient();
         var passageProvider = new FakeSafePassageDecisionProvider();
         using var passageRequest = JsonDocument.Parse(JsonSerializer.Serialize(new
@@ -76,6 +97,7 @@ internal static class AgentHostVillageToolsQuestLoop
         return [
             new { scenario = "village-tools-postcondition-requires-exact-visible-tool-consumption-and-reward-delta", passed = true },
             new { scenario = "village-tools-host-routes-classified-goal-through-native-observe-decide-act-loop", decisions = ReadInt(result, "decisions", 0), actions = client.Actions.ToArray(), clockActions = client.ClockActionCount, passed = true },
+            new { scenario = "village-tools-host-recovers-from-bounded-invalid-actions-in-open-native-dialogue", decisions = recoveryProvider.Calls, rejectedDecisions = recoveryFeedback.Count, nativeActions = recoveryClient.Actions.ToArray(), passed = true },
             new { scenario = "village-tools-host-resolves-bandit-interruption-through-native-safe-passage-without-fight-or-clock-actions", decisions = ReadInt(passageResult, "decisions", 0), actions = passageClient.Actions.ToArray(), encounterCleared = !passageClient.FinalEncounterActive, passed = true }
         ];
     }
@@ -211,17 +233,20 @@ internal static class AgentHostVillageToolsQuestLoop
                         ["completionTokens"] = providerResult.CompletionTokens
                     });
                 }
-                catch (AgentHostException exception) when (IsRecoverableProviderError(exception.Code) && rejected < 2)
+                catch (AgentHostException exception) when (IsRecoverableProviderError(exception.Code) && rejected < 3)
                 {
                     decisions++;
                     rejected++;
+                    var conversationOpen = currentNative?["state"]?["context"]?["conversation"] is JsonObject;
                     feedback = new JsonObject
                     {
                         ["kind"] = "decision-rejected-before-native",
                         ["code"] = exception.Code,
                         ["message"] = exception.Message,
                         ["nativeActionSent"] = false,
-                        ["requiredNextStep"] = "Select exactly one action or control from the latest Native catalog and use the listed argument names and IDs."
+                        ["requiredNextStep"] = exception.Code == "provider-action-unavailable" && conversationOpen
+                            ? "A Native conversation is open. Use dialogueSelect with OptionId exactly matching one listed clickable conversation option; do not return an option ID as the action or call talkToSettlementHero/leave_settlement."
+                            : "Select exactly one action or control from the latest Native catalog and use the listed argument names and IDs."
                     };
                     trace.Add(new JsonObject { ["iteration"] = index, ["stage"] = "decision-rejected-before-native", ["feedback"] = feedback.DeepClone() });
                     continue;
@@ -664,6 +689,38 @@ internal static class AgentHostVillageToolsQuestLoop
             var actions = request.GetProperty("allowedActions").EnumerateArray();
             if (!actions.Any(item => ReadString(JsonNode.Parse(item.GetRawText()) as JsonObject, "action") == actionName))
                 throw new AgentHostException("village-tools-loop-self-test-provider-order-invalid", "The test model selected an action missing from the live policy catalog.");
+            return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 10, 5, "stop", decision));
+        }
+    }
+
+    private sealed class FakeVillageQuestRecoverableDecisionProvider : IAgentHostDecisionProvider
+    {
+        public string ModelId => "selftest-dialogue-recovery";
+        public string ConfigurationSource => "selftest";
+        internal int Calls { get; private set; }
+        internal List<string> FeedbackRequiredNextSteps { get; } = [];
+        public void Dispose() { }
+        public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
+        {
+            Calls++;
+            if (request.TryGetProperty("decisionFeedback", out var feedback) && feedback.ValueKind == JsonValueKind.Object &&
+                feedback.TryGetProperty("requiredNextStep", out var required) && required.ValueKind == JsonValueKind.String)
+                FeedbackRequiredNextSteps.Add(required.GetString() ?? string.Empty);
+            if (Calls is >= 2 and <= 4)
+                throw new AgentHostException("provider-action-unavailable", "Action 'leave_settlement' is not in the current Native action catalog [dialogueSelect].");
+
+            var decision = Calls switch
+            {
+                1 => new JsonObject { ["action"] = "talkToSettlementHero", ["arguments"] = new JsonObject { ["HeroId"] = "hero-tools" }, ["rationale"] = "Talk to the visible issue giver." },
+                5 => new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "issue_64_quest_accept" }, ["rationale"] = "Select the current clickable option." },
+                _ => new JsonObject { ["action"] = "questDetails", ["arguments"] = new JsonObject { ["QuestId"] = "issue-1" }, ["rationale"] = "Read the current Native journal." }
+            };
+            var action = ReadString(decision, "action");
+            if (!request.GetProperty("allowedActions").EnumerateArray().Any(item =>
+                    ReadString(JsonNode.Parse(item.GetRawText()) as JsonObject, "action") == action))
+                throw new AgentHostException("village-tools-loop-self-test-provider-order-invalid", "The recovery test selected an action absent from the current catalog.");
             return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 10, 5, "stop", decision));
         }
     }
