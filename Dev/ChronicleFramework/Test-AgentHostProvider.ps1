@@ -35,10 +35,26 @@ $model = [string]$freeLlmApiProfile.RequestedModelId
 $protocol = 'openai-compatible'
 
 $decisionRequest = [ordered]@{
-    goal = 'This is a provider smoke test only. The exact allowed decision is to stop and report that structured output is working.'
-    observation = [ordered]@{ scope = 'provider-smoke'; state = [ordered]@{ gameState = 'MapState'; worldMutationAllowed = $false } }
-    allowedActions = @()
-    allowedControls = @('done')
+    goal = 'Synthetic provider-contract probe only: choose the single listed Native action and return its exact allowed argument. No game command will be executed.'
+    observation = [ordered]@{
+        scope = 'provider-smoke-synthetic-visible-village-contact'
+        state = [ordered]@{
+            gameState = 'MapState'
+            context = [ordered]@{ menuId = 'village' }
+            worldMutationAllowed = $false
+            settlementOverlayCharacters = @([ordered]@{
+                heroId = 'CharacterObject_ProviderSmoke'
+                name = 'Synthetic Notable'
+                questMarkers = @([ordered]@{ type = 'AvailableIssue'; title = 'Needs tools'; hint = 'Synthetic provider probe only.' })
+            })
+        }
+    }
+    allowedActions = @([ordered]@{
+        action = 'talkToSettlementHero'
+        arguments = @('HeroId')
+        argumentValues = [ordered]@{ HeroId = @('CharacterObject_ProviderSmoke') }
+    })
+    allowedControls = @()
 }
 $startInfo = [Diagnostics.ProcessStartInfo]::new()
 $startInfo.FileName = (Get-Command dotnet -ErrorAction Stop).Source
@@ -66,9 +82,10 @@ $stderr = $stderrTask.GetAwaiter().GetResult()
 if ($process.ExitCode -ne 0) { throw "Local provider returned an error (exit=$($process.ExitCode)); response text is omitted. $stderr" }
 try { $result = $stdout | ConvertFrom-Json }
 catch { throw 'Local provider Host returned invalid structured JSON; raw response is omitted.' }
-if ($result.status -ne 'completed' -or $result.decision.done -ne $true -or
-    [string]::IsNullOrWhiteSpace([string]$result.decision.reason)) {
-    throw 'FreeLLMAPI-routed model did not return the expected bounded stop decision.'
+if ($result.status -ne 'completed' -or $result.decision.action -cne 'talkToSettlementHero' -or
+    $result.decision.arguments.HeroId -cne 'CharacterObject_ProviderSmoke' -or
+    [string]::IsNullOrWhiteSpace([string]$result.decision.rationale)) {
+    throw 'FreeLLMAPI-routed model did not select the single synthetic Native action and exact allowed target.'
 }
 
 $summary = [ordered]@{
@@ -80,8 +97,10 @@ $summary = [ordered]@{
     AvailableModelCatalogSha256 = $freeLlmApiProfile.AvailableModelCatalogSha256
     RoutedVia = [string]$result.routedVia
     ResultStatus = [string]$result.status
-    DecisionType = 'done'
-    ReasonWordCount = ([string]$result.decision.reason -split '\s+' | Where-Object { $_ }).Count
+    DecisionType = 'single-listed-native-action'
+    DecisionAction = [string]$result.decision.action
+    ExactListedArgument = ($result.decision.arguments.HeroId -ceq 'CharacterObject_ProviderSmoke')
+    ReasonWordCount = ([string]$result.decision.rationale -split '\s+' | Where-Object { $_ }).Count
     PromptTokens = $result.promptTokens
     CompletionTokens = $result.completionTokens
     NativeCommands = 0
