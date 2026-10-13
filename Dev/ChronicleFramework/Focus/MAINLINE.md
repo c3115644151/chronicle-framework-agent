@@ -77,6 +77,8 @@ FreeLLMAPI模型请求恢复边界（2026-10-14）：若网关以HTTP 502及回�
 
 W7-K Quest交谈策略修正（2026-10-14）：真实模型回归显示，Quest接取后对话会在玩家离开前继续出现多个交谈节点；若任务仍欠工具，Host现在只允许当前Native对话中的离开选项，聚落菜单不再开放重复`talkToSettlementHero`，引导Agent转向Town市场；只有Journal显示数量满足且已采集交付前Inventory基线后，才重新开放Quest给予者对话。此为Chronicle动作目录策略，不改原版对话/任务机制；动作目录/拒绝非法选项由策略自测覆盖，真实模型运行仍待复验。
 
+W7-K真实模型运行与接口故障（`TestResults/20261014-033349`）：模型实际接取“卡利奥克需要工具”，从玩家可见城镇市场购入1单位工具（扣款866第纳尔，持有金从912降至46），Journal随后确认任务要求1/1。任务尚未交付，Host在读取Native `heroEquipmentOptions` 响应后因`mainHeroId`重复字段触发`ArgumentException`并终止；5fps原生窗口录像完整覆盖1400秒，失败片段及末帧保留用于诊断。已从`AgentInventoryStateAdapter.BuildHeroEquipmentOptionsJson`删除重复写入；`AgentHostPackage`和`Docs`阶段通过（`20261014-040706`、`20261014-040742`）。这是已修复的接口根因，不是任务成功证据；尚需下一轮真实模型从持有工具继续返回村庄、完成交付，并核实奖励与最终库存变化。
+
 单机当前玩家客户端以及“游戏内Native Mod身体 + 游戏外本地Agent Host模型循环”已有3/3可重复的技术原型；设置注册、Native-PID/会话绑定及游戏内正常启停另有上述运行证据，不需要第二游戏账号。可重建的首装zip及隔离游戏根Smoke已有证据；第三方Mod管理器实际安装、升级/回滚/卸载由发行后续工作及Epic验收处理。现有证据没有覆盖完整Campaign或跨3D场景持续游玩。多人客户端/共享Campaign由W6另行研究，首发单机证据不能替代多人验收。
 
 ### 多人独立客户端候选：共享战役 Mod 的实际边界

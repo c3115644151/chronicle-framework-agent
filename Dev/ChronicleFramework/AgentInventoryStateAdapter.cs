@@ -113,7 +113,6 @@ internal static class ChronicleInventoryStateAdapter
         ChroniclePartyUpgradeAdapter.Property(json, "inventoryMode", inventoryState.InventoryMode.ToString());
         json.Append(",\"timeControlMode\":\"").Append(ChroniclePartyUpgradeAdapter.Escape(Campaign.Current.TimeControlMode.ToString())).Append('"');
         json.Append(",\"campaignDay\":").Append(CampaignTime.Now.ToDays.ToString("F6", System.Globalization.CultureInfo.InvariantCulture));
-        json.Append(",\"mainHeroId\":\"").Append(ChroniclePartyUpgradeAdapter.Escape(Hero.MainHero.StringId)).Append('"');
         json.Append(",\"isMainHeroSelected\":").Append(ChroniclePartyUpgradeAdapter.Bool(string.Equals(viewModel.CurrentCharacterName, CharacterObject.PlayerCharacter.Name.ToString(), StringComparison.Ordinal)));
         json.Append(",\"isDoneDisabled\":").Append(ChroniclePartyUpgradeAdapter.Bool(viewModel.IsDoneDisabled));
         json.Append(",\"playerItemCount\":").Append(inventoryState.InventoryLogic.GetElementCountOnSide(InventoryLogic.InventorySide.PlayerInventory));
