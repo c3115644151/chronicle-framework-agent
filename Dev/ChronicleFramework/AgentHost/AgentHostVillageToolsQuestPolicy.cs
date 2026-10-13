@@ -19,10 +19,18 @@ internal static class AgentHostVillageToolsQuestPolicy
                 return BuildBanditSafePassageCatalog(state, context, conversation, previousReceipt, safePassageBalanceReceipt, safePassageContinueUsed);
             var catalog = new JsonArray();
             AddQuestDetailsAction(state, catalog, questDetailsObserved);
-            var options = conversation["options"] as JsonArray ?? new JsonArray();
-            if (options.OfType<JsonObject>().Any(option => ReadBoolean(option, "clickable")))
-                catalog.Add(new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonArray("OptionId") });
-            else
+            var clickableOptions = GetAllowedDialogueOptions(state, conversation, previousReceipt, questDetailsReceipt);
+            if (clickableOptions.Count > 0)
+            {
+                var optionIds = new JsonArray(clickableOptions.Select(option => (JsonNode?)JsonValue.Create(ReadString(option, "id"))).ToArray());
+                catalog.Add(new JsonObject
+                {
+                    ["action"] = "dialogueSelect",
+                    ["arguments"] = new JsonArray("OptionId"),
+                    ["argumentValues"] = new JsonObject { ["OptionId"] = optionIds }
+                });
+            }
+            else if (!HasClickableConversationOptions(conversation))
                 catalog.Add(new JsonObject { ["action"] = "dialogueContinue", ["arguments"] = new JsonArray() });
             return catalog;
         }
@@ -58,7 +66,7 @@ internal static class AgentHostVillageToolsQuestPolicy
         if (!string.IsNullOrWhiteSpace(menuId))
         {
             var markedGivers = GetAllowedToolsQuestGiverIds(state, previousReceipt, questDetailsReceipt);
-            if (markedGivers.Count > 0)
+            if (markedGivers.Count > 0 && (!hasToolsQuest || IsToolsTaskSatisfied(questDetailsReceipt ?? previousReceipt)))
             {
                 catalogWithQuestDetails.Add(new JsonObject { ["action"] = "talkToSettlementHero", ["arguments"] = new JsonArray("HeroId") });
                 return catalogWithQuestDetails;
@@ -241,7 +249,8 @@ internal static class AgentHostVillageToolsQuestPolicy
                 ReadString(context, "gameState") == "MapState" && !string.IsNullOrWhiteSpace(menuId):
             {
                 var heroId = ReadString(arguments, "HeroId");
-                if (GetAllowedToolsQuestGiverIds(state, previousReceipt, questDetailsReceipt).Contains(heroId, StringComparer.Ordinal))
+                var canContactGiver = !hasToolsQuest || IsToolsTaskSatisfied(questDetailsReceipt ?? previousReceipt);
+                if (canContactGiver && GetAllowedToolsQuestGiverIds(state, previousReceipt, questDetailsReceipt).Contains(heroId, StringComparer.Ordinal))
                 {
                     nativeArguments = new JsonObject { ["heroId"] = heroId };
                     rejection = string.Empty;
@@ -268,8 +277,8 @@ internal static class AgentHostVillageToolsQuestPolicy
             case "dialogueSelect" when arguments.Count == 1 && conversation is not null && menuId != "encounter_meeting":
             {
                 var optionId = ReadString(arguments, "OptionId");
-                var option = (conversation["options"] as JsonArray)?.OfType<JsonObject>()
-                    .FirstOrDefault(item => ReadString(item, "id") == optionId && IsTrue(item, "clickable"));
+                var option = GetAllowedDialogueOptions(state, conversation, previousReceipt, questDetailsReceipt)
+                    .FirstOrDefault(item => ReadString(item, "id") == optionId);
                 if (option is not null)
                 {
                     nativeArguments = new JsonObject { ["optionId"] = optionId };
@@ -280,7 +289,7 @@ internal static class AgentHostVillageToolsQuestPolicy
             }
 
             case "dialogueContinue" when arguments.Count == 0 && conversation is not null && menuId != "encounter_meeting" &&
-                (conversation["options"] as JsonArray)?.Count == 0:
+                !HasClickableConversationOptions(conversation):
                 nativeArguments = new JsonObject();
                 rejection = string.Empty;
                 return true;
@@ -449,6 +458,44 @@ internal static class AgentHostVillageToolsQuestPolicy
                 ["journalStages"] = new JsonArray(new JsonObject { ["hasTask"] = true, ["taskName"] = "tools", ["currentProgress"] = 0, ["targetProgress"] = 1 })
             }
         };
+        var activeQuestGiverOverlay = new JsonArray(new JsonObject
+        {
+            ["heroId"] = "hero-tools",
+            ["questMarkers"] = new JsonArray(new JsonObject { ["type"] = "ActiveIssue", ["title"] = "Needs Tools" })
+        });
+        var activeQuestDetails = toolsTaskReceipt.DeepClone().AsObject();
+        activeQuestDetails["data"]!["questGiver"] = new JsonObject { ["id"] = "hero-tools" };
+        var activeQuestConversation = State("MapState", "village", "village-1", overlay: activeQuestGiverOverlay,
+            conversation: new JsonObject
+            {
+                ["options"] = new JsonArray(
+                    new JsonObject { ["id"] = "hero_task_given", ["text"] = "About the task", ["clickable"] = true },
+                    new JsonObject { ["id"] = "player_is_leaving_neutral_or_friendly", ["text"] = "I must leave now", ["clickable"] = true })
+            },
+            quests: new JsonArray(new JsonObject { ["id"] = "quest-tools", ["title"] = "Village Needs Tools" }));
+        var activeQuestConversationCatalog = BuildActionCatalog(activeQuestConversation, null, questDetailsObserved: true, questDetailsReceipt: activeQuestDetails);
+        var activeQuestConversationSelect = activeQuestConversationCatalog.OfType<JsonObject>().FirstOrDefault(item => ReadString(item, "action") == "dialogueSelect");
+        var allowedActiveQuestDialogueIds = (activeQuestConversationSelect?["argumentValues"]?["OptionId"] as JsonArray)?.Select(item => item?.GetValue<string>()).ToArray() ?? Array.Empty<string?>();
+        if (activeQuestConversationSelect is null || !allowedActiveQuestDialogueIds.SequenceEqual(new string?[] { "player_is_leaving_neutral_or_friendly" }, StringComparer.Ordinal) ||
+            TryResolveAction(activeQuestConversation, null, new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "hero_task_given" } }, out _, out _, out _, questDetailsReceipt: activeQuestDetails) ||
+            !TryResolveAction(activeQuestConversation, null, new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "player_is_leaving_neutral_or_friendly" } }, out _, out _, out _, questDetailsReceipt: activeQuestDetails))
+            throw new AgentHostException("village-tools-policy-self-test-active-quest-dialogue-exit-gate-failed", "Once the tools Quest is active but the item count is still short, the current conversation must allow only the native leave option, not more task chatter.");
+        results.Add(new { scenario = "village-tools-active-quest-dialogue-allows-leave-only-before-tools-obtained", passed = true });
+
+        var activeQuestVillageMenu = State("MapState", "village", "village-1", overlay: activeQuestGiverOverlay,
+            quests: new JsonArray(new JsonObject { ["id"] = "quest-tools", ["title"] = "Village Needs Tools" }));
+        var activeQuestVillageCatalog = BuildActionCatalog(activeQuestVillageMenu, null, questDetailsObserved: true, questDetailsReceipt: activeQuestDetails);
+        var activeQuestMenuSelect = activeQuestVillageCatalog.OfType<JsonObject>().FirstOrDefault(item => ReadString(item, "action") == "menuSelect");
+        if (activeQuestVillageCatalog.OfType<JsonObject>().Any(item => ReadString(item, "action") == "talkToSettlementHero") ||
+            (activeQuestMenuSelect?["argumentValues"]?["OptionId"] as JsonArray)?.Any(item => item?.GetValue<string>() == "leave") != true)
+            throw new AgentHostException("village-tools-policy-self-test-active-quest-village-exit-gate-failed", "With an active unsatisfied Quest at its giver's Village menu, the Host must expose leaving for market travel instead of reopening dialogue.");
+        var satisfiedTaskReceipt = activeQuestDetails.DeepClone().AsObject();
+        satisfiedTaskReceipt["data"]!["journalStages"]![0]!["currentProgress"] = 1;
+        var deliveryVillageCatalog = BuildActionCatalog(activeQuestVillageMenu, null, preDeliveryInventoryCaptured: true, questDetailsObserved: true, questDetailsReceipt: satisfiedTaskReceipt);
+        if (!deliveryVillageCatalog.OfType<JsonObject>().Any(item => ReadString(item, "action") == "talkToSettlementHero") ||
+            !TryResolveAction(activeQuestVillageMenu, null, new JsonObject { ["action"] = "talkToSettlementHero", ["arguments"] = new JsonObject { ["HeroId"] = "hero-tools" } }, out _, out _, out _, preDeliveryInventoryCaptured: true, questDetailsReceipt: satisfiedTaskReceipt))
+            throw new AgentHostException("village-tools-policy-self-test-delivery-giver-gate-failed", "After the requested tools are present and a pre-delivery inventory baseline is captured, the Native giver conversation must reopen for turn-in.");
+        results.Add(new { scenario = "village-tools-active-quest-giver-reopens-only-after-tools-and-inventory-baseline", passed = true });
         var tradeOptionsReceipt = new JsonObject
         {
             ["action"] = "tradeOptions", ["status"] = "completed", ["data"] = new JsonObject
@@ -960,6 +1007,21 @@ internal static class AgentHostVillageToolsQuestPolicy
         return current >= 0 && target > 0 && current >= target &&
             (taskName.Contains("tool", StringComparison.OrdinalIgnoreCase) || taskName.Contains("工具", StringComparison.Ordinal));
     }
+
+    private static IReadOnlyList<JsonObject> GetAllowedDialogueOptions(JsonObject state, JsonObject conversation, JsonObject? previousReceipt, JsonObject? questDetailsReceipt)
+    {
+        var options = (conversation["options"] as JsonArray)?.OfType<JsonObject>()
+            .Where(option => IsTrue(option, "clickable"))
+            .ToArray() ?? Array.Empty<JsonObject>();
+        if (!HasActiveToolsQuest(state) || IsToolsTaskSatisfied(questDetailsReceipt ?? previousReceipt)) return options;
+        return options.Where(IsConversationLeaveOption).ToArray();
+    }
+
+    private static bool HasClickableConversationOptions(JsonObject conversation) =>
+        (conversation["options"] as JsonArray)?.OfType<JsonObject>().Any(option => IsTrue(option, "clickable")) == true;
+
+    private static bool IsConversationLeaveOption(JsonObject option) =>
+        ReadString(option, "id")?.StartsWith("player_is_leaving_", StringComparison.Ordinal) == true;
 
     private static int? GetToolsTaskRemainingCount(JsonObject? receipt)
     {
