@@ -366,7 +366,7 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $sourceModuleManifest -notmatch 'DependedModule Id="SandBox" DependentVersion="[^"]+" Optional="false"' -or
     $providerSettingsSource -notmatch 'AttributeGlobalSettings<ChronicleAgentProviderSettings>' -or $providerSettingsSource -notmatch 'FormatType => "json"' -or
     $providerSettingsSource -notmatch 'OllamaBaseUrl' -or $providerSettingsSource -notmatch 'ModelId' -or
-    $providerSettingsSource -notmatch '127.0.0.1:31415/v1' -or $providerSettingsSource -notmatch 'auto:default' -or
+    $providerSettingsSource -notmatch '127.0.0.1:31415/v1' -or $providerSettingsSource -notmatch 'auto' -or
     $providerSettingsSource -notmatch 'FreeLLMAPI' -or $providerSettingsSource -notmatch 'FREELLMAPI_API_KEY' -or
     $providerSettingsSource -notmatch 'provider-freellmapi-endpoint-required' -or
     $providerSettingsSource -notmatch 'SettingPropertyButton' -or $providerSettingsSource -notmatch 'AgentProviderConfigurationValidator\.GetErrorCode' -or
@@ -387,6 +387,7 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerProfileTestSource -notmatch 'provider-profile-reads-without-migrating-user-file' -or
     $providerProfileTestSource -notmatch 'provider-profile-error-path-mutated-file' -or
     $providerProfileTestSource -notmatch 'freellmapi-bearer-auth-available-model-preflight-and-routed-model-evidence' -or
+    $providerProfileTestSource -notmatch 'freellmapi-profile-uses-bounded-512-token-live-model-budget' -or
     $providerProfileTestSource -notmatch 'freellmapi-missing-key-fails-before-network-request' -or
     $providerHostSource -notmatch 'FREELLMAPI_API_KEY' -or $providerHostSource -notmatch 'CHRONICLE_LLM_API_KEY' -or
     $providerHostSource -notmatch 'X-Routed-Via' -or

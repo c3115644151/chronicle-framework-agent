@@ -627,7 +627,7 @@ foreach ($stage in $requestedStages) {
             Invoke-Stage -Name 'AgentHostSupplyEvaluation' -Action {
                 $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $harnessRoot 'Test-AgentHostSupplyEvaluation.ps1') -Runs $AgentHostSupplyRuns 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
-                if ($testExitCode -ne 0) { throw "Real local-model Agent Host supply evaluation failed with exit code $testExitCode.`n$testOutput" }
+                if ($testExitCode -ne 0) { throw "FreeLLMAPI-routed real-model Agent Host supply evaluation failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
             }
         }
@@ -635,7 +635,7 @@ foreach ($stage in $requestedStages) {
             Invoke-Stage -Name 'AgentHostCampaignLoopEvaluation' -Action {
                 $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostCampaignLoopEvaluationScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
-                if ($testExitCode -ne 0) { throw "Real local-model Agent Host Campaign loop evaluation failed with exit code $testExitCode.`n$testOutput" }
+                if ($testExitCode -ne 0) { throw "FreeLLMAPI-routed real-model Agent Host Campaign loop evaluation failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
             }
         }
@@ -643,7 +643,7 @@ foreach ($stage in $requestedStages) {
             Invoke-Stage -Name 'AgentHostVillageToolsQuestEvaluation' -Action {
                 $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostCampaignLoopEvaluationScript -VillageToolsQuest -FrameRate 5 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
-                if ($testExitCode -ne 0) { throw "Real local-model Agent Host VillageNeedsTools Quest evaluation failed with exit code $testExitCode.`n$testOutput" }
+                if ($testExitCode -ne 0) { throw "FreeLLMAPI-routed real-model Agent Host VillageNeedsTools Quest evaluation failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
             }
         }

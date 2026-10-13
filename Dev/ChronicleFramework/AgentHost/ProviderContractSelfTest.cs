@@ -62,10 +62,10 @@ internal static class ProviderContractSelfTest
             throw new AgentHostException("provider-profile-path-self-test-failed", "The Host global profile path does not match the MCM Global folder/id convention.");
         results.Add(new { scenario = "host-default-path-matches-mcm-global-folder-and-id", passed = true });
 
-        using (var validProfile = JsonDocument.Parse("{\"OllamaBaseUrl\":\"http://127.0.0.1:31415/v1\",\"ModelId\":\"auto:default\",\"schemaVersion\":0,\"LegacySetting\":true,\"CampaignGoal\":\"older-MCM-key\"}"))
+        using (var validProfile = JsonDocument.Parse("{\"OllamaBaseUrl\":\"http://127.0.0.1:31415/v1\",\"ModelId\":\"auto\",\"schemaVersion\":0,\"LegacySetting\":true,\"CampaignGoal\":\"older-MCM-key\"}"))
         {
             var profile = AgentProviderProfile.Parse(validProfile.RootElement);
-            if (profile.BaseUrl != "http://127.0.0.1:31415/v1" || profile.ModelId != "auto:default")
+            if (profile.BaseUrl != "http://127.0.0.1:31415/v1" || profile.ModelId != "auto")
                 throw new AgentHostException("provider-profile-self-test-normalization-failed", "The global MCM profile did not load the FreeLLMAPI gateway and default route identifier.");
             if (AgentProviderProfile.GetSettingsValidationError(profile.BaseUrl, profile.ModelId) is not null)
                 throw new AgentHostException("provider-profile-self-test-settings-check-failed", "The MCM configuration check rejected valid local model settings.");
@@ -94,6 +94,23 @@ internal static class ProviderContractSelfTest
             if (currentProvider.ModelId != "current-page-model" || currentProvider.ConfigurationSource != "mcm-start-request")
                 throw new AgentHostException("mcm-launch-snapshot-self-test-failed", "Host did not use the model snapshot supplied by the Start button.");
             results.Add(new { scenario = "mcm-start-request-uses-current-page-model-without-saved-profile", passed = true });
+        }
+        var priorMaxTokens = Environment.GetEnvironmentVariable("CHRONICLE_LLM_MAX_TOKENS");
+        var priorTimeoutSeconds = Environment.GetEnvironmentVariable("CHRONICLE_LLM_TIMEOUT_SECONDS");
+        try
+        {
+            Environment.SetEnvironmentVariable("CHRONICLE_LLM_MAX_TOKENS", "512");
+            Environment.SetEnvironmentVariable("CHRONICLE_LLM_TIMEOUT_SECONDS", "180");
+            using var launchWithBudget = JsonDocument.Parse("{\"providerConfiguration\":{\"OllamaBaseUrl\":\"http://127.0.0.1:31415/v1\",\"ModelId\":\"auto\"}}");
+            using var budgetProvider = OllamaNativeProvider.FromCampaignRequest(launchWithBudget.RootElement);
+            if (budgetProvider.ModelId != "auto" || budgetProvider.MaxOutputTokens != 512)
+                throw new AgentHostException("freellmapi-profile-budget-self-test-failed", "Host did not apply the bounded FreeLLMAPI output budget from the current process configuration.");
+            results.Add(new { scenario = "freellmapi-profile-uses-bounded-512-token-live-model-budget", passed = true });
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CHRONICLE_LLM_MAX_TOKENS", priorMaxTokens);
+            Environment.SetEnvironmentVariable("CHRONICLE_LLM_TIMEOUT_SECONDS", priorTimeoutSeconds);
         }
         using (var invalidLaunch = JsonDocument.Parse("{\"providerConfiguration\":{\"OllamaBaseUrl\":\"https://example.com/v1\",\"ModelId\":\"test\"}}"))
         {
@@ -127,12 +144,12 @@ internal static class ProviderContractSelfTest
             results.Add(new { scenario = "local-provider-health-check-is-read-only-model-list", passed = true });
         }
 
-        var unauthenticatedFreeLlmApiHandler = new StubHandler((_, _) => Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"auto:default\"}]}")));
+        var unauthenticatedFreeLlmApiHandler = new StubHandler((_, _) => Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"auto\"}]}")));
         using (var unauthenticatedFreeLlmApiClient = new HttpClient(unauthenticatedFreeLlmApiHandler) { Timeout = settings.Timeout })
         using (var unauthenticatedFreeLlmApi = new OllamaNativeProvider(settings with
         {
             Endpoint = new Uri("http://127.0.0.1:31415/v1/chat/completions"),
-            Model = "auto:default",
+            Model = "auto",
             ApiKey = null
         }, unauthenticatedFreeLlmApiClient))
         {
@@ -150,11 +167,11 @@ internal static class ProviderContractSelfTest
         }
 
         var freeLlmApiEndpoint = new Uri("http://127.0.0.1:31415/v1/chat/completions");
-        var freeLlmApiSettings = settings with { Endpoint = freeLlmApiEndpoint, Model = "auto:default", ApiKey = "freellmapi-self-test-secret" };
+        var freeLlmApiSettings = settings with { Endpoint = freeLlmApiEndpoint, Model = "auto", ApiKey = "freellmapi-self-test-secret" };
         var freeLlmApiHandler = new StubHandler((request, _) =>
         {
             if (request.Method == HttpMethod.Get)
-                return Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"auto:default\"}]}"));
+                return Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"auto\"}]}"));
             var response = JsonResponse(BuildChatResponse(ValidDecision, "stop"));
             response.Headers.TryAddWithoutValidation("X-Routed-Via", "google/gemini-test-model");
             return Task.FromResult(response);

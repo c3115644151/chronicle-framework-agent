@@ -55,8 +55,8 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
             $modelsUri = [UriBuilder]::new([Uri]$providerBaseUrl)
             $modelsUri.Path = $modelsUri.Path.TrimEnd('/') + '/models'
             try { $models = Invoke-RestMethod -Uri $modelsUri.Uri -Method Get -TimeoutSec 5 }
-            catch { throw 'Local model service preflight failed before starting any Campaign fixture.' }
-            if ($providerModelId -notin @($models.data | ForEach-Object { [string]$_.id })) { throw 'The configured local model is not installed; no Campaign fixture was started.' }
+            catch { throw 'FreeLLMAPI model-catalog preflight failed before starting any Campaign fixture.' }
+            if ($providerModelId -notin @($models.data | ForEach-Object { [string]$_.id })) { throw 'The configured FreeLLMAPI route is not currently available; no Campaign fixture was started.' }
 
             $prepOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Test-AgentVillageToolsQuestFixturePreparation.ps1') -SourceSaveName 'AgentBridgeLifecycle' -MaxVillages 4 2>&1 | Out-String
             $prepExitCode = $LASTEXITCODE

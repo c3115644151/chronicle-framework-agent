@@ -10,7 +10,7 @@ namespace ChronicleFramework;
 internal sealed class ChronicleAgentProviderSettings : AttributeGlobalSettings<ChronicleAgentProviderSettings>
 {
     private string _ollamaBaseUrl = "http://127.0.0.1:31415/v1";
-    private string _modelId = "auto:default";
+    private string _modelId = "auto";
     private string _campaignGoal = "前往一个当前可见且安全的聚落。";
 
     public override string Id => "ChronicleAgentSettings";
@@ -32,7 +32,7 @@ internal sealed class ChronicleAgentProviderSettings : AttributeGlobalSettings<C
         }
     }
 
-    [SettingPropertyText("模型名称/路由链", Order = 1, RequireRestart = false, HintText = "填写 FreeLLMAPI 模型 ID 或路由链；auto:default 使用当前默认免费回退链。实际命中的服务商和模型写入测试收据。")]
+    [SettingPropertyText("模型名称/路由链", Order = 1, RequireRestart = false, HintText = "填写 FreeLLMAPI 模型 ID；auto 使用当前默认免费回退链。实际命中的服务商和模型写入测试收据。")]
     [SettingPropertyGroup("模型服务", GroupOrder = 0)]
     public string ModelId
     {

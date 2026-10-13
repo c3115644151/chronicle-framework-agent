@@ -16,6 +16,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     private readonly HttpClient _client;
     private readonly bool _ownsClient;
     internal string ModelId => _settings.Model;
+    internal int MaxOutputTokens => _settings.MaxOutputTokens;
     internal string ConfigurationSource { get; }
 
     string IAgentHostDecisionProvider.ModelId => ModelId;
@@ -115,8 +116,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             endpoint,
             profile.ModelId,
             NativeOllama: false,
-            Timeout: TimeSpan.FromSeconds(60),
-            MaxOutputTokens: 256,
+            Timeout: TimeSpan.FromSeconds(ReadIntegerEnvironment("CHRONICLE_LLM_TIMEOUT_SECONDS", 180, 5, 240)),
+            MaxOutputTokens: ReadIntegerEnvironment("CHRONICLE_LLM_MAX_TOKENS", 512, 64, 4096),
             Temperature: 0d,
             Thinking: null,
             ReasoningEffort: "none",
