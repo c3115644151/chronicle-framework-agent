@@ -11,7 +11,7 @@ internal static class AgentHostCampaignLoop
     internal static readonly HashSet<string> ApprovedActions = new(StringComparer.Ordinal)
     {
         "mapSettlementTargets", "move", "menuSelect", "talkToSettlementHero", "dialogueSelect", "dialogueContinue",
-        "questDetails", "tradeOptions", "trade", "tradeConfirm", "tradeCancel", "tradeCancelChanges", "inventoryOpen", "heroEquipmentOptions", "inventoryCancel"
+        "questDetails", "tradeOptions", "trade", "tradeConfirm", "tradeCancel", "tradeCancelChanges", "barterOptions", "barterAutoBalance", "barterOffer", "barterCancel", "inventoryOpen", "heroEquipmentOptions", "inventoryCancel"
     };
 
     internal static IReadOnlyList<object> RunContractSelfTests()
@@ -87,7 +87,7 @@ internal static class AgentHostCampaignLoop
 
     internal static async Task<IReadOnlyList<object>> RunTransportSelfTestsAsync()
     {
-        var requestJson = "{\"runId\":\"selftest-arrival\",\"goal\":\"Reach the observed safe settlement.\",\"parentProcessId\":321,\"maxDecisions\":8,\"maxElapsedSeconds\":10,\"allowedActionNames\":[\"mapSettlementTargets\",\"move\",\"menuSelect\",\"talkToSettlementHero\",\"dialogueSelect\",\"dialogueContinue\",\"questDetails\",\"tradeOptions\",\"trade\",\"tradeConfirm\",\"tradeCancel\",\"tradeCancelChanges\",\"inventoryOpen\",\"heroEquipmentOptions\",\"inventoryCancel\"]}";
+        var requestJson = "{\"runId\":\"selftest-arrival\",\"goal\":\"Reach the observed safe settlement.\",\"parentProcessId\":321,\"maxDecisions\":8,\"maxElapsedSeconds\":10,\"allowedActionNames\":[\"mapSettlementTargets\",\"move\",\"menuSelect\",\"talkToSettlementHero\",\"dialogueSelect\",\"dialogueContinue\",\"questDetails\",\"tradeOptions\",\"trade\",\"tradeConfirm\",\"tradeCancel\",\"tradeCancelChanges\",\"barterOptions\",\"barterAutoBalance\",\"barterOffer\",\"barterCancel\",\"inventoryOpen\",\"heroEquipmentOptions\",\"inventoryCancel\"]}";
         using var request = JsonDocument.Parse(requestJson);
         var results = new List<object>();
 

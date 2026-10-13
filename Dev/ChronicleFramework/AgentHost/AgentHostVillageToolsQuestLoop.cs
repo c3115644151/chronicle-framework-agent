@@ -54,9 +54,29 @@ internal static class AgentHostVillageToolsQuestLoop
             ReadBoolean(result, "questWasObservedActive") != true || client.Actions.Count != 3 || provider.Calls != 3 ||
             !client.Actions.SequenceEqual(new[] { "talkToSettlementHero", "dialogueSelect", "questDetails" }) || client.ClockActionCount != 0 || client.ProcessId != 321)
             throw new AgentHostException("village-tools-loop-self-test-observe-decide-act-failed", "Quest loop contract mismatch: status=" + ReadString(result, "status") + "; termination=" + ReadString(result["termination"] as JsonObject, "reason") + "; decisions=" + ReadInt(result, "decisions", -1) + "; actions=" + string.Join(",", client.Actions) + "; providerCalls=" + provider.Calls + "; clockActions=" + client.ClockActionCount + "; active=" + ReadBoolean(result, "questWasObservedActive") + ".");
+
+        var passageClient = new FakeSafePassageNativeClient();
+        var passageProvider = new FakeSafePassageDecisionProvider();
+        using var passageRequest = JsonDocument.Parse(JsonSerializer.Serialize(new
+        {
+            runId = "selftest-village-tools-safe-passage",
+            goal = "Complete the currently visible village tools quest.",
+            parentProcessId = 321,
+            maxDecisions = 4,
+            maxElapsedSeconds = 10,
+            allowedActionNames = AgentHostCampaignLoop.ApprovedActions.ToArray()
+        }));
+        var passageResult = await RunAsync(passageRequest.RootElement, passageClient, passageProvider, CancellationToken.None);
+        if (ReadString(passageResult, "status") != "failed" ||
+            ReadString(passageResult["termination"] as JsonObject, "reason") != "decision-budget-exhausted" ||
+            !passageClient.Actions.SequenceEqual(new[] { "dialogueSelect", "barterOptions", "barterAutoBalance", "barterOffer" }) ||
+            passageClient.Actions.Any(action => action is "advance" or "pause" or "resume" or "fastForward" or "battleFinish" or "battleRetreat") ||
+            passageProvider.Calls != 4 || passageClient.FinalEncounterActive)
+            throw new AgentHostException("village-tools-loop-self-test-safe-passage-transaction-failed", "Host did not complete the bounded Native non-fight Safe Passage action chain exactly once.");
         return [
             new { scenario = "village-tools-postcondition-requires-exact-visible-tool-consumption-and-reward-delta", passed = true },
-            new { scenario = "village-tools-host-routes-classified-goal-through-native-observe-decide-act-loop", decisions = ReadInt(result, "decisions", 0), actions = client.Actions.ToArray(), clockActions = client.ClockActionCount, passed = true }
+            new { scenario = "village-tools-host-routes-classified-goal-through-native-observe-decide-act-loop", decisions = ReadInt(result, "decisions", 0), actions = client.Actions.ToArray(), clockActions = client.ClockActionCount, passed = true },
+            new { scenario = "village-tools-host-resolves-bandit-interruption-through-native-safe-passage-without-fight-or-clock-actions", decisions = ReadInt(passageResult, "decisions", 0), actions = passageClient.Actions.ToArray(), encounterCleared = !passageClient.FinalEncounterActive, passed = true }
         ];
     }
 
@@ -606,6 +626,97 @@ internal static class AgentHostVillageToolsQuestLoop
             var actions = request.GetProperty("allowedActions").EnumerateArray();
             if (!actions.Any(item => ReadString(JsonNode.Parse(item.GetRawText()) as JsonObject, "action") == actionName))
                 throw new AgentHostException("village-tools-loop-self-test-provider-order-invalid", "The test model selected an action missing from the live policy catalog.");
+            return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 10, 5, "stop", decision));
+        }
+    }
+
+    private sealed class FakeSafePassageNativeClient : IAgentHostVillageToolsQuestNativeClient
+    {
+        internal readonly List<string> Actions = [];
+        internal int ProcessId => 321;
+        internal bool FinalEncounterActive => _phase < 4;
+        private int _phase;
+
+        public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken) => Task.FromResult(ParseState());
+        public Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken) =>
+            ExecuteVillageToolsQuestActionAsync(action, arguments, cancellationToken);
+
+        public Task<JsonDocument> ExecuteVillageToolsQuestActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+        {
+            Actions.Add(action);
+            JsonObject data = new();
+            switch (action)
+            {
+                case "dialogueSelect": _phase = 1; break;
+                case "barterOptions":
+                    _phase = 2;
+                    data = SafePassageOptions(isOfferDisabled: true, goldCost: 1, playerGold: 500);
+                    break;
+                case "barterAutoBalance":
+                    _phase = 3;
+                    data = new JsonObject { ["autoBalanced"] = true, ["updatedOptions"] = SafePassageOptions(isOfferDisabled: false, goldCost: 144, playerGold: 500) };
+                    break;
+                case "barterOffer": _phase = 4; break;
+                default: throw new AgentHostException("village-tools-safe-passage-self-test-unexpected-action", "Unexpected action in the Safe Passage Host scenario: " + action);
+            }
+            var response = new JsonObject
+            {
+                ["status"] = "completed", ["processId"] = ProcessId, ["action"] = action, ["data"] = data
+            };
+            return Task.FromResult(JsonDocument.Parse(response.ToJsonString()));
+        }
+
+        private JsonDocument ParseState()
+        {
+            var encounterActive = _phase < 4;
+            var options = _phase == 0
+                ? new JsonArray(
+                    new JsonObject { ["id"] = "bandit_start_defender_1", ["text"] = "Fight", ["clickable"] = true },
+                    new JsonObject { ["id"] = "bandit_start_defender_2", ["text"] = "Find a compromise", ["clickable"] = true })
+                : new JsonArray();
+            var state = new JsonObject
+            {
+                ["context"] = new JsonObject
+                {
+                    ["gameState"] = "MapState", ["menuId"] = encounterActive ? "encounter_meeting" : null,
+                    ["encounterActive"] = encounterActive, ["encounteredPartyId"] = encounterActive ? "looters_1" : null,
+                    ["conversation"] = encounterActive ? new JsonObject { ["options"] = options } : null
+                },
+                ["location"] = new JsonObject { ["currentSettlementId"] = null, ["targetSettlementId"] = null },
+                ["nearbyParties"] = encounterActive ? new JsonArray(new JsonObject { ["id"] = "looters_1", ["name"] = "Looter", ["type"] = "bandit", ["hostile"] = true }) : new JsonArray(),
+                ["quests"] = new JsonArray(new JsonObject { ["id"] = "quest-tools", ["title"] = "Village Needs Tools" }),
+                ["availableMenuOptions"] = new JsonArray()
+            };
+            return JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["processId"] = ProcessId, ["campaignDay"] = 5.0, ["timeControlMode"] = "Stop", ["state"] = state }.ToJsonString());
+        }
+
+        private static JsonObject SafePassageOptions(bool isOfferDisabled, int goldCost, int playerGold) => new()
+        {
+            ["context"] = "contextual:safe_passage_barterable", ["contextInitializer"] = "InitializeSafePassageBarterContext",
+            ["gameState"] = "MapState", ["isOfferDisabled"] = isOfferDisabled, ["playerGold"] = playerGold,
+            ["candidates"] = new JsonArray(
+                new JsonObject { ["nativeType"] = "safe_passage_barterable", ["list"] = "leftOffer", ["originalPartyId"] = "looters_1", ["isOffered"] = true },
+                new JsonObject { ["nativeType"] = "gold_barterable", ["list"] = "rightGold", ["currentAmount"] = goldCost, ["isOffered"] = goldCost > 1 })
+        };
+    }
+
+    private sealed class FakeSafePassageDecisionProvider : IAgentHostDecisionProvider
+    {
+        internal int Calls { get; private set; }
+        public string ModelId => "selftest-safe-passage";
+        public string ConfigurationSource => "selftest";
+        public void Dispose() { }
+        public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
+        {
+            Calls++;
+            var allowed = request.GetProperty("allowedActions").EnumerateArray().FirstOrDefault();
+            var action = allowed.ValueKind == JsonValueKind.Object ? allowed.GetProperty("action").GetString() : null;
+            if (string.IsNullOrWhiteSpace(action)) throw new AgentHostException("village-tools-safe-passage-self-test-empty-catalog", "The fake provider received no Native actions.");
+            var arguments = new JsonObject();
+            if (action == "dialogueSelect") arguments["OptionId"] = "bandit_start_defender_2";
+            var decision = new JsonObject { ["action"] = action, ["arguments"] = arguments, ["rationale"] = "Use the current safe Native option." };
             return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 10, 5, "stop", decision));
         }
     }

@@ -16,6 +16,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
     {
         "mapSettlementTargets", "move", "menuSelect", "talkToSettlementHero", "dialogueSelect",
         "dialogueContinue", "questDetails", "tradeOptions", "trade", "tradeConfirm", "tradeCancel", "tradeCancelChanges",
+        "barterOptions", "barterAutoBalance", "barterOffer", "barterCancel",
         "inventoryOpen", "heroEquipmentOptions", "inventoryCancel"
     };
 
@@ -103,6 +104,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
         var valid = action switch
         {
             "mapSettlementTargets" or "dialogueContinue" or "tradeOptions" or "tradeConfirm" or "tradeCancel" or "tradeCancelChanges" or
+                "barterOptions" or "barterAutoBalance" or "barterOffer" or "barterCancel" or
                 "inventoryOpen" or "heroEquipmentOptions" or "inventoryCancel" => arguments.Count == 0,
             "move" => HasOnlyKeys(arguments, "settlementId") && HasText(arguments, "settlementId"),
             "menuSelect" => HasOnlyKeys(arguments, "menuId", "optionId") && HasText(arguments, "menuId") && HasText(arguments, "optionId"),
@@ -136,6 +138,10 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             ("tradeConfirm", "{}"),
             ("tradeCancel", "{}"),
             ("tradeCancelChanges", "{}"),
+            ("barterOptions", "{}"),
+            ("barterAutoBalance", "{}"),
+            ("barterOffer", "{}"),
+            ("barterCancel", "{}"),
             ("inventoryOpen", "{}"),
             ("heroEquipmentOptions", "{}"),
             ("inventoryCancel", "{}")
