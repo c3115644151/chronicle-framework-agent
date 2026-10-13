@@ -111,55 +111,85 @@ function Invoke-ChronicleShaderCacheDialogAcknowledgement {
         [Parameter(Mandatory)][IntPtr]$WindowHandle
     )
 
+    $maxAcknowledgements = 3
+    $acknowledgementMethods = [System.Collections.Generic.List[string]]::new()
+    $lastButtonName = $null
     $snapshot = Get-ChronicleWindowAutomationSnapshot -ProcessId $ProcessId -WindowHandle $WindowHandle
-    if (-not (Test-ChronicleShaderCacheDialogCandidate -WindowTitle $snapshot.WindowTitle -DialogText $snapshot.DialogText -ActionNames $snapshot.ActionNames)) {
-        return [pscustomobject]@{
-            Handled = $false
-            ProcessId = $ProcessId
-            WindowTitle = $snapshot.WindowTitle
-            DialogText = $snapshot.DialogText
-            ActionNames = $snapshot.ActionNames
-            Controls = $snapshot.Controls
-            Reason = 'Dialog content or button set did not match the narrowly approved shader-cache prompt.'
+    $affirmativeNames = @('OK', 'Yes', 'Continue', 'Proceed', 'Confirm', 'Regenerate', 'Rebuild', ([string][char]0x786E + [char]0x5B9A))
+    $closed = $false
+    for ($attempt = 1; $attempt -le $maxAcknowledgements; $attempt++) {
+        $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+        if (-not $process) { $closed = $true; break }
+        $process.Refresh()
+        if ($process.MainWindowTitle -cne 'Mod change detected') { $closed = $true; break }
+        $currentHandle = [IntPtr]$process.MainWindowHandle
+        if ($currentHandle -eq [IntPtr]::Zero) { break }
+        $snapshot = Get-ChronicleWindowAutomationSnapshot -ProcessId $ProcessId -WindowHandle $currentHandle
+        if (-not (Test-ChronicleShaderCacheDialogCandidate -WindowTitle $snapshot.WindowTitle -DialogText $snapshot.DialogText -ActionNames $snapshot.ActionNames)) { break }
+
+        $targetButton = @($snapshot.ActionElements | Where-Object { ([string]$_.Current.Name).Trim() -cin $affirmativeNames })[0]
+        if (-not $targetButton) { throw 'The verified affirmative UI Automation control disappeared before invocation.' }
+        if ($targetButton.Current.ProcessId -ne $ProcessId) { throw 'Refusing to invoke a control owned by a different process.' }
+        $lastButtonName = ([string]$targetButton.Current.Name).Trim()
+        $targetPatterns = @($snapshot.Controls | Where-Object { $_.Name -ceq [string]$targetButton.Current.Name } | ForEach-Object { $_.Patterns } | Select-Object -First 1)
+        if ('InvokePattern' -in $targetPatterns) {
+            $invoke = $targetButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+            $invoke.Invoke()
+            $acknowledgementMethods.Add('InvokePattern')
+        }
+        elseif ('LegacyIAccessiblePattern' -in $targetPatterns) {
+            $legacy = $targetButton.GetCurrentPattern([System.Windows.Automation.LegacyIAccessiblePattern]::Pattern)
+            $legacy.DoDefaultAction()
+            $acknowledgementMethods.Add('LegacyIAccessiblePattern')
+        }
+        elseif ($targetButton.Current.ClassName -ceq 'Button' -and $targetButton.Current.NativeWindowHandle -gt 0) {
+            Invoke-ChronicleNativeButtonClick -WindowHandle ([IntPtr]$targetButton.Current.NativeWindowHandle) -ExpectedProcessId $ProcessId
+            $acknowledgementMethods.Add('Process-owned BM_CLICK')
+        }
+        else { throw 'The verified affirmative element exposed no safe process-scoped invocation mechanism.' }
+
+        $deadline = (Get-Date).AddSeconds(4)
+        while ((Get-Date) -lt $deadline) {
+            $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+            if (-not $process) { $closed = $true; break }
+            $process.Refresh()
+            if ($process.MainWindowTitle -cne 'Mod change detected') { $closed = $true; break }
+            Start-Sleep -Milliseconds 200
+        }
+        if ($closed) { break }
+
+        $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+        if (-not $process) { $closed = $true; break }
+        $process.Refresh()
+        $currentHandle = [IntPtr]$process.MainWindowHandle
+        if ($process.MainWindowTitle -cne 'Mod change detected' -or $currentHandle -eq [IntPtr]::Zero) { $closed = $true; break }
+        $snapshot = Get-ChronicleWindowAutomationSnapshot -ProcessId $ProcessId -WindowHandle $currentHandle
+        if (-not (Test-ChronicleShaderCacheDialogCandidate -WindowTitle $snapshot.WindowTitle -DialogText $snapshot.DialogText -ActionNames $snapshot.ActionNames)) { break }
+    }
+
+    if (-not $closed) {
+        $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+        if (-not $process) { $closed = $true }
+        else {
+            $process.Refresh()
+            if ($process.MainWindowTitle -cne 'Mod change detected') { $closed = $true }
+            elseif ($process.MainWindowHandle -ne [IntPtr]::Zero) {
+                $snapshot = Get-ChronicleWindowAutomationSnapshot -ProcessId $ProcessId -WindowHandle ([IntPtr]$process.MainWindowHandle)
+            }
         }
     }
 
-    $affirmativeNames = @('OK', 'Yes', 'Continue', 'Proceed', 'Confirm', 'Regenerate', 'Rebuild', ([string][char]0x786E + [char]0x5B9A))
-    $targetButton = @($snapshot.ActionElements | Where-Object { ([string]$_.Current.Name).Trim() -cin $affirmativeNames })[0]
-    if (-not $targetButton) { throw 'The verified affirmative UI Automation control disappeared before invocation.' }
-    if ($targetButton.Current.ProcessId -ne $ProcessId) { throw 'Refusing to invoke a control owned by a different process.' }
-    $targetPatterns = @($snapshot.Controls | Where-Object { $_.Name -ceq [string]$targetButton.Current.Name } | ForEach-Object { $_.Patterns } | Select-Object -First 1)
-    if ('InvokePattern' -in $targetPatterns) {
-        $invoke = $targetButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-        $invoke.Invoke()
-    }
-    elseif ('LegacyIAccessiblePattern' -in $targetPatterns) {
-        $legacy = $targetButton.GetCurrentPattern([System.Windows.Automation.LegacyIAccessiblePattern]::Pattern)
-        $legacy.DoDefaultAction()
-    }
-    elseif ($targetButton.Current.ClassName -ceq 'Button' -and $targetButton.Current.NativeWindowHandle -gt 0) {
-        Invoke-ChronicleNativeButtonClick -WindowHandle ([IntPtr]$targetButton.Current.NativeWindowHandle) -ExpectedProcessId $ProcessId
-    }
-    else { throw 'The verified affirmative element exposed no safe process-scoped invocation mechanism.' }
-
-    $deadline = (Get-Date).AddSeconds(12)
-    $closed = $false
-    while ((Get-Date) -lt $deadline) {
-        $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
-        if (-not $process) { break }
-        $process.Refresh()
-        if ($process.MainWindowTitle -cne 'Mod change detected') { $closed = $true; break }
-        Start-Sleep -Milliseconds 200
-    }
     [pscustomobject]@{
         Handled = $closed
         ProcessId = $ProcessId
         WindowTitle = $snapshot.WindowTitle
         DialogText = $snapshot.DialogText
         ActionNames = $snapshot.ActionNames
-        InvokedMethod = if ('InvokePattern' -in $targetPatterns) { 'InvokePattern' } elseif ('LegacyIAccessiblePattern' -in $targetPatterns) { 'LegacyIAccessiblePattern' } else { 'Process-owned BM_CLICK' }
+        AcknowledgementAttempts = $acknowledgementMethods.Count
+        InvokedMethods = @($acknowledgementMethods)
+        InvokedMethod = if ($acknowledgementMethods.Count -gt 0) { $acknowledgementMethods[$acknowledgementMethods.Count - 1] } else { $null }
         Controls = $snapshot.Controls
-        InvokedButton = [string]$targetButton.Current.Name
-        Reason = if ($closed) { 'Verified shader-cache prompt acknowledged through its process-owned UI Automation InvokePattern.' } else { 'The verified prompt remained open after one acknowledgement; no retry was sent.' }
+        InvokedButton = $lastButtonName
+        Reason = if ($closed) { "Verified shader-cache prompt cleared after $($acknowledgementMethods.Count) process-owned acknowledgement(s)." } else { "The verified shader-cache prompt remained open after the bounded $maxAcknowledgements acknowledgement attempts; no global input was sent." }
     }
 }
