@@ -40,11 +40,10 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
     $preparedSaveRemoved = $null
     $failure = $null
     try {
-        $providerBaseUrl = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_BASE_URL', 'Process')
-        if ([string]::IsNullOrWhiteSpace($providerBaseUrl)) { $providerBaseUrl = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_BASE_URL', 'User') }
-        $providerModelId = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL', 'Process')
-        if ([string]::IsNullOrWhiteSpace($providerModelId)) { $providerModelId = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL', 'User') }
-        if ([string]::IsNullOrWhiteSpace($providerBaseUrl) -or [string]::IsNullOrWhiteSpace($providerModelId)) { throw 'Agent Host Campaign evaluation requires existing local loopback model settings; no user credential is read or written.' }
+        . (Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1')
+        $freeLlmApiProfile = Initialize-FreeLLMAPIProfile
+        $providerBaseUrl = [string]$freeLlmApiProfile.BaseUrl
+        $providerModelId = [string]$freeLlmApiProfile.RequestedModelId
 
         $mcmFixtureDirectory = Join-Path $runTemp 'MCM\Global\ChronicleFramework'
         New-Item -ItemType Directory -Path $mcmFixtureDirectory -Force | Out-Null
@@ -52,12 +51,6 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         [ordered]@{ OllamaBaseUrl = $providerBaseUrl; ModelId = $providerModelId } | ConvertTo-Json -Compress | Set-Content -LiteralPath $profilePath -Encoding UTF8
         $env:CHRONICLE_AGENT_PROFILE_PATH = $profilePath
         if ($VillageToolsQuest) {
-            $modelsUri = [UriBuilder]::new([Uri]$providerBaseUrl)
-            $modelsUri.Path = $modelsUri.Path.TrimEnd('/') + '/models'
-            try { $models = Invoke-RestMethod -Uri $modelsUri.Uri -Method Get -TimeoutSec 5 }
-            catch { throw 'FreeLLMAPI model-catalog preflight failed before starting any Campaign fixture.' }
-            if ($providerModelId -notin @($models.data | ForEach-Object { [string]$_.id })) { throw 'The configured FreeLLMAPI route is not currently available; no Campaign fixture was started.' }
-
             $prepOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Test-AgentVillageToolsQuestFixturePreparation.ps1') -SourceSaveName 'AgentBridgeLifecycle' -MaxVillages 4 2>&1 | Out-String
             $prepExitCode = $LASTEXITCODE
             $prepResultPath = Join-Path $runTemp 'VillageToolsQuestFixturePreparation.json'
@@ -189,7 +182,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
 
 $result = [ordered]@{
     Passed = ($results.Count -eq $Runs -and @($results | Where-Object { $_.passed }).Count -eq $Runs)
-    ProviderKind = 'Local Agent Host decision loop; no billed provider'
+    ProviderKind = 'FreeLLMAPI-routed external model through the user's configured free endpoint'
     RunCount = $Runs
     DistinctCampaignSeeds = 1
     Threshold = if ($VillageToolsQuest) {
@@ -198,7 +191,7 @@ $result = [ordered]@{
             maximumTotalDecisions = 100
             requiredModelNativeActions = @('talkToSettlementHero','dialogueSelect','questDetails','tradeOptions','trade','tradeConfirm','inventoryOpen','heroEquipmentOptions','inventoryCancel')
             requiresVisibleNativeIssueMarker = $true
-            requiresRealLocalModel = $true
+            requiresFreeLlmApiRoutedModel = $true
             exactJournalInventoryDelta = $true
             explicitClockActions = 0
             visualCoverageRatio = 0.9
