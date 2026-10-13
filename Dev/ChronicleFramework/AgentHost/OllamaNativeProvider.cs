@@ -271,11 +271,16 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             ? "ollama-native"
             : useJsonObjectCompatibilityMode ? "json_object_compatibility" : "json_schema";
         var response = await SendProviderRequestAsync(body);
-        if (!_settings.NativeOllama && responseFormatMode == "json_schema" && ShouldRetryWithJsonObject(response))
+        if (!_settings.NativeOllama && responseFormatMode == "json_schema" && ShouldRetryWithJsonObject(_settings.Endpoint, response))
         {
             var failedRoute = ReadResponseHeader(response, "X-Fallback-Trail");
-            if (!string.IsNullOrWhiteSpace(failedRoute) && failedRoute.StartsWith("ovh/", StringComparison.OrdinalIgnoreCase))
+            if (!string.IsNullOrWhiteSpace(failedRoute) && failedRoute.Contains("ovh/", StringComparison.OrdinalIgnoreCase))
                 _lastProviderRoute = "ovh";
+            if (!string.IsNullOrWhiteSpace(failedRoute) && failedRoute.Contains("ovh/Mistral-Small", StringComparison.OrdinalIgnoreCase))
+            {
+                payload.Remove("max_completion_tokens");
+                payload["max_tokens"] = _settings.MaxOutputTokens;
+            }
             response.Dispose();
             payload["response_format"] = new { type = "json_object" };
             body = JsonSerializer.Serialize(payload, JsonOptions);
@@ -393,9 +398,9 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                (details.Count == 0 ? string.Empty : " " + string.Join("; ", details));
     }
 
-    private bool ShouldRetryWithJsonObject(HttpResponseMessage response)
+    internal static bool ShouldRetryWithJsonObject(Uri endpoint, HttpResponseMessage response)
     {
-        if (!IsFreeLlmApi(_settings.Endpoint) || response.StatusCode != HttpStatusCode.BadRequest) return false;
+        if (!IsFreeLlmApi(endpoint) || response.StatusCode is not (HttpStatusCode.BadRequest or HttpStatusCode.UnprocessableEntity)) return false;
         return ReadResponseHeader(response, "X-Fallback-Trail")?.Contains("provider_bad_request", StringComparison.OrdinalIgnoreCase) == true;
     }
 

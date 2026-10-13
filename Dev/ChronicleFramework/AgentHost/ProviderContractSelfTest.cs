@@ -344,16 +344,19 @@ internal static class ProviderContractSelfTest
         try
         {
         var observedResponseFormats = new List<string>();
-        var jsonModeFallbackHandler = new StubHandler((httpRequest, _) =>
+        var observedTokenParameters = new List<(bool MaxTokens, bool MaxCompletionTokens)>();
+        var jsonModeFallbackHandler = new StubHandler((httpRequest, cancellationToken) =>
         {
             using var payloadDocument = JsonDocument.Parse(httpRequest.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
-            if (payloadDocument.RootElement.TryGetProperty("response_format", out var responseFormat) && responseFormat.TryGetProperty("type", out var responseType))
+            var payload = payloadDocument.RootElement;
+            observedTokenParameters.Add((payload.TryGetProperty("max_tokens", out _), payload.TryGetProperty("max_completion_tokens", out _)));
+            if (payload.TryGetProperty("response_format", out var responseFormat) && responseFormat.TryGetProperty("type", out var responseType))
                 observedResponseFormats.Add(responseType.GetString() ?? "missing");
             else
                 observedResponseFormats.Add("missing");
             if (observedResponseFormats.Count == 1)
             {
-                var rejectedSchema = new HttpResponseMessage(HttpStatusCode.BadRequest);
+                var rejectedSchema = new HttpResponseMessage(HttpStatusCode.UnprocessableEntity);
                 rejectedSchema.Headers.TryAddWithoutValidation("X-Fallback-Trail", "ovh/Mistral-Small key1=provider_bad_request");
                 rejectedSchema.Content = new StringContent("schema unsupported");
                 return Task.FromResult(rejectedSchema);
@@ -370,7 +373,8 @@ internal static class ProviderContractSelfTest
             if (result.Decision["done"]?.GetValue<bool>() != true ||
                 result.ResponseFormatMode != "json_object_fallback" ||
                 result.RoutedVia != "ovh/Mistral-Small" ||
-                !observedResponseFormats.SequenceEqual(new[] { "json_schema", "json_object" }, StringComparer.Ordinal))
+                !observedResponseFormats.SequenceEqual(new[] { "json_schema", "json_object" }, StringComparer.Ordinal) ||
+                !observedTokenParameters.SequenceEqual(new[] { (false, true), (true, false) }))
                 throw new AgentHostException("provider-self-test-json-mode-fallback-failed", "A FreeLLMAPI route that explicitly rejected JSON Schema was not retried once in JSON mode and then normalized against the decision contract.");
             results.Add(new { scenario = "freellmapi-json-schema-provider-rejection-falls-back-to-validated-json-object", passed = true });
         }
@@ -413,6 +417,24 @@ internal static class ProviderContractSelfTest
             OllamaNativeProvider.GetMinimumRequestInterval(new Uri("http://127.0.0.1:11434/v1/chat/completions"), "mistral-small-3.2-24b", null) != TimeSpan.Zero)
             throw new AgentHostException("provider-self-test-rate-window-policy-failed", "Only the known FreeLLMAPI-to-OVH Mistral route should receive the conservative 31-second request spacing.");
         results.Add(new { scenario = "freellmapi-ovh-model-rate-window-is-route-specific", passed = true });
+
+        foreach (var status in new[] { HttpStatusCode.BadRequest, HttpStatusCode.UnprocessableEntity })
+        {
+            using var explicitSchemaRejection = new HttpResponseMessage(status);
+            explicitSchemaRejection.Headers.TryAddWithoutValidation("X-Fallback-Trail", "ovh/Mistral-Small key1=provider_bad_request");
+            if (!OllamaNativeProvider.ShouldRetryWithJsonObject(rateWindowEndpoint, explicitSchemaRejection))
+                throw new AgentHostException("provider-self-test-json-schema-rejection-status-not-recognized", $"FreeLLMAPI explicit provider_bad_request status {(int)status} did not enable one bounded JSON-object compatibility retry.");
+        }
+        using (var transientGatewayFailure = new HttpResponseMessage(HttpStatusCode.BadGateway))
+        {
+            transientGatewayFailure.Headers.TryAddWithoutValidation("X-Fallback-Trail", "ovh/Mistral-Small key1=upstream_error");
+            using var nonGatewayBadRequest = new HttpResponseMessage(HttpStatusCode.BadRequest);
+            nonGatewayBadRequest.Headers.TryAddWithoutValidation("X-Fallback-Trail", "ovh/Mistral-Small key1=provider_bad_request");
+            if (OllamaNativeProvider.ShouldRetryWithJsonObject(rateWindowEndpoint, transientGatewayFailure) ||
+                OllamaNativeProvider.ShouldRetryWithJsonObject(new Uri("http://127.0.0.1:11434/v1/chat/completions"), nonGatewayBadRequest))
+                throw new AgentHostException("provider-self-test-retried-non-schema-failure", "JSON-object compatibility retry must be limited to explicit FreeLLMAPI provider_bad_request responses.");
+        }
+        results.Add(new { scenario = "freellmapi-json-object-fallback-recognizes-explicit-400-and-422-schema-rejection-only", passed = true });
         }
         catch (KeyNotFoundException exception)
         {
