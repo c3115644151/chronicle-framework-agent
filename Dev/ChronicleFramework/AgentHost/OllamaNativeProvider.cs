@@ -15,6 +15,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     private readonly OllamaProviderSettings _settings;
     private readonly HttpClient _client;
     private readonly bool _ownsClient;
+    private DateTimeOffset _lastProviderRequestUtc;
+    private string? _lastProviderRoute;
     internal string ModelId => _settings.Model;
     internal int MaxOutputTokens => _settings.MaxOutputTokens;
     internal string ConfigurationSource { get; }
@@ -245,6 +247,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         requestTimeout.CancelAfter(_settings.Timeout);
         async Task<HttpResponseMessage> SendProviderRequestAsync(string requestBody)
         {
+            await WaitForProviderRateWindowAsync(cancellationToken);
             using var message = new HttpRequestMessage(HttpMethod.Post, _settings.Endpoint)
             {
                 Content = new StringContent(requestBody, new UTF8Encoding(false), "application/json")
@@ -270,6 +273,9 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         var response = await SendProviderRequestAsync(body);
         if (!_settings.NativeOllama && responseFormatMode == "json_schema" && ShouldRetryWithJsonObject(response))
         {
+            var failedRoute = ReadResponseHeader(response, "X-Fallback-Trail");
+            if (!string.IsNullOrWhiteSpace(failedRoute) && failedRoute.StartsWith("ovh/", StringComparison.OrdinalIgnoreCase))
+                _lastProviderRoute = "ovh";
             response.Dispose();
             payload["response_format"] = new { type = "json_object" };
             body = JsonSerializer.Serialize(payload, JsonOptions);
@@ -344,6 +350,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             using var decisionDocument = ParseJson(Encoding.UTF8.GetBytes(content), "provider-decision-invalid-json");
             var decision = NormalizeDecision(decisionDocument.RootElement, decisionRequestSnapshot.RootElement);
 
+            var routedVia = ReadResponseHeader(response, "X-Routed-Via");
+            if (!string.IsNullOrWhiteSpace(routedVia)) _lastProviderRoute = routedVia;
             return new ProviderDecisionResult(
                 "completed",
                 responseModel ?? _settings.Model,
@@ -351,7 +359,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 completionTokens,
                 finishReason ?? (ReadBoolean(root, "done") == true ? "stop" : "unknown"),
                 decision,
-                ReadResponseHeader(response, "X-Routed-Via"),
+                routedVia,
                 responseFormatMode);
         }
     }
@@ -400,6 +408,25 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
 
     private static bool IsMistralSmall32(string model) =>
         model.StartsWith("mistral-small-3.2-24b", StringComparison.OrdinalIgnoreCase);
+
+    internal static TimeSpan GetMinimumRequestInterval(Uri endpoint, string model, string? previousRoute)
+    {
+        if (!IsFreeLlmApi(endpoint)) return TimeSpan.Zero;
+        return IsMistralSmall32(model) || previousRoute?.StartsWith("ovh/", StringComparison.OrdinalIgnoreCase) == true
+            ? TimeSpan.FromSeconds(31)
+            : TimeSpan.Zero;
+    }
+
+    private async Task WaitForProviderRateWindowAsync(CancellationToken cancellationToken)
+    {
+        var minimum = GetMinimumRequestInterval(_settings.Endpoint, _settings.Model, _lastProviderRoute);
+        if (_lastProviderRequestUtc != default)
+        {
+            var remaining = minimum - (DateTimeOffset.UtcNow - _lastProviderRequestUtc);
+            if (remaining > TimeSpan.Zero) await Task.Delay(remaining, cancellationToken);
+        }
+        _lastProviderRequestUtc = DateTimeOffset.UtcNow;
+    }
 
     public void Dispose()
     {

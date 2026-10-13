@@ -52,7 +52,7 @@ $buildLog = & dotnet @publishArguments 2>&1 | Out-String
 $buildExitCode = $LASTEXITCODE
 if ($buildExitCode -ne 0 -and $buildLog -match 'NU1900') {
     [xml]$hostProject = Get-Content -LiteralPath $project -Raw -Encoding UTF8
-    if (@($hostProject.Project.ItemGroup.PackageReference).Count -gt 0) {
+    if ($hostProject.SelectNodes('//PackageReference').Count -gt 0) {
         throw "NuGet audit metadata was unreachable and this Host project contains package dependencies; refusing an unaudited fallback. $buildLog"
     }
     $auditFallbackArguments = @($publishArguments[0..($publishArguments.Count - 1)]) + '-p:NuGetAudit=false'

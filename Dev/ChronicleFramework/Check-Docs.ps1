@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.179'
+$contractVersion = '7.180'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -73,6 +73,7 @@ $agentHostVillageToolsQuestLoopSource = Get-Content (Join-Path $harnessRoot 'Age
 $agentHostVillageToolsQuestPolicySource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostVillageToolsQuestPolicy.cs') -Raw -Encoding UTF8
 $agentHostVillageToolsFixturePreparationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentVillageToolsQuestFixturePreparation.ps1') -Raw -Encoding UTF8
 $agentHostPackageSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostPackage.ps1') -Raw -Encoding UTF8
+if ($agentHostPackageSource -notmatch "SelectNodes\('//PackageReference'\)\.Count -gt 0" -or $agentHostPackageSource -notmatch "-match 'NU1900'") { throw 'Package publish may only retry without unreachable NuGet audit metadata after structurally checking that the Host project has no PackageReference dependencies.' }
 $agentHostProviderSelfTestSource = Get-Content (Join-Path $harnessRoot 'AgentHost\ProviderContractSelfTest.cs') -Raw -Encoding UTF8
 $agentHostProviderSmokeSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostProvider.ps1') -Raw -Encoding UTF8
 if ($agentOpenAiProviderSource -notmatch "reason = 'invalid-action-arguments'" -or $agentOpenAiProviderSource -notmatch 'unsupportedArguments' -or $agentDecisionLoopSource -notmatch 'invalid-action-arguments' -or $agentDecisionLoopSource -notmatch 'noNativeActionSent' -or $agentOpenAiProviderTestSource -notmatch 'UnsupportedActionArgumentReturnsRecoverableRejection' -or $agentDecisionLoopTestSource -notmatch 'InvalidActionArgumentsRecoverWithoutNativeMutation' -or $agentDecisionTestProviderSource -notmatch 'invalidArgumentRecovery') { throw 'Unsupported model argument names must be rejected before Native, passed back with a fresh state, and covered in the provider and loop regressions.' }
@@ -393,9 +394,10 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerProfileTestSource -notmatch 'freellmapi-http-error-keeps-safe-route-fallback-headers-without-response-body' -or
     $providerProfileTestSource -notmatch 'freellmapi-json-schema-provider-rejection-falls-back-to-validated-json-object' -or
     $providerProfileTestSource -notmatch 'freellmapi-mistral-uses-validated-json-object-compatibility-mode' -or
+    $providerProfileTestSource -notmatch 'freellmapi-ovh-model-rate-window-is-route-specific' -or
     $providerProfileTestSource -notmatch 'max_tokens' -or
     $providerProfileTestSource -notmatch 'mistralRequestShapeValid' -or
-    $providerHostSource -notmatch 'IsMistralSmall32' -or
+    $providerHostSource -notmatch 'IsMistralSmall32' -or $providerHostSource -notmatch 'GetMinimumRequestInterval' -or $providerHostSource -notmatch 'WaitForProviderRateWindowAsync' -or
     $providerProfileTestSource -notmatch 'freellmapi-missing-key-fails-before-network-request' -or
     $providerSmokeSource -notmatch 'Synthetic provider-contract probe only' -or
     $providerSmokeSource -notmatch 'talkToSettlementHero' -or
