@@ -16,8 +16,10 @@ internal static class ProviderContractSelfTest
         var results = new List<object>();
         var villageQuestPrompt = AgentHostDecisionCycle.VillageToolsQuestSystemPrompt;
         if (!villageQuestPrompt.Contains("talkToSettlementHero", StringComparison.Ordinal) ||
+            !villageQuestPrompt.Contains("conversation is already open: never talk to that hero again", StringComparison.Ordinal) ||
+            !villageQuestPrompt.Contains("never repeat the rejected action/control", StringComparison.Ordinal) ||
             villageQuestPrompt.Contains("quickConversation", StringComparison.OrdinalIgnoreCase))
-            throw new AgentHostException("village-tools-prompt-native-action-id-mismatch", "The quest prompt must name the exact Native talkToSettlementHero action ID, not a UI description as a callable action.");
+            throw new AgentHostException("village-tools-prompt-native-action-id-mismatch", "The quest prompt must name the exact Native contact action and prevent stale contact/decision repetition after conversation opens or feedback rejects an action.");
         results.Add(new { scenario = "village-tools-prompt-uses-exact-native-action-id", passed = true });
         results.AddRange(NativeMailboxClient.RunVillageToolsQuestActionContractSelfTests());
         try { results.AddRange(AgentHostVillageToolsQuestPolicy.RunContractSelfTests()); }
