@@ -306,7 +306,7 @@ try {
     }
     $failedAssertions = @($assertions.Keys | Where-Object { -not [bool]$assertions[$_] })
     if ($failedAssertions.Count -gt 0) {
-        [ordered]@{ Assertions = $assertions; FailedAssertions = $failedAssertions; SafePassageSessionId = $boundSessionId; AutoBalanceSessionId = [string]$autoBalance.data.updatedOptions.sessionId; SafePassageFingerprint = $boundFingerprint; AutoBalanceFingerprint = [string]$autoBalance.data.updatedOptions.proposalFingerprint; FreshQuoteStatus = [string]$freshBoundQuote.status; StaleSessionStatus = [string]$staleSessionOffer.status; StaleSessionError = [string]$staleSessionOffer.error; StaleProposalStatus = [string]$staleProposalOffer.status; StaleProposalError = [string]$staleProposalOffer.error; PreCommitGold = [int]$preCommitState.state.economy.gold; WorldFingerprintBeforeAutoBalance = $worldFingerprintBeforeAutoBalance; WorldFingerprintAfterAutoBalance = $worldFingerprintAfterAutoBalance } |
+        [ordered]@{ Assertions = $assertions; FailedAssertions = $failedAssertions; WorldFingerprintBeforeAutoBalance = $worldFingerprintBeforeAutoBalance; WorldFingerprintAfterAutoBalance = $worldFingerprintAfterAutoBalance } |
             ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $env:CHRONICLE_HARNESS_TEMP 'SafePassageBarterContextAssertions.json') -Encoding UTF8
         throw "Native Safe Passage assertions failed before fixture shutdown: $($failedAssertions -join ', ')"
     }
