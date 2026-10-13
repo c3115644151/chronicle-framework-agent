@@ -102,7 +102,21 @@ internal static class AgentHostVillageToolsQuestPolicy
             }
 
             var candidates = FilterSafeTargets(observedTargets, "town");
-            if (candidates.Count > 0) catalogWithQuestDetails.Add(new JsonObject { ["action"] = "move", ["arguments"] = new JsonArray("SettlementId") });
+            if (candidates.Count > 0)
+            {
+                var settlementIds = new JsonArray();
+                foreach (var candidate in candidates.OfType<JsonObject>())
+                {
+                    var settlementId = ReadString(candidate, "id");
+                    if (!string.IsNullOrWhiteSpace(settlementId)) settlementIds.Add(settlementId);
+                }
+                catalogWithQuestDetails.Add(new JsonObject
+                {
+                    ["action"] = "move",
+                    ["arguments"] = new JsonArray("SettlementId"),
+                    ["argumentValues"] = new JsonObject { ["SettlementId"] = settlementIds }
+                });
+            }
             return catalogWithQuestDetails;
         }
 
@@ -282,7 +296,9 @@ internal static class AgentHostVillageToolsQuestPolicy
             } }
         };
         var moveCatalog = BuildActionCatalog(activeMap, activeTargets);
-        if (!moveCatalog.OfType<JsonObject>().Any(item => ReadString(item, "action") == "move") ||
+        var moveAction = moveCatalog.OfType<JsonObject>().FirstOrDefault(item => ReadString(item, "action") == "move");
+        var permittedTownIds = (moveAction?["argumentValues"]?["SettlementId"] as JsonArray)?.Select(item => item?.GetValue<string>()).ToArray() ?? Array.Empty<string?>();
+        if (moveAction is null || !permittedTownIds.SequenceEqual(new string?[] { "town-1" }, StringComparer.Ordinal) ||
             !TryResolveAction(activeMap, activeTargets, new JsonObject { ["action"] = "move", ["arguments"] = new JsonObject { ["SettlementId"] = "town-1" } }, out _, out _, out _) ||
             TryResolveAction(activeMap, activeTargets, new JsonObject { ["action"] = "move", ["arguments"] = new JsonObject { ["SettlementId"] = "town-danger" } }, out _, out _, out _))
             throw new AgentHostException("village-tools-policy-self-test-map-target-gate-failed", "Only a safe town from the latest Native target query may be selected after the current tools Quest is active.");
@@ -574,6 +590,8 @@ internal static class AgentHostVillageToolsQuestPolicy
     private static JsonArray FilterSafeTargets(JsonArray targets, string requiredType) => new(targets.OfType<JsonObject>()
         .Where(target => ReadString(target, "type") == requiredType && IsFalse(target, "hostile") && IsFalse(target, "underSiege") &&
             !string.IsNullOrWhiteSpace(ReadString(target, "id")) && ReadDouble(target, "distance", double.MaxValue) > 1.0)
+        .GroupBy(target => ReadString(target, "id")!, StringComparer.Ordinal)
+        .Select(group => group.First())
         .Select(target => (JsonNode?)target.DeepClone()).ToArray());
 
     private static bool IsTradeOption(JsonObject option)
