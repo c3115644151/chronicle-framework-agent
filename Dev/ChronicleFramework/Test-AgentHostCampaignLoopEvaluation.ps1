@@ -182,7 +182,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
 
 $result = [ordered]@{
     Passed = ($results.Count -eq $Runs -and @($results | Where-Object { $_.passed }).Count -eq $Runs)
-    ProviderKind = 'FreeLLMAPI-routed external model through the user's configured free endpoint'
+    ProviderKind = 'FreeLLMAPI-routed external model through the configured free endpoint'
     RunCount = $Runs
     DistinctCampaignSeeds = 1
     Threshold = if ($VillageToolsQuest) {
