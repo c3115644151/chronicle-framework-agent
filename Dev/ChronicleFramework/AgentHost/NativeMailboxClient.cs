@@ -104,7 +104,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
         var valid = action switch
         {
             "mapSettlementTargets" or "dialogueContinue" or "tradeOptions" or "tradeConfirm" or "tradeCancel" or "tradeCancelChanges" or
-                "barterOptions" or "barterAutoBalance" or "barterOffer" or "barterCancel" or
+            "barterOptions" or "barterAutoBalance" or "barterCancel" or
                 "inventoryOpen" or "heroEquipmentOptions" or "inventoryCancel" => arguments.Count == 0,
             "move" => HasOnlyKeys(arguments, "settlementId") && HasText(arguments, "settlementId"),
             "menuSelect" => HasOnlyKeys(arguments, "menuId", "optionId") && HasText(arguments, "menuId") && HasText(arguments, "optionId"),
@@ -115,6 +115,9 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
                 HasText(arguments, "direction") && HasText(arguments, "itemViewModelId") && HasText(arguments, "inventorySide") &&
                 arguments["amount"] is JsonValue amountNode && amountNode.TryGetValue<int>(out var amount) && amount > 0 &&
                 arguments["direction"]!.GetValue<string>() is "buy" or "sell",
+            "barterOffer" => arguments.Count == 0 ||
+                HasOnlyKeys(arguments, "expectedSessionId", "expectedProposalFingerprint") &&
+                HasText(arguments, "expectedSessionId") && HasText(arguments, "expectedProposalFingerprint"),
             _ => false
         };
 
@@ -141,6 +144,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             ("barterOptions", "{}"),
             ("barterAutoBalance", "{}"),
             ("barterOffer", "{}"),
+            ("barterOffer", "{\"expectedSessionId\":\"session-1\",\"expectedProposalFingerprint\":\"fingerprint-1\"}"),
             ("barterCancel", "{}"),
             ("inventoryOpen", "{}"),
             ("heroEquipmentOptions", "{}"),
@@ -159,6 +163,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             ("trade", "{\"direction\":\"buy\",\"itemViewModelId\":\"tools\",\"inventorySide\":\"OtherInventory\",\"amount\":0}"),
             ("trade", "{\"direction\":\"delete\",\"itemViewModelId\":\"tools\",\"inventorySide\":\"OtherInventory\",\"amount\":1}"),
             ("tradeConfirm", "{\"questId\":\"quest-1\"}"),
+            ("barterOffer", "{\"expectedSessionId\":\"session-1\"}"),
             ("inventoryCancelChanges", "{}")
         };
         foreach (var item in invalidCases)

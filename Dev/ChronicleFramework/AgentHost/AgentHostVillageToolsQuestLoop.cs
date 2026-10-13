@@ -62,16 +62,16 @@ internal static class AgentHostVillageToolsQuestLoop
             runId = "selftest-village-tools-safe-passage",
             goal = "Complete the currently visible village tools quest.",
             parentProcessId = 321,
-            maxDecisions = 4,
+            maxDecisions = 5,
             maxElapsedSeconds = 10,
             allowedActionNames = AgentHostCampaignLoop.ApprovedActions.ToArray()
         }));
         var passageResult = await RunAsync(passageRequest.RootElement, passageClient, passageProvider, CancellationToken.None);
         if (ReadString(passageResult, "status") != "failed" ||
             ReadString(passageResult["termination"] as JsonObject, "reason") != "decision-budget-exhausted" ||
-            !passageClient.Actions.SequenceEqual(new[] { "dialogueSelect", "barterOptions", "barterAutoBalance", "barterOffer" }) ||
+            !passageClient.Actions.SequenceEqual(new[] { "dialogueSelect", "barterOptions", "barterAutoBalance", "barterOptions", "barterOffer" }) ||
             passageClient.Actions.Any(action => action is "advance" or "pause" or "resume" or "fastForward" or "battleFinish" or "battleRetreat") ||
-            passageProvider.Calls != 4 || passageClient.FinalEncounterActive)
+            passageProvider.Calls != 5 || passageClient.FinalEncounterActive)
             throw new AgentHostException("village-tools-loop-self-test-safe-passage-transaction-failed", "Host did not complete the bounded Native non-fight Safe Passage action chain exactly once.");
         return [
             new { scenario = "village-tools-postcondition-requires-exact-visible-tool-consumption-and-reward-delta", passed = true },
@@ -130,6 +130,7 @@ internal static class AgentHostVillageToolsQuestLoop
         string? failureCode = null;
         string? termination = null;
         JsonObject? previousReceipt = null;
+        JsonObject? safePassageBalanceReceipt = null;
         JsonObject? feedback = null;
         JsonObject? currentNative = null;
         int gameProcessId = -1;
@@ -164,7 +165,7 @@ internal static class AgentHostVillageToolsQuestLoop
                         inventoryVerifiedAfterTurnIn = true;
                 }
 
-                var catalog = AgentHostVillageToolsQuestPolicy.BuildActionCatalog(currentNative!, previousReceipt, preDeliveryInventoryCaptured, questDetailsObservedForActiveQuest, marketsWithoutTools);
+                var catalog = AgentHostVillageToolsQuestPolicy.BuildActionCatalog(currentNative!, previousReceipt, preDeliveryInventoryCaptured, questDetailsObservedForActiveQuest, marketsWithoutTools, safePassageBalanceReceipt);
                 var controls = AgentHostVillageToolsQuestPolicy.BuildControlCatalog(currentNative!, sawQuestActive, inventoryVerifiedAfterTurnIn);
                 if (catalog.Count == 0 && controls.Count == 0)
                 {
@@ -255,7 +256,7 @@ internal static class AgentHostVillageToolsQuestLoop
                     continue;
                 }
 
-                if (!AgentHostVillageToolsQuestPolicy.TryResolveAction(currentNative!, previousReceipt, decision, out var action, out var arguments, out var rejection, preDeliveryInventoryCaptured))
+                if (!AgentHostVillageToolsQuestPolicy.TryResolveAction(currentNative!, previousReceipt, decision, out var action, out var arguments, out var rejection, preDeliveryInventoryCaptured, safePassageBalanceReceipt))
                 {
                     rejected++;
                     feedback = new JsonObject { ["kind"] = "decision-rejected-before-native", ["code"] = "native-precondition-not-met", ["message"] = rejection, ["nativeActionSent"] = false };
@@ -283,6 +284,10 @@ internal static class AgentHostVillageToolsQuestLoop
                 }
 
                 if (ReadString(receipt, "status") == "completed") actionsExecuted++;
+                if (action == "barterAutoBalance" && ReadString(receipt, "status") == "completed")
+                    safePassageBalanceReceipt = receipt.DeepClone() as JsonObject;
+                else if (action is "barterOffer" or "barterCancel")
+                    safePassageBalanceReceipt = null;
                 if (action == "questDetails" && activeQuest is not null && ReadString(receipt, "status") == "completed")
                 {
                     questDetailsReceipt = receipt.DeepClone() as JsonObject;
@@ -649,14 +654,23 @@ internal static class AgentHostVillageToolsQuestLoop
             {
                 case "dialogueSelect": _phase = 1; break;
                 case "barterOptions":
-                    _phase = 2;
-                    data = SafePassageOptions(isOfferDisabled: true, goldCost: 1, playerGold: 500);
+                    if (_phase == 1)
+                    {
+                        _phase = 2;
+                        data = SafePassageOptions(isOfferDisabled: true, goldCost: 1, playerGold: 500, fingerprint: "proposal-before");
+                    }
+                    else
+                        data = SafePassageOptions(isOfferDisabled: false, goldCost: 144, playerGold: 500, fingerprint: "proposal-balanced");
                     break;
                 case "barterAutoBalance":
                     _phase = 3;
-                    data = new JsonObject { ["autoBalanced"] = true, ["updatedOptions"] = SafePassageOptions(isOfferDisabled: false, goldCost: 144, playerGold: 500) };
+                    data = new JsonObject { ["autoBalanced"] = true, ["updatedOptions"] = SafePassageOptions(isOfferDisabled: false, goldCost: 144, playerGold: 500, fingerprint: "proposal-balanced") };
                     break;
-                case "barterOffer": _phase = 4; break;
+                case "barterOffer":
+                    if (ReadString(arguments, "expectedSessionId") != "session-1" || ReadString(arguments, "expectedProposalFingerprint") != "proposal-balanced")
+                        throw new AgentHostException("village-tools-safe-passage-self-test-native-precondition-missing", "Host omitted the Native session/proposal precondition on Offer.");
+                    _phase = 4;
+                    break;
                 default: throw new AgentHostException("village-tools-safe-passage-self-test-unexpected-action", "Unexpected action in the Safe Passage Host scenario: " + action);
             }
             var response = new JsonObject
@@ -690,8 +704,9 @@ internal static class AgentHostVillageToolsQuestLoop
             return JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["processId"] = ProcessId, ["campaignDay"] = 5.0, ["timeControlMode"] = "Stop", ["state"] = state }.ToJsonString());
         }
 
-        private static JsonObject SafePassageOptions(bool isOfferDisabled, int goldCost, int playerGold) => new()
+        private static JsonObject SafePassageOptions(bool isOfferDisabled, int goldCost, int playerGold, string fingerprint) => new()
         {
+            ["sessionId"] = "session-1", ["proposalFingerprint"] = fingerprint,
             ["context"] = "contextual:safe_passage_barterable", ["contextInitializer"] = "InitializeSafePassageBarterContext",
             ["gameState"] = "MapState", ["isOfferDisabled"] = isOfferDisabled, ["playerGold"] = playerGold,
             ["candidates"] = new JsonArray(

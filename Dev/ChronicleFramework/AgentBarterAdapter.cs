@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.BarterSystem;
@@ -59,9 +60,11 @@ internal static class ChronicleAgentBarterAdapter
         _generation++;
         _lastObservedCandidates = new Dictionary<string, Candidate>(StringComparer.Ordinal);
         var rows = CollectCandidates(data, viewModel);
+        var proposalFingerprint = BuildProposalFingerprint(data, viewModel, rows);
         var json = new StringBuilder(8192);
         json.Append('{').Append("\"schemaVersion\":1");
         ChroniclePartyUpgradeAdapter.Property(json, "sessionId", _sessionId);
+        ChroniclePartyUpgradeAdapter.Property(json, "proposalFingerprint", proposalFingerprint);
         ChroniclePartyUpgradeAdapter.Property(json, "context", DescribeContext(data));
         ChroniclePartyUpgradeAdapter.Property(json, "contextInitializer", data.ContextInitializer?.Method?.Name);
         ChroniclePartyUpgradeAdapter.Property(json, "gameState", Game.Current?.GameStateManager?.ActiveState?.GetType().Name);
@@ -205,9 +208,19 @@ internal static class ChronicleAgentBarterAdapter
         return json.Append('}').ToString();
     }
 
-    internal static string SubmitOffer()
+    internal static string SubmitOffer(string expectedSessionId = null, string expectedProposalFingerprint = null)
     {
         RequireCurrentPlayerBarter(out var data, out var viewModel);
+        if (!string.IsNullOrWhiteSpace(expectedSessionId) || !string.IsNullOrWhiteSpace(expectedProposalFingerprint))
+        {
+            if (string.IsNullOrWhiteSpace(expectedSessionId) || string.IsNullOrWhiteSpace(expectedProposalFingerprint))
+                throw new InvalidOperationException("expected Native BarterVM session and proposal fingerprint must be supplied together");
+            if (!string.Equals(_sessionId, expectedSessionId, StringComparison.Ordinal))
+                throw new InvalidOperationException("the active Native BarterVM session changed after the quoted proposal");
+            var currentFingerprint = BuildProposalFingerprint(data, viewModel, CollectCandidates(data, viewModel));
+            if (!string.Equals(currentFingerprint, expectedProposalFingerprint, StringComparison.Ordinal))
+                throw new InvalidOperationException("the active Native BarterVM proposal changed after the quoted proposal");
+        }
         if (viewModel.IsOfferDisabled) throw new InvalidOperationException("Native BarterVM disables Offer for the current proposal; no world transaction was submitted");
         var otherHero = data.OtherHero;
         var offererGoldBefore = data.OffererHero?.Gold ?? 0;
@@ -305,6 +318,30 @@ internal static class ChronicleAgentBarterAdapter
     }
 
     private static string BuildCandidateId(int index) => _sessionId + ":" + _generation.ToString(CultureInfo.InvariantCulture) + ":" + index.ToString(CultureInfo.InvariantCulture);
+
+    private static string BuildProposalFingerprint(BarterData data, BarterVM viewModel, IReadOnlyList<Candidate> candidates)
+    {
+        var canonical = new StringBuilder(1024);
+        void Add(string value) => canonical.Append(value.Length).Append(':').Append(value).Append('|');
+        Add(_sessionId ?? string.Empty);
+        Add(data.ContextInitializer?.Method?.Name ?? string.Empty);
+        Add((Hero.MainHero?.Gold ?? 0).ToString(CultureInfo.InvariantCulture));
+        Add(viewModel.IsOfferDisabled ? "1" : "0");
+        Add(viewModel.ResultBarOffererPercentage.ToString(CultureInfo.InvariantCulture));
+        Add(viewModel.ResultBarOtherPercentage.ToString(CultureInfo.InvariantCulture));
+        foreach (var candidate in candidates.OrderBy(item => item.Index))
+        {
+            Add(candidate.Index.ToString(CultureInfo.InvariantCulture));
+            Add(candidate.Barterable.StringID ?? string.Empty);
+            Add(candidate.ListId ?? string.Empty);
+            Add(candidate.Barterable.OriginalOwner?.StringId ?? string.Empty);
+            Add(candidate.Barterable.OriginalParty?.Id ?? string.Empty);
+            Add(candidate.ViewModel.CurrentOfferedAmount.ToString(CultureInfo.InvariantCulture));
+            Add(candidate.Barterable.IsOffered ? "1" : "0");
+        }
+        using (var sha256 = SHA256.Create())
+            return BitConverter.ToString(sha256.ComputeHash(Encoding.UTF8.GetBytes(canonical.ToString()))).Replace("-", string.Empty);
+    }
 
     private static void RequireCurrentPlayerBarter(out BarterData data, out BarterVM viewModel)
     {

@@ -4,7 +4,7 @@ namespace ChronicleFramework.AgentHost;
 
 internal static class AgentHostVillageToolsQuestPolicy
 {
-    internal static JsonArray BuildActionCatalog(JsonObject native, JsonObject? previousReceipt, bool preDeliveryInventoryCaptured = false, bool questDetailsObserved = false, IReadOnlySet<string>? marketsWithoutTools = null)
+    internal static JsonArray BuildActionCatalog(JsonObject native, JsonObject? previousReceipt, bool preDeliveryInventoryCaptured = false, bool questDetailsObserved = false, IReadOnlySet<string>? marketsWithoutTools = null, JsonObject? safePassageBalanceReceipt = null)
     {
         var state = native["state"] as JsonObject;
         var context = state?["context"] as JsonObject;
@@ -16,7 +16,7 @@ internal static class AgentHostVillageToolsQuestPolicy
         if (conversation is not null)
         {
             if (string.Equals(menuId, "encounter_meeting", StringComparison.Ordinal))
-                return BuildBanditSafePassageCatalog(state, context, conversation, previousReceipt);
+                return BuildBanditSafePassageCatalog(state, context, conversation, previousReceipt, safePassageBalanceReceipt);
             var catalog = new JsonArray();
             AddQuestDetailsAction(state, catalog, questDetailsObserved);
             var options = conversation["options"] as JsonArray ?? new JsonArray();
@@ -162,7 +162,8 @@ internal static class AgentHostVillageToolsQuestPolicy
         out string? action,
         out JsonObject? nativeArguments,
         out string rejection,
-        bool preDeliveryInventoryCaptured = false)
+        bool preDeliveryInventoryCaptured = false,
+        JsonObject? safePassageBalanceReceipt = null)
     {
         action = ReadString(decision, "action");
         nativeArguments = null;
@@ -186,7 +187,7 @@ internal static class AgentHostVillageToolsQuestPolicy
             return TryResolveInventoryAction(state, previousReceipt, action!, arguments, out nativeArguments, out rejection);
 
         if (string.Equals(menuId, "encounter_meeting", StringComparison.Ordinal))
-            return TryResolveBanditSafePassageAction(state, context, conversation, previousReceipt, action!, arguments, out nativeArguments, out rejection);
+            return TryResolveBanditSafePassageAction(state, context, conversation, previousReceipt, safePassageBalanceReceipt, action!, arguments, out nativeArguments, out rejection);
 
         switch (action)
         {
@@ -391,49 +392,36 @@ internal static class AgentHostVillageToolsQuestPolicy
             BuildActionCatalog(noOptionBandit, new JsonObject { ["action"] = "dialogueContinue", ["status"] = "completed" }).Count != 0)
             throw new AgentHostException("village-tools-policy-self-test-bandit-probe-gate-failed", "A no-option Bandit transition must probe the Native Safe Passage VM first and allow at most one Continue after a rejected probe.");
 
-        var initialPassageQuote = new JsonObject { ["action"] = "barterOptions", ["status"] = "completed", ["data"] = new JsonObject
-        {
-            ["context"] = "contextual:safe_passage_barterable", ["contextInitializer"] = "InitializeSafePassageBarterContext", ["isOfferDisabled"] = true,
-            ["candidates"] = new JsonArray(
-                new JsonObject { ["nativeType"] = "safe_passage_barterable", ["list"] = "leftOffer", ["originalPartyId"] = "looters_1", ["isOffered"] = true },
-                new JsonObject { ["nativeType"] = "gold_barterable", ["list"] = "rightGold", ["currentAmount"] = 1, ["isOffered"] = false })
-        } };
+        var initialPassageQuote = SafePassageReceipt("barterOptions", SafePassageOptions("session-1", "proposal-before", 500, 1, isOfferDisabled: true));
         if (ReadString(BuildActionCatalog(banditEncounter, initialPassageQuote)[0] as JsonObject, "action") != "barterAutoBalance" ||
             !TryResolveAction(banditEncounter, initialPassageQuote, new JsonObject { ["action"] = "barterAutoBalance", ["arguments"] = new JsonObject() }, out _, out _, out _))
             throw new AgentHostException("village-tools-policy-self-test-bandit-autobalance-gate-failed", "Only the current Native Safe Passage quote may be auto-balanced.");
 
-        var balancedPassageQuote = new JsonObject { ["action"] = "barterAutoBalance", ["status"] = "completed", ["data"] = new JsonObject { ["updatedOptions"] = new JsonObject
-        {
-            ["context"] = "contextual:safe_passage_barterable", ["contextInitializer"] = "InitializeSafePassageBarterContext", ["isOfferDisabled"] = false, ["playerGold"] = 500,
-            ["candidates"] = new JsonArray(
-                new JsonObject { ["nativeType"] = "safe_passage_barterable", ["list"] = "leftOffer", ["originalPartyId"] = "looters_1", ["isOffered"] = true },
-                new JsonObject { ["nativeType"] = "gold_barterable", ["list"] = "rightGold", ["currentAmount"] = 144, ["isOffered"] = true })
-        } } };
-        var balancedPassageCatalog = BuildActionCatalog(banditEncounter, balancedPassageQuote);
+        var balancedOptions = SafePassageOptions("session-1", "proposal-balanced", 500, 144, isOfferDisabled: false);
+        var balancedPassageQuote = SafePassageReceipt("barterAutoBalance", balancedOptions, wrapAutoBalance: true);
+        var currentPassageQuote = SafePassageReceipt("barterOptions", balancedOptions);
+        var balancedPassageCatalog = BuildActionCatalog(banditEncounter, currentPassageQuote, safePassageBalanceReceipt: balancedPassageQuote);
         var balancedQuoteIsSafe = TryGetSafePassageQuote(balancedPassageQuote, out var parsedBalancedQuote);
         var balancedQuoteIsAffordable = balancedQuoteIsSafe && IsAffordableSafePassageQuote(parsedBalancedQuote);
-        var mismatchedPartyQuote = (JsonObject)balancedPassageQuote.DeepClone();
-        mismatchedPartyQuote["data"]!["updatedOptions"]!["candidates"]![0]!["originalPartyId"] = "looters_2";
-        var mismatchedPartyCatalog = BuildActionCatalog(banditEncounter, mismatchedPartyQuote);
-        var validSafePassageOffer = TryResolveAction(banditEncounter, balancedPassageQuote,
-            new JsonObject { ["action"] = "barterOffer", ["arguments"] = new JsonObject() }, out _, out _, out _);
-        var exhaustedGoldSafePassageOffer = TryResolveAction(banditEncounter, new JsonObject { ["action"] = "barterAutoBalance", ["status"] = "completed", ["data"] = new JsonObject { ["updatedOptions"] = new JsonObject
-        {
-            ["context"] = "contextual:safe_passage_barterable", ["contextInitializer"] = "InitializeSafePassageBarterContext", ["isOfferDisabled"] = false, ["playerGold"] = 144,
-            ["candidates"] = new JsonArray(new JsonObject { ["nativeType"] = "safe_passage_barterable", ["list"] = "leftOffer", ["originalPartyId"] = "looters_1", ["isOffered"] = true }, new JsonObject { ["nativeType"] = "gold_barterable", ["list"] = "rightGold", ["currentAmount"] = 144, ["isOffered"] = true })
-        } } }, new JsonObject { ["action"] = "barterOffer", ["arguments"] = new JsonObject() }, out _, out _, out _);
-        var playerGoodsSafePassageOffer = TryResolveAction(banditEncounter, new JsonObject { ["action"] = "barterAutoBalance", ["status"] = "completed", ["data"] = new JsonObject { ["updatedOptions"] = new JsonObject
-        {
-            ["context"] = "contextual:safe_passage_barterable", ["contextInitializer"] = "InitializeSafePassageBarterContext", ["isOfferDisabled"] = false, ["playerGold"] = 500,
-            ["candidates"] = new JsonArray(new JsonObject { ["nativeType"] = "safe_passage_barterable", ["list"] = "leftOffer", ["originalPartyId"] = "looters_1", ["isOffered"] = true }, new JsonObject { ["nativeType"] = "weapon_barterable", ["list"] = "rightOffer", ["currentAmount"] = 1, ["isOffered"] = true })
-        } } }, new JsonObject { ["action"] = "barterOffer", ["arguments"] = new JsonObject() }, out _, out _, out _);
+        var validSafePassageOffer = TryResolveAction(banditEncounter, currentPassageQuote,
+            new JsonObject { ["action"] = "barterOffer", ["arguments"] = new JsonObject() }, out _, out var nativeOfferArguments, out _, safePassageBalanceReceipt: balancedPassageQuote);
+        var mismatchedPartyOptions = SafePassageOptions("session-1", "proposal-balanced", 500, 144, isOfferDisabled: false);
+        mismatchedPartyOptions["candidates"]![0]!["originalPartyId"] = "looters_2";
+        var mismatchedPartyReceipt = SafePassageReceipt("barterOptions", mismatchedPartyOptions);
+        var mismatchedSessionReceipt = SafePassageReceipt("barterOptions", SafePassageOptions("session-replaced", "proposal-balanced", 500, 144, isOfferDisabled: false));
+        var mismatchedFingerprintReceipt = SafePassageReceipt("barterOptions", SafePassageOptions("session-1", "proposal-replaced", 500, 144, isOfferDisabled: false));
+        var exhaustedGoldReceipt = SafePassageReceipt("barterOptions", SafePassageOptions("session-1", "proposal-balanced", 144, 144, isOfferDisabled: false));
+        var playerGoodsOptions = SafePassageOptions("session-1", "proposal-balanced", 500, 144, isOfferDisabled: false);
+        playerGoodsOptions["candidates"]!.AsArray().Add(new JsonObject { ["nativeType"] = "weapon_barterable", ["list"] = "rightItem", ["currentAmount"] = 1, ["isOffered"] = true });
+        var playerGoodsReceipt = SafePassageReceipt("barterOptions", playerGoodsOptions);
+        bool CanOffer(JsonObject currentQuote) => TryResolveAction(banditEncounter, currentQuote,
+            new JsonObject { ["action"] = "barterOffer", ["arguments"] = new JsonObject() }, out _, out _, out _, safePassageBalanceReceipt: balancedPassageQuote);
         if (!balancedPassageCatalog.OfType<JsonObject>().Any(item => ReadString(item, "action") == "barterOffer") ||
             !balancedPassageCatalog.OfType<JsonObject>().Any(item => ReadString(item, "action") == "barterCancel") ||
-            !validSafePassageOffer || exhaustedGoldSafePassageOffer || playerGoodsSafePassageOffer)
-            throw new AgentHostException("village-tools-policy-self-test-safe-passage-quote-gate-failed", "Safe Passage quote validation mismatch (context=" + ReadString(parsedBalancedQuote, "context") + "; initializer=" + ReadString(parsedBalancedQuote, "contextInitializer") + "; candidates=" + (parsedBalancedQuote["candidates"] as JsonArray)?.ToJsonString() + "; parsed=" + balancedQuoteIsSafe + "; affordable=" + balancedQuoteIsAffordable + "; valid=" + validSafePassageOffer + "; exhaustedGold=" + exhaustedGoldSafePassageOffer + "; playerGoods=" + playerGoodsSafePassageOffer + ").");
-        if (mismatchedPartyCatalog.OfType<JsonObject>().Any(item => ReadString(item, "action") == "barterOffer") ||
-            TryResolveAction(banditEncounter, mismatchedPartyQuote, new JsonObject { ["action"] = "barterOffer", ["arguments"] = new JsonObject() }, out _, out _, out _))
-            throw new AgentHostException("village-tools-policy-self-test-stale-bandit-quote-accepted", "A Safe Passage quote from a different encountered party must never be offered.");
+            !validSafePassageOffer || CanOffer(mismatchedPartyReceipt) || CanOffer(mismatchedSessionReceipt) || CanOffer(mismatchedFingerprintReceipt) ||
+            CanOffer(exhaustedGoldReceipt) || CanOffer(playerGoodsReceipt) ||
+            ReadString(nativeOfferArguments, "expectedSessionId") != "session-1" || ReadString(nativeOfferArguments, "expectedProposalFingerprint") != "proposal-balanced")
+            throw new AgentHostException("village-tools-policy-self-test-safe-passage-quote-gate-failed", "Safe Passage offer authorization must match the current safe party, session, proposal fingerprint, and positive-Gold quote.");
         results.Add(new { scenario = "village-tools-policy-recovers-bandit-travel-only-through-current-safe-passage", passed = true });
 
         var questState = State("MapState", "village", "village-1", quests: new JsonArray(new JsonObject { ["id"] = "quest-tools", ["title"] = "Village Needs Tools" }));
@@ -513,7 +501,7 @@ internal static class AgentHostVillageToolsQuestPolicy
         return results;
     }
 
-    private static JsonArray BuildBanditSafePassageCatalog(JsonObject state, JsonObject context, JsonObject conversation, JsonObject? previousReceipt)
+    private static JsonArray BuildBanditSafePassageCatalog(JsonObject state, JsonObject context, JsonObject conversation, JsonObject? previousReceipt, JsonObject? safePassageBalanceReceipt)
     {
         if (!IsObservedBanditEncounter(state, context)) return new JsonArray();
 
@@ -525,21 +513,29 @@ internal static class AgentHostVillageToolsQuestPolicy
         if (previousAction == "barterOptions")
         {
             if (previousStatus == "completed")
-                return TryGetSafePassageQuote(previousReceipt, out var observedQuote) && IsQuoteForObservedParty(observedQuote, context)
-                    ? new JsonArray(new JsonObject { ["action"] = "barterAutoBalance", ["arguments"] = new JsonArray() })
-                    : new JsonArray();
+            {
+                if (!TryGetSafePassageQuote(previousReceipt, out var observedQuote) || !IsQuoteForObservedParty(observedQuote, context))
+                    return new JsonArray();
+                if (safePassageBalanceReceipt is not null)
+                    return QuoteMatchesBalancedDraft(previousReceipt, safePassageBalanceReceipt, context)
+                        ? new JsonArray(
+                            new JsonObject { ["action"] = "barterOffer", ["arguments"] = new JsonArray() },
+                            new JsonObject { ["action"] = "barterCancel", ["arguments"] = new JsonArray() })
+                        : new JsonArray();
+                return new JsonArray(new JsonObject { ["action"] = "barterAutoBalance", ["arguments"] = new JsonArray() });
+            }
             if (!options.OfType<JsonObject>().Any(option => IsTrue(option, "clickable")))
-                return new JsonArray(new JsonObject { ["action"] = "dialogueContinue", ["arguments"] = new JsonArray() });
+                return safePassageBalanceReceipt is null
+                    ? new JsonArray(new JsonObject { ["action"] = "dialogueContinue", ["arguments"] = new JsonArray() })
+                    : new JsonArray();
         }
 
         if (previousAction == "barterAutoBalance")
         {
             if (previousStatus != "completed") return new JsonArray();
-            if (TryGetSafePassageQuote(previousReceipt, out var balancedQuote) && IsQuoteForObservedParty(balancedQuote, context) && IsAffordableSafePassageQuote(balancedQuote))
-                return new JsonArray(
-                    new JsonObject { ["action"] = "barterOffer", ["arguments"] = new JsonArray() },
-                    new JsonObject { ["action"] = "barterCancel", ["arguments"] = new JsonArray() });
-            return new JsonArray(new JsonObject { ["action"] = "barterCancel", ["arguments"] = new JsonArray() });
+            return TryGetSafePassageQuote(previousReceipt, out var balancedQuote) && IsQuoteForObservedParty(balancedQuote, context) && IsAffordableSafePassageQuote(balancedQuote)
+                ? new JsonArray(new JsonObject { ["action"] = "barterOptions", ["arguments"] = new JsonArray() })
+                : new JsonArray(new JsonObject { ["action"] = "barterCancel", ["arguments"] = new JsonArray() });
         }
 
         if (previousAction == "dialogueSelect" && previousStatus == "completed")
@@ -561,10 +557,10 @@ internal static class AgentHostVillageToolsQuestPolicy
     }
 
     private static bool TryResolveBanditSafePassageAction(JsonObject state, JsonObject context, JsonObject? conversation,
-        JsonObject? previousReceipt, string action, JsonObject arguments, out JsonObject? nativeArguments, out string rejection)
+        JsonObject? previousReceipt, JsonObject? safePassageBalanceReceipt, string action, JsonObject arguments, out JsonObject? nativeArguments, out string rejection)
     {
         nativeArguments = null;
-        var catalog = conversation is null ? new JsonArray() : BuildBanditSafePassageCatalog(state, context, conversation, previousReceipt);
+        var catalog = conversation is null ? new JsonArray() : BuildBanditSafePassageCatalog(state, context, conversation, previousReceipt, safePassageBalanceReceipt);
         var offeredAction = catalog.OfType<JsonObject>().FirstOrDefault(item => ReadString(item, "action") == action);
         if (!IsObservedBanditEncounter(state, context) || offeredAction is null)
         {
@@ -593,11 +589,18 @@ internal static class AgentHostVillageToolsQuestPolicy
         {
             if (action == "barterOffer")
             {
-                if (!TryGetSafePassageQuote(previousReceipt, out var quote) || !IsQuoteForObservedParty(quote, context) || !IsAffordableSafePassageQuote(quote))
+                if (!TryGetSafePassageQuote(previousReceipt, out var quote) || !QuoteMatchesBalancedDraft(previousReceipt, safePassageBalanceReceipt, context) || !IsAffordableSafePassageQuote(quote))
                 {
-                    rejection = "A Safe Passage offer requires the latest enabled quote and must leave positive player Gold.";
+                    rejection = "A Safe Passage offer requires the current quote to match the balanced Native session/proposal and leave positive Gold.";
                     return false;
                 }
+                nativeArguments = new JsonObject
+                {
+                    ["expectedSessionId"] = ReadString(quote, "sessionId"),
+                    ["expectedProposalFingerprint"] = ReadString(quote, "proposalFingerprint")
+                };
+                rejection = string.Empty;
+                return true;
             }
             nativeArguments = new JsonObject();
             rejection = string.Empty;
@@ -624,7 +627,9 @@ internal static class AgentHostVillageToolsQuestPolicy
         if (ReadString(receipt, "action") == "barterAutoBalance") quote = quote["updatedOptions"] as JsonObject ?? new JsonObject();
         if (ReadString(receipt, "status") != "completed" ||
             ReadString(quote, "context") != "contextual:safe_passage_barterable" ||
-            ReadString(quote, "contextInitializer") != "InitializeSafePassageBarterContext") return false;
+            ReadString(quote, "contextInitializer") != "InitializeSafePassageBarterContext" ||
+            string.IsNullOrWhiteSpace(ReadString(quote, "sessionId")) ||
+            string.IsNullOrWhiteSpace(ReadString(quote, "proposalFingerprint"))) return false;
         var candidates = quote["candidates"] as JsonArray;
         return candidates?.OfType<JsonObject>().Any(candidate =>
                 ReadString(candidate, "nativeType") == "safe_passage_barterable" && ReadString(candidate, "list") == "leftOffer" && IsTrue(candidate, "isOffered")) == true &&
@@ -652,6 +657,16 @@ internal static class AgentHostVillageToolsQuestPolicy
             (quote["candidates"] as JsonArray)?.OfType<JsonObject>().Any(candidate =>
                 ReadString(candidate, "nativeType") == "safe_passage_barterable" &&
                 ReadString(candidate, "originalPartyId") == partyId) == true;
+    }
+
+    private static bool QuoteMatchesBalancedDraft(JsonObject? currentOptionsReceipt, JsonObject? balanceReceipt, JsonObject context)
+    {
+        if (!TryGetSafePassageQuote(currentOptionsReceipt, out var currentQuote) ||
+            !TryGetSafePassageQuote(balanceReceipt, out var balancedQuote) ||
+            !IsQuoteForObservedParty(currentQuote, context) || !IsQuoteForObservedParty(balancedQuote, context) ||
+            !IsAffordableSafePassageQuote(currentQuote)) return false;
+        return string.Equals(ReadString(currentQuote, "sessionId"), ReadString(balancedQuote, "sessionId"), StringComparison.Ordinal) &&
+            string.Equals(ReadString(currentQuote, "proposalFingerprint"), ReadString(balancedQuote, "proposalFingerprint"), StringComparison.Ordinal);
     }
 
     private static JsonArray BuildInventoryActionCatalog(JsonObject state, JsonObject? previousReceipt)
@@ -758,6 +773,26 @@ internal static class AgentHostVillageToolsQuestPolicy
         rejection = "The selected inventory action is not authorized by the current Native inventory mode and receipt.";
         return false;
     }
+
+    private static JsonObject SafePassageOptions(string sessionId, string fingerprint, int playerGold, int goldCost, bool isOfferDisabled)
+    {
+        return new JsonObject
+        {
+            ["sessionId"] = sessionId, ["proposalFingerprint"] = fingerprint,
+            ["context"] = "contextual:safe_passage_barterable", ["contextInitializer"] = "InitializeSafePassageBarterContext",
+            ["isOfferDisabled"] = isOfferDisabled, ["playerGold"] = playerGold,
+            ["candidates"] = new JsonArray(
+                new JsonObject { ["nativeType"] = "safe_passage_barterable", ["list"] = "leftOffer", ["originalPartyId"] = "looters_1", ["isOffered"] = true },
+                new JsonObject { ["nativeType"] = "gold_barterable", ["list"] = "rightGold", ["currentAmount"] = goldCost, ["isOffered"] = goldCost > 1 })
+        };
+    }
+
+    private static JsonObject SafePassageReceipt(string action, JsonObject options, bool wrapAutoBalance = false) => new()
+    {
+        ["action"] = action,
+        ["status"] = "completed",
+        ["data"] = wrapAutoBalance ? new JsonObject { ["updatedOptions"] = options.DeepClone() } : options.DeepClone()
+    };
 
     private static JsonObject State(string gameState, string? menuId, string? currentSettlementId, JsonArray? overlay = null, JsonObject? conversation = null, JsonArray? quests = null)
     {

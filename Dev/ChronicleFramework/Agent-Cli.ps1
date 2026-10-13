@@ -36,6 +36,8 @@ param(
     [string]$ItemViewModelId,
     [ValidateSet('PlayerInventory','OtherInventory')][string]$InventorySide,
     [string]$BarterCandidateId,
+    [string]$ExpectedSessionId,
+    [string]$ExpectedProposalFingerprint,
     [ValidateSet('offer','setAmount','remove')][string]$BarterOperation,
     [int]$EquipmentIndex = -1,
     [int]$GoldOffset = 1,
@@ -731,7 +733,12 @@ switch ($Action) {
     }
     'barterReset' { $result = Invoke-ProtocolCommand 'barterReset' }
     'barterAutoBalance' { $result = Invoke-ProtocolCommand 'barterAutoBalance' }
-    'barterOffer' { $result = Invoke-ProtocolCommand 'barterOffer' }
+    'barterOffer' {
+        if ($ExpectedSessionId -or $ExpectedProposalFingerprint) {
+            if (-not $ExpectedSessionId -or -not $ExpectedProposalFingerprint) { throw 'Both -ExpectedSessionId and -ExpectedProposalFingerprint are required together.' }
+            $result = Invoke-ProtocolCommand 'barterOffer' @{ expectedSessionId = $ExpectedSessionId; expectedProposalFingerprint = $ExpectedProposalFingerprint }
+        } else { $result = Invoke-ProtocolCommand 'barterOffer' }
+    }
     'barterCancel' { $result = Invoke-ProtocolCommand 'barterCancel' }
     'save' {
         if (-not $SaveName) { throw '-SaveName is required for save.' }

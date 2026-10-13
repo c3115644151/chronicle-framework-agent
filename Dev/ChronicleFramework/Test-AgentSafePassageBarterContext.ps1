@@ -306,13 +306,27 @@ try {
     }
     $failedAssertions = @($assertions.Keys | Where-Object { -not [bool]$assertions[$_] })
     if ($failedAssertions.Count -gt 0) {
-        [ordered]@{ Assertions = $assertions; FailedAssertions = $failedAssertions; WorldFingerprintBeforeAutoBalance = $worldFingerprintBeforeAutoBalance; WorldFingerprintAfterAutoBalance = $worldFingerprintAfterAutoBalance } |
+        [ordered]@{ Assertions = $assertions; FailedAssertions = $failedAssertions; SafePassageSessionId = $boundSessionId; AutoBalanceSessionId = [string]$autoBalance.data.updatedOptions.sessionId; SafePassageFingerprint = $boundFingerprint; AutoBalanceFingerprint = [string]$autoBalance.data.updatedOptions.proposalFingerprint; FreshQuoteStatus = [string]$freshBoundQuote.status; StaleSessionStatus = [string]$staleSessionOffer.status; StaleSessionError = [string]$staleSessionOffer.error; StaleProposalStatus = [string]$staleProposalOffer.status; StaleProposalError = [string]$staleProposalOffer.error; PreCommitGold = [int]$preCommitState.state.economy.gold; WorldFingerprintBeforeAutoBalance = $worldFingerprintBeforeAutoBalance; WorldFingerprintAfterAutoBalance = $worldFingerprintAfterAutoBalance } |
             ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $env:CHRONICLE_HARNESS_TEMP 'SafePassageBarterContextAssertions.json') -Encoding UTF8
         throw "Native Safe Passage assertions failed before fixture shutdown: $($failedAssertions -join ', ')"
     }
 
     $currentTestStep = 'native-safe-passage-offer-acceptance'
-    $offer = Invoke-AgentCli 'barterOffer' @('-CommandId', "$prefix-native-safe-passage-offer") 15
+    $freshBoundQuote = Invoke-AgentCli 'barterOptions' @('-CommandId', "$prefix-native-safe-passage-pre-offer-recheck") 15
+    $boundSessionId = [string]$freshBoundQuote.data.sessionId
+    $boundFingerprint = [string]$freshBoundQuote.data.proposalFingerprint
+    if ($freshBoundQuote.status -ne 'completed' -or [string]::IsNullOrWhiteSpace($boundSessionId) -or
+        [string]::IsNullOrWhiteSpace($boundFingerprint) -or $boundSessionId -ne [string]$autoBalance.data.updatedOptions.sessionId -or
+        $boundFingerprint -ne [string]$autoBalance.data.updatedOptions.proposalFingerprint)
+        { throw 'Fresh Safe Passage quote no longer matches the same balanced Native session and proposal.' }
+    $staleSessionOffer = Invoke-AgentCli 'barterOffer' @('-CommandId', "$prefix-native-safe-passage-stale-session-rejection", '-ExpectedSessionId', 'stale-session', '-ExpectedProposalFingerprint', $boundFingerprint) 15
+    $staleProposalOffer = Invoke-AgentCli 'barterOffer' @('-CommandId', "$prefix-native-safe-passage-stale-proposal-rejection", '-ExpectedSessionId', $boundSessionId, '-ExpectedProposalFingerprint', 'stale-proposal') 15
+    if ($staleSessionOffer.status -ne 'rejected' -or $staleProposalOffer.status -ne 'rejected')
+        { throw 'Native Safe Passage Offer accepted a stale BarterVM session or changed proposal fingerprint.' }
+    $preCommitState = Get-SafePassageState 'state-after-stale-offer-rejections'
+    if ([int]$preCommitState.state.economy.gold -ne 1000 -or -not [bool]$preCommitState.state.context.encounterActive)
+        { throw 'A rejected stale Safe Passage offer changed Gold or ended the Native encounter.' }
+    $offer = Invoke-AgentCli 'barterOffer' @('-CommandId', "$prefix-native-safe-passage-offer", '-ExpectedSessionId', $boundSessionId, '-ExpectedProposalFingerprint', $boundFingerprint) 15
     if ($offer.status -ne 'completed' -or -not [bool]$offer.data.submitted -or -not [bool]$offer.data.accepted)
         { throw "Native Safe Passage offer was not accepted by the current BarterVM: status=$($offer.status), submitted=$($offer.data.submitted), accepted=$($offer.data.accepted), error=$($offer.error)" }
     $safePassageResolution = Wait-ForSafePassageExit
@@ -334,6 +348,8 @@ try {
         $expiredCooldownParty = @($postExpiryDiagnostics.data.mapPartyEntities | Where-Object { $_.id -eq $fixture.data.partyId } | Select-Object -First 1)
     }
     $offerOutcomeAssertions = [ordered]@{
+        NativeOfferRejectsStaleSessionAndProposalWithoutWorldChange = ($staleSessionOffer.status -eq 'rejected' -and $staleProposalOffer.status -eq 'rejected' -and [int]$preCommitState.state.economy.gold -eq 1000 -and [bool]$preCommitState.state.context.encounterActive)
+        NativeOfferBoundToFreshSameSessionProposal = ($freshBoundQuote.status -eq 'completed' -and $boundSessionId -eq [string]$autoBalance.data.updatedOptions.sessionId -and $boundFingerprint -eq [string]$autoBalance.data.updatedOptions.proposalFingerprint -and $offer.status -eq 'completed')
         NativeSafePassageOfferCommitted144 = ([int]$offer.data.offererGoldBefore -eq 1000 -and [int]$offer.data.offererGoldAfter -eq 856 -and [int]$safePassageResolution.state.economy.gold -eq 856)
         NativeEncounterEndedAfterAcceptedSafePassage = (-not [bool]$safePassageResolution.state.context.encounterActive -and -not $safePassageResolution.state.context.conversation)
         NativeSafePassageOfferDidNotAdvanceClock = ([string]$offer.data.timeControlModeBefore -eq [string]$offer.data.timeControlModeAfter -and [double]$offer.data.campaignDayBefore -eq [double]$offer.data.campaignDayAfter)

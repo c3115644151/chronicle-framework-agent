@@ -1231,7 +1231,11 @@ internal sealed class ChronicleAgentProtocol
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBarterAdapter.AutoBalanceProposal());
                     break;
                 case "barterOffer":
-                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBarterAdapter.SubmitOffer());
+                    var expectedBarterSessionId = ReadString(command, "expectedSessionId");
+                    var expectedBarterProposalFingerprint = ReadString(command, "expectedProposalFingerprint");
+                    if (string.IsNullOrWhiteSpace(expectedBarterSessionId) != string.IsNullOrWhiteSpace(expectedBarterProposalFingerprint))
+                        throw new InvalidOperationException("expected BarterVM session and proposal fingerprint must be supplied together");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBarterAdapter.SubmitOffer(expectedBarterSessionId, expectedBarterProposalFingerprint));
                     break;
                 case "barterCancel":
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBarterAdapter.CancelProposal());
