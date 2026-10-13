@@ -206,6 +206,7 @@ internal static class AgentHostVillageToolsQuestLoop
                         ["requestedModelId"] = provider.ModelId,
                         ["responseModelId"] = providerResult.ModelId,
                         ["routedVia"] = providerResult.RoutedVia,
+                        ["responseFormatMode"] = providerResult.ResponseFormatMode,
                         ["promptTokens"] = providerResult.PromptTokens,
                         ["completionTokens"] = providerResult.CompletionTokens
                     });

@@ -278,6 +278,7 @@ internal static class AgentHostCampaignLoop
                         ["requestedModelId"] = provider.ModelId,
                         ["responseModelId"] = providerResult.ModelId,
                         ["routedVia"] = providerResult.RoutedVia,
+                        ["responseFormatMode"] = providerResult.ResponseFormatMode,
                         ["promptTokens"] = providerResult.PromptTokens,
                         ["completionTokens"] = providerResult.CompletionTokens
                     });

@@ -341,6 +341,76 @@ internal static class ProviderContractSelfTest
         await ExpectResponseBodyTimeoutAsync(settings);
         results.Add(new { scenario = "provider-response-body-timeout", passed = true });
 
+        try
+        {
+        var observedResponseFormats = new List<string>();
+        var jsonModeFallbackHandler = new StubHandler((httpRequest, _) =>
+        {
+            using var payloadDocument = JsonDocument.Parse(httpRequest.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            if (payloadDocument.RootElement.TryGetProperty("response_format", out var responseFormat) && responseFormat.TryGetProperty("type", out var responseType))
+                observedResponseFormats.Add(responseType.GetString() ?? "missing");
+            else
+                observedResponseFormats.Add("missing");
+            if (observedResponseFormats.Count == 1)
+            {
+                var rejectedSchema = new HttpResponseMessage(HttpStatusCode.BadRequest);
+                rejectedSchema.Headers.TryAddWithoutValidation("X-Fallback-Trail", "ovh/Mistral-Small key1=provider_bad_request");
+                rejectedSchema.Content = new StringContent("schema unsupported");
+                return Task.FromResult(rejectedSchema);
+            }
+            var jsonModeResponse = JsonResponse(BuildChatResponse(ValidDecision, "stop"));
+            jsonModeResponse.Headers.TryAddWithoutValidation("X-Routed-Via", "ovh/Mistral-Small");
+            return Task.FromResult(jsonModeResponse);
+        });
+        using (var jsonModeFallbackClient = new HttpClient(jsonModeFallbackHandler) { Timeout = freeLlmApiSettings.Timeout })
+        using (var jsonModeFallbackProvider = new OllamaNativeProvider(freeLlmApiSettings with { Model = "auto:noema-free" }, jsonModeFallbackClient))
+        using (var request = JsonDocument.Parse(BuildDecisionRequest()))
+        {
+            var result = await jsonModeFallbackProvider.DecideAsync(request.RootElement, CancellationToken.None);
+            if (result.Decision["done"]?.GetValue<bool>() != true ||
+                result.ResponseFormatMode != "json_object_fallback" ||
+                result.RoutedVia != "ovh/Mistral-Small" ||
+                !observedResponseFormats.SequenceEqual(new[] { "json_schema", "json_object" }, StringComparer.Ordinal))
+                throw new AgentHostException("provider-self-test-json-mode-fallback-failed", "A FreeLLMAPI route that explicitly rejected JSON Schema was not retried once in JSON mode and then normalized against the decision contract.");
+            results.Add(new { scenario = "freellmapi-json-schema-provider-rejection-falls-back-to-validated-json-object", passed = true });
+        }
+
+        var compatibilityFormats = new List<string>();
+        var mistralRequestShapeValid = true;
+        var mistralCompatibilityHandler = new StubHandler((httpRequest, cancellationToken) =>
+        {
+            using var payloadDocument = JsonDocument.Parse(httpRequest.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            var payload = payloadDocument.RootElement;
+            if (payload.TryGetProperty("response_format", out var responseFormat) && responseFormat.TryGetProperty("type", out var responseFormatType))
+                compatibilityFormats.Add(responseFormatType.GetString() ?? "missing");
+            else
+                compatibilityFormats.Add("missing");
+            mistralRequestShapeValid &= payload.TryGetProperty("max_tokens", out var maxTokens) && maxTokens.GetInt32() == 128 &&
+                !payload.TryGetProperty("max_completion_tokens", out _) && !payload.TryGetProperty("store", out _) &&
+                !payload.TryGetProperty("reasoning_effort", out _);
+            var compatibleResponse = JsonResponse(BuildChatResponse("{\"action\":\"tradeConfirm\",\"arguments\":{},\"rationale\":\"Confirm the current Native draft.\"}", "stop"));
+            compatibleResponse.Headers.TryAddWithoutValidation("X-Routed-Via", "ovh/Mistral-Small-3.2-24B-Instruct-2506");
+            return Task.FromResult(compatibleResponse);
+        });
+        using (var mistralCompatibilityClient = new HttpClient(mistralCompatibilityHandler) { Timeout = freeLlmApiSettings.Timeout })
+        using (var mistralCompatibilityProvider = new OllamaNativeProvider(freeLlmApiSettings with { Model = "mistral-small-3.2-24b" }, mistralCompatibilityClient))
+        using (var request = JsonDocument.Parse(BuildActionDecisionRequest()))
+        {
+            var result = await mistralCompatibilityProvider.DecideAsync(request.RootElement, CancellationToken.None);
+            if (result.Decision["action"]?.GetValue<string>() != "tradeConfirm" ||
+                result.ResponseFormatMode != "json_object_compatibility" ||
+                result.RoutedVia != "ovh/Mistral-Small-3.2-24B-Instruct-2506" ||
+                !mistralRequestShapeValid ||
+                !compatibilityFormats.SequenceEqual(new[] { "json_object" }, StringComparer.Ordinal))
+                throw new AgentHostException("provider-self-test-mistral-json-mode-failed", "The FreeLLMAPI Mistral compatibility route did not use only its empirically accepted JSON/token parameter shape.");
+            results.Add(new { scenario = "freellmapi-mistral-uses-validated-json-object-compatibility-mode", passed = true });
+        }
+        }
+        catch (KeyNotFoundException exception)
+        {
+            throw new AgentHostException("provider-json-mode-compatibility-self-test-missing-property", exception.Message, exception);
+        }
+
         return new
         {
             passed = true,
@@ -764,7 +834,7 @@ internal static class ProviderContractSelfTest
             root.GetProperty("response_format").GetProperty("json_schema").GetProperty("schema").GetProperty("oneOf")[0].GetProperty("properties").GetProperty("control").GetProperty("const").GetString() != "done" ||
             root.GetProperty("response_format").GetProperty("json_schema").GetProperty("schema").GetProperty("oneOf")[0].GetProperty("properties").GetProperty("reason").GetProperty("maxLength").GetInt32() != 64 ||
             root.GetProperty("max_completion_tokens").GetInt32() != 128 ||
-            root.GetProperty("store").GetBoolean())
+            root.TryGetProperty("store", out _) || root.TryGetProperty("reasoning_effort", out _))
             throw new AgentHostException("provider-self-test-request-failed", "Provider request did not constrain its local response to the current decision catalog.");
     }
 

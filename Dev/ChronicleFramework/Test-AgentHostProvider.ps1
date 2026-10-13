@@ -97,6 +97,7 @@ $summary = [ordered]@{
     AvailableModelCatalogSha256 = $freeLlmApiProfile.AvailableModelCatalogSha256
     RoutedVia = [string]$result.routedVia
     ResultStatus = [string]$result.status
+    ResponseFormatMode = [string]$result.responseFormatMode
     DecisionType = 'single-listed-native-action'
     DecisionAction = [string]$result.decision.action
     ExactListedArgument = ($result.decision.arguments.HeroId -ceq 'CharacterObject_ProviderSmoke')

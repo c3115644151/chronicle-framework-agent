@@ -24,7 +24,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
 
     internal OllamaNativeProvider(OllamaProviderSettings settings, HttpClient? client = null, string configurationSource = "direct")
     {
-        _settings = settings;
+        _settings = settings with { MaxTokenParameter = ResolveMaxTokenParameter(settings.Model, settings.MaxTokenParameter) };
         _client = client ?? new HttpClient { Timeout = settings.Timeout };
         _ownsClient = client is null;
         ConfigurationSource = configurationSource;
@@ -214,6 +214,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             ["model"] = _settings.Model,
             ["messages"] = messages
         };
+        var useJsonObjectCompatibilityMode = !_settings.NativeOllama && UsesJsonObjectCompatibilityMode();
         if (_settings.NativeOllama)
         {
             payload["stream"] = false;
@@ -225,39 +226,57 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         }
         else
         {
-            payload["response_format"] = new { type = "json_schema", json_schema = new { schema = BuildDecisionSchema(request) } };
-            payload["store"] = false;
+            payload["response_format"] = useJsonObjectCompatibilityMode
+                ? new { type = "json_object" }
+                : new { type = "json_schema", json_schema = new { schema = BuildDecisionSchema(request) } };
             payload[_settings.MaxTokenParameter] = _settings.MaxOutputTokens;
             if (_settings.Thinking.HasValue) payload["thinking"] = new { type = _settings.Thinking.Value ? "enabled" : "disabled" };
-            if (!string.IsNullOrWhiteSpace(_settings.ReasoningEffort) && _settings.Thinking != false)
+            if (!string.IsNullOrWhiteSpace(_settings.ReasoningEffort) &&
+                !string.Equals(_settings.ReasoningEffort, "none", StringComparison.OrdinalIgnoreCase) && _settings.Thinking != false)
                 payload["reasoning_effort"] = _settings.ReasoningEffort;
             if (_settings.Temperature.HasValue) payload["temperature"] = _settings.Temperature.Value;
         }
 
         var body = JsonSerializer.Serialize(payload, JsonOptions);
-        var bodyBytes = Encoding.UTF8.GetByteCount(body);
-        if (bodyBytes > MaxRequestBytes)
-            throw new AgentHostException("provider-request-too-large", "The structured local model request exceeds the Host size limit.");
+        if (Encoding.UTF8.GetByteCount(body) > MaxRequestBytes)
+            throw new AgentHostException("provider-request-too-large", "The structured model request exceeds the Host size limit.");
 
-        using var message = new HttpRequestMessage(HttpMethod.Post, _settings.Endpoint)
-        {
-            Content = new StringContent(body, new UTF8Encoding(false), "application/json")
-        };
-        AddAuthorization(message);
-        HttpResponseMessage response;
         using var requestTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         requestTimeout.CancelAfter(_settings.Timeout);
-        try
+        async Task<HttpResponseMessage> SendProviderRequestAsync(string requestBody)
         {
-            response = await _client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, requestTimeout.Token);
+            using var message = new HttpRequestMessage(HttpMethod.Post, _settings.Endpoint)
+            {
+                Content = new StringContent(requestBody, new UTF8Encoding(false), "application/json")
+            };
+            AddAuthorization(message);
+            try
+            {
+                return await _client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, requestTimeout.Token);
+            }
+            catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new AgentHostException("provider-timeout", "The model provider did not respond within its configured timeout.", exception);
+            }
+            catch (HttpRequestException exception)
+            {
+                throw new AgentHostException("provider-unreachable", "The configured model provider could not be reached.", exception);
+            }
         }
-        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+
+        var responseFormatMode = _settings.NativeOllama
+            ? "ollama-native"
+            : useJsonObjectCompatibilityMode ? "json_object_compatibility" : "json_schema";
+        var response = await SendProviderRequestAsync(body);
+        if (!_settings.NativeOllama && responseFormatMode == "json_schema" && ShouldRetryWithJsonObject(response))
         {
-            throw new AgentHostException("provider-timeout", "The local model provider did not respond within its configured timeout.", exception);
-        }
-        catch (HttpRequestException exception)
-        {
-            throw new AgentHostException("provider-unreachable", "The configured local model provider could not be reached.", exception);
+            response.Dispose();
+            payload["response_format"] = new { type = "json_object" };
+            body = JsonSerializer.Serialize(payload, JsonOptions);
+            if (Encoding.UTF8.GetByteCount(body) > MaxRequestBytes)
+                throw new AgentHostException("provider-request-too-large", "The JSON-mode model request exceeds the Host size limit.");
+            responseFormatMode = "json_object_fallback";
+            response = await SendProviderRequestAsync(body);
         }
 
         using (response)
@@ -332,7 +351,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 completionTokens,
                 finishReason ?? (ReadBoolean(root, "done") == true ? "stop" : "unknown"),
                 decision,
-                ReadResponseHeader(response, "X-Routed-Via"));
+                ReadResponseHeader(response, "X-Routed-Via"),
+                responseFormatMode);
         }
     }
 
@@ -364,6 +384,22 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         return $"{providerName} returned HTTP {(int)response.StatusCode}." +
                (details.Count == 0 ? string.Empty : " " + string.Join("; ", details));
     }
+
+    private bool ShouldRetryWithJsonObject(HttpResponseMessage response)
+    {
+        if (!IsFreeLlmApi(_settings.Endpoint) || response.StatusCode != HttpStatusCode.BadRequest) return false;
+        return ReadResponseHeader(response, "X-Fallback-Trail")?.Contains("provider_bad_request", StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    private bool UsesJsonObjectCompatibilityMode() =>
+        IsFreeLlmApi(_settings.Endpoint) &&
+        IsMistralSmall32(_settings.Model);
+
+    private static string ResolveMaxTokenParameter(string model, string configured) =>
+        IsMistralSmall32(model) ? "max_tokens" : configured;
+
+    private static bool IsMistralSmall32(string model) =>
+        model.StartsWith("mistral-small-3.2-24b", StringComparison.OrdinalIgnoreCase);
 
     public void Dispose()
     {
@@ -765,7 +801,8 @@ internal sealed record ProviderDecisionResult(
     int? CompletionTokens,
     string FinishReason,
     JsonObject Decision,
-    string? RoutedVia = null);
+    string? RoutedVia = null,
+    string ResponseFormatMode = "json_schema");
 
 internal sealed class AgentHostException : Exception
 {

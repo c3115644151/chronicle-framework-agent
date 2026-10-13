@@ -144,7 +144,13 @@ internal static class Program
             {
                 status = "failed",
                 error = "host-unexpected-error",
-                exceptionType = exception.GetType().Name
+                exceptionType = exception.GetType().Name,
+                providerSelfTestDetail = args.Contains("--provider-self-test", StringComparer.Ordinal)
+                    ? exception.Message[..Math.Min(exception.Message.Length, 240)]
+                    : null,
+                providerSelfTestStack = args.Contains("--provider-self-test", StringComparer.Ordinal) && exception.StackTrace is string stack
+                    ? stack[..Math.Min(stack.Length, 900)]
+                    : null
             }, OutputJsonOptions));
             return 3;
         }
