@@ -78,7 +78,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             temperature,
             thinking,
             reasoningEffort,
-            maxTokenParameter));
+            maxTokenParameter,
+            ReadApiKey()));
     }
 
     internal static OllamaNativeProvider FromConfiguredProfile()
@@ -119,8 +120,16 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             Temperature: 0d,
             Thinking: null,
             ReasoningEffort: "none",
-            MaxTokenParameter: "max_completion_tokens"),
+            MaxTokenParameter: "max_completion_tokens",
+            ApiKey: ReadApiKey()),
             configurationSource: profile.Source);
+    }
+
+    private static string? ReadApiKey()
+    {
+        var key = Environment.GetEnvironmentVariable("CHRONICLE_LLM_API_KEY");
+        if (string.IsNullOrWhiteSpace(key)) key = Environment.GetEnvironmentVariable("FREELLMAPI_API_KEY");
+        return string.IsNullOrWhiteSpace(key) ? null : key.Trim();
     }
 
     internal Task<ProviderDecisionResult> DecideAsync(JsonElement request, CancellationToken cancellationToken) =>
@@ -144,12 +153,18 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             Query = string.Empty,
             Fragment = string.Empty
         };
+        if (!string.IsNullOrWhiteSpace(_settings.ApiKey))
+            modelsUriBuilder.Query = "available=true";
+        if (IsFreeLlmApi(_settings.Endpoint) && string.IsNullOrWhiteSpace(_settings.ApiKey))
+            throw new AgentHostException("provider-api-key-missing", "FreeLLMAPI requires its unified API key in FREELLMAPI_API_KEY or CHRONICLE_LLM_API_KEY.");
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(8));
         try
         {
-            using var response = await _client.GetAsync(modelsUriBuilder.Uri, HttpCompletionOption.ResponseContentRead, timeout.Token);
+            using var healthRequest = new HttpRequestMessage(HttpMethod.Get, modelsUriBuilder.Uri);
+            AddAuthorization(healthRequest);
+            using var response = await _client.SendAsync(healthRequest, HttpCompletionOption.ResponseContentRead, timeout.Token);
             if (!response.IsSuccessStatusCode)
                 throw new AgentHostException("provider-unavailable", "The local model service rejected its model-list health check.");
 
@@ -227,6 +242,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         {
             Content = new StringContent(body, new UTF8Encoding(false), "application/json")
         };
+        AddAuthorization(message);
         HttpResponseMessage response;
         using var requestTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         requestTimeout.CancelAfter(_settings.Timeout);
@@ -314,8 +330,24 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 promptTokens,
                 completionTokens,
                 finishReason ?? (ReadBoolean(root, "done") == true ? "stop" : "unknown"),
-                decision);
+                decision,
+                ReadResponseHeader(response, "X-Routed-Via"));
         }
+    }
+
+    private static bool IsFreeLlmApi(Uri endpoint) => endpoint.Port == 31415 && (endpoint.Host is "127.0.0.1" or "localhost");
+
+    private void AddAuthorization(HttpRequestMessage request)
+    {
+        if (!string.IsNullOrWhiteSpace(_settings.ApiKey))
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _settings.ApiKey);
+    }
+
+    private static string? ReadResponseHeader(HttpResponseMessage response, string headerName)
+    {
+        if (!response.Headers.TryGetValues(headerName, out var values)) return null;
+        var value = values.FirstOrDefault()?.Trim();
+        return string.IsNullOrWhiteSpace(value) ? null : value[..Math.Min(value.Length, 160)];
     }
 
     public void Dispose()
@@ -347,7 +379,10 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     var argumentSchema = new JsonObject { ["type"] = valueType };
                     if (action.TryGetProperty("argumentValues", out var argumentValues) &&
                         argumentValues.ValueKind == JsonValueKind.Object && argumentValues.TryGetProperty(argumentName, out var values) &&
-                        values.ValueKind == JsonValueKind.Array && values.EnumerateArray().All(item => item.ValueKind == JsonValueKind.String))
+                        values.ValueKind == JsonValueKind.Array &&
+                        ((valueType == "string" && values.EnumerateArray().All(item => item.ValueKind == JsonValueKind.String)) ||
+                         (valueType == "integer" && values.EnumerateArray().All(item => item.ValueKind == JsonValueKind.Number && item.TryGetInt32(out _))) ||
+                         (valueType == "boolean" && values.EnumerateArray().All(item => item.ValueKind is JsonValueKind.True or JsonValueKind.False))))
                     {
                         argumentSchema["enum"] = JsonNode.Parse(values.GetRawText());
                     }
@@ -705,7 +740,8 @@ internal sealed record OllamaProviderSettings(
     double? Temperature,
     bool? Thinking,
     string? ReasoningEffort,
-    string MaxTokenParameter);
+    string MaxTokenParameter,
+    string? ApiKey = null);
 
 internal sealed record ProviderDecisionResult(
     string Status,
@@ -713,7 +749,8 @@ internal sealed record ProviderDecisionResult(
     int? PromptTokens,
     int? CompletionTokens,
     string FinishReason,
-    JsonObject Decision);
+    JsonObject Decision,
+    string? RoutedVia = null);
 
 internal sealed class AgentHostException : Exception
 {

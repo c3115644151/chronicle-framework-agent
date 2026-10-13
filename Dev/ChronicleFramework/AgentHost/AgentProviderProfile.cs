@@ -23,7 +23,7 @@ internal sealed record AgentProviderProfile(string BaseUrl, string ModelId, stri
     internal static AgentProviderProfile Load(string path, string source)
     {
         if (!File.Exists(path))
-            throw new AgentHostException("provider-profile-missing", "Open Chronicle Framework's global Mod Settings and configure a local Ollama URL and model before starting the Agent.");
+            throw new AgentHostException("provider-profile-missing", "Open Chronicle Framework's global Mod Settings and configure the FreeLLMAPI gateway URL and model route before starting the Agent.");
 
         var fileInfo = new FileInfo(path);
         if (fileInfo.Length is <= 0 or > MaxProfileBytes)
@@ -63,9 +63,9 @@ internal sealed record AgentProviderProfile(string BaseUrl, string ModelId, stri
     {
         var errorCode = AgentProviderConfigurationValidator.GetErrorCode(baseUrl, modelId);
         if (errorCode == "provider-profile-endpoint-invalid")
-            throw new AgentHostException(errorCode, "The configured local Ollama base URL must be a loopback HTTP(S) address without credentials, query, or fragment.");
+            throw new AgentHostException(errorCode, "The configured model gateway URL must be a loopback HTTP(S) address without credentials, query, or fragment.");
         if (errorCode == "provider-profile-model-invalid")
-            throw new AgentHostException(errorCode, "The configured Ollama model identifier is missing or too long.");
+            throw new AgentHostException(errorCode, "The configured model or FreeLLMAPI route identifier is missing or too long.");
 
         var uri = new Uri(baseUrl!.Trim(), UriKind.Absolute);
 

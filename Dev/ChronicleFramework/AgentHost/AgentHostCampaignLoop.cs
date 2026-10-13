@@ -25,8 +25,9 @@ internal static class AgentHostCampaignLoop
             !initialControls.Any(control => control?.GetValue<string>() == "unsupportedGoal"))
             throw new AgentHostException("campaign-loop-self-test-goal-scope-gate-failed", "The first decision must classify the complete user goal before any Native action is available.");
         results.Add(new { scenario = "campaign-loop-requires-goal-scope-classification-before-native-actions", passed = true });
-        if (!AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("do not reject either goal because no target or quest is listed yet", StringComparison.Ordinal))
-            throw new AgentHostException("campaign-loop-self-test-classifier-confuses-scope-with-availability", "Goal scope classification must not depend on whether the world-target query has already run.");
+        if (!AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("intermediate steps", StringComparison.Ordinal) ||
+            !AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("not yet visible", StringComparison.Ordinal))
+            throw new AgentHostException("campaign-loop-self-test-classifier-confuses-scope-with-availability", "Goal scope classification must treat supported actions as intermediate steps and not depend on target availability.");
         results.Add(new { scenario = "campaign-loop-classification-is-independent-of-target-availability", passed = true });
         var postClassificationActions = BuildActionCatalog(null, moving: false, goalVerified: false);
         var postClassificationControls = BuildControlCatalog(moving: false, goalVerified: false);
@@ -173,6 +174,7 @@ internal static class AgentHostCampaignLoop
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxElapsedSeconds));
 
         var trace = new JsonArray();
+        var providerRouteHistory = new JsonArray();
         var decisionCount = 0;
         var rejectedDecisionCount = 0;
         var prematureCompletionCount = 0;
@@ -270,6 +272,15 @@ internal static class AgentHostCampaignLoop
                     rejectedDecisionCount = 0;
                     if (providerResult.PromptTokens.HasValue) promptTokens += providerResult.PromptTokens.Value;
                     if (providerResult.CompletionTokens.HasValue) completionTokens += providerResult.CompletionTokens.Value;
+                    providerRouteHistory.Add(new JsonObject
+                    {
+                        ["decision"] = decisionCount,
+                        ["requestedModelId"] = provider.ModelId,
+                        ["responseModelId"] = providerResult.ModelId,
+                        ["routedVia"] = providerResult.RoutedVia,
+                        ["promptTokens"] = providerResult.PromptTokens,
+                        ["completionTokens"] = providerResult.CompletionTokens
+                    });
                 }
                 catch (AgentHostException exception) when (IsRecoverableProviderDecisionError(exception.Code) && rejectedDecisionCount < MaxRejectedDecisions)
                 {
@@ -490,6 +501,7 @@ internal static class AgentHostCampaignLoop
             ["firstDecisionListsUnsupportedGoalClassification"] = firstDecisionListsUnsupportedGoalClassification,
             ["promptTokens"] = promptTokens,
             ["completionTokens"] = completionTokens,
+            ["providerRouteHistory"] = providerRouteHistory,
             ["termination"] = new JsonObject { ["reason"] = terminationReason, ["completedByProvider"] = completedByProvider, ["goalVerified"] = goalVerified },
             ["failure"] = failure,
             ["failureCode"] = failureCode,

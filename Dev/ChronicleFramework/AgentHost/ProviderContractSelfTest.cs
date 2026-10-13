@@ -62,11 +62,11 @@ internal static class ProviderContractSelfTest
             throw new AgentHostException("provider-profile-path-self-test-failed", "The Host global profile path does not match the MCM Global folder/id convention.");
         results.Add(new { scenario = "host-default-path-matches-mcm-global-folder-and-id", passed = true });
 
-        using (var validProfile = JsonDocument.Parse("{\"OllamaBaseUrl\":\"http://127.0.0.1:11434/v1\",\"ModelId\":\"qwen3.5:4b-q4_K_M\",\"schemaVersion\":0,\"LegacySetting\":true,\"CampaignGoal\":\"older-MCM-key\"}"))
+        using (var validProfile = JsonDocument.Parse("{\"OllamaBaseUrl\":\"http://127.0.0.1:31415/v1\",\"ModelId\":\"auto:default\",\"schemaVersion\":0,\"LegacySetting\":true,\"CampaignGoal\":\"older-MCM-key\"}"))
         {
             var profile = AgentProviderProfile.Parse(validProfile.RootElement);
-            if (profile.BaseUrl != "http://127.0.0.1:11434/v1" || profile.ModelId != "qwen3.5:4b-q4_K_M")
-                throw new AgentHostException("provider-profile-self-test-normalization-failed", "The global MCM profile did not load the saved loopback URL and model identifier.");
+            if (profile.BaseUrl != "http://127.0.0.1:31415/v1" || profile.ModelId != "auto:default")
+                throw new AgentHostException("provider-profile-self-test-normalization-failed", "The global MCM profile did not load the FreeLLMAPI gateway and default route identifier.");
             if (AgentProviderProfile.GetSettingsValidationError(profile.BaseUrl, profile.ModelId) is not null)
                 throw new AgentHostException("provider-profile-self-test-settings-check-failed", "The MCM configuration check rejected valid local model settings.");
             results.Add(new { scenario = "mcm-global-profile-values-normalized", passed = true });
@@ -77,18 +77,18 @@ internal static class ProviderContractSelfTest
         if (AgentProviderProfile.GetSettingsValidationError("https://example.com/v1", "test") != "provider-profile-endpoint-invalid")
             throw new AgentHostException("provider-profile-self-test-settings-check-failed", "The MCM configuration check accepted a remote endpoint.");
         results.Add(new { scenario = "mcm-profile-rejects-remote-endpoint", passed = true });
-        ExpectInvalidProfile("{\"OllamaBaseUrl\":\"http://user:pass@127.0.0.1:11434/v1\",\"ModelId\":\"test\"}", "provider-profile-endpoint-invalid", "mcm-profile-rejects-credentials");
+        ExpectInvalidProfile("{\"OllamaBaseUrl\":\"http://user:pass@127.0.0.1:31415/v1\",\"ModelId\":\"test\"}", "provider-profile-endpoint-invalid", "mcm-profile-rejects-credentials");
         results.Add(new { scenario = "mcm-profile-rejects-credentials", passed = true });
-        ExpectInvalidProfile("{\"OllamaBaseUrl\":\"http://127.0.0.1:11434/v1?token=not-used\",\"ModelId\":\"test\"}", "provider-profile-endpoint-invalid", "mcm-profile-rejects-query-string");
+        ExpectInvalidProfile("{\"OllamaBaseUrl\":\"http://127.0.0.1:31415/v1?token=not-used\",\"ModelId\":\"test\"}", "provider-profile-endpoint-invalid", "mcm-profile-rejects-query-string");
         results.Add(new { scenario = "mcm-profile-rejects-query-string", passed = true });
-        ExpectInvalidProfile("{\"OllamaBaseUrl\":\"http://127.0.0.1:11434/v1\",\"ModelId\":\" \"}", "provider-profile-model-invalid", "mcm-profile-rejects-empty-model");
-        if (AgentProviderProfile.GetSettingsValidationError("http://127.0.0.1:11434/v1", " ") != "provider-profile-model-invalid")
+        ExpectInvalidProfile("{\"OllamaBaseUrl\":\"http://127.0.0.1:31415/v1\",\"ModelId\":\" \"}", "provider-profile-model-invalid", "mcm-profile-rejects-empty-model");
+        if (AgentProviderProfile.GetSettingsValidationError("http://127.0.0.1:31415/v1", " ") != "provider-profile-model-invalid")
             throw new AgentHostException("provider-profile-self-test-settings-check-failed", "The MCM configuration check accepted an empty model identifier.");
         results.Add(new { scenario = "mcm-profile-rejects-empty-model", passed = true });
         ExpectProfileFileError("{", "provider-profile-invalid-json", "mcm-profile-rejects-corrupt-json");
         results.Add(new { scenario = "mcm-profile-rejects-corrupt-json", passed = true });
         TestConfiguredProfileOverride(results);
-        using (var launch = JsonDocument.Parse("{\"providerConfiguration\":{\"OllamaBaseUrl\":\"http://127.0.0.1:11434/v1\",\"ModelId\":\"current-page-model\"}}"))
+        using (var launch = JsonDocument.Parse("{\"providerConfiguration\":{\"OllamaBaseUrl\":\"http://127.0.0.1:31415/v1\",\"ModelId\":\"current-page-model\"}}"))
         using (var currentProvider = OllamaNativeProvider.FromCampaignRequest(launch.RootElement))
         {
             if (currentProvider.ModelId != "current-page-model" || currentProvider.ConfigurationSource != "mcm-start-request")
@@ -125,6 +125,53 @@ internal static class ProviderContractSelfTest
             if (healthHandler.LastRequestMethod != HttpMethod.Get || healthHandler.LastRequestUri?.AbsolutePath != "/v1/models")
                 throw new AgentHostException("provider-health-self-test-request-failed", "Startup health check must make a read-only GET to the local model catalog, not generate model output.");
             results.Add(new { scenario = "local-provider-health-check-is-read-only-model-list", passed = true });
+        }
+
+        var unauthenticatedFreeLlmApiHandler = new StubHandler((_, _) => Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"auto:default\"}]}")));
+        using (var unauthenticatedFreeLlmApiClient = new HttpClient(unauthenticatedFreeLlmApiHandler) { Timeout = settings.Timeout })
+        using (var unauthenticatedFreeLlmApi = new OllamaNativeProvider(settings with
+        {
+            Endpoint = new Uri("http://127.0.0.1:31415/v1/chat/completions"),
+            Model = "auto:default",
+            ApiKey = null
+        }, unauthenticatedFreeLlmApiClient))
+        {
+            try
+            {
+                await unauthenticatedFreeLlmApi.CheckConfiguredModelAsync(CancellationToken.None);
+                throw new AgentHostException("freellmapi-missing-key-self-test-failed", "The Host attempted unauthenticated FreeLLMAPI access.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-api-key-missing")
+            {
+                if (unauthenticatedFreeLlmApiHandler.LastRequestUri is not null)
+                    throw new AgentHostException("freellmapi-missing-key-request-sent", "A missing FreeLLMAPI key must fail before any HTTP request.");
+            }
+            results.Add(new { scenario = "freellmapi-missing-key-fails-before-network-request", passed = true });
+        }
+
+        var freeLlmApiEndpoint = new Uri("http://127.0.0.1:31415/v1/chat/completions");
+        var freeLlmApiSettings = settings with { Endpoint = freeLlmApiEndpoint, Model = "auto:default", ApiKey = "freellmapi-self-test-secret" };
+        var freeLlmApiHandler = new StubHandler((request, _) =>
+        {
+            if (request.Method == HttpMethod.Get)
+                return Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"auto:default\"}]}"));
+            var response = JsonResponse(BuildChatResponse(ValidDecision, "stop"));
+            response.Headers.TryAddWithoutValidation("X-Routed-Via", "google/gemini-test-model");
+            return Task.FromResult(response);
+        });
+        using (var freeLlmApiClient = new HttpClient(freeLlmApiHandler) { Timeout = freeLlmApiSettings.Timeout })
+        using (var provider = new OllamaNativeProvider(freeLlmApiSettings, freeLlmApiClient))
+        using (var request = JsonDocument.Parse(BuildDecisionRequest()))
+        {
+            await provider.CheckConfiguredModelAsync(CancellationToken.None);
+            if (freeLlmApiHandler.LastAuthorization?.Scheme != "Bearer" ||
+                freeLlmApiHandler.LastAuthorization.Parameter != "freellmapi-self-test-secret" ||
+                freeLlmApiHandler.LastRequestUri?.Query != "?available=true")
+                throw new AgentHostException("freellmapi-auth-self-test-failed", "FreeLLMAPI model discovery must use the bearer credential and only request presently available models.");
+            var result = await provider.DecideAsync(request.RootElement, CancellationToken.None);
+            if (freeLlmApiHandler.LastAuthorization?.Scheme != "Bearer" || result.RoutedVia != "google/gemini-test-model")
+                throw new AgentHostException("freellmapi-routing-evidence-self-test-failed", "FreeLLMAPI inference must carry bearer auth and preserve the actual routed provider/model header.");
+            results.Add(new { scenario = "freellmapi-bearer-auth-available-model-preflight-and-routed-model-evidence", passed = true });
         }
 
         await ExpectProviderHealthErrorAsync(settings, JsonResponse("{\"data\":[{\"id\":\"different-model\"}]}"), "provider-model-unavailable", "local-provider-health-rejects-missing-model");
@@ -379,7 +426,7 @@ internal static class ProviderContractSelfTest
                 throw new AgentHostException("provider-goal-classification-self-test-failed", "Goal classification did not stay within its listed control catalog.");
             using var body = JsonDocument.Parse(handler.LastRequestBody ?? throw new AgentHostException("provider-goal-classification-prompt-missing", "The classification request was not sent."));
             var system = body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString() ?? string.Empty;
-            if (!system.Contains("complete user goal", StringComparison.Ordinal) || !system.Contains("VillageNeedsToolsIssue", StringComparison.Ordinal) || !system.Contains("named destination", StringComparison.Ordinal) || !system.Contains("do not reject either goal because no target or quest is listed yet", StringComparison.Ordinal))
+            if (!system.Contains("required final outcome", StringComparison.Ordinal) || !system.Contains("VillageNeedsToolsIssue", StringComparison.Ordinal) || !system.Contains("named destination", StringComparison.Ordinal) || !system.Contains("not extra goals", StringComparison.Ordinal))
                 throw new AgentHostException("provider-goal-classification-prompt-incomplete", "The classifier prompt omitted the exact limits of the supported goal.");
             results.Add(new { scenario = "provider-goal-classification-before-action", control, passed = true });
         }
@@ -423,14 +470,16 @@ internal static class ProviderContractSelfTest
     private static void VerifyDecisionSchemaBindsCurrentArgumentValues(List<object> results)
     {
         using var request = JsonDocument.Parse("""
-            {"allowedActions":[{"action":"menuSelect","arguments":["OptionId"],"argumentValues":{"OptionId":["trade","leave"]}}],"allowedControls":[]}
+            {"allowedActions":[{"action":"menuSelect","arguments":["OptionId"],"argumentValues":{"OptionId":["trade","leave"]}},{"action":"trade","arguments":["Direction","Amount"],"argumentValues":{"Direction":["buy"],"Amount":[1,2]}}],"allowedControls":[]}
             """);
         var schema = OllamaNativeProvider.BuildDecisionSchema(request.RootElement);
         var enumValues = schema["oneOf"]![0]!["properties"]!["arguments"]!["properties"]!["OptionId"]!["enum"] as JsonArray;
+        var amountValues = schema["oneOf"]![1]!["properties"]!["arguments"]!["properties"]!["Amount"]!["enum"] as JsonArray;
         if (enumValues is null || enumValues.Count != 2 || enumValues.Select(item => item?.GetValue<string>()).Any(value => value == "village_center") ||
-            !enumValues.Any(item => item?.GetValue<string>() == "trade") || !enumValues.Any(item => item?.GetValue<string>() == "leave"))
-            throw new AgentHostException("provider-decision-schema-value-gate-failed", "Structured output must constrain action arguments to values permitted by the current Native policy.");
-        results.Add(new { scenario = "decision-schema-constrains-arguments-to-current-native-policy-values", passed = true });
+            !enumValues.Any(item => item?.GetValue<string>() == "trade") || !enumValues.Any(item => item?.GetValue<string>() == "leave") ||
+            amountValues is null || amountValues.Count != 2 || !amountValues.Any(item => item?.GetValue<int>() == 1) || !amountValues.Any(item => item?.GetValue<int>() == 2))
+            throw new AgentHostException("provider-decision-schema-value-gate-failed", "Structured output must constrain string and integer action arguments to values permitted by the current Native policy.");
+        results.Add(new { scenario = "decision-schema-constrains-current-native-string-and-integer-values", passed = true });
     }
 
     private static async Task ExpectProviderErrorAsync(

@@ -29,7 +29,7 @@ if (@($ArrivalLoop, $RecruitmentLoop, $RoadsideBanditNegotiationLoop, $SupplyMan
 if ($AgentHostRuntime -and -not ($SupplyManagementLoop -or $ArrivalLoop -or $VillageToolsQuestLoop)) { throw 'AgentHostRuntime supports only the frozen Native supply, map-arrival and VillageNeedsTools quest slices.' }
 if ($VillageToolsQuestLoop -and -not $AgentHostRuntime) { throw 'VillageToolsQuestLoop requires the in-game .NET Agent Host route; the older PowerShell decision loop is not product evidence.' }
 if ($RoadsideBanditNegotiationLoop -and -not $RecruitmentLoop) { throw 'RoadsideBanditNegotiationLoop requires RecruitmentLoop so the encounter resolves into the existing growth goal.' }
-foreach ($setting in @('CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL','CHRONICLE_LLM_API_KEY','CHRONICLE_LLM_TIMEOUT_SECONDS','CHRONICLE_LLM_MAX_TOKENS','CHRONICLE_LLM_MAX_TOKEN_PARAMETER','CHRONICLE_LLM_REASONING_EFFORT','CHRONICLE_LLM_THINKING_MODE','CHRONICLE_LLM_TEMPERATURE','CHRONICLE_LLM_PROTOCOL')) {
+foreach ($setting in @('CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL','CHRONICLE_LLM_API_KEY','FREELLMAPI_API_KEY','CHRONICLE_LLM_TIMEOUT_SECONDS','CHRONICLE_LLM_MAX_TOKENS','CHRONICLE_LLM_MAX_TOKEN_PARAMETER','CHRONICLE_LLM_REASONING_EFFORT','CHRONICLE_LLM_THINKING_MODE','CHRONICLE_LLM_TEMPERATURE','CHRONICLE_LLM_PROTOCOL')) {
     $configuredValue = [string][Environment]::GetEnvironmentVariable($setting, 'Process')
     if ([string]::IsNullOrWhiteSpace($configuredValue)) {
         $configuredValue = [string][Environment]::GetEnvironmentVariable($setting, 'User')
@@ -40,6 +40,28 @@ foreach ($setting in @('CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL','CHRONICLE
     }
 }
 $configuredProtocol = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_PROTOCOL)) { 'openai-compatible' } else { [string]$env:CHRONICLE_LLM_PROTOCOL }
+$providerEndpoint = $null
+if ($configuredProtocol -ceq 'ollama-native' -or
+    -not [Uri]::TryCreate([string]$env:CHRONICLE_LLM_BASE_URL, [UriKind]::Absolute, [ref]$providerEndpoint) -or
+    -not $providerEndpoint.IsLoopback -or $providerEndpoint.Port -ne 31415 -or $providerEndpoint.AbsolutePath.TrimEnd('/') -ne '/v1') {
+    throw 'This live Campaign stage is FreeLLMAPI-only. Local Ollama inference and non-FreeLLMAPI endpoints are refused before Campaign launch.'
+}
+$freeLlmApiKey = if (-not [string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_API_KEY)) { [string]$env:CHRONICLE_LLM_API_KEY } else { [string]$env:FREELLMAPI_API_KEY }
+if ([string]::IsNullOrWhiteSpace($freeLlmApiKey)) {
+    throw 'FreeLLMAPI authentication is missing. Configure FREELLMAPI_API_KEY or CHRONICLE_LLM_API_KEY before Campaign launch; the key is never printed.'
+}
+$modelsUri = [UriBuilder]::new($providerEndpoint)
+$modelsUri.Path = $providerEndpoint.AbsolutePath.TrimEnd('/') + '/models'
+$modelsUri.Query = 'available=true'
+try {
+    $availableModelsResponse = Invoke-RestMethod -Uri $modelsUri.Uri -Method Get -Headers @{ Authorization = "Bearer $freeLlmApiKey" } -TimeoutSec 8
+}
+catch { throw 'FreeLLMAPI /v1/models available-only preflight failed before Campaign launch; no inference request was sent and no fixture was started.' }
+finally { $freeLlmApiKey = $null }
+$availableModelIds = @($availableModelsResponse.data | ForEach-Object { [string]$_.id })
+if ([string]$env:CHRONICLE_LLM_MODEL -notin $availableModelIds) {
+    throw 'The configured model/route is not listed by FreeLLMAPI as currently available; no inference request was sent and no fixture was started.'
+}
 if ($configuredProtocol -ceq 'ollama-native') {
     $ollamaEndpoint = $null
     if (-not [Uri]::TryCreate([string]$env:CHRONICLE_LLM_BASE_URL, [UriKind]::Absolute, [ref]$ollamaEndpoint) -or -not $ollamaEndpoint.IsLoopback) {
@@ -281,10 +303,10 @@ try {
         $env:CHRONICLE_LLM_MAX_TOKENS = '256'
     }
     elseif ($VillageToolsQuestLoop) {
-        $goal = '完成当前可见的村庄工具委托。只用原版当前可见的任务标记、对话、交易、任务日志与物品栏入口；先理解Journal的请求数量和奖励，不要猜。若当前地图尚未接取，找到安全可见村庄并与当前蓝色工具委托交谈、选择当前可用接受项。之后按Journal达到目标、用Native交易买工具并确认，回到委托人交付。交付前在Journal任务进度达标后、当前Conversation外，用原版Inventory记录目标物品当前数量；交付后再次核对目标物品准确减少请求量，奖励物品准确增加Journal显示数量。任何中立遭遇/劫匪遭遇/缺少可见入口都安全停止，不得用时钟命令、作弊、脚本或直接数据写入。仅当原版Quest不再活动、Journal奖励与物品栏差值精确匹配、Host开放done时才完成。'
+        $goal = '完成当前可见的村庄工具委托'
         $maxDecisions = 100
         $maxElapsedSeconds = 1800
-        $allowedActions = 'mapSettlementTargets,move,menuSelect,talkToSettlementHero,dialogueSelect,dialogueContinue,questDetails,tradeOptions,trade,tradeConfirm,tradeCancel,tradeCancelChanges,inventoryOpen,heroEquipmentOptions,inventoryCancel'
+        $allowedActions = 'mapSettlementTargets,move,menuSelect,talkToSettlementHero,dialogueSelect,dialogueContinue,questDetails,tradeOptions,trade,tradeConfirm,tradeCancel,tradeCancelChanges,barterOptions,barterAutoBalance,barterOffer,barterCancel,inventoryOpen,heroEquipmentOptions,inventoryCancel'
         $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '180'
         $env:CHRONICLE_LLM_MAX_TOKENS = '512'
     }
@@ -681,6 +703,7 @@ try {
         ProviderProtocol = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_PROTOCOL)) { 'openai-compatible' } else { [string]$env:CHRONICLE_LLM_PROTOCOL }
         ModelId = if ($AgentHostRuntime -and $loopTrace.providerModelId) { [string]$loopTrace.providerModelId } else { [string]$env:CHRONICLE_LLM_MODEL }
         ModelConfigurationSource = if ($AgentHostRuntime) { [string]$loopTrace.providerConfigurationSource } else { 'environment-provider' }
+        ProviderRouteHistory = if ($AgentHostRuntime) { $loopTrace.providerRouteHistory } else { $null }
         ModelMaxOutputTokens = if ($loopTrace.providerBudget) { [int]$loopTrace.providerBudget.maxOutputTokensPerCall } else { [int]$env:CHRONICLE_LLM_MAX_TOKENS }
         ModelThinkingMode = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_THINKING_MODE)) { 'provider-default' } else { [string]$env:CHRONICLE_LLM_THINKING_MODE }
         ModelReasoningEffort = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_REASONING_EFFORT)) { 'provider-default' } else { [string]$env:CHRONICLE_LLM_REASONING_EFFORT }
@@ -749,6 +772,7 @@ catch {
             ProviderKind = 'configured live model provider; failed before acceptance'
             ProviderProtocol = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_PROTOCOL)) { 'openai-compatible' } else { [string]$env:CHRONICLE_LLM_PROTOCOL }
             ModelId = [string]$env:CHRONICLE_LLM_MODEL
+            ProviderRouteHistory = if ($AgentHostRuntime -and $loopTrace) { $loopTrace.providerRouteHistory } else { $null }
             ModelMaxOutputTokens = if ($loopTrace.providerBudget) { [int]$loopTrace.providerBudget.maxOutputTokensPerCall } else { [int]$env:CHRONICLE_LLM_MAX_TOKENS }
             ModelThinkingMode = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_THINKING_MODE)) { 'provider-default' } else { [string]$env:CHRONICLE_LLM_THINKING_MODE }
             ModelReasoningEffort = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_REASONING_EFFORT)) { 'provider-default' } else { [string]$env:CHRONICLE_LLM_REASONING_EFFORT }

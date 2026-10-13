@@ -118,6 +118,7 @@ internal static class AgentHostVillageToolsQuestLoop
         var rejected = 0;
         var promptTokens = priorPromptTokens;
         var completionTokens = priorCompletionTokens;
+        var providerRouteHistory = new JsonArray();
         var questId = string.Empty;
         var sawQuestActive = false;
         var questDetailsObservedForActiveQuest = false;
@@ -131,6 +132,8 @@ internal static class AgentHostVillageToolsQuestLoop
         string? termination = null;
         JsonObject? previousReceipt = null;
         JsonObject? safePassageBalanceReceipt = null;
+        string? safePassageEncounterPartyId = null;
+        var safePassageContinueUsed = false;
         JsonObject? feedback = null;
         JsonObject? currentNative = null;
         int gameProcessId = -1;
@@ -151,6 +154,17 @@ internal static class AgentHostVillageToolsQuestLoop
                 if (ReadInt(currentNative, "processId", -1) != gameProcessId)
                     throw new AgentHostException("native-process-changed", "Native observations switched Bannerlord process during the quest loop.");
 
+                var currentContext = state["context"] as JsonObject;
+                var currentBanditPartyId = ReadString(currentContext, "menuId") == "encounter_meeting" && ReadBoolean(currentContext, "encounterActive")
+                    ? ReadString(currentContext, "encounteredPartyId")
+                    : null;
+                if (!string.Equals(currentBanditPartyId, safePassageEncounterPartyId, StringComparison.Ordinal))
+                {
+                    safePassageEncounterPartyId = currentBanditPartyId;
+                    safePassageContinueUsed = false;
+                    if (currentBanditPartyId is null) safePassageBalanceReceipt = null;
+                }
+
                 var quests = state["quests"] as JsonArray ?? new JsonArray();
                 var activeQuest = quests.OfType<JsonObject>().FirstOrDefault(IsVillageToolsQuest);
                 if (activeQuest is not null)
@@ -165,7 +179,7 @@ internal static class AgentHostVillageToolsQuestLoop
                         inventoryVerifiedAfterTurnIn = true;
                 }
 
-                var catalog = AgentHostVillageToolsQuestPolicy.BuildActionCatalog(currentNative!, previousReceipt, preDeliveryInventoryCaptured, questDetailsObservedForActiveQuest, marketsWithoutTools, safePassageBalanceReceipt);
+                var catalog = AgentHostVillageToolsQuestPolicy.BuildActionCatalog(currentNative!, previousReceipt, preDeliveryInventoryCaptured, questDetailsObservedForActiveQuest, marketsWithoutTools, safePassageBalanceReceipt, questDetailsReceipt, safePassageContinueUsed);
                 var controls = AgentHostVillageToolsQuestPolicy.BuildControlCatalog(currentNative!, sawQuestActive, inventoryVerifiedAfterTurnIn);
                 if (catalog.Count == 0 && controls.Count == 0)
                 {
@@ -186,6 +200,15 @@ internal static class AgentHostVillageToolsQuestLoop
                     decisions++;
                     if (providerResult.PromptTokens.HasValue) promptTokens += providerResult.PromptTokens.Value;
                     if (providerResult.CompletionTokens.HasValue) completionTokens += providerResult.CompletionTokens.Value;
+                    providerRouteHistory.Add(new JsonObject
+                    {
+                        ["decision"] = decisions,
+                        ["requestedModelId"] = provider.ModelId,
+                        ["responseModelId"] = providerResult.ModelId,
+                        ["routedVia"] = providerResult.RoutedVia,
+                        ["promptTokens"] = providerResult.PromptTokens,
+                        ["completionTokens"] = providerResult.CompletionTokens
+                    });
                 }
                 catch (AgentHostException exception) when (IsRecoverableProviderError(exception.Code) && rejected < 2)
                 {
@@ -233,7 +256,7 @@ internal static class AgentHostVillageToolsQuestLoop
                     termination = "native-quest-and-inventory-observed";
                     trace.Add(BuildDecisionStep(index, decisionStarted, modelRequest, decision, null, null));
                     return BuildResult("completed", runId, provider, decisions, actionsExecuted, promptTokens, completionTokens,
-                        termination, null, null, startDay, currentNative, trace, questId, sawQuestActive, inventoryVerifiedAfterTurnIn);
+                        termination, null, null, startDay, currentNative, trace, providerRouteHistory, questId, sawQuestActive, inventoryVerifiedAfterTurnIn);
                 }
 
                 if (ReadBoolean(decision, "observeAgain"))
@@ -256,7 +279,7 @@ internal static class AgentHostVillageToolsQuestLoop
                     continue;
                 }
 
-                if (!AgentHostVillageToolsQuestPolicy.TryResolveAction(currentNative!, previousReceipt, decision, out var action, out var arguments, out var rejection, preDeliveryInventoryCaptured, safePassageBalanceReceipt))
+                if (!AgentHostVillageToolsQuestPolicy.TryResolveAction(currentNative!, previousReceipt, decision, out var action, out var arguments, out var rejection, preDeliveryInventoryCaptured, safePassageBalanceReceipt, questDetailsReceipt, safePassageContinueUsed))
                 {
                     rejected++;
                     feedback = new JsonObject { ["kind"] = "decision-rejected-before-native", ["code"] = "native-precondition-not-met", ["message"] = rejection, ["nativeActionSent"] = false };
@@ -288,10 +311,18 @@ internal static class AgentHostVillageToolsQuestLoop
                     safePassageBalanceReceipt = receipt.DeepClone() as JsonObject;
                 else if (action is "barterOffer" or "barterCancel")
                     safePassageBalanceReceipt = null;
+                if (action == "dialogueContinue" && ReadString(receipt, "status") == "completed" &&
+                    ReadString(currentNative?["state"]?["context"] as JsonObject, "menuId") == "encounter_meeting")
+                    safePassageContinueUsed = true;
                 if (action == "questDetails" && activeQuest is not null && ReadString(receipt, "status") == "completed")
                 {
                     questDetailsReceipt = receipt.DeepClone() as JsonObject;
                     questDetailsObservedForActiveQuest = true;
+                }
+                if (action == "tradeConfirm" && ReadString(receipt, "status") == "completed")
+                {
+                    questDetailsReceipt = null;
+                    questDetailsObservedForActiveQuest = false;
                 }
                 if (action == "tradeOptions" && ReadString(receipt, "status") == "completed" && !AgentHostVillageToolsQuestPolicy.HasCurrentToolsBuyOffer(receipt))
                 {
@@ -343,7 +374,7 @@ internal static class AgentHostVillageToolsQuestLoop
         }
 
         return BuildResult("failed", runId, provider, decisions, actionsExecuted, promptTokens, completionTokens,
-            termination ?? "village-tools-loop-failed", failure, failureCode, startDay, currentNative, trace, questId, sawQuestActive, inventoryVerifiedAfterTurnIn);
+            termination ?? "village-tools-loop-failed", failure, failureCode, startDay, currentNative, trace, providerRouteHistory, questId, sawQuestActive, inventoryVerifiedAfterTurnIn);
     }
 
     private static JsonObject BuildDecisionRequest(string runId, int iteration, string goal, JsonObject observation,
@@ -492,7 +523,7 @@ internal static class AgentHostVillageToolsQuestLoop
 
     private static JsonObject BuildResult(string status, string runId, IAgentHostDecisionProvider provider, int decisions, int actions,
         long promptTokens, long completionTokens, string termination, string? failure, string? failureCode, double startDay,
-        JsonObject? native, JsonArray trace, string questId, bool sawQuest, bool inventoryVerified) => new()
+        JsonObject? native, JsonArray trace, JsonArray providerRouteHistory, string questId, bool sawQuest, bool inventoryVerified) => new()
     {
         ["status"] = status,
         ["runId"] = runId,
@@ -503,6 +534,7 @@ internal static class AgentHostVillageToolsQuestLoop
         ["actionsExecuted"] = actions,
         ["promptTokens"] = promptTokens,
         ["completionTokens"] = completionTokens,
+        ["providerRouteHistory"] = providerRouteHistory.DeepClone(),
         ["startingCampaignDay"] = double.IsFinite(startDay) ? JsonValue.Create(startDay) : null,
         ["endingCampaignDay"] = native is null ? null : native["campaignDay"]?.DeepClone(),
         ["questId"] = questId,

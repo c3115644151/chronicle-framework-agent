@@ -265,7 +265,22 @@ internal static class ChronicleAgentRuntimeController
         var configError = AgentProviderConfigurationValidator.GetErrorCode(settings.OllamaBaseUrl, settings.ModelId);
         if (configError != null)
         {
-            FailStart(configError == "provider-profile-endpoint-invalid" ? "本地服务地址无效" : "模型名称无效");
+            FailStart(configError == "provider-profile-endpoint-invalid" ? "模型网关地址无效" : "模型名称无效");
+            return;
+        }
+        var usesFreeLlmApi = Uri.TryCreate(settings.OllamaBaseUrl, UriKind.Absolute, out var providerUri) &&
+                             providerUri.IsLoopback && providerUri.Port == 31415 && providerUri.AbsolutePath.TrimEnd('/') == "/v1";
+        var noModelLifecycleProbe = IsLifecycleHarnessMode() && Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_NO_MODEL") == "1";
+        if (!usesFreeLlmApi && !noModelLifecycleProbe && !IsLifecycleHarnessMode())
+        {
+            FailStart("实时模型连接只允许本机FreeLLMAPI网关；禁止调用本地模型或其它端点");
+            return;
+        }
+        var hasFreeLlmApiKey = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("FREELLMAPI_API_KEY")) ||
+                               !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CHRONICLE_LLM_API_KEY"));
+        if (usesFreeLlmApi && !hasFreeLlmApiKey && !noModelLifecycleProbe)
+        {
+            FailStart("FreeLLMAPI客户端密钥未配置；请在启动Bannerlord前设置FREELLMAPI_API_KEY环境变量");
             return;
         }
         if (TaleWorlds.CampaignSystem.Campaign.Current == null ||
@@ -338,7 +353,7 @@ internal static class ChronicleAgentRuntimeController
                               ",\"providerConfiguration\":{\"OllamaBaseUrl\":\"" + EscapeJson(settings.OllamaBaseUrl) +
                               "\",\"ModelId\":\"" + EscapeJson(settings.ModelId) + "\"}" +
                               ",\"goal\":\"" + EscapeJson(goal.Trim()) +
-                              "\",\"maxDecisions\":100,\"maxElapsedSeconds\":1800,\"allowedActionNames\":[\"mapSettlementTargets\",\"move\",\"menuSelect\",\"talkToSettlementHero\",\"dialogueSelect\",\"dialogueContinue\",\"questDetails\",\"tradeOptions\",\"trade\",\"tradeConfirm\",\"tradeCancel\",\"tradeCancelChanges\",\"inventoryOpen\",\"heroEquipmentOptions\",\"inventoryCancel\"]}";
+                              "\",\"maxDecisions\":100,\"maxElapsedSeconds\":1800,\"allowedActionNames\":[\"mapSettlementTargets\",\"move\",\"menuSelect\",\"talkToSettlementHero\",\"dialogueSelect\",\"dialogueContinue\",\"questDetails\",\"tradeOptions\",\"trade\",\"tradeConfirm\",\"tradeCancel\",\"tradeCancelChanges\",\"barterOptions\",\"barterAutoBalance\",\"barterOffer\",\"barterCancel\",\"inventoryOpen\",\"heroEquipmentOptions\",\"inventoryCancel\"]}";
             _hostInput.WriteLine(requestJson);
             _hostInput.Flush();
             _stopSignalSent = false;
@@ -414,18 +429,20 @@ internal static class ChronicleAgentRuntimeController
             SetState(RuntimeState.Stopped, "Host已按停止请求退出");
         else if (output.IndexOf("\"status\":\"completed\"", StringComparison.Ordinal) >= 0 && exitCode == 0)
             SetState(RuntimeState.Completed, "当前目标已由Native状态核实完成");
+        else if (ContainsAny(output, errorOutput, "provider-api-key-missing"))
+            SetState(RuntimeState.Failed, "FreeLLMAPI客户端密钥未配置；请在启动Bannerlord前设置FREELLMAPI_API_KEY");
         else if (ContainsAny(output, errorOutput, "provider-model-unavailable", "not listed by the local model service"))
-            SetState(RuntimeState.Failed, "本地服务中没有配置的模型");
+            SetState(RuntimeState.Failed, "FreeLLMAPI当前没有可用的配置模型/路由");
         else if (ContainsAny(output, errorOutput, "provider-unavailable", "could not be reached"))
-            SetState(RuntimeState.Failed, "本地模型服务不可连接");
+            SetState(RuntimeState.Failed, "FreeLLMAPI网关不可连接；请检查应用运行状态");
         else if (ContainsAny(output, errorOutput, "provider-timeout"))
-            SetState(RuntimeState.Failed, "本地模型回复超时；Host已停止，请检查模型服务");
+            SetState(RuntimeState.Failed, "FreeLLMAPI未按时回复；Host已停止，请检查网关/上游服务");
         else if (ContainsAny(output, errorOutput, "provider-http-error", "provider-unreachable"))
-            SetState(RuntimeState.Failed, "本地模型推理请求失败；请检查服务日志与运行组件");
+            SetState(RuntimeState.Failed, "FreeLLMAPI模型请求失败；请检查可用额度和上游状态");
         else if (ContainsAny(output, errorOutput, "campaign-goal-unsupported"))
             SetState(RuntimeState.Failed, "当前目标超出Agent已接入范围；未执行战役行动");
         else if (ContainsAny(output, errorOutput, "provider-profile-missing", "profile-missing"))
-            SetState(RuntimeState.Failed, "未找到已保存的MCM本地模型设置");
+            SetState(RuntimeState.Failed, "未找到已保存的MCM模型网关设置");
         else if (ContainsAny(output, errorOutput, "campaign-parent-exited", "campaign-parent-not-running", "campaign-parent-identity-mismatch", "native-parent-process-mismatch"))
             SetState(RuntimeState.Failed, "原Bannerlord战役进程已关闭或连接不匹配；Host已停止，未重放任何行动");
         else if (ContainsAny(output, errorOutput, "native-state-timeout", "native-command-timeout"))

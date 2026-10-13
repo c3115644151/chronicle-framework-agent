@@ -47,7 +47,7 @@ $moveNotRepeated = $false
 $crashAfterRecruitVerified = $false
 $firstCrashExitCode = $null
 
-foreach ($setting in @('CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL','CHRONICLE_LLM_API_KEY','CHRONICLE_LLM_TIMEOUT_SECONDS','CHRONICLE_LLM_MAX_TOKENS','CHRONICLE_LLM_MAX_TOKEN_PARAMETER','CHRONICLE_LLM_REASONING_EFFORT','CHRONICLE_LLM_TEMPERATURE')) {
+foreach ($setting in @('CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL','CHRONICLE_LLM_API_KEY','FREELLMAPI_API_KEY','CHRONICLE_LLM_TIMEOUT_SECONDS','CHRONICLE_LLM_MAX_TOKENS','CHRONICLE_LLM_MAX_TOKEN_PARAMETER','CHRONICLE_LLM_REASONING_EFFORT','CHRONICLE_LLM_TEMPERATURE')) {
     $configuredValue = [string][Environment]::GetEnvironmentVariable($setting, 'Process')
     if ([string]::IsNullOrWhiteSpace($configuredValue)) {
         $configuredValue = [string][Environment]::GetEnvironmentVariable($setting, 'User')
@@ -57,6 +57,8 @@ foreach ($setting in @('CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL','CHRONICLE
         throw "Live-model checkpoint verification requires local $setting configuration; the value is never printed."
     }
 }
+. (Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1')
+$null = Initialize-FreeLLMAPIProfile
 if (Get-Process -Name Bannerlord* -ErrorAction SilentlyContinue) { throw 'Refusing to run checkpoint resume while any Bannerlord client is already running.' }
 if ($RuntimeOnlyResume -and $CrashAfterRecruit) { throw 'Select only one checkpoint recovery scenario per run.' }
 if (-not (Test-Path -LiteralPath $sourceSavePath -PathType Leaf)) { throw "Disposable checkpoint source save not found: $sourceSavePath" }

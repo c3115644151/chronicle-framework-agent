@@ -39,12 +39,18 @@ try {
     $endpoint = [string]$env:CHRONICLE_LLM_BASE_URL
     $model = [string]$env:CHRONICLE_LLM_MODEL
     $apiKey = [string]$env:CHRONICLE_LLM_API_KEY
+    if ([string]::IsNullOrWhiteSpace($apiKey)) { $apiKey = [string]$env:FREELLMAPI_API_KEY }
     if ([string]::IsNullOrWhiteSpace($endpoint)) { throw 'CHRONICLE_LLM_BASE_URL is required.' }
     if ([string]::IsNullOrWhiteSpace($model)) { throw 'CHRONICLE_LLM_MODEL is required.' }
     $protocol = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_PROTOCOL)) { 'openai-compatible' } else { [string]$env:CHRONICLE_LLM_PROTOCOL }
     if ($protocol -notin @('openai-compatible','ollama-native')) { throw 'CHRONICLE_LLM_PROTOCOL must be openai-compatible or ollama-native.' }
     $endpointUri = [Uri]::new($endpoint)
     if (-not $endpointUri.IsAbsoluteUri -or $endpointUri.Scheme -notin @('https','http')) { throw 'CHRONICLE_LLM_BASE_URL must be an absolute HTTP(S) endpoint.' }
+    if ($env:CHRONICLE_HARNESS_PROVIDER_MODE -cne 'protocol-stub') {
+        if ($protocol -cne 'openai-compatible' -or -not $endpointUri.IsLoopback -or $endpointUri.Port -ne 31415 -or $endpointUri.AbsolutePath.TrimEnd('/') -ne '/v1')
+            { throw 'Live PowerShell model calls are FreeLLMAPI-only; local inference and other endpoints are refused.' }
+        if ([string]::IsNullOrWhiteSpace($apiKey)) { throw 'FreeLLMAPI unified key is not configured in the process environment; no inference request was sent.' }
+    }
     if ($endpointUri.Scheme -eq 'http' -and -not $endpointUri.IsLoopback) { throw 'Plain HTTP is permitted only for a loopback test provider.' }
     if ($protocol -eq 'ollama-native' -and -not $endpointUri.IsLoopback) { throw 'ollama-native protocol is restricted to a loopback Ollama service.' }
     $endpointBuilder = [UriBuilder]::new($endpointUri)

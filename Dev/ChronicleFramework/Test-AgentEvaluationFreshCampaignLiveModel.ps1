@@ -13,15 +13,11 @@ $saveDirectory = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Banner
 $outerTemp = $env:CHRONICLE_HARNESS_TEMP
 if (-not $outerTemp -or -not (Test-Path -LiteralPath $outerTemp -PathType Container)) { throw 'Fresh-Campaign live-model evaluation requires an active Run-Harness TestResults temp directory.' }
 $evaluationRoot = Split-Path -Parent $outerTemp
-$modelName = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL','Process')
-if ([string]::IsNullOrWhiteSpace($modelName)) { $modelName = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL','User') }
-if ([string]::IsNullOrWhiteSpace($modelName)) { throw 'Fresh-Campaign candidate evaluation requires a locally configured model name; credentials are never displayed.' }
+. (Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1')
+$freeLlmApiProfile = Initialize-FreeLLMAPIProfile
+$modelName = [string]$freeLlmApiProfile.RequestedModelId
 $harnessCommit = ([string](& git -C $PSScriptRoot rev-parse HEAD)).Trim()
 $harnessDirtyFileCount = @(& git -C $PSScriptRoot status --short).Count
-$ollamaVersion = $null
-try { $ollamaVersion = [string](Invoke-RestMethod -Uri 'http://127.0.0.1:11434/api/version' -TimeoutSec 3).version } catch { throw 'The local Ollama loopback service could not be queried before the candidate run.' }
-$modelDigest = $null
-try { $modelEntry = (Invoke-RestMethod -Uri 'http://127.0.0.1:11434/api/tags' -TimeoutSec 3).models | Where-Object { [string]$_.name -ceq $modelName } | Select-Object -First 1; if (-not $modelEntry) { throw 'The configured candidate model is not present in Ollama tags.' }; $modelDigest = [string]$modelEntry.digest } catch { throw "Could not verify configured model metadata without reading or printing credentials: $($_.Exception.Message)" }
 $modules = @('Bannerlord.Harmony','Bannerlord.ButterLib','Bannerlord.UIExtenderEx','Bannerlord.MBOptionScreen','Native','SandBoxCore','CustomBattle','SandBox','StoryMode','BirthAndDeath','ChronicleFramework')
 $results = [System.Collections.Generic.List[object]]::new()
 $gitRoot = ([string](& git -C $harnessRoot rev-parse --show-toplevel)).Trim()
@@ -142,8 +138,9 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         HarnessSourceManifestAfter = $sourceManifestAfterRun
         HarnessSourceIntegrityPassed = $sourceManifestUnchanged
         Model = $modelName
-        ModelDigest = $modelDigest
-        OllamaVersion = $ollamaVersion
+        ModelCatalogSha256 = $freeLlmApiProfile.AvailableModelCatalogSha256
+        AvailableModelCount = $freeLlmApiProfile.AvailableModelCount
+        ModelGateway = 'FreeLLMAPI'
         WallClockSeconds = [Math]::Round($stopwatch.Elapsed.TotalSeconds, 3)
         CampaignDaysElapsed = $campaignDays
         MoveCount = if ($progression) { [int]$progression.MoveCount } else { 0 }
@@ -178,10 +175,11 @@ $resultsArray = @($results)
 $campaignIds = @($resultsArray | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.CampaignInstanceId) } | ForEach-Object { [string]$_.CampaignInstanceId } | Select-Object -Unique)
 $passedRuns = @($resultsArray | Where-Object { $_.Passed }).Count
 $result = [ordered]@{
-    ProviderKind = 'configured local real-model candidate; not a deterministic baseline'
+    ProviderKind = 'configured FreeLLMAPI-routed free-model candidate; not a deterministic baseline'
     Model = $modelName
-    ModelDigest = $modelDigest
-    OllamaVersion = $ollamaVersion
+    ModelCatalogSha256 = $freeLlmApiProfile.AvailableModelCatalogSha256
+    AvailableModelCount = $freeLlmApiProfile.AvailableModelCount
+    ModelGateway = 'FreeLLMAPI'
     HarnessCommit = $harnessCommit
     HarnessDirtyFileCountAtStart = $harnessDirtyFileCount
     HarnessSourceManifestAtStart = $sourceManifestAtEvaluationStart

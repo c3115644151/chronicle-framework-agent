@@ -17,6 +17,7 @@ $priorReasoningEffort = $env:CHRONICLE_LLM_REASONING_EFFORT
 $priorThinkingMode = $env:CHRONICLE_LLM_THINKING_MODE
 $priorTemperature = $env:CHRONICLE_LLM_TEMPERATURE
 $priorProtocol = $env:CHRONICLE_LLM_PROTOCOL
+$priorHarnessProviderMode = $env:CHRONICLE_HARNESS_PROVIDER_MODE
 $harnessSecret = 'chronicle-local-provider-test-secret'
 $listener = $null
 $process = $null
@@ -45,6 +46,7 @@ function Start-ProviderProcess($InputJson) {
 }
 
 try {
+    $env:CHRONICLE_HARNESS_PROVIDER_MODE = 'protocol-stub'
     $tcpListener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
     $tcpListener.Start()
     $port = ([System.Net.IPEndPoint]$tcpListener.LocalEndpoint).Port
@@ -835,4 +837,5 @@ finally {
     if ($null -eq $priorThinkingMode) { Remove-Item Env:CHRONICLE_LLM_THINKING_MODE -ErrorAction SilentlyContinue } else { $env:CHRONICLE_LLM_THINKING_MODE = $priorThinkingMode }
     if ($null -eq $priorTemperature) { Remove-Item Env:CHRONICLE_LLM_TEMPERATURE -ErrorAction SilentlyContinue } else { $env:CHRONICLE_LLM_TEMPERATURE = $priorTemperature }
     if ($null -eq $priorProtocol) { Remove-Item Env:CHRONICLE_LLM_PROTOCOL -ErrorAction SilentlyContinue } else { $env:CHRONICLE_LLM_PROTOCOL = $priorProtocol }
+    if ($null -eq $priorHarnessProviderMode) { Remove-Item Env:CHRONICLE_HARNESS_PROVIDER_MODE -ErrorAction SilentlyContinue } else { $env:CHRONICLE_HARNESS_PROVIDER_MODE = $priorHarnessProviderMode }
 }

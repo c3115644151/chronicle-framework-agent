@@ -11,7 +11,7 @@ if (-not (Test-Path -LiteralPath $hostDll -PathType Leaf)) { throw 'Local Agent 
 New-Item -ItemType Directory -Path $evidencePath -Force | Out-Null
 
 foreach ($setting in @(
-    'CHRONICLE_LLM_PROTOCOL', 'CHRONICLE_LLM_BASE_URL', 'CHRONICLE_LLM_MODEL', 'CHRONICLE_LLM_API_KEY',
+    'CHRONICLE_LLM_PROTOCOL', 'CHRONICLE_LLM_BASE_URL', 'CHRONICLE_LLM_MODEL', 'CHRONICLE_LLM_API_KEY', 'FREELLMAPI_API_KEY',
     'CHRONICLE_LLM_TIMEOUT_SECONDS', 'CHRONICLE_LLM_MAX_TOKENS', 'CHRONICLE_LLM_MAX_TOKEN_PARAMETER',
     'CHRONICLE_LLM_REASONING_EFFORT', 'CHRONICLE_LLM_THINKING_MODE', 'CHRONICLE_LLM_TEMPERATURE'
 )) {
@@ -29,26 +29,10 @@ if (-not $protocolSelfTest.passed -or $protocolSelfTest.modelCalls -ne 0 -or $pr
     throw 'Provider contract self-test returned an invalid pass summary.'
 }
 
-$baseUrl = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_BASE_URL', 'Process')
-$model = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL', 'Process')
-$protocol = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_PROTOCOL', 'Process')
-if ([string]::IsNullOrWhiteSpace($protocol)) { $protocol = 'openai-compatible' }
-$endpoint = $null
-if ([string]::IsNullOrWhiteSpace($baseUrl) -or [string]::IsNullOrWhiteSpace($model) -or
-    -not [Uri]::TryCreate($baseUrl, [UriKind]::Absolute, [ref]$endpoint) -or -not $endpoint.IsLoopback) {
-    throw 'Local provider smoke requires configured model settings and a loopback endpoint; values are not printed.'
-}
-
-$tagsBuilder = [UriBuilder]::new($endpoint)
-$tagsBuilder.Path = '/api/tags'
-try { $tags = Invoke-RestMethod -Method Get -Uri $tagsBuilder.Uri -TimeoutSec 5 }
-catch { throw "Configured local model service could not be reached (failureType=$($_.Exception.GetType().Name)); endpoint details are omitted." }
-if ($protocol -in @('openai-compatible','')) {
-    if ([string]$endpoint.AbsolutePath -notmatch '/v1/?$') { throw 'OpenAI-compatible local provider base must resolve to its /v1 API root.' }
-}
-if ($protocol -eq 'ollama-native' -and -not $endpoint.IsLoopback) { throw 'Native Ollama requests are restricted to loopback.' }
-$availableModels = @($tags.models | ForEach-Object { [string]$_.name })
-if ($model -notin $availableModels) { throw 'Configured local model is not present in the reachable Ollama service; its name is not printed.' }
+. (Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1')
+$freeLlmApiProfile = Initialize-FreeLLMAPIProfile
+$model = [string]$freeLlmApiProfile.RequestedModelId
+$protocol = 'openai-compatible'
 
 $decisionRequest = [ordered]@{
     goal = 'This is a provider smoke test only. The exact allowed decision is to stop and report that structured output is working.'
@@ -84,21 +68,24 @@ try { $result = $stdout | ConvertFrom-Json }
 catch { throw 'Local provider Host returned invalid structured JSON; raw response is omitted.' }
 if ($result.status -ne 'completed' -or $result.decision.done -ne $true -or
     [string]::IsNullOrWhiteSpace([string]$result.decision.reason)) {
-    throw 'Local model did not return the expected bounded stop decision.'
+    throw 'FreeLLMAPI-routed model did not return the expected bounded stop decision.'
 }
 
 $summary = [ordered]@{
     Passed = $true
     ProviderProtocol = $protocol
-    LocalServiceReachable = $true
-    ConfiguredModelInstalled = $true
+    FreeLLMAPIReachable = $true
+    ConfiguredRouteAvailable = $freeLlmApiProfile.RequestedModelId
+    AvailableModelCount = $freeLlmApiProfile.AvailableModelCount
+    AvailableModelCatalogSha256 = $freeLlmApiProfile.AvailableModelCatalogSha256
+    RoutedVia = [string]$result.routedVia
     ResultStatus = [string]$result.status
     DecisionType = 'done'
     ReasonWordCount = ([string]$result.decision.reason -split '\s+' | Where-Object { $_ }).Count
     PromptTokens = $result.promptTokens
     CompletionTokens = $result.completionTokens
     NativeCommands = 0
-    LocalCallCost = 0
+    RouterCatalog = 'FreeLLMAPI currently available catalog; actual provider captured in RoutedVia'
     NoModelEndpointOrCredentialLogged = $true
     ProviderContract = $protocolSelfTest
 }
