@@ -356,8 +356,8 @@ internal static class ProviderContractSelfTest
                 observedResponseFormats.Add("missing");
             if (observedResponseFormats.Count == 1)
             {
-                var rejectedSchema = new HttpResponseMessage(HttpStatusCode.UnprocessableEntity);
-                rejectedSchema.Headers.TryAddWithoutValidation("X-Fallback-Trail", "ovh/Mistral-Small key1=provider_bad_request");
+                var rejectedSchema = new HttpResponseMessage(HttpStatusCode.BadGateway);
+                rejectedSchema.Headers.TryAddWithoutValidation("X-Fallback-Trail", "custom/nvidia/model key1=upstream_error; ovh/Mistral-Small key2=provider_bad_request");
                 rejectedSchema.Content = new StringContent("schema unsupported");
                 return Task.FromResult(rejectedSchema);
             }
@@ -418,7 +418,7 @@ internal static class ProviderContractSelfTest
             throw new AgentHostException("provider-self-test-rate-window-policy-failed", "Only the known FreeLLMAPI-to-OVH Mistral route should receive the conservative 31-second request spacing.");
         results.Add(new { scenario = "freellmapi-ovh-model-rate-window-is-route-specific", passed = true });
 
-        foreach (var status in new[] { HttpStatusCode.BadRequest, HttpStatusCode.UnprocessableEntity })
+        foreach (var status in new[] { HttpStatusCode.BadRequest, HttpStatusCode.UnprocessableEntity, HttpStatusCode.BadGateway })
         {
             using var explicitSchemaRejection = new HttpResponseMessage(status);
             explicitSchemaRejection.Headers.TryAddWithoutValidation("X-Fallback-Trail", "ovh/Mistral-Small key1=provider_bad_request");
@@ -434,7 +434,7 @@ internal static class ProviderContractSelfTest
                 OllamaNativeProvider.ShouldRetryWithJsonObject(new Uri("http://127.0.0.1:11434/v1/chat/completions"), nonGatewayBadRequest))
                 throw new AgentHostException("provider-self-test-retried-non-schema-failure", "JSON-object compatibility retry must be limited to explicit FreeLLMAPI provider_bad_request responses.");
         }
-        results.Add(new { scenario = "freellmapi-json-object-fallback-recognizes-explicit-400-and-422-schema-rejection-only", passed = true });
+        results.Add(new { scenario = "freellmapi-json-object-fallback-recognizes-explicit-400-422-and-fallback-502-schema-rejection-only", passed = true });
         }
         catch (KeyNotFoundException exception)
         {

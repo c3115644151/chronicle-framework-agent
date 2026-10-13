@@ -400,7 +400,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
 
     internal static bool ShouldRetryWithJsonObject(Uri endpoint, HttpResponseMessage response)
     {
-        if (!IsFreeLlmApi(endpoint) || response.StatusCode is not (HttpStatusCode.BadRequest or HttpStatusCode.UnprocessableEntity)) return false;
+        if (!IsFreeLlmApi(endpoint) || response.StatusCode is not (HttpStatusCode.BadRequest or HttpStatusCode.UnprocessableEntity or HttpStatusCode.BadGateway)) return false;
         return ReadResponseHeader(response, "X-Fallback-Trail")?.Contains("provider_bad_request", StringComparison.OrdinalIgnoreCase) == true;
     }
 
