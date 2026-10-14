@@ -676,19 +676,20 @@ internal static class ProviderContractSelfTest
                 ignoredFormat.Headers.TryAddWithoutValidation("X-Fallback-Trail", "custom/nvidia/llama-3.2-11b-vision key1=format_ignored");
                 return Task.FromResult(ignoredFormat);
             }
-            return Task.FromResult(JsonResponse(BuildChatResponse(ValidDecision, "stop")));
+            return Task.FromResult(JsonResponse(BuildChatResponse("{\"action\":\"tradeConfirm\",\"arguments\":{}}", "stop")));
         });
         using (var formatFallbackClient = new HttpClient(formatIgnoredFallbackHandler) { Timeout = freeLlmApiSettings.Timeout })
         using (var formatFallbackProvider = new OllamaNativeProvider(freeLlmApiSettings with { Model = "nvidiallama-3.2-11b-vision" }, formatFallbackClient))
         using (var request = JsonDocument.Parse(BuildActionDecisionRequest()))
         {
             var result = await formatFallbackProvider.DecideAsync(request.RootElement, CancellationToken.None);
-            if (result.Decision["done"]?.GetValue<bool>() != true ||
+            if (result.Decision["action"]?.GetValue<string>() != "tradeConfirm" ||
+                result.Decision["rationale"]?.GetValue<string>() != string.Empty ||
                 result.ResponseFormatMode != "json_object_fallback" ||
                 formatFallbackCalls != 2 ||
                 !formatFallbackModes.SequenceEqual(new[] { "json_schema", "json_object" }, StringComparer.Ordinal))
-                throw new AgentHostException("provider-self-test-format-ignored-json-fallback-failed", $"A FreeLLMAPI 502 explicitly classifying format_ignored must permit exactly one JSON-object retry, then validate the returned decision through the normal schema contract. calls={formatFallbackCalls}; modes={string.Join(',', formatFallbackModes)}; done={result.Decision["done"]?.GetValue<bool>()}; format={result.ResponseFormatMode}.");
-            results.Add(new { scenario = "freellmapi-format-ignored-502-falls-back-once-to-locally-validated-json-object", passed = true, providerCalls = formatFallbackCalls, nativeCommands = 0 });
+                throw new AgentHostException("provider-self-test-format-ignored-json-fallback-failed", $"A FreeLLMAPI 502 explicitly classifying format_ignored must permit exactly one JSON-object retry, then normalize the returned Native action through the normal catalog contract. calls={formatFallbackCalls}; modes={string.Join(',', formatFallbackModes)}; action={result.Decision["action"]?.GetValue<string>() ?? "missing"}; format={result.ResponseFormatMode}.");
+            results.Add(new { scenario = "freellmapi-format-ignored-502-falls-back-once-to-locally-normalized-native-action", passed = true, providerCalls = formatFallbackCalls, nativeCommands = 0 });
         }
         using (var transientGatewayFailure = new HttpResponseMessage(HttpStatusCode.BadGateway))
         {

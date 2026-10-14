@@ -417,7 +417,7 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerProfileTestSource -notmatch 'freellmapi-http-error-keeps-safe-route-fallback-headers-without-response-body' -or
     $providerProfileTestSource -notmatch 'freellmapi-json-schema-provider-rejection-falls-back-to-validated-json-object' -or
     $providerProfileTestSource -notmatch 'freellmapi-json-object-fallback-recognizes-schema-rejection-or-format-ignored-502-only' -or
-    $providerProfileTestSource -notmatch 'freellmapi-format-ignored-502-falls-back-once-to-locally-validated-json-object' -or
+    $providerProfileTestSource -notmatch 'freellmapi-format-ignored-502-falls-back-once-to-locally-normalized-native-action' -or
     $agentHostProviderSource -notmatch 'format_ignored' -or
     $providerProfileTestSource -notmatch 'freellmapi-transient-upstream-502-retried-once-before-native-action' -or
     $providerProfileTestSource -notmatch 'freellmapi-429-honors-bounded-retry-after-before-native-action' -or
