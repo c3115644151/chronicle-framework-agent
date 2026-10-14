@@ -89,7 +89,7 @@ W7-K代理故障当时诊断（2026-10-14）：`AgentHostProvider`运行`TestRes
 
 W7-K代理恢复后的重新验证（2026-10-14）：用户表示已恢复7890后，GitHub API经代理返回HTTP 200，FreeLLMAPI真实模型探针通过，实际由`custom/nvidia/llama-3.2-11b-vision`返回唯一允许的`talkToSettlementHero`（`TestResults/20261014-115127`）；本地commit `23e3327`已由`git ls-remote`确认存在于远端。BlockRun探针虽返回HTTP 200，但curl仍报告TLS close-notify，FreeLLMAPI上游连接在不同请求间仍有间歇重置。
 
-最新只读 Provider 探针（`TestResults/20261014-121616`）对当前目录中明确存在的`nvidianemotron-3-nano-omni-30b-a3b-reasoning`先通过Preflight和Build，再在FreeLLMAPI调用层因`ECONNRESET blockrun.ai via proxy`返回HTTP 502并耗尽该直连候选；同一时段FreeLLMAPI健康检查也记录Google、OVH与BlockRun多条代理传输重置。此前单次成功探针不能代表当前代理稳定；此后应先以无游戏的Provider探针确认连接恢复，避免重新启动完整Campaign Fixture。
+最新只读Provider探针（`TestResults/20261014-121616`、`122233`）对目录中明确存在的`nvidianemotron-3-nano-omni-30b-a3b-reasoning`先通过Preflight和Build，再在FreeLLMAPI调用层因`ECONNRESET blockrun.ai via proxy`返回HTTP 502并耗尽该直连候选。两次之间curl曾短暂返回BlockRun HTTP 200，但FreeLLMAPI健康检查和随后模型请求又记录Google、OVH与BlockRun多条代理传输重置，证明出口处于间歇状态而非稳定恢复。此后应先以无游戏Provider探针确认调用持续稳定，避免重新启动完整Campaign Fixture。
 
 W7-K直接免费模型完整场景（`TestResults/20261014-120307`）：固定`nvidianemotron-3-nano-omni-30b-a3b-reasoning`的Provider探针通过，实际路由`custom/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`。完整测试在5次Host决策、1条Native动作后失败：模型进入头人对话后连续三次返回`leave_settlement`作为动作名，Host均在Native前拒绝；没有接受任务，源存档不变且进程清理成功。已进一步改正协议说明：显式标注对话选项ID只能放入`dialogueSelect.arguments.OptionId`，拒绝反馈直接列出当前可点击的确切ID；Host合同测试验证错误响应不产生Native动作并能在之后选对，`AgentHostPackage`及`Docs`通过（`20261014-121044`、`121225`）。这仍是确定性合同证据，下一次真实模型运行才可验证反馈是否纠正。
 
