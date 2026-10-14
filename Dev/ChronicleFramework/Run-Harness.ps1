@@ -23,7 +23,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.188'
+$HarnessContractVersion = '7.189'
 $effectiveSmokeTimeoutSeconds = if ($Phase -eq 'AgentHostVillageToolsQuestEvaluation') { [Math]::Max($SmokeTimeoutSeconds, 240) } else { $SmokeTimeoutSeconds }
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
@@ -228,7 +228,7 @@ $requestedStages = switch ($Phase) {
     'AgentHostPackage' { @('Preflight', 'Build', 'AgentHostPackage') }
     'AgentHostSupplyEvaluation' { @('Preflight', 'Build', 'AgentHostSupplyEvaluation') }
     'AgentHostCampaignLoopEvaluation' { @('Preflight', 'Build', 'AgentHostCampaignLoopEvaluation') }
-    'AgentHostVillageToolsQuestEvaluation' { @('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostVillageToolsQuestEvaluation') }
+    'AgentHostVillageToolsQuestEvaluation' { @('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostProvider', 'AgentHostVillageToolsQuestEvaluation') }
     'AgentHostLifecycleEvaluation' { @('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostLifecycleEvaluation') }
     'AgentHostLifecycleCompletionEvaluation' { @('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostLifecycleCompletionEvaluation') }
     'AgentLoop' { @('Preflight', 'Build', 'AgentLoop') }

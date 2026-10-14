@@ -434,16 +434,19 @@ internal static class ProviderContractSelfTest
         }
 
         using (var missingRetryAfter = new HttpResponseMessage(HttpStatusCode.TooManyRequests))
+        using (var observedRetryAfter = new HttpResponseMessage(HttpStatusCode.TooManyRequests))
         using (var longRetryAfter = new HttpResponseMessage(HttpStatusCode.TooManyRequests))
         using (var nonFreeRetryAfter = new HttpResponseMessage(HttpStatusCode.TooManyRequests))
         {
-            longRetryAfter.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(61));
+            observedRetryAfter.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(85));
+            longRetryAfter.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(121));
             nonFreeRetryAfter.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(1));
-            if (OllamaNativeProvider.GetBoundedRateLimitRetryAfter(freeLlmApiSettings.Endpoint, missingRetryAfter).HasValue ||
+            if (OllamaNativeProvider.GetBoundedRateLimitRetryAfter(freeLlmApiSettings.Endpoint, observedRetryAfter) != TimeSpan.FromSeconds(85) ||
+                OllamaNativeProvider.GetBoundedRateLimitRetryAfter(freeLlmApiSettings.Endpoint, missingRetryAfter).HasValue ||
                 OllamaNativeProvider.GetBoundedRateLimitRetryAfter(freeLlmApiSettings.Endpoint, longRetryAfter).HasValue ||
                 OllamaNativeProvider.GetBoundedRateLimitRetryAfter(settings.Endpoint, nonFreeRetryAfter).HasValue)
-                throw new AgentHostException("provider-self-test-unbounded-rate-limit-retry-accepted", "Rate limits without a safe short retry window must not be retried automatically.");
-            results.Add(new { scenario = "freellmapi-429-without-short-retry-after-fails-closed", passed = true });
+                throw new AgentHostException("provider-self-test-unbounded-rate-limit-retry-accepted", "Only explicit FreeLLMAPI Retry-After delays from 1 through 120 seconds may be retried automatically.");
+            results.Add(new { scenario = "freellmapi-429-accepts-observed-85-second-retry-and-fails-closed-outside-bounds", passed = true });
         }
 
         var boundedTransientRetryCalls = 0;

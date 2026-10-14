@@ -447,7 +447,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         if (!IsFreeLlmApi(endpoint) || response.StatusCode != HttpStatusCode.TooManyRequests || response.Headers.RetryAfter is null)
             return null;
         var delay = response.Headers.RetryAfter.Delta ?? response.Headers.RetryAfter.Date - DateTimeOffset.UtcNow;
-        if (!delay.HasValue || delay.Value <= TimeSpan.Zero || delay.Value > TimeSpan.FromSeconds(60)) return null;
+        if (!delay.HasValue || delay.Value <= TimeSpan.Zero || delay.Value > TimeSpan.FromSeconds(120)) return null;
         return delay.Value;
     }
 
