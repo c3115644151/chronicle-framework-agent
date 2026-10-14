@@ -63,7 +63,6 @@ $gameRoot = if ($env:CHRONICLE_GAME_ROOT -and (Test-Path -LiteralPath $env:CHRON
 $binDirectory = Join-Path $gameRoot 'bin\Win64_Shipping_Client'
 $launcher = Join-Path $binDirectory 'Bannerlord.BLSE.Standalone.exe'
 $steamRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $gameRoot))
-$steamExe = Join-Path $steamRoot 'steam.exe'
 $documentsPath = [Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)
 if ([string]::IsNullOrWhiteSpace($documentsPath)) { throw 'Windows Documents directory could not be resolved for the Native protocol.' }
 $documentsRoot = Join-Path $documentsPath 'Mount and Blade II Bannerlord'
@@ -99,49 +98,7 @@ function Restore-ChronicleTestEngineConfig([string]$BackupPath) {
 }
 
 function Ensure-ChronicleSteamClient([int]$TimeoutSeconds = 45) {
-    $startedByHarness = $false
-    $existingSteam = @(Get-Process -Name 'steam' -ErrorAction SilentlyContinue)
-    if ($existingSteam.Count -eq 0) {
-        if (-not (Test-Path -LiteralPath $steamExe -PathType Leaf)) {
-            throw "Steam client is not running and the expected Steam executable is not present at '$steamExe'."
-        }
-        Start-Process -FilePath $steamExe -ArgumentList '-silent' -WorkingDirectory $steamRoot -WindowStyle Hidden | Out-Null
-        $startedByHarness = $true
-    }
-    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
-    $steamProcesses = @()
-    $webHelperProcesses = @()
-    $webHelperSignature = ''
-    $webHelperStableSinceUtc = $null
-    $readiness = $null
-    while ([DateTime]::UtcNow -lt $deadline) {
-        $steamProcesses = @(Get-Process -Name 'steam' -ErrorAction SilentlyContinue)
-        $webHelperProcesses = @(Get-Process -Name 'steamwebhelper' -ErrorAction SilentlyContinue)
-        $currentWebHelperSignature = (@($webHelperProcesses | ForEach-Object { [int]$_.Id } | Sort-Object) -join ',')
-        if ([string]::IsNullOrWhiteSpace($currentWebHelperSignature)) {
-            $webHelperSignature = ''
-            $webHelperStableSinceUtc = $null
-        }
-        elseif ($currentWebHelperSignature -cne $webHelperSignature) {
-            $webHelperSignature = $currentWebHelperSignature
-            $webHelperStableSinceUtc = [DateTime]::UtcNow
-        }
-        $stableSeconds = if ($webHelperStableSinceUtc) { ([DateTime]::UtcNow - $webHelperStableSinceUtc).TotalSeconds } else { 0 }
-        $readiness = Get-ChronicleSteamClientReadiness -SteamProcessCount $steamProcesses.Count -WebHelperProcessCount $webHelperProcesses.Count -WebHelperStableSeconds $stableSeconds -RequiredStableSeconds 5
-        if ($readiness.Ready) {
-            return [ordered]@{
-                available = $true
-                startedByHarness = $startedByHarness
-                processIds = @($steamProcesses | ForEach-Object { [int]$_.Id })
-                webHelperProcessIds = @($webHelperProcesses | ForEach-Object { [int]$_.Id })
-                readyUtc = [DateTime]::UtcNow.ToString('O')
-                readiness = $readiness
-            }
-        }
-        Start-Sleep -Milliseconds 500
-    }
-    $reason = if ($readiness) { [string]$readiness.Reason } else { 'no-readiness-sample' }
-    throw "Steam client did not reach stable local API readiness within $TimeoutSeconds seconds (reason='$reason', steamProcesses=$($steamProcesses.Count), webHelperProcesses=$($webHelperProcesses.Count)). Bannerlord was not launched."
+    Ensure-ChronicleSteamClientReady -SteamRoot $steamRoot -TimeoutSeconds $TimeoutSeconds
 }
 
 function Write-Result($Value) {

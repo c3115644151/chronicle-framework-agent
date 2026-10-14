@@ -247,6 +247,10 @@ W5-K在`TestResults/20261010-181412`以两次独立New Campaign完成：第1次�
 
 ### 本地Provider运行核验
 
+Steam/Smoke启动守卫的真实验证（`TestResults/20261014-223256`、`224145`、`225755`）：`220946`暴露Smoke绕过Agent-Cli的Steam前置检查，游戏在Steam未运行时弹`Unable to initialize Steam API`。现在Agent-Cli与Smoke共用`HarnessStartupEvidence.ps1`的隐藏Steam启动和5秒WebHelper稳定检查；第一次验证发现Windows PowerShell 5.1 JavaScriptSerializer无法处理用于收据的整数数组并报PSMethod循环引用，Smoke结果改为记录Steam状态计数/标量。最终`225755` Smoke通过，Bannerlord到达主菜单且收据成功序列化；完整`225912`阶段中的Smoke也通过。该修复只影响Harness启动前置和证据，不发送全局键鼠。
+
+W7-K模型阶段的上游失败（`TestResults/20261014-225912`）：真实Campaign从卡利奥克可见任务标记开始，Host在首个模型决策没有执行Native动作；CampaignDay不变、任务仍未接取、源存档不变、游戏/Host进程清理，窗口录像覆盖完整。FreeLLMAPI响应为HTTP 429，明确记录`Retry-After=75`，Host合规等待85014ms后重试仍失败。同期FreeLLMAPI本机日志显示NVIDIA自定义路由请求经`blockrun.ai via proxy`遇到`UND_ERR_SOCKET`/`ECONNRESET`及候选cooldown，因此网络/网关路由故障是更有力的解释；“免费配额耗尽”未被证实。之后`TestResults/20261015-014649` Provider合成门禁再次通过，真实路由`custom/nvidia/llama-3.2-11b-vision`返回动作、703输入/32输出token、NativeCommands=0；当前7890代理直连BlockRun与GitHub只读探针均HTTP 200，但不能保证下一次推理稳定。仍需在最新代码下重跑真实Quest。
+
 本地Provider需区分模型目录存在与推理可用。本机Ollama 0.40.1曾缺少`lib/ollama/llama-server.exe`及配套库，目录查询成功但推理进程无法创建。使用同版本官方Windows包修复，包SHA-256为`b394d14436d38032f23190e3f14eb2c6dad5ebbe4e192414f74c8fdca01703ab`，主程序与原安装文件哈希一致；旧库保留于`D:\Ollama\App\lib-incomplete-20261012`，未重下模型。原`qwen3.5:4b-q4_K_M`短推理返回OK（5.19秒、17 tokens），日志确认33/33层GPU加载；服务以`OLLAMA_NO_CLOUD=true`运行，日志在D盘BuildCache/OllamaRepair。此证据仅证明本机推理恢复。单次Provider时限现覆盖响应头与正文，无模型回归验证正文停滞返回`provider-timeout`；真实生命周期完成测试先做有界一token推理预检，避免运行库失效时启动游戏。目录探测本身仍只证明模型登记/服务可达。
 
 游戏内Start启动真实模型Host的地图到达切片已由`TestResults/20261012-184435`核验：commit `da02a1e`，本地4B Provider读取`mcm-start-request`当前快照，4次模型决策、2个Native命令（查询/移动），实际到达`town_V1`，模型done与Native目标一致，控制器进入Completed且Host退出码0。生命周期场景48.85秒，CampaignDay 91077.378→91077.400自然推进；9017输入/90输出tokens，源档hash未变、游戏/Host/session清理通过。早先正常终态曾被Console.In同步等待阻塞；包回归保持stdin打开验证修复，旧调用对照`183747`超时，修复`183822`通过。控制目录补齐observeAgain的整数waitSeconds 1–10约束后上述真实场景通过。该证据只覆盖一次附近聚落到达，不证明任意自由文本目标、完整生涯能力或实际MCM鼠标点击。

@@ -80,6 +80,8 @@ if (-not $WithoutChronicle) {
 $moduleArgument = '_MODULES_*' + ($modules -join '*') + '*_MODULES_'
 $arguments = "/singleplayer $moduleArgument /anticheat /no_watchdog"
 
+$steamRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $gameRoot))
+$steamStatus = Ensure-ChronicleSteamClientReady -SteamRoot $steamRoot
 Set-ChronicleTestDisplayConfig -EngineConfigPath $engineConfig
 if (Test-Path $engineConfig) {
     $engineText = Get-Content $engineConfig -Raw
@@ -240,6 +242,19 @@ $result = [ordered]@{
     GameRoot = $gameRoot
     ModuleDirectory = $modulePath
     GameExecutable = $gameExe
+    SteamClient = [ordered]@{
+        available = [bool]$steamStatus.available
+        startedByHarness = [bool]$steamStatus.startedByHarness
+        readyUtc = [string]$steamStatus.readyUtc
+        readiness = [ordered]@{
+            Ready = [bool]$steamStatus.readiness.Ready
+            Reason = [string]$steamStatus.readiness.Reason
+            SteamProcessCount = [int]$steamStatus.readiness.SteamProcessCount
+            WebHelperProcessCount = [int]$steamStatus.readiness.WebHelperProcessCount
+            WebHelperStableSeconds = [double]$steamStatus.readiness.WebHelperStableSeconds
+            RequiredStableSeconds = [double]$steamStatus.readiness.RequiredStableSeconds
+        }
+    }
     Build = 'passed'
     ChronicleIncluded = (-not $WithoutChronicle.IsPresent)
     AssemblyLoaded = $assemblyLoaded
@@ -274,7 +289,26 @@ $resultPath = Join-Path $harnessEvidenceDirectory 'SmokeResult.json'
 $result.EvidenceResultPath = $resultPath
 $receiptStagePath = Join-Path $harnessEvidenceDirectory 'SmokeReceiptStages.log'
 Add-Content -LiteralPath $receiptStagePath -Value 'serialize-start'
-$receiptJson = ConvertTo-ChronicleReceiptJson -Value $result
+try {
+    $receiptJson = ConvertTo-ChronicleReceiptJson -Value $result
+}
+catch {
+    $failedFields = [System.Collections.Generic.List[string]]::new()
+    foreach ($fieldName in $result.Keys) {
+        try {
+            $singleField = [ordered]@{ $fieldName = $result[$fieldName] }
+            $null = ConvertTo-ChronicleReceiptJson -Value $singleField
+        }
+        catch {
+            $fieldValue = $result[$fieldName]
+            $fieldType = if ($null -eq $fieldValue) { 'null' } else { $fieldValue.GetType().FullName }
+            $failedFields.Add("${fieldName}:$fieldType")
+        }
+    }
+    $diagnostic = if ($failedFields.Count -gt 0) { 'serialize-field-failed:' + ($failedFields -join ',') } else { 'serialize-field-failed:none;combined-object-only' }
+    Add-Content -LiteralPath $receiptStagePath -Value $diagnostic
+    throw
+}
 Add-Content -LiteralPath $receiptStagePath -Value 'serialize-complete'
 $receiptJson | Set-Content -LiteralPath $resultPath -Encoding UTF8
 Add-Content -LiteralPath $receiptStagePath -Value 'write-complete'

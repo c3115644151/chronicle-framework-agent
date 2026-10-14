@@ -66,6 +66,63 @@ function Get-ChronicleSteamClientReadiness {
     }
 }
 
+function Ensure-ChronicleSteamClientReady {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$SteamRoot,
+        [ValidateRange(1,180)][int]$TimeoutSeconds = 45,
+        [ValidateRange(0,60)][double]$RequiredStableSeconds = 5
+    )
+
+    $resolvedSteamRoot = [IO.Path]::GetFullPath($SteamRoot)
+    $steamExe = Join-Path $resolvedSteamRoot 'steam.exe'
+    if (-not (Test-Path -LiteralPath $steamExe -PathType Leaf)) {
+        throw "Steam client is not running and the expected Steam executable is not present at '$steamExe'."
+    }
+
+    $startedByHarness = $false
+    if (@(Get-Process -Name 'steam' -ErrorAction SilentlyContinue).Count -eq 0) {
+        Start-Process -FilePath $steamExe -ArgumentList '-silent' -WorkingDirectory $resolvedSteamRoot -WindowStyle Hidden | Out-Null
+        $startedByHarness = $true
+    }
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $steamProcesses = @()
+    $webHelperProcesses = @()
+    $webHelperSignature = ''
+    $webHelperStableSinceUtc = $null
+    $readiness = $null
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $steamProcesses = @(Get-Process -Name 'steam' -ErrorAction SilentlyContinue)
+        $webHelperProcesses = @(Get-Process -Name 'steamwebhelper' -ErrorAction SilentlyContinue)
+        $currentWebHelperSignature = (@($webHelperProcesses | ForEach-Object { [int]$_.Id } | Sort-Object) -join ',')
+        if ([string]::IsNullOrWhiteSpace($currentWebHelperSignature)) {
+            $webHelperSignature = ''
+            $webHelperStableSinceUtc = $null
+        }
+        elseif ($currentWebHelperSignature -cne $webHelperSignature) {
+            $webHelperSignature = $currentWebHelperSignature
+            $webHelperStableSinceUtc = [DateTime]::UtcNow
+        }
+        $stableSeconds = if ($webHelperStableSinceUtc) { ([DateTime]::UtcNow - $webHelperStableSinceUtc).TotalSeconds } else { 0 }
+        $readiness = Get-ChronicleSteamClientReadiness -SteamProcessCount $steamProcesses.Count -WebHelperProcessCount $webHelperProcesses.Count -WebHelperStableSeconds $stableSeconds -RequiredStableSeconds $RequiredStableSeconds
+        if ($readiness.Ready) {
+            return [ordered]@{
+                available = $true
+                startedByHarness = $startedByHarness
+                processIds = @($steamProcesses | ForEach-Object { [int]$_.Id })
+                webHelperProcessIds = @($webHelperProcesses | ForEach-Object { [int]$_.Id })
+                readyUtc = [DateTime]::UtcNow.ToString('O')
+                readiness = $readiness
+            }
+        }
+        Start-Sleep -Milliseconds 500
+    }
+
+    $reason = if ($readiness) { [string]$readiness.Reason } else { 'no-readiness-sample' }
+    throw "Steam client did not reach stable local API readiness within $TimeoutSeconds seconds (reason='$reason', steamProcesses=$($steamProcesses.Count), webHelperProcesses=$($webHelperProcesses.Count)). Bannerlord was not launched."
+}
+
 function Test-ChronicleSteamClientReadiness {
     $missingSteam = Get-ChronicleSteamClientReadiness -SteamProcessCount 0 -WebHelperProcessCount 0 -WebHelperStableSeconds 0
     $startingClient = Get-ChronicleSteamClientReadiness -SteamProcessCount 1 -WebHelperProcessCount 0 -WebHelperStableSeconds 0
