@@ -73,7 +73,8 @@ internal static class AgentHostVillageToolsQuestLoop
             ReadString(recoveryResult["termination"] as JsonObject, "reason") != "decision-budget-exhausted" ||
             !recoveryClient.Actions.SequenceEqual(new[] { "talkToSettlementHero", "dialogueSelect", "questDetails" }) ||
             recoveryProvider.Calls != 6 || recoveryTrace.OfType<JsonObject>().Count(step => ReadString(step, "stage") == "decision-rejected-before-native") != 3 ||
-            recoveryFeedback.Count != 3 || recoveryFeedback.Any(text => !text.Contains("Native conversation is open", StringComparison.Ordinal) || !text.Contains("dialogueSelect", StringComparison.Ordinal)))
+            recoveryFeedback.Count != 3 || recoveryFeedback.Any(text => !text.Contains("Native conversation is open", StringComparison.Ordinal) ||
+                !text.Contains("dialogueSelect", StringComparison.Ordinal) || !text.Contains("issue_64_quest_accept", StringComparison.Ordinal)))
             throw new AgentHostException("village-tools-loop-self-test-dialogue-provider-recovery-failed", "Repeated unavailable actions during an open conversation must receive precise feedback, remain Native-side-effect-free, and allow a later listed dialogue action.");
 
         var passageClient = new FakeSafePassageNativeClient();
@@ -237,16 +238,28 @@ internal static class AgentHostVillageToolsQuestLoop
                 {
                     decisions++;
                     rejected++;
-                    var conversationOpen = currentNative?["state"]?["context"]?["conversation"] is JsonObject;
+                    var currentConversation = currentNative?["state"]?["context"]?["conversation"] as JsonObject;
+                    var requiredNextStep = "Select exactly one action or control from the latest Native catalog and use the listed argument names and IDs.";
+                    if (exception.Code == "provider-action-unavailable" && currentConversation is not null)
+                    {
+                        var clickableOptionIds = (currentConversation["options"] as JsonArray)?.OfType<JsonObject>()
+                            .Where(option => ReadBoolean(option, "clickable"))
+                            .Select(option => ReadString(option, "id"))
+                            .Where(id => !string.IsNullOrWhiteSpace(id))
+                            .Cast<string>()
+                            .ToArray() ?? Array.Empty<string>();
+                        if (catalog.OfType<JsonObject>().Any(action => ReadString(action, "action") == "dialogueSelect") && clickableOptionIds.Length > 0)
+                            requiredNextStep = "A Native conversation is open. The only allowed Host action is dialogueSelect; put one exact clickable conversation option ID into arguments.OptionId. Clickable IDs: " + string.Join(", ", clickableOptionIds) + ".";
+                        else if (catalog.OfType<JsonObject>().Any(action => ReadString(action, "action") == "dialogueContinue"))
+                            requiredNextStep = "A Native conversation is open without a clickable option. Use the listed dialogueContinue action only.";
+                    }
                     feedback = new JsonObject
                     {
                         ["kind"] = "decision-rejected-before-native",
                         ["code"] = exception.Code,
                         ["message"] = exception.Message,
                         ["nativeActionSent"] = false,
-                        ["requiredNextStep"] = exception.Code == "provider-action-unavailable" && conversationOpen
-                            ? "A Native conversation is open. Use dialogueSelect with OptionId exactly matching one listed clickable conversation option; do not return an option ID as the action or call talkToSettlementHero/leave_settlement."
-                            : "Select exactly one action or control from the latest Native catalog and use the listed argument names and IDs."
+                        ["requiredNextStep"] = requiredNextStep
                     };
                     trace.Add(new JsonObject { ["iteration"] = index, ["stage"] = "decision-rejected-before-native", ["feedback"] = feedback.DeepClone() });
                     continue;

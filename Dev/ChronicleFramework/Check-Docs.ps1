@@ -250,12 +250,14 @@ if ($harnessScript -notmatch "'AgentHostVillageToolsQuestEvaluation' \{ @\('Pref
     $agentHostVillageToolsQuestPolicySource -notmatch 'GetAllowedDialogueOptions' -or $agentHostVillageToolsQuestPolicySource -notmatch 'IsConversationLeaveOption' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'village-tools-host-routes-classified-goal-through-native-observe-decide-act-loop' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'village-tools-host-recovers-from-bounded-invalid-actions-in-open-native-dialogue' -or
-    $agentHostVillageToolsQuestLoopSource -notmatch 'Native conversation is open\. Use dialogueSelect' -or
+    $agentHostVillageToolsQuestLoopSource -notmatch 'The only allowed Host action is dialogueSelect' -or
+    $agentHostVillageToolsQuestLoopSource -notmatch 'clickableOptionIds' -or
     $agentHostVillageToolsFixturePreparationSource -notmatch 'Get-ToolsIssueMarker' -or
     $agentHostVillageToolsFixturePreparationSource -notmatch "Invoke-NativeCli 'save'" -or
     $agentHostVillageToolsFixturePreparationSource -notmatch 'SourceFixtureUnchanged' -or
     $agentHostVillageToolsFixturePreparationSource -notmatch 'No Quest was injected' -or
     $agentHostDecisionCycleSource -notmatch 'supportedVillageToolsQuestGoal' -or
+    $agentHostDecisionCycleSource -notmatch 'Conversation option IDs are argument values, never action names' -or
     $agentHostDecisionCycleSource -notmatch 'intermediate steps' -or
     $agentHostDecisionCycleSource -notmatch 'not extra goals' -or
     $agentLiveModelLoopSource -notmatch '\[switch\]\$VillageToolsQuestLoop' -or
