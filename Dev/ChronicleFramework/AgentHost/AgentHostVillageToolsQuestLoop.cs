@@ -848,7 +848,9 @@ internal static class AgentHostVillageToolsQuestLoop
             {
                 RequiredNextStep = required.GetString() ?? string.Empty;
                 SystemPromptMappedVisibleContinue = systemPrompt.Contains("点击继续", StringComparison.Ordinal) &&
-                    systemPrompt.Contains("does not leave the settlement", StringComparison.Ordinal);
+                    systemPrompt.Contains("does not leave the settlement", StringComparison.Ordinal) &&
+                    systemPrompt.Contains("RECOVERY DIRECTIVE", StringComparison.Ordinal) &&
+                    systemPrompt.Contains(RequiredNextStep, StringComparison.Ordinal);
             }
             if (Calls == 3)
             {

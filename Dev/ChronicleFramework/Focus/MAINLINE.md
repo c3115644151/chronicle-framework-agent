@@ -75,6 +75,8 @@ Harness FreeLLMAPI服务启动（2026-10-14）：真实模型预检先用本机`
 
 FreeLLMAPI模型请求恢复边界（2026-10-14）：若网关以HTTP 502及回退链`keyN=error`/`keyN=upstream_error`标识临时上游故障，Host仅在当前决定尚未转成Native动作前，对同一模型决定最多重试两次，分别延迟5秒、15秒；第三次失败则安全终止本轮，不重放已执行游戏操作。对HTTP 429，只有网关明确给出`Retry-After`且等待不超过120秒时，Host才等待并重试一次；无提示或超过上限则安全失败，避免盲目重试配额限制。该边界覆盖最近实测到的85秒提示，确定性测试验证85秒被接受、121秒/无提示/非FreeLLMAPI端点被拒，实际短等待重试也由本地假Provider合同测试覆盖；真实免费上游网络仍可能持续不可用。JSON Schema的`provider_bad_request`回退是不同的单次JSON对象兼容规则。
 
+FreeLLMAPI `format_ignored`兼容回退（2026-10-14）：最近一次真实Campaign run `TestResults/20261014-171433`在20次决策/11条Native动作后已接取“卡利奥克需要工具”，`questDetails`能读到活动委托；退出村庄并读取附近目标后，下一模型请求收到HTTP 502，轨迹为`custom/nvidia/llama-3.2-11b-vision key1=format_ignored`。官方`fallback-loop.ts`将模型返回忽略`response_format`或截断JSON分类为`format_ignored`，并非普通传输失败。Host现允许仅针对FreeLLMAPI HTTP 502且轨迹明确含`keyN=format_ignored`的当前决策，一次性改用`json_object`重试；不放宽本地JSON解析、动作ID/参数目录、当前Native状态检查，也不重新执行之前的Native命令。Provider自测覆盖精确轨迹只发第二次JSON对象请求并将返回动作交给原有严格校验；尚待真实模型复验。此次运行证明任务已被接受但未完成工具购买/交付，不能标作Quest通关。用户确认头人3D对话中的金色“点击继续”由点击/按键推进对话直到出现可选回答；该输入事实已进入`dialogueContinue`机制契约，时钟语义仍未知。
+
 W7-K Quest交谈策略修正（2026-10-14）：真实模型回归显示，Quest接取后对话会在玩家离开前继续出现多个交谈节点；若任务仍欠工具，Host现在只允许当前Native对话中的离开选项，聚落菜单不再开放重复`talkToSettlementHero`，引导Agent转向Town市场；只有Journal显示数量满足且已采集交付前Inventory基线后，才重新开放Quest给予者对话。此为Chronicle动作目录策略，不改原版对话/任务机制；动作目录/拒绝非法选项由策略自测覆盖，真实模型运行仍待复验。
 
 W7-K真实模型运行与接口故障（`TestResults/20261014-033349`）：模型实际接取“卡利奥克需要工具”，从玩家可见城镇市场购入1单位工具（扣款866第纳尔，持有金从912降至46），Journal随后确认任务要求1/1。任务尚未交付，Host在读取Native `heroEquipmentOptions` 响应后因`mainHeroId`重复字段触发`ArgumentException`并终止；5fps原生窗口录像完整覆盖1400秒，失败片段及末帧保留用于诊断。已从`AgentInventoryStateAdapter.BuildHeroEquipmentOptionsJson`删除重复写入；`AgentHostPackage`和`Docs`阶段通过（`20261014-040706`、`20261014-040742`）。这是已修复的接口根因，不是任务成功证据；尚需下一轮真实模型从持有工具继续返回村庄、完成交付，并核实奖励与最终库存变化。
@@ -105,9 +107,15 @@ W7-K直接免费模型完整场景（`TestResults/20261014-120307`）：固定`n
 
 W7-K无游戏Provider门禁超时诊断（`TestResults/20261014-143328`、`144834`、`144127`、`145331`、`145735`、`145950`）：两次Provider smoke在外层超时后被杀，均没有启动Campaign。已确认Harness自身原因：PowerShell `TryParse('', [ref]$default)`会把引用参数清成0，原代码因此把缺省180秒变成0并只等待额外15秒；本机复现确认。现在用独立解析变量，缺失/无效值回到180秒、有效值限制5–240秒，脚本内四个边界自检通过，Docs通过`145331`。另一个独立问题是429/502退避等待原先不受Provider总Deadline约束；现已将等待与响应读取共用Deadline，自托管回归以250毫秒总期限/5秒Retry-After确认超时后不再发请求，完整包93个Provider合同场景通过（`144127`）。修复后真实无游戏门禁`145735`成功并返回NVIDIA Llama合成动作；完整任务阶段`145950`的前置门禁触发`provider-timeout`，提示Host在有限总Deadline内等待FreeLLMAPI限流重试仍无响应，Campaign未启动。当前Harness超时与重试越界已分别有证据和回归；真实上游仍间歇限流/延迟，不应再把这类失败归因于游戏逻辑或模型决策质量。
 
+Harness包下载代理探测（`TestResults/20261014-161824`）：每次AgentHostPackage之前的`Test-NetConnection`曾反复在7890端口停留约30秒并打印交互进度；现改为500ms上限`TcpClient`本机回环探测，并用临时listener验证开放端口通过、关闭端口拒绝。Package通过；未绕过7890代理，也不影响产品功能。
+
 W7-K真实模型对话“点击继续”切片（`TestResults/20261014-150844`）：直连免费NVIDIA Llama 11B通过Provider门禁后，Agent在自然可见的卡利奥克任务标记开始；5fps游戏窗口录像覆盖1179/1179帧、235.8秒。模型完成`talkToSettlementHero`并选择`lord_meet_player_response1`，到达原版头人对话的无选项文本屏；随后5次模型输出在只有`dialogueContinue`可用时仍多次尝试`leave_settlement`或`talkToSettlementHero`，均由Host在Native前拒绝。决策总数8、Native动作2，Quest未接取、CampaignDay 91077.634未变、源档未变、游戏进程停止。末帧显示金色“点击继续”；用户确认点击/按键会推进文字直到可选回答出现。已将这一视觉事实加入现有交互契约/系统提示，并增加“拒绝leave→dialogueContinue→出现任务选项”的自托管闭环回归；包测试`TestResults/20261014-153444`通过，但这一新提示尚未由真实模型重验。不能把此阶段误报成Quest完成。
 
 W7-K真实限流链端到端验证（`TestResults/20261014-153952`）：FreeLLMAPI Provider门禁通过后启动Campaign与连续帧捕获；真实模型首次任务决定收到HTTP429/Retry-After 85，Host按新逻辑真实等待85001毫秒后只重试一次，第二个429提示43秒时因该决定已使用一次重试而fail closed。诊断收据明确`rateLimitRetryAttempts=1`、`rateLimitRetryWaitMilliseconds=85001`、`rateLimitRetryEligible=true`；没有模型决策/Native动作，CampaignDay未变，Quest未接取，源fixture未变、游戏进程清理，视频覆盖607/607帧。该结果验证了502/429重分类和一次429等待确实在Campaign Host路径工作；本轮没有测试前一段“点击继续”Prompt反馈，因为模型在首个决定前被限流。
+
+W7-K System恢复指令真实模型复验与动作审计调整（`TestResults/20261014-165249`、`TestResults/20261014-170725`）：165249模型在Native对话中先返回一次非法`leave_settlement`，收到置于System role的当前恢复指令后成功选择当前`dialogueSelect`；随后尝试继续对话时返回了缺少`rationale`的结构化动作，Host以`provider-reason-missing`拒绝。5决策、2个Native动作，CampaignDay 91077.635不变、Quest未接取、源fixture未变、进程停止，录像覆盖602/602帧。因`rationale`只用于审计且不参与Native安全判定，现将动作rationale改为可选（若提供仍受长度校验）；action/arguments当前目录严格校验不变，done/等待等控制的reason仍必需。确定性Provider合同验证无rationale动作可规范化为空审计字段，自包含包95个Provider合同场景通过（170725）。该调整尚需真实模型复测，也不代表委托完成。
+
+W7-K用户界面反馈后的真实重试（`TestResults/20261014-155314`）：FreeLLMAPI门禁通过，真实NVIDIA Llama又进入村庄对话。模型仅执行`talkToSettlementHero`，随后在当前只开放三个确切`dialogueSelect`选项时返回`talkToSettlementHero`/`leave_settlement`并重复；Host原生前拒绝3次并已返回当前OptionId列表。5次决策/1条Native动作，6996输入/253输出token，CampaignDay 91077.635未变，Quest未接取，源fixture未变；原生窗口录像542/542帧、108.4秒，进程清理。该失败发生在“出现可选回答”阶段，而不是用户刚确认的“点击继续”阶段。基于模型反复忽略用户消息中的requiredNextStep，已新增短System层恢复指令：仅把Host生成的下一步要求提升到System role，不回显模型原文，也不执行确定性动作；自托管闭环回归`TestResults/20261014-160535`通过，包内94个Provider场景通过。该System反馈强化尚未由真实模型复验。
 
 ### 多人独立客户端候选：共享战役 Mod 的实际边界
 

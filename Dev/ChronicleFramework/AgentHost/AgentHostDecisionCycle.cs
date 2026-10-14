@@ -62,7 +62,21 @@ internal static class AgentHostDecisionCycle
     internal static Task<ProviderDecisionResult> DecideVillageToolsQuestAsync(
         IAgentHostDecisionProvider provider,
         JsonObject request,
-        CancellationToken cancellationToken) => DecideAsync(provider, request, VillageToolsQuestSystemPrompt, cancellationToken);
+        CancellationToken cancellationToken) => DecideAsync(provider, request, BuildVillageToolsQuestSystemPrompt(request), cancellationToken);
+
+    internal static string BuildVillageToolsQuestSystemPrompt(JsonObject request)
+    {
+        var feedback = request["decisionFeedback"] as JsonObject;
+        if (ReadString(feedback, "kind") != "decision-rejected-before-native" ||
+            string.IsNullOrWhiteSpace(ReadString(feedback, "requiredNextStep")))
+            return VillageToolsQuestSystemPrompt;
+
+        var requiredNextStep = ReadString(feedback, "requiredNextStep")!;
+        return VillageToolsQuestSystemPrompt + " RECOVERY DIRECTIVE: the preceding model decision was rejected before any Native action. Treat this exact required next step as mandatory, choose only the listed action/control that satisfies it, and never repeat the rejected action/control: " + requiredNextStep;
+    }
+
+    private static string? ReadString(JsonObject? value, string name) =>
+        value?[name] is JsonValue node && node.TryGetValue<string>(out var result) ? result : null;
 
     private static async Task<ProviderDecisionResult> DecideAsync(
         IAgentHostDecisionProvider provider,

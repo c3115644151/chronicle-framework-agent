@@ -143,6 +143,20 @@ internal static class ProviderContractSelfTest
             ReasoningEffort: "none",
             MaxTokenParameter: "max_completion_tokens");
 
+        using (var actionRequest = JsonDocument.Parse(BuildActionDecisionRequest()))
+        using (var actionWithoutRationale = JsonDocument.Parse("{\"action\":\"tradeConfirm\",\"arguments\":{}}"))
+        {
+            var normalized = OllamaNativeProvider.NormalizeDecision(actionWithoutRationale.RootElement, actionRequest.RootElement);
+            var schema = OllamaNativeProvider.BuildDecisionSchema(actionRequest.RootElement);
+            var firstBranch = (schema["oneOf"] as JsonArray)?[0] as JsonObject;
+            var required = firstBranch?["required"] as JsonArray ?? new JsonArray();
+            if (normalized["action"]?.GetValue<string>() != "tradeConfirm" ||
+                normalized["rationale"]?.GetValue<string>() != string.Empty ||
+                required.Any(value => value?.GetValue<string>() == "rationale"))
+                throw new AgentHostException("provider-self-test-action-rationale-required", "A listed Native action must remain eligible when optional audit rationale is omitted; action name/arguments remain strict.");
+            results.Add(new { scenario = "provider-action-rationale-is-optional-and-native-catalog-still-gates", passed = true });
+        }
+
         var healthHandler = new StubHandler((_, _) => Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"test-local-model\"}]}")));
         using (var healthClient = new HttpClient(healthHandler) { Timeout = settings.Timeout })
         using (var provider = new OllamaNativeProvider(settings, healthClient))
@@ -649,18 +663,48 @@ internal static class ProviderContractSelfTest
             if (!OllamaNativeProvider.ShouldRetryWithJsonObject(rateWindowEndpoint, explicitSchemaRejection))
                 throw new AgentHostException("provider-self-test-json-schema-rejection-status-not-recognized", $"FreeLLMAPI explicit provider_bad_request status {(int)status} did not enable one bounded JSON-object compatibility retry.");
         }
+        var formatFallbackCalls = 0;
+        var formatFallbackModes = new List<string>();
+        var formatIgnoredFallbackHandler = new StubHandler((httpRequest, cancellationToken) =>
+        {
+            formatFallbackCalls++;
+            using var payloadDocument = JsonDocument.Parse(httpRequest.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            formatFallbackModes.Add(payloadDocument.RootElement.GetProperty("response_format").GetProperty("type").GetString() ?? "missing");
+            if (formatFallbackCalls == 1)
+            {
+                var ignoredFormat = new HttpResponseMessage(HttpStatusCode.BadGateway);
+                ignoredFormat.Headers.TryAddWithoutValidation("X-Fallback-Trail", "custom/nvidia/llama-3.2-11b-vision key1=format_ignored");
+                return Task.FromResult(ignoredFormat);
+            }
+            return Task.FromResult(JsonResponse(BuildChatResponse(ValidDecision, "stop")));
+        });
+        using (var formatFallbackClient = new HttpClient(formatIgnoredFallbackHandler) { Timeout = freeLlmApiSettings.Timeout })
+        using (var formatFallbackProvider = new OllamaNativeProvider(freeLlmApiSettings with { Model = "nvidiallama-3.2-11b-vision" }, formatFallbackClient))
+        using (var request = JsonDocument.Parse(BuildActionDecisionRequest()))
+        {
+            var result = await formatFallbackProvider.DecideAsync(request.RootElement, CancellationToken.None);
+            if (result.Decision["done"]?.GetValue<bool>() != true ||
+                result.ResponseFormatMode != "json_object_fallback" ||
+                formatFallbackCalls != 2 ||
+                !formatFallbackModes.SequenceEqual(new[] { "json_schema", "json_object" }, StringComparer.Ordinal))
+                throw new AgentHostException("provider-self-test-format-ignored-json-fallback-failed", $"A FreeLLMAPI 502 explicitly classifying format_ignored must permit exactly one JSON-object retry, then validate the returned decision through the normal schema contract. calls={formatFallbackCalls}; modes={string.Join(',', formatFallbackModes)}; done={result.Decision["done"]?.GetValue<bool>()}; format={result.ResponseFormatMode}.");
+            results.Add(new { scenario = "freellmapi-format-ignored-502-falls-back-once-to-locally-validated-json-object", passed = true, providerCalls = formatFallbackCalls, nativeCommands = 0 });
+        }
         using (var transientGatewayFailure = new HttpResponseMessage(HttpStatusCode.BadGateway))
         {
             transientGatewayFailure.Headers.TryAddWithoutValidation("X-Fallback-Trail", "ovh/Mistral-Small key1=upstream_error");
+            using var formatIgnoredBadRequest = new HttpResponseMessage(HttpStatusCode.BadRequest);
+            formatIgnoredBadRequest.Headers.TryAddWithoutValidation("X-Fallback-Trail", "custom/nvidia/model key1=format_ignored");
             using var nonGatewayBadRequest = new HttpResponseMessage(HttpStatusCode.BadRequest);
             nonGatewayBadRequest.Headers.TryAddWithoutValidation("X-Fallback-Trail", "ovh/Mistral-Small key1=provider_bad_request");
             if (OllamaNativeProvider.ShouldRetryWithJsonObject(rateWindowEndpoint, transientGatewayFailure) ||
+                OllamaNativeProvider.ShouldRetryWithJsonObject(rateWindowEndpoint, formatIgnoredBadRequest) ||
                 !OllamaNativeProvider.ShouldRetryTransientFreeLlmApiFailure(rateWindowEndpoint, transientGatewayFailure) ||
                 OllamaNativeProvider.ShouldRetryTransientFreeLlmApiFailure(rateWindowEndpoint, nonGatewayBadRequest) ||
                 OllamaNativeProvider.ShouldRetryWithJsonObject(new Uri("http://127.0.0.1:11434/v1/chat/completions"), nonGatewayBadRequest))
                 throw new AgentHostException("provider-self-test-retried-non-schema-failure", "JSON-object compatibility retry must be limited to explicit FreeLLMAPI provider_bad_request responses.");
         }
-        results.Add(new { scenario = "freellmapi-json-object-fallback-recognizes-explicit-400-422-and-fallback-502-schema-rejection-only", passed = true });
+        results.Add(new { scenario = "freellmapi-json-object-fallback-recognizes-schema-rejection-or-format-ignored-502-only", passed = true });
 
         }
         catch (KeyNotFoundException exception)

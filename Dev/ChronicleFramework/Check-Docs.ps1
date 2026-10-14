@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.194'
+$contractVersion = '7.198'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -260,6 +260,8 @@ if ($harnessScript -notmatch "'AgentHostVillageToolsQuestEvaluation' \{ @\('Pref
     $agentHostVillageToolsFixturePreparationSource -notmatch 'No Quest was injected' -or
     $agentHostDecisionCycleSource -notmatch 'supportedVillageToolsQuestGoal' -or
     $agentHostDecisionCycleSource -notmatch 'Conversation option IDs are argument values, never action names' -or
+    $agentHostDecisionCycleSource -notmatch 'BuildVillageToolsQuestSystemPrompt' -or
+    $agentHostDecisionCycleSource -notmatch 'RECOVERY DIRECTIVE' -or
     $agentHostDecisionCycleSource -notmatch '点击继续' -or $agentHostDecisionCycleSource -notmatch 'does not leave the settlement' -or
     $agentHostDecisionCycleSource -notmatch 'intermediate steps' -or
     $agentHostDecisionCycleSource -notmatch 'not extra goals' -or
@@ -405,6 +407,7 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerProfileTestSource -notmatch 'provider-profile-error-path-mutated-file' -or
     $providerProfileTestSource -notmatch 'freellmapi-bearer-auth-available-model-preflight-and-routed-model-evidence' -or
     $providerProfileTestSource -notmatch 'freellmapi-profile-uses-bounded-512-token-live-model-budget' -or
+    $providerProfileTestSource -notmatch 'provider-action-rationale-is-optional-and-native-catalog-still-gates' -or
     $providerProfileTestSource -notmatch 'village-tools-prompt-uses-exact-native-action-id' -or
     $providerProfileTestSource -notmatch 'conversation is already open: never talk to that hero again' -or
     $providerProfileTestSource -notmatch 'only before a conversation is open, and only if talkToSettlementHero is currently listed' -or
@@ -413,7 +416,9 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $agentHostVillageToolsQuestPolicySource -notmatch 'village-tools-active-quest-giver-reopens-only-after-tools-and-inventory-baseline' -or
     $providerProfileTestSource -notmatch 'freellmapi-http-error-keeps-safe-route-fallback-headers-without-response-body' -or
     $providerProfileTestSource -notmatch 'freellmapi-json-schema-provider-rejection-falls-back-to-validated-json-object' -or
-    $providerProfileTestSource -notmatch 'freellmapi-json-object-fallback-recognizes-explicit-400-422-and-fallback-502-schema-rejection-only' -or
+    $providerProfileTestSource -notmatch 'freellmapi-json-object-fallback-recognizes-schema-rejection-or-format-ignored-502-only' -or
+    $providerProfileTestSource -notmatch 'freellmapi-format-ignored-502-falls-back-once-to-locally-validated-json-object' -or
+    $agentHostProviderSource -notmatch 'format_ignored' -or
     $providerProfileTestSource -notmatch 'freellmapi-transient-upstream-502-retried-once-before-native-action' -or
     $providerProfileTestSource -notmatch 'freellmapi-429-honors-bounded-retry-after-before-native-action' -or
     $providerProfileTestSource -notmatch 'freellmapi-429-records-bounded-wait-attempts-in-provider-errors' -or
@@ -590,6 +595,7 @@ if ($harnessScript -notmatch "'AgentHostPackage'\s*\{ @\('Preflight', 'Build', '
     $harnessScript -match "'All'\s*\{[^\r\n]*'AgentHostPackage'" -or
     $agentHostPackageSource -notmatch 'win-x64' -or $agentHostPackageSource -notmatch "'--self-contained',\s*'true'" -or
     $agentHostPackageSource -notmatch 'NUGET_PACKAGES' -or $agentHostPackageSource -notmatch '127\.0\.0\.1:7890' -or
+    $agentHostPackageSource -notmatch 'function Test-BoundedTcpPort' -or $agentHostPackageSource -notmatch 'TimeoutMilliseconds = 500' -or $agentHostPackageSource -match 'Test-NetConnection' -or
     $agentHostPackageSource -notmatch 'D:\\ChronicleFramework\\BuildCache\\Packages' -or $agentHostPackageSource -notmatch 'package staging must be outside the source repository' -or
     $agentHostPackageSource -notmatch 'BaseOutputPath' -or
     $agentHostPackageSource -notmatch 'ChronicleAgentHost\.exe' -or $agentHostPackageSource -notmatch 'AgentHostPackageManifest\.json' -or

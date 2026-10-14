@@ -16,8 +16,40 @@ if (-not $evidenceRoot.StartsWith($harnessTempRoot, [StringComparison]::OrdinalI
     throw 'Agent Host package evidence must remain inside the current disposable Harness run.'
 }
 
+function Test-BoundedTcpPort
+{
+    param(
+        [Parameter(Mandatory = $true)][string]$HostName,
+        [Parameter(Mandatory = $true)][ValidateRange(1,65535)][int]$Port,
+        [ValidateRange(1,5000)][int]$TimeoutMilliseconds = 500
+    )
+
+    $client = [System.Net.Sockets.TcpClient]::new()
+    $asyncResult = $null
+    try {
+        $asyncResult = $client.BeginConnect($HostName, $Port, $null, $null)
+        if (-not $asyncResult.AsyncWaitHandle.WaitOne($TimeoutMilliseconds)) { return $false }
+        $client.EndConnect($asyncResult)
+        return $client.Connected
+    }
+    catch { return $false }
+    finally {
+        if ($asyncResult) { $asyncResult.AsyncWaitHandle.Close() }
+        $client.Dispose()
+    }
+}
+
+$proxyProbeListener = [System.Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+try {
+    $proxyProbeListener.Start()
+    $proxyProbePort = ([Net.IPEndPoint]$proxyProbeListener.LocalEndpoint).Port
+    if (-not (Test-BoundedTcpPort -HostName '127.0.0.1' -Port $proxyProbePort)) { throw 'Bounded TCP proxy probe failed against a live loopback listener.' }
+}
+finally { $proxyProbeListener.Stop() }
+if (Test-BoundedTcpPort -HostName '127.0.0.1' -Port $proxyProbePort) { throw 'Bounded TCP proxy probe accepted a closed loopback port.' }
+
 $proxyUri = 'http://127.0.0.1:7890'
-$proxyReady = Test-NetConnection -ComputerName '127.0.0.1' -Port 7890 -InformationLevel Quiet -WarningAction SilentlyContinue
+$proxyReady = Test-BoundedTcpPort '127.0.0.1' 7890
 if (-not $proxyReady) { throw 'The configured local package-download proxy on port 7890 is unavailable.' }
 
 $packageId = 'ChronicleAgentHost-win-x64-' + [Guid]::NewGuid().ToString('N')

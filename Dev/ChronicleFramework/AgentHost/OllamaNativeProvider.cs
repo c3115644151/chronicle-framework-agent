@@ -458,7 +458,10 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     internal static bool ShouldRetryWithJsonObject(Uri endpoint, HttpResponseMessage response)
     {
         if (!IsFreeLlmApi(endpoint) || response.StatusCode is not (HttpStatusCode.BadRequest or HttpStatusCode.UnprocessableEntity or HttpStatusCode.BadGateway)) return false;
-        return ReadResponseHeader(response, "X-Fallback-Trail")?.Contains("provider_bad_request", StringComparison.OrdinalIgnoreCase) == true;
+        var fallbackTrail = ReadResponseHeader(response, "X-Fallback-Trail");
+        if (fallbackTrail?.Contains("provider_bad_request", StringComparison.OrdinalIgnoreCase) == true) return true;
+        return response.StatusCode == HttpStatusCode.BadGateway &&
+               fallbackTrail?.Contains("=format_ignored", StringComparison.OrdinalIgnoreCase) == true;
     }
 
     internal static bool ShouldRetryTransientFreeLlmApiFailure(Uri endpoint, HttpResponseMessage response)
@@ -559,7 +562,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                         ["arguments"] = new JsonObject { ["type"] = "object", ["properties"] = argumentProperties, ["required"] = requiredArgumentNames, ["additionalProperties"] = false },
                         ["rationale"] = new JsonObject { ["type"] = "string", ["maxLength"] = 64 }
                     },
-                    ["required"] = new JsonArray("action", "arguments", "rationale"),
+                    ["required"] = new JsonArray("action", "arguments"),
                     ["additionalProperties"] = false
                 };
                 alternatives.Add(branch);
@@ -704,7 +707,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             {
                 ["action"] = "menuSelect",
                 ["arguments"] = new JsonObject { ["OptionId"] = menuOptionAlias },
-                ["rationale"] = ValidateReason(ReadString(decision, "rationale") ?? ReadString(decision, "reason"))
+                ["rationale"] = ValidateOptionalRationale(ReadString(decision, "rationale") ?? ReadString(decision, "reason"))
             };
         }
 
@@ -724,7 +727,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         {
             ["action"] = actionName,
             ["arguments"] = normalizedArguments,
-            ["rationale"] = ValidateReason(ReadString(decision, "rationale") ?? ReadString(decision, "reason"))
+            ["rationale"] = ValidateOptionalRationale(ReadString(decision, "rationale") ?? ReadString(decision, "reason"))
         };
     }
 
@@ -856,6 +859,9 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             throw new AgentHostException("provider-reason-too-long", "The decision reason exceeds the 20-word contract.");
         return value.Trim();
     }
+
+    private static string ValidateOptionalRationale(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? string.Empty : ValidateReason(value);
 
     private static JsonDocument ParseJson(byte[] bytes, string errorCode)
     {
