@@ -71,8 +71,20 @@ $stdoutTask = $process.StandardOutput.ReadToEndAsync()
 $stderrTask = $process.StandardError.ReadToEndAsync()
 $process.StandardInput.WriteLine(($decisionRequest | ConvertTo-Json -Depth 6 -Compress))
 $process.StandardInput.Close()
-$effectiveTimeout = 180
-if ([int]::TryParse([string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_TIMEOUT_SECONDS','Process'), [ref]$effectiveTimeout)) { $effectiveTimeout = [Math]::Min(240, [Math]::Max(5, $effectiveTimeout)) }
+function Resolve-ProviderSmokeTimeoutSeconds([AllowNull()][string]$ConfiguredValue)
+{
+    $parsedTimeout = 0
+    if ([int]::TryParse($ConfiguredValue, [ref]$parsedTimeout)) { return [Math]::Min(240, [Math]::Max(5, $parsedTimeout)) }
+    return 180
+}
+
+if ((Resolve-ProviderSmokeTimeoutSeconds $null) -ne 180 -or
+    (Resolve-ProviderSmokeTimeoutSeconds '75') -ne 75 -or
+    (Resolve-ProviderSmokeTimeoutSeconds '2') -ne 5 -or
+    (Resolve-ProviderSmokeTimeoutSeconds 'invalid') -ne 180) {
+    throw 'Provider smoke timeout configuration did not preserve its default and bounded values.'
+}
+$effectiveTimeout = Resolve-ProviderSmokeTimeoutSeconds ([string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_TIMEOUT_SECONDS','Process'))
 if (-not $process.WaitForExit(($effectiveTimeout + 15) * 1000)) {
     try { $process.Kill($true) } catch { }
     throw 'Local provider smoke exceeded the bounded process timeout.'

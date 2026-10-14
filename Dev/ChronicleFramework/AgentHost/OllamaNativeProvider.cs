@@ -246,6 +246,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         using var requestTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         requestTimeout.CancelAfter(_settings.Timeout);
         var transientProviderRetriesUsed = 0;
+        var rateLimitRetryAttempts = 0;
+        var rateLimitRetryWaitMilliseconds = 0L;
         async Task<HttpResponseMessage> SendProviderRequestAsync(string requestBody)
         {
             await WaitForProviderRateWindowAsync(cancellationToken);
@@ -268,28 +270,48 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             }
         }
 
+        async Task DelayForProviderRetryAsync(TimeSpan delay, string description)
+        {
+            try
+            {
+                await Task.Delay(delay, requestTimeout.Token);
+            }
+            catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new AgentHostException("provider-timeout", $"The model provider exceeded its configured timeout {description}.", exception);
+            }
+        }
+
         async Task<HttpResponseMessage> SendProviderRequestWithTransientRetryAsync(string requestBody)
         {
             var response = await SendProviderRequestAsync(requestBody);
-            var retryAfter = GetBoundedRateLimitRetryAfter(_settings.Endpoint, response);
-            if (retryAfter.HasValue)
+            while (true)
             {
-                response.Dispose();
-                await Task.Delay(retryAfter.Value, cancellationToken);
-                response = await SendProviderRequestAsync(requestBody);
+                var retryAfter = GetBoundedRateLimitRetryAfter(_settings.Endpoint, response);
+                if (rateLimitRetryAttempts < 1 && retryAfter.HasValue)
+                {
+                    response.Dispose();
+                    var retryWaitStartedUtc = DateTimeOffset.UtcNow;
+                    await DelayForProviderRetryAsync(retryAfter.Value, "while waiting for the bounded rate-limit retry");
+                    rateLimitRetryAttempts++;
+                    rateLimitRetryWaitMilliseconds += (long)(DateTimeOffset.UtcNow - retryWaitStartedUtc).TotalMilliseconds;
+                    response = await SendProviderRequestAsync(requestBody);
+                    continue;
+                }
+                if (transientProviderRetriesUsed < 2 && ShouldRetryTransientFreeLlmApiFailure(_settings.Endpoint, response))
+                {
+                    var retryDelaySeconds = transientProviderRetriesUsed == 0 ? 5 : 15;
+                    transientProviderRetriesUsed++;
+                    var fallbackTrail = ReadResponseHeader(response, "X-Fallback-Trail");
+                    if (!string.IsNullOrWhiteSpace(fallbackTrail) && fallbackTrail.Contains("ovh/", StringComparison.OrdinalIgnoreCase))
+                        _lastProviderRoute = "ovh";
+                    response.Dispose();
+                    await DelayForProviderRetryAsync(TimeSpan.FromSeconds(retryDelaySeconds), "while waiting for the transient upstream retry");
+                    response = await SendProviderRequestAsync(requestBody);
+                    continue;
+                }
+                return response;
             }
-            while (transientProviderRetriesUsed < 2 && ShouldRetryTransientFreeLlmApiFailure(_settings.Endpoint, response))
-            {
-                var retryDelaySeconds = transientProviderRetriesUsed == 0 ? 5 : 15;
-                transientProviderRetriesUsed++;
-                var fallbackTrail = ReadResponseHeader(response, "X-Fallback-Trail");
-                if (!string.IsNullOrWhiteSpace(fallbackTrail) && fallbackTrail.Contains("ovh/", StringComparison.OrdinalIgnoreCase))
-                    _lastProviderRoute = "ovh";
-                response.Dispose();
-                await Task.Delay(TimeSpan.FromSeconds(retryDelaySeconds), cancellationToken);
-                response = await SendProviderRequestAsync(requestBody);
-            }
-            return response;
         }
 
         var responseFormatMode = _settings.NativeOllama
@@ -318,7 +340,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         using (response)
         {
             if (!response.IsSuccessStatusCode)
-                throw new AgentHostException("provider-http-error", BuildHttpFailureMessage(response));
+                throw new AgentHostException("provider-http-error", BuildHttpFailureMessage(response, rateLimitRetryAttempts, rateLimitRetryWaitMilliseconds));
 
             if (response.Content.Headers.ContentLength is > MaxResponseBytes)
                 throw new AgentHostException("provider-response-too-large", "The local model response exceeds the Host size limit.");
@@ -409,7 +431,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         return string.IsNullOrWhiteSpace(value) ? null : value[..Math.Min(value.Length, 160)];
     }
 
-    private string BuildHttpFailureMessage(HttpResponseMessage response)
+    internal string BuildHttpFailureMessage(HttpResponseMessage response, int rateLimitRetryAttempts, long rateLimitRetryWaitMilliseconds)
     {
         var providerName = IsFreeLlmApi(_settings.Endpoint) ? "FreeLLMAPI" : "model provider";
         var details = new List<string>();
@@ -421,6 +443,14 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         if (!string.IsNullOrWhiteSpace(fallbackAttempts)) details.Add("fallbackAttempts=" + fallbackAttempts);
         if (!string.IsNullOrWhiteSpace(fallbackTrail)) details.Add("fallbackTrail=" + fallbackTrail);
         if (!string.IsNullOrWhiteSpace(retryAfter)) details.Add("retryAfter=" + retryAfter[..Math.Min(retryAfter.Length, 40)]);
+        if (response.StatusCode == HttpStatusCode.TooManyRequests)
+        {
+            var boundedRetryAfter = GetBoundedRateLimitRetryAfter(_settings.Endpoint, response);
+            details.Add("rateLimitRetryAttempts=" + rateLimitRetryAttempts.ToString(CultureInfo.InvariantCulture));
+            details.Add("rateLimitRetryWaitMilliseconds=" + rateLimitRetryWaitMilliseconds.ToString(CultureInfo.InvariantCulture));
+            details.Add("rateLimitRetryEligible=" + (boundedRetryAfter.HasValue ? "true" : "false"));
+            details.Add("rateLimitRetryAfterSeconds=" + (boundedRetryAfter?.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture) ?? "unbounded-or-unparseable"));
+        }
         return $"{providerName} returned HTTP {(int)response.StatusCode}." +
                (details.Count == 0 ? string.Empty : " " + string.Join("; ", details));
     }

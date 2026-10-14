@@ -409,6 +409,38 @@ internal static class ProviderContractSelfTest
             results.Add(new { scenario = "freellmapi-transient-upstream-502-retried-once-before-native-action", passed = true, providerCalls = transientRetryCalls, nativeCommands = 0 });
         }
 
+        var upstreamThenRateLimitCalls = 0;
+        var upstreamThenRateLimitHandler = new StubHandler((_, _) =>
+        {
+            upstreamThenRateLimitCalls++;
+            if (upstreamThenRateLimitCalls == 1)
+            {
+                var upstreamFailure = new HttpResponseMessage(HttpStatusCode.BadGateway);
+                upstreamFailure.Headers.TryAddWithoutValidation("X-Fallback-Trail", "nvidia/test-model key1=upstream_error");
+                return Task.FromResult(upstreamFailure);
+            }
+            var limited = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+            limited.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(1));
+            return Task.FromResult(limited);
+        });
+        using (var upstreamThenRateLimitClient = new HttpClient(upstreamThenRateLimitHandler) { Timeout = transientRetrySettings.Timeout })
+        using (var upstreamThenRateLimitProvider = new OllamaNativeProvider(transientRetrySettings, upstreamThenRateLimitClient))
+        using (var request = JsonDocument.Parse(BuildActionDecisionRequest()))
+        {
+            try
+            {
+                await upstreamThenRateLimitProvider.DecideAsync(request.RootElement, CancellationToken.None);
+                throw new AgentHostException("provider-self-test-upstream-then-rate-limit-accepted", "A second 429 must fail closed after a bounded retry.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-http-error")
+            {
+                if (upstreamThenRateLimitCalls != 3 || !exception.Message.Contains("rateLimitRetryAttempts=1", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("rateLimitRetryEligible=true", StringComparison.Ordinal))
+                    throw new AgentHostException("provider-self-test-upstream-then-rate-limit-recovery-missed", "A 429 returned after a transient 502 retry must receive its own single bounded Retry-After retry.");
+                results.Add(new { scenario = "freellmapi-reclassifies-429-after-transient-upstream-retry", passed = true, providerCalls = upstreamThenRateLimitCalls, nativeCommands = 0 });
+            }
+        }
+
         var retryAfterCalls = 0;
         var retryAfterHandler = new StubHandler((httpRequest, cancellationToken) =>
         {
@@ -431,6 +463,70 @@ internal static class ProviderContractSelfTest
             if (result.Decision["action"]?.GetValue<string>() != "tradeConfirm" || retryAfterCalls != 2)
                 throw new AgentHostException("provider-self-test-retry-after-recovery-failed", "The Host should wait for an explicit short FreeLLMAPI Retry-After once before any Native action can be issued.");
             results.Add(new { scenario = "freellmapi-429-honors-bounded-retry-after-before-native-action", passed = true, providerCalls = retryAfterCalls, nativeCommands = 0 });
+        }
+
+        var exhaustedRetryAfterCalls = 0;
+        var exhaustedRetryAfterHandler = new StubHandler((_, _) =>
+        {
+            exhaustedRetryAfterCalls++;
+            var limited = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+            limited.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(1));
+            return Task.FromResult(limited);
+        });
+        using (var exhaustedRetryAfterClient = new HttpClient(exhaustedRetryAfterHandler) { Timeout = transientRetrySettings.Timeout })
+        using (var exhaustedRetryAfterProvider = new OllamaNativeProvider(transientRetrySettings, exhaustedRetryAfterClient))
+        using (var request = JsonDocument.Parse(BuildActionDecisionRequest()))
+        {
+            try
+            {
+                await exhaustedRetryAfterProvider.DecideAsync(request.RootElement, CancellationToken.None);
+                throw new AgentHostException("provider-self-test-retry-after-exhaustion-accepted", "A second 429 must fail closed after exactly one bounded retry.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-http-error")
+            {
+                if (exhaustedRetryAfterCalls != 2 || !exception.Message.Contains("rateLimitRetryAttempts=1", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("rateLimitRetryWaitMilliseconds=", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("rateLimitRetryEligible=true", StringComparison.Ordinal))
+                    throw new AgentHostException("provider-self-test-retry-after-attempt-telemetry-missing", "A final 429 error must record the actual retry count and elapsed bounded wait.");
+                results.Add(new { scenario = "freellmapi-429-records-bounded-wait-attempts-in-provider-errors", passed = true, providerCalls = exhaustedRetryAfterCalls, nativeCommands = 0 });
+            }
+        }
+
+        using (var overBoundRetryAfter = new HttpResponseMessage(HttpStatusCode.TooManyRequests))
+        using (var diagnosticProvider = new OllamaNativeProvider(freeLlmApiSettings))
+        {
+            overBoundRetryAfter.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(121));
+            var failureMessage = diagnosticProvider.BuildHttpFailureMessage(overBoundRetryAfter, 0, 0);
+            if (!failureMessage.Contains("rateLimitRetryEligible=false", StringComparison.Ordinal) ||
+                !failureMessage.Contains("rateLimitRetryAfterSeconds=unbounded-or-unparseable", StringComparison.Ordinal))
+                throw new AgentHostException("provider-self-test-retry-after-eligibility-diagnostic-missing", "An over-bound Retry-After must be reported as ineligible without logging provider response content.");
+            results.Add(new { scenario = "freellmapi-429-reports-over-bound-retry-as-ineligible", passed = true });
+        }
+
+        var timeoutDuringRetryCalls = 0;
+        var timeoutDuringRetryHandler = new StubHandler((_, _) =>
+        {
+            timeoutDuringRetryCalls++;
+            var limited = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+            limited.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(5));
+            return Task.FromResult(limited);
+        });
+        var timeoutDuringRetrySettings = freeLlmApiSettings with { Timeout = TimeSpan.FromMilliseconds(250) };
+        using (var timeoutDuringRetryClient = new HttpClient(timeoutDuringRetryHandler) { Timeout = timeoutDuringRetrySettings.Timeout })
+        using (var timeoutDuringRetryProvider = new OllamaNativeProvider(timeoutDuringRetrySettings, timeoutDuringRetryClient))
+        using (var request = JsonDocument.Parse(BuildActionDecisionRequest()))
+        {
+            try
+            {
+                await timeoutDuringRetryProvider.DecideAsync(request.RootElement, CancellationToken.None);
+                throw new AgentHostException("provider-self-test-retry-delay-outlived-provider-timeout", "A bounded Retry-After wait must remain inside the total provider timeout.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-timeout")
+            {
+                if (timeoutDuringRetryCalls != 1)
+                    throw new AgentHostException("provider-self-test-retry-delay-sent-after-deadline", "The provider must not issue a retry after its overall request deadline expires.");
+                results.Add(new { scenario = "freellmapi-retry-after-delay-respects-overall-provider-timeout", passed = true, providerCalls = timeoutDuringRetryCalls, nativeCommands = 0 });
+            }
         }
 
         using (var missingRetryAfter = new HttpResponseMessage(HttpStatusCode.TooManyRequests))

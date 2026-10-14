@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.189'
+$contractVersion = '7.194'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -251,6 +251,8 @@ if ($harnessScript -notmatch "'AgentHostVillageToolsQuestEvaluation' \{ @\('Pref
     $agentHostVillageToolsQuestLoopSource -notmatch 'village-tools-host-routes-classified-goal-through-native-observe-decide-act-loop' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'village-tools-host-recovers-from-bounded-invalid-actions-in-open-native-dialogue' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'The only allowed Host action is dialogueSelect' -or
+    $agentHostVillageToolsQuestLoopSource -notmatch 'The Native screen shows gold' -or
+    $agentHostVillageToolsQuestLoopSource -notmatch 'village-tools-host-maps-visible-click-to-continue-screen-to-dialogueContinue' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'clickableOptionIds' -or
     $agentHostVillageToolsFixturePreparationSource -notmatch 'Get-ToolsIssueMarker' -or
     $agentHostVillageToolsFixturePreparationSource -notmatch "Invoke-NativeCli 'save'" -or
@@ -258,6 +260,7 @@ if ($harnessScript -notmatch "'AgentHostVillageToolsQuestEvaluation' \{ @\('Pref
     $agentHostVillageToolsFixturePreparationSource -notmatch 'No Quest was injected' -or
     $agentHostDecisionCycleSource -notmatch 'supportedVillageToolsQuestGoal' -or
     $agentHostDecisionCycleSource -notmatch 'Conversation option IDs are argument values, never action names' -or
+    $agentHostDecisionCycleSource -notmatch '点击继续' -or $agentHostDecisionCycleSource -notmatch 'does not leave the settlement' -or
     $agentHostDecisionCycleSource -notmatch 'intermediate steps' -or
     $agentHostDecisionCycleSource -notmatch 'not extra goals' -or
     $agentLiveModelLoopSource -notmatch '\[switch\]\$VillageToolsQuestLoop' -or
@@ -413,6 +416,13 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerProfileTestSource -notmatch 'freellmapi-json-object-fallback-recognizes-explicit-400-422-and-fallback-502-schema-rejection-only' -or
     $providerProfileTestSource -notmatch 'freellmapi-transient-upstream-502-retried-once-before-native-action' -or
     $providerProfileTestSource -notmatch 'freellmapi-429-honors-bounded-retry-after-before-native-action' -or
+    $providerProfileTestSource -notmatch 'freellmapi-429-records-bounded-wait-attempts-in-provider-errors' -or
+    $providerProfileTestSource -notmatch 'freellmapi-reclassifies-429-after-transient-upstream-retry' -or
+    $providerProfileTestSource -notmatch 'freellmapi-429-reports-over-bound-retry-as-ineligible' -or
+    $providerProfileTestSource -notmatch 'freellmapi-retry-after-delay-respects-overall-provider-timeout' -or
+    $providerSmokeSource -notmatch 'function Resolve-ProviderSmokeTimeoutSeconds' -or
+    $providerSmokeSource -notmatch 'Resolve-ProviderSmokeTimeoutSeconds \$null\) -ne 180' -or
+    $providerSmokeSource -match '\[ref\]\$effectiveTimeout' -or
     $providerProfileTestSource -notmatch 'freellmapi-429-accepts-observed-85-second-retry-and-fails-closed-outside-bounds' -or
     $providerProfileTestSource -notmatch 'freellmapi-two-transient-upstream-retries-bounded-before-native-action' -or
     $providerProfileTestSource -notmatch 'freellmapi-schema-fallback-then-transient-upstream-retry-is-bounded' -or

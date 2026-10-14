@@ -77,6 +77,28 @@ internal static class AgentHostVillageToolsQuestLoop
                 !text.Contains("dialogueSelect", StringComparison.Ordinal) || !text.Contains("issue_64_quest_accept", StringComparison.Ordinal)))
             throw new AgentHostException("village-tools-loop-self-test-dialogue-provider-recovery-failed", "Repeated unavailable actions during an open conversation must receive precise feedback, remain Native-side-effect-free, and allow a later listed dialogue action.");
 
+        var continueClient = new FakeVillageDialogueContinueNativeClient();
+        var continueProvider = new FakeVillageDialogueContinueDecisionProvider();
+        using var continueRequest = JsonDocument.Parse(JsonSerializer.Serialize(new
+        {
+            runId = "selftest-village-dialogue-click-to-continue",
+            goal = "Complete the currently visible village tools quest.",
+            parentProcessId = 321,
+            maxDecisions = 6,
+            maxElapsedSeconds = 10,
+            allowedActionNames = AgentHostCampaignLoop.ApprovedActions.ToArray()
+        }));
+        var continueResult = await RunAsync(continueRequest.RootElement, continueClient, continueProvider, CancellationToken.None);
+        if (ReadString(continueResult, "status") != "failed" ||
+            ReadString(continueResult["termination"] as JsonObject, "reason") != "decision-budget-exhausted" ||
+            !continueClient.Actions.SequenceEqual(new[] { "talkToSettlementHero", "dialogueSelect", "dialogueContinue", "dialogueSelect", "questDetails" }) ||
+            continueClient.ClockActionCount != 0 || continueProvider.Calls != 6 || continueProvider.RejectedActions != 1 ||
+            !continueProvider.SystemPromptMappedVisibleContinue ||
+            !continueProvider.RequiredNextStep.Contains("点击继续", StringComparison.Ordinal) ||
+            !continueProvider.RequiredNextStep.Contains("does not leave the settlement", StringComparison.Ordinal) ||
+            !continueProvider.RequiredNextStep.Contains("dialogueContinue", StringComparison.Ordinal))
+            throw new AgentHostException("village-tools-loop-self-test-visible-click-to-continue-recovery-failed", "A rejected leave action on the Native click-to-continue screen must be replaced with the single listed dialogueContinue action and advance text without leaving the settlement. status=" + ReadString(continueResult, "status") + "; termination=" + ReadString(continueResult["termination"] as JsonObject, "reason") + "; actions=" + string.Join(",", continueClient.Actions) + "; providerCalls=" + continueProvider.Calls + "; rejected=" + continueProvider.RejectedActions + "; requiredNextStep=" + continueProvider.RequiredNextStep + "; promptMapped=" + continueProvider.SystemPromptMappedVisibleContinue + ".");
+
         var passageClient = new FakeSafePassageNativeClient();
         var passageProvider = new FakeSafePassageDecisionProvider();
         using var passageRequest = JsonDocument.Parse(JsonSerializer.Serialize(new
@@ -99,6 +121,7 @@ internal static class AgentHostVillageToolsQuestLoop
             new { scenario = "village-tools-postcondition-requires-exact-visible-tool-consumption-and-reward-delta", passed = true },
             new { scenario = "village-tools-host-routes-classified-goal-through-native-observe-decide-act-loop", decisions = ReadInt(result, "decisions", 0), actions = client.Actions.ToArray(), clockActions = client.ClockActionCount, passed = true },
             new { scenario = "village-tools-host-recovers-from-bounded-invalid-actions-in-open-native-dialogue", decisions = recoveryProvider.Calls, rejectedDecisions = recoveryFeedback.Count, nativeActions = recoveryClient.Actions.ToArray(), passed = true },
+            new { scenario = "village-tools-host-maps-visible-click-to-continue-screen-to-dialogueContinue", decisions = continueProvider.Calls, rejectedDecisions = continueProvider.RejectedActions, nativeActions = continueClient.Actions.ToArray(), passed = true },
             new { scenario = "village-tools-host-resolves-bandit-interruption-through-native-safe-passage-without-fight-or-clock-actions", decisions = ReadInt(passageResult, "decisions", 0), actions = passageClient.Actions.ToArray(), encounterCleared = !passageClient.FinalEncounterActive, passed = true }
         ];
     }
@@ -251,7 +274,7 @@ internal static class AgentHostVillageToolsQuestLoop
                         if (catalog.OfType<JsonObject>().Any(action => ReadString(action, "action") == "dialogueSelect") && clickableOptionIds.Length > 0)
                             requiredNextStep = "A Native conversation is open. The only allowed Host action is dialogueSelect; put one exact clickable conversation option ID into arguments.OptionId. Clickable IDs: " + string.Join(", ", clickableOptionIds) + ".";
                         else if (catalog.OfType<JsonObject>().Any(action => ReadString(action, "action") == "dialogueContinue"))
-                            requiredNextStep = "A Native conversation is open without a clickable option. Use the listed dialogueContinue action only.";
+                            requiredNextStep = "The Native screen shows gold ‘点击继续’ (Click to continue). dialogueContinue advances this dialogue text; it does not leave the settlement. Use only dialogueContinue with empty arguments. Do not call leave_settlement or talkToSettlementHero.";
                     }
                     feedback = new JsonObject
                     {
@@ -734,6 +757,117 @@ internal static class AgentHostVillageToolsQuestLoop
             if (!request.GetProperty("allowedActions").EnumerateArray().Any(item =>
                     ReadString(JsonNode.Parse(item.GetRawText()) as JsonObject, "action") == action))
                 throw new AgentHostException("village-tools-loop-self-test-provider-order-invalid", "The recovery test selected an action absent from the current catalog.");
+            return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 10, 5, "stop", decision));
+        }
+    }
+
+    private sealed class FakeVillageDialogueContinueNativeClient : IAgentHostVillageToolsQuestNativeClient
+    {
+        internal readonly List<string> Actions = [];
+        internal int ClockActionCount { get; private set; }
+        public int ProcessId => 321;
+        private int _dialogueStep;
+        private bool _questActive;
+
+        public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken) => Task.FromResult(ParseState());
+
+        public Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken) =>
+            ExecuteVillageToolsQuestActionAsync(action, arguments, cancellationToken);
+
+        public Task<JsonDocument> ExecuteVillageToolsQuestActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+        {
+            Actions.Add(action);
+            if (action is "pause" or "advance" or "fastForward") ClockActionCount++;
+            if (action == "talkToSettlementHero") _dialogueStep = 1;
+            else if (action == "dialogueSelect" && _dialogueStep == 1) _dialogueStep = 2;
+            else if (action == "dialogueContinue" && _dialogueStep == 2) _dialogueStep = 3;
+            else if (action == "dialogueSelect" && _dialogueStep == 3) { _dialogueStep = 4; _questActive = true; }
+
+            var state = ParseState();
+            using (state)
+            {
+                var response = JsonNode.Parse(state.RootElement.GetRawText())!.AsObject();
+                response["commandId"] = "continue-" + Actions.Count;
+                response["action"] = action;
+                response["status"] = "completed";
+                response["data"] = action switch
+                {
+                    "talkToSettlementHero" => new JsonObject { ["heroId"] = "hero-tools" },
+                    "questDetails" => new JsonObject { ["questId"] = "issue-1", ["title"] = "村庄需要工具", ["journalStages"] = new JsonArray(new JsonObject { ["taskName"] = "tools", ["currentProgress"] = 0, ["targetProgress"] = 1 }) },
+                    _ => new JsonObject()
+                };
+                return Task.FromResult(JsonDocument.Parse(response.ToJsonString()));
+            }
+        }
+
+        private JsonDocument ParseState()
+        {
+            JsonObject? conversation = _dialogueStep switch
+            {
+                1 => new JsonObject { ["options"] = new JsonArray(new JsonObject { ["id"] = "lord_meet_player_response1", ["clickable"] = true, ["text"] = "Greeting" }) },
+                2 => new JsonObject { ["options"] = new JsonArray() },
+                3 => new JsonObject { ["options"] = new JsonArray(new JsonObject { ["id"] = "issue_64_quest_accept", ["clickable"] = true, ["text"] = "I heard you have a problem." }) },
+                _ => null
+            };
+            var state = new JsonObject
+            {
+                ["processId"] = ProcessId,
+                ["campaignDay"] = 4.0,
+                ["timeControlMode"] = "Stop",
+                ["state"] = new JsonObject
+                {
+                    ["context"] = new JsonObject { ["gameState"] = "MapState", ["menuId"] = "village", ["conversation"] = conversation },
+                    ["location"] = new JsonObject { ["currentSettlementId"] = "village-1", ["targetSettlementId"] = null },
+                    ["quests"] = _questActive ? new JsonArray(new JsonObject { ["id"] = "issue-1", ["title"] = "村庄需要工具" }) : new JsonArray(),
+                    ["settlementOverlayCharacters"] = _dialogueStep == 0 && !_questActive
+                        ? new JsonArray(new JsonObject { ["heroId"] = "hero-tools", ["questMarkers"] = new JsonArray(new JsonObject { ["type"] = "AvailableIssue", ["title"] = "需要工具" }) })
+                        : new JsonArray(),
+                    ["availableMenuOptions"] = new JsonArray()
+                }
+            };
+            return JsonDocument.Parse(state.ToJsonString());
+        }
+    }
+
+    private sealed class FakeVillageDialogueContinueDecisionProvider : IAgentHostDecisionProvider
+    {
+        public string ModelId => "selftest-dialogue-continue";
+        public string ConfigurationSource => "selftest";
+        internal int Calls { get; private set; }
+        internal int RejectedActions { get; private set; }
+        internal string RequiredNextStep { get; private set; } = string.Empty;
+        internal bool SystemPromptMappedVisibleContinue { get; private set; }
+        public void Dispose() { }
+        public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
+        {
+            Calls++;
+            if (request.TryGetProperty("decisionFeedback", out var feedback) && feedback.ValueKind == JsonValueKind.Object &&
+                feedback.TryGetProperty("requiredNextStep", out var required) && required.ValueKind == JsonValueKind.String)
+            {
+                RequiredNextStep = required.GetString() ?? string.Empty;
+                SystemPromptMappedVisibleContinue = systemPrompt.Contains("点击继续", StringComparison.Ordinal) &&
+                    systemPrompt.Contains("does not leave the settlement", StringComparison.Ordinal);
+            }
+            if (Calls == 3)
+            {
+                RejectedActions++;
+                throw new AgentHostException("provider-action-unavailable", "Action 'leave_settlement' is not in the current Native action catalog [dialogueContinue].");
+            }
+
+            var decision = Calls switch
+            {
+                1 => new JsonObject { ["action"] = "talkToSettlementHero", ["arguments"] = new JsonObject { ["HeroId"] = "hero-tools" }, ["rationale"] = "Talk to the visible issue giver." },
+                2 => new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "lord_meet_player_response1" }, ["rationale"] = "Select the current clickable greeting." },
+                4 => new JsonObject { ["action"] = "dialogueContinue", ["arguments"] = new JsonObject(), ["rationale"] = "Advance the Native dialogue text." },
+                5 => new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "issue_64_quest_accept" }, ["rationale"] = "Select the current visible issue option." },
+                _ => new JsonObject { ["action"] = "questDetails", ["arguments"] = new JsonObject { ["QuestId"] = "issue-1" }, ["rationale"] = "Read the current Native journal." }
+            };
+            var action = ReadString(decision, "action");
+            if (!request.GetProperty("allowedActions").EnumerateArray().Any(item =>
+                    ReadString(JsonNode.Parse(item.GetRawText()) as JsonObject, "action") == action))
+                throw new AgentHostException("village-tools-loop-self-test-provider-order-invalid", "The click-to-continue recovery test selected an action absent from the current catalog.");
             return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 10, 5, "stop", decision));
         }
     }
