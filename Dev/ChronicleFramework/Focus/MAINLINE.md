@@ -544,6 +544,8 @@ W7-K真实模型分类/入口复验：
 - 后续Campaign运行`TestResults/20261016-030347`从自然蓝色工具标记进入原版聚落对话，逐步读取任务说明与1工具/73亚麻/30日条件；Native可见对话曾进入Alternative Solution分支，显示需贸易同伴和护卫，并回到Issue对话但Quest未出现在活动列表中。该运行没有最终`LiveModelLoopResult.json`，只能把保存的Native响应/游戏视频当作部分证据，不宣布模型实际接受/拒绝选项或完成任务。源`AgentBridgeLifecycle`存档hash在夹具准备前后相同；当次派生`ChronicleW7K-7f61d37cd0894cf7a4e383ae54d53b23.sav`已在确认无游戏进程、stale session恢复配置后按精确路径清理；片段视频保留为不完整诊断证据。
 - 本机`TaleWorlds.CampaignSystem.dll`反编译显示该Issue子类的`VillageNeedsToolsIssue.CanPlayerTakeQuestConditions`只产生“IssueGiver关系≥-10且不与玩家交战”的Issue专属条件；共享`IssueBase.CheckPreconditions`还会执行重复Issue等通用前置。Trade同伴/护卫需求来自另一条`IssueAlternativeSolutionExplanationByIssueGiver`分支，不是标准`VillageNeedsToolsIssueQuest`直接交付路径。当前Issue合同明确排除Alternative Solution；Host动作目录与提示现过滤`issue_alternative_solution_player_response`，并要求只走标准Quest交付分支。当前部分运行没有最终模型动作收据，不能断言先前拒绝是由哪项前置触发；`TestResults/20261016-060108`AgentHostPackage通过（Provider 100、Campaign 12、共享决策循环2项，0模型调用/0Native命令）。
 
+Harness启动边界核验（`TestResults/20261016-061057`与`061235`）：前次Detached完整阶段在Smoke冷启动Steam时被“Unable to initialize Steam API”弹窗挡住，Module/Lifecycle未加载，不是任务代码崩溃；保留已有Steam进程后第二次Smoke正常加载Chronicle assembly和Campaign lifecycle，Harness还自动确认“mod change detected / deleting shader cache”提示，但普通`Smoke`的45秒启动门限在GameStart前超时（`CrashDetected=false`、`ProcessExitedUnexpectedly=false`、没有正式存档修改）。W7-K完整阶段配置240秒Smoke预算，不等于上述45秒单独Phase；下一次完整阶段应在当前Steam会话下验证这条启动链，而不是用单独Smoke超时判定失败。
+
 同一真实运行的时序审计发现：FreeLLMAPI已命中OVH后的45秒请求间隔等待原先使用Campaign循环令牌，而非单次模型请求deadline；因此在429/502重试路径上，速率等待可能延长360秒模型请求上限。现已让该等待遵守Provider请求deadline，并新增`freellmapi-rate-window-wait-respects-per-request-deadline`回归，验证deadline到期后不再等满45秒且不发出第二次请求。本轮`TestResults/20261016-015916`的AgentHostPackage通过，Provider合同场景98项全过，模型调用和Native命令均为0；Quest端到端仍未通过。
 
 ## 维护规则
