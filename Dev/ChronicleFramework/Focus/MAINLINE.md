@@ -522,6 +522,8 @@ Host计时职责分离：`CHRONICLE_LLM_TIMEOUT_SECONDS`只用于FreeLLMAPI模�
 
 315秒重试的新边界合同收据`TestResults/20261015-205325`：AgentHostPackage中的97个Provider合同场景全部通过，`Retry-After=315`仍处于360秒总期限内、361秒/缺失header被拒、429最多重试两次、总Deadline到期后不再发第三次请求且NativeCommands=0。该测试使用短Stub延迟，只验证边界/计数，不等同真实315秒网络等待；真实等待与任务继续仍由下一次OVH Campaign实测证明。
 
+实时Mistral纵切片重验（`TestResults/20261015-223657`）：Provider smoke及片段恢复探针均通过；游戏进入一次性`MapState`村庄菜单后，真实路由`ovh/Mistral-Small-3.2-24B-Instruct-2506`成功完成4个Native动作：`talkToSettlementHero`、选择`lord_meet_player_response1`、`dialogueContinue`、选择`hero_give_issue`。下一决策遇OVH `socket hang up`，Host经过有限的502恢复后最终仍收到上游错误并停止；没有接取Quest。Native前后CampaignDay均为91077.635，正式源档不变、Host/游戏/CLI清理成功，视频完整覆盖3505/3505帧（701秒）并保留；失败帧显示头人正在说明工具委托、等待下一对话选择。此运行证明新超时/录像探针已进入实际Campaign流程，且真实玩家入口与对话可走到Issue解释，但不证明315秒Retry-After、委托接受或购买/交付通过；下一步继续从自然蓝标入口推进并记录路由重试结果。
+
 ## 维护规则
 
 - 本文维护技术目标、机制契约、领域架构、长期验收定义和未解事实；不保存项目工作项状态、域完成计数或测试通过快照。
