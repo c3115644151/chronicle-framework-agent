@@ -24,6 +24,32 @@ internal static class AgentHostVillageToolsQuestLoop
                 throw new AgentHostException("village-tools-loop-self-test-market-fallback-failed", "Map replanning must expose only fresh safe towns and exclude a town whose tools market was already checked empty.");
         }
 
+        var invalidVillageMove = new JsonObject { ["action"] = "move", ["arguments"] = new JsonObject { ["SettlementId"] = "village_V1_1" } };
+        var currentTownMoveCatalog = new JsonArray(new JsonObject
+        {
+            ["action"] = "move",
+            ["arguments"] = new JsonArray("SettlementId"),
+            ["argumentValues"] = new JsonObject { ["SettlementId"] = new JsonArray("town_V1", "town_V6") }
+        });
+        var moveFeedback = BuildActionPreconditionFeedback(invalidVillageMove, currentTownMoveCatalog,
+            "move must select a safe settlement of the required type from the latest Native target query.");
+        var movePrompt = AgentHostDecisionCycle.BuildVillageToolsQuestSystemPrompt(new JsonObject { ["decisionFeedback"] = moveFeedback });
+        var strictRetryPrompt = AgentHostDecisionCycle.BuildVillageToolsQuestSystemPrompt(new JsonObject
+        {
+            ["decisionFeedback"] = new JsonObject
+            {
+                ["kind"] = "decision-rejected-before-native",
+                ["requiredNextStep"] = "Use only the current clickable dialogueSelect ID.",
+                ["sameActionRetryAllowed"] = false
+            }
+        });
+        if (ReadBoolean(moveFeedback, "nativeActionSent") || ReadBoolean(moveFeedback, "sameActionRetryAllowed") != true ||
+            !ReadString(moveFeedback, "requiredNextStep")!.Contains("town_V1, town_V6", StringComparison.Ordinal) ||
+            !movePrompt.Contains("You may repeat that action only with corrected arguments", StringComparison.Ordinal) ||
+            movePrompt.Contains("never repeat the rejected action/control", StringComparison.Ordinal) ||
+            !strictRetryPrompt.Contains("never repeat the rejected action/control", StringComparison.Ordinal))
+            throw new AgentHostException("village-tools-loop-self-test-town-move-argument-recovery-failed", "A rejected move to the current Village must remain Native-side-effect-free and explicitly permit retrying move only with the current safe Town IDs.");
+
         var questReceipt = new JsonObject
         {
             ["action"] = "questDetails", ["status"] = "completed", ["data"] = new JsonObject
@@ -119,6 +145,7 @@ internal static class AgentHostVillageToolsQuestLoop
             throw new AgentHostException("village-tools-loop-self-test-safe-passage-transaction-failed", "Host did not complete the bounded Native non-fight Safe Passage action chain exactly once.");
         return [
             new { scenario = "village-tools-postcondition-requires-exact-visible-tool-consumption-and-reward-delta", passed = true },
+            new { scenario = "village-tools-host-recovers-invalid-village-target-with-current-safe-town-ids", passed = true, nativeActionSent = false },
             new { scenario = "village-tools-host-routes-classified-goal-through-native-observe-decide-act-loop", decisions = ReadInt(result, "decisions", 0), actions = client.Actions.ToArray(), clockActions = client.ClockActionCount, passed = true },
             new { scenario = "village-tools-host-recovers-from-bounded-invalid-actions-in-open-native-dialogue", decisions = recoveryProvider.Calls, rejectedDecisions = recoveryFeedback.Count, nativeActions = recoveryClient.Actions.ToArray(), passed = true },
             new { scenario = "village-tools-host-maps-visible-click-to-continue-screen-to-dialogueContinue", decisions = continueProvider.Calls, rejectedDecisions = continueProvider.RejectedActions, nativeActions = continueClient.Actions.ToArray(), passed = true },
@@ -344,7 +371,7 @@ internal static class AgentHostVillageToolsQuestLoop
                 if (!AgentHostVillageToolsQuestPolicy.TryResolveAction(currentNative!, previousReceipt, decision, out var action, out var arguments, out var rejection, preDeliveryInventoryCaptured, safePassageBalanceReceipt, questDetailsReceipt, safePassageContinueUsed))
                 {
                     rejected++;
-                    feedback = new JsonObject { ["kind"] = "decision-rejected-before-native", ["code"] = "native-precondition-not-met", ["message"] = rejection, ["nativeActionSent"] = false };
+                    feedback = BuildActionPreconditionFeedback(decision, catalog, rejection);
                     trace.Add(BuildDecisionStep(index, decisionStarted, modelRequest, decision, feedback, null, observationAfter: observation));
                     if (rejected > 2) { failure = "The model exceeded the bounded pre-Native rejection allowance."; termination = "rejection-limit"; break; }
                     continue;
@@ -469,6 +496,31 @@ internal static class AgentHostVillageToolsQuestLoop
             ["inventoryVerifiedAfterTurnIn"] = inventoryVerified
         }
     };
+
+    internal static JsonObject BuildActionPreconditionFeedback(JsonObject decision, JsonArray actionCatalog, string rejection)
+    {
+        var feedback = new JsonObject
+        {
+            ["kind"] = "decision-rejected-before-native",
+            ["code"] = "native-precondition-not-met",
+            ["message"] = rejection,
+            ["nativeActionSent"] = false
+        };
+        if (ReadString(decision, "action") != "move") return feedback;
+
+        var move = actionCatalog.OfType<JsonObject>().FirstOrDefault(item => ReadString(item, "action") == "move");
+        var townIds = (move?["argumentValues"]?["SettlementId"] as JsonArray)?.OfType<JsonValue>()
+            .Select(value => value.TryGetValue<string>(out var id) ? id : null)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Cast<string>()
+            .ToArray() ?? Array.Empty<string>();
+        if (townIds.Length == 0) return feedback;
+
+        var rejectedId = ReadString(decision["arguments"] as JsonObject, "SettlementId") ?? "the selected settlement";
+        feedback["sameActionRetryAllowed"] = true;
+        feedback["requiredNextStep"] = $"The previous move to '{rejectedId}' was rejected before Native because this Quest requires a Town merchant, not a Village. The current move action is still valid; retry move using exactly one safe Town SettlementId from the latest catalog: {string.Join(", ", townIds)}. Do not use a Village, the current location, or any ID outside this list.";
+        return feedback;
+    }
 
     internal static JsonObject BuildSafeReceipt(string action, JsonElement response, IReadOnlySet<string>? marketsWithoutTools = null)
     {

@@ -19,7 +19,8 @@ internal static class ProviderContractSelfTest
             !villageQuestPrompt.Contains("only before a conversation is open, and only if talkToSettlementHero is currently listed", StringComparison.Ordinal) ||
             !villageQuestPrompt.Contains("conversation is already open: never talk to that hero again", StringComparison.Ordinal) ||
             !villageQuestPrompt.Contains("Once the Journal confirms the Quest is active and tools are still owed, leave the Village and travel to a Town", StringComparison.Ordinal) ||
-            !villageQuestPrompt.Contains("never repeat the rejected action/control", StringComparison.Ordinal) ||
+            !villageQuestPrompt.Contains("obey the Host RECOVERY DIRECTIVE", StringComparison.Ordinal) ||
+            !villageQuestPrompt.Contains("sameActionRetryAllowed explicitly permits correcting its arguments", StringComparison.Ordinal) ||
             villageQuestPrompt.Contains("quickConversation", StringComparison.OrdinalIgnoreCase))
             throw new AgentHostException("village-tools-prompt-native-action-id-mismatch", "The quest prompt must name the exact Native contact action and prevent stale contact/decision repetition after conversation opens or feedback rejects an action.");
         results.Add(new { scenario = "village-tools-prompt-uses-exact-native-action-id", passed = true });

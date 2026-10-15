@@ -247,6 +247,10 @@ W5-K在`TestResults/20261010-181412`以两次独立New Campaign完成：第1次�
 
 ### 本地Provider运行核验
 
+最新W7-K真实模型纵切片（`TestResults/20261015-015125`，源码`0a89f71`）：Preflight、Build、Steam修复后的Smoke、自包含AgentHostPackage及真实FreeLLMAPI Provider门禁全部通过；Provider门禁实际路由为`custom/nvidia/llama-3.2-11b-vision`，703输入/32输出token、无Native命令。Campaign内模型在20次决策/11条Native动作中通过可见对话接取“卡利奥克需要工具”、读到Journal，并离开村庄查询地图目标；随后误把当前`village_V1_1`作为工具购买目标。Agent Host依据当前动作目录在Native前拒绝这次move，因而没有移动或改存档。FreeLLMAPI日志显示本轮也持续遭遇`blockrun.ai via proxy` socket reset/cooldown，最终Provider失败；CampaignDay未变、正式源存档hash不变、游戏/Host/session清理通过，5fps视频覆盖3214/3214帧并因失败保留。此运行没有买工具或交付，不算Quest通过。
+
+针对这个已复现的模型参数错误，Native拒绝反馈现在从当前`move`动作目录提取安全Town ID，并明确允许模型仅用这些新鲜ID重试`move`。此前全局Village工具System提示无条件禁止重复被拒动作，会与此参数纠错冲突；现在基础提示要求遵循Host恢复指令，只有`sameActionRetryAllowed=true`才可对同一动作纠正参数重试，其它拒绝仍明确禁止重复。`TestResults/20261015-021534`自包含Host包测试通过，覆盖Village ID在Native前被拒、恢复指令只列当前安全Town ID、且Prompt区分授权/未授权重复。该恢复逻辑尚未真实模型复验；下一轮必须在当前同一Quest起点检查模型是否改选Town并继续购物，不将这次安全拒绝算作进展完成。
+
 Steam/Smoke启动守卫的真实验证（`TestResults/20261014-223256`、`224145`、`225755`）：`220946`暴露Smoke绕过Agent-Cli的Steam前置检查，游戏在Steam未运行时弹`Unable to initialize Steam API`。现在Agent-Cli与Smoke共用`HarnessStartupEvidence.ps1`的隐藏Steam启动和5秒WebHelper稳定检查；第一次验证发现Windows PowerShell 5.1 JavaScriptSerializer无法处理用于收据的整数数组并报PSMethod循环引用，Smoke结果改为记录Steam状态计数/标量。最终`225755` Smoke通过，Bannerlord到达主菜单且收据成功序列化；完整`225912`阶段中的Smoke也通过。该修复只影响Harness启动前置和证据，不发送全局键鼠。
 
 W7-K模型阶段的上游失败（`TestResults/20261014-225912`）：真实Campaign从卡利奥克可见任务标记开始，Host在首个模型决策没有执行Native动作；CampaignDay不变、任务仍未接取、源存档不变、游戏/Host进程清理，窗口录像覆盖完整。FreeLLMAPI响应为HTTP 429，明确记录`Retry-After=75`，Host合规等待85014ms后重试仍失败。同期FreeLLMAPI本机日志显示NVIDIA自定义路由请求经`blockrun.ai via proxy`遇到`UND_ERR_SOCKET`/`ECONNRESET`及候选cooldown，因此网络/网关路由故障是更有力的解释；“免费配额耗尽”未被证实。之后`TestResults/20261015-014649` Provider合成门禁再次通过，真实路由`custom/nvidia/llama-3.2-11b-vision`返回动作、703输入/32输出token、NativeCommands=0；当前7890代理直连BlockRun与GitHub只读探针均HTTP 200，但不能保证下一次推理稳定。仍需在最新代码下重跑真实Quest。
