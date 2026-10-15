@@ -495,15 +495,15 @@ internal static class ProviderContractSelfTest
             try
             {
                 await exhaustedRetryAfterProvider.DecideAsync(request.RootElement, CancellationToken.None);
-                throw new AgentHostException("provider-self-test-retry-after-exhaustion-accepted", "A second 429 must fail closed after exactly one bounded retry.");
+                throw new AgentHostException("provider-self-test-retry-after-exhaustion-accepted", "A third 429 must fail closed after exactly two bounded retries.");
             }
             catch (AgentHostException exception) when (exception.Code == "provider-http-error")
             {
-                if (exhaustedRetryAfterCalls != 2 || !exception.Message.Contains("rateLimitRetryAttempts=1", StringComparison.Ordinal) ||
+                if (exhaustedRetryAfterCalls != 3 || !exception.Message.Contains("rateLimitRetryAttempts=2", StringComparison.Ordinal) ||
                     !exception.Message.Contains("rateLimitRetryWaitMilliseconds=", StringComparison.Ordinal) ||
                     !exception.Message.Contains("rateLimitRetryEligible=true", StringComparison.Ordinal))
                     throw new AgentHostException("provider-self-test-retry-after-attempt-telemetry-missing", "A final 429 error must record the actual retry count and elapsed bounded wait.");
-                results.Add(new { scenario = "freellmapi-429-records-bounded-wait-attempts-in-provider-errors", passed = true, providerCalls = exhaustedRetryAfterCalls, nativeCommands = 0 });
+                results.Add(new { scenario = "freellmapi-429-allows-two-explicit-waits-then-fails-closed", passed = true, providerCalls = exhaustedRetryAfterCalls, nativeCommands = 0 });
             }
         }
 

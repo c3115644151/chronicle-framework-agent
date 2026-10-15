@@ -430,7 +430,7 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $agentHostProviderSource -notmatch 'format_ignored' -or
     $providerProfileTestSource -notmatch 'freellmapi-transient-upstream-502-retried-once-before-native-action' -or
     $providerProfileTestSource -notmatch 'freellmapi-429-honors-bounded-retry-after-before-native-action' -or
-    $providerProfileTestSource -notmatch 'freellmapi-429-records-bounded-wait-attempts-in-provider-errors' -or
+    $providerProfileTestSource -notmatch 'freellmapi-429-allows-two-explicit-waits-then-fails-closed' -or
     $providerProfileTestSource -notmatch 'freellmapi-reclassifies-429-after-transient-upstream-retry' -or
     $providerProfileTestSource -notmatch 'freellmapi-429-reports-over-bound-retry-as-ineligible' -or
     $providerProfileTestSource -notmatch 'freellmapi-retry-after-delay-respects-overall-provider-timeout' -or
@@ -470,6 +470,7 @@ if ($providerHostSource -notmatch 'defaultTimeoutSeconds = nativeOllama \? 60 : 
     $providerHostSource -notmatch 'maximumTimeoutSeconds = nativeOllama \? 240 : 360' -or
     $providerHostSource -notmatch 'ReadIntegerEnvironment\("CHRONICLE_LLM_TIMEOUT_SECONDS", defaultTimeoutSeconds, 5, maximumTimeoutSeconds\)' -or
     $providerHostSource -notmatch 'ReadIntegerEnvironment\("CHRONICLE_LLM_TIMEOUT_SECONDS", 360, 5, 360\)' -or
+    $providerHostSource -notmatch 'rateLimitRetryAttempts < 2' -or
     $providerHostSource -notmatch 'TimeSpan.FromSeconds\(360\)' -or
     $providerProfileTestSource -notmatch '315' -or
     $providerProfileTestSource -notmatch '361') {

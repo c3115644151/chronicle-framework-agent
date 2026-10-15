@@ -290,7 +290,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             while (true)
             {
                 var retryAfter = GetBoundedRateLimitRetryAfter(_settings.Endpoint, response);
-                if (rateLimitRetryAttempts < 1 && retryAfter.HasValue)
+                if (rateLimitRetryAttempts < 2 && retryAfter.HasValue)
                 {
                     response.Dispose();
                     var retryWaitStartedUtc = DateTimeOffset.UtcNow;
