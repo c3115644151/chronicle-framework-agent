@@ -449,6 +449,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         var fallbackTrail = ReadResponseHeader(response, "X-Fallback-Trail");
         var retryAfter = response.Headers.RetryAfter?.ToString();
         if (!string.IsNullOrWhiteSpace(routedVia)) details.Add("routedVia=" + routedVia);
+        else if (!string.IsNullOrWhiteSpace(_lastProviderRoute)) details.Add("lastSuccessfulRoute=" + _lastProviderRoute);
         if (!string.IsNullOrWhiteSpace(fallbackAttempts)) details.Add("fallbackAttempts=" + fallbackAttempts);
         if (!string.IsNullOrWhiteSpace(fallbackTrail)) details.Add("fallbackTrail=" + fallbackTrail);
         if (!string.IsNullOrWhiteSpace(retryAfter)) details.Add("retryAfter=" + retryAfter[..Math.Min(retryAfter.Length, 40)]);

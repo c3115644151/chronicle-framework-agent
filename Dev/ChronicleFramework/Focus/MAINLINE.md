@@ -534,6 +534,8 @@ FreeLLMAPI路由复核与预检修正（2026-10-16）：上一轮`TestResults/20
 
 在`TestResults/20261016-013456`中，gpt-oss-20b的真实无游戏冒烟由FreeLLMAPI路由到`ovh/gpt-oss-20b`，通过JSON对象格式回退并返回唯一允许的交谈动作（722输入/156输出token）。完整运行`TestResults/20261016-013744`中，模型实际执行`talkToSettlementHero`和当前可见的`lord_meet_player_response1`两步；第三次决策遇到OVH HTTP429（Retry-After 14秒，两次等待累计23.007秒）后fail-closed。完成3次决策/2个Native动作，7075/490 token；CampaignDay保持91077.635，委托未接取，测试派生存档/source fixture不变，进程清理成功。失败帧实际显示头人3D对话的“点击继续”，录像完整3103/3103帧、620.6秒并保留。该运行显示模型能进入真实对话，但免费上游限制仍阻断委托闭环，不是Quest适配通过。
 
+`auto:noema-free`在`TestResults/20261016-020530`的无游戏冒烟也成功（实际路由`custom/nvidia/llama-3.2-11b-vision`，703/39 token），但随后的完整阶段`TestResults/20261016-020646`在Provider前置检查即收到无Retry-After的HTTP429，因此没有创建Campaign客户端或Fixture。这说明即使上一条冒烟成功，免费链的下一条请求仍可能立刻限流。已补充错误路由诊断合同：若429响应没有`X-Routed-Via`，收据只标记`lastSuccessfulRoute`，不冒充当前失败路由；本轮AgentHostPackage复测待确认。
+
 同一真实运行的时序审计发现：FreeLLMAPI已命中OVH后的45秒请求间隔等待原先使用Campaign循环令牌，而非单次模型请求deadline；因此在429/502重试路径上，速率等待可能延长360秒模型请求上限。现已让该等待遵守Provider请求deadline，并新增`freellmapi-rate-window-wait-respects-per-request-deadline`回归，验证deadline到期后不再等满45秒且不发出第二次请求。本轮`TestResults/20261016-015916`的AgentHostPackage通过，Provider合同场景98项全过，模型调用和Native命令均为0；Quest端到端仍未通过。
 
 ## 维护规则

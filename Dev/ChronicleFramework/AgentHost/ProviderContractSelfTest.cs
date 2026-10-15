@@ -677,6 +677,16 @@ internal static class ProviderContractSelfTest
             if (firstResult.RoutedVia != "ovh/Mistral-Small-3.2-24B-Instruct-2506" || pacedRouteCalls != 1)
                 throw new AgentHostException("provider-self-test-rate-window-seed-failed", "The first OVH response did not establish the route-specific pacing window.");
 
+            using (var rateLimitedWithoutRouteHeader = new HttpResponseMessage(HttpStatusCode.TooManyRequests))
+            {
+                rateLimitedWithoutRouteHeader.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(14));
+                var diagnostic = pacedRouteProvider.BuildHttpFailureMessage(rateLimitedWithoutRouteHeader, 0, 0);
+                if (!diagnostic.Contains("lastSuccessfulRoute=ovh/Mistral-Small-3.2-24B-Instruct-2506", StringComparison.Ordinal) ||
+                    diagnostic.Contains("routedVia=", StringComparison.Ordinal))
+                    throw new AgentHostException("provider-self-test-rate-limit-last-route-diagnostic-failed", "A provider failure without X-Routed-Via must label the previous route only as lastSuccessfulRoute, never as the failed request route.");
+                results.Add(new { scenario = "freellmapi-rate-limit-without-route-header-retains-last-successful-route-label", passed = true });
+            }
+
             var secondRequestStarted = DateTimeOffset.UtcNow;
             try
             {

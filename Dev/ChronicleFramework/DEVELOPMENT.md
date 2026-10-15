@@ -33,6 +33,8 @@ FreeLLMAPI Provider的单次请求时限覆盖接收响应头、完整响应正�
 
 FreeLLMAPI OVH路由的45秒节流等待必须使用单次Provider请求的取消令牌，不能只受整个Campaign循环令牌约束；否则请求deadline届满后仍可能多等一个完整路由间隔。`AgentHostPackage`回归通过先建立真实OVH路由回执，再以100ms模型请求deadline重试；应在deadline内返回`provider-timeout`且不得发送第二个Provider请求或Native命令。此时限只约束模型/路由等待，不改变Campaign时间。
 
+若最终HTTP错误缺少`X-Routed-Via`，Provider诊断可以附带`lastSuccessfulRoute`，但不得把它写成该失败请求的实际路由；只有当前响应带有`X-Routed-Via`时才能记录`routedVia`。回归覆盖此区分，避免把前一轮成功路径误当成本轮失败根因。
+
 升级/卸载的配置所有权：MCM `AttributeGlobalSettings`拥有`Documents/Mount and Blade II Bannerlord/Configs/ModSettings/Global/ChronicleFramework/ChronicleAgentSettings.json`，Host继续读取原有JSON字段`OllamaBaseUrl`与`ModelId`以兼容既有设置文件；新默认值指向FreeLLMAPI本机网关并使用`auto`。FreeLLMAPI统一密钥只通过启动前设置的用户环境变量继承，不写MCM配置。未知旧字段忽略，缺失或损坏配置报错但不重写/删除。当前无显式Chronicle配置迁移schema；新增/删除MCM持久字段前，先用真实旧版配置fixture定义迁移/回滚，然后才引入schemaVersion。发行包不携带用户配置；卸载只移除模块拥有的文件，不碰Global MCM目录、FreeLLMAPI数据/密钥或Campaign档。Host跟随Bannerlord父PID/启动时刻和模块路径，正常停止/模块卸载有界等待，异常退出仅可终止由本Mod创建且PID/启动时刻/可执行路径都匹配的Host；父游戏进程停止时Host自行退出。
 
 Host控制输入读取放在后台任务：`Console.In`同步Reader的异步接口可能阻塞调用线程。游戏保持stdin打开时，主流程仍必须能收到决策循环终态或父进程退出。自包含包回归以有效父进程身份、故意无效动作目录验证“stdin保持打开，拒绝结果仍按时返回”，不调用模型或Native；旧同步调用方式在该回归超时，修复版通过。
