@@ -58,8 +58,13 @@ function Test-ChronicleFragmentedCaptureResilience {
         if ($result.PartialBytes -lt 4096) { throw 'FFmpeg did not write a usable fragmented MP4 prefix before interruption.' }
 
         $ffprobe = (Get-Command ffprobe.exe -ErrorAction Stop).Source
-        $probeText = & $ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=codec_name,width,height,nb_read_frames -of json $videoPath 2> $probeErrorPath | Out-String
-        $result.ProbeExitCode = $LASTEXITCODE
+        $priorErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $probeText = & $ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=codec_name,width,height,nb_read_frames -of json $videoPath 2> $probeErrorPath | Out-String
+            $result.ProbeExitCode = $LASTEXITCODE
+        }
+        finally { $ErrorActionPreference = $priorErrorActionPreference }
         $result.ProbeStderrBytes = if (Test-Path -LiteralPath $probeErrorPath -PathType Leaf) { (Get-Item -LiteralPath $probeErrorPath).Length } else { 0 }
         $probe = $probeText | ConvertFrom-Json
         $streams = @($probe.streams)
@@ -68,8 +73,13 @@ function Test-ChronicleFragmentedCaptureResilience {
         $result.PartialVideoSha256 = (Get-FileHash -LiteralPath $videoPath -Algorithm SHA256).Hash
         $result.PartialVideoDecoded = $true
 
-        & $ffmpeg -hide_banner -loglevel error -err_detect ignore_err -y -i $videoPath -vf 'fps=0.25,scale=160:-1,tile=4x4' -frames:v 1 -q:v 3 $contactPath 2> $extractErrorPath
-        $result.ContactSheetExitCode = $LASTEXITCODE
+        $priorErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            & $ffmpeg -hide_banner -loglevel error -err_detect ignore_err -y -i $videoPath -vf 'fps=0.25,scale=160:-1,tile=4x4' -frames:v 1 -q:v 3 $contactPath 2> $extractErrorPath
+            $result.ContactSheetExitCode = $LASTEXITCODE
+        }
+        finally { $ErrorActionPreference = $priorErrorActionPreference }
         $result.ContactSheetStderrBytes = if (Test-Path -LiteralPath $extractErrorPath -PathType Leaf) { (Get-Item -LiteralPath $extractErrorPath).Length } else { 0 }
         if (-not (Test-Path -LiteralPath $contactPath -PathType Leaf) -or (Get-Item -LiteralPath $contactPath).Length -lt 512) {
             throw 'The interrupted fragmented MP4 could not produce a reviewable keyframe sheet.'
