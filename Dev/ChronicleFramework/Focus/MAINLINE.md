@@ -247,6 +247,8 @@ W5-K在`TestResults/20261010-181412`以两次独立New Campaign完成：第1次�
 
 ### 本地Provider运行核验
 
+W7-K免费路由比较（`TestResults/20261015-085245`、`090038`、`090226`、`090926`、`091708`）：FreeLLMAPI可用目录返回85条；`auto:noema-free`无游戏Provider门禁通过并返回`custom/nvidia/llama-3.2-11b-vision`合成动作，但完整auto链Campaign只完成一次Native对话后返回无Retry-After的HTTP429，未接Quest。此前直连NVIDIA Llama真实运行推进到接取Quest、读Journal和地图目标查询，最深入；随后同一模型在后续运行遇BlockRun socket resets。Gemini 3.8 Flash虽在目录中，Google实回403 `project has been denied access`；Cohere North Mini Code的Schema及JSON对象模式回复均被FreeLLMAPI标为`format_ignored`/截断并结束HTTP502。基于实测，当前仍用已有进展最多的NVIDIA Llama直连做下一次真实复验，而不是把模型尺寸当作根因；自动免费链与其他候选保留为故障时可替换选项，均未完成Quest验收。
+
 最新W7-K真实模型纵切片（`TestResults/20261015-015125`，源码`0a89f71`）：Preflight、Build、Steam修复后的Smoke、自包含AgentHostPackage及真实FreeLLMAPI Provider门禁全部通过；Provider门禁实际路由为`custom/nvidia/llama-3.2-11b-vision`，703输入/32输出token、无Native命令。Campaign内模型在20次决策/11条Native动作中通过可见对话接取“卡利奥克需要工具”、读到Journal，并离开村庄查询地图目标；随后误把当前`village_V1_1`作为工具购买目标。Agent Host依据当前动作目录在Native前拒绝这次move，因而没有移动或改存档。FreeLLMAPI日志显示本轮也持续遭遇`blockrun.ai via proxy` socket reset/cooldown，最终Provider失败；CampaignDay未变、正式源存档hash不变、游戏/Host/session清理通过，5fps视频覆盖3214/3214帧并因失败保留。此运行没有买工具或交付，不算Quest通过。
 
 针对这个已复现的模型参数错误，Native拒绝反馈现在从当前`move`动作目录提取安全Town ID，并明确允许模型仅用这些新鲜ID重试`move`。此前全局Village工具System提示无条件禁止重复被拒动作，会与此参数纠错冲突；现在基础提示要求遵循Host恢复指令，只有`sameActionRetryAllowed=true`才可对同一动作纠正参数重试，其它拒绝仍明确禁止重复。`TestResults/20261015-021534`自包含Host包测试通过，覆盖Village ID在Native前被拒、恢复指令只列当前安全Town ID、且Prompt区分授权/未授权重复。该恢复逻辑尚未真实模型复验；下一轮必须在当前同一Quest起点检查模型是否改选Town并继续购物，不将这次安全拒绝算作进展完成。
