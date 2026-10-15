@@ -73,7 +73,7 @@ FreeLLMAPI 模型服务边界（2026-10-13实现约束）：当前真实模型�
 
 Harness FreeLLMAPI服务启动（2026-10-15）：真实模型预检先用本机`/api/ping`探测桌面网关；没有监听时若默认安装路径含FreeLLMAPI.exe，就用隐藏窗口启动一次并最多等待30秒，仍不就绪则在游戏启动/推理前明确失败。启动FreeLLMAPI子进程时，Harness仅把用户级代理变量临时投影到该子进程；若没有任何显式代理变量且本机`127.0.0.1:7890`通过TCP监听检查，则仅为该FreeLLMAPI子进程临时提供`HTTPS_PROXY=http://127.0.0.1:7890`，之后恢复Harness父进程的环境变量。已运行的FreeLLMAPI不会被悄悄重启或改写其运行时代理。该Harness动作不通过computer-use操作UI、不读UI中的密钥，也不把API key写入任何额外文件；服务保持运行供后续测试复用。此变更针对2026-10-15真实模型请求中FreeLLMAPI上游TLS/socket失败、而显式7890代理探测可达所暴露的启动环境缺口；是否解决需由下一次真实路由回包验证，不宣称配置即代表已修复。
 
-FreeLLMAPI模型请求恢复边界（2026-10-14）：若网关以HTTP 502及回退链`keyN=error`/`keyN=upstream_error`标识临时上游故障，Host仅在当前决定尚未转成Native动作前，对同一模型决定最多重试两次，分别延迟5秒、15秒；第三次失败则安全终止本轮，不重放已执行游戏操作。对HTTP 429，只有网关明确给出`Retry-After`且等待不超过120秒时，Host才等待并重试一次；无提示或超过上限则安全失败，避免盲目重试配额限制。该边界覆盖最近实测到的85秒提示，确定性测试验证85秒被接受、121秒/无提示/非FreeLLMAPI端点被拒，实际短等待重试也由本地假Provider合同测试覆盖；真实免费上游网络仍可能持续不可用。JSON Schema的`provider_bad_request`回退是不同的单次JSON对象兼容规则。
+FreeLLMAPI模型请求恢复边界（2026-10-15更新）：若网关以HTTP 502及回退链`keyN=error`/`keyN=upstream_error`标识临时上游故障，Host仅在当前决定尚未转成Native动作前，对同一模型决定最多重试两次，分别延迟5秒、15秒；第三次失败则安全终止本轮，不重放已执行游戏操作。对HTTP 429，只有FreeLLMAPI明确提供有效`Retry-After`且等待不超过360秒时，Host才等待并重试一次；无提示、非正值或超过上限则安全失败，避免盲目重试配额限制。上限从120秒扩到360秒，是因为`TestResults/20261015-105000`真实返回315秒冷却、Host原先因超界安全失败；Provider总Deadline和无游戏门禁等待上限一并扩为360秒，避免“允许等待315秒”但外层提前杀掉请求。确定性合同测试接受315秒解析、拒绝361秒/无提示/非FreeLLMAPI端点，并继续验证小等待发生一次及等待超过总Deadline时不会发第二个请求；真实315秒等待路径仍须实测。真实免费上游网络仍可能不可用。JSON Schema的`provider_bad_request`回退是不同的单次JSON对象兼容规则。
 
 FreeLLMAPI `format_ignored`兼容回退（2026-10-14）：最近一次真实Campaign run `TestResults/20261014-171433`在20次决策/11条Native动作后已接取“卡利奥克需要工具”，`questDetails`能读到活动委托；退出村庄并读取附近目标后，下一模型请求收到HTTP 502，轨迹为`custom/nvidia/llama-3.2-11b-vision key1=format_ignored`。官方`fallback-loop.ts`将模型返回忽略`response_format`或截断JSON分类为`format_ignored`，并非普通传输失败。Host现允许仅针对FreeLLMAPI HTTP 502且轨迹明确含`keyN=format_ignored`的当前决策，一次性改用`json_object`重试；不放宽本地JSON解析、动作ID/参数目录、当前Native状态检查，也不重新执行之前的Native命令。Provider自测覆盖精确轨迹只发第二次JSON对象请求，并将合法`tradeConfirm`动作和省略的审计理由交给原有严格归一化；不执行Native动作。真实模型复验待FreeLLMAPI用户密钥与模型配置恢复。此次运行证明任务已被接受但未完成工具购买/交付，不能标作Quest通关。用户确认头人3D对话中的金色“点击继续”由点击/按键推进对话直到出现可选回答；该输入事实已进入`dialogueContinue`机制契约，时钟语义仍未知。
 
@@ -515,6 +515,8 @@ flowchart LR
 - Issue：源码中存在多个+1至+10左右的奖励分支，但每种 Issue 的触发对象、前置资源、交付方式和成败结果不同；聚合调用点不足以判断哪一种适合作为通用的 Tier 1 前置循环。
 
 当前判断：地图战斗与已有 battle bridge 的复用度最高，只能列为一个可检验候选；不能把P5偷换为“反复打劫匪直到50”。在确定验证场景前，还需从玩家实际可用路径、出现率、损失/收益及尚未适配的入口完成比较，并继续保持 Tier 1 是Agent成熟度夹具而非产品目标。
+
+真实315秒重试上限扩展后的本地代码审计发现，第一轮Full phase Provider smoke通过`--decision-once`进入`OllamaNativeProvider.FromEnvironment`，而Campaign loop使用`FromProfile`。先前只把Profile超时从180扩到360，Smoke路径仍保留本地协议60/240秒默认/上限，因此FreeLLMAPI在回退等待中仍可提前超时；这是Harness/Host入口差异，不是模型决策。现已按协议分别设置：FreeLLMAPI/OpenAI-compatible `FromEnvironment` 默认/最大360秒，Native Ollama仍默认60/最大240秒；Profile默认/最大360秒；VillageTools Harness切片也已把360秒传给Host，不再用旧180秒值覆盖。`TestResults/20261015-182025` AgentHostPackage有97个Provider合同场景通过；`TestResults/20261015-182144`的无游戏真实Mistral smoke通过（OVH路由、687/32 tokens、0 Native命令），但这尚未真实等待315秒。`TestResults/20261015-182256`随后启动过真实Campaign，却没有写出最终LiveModelLoop/summary收据；Capture JSONL只有起始事件，25分钟MP4尾部缺少`moov`、ffprobe无法解码，故运行过程/动作不作猜测或能力结论。Native夹具收据确认源存档hash不变，测试游戏已退出，唯一派生`ChronicleW7K-*`存档已清理。针对该证据缺口，FFmpeg输出已改为fragmented MP4并每2秒关键帧；自动故障注入探针`TestResults/FragmentedCaptureProbe/Recovery.json`强制杀FFmpeg后仍由ffprobe解码31535帧且能生成联系表，临时合成视频已清理。现在真实LiveModel在开Campaign前运行这个短探针并把结果放入收据；本次合约/Docs和新真实315秒等待路径仍需复验，不能将模拟录像测试替代游戏录像结果。
 
 ## 维护规则
 

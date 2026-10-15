@@ -52,6 +52,7 @@ function Write-CaptureEvent([string]$Name, $Receipt, [long]$CaptureStartTicks, [
 
 try {
     . $videoCaptureLibrary
+    $captureRecoveryProof = Test-ChronicleFragmentedCaptureResilience -EvidencePath (Join-Path $runDirectory 'CampaignWindow-CaptureRecovery.json')
     $env:CHRONICLE_HARNESS_MODE = 'visual-capture'
     $start = Invoke-AgentCli 'load' @('-SaveName', $LoadSaveName)
     $before = Invoke-AgentCli 'state' @('-CommandId', ('visual-capture-before-' + [Guid]::NewGuid().ToString('N')))
@@ -81,6 +82,7 @@ try {
     $fixtureHashAfter = (Get-FileHash $savePath -Algorithm SHA256).Hash
     $result = [ordered]@{
         Capture = $captureResult
+        CaptureRecoveryProof = $captureRecoveryProof
         EngineStillPath = $engineFramePath
         ReviewFramePath = $framePath
         EventTracePath = $eventTracePath

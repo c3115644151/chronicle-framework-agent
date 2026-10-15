@@ -510,7 +510,7 @@ internal static class ProviderContractSelfTest
         using (var overBoundRetryAfter = new HttpResponseMessage(HttpStatusCode.TooManyRequests))
         using (var diagnosticProvider = new OllamaNativeProvider(freeLlmApiSettings))
         {
-            overBoundRetryAfter.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(121));
+            overBoundRetryAfter.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(361));
             var failureMessage = diagnosticProvider.BuildHttpFailureMessage(overBoundRetryAfter, 0, 0);
             if (!failureMessage.Contains("rateLimitRetryEligible=false", StringComparison.Ordinal) ||
                 !failureMessage.Contains("rateLimitRetryAfterSeconds=unbounded-or-unparseable", StringComparison.Ordinal))
@@ -546,18 +546,21 @@ internal static class ProviderContractSelfTest
 
         using (var missingRetryAfter = new HttpResponseMessage(HttpStatusCode.TooManyRequests))
         using (var observedRetryAfter = new HttpResponseMessage(HttpStatusCode.TooManyRequests))
+        using (var observedLongRetryAfter = new HttpResponseMessage(HttpStatusCode.TooManyRequests))
         using (var longRetryAfter = new HttpResponseMessage(HttpStatusCode.TooManyRequests))
         using (var nonFreeRetryAfter = new HttpResponseMessage(HttpStatusCode.TooManyRequests))
         {
             observedRetryAfter.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(85));
-            longRetryAfter.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(121));
+            observedLongRetryAfter.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(315));
+            longRetryAfter.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(361));
             nonFreeRetryAfter.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(1));
             if (OllamaNativeProvider.GetBoundedRateLimitRetryAfter(freeLlmApiSettings.Endpoint, observedRetryAfter) != TimeSpan.FromSeconds(85) ||
+                OllamaNativeProvider.GetBoundedRateLimitRetryAfter(freeLlmApiSettings.Endpoint, observedLongRetryAfter) != TimeSpan.FromSeconds(315) ||
                 OllamaNativeProvider.GetBoundedRateLimitRetryAfter(freeLlmApiSettings.Endpoint, missingRetryAfter).HasValue ||
                 OllamaNativeProvider.GetBoundedRateLimitRetryAfter(freeLlmApiSettings.Endpoint, longRetryAfter).HasValue ||
                 OllamaNativeProvider.GetBoundedRateLimitRetryAfter(settings.Endpoint, nonFreeRetryAfter).HasValue)
-                throw new AgentHostException("provider-self-test-unbounded-rate-limit-retry-accepted", "Only explicit FreeLLMAPI Retry-After delays from 1 through 120 seconds may be retried automatically.");
-            results.Add(new { scenario = "freellmapi-429-accepts-observed-85-second-retry-and-fails-closed-outside-bounds", passed = true });
+                throw new AgentHostException("provider-self-test-unbounded-rate-limit-retry-accepted", "Only explicit FreeLLMAPI Retry-After delays from 1 through 360 seconds may be retried automatically; the observed 315-second delay must remain eligible.");
+            results.Add(new { scenario = "freellmapi-429-accepts-observed-315-second-retry-and-fails-closed-outside-bounds", passed = true });
         }
 
         var boundedTransientRetryCalls = 0;

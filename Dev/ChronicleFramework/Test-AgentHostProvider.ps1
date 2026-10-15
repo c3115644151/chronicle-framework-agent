@@ -74,14 +74,16 @@ $process.StandardInput.Close()
 function Resolve-ProviderSmokeTimeoutSeconds([AllowNull()][string]$ConfiguredValue)
 {
     $parsedTimeout = 0
-    if ([int]::TryParse($ConfiguredValue, [ref]$parsedTimeout)) { return [Math]::Min(240, [Math]::Max(5, $parsedTimeout)) }
-    return 180
+    if ([int]::TryParse($ConfiguredValue, [ref]$parsedTimeout)) { return [Math]::Min(360, [Math]::Max(5, $parsedTimeout)) }
+    return 360
 }
 
-if ((Resolve-ProviderSmokeTimeoutSeconds $null) -ne 180 -or
+if ((Resolve-ProviderSmokeTimeoutSeconds $null) -ne 360 -or
     (Resolve-ProviderSmokeTimeoutSeconds '75') -ne 75 -or
     (Resolve-ProviderSmokeTimeoutSeconds '2') -ne 5 -or
-    (Resolve-ProviderSmokeTimeoutSeconds 'invalid') -ne 180) {
+    (Resolve-ProviderSmokeTimeoutSeconds '360') -ne 360 -or
+    (Resolve-ProviderSmokeTimeoutSeconds '361') -ne 360 -or
+    (Resolve-ProviderSmokeTimeoutSeconds 'invalid') -ne 360) {
     throw 'Provider smoke timeout configuration did not preserve its default and bounded values.'
 }
 $effectiveTimeout = Resolve-ProviderSmokeTimeoutSeconds ([string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_TIMEOUT_SECONDS','Process'))

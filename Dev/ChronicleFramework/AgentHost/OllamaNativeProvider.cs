@@ -53,7 +53,9 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         endpointBuilder.Path = nativeOllama ? "/api/chat" : endpointBuilder.Path.TrimEnd('/') + "/chat/completions";
         var endpoint = endpointBuilder.Uri;
 
-        var timeoutSeconds = ReadIntegerEnvironment("CHRONICLE_LLM_TIMEOUT_SECONDS", 60, 5, 240);
+        var defaultTimeoutSeconds = nativeOllama ? 60 : 360;
+        var maximumTimeoutSeconds = nativeOllama ? 240 : 360;
+        var timeoutSeconds = ReadIntegerEnvironment("CHRONICLE_LLM_TIMEOUT_SECONDS", defaultTimeoutSeconds, 5, maximumTimeoutSeconds);
         var maxOutputTokens = ReadIntegerEnvironment("CHRONICLE_LLM_MAX_TOKENS", 256, 64, 4096);
         var temperature = ReadOptionalDoubleEnvironment("CHRONICLE_LLM_TEMPERATURE", 0d, 2d);
         var thinkingMode = Environment.GetEnvironmentVariable("CHRONICLE_LLM_THINKING_MODE");
@@ -118,7 +120,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             endpoint,
             profile.ModelId,
             NativeOllama: false,
-            Timeout: TimeSpan.FromSeconds(ReadIntegerEnvironment("CHRONICLE_LLM_TIMEOUT_SECONDS", 180, 5, 240)),
+            Timeout: TimeSpan.FromSeconds(ReadIntegerEnvironment("CHRONICLE_LLM_TIMEOUT_SECONDS", 360, 5, 360)),
             MaxOutputTokens: ReadIntegerEnvironment("CHRONICLE_LLM_MAX_TOKENS", 512, 64, 4096),
             Temperature: 0d,
             Thinking: null,
@@ -480,7 +482,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         if (!IsFreeLlmApi(endpoint) || response.StatusCode != HttpStatusCode.TooManyRequests || response.Headers.RetryAfter is null)
             return null;
         var delay = response.Headers.RetryAfter.Delta ?? response.Headers.RetryAfter.Date - DateTimeOffset.UtcNow;
-        if (!delay.HasValue || delay.Value <= TimeSpan.Zero || delay.Value > TimeSpan.FromSeconds(120)) return null;
+        if (!delay.HasValue || delay.Value <= TimeSpan.Zero || delay.Value > TimeSpan.FromSeconds(360)) return null;
         return delay.Value;
     }
 

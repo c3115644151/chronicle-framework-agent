@@ -1,3 +1,98 @@
+function Test-ChronicleFragmentedCaptureResilience {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$EvidencePath)
+
+    $evidencePath = [IO.Path]::GetFullPath($EvidencePath)
+    $evidenceDirectory = Split-Path -Parent $evidencePath
+    New-Item -ItemType Directory -Path $evidenceDirectory -Force | Out-Null
+    $nonce = [Guid]::NewGuid().ToString('N')
+    $videoPath = Join-Path $evidenceDirectory ('CaptureRecoveryProbe-' + $nonce + '.mp4')
+    $contactPath = Join-Path $evidenceDirectory ('CaptureRecoveryProbe-' + $nonce + '-contact.jpg')
+    $probeErrorPath = Join-Path $evidenceDirectory ('CaptureRecoveryProbe-' + $nonce + '-ffprobe.stderr')
+    $extractErrorPath = Join-Path $evidenceDirectory ('CaptureRecoveryProbe-' + $nonce + '-extract.stderr')
+    $captureProcess = $null
+    $processStarted = $false
+    $errorMessage = $null
+    $result = [ordered]@{
+        Passed = $false
+        Probe = 'fragmented-mp4-forced-interruption'
+        InterruptedProcess = $false
+        PartialVideoDecoded = $false
+        ContactSheetExtracted = $false
+        PartialBytes = 0
+        DecodedFrames = 0
+        PartialVideoSha256 = $null
+        TemporaryArtifactsRemoved = $false
+    }
+
+    try {
+        $ffmpeg = (Get-Command ffmpeg.exe -ErrorAction Stop).Source
+        $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $startInfo.FileName = $ffmpeg
+        $startInfo.Arguments = '-hide_banner -loglevel error -nostats -nostdin -y -f lavfi -i "testsrc2=size=320x180:rate=5" -an -c:v libx264 -preset ultrafast -crf 35 -pix_fmt yuv420p -g 5 -keyint_min 5 -fps_mode cfr -movflags +frag_keyframe+empty_moov+default_base_moof -t 86400 "' + $videoPath.Replace('"','\"') + '"'
+        $startInfo.UseShellExecute = $false
+        $startInfo.CreateNoWindow = $true
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+        $captureProcess = [Diagnostics.Process]::new()
+        $captureProcess.StartInfo = $startInfo
+        if (-not $captureProcess.Start()) { throw 'FFmpeg fragmented-capture probe did not start.' }
+        $processStarted = $true
+        $stdoutTask = $captureProcess.StandardOutput.ReadToEndAsync()
+        $stderrTask = $captureProcess.StandardError.ReadToEndAsync()
+        Start-Sleep -Seconds 2
+        $captureProcess.Refresh()
+        if ($captureProcess.HasExited) {
+            $exitCode = [int]$captureProcess.ExitCode
+            $stderr = [string]$stderrTask.GetAwaiter().GetResult()
+            throw "FFmpeg fragmented-capture probe exited before forced interruption (exit=$exitCode): $stderr"
+        }
+        $captureProcess.Kill()
+        $captureProcess.WaitForExit()
+        $result.InterruptedProcess = $true
+        $result.PartialBytes = if (Test-Path -LiteralPath $videoPath -PathType Leaf) { (Get-Item -LiteralPath $videoPath).Length } else { 0 }
+        if ($result.PartialBytes -lt 4096) { throw 'FFmpeg did not write a usable fragmented MP4 prefix before interruption.' }
+
+        $ffprobe = (Get-Command ffprobe.exe -ErrorAction Stop).Source
+        $probeText = & $ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=codec_name,width,height,nb_read_frames -of json $videoPath 2> $probeErrorPath | Out-String
+        $probeExitCode = $LASTEXITCODE
+        if ($probeExitCode -ne 0) { throw 'ffprobe could not parse the interrupted fragmented MP4 prefix.' }
+        $probe = $probeText | ConvertFrom-Json
+        $streams = @($probe.streams)
+        if ($streams.Count -ne 1 -or [int]$streams[0].nb_read_frames -lt 1) { throw 'ffprobe found no decodable frames in the interrupted fragmented MP4 prefix.' }
+        $result.DecodedFrames = [int]$streams[0].nb_read_frames
+        $result.PartialVideoSha256 = (Get-FileHash -LiteralPath $videoPath -Algorithm SHA256).Hash
+        $result.PartialVideoDecoded = $true
+
+        & $ffmpeg -hide_banner -loglevel error -err_detect ignore_err -y -i $videoPath -vf 'fps=0.25,scale=160:-1,tile=4x4' -frames:v 1 -q:v 3 $contactPath 2> $extractErrorPath
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $contactPath -PathType Leaf) -or (Get-Item -LiteralPath $contactPath).Length -lt 512) {
+            throw 'The interrupted fragmented MP4 could not produce a reviewable keyframe sheet.'
+        }
+        $result.ContactSheetExtracted = $true
+        $result.Passed = $true
+    }
+    catch {
+        $errorMessage = $_.Exception.Message
+    }
+    finally {
+        if ($processStarted -and $captureProcess -and -not $captureProcess.HasExited) { try { $captureProcess.Kill(); $captureProcess.WaitForExit() } catch { } }
+        foreach ($artifact in @($videoPath,$contactPath,$probeErrorPath,$extractErrorPath)) {
+            if (Test-Path -LiteralPath $artifact -PathType Leaf) { Remove-Item -LiteralPath $artifact -Force }
+        }
+        $remainingArtifacts = 0
+        foreach ($artifact in @($videoPath,$contactPath,$probeErrorPath,$extractErrorPath)) {
+            if (Test-Path -LiteralPath $artifact -PathType Leaf) { $remainingArtifacts++ }
+        }
+        $result.TemporaryArtifactsRemoved = $remainingArtifacts -eq 0
+        if ($errorMessage) { $result.Failure = $errorMessage }
+        $result | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $evidencePath -Encoding UTF8
+        if ($captureProcess) { $captureProcess.Dispose() }
+    }
+
+    if (-not $result.Passed) { throw "Fragmented MP4 interruption probe failed: $errorMessage" }
+    [pscustomobject]$result
+}
+
 function Start-ChronicleWindowVideoCapture {
     [CmdletBinding()]
     param(
@@ -18,11 +113,12 @@ function Start-ChronicleWindowVideoCapture {
     if ([string]::IsNullOrWhiteSpace($title) -or $title -notmatch 'Bannerlord') { throw "Target HWND did not resolve to a Bannerlord window: '$title'." }
     $hwndValue = [UInt64]$handle.ToInt64()
     $captureFilter = "gfxcapture=hwnd=${hwndValue}:max_framerate=${FrameRate}:capture_cursor=0:capture_border=0:display_border=0"
+    $keyframeInterval = [Math]::Max(1, $FrameRate * 2)
     $quotedFilter = '"' + $captureFilter.Replace('"','\"') + '"'
     $quotedOutput = '"' + $OutputPath.Replace('"','\"') + '"'
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
     $startInfo.FileName = $ffmpeg
-    $startInfo.Arguments = "-hide_banner -loglevel warning -y -f lavfi -i $quotedFilter -an -vf `"hwdownload,format=bgra,pad=ceil(iw/2)*2:ceil(ih/2)*2`" -c:v libx264 -preset ultrafast -crf 22 -pix_fmt yuv420p -fps_mode cfr $quotedOutput"
+    $startInfo.Arguments = "-hide_banner -loglevel warning -y -f lavfi -i $quotedFilter -an -vf `"hwdownload,format=bgra,pad=ceil(iw/2)*2:ceil(ih/2)*2`" -c:v libx264 -preset ultrafast -crf 22 -pix_fmt yuv420p -g $keyframeInterval -keyint_min $keyframeInterval -fps_mode cfr -movflags +frag_keyframe+empty_moov+default_base_moof $quotedOutput"
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardInput = $true

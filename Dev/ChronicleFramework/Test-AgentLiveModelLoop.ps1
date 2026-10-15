@@ -104,6 +104,7 @@ $priorModelMaxTokens = $env:CHRONICLE_LLM_MAX_TOKENS
 $sessionStarted = $false
 $capture = $null
 $captureResult = $null
+$captureRecoveryProof = $null
 $loopTrace = $null
 $hostReadyMessages = @()
 $failure = $null
@@ -181,6 +182,7 @@ function Capture-EngineFrame([string]$Name) {
 
 try {
     . $videoLibrary
+    $captureRecoveryProof = Test-ChronicleFragmentedCaptureResilience -EvidencePath (Join-Path $runDirectory 'FragmentedCaptureRecovery.json')
     Set-Content -LiteralPath $eventTracePath -Value '' -Encoding UTF8
     $env:CHRONICLE_HARNESS_MODE = 'visual-capture'
     $start = Invoke-AgentCli 'load' @('-SaveName', $LoadSaveName)
@@ -307,7 +309,7 @@ try {
         $maxDecisions = 100
         $maxElapsedSeconds = 1800
         $allowedActions = 'mapSettlementTargets,move,menuSelect,talkToSettlementHero,dialogueSelect,dialogueContinue,questDetails,tradeOptions,trade,tradeConfirm,tradeCancel,tradeCancelChanges,barterOptions,barterAutoBalance,barterOffer,barterCancel,inventoryOpen,heroEquipmentOptions,inventoryCancel'
-        $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '180'
+        $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '360'
         $env:CHRONICLE_LLM_MAX_TOKENS = '512'
     }
     elseif ($ArrivalLoop) {
@@ -704,6 +706,7 @@ try {
         ModelId = if ($AgentHostRuntime -and $loopTrace.providerModelId) { [string]$loopTrace.providerModelId } else { [string]$env:CHRONICLE_LLM_MODEL }
         ModelConfigurationSource = if ($AgentHostRuntime) { [string]$loopTrace.providerConfigurationSource } else { 'environment-provider' }
         ProviderRouteHistory = if ($AgentHostRuntime) { $loopTrace.providerRouteHistory } else { $null }
+        CaptureRecoveryProof = $captureRecoveryProof
         ModelMaxOutputTokens = if ($loopTrace.providerBudget) { [int]$loopTrace.providerBudget.maxOutputTokensPerCall } else { [int]$env:CHRONICLE_LLM_MAX_TOKENS }
         ModelThinkingMode = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_THINKING_MODE)) { 'provider-default' } else { [string]$env:CHRONICLE_LLM_THINKING_MODE }
         ModelReasoningEffort = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_REASONING_EFFORT)) { 'provider-default' } else { [string]$env:CHRONICLE_LLM_REASONING_EFFORT }
@@ -773,6 +776,7 @@ catch {
             ProviderProtocol = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_PROTOCOL)) { 'openai-compatible' } else { [string]$env:CHRONICLE_LLM_PROTOCOL }
             ModelId = [string]$env:CHRONICLE_LLM_MODEL
             ProviderRouteHistory = if ($AgentHostRuntime -and $loopTrace) { $loopTrace.providerRouteHistory } else { $null }
+            CaptureRecoveryProof = $captureRecoveryProof
             ModelMaxOutputTokens = if ($loopTrace.providerBudget) { [int]$loopTrace.providerBudget.maxOutputTokensPerCall } else { [int]$env:CHRONICLE_LLM_MAX_TOKENS }
             ModelThinkingMode = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_THINKING_MODE)) { 'provider-default' } else { [string]$env:CHRONICLE_LLM_THINKING_MODE }
             ModelReasoningEffort = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_REASONING_EFFORT)) { 'provider-default' } else { [string]$env:CHRONICLE_LLM_REASONING_EFFORT }
@@ -889,6 +893,7 @@ $result = [ordered]@{
     FailureEngineFramePath = if ($failureEngineFrameCaptured) { $engineFrameFailurePath } else { $null }
     ProcessId = if ($start -and $start.session) { $start.session.processId } else { $null }
     HostReadyMessages = @($hostReadyMessages)
+    CaptureRecoveryProof = $captureRecoveryProof
     Capture = $captureResult
     Trace = $liveModelTrace
 }

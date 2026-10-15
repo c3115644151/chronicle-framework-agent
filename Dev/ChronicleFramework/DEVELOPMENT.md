@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.202
+Contract version: 7.204
 
 Agent Host为每次模型决策按Native当前`allowedActions`/`allowedControls`生成JSON Schema互斥分支；对话、菜单、地图移动等动作还把策略允许的当前ID编码成参数枚举，避免从可见但不允许的选项中重复选择。每个活动Quest只读一次任务日志；城镇工具采购前先尝试当前市场，无货城镇会从本轮后续目标中排除，交易结束后才允许离开，避免在同一城镇循环。无动作目录时Host不调用模型，理由文本在schema中限制为64字符；村庄Quest目标另要求理由最多8个短词。FreeLLMAPI使用OpenAI兼容`response_format.json_schema`；无游戏的真实Provider冒烟测试要求模型返回唯一合成Native动作及精确目标参数，并记录实际`X-Routed-Via`与token；测试不执行Native命令。原生Ollama协议仍只留在隔离协议回归，不作为本项目真实模型推理路径。
 FreeLLMAPI Mistral Small 3.2→OVH当前使用JSON对象模式与`max_tokens`，并省略该上游不接受的OpenAI专属`store`及空`reasoning_effort`字段；输出仍由本地Host按Native动作目录逐项验证。若自动FreeLLMAPI路由以HTTP 400/422/502返回、且`X-Fallback-Trail`明确标记`provider_bad_request`拒绝JSON Schema，并表明回退轨迹中含OVH Mistral Small，则一次JSON对象模式兼容重试同时改用`max_tokens`，等待OVH节奏并严格后验验证。FreeLLMAPI以502和`keyN=format_ignored`标记结构化输出被上游模型忽略/截断时，也允许对同一尚未执行的决策重试一次JSON对象模式；其余HTTP失败不走此兼容重试。所有输出仍由本地Host按Native动作目录严格解析和验证，失败不会发送Native命令。Provider回归覆盖格式回退与非格式错误拒绝。
@@ -25,7 +25,7 @@ W7-K完整真实模型阶段在启动Bannerlord前，先运行同一进程模型
 
 Agent Host包测试在restore前以500毫秒上限TCP连接探测本机7890代理，并通过临时回环listener正/负自检；不使用`Test-NetConnection`长等待交互输出。代理不可达仍快速失败，不绕过用户配置的代理。
 
-FreeLLMAPI Provider的单次请求时限覆盖接收响应头、完整响应正文以及模型请求中的限流/上游退避等待；`ResponseHeadersRead`不能使正文或退避等待脱离该总时限。每次上游响应都重新分类：只允许一次有界429 `Retry-After`、对明确临时502最多重试两次；若502重试后返回429，也适用独立的一次429上限。退避用同一请求Deadline取消，超时后不得继续发请求。429错误只记录安全的重试资格、实际重试次数与累计等待毫秒，不写响应正文或凭据；这样可区分无提示/超界快速失败和等待后仍限流。无游戏Provider冒烟的180秒缺省超时必须在配置缺失时保留；无效配置回退到180秒，显式值限制在5–240秒，避免PowerShell `TryParse`失败时把默认值写成0。只读模型目录探测仅证明网关可达且模型/路由当前可用，不证明上游推理成功。实际请求失败先核查FreeLLMAPI路由、密钥健康/免费额度和上游响应，再归因模型或游戏。相关无模型回归覆盖“响应头立即返回、正文停滞”的超时分支。
+FreeLLMAPI Provider的单次请求时限覆盖接收响应头、完整响应正文以及模型请求中的限流/上游退避等待；`ResponseHeadersRead`不能使正文或退避等待脱离该总时限。每次上游响应都重新分类：只允许一次有界429 `Retry-After`、对明确临时502最多重试两次；若502重试后返回429，也适用独立的一次429上限。429的Retry-After上限现为360秒，来源是本机真实回包315秒；无Retry-After或超过360秒仍快速失败。FreeLLMAPI匿名OVH Mistral每分钟最多两次请求，Host对已命中OVH的请求仍按45秒节奏；允许等待315秒只为尊重FreeLLMAPI明确给出的冷却时间，不重放Native动作。退避用同一请求Deadline取消，超时后不得继续发请求。429错误只记录安全的重试资格、实际重试次数与累计等待毫秒，不写响应正文或凭据；这样可区分无提示/超界快速失败和等待后仍限流。无游戏Provider冒烟缺省超时现为360秒；OpenAI-compatible/FreeLLMAPI路径默认360秒且上限360秒，本地Ollama协议仍默认60秒、上限240秒。无效配置回退360秒，显式值限制在5–360秒，避免PowerShell `TryParse`失败时把默认值写成0。只读模型目录探测仅证明网关可达且模型/路由当前可用，不证明上游推理成功。实际请求失败先核查FreeLLMAPI路由、密钥健康/免费额度和上游响应，再归因模型或游戏。相关无模型回归覆盖响应体与退避都受同一Deadline约束。
 
 升级/卸载的配置所有权：MCM `AttributeGlobalSettings`拥有`Documents/Mount and Blade II Bannerlord/Configs/ModSettings/Global/ChronicleFramework/ChronicleAgentSettings.json`，Host继续读取原有JSON字段`OllamaBaseUrl`与`ModelId`以兼容既有设置文件；新默认值指向FreeLLMAPI本机网关并使用`auto`。FreeLLMAPI统一密钥只通过启动前设置的用户环境变量继承，不写MCM配置。未知旧字段忽略，缺失或损坏配置报错但不重写/删除。当前无显式Chronicle配置迁移schema；新增/删除MCM持久字段前，先用真实旧版配置fixture定义迁移/回滚，然后才引入schemaVersion。发行包不携带用户配置；卸载只移除模块拥有的文件，不碰Global MCM目录、FreeLLMAPI数据/密钥或Campaign档。Host跟随Bannerlord父PID/启动时刻和模块路径，正常停止/模块卸载有界等待，异常退出仅可终止由本Mod创建且PID/启动时刻/可执行路径都匹配的Host；父游戏进程停止时Host自行退出。
 
@@ -389,6 +389,7 @@ Native Barter目录按当前VM会话和成功回执逐阶段开放：没有当�
 - Progression `045339` deterministic provider 验证 Fresh→CampaignTick SaveAs/CLI load→移动→招募1人；保留回执与费用前后值，并确认临时存档清理、原存档哈希未变。
 - FreshCampaign日志尾投影DTO，禁直序列化Get-Content。
 - P2 原子 JSON；`captureFrame` 仅 visual Harness 可用且输出 BMP。FFmpeg `gfxcapture(hwnd=...)` 只采游戏窗；校验覆盖率并生成状态/动作 JSONL、缩略图和关键帧。成功删 MP4，失败留片；Agent 按索引看图。Loot All/Done 限原生 InventoryState，seedVisualLoot 不代表自然掉落。
+- Continuous MP4 uses fragmented output with an empty `moov` and keyframes at two-second intervals so a forced Harness/session termination still leaves a decodable prefix; a normal stop still validates coverage and generates event-aligned keyframes, while a failed clip is retained.
 - Progression证据保留初始Renown、招募回执/净变化、存档周期验证；清理后存档哈希不变。
 - Protocol 若暂时无法读取 `.processing` 命令，保留 claim 并延迟重试，不删失/丢弃命令；Docs 检查此恢复契约。
 - W7-B 的 `AgentHost/` 是目标玩家产品的本地 .NET 8 Host，不属于游戏线程，也不是Harness决策器。当前只提供一次只读 `state` 握手：写入独立关联ID，拒绝覆盖已有`command.json`，只接受关联ID/动作/状态都匹配的Native响应；超时仅删除仍能证明归属自身的未领取命令。它只返回PID、Hero/Clan/MainParty摘要，不输出整份快照、不发送世界动作。Protocol Harness先用假桥验证邮箱繁忙、旧/错响应与超时清理，再在一次性Campaign里连续调用三次Host，并与同一PID的原生CLI只读状态、前后Campaign指纹比较；这证明通信和零世界副作用，不代表模型循环已迁移或玩家入口已交付。

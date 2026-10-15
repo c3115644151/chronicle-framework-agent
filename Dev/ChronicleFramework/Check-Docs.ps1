@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.202'
+$contractVersion = '7.204'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -277,6 +277,9 @@ if ($harnessScript -notmatch "'AgentHostVillageToolsQuestEvaluation' \{ @\('Pref
     $agentHostCampaignLoopEvaluationSource -notmatch 'VillageToolsQuestInventoryDeltaVerified') {
     throw 'The Host village-tools quest path must remain opt-in and verify the current visible quest, native actions and exact pre/post inventory deltas before allowing completion.'
 }
+if ($agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S]{0,700}\$env:CHRONICLE_LLM_TIMEOUT_SECONDS = ''360''') {
+    throw 'The real-model Village quest slice must use the same bounded 360-second FreeLLMAPI retry deadline as the Host provider, so a verified 315-second Retry-After can be honored end to end.'
+}
 if ($agentActionLoopSource -notmatch 'function Get-EffectiveActionCatalog' -or $agentActionLoopSource -notmatch 'recruit_volunteers' -or $agentActionLoopSource -notmatch 'rejected-before-native' -or $agentActionLoopSource -notmatch 'control-unavailable' -or $agentActionLoopSource -notmatch 'control-rejected-before-native' -or $nativeRejectedActionBranch -match '\$previousActionReceipt\s*=\s*\$actionResult' -or $nativeRejectedActionBranch -notmatch 'Keep the last completed Native receipt available' -or $agentDecisionLoopPolicySource -notmatch 'StoppablePlay' -or $agentDecisionLoopPolicySource -notmatch 'encounterActive' -or $agentDecisionLoopPolicySource -notmatch 'town_wait_menus' -or $agentDecisionLoopSource -notmatch 'Convert-ReceiptForDecision' -or $agentDecisionLoopSource -notmatch 'consecutiveDecisionRejections' -or $agentDecisionLoopSource -notmatch 'decisionRejected' -or $agentOpenAiProviderSource -notmatch 'decisionRejected' -or $agentOpenAiProviderSource -notmatch 'decisionFeedback' -or $agentOpenAiProviderTestSource -notmatch 'invalidActionDecision\.decisionRejected' -or $agentEvaluationRecruitmentBaselineProviderSource -notmatch 'recruitment actions leaked' -or $agentDecisionTestProviderSource -notmatch 'staleOfferRecovery' -or $agentDecisionTestProviderSource -notmatch 'unlistedResumeRecovery' -or $agentDecisionLoopTestSource -notmatch 'ObserveAgainPolicySeparatesNaturalTimeFromStoppedEncounter' -or $agentDecisionLoopTestSource -notmatch 'ObserveAgainCanMonitorAcceptedNativeTownWait' -or $agentDecisionLoopTestSource -notmatch 'StaleOfferRecoveryVerified' -or $agentDecisionLoopTestSource -notmatch 'StaleOfferBlockedWithoutNativeMutation' -or $agentDecisionLoopTestSource -notmatch 'UnlistedResumeRejectedWithoutNativeAction' -or $agentDecisionLoopTestSource -notmatch 'StaleObserveAgainRejectedWithoutNativeAction') { throw 'The Agent decision catalog must respect current Native entries, keep the last successful receipt after rejection, permit bounded observation of accepted Native Town Wait, reject waits while time is stopped/encountered, and bound recovery without Native mutation.' }
 if ($agentHostVillageToolsQuestPolicySource -notmatch 'QuoteMatchesBalancedDraft' -or
     $agentHostVillageToolsQuestPolicySource -notmatch 'proposalFingerprint' -or
@@ -431,9 +434,9 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerProfileTestSource -notmatch 'freellmapi-429-reports-over-bound-retry-as-ineligible' -or
     $providerProfileTestSource -notmatch 'freellmapi-retry-after-delay-respects-overall-provider-timeout' -or
     $providerSmokeSource -notmatch 'function Resolve-ProviderSmokeTimeoutSeconds' -or
-    $providerSmokeSource -notmatch 'Resolve-ProviderSmokeTimeoutSeconds \$null\) -ne 180' -or
+    $providerSmokeSource -notmatch 'Resolve-ProviderSmokeTimeoutSeconds \$null\) -ne 360' -or
     $providerSmokeSource -match '\[ref\]\$effectiveTimeout' -or
-    $providerProfileTestSource -notmatch 'freellmapi-429-accepts-observed-85-second-retry-and-fails-closed-outside-bounds' -or
+    $providerProfileTestSource -notmatch 'freellmapi-429-accepts-observed-315-second-retry-and-fails-closed-outside-bounds' -or
     $providerProfileTestSource -notmatch 'freellmapi-two-transient-upstream-retries-bounded-before-native-action' -or
     $providerProfileTestSource -notmatch 'freellmapi-schema-fallback-then-transient-upstream-retry-is-bounded' -or
     $providerProfileTestSource -notmatch 'observedTokenParameters' -or
@@ -461,6 +464,15 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerHostSource -notmatch 'FromConfiguredProfile' -or
     $supplyHostSource -notmatch 'OllamaNativeProvider\.FromConfiguredProfile') {
     throw 'Player model settings must expose MCM Global JSON fields with an explicit safe format check, and the Agent Host must consume that same loopback-only profile outside Harness overrides.'
+}
+if ($providerHostSource -notmatch 'defaultTimeoutSeconds = nativeOllama \? 60 : 360' -or
+    $providerHostSource -notmatch 'maximumTimeoutSeconds = nativeOllama \? 240 : 360' -or
+    $providerHostSource -notmatch 'ReadIntegerEnvironment\("CHRONICLE_LLM_TIMEOUT_SECONDS", defaultTimeoutSeconds, 5, maximumTimeoutSeconds\)' -or
+    $providerHostSource -notmatch 'ReadIntegerEnvironment\("CHRONICLE_LLM_TIMEOUT_SECONDS", 360, 5, 360\)' -or
+    $providerHostSource -notmatch 'TimeSpan.FromSeconds\(360\)' -or
+    $providerProfileTestSource -notmatch '315' -or
+    $providerProfileTestSource -notmatch '361') {
+    throw 'FreeLLMAPI recovery must permit the observed 315-second Retry-After inside a 360-second Host request deadline and reject waits above the bound.'
 }
 $smokeModuleSource = Get-Content (Join-Path $harnessRoot 'Test-Module.ps1') -Raw -Encoding UTF8
 $releasePackageSource = Get-Content (Join-Path $harnessRoot 'New-ChronicleReleasePackage.ps1') -Raw -Encoding UTF8
@@ -709,7 +721,9 @@ if ($protocolSource -notmatch 'captureFrame is restricted to visual Harness mode
 if ($protocolSource -notmatch '_pendingClaimedCommandPath' -or $protocolSource -notmatch 'agent-command-read-retry' -or $protocolSource -notmatch 'FileShare\.ReadWrite \| FileShare\.Delete') { throw 'Transiently locked commands must remain claimed and retry instead of being deleted/lost.' }
 $videoCaptureSource = Get-Content (Join-Path $harnessRoot 'HarnessVideoCapture.ps1') -Raw -Encoding UTF8
 if ($videoCaptureSource -notmatch 'gfxcapture=hwnd=' -or $videoCaptureSource -notmatch 'FrameCoverageRatio' -or $videoCaptureSource -notmatch 'TimelineIndexPath' -or $videoCaptureSource -notmatch 'contactRate = 0\.25' -or $videoCaptureSource -notmatch 'Remove-Item -LiteralPath \$Capture\.OutputPath' -or $videoCaptureSource -notmatch 'Explicit Bannerlord HWND' -or $videoCaptureSource -notmatch "'mapSettlementTargets'.*'move'.*'recruitOptions'.*'recruit'.*'provision'.*'tradeConfirm'.*'rest'.*'providerDone'.*'modelLoopFailure'") { throw 'Continuous capture must target one Bannerlord HWND, make the summary montage legible, align important Agent/movement/recruitment/trade/wait/failure events, validate/index frames, and delete successful source video.' }
+if ($videoCaptureSource -notmatch 'function Test-ChronicleFragmentedCaptureResilience' -or $videoCaptureSource -notmatch 'testsrc2=size=320x180:rate=5' -or $videoCaptureSource -notmatch 'Get-Command ffprobe\.exe' -or $videoCaptureSource -notmatch 'count_frames -select_streams v:0' -or $videoCaptureSource -notmatch 'TemporaryArtifactsRemoved' -or $agentLiveModelLoopSource -notmatch 'Test-ChronicleFragmentedCaptureResilience' -or $agentLiveModelLoopSource -notmatch 'CaptureRecoveryProof') { throw 'Live capture must prove that an abruptly interrupted fragmented MP4 remains decodable before starting a long Campaign run and retain a compact recovery receipt.' }
 $battleFixtureSource = Get-Content (Join-Path $harnessRoot 'Test-AgentBattleFixture.ps1') -Raw -Encoding UTF8
+if ($videoCaptureSource -notmatch 'keyframeInterval = \[Math\]::Max\(1, \$FrameRate \* 2\)' -or $videoCaptureSource -notmatch 'movflags \+frag_keyframe\+empty_moov\+default_base_moof') { throw 'Continuous Bannerlord capture must use frequent fragmented MP4 keyframes so an interrupted Harness process leaves a decodable partial video.' }
 if ($battleFixtureSource -notmatch 'BattleRewardTelemetry = if \(\$simulationFinish -and \$simulationFinish\.data\)') { throw 'PostBattle evidence must preserve the returned renown telemetry object.' }
 if ($protocolSource -notmatch 'inventoryDone refuses to skip the Native' -or $protocolSource -notmatch 'GetElementCountOnSide\(TaleWorlds\.CampaignSystem\.Inventory\.InventoryLogic\.InventorySide\.OtherInventory\) > 0' -or $battleFixtureSource -notmatch 'prematureInventoryDoneRejected' -or $battleFixtureSource -notmatch 'prematureInventoryDonePreservedLoot' -or $battleFixtureSource -notmatch 'CampaignDayAtBattleSimulationStart' -or $battleFixtureSource -notmatch 'TimeControlModeAtPostBattleMapReturn') { throw 'Loot Done must not bypass the Native remaining-loot inquiry: guard unclaimed loot, test no-mutation refusal, then verify Take All/Done and record campaign clock around BattleSimulation.' }
 if ($battleFixtureSource -notmatch 'Start-ChronicleWindowVideoCapture' -or $battleFixtureSource -notmatch 'BattleToLoot-events\.jsonl' -or $battleFixtureSource -notmatch 'videoCapturePassed') { throw 'PostBattle must collect continuous HWND video, aligned action/state events, and enforce capture coverage.' }
