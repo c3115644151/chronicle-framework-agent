@@ -313,7 +313,11 @@ internal static class Program
             var error = await errorTask;
             await outputTask;
             if (child.ExitCode != 2 || !error.Contains("campaign-loop-request-invalid", StringComparison.Ordinal))
-                throw new AgentHostException("open-input-probe-result-invalid", "An open input pipe prevented the expected pre-action failure result.");
+            {
+                var safeError = error.Trim();
+                if (safeError.Length > 500) safeError = safeError[..500] + "...[truncated]";
+                throw new AgentHostException("open-input-probe-result-invalid", $"An open input pipe prevented the expected pre-action failure result (exit={child.ExitCode}; stderr={safeError}).");
+            }
         }
         finally
         {
