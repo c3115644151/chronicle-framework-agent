@@ -445,13 +445,13 @@ internal static class ProviderContractSelfTest
             try
             {
                 await upstreamThenRateLimitProvider.DecideAsync(request.RootElement, CancellationToken.None);
-                throw new AgentHostException("provider-self-test-upstream-then-rate-limit-accepted", "A second 429 must fail closed after a bounded retry.");
+                throw new AgentHostException("provider-self-test-upstream-then-rate-limit-accepted", "Repeated 429 responses after the transient 502 must fail closed after the separate bounded 429 retry budget.");
             }
             catch (AgentHostException exception) when (exception.Code == "provider-http-error")
             {
-                if (upstreamThenRateLimitCalls != 3 || !exception.Message.Contains("rateLimitRetryAttempts=1", StringComparison.Ordinal) ||
+                if (upstreamThenRateLimitCalls != 4 || !exception.Message.Contains("rateLimitRetryAttempts=2", StringComparison.Ordinal) ||
                     !exception.Message.Contains("rateLimitRetryEligible=true", StringComparison.Ordinal))
-                    throw new AgentHostException("provider-self-test-upstream-then-rate-limit-recovery-missed", "A 429 returned after a transient 502 retry must receive its own single bounded Retry-After retry.");
+                    throw new AgentHostException("provider-self-test-upstream-then-rate-limit-recovery-missed", "A 429 returned after transient 502 retries must receive two bounded Retry-After attempts before final failure.");
                 results.Add(new { scenario = "freellmapi-reclassifies-429-after-transient-upstream-retry", passed = true, providerCalls = upstreamThenRateLimitCalls, nativeCommands = 0 });
             }
         }
