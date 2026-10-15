@@ -43,13 +43,69 @@ function Initialize-FreeLLMAPIProfile {
         catch { return $false }
     }
 
+    function Test-ChronicleLocalProxyListener([string]$HostName, [int]$Port)
+    {
+        $client = [System.Net.Sockets.TcpClient]::new()
+        try {
+            $async = $client.BeginConnect($HostName, $Port, $null, $null)
+            if (-not $async.AsyncWaitHandle.WaitOne(1500)) { return $false }
+            $client.EndConnect($async)
+            return $client.Connected
+        }
+        catch { return $false }
+        finally { $client.Dispose() }
+    }
+
+    function Start-FreeLLMAPIWithInheritedProxy([string]$ExecutablePath)
+    {
+        # Child processes do not reliably receive environment updates made after
+        # the parent (Codex/PowerShell) started. Restore the user's persisted
+        # FreeLLMAPI proxy settings into this launch only, without logging values.
+        $proxyEnvironmentNames = @('PROXY_URL', 'PROXY_MODE', 'ALL_PROXY', 'HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY')
+        $originalValues = @{}
+        foreach ($name in $proxyEnvironmentNames) {
+            $processValue = [Environment]::GetEnvironmentVariable($name, 'Process')
+            $userValue = [Environment]::GetEnvironmentVariable($name, 'User')
+            $originalValues[$name] = $processValue
+            if ([string]::IsNullOrWhiteSpace($processValue) -and -not [string]::IsNullOrWhiteSpace($userValue)) {
+                [Environment]::SetEnvironmentVariable($name, $userValue, 'Process')
+            }
+        }
+
+        $proxyConfigured = $false
+        foreach ($name in @('PROXY_URL', 'ALL_PROXY', 'HTTPS_PROXY', 'HTTP_PROXY')) {
+            if (-not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name, 'Process'))) {
+                $proxyConfigured = $true
+                break
+            }
+        }
+
+        $usedLocalProxyBootstrap = $false
+        if (-not $proxyConfigured -and (Test-ChronicleLocalProxyListener -HostName '127.0.0.1' -Port 7890)) {
+            [Environment]::SetEnvironmentVariable('HTTPS_PROXY', 'http://127.0.0.1:7890', 'Process')
+            $usedLocalProxyBootstrap = $true
+        }
+
+        try { Start-Process -FilePath $ExecutablePath -WindowStyle Hidden | Out-Null }
+        finally {
+            foreach ($name in $proxyEnvironmentNames) {
+                [Environment]::SetEnvironmentVariable($name, $originalValues[$name], 'Process')
+            }
+        }
+
+        return $usedLocalProxyBootstrap
+    }
+
+    $gatewayStartedByHarness = $false
+    $localProxyBootstrapApplied = $false
     if (-not (Test-FreeLLMAPIListener $endpoint)) {
         $desktopPath = Join-Path $env:LOCALAPPDATA 'Programs\freellmapi-desktop\FreeLLMAPI.exe'
         if (-not (Get-Process -Name 'FreeLLMAPI' -ErrorAction SilentlyContinue)) {
             if (-not (Test-Path -LiteralPath $desktopPath -PathType Leaf)) {
                 throw 'FreeLLMAPI gateway is stopped and its desktop executable was not found; no inference request was sent.'
             }
-            Start-Process -FilePath $desktopPath -WindowStyle Hidden
+            $localProxyBootstrapApplied = Start-FreeLLMAPIWithInheritedProxy -ExecutablePath $desktopPath
+            $gatewayStartedByHarness = $true
         }
         $listenerReady = $false
         $listenerDeadline = (Get-Date).AddSeconds(30)
@@ -83,5 +139,7 @@ function Initialize-FreeLLMAPIProfile {
         AvailableModelCount = $availableModelIds.Count
         AvailableModelCatalogSha256 = $catalogHash
         ApiKeyPresent = $true
+        GatewayStartedByHarness = $gatewayStartedByHarness
+        LocalProxyBootstrapApplied = $localProxyBootstrapApplied
     }
 }

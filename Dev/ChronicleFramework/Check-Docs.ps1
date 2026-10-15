@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.201'
+$contractVersion = '7.202'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -91,7 +91,7 @@ if ($agentProviderBudgetSource -notmatch 'File\]::Replace' -or $agentDecisionLoo
 $agentLiveModelLoopSource = Get-Content (Join-Path $harnessRoot 'Test-AgentLiveModelLoop.ps1') -Raw -Encoding UTF8
 $agentHostCampaignLoopEvaluationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostCampaignLoopEvaluation.ps1') -Raw -Encoding UTF8
 if ($agentLiveModelLoopSource -notmatch 'ProviderProtocol' -or $agentLiveModelLoopSource -notmatch 'CHRONICLE_LLM_PROTOCOL' -or $agentLiveModelLoopSource -notmatch '31415' -or $agentLiveModelLoopSource -notmatch 'FREELLMAPI_API_KEY' -or $agentLiveModelLoopSource -notmatch 'available=true' -or $agentLiveModelLoopSource -notmatch 'Local Ollama inference.*refused before Campaign launch' -or $agentLiveModelLoopSource -notmatch 'no inference request was sent' -or $agentLiveModelLoopSource -notmatch 'ProviderRouteHistory' -or $agentLiveModelLoopSource -notmatch 'sargot-three-day-food-v1' -or $agentLiveModelLoopSource -notmatch 'CompletionContractBase64' -or $agentLiveModelLoopSource -notmatch 'termination.goalVerified') { throw 'Live Campaign evaluation must require the configured FreeLLMAPI gateway and bearer key, preflight only currently available models, refuse local model inference before Campaign launch, record actual routing, and preserve Native goal verification.' }
-if ($freeLlmApiProfileSource -notmatch 'Initialize-FreeLLMAPIProfile' -or $freeLlmApiProfileSource -notmatch 'FREELLMAPI_API_KEY' -or $freeLlmApiProfileSource -notmatch 'CHRONICLE_LLM_API_KEY' -or $freeLlmApiProfileSource -notmatch '31415' -or $freeLlmApiProfileSource -notmatch 'available=true' -or $freeLlmApiProfileSource -notmatch 'api/ping' -or $freeLlmApiProfileSource -notmatch 'Start-Process -FilePath \$desktopPath -WindowStyle Hidden' -or $freeLlmApiProfileSource -notmatch 'listenerDeadline' -or $freeLlmApiProfileSource -notmatch 'never read from UI or printed') { throw 'Shared FreeLLMAPI preflight must reject local inference, start the installed desktop gateway hidden if stopped, wait for its local ping, retrieve credentials only from process/user environment, and never expose the key.' }
+if ($freeLlmApiProfileSource -notmatch 'Initialize-FreeLLMAPIProfile' -or $freeLlmApiProfileSource -notmatch 'FREELLMAPI_API_KEY' -or $freeLlmApiProfileSource -notmatch 'CHRONICLE_LLM_API_KEY' -or $freeLlmApiProfileSource -notmatch '31415' -or $freeLlmApiProfileSource -notmatch 'available=true' -or $freeLlmApiProfileSource -notmatch 'api/ping' -or $freeLlmApiProfileSource -notmatch 'Start-Process -FilePath \$ExecutablePath -WindowStyle Hidden' -or $freeLlmApiProfileSource -notmatch 'listenerDeadline' -or $freeLlmApiProfileSource -notmatch 'never read from UI or printed' -or $freeLlmApiProfileSource -notmatch 'Start-FreeLLMAPIWithInheritedProxy' -or $freeLlmApiProfileSource -notmatch 'Test-ChronicleLocalProxyListener' -or $freeLlmApiProfileSource -notmatch '127\.0\.0\.1.*7890' -or $freeLlmApiProfileSource -notmatch 'LocalProxyBootstrapApplied' -or $freeLlmApiProfileSource -notmatch 'originalValues') { throw 'Shared FreeLLMAPI preflight must reject local inference, start the installed desktop gateway hidden if stopped, pass persisted proxy configuration or the confirmed local 7890 proxy to that child only, wait for its local ping, retrieve credentials only from process/user environment, restore the parent environment, and never expose the key.' }
 $freeLlmApiProfileTokens = $null
 $freeLlmApiProfileParseErrors = $null
 [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $harnessRoot 'Get-FreeLLMAPIProfile.ps1'), [ref]$freeLlmApiProfileTokens, [ref]$freeLlmApiProfileParseErrors) | Out-Null
@@ -446,6 +446,8 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerSmokeSource -notmatch 'Synthetic provider-contract probe only' -or
     $providerSmokeSource -notmatch 'talkToSettlementHero' -or
     $providerSmokeSource -notmatch 'NativeCommands = 0' -or
+    $providerSmokeSource -notmatch 'GatewayStartedByHarness = \[bool\]\$freeLlmApiProfile\.GatewayStartedByHarness' -or
+    $providerSmokeSource -notmatch 'LocalProxyBootstrapApplied = \[bool\]\$freeLlmApiProfile\.LocalProxyBootstrapApplied' -or
     $providerSmokeSource -notmatch 'ExactListedArgument' -or
     $providerSmokeSource -notmatch 'ResponseFormatMode = \[string\]\$result\.responseFormatMode' -or
     $providerHostSource -notmatch 'FREELLMAPI_API_KEY' -or $providerHostSource -notmatch 'CHRONICLE_LLM_API_KEY' -or
