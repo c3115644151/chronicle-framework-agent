@@ -261,6 +261,8 @@ W7-K模型阶段的上游失败（`TestResults/20261014-225912`）：真实Campa
 
 更新Provider收据后再次无游戏重测`TestResults/20261015-101143`：Build通过，但真实请求因FreeLLMAPI上游冷却/传输失败结束；没有启动游戏，也没有Native命令。它表明仅成功一次的Mistral冒烟不足以证明路由稳定，后续真实任务应先等本机Provider门禁再次成功，再进入Campaign测试。
 
+随后`TestResults/20261015-104326`重试完整阶段：Preflight/Build/Smoke/AgentHostPackage通过；Mistral真实Provider门禁在OVH TLS/socket重置后失败，因此未启动Campaign、无Native命令。此处继续关闭而不是跳过门禁启动游戏；再次运行需先等FreeLLMAPI确认上游可用。
+
 FreeLLMAPI代理恢复后的首次真实模型Quest进展（`TestResults/20261015-102131`）：Preflight/Build/Smoke/AgentHostPackage/无游戏Provider门禁通过，真实路由为`ovh/Mistral-Small-3.2-24B-Instruct-2506`。Campaign中模型先对当前可见村庄联系人使用`talkToSettlementHero`，再按当时Native选项选择对话、执行一次`dialogueContinue`，接受`issue_offer_player_accept_quest`并调用`questDetails`；Native活动Quest列表确认出现`issue_64_quest`“卡利奥克需要工具”。公开Journal文本要求交1单位tools、奖励73单位flax；进度为0/1。运行累计9次模型决策（8次有返回，1次Provider超时）、8条Native动作、32172输入/284输出tokens；CampaignDay维持91077.635，没有到市场购买或交付。失败末帧仍显示委托人3D对话和金色“点击继续”，说明交付前还需恢复对话/回聚落菜单。Host因FreeLLMAPI `provider-timeout`安全终止；测试源档未变、进程已清理、原生窗口录像覆盖100%并因失败保留。该收据首次证明外部模型能接受并查询这条可见委托，但不代表工具购入/交付完成；下次须继续Native市场移动与原版交易，且先解决/等待路由超时。
 
 本地Provider需区分模型目录存在与推理可用。本机Ollama 0.40.1曾缺少`lib/ollama/llama-server.exe`及配套库，目录查询成功但推理进程无法创建。使用同版本官方Windows包修复，包SHA-256为`b394d14436d38032f23190e3f14eb2c6dad5ebbe4e192414f74c8fdca01703ab`，主程序与原安装文件哈希一致；旧库保留于`D:\Ollama\App\lib-incomplete-20261012`，未重下模型。原`qwen3.5:4b-q4_K_M`短推理返回OK（5.19秒、17 tokens），日志确认33/33层GPU加载；服务以`OLLAMA_NO_CLOUD=true`运行，日志在D盘BuildCache/OllamaRepair。此证据仅证明本机推理恢复。单次Provider时限现覆盖响应头与正文，无模型回归验证正文停滞返回`provider-timeout`；真实生命周期完成测试先做有界一token推理预检，避免运行库失效时启动游戏。目录探测本身仍只证明模型登记/服务可达。
