@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$HostDllPath,
     [Parameter(Mandatory = $true)][string]$EvidencePath
@@ -48,28 +48,7 @@ $freeLlmApiProfile = Initialize-FreeLLMAPIProfile
 $model = [string]$freeLlmApiProfile.RequestedModelId
 $protocol = 'openai-compatible'
 
-$decisionRequest = [ordered]@{
-    goal = 'Synthetic provider-contract probe only: choose the single listed Native action and return its exact allowed argument. No game command will be executed.'
-    observation = [ordered]@{
-        scope = 'provider-smoke-synthetic-visible-village-contact'
-        state = [ordered]@{
-            gameState = 'MapState'
-            context = [ordered]@{ menuId = 'village' }
-            worldMutationAllowed = $false
-            settlementOverlayCharacters = @([ordered]@{
-                heroId = 'CharacterObject_ProviderSmoke'
-                name = 'Synthetic Notable'
-                questMarkers = @([ordered]@{ type = 'AvailableIssue'; title = 'Needs tools'; hint = 'Synthetic provider probe only.' })
-            })
-        }
-    }
-    allowedActions = @([ordered]@{
-        action = 'talkToSettlementHero'
-        arguments = @('HeroId')
-        argumentValues = [ordered]@{ HeroId = @('CharacterObject_ProviderSmoke') }
-    })
-    allowedControls = @()
-}
+$decisionRequest = [ordered]@{ goal = '完成当前可见的村庄工具委托'; goalScopeClassificationRequired = $true; goalScopeContract = 'native-map-arrival-v1'; observation = [ordered]@{ scope = 'goal-classification-only'; message = 'No Native map-target query has run yet. Classify the requested outcome only; target availability will be checked after this gate.' }; allowedActions = @(); allowedControls = @('supportedMapArrivalGoal','supportedVillageToolsQuestGoal','unsupportedGoal') }
 $startInfo = [Diagnostics.ProcessStartInfo]::new()
 $startInfo.FileName = (Get-Command dotnet -ErrorAction Stop).Source
 $startInfo.Arguments = '"{0}" --decision-once' -f $hostDll
@@ -110,10 +89,11 @@ $stderr = $stderrTask.GetAwaiter().GetResult()
 if ($process.ExitCode -ne 0) { throw "Local provider returned an error (exit=$($process.ExitCode)); response text is omitted. $stderr" }
 try { $result = $stdout | ConvertFrom-Json }
 catch { throw 'Local provider Host returned invalid structured JSON; raw response is omitted.' }
-if ($result.status -ne 'completed' -or $result.decision.action -cne 'talkToSettlementHero' -or
-    $result.decision.arguments.HeroId -cne 'CharacterObject_ProviderSmoke' -or
-    [string]::IsNullOrWhiteSpace([string]$result.decision.rationale)) {
-    throw 'FreeLLMAPI-routed model did not select the single synthetic Native action and exact allowed target.'
+if ($result.status -ne 'completed' -or $result.decision.goalClassification -cne 'supported-village-tools-quest' -or
+    [string]::IsNullOrWhiteSpace([string]$result.decision.reason)) {
+    $classificationReason = [string]$result.decision.reason
+    if ($classificationReason.Length -gt 160) { $classificationReason = $classificationReason.Substring(0, 160) }
+    throw "FreeLLMAPI-routed model missed the production goal-classification smoke (status=$($result.status); goalClassification=$($result.decision.goalClassification); route=$($result.routedVia); reason=$classificationReason)."
 }
 
 $summary = [ordered]@{
@@ -129,10 +109,9 @@ $summary = [ordered]@{
     RoutedVia = [string]$result.routedVia
     ResultStatus = [string]$result.status
     ResponseFormatMode = [string]$result.responseFormatMode
-    DecisionType = 'single-listed-native-action'
-    DecisionAction = [string]$result.decision.action
-    ExactListedArgument = ($result.decision.arguments.HeroId -ceq 'CharacterObject_ProviderSmoke')
-    ReasonWordCount = ([string]$result.decision.rationale -split '\s+' | Where-Object { $_ }).Count
+    DecisionType = 'production-goal-scope-classification'
+    DecisionClassification = [string]$result.decision.goalClassification
+    ReasonWordCount = ([string]$result.decision.reason -split '\s+' | Where-Object { $_ }).Count
     PromptTokens = $result.promptTokens
     CompletionTokens = $result.completionTokens
     NativeCommands = 0

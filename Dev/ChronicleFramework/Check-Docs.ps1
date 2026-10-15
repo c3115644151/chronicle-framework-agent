@@ -381,6 +381,7 @@ $agentHostProjectSource = Get-Content (Join-Path $harnessRoot 'AgentHost\Chronic
 $providerProfileSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentProviderProfile.cs') -Raw -Encoding UTF8
 $providerProfileTestSource = Get-Content (Join-Path $harnessRoot 'AgentHost\ProviderContractSelfTest.cs') -Raw -Encoding UTF8
 $providerHostSource = Get-Content (Join-Path $harnessRoot 'AgentHost\OllamaNativeProvider.cs') -Raw -Encoding UTF8
+$providerProgramSource = Get-Content (Join-Path $harnessRoot 'AgentHost\Program.cs') -Raw -Encoding UTF8
 $providerSmokeSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostProvider.ps1') -Raw -Encoding UTF8
 $supplyHostSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostSupplyLoop.cs') -Raw -Encoding UTF8
 $sourceModuleManifest = Get-Content $sourceManifestPath -Raw -Encoding UTF8
@@ -447,12 +448,13 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerProfileTestSource -notmatch 'mistralRequestShapeValid' -or
     $providerHostSource -notmatch 'IsMistralSmall32' -or $providerHostSource -notmatch 'GetMinimumRequestInterval' -or $providerHostSource -notmatch 'WaitForProviderRateWindowAsync' -or $providerHostSource -notmatch 'ShouldRetryTransientFreeLlmApiFailure' -or $providerHostSource -notmatch 'GetBoundedRateLimitRetryAfter' -or $providerHostSource -notmatch 'transientProviderRetriesUsed' -or $providerHostSource -notmatch 'retryDelaySeconds = transientProviderRetriesUsed == 0 \? 5 : 15' -or $providerHostSource -notmatch 'retryAfter=' -or $providerHostSource -notmatch 'failedRoute.Contains\("ovh/Mistral-Small"' -or $providerHostSource -notmatch 'payload.Remove\("max_completion_tokens"\)' -or
     $providerProfileTestSource -notmatch 'freellmapi-missing-key-fails-before-network-request' -or
-    $providerSmokeSource -notmatch 'Synthetic provider-contract probe only' -or
-    $providerSmokeSource -notmatch 'talkToSettlementHero' -or
+    $providerSmokeSource -notmatch 'goalScopeClassificationRequired = \$true' -or
+    $providerSmokeSource -notmatch 'supportedVillageToolsQuestGoal' -or
     $providerSmokeSource -notmatch 'NativeCommands = 0' -or
     $providerSmokeSource -notmatch 'GatewayStartedByHarness = \[bool\]\$freeLlmApiProfile\.GatewayStartedByHarness' -or
     $providerSmokeSource -notmatch 'LocalProxyBootstrapApplied = \[bool\]\$freeLlmApiProfile\.LocalProxyBootstrapApplied' -or
-    $providerSmokeSource -notmatch 'ExactListedArgument' -or
+    $providerSmokeSource -notmatch 'DecisionClassification = \[string\]\$result.decision.goalClassification' -or
+    $providerProgramSource -notmatch 'AgentHostDecisionCycle.DecideCampaignAsync' -or
     $providerSmokeSource -notmatch 'ResponseFormatMode = \[string\]\$result\.responseFormatMode' -or
     $providerHostSource -notmatch 'FREELLMAPI_API_KEY' -or $providerHostSource -notmatch 'CHRONICLE_LLM_API_KEY' -or
     $providerHostSource -notmatch 'X-Routed-Via' -or

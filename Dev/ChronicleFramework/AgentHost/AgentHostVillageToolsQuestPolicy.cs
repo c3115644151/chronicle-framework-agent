@@ -345,6 +345,22 @@ internal static class AgentHostVillageToolsQuestPolicy
             throw new AgentHostException("village-tools-policy-self-test-visible-issue-marker-gate-failed", "The Host must only offer quick conversation for an observed available issue visibly matching the tools request.");
         results.Add(new { scenario = "village-tools-policy-talks-only-to-current-visible-tools-issue", passed = true });
 
+        var initialIssueConversation = State("MapState", "village", "village-1", overlay: overlay, conversation: new JsonObject
+        {
+            ["options"] = new JsonArray(
+                new JsonObject { ["id"] = "issue_explanation_player_response_pre_quest_solution", ["text"] = "Tell me the details.", ["clickable"] = true },
+                new JsonObject { ["id"] = "issue_alternative_solution_player_response", ["text"] = "Can my men handle it?", ["clickable"] = true })
+        });
+        var initialIssueConversationCatalog = BuildActionCatalog(initialIssueConversation, null);
+        var initialIssueDialogueSelect = initialIssueConversationCatalog.OfType<JsonObject>().FirstOrDefault(item => ReadString(item, "action") == "dialogueSelect");
+        var initialIssueOptionIds = (initialIssueDialogueSelect?["argumentValues"]?["OptionId"] as JsonArray)?.Select(item => item?.GetValue<string>()).ToArray() ?? Array.Empty<string?>();
+        if (!initialIssueOptionIds.Contains("issue_explanation_player_response_pre_quest_solution", StringComparer.Ordinal) ||
+            initialIssueOptionIds.Contains("issue_alternative_solution_player_response", StringComparer.Ordinal) ||
+            !TryResolveAction(initialIssueConversation, null, new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "issue_explanation_player_response_pre_quest_solution" } }, out _, out _, out _) ||
+            TryResolveAction(initialIssueConversation, null, new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "issue_alternative_solution_player_response" } }, out _, out _, out _))
+            throw new AgentHostException("village-tools-policy-self-test-alternative-solution-out-of-scope", "The single-task quest slice must expose the direct VillageNeedsTools quest route and reject the distinct Alternative Solution path requiring companion/men delegation.");
+        results.Add(new { scenario = "village-tools-policy-excludes-alternative-solution-branch", passed = true });
+
         var acceptedVillageMenu = State("MapState", "village", "village-1", quests: new JsonArray(new JsonObject { ["id"] = "quest-tools", ["title"] = "Village Needs Tools" }));
         acceptedVillageMenu["state"]!["nearbySettlements"] = new JsonArray(new JsonObject { ["id"] = "village-1", ["type"] = "village" });
         acceptedVillageMenu["state"]!["availableMenuOptions"] = new JsonArray(
@@ -1012,10 +1028,14 @@ internal static class AgentHostVillageToolsQuestPolicy
     {
         var options = (conversation["options"] as JsonArray)?.OfType<JsonObject>()
             .Where(option => IsTrue(option, "clickable"))
+            .Where(option => !IsUnsupportedAlternativeSolutionEntry(option))
             .ToArray() ?? Array.Empty<JsonObject>();
         if (!HasActiveToolsQuest(state) || IsToolsTaskSatisfied(questDetailsReceipt ?? previousReceipt)) return options;
         return options.Where(IsConversationLeaveOption).ToArray();
     }
+
+    private static bool IsUnsupportedAlternativeSolutionEntry(JsonObject option) =>
+        ReadString(option, "id") == "issue_alternative_solution_player_response";
 
     private static bool HasClickableConversationOptions(JsonObject conversation) =>
         (conversation["options"] as JsonArray)?.OfType<JsonObject>().Any(option => IsTrue(option, "clickable")) == true;

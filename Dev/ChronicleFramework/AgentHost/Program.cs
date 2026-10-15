@@ -45,9 +45,10 @@ internal static class Program
             if (options.DecisionOnce)
             {
                 var requestJson = await Console.In.ReadToEndAsync();
-                using var requestDocument = JsonDocument.Parse(requestJson);
+                var request = JsonNode.Parse(requestJson) as JsonObject
+                    ?? throw new AgentHostException("provider-decision-once-request-invalid", "The one-shot provider request must be a JSON object.");
                 using var provider = OllamaNativeProvider.FromEnvironment();
-                var decision = await provider.DecideAsync(requestDocument.RootElement, CancellationToken.None);
+                var decision = await AgentHostDecisionCycle.DecideCampaignAsync(provider, request, CancellationToken.None);
                 Console.Out.WriteLine(JsonSerializer.Serialize(decision, OutputJsonOptions));
                 return 0;
             }

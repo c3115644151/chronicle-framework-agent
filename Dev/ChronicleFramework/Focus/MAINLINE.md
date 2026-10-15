@@ -538,6 +538,12 @@ FreeLLMAPI路由复核与预检修正（2026-10-16）：上一轮`TestResults/20
 
 补充复测：`TestResults/20261016-021546`中的`free-router`独立Provider冒烟也在无`Retry-After`提示下返回HTTP429，模型目录当时仍列为ready；未启动游戏、未发送Native命令。此前`auto:noema-free`与`free-router`两条路由因此都不能作为当前稳定的长程Campaign来源，模型目录/Provider健康状态只是快照而非后续请求承诺。
 
+W7-K真实模型分类/入口复验：
+
+- `TestResults/20261016-030055`的FreeLLMAPI Provider冒烟现在镜像生产Campaign第一步：真实Mistral Nemo被路由到`ovh/Mistral-Nemo-Instruct-2407`，经`DecideCampaignAsync`将用户目标分类为`supported-village-tools-quest`（420/20 token，0 Native命令）。这验证的是目标分类，不代表任务成功。
+- 后续Campaign运行`TestResults/20261016-030347`从自然蓝色工具标记进入原版聚落对话，逐步读取任务说明与1工具/73亚麻/30日条件；Native可见对话曾进入Alternative Solution分支，显示需贸易同伴和护卫，并回到Issue对话但Quest未出现在活动列表中。该运行没有最终`LiveModelLoopResult.json`，只能把保存的Native响应/游戏视频当作部分证据，不宣布模型实际接受/拒绝选项或完成任务。源`AgentBridgeLifecycle`存档hash在夹具准备前后相同；当次派生`ChronicleW7K-7f61d37cd0894cf7a4e383ae54d53b23.sav`已在确认无游戏进程、stale session恢复配置后按精确路径清理；片段视频保留为不完整诊断证据。
+- 本机`TaleWorlds.CampaignSystem.dll`反编译显示该Issue子类的`VillageNeedsToolsIssue.CanPlayerTakeQuestConditions`只产生“IssueGiver关系≥-10且不与玩家交战”的Issue专属条件；共享`IssueBase.CheckPreconditions`还会执行重复Issue等通用前置。Trade同伴/护卫需求来自另一条`IssueAlternativeSolutionExplanationByIssueGiver`分支，不是标准`VillageNeedsToolsIssueQuest`直接交付路径。当前Issue合同明确排除Alternative Solution；Host动作目录与提示现过滤`issue_alternative_solution_player_response`，并要求只走标准Quest交付分支。当前部分运行没有最终模型动作收据，不能断言先前拒绝是由哪项前置触发；`TestResults/20261016-060108`AgentHostPackage通过（Provider 100、Campaign 12、共享决策循环2项，0模型调用/0Native命令）。
+
 同一真实运行的时序审计发现：FreeLLMAPI已命中OVH后的45秒请求间隔等待原先使用Campaign循环令牌，而非单次模型请求deadline；因此在429/502重试路径上，速率等待可能延长360秒模型请求上限。现已让该等待遵守Provider请求deadline，并新增`freellmapi-rate-window-wait-respects-per-request-deadline`回归，验证deadline到期后不再等满45秒且不发出第二次请求。本轮`TestResults/20261016-015916`的AgentHostPackage通过，Provider合同场景98项全过，模型调用和Native命令均为0；Quest端到端仍未通过。
 
 ## 维护规则
