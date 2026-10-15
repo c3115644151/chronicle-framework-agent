@@ -63,6 +63,7 @@ $freeLlmApiProfileSource = Get-Content (Join-Path $harnessRoot 'Get-FreeLLMAPIPr
 $agentOpenAiProviderTestSource = Get-Content (Join-Path $harnessRoot 'Test-AgentOpenAICompatibleProvider.ps1') -Raw -Encoding UTF8
 $agentEvaluationLiveModelSupplySource = Get-Content (Join-Path $harnessRoot 'Test-AgentEvaluationLiveModelSupply.ps1') -Raw -Encoding UTF8
 $agentHostCampaignLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostCampaignLoop.cs') -Raw -Encoding UTF8
+$agentHostSupplyLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostSupplyLoop.cs') -Raw -Encoding UTF8
 $agentHostDecisionCycleSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostDecisionCycle.cs') -Raw -Encoding UTF8
 $agentHostProviderSource = Get-Content (Join-Path $harnessRoot 'AgentHost\OllamaNativeProvider.cs') -Raw -Encoding UTF8
 $agentHostRuntimeControllerSource = Get-Content (Join-Path $harnessRoot 'AgentHostRuntimeController.cs') -Raw -Encoding UTF8
@@ -473,6 +474,10 @@ if ($providerHostSource -notmatch 'defaultTimeoutSeconds = nativeOllama \? 60 : 
     $providerProfileTestSource -notmatch '315' -or
     $providerProfileTestSource -notmatch '361') {
     throw 'FreeLLMAPI recovery must permit the observed 315-second Retry-After inside a 360-second Host request deadline and reject waits above the bound.'
+}
+if ($agentHostCampaignLoopSource -notmatch 'ReadIntEnvironment\("CHRONICLE_NATIVE_MAILBOX_TIMEOUT_SECONDS", 180, 5, 240\)' -or
+    $agentHostSupplyLoopSource -notmatch 'ReadIntEnvironment\("CHRONICLE_NATIVE_MAILBOX_TIMEOUT_SECONDS", 180, 5, 240\)') {
+    throw 'Campaign and Supply Native mailbox waits must stay independently bounded and must not inherit the longer FreeLLMAPI model retry deadline.'
 }
 $smokeModuleSource = Get-Content (Join-Path $harnessRoot 'Test-Module.ps1') -Raw -Encoding UTF8
 $releasePackageSource = Get-Content (Join-Path $harnessRoot 'New-ChronicleReleasePackage.ps1') -Raw -Encoding UTF8

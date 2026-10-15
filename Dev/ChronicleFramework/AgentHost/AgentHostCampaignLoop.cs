@@ -139,7 +139,7 @@ internal static class AgentHostCampaignLoop
         CancellationToken cancellationToken,
         Action<int>? onReady = null)
     {
-        var nativeTimeoutSeconds = ReadIntEnvironment("CHRONICLE_LLM_TIMEOUT_SECONDS", 180, 5, 240);
+        var nativeTimeoutSeconds = ReadIntEnvironment("CHRONICLE_NATIVE_MAILBOX_TIMEOUT_SECONDS", 180, 5, 240);
         var expectedProcessId = ReadInt(request, "parentProcessId", 0);
         var nativeSessionId = ReadString(request, "nativeSessionId");
         if (expectedProcessId <= 0 || string.IsNullOrWhiteSpace(nativeSessionId))

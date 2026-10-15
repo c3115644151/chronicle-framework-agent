@@ -518,6 +518,8 @@ flowchart LR
 
 真实315秒重试上限扩展后的本地代码审计发现，第一轮Full phase Provider smoke通过`--decision-once`进入`OllamaNativeProvider.FromEnvironment`，而Campaign loop使用`FromProfile`。先前只把Profile超时从180扩到360，Smoke路径仍保留本地协议60/240秒默认/上限，因此FreeLLMAPI在回退等待中仍可提前超时；这是Harness/Host入口差异，不是模型决策。现已按协议分别设置：FreeLLMAPI/OpenAI-compatible `FromEnvironment` 默认/最大360秒，Native Ollama仍默认60/最大240秒；Profile默认/最大360秒；VillageTools Harness切片也已把360秒传给Host，不再用旧180秒值覆盖。`TestResults/20261015-182025` AgentHostPackage有97个Provider合同场景通过；`TestResults/20261015-182144`的无游戏真实Mistral smoke通过（OVH路由、687/32 tokens、0 Native命令），但这尚未真实等待315秒。`TestResults/20261015-182256`随后启动过真实Campaign，却没有写出最终LiveModelLoop/summary收据；Capture JSONL只有起始事件，25分钟MP4尾部缺少`moov`、ffprobe无法解码，故运行过程/动作不作猜测或能力结论。Native夹具收据确认源存档hash不变，测试游戏已退出，唯一派生`ChronicleW7K-*`存档已清理。针对该证据缺口，FFmpeg输出已改为fragmented MP4并每2秒关键帧；自动故障注入探针`TestResults/FragmentedCaptureProbe/Recovery.json`强制杀FFmpeg后仍由ffprobe解码31535帧且能生成联系表，临时合成视频已清理。现在真实LiveModel在开Campaign前运行这个短探针并把结果放入收据；本次合约/Docs和新真实315秒等待路径仍需复验，不能将模拟录像测试替代游戏录像结果。
 
+Host计时职责分离：`CHRONICLE_LLM_TIMEOUT_SECONDS`只用于FreeLLMAPI模型回复及429退避等待；Campaign/Supply的NativeMailboxClient分别读取`CHRONICLE_NATIVE_MAILBOX_TIMEOUT_SECONDS`，缺省180秒、最大240秒，不会因为模型有315秒Retry-After而无限延长Native命令等待。此次修正的Provider合同覆盖Retry-After315边界；实机315秒等待仍需验证。
+
 ## 维护规则
 
 - 本文维护技术目标、机制契约、领域架构、长期验收定义和未解事实；不保存项目工作项状态、域完成计数或测试通过快照。

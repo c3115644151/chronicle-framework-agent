@@ -31,7 +31,7 @@ internal static class AgentHostSupplyLoop
             : new HashSet<string>(StringComparer.Ordinal);
         if (!requestedActions.SetEquals(SupportedActions))
             throw new AgentHostException("supply-loop-action-scope-invalid", "The Host supply loop only accepts the five previously verified Native actions.");
-        var nativeTimeoutSeconds = ReadIntEnvironment("CHRONICLE_LLM_TIMEOUT_SECONDS", 180, 5, 240);
+        var nativeTimeoutSeconds = ReadIntEnvironment("CHRONICLE_NATIVE_MAILBOX_TIMEOUT_SECONDS", 180, 5, 240);
         var client = new NativeMailboxClient(protocolRoot, TimeSpan.FromSeconds(nativeTimeoutSeconds));
         using var provider = OllamaNativeProvider.FromConfiguredProfile();
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
