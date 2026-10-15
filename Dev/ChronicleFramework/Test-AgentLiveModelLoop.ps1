@@ -12,6 +12,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$freeLlmProfileHelper = Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1'
+. $freeLlmProfileHelper
 $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
 $loop = Join-Path $PSScriptRoot 'Agent-DecisionLoop.ps1'
 $provider = Join-Path $PSScriptRoot 'Agent-OpenAICompatibleProvider.ps1'
@@ -61,6 +63,10 @@ finally { $freeLlmApiKey = $null }
 $availableModelIds = @($availableModelsResponse.data | ForEach-Object { [string]$_.id })
 if ([string]$env:CHRONICLE_LLM_MODEL -notin $availableModelIds) {
     throw 'The configured model/route is not listed by FreeLLMAPI as currently available; no inference request was sent and no fixture was started.'
+}
+$modelExecutionStatus = Get-FreeLLMAPIModelExecutionStatus -ModelRows @($availableModelsResponse.data) -ModelId ([string]$env:CHRONICLE_LLM_MODEL)
+if ($modelExecutionStatus -notin @('ready', 'router')) {
+    throw "The configured FreeLLMAPI route is not executable now (execution_status=$modelExecutionStatus); no inference request was sent and no fixture was started. Wait for provider recovery or select another ready route."
 }
 if ($configuredProtocol -ceq 'ollama-native') {
     $ollamaEndpoint = $null

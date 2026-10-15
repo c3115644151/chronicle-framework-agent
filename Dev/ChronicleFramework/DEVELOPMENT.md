@@ -23,11 +23,15 @@ W7-K的真实模型长程验证为独立opt-in `AgentHostVillageToolsQuestEvalua
 
 W7-K完整真实模型阶段在启动Bannerlord前，先运行同一进程模型/端点配置的`AgentHostProvider`无游戏真实Provider冒烟（唯一合成动作、零Native命令），失败则Harness立即终止并不创建Campaign Fixture；这是仅前置的环境门禁，不算任务成功/失败数据。通过后才构造可见蓝色Issue起点并运行完整游戏内纵切片。这样在FreeLLMAPI路由不可用时不占用启动/加载游戏的时间，也不将Provider连通误称为Quest能力。
 
+`/v1/models?available=true`只说明模型配置/密钥存在，不代表当前可调用。LiveModel预检同时读取`execution_status`：只放行`ready`的显式模型，或者`auto`/`auto:<name>`/`fusion`这类路由入口；显式模型状态为`exhausted`、`needsKey`、未知或缺失时，在游戏启动/Provider推理前快速失败。该状态只是预检瞬间的快照，无法排除之后发生的并发限流；仍以实际模型回包为准。回归覆盖上述各状态与命名路由例外。
+
 Agent Host包测试在restore前以500毫秒上限TCP连接探测本机7890代理，并通过临时回环listener正/负自检；不使用`Test-NetConnection`长等待交互输出。代理不可达仍快速失败，不绕过用户配置的代理。
 
 FreeLLMAPI Provider的单次请求时限覆盖接收响应头、完整响应正文以及模型请求中的限流/上游退避等待；`ResponseHeadersRead`不能使正文或退避等待脱离该总时限。每次上游响应都重新分类：HTTP 429只按明确有效的`Retry-After`等待，最多重试两次；明确临时502最多重试两次，429与502使用独立计数。429的单次Retry-After上限为360秒，来源是本机真实回包315秒；无提示、非正值或超过360秒仍快速失败。若多次显式等待合计超过360秒总Deadline，Host会停止当前决策，不发送超时后的第三次Native请求。FreeLLMAPI匿名OVH Mistral每分钟最多两次请求，Host对已命中OVH的请求仍按45秒节奏；等待只为尊重FreeLLMAPI明确给出的冷却时间，不重放Native动作。退避用同一请求Deadline取消。429错误只记录安全的重试资格、实际重试次数与累计等待毫秒，不写响应正文或凭据。无游戏Provider冒烟缺省超时现为360秒；OpenAI-compatible/FreeLLMAPI路径默认360秒且上限360秒，本地Ollama协议仍默认60秒、上限240秒。无效配置回退360秒，显式值限制在5–360秒，避免PowerShell `TryParse`失败时把默认值写成0。只读模型目录探测仅证明网关可达且模型/路由当前可用，不证明上游推理成功。实际请求失败先核查FreeLLMAPI路由、密钥健康/免费额度和上游响应，再归因模型或游戏；相关无模型回归覆盖响应体和退避均受同一Deadline约束。
 
 `CHRONICLE_LLM_TIMEOUT_SECONDS`只控制模型请求及其429等待；Campaign/Supply Host的Native邮箱往返另读`CHRONICLE_NATIVE_MAILBOX_TIMEOUT_SECONDS`（默认180秒、上限240秒），不随模型重试时间延长。这样尊重315秒外部冷却时，仍不会让无响应的游戏命令获得同样长的等待上限。
+
+FreeLLMAPI OVH路由的45秒节流等待必须使用单次Provider请求的取消令牌，不能只受整个Campaign循环令牌约束；否则请求deadline届满后仍可能多等一个完整路由间隔。`AgentHostPackage`回归通过先建立真实OVH路由回执，再以100ms模型请求deadline重试；应在deadline内返回`provider-timeout`且不得发送第二个Provider请求或Native命令。此时限只约束模型/路由等待，不改变Campaign时间。
 
 升级/卸载的配置所有权：MCM `AttributeGlobalSettings`拥有`Documents/Mount and Blade II Bannerlord/Configs/ModSettings/Global/ChronicleFramework/ChronicleAgentSettings.json`，Host继续读取原有JSON字段`OllamaBaseUrl`与`ModelId`以兼容既有设置文件；新默认值指向FreeLLMAPI本机网关并使用`auto`。FreeLLMAPI统一密钥只通过启动前设置的用户环境变量继承，不写MCM配置。未知旧字段忽略，缺失或损坏配置报错但不重写/删除。当前无显式Chronicle配置迁移schema；新增/删除MCM持久字段前，先用真实旧版配置fixture定义迁移/回滚，然后才引入schemaVersion。发行包不携带用户配置；卸载只移除模块拥有的文件，不碰Global MCM目录、FreeLLMAPI数据/密钥或Campaign档。Host跟随Bannerlord父PID/启动时刻和模块路径，正常停止/模块卸载有界等待，异常退出仅可终止由本Mod创建且PID/启动时刻/可执行路径都匹配的Host；父游戏进程停止时Host自行退出。
 

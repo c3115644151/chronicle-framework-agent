@@ -1,3 +1,29 @@
+function Get-FreeLLMAPIModelExecutionStatus {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][object[]]$ModelRows,
+        [Parameter(Mandatory = $true)][string]$ModelId
+    )
+
+    $model = $ModelRows | Where-Object { [string]$_.id -ceq $ModelId } | Select-Object -First 1
+    if ($null -eq $model) { return 'not-listed' }
+
+    $status = [string]$model.execution_status
+    if ($status -in @('ready', 'needsKey', 'exhausted')) { return $status }
+    if ($ModelId -match '^(auto|fusion)(:|$)') { return 'router' }
+    return 'unknown'
+}
+
+function Test-FreeLLMAPIModelExecutionReady {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][object[]]$ModelRows,
+        [Parameter(Mandatory = $true)][string]$ModelId
+    )
+
+    return (Get-FreeLLMAPIModelExecutionStatus -ModelRows $ModelRows -ModelId $ModelId) -in @('ready', 'router')
+}
+
 function Initialize-FreeLLMAPIProfile {
     [CmdletBinding()]
     param()
@@ -127,7 +153,11 @@ function Initialize-FreeLLMAPIProfile {
     catch { throw 'FreeLLMAPI available-model preflight failed. No inference request was sent and no model call was attempted.' }
 
     $availableModelIds = @($catalog.data | ForEach-Object { [string]$_.id })
-    if ($modelId.Trim() -notin $availableModelIds) { throw 'The selected FreeLLMAPI model/route is not in the currently available catalog; no inference request was sent.' }
+    $modelExecutionStatus = Get-FreeLLMAPIModelExecutionStatus -ModelRows @($catalog.data) -ModelId $modelId.Trim()
+    if ($modelExecutionStatus -eq 'not-listed') { throw 'The selected FreeLLMAPI model/route is not in the currently available catalog; no inference request was sent.' }
+    if ($modelExecutionStatus -notin @('ready', 'router')) {
+        throw "The selected FreeLLMAPI model route is not executable now (execution_status=$modelExecutionStatus); no inference request was sent. Wait for provider recovery or select another ready FreeLLMAPI route."
+    }
     $catalogBytes = [Text.Encoding]::UTF8.GetBytes(($availableModelIds | Sort-Object -Unique) -join "`n")
     $sha = [Security.Cryptography.SHA256]::Create()
     try { $catalogHash = [BitConverter]::ToString($sha.ComputeHash($catalogBytes)).Replace('-', '') }
@@ -136,6 +166,7 @@ function Initialize-FreeLLMAPIProfile {
     [pscustomobject]@{
         BaseUrl = $endpoint.GetLeftPart([UriPartial]::Path)
         RequestedModelId = $modelId.Trim()
+        ModelExecutionStatus = $modelExecutionStatus
         AvailableModelCount = $availableModelIds.Count
         AvailableModelCatalogSha256 = $catalogHash
         ApiKeyPresent = $true

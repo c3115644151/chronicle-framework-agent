@@ -660,6 +660,37 @@ internal static class ProviderContractSelfTest
             throw new AgentHostException("provider-self-test-rate-window-policy-failed", "Only the known FreeLLMAPI-to-OVH Mistral route should receive the conservative 31-second request spacing.");
         results.Add(new { scenario = "freellmapi-ovh-model-rate-window-is-route-specific", passed = true });
 
+        var pacedRouteCalls = 0;
+        var pacedRouteHandler = new StubHandler((_, _) =>
+        {
+            pacedRouteCalls++;
+            var response = JsonResponse(BuildChatResponse("{\"action\":\"tradeConfirm\",\"arguments\":{},\"rationale\":\"Confirm the current Native draft.\"}", "stop"));
+            response.Headers.TryAddWithoutValidation("X-Routed-Via", "ovh/Mistral-Small-3.2-24B-Instruct-2506");
+            return Task.FromResult(response);
+        });
+        var pacedRouteSettings = freeLlmApiSettings with { Model = "mistral-small-3.2-24b", Timeout = TimeSpan.FromMilliseconds(100) };
+        using (var pacedRouteClient = new HttpClient(pacedRouteHandler) { Timeout = pacedRouteSettings.Timeout })
+        using (var pacedRouteProvider = new OllamaNativeProvider(pacedRouteSettings, pacedRouteClient))
+        using (var request = JsonDocument.Parse(BuildActionDecisionRequest()))
+        {
+            var firstResult = await pacedRouteProvider.DecideAsync(request.RootElement, CancellationToken.None);
+            if (firstResult.RoutedVia != "ovh/Mistral-Small-3.2-24B-Instruct-2506" || pacedRouteCalls != 1)
+                throw new AgentHostException("provider-self-test-rate-window-seed-failed", "The first OVH response did not establish the route-specific pacing window.");
+
+            var secondRequestStarted = DateTimeOffset.UtcNow;
+            try
+            {
+                await pacedRouteProvider.DecideAsync(request.RootElement, CancellationToken.None);
+                throw new AgentHostException("provider-self-test-rate-window-deadline-ignored", "A route pacing wait beyond the per-request deadline must not reach another model request.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-timeout")
+            {
+                if (pacedRouteCalls != 1 || DateTimeOffset.UtcNow - secondRequestStarted > TimeSpan.FromSeconds(2))
+                    throw new AgentHostException("provider-self-test-rate-window-exceeded-request-deadline", "The route-specific OVH pacing wait must stop at the model request deadline and must not add a 45-second tail.");
+                results.Add(new { scenario = "freellmapi-rate-window-wait-respects-per-request-deadline", passed = true, providerCalls = pacedRouteCalls, nativeCommands = 0 });
+            }
+        }
+
         foreach (var status in new[] { HttpStatusCode.BadRequest, HttpStatusCode.UnprocessableEntity, HttpStatusCode.BadGateway })
         {
             using var explicitSchemaRejection = new HttpResponseMessage(status);

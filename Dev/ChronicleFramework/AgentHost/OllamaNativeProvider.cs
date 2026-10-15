@@ -252,7 +252,14 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         var rateLimitRetryWaitMilliseconds = 0L;
         async Task<HttpResponseMessage> SendProviderRequestAsync(string requestBody)
         {
-            await WaitForProviderRateWindowAsync(cancellationToken);
+            try
+            {
+                await WaitForProviderRateWindowAsync(requestTimeout.Token);
+            }
+            catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new AgentHostException("provider-timeout", "The model provider exceeded its configured timeout while waiting for the provider rate window.", exception);
+            }
             using var message = new HttpRequestMessage(HttpMethod.Post, _settings.Endpoint)
             {
                 Content = new StringContent(requestBody, new UTF8Encoding(false), "application/json")

@@ -30,6 +30,20 @@ if (-not $protocolSelfTest.passed -or $protocolSelfTest.modelCalls -ne 0 -or $pr
 }
 
 . (Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1')
+$readinessFixture = @(
+    [pscustomobject]@{ id = 'ready-model'; execution_status = 'ready' },
+    [pscustomobject]@{ id = 'blocked-model'; execution_status = 'exhausted' },
+    [pscustomobject]@{ id = 'missing-key-model'; execution_status = 'needsKey' },
+    [pscustomobject]@{ id = 'unknown-model' }
+)
+if (-not (Test-FreeLLMAPIModelExecutionReady -ModelRows $readinessFixture -ModelId 'ready-model') -or
+    (Test-FreeLLMAPIModelExecutionReady -ModelRows $readinessFixture -ModelId 'blocked-model') -or
+    (Test-FreeLLMAPIModelExecutionReady -ModelRows $readinessFixture -ModelId 'missing-key-model') -or
+    (Test-FreeLLMAPIModelExecutionReady -ModelRows $readinessFixture -ModelId 'unknown-model') -or
+    (Get-FreeLLMAPIModelExecutionStatus -ModelRows $readinessFixture -ModelId 'absent-model') -ne 'not-listed' -or
+    -not (Test-FreeLLMAPIModelExecutionReady -ModelRows @([pscustomobject]@{ id = 'auto:noema-free' }) -ModelId 'auto:noema-free')) {
+    throw 'FreeLLMAPI execution-readiness preflight did not reject exhausted, missing-key, unknown, or absent routes while retaining the named router entry.'
+}
 $freeLlmApiProfile = Initialize-FreeLLMAPIProfile
 $model = [string]$freeLlmApiProfile.RequestedModelId
 $protocol = 'openai-compatible'
@@ -109,6 +123,7 @@ $summary = [ordered]@{
     GatewayStartedByHarness = [bool]$freeLlmApiProfile.GatewayStartedByHarness
     LocalProxyBootstrapApplied = [bool]$freeLlmApiProfile.LocalProxyBootstrapApplied
     ConfiguredRouteAvailable = $freeLlmApiProfile.RequestedModelId
+    ConfiguredRouteExecutionStatus = $freeLlmApiProfile.ModelExecutionStatus
     AvailableModelCount = $freeLlmApiProfile.AvailableModelCount
     AvailableModelCatalogSha256 = $freeLlmApiProfile.AvailableModelCatalogSha256
     RoutedVia = [string]$result.routedVia
