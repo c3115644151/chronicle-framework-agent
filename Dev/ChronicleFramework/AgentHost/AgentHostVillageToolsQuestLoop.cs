@@ -66,6 +66,21 @@ internal static class AgentHostVillageToolsQuestLoop
 
         var client = new FakeVillageQuestNativeClient();
         var provider = new FakeVillageQuestDecisionProvider();
+        var parentClassificationTrace = new JsonArray(new JsonObject
+        {
+            ["iteration"] = 1,
+            ["stage"] = "goal-scope-classified",
+            ["decision"] = new JsonObject { ["goalClassification"] = "supported-village-tools-quest" }
+        });
+        var parentClassificationRoute = new JsonArray(new JsonObject
+        {
+            ["decision"] = 1,
+            ["requestedModelId"] = "test-village-model",
+            ["routedVia"] = "test/provider-classifier",
+            ["responseFormatMode"] = "json_schema",
+            ["promptTokens"] = 11,
+            ["completionTokens"] = 7
+        });
         using var request = JsonDocument.Parse(JsonSerializer.Serialize(new
         {
             runId = "selftest-village-tools",
@@ -75,11 +90,35 @@ internal static class AgentHostVillageToolsQuestLoop
             maxElapsedSeconds = 10,
             allowedActionNames = AgentHostCampaignLoop.ApprovedActions.ToArray()
         }));
-        var result = await RunAsync(request.RootElement, client, provider, CancellationToken.None, priorDecisions: 1);
+        var result = await RunAsync(request.RootElement, client, provider, CancellationToken.None,
+            priorDecisions: 1,
+            priorPromptTokens: 11,
+            priorCompletionTokens: 7,
+            priorTrace: parentClassificationTrace,
+            priorProviderRouteHistory: parentClassificationRoute);
+        var fullTrace = result["trace"] as JsonArray ?? new JsonArray();
+        var fullRouteHistory = result["providerRouteHistory"] as JsonArray ?? new JsonArray();
+        var combinedPromptTokens = result["promptTokens"]?.GetValue<long>() ?? -1L;
+        var combinedCompletionTokens = result["completionTokens"]?.GetValue<long>() ?? -1L;
         if (ReadString(result, "status") != "failed" || ReadString(result["termination"] as JsonObject, "reason") != "decision-budget-exhausted" ||
             ReadBoolean(result, "questWasObservedActive") != true || client.Actions.Count != 3 || provider.Calls != 3 ||
-            !client.Actions.SequenceEqual(new[] { "talkToSettlementHero", "dialogueSelect", "questDetails" }) || client.ClockActionCount != 0 || client.ProcessId != 321)
-            throw new AgentHostException("village-tools-loop-self-test-observe-decide-act-failed", "Quest loop contract mismatch: status=" + ReadString(result, "status") + "; termination=" + ReadString(result["termination"] as JsonObject, "reason") + "; decisions=" + ReadInt(result, "decisions", -1) + "; actions=" + string.Join(",", client.Actions) + "; providerCalls=" + provider.Calls + "; clockActions=" + client.ClockActionCount + "; active=" + ReadBoolean(result, "questWasObservedActive") + ".");
+            !client.Actions.SequenceEqual(new[] { "talkToSettlementHero", "dialogueSelect", "questDetails" }) || client.ClockActionCount != 0 || client.ProcessId != 321 ||
+            ReadInt(result, "decisions", -1) != 4 || combinedPromptTokens < 11 || combinedCompletionTokens < 7 ||
+            fullTrace.Count != 4 || ReadString(fullTrace[0] as JsonObject, "stage") != "goal-scope-classified" ||
+            fullRouteHistory.Count != 4 || ReadString(fullRouteHistory[0] as JsonObject, "routedVia") != "test/provider-classifier")
+            throw new AgentHostException("village-tools-loop-self-test-observe-decide-act-failed", "Quest loop contract mismatch: status=" + ReadString(result, "status") +
+                "; termination=" + ReadString(result["termination"] as JsonObject, "reason") +
+                "; decisions=" + ReadInt(result, "decisions", -1) +
+                "; actions=" + string.Join(",", client.Actions) +
+                "; providerCalls=" + provider.Calls +
+                "; clockActions=" + client.ClockActionCount +
+                "; active=" + ReadBoolean(result, "questWasObservedActive") +
+                "; traceRows=" + fullTrace.Count +
+                "; routeRows=" + fullRouteHistory.Count +
+                "; promptTokens=" + combinedPromptTokens +
+                "; completionTokens=" + combinedCompletionTokens +
+                "; firstTraceStage=" + (fullTrace.FirstOrDefault() is JsonObject firstTrace ? ReadString(firstTrace, "stage") : null) +
+                "; firstRoute=" + (fullRouteHistory.FirstOrDefault() is JsonObject firstRoute ? ReadString(firstRoute, "routedVia") : null) + ".");
 
         var recoveryClient = new FakeVillageQuestNativeClient();
         var recoveryProvider = new FakeVillageQuestRecoverableDecisionProvider();
@@ -147,6 +186,7 @@ internal static class AgentHostVillageToolsQuestLoop
             new { scenario = "village-tools-postcondition-requires-exact-visible-tool-consumption-and-reward-delta", passed = true },
             new { scenario = "village-tools-host-recovers-invalid-village-target-with-current-safe-town-ids", passed = true, nativeActionSent = false },
             new { scenario = "village-tools-host-routes-classified-goal-through-native-observe-decide-act-loop", decisions = ReadInt(result, "decisions", 0), actions = client.Actions.ToArray(), clockActions = client.ClockActionCount, passed = true },
+            new { scenario = "village-tools-loop-preserves-parent-classifier-trace-route-and-token-counts", traceRows = fullTrace.Count, routeRows = fullRouteHistory.Count, promptTokens = combinedPromptTokens, completionTokens = combinedCompletionTokens, passed = true },
             new { scenario = "village-tools-host-recovers-from-bounded-invalid-actions-in-open-native-dialogue", decisions = recoveryProvider.Calls, rejectedDecisions = recoveryFeedback.Count, nativeActions = recoveryClient.Actions.ToArray(), passed = true },
             new { scenario = "village-tools-host-maps-visible-click-to-continue-screen-to-dialogueContinue", decisions = continueProvider.Calls, rejectedDecisions = continueProvider.RejectedActions, nativeActions = continueClient.Actions.ToArray(), passed = true },
             new { scenario = "village-tools-host-resolves-bandit-interruption-through-native-safe-passage-without-fight-or-clock-actions", decisions = ReadInt(passageResult, "decisions", 0), actions = passageClient.Actions.ToArray(), encounterCleared = !passageClient.FinalEncounterActive, passed = true }
@@ -170,7 +210,9 @@ internal static class AgentHostVillageToolsQuestLoop
         CancellationToken cancellationToken,
         int priorDecisions = 0,
         long priorPromptTokens = 0,
-        long priorCompletionTokens = 0)
+        long priorCompletionTokens = 0,
+        JsonArray? priorTrace = null,
+        JsonArray? priorProviderRouteHistory = null)
     {
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
         var goal = ReadString(request, "goal") ?? string.Empty;
@@ -185,13 +227,13 @@ internal static class AgentHostVillageToolsQuestLoop
 
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxElapsedSeconds));
-        var trace = new JsonArray();
+        var trace = priorTrace?.DeepClone() as JsonArray ?? new JsonArray();
         var decisions = priorDecisions;
         var actionsExecuted = 0;
         var rejected = 0;
         var promptTokens = priorPromptTokens;
         var completionTokens = priorCompletionTokens;
-        var providerRouteHistory = new JsonArray();
+        var providerRouteHistory = priorProviderRouteHistory?.DeepClone() as JsonArray ?? new JsonArray();
         var questId = string.Empty;
         var sawQuestActive = false;
         var questDetailsObservedForActiveQuest = false;
@@ -222,6 +264,7 @@ internal static class AgentHostVillageToolsQuestLoop
 
             for (var index = 1; index <= maxAdditionalDecisions; index++)
             {
+                var decisionIndex = priorDecisions + index;
                 elapsed.Token.ThrowIfCancellationRequested();
                 var state = currentNative?["state"] as JsonObject ?? throw new AgentHostException("native-state-missing", "The quest loop lost its latest Native state.");
                 if (ReadInt(currentNative, "processId", -1) != gameProcessId)
@@ -264,7 +307,7 @@ internal static class AgentHostVillageToolsQuestLoop
                 }
 
                 var observation = BuildObservation(currentNative!, questId, sawQuestActive, inventoryVerifiedAfterTurnIn);
-                var modelRequest = BuildDecisionRequest(runId, index, goal, observation, previousReceipt, feedback, catalog, controls);
+                var modelRequest = BuildDecisionRequest(runId, decisionIndex, goal, observation, previousReceipt, feedback, catalog, controls);
                 ProviderDecisionResult providerResult;
                 var decisionStarted = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
                 try
@@ -311,7 +354,7 @@ internal static class AgentHostVillageToolsQuestLoop
                         ["nativeActionSent"] = false,
                         ["requiredNextStep"] = requiredNextStep
                     };
-                    trace.Add(new JsonObject { ["iteration"] = index, ["stage"] = "decision-rejected-before-native", ["feedback"] = feedback.DeepClone() });
+                    trace.Add(new JsonObject { ["iteration"] = decisionIndex, ["stage"] = "decision-rejected-before-native", ["feedback"] = feedback.DeepClone() });
                     continue;
                 }
                 catch (Exception exception)
@@ -319,7 +362,7 @@ internal static class AgentHostVillageToolsQuestLoop
                     failure = exception is AgentHostException hostException ? hostException.Code : exception.GetType().Name;
                     failureCode = exception is AgentHostException typed ? typed.Code : null;
                     termination = "provider-failed";
-                    trace.Add(new JsonObject { ["iteration"] = index, ["stage"] = "provider-failed", ["failure"] = failure, ["detail"] = Truncate(exception.Message, 300) });
+                    trace.Add(new JsonObject { ["iteration"] = decisionIndex, ["stage"] = "provider-failed", ["failure"] = failure, ["detail"] = Truncate(exception.Message, 300) });
                     break;
                 }
 
@@ -338,12 +381,12 @@ internal static class AgentHostVillageToolsQuestLoop
                             ["nativeInventoryVerifiedAfterTurnIn"] = inventoryVerifiedAfterTurnIn,
                             ["requiredNextStep"] = activeQuest is null ? "Verify the current MainHero inventory through the listed native inventory options." : "Continue the current Native Quest using a listed action."
                         };
-                        trace.Add(BuildDecisionStep(index, decisionStarted, modelRequest, decision, feedback, null, observationAfter: observation));
+                        trace.Add(BuildDecisionStep(decisionIndex, decisionStarted, modelRequest, decision, feedback, null, observationAfter: observation));
                         if (rejected > 2) { failure = "The model repeatedly proposed completion before Native Quest and inventory postconditions passed."; termination = "premature-done-rejected"; break; }
                         continue;
                     }
                     termination = "native-quest-and-inventory-observed";
-                    trace.Add(BuildDecisionStep(index, decisionStarted, modelRequest, decision, null, null));
+                    trace.Add(BuildDecisionStep(decisionIndex, decisionStarted, modelRequest, decision, null, null));
                     return BuildResult("completed", runId, provider, decisions, actionsExecuted, promptTokens, completionTokens,
                         termination, null, null, startDay, currentNative, trace, providerRouteHistory, questId, sawQuestActive, inventoryVerifiedAfterTurnIn);
                 }
@@ -355,14 +398,14 @@ internal static class AgentHostVillageToolsQuestLoop
                     if (!controlsAllowed || waitSeconds is < 1 or > 10)
                     {
                         feedback = new JsonObject { ["kind"] = "control-rejected-before-wait", ["nativeActionSent"] = false };
-                        trace.Add(BuildDecisionStep(index, decisionStarted, modelRequest, decision, feedback, null, observationAfter: observation));
+                        trace.Add(BuildDecisionStep(decisionIndex, decisionStarted, modelRequest, decision, feedback, null, observationAfter: observation));
                         continue;
                     }
                     await Task.Delay(TimeSpan.FromSeconds(waitSeconds), elapsed.Token);
                     using var afterWait = await client.ReadStateAsync(elapsed.Token);
                     currentNative = JsonNode.Parse(afterWait.RootElement.GetRawText())!.AsObject();
                     feedback = null;
-                    trace.Add(BuildDecisionStep(index, decisionStarted, modelRequest, decision, null, null,
+                    trace.Add(BuildDecisionStep(decisionIndex, decisionStarted, modelRequest, decision, null, null,
                         observationAfter: BuildObservation(currentNative!, questId, sawQuestActive, inventoryVerifiedAfterTurnIn),
                         control: new JsonObject { ["kind"] = "bounded-observe-again", ["waitSeconds"] = waitSeconds }));
                     continue;
@@ -372,7 +415,7 @@ internal static class AgentHostVillageToolsQuestLoop
                 {
                     rejected++;
                     feedback = BuildActionPreconditionFeedback(decision, catalog, rejection);
-                    trace.Add(BuildDecisionStep(index, decisionStarted, modelRequest, decision, feedback, null, observationAfter: observation));
+                    trace.Add(BuildDecisionStep(decisionIndex, decisionStarted, modelRequest, decision, feedback, null, observationAfter: observation));
                     if (rejected > 2) { failure = "The model exceeded the bounded pre-Native rejection allowance."; termination = "rejection-limit"; break; }
                     continue;
                 }
@@ -390,7 +433,7 @@ internal static class AgentHostVillageToolsQuestLoop
                     failure = "Native action timed out with an ambiguous result; it was not replayed.";
                     failureCode = exception.Code;
                     termination = "native-action-result-ambiguous";
-                    trace.Add(BuildDecisionStep(index, decisionStarted, modelRequest, decision, null,
+                    trace.Add(BuildDecisionStep(decisionIndex, decisionStarted, modelRequest, decision, null,
                         new JsonObject { ["action"] = action, ["status"] = "timeout-ambiguous" }));
                     break;
                 }
@@ -436,7 +479,7 @@ internal static class AgentHostVillageToolsQuestLoop
                 previousReceipt = receipt;
                 using (var refreshed = await client.ReadStateAsync(elapsed.Token)) currentNative = JsonNode.Parse(refreshed.RootElement.GetRawText())!.AsObject();
                 feedback = ReadString(receipt, "status") == "completed" ? null : new JsonObject { ["kind"] = "native-action-rejected", ["action"] = action, ["receipt"] = receipt.DeepClone() };
-                trace.Add(BuildDecisionStep(index, decisionStarted, modelRequest, decision, feedback, receipt,
+                trace.Add(BuildDecisionStep(decisionIndex, decisionStarted, modelRequest, decision, feedback, receipt,
                     observationAfter: BuildObservation(currentNative!, questId, sawQuestActive, inventoryVerifiedAfterTurnIn),
                     actionExecuted: ReadString(receipt, "status") == "completed"));
                 if (feedback is not null) rejected++; else rejected = 0;

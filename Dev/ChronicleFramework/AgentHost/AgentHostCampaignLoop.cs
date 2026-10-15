@@ -347,7 +347,9 @@ internal static class AgentHostCampaignLoop
                         request, questClient, provider, elapsed.Token,
                         priorDecisions: decisionCount,
                         priorPromptTokens: promptTokens,
-                        priorCompletionTokens: completionTokens);
+                        priorCompletionTokens: completionTokens,
+                        priorTrace: trace,
+                        priorProviderRouteHistory: providerRouteHistory);
                 }
                 if (!goalScopeClassified)
                 {

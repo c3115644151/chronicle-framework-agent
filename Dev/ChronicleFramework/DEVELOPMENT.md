@@ -23,6 +23,8 @@ W7-K的真实模型长程验证为独立opt-in `AgentHostVillageToolsQuestEvalua
 
 W7-K完整真实模型阶段在启动Bannerlord前，先运行同一进程模型/端点配置的`AgentHostProvider`无游戏真实Provider冒烟；输入与生产Campaign第一步一致，要求真实模型把完整目标分类为唯一支持的VillageNeedsTools Quest范围，不执行Native命令。分类/Provider失败则Harness立即终止并不创建Campaign Fixture；这是仅前置的环境门禁，不算任务成功/失败数据。通过后才构造可见蓝色Issue起点并运行完整游戏内纵切片。这样在FreeLLMAPI路由不可用或模型不能识别目标范围时不占用启动/加载游戏的时间，也不将Provider连通误称为Quest能力。
 
+当`AgentHostCampaignLoop`分类为VillageTools目标并交接给专用Quest loop时，子循环的终态收据必须合并父循环的classifier trace、provider route、token与全局decision编号；不能只显示子循环，遗漏真正的首个模型调用。Provider包回归用合成父收据验证跨循环历史保持，外部模型/Native调用均为0。
+
 W7-K只覆盖标准`VillageNeedsToolsIssueQuest`交付路径。1.4.8 Native界面还会给出独立的“让同伴/手下运送”Alternative Solution；该分支要求Trade同伴与护卫，当前Host action catalog隐藏`issue_alternative_solution_player_response`并提示模型不选这条分支。如果标准直接Quest选项不可用，应停止/重观察，不转而冒充完成Alternative任务。
 
 `/v1/models?available=true`只说明模型配置/密钥存在，不代表当前可调用。LiveModel预检同时读取`execution_status`：只放行`ready`的显式模型，或者`auto`/`auto:<name>`/`fusion`这类路由入口；显式模型状态为`exhausted`、`needsKey`、未知或缺失时，在游戏启动/Provider推理前快速失败。该状态只是预检瞬间的快照，无法排除之后发生的并发限流；仍以实际模型回包为准。回归覆盖上述各状态与命名路由例外。

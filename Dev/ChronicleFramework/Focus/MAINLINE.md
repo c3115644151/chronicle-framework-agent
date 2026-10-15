@@ -548,6 +548,8 @@ Harness启动边界核验（`TestResults/20261016-061057`与`061235`）：前次
 
 同一真实运行的时序审计发现：FreeLLMAPI已命中OVH后的45秒请求间隔等待原先使用Campaign循环令牌，而非单次模型请求deadline；因此在429/502重试路径上，速率等待可能延长360秒模型请求上限。现已让该等待遵守Provider请求deadline，并新增`freellmapi-rate-window-wait-respects-per-request-deadline`回归，验证deadline到期后不再等满45秒且不发出第二次请求。本轮`TestResults/20261016-015916`的AgentHostPackage通过，Provider合同场景98项全过，模型调用和Native命令均为0；Quest端到端仍未通过。
 
+W7-K真实收据完整性修正：`AgentHostCampaignLoop`完成目标分类后会把执行权交给`AgentHostVillageToolsQuestLoop`；此前子loop终态只返回自己的trace/providerRouteHistory，丢失了父loop第一轮分类调用及其token/路由。现将父级trace、实际路由与token数传入并继续累计，决策编号按全局序号，避免真实模型每轮耗时/token/route证据不完整。`TestResults/20261016-063752`自包含AgentHostPackage通过（Provider 101、Campaign 12、共享决策循环2项，模型调用/Native命令为0），新增回归覆盖分类路由与统计跨loop保留。当前真实Model smoke分类已实测成功，但Quest接受/购买/交付仍未完成。
+
 ## 维护规则
 
 - 本文维护技术目标、机制契约、领域架构、长期验收定义和未解事实；不保存项目工作项状态、域完成计数或测试通过快照。
