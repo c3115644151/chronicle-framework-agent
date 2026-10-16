@@ -552,7 +552,9 @@ W7-K真实模型分类/入口复验：
 
 同日Harness磁盘审计发现另一项重复产物：D盘`BuildCache/Packages`下有307个`ChronicleAgentHost-win-x64-<guid>`自包含测试包目录，合计41.25GiB；每个包只用于单轮独立可执行验证，逐文件SHA-256已写入该轮`AgentHostPackageManifest.json`，包本体不承担长期证据价值。已修订`Test-AgentHostPackage.ps1`：成功或异常退出都仅清理该脚本自己创建、且经精确父目录/GUID校验的本轮目录；`TestResults/20261016-185024`的Preflight/Build/AgentHostPackage三阶段通过，新目录被清理，包清单(187文件、74,565,753字节)保留。历史307份清理仍受同一文件操作策略阻止；不得以改名、移动或其他调用方式绕过。
 
-`TestResults/20261016-140206`真实FreeLLMAPI `auto`模型在19次决策/14个Native动作后接受`issue_64_quest`、读Journal、自然到达萨哥特并打开Native Trade。`tradeOptions`显示目标工具报价为0、Gold 920、无交易提交；下一次模型请求收到无Retry-After的HTTP429，尚未决定取消或搜索其他市场。16次成功回复累计55,408输入/887输出token；Quest仍活动、CampaignDay 91077.635→91077.879、源fixture/游戏清理通过，contact/timeline完整且MP4删除。这个结果证明委托接受、地图移动和交易入口原生可达，但未完成缺货恢复/采购/交付；该轮因Provider限流停止。
+`TestResults/20261016-140206`真实FreeLLMAPI `auto`模型在19次决策/14个Native动作后接受`issue_64_quest`、读Journal、自然到达萨哥特并打开Native Trade。`tradeOptions`显示目标工具报价为0、Gold 920、无交易提交；模型随后在Native目录仅含`tradeCancel`时错误重复`tradeOptions`，Host在发出Native命令前拒绝，下一次模型请求才收到无Retry-After的HTTP429。16次成功回复累计55,408输入/887输出token；Quest仍活动、CampaignDay 91077.635→91077.879、源fixture/游戏清理通过，contact/timeline完整且MP4删除。该现场同时揭示模型未遵守目录、Host恢复提示过泛，以及随后Provider限流三个不同环节；不能归为Native交易动作失败。
+
+修正后的`AgentHostVillageToolsQuestLoop`只在上轮Native交易报价已明确无合格任务工具且当前唯一目录动作是`tradeCancel`时，生成具体的恢复提示，要求模型关闭未修改的Trade后依据新Native观察自行决定后续行动；Host不自动替模型取消。`TestResults/20261016-191531`的自包含Host Provider合同检查通过，覆盖拒绝前无Native副作用与恢复提示精确性；尚未用真实模型重测这一恢复路径。
 
 `TestResults/20261016-163619`无游戏FreeLLMAPI Provider冒烟固定`qwen2.5-vl-72b`，实际路由`ovh/Qwen2.5-VL-72B-Instruct`，JSON Schema输出完成目标分类（416输入/28输出token，0 Native命令）。这是选定下一真实模型路由的单次健康证据，不构成长程能力验收。
 

@@ -43,12 +43,31 @@ internal static class AgentHostVillageToolsQuestLoop
                 ["sameActionRetryAllowed"] = false
             }
         });
+        var emptyToolsTradeReceipt = new JsonObject
+        {
+            ["action"] = "tradeOptions", ["status"] = "completed",
+            ["data"] = new JsonObject { ["buyOffers"] = new JsonArray() }
+        };
+        var noToolsTradeCatalog = new JsonArray(new JsonObject { ["action"] = "tradeCancel", ["arguments"] = new JsonArray() });
+        var unavailableTradeFeedback = BuildProviderActionUnavailableFeedback(
+            "tradeOptions",
+            noToolsTradeCatalog,
+            emptyToolsTradeReceipt,
+            null,
+            "Action 'tradeOptions' is not in the current Native action catalog [tradeCancel].");
+        var unavailableTradePrompt = AgentHostDecisionCycle.BuildVillageToolsQuestSystemPrompt(new JsonObject { ["decisionFeedback"] = unavailableTradeFeedback });
         if (ReadBoolean(moveFeedback, "nativeActionSent") || ReadBoolean(moveFeedback, "sameActionRetryAllowed") != true ||
             !ReadString(moveFeedback, "requiredNextStep")!.Contains("town_V1, town_V6", StringComparison.Ordinal) ||
             !movePrompt.Contains("You may repeat that action only with corrected arguments", StringComparison.Ordinal) ||
             movePrompt.Contains("never repeat the rejected action/control", StringComparison.Ordinal) ||
             !strictRetryPrompt.Contains("never repeat the rejected action/control", StringComparison.Ordinal))
             throw new AgentHostException("village-tools-loop-self-test-town-move-argument-recovery-failed", "A rejected move to the current Village must remain Native-side-effect-free and explicitly permit retrying move only with the current safe Town IDs.");
+        if (ReadBoolean(unavailableTradeFeedback, "nativeActionSent") ||
+            !ReadString(unavailableTradeFeedback, "requiredNextStep")!.Contains("tradeCancel", StringComparison.Ordinal) ||
+            !ReadString(unavailableTradeFeedback, "requiredNextStep")!.Contains("do not repeat tradeOptions", StringComparison.Ordinal) ||
+            !unavailableTradePrompt.Contains("tradeCancel", StringComparison.Ordinal) ||
+            !unavailableTradePrompt.Contains("do not repeat tradeOptions", StringComparison.Ordinal))
+            throw new AgentHostException("village-tools-loop-self-test-empty-market-recovery-failed", "Empty-market recovery must instruct the model to use the only listed tradeCancel action and not repeat tradeOptions. actual=" + ReadString(unavailableTradeFeedback, "requiredNextStep") + "; promptContainsCancel=" + unavailableTradePrompt.Contains("tradeCancel", StringComparison.Ordinal) + "; promptContainsNoRetry=" + unavailableTradePrompt.Contains("Do not repeat tradeOptions", StringComparison.Ordinal) + ".");
 
         var questReceipt = new JsonObject
         {
@@ -355,28 +374,7 @@ internal static class AgentHostVillageToolsQuestLoop
                     decisions++;
                     rejected++;
                     var currentConversation = currentNative?["state"]?["context"]?["conversation"] as JsonObject;
-                    var requiredNextStep = "Select exactly one action or control from the latest Native catalog and use the listed argument names and IDs.";
-                    if (exception.Code == "provider-action-unavailable" && currentConversation is not null)
-                    {
-                        var clickableOptionIds = (currentConversation["options"] as JsonArray)?.OfType<JsonObject>()
-                            .Where(option => ReadBoolean(option, "clickable"))
-                            .Select(option => ReadString(option, "id"))
-                            .Where(id => !string.IsNullOrWhiteSpace(id))
-                            .Cast<string>()
-                            .ToArray() ?? Array.Empty<string>();
-                        if (catalog.OfType<JsonObject>().Any(action => ReadString(action, "action") == "dialogueSelect") && clickableOptionIds.Length > 0)
-                            requiredNextStep = "A Native conversation is open. The only allowed Host action is dialogueSelect; put one exact clickable conversation option ID into arguments.OptionId. Clickable IDs: " + string.Join(", ", clickableOptionIds) + ".";
-                        else if (catalog.OfType<JsonObject>().Any(action => ReadString(action, "action") == "dialogueContinue"))
-                            requiredNextStep = "The Native screen shows gold ‘点击继续’ (Click to continue). dialogueContinue advances this dialogue text; it does not leave the settlement. Use only dialogueContinue with empty arguments. Do not call leave_settlement or talkToSettlementHero.";
-                    }
-                    feedback = new JsonObject
-                    {
-                        ["kind"] = "decision-rejected-before-native",
-                        ["code"] = exception.Code,
-                        ["message"] = exception.Message,
-                        ["nativeActionSent"] = false,
-                        ["requiredNextStep"] = requiredNextStep
-                    };
+                    feedback = BuildProviderActionUnavailableFeedback(ExtractUnavailableActionName(exception.Message), catalog, previousReceipt, currentConversation, exception.Message, exception.Code);
                     trace.Add(new JsonObject { ["iteration"] = decisionIndex, ["stage"] = "decision-rejected-before-native", ["feedback"] = feedback.DeepClone() });
                     continue;
                 }
@@ -586,6 +584,58 @@ internal static class AgentHostVillageToolsQuestLoop
         feedback["sameActionRetryAllowed"] = true;
         feedback["requiredNextStep"] = $"The previous move to '{rejectedId}' was rejected before Native because this Quest requires a Town merchant, not a Village. The current move action is still valid; retry move using exactly one safe Town SettlementId from the latest catalog: {string.Join(", ", townIds)}. Do not use a Village, the current location, or any ID outside this list.";
         return feedback;
+    }
+
+    internal static JsonObject BuildProviderActionUnavailableFeedback(string attemptedAction, JsonArray actionCatalog, JsonObject? previousReceipt,
+        JsonObject? currentConversation, string message, string code = "provider-action-unavailable")
+    {
+        var actionName = string.IsNullOrWhiteSpace(attemptedAction) ? "<unknown>" : attemptedAction;
+        var allowedActions = actionCatalog.OfType<JsonObject>()
+            .Select(action => ReadString(action, "action"))
+            .Where(action => !string.IsNullOrWhiteSpace(action))
+            .Cast<string>()
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var requiredNextStep = allowedActions.Length == 0
+            ? "No Native action is currently listed. Do not repeat an action; wait for or request a fresh Native observation only through an explicitly listed control."
+            : $"Action '{actionName}' is not listed in the current Native catalog. Choose only one listed action: {string.Join(", ", allowedActions)}. Do not repeat the rejected action.";
+
+        if (code == "provider-action-unavailable" && actionName == "tradeOptions" &&
+            ReadString(previousReceipt, "action") == "tradeOptions" && ReadString(previousReceipt, "status") == "completed" &&
+            !AgentHostVillageToolsQuestPolicy.HasCurrentToolsBuyOffer(previousReceipt) && allowedActions.Contains("tradeCancel", StringComparer.Ordinal))
+        {
+            requiredNextStep = "The last Native tradeOptions receipt contains no eligible offer for the requested tools, and tradeCancel is the only listed action. Select tradeCancel with empty arguments to close this unchanged Trade screen; do not repeat tradeOptions. After its receipt, use the fresh Native state and catalog to choose the next step.";
+        }
+        else if (code == "provider-action-unavailable" && currentConversation is not null)
+        {
+            var clickableOptionIds = (currentConversation["options"] as JsonArray)?.OfType<JsonObject>()
+                .Where(option => ReadBoolean(option, "clickable"))
+                .Select(option => ReadString(option, "id"))
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Cast<string>()
+                .ToArray() ?? Array.Empty<string>();
+            if (allowedActions.Contains("dialogueSelect", StringComparer.Ordinal) && clickableOptionIds.Length > 0)
+                requiredNextStep = "A Native conversation is open. The only allowed Host action is dialogueSelect; put one exact clickable conversation option ID into arguments.OptionId. Clickable IDs: " + string.Join(", ", clickableOptionIds) + ".";
+            else if (allowedActions.Contains("dialogueContinue", StringComparer.Ordinal))
+                requiredNextStep = "The Native screen shows gold ‘点击继续’ (Click to continue). dialogueContinue advances this dialogue text; it does not leave the settlement. Use only dialogueContinue with empty arguments. Do not call leave_settlement or talkToSettlementHero.";
+        }
+
+        return new JsonObject
+        {
+            ["kind"] = "decision-rejected-before-native",
+            ["code"] = code,
+            ["message"] = message,
+            ["nativeActionSent"] = false,
+            ["requiredNextStep"] = requiredNextStep
+        };
+    }
+
+    private static string ExtractUnavailableActionName(string message)
+    {
+        const string prefix = "Action '";
+        if (!message.StartsWith(prefix, StringComparison.Ordinal)) return string.Empty;
+        var end = message.IndexOf('\'', prefix.Length);
+        return end > prefix.Length ? message[prefix.Length..end] : string.Empty;
     }
 
     internal static JsonObject BuildSafeReceipt(string action, JsonElement response, IReadOnlySet<string>? marketsWithoutTools = null)

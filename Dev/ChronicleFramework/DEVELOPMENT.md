@@ -33,7 +33,9 @@ W7-K完整阶段不再先额外运行一次真实模型冒烟：同一免费路�
 
 更新后真实Campaign复验`TestResults/20261016-124328`使用FreeLLMAPI显式`nvidiallama-3.2-11b-vision`：首轮分类成功，随后模型执行原版`talkToSettlementHero`；第三个模型请求返回HTTP 502（实际路由`custom/nvidia/llama-3.2-11b-vision`，fallback 1次），在读取对话选项前安全终止。累计2决策、1条Native动作、3,611输入/54输出token；Quest仍0、CampaignDay未变化、源fixture未变，5fps画面完整，游戏/Host/CLI/派生存档清理通过。该结果证明模型开始走Native入口，但没有验证说明页→标准接取选项的真实模型行为；502是网关/上游失败信号，不能归咎代码或模型决策。此后`auto`真实模型复验见`TestResults/20261016-140206`。
 
-`TestResults/20261016-140206`（commit `76a30ea`，FreeLLMAPI `auto`）真实模型成功接取`issue_64_quest`并读Journal。它自然抵达萨哥特并打开原版Trade：当前`tradeOptions`目标工具报价为0、Gold 920、尚无交易提交；下一次模型请求收到无Retry-After的HTTP429，未能决定取消或搜索另一个市场。19次决策、14个Native动作、16次成功回复，累计55,408输入/887输出token；CampaignDay 91077.635→91077.879，Quest仍活动、源档不变，游戏与临时存档清理。contact/timeline完整并已删MP4，共享events.jsonl约0.4MB。该结果验证说明页修复后真实模型接任务并抵达Trade界面，但缺货恢复和采购/交付仍未完成；429是Provider限流中断，不是Native交易适配失败。
+`TestResults/20261016-140206`（commit `76a30ea`，FreeLLMAPI `auto`）真实模型成功接取`issue_64_quest`并读Journal。它自然抵达萨哥特并打开原版Trade：当前`tradeOptions`目标工具报价为0、Gold 920、尚无交易提交。随后模型在Native目录仅含`tradeCancel`时再次请求`tradeOptions`；Host在发出Native命令前正确拒绝，但当次恢复提示只泛称应选目录中的动作。之后下一次FreeLLMAPI请求收到无Retry-After的HTTP429，模型未能执行取消并寻找另一市场。19次决策、14个Native动作、16次成功回复，累计55,408输入/887输出token；CampaignDay 91077.635→91077.879，Quest仍活动、源档不变，游戏与临时存档清理。contact/timeline完整并已删MP4，共享events.jsonl约0.4MB。
+
+针对该现场轨迹，Host现在只在前一份成功Native`tradeOptions`明确没有合格工具报价、而当前目录含`tradeCancel`时，向真实模型反馈“取消当前未改动的Trade、不要重复查询；之后按新观察决定下一步”，不代替模型执行。`TestResults/20261016-191531`的自包含Host Provider合同自检通过，覆盖空报价、唯一允许动作、无Native副作用及恢复提示进入模型system prompt；这只是Host恢复合同，不代表FreeLLMAPI长程Quest已重跑或完成。
 
 `TestResults/20261016-163619`是无游戏Provider冒烟：FreeLLMAPI固定路由`qwen2.5-vl-72b`返回Production目标分类，实际由`ovh/Qwen2.5-VL-72B-Instruct`处理，JSON Schema模式416输入/28输出token、0 Native命令。这只证实一次短分类调用成功，不代表长程Quest稳定；下一次真实任务切片固定此直接路由，减少`auto`在多供应商之间切换带来的变量。
 
