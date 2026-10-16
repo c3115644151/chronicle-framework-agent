@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.211
+Contract version: 7.212
 
 Agent Host为每次模型决策按Native当前`allowedActions`/`allowedControls`生成JSON Schema互斥分支；对话、菜单、地图移动等动作还把策略允许的当前ID编码成参数枚举，避免从可见但不允许的选项中重复选择。VillageNeedsTools流程读取当前Quest Journal；每次Native Trade提交后都重新读取Journal再规划，避免用旧进度判断是否还缺货。欠工具时地图移动只列安全Town，已满足时只列接取任务时从Native当前位置观察到的Quest-giver Village；来源未观测到就不猜。无货Town会从后续采购目标中排除。所有移动仍是普通原版Native `move`，不夹带时钟控制。无动作目录时Host不调用模型，理由文本在schema中限制为64字符；村庄Quest目标另要求理由最多8个短词。FreeLLMAPI使用OpenAI兼容`response_format.json_schema`；无游戏真实Provider冒烟测试镜像Campaign Host的第一步：把完整用户目标送入生产用`goalScopeClassificationRequired`提示，并要求返回唯一支持的`supportedVillageToolsQuestGoal`控制值；记录实际`X-Routed-Via`与token，不执行Native命令。原生Ollama协议仍只留在隔离协议回归，不作为本项目真实模型推理路径。
 FreeLLMAPI Mistral Small 3.2→OVH当前使用JSON对象模式与`max_tokens`，并省略该上游不接受的OpenAI专属`store`及空`reasoning_effort`字段；输出仍由本地Host按Native动作目录逐项验证。若自动FreeLLMAPI路由以HTTP 400/422/502返回、且`X-Fallback-Trail`明确标记`provider_bad_request`拒绝JSON Schema，并表明回退轨迹中含OVH Mistral Small，则一次JSON对象模式兼容重试同时改用`max_tokens`，等待OVH节奏并严格后验验证。FreeLLMAPI以502和`keyN=format_ignored`标记结构化输出被上游模型忽略/截断时，也允许对同一尚未执行的决策重试一次JSON对象模式；其余HTTP失败不走此兼容重试。所有输出仍由本地Host按Native动作目录严格解析和验证，失败不会发送Native命令。Provider回归覆盖格式回退与非格式错误拒绝。
@@ -346,7 +346,7 @@ Provider发现模型选择了当前合法动作、但参数名超出该动作当
 
 真实Provider只对尚未收到HTTP响应的TCP连接/名称解析失败自动重试一次，随后停止并记录安全的HTTP状态、主机和内层异常类型；不重试超时或已收到的HTTP错误响应，以免结果不确定时重复生成并产生重复费用。外部服务响应正文、Authorization头和密钥不进入失败日志。`CHRONICLE_LLM_THINKING_MODE`可选地把OpenAI-compatible `thinking.type`设为`enabled`或`disabled`；未配置时不改Provider原来的默认值。DeepSeek Flash默认为Thinking模式，这个选项用于针对结构化动作评测控制推理模式，不更换模型或改游戏动作。
 
-Native Barter目录按当前VM会话和成功回执逐阶段开放：没有当前BarterVM时只允许读取选项；读到当前Safe Passage报价后开放自动平衡，暂不允许提交；自动平衡成功后在同一会话中隐藏重复读取/重复平衡，开放当前可用的Offer。报价编辑、重置、取消或提交会使已平衡标记失效；Offer成功则清除会话标记并转回原版谈话阶段。这样模型仍决定是否调整/提交，但不会被反复可用的“读取/自动平衡”按钮困在无进展循环。
+Native Barter目录按当前VM会话和成功回执逐阶段开放：没有当前BarterVM时只允许读取选项；读到当前Safe Passage报价后开放自动平衡，暂不允许提交；自动平衡成功后在同一会话中隐藏重复读取/重复平衡，开放当前可用的Offer。报价编辑、重置、取消或提交会使已平衡标记失效。Offer回执若被Native接受但Encounter仍打开，且当前对白没有可点击选项，Host保留已接受回执并仅开放一次原版`dialogueContinue`显示的“点击继续”；随后重新观察状态，若遭遇仍未清除即安全停止，不重提报价或选择战斗。这样既不会把Barter回执误当成界面已关闭，也不会因重复调用“读取/自动平衡”困在无进展循环。
 
 真实模型验收收据记录配置中的模型标识、Git源码提交、被跟踪文件是否干净、Campaign日区间与运行UTC区间；不记录API密钥或服务端点。用于结束产品Issue的真实模型结果应在已提交源码上复跑，使收据提交号就是实际被测试的代码版本。
 

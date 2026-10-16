@@ -584,6 +584,10 @@ W7-K真实闭环返回路线断点与修复（2026-10-17）：`TestResults/20261
 
 `TestResults/20261017-014847`真实`auto:reliable`复验确认前述返回路由修复确实在实机生效：模型从蓝色委托自然接取、在Town通过Native Trade买入1件工具、Trade提交后重读Journal，读取交付前Inventory基线，随后仅移动回原`village_V1_1`并经QuickConversation交付；Native活动Quest由1变0。75次决策、58个Native动作、74条真实路由记录，输入/输出265,846/5,299 tokens；CampaignDay 91077.634→91084.115，使用真实FreeLLMAPI路由且未观察到Provider失败。最终验收仍失败关闭：交付后模型推进了“谢谢你”对话，但Host的动作目录因Quest蓝标消失而为空，没能重新打开Native MainHero Inventory；因此工具精确消耗和`73 flax`奖励净差未核实，`inventoryVerifiedAfterTurnIn=false`，不能算任务通过。当前修复是在已记录交付前基线的前提下，即使活动Quest和蓝标已消失，也允许原版`inventoryOpen`→Inventory VM读取；随后仍须核对精确物品差值才开放`done`。该失败为Host后验入口门禁遗漏，不是NPC交付/FreeLLMAPI失败；`TestResults/20261017-025554`Preflight、Build、AgentHostPackage通过。更新后的真实模型复验待进行。
 
+W7-K第二次真实验收在路上触发BanditFaction遭遇（`TestResults/20261017-025918`）：45次决策/36个Native动作、153,346/4,800 tokens后，FreeLLMAPI模型走完原版Safe Passage的Auto Balance与Offer；Native Offer回执明确`accepted=true`、付款后金币904→767且无战斗。失败画面显示提示条“对方接受到提案！”和金色“点击继续”，遭遇仍是`encounter_meeting`，最后一句也仍在对话框。Host此前在任意`barterOffer`/`barterCancel`后直接给空动作目录，因此这不是上游模型/网络失败，也不是任务移动失效，而是漏掉成交后原版对话关闭步骤。现在只在当前遭遇身份不变、Native Offer回执接受、没有可点击选项且尚未用过一次Continue时开放`dialogueContinue`；再次观察后若遭遇仍活跃即停止，不重复收费或切入战斗。`TestResults/20261017-034957`Preflight/Build/AgentHostPackage通过，自检覆盖接受结果后的Continue；仍未用更新后真实模型验证遭遇关闭和继续Quest。
+
+首次 Safe Passage Continue 自检只覆盖Host动作排序。真实截图`TestResults/20261017-025918/AgentHostCampaignRun-01/LiveModelEngine-failure.bmp`证实 Offer accepted 后界面仍显示`encounter_meeting`、成功提示和“点击继续”，Native回执也显示accepted/Gold差，但不能证明继续后遭遇退出。正式自检现让Native Fake在Offer后保持Encounter与空选项/结果对白，仅在接到一次`dialogueContinue`后清除；`TestResults/20261017-034957`AgentHostPackage通过且动作顺序锁定，FreeLLMAPI真实复验还待进行。
+
 ## 维护规则
 
 - 本文维护技术目标、机制契约、领域架构、长期验收定义和未解事实；不保存项目工作项状态、域完成计数或测试通过快照。

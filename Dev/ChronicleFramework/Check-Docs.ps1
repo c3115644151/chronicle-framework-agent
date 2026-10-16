@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.211'
+$contractVersion = '7.212'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -315,7 +315,8 @@ if ($agentHostVillageToolsQuestPolicySource -notmatch 'QuoteMatchesBalancedDraft
     $agentHostVillageToolsQuestPolicySource -notmatch 'argumentValues' -or
     $agentHostDecisionCycleSource -notmatch 'never repeat Continue' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'safePassageBalanceReceipt' -or
-    $agentHostVillageToolsQuestLoopSource -notmatch 'village-tools-host-resolves-bandit-interruption-through-native-safe-passage-without-fight-or-clock-actions' -or
+    $agentHostVillageToolsQuestLoopSource -notmatch 'village-tools-host-resolves-bandit-interruption-through-native-safe-passage-and-click-to-continue-without-fight-or-clock-actions' -or
+    $agentHostVillageToolsQuestLoopSource -notmatch 'safe-passage-self-test-unexpected-continue' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'questDetailsObservedForActiveQuest = false' -or
     $agentHostProviderSelfTestSource -notmatch 'decision-schema-constrains-current-native-string-and-integer-values' -or
     $agentHostProviderSelfTestSource -notmatch 'provider-decision-schema-uses-strict-compatible-root-wrapper' -or

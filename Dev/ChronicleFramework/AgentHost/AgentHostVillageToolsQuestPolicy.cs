@@ -668,7 +668,15 @@ internal static class AgentHostVillageToolsQuestPolicy
         var previousAction = ReadString(previousReceipt, "action");
         var previousStatus = ReadString(previousReceipt, "status");
         var options = conversation["options"] as JsonArray ?? new JsonArray();
-        if (previousAction is "barterOffer" or "barterCancel") return new JsonArray();
+        if (previousAction == "barterOffer")
+        {
+            var acceptedOffer = previousStatus == "completed" && ReadBoolean(previousReceipt?["data"] as JsonObject, "accepted") &&
+                ReadString(safePassageBalanceReceipt, "action") == "barterOffer" && ReadBoolean(safePassageBalanceReceipt?["data"] as JsonObject, "accepted");
+            return acceptedOffer && !safePassageContinueUsed && !options.OfType<JsonObject>().Any(option => IsTrue(option, "clickable"))
+                ? new JsonArray(new JsonObject { ["action"] = "dialogueContinue", ["arguments"] = new JsonArray() })
+                : new JsonArray();
+        }
+        if (previousAction == "barterCancel") return new JsonArray();
 
         if (previousAction == "barterOptions")
         {
