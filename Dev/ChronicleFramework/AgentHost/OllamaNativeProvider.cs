@@ -121,7 +121,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             profile.ModelId,
             NativeOllama: false,
             Timeout: TimeSpan.FromSeconds(ReadIntegerEnvironment("CHRONICLE_LLM_TIMEOUT_SECONDS", 360, 5, 360)),
-            MaxOutputTokens: ReadIntegerEnvironment("CHRONICLE_LLM_MAX_TOKENS", 512, 64, 4096),
+            MaxOutputTokens: ReadIntegerEnvironment("CHRONICLE_LLM_MAX_TOKENS", 1024, 64, 4096),
             Temperature: 0d,
             Thinking: null,
             ReasoningEffort: "none",
@@ -232,7 +232,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         {
             payload["response_format"] = useJsonObjectCompatibilityMode
                 ? new { type = "json_object" }
-                : new { type = "json_schema", json_schema = new { schema = BuildDecisionSchema(request) } };
+                : new { type = "json_schema", json_schema = new { name = "chronicle_agent_decision", strict = true, schema = BuildDecisionSchema(request) } };
             payload[_settings.MaxTokenParameter] = _settings.MaxOutputTokens;
             if (_settings.Thinking.HasValue) payload["thinking"] = new { type = _settings.Thinking.Value ? "enabled" : "disabled" };
             if (!string.IsNullOrWhiteSpace(_settings.ReasoningEffort) &&
@@ -563,14 +563,13 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 }
                 var requiredArgumentNames = new JsonArray();
                 foreach (var argumentName in argumentNames) requiredArgumentNames.Add(argumentName);
-                var branch = new JsonObject
+                    var branch = new JsonObject
                 {
                     ["type"] = "object",
                     ["properties"] = new JsonObject
                     {
-                        ["action"] = new JsonObject { ["type"] = "string", ["const"] = actionName },
-                        ["arguments"] = new JsonObject { ["type"] = "object", ["properties"] = argumentProperties, ["required"] = requiredArgumentNames, ["additionalProperties"] = false },
-                        ["rationale"] = new JsonObject { ["type"] = "string", ["maxLength"] = 64 }
+                            ["action"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray(actionName) },
+                            ["arguments"] = new JsonObject { ["type"] = "object", ["properties"] = argumentProperties, ["required"] = requiredArgumentNames, ["additionalProperties"] = false }
                     },
                     ["required"] = new JsonArray("action", "arguments"),
                     ["additionalProperties"] = false
@@ -587,7 +586,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 var controlName = controlItem.GetString()!;
                 var properties = new JsonObject
                 {
-                    ["control"] = new JsonObject { ["type"] = "string", ["const"] = controlName }
+                    ["control"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray(controlName) }
                 };
                 var required = new JsonArray("control");
                 if (string.Equals(controlName, "observeAgain", StringComparison.Ordinal))
@@ -595,7 +594,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     properties["waitSeconds"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 10 };
                     required.Add("waitSeconds");
                 }
-                properties["reason"] = new JsonObject { ["type"] = "string", ["maxLength"] = 64 };
+                properties["reason"] = new JsonObject { ["type"] = "string" };
                 required.Add("reason");
                 alternatives.Add(new JsonObject
                 {
@@ -609,13 +608,30 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
 
         if (alternatives.Count == 0)
             throw new AgentHostException("provider-decision-catalog-empty", "The local model was not called because Native listed no action or control.");
-        return new JsonObject { ["oneOf"] = alternatives };
+        return new JsonObject
+        {
+            ["type"] = "object",
+            ["properties"] = new JsonObject
+            {
+                ["decision"] = new JsonObject { ["anyOf"] = alternatives }
+            },
+            ["required"] = new JsonArray("decision"),
+            ["additionalProperties"] = false
+        };
     }
 
     internal static JsonObject NormalizeDecision(JsonElement decision, JsonElement request)
     {
         if (decision.ValueKind != JsonValueKind.Object)
             throw new AgentHostException("provider-decision-shape-invalid", "The local model decision must be a JSON object.");
+
+        if (decision.TryGetProperty("decision", out var wrappedDecision))
+        {
+            var wrapperProperties = decision.EnumerateObject().Take(2).ToArray();
+            if (wrapperProperties.Length != 1 || wrapperProperties[0].Name != "decision" || wrappedDecision.ValueKind != JsonValueKind.Object)
+                throw new AgentHostException("provider-decision-wrapper-invalid", "A wrapped model decision must contain only one object-valued decision property.");
+            decision = wrappedDecision;
+        }
 
         var controlName = ReadString(decision, "control");
         var rawActionName = ReadString(decision, "action");

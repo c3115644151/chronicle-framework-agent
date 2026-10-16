@@ -90,6 +90,18 @@ internal static class AgentHostVillageToolsQuestLoop
             maxElapsedSeconds = 10,
             allowedActionNames = AgentHostCampaignLoop.ApprovedActions.ToArray()
         }));
+
+        var alternativeOnlyClient = new FakeVillageQuestNativeClient(alternativeOnly: true);
+        var alternativeOnlyProvider = new FakeVillageQuestDecisionProvider();
+        var alternativeOnlyResult = await RunAsync(request.RootElement, alternativeOnlyClient, alternativeOnlyProvider, CancellationToken.None);
+        if (ReadString(alternativeOnlyResult, "status") != "failed" ||
+            ReadString(alternativeOnlyResult, "failureCode") != "village-tools-direct-quest-option-unavailable" ||
+            ReadString(alternativeOnlyResult["termination"] as JsonObject, "reason") != "out-of-scope-alternative-only" ||
+            !alternativeOnlyClient.Actions.SequenceEqual(new[] { "talkToSettlementHero" }) ||
+            alternativeOnlyProvider.Calls != 1 || ReadString(alternativeOnlyResult, "questId") != string.Empty ||
+            ReadBoolean(alternativeOnlyResult, "questWasObservedActive"))
+            throw new AgentHostException("village-tools-loop-self-test-alternative-only-stop-failed", "A visible Quest-giver dialogue exposing only the out-of-scope Alternative Solution must stop with a precise reason without selecting it or claiming the Quest was accepted.");
+
         var result = await RunAsync(request.RootElement, client, provider, CancellationToken.None,
             priorDecisions: 1,
             priorPromptTokens: 11,
@@ -185,6 +197,7 @@ internal static class AgentHostVillageToolsQuestLoop
         return [
             new { scenario = "village-tools-postcondition-requires-exact-visible-tool-consumption-and-reward-delta", passed = true },
             new { scenario = "village-tools-host-recovers-invalid-village-target-with-current-safe-town-ids", passed = true, nativeActionSent = false },
+            new { scenario = "village-tools-host-safely-stops-when-only-out-of-scope-alternative-is-clickable", passed = true, nativeActions = alternativeOnlyClient.Actions.ToArray(), providerCalls = alternativeOnlyProvider.Calls },
             new { scenario = "village-tools-host-routes-classified-goal-through-native-observe-decide-act-loop", decisions = ReadInt(result, "decisions", 0), actions = client.Actions.ToArray(), clockActions = client.ClockActionCount, passed = true },
             new { scenario = "village-tools-loop-preserves-parent-classifier-trace-route-and-token-counts", traceRows = fullTrace.Count, routeRows = fullRouteHistory.Count, promptTokens = combinedPromptTokens, completionTokens = combinedCompletionTokens, passed = true },
             new { scenario = "village-tools-host-recovers-from-bounded-invalid-actions-in-open-native-dialogue", decisions = recoveryProvider.Calls, rejectedDecisions = recoveryFeedback.Count, nativeActions = recoveryClient.Actions.ToArray(), passed = true },
@@ -299,10 +312,20 @@ internal static class AgentHostVillageToolsQuestLoop
                 var controls = AgentHostVillageToolsQuestPolicy.BuildControlCatalog(currentNative!, sawQuestActive, inventoryVerifiedAfterTurnIn);
                 if (catalog.Count == 0 && controls.Count == 0)
                 {
-                    failure = activeQuest is null
-                        ? "The supported Quest is not currently visible or has no safe recovery/verification action."
-                        : "No safe Native action is available in the current Campaign context.";
-                    termination = activeQuest is null ? "quest-not-observable-or-verification-incomplete" : "no-safe-action";
+                    var alternativeOnly = AgentHostVillageToolsQuestPolicy.IsOnlyOutOfScopeAlternativeOption(currentContext?["conversation"] as JsonObject);
+                    if (alternativeOnly)
+                    {
+                        failure = "The current Native Quest-giver conversation exposes only the out-of-scope companion/men Alternative Solution; direct VillageNeedsTools Quest acceptance is not available, and no alternative was selected.";
+                        failureCode = "village-tools-direct-quest-option-unavailable";
+                        termination = "out-of-scope-alternative-only";
+                    }
+                    else
+                    {
+                        failure = activeQuest is null
+                            ? "The supported Quest is not currently visible or has no safe recovery/verification action."
+                            : "No safe Native action is available in the current Campaign context.";
+                        termination = activeQuest is null ? "quest-not-observable-or-verification-incomplete" : "no-safe-action";
+                    }
                     break;
                 }
 
@@ -733,6 +756,9 @@ internal static class AgentHostVillageToolsQuestLoop
         private bool _atVillageMenu = true;
         private bool _inIssueConversation;
         private bool _questActive;
+        private readonly bool _alternativeOnly;
+
+        internal FakeVillageQuestNativeClient(bool alternativeOnly = false) => _alternativeOnly = alternativeOnly;
 
         public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken) => Task.FromResult(ParseState());
 
@@ -784,7 +810,9 @@ internal static class AgentHostVillageToolsQuestLoop
                     {
                         ["gameState"] = "MapState",
                         ["menuId"] = _atVillageMenu ? "village" : null,
-                        ["conversation"] = _inIssueConversation ? new JsonObject { ["options"] = new JsonArray(new JsonObject { ["id"] = "issue_64_quest_accept", ["clickable"] = true, ["text"] = "接受委托" }) } : null
+                        ["conversation"] = _inIssueConversation ? new JsonObject { ["options"] = _alternativeOnly
+                            ? new JsonArray(new JsonObject { ["id"] = "issue_alternative_solution_player_response", ["clickable"] = true, ["text"] = "或许我的手下能帮你处理此事。" })
+                            : new JsonArray(new JsonObject { ["id"] = "issue_64_quest_accept", ["clickable"] = true, ["text"] = "接受委托" }) } : null
                     },
                     ["location"] = new JsonObject { ["currentSettlementId"] = _currentSettlementId, ["targetSettlementId"] = _targetSettlementId },
                     ["quests"] = _questActive ? new JsonArray(new JsonObject { ["id"] = "issue-1", ["title"] = "村庄需要工具" }) : new JsonArray(),

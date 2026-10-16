@@ -1034,6 +1034,13 @@ internal static class AgentHostVillageToolsQuestPolicy
         return options.Where(IsConversationLeaveOption).ToArray();
     }
 
+    internal static bool IsOnlyOutOfScopeAlternativeOption(JsonObject? conversation)
+    {
+        var clickableOptions = (conversation?["options"] as JsonArray)?.OfType<JsonObject>()
+            .Where(option => IsTrue(option, "clickable")).ToArray() ?? Array.Empty<JsonObject>();
+        return clickableOptions.Length > 0 && clickableOptions.All(IsUnsupportedAlternativeSolutionEntry);
+    }
+
     private static bool IsUnsupportedAlternativeSolutionEntry(JsonObject option) =>
         ReadString(option, "id") == "issue_alternative_solution_player_response";
 

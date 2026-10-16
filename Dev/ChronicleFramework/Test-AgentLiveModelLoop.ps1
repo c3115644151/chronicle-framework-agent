@@ -316,7 +316,7 @@ try {
         $maxElapsedSeconds = 1800
         $allowedActions = 'mapSettlementTargets,move,menuSelect,talkToSettlementHero,dialogueSelect,dialogueContinue,questDetails,tradeOptions,trade,tradeConfirm,tradeCancel,tradeCancelChanges,barterOptions,barterAutoBalance,barterOffer,barterCancel,inventoryOpen,heroEquipmentOptions,inventoryCancel'
         $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '360'
-        $env:CHRONICLE_LLM_MAX_TOKENS = '512'
+        $env:CHRONICLE_LLM_MAX_TOKENS = '1024'
     }
     elseif ($ArrivalLoop) {
         $goal = 'First query mapSettlementTargets. Then choose the nearest observed safe target (not hostile, not under siege, not the current settlement) and issue one move. While party.isMoving toward that target and currentSettlementId differs, use observeAgain with waitSeconds 5; do not send move again or use clock controls. When nativeMoveArrival.status is arrived, return done immediately and issue no further game action.'

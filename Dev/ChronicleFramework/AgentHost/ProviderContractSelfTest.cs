@@ -145,17 +145,31 @@ internal static class ProviderContractSelfTest
             MaxTokenParameter: "max_completion_tokens");
 
         using (var actionRequest = JsonDocument.Parse(BuildActionDecisionRequest()))
-        using (var actionWithoutRationale = JsonDocument.Parse("{\"action\":\"tradeConfirm\",\"arguments\":{}}"))
+        using (var actionWithoutRationale = JsonDocument.Parse("{\"decision\":{\"action\":\"tradeConfirm\",\"arguments\":{}}}"))
         {
             var normalized = OllamaNativeProvider.NormalizeDecision(actionWithoutRationale.RootElement, actionRequest.RootElement);
             var schema = OllamaNativeProvider.BuildDecisionSchema(actionRequest.RootElement);
-            var firstBranch = (schema["oneOf"] as JsonArray)?[0] as JsonObject;
+            var alternatives = schema["properties"]?["decision"]?["anyOf"] as JsonArray;
+            var firstBranch = alternatives?[0] as JsonObject;
             var required = firstBranch?["required"] as JsonArray ?? new JsonArray();
             if (normalized["action"]?.GetValue<string>() != "tradeConfirm" ||
                 normalized["rationale"]?.GetValue<string>() != string.Empty ||
-                required.Any(value => value?.GetValue<string>() == "rationale"))
-                throw new AgentHostException("provider-self-test-action-rationale-required", "A listed Native action must remain eligible when optional audit rationale is omitted; action name/arguments remain strict.");
+                schema["type"]?.GetValue<string>() != "object" || schema["oneOf"] is not null ||
+                alternatives?.Count != 1 || firstBranch?["properties"]?["rationale"] is not null ||
+                firstBranch?["properties"]?["action"]?["enum"]?[0]?.GetValue<string>() != "tradeConfirm" ||
+                required.Count != 2 || required[0]?.GetValue<string>() != "action" || required[1]?.GetValue<string>() != "arguments" ||
+                firstBranch?["additionalProperties"]?.GetValue<bool>() != false)
+                throw new AgentHostException("provider-self-test-decision-schema-strict-subset-failed", "The provider schema must use an object root with a nested anyOf, only supported constraints, and required action arguments; Native normalization still accepts the flattened action.");
+
+            using var invalidWrapper = JsonDocument.Parse("{\"decision\":{\"action\":\"tradeConfirm\",\"arguments\":{}},\"extra\":true}");
+            try
+            {
+                _ = OllamaNativeProvider.NormalizeDecision(invalidWrapper.RootElement, actionRequest.RootElement);
+                throw new AgentHostException("provider-self-test-decision-wrapper-overbroad", "The decision wrapper accepted an extra top-level property.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-decision-wrapper-invalid") { }
             results.Add(new { scenario = "provider-action-rationale-is-optional-and-native-catalog-still-gates", passed = true });
+            results.Add(new { scenario = "provider-decision-schema-uses-strict-compatible-root-wrapper", passed = true });
         }
 
         var healthHandler = new StubHandler((_, _) => Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"test-local-model\"}]}")));
@@ -944,8 +958,9 @@ internal static class ProviderContractSelfTest
             {"allowedActions":[{"action":"menuSelect","arguments":["OptionId"],"argumentValues":{"OptionId":["trade","leave"]}},{"action":"trade","arguments":["Direction","Amount"],"argumentValues":{"Direction":["buy"],"Amount":[1,2]}}],"allowedControls":[]}
             """);
         var schema = OllamaNativeProvider.BuildDecisionSchema(request.RootElement);
-        var enumValues = schema["oneOf"]![0]!["properties"]!["arguments"]!["properties"]!["OptionId"]!["enum"] as JsonArray;
-        var amountValues = schema["oneOf"]![1]!["properties"]!["arguments"]!["properties"]!["Amount"]!["enum"] as JsonArray;
+        var alternatives = schema["properties"]!["decision"]!["anyOf"]!.AsArray();
+        var enumValues = alternatives[0]!["properties"]!["arguments"]!["properties"]!["OptionId"]!["enum"] as JsonArray;
+        var amountValues = alternatives[1]!["properties"]!["arguments"]!["properties"]!["Amount"]!["enum"] as JsonArray;
         if (enumValues is null || enumValues.Count != 2 || enumValues.Select(item => item?.GetValue<string>()).Any(value => value == "village_center") ||
             !enumValues.Any(item => item?.GetValue<string>() == "trade") || !enumValues.Any(item => item?.GetValue<string>() == "leave") ||
             amountValues is null || amountValues.Count != 2 || !amountValues.Any(item => item?.GetValue<int>() == 1) || !amountValues.Any(item => item?.GetValue<int>() == 2))
@@ -1175,14 +1190,20 @@ internal static class ProviderContractSelfTest
             throw new AgentHostException("provider-self-test-request-failed", "Provider request was missing, not loopback, or unexpectedly carried authorization.");
         using var document = JsonDocument.Parse(body);
         var root = document.RootElement;
+        var decisionSchema = root.GetProperty("response_format").GetProperty("json_schema").GetProperty("schema");
+        var decisionAlternatives = decisionSchema.GetProperty("properties").GetProperty("decision").GetProperty("anyOf");
         if (root.GetProperty("model").GetString() != "test-local-model" ||
             root.GetProperty("response_format").GetProperty("type").GetString() != "json_schema" ||
-            root.GetProperty("response_format").GetProperty("json_schema").GetProperty("schema").GetProperty("oneOf").GetArrayLength() != 1 ||
-            root.GetProperty("response_format").GetProperty("json_schema").GetProperty("schema").GetProperty("oneOf")[0].GetProperty("properties").GetProperty("control").GetProperty("const").GetString() != "done" ||
-            root.GetProperty("response_format").GetProperty("json_schema").GetProperty("schema").GetProperty("oneOf")[0].GetProperty("properties").GetProperty("reason").GetProperty("maxLength").GetInt32() != 64 ||
+            root.GetProperty("response_format").GetProperty("json_schema").GetProperty("name").GetString() != "chronicle_agent_decision" ||
+            !root.GetProperty("response_format").GetProperty("json_schema").GetProperty("strict").GetBoolean() ||
+            decisionSchema.GetProperty("type").GetString() != "object" ||
+            decisionSchema.GetProperty("required")[0].GetString() != "decision" ||
+            decisionSchema.TryGetProperty("oneOf", out _) || decisionAlternatives.GetArrayLength() != 1 ||
+            decisionAlternatives[0].GetProperty("properties").GetProperty("control").GetProperty("enum")[0].GetString() != "done" ||
+            decisionAlternatives[0].GetProperty("properties").TryGetProperty("reason", out var reasonSchema) && reasonSchema.TryGetProperty("maxLength", out _) ||
             root.GetProperty("max_completion_tokens").GetInt32() != 128 ||
             root.TryGetProperty("store", out _) || root.TryGetProperty("reasoning_effort", out _))
-            throw new AgentHostException("provider-self-test-request-failed", "Provider request did not constrain its local response to the current decision catalog.");
+            throw new AgentHostException("provider-self-test-request-failed", "Provider request did not use a strict-compatible wrapper object constrained to the current decision catalog.");
     }
 
     private static void ValidateLocalEndpoint(Uri? uri)
@@ -1201,7 +1222,8 @@ internal static class ProviderContractSelfTest
         using var document = JsonDocument.Parse(body);
         var root = document.RootElement;
         if (root.GetProperty("model").GetString() != "test-local-model" ||
-            root.GetProperty("stream").GetBoolean() || root.GetProperty("format").GetProperty("oneOf").GetArrayLength() != 1 ||
+            root.GetProperty("stream").GetBoolean() ||
+            root.GetProperty("format").GetProperty("properties").GetProperty("decision").GetProperty("anyOf").GetArrayLength() != 1 ||
             root.GetProperty("options").GetProperty("num_predict").GetInt32() != 128)
             throw new AgentHostException("provider-self-test-native-request-failed", "Native Ollama request did not constrain output to the current decision catalog.");
     }

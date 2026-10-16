@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.204'
+$contractVersion = '7.205'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -237,10 +237,12 @@ if ($harnessScript -notmatch "'AgentHostCampaignLoopEvaluation' \{ @\('Preflight
     $agentHostProviderSelfTestSource -notmatch 'VerifySharedDecisionCycleAsync\(settings, "foodOptions", "SupplySystemPrompt"') {
     throw 'The Host campaign loop must remain opt-in and prove its bounded Native map-arrival contract, natural time progression, real local-model path, visual evidence and cleanup.'
 }
-if ($harnessScript -notmatch "'AgentHostVillageToolsQuestEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostProvider', 'AgentHostVillageToolsQuestEvaluation'\) \}" -or
+if ($harnessScript -notmatch "'AgentHostVillageToolsQuestEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostVillageToolsQuestEvaluation'\) \}" -or
     -not $harnessScript.Contains('effectiveSmokeTimeoutSeconds = if ($Phase -eq ''AgentHostVillageToolsQuestEvaluation'') { [Math]::Max($SmokeTimeoutSeconds, 240) }') -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostVillageToolsQuestEvaluation'" -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'VerifyQuestInventoryDelta' -or
+    $agentHostVillageToolsQuestLoopSource -notmatch 'village-tools-direct-quest-option-unavailable' -or
+    $agentHostVillageToolsQuestLoopSource -notmatch 'village-tools-loop-self-test-alternative-only-stop-failed' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'inventoryVerifiedAfterTurnIn' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'native-quest-and-inventory-observed' -or
     $agentHostVillageToolsQuestPolicySource -notmatch 'village-tools-policy-self-test-quest-search-overreach' -or
@@ -278,8 +280,9 @@ if ($harnessScript -notmatch "'AgentHostVillageToolsQuestEvaluation' \{ @\('Pref
     $agentHostCampaignLoopEvaluationSource -notmatch 'VillageToolsQuestInventoryDeltaVerified') {
     throw 'The Host village-tools quest path must remain opt-in and verify the current visible quest, native actions and exact pre/post inventory deltas before allowing completion.'
 }
-if ($agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S]{0,700}\$env:CHRONICLE_LLM_TIMEOUT_SECONDS = ''360''') {
-    throw 'The real-model Village quest slice must use the same bounded 360-second FreeLLMAPI retry deadline as the Host provider, so a verified 315-second Retry-After can be honored end to end.'
+if ($agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S]{0,900}\$env:CHRONICLE_LLM_TIMEOUT_SECONDS = ''360''' -or
+    $agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S]{0,900}\$env:CHRONICLE_LLM_MAX_TOKENS = ''1024''') {
+    throw 'The real-model Village quest slice must retain the bounded 360-second FreeLLMAPI retry deadline and the empirically increased 1024-token output ceiling required after a 512-token structured response was truncated.'
 }
 if ($agentActionLoopSource -notmatch 'function Get-EffectiveActionCatalog' -or $agentActionLoopSource -notmatch 'recruit_volunteers' -or $agentActionLoopSource -notmatch 'rejected-before-native' -or $agentActionLoopSource -notmatch 'control-unavailable' -or $agentActionLoopSource -notmatch 'control-rejected-before-native' -or $nativeRejectedActionBranch -match '\$previousActionReceipt\s*=\s*\$actionResult' -or $nativeRejectedActionBranch -notmatch 'Keep the last completed Native receipt available' -or $agentDecisionLoopPolicySource -notmatch 'StoppablePlay' -or $agentDecisionLoopPolicySource -notmatch 'encounterActive' -or $agentDecisionLoopPolicySource -notmatch 'town_wait_menus' -or $agentDecisionLoopSource -notmatch 'Convert-ReceiptForDecision' -or $agentDecisionLoopSource -notmatch 'consecutiveDecisionRejections' -or $agentDecisionLoopSource -notmatch 'decisionRejected' -or $agentOpenAiProviderSource -notmatch 'decisionRejected' -or $agentOpenAiProviderSource -notmatch 'decisionFeedback' -or $agentOpenAiProviderTestSource -notmatch 'invalidActionDecision\.decisionRejected' -or $agentEvaluationRecruitmentBaselineProviderSource -notmatch 'recruitment actions leaked' -or $agentDecisionTestProviderSource -notmatch 'staleOfferRecovery' -or $agentDecisionTestProviderSource -notmatch 'unlistedResumeRecovery' -or $agentDecisionLoopTestSource -notmatch 'ObserveAgainPolicySeparatesNaturalTimeFromStoppedEncounter' -or $agentDecisionLoopTestSource -notmatch 'ObserveAgainCanMonitorAcceptedNativeTownWait' -or $agentDecisionLoopTestSource -notmatch 'StaleOfferRecoveryVerified' -or $agentDecisionLoopTestSource -notmatch 'StaleOfferBlockedWithoutNativeMutation' -or $agentDecisionLoopTestSource -notmatch 'UnlistedResumeRejectedWithoutNativeAction' -or $agentDecisionLoopTestSource -notmatch 'StaleObserveAgainRejectedWithoutNativeAction') { throw 'The Agent decision catalog must respect current Native entries, keep the last successful receipt after rejection, permit bounded observation of accepted Native Town Wait, reject waits while time is stopped/encountered, and bound recovery without Native mutation.' }
 if ($agentHostVillageToolsQuestPolicySource -notmatch 'QuoteMatchesBalancedDraft' -or
@@ -292,6 +295,7 @@ if ($agentHostVillageToolsQuestPolicySource -notmatch 'QuoteMatchesBalancedDraft
     $agentHostVillageToolsQuestLoopSource -notmatch 'village-tools-host-resolves-bandit-interruption-through-native-safe-passage-without-fight-or-clock-actions' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'questDetailsObservedForActiveQuest = false' -or
     $agentHostProviderSelfTestSource -notmatch 'decision-schema-constrains-current-native-string-and-integer-values' -or
+    $agentHostProviderSelfTestSource -notmatch 'provider-decision-schema-uses-strict-compatible-root-wrapper' -or
     $barterAdapterSource -notmatch 'BuildProposalFingerprint' -or
     $barterAdapterSource -notmatch 'expectedSessionId' -or
     $agentProtocolSource -notmatch 'expectedProposalFingerprint' -or
@@ -418,6 +422,7 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerProfileTestSource -notmatch 'freellmapi-bearer-auth-available-model-preflight-and-routed-model-evidence' -or
     $providerProfileTestSource -notmatch 'freellmapi-profile-uses-bounded-512-token-live-model-budget' -or
     $providerProfileTestSource -notmatch 'provider-action-rationale-is-optional-and-native-catalog-still-gates' -or
+    $providerHostSource -notmatch '\["anyOf"\]' -or $providerHostSource -match '\["oneOf"\]' -or
     $providerProfileTestSource -notmatch 'village-tools-prompt-uses-exact-native-action-id' -or
     $providerProfileTestSource -notmatch 'conversation is already open: never talk to that hero again' -or
     $providerProfileTestSource -notmatch 'only before a conversation is open, and only if talkToSettlementHero is currently listed' -or
@@ -446,7 +451,7 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerProfileTestSource -notmatch 'freellmapi-ovh-model-rate-window-is-route-specific' -or
     $providerProfileTestSource -notmatch 'max_tokens' -or
     $providerProfileTestSource -notmatch 'mistralRequestShapeValid' -or
-    $providerHostSource -notmatch 'IsMistralSmall32' -or $providerHostSource -notmatch 'GetMinimumRequestInterval' -or $providerHostSource -notmatch 'WaitForProviderRateWindowAsync' -or $providerHostSource -notmatch 'ShouldRetryTransientFreeLlmApiFailure' -or $providerHostSource -notmatch 'GetBoundedRateLimitRetryAfter' -or $providerHostSource -notmatch 'transientProviderRetriesUsed' -or $providerHostSource -notmatch 'retryDelaySeconds = transientProviderRetriesUsed == 0 \? 5 : 15' -or $providerHostSource -notmatch 'retryAfter=' -or $providerHostSource -notmatch 'failedRoute.Contains\("ovh/Mistral-Small"' -or $providerHostSource -notmatch 'payload.Remove\("max_completion_tokens"\)' -or
+    $providerHostSource -notmatch 'IsMistralSmall32' -or $providerHostSource -notmatch 'GetMinimumRequestInterval' -or $providerHostSource -notmatch 'WaitForProviderRateWindowAsync' -or $providerHostSource -notmatch 'ShouldRetryTransientFreeLlmApiFailure' -or $providerHostSource -notmatch 'GetBoundedRateLimitRetryAfter' -or $providerHostSource -notmatch 'transientProviderRetriesUsed' -or $providerHostSource -notmatch 'retryDelaySeconds = transientProviderRetriesUsed == 0 \? 5 : 15' -or $providerHostSource -notmatch 'retryAfter=' -or $providerHostSource -notmatch 'failedRoute.Contains\("ovh/Mistral-Small"' -or $providerHostSource -notmatch 'payload.Remove\("max_completion_tokens"\)' -or $providerHostSource -notmatch 'ReadIntegerEnvironment\("CHRONICLE_LLM_MAX_TOKENS", 1024, 64, 4096\)' -or
     $providerProfileTestSource -notmatch 'freellmapi-missing-key-fails-before-network-request' -or
     $providerSmokeSource -notmatch 'goalScopeClassificationRequired = \$true' -or
     $providerSmokeSource -notmatch 'supportedVillageToolsQuestGoal' -or
