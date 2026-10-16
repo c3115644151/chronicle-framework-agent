@@ -564,6 +564,8 @@ W7-K真实模型分类/入口复验：
 
 固定FreeLLMAPI `mistral-small-3.2-24b`的`TestResults/20261016-195123`在30分钟Harness时限内完成25次模型回复/26个决策/20个Native动作，共91,787输入/679输出token。所有Provider请求均成功，约1,744秒耗在模型往返；没有因路由/HTTP错误停止。实际完成Quest接受、Journal读取、萨哥特Trade无货后由模型调用`tradeCancel`、离开后通过Native地图目标和Move自然抵达另一Town；CampaignDay 91077.635→91078.588。第二个市场town_V6也无工具，模型在当前仅允许`tradeCancel`时尝试`observeAgain`；Host以通用控制拒绝后，模型没有足够剩余时间完成恢复/采购，30分钟上限以`TaskCanceledException`终止。任务未采购/交付；源档、派生档、游戏与CLI session清理通过，视频索引后删除。
 
+为让同一自治任务在原生可见世界中有时间搜索多个市场并回到委托人，已依据该运行将W7-K的AgentHost MCM请求、父循环、Quest子循环与真实Harness总时限从1800提高到3600秒；仍为100次模型决策上限、单请求360秒和可用Stop动作。`TestResults/20261016-211209`Docs与`TestResults/20261016-211314`AgentHostPackage通过并静态锁定四层上限一致；带3600秒预算的真实Campaign运行尚未完成。
+
 该真实控制错误促使空市场恢复条件覆盖`provider-action-unavailable`与`provider-control-unavailable`两种拒绝；仅当上一份成功Native`tradeOptions`后Journal仍显示有未交付工具，且唯一当前动作严格等于`tradeCancel`时，提示模型取消而非重复查询/等待；若剩余需求为0则不误导取消去找货。`TestResults/20261016-205258`的AgentHostPackage Provider自检通过，覆盖两类拒绝、任务剩余数量门控与Native零副作用；该最新控制提示还没有真实模型复测。
 
 Harness启动边界核验（`TestResults/20261016-061057`与`061235`）：前次Detached完整阶段在Smoke冷启动Steam时被“Unable to initialize Steam API”弹窗挡住，Module/Lifecycle未加载，不是任务代码崩溃；保留已有Steam进程后第二次Smoke正常加载Chronicle assembly和Campaign lifecycle，Harness还自动确认“mod change detected / deleting shader cache”提示，但普通`Smoke`的45秒启动门限在GameStart前超时（`CrashDetected=false`、`ProcessExitedUnexpectedly=false`、没有正式存档修改）。W7-K完整阶段配置240秒Smoke预算，不等于上述45秒单独Phase；下一次完整阶段应在当前Steam会话下验证这条启动链，而不是用单独Smoke超时判定失败。

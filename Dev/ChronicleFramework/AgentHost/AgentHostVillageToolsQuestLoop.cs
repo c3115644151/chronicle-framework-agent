@@ -274,7 +274,7 @@ internal static class AgentHostVillageToolsQuestLoop
         var goal = ReadString(request, "goal") ?? string.Empty;
         var maxDecisions = Math.Clamp(ReadInt(request, "maxDecisions", 100), 1, 100);
         var maxAdditionalDecisions = Math.Max(0, maxDecisions - priorDecisions);
-        var maxElapsedSeconds = Math.Clamp(ReadInt(request, "maxElapsedSeconds", 1800), 1, 1800);
+        var maxElapsedSeconds = Math.Clamp(ReadInt(request, "maxElapsedSeconds", 3600), 1, 3600);
         var actions = request.TryGetProperty("allowedActionNames", out var names) && names.ValueKind == JsonValueKind.Array
             ? names.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String).Select(item => item.GetString()!).ToHashSet(StringComparer.Ordinal)
             : new HashSet<string>(StringComparer.Ordinal);

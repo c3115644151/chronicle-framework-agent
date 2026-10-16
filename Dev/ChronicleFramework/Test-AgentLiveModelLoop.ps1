@@ -313,7 +313,7 @@ try {
     elseif ($VillageToolsQuestLoop) {
         $goal = '完成当前可见的村庄工具委托'
         $maxDecisions = 100
-        $maxElapsedSeconds = 1800
+        $maxElapsedSeconds = 3600
         $allowedActions = 'mapSettlementTargets,move,menuSelect,talkToSettlementHero,dialogueSelect,dialogueContinue,questDetails,tradeOptions,trade,tradeConfirm,tradeCancel,tradeCancelChanges,barterOptions,barterAutoBalance,barterOffer,barterCancel,inventoryOpen,heroEquipmentOptions,inventoryCancel'
         $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '360'
         $env:CHRONICLE_LLM_MAX_TOKENS = '1024'

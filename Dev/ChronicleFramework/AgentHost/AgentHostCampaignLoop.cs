@@ -164,7 +164,7 @@ internal static class AgentHostCampaignLoop
         var requestedActions = request.TryGetProperty("allowedActionNames", out var actionNames) && actionNames.ValueKind == JsonValueKind.Array
             ? actionNames.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String).Select(item => item.GetString()!).ToHashSet(StringComparer.Ordinal)
             : new HashSet<string>(StringComparer.Ordinal);
-        if (string.IsNullOrWhiteSpace(goal) || goal.Length > 1000 || maxDecisions is < 1 or > 100 || maxElapsedSeconds is < 1 or > 1800 ||
+        if (string.IsNullOrWhiteSpace(goal) || goal.Length > 1000 || maxDecisions is < 1 or > 100 || maxElapsedSeconds is < 1 or > 3600 ||
             !requestedActions.SetEquals(ApprovedActions))
             throw new AgentHostException("campaign-loop-request-invalid", "The Host requires a bounded goal and the approved map-arrival/village-tools Native action set.");
 
