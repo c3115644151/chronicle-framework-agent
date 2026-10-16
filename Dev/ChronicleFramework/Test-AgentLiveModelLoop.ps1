@@ -703,7 +703,7 @@ try {
 
     $null = Capture-EngineFrame 'LiveModelEngine-after'
     Write-LiveModelCaptureEvent 'capture-end' ([DateTime]::UtcNow.ToString('O')) 'capture' $null $finalObservation.state $null $capture
-    $captureResult = Stop-ChronicleWindowVideoCapture -Capture $capture -ContactSheetPath $contactSheetPath -EventTracePath $eventTracePath -KeepVideo
+    $captureResult = Stop-ChronicleWindowVideoCapture -Capture $capture -ContactSheetPath $contactSheetPath -EventTracePath $eventTracePath
     $capture = $null
 
     $liveModelTrace = [ordered]@{
@@ -766,7 +766,8 @@ try {
             EventTracePath = $eventTracePath
             EngineFrameBeforePath = $engineFrameBeforePath
             EngineFrameAfterPath = $engineFrameAfterPath
-            SourceVideoPath = $videoPath
+            SourceVideoPath = if ($captureResult.VideoRemovedAfterEvidence) { $null } else { $videoPath }
+            SourceVideoRemovedAfterKeyframes = [bool]$captureResult.VideoRemovedAfterEvidence
             SourceVideoSha256 = $captureResult.SourceVideoSha256
         }
         FixtureHashBefore = $fixtureHashBefore
@@ -849,7 +850,7 @@ catch {
 finally {
     if ($capture) {
         try {
-            $captureResult = Stop-ChronicleWindowVideoCapture -Capture $capture -ContactSheetPath $contactSheetPath -EventTracePath $eventTracePath -KeepVideo
+            $captureResult = Stop-ChronicleWindowVideoCapture -Capture $capture -ContactSheetPath $contactSheetPath -EventTracePath $eventTracePath
         }
         catch {
             [ordered]@{ stoppedUtc = (Get-Date).ToUniversalTime().ToString('O'); error = $_.Exception.Message; videoPath = $videoPath; eventTracePath = $eventTracePath } |
@@ -875,16 +876,9 @@ $processStopped = ([bool]$stop.processStopped -and -not (Test-Path -LiteralPath 
 $capturePassed = ($captureResult -and $captureResult.Passed -and [double]$captureResult.FrameCoverageRatio -ge 0.9 -and $captureResult.WindowTitle -match 'Bannerlord')
 $passed = (-not $failure -and $null -ne $liveModelTrace -and $fixtureUnchanged -and $processStopped -and $capturePassed)
 
-if ($passed -and (Test-Path -LiteralPath $videoPath -PathType Leaf)) {
-    Remove-Item -LiteralPath $videoPath -Force
-    if (Test-Path -LiteralPath $timelineIndexPath -PathType Leaf) {
-        $timelineIndex = Get-Content -LiteralPath $timelineIndexPath -Raw -Encoding UTF8 | ConvertFrom-Json
-        $timelineIndex.sourceClip.retained = $false
-        $timelineIndex.sourceClip.removedAfterEvidence = $true
-        $timelineIndex | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $timelineIndexPath -Encoding UTF8
-    }
-    if ($liveModelTrace.VisualEvidence) { $liveModelTrace.VisualEvidence.SourceVideoPath = $null; $liveModelTrace.VisualEvidence.SourceVideoRemovedAfterKeyframes = $true }
-    if ($captureResult) { $captureResult.VideoRetained = $false; $captureResult.VideoRemovedAfterEvidence = $true }
+if ($captureResult -and $captureResult.Passed -and $captureResult.VideoRemovedAfterEvidence -and $liveModelTrace.VisualEvidence) {
+    $liveModelTrace.VisualEvidence.SourceVideoPath = $null
+    $liveModelTrace.VisualEvidence.SourceVideoRemovedAfterKeyframes = $true
 }
 
 $result = [ordered]@{

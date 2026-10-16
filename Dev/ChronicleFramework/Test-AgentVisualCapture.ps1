@@ -98,7 +98,7 @@ finally {
     if ($capture -and $capture.Process -and -not $capture.Process.HasExited) {
         try {
             $partialContactPath = Join-Path $runDirectory 'CampaignWindow-partial-contact.jpg'
-            $partialResult = Stop-ChronicleWindowVideoCapture -Capture $capture -ContactSheetPath $partialContactPath -EventTracePath $eventTracePath -KeepVideo
+            $partialResult = Stop-ChronicleWindowVideoCapture -Capture $capture -ContactSheetPath $partialContactPath -EventTracePath $eventTracePath
             $partialResult | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $runDirectory 'CampaignWindow-partial.json') -Encoding UTF8
         }
         catch {

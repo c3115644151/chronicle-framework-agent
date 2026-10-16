@@ -103,7 +103,7 @@ function Write-ResumeEvent([string]$Path, [string]$Name, [string]$Utc, [string]$
 
 function Stop-CaptureIfRunning($Capture, $ContactSheet, $Events) {
     if (-not $Capture) { return $null }
-    return Stop-ChronicleWindowVideoCapture -Capture $Capture -ContactSheetPath $ContactSheet -EventTracePath $Events -KeepVideo
+    return Stop-ChronicleWindowVideoCapture -Capture $Capture -ContactSheetPath $ContactSheet -EventTracePath $Events
 }
 
 try {
@@ -278,20 +278,6 @@ $runtimeRunIdChanged = if ($CrashAfterRecruit) { ($firstCrashExitCode -eq 93 -an
 $runtimeBoundaryVerified = if ($RuntimeOnlyResume -or $CrashAfterRecruit) { ([int]$start.session.processId -eq [int]$resumeStart.session.processId -and $runtimeRunIdChanged) } else { $true }
 $firstSegmentVerified = if ($CrashAfterRecruit) { ($firstCrashExitCode -eq 93 -and $crashAfterRecruitVerified) } else { $null -ne $firstLoopTrace }
 $passed = (-not $failure -and $firstSegmentVerified -and $resumeLoopTrace -and $sourceFixtureUnchanged -and $processStopped -and $firstCapturePassed -and $secondCapturePassed -and $goalRestored -and $moveNotRepeated -and $recruitmentVerified -and $runtimeBoundaryVerified)
-
-foreach ($clip in @(@{ Video = $firstVideo; Index = $firstTimeline; Capture = $firstCaptureResult }, @{ Video = $secondVideo; Index = $secondTimeline; Capture = $secondCaptureResult })) {
-    if ($passed -and $clip.Capture -and (Test-Path -LiteralPath $clip.Video -PathType Leaf)) {
-        Remove-Item -LiteralPath $clip.Video -Force
-        if (Test-Path -LiteralPath $clip.Index -PathType Leaf) {
-            $index = Get-Content -LiteralPath $clip.Index -Raw -Encoding UTF8 | ConvertFrom-Json
-            $index.sourceClip.retained = $false
-            $index.sourceClip.removedAfterEvidence = $true
-            $index | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $clip.Index -Encoding UTF8
-        }
-        $clip.Capture.VideoRetained = $false
-        $clip.Capture.VideoRemovedAfterEvidence = $true
-    }
-}
 
 if (Test-Path -LiteralPath $resumeSavePath -PathType Leaf) {
     $saveRootFull = [IO.Path]::GetFullPath($saveRoot).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar

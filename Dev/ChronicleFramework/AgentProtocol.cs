@@ -11,6 +11,7 @@ using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.CampaignSystem.GameState;
 using TaleWorlds.CampaignSystem.GameMenus;
+using TaleWorlds.CampaignSystem.Issues;
 using TaleWorlds.CampaignSystem.MapEvents;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
@@ -64,6 +65,7 @@ internal sealed class ChronicleAgentProtocol
     private const float MissionSceneAgentsObservationLeaseSeconds = 60f;
     private const int LeaveAreaGameKeyId = 4;
     private const float LeaveAreaHoldSeconds = 2.5f;
+    private const long MaxProtocolEventLogBytes = 16L * 1024 * 1024;
     private Mission _missionLeaveMission;
     private IInputContext _missionLeaveOriginalInputContext;
     private ChronicleMissionLeaveInputContext _missionLeaveInputContext;
@@ -81,6 +83,9 @@ internal sealed class ChronicleAgentProtocol
         _responseRoot = Path.Combine(_root, "responses");
         Directory.CreateDirectory(_root);
         Directory.CreateDirectory(_responseRoot);
+        var eventLogPath = Path.Combine(_root, "events.jsonl");
+        if (File.Exists(eventLogPath) && new FileInfo(eventLogPath).Length > MaxProtocolEventLogBytes)
+            File.WriteAllText(eventLogPath, string.Empty, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
         if (Environment.GetEnvironmentVariable("CHRONICLE_FRESH_CAMPAIGN_SKIP_ISSUE_PROBE") == "1")
             ChronicleDiagnostics.Write($"fresh-progression-protocol-created|root={_root}");
     }
@@ -432,7 +437,7 @@ internal sealed class ChronicleAgentProtocol
                         throw new InvalidOperationException("harnessMapDiagnostics is restricted to a visual Harness run with a Harness temp directory");
                     if (Game.Current?.GameStateManager?.ActiveState is not MapState)
                         throw new InvalidOperationException("harnessMapDiagnostics requires the Campaign Map state");
-                    WriteResponse(commandId, action, "completed", behavior, null, BuildHarnessMapDiagnosticsJson());
+                    WriteResponse(commandId, action, "completed", behavior, null, BuildHarnessMapDiagnosticsJson(ReadString(command, "heroId")));
                     break;
                 case "harnessOpenMapEscapeMenu":
                     var escapeFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
@@ -1689,7 +1694,7 @@ internal sealed class ChronicleAgentProtocol
         return json.ToString();
     }
 
-    private static string BuildHarnessMapDiagnosticsJson()
+    private static string BuildHarnessMapDiagnosticsJson(string targetHeroId = null)
     {
         var activeMapState = Game.Current?.GameStateManager?.ActiveState as MapState;
         var escapeMenuOpen = MapScreen.Instance?.IsEscapeMenuOpened ?? false;
@@ -1718,7 +1723,44 @@ internal sealed class ChronicleAgentProtocol
             json.Append(",\"isInspected\":").Append(settlement.IsInspected ? "true" : "false");
             json.Append('}');
         }
-        json.Append("]}");
+        json.Append("],\"issueGateProbe\":");
+        if (string.IsNullOrWhiteSpace(targetHeroId))
+        {
+            json.Append("null");
+        }
+        else
+        {
+            var targetHero = Hero.AllAliveHeroes.FirstOrDefault(hero => hero != null && string.Equals(hero.StringId, targetHeroId, StringComparison.Ordinal));
+            var targetIssue = targetHero?.Issue;
+            var sameTypeIssues = targetIssue == null
+                ? Array.Empty<KeyValuePair<Hero, IssueBase>>()
+                : Campaign.Current.IssueManager.Issues.Where(pair => pair.Value != null && pair.Value.GetType() == targetIssue.GetType()).OrderBy(pair => pair.Key?.StringId, StringComparer.Ordinal).ToArray();
+            json.Append('{');
+            json.Append("\"targetHeroId\":\"").Append(Escape(targetHeroId)).Append('"');
+            json.Append(",\"targetHeroFound\":").Append(ChroniclePartyUpgradeAdapter.Bool(targetHero != null));
+            json.Append(",\"targetHasIssue\":").Append(ChroniclePartyUpgradeAdapter.Bool(targetIssue != null));
+            json.Append(",\"targetIssueType\":\"").Append(Escape(targetIssue?.GetType().FullName)).Append('"');
+            json.Append(",\"targetIssueId\":\"").Append(Escape(targetIssue?.StringId)).Append('"');
+            json.Append(",\"relationToPlayer\":").Append(targetHero == null ? "null" : targetHero.GetRelationWithPlayer().ToString("R", CultureInfo.InvariantCulture));
+            json.Append(",\"atWarWithPlayerFaction\":").Append(ChroniclePartyUpgradeAdapter.Bool(targetHero?.MapFaction != null && targetHero.MapFaction.IsAtWarWith(Hero.MainHero.MapFaction)));
+            json.Append(",\"sameTypeIssueCount\":").Append(sameTypeIssues.Length);
+            json.Append(",\"sameTypeIssues\":[");
+            for (var index = 0; index < sameTypeIssues.Length; index++)
+            {
+                if (index > 0) json.Append(',');
+                var pair = sameTypeIssues[index];
+                json.Append('{');
+                json.Append("\"ownerHeroId\":\"").Append(Escape(pair.Key?.StringId)).Append('"');
+                json.Append(",\"issueId\":\"").Append(Escape(pair.Value.StringId)).Append('"');
+                json.Append(",\"isOngoingWithoutQuest\":").Append(ChroniclePartyUpgradeAdapter.Bool(pair.Value.IsOngoingWithoutQuest));
+                json.Append(",\"isSolvingWithQuest\":").Append(ChroniclePartyUpgradeAdapter.Bool(pair.Value.IsSolvingWithQuest));
+                json.Append(",\"isSolvingWithAlternative\":").Append(ChroniclePartyUpgradeAdapter.Bool(pair.Value.IsSolvingWithAlternative));
+                json.Append(",\"isSolvingWithLord\":").Append(ChroniclePartyUpgradeAdapter.Bool(pair.Value.IsSolvingWithLordSolution));
+                json.Append('}');
+            }
+            json.Append("]}");
+        }
+        json.Append('}');
         return json.ToString();
     }
 
@@ -2561,7 +2603,7 @@ internal sealed class ChronicleAgentProtocol
             {
                 if (File.Exists(responsePath)) File.Delete(responsePath);
                 File.Move(temporaryPath, responsePath);
-                File.AppendAllText(Path.Combine(_root, "events.jsonl"), response + Environment.NewLine);
+                AppendBoundedProtocolEventLog(response);
                 return;
             }
             catch (IOException) when (attempt < 4)
@@ -2569,6 +2611,16 @@ internal sealed class ChronicleAgentProtocol
                 System.Threading.Thread.Sleep(20);
             }
         }
+    }
+
+    private void AppendBoundedProtocolEventLog(string response)
+    {
+        var path = Path.Combine(_root, "events.jsonl");
+        var incomingBytes = Encoding.UTF8.GetByteCount(response) + Encoding.UTF8.GetByteCount(Environment.NewLine);
+        var currentBytes = File.Exists(path) ? new FileInfo(path).Length : 0L;
+        if (currentBytes + incomingBytes > MaxProtocolEventLogBytes)
+            File.WriteAllText(path, string.Empty, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        File.AppendAllText(path, response + Environment.NewLine, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
     }
 
     private static string SanitizeFileName(string value)

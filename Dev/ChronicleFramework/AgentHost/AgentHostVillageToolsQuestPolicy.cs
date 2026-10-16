@@ -355,11 +355,28 @@ internal static class AgentHostVillageToolsQuestPolicy
         var initialIssueDialogueSelect = initialIssueConversationCatalog.OfType<JsonObject>().FirstOrDefault(item => ReadString(item, "action") == "dialogueSelect");
         var initialIssueOptionIds = (initialIssueDialogueSelect?["argumentValues"]?["OptionId"] as JsonArray)?.Select(item => item?.GetValue<string>()).ToArray() ?? Array.Empty<string?>();
         if (!initialIssueOptionIds.Contains("issue_explanation_player_response_pre_quest_solution", StringComparer.Ordinal) ||
-            initialIssueOptionIds.Contains("issue_alternative_solution_player_response", StringComparer.Ordinal) ||
+            !initialIssueOptionIds.Contains("issue_alternative_solution_player_response", StringComparer.Ordinal) ||
             !TryResolveAction(initialIssueConversation, null, new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "issue_explanation_player_response_pre_quest_solution" } }, out _, out _, out _) ||
-            TryResolveAction(initialIssueConversation, null, new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "issue_alternative_solution_player_response" } }, out _, out _, out _))
-            throw new AgentHostException("village-tools-policy-self-test-alternative-solution-out-of-scope", "The single-task quest slice must expose the direct VillageNeedsTools quest route and reject the distinct Alternative Solution path requiring companion/men delegation.");
-        results.Add(new { scenario = "village-tools-policy-excludes-alternative-solution-branch", passed = true });
+            !TryResolveAction(initialIssueConversation, null, new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "issue_alternative_solution_player_response" } }, out _, out _, out _))
+            throw new AgentHostException("village-tools-policy-self-test-alternative-explanation-navigation-blocked", "The Native response that opens the Alternative Solution explanation must remain navigable; it does not itself accept or dispatch that outcome.");
+        results.Add(new { scenario = "village-tools-policy-allows-native-alternative-explanation-navigation", passed = true });
+
+        var finalIssueOfferConversation = State("MapState", "village", "village-1", overlay: overlay, conversation: new JsonObject
+        {
+            ["options"] = new JsonArray(
+                new JsonObject { ["id"] = "issue_offer_player_accept_quest", ["text"] = "I can handle this myself.", ["clickable"] = true },
+                new JsonObject { ["id"] = "issue_offer_player_accept_alternative", ["text"] = "My men will deliver it.", ["clickable"] = true },
+                new JsonObject { ["id"] = "issue_offer_player_response_reject", ["text"] = "Sorry, not now.", ["clickable"] = true })
+        });
+        var finalIssueOfferCatalog = BuildActionCatalog(finalIssueOfferConversation, null);
+        var finalIssueOfferSelect = finalIssueOfferCatalog.OfType<JsonObject>().FirstOrDefault(item => ReadString(item, "action") == "dialogueSelect");
+        var finalIssueOfferIds = (finalIssueOfferSelect?["argumentValues"]?["OptionId"] as JsonArray)?.Select(item => item?.GetValue<string>()).ToArray() ?? Array.Empty<string?>();
+        if (!finalIssueOfferIds.Contains("issue_offer_player_accept_quest", StringComparer.Ordinal) ||
+            !finalIssueOfferIds.Contains("issue_offer_player_response_reject", StringComparer.Ordinal) ||
+            finalIssueOfferIds.Contains("issue_offer_player_accept_alternative", StringComparer.Ordinal) ||
+            TryResolveAction(finalIssueOfferConversation, null, new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "issue_offer_player_accept_alternative" } }, out _, out _, out _))
+            throw new AgentHostException("village-tools-policy-self-test-final-alternative-outcome-not-blocked", "At the final Native Issue offer, the standard Quest and rejection options may be used, but the companion/men Alternative acceptance must remain unavailable.");
+        results.Add(new { scenario = "village-tools-policy-allows-direct-quest-and-reject-but-blocks-alternative-acceptance", passed = true });
 
         var acceptedVillageMenu = State("MapState", "village", "village-1", quests: new JsonArray(new JsonObject { ["id"] = "quest-tools", ["title"] = "Village Needs Tools" }));
         acceptedVillageMenu["state"]!["nearbySettlements"] = new JsonArray(new JsonObject { ["id"] = "village-1", ["type"] = "village" });
@@ -1028,21 +1045,21 @@ internal static class AgentHostVillageToolsQuestPolicy
     {
         var options = (conversation["options"] as JsonArray)?.OfType<JsonObject>()
             .Where(option => IsTrue(option, "clickable"))
-            .Where(option => !IsUnsupportedAlternativeSolutionEntry(option))
+            .Where(option => !IsOutOfScopeIssueOutcomeOption(option))
             .ToArray() ?? Array.Empty<JsonObject>();
         if (!HasActiveToolsQuest(state) || IsToolsTaskSatisfied(questDetailsReceipt ?? previousReceipt)) return options;
         return options.Where(IsConversationLeaveOption).ToArray();
     }
 
-    internal static bool IsOnlyOutOfScopeAlternativeOption(JsonObject? conversation)
+    internal static bool HasOnlyOutOfScopeIssueOutcomeOptions(JsonObject? conversation)
     {
         var clickableOptions = (conversation?["options"] as JsonArray)?.OfType<JsonObject>()
             .Where(option => IsTrue(option, "clickable")).ToArray() ?? Array.Empty<JsonObject>();
-        return clickableOptions.Length > 0 && clickableOptions.All(IsUnsupportedAlternativeSolutionEntry);
+        return clickableOptions.Length > 0 && clickableOptions.All(IsOutOfScopeIssueOutcomeOption);
     }
 
-    private static bool IsUnsupportedAlternativeSolutionEntry(JsonObject option) =>
-        ReadString(option, "id") == "issue_alternative_solution_player_response";
+    private static bool IsOutOfScopeIssueOutcomeOption(JsonObject option) =>
+        ReadString(option, "id") is "issue_offer_player_accept_alternative" or "issue_offer_player_accept_lord";
 
     private static bool HasClickableConversationOptions(JsonObject conversation) =>
         (conversation["options"] as JsonArray)?.OfType<JsonObject>().Any(option => IsTrue(option, "clickable")) == true;

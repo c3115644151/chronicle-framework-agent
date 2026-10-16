@@ -428,7 +428,7 @@ finally {
         try {
             . (Join-Path $PSScriptRoot 'HarnessVideoCapture.ps1')
             $partialContactPath = Join-Path $runDirectory 'BattleToLoot-partial-contact.jpg'
-            $partialVideoResult = Stop-ChronicleWindowVideoCapture -Capture $script:VideoCapture -ContactSheetPath $partialContactPath -EventTracePath $script:VideoCaptureEventsPath -KeepVideo
+            $partialVideoResult = Stop-ChronicleWindowVideoCapture -Capture $script:VideoCapture -ContactSheetPath $partialContactPath -EventTracePath $script:VideoCaptureEventsPath
             $partialVideoResult | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $runDirectory 'BattleToLoot-partial.json') -Encoding UTF8
         }
         catch {

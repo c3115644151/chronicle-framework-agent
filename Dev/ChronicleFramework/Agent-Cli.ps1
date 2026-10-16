@@ -457,7 +457,7 @@ switch ($Action) {
         $result = Invoke-ProtocolCommand 'spendSkillFocus' @{ skillId = $SkillId; count = $Count }
     }
     'harnessMissionDiagnostics' { $result = Invoke-ProtocolCommand 'harnessMissionDiagnostics' }
-    'harnessMapDiagnostics' { $result = Invoke-ProtocolCommand 'harnessMapDiagnostics' }
+    'harnessMapDiagnostics' { $result = Invoke-ProtocolCommand 'harnessMapDiagnostics' @{ heroId = $HeroId } }
     'harnessOpenMapEscapeMenu' { $result = Invoke-ProtocolCommand 'harnessOpenMapEscapeMenu' }
     'harnessOpenNativeInquiry' { $result = Invoke-ProtocolCommand 'harnessOpenNativeInquiry' }
     'harnessOpenRecruitmentInquiry' {

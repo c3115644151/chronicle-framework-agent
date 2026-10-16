@@ -169,8 +169,7 @@ function Stop-ChronicleWindowVideoCapture {
     param(
         [Parameter(Mandatory = $true)]$Capture,
         [Parameter(Mandatory = $true)][string]$ContactSheetPath,
-        [Parameter(Mandatory = $true)][string]$EventTracePath,
-        [switch]$KeepVideo
+        [Parameter(Mandatory = $true)][string]$EventTracePath
     )
 
     $process = $Capture.Process
@@ -260,7 +259,7 @@ function Stop-ChronicleWindowVideoCapture {
     $sourceVideoHash = (Get-FileHash -LiteralPath $Capture.OutputPath -Algorithm SHA256).Hash
     $sourceClipName = [IO.Path]::GetFileName($Capture.OutputPath)
     $timelineIndex = [ordered]@{
-        sourceClip = [ordered]@{ fileName = $sourceClipName; sha256 = $sourceVideoHash; retained = [bool]$KeepVideo; removedAfterEvidence = (-not $KeepVideo) }
+        sourceClip = [ordered]@{ fileName = $sourceClipName; sha256 = $sourceVideoHash; retained = $false; removedAfterEvidence = $true }
         contactSheetPath = $ContactSheetPath
         eventTracePath = $EventTracePath
         timelineFramesDirectory = if ($timelineSelections.Count -gt 0) { $timelineDirectory } else { $null }
@@ -268,7 +267,7 @@ function Stop-ChronicleWindowVideoCapture {
         selections = $timelineSelections
     }
     $timelineIndex | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $timelineIndexPath -Encoding UTF8
-    if (-not $KeepVideo) { Remove-Item -LiteralPath $Capture.OutputPath -Force }
+    Remove-Item -LiteralPath $Capture.OutputPath -Force
 
     [pscustomobject]@{
         Passed = $true
@@ -293,8 +292,8 @@ function Stop-ChronicleWindowVideoCapture {
         StopwatchFrequency = $Capture.StopwatchFrequency
         SourceVideoName = $sourceClipName
         SourceVideoSha256 = $sourceVideoHash
-        VideoRetained = [bool]$KeepVideo
-        VideoRemovedAfterEvidence = (-not $KeepVideo)
+        VideoRetained = $false
+        VideoRemovedAfterEvidence = $true
         ContactSheetPath = $ContactSheetPath
         TimelineIndexPath = $timelineIndexPath
         TimelineFrameCount = $timelineSelections.Count * 3

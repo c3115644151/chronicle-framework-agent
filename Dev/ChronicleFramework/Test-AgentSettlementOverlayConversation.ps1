@@ -6,7 +6,7 @@ param(
     [string]$ApproachSettlementId = 'town_V1',
     [ValidateSet('QuickTalk', 'Visit')]
     [string]$InteractionMode = 'Visit',
-    [ValidateSet('ConversationOnly', 'QuestAccepted', 'NativePreconditionBlocked')]
+    [ValidateSet('ConversationOnly', 'QuestAccepted', 'NativePreconditionBlocked', 'IssueGateProbe')]
     [string]$ExpectedOutcome = 'ConversationOnly',
     [switch]$ValidateQuestDetails
 )
@@ -92,7 +92,8 @@ try {
     if ($move.status -ne 'completed' -or $move.state.location.targetSettlementId -ne $TargetSettlementId) { throw "Native Campaign movement did not accept observed settlement target '$TargetSettlementId'." }
     $routeTrace += [ordered]@{ Step = 'moveToObservedTarget'; SettlementId = $TargetSettlementId; CampaignDay = $initial.campaignDay }
     $arrived = Wait-ForSettlementMenu $TargetSettlementId
-    if ($arrived.state.schemaVersion -ne 21) { throw "Settlement overlay observation schema changed unexpectedly: $($arrived.state.schemaVersion)." }
+    $arrivedStateProperties = @($arrived.state.PSObject.Properties.Name)
+    if ('settlementOverlayCharacters' -notin $arrivedStateProperties -or 'availableMenuOptions' -notin $arrivedStateProperties) { throw "Settlement overlay observation is missing the fields this test consumes (schema $($arrived.state.schemaVersion))." }
 
     $overlayCharacters = @($arrived.state.settlementOverlayCharacters)
     $issueCandidates = @()
@@ -129,6 +130,7 @@ try {
     $questOfferObserved = $false
     $questAccepted = $false
     $questBlockedReason = $null
+    $nativeIssueGateDiagnostics = $null
     $dialogueTrace = @()
     if ($ExpectedOutcome -ne 'ConversationOnly' -and $conversationStartedForTarget) {
         for ($step = 1; $step -le 10; $step++) {
@@ -140,6 +142,7 @@ try {
             $questAcceptOption = @($currentOptions | Where-Object { $_.id -eq 'issue_offer_player_accept_quest' } | Select-Object -First 1)
             if ($questAcceptOption.Count -eq 1) {
                 $questOfferObserved = $true
+                if ($ExpectedOutcome -eq 'IssueGateProbe') { $questBlockedReason = 'Native direct Issue Quest acceptance is available; diagnostic probe stopped before accepting it.'; break }
                 if (-not $questAcceptOption[0].clickable) { $questBlockedReason = 'The native Issue Quest acceptance option is present but not clickable.'; break }
                 $selectedOption = 'issue_offer_player_accept_quest'
             }
@@ -178,8 +181,11 @@ try {
         }
         if (-not $questAccepted -and -not $questBlockedReason) { $questBlockedReason = 'The safe native Issue Quest dialogue path reached its 10-step Harness limit.' }
     }
+    if ($ExpectedOutcome -eq 'IssueGateProbe' -and $InteractionMode -eq 'QuickTalk' -and $conversationStartedForTarget -and $postTalk.state.context.gameState -eq 'MapState') {
+        $nativeIssueGateDiagnostics = Invoke-AgentCli 'harnessMapDiagnostics' @('-HeroId', $targetHeroId, '-CommandId', "$commandPrefix-issue-gate-probe") 30
+    }
     $quickTalkReturnedToSettlementMenu = $false
-    if ($InteractionMode -eq 'QuickTalk' -and $conversationStartedForTarget) {
+    if ($InteractionMode -eq 'QuickTalk' -and $ExpectedOutcome -ne 'IssueGateProbe' -and $conversationStartedForTarget) {
         for ($quickStep = 1; $quickStep -le 10; $quickStep++) {
             $activeQuickConversation = $postTalk.state.context.conversation
             if (-not $activeQuickConversation) { break }
@@ -311,6 +317,7 @@ try {
         QuestOfferObserved = $questOfferObserved
         QuestAccepted = $questAccepted
         QuestBlockedReason = $questBlockedReason
+        NativeIssueGateDiagnostics = if ($nativeIssueGateDiagnostics) { $nativeIssueGateDiagnostics.data.issueGateProbe } else { $null }
         QuestDetails = if ($questDetailsReceipt) { $questDetailsReceipt.data } else { $null }
         QuestDetailsNativeDiagnostics = if ($questDetailsNative) { $questDetailsNative.data } else { $null }
         UnobservedQuestDetailsStatus = if ($questDetailsUnknown) { $questDetailsUnknown.status } else { $null }
@@ -339,8 +346,9 @@ try {
         'ConversationOnly' { $true }
         'QuestAccepted' { [bool]$questAccepted }
         'NativePreconditionBlocked' { [bool]$result.NativePreconditionBlocked }
+        'IssueGateProbe' { [bool]($null -ne $nativeIssueGateDiagnostics -and $result.NativeIssueGateDiagnostics.targetHeroFound -and $result.NativeIssueGateDiagnostics.targetHasIssue -and -not [string]::IsNullOrWhiteSpace([string]$result.NativeIssueGateDiagnostics.targetIssueType) -and [int]$result.NativeIssueGateDiagnostics.sameTypeIssueCount -ge 1 -and $questOfferObserved -and @($conversation.options | Where-Object { $_.id -eq 'issue_offer_player_accept_quest' -and $_.clickable }).Count -eq 1 -and -not $questAccepted) }
     }
-    $interactionReturnValidated = ($InteractionMode -ne 'QuickTalk' -or $quickTalkReturnedToSettlementMenu)
+    $interactionReturnValidated = ($ExpectedOutcome -eq 'IssueGateProbe' -or $InteractionMode -ne 'QuickTalk' -or $quickTalkReturnedToSettlementMenu)
     $clockAssertionValid = ($InteractionMode -eq 'QuickTalk' -or $result.CampaignClockUnchangedDuringSceneEntry)
     $result.Passed = ($talk.status -eq 'completed' -and $initialConversationHeroMatchesTarget -and $interactionReturnValidated -and $result.ExpectedOutcomeMet -and $result.QuestUnchanged -eq (-not $questAccepted) -and $clockAssertionValid -and (-not $ValidateQuestDetails -or $questDetailsValidated) -and $screenshotValid -and $result.FixtureUnchanged -and $result.ProcessStopped -and [int]$result.TestMaximumFramerate -eq 30 -and $result.EngineConfigRestored)
     $resultJson = $result | ConvertTo-Json -Depth 18
