@@ -39,6 +39,8 @@ W7-K完整阶段不再先额外运行一次真实模型冒烟：同一免费路�
 
 `TestResults/20261016-163619`是无游戏Provider冒烟：FreeLLMAPI固定路由`qwen2.5-vl-72b`返回Production目标分类，实际由`ovh/Qwen2.5-VL-72B-Instruct`处理，JSON Schema模式416输入/28输出token、0 Native命令。这只证实一次短分类调用成功，不代表长程Quest稳定；下一次真实任务切片固定此直接路由，减少`auto`在多供应商之间切换带来的变量。
 
+`TestResults/20261016-192233`重跑W7-K真实FreeLLMAPI场景时，Harness正常完成Preflight/Build/Smoke/AgentHostPackage，生成自然可见的工具Quest夹具；模型成功分类后调用`talkToSettlementHero`，Native打开对话，当前可见的是NPC首次见面提问与三项自我介绍回复，尚未显示Quest接取选项。随后实际路由`custom/nvidia/llama-3.2-11b-vision`返回HTTP 502，只有2次成功模型回复/1条Native动作、3,615输入/54输出token，CampaignDay保持91077.635，Quest仍未接受；完整联系表和时间线已生成，MP4自动删除，源档/派生档/进程/session清理通过。该运行没有走到无货市场恢复，不能判定新提示效果；失败发生于Provider调用，不是对话动作的Native拒绝。
+
 当`AgentHostCampaignLoop`分类为VillageTools目标并交接给专用Quest loop时，子循环的终态收据必须合并父循环的classifier trace、provider route、token与全局decision编号；不能只显示子循环，遗漏真正的首个模型调用。Provider包回归用合成父收据验证跨循环历史保持，外部模型/Native调用均为0。
 
 W7-K只覆盖标准`VillageNeedsToolsIssueQuest`交付路径。1.4.8 Native先让玩家进入一段说明“让同伴/手下运送”的Alternative Solution对话入口，再在下一屏展示任务接受结果；`issue_alternative_solution_player_response`本身不接受、也不派出任何人。Agent可走这段说明以抵达原版最终选择，但只允许标准`issue_offer_player_accept_quest`，禁止`issue_offer_player_accept_alternative`和`issue_offer_player_accept_lord`。若最终页没有可点的标准Quest选项，应停止并保留证据，不选择别的结果。
