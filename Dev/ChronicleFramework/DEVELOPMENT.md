@@ -35,6 +35,8 @@ W7-K完整阶段不再先额外运行一次真实模型冒烟：同一免费路�
 
 `TestResults/20261016-140206`（commit `76a30ea`，FreeLLMAPI `auto`）真实模型成功接取`issue_64_quest`并读Journal。它自然抵达萨哥特并打开原版Trade：当前`tradeOptions`目标工具报价为0、Gold 920、尚无交易提交；下一次模型请求收到无Retry-After的HTTP429，未能决定取消或搜索另一个市场。19次决策、14个Native动作、16次成功回复，累计55,408输入/887输出token；CampaignDay 91077.635→91077.879，Quest仍活动、源档不变，游戏与临时存档清理。contact/timeline完整并已删MP4，共享events.jsonl约0.4MB。该结果验证说明页修复后真实模型接任务并抵达Trade界面，但缺货恢复和采购/交付仍未完成；429是Provider限流中断，不是Native交易适配失败。
 
+`TestResults/20261016-163619`是无游戏Provider冒烟：FreeLLMAPI固定路由`qwen2.5-vl-72b`返回Production目标分类，实际由`ovh/Qwen2.5-VL-72B-Instruct`处理，JSON Schema模式416输入/28输出token、0 Native命令。这只证实一次短分类调用成功，不代表长程Quest稳定；下一次真实任务切片固定此直接路由，减少`auto`在多供应商之间切换带来的变量。
+
 当`AgentHostCampaignLoop`分类为VillageTools目标并交接给专用Quest loop时，子循环的终态收据必须合并父循环的classifier trace、provider route、token与全局decision编号；不能只显示子循环，遗漏真正的首个模型调用。Provider包回归用合成父收据验证跨循环历史保持，外部模型/Native调用均为0。
 
 W7-K只覆盖标准`VillageNeedsToolsIssueQuest`交付路径。1.4.8 Native先让玩家进入一段说明“让同伴/手下运送”的Alternative Solution对话入口，再在下一屏展示任务接受结果；`issue_alternative_solution_player_response`本身不接受、也不派出任何人。Agent可走这段说明以抵达原版最终选择，但只允许标准`issue_offer_player_accept_quest`，禁止`issue_offer_player_accept_alternative`和`issue_offer_player_accept_lord`。若最终页没有可点的标准Quest选项，应停止并保留证据，不选择别的结果。
@@ -268,6 +270,8 @@ Mod 内状态、命令与事件遥测
 2. 进程、日志和存档；
 3. Mod 内遥测与白名单命令；
 4. 只读窗口截图，仅在不激活/不前置游戏窗口且确有视觉诊断需要时使用。
+
+TestResults保留可复查的run收据、Native/模型trace、contact sheet、timeline index、事件关键帧与失败帧；原始MP4只是采集暂存。录像完整解码并完成接触表/索引后，无论玩法断言通过或失败都删除原MP4；采集/解码/索引未完成的片段暂留供恢复，恢复出图像证据后删除。共享`AgentRuns/ChronicleAgent/events.jsonl`单文件上限16MiB，超限从新事件重新开始；每轮完整trace另存于TestResults。2026-10-16审计旧目录约9.65GiB：218个MP4约5.34GiB，其中187个约4.33GiB已有contact/timeline可清理，31个约1.14GiB缺后处理证据，不自动删。旧MP4批量清理被本地文件操作安全策略拒绝，故历史积压尚未删除；新规则阻止继续增长。
 
 TestResults保留可复查的run收据、Native/模型trace、contact sheet、timeline index、事件关键帧与失败帧；原始MP4只是采集暂存。录像完整解码并完成接触表/索引后，无论玩法断言通过还是失败都删除原MP4；采集/解码/索引未完成的片段暂留供恢复，后处理完成后再删除。共享`AgentRuns/ChronicleAgent/events.jsonl`单文件上限16MiB，超限从新事件重新开始；完整逐轮trace仍留在所属TestResults。2026-10-16审计旧目录约9.65GiB：218个MP4约5.34GiB，其中187个约4.33GiB已有contact/timeline可清理，31个约1.14GiB缺后处理证据，不自动删。工具安全策略拒绝执行批量历史MP4删除，故旧积压尚未清理；新规则阻止继续增长。
 

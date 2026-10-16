@@ -552,6 +552,8 @@ W7-K真实模型分类/入口复验：
 
 `TestResults/20261016-140206`真实FreeLLMAPI `auto`模型在19次决策/14个Native动作后接受`issue_64_quest`、读Journal、自然到达萨哥特并打开Native Trade。`tradeOptions`显示目标工具报价为0、Gold 920、无交易提交；下一次模型请求收到无Retry-After的HTTP429，尚未决定取消或搜索其他市场。16次成功回复累计55,408输入/887输出token；Quest仍活动、CampaignDay 91077.635→91077.879、源fixture/游戏清理通过，contact/timeline完整且MP4删除。这个结果证明委托接受、地图移动和交易入口原生可达，但未完成缺货恢复/采购/交付；该轮因Provider限流停止。
 
+`TestResults/20261016-163619`无游戏FreeLLMAPI Provider冒烟固定`qwen2.5-vl-72b`，实际路由`ovh/Qwen2.5-VL-72B-Instruct`，JSON Schema输出完成目标分类（416输入/28输出token，0 Native命令）。这是选定下一真实模型路由的单次健康证据，不构成长程能力验收。
+
 Harness启动边界核验（`TestResults/20261016-061057`与`061235`）：前次Detached完整阶段在Smoke冷启动Steam时被“Unable to initialize Steam API”弹窗挡住，Module/Lifecycle未加载，不是任务代码崩溃；保留已有Steam进程后第二次Smoke正常加载Chronicle assembly和Campaign lifecycle，Harness还自动确认“mod change detected / deleting shader cache”提示，但普通`Smoke`的45秒启动门限在GameStart前超时（`CrashDetected=false`、`ProcessExitedUnexpectedly=false`、没有正式存档修改）。W7-K完整阶段配置240秒Smoke预算，不等于上述45秒单独Phase；下一次完整阶段应在当前Steam会话下验证这条启动链，而不是用单独Smoke超时判定失败。
 
 同一真实运行的时序审计发现：FreeLLMAPI已命中OVH后的45秒请求间隔等待原先使用Campaign循环令牌，而非单次模型请求deadline；因此在429/502重试路径上，速率等待可能延长360秒模型请求上限。现已让该等待遵守Provider请求deadline，并新增`freellmapi-rate-window-wait-respects-per-request-deadline`回归，验证deadline到期后不再等满45秒且不发出第二次请求。本轮`TestResults/20261016-015916`的AgentHostPackage通过，Provider合同场景98项全过，模型调用和Native命令均为0；Quest端到端仍未通过。
