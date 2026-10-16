@@ -636,6 +636,8 @@ if ($harnessScript -notmatch "'AgentHostPackage'\s*\{ @\('Preflight', 'Build', '
     $agentHostPackageSource -notmatch 'D:\\ChronicleFramework\\BuildCache\\Packages' -or $agentHostPackageSource -notmatch 'package staging must be outside the source repository' -or
     $agentHostPackageSource -notmatch 'BaseOutputPath' -or
     $agentHostPackageSource -notmatch 'ChronicleAgentHost\.exe' -or $agentHostPackageSource -notmatch 'AgentHostPackageManifest\.json' -or
+    $agentHostPackageSource -notmatch 'PackageArtifactsRetained = \$false' -or $agentHostPackageSource -notmatch 'Remove-Item -LiteralPath \$resolvedPackageRoot -Recurse -Force' -or
+    $agentHostPackageSource -notmatch 'Refusing to remove package staging outside the exact unique Chronicle Agent Host cache directory' -or
     $agentHostPackageSource -notmatch 'Invoke-PackagedHostUnboundParentProbe' -or $agentHostPackageSource -notmatch 'UnboundParentRejected' -or
     $agentHostProviderSelfTestSource -notmatch 'RunParentProcessContractSelfTestsAsync' -or
     $agentHostProviderSelfTestSource -notmatch 'mcm-start-request-rejects-invalid-snapshot-without-profile-fallback' -or

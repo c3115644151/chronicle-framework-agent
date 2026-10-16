@@ -53,7 +53,8 @@ $proxyReady = Test-BoundedTcpPort '127.0.0.1' 7890
 if (-not $proxyReady) { throw 'The configured local package-download proxy on port 7890 is unavailable.' }
 
 $packageId = 'ChronicleAgentHost-win-x64-' + [Guid]::NewGuid().ToString('N')
-$packageRoot = Join-Path 'D:\ChronicleFramework\BuildCache\Packages' $packageId
+$packageParent = [IO.Path]::GetFullPath('D:\ChronicleFramework\BuildCache\Packages').TrimEnd([IO.Path]::DirectorySeparatorChar)
+$packageRoot = Join-Path $packageParent $packageId
 $repositoryRoot = (& git -C $PSScriptRoot rev-parse --show-toplevel 2>$null | Out-String).Trim()
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($repositoryRoot)) { throw 'Could not resolve the source repository before selecting package staging.' }
 $repositoryRoot = [IO.Path]::GetFullPath($repositoryRoot).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
@@ -61,11 +62,20 @@ $packageRootFull = [IO.Path]::GetFullPath($packageRoot).TrimEnd([IO.Path]::Direc
 if ($packageRootFull.StartsWith($repositoryRoot, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Self-contained package staging must be outside the source repository so binary runtime files cannot contaminate normal source builds.'
 }
+if ([IO.Path]::GetFullPath((Split-Path -Parent $packageRoot)).TrimEnd([IO.Path]::DirectorySeparatorChar) -ne $packageParent -or
+    (Split-Path -Leaf $packageRoot) -notmatch '^ChronicleAgentHost-win-x64-[0-9a-f]{32}$' -or
+    (Test-Path -LiteralPath $packageRoot)) {
+    throw 'Refusing package staging outside the exact unique Chronicle Agent Host cache directory.'
+}
 $publishRoot = Join-Path $packageRoot 'publish'
 $buildOutputRoot = Join-Path $packageRoot 'build'
 $consumerWorkingDirectory = Join-Path $evidenceRoot 'AgentHostPackageConsumerWorkingDirectory'
 $nugetRoot = 'D:\ChronicleFramework\BuildCache\NuGetPackages'
+$packageRootCreated = $false
+$result = $null
+try {
 New-Item -ItemType Directory -Path $publishRoot,$buildOutputRoot,$consumerWorkingDirectory,$nugetRoot -Force | Out-Null
+$packageRootCreated = $true
 
 $previousEnvironment = @{}
 foreach ($name in @('NUGET_PACKAGES', 'HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy')) {
@@ -253,8 +263,21 @@ $result = [ordered]@{
     ConsumerWorkingDirectorySeparatedFromPackage = ($consumerWorkingDirectory -ne $publishRoot)
     UserConfigurationIncluded = $false
     ManifestPath = $manifestPath
-    PublishRoot = $publishRoot
-    PackageRoot = $packageRoot
+    PackageArtifactsRetained = $false
+    PublishRoot = $null
+    PackageRoot = $null
     ProcessExited = $true
+}
+}
+finally {
+    if ($packageRootCreated -and (Test-Path -LiteralPath $packageRoot -PathType Container)) {
+        $resolvedPackageRoot = [IO.Path]::GetFullPath($packageRoot).TrimEnd([IO.Path]::DirectorySeparatorChar)
+        $resolvedPackageParent = [IO.Path]::GetFullPath((Split-Path -Parent $resolvedPackageRoot)).TrimEnd([IO.Path]::DirectorySeparatorChar)
+        if ($resolvedPackageParent -ne $packageParent -or (Split-Path -Leaf $resolvedPackageRoot) -notmatch '^ChronicleAgentHost-win-x64-[0-9a-f]{32}$') {
+            throw 'Refusing to remove package staging outside the exact unique Chronicle Agent Host cache directory.'
+        }
+        Remove-Item -LiteralPath $resolvedPackageRoot -Recurse -Force -ErrorAction Stop
+        if (Test-Path -LiteralPath $resolvedPackageRoot) { throw 'Temporary self-contained package staging still exists after cleanup.' }
+    }
 }
 $result | ConvertTo-Json -Depth 6

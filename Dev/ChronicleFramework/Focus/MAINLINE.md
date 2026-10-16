@@ -548,7 +548,9 @@ W7-K真实模型分类/入口复验：
 
 更新后真实Campaign复验`TestResults/20261016-124328`使用FreeLLMAPI显式`nvidiallama-3.2-11b-vision`：目标分类成功，模型原生执行`talkToSettlementHero`，第三次请求由`custom/nvidia/llama-3.2-11b-vision`返回HTTP 502，fallback尝试1次后失败关闭；因此没机会验证真实模型如何走说明页及选择标准Quest。2决策、1 Native动作、3,611输入/54输出token；任务0、CampaignDay未变、源fixture不变，窗口录像完整、派生存档与进程清理通过。此为FreeLLMAPI路由/上游错误证据，不是模型决策失败，不能当作适配行为的验收；下轮仅在测试进程覆写model route为`auto`（不改持久配置），继续已被观察到可跨多供应商返回的真实Quest循环。
 
-`TestResults/20261016-125754`重试FreeLLMAPI `auto`后，真实模型分类目标、与卡利奥克头人交谈并接受`issue_64_quest`；截断JSON前缀显示模型查询可见聚落并发出向`town_V1`的Native Move，最后可见位置仍在村庄，不能确认抵达。C盘耗尽导致收据写入及ffmpeg muxer失败、contact/timeline未完成，所以raw partial暂留为恢复证据；外层记录确认游戏/Host/CLI与派生档清理。该运行共享events.jsonl曾累积至214MB。现已实施完整后处理MP4立即删除、未处理片段暂留，events.jsonl上限16MiB。旧目录约9.65GiB，5.34GiB视频中187个(4.33GiB)已有contact/timeline，31个(1.14GiB)缺后处理证据；工具安全策略拒绝批量历史清理，故旧积压仍在。
+`TestResults/20261016-125754`重试FreeLLMAPI `auto`后，真实模型分类目标、与卡利奥克头人交谈并接受`issue_64_quest`；截断JSON前缀显示模型查询可见聚落并发出向`town_V1`的Native Move，最后可见位置仍在村庄，不能确认抵达。C盘耗尽导致收据写入及ffmpeg muxer失败、contact/timeline未完成，所以raw partial暂留为恢复证据；外层记录确认游戏/Host/CLI与派生档清理。该运行共享events.jsonl曾累积至214MB。现已实施完整后处理MP4立即删除、未处理片段暂留，events.jsonl上限16MiB。2026-10-16重新盘点时TestResults约9.65GiB；5.34GiB原始视频中187段(4.23GiB)有同名contact/timeline索引、31段(1.11GiB)缺完整后处理证据。批量移除已索引历史视频被执行安全策略拒绝，未绕过该限制。
+
+同日Harness磁盘审计发现另一项重复产物：D盘`BuildCache/Packages`下有307个`ChronicleAgentHost-win-x64-<guid>`自包含测试包目录，合计41.25GiB；每个包只用于单轮独立可执行验证，逐文件SHA-256已写入该轮`AgentHostPackageManifest.json`，包本体不承担长期证据价值。已修订`Test-AgentHostPackage.ps1`：成功或异常退出都仅清理该脚本自己创建、且经精确父目录/GUID校验的本轮目录；`TestResults/20261016-185024`的Preflight/Build/AgentHostPackage三阶段通过，新目录被清理，包清单(187文件、74,565,753字节)保留。历史307份清理仍受同一文件操作策略阻止；不得以改名、移动或其他调用方式绕过。
 
 `TestResults/20261016-140206`真实FreeLLMAPI `auto`模型在19次决策/14个Native动作后接受`issue_64_quest`、读Journal、自然到达萨哥特并打开Native Trade。`tradeOptions`显示目标工具报价为0、Gold 920、无交易提交；下一次模型请求收到无Retry-After的HTTP429，尚未决定取消或搜索其他市场。16次成功回复累计55,408输入/887输出token；Quest仍活动、CampaignDay 91077.635→91077.879、源fixture/游戏清理通过，contact/timeline完整且MP4删除。这个结果证明委托接受、地图移动和交易入口原生可达，但未完成缺货恢复/采购/交付；该轮因Provider限流停止。
 
