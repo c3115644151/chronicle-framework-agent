@@ -116,6 +116,8 @@ Harness产物按可复核价值留存：JSON收据、必要日志和索引后的
 
 W7-K实时委托单次循环仍有硬上限：最多100次模型决策、单次模型请求最多360秒；此前已由25次成功模型回复和约1,744秒模型往返的Native实测证明30分钟整体时限可能在到货前耗尽。为让模型在同一自主任务中有机会完成多个市场搜索和交付，MCM启动、Campaign父循环、Quest子循环与真实Harness的总时限统一提高到1小时；这是有界任务窗口，不解除Stop按钮或Native动作/决策上限。
 
+延长后的第一次真实运行`TestResults/20261016-214133`并未触及一小时上限：固定Mistral路由在607秒、5次成功回复/4个Native动作后，于NPC Quest对话中返回FreeLLMAPI HTTP502（同一OVH路由的1次fallback亦报错）。源夹具/正式档、CampaignDay和Quest状态未改变；完整录屏关键帧、游戏/Host/CLI清理通过。该结果不能验证一小时门限是否足够，也不能归因于Quest动作或模型选择。
+
 Project采用最少任务状态：`Todo`表示尚未开始（是否被阻塞看Issue原生dependency关系），`In Progress`表示唯一当前工作（最多一项），`Done`表示验收标准已满足且Issue附有commit/结果摘要。任务清单只记录本项目内容工作（原版系统研究、玩法设计、Mod能力和面向玩家的验收）；纯Agent/Harness/文档/流程重构是内部维护，不作为产品里程碑或任务卡计数。W1用一个父Issue持有跨域审计和退出标准，子Issue只写独有的系统范围；W2-W8由原生Issue dependencies排序，标题前缀提供阶段标识，不再维护重复的自定义Phase/Gate字段。
 
 任务工作流由Agent在明确边界点同步，而非由Harness轮询：开始前从Project确认唯一活动Issue、依赖及验收；仅执行该Issue范围；本地Harness验证并记录commit/测试证据；只有验收条件满足时，Agent才更新Issue为Done并附上commit与结果摘要。暂缓、阻塞或范围变化直接更新对应Issue/依赖，不另开状态文档。没有活动Issue时，Agent选择可执行且依赖已解除的下一项后再开始。
