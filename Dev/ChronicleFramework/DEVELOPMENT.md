@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.209
+Contract version: 7.210
 
 Agent Host为每次模型决策按Native当前`allowedActions`/`allowedControls`生成JSON Schema互斥分支；对话、菜单、地图移动等动作还把策略允许的当前ID编码成参数枚举，避免从可见但不允许的选项中重复选择。每个活动Quest只读一次任务日志；城镇工具采购前先尝试当前市场，无货城镇会从本轮后续目标中排除，交易结束后才允许离开，避免在同一城镇循环。无动作目录时Host不调用模型，理由文本在schema中限制为64字符；村庄Quest目标另要求理由最多8个短词。FreeLLMAPI使用OpenAI兼容`response_format.json_schema`；无游戏真实Provider冒烟测试镜像Campaign Host的第一步：把完整用户目标送入生产用`goalScopeClassificationRequired`提示，并要求返回唯一支持的`supportedVillageToolsQuestGoal`控制值；记录实际`X-Routed-Via`与token，不执行Native命令。原生Ollama协议仍只留在隔离协议回归，不作为本项目真实模型推理路径。
 FreeLLMAPI Mistral Small 3.2→OVH当前使用JSON对象模式与`max_tokens`，并省略该上游不接受的OpenAI专属`store`及空`reasoning_effort`字段；输出仍由本地Host按Native动作目录逐项验证。若自动FreeLLMAPI路由以HTTP 400/422/502返回、且`X-Fallback-Trail`明确标记`provider_bad_request`拒绝JSON Schema，并表明回退轨迹中含OVH Mistral Small，则一次JSON对象模式兼容重试同时改用`max_tokens`，等待OVH节奏并严格后验验证。FreeLLMAPI以502和`keyN=format_ignored`标记结构化输出被上游模型忽略/截断时，也允许对同一尚未执行的决策重试一次JSON对象模式；其余HTTP失败不走此兼容重试。所有输出仍由本地Host按Native动作目录严格解析和验证，失败不会发送Native命令。Provider回归覆盖格式回退与非格式错误拒绝。
@@ -112,7 +112,7 @@ GitHub Project 是工作项、原生依赖、状态的唯一事实源，最多�
 
 GitHub 与 Harness 不互相替代：GitHub Issues/Projects 管理工作项、原生依赖、评审和协作状态；Git记录可审查的源代码历史；本机Harness探测安装的游戏版本/模组、编译并启动游戏、操作disposable fixture、采集崩溃与结构化断言；Agent负责解释目标、研究机制、选择下一步和处理未覆盖异常。这四者之间不复制状态。Harness只输出本次运行的commit、工作树状态和测试收据，不查询或更改GitHub，也不因GitHub未登录/离线而失效。运行收据以run ID保存在本地`TestResults/<run-id>`并由`latest.json`指向最近一次；Agent在工作项达到验收时，将相关commit与简洁测试结论回填到GitHub Issue。大型日志、存档与视频不自动上传或塞进Issue。
 
-Harness产物按可复核价值留存：JSON收据、必要日志和索引后的关键帧/时间线是长期测试证据；成功生成contact sheet与timeline index后，原始MP4即删除，后处理失败时才保留片段以供恢复诊断。`AgentHostPackage`阶段的自包含二进制仅是一次性验证夹具；完整文件哈希清单和运行结果写入本轮`TestResults`后，D盘随机包目录必须在成功或失败出口清理，不能把每轮几十MB的可再生构建副本当成长期证据。
+Harness产物按可复核价值留存：测试收据、日志和 Native/模型 trace 是运行证据；索引后的关键帧保留可见变化。录像完整解码且索引、联系表和全部选中关键帧都存在后，原始MP4即删除；否则保留未完成片段供恢复诊断。`Run-Harness.ps1`收尾自动按此规则清理历史：仅处理名称严格符合`yyyyMMdd-HHmmss`的顶层运行目录，保留当前运行、文档引用的运行、最近30次运行，以及含未完成录像/partial收据的运行；其余旧目录连同内部文件整体删除。非标准命名目录和`TestResults`根目录文件不触碰，清理结果写入本轮`TestResultsRetention.json`。`AgentHostPackage`阶段的自包含二进制是一次性验证夹具；完整哈希清单写入本轮收据后，D盘随机包目录在成功或失败出口都清理。
 
 W7-K实时委托单次循环仍有硬上限：最多100次模型决策、单次模型请求最多360秒；此前已由25次成功模型回复和约1,744秒模型往返的Native实测证明30分钟整体时限可能在到货前耗尽。为让模型在同一自主任务中有机会完成多个市场搜索和交付，MCM启动、Campaign父循环、Quest子循环与真实Harness的总时限统一提高到1小时；这是有界任务窗口，不解除Stop按钮或Native动作/决策上限。
 
@@ -123,6 +123,8 @@ W7-K实时委托单次循环仍有硬上限：最多100次模型决策、单次�
 `TestResults/20261016-220612`在运行游戏前的模型配置预检失败，0次模型请求/0条Native动作；本机FreeLLMAPI目录没有返回策略路由`auto:reliable`这一行，但官方路由文档明确支持该内置策略。根因是Harness的`Get-FreeLLMAPIModelExecutionStatus`在检查空目录前就返回`not-listed`，误把未列出的策略路由当作不存在模型。现已对文档列出的`auto:fast/reliable/...`策略显式判为router；命名的`auto:<profile>`仍必须存在于模型目录，拼错profile仍快速拒绝。纯本地回归验证`auto:reliable`通过、typo profile仍拒绝；此轮没有实际调用模型。参见[FreeLLMAPI路由接口文档](https://github.com/tashfeenahmed/freellmapi/blob/main/docs/en/api/01-rest-api.md)。
 
 Project采用最少任务状态：`Todo`表示尚未开始（是否被阻塞看Issue原生dependency关系），`In Progress`表示唯一当前工作（最多一项），`Done`表示验收标准已满足且Issue附有commit/结果摘要。任务清单只记录本项目内容工作（原版系统研究、玩法设计、Mod能力和面向玩家的验收）；纯Agent/Harness/文档/流程重构是内部维护，不作为产品里程碑或任务卡计数。W1用一个父Issue持有跨域审计和退出标准，子Issue只写独有的系统范围；W2-W8由原生Issue dependencies排序，标题前缀提供阶段标识，不再维护重复的自定义Phase/Gate字段。
+
+Project采用最少任务状态：`Todo`表示尚未开始（是否被阻塞看Issue原生dependency关系），`In Progress`表示唯一当前工作（最多一项），`Done`表示验收标准已满足且Issue附有commit/结果摘要。任务清单只记录本项目内容（原版系统研究、玩法设计、Mod能力和面向玩家的验收）；纯Agent/Harness/文档/流程重构是内部维护，不作为产品里程碑或任务卡计数。W1用一个父Issue持有跨域审计和退出标准，子Issue只写独有的系统范围；W2-W8由原生Issue dependencies排序，标题前缀提供阶段标识，不再维护重复的自定义Phase/Gate字段。
 
 任务工作流由Agent在明确边界点同步，而非由Harness轮询：开始前从Project确认唯一活动Issue、依赖及验收；仅执行该Issue范围；本地Harness验证并记录commit/测试证据；只有验收条件满足时，Agent才更新Issue为Done并附上commit与结果摘要。暂缓、阻塞或范围变化直接更新对应Issue/依赖，不另开状态文档。没有活动Issue时，Agent选择可执行且依赖已解除的下一项后再开始。
 
@@ -291,9 +293,9 @@ Mod 内状态、命令与事件遥测
 3. Mod 内遥测与白名单命令；
 4. 只读窗口截图，仅在不激活/不前置游戏窗口且确有视觉诊断需要时使用。
 
-TestResults保留可复查的run收据、Native/模型trace、contact sheet、timeline index、事件关键帧与失败帧；原始MP4只是采集暂存。录像完整解码并完成接触表/索引后，无论玩法断言通过或失败都删除原MP4；采集/解码/索引未完成的片段暂留供恢复，恢复出图像证据后删除。共享`AgentRuns/ChronicleAgent/events.jsonl`单文件上限16MiB，超限从新事件重新开始；每轮完整trace另存于TestResults。2026-10-16审计旧目录约9.65GiB：218个MP4约5.34GiB，其中187个约4.33GiB已有contact/timeline可清理，31个约1.14GiB缺后处理证据，不自动删。旧MP4批量清理被本地文件操作安全策略拒绝，故历史积压尚未删除；新规则阻止继续增长。
+TestResults的完整留存和历史清理策略见上文“Harness产物按可复核价值留存”，本节不保留第二份规则。
 
-TestResults保留可复查的run收据、Native/模型trace、contact sheet、timeline index、事件关键帧与失败帧；原始MP4只是采集暂存。录像完整解码并完成接触表/索引后，无论玩法断言通过还是失败都删除原MP4；采集/解码/索引未完成的片段暂留供恢复，后处理完成后再删除。共享`AgentRuns/ChronicleAgent/events.jsonl`单文件上限16MiB，超限从新事件重新开始；完整逐轮trace仍留在所属TestResults。2026-10-16审计旧目录约9.65GiB：218个MP4约5.34GiB，其中187个约4.33GiB已有contact/timeline可清理，31个约1.14GiB缺后处理证据，不自动删。工具安全策略拒绝执行批量历史MP4删除，故旧积压尚未清理；新规则阻止继续增长。
+共享`AgentRuns/ChronicleAgent/events.jsonl`单文件上限16MiB，超限从新事件重新开始；逐轮trace保存在按上述规则保护的`TestResults`运行目录中。
 
 不使用 Windows Computer Use 向游戏窗口发送鼠标或键盘输入：当前 `@oai/sky` 的窗口定向输入会自动激活目标窗口，不能保证不抢占用户前台或物理键鼠。游戏操作一律走 Mod 内版本化协议和 Harness 白名单动作；截图不是功能真值。若未来要恢复窗口输入，必须先证明后台窗口输入不会激活窗口、移动/占用用户鼠标或截获键盘，并以隔离测试验证，不能只因 API 接收了 window 参数就视为隔离。
 

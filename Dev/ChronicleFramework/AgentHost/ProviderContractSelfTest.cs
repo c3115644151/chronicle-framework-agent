@@ -229,6 +229,24 @@ internal static class ProviderContractSelfTest
             results.Add(new { scenario = "freellmapi-bearer-auth-available-model-preflight-and-routed-model-evidence", passed = true });
         }
 
+        var reliableRouterHandler = new StubHandler((_, _) => Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"auto\"}]}")));
+        using (var reliableRouterClient = new HttpClient(reliableRouterHandler) { Timeout = settings.Timeout })
+        using (var reliableRouter = new OllamaNativeProvider(freeLlmApiSettings with { Model = "auto:reliable" }, reliableRouterClient))
+            await reliableRouter.CheckConfiguredModelAsync(CancellationToken.None);
+        results.Add(new { scenario = "freellmapi-health-accepts-documented-auto-reliable-strategy-not-listed-as-model", passed = true });
+
+        using (var unknownRouterClient = new HttpClient(new StubHandler((_, _) => Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"auto\"}]}")))) { Timeout = settings.Timeout })
+        using (var unknownRouter = new OllamaNativeProvider(freeLlmApiSettings with { Model = "auto:typo-profile" }, unknownRouterClient))
+        {
+            try
+            {
+                await unknownRouter.CheckConfiguredModelAsync(CancellationToken.None);
+                throw new AgentHostException("freellmapi-unknown-router-profile-accepted", "The Host accepted an unknown named Auto profile absent from the model catalog.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-model-unavailable") { }
+        }
+        results.Add(new { scenario = "freellmapi-health-rejects-unknown-auto-profile-not-listed-as-model", passed = true });
+
         await ExpectProviderHealthErrorAsync(settings, JsonResponse("{\"data\":[{\"id\":\"different-model\"}]}"), "provider-model-unavailable", "local-provider-health-rejects-missing-model");
         using (var unavailableClient = new HttpClient(new StubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)))) { Timeout = settings.Timeout })
         using (var provider = new OllamaNativeProvider(settings, unavailableClient))

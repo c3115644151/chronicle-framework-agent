@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.209'
+$contractVersion = '7.210'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -46,6 +46,7 @@ foreach ($scriptFile in $harnessPowerShellFiles) {
 }
 
 $harnessScript = Get-Content (Join-Path $harnessRoot 'Run-Harness.ps1') -Raw -Encoding UTF8
+$testResultsRetentionScript = Join-Path $harnessRoot 'Prune-TestResults.ps1'
 $agentCliSource = Get-Content (Join-Path $harnessRoot 'Agent-Cli.ps1') -Raw -Encoding UTF8
 $testWindowLayoutSource = Get-Content (Join-Path $harnessRoot 'Test-WindowLayout.ps1') -Raw -Encoding UTF8
 $shaderDialogSource = Get-Content (Join-Path $harnessRoot 'HarnessShaderCacheDialog.ps1') -Raw -Encoding UTF8
@@ -563,6 +564,9 @@ $agentHostSupplyLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\Agen
 $agentHostMailboxSource = Get-Content (Join-Path $harnessRoot 'AgentHost\NativeMailboxClient.cs') -Raw -Encoding UTF8
 if ($agentHostProviderSource -notmatch 'CheckConfiguredModelAsync' -or $agentHostProviderSource -notmatch '/models' -or
     $agentHostProviderSource -notmatch 'FREELLMAPI_API_KEY' -or $agentHostProviderSource -notmatch 'X-Routed-Via' -or
+    $agentHostProviderSource -notmatch 'auto:reliable' -or
+    $agentHostProviderSelfTestSource -notmatch 'freellmapi-health-accepts-documented-auto-reliable-strategy-not-listed-as-model' -or
+    $agentHostProviderSelfTestSource -notmatch 'freellmapi-health-rejects-unknown-auto-profile-not-listed-as-model' -or
     $freeLlmApiProfileSource -notmatch 'auto:reliable' -or $freeLlmApiProfileSource -notmatch 'auto:fastest' -or
     $agentHostProviderSmokeSource -notmatch 'auto:reliable' -or $agentHostProviderSmokeSource -notmatch 'auto:typo-profile' -or
     $agentHostCampaignLoopSource -notmatch 'providerRouteHistory' -or $agentHostVillageToolsQuestLoopSource -notmatch 'providerRouteHistory' -or
@@ -748,6 +752,11 @@ if ($startupEvidenceSource -notmatch 'function Ensure-ChronicleSteamClientReady'
 }
 if (-not (Test-ChronicleStartupDialogEvidenceSerialization)) { throw 'Startup dialog evidence retained a live UI Automation object instead of a serializable snapshot.' }
 if (-not (Test-ChronicleReceiptSerialization)) { throw 'Receipt normalization changed primitive/list data or retained PowerShell object metadata.' }
+$retentionSelfTestOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $testResultsRetentionScript -SelfTest 2>&1 | Out-String
+if ($LASTEXITCODE -ne 0 -or -not ($retentionSelfTestOutput | ConvertFrom-Json).Passed) { throw "TestResults retention safety regression failed: $retentionSelfTestOutput" }
+$retentionSource = Get-Content -LiteralPath $testResultsRetentionScript -Raw -Encoding UTF8
+$expectedTimestampFolderPattern = '$_.Name -match ''^\d{8}-\d{6}$'''
+if ($harnessScript -notmatch 'Prune-TestResults\.ps1' -or $harnessScript -notmatch '-CurrentRunId \$runId -Apply' -or -not $retentionSource.Contains($expectedTimestampFolderPattern) -or $retentionSource -notmatch 'ProtectedDocumentRunCount' -or $retentionSource -notmatch 'PreservedIncompleteCaptureRuns' -or $retentionSource -notmatch 'KeepMostRecentRuns' -or $retentionSource -notmatch 'Complete = \$skippedRuns\.Count -eq 0') { throw 'TestResults retention must protect active, documented, recent and incomplete-capture runs, and only prune timestamped Harness run folders.' }
 if (-not (Test-ChronicleLogTailNormalization -Path $startupEvidenceScript)) { throw 'Get-Content log-tail normalization regression checks failed.' }
 $protocolSource = Get-Content (Join-Path (Split-Path -Parent $harnessRoot) 'ChronicleFramework\AgentProtocol.cs') -Raw -Encoding UTF8
 if ($protocolSource -notmatch 'postbattle-renown-telemetry-failed' -or $protocolSource -notmatch 'visual-battle-fixture' -or $protocolSource -notmatch 'winnerRenownValue' -or $protocolSource -notmatch 'loserStrengthReductionFactorAfterFinish') { throw 'PostBattle renown telemetry must remain fixture-only and report model inputs/results without changing battle rules.' }
@@ -787,7 +796,7 @@ foreach ($requiredText in @('TestResults/latest.json', 'Computer Use', 'ContextS
         throw "DEVELOPMENT.md is missing contract element '$requiredText'."
     }
 }
-foreach ($requiredScript in @('Agent-DecisionLoop.ps1', 'Agent-ProviderBudget.ps1', 'Agent-SaveMetadata.ps1', 'Test-AgentSaveMetadata.ps1', 'Test-AgentLoop.ps1', 'Test-AgentLoopProvider.ps1', 'Test-AgentOpenAICompatibleProvider.ps1', 'Get-FreeLLMAPIProfile.ps1', 'Test-AgentLiveModelLoop.ps1', 'Test-AgentCheckpointPersistence.ps1', 'Test-AgentLiveModelResume.ps1', 'Test-AgentVillageToolsProvider.ps1', 'Test-AgentVillageToolsDelivery.ps1', 'Test-AgentBattleFixture.ps1', 'Test-AgentVisualCapture.ps1', 'AgentMissionInputPatch.cs', 'Test-AgentTavernMission.ps1', 'Test-AgentTownCenterMission.ps1', 'Test-AgentMissionInteraction.ps1', 'AgentMissionInteraction.cs', 'Test-AgentCompanionHiring.ps1', 'AgentPartyRoleAdapter.cs', 'Test-AgentPartyRoles.ps1', 'AgentInventoryStateAdapter.cs', 'AgentTradeAdapter.cs', 'HarnessEquipmentModifierFixture.cs', 'Test-AgentInventoryNavigation.ps1', 'Test-AgentEquipmentTransactions.ps1', 'Test-AgentTradeTransactions.ps1', 'Test-AgentSettlementOverlayConversation.ps1', 'Test-AgentFreshCampaign.ps1', 'Test-AgentSupport.ps1', 'Test-AgentMoveToPoint.ps1', 'Test-AgentCharacterDevelopment.ps1', 'Test-AgentSpendSkillFocus.ps1', 'Test-AgentPartyRoster.ps1', 'AgentPartyScreenAdapter.cs', 'AgentPartyUpgradeAdapter.cs', 'Test-AgentPartyUpgrade.ps1', 'AgentPartyPrisonerRecruitmentAdapter.cs', 'Test-AgentPartyPrisonerRecruitment.ps1', 'Test-AgentJoinEncounterEligibility.ps1', 'Test-AgentJoinEncounterAbandonArmy.ps1', 'Test-AgentMovingArmyJoin.ps1', 'Test-AgentJoinSiegeEvent.ps1', 'HarnessSiegeJoinFixture.cs', 'HarnessVideoCapture.ps1', 'Set-ContextFocus.ps1')) {
+foreach ($requiredScript in @('Agent-DecisionLoop.ps1', 'Agent-ProviderBudget.ps1', 'Agent-SaveMetadata.ps1', 'Test-AgentSaveMetadata.ps1', 'Test-AgentLoop.ps1', 'Test-AgentLoopProvider.ps1', 'Test-AgentOpenAICompatibleProvider.ps1', 'Get-FreeLLMAPIProfile.ps1', 'Test-AgentLiveModelLoop.ps1', 'Test-AgentCheckpointPersistence.ps1', 'Test-AgentLiveModelResume.ps1', 'Test-AgentVillageToolsProvider.ps1', 'Test-AgentVillageToolsDelivery.ps1', 'Test-AgentBattleFixture.ps1', 'Test-AgentVisualCapture.ps1', 'AgentMissionInputPatch.cs', 'Test-AgentTavernMission.ps1', 'Test-AgentTownCenterMission.ps1', 'Test-AgentMissionInteraction.ps1', 'AgentMissionInteraction.cs', 'Test-AgentCompanionHiring.ps1', 'AgentPartyRoleAdapter.cs', 'Test-AgentPartyRoles.ps1', 'AgentInventoryStateAdapter.cs', 'AgentTradeAdapter.cs', 'HarnessEquipmentModifierFixture.cs', 'Test-AgentInventoryNavigation.ps1', 'Test-AgentEquipmentTransactions.ps1', 'Test-AgentTradeTransactions.ps1', 'Test-AgentSettlementOverlayConversation.ps1', 'Test-AgentFreshCampaign.ps1', 'Test-AgentSupport.ps1', 'Test-AgentMoveToPoint.ps1', 'Test-AgentCharacterDevelopment.ps1', 'Test-AgentSpendSkillFocus.ps1', 'Test-AgentPartyRoster.ps1', 'AgentPartyScreenAdapter.cs', 'AgentPartyUpgradeAdapter.cs', 'Test-AgentPartyUpgrade.ps1', 'AgentPartyPrisonerRecruitmentAdapter.cs', 'Test-AgentPartyPrisonerRecruitment.ps1', 'Test-AgentJoinEncounterEligibility.ps1', 'Test-AgentJoinEncounterAbandonArmy.ps1', 'Test-AgentMovingArmyJoin.ps1', 'Test-AgentJoinSiegeEvent.ps1', 'HarnessSiegeJoinFixture.cs', 'HarnessVideoCapture.ps1', 'Prune-TestResults.ps1', 'Set-ContextFocus.ps1')) {
     if (-not (Test-Path (Join-Path $harnessRoot $requiredScript))) { throw "Agent loop harness script is missing: $requiredScript" }
 }
 if (-not (Test-Path (Join-Path $harnessRoot 'Test-AgentMapSettlementTargets.ps1'))) { throw 'MapSettlementTargets regression script is missing.' }

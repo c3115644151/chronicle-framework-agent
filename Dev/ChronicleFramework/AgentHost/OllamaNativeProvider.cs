@@ -12,6 +12,11 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     private const int MaxRequestBytes = 512 * 1024;
     private const int MaxResponseBytes = 1024 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    private static readonly HashSet<string> FreeLlmApiRouterStrategies = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "auto:smart", "auto:fast", "auto:cheap", "auto:reliable", "auto:balanced",
+        "auto:fastest", "auto:speed", "auto:smartest", "auto:cheapest", "auto:budget"
+    };
     private readonly OllamaProviderSettings _settings;
     private readonly HttpClient _client;
     private readonly bool _ownsClient;
@@ -182,7 +187,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 throw new AgentHostException("provider-health-response-invalid", "The local model service returned an unsupported model-list response.");
 
             var modelFound = models.EnumerateArray().Any(model => string.Equals(ReadString(model, "id"), _settings.Model, StringComparison.Ordinal));
-            if (!modelFound)
+            var documentedFreeLlmApiRouterStrategy = IsFreeLlmApi(_settings.Endpoint) && FreeLlmApiRouterStrategies.Contains(_settings.Model);
+            if (!modelFound && !documentedFreeLlmApiRouterStrategy)
                 throw new AgentHostException("provider-model-unavailable", "The configured model is not listed by the local model service.");
         }
         catch (AgentHostException)

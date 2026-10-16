@@ -548,7 +548,7 @@ W7-K真实模型分类/入口复验：
 
 更新后真实Campaign复验`TestResults/20261016-124328`使用FreeLLMAPI显式`nvidiallama-3.2-11b-vision`：目标分类成功，模型原生执行`talkToSettlementHero`，第三次请求由`custom/nvidia/llama-3.2-11b-vision`返回HTTP 502，fallback尝试1次后失败关闭；因此没机会验证真实模型如何走说明页及选择标准Quest。2决策、1 Native动作、3,611输入/54输出token；任务0、CampaignDay未变、源fixture不变，窗口录像完整、派生存档与进程清理通过。此为FreeLLMAPI路由/上游错误证据，不是模型决策失败，不能当作适配行为的验收；下轮仅在测试进程覆写model route为`auto`（不改持久配置），继续已被观察到可跨多供应商返回的真实Quest循环。
 
-`TestResults/20261016-125754`重试FreeLLMAPI `auto`后，真实模型分类目标、与卡利奥克头人交谈并接受`issue_64_quest`；截断JSON前缀显示模型查询可见聚落并发出向`town_V1`的Native Move，最后可见位置仍在村庄，不能确认抵达。C盘耗尽导致收据写入及ffmpeg muxer失败、contact/timeline未完成，所以raw partial暂留为恢复证据；外层记录确认游戏/Host/CLI与派生档清理。该运行共享events.jsonl曾累积至214MB。现已实施完整后处理MP4立即删除、未处理片段暂留，events.jsonl上限16MiB。2026-10-16重新盘点时TestResults约9.65GiB；5.34GiB原始视频中187段(4.23GiB)有同名contact/timeline索引、31段(1.11GiB)缺完整后处理证据。批量移除已索引历史视频被执行安全策略拒绝，未绕过该限制。
+`TestResults/20261016-125754`重试FreeLLMAPI `auto`后，真实模型分类目标、与卡利奥克头人交谈并接受`issue_64_quest`；截断JSON前缀显示模型查询可见聚落并发出向`town_V1`的Native Move，最后可见位置仍在村庄，不能确认抵达。C盘耗尽导致收据写入及ffmpeg muxer失败、contact/timeline未完成，所以raw partial暂留为恢复证据；外层记录确认游戏/Host/CLI与派生档清理。该运行共享events.jsonl曾累积至214MB，现已限为16MiB并滚动记录。2026-10-17对TestResults盘点时发现3,767个运行目录、约10.16GiB，其中219个原始MP4约5.85GiB；对有完整contact/index/关键帧的历史视频按现行规则清理，对没有后处理证据的视频保留。新增`Prune-TestResults.ps1`并接入Harness收尾：保留文档引用运行、最近30次运行、未完成录像和本轮收据，其他旧的标准时间戳运行目录自动清除；非标准目录不处理。一次预演后清理共移除3,496个旧目录、约8.08GiB，当前`TestResults`约2.08GiB；31段未索引片段(约1.11GiB)仍保留，另有一个超出Windows PowerShell安全路径长度的旧目录跳过。清理回执为`TestResults/20261017-011927/TestResultsRetention.json`；该轮Docs通过，回执明确记录1个跳过目录，不把局部保留误报为全清理成功。
 
 同日Harness磁盘审计发现另一项重复产物：D盘`BuildCache/Packages`下有307个`ChronicleAgentHost-win-x64-<guid>`自包含测试包目录，合计41.25GiB；每个包只用于单轮独立可执行验证，逐文件SHA-256已写入该轮`AgentHostPackageManifest.json`，包本体不承担长期证据价值。已修订`Test-AgentHostPackage.ps1`：成功或异常退出都仅清理该脚本自己创建、且经精确父目录/GUID校验的本轮目录；`TestResults/20261016-185024`的Preflight/Build/AgentHostPackage三阶段通过，新目录被清理，包清单(187文件、74,565,753字节)保留。历史307份清理仍受同一文件操作策略阻止；不得以改名、移动或其他调用方式绕过。
 
@@ -569,6 +569,8 @@ W7-K真实模型分类/入口复验：
 `TestResults/20261016-220612`在Bannerlord启动和模型调用前由FreeLLMAPI配置预检阻止，因本机`/v1/models?available=true`不列`auto:reliable`。对照FreeLLMAPI官方路由文档发现，这是其内置策略别名，不是模型目录项；真正失效的是Harness先按目录做空检查。修正`Get-FreeLLMAPIModelExecutionStatus`并补纯回归，显式接受官方文档中的auto策略别名、继续要求用户profile名出现在目录；`auto:reliable`单测通过，拼写错误profile仍`not-listed`。该结果0模型调用、0Native动作，不能当作Provider或游戏故障，也未验证该策略的实际上游稳定性。
 
 `TestResults/20261016-221920`显示同一配置还有第二处Harness误拒绝：在修正首个路由状态helper后，`Test-AgentLiveModelLoop.ps1`仍用字符串精确匹配`/v1/models?available=true`模型行，因而启动前再次拒绝`auto:reliable`，0模型调用/0Native动作。现改用router-aware状态函数完成预检，并保持未知profile拒绝；需要重新运行Docs和真实场景验证全路径。
+
+之后`TestResults/20261016-223939`通过PowerShell门禁但在MCM Host自身model-list健康检查被同一问题拦截（modelId `auto:reliable`不作为普通模型行返回）。C# Provider现仅对FreeLLMAPI endpoint认可官方内置auto策略，并保留对未知profile的catalog fail-fast；新增stub HTTP合同测试覆盖策略行不存在时允许、拼错profile时拒绝，真实模型请求为0。`TestResults/20261017-012359`的Preflight、Build和AgentHostPackage三阶段通过，C# Provider合同回归完成验证；未调用外部模型或发出Native命令。
 
 该真实控制错误促使空市场恢复条件覆盖`provider-action-unavailable`与`provider-control-unavailable`两种拒绝；仅当上一份成功Native`tradeOptions`后Journal仍显示有未交付工具，且唯一当前动作严格等于`tradeCancel`时，提示模型取消而非重复查询/等待；若剩余需求为0则不误导取消去找货。`TestResults/20261016-205258`的AgentHostPackage Provider自检通过，覆盖两类拒绝、任务剩余数量门控与Native零副作用；该最新控制提示还没有真实模型复测。
 

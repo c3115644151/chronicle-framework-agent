@@ -23,7 +23,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.209'
+$HarnessContractVersion = '7.210'
 $effectiveSmokeTimeoutSeconds = if ($Phase -eq 'AgentHostVillageToolsQuestEvaluation') { [Math]::Max($SmokeTimeoutSeconds, 240) } else { $SmokeTimeoutSeconds }
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
@@ -126,6 +126,7 @@ $barterTransactionsScript = Join-Path $harnessRoot 'Test-AgentBarterTransactions
 $barterContextsScript = Join-Path $harnessRoot 'Test-AgentSafePassageBarterContext.ps1'
 $docsScript = Join-Path $harnessRoot 'Check-Docs.ps1'
 $contextPackScript = Join-Path $harnessRoot 'Get-ContextPack.ps1'
+$testResultsRetentionScript = Join-Path $harnessRoot 'Prune-TestResults.ps1'
 
 $sourceControl = [ordered]@{
     Available = $false
@@ -1313,6 +1314,32 @@ $summary = [ordered]@{
     SourceControl = $sourceControl
     EvidenceDirectory = $runDirectory
 }
+
+try {
+    $retentionOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $testResultsRetentionScript -EvidenceRoot $evidenceRoot -CurrentRunId $runId -Apply 2>&1 | Out-String
+    $retentionExitCode = $LASTEXITCODE
+    if ($retentionExitCode -ne 0) { throw "Prune-TestResults exited ${retentionExitCode}: $retentionOutput" }
+    $retention = $retentionOutput | ConvertFrom-Json
+    $retentionReceiptPath = Join-Path $runDirectory 'TestResultsRetention.json'
+    $retention | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $retentionReceiptPath -Encoding UTF8
+    $summary['TestResultsRetention'] = [ordered]@{
+        Passed = [bool]$retention.Passed
+        Complete = [bool]$retention.Complete
+        KeepMostRecentRuns = [int]$retention.KeepMostRecentRuns
+        ProtectedDocumentRunCount = [int]$retention.ProtectedDocumentRunCount
+        PreservedIncompleteCaptureRunCount = @($retention.PreservedIncompleteCaptureRuns).Count
+        DeletedRunCount = [int]$retention.DeletedRunCount
+        DeletedFileCount = [int]$retention.DeletedFileCount
+        DeletedBytes = [long]$retention.DeletedBytes
+        DeletedIndexedVideoCount = [int]$retention.DeletedIndexedVideoCount
+        DeletedIndexedVideoBytes = [long]$retention.DeletedIndexedVideoBytes
+        SkippedRunCount = @($retention.SkippedRuns).Count
+        Receipt = $retentionReceiptPath
+    }
+} catch {
+    $summary['TestResultsRetention'] = [ordered]@{ Passed = $false; Error = $_.Exception.Message }
+}
+
 $summary | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $runDirectory 'summary.json') -Encoding UTF8
 $summary | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $evidenceRoot 'latest.json') -Encoding UTF8
 $summary | ConvertTo-Json -Depth 5
