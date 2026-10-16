@@ -31,7 +31,9 @@ W7-K完整阶段不再先额外运行一次真实模型冒烟：同一免费路�
 
 `TestResults/20261016-113813`的真实`auto`模型运行推进6次决策/5条Native动作，停在卡利奥克任务说明后唯一可点的`issue_alternative_solution_player_response`，玩家任务列表为空、蓝色任务标记仍在。1.4.8源码表明这不是Alternative接受动作：它只把对话继续到替代方案说明；说明后才出现最终选择。无模型原版运行`TestResults/20261016-124045`通过这一节点：测试只选说明入口，未接受任务或派出部队；最终对话有可点的`issue_offer_player_accept_quest`（“我觉得能亲自处理这件事”），派遣选项因没有同伴而灰显。该原生状态中任务计数仍为0、CampaignDay未变、关系1、不交战；8个同类型Issue都处于`OngoingWithoutQuest`，没有同类正由Quest/Alternative解决。结论是这里不是已接任务，也不是上述玩家条件挡住直接接取；真正错误是我们把说明页入口误判成最终替代结果，因而Host提前停止。现已允许这一步说明导航，但只保留最终标准Quest接受，过滤最终Alternative/Lord接受。`TestResults/20261016-123502`AgentHostPackage回归通过：允许Native说明入口、在最终分支只开放Quest/拒绝选项，并在只剩不支持的最终结果时安全停止。下一步用真实模型重验并尝试完成完整委托。
 
-更新后真实Campaign复验`TestResults/20261016-124328`使用FreeLLMAPI显式`nvidiallama-3.2-11b-vision`：首轮分类成功，随后模型执行原版`talkToSettlementHero`；第三个模型请求返回HTTP 502（实际路由`custom/nvidia/llama-3.2-11b-vision`，fallback 1次），在读取对话选项前安全终止。累计2决策、1条Native动作、3,611输入/54输出token；Quest仍0、CampaignDay未变化、源fixture未变，5fps画面完整，游戏/Host/CLI/派生存档清理通过。该结果证明模型开始走Native入口，但没有验证说明页→标准接取选项的真实模型行为；502是网关/上游失败信号，不能归咎代码或模型决策。下一次仅在测试进程中把`CHRONICLE_LLM_MODEL`覆写为FreeLLMAPI的`auto`，不更改用户持久配置，以之前已观察到的多服务商连续六轮成功路由继续真实任务验证。
+更新后真实Campaign复验`TestResults/20261016-124328`使用FreeLLMAPI显式`nvidiallama-3.2-11b-vision`：首轮分类成功，随后模型执行原版`talkToSettlementHero`；第三个模型请求返回HTTP 502（实际路由`custom/nvidia/llama-3.2-11b-vision`，fallback 1次），在读取对话选项前安全终止。累计2决策、1条Native动作、3,611输入/54输出token；Quest仍0、CampaignDay未变化、源fixture未变，5fps画面完整，游戏/Host/CLI/派生存档清理通过。该结果证明模型开始走Native入口，但没有验证说明页→标准接取选项的真实模型行为；502是网关/上游失败信号，不能归咎代码或模型决策。此后`auto`真实模型复验见`TestResults/20261016-140206`。
+
+`TestResults/20261016-140206`（commit `76a30ea`，FreeLLMAPI `auto`）真实模型成功接取`issue_64_quest`并读Journal。它自然抵达萨哥特并打开原版Trade：当前`tradeOptions`目标工具报价为0、Gold 920、尚无交易提交；下一次模型请求收到无Retry-After的HTTP429，未能决定取消或搜索另一个市场。19次决策、14个Native动作、16次成功回复，累计55,408输入/887输出token；CampaignDay 91077.635→91077.879，Quest仍活动、源档不变，游戏与临时存档清理。contact/timeline完整并已删MP4，共享events.jsonl约0.4MB。该结果验证说明页修复后真实模型接任务并抵达Trade界面，但缺货恢复和采购/交付仍未完成；429是Provider限流中断，不是Native交易适配失败。
 
 当`AgentHostCampaignLoop`分类为VillageTools目标并交接给专用Quest loop时，子循环的终态收据必须合并父循环的classifier trace、provider route、token与全局decision编号；不能只显示子循环，遗漏真正的首个模型调用。Provider包回归用合成父收据验证跨循环历史保持，外部模型/Native调用均为0。
 
@@ -266,6 +268,8 @@ Mod 内状态、命令与事件遥测
 2. 进程、日志和存档；
 3. Mod 内遥测与白名单命令；
 4. 只读窗口截图，仅在不激活/不前置游戏窗口且确有视觉诊断需要时使用。
+
+TestResults保留可复查的run收据、Native/模型trace、contact sheet、timeline index、事件关键帧与失败帧；原始MP4只是采集暂存。录像完整解码并完成接触表/索引后，无论玩法断言通过还是失败都删除原MP4；采集/解码/索引未完成的片段暂留供恢复，后处理完成后再删除。共享`AgentRuns/ChronicleAgent/events.jsonl`单文件上限16MiB，超限从新事件重新开始；完整逐轮trace仍留在所属TestResults。2026-10-16审计旧目录约9.65GiB：218个MP4约5.34GiB，其中187个约4.33GiB已有contact/timeline可清理，31个约1.14GiB缺后处理证据，不自动删。工具安全策略拒绝执行批量历史MP4删除，故旧积压尚未清理；新规则阻止继续增长。
 
 不使用 Windows Computer Use 向游戏窗口发送鼠标或键盘输入：当前 `@oai/sky` 的窗口定向输入会自动激活目标窗口，不能保证不抢占用户前台或物理键鼠。游戏操作一律走 Mod 内版本化协议和 Harness 白名单动作；截图不是功能真值。若未来要恢复窗口输入，必须先证明后台窗口输入不会激活窗口、移动/占用用户鼠标或截获键盘，并以隔离测试验证，不能只因 API 接收了 window 参数就视为隔离。
 
