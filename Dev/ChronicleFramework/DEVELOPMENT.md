@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.212
+Contract version: 7.213
 
 Agent Host为每次模型决策按Native当前`allowedActions`/`allowedControls`生成JSON Schema互斥分支；对话、菜单、地图移动等动作还把策略允许的当前ID编码成参数枚举，避免从可见但不允许的选项中重复选择。VillageNeedsTools流程读取当前Quest Journal；每次Native Trade提交后都重新读取Journal再规划，避免用旧进度判断是否还缺货。欠工具时地图移动只列安全Town，已满足时只列接取任务时从Native当前位置观察到的Quest-giver Village；来源未观测到就不猜。无货Town会从后续采购目标中排除。所有移动仍是普通原版Native `move`，不夹带时钟控制。无动作目录时Host不调用模型，理由文本在schema中限制为64字符；村庄Quest目标另要求理由最多8个短词。FreeLLMAPI使用OpenAI兼容`response_format.json_schema`；无游戏真实Provider冒烟测试镜像Campaign Host的第一步：把完整用户目标送入生产用`goalScopeClassificationRequired`提示，并要求返回唯一支持的`supportedVillageToolsQuestGoal`控制值；记录实际`X-Routed-Via`与token，不执行Native命令。原生Ollama协议仍只留在隔离协议回归，不作为本项目真实模型推理路径。
 FreeLLMAPI Mistral Small 3.2→OVH当前使用JSON对象模式与`max_tokens`，并省略该上游不接受的OpenAI专属`store`及空`reasoning_effort`字段；输出仍由本地Host按Native动作目录逐项验证。若自动FreeLLMAPI路由以HTTP 400/422/502返回、且`X-Fallback-Trail`明确标记`provider_bad_request`拒绝JSON Schema，并表明回退轨迹中含OVH Mistral Small，则一次JSON对象模式兼容重试同时改用`max_tokens`，等待OVH节奏并严格后验验证。FreeLLMAPI以502和`keyN=format_ignored`标记结构化输出被上游模型忽略/截断时，也允许对同一尚未执行的决策重试一次JSON对象模式；其余HTTP失败不走此兼容重试。所有输出仍由本地Host按Native动作目录严格解析和验证，失败不会发送Native命令。Provider回归覆盖格式回退与非格式错误拒绝。
@@ -114,7 +114,7 @@ GitHub 与 Harness 不互相替代：GitHub Issues/Projects 管理工作项、�
 
 Harness产物按可复核价值留存：测试收据、日志和 Native/模型 trace 是运行证据；索引后的关键帧保留可见变化。录像完整解码且索引、联系表和全部选中关键帧都存在后，原始MP4即删除；否则保留未完成片段供恢复诊断。`Run-Harness.ps1`收尾自动按此规则清理历史：仅处理名称严格符合`yyyyMMdd-HHmmss`的顶层运行目录，保留当前运行、文档引用的运行、最近30次运行，以及含未完成录像/partial收据的运行；其余旧目录连同内部文件整体删除。非标准命名目录和`TestResults`根目录文件不触碰，清理结果写入本轮`TestResultsRetention.json`。`AgentHostPackage`阶段的自包含二进制是一次性验证夹具；完整哈希清单写入本轮收据后，D盘随机包目录在成功或失败出口都清理。
 
-W7-K实时委托单次循环仍有硬上限：最多100次模型决策、单次模型请求最多360秒；此前已由25次成功模型回复和约1,744秒模型往返的Native实测证明30分钟整体时限可能在到货前耗尽。为让模型在同一自主任务中有机会完成多个市场搜索和交付，MCM启动、Campaign父循环、Quest子循环与真实Harness的总时限统一提高到1小时；这是有界任务窗口，不解除Stop按钮或Native动作/决策上限。
+W7-K实时委托单次循环仍有硬上限：最多160次模型决策、单次模型请求最多360秒；Campaign/MCM父循环、Quest子循环和真实Harness共享2小时总预算且仍可由Stop取消。依据：真实运行`TestResults/20261017-035504`以FreeLLMAPI `auto:reliable`完成81次模型响应/63个Native动作、282,346输入/8,327输出tokens；没有Provider错误，但总循环在3602秒因任务Deadline取消，主队仍在向Town移动、Quest未采购/交付。模型与原生行为未重复执行；上一轮完成边界证明当前1小时不足以在本次自然城镇样本完成这条路线。新的2小时/160决策仍是有界试验窗口，不代表完整委托已通过。
 
 延长后的第一次真实运行`TestResults/20261016-214133`并未触及一小时上限：固定Mistral路由在607秒、5次成功回复/4个Native动作后，于NPC Quest对话中返回FreeLLMAPI HTTP502（同一OVH路由的1次fallback亦报错）。源夹具/正式档、CampaignDay和Quest状态未改变；完整录屏关键帧、游戏/Host/CLI清理通过。该结果不能验证一小时门限是否足够，也不能归因于Quest动作或模型选择。
 

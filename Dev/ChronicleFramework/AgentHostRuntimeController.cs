@@ -353,7 +353,7 @@ internal static class ChronicleAgentRuntimeController
                               ",\"providerConfiguration\":{\"OllamaBaseUrl\":\"" + EscapeJson(settings.OllamaBaseUrl) +
                               "\",\"ModelId\":\"" + EscapeJson(settings.ModelId) + "\"}" +
                               ",\"goal\":\"" + EscapeJson(goal.Trim()) +
-                              "\",\"maxDecisions\":100,\"maxElapsedSeconds\":3600,\"allowedActionNames\":[\"mapSettlementTargets\",\"move\",\"menuSelect\",\"talkToSettlementHero\",\"dialogueSelect\",\"dialogueContinue\",\"questDetails\",\"tradeOptions\",\"trade\",\"tradeConfirm\",\"tradeCancel\",\"tradeCancelChanges\",\"barterOptions\",\"barterAutoBalance\",\"barterOffer\",\"barterCancel\",\"inventoryOpen\",\"heroEquipmentOptions\",\"inventoryCancel\"]}";
+                              "\",\"maxDecisions\":160,\"maxElapsedSeconds\":7200,\"allowedActionNames\":[\"mapSettlementTargets\",\"move\",\"menuSelect\",\"talkToSettlementHero\",\"dialogueSelect\",\"dialogueContinue\",\"questDetails\",\"tradeOptions\",\"trade\",\"tradeConfirm\",\"tradeCancel\",\"tradeCancelChanges\",\"barterOptions\",\"barterAutoBalance\",\"barterOffer\",\"barterCancel\",\"inventoryOpen\",\"heroEquipmentOptions\",\"inventoryCancel\"]}";
             _hostInput.WriteLine(requestJson);
             _hostInput.Flush();
             _stopSignalSent = false;

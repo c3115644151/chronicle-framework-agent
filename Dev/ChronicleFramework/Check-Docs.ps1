@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.212'
+$contractVersion = '7.213'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -296,11 +296,14 @@ if ($agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S
     $agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S]{0,900}\$env:CHRONICLE_LLM_MAX_TOKENS = ''1024''') {
     throw 'The real-model Village quest slice must retain the bounded 360-second FreeLLMAPI retry deadline and the empirically increased 1024-token output ceiling required after a 512-token structured response was truncated.'
 }
-if ($agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S]{0,400}\$maxElapsedSeconds = 3600' -or
-    $agentHostRuntimeControllerSource -notmatch 'maxElapsedSeconds\\":3600' -or
-    $agentHostCampaignLoopSource -notmatch 'maxElapsedSeconds is < 1 or > 3600' -or
-    $agentHostVillageToolsQuestLoopSource -notmatch 'Math\.Clamp\(ReadInt\(request, "maxElapsedSeconds", 3600\), 1, 3600\)') {
-    throw 'The live quest run, MCM Campaign Host request, parent classifier and quest loop must share the evidence-based 3600-second maximum so a campaign handoff cannot cancel the same quest at the old 30-minute cap.'
+if ($agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S]{0,400}\$maxElapsedSeconds = 7200' -or
+    $agentLiveModelLoopSource -notmatch '\$maxDecisions = 160' -or
+    $agentHostRuntimeControllerSource -notmatch 'maxDecisions\\":160,\\"maxElapsedSeconds\\":7200' -or
+    $agentHostCampaignLoopSource -notmatch 'maxDecisions is < 1 or > 160' -or
+    $agentHostCampaignLoopSource -notmatch 'maxElapsedSeconds is < 1 or > 7200' -or
+    $agentHostVillageToolsQuestLoopSource -notmatch 'Math\.Clamp\(ReadInt\(request, "maxElapsedSeconds", 7200\), 1, 7200\)' -or
+    $agentHostVillageToolsQuestLoopSource -notmatch 'Math\.Clamp\(ReadInt\(request, "maxDecisions", 160\), 1, 160\)') {
+    throw 'The live quest run, MCM Campaign Host request, parent classifier and quest loop must share the evidence-based 7200-second/160-decision budget; the prior real run timed out at 3600 seconds before reaching another safe Town.'
 }
 if ($agentLiveModelLoopSource -notmatch 'Get-FreeLLMAPIModelExecutionStatus -ModelRows @\(\$availableModelsResponse\.data\)' -or
     $agentLiveModelLoopSource -notmatch 'if \(\$modelExecutionStatus -eq ''not-listed''\)' -or

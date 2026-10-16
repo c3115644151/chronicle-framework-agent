@@ -564,7 +564,7 @@ W7-K真实模型分类/入口复验：
 
 固定FreeLLMAPI `mistral-small-3.2-24b`的`TestResults/20261016-195123`在30分钟Harness时限内完成25次模型回复/26个决策/20个Native动作，共91,787输入/679输出token。所有Provider请求均成功，约1,744秒耗在模型往返；没有因路由/HTTP错误停止。实际完成Quest接受、Journal读取、萨哥特Trade无货后由模型调用`tradeCancel`、离开后通过Native地图目标和Move自然抵达另一Town；CampaignDay 91077.635→91078.588。第二个市场town_V6也无工具，模型在当前仅允许`tradeCancel`时尝试`observeAgain`；Host以通用控制拒绝后，模型没有足够剩余时间完成恢复/采购，30分钟上限以`TaskCanceledException`终止。任务未采购/交付；源档、派生档、游戏与CLI session清理通过，视频索引后删除。
 
-为让同一自治任务在原生可见世界中有时间搜索多个市场并回到委托人，已依据该运行将W7-K的AgentHost MCM请求、父循环、Quest子循环与真实Harness总时限从1800提高到3600秒；仍为100次模型决策上限、单请求360秒和可用Stop动作。`TestResults/20261016-211209`Docs与`TestResults/20261016-211314`AgentHostPackage通过并静态锁定四层上限一致。首次3600秒真实测试`TestResults/20261016-214133`未触及该上限：第5次模型请求收到Mistral/OVH HTTP502及一次失败fallback，5次回复/4条Native动作后安全停止，CampaignDay/正式档不变，捕获与进程/CLI清理通过；延长时限是否能让同一任务完成仍未判定。
+W7-K任务时限由1800延至3600秒后，真实FreeLLMAPI `auto:reliable`收据`TestResults/20261017-035504`在3602秒时达到loop Deadline：81次模型决策/Provider路由、63个Native动作、282,346输入/8,327输出token，实际路过/探查多个安全Town并仍在前往Town的Native move中；无HTTP/Provider故障、源档未变、Host/Game/session清理通过，Quest未采购/交付。原因是本任务的自然市场搜索样本耗时超过一小时，不是代码崩溃或“目标永远在同一Town”的旧循环。已把`Test-AgentLiveModelLoop`、MCM父循环请求、AgentHost父/子循环统一提高到最多160次决策、7200秒总墙钟上限；单次Provider请求仍限制360秒，Stop/取消仍有效，普通Move/等待没有加入显式时钟动作。`TestResults/20261017-034957`AgentHostPackage此前已通过Safe Passage accepted→`dialogueContinue`合同回归，但2小时预算对真实Quest是否足够仍未判定。
 
 `TestResults/20261016-220612`在Bannerlord启动和模型调用前由FreeLLMAPI配置预检阻止，因本机`/v1/models?available=true`不列`auto:reliable`。对照FreeLLMAPI官方路由文档发现，这是其内置策略别名，不是模型目录项；真正失效的是Harness先按目录做空检查。修正`Get-FreeLLMAPIModelExecutionStatus`并补纯回归，显式接受官方文档中的auto策略别名、继续要求用户profile名出现在目录；`auto:reliable`单测通过，拼写错误profile仍`not-listed`。该结果0模型调用、0Native动作，不能当作Provider或游戏故障，也未验证该策略的实际上游稳定性。
 
