@@ -580,6 +580,10 @@ Harness启动边界核验（`TestResults/20261016-061057`与`061235`）：前次
 
 W7-K真实收据完整性修正：`AgentHostCampaignLoop`完成目标分类后会把执行权交给`AgentHostVillageToolsQuestLoop`；此前子loop终态只返回自己的trace/providerRouteHistory，丢失了父loop第一轮分类调用及其token/路由。现将父级trace、实际路由与token数传入并继续累计，决策编号按全局序号，避免真实模型每轮耗时/token/route证据不完整。`TestResults/20261016-063752`自包含AgentHostPackage通过（Provider 101、Campaign 12、共享决策循环2项，模型调用/Native命令为0），新增回归覆盖分类路由与统计跨loop保留。当前真实Model smoke分类已实测成功，但Quest接受/购买/交付仍未完成。
 
+W7-K真实闭环返回路线断点与修复（2026-10-17）：`TestResults/20261016-232129`真实`auto:reliable`运行确实接受Quest、在`town_V6`通过Native Trade购入工具并读到Journal；随后55次模型决策/47个Native动作后仍停在`town_V6`，Quest仍活动、29日剩余。逐轮trace显示模型不断在同一Town执行`mapSettlementTargets → move town_V6 → menuSelect离开 → mapSettlementTargets`。这不是原版地图移动失效：Host在“工具数量满足”后仍只允许Town目标，已把采购目标类型当成永恒动作白名单；同时`tradeConfirm`清空Journal缓存后又未强制读取新的任务日志。Host现根据Native `questDetails`进度区分路线：欠工具时仅选择安全Town，Native Trade提交后先强制重新读取Journal；确认欠数归零后，`mapSettlementTargets`回执/动作目录/`move`解析器统一仅允许接取任务时从当前Native村庄状态记录的原始Quest-giver Village。来源村庄未观测到时安全失败，不从所有村庄中猜选；没有改原版移动、任务或时钟行为，也未注入世界状态。`TestResults/20261017-014316`的Preflight、Build、AgentHostPackage通过；新增自检覆盖“采购期仅Town”“进度满足后只回原村”“未知来源不猜测”及“交易提交后先读新Journal”。该收据不调用外部模型或Native命令；真实FreeLLMAPI闭环重跑待进行，Quest完成尚未证实。
+
+`TestResults/20261017-014847`真实`auto:reliable`复验确认前述返回路由修复确实在实机生效：模型从蓝色委托自然接取、在Town通过Native Trade买入1件工具、Trade提交后重读Journal，读取交付前Inventory基线，随后仅移动回原`village_V1_1`并经QuickConversation交付；Native活动Quest由1变0。75次决策、58个Native动作、74条真实路由记录，输入/输出265,846/5,299 tokens；CampaignDay 91077.634→91084.115，使用真实FreeLLMAPI路由且未观察到Provider失败。最终验收仍失败关闭：交付后模型推进了“谢谢你”对话，但Host的动作目录因Quest蓝标消失而为空，没能重新打开Native MainHero Inventory；因此工具精确消耗和`73 flax`奖励净差未核实，`inventoryVerifiedAfterTurnIn=false`，不能算任务通过。当前修复是在已记录交付前基线的前提下，即使活动Quest和蓝标已消失，也允许原版`inventoryOpen`→Inventory VM读取；随后仍须核对精确物品差值才开放`done`。该失败为Host后验入口门禁遗漏，不是NPC交付/FreeLLMAPI失败；`TestResults/20261017-025554`Preflight、Build、AgentHostPackage通过。更新后的真实模型复验待进行。
+
 ## 维护规则
 
 - 本文维护技术目标、机制契约、领域架构、长期验收定义和未解事实；不保存项目工作项状态、域完成计数或测试通过快照。

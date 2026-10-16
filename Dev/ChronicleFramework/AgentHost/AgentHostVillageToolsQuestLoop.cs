@@ -22,6 +22,21 @@ internal static class AgentHostVillageToolsQuestLoop
             var targetIds = (safeReceipt["data"]?["mapSettlementTargets"] as JsonArray)?.OfType<JsonObject>().Select(item => ReadString(item, "id")).ToArray() ?? Array.Empty<string?>();
             if (!targetIds.SequenceEqual(new string?[] { "town-2" }, StringComparer.Ordinal))
                 throw new AgentHostException("village-tools-loop-self-test-market-fallback-failed", "Map replanning must expose only fresh safe towns and exclude a town whose tools market was already checked empty.");
+
+            var satisfiedQuestReceipt = new JsonObject
+            {
+                ["action"] = "questDetails", ["status"] = "completed", ["data"] = new JsonObject
+                {
+                    ["journalStages"] = new JsonArray(new JsonObject { ["hasTask"] = true, ["taskName"] = "tools", ["currentProgress"] = 1, ["targetProgress"] = 1 })
+                }
+            };
+            var returnReceipt = BuildSafeReceipt("mapSettlementTargets", targetResponse.RootElement, questDetailsReceipt: satisfiedQuestReceipt, questOriginVillageId: "village-1");
+            var returnIds = (returnReceipt["data"]?["mapSettlementTargets"] as JsonArray)?.OfType<JsonObject>().Select(item => ReadString(item, "id")).ToArray() ?? Array.Empty<string?>();
+            if (!returnIds.SequenceEqual(new string?[] { "village-1" }, StringComparer.Ordinal))
+                throw new AgentHostException("village-tools-loop-self-test-giver-village-receipt-failed", "Once Journal confirms the requested tools are obtained, the safe target receipt must retain only the Native-observed original Quest-giver Village.");
+            var unknownOriginReceipt = BuildSafeReceipt("mapSettlementTargets", targetResponse.RootElement, questDetailsReceipt: satisfiedQuestReceipt);
+            if ((unknownOriginReceipt["data"]?["mapSettlementTargets"] as JsonArray)?.Count != 0)
+                throw new AgentHostException("village-tools-loop-self-test-unknown-origin-fails-closed", "The return phase must not guess among villages when the original Quest-giver settlement was not observed.");
         }
 
         var invalidVillageMove = new JsonObject { ["action"] = "move", ["arguments"] = new JsonObject { ["SettlementId"] = "village_V1_1" } };
@@ -298,6 +313,7 @@ internal static class AgentHostVillageToolsQuestLoop
         var inventoryVerifiedAfterTurnIn = false;
         JsonObject? questDetailsReceipt = null;
         JsonObject? preDeliveryInventoryReceipt = null;
+        string? questOriginVillageId = null;
         string? failure = null;
         string? failureCode = null;
         string? termination = null;
@@ -339,6 +355,11 @@ internal static class AgentHostVillageToolsQuestLoop
 
                 var quests = state["quests"] as JsonArray ?? new JsonArray();
                 var activeQuest = quests.OfType<JsonObject>().FirstOrDefault(IsVillageToolsQuest);
+                var currentSettlementId = ReadString(state["location"] as JsonObject, "currentSettlementId");
+                if (questOriginVillageId is null && !string.IsNullOrWhiteSpace(currentSettlementId) &&
+                    AgentHostVillageToolsQuestPolicy.GetCurrentSettlementType(state) == "village" &&
+                    (activeQuest is not null || AgentHostVillageToolsQuestPolicy.GetAllowedToolsQuestGiverIds(state, previousReceipt, questDetailsReceipt).Count > 0))
+                    questOriginVillageId = currentSettlementId;
                 if (activeQuest is not null)
                 {
                     sawQuestActive = true;
@@ -351,7 +372,7 @@ internal static class AgentHostVillageToolsQuestLoop
                         inventoryVerifiedAfterTurnIn = true;
                 }
 
-                var catalog = AgentHostVillageToolsQuestPolicy.BuildActionCatalog(currentNative!, previousReceipt, preDeliveryInventoryCaptured, questDetailsObservedForActiveQuest, marketsWithoutTools, safePassageBalanceReceipt, questDetailsReceipt, safePassageContinueUsed);
+                var catalog = AgentHostVillageToolsQuestPolicy.BuildActionCatalog(currentNative!, previousReceipt, preDeliveryInventoryCaptured, questDetailsObservedForActiveQuest, marketsWithoutTools, safePassageBalanceReceipt, questDetailsReceipt, safePassageContinueUsed, questOriginVillageId);
                 var controls = AgentHostVillageToolsQuestPolicy.BuildControlCatalog(currentNative!, sawQuestActive, inventoryVerifiedAfterTurnIn);
                 if (catalog.Count == 0 && controls.Count == 0)
                 {
@@ -458,10 +479,11 @@ internal static class AgentHostVillageToolsQuestLoop
                     continue;
                 }
 
-                if (!AgentHostVillageToolsQuestPolicy.TryResolveAction(currentNative!, previousReceipt, decision, out var action, out var arguments, out var rejection, preDeliveryInventoryCaptured, safePassageBalanceReceipt, questDetailsReceipt, safePassageContinueUsed))
+                if (!AgentHostVillageToolsQuestPolicy.TryResolveAction(currentNative!, previousReceipt, decision, out var action, out var arguments, out var rejection, preDeliveryInventoryCaptured, safePassageBalanceReceipt, questDetailsReceipt, safePassageContinueUsed, questOriginVillageId))
                 {
                     rejected++;
-                    feedback = BuildActionPreconditionFeedback(decision, catalog, rejection);
+                    feedback = BuildActionPreconditionFeedback(decision, catalog, rejection,
+                        AgentHostVillageToolsQuestPolicy.GetToolsQuestMapTargetType(questDetailsReceipt));
                     trace.Add(BuildDecisionStep(decisionIndex, decisionStarted, modelRequest, decision, feedback, null, observationAfter: observation));
                     if (rejected > 2) { failure = "The model exceeded the bounded pre-Native rejection allowance."; termination = "rejection-limit"; break; }
                     continue;
@@ -473,7 +495,7 @@ internal static class AgentHostVillageToolsQuestLoop
                     using var actionResponse = await client.ExecuteVillageToolsQuestActionAsync(action!, arguments!, elapsed.Token);
                     if (ReadInt(actionResponse.RootElement, "processId", -1) != gameProcessId)
                         throw new AgentHostException("native-process-mismatch", "Native action receipt came from a different Bannerlord process.");
-                    receipt = BuildSafeReceipt(action!, actionResponse.RootElement, marketsWithoutTools);
+                    receipt = BuildSafeReceipt(action!, actionResponse.RootElement, marketsWithoutTools, questDetailsReceipt, questOriginVillageId);
                 }
                 catch (AgentHostException exception) when (exception.Code == "native-command-timeout")
                 {
@@ -587,7 +609,7 @@ internal static class AgentHostVillageToolsQuestLoop
         }
     };
 
-    internal static JsonObject BuildActionPreconditionFeedback(JsonObject decision, JsonArray actionCatalog, string rejection)
+    internal static JsonObject BuildActionPreconditionFeedback(JsonObject decision, JsonArray actionCatalog, string rejection, string requiredTargetType = "town")
     {
         var feedback = new JsonObject
         {
@@ -599,16 +621,17 @@ internal static class AgentHostVillageToolsQuestLoop
         if (ReadString(decision, "action") != "move") return feedback;
 
         var move = actionCatalog.OfType<JsonObject>().FirstOrDefault(item => ReadString(item, "action") == "move");
-        var townIds = (move?["argumentValues"]?["SettlementId"] as JsonArray)?.OfType<JsonValue>()
+        var allowedSettlementIds = (move?["argumentValues"]?["SettlementId"] as JsonArray)?.OfType<JsonValue>()
             .Select(value => value.TryGetValue<string>(out var id) ? id : null)
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Cast<string>()
             .ToArray() ?? Array.Empty<string>();
-        if (townIds.Length == 0) return feedback;
+        if (allowedSettlementIds.Length == 0) return feedback;
 
         var rejectedId = ReadString(decision["arguments"] as JsonObject, "SettlementId") ?? "the selected settlement";
+        var destination = requiredTargetType == "village" ? "the observed Quest-giver Village" : "a Town merchant";
         feedback["sameActionRetryAllowed"] = true;
-        feedback["requiredNextStep"] = $"The previous move to '{rejectedId}' was rejected before Native because this Quest requires a Town merchant, not a Village. The current move action is still valid; retry move using exactly one safe Town SettlementId from the latest catalog: {string.Join(", ", townIds)}. Do not use a Village, the current location, or any ID outside this list.";
+        feedback["requiredNextStep"] = $"The previous move to '{rejectedId}' was rejected before Native because the current Quest step requires {destination}. The current move action is still valid; retry move using exactly one currently listed SettlementId: {string.Join(", ", allowedSettlementIds)}. Do not use any ID outside this list.";
         return feedback;
     }
 
@@ -666,7 +689,8 @@ internal static class AgentHostVillageToolsQuestLoop
         return end > prefix.Length ? message[prefix.Length..end] : string.Empty;
     }
 
-    internal static JsonObject BuildSafeReceipt(string action, JsonElement response, IReadOnlySet<string>? marketsWithoutTools = null)
+    internal static JsonObject BuildSafeReceipt(string action, JsonElement response, IReadOnlySet<string>? marketsWithoutTools = null,
+        JsonObject? questDetailsReceipt = null, string? questOriginVillageId = null)
     {
         var receipt = new JsonObject { ["action"] = action, ["status"] = ReadString(response, "status"), ["processId"] = ReadInt(response, "processId", -1) };
         if (ReadString(response, "error") is string error) receipt["error"] = error;
@@ -674,12 +698,18 @@ internal static class AgentHostVillageToolsQuestLoop
         {
             var parsed = JsonNode.Parse(data.GetRawText())!.AsObject();
             if (action == "mapSettlementTargets" && parsed["mapSettlementTargets"] is JsonArray targets)
+            {
+                var requiredTargetType = AgentHostVillageToolsQuestPolicy.GetToolsQuestMapTargetType(questDetailsReceipt);
+                var returningToGiverVillage = requiredTargetType == "village";
                 parsed["mapSettlementTargets"] = new JsonArray(targets.OfType<JsonObject>()
                     .Where(IsSafeVisibleTarget)
-                    .Where(item => ReadString(item, "type") == "town")
-                    .Where(item => marketsWithoutTools is null || !marketsWithoutTools.Contains(ReadString(item, "id") ?? string.Empty))
+                    .Where(item => ReadString(item, "type") == requiredTargetType)
+                    .Where(item => !returningToGiverVillage ||
+                        (!string.IsNullOrWhiteSpace(questOriginVillageId) && ReadString(item, "id") == questOriginVillageId))
+                    .Where(item => returningToGiverVillage || marketsWithoutTools is null || !marketsWithoutTools.Contains(ReadString(item, "id") ?? string.Empty))
                     .Take(32)
                     .Select(item => (JsonNode?)item.DeepClone()).ToArray());
+            }
             if (action == "tradeOptions" && parsed["buyOffers"] is JsonArray offers)
                 parsed["buyOffers"] = new JsonArray(offers.OfType<JsonObject>().Where(IsToolsOffer).Take(8).Select(item => (JsonNode?)item.DeepClone()).ToArray());
             if (action == "heroEquipmentOptions" && parsed["rightItems"] is JsonArray inventoryRows)
