@@ -35,11 +35,17 @@ W7-K完整阶段不再先额外运行一次真实模型冒烟：同一免费路�
 
 `TestResults/20261016-140206`（commit `76a30ea`，FreeLLMAPI `auto`）真实模型成功接取`issue_64_quest`并读Journal。它自然抵达萨哥特并打开原版Trade：当前`tradeOptions`目标工具报价为0、Gold 920、尚无交易提交。随后模型在Native目录仅含`tradeCancel`时再次请求`tradeOptions`；Host在发出Native命令前正确拒绝，但当次恢复提示只泛称应选目录中的动作。之后下一次FreeLLMAPI请求收到无Retry-After的HTTP429，模型未能执行取消并寻找另一市场。19次决策、14个Native动作、16次成功回复，累计55,408输入/887输出token；CampaignDay 91077.635→91077.879，Quest仍活动、源档不变，游戏与临时存档清理。contact/timeline完整并已删MP4，共享events.jsonl约0.4MB。
 
-针对该现场轨迹，Host现在只在前一份成功Native`tradeOptions`明确没有合格工具报价、而当前目录含`tradeCancel`时，向真实模型反馈“取消当前未改动的Trade、不要重复查询；之后按新观察决定下一步”，不代替模型执行。`TestResults/20261016-191531`的自包含Host Provider合同自检通过，覆盖空报价、唯一允许动作、无Native副作用及恢复提示进入模型system prompt；这只是Host恢复合同，不代表FreeLLMAPI长程Quest已重跑或完成。
+针对两个现场错误分支，Host现在仅当上一个成功Native`tradeOptions`后Journal仍显示有未交付工具、且当前Native目录严格只含`tradeCancel`时，无论模型错误返回额外动作还是`observeAgain`控制，都反馈“取消未修改的Trade，不要等待或重查，随后用新Native观察再决定”；Host不替模型执行。`TestResults/20261016-191531`覆盖错误动作提示；`TestResults/20261016-205258`自包含Host Provider合同自检扩展覆盖错误控制、未完/已完任务分支及Native零副作用。最新控制反馈尚未由真实模型再次重跑。
 
 `TestResults/20261016-163619`是无游戏Provider冒烟：FreeLLMAPI固定路由`qwen2.5-vl-72b`返回Production目标分类，实际由`ovh/Qwen2.5-VL-72B-Instruct`处理，JSON Schema模式416输入/28输出token、0 Native命令。这只证实一次短分类调用成功，不代表长程Quest稳定；下一次真实任务切片固定此直接路由，减少`auto`在多供应商之间切换带来的变量。
 
 `TestResults/20261016-192233`重跑W7-K真实FreeLLMAPI场景时，Harness正常完成Preflight/Build/Smoke/AgentHostPackage，生成自然可见的工具Quest夹具；模型成功分类后调用`talkToSettlementHero`，Native打开对话，当前可见的是NPC首次见面提问与三项自我介绍回复，尚未显示Quest接取选项。随后实际路由`custom/nvidia/llama-3.2-11b-vision`返回HTTP 502，只有2次成功模型回复/1条Native动作、3,615输入/54输出token，CampaignDay保持91077.635，Quest仍未接受；完整联系表和时间线已生成，MP4自动删除，源档/派生档/进程/session清理通过。该运行没有走到无货市场恢复，不能判定新提示效果；失败发生于Provider调用，不是对话动作的Native拒绝。
+
+之后FreeLLMAPI的只读目录显示`auto`可路由，故将`CHRONICLE_LLM_MODEL=auto`仅覆写于单次Harness进程重跑（不改用户设置）。`TestResults/20261016-194222`仍由FreeLLMAPI返回HTTP429：两个模型回复均成功（Mistral Small分类、NVIDIA Llama执行`talkToSettlementHero`），第三个请求未返回；2决策/1 Native动作/3,601输入/67输出token，尚未收到首次问候的模型回复。Preflight、Build、Smoke、AgentHostPackage及所有临时存档/进程/session清理通过，MP4后处理删除；属于动态路由Provider限流，不是产品动作失败。
+
+为隔离动态路由，本轮另以FreeLLMAPI目录标为`ready`且在前轮`auto`中已成功响应的`mistral-small-3.2-24b`做一次完整真实Campaign（只改当前进程）。`TestResults/20261016-195123`达30分钟Harness上限：25次模型回复/26个决策/20个Native动作，91,787输入/679输出token；接受Quest并读Journal，在萨哥特无工具报价后选择原生`tradeCancel`，查询地图并自然移动至town_V6（CampaignDay 91077.635→91078.588），然后该市场同样无工具。第二次`tradeOptions`后受总时限取消，未采购、未交付；完整收据显示`TaskCanceledException`与1,802.6秒运行，不是HTTP错误或游戏崩溃。MP4有完整联系表/时间线后删除，源fixture/派生档/进程/session清理通过。此次暴露两项需继续处理：无货时模型可错误要求`observeAgain`而当前只允许`tradeCancel`；单场景模型交互成本/时长也使两市场搜索耗尽30分钟门限。
+
+该30分钟运行的本机免费路由调用均成功，并未发生HTTP错误；墙钟主要消耗在25次模型往返（输入累计91,787 token），因此瓶颈是单场景决策/推理时长，而非模型预算扣费或Native动作失败。产品能力仍未证明能在本次有界纵切片内买到并交付。
 
 当`AgentHostCampaignLoop`分类为VillageTools目标并交接给专用Quest loop时，子循环的终态收据必须合并父循环的classifier trace、provider route、token与全局decision编号；不能只显示子循环，遗漏真正的首个模型调用。Provider包回归用合成父收据验证跨循环历史保持，外部模型/Native调用均为0。
 

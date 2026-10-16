@@ -1067,7 +1067,7 @@ internal static class AgentHostVillageToolsQuestPolicy
     private static bool IsConversationLeaveOption(JsonObject option) =>
         ReadString(option, "id")?.StartsWith("player_is_leaving_", StringComparison.Ordinal) == true;
 
-    private static int? GetToolsTaskRemainingCount(JsonObject? receipt)
+    internal static int? GetToolsTaskRemainingCount(JsonObject? receipt)
     {
         if (ReadString(receipt, "action") != "questDetails" || ReadString(receipt, "status") != "completed") return null;
         var task = (receipt?["data"]?["journalStages"] as JsonArray)?.OfType<JsonObject>()

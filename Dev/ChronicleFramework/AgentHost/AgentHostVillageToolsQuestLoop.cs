@@ -49,13 +49,31 @@ internal static class AgentHostVillageToolsQuestLoop
             ["data"] = new JsonObject { ["buyOffers"] = new JsonArray() }
         };
         var noToolsTradeCatalog = new JsonArray(new JsonObject { ["action"] = "tradeCancel", ["arguments"] = new JsonArray() });
-        var unavailableTradeFeedback = BuildProviderActionUnavailableFeedback(
+        var unavailableTradeFeedback = BuildProviderDecisionUnavailableFeedback(
             "tradeOptions",
+            1,
             noToolsTradeCatalog,
             emptyToolsTradeReceipt,
             null,
             "Action 'tradeOptions' is not in the current Native action catalog [tradeCancel].");
         var unavailableTradePrompt = AgentHostDecisionCycle.BuildVillageToolsQuestSystemPrompt(new JsonObject { ["decisionFeedback"] = unavailableTradeFeedback });
+        var unavailableTradeControlFeedback = BuildProviderDecisionUnavailableFeedback(
+            "observeAgain",
+            1,
+            noToolsTradeCatalog,
+            emptyToolsTradeReceipt,
+            null,
+            "observeAgain is not currently listed; do not wait unless the current control catalog allows it.",
+            "provider-control-unavailable");
+        var unavailableTradeControlPrompt = AgentHostDecisionCycle.BuildVillageToolsQuestSystemPrompt(new JsonObject { ["decisionFeedback"] = unavailableTradeControlFeedback });
+        var completedTradeTaskFeedback = BuildProviderDecisionUnavailableFeedback(
+            "observeAgain",
+            0,
+            noToolsTradeCatalog,
+            emptyToolsTradeReceipt,
+            null,
+            "observeAgain is not currently listed; do not wait unless the current control catalog allows it.",
+            "provider-control-unavailable");
         if (ReadBoolean(moveFeedback, "nativeActionSent") || ReadBoolean(moveFeedback, "sameActionRetryAllowed") != true ||
             !ReadString(moveFeedback, "requiredNextStep")!.Contains("town_V1, town_V6", StringComparison.Ordinal) ||
             !movePrompt.Contains("You may repeat that action only with corrected arguments", StringComparison.Ordinal) ||
@@ -64,10 +82,16 @@ internal static class AgentHostVillageToolsQuestLoop
             throw new AgentHostException("village-tools-loop-self-test-town-move-argument-recovery-failed", "A rejected move to the current Village must remain Native-side-effect-free and explicitly permit retrying move only with the current safe Town IDs.");
         if (ReadBoolean(unavailableTradeFeedback, "nativeActionSent") ||
             !ReadString(unavailableTradeFeedback, "requiredNextStep")!.Contains("tradeCancel", StringComparison.Ordinal) ||
-            !ReadString(unavailableTradeFeedback, "requiredNextStep")!.Contains("do not repeat tradeOptions", StringComparison.Ordinal) ||
+            !ReadString(unavailableTradeFeedback, "requiredNextStep")!.Contains("do not wait or requery", StringComparison.Ordinal) ||
             !unavailableTradePrompt.Contains("tradeCancel", StringComparison.Ordinal) ||
-            !unavailableTradePrompt.Contains("do not repeat tradeOptions", StringComparison.Ordinal))
-            throw new AgentHostException("village-tools-loop-self-test-empty-market-recovery-failed", "Empty-market recovery must instruct the model to use the only listed tradeCancel action and not repeat tradeOptions. actual=" + ReadString(unavailableTradeFeedback, "requiredNextStep") + "; promptContainsCancel=" + unavailableTradePrompt.Contains("tradeCancel", StringComparison.Ordinal) + "; promptContainsNoRetry=" + unavailableTradePrompt.Contains("Do not repeat tradeOptions", StringComparison.Ordinal) + ".");
+            !unavailableTradePrompt.Contains("do not wait or requery", StringComparison.Ordinal) ||
+            ReadBoolean(unavailableTradeControlFeedback, "nativeActionSent") ||
+            !ReadString(unavailableTradeControlFeedback, "requiredNextStep")!.Contains("tradeCancel", StringComparison.Ordinal) ||
+            !ReadString(unavailableTradeControlFeedback, "requiredNextStep")!.Contains("do not wait or requery", StringComparison.Ordinal) ||
+            !unavailableTradeControlPrompt.Contains("tradeCancel", StringComparison.Ordinal) ||
+            !unavailableTradeControlPrompt.Contains("do not wait or requery", StringComparison.Ordinal) ||
+            ReadString(completedTradeTaskFeedback, "requiredNextStep")!.Contains("do not wait or requery", StringComparison.Ordinal))
+            throw new AgentHostException("village-tools-loop-self-test-empty-market-recovery-failed", "Empty-market recovery must instruct the model to use the only listed tradeCancel action and not wait or requery. actual=" + ReadString(unavailableTradeFeedback, "requiredNextStep") + "; promptContainsCancel=" + unavailableTradePrompt.Contains("tradeCancel", StringComparison.Ordinal) + "; promptContainsNoRetry=" + unavailableTradePrompt.Contains("do not wait or requery", StringComparison.Ordinal) + ".");
 
         var questReceipt = new JsonObject
         {
@@ -374,7 +398,9 @@ internal static class AgentHostVillageToolsQuestLoop
                     decisions++;
                     rejected++;
                     var currentConversation = currentNative?["state"]?["context"]?["conversation"] as JsonObject;
-                    feedback = BuildProviderActionUnavailableFeedback(ExtractUnavailableActionName(exception.Message), catalog, previousReceipt, currentConversation, exception.Message, exception.Code);
+                    feedback = BuildProviderDecisionUnavailableFeedback(ExtractUnavailableActionName(exception.Message),
+                        AgentHostVillageToolsQuestPolicy.GetToolsTaskRemainingCount(questDetailsReceipt) ?? 0,
+                        catalog, previousReceipt, currentConversation, exception.Message, exception.Code);
                     trace.Add(new JsonObject { ["iteration"] = decisionIndex, ["stage"] = "decision-rejected-before-native", ["feedback"] = feedback.DeepClone() });
                     continue;
                 }
@@ -586,7 +612,7 @@ internal static class AgentHostVillageToolsQuestLoop
         return feedback;
     }
 
-    internal static JsonObject BuildProviderActionUnavailableFeedback(string attemptedAction, JsonArray actionCatalog, JsonObject? previousReceipt,
+    internal static JsonObject BuildProviderDecisionUnavailableFeedback(string attemptedAction, int remainingTools, JsonArray actionCatalog, JsonObject? previousReceipt,
         JsonObject? currentConversation, string message, string code = "provider-action-unavailable")
     {
         var actionName = string.IsNullOrWhiteSpace(attemptedAction) ? "<unknown>" : attemptedAction;
@@ -600,11 +626,13 @@ internal static class AgentHostVillageToolsQuestLoop
             ? "No Native action is currently listed. Do not repeat an action; wait for or request a fresh Native observation only through an explicitly listed control."
             : $"Action '{actionName}' is not listed in the current Native catalog. Choose only one listed action: {string.Join(", ", allowedActions)}. Do not repeat the rejected action.";
 
-        if (code == "provider-action-unavailable" && actionName == "tradeOptions" &&
-            ReadString(previousReceipt, "action") == "tradeOptions" && ReadString(previousReceipt, "status") == "completed" &&
-            !AgentHostVillageToolsQuestPolicy.HasCurrentToolsBuyOffer(previousReceipt) && allowedActions.Contains("tradeCancel", StringComparer.Ordinal))
+        var emptyToolsTradeHasOnlyCancel = ReadString(previousReceipt, "action") == "tradeOptions" &&
+            ReadString(previousReceipt, "status") == "completed" &&
+            remainingTools > 0 &&
+            allowedActions.SequenceEqual(new[] { "tradeCancel" }, StringComparer.Ordinal);
+        if ((code is "provider-action-unavailable" or "provider-control-unavailable") && emptyToolsTradeHasOnlyCancel)
         {
-            requiredNextStep = "The last Native tradeOptions receipt contains no eligible offer for the requested tools, and tradeCancel is the only listed action. Select tradeCancel with empty arguments to close this unchanged Trade screen; do not repeat tradeOptions. After its receipt, use the fresh Native state and catalog to choose the next step.";
+            requiredNextStep = "The last Native tradeOptions receipt has no currently usable offer for the remaining requested tools, and tradeCancel is the only listed action. Select tradeCancel with empty arguments to close this unchanged Trade screen; do not wait or requery. After its receipt, use the fresh Native state and catalog to choose the next step.";
         }
         else if (code == "provider-action-unavailable" && currentConversation is not null)
         {

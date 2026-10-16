@@ -554,11 +554,17 @@ W7-K真实模型分类/入口复验：
 
 `TestResults/20261016-140206`真实FreeLLMAPI `auto`模型在19次决策/14个Native动作后接受`issue_64_quest`、读Journal、自然到达萨哥特并打开Native Trade。`tradeOptions`显示目标工具报价为0、Gold 920、无交易提交；模型随后在Native目录仅含`tradeCancel`时错误重复`tradeOptions`，Host在发出Native命令前拒绝，下一次模型请求才收到无Retry-After的HTTP429。16次成功回复累计55,408输入/887输出token；Quest仍活动、CampaignDay 91077.635→91077.879、源fixture/游戏清理通过，contact/timeline完整且MP4删除。该现场同时揭示模型未遵守目录、Host恢复提示过泛，以及随后Provider限流三个不同环节；不能归为Native交易动作失败。
 
-修正后的`AgentHostVillageToolsQuestLoop`只在上轮Native交易报价已明确无合格任务工具且当前唯一目录动作是`tradeCancel`时，生成具体的恢复提示，要求模型关闭未修改的Trade后依据新Native观察自行决定后续行动；Host不自动替模型取消。`TestResults/20261016-191531`的自包含Host Provider合同检查通过，覆盖拒绝前无Native副作用与恢复提示精确性；尚未用真实模型重测这一恢复路径。
+`TestResults/20261016-191531`的自包含Host Provider合同检查通过：当真实模型返回当前目录外的`tradeOptions`、上一份Native Trade收据明确无合格工具、且当前唯一动作是`tradeCancel`时，Host拒绝命令并把精确的原生取消恢复步骤写入下一次模型提示，不替模型执行。
 
 `TestResults/20261016-163619`无游戏FreeLLMAPI Provider冒烟固定`qwen2.5-vl-72b`，实际路由`ovh/Qwen2.5-VL-72B-Instruct`，JSON Schema输出完成目标分类（416输入/28输出token，0 Native命令）。这是选定下一真实模型路由的单次健康证据，不构成长程能力验收。
 
 `TestResults/20261016-192233`在提交`38a3bb8`后重跑真实W7-K纵切片：Preflight/Build/Smoke/AgentHostPackage均通过；模型以FreeLLMAPI配置的`nvidiallama-3.2-11b-vision`成功分类并执行`talkToSettlementHero`。原生对话当前仍是首次见面提问，3个自我介绍选项可点，Quest尚未接受；随后实际FreeLLMAPI路由`custom/nvidia/llama-3.2-11b-vision`返回HTTP502，2次成功回复/1 Native动作、3,615输入/54输出token、CampaignDay未推进。录像完整后已留contact/timeline并删除MP4，源fixture、派生存档、游戏进程和CLI session清理均通过。该Provider失败发生在进入Quest选项之前，没有验证空市场恢复提示；不得把它记为模型选择错误或Native动作失败。
+
+`TestResults/20261016-194222`的单次FreeLLMAPI `auto`重跑中，Mistral Small完成目标分类、NVIDIA Llama完成Native头人对话，但第三次请求返回HTTP429；2次模型回复/1 Native动作，Quest尚未接受，完整Fixture/进程/session清理通过。此为动态路由Provider中断。
+
+固定FreeLLMAPI `mistral-small-3.2-24b`的`TestResults/20261016-195123`在30分钟Harness时限内完成25次模型回复/26个决策/20个Native动作，共91,787输入/679输出token。所有Provider请求均成功，约1,744秒耗在模型往返；没有因路由/HTTP错误停止。实际完成Quest接受、Journal读取、萨哥特Trade无货后由模型调用`tradeCancel`、离开后通过Native地图目标和Move自然抵达另一Town；CampaignDay 91077.635→91078.588。第二个市场town_V6也无工具，模型在当前仅允许`tradeCancel`时尝试`observeAgain`；Host以通用控制拒绝后，模型没有足够剩余时间完成恢复/采购，30分钟上限以`TaskCanceledException`终止。任务未采购/交付；源档、派生档、游戏与CLI session清理通过，视频索引后删除。
+
+该真实控制错误促使空市场恢复条件覆盖`provider-action-unavailable`与`provider-control-unavailable`两种拒绝；仅当上一份成功Native`tradeOptions`后Journal仍显示有未交付工具，且唯一当前动作严格等于`tradeCancel`时，提示模型取消而非重复查询/等待；若剩余需求为0则不误导取消去找货。`TestResults/20261016-205258`的AgentHostPackage Provider自检通过，覆盖两类拒绝、任务剩余数量门控与Native零副作用；该最新控制提示还没有真实模型复测。
 
 Harness启动边界核验（`TestResults/20261016-061057`与`061235`）：前次Detached完整阶段在Smoke冷启动Steam时被“Unable to initialize Steam API”弹窗挡住，Module/Lifecycle未加载，不是任务代码崩溃；保留已有Steam进程后第二次Smoke正常加载Chronicle assembly和Campaign lifecycle，Harness还自动确认“mod change detected / deleting shader cache”提示，但普通`Smoke`的45秒启动门限在GameStart前超时（`CrashDetected=false`、`ProcessExitedUnexpectedly=false`、没有正式存档修改）。W7-K完整阶段配置240秒Smoke预算，不等于上述45秒单独Phase；下一次完整阶段应在当前Steam会话下验证这条启动链，而不是用单独Smoke超时判定失败。
 
