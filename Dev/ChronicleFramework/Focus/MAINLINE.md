@@ -566,6 +566,10 @@ W7-K真实模型分类/入口复验：
 
 为让同一自治任务在原生可见世界中有时间搜索多个市场并回到委托人，已依据该运行将W7-K的AgentHost MCM请求、父循环、Quest子循环与真实Harness总时限从1800提高到3600秒；仍为100次模型决策上限、单请求360秒和可用Stop动作。`TestResults/20261016-211209`Docs与`TestResults/20261016-211314`AgentHostPackage通过并静态锁定四层上限一致。首次3600秒真实测试`TestResults/20261016-214133`未触及该上限：第5次模型请求收到Mistral/OVH HTTP502及一次失败fallback，5次回复/4条Native动作后安全停止，CampaignDay/正式档不变，捕获与进程/CLI清理通过；延长时限是否能让同一任务完成仍未判定。
 
+`TestResults/20261016-220612`在Bannerlord启动和模型调用前由FreeLLMAPI配置预检阻止，因本机`/v1/models?available=true`不列`auto:reliable`。对照FreeLLMAPI官方路由文档发现，这是其内置策略别名，不是模型目录项；真正失效的是Harness先按目录做空检查。修正`Get-FreeLLMAPIModelExecutionStatus`并补纯回归，显式接受官方文档中的auto策略别名、继续要求用户profile名出现在目录；`auto:reliable`单测通过，拼写错误profile仍`not-listed`。该结果0模型调用、0Native动作，不能当作Provider或游戏故障，也未验证该策略的实际上游稳定性。
+
+`TestResults/20261016-221920`显示同一配置还有第二处Harness误拒绝：在修正首个路由状态helper后，`Test-AgentLiveModelLoop.ps1`仍用字符串精确匹配`/v1/models?available=true`模型行，因而启动前再次拒绝`auto:reliable`，0模型调用/0Native动作。现改用router-aware状态函数完成预检，并保持未知profile拒绝；需要重新运行Docs和真实场景验证全路径。
+
 该真实控制错误促使空市场恢复条件覆盖`provider-action-unavailable`与`provider-control-unavailable`两种拒绝；仅当上一份成功Native`tradeOptions`后Journal仍显示有未交付工具，且唯一当前动作严格等于`tradeCancel`时，提示模型取消而非重复查询/等待；若剩余需求为0则不误导取消去找货。`TestResults/20261016-205258`的AgentHostPackage Provider自检通过，覆盖两类拒绝、任务剩余数量门控与Native零副作用；该最新控制提示还没有真实模型复测。
 
 Harness启动边界核验（`TestResults/20261016-061057`与`061235`）：前次Detached完整阶段在Smoke冷启动Steam时被“Unable to initialize Steam API”弹窗挡住，Module/Lifecycle未加载，不是任务代码崩溃；保留已有Steam进程后第二次Smoke正常加载Chronicle assembly和Campaign lifecycle，Harness还自动确认“mod change detected / deleting shader cache”提示，但普通`Smoke`的45秒启动门限在GameStart前超时（`CrashDetected=false`、`ProcessExitedUnexpectedly=false`、没有正式存档修改）。W7-K完整阶段配置240秒Smoke预算，不等于上述45秒单独Phase；下一次完整阶段应在当前Steam会话下验证这条启动链，而不是用单独Smoke超时判定失败。

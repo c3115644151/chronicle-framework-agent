@@ -118,6 +118,10 @@ W7-K实时委托单次循环仍有硬上限：最多100次模型决策、单次�
 
 延长后的第一次真实运行`TestResults/20261016-214133`并未触及一小时上限：固定Mistral路由在607秒、5次成功回复/4个Native动作后，于NPC Quest对话中返回FreeLLMAPI HTTP502（同一OVH路由的1次fallback亦报错）。源夹具/正式档、CampaignDay和Quest状态未改变；完整录屏关键帧、游戏/Host/CLI清理通过。该结果不能验证一小时门限是否足够，也不能归因于Quest动作或模型选择。
 
+官方FreeLLMAPI API文档定义`auto:reliable`为偏向近期成功率的路由策略；本地catalog不会把内置auto策略作为`/v1/models?available=true`中的普通模型行返回。Harness `Get-FreeLLMAPIProfile.ps1`已修正为接受文档列出的策略别名，同时仍拒绝拼错的profile；纯回归通过。`TestResults/20261016-221920`随后暴露另一处独立的精确名单门禁：`Test-AgentLiveModelLoop.ps1`仍要求配置ModelId必须逐字出现在available rows，因而在Bannerlord/模型调用前拒绝`auto:reliable`。现已改为复用router-aware状态函数，保持未知profile fail-fast；当前Docs会锁定这一条，尚待重新实测网关策略路由。
+
+`TestResults/20261016-220612`在运行游戏前的模型配置预检失败，0次模型请求/0条Native动作；本机FreeLLMAPI目录没有返回策略路由`auto:reliable`这一行，但官方路由文档明确支持该内置策略。根因是Harness的`Get-FreeLLMAPIModelExecutionStatus`在检查空目录前就返回`not-listed`，误把未列出的策略路由当作不存在模型。现已对文档列出的`auto:fast/reliable/...`策略显式判为router；命名的`auto:<profile>`仍必须存在于模型目录，拼错profile仍快速拒绝。纯本地回归验证`auto:reliable`通过、typo profile仍拒绝；此轮没有实际调用模型。参见[FreeLLMAPI路由接口文档](https://github.com/tashfeenahmed/freellmapi/blob/main/docs/en/api/01-rest-api.md)。
+
 Project采用最少任务状态：`Todo`表示尚未开始（是否被阻塞看Issue原生dependency关系），`In Progress`表示唯一当前工作（最多一项），`Done`表示验收标准已满足且Issue附有commit/结果摘要。任务清单只记录本项目内容工作（原版系统研究、玩法设计、Mod能力和面向玩家的验收）；纯Agent/Harness/文档/流程重构是内部维护，不作为产品里程碑或任务卡计数。W1用一个父Issue持有跨域审计和退出标准，子Issue只写独有的系统范围；W2-W8由原生Issue dependencies排序，标题前缀提供阶段标识，不再维护重复的自定义Phase/Gate字段。
 
 任务工作流由Agent在明确边界点同步，而非由Harness轮询：开始前从Project确认唯一活动Issue、依赖及验收；仅执行该Issue范围；本地Harness验证并记录commit/测试证据；只有验收条件满足时，Agent才更新Issue为Done并附上commit与结果摘要。暂缓、阻塞或范围变化直接更新对应Issue/依赖，不另开状态文档。没有活动Issue时，Agent选择可执行且依赖已解除的下一项后再开始。

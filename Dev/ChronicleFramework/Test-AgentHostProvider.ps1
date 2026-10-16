@@ -41,8 +41,10 @@ if (-not (Test-FreeLLMAPIModelExecutionReady -ModelRows $readinessFixture -Model
     (Test-FreeLLMAPIModelExecutionReady -ModelRows $readinessFixture -ModelId 'missing-key-model') -or
     (Test-FreeLLMAPIModelExecutionReady -ModelRows $readinessFixture -ModelId 'unknown-model') -or
     (Get-FreeLLMAPIModelExecutionStatus -ModelRows $readinessFixture -ModelId 'absent-model') -ne 'not-listed' -or
-    -not (Test-FreeLLMAPIModelExecutionReady -ModelRows @([pscustomobject]@{ id = 'auto:noema-free' }) -ModelId 'auto:noema-free')) {
-    throw 'FreeLLMAPI execution-readiness preflight did not reject exhausted, missing-key, unknown, or absent routes while retaining the named router entry.'
+    (Get-FreeLLMAPIModelExecutionStatus -ModelRows $readinessFixture -ModelId 'auto:typo-profile') -ne 'not-listed' -or
+    -not (Test-FreeLLMAPIModelExecutionReady -ModelRows @([pscustomobject]@{ id = 'auto:noema-free' }) -ModelId 'auto:noema-free') -or
+    -not (Test-FreeLLMAPIModelExecutionReady -ModelRows $readinessFixture -ModelId 'auto:reliable')) {
+    throw 'FreeLLMAPI execution-readiness preflight did not reject exhausted, missing-key, unknown, absent or typo router entries while retaining named profiles and documented auto strategy aliases.'
 }
 $freeLlmApiProfile = Initialize-FreeLLMAPIProfile
 $model = [string]$freeLlmApiProfile.RequestedModelId

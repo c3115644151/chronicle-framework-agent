@@ -60,11 +60,10 @@ try {
 }
 catch { throw 'FreeLLMAPI /v1/models available-only preflight failed before Campaign launch; no inference request was sent and no fixture was started.' }
 finally { $freeLlmApiKey = $null }
-$availableModelIds = @($availableModelsResponse.data | ForEach-Object { [string]$_.id })
-if ([string]$env:CHRONICLE_LLM_MODEL -notin $availableModelIds) {
+$modelExecutionStatus = Get-FreeLLMAPIModelExecutionStatus -ModelRows @($availableModelsResponse.data) -ModelId ([string]$env:CHRONICLE_LLM_MODEL)
+if ($modelExecutionStatus -eq 'not-listed') {
     throw 'The configured model/route is not listed by FreeLLMAPI as currently available; no inference request was sent and no fixture was started.'
 }
-$modelExecutionStatus = Get-FreeLLMAPIModelExecutionStatus -ModelRows @($availableModelsResponse.data) -ModelId ([string]$env:CHRONICLE_LLM_MODEL)
 if ($modelExecutionStatus -notin @('ready', 'router')) {
     throw "The configured FreeLLMAPI route is not executable now (execution_status=$modelExecutionStatus); no inference request was sent and no fixture was started. Wait for provider recovery or select another ready route."
 }

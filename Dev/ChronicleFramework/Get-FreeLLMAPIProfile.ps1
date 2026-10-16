@@ -5,6 +5,14 @@ function Get-FreeLLMAPIModelExecutionStatus {
         [Parameter(Mandatory = $true)][string]$ModelId
     )
 
+    $routerStrategies = @('auto:smart', 'auto:fast', 'auto:cheap', 'auto:reliable', 'auto:balanced',
+        'auto:fastest', 'auto:speed', 'auto:smartest', 'auto:cheapest', 'auto:budget')
+    if ($routerStrategies -contains $ModelId) { return 'router' }
+
+    $routerStrategies = @('auto:smart', 'auto:fast', 'auto:cheap', 'auto:reliable', 'auto:balanced',
+        'auto:fastest', 'auto:speed', 'auto:smartest', 'auto:cheapest', 'auto:budget')
+    if ($routerStrategies -contains $ModelId) { return 'router' }
+
     $model = $ModelRows | Where-Object { [string]$_.id -ceq $ModelId } | Select-Object -First 1
     if ($null -eq $model) { return 'not-listed' }
 
