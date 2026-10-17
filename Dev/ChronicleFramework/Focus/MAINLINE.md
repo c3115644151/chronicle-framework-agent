@@ -592,6 +592,8 @@ W7-K第二次真实验收在路上触发BanditFaction遭遇（`TestResults/20261
 
 首次 Safe Passage Continue 自检只覆盖Host动作排序。真实截图`TestResults/20261017-025918/AgentHostCampaignRun-01/LiveModelEngine-failure.bmp`证实 Offer accepted 后界面仍显示`encounter_meeting`、成功提示和“点击继续”，Native回执也显示accepted/Gold差，但不能证明继续后遭遇退出。正式自检现让Native Fake在Offer后保持Encounter与空选项/结果对白，仅在接到一次`dialogueContinue`后清除；`TestResults/20261017-034957`AgentHostPackage通过且动作顺序锁定，FreeLLMAPI真实复验还待进行。
 
+`TestResults/20261017-161513`是一次未进入模型/Native循环的前置清理失败，不是Quest运行结果：Preflight、Build、Smoke、AgentHostPackage均通过；真实阶段发现旧CLI `session.json`记录PID 38824，但该PID与所有Bannerlord进程已退出，另有同一轮`ChronicleW7K-1d8fca53a4c749ba95eb064d2887df17.sav`临时派生档残留。通过Agent-Cli原生`stop`恢复/清除CLI会话和测试EngineConfig备份；新增评测脚本cleanup-only恢复入口，只认`ChronicleW7K-`前缀、验证Game Saves完整路径，且要求无Bannerlord和CLI session后才删派生档。精确该档已删除；Build/Docs相关检查通过（`TestResults/20261017-162743`）。没有改正式存档、没有外部模型调用或Native游戏动作。下一次重跑可直接检查真实Quest路径，不会被这份旧session抢先挡住。
+
 ## 维护规则
 
 - 本文维护技术目标、机制契约、领域架构、长期验收定义和未解事实；不保存项目工作项状态、域完成计数或测试通过快照。

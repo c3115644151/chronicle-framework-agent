@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.214'
+$contractVersion = '7.215'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -291,6 +291,13 @@ if ($harnessScript -notmatch "'AgentHostVillageToolsQuestEvaluation' \{ @\('Pref
     $agentHostCampaignLoopEvaluationSource -notmatch 'Test-AgentVillageToolsQuestFixturePreparation' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'VillageToolsQuestInventoryDeltaVerified') {
     throw 'The Host village-tools quest path must remain opt-in and verify the current visible quest, native actions and exact pre/post inventory deltas before allowing completion.'
+}
+if ($agentHostCampaignLoopEvaluationSource -notmatch '\[string\]\$CleanupPreparedSaveName' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'StartsWith\(''ChronicleW7K-''' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'Bannerlord process is running' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'Agent CLI session is active' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'escaped the Harness-owned ChronicleW7K Game Saves boundary') {
+    throw 'Recovery cleanup may delete only a ChronicleW7K disposable fixture after both Bannerlord and its CLI session are absent, and must stay inside Game Saves.'
 }
 if ($agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S]{0,900}\$env:CHRONICLE_LLM_TIMEOUT_SECONDS = ''360''' -or
     $agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S]{0,900}\$env:CHRONICLE_LLM_MAX_TOKENS = ''1024''') {

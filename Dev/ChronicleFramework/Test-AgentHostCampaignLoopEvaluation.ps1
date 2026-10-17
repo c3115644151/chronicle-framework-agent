@@ -2,19 +2,41 @@
 param(
     [ValidateRange(1,3)][int]$Runs = 1,
     [ValidateRange(5,30)][int]$FrameRate = 10,
+    [string]$CleanupPreparedSaveName,
     [switch]$VillageToolsQuest
 )
 
 $ErrorActionPreference = 'Stop'
 $liveTest = Join-Path $PSScriptRoot 'Test-AgentLiveModelLoop.ps1'
 $outerTemp = $env:CHRONICLE_HARNESS_TEMP
-if (-not $outerTemp -or -not (Test-Path -LiteralPath $outerTemp -PathType Container)) { throw 'Agent Host Campaign loop evaluation requires an active Run-Harness TestResults temp directory.' }
-$evaluationRoot = Split-Path -Parent $outerTemp
+if ([string]::IsNullOrWhiteSpace($CleanupPreparedSaveName)) {
+    if (-not $outerTemp -or -not (Test-Path -LiteralPath $outerTemp -PathType Container)) { throw 'Agent Host Campaign loop evaluation requires an active Run-Harness TestResults temp directory.' }
+    $evaluationRoot = Split-Path -Parent $outerTemp
+}
+else { $evaluationRoot = $null }
 $documentsPath = [Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)
 if ([string]::IsNullOrWhiteSpace($documentsPath)) { throw 'Windows Documents directory could not be resolved for Agent Host cleanup checks.' }
 $protocolRoot = Join-Path $documentsPath 'Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent'
 $sessionPath = Join-Path $protocolRoot 'session.json'
 $results = [System.Collections.Generic.List[object]]::new()
+
+if (-not [string]::IsNullOrWhiteSpace($CleanupPreparedSaveName)) {
+    if (-not $CleanupPreparedSaveName.StartsWith('ChronicleW7K-', [StringComparison]::Ordinal)) { throw 'Cleanup-only mode accepts only a Harness-owned ChronicleW7K prepared save name.' }
+    if (Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue) { throw 'Refusing prepared-save cleanup while a Bannerlord process is running.' }
+    if (Test-Path -LiteralPath $sessionPath -PathType Leaf) { throw 'Refusing prepared-save cleanup while a Chronicle Agent CLI session is active.' }
+    $saveDirectory = Join-Path $documentsPath 'Mount and Blade II Bannerlord\Game Saves'
+    $saveRoot = [IO.Path]::GetFullPath($saveDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    $preparedSavePath = [IO.Path]::GetFullPath((Join-Path $saveRoot ($CleanupPreparedSaveName + '.sav')))
+    if (-not $preparedSavePath.StartsWith($saveRoot, [StringComparison]::OrdinalIgnoreCase) -or -not [IO.Path]::GetFileNameWithoutExtension($preparedSavePath).StartsWith('ChronicleW7K-', [StringComparison]::Ordinal)) { throw 'Prepared save path escaped the Harness-owned ChronicleW7K Game Saves boundary.' }
+    $removed = -not (Test-Path -LiteralPath $preparedSavePath -PathType Leaf)
+    if (-not $removed) {
+        [IO.File]::Delete($preparedSavePath)
+        $removed = -not (Test-Path -LiteralPath $preparedSavePath -PathType Leaf)
+    }
+    if (-not $removed) { throw 'Harness-owned prepared save still exists after cleanup.' }
+    [pscustomobject]@{ CleanupOnly = $true; PreparedSaveName = $CleanupPreparedSaveName; Removed = $true; BannerlordProcessCount = 0; AgentSessionPresent = $false } | ConvertTo-Json -Compress
+    exit 0
+}
 
 for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
     if (Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue) { throw "Agent Host Campaign run $runIndex found a Bannerlord process left by a previous run." }
