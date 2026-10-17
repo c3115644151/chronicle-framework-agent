@@ -31,6 +31,8 @@ internal static class ProviderContractSelfTest
         catch (Exception exception) { throw new AgentHostException("village-tools-policy-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
         try { results.AddRange(await AgentHostVillageToolsQuestLoop.RunContractSelfTestsAsync()); }
         catch (Exception exception) { throw new AgentHostException("village-tools-loop-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
+        try { results.AddRange(await AgentHostEstablishYourClanGoalLoop.RunContractSelfTestsAsync()); }
+        catch (Exception exception) { throw new AgentHostException("establish-clan-planner-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
         results.AddRange(AgentHostCampaignLoop.RunContractSelfTests());
         results.AddRange(AgentHostBattleSimulationLoop.RunContractSelfTests());
         try { results.AddRange(await AgentHostBattleSimulationLoop.RunTransportSelfTestsAsync()); }
@@ -272,11 +274,13 @@ internal static class ProviderContractSelfTest
         await VerifyGoalClassificationAsync(settings, "supportedVillageToolsQuestGoal", "supported-village-tools-quest", ["supportedMapArrivalGoal", "supportedVillageToolsQuestGoal", "unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "supportedBattleSimulationGoal", "supported-battle-simulation", ["supportedMapArrivalGoal", "supportedVillageToolsQuestGoal", "supportedBattleSimulationGoal", "unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "supportedBattleAndCaptivityGoal", "supported-battle-and-captivity", ["supportedMapArrivalGoal", "supportedVillageToolsQuestGoal", "supportedBattleSimulationGoal", "supportedBattleAndCaptivityGoal", "unsupportedGoal"], results);
+        await VerifyGoalClassificationAsync(settings, "supportedEstablishYourClanGoal", "supported-establish-your-clan", ["supportedEstablishYourClanGoal", "unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "unsupportedGoal", "unsupported", ["supportedMapArrivalGoal", "unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "supportedMapArrivalGoal", "provider-goal-classification-unavailable", ["unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "supportedVillageToolsQuestGoal", "provider-goal-classification-unavailable", ["supportedMapArrivalGoal", "unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "supportedBattleSimulationGoal", "provider-goal-classification-unavailable", ["supportedMapArrivalGoal", "unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "supportedBattleAndCaptivityGoal", "provider-goal-classification-unavailable", ["supportedMapArrivalGoal", "unsupportedGoal"], results);
+        await VerifyGoalClassificationAsync(settings, "supportedEstablishYourClanGoal", "provider-goal-classification-unavailable", ["unsupportedGoal"], results);
         VerifyProductionGoalClassificationCatalogNormalization(results);
         VerifyDecisionSchemaBindsCurrentArgumentValues(results);
 
@@ -927,11 +931,22 @@ internal static class ProviderContractSelfTest
                 "supportedVillageToolsQuestGoal" => "Complete the currently visible village tools quest.",
                 "supportedBattleSimulationGoal" => "Resolve one currently visible hostile bandit encounter using Campaign Send Troops and verify actual outcomes.",
                 "supportedBattleAndCaptivityGoal" => "Resolve a Native battle and continue the actual MainHero captivity process until free on the map.",
+                "supportedEstablishYourClanGoal" => "Read the active original StoryMode Establish Your Clan quest and select one currently unmet objective.",
                 _ => "Move to any visible safe settlement."
             },
             goalScopeClassificationRequired = expectedClassification != "provider-goal-classification-unavailable",
             goalScopeContract = "native-map-arrival-v1",
-            observation = new { scope = "goal-classification-test", state = new { gameState = "MapState" } },
+            observation = new
+            {
+                scope = "goal-classification-test",
+                state = new
+                {
+                    gameState = "MapState",
+                    quests = allowedControls.Contains("supportedEstablishYourClanGoal")
+                        ? new[] { new { id = "rebuild_player_clan_storymode_quest", title = "Establish Your Clan" } }
+                        : Array.Empty<object>()
+                }
+            },
             allowedActions = Array.Empty<object>(),
             allowedControls
         }));
@@ -944,7 +959,7 @@ internal static class ProviderContractSelfTest
                 throw new AgentHostException("provider-goal-classification-self-test-failed", "Goal classification did not stay within its listed control catalog.");
             using var body = JsonDocument.Parse(handler.LastRequestBody ?? throw new AgentHostException("provider-goal-classification-prompt-missing", "The classification request was not sent."));
             var system = body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString() ?? string.Empty;
-            if (!system.Contains("required final outcome", StringComparison.Ordinal) || !system.Contains("VillageNeedsToolsIssue", StringComparison.Ordinal) || !system.Contains("BattleSimulation", StringComparison.Ordinal) || !system.Contains("Named destinations", StringComparison.Ordinal))
+            if (!system.Contains("required final outcome", StringComparison.Ordinal) || !system.Contains("VillageNeedsToolsIssue", StringComparison.Ordinal) || !system.Contains("BattleSimulation", StringComparison.Ordinal) || !system.Contains("rebuild_player_clan_storymode_quest", StringComparison.Ordinal) || !system.Contains("Named destinations", StringComparison.Ordinal))
                 throw new AgentHostException("provider-goal-classification-prompt-incomplete", "The classifier prompt omitted the exact limits of the supported goal.");
             results.Add(new { scenario = "provider-goal-classification-before-action", control, passed = true });
         }
@@ -980,6 +995,18 @@ internal static class ProviderContractSelfTest
         {
             _ = OllamaNativeProvider.NormalizeDecision(acceptedDecision.RootElement, unlistedRequest.RootElement);
             throw new AgentHostException("provider-goal-classification-phase-gate-overbroad", "A supported-goal declaration escaped its explicitly marked no-action classification phase.");
+        }
+        catch (AgentHostException exception) when (exception.Code == "provider-goal-classification-unavailable") { }
+        using var unobservedStoryRequest = JsonDocument.Parse("""
+            {"goal":"Select an Establish Your Clan objective.","goalScopeClassificationRequired":true,"observation":{"scope":"goal-classification-only","state":{"quests":[{"id":"issue_64_quest"}]}},"allowedActions":[],"allowedControls":["unsupportedGoal"]}
+            """);
+        using var storyDecision = JsonDocument.Parse("""
+            {"control":"supportedEstablishYourClanGoal","reason":"Handle the active StoryMode quest."}
+            """);
+        try
+        {
+            _ = OllamaNativeProvider.NormalizeDecision(storyDecision.RootElement, unobservedStoryRequest.RootElement);
+            throw new AgentHostException("provider-establish-clan-classification-gate-overbroad", "The planner scope was accepted without its exact active quest being listed by the fresh Native state.");
         }
         catch (AgentHostException exception) when (exception.Code == "provider-goal-classification-unavailable") { }
         results.Add(new { scenario = "production-json-goal-classification-catalog-normalization", passed = true });

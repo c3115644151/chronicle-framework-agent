@@ -4,6 +4,8 @@ param(
     [ValidateRange(5,30)][int]$FrameRate = 10,
     [string]$CleanupPreparedSaveName,
     [switch]$VillageToolsQuest,
+    [switch]$EstablishYourClanGoalPlanner,
+    [string]$PlannerSourceSaveName = 'ChronicleHarness',
     [switch]$BattleSimulationLoop,
     [switch]$BattleAndCaptivityLoop,
     [string]$BattleSourceSaveName = 'AgentBridgeLifecycle'
@@ -25,14 +27,14 @@ $sessionPath = Join-Path $protocolRoot 'session.json'
 $results = [System.Collections.Generic.List[object]]::new()
 
 if (-not [string]::IsNullOrWhiteSpace($CleanupPreparedSaveName)) {
-    if (-not ($CleanupPreparedSaveName.StartsWith('ChronicleW7K-', [StringComparison]::Ordinal) -or $CleanupPreparedSaveName.StartsWith('ChronicleW7L-', [StringComparison]::Ordinal))) { throw 'Cleanup-only mode accepts only Harness-owned ChronicleW7K/W7L prepared save names.' }
+    if (-not ($CleanupPreparedSaveName.StartsWith('ChronicleW7K-', [StringComparison]::Ordinal) -or $CleanupPreparedSaveName.StartsWith('ChronicleW7L-', [StringComparison]::Ordinal) -or $CleanupPreparedSaveName.StartsWith('ChronicleW7N-', [StringComparison]::Ordinal))) { throw 'Cleanup-only mode accepts only Harness-owned ChronicleW7K/W7L/W7N prepared save names.' }
     if (Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue) { throw 'Refusing prepared-save cleanup while a Bannerlord process is running.' }
     if (Test-Path -LiteralPath $sessionPath -PathType Leaf) { throw 'Refusing prepared-save cleanup while a Chronicle Agent CLI session is active.' }
     $saveDirectory = Join-Path $documentsPath 'Mount and Blade II Bannerlord\Game Saves'
     $saveRoot = [IO.Path]::GetFullPath($saveDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
     $preparedSavePath = [IO.Path]::GetFullPath((Join-Path $saveRoot ($CleanupPreparedSaveName + '.sav')))
     $preparedBaseName = [IO.Path]::GetFileNameWithoutExtension($preparedSavePath)
-    if (-not $preparedSavePath.StartsWith($saveRoot, [StringComparison]::OrdinalIgnoreCase) -or -not ($preparedBaseName.StartsWith('ChronicleW7K-', [StringComparison]::Ordinal) -or $preparedBaseName.StartsWith('ChronicleW7L-', [StringComparison]::Ordinal))) { throw 'Prepared save path escaped the Harness-owned ChronicleW7K/W7L Game Saves boundary.' }
+    if (-not $preparedSavePath.StartsWith($saveRoot, [StringComparison]::OrdinalIgnoreCase) -or -not ($preparedBaseName.StartsWith('ChronicleW7K-', [StringComparison]::Ordinal) -or $preparedBaseName.StartsWith('ChronicleW7L-', [StringComparison]::Ordinal) -or $preparedBaseName.StartsWith('ChronicleW7N-', [StringComparison]::Ordinal))) { throw 'Prepared save path escaped the Harness-owned ChronicleW7K/W7L/W7N Game Saves boundary.' }
     $removed = -not (Test-Path -LiteralPath $preparedSavePath -PathType Leaf)
     if (-not $removed) {
         [IO.File]::Delete($preparedSavePath)
@@ -48,13 +50,14 @@ if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) {
         throw 'Battle evaluation source must be one Game Saves basename without a path or extension; no Host or model was started.'
     }
 }
+if ($EstablishYourClanGoalPlanner -and $PlannerSourceSaveName -notmatch '^[A-Za-z0-9_-]{1,48}$') { throw 'Planner source must be one Game Saves basename; no model or game process was started.' }
 
 if (Test-Path -LiteralPath $sessionPath -PathType Leaf) {
     $staleSession = Get-Content -LiteralPath $sessionPath -Raw -Encoding UTF8 | ConvertFrom-Json
     $staleSaveName = [string]$staleSession.saveName
     $stalePid = [int]$staleSession.processId
-    if (-not ($staleSaveName.StartsWith('ChronicleW7K-', [StringComparison]::Ordinal) -or $staleSaveName.StartsWith('ChronicleW7L-', [StringComparison]::Ordinal))) {
-        throw 'A stale CLI session exists, but its save name is not a Harness-owned ChronicleW7K/W7L fixture; preserving it.'
+    if (-not ($staleSaveName.StartsWith('ChronicleW7K-', [StringComparison]::Ordinal) -or $staleSaveName.StartsWith('ChronicleW7L-', [StringComparison]::Ordinal) -or $staleSaveName.StartsWith('ChronicleW7N-', [StringComparison]::Ordinal))) {
+        throw 'A stale CLI session exists, but its save name is not a Harness-owned ChronicleW7K/W7L/W7N fixture; preserving it.'
     }
     if (@(Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue).Count -gt 0 -or (Get-Process -Id $stalePid -ErrorAction SilentlyContinue)) {
         throw 'A ChronicleW7K session still has a live Bannerlord/session process; refusing automatic recovery.'
@@ -107,6 +110,11 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
     $battleSourceHashBefore = $null
     $battleSourceHashAfter = $null
     $battleFixtureRemoved = $null
+    $plannerSourceSavePath = ''
+    $plannerSourceHashBefore = $null
+    $plannerSourceHashAfter = $null
+    $plannerFixtureSaveName = ''
+    $plannerFixtureRemoved = $null
     $failure = $null
     try {
         . (Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1')
@@ -132,6 +140,28 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
             }
             $preparedSaveName = [string]$fixturePreparation.PreparedSaveName
             $childOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $liveTest -LoadSaveName $preparedSaveName -VillageToolsQuestLoop -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
+        }
+        elseif ($EstablishYourClanGoalPlanner) {
+            . (Join-Path $PSScriptRoot 'Agent-SaveMetadata.ps1')
+            $saveRoot = [IO.Path]::GetFullPath($saveDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+            $plannerSourceSavePath = [IO.Path]::GetFullPath((Join-Path $saveDirectory ($PlannerSourceSaveName + '.sav')))
+            if (-not $plannerSourceSavePath.StartsWith($saveRoot, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $plannerSourceSavePath -PathType Leaf)) { throw 'StoryMode planner source save is absent or escaped Game Saves; no copy, Host or model was started.' }
+            $plannerSourceModules = @(Get-AgentSaveModuleIds -SavePath $plannerSourceSavePath)
+            $requiredPlannerModules = @('Native','SandBoxCore','Sandbox','StoryMode')
+            $allowedPlannerModules = @('Bannerlord.Harmony','Bannerlord.ButterLib','Bannerlord.UIExtenderEx','Bannerlord.MBOptionScreen','Native','SandBoxCore','CustomBattle','Sandbox','StoryMode','BirthAndDeath','ChronicleFramework')
+            $missingPlannerModules = @($requiredPlannerModules | Where-Object { $_ -notin $plannerSourceModules })
+            $unexpectedPlannerModules = @($plannerSourceModules | Where-Object { $_ -notin $allowedPlannerModules })
+            if ($missingPlannerModules.Count -gt 0 -or $unexpectedPlannerModules.Count -gt 0) { throw 'StoryMode planner source has a missing required Native/StoryMode module or an unsupported third-party module; source was not loaded.' }
+            $plannerSourceHashBefore = (Get-FileHash -LiteralPath $plannerSourceSavePath -Algorithm SHA256).Hash
+            $plannerFixtureSaveName = 'ChronicleW7N-' + [Guid]::NewGuid().ToString('N').Substring(0,16)
+            $plannerFixtureSavePath = [IO.Path]::GetFullPath((Join-Path $saveDirectory ($plannerFixtureSaveName + '.sav')))
+            if (-not $plannerFixtureSavePath.StartsWith($saveRoot, [StringComparison]::OrdinalIgnoreCase) -or (Test-Path -LiteralPath $plannerFixtureSavePath)) { throw 'Unique W7-N disposable StoryMode save path was not safe/available.' }
+            [IO.File]::Copy($plannerSourceSavePath, $plannerFixtureSavePath, $false)
+            $plannerCloneHash = (Get-FileHash -LiteralPath $plannerFixtureSavePath -Algorithm SHA256).Hash
+            if ($plannerCloneHash -cne $plannerSourceHashBefore) { throw 'The W7-N disposable save copy does not match its read-only source hash.' }
+            [ordered]@{ SourceSaveName = $PlannerSourceSaveName; SourceSha256Before = $plannerSourceHashBefore; SourceModuleIds = $plannerSourceModules; DisposableCloneName = $plannerFixtureSaveName; DisposableCloneSha256 = $plannerCloneHash; IsByteForByteCopy = $true; NoGameWorldStateInjected = $true } |
+                ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $runTemp 'EstablishYourClanSourceFixture.json') -Encoding UTF8
+            $childOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $liveTest -LoadSaveName $plannerFixtureSaveName -EstablishYourClanGoalPlanner -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
         }
         elseif ($BattleSimulationLoop -or $BattleAndCaptivityLoop) {
             $battleSaveRoot = [IO.Path]::GetFullPath($saveDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
@@ -195,6 +225,18 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
             $battleFixtureRemoved = -not (Test-Path -LiteralPath $battleFixturePath -PathType Leaf)
             if (Test-Path -LiteralPath $battleSourceSavePath -PathType Leaf) { $battleSourceHashAfter = (Get-FileHash -LiteralPath $battleSourceSavePath -Algorithm SHA256).Hash }
         }
+        if ($EstablishYourClanGoalPlanner -and $plannerFixtureSaveName) {
+            $plannerRoot = [IO.Path]::GetFullPath($saveDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+            $plannerFixturePath = [IO.Path]::GetFullPath((Join-Path $saveDirectory ($plannerFixtureSaveName + '.sav')))
+            if ((Test-Path -LiteralPath $plannerFixturePath -PathType Leaf) -and
+                $plannerFixtureSaveName.StartsWith('ChronicleW7N-', [StringComparison]::Ordinal) -and
+                $plannerFixturePath.StartsWith($plannerRoot, [StringComparison]::OrdinalIgnoreCase) -and
+                -not (Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue) -and -not (Test-Path -LiteralPath $sessionPath -PathType Leaf)) {
+                [IO.File]::Delete($plannerFixturePath)
+            }
+            $plannerFixtureRemoved = -not (Test-Path -LiteralPath $plannerFixturePath -PathType Leaf)
+            if (Test-Path -LiteralPath $plannerSourceSavePath -PathType Leaf) { $plannerSourceHashAfter = (Get-FileHash -LiteralPath $plannerSourceSavePath -Algorithm SHA256).Hash }
+        }
         $env:CHRONICLE_HARNESS_TEMP = $priorHarnessTemp
         $env:TEMP = $priorTemp
         $env:TMP = $priorTmp
@@ -245,6 +287,28 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         )
         $passed = [bool]$battleEvidenceVerified
         if (-not $passed -and -not $failure) { $failure = 'One or more real-model Native battle, target, actual post-battle/captivity outcome, no-clock, visual, source, or cleanup assertions failed.' }
+    }
+    elseif ($EstablishYourClanGoalPlanner) {
+        $plannerSelection = $trace.EstablishYourClanObjectiveSelection
+        $plannerRoutes = @($trace.ProviderRouteHistory)
+        $clockActions = @($trace.NativeClockActions)
+        $passed = (
+            $childExitCode -eq 0 -and $liveResult -and [bool]$liveResult.Passed -and
+            [bool]$liveResult.FixtureUnchanged -and [bool]$liveResult.ProcessStopped -and
+            [string]$trace.ModelConfigurationSource -eq 'harness-mcm-profile-fixture' -and
+            [string]$trace.AcceptanceSlice -eq 'Real-model read-only selection of one unmet original StoryMode Establish Your Clan objective' -and
+            [bool]$trace.EstablishYourClanPlannerVerified -and
+            -not [bool]$trace.EstablishYourClanGoalVerified -and
+            $plannerSelection -and [string]$plannerSelection.objectiveId -in @('gold','partySize','renown','companions') -and
+            [bool]$trace.EstablishYourClanTargetConsistency.consistent -and
+            $plannerRoutes.Count -ge 2 -and $clockActions.Count -eq 0 -and
+            [bool]$plannerFixtureRemoved -and
+            [bool]$plannerSourceHashBefore -and $plannerSourceHashBefore -ceq $plannerSourceHashAfter -and
+            [bool]$trace.SourceTrackedTreeClean -and [string]$trace.SourceCommit -eq (git.exe -C $PSScriptRoot rev-parse HEAD).Trim() -and
+            [bool]$liveResult.VisualEvidencePassed -and [double]$liveResult.Capture.FrameCoverageRatio -ge 0.9 -and
+            [bool]$liveResult.Capture.VideoRemovedAfterEvidence -and $noGameProcesses -and $noSessionFile
+        )
+        if (-not $passed -and -not $failure) { $failure = 'One or more FreeLLMAPI objective-selection, active-Quest, read-only world/time preservation, source hash, visual, or cleanup assertions failed.' }
     }
     elseif ($VillageToolsQuest) {
         $requiredActions = @('talkToSettlementHero','dialogueSelect','questDetails','tradeOptions','trade','tradeConfirm','inventoryOpen','heroEquipmentOptions','inventoryCancel')
@@ -305,6 +369,12 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         fixturePreparedFromNaturalVisibleIssue = if ($fixturePreparation) { [bool]$fixturePreparation.Prepared } else { $null }
         preparedIssueGiver = if ($fixturePreparation) { $fixturePreparation.VisibleMarker } else { $null }
         battleOutcome = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { $battleOutcome } else { $null }
+        storyModePlannerSourceSave = if ($EstablishYourClanGoalPlanner) { $PlannerSourceSaveName } else { $null }
+        storyModePlannerSourceHashBefore = if ($EstablishYourClanGoalPlanner) { $plannerSourceHashBefore } else { $null }
+        storyModePlannerSourceHashAfter = if ($EstablishYourClanGoalPlanner) { $plannerSourceHashAfter } else { $null }
+        storyModePlannerFixtureRemoved = if ($EstablishYourClanGoalPlanner) { $plannerFixtureRemoved } else { $null }
+        storyModeObjectiveSelection = if ($EstablishYourClanGoalPlanner -and $trace) { $trace.EstablishYourClanObjectiveSelection } else { $null }
+        storyModeObjectiveTargetConsistency = if ($EstablishYourClanGoalPlanner -and $trace) { $trace.EstablishYourClanTargetConsistency } else { $null }
         battleTargetPreflight = if (($BattleSimulationLoop -or $BattleAndCaptivityLoop) -and $liveResult) { $liveResult.BattleTargetPreflight } else { $null }
         battleSourceSaveName = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { $BattleSourceSaveName } else { $null }
         battleSourceHashBefore = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { $battleSourceHashBefore } else { $null }
@@ -339,7 +409,23 @@ $result = [ordered]@{
     ProviderKind = 'FreeLLMAPI-routed external model through the configured free endpoint'
     RunCount = $Runs
     DistinctCampaignSeeds = 1
-    Threshold = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) {
+    Threshold = if ($EstablishYourClanGoalPlanner) {
+        [ordered]@{
+            successfulRuns = $Runs
+            requiresNaturallyActiveOriginalQuest = 'rebuild_player_clan_storymode_quest'
+            requiredObjectives = @('gold','partySize','renown','companions')
+            requiresNativeJournalAndDynamicThresholdConsistency = $true
+            requiresFreeLlmApiModelDecision = $true
+            nativeGameplayActionsAllowed = 0
+            nativeReadOnlyQuestDetailsCalls = 1
+            requiresWorldGoldPartyRenownQuestAndTimeUnchanged = $true
+            sourceSaveHashMustRemainUnchanged = $true
+            disposableClonePrefix = 'ChronicleW7N-'
+            videoCoverageRatio = 0.9
+            goalCompletionClaimAllowed = $false
+        }
+    }
+    elseif ($BattleSimulationLoop -or $BattleAndCaptivityLoop) {
         [ordered]@{
             successfulRuns = $Runs
             targetMustBeCurrentNativeVisibleHostileBandit = $true

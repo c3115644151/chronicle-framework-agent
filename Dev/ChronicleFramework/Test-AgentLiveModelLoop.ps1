@@ -10,6 +10,7 @@ param(
     [switch]$VillageToolsQuestLoop,
     [switch]$BattleSimulationLoop,
     [switch]$BattleAndCaptivityLoop,
+    [switch]$EstablishYourClanGoalPlanner,
     [switch]$AgentHostRuntime
 )
 
@@ -29,9 +30,10 @@ $sessionPath = Join-Path $documentsRoot 'AgentRuns\ChronicleAgent\session.json'
 if (Get-Process -Name Bannerlord* -ErrorAction SilentlyContinue) {
     throw 'Refusing to start a live-model Campaign test while any Bannerlord client is already running.'
 }
-if (@($ArrivalLoop, $RecruitmentLoop, $RoadsideBanditNegotiationLoop, $SupplyManagementLoop, $VillageToolsQuestLoop, $BattleSimulationLoop, $BattleAndCaptivityLoop | Where-Object { $_ }).Count -gt 1) { throw 'Select only one LiveModel test goal per run.' }
-if ($AgentHostRuntime -and -not ($SupplyManagementLoop -or $ArrivalLoop -or $VillageToolsQuestLoop -or $BattleSimulationLoop -or $BattleAndCaptivityLoop)) { throw 'AgentHostRuntime supports only frozen Native supply, arrival, VillageNeedsTools, BattleSimulation and Battle/captivity recovery slices.' }
+if (@($ArrivalLoop, $RecruitmentLoop, $RoadsideBanditNegotiationLoop, $SupplyManagementLoop, $VillageToolsQuestLoop, $BattleSimulationLoop, $BattleAndCaptivityLoop, $EstablishYourClanGoalPlanner | Where-Object { $_ }).Count -gt 1) { throw 'Select only one LiveModel test goal per run.' }
+if ($AgentHostRuntime -and -not ($SupplyManagementLoop -or $ArrivalLoop -or $VillageToolsQuestLoop -or $BattleSimulationLoop -or $BattleAndCaptivityLoop -or $EstablishYourClanGoalPlanner)) { throw 'AgentHostRuntime supports only frozen Native supply, arrival, supported Quest, Battle/captivity, and read-only StoryMode objective-planning slices.' }
 if ($VillageToolsQuestLoop -and -not $AgentHostRuntime) { throw 'VillageToolsQuestLoop requires the in-game .NET Agent Host route; the older PowerShell decision loop is not product evidence.' }
+if ($EstablishYourClanGoalPlanner -and -not $AgentHostRuntime) { throw 'EstablishYourClanGoalPlanner requires the in-game .NET Agent Host route; the older PowerShell decision loop is not product evidence.' }
 if ($RoadsideBanditNegotiationLoop -and -not $RecruitmentLoop) { throw 'RoadsideBanditNegotiationLoop requires RecruitmentLoop so the encounter resolves into the existing growth goal.' }
 foreach ($setting in @('CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL','CHRONICLE_LLM_API_KEY','FREELLMAPI_API_KEY','CHRONICLE_LLM_TIMEOUT_SECONDS','CHRONICLE_LLM_MAX_TOKENS','CHRONICLE_LLM_MAX_TOKEN_PARAMETER','CHRONICLE_LLM_REASONING_EFFORT','CHRONICLE_LLM_THINKING_MODE','CHRONICLE_LLM_TEMPERATURE','CHRONICLE_LLM_PROTOCOL')) {
     $configuredValue = [string][Environment]::GetEnvironmentVariable($setting, 'Process')
@@ -210,6 +212,11 @@ try {
             throw 'VillageToolsQuestLoop requires a disposable save loaded at a village menu with the current Native blue tools-issue marker visible; no model action was sent.'
         }
     }
+    elseif ($EstablishYourClanGoalPlanner) {
+        $activeStoryClanQuest = @($baseline.state.quests | Where-Object { [string]$_.id -ceq 'rebuild_player_clan_storymode_quest' })
+        if ($activeStoryClanQuest.Count -ne 1) { throw 'Read-only StoryMode objective planning requires the exact Establish Your Clan Quest to be active in the fresh Native state; no model decision was sent.' }
+        if ([string]$baseline.state.context.timeControlMode -cne 'Stop') { throw 'Read-only planner fixture must already have the Native campaign clock stopped; the test will not change time mode.' }
+    }
     elseif ($baseline.state.location.currentSettlementId) {
         throw 'Non-quest live-model map fixtures must remain unobstructed with no current settlement.'
     }
@@ -352,6 +359,14 @@ try {
         $allowedActions = 'mapPartyTargets,pursue,dialogueSelect,dialogueContinue,menuSelect,battleSkip,battleFinish,partyTakeAll,partyScreenDone,inventoryTakeAll,inventoryDone'
         $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '360'
         $env:CHRONICLE_LLM_MAX_TOKENS = '1024'
+    }
+    elseif ($EstablishYourClanGoalPlanner) {
+        $goal = 'Read the active original StoryMode Establish Your Clan quest and choose exactly one currently unmet objective from its four visible numeric goals. Return a planning result only; do not take any game action, modify the quest, claim completion, or change Campaign time.'
+        $maxDecisions = 6
+        $maxElapsedSeconds = 300
+        $allowedActions = 'mapSettlementTargets,move,menuSelect,talkToSettlementHero,dialogueSelect,dialogueContinue,questDetails,tradeOptions,trade,tradeConfirm,tradeCancel,tradeCancelChanges,barterOptions,barterAutoBalance,barterOffer,barterCancel,inventoryOpen,heroEquipmentOptions,inventoryCancel'
+        $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '180'
+        $env:CHRONICLE_LLM_MAX_TOKENS = '512'
     }
     elseif ($ArrivalLoop) {
         $goal = 'First query mapSettlementTargets. Then choose the nearest observed safe target (not hostile, not under siege, not the current settlement) and issue one move. While party.isMoving toward that target and currentSettlementId differs, use observeAgain with waitSeconds 5; do not send move again or use clock controls. When nativeMoveArrival.status is arrived, return done immediately and issue no further game action.'
@@ -511,7 +526,69 @@ try {
         }
     }
 
-    if ($VillageToolsQuestLoop) {
+    if ($EstablishYourClanGoalPlanner) {
+        $finalNativeState = Invoke-AgentCli 'state'
+        $selectedObjectiveId = [string]$loopTrace.selection.objectiveId
+        $objectiveSnapshot = $loopTrace.objectiveSnapshot
+        $selectedObjective = if ($selectedObjectiveId -and $objectiveSnapshot) { $objectiveSnapshot.$selectedObjectiveId } else { $null }
+        $initialQuestIds = @($baseline.state.quests | ForEach-Object { [string]$_.id } | Sort-Object)
+        $finalQuestIds = @($finalNativeState.state.quests | ForEach-Object { [string]$_.id } | Sort-Object)
+        $selectionRouteHistory = @($loopTrace.providerRouteHistory)
+        $plannerOnlyTrace = @($steps | Where-Object { $_.planningOnly -eq $true -and $_.nativeActionExecuted -eq $false })
+        $plannerVerified = (
+            [string]$loopTrace.status -ceq 'planned' -and
+            [string]$loopTrace.termination.reason -ceq 'unmet-objective-selected' -and
+            $loopTrace.termination.goalVerified -eq $false -and
+            $loopTrace.selection.met -eq $false -and
+            $selectedObjective -and $selectedObjective.met -eq $false -and
+            @($objectiveSnapshot.PSObject.Properties.Name).Count -eq 4 -and
+            $loopTrace.journalObjectiveSnapshot.Count -eq 4 -and
+            $loopTrace.targetConsistency.consistent -eq $true -and
+            $selectionRouteHistory.Count -ge 2 -and
+            $plannerOnlyTrace.Count -eq 1 -and
+            [string]$baseline.state.context.timeControlMode -ceq 'Stop' -and
+            [Math]::Abs([double]$baseline.campaignDay - [double]$finalNativeState.campaignDay) -le 0.000001 -and
+            [int]$baseline.state.economy.gold -eq [int]$finalNativeState.state.economy.gold -and
+            [int]$baseline.state.party.members -eq [int]$finalNativeState.state.party.members -and
+            [double]$baseline.state.clan.renown -eq [double]$finalNativeState.state.clan.renown -and
+            ($initialQuestIds -join '|') -ceq ($finalQuestIds -join '|') -and
+            [string]$finalNativeState.state.context.timeControlMode -ceq [string]$baseline.state.context.timeControlMode -and
+            @($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -ne 'questDetails' }).Count -eq 0
+        )
+        $plannerVerification = [ordered]@{
+            sourceCampaignDay = [double]$baseline.campaignDay
+            finalCampaignDay = [double]$finalNativeState.campaignDay
+            timeModeBefore = [string]$baseline.state.context.timeControlMode
+            timeModeAfter = [string]$finalNativeState.state.context.timeControlMode
+            goldBefore = [int]$baseline.state.economy.gold
+            goldAfter = [int]$finalNativeState.state.economy.gold
+            partyMembersBefore = [int]$baseline.state.party.members
+            partyMembersAfter = [int]$finalNativeState.state.party.members
+            renownBefore = [double]$baseline.state.clan.renown
+            renownAfter = [double]$finalNativeState.state.clan.renown
+            activeQuestIdsBefore = $initialQuestIds
+            activeQuestIdsAfter = $finalQuestIds
+            gameplayActionCount = @($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -ne 'questDetails' }).Count
+            nativeQuestDetailsReadCount = [int]$loopTrace.actionsExecuted
+            plannerVerified = [bool]$plannerVerified
+            goalVerified = [bool]$loopTrace.termination.goalVerified
+        }
+        $finalObservation = $finalNativeState
+        $providerStoppedAfterGoalAction = $false
+        $chosenId = $null
+        $chosenTarget = @()
+        $observedTargets = @()
+        $targetQueries = @()
+        $moveSteps = @()
+        $observeSteps = @()
+        $nativeMovementObserved = $false
+        $arrivalConfirmed = $false
+        $campaignDayAdvancedDuringTravel = $false
+        $nativeReadObservationsAfterMove = @()
+        $preNativeTravelReobservations = @()
+        if (-not $plannerVerified) { throw 'Read-only StoryMode planner did not select exactly one currently unmet objective while preserving Native state and Campaign time.' }
+    }
+    elseif ($VillageToolsQuestLoop) {
         $lastObservedStep = @($steps | Where-Object { $_.observationAfter -and $_.observationAfter.state } | Select-Object -Last 1)
         $finalObservation = if ($lastObservedStep.Count -eq 1) { $lastObservedStep[0].observationAfter } else { $baseline }
         $questActions = @($steps | Where-Object { $_.actionExecuted } | ForEach-Object { [string]$_.actionReceipt.action })
@@ -866,7 +943,7 @@ try {
         CampaignDayEnd = [double]$finalObservation.campaignDay
         StartupDialogReceipts = @($start.session.startupDialogReceipts)
         Goal = $goal
-        AcceptanceSlice = if ($BattleAndCaptivityLoop) { 'Real-model Native hostile Bandit BattleSimulation and MainHero captivity recovery to Campaign Map' } elseif ($BattleSimulationLoop) { 'Real-model Native hostile Bandit meeting/Fight, Send Troops BattleSimulation, aftermath and Renown verification' } elseif ($VillageToolsQuestLoop) { 'Real-model Native VillageNeedsTools quest acceptance, delivery and exact inventory delta' } elseif ($SupplyManagementLoop) { 'Real-model Native food purchase and three-day Town Wait' } elseif ($RoadsideBanditNegotiationLoop) { 'Native roadside Safe Passage, recovery, and volunteer recruitment' } elseif ($RecruitmentLoop) { 'Native movement plus volunteer recruitment' } elseif ($ArrivalLoop) { 'Native movement arrival' } else { 'Native movement order accepted' }
+        AcceptanceSlice = if ($EstablishYourClanGoalPlanner) { 'Real-model read-only selection of one unmet original StoryMode Establish Your Clan objective' } elseif ($BattleAndCaptivityLoop) { 'Real-model Native hostile Bandit BattleSimulation and MainHero captivity recovery to Campaign Map' } elseif ($BattleSimulationLoop) { 'Real-model Native hostile Bandit meeting/Fight, Send Troops BattleSimulation, aftermath and Renown verification' } elseif ($VillageToolsQuestLoop) { 'Real-model Native VillageNeedsTools quest acceptance, delivery and exact inventory delta' } elseif ($SupplyManagementLoop) { 'Real-model Native food purchase and three-day Town Wait' } elseif ($RoadsideBanditNegotiationLoop) { 'Native roadside Safe Passage, recovery, and volunteer recruitment' } elseif ($RecruitmentLoop) { 'Native movement plus volunteer recruitment' } elseif ($ArrivalLoop) { 'Native movement arrival' } else { 'Native movement order accepted' }
         SafePassageRoute = $safePassageRoute
         HarnessWorldEvents = @($loopTrace.harnessEvents)
         ChosenSettlementId = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { $null } else { $chosenId }
@@ -883,13 +960,21 @@ try {
         VillageToolsQuestVerified = if ($VillageToolsQuestLoop) { [bool]$questVerified } else { $null }
         VillageToolsQuestId = if ($VillageToolsQuestLoop) { [string]$loopTrace.questId } else { $null }
         VillageToolsQuestInventoryDeltaVerified = if ($VillageToolsQuestLoop) { [bool]$loopTrace.inventoryVerifiedAfterTurnIn } else { $null }
+        EstablishYourClanPlannerVerified = if ($EstablishYourClanGoalPlanner) { [bool]$plannerVerified } else { $null }
+        EstablishYourClanObjectiveSelection = if ($EstablishYourClanGoalPlanner) { $loopTrace.selection } else { $null }
+        EstablishYourClanObjectiveSnapshot = if ($EstablishYourClanGoalPlanner) { $loopTrace.objectiveSnapshot } else { $null }
+        EstablishYourClanJournalObjectiveSnapshot = if ($EstablishYourClanGoalPlanner) { $loopTrace.journalObjectiveSnapshot } else { $null }
+        EstablishYourClanPlannerVerification = if ($EstablishYourClanGoalPlanner) { $plannerVerification } else { $null }
+        EstablishYourClanQuestDetails = if ($EstablishYourClanGoalPlanner) { $loopTrace.questDetails } else { $null }
+        EstablishYourClanTargetConsistency = if ($EstablishYourClanGoalPlanner) { $loopTrace.targetConsistency } else { $null }
+        EstablishYourClanGoalVerified = if ($EstablishYourClanGoalPlanner) { [bool]$loopTrace.termination.goalVerified } else { $null }
         BattleSimulationVerified = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { [bool]$battleSimulationVerified } else { $null }
         BattleOutcome = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { $battleOutcome } else { $null }
         CaptivityRecoveryVerified = if ($BattleAndCaptivityLoop) { [bool]$loopTrace.captivityRecoveryVerified } else { $null }
         BattleRenownBefore = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { [double]$loopTrace.renownBefore } else { $null }
         BattleRenownAfter = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { [double]$loopTrace.renownAfter } else { $null }
         BattleReturnToMapVerified = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { [bool]$loopTrace.nativeReturnToMapVerified } else { $null }
-        NativeClockActions = if ($VillageToolsQuestLoop -or $BattleSimulationLoop -or $BattleAndCaptivityLoop) { [string[]]@($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -in @('advance','pause','resume','fastForward') } | ForEach-Object { [string]$_.actionReceipt.action }) } else { [string[]]@() }
+        NativeClockActions = if ($EstablishYourClanGoalPlanner -or $VillageToolsQuestLoop -or $BattleSimulationLoop -or $BattleAndCaptivityLoop) { [string[]]@($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -in @('advance','pause','resume','fastForward') } | ForEach-Object { [string]$_.actionReceipt.action }) } else { [string[]]@() }
         SupplyFixtureSetup = $supplySetup
         SupplyVerified = if ($SupplyManagementLoop) { [bool]$supplyVerified } else { $null }
         SupplyVerification = $supplyVerification

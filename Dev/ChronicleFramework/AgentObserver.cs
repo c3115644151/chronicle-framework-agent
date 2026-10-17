@@ -686,8 +686,36 @@ internal static class ChronicleAgentObserver
             }
             json.Append('}');
         }
-        json.Append("]}");
+        json.Append(']');
+        if (string.Equals(quest.GetType().FullName, "StoryMode.Quests.PlayerClanQuests.RebuildPlayerClanQuest", StringComparison.Ordinal))
+            AppendEstablishClanProgress(json);
+        json.Append('}');
         return json.ToString();
+    }
+
+    private static void AppendEstablishClanProgress(StringBuilder json)
+    {
+        var hero = Hero.MainHero;
+        var clan = Clan.PlayerClan;
+        var party = MobileParty.MainParty;
+        var campaign = Campaign.Current;
+        if (hero == null || clan == null || party == null || campaign?.Models?.BanditDensityModel == null) return;
+
+        const int goldTarget = 2000;
+        const int renownTarget = 50;
+        const int companionTarget = 1;
+        var partyTarget = campaign.Models.BanditDensityModel.GetMinimumTroopCountForHideoutMission(party, false);
+        var gold = hero.Gold;
+        var partyMembers = party.MemberRoster.TotalManCount;
+        var renown = clan.Renown;
+        var companions = clan.Companions.Count;
+        json.Append(",\"storyModeEstablishClan\":{");
+        Property(json, "questId", "rebuild_player_clan_storymode_quest");
+        json.Append(",\"gold\":{\"current\":").Append(gold).Append(",\"target\":").Append(goldTarget).Append(",\"met\":").Append(Bool(gold >= goldTarget)).Append('}');
+        json.Append(",\"partySize\":{\"current\":").Append(partyMembers).Append(",\"target\":").Append(partyTarget).Append(",\"met\":").Append(Bool(partyMembers >= partyTarget)).Append('}');
+        json.Append(",\"renown\":{\"current\":").Append(Number(renown)).Append(",\"target\":").Append(renownTarget).Append(",\"met\":").Append(Bool(renown >= renownTarget)).Append('}');
+        json.Append(",\"companions\":{\"current\":").Append(companions).Append(",\"target\":").Append(companionTarget).Append(",\"met\":").Append(Bool(companions >= companionTarget)).Append('}');
+        json.Append('}');
     }
 
     internal static string BuildPartyRosterJson()

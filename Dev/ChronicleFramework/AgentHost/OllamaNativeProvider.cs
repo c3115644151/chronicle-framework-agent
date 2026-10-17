@@ -691,18 +691,20 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             };
         }
 
-        if (hasControl && controlName is "supportedMapArrivalGoal" or "supportedVillageToolsQuestGoal" or "supportedBattleSimulationGoal" or "supportedBattleAndCaptivityGoal" or "unsupportedGoal")
+        if (hasControl && controlName is "supportedMapArrivalGoal" or "supportedVillageToolsQuestGoal" or "supportedBattleSimulationGoal" or "supportedBattleAndCaptivityGoal" or "supportedEstablishYourClanGoal" or "unsupportedGoal")
         {
             EnsureOnlyProperties(decision, "control", "reason", "rationale");
             var classificationPhase = ReadBoolean(request, "goalScopeClassificationRequired") == true &&
                 request.TryGetProperty("allowedActions", out var classificationActions) &&
                 classificationActions.ValueKind == JsonValueKind.Array && classificationActions.GetArrayLength() == 0;
-            if (!ContainsString(request, "allowedControls", controlName) && !classificationPhase)
+            if (!ContainsString(request, "allowedControls", controlName) &&
+                (!classificationPhase || controlName == "supportedEstablishYourClanGoal"))
             {
                 var supportedListed = ContainsString(request, "allowedControls", "supportedMapArrivalGoal");
                 var supportedQuestListed = ContainsString(request, "allowedControls", "supportedVillageToolsQuestGoal");
                 var supportedBattleListed = ContainsString(request, "allowedControls", "supportedBattleSimulationGoal");
                 var supportedBattleCaptivityListed = ContainsString(request, "allowedControls", "supportedBattleAndCaptivityGoal");
+                var supportedEstablishYourClanListed = ContainsString(request, "allowedControls", "supportedEstablishYourClanGoal");
                 var unsupportedListed = ContainsString(request, "allowedControls", "unsupportedGoal");
                 var controlsKind = request.TryGetProperty("allowedControls", out var controls) ? controls.ValueKind.ToString() : "missing";
                 var controlsItems = controls.ValueKind == JsonValueKind.Array
@@ -716,7 +718,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     ? requestIteration
                     : -1;
                 throw new AgentHostException("provider-goal-classification-unavailable",
-                    $"Goal classification is not currently listed in the decision catalog (catalog={controlsKind}[{controlsItems}], supported={supportedListed}, supportedQuest={supportedQuestListed}, supportedBattle={supportedBattleListed}, supportedBattleCaptivity={supportedBattleCaptivityListed}, unsupported={unsupportedListed}, gate={classificationRequired}, actions={actionCount}, iteration={iteration}).");
+                    $"Goal classification is not currently listed in the decision catalog (catalog={controlsKind}[{controlsItems}], supported={supportedListed}, supportedQuest={supportedQuestListed}, supportedBattle={supportedBattleListed}, supportedBattleCaptivity={supportedBattleCaptivityListed}, supportedEstablishYourClan={supportedEstablishYourClanListed}, unsupported={unsupportedListed}, gate={classificationRequired}, actions={actionCount}, iteration={iteration}).");
             }
             return new JsonObject
             {
@@ -726,6 +728,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     "supportedVillageToolsQuestGoal" => "supported-village-tools-quest",
                     "supportedBattleSimulationGoal" => "supported-battle-simulation",
                     "supportedBattleAndCaptivityGoal" => "supported-battle-and-captivity",
+                    "supportedEstablishYourClanGoal" => "supported-establish-your-clan",
                     _ => "unsupported"
                 },
                 ["reason"] = ValidateReason(ReadString(decision, "reason") ?? ReadString(decision, "rationale"))

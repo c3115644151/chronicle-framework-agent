@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.218'
+$contractVersion = '7.219'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -66,6 +66,7 @@ $agentEvaluationLiveModelSupplySource = Get-Content (Join-Path $harnessRoot 'Tes
 $agentHostCampaignLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostCampaignLoop.cs') -Raw -Encoding UTF8
 $agentHostSupplyLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostSupplyLoop.cs') -Raw -Encoding UTF8
 $agentHostDecisionCycleSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostDecisionCycle.cs') -Raw -Encoding UTF8
+$agentHostEstablishClanPlannerSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostEstablishYourClanGoalLoop.cs') -Raw -Encoding UTF8
 $agentHostHarnessProgressTraceSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostHarnessProgressTrace.cs') -Raw -Encoding UTF8
 $agentHostProviderContractSelfTestSource = Get-Content (Join-Path $harnessRoot 'AgentHost\ProviderContractSelfTest.cs') -Raw -Encoding UTF8
 $agentHostProviderSource = Get-Content (Join-Path $harnessRoot 'AgentHost\OllamaNativeProvider.cs') -Raw -Encoding UTF8
@@ -244,7 +245,7 @@ if ($harnessScript -notmatch "'AgentHostCampaignLoopEvaluation' \{ @\('Preflight
     throw 'The Host campaign loop must remain opt-in and prove its bounded Native map-arrival contract, natural time progression, real local-model path, visual evidence and cleanup.'
 }
 if ($harnessScript -notmatch "'AgentHostVillageToolsQuestEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostVillageToolsQuestEvaluation'\) \}" -or
-    -not $harnessScript.Contains("effectiveSmokeTimeoutSeconds = if (`$Phase -in @('AgentHostVillageToolsQuestEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max(`$SmokeTimeoutSeconds, 240) }") -or
+    -not $harnessScript.Contains("effectiveSmokeTimeoutSeconds = if (`$Phase -in @('AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max(`$SmokeTimeoutSeconds, 240) }") -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostVillageToolsQuestEvaluation'" -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'VerifyQuestInventoryDelta' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'village-tools-direct-quest-option-unavailable' -or
@@ -298,6 +299,20 @@ if ($harnessScript -notmatch "'AgentHostVillageToolsQuestEvaluation' \{ @\('Pref
     $agentHostCampaignLoopEvaluationSource -notmatch 'VillageToolsQuestInventoryDeltaVerified') {
     throw 'The Host village-tools quest path must remain opt-in and verify the current visible quest, native actions and exact pre/post inventory deltas before allowing completion.'
 }
+if ($harnessScript -notmatch "'AgentHostEstablishClanGoalPlannerEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostEstablishClanGoalPlannerEvaluation'\) \}" -or
+    $harnessScript -match "'All' \{[^\r\n]*'AgentHostEstablishClanGoalPlannerEvaluation'" -or
+    $agentHostCampaignLoopEvaluationSource -notmatch '\-EstablishYourClanGoalPlanner' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'ChronicleW7N-' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'SourceSha256Before' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'plannerSourceHashAfter' -or
+    $agentHostLiveModelLoopSource -notmatch '\[switch\]\$EstablishYourClanGoalPlanner' -or
+    $agentHostLiveModelLoopSource -notmatch 'rebuild_player_clan_storymode_quest' -or
+    $agentHostLiveModelLoopSource -notmatch 'timeControlMode -cne ''Stop''' -or
+    $agentHostLiveModelLoopSource -notmatch 'EstablishYourClanPlannerVerified' -or
+    $agentHostLiveModelLoopSource -notmatch 'objectiveId' -or
+    $agentHostLiveModelLoopSource -notmatch 'FixtureUnchanged = \$fixtureUnchanged') {
+    throw 'W7-N must remain opt-in, use a disposable original StoryMode save with the exact naturally active quest, make real FreeLLMAPI decisions only, verify four objectives against Journal/native values without gameplay writes, and preserve source/time/world evidence.'
+}
 if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostBattleSimulationEvaluation'\) \}" -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostBattleSimulationEvaluation'" -or
     $agentHostCampaignLoopEvaluationSource -notmatch '\-BattleSimulationLoop' -or
@@ -346,9 +361,10 @@ if ($harnessScript -notmatch "'AgentHostBattleAndCaptivityEvaluation' \{ @\('Pre
 if ($agentHostCampaignLoopEvaluationSource -notmatch '\[string\]\$CleanupPreparedSaveName' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'StartsWith\(''ChronicleW7K-''' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'StartsWith\(''ChronicleW7L-''' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'StartsWith\(''ChronicleW7N-''' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'Bannerlord process is running' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'Agent CLI session is active' -or
-    $agentHostCampaignLoopEvaluationSource -notmatch 'escaped the Harness-owned ChronicleW7K/W7L Game Saves boundary' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'escaped the Harness-owned ChronicleW7K/W7L/W7N Game Saves boundary' -or
     $agentHostCampaignLoopEvaluationSource -notmatch '\$staleSession\.saveName' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'Get-Process -Id \$stalePid' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'AgentCliStopOutput' -or
@@ -676,6 +692,16 @@ if ($agentHostLifecycleHarness -notmatch "'UnsupportedGoal'" -or
     $agentHostProviderSource -notmatch 'supportedMapArrivalGoal' -or
     $agentHostRuntimeControllerSource -notmatch 'campaign-goal-unsupported') {
     throw 'The bounded map Host must classify the complete user goal before offering Native actions and safely report unsupported objectives.'
+}
+if ($agentHostCampaignLoopSource -notmatch 'supportedEstablishYourClanGoal' -or
+    $agentHostProviderSource -notmatch 'supportedEstablishYourClanGoal' -or
+    $agentHostEstablishClanPlannerSource -notmatch 'BuildObjectiveActionCatalog' -or
+    $agentHostEstablishClanPlannerSource -notmatch 'journal-native-target-mismatch' -or
+    $agentHostEstablishClanPlannerSource -notmatch 'selectEstablishYourClanObjective' -or
+    $agentHostEstablishClanPlannerSource -notmatch 'goalVerified.*false' -or
+    $agentHostDecisionCycleSource -notmatch 'EstablishYourClanGoalPlannerPrompt' -or
+    $agentHostProviderSource -notmatch 'supported-establish-your-clan') {
+    throw 'The Establish Your Clan planner must be gated by the active original quest, compare only its four visible numeric objectives with fresh native values, allow only unmet targets, and never claim gameplay completion.'
 }
 if ($harnessScript -notmatch "'AgentHostLifecycleEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostLifecycleEvaluation'\) \}" -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostLifecycleEvaluation'" -or
