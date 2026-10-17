@@ -244,7 +244,7 @@ internal static class AgentHostBattleSimulationLoop
                     mapPartyTargetsQueried = true;
                     if (ReadBoolean(state["context"] as JsonObject, "encounterActive"))
                     {
-                        var encounteredId = ReadString(state, "encounteredPartyId");
+                        var encounteredId = ReadString(state["context"] as JsonObject, "encounteredPartyId");
                         if (observedTargets.OfType<JsonObject>().Any(x => ReadString(x, "id") == encounteredId && ReadString(x, "type") == "bandit" && ReadBoolean(x, "hostile")))
                             requestedTargetId = encounteredId;
                     }
@@ -344,7 +344,7 @@ internal static class AgentHostBattleSimulationLoop
             }
             if (ReadBoolean(context, "encounterActive"))
             {
-                var encounteredId = ReadString(state, "encounteredPartyId");
+                var encounteredId = ReadString(context, "encounteredPartyId");
                 var validBandit = observedTargets.OfType<JsonObject>().Any(x =>
                     ReadString(x, "id") == encounteredId && ReadString(x, "type") == "bandit" && ReadBoolean(x, "hostile"));
                 if (!validBandit)
@@ -456,7 +456,7 @@ internal static class AgentHostBattleSimulationLoop
                 if (ReadString(context, "menuId") != ReadString(arguments, "menuId") ||
                     ReadString(arguments, "optionId") != "str_order_attack" || !CurrentEnabledMenuOption(state, "str_order_attack"))
                 { rejection = "Only the currently enabled Native str_order_attack option in the active encounter may be selected."; return false; }
-                var encounteredId = ReadString(state, "encounteredPartyId");
+                var encounteredId = ReadString(state["context"] as JsonObject, "encounteredPartyId");
                 if (!observedTargets.OfType<JsonObject>().Any(x => ReadString(x, "id") == encounteredId && ReadString(x, "type") == "bandit" && ReadBoolean(x, "hostile")))
                 { rejection = "The active encounter party must match a currently observed hostile bandit target."; return false; }
             }
@@ -464,7 +464,7 @@ internal static class AgentHostBattleSimulationLoop
             {
                 var conversation = (state["context"] as JsonObject)?["conversation"] as JsonObject;
                 var optionId = ReadString(arguments, "optionId");
-                var encounteredId = ReadString(state, "encounteredPartyId");
+                var encounteredId = ReadString(state["context"] as JsonObject, "encounteredPartyId");
                 if (optionId != "bandit_start_defender_1" || conversation is null ||
                     !(conversation["options"] as JsonArray)?.OfType<JsonObject>().Any(x => ReadString(x, "id") == optionId && ReadBoolean(x, "clickable")) == true ||
                     !observedTargets.OfType<JsonObject>().Any(x => ReadString(x, "id") == encounteredId && ReadString(x, "type") == "bandit" && ReadBoolean(x, "hostile")))
@@ -521,7 +521,7 @@ internal static class AgentHostBattleSimulationLoop
         results.Add(new { scenario = "battle-loop-requires-current-visible-hostile-bandit-for-pursuit", passed = true });
 
         var encounter = ParseState("MapState", "encounter", true, null, null);
-        encounter["state"]!["encounteredPartyId"] = "bandit-1";
+        encounter["state"]!["context"]!["encounteredPartyId"] = "bandit-1";
         encounter["state"]!["availableMenuOptions"] = new JsonArray(new JsonObject { ["id"] = "str_order_attack", ["enabled"] = true, ["available"] = true });
         var fight = BuildActionCatalog(encounter["state"]!.AsObject(), candidates, "bandit-1", false, true);
         if (fight.Count != 1 || ReadString(fight[0] as JsonObject, "action") != "menuSelect")
@@ -532,7 +532,7 @@ internal static class AgentHostBattleSimulationLoop
         results.Add(new { scenario = "battle-loop-selects-only-native-enabled-attack-option", passed = true });
 
         var banditMeeting = ParseState("MapState", "encounter_meeting", true, null, null);
-        banditMeeting["state"]!["encounteredPartyId"] = "bandit-1";
+        banditMeeting["state"]!["context"]!["encounteredPartyId"] = "bandit-1";
         banditMeeting["state"]!["context"]!["conversation"] = new JsonObject
         {
             ["sentenceText"] = "Well well, look at this!",
@@ -800,7 +800,7 @@ internal static class AgentHostBattleSimulationLoop
 
     private static bool IsObservedEncounterBandit(JsonObject state, JsonArray observedTargets)
     {
-        var encounteredId = ReadString(state, "encounteredPartyId");
+        var encounteredId = ReadString(state["context"] as JsonObject, "encounteredPartyId");
         return !string.IsNullOrWhiteSpace(encounteredId) && observedTargets.OfType<JsonObject>().Any(x =>
             ReadString(x, "id") == encounteredId && ReadString(x, "type") == "bandit" && ReadBoolean(x, "hostile"));
     }
@@ -927,8 +927,7 @@ internal static class AgentHostBattleSimulationLoop
                 simulation = new JsonObject { ["finished"] = _stage == 6, ["playerRetreated"] = false, ["battleState"] = "AttackerVictory" };
             var state = new JsonObject
             {
-                ["context"] = new JsonObject { ["gameState"] = stateName, ["menuId"] = menuId, ["encounterActive"] = encounterActive, ["battleSimulation"] = simulation },
-                ["encounteredPartyId"] = encounterActive ? "bandit-1" : null,
+                ["context"] = new JsonObject { ["gameState"] = stateName, ["menuId"] = menuId, ["encounterActive"] = encounterActive, ["battleSimulation"] = simulation, ["encounteredPartyId"] = encounterActive ? "bandit-1" : null },
                 ["economy"] = new JsonObject { ["renown"] = 10.0, ["influence"] = 0.0, ["gold"] = 500 },
                 ["party"] = new JsonObject { ["members"] = _memberLootTaken ? 41 : 40, ["healthy"] = 39, ["wounded"] = 1, ["prisoners"] = 0, ["itemCount"] = 12 },
                 ["location"] = new JsonObject { ["targetPartyId"] = _stage == 1 ? "bandit-1" : null },
