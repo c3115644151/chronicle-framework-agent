@@ -69,6 +69,9 @@ internal static class AgentHostEstablishYourClanGoalLoop
         if (ReadString(result, "status") != "planned" || ReadString(result["selection"] as JsonObject, "objectiveId") != "partySize" ||
             ReadBoolean(result["termination"] as JsonObject, "goalVerified") == true || native.QuestDetailsReads != 1 || native.MutatingActionCount != 0 ||
             providerCatalog is null ||
+            ReadString(provider.FirstRequest?["observation"] as JsonObject, "scope") != "read-only-active-storymode-quest-objective-planning" ||
+            provider.FirstRequest?["observation"]?["state"]?["objectiveSnapshot"] is not JsonObject modelObjectiveSnapshot ||
+            modelObjectiveSnapshot.Count != ObjectiveIds.Length ||
             !providerCatalog[0]!["argumentValues"]!["ObjectiveId"]!.AsArray().Any(value => value?.GetValue<string>() == "partySize") ||
             providerCatalog[0]!["argumentValues"]!["ObjectiveId"]!.AsArray().Any(value => value?.GetValue<string>() is "gold" or "renown"))
             throw new AgentHostException("establish-clan-objective-planner-runtime-failed", "The read-only planner did not select an unmet objective from the exact current quest catalog.");
@@ -163,6 +166,18 @@ internal static class AgentHostEstablishYourClanGoalLoop
             ["goalKind"] = "active-storymode-establish-your-clan-objective-selection",
             ["nativeQuestId"] = QuestId,
             ["nativeQuestTitle"] = ReadString(data, "title"),
+            ["observation"] = new JsonObject
+            {
+                ["scope"] = "read-only-active-storymode-quest-objective-planning",
+                ["state"] = new JsonObject
+                {
+                    ["questId"] = QuestId,
+                    ["title"] = ReadString(data, "title"),
+                    ["objectiveSnapshot"] = snapshot.DeepClone(),
+                    ["journalObjectiveSnapshot"] = journalObjectives.DeepClone(),
+                    ["targetConsistency"] = new JsonObject { ["consistent"] = true }
+                }
+            },
             ["journalObjectiveSnapshot"] = journalObjectives.DeepClone(),
             ["objectiveSnapshot"] = snapshot.DeepClone(),
             ["targetConsistency"] = new JsonObject { ["consistent"] = true },

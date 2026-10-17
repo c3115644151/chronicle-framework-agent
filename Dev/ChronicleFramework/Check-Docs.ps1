@@ -706,6 +706,7 @@ if ($agentHostCampaignLoopSource -notmatch 'supportedEstablishYourClanGoal' -or
     $agentHostProviderSource -notmatch 'supportedEstablishYourClanGoal' -or
     $agentHostEstablishClanPlannerSource -notmatch 'BuildObjectiveActionCatalog' -or
     $agentHostEstablishClanPlannerSource -notmatch 'questDetailsClient\.ReadQuestDetailsAsync' -or
+    $agentHostEstablishClanPlannerSource -notmatch '\["observation"\] = new JsonObject' -or
     $agentHostDecisionCycleSource -notmatch 'IAgentHostQuestDetailsNativeClient' -or
     $agentHostCampaignLoopSource -notmatch 'IAgentHostQuestDetailsNativeClient' -or
     $agentHostMailboxSource -notmatch 'BuildQuestDetailsArguments' -or
