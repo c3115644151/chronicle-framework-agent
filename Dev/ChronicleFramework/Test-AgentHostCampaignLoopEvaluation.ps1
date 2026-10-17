@@ -212,13 +212,14 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         $clockActions = if ($trace) { @($trace.NativeClockActions) } else { @() }
         $battleActionSequence = @($nativeActions | ForEach-Object { [string]$_.actionReceipt.action })
         $providerRoutes = if ($trace -and $trace.ProviderRouteHistory) { @($trace.ProviderRouteHistory) } else { @() }
+        $renownBeforeFinite = ($null -ne $trace.BattleRenownBefore -and -not [double]::IsNaN([double]$trace.BattleRenownBefore) -and -not [double]::IsInfinity([double]$trace.BattleRenownBefore))
+        $renownAfterFinite = ($null -ne $trace.BattleRenownAfter -and -not [double]::IsNaN([double]$trace.BattleRenownAfter) -and -not [double]::IsInfinity([double]$trace.BattleRenownAfter))
         # Source cleanliness is checked at the live test boundary; this evaluator
         # also requires the real provider route and a freshly observed target.
         $battleEvidenceVerified = (
             $childExitCode -eq 0 -and $liveResult -and [bool]$liveResult.Passed -and
             [bool]$trace.BattleSimulationVerified -and [bool]$trace.BattleReturnToMapVerified -and
-            $battleTargetId.Length -gt 0 -and [double]::IsFinite([double]$trace.BattleRenownBefore) -and
-            [double]::IsFinite([double]$trace.BattleRenownAfter) -and $clockActions.Count -eq 0 -and
+            $battleTargetId.Length -gt 0 -and $renownBeforeFinite -and $renownAfterFinite -and $clockActions.Count -eq 0 -and
             $battleActionSequence.Contains('mapPartyTargets') -and $battleActionSequence.Contains('menuSelect') -and
             $battleActionSequence.Contains('battleFinish') -and
             [string]$battleOutcome.SendTroopsOption -ceq 'str_order_attack' -and [string]$battleOutcome.SimulationState -ne 'unknown' -and

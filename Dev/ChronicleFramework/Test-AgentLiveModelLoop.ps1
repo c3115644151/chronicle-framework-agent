@@ -716,7 +716,8 @@ try {
             $providerStoppedAfterGoalAction -and $chosenObservedSafeTarget -and
             (($fightDialogue.Count -eq 1 -and $sendTroops.Count -eq 1) -or ($fightDialogue.Count -eq 0 -and $sendTroops.Count -eq 1)) -and
             $battleFinishes.Count -eq 1 -and $partyLootHandled -and $inventoryLootHandled -and
-            [double]::IsFinite($renownBefore) -and [double]::IsFinite($renownAfter) -and $nativeClockActions.Count -eq 0
+            -not [double]::IsNaN($renownBefore) -and -not [double]::IsInfinity($renownBefore) -and
+            -not [double]::IsNaN($renownAfter) -and -not [double]::IsInfinity($renownAfter) -and $nativeClockActions.Count -eq 0
         )
         $battleOutcome = [ordered]@{
             TargetPartyId = $battleTargetId
