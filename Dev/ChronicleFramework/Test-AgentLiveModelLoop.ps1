@@ -537,27 +537,27 @@ try {
         $finalQuestIds = @($finalNativeState.state.quests | ForEach-Object { [string]$_.id } | Sort-Object)
         $selectionRouteHistory = @($loopTrace.providerRouteHistory)
         $plannerOnlyTrace = @($steps | Where-Object { $_.planningOnly -eq $true -and $_.nativeActionExecuted -eq $false })
-        $plannerVerified = (
-            [string]$loopTrace.status -ceq 'completed' -and
-            [string]$loopTrace.resultKind -ceq 'objective-plan' -and
-            [string]$loopTrace.termination.reason -ceq 'unmet-objective-selected' -and
-            $loopTrace.termination.goalVerified -eq $false -and
-            $loopTrace.selection.met -eq $false -and
-            $selectedObjective -and $selectedObjective.met -eq $false -and
-            @($objectiveSnapshot.PSObject.Properties.Name).Count -eq 4 -and
-            $loopTrace.journalObjectiveSnapshot.Count -eq 4 -and
-            $loopTrace.targetConsistency.consistent -eq $true -and
-            $selectionRouteHistory.Count -ge 2 -and
-            $plannerOnlyTrace.Count -eq 1 -and
-            [string]$baseline.state.context.timeControlMode -ceq 'Stop' -and
-            [Math]::Abs([double]$baseline.campaignDay - [double]$finalNativeState.campaignDay) -le 0.000001 -and
-            [int]$baseline.state.economy.gold -eq [int]$finalNativeState.state.economy.gold -and
-            [int]$baseline.state.party.members -eq [int]$finalNativeState.state.party.members -and
-            [double]$baseline.state.clan.renown -eq [double]$finalNativeState.state.clan.renown -and
-            ($initialQuestIds -join '|') -ceq ($finalQuestIds -join '|') -and
-            [string]$finalNativeState.state.context.timeControlMode -ceq [string]$baseline.state.context.timeControlMode -and
-            @($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -ne 'questDetails' }).Count -eq 0
-        )
+        $plannerChecks = [ordered]@{
+            operationCompleted = ([string]$loopTrace.status -ceq 'completed' -and [string]$loopTrace.resultKind -ceq 'objective-plan')
+            objectiveSelectionTermination = ([string]$loopTrace.termination.reason -ceq 'unmet-objective-selected')
+            wholeQuestNotClaimed = ($loopTrace.termination.goalVerified -eq $false)
+            selectionUnmet = ($loopTrace.selection.met -eq $false -and $null -ne $selectedObjective -and $selectedObjective.met -eq $false)
+            fourNativeObjectives = (@($objectiveSnapshot.PSObject.Properties.Name).Count -eq 4)
+            fourVisibleJournalObjectives = ($loopTrace.journalObjectiveSnapshot.Count -eq 4)
+            journalTargetsConsistent = ($loopTrace.targetConsistency.consistent -eq $true)
+            twoFreeModelRoutes = ($selectionRouteHistory.Count -ge 2)
+            onePlannerDecision = ($plannerOnlyTrace.Count -eq 1)
+            campaignWasPaused = ([string]$baseline.state.context.timeControlMode -ceq 'Stop')
+            campaignDayUnchanged = ([Math]::Abs([double]$baseline.campaignDay - [double]$finalNativeState.campaignDay) -le 0.000001)
+            goldUnchanged = ([int]$baseline.state.economy.gold -eq [int]$finalNativeState.state.economy.gold)
+            partySizeUnchanged = ([int]$baseline.state.party.members -eq [int]$finalNativeState.state.party.members)
+            renownUnchanged = ([double]$baseline.state.economy.renown -eq [double]$finalNativeState.state.economy.renown)
+            questSetUnchanged = (($initialQuestIds -join '|') -ceq ($finalQuestIds -join '|'))
+            timeModeUnchanged = ([string]$finalNativeState.state.context.timeControlMode -ceq [string]$baseline.state.context.timeControlMode)
+            noGameplayActions = (@($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -ne 'questDetails' }).Count -eq 0)
+            oneReadOnlyJournalCall = ([int]$loopTrace.actionsExecuted -eq 1)
+        }
+        $plannerVerified = @($plannerChecks.GetEnumerator() | Where-Object { -not [bool]$_.Value }).Count -eq 0
         $plannerVerification = [ordered]@{
             sourceCampaignDay = [double]$baseline.campaignDay
             finalCampaignDay = [double]$finalNativeState.campaignDay
@@ -567,12 +567,17 @@ try {
             goldAfter = [int]$finalNativeState.state.economy.gold
             partyMembersBefore = [int]$baseline.state.party.members
             partyMembersAfter = [int]$finalNativeState.state.party.members
-            renownBefore = [double]$baseline.state.clan.renown
-            renownAfter = [double]$finalNativeState.state.clan.renown
+            renownBefore = [double]$baseline.state.economy.renown
+            renownAfter = [double]$finalNativeState.state.economy.renown
             activeQuestIdsBefore = $initialQuestIds
             activeQuestIdsAfter = $finalQuestIds
             gameplayActionCount = @($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -ne 'questDetails' }).Count
             nativeQuestDetailsReadCount = [int]$loopTrace.actionsExecuted
+            selectedObjectiveId = $selectedObjectiveId
+            selectedObjectiveCurrent = if ($selectedObjective) { $selectedObjective.current } else { $null }
+            selectedObjectiveTarget = if ($selectedObjective) { $selectedObjective.target } else { $null }
+            selectedObjectiveMet = if ($selectedObjective) { $selectedObjective.met } else { $null }
+            checks = $plannerChecks
             plannerVerified = [bool]$plannerVerified
             goalVerified = [bool]$loopTrace.termination.goalVerified
         }
@@ -1018,6 +1023,7 @@ catch {
             ProviderKind = 'configured live model provider; failed before acceptance'
             ProviderProtocol = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_PROTOCOL)) { 'openai-compatible' } else { [string]$env:CHRONICLE_LLM_PROTOCOL }
             ModelId = [string]$env:CHRONICLE_LLM_MODEL
+            ModelConfigurationSource = if ($AgentHostRuntime -and $loopTrace) { [string]$loopTrace.providerConfigurationSource } else { 'failed-before-provider-loop' }
             ProviderRouteHistory = if ($AgentHostRuntime -and $loopTrace) { $loopTrace.providerRouteHistory } else { $null }
             CaptureRecoveryProof = $captureRecoveryProof
             ModelMaxOutputTokens = if ($loopTrace.providerBudget) { [int]$loopTrace.providerBudget.maxOutputTokensPerCall } else { [int]$env:CHRONICLE_LLM_MAX_TOKENS }
@@ -1036,7 +1042,14 @@ catch {
             CampaignDayStart = if ($baseline) { [double]$baseline.campaignDay } else { $null }
             CampaignDayEnd = if ($loopTrace.lastObservation) { [double]$loopTrace.lastObservation.campaignDay } else { $null }
             Goal = $goal
-            AcceptanceSlice = if ($BattleAndCaptivityLoop) { 'Failed real-model Native BattleSimulation/captivity recovery' } elseif ($BattleSimulationLoop) { 'Failed real-model Native Bandit BattleSimulation' } elseif ($VillageToolsQuestLoop) { 'Failed real-model Native VillageNeedsTools Quest' } elseif ($SupplyManagementLoop) { 'Real-model Native food purchase and three-day Town Wait' } else { 'Failed live-model decision loop' }
+            AcceptanceSlice = if ($EstablishYourClanGoalPlanner) { 'Real-model read-only selection of one unmet original StoryMode Establish Your Clan objective' } elseif ($BattleAndCaptivityLoop) { 'Failed real-model Native BattleSimulation/captivity recovery' } elseif ($BattleSimulationLoop) { 'Failed real-model Native Bandit BattleSimulation' } elseif ($VillageToolsQuestLoop) { 'Failed real-model Native VillageNeedsTools Quest' } elseif ($SupplyManagementLoop) { 'Real-model Native food purchase and three-day Town Wait' } else { 'Failed live-model decision loop' }
+            EstablishYourClanPlannerVerified = if ($EstablishYourClanGoalPlanner) { [bool]$plannerVerified } else { $null }
+            EstablishYourClanObjectiveSelection = if ($EstablishYourClanGoalPlanner -and $loopTrace) { $loopTrace.selection } else { $null }
+            EstablishYourClanObjectiveSnapshot = if ($EstablishYourClanGoalPlanner -and $loopTrace) { $loopTrace.objectiveSnapshot } else { $null }
+            EstablishYourClanJournalObjectiveSnapshot = if ($EstablishYourClanGoalPlanner -and $loopTrace) { $loopTrace.journalObjectiveSnapshot } else { $null }
+            EstablishYourClanPlannerVerification = if ($EstablishYourClanGoalPlanner) { $plannerVerification } else { $null }
+            EstablishYourClanTargetConsistency = if ($EstablishYourClanGoalPlanner -and $loopTrace) { $loopTrace.targetConsistency } else { $null }
+            EstablishYourClanGoalVerified = if ($EstablishYourClanGoalPlanner -and $loopTrace) { [bool]$loopTrace.termination.goalVerified } else { $null }
             SupplyFixtureSetup = $supplySetup
             SupplyVerified = $false
             SupplyVerification = if ($SupplyManagementLoop -and $loopTrace.lastObservation) {
