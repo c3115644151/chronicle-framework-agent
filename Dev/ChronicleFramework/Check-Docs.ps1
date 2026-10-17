@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.216'
+$contractVersion = '7.217'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -261,6 +261,7 @@ if ($harnessScript -notmatch "'AgentHostVillageToolsQuestEvaluation' \{ @\('Pref
     $agentHostVillageToolsQuestPolicySource -notmatch 'village-tools-policy-self-test-return-to-observed-giver-village-failed' -or
     $agentHostVillageToolsQuestPolicySource -notmatch 'village-tools-policy-self-test-requires-fresh-journal-after-purchase' -or
     $agentHostVillageToolsQuestPolicySource -notmatch 'village-tools-policy-self-test-inventory-verification-survives-marker-disappearance' -or
+    $agentHostVillageToolsQuestPolicySource -notmatch 'village-tools-policy-gates-done-on-verified-map-including-settlement-menu' -or
     $agentHostVillageToolsQuestPolicySource -notmatch 'GetToolsQuestMapTargetType' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'village-tools-loop-self-test-giver-village-receipt-failed' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'village-tools-loop-self-test-unknown-origin-fails-closed' -or

@@ -163,11 +163,17 @@ internal static class AgentHostVillageToolsQuestPolicy
 
         var controls = new JsonArray();
         if (!string.Equals(ReadString(context, "gameState"), "MapState", StringComparison.Ordinal) ||
-            context["conversation"] is JsonObject || !string.IsNullOrWhiteSpace(ReadString(context, "menuId")))
+            context["conversation"] is JsonObject)
             return controls;
 
         if (questWasObservedActive && !HasActiveToolsQuest(state) && inventoryVerifiedAfterTurnIn)
             controls.Add("done");
+
+        // A completed Quest may leave the player in the giver's settlement menu.
+        // `done` is a Host control, not a game action, so it remains valid there
+        // once Native Quest and exact Inventory postconditions are proven.
+        if (!string.IsNullOrWhiteSpace(ReadString(context, "menuId")))
+            return controls;
 
         var currentSettlementId = ReadString(location, "currentSettlementId");
         var targetSettlementId = ReadString(location, "targetSettlementId");
@@ -654,10 +660,15 @@ internal static class AgentHostVillageToolsQuestPolicy
             baselineCatalog.OfType<JsonObject>().Any(item => ReadString(item, "action") == "talkToSettlementHero") ||
             !TryResolveAction(activeToolsQuest, completedJournalReceipt, new JsonObject { ["action"] = "inventoryOpen", ["arguments"] = new JsonObject() }, out _, out _, out _))
             throw new AgentHostException("village-tools-policy-self-test-pre-delivery-inventory-gate-failed", "Before delivery, the current completed Journal task must force a Native inventory baseline before reopening the giver conversation.");
+        var completedVillageMenu = State("MapState", "village", "village-1");
+        var completedVillageConversation = State("MapState", "village", "village-1");
+        completedVillageConversation["state"]!["context"]!["conversation"] = new JsonObject { ["options"] = new JsonArray() };
         if (BuildControlCatalog(inventoryState, questWasObservedActive: true, inventoryVerifiedAfterTurnIn: true).Any(control => control?.GetValue<string>() == "done") ||
-            !BuildControlCatalog(State("MapState", null, null), questWasObservedActive: true, inventoryVerifiedAfterTurnIn: true).Any(control => control?.GetValue<string>() == "done"))
-            throw new AgentHostException("village-tools-policy-self-test-done-context-gate-failed", "The done control is available only on unobstructed Campaign Map after the Quest is absent and post-turn-in Inventory is verified.");
-        results.Add(new { scenario = "village-tools-policy-captures-pre-delivery-inventory-and-gates-done-on-map", passed = true });
+            !BuildControlCatalog(State("MapState", null, null), questWasObservedActive: true, inventoryVerifiedAfterTurnIn: true).Any(control => control?.GetValue<string>() == "done") ||
+            !BuildControlCatalog(completedVillageMenu, questWasObservedActive: true, inventoryVerifiedAfterTurnIn: true).Any(control => control?.GetValue<string>() == "done") ||
+            BuildControlCatalog(completedVillageConversation, questWasObservedActive: true, inventoryVerifiedAfterTurnIn: true).Any(control => control?.GetValue<string>() == "done"))
+            throw new AgentHostException("village-tools-policy-self-test-done-context-gate-failed", "The done control must be available in MapState, including a settlement menu, only after the Quest is absent and post-turn-in Inventory is verified; an open conversation still blocks it.");
+        results.Add(new { scenario = "village-tools-policy-gates-done-on-verified-map-including-settlement-menu", passed = true });
         return results;
     }
 
