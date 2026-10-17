@@ -150,6 +150,8 @@ internal static class AgentHostEstablishYourClanGoalLoop
             {
                 ["status"] = "completed",
                 ["resultKind"] = "no-incomplete-objective",
+                ["providerModelId"] = provider.ModelId,
+                ["providerConfigurationSource"] = provider.ConfigurationSource,
                 ["decisions"] = 0,
                 ["actionsExecuted"] = 1,
                 ["questDetails"] = receipt.DeepClone(),
@@ -218,6 +220,8 @@ internal static class AgentHostEstablishYourClanGoalLoop
         {
             ["status"] = "completed",
             ["resultKind"] = "objective-plan",
+            ["providerModelId"] = provider.ModelId,
+            ["providerConfigurationSource"] = provider.ConfigurationSource,
             ["decisions"] = priorDecisions + 1,
             ["actionsExecuted"] = 1,
             ["promptTokens"] = priorPromptTokens + (decision.PromptTokens ?? 0),
