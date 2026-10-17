@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.219'
+$contractVersion = '7.220'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -306,6 +306,11 @@ if ($harnessScript -notmatch "'AgentHostEstablishClanGoalPlannerEvaluation' \{ @
     $agentHostCampaignLoopEvaluationSource -notmatch 'SourceSha256Before' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'plannerSourceHashAfter' -or
     $agentHostLiveModelLoopSource -notmatch '\[switch\]\$EstablishYourClanGoalPlanner' -or
+    $agentHostLiveModelLoopSource -notmatch '-IncludeChronicleFramework' -or
+    $agentCliSource -notmatch '\[switch\]\$IncludeChronicleFramework' -or
+    $agentCliSource -notmatch 'ActiveModules = \$modules' -or
+    $agentCliSource -notmatch 'startup-crash-\$\(\$process.Id\)\.json' -or
+    $agentCliSource -notmatch 'Unhandled startup exception' -or
     $agentHostLiveModelLoopSource -notmatch 'rebuild_player_clan_storymode_quest' -or
     $agentHostLiveModelLoopSource -notmatch 'timeControlMode -cne ''Stop''' -or
     $agentHostLiveModelLoopSource -notmatch 'EstablishYourClanPlannerVerified' -or

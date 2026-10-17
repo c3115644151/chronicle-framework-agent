@@ -4,6 +4,7 @@ param(
     [ValidateSet('start','load','recoverTestConfig','state','agentCheckpointGet','agentCheckpointSet','harnessSeedAgentCheckpointFailure','closeEscapeMenu','respondInquiry','respondMultiSelectionInquiry','mapSettlementTargets','mapNotifications','quickInformation','sceneNotification','mapPartyTargets','mapPartyComposition','mapPartyBehavior','partyUpgradeOptions','upgradeTroop','prisonerRecruitmentOptions','recruitPrisoner','characterDevelopment','spendSkillFocus','questDetails','partyRoster','partyRoles','inventoryOpen','heroEquipmentOptions','equipHeroItem','unequipHeroItem','inventoryConfirm','inventoryCancel','inventoryCancelChanges','tradeConfirm','tradeCancel','tradeCancelChanges','barterOptions','barterEdit','barterReset','barterAutoBalance','barterOffer','barterCancel','setPartyRole','unassignPartyRole','captureFrame','harnessMissionDiagnostics','harnessMapDiagnostics','harnessOpenMapEscapeMenu','harnessOpenNativeInquiry','harnessOpenRecruitmentInquiry','harnessNativeInquiryDiagnostics','harnessPrepareAlleyLeaderFixture','harnessAlleyLeaderDiagnostics','harnessPrepareAlleyRosterFixture','harnessSeedAlleyAttackFixture','harnessSeedPersuasionFixture','harnessCurrentConversationAnswers','harnessAlleyRosterDiagnostics','harnessPlayerSkillsDiagnostics','harnessCharacterDevelopmentDiagnostics','harnessQuestDetailsDiagnostics','harnessQuestDeadlinePrivacyDiagnostics','harnessPartyRosterDiagnostics','harnessMapPartyDiagnostics','harnessMapPartyCompositionDiagnostics','harnessCreateMapArmyFixture','harnessPrepareMovingArmyEncounter','harnessArmyEncounterDiagnostics','harnessPrepareSiegeJoinFixture','harnessSiegeJoinDiagnostics','harnessSeedMapPartyIssueMarker','harnessPrepareSafePassageFixture','harnessSeedCaptivityObservationFixture','harnessSeedPrisonCaptivityFixture','harnessSwitchCaptivityObservationMenu','harnessCaptivityDiagnostics','harnessPrepareSurrenderCondition','harnessSeedTryGetAwayFixture','harnessTryGetAwayDiagnostics','harnessSeedNpcBattleForPlayerJoin','harnessPrepareArmyMemberForCurrentJoinEncounter','harnessJoinEncounterDiagnostics','harnessPreparePursuitVisibilityFixture','harnessSeedPartyUpgradeFixture','harnessSeedPrisonerRecruitmentFixture','harnessSeedRecruitmentCapacityFixture','harnessPrepareCompanionHiringFixture','harnessCompanionHiringDiagnostics','harnessSeedPartyRoleFixture','harnessPartyRoleDiagnostics','harnessSeedEquipmentModifierFixture','harnessClearEquipmentModifierFixture','harnessSeedTradeRumorFixture','harnessTradeRumorTooltipDiagnostics','harnessSeedMapNotificationFixture','harnessSeedQuickInformationFixture','harnessSeedSceneNotificationFixture','harnessOpenInventoryState','harnessCloseInventoryState','harnessInventoryStateDiagnostics','talkToSettlementHero','visitSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','fastForward','move','moveToPoint','missionSceneAgents','missionInput','missionNavigateToAgent','missionLeave','missionInteract','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','persuasionDetails','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','alleyRosterTransfer','alleyRosterCancel','rest','recruitOptions','recruit','foodOptions','tradeOptions','tradeRumors','trade','provision','save','stop')]
     [string]$Action,
     [string]$SaveName,
+    [switch]$IncludeChronicleFramework,
     [string]$CheckpointBase64,
     [ValidateSet('corrupt-json','unsupported-schema','wrong-campaign')][string]$CheckpointFailureMode,
     [string]$SettlementId,
@@ -205,6 +206,10 @@ if ($Action -in @('start','load')) {
         try { $installedModuleIds += [string]([xml](Get-Content -LiteralPath $moduleManifestPath -Raw -Encoding UTF8)).Module.Id.value }
         catch { }
     }
+    if ($IncludeChronicleFramework -and 'ChronicleFramework' -notin $modules) {
+        if ('ChronicleFramework' -notin $installedModuleIds) { throw 'ChronicleFramework was requested for this disposable save load but is not installed in the configured game root.' }
+        $modules += 'ChronicleFramework'
+    }
     $missingSaveModules = @($modules | Where-Object { $_ -notin $installedModuleIds })
     if ($missingSaveModules.Count -gt 0) { throw "Save requires modules that are not installed in the configured game root: $($missingSaveModules -join ', ')." }
     $steamStatus = Ensure-ChronicleSteamClient
@@ -216,6 +221,8 @@ if ($Action -in @('start','load')) {
     $startupDialogSnapshots = [System.Collections.Generic.List[object]]::new()
     $startupFault = $null
     $expectedHarnessMode = if ([string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_MODE)) { 'normal' } else { $env:CHRONICLE_HARNESS_MODE }
+    $programDataLogs = Join-Path $env:ProgramData 'Mount and Blade II Bannerlord\logs'
+    $startupCrashLog = Join-Path $programDataLogs "rgl_log_errors_$($process.Id).txt"
     if (Test-Path -LiteralPath $engineConfig -PathType Leaf) {
         Copy-Item -LiteralPath $engineConfig -Destination $engineConfigBackupPath -Force
         $engineConfigBackupCreated = $true
@@ -237,6 +244,34 @@ if ($Action -in @('start','load')) {
     while ((Get-Date) -lt $deadline) {
         $launchProcess = Get-Process -Id $process.Id -ErrorAction SilentlyContinue
         if (-not $launchProcess) { break }
+        if (Test-Path -LiteralPath $startupCrashLog -PathType Leaf) {
+            $crashTail = @()
+            try { $crashTail = @(Get-Content -LiteralPath $startupCrashLog -Tail 100 -Encoding UTF8) } catch { }
+            $unhandledException = @($crashTail | Where-Object { $_ -match 'Unhandled Exception Code 0x[0-9A-Fa-f]+' } | Select-Object -Last 1)
+            if ($unhandledException.Count -gt 0) {
+                $crashEvidenceRoot = if (-not [string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) { $env:CHRONICLE_HARNESS_TEMP } else { $protocolRoot }
+                New-Item -ItemType Directory -Force -Path $crashEvidenceRoot | Out-Null
+                $crashEvidencePath = Join-Path $crashEvidenceRoot "startup-crash-$($process.Id).json"
+                $rglPath = Join-Path $programDataLogs "rgl_log_$($process.Id).txt"
+                $crashEvidence = [ordered]@{
+                    Detected = $true
+                    ProcessId = $process.Id
+                    SaveName = $SaveName
+                    ActiveModules = $modules
+                    ExceptionLine = [string]$unhandledException[0]
+                    ErrorLogTail = $crashTail
+                    RglLogTail = if (Test-Path -LiteralPath $rglPath -PathType Leaf) { @(Get-Content -LiteralPath $rglPath -Tail 80 -Encoding UTF8) } else { @() }
+                    DetectedUtc = [DateTime]::UtcNow.ToString('O')
+                }
+                $crashEvidence | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $crashEvidencePath -Encoding UTF8
+                $crashStopped = Stop-AgentProcessTree -RootProcessId $process.Id
+                if ($crashStopped) {
+                    Set-SafeExitMarker
+                    if ($engineConfigBackupCreated) { Restore-ChronicleTestEngineConfig -BackupPath $engineConfigBackupPath | Out-Null }
+                }
+                throw "Bannerlord reported an unhandled startup exception. Test-owned processStopped=$crashStopped; crash evidence: $crashEvidencePath. No model request was sent."
+            }
+        }
         if ($launchProcess.MainWindowTitle -match '^Mod change detected$') {
             try {
                 $dialogResult = Invoke-ChronicleShaderCacheDialogAcknowledgement -ProcessId $process.Id -WindowHandle $launchProcess.MainWindowHandle

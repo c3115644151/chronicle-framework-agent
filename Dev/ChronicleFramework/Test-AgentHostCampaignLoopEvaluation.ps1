@@ -159,7 +159,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
             [IO.File]::Copy($plannerSourceSavePath, $plannerFixtureSavePath, $false)
             $plannerCloneHash = (Get-FileHash -LiteralPath $plannerFixtureSavePath -Algorithm SHA256).Hash
             if ($plannerCloneHash -cne $plannerSourceHashBefore) { throw 'The W7-N disposable save copy does not match its read-only source hash.' }
-            [ordered]@{ SourceSaveName = $PlannerSourceSaveName; SourceSha256Before = $plannerSourceHashBefore; SourceModuleIds = $plannerSourceModules; DisposableCloneName = $plannerFixtureSaveName; DisposableCloneSha256 = $plannerCloneHash; IsByteForByteCopy = $true; NoGameWorldStateInjected = $true } |
+            [ordered]@{ SourceSaveName = $PlannerSourceSaveName; SourceSha256Before = $plannerSourceHashBefore; SourceModuleIds = $plannerSourceModules; RuntimeLoadModuleAugment = @('ChronicleFramework'); DisposableCloneName = $plannerFixtureSaveName; DisposableCloneSha256 = $plannerCloneHash; IsByteForByteCopy = $true; NoGameWorldStateInjected = $true } |
                 ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $runTemp 'EstablishYourClanSourceFixture.json') -Encoding UTF8
             $childOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $liveTest -LoadSaveName $plannerFixtureSaveName -EstablishYourClanGoalPlanner -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
         }

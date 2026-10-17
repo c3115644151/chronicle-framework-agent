@@ -195,7 +195,9 @@ try {
     $captureRecoveryProof = Test-ChronicleFragmentedCaptureResilience -EvidencePath (Join-Path $runDirectory 'FragmentedCaptureRecovery.json')
     Set-Content -LiteralPath $eventTracePath -Value '' -Encoding UTF8
     $env:CHRONICLE_HARNESS_MODE = 'visual-capture'
-    $start = Invoke-AgentCli 'load' @('-SaveName', $LoadSaveName)
+    $loadArguments = @('-SaveName', $LoadSaveName)
+    if ($EstablishYourClanGoalPlanner) { $loadArguments += '-IncludeChronicleFramework' }
+    $start = Invoke-AgentCli 'load' $loadArguments
     $sessionStarted = $true
     $baseline = Invoke-AgentCli 'state'
     if ($baseline.status -ne 'completed' -or $baseline.state.context.gameState -ne 'MapState') {
