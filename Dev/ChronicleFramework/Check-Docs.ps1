@@ -305,11 +305,15 @@ if ($harnessScript -notmatch "'AgentHostEstablishClanGoalPlannerEvaluation' \{ @
     $agentHostCampaignLoopEvaluationSource -notmatch 'ChronicleW7N-' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'SourceSha256Before' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'plannerSourceHashAfter' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'RuntimeLoadModuleAugment' -or
+    $harnessScript -notmatch 'StoryModePlannerSourceSaveName' -or
     $agentHostLiveModelLoopSource -notmatch '\[switch\]\$EstablishYourClanGoalPlanner' -or
     $agentHostLiveModelLoopSource -notmatch '-IncludeChronicleFramework' -or
     $agentCliSource -notmatch '\[switch\]\$IncludeChronicleFramework' -or
+    $agentCliSource -notmatch 'observedStartupProcessIds' -or
+    $agentCliSource -notmatch 'Stop-ChronicleStartupProcessTree' -or
     $agentCliSource -notmatch 'ActiveModules = \$modules' -or
-    $agentCliSource -notmatch 'startup-crash-\$\(\$process.Id\)\.json' -or
+    $agentCliSource -notmatch 'startup-crash-\$\(\$crashCandidate\.Id\)\.json' -or
     $agentCliSource -notmatch 'Unhandled startup exception' -or
     $agentHostLiveModelLoopSource -notmatch 'rebuild_player_clan_storymode_quest' -or
     $agentHostLiveModelLoopSource -notmatch 'timeControlMode -cne ''Stop''' -or

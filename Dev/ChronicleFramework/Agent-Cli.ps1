@@ -154,6 +154,19 @@ function Stop-AgentProcessTree([int]$RootProcessId) {
     return $false
 }
 
+function Stop-ChronicleStartupProcessTree([int]$RootProcessId, [int[]]$KnownProcessIds = @()) {
+    $descendants = @(Get-DescendantProcessIds -ParentId $RootProcessId)
+    $targets = @($descendants + $KnownProcessIds + $RootProcessId | Where-Object { $_ } | Select-Object -Unique)
+    foreach ($id in $targets) { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue }
+    $deadline = (Get-Date).AddSeconds(15)
+    do {
+        $remaining = @($targets | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })
+        if ($remaining.Count -eq 0) { return $true }
+        Start-Sleep -Milliseconds 250
+    } while ((Get-Date) -lt $deadline)
+    return $false
+}
+
 function Invoke-ProtocolCommand([string]$ProtocolAction, [hashtable]$Arguments = @{}, [switch]$ReturnWhenAccepted) {
     $session = Get-Session
     $id = if ($CommandId) { $CommandId } else { 'cli-' + [Guid]::NewGuid().ToString('N') }
@@ -221,8 +234,6 @@ if ($Action -in @('start','load')) {
     $startupDialogSnapshots = [System.Collections.Generic.List[object]]::new()
     $startupFault = $null
     $expectedHarnessMode = if ([string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_MODE)) { 'normal' } else { $env:CHRONICLE_HARNESS_MODE }
-    $programDataLogs = Join-Path $env:ProgramData 'Mount and Blade II Bannerlord\logs'
-    $startupCrashLog = Join-Path $programDataLogs "rgl_log_errors_$($process.Id).txt"
     if (Test-Path -LiteralPath $engineConfig -PathType Leaf) {
         Copy-Item -LiteralPath $engineConfig -Destination $engineConfigBackupPath -Force
         $engineConfigBackupCreated = $true
@@ -238,24 +249,51 @@ if ($Action -in @('start','load')) {
     }
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $ready = $false
+    $readyProcessId = 0
     $windowLayout = $null
     $lastWindowLayoutAttemptUtc = [DateTime]::MinValue
     $startupDialogReceipts = [System.Collections.Generic.List[object]]::new()
+    $observedStartupProcessIds = [System.Collections.Generic.HashSet[int]]::new()
+    [void]$observedStartupProcessIds.Add([int]$process.Id)
+    $launchStartedUtc = $process.StartTime.ToUniversalTime()
+    $programDataLogs = Join-Path $env:ProgramData 'Mount and Blade II Bannerlord\logs'
     while ((Get-Date) -lt $deadline) {
         $launchProcess = Get-Process -Id $process.Id -ErrorAction SilentlyContinue
+        $currentDescendants = @(Get-DescendantProcessIds -ParentId $process.Id)
+        foreach ($descendantId in $currentDescendants) { [void]$observedStartupProcessIds.Add([int]$descendantId) }
+        $startedBannerlordProcesses = @(Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue | Where-Object {
+            try { $_.StartTime.ToUniversalTime() -ge $launchStartedUtc.AddSeconds(-1) } catch { $false }
+        })
+        foreach ($bannerlordProcess in $startedBannerlordProcesses) { [void]$observedStartupProcessIds.Add([int]$bannerlordProcess.Id) }
+        if (-not $launchProcess) { $launchProcess = $startedBannerlordProcesses | Select-Object -First 1 }
         if (-not $launchProcess) { break }
-        if (Test-Path -LiteralPath $startupCrashLog -PathType Leaf) {
-            $crashTail = @()
-            try { $crashTail = @(Get-Content -LiteralPath $startupCrashLog -Tail 100 -Encoding UTF8) } catch { }
-            $unhandledException = @($crashTail | Where-Object { $_ -match 'Unhandled Exception Code 0x[0-9A-Fa-f]+' } | Select-Object -Last 1)
-            if ($unhandledException.Count -gt 0) {
+        $crashCandidate = $null
+        $crashTail = @()
+        $unhandledException = @()
+        foreach ($candidateId in @($observedStartupProcessIds)) {
+            $candidateProcess = Get-Process -Id $candidateId -ErrorAction SilentlyContinue
+            if (-not $candidateProcess -or $candidateProcess.ProcessName -notlike 'Bannerlord*') { continue }
+            $candidateCrashLog = Join-Path $programDataLogs "rgl_log_errors_$candidateId.txt"
+            if (-not (Test-Path -LiteralPath $candidateCrashLog -PathType Leaf)) { continue }
+            $candidateTail = @()
+            try { $candidateTail = @(Get-Content -LiteralPath $candidateCrashLog -Tail 100 -Encoding UTF8) } catch { }
+            $candidateException = @($candidateTail | Where-Object { $_ -match 'Unhandled Exception Code 0x[0-9A-Fa-f]+' } | Select-Object -Last 1)
+            if ($candidateException.Count -gt 0) {
+                $crashCandidate = $candidateProcess
+                $crashTail = $candidateTail
+                $unhandledException = $candidateException
+                break
+            }
+        }
+        if ($crashCandidate) {
                 $crashEvidenceRoot = if (-not [string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) { $env:CHRONICLE_HARNESS_TEMP } else { $protocolRoot }
                 New-Item -ItemType Directory -Force -Path $crashEvidenceRoot | Out-Null
-                $crashEvidencePath = Join-Path $crashEvidenceRoot "startup-crash-$($process.Id).json"
-                $rglPath = Join-Path $programDataLogs "rgl_log_$($process.Id).txt"
+                $crashEvidencePath = Join-Path $crashEvidenceRoot "startup-crash-$($crashCandidate.Id).json"
+                $rglPath = Join-Path $programDataLogs "rgl_log_$($crashCandidate.Id).txt"
                 $crashEvidence = [ordered]@{
                     Detected = $true
-                    ProcessId = $process.Id
+                    RootProcessId = $process.Id
+                    ExceptionProcessId = $crashCandidate.Id
                     SaveName = $SaveName
                     ActiveModules = $modules
                     ExceptionLine = [string]$unhandledException[0]
@@ -264,24 +302,23 @@ if ($Action -in @('start','load')) {
                     DetectedUtc = [DateTime]::UtcNow.ToString('O')
                 }
                 $crashEvidence | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $crashEvidencePath -Encoding UTF8
-                $crashStopped = Stop-AgentProcessTree -RootProcessId $process.Id
+                $crashStopped = Stop-ChronicleStartupProcessTree -RootProcessId $process.Id -KnownProcessIds @($observedStartupProcessIds)
                 if ($crashStopped) {
                     Set-SafeExitMarker
                     if ($engineConfigBackupCreated) { Restore-ChronicleTestEngineConfig -BackupPath $engineConfigBackupPath | Out-Null }
                 }
                 throw "Bannerlord reported an unhandled startup exception. Test-owned processStopped=$crashStopped; crash evidence: $crashEvidencePath. No model request was sent."
-            }
         }
         if ($launchProcess.MainWindowTitle -match '^Mod change detected$') {
             try {
-                $dialogResult = Invoke-ChronicleShaderCacheDialogAcknowledgement -ProcessId $process.Id -WindowHandle $launchProcess.MainWindowHandle
+                $dialogResult = Invoke-ChronicleShaderCacheDialogAcknowledgement -ProcessId $launchProcess.Id -WindowHandle $launchProcess.MainWindowHandle
             }
             catch {
                 $dialogEvidenceDirectory = if (-not [string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) { $env:CHRONICLE_HARNESS_TEMP } else { $protocolRoot }
                 New-Item -ItemType Directory -Force -Path $dialogEvidenceDirectory | Out-Null
-                $dialogEvidencePath = Join-Path $dialogEvidenceDirectory "startup-dialog-$($process.Id).json"
-                [pscustomobject]@{ Handled = $false; ProcessId = $process.Id; WindowTitle = $launchProcess.MainWindowTitle; Error = $_.Exception.Message } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $dialogEvidencePath -Encoding UTF8
-                $launchStopped = Stop-AgentProcessTree -RootProcessId $process.Id
+                $dialogEvidencePath = Join-Path $dialogEvidenceDirectory "startup-dialog-$($launchProcess.Id).json"
+                [pscustomobject]@{ Handled = $false; ProcessId = $launchProcess.Id; WindowTitle = $launchProcess.MainWindowTitle; Error = $_.Exception.Message } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $dialogEvidencePath -Encoding UTF8
+                $launchStopped = Stop-ChronicleStartupProcessTree -RootProcessId $process.Id -KnownProcessIds @($observedStartupProcessIds)
                 Set-SafeExitMarker
                 if ($launchStopped -and $engineConfigBackupCreated) { Restore-ChronicleTestEngineConfig -BackupPath $engineConfigBackupPath | Out-Null }
                 throw "Safe handling of the known shader-cache prompt failed before confirmation. The test-owned game process was stopped; evidence: $dialogEvidencePath. Cause: $($_.Exception.Message)"
@@ -289,10 +326,10 @@ if ($Action -in @('start','load')) {
             $startupDialogReceipts.Add($dialogResult)
             $dialogEvidenceDirectory = if (-not [string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) { $env:CHRONICLE_HARNESS_TEMP } else { $protocolRoot }
             New-Item -ItemType Directory -Force -Path $dialogEvidenceDirectory | Out-Null
-            $dialogEvidencePath = Join-Path $dialogEvidenceDirectory "startup-dialog-$($process.Id).json"
+            $dialogEvidencePath = Join-Path $dialogEvidenceDirectory "startup-dialog-$($launchProcess.Id).json"
             $dialogResult | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $dialogEvidencePath -Encoding UTF8
             if (-not $dialogResult.Handled) {
-                $launchStopped = Stop-AgentProcessTree -RootProcessId $process.Id
+                $launchStopped = Stop-ChronicleStartupProcessTree -RootProcessId $process.Id -KnownProcessIds @($observedStartupProcessIds)
                 Set-SafeExitMarker
                 if ($launchStopped -and $engineConfigBackupCreated) { Restore-ChronicleTestEngineConfig -BackupPath $engineConfigBackupPath | Out-Null }
                 $actionSummary = @($dialogResult.ActionNames) -join ', '
@@ -302,7 +339,7 @@ if ($Action -in @('start','load')) {
         }
         if ($launchProcess.MainWindowTitle -ceq 'Warning') {
             try {
-                $warningSnapshot = Get-ChronicleWindowAutomationSnapshot -ProcessId $process.Id -WindowHandle $launchProcess.MainWindowHandle
+                $warningSnapshot = Get-ChronicleWindowAutomationSnapshot -ProcessId $launchProcess.Id -WindowHandle $launchProcess.MainWindowHandle
                 $startupDialogSnapshots.Add((ConvertTo-ChronicleStartupDialogEvidence -Snapshot $warningSnapshot))
                 $startupFault = if ($warningSnapshot.DialogText -match '(?i)Unable to initialize Steam API') { 'Bannerlord reports that the Steam API could not initialize; see startup dialog evidence.' } else { 'Bannerlord is blocked by an unclassified Warning dialog; no button was pressed.' }
             }
@@ -312,7 +349,7 @@ if ($Action -in @('start','load')) {
         $windowAttemptDue = ([DateTime]::UtcNow - $lastWindowLayoutAttemptUtc).TotalSeconds -ge 2
         if ((-not $windowLayout -or -not $windowLayout.Applied) -and $windowAttemptDue) {
             $lastWindowLayoutAttemptUtc = [DateTime]::UtcNow
-            $candidateLayout = Set-ChronicleTestWindow -ProcessId $process.Id
+            $candidateLayout = Set-ChronicleTestWindow -ProcessId $launchProcess.Id
             if ($candidateLayout -and $candidateLayout.Applied) { $windowLayout = $candidateLayout }
         }
         if (Test-Path $diagnosticLog) {
@@ -341,7 +378,18 @@ if ($Action -in @('start','load')) {
                         $diagnosticPendingText = $combinedTelemetry
                     }
                     foreach ($line in $newLines) { if (-not [string]::IsNullOrWhiteSpace([string]$line)) { $startupTelemetry.Add([string]$line) } }
-                    if (@($newLines | Where-Object { $_ -match "\|pid=$($process.Id)\|campaign-loaded\|mode=$([regex]::Escape($expectedHarnessMode))\|" }).Count -gt 0) { $ready = $true }
+                    $readyLine = @($newLines | Where-Object { $_ -match "\|pid=\d+\|campaign-loaded\|mode=$([regex]::Escape($expectedHarnessMode))\|" } | Select-Object -Last 1)
+                    if ($readyLine.Count -gt 0) {
+                        $readyPidMatch = [regex]::Match([string]$readyLine[0], '\|pid=(\d+)\|campaign-loaded\|')
+                        if ($readyPidMatch.Success) {
+                            $candidateReadyPid = [int]$readyPidMatch.Groups[1].Value
+                            $candidateReadyProcess = Get-Process -Id $candidateReadyPid -ErrorAction SilentlyContinue
+                            if ($candidateReadyProcess -and $candidateReadyProcess.ProcessName -like 'Bannerlord*' -and $candidateReadyPid -in @($observedStartupProcessIds)) {
+                                $ready = $true
+                                $readyProcessId = $candidateReadyPid
+                            }
+                        }
+                    }
                 }
             }
             catch { }
@@ -355,17 +403,23 @@ if ($Action -in @('start','load')) {
     }
     if (-not $ready) {
         $startupProcess = Get-Process -Id $process.Id -ErrorAction SilentlyContinue
+        if (-not $startupProcess) { $startupProcess = @($observedStartupProcessIds | ForEach-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue } | Where-Object { $_ } | Select-Object -First 1) }
+        $startupEvidenceProcessId = [int]$process.Id
+        foreach ($candidateId in @($observedStartupProcessIds)) {
+            if (Test-Path -LiteralPath (Join-Path $programDataLogs "rgl_log_errors_$candidateId.txt") -PathType Leaf) { $startupEvidenceProcessId = [int]$candidateId }
+        }
         $programDataLogs = Join-Path $env:ProgramData 'Mount and Blade II Bannerlord\logs'
-        $rglPath = Join-Path $programDataLogs "rgl_log_$($process.Id).txt"
-        $rglErrorPath = Join-Path $programDataLogs "rgl_log_errors_$($process.Id).txt"
-        $watchdogPath = Join-Path $programDataLogs "watchdog_log_$($process.Id).txt"
+        $rglPath = Join-Path $programDataLogs "rgl_log_$startupEvidenceProcessId.txt"
+        $rglErrorPath = Join-Path $programDataLogs "rgl_log_errors_$startupEvidenceProcessId.txt"
+        $watchdogPath = Join-Path $programDataLogs "watchdog_log_$startupEvidenceProcessId.txt"
         $telemetryLines = @()
         if (Test-Path -LiteralPath $diagnosticLog) {
             $allTelemetry = @(Get-Content -LiteralPath $diagnosticLog -Encoding UTF8)
             $telemetryLines = @($allTelemetry | Select-Object -Skip $diagnosticStartLineCount)
         }
         $startupEvidence = [ordered]@{
-            ProcessId = $process.Id
+            RootProcessId = $process.Id
+            ProcessId = $startupEvidenceProcessId
             SaveName = $SaveName
             MainWindowTitle = if ($startupProcess) { [string]$startupProcess.MainWindowTitle } else { $null }
             MainWindowHandle = if ($startupProcess) { [string]$startupProcess.MainWindowHandle } else { $null }
@@ -384,23 +438,24 @@ if ($Action -in @('start','load')) {
         }
         $startupEvidenceDirectory = if (-not [string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) { $env:CHRONICLE_HARNESS_TEMP } else { $protocolRoot }
         New-Item -ItemType Directory -Force -Path $startupEvidenceDirectory | Out-Null
-        $startupEvidencePath = Join-Path $startupEvidenceDirectory "startup-timeout-$($process.Id).json"
+        $startupEvidencePath = Join-Path $startupEvidenceDirectory "startup-timeout-$startupEvidenceProcessId.json"
         $startupEvidence | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $startupEvidencePath -Encoding UTF8
-        $launchStopped = Stop-AgentProcessTree -RootProcessId $process.Id
+        $launchStopped = Stop-ChronicleStartupProcessTree -RootProcessId $process.Id -KnownProcessIds @($observedStartupProcessIds)
         Set-SafeExitMarker
         if ($launchStopped -and $engineConfigBackupCreated) { Restore-ChronicleTestEngineConfig -BackupPath $engineConfigBackupPath | Out-Null }
         $startupFailureMessage = if ($startupFault) { [string]$startupFault } else { 'Campaign did not reach protocol-ready state.' }
         throw "$startupFailureMessage Startup evidence: $startupEvidencePath"
     }
-    $windowLayout = Set-ChronicleTestWindow -ProcessId $process.Id
+    if ($readyProcessId -le 0) { throw 'Campaign reached a ready marker without recording its process identity.' }
+    $windowLayout = Set-ChronicleTestWindow -ProcessId $readyProcessId
     if (-not $windowLayout -or -not $windowLayout.Applied) {
-        $launchStopped = Stop-AgentProcessTree -RootProcessId $process.Id
+        $launchStopped = Stop-ChronicleStartupProcessTree -RootProcessId $process.Id -KnownProcessIds @($observedStartupProcessIds)
         Set-SafeExitMarker
         if ($launchStopped -and $engineConfigBackupCreated) { Restore-ChronicleTestEngineConfig -BackupPath $engineConfigBackupPath | Out-Null }
         throw 'Windowed test layout was not verified.'
     }
     $performanceProfile = [ordered]@{ maxFramerate = 30; width = [int]$windowLayout.Width; height = [int]$windowLayout.Height; configRestoredAfterStop = [bool]$engineConfigBackupCreated }
-    $session = [ordered]@{ protocolVersion = 1; processId = $process.Id; saveName = $SaveName; moduleSet = $modules; startedUtc = (Get-Date).ToUniversalTime().ToString('O'); windowLayout = $windowLayout; performanceProfile = $performanceProfile; steamClient = $steamStatus; engineConfigBackupPath = if ($engineConfigBackupCreated) { $engineConfigBackupPath } else { $null }; startupDialogReceipts = @($startupDialogReceipts) }
+    $session = [ordered]@{ protocolVersion = 1; processId = $readyProcessId; rootProcessId = $process.Id; observedProcessIds = @($observedStartupProcessIds); saveName = $SaveName; moduleSet = $modules; startedUtc = (Get-Date).ToUniversalTime().ToString('O'); windowLayout = $windowLayout; performanceProfile = $performanceProfile; steamClient = $steamStatus; engineConfigBackupPath = if ($engineConfigBackupCreated) { $engineConfigBackupPath } else { $null }; startupDialogReceipts = @($startupDialogReceipts) }
     $session | ConvertTo-Json | Set-Content -Path $sessionPath -Encoding UTF8
     $configuredTimeout = $TimeoutSeconds
     $TimeoutSeconds = [Math]::Min(30, $TimeoutSeconds)
@@ -410,7 +465,7 @@ if ($Action -in @('start','load')) {
     }
     catch {
         $handshakeError = $_.Exception.Message
-        $launchStopped = Stop-AgentProcessTree -RootProcessId $process.Id
+        $launchStopped = Stop-ChronicleStartupProcessTree -RootProcessId $process.Id -KnownProcessIds @($observedStartupProcessIds)
         Set-SafeExitMarker
         if ($launchStopped -and $engineConfigBackupCreated) { Restore-ChronicleTestEngineConfig -BackupPath $engineConfigBackupPath | Out-Null }
         Remove-Item -LiteralPath $sessionPath -Force -ErrorAction SilentlyContinue

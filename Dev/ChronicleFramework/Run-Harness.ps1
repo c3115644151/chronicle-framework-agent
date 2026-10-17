@@ -16,7 +16,8 @@ param(
     [ValidateRange(1,20)][int]$SupplyBaselineProvisionAmount = 4,
     [ValidateRange(1,5)][int]$FreshCampaignSupplyRuns = 5,
     [ValidateRange(1,10)][int]$RecruitmentFallbackMaxAttempts = 10,
-    [string]$BattleSimulationSourceSaveName = 'AgentBridgeLifecycle'
+    [string]$BattleSimulationSourceSaveName = 'AgentBridgeLifecycle',
+    [string]$StoryModePlannerSourceSaveName = 'ChronicleHarness'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -655,7 +656,7 @@ foreach ($stage in $requestedStages) {
         }
         'AgentHostEstablishClanGoalPlannerEvaluation' {
             Invoke-Stage -Name 'AgentHostEstablishClanGoalPlannerEvaluation' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostCampaignLoopEvaluationScript -EstablishYourClanGoalPlanner -FrameRate 5 2>&1 | Out-String
+                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostCampaignLoopEvaluationScript -EstablishYourClanGoalPlanner -PlannerSourceSaveName $StoryModePlannerSourceSaveName -FrameRate 5 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "FreeLLMAPI-routed read-only StoryMode Establish Your Clan objective planner evaluation failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
