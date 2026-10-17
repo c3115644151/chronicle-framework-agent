@@ -217,6 +217,7 @@ try {
     elseif ($EstablishYourClanGoalPlanner) {
         $activeStoryClanQuest = @($baseline.state.quests | Where-Object { [string]$_.id -ceq 'rebuild_player_clan_storymode_quest' })
         if ($activeStoryClanQuest.Count -ne 1) { throw 'Read-only StoryMode objective planning requires the exact Establish Your Clan Quest to be active in the fresh Native state; no model decision was sent.' }
+        if ([string]$baseline.state.storyModeEstablishClanStatus.status -cne 'active') { throw 'The Native StoryMode quest lifecycle observation did not classify the exact active Establish Your Clan Quest; no model decision was sent.' }
         if ([string]$baseline.state.context.timeControlMode -cne 'Stop') { throw 'Read-only planner fixture must already have the Native campaign clock stopped; the test will not change time mode.' }
     }
     elseif ($baseline.state.location.currentSettlementId) {
@@ -557,6 +558,8 @@ try {
             timeModeUnchanged = ([string]$finalNativeState.state.context.timeControlMode -ceq [string]$baseline.state.context.timeControlMode)
             noGameplayActions = (@($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -ne 'questDetails' }).Count -eq 0)
             oneReadOnlyJournalCall = ([int]$loopTrace.actionsExecuted -eq 1)
+            activeQuestLifecycleObservedBefore = ([string]$baseline.state.storyModeEstablishClanStatus.status -ceq 'active')
+            activeQuestLifecycleObservedAfter = ([string]$finalNativeState.state.storyModeEstablishClanStatus.status -ceq 'active')
         }
         $plannerVerified = @($plannerChecks.GetEnumerator() | Where-Object { -not [bool]$_.Value }).Count -eq 0
         $plannerVerification = [ordered]@{
@@ -572,6 +575,8 @@ try {
             renownAfter = [double]$finalNativeState.state.economy.renown
             activeQuestIdsBefore = $initialQuestIds
             activeQuestIdsAfter = $finalQuestIds
+            questLifecycleStatusBefore = [string]$baseline.state.storyModeEstablishClanStatus.status
+            questLifecycleStatusAfter = [string]$finalNativeState.state.storyModeEstablishClanStatus.status
             gameplayActionCount = @($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -ne 'questDetails' }).Count
             nativeQuestDetailsReadCount = [int]$loopTrace.actionsExecuted
             selectedObjectiveId = $selectedObjectiveId
@@ -976,6 +981,8 @@ try {
         EstablishYourClanPlannerVerification = if ($EstablishYourClanGoalPlanner) { $plannerVerification } else { $null }
         EstablishYourClanQuestDetails = if ($EstablishYourClanGoalPlanner) { $loopTrace.questDetails } else { $null }
         EstablishYourClanTargetConsistency = if ($EstablishYourClanGoalPlanner) { $loopTrace.targetConsistency } else { $null }
+        EstablishYourClanQuestStatusBefore = if ($EstablishYourClanGoalPlanner) { [string]$baseline.state.storyModeEstablishClanStatus.status } else { $null }
+        EstablishYourClanQuestStatusAfter = if ($EstablishYourClanGoalPlanner -and $finalObservation) { [string]$finalObservation.state.storyModeEstablishClanStatus.status } else { $null }
         EstablishYourClanGoalVerified = if ($EstablishYourClanGoalPlanner) { [bool]$loopTrace.termination.goalVerified } else { $null }
         BattleSimulationVerified = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { [bool]$battleSimulationVerified } else { $null }
         BattleOutcome = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { $battleOutcome } else { $null }
@@ -1050,6 +1057,8 @@ catch {
             EstablishYourClanJournalObjectiveSnapshot = if ($EstablishYourClanGoalPlanner -and $loopTrace) { $loopTrace.journalObjectiveSnapshot } else { $null }
             EstablishYourClanPlannerVerification = if ($EstablishYourClanGoalPlanner) { $plannerVerification } else { $null }
             EstablishYourClanTargetConsistency = if ($EstablishYourClanGoalPlanner -and $loopTrace) { $loopTrace.targetConsistency } else { $null }
+            EstablishYourClanQuestStatusBefore = if ($EstablishYourClanGoalPlanner -and $baseline) { [string]$baseline.state.storyModeEstablishClanStatus.status } else { $null }
+            EstablishYourClanQuestStatusAfter = if ($EstablishYourClanGoalPlanner -and $finalObservation) { [string]$finalObservation.state.storyModeEstablishClanStatus.status } else { $null }
             EstablishYourClanGoalVerified = if ($EstablishYourClanGoalPlanner -and $loopTrace) { [bool]$loopTrace.termination.goalVerified } else { $null }
             SupplyFixtureSetup = $supplySetup
             SupplyVerified = $false

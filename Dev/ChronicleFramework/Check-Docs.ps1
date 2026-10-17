@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.221'
+$contractVersion = '7.222'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -53,6 +53,7 @@ $shaderDialogSource = Get-Content (Join-Path $harnessRoot 'HarnessShaderCacheDia
 $agentProtocolSource = Get-Content (Join-Path $harnessRoot 'AgentProtocol.cs') -Raw -Encoding UTF8
 $subModuleSource = Get-Content (Join-Path $harnessRoot 'SubModule.cs') -Raw -Encoding UTF8
 $agentObserverSource = Get-Content (Join-Path $harnessRoot 'AgentObserver.cs') -Raw -Encoding UTF8
+$storyModeLifecycleStatusSource = Get-Content (Join-Path $harnessRoot 'StoryModeEstablishClanLifecycleStatus.cs') -Raw -Encoding UTF8
 $agentDecisionLoopSource = Get-Content (Join-Path $harnessRoot 'Agent-DecisionLoop.ps1') -Raw -Encoding UTF8
 $agentProviderBudgetSource = Get-Content (Join-Path $harnessRoot 'Agent-ProviderBudget.ps1') -Raw -Encoding UTF8
 $agentDecisionLoopPolicySource = Get-Content (Join-Path $harnessRoot 'Agent-DecisionLoopPolicy.ps1') -Raw -Encoding UTF8
@@ -318,6 +319,7 @@ if ($harnessScript -notmatch "'AgentHostEstablishClanGoalPlannerEvaluation' \{ @
     $agentHostLiveModelLoopSource -notmatch 'rebuild_player_clan_storymode_quest' -or
     $agentHostLiveModelLoopSource -notmatch 'timeControlMode -cne ''Stop''' -or
     $agentHostLiveModelLoopSource -notmatch 'EstablishYourClanPlannerVerified' -or
+    $agentHostLiveModelLoopSource -notmatch 'storyModeEstablishClanStatus\.status' -or
     $agentHostLiveModelLoopSource -notmatch 'NativeClockActions = @\(\$steps' -or
     $agentHostLiveModelLoopSource -notmatch 'objectiveId' -or
     $agentHostLiveModelLoopSource -notmatch 'FixtureUnchanged = \$fixtureUnchanged') {
@@ -705,6 +707,15 @@ if ($agentHostLifecycleHarness -notmatch "'UnsupportedGoal'" -or
 }
 if ($agentHostCampaignLoopSource -notmatch 'supportedEstablishYourClanGoal' -or
     $agentHostProviderSource -notmatch 'supportedEstablishYourClanGoal' -or
+    $agentObserverSource -notmatch 'storyModeEstablishClanStatus' -or
+    $agentObserverSource -notmatch 'JournalLogEntry' -or
+    $agentObserverSource -notmatch 'bESRdcRo' -or
+    $agentObserverSource -notmatch 'IsEndedUnsuccessfully' -or
+    $storyModeLifecycleStatusSource -notmatch '"not-storymode"' -or
+    $storyModeLifecycleStatusSource -notmatch '"storymode-not-activated"' -or
+    $storyModeLifecycleStatusSource -notmatch '"completed"' -or
+    $storyModeLifecycleStatusSource -notmatch '"failed"' -or
+    $agentHostProviderSelfTestSource -notmatch 'StoryModeEstablishClanLifecycleStatus\.RunContractSelfTests' -or
     $agentHostEstablishClanPlannerSource -notmatch 'BuildObjectiveActionCatalog' -or
     $agentHostEstablishClanPlannerSource -notmatch 'questDetailsClient\.ReadQuestDetailsAsync' -or
     $agentHostEstablishClanPlannerSource -notmatch '\["observation"\] = new JsonObject' -or

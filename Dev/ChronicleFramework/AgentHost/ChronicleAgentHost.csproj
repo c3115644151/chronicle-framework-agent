@@ -14,5 +14,6 @@
   <ItemGroup>
     <Compile Include="..\AgentProviderConfigurationValidator.cs" Link="AgentProviderConfigurationValidator.cs" />
     <Compile Include="..\AgentHostReadyProtocol.cs" Link="AgentHostReadyProtocol.cs" />
+    <Compile Include="..\StoryModeEstablishClanLifecycleStatus.cs" Link="StoryModeEstablishClanLifecycleStatus.cs" />
   </ItemGroup>
 </Project>

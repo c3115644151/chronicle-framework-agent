@@ -14,6 +14,7 @@ internal static class ProviderContractSelfTest
     internal static async Task<object> RunAsync()
     {
         var results = new List<object>();
+        results.AddRange(StoryModeEstablishClanLifecycleStatus.RunContractSelfTests());
         results.AddRange(AgentHostHarnessProgressTrace.RunContractSelfTests());
         var villageQuestPrompt = AgentHostDecisionCycle.VillageToolsQuestSystemPrompt;
         if (!villageQuestPrompt.Contains("talkToSettlementHero", StringComparison.Ordinal) ||

@@ -299,6 +299,8 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
             [string]$trace.AcceptanceSlice -eq 'Real-model read-only selection of one unmet original StoryMode Establish Your Clan objective' -and
             [bool]$trace.EstablishYourClanPlannerVerified -and
             -not [bool]$trace.EstablishYourClanGoalVerified -and
+            [string]$trace.EstablishYourClanQuestStatusBefore -ceq 'active' -and
+            [string]$trace.EstablishYourClanQuestStatusAfter -ceq 'active' -and
             $plannerSelection -and [string]$plannerSelection.objectiveId -in @('gold','partySize','renown','companions') -and
             [bool]$trace.EstablishYourClanTargetConsistency.consistent -and
             $plannerRoutes.Count -ge 2 -and $clockActions.Count -eq 0 -and

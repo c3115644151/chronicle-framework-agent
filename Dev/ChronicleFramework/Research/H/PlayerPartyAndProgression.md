@@ -133,6 +133,8 @@ W2-I已实现主角的按需`spendSkillFocus(SkillId, Count)`动作。它接受�
 
 进度条与真正的完成条件须分开读：`OnStartQuest()`用当时的 `_partySizeGoal` 创建 `JournalLog.Range`，以后 `UpdateProgresses()`每小时再次读取动态 `_partySizeGoal`，更新Party成员当前进度并将其与动态门槛比较以完成Quest；`questDetails`序列化的 `targetProgress`取自JournalLog.Range，不会因模型门槛变化自动刷新。因此若Campaign模型修正/队伍状态导致“Journal显示目标”与“当前 `GetMinimumTroopCountForHideoutMission(MainParty,false)`”不同，当前Quest行为由后者控制；Agent应同时保留可见Journal目标与本轮动态门槛，不能把缓存Range当作当前完成阈值。
 
+StoryMode任务生命周期可读面也有边界：本机1.4.8 `MainStoryLine.TutorialPhase.IsCompleted`/`FirstPhase`能判定Tutorial后主线是否已激活；`QuestManager.Quests`只留当前ongoing Quest，并在完成/取消时移除。官方任务日志页的`QuestsVM.OldQuestsList`来自`Campaign.LogEntryHistory`中的结束态`JournalLogEntry`，其成功/失败由`IsEndedUnsuccessfully()`区分。`RebuildPlayerClanQuest`继承`StoryModeQuestBase`，`SpecialQuestType="MainStoryline"`，日志保留10000年；`JournalLogsCampaignBehavior`写入日志标题ID `bESRdcRo`，因此状态读取可按这个原版稳定标题ID查找成功/失败历史，而不猜QuestManager中不存在的历史对象。Chronicle当前状态应分别表达非StoryMode、主线未激活、Quest活动、历史成功、历史失败；如果StoryMode已过Tutorial但活动与历史记录均缺失，则返回unknown，而不是擅自判成完成/失败。完成/失败状态的映射经过1.4.8源码核实，历史状态当前尚无真实已完成或已失败StoryMode存档的runtime样本。
+
 Renown来源不是一个单独按钮；已源核实的野战/模拟战斗奖励按战力、贡献份额、敌方伤亡比例、奖励模型和Perk等变化，见MAINLINE Tier 1证据与F/G10。其他战斗、任务、锦标赛和政治行为有各自前置/路径，须按H11行为来源去重，不能把RewardModel调用点数当成玩家可达途径数。Influence收入/消耗见E07/F13/C：例如军团召集、凝聚力与政治决策是不同支出，不应该合并成一个“声望系统”行为。战役时钟不因读取数值或打开相关面板而快进；来源动作各自遵循原版Campaign事件/行动。
 
 Chronicle主观察已返回Clan Renown、Influence、Tier、下一级Renown需求和佣兵门槛，但不解释变化因果，也无Renown主动增减、政治决策或通用Influence交易动作。证据：`DefaultClanTierModel`、`DefaultBattleRewardModel`、F/G战斗及E/C政治经济资料、Chronicle `AgentObserver`。未知为全部自然玩家Renown来源/前置/收益的去重分母、不同模式或Mod修改阈值、Influence自动收入和支出事件的完整覆盖、收益在UI/日志可见时点及失败重试后果；不得因此把Tier 1测试当成已掌握全部成长闭环。

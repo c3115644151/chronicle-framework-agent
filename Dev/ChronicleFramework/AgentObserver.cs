@@ -9,6 +9,7 @@ using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.GameMenus;
 using TaleWorlds.CampaignSystem.GameState;
 using TaleWorlds.CampaignSystem.Encounters;
+using TaleWorlds.CampaignSystem.LogEntries;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.CampaignSystem.Settlements;
@@ -265,6 +266,7 @@ internal static class ChronicleAgentObserver
             json.Append('}');
         }
         json.Append(']');
+        json.Append(",\"storyModeEstablishClanStatus\":").Append(BuildEstablishClanLifecycleStatusJson(campaign, quests));
         json.Append(",\"danger\":{");
         json.Append("\"hostilePartyCount\":").Append(hostileParties.Length);
         json.Append(",\"nearestHostileDistance\":").Append(hostileParties.Length == 0 ? "null" : Number(hostileParties[0].Distance));
@@ -272,6 +274,58 @@ internal static class ChronicleAgentObserver
         json.Append(",\"mission\":").Append(BuildMissionObservationJson());
         json.Append('}');
         return json.ToString();
+    }
+
+    private static string BuildEstablishClanLifecycleStatusJson(Campaign campaign, QuestBase[] activeQuests)
+    {
+        const string questId = "rebuild_player_clan_storymode_quest";
+        const string questTitleStringId = "bESRdcRo";
+        var isStoryMode = string.Equals(Game.Current?.GameType?.GetType().FullName, "StoryMode.CampaignStoryMode", StringComparison.Ordinal);
+        var activeQuest = activeQuests.FirstOrDefault(quest => string.Equals(quest.StringId, questId, StringComparison.Ordinal) && quest.IsOngoing);
+        if (activeQuest != null)
+        {
+            var status = StoryModeEstablishClanLifecycleStatus.Classify(isStoryMode: true, tutorialCompleted: true, firstPhaseStarted: true, questActive: true, historicalResultAvailable: false, historicalResultUnsuccessful: false);
+            return "{\"status\":\"" + status + "\",\"questId\":\"rebuild_player_clan_storymode_quest\",\"title\":\"" + Escape(activeQuest.Title?.ToString()) + "\",\"source\":\"quest-manager\"}";
+        }
+
+        if (!isStoryMode)
+        {
+            var status = StoryModeEstablishClanLifecycleStatus.Classify(isStoryMode: false, tutorialCompleted: false, firstPhaseStarted: false, questActive: false, historicalResultAvailable: false, historicalResultUnsuccessful: false);
+            return "{\"status\":\"" + status + "\",\"questId\":\"rebuild_player_clan_storymode_quest\",\"isStoryMode\":false,\"source\":\"current-game-type\"}";
+        }
+
+        try
+        {
+            var storyModeManagerType = Type.GetType("StoryMode.StoryModeManager, StoryMode", throwOnError: false);
+            var storyModeManager = storyModeManagerType?.GetProperty("Current")?.GetValue(null);
+            var mainStoryLine = storyModeManager?.GetType().GetProperty("MainStoryLine")?.GetValue(storyModeManager);
+            var tutorialPhase = mainStoryLine?.GetType().GetProperty("TutorialPhase")?.GetValue(mainStoryLine);
+            var tutorialCompletedValue = tutorialPhase?.GetType().GetProperty("IsCompleted")?.GetValue(tutorialPhase);
+            var tutorialCompleted = tutorialCompletedValue is bool completed && completed;
+            var firstPhase = mainStoryLine?.GetType().GetProperty("FirstPhase")?.GetValue(mainStoryLine);
+            if (storyModeManager == null || tutorialPhase == null || tutorialCompletedValue is not bool)
+                return "{\"status\":\"unknown\",\"questId\":\"rebuild_player_clan_storymode_quest\",\"source\":\"storymode-runtime-unavailable\"}";
+
+            var historicalEntry = campaign.LogEntryHistory.GetGameActionLogs<JournalLogEntry>(entry =>
+                    entry.IsSpecial && entry.IsEnded() && string.Equals(entry.Title?.GetID(), questTitleStringId, StringComparison.Ordinal))
+                .LastOrDefault();
+            if (historicalEntry != null)
+            {
+                var unsuccessful = historicalEntry.IsEndedUnsuccessfully();
+                var status = StoryModeEstablishClanLifecycleStatus.Classify(isStoryMode: true, tutorialCompleted: tutorialCompleted, firstPhaseStarted: firstPhase != null, questActive: false, historicalResultAvailable: true, historicalResultUnsuccessful: unsuccessful);
+                return "{\"status\":\"" + status + "\",\"questId\":\"rebuild_player_clan_storymode_quest\",\"title\":\"" + Escape(historicalEntry.Title?.ToString()) + "\",\"tutorialCompleted\":" + Bool(tutorialCompleted) + ",\"source\":\"native-old-quest-journal\"}";
+            }
+
+            var inactiveStatus = StoryModeEstablishClanLifecycleStatus.Classify(isStoryMode: true, tutorialCompleted: tutorialCompleted, firstPhaseStarted: firstPhase != null, questActive: false, historicalResultAvailable: false, historicalResultUnsuccessful: false);
+            if (inactiveStatus == "storymode-not-activated")
+                return "{\"status\":\"" + inactiveStatus + "\",\"questId\":\"rebuild_player_clan_storymode_quest\",\"tutorialCompleted\":" + Bool(tutorialCompleted) + ",\"firstPhaseStarted\":" + Bool(firstPhase != null) + ",\"source\":\"storymode-tutorial-phase\"}";
+
+            return "{\"status\":\"" + inactiveStatus + "\",\"questId\":\"rebuild_player_clan_storymode_quest\",\"tutorialCompleted\":true,\"firstPhaseStarted\":true,\"source\":\"no-active-or-historical-quest-entry\"}";
+        }
+        catch (Exception exception)
+        {
+            return "{\"status\":\"unknown\",\"questId\":\"rebuild_player_clan_storymode_quest\",\"reason\":\"lifecycle-observation-failed\",\"errorType\":\"" + Escape(exception.GetType().Name) + "\"}";
+        }
     }
 
     internal static string BuildMapSettlementTargetsJson()
