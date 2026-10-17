@@ -712,6 +712,7 @@ if ($agentHostCampaignLoopSource -notmatch 'supportedEstablishYourClanGoal' -or
     $agentHostMailboxSource -notmatch 'BuildQuestDetailsArguments' -or
     $agentHostEstablishClanPlannerSource -notmatch 'journal-native-target-mismatch' -or
     $agentHostEstablishClanPlannerSource -notmatch 'selectEstablishYourClanObjective' -or
+    $agentHostEstablishClanPlannerSource -notmatch 'resultKind.*objective-plan' -or
     $agentHostEstablishClanPlannerSource -notmatch 'goalVerified.*false' -or
     $agentHostDecisionCycleSource -notmatch 'EstablishYourClanGoalPlannerPrompt' -or
     $agentHostProviderSource -notmatch 'supported-establish-your-clan') {

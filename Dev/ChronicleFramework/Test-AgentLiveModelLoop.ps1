@@ -538,7 +538,8 @@ try {
         $selectionRouteHistory = @($loopTrace.providerRouteHistory)
         $plannerOnlyTrace = @($steps | Where-Object { $_.planningOnly -eq $true -and $_.nativeActionExecuted -eq $false })
         $plannerVerified = (
-            [string]$loopTrace.status -ceq 'planned' -and
+            [string]$loopTrace.status -ceq 'completed' -and
+            [string]$loopTrace.resultKind -ceq 'objective-plan' -and
             [string]$loopTrace.termination.reason -ceq 'unmet-objective-selected' -and
             $loopTrace.termination.goalVerified -eq $false -and
             $loopTrace.selection.met -eq $false -and

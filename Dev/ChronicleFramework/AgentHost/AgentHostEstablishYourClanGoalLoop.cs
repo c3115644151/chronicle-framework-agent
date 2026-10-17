@@ -66,7 +66,7 @@ internal static class AgentHostEstablishYourClanGoalLoop
             """);
         var result = await RunAsync(request.RootElement, native, native, provider, CancellationToken.None);
         var providerCatalog = provider.FirstRequest?["allowedActions"] as JsonArray;
-        if (ReadString(result, "status") != "planned" || ReadString(result["selection"] as JsonObject, "objectiveId") != "partySize" ||
+        if (ReadString(result, "status") != "completed" || ReadString(result, "resultKind") != "objective-plan" || ReadString(result["selection"] as JsonObject, "objectiveId") != "partySize" ||
             ReadBoolean(result["termination"] as JsonObject, "goalVerified") == true || native.QuestDetailsReads != 1 || native.MutatingActionCount != 0 ||
             providerCatalog is null ||
             ReadString(provider.FirstRequest?["observation"] as JsonObject, "scope") != "read-only-active-storymode-quest-objective-planning" ||
@@ -148,7 +148,8 @@ internal static class AgentHostEstablishYourClanGoalLoop
         if (actionCatalog.Count == 0)
             return new JsonObject
             {
-                ["status"] = "planned",
+                ["status"] = "completed",
+                ["resultKind"] = "no-incomplete-objective",
                 ["decisions"] = 0,
                 ["actionsExecuted"] = 1,
                 ["questDetails"] = receipt.DeepClone(),
@@ -215,7 +216,8 @@ internal static class AgentHostEstablishYourClanGoalLoop
         });
         return new JsonObject
         {
-            ["status"] = "planned",
+            ["status"] = "completed",
+            ["resultKind"] = "objective-plan",
             ["decisions"] = priorDecisions + 1,
             ["actionsExecuted"] = 1,
             ["promptTokens"] = priorPromptTokens + (decision.PromptTokens ?? 0),
