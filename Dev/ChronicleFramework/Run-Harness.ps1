@@ -23,7 +23,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.213'
+$HarnessContractVersion = '7.214'
 $effectiveSmokeTimeoutSeconds = if ($Phase -eq 'AgentHostVillageToolsQuestEvaluation') { [Math]::Max($SmokeTimeoutSeconds, 240) } else { $SmokeTimeoutSeconds }
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
@@ -1333,6 +1333,10 @@ try {
         DeletedBytes = [long]$retention.DeletedBytes
         DeletedIndexedVideoCount = [int]$retention.DeletedIndexedVideoCount
         DeletedIndexedVideoBytes = [long]$retention.DeletedIndexedVideoBytes
+        DeletedUndecodableVideoCount = [int]$retention.DeletedUndecodableVideoCount
+        DeletedUndecodableVideoBytes = [long]$retention.DeletedUndecodableVideoBytes
+        DeletedLegacyProbeCount = [int]$retention.DeletedLegacyProbeCount
+        DeletedLegacyProbeBytes = [long]$retention.DeletedLegacyProbeBytes
         SkippedRunCount = @($retention.SkippedRuns).Count
         Receipt = $retentionReceiptPath
     }

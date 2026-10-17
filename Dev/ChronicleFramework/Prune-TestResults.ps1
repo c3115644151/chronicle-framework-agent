@@ -26,7 +26,7 @@ function Test-IndexedCapture {
     try {
         $index = Get-Content -LiteralPath $indexPath -Raw -Encoding UTF8 | ConvertFrom-Json
         $selections = @($index.selections)
-        if ($selections.Count -eq 0) { return $false }
+        if ($selections.Count -eq 0) { return [bool]$index.sourceClip.removedAfterEvidence }
         foreach ($selection in $selections) {
             foreach ($property in @('beforeFramePath', 'eventFramePath', 'afterFramePath')) {
                 $framePath = [string]$selection.$property
@@ -69,6 +69,27 @@ function Invoke-TestResultsRetention {
     $skippedRuns = [Collections.Generic.List[object]]::new()
     $removedVideoBytes = [long]0
     $removedVideoCount = 0
+    $removedUndecodableVideoBytes = [long]0
+    $removedUndecodableVideoCount = 0
+    $removedLegacyProbeBytes = [long]0
+    $removedLegacyProbeCount = 0
+
+    # A previous standalone capture-resilience probe left this exact synthetic
+    # file at the TestResults root. It is not a run receipt or user recording.
+    $legacyProbePath = Join-Path $rootFull 'fragment-probe-test.mp4'
+    if (Test-Path -LiteralPath $legacyProbePath -PathType Leaf) {
+        $legacyProbeItem = Get-Item -LiteralPath $legacyProbePath
+        if ($Execute) {
+            Remove-Item -LiteralPath $legacyProbePath -Force -ErrorAction Stop
+            $removedLegacyProbeBytes = [long]$legacyProbeItem.Length
+            $removedLegacyProbeCount = 1
+        }
+    }
+    $legacyProbeStderrPath = Join-Path $rootFull 'fragment-probe-test.stderr'
+    if ($Execute -and (Test-Path -LiteralPath $legacyProbeStderrPath -PathType Leaf) -and (Get-Item -LiteralPath $legacyProbeStderrPath).Length -eq 0) {
+        Remove-Item -LiteralPath $legacyProbeStderrPath -Force -ErrorAction Stop
+    }
+
     foreach ($directory in $timestampedDirectories) {
         $directoryFull = [IO.Path]::GetFullPath($directory.FullName)
         if (-not $directoryFull.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw "Refusing path outside evidence root: $directoryFull" }
@@ -77,6 +98,57 @@ function Invoke-TestResultsRetention {
         $hasIncompleteVideo = $false
         foreach ($video in Get-ChildItem -LiteralPath $directoryFull -File -Recurse -Filter '*.mp4' -ErrorAction SilentlyContinue) {
             if (-not (Test-IndexedCapture -VideoPath $video.FullName)) {
+                $hasMatchingPartialReceipt = $false
+                foreach ($partialReceipt in Get-ChildItem -LiteralPath $directoryFull -File -Recurse -Filter '*partial*.json' -ErrorAction SilentlyContinue) {
+                    try {
+                        $partialData = Get-Content -LiteralPath $partialReceipt.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+                        if ([string]::Equals([string]$partialData.videoPath, $video.FullName, [StringComparison]::OrdinalIgnoreCase)) { $hasMatchingPartialReceipt = $true; break }
+                    } catch { }
+                }
+                if ($hasMatchingPartialReceipt) { $hasIncompleteVideo = $true; continue }
+                $ffprobeCommand = Get-Command ffprobe.exe -ErrorAction SilentlyContinue
+                $probeOutput = ''
+                $probeError = ''
+                $probeExitCode = -1
+                $hasVideoStream = $false
+                if ($ffprobeCommand) {
+                    $previousErrorActionPreference = $ErrorActionPreference
+                    $probeErrorPath = [IO.Path]::GetTempFileName()
+                    try {
+                        $ErrorActionPreference = 'Continue'
+                        $probeOutput = & $ffprobeCommand.Source -v error -select_streams v:0 -show_entries stream=codec_name -of json $video.FullName 2> $probeErrorPath | Out-String
+                        $probeExitCode = $LASTEXITCODE
+                        $probeError = if (Test-Path -LiteralPath $probeErrorPath) { Get-Content -LiteralPath $probeErrorPath -Raw -Encoding UTF8 } else { '' }
+                        try { $hasVideoStream = @((($probeOutput | ConvertFrom-Json).streams | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.codec_name) })).Count -gt 0 } catch { $hasVideoStream = $false }
+                    }
+                    finally {
+                        $ErrorActionPreference = $previousErrorActionPreference
+                        if (Test-Path -LiteralPath $probeErrorPath -PathType Leaf) { Remove-Item -LiteralPath $probeErrorPath -Force -ErrorAction SilentlyContinue }
+                    }
+                }
+                $knownUndecodable = -not $hasVideoStream -and ($video.Length -eq 0 -or ($probeExitCode -ne 0 -and $probeError -match 'moov atom not found|Invalid data found when processing input'))
+                if ($knownUndecodable) {
+                    if ($Execute -and $protectedIds.Contains($directory.Name)) {
+                        $receiptPath = Join-Path $directoryFull (([IO.Path]::GetFileNameWithoutExtension($video.Name)) + '-capture-cleanup.json')
+                        $cleanupReceipt = [ordered]@{
+                            sourceFile = $video.Name
+                            sourceBytes = [long]$video.Length
+                            sourceSha256 = if ($video.Length -gt 0) { (Get-FileHash -LiteralPath $video.FullName -Algorithm SHA256).Hash } else { $null }
+                            ffprobeExitCode = $probeExitCode
+                            ffprobeError = $probeError.Trim()
+                            reason = 'Source MP4 has no decodable video stream; retain per-run screenshots, events and Harness receipts instead.'
+                            sourceRemoved = $false
+                        }
+                        $cleanupReceipt | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $receiptPath -Encoding UTF8
+                        $bytes = [long]$video.Length
+                        Remove-Item -LiteralPath $video.FullName -Force -ErrorAction Stop
+                        $cleanupReceipt.sourceRemoved = $true
+                        $cleanupReceipt | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $receiptPath -Encoding UTF8
+                        $removedUndecodableVideoBytes += $bytes
+                        $removedUndecodableVideoCount++
+                    }
+                    continue
+                }
                 $hasIncompleteVideo = $true
                 continue
             }
@@ -92,7 +164,15 @@ function Invoke-TestResultsRetention {
             }
         }
 
-        if ($hasIncompleteVideo -or (Get-ChildItem -LiteralPath $directoryFull -File -Recurse -Filter '*partial*.json' -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+        $partialCaptureStillExists = $false
+        foreach ($partialReceipt in Get-ChildItem -LiteralPath $directoryFull -File -Recurse -Filter '*partial*.json' -ErrorAction SilentlyContinue) {
+            try {
+                $partialData = Get-Content -LiteralPath $partialReceipt.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+                $partialVideoPath = [string]$partialData.videoPath
+                if (-not [string]::IsNullOrWhiteSpace($partialVideoPath) -and (Test-Path -LiteralPath $partialVideoPath -PathType Leaf)) { $partialCaptureStillExists = $true; break }
+            } catch { }
+        }
+        if ($hasIncompleteVideo -or $partialCaptureStillExists) {
             $null = $protectedIds.Add($directory.Name)
             $keptForIncompleteCapture.Add($directory.Name)
         }
@@ -151,6 +231,10 @@ function Invoke-TestResultsRetention {
         DeletedBytes = $deletedBytes
         DeletedIndexedVideoCount = $removedVideoCount
         DeletedIndexedVideoBytes = $removedVideoBytes
+        DeletedUndecodableVideoCount = $removedUndecodableVideoCount
+        DeletedUndecodableVideoBytes = $removedUndecodableVideoBytes
+        DeletedLegacyProbeCount = $removedLegacyProbeCount
+        DeletedLegacyProbeBytes = $removedLegacyProbeBytes
         DeletedRuns = @($deletedDirectories)
     }
 }
@@ -163,22 +247,34 @@ if ($SelfTest) {
         $cited = Join-Path $fixtureRoot '20260101-000002'
         $old = Join-Path $fixtureRoot '20260101-000001'
         $partial = Join-Path $fixtureRoot '20260101-000000'
+        $contactOnly = Join-Path $fixtureRoot '20251231-235959'
         $misc = Join-Path $fixtureRoot 'UserNamedEvidence'
-        foreach ($path in @($keep, $cited, $old, $partial, $misc)) { $null = New-Item -ItemType Directory -Path $path }
+        foreach ($path in @($keep, $cited, $old, $partial, $contactOnly, $misc)) { $null = New-Item -ItemType Directory -Path $path }
         'keep' | Set-Content -LiteralPath (Join-Path $keep 'summary.json')
+        $brokenCapture = Join-Path $keep 'broken-capture.mp4'
+        [IO.File]::WriteAllBytes($brokenCapture, [byte[]]::new(8192))
         'cited' | Set-Content -LiteralPath (Join-Path $cited 'summary.json')
         'old' | Set-Content -LiteralPath (Join-Path $old 'summary.json')
         'partial' | Set-Content -LiteralPath (Join-Path $partial 'LiveModelWindow.mp4')
-        'partial' | Set-Content -LiteralPath (Join-Path $partial 'LiveModelWindow-partial.json')
+        [ordered]@{ videoPath = (Join-Path $partial 'LiveModelWindow.mp4') } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $partial 'LiveModelWindow-partial.json') -Encoding UTF8
+        $contactVideo = Join-Path $contactOnly 'LiveModelWindow.mp4'
+        $contactSheet = Join-Path $contactOnly 'LiveModelWindow-contact.jpg'
+        [IO.File]::WriteAllBytes($contactVideo, [byte[]]::new(4096))
+        [IO.File]::WriteAllBytes($contactSheet, [byte[]]::new(1024))
+        [ordered]@{ sourceClip = @{ removedAfterEvidence = $true }; contactSheetPath = $contactSheet; selections = @() } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $contactOnly 'LiveModelWindow-timeline-index.json') -Encoding UTF8
         'misc' | Set-Content -LiteralPath (Join-Path $misc 'preserve.txt')
         $reference = Join-Path $fixtureRoot 'reference.md'
         "Evidence: 20260101-000002" | Set-Content -LiteralPath $reference
         $preview = Invoke-TestResultsRetention -Root $fixtureRoot -ActiveRunId '20260101-000003' -ReferencePaths @($reference) -RecentLimit 1 -Execute $false
-        if ($preview.DeletedRunCount -ne 1 -or $preview.DeletedRuns[0].RunId -ne '20260101-000001' -or $preview.PreservedIncompleteCaptureRuns -notcontains '20260101-000000') { throw 'Retention dry-run did not keep the cited/recent/incomplete records and select only the old run.' }
+        if ($preview.DeletedRunCount -ne 2 -or @($preview.DeletedRuns.RunId) -notcontains '20260101-000001' -or @($preview.DeletedRuns.RunId) -notcontains '20251231-235959' -or $preview.PreservedIncompleteCaptureRuns -notcontains '20260101-000000') { throw "Retention dry-run selection mismatch: deleted=$($preview.DeletedRunCount); ids=$(@($preview.DeletedRuns.RunId) -join ','); incomplete=$(@($preview.PreservedIncompleteCaptureRuns) -join ',')" }
         $applied = Invoke-TestResultsRetention -Root $fixtureRoot -ActiveRunId '20260101-000003' -ReferencePaths @($reference) -RecentLimit 1 -Execute $true
         foreach ($path in @($keep, $cited, $partial, $misc)) { if (-not (Test-Path -LiteralPath $path -PathType Container)) { throw "Retention deleted protected fixture $path" } }
         if (Test-Path -LiteralPath $old) { throw 'Retention failed to remove the eligible old fixture run.' }
-        [pscustomobject]@{ Passed = $true; PreviewDeletedRuns = $preview.DeletedRunCount; AppliedDeletedRuns = $applied.DeletedRunCount; IncompleteCapturePreserved = $true; ReferencedRunPreserved = $true; NonRunFolderPreserved = $true } | ConvertTo-Json -Compress
+        if (Test-Path -LiteralPath $contactOnly) { throw 'Retention failed to remove an MP4 whose contact sheet and post-processing index already preserve review evidence.' }
+        $brokenReceiptPath = Join-Path $keep 'broken-capture-capture-cleanup.json'
+        $brokenReceipt = if (Test-Path -LiteralPath $brokenReceiptPath) { Get-Content -LiteralPath $brokenReceiptPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
+        if ((Test-Path -LiteralPath $brokenCapture) -or $null -eq $brokenReceipt -or -not $brokenReceipt.sourceRemoved -or $applied.DeletedUndecodableVideoCount -ne 1) { throw "Retention failed undecodable capture cleanup: rawExists=$(Test-Path -LiteralPath $brokenCapture); receiptExists=$($null -ne $brokenReceipt); sourceRemoved=$($brokenReceipt.sourceRemoved); count=$($applied.DeletedUndecodableVideoCount); skipped=$($applied.SkippedRuns.Count)" }
+        [pscustomobject]@{ Passed = $true; PreviewDeletedRuns = $preview.DeletedRunCount; AppliedDeletedRuns = $applied.DeletedRunCount; IncompleteCapturePreserved = $true; ContactSheetOnlyCapturePruned = $true; UndecodableCapturePrunedWithReceipt = $true; ReferencedRunPreserved = $true; NonRunFolderPreserved = $true } | ConvertTo-Json -Compress
     } finally {
         if (Test-Path -LiteralPath $fixtureRoot -PathType Container) { Remove-Item -LiteralPath $fixtureRoot -Recurse -Force }
     }

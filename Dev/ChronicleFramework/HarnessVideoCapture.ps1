@@ -188,8 +188,11 @@ function Stop-ChronicleWindowVideoCapture {
     if (-not (Test-Path -LiteralPath $Capture.OutputPath) -or (Get-Item -LiteralPath $Capture.OutputPath).Length -lt 4096) { throw 'FFmpeg gfxcapture produced no usable clip.' }
 
     $ffprobe = (Get-Command ffprobe.exe -ErrorAction Stop).Source
-    $probeText = & $ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=width,height,avg_frame_rate,duration,nb_read_frames -of json $Capture.OutputPath 2>&1 | Out-String
-    if ($LASTEXITCODE -ne 0) { throw "ffprobe rejected the captured clip: $probeText" }
+    $probeErrorPath = Join-Path (Split-Path -Parent $Capture.OutputPath) (([IO.Path]::GetFileNameWithoutExtension($Capture.OutputPath)) + '-ffprobe.stderr')
+    $probeText = & $ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=width,height,avg_frame_rate,duration,nb_read_frames -of json $Capture.OutputPath 2> $probeErrorPath | Out-String
+    $probeExitCode = $LASTEXITCODE
+    $probeStderr = if (Test-Path -LiteralPath $probeErrorPath -PathType Leaf) { Get-Content -LiteralPath $probeErrorPath -Raw -Encoding UTF8 } else { '' }
+    if ($probeExitCode -ne 0) { throw "ffprobe rejected the captured clip (exit=$probeExitCode): $probeStderr" }
     $stream = @((($probeText | ConvertFrom-Json).streams) | Select-Object -First 1)
     if ($stream.Count -ne 1) { throw "Captured clip has no decodable video stream: $probeText" }
     $duration = [double]$stream[0].duration
@@ -197,7 +200,11 @@ function Stop-ChronicleWindowVideoCapture {
     $expectedFrames = [Math]::Floor($duration * $Capture.FrameRate)
     $coverage = if ($expectedFrames -gt 0) { $frames / [double]$expectedFrames } else { 0 }
     if ($frames -lt ($expectedFrames * 0.9) -or $duration -lt 1) { throw "Captured clip is incomplete: duration=${duration}s frames=$frames expected~$expectedFrames coverage=$coverage." }
-    $contactRate = 0.25
+    # Bound the contact sheet's pixel dimensions. A fixed 4 fps sample rate
+    # made long failed runs exceed JPEG's 65,500px dimension limit, which
+    # then prevented the normal post-process path from removing the raw MP4.
+    $contactFrameBudget = 64.0
+    $contactRate = [Math]::Min(0.25, $contactFrameBudget / [Math]::Max(1.0, $duration))
     $contactRows = [Math]::Max(1, [Math]::Ceiling($duration * $contactRate / 4))
     & (Get-Command ffmpeg.exe -ErrorAction Stop).Source -hide_banner -loglevel error -y -i $Capture.OutputPath -vf "fps=$contactRate,scale=480:-1,tile=4x$contactRows" -frames:v 1 -q:v 3 $ContactSheetPath
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $ContactSheetPath)) { throw 'Could not extract contact sheet from captured clip.' }
@@ -205,6 +212,8 @@ function Stop-ChronicleWindowVideoCapture {
     $timelineDirectory = Join-Path (Split-Path -Parent $Capture.OutputPath) 'TimelineFrames'
     $timelineIndexPath = Join-Path (Split-Path -Parent $Capture.OutputPath) (([IO.Path]::GetFileNameWithoutExtension($Capture.OutputPath)) + '-timeline-index.json')
     $timelineSelections = @()
+    $frameExtractionFailures = [Collections.Generic.List[object]]::new()
+    $timelineFrameCount = 0
     if (Test-Path -LiteralPath $EventTracePath) {
         $eventRows = @(Get-Content -LiteralPath $EventTracePath -Encoding UTF8 | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_ | ConvertFrom-Json })
         $importantActions = @('menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','partyTakeAll','partyScreenDone','inventoryTakeAll','inventoryDone','mapSettlementTargets','move','recruitOptions','recruit','provision','tradeConfirm','rest','providerDone','modelLoopFailure','crashReport','crashReportExpanded','crashReportScroll','crashObserved')
@@ -250,8 +259,14 @@ function Stop-ChronicleWindowVideoCapture {
                     $seconds = [double]$selection[($edge + 'FrameSeconds')]
                     $framePath = Join-Path $timelineDirectory ('{0:D3}-{1}-{2}-{3}.jpg' -f $frameOrdinal,$selection.actionTag,$selection.stateTag,$edge)
                     & (Get-Command ffmpeg.exe -ErrorAction Stop).Source -hide_banner -loglevel error -y -i $Capture.OutputPath -ss $seconds -vf 'format=yuvj420p' -frames:v 1 -q:v 2 $framePath
-                    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $framePath)) { throw "Could not extract $edge frame at ${seconds}s for event '$($selection.commandId)'." }
-                    $selection[($edge + 'FramePath')] = $framePath
+                    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $framePath)) {
+                        $selection[($edge + 'FramePath')] = $null
+                        $frameExtractionFailures.Add([ordered]@{ edge = $edge; event = [string]$selection.event; commandId = [string]$selection.commandId; seconds = $seconds })
+                    }
+                    else {
+                        $selection[($edge + 'FramePath')] = $framePath
+                        $timelineFrameCount++
+                    }
                 }
             }
         }
@@ -264,10 +279,12 @@ function Stop-ChronicleWindowVideoCapture {
         eventTracePath = $EventTracePath
         timelineFramesDirectory = if ($timelineSelections.Count -gt 0) { $timelineDirectory } else { $null }
         eventCount = $timelineSelections.Count
+        frameExtractionFailures = @($frameExtractionFailures)
         selections = $timelineSelections
     }
     $timelineIndex | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $timelineIndexPath -Encoding UTF8
     Remove-Item -LiteralPath $Capture.OutputPath -Force
+    if (Test-Path -LiteralPath $probeErrorPath -PathType Leaf) { Remove-Item -LiteralPath $probeErrorPath -Force }
 
     [pscustomobject]@{
         Passed = $true
@@ -296,7 +313,8 @@ function Stop-ChronicleWindowVideoCapture {
         VideoRemovedAfterEvidence = $true
         ContactSheetPath = $ContactSheetPath
         TimelineIndexPath = $timelineIndexPath
-        TimelineFrameCount = $timelineSelections.Count * 3
-        FfmpegStderr = $Capture.StderrTask.Result
+        TimelineFrameCount = $timelineFrameCount
+        TimelineFrameExtractionFailures = @($frameExtractionFailures)
+        FfmpegStderr = [string]$Capture.StderrTask.Result + [string]$probeStderr
     }
 }
