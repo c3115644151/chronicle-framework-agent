@@ -209,7 +209,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
     if ($BattleSimulationLoop) {
         $battleOutcome = if ($trace) { $trace.BattleOutcome } else { $null }
         $battleTargetId = if ($battleOutcome) { [string]$battleOutcome.TargetPartyId } else { '' }
-        $clockActions = if ($trace) { @($trace.NativeClockActions) } else { @() }
+        $clockActions = if ($trace) { @($trace.NativeClockActions | Where-Object { [string]$_ -in @('advance','pause','resume','fastForward') }) } else { @() }
         $battleActionSequence = @($nativeActions | ForEach-Object { [string]$_.actionReceipt.action })
         $providerRoutes = if ($trace -and $trace.ProviderRouteHistory) { @($trace.ProviderRouteHistory) } else { @() }
         $renownBeforeFinite = ($null -ne $trace.BattleRenownBefore -and -not [double]::IsNaN([double]$trace.BattleRenownBefore) -and -not [double]::IsInfinity([double]$trace.BattleRenownBefore))

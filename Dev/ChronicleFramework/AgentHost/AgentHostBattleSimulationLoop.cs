@@ -611,6 +611,7 @@ internal static class AgentHostBattleSimulationLoop
             ReadInt(result, "decisions", 0) != 15 || ReadInt(result, "actionsExecuted", 0) != 12 || provider.CallCount != 14 ||
             ReadString(result, "targetPartyId") != "bandit-1" || ReadDouble(result, "renownBefore", double.NaN) != 10 ||
             ReadDouble(result, "renownAfter", double.NaN) != 10 || ReadInt(result, "explicitClockActionCount", -1) != 0 ||
+            ReadString(result, "providerConfigurationSource") != provider.ConfigurationSource || ReadString(result, "playerOutcome") != "resolved-native-battle" ||
             !ReadBoolean(result, "nativeReturnToMapVerified") || client.Actions.Contains("pause") || client.Actions.Contains("advance") ||
             result["trace"] is not JsonArray trace || trace.Count != 15 || result["providerRouteHistory"] is not JsonArray routes || routes.Count != 15)
         {
@@ -681,6 +682,7 @@ internal static class AgentHostBattleSimulationLoop
             ["goalScope"] = ContractId,
             ["status"] = status,
             ["modelId"] = provider.ModelId,
+            ["providerConfigurationSource"] = provider.ConfigurationSource,
             ["decisions"] = decisions,
             ["actionsExecuted"] = actionsExecuted,
             ["promptTokens"] = promptTokens,

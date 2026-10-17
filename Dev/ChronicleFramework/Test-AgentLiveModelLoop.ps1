@@ -506,7 +506,7 @@ try {
         $lastObservedStep = @($steps | Where-Object { $_.observationAfter -and $_.observationAfter.state } | Select-Object -Last 1)
         $finalObservation = if ($lastObservedStep.Count -eq 1) { $lastObservedStep[0].observationAfter } else { $baseline }
         $questActions = @($steps | Where-Object { $_.actionExecuted } | ForEach-Object { [string]$_.actionReceipt.action })
-        $nativeClockActions = @($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -in @('advance','pause','resume','fastForward') })
+        $nativeClockActions = [object[]]@($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -in @('advance','pause','resume','fastForward') })
         $questVerified = ([string]$loopTrace.status -eq 'completed' -and [bool]$loopTrace.questWasObservedActive -and
             [bool]$loopTrace.inventoryVerifiedAfterTurnIn -and [bool]$loopTrace.termination.goalVerified -and $nativeClockActions.Count -eq 0 -and
             $questActions.Contains('questDetails') -and $questActions.Contains('tradeOptions') -and $questActions.Contains('trade') -and
@@ -667,7 +667,7 @@ try {
         $nativeReadObservationsAfterMove = @()
         $preNativeTravelReobservations = @()
 
-        $nativeClockActions = @($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -in @('advance','pause','resume','fastForward') })
+        $nativeClockActions = [object[]]@($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -in @('advance','pause','resume','fastForward') })
         $fightDialogue = @($steps | Where-Object {
             $_.actionExecuted -and $_.actionReceipt.status -eq 'completed' -and
             $_.decision.action -eq 'dialogueSelect' -and [string]$_.decision.arguments.OptionId -ceq 'bandit_start_defender_1' -and
@@ -734,6 +734,10 @@ try {
             PartyTakeAllCount = $partyTakeActions.Count
             InventoryLootScreenCount = $inventoryLootObservations.Count
             InventoryTakeAllCount = $inventoryTakeActions.Count
+            PlayerOutcome = [string]$loopTrace.playerOutcome
+            PlayerCaptiveAtMapReturn = [bool]$loopTrace.playerCaptiveAtMapReturn
+            NativeMapReturnMenuId = [string]$loopTrace.nativeMapReturnMenuId
+            FreeMapReturned = [bool]$loopTrace.freeMapReturned
             RenownBefore = $renownBefore
             RenownAfter = $renownAfter
             RenownDelta = [Math]::Round(($renownAfter - $renownBefore), 4)
@@ -869,7 +873,7 @@ try {
         BattleRenownBefore = if ($BattleSimulationLoop) { [double]$loopTrace.renownBefore } else { $null }
         BattleRenownAfter = if ($BattleSimulationLoop) { [double]$loopTrace.renownAfter } else { $null }
         BattleReturnToMapVerified = if ($BattleSimulationLoop) { [bool]$loopTrace.nativeReturnToMapVerified } else { $null }
-        NativeClockActions = if ($VillageToolsQuestLoop -or $BattleSimulationLoop) { @($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -in @('advance','pause','resume','fastForward') } | ForEach-Object { [string]$_.actionReceipt.action }) } else { @() }
+        NativeClockActions = if ($VillageToolsQuestLoop -or $BattleSimulationLoop) { [string[]]@($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -in @('advance','pause','resume','fastForward') } | ForEach-Object { [string]$_.actionReceipt.action }) } else { [string[]]@() }
         SupplyFixtureSetup = $supplySetup
         SupplyVerified = if ($SupplyManagementLoop) { [bool]$supplyVerified } else { $null }
         SupplyVerification = $supplyVerification
