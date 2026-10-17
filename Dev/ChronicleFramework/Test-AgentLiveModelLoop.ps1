@@ -535,6 +535,7 @@ try {
         $selectedObjective = if ($selectedObjectiveId -and $objectiveSnapshot) { $objectiveSnapshot.$selectedObjectiveId } else { $null }
         $initialQuestIds = @($baseline.state.quests | ForEach-Object { [string]$_.id } | Sort-Object)
         $finalQuestIds = @($finalNativeState.state.quests | ForEach-Object { [string]$_.id } | Sort-Object)
+        $objectiveIdsFound = @(@('gold','partySize','renown','companions') | Where-Object { $objectiveSnapshot.PSObject.Properties.Name -contains $_ })
         $selectionRouteHistory = @($loopTrace.providerRouteHistory)
         $plannerOnlyTrace = @($steps | Where-Object { $_.planningOnly -eq $true -and $_.nativeActionExecuted -eq $false })
         $plannerChecks = [ordered]@{
@@ -542,7 +543,7 @@ try {
             objectiveSelectionTermination = ([string]$loopTrace.termination.reason -ceq 'unmet-objective-selected')
             wholeQuestNotClaimed = ($loopTrace.termination.goalVerified -eq $false)
             selectionUnmet = ($loopTrace.selection.met -eq $false -and $null -ne $selectedObjective -and $selectedObjective.met -eq $false)
-            fourNativeObjectives = (@($objectiveSnapshot.PSObject.Properties.Name).Count -eq 4)
+            fourNativeObjectives = ($objectiveIdsFound.Count -eq 4)
             fourVisibleJournalObjectives = ($loopTrace.journalObjectiveSnapshot.Count -eq 4)
             journalTargetsConsistent = ($loopTrace.targetConsistency.consistent -eq $true)
             twoFreeModelRoutes = ($selectionRouteHistory.Count -ge 2)
