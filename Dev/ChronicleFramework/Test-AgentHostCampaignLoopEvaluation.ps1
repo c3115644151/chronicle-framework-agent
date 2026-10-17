@@ -5,7 +5,7 @@ param(
     [string]$CleanupPreparedSaveName,
     [switch]$VillageToolsQuest,
     [switch]$BattleSimulationLoop,
-    [string]$BattleSaveName = 'AgentBridgeLifecycle'
+    [string]$BattleSourceSaveName = 'AgentBridgeLifecycle'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -19,17 +19,19 @@ else { $evaluationRoot = $null }
 $documentsPath = [Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)
 if ([string]::IsNullOrWhiteSpace($documentsPath)) { throw 'Windows Documents directory could not be resolved for Agent Host cleanup checks.' }
 $protocolRoot = Join-Path $documentsPath 'Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent'
+$saveDirectory = Join-Path $documentsPath 'Mount and Blade II Bannerlord\Game Saves'
 $sessionPath = Join-Path $protocolRoot 'session.json'
 $results = [System.Collections.Generic.List[object]]::new()
 
 if (-not [string]::IsNullOrWhiteSpace($CleanupPreparedSaveName)) {
-    if (-not $CleanupPreparedSaveName.StartsWith('ChronicleW7K-', [StringComparison]::Ordinal)) { throw 'Cleanup-only mode accepts only a Harness-owned ChronicleW7K prepared save name.' }
+    if (-not ($CleanupPreparedSaveName.StartsWith('ChronicleW7K-', [StringComparison]::Ordinal) -or $CleanupPreparedSaveName.StartsWith('ChronicleW7L-', [StringComparison]::Ordinal))) { throw 'Cleanup-only mode accepts only Harness-owned ChronicleW7K/W7L prepared save names.' }
     if (Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue) { throw 'Refusing prepared-save cleanup while a Bannerlord process is running.' }
     if (Test-Path -LiteralPath $sessionPath -PathType Leaf) { throw 'Refusing prepared-save cleanup while a Chronicle Agent CLI session is active.' }
     $saveDirectory = Join-Path $documentsPath 'Mount and Blade II Bannerlord\Game Saves'
     $saveRoot = [IO.Path]::GetFullPath($saveDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
     $preparedSavePath = [IO.Path]::GetFullPath((Join-Path $saveRoot ($CleanupPreparedSaveName + '.sav')))
-    if (-not $preparedSavePath.StartsWith($saveRoot, [StringComparison]::OrdinalIgnoreCase) -or -not [IO.Path]::GetFileNameWithoutExtension($preparedSavePath).StartsWith('ChronicleW7K-', [StringComparison]::Ordinal)) { throw 'Prepared save path escaped the Harness-owned ChronicleW7K Game Saves boundary.' }
+    $preparedBaseName = [IO.Path]::GetFileNameWithoutExtension($preparedSavePath)
+    if (-not $preparedSavePath.StartsWith($saveRoot, [StringComparison]::OrdinalIgnoreCase) -or -not ($preparedBaseName.StartsWith('ChronicleW7K-', [StringComparison]::Ordinal) -or $preparedBaseName.StartsWith('ChronicleW7L-', [StringComparison]::Ordinal))) { throw 'Prepared save path escaped the Harness-owned ChronicleW7K/W7L Game Saves boundary.' }
     $removed = -not (Test-Path -LiteralPath $preparedSavePath -PathType Leaf)
     if (-not $removed) {
         [IO.File]::Delete($preparedSavePath)
@@ -41,19 +43,17 @@ if (-not [string]::IsNullOrWhiteSpace($CleanupPreparedSaveName)) {
 }
 
 if ($BattleSimulationLoop) {
-    if ($BattleSaveName -cnotin @('AgentBridgeLifecycle','AgentBridgeFixture','AgentBridgeProtocol') -and -not $BattleSaveName.StartsWith('ChronicleP5Fresh-', [StringComparison]::Ordinal)) {
-        throw 'Battle evaluation accepts only a clean AgentBridge fixture or a Harness-owned ChronicleP5Fresh campaign fixture; unapproved user save names are refused.'
+    if ($BattleSourceSaveName -notmatch '^[A-Za-z0-9_-]{1,48}$' -or $BattleSourceSaveName.EndsWith('.sav', [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Battle evaluation source must be one Game Saves basename without a path or extension; no Host or model was started.'
     }
-    $battleSavePath = Join-Path $documentsPath "Mount and Blade II Bannerlord\Game Saves\$BattleSaveName.sav"
-    if (-not (Test-Path -LiteralPath $battleSavePath -PathType Leaf)) { throw 'Selected battle evaluation source save does not exist; no Host or model was started.' }
 }
 
 if (Test-Path -LiteralPath $sessionPath -PathType Leaf) {
     $staleSession = Get-Content -LiteralPath $sessionPath -Raw -Encoding UTF8 | ConvertFrom-Json
     $staleSaveName = [string]$staleSession.saveName
     $stalePid = [int]$staleSession.processId
-    if (-not $staleSaveName.StartsWith('ChronicleW7K-', [StringComparison]::Ordinal)) {
-        throw 'A stale CLI session exists, but its save name is not a Harness-owned ChronicleW7K fixture; preserving it.'
+    if (-not ($staleSaveName.StartsWith('ChronicleW7K-', [StringComparison]::Ordinal) -or $staleSaveName.StartsWith('ChronicleW7L-', [StringComparison]::Ordinal))) {
+        throw 'A stale CLI session exists, but its save name is not a Harness-owned ChronicleW7K/W7L fixture; preserving it.'
     }
     if (@(Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue).Count -gt 0 -or (Get-Process -Id $stalePid -ErrorAction SilentlyContinue)) {
         throw 'A ChronicleW7K session still has a live Bannerlord/session process; refusing automatic recovery.'
@@ -101,6 +101,11 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
     $fixturePreparation = $null
     $preparedSaveName = ''
     $preparedSaveRemoved = $null
+    $battleFixtureSaveName = ''
+    $battleSourceSavePath = ''
+    $battleSourceHashBefore = $null
+    $battleSourceHashAfter = $null
+    $battleFixtureRemoved = $null
     $failure = $null
     try {
         . (Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1')
@@ -128,9 +133,28 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
             $childOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $liveTest -LoadSaveName $preparedSaveName -VillageToolsQuestLoop -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
         }
         elseif ($BattleSimulationLoop) {
-            # No battle fixture is seeded: the live Host must find a naturally
-            # visible Native Bandit, or stop safely and leave an incomplete receipt.
-            $childOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $liveTest -LoadSaveName $BattleSaveName -BattleSimulationLoop -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
+            $battleSaveRoot = [IO.Path]::GetFullPath($saveDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+            $battleSourceSavePath = [IO.Path]::GetFullPath((Join-Path $saveDirectory ($BattleSourceSaveName + '.sav')))
+            if (-not $battleSourceSavePath.StartsWith($battleSaveRoot, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $battleSourceSavePath -PathType Leaf)) { throw 'Battle source save is absent or escaped Game Saves; no copy, Host or model was started.' }
+            . (Join-Path $PSScriptRoot 'Agent-SaveMetadata.ps1')
+            $sourceModules = @(Get-AgentSaveModuleIds -SavePath $battleSourceSavePath)
+            $requiredModules = @('Native','SandBoxCore','Sandbox','BirthAndDeath','ChronicleFramework')
+            $allowedModules = @('Bannerlord.Harmony','Bannerlord.ButterLib','Bannerlord.UIExtenderEx','Bannerlord.MBOptionScreen','Native','SandBoxCore','CustomBattle','Sandbox','StoryMode','BirthAndDeath','ChronicleFramework')
+            $sourceModuleSet = @($sourceModules | ForEach-Object { $_.ToLowerInvariant() })
+            $missingRequiredModules = @($requiredModules | Where-Object { $_.ToLowerInvariant() -notin $sourceModuleSet })
+            $unexpectedModules = @($sourceModules | Where-Object { $_ -notin $allowedModules })
+            if ($missingRequiredModules.Count -gt 0 -or $unexpectedModules.Count -gt 0) { throw 'Battle source save module set is outside the supported Native Chronicle test profile; source was not loaded.' }
+
+            $battleSourceHashBefore = (Get-FileHash -LiteralPath $battleSourceSavePath -Algorithm SHA256).Hash
+            $battleFixtureSaveName = 'ChronicleW7L-' + [Guid]::NewGuid().ToString('N').Substring(0,16)
+            $battleFixtureSavePath = [IO.Path]::GetFullPath((Join-Path $saveDirectory ($battleFixtureSaveName + '.sav')))
+            if (-not $battleFixtureSavePath.StartsWith($battleSaveRoot, [StringComparison]::OrdinalIgnoreCase) -or (Test-Path -LiteralPath $battleFixtureSavePath)) { throw 'Unique W7-L disposable save path was not safe/available.' }
+            [IO.File]::Copy($battleSourceSavePath, $battleFixtureSavePath, $false)
+            $battleCloneHash = (Get-FileHash -LiteralPath $battleFixtureSavePath -Algorithm SHA256).Hash
+            if ($battleCloneHash -cne $battleSourceHashBefore) { throw 'The W7-L disposable save copy does not match its read-only source hash.' }
+            [ordered]@{ SourceSaveName = $BattleSourceSaveName; SourceSha256Before = $battleSourceHashBefore; SourceModuleIds = $sourceModules; DisposableCloneName = $battleFixtureSaveName; DisposableCloneSha256 = $battleCloneHash; IsByteForByteCopy = $true; NoGameWorldStateInjected = $true } |
+                ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $runTemp 'BattleSourceFixture.json') -Encoding UTF8
+            $childOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $liveTest -LoadSaveName $battleFixtureSaveName -BattleSimulationLoop -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
         }
         else {
             $childOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $liveTest -ArrivalLoop -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
@@ -157,6 +181,17 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
                 if (Test-Path -LiteralPath $preparedSavePath -PathType Leaf) { [IO.File]::Delete($preparedSavePath) }
                 $preparedSaveRemoved = -not (Test-Path -LiteralPath $preparedSavePath -PathType Leaf)
             }
+        }
+        if ($BattleSimulationLoop -and $battleFixtureSaveName) {
+            $battleRoot = [IO.Path]::GetFullPath($saveDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+            $battleFixturePath = [IO.Path]::GetFullPath((Join-Path $saveDirectory ($battleFixtureSaveName + '.sav')))
+            if ((Test-Path -LiteralPath $battleFixturePath -PathType Leaf) -and $battleFixtureSaveName.StartsWith('ChronicleW7L-', [StringComparison]::Ordinal) -and
+                $battleFixturePath.StartsWith($battleRoot, [StringComparison]::OrdinalIgnoreCase) -and
+                -not (Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue) -and -not (Test-Path -LiteralPath $sessionPath -PathType Leaf)) {
+                [IO.File]::Delete($battleFixturePath)
+            }
+            $battleFixtureRemoved = -not (Test-Path -LiteralPath $battleFixturePath -PathType Leaf)
+            if (Test-Path -LiteralPath $battleSourceSavePath -PathType Leaf) { $battleSourceHashAfter = (Get-FileHash -LiteralPath $battleSourceSavePath -Algorithm SHA256).Hash }
         }
         $env:CHRONICLE_HARNESS_TEMP = $priorHarnessTemp
         $env:TEMP = $priorTemp
@@ -191,6 +226,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
             ([int]$battleOutcome.InventoryLootScreenCount -eq 0 -or $battleActionSequence.Contains('inventoryDone')) -and
             $providerRoutes.Count -gt 0 -and [string]$trace.ModelConfigurationSource -eq 'harness-mcm-profile-fixture' -and
             [bool]$liveResult.FixtureUnchanged -and [bool]$liveResult.ProcessStopped -and
+            [bool]$battleSourceHashBefore -and $battleSourceHashBefore -ceq $battleSourceHashAfter -and [bool]$battleFixtureRemoved -and
             [bool]$liveResult.VisualEvidencePassed -and [double]$liveResult.Capture.FrameCoverageRatio -ge 0.9 -and
             [bool]$liveResult.Capture.VideoRemovedAfterEvidence -and
             [bool]$trace.SourceTrackedTreeClean -and [string]$trace.SourceCommit -eq (git.exe -C $PSScriptRoot rev-parse HEAD).Trim() -and
@@ -259,14 +295,17 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         preparedIssueGiver = if ($fixturePreparation) { $fixturePreparation.VisibleMarker } else { $null }
         battleOutcome = if ($BattleSimulationLoop) { $battleOutcome } else { $null }
         battleTargetPreflight = if ($BattleSimulationLoop -and $liveResult) { $liveResult.BattleTargetPreflight } else { $null }
-        battleSourceSaveName = if ($BattleSimulationLoop) { $BattleSaveName } else { $null }
+        battleSourceSaveName = if ($BattleSimulationLoop) { $BattleSourceSaveName } else { $null }
+        battleSourceHashBefore = if ($BattleSimulationLoop) { $battleSourceHashBefore } else { $null }
+        battleSourceHashAfter = if ($BattleSimulationLoop) { $battleSourceHashAfter } else { $null }
+        battleDisposableSaveRemoved = if ($BattleSimulationLoop) { $battleFixtureRemoved } else { $null }
         battleActionSequence = if ($BattleSimulationLoop) { $battleActionSequence } else { @() }
         battleSimulationVerified = if ($BattleSimulationLoop -and $trace) { [bool]$trace.BattleSimulationVerified } else { $null }
         renownBefore = if ($BattleSimulationLoop -and $trace) { $trace.BattleRenownBefore } else { $null }
         renownAfter = if ($BattleSimulationLoop -and $trace) { $trace.BattleRenownAfter } else { $null }
         observedIssueMarkerMatchedTalkTarget = if ($VillageToolsQuest) { [bool]$visibleIssueMarkerVerified } else { $null }
         nativeToolTradeCommits = if ($VillageToolsQuest) { @($tradeCommits | ForEach-Object { $_.actionReceipt.data }) } else { @() }
-        preparedSaveRemoved = $preparedSaveRemoved
+        preparedSaveRemoved = if ($BattleSimulationLoop) { $battleFixtureRemoved } else { $preparedSaveRemoved }
         trackedTreeClean = if ($trace) { [bool]$trace.SourceTrackedTreeClean } else { $false }
         decisions = if ($trace) { [int]$trace.Decisions } else { $null }
         nativeActions = $nativeActions.Count

@@ -301,10 +301,14 @@ if ($harnessScript -notmatch "'AgentHostVillageToolsQuestEvaluation' \{ @\('Pref
 if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostBattleSimulationEvaluation'\) \}" -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostBattleSimulationEvaluation'" -or
     $agentHostCampaignLoopEvaluationSource -notmatch '\-BattleSimulationLoop' -or
-    $agentHostCampaignLoopEvaluationSource -notmatch '\$BattleSaveName' -or
-    $agentHostCampaignLoopEvaluationSource -notmatch 'AgentBridgeFixture' -or
-    $agentHostCampaignLoopEvaluationSource -notmatch 'AgentBridgeProtocol' -or
-    $agentHostCampaignLoopEvaluationSource -notmatch 'ChronicleP5Fresh-' -or
+    $harnessScript -notmatch 'BattleSimulationSourceSaveName' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch '\$BattleSourceSaveName' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'Get-AgentSaveModuleIds' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'ChronicleW7L-' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch '\[IO\.File\]::Copy\(\$battleSourceSavePath, \$battleFixtureSavePath, \$false\)' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'IsByteForByteCopy' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'SourceSha256Before' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'battleSourceHashAfter' -or
     $agentHostLiveModelLoopSource -notmatch '\[switch\]\$BattleSimulationLoop' -or
     $agentHostLiveModelLoopSource -notmatch 'BattleTargetPreflight\.json' -or
     $agentHostLiveModelLoopSource -notmatch 'ModelInferenceStarted = \$false' -or
@@ -320,9 +324,10 @@ if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Prefl
 }
 if ($agentHostCampaignLoopEvaluationSource -notmatch '\[string\]\$CleanupPreparedSaveName' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'StartsWith\(''ChronicleW7K-''' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'StartsWith\(''ChronicleW7L-''' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'Bannerlord process is running' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'Agent CLI session is active' -or
-    $agentHostCampaignLoopEvaluationSource -notmatch 'escaped the Harness-owned ChronicleW7K Game Saves boundary' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'escaped the Harness-owned ChronicleW7K/W7L Game Saves boundary' -or
     $agentHostCampaignLoopEvaluationSource -notmatch '\$staleSession\.saveName' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'Get-Process -Id \$stalePid' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'AgentCliStopOutput' -or
