@@ -408,6 +408,8 @@ Hero 俘虏可以存在于：
 
 玩家确认：主角收到赎金提议时，游戏界面明确显示赎金金额，并提供接受/拒绝选项。Harness Native运行也曾观察到 `mno_captivity_end_ransom_accept` 与拒绝选项，并分别核验支付释放与拒绝后继续被俘；详见 `DEVELOPMENT.md` 的 `CaptivityOutcome` 记录。此确认只描述该赎金提议界面，不意味着任何被俘存档都会立即出现报价；Host仍须以当前Native菜单/启用选项与当前报价为准。
 
+真实Host闭环补证：`TestResults/20261018-050124`通过 `AgentHostBattleAndCaptivityEvaluation`。FreeLLMAPI `auto:reliable`以12次模型决策/路由完成Native bandit接敌与Send Troops；战后确实观察到MainHero Captive、`prisoner_wait`无选项，Host在不发出任何时钟动作下自然等待，1.522 Campaign日后出现野外Native赎金界面。模型依据当前报价选择 `mno_captivity_end_ransom_accept`，Native赎金112使Gold 324→212；MainHero解囚、MainParty 0→1并回MapState。Renown 20→20，最终`playerOutcome=captured-then-recovered`。源档SHA前后相同、临时副本/游戏/Host/session清理，窗口画面覆盖率100%并在提取索引后删除原视频。此证据覆盖一次真实野外赎金恢复，不外推为其他Captor、监狱、逃脱或Captivity等待时长规律。
+
 ### 转移
 
 `TransferPrisonerBarterBehavior.CheckForBarters`遍历双方Party的`PrisonerHeroes`：一方所持的Hero若与对方Party所属Faction处于战争状态，就把该Hero作为`TransferPrisonerBarterable`加入俘虏Barter组，双方方向分别检查。玩家调整谈判条款并接受后，`TransferPrisonerBarterable.Apply`再次确认交战关系，并调用`TransferPrisonerAction`把Hero俘虏转入对方Party；此转移本身不改Hero个人关系。取消Barter则不调用Apply，因此不转移。
