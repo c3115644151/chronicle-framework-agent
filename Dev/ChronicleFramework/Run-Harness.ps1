@@ -1326,6 +1326,7 @@ try {
         Passed = [bool]$retention.Passed
         Complete = [bool]$retention.Complete
         KeepMostRecentRuns = [int]$retention.KeepMostRecentRuns
+        KeepMostRecentContactSheets = [int]$retention.KeepMostRecentContactSheets
         ProtectedDocumentRunCount = [int]$retention.ProtectedDocumentRunCount
         PreservedIncompleteCaptureRunCount = @($retention.PreservedIncompleteCaptureRuns).Count
         DeletedRunCount = [int]$retention.DeletedRunCount
@@ -1337,6 +1338,8 @@ try {
         DeletedUndecodableVideoBytes = [long]$retention.DeletedUndecodableVideoBytes
         DeletedLegacyProbeCount = [int]$retention.DeletedLegacyProbeCount
         DeletedLegacyProbeBytes = [long]$retention.DeletedLegacyProbeBytes
+        CompactedMediaCount = [int]$retention.CompactedMediaCount
+        CompactedMediaBytes = [long]$retention.CompactedMediaBytes
         SkippedRunCount = @($retention.SkippedRuns).Count
         Receipt = $retentionReceiptPath
     }

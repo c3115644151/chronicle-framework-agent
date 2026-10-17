@@ -4,6 +4,7 @@ param(
     [string]$CurrentRunId,
     [string[]]$ReferenceDocumentPaths,
     [ValidateRange(1, 1000)][int]$KeepMostRecent = 30,
+    [ValidateRange(1, 1000)][int]$KeepMostRecentContactSheets = 5,
     [switch]$Apply,
     [switch]$SelfTest
 )
@@ -45,6 +46,7 @@ function Invoke-TestResultsRetention {
         [string]$ActiveRunId,
         [string[]]$ReferencePaths,
         [int]$RecentLimit,
+        [int]$RecentContactLimit,
         [bool]$Execute
     )
 
@@ -53,17 +55,27 @@ function Invoke-TestResultsRetention {
     $rootPrefix = $rootFull + [IO.Path]::DirectorySeparatorChar
     $protectedIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     if (-not [string]::IsNullOrWhiteSpace($ActiveRunId)) { $null = $protectedIds.Add($ActiveRunId) }
+    $recentIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $referencedFiles = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 
     foreach ($documentPath in $ReferencePaths) {
         if (-not (Test-Path -LiteralPath $documentPath -PathType Leaf)) { continue }
         $documentText = Get-Content -LiteralPath $documentPath -Raw -Encoding UTF8
         foreach ($match in [regex]::Matches($documentText, '(?<!\d)\d{8}-\d{6}(?!\d)')) { $null = $protectedIds.Add($match.Value) }
+        foreach ($match in [regex]::Matches($documentText, '(?i)TestResults[\\/](\d{8}-\d{6})[\\/]([^\s`"\)\]>]+\.(?:bmp|jpg|jpeg|png))')) {
+            $relative = $match.Value -replace '(?i)^TestResults[\\/]', ''
+            $relative = $relative.Replace('/', '\\')
+            $null = $referencedFiles.Add([IO.Path]::GetFullPath((Join-Path $rootFull $relative)))
+        }
     }
     $referencedRunCount = $protectedIds.Count
 
     $timestampedDirectories = @(Get-ChildItem -LiteralPath $rootFull -Directory | Where-Object { $_.Name -match '^\d{8}-\d{6}$' })
     $recentDirectories = @($timestampedDirectories | Sort-Object Name -Descending | Select-Object -First $RecentLimit)
-    foreach ($directory in $recentDirectories) { $null = $protectedIds.Add($directory.Name) }
+    foreach ($directory in $recentDirectories) { $null = $protectedIds.Add($directory.Name); $null = $recentIds.Add($directory.Name) }
+    $recentContactDirectories = @($timestampedDirectories | Sort-Object Name -Descending | Select-Object -First $RecentContactLimit)
+    $recentContactIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($directory in $recentContactDirectories) { $null = $recentContactIds.Add($directory.Name) }
 
     $keptForIncompleteCapture = [Collections.Generic.List[string]]::new()
     $skippedRuns = [Collections.Generic.List[object]]::new()
@@ -73,6 +85,9 @@ function Invoke-TestResultsRetention {
     $removedUndecodableVideoCount = 0
     $removedLegacyProbeBytes = [long]0
     $removedLegacyProbeCount = 0
+    $compactedMedia = [Collections.Generic.List[object]]::new()
+    $compactedMediaBytes = [long]0
+    $compactedMediaCount = 0
 
     # A previous standalone capture-resilience probe left this exact synthetic
     # file at the TestResults root. It is not a run receipt or user recording.
@@ -178,6 +193,59 @@ function Invoke-TestResultsRetention {
         }
     }
 
+    # Keep compact receipts for old runs cited by docs, but do not let every
+    # historical screenshot/contact sheet accumulate forever. Preserve recent
+    # runs, explicitly cited image files, and all keyframes named by an index.
+    foreach ($directory in $timestampedDirectories) {
+        if (-not $protectedIds.Contains($directory.Name) -or $keptForIncompleteCapture.Contains($directory.Name)) { continue }
+        $directoryFull = [IO.Path]::GetFullPath($directory.FullName)
+        if (-not $directoryFull.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw "Refusing media compaction outside evidence root: $directoryFull" }
+        try { $compactionTree = @(Get-ChildItem -LiteralPath $directoryFull -Force -Recurse -ErrorAction Stop) }
+        catch { $skippedRuns.Add([pscustomobject]@{ RunId = $directory.Name; Reason = 'media-tree-enumeration-failed'; Detail = $_.Exception.Message }); continue }
+        if (@($compactionTree | Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 }).Count -gt 0 -or @($compactionTree | Where-Object { $_.FullName.Length -gt 240 }).Count -gt 0) {
+            $skippedRuns.Add([pscustomobject]@{ RunId = $directory.Name; Reason = 'media-tree-unsafe-or-path-too-long'; Detail = $null })
+            continue
+        }
+
+        $indexedFrames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        $completeContactSheets = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($indexFile in Get-ChildItem -LiteralPath $directoryFull -File -Recurse -Filter '*-timeline-index.json' -ErrorAction SilentlyContinue) {
+            try {
+                $index = Get-Content -LiteralPath $indexFile.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+                $framesExist = $true
+                foreach ($selection in @($index.selections)) {
+                    foreach ($property in @('beforeFramePath', 'eventFramePath', 'afterFramePath')) {
+                        $frame = [string]$selection.$property
+                        if ([string]::IsNullOrWhiteSpace($frame)) { continue }
+                        $frameFull = [IO.Path]::GetFullPath($frame)
+                        if (-not (Test-Path -LiteralPath $frameFull -PathType Leaf)) { $framesExist = $false; break }
+                        $null = $indexedFrames.Add($frameFull)
+                    }
+                    if (-not $framesExist) { break }
+                }
+                if ($framesExist -and [bool]$index.sourceClip.removedAfterEvidence) {
+                    $contactName = ([IO.Path]::GetFileName($indexFile.FullName) -replace '-timeline-index\.json$', '-contact.jpg')
+                    $null = $completeContactSheets.Add([IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $indexFile.FullName) $contactName)))
+                }
+            } catch { }
+        }
+
+        foreach ($file in Get-ChildItem -LiteralPath $directoryFull -File -Recurse -Force -ErrorAction SilentlyContinue) {
+            $isBitmap = [string]::Equals($file.Extension, '.bmp', [StringComparison]::OrdinalIgnoreCase) -and -not $recentIds.Contains($directory.Name)
+            $isContactSheet = $file.Name -match '-contact\.jpg$' -and -not $recentContactIds.Contains($directory.Name) -and $completeContactSheets.Contains([IO.Path]::GetFullPath($file.FullName))
+            if (-not ($isBitmap -or $isContactSheet)) { continue }
+            $fileFull = [IO.Path]::GetFullPath($file.FullName)
+            if ($referencedFiles.Contains($fileFull) -or $indexedFrames.Contains($fileFull)) { continue }
+            $entry = [pscustomobject]@{ Path = $fileFull.Substring($rootPrefix.Length); Bytes = [long]$file.Length }
+            if ($Execute) {
+                Remove-Item -LiteralPath $fileFull -Force -ErrorAction Stop
+            }
+            $compactedMedia.Add($entry)
+            $compactedMediaBytes += [long]$file.Length
+            $compactedMediaCount++
+        }
+    }
+
     $candidates = @($timestampedDirectories | Where-Object { -not $protectedIds.Contains($_.Name) })
     $deletedDirectories = [Collections.Generic.List[object]]::new()
     $deletedBytes = [long]0
@@ -223,6 +291,7 @@ function Invoke-TestResultsRetention {
         Applied = $Execute
         EvidenceRoot = $rootFull
         KeepMostRecentRuns = $RecentLimit
+        KeepMostRecentContactSheets = $RecentContactLimit
         ProtectedDocumentRunCount = $referencedRunCount
         PreservedIncompleteCaptureRuns = @($keptForIncompleteCapture | Sort-Object -Unique)
         SkippedRuns = @($skippedRuns)
@@ -235,6 +304,9 @@ function Invoke-TestResultsRetention {
         DeletedUndecodableVideoBytes = $removedUndecodableVideoBytes
         DeletedLegacyProbeCount = $removedLegacyProbeCount
         DeletedLegacyProbeBytes = $removedLegacyProbeBytes
+        CompactedMediaCount = $compactedMediaCount
+        CompactedMediaBytes = $compactedMediaBytes
+        CompactedMedia = @($compactedMedia)
         DeletedRuns = @($deletedDirectories)
     }
 }
@@ -254,6 +326,16 @@ if ($SelfTest) {
         $brokenCapture = Join-Path $keep 'broken-capture.mp4'
         [IO.File]::WriteAllBytes($brokenCapture, [byte[]]::new(8192))
         'cited' | Set-Content -LiteralPath (Join-Path $cited 'summary.json')
+        $citedImage = Join-Path $cited 'Temp\explicit.bmp'
+        $unusedImage = Join-Path $cited 'Temp\unused.bmp'
+        $citedContact = Join-Path $cited 'Temp\LiveModelWindow-contact.jpg'
+        $citedFrames = Join-Path $cited 'Temp\event.jpg'
+        $null = New-Item -ItemType Directory -Path (Join-Path $cited 'Temp')
+        [IO.File]::WriteAllBytes($citedImage, [byte[]]::new(1024))
+        [IO.File]::WriteAllBytes($unusedImage, [byte[]]::new(2048))
+        [IO.File]::WriteAllBytes($citedContact, [byte[]]::new(3072))
+        [IO.File]::WriteAllBytes($citedFrames, [byte[]]::new(4096))
+        [ordered]@{ sourceClip = @{ removedAfterEvidence = $true }; selections = @(@{ beforeFramePath = ''; eventFramePath = $citedFrames; afterFramePath = '' }) } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $cited 'Temp\LiveModelWindow-timeline-index.json') -Encoding UTF8
         'old' | Set-Content -LiteralPath (Join-Path $old 'summary.json')
         'partial' | Set-Content -LiteralPath (Join-Path $partial 'LiveModelWindow.mp4')
         [ordered]@{ videoPath = (Join-Path $partial 'LiveModelWindow.mp4') } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $partial 'LiveModelWindow-partial.json') -Encoding UTF8
@@ -264,22 +346,23 @@ if ($SelfTest) {
         [ordered]@{ sourceClip = @{ removedAfterEvidence = $true }; contactSheetPath = $contactSheet; selections = @() } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $contactOnly 'LiveModelWindow-timeline-index.json') -Encoding UTF8
         'misc' | Set-Content -LiteralPath (Join-Path $misc 'preserve.txt')
         $reference = Join-Path $fixtureRoot 'reference.md'
-        "Evidence: 20260101-000002" | Set-Content -LiteralPath $reference
-        $preview = Invoke-TestResultsRetention -Root $fixtureRoot -ActiveRunId '20260101-000003' -ReferencePaths @($reference) -RecentLimit 1 -Execute $false
+        "Evidence: 20260101-000002; TestResults\20260101-000002\Temp\explicit.bmp" | Set-Content -LiteralPath $reference
+        $preview = Invoke-TestResultsRetention -Root $fixtureRoot -ActiveRunId '20260101-000003' -ReferencePaths @($reference) -RecentLimit 1 -RecentContactLimit 1 -Execute $false
         if ($preview.DeletedRunCount -ne 2 -or @($preview.DeletedRuns.RunId) -notcontains '20260101-000001' -or @($preview.DeletedRuns.RunId) -notcontains '20251231-235959' -or $preview.PreservedIncompleteCaptureRuns -notcontains '20260101-000000') { throw "Retention dry-run selection mismatch: deleted=$($preview.DeletedRunCount); ids=$(@($preview.DeletedRuns.RunId) -join ','); incomplete=$(@($preview.PreservedIncompleteCaptureRuns) -join ',')" }
-        $applied = Invoke-TestResultsRetention -Root $fixtureRoot -ActiveRunId '20260101-000003' -ReferencePaths @($reference) -RecentLimit 1 -Execute $true
+        $applied = Invoke-TestResultsRetention -Root $fixtureRoot -ActiveRunId '20260101-000003' -ReferencePaths @($reference) -RecentLimit 1 -RecentContactLimit 1 -Execute $true
         foreach ($path in @($keep, $cited, $partial, $misc)) { if (-not (Test-Path -LiteralPath $path -PathType Container)) { throw "Retention deleted protected fixture $path" } }
         if (Test-Path -LiteralPath $old) { throw 'Retention failed to remove the eligible old fixture run.' }
         if (Test-Path -LiteralPath $contactOnly) { throw 'Retention failed to remove an MP4 whose contact sheet and post-processing index already preserve review evidence.' }
+        if ((Test-Path -LiteralPath $citedImage) -eq $false -or (Test-Path -LiteralPath $unusedImage) -or (Test-Path -LiteralPath $citedContact) -or (Test-Path -LiteralPath $citedFrames) -eq $false) { throw "Retention media compaction failed: cited=$(Test-Path -LiteralPath $citedImage), unused=$(Test-Path -LiteralPath $unusedImage), contact=$(Test-Path -LiteralPath $citedContact), indexed=$(Test-Path -LiteralPath $citedFrames); compacted=$($applied.CompactedMediaCount); paths=$(@($applied.CompactedMedia.Path) -join ',')" }
         $brokenReceiptPath = Join-Path $keep 'broken-capture-capture-cleanup.json'
         $brokenReceipt = if (Test-Path -LiteralPath $brokenReceiptPath) { Get-Content -LiteralPath $brokenReceiptPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
         if ((Test-Path -LiteralPath $brokenCapture) -or $null -eq $brokenReceipt -or -not $brokenReceipt.sourceRemoved -or $applied.DeletedUndecodableVideoCount -ne 1) { throw "Retention failed undecodable capture cleanup: rawExists=$(Test-Path -LiteralPath $brokenCapture); receiptExists=$($null -ne $brokenReceipt); sourceRemoved=$($brokenReceipt.sourceRemoved); count=$($applied.DeletedUndecodableVideoCount); skipped=$($applied.SkippedRuns.Count)" }
-        [pscustomobject]@{ Passed = $true; PreviewDeletedRuns = $preview.DeletedRunCount; AppliedDeletedRuns = $applied.DeletedRunCount; IncompleteCapturePreserved = $true; ContactSheetOnlyCapturePruned = $true; UndecodableCapturePrunedWithReceipt = $true; ReferencedRunPreserved = $true; NonRunFolderPreserved = $true } | ConvertTo-Json -Compress
+        [pscustomobject]@{ Passed = $true; PreviewDeletedRuns = $preview.DeletedRunCount; AppliedDeletedRuns = $applied.DeletedRunCount; IncompleteCapturePreserved = $true; ContactSheetOnlyCapturePruned = $true; UndecodableCapturePrunedWithReceipt = $true; ReferencedRunPreserved = $true; CitedAndIndexedMediaPreserved = $true; RedundantHistoricalMediaCompacted = $true; NonRunFolderPreserved = $true } | ConvertTo-Json -Compress
     } finally {
         if (Test-Path -LiteralPath $fixtureRoot -PathType Container) { Remove-Item -LiteralPath $fixtureRoot -Recurse -Force }
     }
     exit 0
 }
 
-$result = Invoke-TestResultsRetention -Root $EvidenceRoot -ActiveRunId $CurrentRunId -ReferencePaths $ReferenceDocumentPaths -RecentLimit $KeepMostRecent -Execute ([bool]$Apply)
+$result = Invoke-TestResultsRetention -Root $EvidenceRoot -ActiveRunId $CurrentRunId -ReferencePaths $ReferenceDocumentPaths -RecentLimit $KeepMostRecent -RecentContactLimit $KeepMostRecentContactSheets -Execute ([bool]$Apply)
 $result | ConvertTo-Json -Depth 6
