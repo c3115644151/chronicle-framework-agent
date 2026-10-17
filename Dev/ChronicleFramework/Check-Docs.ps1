@@ -301,7 +301,12 @@ if ($harnessScript -notmatch "'AgentHostVillageToolsQuestEvaluation' \{ @\('Pref
 if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostBattleSimulationEvaluation'\) \}" -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostBattleSimulationEvaluation'" -or
     $agentHostCampaignLoopEvaluationSource -notmatch '\-BattleSimulationLoop' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch '\$BattleSaveName' -or
     $agentHostLiveModelLoopSource -notmatch '\[switch\]\$BattleSimulationLoop' -or
+    $agentHostLiveModelLoopSource -notmatch 'BattleTargetPreflight\.json' -or
+    $agentHostLiveModelLoopSource -notmatch 'ModelInferenceStarted = \$false' -or
+    $agentHostRuntimeControllerSource -notmatch 'battleSkip' -or
+    $agentHostRuntimeControllerSource -notmatch 'dialogueSelect' -or
     $agentHostBattleSimulationLoopSource -notmatch 'bandit_start_defender_1' -or
     $agentHostBattleSimulationLoopSource -notmatch 'str_order_attack' -or
     $agentHostBattleSimulationLoopSource -notmatch 'battleSimulation' -or

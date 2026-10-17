@@ -125,6 +125,7 @@ $failureEvidenceError = $null
 $supplySetup = $null
 $supplyVerified = $null
 $supplyVerification = $null
+$battleTargetPreflight = $null
 $completionContractBase64 = $null
 $chosenSettlementId = ''
 $chosenSettlementName = ''
@@ -210,6 +211,23 @@ try {
     }
     elseif ($baseline.state.location.currentSettlementId) {
         throw 'Non-quest live-model map fixtures must remain unobstructed with no current settlement.'
+    }
+    if ($BattleSimulationLoop) {
+        $partyProbe = Invoke-AgentCli 'mapPartyTargets' @('-CommandId', ('battle-target-preflight-' + [Guid]::NewGuid().ToString('N')))
+        if ($partyProbe.status -ne 'completed') { throw 'Native mapPartyTargets preflight failed; no model call was started.' }
+        $visibleBandits = @($partyProbe.data.mapPartyTargets | Where-Object { $_.type -eq 'bandit' -and $_.hostile -eq $true })
+        $battleTargetPreflight = [ordered]@{
+            IsReadOnlyHarnessGate = $true
+            ModelInferenceStarted = $false
+            CampaignDay = [double]$baseline.campaignDay
+            TimeControlMode = [string]$baseline.timeControlMode
+            VisiblePartyCount = @($partyProbe.data.mapPartyTargets).Count
+            VisibleHostileBanditCount = $visibleBandits.Count
+            TargetAvailable = ($visibleBandits.Count -gt 0)
+            TargetNames = @($visibleBandits | Select-Object -First 12 -ExpandProperty name)
+        }
+        $battleTargetPreflight | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $env:CHRONICLE_HARNESS_TEMP 'BattleTargetPreflight.json') -Encoding UTF8
+        if ($visibleBandits.Count -eq 0) { throw 'No current Native-visible hostile Bandit was available in the selected world; the test stopped before model inference and did not create an encounter.' }
     }
     $null = Capture-EngineFrame 'LiveModelEngine-before'
     $capture = Start-ChronicleWindowVideoCapture -ProcessId ([int]$start.session.processId) -OutputPath $videoPath -FrameRate $FrameRate
@@ -996,6 +1014,7 @@ $result = [ordered]@{
     HostReadyMessages = @($hostReadyMessages)
     CaptureRecoveryProof = $captureRecoveryProof
     Capture = $captureResult
+    BattleTargetPreflight = $battleTargetPreflight
     Trace = $liveModelTrace
 }
 $json = $result | ConvertTo-Json -Depth 28

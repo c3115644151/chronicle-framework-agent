@@ -15,7 +15,8 @@ param(
     [ValidateRange(1,3)][int]$AgentHostSupplyRuns = 3,
     [ValidateRange(1,20)][int]$SupplyBaselineProvisionAmount = 4,
     [ValidateRange(1,5)][int]$FreshCampaignSupplyRuns = 5,
-    [ValidateRange(1,10)][int]$RecruitmentFallbackMaxAttempts = 10
+    [ValidateRange(1,10)][int]$RecruitmentFallbackMaxAttempts = 10,
+    [string]$BattleSimulationSaveName = 'AgentBridgeLifecycle'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -652,7 +653,7 @@ foreach ($stage in $requestedStages) {
         }
         'AgentHostBattleSimulationEvaluation' {
             Invoke-Stage -Name 'AgentHostBattleSimulationEvaluation' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostCampaignLoopEvaluationScript -BattleSimulationLoop -FrameRate 5 2>&1 | Out-String
+                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostCampaignLoopEvaluationScript -BattleSimulationLoop -BattleSaveName $BattleSimulationSaveName -FrameRate 5 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "FreeLLMAPI-routed real-model Agent Host BattleSimulation evaluation failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput

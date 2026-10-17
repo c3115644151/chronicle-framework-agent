@@ -4,7 +4,8 @@ param(
     [ValidateRange(5,30)][int]$FrameRate = 10,
     [string]$CleanupPreparedSaveName,
     [switch]$VillageToolsQuest,
-    [switch]$BattleSimulationLoop
+    [switch]$BattleSimulationLoop,
+    [string]$BattleSaveName = 'AgentBridgeLifecycle'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -37,6 +38,14 @@ if (-not [string]::IsNullOrWhiteSpace($CleanupPreparedSaveName)) {
     if (-not $removed) { throw 'Harness-owned prepared save still exists after cleanup.' }
     [pscustomobject]@{ CleanupOnly = $true; PreparedSaveName = $CleanupPreparedSaveName; Removed = $true; BannerlordProcessCount = 0; AgentSessionPresent = $false } | ConvertTo-Json -Compress
     exit 0
+}
+
+if ($BattleSimulationLoop) {
+    if ($BattleSaveName -cne 'AgentBridgeLifecycle' -and -not $BattleSaveName.StartsWith('ChronicleP5Fresh-', [StringComparison]::Ordinal)) {
+        throw 'Battle evaluation accepts only the clean AgentBridgeLifecycle fixture or a Harness-owned ChronicleP5Fresh campaign fixture; user save names are refused.'
+    }
+    $battleSavePath = Join-Path $documentsPath "Mount and Blade II Bannerlord\Game Saves\$BattleSaveName.sav"
+    if (-not (Test-Path -LiteralPath $battleSavePath -PathType Leaf)) { throw 'Selected battle evaluation source save does not exist; no Host or model was started.' }
 }
 
 if (Test-Path -LiteralPath $sessionPath -PathType Leaf) {
@@ -121,7 +130,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         elseif ($BattleSimulationLoop) {
             # No battle fixture is seeded: the live Host must find a naturally
             # visible Native Bandit, or stop safely and leave an incomplete receipt.
-            $childOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $liveTest -LoadSaveName 'AgentBridgeLifecycle' -BattleSimulationLoop -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
+            $childOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $liveTest -LoadSaveName $BattleSaveName -BattleSimulationLoop -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
         }
         else {
             $childOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $liveTest -ArrivalLoop -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
@@ -249,6 +258,8 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         fixturePreparedFromNaturalVisibleIssue = if ($fixturePreparation) { [bool]$fixturePreparation.Prepared } else { $null }
         preparedIssueGiver = if ($fixturePreparation) { $fixturePreparation.VisibleMarker } else { $null }
         battleOutcome = if ($BattleSimulationLoop) { $battleOutcome } else { $null }
+        battleTargetPreflight = if ($BattleSimulationLoop -and $liveResult) { $liveResult.BattleTargetPreflight } else { $null }
+        battleSourceSaveName = if ($BattleSimulationLoop) { $BattleSaveName } else { $null }
         battleActionSequence = if ($BattleSimulationLoop) { $battleActionSequence } else { @() }
         battleSimulationVerified = if ($BattleSimulationLoop -and $trace) { [bool]$trace.BattleSimulationVerified } else { $null }
         renownBefore = if ($BattleSimulationLoop -and $trace) { $trace.BattleRenownBefore } else { $null }
