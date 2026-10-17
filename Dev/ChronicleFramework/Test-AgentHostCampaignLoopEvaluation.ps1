@@ -41,8 +41,8 @@ if (-not [string]::IsNullOrWhiteSpace($CleanupPreparedSaveName)) {
 }
 
 if ($BattleSimulationLoop) {
-    if ($BattleSaveName -cne 'AgentBridgeLifecycle' -and -not $BattleSaveName.StartsWith('ChronicleP5Fresh-', [StringComparison]::Ordinal)) {
-        throw 'Battle evaluation accepts only the clean AgentBridgeLifecycle fixture or a Harness-owned ChronicleP5Fresh campaign fixture; user save names are refused.'
+    if ($BattleSaveName -cnotin @('AgentBridgeLifecycle','AgentBridgeFixture','AgentBridgeProtocol') -and -not $BattleSaveName.StartsWith('ChronicleP5Fresh-', [StringComparison]::Ordinal)) {
+        throw 'Battle evaluation accepts only a clean AgentBridge fixture or a Harness-owned ChronicleP5Fresh campaign fixture; unapproved user save names are refused.'
     }
     $battleSavePath = Join-Path $documentsPath "Mount and Blade II Bannerlord\Game Saves\$BattleSaveName.sav"
     if (-not (Test-Path -LiteralPath $battleSavePath -PathType Leaf)) { throw 'Selected battle evaluation source save does not exist; no Host or model was started.' }

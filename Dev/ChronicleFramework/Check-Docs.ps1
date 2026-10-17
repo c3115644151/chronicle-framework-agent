@@ -302,6 +302,9 @@ if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Prefl
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostBattleSimulationEvaluation'" -or
     $agentHostCampaignLoopEvaluationSource -notmatch '\-BattleSimulationLoop' -or
     $agentHostCampaignLoopEvaluationSource -notmatch '\$BattleSaveName' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'AgentBridgeFixture' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'AgentBridgeProtocol' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'ChronicleP5Fresh-' -or
     $agentHostLiveModelLoopSource -notmatch '\[switch\]\$BattleSimulationLoop' -or
     $agentHostLiveModelLoopSource -notmatch 'BattleTargetPreflight\.json' -or
     $agentHostLiveModelLoopSource -notmatch 'ModelInferenceStarted = \$false' -or
