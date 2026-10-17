@@ -5,6 +5,7 @@ param(
     [string]$CleanupPreparedSaveName,
     [switch]$VillageToolsQuest,
     [switch]$BattleSimulationLoop,
+    [switch]$BattleAndCaptivityLoop,
     [string]$BattleSourceSaveName = 'AgentBridgeLifecycle'
 )
 
@@ -42,7 +43,7 @@ if (-not [string]::IsNullOrWhiteSpace($CleanupPreparedSaveName)) {
     exit 0
 }
 
-if ($BattleSimulationLoop) {
+if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) {
     if ($BattleSourceSaveName -notmatch '^[A-Za-z0-9_-]{1,48}$' -or $BattleSourceSaveName.EndsWith('.sav', [StringComparison]::OrdinalIgnoreCase)) {
         throw 'Battle evaluation source must be one Game Saves basename without a path or extension; no Host or model was started.'
     }
@@ -132,7 +133,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
             $preparedSaveName = [string]$fixturePreparation.PreparedSaveName
             $childOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $liveTest -LoadSaveName $preparedSaveName -VillageToolsQuestLoop -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
         }
-        elseif ($BattleSimulationLoop) {
+        elseif ($BattleSimulationLoop -or $BattleAndCaptivityLoop) {
             $battleSaveRoot = [IO.Path]::GetFullPath($saveDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
             $battleSourceSavePath = [IO.Path]::GetFullPath((Join-Path $saveDirectory ($BattleSourceSaveName + '.sav')))
             if (-not $battleSourceSavePath.StartsWith($battleSaveRoot, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $battleSourceSavePath -PathType Leaf)) { throw 'Battle source save is absent or escaped Game Saves; no copy, Host or model was started.' }
@@ -154,7 +155,8 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
             if ($battleCloneHash -cne $battleSourceHashBefore) { throw 'The W7-L disposable save copy does not match its read-only source hash.' }
             [ordered]@{ SourceSaveName = $BattleSourceSaveName; SourceSha256Before = $battleSourceHashBefore; SourceModuleIds = $sourceModules; DisposableCloneName = $battleFixtureSaveName; DisposableCloneSha256 = $battleCloneHash; IsByteForByteCopy = $true; NoGameWorldStateInjected = $true } |
                 ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $runTemp 'BattleSourceFixture.json') -Encoding UTF8
-            $childOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $liveTest -LoadSaveName $battleFixtureSaveName -BattleSimulationLoop -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
+            $battleLoopSwitch = if ($BattleAndCaptivityLoop) { '-BattleAndCaptivityLoop' } else { '-BattleSimulationLoop' }
+            $childOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $liveTest -LoadSaveName $battleFixtureSaveName $battleLoopSwitch -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
         }
         else {
             $childOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $liveTest -ArrivalLoop -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
@@ -182,7 +184,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
                 $preparedSaveRemoved = -not (Test-Path -LiteralPath $preparedSavePath -PathType Leaf)
             }
         }
-        if ($BattleSimulationLoop -and $battleFixtureSaveName) {
+        if (($BattleSimulationLoop -or $BattleAndCaptivityLoop) -and $battleFixtureSaveName) {
             $battleRoot = [IO.Path]::GetFullPath($saveDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
             $battleFixturePath = [IO.Path]::GetFullPath((Join-Path $saveDirectory ($battleFixtureSaveName + '.sav')))
             if ((Test-Path -LiteralPath $battleFixturePath -PathType Leaf) -and $battleFixtureSaveName.StartsWith('ChronicleW7L-', [StringComparison]::Ordinal) -and
@@ -206,7 +208,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
     $observeAgainSteps = @($modelSteps | Where-Object { $_.control.kind -eq 'bounded-observe-again' -and -not $_.actionExecuted })
     $noGameProcesses = @(Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue).Count -eq 0
     $noSessionFile = -not (Test-Path -LiteralPath $sessionPath -PathType Leaf)
-    if ($BattleSimulationLoop) {
+    if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) {
         $battleOutcome = if ($trace) { $trace.BattleOutcome } else { $null }
         $battleTargetId = if ($battleOutcome) { [string]$battleOutcome.TargetPartyId } else { '' }
         $clockActions = if ($trace) { @($trace.NativeClockActions | Where-Object { [string]$_ -in @('advance','pause','resume','fastForward') }) } else { @() }
@@ -216,6 +218,12 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         $renownAfterFinite = ($null -ne $trace.BattleRenownAfter -and -not [double]::IsNaN([double]$trace.BattleRenownAfter) -and -not [double]::IsInfinity([double]$trace.BattleRenownAfter))
         # Source cleanliness is checked at the live test boundary; this evaluator
         # also requires the real provider route and a freshly observed target.
+        $playerOutcomeVerified = if ($BattleAndCaptivityLoop) {
+            [bool]$battleOutcome.CaptivityRecoveryRequested -and [bool]$battleOutcome.CaptivityObserved -and
+            [bool]$battleOutcome.CaptivityRecoveryVerified -and [string]$battleOutcome.PlayerOutcome -ceq 'captured-then-recovered' -and
+            -not [bool]$battleOutcome.PlayerCaptiveAtMapReturn -and [bool]$battleOutcome.FreeMapReturned -and [int]$battleOutcome.MainPartyMembersAtReturn -gt 0
+        }
+        else { [string]$battleOutcome.PlayerOutcome -in @('captured','retreated','resolved-native-battle') }
         $battleEvidenceVerified = (
             $childExitCode -eq 0 -and $liveResult -and [bool]$liveResult.Passed -and
             [bool]$trace.BattleSimulationVerified -and [bool]$trace.BattleReturnToMapVerified -and
@@ -223,7 +231,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
             $battleActionSequence.Contains('mapPartyTargets') -and $battleActionSequence.Contains('menuSelect') -and
             $battleActionSequence.Contains('battleFinish') -and
             [string]$battleOutcome.SendTroopsOption -ceq 'str_order_attack' -and [string]$battleOutcome.SimulationState -ne 'unknown' -and
-            [string]$battleOutcome.PlayerOutcome -in @('captured','retreated','resolved-native-battle') -and
+            $playerOutcomeVerified -and
             [string]$battleOutcome.BattleFinishReceipt.status -ceq 'completed' -and
             ([int]$battleOutcome.PartyLootScreenCount -eq 0 -or $battleActionSequence.Contains('partyScreenDone')) -and
             ([int]$battleOutcome.InventoryLootScreenCount -eq 0 -or $battleActionSequence.Contains('inventoryDone')) -and
@@ -236,7 +244,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
             $noGameProcesses -and $noSessionFile
         )
         $passed = [bool]$battleEvidenceVerified
-        if (-not $passed -and -not $failure) { $failure = 'One or more real-model Native BattleSimulation, current target, actual outcome, no-clock, visual, source, or cleanup assertions failed.' }
+        if (-not $passed -and -not $failure) { $failure = 'One or more real-model Native battle, target, actual post-battle/captivity outcome, no-clock, visual, source, or cleanup assertions failed.' }
     }
     elseif ($VillageToolsQuest) {
         $requiredActions = @('talkToSettlementHero','dialogueSelect','questDetails','tradeOptions','trade','tradeConfirm','inventoryOpen','heroEquipmentOptions','inventoryCancel')
@@ -296,19 +304,20 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         modelConfigurationSource = if ($trace) { [string]$trace.ModelConfigurationSource } else { $null }
         fixturePreparedFromNaturalVisibleIssue = if ($fixturePreparation) { [bool]$fixturePreparation.Prepared } else { $null }
         preparedIssueGiver = if ($fixturePreparation) { $fixturePreparation.VisibleMarker } else { $null }
-        battleOutcome = if ($BattleSimulationLoop) { $battleOutcome } else { $null }
-        battleTargetPreflight = if ($BattleSimulationLoop -and $liveResult) { $liveResult.BattleTargetPreflight } else { $null }
-        battleSourceSaveName = if ($BattleSimulationLoop) { $BattleSourceSaveName } else { $null }
-        battleSourceHashBefore = if ($BattleSimulationLoop) { $battleSourceHashBefore } else { $null }
-        battleSourceHashAfter = if ($BattleSimulationLoop) { $battleSourceHashAfter } else { $null }
-        battleDisposableSaveRemoved = if ($BattleSimulationLoop) { $battleFixtureRemoved } else { $null }
-        battleActionSequence = if ($BattleSimulationLoop) { $battleActionSequence } else { @() }
-        battleSimulationVerified = if ($BattleSimulationLoop -and $trace) { [bool]$trace.BattleSimulationVerified } else { $null }
-        renownBefore = if ($BattleSimulationLoop -and $trace) { $trace.BattleRenownBefore } else { $null }
-        renownAfter = if ($BattleSimulationLoop -and $trace) { $trace.BattleRenownAfter } else { $null }
+        battleOutcome = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { $battleOutcome } else { $null }
+        battleTargetPreflight = if (($BattleSimulationLoop -or $BattleAndCaptivityLoop) -and $liveResult) { $liveResult.BattleTargetPreflight } else { $null }
+        battleSourceSaveName = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { $BattleSourceSaveName } else { $null }
+        battleSourceHashBefore = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { $battleSourceHashBefore } else { $null }
+        battleSourceHashAfter = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { $battleSourceHashAfter } else { $null }
+        battleDisposableSaveRemoved = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { $battleFixtureRemoved } else { $null }
+        battleActionSequence = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { $battleActionSequence } else { @() }
+        battleSimulationVerified = if (($BattleSimulationLoop -or $BattleAndCaptivityLoop) -and $trace) { [bool]$trace.BattleSimulationVerified } else { $null }
+        captivityRecoveryVerified = if ($BattleAndCaptivityLoop -and $trace) { [bool]$trace.CaptivityRecoveryVerified } else { $null }
+        renownBefore = if (($BattleSimulationLoop -or $BattleAndCaptivityLoop) -and $trace) { $trace.BattleRenownBefore } else { $null }
+        renownAfter = if (($BattleSimulationLoop -or $BattleAndCaptivityLoop) -and $trace) { $trace.BattleRenownAfter } else { $null }
         observedIssueMarkerMatchedTalkTarget = if ($VillageToolsQuest) { [bool]$visibleIssueMarkerVerified } else { $null }
         nativeToolTradeCommits = if ($VillageToolsQuest) { @($tradeCommits | ForEach-Object { $_.actionReceipt.data }) } else { @() }
-        preparedSaveRemoved = if ($BattleSimulationLoop) { $battleFixtureRemoved } else { $preparedSaveRemoved }
+        preparedSaveRemoved = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { $battleFixtureRemoved } else { $preparedSaveRemoved }
         trackedTreeClean = if ($trace) { [bool]$trace.SourceTrackedTreeClean } else { $false }
         decisions = if ($trace) { [int]$trace.Decisions } else { $null }
         nativeActions = $nativeActions.Count
@@ -330,7 +339,7 @@ $result = [ordered]@{
     ProviderKind = 'FreeLLMAPI-routed external model through the configured free endpoint'
     RunCount = $Runs
     DistinctCampaignSeeds = 1
-    Threshold = if ($BattleSimulationLoop) {
+    Threshold = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) {
         [ordered]@{
             successfulRuns = $Runs
             targetMustBeCurrentNativeVisibleHostileBandit = $true

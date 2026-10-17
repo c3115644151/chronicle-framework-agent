@@ -201,7 +201,7 @@ function Invoke-PackagedHostUnboundParentProbe([string]$ExecutablePath)
 
 $packageHealth = Invoke-PackagedHost -ExecutablePath $hostExe -Argument '--package-health'
 $version = Invoke-PackagedHost -ExecutablePath $hostExe -Argument '--version'
-$providerSelfTest = Invoke-PackagedHost -ExecutablePath $hostExe -Argument '--provider-self-test' -TimeoutMilliseconds 45000
+$providerSelfTest = Invoke-PackagedHost -ExecutablePath $hostExe -Argument '--provider-self-test' -TimeoutMilliseconds 90000
 $unboundParentProbe = Invoke-PackagedHostUnboundParentProbe -ExecutablePath $hostExe
 foreach ($receipt in @($packageHealth, $version)) {
     if ($receipt.status -ne 'ready' -or $receipt.product -ne 'ChronicleAgentHost' -or
@@ -277,8 +277,17 @@ finally {
         if ($resolvedPackageParent -ne $packageParent -or (Split-Path -Leaf $resolvedPackageRoot) -notmatch '^ChronicleAgentHost-win-x64-[0-9a-f]{32}$') {
             throw 'Refusing to remove package staging outside the exact unique Chronicle Agent Host cache directory.'
         }
-        Remove-Item -LiteralPath $resolvedPackageRoot -Recurse -Force -ErrorAction Stop
-        if (Test-Path -LiteralPath $resolvedPackageRoot) { throw 'Temporary self-contained package staging still exists after cleanup.' }
+        $cleanupFailure = $null
+        for ($cleanupAttempt = 1; $cleanupAttempt -le 5; $cleanupAttempt++) {
+            try {
+                Remove-Item -LiteralPath $resolvedPackageRoot -Recurse -Force -ErrorAction Stop
+                if (-not (Test-Path -LiteralPath $resolvedPackageRoot)) { $cleanupFailure = $null; break }
+                $cleanupFailure = 'Temporary self-contained package staging still exists after cleanup.'
+            }
+            catch { $cleanupFailure = $_.Exception.Message }
+            if ($cleanupAttempt -lt 5) { Start-Sleep -Milliseconds (250 * $cleanupAttempt) }
+        }
+        if ($cleanupFailure -or (Test-Path -LiteralPath $resolvedPackageRoot)) { throw "Temporary self-contained package staging cleanup failed after bounded retry: $cleanupFailure" }
     }
 }
 $result | ConvertTo-Json -Depth 6

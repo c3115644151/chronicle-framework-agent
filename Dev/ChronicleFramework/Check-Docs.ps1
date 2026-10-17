@@ -244,7 +244,7 @@ if ($harnessScript -notmatch "'AgentHostCampaignLoopEvaluation' \{ @\('Preflight
     throw 'The Host campaign loop must remain opt-in and prove its bounded Native map-arrival contract, natural time progression, real local-model path, visual evidence and cleanup.'
 }
 if ($harnessScript -notmatch "'AgentHostVillageToolsQuestEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostVillageToolsQuestEvaluation'\) \}" -or
-    -not $harnessScript.Contains("effectiveSmokeTimeoutSeconds = if (`$Phase -in @('AgentHostVillageToolsQuestEvaluation','AgentHostBattleSimulationEvaluation')) { [Math]::Max(`$SmokeTimeoutSeconds, 240) }") -or
+    -not $harnessScript.Contains("effectiveSmokeTimeoutSeconds = if (`$Phase -in @('AgentHostVillageToolsQuestEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max(`$SmokeTimeoutSeconds, 240) }") -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostVillageToolsQuestEvaluation'" -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'VerifyQuestInventoryDelta' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'village-tools-direct-quest-option-unavailable' -or
@@ -328,6 +328,20 @@ if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Prefl
     $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-native-observe-pursue-send-troops-aftermath-return-and-verify' -or
     $agentHostBattleSimulationLoopSource -notmatch 'mapPartyTargetsQueried') {
     throw 'W7-L must remain opt-in, use the current Native Bandit Fight/Send Troops path, process aftermath, verify outcomes and stop safely when no visible target exists.'
+}
+if ($harnessScript -notmatch "'AgentHostBattleAndCaptivityEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostBattleAndCaptivityEvaluation'\) \}" -or
+    $harnessScript -match "'All' \{[^\r\n]*'AgentHostBattleAndCaptivityEvaluation'" -or
+    $agentHostCampaignLoopSource -notmatch 'supportedBattleAndCaptivityGoal' -or
+    $agentHostDecisionCycleSource -notmatch 'BattleAndCaptivitySystemPrompt' -or
+    $agentHostDecisionCycleSource -notmatch 'current Native wilderness ransom menu is visible' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch '\-BattleAndCaptivityLoop' -or
+    $agentHostLiveModelLoopSource -notmatch '\[switch\]\$BattleAndCaptivityLoop' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'ShouldPassivelyWaitForCaptivity' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'captivityRecoveryVerified' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'menu_captivity_end_propose_ransom_wilderness' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'captivity_end_ransom_deny' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-captivity-waits-for-native-and-binds-ransom-choice') {
+    throw 'W7-M must remain an opt-in real-model continuation from an actual Native battle capture, passively wait without clock actions, and restrict ransom decisions to current enabled Native options.'
 }
 if ($agentHostCampaignLoopEvaluationSource -notmatch '\[string\]\$CleanupPreparedSaveName' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'StartsWith\(''ChronicleW7K-''' -or
