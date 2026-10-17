@@ -602,6 +602,10 @@ W7-K第二次真实验收在路上触发BanditFaction遭遇（`TestResults/20261
 
 本次整体Evaluation仍返回失败，但不再是模型、Provider、移动、Native Offer、Quest提交或物品后验失败：`AgentHostVillageToolsQuestLoop`的最终观察明确`questWasObservedActive=true`、`inventoryVerifiedAfterTurnIn=true`、Quest已关闭、MapState并返回任务人所在`village`菜单；Host `BuildControlCatalog`却把任何非空Settlement menu都当作不允许`done`的上下文，于是动作/控制目录为空并误报`quest-not-observable-or-verification-incomplete`。代码修正为无对话且Native后置条件已证实时，即使停在任务聚落菜单也开放终止控制；MapState仍不满足任务/库存条件或仍有对话时照常拒绝。`AgentHostVillageToolsQuestPolicy`自检新增这一菜单场景，要求AgentHostPackage/Docs再过后，以原FreeLLMAPI真实路径复验整条闭环；旧运行的源码提交为`e4ecda8`，不能当作修复后通过。
 
+修复后复验`TestResults/20261017-202926`基于推送提交`e390cac`通过W7-K验收。真实FreeLLMAPI `auto:reliable`完成43次模型决策/Provider路由、37个Native动作，156,691输入/2,812输出Token；实际服务商为FreeLLMAPI可用的OVH Mistral Small、Qwen2.5-VL、Qwen3.8、Qwen3.5、gpt-oss-120b、Mistral-Nemo。初始Village人物overlay自然暴露`CharacterObject_1691`蓝色“卡利奥克需要工具”标记，模型沿Native问候/说明/解决方案解释到最终可点击的`issue_offer_player_accept_quest`并成功接取。它先在town_V1当前市场无货时通过Native tradeCancel退出，再按已观察的town_V6候选买入1件`tools`并提交Trade；Journal从0/1变为1/1。模型返回原Quest-giver Village，经Native quick conversation交付；任务1→0。主角Inventory交付前后精确为`tools 1→0`、`flax 0→73`，与原生Journal要求完全一致；Gold由购入后324保持至交付后324。最终模型在任务完成、库存精确核对后调用`done`，此时仍在`MapState`的Village菜单，证明上述终止门槛修复有效。
+
+该次CampaignDay为91077.635→91079.022，只有地图旅行自然推进；显式advance/pause/resume/fastForward动作数0。Seed fixture哈希未变、临时`ChronicleW7K-`存档已删、Bannerlord/Host/CLI session均清理、录像覆盖率100%并移除原片，Host跟踪树为clean。运行记录与任务卡只证明这一个自然可见的VillageNeedsTools闭环；W7-K Campaign Host循环由Harness发起，注册MCM Start/Stop生命周期另由其已通过的依赖#119验证，Epic #18的完整玩家界面验收仍未完成。该证据足以关闭#123，下一工作项仍须按GitHub Project现有依赖与顺序推进，不能把一次Quest成功外推为完整战役自主能力。
+
 ## 维护规则
 
 - 本文维护技术目标、机制契约、领域架构、长期验收定义和未解事实；不保存项目工作项状态、域完成计数或测试通过快照。
