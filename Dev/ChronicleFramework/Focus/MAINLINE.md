@@ -612,6 +612,8 @@ W7-K第二次真实验收在路上触发BanditFaction遭遇（`TestResults/20261
 
 该次CampaignDay为91077.635→91079.022，只有地图旅行自然推进；显式advance/pause/resume/fastForward动作数0。Seed fixture哈希未变、临时`ChronicleW7K-`存档已删、Bannerlord/Host/CLI session均清理、录像覆盖率100%并移除原片，Host跟踪树为clean。运行记录与任务卡只证明这一个自然可见的VillageNeedsTools闭环；W7-K Campaign Host循环由Harness发起，注册MCM Start/Stop生命周期另由其已通过的依赖#119验证，Epic #18的完整玩家界面验收仍未完成。该证据足以关闭#123，下一工作项仍须按GitHub Project现有依赖与顺序推进，不能把一次Quest成功外推为完整战役自主能力。
 
+W7-N `Establish Your Clan`目标规划切片已完成真实模型只读门禁（`TestResults/20261018-070853`，提交`b136e57`）：从原版StoryMode模块组的`save002`逐字节复制为`ChronicleW7N-*`，加载时仅在启动参数临时附加ChronicleFramework；源SHA-256前后同为`5A1CBACF6A67202F68CF71CDDD56A2485A5E04E41A2BFB9DF7003EA8B337875F`。FreeLLMAPI `auto:reliable`完成2次真实决策/Provider路由（OVH Mistral Small；689/40与1080/30输入/输出tokens），先从Native当前Quest list选中精确的活动StoryMode目标，再经独立`questDetails`只读适配读取四项目标；Journal和Native状态一致：Gold 32/2000、Party 0/25、Renown 5/50、Companion 1/1。模型只选择未完成的Renown目标；游戏动作0、Journal只读调用1，CampaignDay 91080.216保持、time mode Stop，Gold/Party/Renown/活动Quest集合不变且未声称Quest完成。录像覆盖100%、源片已按索引删除、临时存档/游戏/Host/CLI均清理。`AgentObserver.state.storyModeEstablishClanStatus`现按当前Campaign类型、Tutorial/MainStoryLine阶段、活动QuestManager与原版Old Quests `JournalLogEntry`区分非StoryMode、尚未激活、活动、历史完成、历史失败；特殊StoryMode Quest历史保留期10000年，状态分类的6种输入组合有确定性回归。若StoryMode教程已结束但当前Quest与历史Journal均缺失，明确返回unknown，不猜测已完成或失败。W7-N完成的是“从原版Quest状态选一个下一项目标”的规划切片，不代表四目标执行、Quest完成或Epic #18长程门禁通过。
+
 ## 维护规则
 
 - 本文维护技术目标、机制契约、领域架构、长期验收定义和未解事实；不保存项目工作项状态、域完成计数或测试通过快照。
