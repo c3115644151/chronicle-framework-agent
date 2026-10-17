@@ -38,6 +38,37 @@ if (-not [string]::IsNullOrWhiteSpace($CleanupPreparedSaveName)) {
     exit 0
 }
 
+if (Test-Path -LiteralPath $sessionPath -PathType Leaf) {
+    $staleSession = Get-Content -LiteralPath $sessionPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $staleSaveName = [string]$staleSession.saveName
+    $stalePid = [int]$staleSession.processId
+    if (-not $staleSaveName.StartsWith('ChronicleW7K-', [StringComparison]::Ordinal)) {
+        throw 'A stale CLI session exists, but its save name is not a Harness-owned ChronicleW7K fixture; preserving it.'
+    }
+    if (@(Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue).Count -gt 0 -or (Get-Process -Id $stalePid -ErrorAction SilentlyContinue)) {
+        throw 'A ChronicleW7K session still has a live Bannerlord/session process; refusing automatic recovery.'
+    }
+
+    $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
+    $stopOutput = ''
+    try { $stopOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli stop -AsJson 2>&1 | Out-String }
+    catch { $stopOutput = $_.Exception.Message }
+    if (Test-Path -LiteralPath $sessionPath -PathType Leaf) { throw 'The stale CLI session did not clear through the Agent CLI recovery path.' }
+    $cleanupOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath -CleanupPreparedSaveName $staleSaveName 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) { throw "The stale ChronicleW7K fixture save did not clear through bounded cleanup: $cleanupOutput" }
+    if ($outerTemp -and (Test-Path -LiteralPath $outerTemp -PathType Container)) {
+        [ordered]@{
+            RecoveredUtc = [DateTime]::UtcNow.ToString('O')
+            ProcessId = $stalePid
+            ProcessWasRunning = $false
+            SaveName = $staleSaveName
+            AgentCliStopOutput = $stopOutput.Trim()
+            EngineConfigBackupRemains = Test-Path -LiteralPath (Join-Path $protocolRoot 'engine_config.chronicle-backup')
+            CleanupReceipt = ($cleanupOutput | ConvertFrom-Json)
+        } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $outerTemp 'AgentHostStaleFixtureRecovery.json') -Encoding UTF8
+    }
+}
+
 for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
     if (Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue) { throw "Agent Host Campaign run $runIndex found a Bannerlord process left by a previous run." }
     if (Test-Path -LiteralPath $sessionPath -PathType Leaf) { throw "Agent Host Campaign run $runIndex found a stale CLI session; the fixture must be stopped before testing Host." }

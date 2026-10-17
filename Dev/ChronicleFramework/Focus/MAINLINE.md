@@ -594,6 +594,10 @@ W7-K第二次真实验收在路上触发BanditFaction遭遇（`TestResults/20261
 
 `TestResults/20261017-161513`是一次未进入模型/Native循环的前置清理失败，不是Quest运行结果：Preflight、Build、Smoke、AgentHostPackage均通过；真实阶段发现旧CLI `session.json`记录PID 38824，但该PID与所有Bannerlord进程已退出，另有同一轮`ChronicleW7K-1d8fca53a4c749ba95eb064d2887df17.sav`临时派生档残留。通过Agent-Cli原生`stop`恢复/清除CLI会话和测试EngineConfig备份；新增评测脚本cleanup-only恢复入口，只认`ChronicleW7K-`前缀、验证Game Saves完整路径，且要求无Bannerlord和CLI session后才删派生档。精确该档已删除；Build/Docs相关检查通过（`TestResults/20261017-162743`）。没有改正式存档、没有外部模型调用或Native游戏动作。下一次重跑可直接检查真实Quest路径，不会被这份旧session抢先挡住。
 
+`TestResults/20261017-163357`启动FreeLLMAPI `auto:reliable`真实Campaign循环：Preflight/Build/Smoke/AgentHostPackage通过，Native入口确实观察到卡利奥克头人的可见蓝色工具Issue标记，并完成32个原生协议读/写事件；CampaignDay停在91077.634，活动Quest一直为0。可见对话进入任务说明，Native Offer屏幕曾显示“我觉得能亲自处理这件事”可点；随后又回到该Notable的`hero_give_issue`对话，Quest仍未启动。由于当时Harness只在完整子循环结束时写`LiveModelLoopResult.json`，中途终止后没有保留模型实际选择的OptionId，故目前能证明无Quest接受，不能归因是模型拒绝、Native选项后果异常或其它中断原因。Windows Application日志没有该时间窗的Bannerlord崩溃记录，但缺少Harness终态和原生失败帧，终止原因保持未知，不伪报为游戏崩溃或模型成功。
+
+该轮原始窗口录像(约126MiB)已缩为64帧均匀联系表并删除原片；捕获开始画面及32条Native协议事件仍保留。初次手工恢复的事件相对时间误把本地时区当作UTC，生成的动作关键帧位置不可信；随后把索引改为明确的“capture-start画面对齐、Native事件时间另存、动作画面不宣称对齐”，并通过响应文件UTC修改时间重建实际0–642.8秒原生事件顺序。该收据只能证明持续处于村庄对话/地图过程中与Native当前回执，不含模型决策参数。为了使下一轮即使被外部中断仍能说明选择原因，Host现在在FreeLLMAPI每次成功回复后增量追加受限的`AgentHostProgress.jsonl`：记录具体动作/OptionId、实际服务商路由、token及当时玩家可见状态摘要，不写prompt、原始回答或rationale，仅在Harness `visual-capture`目录启用并限16MiB。`AgentHostPackage`自检覆盖该trace记录/非Harness关闭分支并于`TestResults/20261017-184917`通过；Docs于`20261017-184530`通过。评测脚本亦会只在确认Bannerlord/PID退出、会话记录属于`ChronicleW7K-`且精确路径位于Game Saves时，自动按原CLI恢复并清理遗留派生档；正式存档名、活跃会话一律安全拒绝。下一步以已推送版本重新进行FreeLLMAPI真实Quest纵切片，先核对增量trace中的实际选项及原生结果，再判断是否需要修Prompt或Native适配。
+
 ## 维护规则
 
 - 本文维护技术目标、机制契约、领域架构、长期验收定义和未解事实；不保存项目工作项状态、域完成计数或测试通过快照。

@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.215'
+$contractVersion = '7.216'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -66,6 +66,8 @@ $agentEvaluationLiveModelSupplySource = Get-Content (Join-Path $harnessRoot 'Tes
 $agentHostCampaignLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostCampaignLoop.cs') -Raw -Encoding UTF8
 $agentHostSupplyLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostSupplyLoop.cs') -Raw -Encoding UTF8
 $agentHostDecisionCycleSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostDecisionCycle.cs') -Raw -Encoding UTF8
+$agentHostHarnessProgressTraceSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostHarnessProgressTrace.cs') -Raw -Encoding UTF8
+$agentHostProviderContractSelfTestSource = Get-Content (Join-Path $harnessRoot 'AgentHost\ProviderContractSelfTest.cs') -Raw -Encoding UTF8
 $agentHostProviderSource = Get-Content (Join-Path $harnessRoot 'AgentHost\OllamaNativeProvider.cs') -Raw -Encoding UTF8
 $agentHostRuntimeControllerSource = Get-Content (Join-Path $harnessRoot 'AgentHostRuntimeController.cs') -Raw -Encoding UTF8
 $agentHostLifecycleEvaluationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostLifecycleEvaluation.ps1') -Raw -Encoding UTF8
@@ -296,8 +298,21 @@ if ($agentHostCampaignLoopEvaluationSource -notmatch '\[string\]\$CleanupPrepare
     $agentHostCampaignLoopEvaluationSource -notmatch 'StartsWith\(''ChronicleW7K-''' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'Bannerlord process is running' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'Agent CLI session is active' -or
-    $agentHostCampaignLoopEvaluationSource -notmatch 'escaped the Harness-owned ChronicleW7K Game Saves boundary') {
+    $agentHostCampaignLoopEvaluationSource -notmatch 'escaped the Harness-owned ChronicleW7K Game Saves boundary' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch '\$staleSession\.saveName' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'Get-Process -Id \$stalePid' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'AgentCliStopOutput' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'AgentHostStaleFixtureRecovery\.json') {
     throw 'Recovery cleanup may delete only a ChronicleW7K disposable fixture after both Bannerlord and its CLI session are absent, and must stay inside Game Saves.'
+}
+if ($agentHostDecisionCycleSource -notmatch 'AgentHostHarnessProgressTrace\.RecordDecision' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'CHRONICLE_HARNESS_MODE' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'visual-capture' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'AgentHostProgress\.jsonl' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'MaximumBytes' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'Rationale is deliberately excluded' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'AgentHostHarnessProgressTrace\.RunContractSelfTests') {
+    throw 'Real Host decisions must be incrementally persisted only in bounded Harness visual-capture mode, including the selected Native argument and route but excluding rationale/raw prompt content.'
 }
 if ($agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S]{0,900}\$env:CHRONICLE_LLM_TIMEOUT_SECONDS = ''360''' -or
     $agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S]{0,900}\$env:CHRONICLE_LLM_MAX_TOKENS = ''1024''') {

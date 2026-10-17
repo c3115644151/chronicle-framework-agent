@@ -94,6 +94,8 @@ internal static class AgentHostDecisionCycle
         CancellationToken cancellationToken)
     {
         using var document = JsonDocument.Parse(request.ToJsonString());
-        return await provider.DecideAsync(document.RootElement, systemPrompt, cancellationToken);
+        var result = await provider.DecideAsync(document.RootElement, systemPrompt, cancellationToken);
+        AgentHostHarnessProgressTrace.RecordDecision(document.RootElement, result);
+        return result;
     }
 }
