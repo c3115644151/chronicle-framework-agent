@@ -983,7 +983,7 @@ try {
         BattleRenownBefore = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { [double]$loopTrace.renownBefore } else { $null }
         BattleRenownAfter = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { [double]$loopTrace.renownAfter } else { $null }
         BattleReturnToMapVerified = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { [bool]$loopTrace.nativeReturnToMapVerified } else { $null }
-        NativeClockActions = if ($EstablishYourClanGoalPlanner -or $VillageToolsQuestLoop -or $BattleSimulationLoop -or $BattleAndCaptivityLoop) { [string[]]@($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -in @('advance','pause','resume','fastForward') } | ForEach-Object { [string]$_.actionReceipt.action }) } else { [string[]]@() }
+        NativeClockActions = @($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -in @('advance','pause','resume','fastForward') } | ForEach-Object { [string]$_.actionReceipt.action })
         SupplyFixtureSetup = $supplySetup
         SupplyVerified = if ($SupplyManagementLoop) { [bool]$supplyVerified } else { $null }
         SupplyVerification = $supplyVerification

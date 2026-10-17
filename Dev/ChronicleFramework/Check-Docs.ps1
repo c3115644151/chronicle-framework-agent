@@ -318,6 +318,7 @@ if ($harnessScript -notmatch "'AgentHostEstablishClanGoalPlannerEvaluation' \{ @
     $agentHostLiveModelLoopSource -notmatch 'rebuild_player_clan_storymode_quest' -or
     $agentHostLiveModelLoopSource -notmatch 'timeControlMode -cne ''Stop''' -or
     $agentHostLiveModelLoopSource -notmatch 'EstablishYourClanPlannerVerified' -or
+    $agentHostLiveModelLoopSource -notmatch 'NativeClockActions = @\(\$steps' -or
     $agentHostLiveModelLoopSource -notmatch 'objectiveId' -or
     $agentHostLiveModelLoopSource -notmatch 'FixtureUnchanged = \$fixtureUnchanged') {
     throw 'W7-N must remain opt-in, use a disposable original StoryMode save with the exact naturally active quest, make real FreeLLMAPI decisions only, verify four objectives against Journal/native values without gameplay writes, and preserve source/time/world evidence.'
