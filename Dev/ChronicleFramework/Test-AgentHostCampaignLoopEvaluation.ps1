@@ -220,8 +220,10 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
             $battleTargetId.Length -gt 0 -and [double]::IsFinite([double]$trace.BattleRenownBefore) -and
             [double]::IsFinite([double]$trace.BattleRenownAfter) -and $clockActions.Count -eq 0 -and
             $battleActionSequence.Contains('mapPartyTargets') -and $battleActionSequence.Contains('menuSelect') -and
-            $battleActionSequence.Contains('battleSkip') -and $battleActionSequence.Contains('battleFinish') -and
+            $battleActionSequence.Contains('battleFinish') -and
             [string]$battleOutcome.SendTroopsOption -ceq 'str_order_attack' -and [string]$battleOutcome.SimulationState -ne 'unknown' -and
+            [string]$battleOutcome.PlayerOutcome -in @('captured','retreated','resolved-native-battle') -and
+            [string]$battleOutcome.BattleFinishReceipt.status -ceq 'completed' -and
             ([int]$battleOutcome.PartyLootScreenCount -eq 0 -or $battleActionSequence.Contains('partyScreenDone')) -and
             ([int]$battleOutcome.InventoryLootScreenCount -eq 0 -or $battleActionSequence.Contains('inventoryDone')) -and
             $providerRoutes.Count -gt 0 -and [string]$trace.ModelConfigurationSource -eq 'harness-mcm-profile-fixture' -and

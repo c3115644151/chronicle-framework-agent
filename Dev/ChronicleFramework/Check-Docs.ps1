@@ -318,6 +318,8 @@ if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Prefl
     $agentHostBattleSimulationLoopSource -notmatch 'str_order_attack' -or
     $agentHostBattleSimulationLoopSource -notmatch 'battleSimulation' -or
     $agentHostBattleSimulationLoopSource -notmatch 'nativeReturnToMapVerified' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'prisoner_wait' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'playerOutcome' -or
     $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-native-observe-pursue-send-troops-aftermath-return-and-verify' -or
     $agentHostBattleSimulationLoopSource -notmatch 'mapPartyTargetsQueried') {
     throw 'W7-L must remain opt-in, use the current Native Bandit Fight/Send Troops path, process aftermath, verify outcomes and stop safely when no visible target exists.'

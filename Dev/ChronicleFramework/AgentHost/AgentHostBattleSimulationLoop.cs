@@ -92,9 +92,7 @@ internal static class AgentHostBattleSimulationLoop
                     playerRetreated = ReadBoolean(simulation, "playerRetreated");
                 }
 
-                if (string.Equals(gameState, "MapState", StringComparison.Ordinal) &&
-                    string.IsNullOrWhiteSpace(menuId) && !ReadBoolean(context, "escapeMenuOpen") && !ReadBoolean(context, "inquiryOpen") &&
-                    !ReadBoolean(context, "encounterActive") && simulation is null && partyScreen is null && inventoryScreen is null && battleWasStarted)
+                if (IsVerifiedMapTerminalAfterBattle(state, battleWasStarted))
                 {
                     var renownAfterFinal = ReadRenown(state);
                     if (!double.IsFinite(renownBefore) || !double.IsFinite(renownAfterFinal))
@@ -409,12 +407,13 @@ internal static class AgentHostBattleSimulationLoop
         var controls = new JsonArray();
         var context = state["context"] as JsonObject;
         var gameState = ReadString(context, "gameState");
-        var completedMap = string.Equals(gameState, "MapState", StringComparison.Ordinal) &&
-                           string.IsNullOrWhiteSpace(ReadString(context, "menuId")) && !ReadBoolean(context, "escapeMenuOpen") && !ReadBoolean(context, "inquiryOpen") &&
-                           !ReadBoolean(context, "encounterActive") && context?["battleSimulation"] is null &&
-                           state["partyScreen"] is null && state["inventoryScreen"] is null;
-        if (completedMap && battleWasStarted) controls.Add("done");
-        else if (completedMap && !string.IsNullOrWhiteSpace(targetId) &&
+        var completedMap = IsVerifiedMapTerminalAfterBattle(state, battleWasStarted);
+        var mapMovementWait = string.Equals(ReadString(context, "gameState"), "MapState", StringComparison.Ordinal) &&
+                              string.IsNullOrWhiteSpace(ReadString(context, "menuId")) && !ReadBoolean(context, "escapeMenuOpen") && !ReadBoolean(context, "inquiryOpen") &&
+                              !ReadBoolean(context, "encounterActive") && context?["battleSimulation"] is null &&
+                              state["partyScreen"] is null && state["inventoryScreen"] is null;
+        if (completedMap) controls.Add("done");
+        else if (mapMovementWait && !string.IsNullOrWhiteSpace(targetId) &&
                  string.Equals(ReadString(state["location"] as JsonObject, "targetPartyId"), targetId, StringComparison.Ordinal))
             controls.Add("observeAgain");
         return controls;
@@ -583,6 +582,17 @@ internal static class AgentHostBattleSimulationLoop
         var emptyInventoryActions = BuildActionCatalog(inventory["state"]!.AsObject(), new JsonArray(), null, true, true);
         if (emptyInventoryActions.Count != 1 || ReadString(emptyInventoryActions[0] as JsonObject, "action") != "inventoryDone")
             throw new AgentHostException("battle-loop-self-test-inventory-done-not-listed", "Native Inventory Done may only be listed after the observed Loot roster is empty.");
+        var capturedWait = new JsonObject
+        {
+            ["context"] = new JsonObject { ["gameState"] = "MapState", ["menuId"] = "prisoner_wait", ["encounterActive"] = false, ["battleSimulation"] = null,
+                ["captivity"] = new JsonObject { ["isCaptive"] = true, ["currentMenuId"] = "prisoner_wait", ["ransomOfferVisible"] = false } },
+            ["availableMenuOptions"] = new JsonArray(), ["partyScreen"] = null, ["inventoryScreen"] = null
+        };
+        if (!IsVerifiedMapTerminalAfterBattle(capturedWait, battleStarted: true) || BuildControlCatalog(capturedWait, null, battleWasStarted: true).Count != 1)
+            throw new AgentHostException("battle-loop-self-test-captive-map-terminal-missing", "A completed Native battle ending in no-option prisoner_wait must be reported as captured, not misreported as a Host dead end.");
+        capturedWait["availableMenuOptions"] = new JsonArray(new JsonObject { ["id"] = "captivity_ransom", ["available"] = true, ["enabled"] = true });
+        if (IsVerifiedMapTerminalAfterBattle(capturedWait, battleStarted: true))
+            throw new AgentHostException("battle-loop-self-test-captive-choice-ignored", "A visible Native captivity choice must not be silently ignored as a completed terminal state.");
         results.Add(new { scenario = "battle-loop-processes-observed-party-and-inventory-aftermath", passed = true });
         return results;
     }
@@ -657,11 +667,13 @@ internal static class AgentHostBattleSimulationLoop
     {
         var state = finalNative?["state"] as JsonObject;
         var verifiedReturn = state is not null &&
-            string.Equals(ReadString(state["context"] as JsonObject, "gameState"), "MapState", StringComparison.Ordinal) &&
-            string.IsNullOrWhiteSpace(ReadString(state["context"] as JsonObject, "menuId")) &&
-            !ReadBoolean(state["context"] as JsonObject, "escapeMenuOpen") && !ReadBoolean(state["context"] as JsonObject, "inquiryOpen") &&
-            !ReadBoolean(state["context"] as JsonObject, "encounterActive") &&
-            (state["context"] as JsonObject)?["battleSimulation"] is null && state["partyScreen"] is null && state["inventoryScreen"] is null;
+            IsVerifiedMapTerminalAfterBattle(state, battleStarted);
+        var finalContext = state?["context"] as JsonObject;
+        var finalCaptivity = finalContext?["captivity"] as JsonObject;
+        var captiveAtReturn = verifiedReturn && ReadBoolean(finalCaptivity, "isCaptive");
+        var finalMenuId = ReadString(finalContext, "menuId");
+        var nativeFreeMapReturned = verifiedReturn && string.IsNullOrWhiteSpace(finalMenuId);
+        var finalPlayerOutcome = captiveAtReturn ? "captured" : playerRetreated ? "retreated" : string.IsNullOrWhiteSpace(battleResult) || battleResult == "unknown" ? "unknown" : "resolved-native-battle";
         return new JsonObject
         {
             ["schemaVersion"] = 1,
@@ -686,6 +698,10 @@ internal static class AgentHostBattleSimulationLoop
             ["battleState"] = battleResult,
             ["battleFinishReceipt"] = battleFinishReceipt?.DeepClone(),
             ["playerRetreated"] = playerRetreated,
+            ["playerOutcome"] = finalPlayerOutcome,
+            ["playerCaptiveAtMapReturn"] = captiveAtReturn,
+            ["nativeMapReturnMenuId"] = finalMenuId,
+            ["freeMapReturned"] = nativeFreeMapReturned,
             ["renownBefore"] = double.IsFinite(renownBefore) ? JsonValue.Create(renownBefore) : null,
             ["renownAfter"] = double.IsFinite(renownAfter) ? JsonValue.Create(renownAfter) : null,
             ["renownDelta"] = double.IsFinite(renownBefore) && double.IsFinite(renownAfter) ? JsonValue.Create(renownAfter - renownBefore) : null,
@@ -718,6 +734,26 @@ internal static class AgentHostBattleSimulationLoop
             ["partyScreen"] = state["partyScreen"]?.DeepClone(),
             ["inventoryScreen"] = state["inventoryScreen"]?.DeepClone()
         };
+    }
+
+    private static bool IsVerifiedMapTerminalAfterBattle(JsonObject state, bool battleStarted)
+    {
+        if (!battleStarted) return false;
+        var context = state["context"] as JsonObject;
+        if (!string.Equals(ReadString(context, "gameState"), "MapState", StringComparison.Ordinal) ||
+            ReadBoolean(context, "escapeMenuOpen") || ReadBoolean(context, "inquiryOpen") ||
+            ReadBoolean(context, "encounterActive") || context?["battleSimulation"] is not null ||
+            state["partyScreen"] is not null || state["inventoryScreen"] is not null)
+            return false;
+        var menuId = ReadString(context, "menuId");
+        if (string.IsNullOrWhiteSpace(menuId)) return true;
+        var captivity = context?["captivity"] as JsonObject;
+        var noOptionPrisonerWait = ReadBoolean(captivity, "isCaptive") &&
+            string.Equals(menuId, "prisoner_wait", StringComparison.Ordinal) &&
+            string.Equals(ReadString(captivity, "currentMenuId"), "prisoner_wait", StringComparison.Ordinal) &&
+            !ReadBoolean(captivity, "ransomOfferVisible") &&
+            (state["availableMenuOptions"] as JsonArray)?.OfType<JsonObject>().Any(x => ReadBoolean(x, "available") && ReadBoolean(x, "enabled")) != true;
+        return noOptionPrisonerWait;
     }
 
     private static JsonObject BuildObserveControl(int waitSeconds) => new()

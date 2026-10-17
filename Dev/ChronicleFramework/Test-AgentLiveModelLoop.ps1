@@ -687,6 +687,11 @@ try {
             $_.actionExecuted -and $_.actionReceipt.status -eq 'completed' -and $_.decision.action -eq 'battleSkip' -and
             $_.observationBefore.state.context.battleSimulation -and -not [bool]$_.observationBefore.state.context.battleSimulation.finished
         })
+        $battleSkipAttempts = @($steps | Where-Object { $_.actionAttempted -and $_.decision.action -eq 'battleSkip' })
+        $battleSkipRaceToFinished = @($steps | Where-Object {
+            $_.decision.action -eq 'battleSkip' -and [string]$_.actionReceipt.error -match 'requires an unfinished native battle simulation' -and
+            [bool]$_.observationAfter.state.context.battleSimulation.finished
+        })
         $battleFinishes = @($steps | Where-Object {
             $_.actionExecuted -and $_.actionReceipt.status -eq 'completed' -and $_.decision.action -eq 'battleFinish' -and
             $_.observationBefore.state.context.battleSimulation -and [bool]$_.observationBefore.state.context.battleSimulation.finished
@@ -710,7 +715,7 @@ try {
         $battleSimulationVerified = (
             $providerStoppedAfterGoalAction -and $chosenObservedSafeTarget -and
             (($fightDialogue.Count -eq 1 -and $sendTroops.Count -eq 1) -or ($fightDialogue.Count -eq 0 -and $sendTroops.Count -eq 1)) -and
-            $battleSkips.Count -gt 0 -and $battleFinishes.Count -eq 1 -and $partyLootHandled -and $inventoryLootHandled -and
+            $battleFinishes.Count -eq 1 -and $partyLootHandled -and $inventoryLootHandled -and
             [double]::IsFinite($renownBefore) -and [double]::IsFinite($renownAfter) -and $nativeClockActions.Count -eq 0
         )
         $battleOutcome = [ordered]@{
@@ -720,6 +725,9 @@ try {
             SendTroopsOption = if ($sendTroops.Count -eq 1) { [string]$sendTroops[0].decision.arguments.OptionId } else { $null }
             SimulationState = [string]$loopTrace.battleState
             BattleFinishReceipt = $loopTrace.battleFinishReceipt
+            BattleSkipAttemptCount = $battleSkipAttempts.Count
+            BattleSkipCompletedCount = $battleSkips.Count
+            BattleSkipRacedWithNativeCompletionCount = $battleSkipRaceToFinished.Count
             PlayerRetreated = [bool]$loopTrace.playerRetreated
             PartyLootScreenCount = $partyLootObservations.Count
             PartyTakeAllCount = $partyTakeActions.Count
