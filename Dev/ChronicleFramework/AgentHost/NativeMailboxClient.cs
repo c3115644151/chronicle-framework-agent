@@ -5,7 +5,7 @@ using System.Text.Json.Nodes;
 
 namespace ChronicleFramework.AgentHost;
 
-internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeClient
+internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeClient, IAgentHostBattleSimulationNativeClient
 {
     private static readonly HashSet<string> SupplySliceActions = new(StringComparer.Ordinal)
     {
@@ -18,6 +18,10 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
         "dialogueContinue", "questDetails", "tradeOptions", "trade", "tradeConfirm", "tradeCancel", "tradeCancelChanges",
         "barterOptions", "barterAutoBalance", "barterOffer", "barterCancel",
         "inventoryOpen", "heroEquipmentOptions", "inventoryCancel"
+    };
+    private static readonly HashSet<string> BattleSimulationActions = new(StringComparer.Ordinal)
+    {
+        "mapPartyTargets", "pursue", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone"
     };
 
     private readonly string _root;
@@ -89,6 +93,35 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
         // construct its per-decision catalog from fresh Native observations and bind every ID to it.
         ValidateVillageToolsQuestAction(action, arguments);
         return SendAsync(action, arguments, acceptedResponseExpected: false, cancellationToken);
+    }
+
+    public Task<JsonDocument> ExecuteBattleSimulationActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+    {
+        ValidateBattleSimulationAction(action, arguments);
+        return SendAsync(action, arguments, acceptedResponseExpected: false, cancellationToken);
+    }
+
+    internal static void ValidateBattleSimulationAction(string action, JsonObject arguments)
+    {
+        if (!BattleSimulationActions.Contains(action))
+            throw new AgentHostException("native-action-not-in-battle-simulation-scope", "The action is outside the bounded Native Campaign BattleSimulation scope.");
+
+        static bool HasOnlyKeys(JsonObject value, params string[] keys) =>
+            value.Count == keys.Length && keys.All(value.ContainsKey);
+        static bool HasText(JsonObject value, string key) =>
+            value[key] is JsonValue node && node.TryGetValue<string>(out var text) && !string.IsNullOrWhiteSpace(text);
+
+        var valid = action switch
+        {
+            "mapPartyTargets" or "dialogueContinue" or "battleSkip" or "battleFinish" or "partyScreenDone" or "inventoryTakeAll" or "inventoryDone" => arguments.Count == 0,
+            "pursue" => HasOnlyKeys(arguments, "partyId") && HasText(arguments, "partyId"),
+            "dialogueSelect" => HasOnlyKeys(arguments, "optionId") && HasText(arguments, "optionId"),
+            "menuSelect" => HasOnlyKeys(arguments, "menuId", "optionId") && HasText(arguments, "menuId") && HasText(arguments, "optionId"),
+            "partyTakeAll" => HasOnlyKeys(arguments, "troopType") && arguments["troopType"] is JsonValue troopTypeNode && troopTypeNode.TryGetValue<string>(out var troopType) && troopType is "members" or "prisoners",
+            _ => false
+        };
+        if (!valid)
+            throw new AgentHostException("native-battle-simulation-arguments-invalid", $"The Native '{action}' arguments do not match the bounded BattleSimulation protocol contract.");
     }
 
     internal static void ValidateVillageToolsQuestAction(string action, JsonObject arguments)
@@ -178,6 +211,45 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
         }
 
         return [new { scenario = "village-tools-mailbox-action-contract-allows-only-observed-native-action-shapes-and-no-clock-control", validCases = validCases.Length, invalidCases = invalidCases.Length, passed = true }];
+    }
+
+    internal static IReadOnlyList<object> RunBattleSimulationActionContractSelfTests()
+    {
+        var validCases = new (string Action, string Json)[]
+        {
+            ("mapPartyTargets", "{}"),
+            ("pursue", "{\"partyId\":\"observed-bandit\"}"),
+            ("menuSelect", "{\"menuId\":\"encounter\",\"optionId\":\"str_order_attack\"}"),
+            ("battleSkip", "{}"),
+            ("battleFinish", "{}"),
+            ("partyTakeAll", "{\"troopType\":\"members\"}"),
+            ("partyTakeAll", "{\"troopType\":\"prisoners\"}"),
+            ("partyScreenDone", "{}"),
+            ("inventoryTakeAll", "{}"),
+            ("inventoryDone", "{}")
+        };
+        foreach (var item in validCases)
+            ValidateBattleSimulationAction(item.Action, JsonNode.Parse(item.Json)!.AsObject());
+
+        var invalidCases = new (string Action, string Json)[]
+        {
+            ("pause", "{}"),
+            ("battleRetreat", "{}"),
+            ("menuSelect", "{\"menuId\":\"encounter\"}"),
+            ("pursue", "{\"partyId\":\"\"}"),
+            ("partyTakeAll", "{\"troopType\":\"companions\"}"),
+            ("inventoryDone", "{\"skipLoot\":true}")
+        };
+        foreach (var item in invalidCases)
+        {
+            try
+            {
+                ValidateBattleSimulationAction(item.Action, JsonNode.Parse(item.Json)!.AsObject());
+                throw new AgentHostException("native-battle-simulation-contract-self-test-invalid-accepted", "An invalid action, argument, outcome, or clock request passed validation.");
+            }
+            catch (AgentHostException exception) when (exception.Code is "native-action-not-in-battle-simulation-scope" or "native-battle-simulation-arguments-invalid") { }
+        }
+        return [new { scenario = "battle-simulation-mailbox-allows-only-bounded-native-actions-and-no-clock-controls", validCases = validCases.Length, invalidCases = invalidCases.Length, passed = true }];
     }
 
     private async Task<JsonDocument> SendAsync(

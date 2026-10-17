@@ -13,20 +13,27 @@ internal static class AgentHostCampaignLoop
         "mapSettlementTargets", "move", "menuSelect", "talkToSettlementHero", "dialogueSelect", "dialogueContinue",
         "questDetails", "tradeOptions", "trade", "tradeConfirm", "tradeCancel", "tradeCancelChanges", "barterOptions", "barterAutoBalance", "barterOffer", "barterCancel", "inventoryOpen", "heroEquipmentOptions", "inventoryCancel"
     };
+    internal static readonly HashSet<string> BattleSimulationActions = new(StringComparer.Ordinal)
+    {
+        "mapPartyTargets", "pursue", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone"
+    };
+    internal static readonly HashSet<string> AllSupportedActions = new(ApprovedActions.Concat(BattleSimulationActions), StringComparer.Ordinal);
 
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
         var results = new List<object>();
         var initialActions = new JsonArray();
         var initialControls = BuildGoalScopeClassificationControls();
-        if (initialActions.Count != 0 || initialControls.Count != 3 ||
+        if (initialActions.Count != 0 || initialControls.Count != 4 ||
             !initialControls.Any(control => control?.GetValue<string>() == "supportedMapArrivalGoal") ||
             !initialControls.Any(control => control?.GetValue<string>() == "supportedVillageToolsQuestGoal") ||
+            !initialControls.Any(control => control?.GetValue<string>() == "supportedBattleSimulationGoal") ||
             !initialControls.Any(control => control?.GetValue<string>() == "unsupportedGoal"))
             throw new AgentHostException("campaign-loop-self-test-goal-scope-gate-failed", "The first decision must classify the complete user goal before any Native action is available.");
         results.Add(new { scenario = "campaign-loop-requires-goal-scope-classification-before-native-actions", passed = true });
         if (!AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("intermediate steps", StringComparison.Ordinal) ||
-            !AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("not yet visible", StringComparison.Ordinal))
+            !AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("not currently visible", StringComparison.Ordinal) ||
+            !AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("BattleSimulation", StringComparison.Ordinal))
             throw new AgentHostException("campaign-loop-self-test-classifier-confuses-scope-with-availability", "Goal scope classification must treat supported actions as intermediate steps and not depend on target availability.");
         results.Add(new { scenario = "campaign-loop-classification-is-independent-of-target-availability", passed = true });
         var postClassificationActions = BuildActionCatalog(null, moving: false, goalVerified: false);
@@ -103,9 +110,10 @@ internal static class AgentHostCampaignLoop
             arrivalProvider.FirstRequest?["observation"]?["scope"]?.GetValue<string>() != "goal-classification-only" ||
             arrivalProvider.FirstRequest?["observation"]?["state"] is not null ||
             arrivalProvider.FirstRequest?["allowedActions"] is not JsonArray firstAllowedActions || firstAllowedActions.Count != 0 ||
-            arrivalProvider.FirstRequest?["allowedControls"] is not JsonArray firstAllowedControls || firstAllowedControls.Count != 3 ||
+            arrivalProvider.FirstRequest?["allowedControls"] is not JsonArray firstAllowedControls || firstAllowedControls.Count != 4 ||
             !firstAllowedControls.Any(control => control?.GetValue<string>() == "supportedMapArrivalGoal") ||
             !firstAllowedControls.Any(control => control?.GetValue<string>() == "supportedVillageToolsQuestGoal") ||
+            !firstAllowedControls.Any(control => control?.GetValue<string>() == "supportedBattleSimulationGoal") ||
             !firstAllowedControls.Any(control => control?.GetValue<string>() == "unsupportedGoal") ||
             arrival["termination"] is not JsonObject arrivalTermination || ReadBoolean(arrivalTermination, "goalVerified") != true)
             throw new AgentHostException("campaign-loop-self-test-arrival-runtime-failed", "The injected Native/Provider loop did not observe, move once, passively re-observe, and verify arrival.");
@@ -165,8 +173,8 @@ internal static class AgentHostCampaignLoop
             ? actionNames.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String).Select(item => item.GetString()!).ToHashSet(StringComparer.Ordinal)
             : new HashSet<string>(StringComparer.Ordinal);
         if (string.IsNullOrWhiteSpace(goal) || goal.Length > 1000 || maxDecisions is < 1 or > 160 || maxElapsedSeconds is < 1 or > 7200 ||
-            !requestedActions.SetEquals(ApprovedActions))
-            throw new AgentHostException("campaign-loop-request-invalid", "The Host requires a bounded goal and the approved map-arrival/village-tools Native action set.");
+            !IsSupportedRequestedActionSet(requestedActions))
+            throw new AgentHostException("campaign-loop-request-invalid", "The Host requires a bounded goal and one exact approved Campaign action set.");
 
         using (provider)
         {
@@ -310,7 +318,7 @@ internal static class AgentHostCampaignLoop
                 var goalClassification = ReadNodeString(decision["goalClassification"]);
                 if (goalClassification == "unsupported")
                 {
-                    failure = "The configured goal exceeds the implemented Native map-arrival scope; no game action was issued.";
+                    failure = "The configured goal is outside the implemented Native Campaign scopes; no game action was issued.";
                     failureCode = "campaign-goal-unsupported";
                     terminationReason = "campaign-goal-unsupported";
                     trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
@@ -345,6 +353,22 @@ internal static class AgentHostCampaignLoop
                         throw new AgentHostException("village-tools-native-client-unavailable", "The Native transport does not implement the bounded VillageNeedsTools quest protocol.");
                     return await AgentHostVillageToolsQuestLoop.RunAsync(
                         request, questClient, provider, elapsed.Token,
+                        priorDecisions: decisionCount,
+                        priorPromptTokens: promptTokens,
+                        priorCompletionTokens: completionTokens,
+                        priorTrace: trace,
+                        priorProviderRouteHistory: providerRouteHistory);
+                }
+                if (goalClassification == "supported-battle-simulation")
+                {
+                    trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
+                        providerStartedUtc, providerDoneUtc, providerStartedTicks, null));
+                    if (!requestedActions.SetEquals(BattleSimulationActions) && !requestedActions.SetEquals(AllSupportedActions))
+                        throw new AgentHostException("battle-simulation-action-set-unavailable", "The Campaign request does not include the exact bounded Native BattleSimulation action set.");
+                    if (client is not IAgentHostBattleSimulationNativeClient battleClient)
+                        throw new AgentHostException("battle-simulation-native-client-unavailable", "The Native transport does not implement the bounded Campaign BattleSimulation protocol.");
+                    return await AgentHostBattleSimulationLoop.RunAsync(
+                        request, battleClient, provider, elapsed.Token,
                         priorDecisions: decisionCount,
                         priorPromptTokens: promptTokens,
                         priorCompletionTokens: completionTokens,
@@ -535,7 +559,10 @@ internal static class AgentHostCampaignLoop
     }
 
     private static JsonArray BuildGoalScopeClassificationControls() =>
-        new("supportedMapArrivalGoal", "supportedVillageToolsQuestGoal", "unsupportedGoal");
+        new("supportedMapArrivalGoal", "supportedVillageToolsQuestGoal", "supportedBattleSimulationGoal", "unsupportedGoal");
+
+    internal static bool IsSupportedRequestedActionSet(HashSet<string> requestedActions) =>
+        requestedActions.SetEquals(ApprovedActions) || requestedActions.SetEquals(BattleSimulationActions) || requestedActions.SetEquals(AllSupportedActions);
 
     private static JsonObject BuildObservation(JsonObject native, JsonArray? targets, string? targetId, string? targetName, bool goalVerified)
     {

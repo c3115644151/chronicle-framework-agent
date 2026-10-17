@@ -293,8 +293,9 @@ internal static class AgentHostVillageToolsQuestLoop
         var actions = request.TryGetProperty("allowedActionNames", out var names) && names.ValueKind == JsonValueKind.Array
             ? names.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String).Select(item => item.GetString()!).ToHashSet(StringComparer.Ordinal)
             : new HashSet<string>(StringComparer.Ordinal);
-        if (string.IsNullOrWhiteSpace(goal) || !actions.SetEquals(AgentHostCampaignLoop.ApprovedActions))
-            throw new AgentHostException("village-tools-loop-request-invalid", "The Host requires the exact bounded VillageNeedsTools Native action catalog.");
+        if (string.IsNullOrWhiteSpace(goal) ||
+            (!actions.SetEquals(AgentHostCampaignLoop.ApprovedActions) && !actions.SetEquals(AgentHostCampaignLoop.AllSupportedActions)))
+            throw new AgentHostException("village-tools-loop-request-invalid", "The Host requires the bounded VillageNeedsTools action set or its approved Campaign superset.");
 
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxElapsedSeconds));

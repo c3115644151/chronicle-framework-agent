@@ -691,7 +691,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             };
         }
 
-        if (hasControl && controlName is "supportedMapArrivalGoal" or "supportedVillageToolsQuestGoal" or "unsupportedGoal")
+        if (hasControl && controlName is "supportedMapArrivalGoal" or "supportedVillageToolsQuestGoal" or "supportedBattleSimulationGoal" or "unsupportedGoal")
         {
             EnsureOnlyProperties(decision, "control", "reason", "rationale");
             var classificationPhase = ReadBoolean(request, "goalScopeClassificationRequired") == true &&
@@ -701,6 +701,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             {
                 var supportedListed = ContainsString(request, "allowedControls", "supportedMapArrivalGoal");
                 var supportedQuestListed = ContainsString(request, "allowedControls", "supportedVillageToolsQuestGoal");
+                var supportedBattleListed = ContainsString(request, "allowedControls", "supportedBattleSimulationGoal");
                 var unsupportedListed = ContainsString(request, "allowedControls", "unsupportedGoal");
                 var controlsKind = request.TryGetProperty("allowedControls", out var controls) ? controls.ValueKind.ToString() : "missing";
                 var controlsItems = controls.ValueKind == JsonValueKind.Array
@@ -714,7 +715,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     ? requestIteration
                     : -1;
                 throw new AgentHostException("provider-goal-classification-unavailable",
-                    $"Goal classification is not currently listed in the decision catalog (catalog={controlsKind}[{controlsItems}], supported={supportedListed}, supportedQuest={supportedQuestListed}, unsupported={unsupportedListed}, gate={classificationRequired}, actions={actionCount}, iteration={iteration}).");
+                    $"Goal classification is not currently listed in the decision catalog (catalog={controlsKind}[{controlsItems}], supported={supportedListed}, supportedQuest={supportedQuestListed}, supportedBattle={supportedBattleListed}, unsupported={unsupportedListed}, gate={classificationRequired}, actions={actionCount}, iteration={iteration}).");
             }
             return new JsonObject
             {
@@ -722,6 +723,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 {
                     "supportedMapArrivalGoal" => "supported-map-arrival",
                     "supportedVillageToolsQuestGoal" => "supported-village-tools-quest",
+                    "supportedBattleSimulationGoal" => "supported-battle-simulation",
                     _ => "unsupported"
                 },
                 ["reason"] = ValidateReason(ReadString(decision, "reason") ?? ReadString(decision, "rationale"))

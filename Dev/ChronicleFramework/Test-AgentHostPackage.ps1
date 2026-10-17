@@ -252,6 +252,7 @@ $result = [ordered]@{
     ProviderContractSelfTestPassed = [bool]$providerSelfTest.passed
     ProviderContractSelfTestScenarioCount = @($providerSelfTest.scenarios).Count
     CampaignLoopSelfTestScenarioCount = @($providerSelfTest.scenarios | Where-Object { $_.scenario -like 'campaign-loop-*' }).Count
+    BattleSimulationLoopSelfTestScenarioCount = @($providerSelfTest.scenarios | Where-Object { $_.scenario -like 'battle-loop-*' }).Count
     SharedDecisionCycleScenarioCount = @($providerSelfTest.scenarios | Where-Object { $_.scenario -like 'shared-agent-host-decision-cycle-*' }).Count
     SelfTestModelCalls = [int]$providerSelfTest.modelCalls
     SelfTestNativeCommands = [int]$providerSelfTest.nativeCommands

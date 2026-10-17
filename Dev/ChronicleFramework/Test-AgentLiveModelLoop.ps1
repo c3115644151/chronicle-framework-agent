@@ -8,6 +8,7 @@ param(
     [switch]$RoadsideBanditNegotiationLoop,
     [switch]$SupplyManagementLoop,
     [switch]$VillageToolsQuestLoop,
+    [switch]$BattleSimulationLoop,
     [switch]$AgentHostRuntime
 )
 
@@ -27,8 +28,8 @@ $sessionPath = Join-Path $documentsRoot 'AgentRuns\ChronicleAgent\session.json'
 if (Get-Process -Name Bannerlord* -ErrorAction SilentlyContinue) {
     throw 'Refusing to start a live-model Campaign test while any Bannerlord client is already running.'
 }
-if (@($ArrivalLoop, $RecruitmentLoop, $RoadsideBanditNegotiationLoop, $SupplyManagementLoop, $VillageToolsQuestLoop | Where-Object { $_ }).Count -gt 1) { throw 'Select only one LiveModel test goal per run.' }
-if ($AgentHostRuntime -and -not ($SupplyManagementLoop -or $ArrivalLoop -or $VillageToolsQuestLoop)) { throw 'AgentHostRuntime supports only the frozen Native supply, map-arrival and VillageNeedsTools quest slices.' }
+if (@($ArrivalLoop, $RecruitmentLoop, $RoadsideBanditNegotiationLoop, $SupplyManagementLoop, $VillageToolsQuestLoop, $BattleSimulationLoop | Where-Object { $_ }).Count -gt 1) { throw 'Select only one LiveModel test goal per run.' }
+if ($AgentHostRuntime -and -not ($SupplyManagementLoop -or $ArrivalLoop -or $VillageToolsQuestLoop -or $BattleSimulationLoop)) { throw 'AgentHostRuntime supports only frozen Native supply, arrival, VillageNeedsTools and BattleSimulation slices.' }
 if ($VillageToolsQuestLoop -and -not $AgentHostRuntime) { throw 'VillageToolsQuestLoop requires the in-game .NET Agent Host route; the older PowerShell decision loop is not product evidence.' }
 if ($RoadsideBanditNegotiationLoop -and -not $RecruitmentLoop) { throw 'RoadsideBanditNegotiationLoop requires RecruitmentLoop so the encounter resolves into the existing growth goal.' }
 foreach ($setting in @('CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL','CHRONICLE_LLM_API_KEY','FREELLMAPI_API_KEY','CHRONICLE_LLM_TIMEOUT_SECONDS','CHRONICLE_LLM_MAX_TOKENS','CHRONICLE_LLM_MAX_TOKEN_PARAMETER','CHRONICLE_LLM_REASONING_EFFORT','CHRONICLE_LLM_THINKING_MODE','CHRONICLE_LLM_TEMPERATURE','CHRONICLE_LLM_PROTOCOL')) {
@@ -316,6 +317,14 @@ try {
         $allowedActions = 'mapSettlementTargets,move,menuSelect,talkToSettlementHero,dialogueSelect,dialogueContinue,questDetails,tradeOptions,trade,tradeConfirm,tradeCancel,tradeCancelChanges,barterOptions,barterAutoBalance,barterOffer,barterCancel,inventoryOpen,heroEquipmentOptions,inventoryCancel'
         $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '360'
         $env:CHRONICLE_LLM_MAX_TOKENS = '1024'
+    }
+    elseif ($BattleSimulationLoop) {
+        $goal = 'Resolve exactly one currently Native-visible hostile Bandit party encounter using the original Campaign map Send Troops/BattleSimulation. Pursue only a current visible mapPartyTargets candidate with hostile=true and type=bandit. If the Native bandit meeting shows its current Fight option, choose that Fight option, not toll or surrender. Use only Native BattleSimulation, then process current PartyState/InventoryState aftermath and return to Map. Verify actual pre/post party, gold, influence and renown; renown may be unchanged. Never control the clock or enter a real-time Mission.'
+        $maxDecisions = 80
+        $maxElapsedSeconds = 1800
+        $allowedActions = 'mapPartyTargets,pursue,dialogueSelect,dialogueContinue,menuSelect,battleSkip,battleFinish,partyTakeAll,partyScreenDone,inventoryTakeAll,inventoryDone'
+        $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '360'
+        $env:CHRONICLE_LLM_MAX_TOKENS = '768'
     }
     elseif ($ArrivalLoop) {
         $goal = 'First query mapSettlementTargets. Then choose the nearest observed safe target (not hostile, not under siege, not the current settlement) and issue one move. While party.isMoving toward that target and currentSettlementId differs, use observeAgain with waitSeconds 5; do not send move again or use clock controls. When nativeMoveArrival.status is arrived, return done immediately and issue no further game action.'
@@ -620,6 +629,94 @@ try {
         }
         if (-not $supplyVerified) { throw 'Real model failed the frozen Native multi-day supply postconditions; preserve the captured trace and engine frame.' }
     }
+    elseif ($BattleSimulationLoop) {
+        $finalNativeState = $loopTrace.finalNativeState
+        if (-not $finalNativeState -or -not $finalNativeState.state) { throw 'Battle Host did not return the final Native state needed for result and evidence verification.' }
+        $finalObservation = [ordered]@{ status = 'completed'; campaignDay = [double]$finalNativeState.campaignDay; dailyTickCount = $null; timeControlMode = [string]$finalNativeState.timeControlMode; state = $finalNativeState.state }
+        $battleTargetId = [string]$loopTrace.targetPartyId
+        $targetQueries = @($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -eq 'mapPartyTargets' -and $_.actionReceipt.status -eq 'completed' })
+        $targetObservation = @($targetQueries | ForEach-Object { $_.actionReceipt.data.mapPartyTargets } | Where-Object { $_.id -ceq $battleTargetId -and $_.type -ceq 'bandit' -and $_.hostile -eq $true } | Select-Object -First 1)
+        $chosenTarget = @($targetObservation)
+        $chosenId = $battleTargetId
+        $chosenObservedSafeTarget = ($chosenTarget.Count -eq 1)
+        $observedTargets = @($targetObservation)
+        $targetSource = 'current Native mapPartyTargets hostile Bandit candidate; no seeded party or hidden global target'
+        $moveSteps = @($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -eq 'pursue' -and $_.actionReceipt.status -eq 'completed' })
+        $nativeMovementObserved = ($moveSteps.Count -gt 0)
+        $arrivalConfirmed = $null
+        $campaignDayAdvancedDuringTravel = if ($moveSteps.Count -gt 0) { [double]$finalObservation.campaignDay -gt [double]$moveSteps[0].actionReceipt.campaignDay } else { $false }
+        $observeSteps = @($steps | Where-Object { $_.decision.observeAgain -eq $true -and $_.observationAfter.status -eq 'completed' })
+        $nativeReadObservationsAfterMove = @()
+        $preNativeTravelReobservations = @()
+
+        $nativeClockActions = @($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -in @('advance','pause','resume','fastForward') })
+        $fightDialogue = @($steps | Where-Object {
+            $_.actionExecuted -and $_.actionReceipt.status -eq 'completed' -and
+            $_.decision.action -eq 'dialogueSelect' -and [string]$_.decision.arguments.OptionId -ceq 'bandit_start_defender_1' -and
+            [bool]$_.observationBefore.state.context.encounterActive -and
+            [string]$_.observationBefore.state.context.encounteredPartyId -ceq $battleTargetId -and
+            @($_.observationBefore.state.context.conversation.options | Where-Object { $_.id -ceq 'bandit_start_defender_1' -and $_.clickable }).Count -eq 1
+        })
+        $sendTroops = @($steps | Where-Object {
+            $_.actionExecuted -and $_.actionReceipt.status -eq 'completed' -and
+            $_.decision.action -eq 'menuSelect' -and [string]$_.decision.arguments.OptionId -ceq 'str_order_attack' -and
+            [bool]$_.observationBefore.state.context.encounterActive -and
+            [string]$_.observationBefore.state.context.menuId -ceq 'encounter' -and
+            [string]$_.observationBefore.state.context.encounteredPartyId -ceq $battleTargetId -and
+            @($_.observationBefore.state.availableMenuOptions | Where-Object { $_.id -ceq 'str_order_attack' -and $_.available -and $_.enabled }).Count -eq 1
+        })
+        $battleSkips = @($steps | Where-Object {
+            $_.actionExecuted -and $_.actionReceipt.status -eq 'completed' -and $_.decision.action -eq 'battleSkip' -and
+            $_.observationBefore.state.context.battleSimulation -and -not [bool]$_.observationBefore.state.context.battleSimulation.finished
+        })
+        $battleFinishes = @($steps | Where-Object {
+            $_.actionExecuted -and $_.actionReceipt.status -eq 'completed' -and $_.decision.action -eq 'battleFinish' -and
+            $_.observationBefore.state.context.battleSimulation -and [bool]$_.observationBefore.state.context.battleSimulation.finished
+        })
+        $partyLootObservations = @($steps | Where-Object { [string]$_.observationBefore.state.partyScreen.mode -eq 'Loot' })
+        $inventoryLootObservations = @($steps | Where-Object { [string]$_.observationBefore.state.inventoryScreen.mode -eq 'Loot' })
+        $partyTakeActions = @($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.status -eq 'completed' -and $_.decision.action -eq 'partyTakeAll' })
+        $inventoryTakeActions = @($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.status -eq 'completed' -and $_.decision.action -eq 'inventoryTakeAll' })
+        $partyDoneActions = @($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.status -eq 'completed' -and $_.decision.action -eq 'partyScreenDone' })
+        $inventoryDoneActions = @($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.status -eq 'completed' -and $_.decision.action -eq 'inventoryDone' })
+        $partyLootHandled = ($partyLootObservations.Count -eq 0 -or $partyDoneActions.Count -gt 0)
+        $inventoryLootHandled = ($inventoryLootObservations.Count -eq 0 -or $inventoryDoneActions.Count -gt 0)
+        $renownBefore = [double]$loopTrace.renownBefore
+        $renownAfter = [double]$loopTrace.renownAfter
+        $providerStoppedAfterGoalAction = (
+            [string]$loopTrace.status -eq 'completed' -and
+            [string]$loopTrace.termination -eq 'battle-resolved-and-verified' -and
+            [bool]$loopTrace.nativeReturnToMapVerified -and
+            $steps.Count -gt 0 -and [bool]$steps[-1].decision.done
+        )
+        $battleSimulationVerified = (
+            $providerStoppedAfterGoalAction -and $chosenObservedSafeTarget -and
+            (($fightDialogue.Count -eq 1 -and $sendTroops.Count -eq 1) -or ($fightDialogue.Count -eq 0 -and $sendTroops.Count -eq 1)) -and
+            $battleSkips.Count -gt 0 -and $battleFinishes.Count -eq 1 -and $partyLootHandled -and $inventoryLootHandled -and
+            [double]::IsFinite($renownBefore) -and [double]::IsFinite($renownAfter) -and $nativeClockActions.Count -eq 0
+        )
+        $battleOutcome = [ordered]@{
+            TargetPartyId = $battleTargetId
+            TargetParty = if ($chosenTarget.Count -eq 1) { $chosenTarget[0] } else { $null }
+            EncounterFightDialogue = if ($fightDialogue.Count -eq 1) { [string]$fightDialogue[0].decision.arguments.OptionId } else { $null }
+            SendTroopsOption = if ($sendTroops.Count -eq 1) { [string]$sendTroops[0].decision.arguments.OptionId } else { $null }
+            SimulationState = [string]$loopTrace.battleState
+            BattleFinishReceipt = $loopTrace.battleFinishReceipt
+            PlayerRetreated = [bool]$loopTrace.playerRetreated
+            PartyLootScreenCount = $partyLootObservations.Count
+            PartyTakeAllCount = $partyTakeActions.Count
+            InventoryLootScreenCount = $inventoryLootObservations.Count
+            InventoryTakeAllCount = $inventoryTakeActions.Count
+            RenownBefore = $renownBefore
+            RenownAfter = $renownAfter
+            RenownDelta = [Math]::Round(($renownAfter - $renownBefore), 4)
+            OutcomeBefore = $loopTrace.outcomeBefore
+            OutcomeAfter = $loopTrace.outcomeAfter
+            NativeReturnToMapVerified = [bool]$loopTrace.nativeReturnToMapVerified
+            ExplicitClockActionCount = $nativeClockActions.Count
+        }
+        if (-not $battleSimulationVerified) { throw 'Real model did not complete one current Native hostile-bandit Send Troops simulation, process every observed aftermath screen, return to Map, and verify actual Renown/outcomes.' }
+    }
     else {
     $targetQueries = @($steps | Where-Object { $_.decision.action -eq 'mapSettlementTargets' -and $_.actionReceipt.status -eq 'completed' })
     $moveSteps = @($steps | Where-Object { $_.decision.action -eq 'move' -and $_.actionReceipt.status -eq 'completed' })
@@ -723,13 +820,13 @@ try {
         CampaignDayEnd = [double]$finalObservation.campaignDay
         StartupDialogReceipts = @($start.session.startupDialogReceipts)
         Goal = $goal
-        AcceptanceSlice = if ($VillageToolsQuestLoop) { 'Real-model Native VillageNeedsTools quest acceptance, delivery and exact inventory delta' } elseif ($SupplyManagementLoop) { 'Real-model Native food purchase and three-day Town Wait' } elseif ($RoadsideBanditNegotiationLoop) { 'Native roadside Safe Passage, recovery, and volunteer recruitment' } elseif ($RecruitmentLoop) { 'Native movement plus volunteer recruitment' } elseif ($ArrivalLoop) { 'Native movement arrival' } else { 'Native movement order accepted' }
+        AcceptanceSlice = if ($BattleSimulationLoop) { 'Real-model Native hostile Bandit meeting/Fight, Send Troops BattleSimulation, aftermath and Renown verification' } elseif ($VillageToolsQuestLoop) { 'Real-model Native VillageNeedsTools quest acceptance, delivery and exact inventory delta' } elseif ($SupplyManagementLoop) { 'Real-model Native food purchase and three-day Town Wait' } elseif ($RoadsideBanditNegotiationLoop) { 'Native roadside Safe Passage, recovery, and volunteer recruitment' } elseif ($RecruitmentLoop) { 'Native movement plus volunteer recruitment' } elseif ($ArrivalLoop) { 'Native movement arrival' } else { 'Native movement order accepted' }
         SafePassageRoute = $safePassageRoute
         HarnessWorldEvents = @($loopTrace.harnessEvents)
-        ChosenSettlementId = $chosenId
-        ChosenSettlementName = [string]$chosenTarget[0].name
+        ChosenSettlementId = if ($BattleSimulationLoop) { $null } else { $chosenId }
+        ChosenSettlementName = if ($BattleSimulationLoop) { $null } else { [string]$chosenTarget[0].name }
         ObservedTargetCount = $observedTargets.Count
-        QueryThenNativeMoveVerified = (-not ($SupplyManagementLoop -or $VillageToolsQuestLoop))
+        QueryThenNativeMoveVerified = (-not ($SupplyManagementLoop -or $VillageToolsQuestLoop -or $BattleSimulationLoop))
         ChosenTargetSource = $targetSource
         ArrivalConfirmed = $arrivalConfirmed
         BoundedReobservations = $observeSteps.Count
@@ -740,7 +837,12 @@ try {
         VillageToolsQuestVerified = if ($VillageToolsQuestLoop) { [bool]$questVerified } else { $null }
         VillageToolsQuestId = if ($VillageToolsQuestLoop) { [string]$loopTrace.questId } else { $null }
         VillageToolsQuestInventoryDeltaVerified = if ($VillageToolsQuestLoop) { [bool]$loopTrace.inventoryVerifiedAfterTurnIn } else { $null }
-        NativeClockActions = if ($VillageToolsQuestLoop) { @($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -in @('advance','pause','resume','fastForward') } | ForEach-Object { [string]$_.actionReceipt.action }) } else { @() }
+        BattleSimulationVerified = if ($BattleSimulationLoop) { [bool]$battleSimulationVerified } else { $null }
+        BattleOutcome = if ($BattleSimulationLoop) { $battleOutcome } else { $null }
+        BattleRenownBefore = if ($BattleSimulationLoop) { [double]$loopTrace.renownBefore } else { $null }
+        BattleRenownAfter = if ($BattleSimulationLoop) { [double]$loopTrace.renownAfter } else { $null }
+        BattleReturnToMapVerified = if ($BattleSimulationLoop) { [bool]$loopTrace.nativeReturnToMapVerified } else { $null }
+        NativeClockActions = if ($VillageToolsQuestLoop -or $BattleSimulationLoop) { @($steps | Where-Object { $_.actionExecuted -and $_.actionReceipt.action -in @('advance','pause','resume','fastForward') } | ForEach-Object { [string]$_.actionReceipt.action }) } else { @() }
         SupplyFixtureSetup = $supplySetup
         SupplyVerified = if ($SupplyManagementLoop) { [bool]$supplyVerified } else { $null }
         SupplyVerification = $supplyVerification
@@ -799,7 +901,7 @@ catch {
             CampaignDayStart = if ($baseline) { [double]$baseline.campaignDay } else { $null }
             CampaignDayEnd = if ($loopTrace.lastObservation) { [double]$loopTrace.lastObservation.campaignDay } else { $null }
             Goal = $goal
-            AcceptanceSlice = if ($VillageToolsQuestLoop) { 'Failed real-model Native VillageNeedsTools Quest' } elseif ($SupplyManagementLoop) { 'Real-model Native food purchase and three-day Town Wait' } else { 'Failed live-model decision loop' }
+            AcceptanceSlice = if ($BattleSimulationLoop) { 'Failed real-model Native Bandit BattleSimulation' } elseif ($VillageToolsQuestLoop) { 'Failed real-model Native VillageNeedsTools Quest' } elseif ($SupplyManagementLoop) { 'Real-model Native food purchase and three-day Town Wait' } else { 'Failed live-model decision loop' }
             SupplyFixtureSetup = $supplySetup
             SupplyVerified = $false
             SupplyVerification = if ($SupplyManagementLoop -and $loopTrace.lastObservation) {

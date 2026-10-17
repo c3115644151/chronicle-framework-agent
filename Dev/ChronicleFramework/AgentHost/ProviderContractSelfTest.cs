@@ -26,11 +26,15 @@ internal static class ProviderContractSelfTest
             throw new AgentHostException("village-tools-prompt-native-action-id-mismatch", "The quest prompt must name the exact Native contact action and prevent stale contact/decision repetition after conversation opens or feedback rejects an action.");
         results.Add(new { scenario = "village-tools-prompt-uses-exact-native-action-id", passed = true });
         results.AddRange(NativeMailboxClient.RunVillageToolsQuestActionContractSelfTests());
+        results.AddRange(NativeMailboxClient.RunBattleSimulationActionContractSelfTests());
         try { results.AddRange(AgentHostVillageToolsQuestPolicy.RunContractSelfTests()); }
         catch (Exception exception) { throw new AgentHostException("village-tools-policy-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
         try { results.AddRange(await AgentHostVillageToolsQuestLoop.RunContractSelfTestsAsync()); }
         catch (Exception exception) { throw new AgentHostException("village-tools-loop-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
         results.AddRange(AgentHostCampaignLoop.RunContractSelfTests());
+        results.AddRange(AgentHostBattleSimulationLoop.RunContractSelfTests());
+        try { results.AddRange(await AgentHostBattleSimulationLoop.RunTransportSelfTestsAsync()); }
+        catch (Exception exception) { throw new AgentHostException("battle-simulation-loop-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
         results.AddRange(await AgentHostCampaignLoop.RunTransportSelfTestsAsync());
         results.AddRange(await Program.RunParentProcessContractSelfTestsAsync());
         var readyLine = AgentHostReadyProtocol.Format(321, "mcm-test", "0.1.0+test");
@@ -266,9 +270,11 @@ internal static class ProviderContractSelfTest
 
         await VerifyGoalClassificationAsync(settings, "supportedMapArrivalGoal", "supported-map-arrival", ["supportedMapArrivalGoal", "unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "supportedVillageToolsQuestGoal", "supported-village-tools-quest", ["supportedMapArrivalGoal", "supportedVillageToolsQuestGoal", "unsupportedGoal"], results);
+        await VerifyGoalClassificationAsync(settings, "supportedBattleSimulationGoal", "supported-battle-simulation", ["supportedMapArrivalGoal", "supportedVillageToolsQuestGoal", "supportedBattleSimulationGoal", "unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "unsupportedGoal", "unsupported", ["supportedMapArrivalGoal", "unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "supportedMapArrivalGoal", "provider-goal-classification-unavailable", ["unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "supportedVillageToolsQuestGoal", "provider-goal-classification-unavailable", ["supportedMapArrivalGoal", "unsupportedGoal"], results);
+        await VerifyGoalClassificationAsync(settings, "supportedBattleSimulationGoal", "provider-goal-classification-unavailable", ["supportedMapArrivalGoal", "unsupportedGoal"], results);
         VerifyProductionGoalClassificationCatalogNormalization(results);
         VerifyDecisionSchemaBindsCurrentArgumentValues(results);
 
@@ -914,7 +920,12 @@ internal static class ProviderContractSelfTest
         using var provider = new OllamaNativeProvider(settings, client);
         using var request = JsonDocument.Parse(JsonSerializer.Serialize(new
         {
-            goal = control == "supportedVillageToolsQuestGoal" ? "Complete the currently visible village tools quest." : "Move to any visible safe settlement.",
+            goal = control switch
+            {
+                "supportedVillageToolsQuestGoal" => "Complete the currently visible village tools quest.",
+                "supportedBattleSimulationGoal" => "Resolve one currently visible hostile bandit encounter using Campaign Send Troops and verify actual outcomes.",
+                _ => "Move to any visible safe settlement."
+            },
             goalScopeClassificationRequired = expectedClassification != "provider-goal-classification-unavailable",
             goalScopeContract = "native-map-arrival-v1",
             observation = new { scope = "goal-classification-test", state = new { gameState = "MapState" } },
@@ -930,7 +941,7 @@ internal static class ProviderContractSelfTest
                 throw new AgentHostException("provider-goal-classification-self-test-failed", "Goal classification did not stay within its listed control catalog.");
             using var body = JsonDocument.Parse(handler.LastRequestBody ?? throw new AgentHostException("provider-goal-classification-prompt-missing", "The classification request was not sent."));
             var system = body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString() ?? string.Empty;
-            if (!system.Contains("required final outcome", StringComparison.Ordinal) || !system.Contains("VillageNeedsToolsIssue", StringComparison.Ordinal) || !system.Contains("named destination", StringComparison.Ordinal) || !system.Contains("not extra goals", StringComparison.Ordinal))
+            if (!system.Contains("required final outcome", StringComparison.Ordinal) || !system.Contains("VillageNeedsToolsIssue", StringComparison.Ordinal) || !system.Contains("BattleSimulation", StringComparison.Ordinal) || !system.Contains("Named destinations", StringComparison.Ordinal))
                 throw new AgentHostException("provider-goal-classification-prompt-incomplete", "The classifier prompt omitted the exact limits of the supported goal.");
             results.Add(new { scenario = "provider-goal-classification-before-action", control, passed = true });
         }

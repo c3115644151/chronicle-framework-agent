@@ -3,7 +3,8 @@ param(
     [ValidateRange(1,3)][int]$Runs = 1,
     [ValidateRange(5,30)][int]$FrameRate = 10,
     [string]$CleanupPreparedSaveName,
-    [switch]$VillageToolsQuest
+    [switch]$VillageToolsQuest,
+    [switch]$BattleSimulationLoop
 )
 
 $ErrorActionPreference = 'Stop'
@@ -117,6 +118,11 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
             $preparedSaveName = [string]$fixturePreparation.PreparedSaveName
             $childOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $liveTest -LoadSaveName $preparedSaveName -VillageToolsQuestLoop -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
         }
+        elseif ($BattleSimulationLoop) {
+            # No battle fixture is seeded: the live Host must find a naturally
+            # visible Native Bandit, or stop safely and leave an incomplete receipt.
+            $childOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $liveTest -LoadSaveName 'AgentBridgeLifecycle' -BattleSimulationLoop -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
+        }
         else {
             $childOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $liveTest -ArrivalLoop -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
         }
@@ -156,7 +162,35 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
     $observeAgainSteps = @($modelSteps | Where-Object { $_.control.kind -eq 'bounded-observe-again' -and -not $_.actionExecuted })
     $noGameProcesses = @(Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue).Count -eq 0
     $noSessionFile = -not (Test-Path -LiteralPath $sessionPath -PathType Leaf)
-    if ($VillageToolsQuest) {
+    if ($BattleSimulationLoop) {
+        $battleOutcome = if ($trace) { $trace.BattleOutcome } else { $null }
+        $battleTargetId = if ($battleOutcome) { [string]$battleOutcome.TargetPartyId } else { '' }
+        $clockActions = if ($trace) { @($trace.NativeClockActions) } else { @() }
+        $battleActionSequence = @($nativeActions | ForEach-Object { [string]$_.actionReceipt.action })
+        $providerRoutes = if ($trace -and $trace.ProviderRouteHistory) { @($trace.ProviderRouteHistory) } else { @() }
+        # Source cleanliness is checked at the live test boundary; this evaluator
+        # also requires the real provider route and a freshly observed target.
+        $battleEvidenceVerified = (
+            $childExitCode -eq 0 -and $liveResult -and [bool]$liveResult.Passed -and
+            [bool]$trace.BattleSimulationVerified -and [bool]$trace.BattleReturnToMapVerified -and
+            $battleTargetId.Length -gt 0 -and [double]::IsFinite([double]$trace.BattleRenownBefore) -and
+            [double]::IsFinite([double]$trace.BattleRenownAfter) -and $clockActions.Count -eq 0 -and
+            $battleActionSequence.Contains('mapPartyTargets') -and $battleActionSequence.Contains('menuSelect') -and
+            $battleActionSequence.Contains('battleSkip') -and $battleActionSequence.Contains('battleFinish') -and
+            [string]$battleOutcome.SendTroopsOption -ceq 'str_order_attack' -and [string]$battleOutcome.SimulationState -ne 'unknown' -and
+            ([int]$battleOutcome.PartyLootScreenCount -eq 0 -or $battleActionSequence.Contains('partyScreenDone')) -and
+            ([int]$battleOutcome.InventoryLootScreenCount -eq 0 -or $battleActionSequence.Contains('inventoryDone')) -and
+            $providerRoutes.Count -gt 0 -and [string]$trace.ModelConfigurationSource -eq 'harness-mcm-profile-fixture' -and
+            [bool]$liveResult.FixtureUnchanged -and [bool]$liveResult.ProcessStopped -and
+            [bool]$liveResult.VisualEvidencePassed -and [double]$liveResult.Capture.FrameCoverageRatio -ge 0.9 -and
+            [bool]$liveResult.Capture.VideoRemovedAfterEvidence -and
+            [bool]$trace.SourceTrackedTreeClean -and [string]$trace.SourceCommit -eq (git.exe -C $PSScriptRoot rev-parse HEAD).Trim() -and
+            $noGameProcesses -and $noSessionFile
+        )
+        $passed = [bool]$battleEvidenceVerified
+        if (-not $passed -and -not $failure) { $failure = 'One or more real-model Native BattleSimulation, current target, actual outcome, no-clock, visual, source, or cleanup assertions failed.' }
+    }
+    elseif ($VillageToolsQuest) {
         $requiredActions = @('talkToSettlementHero','dialogueSelect','questDetails','tradeOptions','trade','tradeConfirm','inventoryOpen','heroEquipmentOptions','inventoryCancel')
         $requiredActionsObserved = $true
         foreach ($requiredAction in $requiredActions) {
@@ -214,6 +248,11 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         modelConfigurationSource = if ($trace) { [string]$trace.ModelConfigurationSource } else { $null }
         fixturePreparedFromNaturalVisibleIssue = if ($fixturePreparation) { [bool]$fixturePreparation.Prepared } else { $null }
         preparedIssueGiver = if ($fixturePreparation) { $fixturePreparation.VisibleMarker } else { $null }
+        battleOutcome = if ($BattleSimulationLoop) { $battleOutcome } else { $null }
+        battleActionSequence = if ($BattleSimulationLoop) { $battleActionSequence } else { @() }
+        battleSimulationVerified = if ($BattleSimulationLoop -and $trace) { [bool]$trace.BattleSimulationVerified } else { $null }
+        renownBefore = if ($BattleSimulationLoop -and $trace) { $trace.BattleRenownBefore } else { $null }
+        renownAfter = if ($BattleSimulationLoop -and $trace) { $trace.BattleRenownAfter } else { $null }
         observedIssueMarkerMatchedTalkTarget = if ($VillageToolsQuest) { [bool]$visibleIssueMarkerVerified } else { $null }
         nativeToolTradeCommits = if ($VillageToolsQuest) { @($tradeCommits | ForEach-Object { $_.actionReceipt.data }) } else { @() }
         preparedSaveRemoved = $preparedSaveRemoved
@@ -238,7 +277,19 @@ $result = [ordered]@{
     ProviderKind = 'FreeLLMAPI-routed external model through the configured free endpoint'
     RunCount = $Runs
     DistinctCampaignSeeds = 1
-    Threshold = if ($VillageToolsQuest) {
+    Threshold = if ($BattleSimulationLoop) {
+        [ordered]@{
+            successfulRuns = $Runs
+            targetMustBeCurrentNativeVisibleHostileBandit = $true
+            requiresNativeBanditFightDialogueWhenMeeting = 'bandit_start_defender_1'
+            requiresNativeSendTroopsOption = 'str_order_attack'
+            requiresBattleSimulationAndNativeAftermath = $true
+            requiresReturnToMapAndRenownBeforeAfter = $true
+            explicitClockActions = 0
+            visualCoverageRatio = 0.9
+        }
+    }
+    elseif ($VillageToolsQuest) {
         [ordered]@{
             successfulRuns = $Runs
             maximumTotalDecisions = 100

@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.217'
+$contractVersion = '7.218'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -73,6 +73,8 @@ $agentHostRuntimeControllerSource = Get-Content (Join-Path $harnessRoot 'AgentHo
 $agentHostLifecycleEvaluationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostLifecycleEvaluation.ps1') -Raw -Encoding UTF8
 $agentHostDecisionCycleSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostDecisionCycle.cs') -Raw -Encoding UTF8
 $agentHostCampaignLoopEvaluationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostCampaignLoopEvaluation.ps1') -Raw -Encoding UTF8
+$agentHostLiveModelLoopSource = Get-Content (Join-Path $harnessRoot 'Test-AgentLiveModelLoop.ps1') -Raw -Encoding UTF8
+$agentHostBattleSimulationLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostBattleSimulationLoop.cs') -Raw -Encoding UTF8
 $agentHostVillageToolsQuestLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostVillageToolsQuestLoop.cs') -Raw -Encoding UTF8
 $agentHostVillageToolsQuestPolicySource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostVillageToolsQuestPolicy.cs') -Raw -Encoding UTF8
 $agentHostVillageToolsFixturePreparationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentVillageToolsQuestFixturePreparation.ps1') -Raw -Encoding UTF8
@@ -234,6 +236,7 @@ if ($harnessScript -notmatch "'AgentHostCampaignLoopEvaluation' \{ @\('Preflight
     $agentLiveModelLoopSource -notmatch 'HostReadyMessages' -or
     $agentHostPackageSource -notmatch '--provider-self-test' -or
     $agentHostPackageSource -notmatch 'CampaignLoopSelfTestScenarioCount' -or
+    $agentHostPackageSource -notmatch 'BattleSimulationLoopSelfTestScenarioCount' -or
     $agentHostPackageSource -notmatch 'SharedDecisionCycleScenarioCount' -or
     $agentHostPackageSource -notmatch 'SelfTestNativeCommands' -or
     $agentHostProviderSelfTestSource -notmatch 'VerifySharedDecisionCycleAsync\(settings, "mapSettlementTargets", "CampaignSystemPrompt"' -or
@@ -241,7 +244,7 @@ if ($harnessScript -notmatch "'AgentHostCampaignLoopEvaluation' \{ @\('Preflight
     throw 'The Host campaign loop must remain opt-in and prove its bounded Native map-arrival contract, natural time progression, real local-model path, visual evidence and cleanup.'
 }
 if ($harnessScript -notmatch "'AgentHostVillageToolsQuestEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostVillageToolsQuestEvaluation'\) \}" -or
-    -not $harnessScript.Contains('effectiveSmokeTimeoutSeconds = if ($Phase -eq ''AgentHostVillageToolsQuestEvaluation'') { [Math]::Max($SmokeTimeoutSeconds, 240) }') -or
+    -not $harnessScript.Contains("effectiveSmokeTimeoutSeconds = if (`$Phase -in @('AgentHostVillageToolsQuestEvaluation','AgentHostBattleSimulationEvaluation')) { [Math]::Max(`$SmokeTimeoutSeconds, 240) }") -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostVillageToolsQuestEvaluation'" -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'VerifyQuestInventoryDelta' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'village-tools-direct-quest-option-unavailable' -or
@@ -287,13 +290,25 @@ if ($harnessScript -notmatch "'AgentHostVillageToolsQuestEvaluation' \{ @\('Pref
     $agentHostDecisionCycleSource -notmatch 'You may repeat that action only with corrected arguments from the current catalog' -or
     $agentHostDecisionCycleSource -notmatch '点击继续' -or $agentHostDecisionCycleSource -notmatch 'does not leave the settlement' -or
     $agentHostDecisionCycleSource -notmatch 'intermediate steps' -or
-    $agentHostDecisionCycleSource -notmatch 'not extra goals' -or
+    $agentHostDecisionCycleSource -notmatch 'steps toward the same outcome' -or
     $agentLiveModelLoopSource -notmatch '\[switch\]\$VillageToolsQuestLoop' -or
     $agentLiveModelLoopSource -notmatch 'tradeCancelChanges,barterOptions,barterAutoBalance,barterOffer,barterCancel,inventoryOpen' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'VillageToolsQuest' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'Test-AgentVillageToolsQuestFixturePreparation' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'VillageToolsQuestInventoryDeltaVerified') {
     throw 'The Host village-tools quest path must remain opt-in and verify the current visible quest, native actions and exact pre/post inventory deltas before allowing completion.'
+}
+if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostBattleSimulationEvaluation'\) \}" -or
+    $harnessScript -match "'All' \{[^\r\n]*'AgentHostBattleSimulationEvaluation'" -or
+    $agentHostCampaignLoopEvaluationSource -notmatch '\-BattleSimulationLoop' -or
+    $agentHostLiveModelLoopSource -notmatch '\[switch\]\$BattleSimulationLoop' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'bandit_start_defender_1' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'str_order_attack' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'battleSimulation' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'nativeReturnToMapVerified' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-native-observe-pursue-send-troops-aftermath-return-and-verify' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'mapPartyTargetsQueried') {
+    throw 'W7-L must remain opt-in, use the current Native Bandit Fight/Send Troops path, process aftermath, verify outcomes and stop safely when no visible target exists.'
 }
 if ($agentHostCampaignLoopEvaluationSource -notmatch '\[string\]\$CleanupPreparedSaveName' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'StartsWith\(''ChronicleW7K-''' -or
