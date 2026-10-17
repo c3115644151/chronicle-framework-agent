@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.220'
+$contractVersion = '7.221'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -705,6 +705,10 @@ if ($agentHostLifecycleHarness -notmatch "'UnsupportedGoal'" -or
 if ($agentHostCampaignLoopSource -notmatch 'supportedEstablishYourClanGoal' -or
     $agentHostProviderSource -notmatch 'supportedEstablishYourClanGoal' -or
     $agentHostEstablishClanPlannerSource -notmatch 'BuildObjectiveActionCatalog' -or
+    $agentHostEstablishClanPlannerSource -notmatch 'questDetailsClient\.ReadQuestDetailsAsync' -or
+    $agentHostDecisionCycleSource -notmatch 'IAgentHostQuestDetailsNativeClient' -or
+    $agentHostCampaignLoopSource -notmatch 'IAgentHostQuestDetailsNativeClient' -or
+    $agentHostMailboxSource -notmatch 'BuildQuestDetailsArguments' -or
     $agentHostEstablishClanPlannerSource -notmatch 'journal-native-target-mismatch' -or
     $agentHostEstablishClanPlannerSource -notmatch 'selectEstablishYourClanObjective' -or
     $agentHostEstablishClanPlannerSource -notmatch 'goalVerified.*false' -or

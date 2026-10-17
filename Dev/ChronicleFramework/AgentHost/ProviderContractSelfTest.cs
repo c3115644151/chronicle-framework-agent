@@ -27,6 +27,7 @@ internal static class ProviderContractSelfTest
         results.Add(new { scenario = "village-tools-prompt-uses-exact-native-action-id", passed = true });
         results.AddRange(NativeMailboxClient.RunVillageToolsQuestActionContractSelfTests());
         results.AddRange(NativeMailboxClient.RunBattleSimulationActionContractSelfTests());
+        results.AddRange(NativeMailboxClient.RunQuestDetailsReadActionContractSelfTests());
         try { results.AddRange(AgentHostVillageToolsQuestPolicy.RunContractSelfTests()); }
         catch (Exception exception) { throw new AgentHostException("village-tools-policy-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
         try { results.AddRange(await AgentHostVillageToolsQuestLoop.RunContractSelfTestsAsync()); }

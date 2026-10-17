@@ -64,7 +64,7 @@ internal static class AgentHostEstablishYourClanGoalLoop
         using var request = JsonDocument.Parse("""
             {"runId":"establish-clan-planner-selftest","goal":"Choose one unmet Establish Your Clan objective.","parentProcessId":321,"maxDecisions":8,"maxElapsedSeconds":10,"allowedActionNames":["questDetails"]}
             """);
-        var result = await RunAsync(request.RootElement, native, provider, CancellationToken.None);
+        var result = await RunAsync(request.RootElement, native, native, provider, CancellationToken.None);
         var providerCatalog = provider.FirstRequest?["allowedActions"] as JsonArray;
         if (ReadString(result, "status") != "planned" || ReadString(result["selection"] as JsonObject, "objectiveId") != "partySize" ||
             ReadBoolean(result["termination"] as JsonObject, "goalVerified") == true || native.QuestDetailsReads != 1 || native.MutatingActionCount != 0 ||
@@ -76,7 +76,8 @@ internal static class AgentHostEstablishYourClanGoalLoop
         var inconsistentSnapshot = (JsonObject)snapshot.DeepClone();
         inconsistentSnapshot["partySize"]!["target"] = 21;
         var inconsistentProvider = new FakeDecisionProvider("partySize");
-        var inconsistentResult = await RunAsync(request.RootElement, new FakeNativeClient(inconsistentSnapshot), inconsistentProvider, CancellationToken.None);
+        var inconsistentNative = new FakeNativeClient(inconsistentSnapshot);
+        var inconsistentResult = await RunAsync(request.RootElement, inconsistentNative, inconsistentNative, inconsistentProvider, CancellationToken.None);
         if (ReadString(inconsistentResult, "status") != "blocked" || inconsistentProvider.CallCount != 0 ||
             ReadString(inconsistentResult["termination"] as JsonObject, "reason") != "journal-native-target-mismatch")
             throw new AgentHostException("establish-clan-journal-mismatch-model-call-leaked", "A mismatched Journal/dynamic target must stop before calling the model.");
@@ -85,7 +86,7 @@ internal static class AgentHostEstablishYourClanGoalLoop
         var inactiveProvider = new FakeDecisionProvider("partySize");
         try
         {
-            _ = await RunAsync(request.RootElement, inactiveNative, inactiveProvider, CancellationToken.None);
+            _ = await RunAsync(request.RootElement, inactiveNative, inactiveNative, inactiveProvider, CancellationToken.None);
             throw new AgentHostException("establish-clan-inactive-quest-planner-accepted", "The planner accepted a Campaign without the exact active StoryMode quest.");
         }
         catch (AgentHostException exception) when (exception.Code == "establish-clan-quest-no-longer-active")
@@ -104,6 +105,7 @@ internal static class AgentHostEstablishYourClanGoalLoop
     internal static async Task<JsonObject> RunAsync(
         JsonElement request,
         IAgentHostCampaignNativeClient client,
+        IAgentHostQuestDetailsNativeClient questDetailsClient,
         IAgentHostDecisionProvider provider,
         CancellationToken cancellationToken,
         int priorDecisions = 0,
@@ -116,7 +118,7 @@ internal static class AgentHostEstablishYourClanGoalLoop
         if (!HasActiveQuest(current.RootElement))
             throw new AgentHostException("establish-clan-quest-no-longer-active", "The exact StoryMode quest is no longer in the fresh Native active-quest list.");
 
-        using var questDetails = await client.ExecuteCampaignActionAsync("questDetails", new JsonObject { ["questId"] = QuestId }, cancellationToken);
+        using var questDetails = await questDetailsClient.ReadQuestDetailsAsync(QuestId, cancellationToken);
         var receipt = JsonNode.Parse(questDetails.RootElement.GetRawText())?.AsObject()
             ?? throw new AgentHostException("establish-clan-quest-details-invalid", "Native returned no quest-details receipt.");
         if (ReadString(receipt, "status") != "completed" || receipt["data"] is not JsonObject data ||
@@ -305,7 +307,7 @@ internal static class AgentHostEstablishYourClanGoalLoop
         return null;
     }
 
-    private sealed class FakeNativeClient(JsonObject snapshot, bool activeQuest = true) : IAgentHostCampaignNativeClient
+    private sealed class FakeNativeClient(JsonObject snapshot, bool activeQuest = true) : IAgentHostCampaignNativeClient, IAgentHostQuestDetailsNativeClient
     {
         internal int QuestDetailsReads { get; private set; }
         internal int MutatingActionCount { get; private set; }
@@ -323,11 +325,14 @@ internal static class AgentHostEstablishYourClanGoalLoop
         public Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (action != "questDetails" || ReadString(arguments, "questId") != QuestId)
-            {
-                MutatingActionCount++;
-                throw new AgentHostException("establish-clan-self-test-native-mutation", "The planner attempted an action other than its one exact read-only questDetails query.");
-            }
+            MutatingActionCount++;
+            throw new AgentHostException("establish-clan-self-test-native-mutation", "The planner attempted to use the generic Campaign action interface for quest inspection.");
+        }
+
+        public Task<JsonDocument> ReadQuestDetailsAsync(string questId, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (questId != QuestId) throw new AgentHostException("establish-clan-self-test-wrong-quest-read", "The planner attempted to inspect any Quest other than its exact active StoryMode objective.");
             QuestDetailsReads++;
             var data = new JsonObject
             {

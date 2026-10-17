@@ -5,7 +5,7 @@ using System.Text.Json.Nodes;
 
 namespace ChronicleFramework.AgentHost;
 
-internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeClient, IAgentHostBattleSimulationNativeClient
+internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeClient, IAgentHostBattleSimulationNativeClient, IAgentHostQuestDetailsNativeClient
 {
     private static readonly HashSet<string> SupplySliceActions = new(StringComparer.Ordinal)
     {
@@ -53,6 +53,35 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
         SendAsync("state", new JsonObject(), acceptedResponseExpected: false, cancellationToken);
 
     Task<JsonDocument> IAgentHostCampaignNativeClient.ReadStateAsync(CancellationToken cancellationToken) => ReadStateAsync(cancellationToken);
+
+    public Task<JsonDocument> ReadQuestDetailsAsync(string questId, CancellationToken cancellationToken)
+    {
+        return SendAsync("questDetails", BuildQuestDetailsArguments(questId), acceptedResponseExpected: false, cancellationToken);
+    }
+
+    internal static JsonObject BuildQuestDetailsArguments(string questId)
+    {
+        if (string.IsNullOrWhiteSpace(questId) || questId.Length > 160)
+            throw new AgentHostException("native-quest-details-id-invalid", "The read-only Quest Journal query requires one bounded observed quest id.");
+        return new JsonObject { ["questId"] = questId };
+    }
+
+    internal static IReadOnlyList<object> RunQuestDetailsReadActionContractSelfTests()
+    {
+        var arguments = BuildQuestDetailsArguments("rebuild_player_clan_storymode_quest");
+        if (arguments.Count != 1 || arguments["questId"]?.GetValue<string>() != "rebuild_player_clan_storymode_quest")
+            throw new AgentHostException("native-quest-details-read-contract-failed", "The read-only Quest Journal adapter must serialize only its single observed quest id.");
+        foreach (var invalid in new[] { "", " ", new string('x', 161) })
+        {
+            try
+            {
+                _ = BuildQuestDetailsArguments(invalid);
+                throw new AgentHostException("native-quest-details-invalid-id-accepted", "The read-only Quest Journal adapter accepted a blank or oversized id.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "native-quest-details-id-invalid") { }
+        }
+        return [new { scenario = "native-quest-details-is-an-explicit-read-only-adapter-with-one-bounded-id", passed = true }];
+    }
 
     internal Task<JsonDocument> ExecuteSupplyActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
     {

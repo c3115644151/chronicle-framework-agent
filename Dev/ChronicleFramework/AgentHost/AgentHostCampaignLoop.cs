@@ -413,8 +413,10 @@ internal static class AgentHostCampaignLoop
                         providerStartedUtc, providerDoneUtc, providerStartedTicks, null));
                     if (!requestedActions.SetEquals(ApprovedActions) && !requestedActions.SetEquals(AllSupportedActions))
                         throw new AgentHostException("establish-clan-planner-action-set-unavailable", "The Campaign request does not include the exact approved read-only quest action set.");
+                    if (client is not IAgentHostQuestDetailsNativeClient questDetailsClient)
+                        throw new AgentHostException("establish-clan-quest-details-client-unavailable", "The Native transport does not implement the read-only Quest Journal query required by the StoryMode planner.");
                     return await AgentHostEstablishYourClanGoalLoop.RunAsync(
-                        request, client, provider, elapsed.Token,
+                        request, client, questDetailsClient, provider, elapsed.Token,
                         priorDecisions: decisionCount,
                         priorPromptTokens: promptTokens,
                         priorCompletionTokens: completionTokens,
