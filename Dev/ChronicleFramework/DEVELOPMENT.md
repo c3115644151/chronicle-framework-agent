@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.224
+Contract version: 7.225
 
 失败测试的录像也要经过证据收尾：按事件抽取关键帧，并把均匀联系表的样本数限制为最多64帧。只有录像无法解码或关键证据无法生成时才保留原始MP4；联系表和事件索引齐全后删除原片。这样保留的是能解释测试结果的证据，不是整段重复播放的大文件。
 
@@ -31,7 +31,7 @@ W7-K的真实模型长程验证为独立opt-in `AgentHostVillageToolsQuestEvalua
 
 W7-N的StoryMode目标选择器为独立opt-in `AgentHostEstablishClanGoalPlannerEvaluation`，不并入`All`。Native观察明确区分非StoryMode、StoryMode主线尚未激活、活动、历史完成、历史失败；StoryMode通过官方`JournalLogEntry`判定结束结果，历史记录缺失时返回unknown。只有当前观察确有活动原版Quest `rebuild_player_clan_storymode_quest`时才开放范围分类；通过独立只读`IAgentHostQuestDetailsNativeClient`读取同一任务的Journal数值，按当前Native `BanditDensityModel`计算藏身处人数，不复用村庄任务执行器。Journal当前/目标与实时目标不一致时保留差异并停止，不向模型提供一个猜测值。模型只可在当前未完成的四项目标中选一项，Host不把这个内部选择转换成游戏动作，也不将计划结果称为Quest完成。该阶段必须用FreeLLMAPI真实路由、已自然激活该Quest的disposable StoryMode存档；验证前后Campaign时间、Gold、队伍、Renown、Quest和源存档均不变，派生档/游戏/Host/CLI清理，且保留屏幕连续帧证据。旧StoryMode起点可能缺少ChronicleFramework模块时，Harness可仅在游戏启动模块列表中追加该插件，存档本身仍保持逐字节副本；如RGL错误日志报告未处理启动异常，Agent CLI会保存该进程/模块集/异常的收据，停止准确的测试进程树并恢复EngineConfig，不等待普通加载超时。Historical completed/failed分支已由源码核实，但尚未由真实完成/失败StoryMode存档作运行验收。
 
-W7-O现从Agent已接管的活动StoryMode存档进入已有Native `prisoner_wait`（不是新发起Battle）的狭窄恢复测试。只在Native status仍captured、Wait菜单无选项且raw时间为Stop时列出独立的原版`resume`动作，必须以当前`isWaitMenu/isWaitActive`再核资格；时间已自然流动时由Host只读轮询，不让模型重复设置时钟。出现当前野外赎金选项时，模型以实时金额/Gold/长期目标权衡并仅提交当前enabled的原版选项；只验证恢复到非俘虏可继续地图后重读/规划原始Quest。该动作不包含新Battle、即时战斗、状态写入或目标达成声明。
+W7-O现从Agent已接管的活动StoryMode存档进入已有Native `prisoner_wait`（不是新发起Battle）的狭窄恢复测试。只在Native status仍captured、Wait菜单无选项且raw时间为Stop时列出独立的原版`resume`动作，必须以当前`isWaitMenu/isWaitActive`再核资格；时间已自然流动时由Host只读轮询，不让模型重复设置时钟。出现当前野外赎金选项时，模型以实时金额/Gold/长期目标权衡并仅提交当前enabled的原版选项。原版`menu_captivity_end_no_more_enemies`的`mno_continue`会调用当前Hero的原版释放回调；仅在Native确认该菜单且选项enabled时允许模型推进。此范围由`PlayerCaptivityCampaignBehavior`/`EndCaptivityAction.ApplyByEscape`源码确认，且本轮连续画面已显示相符的释放/继续页；准确Native菜单ID及点击后自由地图仍由下一次真实运行验证。该动作不包含新Battle、即时战斗、状态写入或目标达成声明。
 
 W7-K完整阶段不再先额外运行一次真实模型冒烟：同一免费路由上的前置调用会重复战役首轮目标分类并消耗可用额度。阶段仍先做只读FreeLLMAPI目录/执行状态预检、构建、游戏Smoke和不调用模型的AgentHost包/Provider合同回归；随后在实际Campaign loop中执行唯一首轮真实目标分类，只有模型明确支持VillageNeedsTools目标后才会发出Native动作。若网关状态预检通过但实时请求随后限流/失败，Harness安全停止且不执行Native动作；结果仍算Provider/完整纵切片失败，而非任务成功。`AgentHostProvider`真实模型冒烟保留为单独opt-in诊断阶段，不在同一Quest评测前重复调用。实际运行的模型回复、路由、token、Native后验、连续录像和清理证据由Quest收据统一记录。
 

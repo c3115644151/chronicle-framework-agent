@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.224'
+$contractVersion = '7.225'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -338,10 +338,12 @@ if ($harnessScript -notmatch "'AgentHostCaptivityRecoveryEvaluation' \{ @\('Pref
     $agentHostCampaignLoopSource -notmatch 'supportedCaptivityRecoveryGoal' -or
     $agentHostCaptivityRecoveryLoopSource -notmatch 'ShouldPassivelyWait' -or
     $agentHostCaptivityRecoveryLoopSource -notmatch 'captivity-recovery-current-menu-unsupported' -or
+    $agentHostCaptivityRecoveryLoopSource -notmatch 'menu_captivity_end_no_more_enemies' -or
+    $agentHostCaptivityRecoveryLoopSource -notmatch 'mno_continue' -or
     $agentHostCaptivityRecoveryLoopSource -notmatch 'CaptivityRecoveryNativeClient' -or
     $agentHostDecisionCycleSource -notmatch 'CaptivityRecoverySystemPrompt' -or
     $agentHostMailboxSource -notmatch 'ExecuteCaptivityRecoveryActionAsync') {
-    throw 'W7-O must remain opt-in, resume from an already captive active StoryMode source without starting a battle, separate explicit Play from passive waiting, use only enabled ransom options, replan after free-map verification, and clean its disposable copy.'
+    throw 'W7-O must remain opt-in, resume from an already captive active StoryMode source without starting a battle, separate explicit Play from passive waiting, use only enabled ransom/release options, replan after free-map verification, and clean its disposable copy.'
 }
 if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostBattleSimulationEvaluation'\) \}" -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostBattleSimulationEvaluation'" -or
