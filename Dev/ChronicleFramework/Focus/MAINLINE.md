@@ -545,6 +545,14 @@ flowchart LR
 
 四项全部满足后原版才调用 `CompleteQuestWithSuccess()`；`OnCompleteWithSuccess()`再给予25点Renown。因此要分别记录任务未完成期间四项进度和原版完成/奖励后果，不能把奖励倒灌成前置目标。
 
+### 当前代码缺口（W7-P 2026-10-19源码/Host包核对，非端到端验收）
+
+`AgentObserver`已读出原版Quest/Journal四个目标进度；`AgentHostEstablishYourClanGoalLoop`仅调用`questDetails`并让模型选出一个Journal未完成目标，返回`objective-plan`，不执行游戏动作。现有`AgentHostCampaignLoop`把地图抵达、Village Issue、单次Bandit模拟、战斗后俘虏恢复和StoryMode目标规划分成不同范围；Gold另有一次出售切片。Bridge虽已有`recruitOptions/recruit`、Native对话选项、Trade与BattleSimulation接口，但目标规划没有把这些入口按选定目标接起来，也没有一个持续保持StoryMode目标、在遭遇/失败/战斗/俘虏后重新观察再续跑的总循环。代码/合同核对收据：`TestResults/20261019-023738` AgentHostPackage通过；它只证明Host合同自检通过，不是四目标实机运行。
+
+因此当前主要缺口不是“182个人类玩家动作是否都列过”，而是四目标对应的合法Native动作路径能否在同一个真实模型长循环中被适时开放、执行和后验：Gold出售只是独立的一次性切片；队伍招募尚未进入StoryMode目标Host目录；Renown战斗与俘虏恢复仍是独立任务循环；同伴可通过Native对话选项进入队伍，但目标规划没有定位并发起该事务。Campaign开局后教程继续运行、Quest自然激活并保持同一Agent会话的实际覆盖也尚未证明。`AgentHostPackage`只证明各专用协议合同回归，不能替代这条集成闭环的真实模型运行。
+
+首个实现性增量应先让这个目标规划器变成一个受限的长期Agent循环：每轮重新读Journal；依当前未完成目标生成该目标必要的最小Native action catalog；通过可复用的现有Host动作/子流程执行；每个动作之后重读并以后验决定继续、切换目标、恢复或停止。尚未核清玩家入口、失败语义或副作用的动作继续拒绝，不做“一次开放全部183条ACT”的通用大工具箱。自然新战役/教程接管与四目标循环的整体验收仍保留，不以集成测试过关替代最终门禁。
+
 该门禁现在取代“只测50 Renown/Tier 1”的旧口径。成长路径研究要同时覆盖资金、队伍规模、同伴、Renown四个耦合目标以及它们共享的玩家入口/副作用；当前的地图移动、招募、任务、交易、战斗、同伴等能力只能按实际覆盖证明，不得因单项数值达标就宣称通过。每次运行以新鲜Native观察→模型选择当前可用的原版动作→原版结果收据→Native后验复核为循环，失败分支不得固定重放动作；每项动作仍遵守各自机制契约和Campaign自然时间规则。
 
 1.4.8新档与成长证据
