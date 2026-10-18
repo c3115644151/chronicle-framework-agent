@@ -410,6 +410,8 @@ Hero 俘虏可以存在于：
 
 真实Host闭环补证：`TestResults/20261018-050124`通过 `AgentHostBattleAndCaptivityEvaluation`。FreeLLMAPI `auto:reliable`以12次模型决策/路由完成Native bandit接敌与Send Troops；战后确实观察到MainHero Captive、`prisoner_wait`无选项，Host在不发出任何时钟动作下自然等待，1.522 Campaign日后出现野外Native赎金界面。模型依据当前报价选择 `mno_captivity_end_ransom_accept`，Native赎金112使Gold 324→212；MainHero解囚、MainParty 0→1并回MapState。Renown 20→20，最终`playerOutcome=captured-then-recovered`。源档SHA前后相同、临时副本/游戏/Host/session清理，窗口画面覆盖率100%并在提取索引后删除原视频。此证据覆盖一次真实野外赎金恢复，不外推为其他Captor、监狱、逃脱或Captivity等待时长规律。
 
+本机1.4.8 `PlayerCaptivity.Update(dt)`源码补充：仅当MainHero仍为Captor俘虏且`dt > 0`，或MapState当前并非位于菜单时，才同步Captor位置并调用`ICaptivityCampaignBehavior.CheckCaptivityChange(dt)`。因此Stop+`prisoner_wait`菜单中Host单纯延迟/重复读取不推进Captor变化；从Stop恢复必须是单独的原版时间档位动作，并先确认Native当前菜单确实`IsWaitMenu && IsWaitActive`，此时 `AgentProtocol.SetNativeTimeSpeed(1)`才满足原生context gate。Capture observer当前schema25暴露raw `timeControlMode`、`isWaitMenu`和`isWaitActive`，让Host可区别“可显式Play”与“时间本已运行时被动观察”。这来自本机`PlayerCaptivity.Update`、`GameMenu.StartWait/EndWait`、`SetNativeTimeSpeed`源码，W7-O首次运行验收再验证当前Player Captivity menu的实际运行值和后果；不把显式Resume藏进Host等待。
+
 ### 转移
 
 `TransferPrisonerBarterBehavior.CheckForBarters`遍历双方Party的`PrisonerHeroes`：一方所持的Hero若与对方Party所属Faction处于战争状态，就把该Hero作为`TransferPrisonerBarterable`加入俘虏Barter组，双方方向分别检查。玩家调整谈判条款并接受后，`TransferPrisonerBarterable.Apply`再次确认交战关系，并调用`TransferPrisonerAction`把Hero俘虏转入对方Party；此转移本身不改Hero个人关系。取消Barter则不调用Apply，因此不转移。

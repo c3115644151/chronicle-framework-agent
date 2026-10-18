@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.222'
+$contractVersion = '7.224'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -53,6 +53,7 @@ $shaderDialogSource = Get-Content (Join-Path $harnessRoot 'HarnessShaderCacheDia
 $agentProtocolSource = Get-Content (Join-Path $harnessRoot 'AgentProtocol.cs') -Raw -Encoding UTF8
 $subModuleSource = Get-Content (Join-Path $harnessRoot 'SubModule.cs') -Raw -Encoding UTF8
 $agentObserverSource = Get-Content (Join-Path $harnessRoot 'AgentObserver.cs') -Raw -Encoding UTF8
+if ([regex]::Matches($agentObserverSource, 'isWaitMenu').Count -ne 1 -or [regex]::Matches($agentObserverSource, 'isWaitActive').Count -ne 1) { throw 'The Native observer must emit each Wait-menu fact exactly once; duplicate JSON keys can make the Host fail before any model decision.' }
 $storyModeLifecycleStatusSource = Get-Content (Join-Path $harnessRoot 'StoryModeEstablishClanLifecycleStatus.cs') -Raw -Encoding UTF8
 $agentDecisionLoopSource = Get-Content (Join-Path $harnessRoot 'Agent-DecisionLoop.ps1') -Raw -Encoding UTF8
 $agentProviderBudgetSource = Get-Content (Join-Path $harnessRoot 'Agent-ProviderBudget.ps1') -Raw -Encoding UTF8
@@ -77,6 +78,8 @@ $agentHostDecisionCycleSource = Get-Content (Join-Path $harnessRoot 'AgentHost\A
 $agentHostCampaignLoopEvaluationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostCampaignLoopEvaluation.ps1') -Raw -Encoding UTF8
 $agentHostLiveModelLoopSource = Get-Content (Join-Path $harnessRoot 'Test-AgentLiveModelLoop.ps1') -Raw -Encoding UTF8
 $agentHostBattleSimulationLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostBattleSimulationLoop.cs') -Raw -Encoding UTF8
+$agentHostCaptivityRecoveryLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostCaptivityRecoveryLoop.cs') -Raw -Encoding UTF8
+$agentHostMailboxSource = Get-Content (Join-Path $harnessRoot 'AgentHost\NativeMailboxClient.cs') -Raw -Encoding UTF8
 $agentHostVillageToolsQuestLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostVillageToolsQuestLoop.cs') -Raw -Encoding UTF8
 $agentHostVillageToolsQuestPolicySource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostVillageToolsQuestPolicy.cs') -Raw -Encoding UTF8
 $agentHostVillageToolsFixturePreparationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentVillageToolsQuestFixturePreparation.ps1') -Raw -Encoding UTF8
@@ -143,7 +146,7 @@ $shaderDialogTestCases = @(
 )
 if (-not $shaderDialogTestCases[0] -or $shaderDialogTestCases[1] -or $shaderDialogTestCases[2] -or $shaderDialogTestCases[3]) { throw 'Shader-cache dialog classifier must accept only the exact known title, cache text, and a unique affirmative action.' }
 if ($agentCliSource -notmatch 'Invoke-ChronicleShaderCacheDialogAcknowledgement' -or $shaderDialogSource -notmatch 'InvokePattern' -or $shaderDialogSource -notmatch 'LegacyIAccessiblePattern' -or $shaderDialogSource -notmatch 'Current\.ProcessId -ne \$ProcessId' -or $shaderDialogSource -notmatch 'GetWindowThreadProcessId' -or $shaderDialogSource -notmatch '0x00F5' -or $shaderDialogSource -notmatch '\$maxAcknowledgements\s*=\s*3' -or $shaderDialogSource -notmatch 'AcknowledgementAttempts' -or $shaderDialogSource -match 'SendInput|mouse_event|keybd_event|SetForegroundWindow|SetFocus' -or $inventoryNavigationSource -notmatch 'StartupDialogReceipts') { throw 'The shader-cache prompt must use a verified process-owned UIA/native-button action, bounded same-dialog retries, preserve its receipt, and never use global input or foreground activation.' }
-if ($agentCliSource -notmatch "'moveToPoint'" -or $agentCliSource -notmatch "'missionInput'" -or $agentCliSource -notmatch "ValidateSet\('land'\)" -or $agentProtocolSource -notmatch 'case "moveToPoint"' -or $agentProtocolSource -notmatch 'case "missionInput"' -or $agentProtocolSource -notmatch 'boundedLease' -or $agentProtocolSource -notmatch 'UpdateMissionInputLease' -or $agentProtocolSource -notmatch 'ReadRequiredFiniteDouble' -or $agentProtocolSource -notmatch 'ProcessTravel\(requestedPoint\)' -or $agentProtocolSource -notmatch 'naval/sea transition belongs to a separately tested adapter' -or $agentDecisionLoopSource -notmatch "moveToPoint = @\('X','Y','Surface'\)" -or $agentDecisionLoopSource -notmatch "missionInput = @\('X','Y','DurationSeconds'\)" -or $agentObserverSource -notmatch 'schemaVersion\\":23' -or $agentObserverSource -notmatch 'questMarkerFlags' -or $agentObserverSource -notmatch 'OptionQuestData' -or $agentObserverSource -notmatch 'CanInteractWithAgent' -or $agentObserverSource -notmatch 'isInteractable' -or $agentObserverSource -notmatch 'targetPosition' -or $agentObserverSource -notmatch 'BuildMissionObservationJson' -or $agentObserverSource -notmatch 'combatType' -or $agentObserverSource -notmatch 'movementInput' -or $agentObserverSource -notmatch 'CameraBearing' -or $agentObserverSource -notmatch 'CameraElevation' -or $agentObserverSource -notmatch 'nativeFocus' -or $agentObserverSource -notmatch 'nearbySceneAgents' -or $agentObserverSource -notmatch 'BuildMissionNavigationObservationJson' -or $agentObserverSource -notmatch 'isPlayerControlled' -or $agentObserverSource -notmatch 'isAIControlled' -or $agentObserverSource -notmatch 'settlementOverlayCharacters' -or $agentProtocolSource -notmatch 'case "talkToSettlementHero"' -or $agentProtocolSource -notmatch 'case "visitSettlementHero"' -or $agentDecisionLoopSource -notmatch "talkToSettlementHero = @\('HeroId'\)" -or $agentDecisionLoopSource -notmatch "visitSettlementHero = @\('HeroId'\)") { throw 'W2-B land-point observation and W2-D native menu quest-marker and Mission camera/focus/input observations must coexist under the current schema.' }
+if ($agentCliSource -notmatch "'moveToPoint'" -or $agentCliSource -notmatch "'missionInput'" -or $agentCliSource -notmatch "ValidateSet\('land'\)" -or $agentProtocolSource -notmatch 'case "moveToPoint"' -or $agentProtocolSource -notmatch 'case "missionInput"' -or $agentProtocolSource -notmatch 'boundedLease' -or $agentProtocolSource -notmatch 'UpdateMissionInputLease' -or $agentProtocolSource -notmatch 'ReadRequiredFiniteDouble' -or $agentProtocolSource -notmatch 'ProcessTravel\(requestedPoint\)' -or $agentProtocolSource -notmatch 'naval/sea transition belongs to a separately tested adapter' -or $agentDecisionLoopSource -notmatch "moveToPoint = @\('X','Y','Surface'\)" -or $agentDecisionLoopSource -notmatch "missionInput = @\('X','Y','DurationSeconds'\)" -or $agentObserverSource -notmatch 'schemaVersion\\":25' -or $agentObserverSource -notmatch 'isWaitMenu' -or $agentObserverSource -notmatch 'isWaitActive' -or $agentObserverSource -notmatch 'storyModeEstablishClanStatus' -or $agentObserverSource -notmatch 'questMarkerFlags' -or $agentObserverSource -notmatch 'OptionQuestData' -or $agentObserverSource -notmatch 'CanInteractWithAgent' -or $agentObserverSource -notmatch 'isInteractable' -or $agentObserverSource -notmatch 'targetPosition' -or $agentObserverSource -notmatch 'BuildMissionObservationJson' -or $agentObserverSource -notmatch 'combatType' -or $agentObserverSource -notmatch 'movementInput' -or $agentObserverSource -notmatch 'CameraBearing' -or $agentObserverSource -notmatch 'CameraElevation' -or $agentObserverSource -notmatch 'nativeFocus' -or $agentObserverSource -notmatch 'nearbySceneAgents' -or $agentObserverSource -notmatch 'BuildMissionNavigationObservationJson' -or $agentObserverSource -notmatch 'isPlayerControlled' -or $agentObserverSource -notmatch 'isAIControlled' -or $agentObserverSource -notmatch 'settlementOverlayCharacters' -or $agentProtocolSource -notmatch 'case "talkToSettlementHero"' -or $agentProtocolSource -notmatch 'case "visitSettlementHero"' -or $agentDecisionLoopSource -notmatch "talkToSettlementHero = @\('HeroId'\)" -or $agentDecisionLoopSource -notmatch "visitSettlementHero = @\('HeroId'\)") { throw 'W2-B land-point observation and W2-D native menu quest-marker and Mission camera/focus/input observations must coexist under the current schema.' }
 if ($agentObserverSource -notmatch 'mapSettlementTargets' -or $agentObserverSource -notmatch 'item.IsActive && item.IsVisible' -or $agentProtocolSource -notmatch 'settlement.IsVisible' -or $agentProtocolSource -notmatch 'GetInteractionDataForMainParty') { throw 'W2-F must expose only native visible Settlement map targets and keep the move adapter constrained to visible, natively navigable targets.' }
 if ($agentObserverSource -notmatch 'mainHeroSkills' -or $agentObserverSource -notmatch 'Skills.All' -or $agentObserverSource -notmatch 'hero.GetSkillValue\(skill\)') { throw 'MainHero skills must come from Campaign skill objects and the native Hero.GetSkillValue calculation.' }
 if ($agentObserverSource -notmatch 'BuildMapSettlementTargetsJson' -or $agentProtocolSource -notmatch 'case "mapSettlementTargets"' -or $agentDecisionLoopSource -notmatch 'mapSettlementTargets = @\(\)' -or $agentProtocolSource -notmatch 'mapSettlementTargets requires the Campaign Map state') { throw 'Map targets must be exposed as an on-demand read-only Campaign Map observation tool, not repeated in every state snapshot.' }
@@ -246,7 +249,7 @@ if ($harnessScript -notmatch "'AgentHostCampaignLoopEvaluation' \{ @\('Preflight
     throw 'The Host campaign loop must remain opt-in and prove its bounded Native map-arrival contract, natural time progression, real local-model path, visual evidence and cleanup.'
 }
 if ($harnessScript -notmatch "'AgentHostVillageToolsQuestEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostVillageToolsQuestEvaluation'\) \}" -or
-    -not $harnessScript.Contains("effectiveSmokeTimeoutSeconds = if (`$Phase -in @('AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max(`$SmokeTimeoutSeconds, 240) }") -or
+    -not $harnessScript.Contains("effectiveSmokeTimeoutSeconds = if (`$Phase -in @('AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostCaptivityRecoveryEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max(`$SmokeTimeoutSeconds, 240) }") -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostVillageToolsQuestEvaluation'" -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'VerifyQuestInventoryDelta' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'village-tools-direct-quest-option-unavailable' -or
@@ -325,6 +328,21 @@ if ($harnessScript -notmatch "'AgentHostEstablishClanGoalPlannerEvaluation' \{ @
     $agentHostLiveModelLoopSource -notmatch 'FixtureUnchanged = \$fixtureUnchanged') {
     throw 'W7-N must remain opt-in, use a disposable original StoryMode save with the exact naturally active quest, make real FreeLLMAPI decisions only, verify four objectives against Journal/native values without gameplay writes, and preserve source/time/world evidence.'
 }
+if ($harnessScript -notmatch "'AgentHostCaptivityRecoveryEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostCaptivityRecoveryEvaluation'\) \}" -or
+    $harnessScript -match "'All' \{[^\r\n]*'AgentHostCaptivityRecoveryEvaluation'" -or
+    $harnessScript -notmatch 'CaptivityRecoveryFromExisting' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'ChronicleW7O-' -or
+    $agentHostLiveModelLoopSource -notmatch '\[switch\]\$CaptivityRecoveryLoop' -or
+    $agentHostLiveModelLoopSource -notmatch 'isWaitActive' -or
+    $agentHostLiveModelLoopSource -notmatch 'CaptivityRecoveryVerified' -or
+    $agentHostCampaignLoopSource -notmatch 'supportedCaptivityRecoveryGoal' -or
+    $agentHostCaptivityRecoveryLoopSource -notmatch 'ShouldPassivelyWait' -or
+    $agentHostCaptivityRecoveryLoopSource -notmatch 'captivity-recovery-current-menu-unsupported' -or
+    $agentHostCaptivityRecoveryLoopSource -notmatch 'CaptivityRecoveryNativeClient' -or
+    $agentHostDecisionCycleSource -notmatch 'CaptivityRecoverySystemPrompt' -or
+    $agentHostMailboxSource -notmatch 'ExecuteCaptivityRecoveryActionAsync') {
+    throw 'W7-O must remain opt-in, resume from an already captive active StoryMode source without starting a battle, separate explicit Play from passive waiting, use only enabled ransom options, replan after free-map verification, and clean its disposable copy.'
+}
 if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostBattleSimulationEvaluation'\) \}" -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostBattleSimulationEvaluation'" -or
     $agentHostCampaignLoopEvaluationSource -notmatch '\-BattleSimulationLoop' -or
@@ -374,9 +392,10 @@ if ($agentHostCampaignLoopEvaluationSource -notmatch '\[string\]\$CleanupPrepare
     $agentHostCampaignLoopEvaluationSource -notmatch 'StartsWith\(''ChronicleW7K-''' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'StartsWith\(''ChronicleW7L-''' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'StartsWith\(''ChronicleW7N-''' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'StartsWith\(''ChronicleW7O-''' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'Bannerlord process is running' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'Agent CLI session is active' -or
-    $agentHostCampaignLoopEvaluationSource -notmatch 'escaped the Harness-owned ChronicleW7K/W7L/W7N Game Saves boundary' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'escaped the Harness-owned ChronicleW7K/W7L/W7N/W7O Game Saves boundary' -or
     $agentHostCampaignLoopEvaluationSource -notmatch '\$staleSession\.saveName' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'Get-Process -Id \$stalePid' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'AgentCliStopOutput' -or

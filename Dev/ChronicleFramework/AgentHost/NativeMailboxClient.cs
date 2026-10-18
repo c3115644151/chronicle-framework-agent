@@ -5,7 +5,8 @@ using System.Text.Json.Nodes;
 
 namespace ChronicleFramework.AgentHost;
 
-internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeClient, IAgentHostBattleSimulationNativeClient, IAgentHostQuestDetailsNativeClient
+internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeClient, IAgentHostBattleSimulationNativeClient,
+    IAgentHostQuestDetailsNativeClient, IAgentHostCaptivityRecoveryNativeClient
 {
     private static readonly HashSet<string> SupplySliceActions = new(StringComparer.Ordinal)
     {
@@ -57,6 +58,17 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
     public Task<JsonDocument> ReadQuestDetailsAsync(string questId, CancellationToken cancellationToken)
     {
         return SendAsync("questDetails", BuildQuestDetailsArguments(questId), acceptedResponseExpected: false, cancellationToken);
+    }
+
+    public Task<JsonDocument> ExecuteCaptivityRecoveryActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+    {
+        if (action == "resume" && arguments.Count == 0)
+            return SendAsync("resume", arguments, acceptedResponseExpected: false, cancellationToken);
+        if (action == "menuSelect" && arguments.Count == 2 &&
+            arguments["menuId"] is JsonValue menuIdNode && menuIdNode.TryGetValue<string>(out var menuId) && !string.IsNullOrWhiteSpace(menuId) &&
+            arguments["optionId"] is JsonValue optionIdNode && optionIdNode.TryGetValue<string>(out var optionId) && !string.IsNullOrWhiteSpace(optionId))
+            return SendAsync("menuSelect", arguments, acceptedResponseExpected: false, cancellationToken);
+        throw new AgentHostException("native-action-not-in-captivity-recovery-scope", "Only explicit Native resume or a current menuSelect can be sent through the Captivity recovery adapter.");
     }
 
     internal static JsonObject BuildQuestDetailsArguments(string questId)

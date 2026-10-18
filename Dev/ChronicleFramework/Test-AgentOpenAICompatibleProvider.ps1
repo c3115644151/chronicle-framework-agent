@@ -146,7 +146,7 @@ try {
         [ordered]@{ action = 'tradeCancelChanges'; arguments = @() }
     )
     $tradeState = [ordered]@{
-        schemaVersion = 23
+        schemaVersion = 25
         campaignDay = 91077.401
         identity = [ordered]@{ heroId = 'main_hero'; heroName = $expectedHeroName; clanTier = 0 }
         economy = [ordered]@{ gold = 900; influence = 0; renown = 20 }

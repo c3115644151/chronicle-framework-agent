@@ -17,6 +17,7 @@ internal static class AgentHostCampaignLoop
     {
         "mapPartyTargets", "pursue", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone"
     };
+    internal static readonly HashSet<string> CaptivityRecoveryActions = new(StringComparer.Ordinal) { "resume", "menuSelect" };
     internal static readonly HashSet<string> AllSupportedActions = new(ApprovedActions.Concat(BattleSimulationActions), StringComparer.Ordinal);
 
     internal static IReadOnlyList<object> RunContractSelfTests()
@@ -40,10 +41,16 @@ internal static class AgentHostCampaignLoop
         {
             ["quests"] = new JsonArray(new JsonObject { ["id"] = "issue_64_quest" })
         });
+        var captiveControls = BuildGoalScopeClassificationControls(new JsonObject
+        {
+            ["context"] = new JsonObject { ["captivity"] = new JsonObject { ["isCaptive"] = true } },
+            ["quests"] = new JsonArray(new JsonObject { ["id"] = "rebuild_player_clan_storymode_quest" })
+        });
         if (storyQuestControls.Count != 6 || !storyQuestControls.Any(control => control?.GetValue<string>() == "supportedEstablishYourClanGoal") ||
-            unrelatedQuestControls.Count != 5 || unrelatedQuestControls.Any(control => control?.GetValue<string>() == "supportedEstablishYourClanGoal"))
+            unrelatedQuestControls.Count != 5 || unrelatedQuestControls.Any(control => control?.GetValue<string>() == "supportedEstablishYourClanGoal") ||
+            captiveControls.Count != 7 || !captiveControls.Any(control => control?.GetValue<string>() == "supportedCaptivityRecoveryGoal"))
             throw new AgentHostException("campaign-loop-self-test-establish-clan-gate-leaked", "The StoryMode planner classification must be listed only when the exact original Quest is currently observed.");
-        results.Add(new { scenario = "campaign-loop-offers-storymode-planner-only-for-exact-active-quest", passed = true });
+        results.Add(new { scenario = "campaign-loop-offers-storymode-planner-and-captivity-recovery-only-for-observed-prerequisites", passed = true });
         if (!AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("intermediate steps", StringComparison.Ordinal) ||
             !AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("not currently visible", StringComparison.Ordinal) ||
             !AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("BattleSimulation", StringComparison.Ordinal) ||
@@ -423,6 +430,23 @@ internal static class AgentHostCampaignLoop
                         priorTrace: trace,
                         priorProviderRouteHistory: providerRouteHistory);
                 }
+                if (goalClassification == "supported-captivity-recovery")
+                {
+                    trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
+                        providerStartedUtc, providerDoneUtc, providerStartedTicks, null));
+                    if (!requestedActions.SetEquals(CaptivityRecoveryActions) && !requestedActions.SetEquals(AllSupportedActions))
+                        throw new AgentHostException("captivity-recovery-action-set-unavailable", "The Campaign request does not include the exact approved Native captivity recovery action set.");
+                    if (client is not IAgentHostCaptivityRecoveryNativeClient captivityClient ||
+                        client is not IAgentHostQuestDetailsNativeClient questDetailsClient)
+                        throw new AgentHostException("captivity-recovery-native-client-unavailable", "The Native transport does not implement read-only Quest details and explicit Captivity recovery actions.");
+                    return await AgentHostCaptivityRecoveryLoop.RunAsync(
+                        request, client, captivityClient, questDetailsClient, provider, elapsed.Token,
+                        priorDecisions: decisionCount,
+                        priorPromptTokens: promptTokens,
+                        priorCompletionTokens: completionTokens,
+                        priorTrace: trace,
+                        priorProviderRouteHistory: providerRouteHistory);
+                }
                 if (!goalScopeClassified)
                 {
                     failure = "The model did not classify the configured goal before the Native action gate.";
@@ -610,6 +634,7 @@ internal static class AgentHostCampaignLoop
     {
         var controls = new JsonArray("supportedMapArrivalGoal", "supportedVillageToolsQuestGoal", "supportedBattleSimulationGoal", "supportedBattleAndCaptivityGoal");
         if (HasObservedEstablishYourClanQuest(currentState)) controls.Add("supportedEstablishYourClanGoal");
+        if (HasObservedPlayerCaptivity(currentState)) controls.Add("supportedCaptivityRecoveryGoal");
         controls.Add("unsupportedGoal");
         return controls;
     }
@@ -618,8 +643,12 @@ internal static class AgentHostCampaignLoop
         (state?["quests"] as JsonArray)?.OfType<JsonObject>().Any(quest =>
             string.Equals(ReadString(quest, "id"), "rebuild_player_clan_storymode_quest", StringComparison.Ordinal)) == true;
 
+    private static bool HasObservedPlayerCaptivity(JsonObject? state) =>
+        ReadBoolean(((state?["context"] as JsonObject)?["captivity"] as JsonObject), "isCaptive");
+
     internal static bool IsSupportedRequestedActionSet(HashSet<string> requestedActions) =>
-        requestedActions.SetEquals(ApprovedActions) || requestedActions.SetEquals(BattleSimulationActions) || requestedActions.SetEquals(AllSupportedActions);
+        requestedActions.SetEquals(ApprovedActions) || requestedActions.SetEquals(BattleSimulationActions) ||
+        requestedActions.SetEquals(CaptivityRecoveryActions) || requestedActions.SetEquals(AllSupportedActions);
 
     private static JsonObject BuildObservation(JsonObject native, JsonArray? targets, string? targetId, string? targetName, bool goalVerified)
     {

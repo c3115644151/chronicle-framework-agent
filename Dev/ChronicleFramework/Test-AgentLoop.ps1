@@ -112,7 +112,7 @@ $nativeMenuAndTradeCatalogVerified = (
     $tradeInventoryObserveAgainRejectedSafely
 )
 $supplyProfileState = [pscustomobject]@{
-    schemaVersion = 23
+    schemaVersion = 25
     identity = [pscustomobject]@{ heroId = 'main_hero' }
     party = [pscustomobject]@{ members = 6; sizeLimit = 20; food = 0.95; foodInventory = 0; foodChange = -0.3; dailyWage = 10; morale = 49; isMoving = $false }
     economy = [pscustomobject]@{ gold = 900; influence = 0; renown = 20 }
