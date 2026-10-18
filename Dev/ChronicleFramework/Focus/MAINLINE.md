@@ -8,12 +8,12 @@ MainHero是首个Agent的原生行动身体和基础设施，不等于首个产�
 
 产品纵向门禁从一个全新、自然创建且无预处理进度的StoryMode战役开始；玩家可以通过原版菜单建立存档/角色，AI从MainHero第一次进入稳定Campaign MapState时接管，不要求AI自动化主菜单和角色创建。若原版教程仍在进行，Agent继续使用原版入口完成到任务自然激活。真实模型随后自主完成“建立你的家族”(Establish Your Clan)四项目标：Gold 2000、达到当前藏身处战斗人数门槛、Renown 50、招募至少一名同伴。每项都以Quest Journal/Native状态和最终原版Quest完成后验核验；不注入Quest/资源/进度，不靠预设路线冒充自主运行。这是首个长程闭环，不声称覆盖骑砍所有玩法。
 
-Research Gate: **BLOCKED** for the fresh StoryMode-to-four-goal action/observation map; W1/W2's 182 ACT / 73 OBS player-interface baseline alone does not prove this longitudinal loop.
+Research Gate: **BLOCKED** until the fresh StoryMode-to-four-goal action/observation map is complete; W1/W2's 182 ACT / 73 OBS player-interface baseline alone does not prove this longitudinal loop. Research work remains active under the current W7 issue.
 Implementation Gate: **BLOCKED** for new MainHero gameplay code until the current W7 issue maps required Native affordances, gaps, time/failure boundaries, and verification for all four objectives.
 
 ## 当前MainHero纵向门禁
 
-Research Gate: **OPEN** for the natural fresh-StoryMode-to-`Establish Your Clan` route map; W1/W2's 182 core ACT and 73 OBS remain the human-player interface baseline, not proof of full StoryMode coverage.
+Research work: **ACTIVE; readiness not met** for the natural fresh-StoryMode-to-`Establish Your Clan` route map. W1/W2's 182 core ACT and 73 OBS remain the human-player interface baseline, not proof of full StoryMode coverage; gameplay implementation remains gated.
 Implementation Gate: **BLOCKED** for new gameplay C# until the four quest goals, tutorial/activation preconditions, reusable Native actions, real gaps, Campaign-time behavior, failure/recovery and outcome verification are mapped in the current Issue and mechanism contracts.
 
 该门禁不阻止对既有Host/Agent循环做真实模型评估或只读Harness诊断；门禁只阻止在目标动作范围未被事实/契约支撑前凭推测新增游戏能力。NPC/同伴独立行动的W8候选不进入本轮Research readiness判断。
