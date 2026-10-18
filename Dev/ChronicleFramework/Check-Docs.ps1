@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.236'
+$contractVersion = '7.238'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -250,7 +250,7 @@ if ($harnessScript -notmatch "'AgentHostCampaignLoopEvaluation' \{ @\('Preflight
     throw 'The Host campaign loop must remain opt-in and prove its bounded Native map-arrival contract, natural time progression, real local-model path, visual evidence and cleanup.'
 }
 if ($harnessScript -notmatch "'AgentHostVillageToolsQuestEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostVillageToolsQuestEvaluation'\) \}" -or
-    -not $harnessScript.Contains("effectiveSmokeTimeoutSeconds = if (`$Phase -in @('AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostCaptivityRecoveryEvaluation','AgentHostEstablishClanGoldSaleEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max(`$SmokeTimeoutSeconds, 240) }") -or
+    -not $harnessScript.Contains("effectiveSmokeTimeoutSeconds = if (`$Phase -in @('AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostEstablishClanAutonomyEvaluation','AgentHostCaptivityRecoveryEvaluation','AgentHostEstablishClanGoldSaleEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max(`$SmokeTimeoutSeconds, 240) }") -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostVillageToolsQuestEvaluation'" -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'VerifyQuestInventoryDelta' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'village-tools-direct-quest-option-unavailable' -or

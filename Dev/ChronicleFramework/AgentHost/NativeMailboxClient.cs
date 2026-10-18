@@ -7,7 +7,7 @@ namespace ChronicleFramework.AgentHost;
 
 internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeClient, IAgentHostBattleSimulationNativeClient,
     IAgentHostQuestDetailsNativeClient, IAgentHostCaptivityRecoveryNativeClient, IAgentHostGoldSaleNativeClient,
-    IAgentHostRecruitmentNativeClient
+    IAgentHostRecruitmentNativeClient, IAgentHostCompanionHiringNativeClient
 {
     private static readonly HashSet<string> SupplySliceActions = new(StringComparer.Ordinal)
     {
@@ -82,6 +82,64 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
     {
         ValidateRecruitmentAction(action, arguments);
         return SendAsync(action, arguments, acceptedResponseExpected: false, cancellationToken);
+    }
+
+    public Task<JsonDocument> ExecuteCompanionHiringActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+    {
+        ValidateCompanionHiringAction(action, arguments);
+        return SendAsync(action, arguments, acceptedResponseExpected: false, cancellationToken);
+    }
+
+    internal static void ValidateCompanionHiringAction(string action, JsonObject arguments)
+    {
+        static bool HasText(JsonObject value, string key) => value[key] is JsonValue node && node.TryGetValue<string>(out var text) && !string.IsNullOrWhiteSpace(text);
+        static bool IsIndex(JsonObject value, string key) => value[key] is JsonValue node && node.TryGetValue<int>(out var index) && index >= 0;
+        static bool HasOnlyKeys(JsonObject value, params string[] keys) => value.Count == keys.Length && keys.All(value.ContainsKey);
+        var valid = action switch
+        {
+            "missionSceneAgents" or "missionLeave" or "dialogueContinue" => arguments.Count == 0,
+            "menuSelect" => HasOnlyKeys(arguments, "menuId", "optionId") && HasText(arguments, "menuId") && HasText(arguments, "optionId"),
+            "missionNavigateToAgent" => (arguments.Count == 1 || arguments.Count == 2) && IsIndex(arguments, "agentIndex") &&
+                (!arguments.ContainsKey("durationSeconds") || arguments["durationSeconds"] is JsonValue durationNode && durationNode.TryGetValue<int>(out var duration) && duration is >= 1 and <= 20),
+            "missionInteract" => HasOnlyKeys(arguments, "agentIndex") && IsIndex(arguments, "agentIndex"),
+            "dialogueSelect" => HasOnlyKeys(arguments, "optionId") && HasText(arguments, "optionId"),
+            _ => false
+        };
+        if (!valid)
+            throw new AgentHostException("native-action-not-in-companion-hiring-scope", "The companion adapter accepts only observed Town/Tavern entry, local scene perception/navigation/interact, and current Native dialogue/leave actions.");
+    }
+
+    internal static IReadOnlyList<object> RunCompanionHiringActionContractSelfTests()
+    {
+        var valid = new (string Action, string Json)[]
+        {
+            ("menuSelect", "{\"menuId\":\"town_backstreet\",\"optionId\":\"town_tavern\"}"),
+            ("missionSceneAgents", "{}"),
+            ("missionNavigateToAgent", "{\"agentIndex\":4,\"durationSeconds\":8}"),
+            ("missionInteract", "{\"agentIndex\":4}"),
+            ("dialogueSelect", "{\"optionId\":\"player_companion_hire_response_1\"}"),
+            ("dialogueContinue", "{}"),
+            ("missionLeave", "{}")
+        };
+        foreach (var item in valid) ValidateCompanionHiringAction(item.Action, JsonNode.Parse(item.Json)!.AsObject());
+        foreach (var item in new (string Action, string Json)[]
+        {
+            ("missionSceneAgents", "{\"heroId\":\"unobserved\"}"),
+            ("missionNavigateToAgent", "{\"agentIndex\":-1}"),
+            ("missionNavigateToAgent", "{\"agentIndex\":4,\"durationSeconds\":21}"),
+            ("missionInteract", "{\"agentIndex\":4,\"heroId\":\"unobserved\"}"),
+            ("dialogueSelect", "{\"optionId\":\"\"}"),
+            ("missionLeave", "{\"forceEndMission\":true}")
+        })
+        {
+            try
+            {
+                ValidateCompanionHiringAction(item.Action, JsonNode.Parse(item.Json)!.AsObject());
+                throw new AgentHostException("native-companion-invalid-action-accepted", "The companion adapter accepted a hidden target, invalid navigation duration or extra argument.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "native-action-not-in-companion-hiring-scope") { }
+        }
+        return [new { scenario = "native-companion-adapter-is-limited-to-observed-current-settlement-mission-and-dialogue-actions", validCases = valid.Length, invalidCases = 6, passed = true }];
     }
 
     internal static void ValidateRecruitmentAction(string action, JsonObject arguments)

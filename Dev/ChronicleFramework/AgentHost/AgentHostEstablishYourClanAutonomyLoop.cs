@@ -8,7 +8,7 @@ namespace ChronicleFramework.AgentHost;
 internal static class AgentHostEstablishYourClanAutonomyLoop
 {
     private const string QuestId = "rebuild_player_clan_storymode_quest";
-    internal static readonly HashSet<string> InitiallyIntegratedObjectives = new(StringComparer.Ordinal) { "gold", "partySize", "renown" };
+    internal static readonly HashSet<string> InitiallyIntegratedObjectives = new(StringComparer.Ordinal) { "gold", "partySize", "renown", "companions" };
 
     internal delegate Task<JsonObject> ObjectiveExecutor(
         string objectiveId,
@@ -30,11 +30,11 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         };
         var catalog = AgentHostEstablishYourClanGoalLoop.BuildObjectiveActionCatalog(snapshot, InitiallyIntegratedObjectives);
         var selectable = catalog[0]?["argumentValues"]?["ObjectiveId"] as JsonArray;
-        if (selectable is null || selectable.Count != 3 ||
+        if (selectable is null || selectable.Count != 4 ||
             !selectable.Any(value => value?.GetValue<string>() == "gold") ||
             !selectable.Any(value => value?.GetValue<string>() == "partySize") ||
             !selectable.Any(value => value?.GetValue<string>() == "renown") ||
-            selectable.Any(value => value?.GetValue<string>() == "companions"))
+            !selectable.Any(value => value?.GetValue<string>() == "companions"))
             throw new AgentHostException("establish-clan-autonomy-catalog-failed", "The integrated EYC scheduler must offer only objective routes that exist in the current Host build.");
 
         var allMet = (JsonObject)snapshot.DeepClone();
@@ -47,6 +47,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         unsupportedOnly["gold"]!["met"] = true;
         unsupportedOnly["partySize"]!["met"] = true;
         unsupportedOnly["renown"]!["met"] = true;
+        unsupportedOnly["companions"]!["met"] = true;
         if (AgentHostEstablishYourClanGoalLoop.BuildObjectiveActionCatalog(unsupportedOnly, InitiallyIntegratedObjectives).Count != 0)
             throw new AgentHostException("establish-clan-autonomy-invented-route", "The scheduler must fail closed when only objectives without integrated Native executors remain.");
 
@@ -238,7 +239,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                                   !(failedContext.TryGetProperty("encounterActive", out var encounterActive) && encounterActive.ValueKind == JsonValueKind.True) &&
                                   !(failedContext.TryGetProperty("captivity", out var captivity) && captivity.ValueKind == JsonValueKind.Object &&
                                     captivity.TryGetProperty("isCaptive", out var captive) && captive.ValueKind == JsonValueKind.True);
-                    if (objectiveId == "partySize" && freeMap && termination is ("native-journal-refresh-pending" or "recruitment-route-unavailable"))
+                    if (objectiveId is "partySize" or "companions" && freeMap && termination is ("native-journal-refresh-pending" or "recruitment-route-unavailable" or "companion-route-unavailable"))
                     {
                         unavailableObjectives.Add(objectiveId);
                         trace.Add(new JsonObject { ["stage"] = "objective-route-blocked", ["objectiveId"] = objectiveId, ["termination"] = termination, ["failureCode"] = ReadString(child, "failureCode") });
