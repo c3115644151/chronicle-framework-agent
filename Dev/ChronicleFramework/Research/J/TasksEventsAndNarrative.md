@@ -126,6 +126,18 @@ StoryMode是独立Campaign mode内容，不是所有Sandbox战役必有的任务
 
 具体Mission入口例：Tutorial Quest `VillagersInNeed` 的救Headman步骤在StoryMode `SneakIntoTheVilla` Mission中，由MainAgent使用`IsMissionExit`的`PassageUsePoint`调用`OnHeadmanRescued`设置Quest内部救援标记；该3D动作目录为`ACT-G03-24`。本J域记录Quest阶段与后果关联，Mission内触发方式留G03，不再新增泛化“完成任务”ACT。回到Campaign后的Quest推进/成功结算时点仍需按该Quest完整生命周期核验。
 
+### 自然新档进入 Establish Your Clan 的 Tutorial 关键依赖
+
+按本机1.4.8.119303 `StoryMode.dll` 的 `TutorialPhaseCampaignBehavior`、`TutorialPhase`、教程 Quest 和 `FindHideoutTutorialQuest`调用链，可确认以下源码路径：
+
+1. 新战役第99号 `OnNewGameCreatedPartialFollowUp` 执行 `InitializeTutorial`：设置/加入长兄、创建指定村庄头人并准备教程粮食；Tutorial 状态是保存中的StoryMode阶段数据，不应仅凭地名或Quest标题推断。
+2. MainParty离开`tutorial_training_field`且教程阶段仍为`None`时，原版启动`TravelToVillageTutorialQuest`。完成后接`TalkToTheHeadmanTutorialQuest`；Headman对话启动`RecruitTroopsTutorialQuest`和`PurchaseGrainTutorialQuest`两条并行任务。两者的原版招募/市场入口已在H04/E02及其MAINLINE契约中分别记录。
+3. Headman任务完成后启动`LocateAndRescueTravellerTutorialQuest`。该Quest原生要求击败三个指定劫匪Party，需主队人数至少4；本Quest自定义遭遇菜单把`encounter_raiders_quest_send_troops`置为disabled，而`Attack!`走`MenuHelper.EncounterAttackConsequence`。这只证明自定义第一层选项状态；攻击后后续标准Encounter/BattleSimulation入口是否可用，需继续追到对应Native回调/运行验证，不能由普通Bandit菜单类推。
+4. 该Quest完成后启动`FindHideoutTutorialQuest`并指向教程藏身处；菜单提供原版`Attack`进入Hideout流程。藏身处Mission由`HideoutMissionController`掌管，胜利后才会打开Radagos对话；对话有决斗或“让手下攻击”的分支，来源分别进入该控制器的duel/battle mode。此为Campaign Mission/Encounter与自定义StoryMode内容，不等于普通地图坐镇战斗已覆盖。
+5. 成功击败/解决Radagos后，Quest经过兄长对话、家族名字TextInquiry、`BannerEditorState`和藏身处物品菜单；任务 `OnCompleteWithSuccess` 调 `MainStoryLine.CompleteTutorialPhase(false)`，后者发出`OnStoryModeTutorialEnded`并建立FirstPhase。原版`FirstPhaseCampaignBehavior.OnStoryModeTutorialEnded`随后自然启动`RebuildPlayerClanQuest`（Establish Your Clan）。Tutorial结束后还可能跟着独立的 `VillagersInNeed` Stealth Tutorial；它不是同一个Quest，是否影响家族目标循环需按当时Native状态处理。
+
+实现边界：现有Bridge虽有局部Mission场景观察/接近/互动接口，但`AgentHostCampaignLoop`允许动作及`AgentHostRuntimeController`请求均没有把Mission动作接入StoryMode目标循环；也没有`TextInquiry`/`BannerEditorState`和上述Tutorial任务续接的Host运行证据。因此“已有游戏内动作”并不证明新档路线可通。下一步必须补完Attack后的真实Encounter选项、Hideout Mission的玩家可见动作/胜负返回、文本输入/旗帜确认状态，以及Tutorial跳过是否属于玩家开局设置的独立原版路径；若自然AI闭环要涵盖未跳过教程，Mission阶段是明确的实现缺口，不得用预备`save002`测试替代。
+
 来源：`StoryMode.dll`的 `StoryModeManager/MainStoryLine`、`TutorialPhaseCampaignBehavior`、First/Second/Third phase Quest behaviors/QuestTasks、`StoryModeEncounterGameMenuModel`与Campaign `QuestBase`；版本v1.4.8.119303。未知Story/New Campaign各设置对流程的精确删减、分支是否会阻塞/过期、跳过/回档时任务数据的存取，以及所有剧情分支完整玩家操作/失败恢复矩阵。
 
 ## 跨域关系与当前适配边界
