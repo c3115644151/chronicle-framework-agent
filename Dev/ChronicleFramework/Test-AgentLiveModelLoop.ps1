@@ -1070,6 +1070,12 @@ try {
         CaptivityRecoveryFinalState = if ($CaptivityRecoveryLoop) { $loopTrace.finalNativeState.state.context } else { $null }
         CaptivityRecoveryResultKind = if ($CaptivityRecoveryLoop) { [string]$loopTrace.resultKind } else { $null }
         CaptivityRecoveryObjectiveSelection = if ($CaptivityRecoveryLoop) { $loopTrace.objectiveSelection } else { $null }
+        CaptivityRecoveryPlannerStatus = if ($CaptivityRecoveryLoop) { [string]$loopTrace.status } else { $null }
+        CaptivityRecoveryPlannerResultKind = if ($CaptivityRecoveryLoop) { [string]$loopTrace.resultKind } else { $null }
+        CaptivityRecoveryObjectiveSnapshot = if ($CaptivityRecoveryLoop) { $loopTrace.objectiveSnapshot } else { $null }
+        CaptivityRecoveryJournalObjectiveSnapshot = if ($CaptivityRecoveryLoop) { $loopTrace.journalObjectiveSnapshot } else { $null }
+        CaptivityRecoveryTargetConsistency = if ($CaptivityRecoveryLoop) { $loopTrace.targetConsistency } else { $null }
+        CaptivityRecoveryPlannerTermination = if ($CaptivityRecoveryLoop) { $loopTrace.termination } else { $null }
         CaptivityRecoveryPlannerVerification = if ($CaptivityRecoveryLoop) { $plannerVerification } else { $null }
         BattleSimulationVerified = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { [bool]$battleSimulationVerified } else { $null }
         BattleOutcome = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { $battleOutcome } else { $null }
@@ -1141,6 +1147,12 @@ catch {
             CaptivityRecoveryChoiceOptionId = if ($CaptivityRecoveryLoop -and $loopTrace) { [string]$loopTrace.captivityChoiceOptionId } else { $null }
             CaptivityRecoveryFinalState = if ($CaptivityRecoveryLoop -and $loopTrace) { $loopTrace.finalNativeState.state.context } else { $null }
             CaptivityRecoveryObjectiveSelection = if ($CaptivityRecoveryLoop -and $loopTrace) { $loopTrace.objectiveSelection } else { $null }
+            CaptivityRecoveryPlannerStatus = if ($CaptivityRecoveryLoop -and $loopTrace) { [string]$loopTrace.status } else { $null }
+            CaptivityRecoveryPlannerResultKind = if ($CaptivityRecoveryLoop -and $loopTrace) { [string]$loopTrace.resultKind } else { $null }
+            CaptivityRecoveryObjectiveSnapshot = if ($CaptivityRecoveryLoop -and $loopTrace) { $loopTrace.objectiveSnapshot } else { $null }
+            CaptivityRecoveryJournalObjectiveSnapshot = if ($CaptivityRecoveryLoop -and $loopTrace) { $loopTrace.journalObjectiveSnapshot } else { $null }
+            CaptivityRecoveryTargetConsistency = if ($CaptivityRecoveryLoop -and $loopTrace) { $loopTrace.targetConsistency } else { $null }
+            CaptivityRecoveryPlannerTermination = if ($CaptivityRecoveryLoop -and $loopTrace) { $loopTrace.termination } else { $null }
             CaptivityRecoveryPlannerVerification = if ($CaptivityRecoveryLoop) { $plannerVerification } else { $null }
             EstablishYourClanPlannerVerified = if ($EstablishYourClanGoalPlanner) { [bool]$plannerVerified } else { $null }
             EstablishYourClanObjectiveSelection = if ($EstablishYourClanGoalPlanner -and $loopTrace) { $loopTrace.selection } else { $null }

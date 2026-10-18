@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.227'
+$contractVersion = '7.228'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -335,6 +335,7 @@ if ($harnessScript -notmatch "'AgentHostCaptivityRecoveryEvaluation' \{ @\('Pref
     $agentHostLiveModelLoopSource -notmatch '\[switch\]\$CaptivityRecoveryLoop' -or
     $agentHostLiveModelLoopSource -notmatch 'isWaitActive' -or
     $agentHostLiveModelLoopSource -notmatch 'CaptivityRecoveryVerified' -or
+    $agentHostLiveModelLoopSource -notmatch 'CaptivityRecoveryTargetConsistency' -or
     $agentHostCampaignLoopSource -notmatch 'supportedCaptivityRecoveryGoal' -or
     $agentHostCaptivityRecoveryLoopSource -notmatch 'ShouldPassivelyWait' -or
     $agentHostCaptivityRecoveryLoopSource -notmatch 'captivity-recovery-current-menu-unsupported' -or
