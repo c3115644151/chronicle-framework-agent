@@ -6,7 +6,7 @@ using System.Text.Json.Nodes;
 namespace ChronicleFramework.AgentHost;
 
 internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeClient, IAgentHostBattleSimulationNativeClient,
-    IAgentHostQuestDetailsNativeClient, IAgentHostCaptivityRecoveryNativeClient
+    IAgentHostQuestDetailsNativeClient, IAgentHostCaptivityRecoveryNativeClient, IAgentHostGoldSaleNativeClient
 {
     private static readonly HashSet<string> SupplySliceActions = new(StringComparer.Ordinal)
     {
@@ -69,6 +69,66 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             arguments["optionId"] is JsonValue optionIdNode && optionIdNode.TryGetValue<string>(out var optionId) && !string.IsNullOrWhiteSpace(optionId))
             return SendAsync("menuSelect", arguments, acceptedResponseExpected: false, cancellationToken);
         throw new AgentHostException("native-action-not-in-captivity-recovery-scope", "Only explicit Native resume or a current menuSelect can be sent through the Captivity recovery adapter.");
+    }
+
+    public Task<JsonDocument> ExecuteGoldSaleActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+    {
+        ValidateGoldSaleAction(action, arguments);
+        return SendAsync(action, arguments, acceptedResponseExpected: false, cancellationToken);
+    }
+
+    internal static void ValidateGoldSaleAction(string action, JsonObject arguments)
+    {
+        static bool HasOnlyKeys(JsonObject value, params string[] keys) => value.Count == keys.Length && keys.All(value.ContainsKey);
+        static bool HasText(JsonObject value, string key) => value[key] is JsonValue node && node.TryGetValue<string>(out var text) && !string.IsNullOrWhiteSpace(text);
+
+        var valid = action switch
+        {
+            "mapSettlementTargets" or "tradeOptions" or "tradeConfirm" or "tradeCancel" or "tradeCancelChanges" => arguments.Count == 0,
+            "move" => HasOnlyKeys(arguments, "settlementId") && HasText(arguments, "settlementId"),
+            "menuSelect" => HasOnlyKeys(arguments, "menuId", "optionId") && HasText(arguments, "menuId") && HasText(arguments, "optionId"),
+            "trade" => HasOnlyKeys(arguments, "direction", "itemViewModelId", "inventorySide", "amount") &&
+                arguments["direction"] is JsonValue directionNode && directionNode.TryGetValue<string>(out var direction) && direction == "sell" &&
+                arguments["inventorySide"] is JsonValue sideNode && sideNode.TryGetValue<string>(out var side) && side == "PlayerInventory" &&
+                HasText(arguments, "itemViewModelId") && arguments["amount"] is JsonValue amountNode && amountNode.TryGetValue<int>(out var amount) && amount == 1,
+            _ => false
+        };
+        if (!valid) throw new AgentHostException("native-action-not-in-gold-sale-scope", "The W7-P Native adapter allows only safe movement, current Town trade navigation, one exact sale, transaction confirmation, or explicit cancellation.");
+    }
+
+    internal static IReadOnlyList<object> RunGoldSaleActionContractSelfTests()
+    {
+        var validCases = new (string Action, string Json)[]
+        {
+            ("mapSettlementTargets", "{}"),
+            ("move", "{\"settlementId\":\"visible-safe-town\"}"),
+            ("menuSelect", "{\"menuId\":\"town\",\"optionId\":\"trade\"}"),
+            ("tradeOptions", "{}"),
+            ("trade", "{\"direction\":\"sell\",\"itemViewModelId\":\"current-goods-id\",\"inventorySide\":\"PlayerInventory\",\"amount\":1}"),
+            ("tradeConfirm", "{}"),
+            ("tradeCancel", "{}"),
+            ("tradeCancelChanges", "{}")
+        };
+        foreach (var item in validCases) ValidateGoldSaleAction(item.Action, JsonNode.Parse(item.Json)!.AsObject());
+
+        var invalidCases = new (string Action, string Json)[]
+        {
+            ("pause", "{}"),
+            ("trade", "{\"direction\":\"buy\",\"itemViewModelId\":\"market-goods\",\"inventorySide\":\"OtherInventory\",\"amount\":1}"),
+            ("trade", "{\"direction\":\"sell\",\"itemViewModelId\":\"current-goods-id\",\"inventorySide\":\"PlayerInventory\",\"amount\":2}"),
+            ("trade", "{\"direction\":\"sell\",\"itemViewModelId\":\"current-goods-id\",\"inventorySide\":\"OtherInventory\",\"amount\":1}"),
+            ("move", "{\"settlementId\":\"visible-safe-town\",\"resume\":true}")
+        };
+        foreach (var item in invalidCases)
+        {
+            try
+            {
+                ValidateGoldSaleAction(item.Action, JsonNode.Parse(item.Json)!.AsObject());
+                throw new AgentHostException("native-gold-sale-invalid-action-accepted", "The Gold sale mailbox accepted a buy, bulk quantity, wrong inventory side, or clock action.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "native-action-not-in-gold-sale-scope") { }
+        }
+        return [new { scenario = "gold-sale-native-mailbox-allows-only-one-current-player-inventory-sale-and-no-clock-controls", validCases = validCases.Length, invalidCases = invalidCases.Length, passed = true }];
     }
 
     internal static JsonObject BuildQuestDetailsArguments(string questId)

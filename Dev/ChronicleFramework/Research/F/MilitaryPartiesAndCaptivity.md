@@ -52,6 +52,8 @@ Army leader `mapPartyComposition`窄运行 `TestResults/20260927-140439/Temp/Map
 
 Think 时清空 `PartyThinkParams` 并派发 `CampaignEvents.AiHourlyTick(party, thinkParams)`。注册的各 AI Behavior 向参数中添加 `AIBehaviorData` 和分数；候选记录行为类型、目标 Party/Settlement 或位置、NavigationType/港口参数及是否计划聚集 Army。`AiPartyThinkBehavior` 选择最高分候选，并另保留一个不要求 Gather Army 的候选，之后结合当前 Army、目标、ObjectiveValue、DoNotChangeBehavior 和随机阈值选择是否切换。
 
+当前安装版公开接口细节：`AIBehaviorData`为公开struct，字段包括`Party:IMapPoint`、`Position:CampaignVec2`、`AiBehavior`、`WillGatherArmy`、`IsFromPort`、`IsTargetingPort`和`NavigationType`；构造形式分别接受地图实体目标或位置目标。`PartyThinkParams`对外暴露`AddBehaviorScore`、`SetBehaviorScore`、`TryGetBehaviorScore`和候选只读列表，同时有`DoNotChangeBehavior`、`CurrentObjectiveValue`、Army强度等控制/诊断字段。`AiPartyThinkBehavior.PartyHourlyAiTick`先跳过`Ai.IsDisabled`或`Ai.DoNotMakeNewDecisions`的Party，再在重想时同步派发`AiHourlyTick`，之后读取分数并决定是否调用`SetPartyAiAction`。这些是Campaign AI内部目标选择接口，不是人类玩家的UI输入。
+
 因此观察到“一个 Lord Party 当前正围城/进攻”通常只说明 Campaign AI 当前已接受某个行为目标；具体行为候选来自多个 Behavior 评分，而不是 MobileParty 自己存有一个完整自然语言计划。目标会因目标消失、攻守态势、关系/战争变化、Settlement易主、Army状态和重新评估随机门限而被放弃/替换。
 
 ### 目标决定怎样落成地图行为
@@ -62,7 +64,7 @@ Think 时清空 `PartyThinkParams` 并派发 `CampaignEvents.AiHourlyTick(party,
 
 Chronicle 不读取 NPC的候选分数、`ThinkParams`、ObjectiveValue、Rethink标志、Initiative、AI禁止决策标志或目标评估理由；附近Party摘要只呈现有限状态。Protocol对 MainParty 有少量 move/pursue/hold/Wait动作，不具备向任意NPC Party设置目标/行为或控制其行动分值的动作。原版 AI 的 Campaign执行与 Chronicle Agent的玩家动作适配是两层系统。
 
-证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `AiPartyThinkBehavior`、`PartyThinkParams`、`AIBehaviorData`、`MobilePartyAi`、`DefaultMobilePartyAIModel`、`CampaignEventDispatcher.AiHourlyTick`、`SetPartyAiAction`；Chronicle `AgentObserver.cs`、`AgentProtocol.cs`。源码版本 v1.4.8.119303；未采集不同真实Party AI Think的完整运行轨迹。
+证据：当前安装 `TaleWorlds.CampaignSystem.dll` 的 `AiPartyThinkBehavior`、`PartyThinkParams`、`AIBehaviorData`、`MobilePartyAi`、`DefaultMobilePartyAIModel`、`CampaignEventDispatcher.AiHourlyTick`、`SetPartyAiAction`；使用本机`ilspycmd`对v1.4.8.119303 DLL读取类型/方法签名；Chronicle `AgentObserver.cs`、`AgentProtocol.cs`。未采集不同真实Party AI Think的完整运行轨迹。
 
 未知项：具体 AI Behavior 对各候选的评分表、模型权重与每种Party专属冷却/禁用门禁尚未全部拆开；AI HourCounter在各 Campaign 模式/地图tick速率下的精确自然时间映射；多队伍同时通过随机决策门限时 Army/Settlement目标竞争次序；Mod新增Behavior的注册和评分合并影响。
 

@@ -18,7 +18,11 @@ internal static class AgentHostCampaignLoop
         "mapPartyTargets", "pursue", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone"
     };
     internal static readonly HashSet<string> CaptivityRecoveryActions = new(StringComparer.Ordinal) { "resume", "menuSelect" };
-    internal static readonly HashSet<string> AllSupportedActions = new(ApprovedActions.Concat(BattleSimulationActions), StringComparer.Ordinal);
+    internal static readonly HashSet<string> GoldSaleActions = new(StringComparer.Ordinal)
+    {
+        "mapSettlementTargets", "move", "menuSelect", "tradeOptions", "trade", "tradeConfirm", "tradeCancel", "tradeCancelChanges"
+    };
+    internal static readonly HashSet<string> AllSupportedActions = new(ApprovedActions.Concat(BattleSimulationActions).Concat(GoldSaleActions), StringComparer.Ordinal);
 
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
@@ -46,15 +50,19 @@ internal static class AgentHostCampaignLoop
             ["context"] = new JsonObject { ["captivity"] = new JsonObject { ["isCaptive"] = true } },
             ["quests"] = new JsonArray(new JsonObject { ["id"] = "rebuild_player_clan_storymode_quest" })
         });
-        if (storyQuestControls.Count != 6 || !storyQuestControls.Any(control => control?.GetValue<string>() == "supportedEstablishYourClanGoal") ||
+        if (storyQuestControls.Count != 7 || !storyQuestControls.Any(control => control?.GetValue<string>() == "supportedEstablishYourClanGoal") ||
+            !storyQuestControls.Any(control => control?.GetValue<string>() == "supportedEstablishClanGoldSaleGoal") ||
             unrelatedQuestControls.Count != 5 || unrelatedQuestControls.Any(control => control?.GetValue<string>() == "supportedEstablishYourClanGoal") ||
-            captiveControls.Count != 7 || !captiveControls.Any(control => control?.GetValue<string>() == "supportedCaptivityRecoveryGoal"))
+            unrelatedQuestControls.Any(control => control?.GetValue<string>() == "supportedEstablishClanGoldSaleGoal") ||
+            captiveControls.Count != 8 || !captiveControls.Any(control => control?.GetValue<string>() == "supportedCaptivityRecoveryGoal") ||
+            !captiveControls.Any(control => control?.GetValue<string>() == "supportedEstablishClanGoldSaleGoal"))
             throw new AgentHostException("campaign-loop-self-test-establish-clan-gate-leaked", "The StoryMode planner classification must be listed only when the exact original Quest is currently observed.");
         results.Add(new { scenario = "campaign-loop-offers-storymode-planner-and-captivity-recovery-only-for-observed-prerequisites", passed = true });
         if (!AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("intermediate steps", StringComparison.Ordinal) ||
             !AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("not currently visible", StringComparison.Ordinal) ||
             !AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("BattleSimulation", StringComparison.Ordinal) ||
-            !AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("rebuild_player_clan_storymode_quest", StringComparison.Ordinal))
+            !AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("rebuild_player_clan_storymode_quest", StringComparison.Ordinal) ||
+            !AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("currently held, currently sellable item", StringComparison.Ordinal))
             throw new AgentHostException("campaign-loop-self-test-classifier-confuses-scope-with-availability", "Goal scope classification must treat supported actions as intermediate steps and not depend on target availability.");
         results.Add(new { scenario = "campaign-loop-classification-is-independent-of-target-availability", passed = true });
         var postClassificationActions = BuildActionCatalog(null, moving: false, goalVerified: false);
@@ -447,6 +455,22 @@ internal static class AgentHostCampaignLoop
                         priorTrace: trace,
                         priorProviderRouteHistory: providerRouteHistory);
                 }
+                if (goalClassification == "supported-establish-clan-gold-sale")
+                {
+                    trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
+                        providerStartedUtc, providerDoneUtc, providerStartedTicks, null));
+                    if (!requestedActions.SetEquals(GoldSaleActions) && !requestedActions.SetEquals(AllSupportedActions))
+                        throw new AgentHostException("establish-clan-gold-sale-action-set-unavailable", "The Campaign request does not include the exact bounded Gold sale action set.");
+                    if (client is not IAgentHostGoldSaleNativeClient goldSaleClient)
+                        throw new AgentHostException("establish-clan-gold-sale-native-client-unavailable", "The Native transport does not implement the original Trade sale and active StoryMode Journal protocol.");
+                    return await AgentHostEstablishClanGoldSaleLoop.RunAsync(
+                        request, client, goldSaleClient, provider, elapsed.Token,
+                        priorDecisions: decisionCount,
+                        priorPromptTokens: promptTokens,
+                        priorCompletionTokens: completionTokens,
+                        priorTrace: trace,
+                        priorProviderRouteHistory: providerRouteHistory);
+                }
                 if (!goalScopeClassified)
                 {
                     failure = "The model did not classify the configured goal before the Native action gate.";
@@ -633,7 +657,11 @@ internal static class AgentHostCampaignLoop
     internal static JsonArray BuildGoalScopeClassificationControls(JsonObject? currentState = null)
     {
         var controls = new JsonArray("supportedMapArrivalGoal", "supportedVillageToolsQuestGoal", "supportedBattleSimulationGoal", "supportedBattleAndCaptivityGoal");
-        if (HasObservedEstablishYourClanQuest(currentState)) controls.Add("supportedEstablishYourClanGoal");
+        if (HasObservedEstablishYourClanQuest(currentState))
+        {
+            controls.Add("supportedEstablishYourClanGoal");
+            controls.Add("supportedEstablishClanGoldSaleGoal");
+        }
         if (HasObservedPlayerCaptivity(currentState)) controls.Add("supportedCaptivityRecoveryGoal");
         controls.Add("unsupportedGoal");
         return controls;
@@ -648,7 +676,8 @@ internal static class AgentHostCampaignLoop
 
     internal static bool IsSupportedRequestedActionSet(HashSet<string> requestedActions) =>
         requestedActions.SetEquals(ApprovedActions) || requestedActions.SetEquals(BattleSimulationActions) ||
-        requestedActions.SetEquals(CaptivityRecoveryActions) || requestedActions.SetEquals(AllSupportedActions);
+        requestedActions.SetEquals(CaptivityRecoveryActions) || requestedActions.SetEquals(GoldSaleActions) ||
+        requestedActions.SetEquals(AllSupportedActions);
 
     private static JsonObject BuildObservation(JsonObject native, JsonArray? targets, string? targetId, string? targetName, bool goalVerified)
     {

@@ -1,6 +1,10 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.232
+Contract version: 7.234
+
+## 当前产品边界
+
+自2026-10-18起，产品目标为“AI作为独立Campaign Actor行动、玩家仍控制MainHero”，而不是让Agent接管MainHero完成战役；StoryMode Gold/Establish Your Clan及W7旧主角路线均为历史原型或压力测试。当前唯一产品工作项及验收以GitHub Project/W7-P #129为准。下文保留的W7 MainHero实现/运行记录用于追溯既有Native适配，不能据此推断Actor绑定、NPC观察、原版AI仲裁或Actor独立行动已经实现。
 
 失败测试的录像也要经过证据收尾：按事件抽取关键帧，并把均匀联系表的样本数限制为最多64帧。只有录像无法解码或关键证据无法生成时才保留原始MP4；联系表和事件索引齐全后删除原片。这样保留的是能解释测试结果的证据，不是整段重复播放的大文件。
 
@@ -32,6 +36,8 @@ W7-K的真实模型长程验证为独立opt-in `AgentHostVillageToolsQuestEvalua
 W7-N的StoryMode目标选择器为独立opt-in `AgentHostEstablishClanGoalPlannerEvaluation`，不并入`All`。Native观察明确区分非StoryMode、StoryMode主线尚未激活、活动、历史完成、历史失败；StoryMode通过官方`JournalLogEntry`判定结束结果，历史记录缺失时返回unknown。只有当前观察确有活动原版Quest `rebuild_player_clan_storymode_quest`时才开放范围分类；通过独立只读`IAgentHostQuestDetailsNativeClient`读取同一任务的Journal数值。原版`RebuildPlayerClanQuest.UpdateProgresses()`用四个缓存JournalLog.CurrentProgress判定Quest成功，且当前Journal值正是玩家任务界面所见；因此Planner从四个Journal stage的current/target构造唯一权威的任务进度快照。实时Gold/Party/Renown/Companion与Journal不同步时只附带诊断差异，不覆盖当前任务进度、不单独阻塞模型、不据此宣称任务完成。藏身处人数以Quest Journal记录的原版target为准，不用模型实时重算值替代当前日志目标。模型只可在当前Journal未完成的四项目标中选一项，Host不把这个内部选择转换成游戏动作，也不将计划结果称为Quest完成。该阶段必须用FreeLLMAPI真实路由、已自然激活该Quest的disposable StoryMode存档；只读planner验证前后Campaign时间、Gold、队伍、Renown、Quest和源存档不变；W7-O的恢复后重规划允许记录由原版捕获/释放事件造成的Journal/实时Roster差异。派生档/游戏/Host/CLI清理，且保留屏幕连续帧证据。旧StoryMode起点可能缺少ChronicleFramework模块时，Harness可仅在游戏启动模块列表中追加该插件，存档本身仍保持逐字节副本；如RGL错误日志报告未处理启动异常，Agent CLI会保存该进程/模块集/异常的收据，停止准确的测试进程树并恢复EngineConfig，不等待普通加载超时。Historical completed/failed分支已由源码核实，但尚未由真实完成/失败StoryMode存档作运行验收。
 
 W7-O现从Agent已接管的活动StoryMode存档进入已有Native `prisoner_wait`（不是新发起Battle）的狭窄恢复测试。只在Native status仍captured、Wait菜单无选项且raw时间为Stop时列出独立的原版`resume`动作，必须以当前`isWaitMenu/isWaitActive`再核资格；时间已自然流动时由Host只读轮询，不让模型重复设置时钟。赎金只使用当前Native菜单中enabled的原版接受/拒绝选择，并以当轮金额和Gold作为模型输入。已对照本机`PlayerCaptivityCampaignBehavior.AddGameMenus`完整枚举原版Captivity继续/赎金页；只有Native确认当前页面及当前enabled选项时才会提交`menuSelect`，该集合与各回调在Research/F及MAINLINE契约中逐项记录。Native原版菜单回调本身可能退出等待、恢复`LastTimeControlMode`、释放Hero或返回Captivity wait；Host把回执后的时钟/脱俘状态作为原版副作用重新观察，不视作自身clock action。获释后先按原版JournalLog当前/目标规划一项未完成目标，再做一次只读Native后验确认；返回结果分别保存Journal与live metric差异，不能把选择目标说成任务进度已更新。此动作不包含新Battle、即时战斗、状态写入或目标达成声明。
+
+历史 MainHero 原型W7-P `AgentHostEstablishClanGoldSaleEvaluation`是单笔Gold目标销售的独立opt-in真实模型切片，不并入`All`，不等于完成Gold 2000或整个StoryMode任务。默认自然StoryMode来源为现有`save002`（可用`StoryModePlannerSourceSaveName`指定别的保存档）；若它从Captivity开始，GoldSale Host在同一决策运行中复用已验证的W7-O Captivity流程先回到自由Map，再继续安全Town移动与Native Trade。只开放本轮Native Trade可见、可转让、价格为正的PlayerInventory Goods报价，一件、一个单位、原版SPItemVM Draft及Done；来源/库存/金币不得注入。若Native刚接受普通移动后暂时显示目标已设置但`isMoving=false`，Host只允许一次1秒只读观察来跨过原版状态转换；测试证明后续Native状态才变为`isMoving=true`，但移动开始后的完整真实Gold sale没有通过。此独立phase仅保留作历史/可能复用的Native交易试验，不再是当前产品路径；不得将其视作AI Actor能力或StoryMode产品验收。
 
 W7-K完整阶段不再先额外运行一次真实模型冒烟：同一免费路由上的前置调用会重复战役首轮目标分类并消耗可用额度。阶段仍先做只读FreeLLMAPI目录/执行状态预检、构建、游戏Smoke和不调用模型的AgentHost包/Provider合同回归；随后在实际Campaign loop中执行唯一首轮真实目标分类，只有模型明确支持VillageNeedsTools目标后才会发出Native动作。若网关状态预检通过但实时请求随后限流/失败，Harness安全停止且不执行Native动作；结果仍算Provider/完整纵切片失败，而非任务成功。`AgentHostProvider`真实模型冒烟保留为单独opt-in诊断阶段，不在同一Quest评测前重复调用。实际运行的模型回复、路由、token、Native后验、连续录像和清理证据由Quest收据统一记录。
 
@@ -107,12 +113,9 @@ Smoke的FinishedAll/AssemblyLoaded/CrashDetected必须是Boolean；日志先转�
 
 ## 目标与边界
 
-Chronicle 当前服务自主战役Agent产品及其验证工具链：
+Chronicle 当前的产品方向是 AI-native Calradia Campaign Actor：玩家控制 MainHero，AI在同一原版Campaign中拥有独立的Hero/Party/Clan身份、长期目标及经Native后果核验的行动循环。它不应退化为纯聊天NPC，也不再把“LLM代替玩家完成StoryMode任务”当作产品终态；产品范围、历史与当前决定、事实/未知见`Focus/MAINLINE.md`，工作次序由GitHub Project维护。
 
-1. 交付玩家可安装、在游戏内配置和启动的Agent Mod，让AI自主观察当前战役、决定行动、通过原版入口执行并核对结果；产品范围、机制事实和未验证边界见`Focus/MAINLINE.md`，工作次序由GitHub Project维护。
-2. 维护可无人值守验证上述产品的本地Harness，隔离一次性夹具与正式存档，提供可信的原生状态、进程、日志及必要视觉证据。
-
-Campaign Agent Bridge是产品的游戏内适配层，负责观察、原版动作执行和会话绑定；外部Host负责模型决策与运行监护。Harness专用诊断、造景和故障注入只服务验证，不能进入普通Agent动作目录。具体玩法设计按相关研究与`DESIGN.md`的职责维护，工程测试夹具不能替代玩家产品目标。
+工程同时维护可无人值守验证产品的本地Harness：隔离一次性夹具与正式存档，提供可信的原生状态、进程、日志及必要视觉证据。游戏内Bridge负责受限Actor观察、动作分发和身份会话绑定；Agent Host负责模型决策、长期目标状态及运行监护。当前大多数Bridge接口仍硬编码MainHero/MainParty，因此不能因Host闭环已存在就宣称NPC Actor可用。Harness专用诊断、造景和故障注入只服务验证，不能进入普通Agent动作目录；工程测试夹具不能替代玩家产品目标。
 
 ## 单一事实来源
 

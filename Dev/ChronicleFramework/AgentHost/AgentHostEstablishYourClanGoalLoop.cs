@@ -268,7 +268,7 @@ internal static class AgentHostEstablishYourClanGoalLoop
         }
     }
 
-    private static JsonArray BuildJournalObjectives(JsonObject questData)
+    internal static JsonArray BuildJournalObjectives(JsonObject questData)
     {
         if (questData["journalStages"] is not JsonArray stages)
             throw new AgentHostException("establish-clan-journal-objectives-missing", "The observed Quest Journal does not contain its objective list.");
@@ -294,7 +294,7 @@ internal static class AgentHostEstablishYourClanGoalLoop
         return result;
     }
 
-    private static JsonObject BuildObjectiveSnapshot(JsonArray journalObjectives)
+    internal static JsonObject BuildObjectiveSnapshot(JsonArray journalObjectives)
     {
         var result = new JsonObject();
         foreach (var objectiveId in ObjectiveIds)
@@ -314,7 +314,7 @@ internal static class AgentHostEstablishYourClanGoalLoop
         return result;
     }
 
-    private static JsonArray FindLiveMetricDifferences(JsonObject snapshot, JsonArray journalObjectives)
+    internal static JsonArray FindLiveMetricDifferences(JsonObject snapshot, JsonArray journalObjectives)
     {
         var differences = new JsonArray();
         foreach (var stage in journalObjectives.OfType<JsonObject>())

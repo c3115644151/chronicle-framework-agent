@@ -28,8 +28,11 @@ internal static class ProviderContractSelfTest
         results.Add(new { scenario = "village-tools-prompt-uses-exact-native-action-id", passed = true });
         results.AddRange(NativeMailboxClient.RunVillageToolsQuestActionContractSelfTests());
         results.AddRange(NativeMailboxClient.RunBattleSimulationActionContractSelfTests());
+        results.AddRange(NativeMailboxClient.RunGoldSaleActionContractSelfTests());
+        results.AddRange(AgentHostEstablishClanGoldSaleLoop.RunContractSelfTests());
         results.AddRange(NativeMailboxClient.RunQuestDetailsReadActionContractSelfTests());
         results.AddRange(AgentHostCaptivityRecoveryLoop.RunContractSelfTests());
+        results.AddRange(AgentHostEstablishClanGoldSaleLoop.RunContractSelfTests());
         try { results.AddRange(await AgentHostCaptivityRecoveryLoop.RunTransportSelfTestsAsync()); }
         catch (Exception exception) { throw new AgentHostException("captivity-recovery-loop-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
         try { results.AddRange(AgentHostVillageToolsQuestPolicy.RunContractSelfTests()); }
@@ -281,6 +284,7 @@ internal static class ProviderContractSelfTest
         await VerifyGoalClassificationAsync(settings, "supportedBattleAndCaptivityGoal", "supported-battle-and-captivity", ["supportedMapArrivalGoal", "supportedVillageToolsQuestGoal", "supportedBattleSimulationGoal", "supportedBattleAndCaptivityGoal", "unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "supportedEstablishYourClanGoal", "supported-establish-your-clan", ["supportedEstablishYourClanGoal", "unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "supportedCaptivityRecoveryGoal", "supported-captivity-recovery", ["supportedCaptivityRecoveryGoal", "unsupportedGoal"], results);
+        await VerifyGoalClassificationAsync(settings, "supportedEstablishClanGoldSaleGoal", "supported-establish-clan-gold-sale", ["supportedEstablishYourClanGoal", "supportedEstablishClanGoldSaleGoal", "unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "unsupportedGoal", "unsupported", ["supportedMapArrivalGoal", "unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "supportedMapArrivalGoal", "provider-goal-classification-unavailable", ["unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "supportedVillageToolsQuestGoal", "provider-goal-classification-unavailable", ["supportedMapArrivalGoal", "unsupportedGoal"], results);
@@ -288,6 +292,7 @@ internal static class ProviderContractSelfTest
         await VerifyGoalClassificationAsync(settings, "supportedBattleAndCaptivityGoal", "provider-goal-classification-unavailable", ["supportedMapArrivalGoal", "unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "supportedEstablishYourClanGoal", "provider-goal-classification-unavailable", ["unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "supportedCaptivityRecoveryGoal", "provider-goal-classification-unavailable", ["unsupportedGoal"], results);
+        await VerifyGoalClassificationAsync(settings, "supportedEstablishClanGoldSaleGoal", "provider-goal-classification-unavailable", ["supportedEstablishYourClanGoal", "unsupportedGoal"], results);
         VerifyProductionGoalClassificationCatalogNormalization(results);
         VerifyDecisionSchemaBindsCurrentArgumentValues(results);
 
@@ -940,6 +945,7 @@ internal static class ProviderContractSelfTest
                 "supportedBattleAndCaptivityGoal" => "Resolve a Native battle and continue the actual MainHero captivity process until free on the map.",
                 "supportedEstablishYourClanGoal" => "Read the active original StoryMode Establish Your Clan quest and select one currently unmet objective.",
                 "supportedCaptivityRecoveryGoal" => "Recover from the current Native captivity state, then replan one unmet active Establish Your Clan objective.",
+                "supportedEstablishClanGoldSaleGoal" => "Sell one currently sellable item through Native Trade to increase the active Establish Your Clan Gold Journal progress.",
                 _ => "Move to any visible safe settlement."
             },
             goalScopeClassificationRequired = expectedClassification != "provider-goal-classification-unavailable",
@@ -950,7 +956,7 @@ internal static class ProviderContractSelfTest
                 state = new
                 {
                     gameState = "MapState",
-                    quests = allowedControls.Contains("supportedEstablishYourClanGoal")
+                    quests = allowedControls.Contains("supportedEstablishYourClanGoal") || allowedControls.Contains("supportedEstablishClanGoldSaleGoal")
                         ? new[] { new { id = "rebuild_player_clan_storymode_quest", title = "Establish Your Clan" } }
                         : Array.Empty<object>(),
                     context = new
@@ -973,7 +979,7 @@ internal static class ProviderContractSelfTest
                 throw new AgentHostException("provider-goal-classification-self-test-failed", "Goal classification did not stay within its listed control catalog.");
             using var body = JsonDocument.Parse(handler.LastRequestBody ?? throw new AgentHostException("provider-goal-classification-prompt-missing", "The classification request was not sent."));
             var system = body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString() ?? string.Empty;
-            if (!system.Contains("required final outcome", StringComparison.Ordinal) || !system.Contains("VillageNeedsToolsIssue", StringComparison.Ordinal) || !system.Contains("BattleSimulation", StringComparison.Ordinal) || !system.Contains("rebuild_player_clan_storymode_quest", StringComparison.Ordinal) || !system.Contains("Named destinations", StringComparison.Ordinal))
+            if (!system.Contains("required final outcome", StringComparison.Ordinal) || !system.Contains("VillageNeedsToolsIssue", StringComparison.Ordinal) || !system.Contains("BattleSimulation", StringComparison.Ordinal) || !system.Contains("rebuild_player_clan_storymode_quest", StringComparison.Ordinal) || !system.Contains("currently held, currently sellable item", StringComparison.Ordinal) || !system.Contains("Named destinations", StringComparison.Ordinal))
                 throw new AgentHostException("provider-goal-classification-prompt-incomplete", "The classifier prompt omitted the exact limits of the supported goal.");
             if (control == "supportedCaptivityRecoveryGoal" &&
                 (!system.Contains("prisoner_wait", StringComparison.Ordinal) || !system.Contains("never hide time changes", StringComparison.Ordinal) || !system.Contains("already captive", StringComparison.Ordinal)))
