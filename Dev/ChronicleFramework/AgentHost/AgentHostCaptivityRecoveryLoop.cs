@@ -249,6 +249,9 @@ internal static class AgentHostCaptivityRecoveryLoop
                     priorCompletionTokens: priorCompletionTokens,
                     priorTrace: trace,
                     priorProviderRouteHistory: routes);
+                using var postPlanDocument = await stateClient.ReadStateAsync(elapsed.Token);
+                var postPlanNative = ParseObject(postPlanDocument.RootElement);
+                var postPlanState = postPlanNative["state"] as JsonObject ?? new JsonObject();
                 return new JsonObject
                 {
                     ["status"] = ReadString(objectivePlan, "status"),
@@ -266,12 +269,13 @@ internal static class AgentHostCaptivityRecoveryLoop
                     ["captivityChoiceOptionId"] = captivityChoiceOptionId,
                     ["passiveCaptivityPollCount"] = passiveWaitCount,
                     ["initialTimeControlMode"] = initialMode,
-                    ["finalTimeControlMode"] = ReadString(state["context"] as JsonObject, "timeControlMode"),
+                    ["finalTimeControlMode"] = ReadString(postPlanState["context"] as JsonObject, "timeControlMode"),
                     ["campaignDayStart"] = double.IsFinite(initialDay) ? JsonValue.Create(initialDay) : null,
-                    ["campaignDayEnd"] = current["campaignDay"]?.DeepClone(),
+                    ["campaignDayEnd"] = postPlanNative["campaignDay"]?.DeepClone(),
                     ["initialNativeState"] = initialNative.DeepClone(),
-                    ["finalNativeState"] = current.DeepClone(),
+                    ["finalNativeState"] = postPlanNative.DeepClone(),
                     ["initialStoryModeEstablishClanStatus"] = initialState["storyModeEstablishClanStatus"]?.DeepClone(),
+                    ["finalStoryModeEstablishClanStatus"] = postPlanState["storyModeEstablishClanStatus"]?.DeepClone(),
                     ["objectiveSelection"] = objectivePlan["selection"]?.DeepClone(),
                     ["objectiveSnapshot"] = objectivePlan["objectiveSnapshot"]?.DeepClone(),
                     ["journalObjectiveSnapshot"] = objectivePlan["journalObjectiveSnapshot"]?.DeepClone(),
