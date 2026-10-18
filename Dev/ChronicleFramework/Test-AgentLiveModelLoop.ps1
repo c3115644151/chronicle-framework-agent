@@ -376,7 +376,7 @@ try {
         $maxElapsedSeconds = 7200
         $allowedActions = 'resume,menuSelect'
         $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '360'
-        $env:CHRONICLE_LLM_MAX_TOKENS = '1024'
+        $env:CHRONICLE_LLM_MAX_TOKENS = '2048'
     }
     elseif ($EstablishYourClanGoalPlanner) {
         $goal = 'Read the active original StoryMode Establish Your Clan quest and choose exactly one currently unmet objective from its four visible numeric goals. Return a planning result only; do not take any game action, modify the quest, claim completion, or change Campaign time.'
