@@ -1,24 +1,38 @@
-# 当前主线：Calradia AI-native Campaign Actor Mod
+# 当前主线：AI自主游玩 Bannerlord 单机 Campaign
 
-## 当前产品方向（2026-10-18）
+## 当前产品方向（2026-10-19）
 
-Chronicle 的目标从“AI代替玩家控制 MainHero 完成整场战役”转为“AI成为卡拉迪亚战役中的自主角色”。玩家继续控制自己的 MainHero；初始Actor以一个非MainHero的持久`Hero.StringId`为身份锚，在同一原版Campaign中拥有目标、受限观察、原生行动和失败后重规划；它当前的Party与Clan由Native状态动态解析为行动身体/政治上下文，不把三种对象误作可互换身份。玩家可以通过对话、关系、交易、结盟或冲突影响它，但不逐步指挥它每个动作。AI 对话是入口之一，不是产品终点；叙事文字不能代替可观察、可核验的 Native 世界后果。
+Chronicle的核心产品是AI作为单机战役玩家，直接控制原版`Hero.MainHero`与`MobileParty.MainParty`，通过原生菜单、对话、交易、队伍管理、任务、地图移动与战斗结果持续游玩。产品需要同一个Agent支持两种切换方式：自主模式下持续追踪并推进战役目标；指令模式下玩家可临时要求它完成一件原版事务，完成或受阻后回到目标循环。两者共用同一套观察、计划、Native动作和后验核验，不要求玩家替Agent逐步点选，也不把长期自治缩成聊天助手或离散动作演示。
 
-核心循环假设：限定身份和视野 → AI 选择有游戏意义的目标 → 通过当前版本原生 Campaign 规则执行行动 → 核对真实后果 → 因事件或失败重新规划。原版世界模拟负责移动路径、部队战斗判断、市场与时间；LLM 不承担逐帧反射，也不得绕过原生规则写入金币、关系、胜负或剧情结果。若确需原版无此能力的动作，必须单独论证并标明为新玩法，而非称作 Native。
+MainHero是首个Agent的原生行动身体和基础设施，不等于首个产品门禁就是最终玩法。当前“建立你的家族”只是一项有边界的第一段长程验收；完成它只能证明该段连续自主闭环，之后仍须逐步扩展到更广泛的战役自治。陪伴者/同伴代理可能提供长期共处的玩家体验，但不是天然更简单的技术起点：同伴留在`MainParty`时没有独立的Campaign Party Think身体，赋予它独立目标与行动还需新增身份、行动权限、原版AI冲突仲裁及玩家影响规则。因此本阶段先打通MainHero自治底座；不把同伴路线删除，保留为后续玩法设计候选，并在主角闭环形成后按玩家体验和引擎成本重新评估。
 
-当前源码已显示适合分层的原版AI骨架：`AiPartyThinkBehavior`在`TickPartialHourlyAiEvent`收集由各Native AIBehavior评分的目标，选出候选后经`SetPartyAiAction`落成Party行为；`MobilePartyAi`再负责短期路径、接敌/规避、逃离与地形导航（详见`Research/F/MilitaryPartiesAndCaptivity.md` F02/F03/F04）。v1.4.8公开`AIBehaviorData`目标结构与`PartyThinkParams.AddBehaviorScore/SetBehaviorScore`；`AiPartyThinkBehavior`在Think回调中派发`CampaignEvents.AiHourlyTick`后读取这些候选。故一个待验证的Actor接入候选是：Host只异步决定高层目标/偏好，游戏主线程的Campaign Actor适配在Native AI Think边界提交经校验的目标候选，由原版评分/移动/遭遇处理低层执行。不能每小时让LLM重算每个移动点，也不能假定该注入与Vanilla其他AIBehavior、Army/Encounter状态兼容。对NPC Actor，合法接口可以是源码验证的Native AI决策/行为入口，不必伪装成人类鼠标操作；但其权限、成本、AI ownership竞争和状态后验必须与玩家输入API分开标注。当前Chronicle还没有Actor ID绑定或上述Party Think集成，现有MainHero/MainParty工具不能算作这项能力。此候选只有静态源码依据，尚未在真实NPC Party上运行验证。
+产品纵向门禁从一个全新、自然创建且无预处理进度的StoryMode战役开始；玩家可以通过原版菜单建立存档/角色，AI从MainHero第一次进入稳定Campaign MapState时接管，不要求AI自动化主菜单和角色创建。若原版教程仍在进行，Agent继续使用原版入口完成到任务自然激活。真实模型随后自主完成“建立你的家族”(Establish Your Clan)四项目标：Gold 2000、达到当前藏身处战斗人数门槛、Renown 50、招募至少一名同伴。每项都以Quest Journal/Native状态和最终原版Quest完成后验核验；不注入Quest/资源/进度，不靠预设路线冒充自主运行。这是首个长程闭环，不声称覆盖骑砍所有玩法。
 
-首发研究边界为单机 Campaign 中的人类玩家 + AI 世界角色，而非AI接管玩家。Campaign 时间在玩家进入 Mission/聚落场景时按单机原版规则暂停；Actor只能在相应 Campaign 生命周期可运行时推进，不能宣称与玩家场景并行行动。多人共享战役、所有NPC全量LLM化和实时3D战斗控制均不是当前首发承诺。
+Research Gate: **BLOCKED** for the fresh StoryMode-to-four-goal action/observation map; W1/W2's 182 ACT / 73 OBS player-interface baseline alone does not prove this longitudinal loop.
+Implementation Gate: **BLOCKED** for new MainHero gameplay code until the current W7 issue maps required Native affordances, gaps, time/failure boundaries, and verification for all four objectives.
 
-此方向必须与《AI效应》/《重铸者》等现有AI角色模组区分：它们公开资料已包含记忆、主动互动、动态事件、AI委托、外交和会造成游戏变化的对话动作，不能把“加记忆/对话/行动按钮”本身当作新产品差异。Chronicle 的待验证差异是：Agent是否能在无玩家逐步提示时持续追踪一个独立目标、组合多步Native行动、根据结果调整，并在一致规则下产生可展示的战役后果。公开功能介绍不证明竞品缺少这些能力；W7必须先做运行对比与证据核验。
+## 当前MainHero纵向门禁
+
+Research Gate: **OPEN** for the natural fresh-StoryMode-to-`Establish Your Clan` route map; W1/W2's 182 core ACT and 73 OBS remain the human-player interface baseline, not proof of full StoryMode coverage.
+Implementation Gate: **BLOCKED** for new gameplay C# until the four quest goals, tutorial/activation preconditions, reusable Native actions, real gaps, Campaign-time behavior, failure/recovery and outcome verification are mapped in the current Issue and mechanism contracts.
+
+该门禁不阻止对既有Host/Agent循环做真实模型评估或只读Harness诊断；门禁只阻止在目标动作范围未被事实/契约支撑前凭推测新增游戏能力。NPC/同伴独立行动的W8候选不进入本轮Research readiness判断。
+
+### 2026-10-18 NPC Campaign Actor 研究快照（历史候选，不是当前产品路线）
+
+当时的源码研究显示NPC Campaign AI的分层骨架：`AiPartyThinkBehavior`在`TickPartialHourlyAiEvent`收集Native AIBehavior目标评分，选择后经`SetPartyAiAction`落成Party行为；`MobilePartyAi`再负责短期路径、接敌/规避、逃离与地形导航（详见`Research/F/MilitaryPartiesAndCaptivity.md` F02/F03/F04）。v1.4.8公开`AIBehaviorData`目标结构与`PartyThinkParams.AddBehaviorScore/SetBehaviorScore`。只读Harness捕获过真实非MainHero Lord Think样本：110个目标候选、含GoToSettlement、PatrolAroundPoint、BesiegeSettlement、RaidSettlement及目标ID/评分；完整证据见`TestResults/20261019-022445`。这证明该缓存可提供真实Native决策上下文，但不证明候选被最终选中、后续持续性、Agent可控制它或不同存档/状态均一致。该Actor接入提议只属于未来候选研究：Host异步决定高层目标/偏好后，游戏主线程需在有效Think边界重新核验身份、当前候选、权限和期限，不能假定与Vanilla行为评分、Army/Encounter状态兼容；它与MainHero玩家输入API是不同技术接口。
+
+这段研究当时讨论的边界是单机 Campaign 中的人类玩家 + AI 世界角色，而非AI接管玩家；这是已被后续MainHero主线取代的历史候选。其关于Campaign暂停、Actor生命周期、多人共享战役和3D战斗的机制调查仍可复用，但不构成当前产品的首发承诺。
+
+该候选方向曾尝试与《AI效应》/《重铸者》等AI角色模组比较；这不是当前产品定位依据。可复用的行业结论是：不能把“加记忆/对话/行动按钮”本身当作差异，必须验证Agent能否持续追踪目标、组合Native行动、根据后果调整，并产生可观察的战役结果。竞品公开功能不等于运行证据。
 
 本轮外部研究发现两个重要边界：其一，BUTR的Bannerlord.GABS公开声明已提供MCP/GABP工具桥、90+游戏工具、地图威胁检测/逃离、贸易、对话及坐镇战斗等，故“第一个把AI接到骑砍工具”不成立；其仓库/README只证明项目自述和工具覆盖，不能证明多小时目标自主或StoryMode完整成功。[Bannerlord.GABS](https://github.com/BUTR/Bannerlord.GABS)。其二，《AI效应》与《重铸者/AnimusForge》的公开功能已远超纯聊天；具体能力需按它们实际运行/原版状态验证，不能从功能宣传推断或贬低。[AI效应](https://www.nexusmods.com/mountandblade2bannerlord/mods/9711) [重铸者](https://www.mountblade.com.cn/news/Bannerlord/2026-08-14/3294.html)。
 
 “AI-native”可操作化为AI是否构成玩法核心：若移除AI后核心玩法几乎不变，它更像AI增强/聊天层。2026综述分析53个公开游戏/原型，指出目前偏语言叙事，主要设计难点是把语义开放性放进稳定的目标、规则、状态、反馈、节奏和玩家能动性；这是一种学术分类与现状分析，不是商业成功证明。[AI Native Games: A Survey and Roadmap](https://arxiv.org/abs/2607.00527)。OpenGameAgent目前自称alpha/早期接入；另有商业合作方宣布将AI反射层与深思层分开、计划于2027年推出的合作模式。这说明业态在演进，但尚非可据以宣称的爆品案例。[OpenGameAgent](https://opengameagent.com/) [Dimensional Double Shift announcement](https://www.globenewswire.com/news-release/2026/09/14/3361481/0/en/artificial-agency-integrates-agentic-behavior-into-first-commercial-video-game-in-dimensional-double-shift-s-new-single-player-mode.html)。
 
-该方向是当前产品决定，不代表玩法细节已经冻结。先证明一个自主Campaign Actor能产生真实、可重复且玩家可感知的因果链，再决定扩展到多个Actor或更长远目标。StoryMode `Establish Your Clan`及 MainHero Agent 继续作为旧架构的长程压力测试/参考数据，不再是新产品必须完成的北极星门禁。
+历史决策（2026-10-18）：先证明一个自主Campaign Actor能产生真实、可重复且玩家可感知的因果链，再决定扩展到多个Actor。该决定已由2026-10-19 MainHero自主游玩主线取代；StoryMode `Establish Your Clan`现在是首个产品北极星门禁，而NPC/同伴Actor仅保留为后续候选。
 
-## Agent 身份术语
+### NPC/同伴 Agent 术语（后续候选研究，不属于当前主线）
 
 - **人类玩家角色**：当前存档中的 MainHero/MainParty，由玩家控制。
 - **Campaign Actor**：首个角色以被绑定的非MainHero `HeroId`为持久身份；当前MobileParty与Clan是需每次从Native关系重新验证的行动身体/政治上下文。Actor具有独立目标，行动通过验证过的原生Campaign AI接口发生。Partyless/Prisoner/Dead/Leader变更等生命周期状态会门控其可用动作。
@@ -48,15 +62,14 @@ Chronicle 的目标从“AI代替玩家控制 MainHero 完成整场战役”转�
 
 Mineflayer/MineDojo 等 Agent 以独立玩家为动作和观察主体；这不排除 Bannerlord 单机 NPC 代理，它是利用原生 Hero/Party AI 的另一条研究路线，验收不可与多人客户端路线混称。
 
-### Research readiness and current technical focus
+### 历史NPC Actor Research Gate（已暂停实施）
 
-Research Gate: **READY** for the W1-A–L human-player baseline; Campaign Actor-specific Research Gate remains **OPEN** until its actor-facing decision/action/observation boundary is defined.
-Implementation Gate: **BLOCKED** for new Campaign Actor capabilities until Actor identity/ownership, visibility, Native AI arbitration and result contracts are researched and tested.
+本段Research/Implementation Gate状态属于2026-10-18的NPC Actor研究快照，不控制当前MainHero StoryMode主线。MainHero可见玩家行为的W1-A–L基线已完成；StoryMode完整目标所需的前置/行动组合仍由当前W7产品Issue核对。任何新增Native动作仍须先在MAINLINE机制契约中记录玩家入口、原生副作用、时间行为、UI与直接API差异、证据/未知。
 行为总分母：**182**（仅人类玩家核心ACT；OBS分母：**73**，23个N/A不计入）　游戏版本：**1.4.8.119303**
 
-当前目录含183条ACT（其中1条特权入口）；标准行动族分母为182，观察面分母为73。该分母仅指人类玩家行为目录，不表示AI Actor已有182项能力覆盖。
+当前目录含183条ACT（其中1条特权入口）；标准行动族分母为182，观察面分母为73。该分母记录人类玩家原版入口，不能单独证明Agent已覆盖全部动作或通过StoryMode长程门禁。
 
-上述182 ACT/73 OBS仍只表示本机1.4.8.119303 Native/SandBox/SandBoxCore/StoryMode中玩家可见入口的基线，不是AI Campaign Actor的能力覆盖分母。`SYSTEM_INVENTORY.md`的126项仍是系统研究入口，不是动作数量。当前人类玩家目录含183条ACT、73条OBS和23条N/A，其中`ACT-A06-06`仅为打开Cheat菜单的特权入口，另有控制台/作弊命令；它们留在条件特权扩展，不计入标准Campaign行动分母或普通Agent白名单。W1/W2为当前人类玩家接口研究、Native读写桥和测试提供了重要底座，但不能外推为已有非MainHero Actor控制能力。
+上述182 ACT/73 OBS表示本机1.4.8.119303 Native/SandBox/SandBoxCore/StoryMode中玩家可见入口的基线，不是Agent能力覆盖或全StoryMode通关证明。`SYSTEM_INVENTORY.md`的126项仍是系统研究入口，不是动作数量。当前人类玩家目录含183条ACT、73条OBS和23条N/A，其中`ACT-A06-06`仅为打开Cheat菜单的特权入口，另有控制台/作弊命令；它们留在条件特权扩展，不计入标准Campaign行动分母或普通Agent白名单。W1/W2为当前MainHero接口研究、Native读写桥和测试提供基础。
 
 Campaign Actor的下一道研究门禁须先定义身份绑定（Hero/Party/Clan与原版AI ownership）、受限观察/情报来源、可控制的原生决策面、与原版Party/Campaign AI的冲突仲裁、事件触发与节奏、单机Mission暂停语义、存档/checkpoint身份、玩家影响入口及可验证的持续目标。Actor的“分母”应是可组合的决策/行动族和必要观察，不按每个Campaign Tick或所有NPC机械扩容；需经源码和一个真实运行切片后才能冻结。新能力不得在该契约完成前加入产品白名单。
 
@@ -80,9 +93,9 @@ Minecraft Agent 的环境、规划、技能、记忆和评测研究已沉淀到�
 | Mod + 隐藏 Host | 故障隔离、模型/记忆独立升级、批量测试和多代理更自然 | 安装与生命周期复杂、IPC 和进程管理成本 |
 | 混合式 | Mod 保留身体与轻量循环，Host 承担可选重型能力 | 边界设计和兼容测试要求更高 |
 
-### 历史 MainHero 单机原型：当前已证实的运行边界
+### MainHero AI Player 技术基线：已证实的运行边界
 
-下表记录旧“AI接管当前MainHero”原型的实测边界，**不再是当前产品身份或部署方案**。旧原型通过Native接口操作`Hero.MainHero`、`MobileParty.MainParty`和玩家家族；真实模型曾完成萨哥特市场购买、原版等待三次日结算并返回Town菜单。它证明了本地Campaign Host/协议/原生主角动作的部分技术链，并提供可复用测试资产；不能证明AI Actor能控制非MainHero Hero/Party/Clan，也不等于完整战役自主能力。后续表格中的“当前形态”均指该历史MainHero原型。
+下表总结现有MainHero/MainParty Native Bridge、Host、Provider与运行验证，**它们是当前主线可复用的基础，不等于AI已经能自主完成整个StoryMode**。真实模型曾完成萨哥特市场购买与三日原版等待切片，也完成过若干任务/遭遇/恢复样本；这些证明主角原生操作链中的部分能力已能运行。仍须以完整StoryMode四目标自然达成作为当前验收；对非MainHero Hero/Party/Clan的控制则仍是未启用的未来候选。
 
 | 边界 | 已核实的当前形态 | 证据与边界 |
 | --- | --- | --- |
@@ -163,16 +176,16 @@ W7-K用户界面反馈后的真实重试（`TestResults/20261014-155314`）：Fr
 
 阶段判断：多人路线确实能提供“AI作为独立Hero/Party进入同一个Campaign”的产品形态，但它不是轻量地给Chronicle加一个联机开关，而是依赖一个独立共享战役服务器、客户端身份与同步协议；AI仍须占用一个真实游戏客户端。它解决了单机 NPC 路线的身份和世界推进问题，却带来第二个客户端授权、服务端部署、版本兼容以及目前共享战役Mod不承诺兼容其它Mod等成本。现阶段只确认其概念/公开契约匹配，并未在本机运行该Mod，也未验证 Chronicle 可连接；W6 Epic 需要结合单机候选和这些成本再决定首发路线，不能由“技术上可想象”直接定案。
 
-### 历史决策：W6 曾选择单机 MainHero Agent（2026-10-18 产品方向更新后已被取代）
+### 历史决策：W6 MainHero Player → 2026-10-18 NPC Actor pivot → 2026-10-19 回归MainHero
 
-先前W6选择AI完全接管当前单机客户端的MainHero/MainParty，并以StoryMode `Establish Your Clan`闭环作为长程门禁。当时选择基于已有Native主角适配、与未实测的共享Campaign Mod相比工程风险更低；这仍是历史事实和可复用的测试基线，但不再定义当前产品身份。用户对AI玩家身体路线的价值提出新疑问后，研究与策略复核确定：Chronicle当前首发产品应让人类保留MainHero控制权，将自主AI作为Campaign内的Hero/Party/Clan Actor。W7项目及验收以此方向为准；不要继续把MainHero接管路线默认为终态。
+W6最初选择AI控制MainHero/MainParty并以StoryMode `Establish Your Clan`为长程门禁；2026-10-18短暂转向NPC Campaign Actor研究。2026-10-19结合已有Bridge/Host的MainHero实测基础和玩家提出的玩法定位，产品方向回归AI自主游玩MainHero，StoryMode四目标恢复为当前首发门禁。本表保留上一轮取舍理由和多人路线成本供追溯，不再是当前方向选择；当前主线以本文件顶部决定及GitHub W7 MainHero Issue为准。
 
 | 历史W6选择因素 | 单机当前玩家客户端 | 多人共享Campaign独立客户端 |
 | --- | --- | --- |
 | 目标符合度 | 符合用户允许的“AI直接掌控玩家”形式；AI仍是唯一决策者，不要求人类逐步确认。 | 符合“AI为同战役第二玩家且人类同时游玩”的形式，但需要多人身份/服务端。 |
 | 实证程度 | 本机原生 Mod/Agent Bridge 已用 Qwen3.5 4B 在 Bannerlord 1.4.8完成购买、三日等待和原生结果核验；3次同模板重复通过。 | 有第三方Bannerlord Coop公开项目支持1.4.8，但本机未安装，Chronicle兼容性/自动化客户端均未验证；它不保证与其他Mod兼容，Quests仍列为计划项。 |
 | 不可绕开的成本 | 单游戏客户端与当前玩家身份；当前风险集中于产品级Runtime、前后台/场景边界、进程管理、发行和更广行为覆盖。 | 第二个真实客户端会话、第二份可同时用授权、共享服务器/同步/版本锁定和两端安装；不是只加一个AI NPC。 |
-| 历史结论（当前已被AI Actor方向取代） | 曾为首发，以最大化复用已运行的Native适配和评测路径。 | 曾保留为后续候选；是否仍有产品价值，需在Actor方向稳定后再评估。 |
+| 2026-10-19当前结论 | 单机 MainHero 自主玩家 Agent 为首发，复用既有 Native Bridge/Host 并以 EYC 四目标通关为门禁。 | 非MainHero NPC/同伴自主权不作当前首发要求，待MainHero纵向闭环后再评估。 |
 
 **首发运行边界：** Bannerlord 内的 C# Mod 负责局部 Native 观察、动作前校验与游戏主线程上的原生动作；模型请求、目标循环与重规划放在游戏进程之外的本地 Agent Host，避免把模型等待放到游戏主线程。由产品入口透明管理 Host，玩家不手工运行 PowerShell/CLI/Codex/MCP。当前文件邮箱可作为测试原型证据，但最终 IPC、进程监护器、游戏内启动/停止UI、Host/模型随包策略和玩家安装更新流程尚未冻结，必须在W7按真实产品闭环验证；本选择不是声称这些交付件已经存在。
 
@@ -343,11 +356,11 @@ checkpoint输入失败安全边界已由`TestResults/20261008-063503`通过：�
 - 为测试直接写入资源、位置或战斗结果；
 - 把全世界状态和全部技能塞入上下文。
 
-## Bannerlord 目标架构
+## Bannerlord MainHero AI Player 目标架构
 
 ```mermaid
 flowchart TD
-    Player[玩家控制MainHero；安装产品/配置模型一次/启动AI Actor] --> ProductShell[产品启动与运行管理]
+    Operator[玩家设定高层目标/启动/暂停/监督] --> ProductShell[产品启动与运行管理]
     ProductShell --> Runtime[Chronicle Agent Runtime]
     Runtime --> Provider[可替换模型 Provider]
     Runtime <--> Protocol[版本化游戏 Agent 协议]
@@ -359,22 +372,22 @@ flowchart TD
     Dispatcher --> Engine
     Engine --> Collector
     Collector --> Verifier[确定性后置条件核验]
-    Verifier --> Planner[目标/计划/重规划]
+    Verifier --> Planner[MainHero自主目标/计划/重规划]
     Planner --> Skills[可恢复技能状态机]
     Skills --> Runtime
     Verifier --> Memory[目标/事件/技能/checkpoint/完整轨迹]
     Memory <--> Runtime
     DevHarness[开发期 Test Harness] -.启动/遥测/回归证据.-> Protocol
     DevCodex[Codex 仅为开发工具] -.开发期操作.-> DevHarness
-    RuntimePlacement[Runtime 最终放入 Mod 还是由产品透明管理的本地 Host：W6 证据决策] -.运行部署边界.-> Runtime
+    RuntimePlacement[Runtime 放入 Mod 还是由产品透明管理的本地 Host：以玩家交付与故障隔离实证决定] -.运行部署边界.-> Runtime
 ```
 
-- 游戏内 Mod 是深入 Bannerlord 引擎的身体：从当前 Campaign、GameState、原生菜单/ViewModel、Mission 与事件生命周期收集信息，并把当前绑定的Campaign Actor意图映射到有身份范围/前置/后置条件的Native动作；不能用外部脚本伪造游戏结果。
-- Agent Runtime 是交付给玩家的自主决策系统，包含模型 Provider、持久目标、事件触发、Actor action planning、Native结果验证、记忆和重规划。部署到游戏进程内还是由产品透明管理的本地Host仍需真实产品原型决定；无论边界如何，玩家都只安装/启动一个产品并配置模型一次。
+- 游戏内 Mod 是深入 Bannerlord 引擎的原生身体：从当前 Campaign、MainHero/MainParty、GameState、菜单/ViewModel、Mission 与事件生命周期收集信息，并把MainHero Agent意图映射到有前置/后置条件的Native动作；不能用外部脚本伪造游戏结果。
+- Agent Runtime 是交付给玩家的自主决策系统，包含模型 Provider、StoryMode长期目标、事件触发、MainHero action planning、Native结果验证、记忆和失败重规划。部署到游戏进程内还是由产品透明管理的本地Host仍需真实产品原型决定；无论边界如何，玩家都只安装/启动一个产品并配置模型一次。
 - Codex、MCP、开发用 CLI、Computer Use 与 Test Harness 只属于开发工具，不是交付依赖、产品界面或 Agent Runtime。若 Agent Runtime 位于进程外，它必须随产品被透明部署/启动/更新/停止，玩家不能被要求自行准备 Python/Node 等开发运行环境。
 - 游戏进程只执行协议允许的结构化读取与白名单动作；不得执行模型任意生成代码。模型调用不能阻塞 Campaign/UI 主线程。
-- 当前 `AgentObserver.cs`/`AgentProtocol.cs`大量入口直接绑定`Hero.MainHero`、`MobileParty.MainParty`；W7主角Host、主角的StoryMode日志与GoldSale循环都是旧MainHero主体的原型，**不能**被算作AI Campaign Actor能力。新Actor适配须把被控制的Hero/Party稳定身份作为协议上下文并在每次读写核对所有权/当前Actor状态，不能简单替换几个`MainHero`字段或让LLM任意指定一个世界实体ID。
-- 设计上优先让Native Campaign AI继续承担移动寻路和Party模拟等游戏规则，模型负责独立目标、战略选择与重规划；只有经源码/运行证明AI控制接口不会与原版AI争夺同一Party时才启用。Actor的观察基于其批准视角/当前游戏知识，当前尚未定义情报权限，不假设可见全世界；玩家进入Mission时AI Actor不宣称并行推进。
+- 当前`AgentObserver.cs`/`AgentProtocol.cs`已大量绑定`Hero.MainHero`与`MobileParty.MainParty`；这与首发AI Player身体一致，可按已验证范围复用，但不能据此宣称四个StoryMode目标已经自主完成。新增MainHero动作仍须核对原版入口、状态、失败和后验。
+- 原版Campaign AI继续模拟其他NPC Party；AI Player通过MainHero原生交互和MainParty执行自己的行动，不注入NPC Party Think评分。单机Mission暂停、遭遇、战斗和场景边界维持原版规则；Agent不宣称世界在Mission期间并行推进。
 
 ## 状态、记忆与动作
 
@@ -411,9 +424,10 @@ flowchart TD
 | GameState接口 | 反编译枚举的状态类型只是接口分母，不等于玩家行为或 Agent 覆盖率 | 按当前安装DLL重新盘点；API Probe和运行时结果分别标记 |
 | 自主 Agent 闭环 | 必须有非测试模型/规划器选择目标、调用白名单动作、验证结果，并在世界变化或失败后重规划 | 确定性Provider、单动作成功或累计动作数量均不能算自主闭环 |
 | 历史 MainHero `Establish Your Clan` stress test（非当前产品门禁） | 以StoryMode原版`Establish Your Clan`（`RebuildPlayerClanQuest`）完整成功作为旧“AI接管MainHero”路线的长程压力测试；Tier 1/50 Renown只是其中一项，不代表当前AI Actor产品完成 | 使用一个经原版StoryMode Tutorial结束事件自然激活该Quest的disposable Campaign起点，模型只在Quest真实活动后接管并推进。四项目标为：MainHero当前金币达到2000、MainParty达到当前`BanditDensityModel.GetMinimumTroopCountForHideoutMission(MainParty,false)`人数门槛、Clan Renown达到50、至少招募1名同伴。以原版Quest成功结束及四项后验为旧主角路线证据；禁止注入Quest/资源/进度或固定脚本冒充模型自主。成功奖励25 Renown是完成后的原版后果，不计入前置达标。保留失败/重规划与状态证据并清理fixture |
+| MainHero `Establish Your Clan` 当前产品门禁 | 以StoryMode原版`Establish Your Clan`（`RebuildPlayerClanQuest`）完整成功作为AI玩家首个长程Native闭环；Tier 1/50 Renown只是其中一项 | 必须从自然新战役/原版教程流程开始，直到教程结束时Quest自然激活，再由真实模型自主推进。四项目标为MainHero金币2000、MainParty达到动态藏身处战斗人数门槛、Clan Renown 50、至少招募一名同伴。以原版Quest成功结束和四项Native后验通过为最终证据；不得注入Quest/资源/进度或使用固定脚本冒充自主。成功奖励25 Renown不计入前置达标；保留失败/重规划证据并清理disposable fixture |
 | 视觉证据 | 仅用于结构化遥测不能判明的真实界面迁移；采集窗口、帧覆盖、索引和源视频清理均需验证 | 关键帧与事件时间线可追溯至同一run；不将截图替代游戏状态真值 |
 
-新增动作族先更新完整行为分母和验收定义；命令数、Issue数量和测试运行次数都不代表 Agent 能力进度。
+表中“历史MainHero stress test”行保留此前阶段的定义，仅供追溯；当前W7产品门禁以“MainHero `Establish Your Clan` 当前产品门禁”行作为唯一有效验收。新增动作族先更新完整行为分母和验收定义；命令数、Issue数量和测试运行次数都不代表 Agent 能力进度。
 
 #### 原版机制契约 / Mechanic Contract
 
@@ -518,9 +532,9 @@ flowchart LR
 
 证据等级统一标为：源码/资源核实、运行时状态核实、自动动作/结果核实、人工视觉核实。高等级不自动替代低等级；尤其“VM 调用成功”不等于“已验证玩家从界面入口走通”。
 
-## 历史 MainHero Agent 压力测试：StoryMode “Establish Your Clan”
+## 当前 MainHero Agent 首个完整战役门禁：StoryMode “Establish Your Clan”
 
-这一门禁原先用于证明AI接管MainHero后可以从自然活动的原版StoryMode Quest推进长期玩家目标；它仍是高价值的主角行动适配/恢复测试，但产品方向更新后，不再是AI Actor产品的必要成功门禁。它只证明任务段闭环，不证明Agent能从新档完成教程前置，也不证明独立NPC Actor能作出自主世界行动。测试仍禁止注入目标/资源或用预设动作脚本冒充真实模型自主。
+这是当前首发产品的长程垂直门禁：AI接管MainHero后，必须从自然激活的原版StoryMode Quest推进并完成四个目标；单次动作通过、只读规划成功或一个目标达标都不算通过。门禁聚焦该任务段，不能据此声称覆盖全骑砍玩法；仍禁止注入目标/资源或用预设动作脚本冒充真实模型自主。NPC/同伴独立自主权是后续扩展，不替代此门禁。
 
 本机 Bannerlord `1.4.8.119303` 安装版 `StoryMode.dll` 反编译 `RebuildPlayerClanQuest` 已核到：Quest 标题为 `Establish Your Clan`；`FirstPhaseCampaignBehavior.OnStoryModeTutorialEnded()`会在StoryMode教程结束时通过原版`StartQuest()`自然启动它。必要门禁从一个真实流程自然激活该Quest的disposable StoryMode存档开始，不得预注入Quest/进度/资源；这只验证该长程目标闭环，不声称AI已经能从新档开始完成前置教程。成功条件由`UpdateProgresses()`读取四个官方JournalLog的缓存进度并比较当前目标；Party的log进度按事件/小时从MainParty roster刷新，但俘虏释放本身未注册为此Quest的刷新事件，因此短时间内真实Roster人数可能先于Journal current值更新。规划以玩家可见Journal的current/target为官方任务进度，直接实时资源与队伍值仅作差异诊断，不能替换任务log进度或据此报完成。成功条件由原版`UpdateProgresses()`同时检查以下四项：
 

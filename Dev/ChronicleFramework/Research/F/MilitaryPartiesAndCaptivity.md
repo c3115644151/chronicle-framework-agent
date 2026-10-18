@@ -70,7 +70,13 @@ Think 时清空 `PartyThinkParams` 并派发 `CampaignEvents.AiHourlyTick(party,
 
 边界：这是CampaignSystem安装程序集内已反编译确认的七个`AiHourlyTick`候选提供者，不代表已穷举第三方Mod动态注册的监听器；SandBox.dll与StoryMode.dll当前静态反汇编未检出`AiHourlyTickEvent`引用，不能据此推断所有安装Mod都没有扩展。一次只读提取的`AgentBridgeLifecycle.sav`元数据列出`Native`、`SandBoxCore`、`Sandbox`、`BirthAndDeath`、`CustomBattle`、Chronicle及四个前置框架；它不代表玩家其他模组集，也没有运行时事件轨迹。证据是本机游戏版本和`ilspycmd`对上述类型的反编译/事件注册扫描；字段/分支的完整逐个评分模型仍未拆完。
 
-这份提供者清单收窄了原版战略Think的候选来源，但仍未形成AI Actor的可执行行动分母：其中Escort、绕行、巡逻、去聚落等候选是原版系统给NPC评分的内部状态，不是已授权给Chronicle调用的独立动作。当前未知仍包括某个指定Hero/Party的真实候选样本、候选到`SetPartyAiAction`的实际选中/覆盖时序、Chronicle与Native Think如何仲裁，以及如何把若干短期目标组成由AI维持的持续目标。
+### 一次真实 Campaign 的 Think cache 观察
+
+`CampaignActorThinkTrace`在 `TestResults/20261019-022445/Temp/CampaignActorThinkTraceResult.json` 通过。只读查询公开的`MobileParty.ThinkParamsCache`，从`AgentBridgeLifecycle`中捕获到非MainHero Lord `lord_1_21`、Party `lord_1_21_party_1`、Clan `clan_empire_north_1`的一次非空Native Think候选集合。该样本含110条目标候选：`GoToSettlement` 47、`PatrolAroundPoint` 38、`RaidSettlement` 18、`BesiegeSettlement` 7；最高观察分为前往`town_EN2`的`GoToSettlement` 2.842。样本Party当时已处于`GoToSettlement`、当前目标为`town_EN2`、位置约`(453.598,473.122)`，`AiDisabled=False`、`DoNotMakeNewDecisions=False`、`DoNotChangeBehavior=False`、`CurrentObjectiveValue=0`；记录列出目标ID/位置、分数、Army聚集标记、导航与港口标记。不同目标各自有同一行为候选，故110是该样本的目标候选行数，不是110种独立动作或概率。
+
+Harness对本次disposable进程显式发出`advance 0.25 days`；Native遭遇在目标日到达前中断该推进，响应`completedBy=encounter`，时钟回到Stop。战役日从91077.378推进到91077.537。源档中的MainParty原先正以原生`GoToPoint`行为移动至既有目标；时间推进期间由`(207.018,389.419)`自然到达`(206.647,395.887)`，没有发出Agent `move`命令。Harness将此作为显式时钟推进下的原版移动记录，不误判为只读采样器写入，也不把普通移动与时间控制合并。采样器未写ThinkParams/Party、未提交Actor动作；MainHero身份、队伍、Gold、Renown一致，源存档SHA一致，游戏/CLI正常停止。此记录只证明一个存档/模块集、一个Hero/Party在一次Think cache下确有真实候选分数；没有证明候选被最终选中、下一次Think不覆盖它、LLM能决策，或Actor可持续实现目标。由于遭遇使Native时间推进提前结束，不把目标推进0.25日写作已完成。
+
+这份提供者清单与单次Think cache样本不是当前MainHero AI Player的动作分母，也没有产生任何NPC控制能力。它为W8候选研究提供基础；不同Party/战役阶段下候选分布、候选到`SetPartyAiAction`的选中时序、多个Think周期中的稳定性及任何AI Actor扩展均未作为当前产品开发门禁。
 
 因此观察到“一个 Lord Party 当前正围城/进攻”通常只说明 Campaign AI 当前已接受某个行为目标；具体行为候选来自多个 Behavior 评分，而不是 MobileParty 自己存有一个完整自然语言计划。目标会因目标消失、攻守态势、关系/战争变化、Settlement易主、Army状态和重新评估随机门限而被放弃/替换。
 

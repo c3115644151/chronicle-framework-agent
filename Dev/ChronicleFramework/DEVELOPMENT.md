@@ -1,10 +1,12 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.234
+Contract version: 7.235
 
 ## 当前产品边界
 
-自2026-10-18起，产品目标为“AI作为独立Campaign Actor行动、玩家仍控制MainHero”，而不是让Agent接管MainHero完成战役；StoryMode Gold/Establish Your Clan及W7旧主角路线均为历史原型或压力测试。当前唯一产品工作项及验收以GitHub Project/W7-P #129为准。下文保留的W7 MainHero实现/运行记录用于追溯既有Native适配，不能据此推断Actor绑定、NPC观察、原版AI仲裁或Actor独立行动已经实现。
+自2026-10-19起，产品主线是AI自主控制MainHero/MainParty游玩单机Campaign。一个Agent需支持持续自主推进与玩家临时交办两种模式；临时指令完成/受阻后回到自主目标循环，不能退化为玩家逐步点选的遥控器。首个长程门禁是由真实模型从自然StoryMode流程完成原版`Establish Your Clan`四项目标并由Native判定任务完成；这只证明首段闭环，不等于整个自主玩家产品完成。NPC/同伴Agent保留为后续玩法候选，但同伴加入MainParty本身没有独立Campaign Party Think循环，因此不假设其比MainHero更容易接入。工作顺序以GitHub Project中MainHero StoryMode门禁唯一进行中的产品Issue为准。
+
+下文标注为“历史”的NPC Actor产品路线已降为未来研究；MainHero GoldSale等历史切片若未有通过收据仍视为失败/未完成证据，只在当前W7缺口审计确认相关时才重跑。
 
 失败测试的录像也要经过证据收尾：按事件抽取关键帧，并把均匀联系表的样本数限制为最多64帧。只有录像无法解码或关键证据无法生成时才保留原始MP4；联系表和事件索引齐全后删除原片。这样保留的是能解释测试结果的证据，不是整段重复播放的大文件。
 
@@ -113,9 +115,9 @@ Smoke的FinishedAll/AssemblyLoaded/CrashDetected必须是Boolean；日志先转�
 
 ## 目标与边界
 
-Chronicle 当前的产品方向是 AI-native Calradia Campaign Actor：玩家控制 MainHero，AI在同一原版Campaign中拥有独立的Hero/Party/Clan身份、长期目标及经Native后果核验的行动循环。它不应退化为纯聊天NPC，也不再把“LLM代替玩家完成StoryMode任务”当作产品终态；产品范围、历史与当前决定、事实/未知见`Focus/MAINLINE.md`，工作次序由GitHub Project维护。
+Chronicle 当前的产品方向是AI自主游玩Bannerlord单机Campaign：AI直接驱动`Hero.MainHero`/`MobileParty.MainParty`，通过原版交互实现目标，玩家可高层督导但不逐步代点。产品北极星是StoryMode `Establish Your Clan`自然完成；纯聊天、单次工具演示或NPC候选扫描均不算通过。产品范围、当前门禁与未决事实见`Focus/MAINLINE.md`，工作顺序由GitHub Project维护。
 
-工程同时维护可无人值守验证产品的本地Harness：隔离一次性夹具与正式存档，提供可信的原生状态、进程、日志及必要视觉证据。游戏内Bridge负责受限Actor观察、动作分发和身份会话绑定；Agent Host负责模型决策、长期目标状态及运行监护。当前大多数Bridge接口仍硬编码MainHero/MainParty，因此不能因Host闭环已存在就宣称NPC Actor可用。Harness专用诊断、造景和故障注入只服务验证，不能进入普通Agent动作目录；工程测试夹具不能替代玩家产品目标。
+工程同时维护可无人值守验证产品的本地Harness：隔离一次性夹具与正式存档，提供可信原生状态、进程、日志及必要视觉证据。游戏内Bridge负责MainHero/MainParty观察、Native动作分发和会话校验；Agent Host负责真实模型决策、目标循环、结果核验、记忆/checkpoint与运行监护。既有接口以MainHero为主体，正是当前首发身体基础；这不等于完整StoryMode自主能力。NPC Think trace、造景与故障注入只服务验证/未来研究，不能进入普通Agent动作目录或替代产品目标。
 
 ## 单一事实来源
 
@@ -169,7 +171,9 @@ Project采用最少任务状态：`Todo`表示尚未开始（是否被阻塞看I
 
 ## 研究就绪门槛
 
-`Focus/MAINLINE.md` 的 Research Gate 未就绪时，不实现新的游戏能力。就绪依据是玩家真实入口与相关观察/行为范围已研究到足以界定覆盖分母，而不是列出多少熟悉案例。`HarnessResearchReadiness.ps1`保留一个精确hash的SubModule审阅基线，用来发现未经复核的额外改动；当已批准的产品生命周期或Harness入口合理需要改SubModule时，先检查实际diff/Build/Smoke，再同步更新该hash，不得用删掉门禁来让检查通过。纯Harness诊断维护不等于新游戏能力。
+`Focus/MAINLINE.md` 的 Research Gate 未就绪时，不实现新的游戏能力。当前MainHero StoryMode纵向门禁须先把自然新战役/教程/Quest激活、四个动态目标、现有Native动作可复用处、实际缺口、时间/失败恢复和Journal/Quest后验核清楚；不得因182个人类玩家ACT已盘点就假定这条StoryMode纵向链已经覆盖。就绪依据是玩家真实入口与相关观察/行为范围已研究到足以界定当前目标覆盖分母，而不是列出多少熟悉案例。`HarnessResearchReadiness.ps1`保留一个精确hash的SubModule审阅基线，用来发现未经复核的额外改动；当已批准的产品生命周期或Harness入口合理需要改SubModule时，先检查实际diff/Build/Smoke，再同步更新该hash，不得用删掉门禁来让检查通过。纯Harness诊断维护不等于新游戏能力。
+
+`CampaignActorThinkTrace`是留存的W8/NPC Actor未来研究专用只读Harness阶段，不属于当前W7 MainHero产品门禁：仅Harness环境变量启用，在Campaign `TickEvent`中按需读取公开`MobileParty.ThinkParamsCache`的一名现存非MainHero Lord非空候选，含行为、目标标识/位置、分数和导航标志；默认用专用Harness `advance`显式推进0.25个Campaign日。它不调用`PartyThinkParams`写方法、不提交Party动作、不进入普通Agent动作目录。该阶段只证明一项Native候选观测，不证明Chronicle控制NPC，也不改变W7 MainHero StoryMode的Research/Implementation Gate。SubModule仍只允许精确审阅哈希的Harness诊断基线；新增玩法代码仍受当前门禁约束。
 
 ## 当前版本事实
 

@@ -325,6 +325,8 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
     private string _agentCheckpointJson = string.Empty;
     private bool _harnessSaveRequested;
     private bool _harnessTimeControlApplied;
+    private bool _campaignActorThinkTraceCaptured;
+    private float _campaignActorThinkTraceScanElapsed;
     private bool _freshProgressionSavePending;
     private bool _freshProgressionCampaignPollLogged;
     private ChronicleAgentProtocol _agentProtocol;
@@ -372,6 +374,45 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
         CampaignEvents.OnSaveOverEvent.AddNonSerializedListener(this, OnSaveOver);
         if (Environment.GetEnvironmentVariable(HarnessModeVariable) == FreshCampaignHarness.Mode)
             CampaignEvents.OnCharacterCreationIsOverEvent.AddNonSerializedListener(this, OnFreshCharacterCreationFinished);
+    }
+
+    private void CaptureCampaignActorThink(MobileParty party, PartyThinkParams thinkParams)
+    {
+        if (_campaignActorThinkTraceCaptured || party == null || thinkParams == null) return;
+
+        var hero = party.LeaderHero;
+        if (hero == null || hero == Hero.MainHero || hero.Clan == null || !hero.IsAlive || hero.IsPrisoner ||
+            !party.IsActive || !party.IsLordParty || hero.PartyBelongedTo != party) return;
+
+        var requestedHeroId = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_ACTOR_HERO_ID");
+        if (!string.IsNullOrWhiteSpace(requestedHeroId) && !string.Equals(hero.StringId, requestedHeroId, StringComparison.Ordinal)) return;
+
+        var candidateCount = thinkParams.AIBehaviorScores.Count;
+        if (candidateCount == 0) return;
+        _campaignActorThinkTraceCaptured = true;
+        var candidates = string.Join(",", thinkParams.AIBehaviorScores.Select(item =>
+        {
+            var data = item.Item1;
+            var target = data.Party is MobileParty targetParty
+                ? "party:" + targetParty.StringId
+                : data.Party is Settlement targetSettlement
+                    ? "settlement:" + targetSettlement.StringId
+                    : data.Party != null
+                        ? "mapPoint:" + data.Party.GetType().Name + ":" + (data.Party.Name?.ToString() ?? "unnamed")
+                        : "position:" + data.Position.X.ToString("F3", CultureInfo.InvariantCulture) + "," + data.Position.Y.ToString("F3", CultureInfo.InvariantCulture) + ",onLand=" + data.Position.IsOnLand;
+            return data.AiBehavior + ":" + target + ":score=" + item.Item2.ToString("F3", CultureInfo.InvariantCulture) +
+                ":gatherArmy=" + data.WillGatherArmy + ":navigation=" + data.NavigationType + ":fromPort=" + data.IsFromPort + ":toPort=" + data.IsTargetingPort;
+        }));
+        var campaign = Campaign.Current;
+        var state = Game.Current?.GameStateManager?.ActiveState?.GetType().Name ?? "null";
+        var currentPosition = party.GetPosition2D;
+        var currentTarget = party.TargetSettlement != null
+            ? "settlement:" + party.TargetSettlement.StringId
+            : party.TargetParty != null
+                ? "party:" + party.TargetParty.StringId
+                : "none";
+        ChronicleDiagnostics.Write(
+            $"campaign-actor-think-trace|trace={Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_ACTOR_TRACE_ID") ?? "unscoped"}|source=MobileParty.ThinkParamsCache|actorHeroId={hero.StringId}|partyId={party.StringId}|clanId={hero.Clan.StringId}|mainHeroId={Hero.MainHero?.StringId ?? "null"}|heroAlive={hero.IsAlive}|heroPrisoner={hero.IsPrisoner}|partyActive={party.IsActive}|partyIsLord={party.IsLordParty}|partyLeaderMatchesHero={hero.PartyBelongedTo == party}|thinkPartyMatches={thinkParams.MobilePartyOf == party}|partyBehavior={party.DefaultBehavior}|currentTarget={currentTarget}|currentPosition={currentPosition.X.ToString("F3", CultureInfo.InvariantCulture)},{currentPosition.Y.ToString("F3", CultureInfo.InvariantCulture)}|aiDisabled={party.Ai.IsDisabled}|aiDoNotMakeNewDecisions={party.Ai.DoNotMakeNewDecisions}|doNotChangeBehavior={thinkParams.DoNotChangeBehavior}|currentObjective={thinkParams.CurrentObjectiveValue.ToString("F3", CultureInfo.InvariantCulture)}|candidateCount={candidateCount}|candidates={candidates}|campaignDay={CampaignTime.Now.ToDays.ToString("F6", CultureInfo.InvariantCulture)}|timeControl={campaign?.TimeControlMode.ToString() ?? "null"}|gameState={state}|writeMode=read-only");
     }
 
     private void OnFreshCharacterCreationFinished()
@@ -511,6 +552,23 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
 
     private void OnCampaignTick(float deltaTime)
     {
+        if (Environment.GetEnvironmentVariable(HarnessModeVariable) == "campaign-actor-think-trace" && !_campaignActorThinkTraceCaptured)
+        {
+            _campaignActorThinkTraceScanElapsed += deltaTime;
+            if (_campaignActorThinkTraceScanElapsed >= 1f)
+            {
+                _campaignActorThinkTraceScanElapsed = 0f;
+                foreach (var candidate in MobileParty.All)
+                {
+                    var thinkParams = candidate?.ThinkParamsCache;
+                    if (candidate == null || candidate == MobileParty.MainParty || !candidate.IsActive || !candidate.IsLordParty ||
+                        candidate.LeaderHero == null || thinkParams == null || thinkParams.MobilePartyOf != candidate || thinkParams.AIBehaviorScores.Count == 0) continue;
+                    CaptureCampaignActorThink(candidate, thinkParams);
+                    if (_campaignActorThinkTraceCaptured) break;
+                }
+            }
+        }
+
         if (Environment.GetEnvironmentVariable(HarnessModeVariable) == FreshCampaignHarness.Mode && _freshProgressionSavePending)
         {
             var freshSaveName = Environment.GetEnvironmentVariable("CHRONICLE_FRESH_CAMPAIGN_SAVE_NAME");
