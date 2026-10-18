@@ -371,12 +371,12 @@ try {
         $env:CHRONICLE_LLM_MAX_TOKENS = '1024'
     }
     elseif ($CaptivityRecoveryLoop) {
-        $goal = 'Recover this already captive MainHero from the current Native prisoner_wait menu, then re-read the still-active original Establish Your Clan quest and select one unmet objective. Do not start a battle or claim the quest complete. If the no-option wait menu is stopped and Native marks it wait-active, choose explicit Play as a separate Native action; while time flows, let the Host passively observe. At a current ransom menu, weigh its displayed price and current Gold against the goal and choose only an enabled Native accept/reject option; do not hardcode a threshold or write game state.'
+        $goal = 'Recover this already captive MainHero from the current Native Captivity state, then re-read the still-active original Establish Your Clan quest and select one unmet objective. Do not start a battle or claim the quest complete. If the no-option wait menu is stopped and Native marks it wait-active, choose explicit Play as a separate Native action; while time flows, let the Host passively observe. At a current ransom menu, weigh its displayed price and current Gold against the goal and choose only an enabled Native accept/reject option. On a current allowlisted Native Captivity continuation page, choose only the currently enabled Continue option; re-observe because some pages return to captive waiting. Do not hardcode a threshold or write game state.'
         $maxDecisions = 120
         $maxElapsedSeconds = 7200
         $allowedActions = 'resume,menuSelect'
         $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '360'
-        $env:CHRONICLE_LLM_MAX_TOKENS = '768'
+        $env:CHRONICLE_LLM_MAX_TOKENS = '1024'
     }
     elseif ($EstablishYourClanGoalPlanner) {
         $goal = 'Read the active original StoryMode Establish Your Clan quest and choose exactly one currently unmet objective from its four visible numeric goals. Return a planning result only; do not take any game action, modify the quest, claim completion, or change Campaign time.'
