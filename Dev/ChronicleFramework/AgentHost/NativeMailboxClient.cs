@@ -6,7 +6,8 @@ using System.Text.Json.Nodes;
 namespace ChronicleFramework.AgentHost;
 
 internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeClient, IAgentHostBattleSimulationNativeClient,
-    IAgentHostQuestDetailsNativeClient, IAgentHostCaptivityRecoveryNativeClient, IAgentHostGoldSaleNativeClient
+    IAgentHostQuestDetailsNativeClient, IAgentHostCaptivityRecoveryNativeClient, IAgentHostGoldSaleNativeClient,
+    IAgentHostRecruitmentNativeClient
 {
     private static readonly HashSet<string> SupplySliceActions = new(StringComparer.Ordinal)
     {
@@ -75,6 +76,51 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
     {
         ValidateGoldSaleAction(action, arguments);
         return SendAsync(action, arguments, acceptedResponseExpected: false, cancellationToken);
+    }
+
+    public Task<JsonDocument> ExecuteRecruitmentActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+    {
+        ValidateRecruitmentAction(action, arguments);
+        return SendAsync(action, arguments, acceptedResponseExpected: false, cancellationToken);
+    }
+
+    internal static void ValidateRecruitmentAction(string action, JsonObject arguments)
+    {
+        static bool HasText(JsonObject value, string key) => value[key] is JsonValue node && node.TryGetValue<string>(out var text) && !string.IsNullOrWhiteSpace(text);
+        var valid = action switch
+        {
+            "recruitOptions" => arguments.Count == 0,
+            "menuSelect" => arguments.Count == 2 && HasText(arguments, "menuId") && HasText(arguments, "optionId"),
+            "recruit" => arguments.Count == 4 && HasText(arguments, "ownerId") && HasText(arguments, "troopId") &&
+                         arguments["slot"] is JsonValue slotNode && slotNode.TryGetValue<int>(out var slot) && slot >= 0 &&
+                         arguments["confirmPartySizeWarning"] is JsonValue confirmNode && confirmNode.TryGetValue<int>(out var confirm) && confirm is 0 or 1,
+            _ => false
+        };
+        if (!valid)
+            throw new AgentHostException("native-action-not-in-recruitment-scope", "The recruitment adapter accepts only a fresh options query or one exact Native volunteer offer with a binary capacity-confirmation choice.");
+    }
+
+    internal static IReadOnlyList<object> RunRecruitmentActionContractSelfTests()
+    {
+        ValidateRecruitmentAction("recruitOptions", new JsonObject());
+        ValidateRecruitmentAction("menuSelect", JsonNode.Parse("{\"menuId\":\"village\",\"optionId\":\"leave\"}")!.AsObject());
+        ValidateRecruitmentAction("recruit", JsonNode.Parse("{\"ownerId\":\"notable-a\",\"troopId\":\"vlandian_recruit\",\"slot\":0,\"confirmPartySizeWarning\":0}")!.AsObject());
+        foreach (var item in new (string Action, string Json)[]
+        {
+            ("recruitOptions", "{\"slot\":0}"),
+            ("recruit", "{\"ownerId\":\"notable-a\",\"troopId\":\"vlandian_recruit\",\"slot\":-1,\"confirmPartySizeWarning\":0}"),
+            ("recruit", "{\"ownerId\":\"notable-a\",\"troopId\":\"vlandian_recruit\",\"slot\":0,\"confirmPartySizeWarning\":2}"),
+            ("recruit", "{\"ownerId\":\"notable-a\",\"troopId\":\"vlandian_recruit\",\"slot\":0,\"confirmPartySizeWarning\":0,\"extra\":true}")
+        })
+        {
+            try
+            {
+                ValidateRecruitmentAction(item.Action, JsonNode.Parse(item.Json)!.AsObject());
+                throw new AgentHostException("native-recruitment-invalid-action-accepted", "The recruitment transport accepted a malformed slot, extra argument, or invalid capacity-warning confirmation.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "native-action-not-in-recruitment-scope") { }
+        }
+        return [new { scenario = "native-recruitment-mailbox-requires-current-offer-identity-and-binary-over-capacity-confirmation", passed = true }];
     }
 
     internal static void ValidateGoldSaleAction(string action, JsonObject arguments)

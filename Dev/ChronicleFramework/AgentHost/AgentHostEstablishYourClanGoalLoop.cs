@@ -6,9 +6,9 @@ namespace ChronicleFramework.AgentHost;
 internal static class AgentHostEstablishYourClanGoalLoop
 {
     private const string QuestId = "rebuild_player_clan_storymode_quest";
-    private static readonly string[] ObjectiveIds = ["gold", "partySize", "renown", "companions"];
+    internal static readonly string[] ObjectiveIds = ["gold", "partySize", "renown", "companions"];
 
-    internal static JsonArray BuildObjectiveActionCatalog(JsonObject? snapshot)
+    internal static JsonArray BuildObjectiveActionCatalog(JsonObject? snapshot, IReadOnlySet<string>? supportedObjectives = null)
     {
         var action = new JsonObject
         {
@@ -18,7 +18,8 @@ internal static class AgentHostEstablishYourClanGoalLoop
         var unmet = new JsonArray();
         foreach (var objectiveId in ObjectiveIds)
         {
-            if (ReadBoolean(snapshot?[objectiveId] as JsonObject, "met") == false)
+            if ((supportedObjectives is null || supportedObjectives.Contains(objectiveId)) &&
+                ReadBoolean(snapshot?[objectiveId] as JsonObject, "met") == false)
                 unmet.Add(objectiveId);
         }
         action["argumentValues"] = new JsonObject { ["ObjectiveId"] = unmet };
@@ -123,15 +124,29 @@ internal static class AgentHostEstablishYourClanGoalLoop
         long priorPromptTokens = 0,
         long priorCompletionTokens = 0,
         JsonArray? priorTrace = null,
-        JsonArray? priorProviderRouteHistory = null)
+        JsonArray? priorProviderRouteHistory = null,
+        IReadOnlySet<string>? supportedObjectives = null,
+        JsonObject? observedQuestDetails = null,
+        bool activeQuestAlreadyVerified = false)
     {
-        using var current = await client.ReadStateAsync(cancellationToken);
-        if (!HasActiveQuest(current.RootElement))
-            throw new AgentHostException("establish-clan-quest-no-longer-active", "The exact StoryMode quest is no longer in the fresh Native active-quest list.");
+        if (!activeQuestAlreadyVerified)
+        {
+            using var current = await client.ReadStateAsync(cancellationToken);
+            if (!HasActiveQuest(current.RootElement))
+                throw new AgentHostException("establish-clan-quest-no-longer-active", "The exact StoryMode quest is no longer in the fresh Native active-quest list.");
+        }
 
-        using var questDetails = await questDetailsClient.ReadQuestDetailsAsync(QuestId, cancellationToken);
-        var receipt = JsonNode.Parse(questDetails.RootElement.GetRawText())?.AsObject()
-            ?? throw new AgentHostException("establish-clan-quest-details-invalid", "Native returned no quest-details receipt.");
+        JsonObject receipt;
+        if (observedQuestDetails is not null)
+            receipt = observedQuestDetails.DeepClone() as JsonObject
+                ?? throw new AgentHostException("establish-clan-quest-details-invalid", "The supplied fresh Native Quest Journal could not be cloned.");
+        else
+        {
+            using var questDetails = await questDetailsClient.ReadQuestDetailsAsync(QuestId, cancellationToken);
+            receipt = JsonNode.Parse(questDetails.RootElement.GetRawText())?.AsObject()
+                ?? throw new AgentHostException("establish-clan-quest-details-invalid", "Native returned no quest-details receipt.");
+        }
+        cancellationToken.ThrowIfCancellationRequested();
         if (ReadString(receipt, "status") != "completed" || receipt["data"] is not JsonObject data ||
             ReadString(data, "questId") != QuestId)
             throw new AgentHostException("establish-clan-progress-unavailable", "The current Native quest-details read did not expose the exact active StoryMode quest.");
@@ -141,12 +156,19 @@ internal static class AgentHostEstablishYourClanGoalLoop
         var liveSnapshot = data["storyModeEstablishClan"] as JsonObject;
         var liveMetricDifferences = liveSnapshot is null ? new JsonArray() : FindLiveMetricDifferences(liveSnapshot, journalObjectives);
         var targetConsistency = new JsonObject { ["consistent"] = true, ["authoritativeSource"] = "original-journal-log-progress" };
-        var actionCatalog = BuildObjectiveActionCatalog(snapshot);
+        var actionCatalog = BuildObjectiveActionCatalog(snapshot, supportedObjectives);
         if (actionCatalog.Count == 0)
+        {
+            var allConditionsMet = ObjectiveIds.All(objectiveId => ReadBoolean(snapshot[objectiveId] as JsonObject, "met") == true);
+            var unimplementedObjectives = new JsonArray(ObjectiveIds
+                .Where(objectiveId => ReadBoolean(snapshot[objectiveId] as JsonObject, "met") == false &&
+                                      supportedObjectives is not null && !supportedObjectives.Contains(objectiveId))
+                .Select(objectiveId => (JsonNode?)JsonValue.Create(objectiveId))
+                .ToArray());
             return new JsonObject
             {
                 ["status"] = "completed",
-                ["resultKind"] = "no-incomplete-objective",
+                ["resultKind"] = allConditionsMet ? "no-incomplete-objective" : "no-implemented-objective-route",
                 ["providerModelId"] = provider.ModelId,
                 ["providerConfigurationSource"] = provider.ConfigurationSource,
                 ["decisions"] = 0,
@@ -154,12 +176,16 @@ internal static class AgentHostEstablishYourClanGoalLoop
                 ["questDetails"] = receipt.DeepClone(),
                 ["journalObjectiveSnapshot"] = journalObjectives,
                 ["objectiveSnapshot"] = snapshot.DeepClone(),
+                ["unimplementedObjectives"] = unimplementedObjectives,
                 ["targetConsistency"] = targetConsistency.DeepClone(),
                 ["liveMetricDifferences"] = liveMetricDifferences.DeepClone(),
                 ["selection"] = null,
                 ["termination"] = new JsonObject { ["reason"] = "no-currently-unmet-objective", ["completedByProvider"] = false, ["goalVerified"] = false },
-                ["note"] = "No objective was selected because all four currently observed objective conditions are met; this does not claim Native Quest completion."
+                ["note"] = allConditionsMet
+                    ? "No objective was selected because all four currently observed objective conditions are met; this does not claim Native Quest completion."
+                    : "No objective was selected because each currently unmet condition lacks an integrated executor in this Host build. This does not claim Native Quest completion."
             };
+        }
 
         var modelRequest = new JsonObject
         {
@@ -251,7 +277,7 @@ internal static class AgentHostEstablishYourClanGoalLoop
         };
     }
 
-    private static bool HasActiveQuest(JsonElement native)
+    internal static bool HasActiveQuest(JsonElement native)
     {
         if (!native.TryGetProperty("state", out var state) || state.ValueKind != JsonValueKind.Object ||
             !state.TryGetProperty("quests", out var quests) || quests.ValueKind != JsonValueKind.Array) return false;

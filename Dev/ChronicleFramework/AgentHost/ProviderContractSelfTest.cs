@@ -29,6 +29,9 @@ internal static class ProviderContractSelfTest
         results.AddRange(NativeMailboxClient.RunVillageToolsQuestActionContractSelfTests());
         results.AddRange(NativeMailboxClient.RunBattleSimulationActionContractSelfTests());
         results.AddRange(NativeMailboxClient.RunGoldSaleActionContractSelfTests());
+        results.AddRange(NativeMailboxClient.RunRecruitmentActionContractSelfTests());
+        try { results.AddRange(await AgentHostEstablishClanRecruitmentLoop.RunContractSelfTestsAsync()); }
+        catch (Exception exception) { throw new AgentHostException("establish-clan-recruitment-loop-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
         results.AddRange(AgentHostEstablishClanGoldSaleLoop.RunContractSelfTests());
         results.AddRange(NativeMailboxClient.RunQuestDetailsReadActionContractSelfTests());
         results.AddRange(AgentHostCaptivityRecoveryLoop.RunContractSelfTests());
@@ -41,6 +44,7 @@ internal static class ProviderContractSelfTest
         catch (Exception exception) { throw new AgentHostException("village-tools-loop-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
         try { results.AddRange(await AgentHostEstablishYourClanGoalLoop.RunContractSelfTestsAsync()); }
         catch (Exception exception) { throw new AgentHostException("establish-clan-planner-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
+        results.AddRange(AgentHostEstablishYourClanAutonomyLoop.RunContractSelfTests());
         results.AddRange(AgentHostCampaignLoop.RunContractSelfTests());
         results.AddRange(AgentHostBattleSimulationLoop.RunContractSelfTests());
         try { results.AddRange(await AgentHostBattleSimulationLoop.RunTransportSelfTestsAsync()); }
@@ -943,7 +947,7 @@ internal static class ProviderContractSelfTest
                 "supportedVillageToolsQuestGoal" => "Complete the currently visible village tools quest.",
                 "supportedBattleSimulationGoal" => "Resolve one currently visible hostile bandit encounter using Campaign Send Troops and verify actual outcomes.",
                 "supportedBattleAndCaptivityGoal" => "Resolve a Native battle and continue the actual MainHero captivity process until free on the map.",
-                "supportedEstablishYourClanGoal" => "Read the active original StoryMode Establish Your Clan quest and select one currently unmet objective.",
+                "supportedEstablishYourClanGoal" => "Autonomously pursue the active original StoryMode Establish Your Clan quest through the Host's currently integrated Native objective routes.",
                 "supportedCaptivityRecoveryGoal" => "Recover from the current Native captivity state, then replan one unmet active Establish Your Clan objective.",
                 "supportedEstablishClanGoldSaleGoal" => "Sell one currently sellable item through Native Trade to increase the active Establish Your Clan Gold Journal progress.",
                 _ => "Move to any visible safe settlement."

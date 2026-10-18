@@ -22,7 +22,8 @@ internal static class AgentHostCampaignLoop
     {
         "mapSettlementTargets", "move", "menuSelect", "tradeOptions", "trade", "tradeConfirm", "tradeCancel", "tradeCancelChanges"
     };
-    internal static readonly HashSet<string> AllSupportedActions = new(ApprovedActions.Concat(BattleSimulationActions).Concat(GoldSaleActions), StringComparer.Ordinal);
+    internal static readonly HashSet<string> RecruitmentActions = new(StringComparer.Ordinal) { "recruitOptions", "recruit" };
+    internal static readonly HashSet<string> AllSupportedActions = new(ApprovedActions.Concat(BattleSimulationActions).Concat(GoldSaleActions).Concat(RecruitmentActions), StringComparer.Ordinal);
 
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
@@ -426,12 +427,48 @@ internal static class AgentHostCampaignLoop
                 {
                     trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
                         providerStartedUtc, providerDoneUtc, providerStartedTicks, null));
-                    if (!requestedActions.SetEquals(ApprovedActions) && !requestedActions.SetEquals(AllSupportedActions))
-                        throw new AgentHostException("establish-clan-planner-action-set-unavailable", "The Campaign request does not include the exact approved read-only quest action set.");
-                    if (client is not IAgentHostQuestDetailsNativeClient questDetailsClient)
-                        throw new AgentHostException("establish-clan-quest-details-client-unavailable", "The Native transport does not implement the read-only Quest Journal query required by the StoryMode planner.");
-                    return await AgentHostEstablishYourClanGoalLoop.RunAsync(
-                        request, client, questDetailsClient, provider, elapsed.Token,
+                    if (!requestedActions.SetEquals(AllSupportedActions))
+                        throw new AgentHostException("establish-clan-autonomy-action-set-unavailable", "The StoryMode autonomy loop requires the exact reviewed Native superset for its currently integrated Gold, PartySize and Renown subgoals.");
+                    if (client is not IAgentHostQuestDetailsNativeClient questDetailsClient ||
+                        client is not IAgentHostGoldSaleNativeClient goldSaleClient ||
+                        client is not IAgentHostBattleSimulationNativeClient battleClient ||
+                        client is not IAgentHostRecruitmentNativeClient recruitmentClient)
+                        throw new AgentHostException("establish-clan-autonomy-native-client-unavailable", "The Native transport does not implement the reviewed Quest Journal, Trade-sale, recruitment and BattleSimulation subgoal contracts.");
+
+                    async Task<JsonObject> ExecuteObjectiveAsync(string objectiveId, int priorSubDecisions, long priorSubPromptTokens,
+                        long priorSubCompletionTokens, JsonArray priorSubTrace, JsonArray priorSubRoutes, CancellationToken subToken)
+                    {
+                        var childRequestNode = JsonNode.Parse(request.GetRawText())?.AsObject()
+                            ?? throw new AgentHostException("establish-clan-subgoal-request-invalid", "The active StoryMode request could not be cloned for a bounded objective subgoal.");
+                        var remainingDecisions = Math.Max(1, maxDecisions - priorSubDecisions);
+                        var remainingSeconds = Math.Max(1, maxElapsedSeconds - (int)Stopwatch.GetElapsedTime(loopStartedTicks).TotalSeconds);
+                        childRequestNode["maxDecisions"] = remainingDecisions;
+                        childRequestNode["maxElapsedSeconds"] = remainingSeconds;
+                        childRequestNode["goal"] = objectiveId switch
+                        {
+                            "gold" => "Raise the current original Establish Your Clan Journal Gold progress with one positive Native Goods sale; then return to the StoryMode objective loop.",
+                            "partySize" => "Raise the current original Establish Your Clan Journal PartySize progress by recruiting current affordable volunteers through the original RecruitmentVM, stopping at the dynamic target and rechecking the Journal.",
+                            "renown" => "Raise the current original Establish Your Clan Journal Renown progress by resolving one currently visible hostile Bandit through Native Campaign BattleSimulation, verifying actual aftermath, then return to the StoryMode objective loop.",
+                            _ => throw new AgentHostException("establish-clan-objective-route-unavailable", "No integrated Native objective executor is registered for this StoryMode target.")
+                        };
+                        using var childRequest = JsonDocument.Parse(childRequestNode.ToJsonString());
+                        return objectiveId switch
+                        {
+                            "gold" => await AgentHostEstablishClanGoldSaleLoop.RunAsync(childRequest.RootElement, client, goldSaleClient, provider, subToken,
+                                priorDecisions: priorSubDecisions, priorPromptTokens: priorSubPromptTokens, priorCompletionTokens: priorSubCompletionTokens,
+                                priorTrace: priorSubTrace, priorProviderRouteHistory: priorSubRoutes),
+                            "partySize" => await AgentHostEstablishClanRecruitmentLoop.RunAsync(childRequest.RootElement, client, recruitmentClient, questDetailsClient, provider, subToken,
+                                priorDecisions: priorSubDecisions, priorPromptTokens: priorSubPromptTokens, priorCompletionTokens: priorSubCompletionTokens,
+                                priorTrace: priorSubTrace, priorProviderRouteHistory: priorSubRoutes),
+                            "renown" => await AgentHostBattleSimulationLoop.RunAsync(childRequest.RootElement, battleClient, provider, subToken,
+                                priorDecisions: priorSubDecisions, priorPromptTokens: priorSubPromptTokens, priorCompletionTokens: priorSubCompletionTokens,
+                                priorTrace: priorSubTrace, priorProviderRouteHistory: priorSubRoutes),
+                            _ => throw new AgentHostException("establish-clan-objective-route-unavailable", "No integrated Native objective executor is registered for this StoryMode target.")
+                        };
+                    }
+
+                    return await AgentHostEstablishYourClanAutonomyLoop.RunAsync(
+                        request, client, questDetailsClient, provider, ExecuteObjectiveAsync, elapsed.Token,
                         priorDecisions: decisionCount,
                         priorPromptTokens: promptTokens,
                         priorCompletionTokens: completionTokens,
