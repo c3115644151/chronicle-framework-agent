@@ -426,7 +426,8 @@ try {
         $initialQuestIds = @($baseline.state.quests | ForEach-Object { [string]$_.id } | Sort-Object)
         $finalQuestIds = @($finalNativeState.state.quests | ForEach-Object { [string]$_.id } | Sort-Object)
         $finalLifecycle = [string]$finalNativeState.state.storyModeEstablishClanStatus.status
-        $unmetFinalObjectives = @('gold','partySize','renown','companions' | Where-Object { -not [bool]$loopTrace.objectiveSnapshot.$_.met })
+        $finalObjectiveIds = @('gold','partySize','renown','companions')
+        $unmetFinalObjectives = @($finalObjectiveIds | Where-Object { -not [bool]$loopTrace.objectiveSnapshot.$_.met })
         $allObjectivesMet = ($null -ne $loopTrace.objectiveSnapshot) -and $unmetFinalObjectives.Count -eq 0
         $nativeQuestSucceeded = ([string]$loopTrace.status -ceq 'completed' -and [bool]$loopTrace.termination.goalVerified -and
             [string]$loopTrace.termination.reason -ceq 'native-establish-your-clan-quest-success-verified' -and
