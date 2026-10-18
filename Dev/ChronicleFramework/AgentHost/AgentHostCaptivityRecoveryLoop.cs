@@ -276,6 +276,7 @@ internal static class AgentHostCaptivityRecoveryLoop
                     ["objectiveSnapshot"] = objectivePlan["objectiveSnapshot"]?.DeepClone(),
                     ["journalObjectiveSnapshot"] = objectivePlan["journalObjectiveSnapshot"]?.DeepClone(),
                     ["targetConsistency"] = objectivePlan["targetConsistency"]?.DeepClone(),
+                    ["liveMetricDifferences"] = objectivePlan["liveMetricDifferences"]?.DeepClone(),
                     ["termination"] = new JsonObject { ["reason"] = "captivity-recovered-and-objective-replanned", ["completedByProvider"] = true, ["goalVerified"] = false },
                     ["trace"] = objectivePlan["trace"]?.DeepClone()
                 };

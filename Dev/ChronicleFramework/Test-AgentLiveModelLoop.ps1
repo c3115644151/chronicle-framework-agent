@@ -605,6 +605,7 @@ try {
             mainPartyMembersAtReturn = [int]$finalNativeState.state.party.members
             selectedObjective = $objectiveSelection
             targetConsistency = $loopTrace.targetConsistency
+            liveMetricDifferences = $loopTrace.liveMetricDifferences
             goalVerified = [bool]$loopTrace.termination.goalVerified
             passed = [bool]$captivityRecoveryVerified
         }
@@ -1075,6 +1076,7 @@ try {
         CaptivityRecoveryObjectiveSnapshot = if ($CaptivityRecoveryLoop) { $loopTrace.objectiveSnapshot } else { $null }
         CaptivityRecoveryJournalObjectiveSnapshot = if ($CaptivityRecoveryLoop) { $loopTrace.journalObjectiveSnapshot } else { $null }
         CaptivityRecoveryTargetConsistency = if ($CaptivityRecoveryLoop) { $loopTrace.targetConsistency } else { $null }
+        CaptivityRecoveryLiveMetricDifferences = if ($CaptivityRecoveryLoop) { $loopTrace.liveMetricDifferences } else { $null }
         CaptivityRecoveryPlannerTermination = if ($CaptivityRecoveryLoop) { $loopTrace.termination } else { $null }
         CaptivityRecoveryPlannerVerification = if ($CaptivityRecoveryLoop) { $plannerVerification } else { $null }
         BattleSimulationVerified = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { [bool]$battleSimulationVerified } else { $null }
@@ -1152,6 +1154,7 @@ catch {
             CaptivityRecoveryObjectiveSnapshot = if ($CaptivityRecoveryLoop -and $loopTrace) { $loopTrace.objectiveSnapshot } else { $null }
             CaptivityRecoveryJournalObjectiveSnapshot = if ($CaptivityRecoveryLoop -and $loopTrace) { $loopTrace.journalObjectiveSnapshot } else { $null }
             CaptivityRecoveryTargetConsistency = if ($CaptivityRecoveryLoop -and $loopTrace) { $loopTrace.targetConsistency } else { $null }
+            CaptivityRecoveryLiveMetricDifferences = if ($CaptivityRecoveryLoop -and $loopTrace) { $loopTrace.liveMetricDifferences } else { $null }
             CaptivityRecoveryPlannerTermination = if ($CaptivityRecoveryLoop -and $loopTrace) { $loopTrace.termination } else { $null }
             CaptivityRecoveryPlannerVerification = if ($CaptivityRecoveryLoop) { $plannerVerification } else { $null }
             EstablishYourClanPlannerVerified = if ($EstablishYourClanGoalPlanner) { [bool]$plannerVerified } else { $null }

@@ -52,12 +52,17 @@ internal static class AgentHostEstablishYourClanGoalLoop
             new JsonObject { ["objectiveId"] = "partySize", ["current"] = 8, ["target"] = 20 },
             new JsonObject { ["objectiveId"] = "renown", ["current"] = 50, ["target"] = 50 },
             new JsonObject { ["objectiveId"] = "companions", ["current"] = 0, ["target"] = 1 });
-        if (FindJournalInconsistencies(snapshot, journalSnapshot).Count != 0)
+        if (FindLiveMetricDifferences(snapshot, journalSnapshot).Count != 0)
             throw new AgentHostException("establish-clan-journal-consistency-self-test-failed", "Matching Journal and current objective snapshots must be accepted.");
+        var authoritativeSnapshot = BuildObjectiveSnapshot(journalSnapshot);
+        if (ReadNumber(authoritativeSnapshot["partySize"] as JsonObject, "current") != 8 ||
+            ReadNumber(authoritativeSnapshot["partySize"] as JsonObject, "target") != 20 ||
+            ReadBoolean(authoritativeSnapshot["partySize"] as JsonObject, "met") != false)
+            throw new AgentHostException("establish-clan-journal-authority-self-test-failed", "Planner current/target/met values must come directly from the original Journal task log.");
         var stalePartyTargetSnapshot = (JsonObject)snapshot.DeepClone();
         stalePartyTargetSnapshot["partySize"]!["target"] = 21;
-        if (FindJournalInconsistencies(stalePartyTargetSnapshot, journalSnapshot).Count != 1)
-            throw new AgentHostException("establish-clan-stale-dynamic-target-self-test-failed", "A stale Journal hideout-size target must be preserved as a mismatch and fail closed.");
+        if (FindLiveMetricDifferences(stalePartyTargetSnapshot, journalSnapshot).Count != 1)
+            throw new AgentHostException("establish-clan-live-metric-difference-self-test-failed", "A stale recomputed live target must be preserved as a diagnostic difference from the official Journal target.");
 
         var native = new FakeNativeClient(snapshot);
         var provider = new FakeDecisionProvider("partySize");
@@ -77,13 +82,16 @@ internal static class AgentHostEstablishYourClanGoalLoop
             throw new AgentHostException("establish-clan-objective-planner-runtime-failed", "The read-only planner did not select an unmet objective from the exact current quest catalog.");
 
         var inconsistentSnapshot = (JsonObject)snapshot.DeepClone();
-        inconsistentSnapshot["partySize"]!["target"] = 21;
+        inconsistentSnapshot["partySize"]!["current"] = 20;
+        inconsistentSnapshot["partySize"]!["met"] = true;
         var inconsistentProvider = new FakeDecisionProvider("partySize");
         var inconsistentNative = new FakeNativeClient(inconsistentSnapshot);
         var inconsistentResult = await RunAsync(request.RootElement, inconsistentNative, inconsistentNative, inconsistentProvider, CancellationToken.None);
-        if (ReadString(inconsistentResult, "status") != "blocked" || inconsistentProvider.CallCount != 0 ||
-            ReadString(inconsistentResult["termination"] as JsonObject, "reason") != "journal-native-target-mismatch")
-            throw new AgentHostException("establish-clan-journal-mismatch-model-call-leaked", "A mismatched Journal/dynamic target must stop before calling the model.");
+        var resultJournalSnapshot = inconsistentResult["objectiveSnapshot"]?["partySize"] as JsonObject;
+        if (ReadString(inconsistentResult, "status") != "completed" || ReadString(inconsistentResult["selection"] as JsonObject, "objectiveId") != "partySize" ||
+            ReadNumber(resultJournalSnapshot, "current") != 8 || ReadNumber(resultJournalSnapshot, "target") != 20 ||
+            (inconsistentResult["liveMetricDifferences"] as JsonArray)?.Count != 1 || inconsistentProvider.CallCount != 1)
+            throw new AgentHostException("establish-clan-live-metric-lag-blocked-planner", "When live MainParty data is newer than the original Journal cache, selection must still follow Journal and retain the difference diagnostically.");
 
         var inactiveNative = new FakeNativeClient(snapshot, activeQuest: false);
         var inactiveProvider = new FakeDecisionProvider("partySize");
@@ -100,7 +108,7 @@ internal static class AgentHostEstablishYourClanGoalLoop
         return [
             new { scenario = "establish-clan-planner-offers-only-currently-unmet-objectives", passed = true },
             new { scenario = "establish-clan-planner-reads-native-quest-and-never-mutates-campaign", passed = true },
-            new { scenario = "establish-clan-journal-dynamic-threshold-mismatch-fails-before-model-call", passed = true },
+            new { scenario = "establish-clan-journal-progress-is-authoritative-when-live-metrics-lag", passed = true },
             new { scenario = "establish-clan-planner-stops-before-read-without-active-quest", passed = true }
         ];
     }
@@ -125,25 +133,14 @@ internal static class AgentHostEstablishYourClanGoalLoop
         var receipt = JsonNode.Parse(questDetails.RootElement.GetRawText())?.AsObject()
             ?? throw new AgentHostException("establish-clan-quest-details-invalid", "Native returned no quest-details receipt.");
         if (ReadString(receipt, "status") != "completed" || receipt["data"] is not JsonObject data ||
-            ReadString(data, "questId") != QuestId || data["storyModeEstablishClan"] is not JsonObject snapshot)
-            throw new AgentHostException("establish-clan-progress-unavailable", "The current Native quest-details read did not expose the active StoryMode objective snapshot.");
-
-        ValidateSnapshot(snapshot);
+            ReadString(data, "questId") != QuestId)
+            throw new AgentHostException("establish-clan-progress-unavailable", "The current Native quest-details read did not expose the exact active StoryMode quest.");
         var journalObjectives = BuildJournalObjectives(data);
-        var inconsistencies = FindJournalInconsistencies(snapshot, journalObjectives);
-        if (inconsistencies.Count > 0)
-            return new JsonObject
-            {
-                ["status"] = "blocked",
-                ["decisions"] = 0,
-                ["actionsExecuted"] = 1,
-                ["questDetails"] = receipt.DeepClone(),
-                ["journalObjectiveSnapshot"] = journalObjectives,
-                ["objectiveSnapshot"] = snapshot.DeepClone(),
-                ["targetConsistency"] = new JsonObject { ["consistent"] = false, ["differences"] = inconsistencies },
-                ["selection"] = null,
-                ["termination"] = new JsonObject { ["reason"] = "journal-native-target-mismatch", ["completedByProvider"] = false, ["goalVerified"] = false }
-            };
+        var snapshot = BuildObjectiveSnapshot(journalObjectives);
+        ValidateSnapshot(snapshot);
+        var liveSnapshot = data["storyModeEstablishClan"] as JsonObject;
+        var liveMetricDifferences = liveSnapshot is null ? new JsonArray() : FindLiveMetricDifferences(liveSnapshot, journalObjectives);
+        var targetConsistency = new JsonObject { ["consistent"] = true, ["authoritativeSource"] = "original-journal-log-progress" };
         var actionCatalog = BuildObjectiveActionCatalog(snapshot);
         if (actionCatalog.Count == 0)
             return new JsonObject
@@ -156,7 +153,9 @@ internal static class AgentHostEstablishYourClanGoalLoop
                 ["actionsExecuted"] = 1,
                 ["questDetails"] = receipt.DeepClone(),
                 ["journalObjectiveSnapshot"] = journalObjectives,
-                ["targetConsistency"] = new JsonObject { ["consistent"] = true },
+                ["objectiveSnapshot"] = snapshot.DeepClone(),
+                ["targetConsistency"] = targetConsistency.DeepClone(),
+                ["liveMetricDifferences"] = liveMetricDifferences.DeepClone(),
                 ["selection"] = null,
                 ["termination"] = new JsonObject { ["reason"] = "no-currently-unmet-objective", ["completedByProvider"] = false, ["goalVerified"] = false },
                 ["note"] = "No objective was selected because all four currently observed objective conditions are met; this does not claim Native Quest completion."
@@ -178,12 +177,14 @@ internal static class AgentHostEstablishYourClanGoalLoop
                     ["title"] = ReadString(data, "title"),
                     ["objectiveSnapshot"] = snapshot.DeepClone(),
                     ["journalObjectiveSnapshot"] = journalObjectives.DeepClone(),
-                    ["targetConsistency"] = new JsonObject { ["consistent"] = true }
+                    ["targetConsistency"] = targetConsistency.DeepClone(),
+                    ["liveMetricDifferences"] = liveMetricDifferences.DeepClone()
                 }
             },
             ["journalObjectiveSnapshot"] = journalObjectives.DeepClone(),
             ["objectiveSnapshot"] = snapshot.DeepClone(),
-            ["targetConsistency"] = new JsonObject { ["consistent"] = true },
+            ["targetConsistency"] = targetConsistency.DeepClone(),
+            ["liveMetricDifferences"] = liveMetricDifferences.DeepClone(),
             ["allowedActions"] = actionCatalog,
             ["allowedControls"] = new JsonArray()
         };
@@ -231,7 +232,8 @@ internal static class AgentHostEstablishYourClanGoalLoop
             ["questDetails"] = receipt.DeepClone(),
             ["objectiveSnapshot"] = snapshot.DeepClone(),
             ["journalObjectiveSnapshot"] = journalObjectives.DeepClone(),
-            ["targetConsistency"] = new JsonObject { ["consistent"] = true },
+            ["targetConsistency"] = targetConsistency.DeepClone(),
+            ["liveMetricDifferences"] = liveMetricDifferences,
             ["selection"] = new JsonObject
             {
                 ["objectiveId"] = selectedObjective,
@@ -292,7 +294,27 @@ internal static class AgentHostEstablishYourClanGoalLoop
         return result;
     }
 
-    private static JsonArray FindJournalInconsistencies(JsonObject snapshot, JsonArray journalObjectives)
+    private static JsonObject BuildObjectiveSnapshot(JsonArray journalObjectives)
+    {
+        var result = new JsonObject();
+        foreach (var objectiveId in ObjectiveIds)
+        {
+            var objective = journalObjectives.OfType<JsonObject>().FirstOrDefault(stage => ReadString(stage, "objectiveId") == objectiveId);
+            var current = ReadNumber(objective, "current");
+            var target = ReadNumber(objective, "target");
+            if (current is null || target is null)
+                throw new AgentHostException("establish-clan-journal-objective-values-missing", "The original StoryMode Journal did not provide current and target progress for every objective.");
+            result[objectiveId] = new JsonObject
+            {
+                ["current"] = current.Value,
+                ["target"] = target.Value,
+                ["met"] = current.Value >= target.Value
+            };
+        }
+        return result;
+    }
+
+    private static JsonArray FindLiveMetricDifferences(JsonObject snapshot, JsonArray journalObjectives)
     {
         var differences = new JsonArray();
         foreach (var stage in journalObjectives.OfType<JsonObject>())

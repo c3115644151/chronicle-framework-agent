@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.229'
+$contractVersion = '7.231'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -746,14 +746,17 @@ if ($agentHostCampaignLoopSource -notmatch 'supportedEstablishYourClanGoal' -or
     $agentHostDecisionCycleSource -notmatch 'IAgentHostQuestDetailsNativeClient' -or
     $agentHostCampaignLoopSource -notmatch 'IAgentHostQuestDetailsNativeClient' -or
     $agentHostMailboxSource -notmatch 'BuildQuestDetailsArguments' -or
-    $agentHostEstablishClanPlannerSource -notmatch 'journal-native-target-mismatch' -or
+    $agentHostEstablishClanPlannerSource -notmatch 'BuildObjectiveSnapshot' -or
+    $agentHostEstablishClanPlannerSource -notmatch 'FindLiveMetricDifferences' -or
+    $agentHostEstablishClanPlannerSource -notmatch 'liveMetricDifferences' -or
     $agentHostEstablishClanPlannerSource -notmatch 'selectEstablishYourClanObjective' -or
     $agentHostEstablishClanPlannerSource -notmatch 'resultKind.*objective-plan' -or
     $agentHostEstablishClanPlannerSource -notmatch 'providerConfigurationSource' -or
     $agentHostEstablishClanPlannerSource -notmatch 'goalVerified.*false' -or
     $agentHostDecisionCycleSource -notmatch 'EstablishYourClanGoalPlannerPrompt' -or
+    $agentHostDecisionCycleSource -notmatch 'JournalLog current/target values' -or
     $agentHostProviderSource -notmatch 'supported-establish-your-clan') {
-    throw 'The Establish Your Clan planner must be gated by the active original quest, compare only its four visible numeric objectives with fresh native values, allow only unmet targets, and never claim gameplay completion.'
+    throw 'The Establish Your Clan planner must be gated by the active original quest, use the four official JournalLog values as tracked progress, retain live metric differences diagnostically, allow only unmet Journal objectives, and never claim gameplay completion.'
 }
 if ($harnessScript -notmatch "'AgentHostLifecycleEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostLifecycleEvaluation'\) \}" -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostLifecycleEvaluation'" -or
