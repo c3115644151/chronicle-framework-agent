@@ -10,16 +10,30 @@ internal static class AgentHostCaptivityRecoveryLoop
     private const string StoryQuestId = "rebuild_player_clan_storymode_quest";
     private const string PrisonerWaitMenu = "prisoner_wait";
     private const string WildernessRansomMenu = "menu_captivity_end_propose_ransom_wilderness";
+    private const string PrisonRansomMenu = "menu_captivity_end_propose_ransom_in_prison";
     private const string ReleasedByNoMoreEnemiesMenu = "menu_captivity_end_no_more_enemies";
     private const string CaptivityContinueOption = "mno_continue";
+    private static readonly HashSet<string> RansomMenus = new(StringComparer.Ordinal)
+    {
+        WildernessRansomMenu, PrisonRansomMenu
+    };
+    private static readonly HashSet<string> CaptivityContinueMenus = new(StringComparer.Ordinal)
+    {
+        "menu_captivity_end_no_more_enemies", "menu_captivity_end_by_ally_party_saved",
+        "menu_captivity_end_by_party_removed", "menu_captivity_end_wilderness_escape",
+        "menu_escape_captivity_during_battle", "menu_released_after_battle",
+        "menu_captivity_transfer_to_town", "menu_captivity_end_exchanged_with_prisoner",
+        "menu_captivity_castle_remain", "menu_captivity_end_prison_escape"
+    };
 
     internal static JsonArray BuildActionCatalog(JsonObject state)
     {
         var catalog = new JsonArray();
         var context = state["context"] as JsonObject;
-        if (ReadBoolean(context?["captivity"] as JsonObject, "isCaptive") != true) return catalog;
-
         var menuId = ReadString(context, "menuId");
+        var isCaptive = ReadBoolean(context?["captivity"] as JsonObject, "isCaptive");
+        if (!isCaptive && !CaptivityContinueMenus.Contains(menuId ?? string.Empty)) return catalog;
+
         if (string.Equals(menuId, PrisonerWaitMenu, StringComparison.Ordinal))
         {
             if (GetEnabledOptions(state).Count > 0) return catalog;
@@ -29,7 +43,7 @@ internal static class AgentHostCaptivityRecoveryLoop
             return catalog;
         }
 
-        if (string.Equals(menuId, WildernessRansomMenu, StringComparison.Ordinal))
+        if (RansomMenus.Contains(menuId ?? string.Empty))
         {
             var enabled = GetEnabledOptions(state).Where(option => IsKnownRansomOption(ReadString(option, "id"))).ToArray();
             if (enabled.Length > 0)
@@ -44,7 +58,7 @@ internal static class AgentHostCaptivityRecoveryLoop
                 });
             }
         }
-        else if (string.Equals(menuId, ReleasedByNoMoreEnemiesMenu, StringComparison.Ordinal) &&
+        else if (CaptivityContinueMenus.Contains(menuId ?? string.Empty) &&
             GetEnabledOptions(state).Any(option => ReadString(option, "id") == CaptivityContinueOption))
         {
             catalog.Add(new JsonObject
@@ -119,13 +133,28 @@ internal static class AgentHostCaptivityRecoveryLoop
             new JsonObject { ["id"] = "unrelated", ["available"] = true, ["enabled"] = true },
             new JsonObject { ["id"] = CaptivityContinueOption, ["available"] = true, ["enabled"] = false }
         };
-        var releaseCatalog = BuildActionCatalog(CaptiveState(ReleasedByNoMoreEnemiesMenu, "Stop", false, false, releaseOptions));
-        var releaseOptionsAllowed = releaseCatalog[0]?["argumentValues"]?["OptionId"] as JsonArray;
-        if (releaseCatalog.Count != 1 || releaseOptionsAllowed?.Count != 1 || releaseOptionsAllowed[0]?.GetValue<string>() != CaptivityContinueOption)
-            throw new AgentHostException("captivity-recovery-self-test-release-menu-catalog-failed", "The Host must expose only the source-verified Native Continue option in the no-more-enemies release menu.");
-        if (!AgentHostDecisionCycle.CaptivityRecoverySystemPrompt.Contains(ReleasedByNoMoreEnemiesMenu, StringComparison.Ordinal) ||
-            !AgentHostDecisionCycle.CaptivityRecoverySystemPrompt.Contains(CaptivityContinueOption, StringComparison.Ordinal))
-            throw new AgentHostException("captivity-recovery-self-test-release-prompt-failed", "The model prompt must explain the one source-verified Native release continuation in this recovery slice.");
+        var releaseMenuIds = new[]
+        {
+            "menu_captivity_end_no_more_enemies", "menu_captivity_end_by_ally_party_saved",
+            "menu_captivity_end_by_party_removed", "menu_captivity_end_wilderness_escape",
+            "menu_escape_captivity_during_battle", "menu_released_after_battle",
+            "menu_captivity_transfer_to_town", "menu_captivity_end_exchanged_with_prisoner",
+            "menu_captivity_castle_remain", "menu_captivity_end_prison_escape"
+        };
+        foreach (var releaseMenuId in releaseMenuIds)
+        {
+            var releaseCatalog = BuildActionCatalog(CaptiveState(releaseMenuId, "Stop", false, false, releaseOptions,
+                isCaptive: releaseMenuId != "menu_released_after_battle"));
+            var releaseOptionsAllowed = releaseCatalog.Count > 0 ? releaseCatalog[0]?["argumentValues"]?["OptionId"] as JsonArray : null;
+            if (releaseCatalog.Count != 1 || releaseOptionsAllowed?.Count != 1 || releaseOptionsAllowed[0]?.GetValue<string>() != CaptivityContinueOption)
+                throw new AgentHostException("captivity-recovery-self-test-release-menu-catalog-failed", $"The Host must expose only the source-verified Native Continue option in recognized menu '{releaseMenuId}'.");
+        }
+        var unrecognizedReleaseCatalog = BuildActionCatalog(CaptiveState("unrecognized_captivity_page", "Stop", false, false, releaseOptions, isCaptive: false));
+        if (unrecognizedReleaseCatalog.Count != 0)
+            throw new AgentHostException("captivity-recovery-self-test-release-menu-overbroad", "A generic Continue option on an unrecognized page must not become a captivity action.");
+        if (!AgentHostDecisionCycle.CaptivityRecoverySystemPrompt.Contains("currently enabled original mno_continue", StringComparison.Ordinal) ||
+            !AgentHostDecisionCycle.CaptivityRecoverySystemPrompt.Contains("return to a captive wait menu", StringComparison.Ordinal))
+            throw new AgentHostException("captivity-recovery-self-test-release-prompt-failed", "The model prompt must explain the source-verified Native captivity continuation menus in this recovery slice.");
 
         return [
             new { scenario = "captivity-recovery-explicit-native-resume-is-separated-from-passive-wait", passed = true },
@@ -356,11 +385,11 @@ internal static class AgentHostCaptivityRecoveryLoop
             var optionId = ReadString(supplied, "OptionId");
             var menuValues = allowed["argumentValues"]?["MenuId"] as JsonArray;
             var optionValues = allowed["argumentValues"]?["OptionId"] as JsonArray;
-            var currentMenuId = ReadString((context?["captivity"] as JsonObject), "currentMenuId");
-            var isRansomChoice = currentMenuId == WildernessRansomMenu && IsKnownRansomOption(optionId);
-            var isVerifiedReleaseContinue = currentMenuId == ReleasedByNoMoreEnemiesMenu && optionId == CaptivityContinueOption;
-            if (ReadBoolean((context?["captivity"] as JsonObject), "isCaptive") != true ||
-                (!isRansomChoice && !isVerifiedReleaseContinue) ||
+            var captivity = context?["captivity"] as JsonObject;
+            var currentMenuId = ReadString(captivity, "currentMenuId") ?? ReadString(context, "menuId");
+            var isRansomChoice = ReadBoolean(captivity, "isCaptive") && RansomMenus.Contains(currentMenuId ?? string.Empty) && IsKnownRansomOption(optionId);
+            var isVerifiedContinue = CaptivityContinueMenus.Contains(currentMenuId ?? string.Empty) && optionId == CaptivityContinueOption;
+            if ((!isRansomChoice && !isVerifiedContinue) ||
                 menuId != ReadString(context, "menuId") || menuValues?.Any(value => value?.GetValue<string>() == menuId) != true ||
                 optionValues?.Any(value => value?.GetValue<string>() == optionId) != true ||
                 !GetEnabledOptions(state).Any(option => ReadString(option, "id") == optionId))
@@ -436,15 +465,15 @@ internal static class AgentHostCaptivityRecoveryLoop
     private static JsonObject ParseObject(JsonElement element) => JsonNode.Parse(element.GetRawText())?.AsObject()
         ?? throw new AgentHostException("native-response-invalid", "Native returned no Campaign state object.");
 
-    private static JsonObject CaptiveState(string menuId, string timeMode, bool isWaitMenu, bool isWaitActive, JsonArray options) => new()
+    private static JsonObject CaptiveState(string menuId, string timeMode, bool isWaitMenu, bool isWaitActive, JsonArray options, bool isCaptive = true) => new()
     {
         ["context"] = new JsonObject
         {
             ["gameState"] = "MapState", ["menuId"] = menuId, ["timeControlMode"] = timeMode,
             ["isWaitMenu"] = isWaitMenu, ["isWaitActive"] = isWaitActive,
-            ["captivity"] = new JsonObject { ["isCaptive"] = true, ["currentMenuId"] = menuId, ["ransomOfferVisible"] = menuId == WildernessRansomMenu, ["currentVisibleRansomAmount"] = menuId == WildernessRansomMenu ? 100 : null }
+            ["captivity"] = isCaptive ? new JsonObject { ["isCaptive"] = true, ["currentMenuId"] = menuId, ["ransomOfferVisible"] = RansomMenus.Contains(menuId), ["currentVisibleRansomAmount"] = RansomMenus.Contains(menuId) ? 100 : null } : null
         },
-        ["availableMenuOptions"] = options
+        ["availableMenuOptions"] = options.DeepClone()
     };
 
     private static JsonObject FreeMapState() => new()
@@ -504,7 +533,7 @@ internal static class AgentHostCaptivityRecoveryLoop
             BuildFakeNative(WildernessRansomMenu, "Stop", captive: true, waitActive: false, new JsonArray(
                 new JsonObject { ["id"] = "mno_captivity_end_ransom_accept", ["available"] = true, ["enabled"] = true },
                 new JsonObject { ["id"] = "captivity_end_ransom_deny", ["available"] = true, ["enabled"] = true })),
-            BuildFakeNative(ReleasedByNoMoreEnemiesMenu, "Stop", captive: true, waitActive: false, new JsonArray(
+            BuildFakeNative("menu_released_after_battle", "Stop", captive: false, waitActive: false, new JsonArray(
                 new JsonObject { ["id"] = CaptivityContinueOption, ["available"] = true, ["enabled"] = true })),
             BuildFakeNative(string.Empty, "Stop", captive: false, waitActive: false),
             BuildFakeNative(string.Empty, "Stop", captive: false, waitActive: false)
@@ -541,7 +570,7 @@ internal static class AgentHostCaptivityRecoveryLoop
                 RecoveryActionOrder.Add(ReadString(arguments, "optionId")!);
                 return Task.FromResult(ToDocument(new JsonObject { ["status"] = "completed", ["action"] = action, ["campaignDay"] = 91080.220, ["timeControlMode"] = "UnstoppableFastForward" }));
             }
-            if (action == "menuSelect" && ReadString(arguments, "menuId") == ReleasedByNoMoreEnemiesMenu && ReadString(arguments, "optionId") == CaptivityContinueOption)
+            if (action == "menuSelect" && CaptivityContinueMenus.Contains(ReadString(arguments, "menuId") ?? string.Empty) && ReadString(arguments, "optionId") == CaptivityContinueOption)
             {
                 ReleaseContinueCount++;
                 RecoveryActionOrder.Add(CaptivityContinueOption);
@@ -589,7 +618,7 @@ internal static class AgentHostCaptivityRecoveryLoop
             JsonObject decision = allowed.Contains("resume", StringComparer.Ordinal)
                 ? new JsonObject { ["action"] = "resume", ["arguments"] = new JsonObject(), ["rationale"] = "Use current native wait control." }
                 : allowed.Contains("menuSelect", StringComparer.Ordinal)
-                    ? new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = currentMenuId, ["OptionId"] = currentMenuId == ReleasedByNoMoreEnemiesMenu ? CaptivityContinueOption : "captivity_end_ransom_deny" }, ["rationale"] = "Choose the currently enabled Native captivity option." }
+                    ? new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = currentMenuId, ["OptionId"] = CaptivityContinueMenus.Contains(currentMenuId ?? string.Empty) ? CaptivityContinueOption : "captivity_end_ransom_deny" }, ["rationale"] = "Choose the currently enabled Native captivity option." }
                     : request.GetProperty("allowedControls").EnumerateArray().Any(item => item.GetString() == "done")
                         ? new JsonObject { ["done"] = true, ["reason"] = "Native confirms the hero is free." }
                         : ReadString(JsonNode.Parse(request.GetRawText())?.AsObject(), "goalKind") == "active-storymode-establish-your-clan-objective-selection"

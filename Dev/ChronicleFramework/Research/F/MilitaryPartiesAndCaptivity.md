@@ -408,6 +408,21 @@ Hero 俘虏可以存在于：
 
 玩家确认：主角收到赎金提议时，游戏界面明确显示赎金金额，并提供接受/拒绝选项。Harness Native运行也曾观察到 `mno_captivity_end_ransom_accept` 与拒绝选项，并分别核验支付释放与拒绝后继续被俘；详见 `DEVELOPMENT.md` 的 `CaptivityOutcome` 记录。此确认只描述该赎金提议界面，不意味着任何被俘存档都会立即出现报价；Host仍须以当前Native菜单/启用选项与当前报价为准。
 
+本机1.4.8 `PlayerCaptivityCampaignBehavior.AddGameMenus`还注册了一组被俘期间的原版剧情菜单。它们不是普通战斗菜单；玩家只能点击当前菜单里真实出现、已启用的选项。W7-O从已被俘状态出发，所以只把这些原版菜单的当前选项作为可选动作，后验仍以Native状态为准：
+
+| Native菜单 | 可见选项 | 原版回调效果 |
+|---|---|---|
+| `menu_captivity_end_no_more_enemies` | `mno_continue`（Continue） | `EndCaptivityAction.ApplyByEscape(Hero.MainHero)` |
+| `menu_captivity_end_by_ally_party_saved` | `mno_continue` | `EndCaptivityAction.ApplyByReleasedByCompensation(Hero.MainHero)` |
+| `menu_captivity_end_by_party_removed` | `mno_continue` | Captor已无领袖且无成员时按战后释放，否则按逃脱释放 |
+| `menu_captivity_end_wilderness_escape`、`menu_escape_captivity_during_battle`、`menu_captivity_end_prison_escape` | `mno_continue` | `EndCaptivityAction.ApplyByEscape(Hero.MainHero)` |
+| `menu_released_after_battle`、`menu_captivity_end_exchanged_with_prisoner` | `mno_continue` | 保护玩家侧、设置Captor暂不攻击并退出当前结果菜单；是否已脱俘由其前置原版事件和新鲜Native状态决定 |
+| `menu_captivity_end_propose_ransom_wilderness`、`menu_captivity_end_propose_ransom_in_prison` | `mno_captivity_end_ransom_accept` / `captivity_end_ransom_deny` | 接受时按当前Native金额扣金并执行`ApplyByRansom`；拒绝时退出到原Captivity等待 |
+| `menu_captivity_transfer_to_town` | `mno_continue` | 退出剧情菜单、激活`settlement_wait`并恢复`LastTimeControlMode`；此处可能仍被俘且原版恢复时钟是菜单回调副作用 |
+| `menu_captivity_castle_remain` | `mno_continue` | 退出结果页回到此前地牢等待，不等于已脱俘 |
+
+Wait菜单本身 (`prisoner_wait`/`settlement_wait`) 另由 `PlayerTownVisitCampaignBehavior` 注册；其`StartWait/EndWait`和`PlayerCaptivity.Update(dt)`约束见本节下文。`menuSelect`在Chronicle中必须保留当前menuId/optionId，并受当前Native available+enabled门控；不直接调用上述Captivity API。源码覆盖的是已安装Native/System程序集静态回调；哪些分支会在本次存档实际出现、Continue后是否自由、队伍是否恢复，都不能从注册表推断，必须按实际Native状态验收。真实模型已复现从`prisoner_wait`自然等待转为`menu_captivity_end_wilderness_escape`且当前只有`mno_continue`启用；画面与Native状态证据见 `TestResults/20261018-121747/AgentHostCampaignRun-01/Temp/LiveModelLoopResult.json` 与 `TestResults/20261018-121747/AgentHostCampaignRun-01/LiveModelWindow-contact.jpg`，该次因原菜单白名单不完整而安全停止，未点击菜单、未运行Battle、源存档未变。
+
 真实Host闭环补证：`TestResults/20261018-050124`通过 `AgentHostBattleAndCaptivityEvaluation`。FreeLLMAPI `auto:reliable`以12次模型决策/路由完成Native bandit接敌与Send Troops；战后确实观察到MainHero Captive、`prisoner_wait`无选项，Host在不发出任何时钟动作下自然等待，1.522 Campaign日后出现野外Native赎金界面。模型依据当前报价选择 `mno_captivity_end_ransom_accept`，Native赎金112使Gold 324→212；MainHero解囚、MainParty 0→1并回MapState。Renown 20→20，最终`playerOutcome=captured-then-recovered`。源档SHA前后相同、临时副本/游戏/Host/session清理，窗口画面覆盖率100%并在提取索引后删除原视频。此证据覆盖一次真实野外赎金恢复，不外推为其他Captor、监狱、逃脱或Captivity等待时长规律。
 
 本机1.4.8 `PlayerCaptivity.Update(dt)`源码补充：仅当MainHero仍为Captor俘虏且`dt > 0`，或MapState当前并非位于菜单时，才同步Captor位置并调用`ICaptivityCampaignBehavior.CheckCaptivityChange(dt)`。因此Stop+`prisoner_wait`菜单中Host单纯延迟/重复读取不推进Captor变化；从Stop恢复必须是单独的原版时间档位动作，并先确认Native当前菜单确实`IsWaitMenu && IsWaitActive`，此时 `AgentProtocol.SetNativeTimeSpeed(1)`才满足原生context gate。Capture observer当前schema25暴露raw `timeControlMode`、`isWaitMenu`和`isWaitActive`，让Host可区别“可显式Play”与“时间本已运行时被动观察”。这来自本机`PlayerCaptivity.Update`、`GameMenu.StartWait/EndWait`、`SetNativeTimeSpeed`源码，W7-O首次运行验收再验证当前Player Captivity menu的实际运行值和后果；不把显式Resume藏进Host等待。
