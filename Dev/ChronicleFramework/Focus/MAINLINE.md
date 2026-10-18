@@ -25,6 +25,8 @@ Chronicle 的目标从“AI代替玩家控制 MainHero 完成整场战役”转�
 - **产品运行时**：模型、计划/checkpoint、事件触发、Native Actor 绑定/执行与结果核验的组合。一个MCP工具服务器或大量可调用方法不等于自主Agent产品。
 - 单机 Campaign Actor仍与玩家共享一个Campaign时钟；不称为第二个网络玩家或“离线联机”。多人独立客户端是未来独立问题。
 
+**Agent/游戏线程分层约束（候选）：** `AiHourlyTick`内的`PartyThinkParams`是一次同步Think的瞬时对象，不能带到Host线程等待模型后原样写回。Native回调只应收集可序列化候选并继续执行原版Think；Host异步决定后，游戏线程在后续有效Think中重新解析HeroId/LeaderParty/target并复核候选、权限和期限，失效则丢弃而回退Native AI。绝不在该Campaign事件上同步等待LLM，也不暂停原版AI模拟；这一排队/新鲜度设计尚未有运行收据。
+
 ### 术语边界：单机多代理不等于离线联机
 
 - **单机自主玩家**：AI 控制当前单机客户端中的玩家角色；没有第二玩家实体。

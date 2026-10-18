@@ -54,6 +54,24 @@ Think 时清空 `PartyThinkParams` 并派发 `CampaignEvents.AiHourlyTick(party,
 
 当前安装版公开接口细节：`AIBehaviorData`为公开struct，字段包括`Party:IMapPoint`、`Position:CampaignVec2`、`AiBehavior`、`WillGatherArmy`、`IsFromPort`、`IsTargetingPort`和`NavigationType`；构造形式分别接受地图实体目标或位置目标。`PartyThinkParams`对外暴露`AddBehaviorScore`、`SetBehaviorScore`、`TryGetBehaviorScore`和候选只读列表，同时有`DoNotChangeBehavior`、`CurrentObjectiveValue`、Army强度等控制/诊断字段。`AiPartyThinkBehavior.PartyHourlyAiTick`先跳过`Ai.IsDisabled`或`Ai.DoNotMakeNewDecisions`的Party，再在重想时同步派发`AiHourlyTick`，之后读取分数并决定是否调用`SetPartyAiAction`。这些是Campaign AI内部目标选择接口，不是人类玩家的UI输入。
 
+### 原版候选行为提供者清点（2026-10-19，本机1.4.8.119303）
+
+对当前安装的`TaleWorlds.CampaignSystem.dll`逐类检查`CampaignEvents.AiHourlyTickEvent.AddNonSerializedListener`及对应候选构造/写入，发现以下七个内置提供者。表中“提供什么”是源码支持的候选类别，不是每个NPC都会得到该项，也不是最终必选项；Think资格、Party类型、事件状态、分数与随机切换阈值仍会过滤结果。
+
+| 内置提供者 | 产生的决策面 | 主要适用边界/含义 |
+| --- | --- | --- |
+| `AiArmyMemberBehavior` | 给军团附属Party产生指向LeaderParty的`EscortParty`候选 | 仅非Leader且确为Army成员；围城封锁/海陆导航、成员是否已附着等会改变或阻止候选。这是组织从属行动，不是Actor自己的独立长期目标。 |
+| `AiEngagePartyBehavior` | 产生针对地图Party的`GoAroundParty`绕行候选，并维护`CurrentObjectiveValue` | 仅特定王国/玩家阵营的领主队伍、非Caravan/非附属Army成员、可进入地图接敌计算的状态；根据敌对目标与路径条件评估是否绕开特定队伍。它不直接提交`EngageParty`战斗动作；结果不等于已经发生遭遇或战斗。 |
+| `AiLandBanditPatrollingBehavior` | 给非Boss陆地劫匪队产生围绕HomeSettlement的`PatrolAroundPoint`候选 | 会检查Bandit身份、陆地导航、Hideout驻扎数量/感染状态；随机分数会受Hideout队伍数量影响。是劫匪活动候选，不是领主通用选择。 |
+| `AiMilitaryBehavior` | 给合格军事Party提供`RaidSettlement`、`BesiegeSettlement`或`DefendSettlement`类聚落目标候选；可带`WillGatherAnArmy` | 排除民兵、商队、村民、劫匪、巡逻队、解散中Party及不合格Faction/Leader；分数结合战争目标、目标价值/距离、军团凝聚、队伍规模和食物等模型。候选不保证宣战、组军或攻城结果。 |
+| `AIMoveToNearestLandBehavior` | 给当前在海上的MobileParty产生`MoveToNearestLandOrPort`候选 | 需正在海上、有陆地导航能力且可计算有效陆地点；属于海上导航恢复分支，不应当成无DLC本体的普遍NPC玩法。当前测试存档模块列表不含War Sails，尚未验证该分支能在此安装/存档条件触发。 |
+| `AiPatrollingBehavior` | 给合格Party产生围绕聚落的`PatrolAroundPoint`候选，含陆上及条件性海上巡逻子分支 | 主要是有领地/派系支撑的领主队；会过滤民兵、商队、村民、劫匪、巡逻队、围城、Army成员及食物不足等状态。分数与本方聚落拓扑、导航距离、兵力/补给有关。 |
+| `AiVisitSettlementBehavior` | 给目标聚落产生`GoToSettlement`候选；支持Bandit Hideout路径及聚落访问/队伍合并相关子分支 | 会排除围城状态及不适格Party；非Bandit Lord/Army Leader可依据队伍补充、聚落/驻军角色、交易卖货分数、访问间隔/目标竞争等计算访问分。源码还含解散/无领袖Party寻找合并聚落的评分，这不是一般Hero自主任务。 |
+
+边界：这是CampaignSystem安装程序集内已反编译确认的七个`AiHourlyTick`候选提供者，不代表已穷举第三方Mod动态注册的监听器；SandBox.dll与StoryMode.dll当前静态反汇编未检出`AiHourlyTickEvent`引用，不能据此推断所有安装Mod都没有扩展。一次只读提取的`AgentBridgeLifecycle.sav`元数据列出`Native`、`SandBoxCore`、`Sandbox`、`BirthAndDeath`、`CustomBattle`、Chronicle及四个前置框架；它不代表玩家其他模组集，也没有运行时事件轨迹。证据是本机游戏版本和`ilspycmd`对上述类型的反编译/事件注册扫描；字段/分支的完整逐个评分模型仍未拆完。
+
+这份提供者清单收窄了原版战略Think的候选来源，但仍未形成AI Actor的可执行行动分母：其中Escort、绕行、巡逻、去聚落等候选是原版系统给NPC评分的内部状态，不是已授权给Chronicle调用的独立动作。当前未知仍包括某个指定Hero/Party的真实候选样本、候选到`SetPartyAiAction`的实际选中/覆盖时序、Chronicle与Native Think如何仲裁，以及如何把若干短期目标组成由AI维持的持续目标。
+
 因此观察到“一个 Lord Party 当前正围城/进攻”通常只说明 Campaign AI 当前已接受某个行为目标；具体行为候选来自多个 Behavior 评分，而不是 MobileParty 自己存有一个完整自然语言计划。目标会因目标消失、攻守态势、关系/战争变化、Settlement易主、Army状态和重新评估随机门限而被放弃/替换。
 
 ### 目标决定怎样落成地图行为
