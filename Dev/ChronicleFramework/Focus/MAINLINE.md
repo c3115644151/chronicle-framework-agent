@@ -6,15 +6,15 @@ Chronicle的核心产品是AI作为单机战役玩家，直接控制原版`Hero.
 
 MainHero是首个Agent的原生行动身体和基础设施，不等于首个产品门禁就是最终玩法。当前“建立你的家族”只是一项有边界的第一段长程验收；完成它只能证明该段连续自主闭环，之后仍须逐步扩展到更广泛的战役自治。陪伴者/同伴代理可能提供长期共处的玩家体验，但不是天然更简单的技术起点：同伴留在`MainParty`时没有独立的Campaign Party Think身体，赋予它独立目标与行动还需新增身份、行动权限、原版AI冲突仲裁及玩家影响规则。因此本阶段先打通MainHero自治底座；不把同伴路线删除，保留为后续玩法设计候选，并在主角闭环形成后按玩家体验和引擎成本重新评估。
 
-产品纵向门禁从一个全新、自然创建且无预处理进度的StoryMode战役开始；玩家可以通过原版菜单建立存档/角色，AI从MainHero第一次进入稳定Campaign MapState时接管，不要求AI自动化主菜单和角色创建。若原版教程仍在进行，Agent继续使用原版入口完成到任务自然激活。真实模型随后自主完成“建立你的家族”(Establish Your Clan)四项目标：Gold 2000、达到当前藏身处战斗人数门槛、Renown 50、招募至少一名同伴。每项都以Quest Journal/Native状态和最终原版Quest完成后验核验；不注入Quest/资源/进度，不靠预设路线冒充自主运行。这是首个长程闭环，不声称覆盖骑砍所有玩法。
+产品纵向门禁从一个全新、自然创建且无预处理进度的StoryMode战役开始；玩家可走原版角色创建和开局流程。当前首测约定：若新战役自动进入Training Field教程，玩家可在AI接管前使用原版兄长对话的“跳过教程”选项及确认；它不是角色创建菜单选项，必须在首个Campaign MapState前于原版训练场Mission完成。此操作会自然完成Tutorial阶段并触发原版第一阶段/`Establish Your Clan`，不允许用预制存档、注入Quest/资源或预先达成目标替代。AI随后从MainHero第一个稳定Campaign MapState接管，并由真实模型自主完成“建立你的家族”(Establish Your Clan)四项目标：Gold 2000、达到当前藏身处战斗人数门槛、Renown 50、招募至少一名同伴。若AI接管时Tutorial仍未结束，本首测不宣称AI能完成教程；全教程自治是独立后续扩展。每项都以Quest Journal/Native状态和最终原版Quest完成后验核验。这是首个长程闭环，不声称覆盖骑砍所有玩法。
 
-Research Gate: **BLOCKED** until the fresh StoryMode-to-four-goal action/observation map is complete; W1/W2's 182 ACT / 73 OBS player-interface baseline alone does not prove this longitudinal loop. Research work remains active under the current W7 issue.
-Implementation Gate: **BLOCKED** for new MainHero gameplay code until the current W7 issue maps required Native affordances, gaps, time/failure boundaries, and verification for all four objectives.
+Research Gate: **READY** for composing the four source-verified StoryMode objective routes after the user-approved Native Tutorial-skip setup; W1/W2's 182 ACT / 73 OBS player-interface baseline alone does not prove this longitudinal loop.
+Implementation Gate: **READY** for AgentHost orchestration using already-contracted Native actions; any new player interaction surface or change to a vanilla mechanic remains individually blocked until its exact Native player contract is verified.
 
 ## 当前MainHero纵向门禁
 
-Research work: **ACTIVE; readiness not met** for the natural fresh-StoryMode-to-`Establish Your Clan` route map. W1/W2's 182 core ACT and 73 OBS remain the human-player interface baseline, not proof of full StoryMode coverage; gameplay implementation remains gated.
-Implementation Gate: **BLOCKED** for new gameplay C# until the four quest goals, tutorial/activation preconditions, reusable Native actions, real gaps, Campaign-time behavior, failure/recovery and outcome verification are mapped in the current Issue and mechanism contracts.
+Research work: **READY for Host composition; further research remains required for any newly discovered route**. W1/W2's 182 core ACT and 73 OBS remain the human-player interface baseline, not proof of this long-term loop. The first natural Campaign MapState is reached after the user performs the allowed Native Tutorial skip; the Quest still must activate naturally.
+Implementation Gate: **READY** for AgentHost composition only—the four goal values, existing Native actions, source time/failure behavior and major unsupported surfaces are mapped. New Bridge/Native actions remain individually gated by their player-visible entry, Native side effects and test contract.
 
 该门禁不阻止对既有Host/Agent循环做真实模型评估或只读Harness诊断；门禁只阻止在目标动作范围未被事实/契约支撑前凭推测新增游戏能力。NPC/同伴独立行动的W8候选不进入本轮Research readiness判断。
 
@@ -549,7 +549,7 @@ flowchart LR
 
 `AgentObserver`已读出原版Quest/Journal四个目标进度；`AgentHostEstablishYourClanGoalLoop`仅调用`questDetails`并让模型选出一个Journal未完成目标，返回`objective-plan`，不执行游戏动作。现有`AgentHostCampaignLoop`把地图抵达、Village Issue、单次Bandit模拟、战斗后俘虏恢复和StoryMode目标规划分成不同范围；Gold另有一次出售切片。Bridge虽已有`recruitOptions/recruit`、Native对话选项、Trade与BattleSimulation接口，但目标规划没有把这些入口按选定目标接起来，也没有一个持续保持StoryMode目标、在遭遇/失败/战斗/俘虏后重新观察再续跑的总循环。代码/合同核对收据：`TestResults/20261019-023738` AgentHostPackage通过；它只证明Host合同自检通过，不是四目标实机运行。
 
-因此当前主要缺口不是“182个人类玩家动作是否都列过”，而是四目标对应的合法Native动作路径能否在同一个真实模型长循环中被适时开放、执行和后验：Gold出售只是独立的一次性切片；队伍招募尚未进入StoryMode目标Host目录；Renown战斗与俘虏恢复仍是独立任务循环；同伴可通过Native对话选项进入队伍，但目标规划没有定位并发起该事务。自然开局的教程源码路线现已具体映射（完整分支与来源见`Research/J/TasksEventsAndNarrative.md` J12）：训练场离开后，依次涉及村庄旅行、头人对话并行招兵/买粮、主队至少4人的救旅人遭遇、找藏身处Mission、Radagos对话和家族名字/旗帜编辑，最后Tutorial结束才自然启动家族Quest。救旅人自定义第一层菜单禁用了`Send in your troops`；`Attack!`走原版`MenuHelper.EncounterAttackConsequence`并进入`CampaignMission.OpenBattleMission`/`StartAttackMission`，这是实时Mission而不是Campaign坐镇模拟。藏身处的`Attack`也直接进入`OpenHideoutBattleMission`，Radagos交战在Mission内由duel/battle mode控制。`AgentHostCampaignLoop`只在活动Quest列表出现`rebuild_player_clan_storymode_quest`时开放家族目标规划；当前Campaign Host action set没有`missionSceneAgents`/`missionNavigateToAgent`/`missionInteract`、TextInquiry或BannerEditor处理，故无法宣称能从未跳过教程的自然新档跨MapState→MissionState→MapState保留长程目标。Mission内Native命令能否可靠完成这些战斗、Tutorial Native跳过路径是否可作为玩家开档设置、以及新战役中AI接管的合法起点，仍需按产品门禁验证；实际自然教程/Quest激活运行收据也缺失。`AgentHostPackage`只证明各专用协议合同回归，不能替代这条集成闭环的真实模型运行。
+因此当前主要缺口不是“182个人类玩家动作是否都列过”，而是四目标对应的合法Native动作路径能否在同一个真实模型长循环中被适时开放、执行和后验：Gold出售只是独立的一次性切片；队伍招募尚未进入StoryMode目标Host目录；Renown战斗与俘虏恢复仍是独立任务循环；同伴可通过Native对话选项进入队伍，但目标规划没有定位并发起该事务。教程源码路线和本首测边界已明确记录在`Research/J/TasksEventsAndNarrative.md` J12：当前由玩家在角色创建后Training Field兄长对话中选择原版跳过并确认；这是Native开局设置，不是Agent已经支持的动作，也不计作预制进度。这样AI可从首个MapState接管且Quest自然激活。未跳过的自然教程路径包含招兵/买粮、指定遭遇、藏身处Mission、Radagos对话和家族名/旗帜处理；救旅人自定义第一层禁用`Send in your troops`，`Attack!`进入`CampaignMission.OpenBattleMission`/`StartAttackMission`，藏身处进入`OpenHideoutBattleMission`，都不是坐镇模拟。它们均不在本首测4目标门禁内，也不声称已适配；未来若要把接管提前到训练场Mission，需要另做Mission Host状态迁移与战斗控制研究。当前Host仍只在活动Quest列表出现`rebuild_player_clan_storymode_quest`时开放目标规划；4目标循环/自然激活运行收据尚缺失。`AgentHostPackage`只证明各专用协议合同回归，不能替代真实模型闭环。
 
 首个实现性增量应先让这个目标规划器变成一个受限的长期Agent循环：每轮重新读Journal；依当前未完成目标生成该目标必要的最小Native action catalog；通过可复用的现有Host动作/子流程执行；每个动作之后重读并以后验决定继续、切换目标、恢复或停止。尚未核清玩家入口、失败语义或副作用的动作继续拒绝，不做“一次开放全部183条ACT”的通用大工具箱。自然新战役/教程接管与四目标循环的整体验收仍保留，不以集成测试过关替代最终门禁。
 
