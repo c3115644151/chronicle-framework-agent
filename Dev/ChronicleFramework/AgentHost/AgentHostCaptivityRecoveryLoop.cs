@@ -119,8 +119,11 @@ internal static class AgentHostCaptivityRecoveryLoop
             new JsonObject { ["id"] = "unrelated", ["available"] = true, ["enabled"] = true },
             new JsonObject { ["id"] = "mno_captivity_end_ransom_accept", ["available"] = true, ["enabled"] = false }
         };
-        var ransomCatalog = BuildActionCatalog(CaptiveState(WildernessRansomMenu, "Stop", false, false, ransomOptions));
+        var ransomState = CaptiveState(WildernessRansomMenu, "Stop", false, false, ransomOptions);
+        var ransomCatalog = BuildActionCatalog(ransomState);
         var allowedOptions = ransomCatalog[0]?["argumentValues"]?["OptionId"] as JsonArray;
+        if (ReadInt(ransomState["economy"] as JsonObject, "gold", 0) >= ReadInt((ransomState["context"]?["captivity"] as JsonObject), "currentVisibleRansomAmount", 0))
+            throw new AgentHostException("captivity-recovery-self-test-unaffordable-ransom-fixture-invalid", "The deterministic ransom scenario must have a current price above current Gold to prove the choice is not hardcoded away.");
         if (ransomCatalog.Count != 1 || allowedOptions is null || allowedOptions.Count != 2 ||
             !allowedOptions.Any(option => option?.GetValue<string>() == "mno_captivity_end_ransom_accept") ||
             !allowedOptions.Any(option => option?.GetValue<string>() == "captivity_end_ransom_deny") ||
@@ -153,8 +156,10 @@ internal static class AgentHostCaptivityRecoveryLoop
         if (unrecognizedReleaseCatalog.Count != 0)
             throw new AgentHostException("captivity-recovery-self-test-release-menu-overbroad", "A generic Continue option on an unrecognized page must not become a captivity action.");
         if (!AgentHostDecisionCycle.CaptivityRecoverySystemPrompt.Contains("currently enabled original mno_continue", StringComparison.Ordinal) ||
-            !AgentHostDecisionCycle.CaptivityRecoverySystemPrompt.Contains("return to a captive wait menu", StringComparison.Ordinal))
-            throw new AgentHostException("captivity-recovery-self-test-release-prompt-failed", "The model prompt must explain the source-verified Native captivity continuation menus in this recovery slice.");
+            !AgentHostDecisionCycle.CaptivityRecoverySystemPrompt.Contains("return to a captive wait menu", StringComparison.Ordinal) ||
+            !AgentHostDecisionCycle.CaptivityRecoverySystemPrompt.Contains("no fixed accept/reject threshold", StringComparison.Ordinal) ||
+            !AgentHostDecisionCycle.CaptivityRecoverySystemPrompt.Contains("current Gold", StringComparison.Ordinal))
+            throw new AgentHostException("captivity-recovery-self-test-prompt-incomplete", "The model prompt must explain source-verified continuation, post-action re-observation, and current-price/Gold ransom weighting without a fixed threshold.");
 
         return [
             new { scenario = "captivity-recovery-explicit-native-resume-is-separated-from-passive-wait", passed = true },
@@ -181,6 +186,7 @@ internal static class AgentHostCaptivityRecoveryLoop
             native.QuestDetailsCount != 1 || provider.CallCount != 5 || routes?.Count != 5 ||
             result["gameplayActionsExecuted"]?.GetValue<int>() != 3 || explicitTimeActions?.Count != 1 ||
             explicitTimeActions[0]?.GetValue<string>() != "resume" ||
+            ReadInt(result, "passiveCaptivityPollCount", 0) < 2 ||
             !native.RecoveryActionOrder.SequenceEqual(new[] { "resume", "captivity_end_ransom_deny", CaptivityContinueOption }, StringComparer.Ordinal))
             throw new AgentHostException("captivity-recovery-runtime-self-test-failed", "The Host failed to use explicit resume, current Native ransom and release-menu choices, verified free MapState, and original Quest replanning without a battle.");
         return [
@@ -472,6 +478,7 @@ internal static class AgentHostCaptivityRecoveryLoop
 
     private static JsonObject CaptiveState(string menuId, string timeMode, bool isWaitMenu, bool isWaitActive, JsonArray options, bool isCaptive = true) => new()
     {
+        ["economy"] = new JsonObject { ["gold"] = 32 },
         ["context"] = new JsonObject
         {
             ["gameState"] = "MapState", ["menuId"] = menuId, ["timeControlMode"] = timeMode,
@@ -538,6 +545,7 @@ internal static class AgentHostCaptivityRecoveryLoop
             BuildFakeNative(WildernessRansomMenu, "Stop", captive: true, waitActive: false, new JsonArray(
                 new JsonObject { ["id"] = "mno_captivity_end_ransom_accept", ["available"] = true, ["enabled"] = true },
                 new JsonObject { ["id"] = "captivity_end_ransom_deny", ["available"] = true, ["enabled"] = true })),
+            BuildFakeNative(PrisonerWaitMenu, "UnstoppableFastForward", captive: true, waitActive: true),
             BuildFakeNative("menu_released_after_battle", "Stop", captive: false, waitActive: false, new JsonArray(
                 new JsonObject { ["id"] = CaptivityContinueOption, ["available"] = true, ["enabled"] = true })),
             BuildFakeNative(string.Empty, "Stop", captive: false, waitActive: false),
