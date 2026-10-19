@@ -14,6 +14,7 @@ internal static class ProviderContractSelfTest
     internal static async Task<object> RunAsync()
     {
         var results = new List<object>();
+        results.AddRange(AgentHostProviderDecisionRecovery.RunContractSelfTests());
         results.AddRange(StoryModeEstablishClanLifecycleStatus.RunContractSelfTests());
         results.AddRange(AgentHostHarnessProgressTrace.RunContractSelfTests());
         var villageQuestPrompt = AgentHostDecisionCycle.VillageToolsQuestSystemPrompt;
@@ -193,6 +194,21 @@ internal static class ProviderContractSelfTest
                 throw new AgentHostException("provider-self-test-decision-wrapper-overbroad", "The decision wrapper accepted an extra top-level property.");
             }
             catch (AgentHostException exception) when (exception.Code == "provider-decision-wrapper-invalid") { }
+
+            var longRationale = string.Join(' ', Enumerable.Range(1, 25).Select(index => "word" + index));
+            using var longActionDecision = JsonDocument.Parse(JsonSerializer.Serialize(new
+            {
+                action = "tradeConfirm",
+                arguments = new { },
+                rationale = longRationale
+            }));
+            var longActionNormalized = OllamaNativeProvider.NormalizeDecision(longActionDecision.RootElement, actionRequest.RootElement);
+            var expectedBoundedRationale = string.Join(' ', Enumerable.Range(1, 20).Select(index => "word" + index));
+            if (longActionNormalized["action"]?.GetValue<string>() != "tradeConfirm" ||
+                longActionNormalized["rationale"]?.GetValue<string>() != expectedBoundedRationale)
+                throw new AgentHostException("provider-self-test-long-rationale-blocked-valid-action", "An overlong explanatory field must be bounded without discarding a Native-catalog-validated action.");
+            results.Add(new { scenario = "provider-bounds-overlong-action-rationale-without-blocking-validated-action", passed = true });
+
             results.Add(new { scenario = "provider-action-rationale-is-optional-and-native-catalog-still-gates", passed = true });
             results.Add(new { scenario = "provider-decision-schema-uses-strict-compatible-root-wrapper", passed = true });
         }

@@ -675,6 +675,19 @@ W7-N `Establish Your Clan`目标规划切片已完成真实模型只读门禁（
 
 ## 维护规则
 
+### 2026-10-19 FreeLLMAPI/Host错误现场诊断与修复
+
+用户确认允许在原版TrainingField跳过Tutorial后，将AI接管点设为首个稳定Campaign MapState；此边界只确定首轮验收，不表示AI已具备训练场Mission能力。
+
+FreeLLMAPI路由错误已分成两类，不能统称“模型不可用”：
+
+- **上游/传输失败**：`TestResults/20261019-122626`的真实请求返回HTTP 502，FallbackTrail为`custom/nvidia/llama-3.2-11b-vision key1=error`；同一请求的`freeapi.log`记为约3秒`socket hang up`，其后的Fallback显示唯一候选处于cooldown、没有上游尝试。期间Provider请求失败，无Host动作、无Native命令。日志中的Google、Kilo、OVH、AI Horde健康检查多次报告`ECONNRESET`或TLS断开，但仍写“status preserved as healthy”；因此`/v1/models`中的`ready`不是实时连通性证明。
+- **可工作的同应用对照**：同一FreeLLMAPI `/v1`端点和统一key下，`TestResults/20261019-123127`的Mistral Small 3.2远端请求返回合法结构化分类（874输入/20输出tokens，实际路由`ovh/Mistral-Small-3.2-24B-Instruct-2506`）。通过本机7890代理对照测试，OVH `/v1/models`返回HTTP 200，Kilo TLS握手失败，Google连接超时。故现有证据不支持“AgentHost全部请求构造错误”或“统一key整体失效”；更符合分平台/时段的代理—上游连接不稳定。不能仅凭此区分代理链路与上游服务端，需以同一时刻实际响应继续判定。早期403/429与当前传输重置也应分别记录：它们可能是provider授权/限额与TCP/TLS连通性问题，并非同一根因。
+
+同一save002临时副本诊断`TestResults/20261019-123338`以真实Mistral请求完成9个有效决策、4个Native动作，走出原版俘虏状态并返回自由Map，源存档未变、夹具和进程均清理；但在Gold子流程中，FreeLLMAPI日志显示上游请求成功（OVH、27,516输入/17输出），AgentHost因动作参数无法按JSON解析而拒绝，最终未开始售卖。它与稍后的`TestResults/20261019-131148`是不同故障：后者在第一个EYC分类成功后，下一次请求经OVH返回HTTP 502，0个Native动作，临时副本清理且画面证据完整。两个失败都不是EYC通关证据。
+
+为让模型犯一次格式错误不至于直接终止子目标，`AgentHostProviderDecisionRecovery`现对“响应已到达但未通过当前Native动作/控制目录校验”的错误最多给两次受限修正反馈；只传错误码与当前目录，不回显原模型全文；每次此前提必须是`nativeActionSent=false`，因此不重放已执行的交易或移动。俘虏子流程用Fake Provider复现“错误的未列出observeAgain→明确目录反馈→原版resume成功”；Gold售卖子流程用Fake Provider复现“参数JSON无效→反馈→地图查询成功→之后HTTP故障仍保留查询回执”。`TestResults/20261019-130951`AgentHostPackage通过；`TestResults/20261019-131148`因FreeLLMAPI 502在这项新Gold参数纠正分支之前失败，尚未真实模型验证该重试有效。下一次EYC实机诊断现在在启动Bannerlord之前先执行真实、无游戏Provider smoke；烟测失败就停止游戏启动，诊断调用默认限90秒（显式环境变量优先），烟测成功也不被当作后续Provider持续可用的保证。契约版本递增至7.240；Fake回归通过不等于目标门禁完成。
+
 - 本文维护技术目标、机制契约、领域架构、长期验收定义和未解事实；不保存项目工作项状态、域完成计数或测试通过快照。
 - GitHub Project 是唯一工作项/依赖/状态入口；本地 `TestResults/latest.json` 只代表最近一次本机Harness运行，不代表任务完成或当前项目状态。
 - 主线改变时更新本文并运行 `Set-ContextFocus.ps1 -Review` 刷新hash/复核期；ContextState只作为本文件和按需研究的路由器。

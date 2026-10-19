@@ -113,11 +113,17 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         var routeHistory = result["providerRouteHistory"] as JsonArray;
         var failedRoute = routeHistory?.OfType<JsonObject>().LastOrDefault();
         var firstAction = trace?.OfType<JsonObject>().Select(step => step["actionReceipt"] as JsonObject).FirstOrDefault(receipt => receipt is not null);
+        var rejectedDecisionRecorded = trace?.OfType<JsonObject>().Any(step =>
+            ReadString(step, "stage") == "decision-rejected-before-native" &&
+            ReadString(step, "rejectionCode") == "provider-arguments-invalid-json" &&
+            ReadBoolean(step, "nativeActionSent") == false &&
+            step["allowedActionNames"] is JsonArray names && names.Count == 1 && names[0]?.GetValue<string>() == "mapSettlementTargets") == true;
         if (ReadString(result, "status") != "failed" || ReadString(result, "failureCode") != "provider-http-error" ||
-            ReadInt(result, "actionsExecuted", 0) != 1 || trace?.Count != 1 || ReadString(firstAction, "action") != "mapSettlementTargets" ||
-            ReadString(failedRoute, "failureCode") != "provider-http-error" || client.MapTargetQueries != 1)
-            throw new AgentHostException("gold-sale-failure-receipt-selftest-failed", "A provider error after one successful Native map query must preserve the subflow trace, native-action count, and failure route for the StoryMode parent.");
-        return [new { scenario = "gold-sale-provider-failure-preserves-native-action-count-trace-and-route-error", passed = true }];
+            ReadInt(result, "actionsExecuted", 0) != 1 || trace?.Count != 2 || ReadString(firstAction, "action") != "mapSettlementTargets" ||
+            ReadString(failedRoute, "failureCode") != "provider-http-error" || client.MapTargetQueries != 1 ||
+            provider.CallCount != 3 || !provider.FeedbackObserved || !rejectedDecisionRecorded)
+            throw new AgentHostException("gold-sale-failure-receipt-selftest-failed", "One malformed provider decision must be corrected before Native action; a later provider outage must still preserve the query trace and must not replay it.");
+        return [new { scenario = "gold-sale-recovers-malformed-provider-arguments-and-preserves-later-provider-failure-evidence", passed = true }];
     }
 
     internal static async Task<JsonObject> RunAsync(
@@ -146,8 +152,10 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         long completionTokens = priorCompletionTokens;
         string? moveTargetId = null;
         var moveStartPending = false;
+        var rejectedProviderDecisions = 0;
         JsonArray? safeTowns = null;
         JsonObject? previousReceipt = null;
+        JsonObject? decisionFeedback = null;
         JsonObject? saleReceipt = null;
         JsonObject? initialNative = null;
         JsonObject? currentNative = null;
@@ -222,11 +230,34 @@ internal static class AgentHostEstablishClanGoldSaleLoop
 
                 var observation = BuildObservation(currentNative, state, objectiveSnapshotBefore, liveMetricDifferencesBefore, saleReceipt);
                 var modelRequest = BuildDecisionRequest(runId, ReadString(request, "goal"), iteration + decisionCount,
-                    observation, previousReceipt, actionCatalog, controls);
+                    observation, previousReceipt, decisionFeedback, actionCatalog, controls);
                 var started = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
                 var startedTicks = Stopwatch.GetTimestamp();
-                var modelDecision = await AgentHostDecisionCycle.DecideEstablishClanGoldSaleAsync(provider, modelRequest, elapsed.Token);
+                ProviderDecisionResult modelDecision;
+                try
+                {
+                    modelDecision = await AgentHostDecisionCycle.DecideEstablishClanGoldSaleAsync(provider, modelRequest, elapsed.Token);
+                }
+                catch (AgentHostException exception) when (AgentHostProviderDecisionRecovery.CanRetry(exception.Code, rejectedProviderDecisions))
+                {
+                    decisionCount++;
+                    rejectedProviderDecisions++;
+                    decisionFeedback = AgentHostProviderDecisionRecovery.BuildFeedback(exception.Code, actionCatalog, controls);
+                    trace.Add(new JsonObject
+                    {
+                        ["iteration"] = decisionCount,
+                        ["stage"] = "decision-rejected-before-native",
+                        ["rejectionCode"] = exception.Code,
+                        ["nativeActionSent"] = false,
+                        ["allowedActionNames"] = AgentHostProviderDecisionRecovery.CurrentActionNames(actionCatalog),
+                        ["allowedControls"] = controls.DeepClone(),
+                        ["feedback"] = decisionFeedback.DeepClone()
+                    });
+                    continue;
+                }
                 decisionCount++;
+                rejectedProviderDecisions = 0;
+                decisionFeedback = null;
                 promptTokens += modelDecision.PromptTokens ?? 0;
                 completionTokens += modelDecision.CompletionTokens ?? 0;
                 routeHistory.Add(new JsonObject
@@ -569,7 +600,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
     };
 
     private static JsonObject BuildDecisionRequest(string runId, string? goal, int iteration, JsonObject observation,
-        JsonObject? previousReceipt, JsonArray actionCatalog, JsonArray controls) => new()
+        JsonObject? previousReceipt, JsonObject? feedback, JsonArray actionCatalog, JsonArray controls) => new()
     {
         ["runId"] = runId,
         ["goal"] = goal,
@@ -578,7 +609,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         ["iteration"] = iteration,
         ["observation"] = observation.DeepClone(),
         ["previousActionReceipt"] = previousReceipt?.DeepClone(),
-        ["decisionFeedback"] = null,
+        ["decisionFeedback"] = feedback?.DeepClone(),
         ["allowedActions"] = actionCatalog.DeepClone(),
         ["allowedControls"] = controls.DeepClone()
     };
@@ -826,6 +857,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
     private sealed class FakeGoldSaleFailureProvider : IAgentHostDecisionProvider
     {
         internal int CallCount { get; private set; }
+        internal bool FeedbackObserved { get; private set; }
         public string ModelId => "deterministic-gold-sale-failure-selftest";
         public string ConfigurationSource => "harness-fake-provider";
         public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) { cancellationToken.ThrowIfCancellationRequested(); return Task.CompletedTask; }
@@ -833,7 +865,12 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         {
             cancellationToken.ThrowIfCancellationRequested();
             CallCount++;
+            if (request.TryGetProperty("decisionFeedback", out var feedbackValue) && feedbackValue.ValueKind == JsonValueKind.Object &&
+                feedbackValue.TryGetProperty("kind", out var feedbackKind) && feedbackKind.ValueKind == JsonValueKind.String &&
+                feedbackKind.GetString() == "decision-rejected-before-native") FeedbackObserved = true;
             if (CallCount == 1)
+                throw new AgentHostException("provider-arguments-invalid-json", "The self-test model returned malformed action arguments before Native execution.");
+            if (CallCount == 2)
                 return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "fake-gold-sale-failure-route", new JsonObject
                 {
                     ["action"] = "mapSettlementTargets", ["arguments"] = new JsonObject(), ["rationale"] = "Read current safe Town targets."

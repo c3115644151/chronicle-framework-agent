@@ -170,7 +170,7 @@ internal static class AgentHostCaptivityRecoveryLoop
     internal static async Task<IReadOnlyList<object>> RunTransportSelfTestsAsync()
     {
         var native = new FakeNativeClient();
-        var provider = new FakeProvider();
+        var provider = new FakeProvider { FirstDecisionFailureCode = "provider-control-unavailable" };
         using var request = JsonDocument.Parse("""
             {"runId":"captivity-recovery-selftest","goal":"Recover the currently captive MainHero, then plan one unmet Establish Your Clan objective.","maxDecisions":12,"maxElapsedSeconds":20}
             """);
@@ -179,17 +179,25 @@ internal static class AgentHostCaptivityRecoveryLoop
         var verification = result["captivityRecoveryVerified"]?.GetValue<bool>() == true;
         var explicitTimeActions = result["explicitTimeActions"] as JsonArray;
         var routes = result["providerRouteHistory"] as JsonArray;
+        var trace = result["trace"] as JsonArray;
+        var boundedCorrectionWasRecorded = trace?.OfType<JsonObject>().Any(step =>
+            ReadString(step, "stage") == "decision-rejected-before-native" &&
+            ReadString(step, "rejectionCode") == "provider-control-unavailable" &&
+            ReadBoolean(step, "nativeActionSent") == false &&
+            step["allowedActionNames"] is JsonArray names && names.Count == 1 && names[0]?.GetValue<string>() == "resume") == true;
         if (ReadString(result, "status") != "completed" ||
             ReadString(result, "resultKind") != "captivity-recovered-objective-plan" ||
             !verification || ReadBoolean((result["termination"] as JsonObject), "goalVerified") ||
             ReadString(selected, "objectiveId") != "gold" || native.ResumeCount != 1 || native.RansomChoiceCount != 1 || native.ReleaseContinueCount != 1 ||
-            native.QuestDetailsCount != 1 || provider.CallCount != 5 || routes?.Count != 5 ||
+            native.QuestDetailsCount != 1 || provider.CallCount != 6 || routes?.Count != 5 ||
+            ReadInt(result, "decisions", 0) != 6 || !provider.FeedbackObserved || !boundedCorrectionWasRecorded ||
             result["gameplayActionsExecuted"]?.GetValue<int>() != 3 || explicitTimeActions?.Count != 1 ||
             explicitTimeActions[0]?.GetValue<string>() != "resume" ||
             ReadInt(result, "passiveCaptivityPollCount", 0) < 2 ||
             !native.RecoveryActionOrder.SequenceEqual(new[] { "resume", "captivity_end_ransom_deny", CaptivityContinueOption }, StringComparer.Ordinal))
-            throw new AgentHostException("captivity-recovery-runtime-self-test-failed", "The Host failed to use explicit resume, current Native ransom and release-menu choices, verified free MapState, and original Quest replanning without a battle.");
+            throw new AgentHostException("captivity-recovery-runtime-self-test-failed", "The Host failed to recover one rejected model control before any Native action, then use explicit resume, current Native ransom/release choices and verified free MapState without a battle.");
         return [
+            new { scenario = "captivity-recovery-retries-one-rejected-unlisted-control-with-current-catalog-before-native-action", passed = true },
             new { scenario = "captivity-recovery-host-resumes-explicitly-then-passively-observes-and-selects-current-ransom-or-release-menu", passed = true },
             new { scenario = "captivity-recovery-replans-active-establish-clan-without-claiming-quest-completion", passed = true }
         ];
@@ -219,8 +227,10 @@ internal static class AgentHostCaptivityRecoveryLoop
         var decisions = priorDecisions;
         var actionCount = 0;
         var passiveWaitCount = 0;
+        var rejectedProviderDecisions = 0;
         string? captivityChoiceOptionId = null;
         JsonObject? previousReceipt = null;
+        JsonObject? decisionFeedback = null;
         var explicitTimeActions = new JsonArray();
         using var initialDocument = await stateClient.ReadStateAsync(elapsed.Token);
         var initialNative = ParseObject(initialDocument.RootElement);
@@ -240,7 +250,7 @@ internal static class AgentHostCaptivityRecoveryLoop
             {
                 var terminalObservation = BuildObservation(current, state);
                 var terminalRequest = BuildRequest(runId, ReadString(request, "goal"), terminalObservation, previousReceipt,
-                    new JsonArray(), new JsonArray("done"), decisions + 1);
+                    null, new JsonArray(), new JsonArray("done"), decisions + 1);
                 var terminalDecision = await AgentHostDecisionCycle.DecideCaptivityRecoveryAsync(provider, terminalRequest, elapsed.Token);
                 decisions++;
                 AddRoute(routes, provider, terminalDecision, decisions, ref priorPromptTokens, ref priorCompletionTokens);
@@ -326,9 +336,32 @@ internal static class AgentHostCaptivityRecoveryLoop
                     $"No supported Native captivity action is available: menuId={ReadString(context, "menuId") ?? "<none>"}; captivityMenuId={ReadString(context?["captivity"] as JsonObject, "currentMenuId") ?? "<none>"}; time={ReadString(context, "timeControlMode") ?? "<none>"}; isWaitMenu={ReadBoolean(context, "isWaitMenu")}; isWaitActive={ReadBoolean(context, "isWaitActive")}; enabledOptionIds=[{optionIds}].");
             }
             var observation = BuildObservation(current, state);
-            var modelRequest = BuildRequest(runId, ReadString(request, "goal"), observation, previousReceipt, actionCatalog, controls, decisions + 1);
-            var result = await AgentHostDecisionCycle.DecideCaptivityRecoveryAsync(provider, modelRequest, elapsed.Token);
+            var modelRequest = BuildRequest(runId, ReadString(request, "goal"), observation, previousReceipt, decisionFeedback, actionCatalog, controls, decisions + 1);
+            ProviderDecisionResult result;
+            try
+            {
+                result = await AgentHostDecisionCycle.DecideCaptivityRecoveryAsync(provider, modelRequest, elapsed.Token);
+            }
+            catch (AgentHostException exception) when (AgentHostProviderDecisionRecovery.CanRetry(exception.Code, rejectedProviderDecisions))
+            {
+                decisions++;
+                rejectedProviderDecisions++;
+                decisionFeedback = AgentHostProviderDecisionRecovery.BuildFeedback(exception.Code, actionCatalog, controls);
+                trace.Add(new JsonObject
+                {
+                    ["iteration"] = decisions,
+                    ["stage"] = "decision-rejected-before-native",
+                    ["rejectionCode"] = exception.Code,
+                    ["nativeActionSent"] = false,
+                    ["allowedActionNames"] = AgentHostProviderDecisionRecovery.CurrentActionNames(actionCatalog),
+                    ["allowedControls"] = controls.DeepClone(),
+                    ["feedback"] = decisionFeedback.DeepClone()
+                });
+                continue;
+            }
             decisions++;
+            rejectedProviderDecisions = 0;
+            decisionFeedback = null;
             AddRoute(routes, provider, result, decisions, ref priorPromptTokens, ref priorCompletionTokens);
             if (!TryResolveAction(result.Decision, actionCatalog, state, out var action, out var arguments, out var rejection))
                 throw new AgentHostException("captivity-recovery-decision-invalid", rejection ?? "The model did not choose a currently allowed Native captivity action.");
@@ -425,7 +458,7 @@ internal static class AgentHostCaptivityRecoveryLoop
     };
 
     private static JsonObject BuildRequest(string runId, string? goal, JsonObject observation, JsonObject? previousReceipt,
-        JsonArray actions, JsonArray controls, int iteration) => new()
+        JsonObject? feedback, JsonArray actions, JsonArray controls, int iteration) => new()
     {
         ["runId"] = runId,
         ["goal"] = goal,
@@ -434,7 +467,7 @@ internal static class AgentHostCaptivityRecoveryLoop
         ["iteration"] = iteration,
         ["observation"] = observation.DeepClone(),
         ["previousActionReceipt"] = previousReceipt?.DeepClone(),
-        ["decisionFeedback"] = null,
+        ["decisionFeedback"] = feedback?.DeepClone(),
         ["allowedActions"] = actions.DeepClone(),
         ["allowedControls"] = controls.DeepClone()
     };
@@ -618,6 +651,8 @@ internal static class AgentHostCaptivityRecoveryLoop
     private sealed class FakeProvider : IAgentHostDecisionProvider
     {
         internal int CallCount { get; private set; }
+        internal string? FirstDecisionFailureCode { get; init; }
+        internal bool FeedbackObserved { get; private set; }
         public string ModelId => "deterministic-captivity-selftest";
         public string ConfigurationSource => "harness-fake-provider";
         public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) => Task.CompletedTask;
@@ -625,8 +660,12 @@ internal static class AgentHostCaptivityRecoveryLoop
         {
             cancellationToken.ThrowIfCancellationRequested();
             CallCount++;
-            var allowed = request.GetProperty("allowedActions").EnumerateArray().Select(item => item.GetProperty("action").GetString()).ToArray();
             var requestNode = JsonNode.Parse(request.GetRawText())?.AsObject();
+            if (requestNode?["decisionFeedback"] is JsonObject feedback && ReadString(feedback, "kind") == "decision-rejected-before-native")
+                FeedbackObserved = true;
+            if (CallCount == 1 && FirstDecisionFailureCode is string code)
+                throw new AgentHostException(code, "The self-test provider returned an unlisted control before Native execution.");
+            var allowed = request.GetProperty("allowedActions").EnumerateArray().Select(item => item.GetProperty("action").GetString()).ToArray();
             var currentMenuId = ReadString(requestNode?["observation"]?["state"]?["context"] as JsonObject, "menuId");
             JsonObject decision = allowed.Contains("resume", StringComparer.Ordinal)
                 ? new JsonObject { ["action"] = "resume", ["arguments"] = new JsonObject(), ["rationale"] = "Use current native wait control." }

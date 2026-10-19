@@ -898,9 +898,12 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     {
         if (string.IsNullOrWhiteSpace(value))
             throw new AgentHostException("provider-reason-missing", "The structured decision requires an evidence-based reason.");
-        if (value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length > 20)
-            throw new AgentHostException("provider-reason-too-long", "The decision reason exceeds the 20-word contract.");
-        return value.Trim();
+        // Reasons/rationales are bounded metadata, not authority for a game action.
+        // Providers can exceed the prompt's brevity hint even when the structured action
+        // is valid; rejecting that response would discard a separately catalog-validated
+        // action. Keep the stored explanation within the same bound without changing the
+        // action or its arguments.
+        return string.Join(' ', value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Take(20));
     }
 
     private static string ValidateOptionalRationale(string? value) =>

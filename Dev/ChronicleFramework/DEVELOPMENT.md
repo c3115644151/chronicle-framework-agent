@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.239
+Contract version: 7.240
 
 ## 当前产品边界
 
@@ -8,6 +8,10 @@ Contract version: 7.239
 当前StoryMode父循环已把Gold、动态PartySize、Renown及Companion四个目标接入已有Native子流程。Town Tavern Companion路由只用当前菜单、同一Mission内观察到的Wanderer、原版导航/交谈及当前可点击雇佣对话；当前Host包回归用Fake Native/Provider核对接口组合，不等同真实Campaign或真实模型通过。此区别和当前四目标集成状态以Focus/MAINLINE为准。
 Gold子流程遇到Provider/Native故障时返回失败收据，其中保留已有子流程Trace、Native动作计数、路由和安全失败码；父级不得因失败后验缺失而宣称执行了未记录的动作，更不得重放非幂等交易。真实响应错误文本仅限安全摘要长度，不保存模型prompt/回复正文或认证信息。
 新增的`AgentHostEstablishClanAutonomyEvaluation`是后续真实模型集成调试入口：从已有活动StoryMode存档的逐字节临时副本加载，真实模型可驱动四目标父循环，随后清理副本；它不是新战役门禁。产品验收仍要求玩家原版Tutorial skip后从首个稳定MapState接管，并在两个独立自然新建的StoryMode战役完成原版Quest。
+
+运行这个EYC实机诊断前，Harness先运行无游戏的`AgentHostProvider`真实请求烟测；模型目录`ready`只代表有可选路由，不证明上游当下能回答。烟测失败时不启动Bannerlord，减少无效开游戏；该诊断阶段没有显式提供`CHRONICLE_LLM_TIMEOUT_SECONDS`时，将烟测单次上限设为90秒并在结束后恢复环境值，用户显式设置的上限不覆盖。烟测通过仍不保证后续每次请求成功；每次调用需以FreeLLMAPI实际响应路由、结果和错误日志区分上游/代理传输故障与AgentHost协议/参数错误。
+
+AgentHost对“模型响应已返回但未通过动作/控制目录校验”的可恢复决策错误可最多请求两次修正；反馈只包含错误类别和当前Native动作/控制目录，不包含原始模型回复，也不发送Native动作。传输错误、上游429/502、超时不走这条模型决策修正路径；已经执行的Native副作用不因重试重新执行。所有此类分支必须有Fake Provider回归，并在真实模型中按现有Harness收据区分是否生效。
 
 下文标注为“历史”的NPC Actor产品路线已降为未来研究；MainHero GoldSale等历史切片若未有通过收据仍视为失败/未完成证据，只在当前W7缺口审计确认相关时才重跑。
 

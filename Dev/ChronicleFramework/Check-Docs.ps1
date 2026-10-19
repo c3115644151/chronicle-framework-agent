@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.239'
+$contractVersion = '7.240'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -546,6 +546,11 @@ if ($projectFile -notmatch [regex]::Escape('<Compile Remove="TestResults/**/*.cs
 
 if ($harnessScript -notmatch "HarnessContractVersion\s*=\s*'$contractVersion'") {
     throw "Run-Harness.ps1 does not declare contract version $contractVersion."
+}
+$autonomyStages = [regex]::Match($harnessScript, "'AgentHostEstablishClanAutonomyEvaluation'\s*\{\s*@\(([^)]*)\)")
+if (-not $autonomyStages.Success -or $autonomyStages.Groups[1].Value.IndexOf('AgentHostProvider', [StringComparison]::Ordinal) -lt 0 -or
+    $autonomyStages.Groups[1].Value.IndexOf('AgentHostProvider', [StringComparison]::Ordinal) -gt $autonomyStages.Groups[1].Value.IndexOf('AgentHostEstablishClanAutonomyEvaluation', [StringComparison]::Ordinal)) {
+    throw 'Live StoryMode autonomy evaluation must run the real-model no-game provider smoke before launching Bannerlord.'
 }
 if ($harnessScript -notmatch 'GitCommit' -or $harnessScript -notmatch 'SourceControl' -or $harnessScript -notmatch 'status --porcelain' -or $harnessScript -match 'TaskBoard|CensusDomainDoneCount|gh project|gh api|githubProjectNumber') { throw 'Harness receipts must record Git provenance and remain independent of GitHub task tracking.' }
 if ($projectFile -notmatch 'ChronicleGameRoot' -or $harnessScript -notmatch 'ChronicleGameRoot=\$gameRoot' -or -not (Test-Path -LiteralPath (Join-Path $harnessRoot 'Initialize-ChronicleWorkspace.ps1'))) { throw 'Cloned repositories must accept a local game path and provide a repeatable workspace initializer.' }
