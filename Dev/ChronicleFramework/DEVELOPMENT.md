@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.240
+Contract version: 7.241
 
 ## 当前产品边界
 
@@ -10,6 +10,8 @@ Gold子流程遇到Provider/Native故障时返回失败收据，其中保留已�
 新增的`AgentHostEstablishClanAutonomyEvaluation`是后续真实模型集成调试入口：从已有活动StoryMode存档的逐字节临时副本加载，真实模型可驱动四目标父循环，随后清理副本；它不是新战役门禁。产品验收仍要求玩家原版Tutorial skip后从首个稳定MapState接管，并在两个独立自然新建的StoryMode战役完成原版Quest。
 
 运行这个EYC实机诊断前，Harness先运行无游戏的`AgentHostProvider`真实请求烟测；模型目录`ready`只代表有可选路由，不证明上游当下能回答。烟测失败时不启动Bannerlord，减少无效开游戏；该诊断阶段没有显式提供`CHRONICLE_LLM_TIMEOUT_SECONDS`时，将烟测单次上限设为90秒并在结束后恢复环境值，用户显式设置的上限不覆盖。烟测通过仍不保证后续每次请求成功；每次调用需以FreeLLMAPI实际响应路由、结果和错误日志区分上游/代理传输故障与AgentHost协议/参数错误。
+
+同一变量还必须传到实机Host进程：`Test-AgentLiveModelLoop.ps1`仅在没有显式Provider timeout时使用各场景默认值；外层EYC Harness默认设置90秒，显式`CHRONICLE_LLM_TIMEOUT_SECONDS`仍由用户决定且范围为5–360秒。禁止在目标分支中无条件重置360秒，这会使一个不断重试的远端断连占住游戏数分钟，并掩盖上层限制。
 
 AgentHost对“模型响应已返回但未通过动作/控制目录校验”的可恢复决策错误可最多请求两次修正；反馈只包含错误类别和当前Native动作/控制目录，不包含原始模型回复，也不发送Native动作。传输错误、上游429/502、超时不走这条模型决策修正路径；已经执行的Native副作用不因重试重新执行。所有此类分支必须有Fake Provider回归，并在真实模型中按现有Harness收据区分是否生效。
 

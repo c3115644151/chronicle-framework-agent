@@ -25,7 +25,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.240'
+$HarnessContractVersion = '7.241'
 $effectiveSmokeTimeoutSeconds = if ($Phase -in @('AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostEstablishClanAutonomyEvaluation','AgentHostCaptivityRecoveryEvaluation','AgentHostEstablishClanGoldSaleEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max($SmokeTimeoutSeconds, 240) } else { $SmokeTimeoutSeconds }
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
@@ -685,10 +685,18 @@ foreach ($stage in $requestedStages) {
         }
         'AgentHostEstablishClanAutonomyEvaluation' {
             Invoke-Stage -Name 'AgentHostEstablishClanAutonomyEvaluation' -Action {
+                $originalProviderTimeout = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_TIMEOUT_SECONDS', 'Process')
+                $useBoundedAutonomyRuntime = [string]::IsNullOrWhiteSpace($originalProviderTimeout)
+                if ($useBoundedAutonomyRuntime) { [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_TIMEOUT_SECONDS', '90', 'Process') }
+                try {
                 $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostCampaignLoopEvaluationScript -EstablishYourClanAutonomyLoop -PlannerSourceSaveName $StoryModePlannerSourceSaveName -FrameRate 5 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "FreeLLMAPI-routed real-model StoryMode autonomy evaluation on a disposable existing-quest clone failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
+                }
+                finally {
+                    if ($useBoundedAutonomyRuntime) { [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_TIMEOUT_SECONDS', $originalProviderTimeout, 'Process') }
+                }
             }
         }
         'AgentHostCaptivityRecoveryEvaluation' {

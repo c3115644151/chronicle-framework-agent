@@ -50,6 +50,28 @@ foreach ($setting in @('CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL','CHRONICLE
         throw "Live-model verification requires local $setting configuration; the value is never printed by this test."
     }
 }
+function Resolve-LiveModelProviderTimeout([AllowNull()][string]$ConfiguredValue, [ValidateRange(5,360)][int]$ScenarioDefaultSeconds) {
+    if ([string]::IsNullOrWhiteSpace($ConfiguredValue)) { return $ScenarioDefaultSeconds }
+    $requestedTimeoutSeconds = 0
+    if (-not [int]::TryParse($ConfiguredValue, [ref]$requestedTimeoutSeconds) -or $requestedTimeoutSeconds -lt 5 -or $requestedTimeoutSeconds -gt 360) {
+        throw 'CHRONICLE_LLM_TIMEOUT_SECONDS must be an integer from 5 to 360; no game process was started.'
+    }
+    return $requestedTimeoutSeconds
+}
+$timeoutOverrideContract = @(
+    @{ Configured='90'; Default=360; Expected=90 },
+    @{ Configured=''; Default=180; Expected=180 },
+    @{ Configured='5'; Default=360; Expected=5 },
+    @{ Configured='360'; Default=90; Expected=360 }
+)
+foreach ($case in $timeoutOverrideContract) {
+    if ((Resolve-LiveModelProviderTimeout $case.Configured $case.Default) -ne $case.Expected) {
+        throw 'Live-model provider timeout override/default contract failed before game launch.'
+    }
+}
+function Set-LiveModelProviderTimeout([ValidateRange(5,360)][int]$ScenarioDefaultSeconds) {
+    $env:CHRONICLE_LLM_TIMEOUT_SECONDS = [string](Resolve-LiveModelProviderTimeout ([string]$env:CHRONICLE_LLM_TIMEOUT_SECONDS) $ScenarioDefaultSeconds)
+}
 $configuredProtocol = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_PROTOCOL)) { 'openai-compatible' } else { [string]$env:CHRONICLE_LLM_PROTOCOL }
 $providerEndpoint = $null
 if ($configuredProtocol -ceq 'ollama-native' -or
@@ -339,7 +361,7 @@ try {
         $maxDecisions = 36
         $maxElapsedSeconds = 600
         $allowedActions = 'mapSettlementTargets,move,dialogueSelect,dialogueContinue,barterOptions,barterAutoBalance,barterOffer,barterCancel,recruitOptions,recruit'
-        $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '180'
+        Set-LiveModelProviderTimeout 180
         $env:CHRONICLE_LLM_MAX_TOKENS = '768'
     }
     elseif ($RecruitmentLoop) {
@@ -347,7 +369,7 @@ try {
         $maxDecisions = 24
         $maxElapsedSeconds = 600
         $allowedActions = 'mapSettlementTargets,move,recruitOptions,recruit'
-        $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '180'
+        Set-LiveModelProviderTimeout 180
         $env:CHRONICLE_LLM_MAX_TOKENS = '512'
     }
     elseif ($SupplyManagementLoop) {
@@ -370,7 +392,7 @@ try {
         }
         $completionContractJson = $completionContract | ConvertTo-Json -Depth 8 -Compress
         $completionContractBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($completionContractJson))
-        $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '180'
+        Set-LiveModelProviderTimeout 180
         $env:CHRONICLE_LLM_MAX_TOKENS = '256'
     }
     elseif ($VillageToolsQuestLoop) {
@@ -378,7 +400,7 @@ try {
         $maxDecisions = 160
         $maxElapsedSeconds = 7200
         $allowedActions = 'mapSettlementTargets,move,menuSelect,talkToSettlementHero,dialogueSelect,dialogueContinue,questDetails,tradeOptions,trade,tradeConfirm,tradeCancel,tradeCancelChanges,barterOptions,barterAutoBalance,barterOffer,barterCancel,inventoryOpen,heroEquipmentOptions,inventoryCancel'
-        $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '360'
+        Set-LiveModelProviderTimeout 360
         $env:CHRONICLE_LLM_MAX_TOKENS = '1024'
     }
     elseif ($BattleSimulationLoop) {
@@ -386,7 +408,7 @@ try {
         $maxDecisions = 80
         $maxElapsedSeconds = 1800
         $allowedActions = 'mapPartyTargets,pursue,dialogueSelect,dialogueContinue,menuSelect,battleSkip,battleFinish,partyTakeAll,partyScreenDone,inventoryTakeAll,inventoryDone'
-        $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '360'
+        Set-LiveModelProviderTimeout 360
         $env:CHRONICLE_LLM_MAX_TOKENS = '768'
     }
     elseif ($BattleAndCaptivityLoop) {
@@ -394,7 +416,7 @@ try {
         $maxDecisions = 160
         $maxElapsedSeconds = 7200
         $allowedActions = 'mapPartyTargets,pursue,dialogueSelect,dialogueContinue,menuSelect,battleSkip,battleFinish,partyTakeAll,partyScreenDone,inventoryTakeAll,inventoryDone'
-        $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '360'
+        Set-LiveModelProviderTimeout 360
         $env:CHRONICLE_LLM_MAX_TOKENS = '1024'
     }
     elseif ($CaptivityRecoveryLoop) {
@@ -402,7 +424,7 @@ try {
         $maxDecisions = 120
         $maxElapsedSeconds = 7200
         $allowedActions = 'resume,menuSelect'
-        $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '360'
+        Set-LiveModelProviderTimeout 360
         $env:CHRONICLE_LLM_MAX_TOKENS = '2048'
     }
     elseif ($EstablishClanGoldSaleLoop) {
@@ -410,7 +432,7 @@ try {
         $maxDecisions = 160
         $maxElapsedSeconds = 7200
         $allowedActions = 'mapSettlementTargets,move,menuSelect,tradeOptions,trade,tradeConfirm,tradeCancel,tradeCancelChanges'
-        $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '360'
+        Set-LiveModelProviderTimeout 360
         $env:CHRONICLE_LLM_MAX_TOKENS = '2048'
     }
     elseif ($EstablishYourClanAutonomyLoop) {
@@ -418,7 +440,7 @@ try {
         $maxDecisions = 160
         $maxElapsedSeconds = 7200
         $allowedActions = 'mapSettlementTargets,move,menuSelect,talkToSettlementHero,dialogueSelect,dialogueContinue,questDetails,tradeOptions,trade,tradeConfirm,tradeCancel,tradeCancelChanges,barterOptions,barterAutoBalance,barterOffer,barterCancel,inventoryOpen,heroEquipmentOptions,inventoryCancel,mapPartyTargets,pursue,battleSkip,battleFinish,partyTakeAll,partyScreenDone,inventoryTakeAll,inventoryDone,recruitOptions,recruit,missionSceneAgents,missionNavigateToAgent,missionInteract,missionLeave'
-        $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '360'
+        Set-LiveModelProviderTimeout 360
         $env:CHRONICLE_LLM_MAX_TOKENS = '1024'
     }
     elseif ($EstablishYourClanAutonomyLoop) {
@@ -468,12 +490,12 @@ try {
         $maxDecisions = 6
         $maxElapsedSeconds = 300
         $allowedActions = 'mapSettlementTargets,move,menuSelect,talkToSettlementHero,dialogueSelect,dialogueContinue,questDetails,tradeOptions,trade,tradeConfirm,tradeCancel,tradeCancelChanges,barterOptions,barterAutoBalance,barterOffer,barterCancel,inventoryOpen,heroEquipmentOptions,inventoryCancel'
-        $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '180'
+        Set-LiveModelProviderTimeout 180
         $env:CHRONICLE_LLM_MAX_TOKENS = '512'
     }
     elseif ($ArrivalLoop) {
         $goal = 'First query mapSettlementTargets. Then choose the nearest observed safe target (not hostile, not under siege, not the current settlement) and issue one move. While party.isMoving toward that target and currentSettlementId differs, use observeAgain with waitSeconds 5; do not send move again or use clock controls. When nativeMoveArrival.status is arrived, return done immediately and issue no further game action.'
-        $env:CHRONICLE_LLM_TIMEOUT_SECONDS = '180'
+        Set-LiveModelProviderTimeout 180
         # The four-step arrival loop emits compact JSON; reserve only 256 completion tokens to keep the 4K context available for observed state.
         $env:CHRONICLE_LLM_MAX_TOKENS = '256'
         $maxDecisions = 30

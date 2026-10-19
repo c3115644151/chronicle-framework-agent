@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.240'
+$contractVersion = '7.241'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -440,7 +440,7 @@ if ($agentHostDecisionCycleSource -notmatch 'AgentHostHarnessProgressTrace\.Reco
     $agentHostProviderContractSelfTestSource -notmatch 'AgentHostHarnessProgressTrace\.RunContractSelfTests') {
     throw 'Real Host decisions must be incrementally persisted only in bounded Harness visual-capture mode, including the selected Native argument and route but excluding rationale/raw prompt content.'
 }
-if ($agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S]{0,900}\$env:CHRONICLE_LLM_TIMEOUT_SECONDS = ''360''' -or
+if ($agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S]{0,900}Set-LiveModelProviderTimeout 360' -or
     $agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S]{0,900}\$env:CHRONICLE_LLM_MAX_TOKENS = ''1024''') {
     throw 'The real-model Village quest slice must retain the bounded 360-second FreeLLMAPI retry deadline and the empirically increased 1024-token output ceiling required after a 512-token structured response was truncated.'
 }
@@ -551,6 +551,12 @@ $autonomyStages = [regex]::Match($harnessScript, "'AgentHostEstablishClanAutonom
 if (-not $autonomyStages.Success -or $autonomyStages.Groups[1].Value.IndexOf('AgentHostProvider', [StringComparison]::Ordinal) -lt 0 -or
     $autonomyStages.Groups[1].Value.IndexOf('AgentHostProvider', [StringComparison]::Ordinal) -gt $autonomyStages.Groups[1].Value.IndexOf('AgentHostEstablishClanAutonomyEvaluation', [StringComparison]::Ordinal)) {
     throw 'Live StoryMode autonomy evaluation must run the real-model no-game provider smoke before launching Bannerlord.'
+}
+if ($agentHostLiveModelLoopSource -notmatch 'Set-LiveModelProviderTimeout' -or
+    $agentHostLiveModelLoopSource -notmatch 'Resolve-LiveModelProviderTimeout' -or
+    $agentHostLiveModelLoopSource -notmatch 'timeoutOverrideContract' -or
+    $agentHostLiveModelLoopSource -match '\$env:CHRONICLE_LLM_TIMEOUT_SECONDS\s*=\s*''(180|360)''') {
+    throw 'Live-model scenario defaults must honor a bounded explicit CHRONICLE_LLM_TIMEOUT_SECONDS override instead of resetting it.'
 }
 if ($harnessScript -notmatch 'GitCommit' -or $harnessScript -notmatch 'SourceControl' -or $harnessScript -notmatch 'status --porcelain' -or $harnessScript -match 'TaskBoard|CensusDomainDoneCount|gh project|gh api|githubProjectNumber') { throw 'Harness receipts must record Git provenance and remain independent of GitHub task tracking.' }
 if ($projectFile -notmatch 'ChronicleGameRoot' -or $harnessScript -notmatch 'ChronicleGameRoot=\$gameRoot' -or -not (Test-Path -LiteralPath (Join-Path $harnessRoot 'Initialize-ChronicleWorkspace.ps1'))) { throw 'Cloned repositories must accept a local game path and provide a repeatable workspace initializer.' }
