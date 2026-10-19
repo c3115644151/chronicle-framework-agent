@@ -700,6 +700,8 @@ FreeLLMAPI路由错误已分成两类，不能统称“模型不可用”：
 
 方法复盘：完整EYC流水线曾尝试额外Provider smoke（前文`20261019-223430`），但该调用成功后实际EYC请求仍立即遇HTTP 429；它未能预测下一次服务可用性，却消耗了一个免费模型调用。该实验已被撤回，当前完整EYC流水线不再并列执行Provider模型烟测；独立`AgentHostProvider`仍是手工/诊断阶段。当前EYC顺序为`Preflight→Build→AgentHostPackage→Smoke→AgentHostEstablishClanAutonomyEvaluation`，模型的首个真实调用直接分类实际StoryMode目标。该改动由`Check-Docs.ps1`锁定，以免把无游戏烟测当成产品能力证据或造成重复费用/配额消耗。
 
+撤回重复Provider smoke后，`TestResults/20261019-232015`直接使用真实`qwen2.5-vl-72b`做EYC集成诊断：Preflight/Build/AgentHostPackage/Native Smoke通过并加载临时save002副本，但模型第一条真实EYC请求在FreeLLMAPI OVH cooldown/retry期间达到90秒Host deadline，返回`provider-timeout`。有效决策0、Native动作0、正式源档未变，临时副本/进程/session清理且引擎录像100%覆盖。此样本验证无重复调用的新顺序能准确暴露即时真实请求故障，却仍未触及Gold/Move动作链；provider `ready`与列表可见不能证明当前调用能通过。
+
 - 本文维护技术目标、机制契约、领域架构、长期验收定义和未解事实；不保存项目工作项状态、域完成计数或测试通过快照。
 - GitHub Project 是唯一工作项/依赖/状态入口；本地 `TestResults/latest.json` 只代表最近一次本机Harness运行，不代表任务完成或当前项目状态。
 - 主线改变时更新本文并运行 `Set-ContextFocus.ps1 -Review` 刷新hash/复核期；ContextState只作为本文件和按需研究的路由器。
