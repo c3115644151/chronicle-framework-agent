@@ -103,6 +103,23 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         ];
     }
 
+    internal static async Task<IReadOnlyList<object>> RunFailureTransportSelfTestsAsync()
+    {
+        var client = new FakeGoldSaleFailureNativeClient();
+        var provider = new FakeGoldSaleFailureProvider();
+        using var request = JsonDocument.Parse("{\"runId\":\"gold-sale-failure-receipt-selftest\",\"goal\":\"Raise Gold Journal progress with one Native sale.\",\"maxDecisions\":6,\"maxElapsedSeconds\":30}");
+        var result = await RunAsync(request.RootElement, client, client, provider, CancellationToken.None);
+        var trace = result["trace"] as JsonArray;
+        var routeHistory = result["providerRouteHistory"] as JsonArray;
+        var failedRoute = routeHistory?.OfType<JsonObject>().LastOrDefault();
+        var firstAction = trace?.OfType<JsonObject>().Select(step => step["actionReceipt"] as JsonObject).FirstOrDefault(receipt => receipt is not null);
+        if (ReadString(result, "status") != "failed" || ReadString(result, "failureCode") != "provider-http-error" ||
+            ReadInt(result, "actionsExecuted", 0) != 1 || trace?.Count != 1 || ReadString(firstAction, "action") != "mapSettlementTargets" ||
+            ReadString(failedRoute, "failureCode") != "provider-http-error" || client.MapTargetQueries != 1)
+            throw new AgentHostException("gold-sale-failure-receipt-selftest-failed", "A provider error after one successful Native map query must preserve the subflow trace, native-action count, and failure route for the StoryMode parent.");
+        return [new { scenario = "gold-sale-provider-failure-preserves-native-action-count-trace-and-route-error", passed = true }];
+    }
+
     internal static async Task<JsonObject> RunAsync(
         JsonElement request,
         IAgentHostCampaignNativeClient stateClient,
@@ -142,6 +159,8 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         string? timeControlModeBefore = null;
         JsonObject? initialCaptivityRecovery = null;
 
+        try
+        {
         using (provider)
         {
             await provider.CheckConfiguredModelAsync(elapsed.Token);
@@ -302,6 +321,57 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             }
         }
         throw new AgentHostException("gold-sale-budget-exhausted", "The bounded Native Gold sale loop did not complete one verified positive sale.");
+        }
+        catch (OperationCanceledException)
+        {
+            return BuildFailure(cancellationToken.IsCancellationRequested ? "host-stop-requested" : "gold-sale-timeout",
+                cancellationToken.IsCancellationRequested ? "The Host stop signal ended the Gold sale objective without claiming progress." : "The bounded Gold sale objective exceeded its elapsed-time limit.");
+        }
+        catch (AgentHostException exception)
+        {
+            return BuildFailure(exception.Code, exception.Message);
+        }
+        catch (Exception exception)
+        {
+            return BuildFailure("gold-sale-unexpected-error", exception.GetType().Name);
+        }
+
+        JsonObject BuildFailure(string code, string message)
+        {
+            routeHistory.Add(new JsonObject
+            {
+                ["decision"] = decisionCount + 1,
+                ["requestedModelId"] = provider.ModelId,
+                ["status"] = "failed-before-valid-decision",
+                ["failureCode"] = code,
+                ["failureSummary"] = message.Length > 240 ? message[..240] : message
+            });
+            var recoveryActions = ReadInt(initialCaptivityRecovery, "actionsExecuted", 0);
+            return new JsonObject
+            {
+                ["status"] = "failed",
+                ["resultKind"] = "establish-clan-gold-sale",
+                ["runId"] = runId,
+                ["providerModelId"] = provider.ModelId,
+                ["providerConfigurationSource"] = provider.ConfigurationSource,
+                ["decisions"] = decisionCount,
+                ["actionsExecuted"] = recoveryActions + actionCount,
+                ["saleActionsExecuted"] = saleActionCount,
+                ["promptTokens"] = promptTokens,
+                ["completionTokens"] = completionTokens,
+                ["providerRouteHistory"] = routeHistory.DeepClone(),
+                ["initialNativeState"] = initialNative?.DeepClone(),
+                ["finalNativeState"] = currentNative?.DeepClone(),
+                ["initialCaptivityRecovery"] = initialCaptivityRecovery?.DeepClone(),
+                ["objectiveSnapshotBefore"] = objectiveSnapshotBefore?.DeepClone(),
+                ["objectiveSnapshotAfter"] = objectiveSnapshotAfter?.DeepClone(),
+                ["saleReceipt"] = saleReceipt?.DeepClone(),
+                ["trace"] = trace.DeepClone(),
+                ["termination"] = new JsonObject { ["reason"] = code, ["completedByProvider"] = false, ["goalVerified"] = false },
+                ["failure"] = message,
+                ["failureCode"] = code
+            };
+        }
     }
 
     private static JsonArray BuildActionCatalog(JsonObject state, JsonObject? previousReceipt, JsonArray? safeTowns, string? moveTargetId)
@@ -690,4 +760,86 @@ internal static class AgentHostEstablishClanGoldSaleLoop
     private static string? ReadString(JsonObject? value, string key) => value?[key] is JsonValue node && node.TryGetValue<string>(out var text) ? text : null;
     private static string? ReadString(JsonElement value, string key) => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(key, out var property) && property.ValueKind == JsonValueKind.String ? property.GetString() : null;
     private static long ReadLong(JsonObject? value, string key, long fallback) => value?[key] is JsonValue node && node.TryGetValue<long>(out var result) ? result : fallback;
+
+    private sealed class FakeGoldSaleFailureNativeClient : IAgentHostGoldSaleNativeClient
+    {
+        internal int MapTargetQueries { get; private set; }
+
+        public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var state = new JsonObject
+            {
+                ["context"] = new JsonObject
+                {
+                    ["gameState"] = "MapState", ["menuId"] = null, ["timeControlMode"] = "Stop",
+                    ["captivity"] = new JsonObject { ["isCaptive"] = false }, ["encounterActive"] = false,
+                    ["battleSimulation"] = null, ["escapeMenuOpen"] = false, ["inquiryOpen"] = false
+                },
+                ["quests"] = new JsonArray(new JsonObject { ["id"] = QuestId }),
+                ["storyModeEstablishClanStatus"] = new JsonObject { ["status"] = "active", ["questId"] = QuestId },
+                ["location"] = new JsonObject { ["currentSettlementId"] = null, ["targetSettlementId"] = null },
+                ["party"] = new JsonObject { ["isMoving"] = false },
+                ["economy"] = new JsonObject { ["gold"] = 32, ["renown"] = 5 }
+            };
+            var receipt = new JsonObject { ["status"] = "completed", ["campaignDay"] = 10.0, ["timeControlMode"] = "Stop", ["state"] = state };
+            return Task.FromResult(JsonDocument.Parse(receipt.ToJsonString()));
+        }
+
+        public Task<JsonDocument> ReadQuestDetailsAsync(string questId, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (questId != QuestId) throw new AgentHostException("gold-sale-failure-selftest-quest-id-invalid", "The fake Native client received an unexpected Quest id.");
+            var stages = new JsonArray(
+                Stage("gold", 32, 2000), Stage("partySize", 4, 25), Stage("renown", 5, 50), Stage("companions", 1, 1));
+            var live = new JsonObject
+            {
+                ["gold"] = Metric(32, 2000), ["partySize"] = Metric(4, 25), ["renown"] = Metric(5, 50), ["companions"] = Metric(1, 1)
+            };
+            var data = new JsonObject { ["questId"] = QuestId, ["journalStages"] = stages, ["storyModeEstablishClan"] = live };
+            return Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["data"] = data }.ToJsonString()));
+        }
+
+        public Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken) =>
+            throw new AgentHostException("gold-sale-failure-selftest-unexpected-map-action", "Gold sale did not use the reviewed Native sale adapter.");
+
+        public Task<JsonDocument> ExecuteCaptivityRecoveryActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken) =>
+            throw new AgentHostException("gold-sale-failure-selftest-unexpected-captivity-action", "The fake Native source is not captive.");
+
+        public Task<JsonDocument> ExecuteGoldSaleActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (action != "mapSettlementTargets" || arguments.Count != 0) throw new AgentHostException("gold-sale-failure-selftest-unexpected-native-action", "Only the first current safe Town target query is expected before the provider failure.");
+            MapTargetQueries++;
+            var targets = new JsonArray(new JsonObject { ["id"] = "town-safe", ["name"] = "Safe Town", ["type"] = "town", ["distance"] = 10.0, ["hostile"] = false, ["underSiege"] = false });
+            var data = new JsonObject { ["mapSettlementTargets"] = targets };
+            return Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["action"] = action, ["data"] = data }.ToJsonString()));
+        }
+
+        private static JsonObject Stage(string id, int current, int target) => new()
+        {
+            ["hasTask"] = true, ["currentProgress"] = current, ["targetProgress"] = target, ["description"] = id
+        };
+        private static JsonObject Metric(int current, int target) => new() { ["current"] = current, ["target"] = target, ["met"] = current >= target };
+    }
+
+    private sealed class FakeGoldSaleFailureProvider : IAgentHostDecisionProvider
+    {
+        internal int CallCount { get; private set; }
+        public string ModelId => "deterministic-gold-sale-failure-selftest";
+        public string ConfigurationSource => "harness-fake-provider";
+        public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) { cancellationToken.ThrowIfCancellationRequested(); return Task.CompletedTask; }
+        public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CallCount++;
+            if (CallCount == 1)
+                return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "fake-gold-sale-failure-route", new JsonObject
+                {
+                    ["action"] = "mapSettlementTargets", ["arguments"] = new JsonObject(), ["rationale"] = "Read current safe Town targets."
+                }));
+            throw new AgentHostException("provider-http-error", "Fake external provider rate-limit summary; no Native command followed.");
+        }
+        public void Dispose() { }
+    }
 }

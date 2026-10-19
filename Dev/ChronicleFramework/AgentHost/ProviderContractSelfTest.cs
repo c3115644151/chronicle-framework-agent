@@ -40,6 +40,8 @@ internal static class ProviderContractSelfTest
         results.AddRange(NativeMailboxClient.RunQuestDetailsReadActionContractSelfTests());
         results.AddRange(AgentHostCaptivityRecoveryLoop.RunContractSelfTests());
         results.AddRange(AgentHostEstablishClanGoldSaleLoop.RunContractSelfTests());
+        try { results.AddRange(await AgentHostEstablishClanGoldSaleLoop.RunFailureTransportSelfTestsAsync()); }
+        catch (Exception exception) { throw new AgentHostException("gold-sale-failure-transport-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
         try { results.AddRange(await AgentHostCaptivityRecoveryLoop.RunTransportSelfTestsAsync()); }
         catch (Exception exception) { throw new AgentHostException("captivity-recovery-loop-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
         try { results.AddRange(AgentHostVillageToolsQuestPolicy.RunContractSelfTests()); }

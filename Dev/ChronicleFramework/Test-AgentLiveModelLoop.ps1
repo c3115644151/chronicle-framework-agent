@@ -1287,7 +1287,7 @@ try {
         ProviderBudget = $loopTrace.providerBudget
         HostFailureStage = $loopTrace.failureStage
         HostFailureExceptionType = $loopTrace.failureExceptionType
-        HostFailureDetail = $loopTrace.failureDetail
+        HostFailureDetail = if (-not [string]::IsNullOrWhiteSpace([string]$loopTrace.failureDetail)) { [string]$loopTrace.failureDetail } elseif (-not [string]::IsNullOrWhiteSpace([string]$loopTrace.failure)) { ([string]$loopTrace.failure).Substring(0, [Math]::Min(600, ([string]$loopTrace.failure).Length)) } elseif (-not [string]::IsNullOrWhiteSpace([string]$loopTrace.message)) { ([string]$loopTrace.message).Substring(0, [Math]::Min(600, ([string]$loopTrace.message).Length)) } else { $null }
         HostFailureStack = $loopTrace.failureStack
         HostLastSelectedAction = $loopTrace.lastSelectedAction
         HostFailureCode = if ($loopTrace.failureCode) { [string]$loopTrace.failureCode } elseif ($loopTrace.error) { [string]$loopTrace.error } else { $null }
@@ -1334,7 +1334,7 @@ catch {
             ProviderBudget = $loopTrace.providerBudget
             HostFailureStage = $loopTrace.failureStage
             HostFailureExceptionType = $loopTrace.failureExceptionType
-            HostFailureDetail = $loopTrace.failureDetail
+            HostFailureDetail = if (-not [string]::IsNullOrWhiteSpace([string]$loopTrace.failureDetail)) { [string]$loopTrace.failureDetail } elseif (-not [string]::IsNullOrWhiteSpace([string]$loopTrace.failure)) { ([string]$loopTrace.failure).Substring(0, [Math]::Min(600, ([string]$loopTrace.failure).Length)) } elseif (-not [string]::IsNullOrWhiteSpace([string]$loopTrace.message)) { ([string]$loopTrace.message).Substring(0, [Math]::Min(600, ([string]$loopTrace.message).Length)) } else { $null }
             HostFailureStack = $loopTrace.failureStack
             HostLastSelectedAction = $loopTrace.lastSelectedAction
             HostFailureCode = if ($loopTrace.failureCode) { [string]$loopTrace.failureCode } elseif ($loopTrace.error) { [string]$loopTrace.error } else { $null }
