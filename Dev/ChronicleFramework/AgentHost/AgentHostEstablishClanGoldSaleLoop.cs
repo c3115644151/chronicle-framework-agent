@@ -79,12 +79,19 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         if (movementCatalog.Count != 1 || ReadString(movementCatalog[0] as JsonObject, "action") != "move" ||
             movementTargets?.Count != 1 || movementTargets[0]?.GetValue<string>() != "safe-town")
             throw new AgentHostException("gold-sale-self-test-safe-town-movement-failed", "The sale route must use only currently visible, non-hostile, non-sieged Towns.");
+        if (!TryResolveAction(noSettlement, null, movementCatalog, new JsonObject
+            {
+                ["action"] = "move",
+                ["arguments"] = new JsonObject { ["SettlementId"] = "safe-town" }
+            }, FilterSafeTowns(moveTargetReceipt), null, out var resolvedMoveAction, out var resolvedMoveArguments, out _) ||
+            resolvedMoveAction != "move" || ReadMoveTargetId(resolvedMoveArguments) != "safe-town")
+            throw new AgentHostException("gold-sale-self-test-normalized-move-target-lost", "The Host must recover the destination from its normalized Native argument shape before the next observation cycle.");
         var moveStarting = MapState(null, null, []);
         moveStarting["location"]!["targetSettlementId"] = "safe-town";
         moveStarting["context"]!["timeControlMode"] = "StoppablePlay";
         moveStarting["context"]!["isWaiting"] = true;
-        if (!BuildControlCatalog(moveStarting, "safe-town", moveStartPending: true).Any(control => control?.GetValue<string>() == "observeAgain") ||
-            BuildControlCatalog(moveStarting, "safe-town", moveStartPending: false).Count != 0)
+        if (!BuildControlCatalog(moveStarting, ReadMoveTargetId(resolvedMoveArguments), moveStartPending: true).Any(control => control?.GetValue<string>() == "observeAgain") ||
+            BuildControlCatalog(moveStarting, ReadMoveTargetId(resolvedMoveArguments), moveStartPending: false).Count != 0)
             throw new AgentHostException("gold-sale-self-test-native-move-start-transition-poll-failed", "After its own Native move sets the target but before isMoving updates, allow one bounded read-only poll and no replayed movement or clock action.");
         var existingMove = MapState(null, null, []);
         existingMove["party"]!["isMoving"] = true;
@@ -300,7 +307,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 if (action == "mapSettlementTargets") safeTowns = FilterSafeTowns(receipt);
                 if (action == "move")
                 {
-                    moveTargetId = ReadString(arguments, "SettlementId");
+                    moveTargetId = ReadMoveTargetId(arguments);
                     moveStartPending = moveTargetId is not null;
                 }
                 if (action == "trade")
@@ -485,6 +492,8 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             return new JsonArray("observeAgain");
         return new JsonArray();
     }
+
+    private static string? ReadMoveTargetId(JsonObject? arguments) => ReadString(arguments, "settlementId");
 
     private static bool TryResolveAction(JsonObject state, JsonObject? previousReceipt, JsonArray catalog,
         JsonObject decision, JsonArray? safeTowns, string? moveTargetId,
