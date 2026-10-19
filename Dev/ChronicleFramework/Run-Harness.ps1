@@ -235,7 +235,7 @@ $requestedStages = switch ($Phase) {
     'AgentHostCampaignLoopEvaluation' { @('Preflight', 'Build', 'AgentHostCampaignLoopEvaluation') }
     'AgentHostVillageToolsQuestEvaluation' { @('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostVillageToolsQuestEvaluation') }
     'AgentHostEstablishClanGoalPlannerEvaluation' { @('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostEstablishClanGoalPlannerEvaluation') }
-    'AgentHostEstablishClanAutonomyEvaluation' { @('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostProvider', 'AgentHostEstablishClanAutonomyEvaluation') }
+    'AgentHostEstablishClanAutonomyEvaluation' { @('Preflight', 'Build', 'AgentHostPackage', 'AgentHostProvider', 'Smoke', 'AgentHostEstablishClanAutonomyEvaluation') }
     'AgentHostCaptivityRecoveryEvaluation' { @('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostCaptivityRecoveryEvaluation') }
     'AgentHostEstablishClanGoldSaleEvaluation' { @('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostEstablishClanGoldSaleEvaluation') }
     'AgentHostBattleSimulationEvaluation' { @('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostBattleSimulationEvaluation') }

@@ -548,9 +548,15 @@ if ($harnessScript -notmatch "HarnessContractVersion\s*=\s*'$contractVersion'") 
     throw "Run-Harness.ps1 does not declare contract version $contractVersion."
 }
 $autonomyStages = [regex]::Match($harnessScript, "'AgentHostEstablishClanAutonomyEvaluation'\s*\{\s*@\(([^)]*)\)")
-if (-not $autonomyStages.Success -or $autonomyStages.Groups[1].Value.IndexOf('AgentHostProvider', [StringComparison]::Ordinal) -lt 0 -or
-    $autonomyStages.Groups[1].Value.IndexOf('AgentHostProvider', [StringComparison]::Ordinal) -gt $autonomyStages.Groups[1].Value.IndexOf('AgentHostEstablishClanAutonomyEvaluation', [StringComparison]::Ordinal)) {
-    throw 'Live StoryMode autonomy evaluation must run the real-model no-game provider smoke before launching Bannerlord.'
+$autonomyStageList = if ($autonomyStages.Success) { $autonomyStages.Groups[1].Value } else { '' }
+if (-not $autonomyStages.Success -or
+    $autonomyStageList.IndexOf('AgentHostPackage', [StringComparison]::Ordinal) -lt 0 -or
+    $autonomyStageList.IndexOf('AgentHostProvider', [StringComparison]::Ordinal) -lt 0 -or
+    $autonomyStageList.IndexOf('Smoke', [StringComparison]::Ordinal) -lt 0 -or
+    $autonomyStageList.IndexOf('AgentHostPackage', [StringComparison]::Ordinal) -gt $autonomyStageList.IndexOf('AgentHostProvider', [StringComparison]::Ordinal) -or
+    $autonomyStageList.IndexOf('AgentHostProvider', [StringComparison]::Ordinal) -gt $autonomyStageList.IndexOf('Smoke', [StringComparison]::Ordinal) -or
+    $autonomyStageList.IndexOf('Smoke', [StringComparison]::Ordinal) -gt $autonomyStageList.IndexOf('AgentHostEstablishClanAutonomyEvaluation', [StringComparison]::Ordinal)) {
+    throw 'Live StoryMode autonomy evaluation must run package and real-model no-game provider checks before any game launch, then Smoke and the actual evaluation.'
 }
 if ($agentHostLiveModelLoopSource -notmatch 'Set-LiveModelProviderTimeout' -or
     $agentHostLiveModelLoopSource -notmatch 'Resolve-LiveModelProviderTimeout' -or

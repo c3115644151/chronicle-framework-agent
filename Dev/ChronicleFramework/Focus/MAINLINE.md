@@ -692,6 +692,8 @@ FreeLLMAPI路由错误已分成两类，不能统称“模型不可用”：
 
 `TestResults/20261019-184452`的Auto路由实机整合样本中，模型确实选择了当前Native安全城镇`town_ES3`；Native `move`回执成功，后验显示`party.isMoving=true`且目标仍为`town_ES3`。Host因读取规范化参数时把`settlementId`误写成`SettlementId`而丢失目标，错误终止Gold子流程。代码已修为读取规范化键并补回归；`TestResults/20261019-185739`AgentHostPackage通过。随后`20261019-185937`Auto路由在大型地图目标查询后遇FreeLLMAPI 45秒Fallback预算耗尽、没有进入move；`20261019-191115`Mistral无游戏预检命中cooldown，在Bannerlord启动前以provider-timeout失败、零Native动作。先前`TestResults/20261019-184022`Auto无游戏烟测通过且实际回退到OVH，说明可发现替代路由，但不保证后续game loop稳定。修复后的实机Move重测仍未通过provider前置/路由稳定门槛，故只可称Fake/Package链路通过，不可称Move问题已实机闭环。
 
+`TestResults/20261019-221352`的`auto:noema-free`无游戏烟测实际路由到`custom/cohere/north-mini-code`并返回合法分类；FreeLLMAPI同时警告该上游报告服务模型ID为`nvidia/llama-3.2-11b-vision`，与路由ID不一致，响应格式虽正常，模型身份需谨慎标记。其后`TestResults/20261019-221715`完整EYC Harness在Smoke阶段因Steam WebHelper数量/稳定条件不满足而停止，Bannerlord没有启动；检查确认该次阶段顺序把Smoke放在Provider烟测前，因而未执行本可更早发现问题的无游戏模型检查。Harness阶段现调整为`Preflight→Build→AgentHostPackage→AgentHostProvider→Smoke→Campaign`，Docs静态门禁锁定此先后关系。这是测试效率/归因修复，不是游戏能力或Campaign动作证据。
+
 `TestResults/20261019-192515`在`mistral-small-3.2-24b`直连下再次验证 timeout 传播：Provider smoke通过、第一条真实EYC分类请求成功；随后的第二次请求在FreeLLMAPI等待OVH route cooldown/retry时触发`provider-timeout`（Host.Elapsed 96秒），没有发出Native动作，源存档不变且客户端/session/临时副本清理、录像覆盖100%。这证明新timeout确实快速止住长等待，不构成EYC目标执行或Move修复的实机验证；失败仍是FreeLLMAPI/上游暂时不可用。下一次能完成有效模型决策时，继续用现有收据确认move目标是否稳定保留及Gold子目标后续路由。
 
 - 本文维护技术目标、机制契约、领域架构、长期验收定义和未解事实；不保存项目工作项状态、域完成计数或测试通过快照。
