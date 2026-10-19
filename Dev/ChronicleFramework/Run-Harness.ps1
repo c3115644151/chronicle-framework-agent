@@ -25,7 +25,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.241'
+$HarnessContractVersion = '7.242'
 $effectiveSmokeTimeoutSeconds = if ($Phase -in @('AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostEstablishClanAutonomyEvaluation','AgentHostCaptivityRecoveryEvaluation','AgentHostEstablishClanGoldSaleEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max($SmokeTimeoutSeconds, 240) } else { $SmokeTimeoutSeconds }
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
@@ -235,7 +235,7 @@ $requestedStages = switch ($Phase) {
     'AgentHostCampaignLoopEvaluation' { @('Preflight', 'Build', 'AgentHostCampaignLoopEvaluation') }
     'AgentHostVillageToolsQuestEvaluation' { @('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostVillageToolsQuestEvaluation') }
     'AgentHostEstablishClanGoalPlannerEvaluation' { @('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostEstablishClanGoalPlannerEvaluation') }
-    'AgentHostEstablishClanAutonomyEvaluation' { @('Preflight', 'Build', 'AgentHostPackage', 'AgentHostProvider', 'Smoke', 'AgentHostEstablishClanAutonomyEvaluation') }
+    'AgentHostEstablishClanAutonomyEvaluation' { @('Preflight', 'Build', 'AgentHostPackage', 'Smoke', 'AgentHostEstablishClanAutonomyEvaluation') }
     'AgentHostCaptivityRecoveryEvaluation' { @('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostCaptivityRecoveryEvaluation') }
     'AgentHostEstablishClanGoldSaleEvaluation' { @('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostEstablishClanGoldSaleEvaluation') }
     'AgentHostBattleSimulationEvaluation' { @('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostBattleSimulationEvaluation') }
@@ -617,8 +617,8 @@ foreach ($stage in $requestedStages) {
         'AgentHostProvider' {
             Invoke-Stage -Name 'AgentHostProvider' -Action {
                 $originalProviderTimeout = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_TIMEOUT_SECONDS', 'Process')
-                $useBoundedAutonomyPreflight = $Phase -eq 'AgentHostEstablishClanAutonomyEvaluation' -and [string]::IsNullOrWhiteSpace($originalProviderTimeout)
-                if ($useBoundedAutonomyPreflight) { [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_TIMEOUT_SECONDS', '90', 'Process') }
+                $useBoundedProviderSmoke = [string]::IsNullOrWhiteSpace($originalProviderTimeout)
+                if ($useBoundedProviderSmoke) { [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_TIMEOUT_SECONDS', '90', 'Process') }
                 try {
                 $mailboxEvidencePath = Join-Path $harnessTempDirectory 'AgentHostMailboxContract'
                 $mailboxOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $harnessRoot 'Test-AgentHostProtocol.ps1') -HostDllPath $agentHostDllPath -EvidenceDirectory $mailboxEvidencePath 2>&1 | Out-String
@@ -631,7 +631,7 @@ foreach ($stage in $requestedStages) {
                 [ordered]@{ mailboxRegression = $mailboxOutput; providerContractAndSmoke = $providerOutput } | ConvertTo-Json -Depth 8
                 }
                 finally {
-                    if ($useBoundedAutonomyPreflight) { [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_TIMEOUT_SECONDS', $originalProviderTimeout, 'Process') }
+                    if ($useBoundedProviderSmoke) { [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_TIMEOUT_SECONDS', $originalProviderTimeout, 'Process') }
                 }
             }
         }

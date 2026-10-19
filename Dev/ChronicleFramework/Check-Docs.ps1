@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.241'
+$contractVersion = '7.242'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -551,12 +551,11 @@ $autonomyStages = [regex]::Match($harnessScript, "'AgentHostEstablishClanAutonom
 $autonomyStageList = if ($autonomyStages.Success) { $autonomyStages.Groups[1].Value } else { '' }
 if (-not $autonomyStages.Success -or
     $autonomyStageList.IndexOf('AgentHostPackage', [StringComparison]::Ordinal) -lt 0 -or
-    $autonomyStageList.IndexOf('AgentHostProvider', [StringComparison]::Ordinal) -lt 0 -or
     $autonomyStageList.IndexOf('Smoke', [StringComparison]::Ordinal) -lt 0 -or
-    $autonomyStageList.IndexOf('AgentHostPackage', [StringComparison]::Ordinal) -gt $autonomyStageList.IndexOf('AgentHostProvider', [StringComparison]::Ordinal) -or
-    $autonomyStageList.IndexOf('AgentHostProvider', [StringComparison]::Ordinal) -gt $autonomyStageList.IndexOf('Smoke', [StringComparison]::Ordinal) -or
-    $autonomyStageList.IndexOf('Smoke', [StringComparison]::Ordinal) -gt $autonomyStageList.IndexOf('AgentHostEstablishClanAutonomyEvaluation', [StringComparison]::Ordinal)) {
-    throw 'Live StoryMode autonomy evaluation must run package and real-model no-game provider checks before any game launch, then Smoke and the actual evaluation.'
+    $autonomyStageList.IndexOf('AgentHostPackage', [StringComparison]::Ordinal) -gt $autonomyStageList.IndexOf('Smoke', [StringComparison]::Ordinal) -or
+    $autonomyStageList.IndexOf('Smoke', [StringComparison]::Ordinal) -gt $autonomyStageList.IndexOf('AgentHostEstablishClanAutonomyEvaluation', [StringComparison]::Ordinal) -or
+    $autonomyStageList.IndexOf('AgentHostProvider', [StringComparison]::Ordinal) -ge 0) {
+    throw 'Live StoryMode autonomy evaluation must run package/Native startup checks, then use the exact real-model EYC classification as its first model request; do not spend an extra model call in AgentHostProvider.'
 }
 if ($agentHostLiveModelLoopSource -notmatch 'Set-LiveModelProviderTimeout' -or
     $agentHostLiveModelLoopSource -notmatch 'Resolve-LiveModelProviderTimeout' -or
