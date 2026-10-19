@@ -196,10 +196,22 @@ internal static class AgentHostCaptivityRecoveryLoop
             ReadInt(result, "passiveCaptivityPollCount", 0) < 2 ||
             !native.RecoveryActionOrder.SequenceEqual(new[] { "resume", "captivity_end_ransom_deny", CaptivityContinueOption }, StringComparer.Ordinal))
             throw new AgentHostException("captivity-recovery-runtime-self-test-failed", "The Host failed to recover one rejected model control before any Native action, then use explicit resume, current Native ransom/release choices and verified free MapState without a battle.");
+        var parentNative = new FakeNativeClient();
+        var parentProvider = new FakeProvider();
+        var recoveredToParent = await RunAsync(request.RootElement, parentNative, parentNative, parentNative, parentProvider,
+            CancellationToken.None, planObjectiveAfterRecovery: false);
+        if (ReadString(recoveredToParent, "status") != "completed" ||
+            ReadString(recoveredToParent, "resultKind") != "captivity-recovered-return-to-parent" ||
+            ReadBoolean(recoveredToParent, "captivityRecoveryVerified") != true ||
+            ReadString(recoveredToParent["termination"] as JsonObject, "reason") != "captivity-recovered-return-to-parent" ||
+            parentNative.QuestDetailsCount != 0 || parentProvider.CallCount != 3 ||
+            ReadInt(recoveredToParent, "actionsExecuted", -1) != 3)
+            throw new AgentHostException("captivity-recovery-parent-handoff-self-test-failed", "The EYC parent handoff must return a fresh Native-verified free Map without spending an extra planning call; objective selection belongs to the parent loop. result=" + recoveredToParent.ToJsonString());
         return [
             new { scenario = "captivity-recovery-retries-one-rejected-unlisted-control-with-current-catalog-before-native-action", passed = true },
             new { scenario = "captivity-recovery-host-resumes-explicitly-then-passively-observes-and-selects-current-ransom-or-release-menu", passed = true },
-            new { scenario = "captivity-recovery-replans-active-establish-clan-without-claiming-quest-completion", passed = true }
+            new { scenario = "captivity-recovery-replans-active-establish-clan-without-claiming-quest-completion", passed = true },
+            new { scenario = "captivity-recovery-returns-verified-free-map-to-parent-without-duplicate-planner-call", passed = true }
         ];
     }
 
@@ -214,7 +226,8 @@ internal static class AgentHostCaptivityRecoveryLoop
         long priorPromptTokens = 0,
         long priorCompletionTokens = 0,
         JsonArray? priorTrace = null,
-        JsonArray? priorProviderRouteHistory = null)
+        JsonArray? priorProviderRouteHistory = null,
+        bool planObjectiveAfterRecovery = true)
     {
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
         var maxDecisions = Math.Clamp(ReadInt(request, "maxDecisions", 80), 1, 160);
@@ -248,6 +261,45 @@ internal static class AgentHostCaptivityRecoveryLoop
             var state = current["state"] as JsonObject ?? throw new AgentHostException("captivity-recovery-state-missing", "Native returned no current Campaign state.");
             if (IsUsableFreeMap(state))
             {
+                if (!planObjectiveAfterRecovery)
+                {
+                    using var verifiedStateDocument = await stateClient.ReadStateAsync(elapsed.Token);
+                    var verifiedNative = ParseObject(verifiedStateDocument.RootElement);
+                    var verifiedState = verifiedNative["state"] as JsonObject ?? new JsonObject();
+                    if (!IsUsableFreeMap(verifiedState) ||
+                        ReadString(verifiedState["storyModeEstablishClanStatus"] as JsonObject, "status") != "active")
+                        throw new AgentHostException("captivity-recovery-completion-not-confirmed", "The recovery subflow must verify an active Establish Your Clan quest and a usable free Campaign Map before returning control to its parent.");
+                    trace.Add(new JsonObject
+                    {
+                        ["stage"] = "captivity-recovered-return-to-parent",
+                        ["campaignDay"] = verifiedNative["campaignDay"]?.DeepClone(),
+                        ["menuId"] = ReadString(verifiedState["context"] as JsonObject, "menuId"),
+                        ["isCaptive"] = ReadBoolean((verifiedState["context"] as JsonObject)?["captivity"] as JsonObject, "isCaptive")
+                    });
+                    return new JsonObject
+                    {
+                        ["status"] = "completed",
+                        ["resultKind"] = "captivity-recovered-return-to-parent",
+                        ["providerModelId"] = provider.ModelId,
+                        ["providerConfigurationSource"] = provider.ConfigurationSource,
+                        ["decisions"] = decisions,
+                        ["actionsExecuted"] = actionCount,
+                        ["gameplayActionsExecuted"] = actionCount,
+                        ["explicitTimeActions"] = explicitTimeActions.DeepClone(),
+                        ["promptTokens"] = priorPromptTokens,
+                        ["completionTokens"] = priorCompletionTokens,
+                        ["providerRouteHistory"] = routes.DeepClone(),
+                        ["captivityRecoveryVerified"] = true,
+                        ["passiveCaptivityPollCount"] = passiveWaitCount,
+                        ["initialTimeControlMode"] = initialMode,
+                        ["finalTimeControlMode"] = ReadString(verifiedState["context"] as JsonObject, "timeControlMode"),
+                        ["campaignDayStart"] = double.IsFinite(initialDay) ? JsonValue.Create(initialDay) : null,
+                        ["campaignDayEnd"] = verifiedNative["campaignDay"]?.DeepClone(),
+                        ["finalNativeState"] = verifiedNative.DeepClone(),
+                        ["termination"] = new JsonObject { ["reason"] = "captivity-recovered-return-to-parent", ["completedByProvider"] = true, ["goalVerified"] = false },
+                        ["trace"] = trace.DeepClone()
+                    };
+                }
                 var terminalObservation = BuildObservation(current, state);
                 var terminalRequest = BuildRequest(runId, ReadString(request, "goal"), terminalObservation, previousReceipt,
                     null, new JsonArray(), new JsonArray("done"), decisions + 1);

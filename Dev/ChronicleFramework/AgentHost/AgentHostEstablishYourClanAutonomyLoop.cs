@@ -91,6 +91,44 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             throw new AgentHostException("establish-clan-autonomy-completion-selftest-failed", "The parent loop must re-read the Native Journal, execute the selected objective route, and only report completion after Native Quest history confirms success. result=" + completed.ToJsonString() + "; providerCalls=" + provider.CallCount + "; executorCalls=" + executorCalls + "; journalReads=" + native.QuestDetailsReads);
         results.Add(new { scenario = "establish-clan-autonomy-dispatches-selected-route-and-requires-native-quest-success", passed = true });
 
+        var captiveNative = new FakeNativeClient(activeQuest: true, lifecycle: "active", initialGold: 100, initialCaptive: true);
+        var captiveProvider = new FakeObjectiveProvider("gold");
+        var captiveObjectiveOrder = new List<string>();
+        async Task<JsonObject> RecoverBeforeObjective(string objectiveId, int priorDecisions, long priorPromptTokens, long priorCompletionTokens,
+            JsonArray priorTrace, JsonArray priorRoutes, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            captiveObjectiveOrder.Add(objectiveId);
+            if (objectiveId == "captivityRecovery")
+            {
+                if (captiveProvider.CallCount != 0) throw new AgentHostException("autonomy-selftest-objective-ran-before-captivity-recovery", "The parent must route current Native captivity before planning a StoryMode objective.");
+                captiveNative.LeaveCaptivity();
+                return new JsonObject
+                {
+                    ["status"] = "completed", ["captivityRecoveryVerified"] = true,
+                    ["decisions"] = priorDecisions, ["actionsExecuted"] = 1,
+                    ["promptTokens"] = priorPromptTokens, ["completionTokens"] = priorCompletionTokens,
+                    ["trace"] = priorTrace.DeepClone(), ["providerRouteHistory"] = priorRoutes.DeepClone(),
+                    ["termination"] = new JsonObject { ["reason"] = "captivity-recovered-return-to-parent" }
+                };
+            }
+            if (objectiveId != "gold" || !captiveNative.IsFree)
+                throw new AgentHostException("autonomy-selftest-objective-after-recovery-invalid", "The objective executor must run only after the fresh Native state shows the Hero free.");
+            captiveNative.CompleteSuccessfully();
+            return new JsonObject
+            {
+                ["status"] = "completed", ["decisions"] = priorDecisions, ["actionsExecuted"] = 1,
+                ["promptTokens"] = priorPromptTokens, ["completionTokens"] = priorCompletionTokens,
+                ["trace"] = priorTrace.DeepClone(), ["providerRouteHistory"] = priorRoutes.DeepClone(),
+                ["termination"] = new JsonObject { ["reason"] = "one-native-objective-subflow-completed" }
+            };
+        }
+        var recovered = RunAsync(request.RootElement, captiveNative, captiveNative, captiveProvider, RecoverBeforeObjective, CancellationToken.None).GetAwaiter().GetResult();
+        if (ReadString(recovered, "status") != "completed" || ReadInt(recovered, "actionsExecuted", -1) != 2 ||
+            captiveProvider.CallCount != 1 || !captiveObjectiveOrder.SequenceEqual(new[] { "captivityRecovery", "gold" }, StringComparer.Ordinal))
+            throw new AgentHostException("establish-clan-autonomy-captivity-dispatch-selftest-failed", "An already-captive MainHero must recover through the current Native captivity subflow before the parent plans or executes an unmet objective.");
+        results.Add(new { scenario = "establish-clan-autonomy-recovers-current-captivity-before-replanning-objectives", passed = true });
+
         var unverifiedNative = new FakeNativeClient(activeQuest: false, lifecycle: "unknown", initialGold: 100);
         var unverifiedProvider = new FakeObjectiveProvider("gold");
         var unverified = RunAsync(request.RootElement, unverifiedNative, unverifiedNative, unverifiedProvider, ExecuteObjective, CancellationToken.None).GetAwaiter().GetResult();
@@ -145,6 +183,35 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                             completionEvidence: "Native lifecycle status storyModeEstablishClanStatus=completed");
                     return BuildResult("failed", "quest-no-longer-active-without-success-evidence", false,
                         "The original StoryMode quest is no longer active and Native history does not prove successful completion.", "establish-clan-native-success-unverified");
+                }
+
+                if (IsPlayerCaptive(current.RootElement))
+                {
+                    var recovery = await executeObjective("captivityRecovery", decisions, promptTokens, completionTokens, trace, routes, elapsed.Token);
+                    decisions = ReadInt(recovery, "decisions", decisions);
+                    promptTokens = ReadLong(recovery, "promptTokens", promptTokens);
+                    completionTokens = ReadLong(recovery, "completionTokens", completionTokens);
+                    nativeActions += ReadInt(recovery, "actionsExecuted", 0);
+                    trace = recovery["trace"]?.DeepClone() as JsonArray ?? trace;
+                    routes = recovery["providerRouteHistory"]?.DeepClone() as JsonArray ?? routes;
+                    objectiveRuns.Add(new JsonObject
+                    {
+                        ["objectiveId"] = "captivityRecovery",
+                        ["status"] = ReadString(recovery, "status"),
+                        ["termination"] = recovery["termination"]?.DeepClone(),
+                        ["captivityRecoveryVerified"] = ReadBoolean(recovery, "captivityRecoveryVerified"),
+                        ["actionsExecuted"] = ReadInt(recovery, "actionsExecuted", 0)
+                    });
+                    if (ReadString(recovery, "status") != "completed" || !ReadBoolean(recovery, "captivityRecoveryVerified"))
+                        return BuildResult("failed", "captivity-recovery-subflow-failed", false,
+                            "The MainHero is captive; the Host did not resume objective planning because Native captivity recovery was not verified.",
+                            ReadString(recovery, "failureCode"));
+                    using var recoveredState = await client.ReadStateAsync(elapsed.Token);
+                    if (IsPlayerCaptive(recoveredState.RootElement))
+                        return BuildResult("failed", "captivity-recovery-native-state-still-captive", false,
+                            "The recovery subflow returned but the fresh Native state still marks MainHero captive; no ordinary objective action was attempted.",
+                            "captivity-recovery-native-state-still-captive");
+                    continue;
                 }
 
                 using var details = await questDetailsClient.ReadQuestDetailsAsync(QuestId, elapsed.Token);
@@ -358,6 +425,12 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         return value.GetString();
     }
 
+    private static bool IsPlayerCaptive(JsonElement native) => native.ValueKind == JsonValueKind.Object &&
+        native.TryGetProperty("state", out var state) && state.ValueKind == JsonValueKind.Object &&
+        state.TryGetProperty("context", out var context) && context.ValueKind == JsonValueKind.Object &&
+        context.TryGetProperty("captivity", out var captivity) && captivity.ValueKind == JsonValueKind.Object &&
+        captivity.TryGetProperty("isCaptive", out var isCaptive) && isCaptive.ValueKind == JsonValueKind.True;
+
     private static JsonArray UnimplementedObjectives(JsonArray journal)
     {
         var result = new JsonArray();
@@ -378,11 +451,13 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
     private static long ReadLong(JsonObject? node, string name, long fallback) => node?[name] is JsonValue value && value.TryGetValue<long>(out var result) ? result : fallback;
     private static double ReadDouble(JsonObject? node, string name) => node?[name] is JsonValue value && value.TryGetValue<double>(out var result) ? result : double.NaN;
 
-    private sealed class FakeNativeClient(bool activeQuest, string lifecycle, int initialGold) : IAgentHostCampaignNativeClient, IAgentHostQuestDetailsNativeClient
+    private sealed class FakeNativeClient(bool activeQuest, string lifecycle, int initialGold, bool initialCaptive = false) : IAgentHostCampaignNativeClient, IAgentHostQuestDetailsNativeClient
     {
         private bool _activeQuest = activeQuest;
         private string _lifecycle = lifecycle;
         private int _gold = initialGold;
+        internal bool IsFree => !_captive;
+        private bool _captive = initialCaptive;
         internal int QuestDetailsReads { get; private set; }
 
         internal void CompleteSuccessfully()
@@ -392,6 +467,8 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             _lifecycle = "completed";
         }
 
+        internal void LeaveCaptivity() => _captive = false;
+
         public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -399,7 +476,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             if (_activeQuest) quests.Add(new JsonObject { ["id"] = QuestId });
             var state = new JsonObject
             {
-                ["context"] = new JsonObject { ["gameState"] = "MapState", ["captivity"] = new JsonObject { ["isCaptive"] = false } },
+                ["context"] = new JsonObject { ["gameState"] = "MapState", ["captivity"] = new JsonObject { ["isCaptive"] = _captive } },
                 ["quests"] = quests,
                 ["storyModeEstablishClanStatus"] = new JsonObject { ["status"] = _lifecycle }
             };

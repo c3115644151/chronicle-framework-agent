@@ -466,6 +466,7 @@ internal static class AgentHostCampaignLoop
                             "partySize" => "Raise the current original Establish Your Clan Journal PartySize progress by recruiting current affordable volunteers through the original RecruitmentVM, stopping at the dynamic target and rechecking the Journal.",
                             "companions" => "Find one currently observed unowned Wanderer through a Native Town Tavern Mission, follow the current original hire dialogue and quote, and recheck the original Journal after the actual Native Clan/Party result.",
                             "renown" => "Raise the current original Establish Your Clan Journal Renown progress by resolving one currently visible hostile Bandit through Native Campaign BattleSimulation, verifying actual aftermath, then return to the StoryMode objective loop.",
+                            "captivityRecovery" => "Recover MainHero from the currently observed Native captivity menus without starting another battle, verify a usable free Campaign Map, then return control to the Establish Your Clan objective loop.",
                             _ => throw new AgentHostException("establish-clan-objective-route-unavailable", "No integrated Native objective executor is registered for this StoryMode target.")
                         };
                         using var childRequest = JsonDocument.Parse(childRequestNode.ToJsonString());
@@ -483,6 +484,11 @@ internal static class AgentHostCampaignLoop
                             "renown" => await AgentHostBattleSimulationLoop.RunAsync(childRequest.RootElement, battleClient, provider, subToken,
                                 priorDecisions: priorSubDecisions, priorPromptTokens: priorSubPromptTokens, priorCompletionTokens: priorSubCompletionTokens,
                                 priorTrace: priorSubTrace, priorProviderRouteHistory: priorSubRoutes),
+                            "captivityRecovery" => client is IAgentHostCaptivityRecoveryNativeClient captivityRecoveryClient
+                                ? await AgentHostCaptivityRecoveryLoop.RunAsync(childRequest.RootElement, client, captivityRecoveryClient, questDetailsClient, provider, subToken,
+                                    priorDecisions: priorSubDecisions, priorPromptTokens: priorSubPromptTokens, priorCompletionTokens: priorSubCompletionTokens,
+                                    priorTrace: priorSubTrace, priorProviderRouteHistory: priorSubRoutes, planObjectiveAfterRecovery: false)
+                                : throw new AgentHostException("establish-clan-captivity-recovery-client-unavailable", "The Native transport does not implement the current captivity recovery action contract required by the EYC parent loop."),
                             _ => throw new AgentHostException("establish-clan-objective-route-unavailable", "No integrated Native objective executor is registered for this StoryMode target.")
                         };
                     }

@@ -102,11 +102,25 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         if (BuildActionCatalog(disabledTradeMenu, null, null, null).Count != 0)
             throw new AgentHostException("gold-sale-self-test-disabled-trade-menu-leaked", "A disabled Native Trade menu entry must not become an agent action.");
 
+        var nativeTownEncounter = MapState("town", "town_ES3", new JsonArray(new JsonObject { ["id"] = "trade", ["available"] = true, ["enabled"] = true }));
+        nativeTownEncounter["context"]!["encounterActive"] = true;
+        nativeTownEncounter["context"]!["encounteredPartyId"] = "town_ES3";
+        nativeTownEncounter["context"]!["encounteredPartyName"] = "Poros";
+        var townTradeEntry = BuildActionCatalog(nativeTownEncounter, null, null, null);
+        if (townTradeEntry.Count != 1 || ReadString(townTradeEntry[0] as JsonObject, "action") != "menuSelect")
+            throw new AgentHostException("gold-sale-self-test-native-town-menu-misclassified-as-hostile-encounter", "An active native settlement menu where encounteredPartyId equals currentSettlementId is the expected market entry, not a hostile battle to abort.");
+        var hostileEncounter = MapState("encounter", null, []);
+        hostileEncounter["context"]!["encounterActive"] = true;
+        hostileEncounter["context"]!["encounteredPartyId"] = "bandit_party";
+        if (BuildActionCatalog(hostileEncounter, null, null, null).Count != 0)
+            throw new AgentHostException("gold-sale-self-test-hostile-encounter-not-blocked", "An active non-settlement encounter must remain outside the bounded Gold trade subflow.");
+
         return [
             new { scenario = "gold-sale-offers-only-current-enabled-town-trade-entry", passed = true },
             new { scenario = "gold-sale-binds-one-current-native-goods-offer-and-positive-quote", passed = true },
             new { scenario = "gold-sale-native-move-start-transition-uses-one-bounded-observation", passed = true },
-            new { scenario = "gold-sale-rejects-stale-offers-unsafe-targets-and-disabled-native-options", passed = true }
+            new { scenario = "gold-sale-rejects-stale-offers-unsafe-targets-and-disabled-native-options", passed = true },
+            new { scenario = "gold-sale-allows-native-town-encounter-menu-but-rejects-hostile-party-encounter", passed = true }
         ];
     }
 
@@ -709,8 +723,13 @@ internal static class AgentHostEstablishClanGoldSaleLoop
     private static bool IsActiveEncounter(JsonObject state)
     {
         var context = state["context"] as JsonObject;
-        return ReadBoolean(context, "encounterActive") || context?["battleSimulation"] is not null ||
-            !string.IsNullOrWhiteSpace(ReadString(context, "encounteredPartyId")) || ReadString(context, "menuId") == "encounter";
+        var menuId = ReadString(context, "menuId");
+        var currentSettlementId = ReadString(state["location"] as JsonObject, "currentSettlementId");
+        var encounteredPartyId = ReadString(context, "encounteredPartyId");
+        var nativeSettlementMenu = menuId == "town" && !string.IsNullOrWhiteSpace(currentSettlementId) &&
+            string.Equals(currentSettlementId, encounteredPartyId, StringComparison.Ordinal);
+        return context?["battleSimulation"] is not null || menuId == "encounter" ||
+            (!nativeSettlementMenu && (ReadBoolean(context, "encounterActive") || !string.IsNullOrWhiteSpace(encounteredPartyId)));
     }
 
     private static JsonObject MapState(string? menuId, string? settlementId, JsonArray options) => new()
