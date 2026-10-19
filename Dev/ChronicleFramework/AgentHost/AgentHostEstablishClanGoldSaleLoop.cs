@@ -125,12 +125,20 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             ReadString(step, "rejectionCode") == "provider-arguments-invalid-json" &&
             ReadBoolean(step, "nativeActionSent") == false &&
             step["allowedActionNames"] is JsonArray names && names.Count == 1 && names[0]?.GetValue<string>() == "mapSettlementTargets") == true;
+        var compactTargetCandidates = provider.LastRequest?["previousActionReceipt"]?["data"]?["mapSettlementTargets"] as JsonArray;
+        var compactTargetArgumentValues = provider.LastRequest?["allowedActions"]?[0]?["argumentValues"]?["SettlementId"] as JsonArray;
+        var rawMapReceipt = trace?.OfType<JsonObject>()
+            .Select(step => step["actionReceipt"] as JsonObject)
+            .FirstOrDefault(receipt => ReadString(receipt, "action") == "mapSettlementTargets");
+        var rawTargetCandidates = rawMapReceipt?["data"]?["mapSettlementTargets"] as JsonArray;
         if (ReadString(result, "status") != "failed" || ReadString(result, "failureCode") != "provider-http-error" ||
             ReadInt(result, "actionsExecuted", 0) != 1 || trace?.Count != 2 || ReadString(firstAction, "action") != "mapSettlementTargets" ||
             ReadString(failedRoute, "failureCode") != "provider-http-error" || client.MapTargetQueries != 1 ||
-            provider.CallCount != 3 || !provider.FeedbackObserved || !rejectedDecisionRecorded)
-            throw new AgentHostException("gold-sale-failure-receipt-selftest-failed", "One malformed provider decision must be corrected before Native action; a later provider outage must still preserve the query trace and must not replay it.");
-        return [new { scenario = "gold-sale-recovers-malformed-provider-arguments-and-preserves-later-provider-failure-evidence", passed = true }];
+            provider.CallCount != 3 || !provider.FeedbackObserved || !rejectedDecisionRecorded ||
+            compactTargetCandidates?.Count != 12 || compactTargetArgumentValues?.Count != 12 || rawTargetCandidates?.Count != 18 ||
+            compactTargetCandidates.OfType<JsonObject>().Any(target => ReadString(target, "type") != "town" || ReadBoolean(target, "hostile") || ReadBoolean(target, "underSiege")))
+            throw new AgentHostException("gold-sale-failure-receipt-selftest-failed", "The Host must correct malformed arguments before Native, preserve the full Native map receipt in trace, send only the current safe Town candidates to the model, and preserve a later transport failure without replay.");
+        return [new { scenario = "gold-sale-compacts-full-native-map-query-to-the-current-safe-town-decision-catalog", passed = true }];
     }
 
     internal static async Task<JsonObject> RunAsync(
@@ -236,8 +244,9 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                     throw new AgentHostException("gold-sale-no-safe-native-action", DescribeNoAction(state, previousReceipt));
 
                 var observation = BuildObservation(currentNative, state, objectiveSnapshotBefore, liveMetricDifferencesBefore, saleReceipt);
+                var providerPreviousReceipt = BuildProviderPreviousReceipt(previousReceipt, safeTowns);
                 var modelRequest = BuildDecisionRequest(runId, ReadString(request, "goal"), iteration + decisionCount,
-                    observation, previousReceipt, decisionFeedback, actionCatalog, controls);
+                    observation, providerPreviousReceipt, decisionFeedback, actionCatalog, controls);
                 var started = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
                 var startedTicks = Stopwatch.GetTimestamp();
                 ProviderDecisionResult modelDecision;
@@ -623,6 +632,20 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         ["allowedControls"] = controls.DeepClone()
     };
 
+    private static JsonObject? BuildProviderPreviousReceipt(JsonObject? previousReceipt, JsonArray? safeTowns)
+    {
+        if (ReadString(previousReceipt, "action") != "mapSettlementTargets")
+            return previousReceipt?.DeepClone() as JsonObject;
+        var compact = previousReceipt?.DeepClone() as JsonObject;
+        var data = compact?["data"] as JsonObject;
+        if (data is null || data["mapSettlementTargets"] is not JsonArray)
+            return compact;
+        data["mapSettlementTargets"] = safeTowns?.DeepClone() as JsonArray ?? new JsonArray();
+        data["candidateScope"] = "currently observed safe Town targets for the active Gold objective";
+        data["candidateCount"] = safeTowns?.Count ?? 0;
+        return compact;
+    }
+
     private static JsonObject BuildReceipt(string action, JsonObject arguments, JsonObject receipt)
     {
         var result = new JsonObject { ["action"] = action, ["status"] = ReadString(receipt, "status"), ["data"] = receipt["data"]?.DeepClone() };
@@ -851,7 +874,12 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             cancellationToken.ThrowIfCancellationRequested();
             if (action != "mapSettlementTargets" || arguments.Count != 0) throw new AgentHostException("gold-sale-failure-selftest-unexpected-native-action", "Only the first current safe Town target query is expected before the provider failure.");
             MapTargetQueries++;
-            var targets = new JsonArray(new JsonObject { ["id"] = "town-safe", ["name"] = "Safe Town", ["type"] = "town", ["distance"] = 10.0, ["hostile"] = false, ["underSiege"] = false });
+            var targets = new JsonArray();
+            for (var index = 1; index <= 15; index++)
+                targets.Add(new JsonObject { ["id"] = $"town-safe-{index}", ["name"] = $"Safe Town {index}", ["type"] = "town", ["distance"] = 10.0 + index, ["hostile"] = false, ["underSiege"] = false });
+            targets.Add(new JsonObject { ["id"] = "town-hostile", ["name"] = "Hostile Town", ["type"] = "town", ["distance"] = 3.0, ["hostile"] = true, ["underSiege"] = false });
+            targets.Add(new JsonObject { ["id"] = "town-sieged", ["name"] = "Sieged Town", ["type"] = "town", ["distance"] = 4.0, ["hostile"] = false, ["underSiege"] = true });
+            targets.Add(new JsonObject { ["id"] = "village", ["name"] = "Village", ["type"] = "village", ["distance"] = 2.0, ["hostile"] = false, ["underSiege"] = false });
             var data = new JsonObject { ["mapSettlementTargets"] = targets };
             return Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["action"] = action, ["data"] = data }.ToJsonString()));
         }
@@ -867,6 +895,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
     {
         internal int CallCount { get; private set; }
         internal bool FeedbackObserved { get; private set; }
+        internal JsonObject? LastRequest { get; private set; }
         public string ModelId => "deterministic-gold-sale-failure-selftest";
         public string ConfigurationSource => "harness-fake-provider";
         public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) { cancellationToken.ThrowIfCancellationRequested(); return Task.CompletedTask; }
@@ -874,6 +903,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         {
             cancellationToken.ThrowIfCancellationRequested();
             CallCount++;
+            LastRequest = JsonNode.Parse(request.GetRawText())?.AsObject();
             if (request.TryGetProperty("decisionFeedback", out var feedbackValue) && feedbackValue.ValueKind == JsonValueKind.Object &&
                 feedbackValue.TryGetProperty("kind", out var feedbackKind) && feedbackKind.ValueKind == JsonValueKind.String &&
                 feedbackKind.GetString() == "decision-rejected-before-native") FeedbackObserved = true;
