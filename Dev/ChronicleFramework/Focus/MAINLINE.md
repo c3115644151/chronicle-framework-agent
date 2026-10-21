@@ -716,6 +716,8 @@ Gold售卖循环的Native地图目标原始回执可以含395个聚落，而安�
 
 `TestResults/20261021-142707`对Qwen 2.5 VL直连配置在FreeLLMAPI执行状态预检就得到`exhausted`，未发送推理请求、未打开Campaign副本，不能用来判断新的重判提示。`TestResults/20261021-140403`真实`auto:reliable`在多次上游TLS/socket失败后仍成功以Mistral分类EYC、再以Qwen执行Native `resume`，最后由Mistral选择Native `mno_continue`；其后的子目标规划同样在请求内遇多上游断连，90秒deadline前未产生有效决策。重判实现已编译并由`TestResults/20261021-142509`合同覆盖，但截至本记录，真实模型尚未产出一次`unsupported`后再成功EYC分类的样本。该Host提示修正保存在提交`999d363`中。FreeLLMAPI当前错误以“执行目录ready但路由无可用上游”区分，不能把没有有效模型输出的超时归为Mod成功或模型拒绝。
 
+`TestResults/20261021-144939`在重判实现构建后，`auto:reliable`首个真实请求由NVIDIA Llama成功返回并分类为EYC；第二个真实请求时FreeLLMAPI顺序尝试了多家上游，日志记录跨平台TLS/socket断连、冷却或格式不兼容，最终`FallbackLoop routing exhausted (no upstream tried, candidates=81)`并向Host返回无Retry-After的HTTP429。Host有效决策1、Native动作0，故本次没有触发“unsupported重判”或Captivity行动；不证明该重判实现失效，也不证明EYC任何进展。Harness清理`ChronicleW7P-12b98703f3fa48ec`与session、Bannerlord进程0，`save002.sav`哈希保持不变。FreeLLMAPI其余候选目录`ready`不能抵消这份同一时刻的路由耗尽证据；该失败仍归因于请求时可用上游池耗尽，而不是把HTTP429假定成模型回答。
+
 方法复盘：完整EYC流水线曾尝试额外Provider smoke（前文`20261019-223430`），但该调用成功后实际EYC请求仍立即遇HTTP 429；它未能预测下一次服务可用性，却消耗了一个免费模型调用。该实验已被撤回，当前完整EYC流水线不再并列执行Provider模型烟测；独立`AgentHostProvider`仍是手工/诊断阶段。当前EYC顺序为`Preflight→Build→AgentHostPackage→Smoke→AgentHostEstablishClanAutonomyEvaluation`，模型的首个真实调用直接分类实际StoryMode目标。该改动由`Check-Docs.ps1`锁定，以免把无游戏烟测当成产品能力证据或造成重复费用/配额消耗。
 
 撤回重复Provider smoke后，`TestResults/20261019-232015`直接使用真实`qwen2.5-vl-72b`做EYC集成诊断：Preflight/Build/AgentHostPackage/Native Smoke通过并加载临时save002副本，但模型第一条真实EYC请求在FreeLLMAPI OVH cooldown/retry期间达到90秒Host deadline，返回`provider-timeout`。有效决策0、Native动作0、正式源档未变，临时副本/进程/session清理且引擎录像100%覆盖。此样本验证无重复调用的新顺序能准确暴露即时真实请求故障，却仍未触及Gold/Move动作链；provider `ready`与列表可见不能证明当前调用能通过。
