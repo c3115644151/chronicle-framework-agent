@@ -522,8 +522,9 @@ internal static class ProviderContractSelfTest
                     !exception.Message.Contains("routedVia=custom/nvidia/test-model", StringComparison.Ordinal) ||
                     !exception.Message.Contains("fallbackAttempts=2", StringComparison.Ordinal) ||
                     !exception.Message.Contains("fallbackTrail=nvidia/test-model=upstream_502", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("outputFormat=json_schema", StringComparison.Ordinal) ||
                     exception.Message.Contains("sensitive-error-body-marker", StringComparison.Ordinal))
-                    throw new AgentHostException("provider-self-test-routed-failure-diagnostics-unsafe", "FreeLLMAPI failure diagnostics must retain route headers while omitting response bodies.");
+                    throw new AgentHostException("provider-self-test-routed-failure-diagnostics-unsafe", "FreeLLMAPI failure diagnostics must retain route headers and selected output protocol while omitting response bodies.");
             }
             results.Add(new { scenario = "freellmapi-http-error-keeps-safe-route-fallback-headers-without-response-body", passed = true });
         }

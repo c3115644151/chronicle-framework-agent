@@ -428,7 +428,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         using (response)
         {
             if (!response.IsSuccessStatusCode)
-                throw new AgentHostException("provider-http-error", BuildHttpFailureMessage(response, rateLimitRetryAttempts, rateLimitRetryWaitMilliseconds, lastRateLimitRetryHint, lastRateLimitRetryFitsDeadline));
+                throw new AgentHostException("provider-http-error", BuildHttpFailureMessage(response, rateLimitRetryAttempts, rateLimitRetryWaitMilliseconds, lastRateLimitRetryHint, lastRateLimitRetryFitsDeadline) + " outputFormat=" + responseFormatMode);
 
             if (response.Content.Headers.ContentLength is > MaxResponseBytes)
                 throw new AgentHostException("provider-response-too-large", "The local model response exceeds the Host size limit.");
