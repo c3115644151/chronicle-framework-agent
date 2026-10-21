@@ -708,6 +708,8 @@ Gold售卖循环的Native地图目标原始回执可以含395个聚落，而安�
 
 修复后的实机复验尚未闭环：`TestResults/20261020-030004`的`auto:reliable`路由选到Qwen 2.5 VL并在第一条真实请求将目标分类为`unsupported`，决策数1、Native动作0；这发生在业务代码动作目录之前。`TestResults/20261020-030335`直连Mistral有效分类并再次完成原版俘虏恢复，但后续Gold决策前FreeLLMAPI报告OVH socket hang up，Host因唯一配置路由进入cooldown而在90秒请求deadline安全失败（累计决策3、Native恢复动作2、Campaign未变）。因此当前证据确认真实俘虏恢复工作，Town/hostile encounter区别只通过Fake包测试，下一次真实运行仍须重新验证Town菜单Trade；不能称Gold子目标或完整EYC通过。FreeLLMAPI路由状态不是实时可用性证明，失败的上游日志与有效Native动作/模型分类必须分别归因。
 
+后续`TestResults/20261020-031213`在新的 Mistral 路由诊断中只留下三个有效模型决定：EYC目标分类、Native `resume`、Native `menu_captivity_end_wilderness_escape/mno_continue`；可观察到 CampaignDay 91080.216→91082.894，表明该时间段Native世界自然推进。随后运行没有 `summary.json` 或Host终态收据，视频文件未完成，不能判断俘虏后续结果、Gold执行或代码通过。复核确认无Bannerlord/Host进程仍在；通过既有Agent CLI停止/恢复流程清掉过期session，并仅清理Harness前缀`ChronicleW7P-89aa286cb6654072`副本。源`save002.sav`清理前后SHA-256均为`5A1CBACF6A67202F68CF71CDDD56A2485A5E04E41A2BFB9DF7003EA8B337875F`，session和engine_config备份均已移除，正式源档未改。这是一次未完成的实机运行，不视为通过或失败的业务结果。
+
 方法复盘：完整EYC流水线曾尝试额外Provider smoke（前文`20261019-223430`），但该调用成功后实际EYC请求仍立即遇HTTP 429；它未能预测下一次服务可用性，却消耗了一个免费模型调用。该实验已被撤回，当前完整EYC流水线不再并列执行Provider模型烟测；独立`AgentHostProvider`仍是手工/诊断阶段。当前EYC顺序为`Preflight→Build→AgentHostPackage→Smoke→AgentHostEstablishClanAutonomyEvaluation`，模型的首个真实调用直接分类实际StoryMode目标。该改动由`Check-Docs.ps1`锁定，以免把无游戏烟测当成产品能力证据或造成重复费用/配额消耗。
 
 撤回重复Provider smoke后，`TestResults/20261019-232015`直接使用真实`qwen2.5-vl-72b`做EYC集成诊断：Preflight/Build/AgentHostPackage/Native Smoke通过并加载临时save002副本，但模型第一条真实EYC请求在FreeLLMAPI OVH cooldown/retry期间达到90秒Host deadline，返回`provider-timeout`。有效决策0、Native动作0、正式源档未变，临时副本/进程/session清理且引擎录像100%覆盖。此样本验证无重复调用的新顺序能准确暴露即时真实请求故障，却仍未触及Gold/Move动作链；provider `ready`与列表可见不能证明当前调用能通过。
