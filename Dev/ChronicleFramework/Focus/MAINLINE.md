@@ -768,6 +768,10 @@ FreeLLMAPI模型路由现况（2026-10-21/22）：原版FreeLLMAPI的单请求`g
 
 `TestResults/20261022-053115`TradeTransactions窄Native测试通过：从Town原版Trade菜单取当前`olives` Goods报价，在TradeVM中先draft再用原版`tradeConfirm`提交，验证金币959→950买入1件后950→957卖回、玩家该商品1→0、市场库存165→166；Native交易金额为7，CampaignDay保持91077.401175且timeControl仍为Stop。测试还验证过期报价/错误库存侧/超预算草案在Native确认前拒绝并回滚；`AgentBridgeLifecycle.sav`源SHA-256前后相同，游戏进程已停止。它确认AI可用的原版交易事务能净增7第纳尔，但样例是已有人物/市场状态的单笔夹具，不证明自然EYC中拥有可卖商品、能持续到2000或真实模型会选对报价。
 
+同日后续按最新分类契约复验Provider smoke：`TestResults/20261022-053525`实际模型`mistral-nemo→ovh/Mistral-Nemo-Instruct-2407`用496/33输入/输出tokens将中文“完成当前可见的村庄工具委托”正确分类为`supported-village-tools-quest`，返回`json_schema`，模型调用1、Native命令0。它验证的是当前Prompt可正确分类该目标类型，并不证明地图Host下发行动或任务完成；前一段`051835`的429记录仍解释了当时失败，但不再代表最新提示词未实测。
+
+最新真实模型长循环切片`TestResults/20261022-054303`仍从隔离的既有EYC `save002`副本开始，不是自然新战役门禁。Mistral Nemo先分类为`supported-establish-your-clan`，随后选择原版显式`resume`；Native地图从`prisoner_wait`/Stop进入`UnstoppablePlay`并自然推进约3.238 Campaign days，随后出现原版`menu_captivity_end_prison_escape`（游戏截图显示“继续……”）。在需要下一次决策选择该当前原版继续选项时，OVH再次socket hang-up、FreeLLMAPI把路由置cooldown并回429/Retry-After=75；Host安全失败前没有成功释放或推进EYC子目标。Gate收据显示模型行动决策1、Native objective actions 0、Gold32/Renown5/Party0，Clone removed、`save002` hash相同、Bannerlord/Host/session clean；失败屏截图和Timeline保留，MP4已移除。此轮证明真实模型分类→显式时间选择→Native自然等待→转入原版逃离继续菜单能够衔接，但最后一个Provider故障阻断选择；它不证明Captivity通过、目标推进或原版Quest完成。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager
