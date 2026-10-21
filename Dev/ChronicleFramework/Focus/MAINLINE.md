@@ -766,6 +766,8 @@ FreeLLMAPI模型路由现况（2026-10-21/22）：原版FreeLLMAPI的单请求`g
 
 `TestResults/20261022-052725`窄Native PostBattle实机切片通过：在隔离的`AgentBridgeLifecycle`测试存档中，Native hostile looter encounter→`str_order_attack`→BattleSimulation→`battlePause`/`battleSkip`/`battleFinish`完整发生；Native telemetry记录MainHero Renown 20.000→22.562（Contribution 1600，奖励2.562）。之后Native自动进入PartyState/Loot，8名可转移俘虏全部加入MainParty，再经`partyScreenDone`进入InventoryState/Loot；为验证界面/按钮，本夹具战后特意调用仅测试用`seedVisualLoot`放入9件可见物品（不代表自然掉落），`inventoryTakeAll`清空后Native返回Map。战斗流程CampaignDay保持91077.379，源夹具未变、游戏进程已停止；整段MP4完整索引为Contact Sheet/Timeline后删除，保留5张Native截图和事件序列。这个结果确认当前1.4.8 Native坐镇战斗确实能产生Renown，且PostBattle两层原版清理顺序已可自动执行；它不是LLM决策、自然战利品或EYC长程任务通过的证据。
 
+`TestResults/20261022-053115`TradeTransactions窄Native测试通过：从Town原版Trade菜单取当前`olives` Goods报价，在TradeVM中先draft再用原版`tradeConfirm`提交，验证金币959→950买入1件后950→957卖回、玩家该商品1→0、市场库存165→166；Native交易金额为7，CampaignDay保持91077.401175且timeControl仍为Stop。测试还验证过期报价/错误库存侧/超预算草案在Native确认前拒绝并回滚；`AgentBridgeLifecycle.sav`源SHA-256前后相同，游戏进程已停止。它确认AI可用的原版交易事务能净增7第纳尔，但样例是已有人物/市场状态的单笔夹具，不证明自然EYC中拥有可卖商品、能持续到2000或真实模型会选对报价。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager
