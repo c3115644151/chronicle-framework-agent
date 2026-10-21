@@ -758,6 +758,8 @@ FreeLLMAPI模型路由现况（2026-10-21/22）：原版FreeLLMAPI的单请求`g
 
 2026-10-21 20:35Z同一时段请求形态对照：Windows `curl` 经`socks5h://127.0.0.1:7890`访问OVH `/v1/models` GET返回HTTP 200/TLS约0.46秒；向同一主机发送一个极小、无密钥的JSON-Schema `/v1/chat/completions` POST则以curl exit 56（`server closed abruptly (missing close_notify)`）、HTTP 000结束。紧接着不带`response_format`的最小chat POST通过同一SOCKS5H返回HTTP 200、模型`gpt-oss-20b`；这提示请求格式或相关上游/代理路径可能影响推理请求，但只是一组单次对照，不能推翻先前JSON-Schema成功样本，也不能确定责任在星辰代理、OVH还是具体格式。未改应用/代理设置、未用该文本探针对游戏发Native动作；下一条实测优先用Host现有的直接Kilo `north-mini-code` required-tool-call路径，待Kilo池冷却窗口自然恢复后再做。
 
+2026-10-22当前用户配置路由的无游戏Host烟测（`TestResults/20261022-044617`）用于核查先前失败是否由Harness操作造成：配置读取为FreeLLMAPI `nvidiallama-3.2-11b-vision`，目录快照为`ready`，真实请求随即由该custom/NVIDIA路由返回HTTP 429，响应明确为“Free model capacity exhausted”，`Retry-After=90`，没有模型决策/token或Native命令。Host在有界截止时间内拒绝等待该90秒，不启动游戏；FreeLLMAPI同秒日志以相同路由记录容量错误。故这次失败可归因于该免费上游当时容量/限额，而不是游戏输入、Bannerlord启动或已执行动作；模型目录`ready`仍不足以保证下一次推理可用。由于只收到上游限流响应，不能据此彻底证明所有请求字段均适配，但此错误不是格式拒绝（没有400/422或format错误证据）。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager
