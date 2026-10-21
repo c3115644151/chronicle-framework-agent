@@ -764,6 +764,8 @@ FreeLLMAPI模型路由现况（2026-10-21/22）：原版FreeLLMAPI的单请求`g
 
 把目标分类上下文改为中性描述后，同一路由Mistral Nemo的复验仍选择`unsupported`，理由误称`VillageNeedsToolsIssue`不受支持；这说明去掉“地图到达”偏置本身不足以解决分类。对照较早的同一Mistral Nemo Provider烟测`TestResults/20261016-030055`曾以420输入/20输出tokens正确识别同一中文村庄委托；当时分类Prompt只列2个支持范围，现在已扩展为7个。无法仅凭跨日期样本把错误归因于Prompt长度，但将全部7个场景同时塞入每次分类并无必要：Host现改为只按当前`allowedControls`动态附加对应范围说明，并为地图/村庄委托/建家任务增加中文语义例子；离线Host合同要求说明范围与允许控制严格一致。随后的`TestResults/20261022-051502`真实响应（448/39 tokens）仍把中文目标判为unsupported，理由称模型无法从goal-only observation确认“具体可见任务”。这暴露另一个输入契约矛盾：分类本应只判断目标类型，当前Native任务/地点可用性由Host在分类后核实；现已把这个边界写进共享Prompt，并在村庄范围说明“支持类型”不等于“当前已观察到Issue”。offline package合同通过。将该范围/可用性区别进一步加入Prompt后的Provider smoke `TestResults/20261022-051835`未取得模型决定：OVH返回HTTP429、Retry-After=75且不适配180秒以内剩余预算，因此没有Native动作，也没有得到该新Prompt的实模结果。该提示修正仍未获实模验证，不代表分类已解决。
 
+`TestResults/20261022-052725`窄Native PostBattle实机切片通过：在隔离的`AgentBridgeLifecycle`测试存档中，Native hostile looter encounter→`str_order_attack`→BattleSimulation→`battlePause`/`battleSkip`/`battleFinish`完整发生；Native telemetry记录MainHero Renown 20.000→22.562（Contribution 1600，奖励2.562）。之后Native自动进入PartyState/Loot，8名可转移俘虏全部加入MainParty，再经`partyScreenDone`进入InventoryState/Loot；为验证界面/按钮，本夹具战后特意调用仅测试用`seedVisualLoot`放入9件可见物品（不代表自然掉落），`inventoryTakeAll`清空后Native返回Map。战斗流程CampaignDay保持91077.379，源夹具未变、游戏进程已停止；整段MP4完整索引为Contact Sheet/Timeline后删除，保留5张Native截图和事件序列。这个结果确认当前1.4.8 Native坐镇战斗确实能产生Renown，且PostBattle两层原版清理顺序已可自动执行；它不是LLM决策、自然战利品或EYC长程任务通过的证据。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager
