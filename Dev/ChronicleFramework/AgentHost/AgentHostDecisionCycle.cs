@@ -86,10 +86,34 @@ internal static class AgentHostDecisionCycle
     {
         var prompt = request["goalScopeClassificationRequired"] is JsonValue classification &&
                      classification.TryGetValue<bool>(out var required) && required
-            ? CampaignGoalClassificationPrompt
+            ? BuildCampaignGoalClassificationPrompt(request)
             : CampaignSystemPrompt;
         return DecideAsync(provider, request, prompt, cancellationToken);
     }
+
+    internal static string BuildCampaignGoalClassificationPrompt(JsonObject request)
+    {
+        var prompt = CampaignGoalClassificationPrompt;
+        var goal = ReadString(request, "goal") ?? string.Empty;
+        var controls = request["allowedControls"] as JsonArray;
+        var establishesClanGoalListed = controls?.Any(control => ReadString(control) == "supportedEstablishYourClanGoal") == true;
+        if (establishesClanGoalListed && IsExplicitEstablishYourClanGoal(goal))
+        {
+            prompt += " IMPORTANT SCOPE RULE: Completing the active original Establish Your Clan quest is one supported high-level goal even though its Native executor autonomously performs multiple objective substeps. Multi-step execution within this exact quest is not a reason to choose unsupportedGoal; choose supportedEstablishYourClanGoal when the requested final outcome is this quest's completion and that control is listed.";
+            if (ReadString(request["decisionFeedback"] as JsonObject, "kind") == "supported-establish-clan-scope-reconsideration")
+                prompt += " RECONSIDERATION: Your previous unsupported classification was rejected before any Native action. Re-evaluate only the exact requested final outcome against the currently listed controls; if it is the listed active Establish Your Clan quest, return supportedEstablishYourClanGoal, not unsupportedGoal.";
+        }
+        return prompt;
+    }
+
+    internal static bool IsExplicitEstablishYourClanGoal(string goal) =>
+        goal.Contains("Establish Your Clan", StringComparison.OrdinalIgnoreCase) ||
+        goal.Contains("rebuild_player_clan_storymode_quest", StringComparison.Ordinal) ||
+        goal.Contains("建立你的家族", StringComparison.Ordinal) ||
+        goal.Contains("建立家族", StringComparison.Ordinal);
+
+    private static string? ReadString(JsonNode? value) => value is JsonValue jsonValue &&
+        jsonValue.TryGetValue<string>(out var result) ? result : null;
 
     internal static Task<ProviderDecisionResult> DecideSupplyAsync(
         IAgentHostDecisionProvider provider,

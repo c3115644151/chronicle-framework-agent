@@ -8,6 +8,7 @@ namespace ChronicleFramework.AgentHost;
 internal static class AgentHostCampaignLoop
 {
     private const int MaxRejectedDecisions = 2;
+    private const int MaxUnsupportedEycScopeReconsiderations = 1;
     internal static readonly HashSet<string> ApprovedActions = new(StringComparer.Ordinal)
     {
         "mapSettlementTargets", "move", "menuSelect", "talkToSettlementHero", "dialogueSelect", "dialogueContinue",
@@ -67,6 +68,21 @@ internal static class AgentHostCampaignLoop
             !AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("currently held, currently sellable item", StringComparison.Ordinal))
             throw new AgentHostException("campaign-loop-self-test-classifier-confuses-scope-with-availability", "Goal scope classification must treat supported actions as intermediate steps and not depend on target availability.");
         results.Add(new { scenario = "campaign-loop-classification-is-independent-of-target-availability", passed = true });
+        var activeEycGoal = "Autonomously complete the exact currently active original StoryMode Establish Your Clan quest.";
+        var activeEycControls = BuildGoalScopeClassificationControls(new JsonObject
+        {
+            ["quests"] = new JsonArray(new JsonObject { ["id"] = "rebuild_player_clan_storymode_quest" })
+        });
+        if (!ShouldReconsiderUnsupportedEycScope(activeEycGoal, activeEycControls, false, 0) ||
+            ShouldReconsiderUnsupportedEycScope("Sell a sword to a nearby merchant.", activeEycControls, false, 0) ||
+            ShouldReconsiderUnsupportedEycScope(activeEycGoal, BuildGoalScopeClassificationControls(), false, 0) ||
+            ShouldReconsiderUnsupportedEycScope(activeEycGoal, activeEycControls, false, MaxUnsupportedEycScopeReconsiderations))
+            throw new AgentHostException("campaign-loop-self-test-eyc-scope-reconsideration-gate-failed", "Only an explicit Establish Your Clan request with its exact Native quest scope currently listed may receive one bounded unsupported-classification retry.");
+        var eycClassifierRequest = new JsonObject { ["goal"] = activeEycGoal, ["allowedControls"] = activeEycControls.DeepClone() };
+        var eycClassifierPrompt = AgentHostDecisionCycle.BuildCampaignGoalClassificationPrompt(eycClassifierRequest);
+        if (!eycClassifierPrompt.Contains("Multi-step execution within this exact quest is not a reason to choose unsupportedGoal", StringComparison.Ordinal))
+            throw new AgentHostException("campaign-loop-self-test-eyc-multistep-classification-guidance-missing", "The classifier must explicitly recognize the exact active multi-objective StoryMode quest as one supported high-level goal.");
+        results.Add(new { scenario = "campaign-loop-allows-one-bounded-reconsideration-for-explicit-active-eyc-multistep-scope", passed = true });
         var postClassificationActions = BuildActionCatalog(null, moving: false, goalVerified: false);
         var postClassificationControls = BuildControlCatalog(moving: false, goalVerified: false);
         if (postClassificationActions.Count != 1 || ReadString(postClassificationActions[0] as JsonObject, "action") != "mapSettlementTargets" || postClassificationControls.Count != 0 ||
@@ -170,6 +186,32 @@ internal static class AgentHostCampaignLoop
             unsupportedClient.MoveCount != 0 || unsupportedProvider.CallCount != 1)
             throw new AgentHostException("campaign-loop-self-test-unsupported-goal-action-leaked", "An unsupported task must terminate after classification and before any Native game action.");
         results.Add(new { scenario = "campaign-loop-unsupported-goal-stops-before-native-actions", passed = true });
+
+        var eycScopeRequest = new JsonObject
+        {
+            ["runId"] = "selftest-eyc-unsupported-reconsideration",
+            ["goal"] = "Autonomously complete the exact currently active original StoryMode Establish Your Clan quest.",
+            ["parentProcessId"] = 321,
+            ["maxDecisions"] = 8,
+            ["maxElapsedSeconds"] = 10,
+            ["allowedActionNames"] = new JsonArray(AllSupportedActions.OrderBy(action => action, StringComparer.Ordinal).Select(action => (JsonNode?)JsonValue.Create(action)).ToArray())
+        };
+        using var eycScopeDocument = JsonDocument.Parse(eycScopeRequest.ToJsonString());
+        var eycScopeClient = new FakeCampaignNativeClient(timeoutOnMove: false, includeActiveEycQuest: true);
+        var eycScopeProvider = new FakeCampaignDecisionProvider(timeoutOnMove: false, reconsiderEycScope: true);
+        var reconsideredEycScope = await RunAsync(eycScopeDocument.RootElement, eycScopeClient, eycScopeProvider, CancellationToken.None);
+        var reconsiderationTrace = reconsideredEycScope["trace"] as JsonArray;
+        if (ReadString(reconsideredEycScope, "status") != "failed" ||
+            ReadString(reconsideredEycScope, "failureCode") != "establish-clan-autonomy-native-client-unavailable" ||
+            ReadInt(reconsideredEycScope, "decisions", 0) != 2 || ReadInt(reconsideredEycScope, "actionsExecuted", 0) != 0 ||
+            eycScopeClient.MapQueryCount != 0 || eycScopeClient.MoveCount != 0 || eycScopeProvider.CallCount != 2 ||
+            eycScopeProvider.SecondRequest?["decisionFeedback"]?["kind"]?.GetValue<string>() != "supported-establish-clan-scope-reconsideration" ||
+            !((eycScopeProvider.SecondSystemPrompt ?? string.Empty).Contains("Multi-step execution within this exact quest is not a reason to choose unsupportedGoal", StringComparison.Ordinal)) ||
+            !reconsiderationTrace!.OfType<JsonObject>().Any(step =>
+                ReadString(step["decisionFeedback"] as JsonObject, "kind") == "supported-establish-clan-scope-reconsideration" &&
+                ReadBoolean(step["actionReceipt"] as JsonObject, "noNativeActionSent")))
+            throw new AgentHostException("campaign-loop-self-test-eyc-unsupported-reconsideration-failed", "A single explicit active EYC multi-step classification error must be reconsidered once before any Native action, then route only to the listed EYC executor.");
+        results.Add(new { scenario = "campaign-loop-reconsiders-one-explicit-active-eyc-unsupported-classification-before-native", passed = true });
         return results;
     }
 
@@ -229,6 +271,7 @@ internal static class AgentHostCampaignLoop
         string? moveTargetName = null;
         var completedByProvider = false;
         var goalScopeClassified = false;
+        var unsupportedEycScopeReconsiderations = 0;
         bool? firstDecisionRequiresGoalClassification = null;
         bool? firstDecisionListsSupportedGoalClassification = null;
         bool? firstDecisionListsUnsupportedGoalClassification = null;
@@ -350,6 +393,18 @@ internal static class AgentHostCampaignLoop
                 var goalClassification = ReadNodeString(decision["goalClassification"]);
                 if (goalClassification == "unsupported")
                 {
+                    if (ShouldReconsiderUnsupportedEycScope(goal!, controls, goalScopeClassified, unsupportedEycScopeReconsiderations))
+                    {
+                        unsupportedEycScopeReconsiderations++;
+                        feedback = new JsonObject
+                        {
+                            ["kind"] = "supported-establish-clan-scope-reconsideration",
+                            ["requiredNextStep"] = "The exact active original Establish Your Clan quest is explicitly listed as a supported high-level scope. It is one goal with multi-step Native subgoals; reconsider that supported scope before declaring unrelated unsupported work."
+                        };
+                        trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
+                            providerStartedUtc, providerDoneUtc, providerStartedTicks, feedback.DeepClone() as JsonObject));
+                        continue;
+                    }
                     failure = "The configured goal is outside the implemented Native Campaign scopes; no game action was issued.";
                     failureCode = "campaign-goal-unsupported";
                     terminationReason = "campaign-goal-unsupported";
@@ -730,6 +785,11 @@ internal static class AgentHostCampaignLoop
         return controls;
     }
 
+    internal static bool ShouldReconsiderUnsupportedEycScope(string goal, JsonArray controls, bool goalScopeClassified, int reconsiderations) =>
+        !goalScopeClassified && reconsiderations < MaxUnsupportedEycScopeReconsiderations &&
+        AgentHostDecisionCycle.IsExplicitEstablishYourClanGoal(goal) &&
+        controls.Any(control => control?.GetValue<string>() == "supportedEstablishYourClanGoal");
+
     private static bool HasObservedEstablishYourClanQuest(JsonObject? state) =>
         (state?["quests"] as JsonArray)?.OfType<JsonObject>().Any(quest =>
             string.Equals(ReadString(quest, "id"), "rebuild_player_clan_storymode_quest", StringComparison.Ordinal)) == true;
@@ -967,7 +1027,7 @@ internal static class AgentHostCampaignLoop
         return parsed;
     }
 
-    private sealed class FakeCampaignNativeClient(bool timeoutOnMove) : IAgentHostCampaignNativeClient
+    private sealed class FakeCampaignNativeClient(bool timeoutOnMove, bool includeActiveEycQuest = false) : IAgentHostCampaignNativeClient
     {
         private int _readCount;
         internal int MapQueryCount { get; private set; }
@@ -988,6 +1048,7 @@ internal static class AgentHostCampaignLoop
                 ["state"] = new JsonObject
                 {
                     ["context"] = new JsonObject { ["gameState"] = "MapState", ["menuId"] = "", ["timeControlMode"] = "StoppablePlay" },
+                    ["quests"] = includeActiveEycQuest ? new JsonArray(new JsonObject { ["id"] = "rebuild_player_clan_storymode_quest" }) : new JsonArray(),
                     ["location"] = new JsonObject
                     {
                         ["currentSettlementId"] = arrived ? "safe" : "origin",
@@ -1035,16 +1096,20 @@ internal static class AgentHostCampaignLoop
     {
         private readonly bool _timeoutOnMove;
         private readonly bool _unsupportedGoal;
+        private readonly bool _reconsiderEycScope;
 
         internal int CallCount { get; private set; }
         internal JsonObject? FirstRequest { get; private set; }
+        internal JsonObject? SecondRequest { get; private set; }
+        internal string? SecondSystemPrompt { get; private set; }
         public string ModelId => "deterministic-campaign-loop-self-test";
         public string ConfigurationSource => "harness-fake-provider";
 
-        internal FakeCampaignDecisionProvider(bool timeoutOnMove, bool unsupportedGoal = false)
+        internal FakeCampaignDecisionProvider(bool timeoutOnMove, bool unsupportedGoal = false, bool reconsiderEycScope = false)
         {
             _timeoutOnMove = timeoutOnMove;
             _unsupportedGoal = unsupportedGoal;
+            _reconsiderEycScope = reconsiderEycScope;
         }
 
         public Task CheckConfiguredModelAsync(CancellationToken cancellationToken)
@@ -1058,9 +1123,17 @@ internal static class AgentHostCampaignLoop
             cancellationToken.ThrowIfCancellationRequested();
             CallCount++;
             if (CallCount == 1) FirstRequest = JsonNode.Parse(request.GetRawText())?.AsObject();
+            if (CallCount == 2)
+            {
+                SecondRequest = JsonNode.Parse(request.GetRawText())?.AsObject();
+                SecondSystemPrompt = systemPrompt;
+            }
             if (CallCount == 1)
                 return Task.FromResult(new ProviderDecisionResult("completed", ModelId, null, null, "stop",
-                    new JsonObject { ["goalClassification"] = _unsupportedGoal ? "unsupported" : "supported-map-arrival" }));
+                    new JsonObject { ["goalClassification"] = _unsupportedGoal || _reconsiderEycScope ? "unsupported" : "supported-map-arrival" }));
+            if (_reconsiderEycScope && CallCount == 2)
+                return Task.FromResult(new ProviderDecisionResult("completed", ModelId, null, null, "stop",
+                    new JsonObject { ["goalClassification"] = "supported-establish-your-clan" }));
             var decision = (CallCount - 1) switch
             {
                 1 => new JsonObject { ["action"] = "mapSettlementTargets", ["arguments"] = new JsonObject(), ["rationale"] = "Read current safe destinations." },
