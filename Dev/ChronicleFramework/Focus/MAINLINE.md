@@ -754,6 +754,8 @@ FreeLLMAPI模型路由现况（2026-10-21/22）：原版FreeLLMAPI的单请求`g
 
 2026-10-22 为FreeLLMAPI直接模型增加能力感知的结构化输出选择：在模型目录声明`response_format`时保留原严格JSON Schema；若没有它但同时声明`tools`和`tool_choice`，Host改用单一强制`submit_chronicle_decision`函数格式并把arguments交给原有本地`NormalizeDecision`/当前动作目录验证，工具绝不被当作Native动作执行；两类能力都缺失时在推理前安全拒绝。FreeLLMAPI `auto`路由仍发送JSON Schema，以让路由器避开不兼容候选。此选择遵循LangChain正式文档中ProviderStrategy优先、无原生结构化输出时使用ToolStrategy并校验输出的模式；Kilo官方OpenAI-compatible Gateway文档确认`tool_choice`接受`required`。[LangChain Structured output](https://docs.langchain.com/oss/python/langchain/structured-output) [Kilo Gateway API Reference](https://kilo.ai/docs/gateway/api-reference)。本机FreeLLMAPI目录读取到`north-mini-code`有`tools/tool_choice`、无`response_format`，`thedrummer-behemoth-128b-v3-q4-k-m`无两者；`TestResults/20261022-032333` AgentHostPackage通过（Provider合同178项，模型调用0、Native命令0），覆盖工具调用构造/解析、目录外动作拒绝和无兼容格式时的请求前失败。Kilo路由池当前报告耗尽，故此新协议尚未由真实模型或游戏实测；不能据此宣称EYC完成。
 
+2026-10-21 20:35Z同一时段请求形态对照：Windows `curl` 经`socks5h://127.0.0.1:7890`访问OVH `/v1/models` GET返回HTTP 200/TLS约0.46秒；向同一主机发送一个极小、无密钥的JSON-Schema `/v1/chat/completions` POST则以curl exit 56（`server closed abruptly (missing close_notify)`）、HTTP 000结束。它说明推理POST故障不只出现在FreeLLMAPI Node包装器，但因GET与POST行为不同，仍不能判定是星辰SOCKS代理、OVH匿名推理入口还是两者交互；没有模型响应/可用量回执、没有修改代理或应用设置，也没有游戏动作。只凭公开`/models`成功不得宣称推理可用。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager
