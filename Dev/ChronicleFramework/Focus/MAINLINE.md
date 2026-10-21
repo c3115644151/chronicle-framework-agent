@@ -725,6 +725,8 @@ Gold售卖循环的Native地图目标原始回执可以含395个聚落，而安�
 - 主线改变时更新本文并运行 `Set-ContextFocus.ps1 -Review` 刷新hash/复核期；ContextState只作为本文件和按需研究的路由器。
 - 缺少前置时按GitHub原生依赖表示阻塞；领域事实和验收约束留在本文/Research，不复制进任务状态字段。
 
+`TestResults/20261021-144939`加载了包含最新EYC分类重判代码的隔离`save002`副本。FreeLLMAPI第一次Mistral请求成功且分类为EYC，但下一次实际目标循环请求收到HTTP429；Host日志说明没有有界Retry-After，FreeLLMAPI原始Fallback日志显示多候选处于cooldown/不兼容，因而在第二次有效模型决策前安全终止（有效决策1、Native动作0）。源`save002.sav`前后SHA-256一致，临时`ChronicleW7P-12b98703f3fa48ec`副本/session清理，Bannerlord进程0。此运行验证新提交可构建、游戏可启动及失败清理，不验证Gold、交易、分类重判或EYC进展；无实时有效上游时不重复轰击路由。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager
