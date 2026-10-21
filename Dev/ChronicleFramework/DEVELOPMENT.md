@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.242
+Contract version: 7.243
 
 ## 当前产品边界
 
@@ -88,7 +88,7 @@ W7-K只覆盖标准`VillageNeedsToolsIssueQuest`交付路径。1.4.8 Native先�
 
 Agent Host包测试在restore前以500毫秒上限TCP连接探测本机7890代理，并通过临时回环listener正/负自检；不使用`Test-NetConnection`长等待交互输出。代理不可达仍快速失败，不绕过用户配置的代理。
 
-FreeLLMAPI Provider的单次请求时限覆盖接收响应头、完整响应正文以及模型请求中的限流/上游退避等待；`ResponseHeadersRead`不能使正文或退避等待脱离该总时限。每次上游响应都重新分类：HTTP 429只按明确有效的`Retry-After`等待，最多重试两次；明确临时502最多重试两次，429与502使用独立计数。429的单次Retry-After上限为360秒，来源是本机真实回包315秒；无提示、非正值或超过360秒仍快速失败。若多次显式等待合计超过360秒总Deadline，Host会停止当前决策，不发送超时后的第三次Native请求。FreeLLMAPI匿名OVH Mistral每分钟最多两次请求，Host对已命中OVH的请求仍按45秒节奏；等待只为尊重FreeLLMAPI明确给出的冷却时间，不重放Native动作。退避用同一请求Deadline取消。429错误只记录安全的重试资格、实际重试次数与累计等待毫秒，不写响应正文或凭据。无游戏Provider冒烟缺省超时现为360秒；OpenAI-compatible/FreeLLMAPI路径默认360秒且上限360秒，本地Ollama协议仍默认60秒、上限240秒。无效配置回退360秒，显式值限制在5–360秒，避免PowerShell `TryParse`失败时把默认值写成0。只读模型目录探测仅证明网关可达且模型/路由当前可用，不证明上游推理成功。实际请求失败先核查FreeLLMAPI路由、密钥健康/免费额度和上游响应，再归因模型或游戏；相关无模型回归覆盖响应体和退避均受同一Deadline约束。
+FreeLLMAPI Provider的单次请求时限覆盖接收响应头、完整响应正文以及模型请求中的限流/上游退避等待；`ResponseHeadersRead`不能使正文或退避等待脱离该总时限。每次上游响应都重新分类：HTTP 429优先尊重明确有效的`Retry-After`，最多重试两次；若该头缺失，仅对FreeLLMAPI loopback返回的JSON错误中严格匹配`All models exhausted`及`Soonest reset ~Ns/~Nm/~Nh`时采用正文ETA，最多重试一次。只读取最多16KiB、只提取白名单时间字段、不记录错误正文；模糊/缺失/超360秒提示不重试。无论头还是正文提示，若等待无法放进本次剩余Provider deadline则立即返回可诊断的429，不空等至超时；明确临时502仍最多重试两次，429与502使用独立计数。429的单次等待上限为360秒，来源是本机真实回包315秒。FreeLLMAPI匿名OVH Mistral每分钟最多两次请求，Host对已命中OVH的请求仍按45秒节奏；等待不重放已执行Native动作。退避用同一请求Deadline取消。429错误只记录安全的重试资格、提示来源、是否为网关池耗尽、deadline可容纳性、实际重试次数与累计等待毫秒，不写响应正文或凭据。无游戏Provider冒烟缺省超时现为360秒；OpenAI-compatible/FreeLLMAPI路径默认360秒且上限360秒，本地Ollama协议仍默认60秒、上限240秒。无效配置回退360秒，显式值限制在5–360秒，避免PowerShell `TryParse`失败时把默认值写成0。只读模型目录探测仅证明网关可达且模型/路由当前可用，不证明上游推理成功。实际请求失败先核查FreeLLMAPI路由、密钥健康/免费额度和上游响应，再归因模型或游戏；相关无模型回归覆盖响应体和退避均受同一Deadline约束。
 
 `CHRONICLE_LLM_TIMEOUT_SECONDS`只控制模型请求及其429等待；Campaign/Supply Host的Native邮箱往返另读`CHRONICLE_NATIVE_MAILBOX_TIMEOUT_SECONDS`（默认180秒、上限240秒），不随模型重试时间延长。这样尊重315秒外部冷却时，仍不会让无响应的游戏命令获得同样长的等待上限。
 

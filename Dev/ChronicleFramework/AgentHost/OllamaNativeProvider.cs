@@ -11,6 +11,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
 {
     private const int MaxRequestBytes = 512 * 1024;
     private const int MaxResponseBytes = 1024 * 1024;
+    private const int MaxRateLimitErrorBytes = 16 * 1024;
+    private static readonly TimeSpan MinimumRateLimitRetryRequestBudget = TimeSpan.FromSeconds(5);
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private static readonly HashSet<string> FreeLlmApiRouterStrategies = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -253,9 +255,12 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
 
         using var requestTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         requestTimeout.CancelAfter(_settings.Timeout);
+        var requestDeadlineUtc = DateTimeOffset.UtcNow + _settings.Timeout;
         var transientProviderRetriesUsed = 0;
         var rateLimitRetryAttempts = 0;
         var rateLimitRetryWaitMilliseconds = 0L;
+        RateLimitRetryHint? lastRateLimitRetryHint = null;
+        bool? lastRateLimitRetryFitsDeadline = null;
         async Task<HttpResponseMessage> SendProviderRequestAsync(string requestBody)
         {
             try
@@ -302,12 +307,27 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             var response = await SendProviderRequestAsync(requestBody);
             while (true)
             {
-                var retryAfter = GetBoundedRateLimitRetryAfter(_settings.Endpoint, response);
-                if (rateLimitRetryAttempts < 2 && retryAfter.HasValue)
+                RateLimitRetryHint retryHint;
+                try
+                {
+                    retryHint = await ReadRateLimitRetryHintAsync(_settings.Endpoint, response, requestTimeout.Token);
+                }
+                catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+                {
+                    throw new AgentHostException("provider-timeout", "The model provider exceeded its configured timeout while reading rate-limit guidance.", exception);
+                }
+                if (response.StatusCode == HttpStatusCode.TooManyRequests)
+                {
+                    lastRateLimitRetryHint = retryHint;
+                    var remaining = requestDeadlineUtc - DateTimeOffset.UtcNow;
+                    lastRateLimitRetryFitsDeadline = retryHint.Delay.HasValue && retryHint.Delay.Value + MinimumRateLimitRetryRequestBudget <= remaining;
+                }
+                var maximumRateLimitRetries = retryHint.Source == "body-exhaustion" ? 1 : 2;
+                if (rateLimitRetryAttempts < maximumRateLimitRetries && retryHint.Delay.HasValue && lastRateLimitRetryFitsDeadline == true)
                 {
                     response.Dispose();
                     var retryWaitStartedUtc = DateTimeOffset.UtcNow;
-                    await DelayForProviderRetryAsync(retryAfter.Value, "while waiting for the bounded rate-limit retry");
+                    await DelayForProviderRetryAsync(retryHint.Delay.Value, "while waiting for the bounded rate-limit retry");
                     rateLimitRetryAttempts++;
                     rateLimitRetryWaitMilliseconds += (long)(DateTimeOffset.UtcNow - retryWaitStartedUtc).TotalMilliseconds;
                     response = await SendProviderRequestAsync(requestBody);
@@ -355,7 +375,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         using (response)
         {
             if (!response.IsSuccessStatusCode)
-                throw new AgentHostException("provider-http-error", BuildHttpFailureMessage(response, rateLimitRetryAttempts, rateLimitRetryWaitMilliseconds));
+                throw new AgentHostException("provider-http-error", BuildHttpFailureMessage(response, rateLimitRetryAttempts, rateLimitRetryWaitMilliseconds, lastRateLimitRetryHint, lastRateLimitRetryFitsDeadline));
 
             if (response.Content.Headers.ContentLength is > MaxResponseBytes)
                 throw new AgentHostException("provider-response-too-large", "The local model response exceeds the Host size limit.");
@@ -433,6 +453,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
 
     private static bool IsFreeLlmApi(Uri endpoint) => endpoint.Port == 31415 && (endpoint.Host is "127.0.0.1" or "localhost");
 
+    internal sealed record RateLimitRetryHint(TimeSpan? Delay, TimeSpan? ObservedDelay, string Source, bool IsPoolExhaustion);
+
     private void AddAuthorization(HttpRequestMessage request)
     {
         if (!string.IsNullOrWhiteSpace(_settings.ApiKey))
@@ -446,7 +468,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         return string.IsNullOrWhiteSpace(value) ? null : value[..Math.Min(value.Length, 160)];
     }
 
-    internal string BuildHttpFailureMessage(HttpResponseMessage response, int rateLimitRetryAttempts, long rateLimitRetryWaitMilliseconds)
+    internal string BuildHttpFailureMessage(HttpResponseMessage response, int rateLimitRetryAttempts, long rateLimitRetryWaitMilliseconds, RateLimitRetryHint? retryHint = null, bool? retryFitsDeadline = null)
     {
         var providerName = IsFreeLlmApi(_settings.Endpoint) ? "FreeLLMAPI" : "model provider";
         var details = new List<string>();
@@ -461,11 +483,14 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         if (!string.IsNullOrWhiteSpace(retryAfter)) details.Add("retryAfter=" + retryAfter[..Math.Min(retryAfter.Length, 40)]);
         if (response.StatusCode == HttpStatusCode.TooManyRequests)
         {
-            var boundedRetryAfter = GetBoundedRateLimitRetryAfter(_settings.Endpoint, response);
+            var boundedRetryAfter = retryHint?.Delay ?? GetBoundedRateLimitRetryAfter(_settings.Endpoint, response);
             details.Add("rateLimitRetryAttempts=" + rateLimitRetryAttempts.ToString(CultureInfo.InvariantCulture));
             details.Add("rateLimitRetryWaitMilliseconds=" + rateLimitRetryWaitMilliseconds.ToString(CultureInfo.InvariantCulture));
             details.Add("rateLimitRetryEligible=" + (boundedRetryAfter.HasValue ? "true" : "false"));
-            details.Add("rateLimitRetryAfterSeconds=" + (boundedRetryAfter?.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture) ?? "unbounded-or-unparseable"));
+            details.Add("rateLimitRetrySource=" + (retryHint?.Source ?? (boundedRetryAfter.HasValue ? "header" : "none")));
+            details.Add("rateLimitRetryAfterSeconds=" + ((retryHint?.ObservedDelay ?? boundedRetryAfter)?.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture) ?? "unbounded-or-unparseable"));
+            if (retryHint?.IsPoolExhaustion == true) details.Add("freeLlmApiPoolExhausted=true");
+            if (retryFitsDeadline.HasValue) details.Add("rateLimitRetryFitsDeadline=" + (retryFitsDeadline.Value ? "true" : "false"));
         }
         return $"{providerName} returned HTTP {(int)response.StatusCode}." +
                (details.Count == 0 ? string.Empty : " " + string.Join("; ", details));
@@ -498,6 +523,88 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         var delay = response.Headers.RetryAfter.Delta ?? response.Headers.RetryAfter.Date - DateTimeOffset.UtcNow;
         if (!delay.HasValue || delay.Value <= TimeSpan.Zero || delay.Value > TimeSpan.FromSeconds(360)) return null;
         return delay.Value;
+    }
+
+    private static async Task<RateLimitRetryHint> ReadRateLimitRetryHintAsync(Uri endpoint, HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        if (response.StatusCode != HttpStatusCode.TooManyRequests)
+            return new RateLimitRetryHint(null, null, "none", false);
+
+        var explicitHeader = response.Headers.RetryAfter;
+        if (explicitHeader is not null)
+        {
+            var boundedHeaderDelay = GetBoundedRateLimitRetryAfter(endpoint, response);
+            var observedHeaderDelay = explicitHeader.Delta ?? explicitHeader.Date - DateTimeOffset.UtcNow;
+            return new RateLimitRetryHint(boundedHeaderDelay, observedHeaderDelay, boundedHeaderDelay.HasValue ? "header" : "header-ineligible", false);
+        }
+
+        if (!IsFreeLlmApi(endpoint))
+            return new RateLimitRetryHint(null, null, "none", false);
+
+        try
+        {
+            if (response.Content.Headers.ContentLength is > MaxRateLimitErrorBytes)
+                return new RateLimitRetryHint(null, null, "body-too-large", false);
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var body = new MemoryStream();
+            var buffer = new byte[4096];
+            while (body.Length <= MaxRateLimitErrorBytes)
+            {
+                var wanted = (int)Math.Min(buffer.Length, MaxRateLimitErrorBytes + 1L - body.Length);
+                var read = await stream.ReadAsync(buffer.AsMemory(0, wanted), cancellationToken);
+                if (read == 0) break;
+                body.Write(buffer, 0, read);
+                if (body.Length > MaxRateLimitErrorBytes)
+                    return new RateLimitRetryHint(null, null, "body-too-large", false);
+            }
+
+            using var document = JsonDocument.Parse(body.ToArray());
+            var root = document.RootElement;
+            if (!root.TryGetProperty("error", out var error) || error.ValueKind != JsonValueKind.Object ||
+                !error.TryGetProperty("message", out var messageElement) || messageElement.ValueKind != JsonValueKind.String)
+                return new RateLimitRetryHint(null, null, "body-unrecognized", false);
+
+            var message = messageElement.GetString() ?? string.Empty;
+            if (!message.StartsWith("All models exhausted", StringComparison.OrdinalIgnoreCase))
+                return new RateLimitRetryHint(null, null, "body-unrecognized", false);
+
+            var marker = "Soonest reset ~";
+            var markerIndex = message.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (markerIndex < 0)
+                return new RateLimitRetryHint(null, null, "body-exhaustion-no-eta", true);
+
+            var valueStart = markerIndex + marker.Length;
+            var valueEnd = valueStart;
+            while (valueEnd < message.Length && char.IsAsciiDigit(message[valueEnd])) valueEnd++;
+            if (valueEnd == valueStart || valueEnd >= message.Length)
+                return new RateLimitRetryHint(null, null, "body-exhaustion-invalid-eta", true);
+
+            if (!int.TryParse(message.AsSpan(valueStart, valueEnd - valueStart), NumberStyles.None, CultureInfo.InvariantCulture, out var amount) || amount <= 0)
+                return new RateLimitRetryHint(null, null, "body-exhaustion-invalid-eta", true);
+
+            var unit = char.ToLowerInvariant(message[valueEnd]);
+            var observedDelay = unit switch
+            {
+                's' => TimeSpan.FromSeconds(amount),
+                'm' => TimeSpan.FromMinutes(amount),
+                'h' => TimeSpan.FromHours(amount),
+                _ => (TimeSpan?)null
+            };
+            if (!observedDelay.HasValue || (valueEnd + 1 < message.Length && message[valueEnd + 1] is not ('.' or ' ')))
+                return new RateLimitRetryHint(null, null, "body-exhaustion-invalid-eta", true);
+
+            var boundedDelay = observedDelay.Value <= TimeSpan.FromSeconds(360) ? observedDelay : null;
+            return new RateLimitRetryHint(boundedDelay, observedDelay, boundedDelay.HasValue ? "body-exhaustion" : "body-exhaustion-over-bound", true);
+        }
+        catch (JsonException)
+        {
+            return new RateLimitRetryHint(null, null, "body-unrecognized", false);
+        }
+        catch (IOException)
+        {
+            return new RateLimitRetryHint(null, null, "body-read-failed", false);
+        }
     }
 
     private bool UsesJsonObjectCompatibilityMode() =>

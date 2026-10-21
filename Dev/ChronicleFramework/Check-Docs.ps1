@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.242'
+$contractVersion = '7.243'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -627,6 +627,8 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $agentHostProviderSource -notmatch 'format_ignored' -or
     $providerProfileTestSource -notmatch 'freellmapi-transient-upstream-502-retried-once-before-native-action' -or
     $providerProfileTestSource -notmatch 'freellmapi-429-honors-bounded-retry-after-before-native-action' -or
+    $providerProfileTestSource -notmatch 'freellmapi-exhaustion-body-eta-allows-one-bounded-retry' -or
+    $providerProfileTestSource -notmatch 'freellmapi-exhaustion-body-beyond-deadline-fails-fast-with-safe-diagnostic' -or
     $providerProfileTestSource -notmatch 'freellmapi-429-allows-two-explicit-waits-then-fails-closed' -or
     $providerProfileTestSource -notmatch 'freellmapi-reclassifies-429-after-transient-upstream-retry' -or
     $providerProfileTestSource -notmatch 'freellmapi-429-reports-over-bound-retry-as-ineligible' -or
@@ -668,7 +670,10 @@ if ($providerHostSource -notmatch 'defaultTimeoutSeconds = nativeOllama \? 60 : 
     $providerHostSource -notmatch 'maximumTimeoutSeconds = nativeOllama \? 240 : 360' -or
     $providerHostSource -notmatch 'ReadIntegerEnvironment\("CHRONICLE_LLM_TIMEOUT_SECONDS", defaultTimeoutSeconds, 5, maximumTimeoutSeconds\)' -or
     $providerHostSource -notmatch 'ReadIntegerEnvironment\("CHRONICLE_LLM_TIMEOUT_SECONDS", 360, 5, 360\)' -or
-    $providerHostSource -notmatch 'rateLimitRetryAttempts < 2' -or
+    $providerHostSource -notmatch 'maximumRateLimitRetries = retryHint.Source == "body-exhaustion" \? 1 : 2' -or
+    $providerHostSource -notmatch 'ReadRateLimitRetryHintAsync' -or
+    $providerHostSource -notmatch 'MaxRateLimitErrorBytes = 16 \* 1024' -or
+    $providerHostSource -notmatch 'MinimumRateLimitRetryRequestBudget = TimeSpan.FromSeconds\(5\)' -or
     $providerHostSource -notmatch 'TimeSpan.FromSeconds\(360\)' -or
     $providerProfileTestSource -notmatch '315' -or
     $providerProfileTestSource -notmatch '361') {

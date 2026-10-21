@@ -563,6 +563,63 @@ internal static class ProviderContractSelfTest
             results.Add(new { scenario = "freellmapi-429-honors-bounded-retry-after-before-native-action", passed = true, providerCalls = retryAfterCalls, nativeCommands = 0 });
         }
 
+        var exhaustionBodyRetryCalls = 0;
+        var exhaustionBodyRetryHandler = new StubHandler((_, _) =>
+        {
+            exhaustionBodyRetryCalls++;
+            if (exhaustionBodyRetryCalls == 1)
+            {
+                var exhausted = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+                exhausted.Content = new StringContent("{\"error\":{\"message\":\"All models exhausted. Add more API keys or wait for rate limits to reset. Soonest reset ~1s.\"}}", Encoding.UTF8, "application/json");
+                return Task.FromResult(exhausted);
+            }
+            var recovered = JsonResponse(BuildChatResponse("{\"action\":\"tradeConfirm\",\"arguments\":{},\"rationale\":\"Confirm the current Native draft.\"}", "stop"));
+            recovered.Headers.TryAddWithoutValidation("X-Routed-Via", "custom/nvidia/test-model");
+            return Task.FromResult(recovered);
+        });
+        var exhaustionBodyRetrySettings = freeLlmApiSettings with { Model = "auto:reliable", Timeout = TimeSpan.FromSeconds(8) };
+        using (var exhaustionBodyRetryClient = new HttpClient(exhaustionBodyRetryHandler) { Timeout = exhaustionBodyRetrySettings.Timeout })
+        using (var exhaustionBodyRetryProvider = new OllamaNativeProvider(exhaustionBodyRetrySettings, exhaustionBodyRetryClient))
+        using (var request = JsonDocument.Parse(BuildActionDecisionRequest()))
+        {
+            var result = await exhaustionBodyRetryProvider.DecideAsync(request.RootElement, CancellationToken.None);
+            if (result.Decision["action"]?.GetValue<string>() != "tradeConfirm" || exhaustionBodyRetryCalls != 2)
+                throw new AgentHostException("provider-self-test-exhaustion-body-retry-failed", "A strict FreeLLMAPI all-models-exhausted body hint should permit at most one retry when its reset ETA fits the current request deadline.");
+            results.Add(new { scenario = "freellmapi-exhaustion-body-eta-allows-one-bounded-retry", passed = true, providerCalls = exhaustionBodyRetryCalls, nativeCommands = 0 });
+        }
+
+        var overDeadlineBodyCalls = 0;
+        var overDeadlineBodyHandler = new StubHandler((_, _) =>
+        {
+            overDeadlineBodyCalls++;
+            var exhausted = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+            exhausted.Content = new StringContent("{\"error\":{\"message\":\"All models exhausted. Soonest reset ~2m.\"}}", Encoding.UTF8, "application/json");
+            return Task.FromResult(exhausted);
+        });
+        var overDeadlineBodySettings = freeLlmApiSettings with { Model = "auto:reliable", Timeout = TimeSpan.FromMilliseconds(250) };
+        using (var overDeadlineBodyClient = new HttpClient(overDeadlineBodyHandler) { Timeout = overDeadlineBodySettings.Timeout })
+        using (var overDeadlineBodyProvider = new OllamaNativeProvider(overDeadlineBodySettings, overDeadlineBodyClient))
+        using (var request = JsonDocument.Parse(BuildActionDecisionRequest()))
+        {
+            var startedUtc = DateTimeOffset.UtcNow;
+            try
+            {
+                await overDeadlineBodyProvider.DecideAsync(request.RootElement, CancellationToken.None);
+                throw new AgentHostException("provider-self-test-over-deadline-body-retry-accepted", "The Host must not wait for a FreeLLMAPI pool reset that cannot fit inside the current request deadline.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-http-error")
+            {
+                if (overDeadlineBodyCalls != 1 || DateTimeOffset.UtcNow - startedUtc > TimeSpan.FromSeconds(2) ||
+                    !exception.Message.Contains("rateLimitRetrySource=body-exhaustion", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("freeLlmApiPoolExhausted=true", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("rateLimitRetryFitsDeadline=false", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("rateLimitRetryAfterSeconds=120", StringComparison.Ordinal) ||
+                    exception.Message.Contains("All models exhausted", StringComparison.Ordinal))
+                    throw new AgentHostException("provider-self-test-over-deadline-body-diagnostics-unsafe", "An over-deadline exhaustion hint must fail immediately, preserve only safe parsed diagnostics, and omit provider response text.");
+                results.Add(new { scenario = "freellmapi-exhaustion-body-beyond-deadline-fails-fast-with-safe-diagnostic", passed = true, providerCalls = overDeadlineBodyCalls, nativeCommands = 0 });
+            }
+        }
+
         var exhaustedRetryAfterCalls = 0;
         var exhaustedRetryAfterHandler = new StubHandler((_, _) =>
         {
@@ -614,15 +671,17 @@ internal static class ProviderContractSelfTest
         using (var timeoutDuringRetryProvider = new OllamaNativeProvider(timeoutDuringRetrySettings, timeoutDuringRetryClient))
         using (var request = JsonDocument.Parse(BuildActionDecisionRequest()))
         {
+            var startedUtc = DateTimeOffset.UtcNow;
             try
             {
                 await timeoutDuringRetryProvider.DecideAsync(request.RootElement, CancellationToken.None);
                 throw new AgentHostException("provider-self-test-retry-delay-outlived-provider-timeout", "A bounded Retry-After wait must remain inside the total provider timeout.");
             }
-            catch (AgentHostException exception) when (exception.Code == "provider-timeout")
+            catch (AgentHostException exception) when (exception.Code == "provider-http-error")
             {
-                if (timeoutDuringRetryCalls != 1)
-                    throw new AgentHostException("provider-self-test-retry-delay-sent-after-deadline", "The provider must not issue a retry after its overall request deadline expires.");
+                if (timeoutDuringRetryCalls != 1 || DateTimeOffset.UtcNow - startedUtc > TimeSpan.FromSeconds(2) ||
+                    !exception.Message.Contains("rateLimitRetryFitsDeadline=false", StringComparison.Ordinal))
+                    throw new AgentHostException("provider-self-test-retry-delay-sent-after-deadline", "The provider must fail a wait that cannot fit inside its overall request deadline without waiting or sending a second request.");
                 results.Add(new { scenario = "freellmapi-retry-after-delay-respects-overall-provider-timeout", passed = true, providerCalls = timeoutDuringRetryCalls, nativeCommands = 0 });
             }
         }
