@@ -729,9 +729,10 @@ Gold售卖循环的Native地图目标原始回执可以含395个聚落，而安�
 
 `TestResults/20261021-144939`加载了包含最新EYC分类重判代码的隔离`save002`副本。FreeLLMAPI第一次Mistral请求成功且分类为EYC，但下一次实际目标循环请求收到HTTP429；Host日志说明没有有界Retry-After，FreeLLMAPI原始Fallback日志显示多候选处于cooldown/不兼容，因而在第二次有效模型决策前安全终止（有效决策1、Native动作0）。源`save002.sav`前后SHA-256一致，临时`ChronicleW7P-12b98703f3fa48ec`副本/session清理，Bannerlord进程0。此运行验证新提交可构建、游戏可启动及失败清理，不验证Gold、交易、分类重判或EYC进展；无实时有效上游时不重复轰击路由。
 
-`TestResults/20261021-151955`把`gpt-oss-20b`作为本次唯一FreeLLMAPI模型路由再次实测；目录预检通过且Bannerlord能正常启动，但OVH TLS握手在首个Provider请求约0.4秒后断开，FreeLLMAPI记录其余10个有模型的provider platform无健康/启用key，随后Host在bounded retry等待中以`provider-timeout`退出（模型决定0、Native动作0）。这证明“列在ready目录”并不保证本次请求有可用上游，也排除了EYC分类/动作协议是该run失败的原因。Harness清理游戏进程、临时副本与CLI session，正式源档未变；不再用同一已耗尽路由重复重启完整游戏来消耗等待和调试时间。
 
 `TestResults/20261021-151955`以直连`gpt-oss-20b`替代auto路由作对照；FreeLLMAPI对`ovh/gpt-oss-20b`的第一次上游TLS握手在0.44秒失败，fallback总结仅有2个候选（该OVH路由冷却、另10个模型所属平台无启用/健康key），随后Host在bounded retry deadline退出，决策/Native动作均为0。路由目录预检和本地`/api/ping`当时均成功，源save002哈希前后相同、临时副本/session被清理。加上之前的Mistral、NVIDIA和auto路由故障，证据表明本次重点不是单一模型不理解prompt，而是本机FreeLLMAPI已配置的多条远端provider网络连接不稳定并造成候选冷却。当前安装版本为0.16.4；官方0.16.5/0.16.6更新说明是Windows premium激活网络栈与key“last worked”可见性，没有声称修复provider fallback连通性，故未把盲目升级当根因修复。[FreeLLMAPI官方release notes](https://github.com/tashfeenahmed/freellmapi/releases)
+
+2026-10-21的无密钥网络探针使用FreeLLMAPI已配置的SOCKS5H代理`127.0.0.1:7890`，只访问公开HTTP端点：GitHub返回HTTP 200、Google根API返回HTTP 404（均完成TLS/HTTP），NVIDIA模型API在Windows Schannel TLS阶段断开，Cohere则报证书吊销检查离线。它说明该代理端口并非整体不可达，但不同上游域名/Windows证书链的实际连通性不一致；curl/Schannel与FreeLLMAPI Node TLS不是同一客户端栈，因此不能据此定位是StarVPN代理、系统证书状态还是具体provider服务器。FreeLLMAPI官方说明中，heuristic cooldown probe约每60秒扫描，并且仅在provider验证成功时提前清除cooldown；该信息支持等待/观察可恢复窗口，不构成新的推理可用性证明。[FreeLLMAPI cooldown & probe documentation](https://github.com/tashfeenahmed/freellmapi/blob/main/docs/en/architecture/02-quota-and-cooldown-engine.md)
 
 ## 主要来源
 
