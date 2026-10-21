@@ -22,6 +22,13 @@ foreach ($setting in @(
     }
 }
 
+# The one-shot provider entry point defaults to 256 output tokens, while the
+# in-game MCM profile defaults to 1024. Keep this real-provider smoke aligned
+# with production unless the user explicitly configured a token budget.
+if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_MAX_TOKENS)) {
+    $env:CHRONICLE_LLM_MAX_TOKENS = '1024'
+}
+
 $protocolSelfTestOutput = & dotnet $hostDll --provider-self-test 2>&1 | Out-String
 if ($LASTEXITCODE -ne 0) { throw "Provider transport-contract tests failed: $protocolSelfTestOutput" }
 $protocolSelfTest = $protocolSelfTestOutput | ConvertFrom-Json
@@ -50,7 +57,7 @@ $freeLlmApiProfile = Initialize-FreeLLMAPIProfile
 $model = [string]$freeLlmApiProfile.RequestedModelId
 $protocol = 'openai-compatible'
 
-$decisionRequest = [ordered]@{ goal = '完成当前可见的村庄工具委托'; goalScopeClassificationRequired = $true; goalScopeContract = 'native-map-arrival-v1'; observation = [ordered]@{ scope = 'goal-classification-only'; message = 'No Native map-target query has run yet. Classify the requested outcome only; target availability will be checked after this gate.' }; allowedActions = @(); allowedControls = @('supportedMapArrivalGoal','supportedVillageToolsQuestGoal','unsupportedGoal') }
+$decisionRequest = [ordered]@{ goal = '完成当前可见的村庄工具委托'; goalScopeClassificationRequired = $true; goalScopeContract = 'native-campaign-goal-classification-v1'; observation = [ordered]@{ scope = 'goal-classification-only'; message = 'No goal-specific game action has run yet. Classify the complete requested outcome against the listed supported goals; only the selected goal executor will become available after this gate.' }; allowedActions = @(); allowedControls = @('supportedMapArrivalGoal','supportedVillageToolsQuestGoal','unsupportedGoal') }
 $startInfo = [Diagnostics.ProcessStartInfo]::new()
 $startInfo.FileName = (Get-Command dotnet -ErrorAction Stop).Source
 $startInfo.Arguments = '"{0}" --decision-once' -f $hostDll
@@ -106,6 +113,8 @@ $summary = [ordered]@{
     LocalProxyBootstrapApplied = [bool]$freeLlmApiProfile.LocalProxyBootstrapApplied
     ConfiguredRouteAvailable = $freeLlmApiProfile.RequestedModelId
     ConfiguredRouteExecutionStatus = $freeLlmApiProfile.ModelExecutionStatus
+    EffectiveMaxOutputTokens = [int]$env:CHRONICLE_LLM_MAX_TOKENS
+    MaxTokenParameter = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER)) { 'max_completion_tokens' } else { [string]$env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER }
     AvailableModelCount = $freeLlmApiProfile.AvailableModelCount
     AvailableModelCatalogSha256 = $freeLlmApiProfile.AvailableModelCatalogSha256
     RoutedVia = [string]$result.routedVia

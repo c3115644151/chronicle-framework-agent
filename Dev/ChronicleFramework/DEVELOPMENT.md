@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.245
+Contract version: 7.246
 
 ## 当前产品边界
 
@@ -10,6 +10,8 @@ Gold子流程遇到Provider/Native故障时返回失败收据，其中保留已�
 新增的`AgentHostEstablishClanAutonomyEvaluation`是后续真实模型集成调试入口：从已有活动StoryMode存档的逐字节临时副本加载，真实模型可驱动四目标父循环，随后清理副本；它不是新战役门禁。产品验收仍要求玩家原版Tutorial skip后从首个稳定MapState接管，并在两个独立自然新建的StoryMode战役完成原版Quest。
 
 EYC实机诊断只做只读FreeLLMAPI目录检查、构建、AgentHost包合同测试和Native启动Smoke，不在Campaign前再花一次真实模型调用；在真实Native状态可见后，第一条模型请求就是生产EYC目标分类。独立`AgentHostProvider`保留为opt-in路由诊断工具，不证明EYC分类能力，也不保证后续请求仍可用；即使它成功，也不得作为随后启动EYC游戏循环的“模型就绪”门槛或理由，因为下一次请求可能立即遇到不同冷却/上游状态。若当前目标是完整EYC实测，跳过独立Provider smoke；若当前目标仅为FreeLLMAPI故障诊断，则至多做一次单路由诊断，不把成功外推为Campaign可用性。Direct FreeLLMAPI model用本机`/v1/models.supported_parameters`选输出协议：优先模型声明的原生`response_format`；只有模型未声明该参数且同时声明`tools`与`tool_choice`时才用一个强制、无副作用的decision tool-call；参数仍须通过同一Native目录/本地校验。Auto路由保持JSON Schema，使FreeLLMAPI只挑选兼容候选；未声明两种能力的Direct model在请求前安全失败，不做无约束文本解析。模型目录`ready`只代表存在可选路由，不证明上游当下能回答；每次真实请求按实际路由、结构化结果和错误日志区分上游/代理传输故障与AgentHost协议/参数错误。
+
+通用目标分类按当前`allowedControls`只附带可用目标类型的简短语义，区分“目标类型受支持”与“该目标的Native前置条件当前可用”；Host在分类后再以Native状态核验任务/对象。Provider smoke的默认输出上限与游戏内MCM profile保持一致（1024 tokens），但用户显式配置优先。分类合同或测试配置调整时，用离线Host合同检查控制列表/提示范围一致，并记录真实模型决定；不得把一次Provider烟测当作EYC完整闭环证据。
 
 同一变量还必须传到实机Host进程：`Test-AgentLiveModelLoop.ps1`仅在没有显式Provider timeout时使用各场景默认值；外层EYC Harness默认设置90秒，显式`CHRONICLE_LLM_TIMEOUT_SECONDS`仍由用户决定且范围为5–360秒。禁止在目标分支中无条件重置360秒，这会使一个不断重试的远端断连占住游戏数分钟，并掩盖上层限制。EYC阶段不重复发provider smoke，因此有效模型预算留给真实Campaign首轮目标分类。
 

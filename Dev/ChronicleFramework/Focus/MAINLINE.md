@@ -760,6 +760,10 @@ FreeLLMAPI模型路由现况（2026-10-21/22）：原版FreeLLMAPI的单请求`g
 
 2026-10-22当前用户配置路由的无游戏Host烟测（`TestResults/20261022-044617`）用于核查先前失败是否由Harness操作造成：配置读取为FreeLLMAPI `nvidiallama-3.2-11b-vision`，目录快照为`ready`，真实请求随即由该custom/NVIDIA路由返回HTTP 429，响应明确为“Free model capacity exhausted”，`Retry-After=90`，没有模型决策/token或Native命令。Host在有界截止时间内拒绝等待该90秒，不启动游戏；FreeLLMAPI同秒日志以相同路由记录容量错误。故这次失败可归因于该免费上游当时容量/限额，而不是游戏输入、Bannerlord启动或已执行动作；模型目录`ready`仍不足以保证下一次推理可用。由于只收到上游限流响应，不能据此彻底证明所有请求字段均适配，但此错误不是格式拒绝（没有400/422或format错误证据）。
 
+同日继续对照时发现Provider smoke的默认输出预算确有Harness偏差：一次性Host入口的默认值为256 tokens，而游戏MCM profile默认1024；`Test-AgentHostProvider.ps1`现仅在用户未显式配置时使用1024，并在结果回执记录有效额度，`Check-Docs.ps1`增加防回归检查。修后真实配置模型再测：NVIDIA Llama路由曾由服务端实际交付`nvidia/nemotron-3-super-120b`而非所请求模型，在1024 tokens下仍等待到上游120秒超时；临时选取的Nemotron 3.5 Lightning也实际交付`nvidia/nemotron-3.5-lightning-nim`并正好耗尽1024输出tokens，形成截断，均无Native命令。此前可用的Mistral Nemo在一次OVH socket断连/冷却后成功回包（872/33 tokens），但把“完成当前可见村庄工具委托”误分为`supported-map-arrival`，所以Provider smoke失败。结论需分开：256额度是已修正的Harness偏差；模型身份漂移、120秒超时、输出截断和错误目标分类分别是当前远端响应证据，尚未证明由同一根因造成；本轮没有启动游戏或执行Native动作，不据此宣布产品决策链通过。
+
+把目标分类上下文改为中性描述后，同一路由Mistral Nemo的复验仍选择`unsupported`，理由误称`VillageNeedsToolsIssue`不受支持；这说明去掉“地图到达”偏置本身不足以解决分类。对照较早的同一Mistral Nemo Provider烟测`TestResults/20261016-030055`曾以420输入/20输出tokens正确识别同一中文村庄委托；当时分类Prompt只列2个支持范围，现在已扩展为7个。无法仅凭跨日期样本把错误归因于Prompt长度，但将全部7个场景同时塞入每次分类并无必要：Host现改为只按当前`allowedControls`动态附加对应范围说明，并为地图/村庄委托/建家任务增加中文语义例子；离线Host合同要求说明范围与允许控制严格一致。随后的`TestResults/20261022-051502`真实响应（448/39 tokens）仍把中文目标判为unsupported，理由称模型无法从goal-only observation确认“具体可见任务”。这暴露另一个输入契约矛盾：分类本应只判断目标类型，当前Native任务/地点可用性由Host在分类后核实；现已把这个边界写进共享Prompt，并在村庄范围说明“支持类型”不等于“当前已观察到Issue”。offline package合同通过。将该范围/可用性区别进一步加入Prompt后的Provider smoke `TestResults/20261022-051835`未取得模型决定：OVH返回HTTP429、Retry-After=75且不适配180秒以内剩余预算，因此没有Native动作，也没有得到该新Prompt的实模结果。该提示修正仍未获实模验证，不代表分类已解决。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager

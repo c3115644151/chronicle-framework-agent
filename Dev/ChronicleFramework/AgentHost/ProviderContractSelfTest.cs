@@ -1125,7 +1125,7 @@ internal static class ProviderContractSelfTest
                 _ => "Move to any visible safe settlement."
             },
             goalScopeClassificationRequired = expectedClassification != "provider-goal-classification-unavailable",
-            goalScopeContract = "native-map-arrival-v1",
+            goalScopeContract = "native-campaign-goal-classification-v1",
             observation = new
             {
                 scope = "goal-classification-test",
@@ -1155,8 +1155,27 @@ internal static class ProviderContractSelfTest
                 throw new AgentHostException("provider-goal-classification-self-test-failed", "Goal classification did not stay within its listed control catalog.");
             using var body = JsonDocument.Parse(handler.LastRequestBody ?? throw new AgentHostException("provider-goal-classification-prompt-missing", "The classification request was not sent."));
             var system = body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString() ?? string.Empty;
-            if (!system.Contains("required final outcome", StringComparison.Ordinal) || !system.Contains("VillageNeedsToolsIssue", StringComparison.Ordinal) || !system.Contains("BattleSimulation", StringComparison.Ordinal) || !system.Contains("rebuild_player_clan_storymode_quest", StringComparison.Ordinal) || !system.Contains("currently held, currently sellable item", StringComparison.Ordinal) || !system.Contains("Named destinations", StringComparison.Ordinal))
-                throw new AgentHostException("provider-goal-classification-prompt-incomplete", "The classifier prompt omitted the exact limits of the supported goal.");
+            if (!system.Contains("complete requested final outcome", StringComparison.Ordinal) ||
+                !system.Contains("may be written in Chinese", StringComparison.Ordinal) ||
+                !system.Contains("live Native preconditions are currently met", StringComparison.Ordinal))
+                throw new AgentHostException("provider-goal-classification-prompt-incomplete", "The classifier prompt omitted outcome-first, multilingual or scope-versus-availability guidance.");
+            var scopeMarkers = new (string Control, string Marker)[]
+            {
+                ("supportedMapArrivalGoal", "later-observed safe visible settlement"),
+                ("supportedVillageToolsQuestGoal", "VillageNeedsToolsIssue (村庄工具委托)"),
+                ("supportedBattleSimulationGoal", "Native Campaign Send Troops/BattleSimulation path"),
+                ("supportedBattleAndCaptivityGoal", "continue through enabled Native captivity options until free"),
+                ("supportedEstablishYourClanGoal", "exact active StoryMode quest rebuild_player_clan_storymode_quest"),
+                ("supportedCaptivityRecoveryGoal", "MainHero already captive and the original Establish Your Clan quest active"),
+                ("supportedEstablishClanGoldSaleGoal", "currently sellable Goods item"),
+                ("unsupportedGoal", "named destinations, other quests, fixed reward amounts")
+            };
+            var listedControlSet = new HashSet<string>(allowedControls, StringComparer.Ordinal);
+            foreach (var scopeMarker in scopeMarkers)
+            {
+                if (system.Contains(scopeMarker.Marker, StringComparison.Ordinal) != listedControlSet.Contains(scopeMarker.Control))
+                    throw new AgentHostException("provider-goal-classification-scope-catalog-mismatch", "The classifier prompt did not match its scope explanations to exactly the currently listed controls.");
+            }
             if (control == "supportedCaptivityRecoveryGoal" &&
                 (!system.Contains("prisoner_wait", StringComparison.Ordinal) || !system.Contains("never hide time changes", StringComparison.Ordinal) || !system.Contains("already captive", StringComparison.Ordinal)))
                 throw new AgentHostException("provider-captivity-classification-prompt-incomplete", "The classifier prompt omitted the current-captivity boundary or explicit time-control separation.");

@@ -61,11 +61,17 @@ internal static class AgentHostCampaignLoop
             !captiveControls.Any(control => control?.GetValue<string>() == "supportedEstablishClanGoldSaleGoal"))
             throw new AgentHostException("campaign-loop-self-test-establish-clan-gate-leaked", "The StoryMode planner classification must be listed only when the exact original Quest is currently observed.");
         results.Add(new { scenario = "campaign-loop-offers-storymode-planner-and-captivity-recovery-only-for-observed-prerequisites", passed = true });
+        var allScopeClassifierPrompt = AgentHostDecisionCycle.BuildCampaignGoalClassificationPrompt(new JsonObject
+        {
+            ["allowedControls"] = new JsonArray("supportedMapArrivalGoal", "supportedVillageToolsQuestGoal", "supportedBattleSimulationGoal",
+                "supportedBattleAndCaptivityGoal", "supportedEstablishYourClanGoal", "supportedCaptivityRecoveryGoal",
+                "supportedEstablishClanGoldSaleGoal", "unsupportedGoal")
+        });
         if (!AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("intermediate steps", StringComparison.Ordinal) ||
             !AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("not currently visible", StringComparison.Ordinal) ||
-            !AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("BattleSimulation", StringComparison.Ordinal) ||
-            !AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("rebuild_player_clan_storymode_quest", StringComparison.Ordinal) ||
-            !AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("currently held, currently sellable item", StringComparison.Ordinal))
+            !allScopeClassifierPrompt.Contains("BattleSimulation", StringComparison.Ordinal) ||
+            !allScopeClassifierPrompt.Contains("rebuild_player_clan_storymode_quest", StringComparison.Ordinal) ||
+            !allScopeClassifierPrompt.Contains("currently sellable Goods item", StringComparison.Ordinal))
             throw new AgentHostException("campaign-loop-self-test-classifier-confuses-scope-with-availability", "Goal scope classification must treat supported actions as intermediate steps and not depend on target availability.");
         results.Add(new { scenario = "campaign-loop-classification-is-independent-of-target-availability", passed = true });
         var activeEycGoal = "Autonomously complete the exact currently active original StoryMode Establish Your Clan quest.";
@@ -832,7 +838,7 @@ internal static class AgentHostCampaignLoop
             ? new JsonObject
             {
                 ["scope"] = "goal-classification-only",
-                ["message"] = "No Native map-target query has run yet. Classify the requested outcome only; target availability will be checked after this gate."
+                ["message"] = "No goal-specific game action has run yet. Classify the complete requested outcome against the listed supported goals; only the selected goal executor will become available after this gate."
             }
             : observation.DeepClone();
         return new JsonObject
@@ -842,7 +848,7 @@ internal static class AgentHostCampaignLoop
             ["iteration"] = iteration,
             ["goal"] = goal,
             ["goalScopeClassificationRequired"] = classificationRequired,
-            ["goalScopeContract"] = "native-map-arrival-v1",
+            ["goalScopeContract"] = "native-campaign-goal-classification-v1",
             ["observation"] = modelObservation,
             ["previousActionReceipt"] = previousReceipt?.DeepClone(),
             ["decisionFeedback"] = feedback?.DeepClone(),

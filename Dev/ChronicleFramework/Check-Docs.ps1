@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.245'
+$contractVersion = '7.246'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -296,7 +296,7 @@ if ($harnessScript -notmatch "'AgentHostVillageToolsQuestEvaluation' \{ @\('Pref
     $agentHostDecisionCycleSource -notmatch 'You may repeat that action only with corrected arguments from the current catalog' -or
     $agentHostDecisionCycleSource -notmatch '点击继续' -or $agentHostDecisionCycleSource -notmatch 'does not leave the settlement' -or
     $agentHostDecisionCycleSource -notmatch 'intermediate steps' -or
-    $agentHostDecisionCycleSource -notmatch 'steps toward the same outcome' -or
+    $agentHostDecisionCycleSource -notmatch 'steps toward that one outcome' -or
     $agentLiveModelLoopSource -notmatch '\[switch\]\$VillageToolsQuestLoop' -or
     $agentLiveModelLoopSource -notmatch 'tradeCancelChanges,barterOptions,barterAutoBalance,barterOffer,barterCancel,inventoryOpen' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'VillageToolsQuest' -or
@@ -635,6 +635,8 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerProfileTestSource -notmatch 'freellmapi-retry-after-delay-respects-overall-provider-timeout' -or
     $providerSmokeSource -notmatch 'function Resolve-ProviderSmokeTimeoutSeconds' -or
     $providerSmokeSource -notmatch 'Resolve-ProviderSmokeTimeoutSeconds \$null\) -ne 360' -or
+    $providerSmokeSource -notmatch "CHRONICLE_LLM_MAX_TOKENS = '1024'" -or
+    $providerSmokeSource -notmatch 'EffectiveMaxOutputTokens = \[int\]\$env:CHRONICLE_LLM_MAX_TOKENS' -or
     $providerSmokeSource -match '\[ref\]\$effectiveTimeout' -or
     $providerProfileTestSource -notmatch 'freellmapi-429-accepts-observed-315-second-retry-and-fails-closed-outside-bounds' -or
     $providerProfileTestSource -notmatch 'freellmapi-two-transient-upstream-retries-bounded-before-native-action' -or
@@ -647,6 +649,8 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerHostSource -notmatch 'IsMistralSmall32' -or $providerHostSource -notmatch 'GetMinimumRequestInterval' -or $providerHostSource -notmatch 'WaitForProviderRateWindowAsync' -or $providerHostSource -notmatch 'ShouldRetryTransientFreeLlmApiFailure' -or $providerHostSource -notmatch 'GetBoundedRateLimitRetryAfter' -or $providerHostSource -notmatch 'transientProviderRetriesUsed' -or $providerHostSource -notmatch 'retryDelaySeconds = transientProviderRetriesUsed == 0 \? 5 : 15' -or $providerHostSource -notmatch 'retryAfter=' -or $providerHostSource -notmatch 'failedRoute.Contains\("ovh/Mistral-Small"' -or $providerHostSource -notmatch 'payload.Remove\("max_completion_tokens"\)' -or $providerHostSource -notmatch 'ReadIntegerEnvironment\("CHRONICLE_LLM_MAX_TOKENS", 1024, 64, 4096\)' -or
     $providerProfileTestSource -notmatch 'freellmapi-missing-key-fails-before-network-request' -or
     $providerSmokeSource -notmatch 'goalScopeClassificationRequired = \$true' -or
+    $providerSmokeSource -notmatch 'goalScopeContract = ''native-campaign-goal-classification-v1''' -or
+    $providerSmokeSource -notmatch 'No goal-specific game action has run yet' -or
     $providerSmokeSource -notmatch 'supportedVillageToolsQuestGoal' -or
     $providerSmokeSource -notmatch 'NativeCommands = 0' -or
     $providerSmokeSource -notmatch 'GatewayStartedByHarness = \[bool\]\$freeLlmApiProfile\.GatewayStartedByHarness' -or
@@ -768,8 +772,15 @@ $agentHostLifecycleHarness = Get-Content (Join-Path $harnessRoot 'Test-AgentHost
 $agentHostRuntimeControllerSource = Get-Content (Join-Path $harnessRoot 'AgentHostRuntimeController.cs') -Raw -Encoding UTF8
 if ($agentHostLifecycleHarness -notmatch "'UnsupportedGoal'" -or
     $agentHostCampaignLoopSource -notmatch 'BuildGoalScopeClassificationControls' -or
+    $agentHostCampaignLoopSource -notmatch 'native-campaign-goal-classification-v1' -or
+    $agentHostCampaignLoopSource -notmatch 'No goal-specific game action has run yet' -or
     $agentHostCampaignLoopSource -notmatch 'campaign-goal-unsupported' -or
     $agentHostDecisionCycleSource -notmatch 'CampaignGoalClassificationPrompt' -or
+    $agentHostDecisionCycleSource -notmatch 'The goal may be written in Chinese' -or
+    $agentHostDecisionCycleSource -notmatch 'Classification tests supported goal type only' -or
+    $agentHostDecisionCycleSource -notmatch 'VillageNeedsToolsIssue \(村庄工具委托\)' -or
+    $agentHostDecisionCycleSource -notmatch 'Use unsupportedGoal for any requested final outcome' -or
+    $agentHostProviderSelfTestSource -notmatch 'provider-goal-classification-scope-catalog-mismatch' -or
     $agentHostProviderSource -notmatch 'supportedMapArrivalGoal' -or
     $agentHostRuntimeControllerSource -notmatch 'campaign-goal-unsupported') {
     throw 'The bounded map Host must classify the complete user goal before offering Native actions and safely report unsupported objectives.'
