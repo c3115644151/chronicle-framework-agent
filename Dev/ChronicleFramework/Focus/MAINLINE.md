@@ -734,6 +734,8 @@ Gold售卖循环的Native地图目标原始回执可以含395个聚落，而安�
 
 2026-10-21的无密钥网络探针使用FreeLLMAPI已配置的SOCKS5H代理`127.0.0.1:7890`，只访问公开HTTP端点：GitHub返回HTTP 200、Google根API返回HTTP 404（均完成TLS/HTTP），NVIDIA模型API在Windows Schannel TLS阶段断开，Cohere则报证书吊销检查离线。它说明该代理端口并非整体不可达，但不同上游域名/Windows证书链的实际连通性不一致；curl/Schannel与FreeLLMAPI Node TLS不是同一客户端栈，因此不能据此定位是StarVPN代理、系统证书状态还是具体provider服务器。FreeLLMAPI官方说明中，heuristic cooldown probe约每60秒扫描，并且仅在provider验证成功时提前清除cooldown；该信息支持等待/观察可恢复窗口，不构成新的推理可用性证明。[FreeLLMAPI cooldown & probe documentation](https://github.com/tashfeenahmed/freellmapi/blob/main/docs/en/architecture/02-quota-and-cooldown-engine.md)
 
+同一分钟内对官方OVH `/v1/models`做协议对照：经` socks5h://127.0.0.1:7890`返回HTTP 200，经`http://127.0.0.1:7890`则Windows Schannel在TLS握手失败。故不同时间的curl结果不能作为“FreeLLMAPI代理协议设错”的证据，现有SOCKS5H配置与本次探测一致；provider health log仍在同一时段报告OVH Node请求断开。仅可判为各上游/客户端TLS路径有时段性差异，不能据此指认StarVPN配置错误或直接更改其协议。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager
