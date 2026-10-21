@@ -756,6 +756,8 @@ FreeLLMAPI模型路由现况（2026-10-21/22）：原版FreeLLMAPI的单请求`g
 
 2026-10-21 20:35Z同一时段请求形态对照：Windows `curl` 经`socks5h://127.0.0.1:7890`访问OVH `/v1/models` GET返回HTTP 200/TLS约0.46秒；向同一主机发送一个极小、无密钥的JSON-Schema `/v1/chat/completions` POST则以curl exit 56（`server closed abruptly (missing close_notify)`）、HTTP 000结束。它说明推理POST故障不只出现在FreeLLMAPI Node包装器，但因GET与POST行为不同，仍不能判定是星辰SOCKS代理、OVH匿名推理入口还是两者交互；没有模型响应/可用量回执、没有修改代理或应用设置，也没有游戏动作。只凭公开`/models`成功不得宣称推理可用。
 
+2026-10-21 20:35Z同一时段请求形态对照：Windows `curl` 经`socks5h://127.0.0.1:7890`访问OVH `/v1/models` GET返回HTTP 200/TLS约0.46秒；向同一主机发送一个极小、无密钥的JSON-Schema `/v1/chat/completions` POST则以curl exit 56（`server closed abruptly (missing close_notify)`）、HTTP 000结束。紧接着不带`response_format`的最小chat POST通过同一SOCKS5H返回HTTP 200、模型`gpt-oss-20b`；这提示请求格式或相关上游/代理路径可能影响推理请求，但只是一组单次对照，不能推翻先前JSON-Schema成功样本，也不能确定责任在星辰代理、OVH还是具体格式。未改应用/代理设置、未用该文本探针对游戏发Native动作；下一条实测优先用Host现有的直接Kilo `north-mini-code` required-tool-call路径，待Kilo池冷却窗口自然恢复后再做。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager
