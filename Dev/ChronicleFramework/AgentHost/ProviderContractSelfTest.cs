@@ -270,6 +270,96 @@ internal static class ProviderContractSelfTest
             results.Add(new { scenario = "freellmapi-bearer-auth-available-model-preflight-and-routed-model-evidence", passed = true });
         }
 
+        var toolCallRequestCount = 0;
+        var toolCallPayloadValid = false;
+        var toolCallHandler = new StubHandler((httpRequest, _) =>
+        {
+            if (httpRequest.Method == HttpMethod.Get)
+                return Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"north-mini-code\",\"supported_parameters\":[\"tools\",\"tool_choice\",\"max_tokens\"]}]}"));
+
+            toolCallRequestCount++;
+            using var payloadDocument = JsonDocument.Parse(httpRequest.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            var payload = payloadDocument.RootElement;
+            var tools = payload.TryGetProperty("tools", out var toolRows) && toolRows.ValueKind == JsonValueKind.Array
+                ? toolRows.EnumerateArray().ToArray()
+                : Array.Empty<JsonElement>();
+            var function = tools.Length == 1 && tools[0].TryGetProperty("function", out var functionValue)
+                ? functionValue
+                : default;
+            toolCallPayloadValid =
+                payload.GetProperty("model").GetString() == "north-mini-code" &&
+                !payload.TryGetProperty("response_format", out var ignoredResponseFormat) &&
+                payload.GetProperty("tool_choice").GetString() == "required" &&
+                tools.Length == 1 &&
+                function.ValueKind == JsonValueKind.Object &&
+                function.TryGetProperty("name", out var functionName) && functionName.GetString() == "submit_chronicle_decision" &&
+                function.GetProperty("parameters").GetProperty("properties").GetProperty("decision").GetProperty("anyOf").GetArrayLength() == 1;
+            return Task.FromResult(JsonResponse(BuildToolCallChatResponse(
+                "{\"decision\":{\"control\":\"done\",\"reason\":\"provider contract smoke passed\"}}", "tool_calls")));
+        });
+        using (var toolCallClient = new HttpClient(toolCallHandler) { Timeout = freeLlmApiSettings.Timeout })
+        using (var toolCallProvider = new OllamaNativeProvider(freeLlmApiSettings with { Model = "north-mini-code" }, toolCallClient))
+        using (var request = JsonDocument.Parse(BuildDecisionRequest()))
+        {
+            await toolCallProvider.CheckConfiguredModelAsync(CancellationToken.None);
+            var result = await toolCallProvider.DecideAsync(request.RootElement, CancellationToken.None);
+            if (!toolCallPayloadValid || toolCallRequestCount != 1 ||
+                result.ResponseFormatMode != "required_tool_call" ||
+                result.Decision["done"]?.GetValue<bool>() != true ||
+                result.PromptTokens != 24 || result.CompletionTokens != 12)
+                throw new AgentHostException("provider-self-test-tool-call-compatibility-failed", "A FreeLLMAPI model that advertises tools and tool_choice but not response_format must receive one forced, side-effect-free decision tool call and still pass the normal local decision validator.");
+            results.Add(new { scenario = "freellmapi-model-capabilities-select-required-tool-call-with-local-decision-validation", passed = true, model = "north-mini-code", modelCalls = 1, nativeCommands = 0 });
+        }
+
+        var invalidToolCallRequests = 0;
+        var invalidToolCallHandler = new StubHandler((httpRequest, _) =>
+        {
+            if (httpRequest.Method == HttpMethod.Get)
+                return Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"north-mini-code\",\"supported_parameters\":[\"tools\",\"tool_choice\"]}]}"));
+            invalidToolCallRequests++;
+            return Task.FromResult(JsonResponse(BuildToolCallChatResponse(
+                "{\"decision\":{\"action\":\"invented_action\",\"arguments\":{},\"rationale\":\"bad\"}}", "tool_calls")));
+        });
+        using (var invalidToolCallClient = new HttpClient(invalidToolCallHandler) { Timeout = freeLlmApiSettings.Timeout })
+        using (var invalidToolCallProvider = new OllamaNativeProvider(freeLlmApiSettings with { Model = "north-mini-code" }, invalidToolCallClient))
+        using (var request = JsonDocument.Parse(BuildDecisionRequest()))
+        {
+            await invalidToolCallProvider.CheckConfiguredModelAsync(CancellationToken.None);
+            try
+            {
+                await invalidToolCallProvider.DecideAsync(request.RootElement, CancellationToken.None);
+                throw new AgentHostException("provider-self-test-tool-call-unlisted-action-accepted", "A structured tool call outside the current Native catalog must be rejected before it can become a Host action.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-action-unavailable")
+            {
+                if (invalidToolCallRequests != 1)
+                    throw new AgentHostException("provider-self-test-tool-call-unlisted-action-request-count-invalid", "The Host must validate one tool call locally and must not repeat or dispatch it as a Native command.");
+            }
+            results.Add(new { scenario = "freellmapi-tool-call-output-still-rejects-actions-outside-current-native-catalog", passed = true, modelCalls = 1, nativeCommands = 0 });
+        }
+
+        var noStructuredOutputRequests = 0;
+        var unsupportedOutputHandler = new StubHandler((httpRequest, _) =>
+        {
+            if (httpRequest.Method != HttpMethod.Get) noStructuredOutputRequests++;
+            return Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"horde-model-without-structured-output\",\"supported_parameters\":[\"max_tokens\",\"stream\"]}]}"));
+        });
+        using (var unsupportedOutputClient = new HttpClient(unsupportedOutputHandler) { Timeout = freeLlmApiSettings.Timeout })
+        using (var unsupportedOutputProvider = new OllamaNativeProvider(freeLlmApiSettings with { Model = "horde-model-without-structured-output" }, unsupportedOutputClient))
+        {
+            try
+            {
+                await unsupportedOutputProvider.CheckConfiguredModelAsync(CancellationToken.None);
+                throw new AgentHostException("provider-self-test-unsupported-structured-output-accepted", "The Host accepted a FreeLLMAPI model with neither JSON response_format nor tool-calling support.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-structured-output-unsupported")
+            {
+                if (noStructuredOutputRequests != 0)
+                    throw new AgentHostException("provider-self-test-unsupported-structured-output-request-sent", "The Host sent an inference request to a FreeLLMAPI model that advertises no safe structured-output strategy.");
+            }
+            results.Add(new { scenario = "freellmapi-model-without-json-or-tool-support-fails-before-inference", passed = true, modelCalls = 0, nativeCommands = 0 });
+        }
+
         var reliableRouterHandler = new StubHandler((_, _) => Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"auto\"}]}")));
         using (var reliableRouterClient = new HttpClient(reliableRouterHandler) { Timeout = settings.Timeout })
         using (var reliableRouter = new OllamaNativeProvider(freeLlmApiSettings with { Model = "auto:reliable" }, reliableRouterClient))
@@ -1353,6 +1443,34 @@ internal static class ProviderContractSelfTest
             {
                 index = 0,
                 message = new { role = "assistant", content, refusal = (string?)null },
+                finish_reason = finishReason
+            }
+        },
+        usage = new { prompt_tokens = 24, completion_tokens = 12, total_tokens = 36 }
+    });
+
+    private static string BuildToolCallChatResponse(string arguments, string finishReason) => JsonSerializer.Serialize(new
+    {
+        model = "north-mini-code",
+        choices = new[]
+        {
+            new
+            {
+                index = 0,
+                message = new
+                {
+                    role = "assistant",
+                    content = (string?)null,
+                    tool_calls = new[]
+                    {
+                        new
+                        {
+                            id = "call_chronicle_decision",
+                            type = "function",
+                            function = new { name = "submit_chronicle_decision", arguments }
+                        }
+                    }
+                },
                 finish_reason = finishReason
             }
         },

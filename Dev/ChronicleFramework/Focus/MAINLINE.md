@@ -746,6 +746,8 @@ Gold售卖循环的Native地图目标原始回执可以含395个聚落，而安�
 
 Provider现况（2026-10-21）：`TestResults/20261021-194935`原版FreeLLMAPI单请求`gpt-oss-20b→ovh/gpt-oss-20b`成功完成JSON Schema分类（891/160 tokens，Native 0），但隔离EYC连续两次`20261021-200009`与`203602`都在首个有效决策前失败。两次`save002`字节副本均起始于MainHero captive的`prisoner_wait`；第二次用5fps显式Bannerlord HWND视频覆盖114.4秒/572帧，时间线采样与事件索引均显示CampaignDay 91080.216、菜单和状态未变化，MP4索引后删除。FreeLLMAPI两次记录OVH `socket hang up`；第二次Host等待85,010ms后重试仍无上游，收到429/Retry-After=75并安全结束，0有效决策/Native动作，两个源存档hash不变、副本/session/进程清理通过。单一Kilo模型`north-mini-code`探针`201348`也在模型决策前收到FreeLLMAPI pool-exhausted 429，Soonest reset约64,800秒、no upstream tried。结合原版应用/Kilo目录探测HTTP 200，当前能确认本机FreeLLMAPI/API key和通用SOCKS路由可用；模型`ready`不代表当下有可用上游，模型池/配额间歇耗尽是本轮直接阻断项，尚不能归因EYC玩法逻辑。停止本轮模型探测，等待路由自然恢复或补充可用Provider后再实测；EYC闭环仍未完成。
 
+2026-10-22 为FreeLLMAPI直接模型增加能力感知的结构化输出选择：在模型目录声明`response_format`时保留原严格JSON Schema；若没有它但同时声明`tools`和`tool_choice`，Host改用单一强制`submit_chronicle_decision`函数格式并把arguments交给原有本地`NormalizeDecision`/当前动作目录验证，工具绝不被当作Native动作执行；两类能力都缺失时在推理前安全拒绝。FreeLLMAPI `auto`路由仍发送JSON Schema，以让路由器避开不兼容候选。此选择遵循LangChain正式文档中ProviderStrategy优先、无原生结构化输出时使用ToolStrategy并校验输出的模式；Kilo官方OpenAI-compatible Gateway文档确认`tool_choice`接受`required`。[LangChain Structured output](https://docs.langchain.com/oss/python/langchain/structured-output) [Kilo Gateway API Reference](https://kilo.ai/docs/gateway/api-reference)。本机FreeLLMAPI目录读取到`north-mini-code`有`tools/tool_choice`、无`response_format`，`thedrummer-behemoth-128b-v3-q4-k-m`无两者；`TestResults/20261022-032333` AgentHostPackage通过（Provider合同178项，模型调用0、Native命令0），覆盖工具调用构造/解析、目录外动作拒绝和无兼容格式时的请求前失败。Kilo路由池当前报告耗尽，故此新协议尚未由真实模型或游戏实测；不能据此宣称EYC完成。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager

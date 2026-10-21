@@ -24,6 +24,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     private readonly bool _ownsClient;
     private DateTimeOffset _lastProviderRequestUtc;
     private string? _lastProviderRoute;
+    private bool _useRequiredToolCallStrategy;
     internal string ModelId => _settings.Model;
     internal int MaxOutputTokens => _settings.MaxOutputTokens;
     internal string ConfigurationSource { get; }
@@ -188,10 +189,42 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             if (!document.RootElement.TryGetProperty("data", out var models) || models.ValueKind != JsonValueKind.Array)
                 throw new AgentHostException("provider-health-response-invalid", "The local model service returned an unsupported model-list response.");
 
-            var modelFound = models.EnumerateArray().Any(model => string.Equals(ReadString(model, "id"), _settings.Model, StringComparison.Ordinal));
+            JsonElement selectedModel = default;
+            foreach (var model in models.EnumerateArray())
+            {
+                if (!string.Equals(ReadString(model, "id"), _settings.Model, StringComparison.Ordinal)) continue;
+                selectedModel = model;
+                break;
+            }
+            var modelFound = selectedModel.ValueKind == JsonValueKind.Object;
             var documentedFreeLlmApiRouterStrategy = IsFreeLlmApi(_settings.Endpoint) && FreeLlmApiRouterStrategies.Contains(_settings.Model);
             if (!modelFound && !documentedFreeLlmApiRouterStrategy)
                 throw new AgentHostException("provider-model-unavailable", "The configured model is not listed by the local model service.");
+
+            _useRequiredToolCallStrategy = false;
+            if (IsFreeLlmApi(_settings.Endpoint) && modelFound &&
+                selectedModel.TryGetProperty("supported_parameters", out var supportedParameters) && supportedParameters.ValueKind == JsonValueKind.Array)
+            {
+                var capabilities = supportedParameters.EnumerateArray()
+                    .Where(value => value.ValueKind == JsonValueKind.String)
+                    .Select(value => value.GetString())
+                    .Where(value => !string.IsNullOrWhiteSpace(value))
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var supportsResponseFormat = capabilities.Contains("response_format");
+                var supportsRequiredToolCall = capabilities.Contains("tools") && capabilities.Contains("tool_choice");
+                if (supportsResponseFormat)
+                {
+                    _useRequiredToolCallStrategy = false;
+                }
+                else if (supportsRequiredToolCall)
+                {
+                    _useRequiredToolCallStrategy = true;
+                }
+                else
+                {
+                    throw new AgentHostException("provider-structured-output-unsupported", "The configured FreeLLMAPI model advertises neither response_format nor required tool-calling support; no decision request was sent.");
+                }
+            }
         }
         catch (AgentHostException)
         {
@@ -238,9 +271,29 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         }
         else
         {
-            payload["response_format"] = useJsonObjectCompatibilityMode
-                ? new { type = "json_object" }
-                : new { type = "json_schema", json_schema = new { name = "chronicle_agent_decision", strict = true, schema = BuildDecisionSchema(request) } };
+            if (_useRequiredToolCallStrategy)
+            {
+                payload["tools"] = new[]
+                {
+                    new
+                    {
+                        type = "function",
+                        function = new
+                        {
+                            name = "submit_chronicle_decision",
+                            description = "Submit exactly one proposed Chronicle decision. This function is an output format only; it does not execute any game action.",
+                            parameters = BuildDecisionSchema(request)
+                        }
+                    }
+                };
+                payload["tool_choice"] = "required";
+            }
+            else
+            {
+                payload["response_format"] = useJsonObjectCompatibilityMode
+                    ? new { type = "json_object" }
+                    : new { type = "json_schema", json_schema = new { name = "chronicle_agent_decision", strict = true, schema = BuildDecisionSchema(request) } };
+            }
             payload[_settings.MaxTokenParameter] = _settings.MaxOutputTokens;
             if (_settings.Thinking.HasValue) payload["thinking"] = new { type = _settings.Thinking.Value ? "enabled" : "disabled" };
             if (!string.IsNullOrWhiteSpace(_settings.ReasoningEffort) &&
@@ -351,7 +404,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
 
         var responseFormatMode = _settings.NativeOllama
             ? "ollama-native"
-            : useJsonObjectCompatibilityMode ? "json_object_compatibility" : "json_schema";
+            : _useRequiredToolCallStrategy ? "required_tool_call" : useJsonObjectCompatibilityMode ? "json_object_compatibility" : "json_schema";
         var response = await SendProviderRequestWithTransientRetryAsync(body);
         if (!_settings.NativeOllama && responseFormatMode == "json_schema" && ShouldRetryWithJsonObject(_settings.Endpoint, response))
         {
@@ -418,14 +471,30 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     ? choiceArray.EnumerateArray().ToArray()
                     : Array.Empty<JsonElement>();
                 if (choices.Length != 1 || choices[0].ValueKind != JsonValueKind.Object ||
-                    !choices[0].TryGetProperty("message", out var messageElement) || messageElement.ValueKind != JsonValueKind.Object ||
-                    !messageElement.TryGetProperty("content", out var contentElement) || contentElement.ValueKind != JsonValueKind.String)
+                    !choices[0].TryGetProperty("message", out var messageElement) || messageElement.ValueKind != JsonValueKind.Object)
                     throw new AgentHostException("provider-content-missing", "The local OpenAI-compatible provider did not return one structured message.");
                 if (!string.IsNullOrWhiteSpace(ReadString(messageElement, "refusal")))
                     throw new AgentHostException("provider-refused", "The local model provider refused the decision request.");
                 finishReason = ReadString(choices[0], "finish_reason");
                 responseModel = ReadString(root, "model");
-                content = contentElement.GetString();
+                if (responseFormatMode == "required_tool_call")
+                {
+                    if (!messageElement.TryGetProperty("tool_calls", out var toolCalls) || toolCalls.ValueKind != JsonValueKind.Array || toolCalls.GetArrayLength() != 1)
+                        throw new AgentHostException("provider-tool-call-missing", "The model must return exactly one required decision tool call.");
+                    var toolCall = toolCalls[0];
+                    if (ReadString(toolCall, "type") != "function" ||
+                        !toolCall.TryGetProperty("function", out var function) || function.ValueKind != JsonValueKind.Object ||
+                        ReadString(function, "name") != "submit_chronicle_decision" ||
+                        !function.TryGetProperty("arguments", out var arguments) || arguments.ValueKind != JsonValueKind.String)
+                        throw new AgentHostException("provider-tool-call-invalid", "The model returned an unsupported decision tool call envelope.");
+                    content = arguments.GetString();
+                }
+                else
+                {
+                    if (!messageElement.TryGetProperty("content", out var contentElement) || contentElement.ValueKind != JsonValueKind.String)
+                        throw new AgentHostException("provider-content-missing", "The local OpenAI-compatible provider did not return one structured message.");
+                    content = contentElement.GetString();
+                }
                 var usage = root.TryGetProperty("usage", out var usageValue) ? usageValue : default;
                 promptTokens = ReadNonNegativeInt(usage, "prompt_tokens");
                 completionTokens = ReadNonNegativeInt(usage, "completion_tokens");
