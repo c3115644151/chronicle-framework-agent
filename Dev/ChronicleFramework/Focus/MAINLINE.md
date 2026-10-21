@@ -736,6 +736,8 @@ Gold售卖循环的Native地图目标原始回执可以含395个聚落，而安�
 
 同一分钟内对官方OVH `/v1/models`做协议对照：经`socks5h://127.0.0.1:7890`返回HTTP 200，经`http://127.0.0.1:7890`则Windows Schannel在TLS握手失败。7890监听进程已由只读Windows进程查询确认为`XingchenCore.exe`（星辰VPN核心）。故不同时间的curl结果不能作为“FreeLLMAPI代理协议设错”的证据，现有SOCKS5H配置与本次探测一致；provider health log仍在同一时段报告OVH Node请求断开。仅可判为各上游/客户端TLS路径有时段性差异，不能据此指认StarVPN配置错误或直接更改其协议。
 
+2026-10-21继续核验FreeLLMAPI 0.16.4原生日志：Google Gemini多次返回`403 Your project has been denied access`，属于Google项目授权拒绝；BlockRun custom曾明确返回免费容量耗尽429；当日`auto:reliable`的一条请求先由Kilo Poolside路由返回429，再回退到AI Horde的Behemoth-X模型并返回`406 Model None not known`。同一时段Host使用本机FreeLLMAPI `/v1`接口，`/api/ping`成功、带统一密钥读取到87个目录条目；请求日志已显示进入Kilo和AI Horde上游，因此没有证据表明本次是Chronicle endpoint/API认证失败，但AI Horde的精确model映射来源仍未知。该日志文件在2026-10-16至10-21记录580条代理请求（10-21为23条），日志不含调用方身份，不能把全部请求归给Harness；不过反复真实测试很可能贡献了部分流量并放大免费额度/冷却压力。今后诊断不再重复打`auto`链，先单个免费路由、单次小请求；不要用`ready`状态代替真实推理证明。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager
