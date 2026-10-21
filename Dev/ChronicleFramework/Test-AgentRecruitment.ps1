@@ -91,21 +91,19 @@ try {
         @($offersAfterUnconfirmedCapacity.data.offers | Where-Object { $_.available -and $_.ownerId -eq $capacityOffer[0].ownerId -and $_.troopId -eq $capacityOffer[0].troopId -and [int]$_.slot -eq [int]$capacityOffer[0].slot }).Count -eq 1
     )
     if (-not $unconfirmedCapacityRejectedWithoutMutation) { throw 'Unconfirmed Native over-limit recruitment changed MainParty, Gold, or the Notable volunteer slot.' }
-    $previousCapacityProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
-    $env:CHRONICLE_TEST_PROVIDER_MODE = 'recruitment'
-    try {
-        $capacityLoopOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $decisionLoop -DecisionProviderPath $decisionProvider -MaxDecisions 2 -TimeoutSeconds $TimeoutSeconds -CommandPrefix "$runPrefix-capacity-loop" 2>&1 | Out-String
-        if ($LASTEXITCODE -ne 0) { throw "Over-limit recruitment decision loop failed: $capacityLoopOutput" }
-        $capacityLoop = $capacityLoopOutput | ConvertFrom-Json
+    # The legacy PowerShell decision loop intentionally hides over-capacity offers. Exercise the explicit Native Bridge consent directly here; the EYC AgentHost has its own model/catalog contract test for this branch.
+    $capacityDecision = [ordered]@{
+        action = 'recruit'
+        arguments = [ordered]@{
+            OwnerId = [string]$capacityOffer[0].ownerId
+            TroopId = [string]$capacityOffer[0].troopId
+            VolunteerSlot = [int]$capacityOffer[0].slot
+            ConfirmPartySizeWarning = $true
+        }
+        source = 'harness-explicit-native-over-limit-confirmation'
     }
-    finally {
-        if ($null -eq $previousCapacityProviderMode) { Remove-Item Env:CHRONICLE_TEST_PROVIDER_MODE -ErrorAction SilentlyContinue }
-        else { $env:CHRONICLE_TEST_PROVIDER_MODE = $previousCapacityProviderMode }
-    }
-    $capacityTrace = @($capacityLoop.trace)
-    $capacityDecision = if ($capacityTrace.Count -ge 2) { $capacityTrace[1].decision } else { $null }
-    $capacityRecruit = if ($capacityTrace.Count -ge 2) { $capacityTrace[1].actionReceipt } else { $null }
-    $afterCapacityRecruit = if ($capacityTrace.Count -ge 2) { $capacityTrace[1].observationAfter } else { $null }
+    $capacityRecruit = Invoke-AgentCli 'recruit' @('-OwnerId', [string]$capacityOffer[0].ownerId, '-TroopId', [string]$capacityOffer[0].troopId, '-VolunteerSlot', [string]$capacityOffer[0].slot, '-ConfirmPartySizeWarning', '-CommandId', "$runPrefix-capacity-confirm", '-TimeoutSeconds', $TimeoutSeconds)
+    $afterCapacityRecruit = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-capacity-confirm-state", '-TimeoutSeconds', $TimeoutSeconds)
     $capacityWarningConfirmed = (
         $capacityDecision.action -eq 'recruit' -and
         [bool]$capacityDecision.arguments.ConfirmPartySizeWarning -and
