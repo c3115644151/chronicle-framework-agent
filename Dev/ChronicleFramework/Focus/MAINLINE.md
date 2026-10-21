@@ -738,6 +738,8 @@ Gold售卖循环的Native地图目标原始回执可以含395个聚落，而安�
 
 2026-10-21继续核验FreeLLMAPI 0.16.4原生日志：Google Gemini多次返回`403 Your project has been denied access`，属于Google项目授权拒绝；BlockRun custom曾明确返回免费容量耗尽429；当日`auto:reliable`的一条请求先由Kilo Poolside路由返回429，再回退到AI Horde的Behemoth-X模型并返回`406 Model None not known`。同一时段Host使用本机FreeLLMAPI `/v1`接口，`/api/ping`成功、带统一密钥读取到87个目录条目；请求日志已显示进入Kilo和AI Horde上游，因此没有证据表明本次是Chronicle endpoint/API认证失败，但AI Horde的精确model映射来源仍未知。该日志文件在2026-10-16至10-21记录580条代理请求（10-21为23条），日志不含调用方身份，不能把全部请求归给Harness；不过反复真实测试很可能贡献了部分流量并放大免费额度/冷却压力。今后诊断不再重复打`auto`链，先单个免费路由、单次小请求；不要用`ready`状态代替真实推理证明。
 
+2026-10-21后续真实模型诊断：`TestResults/20261021-175115`用单模型`gpt-oss-20b`探针成功经`ovh/gpt-oss-20b`返回` supported-village-tools-quest`（891输入/103输出tokens，Native命令0）；这只证明一次远端分类可用。随后EYC隔离切片`175453`在90秒请求期限下遇`Retry-After=85`，尚未等待即快速失败；`175954`把期限提高到120秒后实际等待85.011秒并重试一次，但第二次仍未获得模型回答，FreeLLMAPI报`Retry-After=585`，Host按360秒上限立即安全终止。两次EYC均0个有效模型决定/Native动作，源`save002.sav`哈希不变，临时副本、游戏进程和session清理成功，录像完整覆盖；失败帧是战役地图上的通知/提示面板。对应FreeLLMAPI日志在10:02和10:04记录两次`ovh/gpt-oss-20b` socket hang up，随后路由池将该模型置于cooldown。与此同时，只读数据库确认代理启用、模式为forward、代理来源dashboard、地址`socks5h://127.0.0.1:7890`、无key级代理覆盖；同一时段Windows curl经该SOCKS5H访问OVH与Kilo公开`/models`均HTTP 200。故可排除“代理未设置/Host API认证错误”，但Node Provider TLS路径与Windows Schannel表现不同或具有间歇性，具体根因仍待定位，不把curl GET成功当作模型推理成功。AI Horde公共文本模型目录当前没有日志所选`aphrodite/TheDrummer/Behemoth-X-123B-v2.1`（当前Behemoth项为不同名称/版本），支持此回退模型ID过时的判断，但其在FreeLLMAPI内部的映射来源尚未知；不再重复调用`auto`链。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager
