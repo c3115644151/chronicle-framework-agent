@@ -729,6 +729,8 @@ Gold售卖循环的Native地图目标原始回执可以含395个聚落，而安�
 
 `TestResults/20261021-144939`加载了包含最新EYC分类重判代码的隔离`save002`副本。FreeLLMAPI第一次Mistral请求成功且分类为EYC，但下一次实际目标循环请求收到HTTP429；Host日志说明没有有界Retry-After，FreeLLMAPI原始Fallback日志显示多候选处于cooldown/不兼容，因而在第二次有效模型决策前安全终止（有效决策1、Native动作0）。源`save002.sav`前后SHA-256一致，临时`ChronicleW7P-12b98703f3fa48ec`副本/session清理，Bannerlord进程0。此运行验证新提交可构建、游戏可启动及失败清理，不验证Gold、交易、分类重判或EYC进展；无实时有效上游时不重复轰击路由。
 
+`TestResults/20261021-151955`把`gpt-oss-20b`作为本次唯一FreeLLMAPI模型路由再次实测；目录预检通过且Bannerlord能正常启动，但OVH TLS握手在首个Provider请求约0.4秒后断开，FreeLLMAPI记录其余10个有模型的provider platform无健康/启用key，随后Host在bounded retry等待中以`provider-timeout`退出（模型决定0、Native动作0）。这证明“列在ready目录”并不保证本次请求有可用上游，也排除了EYC分类/动作协议是该run失败的原因。Harness清理游戏进程、临时副本与CLI session，正式源档未变；不再用同一已耗尽路由重复重启完整游戏来消耗等待和调试时间。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager
