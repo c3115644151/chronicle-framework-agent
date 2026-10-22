@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.273
+Contract version: 7.274
 
 `FreshStoryModeNativeMenuLeaveEvaluation`是非模型的窄Native集成测试：同一个新Campaign先通过兄长对话的原版“跳过教程”及确认，原生推进对话后自然结束训练场Mission并进入活动EYC的首个MapState；该状态仍位于`training_field_menu`。Harness只选择当前启用的原版`training_field_leave`并通过`GameMenu.RunMenuOptionConsequence`调用原版处理器，随后验证回到地图、训练场菜单/地点退出、EYC仍活动、CampaignDay与Stop档位未变、无存档写入，并捕获前后引擎画面和Native post-action观察（包括若出现的Inquiry）。`TestResults/20261022-194410`完整通过；`20261022-195530`复测后还在收据中明确记录`brother-dialogue-path-no-tab-fallback`。两次教程Mission离开均由原版兄长对话路径完成，没有使用Tab兜底。这项测试只验证开局准备与单项Native菜单动作，不计作AI决策或长程EYC目标进展。`TestResults/20261022-193820`曾在兄长对话仍活跃时过早模拟原版Leave Area并触发游戏空引用崩溃；现Harness改为每1.5秒推进一次原版“点击继续”，且仅在ConversationManager已结束对话、场景仍未退出时才启动2.5秒Native Leave Area兜底。该兜底在训练场场景尚未单独实测，严禁在对话仍活跃时触发；其它Town Mission Leave证据不能替代该特定验证。后续弹出的通知/询问也不会由本测试自动确认。
 
@@ -19,7 +19,7 @@ EYC实机诊断只做只读FreeLLMAPI目录检查、构建、AgentHost包合同�
 
 Fresh StoryMode setup Harness只在显式`CHRONICLE_FRESH_CAMPAIGN_STORYMODE`辅助标记下从原版`InitialStateOption`目录执行官方`StoryModeNewGame`菜单委托；Campaign自身及原版CharacterCreation流程负责创建角色，再由Native `ConversationManager`选择训练场兄长的原版`player_answer_skip_tutorial`与`end_tutorial_yes`选项。不直接调用`CompleteTutorialPhase`、不写Quest/资源、也不保存或回载预备档；启动必须经过BLSE standalone与稳定Steam就绪检查，避免直接启动`Bannerlord.exe`触发Steam API警告。本setup阶段验证原版EYC自然活动后停在MapState，仍不等于真实鼠标点击的菜单入口验证或EYC自治门禁通过。Harness在对话开始、Skip选项、确认选项和目标地图各留出8秒的只读画面稳定时间；四张有效引擎帧必须各有不同SHA-256，重复静态Splash/旧帧使视觉验收失败，不能仅凭文件存在或游戏状态日志声称视觉已看见。
 
-`FreshStoryModeModelEvaluation`在同一个新建Campaign进程中完成上述Natural StoryMode/官方Skip起点，然后仅用Harness生命周期路径调用既有MCM“启动自主Agent”按钮；它不保存/回载Campaign，不通过固定动作路线推进四项目标。目标文本限定为完整EYC主线目标；FreeLLMAPI单请求默认90秒、Host Ready后最多运行120秒并有界停止，达到上限作为失败/截断样本保留，不重放已经执行过的动作。
+`FreshStoryModeModelEvaluation`在同一个新建Campaign进程中完成上述Natural StoryMode/官方Skip起点，然后仅用Harness生命周期路径调用既有MCM“启动自主Agent”按钮；它不保存/回载Campaign，不通过固定动作路线推进四项目标。目标文本限定为完整EYC主线目标；FreeLLMAPI单请求默认120秒、Host Ready后最多运行120秒并有界停止，达到上限作为失败/截断样本保留，不重放已经执行过的动作。该期限允许上游明确提供85秒`Retry-After`时进行一次有界重试；更长冷却无法装入剩余预算时仍立即失败。显式`CHRONICLE_LLM_TIMEOUT_SECONDS`用户设置优先。
 
 Harness参数`-FreshStoryModeModel`只接受明示的远端路由标识，逐次固定一个模型；当前允许通用`gpt-oss-20b`、FreeLLMAPI Groq 专属`openai-gpt-oss-20b`、NVIDIA `nvidiallama-3.2-11b-vision`、Poolside `poolside-laguna-s-2.1`、Google `gemini-2.5-flash`、Mistral `mistral-nemo`。不选`auto`，避免无法审计的路由扇出或进入本地自定义端点；该覆盖只改变测试进程环境，不改玩家MCM/用户模型配置。FreeLLMAPI预检确认所选ID此刻出现在可执行目录，但`ready`不证明上游当前能回答。FreeLLMAPI将`openai-gpt-oss-20b`列为独立Groq远端路由；本机当前目录状态为`needsKey/no_key`，所以没有发送请求。模型结构化协议从当前模型的`supported_parameters`选择：声明`response_format`时用JSON Schema；否则仅在同时声明`tools`与`tool_choice`时用强制、无副作用的decision tool-call；两者均不支持时请求前安全失败。
 
@@ -41,7 +41,7 @@ Host决策事件仅在`visual-capture`及`agent-host-lifecycle-test`模式写入
 
 Fresh EYC 的真实 Host 切片`TestResults/20261022-164200`显示原版Tutorial skip后首个Campaign MapState的地点菜单是`training_field_menu`，原生状态同时有`encounterActive=true`和`encounteredPartyId=tutorial_training_field`，且`currentSettlementId`相同、存在可用`training_field_leave`。真实模型两次选择成功：先将完整目标分类为`supported-establish-your-clan`，再选择未完成的同伴目标；随后的Native同伴子流程误把训练场地点菜单当成劫匪/敌军遭遇并在第一个动作前中止（`companion-campaign-interruption`），Native动作0，源新档无存档写入。后续真实运行`TestResults/20261022-173044`选声望时同样呈现需处理的训练场菜单；第三次输出了尝试`menuSelect`但`MenuId`字段写成字面值`MenuId`的错误参数。源码发现BattleSimulation位置菜单分支仅给出参数名、未给当前Native可选ID枚举。现已增加共享`AgentHostCampaignStateFacts`把Native地点菜单同真实Party/Encounter分开，并在Companion/Recruitment/GoldSale/BattleSimulation子流程把可见原版Leave选项作为受限`menuSelect`；BattleSimulation的参数schema同时枚举当前精确`MenuId`和enabled Leave OptionId，真实敌方遭遇仍fail-closed。该修正已进入Package自检前的源码，窄包验证仍待本轮；三次实机均只产出真实模型规划/动作提案，未执行Native目标动作、无EYC进度、无存档或游戏崩溃；第一份诊断视频/截图留存，MP4均已按Harness索引删除。
 
-同一变量还必须传到实机Host进程：`Test-AgentLiveModelLoop.ps1`仅在没有显式Provider timeout时使用各场景默认值；外层EYC Harness默认设置90秒，显式`CHRONICLE_LLM_TIMEOUT_SECONDS`仍由用户决定且范围为5–360秒。禁止在目标分支中无条件重置360秒，这会使一个不断重试的远端断连占住游戏数分钟，并掩盖上层限制。EYC阶段不重复发provider smoke，因此有效模型预算留给真实Campaign首轮目标分类。
+同一变量还必须传到实机Host进程：`Test-AgentLiveModelLoop.ps1`仅在没有显式Provider timeout时使用各场景默认值；外层EYC Harness默认设置120秒，显式`CHRONICLE_LLM_TIMEOUT_SECONDS`仍由用户决定且范围为5–360秒。该有限期限为本机实测到的85秒Retry-After容纳单次重试，不是对长冷却循环放宽；更长退避在剩余期限不足时仍立即结束。禁止在目标分支中无条件重置360秒，这会使一个不断重试的远端断连占住游戏数分钟，并掩盖上层限制。EYC阶段不重复发provider smoke，因此有效模型预算留给真实Campaign首轮目标分类。
 
 AgentHost对“模型响应已返回但未通过动作/控制目录校验”的可恢复决策错误可最多请求两次修正；反馈只包含错误类别和当前Native动作/控制目录，不包含原始模型回复，也不发送Native动作。传输错误、上游429/502、超时不走这条模型决策修正路径；已经执行的Native副作用不因重试重新执行。所有此类分支必须有Fake Provider回归，并在真实模型中按现有Harness收据区分是否生效。
 

@@ -802,7 +802,9 @@ FreeLLMAPI官方目录将NVIDIA Llama 3.2 11B Vision和Poolside Laguna S 2.1分�
 
 2026-10-23本机FreeLLMAPI目录核验：通用`gpt-oss-20b`当前为`ready`，但已知真实调用曾被路由到OVH并受到429限制；独立模型ID `openai-gpt-oss-20b` 当前为`needsKey/no_key`且不可用。FreeLLMAPI产品页把此独立ID标为Groq提供的GPT-OSS 20B路线（[模型页](https://freellmapi.co/uk/model/gpt-oss-20b)）；它不是本地推理，也不同于通用`gpt-oss-20b`。即使该路线尚不可用，本机目录已声明其context_length为128000、supported_parameters包括`response_format`；因此路由可用后Host应走既有JSON Schema结构化响应协议，而非tool-call回退。Harness的自然StoryMode真实模型参数现允许显式选择该ID，避免测试意外落回OVH/自动多路由；在Groq key添加并且目录确认此路由可用前，不请求该模型。目录就绪仍不等于实时上游调用成功；首个真实请求应在自然StoryMode Host循环内完成，而非另做一次模型烟测。
 
-自然新战役模型切片`TestResults/20261023-001618`用固定NVIDIA远端ID完成原版StoryMode创建、兄长Tutorial Skip、EYC自然激活、首个MapState Host就绪；5张Native开局截图不同，连续引擎录屏821/821帧，录像缩帧检查后删除，Bannerlord/Host/临时档清理且没有存档写入。Native初始EYC为活动，MainHero 1000 Gold/20 Renown、MainParty 1/20。Host真实首请求收到FreeLLMAPI HTTP429/Retry-After=85，`retryAfterFitsDeadline=false`；本轮90秒单请求期限和120秒生命周期上限不适合再等85秒重试，所以0有效模型决策、0模型token、0 Native目标动作，最后安全失败。收据的`provider-http-error`及真实上游429定位为服务商容量/速率限制，不是Host/原版教程交互失败；本轮没有评估模型决策质量或Native目标执行。不要单纯拉长超时来掩盖可用路由不足，待Groq专属路由加入后优先用自然EYC首请求验证。
+自然新战役模型切片`TestResults/20261023-001618`用固定NVIDIA远端ID完成原版StoryMode创建、兄长Tutorial Skip、EYC自然激活、首个MapState Host就绪；5张Native开局截图不同，连续引擎录屏821/821帧，录像缩帧检查后删除，Bannerlord/Host/临时档清理且没有存档写入。Native初始EYC为活动，MainHero 1000 Gold/20 Renown、MainParty 1/20。Host真实首请求收到FreeLLMAPI HTTP429/Retry-After=85，`retryAfterFitsDeadline=false`；本轮90秒单请求期限剩余预算不适合再等85秒重试，所以0有效模型决策、0模型token、0 Native目标动作，最后安全失败。收据的`provider-http-error`及真实上游429定位为服务商容量/速率限制，不是Host/原版教程交互失败；本轮没有评估模型决策质量或Native目标执行。基于明确Retry-After证据，FreshStoryMode实测的Harness默认单请求期限已从90调整为120秒，与Host上限一致，使约85秒退避可容纳一次重试；这不是循环拉长超时，超过剩余预算的退避仍会立即停止。下一次待Groq专属路由加入后优先用自然EYC首请求验证，也会验证这个有界重试合同。
+
+`TestResults/20261023-002830`在该120秒预算下复测：自然StoryMode skip/MapState/EYC激活、Host就绪、5个开局截图与1852/1852录像帧、Build/AgentHostPackage均通过；Bannerlord干净退出、无崩溃、未写入存档。NVIDIA真实请求先收到HTTP429/Retry-After=85，Host按FreeLLMAPI明确头部等待85006ms并实际发起一次重试；第二次响应的Retry-After=585无法装入剩余期限，按设计安全失败。总结果仍为0模型token/0决策/0 Native动作；已验证的是Harness有界重试行为，不是模型或EYC任务进度，持续失败根因仍是该免费上游当前限流/耗尽。
 
 ## 主要来源
 
