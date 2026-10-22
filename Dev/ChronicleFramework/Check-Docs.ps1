@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.285'
+$contractVersion = '7.288'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -257,7 +257,7 @@ if ($harnessScript -notmatch "'AgentHostCampaignLoopEvaluation' \{ @\('Preflight
     throw 'The Host campaign loop must remain opt-in and prove its bounded Native map-arrival contract, natural time progression, real local-model path, visual evidence and cleanup.'
 }
 if ($harnessScript -notmatch "'AgentHostVillageToolsQuestEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostVillageToolsQuestEvaluation'\) \}" -or
-    -not $harnessScript.Contains("effectiveSmokeTimeoutSeconds = if (`$Phase -in @('FreshStoryModeModelEvaluation','AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostEstablishClanAutonomyEvaluation','AgentHostCaptivityRecoveryEvaluation','AgentHostEstablishClanGoldSaleEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max(`$SmokeTimeoutSeconds, 240) }") -or
+    -not $harnessScript.Contains("effectiveSmokeTimeoutSeconds = if (`$Phase -in @('FreshStoryModeModelEvaluation','FreshStoryModeNativeInquiryResponseEvaluation','AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostEstablishClanAutonomyEvaluation','AgentHostCaptivityRecoveryEvaluation','AgentHostEstablishClanGoldSaleEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max(`$SmokeTimeoutSeconds, 240) }") -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostVillageToolsQuestEvaluation'" -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'VerifyQuestInventoryDelta' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'village-tools-direct-quest-option-unavailable' -or
@@ -1293,6 +1293,21 @@ if ($harnessScript -notmatch "'FreshStoryModeNativeMenuLeaveEvaluation' \{ @\('P
     $freshCampaignSource -notmatch 'RunMenuOptionConsequence\(menuContext, leaveIndex\)' -or
     $freshCampaignSource -notmatch 'fresh-storymode-native-menu-leave-snapshot\|json=' -or
     $freshCampaignSource -notmatch 'training_field_leave') { throw 'The opt-in fresh StoryMode Native-menu test must invoke only the currently enabled original training-field Leave consequence, verify the resulting map/clock/Quest state and preserve its screenshots without saving.' }
+if ($harnessScript -notmatch "'FreshStoryModeNativeInquiryResponseEvaluation' \{ @\('Preflight', 'Build', 'FreshStoryModeNativeInquiryResponseEvaluation'\) \}" -or
+    $harnessScript -notmatch '-StoryModeNativeMenuLeaveEvaluation -StoryModeNativeInquiryResponseEvaluation' -or
+    $freshCampaignTest -notmatch '\[switch\]\$StoryModeNativeInquiryResponseEvaluation' -or
+    $freshCampaignTest -notmatch 'respondInquiry' -or
+    $freshCampaignTest -notmatch '\[IO\.FileMode\]::CreateNew' -or
+    $freshCampaignTest -notmatch 'harnessNativeOnly = \$true' -or
+    $freshCampaignTest -notmatch 'StoryModeNativeInquiryTestSessionCreated' -or
+    $freshCampaignTest -notmatch 'Remove-Item -LiteralPath \$agentSessionPath' -or
+    $freshCampaignTest -notmatch 'ExecuteAffirmativeAction' -or
+    $freshCampaignTest -notmatch 'inquiry\.affirmative\.visible' -or
+    $freshCampaignTest -notmatch 'inquiry\.affirmative\.enabled' -or
+    $freshCampaignTest -notmatch 'inquiry\.negative\.visible' -or
+    $freshCampaignTest -notmatch 'storyModeNativeInquiryClosedAfterResponse' -or
+    $freshCampaignTest -notmatch 'StoryModeNativeInquiryKeptCampaignDayAndStop' -or
+    $freshCampaignTest -notmatch '\[redacted-token\]') { throw 'The fresh StoryMode Native Inquiry integration phase must answer only the observed enabled affirmative button, use the production respondInquiry bridge, verify the modal closed with EYC/time unchanged, and keep its one-use token out of summaries.' }
 if ($harnessScript -notmatch 'function Remove-RetainedAgentHostPackage' -or
     $harnessScript -notmatch 'CHRONICLE_AGENT_HOST_TEST_PATH' -or
     $harnessScript -notmatch 'Remove-RetainedAgentHostPackage \$script:retainedAgentHostPackageRoot' -or

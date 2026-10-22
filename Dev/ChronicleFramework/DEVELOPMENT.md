@@ -1,10 +1,12 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.285
+Contract version: 7.288
 
 `FreshStoryModeNativeMenuLeaveEvaluation`是非模型的窄Native集成测试：同一个新Campaign先通过兄长对话的原版“跳过教程”及确认，原生推进对话后自然结束训练场Mission并进入活动EYC的首个MapState；该状态仍位于`training_field_menu`。Harness只选择当前启用的原版`training_field_leave`并通过`GameMenu.RunMenuOptionConsequence`调用原版处理器，随后验证回到地图、训练场菜单/地点退出、EYC仍活动、CampaignDay与Stop档位未变、无存档写入，并捕获前后引擎画面和Native post-action观察（包括若出现的Inquiry）。`TestResults/20261022-194410`完整通过；`20261022-195530`复测后还在收据中明确记录`brother-dialogue-path-no-tab-fallback`。两次教程Mission离开均由原版兄长对话路径完成，没有使用Tab兜底。这项测试只验证开局准备与单项Native菜单动作，不计作AI决策或长程EYC目标进展。`TestResults/20261022-193820`曾在兄长对话仍活跃时过早模拟原版Leave Area并触发游戏空引用崩溃；现Harness改为每1.5秒推进一次原版“点击继续”，且仅在ConversationManager已结束对话、场景仍未退出时才启动2.5秒Native Leave Area兜底。该兜底在训练场场景尚未单独实测，严禁在对话仍活跃时触发；其它Town Mission Leave证据不能替代该特定验证。后续弹出的通知/询问也不会由本测试自动确认。
 
 Fresh StoryMode observer的原版Native菜单退出快照是schema JSON根对象本身，字段路径为`context.inquiryOpen`与`context.inquiry`，不是Agent Host邮箱包裹使用的`state.context`。`20261022-194410`的快照实际包含离开训练场后标题“通知”、仅affirmative“好”的`YesNoInquiry`；当时测试汇总误读为嵌套对象，导致log显示`InquiryOpenAfter=false`/`Inquiry=null`，与同一运行保存的快照相矛盾。`Test-AgentFreshCampaign.ps1`现在读平面路径，`Check-Docs.ps1`回归检查该schema形态并拒绝旧错误路径；汇总Inquiry仅包含玩家可见字段、排除一次性token；旧收据保持不变，新路径由`20261023-033645`窄运行实测确认。
+
+独立的`FreshStoryModeNativeInquiryResponseEvaluation`阶段从全新自然StoryMode经原版skip/tutorial leave触发这条通知，用`Agent-Cli.ps1 respondInquiry`按新鲜token选择Native唯一可见且启用的affirmative按钮。它是无模型、仅Native事务/回调和时间/Quest后验测试，不算AI自主能力，不保存进度；为复用CLI而临时创建的测试session只绑定当前Bannerlord PID，仅当session路径原本不存在时才建，结束后按PID归属清理session、命令和响应文件，不启动AgentHost也不发送LLM请求。必须验证VM handler回执、弹窗关闭、EYC保持active、CampaignDay/raw Stop不变与进程清理，并把Inquiry token从结果摘要中去除；只有真实Agent Host模型自己在同一局面选择并提交该动作，才算产品闭环证据。
 
 正常AgentHostPackage阶段会先检查D盘`BuildCache/Packages`内只属于该Harness的`ChronicleAgentHost-win-x64-<32位GUID>`临时发布目录；仅清理创建超过24小时、且当前没有Bannerlord或AgentHost运行的目录，并在回执中记录数量和字节数。未达到年龄的保持不动；不扫描/清理其它BuildCache或用户数据。
 

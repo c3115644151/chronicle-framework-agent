@@ -4,6 +4,7 @@ param(
     [switch]$StoryModeEycSetup,
     [switch]$StoryModeEycLiveModelEvaluation,
     [switch]$StoryModeNativeMenuLeaveEvaluation,
+    [switch]$StoryModeNativeInquiryResponseEvaluation,
     [switch]$ValidateRecruitmentProgression,
     [switch]$RealModelRecruitment,
     [switch]$RetainDisposableSave
@@ -42,6 +43,9 @@ if ($ValidateRecruitmentProgression -and (Test-Path -LiteralPath $agentCommandPa
 if ($StoryModeEycSetup -and ($ValidateRecruitmentProgression -or $RealModelRecruitment -or $RetainDisposableSave)) { throw 'StoryModeEycSetup is a no-save Native StoryMode/tutorial-skip setup probe; it cannot be combined with Sandbox recruitment progression or disposable-save retention.' }
 if ($StoryModeEycLiveModelEvaluation -and (-not $StoryModeEycSetup -or $ValidateRecruitmentProgression -or $RealModelRecruitment -or $RetainDisposableSave)) { throw 'StoryModeEycLiveModelEvaluation requires the no-save StoryModeEycSetup path and cannot be combined with Sandbox progression or retained saves.' }
 if ($StoryModeNativeMenuLeaveEvaluation -and (-not $StoryModeEycSetup -or $StoryModeEycLiveModelEvaluation -or $ValidateRecruitmentProgression -or $RealModelRecruitment -or $RetainDisposableSave)) { throw 'StoryModeNativeMenuLeaveEvaluation requires the no-save StoryModeEycSetup path and cannot be combined with a live-model run, Sandbox progression or retained saves.' }
+if ($StoryModeNativeInquiryResponseEvaluation -and (-not $StoryModeNativeMenuLeaveEvaluation -or -not $StoryModeEycSetup)) { throw 'StoryModeNativeInquiryResponseEvaluation requires the no-save StoryModeNativeMenuLeaveEvaluation path.' }
+if ($StoryModeNativeInquiryResponseEvaluation -and $previousSessionExisted) { throw 'The Native Inquiry callback test requires exclusive ownership of a temporary Agent CLI session; an existing session file will not be replaced.' }
+if ($StoryModeNativeInquiryResponseEvaluation -and (Test-Path -LiteralPath $agentCommandPath)) { throw 'The Native Inquiry callback test will not overwrite a pending Agent CLI command.' }
 if ($RealModelRecruitment -and -not $ValidateRecruitmentProgression) { throw 'RealModelRecruitment requires ValidateRecruitmentProgression so the new Campaign is saved as a protected disposable fixture before the model starts.' }
 if ($RetainDisposableSave -and -not $ValidateRecruitmentProgression) { throw 'RetainDisposableSave requires ValidateRecruitmentProgression so only a verified Native New Campaign save can be retained.' }
 if ($progressionSavePath -and (Test-Path -LiteralPath $progressionSavePath)) { throw 'Generated disposable-save name already exists; refusing to overwrite.' }
@@ -192,6 +196,16 @@ $storyModeNativeLeaveCampaignDayBefore = $null
 $storyModeNativeLeaveCampaignDayAfter = $null
 $storyModeNativeLeaveClockAfter = $null
 $storyModeNativeLeavePostActionSnapshot = $null
+$storyModeNativeInquiryResponseRequested = $false
+$storyModeNativeInquiryResponseVerified = $false
+$storyModeNativeInquiryResponseFailure = $null
+$storyModeNativeInquiryResponseReceipt = $null
+$storyModeNativeInquiryStateAfterResponse = $null
+$storyModeNativeInquiryBeforeDay = $null
+$storyModeNativeInquiryAfterDay = $null
+$storyModeNativeInquiryTestSessionCreated = $false
+$storyModeNativeInquiryResponseCommandId = $null
+$storyModeNativeInquiryStateCommandId = $null
 $storyModeAgentHostTerminalState = $null
 $storyModeAgentProgressLineCount = 0
 $storyModeAgentProgressEntries = [System.Collections.Generic.List[object]]::new()
@@ -436,8 +450,65 @@ try {
                         if (-not $storyModeNativeLeaveSnapshotPath) { throw 'Harness temp path is unavailable for the post-Leave observation.' }
                         [IO.File]::WriteAllBytes($storyModeNativeLeaveSnapshotPath, [Text.Encoding]::UTF8.GetBytes($Matches[1]))
                         $storyModeNativeLeavePostActionSnapshot = $Matches[1] | ConvertFrom-Json
+                        if ($StoryModeNativeInquiryResponseEvaluation) {
+                            $inquiry = $storyModeNativeLeavePostActionSnapshot.context.inquiry
+                            if (-not $storyModeNativeLeavePostActionSnapshot.context.inquiryOpen -or
+                                -not $inquiry.supported -or $inquiry.kind -ne 'YesNoInquiry' -or
+                                -not $inquiry.affirmative.visible -or -not $inquiry.affirmative.enabled -or
+                                $inquiry.negative.visible -or [string]::IsNullOrWhiteSpace([string]$inquiry.token)) {
+                                throw 'The fresh Native state did not expose the expected one-button, affirmative-only Map YesNoInquiry.'
+                            }
+                            $storyModeNativeInquiryBeforeDay = [double]$storyModeNativeLeavePostActionSnapshot.campaignDay
+                            Write-StoryModeCaptureEvent 'native-map-inquiry-visible' 'state' 'observed' 'MapState' ([string]$storyModeNativeLeavePostActionSnapshot.context.menuId)
+                            $responseCommandId = 'fresh-storymode-inquiry-response-' + [Guid]::NewGuid().ToString('N')
+                            $storyModeNativeInquiryResponseCommandId = $responseCommandId
+                            $testSession = [ordered]@{ protocolVersion = 1; processId = [int]$bannerlordPid; startedUtc = (Get-Date).ToUniversalTime().ToString('O'); harnessNativeOnly = $true }
+                            $sessionBytes = [Text.UTF8Encoding]::new($false).GetBytes(($testSession | ConvertTo-Json -Compress -Depth 4))
+                            $sessionStream = [IO.File]::Open($agentSessionPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+                            try { $sessionStream.Write($sessionBytes, 0, $sessionBytes.Length); $sessionStream.Flush($true) }
+                            finally { $sessionStream.Dispose() }
+                            $storyModeNativeInquiryTestSessionCreated = $true
+                            $response = Invoke-FreshCampaignAgentCli 'respondInquiry' @(
+                                '-InquiryToken', [string]$inquiry.token,
+                                '-InquiryChoice', 'affirmative',
+                                '-CommandId', $responseCommandId
+                            ) -CommandTimeout 30
+                            $storyModeNativeInquiryResponseRequested = $true
+                            $storyModeNativeInquiryResponseReceipt = [ordered]@{
+                                status = [string]$response.status
+                                action = [string]$response.action
+                                data = $response.data
+                            }
+                            if ($response.status -ne 'completed' -or $response.action -ne 'respondInquiry' -or
+                                $response.data.choice -ne 'affirmative' -or $response.data.nativeViewModelHandler -ne 'ExecuteAffirmativeAction') {
+                                throw 'Native respondInquiry did not report the expected affirmative SingleQueryPopUpVM callback.'
+                            }
+                            Write-StoryModeCaptureEvent 'native-map-inquiry-affirmative-response' 'respondInquiry' 'completed' 'MapState' ''
+                            $storyModeNativeInquiryStateCommandId = "$responseCommandId-after"
+                            $after = Invoke-FreshCampaignAgentCli 'state' @('-CommandId', $storyModeNativeInquiryStateCommandId) -CommandTimeout 15
+                            $storyModeNativeInquiryStateAfterResponse = $after.state
+                            $storyModeNativeInquiryAfterDay = [double]$after.campaignDay
+                            if ($after.status -ne 'completed' -or
+                                $after.state.context.gameState -ne 'MapState' -or
+                                $after.state.context.inquiryOpen -or $after.state.context.inquiry -or
+                                -not @($after.state.quests | Where-Object { $_.id -eq 'rebuild_player_clan_storymode_quest' }).Count -or
+                                [Math]::Abs($storyModeNativeInquiryAfterDay - $storyModeNativeInquiryBeforeDay) -gt 0.001 -or
+                                $after.timeControlMode -ne 'Stop') {
+                                throw 'After affirmative response, Native state did not confirm a closed inquiry, active EYC, unchanged Campaign day and stopped clock.'
+                            }
+                            $storyModeNativeInquiryResponseVerified = $true
+                            Write-StoryModeCaptureEvent 'native-map-inquiry-closed' 'state' 'verified' 'MapState' ''
+                        }
                     }
-                    catch { $harnessFailureObserved = $true }
+                    catch {
+                        if ($StoryModeNativeInquiryResponseEvaluation) {
+                            $storyModeNativeInquiryResponseFailure = $_.Exception.Message
+                            if ($inquiry -and -not [string]::IsNullOrWhiteSpace([string]$inquiry.token)) {
+                                $storyModeNativeInquiryResponseFailure = $storyModeNativeInquiryResponseFailure.Replace([string]$inquiry.token, '[redacted-token]')
+                            }
+                        }
+                        $harnessFailureObserved = $true
+                    }
                 }
             }
         }
@@ -871,6 +942,38 @@ if ($ValidateRecruitmentProgression) {
 $saveDigestAfter = Get-SaveManifestDigest
 $remainingBannerlordProcesses = @(Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue)
 $gameProcessesClean = $remainingBannerlordProcesses.Count -eq 0
+if ($storyModeNativeInquiryTestSessionCreated) {
+    if (Test-Path -LiteralPath $agentSessionPath) {
+        try {
+            $testSessionNow = Get-Content -LiteralPath $agentSessionPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ([int]$testSessionNow.processId -eq [int]$bannerlordPid) { Remove-Item -LiteralPath $agentSessionPath -Force }
+            else { throw 'Native Inquiry test session ownership changed before cleanup.' }
+        }
+        catch { $harnessFailureObserved = $true; $storyModeNativeInquiryResponseFailure = 'Test-only Agent CLI session cleanup failed.' }
+    }
+    $testCommandIds = @($storyModeNativeInquiryResponseCommandId, $storyModeNativeInquiryStateCommandId) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
+    if (Test-Path -LiteralPath $agentCommandPath) {
+        try {
+            $pendingTestCommand = Get-Content -LiteralPath $agentCommandPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($testCommandIds -contains [string]$pendingTestCommand.id) { Remove-Item -LiteralPath $agentCommandPath -Force }
+        } catch { }
+    }
+    foreach ($processingFile in Get-ChildItem -LiteralPath $agentProtocolRoot -File -Filter 'command-*.processing' -ErrorAction SilentlyContinue) {
+        try {
+            $processingCommand = Get-Content -LiteralPath $processingFile.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($testCommandIds -contains [string]$processingCommand.id) { Remove-Item -LiteralPath $processingFile.FullName -Force }
+        } catch { }
+    }
+    if (Test-Path -LiteralPath $agentResponseRoot) {
+        foreach ($testCommandId in $testCommandIds) {
+            Get-ChildItem -LiteralPath $agentResponseRoot -File -Filter "$testCommandId.*.json" | Remove-Item -Force -ErrorAction SilentlyContinue
+        }
+    }
+    if (-not $gameProcessesClean) {
+        $harnessFailureObserved = $true
+        $storyModeNativeInquiryResponseFailure = 'Bannerlord process cleanup was not verified after the Native Inquiry test.'
+    }
+}
 $saveDigestForComparison = if ($RetainDisposableSave -and $progressionSaveName) { Get-SaveManifestDigest -ExcludeSaveName $progressionSaveName } else { $saveDigestAfter }
 $saveStateUnchanged = $saveDigestBefore -eq $saveDigestForComparison
 $retainedDisposableSave = [bool]($RetainDisposableSave -and $disposableSaveOwned -and $progressionSaveName -and (Test-Path -LiteralPath $progressionSavePath))
@@ -930,6 +1033,31 @@ if ($StoryModeEycSetup) {
         $acceptanceChecks.storyModeNativeMenuLeaveKeptEycActive = $storyModeEycReadyObserved
         $acceptanceChecks.storyModeNativeMenuLeavePostActionSnapshotCaptured = $null -ne $storyModeNativeLeavePostActionSnapshot
     }
+    if ($StoryModeNativeInquiryResponseEvaluation) {
+        $acceptanceChecks.storyModeNativeInquiryWasSupportedSingleButtonYesNo = $storyModeNativeLeavePostActionSnapshot.context.inquiryOpen -and
+            $storyModeNativeLeavePostActionSnapshot.context.inquiry.supported -and
+            $storyModeNativeLeavePostActionSnapshot.context.inquiry.kind -eq 'YesNoInquiry' -and
+            $storyModeNativeLeavePostActionSnapshot.context.inquiry.affirmative.visible -and
+            $storyModeNativeLeavePostActionSnapshot.context.inquiry.affirmative.enabled -and
+            -not $storyModeNativeLeavePostActionSnapshot.context.inquiry.negative.visible
+        $acceptanceChecks.storyModeNativeInquiryResponseRequested = $storyModeNativeInquiryResponseRequested
+        $acceptanceChecks.storyModeNativeInquiryResponseVerified = $storyModeNativeInquiryResponseVerified
+        $acceptanceChecks.storyModeNativeInquiryClosedAfterResponse = $null -ne $storyModeNativeInquiryStateAfterResponse -and
+            -not $storyModeNativeInquiryStateAfterResponse.context.inquiryOpen -and -not $storyModeNativeInquiryStateAfterResponse.context.inquiry
+        $acceptanceChecks.storyModeNativeInquiryKeptEycActive = $storyModeNativeInquiryStateAfterResponse -and
+            @($storyModeNativeInquiryStateAfterResponse.quests | Where-Object { $_.id -eq 'rebuild_player_clan_storymode_quest' }).Count -eq 1
+        $acceptanceChecks.storyModeNativeInquiryKeptCampaignDayAndStop = $null -ne $storyModeNativeInquiryBeforeDay -and
+            $null -ne $storyModeNativeInquiryAfterDay -and
+            [Math]::Abs($storyModeNativeInquiryAfterDay - $storyModeNativeInquiryBeforeDay) -le 0.001 -and
+            $storyModeNativeInquiryStateAfterResponse.context.timeControlMode -eq 'Stop'
+        if (-not $acceptanceChecks.storyModeNativeInquiryResponseVerified -or
+            -not $acceptanceChecks.storyModeNativeInquiryClosedAfterResponse -or
+            -not $acceptanceChecks.storyModeNativeInquiryKeptEycActive -or
+            -not $acceptanceChecks.storyModeNativeInquiryKeptCampaignDayAndStop) {
+            $harnessFailureObserved = $true
+            $acceptanceChecks.noHarnessFailure = $false
+        }
+    }
     if ($StoryModeEycLiveModelEvaluation) {
         $acceptanceChecks.storyModeLiveHostStarted = $storyModeAgentHostStarted
         $acceptanceChecks.storyModeLiveHostReady = $storyModeAgentHostReady
@@ -949,7 +1077,7 @@ $storyModeNativeLeaveInquiryForSummary = if ($StoryModeNativeMenuLeaveEvaluation
     $storyModeNativeLeavePostActionSnapshot.context.inquiry | Select-Object supported,kind,title,text,affirmative,negative,timerShown,pauseGameActiveState
 } else { $null }
 $result = [ordered]@{
-    Scenario = if ($StoryModeNativeMenuLeaveEvaluation) { 'FreshStoryModeOriginalTutorialSkipAndNativeTrainingFieldLeave' } elseif ($StoryModeEycSetup) { 'FreshStoryModeOriginalTutorialSkipToEstablishYourClan' } else { 'FreshCampaignCharacterCreationRenown' }
+    Scenario = if ($StoryModeNativeInquiryResponseEvaluation) { 'FreshStoryModeOriginalTutorialSkipNativeInquiryCallback' } elseif ($StoryModeNativeMenuLeaveEvaluation) { 'FreshStoryModeOriginalTutorialSkipAndNativeTrainingFieldLeave' } elseif ($StoryModeEycSetup) { 'FreshStoryModeOriginalTutorialSkipToEstablishYourClan' } else { 'FreshCampaignCharacterCreationRenown' }
     GameMode = if ($StoryModeEycSetup) { 'StoryMode' } else { 'Sandbox' }
     Launcher = $launcher
     GameExecutable = $gameExe
@@ -1005,6 +1133,23 @@ $result = [ordered]@{
     StoryModeNativeMenuLeavePostActionSnapshotPath = if ($StoryModeNativeMenuLeaveEvaluation -and $storyModeNativeLeavePostActionSnapshot) { $storyModeNativeLeaveSnapshotPath } else { $null }
     StoryModeNativeMenuLeaveInquiryOpenAfter = if ($StoryModeNativeMenuLeaveEvaluation -and $storyModeNativeLeavePostActionSnapshot) { [bool]$storyModeNativeLeavePostActionSnapshot.context.inquiryOpen } else { $null }
     StoryModeNativeMenuLeaveInquiry = $storyModeNativeLeaveInquiryForSummary
+    StoryModeNativeInquiryResponseEvaluation = [bool]$StoryModeNativeInquiryResponseEvaluation
+    StoryModeNativeInquiryResponseChoice = if ($StoryModeNativeInquiryResponseEvaluation) { 'affirmative' } else { $null }
+    StoryModeNativeInquiryResponseRequested = if ($StoryModeNativeInquiryResponseEvaluation) { $storyModeNativeInquiryResponseRequested } else { $null }
+    StoryModeNativeInquiryResponseVerified = if ($StoryModeNativeInquiryResponseEvaluation) { $storyModeNativeInquiryResponseVerified } else { $null }
+    StoryModeNativeInquiryResponseFailure = if ($StoryModeNativeInquiryResponseEvaluation) { $storyModeNativeInquiryResponseFailure } else { $null }
+    StoryModeNativeInquiryResponseReceipt = if ($StoryModeNativeInquiryResponseEvaluation) { $storyModeNativeInquiryResponseReceipt } else { $null }
+    StoryModeNativeInquiryStateAfterResponse = if ($StoryModeNativeInquiryResponseEvaluation -and $storyModeNativeInquiryStateAfterResponse) {
+        [ordered]@{
+            gameState = $storyModeNativeInquiryStateAfterResponse.context.gameState
+            menuId = $storyModeNativeInquiryStateAfterResponse.context.menuId
+            inquiryOpen = $storyModeNativeInquiryStateAfterResponse.context.inquiryOpen
+            storyModeEstablishClanStatus = $storyModeNativeInquiryStateAfterResponse.storyModeEstablishClanStatus.status
+            campaignDay = $storyModeNativeInquiryAfterDay
+            timeControlMode = $storyModeNativeInquiryStateAfterResponse.context.timeControlMode
+            questIds = @($storyModeNativeInquiryStateAfterResponse.quests | ForEach-Object { $_.id })
+        }
+    } else { $null }
     StoryModeLiveModelEvaluation = [bool]$StoryModeEycLiveModelEvaluation
     StoryModeAgentHostStarted = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentHostStarted } else { $null }
     StoryModeAgentHostStartRequested = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentHostStartRequested } else { $null }
