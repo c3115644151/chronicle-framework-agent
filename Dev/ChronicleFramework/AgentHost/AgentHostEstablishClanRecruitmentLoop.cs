@@ -101,6 +101,17 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             !fakeClient.Actions.SequenceEqual(["recruitOptions", "recruit"], StringComparer.Ordinal))
             throw new AgentHostException("establish-clan-recruitment-runtime-self-test-failed", "The recruitment subloop must query current offers, commit one affordable volunteer through the Native adapter and stop only after the Journal target refreshes.");
         results.Add(new { scenario = "establish-clan-recruitment-runtime-observe-decide-native-commit-journal-verify", passed = true });
+
+        var unavailableClient = new FakeRecruitmentNativeClient(startOnMap: false);
+        var unavailableProvider = new FakeRecruitmentDecisionProvider();
+        var unavailable = await RunAsync(request.RootElement, unavailableClient, unavailableClient, unavailableClient, unavailableProvider, CancellationToken.None);
+        if (ReadString(unavailable, "status") != "failed" ||
+            ReadString(unavailable["termination"] as JsonObject, "reason") != "campaign-map-unavailable" ||
+            ReadString(unavailable, "failureCode") != "recruitment-map-unavailable" ||
+            string.IsNullOrWhiteSpace(ReadString(unavailable, "failure")) ||
+            ReadInt(unavailable, "actionsExecuted", -1) != 0 || unavailableProvider.CallCount != 0)
+            throw new AgentHostException("establish-clan-recruitment-failure-receipt-failed", "A Native map precondition failure must preserve its termination, failure code and safe summary without calling the Provider or executing an action.");
+        results.Add(new { scenario = "establish-clan-recruitment-failure-receipt-preserves-map-precondition-code", passed = true });
         return results;
     }
 
@@ -373,6 +384,8 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                 ["livePartySize"] = live?["partySize"]?.DeepClone(),
                 ["journalObjectiveSnapshot"] = journal?.DeepClone(),
                 ["objectiveSnapshot"] = objective?.DeepClone(),
+                ["failure"] = failure,
+                ["failureCode"] = failureCode,
                 ["termination"] = new JsonObject { ["reason"] = termination, ["goalVerified"] = ReadBoolean(objective?["partySize"] as JsonObject, "met") }
             };
         }
@@ -642,6 +655,8 @@ internal static class AgentHostEstablishClanRecruitmentLoop
     private sealed class FakeRecruitmentNativeClient : IAgentHostCampaignNativeClient, IAgentHostQuestDetailsNativeClient, IAgentHostRecruitmentNativeClient
     {
         private bool _recruited;
+        private readonly bool _startOnMap;
+        internal FakeRecruitmentNativeClient(bool startOnMap = true) => _startOnMap = startOnMap;
         internal int RecruitedMembers => _recruited ? 5 : 4;
         internal int Gold => _recruited ? 80 : 100;
         internal List<string> Actions { get; } = new();
@@ -655,7 +670,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                 ["timeControlMode"] = "Stop",
                 ["context"] = new JsonObject
                 {
-                    ["gameState"] = "MapState",
+                    ["gameState"] = _startOnMap ? "MapState" : "MenuState",
                     ["menuId"] = "town",
                     ["encounterActive"] = false,
                     ["inquiryOpen"] = false,

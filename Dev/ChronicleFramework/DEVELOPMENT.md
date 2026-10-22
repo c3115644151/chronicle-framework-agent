@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.269
+Contract version: 7.270
 
 `FreshStoryModeNativeMenuLeaveEvaluation`是非模型的窄Native集成测试：同一个新Campaign先通过兄长对话的原版“跳过教程”及确认，原生推进对话后自然结束训练场Mission并进入活动EYC的首个MapState；该状态仍位于`training_field_menu`。Harness只选择当前启用的原版`training_field_leave`并通过`GameMenu.RunMenuOptionConsequence`调用原版处理器，随后验证回到地图、训练场菜单/地点退出、EYC仍活动、CampaignDay与Stop档位未变、无存档写入，并捕获前后引擎画面和Native post-action观察（包括若出现的Inquiry）。`TestResults/20261022-194410`完整通过；`20261022-195530`复测后还在收据中明确记录`brother-dialogue-path-no-tab-fallback`。两次教程Mission离开均由原版兄长对话路径完成，没有使用Tab兜底。这项测试只验证开局准备与单项Native菜单动作，不计作AI决策或长程EYC目标进展。`TestResults/20261022-193820`曾在兄长对话仍活跃时过早模拟原版Leave Area并触发游戏空引用崩溃；现Harness改为每1.5秒推进一次原版“点击继续”，且仅在ConversationManager已结束对话、场景仍未退出时才启动2.5秒Native Leave Area兜底。该兜底在训练场场景尚未单独实测，严禁在对话仍活跃时触发；其它Town Mission Leave证据不能替代该特定验证。后续弹出的通知/询问也不会由本测试自动确认。
 
@@ -26,6 +26,8 @@ Harness参数`-FreshStoryModeModel`只接受明示的远端路由标识，逐次
 启动器只在当前进程缺少FreeLLMAPI客户端密钥时从Windows当前用户环境读取`FREELLMAPI_API_KEY`，仅传给Bannerlord子进程后恢复Harness父进程环境；不写密钥到项目、MCM文件或日志。模型调用前只读检查共享FreeLLMAPI的`/api/ping`和`/v1/models`，网关停止或模型不在当前目录时不启动游戏。MCM实际启动的Host来自本轮验证的win-x64自包含发布目录；测试仅在D盘BuildCache唯一GUID目录暂存，确认Bannerlord和Host进程退出后精确删除。
 
 Host决策事件仅在`visual-capture`及`agent-host-lifecycle-test`模式写入临时目录的`AgentHostProgress.jsonl`，上限16MiB，不记prompt、原始回答或rationale。生命周期Host收据把统一循环的`decisions`正确映射为`decisionCount`；子目标执行结束时另记录`objective-subflow-result`，只含目标ID、状态、终止原因、失败码、动作数和token数，不记录自由文本失败说明。训练场setup稳定后只写一次Host autostart marker，避免每帧重复日志。此测试仅证明新档首个Host接管及模型交互，不替代两个独立Campaign全Quest门禁；不得以本地模型、Fake决策或固定路线补齐真实模型缺口。
+
+真实模型曾两次选择PartySize后，Host只报告“目标子流程失败”，没有子流程错误码。源码核对发现招募子流程的结果结构接受`failure`/`failureCode`参数却未把它们写入返回JSON，导致父循环无法保留实际终止原因；现已补齐字段，并增加Fake Native precondition回归，验证非MapState必须带出`recruitment-map-unavailable`且不调用模型、不发送Native动作。`TestResults/20261022-225328`的完整AgentHostPackage合同阶段通过；该回归只验证失败收据合同，真实训练场PartySize子流程还需等一个远端模型请求成功后用新增的`objective-subflow-result`轨迹定位。
 
 `TestResults/20261022-200511`首次用真实MCM启动同进程AgentHost并走到自然StoryMode的EYC活动MapState；全程无存档写入、进程清理、7帧有效引擎截图和831/831录像帧，未发生崩溃。Host版本/Campaign连接正常，随后的首个真实请求走`gpt-oss-20b`，FreeLLMAPI实际选中`ovh`并回HTTP429/Retry-After 85秒；单请求90秒Deadline不允许等待，故prompt/completion tokens=0、模型决策0、Native动作0。该失败由上游限流响应明确支持，不是训练场入口、Host连接或模型输出质量故障；FreeLLMAPI目录`execution_status=ready`只是路由可选，不代表当前供应商可服务。当前不重复轰击同一路由；下一次真实模型评测需等冷却恢复或选择一个来源已确认的远端服务路由，绝不切回本地模型。
 
