@@ -2,6 +2,8 @@
 param(
     [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'ReleasePackage', 'Campaign', 'CampaignActorThinkTrace', 'FreshCampaign', 'FreshStoryModeSetup', 'FreshStoryModeModelEvaluation', 'FreshStoryModeNativeMenuLeaveEvaluation', 'FreshCampaignProgression', 'FreshCampaignBaselineMatrix', 'FreshCampaignLiveModelEvaluation', 'FreshCampaignSupplyBaseline', 'FreshCampaignRecruitmentFallback', 'Protocol', 'AgentHostProvider', 'AgentHostPackage', 'AgentHostSupplyEvaluation', 'AgentHostCampaignLoopEvaluation', 'AgentHostVillageToolsQuestEvaluation', 'AgentHostEstablishClanGoalPlannerEvaluation', 'AgentHostEstablishClanAutonomyEvaluation', 'AgentHostCaptivityRecoveryEvaluation', 'AgentHostEstablishClanGoldSaleEvaluation', 'AgentHostBattleSimulationEvaluation', 'AgentHostBattleAndCaptivityEvaluation', 'AgentHostLifecycleEvaluation', 'AgentHostLifecycleCompletionEvaluation', 'AgentLoop', 'LiveModel', 'LiveModelArrival', 'LiveModelRecruitment', 'LiveModelSafePassageRecruitment', 'LiveModelRecruitmentEvaluation', 'LiveModelSupplyEvaluation', 'CheckpointPersistence', 'LiveModelResume', 'LiveModelRuntimeResume', 'LiveModelActionRecovery', 'CheckpointValidation', 'RecruitmentBaseline', 'MultiDaySupplyBaseline', 'TimeControlLoop', 'BattleFixture', 'PostBattle', 'Observation', 'CaptivityObservation', 'CaptivityOutcome', 'EncounterSurrender', 'EncounterEscape', 'JoinEncounterDefenders', 'JoinEncounterEligibility', 'JoinEncounterAbandonArmy', 'MovingArmyJoin', 'JoinSiegeEvent', 'MapNotifications', 'QuickInformation', 'SceneNotification', 'MissionLeave', 'VillageToolsDelivery', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyQuestMarkers', 'MapPartyQuestAcceptance', 'MapEscapeMenu', 'MapInquiry', 'AlleyLeaderInquiry', 'AlleyRosterManagement', 'AlleyAbandonment', 'AlleyEntryMenu', 'MissionSceneNavigation', 'AlleyVolunteerBranches', 'AlleyAttackYield', 'AlleyAttackFightMission', 'PersuasionDetails', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'BarterFightRoute', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EngageVisibility', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuickTalk', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'SettlementOverlayQuickTalkIssueGateProbe', 'VisualCapture', 'All')]
     [string]$Phase = 'All',
+    [ValidateSet('gpt-oss-20b','nvidiallama-3.2-11b-vision','poolside-laguna-s-2.1','gemini-2.5-flash','mistral-nemo')]
+    [string]$FreshStoryModeModel = 'gpt-oss-20b',
     [int]$SmokeTimeoutSeconds = 45,
     [int]$SmokeStabilitySeconds = 8,
     [ValidateSet('Stop','Complete','UnsupportedGoal','MissingModel','ServiceUnavailable','ParentExited','StopTimeout','NonMap','CampaignRoundtrip')][string]$LifecycleScenario = 'Stop',
@@ -25,7 +27,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.265'
+$HarnessContractVersion = '7.269'
 $effectiveSmokeTimeoutSeconds = if ($Phase -in @('AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostEstablishClanAutonomyEvaluation','AgentHostCaptivityRecoveryEvaluation','AgentHostEstablishClanGoldSaleEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max($SmokeTimeoutSeconds, 240) } else { $SmokeTimeoutSeconds }
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
@@ -554,9 +556,9 @@ foreach ($stage in $requestedStages) {
                     [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_START', '1', 'Process')
                     [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS', '120000', 'Process')
                     [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_GOAL', '自主完成原版主线任务“建立你的家族”。', 'Process')
-                    # Use the direct FreeLLMAPI route that previously completed four real EYC decisions; avoid auto-router fan-out across repeatedly failing providers.
-                    [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL', 'gpt-oss-20b', 'Process')
-                    [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_MODEL', 'gpt-oss-20b', 'Process')
+                    # Pin one explicitly remote provider-backed model per real evaluation; never use a local custom route or an unbounded auto-router chain.
+                    [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL', $FreshStoryModeModel, 'Process')
+                    [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_MODEL', $FreshStoryModeModel, 'Process')
                     if ([string]::IsNullOrWhiteSpace($savedProviderTimeout)) { [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_TIMEOUT_SECONDS', '90', 'Process') }
                     $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $freshCampaignScript -StoryModeEycSetup -StoryModeEycLiveModelEvaluation -TimeoutSeconds 360 2>&1 | Out-String
                     if ($LASTEXITCODE -ne 0) { throw "Fresh natural StoryMode real-model first-decision evaluation failed with exit code $LASTEXITCODE. Output: $testOutput" }

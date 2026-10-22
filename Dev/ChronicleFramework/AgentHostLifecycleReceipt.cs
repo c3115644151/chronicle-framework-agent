@@ -3,6 +3,7 @@ using System.IO;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace ChronicleFramework;
 
@@ -13,6 +14,7 @@ internal sealed class AgentHostLifecycleReceipt
     [DataMember(Name = "providerModelId")] public string ModelId { get; set; }
     [DataMember(Name = "providerConfigurationSource")] public string ConfigurationSource { get; set; }
     [DataMember(Name = "decisionCount")] public int DecisionCount { get; set; }
+    [DataMember(Name = "decisions", EmitDefaultValue = false)] public int DecisionCountAlias { get; set; }
     [DataMember(Name = "actionsExecuted")] public int ActionsExecuted { get; set; }
     [DataMember(Name = "firstDecisionRequiresGoalClassification")] public bool FirstDecisionRequiresGoalClassification { get; set; }
     [DataMember(Name = "firstDecisionListsSupportedGoalClassification")] public bool FirstDecisionListsSupportedGoalClassification { get; set; }
@@ -41,12 +43,18 @@ internal sealed class AgentHostLifecycleReceipt
             AgentHostLifecycleReceipt receipt;
             using (var input = new MemoryStream(Encoding.UTF8.GetBytes(json)))
                 receipt = (AgentHostLifecycleReceipt)serializer.ReadObject(input);
+            receipt.DecisionCount = Math.Max(receipt.DecisionCount, receipt.DecisionCountAlias);
+            receipt.DecisionCountAlias = 0;
             using (var file = File.Create(Path.Combine(actualTemp, "AgentHostLifecycleHostReceipt.json")))
                 serializer.WriteObject(file, receipt);
         }
         catch (Exception exception)
         {
-            ChronicleDiagnostics.Write("harness-agent-host-receipt-failed|type=" + exception.GetType().Name);
+            var detail = Regex.Replace(exception.Message ?? string.Empty, @"(?i)(bearer\s+)\S+", "$1<redacted>");
+            detail = Regex.Replace(detail, @"(?i)((?:api.?key|token|secret)\s*[:=]\s*)[^\s,;]+", "$1<redacted>");
+            detail = detail.Replace('|', '/').Replace('\r', ' ').Replace('\n', ' ');
+            if (detail.Length > 240) detail = detail.Substring(0, 240);
+            ChronicleDiagnostics.Write("harness-agent-host-receipt-failed|type=" + exception.GetType().Name + "|detail=" + detail);
         }
     }
 }

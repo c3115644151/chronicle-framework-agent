@@ -277,6 +277,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
 
                 JsonObject child;
                 child = await executeObjective(objectiveId, decisions, promptTokens, completionTokens, trace, routes, elapsed.Token);
+                AgentHostHarnessProgressTrace.RecordObjectiveSubflowResult(objectiveId, child);
 
                 decisions = ReadInt(child, "decisions", decisions);
                 promptTokens = ReadLong(child, "promptTokens", promptTokens);

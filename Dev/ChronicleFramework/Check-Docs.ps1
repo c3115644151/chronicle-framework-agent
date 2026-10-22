@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.265'
+$contractVersion = '7.269'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -73,6 +73,7 @@ $agentHostHarnessProgressTraceSource = Get-Content (Join-Path $harnessRoot 'Agen
 $agentHostProviderContractSelfTestSource = Get-Content (Join-Path $harnessRoot 'AgentHost\ProviderContractSelfTest.cs') -Raw -Encoding UTF8
 $agentHostProviderSource = Get-Content (Join-Path $harnessRoot 'AgentHost\OllamaNativeProvider.cs') -Raw -Encoding UTF8
 $agentHostRuntimeControllerSource = Get-Content (Join-Path $harnessRoot 'AgentHostRuntimeController.cs') -Raw -Encoding UTF8
+$agentHostLifecycleReceiptSource = Get-Content (Join-Path $harnessRoot 'AgentHostLifecycleReceipt.cs') -Raw -Encoding UTF8
 $agentHostLifecycleEvaluationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostLifecycleEvaluation.ps1') -Raw -Encoding UTF8
 $agentHostDecisionCycleSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostDecisionCycle.cs') -Raw -Encoding UTF8
 $agentHostCampaignLoopEvaluationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostCampaignLoopEvaluation.ps1') -Raw -Encoding UTF8
@@ -854,7 +855,11 @@ if ($harnessScript -notmatch "'AgentHostLifecycleCompletionEvaluation' \{ @\('Pr
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostLifecycleCompletionEvaluation'" -or
     $harnessScript -notmatch '\-Scenario Complete' -or $agentHostLifecycleHarness -notmatch 'NativeArrivalCompleted' -or
     $agentHostLifecycleHarness -notmatch 'AgentHostLifecycleHostReceipt\.json' -or
-    $agentHostRuntimeControllerSource -notmatch 'AgentHostLifecycleReceipt\.CaptureForHarness') {
+    $agentHostRuntimeControllerSource -notmatch 'AgentHostLifecycleReceipt\.CaptureForHarness' -or
+    $agentHostLifecycleReceiptSource -notmatch 'DecisionCountAlias' -or
+    $agentHostLifecycleReceiptSource -notmatch 'DecisionCount = Math\.Max' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'RecordObjectiveSubflowResult' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'objective-subflow-result') {
     throw 'Real game-launched Host completion must remain opt-in, use the local model and Native arrival postcondition, and keep a sanitized lifecycle receipt without full model prompts or responses.'
 }
 $agentHostCampaignTransitionSource = Get-Content (Join-Path $harnessRoot 'AgentHostCampaignTransitionHarness.cs') -Raw -Encoding UTF8
@@ -1244,8 +1249,11 @@ if ($freshCampaignSource -notmatch 'StoryModeNewGame' -or
     $harnessScript -notmatch '-StoryModeEycLiveModelEvaluation -TimeoutSeconds 360' -or
     $harnessScript -notmatch "CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS', '120000'" -or
     $agentHostRuntimeControllerSource -notmatch 'autoStopMilliseconds <= 120000' -or
-    $harnessScript -notmatch "CHRONICLE_HARNESS_AGENT_MODEL', 'gpt-oss-20b'" -or
+    $harnessScript -notmatch "ValidateSet\('gpt-oss-20b','nvidiallama-3.2-11b-vision','poolside-laguna-s-2.1','gemini-2.5-flash','mistral-nemo'\)" -or
+    $harnessScript -notmatch 'CHRONICLE_HARNESS_AGENT_MODEL.*\$FreshStoryModeModel' -or
     $agentHostRuntimeControllerSource -notmatch 'CHRONICLE_HARNESS_AGENT_MODEL' -or
+    $freshCampaignSource -notmatch '_storyModeAgentAutostartArmed' -or
+    $freshCampaignSource -notmatch 'if \(_storyModeAgentAutostartArmed\) return' -or
     $freshCampaignTest -notmatch 'storyModeLiveModelProducedDecision' -or
     $freshCampaignTest -notmatch 'AgentHostProgress\.jsonl') { throw 'Fresh StoryMode setup must use the original StoryMode Campaign and exact skip-tutorial/confirmation dialogue choices, verify natural EYC activation, and never call the tutorial completion function directly; its optional live Host slice must use bounded same-session MCM startup with a real decision trace.' }
 if ($harnessScript -notmatch "'FreshStoryModeNativeMenuLeaveEvaluation' \{ @\('Preflight', 'Build', 'FreshStoryModeNativeMenuLeaveEvaluation'\) \}" -or

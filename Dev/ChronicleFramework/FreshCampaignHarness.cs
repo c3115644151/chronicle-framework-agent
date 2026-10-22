@@ -46,6 +46,7 @@ internal static class FreshCampaignHarness
     private static bool _trainingFieldMissionExitLogged;
     private static bool _storyModeReadyLogged;
     private static bool _storyModeSettledFrameLogged;
+    private static bool _storyModeAgentAutostartArmed;
     private static bool _trainingFieldNativeMenuLeaveAttempted;
     private static bool _trainingFieldNativeMenuLeaveVerified;
     private static string _trainingFieldNativeMenuLeaveFailure = string.Empty;
@@ -548,6 +549,8 @@ internal static class FreshCampaignHarness
 
         if (!string.Equals(Environment.GetEnvironmentVariable("CHRONICLE_FRESH_CAMPAIGN_START_AGENT"), "1", StringComparison.Ordinal)) return;
         if (!_storyModeSettledFrameLogged || _trainingFieldNativeMenuLeaveAttempted) return;
+        if (_storyModeAgentAutostartArmed) return;
+        _storyModeAgentAutostartArmed = true;
         Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "agent-host-lifecycle-test");
         ChronicleDiagnostics.Write("fresh-storymode-agent-autostart-armed|entry=existing-MCM-start|gameState=MapState");
     }

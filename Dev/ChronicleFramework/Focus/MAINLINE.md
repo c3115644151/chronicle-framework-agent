@@ -790,6 +790,10 @@ FreeLLMAPI模型路由现况（2026-10-21/22）：原版FreeLLMAPI的单请求`g
 
 2026-10-22自然StoryMode真实Host复测`TestResults/20261022-200511`：新Campaign经兄长官方Skip、教程自然结束、EYC原版激活；同一PID的MCM Host启动并通过版本/Campaign连接。首个模型请求使用经先前实际请求确认的远端`gpt-oss-20b`，FreeLLMAPI最终路由`ovh`返回HTTP429/Retry-After=85秒，单请求90秒Deadline判断冷却不可容纳后安全停止。Host收据确认模型/输入/输出tokens均0、真实决定0、Native目标动作0；不应归因提示词或Host动作。自然StoryMode进程无崩溃、未保存、源/正式存档清单不变，Host/游戏/session/临时包清理；连续录像831/831帧并提取24关键帧后删除MP4。`/v1/models`的`ready`不等于上游当前可用；本轮不重试同一受限路线，不使用本地模型。门禁仍未推进任何EYC目标，也没有真实模型规划证据。
 
+2026-10-22远端模型切片与Harness反馈改进：`TestResults/20261022-203216`、`205226` 使用FreeLLMAPI NVIDIA远端路由后，真实模型各成功两步：把目标分类为`supported-establish-your-clan`，随后选择当前未完成的`partySize`目标（合计约1.9k prompt tokens/135 completion tokens）；但PartySize Native子流程未执行动作并返回通用失败。`205226`暴露Lifecycle收据在序列化`objectiveRuns`时抛`SerializationException`，导致关键Native子流程原因丢失。现将子流程终止原因/失败码/动作数/决策数以无自由文本的`objective-subflow-result`事件写进现有`AgentHostProgress.jsonl`，同时把顶层`decisions`映射为收据的`decisionCount`；并把Campaign自动启动标记改为一次性，避免每帧重复日志。Build、Docs与`AgentHostPackage`合同测试`TestResults/20261022-214809`通过，但尚未用一次成功的真实模型/子流程再次实测新版诊断收据。
+
+随后直接NVIDIA路由`TestResults/20261022-210449`、`211231`和Poolside/OpenRouter路由`212742`均由FreeLLMAPI返回HTTP429/Retry-After 85秒，模型输入/输出tokens=0、Native动作=0；这些记录证明上游限流，不证明Agent/Native计划失败。远端provider当前状态不适合重复请求；不转成本地推理、不走可能混入本地custom endpoint的`auto`。下一次真实模型测试优先选一个源可核验的远端路由，并在不重复消耗额度的前提下读取`objective-subflow-result`收据以定位partySize开局出口链。FreeLLMAPI官方目录将NVIDIA Llama 3.2 11B Vision和Poolside Laguna S 2.1分别列为NVIDIA与OpenRouter远端服务，可复核来源：[NVIDIA模型目录](https://freellmapi.co/free-nvidia-api) · [Poolside Laguna S 2.1](https://freellmapi.co/uk/model/poolside-laguna-s-2-1)。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager

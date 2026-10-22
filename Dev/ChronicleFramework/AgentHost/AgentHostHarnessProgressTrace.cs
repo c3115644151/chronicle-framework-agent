@@ -102,17 +102,57 @@ internal static class AgentHostHarnessProgressTrace
                 }
             };
             var line = Encoding.UTF8.GetBytes(payload.ToJsonString() + Environment.NewLine);
-            lock (WriteGate)
-            {
-                using var stream = new FileStream(tracePath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
-                if (stream.Length + line.Length > MaximumBytes) return;
-                stream.Write(line);
-                stream.Flush();
-            }
+            AppendLine(tracePath, line);
         }
         catch
         {
             // Diagnostics must never change or block a real model decision.
+        }
+    }
+
+    internal static void RecordObjectiveSubflowResult(string objectiveId, JsonObject result)
+    {
+        var harnessMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+        if (!string.Equals(harnessMode, "visual-capture", StringComparison.Ordinal) &&
+            !string.Equals(harnessMode, "agent-host-lifecycle-test", StringComparison.Ordinal)) return;
+        var directory = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory)) return;
+
+        try
+        {
+            var rootPath = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var tracePath = Path.GetFullPath(Path.Combine(rootPath, "AgentHostProgress.jsonl"));
+            if (!tracePath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase)) return;
+            var termination = result["termination"] as JsonObject;
+            var payload = new JsonObject
+            {
+                ["event"] = "objective-subflow-result",
+                ["utc"] = DateTime.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+                ["objectiveId"] = objectiveId,
+                ["status"] = Copy(result, "status"),
+                ["termination"] = Copy(termination, "reason") ?? Copy(result, "termination"),
+                ["failureCode"] = Copy(result, "failureCode"),
+                ["actionsExecuted"] = Copy(result, "actionsExecuted"),
+                ["decisions"] = Copy(result, "decisions"),
+                ["promptTokens"] = Copy(result, "promptTokens"),
+                ["completionTokens"] = Copy(result, "completionTokens")
+            };
+            AppendLine(tracePath, Encoding.UTF8.GetBytes(payload.ToJsonString() + Environment.NewLine));
+        }
+        catch
+        {
+            // Diagnostics must never change or block an objective result.
+        }
+    }
+
+    private static void AppendLine(string tracePath, byte[] line)
+    {
+        lock (WriteGate)
+        {
+            using var stream = new FileStream(tracePath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+            if (stream.Length + line.Length > MaximumBytes) return;
+            stream.Write(line);
+            stream.Flush();
         }
     }
 
@@ -148,11 +188,34 @@ internal static class AgentHostHarnessProgressTrace
             if (File.ReadAllLines(path).Length != 2)
                 throw new AgentHostException("host-progress-trace-lifecycle-mode", "Lifecycle Harness model evaluation must retain the same bounded decision trace as visual-capture runs.");
 
+            var objectiveResult = new JsonObject
+            {
+                ["status"] = "failed",
+                ["termination"] = "recruitment-route-unavailable",
+                ["failureCode"] = "recruitment-route-unavailable",
+                ["actionsExecuted"] = 0,
+                ["decisions"] = 2,
+                ["promptTokens"] = 900,
+                ["completionTokens"] = 60,
+                ["failure"] = "Free text must not be copied into this bounded diagnostics line."
+            };
+            RecordObjectiveSubflowResult("partySize", objectiveResult);
+            var objectiveLine = JsonNode.Parse(File.ReadAllLines(path)[2])!.AsObject();
+            if (File.ReadAllLines(path).Length != 3 ||
+                ReadString(objectiveLine, "event") != "objective-subflow-result" ||
+                ReadString(objectiveLine, "objectiveId") != "partySize" ||
+                ReadString(objectiveLine, "failureCode") != "recruitment-route-unavailable" ||
+                objectiveLine.ContainsKey("failure"))
+                throw new AgentHostException("host-progress-trace-objective-subflow", "Harness diagnostics must record bounded objective result codes without copying free-text failure details.");
+
             Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "normal");
             RecordDecision(request.RootElement, new ProviderDecisionResult("completed", "selftest-model", 1, 1, "stop", decision, "selftest/route"));
-            if (File.ReadAllLines(path).Length != 2)
+            if (File.ReadAllLines(path).Length != 3)
                 throw new AgentHostException("host-progress-trace-self-test-mode-gate", "Progress tracing must be disabled outside Harness visual-capture/lifecycle modes.");
-            return [new { scenario = "harness-progress-trace-persists-native-decision-and-route-without-free-text-in-visual-capture-and-lifecycle-modes", passed = true }];
+            return [
+                new { scenario = "harness-progress-trace-persists-native-decision-and-route-without-free-text-in-visual-capture-and-lifecycle-modes", passed = true },
+                new { scenario = "harness-progress-trace-records-objective-subflow-termination-codes-without-free-text", passed = true }
+            ];
         }
         finally
         {
