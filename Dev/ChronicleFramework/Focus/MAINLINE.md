@@ -802,6 +802,8 @@ FreeLLMAPI官方目录将NVIDIA Llama 3.2 11B Vision和Poolside Laguna S 2.1分�
 
 2026-10-23本机FreeLLMAPI目录核验：通用`gpt-oss-20b`当前为`ready`，但已知真实调用曾被路由到OVH并受到429限制；独立模型ID `openai-gpt-oss-20b` 当前为`needsKey/no_key`且不可用。FreeLLMAPI产品页把此独立ID标为Groq提供的GPT-OSS 20B路线（[模型页](https://freellmapi.co/uk/model/gpt-oss-20b)）；它不是本地推理，也不同于通用`gpt-oss-20b`。即使该路线尚不可用，本机目录已声明其context_length为128000、supported_parameters包括`response_format`；因此路由可用后Host应走既有JSON Schema结构化响应协议，而非tool-call回退。Harness的自然StoryMode真实模型参数现允许显式选择该ID，避免测试意外落回OVH/自动多路由；在Groq key添加并且目录确认此路由可用前，不请求该模型。目录就绪仍不等于实时上游调用成功；首个真实请求应在自然StoryMode Host循环内完成，而非另做一次模型烟测。
 
+自然新战役模型切片`TestResults/20261023-001618`用固定NVIDIA远端ID完成原版StoryMode创建、兄长Tutorial Skip、EYC自然激活、首个MapState Host就绪；5张Native开局截图不同，连续引擎录屏821/821帧，录像缩帧检查后删除，Bannerlord/Host/临时档清理且没有存档写入。Native初始EYC为活动，MainHero 1000 Gold/20 Renown、MainParty 1/20。Host真实首请求收到FreeLLMAPI HTTP429/Retry-After=85，`retryAfterFitsDeadline=false`；本轮90秒单请求期限和120秒生命周期上限不适合再等85秒重试，所以0有效模型决策、0模型token、0 Native目标动作，最后安全失败。收据的`provider-http-error`及真实上游429定位为服务商容量/速率限制，不是Host/原版教程交互失败；本轮没有评估模型决策质量或Native目标执行。不要单纯拉长超时来掩盖可用路由不足，待Groq专属路由加入后优先用自然EYC首请求验证。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager
