@@ -788,6 +788,8 @@ FreeLLMAPI模型路由现况（2026-10-21/22）：原版FreeLLMAPI的单请求`g
 
 2026-10-22 训练场出口顺序校正：此前一次窄试验`TestResults/20261022-193820`在兄长对话尚未结束时过早模拟Native Leave Area，触发`MissionGauntletConversationView.OnConversationEndOneShot`空引用崩溃。报告栈已保存；根因是Harness输入时机，而非有证据指向原版正常玩家流程。Harness现按可见的“点击继续”节奏每1.5秒推进一次原版对话，只有ConversationManager已结束且Mission仍留在训练场时才考虑Tab/Leave Area兜底。修正后`TestResults/20261022-194410`通过：新建StoryMode、兄长Skip/确认、两次原生对话推进、EYC自然激活、首个`training_field_menu`上的原版Leave选项离开；CampaignDay/Stop档位保持、无保存、录像覆盖与7张引擎截图有效、无崩溃、进程清理。第二次`TestResults/20261022-195530`同样通过，并在结构化收据中明确记为`brother-dialogue-path-no-tab-fallback`。两次成功样本都没有使用Tab兜底，所以训练场Tab分支仍未单独验证。测试只证明跳过教程开局和该地点菜单的Native退出，不是AI/真实模型或EYC完成通过。
 
+2026-10-22自然StoryMode真实Host复测`TestResults/20261022-200511`：新Campaign经兄长官方Skip、教程自然结束、EYC原版激活；同一PID的MCM Host启动并通过版本/Campaign连接。首个模型请求使用经先前实际请求确认的远端`gpt-oss-20b`，FreeLLMAPI最终路由`ovh`返回HTTP429/Retry-After=85秒，单请求90秒Deadline判断冷却不可容纳后安全停止。Host收据确认模型/输入/输出tokens均0、真实决定0、Native目标动作0；不应归因提示词或Host动作。自然StoryMode进程无崩溃、未保存、源/正式存档清单不变，Host/游戏/session/临时包清理；连续录像831/831帧并提取24关键帧后删除MP4。`/v1/models`的`ready`不等于上游当前可用；本轮不重试同一受限路线，不使用本地模型。门禁仍未推进任何EYC目标，也没有真实模型规划证据。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager
