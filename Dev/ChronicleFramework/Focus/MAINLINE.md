@@ -792,7 +792,9 @@ FreeLLMAPI模型路由现况（2026-10-21/22）：原版FreeLLMAPI的单请求`g
 
 2026-10-22远端模型切片与Harness反馈改进：`TestResults/20261022-203216`、`205226` 使用FreeLLMAPI NVIDIA远端路由后，真实模型各成功两步：把目标分类为`supported-establish-your-clan`，随后选择当前未完成的`partySize`目标（合计约1.9k prompt tokens/135 completion tokens）；但PartySize Native子流程未执行动作并返回通用失败。`205226`暴露Lifecycle收据在序列化`objectiveRuns`时抛`SerializationException`，导致关键Native子流程原因丢失。现将子流程终止原因/失败码/动作数/决策数以无自由文本的`objective-subflow-result`事件写进现有`AgentHostProgress.jsonl`，同时把顶层`decisions`映射为收据的`decisionCount`；并把Campaign自动启动标记改为一次性，避免每帧重复日志。Build、Docs与`AgentHostPackage`合同测试`TestResults/20261022-214809`通过，但尚未用一次成功的真实模型/子流程再次实测新版诊断收据。
 
-随后直接NVIDIA路由`TestResults/20261022-210449`、`211231`和Poolside/OpenRouter路由`212742`均由FreeLLMAPI返回HTTP429/Retry-After 85秒，模型输入/输出tokens=0、Native动作=0；这些记录证明上游限流，不证明Agent/Native计划失败。远端provider当前状态不适合重复请求；不转成本地推理、不走可能混入本地custom endpoint的`auto`。下一次真实模型测试优先选一个源可核验的远端路由，并在不重复消耗额度的前提下读取`objective-subflow-result`收据以定位partySize开局出口链。FreeLLMAPI官方目录将NVIDIA Llama 3.2 11B Vision和Poolside Laguna S 2.1分别列为NVIDIA与OpenRouter远端服务，可复核来源：[NVIDIA模型目录](https://freellmapi.co/free-nvidia-api) · [Poolside Laguna S 2.1](https://freellmapi.co/uk/model/poolside-laguna-s-2-1)。
+后续服务商轮换与诊断修正：`TestResults/20261022-220746`显示Google `gemini-2.5-flash`虽在本机目录标`ready`，实际上游返回HTTP404 `model_not_found`；`TestResults/20261022-221321`和`222136`再次对NVIDIA路由得到429/Retry-After=85秒，均0模型tokens/0Native动作，`212742`的Poolside/OpenRouter也为429。`AgentHostProgress.jsonl`现在有无自由文本的`objective-subflow-result`条目，Lifecycle收据不再尝试把复杂`objectiveRuns`数组强制序列化，从而避免诊断器自身出错；`AgentHostPackage`合同测试通过。当前上游不可用/模型目录过时，未宣称任务推进。下次优先选择一个真实能回答的远端路由，在真实Game/Host任务中验证新收据并修正partySize child failure；不调用本地模型或无法审计的`auto`。
+
+FreeLLMAPI官方目录将NVIDIA Llama 3.2 11B Vision和Poolside Laguna S 2.1分别列为NVIDIA与OpenRouter远端服务，可复核来源：[NVIDIA模型目录](https://freellmapi.co/free-nvidia-api) · [Poolside Laguna S 2.1](https://freellmapi.co/uk/model/poolside-laguna-s-2-1)。
 
 ## 主要来源
 
