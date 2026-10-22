@@ -112,6 +112,16 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             ReadInt(unavailable, "actionsExecuted", -1) != 0 || unavailableProvider.CallCount != 0)
             throw new AgentHostException("establish-clan-recruitment-failure-receipt-failed", "A Native map precondition failure must preserve its termination, failure code and safe summary without calling the Provider or executing an action.");
         results.Add(new { scenario = "establish-clan-recruitment-failure-receipt-preserves-map-precondition-code", passed = true });
+
+        var trainingFieldClient = new FakeRecruitmentNativeClient(startAtTrainingField: true);
+        var trainingFieldProvider = new FakeObservedRecruitmentDecisionProvider();
+        var trainingFieldRun = await RunAsync(request.RootElement, trainingFieldClient, trainingFieldClient, trainingFieldClient, trainingFieldProvider, CancellationToken.None);
+        if (ReadString(trainingFieldRun, "status") != "completed" ||
+            ReadString(trainingFieldRun["termination"] as JsonObject, "reason") != "native-party-size-journal-target-met" ||
+            ReadInt(trainingFieldRun, "actionsExecuted", 0) != 3 || trainingFieldProvider.CallCount != 3 ||
+            !trainingFieldClient.Actions.SequenceEqual(["menuSelect", "recruitOptions", "recruit"], StringComparer.Ordinal))
+            throw new AgentHostException("establish-clan-recruitment-training-field-runtime-self-test-failed", "The Native PartySize subflow must leave the original training-field location menu before querying a Town RecruitmentVM and verifying a volunteer in the Journal.");
+        results.Add(new { scenario = "establish-clan-recruitment-native-training-field-leave-to-volunteer-to-journal-verification", passed = true });
         return results;
     }
 
@@ -656,7 +666,13 @@ internal static class AgentHostEstablishClanRecruitmentLoop
     {
         private bool _recruited;
         private readonly bool _startOnMap;
-        internal FakeRecruitmentNativeClient(bool startOnMap = true) => _startOnMap = startOnMap;
+        private readonly bool _startAtTrainingField;
+        private bool _trainingFieldLeft;
+        internal FakeRecruitmentNativeClient(bool startOnMap = true, bool startAtTrainingField = false)
+        {
+            _startOnMap = startOnMap;
+            _startAtTrainingField = startAtTrainingField;
+        }
         internal int RecruitedMembers => _recruited ? 5 : 4;
         internal int Gold => _recruited ? 80 : 100;
         internal List<string> Actions { get; } = new();
@@ -664,6 +680,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var atTrainingField = _startAtTrainingField && !_trainingFieldLeft;
             var state = new JsonObject
             {
                 ["campaignDay"] = 10.0,
@@ -671,13 +688,16 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                 ["context"] = new JsonObject
                 {
                     ["gameState"] = _startOnMap ? "MapState" : "MenuState",
-                    ["menuId"] = "town",
-                    ["encounterActive"] = false,
+                    ["menuId"] = atTrainingField ? "training_field_menu" : "town",
+                    ["encounterActive"] = atTrainingField,
+                    ["encounteredPartyId"] = atTrainingField ? "tutorial_training_field" : null,
                     ["inquiryOpen"] = false,
                     ["captivity"] = new JsonObject { ["isCaptive"] = false }
                 },
-                ["availableMenuOptions"] = new JsonArray(new JsonObject { ["id"] = RecruitmentMenuOptionId, ["available"] = true, ["enabled"] = true }),
-                ["location"] = new JsonObject { ["currentSettlementId"] = "town-a", ["targetSettlementId"] = null },
+                ["availableMenuOptions"] = atTrainingField
+                    ? new JsonArray(new JsonObject { ["id"] = "training_field_leave", ["available"] = true, ["enabled"] = true, ["isLeave"] = true })
+                    : new JsonArray(new JsonObject { ["id"] = RecruitmentMenuOptionId, ["available"] = true, ["enabled"] = true }),
+                ["location"] = new JsonObject { ["currentSettlementId"] = atTrainingField ? "tutorial_training_field" : "town-a", ["targetSettlementId"] = null },
                 ["party"] = new JsonObject { ["isMoving"] = false },
                 ["storyModeEstablishClan"] = new JsonObject { ["partySize"] = new JsonObject { ["current"] = RecruitedMembers, ["target"] = 5 } }
             };
@@ -713,6 +733,12 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         {
             cancellationToken.ThrowIfCancellationRequested();
             Actions.Add(action);
+            if (action == "menuSelect" && _startAtTrainingField && !_trainingFieldLeft &&
+                ReadString(arguments, "menuId") == "training_field_menu" && ReadString(arguments, "optionId") == "training_field_leave")
+            {
+                _trainingFieldLeft = true;
+                return Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["data"] = new JsonObject { ["menuId"] = "training_field_menu", ["optionId"] = "training_field_leave" } }.ToJsonString()));
+            }
             if (action == "recruitOptions")
             {
                 var options = new JsonObject
@@ -753,6 +779,47 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                     ["ownerId"] = "notable-a", ["troopId"] = "vlandian_recruit", ["slot"] = 0, ["confirmPartySizeWarning"] = 0
                 },
                 ["rationale"] = "Use the currently listed Native volunteer offer."
+            }));
+        }
+        public void Dispose() { }
+    }
+
+    private sealed class FakeObservedRecruitmentDecisionProvider : IAgentHostDecisionProvider
+    {
+        internal int CallCount { get; private set; }
+        public string ModelId => "deterministic-training-field-recruitment-selftest";
+        public string ConfigurationSource => "harness-fake-provider";
+        public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) { cancellationToken.ThrowIfCancellationRequested(); return Task.CompletedTask; }
+        public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var allowed = request.GetProperty("allowedActions");
+            if (allowed.GetArrayLength() == 0) throw new AgentHostException("training-field-selftest-action-catalog-empty", "The fake Native training-field route exposed no currently allowed action.");
+            var selected = allowed[0];
+            var action = selected.GetProperty("action").GetString() ?? throw new AgentHostException("training-field-selftest-action-missing", "The fake Native catalog action had no id.");
+            var values = selected.TryGetProperty("argumentValues", out var argumentValues) ? argumentValues : default;
+            JsonObject arguments = action switch
+            {
+                "menuSelect" => new JsonObject
+                {
+                    ["MenuId"] = values.GetProperty("MenuId")[0].GetString(),
+                    ["OptionId"] = values.GetProperty("OptionId")[0].GetString()
+                },
+                "recruitOptions" => new JsonObject(),
+                "recruit" => new JsonObject
+                {
+                    ["ownerId"] = values.GetProperty("ownerId")[0].GetString(),
+                    ["troopId"] = values.GetProperty("troopId")[0].GetString(),
+                    ["slot"] = values.GetProperty("slot")[0].GetInt32(),
+                    ["confirmPartySizeWarning"] = values.GetProperty("confirmPartySizeWarning")[0].GetInt32()
+                },
+                _ => throw new AgentHostException("training-field-selftest-action-unsupported", "The fake Native training-field route received an unexpected action catalog entry.")
+            };
+            CallCount++;
+            return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "fake-training-field-recruitment", new JsonObject
+            {
+                ["action"] = action,
+                ["arguments"] = arguments
             }));
         }
         public void Dispose() { }
