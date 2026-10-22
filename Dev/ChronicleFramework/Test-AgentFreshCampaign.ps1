@@ -945,6 +945,9 @@ else {
     $acceptanceChecks.progressionPassed = $recruitmentProgressionPassed
     $acceptanceChecks.expectedRenown = ($renown -eq 20)
 }
+$storyModeNativeLeaveInquiryForSummary = if ($StoryModeNativeMenuLeaveEvaluation -and $storyModeNativeLeavePostActionSnapshot -and $storyModeNativeLeavePostActionSnapshot.context.inquiry) {
+    $storyModeNativeLeavePostActionSnapshot.context.inquiry | Select-Object supported,kind,title,text,affirmative,negative,timerShown,pauseGameActiveState
+} else { $null }
 $result = [ordered]@{
     Scenario = if ($StoryModeNativeMenuLeaveEvaluation) { 'FreshStoryModeOriginalTutorialSkipAndNativeTrainingFieldLeave' } elseif ($StoryModeEycSetup) { 'FreshStoryModeOriginalTutorialSkipToEstablishYourClan' } else { 'FreshCampaignCharacterCreationRenown' }
     GameMode = if ($StoryModeEycSetup) { 'StoryMode' } else { 'Sandbox' }
@@ -1000,8 +1003,8 @@ $result = [ordered]@{
     StoryModeNativeMenuLeaveCampaignDayAfter = if ($StoryModeNativeMenuLeaveEvaluation) { $storyModeNativeLeaveCampaignDayAfter } else { $null }
     StoryModeNativeMenuLeaveClockAfter = if ($StoryModeNativeMenuLeaveEvaluation) { $storyModeNativeLeaveClockAfter } else { $null }
     StoryModeNativeMenuLeavePostActionSnapshotPath = if ($StoryModeNativeMenuLeaveEvaluation -and $storyModeNativeLeavePostActionSnapshot) { $storyModeNativeLeaveSnapshotPath } else { $null }
-    StoryModeNativeMenuLeaveInquiryOpenAfter = if ($StoryModeNativeMenuLeaveEvaluation -and $storyModeNativeLeavePostActionSnapshot) { [bool]$storyModeNativeLeavePostActionSnapshot.state.context.inquiryOpen } else { $null }
-    StoryModeNativeMenuLeaveInquiry = if ($StoryModeNativeMenuLeaveEvaluation -and $storyModeNativeLeavePostActionSnapshot) { $storyModeNativeLeavePostActionSnapshot.state.context.inquiry } else { $null }
+    StoryModeNativeMenuLeaveInquiryOpenAfter = if ($StoryModeNativeMenuLeaveEvaluation -and $storyModeNativeLeavePostActionSnapshot) { [bool]$storyModeNativeLeavePostActionSnapshot.context.inquiryOpen } else { $null }
+    StoryModeNativeMenuLeaveInquiry = $storyModeNativeLeaveInquiryForSummary
     StoryModeLiveModelEvaluation = [bool]$StoryModeEycLiveModelEvaluation
     StoryModeAgentHostStarted = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentHostStarted } else { $null }
     StoryModeAgentHostStartRequested = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentHostStartRequested } else { $null }

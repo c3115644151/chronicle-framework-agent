@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.283'
+$contractVersion = '7.285'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -1284,6 +1284,11 @@ if ($harnessScript -notmatch "'FreshStoryModeNativeMenuLeaveEvaluation' \{ @\('P
     $freshCampaignTest -notmatch '\[switch\]\$StoryModeNativeMenuLeaveEvaluation' -or
     $freshCampaignTest -notmatch 'StoryModeNativeMenuLeaveVerified' -or
     $freshCampaignTest -notmatch 'StoryModeNativeMenuLeaveInquiryOpenAfter' -or
+    $freshCampaignTest -notmatch 'storyModeNativeLeavePostActionSnapshot\.context\.inquiryOpen' -or
+    $freshCampaignTest -notmatch 'storyModeNativeLeavePostActionSnapshot\.context\.inquiry' -or
+    $freshCampaignTest -notmatch 'Select-Object supported,kind,title,text,affirmative,negative,timerShown,pauseGameActiveState' -or
+    $freshCampaignTest -notmatch 'StoryModeNativeMenuLeaveInquiry = \$storyModeNativeLeaveInquiryForSummary' -or
+    $freshCampaignTest -match 'storyModeNativeLeavePostActionSnapshot\.state\.context\.inquiry' -or
     $freshCampaignTest -notmatch 'training-field-menu-exited' -or
     $freshCampaignSource -notmatch 'RunMenuOptionConsequence\(menuContext, leaveIndex\)' -or
     $freshCampaignSource -notmatch 'fresh-storymode-native-menu-leave-snapshot\|json=' -or
