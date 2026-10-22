@@ -63,7 +63,6 @@ internal sealed class ChronicleAgentProtocol
     private Dictionary<int, Agent> _missionSceneAgentsObservation;
     private float _missionSceneAgentsObservationAt;
     private const float MissionSceneAgentsObservationLeaseSeconds = 60f;
-    private const int LeaveAreaGameKeyId = 4;
     private const float LeaveAreaHoldSeconds = 2.5f;
     private const long MaxProtocolEventLogBytes = 16L * 1024 * 1024;
     private Mission _missionLeaveMission;
@@ -1096,7 +1095,7 @@ internal sealed class ChronicleAgentProtocol
                     if (leaveMission.InputManager == null) throw new InvalidOperationException("Native Mission input context is unavailable");
                     _missionLeaveMission = leaveMission;
                     _missionLeaveOriginalInputContext = leaveMission.InputManager;
-                    _missionLeaveInputContext = new ChronicleMissionLeaveInputContext(_missionLeaveOriginalInputContext, LeaveAreaGameKeyId);
+                    _missionLeaveInputContext = new ChronicleMissionLeaveInputContext(_missionLeaveOriginalInputContext, ChronicleMissionLeaveInputContext.LeaveAreaGameKeyId);
                     leaveMission.InputManager = _missionLeaveInputContext;
                     _missionLeaveStartedAt = EngineTime.ApplicationTime;
                     _missionLeaveExpiresAt = _missionLeaveStartedAt + LeaveAreaHoldSeconds;

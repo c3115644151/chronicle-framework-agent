@@ -11,6 +11,8 @@ namespace ChronicleFramework;
 /// </summary>
 internal sealed class ChronicleMissionLeaveInputContext : IInputContext
 {
+    internal const int LeaveAreaGameKeyId = 4;
+
     private readonly IInputContext _inner;
     private readonly int _leaveAreaGameKey;
 

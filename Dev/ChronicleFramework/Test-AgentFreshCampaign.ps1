@@ -3,6 +3,7 @@ param(
     [int]$TimeoutSeconds = 240,
     [switch]$StoryModeEycSetup,
     [switch]$StoryModeEycLiveModelEvaluation,
+    [switch]$StoryModeNativeMenuLeaveEvaluation,
     [switch]$ValidateRecruitmentProgression,
     [switch]$RealModelRecruitment,
     [switch]$RetainDisposableSave
@@ -40,6 +41,7 @@ $previousSessionBytes = if ($previousSessionExisted) { [IO.File]::ReadAllBytes($
 if ($ValidateRecruitmentProgression -and (Test-Path -LiteralPath $agentCommandPath)) { throw 'A pending Agent command exists; refusing to overwrite it for FreshCampaign progression.' }
 if ($StoryModeEycSetup -and ($ValidateRecruitmentProgression -or $RealModelRecruitment -or $RetainDisposableSave)) { throw 'StoryModeEycSetup is a no-save Native StoryMode/tutorial-skip setup probe; it cannot be combined with Sandbox recruitment progression or disposable-save retention.' }
 if ($StoryModeEycLiveModelEvaluation -and (-not $StoryModeEycSetup -or $ValidateRecruitmentProgression -or $RealModelRecruitment -or $RetainDisposableSave)) { throw 'StoryModeEycLiveModelEvaluation requires the no-save StoryModeEycSetup path and cannot be combined with Sandbox progression or retained saves.' }
+if ($StoryModeNativeMenuLeaveEvaluation -and (-not $StoryModeEycSetup -or $StoryModeEycLiveModelEvaluation -or $ValidateRecruitmentProgression -or $RealModelRecruitment -or $RetainDisposableSave)) { throw 'StoryModeNativeMenuLeaveEvaluation requires the no-save StoryModeEycSetup path and cannot be combined with a live-model run, Sandbox progression or retained saves.' }
 if ($RealModelRecruitment -and -not $ValidateRecruitmentProgression) { throw 'RealModelRecruitment requires ValidateRecruitmentProgression so the new Campaign is saved as a protected disposable fixture before the model starts.' }
 if ($RetainDisposableSave -and -not $ValidateRecruitmentProgression) { throw 'RetainDisposableSave requires ValidateRecruitmentProgression so only a verified Native New Campaign save can be retained.' }
 if ($progressionSavePath -and (Test-Path -LiteralPath $progressionSavePath)) { throw 'Generated disposable-save name already exists; refusing to overwrite.' }
@@ -100,6 +102,7 @@ $launchStart = Get-Date
 $previousMode = $env:CHRONICLE_HARNESS_MODE
 $previousStoryModeFlag = $env:CHRONICLE_FRESH_CAMPAIGN_STORYMODE
 $previousStoryModeStartAgent = $env:CHRONICLE_FRESH_CAMPAIGN_START_AGENT
+$previousStoryModeNativeMenuLeaveTest = $env:CHRONICLE_FRESH_CAMPAIGN_NATIVE_MENU_LEAVE_TEST
 $previousFreeLlmApiKey = $env:FREELLMAPI_API_KEY
 $previousIssueProbeFlag = $env:CHRONICLE_FRESH_CAMPAIGN_SKIP_ISSUE_PROBE
 $previousFreshSaveName = $env:CHRONICLE_FRESH_CAMPAIGN_SAVE_NAME
@@ -109,6 +112,8 @@ if ($StoryModeEycSetup) { $env:CHRONICLE_FRESH_CAMPAIGN_STORYMODE = '1' }
 else { Remove-Item Env:CHRONICLE_FRESH_CAMPAIGN_STORYMODE -ErrorAction SilentlyContinue }
 if ($StoryModeEycLiveModelEvaluation) { $env:CHRONICLE_FRESH_CAMPAIGN_START_AGENT = '1' }
 else { Remove-Item Env:CHRONICLE_FRESH_CAMPAIGN_START_AGENT -ErrorAction SilentlyContinue }
+if ($StoryModeNativeMenuLeaveEvaluation) { $env:CHRONICLE_FRESH_CAMPAIGN_NATIVE_MENU_LEAVE_TEST = '1' }
+else { Remove-Item Env:CHRONICLE_FRESH_CAMPAIGN_NATIVE_MENU_LEAVE_TEST -ErrorAction SilentlyContinue }
 $env:CHRONICLE_CAPTURE_CRASH_EXCEPTION = '1'
 $freeLlmApiProfile = $null
 if ($ValidateRecruitmentProgression -or $RetainDisposableSave) {
@@ -144,6 +149,8 @@ finally {
     else { $env:CHRONICLE_FRESH_CAMPAIGN_STORYMODE = $previousStoryModeFlag }
     if ($null -eq $previousStoryModeStartAgent) { Remove-Item Env:CHRONICLE_FRESH_CAMPAIGN_START_AGENT -ErrorAction SilentlyContinue }
     else { $env:CHRONICLE_FRESH_CAMPAIGN_START_AGENT = $previousStoryModeStartAgent }
+    if ($null -eq $previousStoryModeNativeMenuLeaveTest) { Remove-Item Env:CHRONICLE_FRESH_CAMPAIGN_NATIVE_MENU_LEAVE_TEST -ErrorAction SilentlyContinue }
+    else { $env:CHRONICLE_FRESH_CAMPAIGN_NATIVE_MENU_LEAVE_TEST = $previousStoryModeNativeMenuLeaveTest }
     if ($null -eq $previousFreeLlmApiKey) { Remove-Item Env:FREELLMAPI_API_KEY -ErrorAction SilentlyContinue }
     else { $env:FREELLMAPI_API_KEY = $previousFreeLlmApiKey }
     if ($null -eq $previousCrashCaptureFlag) { Remove-Item Env:CHRONICLE_CAPTURE_CRASH_EXCEPTION -ErrorAction SilentlyContinue }
@@ -171,6 +178,16 @@ $storyModeAgentHostStarted = $false
 $storyModeAgentHostReady = $false
 $storyModeAgentHostStartRequested = $false
 $storyModeAgentHostTerminalDetail = $null
+$storyModeNativeLeaveRequested = $false
+$storyModeNativeLeaveVerified = $false
+$storyModeNativeLeaveFailure = $null
+$storyModeNativeLeaveBeforeMenu = $null
+$storyModeNativeLeaveAfterMenu = $null
+$storyModeNativeLeaveAfterSettlement = $null
+$storyModeNativeLeaveCampaignDayBefore = $null
+$storyModeNativeLeaveCampaignDayAfter = $null
+$storyModeNativeLeaveClockAfter = $null
+$storyModeNativeLeavePostActionSnapshot = $null
 $storyModeAgentHostTerminalState = $null
 $storyModeAgentProgressLineCount = 0
 $storyModeAgentProgressEntries = [System.Collections.Generic.List[object]]::new()
@@ -230,6 +247,8 @@ $storyModeVideoStartedTicks = 0L
 $storyModeVideoFrequency = [Diagnostics.Stopwatch]::Frequency
 $storyModeVideoPath = if ($env:CHRONICLE_HARNESS_TEMP) { Join-Path $env:CHRONICLE_HARNESS_TEMP 'FreshStoryModeSetup.mp4' } else { $null }
 $storyModeVideoEventsPath = if ($env:CHRONICLE_HARNESS_TEMP) { Join-Path $env:CHRONICLE_HARNESS_TEMP 'FreshStoryModeSetup-events.jsonl' } else { $null }
+$storyModeNativeLeaveSnapshotPath = if ($env:CHRONICLE_HARNESS_TEMP) { Join-Path $env:CHRONICLE_HARNESS_TEMP 'FreshStoryMode.native-menu-leave.json' } else { $null }
+$storyModeTrainingFieldExitPath = $null
 $storyModeAgentProgressPath = if ($env:CHRONICLE_HARNESS_TEMP) { Join-Path $env:CHRONICLE_HARNESS_TEMP 'AgentHostProgress.jsonl' } else { $null }
 $storyModeVideoContactPath = if ($env:CHRONICLE_HARNESS_TEMP) { Join-Path $env:CHRONICLE_HARNESS_TEMP 'FreshStoryModeSetup-contact.jpg' } else { $null }
 $deadline = (Get-Date).AddSeconds($(if ($ValidateRecruitmentProgression) { [Math]::Min(90, $TimeoutSeconds) } else { $TimeoutSeconds }))
@@ -381,6 +400,38 @@ try {
                 }
             }
         }
+        if ($StoryModeNativeMenuLeaveEvaluation) {
+            foreach ($line in $newLines) {
+                if ($line -match "pid=$bannerlordPid\|fresh-storymode-native-menu-leave\|status=requested\|") {
+                    $storyModeNativeLeaveRequested = $true
+                    Write-StoryModeCaptureEvent 'native-training-field-leave-requested' 'menuSelect' 'completed' 'MapState' 'training_field_menu'
+                }
+                if ($line -match 'fresh-storymode-native-menu-leave\|status=verified\|beforeMenu=([^|]+)\|afterMenu=([^|]+)\|afterSettlement=([^|]+)\|campaignDayBefore=([0-9.]+)\|campaignDayAfter=([0-9.]+)\|clock=([^|]+)\|eycActive=(True|False)$') {
+                    $storyModeNativeLeaveRequested = $true
+                    $storyModeNativeLeaveVerified = $true
+                    $storyModeNativeLeaveBeforeMenu = $Matches[1]
+                    $storyModeNativeLeaveAfterMenu = $Matches[2]
+                    $storyModeNativeLeaveAfterSettlement = $Matches[3]
+                    $storyModeNativeLeaveCampaignDayBefore = [double]::Parse($Matches[4], [Globalization.CultureInfo]::InvariantCulture)
+                    $storyModeNativeLeaveCampaignDayAfter = [double]::Parse($Matches[5], [Globalization.CultureInfo]::InvariantCulture)
+                    $storyModeNativeLeaveClockAfter = $Matches[6]
+                    $storyModeEycReadyObserved = $storyModeEycReadyObserved -and $Matches[7] -eq 'True'
+                    Write-StoryModeCaptureEvent 'native-training-field-leave-verified' 'menuSelect' 'completed' 'MapState' $storyModeNativeLeaveAfterMenu
+                }
+                if ($line -match 'fresh-storymode-native-menu-leave\|status=(failed|unverified)\|detail=(.*)$') {
+                    $storyModeNativeLeaveFailure = [string]$Matches[2]
+                    $harnessFailureObserved = $true
+                }
+                if ($line -match 'fresh-storymode-native-menu-leave-snapshot\|json=(\{.*\})$') {
+                    try {
+                        if (-not $storyModeNativeLeaveSnapshotPath) { throw 'Harness temp path is unavailable for the post-Leave observation.' }
+                        [IO.File]::WriteAllBytes($storyModeNativeLeaveSnapshotPath, [Text.Encoding]::UTF8.GetBytes($Matches[1]))
+                        $storyModeNativeLeavePostActionSnapshot = $Matches[1] | ConvertFrom-Json
+                    }
+                    catch { $harnessFailureObserved = $true }
+                }
+            }
+        }
         $startRequested = $startRequested -or [bool]($newLines -match "pid=$bannerlordPid\|fresh-campaign-start-requested\|save=none\|gameMode=sandbox$|pid=$bannerlordPid\|fresh-campaign-start-requested\|save=none\|gameMode=storymode\|entry=StoryModeNewGame$")
         $introSkippedObserved = $introSkippedObserved -or [bool]($newLines -match 'fresh-campaign-intro-skipped\|via=native-video-completion\|mode=harness$')
         $harnessFailureObserved = $harnessFailureObserved -or [bool]($newLines -match 'fresh-campaign-failed\||fresh-storymode-e2e-failed\|')
@@ -393,6 +444,19 @@ try {
         if ($disposableSaveRequested) { $disposableSaveOwned = $true }
         foreach ($line in $newLines) {
             if ($line -match 'fresh-campaign-stage\|index=(\d+)') { [void]$stageIndices.Add([int]$Matches[1]) }
+            if ($StoryModeEycSetup -and $line -match 'fresh-storymode-training-field-exit\|status=mission-ended\|via=brother-dialogue$') {
+                $storyModeTrainingFieldExitPath = 'brother-dialogue'
+            }
+            if ($StoryModeEycSetup -and $line -match 'fresh-storymode-training-field-exit\|status=native-leave-area-fallback-started\|via=NativeTabLeaveAreaFallback\|holdSeconds=([0-9.]+)\|clock=([^|]+)$') {
+                $storyModeTrainingFieldExitPath = 'long-Tab-Native-Leave-Area-fallback'
+                Write-StoryModeCaptureEvent 'training-field-long-tab-fallback-started' 'missionLeave' 'nativeInputHold' 'MissionState' 'training_field'
+            }
+            if ($StoryModeEycSetup -and $line -match 'fresh-storymode-training-field-exit\|status=post-confirmation-dialogue-advanced\|via=NativeConversationManager$') {
+                Write-StoryModeCaptureEvent 'tutorial-skip-dialogue-advanced' 'dialogueContinue' 'completed' 'MissionState' 'training_field'
+            }
+            if ($StoryModeEycSetup -and $line -match 'fresh-storymode-training-field-exit\|status=native-leave-area-ended-mission\|via=NativeTabLeaveAreaFallback$') {
+                Write-StoryModeCaptureEvent 'training-field-long-tab-fallback-ended-mission' 'missionLeave' 'completed' 'MapState' 'training_field_menu'
+            }
             if ($StoryModeEycSetup -and $line -match 'fresh-storymode-tutorial-skip\|status=original-brother-conversation-started$') {
                 Write-StoryModeCaptureEvent 'brother-conversation-started' 'dialogueStart' 'completed' 'MissionState' 'training_field'
             }
@@ -413,6 +477,7 @@ try {
             }
             if ($StoryModeEycSetup -and $line -match 'fresh-storymode-e2e-ready\|quest=rebuild_player_clan_storymode_quest\|mapState=MapState\|renown=([0-9.]+)\|campaignDay=([0-9.]+)$') {
                 $storyModeEycReadyObserved = $true
+                if (-not $storyModeTrainingFieldExitPath) { $storyModeTrainingFieldExitPath = 'brother-dialogue-path-no-tab-fallback' }
                 $renown = [double]::Parse($Matches[1], [Globalization.CultureInfo]::InvariantCulture)
                 $mapState = 'MapState'
                 $issueConversationProbeStatus = 'skipped:storymode-setup'
@@ -523,7 +588,7 @@ try {
         }
 
         $creationReady = if ($StoryModeEycSetup) {
-            $creationCompleted -and $initialSnapshotCaptured -and $storyModeTutorialSkipSelected -and $storyModeTutorialSkipConfirmed -and $storyModeEycReadyObserved -and $storyModeRenderSettledObserved
+            $creationCompleted -and $initialSnapshotCaptured -and $storyModeTutorialSkipSelected -and $storyModeTutorialSkipConfirmed -and $storyModeEycReadyObserved -and $storyModeRenderSettledObserved -and (-not $StoryModeNativeMenuLeaveEvaluation -or $storyModeNativeLeaveVerified)
         } else {
             $creationCompleted -and $initialSnapshotCaptured -and $issueConversationProbeStatus -ne 'not-observed'
         }
@@ -807,12 +872,22 @@ if ($StoryModeEycSetup) {
     $acceptanceChecks.storyModeOfficialTutorialSkipConfirmed = $storyModeTutorialSkipConfirmed
     $acceptanceChecks.originalEstablishYourClanQuestNaturallyActive = $storyModeEycReadyObserved
     $requiredNativeFrames = @('brother-conversation-start', 'tutorial-skip-option-visible', 'tutorial-skip-confirmation-visible', 'eyc-map-render-settled')
+    if ($StoryModeNativeMenuLeaveEvaluation) { $requiredNativeFrames += 'training-field-menu-exited' }
     $allRequiredNativeFramesPresent = @($requiredNativeFrames | Where-Object { -not $storyModeNativeFrameNames.Contains($_) }).Count -eq 0
     $requiredFrameHashes = @($requiredNativeFrames | ForEach-Object { [string]$storyModeNativeFrameHashes[$_] } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     $distinctRequiredFrameHashes = @($requiredFrameHashes | Sort-Object -Unique)
     $storyModeNativeFramesPassed = $allRequiredNativeFramesPresent -and $requiredFrameHashes.Count -eq $requiredNativeFrames.Count -and $distinctRequiredFrameHashes.Count -eq $requiredNativeFrames.Count
     if ($allRequiredNativeFramesPresent -and -not $storyModeNativeFramesPassed) { $harnessFailureObserved = $true; $acceptanceChecks.noHarnessFailure = $false }
     $acceptanceChecks.storyModeNativeFrames = $storyModeNativeFramesPassed
+    if ($StoryModeNativeMenuLeaveEvaluation) {
+        $acceptanceChecks.storyModeNativeMenuLeaveRequested = $storyModeNativeLeaveRequested
+        $acceptanceChecks.storyModeNativeMenuLeaveVerified = $storyModeNativeLeaveVerified
+        $acceptanceChecks.storyModeNativeMenuLeaveUsedCurrentNativeEntry = $storyModeNativeLeaveBeforeMenu -eq 'training_field_menu' -and $storyModeNativeLeaveAfterMenu -ne 'training_field_menu' -and $storyModeNativeLeaveAfterSettlement -ne 'tutorial_training_field'
+        $acceptanceChecks.storyModeNativeMenuLeaveKeptCampaignClockStopped = $storyModeNativeLeaveClockAfter -eq 'Stop'
+        $acceptanceChecks.storyModeNativeMenuLeaveCampaignDayUnchanged = $null -ne $storyModeNativeLeaveCampaignDayBefore -and [Math]::Abs($storyModeNativeLeaveCampaignDayAfter - $storyModeNativeLeaveCampaignDayBefore) -le 0.001
+        $acceptanceChecks.storyModeNativeMenuLeaveKeptEycActive = $storyModeEycReadyObserved
+        $acceptanceChecks.storyModeNativeMenuLeavePostActionSnapshotCaptured = $null -ne $storyModeNativeLeavePostActionSnapshot
+    }
     if ($StoryModeEycLiveModelEvaluation) {
         $acceptanceChecks.storyModeLiveHostStarted = $storyModeAgentHostStarted
         $acceptanceChecks.storyModeLiveHostReady = $storyModeAgentHostReady
@@ -828,7 +903,7 @@ else {
     $acceptanceChecks.expectedRenown = ($renown -eq 20)
 }
 $result = [ordered]@{
-    Scenario = if ($StoryModeEycSetup) { 'FreshStoryModeOriginalTutorialSkipToEstablishYourClan' } else { 'FreshCampaignCharacterCreationRenown' }
+    Scenario = if ($StoryModeNativeMenuLeaveEvaluation) { 'FreshStoryModeOriginalTutorialSkipAndNativeTrainingFieldLeave' } elseif ($StoryModeEycSetup) { 'FreshStoryModeOriginalTutorialSkipToEstablishYourClan' } else { 'FreshCampaignCharacterCreationRenown' }
     GameMode = if ($StoryModeEycSetup) { 'StoryMode' } else { 'Sandbox' }
     Launcher = $launcher
     GameExecutable = $gameExe
@@ -861,10 +936,24 @@ $result = [ordered]@{
     StoryModeOfficialTutorialSkipSelected = if ($StoryModeEycSetup) { $storyModeTutorialSkipSelected } else { $null }
     StoryModeOfficialTutorialSkipConfirmed = if ($StoryModeEycSetup) { $storyModeTutorialSkipConfirmed } else { $null }
     OriginalEstablishYourClanQuestNaturallyActive = if ($StoryModeEycSetup) { $storyModeEycReadyObserved } else { $null }
+    StoryModeTrainingFieldExitPath = if ($StoryModeEycSetup) { $storyModeTrainingFieldExitPath } else { $null }
     StoryModeNativeFrames = if ($StoryModeEycSetup) { @($storyModeNativeFrameNames) } else { $null }
     StoryModeNativeFrameSha256 = if ($StoryModeEycSetup) { $storyModeNativeFrameHashes } else { $null }
     StoryModeNativeFrameDistinctCount = if ($StoryModeEycSetup) { $distinctRequiredFrameHashes.Count } else { $null }
     StoryModeNativeFramesPassed = if ($StoryModeEycSetup) { $storyModeNativeFramesPassed } else { $null }
+    StoryModeNativeMenuLeaveEvaluation = [bool]$StoryModeNativeMenuLeaveEvaluation
+    StoryModeNativeMenuLeaveRequested = if ($StoryModeNativeMenuLeaveEvaluation) { $storyModeNativeLeaveRequested } else { $null }
+    StoryModeNativeMenuLeaveVerified = if ($StoryModeNativeMenuLeaveEvaluation) { $storyModeNativeLeaveVerified } else { $null }
+    StoryModeNativeMenuLeaveFailure = if ($StoryModeNativeMenuLeaveEvaluation) { $storyModeNativeLeaveFailure } else { $null }
+    StoryModeNativeMenuLeaveBeforeMenu = if ($StoryModeNativeMenuLeaveEvaluation) { $storyModeNativeLeaveBeforeMenu } else { $null }
+    StoryModeNativeMenuLeaveAfterMenu = if ($StoryModeNativeMenuLeaveEvaluation) { $storyModeNativeLeaveAfterMenu } else { $null }
+    StoryModeNativeMenuLeaveAfterSettlement = if ($StoryModeNativeMenuLeaveEvaluation) { $storyModeNativeLeaveAfterSettlement } else { $null }
+    StoryModeNativeMenuLeaveCampaignDayBefore = if ($StoryModeNativeMenuLeaveEvaluation) { $storyModeNativeLeaveCampaignDayBefore } else { $null }
+    StoryModeNativeMenuLeaveCampaignDayAfter = if ($StoryModeNativeMenuLeaveEvaluation) { $storyModeNativeLeaveCampaignDayAfter } else { $null }
+    StoryModeNativeMenuLeaveClockAfter = if ($StoryModeNativeMenuLeaveEvaluation) { $storyModeNativeLeaveClockAfter } else { $null }
+    StoryModeNativeMenuLeavePostActionSnapshotPath = if ($StoryModeNativeMenuLeaveEvaluation -and $storyModeNativeLeavePostActionSnapshot) { $storyModeNativeLeaveSnapshotPath } else { $null }
+    StoryModeNativeMenuLeaveInquiryOpenAfter = if ($StoryModeNativeMenuLeaveEvaluation -and $storyModeNativeLeavePostActionSnapshot) { [bool]$storyModeNativeLeavePostActionSnapshot.state.context.inquiryOpen } else { $null }
+    StoryModeNativeMenuLeaveInquiry = if ($StoryModeNativeMenuLeaveEvaluation -and $storyModeNativeLeavePostActionSnapshot) { $storyModeNativeLeavePostActionSnapshot.state.context.inquiry } else { $null }
     StoryModeLiveModelEvaluation = [bool]$StoryModeEycLiveModelEvaluation
     StoryModeAgentHostStarted = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentHostStarted } else { $null }
     StoryModeAgentHostStartRequested = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentHostStartRequested } else { $null }

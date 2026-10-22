@@ -1,6 +1,8 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.262
+Contract version: 7.265
+
+`FreshStoryModeNativeMenuLeaveEvaluation`是非模型的窄Native集成测试：同一个新Campaign先通过兄长对话的原版“跳过教程”及确认，原生推进对话后自然结束训练场Mission并进入活动EYC的首个MapState；该状态仍位于`training_field_menu`。Harness只选择当前启用的原版`training_field_leave`并通过`GameMenu.RunMenuOptionConsequence`调用原版处理器，随后验证回到地图、训练场菜单/地点退出、EYC仍活动、CampaignDay与Stop档位未变、无存档写入，并捕获前后引擎画面和Native post-action观察（包括若出现的Inquiry）。`TestResults/20261022-194410`完整通过；`20261022-195530`复测后还在收据中明确记录`brother-dialogue-path-no-tab-fallback`。两次教程Mission离开均由原版兄长对话路径完成，没有使用Tab兜底。这项测试只验证开局准备与单项Native菜单动作，不计作AI决策或长程EYC目标进展。`TestResults/20261022-193820`曾在兄长对话仍活跃时过早模拟原版Leave Area并触发游戏空引用崩溃；现Harness改为每1.5秒推进一次原版“点击继续”，且仅在ConversationManager已结束对话、场景仍未退出时才启动2.5秒Native Leave Area兜底。该兜底在训练场场景尚未单独实测，严禁在对话仍活跃时触发；其它Town Mission Leave证据不能替代该特定验证。后续弹出的通知/询问也不会由本测试自动确认。
 
 正常AgentHostPackage阶段会先检查D盘`BuildCache/Packages`内只属于该Harness的`ChronicleAgentHost-win-x64-<32位GUID>`临时发布目录；仅清理创建超过24小时、且当前没有Bannerlord或AgentHost运行的目录，并在回执中记录数量和字节数。未达到年龄的保持不动；不扫描/清理其它BuildCache或用户数据。
 

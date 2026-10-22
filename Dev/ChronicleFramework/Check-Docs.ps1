@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.262'
+$contractVersion = '7.265'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -1248,6 +1248,15 @@ if ($freshCampaignSource -notmatch 'StoryModeNewGame' -or
     $agentHostRuntimeControllerSource -notmatch 'CHRONICLE_HARNESS_AGENT_MODEL' -or
     $freshCampaignTest -notmatch 'storyModeLiveModelProducedDecision' -or
     $freshCampaignTest -notmatch 'AgentHostProgress\.jsonl') { throw 'Fresh StoryMode setup must use the original StoryMode Campaign and exact skip-tutorial/confirmation dialogue choices, verify natural EYC activation, and never call the tutorial completion function directly; its optional live Host slice must use bounded same-session MCM startup with a real decision trace.' }
+if ($harnessScript -notmatch "'FreshStoryModeNativeMenuLeaveEvaluation' \{ @\('Preflight', 'Build', 'FreshStoryModeNativeMenuLeaveEvaluation'\) \}" -or
+    $harnessScript -notmatch '-StoryModeNativeMenuLeaveEvaluation -TimeoutSeconds 360' -or
+    $freshCampaignTest -notmatch '\[switch\]\$StoryModeNativeMenuLeaveEvaluation' -or
+    $freshCampaignTest -notmatch 'StoryModeNativeMenuLeaveVerified' -or
+    $freshCampaignTest -notmatch 'StoryModeNativeMenuLeaveInquiryOpenAfter' -or
+    $freshCampaignTest -notmatch 'training-field-menu-exited' -or
+    $freshCampaignSource -notmatch 'RunMenuOptionConsequence\(menuContext, leaveIndex\)' -or
+    $freshCampaignSource -notmatch 'fresh-storymode-native-menu-leave-snapshot\|json=' -or
+    $freshCampaignSource -notmatch 'training_field_leave') { throw 'The opt-in fresh StoryMode Native-menu test must invoke only the currently enabled original training-field Leave consequence, verify the resulting map/clock/Quest state and preserve its screenshots without saving.' }
 if ($harnessScript -notmatch 'function Remove-RetainedAgentHostPackage' -or
     $harnessScript -notmatch 'CHRONICLE_AGENT_HOST_TEST_PATH' -or
     $harnessScript -notmatch 'Remove-RetainedAgentHostPackage \$script:retainedAgentHostPackageRoot' -or

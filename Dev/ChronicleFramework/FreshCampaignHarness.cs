@@ -10,6 +10,7 @@ using TaleWorlds.CampaignSystem.GameState;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Core;
+using TaleWorlds.InputSystem;
 using TaleWorlds.MountAndBlade;
 
 namespace ChronicleFramework;
@@ -33,10 +34,25 @@ internal static class FreshCampaignHarness
     private static bool _tutorialSkipConfirmationFrameCaptured;
     private static DateTime _tutorialSkipConfirmationVisibleUtc;
     private static bool _tutorialSkipConfirmed;
+    private static bool _tutorialSkipConversationContinued;
+    private static DateTime _tutorialSkipConversationContinuedUtc;
+    private static DateTime _tutorialSkipNextAdvanceUtc;
+    private static bool _tutorialSkipPostConfirmationOptionsLogged;
+    private static Mission _trainingFieldFallbackLeaveMission;
+    private static IInputContext _trainingFieldFallbackLeaveOriginalContext;
+    private static ChronicleMissionLeaveInputContext _trainingFieldFallbackLeaveContext;
+    private static DateTime _trainingFieldFallbackLeaveExpiresUtc;
+    private static bool _trainingFieldFallbackLeaveRequested;
+    private static bool _trainingFieldMissionExitLogged;
     private static bool _storyModeReadyLogged;
     private static bool _storyModeSettledFrameLogged;
+    private static bool _trainingFieldNativeMenuLeaveAttempted;
+    private static bool _trainingFieldNativeMenuLeaveVerified;
+    private static string _trainingFieldNativeMenuLeaveFailure = string.Empty;
     private static bool _storyModeFailureLogged;
     private static DateTime _storyModeReadyObservedUtc;
+    private static DateTime _trainingFieldNativeMenuLeaveStartedUtc;
+    private static double _trainingFieldNativeMenuLeaveCampaignDayBefore;
     private static int _storyModeTrainingFieldAgentWaitTicks;
     private static int _lastProcessedStage = -1;
 
@@ -238,8 +254,10 @@ internal static class FreshCampaignHarness
 
     private static void TrySkipStoryModeTrainingField()
     {
-        if (!_armed || !_storyMode ||
-            GameStateManager.Current?.ActiveState?.GetType().Name != "MissionState" ||
+        if (!_armed || !_storyMode) return;
+
+        UpdateTrainingFieldFallbackLeave();
+        if (GameStateManager.Current?.ActiveState?.GetType().Name != "MissionState" ||
             Settlement.CurrentSettlement?.StringId != "tutorial_training_field" || Mission.Current == null || Mission.Current.MissionEnded)
             return;
 
@@ -250,6 +268,16 @@ internal static class FreshCampaignHarness
             if (manager == null) return;
             if (!manager.IsConversationInProgress)
             {
+                if (_tutorialSkipConfirmed)
+                {
+                    if (!_tutorialSkipConversationContinued)
+                    {
+                        _tutorialSkipConversationContinued = true;
+                        _tutorialSkipConversationContinuedUtc = DateTime.UtcNow;
+                        ChronicleDiagnostics.Write("fresh-storymode-training-field-exit|status=brother-conversation-ended|via=NativeConversationManager");
+                    }
+                    return;
+                }
                 if (_trainingFieldConversationStarted) return;
                 var brotherAgent = mission.Agents.FirstOrDefault(agent => agent?.Character?.StringId == "tutorial_npc_brother");
                 var playerAgent = mission.MainAgent;
@@ -296,8 +324,19 @@ internal static class FreshCampaignHarness
 
             if (_tutorialSkipConfirmed)
             {
-                if (manager.CurOptions.Count == 0) manager.ContinueConversation();
-                else WriteStoryModeFailure("unexpected-options-after-original-skip-confirmation");
+                if (manager.CurOptions.Count > 0)
+                {
+                    if (!_tutorialSkipPostConfirmationOptionsLogged)
+                    {
+                        _tutorialSkipPostConfirmationOptionsLogged = true;
+                        ChronicleDiagnostics.Write("fresh-storymode-training-field-exit|status=post-confirmation-native-options|ids=" + string.Join(",", manager.CurOptions.Select(option => option.Id + ":" + option.IsClickable)));
+                    }
+                    return;
+                }
+                if (DateTime.UtcNow < _tutorialSkipNextAdvanceUtc) return;
+                manager.ContinueConversation();
+                _tutorialSkipNextAdvanceUtc = DateTime.UtcNow.AddSeconds(1.5);
+                ChronicleDiagnostics.Write("fresh-storymode-training-field-exit|status=post-confirmation-dialogue-advanced|via=NativeConversationManager");
                 return;
             }
 
@@ -349,6 +388,63 @@ internal static class FreshCampaignHarness
         }
     }
 
+    private static void UpdateTrainingFieldFallbackLeave()
+    {
+        var mission = Mission.Current;
+        if (_tutorialSkipConfirmed && _tutorialSkipConversationContinued && !_trainingFieldMissionExitLogged &&
+            _trainingFieldFallbackLeaveMission == null &&
+            (GameStateManager.Current?.ActiveState?.GetType().Name != "MissionState" || mission == null || mission.MissionEnded ||
+             Settlement.CurrentSettlement?.StringId != "tutorial_training_field"))
+        {
+            _trainingFieldMissionExitLogged = true;
+            ChronicleDiagnostics.Write("fresh-storymode-training-field-exit|status=mission-ended|via=brother-dialogue");
+        }
+
+        if (_trainingFieldFallbackLeaveMission != null &&
+            (_trainingFieldFallbackLeaveMission != mission || _trainingFieldFallbackLeaveMission.MissionEnded ||
+             DateTime.UtcNow >= _trainingFieldFallbackLeaveExpiresUtc))
+        {
+            var completed = _trainingFieldFallbackLeaveMission.MissionEnded || _trainingFieldFallbackLeaveMission != mission;
+            if (ReferenceEquals(_trainingFieldFallbackLeaveMission.InputManager, _trainingFieldFallbackLeaveContext))
+            {
+                try { _trainingFieldFallbackLeaveMission.InputManager = _trainingFieldFallbackLeaveOriginalContext; }
+                catch (Exception exception) { ChronicleDiagnostics.Write("fresh-storymode-training-field-exit|status=input-context-restore-failed|type=" + exception.GetType().Name); }
+            }
+            ChronicleDiagnostics.Write("fresh-storymode-training-field-exit|status=" + (completed ? "native-leave-area-ended-mission" : "native-leave-area-hold-expired") + "|via=NativeTabLeaveAreaFallback");
+            _trainingFieldFallbackLeaveMission = null;
+            _trainingFieldFallbackLeaveOriginalContext = null;
+            _trainingFieldFallbackLeaveContext = null;
+            _trainingFieldFallbackLeaveExpiresUtc = DateTime.MinValue;
+            if (completed) _trainingFieldMissionExitLogged = true;
+        }
+
+        if (_trainingFieldMissionExitLogged || !_tutorialSkipConfirmed || !_tutorialSkipConversationContinued ||
+            _trainingFieldFallbackLeaveRequested || _trainingFieldFallbackLeaveMission != null || mission == null || mission.MissionEnded ||
+            Campaign.Current?.ConversationManager?.IsConversationInProgress == true ||
+            GameStateManager.Current?.ActiveState?.GetType().Name != "MissionState" ||
+            Settlement.CurrentSettlement?.StringId != "tutorial_training_field" ||
+            DateTime.UtcNow - _tutorialSkipConversationContinuedUtc < TimeSpan.FromSeconds(3))
+            return;
+
+        try
+        {
+            if (mission.MainAgent == null || !mission.MainAgent.IsActive() || !mission.MainAgent.IsPlayerControlled || mission.InputManager == null)
+                throw new InvalidOperationException("The Native training-field Leave Area fallback requires the active player MainAgent and Native Mission input context.");
+            _trainingFieldFallbackLeaveMission = mission;
+            _trainingFieldFallbackLeaveOriginalContext = mission.InputManager;
+            _trainingFieldFallbackLeaveContext = new ChronicleMissionLeaveInputContext(_trainingFieldFallbackLeaveOriginalContext, ChronicleMissionLeaveInputContext.LeaveAreaGameKeyId);
+            mission.InputManager = _trainingFieldFallbackLeaveContext;
+            _trainingFieldFallbackLeaveExpiresUtc = DateTime.UtcNow.AddSeconds(2.5);
+            _trainingFieldFallbackLeaveRequested = true;
+            ChronicleDiagnostics.Write("fresh-storymode-training-field-exit|status=native-leave-area-fallback-started|via=NativeTabLeaveAreaFallback|holdSeconds=2.5|clock=" + (Campaign.Current?.TimeControlMode.ToString() ?? "null"));
+            CaptureStoryModeFrame("training-field-before-tab-fallback", "MissionState", "training_field");
+        }
+        catch (Exception exception)
+        {
+            WriteStoryModeFailure("native-training-field-leave-fallback-failed-" + exception.GetType().Name);
+        }
+    }
+
     private static void LogStoryModeReadyIfVerified()
     {
         if (!_armed || !_storyMode || !_tutorialSkipConfirmed ||
@@ -379,12 +475,81 @@ internal static class FreshCampaignHarness
             _storyModeSettledFrameLogged = true;
             CaptureStoryModeFrame("eyc-map-render-settled", "MapState", string.Empty);
             ChronicleDiagnostics.Write("fresh-storymode-render-settled|gameState=MapState|campaignClock=" + Campaign.Current.TimeControlMode);
-            if (string.Equals(Environment.GetEnvironmentVariable("CHRONICLE_FRESH_CAMPAIGN_START_AGENT"), "1", StringComparison.Ordinal))
+        }
+
+        if (string.Equals(Environment.GetEnvironmentVariable("CHRONICLE_FRESH_CAMPAIGN_NATIVE_MENU_LEAVE_TEST"), "1", StringComparison.Ordinal))
+        {
+            if (!_trainingFieldNativeMenuLeaveAttempted)
             {
-                Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "agent-host-lifecycle-test");
-                ChronicleDiagnostics.Write("fresh-storymode-agent-autostart-armed|entry=existing-MCM-start|gameState=MapState");
+                _trainingFieldNativeMenuLeaveAttempted = true;
+                try
+                {
+                    var mapState = GameStateManager.Current?.ActiveState as MapState;
+                    var menuContext = Campaign.Current.CurrentMenuContext;
+                    if (mapState == null || menuContext?.GameMenu == null ||
+                        !string.Equals(menuContext.GameMenu.StringId, "training_field_menu", StringComparison.Ordinal) ||
+                        !string.Equals(Settlement.CurrentSettlement?.StringId, "tutorial_training_field", StringComparison.Ordinal))
+                        throw new InvalidOperationException("The expected original training-field location menu is not the current Native menu.");
+
+                    var menuOptions = menuContext.GameMenu.MenuOptions.ToList();
+                    var leaveIndex = menuOptions.FindIndex(option =>
+                        string.Equals(option.IdString, "training_field_leave", StringComparison.Ordinal) &&
+                        option.GetConditionsHold(Game.Current, menuContext) && option.IsEnabled);
+                    if (leaveIndex < 0) throw new InvalidOperationException("The original training-field Leave option is not currently enabled.");
+
+                    _trainingFieldNativeMenuLeaveCampaignDayBefore = CampaignTime.Now.ToDays;
+                    _trainingFieldNativeMenuLeaveStartedUtc = DateTime.UtcNow;
+                    ChronicleDiagnostics.Write("fresh-storymode-native-menu-leave|status=requested|menu=training_field_menu|option=training_field_leave|via=NativeGameMenuHandler|clock=" + Campaign.Current.TimeControlMode);
+                    CaptureStoryModeFrame("training-field-menu-before-native-leave", "MapState", "training_field_menu");
+                    menuContext.GameMenu.RunMenuOptionConsequence(menuContext, leaveIndex);
+                    ChronicleDiagnostics.Write("fresh-storymode-native-menu-leave|status=handler-returned|clock=" + Campaign.Current.TimeControlMode);
+                }
+                catch (Exception exception)
+                {
+                    _trainingFieldNativeMenuLeaveFailure = exception.GetType().Name + ":" + exception.Message.Replace('|', '/').Replace('\r', ' ').Replace('\n', ' ');
+                    ChronicleDiagnostics.Write("fresh-storymode-native-menu-leave|status=failed|detail=" + _trainingFieldNativeMenuLeaveFailure);
+                }
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(_trainingFieldNativeMenuLeaveFailure) && !_trainingFieldNativeMenuLeaveVerified)
+            {
+                var elapsedSeconds = (DateTime.UtcNow - _trainingFieldNativeMenuLeaveStartedUtc).TotalSeconds;
+                if (elapsedSeconds < 8) return;
+                var currentMap = GameStateManager.Current?.ActiveState is MapState;
+                var currentMenuId = Campaign.Current.CurrentMenuContext?.GameMenu?.StringId ?? string.Empty;
+                var currentSettlementId = Settlement.CurrentSettlement?.StringId ?? string.Empty;
+                var currentQuest = Campaign.Current.QuestManager?.Quests.FirstOrDefault(quest =>
+                    string.Equals(quest.StringId, "rebuild_player_clan_storymode_quest", StringComparison.Ordinal) && quest.IsOngoing);
+                var campaignDayAfter = CampaignTime.Now.ToDays;
+                var clockStopped = Campaign.Current.TimeControlMode == CampaignTimeControlMode.Stop;
+                _trainingFieldNativeMenuLeaveVerified = currentMap && currentMenuId != "training_field_menu" &&
+                    currentSettlementId != "tutorial_training_field" && currentQuest != null && clockStopped &&
+                    Math.Abs(campaignDayAfter - _trainingFieldNativeMenuLeaveCampaignDayBefore) <= 0.001;
+                if (_trainingFieldNativeMenuLeaveVerified)
+                {
+                    CaptureStoryModeFrame("training-field-menu-exited", "MapState", currentMenuId);
+                    ChronicleDiagnostics.Write("fresh-storymode-native-menu-leave|status=verified|beforeMenu=training_field_menu|afterMenu=" +
+                        (string.IsNullOrEmpty(currentMenuId) ? "none" : currentMenuId) + "|afterSettlement=" +
+                        (string.IsNullOrEmpty(currentSettlementId) ? "none" : currentSettlementId) + "|campaignDayBefore=" +
+                        _trainingFieldNativeMenuLeaveCampaignDayBefore.ToString("F6", CultureInfo.InvariantCulture) + "|campaignDayAfter=" +
+                        campaignDayAfter.ToString("F6", CultureInfo.InvariantCulture) + "|clock=" + Campaign.Current.TimeControlMode + "|eycActive=True");
+                    ChronicleDiagnostics.Write("fresh-storymode-native-menu-leave-snapshot|json=" + ChronicleAgentObserver.BuildSnapshotJson());
+                }
+                else if (elapsedSeconds >= 30)
+                {
+                    _trainingFieldNativeMenuLeaveFailure = "Native location menu did not clear while preserving active EYC, stopped clock, and unchanged Campaign day.";
+                    CaptureStoryModeFrame("training-field-menu-leave-unverified", currentMap ? "MapState" : GameStateManager.Current?.ActiveState?.GetType().Name ?? "UnknownState", currentMenuId);
+                    ChronicleDiagnostics.Write("fresh-storymode-native-menu-leave|status=unverified|detail=" + _trainingFieldNativeMenuLeaveFailure + "|menu=" + currentMenuId + "|settlement=" + currentSettlementId + "|clock=" + Campaign.Current.TimeControlMode + "|campaignDay=" + campaignDayAfter.ToString("F6", CultureInfo.InvariantCulture));
+                }
+                return;
             }
         }
+
+        if (!string.Equals(Environment.GetEnvironmentVariable("CHRONICLE_FRESH_CAMPAIGN_START_AGENT"), "1", StringComparison.Ordinal)) return;
+        if (!_storyModeSettledFrameLogged || _trainingFieldNativeMenuLeaveAttempted) return;
+        Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "agent-host-lifecycle-test");
+        ChronicleDiagnostics.Write("fresh-storymode-agent-autostart-armed|entry=existing-MCM-start|gameState=MapState");
     }
 
     private static void WriteStoryModeFailure(string reason)
