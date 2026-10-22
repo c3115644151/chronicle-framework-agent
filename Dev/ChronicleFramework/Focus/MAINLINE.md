@@ -800,7 +800,7 @@ FreeLLMAPI模型路由现况（2026-10-21/22）：原版FreeLLMAPI的单请求`g
 
 FreeLLMAPI官方目录将NVIDIA Llama 3.2 11B Vision和Poolside Laguna S 2.1分别列为NVIDIA与OpenRouter远端服务，可复核来源：[NVIDIA模型目录](https://freellmapi.co/free-nvidia-api) · [Poolside Laguna S 2.1](https://freellmapi.co/uk/model/poolside-laguna-s-2-1)。
 
-2026-10-23本机FreeLLMAPI目录核验：通用`gpt-oss-20b`当前为`ready`，但已知真实调用曾被路由到OVH并受到429限制；独立模型ID `openai-gpt-oss-20b` 当前为`needsKey/no_key`且不可用。FreeLLMAPI产品页把此独立ID标为Groq提供的GPT-OSS 20B路线（[模型页](https://freellmapi.co/uk/model/gpt-oss-20b)）；它不是本地推理，也不同于通用`gpt-oss-20b`。Harness的自然StoryMode真实模型参数现允许显式选择该ID，避免测试意外落回OVH/自动多路由；在Groq key添加并且目录确认此路由可用前，不请求该模型。目录就绪仍不等于实时上游调用成功；首个真实请求应在自然StoryMode Host循环内完成，而非另做一次模型烟测。
+2026-10-23本机FreeLLMAPI目录核验：通用`gpt-oss-20b`当前为`ready`，但已知真实调用曾被路由到OVH并受到429限制；独立模型ID `openai-gpt-oss-20b` 当前为`needsKey/no_key`且不可用。FreeLLMAPI产品页把此独立ID标为Groq提供的GPT-OSS 20B路线（[模型页](https://freellmapi.co/uk/model/gpt-oss-20b)）；它不是本地推理，也不同于通用`gpt-oss-20b`。即使该路线尚不可用，本机目录已声明其context_length为128000、supported_parameters包括`response_format`；因此路由可用后Host应走既有JSON Schema结构化响应协议，而非tool-call回退。Harness的自然StoryMode真实模型参数现允许显式选择该ID，避免测试意外落回OVH/自动多路由；在Groq key添加并且目录确认此路由可用前，不请求该模型。目录就绪仍不等于实时上游调用成功；首个真实请求应在自然StoryMode Host循环内完成，而非另做一次模型烟测。
 
 ## 主要来源
 
