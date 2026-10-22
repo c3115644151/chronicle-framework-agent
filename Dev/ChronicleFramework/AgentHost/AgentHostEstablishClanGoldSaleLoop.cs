@@ -109,6 +109,15 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         var townTradeEntry = BuildActionCatalog(nativeTownEncounter, null, null, null);
         if (townTradeEntry.Count != 1 || ReadString(townTradeEntry[0] as JsonObject, "action") != "menuSelect")
             throw new AgentHostException("gold-sale-self-test-native-town-menu-misclassified-as-hostile-encounter", "An active native settlement menu where encounteredPartyId equals currentSettlementId is the expected market entry, not a hostile battle to abort.");
+        var nativeTrainingFieldMenu = MapState("training_field_menu", "tutorial_training_field", new JsonArray(
+            new JsonObject { ["id"] = "training_field_leave", ["available"] = true, ["enabled"] = true, ["isLeave"] = true }));
+        nativeTrainingFieldMenu["context"]!["encounterActive"] = true;
+        nativeTrainingFieldMenu["context"]!["encounteredPartyId"] = "tutorial_training_field";
+        var trainingFieldExit = BuildActionCatalog(nativeTrainingFieldMenu, null, null, null);
+        var trainingFieldExitOption = trainingFieldExit.Count == 0 ? null : (trainingFieldExit[0]?["argumentValues"]?["OptionId"] as JsonArray)?[0]?.GetValue<string>();
+        if (trainingFieldExit.Count != 1 || ReadString(trainingFieldExit[0] as JsonObject, "action") != "menuSelect" ||
+            trainingFieldExitOption != "training_field_leave")
+            throw new AgentHostException("gold-sale-self-test-training-field-menu-not-exitable", "The original Tutorial skip can leave the training-field Native location menu even though its context marks the location as an encounter.");
         var hostileEncounter = MapState("encounter", null, []);
         hostileEncounter["context"]!["encounterActive"] = true;
         hostileEncounter["context"]!["encounteredPartyId"] = "bandit_party";
@@ -120,7 +129,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             new { scenario = "gold-sale-binds-one-current-native-goods-offer-and-positive-quote", passed = true },
             new { scenario = "gold-sale-native-move-start-transition-uses-one-bounded-observation", passed = true },
             new { scenario = "gold-sale-rejects-stale-offers-unsafe-targets-and-disabled-native-options", passed = true },
-            new { scenario = "gold-sale-allows-native-town-encounter-menu-but-rejects-hostile-party-encounter", passed = true }
+            new { scenario = "gold-sale-allows-native-town-menu-and-training-field-exit-but-rejects-hostile-party-encounter", passed = true }
         ];
     }
 
@@ -479,7 +488,20 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         var menuId = ReadString(context, "menuId");
         if (!string.IsNullOrWhiteSpace(menuId))
         {
-            if (menuId != "town") return new JsonArray();
+            if (menuId != "town")
+            {
+                if (!AgentHostCampaignStateFacts.IsNativeLocationMenu(state)) return new JsonArray();
+                var leaveOptions = GetEnabledOptions(state).OfType<JsonObject>()
+                    .Where(option => ReadBoolean(option, "isLeave"))
+                    .Select(option => ReadString(option, "id"))
+                    .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToArray();
+                if (leaveOptions.Length == 0) return new JsonArray();
+                return new JsonArray(new JsonObject
+                {
+                    ["action"] = "menuSelect", ["arguments"] = new JsonArray("MenuId", "OptionId"),
+                    ["argumentValues"] = new JsonObject { ["MenuId"] = new JsonArray(menuId), ["OptionId"] = new JsonArray(leaveOptions.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray()) }
+                });
+            }
             var tradeOptions = GetEnabledOptions(state).OfType<JsonObject>().Where(option => ReadString(option, "id") == "trade").ToArray();
             if (tradeOptions.Length == 0) return new JsonArray();
             return new JsonArray(new JsonObject
@@ -722,14 +744,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
 
     private static bool IsActiveEncounter(JsonObject state)
     {
-        var context = state["context"] as JsonObject;
-        var menuId = ReadString(context, "menuId");
-        var currentSettlementId = ReadString(state["location"] as JsonObject, "currentSettlementId");
-        var encounteredPartyId = ReadString(context, "encounteredPartyId");
-        var nativeSettlementMenu = menuId == "town" && !string.IsNullOrWhiteSpace(currentSettlementId) &&
-            string.Equals(currentSettlementId, encounteredPartyId, StringComparison.Ordinal);
-        return context?["battleSimulation"] is not null || menuId == "encounter" ||
-            (!nativeSettlementMenu && (ReadBoolean(context, "encounterActive") || !string.IsNullOrWhiteSpace(encounteredPartyId)));
+        return AgentHostCampaignStateFacts.IsActiveEncounter(state);
     }
 
     private static JsonObject MapState(string? menuId, string? settlementId, JsonArray options) => new()

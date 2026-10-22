@@ -277,7 +277,7 @@ internal static class AgentHostBattleSimulationLoop
                 {
                     observedTargets = CloneArray(receipt["data"]?["mapPartyTargets"] as JsonArray);
                     mapPartyTargetsQueried = true;
-                    if (ReadBoolean(state["context"] as JsonObject, "encounterActive"))
+                    if (AgentHostCampaignStateFacts.IsActiveEncounter(state))
                     {
                         var encounteredId = ReadString(state["context"] as JsonObject, "encounteredPartyId");
                         if (observedTargets.OfType<JsonObject>().Any(x => ReadString(x, "id") == encounteredId && ReadString(x, "type") == "bandit" && ReadBoolean(x, "hostile")))
@@ -389,7 +389,31 @@ internal static class AgentHostBattleSimulationLoop
                 else Add(catalog, "battleSkip");
                 return catalog;
             }
-            if (ReadBoolean(context, "encounterActive"))
+            if (AgentHostCampaignStateFacts.IsNativeLocationMenu(state))
+            {
+                var menuId = ReadString(context, "menuId");
+                var leaveOptionIds = (state["availableMenuOptions"] as JsonArray)?.OfType<JsonObject>()
+                    .FirstOrDefault(option => ReadBoolean(option, "available") && ReadBoolean(option, "enabled") && ReadBoolean(option, "isLeave"));
+                if (menuId is not null && leaveOptionIds is not null)
+                {
+                    var enabledLeaveIds = (state["availableMenuOptions"] as JsonArray)?.OfType<JsonObject>()
+                        .Where(option => ReadBoolean(option, "available") && ReadBoolean(option, "enabled") && ReadBoolean(option, "isLeave"))
+                        .Select(option => ReadString(option, "id"))
+                        .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToArray() ?? Array.Empty<string>();
+                    catalog.Add(new JsonObject
+                    {
+                        ["action"] = "menuSelect",
+                        ["arguments"] = new JsonArray("MenuId", "OptionId"),
+                        ["argumentValues"] = new JsonObject
+                        {
+                            ["MenuId"] = new JsonArray(menuId),
+                            ["OptionId"] = new JsonArray(enabledLeaveIds.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray())
+                        }
+                    });
+                }
+                return catalog;
+            }
+            if (AgentHostCampaignStateFacts.IsActiveEncounter(state))
             {
                 var encounteredId = ReadString(context, "encounteredPartyId");
                 var validBandit = observedTargets.OfType<JsonObject>().Any(x =>
@@ -502,7 +526,18 @@ internal static class AgentHostBattleSimulationLoop
             if (action == "menuSelect")
             {
                 var context = state["context"] as JsonObject;
-                if (recoverPlayerCaptivity && IsPlayerCaptive(state))
+                if (AgentHostCampaignStateFacts.IsNativeLocationMenu(state))
+                {
+                    var menuId = ReadString(context, "menuId");
+                    var optionId = ReadString(arguments, "optionId");
+                    if (menuId != ReadString(arguments, "menuId") ||
+                        string.IsNullOrWhiteSpace(optionId) ||
+                        !(state["availableMenuOptions"] as JsonArray)?.OfType<JsonObject>().Any(option =>
+                            ReadString(option, "id") == optionId && ReadBoolean(option, "available") &&
+                            ReadBoolean(option, "enabled") && ReadBoolean(option, "isLeave")) == true)
+                    { rejection = "A Native location menu may only select its currently enabled Leave option before this battle subflow proceeds."; return false; }
+                }
+                else if (recoverPlayerCaptivity && IsPlayerCaptive(state))
                 {
                     var optionId = ReadString(arguments, "optionId");
                     if (!IsSupportedCaptivityRansomMenu(ReadString(context, "menuId")) ||
@@ -572,6 +607,18 @@ internal static class AgentHostBattleSimulationLoop
             throw new AgentHostException("battle-loop-self-test-map-query-missing", "The initial battle loop must query currently visible Native party targets.");
         if (BuildActionCatalog(mapState, new JsonArray(), null, false, true).Count != 0)
             throw new AgentHostException("battle-loop-self-test-empty-party-query-repeated", "After an empty visible-party query, the Host must safely stop rather than requery the same world state indefinitely.");
+        var trainingFieldMenu = ParseState("MapState", "training_field_menu", true, null, null)["state"]!.AsObject();
+        trainingFieldMenu["context"]!["encounteredPartyId"] = "tutorial_training_field";
+        trainingFieldMenu["location"]!["currentSettlementId"] = "tutorial_training_field";
+        trainingFieldMenu["availableMenuOptions"] = new JsonArray(new JsonObject { ["id"] = "training_field_leave", ["available"] = true, ["enabled"] = true, ["isLeave"] = true });
+        var trainingFieldLeave = BuildActionCatalog(trainingFieldMenu, new JsonArray(), null, false, false);
+        var trainingFieldLeaveDecision = new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "training_field_menu", ["OptionId"] = "training_field_leave" } };
+        if (trainingFieldLeave.Count != 1 || ReadString(trainingFieldLeave[0] as JsonObject, "action") != "menuSelect" ||
+            (trainingFieldLeave[0]?["argumentValues"]?["MenuId"] as JsonArray)?[0]?.GetValue<string>() != "training_field_menu" ||
+            !((trainingFieldLeave[0]?["argumentValues"]?["OptionId"] as JsonArray)?.Any(option => option?.GetValue<string>() == "training_field_leave") ?? false) ||
+            !TryResolveDecision(trainingFieldLeaveDecision, trainingFieldLeave, new JsonArray(), trainingFieldMenu, new JsonArray(), null, out _, out _, out _, out _))
+            throw new AgentHostException("battle-loop-self-test-training-field-menu-not-exitable", "A Native location menu with an encounter-like location ID must expose only its current enabled Leave option before battle target scanning.");
+        results.Add(new { scenario = "battle-loop-can-leave-native-training-field-location-menu-without-treating-it-as-hostile", passed = true });
         var pursue = BuildActionCatalog(mapState, candidates, null, false, true);
         if (pursue.Count != 1 || ReadString(pursue[0] as JsonObject, "action") != "pursue")
             throw new AgentHostException("battle-loop-self-test-pursue-missing", "Pursuit must only be available after a Native bandit target observation.");

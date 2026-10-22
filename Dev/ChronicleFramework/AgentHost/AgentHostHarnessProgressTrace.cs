@@ -11,7 +11,9 @@ internal static class AgentHostHarnessProgressTrace
 
     internal static void RecordDecision(JsonElement request, ProviderDecisionResult result)
     {
-        if (!string.Equals(Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE"), "visual-capture", StringComparison.Ordinal)) return;
+        var harnessMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+        if (!string.Equals(harnessMode, "visual-capture", StringComparison.Ordinal) &&
+            !string.Equals(harnessMode, "agent-host-lifecycle-test", StringComparison.Ordinal)) return;
         var directory = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
         if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory)) return;
 
@@ -141,11 +143,16 @@ internal static class AgentHostHarnessProgressTrace
                 ReadString(recorded?["observation"] as JsonObject, "menuId") != "village")
                 throw new AgentHostException("host-progress-trace-self-test-content", "Harness trace must preserve route and chosen Native argument without rationale or prompt content.");
 
+            Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "agent-host-lifecycle-test");
+            RecordDecision(request.RootElement, new ProviderDecisionResult("completed", "selftest-model", 1, 1, "stop", decision, "lifecycle/selftest-route"));
+            if (File.ReadAllLines(path).Length != 2)
+                throw new AgentHostException("host-progress-trace-lifecycle-mode", "Lifecycle Harness model evaluation must retain the same bounded decision trace as visual-capture runs.");
+
             Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "normal");
             RecordDecision(request.RootElement, new ProviderDecisionResult("completed", "selftest-model", 1, 1, "stop", decision, "selftest/route"));
-            if (File.ReadAllLines(path).Length != 1)
-                throw new AgentHostException("host-progress-trace-self-test-mode-gate", "Progress tracing must be disabled outside Harness visual-capture mode.");
-            return [new { scenario = "harness-progress-trace-persists-native-decision-and-route-without-free-text-outside-visual-capture", passed = true }];
+            if (File.ReadAllLines(path).Length != 2)
+                throw new AgentHostException("host-progress-trace-self-test-mode-gate", "Progress tracing must be disabled outside Harness visual-capture/lifecycle modes.");
+            return [new { scenario = "harness-progress-trace-persists-native-decision-and-route-without-free-text-in-visual-capture-and-lifecycle-modes", passed = true }];
         }
         finally
         {

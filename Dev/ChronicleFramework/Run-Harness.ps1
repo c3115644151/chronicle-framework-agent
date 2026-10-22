@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'ReleasePackage', 'Campaign', 'CampaignActorThinkTrace', 'FreshCampaign', 'FreshCampaignProgression', 'FreshCampaignBaselineMatrix', 'FreshCampaignLiveModelEvaluation', 'FreshCampaignSupplyBaseline', 'FreshCampaignRecruitmentFallback', 'Protocol', 'AgentHostProvider', 'AgentHostPackage', 'AgentHostSupplyEvaluation', 'AgentHostCampaignLoopEvaluation', 'AgentHostVillageToolsQuestEvaluation', 'AgentHostEstablishClanGoalPlannerEvaluation', 'AgentHostEstablishClanAutonomyEvaluation', 'AgentHostCaptivityRecoveryEvaluation', 'AgentHostEstablishClanGoldSaleEvaluation', 'AgentHostBattleSimulationEvaluation', 'AgentHostBattleAndCaptivityEvaluation', 'AgentHostLifecycleEvaluation', 'AgentHostLifecycleCompletionEvaluation', 'AgentLoop', 'LiveModel', 'LiveModelArrival', 'LiveModelRecruitment', 'LiveModelSafePassageRecruitment', 'LiveModelRecruitmentEvaluation', 'LiveModelSupplyEvaluation', 'CheckpointPersistence', 'LiveModelResume', 'LiveModelRuntimeResume', 'LiveModelActionRecovery', 'CheckpointValidation', 'RecruitmentBaseline', 'MultiDaySupplyBaseline', 'TimeControlLoop', 'BattleFixture', 'PostBattle', 'Observation', 'CaptivityObservation', 'CaptivityOutcome', 'EncounterSurrender', 'EncounterEscape', 'JoinEncounterDefenders', 'JoinEncounterEligibility', 'JoinEncounterAbandonArmy', 'MovingArmyJoin', 'JoinSiegeEvent', 'MapNotifications', 'QuickInformation', 'SceneNotification', 'MissionLeave', 'VillageToolsDelivery', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyQuestMarkers', 'MapPartyQuestAcceptance', 'MapEscapeMenu', 'MapInquiry', 'AlleyLeaderInquiry', 'AlleyRosterManagement', 'AlleyAbandonment', 'AlleyEntryMenu', 'MissionSceneNavigation', 'AlleyVolunteerBranches', 'AlleyAttackYield', 'AlleyAttackFightMission', 'PersuasionDetails', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'BarterFightRoute', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EngageVisibility', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuickTalk', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'SettlementOverlayQuickTalkIssueGateProbe', 'VisualCapture', 'All')]
+    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'ReleasePackage', 'Campaign', 'CampaignActorThinkTrace', 'FreshCampaign', 'FreshStoryModeSetup', 'FreshStoryModeModelEvaluation', 'FreshCampaignProgression', 'FreshCampaignBaselineMatrix', 'FreshCampaignLiveModelEvaluation', 'FreshCampaignSupplyBaseline', 'FreshCampaignRecruitmentFallback', 'Protocol', 'AgentHostProvider', 'AgentHostPackage', 'AgentHostSupplyEvaluation', 'AgentHostCampaignLoopEvaluation', 'AgentHostVillageToolsQuestEvaluation', 'AgentHostEstablishClanGoalPlannerEvaluation', 'AgentHostEstablishClanAutonomyEvaluation', 'AgentHostCaptivityRecoveryEvaluation', 'AgentHostEstablishClanGoldSaleEvaluation', 'AgentHostBattleSimulationEvaluation', 'AgentHostBattleAndCaptivityEvaluation', 'AgentHostLifecycleEvaluation', 'AgentHostLifecycleCompletionEvaluation', 'AgentLoop', 'LiveModel', 'LiveModelArrival', 'LiveModelRecruitment', 'LiveModelSafePassageRecruitment', 'LiveModelRecruitmentEvaluation', 'LiveModelSupplyEvaluation', 'CheckpointPersistence', 'LiveModelResume', 'LiveModelRuntimeResume', 'LiveModelActionRecovery', 'CheckpointValidation', 'RecruitmentBaseline', 'MultiDaySupplyBaseline', 'TimeControlLoop', 'BattleFixture', 'PostBattle', 'Observation', 'CaptivityObservation', 'CaptivityOutcome', 'EncounterSurrender', 'EncounterEscape', 'JoinEncounterDefenders', 'JoinEncounterEligibility', 'JoinEncounterAbandonArmy', 'MovingArmyJoin', 'JoinSiegeEvent', 'MapNotifications', 'QuickInformation', 'SceneNotification', 'MissionLeave', 'VillageToolsDelivery', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyQuestMarkers', 'MapPartyQuestAcceptance', 'MapEscapeMenu', 'MapInquiry', 'AlleyLeaderInquiry', 'AlleyRosterManagement', 'AlleyAbandonment', 'AlleyEntryMenu', 'MissionSceneNavigation', 'AlleyVolunteerBranches', 'AlleyAttackYield', 'AlleyAttackFightMission', 'PersuasionDetails', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'BarterFightRoute', 'MissionInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EngageVisibility', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuickTalk', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'SettlementOverlayQuickTalkIssueGateProbe', 'VisualCapture', 'All')]
     [string]$Phase = 'All',
     [int]$SmokeTimeoutSeconds = 45,
     [int]$SmokeStabilitySeconds = 8,
@@ -25,7 +25,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.246'
+$HarnessContractVersion = '7.262'
 $effectiveSmokeTimeoutSeconds = if ($Phase -in @('AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostEstablishClanAutonomyEvaluation','AgentHostCaptivityRecoveryEvaluation','AgentHostEstablishClanGoldSaleEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max($SmokeTimeoutSeconds, 240) } else { $SmokeTimeoutSeconds }
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
@@ -40,6 +40,9 @@ $env:CHRONICLE_REPOSITORY_ROOT = $repositoryRoot
 $evidenceRoot = Join-Path $harnessRoot 'TestResults'
 $runId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $runDirectory = Join-Path $evidenceRoot $runId
+$script:retainedAgentHostPackageRoot = $null
+$script:retainedAgentHostExecutablePath = $null
+$previousAgentHostTestPath = [Environment]::GetEnvironmentVariable('CHRONICLE_AGENT_HOST_TEST_PATH', 'Process')
 $manifestPath = Join-Path $gameRoot 'Modules\ChronicleFramework\SubModule.xml'
 $sourceManifestPath = Join-Path $repositoryRoot 'Modules\ChronicleFramework\SubModule.xml'
 $gameExe = Join-Path $gameRoot 'bin\Win64_Shipping_Client\Bannerlord.exe'
@@ -86,6 +89,21 @@ $agentHostReleasePackageScript = Join-Path $harnessRoot 'Test-AgentHostReleasePa
 $agentHostCampaignLoopEvaluationScript = Join-Path $harnessRoot 'Test-AgentHostCampaignLoopEvaluation.ps1'
 $campaignActorThinkTraceScript = Join-Path $harnessRoot 'Test-AgentCampaignActorThinkTrace.ps1'
 $agentHostLifecycleEvaluationScript = Join-Path $harnessRoot 'Test-AgentHostLifecycleEvaluation.ps1'
+
+function Remove-RetainedAgentHostPackage([string]$PackageRoot) {
+    if ([string]::IsNullOrWhiteSpace($PackageRoot)) { return }
+    $packageParent = [IO.Path]::GetFullPath('D:\ChronicleFramework\BuildCache\Packages').TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $resolvedPackageRoot = [IO.Path]::GetFullPath($PackageRoot).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    if ([IO.Path]::GetFullPath((Split-Path -Parent $resolvedPackageRoot)).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) -ne $packageParent -or
+        (Split-Path -Leaf $resolvedPackageRoot) -notmatch '^ChronicleAgentHost-win-x64-[0-9a-f]{32}$') {
+        throw 'Refusing retained Agent Host package cleanup outside its unique D: BuildCache package directory.'
+    }
+    $cleanupScript = Join-Path $harnessRoot 'Test-AgentHostPackage.ps1'
+    $cleanupOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $cleanupScript -CleanupPackageRoot $resolvedPackageRoot 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) { throw "Retained Agent Host package cleanup failed: $cleanupOutput" }
+    $cleanupReceipt = $cleanupOutput | ConvertFrom-Json
+    if (-not [bool]$cleanupReceipt.Removed -or (Test-Path -LiteralPath $resolvedPackageRoot)) { throw 'Retained Agent Host package directory remains after cleanup.' }
+}
 $agentLiveModelLoopScript = Join-Path $harnessRoot 'Test-AgentLiveModelLoop.ps1'
 $agentCheckpointPersistenceScript = Join-Path $harnessRoot 'Test-AgentCheckpointPersistence.ps1'
 $agentLiveModelResumeScript = Join-Path $harnessRoot 'Test-AgentLiveModelResume.ps1'
@@ -223,6 +241,8 @@ $requestedStages = switch ($Phase) {
     'Campaign' { @('Preflight', 'Build', 'Campaign') }
     'CampaignActorThinkTrace' { @('Preflight', 'Build', 'CampaignActorThinkTrace') }
     'FreshCampaign' { @('Preflight', 'Build', 'FreshCampaign') }
+    'FreshStoryModeSetup' { @('Preflight', 'Build', 'FreshStoryModeSetup') }
+    'FreshStoryModeModelEvaluation' { @('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'FreshStoryModeModelEvaluation') }
     'FreshCampaignProgression' { @('Preflight', 'Build', 'FreshCampaignProgression') }
     'FreshCampaignBaselineMatrix' { @('Preflight', 'Build', 'FreshCampaignBaselineMatrix') }
     'FreshCampaignSupplyBaseline' { @('Preflight', 'Build', 'FreshCampaignSupplyBaseline') }
@@ -507,6 +527,51 @@ foreach ($stage in $requestedStages) {
                 $testOutput
             }
         }
+        'FreshStoryModeSetup' {
+            Invoke-Stage -Name 'FreshStoryModeSetup' -Action {
+                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $freshCampaignScript -StoryModeEycSetup -TimeoutSeconds 360 2>&1 | Out-String
+                if ($LASTEXITCODE -ne 0) { throw "Fresh StoryMode/tutorial-skip setup probe failed with exit code $LASTEXITCODE. Output: $testOutput" }
+                $testOutput
+            }
+        }
+        'FreshStoryModeModelEvaluation' {
+            Invoke-Stage -Name 'FreshStoryModeModelEvaluation' -Action {
+                $savedHarnessAutoStart = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_START', 'Process')
+                $savedHarnessAutoStop = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS', 'Process')
+                $savedHarnessGoal = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_GOAL', 'Process')
+                $savedHarnessModel = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL', 'Process')
+                $savedLlmModel = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL', 'Process')
+                $savedProviderTimeout = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_TIMEOUT_SECONDS', 'Process')
+                try {
+                    [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_START', '1', 'Process')
+                    [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS', '120000', 'Process')
+                    [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_GOAL', '自主完成原版主线任务“建立你的家族”。', 'Process')
+                    # Use the direct FreeLLMAPI route that previously completed four real EYC decisions; avoid auto-router fan-out across repeatedly failing providers.
+                    [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL', 'gpt-oss-20b', 'Process')
+                    [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_MODEL', 'gpt-oss-20b', 'Process')
+                    if ([string]::IsNullOrWhiteSpace($savedProviderTimeout)) { [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_TIMEOUT_SECONDS', '90', 'Process') }
+                    $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $freshCampaignScript -StoryModeEycSetup -StoryModeEycLiveModelEvaluation -TimeoutSeconds 360 2>&1 | Out-String
+                    if ($LASTEXITCODE -ne 0) { throw "Fresh natural StoryMode real-model first-decision evaluation failed with exit code $LASTEXITCODE. Output: $testOutput" }
+                    $testOutput
+                }
+                finally {
+                    [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_START', $savedHarnessAutoStart, 'Process')
+                    [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS', $savedHarnessAutoStop, 'Process')
+                    [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_GOAL', $savedHarnessGoal, 'Process')
+                    [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL', $savedHarnessModel, 'Process')
+                    [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_MODEL', $savedLlmModel, 'Process')
+                    [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_TIMEOUT_SECONDS', $savedProviderTimeout, 'Process')
+                    try {
+                        if ($script:retainedAgentHostPackageRoot) { Remove-RetainedAgentHostPackage $script:retainedAgentHostPackageRoot }
+                    }
+                    finally {
+                        $script:retainedAgentHostPackageRoot = $null
+                        $script:retainedAgentHostExecutablePath = $null
+                        [Environment]::SetEnvironmentVariable('CHRONICLE_AGENT_HOST_TEST_PATH', $previousAgentHostTestPath, 'Process')
+                    }
+                }
+            }
+        }
         'FreshCampaignProgression' {
             Invoke-Stage -Name 'FreshCampaignProgression' -Action {
                 $attempts = @()
@@ -638,9 +703,29 @@ foreach ($stage in $requestedStages) {
         'AgentHostPackage' {
             Invoke-Stage -Name 'AgentHostPackage' -Action {
                 $packageEvidencePath = Join-Path $harnessTempDirectory 'AgentHostPackage'
-                $packageOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostPackageScript -ProjectPath $agentHostProjectPath -EvidencePath $packageEvidencePath 2>&1 | Out-String
-                if ($LASTEXITCODE -ne 0) { throw "Self-contained Agent Host package validation failed. Evidence: $packageOutput" }
-                $packageOutput
+                $retainPackageForSameSessionRuntime = $Phase -eq 'FreshStoryModeModelEvaluation'
+                $packageArguments = @('-ProjectPath', $agentHostProjectPath, '-EvidencePath', $packageEvidencePath)
+                if ($retainPackageForSameSessionRuntime) { $packageArguments += '-RetainRuntimePackage' }
+                try {
+                    $packageOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostPackageScript @packageArguments 2>&1 | Out-String
+                    $packageExitCode = $LASTEXITCODE
+                    $runtimeReceiptPath = Join-Path $packageEvidencePath 'AgentHostRuntimePackage.json'
+                    if ($retainPackageForSameSessionRuntime -and (Test-Path -LiteralPath $runtimeReceiptPath -PathType Leaf)) {
+                        $runtimeReceipt = Get-Content -LiteralPath $runtimeReceiptPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                        $script:retainedAgentHostPackageRoot = [IO.Path]::GetFullPath([string]$runtimeReceipt.PackageRoot)
+                        $script:retainedAgentHostExecutablePath = [IO.Path]::GetFullPath([string]$runtimeReceipt.RuntimeExecutablePath)
+                        if (-not (Test-Path -LiteralPath $script:retainedAgentHostExecutablePath -PathType Leaf)) { throw 'Retained Agent Host runtime executable is missing after package verification.' }
+                        [Environment]::SetEnvironmentVariable('CHRONICLE_AGENT_HOST_TEST_PATH', $script:retainedAgentHostExecutablePath, 'Process')
+                    }
+                    if ($packageExitCode -ne 0) { throw "Self-contained Agent Host package validation failed. Evidence: $packageOutput" }
+                    if ($retainPackageForSameSessionRuntime -and [string]::IsNullOrWhiteSpace($script:retainedAgentHostExecutablePath)) { throw 'Fresh StoryMode runtime requires the self-contained package receipt and executable path.' }
+                    $packageOutput
+                }
+                catch {
+                    if ($script:retainedAgentHostPackageRoot) { Remove-RetainedAgentHostPackage $script:retainedAgentHostPackageRoot; $script:retainedAgentHostPackageRoot = $null; $script:retainedAgentHostExecutablePath = $null }
+                    [Environment]::SetEnvironmentVariable('CHRONICLE_AGENT_HOST_TEST_PATH', $previousAgentHostTestPath, 'Process')
+                    throw
+                }
             }
         }
         'AgentHostSupplyEvaluation' {

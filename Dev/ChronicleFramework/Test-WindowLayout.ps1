@@ -30,6 +30,7 @@ namespace ChronicleFramework
         [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
         [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
         [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+        [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder className, int maxCount);
         [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int command);
@@ -81,14 +82,24 @@ function Set-ChronicleTestWindow([int]$ProcessId) {
     if (-not (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) { return $null }
     $handle = [ChronicleFramework.WindowApi]::FindProcessWindow($ProcessId)
     if ($handle -eq [IntPtr]::Zero) { return $null }
-    [ChronicleFramework.WindowApi]::ShowWindowAsync($handle, 4) | Out-Null
-    $rawApplied = [ChronicleFramework.WindowApi]::SetWindowPos($handle, [IntPtr]::Zero, $script:ChronicleTestWindowX, $script:ChronicleTestWindowY, $script:ChronicleTestWindowWidth, $script:ChronicleTestWindowHeight, 0x0014)
+    $rawApplied = $false
+    $visible = $false
+    $iconic = $true
+    for ($attempt = 0; $attempt -lt 12; $attempt++) {
+        [ChronicleFramework.WindowApi]::ShowWindowAsync($handle, 4) | Out-Null
+        $rawApplied = [ChronicleFramework.WindowApi]::SetWindowPos($handle, [IntPtr]::Zero, $script:ChronicleTestWindowX, $script:ChronicleTestWindowY, $script:ChronicleTestWindowWidth, $script:ChronicleTestWindowHeight, 0x0050)
+        Start-Sleep -Milliseconds 100
+        $visible = [ChronicleFramework.WindowApi]::IsWindowVisible($handle)
+        $iconic = [ChronicleFramework.WindowApi]::IsIconic($handle)
+        if ($visible -and -not $iconic) { break }
+    }
     $rect = New-Object ChronicleFramework.WindowApi+Rect
     $measured = [ChronicleFramework.WindowApi]::GetWindowRect($handle, [ref]$rect)
     $width = $rect.Right - $rect.Left
     $height = $rect.Bottom - $rect.Top
     [pscustomobject]@{
-        Applied = ($rawApplied -and $measured -and $rect.Left -eq 0 -and $rect.Top -eq 0 -and $width -eq $script:ChronicleTestWindowWidth -and $height -eq $script:ChronicleTestWindowHeight)
+        Applied = ($rawApplied -and $measured -and $visible -and -not $iconic -and $rect.Left -eq 0 -and $rect.Top -eq 0 -and $width -eq $script:ChronicleTestWindowWidth -and $height -eq $script:ChronicleTestWindowHeight)
+        Visible = $visible; Minimized = $iconic
         X = $rect.Left; Y = $rect.Top; Width = $width; Height = $height; DisplayMode = 0
     }
 }

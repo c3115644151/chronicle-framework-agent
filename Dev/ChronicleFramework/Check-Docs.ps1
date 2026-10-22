@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.246'
+$contractVersion = '7.262'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -78,6 +78,9 @@ $agentHostDecisionCycleSource = Get-Content (Join-Path $harnessRoot 'AgentHost\A
 $agentHostCampaignLoopEvaluationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostCampaignLoopEvaluation.ps1') -Raw -Encoding UTF8
 $agentHostLiveModelLoopSource = Get-Content (Join-Path $harnessRoot 'Test-AgentLiveModelLoop.ps1') -Raw -Encoding UTF8
 $agentHostBattleSimulationLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostBattleSimulationLoop.cs') -Raw -Encoding UTF8
+$agentHostCampaignStateFactsSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostCampaignStateFacts.cs') -Raw -Encoding UTF8
+$agentHostCompanionLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostEstablishClanCompanionLoop.cs') -Raw -Encoding UTF8
+$agentHostRecruitmentLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostEstablishClanRecruitmentLoop.cs') -Raw -Encoding UTF8
 $agentHostCaptivityRecoveryLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostCaptivityRecoveryLoop.cs') -Raw -Encoding UTF8
 $agentHostGoldSaleLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostEstablishClanGoldSaleLoop.cs') -Raw -Encoding UTF8
 $agentHostMailboxSource = Get-Content (Join-Path $harnessRoot 'AgentHost\NativeMailboxClient.cs') -Raw -Encoding UTF8
@@ -434,11 +437,27 @@ if ($agentHostCampaignLoopEvaluationSource -notmatch '\[string\]\$CleanupPrepare
 if ($agentHostDecisionCycleSource -notmatch 'AgentHostHarnessProgressTrace\.RecordDecision' -or
     $agentHostHarnessProgressTraceSource -notmatch 'CHRONICLE_HARNESS_MODE' -or
     $agentHostHarnessProgressTraceSource -notmatch 'visual-capture' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'agent-host-lifecycle-test' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'lifecycle/selftest-route' -or
     $agentHostHarnessProgressTraceSource -notmatch 'AgentHostProgress\.jsonl' -or
     $agentHostHarnessProgressTraceSource -notmatch 'MaximumBytes' -or
     $agentHostHarnessProgressTraceSource -notmatch 'Rationale is deliberately excluded' -or
     $agentHostProviderContractSelfTestSource -notmatch 'AgentHostHarnessProgressTrace\.RunContractSelfTests') {
-    throw 'Real Host decisions must be incrementally persisted only in bounded Harness visual-capture mode, including the selected Native argument and route but excluding rationale/raw prompt content.'
+    throw 'Real Host decisions must be incrementally persisted only in bounded Harness visual-capture/lifecycle modes, including the selected Native argument and route but excluding rationale/raw prompt content.'
+}
+if (-not (Test-Path -LiteralPath (Join-Path $harnessRoot 'AgentHost\AgentHostCampaignStateFacts.cs')) -or
+    $agentHostCampaignStateFactsSource -notmatch 'IsNativeLocationMenu' -or
+    $agentHostCampaignStateFactsSource -notmatch 'IsActiveEncounter' -or
+    $agentHostCampaignStateFactsSource -notmatch 'campaign-state-facts-training-field-menu-misclassified' -or
+    $agentHostCampaignStateFactsSource -notmatch 'campaign-state-facts-hostile-encounter-misclassified' -or
+    $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-training-field-menu-misclassified' -or
+    $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-training-field-menu-not-exitable' -or
+    $agentHostGoldSaleLoopSource -notmatch 'gold-sale-self-test-training-field-menu-not-exitable' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-self-test-training-field-menu-not-exitable' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'trainingFieldLeave\[0\].*argumentValues' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'enabledLeaveIds\.Select' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'AgentHostCampaignStateFacts.RunContractSelfTests') {
+    throw 'EYC objective subflows must distinguish the verified Native training-field Leave menu from a hostile Party encounter and keep the same leave path out of hostile encounter handling.'
 }
 if ($agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S]{0,900}Set-LiveModelProviderTimeout 360' -or
     $agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S]{0,900}\$env:CHRONICLE_LLM_MAX_TOKENS = ''1024''') {
@@ -872,7 +891,17 @@ if ($harnessScript -notmatch "'AgentHostPackage'\s*\{ @\('Preflight', 'Build', '
     $agentHostPackageSource -notmatch 'D:\\ChronicleFramework\\BuildCache\\Packages' -or $agentHostPackageSource -notmatch 'package staging must be outside the source repository' -or
     $agentHostPackageSource -notmatch 'BaseOutputPath' -or
     $agentHostPackageSource -notmatch 'ChronicleAgentHost\.exe' -or $agentHostPackageSource -notmatch 'AgentHostPackageManifest\.json' -or
-    $agentHostPackageSource -notmatch 'PackageArtifactsRetained = \$false' -or $agentHostPackageSource -notmatch 'Remove-Item -LiteralPath \$resolvedPackageRoot -Recurse -Force' -or
+    $agentHostPackageSource -notmatch '\[switch\]\$RetainRuntimePackage' -or
+    $agentHostPackageSource -notmatch '\[string\]\$CleanupPackageRoot' -or
+    $agentHostPackageSource -notmatch 'Cleanup-only mode refuses while a Bannerlord or Agent Host process may still use the package' -or
+    $agentHostPackageSource -notmatch 'PackageArtifactsRetained = \[bool\]\$RetainRuntimePackage' -or
+    $agentHostPackageSource -notmatch 'AgentHostRuntimePackage\.json' -or
+    $agentHostPackageSource -notmatch 'RuntimeExecutablePath' -or
+    $agentHostPackageSource -notmatch 'Invoke-StaleAgentHostPackageCleanup' -or
+    $agentHostPackageSource -notmatch 'OlderThanHours = 24' -or
+    $agentHostPackageSource -notmatch 'CreationTimeUtc -lt \$cutoffUtc' -or
+    $agentHostPackageSource -notmatch 'StalePackageCleanup = \$stalePackageCleanup' -or
+    $agentHostPackageSource -notmatch 'Remove-Item -LiteralPath \$resolvedPackageRoot -Recurse -Force' -or
     $agentHostPackageSource -notmatch 'Refusing to remove package staging outside the exact unique Chronicle Agent Host cache directory' -or
     $agentHostPackageSource -notmatch 'Invoke-PackagedHostUnboundParentProbe' -or $agentHostPackageSource -notmatch 'UnboundParentRejected' -or
     $agentHostProviderSelfTestSource -notmatch 'RunParentProcessContractSelfTestsAsync' -or
@@ -1114,6 +1143,16 @@ $missionInteractionAdapter = Get-Content (Join-Path $harnessRoot 'AgentMissionIn
 if ($missionInteractionTest -notmatch 'missionInteract' -or $missionInteractionTest -notmatch 'NativeOnUseStartsObservedTargetConversation' -or $missionInteractionTest -notmatch 'InvalidAgentRejectedWithoutConversation' -or $missionInteractionTest -notmatch 'ConversationTargetMatches' -or $missionInteractionTest -notmatch 'FixtureUnchanged' -or $missionInteractionTest -notmatch 'ProcessStopped' -or $missionInteractionAdapter -notmatch 'target\.OnUse\(mainAgent, -1\)' -or $missionInteractionAdapter -notmatch 'MissionConversationLogic' -or $missionInteractionAdapter -notmatch 'IsThereAgentAction' -or $missionInteractionAdapter -notmatch 'CanInteractWithAgent' -or $missionInteractionAdapter -match 'SetupAndStartMissionConversation' -or $agentProtocolSource -notmatch 'case "missionInteract"' -or $agentCliSource -notmatch "'missionInteract'" -or $agentDecisionLoopSource -notmatch "missionInteract = @\('AgentIndex'\)") { throw 'MissionInteraction must use the local Native Agent.OnUse pipeline, prevalidate native conversation/interaction rules, verify the actual target conversation, and reject invalid targets without direct ConversationManager starts.' }
 $companionHiringTest = Get-Content (Join-Path $harnessRoot 'Test-AgentCompanionHiring.ps1') -Raw -Encoding UTF8
 if ($companionHiringTest -notmatch 'missionNavigateToAgent' -or $companionHiringTest -notmatch 'missionInteract' -or $companionHiringTest -notmatch 'dialogueSelect' -or $companionHiringTest -notmatch 'main_option_faction_hire' -or $companionHiringTest -notmatch 'player_companion_hire_response_1' -or $companionHiringTest -notmatch 'HireCommitted' -or $companionHiringTest -notmatch 'StrictGoldEqualityRejected' -or $companionHiringTest -notmatch 'harnessPrepareCompanionHiringFixture' -or $companionHiringTest -notmatch 'harnessCompanionHiringDiagnostics' -or $companionHiringTest -notmatch 'FixtureUnchanged' -or $companionHiringTest -notmatch 'ProcessStopped' -or $agentProtocolSource -notmatch 'harnessPrepareCompanionHiringFixture is restricted to a visual Harness run' -or $agentProtocolSource -notmatch 'harnessCompanionHiringDiagnostics is restricted to a visual Harness run' -or $agentDecisionLoopSource -match 'harnessPrepareCompanionHiringFixture|harnessCompanionHiringDiagnostics') { throw 'CompanionHiring must traverse observed Tavern Mission dialogue, verify the native price and Clan/Party result plus strict-gold refusal, and keep Gold injection/diagnostics Harness-only.' }
+if (-not (Test-Path (Join-Path $harnessRoot 'AgentHost\AgentHostCampaignStateFacts.cs')) -or
+    $agentHostCampaignStateFactsSource -notmatch 'IsNativeLocationMenu' -or
+    $agentHostCampaignStateFactsSource -notmatch 'IsActiveEncounter' -or
+    $agentHostCampaignStateFactsSource -notmatch 'campaign-state-facts-training-field-menu-misclassified' -or
+    $agentHostCampaignStateFactsSource -notmatch 'campaign-state-facts-hostile-encounter-misclassified' -or
+    $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-training-field-menu-misclassified' -or
+    $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-training-field-menu-not-exitable' -or
+    $agentHostGoldSaleLoopSource -notmatch 'gold-sale-self-test-training-field-menu-not-exitable' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-self-test-training-field-menu-not-exitable' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'AgentHostCampaignStateFacts.RunContractSelfTests') { throw 'EYC objective subflows must distinguish the verified Native training-field Leave menu from a hostile Party encounter and keep the same leave path out of hostile encounter handling.' }
 $partyRoleAdapterSource = Get-Content (Join-Path $harnessRoot 'AgentPartyRoleAdapter.cs') -Raw -Encoding UTF8
 $partyRoleTest = Get-Content (Join-Path $harnessRoot 'Test-AgentPartyRoles.ps1') -Raw -Encoding UTF8
 if ($agentProtocolSource -notmatch 'case "partyRoles"' -or $agentProtocolSource -notmatch 'case "setPartyRole"' -or $agentProtocolSource -notmatch 'case "unassignPartyRole"' -or $agentCliSource -notmatch "'partyRoles'" -or $agentCliSource -notmatch "'setPartyRole'" -or $agentCliSource -notmatch "'unassignPartyRole'" -or $agentDecisionLoopSource -notmatch 'partyRoles = @\(\)' -or $agentDecisionLoopSource -notmatch "setPartyRole = @\('RoleId','HeroId'\)" -or $agentDecisionLoopSource -notmatch "unassignPartyRole = @\('RoleId'\)" -or $partyRoleAdapterSource -notmatch 'GetAssignablePartyRoles' -or $partyRoleAdapterSource -notmatch 'ExecuteAssignHeroToRole' -or $partyRoleAdapterSource -notmatch 'GetMapScreenActionIsEnabledWithReason' -or $partyRoleAdapterSource -match 'SetPartyQuartermaster|SetPartyScout|SetPartySurgeon|SetPartyEngineer' -or $agentProtocolSource -notmatch 'PartyRole fixture/diagnostics are restricted to visual Harness runs' -or $agentDecisionLoopSource -match 'harnessSeedPartyRoleFixture|harnessPartyRoleDiagnostics') { throw 'PartyRoles must query native role VM candidates, apply native Campaign action gating and call its native handler; fixture seeding/diagnostics stay Harness-only and bypassing role setters is forbidden.' }
@@ -1170,6 +1209,64 @@ if ($pursuitTestSource -notmatch 'ProbeQuestAcceptance' -or $pursuitTestSource -
 if ($moveToPointTestSource -notmatch 'moveToPoint' -or $moveToPointTestSource -notmatch 'AgentMoveToPointResult\.json' -or $moveToPointTestSource -notmatch 'ArrivedWithinTolerance' -or $moveToPointTestSource -notmatch 'InvalidOutOfRangeDestination' -or $moveToPointTestSource -notmatch 'FixtureUnchanged' -or $moveToPointTestSource -notmatch 'ProcessStopped') { throw 'Free-point movement requires an independent disposable fixture test for native target result, arrival, invalid coordinate safety, and cleanup.' }
 if ($freshCampaignTelemetry -notmatch 'Campaign\.Current\?\.CampaignBehaviorManager\?\.GetBehavior<ChronicleCampaignBehavior>\(\)' -or $freshCampaignTelemetry -notmatch 'campaign-agent-behavior-rebound' -or $freshCampaignTelemetry -notmatch 'AgentProtocolReady' -or $freshCampaignTelemetry -match 'fresh-progression-app-tick|fresh-progression-map-tick' -or $protocolSource -notmatch 'fresh-progression-protocol-command-visible' -or $freshCampaignTest -notmatch 'CHRONICLE_FRESH_CAMPAIGN_SKIP_ISSUE_PROBE') { throw 'Progression must skip the native Issue probe without app-tick polling before a campaign exists.' }
 if ($freshCampaignSource -notmatch 'CHRONICLE_HARNESS_MODE' -or $freshCampaignSource -notmatch 'OnNarrativeMenuOptionSelected' -or $freshCampaignSource -notmatch 'adulthood_defeated_enemy_option' -or $freshCampaignSource -notmatch 'manager\.NextStage\(\)' -or $freshCampaignSource -notmatch 'CanUserSkip' -or $freshCampaignSource -notmatch 'OnVideoFinished\(\)' -or $freshCampaignSource -notmatch 'CampaignMapConversation.OpenConversation' -or $freshCampaignSource -notmatch 'hero_give_issue' -or $freshCampaignSource -notmatch 'issueOfferDenied' -or $freshCampaignSource -notmatch 'lord_meet_player_response1' -or $freshCampaignSource -notmatch 'issue_explanation_player_response_pre_quest_solution') { throw 'Fresh campaign test must exercise native creation and classify local Issue offer/precondition outcomes.' }
+if ($freshCampaignSource -notmatch 'StoryModeNewGame' -or
+    $freshCampaignSource -notmatch 'GetInitialStateOptions\(\)' -or
+    $freshCampaignSource -notmatch 'OnExecutedInitialStateOption\(storyModeOption\)' -or
+    $freshCampaignSource -notmatch 'storyModeOption\.DoAction\(\)' -or
+    $freshCampaignSource -notmatch 'player_answer_skip_tutorial' -or
+    $freshCampaignSource -notmatch 'end_tutorial_yes' -or
+    $freshCampaignSource -notmatch 'manager\.DoOption\(requiredOptionId\)' -or
+    $freshCampaignSource -match 'CompleteTutorialPhase\(' -or
+    $freshCampaignSource -notmatch 'fresh-storymode-e2e-ready' -or
+    $freshCampaignSource -notmatch 'eyc-map-render-settled' -or
+    $freshCampaignSource -notmatch 'CHRONICLE_FRESH_CAMPAIGN_START_AGENT' -or
+    $freshCampaignSource -notmatch 'CHRONICLE_HARNESS_MODE", "agent-host-lifecycle-test"' -or
+    $freshCampaignSource -notmatch 'TimeSpan\.FromSeconds\(8\)' -or
+    $freshCampaignSource -notmatch '_trainingFieldConversationFrameCaptured' -or
+    $freshCampaignSource -notmatch '_tutorialSkipOptionFrameCaptured' -or
+    $freshCampaignSource -notmatch '_tutorialSkipConfirmationFrameCaptured' -or
+    $freshCampaignTest -notmatch '\[switch\]\$StoryModeEycSetup' -or
+    $freshCampaignTest -notmatch '\[switch\]\$StoryModeEycLiveModelEvaluation' -or
+    $freshCampaignTest -notmatch "GetEnvironmentVariable\('FREELLMAPI_API_KEY', 'User'\)" -or
+    $freshCampaignTest -notmatch '\$env:FREELLMAPI_API_KEY = \$userFreeLlmApiKey' -or
+    $freshCampaignTest -notmatch '\$previousFreeLlmApiKey' -or
+    $freshCampaignTest -notmatch 'StoryModeAgentHostStarted' -or
+    $freshCampaignTest -notmatch 'StoryModeAgentProgressPath' -or
+    $freshCampaignTest -notmatch 'Initialize-FreeLLMAPIProfile' -or
+    $freshCampaignTest -notmatch 'storyModeLiveProviderPreflightReady' -or
+    $freshCampaignTest -notmatch 'cleanupDeadline = \(Get-Date\)\.AddSeconds\(15\)' -or
+    $freshCampaignTest -notmatch 'CHRONICLE_FRESH_CAMPAIGN_STORYMODE' -or
+    $freshCampaignTest -notmatch '\$diagnosticStartLineCount = \$allLines\.Count' -or
+    $freshCampaignTest -notmatch 'originalEstablishYourClanQuestNaturallyActive' -or
+    $harnessScript -notmatch "'FreshStoryModeSetup' \{ @\('Preflight', 'Build', 'FreshStoryModeSetup'\) \}" -or
+    $harnessScript -notmatch "-StoryModeEycSetup -TimeoutSeconds 360" -or
+    $harnessScript -notmatch "'FreshStoryModeModelEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'FreshStoryModeModelEvaluation'\) \}" -or
+    $harnessScript -notmatch '-StoryModeEycLiveModelEvaluation -TimeoutSeconds 360' -or
+    $harnessScript -notmatch "CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS', '120000'" -or
+    $agentHostRuntimeControllerSource -notmatch 'autoStopMilliseconds <= 120000' -or
+    $harnessScript -notmatch "CHRONICLE_HARNESS_AGENT_MODEL', 'gpt-oss-20b'" -or
+    $agentHostRuntimeControllerSource -notmatch 'CHRONICLE_HARNESS_AGENT_MODEL' -or
+    $freshCampaignTest -notmatch 'storyModeLiveModelProducedDecision' -or
+    $freshCampaignTest -notmatch 'AgentHostProgress\.jsonl') { throw 'Fresh StoryMode setup must use the original StoryMode Campaign and exact skip-tutorial/confirmation dialogue choices, verify natural EYC activation, and never call the tutorial completion function directly; its optional live Host slice must use bounded same-session MCM startup with a real decision trace.' }
+if ($harnessScript -notmatch 'function Remove-RetainedAgentHostPackage' -or
+    $harnessScript -notmatch 'CHRONICLE_AGENT_HOST_TEST_PATH' -or
+    $harnessScript -notmatch 'Remove-RetainedAgentHostPackage \$script:retainedAgentHostPackageRoot' -or
+    $harnessScript -notmatch 'Test-AgentHostPackage\.ps1' -or $harnessScript -notmatch '-CleanupPackageRoot' -or
+    $agentHostPackageSource -notmatch 'Cleanup-only mode refuses while a Bannerlord or Agent Host process may still use the package') { throw 'Same-session MCM runtime testing must use the verified self-contained D: package artifact and remove only its unique temporary folder after game/Host processes are gone.' }
+if ($freshCampaignTest -notmatch 'FreshStoryModeSetup\.mp4' -or
+    $freshCampaignTest -notmatch 'FreshStoryModeSetup-contact\.jpg' -or
+    $freshCampaignTest -notmatch 'Write-StoryModeCaptureEvent' -or
+    $freshCampaignTest -notmatch 'StoryModeNativeFramesPassed' -or
+    $freshCampaignTest -notmatch 'Bannerlord\.BLSE\.Standalone\.exe' -or
+    $freshCampaignTest -notmatch 'Ensure-ChronicleSteamClientReady' -or
+    $freshCampaignTest -notmatch 'StoryModeNativeFrameSha256' -or
+    $freshCampaignTest -notmatch 'distinctRequiredFrameHashes\.Count -eq \$requiredNativeFrames\.Count' -or
+    $freshCampaignTest -notmatch 'Get-FileHash -LiteralPath \$finalFramePath -Algorithm SHA256' -or
+    $freshCampaignTest -notmatch 'tutorial-skip-confirmation-visible' -or
+    $freshCampaignTest -notmatch 'eyc-map-render-settled' -or
+    $freshCampaignTest -notmatch 'storyModeRenderSettledObserved' -or
+    $freshCampaignSource -notmatch 'TaleWorlds\.Engine\.Utilities\.TakeScreenshot' -or
+    $freshCampaignTest -notmatch "Get-Process -Name 'Bannerlord\*'") { throw 'Fresh StoryMode UI setup evidence must stay window-scoped, mark tutorial/EYC transitions in its timeline, and handle the installed BLSE process name.' }
 if ($freshCampaignTelemetry -notmatch 'ChronicleAgentObserver.BuildSnapshotJson') { throw 'FreshCampaign must capture the post-creation Agent snapshot.' }
 if ($freshCampaignTelemetry -notmatch 'Campaign\.Current\.SaveHandler\.SaveAs\(freshSaveName\)' -or $freshCampaignTelemetry -notmatch 'fresh-campaign-disposable-save-scheduled' -or $freshCampaignTelemetry -notmatch 'fresh-campaign-disposable-save-requested' -or $freshCampaignTelemetry -notmatch 'fresh-campaign-disposable-save-complete' -or $freshCampaignTelemetry -notmatch 'via=CampaignTick' -or $freshCampaignTelemetry -notmatch 'fresh-campaign-progression-campaign-tick' -or $freshCampaignTelemetry -notmatch '_agentProtocol\?\.Poll\(this\)') { throw 'FreshCampaign must save the stopped fresh campaign on its first native CampaignTick and observe completion.' }
 if ($freshCampaignTelemetry -notmatch 'IsNativeCampaignMusicInitialized' -or $freshCampaignTelemetry -notmatch 'MBMusicManager\.IsCreationCompleted\(\)' -or $freshCampaignTelemetry -notmatch 'fresh-campaign-start-wait' -or $freshCampaignTelemetry -notmatch 'fresh-campaign-start-ready' -or $freshCampaignTelemetry -notmatch 'skipProgressionIssueProbe' -or $freshCampaignTelemetry -notmatch 'GetType\(\)\.Name == "MapState"') { throw 'FreshCampaign must wait for native music initialization and suppress only the progression Issue probe after MapState.' }
@@ -1201,6 +1298,7 @@ if ($decisionLoopSource -notmatch 'decision\.done -eq \$true' -or $decisionLoopS
 $recruitmentTest = Get-Content (Join-Path $harnessRoot 'Test-AgentRecruitment.ps1') -Raw -Encoding UTF8
 if ($agentLoopProvider -notmatch "CHRONICLE_TEST_PROVIDER_MODE -eq 'recruitment'" -or $agentLoopProvider -notmatch '\$request\.previousActionReceipt' -or $agentLoopProvider -notmatch '\$receipt\.data\.offers' -or $recruitmentTest -notmatch 'OfferDataForwardedToNextDecision' -or $recruitmentTest -notmatch 'OfferSelectionMatchedReceipt' -or $recruitmentTest -notmatch 'RecruitmentDecisionSummary' -or $recruitmentTest -match 'RecruitmentDecisionTrace\s*=\s*\$recruitmentLoop\.trace') { throw 'Recruitment must test receipt-based selection and keep only concise evidence, not duplicate full observations.' }
 if ($freshCampaignTest -notmatch 'Set-ChronicleTestWindow' -or $freshCampaignTest -notmatch 'WindowLayoutApplied' -or $freshCampaignTest -notmatch 'display_width' -or $freshCampaignTest -notmatch '840') { throw 'FreshCampaign must enforce the existing non-activating windowed test layout.' }
+if ($testWindowLayoutSource -notmatch 'IsIconic' -or $testWindowLayoutSource -notmatch 'IsWindowVisible' -or $testWindowLayoutSource -notmatch '0x0050' -or $testWindowLayoutSource -notmatch 'Minimized = \$iconic' -or $testWindowLayoutSource -match 'SetForegroundWindow|BringWindowToTop') { throw 'Windowed capture must show the 840x472 game window without activating it or stealing the user focus.' }
 if ($agentCliSource -notmatch "'recoverTestConfig'" -or $testWindowLayoutSource -notmatch "max_framerate = 30" -or $agentCliSource -notmatch 'engine_config\.chronicle-backup' -or $agentCliSource -notmatch 'Restore-ChronicleTestEngineConfig' -or $agentCliSource -notmatch 'engineConfigRestored' -or $agentCliSource -notmatch 'startup-timeout-' -or $agentCliSource -notmatch 'RglErrorLogTail' -or $agentCliSource -notmatch 'WatchdogLogTail' -or $agentCliSource -notmatch 'Ensure-ChronicleSteamClient' -or $startupEvidenceSource -notmatch 'steamwebhelper' -or $startupEvidenceSource -notmatch 'Get-ChronicleSteamClientReadiness' -or $startupEvidenceSource -notmatch 'Bannerlord was not launched' -or $agentCliSource -notmatch 'ConvertTo-ChronicleStartupDialogEvidence' -or $agentCliSource -notmatch 'StreamReader') { throw 'Harness must wait for stable Steam WebHelper readiness, serialize sanitized startup dialog evidence, and preserve Steam API warnings without global input.' }
 if ($freshCampaignTest -notmatch 'FreshCampaign\.initial-state\.json' -or $freshCampaignTest -notmatch 'WriteAllBytes' -or $freshCampaignTest -notmatch 'creationCompleted -and \$initialSnapshotCaptured') { throw 'FreshCampaign must persist the post-creation Agent observation as UTF-8 evidence before passing.' }
 if ($freshCampaignTest -notmatch 'IssueConversationProbeApplicable' -or $freshCampaignTest -notmatch 'IssueConversationProbeSkipped' -or $freshCampaignTestCompact -notmatch 'issueConversationProbePassed = if \(\$issueProbeExpected\).*?\$null' -or $freshCampaignTest -notmatch 'issueConversationProbeOutcomeValid' -or $freshCampaignTest -notmatch 'issueConversationOfferDenied' -or $freshCampaignTest -notmatch 'issueOfferOptionAvailable') { throw 'FreshCampaign must distinguish an applicable offer/denial from a no-issue skip.' }

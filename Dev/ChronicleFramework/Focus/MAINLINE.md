@@ -568,6 +568,8 @@ flowchart LR
 
 1.4.8新档与成长证据
 
+2026-10-22 原版StoryMode开局与连续视觉回归 `TestResults/20261022-142200`：Harness经BLSE standalone及稳定Steam就绪门禁启动，调用原版初始菜单`StoryModeNewGame`委托与CharacterCreation流程；在`tutorial_training_field`用原版兄长ConversationManager选项`player_answer_skip_tutorial`及`end_tutorial_yes`推进，不直接调用Tutorial完成函数、不注入Quest/资源、未请求或写入存档。原版`Establish Your Clan`自然激活，首个MapState Native观察记录Clan Renown 20、Campaign Clock Stop。四张已稳定渲染的引擎帧（兄长对话、Skip选项、确认选项、EYC地图）各有不同SHA-256；目标窗口视频覆盖703/703帧并按事件索引18个关键帧，MP4已删除。帧图显示初次MapState仍有训练场地点面板并显示“你找到了第一块族群部件”提示；该界面仍需由AI后续按当前Native菜单处理，不能默认已在无面板自由地图。测试未保存、正式存档目录元数据未变、游戏进程清理。它证明新StoryMode与Tutorial-skip起点可由测试Harness重复进入、视觉证据真实覆盖并识别首个MapState画面；尚非真实模型自治、鼠标/UI玩家点击验证、两个独立战役或EYC完成门禁。下一增量应在同一新Campaign进程中从该观察启动真实AgentHost并记录首个决策及动作后验；不可为接入便利先保存/回载预备档。
+
 - 角色创建反编译显示：成年背景选择在新档起始给予 Clan Renown +20；Tier 1 门槛为50，因此示例背景下缺30。StoryMode 的+25奖励要在Tier 1 后才可能取得，不能作为前置成长路径。
 - 在确定性、非模型Provider下，测试招募入口通过VM产生过以下原生副作用：招入一名瓦兰迪亚新兵花费20第纳尔、工资2/日、队伍人数+1；此类单动作结果不代表Agent具备自主成长能力。
 - 新档的本地Issue种子和条件有变化：有的没有Issue，有的仅有金币报酬，也有到不了Brief的情况；单个fixture不能推成通用可用的任务路线。
@@ -773,6 +775,16 @@ FreeLLMAPI模型路由现况（2026-10-21/22）：原版FreeLLMAPI的单请求`g
 同日后续按最新分类契约复验Provider smoke：`TestResults/20261022-053525`实际模型`mistral-nemo→ovh/Mistral-Nemo-Instruct-2407`用496/33输入/输出tokens将中文“完成当前可见的村庄工具委托”正确分类为`supported-village-tools-quest`，返回`json_schema`，模型调用1、Native命令0。它验证的是当前Prompt可正确分类该目标类型，并不证明地图Host下发行动或任务完成；前一段`051835`的429记录仍解释了当时失败，但不再代表最新提示词未实测。
 
 最新真实模型长循环切片`TestResults/20261022-054303`仍从隔离的既有EYC `save002`副本开始，不是自然新战役门禁。Mistral Nemo先分类为`supported-establish-your-clan`，随后选择原版显式`resume`；Native地图从`prisoner_wait`/Stop进入`UnstoppablePlay`并自然推进约3.238 Campaign days，随后出现原版`menu_captivity_end_prison_escape`（游戏截图显示“继续……”）。在需要下一次决策选择该当前原版继续选项时，OVH再次socket hang-up、FreeLLMAPI把路由置cooldown并回429/Retry-After=75；Host安全失败前没有成功释放或推进EYC子目标。Gate收据显示模型行动决策1、Native objective actions 0、Gold32/Renown5/Party0，Clone removed、`save002` hash相同、Bannerlord/Host/session clean；失败屏截图和Timeline保留，MP4已移除。此轮证明真实模型分类→显式时间选择→Native自然等待→转入原版逃离继续菜单能够衔接，但最后一个Provider故障阻断选择；它不证明Captivity通过、目标推进或原版Quest完成。
+
+2026-10-22自然StoryMode同进程MCM Host首轮真实评测（`TestResults/20261022-163050`、`164200`、`173044`、`174157`、`175650`、`172047`）：测试经原版`StoryModeNewGame`、原版角色创建及玩家允许的兄长Skip/确认开始，无保存/回载；可见截图/视频覆盖训练场对话、Skip、确认、自然激活EYC后的首个MapState地点菜单。现有MCM Host Start确实可在这个自然Campaign/同一Bannerlord PID启动本轮自包含Win64 Host，读取当前EYC并向FreeLLMAPI发真实模型决策。已观察的有效决策包括`Mistral Small 3.2`/`Mistral Nemo`分类为EYC、选择未完成的Companion或Renown目标；**未执行任何Native目标动作，EYC四项目标未推进，Host/游戏正常清理且正式档不变**，不能把这一门禁切片称为AI游戏已跑通。
+
+该评测发现并修正一个玩家入口/观察理解缺口：Tutorial Skip后首个MapState不是无面板的自由地图，而是`training_field_menu`；原生状态同时标`encounterActive=true`，其`encounteredPartyId`与`currentSettlementId`同为`tutorial_training_field`，画面显示可用原版“离开”选项。错误的`encounterActive`布尔判断使Companion子流程把训练场当作劫匪/战斗而中止（164200，Native动作0）。共同状态判定`AgentHostCampaignStateFacts`现仅在当前Native地点菜单ID与地点ID匹配时将它归为location menu，真正遭遇仍保持fail-closed；GoldSale/Recruitment/Companion/BattleSimulation各自只允许当前原版Leave菜单动作退出。另一次模型在Renown路线下返回了`MenuId="MenuId"`的无效menuSelect提案（173044）：BattleSimulation原菜单Leave动作目录此前只列参数名，未枚举当前真实`MenuId`/enabled Leave `OptionId`；现schema精确绑定可见菜单和可用退出选项，并由Package合同测试覆盖。
+
+后续把`auto`路由临时换成只读模型目录中`execution_status=ready`且此前真实回复过的`mistral-nemo`，避免每个请求自动扇出到多家不稳定Provider；但同程第一次仍在需要BattleSimulation Native菜单决策时遭FreeLLMAPI该路由TLS/socket断连，Host以`provider-timeout`停止（175650；Native动作0）。自动路由运行的FreeLLMAPI日志亦显示多家socket hang-up及45秒fallback超时，故这是清楚的上游/传输失败收据，不是修复后菜单动作被真实模型拒绝的证据。`AgentHostPackage`在`TestResults/20261022-180417`已重新Build并通过共享状态/四个目标子流程的自检；真实模型尚未用一份成功返回的menuSelect再次实测该修复。下一次只在FreeLLMAPI有实际可用响应时重跑该单个自然起点切片，不重复provider smoke、不回退本地模型，也不注入动作。
+
+`TestResults/20261022-181338`进一步做直连路由对照：MCM配置保持原样，Harness临时让同进程Host使用只读目录中`ready`的`gpt-oss-20b`，实际FreeLLMAPI返回一条EYC分类成功（921/138 tokens，`supported-establish-your-clan`）；下一次同一路由请求约3秒`socket hang up`后由FreeLLMAPI返回HTTP429/Retry-After=85，Host的单请求90秒总Deadline判定该等待无法放进剩余期限并fail-closed。结果为模型决定1、Native objective actions 0、无任务/资源变化，Campaign/Host/session/临时包均清理、自然存档未保存。这个样本不是Quest/Host执行器失败，也没验证训练场Leave动作；与`175650`的Mistral-Nemo“分类+选择Renown后第三请求TLS断开”并列，证据定位为当前上游路由不稳定。测试专用模型覆盖不改MCM全局设置，避免默认`auto`的fallback fan-out；目前最小真实状态只能推进到EYC分类，状态菜单后的首个Native动作等待后续可用Provider再实测。
+
+同一阶段再用Harness生命周期临时指定的`gpt-oss-20b`做自然新StoryMode直连对照，`TestResults/20261022-181338`只收到一条真实模型分类（921输入/138输出tokens，route `ovh/gpt-oss-20b`，结果`supported-establish-your-clan`）。第二次模型请求约3秒`socket hang up`，FreeLLMAPI随后向Host返回HTTP429/Retry-After=85；单次90秒deadline判定退避装不进剩余时间而fail-closed，未进入目标规划或任何Native objective action；Campaign/正式存档状态未变、Host/游戏/session/本轮唯一GUID包均清理。模型目录`ready`仍非实时调用可用证明。`AgentHostPackage`合同`TestResults/20261022-181136`已覆盖Native训练场地点Leave目录及精确参数枚举，Package自检通过；直接模型覆盖仅属于本轮Harness，不更改MCM `auto`设置。现在真实MCM Host已经能从自然首个MapState启动，实际只观察到EYC范围分类，没有目标后验/Native动作成功证据；下一次待上游有可用响应时窄测同一入口，不重复打模型，也不把此切片称作门禁通过。
 
 ## 主要来源
 

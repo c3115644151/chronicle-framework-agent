@@ -27,6 +27,36 @@ internal static class AgentHostEstablishClanCompanionLoop
         if (candidates.Count != 1 || ReadString(candidates[0] as JsonObject, "heroId") != "wanderer-a")
             throw new AgentHostException("establish-clan-companion-candidate-filter-failed", "Only a current, unowned, friendly Wanderer Hero may enter the Companion objective candidate catalog.");
 
+        var nativeTrainingFieldMenu = new JsonObject
+        {
+            ["context"] = new JsonObject
+            {
+                ["gameState"] = "MapState", ["menuId"] = "training_field_menu", ["encounterActive"] = true,
+                ["encounteredPartyId"] = "tutorial_training_field", ["battleSimulation"] = null,
+                ["captivity"] = new JsonObject { ["isCaptive"] = false }
+            },
+            ["location"] = new JsonObject { ["currentSettlementId"] = "tutorial_training_field" },
+            ["availableMenuOptions"] = new JsonArray
+            {
+                new JsonObject { ["id"] = "training_field_enter", ["available"] = true, ["enabled"] = true, ["isLeave"] = false },
+                new JsonObject { ["id"] = "training_field_leave", ["available"] = true, ["enabled"] = true, ["isLeave"] = true }
+            }
+        };
+        var trainingFieldActions = BuildActionCatalog(nativeTrainingFieldMenu, new JsonArray(), new JsonObject(), null, null, null, null, false,
+            new HashSet<string>(StringComparer.Ordinal), new HashSet<string>(StringComparer.Ordinal));
+        var trainingFieldLeave = trainingFieldActions.OfType<JsonObject>().SingleOrDefault(action => ReadString(action, "action") == "menuSelect");
+        if (((trainingFieldLeave?["argumentValues"]?["OptionId"] as JsonArray)?[0]?.GetValue<string>()) != "training_field_leave" ||
+            AgentHostCampaignStateFacts.IsActiveEncounter(nativeTrainingFieldMenu))
+            throw new AgentHostException("establish-clan-companion-training-field-menu-misclassified", "The original post-tutorial training-field menu is a Native location menu with a Leave option, not a hostile encounter that should abort the Companion objective.");
+        var hostileEncounter = new JsonObject
+        {
+            ["context"] = new JsonObject { ["gameState"] = "MapState", ["encounterActive"] = true, ["encounteredPartyId"] = "looter-party", ["captivity"] = new JsonObject { ["isCaptive"] = false } },
+            ["location"] = new JsonObject { ["currentSettlementId"] = null }
+        };
+        if (!AgentHostCampaignStateFacts.IsActiveEncounter(hostileEncounter) || BuildActionCatalog(hostileEncounter, new JsonArray(), new JsonObject(), null, null, null, null, false,
+                new HashSet<string>(StringComparer.Ordinal), new HashSet<string>(StringComparer.Ordinal)).Count != 0)
+            throw new AgentHostException("establish-clan-companion-hostile-encounter-not-blocked", "A true map-party encounter must continue to block Tavern hiring actions.");
+
         var journey = new JsonObject
         {
             ["context"] = new JsonObject { ["gameState"] = "MissionState" },
@@ -140,7 +170,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                     return BuildResult("interrupted", "native-state-out-of-scope", "The current Native state is outside Campaign Map/Town Tavern Companion handling; no new game action was attempted.", "companion-state-out-of-scope", state);
                 if (ReadBoolean(context, "inquiryOpen") || ReadBoolean(context, "escapeMenuOpen"))
                     return BuildResult("interrupted", "native-modal-out-of-scope", "A Native modal interrupted the Companion route; the executor did not guess a response.", "companion-native-modal", state);
-                if (ReadBoolean(context?["captivity"] as JsonObject, "isCaptive") || ReadBoolean(context, "encounterActive"))
+                if (ReadBoolean(context?["captivity"] as JsonObject, "isCaptive") || AgentHostCampaignStateFacts.IsActiveEncounter(state))
                     return BuildResult("interrupted", "campaign-interruption", "Captivity or an encounter interrupts the Tavern hiring route and must be handled by its own Native subflow.", "companion-campaign-interruption", state);
 
                 var journal = await ReadJournalAsync(companionClient, elapsed.Token);
@@ -389,7 +419,7 @@ internal static class AgentHostEstablishClanCompanionLoop
         var context = state["context"] as JsonObject;
         var gameState = ReadString(context, "gameState");
         if (pending || ReadBoolean(context, "inquiryOpen") || ReadBoolean(context, "escapeMenuOpen") ||
-            ReadBoolean(context, "encounterActive") || ReadBoolean(context?["captivity"] as JsonObject, "isCaptive")) return catalog;
+            AgentHostCampaignStateFacts.IsActiveEncounter(state) || ReadBoolean(context?["captivity"] as JsonObject, "isCaptive")) return catalog;
 
         if (gameState == "MapState")
         {

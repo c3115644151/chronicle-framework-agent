@@ -1,6 +1,8 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.246
+Contract version: 7.262
+
+正常AgentHostPackage阶段会先检查D盘`BuildCache/Packages`内只属于该Harness的`ChronicleAgentHost-win-x64-<32位GUID>`临时发布目录；仅清理创建超过24小时、且当前没有Bannerlord或AgentHost运行的目录，并在回执中记录数量和字节数。未达到年龄的保持不动；不扫描/清理其它BuildCache或用户数据。
 
 ## 当前产品边界
 
@@ -13,6 +15,12 @@ EYC实机诊断只做只读FreeLLMAPI目录检查、构建、AgentHost包合同�
 
 通用目标分类按当前`allowedControls`只附带可用目标类型的简短语义，区分“目标类型受支持”与“该目标的Native前置条件当前可用”；Host在分类后再以Native状态核验任务/对象。Provider smoke的默认输出上限与游戏内MCM profile保持一致（1024 tokens），但用户显式配置优先。分类合同或测试配置调整时，用离线Host合同检查控制列表/提示范围一致，并记录真实模型决定；不得把一次Provider烟测当作EYC完整闭环证据。
 
+Fresh StoryMode setup Harness只在显式`CHRONICLE_FRESH_CAMPAIGN_STORYMODE`辅助标记下从原版`InitialStateOption`目录执行官方`StoryModeNewGame`菜单委托；Campaign自身及原版CharacterCreation流程负责创建角色，再由Native `ConversationManager`选择训练场兄长的原版`player_answer_skip_tutorial`与`end_tutorial_yes`选项。不直接调用`CompleteTutorialPhase`、不写Quest/资源、也不保存或回载预备档；启动必须经过BLSE standalone与稳定Steam就绪检查，避免直接启动`Bannerlord.exe`触发Steam API警告。本setup阶段验证原版EYC自然活动后停在MapState，仍不等于真实鼠标点击的菜单入口验证或EYC自治门禁通过。Harness在对话开始、Skip选项、确认选项和目标地图各留出8秒的只读画面稳定时间；四张有效引擎帧必须各有不同SHA-256，重复静态Splash/旧帧使视觉验收失败，不能仅凭文件存在或游戏状态日志声称视觉已看见。
+
+`FreshStoryModeModelEvaluation`在同一个新建Campaign进程中完成上述Natural StoryMode/官方Skip起点，然后仅用Harness生命周期路径调用既有MCM“启动自主Agent”按钮；它不保存/回载Campaign，不通过固定动作路线推进四项目标。目标文本限定为完整EYC主线目标，FreeLLMAPI单请求时限默认90秒、Host Ready后最多运行120秒并走现有有界Stop，以容纳两个串行的真实模型决策窗口；达到上限仍无原版结果时留作失败/截断样本，不重放。该诊断用只读目录确认的`gpt-oss-20b`直连路由；此前它曾在`TestResults/20261022-034131`完成4次真实EYC模型决策，因此本轮选它隔离自动路由跨平台fan-out问题。覆盖仅作用于Harness生命周期模式，玩家MCM全局模型选择保持不变。每条有效决策会在执行前留下脱敏trace。启动器只在当前进程缺少FreeLLMAPI客户端密钥时从Windows当前用户环境读取`FREELLMAPI_API_KEY`，仅传给Bannerlord子进程后恢复Harness父进程的原环境；不写密钥到项目、MCM文件或日志。模型调用前通过共享FreeLLMAPI预检读取 `/api/ping` 与 `/v1/models`（不生成模型输出），若网关停止则按既有逻辑隐藏启动；检查失败时不启动游戏。MCM实际启动的Host来自本轮验证的win-x64自包含发布目录；只为该测试在D盘BuildCache唯一GUID目录保留，结束后在确认Bannerlord/该Host进程已退出时精确删除。Host决策日志仅在`visual-capture`及`agent-host-lifecycle-test`两种Harness模式写入当前临时目录的`AgentHostProgress.jsonl`（上限16MiB，不记prompt、原始回复或rationale）；测试读取此脱敏轨迹并和Native结果/录像事件关联。该模式只验证新档首个Host接管/真实模型交互，不替代两个独立Campaign全Quest门禁；遇到上游限流/超时必须单独分类，不能通过回退本地模型或复制固定动作补齐。
+
+Fresh EYC 的真实 Host 切片`TestResults/20261022-164200`显示原版Tutorial skip后首个Campaign MapState的地点菜单是`training_field_menu`，原生状态同时有`encounterActive=true`和`encounteredPartyId=tutorial_training_field`，且`currentSettlementId`相同、存在可用`training_field_leave`。真实模型两次选择成功：先将完整目标分类为`supported-establish-your-clan`，再选择未完成的同伴目标；随后的Native同伴子流程误把训练场地点菜单当成劫匪/敌军遭遇并在第一个动作前中止（`companion-campaign-interruption`），Native动作0，源新档无存档写入。后续真实运行`TestResults/20261022-173044`选声望时同样呈现需处理的训练场菜单；第三次输出了尝试`menuSelect`但`MenuId`字段写成字面值`MenuId`的错误参数。源码发现BattleSimulation位置菜单分支仅给出参数名、未给当前Native可选ID枚举。现已增加共享`AgentHostCampaignStateFacts`把Native地点菜单同真实Party/Encounter分开，并在Companion/Recruitment/GoldSale/BattleSimulation子流程把可见原版Leave选项作为受限`menuSelect`；BattleSimulation的参数schema同时枚举当前精确`MenuId`和enabled Leave OptionId，真实敌方遭遇仍fail-closed。该修正已进入Package自检前的源码，窄包验证仍待本轮；三次实机均只产出真实模型规划/动作提案，未执行Native目标动作、无EYC进度、无存档或游戏崩溃；第一份诊断视频/截图留存，MP4均已按Harness索引删除。
+
 同一变量还必须传到实机Host进程：`Test-AgentLiveModelLoop.ps1`仅在没有显式Provider timeout时使用各场景默认值；外层EYC Harness默认设置90秒，显式`CHRONICLE_LLM_TIMEOUT_SECONDS`仍由用户决定且范围为5–360秒。禁止在目标分支中无条件重置360秒，这会使一个不断重试的远端断连占住游戏数分钟，并掩盖上层限制。EYC阶段不重复发provider smoke，因此有效模型预算留给真实Campaign首轮目标分类。
 
 AgentHost对“模型响应已返回但未通过动作/控制目录校验”的可恢复决策错误可最多请求两次修正；反馈只包含错误类别和当前Native动作/控制目录，不包含原始模型回复，也不发送Native动作。传输错误、上游429/502、超时不走这条模型决策修正路径；已经执行的Native副作用不因重试重新执行。所有此类分支必须有Fake Provider回归，并在真实模型中按现有Harness收据区分是否生效。
@@ -23,7 +31,7 @@ AgentHost对“模型响应已返回但未通过动作/控制目录校验”的�
 
 W7-K恢复测试专用的`ChronicleW7K-`派生存档时，只允许在Bannerlord和CLI会话都已结束后，通过`Test-AgentHostCampaignLoopEvaluation.ps1 -CleanupPreparedSaveName`按精确Game Saves路径清理。该恢复入口不能接受正式存档名；普通产品失败不得跳过本规则。
 
-Host真实模型的每个有效回复在执行前增量写入Harness `AgentHostProgress.jsonl`；仅在`visual-capture`模式、当前Harness临时目录内启用，限制16MiB，只保存所选动作/参数、模型路由、token与玩家可见状态摘要，不保存prompt、回复正文或rationale。这样即使长测进程被外部打断，也能分辨模型具体选择、Native动作执行前的状态和已知成本。
+Host真实模型的每个有效回复在执行前增量写入Harness `AgentHostProgress.jsonl`；仅在`visual-capture`或`agent-host-lifecycle-test`模式、当前Harness临时目录内启用，限制16MiB，只保存所选动作/参数、模型路由、token与玩家可见状态摘要，不保存prompt、回复正文或rationale。这样即使长测进程被外部打断，也能分辨模型具体选择、Native动作执行前的状态和已知成本。
 
 Village Quest的终止`done`在MapState且Quest已关闭、库存净变化已逐项核实、没有活跃对话时可用，包括玩家仍停在任务人聚落菜单的情况；打开对话或任一后置条件缺失仍不能结束。退出Trade/Inventory后玩家可能自然留在该聚落菜单，无需多执行一次“离开聚落”作为任务完成前置。
 
@@ -129,6 +137,10 @@ Smoke的FinishedAll/AssemblyLoaded/CrashDetected必须是Boolean；日志先转�
 Chronicle 当前的产品方向是AI自主游玩Bannerlord单机Campaign：AI直接驱动`Hero.MainHero`/`MobileParty.MainParty`，通过原版交互实现目标，玩家可高层督导但不逐步代点。产品北极星是StoryMode `Establish Your Clan`自然完成；纯聊天、单次工具演示或NPC候选扫描均不算通过。产品范围、当前门禁与未决事实见`Focus/MAINLINE.md`，工作顺序由GitHub Project维护。
 
 工程同时维护可无人值守验证产品的本地Harness：隔离一次性夹具与正式存档，提供可信原生状态、进程、日志及必要视觉证据。游戏内Bridge负责MainHero/MainParty观察、Native动作分发和会话校验；Agent Host负责真实模型决策、目标循环、结果核验、记忆/checkpoint与运行监护。既有接口以MainHero为主体，正是当前首发身体基础；这不等于完整StoryMode自主能力。NPC Think trace、造景与故障注入只服务验证/未来研究，不能进入普通Agent动作目录或替代产品目标。
+
+`FreshStoryModeSetup`是#130验证前置的测试切片：仅显式`CHRONICLE_FRESH_CAMPAIGN_STORYMODE`标记会从原版`InitialStateOption`目录执行`StoryModeNewGame`，由StoryMode原生委托创建全新Campaign，Native `CharacterCreationManager`走有效文化/经历菜单；训练场教程跳过只调用兄长对话中可见的`player_answer_skip_tutorial`和`end_tutorial_yes`，并通过`ConversationManager.DoOption`（包含原版选项后果/自动回复处理）提交，不直接ProcessSentence或调用`CompleteTutorialPhase`。之后等待原版Mission/Quest事件自然激活EYC；不写入任务/资源或生成进度存档。每个关键剧情界面同时保留Native Engine截图与窗口录像切片；若窗口视频帧与引擎截图不一致，以Native截图、游戏状态与RGL事件复核并修工具。本setup在首个EYC活动MapState即停；Harness调用官方菜单项委托而非实际鼠标输入，仍需单独验证用户主菜单操作及随后两个自然新战役EYC闭环。
+
+游戏窗口可见性是视觉测试前置条件：从`Start-Process -WindowStyle Minimized`启动后，用不激活焦点的Win32 `ShowWindowAsync(SW_SHOWNOACTIVATE)`与`SetWindowPos(SWP_NOACTIVATE|SWP_SHOWWINDOW)`恢复目标窗口，读取`IsIconic`/`IsWindowVisible`验收；不调用键鼠输入或抢占前台。Engine screenshot、窗口视频与原生状态/事件必须相互核对；若关键帧像素完全相同，不能把文件“存在”当成视觉验证通过。
 
 ## 单一事实来源
 

@@ -35,6 +35,7 @@ internal static class ProviderContractSelfTest
         try { results.AddRange(await AgentHostEstablishClanRecruitmentLoop.RunContractSelfTestsAsync()); }
         catch (Exception exception) { throw new AgentHostException("establish-clan-recruitment-loop-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
         results.AddRange(AgentHostEstablishClanCompanionLoop.RunContractSelfTests());
+        results.AddRange(AgentHostCampaignStateFacts.RunContractSelfTests());
         try { results.AddRange(await AgentHostEstablishClanCompanionLoop.RunTransportSelfTestsAsync()); }
         catch (Exception exception) { throw new AgentHostException("establish-clan-companion-loop-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
         results.AddRange(AgentHostEstablishClanGoldSaleLoop.RunContractSelfTests());

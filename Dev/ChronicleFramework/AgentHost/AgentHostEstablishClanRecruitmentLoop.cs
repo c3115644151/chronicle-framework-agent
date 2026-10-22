@@ -68,6 +68,21 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         if (TryResolveRecruitmentAction(stale, recruitmentMenu, null, offers, null, false, out _, out _, out _, out _))
             throw new AgentHostException("establish-clan-recruitment-stale-offer-accepted", "A recruitment slot not present in the fresh Native RecruitmentVM receipt was accepted.");
 
+        var trainingFieldMenu = new JsonObject
+        {
+            ["context"] = new JsonObject
+            {
+                ["gameState"] = "MapState", ["menuId"] = "training_field_menu", ["encounterActive"] = true,
+                ["encounteredPartyId"] = "tutorial_training_field", ["captivity"] = new JsonObject { ["isCaptive"] = false }
+            },
+            ["location"] = new JsonObject { ["currentSettlementId"] = "tutorial_training_field" },
+            ["availableMenuOptions"] = new JsonArray(new JsonObject { ["id"] = "training_field_leave", ["available"] = true, ["enabled"] = true, ["isLeave"] = true })
+        };
+        var trainingFieldCatalog = BuildActionCatalog(trainingFieldMenu, new JsonObject { ["partySize"] = new JsonObject { ["target"] = 5 } }, null, null, null, false);
+        var trainingFieldLeaveOption = trainingFieldCatalog.Count == 0 ? null : (trainingFieldCatalog[0]?["argumentValues"]?["OptionId"] as JsonArray)?[0]?.GetValue<string>();
+        if (trainingFieldCatalog.Count != 1 || ReadString(trainingFieldCatalog[0] as JsonObject, "action") != "menuSelect" || trainingFieldLeaveOption != "training_field_leave")
+            throw new AgentHostException("establish-clan-recruitment-training-field-menu-not-exitable", "The original post-tutorial training-field location menu must remain leaveable before party recruitment begins.");
+
         var results = new List<object>
         {
             new { scenario = "establish-clan-recruitment-travels-only-to-current-safe-town-village-targets", passed = true },
@@ -156,7 +171,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                     return BuildResult("failed", "native-inquiry-out-of-scope", "A Native Inquiry interrupted the recruitment path; no answer was invented.", "recruitment-inquiry-out-of-scope", state, currentRecruitOffers);
                 if (ReadBoolean(context?["captivity"] as JsonObject, "isCaptive"))
                     return BuildResult("interrupted", "captivity-recovery-required", "The MainHero is captive; the EYC supervisor must run the Native captivity recovery subflow before recruiting.", "recruitment-captive", state, currentRecruitOffers);
-                if (ReadBoolean(context, "encounterActive"))
+                if (AgentHostCampaignStateFacts.IsActiveEncounter(state))
                     return BuildResult("interrupted", "encounter-resolution-required", "A Native encounter interrupted travel; the EYC supervisor must resolve or leave that encounter before recruiting.", "recruitment-encounter", state, currentRecruitOffers);
 
                 var journal = await ReadJournalAsync(questDetailsClient, elapsed.Token);
@@ -369,7 +384,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         var catalog = new JsonArray();
         if (moving) return catalog;
         var context = state?["context"] as JsonObject;
-        if (ReadBoolean(context, "encounterActive") || ReadBoolean(context, "escapeMenuOpen") || ReadBoolean(context, "inquiryOpen") ||
+        if ((state is not null && AgentHostCampaignStateFacts.IsActiveEncounter(state)) || ReadBoolean(context, "escapeMenuOpen") || ReadBoolean(context, "inquiryOpen") ||
             ReadBoolean(context?["captivity"] as JsonObject, "isCaptive")) return catalog;
 
         if (recruitOptions is not null)
@@ -380,6 +395,22 @@ internal static class AgentHostEstablishClanRecruitmentLoop
 
         var menuId = ReadString(context, "menuId");
         var menuOptions = state?["availableMenuOptions"] as JsonArray ?? new JsonArray();
+        if (!IsRecruitmentMenu(menuId) && state is not null && AgentHostCampaignStateFacts.IsNativeLocationMenu(state))
+        {
+            var leaveOptions = menuOptions.OfType<JsonObject>()
+                .Where(option => ReadBoolean(option, "available") && ReadBoolean(option, "enabled") && ReadBoolean(option, "isLeave"))
+                .Select(option => ReadString(option, "id"))
+                .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToArray();
+            if (leaveOptions.Length == 0) return catalog;
+            var leaveAction = new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonArray("MenuId", "OptionId") };
+            leaveAction["argumentValues"] = new JsonObject
+            {
+                ["MenuId"] = new JsonArray(menuId),
+                ["OptionId"] = new JsonArray(leaveOptions.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray())
+            };
+            catalog.Add(leaveAction);
+            return catalog;
+        }
         if (IsRecruitmentMenu(menuId) && HasEnabledOption(menuOptions, RecruitmentMenuOptionId))
         {
             catalog.Add(new JsonObject { ["action"] = "recruitOptions", ["arguments"] = new JsonArray() });

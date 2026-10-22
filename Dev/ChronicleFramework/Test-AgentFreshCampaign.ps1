@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
     [int]$TimeoutSeconds = 240,
+    [switch]$StoryModeEycSetup,
+    [switch]$StoryModeEycLiveModelEvaluation,
     [switch]$ValidateRecruitmentProgression,
     [switch]$RealModelRecruitment,
     [switch]$RetainDisposableSave
@@ -10,8 +12,14 @@ $ErrorActionPreference = 'Stop'
 $harnessRoot = $PSScriptRoot
 . (Join-Path $harnessRoot 'Test-AgentSupport.ps1')
 . (Join-Path $harnessRoot 'HarnessShaderCacheDialog.ps1')
+. (Join-Path $harnessRoot 'HarnessStartupEvidence.ps1')
+if ($StoryModeEycSetup -and [string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) { throw 'StoryModeEycSetup requires an active Run-Harness temp/evidence directory.' }
+$storyModeEvidenceRoot = if ($StoryModeEycSetup) { Split-Path -Parent $env:CHRONICLE_HARNESS_TEMP } else { $null }
 $gameRoot = if ($env:CHRONICLE_GAME_ROOT -and (Test-Path -LiteralPath $env:CHRONICLE_GAME_ROOT)) { [IO.Path]::GetFullPath($env:CHRONICLE_GAME_ROOT) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
 $gameExe = Join-Path $gameRoot 'bin\Win64_Shipping_Client\Bannerlord.exe'
+$launcher = Join-Path $gameRoot 'bin\Win64_Shipping_Client\Bannerlord.BLSE.Standalone.exe'
+$gameBinDirectory = Join-Path $gameRoot 'bin\Win64_Shipping_Client'
+$steamRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $gameRoot))
 $engineConfig = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\Configs\engine_config.txt'
 $diagnosticLog = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\Configs\ModLogs\chronicle-framework.log'
 $saveDirectory = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\Game Saves'
@@ -30,6 +38,8 @@ $disposableSaveOwned = $false
 $previousSessionExisted = Test-Path -LiteralPath $agentSessionPath
 $previousSessionBytes = if ($previousSessionExisted) { [IO.File]::ReadAllBytes($agentSessionPath) } else { $null }
 if ($ValidateRecruitmentProgression -and (Test-Path -LiteralPath $agentCommandPath)) { throw 'A pending Agent command exists; refusing to overwrite it for FreshCampaign progression.' }
+if ($StoryModeEycSetup -and ($ValidateRecruitmentProgression -or $RealModelRecruitment -or $RetainDisposableSave)) { throw 'StoryModeEycSetup is a no-save Native StoryMode/tutorial-skip setup probe; it cannot be combined with Sandbox recruitment progression or disposable-save retention.' }
+if ($StoryModeEycLiveModelEvaluation -and (-not $StoryModeEycSetup -or $ValidateRecruitmentProgression -or $RealModelRecruitment -or $RetainDisposableSave)) { throw 'StoryModeEycLiveModelEvaluation requires the no-save StoryModeEycSetup path and cannot be combined with Sandbox progression or retained saves.' }
 if ($RealModelRecruitment -and -not $ValidateRecruitmentProgression) { throw 'RealModelRecruitment requires ValidateRecruitmentProgression so the new Campaign is saved as a protected disposable fixture before the model starts.' }
 if ($RetainDisposableSave -and -not $ValidateRecruitmentProgression) { throw 'RetainDisposableSave requires ValidateRecruitmentProgression so only a verified Native New Campaign save can be retained.' }
 if ($progressionSavePath -and (Test-Path -LiteralPath $progressionSavePath)) { throw 'Generated disposable-save name already exists; refusing to overwrite.' }
@@ -43,7 +53,7 @@ function Invoke-FreshCampaignAgentCli([string]$Action, [string[]]$Arguments = @{
 }
 
 if (-not (Test-Path -LiteralPath $gameExe)) { throw "Bannerlord executable was not found: $gameExe" }
-if (Get-Process Bannerlord -ErrorAction SilentlyContinue) { throw 'Bannerlord is already running.' }
+if (Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue) { throw 'A Bannerlord client is already running.' }
 if (-not (Test-Path -LiteralPath $engineConfig)) { throw "Windowed display config was not found: $engineConfig" }
 $currentEngineConfig = Get-Content -LiteralPath $engineConfig -Raw
 if ($currentEngineConfig -notmatch '(?m)^display_mode\s*=\s*0\s*$' -or
@@ -88,21 +98,54 @@ $saveDigestBefore = Get-SaveManifestDigest
 $diagnosticStartLineCount = if (Test-Path -LiteralPath $diagnosticLog) { @(Get-Content -LiteralPath $diagnosticLog -Encoding UTF8).Count } else { 0 }
 $launchStart = Get-Date
 $previousMode = $env:CHRONICLE_HARNESS_MODE
+$previousStoryModeFlag = $env:CHRONICLE_FRESH_CAMPAIGN_STORYMODE
+$previousStoryModeStartAgent = $env:CHRONICLE_FRESH_CAMPAIGN_START_AGENT
+$previousFreeLlmApiKey = $env:FREELLMAPI_API_KEY
 $previousIssueProbeFlag = $env:CHRONICLE_FRESH_CAMPAIGN_SKIP_ISSUE_PROBE
 $previousFreshSaveName = $env:CHRONICLE_FRESH_CAMPAIGN_SAVE_NAME
 $previousCrashCaptureFlag = $env:CHRONICLE_CAPTURE_CRASH_EXCEPTION
 $env:CHRONICLE_HARNESS_MODE = 'fresh-campaign-renown'
+if ($StoryModeEycSetup) { $env:CHRONICLE_FRESH_CAMPAIGN_STORYMODE = '1' }
+else { Remove-Item Env:CHRONICLE_FRESH_CAMPAIGN_STORYMODE -ErrorAction SilentlyContinue }
+if ($StoryModeEycLiveModelEvaluation) { $env:CHRONICLE_FRESH_CAMPAIGN_START_AGENT = '1' }
+else { Remove-Item Env:CHRONICLE_FRESH_CAMPAIGN_START_AGENT -ErrorAction SilentlyContinue }
 $env:CHRONICLE_CAPTURE_CRASH_EXCEPTION = '1'
+$freeLlmApiProfile = $null
 if ($ValidateRecruitmentProgression -or $RetainDisposableSave) {
     $env:CHRONICLE_FRESH_CAMPAIGN_SKIP_ISSUE_PROBE = '1'
     $env:CHRONICLE_FRESH_CAMPAIGN_SAVE_NAME = $progressionSaveName
 }
 try {
+    if ($StoryModeEycLiveModelEvaluation -and [string]::IsNullOrWhiteSpace($env:FREELLMAPI_API_KEY)) {
+        $userFreeLlmApiKey = [Environment]::GetEnvironmentVariable('FREELLMAPI_API_KEY', 'User')
+        if ([string]::IsNullOrWhiteSpace($userFreeLlmApiKey)) { throw 'The FreeLLMAPI user-scoped client key is unavailable; Bannerlord was not started and no key value was displayed.' }
+        $env:FREELLMAPI_API_KEY = $userFreeLlmApiKey
+        $userFreeLlmApiKey = $null
+    }
+    if ($StoryModeEycLiveModelEvaluation) {
+        . (Join-Path $harnessRoot 'Get-FreeLLMAPIProfile.ps1')
+        if ([string]::IsNullOrWhiteSpace($env:CHRONICLE_LLM_BASE_URL) -and [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable('CHRONICLE_LLM_BASE_URL', 'User'))) {
+            $env:CHRONICLE_LLM_BASE_URL = 'http://127.0.0.1:31415/v1'
+        }
+        if ([string]::IsNullOrWhiteSpace($env:CHRONICLE_LLM_MODEL) -and [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL', 'User'))) {
+            $env:CHRONICLE_LLM_MODEL = 'auto'
+        }
+        $freeLlmApiProfile = Initialize-FreeLLMAPIProfile
+    }
+    if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) { throw 'BLSE standalone launcher was not found in the configured Bannerlord installation.' }
+    $steamReadiness = Ensure-ChronicleSteamClientReady -SteamRoot $steamRoot -TimeoutSeconds 45
+    if (-not $steamReadiness.Readiness.Ready) { throw 'Steam did not reach the stable WebHelper readiness gate; FreshCampaign launch was refused.' }
     Set-SafeExitMarker
-    $launcherProcess = Start-Process -FilePath $gameExe -ArgumentList $arguments -WorkingDirectory (Split-Path $gameExe) -WindowStyle Minimized -PassThru
+    $launcherProcess = Start-Process -FilePath $launcher -ArgumentList $arguments -WorkingDirectory $gameBinDirectory -WindowStyle Minimized -PassThru
 }
 finally {
     $env:CHRONICLE_HARNESS_MODE = $previousMode
+    if ($null -eq $previousStoryModeFlag) { Remove-Item Env:CHRONICLE_FRESH_CAMPAIGN_STORYMODE -ErrorAction SilentlyContinue }
+    else { $env:CHRONICLE_FRESH_CAMPAIGN_STORYMODE = $previousStoryModeFlag }
+    if ($null -eq $previousStoryModeStartAgent) { Remove-Item Env:CHRONICLE_FRESH_CAMPAIGN_START_AGENT -ErrorAction SilentlyContinue }
+    else { $env:CHRONICLE_FRESH_CAMPAIGN_START_AGENT = $previousStoryModeStartAgent }
+    if ($null -eq $previousFreeLlmApiKey) { Remove-Item Env:FREELLMAPI_API_KEY -ErrorAction SilentlyContinue }
+    else { $env:FREELLMAPI_API_KEY = $previousFreeLlmApiKey }
     if ($null -eq $previousCrashCaptureFlag) { Remove-Item Env:CHRONICLE_CAPTURE_CRASH_EXCEPTION -ErrorAction SilentlyContinue }
     else { $env:CHRONICLE_CAPTURE_CRASH_EXCEPTION = $previousCrashCaptureFlag }
             if ($null -eq $previousIssueProbeFlag) { Remove-Item Env:CHRONICLE_FRESH_CAMPAIGN_SKIP_ISSUE_PROBE -ErrorAction SilentlyContinue }
@@ -116,9 +159,23 @@ $gameStarted = $false
 $startRequested = $false
 $introSkippedObserved = $false
 $startupDialogReceipts = [System.Collections.Generic.List[object]]::new()
+$startupDialogSnapshots = [System.Collections.Generic.List[object]]::new()
 $startupDialogFailure = $null
 $creationCompleted = $false
 $initialSnapshotCaptured = $false
+$storyModeTutorialSkipSelected = $false
+$storyModeTutorialSkipConfirmed = $false
+$storyModeEycReadyObserved = $false
+$storyModeRenderSettledObserved = $false
+$storyModeAgentHostStarted = $false
+$storyModeAgentHostReady = $false
+$storyModeAgentHostStartRequested = $false
+$storyModeAgentHostTerminalDetail = $null
+$storyModeAgentHostTerminalState = $null
+$storyModeAgentProgressLineCount = 0
+$storyModeAgentProgressEntries = [System.Collections.Generic.List[object]]::new()
+$storyModeNativeFrameNames = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+$storyModeNativeFrameHashes = [ordered]@{}
 $snapshotArtifactPath = if ([string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) { $null } else { Join-Path $env:CHRONICLE_HARNESS_TEMP 'FreshCampaign.initial-state.json' }
 $renown = $null
 $campaignInstanceId = $null
@@ -163,11 +220,41 @@ $recruitmentProgressionPassed = -not $ValidateRecruitmentProgression
 $disposableSaveRequested = $false
 $disposableSaveCompleted = $false
 $disposableSaveSuccessful = $false
+$storyModeVideoCapture = $null
+$storyModeVideoCaptureResult = $null
+$storyModeVideoCaptureError = $null
+$storyModeVideoCaptureAttempted = $false
+$storyModeVideoCaptureActive = $false
+$storyModeVideoCaptureRetained = $false
+$storyModeVideoStartedTicks = 0L
+$storyModeVideoFrequency = [Diagnostics.Stopwatch]::Frequency
+$storyModeVideoPath = if ($env:CHRONICLE_HARNESS_TEMP) { Join-Path $env:CHRONICLE_HARNESS_TEMP 'FreshStoryModeSetup.mp4' } else { $null }
+$storyModeVideoEventsPath = if ($env:CHRONICLE_HARNESS_TEMP) { Join-Path $env:CHRONICLE_HARNESS_TEMP 'FreshStoryModeSetup-events.jsonl' } else { $null }
+$storyModeAgentProgressPath = if ($env:CHRONICLE_HARNESS_TEMP) { Join-Path $env:CHRONICLE_HARNESS_TEMP 'AgentHostProgress.jsonl' } else { $null }
+$storyModeVideoContactPath = if ($env:CHRONICLE_HARNESS_TEMP) { Join-Path $env:CHRONICLE_HARNESS_TEMP 'FreshStoryModeSetup-contact.jpg' } else { $null }
 $deadline = (Get-Date).AddSeconds($(if ($ValidateRecruitmentProgression) { [Math]::Min(90, $TimeoutSeconds) } else { $TimeoutSeconds }))
+
+function Write-StoryModeCaptureEvent([string]$EventName, [string]$Action, [string]$Status, [string]$GameState, [string]$MenuId) {
+    if (-not $script:storyModeVideoCaptureActive -or -not $script:storyModeVideoEventsPath) { return }
+    $nowTicks = [Diagnostics.Stopwatch]::GetTimestamp()
+    $event = [ordered]@{
+        event = $EventName
+        action = $Action
+        commandId = 'fresh-storymode-' + $EventName
+        status = $Status
+        gameState = $GameState
+        menuId = $MenuId
+        partyScreenMode = ''
+        inventoryMode = ''
+        utc = (Get-Date).ToUniversalTime().ToString('O')
+        offsetMilliseconds = [Math]::Round(($nowTicks - $script:storyModeVideoStartedTicks) * 1000.0 / $script:storyModeVideoFrequency, 2)
+    }
+    [IO.File]::AppendAllText($script:storyModeVideoEventsPath, (ConvertTo-Json -InputObject $event -Compress) + [Environment]::NewLine, [Text.Encoding]::UTF8)
+}
 
 try {
     while ((Get-Date) -lt $deadline) {
-        $candidate = Get-Process Bannerlord -ErrorAction SilentlyContinue |
+        $candidate = Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue |
             Where-Object { $_.StartTime -ge $launchStart } |
             Sort-Object StartTime |
             Select-Object -Last 1
@@ -199,8 +286,46 @@ try {
                 Start-Sleep -Milliseconds 200
                 continue
             }
-            $windowLayout = Set-ChronicleTestWindow -ProcessId $bannerlordPid
-            if ($windowLayout) { $windowLayoutApplied = [bool]$windowLayout.Applied }
+            $isBannerlordWindow = [string]$candidate.MainWindowTitle -match '(?i)Bannerlord'
+            if ($isBannerlordWindow) {
+                $windowLayout = Set-ChronicleTestWindow -ProcessId $bannerlordPid
+                if ($windowLayout) { $windowLayoutApplied = [bool]$windowLayout.Applied }
+            }
+            elseif ($candidate.MainWindowHandle -ne [IntPtr]::Zero -and -not [string]::IsNullOrWhiteSpace([string]$candidate.MainWindowTitle) -and
+                -not @($startupDialogSnapshots | Where-Object { $_.ProcessId -eq $bannerlordPid -and $_.WindowTitle -ceq [string]$candidate.MainWindowTitle }).Count) {
+                try {
+                    $unknownWindow = Get-ChronicleWindowAutomationSnapshot -ProcessId $bannerlordPid -WindowHandle ([IntPtr]$candidate.MainWindowHandle)
+                    $startupDialogSnapshots.Add($unknownWindow)
+                    if (-not [string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) {
+                        $snapshotPath = Join-Path $env:CHRONICLE_HARNESS_TEMP "startup-window-$bannerlordPid.json"
+                        $unknownWindow | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $snapshotPath -Encoding UTF8
+                    }
+                }
+                catch { $startupDialogSnapshots.Add([pscustomobject]@{ ProcessId = $bannerlordPid; WindowTitle = [string]$candidate.MainWindowTitle; Error = $_.Exception.Message }) }
+            }
+            if ($StoryModeEycSetup -and $isBannerlordWindow -and -not $storyModeVideoCaptureAttempted -and $candidate.MainWindowHandle -ne [IntPtr]::Zero -and $windowLayout -and $windowLayout.Applied) {
+                if ([string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP) -or
+                    (Test-Path -LiteralPath $storyModeVideoPath) -or (Test-Path -LiteralPath $storyModeVideoEventsPath)) {
+                    $storyModeVideoCaptureError = 'Harness temp path is unavailable or the unique story setup capture path already exists.'
+                    $harnessFailureObserved = $true
+                    break
+                }
+                $storyModeVideoCaptureAttempted = $true
+                try {
+                    . (Join-Path $PSScriptRoot 'HarnessVideoCapture.ps1')
+                    [IO.File]::WriteAllText($storyModeVideoEventsPath, '', [Text.Encoding]::UTF8)
+                    $storyModeVideoCapture = Start-ChronicleWindowVideoCapture -ProcessId $bannerlordPid -OutputPath $storyModeVideoPath -FrameRate 10
+                    $storyModeVideoStartedTicks = $storyModeVideoCapture.StartedTicks
+                    $storyModeVideoFrequency = $storyModeVideoCapture.StopwatchFrequency
+                    $storyModeVideoCaptureActive = $true
+                    Write-StoryModeCaptureEvent 'capture-start' 'capture' 'completed' 'Startup' ''
+                }
+                catch {
+                    $storyModeVideoCaptureError = $_.Exception.Message
+                    $harnessFailureObserved = $true
+                    break
+                }
+            }
             if ($crashWindowTitle -match '(?i)Crash Report|CrashReporter' -and -not $crashWindowCaptureAttempted) {
                 $crashWindowCaptureAttempted = $true
                 if (-not [string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) {
@@ -226,12 +351,39 @@ try {
             $allLines = @(Get-Content -LiteralPath $diagnosticLog -Encoding UTF8)
             if ($allLines.Count -gt $diagnosticStartLineCount) {
                 $newLines = @($allLines[$diagnosticStartLineCount..($allLines.Count - 1)])
+                $diagnosticStartLineCount = $allLines.Count
             }
         }
         $gameStarted = $gameStarted -or [bool]($newLines -match "pid=$bannerlordPid\|game-start$")
-        $startRequested = $startRequested -or [bool]($newLines -match "pid=$bannerlordPid\|fresh-campaign-start-requested\|save=none\|gameMode=sandbox$")
+        if ($StoryModeEycLiveModelEvaluation) {
+            foreach ($line in $newLines) {
+                if ($line -match "pid=$bannerlordPid\|harness-agent-lifecycle-auto-start$") { $storyModeAgentHostStartRequested = $true }
+                if ($line -match "pid=$bannerlordPid\|agent-host-state\|state=Starting\|") { $storyModeAgentHostStartRequested = $true }
+                if ($line -match "pid=$bannerlordPid\|agent-host-process-started\|pid=(\d+)\|") { $storyModeAgentHostStarted = $true }
+                if ($line -match "pid=$bannerlordPid\|agent-host-ready\|hostPid=(\d+)\|") { $storyModeAgentHostReady = $true; Write-StoryModeCaptureEvent 'agent-host-ready' 'hostReady' 'completed' 'MapState' '' }
+                if ($line -match "pid=$bannerlordPid\|agent-host-state\|state=(Stopped|Completed|Failed)\|detail=(.*)$") { $storyModeAgentHostTerminalState = $Matches[1]; $storyModeAgentHostTerminalDetail = $Matches[2]; Write-StoryModeCaptureEvent 'agent-host-terminal' $storyModeAgentHostTerminalState 'completed' 'MapState' '' }
+            }
+            if ($storyModeAgentProgressPath -and (Test-Path -LiteralPath $storyModeAgentProgressPath -PathType Leaf)) {
+                $progressLines = @(Get-Content -LiteralPath $storyModeAgentProgressPath -Encoding UTF8)
+                if ($progressLines.Count -gt $storyModeAgentProgressLineCount) {
+                    foreach ($progressLine in $progressLines[$storyModeAgentProgressLineCount..($progressLines.Count - 1)]) {
+                        try {
+                            $entry = $progressLine | ConvertFrom-Json
+                            $storyModeAgentProgressEntries.Add($entry)
+                            $decisionAction = [string]$entry.decision.action
+                            $decisionState = [string]$entry.observation.gameState
+                            $decisionMenu = [string]$entry.observation.menuId
+                            Write-StoryModeCaptureEvent 'agent-provider-decision' $decisionAction 'modelDecision' $decisionState $decisionMenu
+                        }
+                        catch { $harnessFailureObserved = $true }
+                    }
+                    $storyModeAgentProgressLineCount = $progressLines.Count
+                }
+            }
+        }
+        $startRequested = $startRequested -or [bool]($newLines -match "pid=$bannerlordPid\|fresh-campaign-start-requested\|save=none\|gameMode=sandbox$|pid=$bannerlordPid\|fresh-campaign-start-requested\|save=none\|gameMode=storymode\|entry=StoryModeNewGame$")
         $introSkippedObserved = $introSkippedObserved -or [bool]($newLines -match 'fresh-campaign-intro-skipped\|via=native-video-completion\|mode=harness$')
-        $harnessFailureObserved = $harnessFailureObserved -or [bool]($newLines -match 'fresh-campaign-failed\|')
+        $harnessFailureObserved = $harnessFailureObserved -or [bool]($newLines -match 'fresh-campaign-failed\||fresh-storymode-e2e-failed\|')
         $campaignSaveRequested = $campaignSaveRequested -or [bool]($newLines -match 'campaign-save-requested\|')
         $disposableSaveRequested = $disposableSaveRequested -or [bool]($newLines -match "fresh-campaign-disposable-save-requested\|name=$([regex]::Escape($progressionSaveName))\|via=CampaignTick$")
         $disposableSaveCompleted = $disposableSaveCompleted -or [bool]($newLines -match "fresh-campaign-disposable-save-complete\|name=$([regex]::Escape($progressionSaveName))\|successful=True$")
@@ -241,12 +393,30 @@ try {
         if ($disposableSaveRequested) { $disposableSaveOwned = $true }
         foreach ($line in $newLines) {
             if ($line -match 'fresh-campaign-stage\|index=(\d+)') { [void]$stageIndices.Add([int]$Matches[1]) }
+            if ($StoryModeEycSetup -and $line -match 'fresh-storymode-tutorial-skip\|status=original-brother-conversation-started$') {
+                Write-StoryModeCaptureEvent 'brother-conversation-started' 'dialogueStart' 'completed' 'MissionState' 'training_field'
+            }
             if ($line -match 'fresh-campaign-background-selected\|menu=narrative_adulthood_menu\|option=adulthood_defeated_enemy_option$') { $backgroundChoiceObserved = $true }
             if ($line -match 'fresh-campaign-character-creation-complete\|renown=([0-9.]+)\|tier=([^|]+)\|clock=([^|]+)\|mapState=([^|]+)$') {
                 $creationCompleted = $true
                 $renown = [double]::Parse($Matches[1], [Globalization.CultureInfo]::InvariantCulture)
                 $clock = $Matches[3]
                 $mapState = $Matches[4]
+            }
+            if ($StoryModeEycSetup -and $line -match 'fresh-storymode-tutorial-skip\|status=original-skip-selected\|option=player_answer_skip_tutorial$') {
+                $storyModeTutorialSkipSelected = $true
+                Write-StoryModeCaptureEvent 'tutorial-skip-selected' 'dialogueSelect' 'completed' 'MissionState' 'training_field'
+            }
+            if ($StoryModeEycSetup -and $line -match 'fresh-storymode-tutorial-skip\|status=original-confirmation-selected\|option=end_tutorial_yes$') {
+                $storyModeTutorialSkipConfirmed = $true
+                Write-StoryModeCaptureEvent 'tutorial-skip-confirmed' 'dialogueSelect' 'completed' 'MissionState' 'training_field'
+            }
+            if ($StoryModeEycSetup -and $line -match 'fresh-storymode-e2e-ready\|quest=rebuild_player_clan_storymode_quest\|mapState=MapState\|renown=([0-9.]+)\|campaignDay=([0-9.]+)$') {
+                $storyModeEycReadyObserved = $true
+                $renown = [double]::Parse($Matches[1], [Globalization.CultureInfo]::InvariantCulture)
+                $mapState = 'MapState'
+                $issueConversationProbeStatus = 'skipped:storymode-setup'
+                Write-StoryModeCaptureEvent 'original-eyc-active' 'questActivationObserved' 'completed' 'MapState' ''
             }
             if ($line -match '\|fresh-campaign-snapshot\|json=(\{.*\})$') {
                 try {
@@ -255,6 +425,33 @@ try {
                     $initialSnapshotCaptured = $true
                 }
                 catch { $harnessFailureObserved = $true }
+            }
+            if ($StoryModeEycSetup -and $line -match 'fresh-storymode-e2e-snapshot\|json=(\{.*\})$') {
+                try {
+                    if (-not $snapshotArtifactPath) { throw 'Harness temp directory is not set.' }
+                    [IO.File]::WriteAllBytes($snapshotArtifactPath, [Text.Encoding]::UTF8.GetBytes($Matches[1]))
+                    $initialSnapshotCaptured = $true
+                }
+                catch { $harnessFailureObserved = $true }
+            }
+            if ($StoryModeEycSetup -and $line -match 'fresh-storymode-frame-captured\|name=([^|]+)\|file=([^|]+)\|gameState=([^|]+)\|menuId=(.*)$') {
+                $frameName = [string]$Matches[1]
+                $frameFile = [string]$Matches[2]
+                $framePath = Join-Path $env:CHRONICLE_HARNESS_TEMP $frameFile
+                $frameDeadline = (Get-Date).AddSeconds(5)
+                while (-not (Test-Path -LiteralPath $framePath -PathType Leaf) -and (Get-Date) -lt $frameDeadline) { Start-Sleep -Milliseconds 100 }
+                if (Test-Path -LiteralPath $framePath -PathType Leaf) {
+                    $finalFramePath = Join-Path $storyModeEvidenceRoot $frameFile
+                    if (Test-Path -LiteralPath $finalFramePath) { throw "Fresh StoryMode frame already exists: $frameFile" }
+                    Move-Item -LiteralPath $framePath -Destination $finalFramePath
+                    [void]$storyModeNativeFrameNames.Add($frameName)
+                    $storyModeNativeFrameHashes[$frameName] = (Get-FileHash -LiteralPath $finalFramePath -Algorithm SHA256).Hash
+                    if ($frameName -eq 'eyc-map-render-settled') {
+                        $storyModeRenderSettledObserved = $true
+                        Write-StoryModeCaptureEvent 'map-render-settled' 'captureFrame' 'completed' 'MapState' ''
+                    }
+                }
+                else { $harnessFailureObserved = $true }
             }
             if ($line -match 'fresh-campaign-visible-issues\|settlements=(.*)$') {
                 $visibleIssuePoolObserved = $true
@@ -325,16 +522,33 @@ try {
             else { $crashWindowCaptureError = 'Harness temp directory is unavailable for crash capture.' }
         }
 
-        $creationReady = $creationCompleted -and $initialSnapshotCaptured -and $issueConversationProbeStatus -ne 'not-observed'
+        $creationReady = if ($StoryModeEycSetup) {
+            $creationCompleted -and $initialSnapshotCaptured -and $storyModeTutorialSkipSelected -and $storyModeTutorialSkipConfirmed -and $storyModeEycReadyObserved -and $storyModeRenderSettledObserved
+        } else {
+            $creationCompleted -and $initialSnapshotCaptured -and $issueConversationProbeStatus -ne 'not-observed'
+        }
         $saveReady = -not $ValidateRecruitmentProgression -or $disposableSaveCompleted
+        $storyModeAgentReadyForExit = -not $StoryModeEycLiveModelEvaluation -or (($storyModeAgentHostStarted -and $storyModeAgentHostReady -and -not [string]::IsNullOrWhiteSpace($storyModeAgentHostTerminalState)) -or ($storyModeAgentHostStartRequested -and $storyModeAgentHostTerminalState -eq 'Failed'))
         $crashCaptureGraceActive = $crashWindowCapture -and $crashWindowCaptureUntil -and (Get-Date) -lt $crashWindowCaptureUntil
-        if (($creationReady -and $saveReady) -or (($crashDetected -or $harnessFailureObserved) -and -not $crashCaptureGraceActive)) { break }
-        if (-not (Get-Process -Id $launcherProcess.Id -ErrorAction SilentlyContinue) -and -not $candidate) { break }
+        if (($creationReady -and $saveReady -and $storyModeAgentReadyForExit) -or (($crashDetected -or $harnessFailureObserved) -and -not $crashCaptureGraceActive)) { break }
+        if (-not (Get-Process -Id $launcherProcess.Id -ErrorAction SilentlyContinue) -and -not (Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue)) { break }
         Start-Sleep -Milliseconds 300
     }
 
 }
 finally {
+    if ($storyModeVideoCapture) {
+        try {
+            Write-StoryModeCaptureEvent 'capture-end' 'capture' 'completed' $mapState ''
+            $storyModeVideoCaptureResult = Stop-ChronicleWindowVideoCapture -Capture $storyModeVideoCapture -ContactSheetPath $storyModeVideoContactPath -EventTracePath $storyModeVideoEventsPath
+            $storyModeVideoCaptureActive = $false
+        }
+        catch {
+            $storyModeVideoCaptureError = $_.Exception.Message
+            $storyModeVideoCaptureRetained = Test-Path -LiteralPath $storyModeVideoPath
+            $storyModeVideoCaptureActive = $false
+        }
+    }
     if ($crashWindowCapture) {
         $crashContactSheetPath = Join-Path $env:CHRONICLE_HARNESS_TEMP "CrashReport-$bannerlordPid-contact.jpg"
         try {
@@ -366,6 +580,13 @@ finally {
         }
     }
 }
+
+$cleanupDeadline = (Get-Date).AddSeconds(15)
+do {
+    $remainingBannerlordProcesses = @(Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue)
+    if ($remainingBannerlordProcesses.Count -eq 0) { break }
+    Start-Sleep -Milliseconds 200
+} while ((Get-Date) -lt $cleanupDeadline)
 
 if ($ValidateRecruitmentProgression) {
     try {
@@ -551,10 +772,12 @@ if ($ValidateRecruitmentProgression) {
 }
 
 $saveDigestAfter = Get-SaveManifestDigest
+$remainingBannerlordProcesses = @(Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue)
+$gameProcessesClean = $remainingBannerlordProcesses.Count -eq 0
 $saveDigestForComparison = if ($RetainDisposableSave -and $progressionSaveName) { Get-SaveManifestDigest -ExcludeSaveName $progressionSaveName } else { $saveDigestAfter }
 $saveStateUnchanged = $saveDigestBefore -eq $saveDigestForComparison
 $retainedDisposableSave = [bool]($RetainDisposableSave -and $disposableSaveOwned -and $progressionSaveName -and (Test-Path -LiteralPath $progressionSavePath))
-$issueProbeExpected = -not $ValidateRecruitmentProgression -and [bool]($visibleIssueTypes -match ':[^,]+')
+$issueProbeExpected = -not $StoryModeEycSetup -and -not $ValidateRecruitmentProgression -and [bool]($visibleIssueTypes -match ':[^,]+')
 $issueConversationProbeApplicable = $issueProbeExpected
 $issueConversationProbePassed = if ($issueProbeExpected) {
     $issueConversationProbeStatus -eq 'opened' -and $issueConversationOfferOption -and ($issueConversationBriefReached -or $issueConversationOfferDenied) -and $issueConversationClockBefore -eq $issueConversationClockAfter
@@ -570,10 +793,6 @@ $acceptanceChecks = [ordered]@{
     backgroundSelected = $backgroundChoiceObserved
     characterCreationCompleted = $creationCompleted
     initialObservationCaptured = $initialSnapshotCaptured
-    visibleIssuePoolObserved = $visibleIssuePoolObserved
-    issueProbeOutcomeValid = $issueConversationProbeOutcomeValid
-    progressionPassed = $recruitmentProgressionPassed
-    expectedRenown = ($renown -eq 20)
     mapState = ($mapState -eq 'MapState')
     noCrash = (-not $crashDetected)
     noHarnessFailure = (-not $harnessFailureObserved)
@@ -581,10 +800,39 @@ $acceptanceChecks = [ordered]@{
     unrelatedSaveManifestUnchanged = $saveStateUnchanged
     requestedDisposableSaveRetained = (-not $RetainDisposableSave -or $retainedDisposableSave)
     windowLayout = ($windowLayoutApplied -and $windowLayout.Width -eq 840 -and $windowLayout.Height -eq 472)
+    gameProcessesClean = $gameProcessesClean
+}
+if ($StoryModeEycSetup) {
+    $acceptanceChecks.storyModeOfficialTutorialSkipSelected = $storyModeTutorialSkipSelected
+    $acceptanceChecks.storyModeOfficialTutorialSkipConfirmed = $storyModeTutorialSkipConfirmed
+    $acceptanceChecks.originalEstablishYourClanQuestNaturallyActive = $storyModeEycReadyObserved
+    $requiredNativeFrames = @('brother-conversation-start', 'tutorial-skip-option-visible', 'tutorial-skip-confirmation-visible', 'eyc-map-render-settled')
+    $allRequiredNativeFramesPresent = @($requiredNativeFrames | Where-Object { -not $storyModeNativeFrameNames.Contains($_) }).Count -eq 0
+    $requiredFrameHashes = @($requiredNativeFrames | ForEach-Object { [string]$storyModeNativeFrameHashes[$_] } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $distinctRequiredFrameHashes = @($requiredFrameHashes | Sort-Object -Unique)
+    $storyModeNativeFramesPassed = $allRequiredNativeFramesPresent -and $requiredFrameHashes.Count -eq $requiredNativeFrames.Count -and $distinctRequiredFrameHashes.Count -eq $requiredNativeFrames.Count
+    if ($allRequiredNativeFramesPresent -and -not $storyModeNativeFramesPassed) { $harnessFailureObserved = $true; $acceptanceChecks.noHarnessFailure = $false }
+    $acceptanceChecks.storyModeNativeFrames = $storyModeNativeFramesPassed
+    if ($StoryModeEycLiveModelEvaluation) {
+        $acceptanceChecks.storyModeLiveHostStarted = $storyModeAgentHostStarted
+        $acceptanceChecks.storyModeLiveHostReady = $storyModeAgentHostReady
+        $acceptanceChecks.storyModeLiveHostTerminated = $storyModeAgentHostTerminalState -in @('Stopped','Completed','Failed')
+        $acceptanceChecks.storyModeLiveModelProducedDecision = $storyModeAgentProgressEntries.Count -gt 0
+        $acceptanceChecks.storyModeLiveProviderPreflightReady = [bool]($freeLlmApiProfile -and $freeLlmApiProfile.ApiKeyPresent -and $freeLlmApiProfile.ModelExecutionStatus -in @('ready','router'))
+    }
+}
+else {
+    $acceptanceChecks.visibleIssuePoolObserved = $visibleIssuePoolObserved
+    $acceptanceChecks.issueProbeOutcomeValid = $issueConversationProbeOutcomeValid
+    $acceptanceChecks.progressionPassed = $recruitmentProgressionPassed
+    $acceptanceChecks.expectedRenown = ($renown -eq 20)
 }
 $result = [ordered]@{
-    Scenario = 'FreshCampaignCharacterCreationRenown'
-    Launcher = $gameExe
+    Scenario = if ($StoryModeEycSetup) { 'FreshStoryModeOriginalTutorialSkipToEstablishYourClan' } else { 'FreshCampaignCharacterCreationRenown' }
+    GameMode = if ($StoryModeEycSetup) { 'StoryMode' } else { 'Sandbox' }
+    Launcher = $launcher
+    GameExecutable = $gameExe
+    SteamClientReadiness = $steamReadiness
     GameProcessId = $bannerlordPid
     GameStarted = $gameStarted
     NativeNewCampaignRequested = $startRequested
@@ -610,11 +858,32 @@ $result = [ordered]@{
     DisposableSaveRetained = $retainedDisposableSave
     RecruitmentProgressionError = $recruitmentProgressionError
     CharacterCreationCompleted = $creationCompleted
+    StoryModeOfficialTutorialSkipSelected = if ($StoryModeEycSetup) { $storyModeTutorialSkipSelected } else { $null }
+    StoryModeOfficialTutorialSkipConfirmed = if ($StoryModeEycSetup) { $storyModeTutorialSkipConfirmed } else { $null }
+    OriginalEstablishYourClanQuestNaturallyActive = if ($StoryModeEycSetup) { $storyModeEycReadyObserved } else { $null }
+    StoryModeNativeFrames = if ($StoryModeEycSetup) { @($storyModeNativeFrameNames) } else { $null }
+    StoryModeNativeFrameSha256 = if ($StoryModeEycSetup) { $storyModeNativeFrameHashes } else { $null }
+    StoryModeNativeFrameDistinctCount = if ($StoryModeEycSetup) { $distinctRequiredFrameHashes.Count } else { $null }
+    StoryModeNativeFramesPassed = if ($StoryModeEycSetup) { $storyModeNativeFramesPassed } else { $null }
+    StoryModeLiveModelEvaluation = [bool]$StoryModeEycLiveModelEvaluation
+    StoryModeAgentHostStarted = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentHostStarted } else { $null }
+    StoryModeAgentHostStartRequested = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentHostStartRequested } else { $null }
+    StoryModeAgentHostReady = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentHostReady } else { $null }
+    StoryModeAgentHostTerminalState = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentHostTerminalState } else { $null }
+    StoryModeAgentHostTerminalDetail = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentHostTerminalDetail } else { $null }
+    FreeLLMAPIProfile = if ($StoryModeEycLiveModelEvaluation) { $freeLlmApiProfile } else { $null }
+    StoryModeAgentProgressPath = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentProgressPath } else { $null }
+    StoryModeAgentDecisions = if ($StoryModeEycLiveModelEvaluation) { @($storyModeAgentProgressEntries) } else { $null }
+    BannerlordProcessesCleanAtExit = $gameProcessesClean
+    StoryModeVisualCapture = if ($StoryModeEycSetup) { $storyModeVideoCaptureResult } else { $null }
+    StoryModeVisualCaptureError = if ($StoryModeEycSetup) { $storyModeVideoCaptureError } else { $null }
+    StoryModeVideoRetained = if ($StoryModeEycSetup) { $storyModeVideoCaptureRetained } else { $null }
+    StartupDialogSnapshots = @($startupDialogSnapshots)
     InitialAgentObservationCaptured = $initialSnapshotCaptured
     InitialAgentObservationPath = if ($initialSnapshotCaptured) { $snapshotArtifactPath } else { $null }
     ChronicleCampaignInstanceId = $campaignInstanceId
     ClanRenown = $renown
-    ExpectedClanRenown = 20
+    ExpectedClanRenown = if ($StoryModeEycSetup) { $null } else { 20 }
     MapState = $mapState
     CampaignClockMode = $clock
     CharacterCreationStagesObserved = @($stageIndices | Sort-Object)

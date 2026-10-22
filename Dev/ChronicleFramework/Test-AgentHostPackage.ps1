@@ -1,10 +1,70 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][string]$ProjectPath,
-    [Parameter(Mandatory = $true)][string]$EvidencePath
+    [string]$ProjectPath,
+    [string]$EvidencePath,
+    [string]$CleanupPackageRoot,
+    [switch]$RetainRuntimePackage
 )
 
 $ErrorActionPreference = 'Stop'
+
+function Invoke-StaleAgentHostPackageCleanup {
+    $packageParent = [IO.Path]::GetFullPath('D:\ChronicleFramework\BuildCache\Packages').TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    if (-not (Test-Path -LiteralPath $packageParent -PathType Container)) {
+        return [ordered]@{ Examined = 0; Removed = 0; DeletedBytes = [long]0; Skipped = $false; Reason = 'cache-directory-absent' }
+    }
+    if (@(Get-Process -Name 'Bannerlord*','ChronicleAgentHost' -ErrorAction SilentlyContinue).Count -gt 0) {
+        return [ordered]@{ Examined = 0; Removed = 0; DeletedBytes = [long]0; Skipped = $true; Reason = 'game-or-host-process-active' }
+    }
+
+    $cutoffUtc = [DateTime]::UtcNow.AddHours(-24)
+    $candidates = @(Get-ChildItem -LiteralPath $packageParent -Directory -Filter 'ChronicleAgentHost-win-x64-*' -ErrorAction Stop |
+        Where-Object { $_.Name -match '^ChronicleAgentHost-win-x64-[0-9a-f]{32}$' -and $_.CreationTimeUtc -lt $cutoffUtc })
+    $deletedBytes = [long]0
+    $removed = 0
+    foreach ($candidate in $candidates) {
+        $resolvedRoot = [IO.Path]::GetFullPath($candidate.FullName).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+        if ([IO.Path]::GetFullPath((Split-Path -Parent $resolvedRoot)).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) -ne $packageParent -or
+            (Split-Path -Leaf $resolvedRoot) -notmatch '^ChronicleAgentHost-win-x64-[0-9a-f]{32}$') {
+            throw 'Stale package cleanup candidate escaped the exact unique D: Agent Host package directory.'
+        }
+        $fileBytes = (Get-ChildItem -LiteralPath $resolvedRoot -File -Recurse -ErrorAction Stop | Measure-Object -Property Length -Sum).Sum
+        if (-not $fileBytes) { $fileBytes = 0 }
+        Remove-Item -LiteralPath $resolvedRoot -Recurse -Force -ErrorAction Stop
+        if (Test-Path -LiteralPath $resolvedRoot) { throw 'A stale Agent Host package staging directory remains after cleanup.' }
+        $deletedBytes += [long]$fileBytes
+        $removed++
+    }
+    return [ordered]@{ Examined = $candidates.Count; Removed = $removed; DeletedBytes = $deletedBytes; Skipped = $false; OlderThanHours = 24; Reason = 'verified-unique-temporary-package-staging' }
+}
+
+if (-not [string]::IsNullOrWhiteSpace($CleanupPackageRoot)) {
+    $packageParent = [IO.Path]::GetFullPath('D:\ChronicleFramework\BuildCache\Packages').TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $resolvedPackageRoot = [IO.Path]::GetFullPath($CleanupPackageRoot).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    if ([IO.Path]::GetFullPath((Split-Path -Parent $resolvedPackageRoot)).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) -ne $packageParent -or
+        (Split-Path -Leaf $resolvedPackageRoot) -notmatch '^ChronicleAgentHost-win-x64-[0-9a-f]{32}$') {
+        throw 'Cleanup-only mode accepts only one exact unique D: Agent Host package directory.'
+    }
+    if (@(Get-Process -Name 'Bannerlord*','ChronicleAgentHost' -ErrorAction SilentlyContinue).Count -gt 0) {
+        throw 'Cleanup-only mode refuses while a Bannerlord or Agent Host process may still use the package.'
+    }
+    if (Test-Path -LiteralPath $resolvedPackageRoot -PathType Container) {
+        $cleanupFailure = $null
+        for ($cleanupAttempt = 1; $cleanupAttempt -le 5; $cleanupAttempt++) {
+            try {
+                Remove-Item -LiteralPath $resolvedPackageRoot -Recurse -Force -ErrorAction Stop
+                if (-not (Test-Path -LiteralPath $resolvedPackageRoot)) { $cleanupFailure = $null; break }
+                $cleanupFailure = 'Package directory still exists after removal.'
+            }
+            catch { $cleanupFailure = $_.Exception.Message }
+            if ($cleanupAttempt -lt 5) { Start-Sleep -Milliseconds (250 * $cleanupAttempt) }
+        }
+        if ($cleanupFailure) { throw "Cleanup-only mode failed: $cleanupFailure" }
+    }
+    [pscustomobject]@{ CleanupOnly = $true; PackageRoot = $resolvedPackageRoot; Removed = -not (Test-Path -LiteralPath $resolvedPackageRoot) } | ConvertTo-Json -Compress
+    exit 0
+}
+if ([string]::IsNullOrWhiteSpace($ProjectPath) -or [string]::IsNullOrWhiteSpace($EvidencePath)) { throw 'Package verification requires ProjectPath and EvidencePath, or one exact CleanupPackageRoot.' }
 $project = [IO.Path]::GetFullPath($ProjectPath)
 $evidenceRoot = [IO.Path]::GetFullPath($EvidencePath)
 $harnessTemp = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_TEMP', 'Process')
@@ -15,6 +75,7 @@ $harnessTempRoot = [IO.Path]::GetFullPath($harnessTemp).TrimEnd([IO.Path]::Direc
 if (-not $evidenceRoot.StartsWith($harnessTempRoot, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Agent Host package evidence must remain inside the current disposable Harness run.'
 }
+$stalePackageCleanup = Invoke-StaleAgentHostPackageCleanup
 
 function Test-BoundedTcpPort
 {
@@ -264,14 +325,29 @@ $result = [ordered]@{
     ConsumerWorkingDirectorySeparatedFromPackage = ($consumerWorkingDirectory -ne $publishRoot)
     UserConfigurationIncluded = $false
     ManifestPath = $manifestPath
-    PackageArtifactsRetained = $false
-    PublishRoot = $null
-    PackageRoot = $null
+    PackageArtifactsRetained = [bool]$RetainRuntimePackage
+    PublishRoot = if ($RetainRuntimePackage) { $publishRoot } else { $null }
+    PackageRoot = if ($RetainRuntimePackage) { $packageRoot } else { $null }
+    RuntimeExecutablePath = if ($RetainRuntimePackage) { Join-Path $publishRoot 'ChronicleAgentHost.exe' } else { $null }
+    StalePackageCleanup = $stalePackageCleanup
     ProcessExited = $true
+}
+
+if ($RetainRuntimePackage) {
+    $runtimeReceipt = [ordered]@{
+        PackageRoot = $packageRoot
+        PublishRoot = $publishRoot
+        RuntimeExecutablePath = Join-Path $publishRoot 'ChronicleAgentHost.exe'
+        PackageVersion = [string]$packageHealth.version
+        RuntimeIdentifier = 'win-x64'
+        SelfContained = $true
+        SourceControlCommit = (git -C $repositoryRoot rev-parse HEAD 2>$null | Out-String).Trim()
+    }
+    $runtimeReceipt | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $evidenceRoot 'AgentHostRuntimePackage.json') -Encoding UTF8
 }
 }
 finally {
-    if ($packageRootCreated -and (Test-Path -LiteralPath $packageRoot -PathType Container)) {
+    if ($packageRootCreated -and -not ($RetainRuntimePackage -and $result -and [bool]$result.Passed) -and (Test-Path -LiteralPath $packageRoot -PathType Container)) {
         $resolvedPackageRoot = [IO.Path]::GetFullPath($packageRoot).TrimEnd([IO.Path]::DirectorySeparatorChar)
         $resolvedPackageParent = [IO.Path]::GetFullPath((Split-Path -Parent $resolvedPackageRoot)).TrimEnd([IO.Path]::DirectorySeparatorChar)
         if ($resolvedPackageParent -ne $packageParent -or (Split-Path -Leaf $resolvedPackageRoot) -notmatch '^ChronicleAgentHost-win-x64-[0-9a-f]{32}$') {

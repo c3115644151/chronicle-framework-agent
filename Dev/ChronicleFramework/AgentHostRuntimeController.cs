@@ -171,7 +171,7 @@ internal static class ChronicleAgentRuntimeController
 
         if (!_stopRequested && _state == RuntimeState.Running && IsLifecycleHarnessMode() &&
             int.TryParse(Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS"), out var autoStopMilliseconds) &&
-            autoStopMilliseconds >= 250 && autoStopMilliseconds <= 30000 &&
+            autoStopMilliseconds >= 250 && autoStopMilliseconds <= 120000 &&
             DateTime.UtcNow - _hostReadyUtc >= TimeSpan.FromMilliseconds(autoStopMilliseconds))
         {
             var stopButton = ChronicleAgentProviderSettings.Instance?.StopAgent;
@@ -238,6 +238,16 @@ internal static class ChronicleAgentRuntimeController
         {
             FailStart("无法读取MCM配置");
             return;
+        }
+        var harnessProviderModel = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_MODEL");
+        if (harnessSettings == null && IsLifecycleHarnessMode() && !string.IsNullOrWhiteSpace(harnessProviderModel))
+        {
+            settings = new ChronicleAgentProviderSettings
+            {
+                OllamaBaseUrl = settings.OllamaBaseUrl,
+                ModelId = harnessProviderModel.Trim(),
+                CampaignGoal = settings.CampaignGoal
+            };
         }
         if (harnessSettings == null && IsLifecycleHarnessMode())
         {
