@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.272
+Contract version: 7.273
 
 `FreshStoryModeNativeMenuLeaveEvaluation`是非模型的窄Native集成测试：同一个新Campaign先通过兄长对话的原版“跳过教程”及确认，原生推进对话后自然结束训练场Mission并进入活动EYC的首个MapState；该状态仍位于`training_field_menu`。Harness只选择当前启用的原版`training_field_leave`并通过`GameMenu.RunMenuOptionConsequence`调用原版处理器，随后验证回到地图、训练场菜单/地点退出、EYC仍活动、CampaignDay与Stop档位未变、无存档写入，并捕获前后引擎画面和Native post-action观察（包括若出现的Inquiry）。`TestResults/20261022-194410`完整通过；`20261022-195530`复测后还在收据中明确记录`brother-dialogue-path-no-tab-fallback`。两次教程Mission离开均由原版兄长对话路径完成，没有使用Tab兜底。这项测试只验证开局准备与单项Native菜单动作，不计作AI决策或长程EYC目标进展。`TestResults/20261022-193820`曾在兄长对话仍活跃时过早模拟原版Leave Area并触发游戏空引用崩溃；现Harness改为每1.5秒推进一次原版“点击继续”，且仅在ConversationManager已结束对话、场景仍未退出时才启动2.5秒Native Leave Area兜底。该兜底在训练场场景尚未单独实测，严禁在对话仍活跃时触发；其它Town Mission Leave证据不能替代该特定验证。后续弹出的通知/询问也不会由本测试自动确认。
 
@@ -21,7 +21,7 @@ Fresh StoryMode setup Harness只在显式`CHRONICLE_FRESH_CAMPAIGN_STORYMODE`辅
 
 `FreshStoryModeModelEvaluation`在同一个新建Campaign进程中完成上述Natural StoryMode/官方Skip起点，然后仅用Harness生命周期路径调用既有MCM“启动自主Agent”按钮；它不保存/回载Campaign，不通过固定动作路线推进四项目标。目标文本限定为完整EYC主线目标；FreeLLMAPI单请求默认90秒、Host Ready后最多运行120秒并有界停止，达到上限作为失败/截断样本保留，不重放已经执行过的动作。
 
-Harness参数`-FreshStoryModeModel`只接受明示的远端路由标识，逐次固定一个模型；当前允许`gpt-oss-20b`、NVIDIA `nvidiallama-3.2-11b-vision`、Poolside `poolside-laguna-s-2.1`、Google `gemini-2.5-flash`、Mistral `mistral-nemo`。不选`auto`，避免无法审计的路由扇出或进入本地自定义端点；该覆盖只改变测试进程环境，不改玩家MCM/用户模型配置。FreeLLMAPI预检确认所选ID此刻出现在可执行目录，但`ready`不证明上游当前能回答。模型结构化协议从当前模型的`supported_parameters`选择：声明`response_format`时用JSON Schema；否则仅在同时声明`tools`与`tool_choice`时用强制、无副作用的decision tool-call；两者均不支持时请求前安全失败。
+Harness参数`-FreshStoryModeModel`只接受明示的远端路由标识，逐次固定一个模型；当前允许通用`gpt-oss-20b`、FreeLLMAPI Groq 专属`openai-gpt-oss-20b`、NVIDIA `nvidiallama-3.2-11b-vision`、Poolside `poolside-laguna-s-2.1`、Google `gemini-2.5-flash`、Mistral `mistral-nemo`。不选`auto`，避免无法审计的路由扇出或进入本地自定义端点；该覆盖只改变测试进程环境，不改玩家MCM/用户模型配置。FreeLLMAPI预检确认所选ID此刻出现在可执行目录，但`ready`不证明上游当前能回答。FreeLLMAPI将`openai-gpt-oss-20b`列为独立Groq远端路由；本机当前目录状态为`needsKey/no_key`，所以没有发送请求。模型结构化协议从当前模型的`supported_parameters`选择：声明`response_format`时用JSON Schema；否则仅在同时声明`tools`与`tool_choice`时用强制、无副作用的decision tool-call；两者均不支持时请求前安全失败。
 
 `free-router`作为一个单独白名单选项映射到FreeLLMAPI/OpenRouter的`openrouter/free`远端免费路由；它可选择不同远端模型，但不会经过本机自定义推理端点。由于不声明`response_format`，本次Harness只在模型同时声明`tools`与`tool_choice`时走单次强制decision tool-call，响应/路由/Token均写入脱敏trace。[FreeLLMAPI Free Router](https://freellmapi.co/uk/model/free-router)
 
