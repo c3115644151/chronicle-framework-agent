@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.270
+Contract version: 7.271
 
 `FreshStoryModeNativeMenuLeaveEvaluation`是非模型的窄Native集成测试：同一个新Campaign先通过兄长对话的原版“跳过教程”及确认，原生推进对话后自然结束训练场Mission并进入活动EYC的首个MapState；该状态仍位于`training_field_menu`。Harness只选择当前启用的原版`training_field_leave`并通过`GameMenu.RunMenuOptionConsequence`调用原版处理器，随后验证回到地图、训练场菜单/地点退出、EYC仍活动、CampaignDay与Stop档位未变、无存档写入，并捕获前后引擎画面和Native post-action观察（包括若出现的Inquiry）。`TestResults/20261022-194410`完整通过；`20261022-195530`复测后还在收据中明确记录`brother-dialogue-path-no-tab-fallback`。两次教程Mission离开均由原版兄长对话路径完成，没有使用Tab兜底。这项测试只验证开局准备与单项Native菜单动作，不计作AI决策或长程EYC目标进展。`TestResults/20261022-193820`曾在兄长对话仍活跃时过早模拟原版Leave Area并触发游戏空引用崩溃；现Harness改为每1.5秒推进一次原版“点击继续”，且仅在ConversationManager已结束对话、场景仍未退出时才启动2.5秒Native Leave Area兜底。该兜底在训练场场景尚未单独实测，严禁在对话仍活跃时触发；其它Town Mission Leave证据不能替代该特定验证。后续弹出的通知/询问也不会由本测试自动确认。
 
@@ -23,6 +23,8 @@ Fresh StoryMode setup Harness只在显式`CHRONICLE_FRESH_CAMPAIGN_STORYMODE`辅
 
 Harness参数`-FreshStoryModeModel`只接受明示的远端路由标识，逐次固定一个模型；当前允许`gpt-oss-20b`、NVIDIA `nvidiallama-3.2-11b-vision`、Poolside `poolside-laguna-s-2.1`、Google `gemini-2.5-flash`、Mistral `mistral-nemo`。不选`auto`，避免无法审计的路由扇出或进入本地自定义端点；该覆盖只改变测试进程环境，不改玩家MCM/用户模型配置。FreeLLMAPI预检确认所选ID此刻出现在可执行目录，但`ready`不证明上游当前能回答。模型结构化协议从当前模型的`supported_parameters`选择：声明`response_format`时用JSON Schema；否则仅在同时声明`tools`与`tool_choice`时用强制、无副作用的decision tool-call；两者均不支持时请求前安全失败。
 
+`free-router`作为一个单独白名单选项映射到FreeLLMAPI/OpenRouter的`openrouter/free`远端免费路由；它可选择不同远端模型，但不会经过本机自定义推理端点。由于不声明`response_format`，本次Harness只在模型同时声明`tools`与`tool_choice`时走单次强制decision tool-call，响应/路由/Token均写入脱敏trace。[FreeLLMAPI Free Router](https://freellmapi.co/uk/model/free-router)
+
 启动器只在当前进程缺少FreeLLMAPI客户端密钥时从Windows当前用户环境读取`FREELLMAPI_API_KEY`，仅传给Bannerlord子进程后恢复Harness父进程环境；不写密钥到项目、MCM文件或日志。模型调用前只读检查共享FreeLLMAPI的`/api/ping`和`/v1/models`，网关停止或模型不在当前目录时不启动游戏。MCM实际启动的Host来自本轮验证的win-x64自包含发布目录；测试仅在D盘BuildCache唯一GUID目录暂存，确认Bannerlord和Host进程退出后精确删除。
 
 Host决策事件仅在`visual-capture`及`agent-host-lifecycle-test`模式写入临时目录的`AgentHostProgress.jsonl`，上限16MiB，不记prompt、原始回答或rationale。生命周期Host收据把统一循环的`decisions`正确映射为`decisionCount`；子目标执行结束时另记录`objective-subflow-result`，只含目标ID、状态、终止原因、失败码、动作数和token数，不记录自由文本失败说明。训练场setup稳定后只写一次Host autostart marker，避免每帧重复日志。此测试仅证明新档首个Host接管及模型交互，不替代两个独立Campaign全Quest门禁；不得以本地模型、Fake决策或固定路线补齐真实模型缺口。
@@ -34,6 +36,8 @@ Host决策事件仅在`visual-capture`及`agent-host-lifecycle-test`模式写入
 后续一次服务商轮换得到`TestResults/20261022-220746`：FreeLLMAPI目录对`gemini-2.5-flash`仍标`ready`，但实际Google upstream返回HTTP404 `model_not_found`，无模型tokens/Native动作，表明网关目录别名与上游当前模型名不一致。NVIDIA路由在`203216/205226`曾真实回答两次，但`210449/211231/221321/222136`后续调用全返回429、Retry-After 85秒，0 tokens/0 Native动作；Poolside/OpenRouter `212742`也返回429。这里不是单一游戏入口或一次坏提示的现象：显式已配置远端供应商此时处于限流/目录陈旧状态。没有执行本地模型、没有对自动路由或本地自定义端点做试探性推理。
 
 `-FreshStoryModeModel`远端模型白名单后续增补了`poolside-laguna-s-2.1`：FreeLLMAPI官方目录将该别名路由到Poolside/OpenRouter远端而不是本机推理；其当前接口支持工具调用但未声明`response_format`，Host应按已实现的强制无副作用tool-call协议发送单次决策。下一轮会在自然新战役里直接验证协议和目标链，不另做provider smoke；若OpenRouter上游失败则记录真实响应，不转本地模型。
+
+`free-router`也作为明确的OpenRouter远端免费池路由加入白名单；`TestResults/20261022-232153`在真实新战役Host中调用后仍收HTTP429/Retry-After 85秒，prompt/completion tokens=0、决定0、动作0。因此OpenRouter目前也没有可用的实测服务；本测试不把路由目录ready当作供应商恢复。
 
 Fresh EYC 的真实 Host 切片`TestResults/20261022-164200`显示原版Tutorial skip后首个Campaign MapState的地点菜单是`training_field_menu`，原生状态同时有`encounterActive=true`和`encounteredPartyId=tutorial_training_field`，且`currentSettlementId`相同、存在可用`training_field_leave`。真实模型两次选择成功：先将完整目标分类为`supported-establish-your-clan`，再选择未完成的同伴目标；随后的Native同伴子流程误把训练场地点菜单当成劫匪/敌军遭遇并在第一个动作前中止（`companion-campaign-interruption`），Native动作0，源新档无存档写入。后续真实运行`TestResults/20261022-173044`选声望时同样呈现需处理的训练场菜单；第三次输出了尝试`menuSelect`但`MenuId`字段写成字面值`MenuId`的错误参数。源码发现BattleSimulation位置菜单分支仅给出参数名、未给当前Native可选ID枚举。现已增加共享`AgentHostCampaignStateFacts`把Native地点菜单同真实Party/Encounter分开，并在Companion/Recruitment/GoldSale/BattleSimulation子流程把可见原版Leave选项作为受限`menuSelect`；BattleSimulation的参数schema同时枚举当前精确`MenuId`和enabled Leave OptionId，真实敌方遭遇仍fail-closed。该修正已进入Package自检前的源码，窄包验证仍待本轮；三次实机均只产出真实模型规划/动作提案，未执行Native目标动作、无EYC进度、无存档或游戏崩溃；第一份诊断视频/截图留存，MP4均已按Harness索引删除。
 

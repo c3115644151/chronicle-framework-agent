@@ -794,6 +794,8 @@ FreeLLMAPI模型路由现况（2026-10-21/22）：原版FreeLLMAPI的单请求`g
 
 后续服务商轮换与诊断修正：`TestResults/20261022-220746`显示Google `gemini-2.5-flash`虽在本机目录标`ready`，实际上游返回HTTP404 `model_not_found`；`TestResults/20261022-221321`和`222136`再次对NVIDIA路由得到429/Retry-After=85秒，均0模型tokens/0Native动作，`212742`的Poolside/OpenRouter也为429。`AgentHostProgress.jsonl`现在有无自由文本的`objective-subflow-result`条目，Lifecycle收据不再尝试把复杂`objectiveRuns`数组强制序列化，从而避免诊断器自身出错；`AgentHostPackage`合同测试通过。当前上游不可用/模型目录过时，未宣称任务推进。下次优先选择一个真实能回答的远端路由，在真实Game/Host任务中验证新收据并修正partySize child failure；不调用本地模型或无法审计的`auto`。
 
+补充一次显式`free-router`远端路线测试`TestResults/20261022-232153`：FreeLLMAPI返回HTTP429/Retry-After=85秒，prompt/completion tokens=0，模型决定/Native动作均0。至此从一次现有NVIDIA真实成功（完成分类和PartySize选择）到随后的NVIDIA、Poolside/OpenRouter、Free Router限流与Google模型名失效，证据呈现为供应商/目录状态，而非可据此断言的模型规划质量。当前无可用真实远端响应，保持目标门禁未完成；等待FreeLLMAPI既有远端路由恢复或新增一条已由服务端确认的远端路由，不使用本机推理。
+
 源码对比还确认真实模型选中`partySize`后，“objective-subflow-failed”缺少具体码的直接原因是招募子流程`BuildResult`接受`failure`与`failureCode`参数却没有写入结果JSON；这解释的是**诊断信息为何丢失**，并不等于已找到导致子流程停止的原始原因。现已补写字段，并用假Native非MapState场景验证必须返回`recruitment-map-unavailable`、不调用模型且不产生Native动作；`TestResults/20261022-225138` Docs、`225303` Build与`225328` AgentHostPackage合同测试均通过。真实子流程终止码需在上游恢复后，通过新加的安全Host进度事件再实测。
 
 FreeLLMAPI官方目录将NVIDIA Llama 3.2 11B Vision和Poolside Laguna S 2.1分别列为NVIDIA与OpenRouter远端服务，可复核来源：[NVIDIA模型目录](https://freellmapi.co/free-nvidia-api) · [Poolside Laguna S 2.1](https://freellmapi.co/uk/model/poolside-laguna-s-2-1)。
