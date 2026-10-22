@@ -172,6 +172,10 @@ $creationCompleted = $false
 $initialSnapshotCaptured = $false
 $storyModeTutorialSkipSelected = $false
 $storyModeTutorialSkipConfirmed = $false
+$storyModeMapReadyObserved = $false
+$storyModeMapSettledObserved = $false
+$storyModeMapMenuId = $null
+$storyModeMapSettlementId = $null
 $storyModeEycReadyObserved = $false
 $storyModeRenderSettledObserved = $false
 $storyModeAgentHostStarted = $false
@@ -191,9 +195,14 @@ $storyModeNativeLeavePostActionSnapshot = $null
 $storyModeAgentHostTerminalState = $null
 $storyModeAgentProgressLineCount = 0
 $storyModeAgentProgressEntries = [System.Collections.Generic.List[object]]::new()
+$storyModeAgentNativeActionsExecuted = 0
+$storyModeAgentDecisionCount = 0
+$storyModeAgentFailureCode = $null
+$storyModeAgentHostReceiptPath = if ([string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) { $null } else { Join-Path $env:CHRONICLE_HARNESS_TEMP 'AgentHostLifecycleHostReceipt.json' }
 $storyModeNativeFrameNames = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
 $storyModeNativeFrameHashes = [ordered]@{}
 $snapshotArtifactPath = if ([string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) { $null } else { Join-Path $env:CHRONICLE_HARNESS_TEMP 'FreshCampaign.initial-state.json' }
+$storyModeFirstMapSnapshotPath = if ([string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) { $null } else { Join-Path $env:CHRONICLE_HARNESS_TEMP 'FreshStoryMode.post-skip-map-state.json' }
 $renown = $null
 $campaignInstanceId = $null
 $mapState = $null
@@ -475,6 +484,25 @@ try {
                 $storyModeTutorialSkipConfirmed = $true
                 Write-StoryModeCaptureEvent 'tutorial-skip-confirmed' 'dialogueSelect' 'completed' 'MissionState' 'training_field'
             }
+            if ($StoryModeEycSetup -and $line -match 'fresh-storymode-post-skip-map-ready\|gameState=MapState\|menuId=([^|]*)\|settlement=([^|]*)\|eycActive=(True|False)$') {
+                $storyModeMapReadyObserved = $true
+                $storyModeMapMenuId = if ($Matches[1] -eq 'none') { $null } else { [string]$Matches[1] }
+                $storyModeMapSettlementId = if ($Matches[2] -eq 'none') { $null } else { [string]$Matches[2] }
+                $mapState = 'MapState'
+                Write-StoryModeCaptureEvent 'campaign-map-after-tutorial-skip' 'mapStateObserved' 'completed' 'MapState' ([string]$Matches[1])
+            }
+            if ($StoryModeEycSetup -and $line -match 'fresh-storymode-post-skip-map-snapshot\|json=(\{.*\})$') {
+                try {
+                    if (-not $storyModeFirstMapSnapshotPath) { throw 'Harness temp path is unavailable for the post-skip MapState observation.' }
+                    [IO.File]::WriteAllBytes($storyModeFirstMapSnapshotPath, [Text.Encoding]::UTF8.GetBytes($Matches[1]))
+                }
+                catch { $harnessFailureObserved = $true }
+            }
+            if ($StoryModeEycSetup -and $line -match 'fresh-storymode-post-skip-map-settled\|gameState=MapState\|menuId=([^|]*)\|settlement=([^|]*)\|eycActive=(True|False)$') {
+                $storyModeMapSettledObserved = $true
+                $mapState = 'MapState'
+                Write-StoryModeCaptureEvent 'campaign-map-after-tutorial-skip-settled' 'captureFrame' 'completed' 'MapState' ([string]$Matches[1])
+            }
             if ($StoryModeEycSetup -and $line -match 'fresh-storymode-e2e-ready\|quest=rebuild_player_clan_storymode_quest\|mapState=MapState\|renown=([0-9.]+)\|campaignDay=([0-9.]+)$') {
                 $storyModeEycReadyObserved = $true
                 if (-not $storyModeTrainingFieldExitPath) { $storyModeTrainingFieldExitPath = 'brother-dialogue-path-no-tab-fallback' }
@@ -514,6 +542,9 @@ try {
                     if ($frameName -eq 'eyc-map-render-settled') {
                         $storyModeRenderSettledObserved = $true
                         Write-StoryModeCaptureEvent 'map-render-settled' 'captureFrame' 'completed' 'MapState' ''
+                    }
+                    if ($frameName -eq 'campaign-map-after-tutorial-skip-settled') {
+                        $storyModeMapSettledObserved = $true
                     }
                 }
                 else { $harnessFailureObserved = $true }
@@ -587,8 +618,9 @@ try {
             else { $crashWindowCaptureError = 'Harness temp directory is unavailable for crash capture.' }
         }
 
+        $storyModeTakeoverMapReady = if ($StoryModeEycLiveModelEvaluation) { $storyModeMapReadyObserved -and $storyModeMapSettledObserved } else { $storyModeEycReadyObserved -and $storyModeRenderSettledObserved }
         $creationReady = if ($StoryModeEycSetup) {
-            $creationCompleted -and $initialSnapshotCaptured -and $storyModeTutorialSkipSelected -and $storyModeTutorialSkipConfirmed -and $storyModeEycReadyObserved -and $storyModeRenderSettledObserved -and (-not $StoryModeNativeMenuLeaveEvaluation -or $storyModeNativeLeaveVerified)
+            $creationCompleted -and $initialSnapshotCaptured -and $storyModeTutorialSkipSelected -and $storyModeTutorialSkipConfirmed -and $storyModeTakeoverMapReady -and (-not $StoryModeNativeMenuLeaveEvaluation -or $storyModeNativeLeaveVerified)
         } else {
             $creationCompleted -and $initialSnapshotCaptured -and $issueConversationProbeStatus -ne 'not-observed'
         }
@@ -842,6 +874,15 @@ $gameProcessesClean = $remainingBannerlordProcesses.Count -eq 0
 $saveDigestForComparison = if ($RetainDisposableSave -and $progressionSaveName) { Get-SaveManifestDigest -ExcludeSaveName $progressionSaveName } else { $saveDigestAfter }
 $saveStateUnchanged = $saveDigestBefore -eq $saveDigestForComparison
 $retainedDisposableSave = [bool]($RetainDisposableSave -and $disposableSaveOwned -and $progressionSaveName -and (Test-Path -LiteralPath $progressionSavePath))
+if ($StoryModeEycLiveModelEvaluation -and $storyModeAgentHostReceiptPath -and (Test-Path -LiteralPath $storyModeAgentHostReceiptPath -PathType Leaf)) {
+    try {
+        $storyModeHostReceipt = Get-Content -LiteralPath $storyModeAgentHostReceiptPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $storyModeAgentNativeActionsExecuted = [Math]::Max(0, [int]$storyModeHostReceipt.actionsExecuted)
+        $storyModeAgentDecisionCount = [Math]::Max(0, [int]$storyModeHostReceipt.decisionCount)
+        $storyModeAgentFailureCode = [string]$storyModeHostReceipt.failureCode
+    }
+    catch { $harnessFailureObserved = $true }
+}
 $issueProbeExpected = -not $StoryModeEycSetup -and -not $ValidateRecruitmentProgression -and [bool]($visibleIssueTypes -match ':[^,]+')
 $issueConversationProbeApplicable = $issueProbeExpected
 $issueConversationProbePassed = if ($issueProbeExpected) {
@@ -871,7 +912,8 @@ if ($StoryModeEycSetup) {
     $acceptanceChecks.storyModeOfficialTutorialSkipSelected = $storyModeTutorialSkipSelected
     $acceptanceChecks.storyModeOfficialTutorialSkipConfirmed = $storyModeTutorialSkipConfirmed
     $acceptanceChecks.originalEstablishYourClanQuestNaturallyActive = $storyModeEycReadyObserved
-    $requiredNativeFrames = @('brother-conversation-start', 'tutorial-skip-option-visible', 'tutorial-skip-confirmation-visible', 'eyc-map-render-settled')
+    $requiredNativeFrames = @('brother-conversation-start', 'tutorial-skip-option-visible', 'tutorial-skip-confirmation-visible', 'campaign-map-after-tutorial-skip-settled')
+    if (-not $StoryModeEycLiveModelEvaluation -or $storyModeEycReadyObserved) { $requiredNativeFrames += 'eyc-map-render-settled' }
     if ($StoryModeNativeMenuLeaveEvaluation) { $requiredNativeFrames += 'training-field-menu-exited' }
     $allRequiredNativeFramesPresent = @($requiredNativeFrames | Where-Object { -not $storyModeNativeFrameNames.Contains($_) }).Count -eq 0
     $requiredFrameHashes = @($requiredNativeFrames | ForEach-Object { [string]$storyModeNativeFrameHashes[$_] } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
@@ -893,6 +935,7 @@ if ($StoryModeEycSetup) {
         $acceptanceChecks.storyModeLiveHostReady = $storyModeAgentHostReady
         $acceptanceChecks.storyModeLiveHostTerminated = $storyModeAgentHostTerminalState -in @('Stopped','Completed','Failed')
         $acceptanceChecks.storyModeLiveModelProducedDecision = $storyModeAgentProgressEntries.Count -gt 0
+        $acceptanceChecks.storyModeLiveNativeActionExecuted = $storyModeAgentNativeActionsExecuted -gt 0
         $acceptanceChecks.storyModeLiveProviderPreflightReady = [bool]($freeLlmApiProfile -and $freeLlmApiProfile.ApiKeyPresent -and $freeLlmApiProfile.ModelExecutionStatus -in @('ready','router'))
     }
 }
@@ -936,6 +979,11 @@ $result = [ordered]@{
     StoryModeOfficialTutorialSkipSelected = if ($StoryModeEycSetup) { $storyModeTutorialSkipSelected } else { $null }
     StoryModeOfficialTutorialSkipConfirmed = if ($StoryModeEycSetup) { $storyModeTutorialSkipConfirmed } else { $null }
     OriginalEstablishYourClanQuestNaturallyActive = if ($StoryModeEycSetup) { $storyModeEycReadyObserved } else { $null }
+    StoryModeFirstMapStateObserved = if ($StoryModeEycSetup) { $storyModeMapReadyObserved } else { $null }
+    StoryModeFirstMapMenuId = if ($StoryModeEycSetup) { $storyModeMapMenuId } else { $null }
+    StoryModeFirstMapSettlementId = if ($StoryModeEycSetup) { $storyModeMapSettlementId } else { $null }
+    StoryModeFirstMapSnapshotPath = if ($StoryModeEycSetup -and (Test-Path -LiteralPath $storyModeFirstMapSnapshotPath -PathType Leaf)) { $storyModeFirstMapSnapshotPath } else { $null }
+    StoryModeFirstMapStateSettled = if ($StoryModeEycSetup) { $storyModeMapSettledObserved } else { $null }
     StoryModeTrainingFieldExitPath = if ($StoryModeEycSetup) { $storyModeTrainingFieldExitPath } else { $null }
     StoryModeNativeFrames = if ($StoryModeEycSetup) { @($storyModeNativeFrameNames) } else { $null }
     StoryModeNativeFrameSha256 = if ($StoryModeEycSetup) { $storyModeNativeFrameHashes } else { $null }
@@ -960,6 +1008,9 @@ $result = [ordered]@{
     StoryModeAgentHostReady = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentHostReady } else { $null }
     StoryModeAgentHostTerminalState = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentHostTerminalState } else { $null }
     StoryModeAgentHostTerminalDetail = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentHostTerminalDetail } else { $null }
+    StoryModeAgentDecisionCount = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentDecisionCount } else { $null }
+    StoryModeAgentNativeActionsExecuted = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentNativeActionsExecuted } else { $null }
+    StoryModeAgentFailureCode = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentFailureCode } else { $null }
     FreeLLMAPIProfile = if ($StoryModeEycLiveModelEvaluation) { $freeLlmApiProfile } else { $null }
     StoryModeAgentProgressPath = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentProgressPath } else { $null }
     StoryModeAgentDecisions = if ($StoryModeEycLiveModelEvaluation) { @($storyModeAgentProgressEntries) } else { $null }

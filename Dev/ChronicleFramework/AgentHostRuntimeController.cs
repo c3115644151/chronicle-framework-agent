@@ -171,7 +171,7 @@ internal static class ChronicleAgentRuntimeController
 
         if (!_stopRequested && _state == RuntimeState.Running && IsLifecycleHarnessMode() &&
             int.TryParse(Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS"), out var autoStopMilliseconds) &&
-            autoStopMilliseconds >= 250 && autoStopMilliseconds <= 120000 &&
+            autoStopMilliseconds >= 250 && autoStopMilliseconds <= 600000 &&
             DateTime.UtcNow - _hostReadyUtc >= TimeSpan.FromMilliseconds(autoStopMilliseconds))
         {
             var stopButton = ChronicleAgentProviderSettings.Instance?.StopAgent;

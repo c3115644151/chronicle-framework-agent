@@ -44,6 +44,8 @@ internal static class FreshCampaignHarness
     private static DateTime _trainingFieldFallbackLeaveExpiresUtc;
     private static bool _trainingFieldFallbackLeaveRequested;
     private static bool _trainingFieldMissionExitLogged;
+    private static bool _storyModeMapReadyLogged;
+    private static bool _storyModeMapSettledFrameLogged;
     private static bool _storyModeReadyLogged;
     private static bool _storyModeSettledFrameLogged;
     private static bool _storyModeAgentAutostartArmed;
@@ -51,6 +53,7 @@ internal static class FreshCampaignHarness
     private static bool _trainingFieldNativeMenuLeaveVerified;
     private static string _trainingFieldNativeMenuLeaveFailure = string.Empty;
     private static bool _storyModeFailureLogged;
+    private static DateTime _storyModeMapReadyObservedUtc;
     private static DateTime _storyModeReadyObservedUtc;
     private static DateTime _trainingFieldNativeMenuLeaveStartedUtc;
     private static double _trainingFieldNativeMenuLeaveCampaignDayBefore;
@@ -453,9 +456,33 @@ internal static class FreshCampaignHarness
             return;
         var activeQuest = Campaign.Current.QuestManager?.Quests.FirstOrDefault(quest =>
             string.Equals(quest.StringId, "rebuild_player_clan_storymode_quest", StringComparison.Ordinal) && quest.IsOngoing);
-        if (activeQuest == null) return;
 
-        if (!_storyModeReadyLogged)
+        if (!_storyModeMapReadyLogged)
+        {
+            _storyModeMapReadyLogged = true;
+            _storyModeMapReadyObservedUtc = DateTime.UtcNow;
+            var mapMenuId = Campaign.Current.CurrentMenuContext?.GameMenu?.StringId ?? string.Empty;
+            var settlementId = Settlement.CurrentSettlement?.StringId ?? string.Empty;
+            CaptureStoryModeFrame("campaign-map-after-tutorial-skip", "MapState", mapMenuId);
+            ChronicleDiagnostics.Write("fresh-storymode-post-skip-map-ready|gameState=MapState|menuId=" +
+                (string.IsNullOrEmpty(mapMenuId) ? "none" : mapMenuId) + "|settlement=" +
+                (string.IsNullOrEmpty(settlementId) ? "none" : settlementId) + "|eycActive=" + (activeQuest != null));
+            ChronicleDiagnostics.Write("fresh-storymode-post-skip-map-snapshot|json=" + ChronicleAgentObserver.BuildSnapshotJson());
+            return;
+        }
+
+        if (!_storyModeMapSettledFrameLogged && DateTime.UtcNow - _storyModeMapReadyObservedUtc >= TimeSpan.FromSeconds(8))
+        {
+            _storyModeMapSettledFrameLogged = true;
+            var mapMenuId = Campaign.Current.CurrentMenuContext?.GameMenu?.StringId ?? string.Empty;
+            var settlementId = Settlement.CurrentSettlement?.StringId ?? string.Empty;
+            CaptureStoryModeFrame("campaign-map-after-tutorial-skip-settled", "MapState", mapMenuId);
+            ChronicleDiagnostics.Write("fresh-storymode-post-skip-map-settled|gameState=MapState|menuId=" +
+                (string.IsNullOrEmpty(mapMenuId) ? "none" : mapMenuId) + "|settlement=" +
+                (string.IsNullOrEmpty(settlementId) ? "none" : settlementId) + "|eycActive=" + (activeQuest != null));
+        }
+
+        if (activeQuest != null && !_storyModeReadyLogged)
         {
             _storyModeReadyLogged = true;
             _storyModeReadyObservedUtc = DateTime.UtcNow;
@@ -471,14 +498,14 @@ internal static class FreshCampaignHarness
         // The native campaign state can advance while the startup/video layer is still presenting.
         // Hold the disposable fixture in the same MapState briefly so the final visual capture can
         // prove that the rendered UI caught up instead of accepting another copy of the splash frame.
-        if (!_storyModeSettledFrameLogged && DateTime.UtcNow - _storyModeReadyObservedUtc >= TimeSpan.FromSeconds(8))
+        if (activeQuest != null && !_storyModeSettledFrameLogged && DateTime.UtcNow - _storyModeReadyObservedUtc >= TimeSpan.FromSeconds(8))
         {
             _storyModeSettledFrameLogged = true;
             CaptureStoryModeFrame("eyc-map-render-settled", "MapState", string.Empty);
             ChronicleDiagnostics.Write("fresh-storymode-render-settled|gameState=MapState|campaignClock=" + Campaign.Current.TimeControlMode);
         }
 
-        if (string.Equals(Environment.GetEnvironmentVariable("CHRONICLE_FRESH_CAMPAIGN_NATIVE_MENU_LEAVE_TEST"), "1", StringComparison.Ordinal))
+        if (activeQuest != null && string.Equals(Environment.GetEnvironmentVariable("CHRONICLE_FRESH_CAMPAIGN_NATIVE_MENU_LEAVE_TEST"), "1", StringComparison.Ordinal))
         {
             if (!_trainingFieldNativeMenuLeaveAttempted)
             {
@@ -548,7 +575,7 @@ internal static class FreshCampaignHarness
         }
 
         if (!string.Equals(Environment.GetEnvironmentVariable("CHRONICLE_FRESH_CAMPAIGN_START_AGENT"), "1", StringComparison.Ordinal)) return;
-        if (!_storyModeSettledFrameLogged || _trainingFieldNativeMenuLeaveAttempted) return;
+        if (!_storyModeMapSettledFrameLogged || _trainingFieldNativeMenuLeaveAttempted) return;
         if (_storyModeAgentAutostartArmed) return;
         _storyModeAgentAutostartArmed = true;
         Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "agent-host-lifecycle-test");

@@ -806,6 +806,26 @@ FreeLLMAPI官方目录将NVIDIA Llama 3.2 11B Vision和Poolside Laguna S 2.1分�
 
 `TestResults/20261023-002830`在该120秒预算下复测：自然StoryMode skip/MapState/EYC激活、Host就绪、5个开局截图与1852/1852录像帧、Build/AgentHostPackage均通过；Bannerlord干净退出、无崩溃、未写入存档。NVIDIA真实请求先收到HTTP429/Retry-After=85，Host按FreeLLMAPI明确头部等待85006ms并实际发起一次重试；第二次响应的Retry-After=585无法装入剩余期限，按设计安全失败。总结果仍为0模型token/0决策/0 Native动作；已验证的是Harness有界重试行为，不是模型或EYC任务进度，持续失败根因仍是该免费上游当前限流/耗尽。
 
+`TestResults/20261023-003908`的Poolside自然EYC调用也在首个请求遇429；Harness按Retry-After实际等待85011ms并重试一次，第二次仍收到429，余下Retry-After无法装入120秒期限。0模型Token/0决策/0动作，Game/Host干净退出、无崩溃/存档写入、录像1847/1847帧。此次仍是OpenRouter上游限流，不是动作协议失败。
+
+`TestResults/20261023-004523`的Free Router自然StoryMode实测首轮终于得到有效模型响应：真实模型经`kilo/openrouter/free`返回`supported-establish-your-clan`分类，1602输入/277输出tokens。HostReady后该请求用了约100秒，120秒测试自动停止窗仅留下约20秒；在后续目标选择前触发`host-stop-requested`，所以0 Native动作/0 EYC进度。Skip、自然激活、开局视觉、Build/Package均通过，1847帧覆盖，游戏无崩溃/存档写入且进程清理。该失败是测试窗口过短，不是模型分类/Provider失败。为允许真实模型继续从分类到目标规划与首条Native动作，FreshStoryMode测试窗口现扩大为Host Ready后360秒、整轮外限600秒，单次请求仍120秒；这只扩大Harness有界诊断范围，不改变玩家MCM启动后的正常Agent寿命，也不等于完整Quest门禁通过。
+
+`TestResults/20261023-005450`在扩窗后再次测free-router，模型首请求改为`provider-tool-call-missing`，没有决策/Token/Native动作；之前该路由能成功给一次分类，但再次调用未返回必需工具调用，说明此动态free-router的工具协议一致性不足。`TestResults/20261023-010053`换到支持JSON Schema的通用`gpt-oss-20b`后，FreeLLMAPI经`ovh/gpt-oss-20b`真实完成`supported-establish-your-clan`分类（921/149 tokens）；随后第二个请求遇HTTP429/Retry-After=85，但在约50秒等待/调用后已不够120秒重试预算，0 Native动作。新证据说明将Host窗口扩到360秒仍不够；FreshStoryMode测试专用默认单请求期限现进一步调整为180秒，保留360秒总观察窗和600秒外限，让明确85秒退避有机会重试。还需通过下一次自然EYC实测验证长窗下是否能完成目标选择及原版动作，不把分类成功计为游戏进展。
+
+`TestResults/20261023-010655`用全新StoryMode与`gpt-oss-20b`检验扩大窗口：原版教程Skip及确认被选择，RGL最后记录`I called EndMission`；持续引擎录像约4分钟处仍显示训练场项目列表和原版“按住Tab离开训练场”提示。此轮未出现`fresh-storymode-e2e-ready`，也没有启动Host；同时Harness缺少Skip后第一张MapState快照，因此不能仅以这个收据判定原版EYC未激活或训练场出口的确切Native状态。**已证实的Harness问题**是Host启动门禁硬性等待EYC活动Quest，违反Issue #130“从首个稳定Campaign MapState接管”的边界；下一步改为记录首个Skip后MapState并在那里启动真实Host。若Native此时尚无EYC Quest，仅当当前Native状态明确是Tutorial已结束的`tutorial_training_field`/`training_field_menu`且`training_field_leave`确实启用时，允许模型从当前菜单选项中作一次原版`menuSelect`，随后重新读状态；不满足这些精确条件就安全停止，不用Harness预设选项或时钟宏。该区分经新自然实测复核后再收口。
+
+`TestResults/20261023-015624`验证首MapState接管后，Native自然已激活EYC；真实`gpt-oss-20b→ovh/gpt-oss-20b`完成目标分类（927/138 tokens）和目标选择（`gold`，1088/204 tokens），之后GoldSale在首个Native动作前以`gold-sale-free-map-required`停止。源码差异定位为GoldSale入口的`IsFreeCampaignMap`仍把原版训练场地点菜单的`encounterActive=true`直接当敌对遭遇拒绝；共享`AgentHostCampaignStateFacts`已经能以当前菜单/定居点身份区分真实地点菜单和敌队。现将这个GoldSale前置检查改用共享事实分类，并在AgentHostPackage增加“training_field_menu 是合法Campaign Map入口而真实敌对encounter仍拒绝”的回归。此次没有执行Native动作或推进Journal；下一次同一自然起点应验证模型选择当前启用的`training_field_leave`后重新观察并继续Gold目标，而不是把模型目标选择误报成金币进展。Skip后MapState/Quest激活状态由新的视频关键帧和Native快照同时记录；在Quest未激活的变体中，第一地图模型接管与训练场Leave bootstrap也有单独的严格状态/选项门禁。
+
+后续自然实测`TestResults/20261023-014459`验证新的第一MapState捕获：skip后首个MapState `menuId=training_field_menu`、settled截图通过，Native EYC Quest此时已经active，故未实际调用bootstrap菜单动作；真实模型完成EYC scope分类（927/140 tokens，`ovh/gpt-oss-20b` JSON Schema），第二个目标规划请求遇OVH HTTP429。Host先按85秒重试一次，随后又收到Retry-After=75；这次约50秒的上游调用+85秒等待耗尽180秒单请求预算，未作Native动作。无崩溃/存档写入、录像完整覆盖、进程清理。为让下次请求有足够预算验证一个约50–100秒模型响应后再等85秒，本地FreshStoryMode单请求默认再从180增至300秒，仍受Host Ready后360秒和整轮600秒双上限约束。下次需要获得模型目标选择与训练场菜单的原版`menuSelect`证据；该回合当前尚未证明菜单bootstrap在自然运行中实际触发。
+
+`TestResults/20261023-015624`在新的首MapState接管路径里，Host收到Native training-field menu和活动EYC；真实模型完成分类（927/138）与Gold目标选择（1088/204）。Gold子流程没有再以`gold-sale-free-map-required`提前中止，说明它已进入后续流程；但第三次远端请求没有在Host的360秒自动停止前返回，收据为`host-stop-requested`、累计0个Native动作。此样本证明初始菜单分类和目标调度，不证明离开训练场、售卖物品或Journal进度。按照这次实际约239秒的两次有效决策加一次未完成的下一请求，FreshStoryMode Harness专用Host窗口从360扩为600秒，单请求300秒、整个启动/清理外限900秒；这仍只是有限实测窗口，产品自身不启用这个自动停止值。
+
+`TestResults/20261023-025858`用全新StoryMode和Mistral Nemo再次验证首MapState接管：真实模型完成EYC目标分类、选择Renown、从当前训练场菜单调用原版`training_field_leave`（1个Native动作）；附近无敌队，BattleSimulation依当前观察安全返回`no-safe-action`，父循环再选择Gold。Gold子流程在0动作下以`gold-sale-free-map-required`失败，FreshStoryMode总收据为4次决策、5279输入/151输出token，仍未推进任何Journal目标。引擎关键帧`TestResults/20261023-025858/Temp/TimelineFrames/036-menuSelect-MapState---after.jpg`清楚显示离开训练场后的原版“通知”弹窗，只有一个“好”按钮，地图输入被遮挡；旧版Progress trace没保存当前Inquiry类型/可见按钮，因此不能仅凭截图断言这个弹窗就是受支持的`InquiryData/SingleQueryPopUpVM`，这是本轮新增能力必须通过Native状态确认的未决点。游戏/存档未崩溃或写入，Harness进程按收据清理。
+
+针对该失配，AgentHost现在在EYC子流程以0个世界动作失败且fresh Native状态明确显示Inquiry仍打开时，读取当前可支持的Campaign Map `YesNoInquiry`，把真实标题/文案/可见且启用的按钮交给模型；一回合只允许模型选择当前可见/启用的 affirmative/negative，Host隐藏并绑定Native一次性token，调用已存在的原版`respondInquiry` handler后重新观察。若弹窗未关闭、转成另一种模态、当前Map/活动EYC状态不成立或模型选择无效，则安全失败；只有确认已回到无模态、无遭遇且EYC仍active的MapState后，父循环才重新规划，绝不重放此前任何已执行动作。受限进度轨迹现另存当前modal类型/标题/截断文案/按钮可见性与时钟暂停标志，排除一次性token；诊断自检覆盖单按钮通知、隐藏token、隐藏选项拒绝、未知Inquiry类型关闭失败及0动作中断后重新规划。
+
+`TestResults/20261023-032442`AgentHostPackage Build/ProviderContract SelfTest与打包通过（195个Host契约场景；包含假的父循环集成场景，覆盖模型选中当前单按钮、Native回调关闭、fresh Map/EYC核验后再规划，并证明失败子流程0动作时才可重试）。这只是Host层合约证据，不是FreeLLMAPI真实模型处理该训练场通知的游戏内运行证据；尚未从实际弹窗读到`context.inquiry`并成功关闭，也没有完成Gold或其它Journal目标。下一个有效运行必须保留同类关键帧、模型/Native trace，确认真实弹窗类型和暂停标志；如果它属于不支持的通知VM，应基于1.4.8真实玩家入口另做窄原生适配，不能把任何通知都当“Yes”按掉。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager

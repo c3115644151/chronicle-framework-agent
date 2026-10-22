@@ -135,7 +135,9 @@ internal static class AgentHostHarnessProgressTrace
                 ["actionsExecuted"] = Copy(result, "actionsExecuted"),
                 ["decisions"] = Copy(result, "decisions"),
                 ["promptTokens"] = Copy(result, "promptTokens"),
-                ["completionTokens"] = Copy(result, "completionTokens")
+                ["completionTokens"] = Copy(result, "completionTokens"),
+                ["nativeStateBefore"] = BuildNativeStateSummary(result["initialNativeState"] as JsonObject),
+                ["nativeStateAfter"] = BuildNativeStateSummary(result["finalNativeState"] as JsonObject ?? result["finalState"] as JsonObject)
             };
             AppendLine(tracePath, Encoding.UTF8.GetBytes(payload.ToJsonString() + Environment.NewLine));
         }
@@ -156,8 +158,110 @@ internal static class AgentHostHarnessProgressTrace
         }
     }
 
+    internal static JsonObject? BuildNativeStateSummary(JsonObject? native)
+    {
+        var state = native?["state"] as JsonObject;
+        if (state is null) return null;
+        var context = state["context"] as JsonObject;
+        var location = state["location"] as JsonObject;
+        var economy = state["economy"] as JsonObject;
+        var party = state["party"] as JsonObject;
+        var captivity = context?["captivity"] as JsonObject;
+        var storyMode = state["storyModeEstablishClanStatus"] as JsonObject;
+        var menuOptions = new JsonArray();
+        if (state["availableMenuOptions"] is JsonArray options)
+        {
+            foreach (var option in options.OfType<JsonObject>())
+                menuOptions.Add(new JsonObject
+                {
+                    ["id"] = Copy(option, "id"),
+                    ["available"] = Copy(option, "available"),
+                    ["enabled"] = Copy(option, "enabled"),
+                    ["isLeave"] = Copy(option, "isLeave")
+                });
+        }
+        var questIds = new JsonArray();
+        if (state["quests"] is JsonArray quests)
+        {
+            foreach (var quest in quests.OfType<JsonObject>())
+                questIds.Add(Copy(quest, "id"));
+        }
+        return new JsonObject
+        {
+            ["campaignDay"] = Copy(native, "campaignDay"),
+            ["gameState"] = Copy(context, "gameState"),
+            ["menuId"] = Copy(context, "menuId"),
+            ["currentSettlementId"] = Copy(location, "currentSettlementId"),
+            ["targetSettlementId"] = Copy(location, "targetSettlementId"),
+            ["targetPartyId"] = Copy(location, "targetPartyId"),
+            ["encounteredPartyId"] = Copy(context, "encounteredPartyId"),
+            ["encounterActive"] = Copy(context, "encounterActive"),
+            ["escapeMenuOpen"] = Copy(context, "escapeMenuOpen"),
+            ["inquiryOpen"] = Copy(context, "inquiryOpen"),
+            ["inquiry"] = BuildInquirySummary(context?["inquiry"] as JsonObject),
+            ["partyScreenOpen"] = state["partyScreen"] is JsonObject,
+            ["inventoryScreenOpen"] = state["inventoryScreen"] is JsonObject,
+            ["battleSimulationActive"] = context?["battleSimulation"] is JsonObject,
+            ["isCaptive"] = Copy(captivity, "isCaptive"),
+            ["storyModeStatus"] = Copy(storyMode, "status"),
+            ["tutorialCompleted"] = Copy(storyMode, "tutorialCompleted"),
+            ["gold"] = Copy(economy, "gold"),
+            ["renown"] = Copy(economy, "renown"),
+            ["partyMembers"] = Copy(party, "members"),
+            ["partySizeLimit"] = Copy(party, "sizeLimit"),
+            ["questIds"] = questIds,
+            ["availableMenuOptions"] = menuOptions
+        };
+    }
+
+    private static JsonObject? BuildInquirySummary(JsonObject? inquiry)
+    {
+        if (inquiry is null) return null;
+        return new JsonObject
+        {
+            ["supported"] = Copy(inquiry, "supported"),
+            ["kind"] = Copy(inquiry, "kind"),
+            ["title"] = Copy(inquiry, "title"),
+            ["text"] = Truncate(ReadString(inquiry, "text"), 800),
+            ["affirmative"] = BuildInquiryOption(inquiry["affirmative"] as JsonObject),
+            ["negative"] = BuildInquiryOption(inquiry["negative"] as JsonObject),
+            ["pauseGameActiveState"] = Copy(inquiry, "pauseGameActiveState")
+        };
+    }
+
+    private static JsonObject? BuildInquiryOption(JsonObject? option) => option is null ? null : new JsonObject
+    {
+        ["visible"] = Copy(option, "visible"),
+        ["enabled"] = Copy(option, "enabled"),
+        ["text"] = Copy(option, "text")
+    };
+
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
+        var modalSummary = BuildNativeStateSummary(new JsonObject
+        {
+            ["state"] = new JsonObject
+            {
+                ["context"] = new JsonObject
+                {
+                    ["gameState"] = "MapState", ["escapeMenuOpen"] = false, ["inquiryOpen"] = true,
+                    ["inquiry"] = new JsonObject
+                    {
+                        ["supported"] = true, ["kind"] = "YesNoInquiry", ["token"] = "never-copy-this-token",
+                        ["title"] = "通知", ["text"] = "Native alert body",
+                        ["affirmative"] = new JsonObject { ["visible"] = true, ["enabled"] = true, ["text"] = "好" },
+                        ["negative"] = new JsonObject { ["visible"] = false, ["enabled"] = false, ["text"] = "" },
+                        ["pauseGameActiveState"] = true
+                    }
+                }
+            }
+        });
+        var summarizedInquiry = modalSummary?["inquiry"] as JsonObject;
+        if (ReadBoolean(modalSummary, "inquiryOpen") != true || ReadString(summarizedInquiry, "kind") != "YesNoInquiry" ||
+            ReadString(summarizedInquiry, "text") != "Native alert body" ||
+            ReadString(summarizedInquiry?["affirmative"] as JsonObject, "text") != "好" ||
+            summarizedInquiry?.ContainsKey("token") == true || ReadBoolean(modalSummary, "partyScreenOpen") || ReadBoolean(modalSummary, "inventoryScreenOpen"))
+            throw new AgentHostException("host-progress-trace-native-modal-self-test", "The bounded progress trace must identify current modal blockers and visible button labels without leaking one-use tokens or claiming unrelated screens.");
         var previousMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
         var previousTemp = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
         var temporaryDirectory = Path.Combine(Path.GetTempPath(), "ChronicleAgentHostProgress-" + Guid.NewGuid().ToString("N"));
@@ -197,7 +301,31 @@ internal static class AgentHostHarnessProgressTrace
                 ["decisions"] = 2,
                 ["promptTokens"] = 900,
                 ["completionTokens"] = 60,
-                ["failure"] = "Free text must not be copied into this bounded diagnostics line."
+                ["failure"] = "Free text must not be copied into this bounded diagnostics line.",
+                ["initialNativeState"] = new JsonObject
+                {
+                    ["campaignDay"] = 1,
+                    ["state"] = new JsonObject
+                    {
+                        ["context"] = new JsonObject { ["gameState"] = "MapState", ["menuId"] = "training_field_menu", ["encounterActive"] = true, ["encounteredPartyId"] = "tutorial_training_field" },
+                        ["location"] = new JsonObject { ["currentSettlementId"] = "tutorial_training_field" },
+                        ["economy"] = new JsonObject { ["gold"] = 1000, ["renown"] = 20 },
+                        ["party"] = new JsonObject { ["members"] = 1, ["sizeLimit"] = 20 },
+                        ["storyModeEstablishClanStatus"] = new JsonObject { ["status"] = "active" },
+                        ["quests"] = new JsonArray(new JsonObject { ["id"] = "rebuild_player_clan_storymode_quest", ["title"] = "do not copy arbitrary title" }),
+                        ["availableMenuOptions"] = new JsonArray(new JsonObject { ["id"] = "training_field_leave", ["text"] = "do not copy localized menu text", ["available"] = true, ["enabled"] = true, ["isLeave"] = true })
+                    }
+                },
+                ["finalNativeState"] = new JsonObject
+                {
+                    ["campaignDay"] = 1,
+                    ["state"] = new JsonObject
+                    {
+                        ["context"] = new JsonObject { ["gameState"] = "MapState", ["menuId"] = null, ["encounterActive"] = false, ["encounteredPartyId"] = null },
+                        ["location"] = new JsonObject { ["currentSettlementId"] = null },
+                        ["availableMenuOptions"] = new JsonArray()
+                    }
+                }
             };
             RecordObjectiveSubflowResult("partySize", objectiveResult);
             var objectiveLine = JsonNode.Parse(File.ReadAllLines(path)[2])!.AsObject();
@@ -205,16 +333,20 @@ internal static class AgentHostHarnessProgressTrace
                 ReadString(objectiveLine, "event") != "objective-subflow-result" ||
                 ReadString(objectiveLine, "objectiveId") != "partySize" ||
                 ReadString(objectiveLine, "failureCode") != "recruitment-route-unavailable" ||
+                ReadString(objectiveLine["nativeStateBefore"] as JsonObject, "menuId") != "training_field_menu" ||
+                ReadString(objectiveLine["nativeStateAfter"] as JsonObject, "menuId") is not null ||
+                objectiveLine.ToJsonString().Contains("do not copy", StringComparison.Ordinal) ||
                 objectiveLine.ContainsKey("failure"))
-                throw new AgentHostException("host-progress-trace-objective-subflow", "Harness diagnostics must record bounded objective result codes without copying free-text failure details.");
+                throw new AgentHostException("host-progress-trace-objective-subflow", "Harness diagnostics must record bounded failure codes and safe before/after Native state summaries without copying free-text failure details.");
 
             Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "normal");
             RecordDecision(request.RootElement, new ProviderDecisionResult("completed", "selftest-model", 1, 1, "stop", decision, "selftest/route"));
             if (File.ReadAllLines(path).Length != 3)
                 throw new AgentHostException("host-progress-trace-self-test-mode-gate", "Progress tracing must be disabled outside Harness visual-capture/lifecycle modes.");
             return [
+                new { scenario = "harness-progress-trace-records-current-modal-and-visible-buttons-without-one-use-token", passed = true },
                 new { scenario = "harness-progress-trace-persists-native-decision-and-route-without-free-text-in-visual-capture-and-lifecycle-modes", passed = true },
-                new { scenario = "harness-progress-trace-records-objective-subflow-termination-codes-without-free-text", passed = true }
+                new { scenario = "harness-progress-trace-records-objective-subflow-termination-and-safe-native-state-summaries", passed = true }
             ];
         }
         finally
@@ -226,6 +358,9 @@ internal static class AgentHostHarnessProgressTrace
     }
 
     private static JsonNode? Copy(JsonObject? source, string name) => source?[name]?.DeepClone();
+
+    private static bool ReadBoolean(JsonObject? source, string name) =>
+        source?[name] is JsonValue value && value.TryGetValue<bool>(out var result) && result;
 
     private static string? ReadString(JsonElement source, string name) =>
         source.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;

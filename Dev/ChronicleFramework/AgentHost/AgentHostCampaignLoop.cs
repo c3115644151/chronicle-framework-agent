@@ -30,6 +30,7 @@ internal static class AgentHostCampaignLoop
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
         var results = new List<object>();
+        results.AddRange(AgentHostStoryModeBootstrapLoop.RunContractSelfTests());
         var initialActions = new JsonArray();
         var initialControls = BuildGoalScopeClassificationControls();
         if (initialActions.Count != 0 || initialControls.Count != 5 ||
@@ -61,6 +62,30 @@ internal static class AgentHostCampaignLoop
             !captiveControls.Any(control => control?.GetValue<string>() == "supportedEstablishClanGoldSaleGoal"))
             throw new AgentHostException("campaign-loop-self-test-establish-clan-gate-leaked", "The StoryMode planner classification must be listed only when the exact original Quest is currently observed.");
         results.Add(new { scenario = "campaign-loop-offers-storymode-planner-and-captivity-recovery-only-for-observed-prerequisites", passed = true });
+
+        var postTutorialTrainingField = new JsonObject
+        {
+            ["context"] = new JsonObject { ["gameState"] = "MapState", ["menuId"] = "training_field_menu" },
+            ["location"] = new JsonObject { ["currentSettlementId"] = "tutorial_training_field" },
+            ["storyModeEstablishClanStatus"] = new JsonObject
+            {
+                ["status"] = "unknown", ["questId"] = "rebuild_player_clan_storymode_quest", ["tutorialCompleted"] = true
+            }
+        };
+        var postTutorialControls = BuildGoalScopeClassificationControls(postTutorialTrainingField);
+        var preTutorialTrainingField = (JsonObject)postTutorialTrainingField.DeepClone();
+        preTutorialTrainingField["storyModeEstablishClanStatus"]!["status"] = "storymode-not-activated";
+        preTutorialTrainingField["storyModeEstablishClanStatus"]!["tutorialCompleted"] = false;
+        var preTutorialControls = BuildGoalScopeClassificationControls(preTutorialTrainingField);
+        var wrongMenuTrainingField = (JsonObject)postTutorialTrainingField.DeepClone();
+        wrongMenuTrainingField["context"]!["menuId"] = "town";
+        var wrongMenuControls = BuildGoalScopeClassificationControls(wrongMenuTrainingField);
+        if (postTutorialControls.Count != 6 || !postTutorialControls.Any(control => control?.GetValue<string>() == "supportedEstablishYourClanGoal") ||
+            postTutorialControls.Any(control => control?.GetValue<string>() == "supportedEstablishClanGoldSaleGoal") ||
+            preTutorialControls.Any(control => control?.GetValue<string>() == "supportedEstablishYourClanGoal") ||
+            wrongMenuControls.Any(control => control?.GetValue<string>() == "supportedEstablishYourClanGoal"))
+            throw new AgentHostException("campaign-loop-self-test-post-skip-bootstrap-scope-failed", "The EYC goal may bootstrap only after Tutorial completion at the original training-field MapState; Gold objective planning still requires the active quest.");
+        results.Add(new { scenario = "campaign-loop-offers-eyc-bootstrap-only-after-tutorial-at-training-field-map", passed = true });
         var allScopeClassifierPrompt = AgentHostDecisionCycle.BuildCampaignGoalClassificationPrompt(new JsonObject
         {
             ["allowedControls"] = new JsonArray("supportedMapArrivalGoal", "supportedVillageToolsQuestGoal", "supportedBattleSimulationGoal",
@@ -781,9 +806,11 @@ internal static class AgentHostCampaignLoop
     internal static JsonArray BuildGoalScopeClassificationControls(JsonObject? currentState = null)
     {
         var controls = new JsonArray("supportedMapArrivalGoal", "supportedVillageToolsQuestGoal", "supportedBattleSimulationGoal", "supportedBattleAndCaptivityGoal");
-        if (HasObservedEstablishYourClanQuest(currentState))
-        {
+        var activeEycQuest = HasObservedEstablishYourClanQuest(currentState);
+        if (activeEycQuest || HasPostTutorialTrainingFieldMap(currentState))
             controls.Add("supportedEstablishYourClanGoal");
+        if (activeEycQuest)
+        {
             controls.Add("supportedEstablishClanGoldSaleGoal");
         }
         if (HasObservedPlayerCaptivity(currentState)) controls.Add("supportedCaptivityRecoveryGoal");
@@ -799,6 +826,19 @@ internal static class AgentHostCampaignLoop
     private static bool HasObservedEstablishYourClanQuest(JsonObject? state) =>
         (state?["quests"] as JsonArray)?.OfType<JsonObject>().Any(quest =>
             string.Equals(ReadString(quest, "id"), "rebuild_player_clan_storymode_quest", StringComparison.Ordinal)) == true;
+
+    internal static bool HasPostTutorialTrainingFieldMap(JsonObject? state)
+    {
+        var context = state?["context"] as JsonObject;
+        var location = state?["location"] as JsonObject;
+        var lifecycle = state?["storyModeEstablishClanStatus"] as JsonObject;
+        return ReadString(lifecycle, "questId") == AgentHostStoryModeBootstrapLoop.StoryQuestId &&
+               ReadBoolean(lifecycle, "tutorialCompleted") &&
+               (ReadString(lifecycle, "status") is "storymode-not-activated" or "unknown") &&
+               ReadString(context, "gameState") == "MapState" &&
+               ReadString(context, "menuId") == AgentHostStoryModeBootstrapLoop.TrainingFieldMenuId &&
+               ReadString(location, "currentSettlementId") == AgentHostStoryModeBootstrapLoop.TrainingFieldSettlementId;
+    }
 
     private static bool HasObservedPlayerCaptivity(JsonObject? state) =>
         ReadBoolean(((state?["context"] as JsonObject)?["captivity"] as JsonObject), "isCaptive");

@@ -137,6 +137,46 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             unverifiedProvider.CallCount != 0 || executorCalls != 1)
             throw new AgentHostException("establish-clan-autonomy-unverified-completion-accepted", "An inactive Quest without a successful Native history record must fail before model or objective execution.");
         results.Add(new { scenario = "establish-clan-autonomy-rejects-unverified-quest-termination", passed = true });
+
+        var modalNative = new FakeNativeClient(activeQuest: true, lifecycle: "active", initialGold: 100);
+        var modalProvider = new FakeInquiryRecoveryProvider();
+        var interruptedObjectiveCalls = 0;
+        async Task<JsonObject> RecoverInterruptedObjective(string objectiveId, int priorDecisions, long priorPromptTokens, long priorCompletionTokens,
+            JsonArray priorTrace, JsonArray priorRoutes, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (objectiveId != "gold") throw new AgentHostException("autonomy-selftest-modal-objective-invalid", "The modal-recovery fixture must remain on the current Gold objective.");
+            interruptedObjectiveCalls++;
+            if (interruptedObjectiveCalls == 1)
+            {
+                modalNative.OpenInquiry();
+                return new JsonObject
+                {
+                    ["status"] = "failed", ["actionsExecuted"] = 0, ["decisions"] = priorDecisions,
+                    ["promptTokens"] = priorPromptTokens, ["completionTokens"] = priorCompletionTokens,
+                    ["trace"] = priorTrace.DeepClone(), ["providerRouteHistory"] = priorRoutes.DeepClone(),
+                    ["termination"] = new JsonObject { ["reason"] = "no-safe-action" },
+                    ["failureCode"] = "gold-sale-free-map-required"
+                };
+            }
+            if (interruptedObjectiveCalls != 2 || modalNative.InquiryOpen)
+                throw new AgentHostException("autonomy-selftest-modal-replayed-before-fresh-map", "The objective may be retried only after the model-resolved current Native modal is closed.");
+            modalNative.CompleteSuccessfully();
+            return new JsonObject
+            {
+                ["status"] = "completed", ["actionsExecuted"] = 1, ["decisions"] = priorDecisions,
+                ["promptTokens"] = priorPromptTokens, ["completionTokens"] = priorCompletionTokens,
+                ["trace"] = priorTrace.DeepClone(), ["providerRouteHistory"] = priorRoutes.DeepClone(),
+                ["termination"] = new JsonObject { ["reason"] = "one-native-objective-subflow-completed" }
+            };
+        }
+        var modalRecovered = RunAsync(request.RootElement, modalNative, modalNative, modalProvider, RecoverInterruptedObjective, CancellationToken.None).GetAwaiter().GetResult();
+        if (ReadString(modalRecovered, "status") != "completed" || ReadInt(modalRecovered, "actionsExecuted", 0) != 2 ||
+            modalProvider.CallCount != 3 || interruptedObjectiveCalls != 2 || modalNative.LastInquiryChoice != "affirmative" ||
+            modalNative.LastInquiryToken != "inquiry-token" ||
+            !((modalRecovered["trace"] as JsonArray)?.OfType<JsonObject>().Any(step => ReadString(step, "stage") == "objective-replanned-after-native-inquiry") ?? false))
+            throw new AgentHostException("establish-clan-autonomy-native-inquiry-recovery-selftest-failed", "A zero-action objective blocked by an active Native Inquiry must ask the model to resolve the visible prompt, verify the fresh Map/Quest state, and replan without replaying the interrupted child.");
+        results.Add(new { scenario = "establish-clan-autonomy-model-resolves-native-modal-then-replans-only-from-fresh-state", passed = true });
         return results;
     }
 
@@ -171,6 +211,47 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         try
         {
             await provider.CheckConfiguredModelAsync(elapsed.Token);
+            using (var initialState = await client.ReadStateAsync(elapsed.Token))
+            {
+                if (!AgentHostEstablishYourClanGoalLoop.HasActiveQuest(initialState.RootElement))
+                {
+                    var lifecycle = ReadLifecycleStatus(initialState.RootElement);
+                    if (lifecycle == "completed")
+                        return BuildResult("completed", "native-establish-your-clan-quest-success-verified", true, null, null,
+                            completionEvidence: "Native lifecycle status storyModeEstablishClanStatus=completed before objective execution");
+
+                    if (!AgentHostStoryModeBootstrapLoop.IsEligibleTrainingFieldBootstrapState(initialState.RootElement))
+                        return BuildResult("failed", "quest-no-longer-active-without-success-evidence", false,
+                            "The original StoryMode quest is no longer active and Native history does not prove successful completion.",
+                            "establish-clan-native-success-unverified");
+
+                    if (client is not IAgentHostStoryModeBootstrapNativeClient bootstrapClient)
+                        return BuildResult("failed", "storymode-bootstrap-native-client-unavailable", false,
+                            "The Native transport cannot submit the visible original training-field menu option.", "storymode-bootstrap-native-client-unavailable");
+
+                    var bootstrap = await AgentHostStoryModeBootstrapLoop.RunAsync(request, client, bootstrapClient, provider, elapsed.Token,
+                        priorDecisions: decisions, priorPromptTokens: promptTokens, priorCompletionTokens: completionTokens,
+                        priorTrace: trace, priorProviderRouteHistory: routes);
+                    decisions = ReadInt(bootstrap, "decisions", decisions);
+                    promptTokens = ReadLong(bootstrap, "promptTokens", promptTokens);
+                    completionTokens = ReadLong(bootstrap, "completionTokens", completionTokens);
+                    nativeActions += ReadInt(bootstrap, "actionsExecuted", 0);
+                    trace = bootstrap["trace"]?.DeepClone() as JsonArray ?? trace;
+                    routes = bootstrap["providerRouteHistory"]?.DeepClone() as JsonArray ?? routes;
+
+                    if (ReadString(bootstrap, "status") != "completed")
+                        return BuildResult("failed", "storymode-bootstrap-failed", false,
+                            ReadString(bootstrap, "failure") ?? "The Native StoryMode bootstrap did not verify original EYC activation.",
+                            ReadString(bootstrap, "failureCode") ?? "storymode-bootstrap-failed");
+
+                    using var afterBootstrap = await client.ReadStateAsync(elapsed.Token);
+                    if (!AgentHostEstablishYourClanGoalLoop.HasActiveQuest(afterBootstrap.RootElement))
+                        return BuildResult("failed", "storymode-bootstrap-active-quest-unverified", false,
+                            "The bootstrap reported completion but fresh Native state does not show the exact active original EYC quest.",
+                            "storymode-bootstrap-active-quest-unverified");
+                }
+            }
+
             for (var cycle = 0; cycle < 20 && decisions < maxDecisions; cycle++)
             {
                 elapsed.Token.ThrowIfCancellationRequested();
@@ -307,6 +388,73 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                                   !(failedContext.TryGetProperty("encounterActive", out var encounterActive) && encounterActive.ValueKind == JsonValueKind.True) &&
                                   !(failedContext.TryGetProperty("captivity", out var captivity) && captivity.ValueKind == JsonValueKind.Object &&
                                     captivity.TryGetProperty("isCaptive", out var captive) && captive.ValueKind == JsonValueKind.True);
+
+                    // A child objective can stop before taking any action because a Native modal
+                    // appeared between observations. Let the model resolve only that current,
+                    // supported prompt, then return to the parent planner from fresh Native state.
+                    // Never replay a child that already issued a world-changing action.
+                    if (ReadInt(child, "actionsExecuted", 0) == 0 &&
+                        failedContext.ValueKind == JsonValueKind.Object &&
+                        failedContext.TryGetProperty("inquiryOpen", out var inquiryOpen) && inquiryOpen.ValueKind == JsonValueKind.True)
+                    {
+                        if (client is not IAgentHostNativeInquiryClient inquiryClient)
+                            return BuildResult("failed", "native-inquiry-client-unavailable", false,
+                                "A Native inquiry blocks the Campaign map and this Host transport cannot answer it.", "native-inquiry-client-unavailable",
+                                journalObjectives, snapshot, differences);
+
+                        var resolution = await AgentHostNativeInquiryResolution.RunAsync(
+                            client, inquiryClient, provider, elapsed.Token,
+                            runId + "-inquiry-" + (decisions + 1).ToString(CultureInfo.InvariantCulture));
+                        decisions += ReadInt(resolution, "decisions", 0);
+                        promptTokens += ReadLong(resolution, "promptTokens", 0);
+                        completionTokens += ReadLong(resolution, "completionTokens", 0);
+                        nativeActions += ReadInt(resolution, "actionsExecuted", 0);
+                        if (resolution["providerRoute"] is JsonObject inquiryRoute)
+                            routes.Add(inquiryRoute.DeepClone());
+                        trace.Add(new JsonObject
+                        {
+                            ["stage"] = "native-inquiry-resolution",
+                            ["objectiveId"] = objectiveId,
+                            ["status"] = ReadString(resolution, "status"),
+                            ["choice"] = ReadString(resolution, "choice"),
+                            ["failureCode"] = ReadString(resolution, "failureCode"),
+                            ["decision"] = resolution["decision"]?.DeepClone(),
+                            ["nativeReceipt"] = resolution["nativeReceipt"]?.DeepClone(),
+                            ["nativeStateAfter"] = resolution["nativeStateAfter"]?.DeepClone()
+                        });
+
+                        if (ReadString(resolution, "status") == "resolved")
+                        {
+                            using var afterInquiry = await client.ReadStateAsync(elapsed.Token);
+                            var afterContext = afterInquiry.RootElement.TryGetProperty("state", out var inquiryAfterStateNode) && inquiryAfterStateNode.ValueKind == JsonValueKind.Object &&
+                                               inquiryAfterStateNode.TryGetProperty("context", out var afterContextValue) && afterContextValue.ValueKind == JsonValueKind.Object
+                                ? afterContextValue
+                                : default;
+                            var inquiryClosedOnFreeMap = afterContext.ValueKind == JsonValueKind.Object &&
+                                ReadString(afterContext, "gameState") == "MapState" &&
+                                !(afterContext.TryGetProperty("inquiryOpen", out var stillOpen) && stillOpen.ValueKind == JsonValueKind.True) &&
+                                !(afterContext.TryGetProperty("encounterActive", out var nextEncounter) && nextEncounter.ValueKind == JsonValueKind.True) &&
+                                !IsPlayerCaptive(afterInquiry.RootElement) &&
+                                AgentHostEstablishYourClanGoalLoop.HasActiveQuest(afterInquiry.RootElement);
+                            if (inquiryClosedOnFreeMap)
+                            {
+                                trace.Add(new JsonObject
+                                {
+                                    ["stage"] = "objective-replanned-after-native-inquiry",
+                                    ["objectiveId"] = objectiveId,
+                                    ["childActionsExecuted"] = 0,
+                                    ["replayedChildActions"] = false
+                                });
+                                continue;
+                            }
+                        }
+
+                        return BuildResult("failed", "native-inquiry-resolution-failed", false,
+                            ReadString(resolution, "failure") ?? "The current Native inquiry was not safely resolved to a free Campaign Map.",
+                            ReadString(resolution, "failureCode") ?? "native-inquiry-resolution-failed",
+                            journalObjectives, snapshot, differences);
+                    }
+
                     if (objectiveId is "partySize" or "companions" && freeMap && termination is ("native-journal-refresh-pending" or "recruitment-route-unavailable" or "companion-route-unavailable"))
                     {
                         unavailableObjectives.Add(objectiveId);
@@ -452,13 +600,17 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
     private static long ReadLong(JsonObject? node, string name, long fallback) => node?[name] is JsonValue value && value.TryGetValue<long>(out var result) ? result : fallback;
     private static double ReadDouble(JsonObject? node, string name) => node?[name] is JsonValue value && value.TryGetValue<double>(out var result) ? result : double.NaN;
 
-    private sealed class FakeNativeClient(bool activeQuest, string lifecycle, int initialGold, bool initialCaptive = false) : IAgentHostCampaignNativeClient, IAgentHostQuestDetailsNativeClient
+    private sealed class FakeNativeClient(bool activeQuest, string lifecycle, int initialGold, bool initialCaptive = false) : IAgentHostCampaignNativeClient, IAgentHostQuestDetailsNativeClient, IAgentHostNativeInquiryClient
     {
         private bool _activeQuest = activeQuest;
         private string _lifecycle = lifecycle;
         private int _gold = initialGold;
         internal bool IsFree => !_captive;
         private bool _captive = initialCaptive;
+        private bool _inquiryOpen;
+        internal bool InquiryOpen => _inquiryOpen;
+        internal string? LastInquiryChoice { get; private set; }
+        internal string? LastInquiryToken { get; private set; }
         internal int QuestDetailsReads { get; private set; }
 
         internal void CompleteSuccessfully()
@@ -469,6 +621,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         }
 
         internal void LeaveCaptivity() => _captive = false;
+        internal void OpenInquiry() => _inquiryOpen = true;
 
         public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
         {
@@ -477,7 +630,18 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             if (_activeQuest) quests.Add(new JsonObject { ["id"] = QuestId });
             var state = new JsonObject
             {
-                ["context"] = new JsonObject { ["gameState"] = "MapState", ["captivity"] = new JsonObject { ["isCaptive"] = _captive } },
+                ["context"] = new JsonObject
+                {
+                    ["gameState"] = "MapState", ["captivity"] = new JsonObject { ["isCaptive"] = _captive },
+                    ["inquiryOpen"] = _inquiryOpen,
+                    ["inquiry"] = _inquiryOpen ? new JsonObject
+                    {
+                        ["supported"] = true, ["kind"] = "YesNoInquiry", ["token"] = "inquiry-token",
+                        ["title"] = "通知", ["text"] = "训练场结束通知",
+                        ["affirmative"] = new JsonObject { ["visible"] = true, ["enabled"] = true, ["text"] = "好" },
+                        ["negative"] = new JsonObject { ["visible"] = false, ["enabled"] = false, ["text"] = "" }
+                    } : null
+                },
                 ["quests"] = quests,
                 ["storyModeEstablishClanStatus"] = new JsonObject { ["status"] = _lifecycle }
             };
@@ -508,6 +672,17 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         public Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken) =>
             throw new AgentHostException("autonomy-selftest-unexpected-native-action", "The fake parent-loop test injects the objective executor and must not directly send Native actions.");
 
+        public Task<JsonDocument> RespondNativeInquiryAsync(string token, string choice, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!_inquiryOpen || token != "inquiry-token" || choice is not ("affirmative" or "negative"))
+                throw new AgentHostException("autonomy-selftest-native-inquiry-invalid", "The parent sent a stale prompt token or a choice outside the Native Yes/No contract.");
+            LastInquiryToken = token;
+            LastInquiryChoice = choice;
+            _inquiryOpen = false;
+            return Task.FromResult(JsonDocument.Parse("{\"status\":\"completed\",\"action\":\"respondInquiry\"}"));
+        }
+
         private static JsonObject Objective(string id, int current, int target) => new()
         {
             ["hasTask"] = true,
@@ -533,6 +708,30 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 ["arguments"] = new JsonObject { ["ObjectiveId"] = selectedObjective },
                 ["rationale"] = "Choose the currently unmet integrated objective."
             }));
+        }
+        public void Dispose() { }
+    }
+
+    private sealed class FakeInquiryRecoveryProvider : IAgentHostDecisionProvider
+    {
+        internal int CallCount { get; private set; }
+        public string ModelId => "deterministic-native-inquiry-recovery-selftest";
+        public string ConfigurationSource => "harness-fake-provider";
+        public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CallCount++;
+            var isInquiry = systemPrompt.Contains("currently visible to the player", StringComparison.Ordinal);
+            var decision = isInquiry
+                ? new JsonObject { ["choice"] = "affirmative", ["reason"] = "Only visible response." }
+                : new JsonObject
+                {
+                    ["action"] = "selectEstablishYourClanObjective",
+                    ["arguments"] = new JsonObject { ["ObjectiveId"] = "gold" },
+                    ["rationale"] = "Choose the currently unmet objective."
+                };
+            return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 9, 2, "self-test", decision, "self-test", "json_schema"));
         }
         public void Dispose() { }
     }

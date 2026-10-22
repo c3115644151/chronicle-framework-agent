@@ -116,7 +116,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         var trainingFieldExit = BuildActionCatalog(nativeTrainingFieldMenu, null, null, null);
         var trainingFieldExitOption = trainingFieldExit.Count == 0 ? null : (trainingFieldExit[0]?["argumentValues"]?["OptionId"] as JsonArray)?[0]?.GetValue<string>();
         if (trainingFieldExit.Count != 1 || ReadString(trainingFieldExit[0] as JsonObject, "action") != "menuSelect" ||
-            trainingFieldExitOption != "training_field_leave")
+            trainingFieldExitOption != "training_field_leave" || !IsFreeCampaignMap(nativeTrainingFieldMenu))
             throw new AgentHostException("gold-sale-self-test-training-field-menu-not-exitable", "The original Tutorial skip can leave the training-field Native location menu even though its context marks the location as an encounter.");
         var hostileEncounter = MapState("encounter", null, []);
         hostileEncounter["context"]!["encounterActive"] = true;
@@ -737,7 +737,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         var context = state["context"] as JsonObject;
         return ReadString(context, "gameState") == "MapState" &&
             !ReadBoolean(context?["captivity"] as JsonObject, "isCaptive") &&
-            !ReadBoolean(context, "encounterActive") && context?["battleSimulation"] is null &&
+            !AgentHostCampaignStateFacts.IsActiveEncounter(state) && context?["battleSimulation"] is null &&
             !ReadBoolean(context, "escapeMenuOpen") && !ReadBoolean(context, "inquiryOpen") &&
             state["inventoryScreen"] is null && state["partyScreen"] is null;
     }

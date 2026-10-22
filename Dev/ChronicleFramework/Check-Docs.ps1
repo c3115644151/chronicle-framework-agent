@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.274'
+$contractVersion = '7.283'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -69,6 +69,8 @@ $agentHostCampaignLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\Ag
 $agentHostSupplyLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostSupplyLoop.cs') -Raw -Encoding UTF8
 $agentHostDecisionCycleSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostDecisionCycle.cs') -Raw -Encoding UTF8
 $agentHostEstablishClanPlannerSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostEstablishYourClanGoalLoop.cs') -Raw -Encoding UTF8
+$agentHostEstablishClanAutonomySource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostEstablishYourClanAutonomyLoop.cs') -Raw -Encoding UTF8
+$agentHostStoryModeBootstrapLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostStoryModeBootstrapLoop.cs') -Raw -Encoding UTF8
 $agentHostHarnessProgressTraceSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostHarnessProgressTrace.cs') -Raw -Encoding UTF8
 $agentHostProviderContractSelfTestSource = Get-Content (Join-Path $harnessRoot 'AgentHost\ProviderContractSelfTest.cs') -Raw -Encoding UTF8
 $agentHostProviderSource = Get-Content (Join-Path $harnessRoot 'AgentHost\OllamaNativeProvider.cs') -Raw -Encoding UTF8
@@ -85,6 +87,7 @@ $agentHostRecruitmentLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost
 $agentHostCaptivityRecoveryLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostCaptivityRecoveryLoop.cs') -Raw -Encoding UTF8
 $agentHostGoldSaleLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostEstablishClanGoldSaleLoop.cs') -Raw -Encoding UTF8
 $agentHostMailboxSource = Get-Content (Join-Path $harnessRoot 'AgentHost\NativeMailboxClient.cs') -Raw -Encoding UTF8
+$agentHostInquiryResolutionSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostNativeInquiryResolution.cs') -Raw -Encoding UTF8
 $agentHostVillageToolsQuestLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostVillageToolsQuestLoop.cs') -Raw -Encoding UTF8
 $agentHostVillageToolsQuestPolicySource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostVillageToolsQuestPolicy.cs') -Raw -Encoding UTF8
 $agentHostVillageToolsFixturePreparationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentVillageToolsQuestFixturePreparation.ps1') -Raw -Encoding UTF8
@@ -254,7 +257,7 @@ if ($harnessScript -notmatch "'AgentHostCampaignLoopEvaluation' \{ @\('Preflight
     throw 'The Host campaign loop must remain opt-in and prove its bounded Native map-arrival contract, natural time progression, real local-model path, visual evidence and cleanup.'
 }
 if ($harnessScript -notmatch "'AgentHostVillageToolsQuestEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostVillageToolsQuestEvaluation'\) \}" -or
-    -not $harnessScript.Contains("effectiveSmokeTimeoutSeconds = if (`$Phase -in @('AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostEstablishClanAutonomyEvaluation','AgentHostCaptivityRecoveryEvaluation','AgentHostEstablishClanGoldSaleEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max(`$SmokeTimeoutSeconds, 240) }") -or
+    -not $harnessScript.Contains("effectiveSmokeTimeoutSeconds = if (`$Phase -in @('FreshStoryModeModelEvaluation','AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostEstablishClanAutonomyEvaluation','AgentHostCaptivityRecoveryEvaluation','AgentHostEstablishClanGoldSaleEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max(`$SmokeTimeoutSeconds, 240) }") -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostVillageToolsQuestEvaluation'" -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'VerifyQuestInventoryDelta' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'village-tools-direct-quest-option-unavailable' -or
@@ -443,6 +446,9 @@ if ($agentHostDecisionCycleSource -notmatch 'AgentHostHarnessProgressTrace\.Reco
     $agentHostHarnessProgressTraceSource -notmatch 'AgentHostProgress\.jsonl' -or
     $agentHostHarnessProgressTraceSource -notmatch 'MaximumBytes' -or
     $agentHostHarnessProgressTraceSource -notmatch 'Rationale is deliberately excluded' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'BuildNativeStateSummary' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'nativeStateBefore' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'nativeStateAfter' -or
     $agentHostProviderContractSelfTestSource -notmatch 'AgentHostHarnessProgressTrace\.RunContractSelfTests') {
     throw 'Real Host decisions must be incrementally persisted only in bounded Harness visual-capture/lifecycle modes, including the selected Native argument and route but excluding rationale/raw prompt content.'
 }
@@ -1082,6 +1088,7 @@ $mapInquiryTest = Get-Content (Join-Path $harnessRoot 'Test-AgentMapInquiry.ps1'
 $alleyLeaderInquiryTest = Get-Content (Join-Path $harnessRoot 'Test-AgentAlleyLeaderInquiry.ps1') -Raw -Encoding UTF8
 $inquiryAdapterSource = Get-Content (Join-Path $harnessRoot 'AgentInquiryAdapter.cs') -Raw -Encoding UTF8
 if ($harnessScript -notmatch "'MapInquiry'\s*\{\s*@\('Preflight', 'Build', 'MapInquiry'\)" -or $harnessScript -notmatch "Invoke-Stage -Name 'MapInquiry'" -or $harnessScript -notmatch 'Test-AgentMapInquiry\.ps1' -or $agentObserverSource -notmatch 'inquiryOpen' -or $agentObserverSource -notmatch 'ChronicleInquiryAdapter.BuildMapInquiryJson' -or $agentProtocolSource -notmatch 'case "respondInquiry"' -or $agentProtocolSource -notmatch 'case "harnessOpenNativeInquiry"' -or $agentProtocolSource -notmatch 'ChronicleInquiryAdapter.Respond' -or $agentCliSource -notmatch "'respondInquiry'" -or $agentDecisionLoopSource -notmatch "respondInquiry = @\('InquiryToken','InquiryChoice'\)" -or $inquiryAdapterSource -notmatch '_activeQueryData' -or $inquiryAdapterSource -notmatch '_activeDataSource' -or $inquiryAdapterSource -notmatch 'IsAnyInquiryActive' -or $inquiryAdapterSource -notmatch 'ExecuteAffirmativeAction' -or $inquiryAdapterSource -notmatch 'ExecuteNegativeAction' -or $inquiryAdapterSource -notmatch 'pauseGameActiveState' -or $mapInquiryTest -notmatch 'harnessOpenNativeInquiry' -or $mapInquiryTest -notmatch 'StaleTokenRejectedBeforeAndAfter' -or $mapInquiryTest -notmatch 'MapActionRejectedWithoutClosingInquiry' -or $mapInquiryTest -notmatch 'EngineFrames' -or $mapInquiryTest -notmatch 'SourceFixtureUnchanged') { throw 'Map Inquiry support must read the active Native popup VM, call its affirmative/negative handlers with fresh tokens, reject blocked map actions, expose pause semantics, and test screenshots/cleanup.' }
+if ($agentHostDecisionCycleSource -notmatch 'DecideNativeInquiryResponseAsync' -or $agentHostMailboxSource -notmatch 'RespondNativeInquiryAsync' -or $agentHostEstablishClanAutonomySource -notmatch 'actionsExecuted", 0\) == 0' -or $agentHostEstablishClanAutonomySource -notmatch 'objective-replanned-after-native-inquiry' -or $agentHostInquiryResolutionSource -notmatch 'YesNoInquiry' -or $agentHostInquiryResolutionSource -notmatch 'allowedChoices' -or $agentHostInquiryResolutionSource -notmatch 'inquiryOpen' -or $agentHostInquiryResolutionSource -notmatch 'native-inquiry-choice-not-currently-enabled' -or $agentHostHarnessProgressTraceSource -notmatch 'BuildInquirySummary' -or $agentHostHarnessProgressTraceSource -notmatch 'harness-progress-trace-records-current-modal-and-visible-buttons-without-one-use-token') { throw 'The EYC Host must let the model choose only a currently visible/enabled supported Native Map inquiry response, verify the modal transition, replan only after a zero-action interruption, and preserve a token-free modal state trace.' }
 if ($agentProtocolSource -notmatch 'case "harnessOpenRecruitmentInquiry"' -or $agentProtocolSource -notmatch 'BeginHarnessNativeCapacityInquiry' -or $agentCliSource -notmatch "'harnessOpenRecruitmentInquiry'" -or $mapInquiryTest -notmatch 'NativeRecruitmentInquiry' -or $mapInquiryTest -notmatch 'declineNoMutation' -or $mapInquiryTest -notmatch 'nativeCapacityCommit' -or $mapInquiryTest -notmatch 'nativeInquiryTimeStable') { throw 'MapInquiry must exercise a real Native RecruitmentVM capacity confirmation in addition to the generic Native UI fixture, and verify clock stability.' }
 if (-not (Test-Path (Join-Path $harnessRoot 'Test-AgentAlleyLeaderInquiry.ps1')) -or $harnessScript -notmatch "'AlleyLeaderInquiry'\s*\{\s*@\('Preflight', 'Build', 'AlleyLeaderInquiry'\)" -or $harnessScript -notmatch "Invoke-Stage -Name 'AlleyLeaderInquiry'" -or $harnessScript -notmatch 'Test-AgentAlleyLeaderInquiry\.ps1' -or $inquiryAdapterSource -notmatch 'RespondAlleyMultiSelection' -or $inquiryAdapterSource -notmatch 'BuildAlleyMultiSelectionJson' -or $inquiryAdapterSource -notmatch 'ChangeAssignedClanMemberOfAlley' -or $inquiryAdapterSource -notmatch 'MultiSelectionQueryPopUpVM' -or $agentProtocolSource -notmatch 'case "respondMultiSelectionInquiry"' -or $agentDecisionLoopSource -notmatch "respondMultiSelectionInquiry = @\('InquiryToken','InquiryChoice','SelectedIds'\)" -or $agentProtocolSource -notmatch 'harnessPrepareAlleyLeaderFixture' -or $agentProtocolSource -notmatch 'harnessAlleyLeaderDiagnostics' -or $alleyLeaderInquiryTest -notmatch 'change_leader_of_alley' -or $alleyLeaderInquiryTest -notmatch 'pauseGameActiveState' -or $alleyLeaderInquiryTest -notmatch 'cancelNoMutation' -or $alleyLeaderInquiryTest -notmatch 'positiveCommitted' -or $alleyLeaderInquiryTest -notmatch 'SourceFixtureUnchanged') { throw 'Alley MultiSelection must be gated to its active Native VM/Town action, preserve pause/selection semantics, and test positive/negative callbacks and cleanup.' }
 $alleyLeaderFixture = Get-Content (Join-Path $harnessRoot 'HarnessAlleyLeaderFixture.cs') -Raw -Encoding UTF8
@@ -1226,6 +1233,8 @@ if ($freshCampaignSource -notmatch 'StoryModeNewGame' -or
     $freshCampaignSource -notmatch 'manager\.DoOption\(requiredOptionId\)' -or
     $freshCampaignSource -match 'CompleteTutorialPhase\(' -or
     $freshCampaignSource -notmatch 'fresh-storymode-e2e-ready' -or
+    $freshCampaignSource -notmatch 'fresh-storymode-post-skip-map-ready' -or
+    $freshCampaignSource -notmatch 'fresh-storymode-post-skip-map-settled' -or
     $freshCampaignSource -notmatch 'eyc-map-render-settled' -or
     $freshCampaignSource -notmatch 'CHRONICLE_FRESH_CAMPAIGN_START_AGENT' -or
     $freshCampaignSource -notmatch 'CHRONICLE_HARNESS_MODE", "agent-host-lifecycle-test"' -or
@@ -1246,19 +1255,29 @@ if ($freshCampaignSource -notmatch 'StoryModeNewGame' -or
     $freshCampaignTest -notmatch 'CHRONICLE_FRESH_CAMPAIGN_STORYMODE' -or
     $freshCampaignTest -notmatch '\$diagnosticStartLineCount = \$allLines\.Count' -or
     $freshCampaignTest -notmatch 'originalEstablishYourClanQuestNaturallyActive' -or
+    $freshCampaignTest -notmatch 'StoryModeFirstMapStateObserved' -or
+    $freshCampaignTest -notmatch 'storyModeTakeoverMapReady' -or
     $harnessScript -notmatch "'FreshStoryModeSetup' \{ @\('Preflight', 'Build', 'FreshStoryModeSetup'\) \}" -or
     $harnessScript -notmatch "-StoryModeEycSetup -TimeoutSeconds 360" -or
     $harnessScript -notmatch "'FreshStoryModeModelEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'FreshStoryModeModelEvaluation'\) \}" -or
-    $harnessScript -notmatch '-StoryModeEycLiveModelEvaluation -TimeoutSeconds 360' -or
-    $harnessScript -notmatch "CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS', '120000'" -or
-    $harnessScript -notmatch "CHRONICLE_LLM_TIMEOUT_SECONDS', '120'" -or
-    $agentHostRuntimeControllerSource -notmatch 'autoStopMilliseconds <= 120000' -or
+    $harnessScript -notmatch '-StoryModeEycLiveModelEvaluation -TimeoutSeconds 900' -or
+    $harnessScript -notmatch "CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS', '600000'" -or
+    $harnessScript -notmatch "CHRONICLE_LLM_TIMEOUT_SECONDS', '300'" -or
+    $agentHostRuntimeControllerSource -notmatch 'autoStopMilliseconds <= 600000' -or
     $harnessScript -notmatch "ValidateSet\('gpt-oss-20b','openai-gpt-oss-20b','nvidiallama-3.2-11b-vision','poolside-laguna-s-2.1','free-router','gemini-2.5-flash','mistral-nemo'\)" -or
     $harnessScript -notmatch 'CHRONICLE_HARNESS_AGENT_MODEL.*\$FreshStoryModeModel' -or
     $agentHostRuntimeControllerSource -notmatch 'CHRONICLE_HARNESS_AGENT_MODEL' -or
+    $agentHostCampaignLoopSource -notmatch 'HasPostTutorialTrainingFieldMap' -or
+    $agentHostCampaignLoopSource -notmatch 'supportedEstablishYourClanGoal' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'AgentHostStoryModeBootstrapLoop.RunAsync' -or
+    $agentHostStoryModeBootstrapLoopSource -notmatch 'ExecuteTrainingFieldMenuSelectAsync' -or
+    $agentHostStoryModeBootstrapLoopSource -notmatch 'storymode-bootstrap-model-selects-native-leave' -or
     $freshCampaignSource -notmatch '_storyModeAgentAutostartArmed' -or
     $freshCampaignSource -notmatch 'if \(_storyModeAgentAutostartArmed\) return' -or
     $freshCampaignTest -notmatch 'storyModeLiveModelProducedDecision' -or
+    $freshCampaignTest -notmatch 'storyModeLiveNativeActionExecuted' -or
+    $freshCampaignTest -notmatch 'StoryModeAgentNativeActionsExecuted' -or
+    $freshCampaignTest -notmatch 'AgentHostLifecycleHostReceipt\.json' -or
     $freshCampaignTest -notmatch 'AgentHostProgress\.jsonl') { throw 'Fresh StoryMode setup must use the original StoryMode Campaign and exact skip-tutorial/confirmation dialogue choices, verify natural EYC activation, and never call the tutorial completion function directly; its optional live Host slice must use bounded same-session MCM startup with a real decision trace.' }
 if ($harnessScript -notmatch "'FreshStoryModeNativeMenuLeaveEvaluation' \{ @\('Preflight', 'Build', 'FreshStoryModeNativeMenuLeaveEvaluation'\) \}" -or
     $harnessScript -notmatch '-StoryModeNativeMenuLeaveEvaluation -TimeoutSeconds 360' -or

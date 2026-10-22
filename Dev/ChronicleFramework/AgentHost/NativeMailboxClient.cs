@@ -7,7 +7,8 @@ namespace ChronicleFramework.AgentHost;
 
 internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeClient, IAgentHostBattleSimulationNativeClient,
     IAgentHostQuestDetailsNativeClient, IAgentHostCaptivityRecoveryNativeClient, IAgentHostGoldSaleNativeClient,
-    IAgentHostRecruitmentNativeClient, IAgentHostCompanionHiringNativeClient
+    IAgentHostRecruitmentNativeClient, IAgentHostCompanionHiringNativeClient, IAgentHostStoryModeBootstrapNativeClient,
+    IAgentHostNativeInquiryClient
 {
     private static readonly HashSet<string> SupplySliceActions = new(StringComparer.Ordinal)
     {
@@ -54,7 +55,43 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
     internal Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken) =>
         SendAsync("state", new JsonObject(), acceptedResponseExpected: false, cancellationToken);
 
+    public Task<JsonDocument> RespondNativeInquiryAsync(string token, string choice, CancellationToken cancellationToken)
+    {
+        ValidateNativeInquiryResponse(token, choice);
+        return SendAsync("respondInquiry", new JsonObject { ["token"] = token, ["choice"] = choice }, acceptedResponseExpected: false, cancellationToken);
+    }
+
+    internal static void ValidateNativeInquiryResponse(string token, string choice)
+    {
+        if (string.IsNullOrWhiteSpace(token) || token.Length > 256 || choice is not ("affirmative" or "negative"))
+            throw new AgentHostException("native-inquiry-response-arguments-invalid", "The Native Inquiry adapter requires a current token and one explicit affirmative/negative choice.");
+    }
+
+    internal static IReadOnlyList<object> RunNativeInquiryResponseContractSelfTests()
+    {
+        ValidateNativeInquiryResponse("current-token", "affirmative");
+        ValidateNativeInquiryResponse("current-token", "negative");
+        foreach (var item in new[] { (Token: "", Choice: "affirmative"), (Token: "current-token", Choice: "stop"), (Token: "current-token", Choice: "yes") })
+        {
+            try
+            {
+                ValidateNativeInquiryResponse(item.Token, item.Choice);
+                throw new AgentHostException("native-inquiry-response-invalid-accepted", "The Native Inquiry adapter accepted a missing token or a non-native choice.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "native-inquiry-response-arguments-invalid") { }
+        }
+        return [new { scenario = "native-inquiry-mailbox-accepts-only-token-bound-explicit-yes-no-choices", passed = true }];
+    }
+
     Task<JsonDocument> IAgentHostCampaignNativeClient.ReadStateAsync(CancellationToken cancellationToken) => ReadStateAsync(cancellationToken);
+
+    public Task<JsonDocument> ExecuteTrainingFieldMenuSelectAsync(string menuId, string optionId, CancellationToken cancellationToken)
+    {
+        if (menuId != AgentHostStoryModeBootstrapLoop.TrainingFieldMenuId ||
+            optionId is not ("training_field_enter" or AgentHostStoryModeBootstrapLoop.TrainingFieldLeaveOptionId))
+            throw new AgentHostException("native-training-field-menu-option-invalid", "The StoryMode bootstrap can select only a currently observed original training-field menu option.");
+        return SendAsync("menuSelect", new JsonObject { ["menuId"] = menuId, ["optionId"] = optionId }, acceptedResponseExpected: false, cancellationToken);
+    }
 
     public Task<JsonDocument> ReadQuestDetailsAsync(string questId, CancellationToken cancellationToken)
     {

@@ -17,6 +17,7 @@ internal static class ProviderContractSelfTest
         results.AddRange(AgentHostProviderDecisionRecovery.RunContractSelfTests());
         results.AddRange(StoryModeEstablishClanLifecycleStatus.RunContractSelfTests());
         results.AddRange(AgentHostHarnessProgressTrace.RunContractSelfTests());
+        results.AddRange(AgentHostNativeInquiryResolution.RunContractSelfTests());
         var villageQuestPrompt = AgentHostDecisionCycle.VillageToolsQuestSystemPrompt;
         if (!villageQuestPrompt.Contains("talkToSettlementHero", StringComparison.Ordinal) ||
             !villageQuestPrompt.Contains("only before a conversation is open, and only if talkToSettlementHero is currently listed", StringComparison.Ordinal) ||
@@ -28,6 +29,7 @@ internal static class ProviderContractSelfTest
             throw new AgentHostException("village-tools-prompt-native-action-id-mismatch", "The quest prompt must name the exact Native contact action and prevent stale contact/decision repetition after conversation opens or feedback rejects an action.");
         results.Add(new { scenario = "village-tools-prompt-uses-exact-native-action-id", passed = true });
         results.AddRange(NativeMailboxClient.RunVillageToolsQuestActionContractSelfTests());
+        results.AddRange(NativeMailboxClient.RunNativeInquiryResponseContractSelfTests());
         results.AddRange(NativeMailboxClient.RunBattleSimulationActionContractSelfTests());
         results.AddRange(NativeMailboxClient.RunGoldSaleActionContractSelfTests());
         results.AddRange(NativeMailboxClient.RunRecruitmentActionContractSelfTests());
