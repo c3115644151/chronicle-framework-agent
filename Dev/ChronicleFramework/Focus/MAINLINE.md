@@ -869,6 +869,8 @@ FreeLLMAPI 官方 CLI 现已从 Electron Local Storage 的本地 dashboard sessi
 
 为让下一次真实门禁尝试覆盖多项Native行动，而非在10分钟人为窗口内只记录一两步，FreshStoryMode模型评测的Harness-only自动停止窗现提高到7200秒，并匹配Host自治循环已有的7200秒硬预算；测试外限为7500秒。只在带Harness临时目录的`agent-host-lifecycle-test`运行下生效，正常MCM Agent不会被此窗中止。下一次可用远端评测将试用FreeLLMAPI `auto:reliable`，不是把目录ready视为可用：每一条真实回复都须记录它实际路由到的Provider，并按当时的成功率排序决定候选；FreeLLMAPI官方说明`auto:reliable`偏重近期成功率、结构化响应候选会按`response_format`能力过滤，真实效果仍以本机请求收据为准。[FreeLLMAPI routing strategies](https://github.com/lov0u/freellmapi/blob/main/docs/api.md#routing-strategies-auto)
 
+`TestResults/20261024-061135`用`auto:reliable`真实自然战役验证了FreeLLMAPI会先实际路由/回退（Google别名404、Qwen socket断连后曾由OVH GPT-OSS接续）；AI完整完成Native姓名/默认旗帜开局、自然移动到两个不同Town，并通过`town_backstreet`→`town_tavern`进入Town Tavern Mission。第二个Town的Native `missionSceneAgents`返回了一位符合源码候选过滤条件的Wanderer Hero；视觉关键帧也显示AI在酒馆3D场景中，真实模型随后却选择`stop`。当时Host把`stop`放在Mission可用控制中，但父循环只允许无遭遇的free Map终止子路线，所以Host按保护规则失败退出，没有把Mission当作已完成或自动改选动作；EYC四目标仍为Gold1000/Renown20/Party1/Companion0。这个样本把下一处真实缺口收敛为Mission内退出/重规划协议，而不是模型路由或Banner设置：Host现只在Map暴露子目标`stop`，Mission目录在Wanderer Navigate/Interact同时始终列原版`missionLeave`；Mission模型误回stop/未列控制时，按当前Native动作目录最多纠正两次，执行Native Leave并回Map后才允许父循环重规划。`TestResults/20261024-064520`Build/AgentHostPackage已通过211项Provider合同，其中Fake Native/Provider样例验证Mission内stop→恢复请求明确列出`missionLeave`→原版Leave回Map后才允许安全stop；修复后的真实模型Campaign仍待重跑，产品全Quest门禁仍未完成。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager

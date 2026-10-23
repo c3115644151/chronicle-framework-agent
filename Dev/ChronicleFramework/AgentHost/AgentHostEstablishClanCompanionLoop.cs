@@ -80,6 +80,31 @@ internal static class AgentHostEstablishClanCompanionLoop
         if (optionIds is null || optionIds.Count != 1 || optionIds[0]?.GetValue<string>() != "main_option_faction_hire")
             throw new AgentHostException("establish-clan-companion-unrelated-dialogue-leaked", "The companion executor may expose only the source-verified hiring conversation options.");
 
+        var missionCandidateState = new JsonObject
+        {
+            ["context"] = new JsonObject { ["gameState"] = "MissionState", ["encounterActive"] = false },
+            ["mission"] = new JsonObject { ["nearbySceneAgents"] = new JsonArray() }
+        };
+        var missionCandidateReceipt = new JsonObject
+        {
+            ["data"] = new JsonObject
+            {
+                ["agents"] = new JsonArray(new JsonObject
+                {
+                    ["agentIndex"] = 4, ["heroId"] = "wanderer-a", ["occupation"] = "Wanderer",
+                    ["isNotable"] = false, ["isEnemy"] = false, ["distance"] = 6.0
+                })
+            }
+        };
+        var missionCandidateCatalog = BuildActionCatalog(missionCandidateState, new JsonArray(), new JsonObject(), null,
+            missionCandidateReceipt, null, null, false, new HashSet<string>(StringComparer.Ordinal), new HashSet<string>(StringComparer.Ordinal));
+        if (!missionCandidateCatalog.OfType<JsonObject>().Any(action => ReadString(action, "action") == "missionNavigateToAgent") ||
+            !missionCandidateCatalog.OfType<JsonObject>().Any(action => ReadString(action, "action") == "missionLeave"))
+            throw new AgentHostException("establish-clan-companion-mission-exit-not-listed", "A Tavern Mission with a Wanderer candidate must offer both the Native hiring route and a Native exit so the model can leave safely and replan.");
+        if (BuildControlCatalog(false, false, false, false).Any(control => control?.GetValue<string>() == "stop") ||
+            !BuildControlCatalog(true, false, false, false).Any(control => control?.GetValue<string>() == "stop"))
+            throw new AgentHostException("establish-clan-companion-stop-scope-invalid", "A subgoal may stop for parent replan only from a free Native Map, never from inside a Mission.");
+
         var safeMap = FilterSafeTowns(new JsonArray
         {
             new JsonObject { ["id"] = "town-a", ["type"] = "town", ["distance"] = 4.0, ["hostile"] = false, ["underSiege"] = false },
@@ -124,8 +149,9 @@ internal static class AgentHostEstablishClanCompanionLoop
         }, new JsonArray(), new JsonObject(), null,
             new JsonObject { ["data"] = new JsonObject { ["agents"] = new JsonArray(new JsonObject { ["agentIndex"] = 4, ["heroId"] = "wanderer-a", ["occupation"] = "Wanderer", ["isNotable"] = false, ["isEnemy"] = false, ["distance"] = 6.0 }) } },
             "wanderer-a", null, false, new HashSet<string>(StringComparer.Ordinal), new HashSet<string>(StringComparer.Ordinal));
-        if (options.Count != 1 || ReadString(options[0] as JsonObject, "action") != "missionInteract")
-            throw new AgentHostException("establish-clan-companion-native-interaction-route-failed", "An observed, interactable local Wanderer must use Native Agent interaction rather than an invented conversation action.");
+        if (!options.OfType<JsonObject>().Any(action => ReadString(action, "action") == "missionInteract") ||
+            !options.OfType<JsonObject>().Any(action => ReadString(action, "action") == "missionLeave"))
+            throw new AgentHostException("establish-clan-companion-native-interaction-route-failed", "An observed, interactable local Wanderer must use Native Agent interaction while retaining the Native option to leave its Mission safely.");
 
         return [
             new { scenario = "establish-clan-companion-targets-only-current-safe-unvisited-town-and-friendly-wanderer", passed = true },
@@ -156,10 +182,20 @@ internal static class AgentHostEstablishClanCompanionLoop
             ReadString(stopped["termination"] as JsonObject, "reason") != "companion-model-stopped" ||
             ReadInt(stopped, "actionsExecuted", 0) != 0 || stopProvider.CallCount != 1 || stopClient.Actions.Count != 0)
             throw new AgentHostException("establish-clan-companion-safe-stop-self-test-failed", "A listed stop control must stop the Companion subgoal explicitly without being rejected as an unavailable control or sending a Native action.");
+        var missionStopClient = new FakeMissionStopRecoveryClient();
+        var missionStopProvider = new FakeMissionStopRecoveryProvider();
+        var missionStopRecovered = await RunAsync(request.RootElement, missionStopClient, missionStopClient, missionStopProvider, CancellationToken.None);
+        if (ReadString(missionStopRecovered, "status") != "interrupted" ||
+            ReadString(missionStopRecovered["termination"] as JsonObject, "reason") != "companion-model-stopped" ||
+            ReadInt(missionStopRecovered, "actionsExecuted", 0) != 3 || missionStopProvider.CallCount != 5 ||
+            !missionStopClient.Actions.SequenceEqual(["missionSceneAgents", "missionLeave", "mapSettlementTargets"], StringComparer.Ordinal) ||
+            !missionStopProvider.SawMissionStopRecovery)
+            throw new AgentHostException("establish-clan-companion-mission-stop-did-not-recover-to-map", "A model stop inside a Tavern Mission must be corrected to a listed Native exit, return to Map, and only then allow safe parent replanning.");
         var movementWaitResult = await RunMapMovementWaitSelfTestAsync();
         return [
             new { scenario = "establish-clan-companion-runtime-observe-travel-tavern-native-dialogue-hire-and-journal-verify", decisions = provider.CallCount, nativeActions = client.Actions.ToArray(), passed = true },
             new { scenario = "establish-clan-companion-listed-safe-stop-is-interrupted-with-zero-native-actions", decisions = stopProvider.CallCount, passed = true },
+            new { scenario = "establish-clan-companion-mission-stop-is-corrected-to-native-leave-before-parent-replan", decisions = missionStopProvider.CallCount, nativeActions = missionStopClient.Actions.ToArray(), passed = true },
             movementWaitResult
         ];
     }
@@ -209,6 +245,8 @@ internal static class AgentHostEstablishClanCompanionLoop
         var missionTransitionPending = false;
         var visitedTowns = new HashSet<string>(StringComparer.Ordinal);
         var visitedHeroes = new HashSet<string>(StringComparer.Ordinal);
+        var rejectedProviderDecisions = 0;
+        JsonObject? decisionFeedback = null;
         var start = Stopwatch.GetTimestamp();
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxSeconds));
@@ -288,7 +326,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                 var missionNavigationActive = gameState == "MissionState" && ReadBoolean(state["mission"]?["navigation"] as JsonObject, "active");
                 var missionLeaveActive = gameState == "MissionState" && ReadBoolean(state["mission"]?["leave"] as JsonObject, "active");
                 var actionPending = !sceneNotificationActive && (mapMovementPending || menuArrivalPending || missionNavigationActive || missionLeaveActive || missionTransitionPending);
-                var controls = BuildControlCatalog(!sceneNotificationActive && (mapMovementPending || menuArrivalPending), missionNavigationActive, missionLeaveActive || missionTransitionPending);
+                var controls = BuildControlCatalog(gameState == "MapState", !sceneNotificationActive && (mapMovementPending || menuArrivalPending), missionNavigationActive, missionLeaveActive || missionTransitionPending);
                 var catalog = BuildActionCatalog(state, journal, objective, safeTowns, sceneAgentsReceipt, selectedHeroId,
                     moveTargetId, actionPending, visitedTowns, visitedHeroes);
                 if (liveGoalAhead && !sceneNotificationActive)
@@ -310,9 +348,31 @@ internal static class AgentHostEstablishClanCompanionLoop
                     ["observation"] = observation,
                     ["allowedActions"] = catalog.DeepClone(),
                     ["allowedControls"] = controls.DeepClone(),
-                    ["previousActionReceipt"] = trace.LastOrDefault() is JsonObject lastTrace ? lastTrace["nativeReceipt"]?.DeepClone() : null
+                    ["previousActionReceipt"] = trace.LastOrDefault() is JsonObject lastTrace ? lastTrace["nativeReceipt"]?.DeepClone() : null,
+                    ["decisionFeedback"] = decisionFeedback?.DeepClone()
                 };
-                var decision = await AgentHostDecisionCycle.DecideEstablishClanCompanionAsync(provider, modelRequest, elapsed.Token);
+                ProviderDecisionResult decision;
+                try
+                {
+                    decision = await AgentHostDecisionCycle.DecideEstablishClanCompanionAsync(provider, modelRequest, elapsed.Token);
+                }
+                catch (AgentHostException exception) when (AgentHostProviderDecisionRecovery.CanRetry(exception.Code, rejectedProviderDecisions))
+                {
+                    decisions++;
+                    rejectedProviderDecisions++;
+                    decisionFeedback = AgentHostProviderDecisionRecovery.BuildFeedback(exception.Code, catalog, controls);
+                    trace.Add(new JsonObject
+                    {
+                        ["iteration"] = decisions,
+                        ["stage"] = "decision-rejected-before-native",
+                        ["rejectionCode"] = exception.Code,
+                        ["nativeActionSent"] = false,
+                        ["allowedActionNames"] = AgentHostProviderDecisionRecovery.CurrentActionNames(catalog),
+                        ["allowedControls"] = controls.DeepClone(),
+                        ["feedback"] = decisionFeedback.DeepClone()
+                    });
+                    continue;
+                }
                 decisions++;
                 promptTokens += decision.PromptTokens ?? 0;
                 completionTokens += decision.CompletionTokens ?? 0;
@@ -325,6 +385,19 @@ internal static class AgentHostEstablishClanCompanionLoop
                     ["promptTokens"] = decision.PromptTokens,
                     ["completionTokens"] = decision.CompletionTokens
                 });
+
+                if (ReadBoolean(decision.Decision, "stop") && !controls.Any(control => control?.GetValue<string>() == "stop"))
+                {
+                    if (!AgentHostProviderDecisionRecovery.CanRetry("provider-control-unavailable", rejectedProviderDecisions))
+                        return BuildResult("failed", "companion-stop-recovery-exhausted", "The model kept requesting a stop while still inside a Native Mission; no map replan was claimed.", "companion-stop-recovery-exhausted", state, journal, objective);
+                    rejectedProviderDecisions++;
+                    decisionFeedback = AgentHostProviderDecisionRecovery.BuildFeedback("provider-control-unavailable", catalog, controls);
+                    trace.Add(BuildStep(decisions, observation, decision.Decision, null, state, "rejected",
+                        new JsonObject { ["kind"] = "decision-rejected-before-native", ["message"] = decisionFeedback["requiredNextStep"]?.DeepClone() }));
+                    continue;
+                }
+                rejectedProviderDecisions = 0;
+                decisionFeedback = null;
 
                 if (ReadBoolean(decision.Decision, "stop"))
                     return BuildResult("interrupted", "companion-model-stopped", ReadString(decision.Decision, "reason") ?? "The model safely stopped this Companion subgoal before another Native action.", "companion-model-stopped", state, journal, objective);
@@ -586,6 +659,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                 ["argumentValues"] = new JsonObject { ["AgentIndex"] = new JsonArray(indexes) },
                 ["candidateHeroes"] = new JsonArray(nearbyInteractable.Select(candidate => (JsonNode?)new JsonObject { ["heroId"] = ReadString(candidate, "heroId"), ["name"] = ReadString(candidate, "name"), ["agentIndex"] = ReadInt(candidate, "agentIndex", -1), ["distance"] = ReadDouble(candidate, "distance") }).ToArray())
             });
+            catalog.Add(new JsonObject { ["action"] = "missionLeave", ["arguments"] = new JsonArray() });
             return catalog;
         }
 
@@ -601,6 +675,7 @@ internal static class AgentHostEstablishClanCompanionLoop
             },
             ["candidateHeroes"] = new JsonArray(targets.Select(candidate => (JsonNode?)new JsonObject { ["heroId"] = ReadString(candidate, "heroId"), ["name"] = ReadString(candidate, "name"), ["agentIndex"] = ReadInt(candidate, "agentIndex", -1), ["distance"] = ReadDouble(candidate, "distance") }).ToArray())
         });
+        catalog.Add(new JsonObject { ["action"] = "missionLeave", ["arguments"] = new JsonArray() });
         return catalog;
     }
 
@@ -738,9 +813,10 @@ internal static class AgentHostEstablishClanCompanionLoop
         return catalog;
     }
 
-    private static JsonArray BuildControlCatalog(bool mapMovementPending, bool missionNavigationActive, bool missionLeaveActive)
+    private static JsonArray BuildControlCatalog(bool allowStop, bool mapMovementPending, bool missionNavigationActive, bool missionLeaveActive)
     {
-        var controls = new JsonArray("stop");
+        var controls = new JsonArray();
+        if (allowStop) controls.Add("stop");
         if (mapMovementPending || missionNavigationActive || missionLeaveActive) controls.Add("observeAgain");
         return controls;
     }
@@ -1189,6 +1265,128 @@ internal static class AgentHostEstablishClanCompanionLoop
                 throw new AgentHostException("companion-stop-selftest-control-not-listed", "The model prompt allows a safe stop, so the action catalog must list that control.");
             return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "self-test",
                 new JsonObject { ["stop"] = true, ["reason"] = "No safe action now." }, "self-test", "json_schema"));
+        }
+        public void Dispose() { }
+    }
+
+    private sealed class FakeMissionStopRecoveryClient : IAgentHostCampaignNativeClient, IAgentHostCompanionHiringNativeClient, IAgentHostQuestDetailsNativeClient
+    {
+        private bool _leftMission;
+        internal List<string> Actions { get; } = new();
+
+        public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var mission = !_leftMission;
+            var state = new JsonObject
+            {
+                ["context"] = new JsonObject
+                {
+                    ["gameState"] = mission ? "MissionState" : "MapState",
+                    ["menuId"] = mission ? "town_backstreet" : "",
+                    ["encounterActive"] = false,
+                    ["inquiryOpen"] = false,
+                    ["captivity"] = new JsonObject { ["isCaptive"] = false }
+                },
+                ["location"] = new JsonObject { ["currentSettlementId"] = mission ? "town-a" : null },
+                ["mission"] = mission ? new JsonObject
+                {
+                    ["navigation"] = new JsonObject { ["active"] = false },
+                    ["leave"] = new JsonObject { ["active"] = false },
+                    ["nearbySceneAgents"] = new JsonArray()
+                } : null,
+                ["party"] = new JsonObject { ["members"] = 1, ["isMoving"] = false },
+                ["economy"] = new JsonObject { ["gold"] = 1000 },
+                ["storyModeEstablishClan"] = new JsonObject { ["companions"] = new JsonObject { ["current"] = 0, ["target"] = 1 } }
+            };
+            return Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["state"] = state }.ToJsonString()));
+        }
+
+        public Task<JsonDocument> ReadQuestDetailsAsync(string questId, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (questId != QuestId) throw new AgentHostException("companion-mission-stop-selftest-wrong-quest", "The companion Mission stop recovery read an unexpected Journal.");
+            var stages = new JsonArray(
+                new JsonObject { ["hasTask"] = true, ["currentProgress"] = 1000, ["targetProgress"] = 2000, ["description"] = "gold" },
+                new JsonObject { ["hasTask"] = true, ["currentProgress"] = 1, ["targetProgress"] = 25, ["description"] = "partySize" },
+                new JsonObject { ["hasTask"] = true, ["currentProgress"] = 20, ["targetProgress"] = 50, ["description"] = "renown" },
+                new JsonObject { ["hasTask"] = true, ["currentProgress"] = 0, ["targetProgress"] = 1, ["description"] = "companions" });
+            return Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["data"] = new JsonObject { ["questId"] = QuestId, ["journalStages"] = stages } }.ToJsonString()));
+        }
+
+        public Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Actions.Add(action);
+            if (action == "mapSettlementTargets")
+                return Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["action"] = action, ["data"] = new JsonObject { ["mapSettlementTargets"] = new JsonArray() } }.ToJsonString()));
+            throw new AgentHostException("companion-mission-stop-selftest-unexpected-campaign-action", "The model issued an unexpected Campaign action while recovering from a Mission stop.");
+        }
+
+        public Task<JsonDocument> ExecuteCompanionHiringActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Actions.Add(action);
+            if (action == "missionSceneAgents")
+            {
+                var agent = new JsonObject
+                {
+                    ["agentIndex"] = 4, ["heroId"] = "wanderer-a", ["occupation"] = "Wanderer",
+                    ["isNotable"] = false, ["isEnemy"] = false, ["distance"] = 6.0
+                };
+                return Task.FromResult(JsonDocument.Parse(new JsonObject
+                {
+                    ["status"] = "completed", ["action"] = action,
+                    ["data"] = new JsonObject { ["scope"] = "current-location-mission", ["activeAgentCount"] = 1, ["agents"] = new JsonArray(agent) }
+                }.ToJsonString()));
+            }
+            if (action == "missionLeave")
+            {
+                _leftMission = true;
+                return Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["action"] = action, ["data"] = new JsonObject { ["nativeHandler"] = "LeaveMission" } }.ToJsonString()));
+            }
+            throw new AgentHostException("companion-mission-stop-selftest-unexpected-native-action", "The Mission stop recovery must choose the listed Native Leave action.");
+        }
+    }
+
+    private sealed class FakeMissionStopRecoveryProvider : IAgentHostDecisionProvider
+    {
+        internal int CallCount { get; private set; }
+        internal bool SawMissionStopRecovery { get; private set; }
+        public string ModelId => "deterministic-companion-mission-stop-recovery-selftest";
+        public string ConfigurationSource => "harness-fake-provider";
+        public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) { cancellationToken.ThrowIfCancellationRequested(); return Task.CompletedTask; }
+        public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CallCount++;
+            var actions = request.GetProperty("allowedActions").EnumerateArray().ToArray();
+            var controls = request.GetProperty("allowedControls").EnumerateArray().Select(control => control.GetString()).ToArray();
+            JsonObject decision;
+            if (actions.Any(action => action.GetProperty("action").GetString() == "missionSceneAgents"))
+                decision = new JsonObject { ["action"] = "missionSceneAgents", ["arguments"] = new JsonObject() };
+            else if (CallCount == 2)
+                decision = new JsonObject { ["stop"] = true, ["reason"] = "The model first tries to stop inside a Mission." };
+            else if (CallCount == 3)
+            {
+                var feedback = request.TryGetProperty("decisionFeedback", out var feedbackElement) && feedbackElement.ValueKind == JsonValueKind.Object
+                    ? JsonNode.Parse(feedbackElement.GetRawText())?.AsObject()
+                    : null;
+                var missionLeaveListed = actions.Any(action => action.GetProperty("action").GetString() == "missionLeave");
+                SawMissionStopRecovery = feedback is not null && ReadString(feedback, "kind") == "decision-rejected-before-native" &&
+                    ReadString(feedback, "requiredNextStep")?.Contains("missionLeave", StringComparison.Ordinal) == true &&
+                    !controls.Contains("stop") && missionLeaveListed;
+                if (!SawMissionStopRecovery)
+                    throw new AgentHostException("companion-mission-stop-selftest-feedback-invalid", "The recovery request must remove stop, list the current Native Leave action, and explain the rejected control.");
+                decision = new JsonObject { ["action"] = "missionLeave", ["arguments"] = new JsonObject() };
+            }
+            else if (actions.Any(action => action.GetProperty("action").GetString() == "mapSettlementTargets"))
+                decision = new JsonObject { ["action"] = "mapSettlementTargets", ["arguments"] = new JsonObject() };
+            else if (controls.Contains("stop"))
+                decision = new JsonObject { ["stop"] = true, ["reason"] = "The route can now be safely replanned on Map." };
+            else throw new AgentHostException("companion-mission-stop-selftest-no-current-action", "The fake provider did not receive a supported current action or control.");
+
+            return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "self-test", decision, "self-test", "json_schema"));
         }
         public void Dispose() { }
     }

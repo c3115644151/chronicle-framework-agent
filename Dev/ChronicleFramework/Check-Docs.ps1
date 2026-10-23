@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.294'
+$contractVersion = '7.295'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -1172,6 +1172,14 @@ $missionInteractionAdapter = Get-Content (Join-Path $harnessRoot 'AgentMissionIn
 if ($missionInteractionTest -notmatch 'missionInteract' -or $missionInteractionTest -notmatch 'NativeOnUseStartsObservedTargetConversation' -or $missionInteractionTest -notmatch 'InvalidAgentRejectedWithoutConversation' -or $missionInteractionTest -notmatch 'ConversationTargetMatches' -or $missionInteractionTest -notmatch 'FixtureUnchanged' -or $missionInteractionTest -notmatch 'ProcessStopped' -or $missionInteractionAdapter -notmatch 'target\.OnUse\(mainAgent, -1\)' -or $missionInteractionAdapter -notmatch 'MissionConversationLogic' -or $missionInteractionAdapter -notmatch 'IsThereAgentAction' -or $missionInteractionAdapter -notmatch 'CanInteractWithAgent' -or $missionInteractionAdapter -match 'SetupAndStartMissionConversation' -or $agentProtocolSource -notmatch 'case "missionInteract"' -or $agentCliSource -notmatch "'missionInteract'" -or $agentDecisionLoopSource -notmatch "missionInteract = @\('AgentIndex'\)") { throw 'MissionInteraction must use the local Native Agent.OnUse pipeline, prevalidate native conversation/interaction rules, verify the actual target conversation, and reject invalid targets without direct ConversationManager starts.' }
 $companionHiringTest = Get-Content (Join-Path $harnessRoot 'Test-AgentCompanionHiring.ps1') -Raw -Encoding UTF8
 if ($companionHiringTest -notmatch 'missionNavigateToAgent' -or $companionHiringTest -notmatch 'missionInteract' -or $companionHiringTest -notmatch 'dialogueSelect' -or $companionHiringTest -notmatch 'main_option_faction_hire' -or $companionHiringTest -notmatch 'player_companion_hire_response_1' -or $companionHiringTest -notmatch 'HireCommitted' -or $companionHiringTest -notmatch 'StrictGoldEqualityRejected' -or $companionHiringTest -notmatch 'harnessPrepareCompanionHiringFixture' -or $companionHiringTest -notmatch 'harnessCompanionHiringDiagnostics' -or $companionHiringTest -notmatch 'FixtureUnchanged' -or $companionHiringTest -notmatch 'ProcessStopped' -or $agentProtocolSource -notmatch 'harnessPrepareCompanionHiringFixture is restricted to a visual Harness run' -or $agentProtocolSource -notmatch 'harnessCompanionHiringDiagnostics is restricted to a visual Harness run' -or $agentDecisionLoopSource -match 'harnessPrepareCompanionHiringFixture|harnessCompanionHiringDiagnostics') { throw 'CompanionHiring must traverse observed Tavern Mission dialogue, verify the native price and Clan/Party result plus strict-gold refusal, and keep Gold injection/diagnostics Harness-only.' }
+if ($agentHostCompanionLoopSource -notmatch 'BuildControlCatalog\(gameState == "MapState"' -or
+    $agentHostCompanionLoopSource -notmatch 'missionStopRecoveryProvider' -or
+    $agentHostCompanionLoopSource -notmatch 'mission-stop-did-not-recover-to-map' -or
+    $agentHostCompanionLoopSource -notmatch 'BuildControlCatalog\(bool allowStop' -or
+    $agentHostCompanionLoopSource -notmatch 'decisionFeedback = AgentHostProviderDecisionRecovery\.BuildFeedback' -or
+    $agentHostCompanionLoopSource -notmatch 'missionLeave' -or
+    $agentHostDecisionCycleSource -notmatch 'var prompt = EstablishClanCompanionSystemPrompt' -or
+    $agentHostDecisionCycleSource -notmatch 'RECOVERY DIRECTIVE') { throw 'Companion Mission stops must be rejected before action, provide a bounded recovery from the exact Native catalog, and keep a Native missionLeave option beside Wanderer navigation/interact.' }
 if ($agentHostCompanionLoopSource -notmatch 'SafeTownDecisionWindowSize' -or $agentHostCompanionLoopSource -notmatch 'BuildSafeTownDecisionWindow' -or $agentHostCompanionLoopSource -notmatch 'additionalSafeTownTargetsAvailable' -or $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-town-choice-window-pages-without-world-target-cap' -or $agentHostCompanionLoopSource -notmatch 'while \(decisions < maxDecisions\)' -or $agentHostCompanionLoopSource -notmatch 'do not spend a model decision or issue another move/time command' -or $agentHostDecisionCycleSource -notmatch 'nearest unvisited decision window') { throw 'Companion map travel must use a bounded nearest-Town decision window that preserves access to the remaining world, and must observe active Native movement without repeated model calls or hidden clock actions.' }
 if (-not (Test-Path (Join-Path $harnessRoot 'AgentHost\AgentHostCampaignStateFacts.cs')) -or
     $agentHostCampaignStateFactsSource -notmatch 'IsNativeLocationMenu' -or
@@ -1350,11 +1358,17 @@ if ($harnessScript -notmatch "'FreshStoryModeNativeMenuLeaveEvaluation' \{ @\('P
     $freshCampaignSource -notmatch 'MissionScreen missionScreen && missionScreen\.IsConversationActive' -or
     $freshCampaignSource -notmatch 'conversation-ui-ended-manager-still-active' -or
     $freshCampaignSource -notmatch 'post-confirmation-dialogue-remained-active-after-8-native-continues') { throw 'The opt-in fresh StoryMode Native-menu test must wait for the visible conversation UI to end, use the bounded Native Tab fallback only when that UI is gone, then verify the map/menu/clock/Quest and preserve evidence without saving.' }
-if ($agentHostCompanionLoopSource -notmatch 'new JsonArray\("stop"\)' -or
+if ($agentHostCompanionLoopSource -notmatch 'BuildControlCatalog\(gameState == "MapState"' -or
+    $agentHostCompanionLoopSource -notmatch 'private static JsonArray BuildControlCatalog\(bool allowStop' -or
+    $agentHostCompanionLoopSource -notmatch 'if \(allowStop\) controls\.Add\("stop"\)' -or
+    $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-mission-stop-did-not-recover-to-map' -or
+    $agentHostCompanionLoopSource -notmatch 'decisionFeedback = AgentHostProviderDecisionRecovery\.BuildFeedback' -or
     $agentHostCompanionLoopSource -notmatch 'ReadBoolean\(decision\.Decision, "stop"\)' -or
+    $agentHostDecisionCycleSource -notmatch 'var prompt = EstablishClanCompanionSystemPrompt' -or
+    $agentHostDecisionCycleSource -notmatch 'RECOVERY DIRECTIVE' -or
     $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-listed-safe-stop-is-interrupted-with-zero-native-actions' -or
     $agentHostProviderSource -notmatch 'ContainsString\(request, "allowedControls", "stop"\)' -or
-    $agentHostProviderContractSelfTestSource -notmatch 'provider-normalizes-only-workflow-listed-safe-stop-control') { throw 'The Companion prompt may request a safe stop only when the control is explicitly listed, normalized as non-success, and tested to emit zero Native actions.' }
+    $agentHostProviderContractSelfTestSource -notmatch 'provider-normalizes-only-workflow-listed-safe-stop-control') { throw 'The Companion may stop only on free Map; Mission stop requests must be corrected against the current Native catalog, and only the original Native missionLeave may return it to Map for parent replanning.' }
 if ($agentHostEstablishClanPlannerSource -notmatch 'objective-selection-rejected-before-native' -or
     $agentHostEstablishClanPlannerSource -notmatch 'allowed ObjectiveId values are exactly' -or
     $agentHostDecisionCycleSource -notmatch 'Treat the current allowedActions list as exact' -or

@@ -242,8 +242,15 @@ internal static class AgentHostDecisionCycle
     internal static Task<ProviderDecisionResult> DecideEstablishClanCompanionAsync(
         IAgentHostDecisionProvider provider,
         JsonObject request,
-        CancellationToken cancellationToken) =>
-        DecideAsync(provider, request, EstablishClanCompanionSystemPrompt, cancellationToken);
+        CancellationToken cancellationToken)
+    {
+        var prompt = EstablishClanCompanionSystemPrompt;
+        var feedback = request["decisionFeedback"] as JsonObject;
+        if (ReadString(feedback, "kind") == "decision-rejected-before-native")
+            prompt += " RECOVERY DIRECTIVE: The prior response was rejected before any Native action. Follow this exact next step using only the current catalog; do not repeat the rejected response. " +
+                (ReadString(feedback, "requiredNextStep") ?? "Choose one action from the current allowedActions list.");
+        return DecideAsync(provider, request, prompt, cancellationToken);
+    }
 
     internal static Task<ProviderDecisionResult> DecideEstablishClanRecruitmentAsync(
         IAgentHostDecisionProvider provider,
