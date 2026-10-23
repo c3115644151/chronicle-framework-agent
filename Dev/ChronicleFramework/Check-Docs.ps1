@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.293'
+$contractVersion = '7.294'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -1309,10 +1309,10 @@ if ($freshCampaignSource -notmatch 'StoryModeNewGame' -or
     $harnessScript -notmatch "'FreshStoryModeSetup' \{ @\('Preflight', 'Build', 'FreshStoryModeSetup'\) \}" -or
     $harnessScript -notmatch "-StoryModeEycSetup -TimeoutSeconds 360" -or
     $harnessScript -notmatch "'FreshStoryModeModelEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'FreshStoryModeModelEvaluation'\) \}" -or
-    $harnessScript -notmatch '-StoryModeEycLiveModelEvaluation -TimeoutSeconds 900' -or
-    $harnessScript -notmatch "CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS', '600000'" -or
+    $harnessScript -notmatch '-StoryModeEycLiveModelEvaluation -TimeoutSeconds 7500' -or
+    $harnessScript -notmatch "CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS', '7200000'" -or
     $harnessScript -notmatch "CHRONICLE_LLM_TIMEOUT_SECONDS', '300'" -or
-    $agentHostRuntimeControllerSource -notmatch 'autoStopMilliseconds <= 600000' -or
+    $agentHostRuntimeControllerSource -notmatch 'autoStopMilliseconds <= 7200000' -or
     $harnessScript -notmatch "ValidateSet\('gpt-oss-20b','openai-gpt-oss-20b','nvidiallama-3.2-11b-vision','poolside-laguna-s-2.1','free-router','gemini-2.5-flash','mistral-nemo','mistral-small-3.2-24b','auto:reliable'\)" -or
     $harnessScript -notmatch 'CHRONICLE_HARNESS_AGENT_MODEL.*\$FreshStoryModeModel' -or
     $agentHostRuntimeControllerSource -notmatch 'CHRONICLE_HARNESS_AGENT_MODEL' -or

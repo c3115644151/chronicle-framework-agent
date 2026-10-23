@@ -867,6 +867,8 @@ FreeLLMAPI 官方 CLI 现已从 Electron Local Storage 的本地 dashboard sessi
 
 `TestResults/20261024-054410`用真实FreeLLMAPI Mistral Small从全新自然StoryMode再次走完教程跳过后的训练场Leave、原版通知、龙旗卡片、模型生成家族名、BannerEditor保留默认旗帜与后续教程Inquiry；Native回到Map后，模型先选Companion并用允许的`stop`无动作安全退出。父规划再次选已排除Companion后，精确候选反馈成功引导它改选PartySize，第一次真实Campaign证明该修正可被模型遵循。PartySize接着只执行`mapSettlementTargets`观察（全程Gold 1000、Renown 20、Party 1，EYC Journal无进展）；下一FreeLLMAPI请求遇OVH socket hang-up及路由冷却，Host在10分钟生命周期停止窗结束，累计12个模型决策/7个Native动作，无崩溃、正式存档写入或遗留进程。收据的Harness `Passed=true`只表示其观测/清理条件通过，不表示Quest完成；现增加单独的`StoryModeOriginalEstablishYourClanCompleted`字段，只有Host回执同时为completed且`goalVerified=true`才为真。此次字段修改不能回填旧收据，旧样本的原版Quest完成状态仍明确为未完成。
 
+为让下一次真实门禁尝试覆盖多项Native行动，而非在10分钟人为窗口内只记录一两步，FreshStoryMode模型评测的Harness-only自动停止窗现提高到7200秒，并匹配Host自治循环已有的7200秒硬预算；测试外限为7500秒。只在带Harness临时目录的`agent-host-lifecycle-test`运行下生效，正常MCM Agent不会被此窗中止。下一次可用远端评测将试用FreeLLMAPI `auto:reliable`，不是把目录ready视为可用：每一条真实回复都须记录它实际路由到的Provider，并按当时的成功率排序决定候选；FreeLLMAPI官方说明`auto:reliable`偏重近期成功率、结构化响应候选会按`response_format`能力过滤，真实效果仍以本机请求收据为准。[FreeLLMAPI routing strategies](https://github.com/lov0u/freellmapi/blob/main/docs/api.md#routing-strategies-auto)
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager
