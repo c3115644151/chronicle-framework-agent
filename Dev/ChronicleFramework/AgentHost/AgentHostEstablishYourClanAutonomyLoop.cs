@@ -56,6 +56,11 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             new { scenario = "establish-clan-autonomy-offers-only-integrated-unmet-objectives", passed = true },
             new { scenario = "establish-clan-autonomy-never-selects-unimplemented-or-met-objectives", passed = true }
         };
+        if (!IsSafeObjectiveRouteUnavailable("companions", "companion-model-stopped", freeMap: true) ||
+            IsSafeObjectiveRouteUnavailable("companions", "companion-model-stopped", freeMap: false) ||
+            IsSafeObjectiveRouteUnavailable("gold", "companion-model-stopped", freeMap: true))
+            throw new AgentHostException("establish-clan-autonomy-safe-stop-replan-policy-failed", "A safe Companion stop may mark only that route unavailable on a free Map; it must not hide an unrelated failure or encounter/captive state.");
+        results.Add(new { scenario = "establish-clan-autonomy-safe-companion-stop-marks-route-unavailable-and-allows-replan", passed = true });
 
         var native = new FakeNativeClient(activeQuest: true, lifecycle: "active", initialGold: 100);
         var provider = new FakeObjectiveProvider("gold");
@@ -216,18 +221,18 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             await provider.CheckConfiguredModelAsync(elapsed.Token);
             using (var initialState = await client.ReadStateAsync(elapsed.Token))
             {
-                if (!AgentHostEstablishYourClanGoalLoop.HasActiveQuest(initialState.RootElement))
+                var initialQuestActive = AgentHostEstablishYourClanGoalLoop.HasActiveQuest(initialState.RootElement);
+                var initialLifecycle = ReadLifecycleStatus(initialState.RootElement);
+                if (!initialQuestActive && initialLifecycle == "completed")
+                    return BuildResult("completed", "native-establish-your-clan-quest-success-verified", true, null, null,
+                        completionEvidence: "Native lifecycle status storyModeEstablishClanStatus=completed before objective execution");
+
+                // The tutorial-skip branch can naturally activate EYC before the first
+                // settled MapState, while the player still remains in training_field_menu.
+                // Run the same Native Leave action for both pre-activation and active-EYC
+                // states; do not let a subgoal-specific model prompt infer this bootstrap.
+                if (AgentHostStoryModeBootstrapLoop.IsEligibleTrainingFieldBootstrapState(initialState.RootElement))
                 {
-                    var lifecycle = ReadLifecycleStatus(initialState.RootElement);
-                    if (lifecycle == "completed")
-                        return BuildResult("completed", "native-establish-your-clan-quest-success-verified", true, null, null,
-                            completionEvidence: "Native lifecycle status storyModeEstablishClanStatus=completed before objective execution");
-
-                    if (!AgentHostStoryModeBootstrapLoop.IsEligibleTrainingFieldBootstrapState(initialState.RootElement))
-                        return BuildResult("failed", "quest-no-longer-active-without-success-evidence", false,
-                            "The original StoryMode quest is no longer active and Native history does not prove successful completion.",
-                            "establish-clan-native-success-unverified");
-
                     if (client is not IAgentHostStoryModeBootstrapNativeClient bootstrapClient)
                         return BuildResult("failed", "storymode-bootstrap-native-client-unavailable", false,
                             "The Native transport cannot submit the visible original training-field menu option.", "storymode-bootstrap-native-client-unavailable");
@@ -244,15 +249,20 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
 
                     if (ReadString(bootstrap, "status") != "completed")
                         return BuildResult("failed", "storymode-bootstrap-failed", false,
-                            ReadString(bootstrap, "failure") ?? "The Native StoryMode bootstrap did not verify original EYC activation.",
+                            ReadString(bootstrap, "failure") ?? "The Native StoryMode training-field exit did not verify a usable map and active EYC quest.",
                             ReadString(bootstrap, "failureCode") ?? "storymode-bootstrap-failed");
 
                     using var afterBootstrap = await client.ReadStateAsync(elapsed.Token);
-                    if (!AgentHostEstablishYourClanGoalLoop.HasActiveQuest(afterBootstrap.RootElement))
-                        return BuildResult("failed", "storymode-bootstrap-active-quest-unverified", false,
-                            "The bootstrap reported completion but fresh Native state does not show the exact active original EYC quest.",
+                    if (!AgentHostEstablishYourClanGoalLoop.HasActiveQuest(afterBootstrap.RootElement) ||
+                        !AgentHostStoryModeBootstrapLoop.HasLeftTrainingField(afterBootstrap.RootElement))
+                        return BuildResult("failed", "storymode-bootstrap-postcondition-unverified", false,
+                            "The bootstrap reported completion but fresh Native state does not show the player outside the training-field menu with the original EYC quest active.",
                             "storymode-bootstrap-active-quest-unverified");
                 }
+                else if (!initialQuestActive)
+                    return BuildResult("failed", "quest-no-longer-active-without-success-evidence", false,
+                        "The original StoryMode quest is no longer active and Native history does not prove successful completion.",
+                        "establish-clan-native-success-unverified");
             }
 
             if (client is IAgentHostNativeInquiryClient startupInquiryClient && client is IAgentHostStoryModeBannerEditorNativeClient startupBannerEditorClient)
@@ -518,13 +528,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                             journalObjectives, snapshot, differences);
                     }
 
-                    if (objectiveId is "partySize" or "companions" && freeMap && termination is ("native-journal-refresh-pending" or "recruitment-route-unavailable" or "companion-route-unavailable"))
-                    {
-                        unavailableObjectives.Add(objectiveId);
-                        trace.Add(new JsonObject { ["stage"] = "objective-route-blocked", ["objectiveId"] = objectiveId, ["termination"] = termination, ["failureCode"] = ReadString(child, "failureCode") });
-                        continue;
-                    }
-                    if (objectiveId == "renown" && termination == "no-safe-action" && freeMap)
+                    if (IsSafeObjectiveRouteUnavailable(objectiveId, termination, freeMap))
                     {
                         unavailableObjectives.Add(objectiveId);
                         trace.Add(new JsonObject { ["stage"] = "objective-route-blocked", ["objectiveId"] = objectiveId, ["termination"] = termination, ["failureCode"] = ReadString(child, "failureCode") });
@@ -635,6 +639,14 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             !state.TryGetProperty("storyModeEstablishClanStatus", out var status) || status.ValueKind != JsonValueKind.Object ||
             !status.TryGetProperty("status", out var value) || value.ValueKind != JsonValueKind.String) return null;
         return value.GetString();
+    }
+
+    internal static bool IsSafeObjectiveRouteUnavailable(string objectiveId, string? termination, bool freeMap)
+    {
+        if (!freeMap) return false;
+        if (objectiveId is "partySize" or "companions")
+            return termination is "native-journal-refresh-pending" or "recruitment-route-unavailable" or "companion-route-unavailable" or "companion-model-stopped";
+        return objectiveId == "renown" && termination == "no-safe-action";
     }
 
     private static bool IsPlayerCaptive(JsonElement native) => native.ValueKind == JsonValueKind.Object &&

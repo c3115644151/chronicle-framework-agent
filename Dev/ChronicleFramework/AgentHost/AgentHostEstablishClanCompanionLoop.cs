@@ -148,9 +148,18 @@ internal static class AgentHostEstablishClanCompanionLoop
             !client.Actions.SequenceEqual(expected, StringComparer.Ordinal) || client.Gold != 1340 || client.CompanionCount != 1 ||
             ReadBoolean((result["objectiveSnapshot"] as JsonObject)?["companions"] as JsonObject, "met") != true)
             throw new AgentHostException("establish-clan-companion-transport-self-test-failed", "The injected Native/Provider route did not follow the observed Tavern path, hire one quoted Wanderer, and verify refreshed original Journal progress. status=" + ReadString(result, "status") + "; termination=" + ReadString(result["termination"] as JsonObject, "reason") + "; failureCode=" + ReadString(result, "failureCode") + "; failure=" + ReadString(result, "failure") + "; actions=" + string.Join(",", client.Actions) + "; calls=" + provider.CallCount + "; journalMet=" + ReadBoolean((result["objectiveSnapshot"] as JsonObject)?["companions"] as JsonObject, "met"));
+        var stopClient = new FakeCompanionClient();
+        var stopProvider = new FakeCompanionStopProvider();
+        using var stopRequest = JsonDocument.Parse("{\"runId\":\"establish-clan-companion-safe-stop-selftest\",\"goal\":\"Hire one Companion.\",\"maxDecisions\":1,\"maxElapsedSeconds\":10}");
+        var stopped = await RunAsync(stopRequest.RootElement, stopClient, stopClient, stopProvider, CancellationToken.None);
+        if (ReadString(stopped, "status") != "interrupted" ||
+            ReadString(stopped["termination"] as JsonObject, "reason") != "companion-model-stopped" ||
+            ReadInt(stopped, "actionsExecuted", 0) != 0 || stopProvider.CallCount != 1 || stopClient.Actions.Count != 0)
+            throw new AgentHostException("establish-clan-companion-safe-stop-self-test-failed", "A listed stop control must stop the Companion subgoal explicitly without being rejected as an unavailable control or sending a Native action.");
         var movementWaitResult = await RunMapMovementWaitSelfTestAsync();
         return [
             new { scenario = "establish-clan-companion-runtime-observe-travel-tavern-native-dialogue-hire-and-journal-verify", decisions = provider.CallCount, nativeActions = client.Actions.ToArray(), passed = true },
+            new { scenario = "establish-clan-companion-listed-safe-stop-is-interrupted-with-zero-native-actions", decisions = stopProvider.CallCount, passed = true },
             movementWaitResult
         ];
     }
@@ -317,8 +326,8 @@ internal static class AgentHostEstablishClanCompanionLoop
                     ["completionTokens"] = decision.CompletionTokens
                 });
 
-                if (ReadString(decision.Decision, "control") == "stop")
-                    return BuildResult("interrupted", "companion-route-unavailable", ReadString(decision.Decision, "reason") ?? "The model stopped because no safe current Native action remained.", "companion-model-stopped", state, journal, objective);
+                if (ReadBoolean(decision.Decision, "stop"))
+                    return BuildResult("interrupted", "companion-model-stopped", ReadString(decision.Decision, "reason") ?? "The model safely stopped this Companion subgoal before another Native action.", "companion-model-stopped", state, journal, objective);
 
                 if (ReadString(decision.Decision, "control") == "observeAgain")
                 {
@@ -729,8 +738,12 @@ internal static class AgentHostEstablishClanCompanionLoop
         return catalog;
     }
 
-    private static JsonArray BuildControlCatalog(bool mapMovementPending, bool missionNavigationActive, bool missionLeaveActive) =>
-        mapMovementPending || missionNavigationActive || missionLeaveActive ? new JsonArray("observeAgain") : new JsonArray();
+    private static JsonArray BuildControlCatalog(bool mapMovementPending, bool missionNavigationActive, bool missionLeaveActive)
+    {
+        var controls = new JsonArray("stop");
+        if (mapMovementPending || missionNavigationActive || missionLeaveActive) controls.Add("observeAgain");
+        return controls;
+    }
 
     private static JsonObject BuildObservation(JsonObject state, JsonArray journal, JsonObject objective, JsonArray? safeTowns,
         JsonObject? sceneAgentsReceipt, string? selectedHeroId, string? interactTargetHeroId, int traceCount)
@@ -1158,6 +1171,24 @@ internal static class AgentHostEstablishClanCompanionLoop
                 ["arguments"] = selected.Arguments.DeepClone(),
                 ["rationale"] = "Choose the current Native option for the bounded hiring task."
             }));
+        }
+        public void Dispose() { }
+    }
+
+    private sealed class FakeCompanionStopProvider : IAgentHostDecisionProvider
+    {
+        internal int CallCount { get; private set; }
+        public string ModelId => "deterministic-establish-clan-companion-stop-selftest";
+        public string ConfigurationSource => "harness-fake-provider";
+        public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) { cancellationToken.ThrowIfCancellationRequested(); return Task.CompletedTask; }
+        public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CallCount++;
+            if (!request.GetProperty("allowedControls").EnumerateArray().Any(control => control.GetString() == "stop"))
+                throw new AgentHostException("companion-stop-selftest-control-not-listed", "The model prompt allows a safe stop, so the action catalog must list that control.");
+            return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "self-test",
+                new JsonObject { ["stop"] = true, ["reason"] = "No safe action now." }, "self-test", "json_schema"));
         }
         public void Dispose() { }
     }

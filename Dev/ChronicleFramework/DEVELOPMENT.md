@@ -23,9 +23,15 @@ EYC实机诊断只做只读FreeLLMAPI目录检查、构建、AgentHost包合同�
 
 Fresh StoryMode setup Harness只在显式`CHRONICLE_FRESH_CAMPAIGN_STORYMODE`辅助标记下从原版`InitialStateOption`目录执行官方`StoryModeNewGame`菜单委托；Campaign自身及原版CharacterCreation流程负责创建角色，再由Native `ConversationManager`选择训练场兄长的原版`player_answer_skip_tutorial`与`end_tutorial_yes`选项。不直接调用`CompleteTutorialPhase`、不写Quest/资源、也不保存或回载预备档；启动必须经过BLSE standalone与稳定Steam就绪检查，避免直接启动`Bannerlord.exe`触发Steam API警告。Harness分别记录教程跳过后首个稳定MapState和原版EYC Quest实际激活，不把二者当成同一个状态；非模型setup仍须验证EYC自然活动，而实时ModelEvaluation从首个稳定MapState接管，即使Quest尚未进入Journal。对已确认Skip的StoryMode，若当前确为`training_field_menu`且Native列出启用的`training_field_leave`，Host由真实模型选择该可见菜单动作并重新观察；它不预设选择、不调用时钟API，其他状态则安全失败。跳过与屏幕转场仍有连续引擎截图/录像，首帧和稳定帧都必须可区分，不能仅凭日志声称视觉已看见。
 
+Native Tutorial-skip链会因运行时序不同而在首个稳定Campaign MapState之前或之后激活EYC。因而Bootstrap边界不是“仅当Quest尚未激活才离开训练场”：精确`training_field_menu`、训练场地点与当前启用原版Leave选项成立时，Agent都必须先通过模型选当前Native `menuSelect`；退出后以新鲜MapState同时核实已离开训练场且EYC仍active，再处理可能出现的Native开局姓名/旗帜界面和四目标。不能让Companion、Gold或Renown子流程顺带承担这一步。
+
+原版第一块旗帜`SceneNotification`会异步显示。若Native已识别精确StoryMode卡片但`IsReady`/`canContinue`尚未成立，Host每250ms只读重查，不占一次模型决策、不发Native动作；卡片确认可继续后才交给模型选择原版Close handler。若受限重查次数耗尽或通知类型不符，则安全失败，不猜测关闭动作。
+
 `FreshStoryModeModelEvaluation`在同一个新建Campaign进程中完成上述Natural StoryMode/官方Skip起点，然后仅用Harness生命周期路径调用既有MCM“启动自主Agent”按钮；它不保存/回载Campaign，不通过固定动作路线推进四项目标。目标文本限定为完整EYC主线目标；FreeLLMAPI单请求默认300秒，Host Ready后Harness观察窗口最多600秒，并由外层900秒测试期限兜底。停止或到限时都会保留失败收据，不重放已执行Native动作。该窗口依据实测多次远端决策耗时约1–2.5分钟逐步加长，仍不改变用户正常Campaign启动后的Host寿命。EYC诊断Smoke最少等待240秒，避免把RGL仍在加载模块资源误判为崩溃；显式`CHRONICLE_LLM_TIMEOUT_SECONDS`用户设置优先。该窗口用于验证真实模型能从首个MapState经原版训练场菜单/Native动作继续进入EYC决策循环，不代表全Quest门禁已通过。评估通过条件还要求Host lifecycle收据证明至少执行过一条Native动作；只有分类或目标选择的样本保留证据但不标为通过。
 
 教程Skip后的原版启动链不是“看到弹窗就关掉”：Host还要由模型选择当前Native通知按钮、继续棕色`FindingFirstBannerPieceSceneNotificationItem`（执行原版`OnPieceFoundAction`）、为MainHero提交通过Native校验的家族名、在BannerEditor保留当前旗帜并调用Done，再处理出现的后续StoryMode教程Inquiry，重新观察回Map后才开始EYC目标循环。棕色卡片的`PauseActiveState=true`由源码和Native运行证据确认；用户另确认它显示时地图时间/队伍移动均停止。本轮完整链Fake Provider自检通过，原版callback/Name/Banner/后续Inquiry已用Native测试验证，但这些仍不能代替真实模型逐步处理。
+
+真实自然开局`TestResults/20261024-034735`已验证模型走过通知、第一块龙旗卡片、家族名提交、BannerEditor Done和后续教程Inquiry，最终Native state返回Campaign Map；本轮没有推进EYC Journal目标。父循环随后选择Companion目标，但子流程在Native动作前安全停止，故这项通过的是开局接管链，不是Establish Your Clan总门禁。
 
 Harness参数`-FreshStoryModeModel`只接受明示的远端路由标识，逐次固定一个模型；当前允许通用`gpt-oss-20b`、FreeLLMAPI Groq 专属`openai-gpt-oss-20b`、NVIDIA `nvidiallama-3.2-11b-vision`、Poolside `poolside-laguna-s-2.1`、Google `gemini-2.5-flash`、Mistral `mistral-nemo`。不选`auto`，避免无法审计的路由扇出或进入本地自定义端点；该覆盖只改变测试进程环境，不改玩家MCM/用户模型配置。FreeLLMAPI预检确认所选ID此刻出现在可执行目录，但`ready`不证明上游当前能回答。FreeLLMAPI将`openai-gpt-oss-20b`列为独立Groq远端路由；本机当前目录状态为`needsKey/no_key`，所以没有发送请求。模型结构化协议从当前模型的`supported_parameters`选择：声明`response_format`时用JSON Schema；否则仅在同时声明`tools`与`tool_choice`时用强制、无副作用的decision tool-call；两者均不支持时请求前安全失败。
 

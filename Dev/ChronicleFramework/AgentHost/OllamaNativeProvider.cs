@@ -851,6 +851,18 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             };
         }
 
+        if (controlName == "stop")
+        {
+            EnsureOnlyProperties(decision, "control", "reason", "rationale");
+            if (!ContainsString(request, "allowedControls", "stop"))
+                throw new AgentHostException("provider-control-unavailable", "stop is not currently listed; the workflow did not offer a safe stop control.");
+            return new JsonObject
+            {
+                ["stop"] = true,
+                ["reason"] = ValidateReason(ReadString(decision, "reason") ?? ReadString(decision, "rationale"))
+            };
+        }
+
         if (hasObserveAgain)
         {
             EnsureOnlyProperties(decision, "observeAgain", "control", "action", "arguments", "waitSeconds", "reason", "rationale");
@@ -990,9 +1002,30 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         {
             if (argumentValue.ValueKind == JsonValueKind.String)
             {
-                using var parsed = ParseJson(Encoding.UTF8.GetBytes(argumentValue.GetString()!), "provider-arguments-invalid-json");
-                argumentValue = parsed.RootElement.Clone();
-                continue;
+                var encodedArguments = argumentValue.GetString()!;
+                try
+                {
+                    using var parsed = ParseJson(Encoding.UTF8.GetBytes(encodedArguments), "provider-arguments-invalid-json");
+                    argumentValue = parsed.RootElement.Clone();
+                    continue;
+                }
+                catch (AgentHostException exception) when (exception.Code == "provider-arguments-invalid-json" &&
+                    allowedNames.Length == 1 &&
+                    (IsListedSingleArgumentValue(allowedAction, allowedNames[0], encodedArguments) ||
+                     IsStoryModeClanNameTextArgument(allowedAction, allowedNames[0], encodedArguments)))
+                {
+                    // Some OpenAI-compatible JSON-object routes emit a one-scalar argument
+                    // directly instead of wrapping it in an object. Repair only when the
+                    // active Native action catalog proves the exact enum choice, or when the
+                    // one text field is the StoryMode clan-name action whose native validator
+                    // still decides whether the proposed name may be committed.
+                    using var normalizedArguments = JsonDocument.Parse(JsonSerializer.Serialize(new Dictionary<string, string>
+                    {
+                        [allowedNames[0]] = encodedArguments
+                    }));
+                    argumentValue = normalizedArguments.RootElement.Clone();
+                    break;
+                }
             }
             if (argumentValue.ValueKind == JsonValueKind.Array && argumentValue.GetArrayLength() == 1)
             {
@@ -1042,6 +1075,24 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
 
         throw new AgentHostException("provider-arguments-shape-invalid", "Action arguments do not match the current Native catalog.");
     }
+
+    private static bool IsListedSingleArgumentValue(JsonElement allowedAction, string argumentName, string value)
+    {
+        if (!allowedAction.TryGetProperty("argumentValues", out var argumentValues) || argumentValues.ValueKind != JsonValueKind.Object)
+            return false;
+        foreach (var property in argumentValues.EnumerateObject())
+        {
+            if (!string.Equals(property.Name, argumentName, StringComparison.OrdinalIgnoreCase) || property.Value.ValueKind != JsonValueKind.Array)
+                continue;
+            return property.Value.EnumerateArray().Any(item => item.ValueKind == JsonValueKind.String && string.Equals(item.GetString(), value, StringComparison.Ordinal));
+        }
+        return false;
+    }
+
+    private static bool IsStoryModeClanNameTextArgument(JsonElement allowedAction, string argumentName, string value) =>
+        string.Equals(ReadString(allowedAction, "action"), "submitStoryModeClanName", StringComparison.Ordinal) &&
+        string.Equals(argumentName, "text", StringComparison.Ordinal) &&
+        !string.IsNullOrWhiteSpace(value) && value.Length <= 64;
 
     private static JsonElement? FindAllowedAction(JsonElement request, string actionName)
     {

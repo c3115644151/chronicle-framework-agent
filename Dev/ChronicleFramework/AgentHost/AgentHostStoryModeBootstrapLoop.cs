@@ -20,12 +20,12 @@ internal static class AgentHostStoryModeBootstrapLoop
         var wrongMenu = CreateState("unknown", tutorialCompleted: true, includeQuest: false);
         wrongMenu["state"]!["context"]!["menuId"] = "town";
 
-        if (IsEligibleTrainingFieldBootstrapState(Parse(activeQuest).RootElement) ||
+        if (!IsEligibleTrainingFieldBootstrapState(Parse(activeQuest).RootElement) ||
             !IsEligibleTrainingFieldBootstrapState(Parse(validBeforeActivation).RootElement) ||
             !IsEligibleTrainingFieldBootstrapState(Parse(validUnknown).RootElement) ||
             IsEligibleTrainingFieldBootstrapState(Parse(preTutorial).RootElement) ||
             IsEligibleTrainingFieldBootstrapState(Parse(wrongMenu).RootElement))
-            throw new AgentHostException("storymode-bootstrap-self-test-lifecycle-gate-failed", "The EYC bootstrap must activate only for a post-skip StoryMode training-field MapState with no active quest.");
+            throw new AgentHostException("storymode-bootstrap-self-test-lifecycle-gate-failed", "The Native training-field exit must run for the exact post-skip menu both before and after natural EYC activation, and reject other lifecycle/location states.");
 
         var noLeave = CreateState("unknown", tutorialCompleted: true, includeQuest: false);
         var options = noLeave["state"]!["availableMenuOptions"]!.AsArray();
@@ -50,12 +50,22 @@ internal static class AgentHostStoryModeBootstrapLoop
             fakeProvider.CallCount != 1 || fakeClient.MenuActionCount != 1 || !fakeClient.ActiveEyc)
             throw new AgentHostException("storymode-bootstrap-self-test-native-leave-activation-failed", "The model-selected current Native training-field leave option must activate the original quest and return fresh active-quest evidence.");
 
+        var activeQuestClient = new FakeBootstrapNativeClient(activeQuestAtStart: true);
+        var activeQuestProvider = new FakeBootstrapProvider();
+        var activeQuestExecution = RunAsync(request.RootElement, activeQuestClient, activeQuestClient, activeQuestProvider, CancellationToken.None).GetAwaiter().GetResult();
+        if (ReadString(activeQuestExecution, "status") != "completed" ||
+            ReadString(activeQuestExecution["termination"]?.AsObject(), "reason") != "native-training-field-left-with-active-eyc" ||
+            ReadInt(activeQuestExecution, "decisions", -1) != 1 || ReadInt(activeQuestExecution, "actionsExecuted", -1) != 1 ||
+            activeQuestProvider.CallCount != 1 || activeQuestClient.MenuActionCount != 1 || !activeQuestClient.ActiveEyc)
+            throw new AgentHostException("storymode-bootstrap-self-test-active-quest-leave-failed", "When EYC is already active on the first training-field MapState, the model must still leave via the Native option and verify it returned to usable MapState with EYC active.");
+
         return
         [
-            new { scenario = "storymode-bootstrap-only-at-post-skip-training-field-map", passed = true },
+            new { scenario = "storymode-training-field-exit-runs-before-or-after-natural-eyc-activation", passed = true },
             new { scenario = "storymode-bootstrap-requires-current-native-leave-option", passed = true },
             new { scenario = "storymode-bootstrap-model-catalog-enumerates-current-visible-menu", passed = true },
-            new { scenario = "storymode-bootstrap-model-selects-native-leave-and-requires-active-quest-postcondition", passed = true }
+            new { scenario = "storymode-bootstrap-model-selects-native-leave-and-requires-active-quest-postcondition", passed = true },
+            new { scenario = "storymode-training-field-leave-works-when-eyc-is-already-active", passed = true }
         ];
     }
 
@@ -66,9 +76,15 @@ internal static class AgentHostStoryModeBootstrapLoop
             !TryReadObject(state, "location", out var location)) return false;
 
         var lifecycleStatus = ReadString(lifecycle, "status");
-        if (lifecycleStatus is not ("storymode-not-activated" or "unknown") ||
+        var activeQuest = HasActiveQuest(native);
+        var lifecycleMatches = lifecycleStatus switch
+        {
+            "storymode-not-activated" or "unknown" => !activeQuest && ReadBoolean(lifecycle, "tutorialCompleted"),
+            "active" => activeQuest,
+            _ => false
+        };
+        if (!lifecycleMatches ||
             ReadString(lifecycle, "questId") != StoryQuestId ||
-            !ReadBoolean(lifecycle, "tutorialCompleted") ||
             ReadString(context, "gameState") != "MapState" ||
             ReadString(context, "menuId") != TrainingFieldMenuId ||
             ReadString(location, "currentSettlementId") != TrainingFieldSettlementId ||
@@ -135,11 +151,9 @@ internal static class AgentHostStoryModeBootstrapLoop
         try
         {
             using var observed = await client.ReadStateAsync(cancellationToken);
-            if (HasActiveQuest(observed.RootElement))
-                return BuildResult("completed", "native-storymode-quest-already-active", "", null);
-
             if (!IsEligibleTrainingFieldBootstrapState(observed.RootElement))
                 return BuildResult("failed", "storymode-bootstrap-state-unsupported", "The exact post-skip training-field map menu and current Native leave option were not observed.", "storymode-bootstrap-state-unsupported");
+            var questWasActive = HasActiveQuest(observed.RootElement);
 
             var allowedActions = BuildActionCatalog(observed.RootElement);
             var modelRequest = new JsonObject
@@ -154,7 +168,9 @@ internal static class AgentHostStoryModeBootstrapLoop
                 {
                     ["status"] = "completed",
                     ["scope"] = "post-tutorial-skip-storymode-bootstrap",
-                    ["message"] = "The first Campaign MapState is active but the original Establish Your Clan quest is not active yet. Use the currently visible Native training-field menu to continue the campaign.",
+                    ["message"] = questWasActive
+                        ? "The original Establish Your Clan quest is already active, but the player is still in the tutorial training-field menu. Leave through its current Native menu option."
+                        : "The first Campaign MapState is active but the original Establish Your Clan quest is not active yet. Use the currently visible Native training-field menu to continue the campaign.",
                     ["campaignDay"] = GetNativeNumber(observed.RootElement, "campaignDay"),
                     ["timeControlMode"] = GetNativeString(observed.RootElement, "timeControlMode"),
                     ["state"] = JsonNode.Parse(observed.RootElement.GetProperty("state").GetRawText())
@@ -162,8 +178,8 @@ internal static class AgentHostStoryModeBootstrapLoop
                 ["previousActionReceipt"] = null,
                 ["decisionFeedback"] = new JsonObject
                 {
-                    ["kind"] = "storymode-quest-awaiting-map-transition",
-                    ["requiredNextStep"] = "Choose one currently listed menuSelect option that leaves the tutorial training field; do not re-enter training, manipulate Campaign time, or claim quest completion."
+                    ["kind"] = questWasActive ? "storymode-active-quest-training-field-exit" : "storymode-quest-awaiting-map-transition",
+                    ["requiredNextStep"] = "Choose the currently listed Native training_field_leave menu option; do not re-enter training, manipulate Campaign time, or claim quest completion."
                 },
                 ["allowedActions"] = allowedActions,
                 ["allowedControls"] = new JsonArray(),
@@ -202,7 +218,9 @@ internal static class AgentHostStoryModeBootstrapLoop
             JsonObject actionReceipt;
             using (var response = await bootstrapClient.ExecuteTrainingFieldMenuSelectAsync(menuId, optionId, cancellationToken))
                 actionReceipt = CloneObject(response.RootElement);
-            if (ReadString(actionReceipt, "status") == "completed") nativeActions++;
+            if (ReadString(actionReceipt, "status") != "completed")
+                return BuildResult("failed", "storymode-bootstrap-native-menu-action-failed", "The original training-field menu handler did not report completion.", "storymode-bootstrap-native-menu-action-failed");
+            nativeActions++;
 
             var traceStep = new JsonObject
             {
@@ -227,11 +245,11 @@ internal static class AgentHostStoryModeBootstrapLoop
                 cancellationToken.ThrowIfCancellationRequested();
                 if (poll > 0) await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
                 using var fresh = await client.ReadStateAsync(cancellationToken);
-                if (HasActiveQuest(fresh.RootElement))
-                    return BuildResult("completed", "native-establish-your-clan-activated-after-visible-menu-action", null, null);
+                if (HasActiveQuest(fresh.RootElement) && HasLeftTrainingField(fresh.RootElement))
+                    return BuildResult("completed", questWasActive ? "native-training-field-left-with-active-eyc" : "native-establish-your-clan-activated-after-visible-menu-action", null, null);
             }
 
-            return BuildResult("failed", "storymode-bootstrap-quest-not-activated", "The selected Native training-field menu action completed, but fresh state did not show the original EYC quest active.", "storymode-bootstrap-quest-not-activated");
+            return BuildResult("failed", "storymode-bootstrap-postcondition-unverified", "The selected Native training-field menu action completed, but fresh state did not show both a usable map outside the training field and the original EYC quest active.", "storymode-bootstrap-postcondition-unverified");
         }
         catch (OperationCanceledException)
         {
@@ -278,6 +296,14 @@ internal static class AgentHostStoryModeBootstrapLoop
         native.TryGetProperty("state", out var state) && state.ValueKind == JsonValueKind.Object &&
         state.TryGetProperty("quests", out var quests) && quests.ValueKind == JsonValueKind.Array &&
         quests.EnumerateArray().Any(quest => quest.ValueKind == JsonValueKind.Object && ReadString(quest, "id") == StoryQuestId);
+
+    internal static bool HasLeftTrainingField(JsonElement native)
+    {
+        if (!TryReadState(native, out var state) || !TryReadObject(state, "context", out var context) || !TryReadObject(state, "location", out var location)) return false;
+        return ReadString(context, "gameState") == "MapState" &&
+               ReadString(context, "menuId") != TrainingFieldMenuId &&
+               ReadString(location, "currentSettlementId") != TrainingFieldSettlementId;
+    }
 
     private static bool TryReadState(JsonElement native, out JsonElement state)
     {
@@ -336,9 +362,17 @@ internal static class AgentHostStoryModeBootstrapLoop
 
     private sealed class FakeBootstrapNativeClient : IAgentHostCampaignNativeClient, IAgentHostStoryModeBootstrapNativeClient
     {
-        private JsonObject _state = CreateState("unknown", tutorialCompleted: true, includeQuest: false);
+        private readonly JsonObject _state;
         internal int MenuActionCount { get; private set; }
         internal bool ActiveEyc { get; private set; }
+
+        internal FakeBootstrapNativeClient(bool activeQuestAtStart = false)
+        {
+            ActiveEyc = activeQuestAtStart;
+            _state = activeQuestAtStart
+                ? CreateState("active", tutorialCompleted: true, includeQuest: true)
+                : CreateState("unknown", tutorialCompleted: true, includeQuest: false);
+        }
 
         public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
         {

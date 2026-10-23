@@ -219,6 +219,52 @@ internal static class ProviderContractSelfTest
             results.Add(new { scenario = "provider-decision-schema-uses-strict-compatible-root-wrapper", passed = true });
         }
 
+        using (var oneChoiceArgumentRequest = JsonDocument.Parse("""
+        {"goal":"Answer the current Native inquiry.","observation":{"state":{"context":{"inquiryOpen":true}}},"allowedActions":[{"action":"respondInquiry","arguments":["choice"],"argumentValues":{"choice":["affirmative","negative"]}}],"allowedControls":[]}
+        """))
+        using (var scalarChoiceDecision = JsonDocument.Parse("{\"action\":\"respondInquiry\",\"arguments\":\"affirmative\"}"))
+        {
+            var repaired = OllamaNativeProvider.NormalizeDecision(scalarChoiceDecision.RootElement, oneChoiceArgumentRequest.RootElement);
+            if (repaired["action"]?.GetValue<string>() != "respondInquiry" ||
+                repaired["arguments"]?["choice"]?.GetValue<string>() != "affirmative")
+                throw new AgentHostException("provider-single-enum-argument-normalization-failed", "A raw single-argument enum value was not mapped to its exact currently listed Native argument.");
+
+            using var unlistedScalar = JsonDocument.Parse("{\"action\":\"respondInquiry\",\"arguments\":\"teleport\"}");
+            try
+            {
+                _ = OllamaNativeProvider.NormalizeDecision(unlistedScalar.RootElement, oneChoiceArgumentRequest.RootElement);
+                throw new AgentHostException("provider-unlisted-scalar-argument-accepted", "A scalar shorthand outside the active Native enum values was accepted.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-arguments-invalid-json") { }
+            results.Add(new { scenario = "provider-repairs-only-exact-listed-single-enum-argument-shorthand", passed = true });
+
+            using var clanNameRequest = JsonDocument.Parse("""
+            {"goal":"Choose a valid family name.","observation":{"state":{"context":{"inquiryOpen":true}}},"allowedActions":[{"action":"submitStoryModeClanName","arguments":["text"]}],"allowedControls":[]}
+            """);
+            using var clanNameScalar = JsonDocument.Parse("{\"action\":\"submitStoryModeClanName\",\"arguments\":\"Chronicle Wolves\"}");
+            var clanNameNormalized = OllamaNativeProvider.NormalizeDecision(clanNameScalar.RootElement, clanNameRequest.RootElement);
+            if (clanNameNormalized["action"]?.GetValue<string>() != "submitStoryModeClanName" ||
+                clanNameNormalized["arguments"]?["text"]?.GetValue<string>() != "Chronicle Wolves")
+                throw new AgentHostException("provider-storymode-text-argument-normalization-failed", "A raw scalar clan-name string was not mapped to the single listed Native text field.");
+            results.Add(new { scenario = "provider-repairs-single-storymode-clan-name-text-shorthand-for-native-validation", passed = true });
+        }
+
+        using (var listedStopRequest = JsonDocument.Parse("{\"goal\":\"Safely stop this subgoal.\",\"observation\":{},\"allowedActions\":[],\"allowedControls\":[\"stop\"]}"))
+        using (var stopDecision = JsonDocument.Parse("{\"control\":\"stop\",\"reason\":\"No safe action now.\"}"))
+        {
+            var normalizedStop = OllamaNativeProvider.NormalizeDecision(stopDecision.RootElement, listedStopRequest.RootElement);
+            if (normalizedStop["stop"]?.GetValue<bool>() != true || normalizedStop["reason"]?.GetValue<string>() != "No safe action now.")
+                throw new AgentHostException("provider-stop-control-normalization-failed", "A workflow-listed safe stop must normalize without becoming goal completion.");
+            using var unlistedStopRequest = JsonDocument.Parse("{\"goal\":\"Choose an action.\",\"observation\":{},\"allowedActions\":[],\"allowedControls\":[]}");
+            try
+            {
+                _ = OllamaNativeProvider.NormalizeDecision(stopDecision.RootElement, unlistedStopRequest.RootElement);
+                throw new AgentHostException("provider-unlisted-stop-control-accepted", "The provider accepted a stop control not allowed by the current workflow.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-control-unavailable") { }
+            results.Add(new { scenario = "provider-normalizes-only-workflow-listed-safe-stop-control", passed = true });
+        }
+
         var visibleInquiry = new JsonObject
         {
             ["supported"] = true,

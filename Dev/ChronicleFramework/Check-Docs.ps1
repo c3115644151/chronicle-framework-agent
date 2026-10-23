@@ -778,6 +778,9 @@ $agentHostSupplyLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\Agen
 $agentHostMailboxSource = Get-Content (Join-Path $harnessRoot 'AgentHost\NativeMailboxClient.cs') -Raw -Encoding UTF8
 if ($agentHostProviderSource -notmatch 'CheckConfiguredModelAsync' -or $agentHostProviderSource -notmatch '/models' -or
     $agentHostProviderSource -notmatch 'FREELLMAPI_API_KEY' -or $agentHostProviderSource -notmatch 'X-Routed-Via' -or
+    $agentHostProviderSource -notmatch 'IsListedSingleArgumentValue' -or $agentHostProviderSource -notmatch 'IsStoryModeClanNameTextArgument' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'provider-repairs-only-exact-listed-single-enum-argument-shorthand' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'provider-repairs-single-storymode-clan-name-text-shorthand-for-native-validation' -or
     $agentHostProviderSource -notmatch 'auto:reliable' -or
     $agentHostProviderSelfTestSource -notmatch 'freellmapi-health-accepts-documented-auto-reliable-strategy-not-listed-as-model' -or
     $agentHostProviderSelfTestSource -notmatch 'freellmapi-health-rejects-unknown-auto-profile-not-listed-as-model' -or
@@ -1234,6 +1237,8 @@ if ($agentProtocolSource -notmatch 'case "sceneNotification"' -or $agentProtocol
     $nativeInquiryAdapterSource -notmatch 'StoryModeClanNameTextInquiry' -or $nativeInquiryAdapterSource -notmatch 'TextQueryPopUpVM.ExecuteAffirmativeAction' -or
     $bannerEditorAdapterSource -notmatch 'BannerEditorVM.ExecuteDone' -or $bannerEditorAdapterSource -notmatch 'ExecuteDone' -or
     $storyModeSetupLoopSource -notmatch 'family-name' -or $storyModeSetupLoopSource -notmatch 'banner-editor-done' -or $storyModeSetupLoopSource -notmatch 'stealth-tutorial-start' -or
+    $storyModeSetupLoopSource -notmatch 'if \(!ReadBoolean\(scene, "isReady"\) \|\| !ReadBoolean\(scene, "canContinue"\)\)' -or
+    $storyModeSetupLoopSource -notmatch 'storymode-setup-waits-for-scene-notification-native-readiness-without-spending-model-call' -or
     $companionLoopSource -notmatch 'continueSceneNotification' -or $companionLoopSource -notmatch 'native-map-scene-notification-closes-then-movement-resumes' -or
     $companionPromptSource -notmatch 'FindingFirstBannerPieceSceneNotificationItem' -or $companionPromptSource -notmatch 'family-name' -or
     $sceneNotificationTestSource -notmatch 'NativeSceneNotificationVMFieldsMatchData' -or $sceneNotificationTestSource -notmatch 'ActualEngineFrameCaptured' -or
@@ -1310,6 +1315,11 @@ if ($freshCampaignSource -notmatch 'StoryModeNewGame' -or
     $agentHostEstablishClanAutonomySource -notmatch 'AgentHostStoryModeBootstrapLoop.RunAsync' -or
     $agentHostStoryModeBootstrapLoopSource -notmatch 'ExecuteTrainingFieldMenuSelectAsync' -or
     $agentHostStoryModeBootstrapLoopSource -notmatch 'storymode-bootstrap-model-selects-native-leave' -or
+    $agentHostStoryModeBootstrapLoopSource -notmatch 'storymode-training-field-leave-works-when-eyc-is-already-active' -or
+    $agentHostStoryModeBootstrapLoopSource -notmatch 'HasLeftTrainingField' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'AgentHostStoryModeBootstrapLoop.IsEligibleTrainingFieldBootstrapState\(initialState.RootElement\)' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'companion-model-stopped' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'establish-clan-autonomy-safe-companion-stop-marks-route-unavailable-and-allows-replan' -or
     $freshCampaignSource -notmatch '_storyModeAgentAutostartArmed' -or
     $freshCampaignSource -notmatch 'if \(_storyModeAgentAutostartArmed\) return' -or
     $freshCampaignTest -notmatch 'storyModeLiveModelProducedDecision' -or
@@ -1334,6 +1344,11 @@ if ($harnessScript -notmatch "'FreshStoryModeNativeMenuLeaveEvaluation' \{ @\('P
     $freshCampaignSource -notmatch 'MissionScreen missionScreen && missionScreen\.IsConversationActive' -or
     $freshCampaignSource -notmatch 'conversation-ui-ended-manager-still-active' -or
     $freshCampaignSource -notmatch 'post-confirmation-dialogue-remained-active-after-8-native-continues') { throw 'The opt-in fresh StoryMode Native-menu test must wait for the visible conversation UI to end, use the bounded Native Tab fallback only when that UI is gone, then verify the map/menu/clock/Quest and preserve evidence without saving.' }
+if ($agentHostCompanionLoopSource -notmatch 'new JsonArray\("stop"\)' -or
+    $agentHostCompanionLoopSource -notmatch 'ReadBoolean\(decision\.Decision, "stop"\)' -or
+    $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-listed-safe-stop-is-interrupted-with-zero-native-actions' -or
+    $agentHostProviderSource -notmatch 'ContainsString\(request, "allowedControls", "stop"\)' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'provider-normalizes-only-workflow-listed-safe-stop-control') { throw 'The Companion prompt may request a safe stop only when the control is explicitly listed, normalized as non-success, and tested to emit zero Native actions.' }
 if ($harnessScript -notmatch "'FreshStoryModeNativeInquiryResponseEvaluation' \{ @\('Preflight', 'Build', 'FreshStoryModeNativeInquiryResponseEvaluation'\) \}" -or
     $harnessScript -notmatch '-StoryModeNativeMenuLeaveEvaluation -StoryModeNativeInquiryResponseEvaluation' -or
     $freshCampaignTest -notmatch '\[switch\]\$StoryModeNativeInquiryResponseEvaluation' -or

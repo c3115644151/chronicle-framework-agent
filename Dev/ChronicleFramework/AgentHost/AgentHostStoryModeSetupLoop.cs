@@ -10,7 +10,7 @@ internal static class AgentHostStoryModeSetupLoop
 
     internal static async Task<IReadOnlyList<object>> RunContractSelfTestsAsync()
     {
-        var native = new FakeStoryModeSetupNativeClient();
+        var native = new FakeStoryModeSetupNativeClient(delayNotificationReady: true);
         var provider = new FakeStoryModeSetupDecisionProvider();
         using var request = JsonDocument.Parse("{\"runId\":\"storymode-post-tutorial-setup-selftest\",\"goal\":\"Complete original family name and banner setup.\"}");
         var result = await RunAsync(request.RootElement, native, native, native, provider, CancellationToken.None);
@@ -21,7 +21,11 @@ internal static class AgentHostStoryModeSetupLoop
             provider.CallCount != expected.Length || native.Actions.Count != expected.Length ||
             !native.Actions.SequenceEqual(expected, StringComparer.Ordinal) || native.SubmittedClanName != "Chronicle Wolves")
             throw new AgentHostException("storymode-setup-loop-selftest-failed", "The Native startup chain must continue the verified banner notification, use TextQueryPopUpVM for a model-selected family name, commit the current BannerEditor through Done, answer the resulting tutorial inquiry, and return to Map. status=" + ReadString(result, "status") + "; actions=" + string.Join(",", native.Actions) + "; decisions=" + provider.CallCount);
-        return [new { scenario = "storymode-post-tutorial-native-notification-family-name-banner-editor-and-follow-up-inquiry-loop", decisions = provider.CallCount, nativeActions = native.Actions.ToArray(), passed = true }];
+        return
+        [
+            new { scenario = "storymode-post-tutorial-native-notification-family-name-banner-editor-and-follow-up-inquiry-loop", decisions = provider.CallCount, nativeActions = native.Actions.ToArray(), passed = true },
+            new { scenario = "storymode-setup-waits-for-scene-notification-native-readiness-without-spending-model-call", readinessPolls = native.NotificationReadinessPolls, passed = native.NotificationReadinessPolls == 2 }
+        ];
     }
 
     internal static async Task<JsonObject> RunAsync(
@@ -63,13 +67,22 @@ internal static class AgentHostStoryModeSetupLoop
                 if (ReadBoolean(scene, "hasActiveNotification"))
                 {
                     if (ReadString(scene, "dataType") != "FindingFirstBannerPieceSceneNotificationItem" ||
-                        ReadString(scene, "continuationKind") != "storymode-clan-name-setup" || !ReadBoolean(scene, "canContinue"))
+                        ReadString(scene, "continuationKind") != "storymode-clan-name-setup")
                     {
                         if (!started) return Result("not-needed", "scene-notification-outside-storymode-setup", null);
                         return Result("failed", "storymode-setup-scene-notification-unsupported", "A different or unsafe Native scene notification interrupted StoryMode setup.");
                     }
 
                     started = true;
+                    if (!ReadBoolean(scene, "isReady") || !ReadBoolean(scene, "canContinue"))
+                    {
+                        // Native loads/shows this Campaign callback-backed scene card
+                        // asynchronously. A current exact StoryMode card that is not yet
+                        // ready is a transition, not an unsupported modal or an LLM decision.
+                        await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
+                        continue;
+                    }
+
                     var observation = new JsonObject
                     {
                         ["scope"] = "original-storymode-post-tutorial-setup",
@@ -252,20 +265,29 @@ internal static class AgentHostStoryModeSetupLoop
     private sealed class FakeStoryModeSetupNativeClient : IAgentHostCampaignNativeClient, IAgentHostNativeInquiryClient, IAgentHostStoryModeBannerEditorNativeClient
     {
         private int _stage;
+        private readonly bool _delayNotificationReady;
         internal List<string> Actions { get; } = new();
         internal string? SubmittedClanName { get; private set; }
+        internal int NotificationReadinessPolls { get; private set; }
+
+        internal FakeStoryModeSetupNativeClient(bool delayNotificationReady = false) => _delayNotificationReady = delayNotificationReady;
 
         public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var context = new JsonObject { ["gameState"] = _stage == 3 ? "BannerEditorState" : "MapState" };
             if (_stage == 1)
+            {
+                var ready = !_delayNotificationReady || NotificationReadinessPolls > 0;
+                NotificationReadinessPolls++;
                 context["sceneNotification"] = new JsonObject
                 {
-                    ["hasActiveNotification"] = true, ["dataType"] = "FindingFirstBannerPieceSceneNotificationItem",
-                    ["continuationKind"] = "storymode-clan-name-setup", ["canContinue"] = true,
+                    ["hasActiveNotification"] = true, ["isReady"] = ready,
+                    ["dataType"] = "FindingFirstBannerPieceSceneNotificationItem",
+                    ["continuationKind"] = "storymode-clan-name-setup", ["canContinue"] = ready,
                     ["titleText"] = "You found the first banner piece.", ["clickToContinueText"] = "Click to continue"
                 };
+            }
             else
                 context["sceneNotification"] = new JsonObject { ["available"] = true, ["hasActiveNotification"] = false };
 
