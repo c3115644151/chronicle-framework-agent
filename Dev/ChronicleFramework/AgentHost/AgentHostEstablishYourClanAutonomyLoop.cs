@@ -64,6 +64,16 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             throw new AgentHostException("establish-clan-autonomy-safe-stop-replan-policy-failed", "Safe Companion/PartySize stops may block only that route on a free Map; they must not hide unrelated failures or encounter/captive state.");
         results.Add(new { scenario = "establish-clan-autonomy-safe-companion-and-recruitment-stops-mark-route-unavailable-and-allow-replan", passed = true });
 
+        using var townLocationMenu = JsonDocument.Parse("""
+            {"status":"completed","state":{"context":{"gameState":"MapState","menuId":"town","encounterActive":true,"encounteredPartyId":"town_ES3","captivity":{"isCaptive":false}},"location":{"currentSettlementId":"town_ES3"}}}
+            """);
+        using var hostileEncounter = JsonDocument.Parse("""
+            {"status":"completed","state":{"context":{"gameState":"MapState","menuId":"encounter","encounterActive":true,"encounteredPartyId":"looter-party","captivity":{"isCaptive":false}},"location":{"currentSettlementId":null}}}
+            """);
+        if (!IsFreeMapForObjectiveReplan(townLocationMenu.RootElement) || IsFreeMapForObjectiveReplan(hostileEncounter.RootElement))
+            throw new AgentHostException("establish-clan-autonomy-town-menu-free-map-classification-failed", "A Native Town location menu may report encounterActive=true but must remain a free Map for safe objective replanning; a real party encounter must still block it.");
+        results.Add(new { scenario = "establish-clan-autonomy-native-town-menu-is-free-map-for-objective-replan-but-hostile-encounter-is-not", passed = true });
+
         var native = new FakeNativeClient(activeQuest: true, lifecycle: "active", initialGold: 100);
         var provider = new FakeObjectiveProvider("gold");
         var executorCalls = 0;
@@ -422,11 +432,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                                         failedStateData.TryGetProperty("context", out var contextData) && contextData.ValueKind == JsonValueKind.Object
                         ? contextData
                         : default;
-                    var freeMap = failedContext.ValueKind == JsonValueKind.Object &&
-                                  ReadString(failedContext, "gameState") == "MapState" &&
-                                  !(failedContext.TryGetProperty("encounterActive", out var encounterActive) && encounterActive.ValueKind == JsonValueKind.True) &&
-                                  !(failedContext.TryGetProperty("captivity", out var captivity) && captivity.ValueKind == JsonValueKind.Object &&
-                                    captivity.TryGetProperty("isCaptive", out var captive) && captive.ValueKind == JsonValueKind.True);
+                    var freeMap = IsFreeMapForObjectiveReplan(failedState.RootElement);
 
                     // A child objective can stop when a Native modal appears, either before or
                     // after other Native actions. Resolve only the current supported prompt;
@@ -655,6 +661,15 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         if (objectiveId is "partySize" or "companions")
             return termination is "native-journal-refresh-pending" or "recruitment-route-unavailable" or "companion-route-unavailable" or "companion-model-stopped" or "recruitment-model-stopped";
         return objectiveId == "renown" && termination == "no-safe-action";
+    }
+
+    internal static bool IsFreeMapForObjectiveReplan(JsonElement native)
+    {
+        if (native.ValueKind != JsonValueKind.Object || !native.TryGetProperty("state", out var stateElement) || stateElement.ValueKind != JsonValueKind.Object)
+            return false;
+        var state = JsonNode.Parse(stateElement.GetRawText())?.AsObject();
+        if (state is null || ReadString(state["context"] as JsonObject, "gameState") != "MapState") return false;
+        return !AgentHostCampaignStateFacts.IsActiveEncounter(state) && !IsPlayerCaptive(native);
     }
 
     private static bool IsPlayerCaptive(JsonElement native) => native.ValueKind == JsonValueKind.Object &&

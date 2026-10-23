@@ -871,6 +871,8 @@ FreeLLMAPI 官方 CLI 现已从 Electron Local Storage 的本地 dashboard sessi
 
 `TestResults/20261024-061135`用`auto:reliable`真实自然战役验证了FreeLLMAPI会先实际路由/回退（Google别名404、Qwen socket断连后曾由OVH GPT-OSS接续）；AI完整完成Native姓名/默认旗帜开局、自然移动到两个不同Town，并通过`town_backstreet`→`town_tavern`进入Town Tavern Mission。第二个Town的Native `missionSceneAgents`返回了一位符合源码候选过滤条件的Wanderer Hero；视觉关键帧也显示AI在酒馆3D场景中，真实模型随后却选择`stop`。当时Host把`stop`放在Mission可用控制中，但父循环只允许无遭遇的free Map终止子路线，所以Host按保护规则失败退出，没有把Mission当作已完成或自动改选动作；EYC四目标仍为Gold1000/Renown20/Party1/Companion0。这个样本把下一处真实缺口收敛为Mission内退出/重规划协议，而不是模型路由或Banner设置：Host现只在Map暴露子目标`stop`，Mission目录在Wanderer Navigate/Interact同时始终列原版`missionLeave`；Mission模型误回stop/未列控制时，按当前Native动作目录最多纠正两次，执行Native Leave并回Map后才允许父循环重规划。`TestResults/20261024-064520`Build/AgentHostPackage已通过211项Provider合同，其中Fake Native/Provider样例验证Mission内stop→恢复请求明确列出`missionLeave`→原版Leave回Map后才允许安全stop；修复后的真实模型Campaign仍待重跑，产品全Quest门禁仍未完成。
 
+新修复后的真实重跑`TestResults/20261024-065616`证实上一条Mission边界已跨过：教程后开局setup、模型选EYC Companion、到`town_ES3`后Native `missionSceneAgents`只返回25个本地非Hero市民、没有Wanderer；模型用原版missionLeave返回Map，再用当前Backstreet/Town Leave离开聚落，随后在Town菜单安全stop。Host父循环却再次失败。对应Native收据给出`gameState=MapState, menuId=town, encounterActive=true, encounteredPartyId=currentSettlementId=town_ES3`；共享`AgentHostCampaignStateFacts.IsNativeLocationMenu`已证明这是一张原版地点菜单，不是敌队遭遇，但父循环仍用原始`encounterActive`布尔判定freeMap，误把可replan地点挡掉。现改为复用共享遭遇分类，并加回归：Town Native location menu允许安全replan、真劫匪encounter仍拒绝。该Campaign仍无EYC Journal进度；此最新父循环修正已进入`TestResults/20261024-065342`后的源码，需要再跑真实模型验证 parent 确实选中PartySize/其他目标。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager

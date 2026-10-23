@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.295'
+$contractVersion = '7.297'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -1180,6 +1180,12 @@ if ($agentHostCompanionLoopSource -notmatch 'BuildControlCatalog\(gameState == "
     $agentHostCompanionLoopSource -notmatch 'missionLeave' -or
     $agentHostDecisionCycleSource -notmatch 'var prompt = EstablishClanCompanionSystemPrompt' -or
     $agentHostDecisionCycleSource -notmatch 'RECOVERY DIRECTIVE') { throw 'Companion Mission stops must be rejected before action, provide a bounded recovery from the exact Native catalog, and keep a Native missionLeave option beside Wanderer navigation/interact.' }
+if ($agentHostEstablishClanAutonomySource -notmatch 'IsFreeMapForObjectiveReplan\(failedState\.RootElement\)' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'AgentHostCampaignStateFacts\.IsActiveEncounter\(state\)' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'town-menu-is-free-map-for-objective-replan-but-hostile-encounter-is-not') { throw 'Parent EYC replan safety must use the shared Native location-menu classifier so a Town menu is not mistaken for a hostile Party encounter, while real encounters remain blocked.' }
+if ($agentHostEstablishClanAutonomySource -notmatch 'IsFreeMapForObjectiveReplan\(failedState\.RootElement\)' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'AgentHostCampaignStateFacts\.IsActiveEncounter\(state\)' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'town-menu-is-free-map-for-objective-replan-but-hostile-encounter-is-not') { throw 'Parent EYC replan safety must use the shared Native location-menu classifier so a Town menu is not mistaken for a hostile Party encounter, while true encounters remain blocked.' }
 if ($agentHostCompanionLoopSource -notmatch 'SafeTownDecisionWindowSize' -or $agentHostCompanionLoopSource -notmatch 'BuildSafeTownDecisionWindow' -or $agentHostCompanionLoopSource -notmatch 'additionalSafeTownTargetsAvailable' -or $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-town-choice-window-pages-without-world-target-cap' -or $agentHostCompanionLoopSource -notmatch 'while \(decisions < maxDecisions\)' -or $agentHostCompanionLoopSource -notmatch 'do not spend a model decision or issue another move/time command' -or $agentHostDecisionCycleSource -notmatch 'nearest unvisited decision window') { throw 'Companion map travel must use a bounded nearest-Town decision window that preserves access to the remaining world, and must observe active Native movement without repeated model calls or hidden clock actions.' }
 if (-not (Test-Path (Join-Path $harnessRoot 'AgentHost\AgentHostCampaignStateFacts.cs')) -or
     $agentHostCampaignStateFactsSource -notmatch 'IsNativeLocationMenu' -or
