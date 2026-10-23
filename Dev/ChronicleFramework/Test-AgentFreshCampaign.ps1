@@ -185,6 +185,7 @@ $storyModeRenderSettledObserved = $false
 $storyModeAgentHostStarted = $false
 $storyModeAgentHostReady = $false
 $storyModeAgentHostStartRequested = $false
+$storyModeFocusLossEscapeMenuGuardInstalled = $false
 $storyModeAgentHostTerminalDetail = $null
 $storyModeNativeLeaveRequested = $false
 $storyModeNativeLeaveVerified = $false
@@ -400,6 +401,7 @@ try {
         $gameStarted = $gameStarted -or [bool]($newLines -match "pid=$bannerlordPid\|game-start$")
         if ($StoryModeEycLiveModelEvaluation) {
             foreach ($line in $newLines) {
+                if ($line -match "pid=$bannerlordPid\|harness-focus-loss-escape-guard-installed\|scope=(visual-capture|agent-host-lifecycle-test)$") { $storyModeFocusLossEscapeMenuGuardInstalled = $true }
                 if ($line -match "pid=$bannerlordPid\|harness-agent-lifecycle-auto-start$") { $storyModeAgentHostStartRequested = $true }
                 if ($line -match "pid=$bannerlordPid\|agent-host-state\|state=Starting\|") { $storyModeAgentHostStartRequested = $true }
                 if ($line -match "pid=$bannerlordPid\|agent-host-process-started\|pid=(\d+)\|") { $storyModeAgentHostStarted = $true }
@@ -1065,6 +1067,7 @@ if ($StoryModeEycSetup) {
         $acceptanceChecks.storyModeLiveHostStarted = $storyModeAgentHostStarted
         $acceptanceChecks.storyModeLiveHostReady = $storyModeAgentHostReady
         $acceptanceChecks.storyModeLiveHostTerminated = $storyModeAgentHostTerminalState -in @('Stopped','Completed','Failed')
+        $acceptanceChecks.storyModeFocusLossEscapeMenuGuardInstalled = $storyModeFocusLossEscapeMenuGuardInstalled
         $acceptanceChecks.storyModeLiveModelProducedDecision = $storyModeAgentProgressEntries.Count -gt 0
         $acceptanceChecks.storyModeLiveNativeActionExecuted = $storyModeAgentNativeActionsExecuted -gt 0
         $acceptanceChecks.storyModeLiveProviderPreflightReady = [bool]($freeLlmApiProfile -and $freeLlmApiProfile.ApiKeyPresent -and $freeLlmApiProfile.ModelExecutionStatus -in @('ready','router'))
@@ -1157,6 +1160,7 @@ $result = [ordered]@{
     StoryModeAgentHostStarted = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentHostStarted } else { $null }
     StoryModeAgentHostStartRequested = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentHostStartRequested } else { $null }
     StoryModeAgentHostReady = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentHostReady } else { $null }
+    StoryModeFocusLossEscapeMenuGuardInstalled = if ($StoryModeEycLiveModelEvaluation) { $storyModeFocusLossEscapeMenuGuardInstalled } else { $null }
     StoryModeAgentHostTerminalState = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentHostTerminalState } else { $null }
     StoryModeAgentHostTerminalDetail = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentHostTerminalDetail } else { $null }
     StoryModeAgentDecisionCount = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentDecisionCount } else { $null }

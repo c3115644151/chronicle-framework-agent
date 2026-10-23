@@ -873,6 +873,8 @@ FreeLLMAPI 官方 CLI 现已从 Electron Local Storage 的本地 dashboard sessi
 
 新修复后的真实重跑`TestResults/20261024-065616`证实上一条Mission边界已跨过：教程后开局setup、模型选EYC Companion、到`town_ES3`后Native `missionSceneAgents`只返回25个本地非Hero市民、没有Wanderer；模型用原版missionLeave返回Map，再用当前Backstreet/Town Leave离开聚落，随后在Town菜单安全stop。Host父循环却再次失败。对应Native收据给出`gameState=MapState, menuId=town, encounterActive=true, encounteredPartyId=currentSettlementId=town_ES3`；共享`AgentHostCampaignStateFacts.IsNativeLocationMenu`已证明这是一张原版地点菜单，不是敌队遭遇，但父循环仍用原始`encounterActive`布尔判定freeMap，误把可replan地点挡掉。现改为复用共享遭遇分类，并加回归：Town Native location menu允许安全replan、真劫匪encounter仍拒绝。该Campaign仍无EYC Journal进度；此最新父循环修正已进入`TestResults/20261024-065342`后的源码，需要再跑真实模型验证 parent 确实选中PartySize/其他目标。
 
+`TestResults/20261024-072241`复测上述free-map修正后，父循环确实从Companion安全stop转到Renown，再转到Gold；但Gold目标在模型耗时约45秒期间，Native Map UI状态变为`escapeMenuOpen=true`。此前新鲜观察中Escape overlay为false；Native的`move` handler按原版前置拒绝，收据确认时钟/日期和队伍移动均未改变，并记录无额外Native目标状态。引擎关键帧显示Campaign Escape overlay与Host失败提示，但它是命令拒绝前已打开还是失败提示阶段才出现，当前时序证据尚不能定论。代码核对发现现有Native focus-loss Escape guard只安装于`visual-capture`，本自然模型评测使用`agent-host-lifecycle-test`，故本测试PID从未记录guard安装标记；这是明确的Harness覆盖缺口，焦点丢失是强可能解释但尚非单收据证明。现已把同一focus-loss guard扩展到隔离的`agent-host-lifecycle-test`模式，并要求真实StoryMode收据证明guard安装；不改变正常玩家模式或屏蔽玩家手动开Escape。`TestResults/20261024-075426`的SubModule build/readiness gate通过，`TestResults/20261024-075449`Docs通过，SubModule审阅hash同步到`HarnessResearchReadiness.ps1`。下一次自然测试需实证guard安装，并观察该Move是否还会在模型响应期间因Escape overlay而被Native拒绝；若Native真的开着overlay，继续按原版拒绝，不直接强关本体UI。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager

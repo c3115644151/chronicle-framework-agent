@@ -65,7 +65,7 @@ public sealed class SubModule : MBSubModuleBase
 
     private static void TryInstallHarnessFocusLossEscapeMenuGuard()
     {
-        if (_harnessFocusLossEscapeMenuGuardInstalled || Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") != "visual-capture") return;
+        if (_harnessFocusLossEscapeMenuGuardInstalled || !IsHarnessFocusLossEscapeMenuGuardMode()) return;
         var harnessTemp = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
         if (string.IsNullOrWhiteSpace(harnessTemp) || !Directory.Exists(harnessTemp)) return;
         try
@@ -85,7 +85,7 @@ public sealed class SubModule : MBSubModuleBase
             var prefix = AccessTools.Method(typeof(SubModule), nameof(KeepNativeEscapeMenuClosedWhenHarnessLosesFocus));
             new Harmony("ChronicleFramework.HarnessFocusLossEscapeMenuGuard").Patch(nativeMethod, prefix: new HarmonyMethod(prefix));
             _harnessFocusLossEscapeMenuGuardInstalled = true;
-            ChronicleDiagnostics.Write("harness-focus-loss-escape-guard-installed|scope=visual-capture");
+            ChronicleDiagnostics.Write("harness-focus-loss-escape-guard-installed|scope=" + Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE"));
         }
         catch (Exception exception)
         {
@@ -95,11 +95,17 @@ public sealed class SubModule : MBSubModuleBase
 
     private static bool KeepNativeEscapeMenuClosedWhenHarnessLosesFocus(ref bool __result)
     {
-        if (Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") != "visual-capture") return true;
+        if (!IsHarnessFocusLossEscapeMenuGuardMode()) return true;
         var harnessTemp = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
         if (string.IsNullOrWhiteSpace(harnessTemp) || !Directory.Exists(harnessTemp)) return true;
         __result = false;
         return false;
+    }
+
+    private static bool IsHarnessFocusLossEscapeMenuGuardMode()
+    {
+        var mode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+        return mode == "visual-capture" || mode == "agent-host-lifecycle-test";
     }
 
     internal static bool HarnessFocusLossEscapeMenuGuardInstalled => _harnessFocusLossEscapeMenuGuardInstalled;

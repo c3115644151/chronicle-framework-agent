@@ -1,5 +1,5 @@
 ﻿$script:AuditedHarnessDiagnosticSource = 'SubModule.cs'
-$script:AuditedHarnessDiagnosticSha256 = '22b1598c05943f1ad5f166dbbae9999dceafc8dbac997f55db4f076db97ced6e'
+$script:AuditedHarnessDiagnosticSha256 = '616b1dc1e2252e7a4d2f8cc594ddd3449d730d03a8e268491deeec4a14b081cd'
 
 function Get-ChronicleCanonicalTextSha256 {
     [CmdletBinding()]
@@ -41,7 +41,7 @@ function Get-ChronicleResearchReadiness {
     }
     if ($changed.Count -eq 1 -and $changed[0] -eq $script:AuditedHarnessDiagnosticSource -and
         $AuditedHarnessDiagnosticSha256 -eq $script:AuditedHarnessDiagnosticSha256) {
-        return [pscustomobject]@{ Allowed = $true; ChangedSources = $changed; Reason = 'exact reviewed SubModule baseline; no additional source changes' }
+        return [pscustomobject]@{ Allowed = $true; ChangedSources = $changed; Reason = 'exact reviewed SubModule Harness focus-guard baseline; no gameplay behavior changes' }
     }
     [pscustomobject]@{
         Allowed = $false
