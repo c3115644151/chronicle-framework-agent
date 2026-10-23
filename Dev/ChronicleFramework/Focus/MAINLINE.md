@@ -845,6 +845,8 @@ FreeLLMAPI 官方 CLI 现已从 Electron Local Storage 的本地 dashboard sessi
 
 另有当前`custom`端点指向BlockRun，配置了Nemotron、Cohere North和Poolside等6个远端模型，均声明支持Tools。BlockRun官方模型目录把Nemotron 3.5 Lightning列在免费模型中；不过`TestResults/20261023-144206`真实FreeLLMAPI请求收到HTTP429/Retry-After=85，等待85秒后`144805`重测仍同样429，因此不再重复调用。该情况定位为BlockRun当前按IP/上游限流，而非本地模型或Host动作错误。[BlockRun官方免费/计费模型目录](https://blockrun.ai/docs/api-reference/models)
 
+`TestResults/20261024-024213`首次从自然新建StoryMode运行真实模型Host接管，Preflight/Build/Smoke/AgentHostPackage、教程skip、EYC自然激活、连续录像、无存档写入与进程清理均通过。`gpt-oss-20b→ovh/gpt-oss-20b`第一条EYC范围分类成功（923输入/144输出token）；随后在原版“通知”弹窗前/弹窗处的下一决策请求，FreeLLMAPI本机日志记录OVH `socket hang up`（约3秒），随后FallbackLoop报告该路由cooldown且未再尝试上游；Host按重试策略之后的请求仍遇同类断连，最终`provider-http-error`、共1条有效模型决策、0条Native动作。该运行只确认真实模型理解了EYC目标类型，**没有**证明模型按按钮、抵达棕色龙旗卡片、提交家族名或完成BannerEditor。33帧索引图显示地图“通知/好”弹窗停留；本次没有触发棕色卡片。游戏无崩溃/正式存档修改，录像3126/3126帧覆盖后已压缩为索引图并删除视频。失败证据来自FreeLLMAPI app log中与同一时间窗/模型对应的OVH断连及路由冷却，归因在上游/代理调用链而非Native交互逻辑；在该模型恢复前不重复同一路由。用户已确认棕色卡片显示时地图时间与队伍移动停止，这和`PauseActiveState=true`契约一致。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager
