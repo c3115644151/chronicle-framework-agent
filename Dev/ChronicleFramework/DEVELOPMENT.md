@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.288
+Contract version: 7.289
 
 `FreshStoryModeNativeMenuLeaveEvaluation`是非模型的窄Native集成测试：同一个新Campaign先通过兄长对话的原版“跳过教程”及确认，原生推进对话后自然结束训练场Mission并进入活动EYC的首个MapState；该状态仍位于`training_field_menu`。Harness只选择当前启用的原版`training_field_leave`并通过`GameMenu.RunMenuOptionConsequence`调用原版处理器，随后验证回到地图、训练场菜单/地点退出、EYC仍活动、CampaignDay与Stop档位未变、无存档写入，并捕获前后引擎画面和Native post-action观察（包括若出现的Inquiry）。`TestResults/20261022-194410`完整通过；`20261022-195530`复测后还在收据中明确记录`brother-dialogue-path-no-tab-fallback`。两次教程Mission离开均由原版兄长对话路径完成，没有使用Tab兜底。这项测试只验证开局准备与单项Native菜单动作，不计作AI决策或长程EYC目标进展。`TestResults/20261022-193820`曾在兄长对话仍活跃时过早模拟原版Leave Area并触发游戏空引用崩溃；现Harness改为每1.5秒推进一次原版“点击继续”，且仅在ConversationManager已结束对话、场景仍未退出时才启动2.5秒Native Leave Area兜底。该兜底在训练场场景尚未单独实测，严禁在对话仍活跃时触发；其它Town Mission Leave证据不能替代该特定验证。后续弹出的通知/询问也不会由本测试自动确认。
 
@@ -33,7 +33,7 @@ Harness参数`-FreshStoryModeModel`只接受明示的远端路由标识，逐次
 
 Host决策事件仅在`visual-capture`及`agent-host-lifecycle-test`模式写入临时目录的`AgentHostProgress.jsonl`，上限16MiB，不记prompt、原始回答或rationale。生命周期Host收据把统一循环的`decisions`正确映射为`decisionCount`；子目标执行结束时另记录`objective-subflow-result`，包含目标ID、状态、终止原因、失败码、动作/Token计数，以及从子流程Native结果提取的精简前后状态（游戏状态、菜单/地点/遭遇、EYC生命周期、资源数量、Quest ID和可选菜单ID/可用性）。不保存自由文本失败说明、Quest/菜单显示文本或prompt，便于区分“提交菜单动作后仍处于遭遇/地点状态”等根因。训练场setup稳定后只写一次Host autostart marker，避免每帧重复日志。此测试仅证明自然新档的Native/Host进展，不替代两个独立Campaign全Quest门禁；不得以本地模型、Fake决策或固定路线补齐真实模型缺口。
 
-当前EYC子流程若在零个Native世界动作后被活动Campaign Map弹窗挡住，AgentHost仅将当前已验证Native `YesNoInquiry`及其真实可见、启用按钮交给模型；Host保管一次性Inquiry token，按模型选择调用原版`respondInquiry` handler，并检查新Native状态是否确已回到无Inquiry的MapState且EYC仍active后才让父目标循环重新规划。不可见/禁用选项、未知Inquiry VM、状态未转场或此前子流程已执行动作时都不自动恢复/重放。进度trace为定位此类中断记录当前Inquiry类别、标题/截断文案、按钮可见/启用与pause标志，不记token；`AgentHostPackage`自检覆盖该边界，但Fake通过不代表真实开局通知已在运行中成功关闭。
+当前EYC子流程失败后若fresh Native Map仍被活动Inquiry阻塞（无论该子流程此前是否已执行动作），AgentHost仅将当前已验证Native `YesNoInquiry`及其真实可见、启用按钮交给模型；Host保管一次性Inquiry token，按模型选择调用原版`respondInquiry` handler，并检查新Native状态是否确已回到无Inquiry的MapState且EYC仍active后，重新读取Journal并请求一个全新的父目标计划。不可见/禁用选项、未知Inquiry VM或状态未转场时均安全失败；从不自动恢复/重放已失败的子流程动作。进度trace为定位此类中断记录当前Inquiry类别、标题/截断文案、按钮可见/启用与pause标志，不记token；`AgentHostPackage`自检覆盖此前已执行一动作后弹窗处理与新计划的集成，但Fake通过不代表真实模型开局已处理成功。
 
 真实模型曾两次选择PartySize后，Host只报告“目标子流程失败”，没有子流程错误码。源码核对发现招募子流程的结果结构接受`failure`/`failureCode`参数却未把它们写入返回JSON，导致父循环无法保留实际终止原因；现已补齐字段，并增加Fake Native前置条件回归，验证非MapState会返回`recruitment-map-unavailable`且不调用模型、不发送Native动作。另加一条完整的Fake Native/Provider路径：从原版`training_field_menu`只选当前可见Leave，返回Town后读取招聘报价、提交一名志愿兵并等Journal达到PartySize target；该合同不代表真实战役成功，但能隔离和回归Host/Native adapter逻辑。`TestResults/20261022-234329`的AgentHostPackage合同阶段通过；真实训练场PartySize子流程仍需等可用远端模型回复，再用`objective-subflow-result`轨迹确认原先终止原因。
 

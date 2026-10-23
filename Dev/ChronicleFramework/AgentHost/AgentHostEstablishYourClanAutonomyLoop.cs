@@ -152,15 +152,15 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 modalNative.OpenInquiry();
                 return new JsonObject
                 {
-                    ["status"] = "failed", ["actionsExecuted"] = 0, ["decisions"] = priorDecisions,
+                    ["status"] = "failed", ["actionsExecuted"] = 1, ["decisions"] = priorDecisions,
                     ["promptTokens"] = priorPromptTokens, ["completionTokens"] = priorCompletionTokens,
                     ["trace"] = priorTrace.DeepClone(), ["providerRouteHistory"] = priorRoutes.DeepClone(),
                     ["termination"] = new JsonObject { ["reason"] = "no-safe-action" },
                     ["failureCode"] = "gold-sale-free-map-required"
                 };
             }
-            if (interruptedObjectiveCalls != 2 || modalNative.InquiryOpen)
-                throw new AgentHostException("autonomy-selftest-modal-replayed-before-fresh-map", "The objective may be retried only after the model-resolved current Native modal is closed.");
+            if (interruptedObjectiveCalls != 2 || modalNative.InquiryOpen || modalProvider.CallCount != 3)
+                throw new AgentHostException("autonomy-selftest-modal-replayed-before-fresh-plan", "After an interrupted child has already acted, the Host must resolve the current Native modal and obtain a fresh parent-model plan before invoking any objective executor again.");
             modalNative.CompleteSuccessfully();
             return new JsonObject
             {
@@ -171,12 +171,15 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             };
         }
         var modalRecovered = RunAsync(request.RootElement, modalNative, modalNative, modalProvider, RecoverInterruptedObjective, CancellationToken.None).GetAwaiter().GetResult();
-        if (ReadString(modalRecovered, "status") != "completed" || ReadInt(modalRecovered, "actionsExecuted", 0) != 2 ||
+        if (ReadString(modalRecovered, "status") != "completed" || ReadInt(modalRecovered, "actionsExecuted", 0) != 3 ||
             modalProvider.CallCount != 3 || interruptedObjectiveCalls != 2 || modalNative.LastInquiryChoice != "affirmative" ||
             modalNative.LastInquiryToken != "inquiry-token" ||
-            !((modalRecovered["trace"] as JsonArray)?.OfType<JsonObject>().Any(step => ReadString(step, "stage") == "objective-replanned-after-native-inquiry") ?? false))
-            throw new AgentHostException("establish-clan-autonomy-native-inquiry-recovery-selftest-failed", "A zero-action objective blocked by an active Native Inquiry must ask the model to resolve the visible prompt, verify the fresh Map/Quest state, and replan without replaying the interrupted child.");
-        results.Add(new { scenario = "establish-clan-autonomy-model-resolves-native-modal-then-replans-only-from-fresh-state", passed = true });
+            !((modalRecovered["trace"] as JsonArray)?.OfType<JsonObject>().Any(step =>
+                ReadString(step, "stage") == "objective-replanned-after-native-inquiry" &&
+                ReadInt(step, "childActionsExecuted", -1) == 1 &&
+                !ReadBoolean(step, "replayedChildActions")) ?? false))
+            throw new AgentHostException("establish-clan-autonomy-native-inquiry-recovery-selftest-failed", "A failed objective that already sent a Native action may resolve the current inquiry, but only a fresh parent-model decision may choose the next objective action; no child action is silently resumed.");
+        results.Add(new { scenario = "establish-clan-autonomy-model-resolves-native-modal-after-prior-action-then-replans-from-fresh-state", passed = true });
         return results;
     }
 
@@ -389,12 +392,12 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                                   !(failedContext.TryGetProperty("captivity", out var captivity) && captivity.ValueKind == JsonValueKind.Object &&
                                     captivity.TryGetProperty("isCaptive", out var captive) && captive.ValueKind == JsonValueKind.True);
 
-                    // A child objective can stop before taking any action because a Native modal
-                    // appeared between observations. Let the model resolve only that current,
-                    // supported prompt, then return to the parent planner from fresh Native state.
-                    // Never replay a child that already issued a world-changing action.
-                    if (ReadInt(child, "actionsExecuted", 0) == 0 &&
-                        failedContext.ValueKind == JsonValueKind.Object &&
+                    // A child objective can stop when a Native modal appears, either before or
+                    // after other Native actions. Resolve only the current supported prompt;
+                    // then let the parent read the current Journal/state and ask the model to
+                    // replan. The failed child is never resumed automatically.
+                    var interruptedChildActions = ReadInt(child, "actionsExecuted", 0);
+                    if (failedContext.ValueKind == JsonValueKind.Object &&
                         failedContext.TryGetProperty("inquiryOpen", out var inquiryOpen) && inquiryOpen.ValueKind == JsonValueKind.True)
                     {
                         if (client is not IAgentHostNativeInquiryClient inquiryClient)
@@ -442,7 +445,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                                 {
                                     ["stage"] = "objective-replanned-after-native-inquiry",
                                     ["objectiveId"] = objectiveId,
-                                    ["childActionsExecuted"] = 0,
+                                    ["childActionsExecuted"] = interruptedChildActions,
                                     ["replayedChildActions"] = false
                                 });
                                 continue;
