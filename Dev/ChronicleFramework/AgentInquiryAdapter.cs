@@ -17,6 +17,7 @@ internal static class ChronicleInquiryAdapter
     private const string QueryManagerTypeName = "TaleWorlds.MountAndBlade.GauntletUI.GauntletQueryManager";
     private const string QueryManagerAssemblyName = "TaleWorlds.MountAndBlade.GauntletUI";
     private const string SupportedInquiryVmTypeName = "TaleWorlds.MountAndBlade.ViewModelCollection.Inquiries.SingleQueryPopUpVM";
+    private const string TextInquiryVmTypeName = "TaleWorlds.MountAndBlade.ViewModelCollection.Inquiries.TextQueryPopUpVM";
     private static readonly object Sync = new();
     private static bool _subscribed;
     private static long _eventGeneration;
@@ -50,6 +51,26 @@ internal static class ChronicleInquiryAdapter
 
         var inquiryType = queryData?.GetType();
         var viewModelType = dataSource?.GetType();
+        if (queryData is TextInquiryData textData)
+        {
+            var supportedClanName = IsStoryModeClanNameInquiry(textData) && viewModelType?.FullName == TextInquiryVmTypeName;
+            if (!supportedClanName)
+                return "{\"supported\":false,\"kind\":\"TextInquiry\",\"viewModel\":\"" + Escape(viewModelType?.FullName ?? "unknown") + "\"}";
+
+            var textJson = new StringBuilder(768);
+            textJson.Append("{\"supported\":true,\"kind\":\"StoryModeClanNameTextInquiry\",\"token\":\"").Append(GetToken(textData)).Append('"');
+            AppendProperty(textJson, "title", ReadString(dataSource, "TitleText") ?? textData.TitleText);
+            AppendProperty(textJson, "text", ReadString(dataSource, "PopUpLabel") ?? textData.Text);
+            AppendProperty(textJson, "defaultInputText", textData.DefaultInputText);
+            AppendProperty(textJson, "inputText", ReadString(dataSource, "InputText") ?? textData.DefaultInputText);
+            AppendProperty(textJson, "affirmativeText", ReadString(dataSource, "ButtonOkLabel") ?? textData.AffirmativeText);
+            textJson.Append(",\"affirmativeVisible\":").Append(Bool(ReadBool(dataSource, "IsButtonOkShown", textData.IsAffirmativeOptionShown)));
+            textJson.Append(",\"affirmativeEnabled\":").Append(Bool(ReadBool(dataSource, "IsButtonOkEnabled", false)));
+            textJson.Append(",\"negativeVisible\":").Append(Bool(ReadBool(dataSource, "IsButtonCancelShown", textData.IsNegativeOptionShown)));
+            textJson.Append(",\"inputObfuscated\":").Append(Bool(textData.IsInputObfuscated));
+            textJson.Append(",\"pauseGameActiveState\":").Append(Bool(pauseGameActiveState)).Append('}');
+            return textJson.ToString();
+        }
         if (queryData is MultiSelectionInquiryData multiData && IsAlleyLeaderInquiry(multiData) && viewModelType?.FullName == "TaleWorlds.MountAndBlade.ViewModelCollection.Inquiries.MultiSelectionQueryPopUpVM")
             return BuildAlleyMultiSelectionJson(multiData, dataSource, pauseGameActiveState);
         if (inquiryType != typeof(InquiryData) || viewModelType?.FullName != SupportedInquiryVmTypeName)
@@ -66,9 +87,11 @@ internal static class ChronicleInquiryAdapter
         var okEnabled = ReadBool(dataSource, "IsButtonOkEnabled", IsOptionEnabled(data.GetIsAffirmativeOptionEnabled));
         var cancelEnabled = ReadBool(dataSource, "IsButtonCancelEnabled", IsOptionEnabled(data.GetIsNegativeOptionEnabled));
         var token = GetToken(data);
+        var storyModeStartupKind = GetStoryModeStartupInquiryKind(data);
 
         var json = new StringBuilder(512);
         json.Append("{\"supported\":true,\"kind\":\"YesNoInquiry\",\"token\":\"").Append(token).Append('"');
+        AppendProperty(json, "storyModeStartupKind", storyModeStartupKind);
         AppendProperty(json, "title", ReadString(dataSource, "TitleText") ?? data.TitleText);
         AppendProperty(json, "text", ReadString(dataSource, "PopUpLabel") ?? data.Text);
         json.Append(",\"affirmative\":{\"visible\":").Append(Bool(okVisible));
@@ -114,6 +137,37 @@ internal static class ChronicleInquiryAdapter
         if (IsInquiryOpen && ReferenceEquals(ReadActiveDataField(), inquiry))
             throw new InvalidOperationException("Native Inquiry ViewModel did not transition after its selected action");
         return "{\"schemaVersion\":1,\"choice\":\"" + choice + "\",\"nativeViewModelHandler\":\"" + methodName + "\"}";
+    }
+
+    internal static string RespondStoryModeClanName(string token, string clanName)
+    {
+        EnsureLifecycleTracking();
+        if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+            throw new InvalidOperationException("submitStoryModeClanName requires the Campaign Map state");
+        string failure = null;
+        if (!IsInquiryOpen || !TryReadNativeActiveQuery(out var queryData, out var dataSource, out _, out failure))
+            throw new InvalidOperationException("submitStoryModeClanName requires the current active Native clan-name TextInquiry: " + failure);
+        if (queryData is not TextInquiryData textData || dataSource?.GetType().FullName != TextInquiryVmTypeName || !IsStoryModeClanNameInquiry(textData))
+            throw new InvalidOperationException("submitStoryModeClanName supports only the current StoryMode family-name TextInquiry");
+        if (!string.Equals(token, GetToken(textData), StringComparison.Ordinal))
+            throw new InvalidOperationException("StoryMode family-name token is stale; observe the current TextInquiry again");
+        if (string.IsNullOrWhiteSpace(clanName) || clanName.Length > 64)
+            throw new InvalidOperationException("The proposed clan name must contain 1-64 non-whitespace characters");
+
+        var nativeValidation = textData.TextCondition?.Invoke(clanName);
+        if (nativeValidation != null && !nativeValidation.Item1)
+            throw new InvalidOperationException("The Native StoryMode family-name validation rejected the proposed text: " + nativeValidation.Item2);
+        var inputProperty = dataSource.GetType().GetProperty("InputText", BindingFlags.Instance | BindingFlags.Public);
+        if (inputProperty?.CanWrite != true) throw new MissingMemberException(dataSource.GetType().FullName, "InputText");
+        inputProperty.SetValue(dataSource, clanName);
+        if (!ReadBool(dataSource, "IsButtonOkEnabled", false))
+            throw new InvalidOperationException("Native TextQueryPopUpVM did not enable its visible Done button for the validated clan name");
+        var method = dataSource.GetType().GetMethod("ExecuteAffirmativeAction", BindingFlags.Instance | BindingFlags.Public, null, Type.EmptyTypes, null);
+        if (method == null) throw new MissingMethodException(dataSource.GetType().FullName, "ExecuteAffirmativeAction()");
+        method.Invoke(dataSource, null);
+        if (IsInquiryOpen && ReferenceEquals(ReadActiveDataField(), textData))
+            throw new InvalidOperationException("Native TextQueryPopUpVM did not transition after Done");
+        return "{\"schemaVersion\":1,\"nativeViewModelHandler\":\"TextQueryPopUpVM.ExecuteAffirmativeAction\",\"inputText\":\"" + Escape(clanName) + "\",\"clanNameAfter\":\"" + Escape(Clan.PlayerClan?.Name?.ToString()) + "\"}";
     }
 
     internal static string RespondAlleyMultiSelection(string token, string choice, string[] selectedIds)
@@ -199,7 +253,20 @@ internal static class ChronicleInquiryAdapter
         return "{\"fixtureCreated\":" + Bool(IsInquiryOpen) + ",\"callbackCount\":0}";
     }
 
-    internal static string BuildHarnessInquiryDiagnosticsJson() => "{\"lastChoice\":\"" + Escape(_harnessFixtureChoice) + "\"}";
+    internal static string BuildHarnessInquiryDiagnosticsJson()
+    {
+        EnsureLifecycleTracking();
+        if (!TryReadNativeActiveQuery(out var queryData, out _, out _, out var failure))
+            return "{\"active\":false,\"reason\":\"" + Escape(failure) + "\"}";
+        var callback = queryData is InquiryData inquiry ? inquiry.AffirmativeAction : null;
+        var json = new StringBuilder(512);
+        json.Append("{\"active\":true,\"lastChoice\":\"").Append(Escape(_harnessFixtureChoice)).Append('"');
+        AppendProperty(json, "inquiryType", queryData.GetType().FullName);
+        AppendProperty(json, "callbackTargetType", callback?.Target?.GetType().FullName);
+        AppendProperty(json, "callbackMethod", callback?.Method.Name);
+        AppendProperty(json, "callbackDeclaringType", callback?.Method.DeclaringType?.FullName);
+        return json.Append('}').ToString();
+    }
 
     private static void OnInquiryLifecycleChanged(InquiryData data, bool pauseGameActiveState, bool prioritize) => InvalidateToken();
     private static void OnTextInquiryLifecycleChanged(TextInquiryData data, bool pauseGameActiveState, bool prioritize) => InvalidateToken();
@@ -269,6 +336,37 @@ internal static class ChronicleInquiryAdapter
         var callback = data?.AffirmativeAction;
         return callback?.Target?.GetType().FullName == "SandBox.CampaignBehaviors.AlleyCampaignBehavior" &&
             callback.Method.Name == "ChangeAssignedClanMemberOfAlley";
+    }
+
+    private static bool IsStoryModeClanNameInquiry(TextInquiryData data)
+    {
+        var callback = data?.AffirmativeAction;
+        var condition = data?.TextCondition;
+        return callback?.Target?.GetType().FullName == "StoryMode.GameComponents.CampaignBehaviors.FirstPhaseCampaignBehavior" &&
+            callback.Method.Name == "OnChangeClanNameDone" && condition?.Method.Name == "IsClanNameApplicable" &&
+            condition.Method.DeclaringType?.FullName == "Helpers.FactionHelper" &&
+            data.IsAffirmativeOptionShown && !data.IsNegativeOptionShown && !data.IsInputObfuscated;
+    }
+
+    private static string GetStoryModeStartupInquiryKind(InquiryData data)
+    {
+        var callback = data?.AffirmativeAction;
+        if (!IsFirstPhaseCampaignCallback(callback)) return null;
+        if (callback.Method.Name == "StartStealthTutorial") return "stealth-tutorial-start";
+        if (callback.Method.Name.IndexOf("OnSettlementLeft", StringComparison.Ordinal) >= 0 ||
+            callback.Method.Name.IndexOf("OnGameMenuOpened", StringComparison.Ordinal) >= 0) return "tutorial-skip-notification";
+        return null;
+    }
+
+    private static bool IsFirstPhaseCampaignCallback(Delegate callback)
+    {
+        const string behaviorTypeName = "StoryMode.GameComponents.CampaignBehaviors.FirstPhaseCampaignBehavior";
+        var targetName = callback?.Target?.GetType().FullName;
+        var declaringName = callback?.Method.DeclaringType?.FullName;
+        return string.Equals(targetName, behaviorTypeName, StringComparison.Ordinal) ||
+            string.Equals(declaringName, behaviorTypeName, StringComparison.Ordinal) ||
+            targetName?.StartsWith(behaviorTypeName + "+", StringComparison.Ordinal) == true ||
+            declaringName?.StartsWith(behaviorTypeName + "+", StringComparison.Ordinal) == true;
     }
 
     private static string BuildAlleyMultiSelectionJson(MultiSelectionInquiryData data, object dataSource, bool pauseGameActiveState)

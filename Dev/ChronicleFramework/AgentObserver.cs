@@ -54,7 +54,7 @@ internal static class ChronicleAgentObserver
 
         var json = new StringBuilder(4096);
         json.Append('{');
-        json.Append("\"schemaVersion\":25");
+        json.Append("\"schemaVersion\":26");
         json.Append(",\"campaignDay\":").Append(Number(CampaignTime.Now.ToDays));
         json.Append(",\"identity\":{");
         Property(json, "heroId", hero.StringId); Property(json, "heroName", hero.Name?.ToString(), true);
@@ -133,6 +133,8 @@ internal static class ChronicleAgentObserver
         var nativeInquiryOpen = (activeGameState is MapState || activeGameState is MissionState) && ChronicleInquiryAdapter.IsInquiryOpen;
         json.Append(",\"inquiryOpen\":").Append(Bool(nativeInquiryOpen));
         json.Append(",\"inquiry\":").Append(nativeInquiryOpen ? ChronicleInquiryAdapter.BuildMapInquiryJson() : "null");
+        json.Append(",\"sceneNotification\":").Append(ChronicleAgentSceneNotification.BuildJson(includeClockAudit: false));
+        json.Append(",\"bannerEditor\":").Append(ChronicleAgentBannerEditor.BuildJson());
         json.Append(",\"encounterActive\":").Append(Bool(PlayerEncounter.IsActive));
         json.Append(",\"lootItemCount\":");
         if (PlayerEncounter.Current == null) json.Append("null");

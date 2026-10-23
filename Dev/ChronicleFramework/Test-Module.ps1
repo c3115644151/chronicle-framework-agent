@@ -92,7 +92,7 @@ if (Test-Path $engineConfig) {
 $launchStart = Get-Date
 $startupWatch = [Diagnostics.Stopwatch]::StartNew()
 $diagnosticStartLineCount = if (Test-Path $diagnosticLog) { @(Get-Content $diagnosticLog).Count } else { 0 }
-$process = Start-Process -FilePath $gameExe -ArgumentList $arguments -WorkingDirectory (Split-Path $gameExe) -WindowStyle Minimized -PassThru
+$process = Start-ChronicleSteamGame -FilePath $gameExe -ArgumentList $arguments -WorkingDirectory (Split-Path $gameExe) -WindowStyle Minimized
 $trackedProcessId = $process.Id
 $rglLog = Join-Path $env:ProgramData "Mount and Blade II Bannerlord\logs\rgl_log_$trackedProcessId.txt"
 $watchdogLog = Join-Path $env:ProgramData "Mount and Blade II Bannerlord\logs\watchdog_log_$trackedProcessId.txt"

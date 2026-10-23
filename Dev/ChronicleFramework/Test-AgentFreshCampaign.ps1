@@ -145,7 +145,7 @@ try {
     $steamReadiness = Ensure-ChronicleSteamClientReady -SteamRoot $steamRoot -TimeoutSeconds 45
     if (-not $steamReadiness.Readiness.Ready) { throw 'Steam did not reach the stable WebHelper readiness gate; FreshCampaign launch was refused.' }
     Set-SafeExitMarker
-    $launcherProcess = Start-Process -FilePath $launcher -ArgumentList $arguments -WorkingDirectory $gameBinDirectory -WindowStyle Minimized -PassThru
+    $launcherProcess = Start-ChronicleSteamGame -FilePath $launcher -ArgumentList $arguments -WorkingDirectory $gameBinDirectory -WindowStyle Minimized
 }
 finally {
     $env:CHRONICLE_HARNESS_MODE = $previousMode

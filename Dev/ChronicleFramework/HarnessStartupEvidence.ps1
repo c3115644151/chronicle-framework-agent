@@ -123,6 +123,42 @@ function Ensure-ChronicleSteamClientReady {
     throw "Steam client did not reach stable local API readiness within $TimeoutSeconds seconds (reason='$reason', steamProcesses=$($steamProcesses.Count), webHelperProcesses=$($webHelperProcesses.Count)). Bannerlord was not launched."
 }
 
+function Start-ChronicleSteamGame {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [Parameter(Mandatory)][string]$ArgumentList,
+        [Parameter(Mandatory)][string]$WorkingDirectory,
+        [ValidateSet('Normal','Hidden','Minimized','Maximized')][string]$WindowStyle = 'Minimized'
+    )
+
+    $resolvedWorkingDirectory = [IO.Path]::GetFullPath($WorkingDirectory)
+    $appIdPath = Join-Path $resolvedWorkingDirectory 'steam_appid.txt'
+    if (-not (Test-Path -LiteralPath $appIdPath -PathType Leaf)) {
+        throw 'Bannerlord steam_appid.txt is missing from the launch directory; refusing a direct launch that cannot identify the Steam App ID.'
+    }
+    $appId = (Get-Content -LiteralPath $appIdPath -Raw).Trim()
+    if ($appId -ne '261550') {
+        throw "Bannerlord steam_appid.txt must contain App ID 261550; found '$appId'."
+    }
+
+    # Directly launching the installed executable does not inherit Steam's app
+    # identity. Bannerlord's Steamworks initialization fails without these vars
+    # even when the Steam client and steam_appid.txt are present. Scope them to
+    # this child process only; do not change the caller's persistent environment.
+    $priorSteamAppId = [Environment]::GetEnvironmentVariable('SteamAppId', 'Process')
+    $priorSteamGameId = [Environment]::GetEnvironmentVariable('SteamGameId', 'Process')
+    try {
+        [Environment]::SetEnvironmentVariable('SteamAppId', $appId, 'Process')
+        [Environment]::SetEnvironmentVariable('SteamGameId', $appId, 'Process')
+        return Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -WorkingDirectory $resolvedWorkingDirectory -WindowStyle $WindowStyle -PassThru
+    }
+    finally {
+        [Environment]::SetEnvironmentVariable('SteamAppId', $priorSteamAppId, 'Process')
+        [Environment]::SetEnvironmentVariable('SteamGameId', $priorSteamGameId, 'Process')
+    }
+}
+
 function Test-ChronicleSteamClientReadiness {
     $missingSteam = Get-ChronicleSteamClientReadiness -SteamProcessCount 0 -WebHelperProcessCount 0 -WebHelperStableSeconds 0
     $startingClient = Get-ChronicleSteamClientReadiness -SteamProcessCount 1 -WebHelperProcessCount 0 -WebHelperStableSeconds 0

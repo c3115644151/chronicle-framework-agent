@@ -30,6 +30,7 @@ internal static class ProviderContractSelfTest
         results.Add(new { scenario = "village-tools-prompt-uses-exact-native-action-id", passed = true });
         results.AddRange(NativeMailboxClient.RunVillageToolsQuestActionContractSelfTests());
         results.AddRange(NativeMailboxClient.RunNativeInquiryResponseContractSelfTests());
+        results.AddRange(NativeMailboxClient.RunStoryModeClanNameContractSelfTests());
         results.AddRange(NativeMailboxClient.RunBattleSimulationActionContractSelfTests());
         results.AddRange(NativeMailboxClient.RunGoldSaleActionContractSelfTests());
         results.AddRange(NativeMailboxClient.RunRecruitmentActionContractSelfTests());
@@ -40,6 +41,8 @@ internal static class ProviderContractSelfTest
         results.AddRange(AgentHostCampaignStateFacts.RunContractSelfTests());
         try { results.AddRange(await AgentHostEstablishClanCompanionLoop.RunTransportSelfTestsAsync()); }
         catch (Exception exception) { throw new AgentHostException("establish-clan-companion-loop-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
+        try { results.AddRange(await AgentHostStoryModeSetupLoop.RunContractSelfTestsAsync()); }
+        catch (Exception exception) { throw new AgentHostException("storymode-setup-loop-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
         results.AddRange(AgentHostEstablishClanGoldSaleLoop.RunContractSelfTests());
         results.AddRange(NativeMailboxClient.RunQuestDetailsReadActionContractSelfTests());
         results.AddRange(AgentHostCaptivityRecoveryLoop.RunContractSelfTests());
@@ -214,6 +217,39 @@ internal static class ProviderContractSelfTest
 
             results.Add(new { scenario = "provider-action-rationale-is-optional-and-native-catalog-still-gates", passed = true });
             results.Add(new { scenario = "provider-decision-schema-uses-strict-compatible-root-wrapper", passed = true });
+        }
+
+        var visibleInquiry = new JsonObject
+        {
+            ["supported"] = true,
+            ["kind"] = "YesNoInquiry",
+            ["title"] = "通知",
+            ["text"] = "玩家可见的原版提示",
+            ["affirmative"] = new JsonObject { ["visible"] = true, ["enabled"] = true, ["text"] = "好" },
+            ["negative"] = new JsonObject { ["visible"] = false, ["enabled"] = false, ["text"] = "" }
+        };
+        var inquiryRequestObject = AgentHostNativeInquiryResolution.BuildDecisionRequest("provider-native-inquiry-selftest", visibleInquiry, new JsonArray("affirmative"));
+        using (var inquiryRequest = JsonDocument.Parse(inquiryRequestObject.ToJsonString()))
+        {
+            var inquiryHandler = new StubHandler((_, _) => Task.FromResult(JsonResponse(BuildChatResponse(
+                "{\"action\":\"respondInquiry\",\"arguments\":{\"choice\":\"affirmative\"}}", "stop"))));
+            using var inquiryClient = new HttpClient(inquiryHandler) { Timeout = settings.Timeout };
+            using var inquiryProvider = new OllamaNativeProvider(settings, inquiryClient);
+            var inquiryDecision = await inquiryProvider.DecideAsync(inquiryRequest.RootElement,
+                AgentHostDecisionCycle.NativeInquiryResponseSystemPrompt, CancellationToken.None);
+            var inquiryArguments = inquiryDecision.Decision["arguments"] as JsonObject;
+            using var posted = JsonDocument.Parse(inquiryHandler.LastRequestBody ?? throw new AgentHostException("provider-self-test-inquiry-request-missing", "Native Inquiry decision did not reach the provider transport."));
+            var schemaAlternatives = posted.RootElement.GetProperty("response_format").GetProperty("json_schema").GetProperty("schema")
+                .GetProperty("properties").GetProperty("decision").GetProperty("anyOf");
+            if (inquiryDecision.Decision["action"]?.GetValue<string>() != "respondInquiry" ||
+                inquiryArguments?["choice"]?.GetValue<string>() != "affirmative" ||
+                schemaAlternatives.GetArrayLength() != 2 ||
+                !schemaAlternatives.GetRawText().Contains("affirmative", StringComparison.Ordinal) ||
+                schemaAlternatives.GetRawText().Contains("inquiry-token", StringComparison.Ordinal) ||
+                inquiryRequest.RootElement.GetProperty("allowedActions").GetArrayLength() != 1 ||
+                inquiryRequest.RootElement.GetProperty("allowedControls").GetArrayLength() != 1)
+                throw new AgentHostException("provider-self-test-native-inquiry-decision-envelope-invalid", "A Native Inquiry must use the production action/control decision envelope, expose only the enabled current choice, omit its anti-stale token, and reach the provider successfully.");
+            results.Add(new { scenario = "native-inquiry-uses-standard-action-control-envelope-through-provider", passed = true, nativeCommands = 0 });
         }
 
         var healthHandler = new StubHandler((_, _) => Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"test-local-model\"}]}")));
@@ -626,9 +662,9 @@ internal static class ProviderContractSelfTest
             }
             catch (AgentHostException exception) when (exception.Code == "provider-http-error")
             {
-                if (upstreamThenRateLimitCalls != 4 || !exception.Message.Contains("rateLimitRetryAttempts=2", StringComparison.Ordinal) ||
+                if (upstreamThenRateLimitCalls != 5 || !exception.Message.Contains("rateLimitRetryAttempts=3", StringComparison.Ordinal) ||
                     !exception.Message.Contains("rateLimitRetryEligible=true", StringComparison.Ordinal))
-                    throw new AgentHostException("provider-self-test-upstream-then-rate-limit-recovery-missed", "A 429 returned after transient 502 retries must receive two bounded Retry-After attempts before final failure.");
+                    throw new AgentHostException("provider-self-test-upstream-then-rate-limit-recovery-missed", "A 429 returned after transient 502 retries must receive three bounded Retry-After attempts before final failure.");
                 results.Add(new { scenario = "freellmapi-reclassifies-429-after-transient-upstream-retry", passed = true, providerCalls = upstreamThenRateLimitCalls, nativeCommands = 0 });
             }
         }
@@ -655,6 +691,33 @@ internal static class ProviderContractSelfTest
             if (result.Decision["action"]?.GetValue<string>() != "tradeConfirm" || retryAfterCalls != 2)
                 throw new AgentHostException("provider-self-test-retry-after-recovery-failed", "The Host should wait for an explicit short FreeLLMAPI Retry-After once before any Native action can be issued.");
             results.Add(new { scenario = "freellmapi-429-honors-bounded-retry-after-before-native-action", passed = true, providerCalls = retryAfterCalls, nativeCommands = 0 });
+        }
+
+        var changingRetryAfterCalls = 0;
+        var changingRetryAfterHandler = new StubHandler((_, _) =>
+        {
+            changingRetryAfterCalls++;
+            if (changingRetryAfterCalls <= 3)
+            {
+                var limited = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+                limited.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(changingRetryAfterCalls == 3 ? 3 : 1));
+                return Task.FromResult(limited);
+            }
+            var recovered = JsonResponse(BuildChatResponse("{\"action\":\"tradeConfirm\",\"arguments\":{},\"rationale\":\"Confirm the current Native draft.\"}", "stop"));
+            recovered.Headers.TryAddWithoutValidation("X-Routed-Via", "custom/nvidia/test-model");
+            return Task.FromResult(recovered);
+        });
+        var changingRetryAfterSettings = freeLlmApiSettings with { Model = "auto:reliable", Timeout = TimeSpan.FromSeconds(20) };
+        using (var changingRetryAfterClient = new HttpClient(changingRetryAfterHandler) { Timeout = changingRetryAfterSettings.Timeout })
+        using (var changingRetryAfterProvider = new OllamaNativeProvider(changingRetryAfterSettings, changingRetryAfterClient))
+        using (var request = JsonDocument.Parse(BuildActionDecisionRequest()))
+        {
+            var startedUtc = DateTimeOffset.UtcNow;
+            var result = await changingRetryAfterProvider.DecideAsync(request.RootElement, CancellationToken.None);
+            var elapsed = DateTimeOffset.UtcNow - startedUtc;
+            if (result.Decision["action"]?.GetValue<string>() != "tradeConfirm" || changingRetryAfterCalls != 4 || elapsed < TimeSpan.FromSeconds(4))
+                throw new AgentHostException("provider-self-test-changing-retry-after-hint-not-honored", "A later, longer Retry-After that fits the request deadline must still receive a bounded retry after earlier short waits.");
+            results.Add(new { scenario = "freellmapi-changing-retry-after-honors-later-in-deadline-window", passed = true, providerCalls = changingRetryAfterCalls, nativeCommands = 0 });
         }
 
         var exhaustionBodyRetryCalls = 0;
@@ -729,15 +792,15 @@ internal static class ProviderContractSelfTest
             try
             {
                 await exhaustedRetryAfterProvider.DecideAsync(request.RootElement, CancellationToken.None);
-                throw new AgentHostException("provider-self-test-retry-after-exhaustion-accepted", "A third 429 must fail closed after exactly two bounded retries.");
+                throw new AgentHostException("provider-self-test-retry-after-exhaustion-accepted", "A fourth 429 must fail closed after exactly three bounded retries.");
             }
             catch (AgentHostException exception) when (exception.Code == "provider-http-error")
             {
-                if (exhaustedRetryAfterCalls != 3 || !exception.Message.Contains("rateLimitRetryAttempts=2", StringComparison.Ordinal) ||
+                if (exhaustedRetryAfterCalls != 4 || !exception.Message.Contains("rateLimitRetryAttempts=3", StringComparison.Ordinal) ||
                     !exception.Message.Contains("rateLimitRetryWaitMilliseconds=", StringComparison.Ordinal) ||
                     !exception.Message.Contains("rateLimitRetryEligible=true", StringComparison.Ordinal))
                     throw new AgentHostException("provider-self-test-retry-after-attempt-telemetry-missing", "A final 429 error must record the actual retry count and elapsed bounded wait.");
-                results.Add(new { scenario = "freellmapi-429-allows-two-explicit-waits-then-fails-closed", passed = true, providerCalls = exhaustedRetryAfterCalls, nativeCommands = 0 });
+                results.Add(new { scenario = "freellmapi-429-allows-three-explicit-waits-then-fails-closed", passed = true, providerCalls = exhaustedRetryAfterCalls, nativeCommands = 0 });
             }
         }
 

@@ -255,6 +255,24 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 }
             }
 
+            if (client is IAgentHostNativeInquiryClient startupInquiryClient && client is IAgentHostStoryModeBannerEditorNativeClient startupBannerEditorClient)
+            {
+                var setup = await AgentHostStoryModeSetupLoop.RunAsync(request, client, startupInquiryClient, startupBannerEditorClient, provider, elapsed.Token,
+                    decisions, promptTokens, completionTokens, trace, routes);
+                decisions = ReadInt(setup, "decisions", decisions);
+                promptTokens = ReadLong(setup, "promptTokens", promptTokens);
+                completionTokens = ReadLong(setup, "completionTokens", completionTokens);
+                nativeActions += ReadInt(setup, "actionsExecuted", 0);
+                trace = setup["trace"]?.DeepClone() as JsonArray ?? trace;
+                routes = setup["providerRouteHistory"]?.DeepClone() as JsonArray ?? routes;
+                if (ReadString(setup, "status") == "failed")
+                    return BuildResult("failed", "storymode-initial-setup-failed", false,
+                        ReadString(setup, "failure") ?? "The original StoryMode family-name/BannerEditor setup could not be completed.",
+                        ReadString(setup, "failureCode"));
+                if (ReadString(setup, "status") == "completed")
+                    trace.Add(new JsonObject { ["stage"] = "storymode-initial-setup-completed", ["termination"] = setup["termination"]?.DeepClone() });
+            }
+
             for (var cycle = 0; cycle < 20 && decisions < maxDecisions; cycle++)
             {
                 elapsed.Token.ThrowIfCancellationRequested();
@@ -397,6 +415,48 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                     // then let the parent read the current Journal/state and ask the model to
                     // replan. The failed child is never resumed automatically.
                     var interruptedChildActions = ReadInt(child, "actionsExecuted", 0);
+                    var storySetupVisible = failedContext.ValueKind == JsonValueKind.Object &&
+                        ((failedContext.TryGetProperty("gameState", out var setupGameState) && setupGameState.ValueKind == JsonValueKind.String && setupGameState.GetString() == "BannerEditorState") ||
+                         (failedContext.TryGetProperty("sceneNotification", out var setupScene) && setupScene.ValueKind == JsonValueKind.Object &&
+                          setupScene.TryGetProperty("hasActiveNotification", out var setupSceneActive) && setupSceneActive.ValueKind == JsonValueKind.True) ||
+                         (failedContext.TryGetProperty("inquiry", out var setupInquiry) && setupInquiry.ValueKind == JsonValueKind.Object &&
+                          ((setupInquiry.TryGetProperty("kind", out var setupInquiryKind) && setupInquiryKind.ValueKind == JsonValueKind.String && setupInquiryKind.GetString() == "StoryModeClanNameTextInquiry") ||
+                           (setupInquiry.TryGetProperty("storyModeStartupKind", out var startupKind) && startupKind.ValueKind == JsonValueKind.String))));
+                    if (storySetupVisible && client is IAgentHostNativeInquiryClient storySetupInquiryClient &&
+                        client is IAgentHostStoryModeBannerEditorNativeClient storySetupBannerClient)
+                    {
+                        var setup = await AgentHostStoryModeSetupLoop.RunAsync(request, client, storySetupInquiryClient, storySetupBannerClient, provider, elapsed.Token,
+                            decisions, promptTokens, completionTokens, trace, routes);
+                        decisions = ReadInt(setup, "decisions", decisions);
+                        promptTokens = ReadLong(setup, "promptTokens", promptTokens);
+                        completionTokens = ReadLong(setup, "completionTokens", completionTokens);
+                        nativeActions += ReadInt(setup, "actionsExecuted", 0);
+                        trace = setup["trace"]?.DeepClone() as JsonArray ?? trace;
+                        routes = setup["providerRouteHistory"]?.DeepClone() as JsonArray ?? routes;
+                        if (ReadString(setup, "status") == "failed")
+                            return BuildResult("failed", "storymode-setup-interrupted-objective", false,
+                                ReadString(setup, "failure") ?? "The original StoryMode name/banner setup could not be completed after the current objective interruption.",
+                                ReadString(setup, "failureCode"));
+                        if (ReadString(setup, "status") == "completed")
+                        {
+                            using var resumedAfterStorySetup = await client.ReadStateAsync(elapsed.Token);
+                            if (AgentHostEstablishYourClanGoalLoop.HasActiveQuest(resumedAfterStorySetup.RootElement) &&
+                                !IsPlayerCaptive(resumedAfterStorySetup.RootElement))
+                            {
+                                trace.Add(new JsonObject
+                                {
+                                    ["stage"] = "objective-replanned-after-storymode-setup",
+                                    ["objectiveId"] = objectiveId,
+                                    ["childActionsExecuted"] = interruptedChildActions,
+                                    ["replayedChildActions"] = false
+                                });
+                                continue;
+                            }
+                            return BuildResult("failed", "storymode-setup-return-state-unverified", false,
+                                "The StoryMode setup callback completed but fresh Native state did not show the active EYC Campaign outside captivity.",
+                                "storymode-setup-return-state-unverified");
+                        }
+                    }
                     if (failedContext.ValueKind == JsonValueKind.Object &&
                         failedContext.TryGetProperty("inquiryOpen", out var inquiryOpen) && inquiryOpen.ValueKind == JsonValueKind.True)
                     {
@@ -686,6 +746,9 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             return Task.FromResult(JsonDocument.Parse("{\"status\":\"completed\",\"action\":\"respondInquiry\"}"));
         }
 
+        public Task<JsonDocument> SubmitStoryModeClanNameAsync(string token, string clanName, CancellationToken cancellationToken) =>
+            throw new AgentHostException("autonomy-selftest-unexpected-clan-name", "The autonomy parent fake does not expect a StoryMode clan-name TextInquiry.");
+
         private static JsonObject Objective(string id, int current, int target) => new()
         {
             ["hasTask"] = true,
@@ -727,7 +790,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             CallCount++;
             var isInquiry = systemPrompt.Contains("currently visible to the player", StringComparison.Ordinal);
             var decision = isInquiry
-                ? new JsonObject { ["choice"] = "affirmative", ["reason"] = "Only visible response." }
+                ? new JsonObject { ["action"] = "respondInquiry", ["arguments"] = new JsonObject { ["choice"] = "affirmative" }, ["rationale"] = "Only visible response." }
                 : new JsonObject
                 {
                     ["action"] = "selectEstablishYourClanObjective",

@@ -15,6 +15,9 @@ internal static class AgentHostNativeInquiryResolution
             ReadInt(resolved, "decisions", 0) != 1 || ReadInt(resolved, "actionsExecuted", 0) != 1 ||
             native.LastChoice != "affirmative" || native.LastToken != "inquiry-token-1" ||
             provider.LastRequest?["allowedChoices"] is not JsonArray choices || choices.Count != 1 || choices[0]?.GetValue<string>() != "affirmative" ||
+            ReadString(provider.LastRequest, "goal") is null ||
+            provider.LastRequest?["allowedActions"] is not JsonArray allowedActions || allowedActions.Count != 1 ||
+            ReadString(allowedActions[0] as JsonObject, "action") != "respondInquiry" ||
             provider.LastRequest?["observation"]?["state"]?["context"]?["inquiry"]?["token"] is not null)
             throw new AgentHostException("native-inquiry-resolution-selftest-failed", "The resolver must show only current enabled Native choices, bind the token internally, and verify the modal closed after the model's choice.");
         results.Add(new { scenario = "native-map-inquiry-is-resolved-only-by-a-model-choice-from-current-visible-enabled-buttons", passed = true });
@@ -34,6 +37,18 @@ internal static class AgentHostNativeInquiryResolution
             unsupportedProvider.CallCount != 0 || unsupportedNative.LastChoice is not null)
             throw new AgentHostException("native-inquiry-unsupported-selftest-failed", "Unsupported Native modal types must fail closed without a model request or Native response.");
         results.Add(new { scenario = "native-inquiry-resolver-fails-closed-for-unsupported-modal-types", passed = true });
+
+        var clanNameNative = new FakeStoryModeClanNameInquiryClient();
+        var clanNameProvider = new FakeStoryModeClanNameProvider();
+        var clanName = RunAsync(clanNameNative, clanNameNative, clanNameProvider, CancellationToken.None, "storymode-name-selftest").GetAwaiter().GetResult();
+        if (ReadString(clanName, "status") != "resolved" || ReadBoolean(clanName, "bannerEditorEntered") != true ||
+            ReadInt(clanName, "decisions", 0) != 1 || ReadInt(clanName, "actionsExecuted", 0) != 1 ||
+            clanNameNative.SubmittedName != "Chronicle Wolves" || clanNameProvider.LastRequest?[
+                "observation"]?["state"]?["context"]?["inquiry"]?["token"] is not null ||
+            ReadString(clanNameProvider.LastRequest, "goal") is null ||
+            ReadString((clanNameProvider.LastRequest?["allowedActions"] as JsonArray)?[0] as JsonObject, "action") != "submitStoryModeClanName")
+            throw new AgentHostException("storymode-clan-name-resolution-selftest-failed", "The family-name TextInquiry resolver must use the normal model decision envelope, keep the Native token hidden, submit text through the Native handler and verify BannerEditorState.");
+        results.Add(new { scenario = "storymode-family-name-text-inquiry-uses-model-text-and-native-handler-before-banner-editor", passed = true });
         return results;
     }
 
@@ -52,9 +67,14 @@ internal static class AgentHostNativeInquiryResolution
             return new JsonObject { ["status"] = "no-active-inquiry", ["decisions"] = 0, ["actionsExecuted"] = 0 };
 
         var inquiry = context?["inquiry"] as JsonObject;
-        if (ReadString(context, "gameState") != "MapState" ||
-            inquiry is null || !ReadBoolean(inquiry, "supported") || ReadString(inquiry, "kind") != "YesNoInquiry")
+        var gameState = ReadString(context, "gameState");
+        if (gameState != "MapState" || inquiry is null || !ReadBoolean(inquiry, "supported"))
             return Failure("native-inquiry-kind-unsupported", "The current Native prompt is not a supported Campaign Map Yes/No Inquiry.");
+
+        if (ReadString(inquiry, "kind") == "StoryModeClanNameTextInquiry")
+            return await RunStoryModeClanNameAsync(stateClient, inquiryClient, provider, runId, inquiry, cancellationToken);
+        if (ReadString(inquiry, "kind") != "YesNoInquiry")
+            return Failure("native-inquiry-kind-unsupported", "The current Native prompt is not a supported Campaign Map Yes/No Inquiry or StoryMode family-name TextInquiry.");
 
         var token = ReadString(inquiry, "token");
         if (string.IsNullOrWhiteSpace(token))
@@ -70,37 +90,22 @@ internal static class AgentHostNativeInquiryResolution
 
         var visibleInquiry = inquiry.DeepClone() as JsonObject ?? new JsonObject();
         visibleInquiry.Remove("token");
-        var request = new JsonObject
-        {
-            ["schemaVersion"] = 1,
-            ["runId"] = runId,
-            ["observation"] = new JsonObject
-            {
-                ["scope"] = "one-current-native-map-inquiry",
-                ["state"] = new JsonObject
-                {
-                    ["context"] = new JsonObject
-                    {
-                        ["gameState"] = "MapState",
-                        ["inquiryOpen"] = true,
-                        ["inquiry"] = visibleInquiry
-                    }
-                }
-            },
-            ["allowedChoices"] = allowedChoices.DeepClone()
-        };
+        var request = BuildDecisionRequest(runId, visibleInquiry, allowedChoices);
 
         var decision = await AgentHostDecisionCycle.DecideNativeInquiryResponseAsync(provider, request, cancellationToken);
         using (var requestDocument = JsonDocument.Parse(request.ToJsonString()))
             AgentHostHarnessProgressTrace.RecordDecision(requestDocument.RootElement, decision);
 
-        var selectedChoice = ReadString(decision.Decision, "choice");
-        if (selectedChoice is not ("affirmative" or "negative") || !allowedChoices.Any(node => node?.GetValue<string>() == selectedChoice))
+        var actionName = ReadString(decision.Decision, "action");
+        var decisionArguments = decision.Decision["arguments"] as JsonObject;
+        var selectedChoice = ReadString(decisionArguments, "choice");
+        if (actionName != "respondInquiry" || selectedChoice is not ("affirmative" or "negative") ||
+            !allowedChoices.Any(node => node?.GetValue<string>() == selectedChoice))
             return new JsonObject
             {
                 ["status"] = "failed",
                 ["failureCode"] = "native-inquiry-choice-not-currently-enabled",
-                ["failure"] = "The model did not choose a response currently shown and enabled by the Native Inquiry.",
+                ["failure"] = "The model did not choose the current respondInquiry action and a response shown and enabled by the Native Inquiry.",
                 ["decisions"] = 1,
                 ["actionsExecuted"] = 0,
                 ["promptTokens"] = decision.PromptTokens ?? 0,
@@ -133,6 +138,190 @@ internal static class AgentHostNativeInquiryResolution
             ["providerRoute"] = BuildProviderRoute(decision),
             ["nativeReceipt"] = nativeReceipt,
             ["nativeStateAfter"] = AgentHostHarnessProgressTrace.BuildNativeStateSummary(JsonNode.Parse(after.RootElement.GetRawText()) as JsonObject)
+        };
+    }
+
+    private static async Task<JsonObject> RunStoryModeClanNameAsync(
+        IAgentHostCampaignNativeClient stateClient,
+        IAgentHostNativeInquiryClient inquiryClient,
+        IAgentHostDecisionProvider provider,
+        string runId,
+        JsonObject inquiry,
+        CancellationToken cancellationToken)
+    {
+        var token = ReadString(inquiry, "token");
+        if (string.IsNullOrWhiteSpace(token))
+            return Failure("storymode-clan-name-token-missing", "The active Native family-name prompt has no current anti-stale token.");
+        var visibleInquiry = inquiry.DeepClone() as JsonObject ?? new JsonObject();
+        visibleInquiry.Remove("token");
+        var request = BuildStoryModeClanNameDecisionRequest(runId, visibleInquiry);
+        var decision = await AgentHostDecisionCycle.DecideStoryModeClanNameAsync(provider, request, cancellationToken);
+        using (var requestDocument = JsonDocument.Parse(request.ToJsonString()))
+            AgentHostHarnessProgressTrace.RecordDecision(requestDocument.RootElement, decision);
+
+        var arguments = decision.Decision["arguments"] as JsonObject;
+        var clanName = ReadString(arguments, "text");
+        if (ReadString(decision.Decision, "action") != "submitStoryModeClanName" || string.IsNullOrWhiteSpace(clanName) || clanName.Length > 64)
+            return new JsonObject
+            {
+                ["status"] = "failed", ["failureCode"] = "storymode-clan-name-decision-invalid",
+                ["failure"] = "The model did not return one nonblank, bounded current clan-name submission.",
+                ["decisions"] = 1, ["actionsExecuted"] = 0,
+                ["promptTokens"] = decision.PromptTokens ?? 0, ["completionTokens"] = decision.CompletionTokens ?? 0,
+                ["decision"] = decision.Decision.DeepClone(), ["providerRoute"] = BuildProviderRoute(decision)
+            };
+
+        using var receiptDocument = await inquiryClient.SubmitStoryModeClanNameAsync(token, clanName, cancellationToken);
+        var receipt = JsonNode.Parse(receiptDocument.RootElement.GetRawText()) as JsonObject ?? new JsonObject();
+        using var after = await stateClient.ReadStateAsync(cancellationToken);
+        var afterRoot = JsonNode.Parse(after.RootElement.GetRawText()) as JsonObject;
+        var afterState = afterRoot?["state"] as JsonObject;
+        var afterContext = afterState?["context"] as JsonObject;
+        var enteredBannerEditor = ReadString(afterContext, "gameState") == "BannerEditorState" &&
+                                  !ReadBoolean(afterContext, "inquiryOpen") &&
+                                  ReadBoolean(afterContext?["bannerEditor"] as JsonObject, "supported");
+        var completed = ReadString(receipt, "status") == "completed" && enteredBannerEditor;
+        return new JsonObject
+        {
+            ["status"] = completed ? "resolved" : "failed",
+            ["failureCode"] = completed ? null : "storymode-clan-name-transition-unverified",
+            ["failure"] = completed ? null : "The Native family-name handler did not transition to the verified player BannerEditorState.",
+            ["decisions"] = 1, ["actionsExecuted"] = ReadString(receipt, "status") == "completed" ? 1 : 0,
+            ["promptTokens"] = decision.PromptTokens ?? 0, ["completionTokens"] = decision.CompletionTokens ?? 0,
+            ["storyModeSetupStage"] = "family-name",
+            ["clanName"] = clanName,
+            ["bannerEditorEntered"] = enteredBannerEditor,
+            ["decision"] = decision.Decision.DeepClone(),
+            ["providerRoute"] = BuildProviderRoute(decision),
+            ["nativeReceipt"] = receipt,
+            ["nativeStateAfter"] = AgentHostHarnessProgressTrace.BuildNativeStateSummary(afterRoot)
+        };
+    }
+
+    internal static JsonObject BuildStoryModeClanNameDecisionRequest(string runId, JsonObject visibleInquiry) => new()
+    {
+        ["schemaVersion"] = 1,
+        ["runId"] = runId,
+        ["goal"] = "Choose and submit a valid Native family name to continue the current StoryMode setup.",
+        ["observation"] = new JsonObject
+        {
+            ["scope"] = "storymode-player-clan-name-setup",
+            ["state"] = new JsonObject
+            {
+                ["context"] = new JsonObject
+                {
+                    ["gameState"] = "MapState",
+                    ["inquiryOpen"] = true,
+                    ["inquiry"] = visibleInquiry.DeepClone()
+                }
+            }
+        },
+        ["allowedActions"] = new JsonArray
+        {
+            new JsonObject
+            {
+                ["action"] = "submitStoryModeClanName",
+                ["arguments"] = new JsonArray("text"),
+                ["textConstraints"] = new JsonObject { ["minLength"] = 1, ["maxLength"] = 64, ["nativeValidation"] = true }
+            }
+        },
+        ["allowedControls"] = new JsonArray("done")
+    };
+
+    private sealed class FakeStoryModeClanNameInquiryClient : IAgentHostCampaignNativeClient, IAgentHostNativeInquiryClient
+    {
+        private bool _inquiryOpen = true;
+        private bool _bannerEditor;
+        internal string? SubmittedName { get; private set; }
+
+        public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var context = new JsonObject
+            {
+                ["gameState"] = _bannerEditor ? "BannerEditorState" : "MapState",
+                ["inquiryOpen"] = _inquiryOpen,
+                ["inquiry"] = _inquiryOpen ? new JsonObject
+                {
+                    ["supported"] = true, ["kind"] = "StoryModeClanNameTextInquiry", ["token"] = "clan-name-token",
+                    ["title"] = "Select your family name:", ["text"] = "", ["defaultInputText"] = "Clan",
+                    ["inputText"] = "Clan", ["affirmativeText"] = "Done", ["affirmativeVisible"] = true,
+                    ["affirmativeEnabled"] = true, ["negativeVisible"] = false, ["inputObfuscated"] = false
+                } : null,
+                ["bannerEditor"] = _bannerEditor ? new JsonObject { ["active"] = true, ["supported"] = true } : new JsonObject { ["active"] = false }
+            };
+            return Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["state"] = new JsonObject { ["context"] = context } }.ToJsonString()));
+        }
+
+        public Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken) =>
+            throw new AgentHostException("storymode-name-selftest-unexpected-campaign-action", "The clan-name resolver must not use a generic Campaign action.");
+
+        public Task<JsonDocument> RespondNativeInquiryAsync(string token, string choice, CancellationToken cancellationToken) =>
+            throw new AgentHostException("storymode-name-selftest-unexpected-choice", "The clan-name resolver must not treat a text input as a Yes/No choice.");
+
+        public Task<JsonDocument> SubmitStoryModeClanNameAsync(string token, string clanName, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!_inquiryOpen || token != "clan-name-token" || string.IsNullOrWhiteSpace(clanName))
+                throw new AgentHostException("storymode-name-selftest-token-invalid", "The Native clan-name submission did not bind the current TextInquiry and text.");
+            SubmittedName = clanName;
+            _inquiryOpen = false;
+            _bannerEditor = true;
+            return Task.FromResult(JsonDocument.Parse("{\"status\":\"completed\",\"nativeViewModelHandler\":\"TextQueryPopUpVM.ExecuteAffirmativeAction\"}"));
+        }
+    }
+
+    private sealed class FakeStoryModeClanNameProvider : IAgentHostDecisionProvider
+    {
+        internal JsonObject? LastRequest { get; private set; }
+        public string ModelId => "storymode-clan-name-selftest-model";
+        public string ConfigurationSource => "harness-fake-provider";
+        public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            LastRequest = JsonNode.Parse(request.GetRawText()) as JsonObject;
+            if (!systemPrompt.Contains("family name", StringComparison.Ordinal))
+                throw new AgentHostException("storymode-name-selftest-prompt-invalid", "The name-specific Native text prompt was not used.");
+            return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 15, 3, "self-test",
+                new JsonObject { ["action"] = "submitStoryModeClanName", ["arguments"] = new JsonObject { ["text"] = "Chronicle Wolves" }, ["rationale"] = "A concise in-world family name." }, "self-test", "json_schema"));
+        }
+
+        public void Dispose() { }
+    }
+
+    internal static JsonObject BuildDecisionRequest(string runId, JsonObject visibleInquiry, JsonArray allowedChoices)
+    {
+        return new JsonObject
+        {
+            ["schemaVersion"] = 1,
+            ["runId"] = runId,
+            ["goal"] = "Respond to the one current Native Bannerlord Map inquiry using only a currently visible and enabled choice.",
+            ["observation"] = new JsonObject
+            {
+                ["scope"] = "one-current-native-map-inquiry",
+                ["state"] = new JsonObject
+                {
+                    ["context"] = new JsonObject
+                    {
+                        ["gameState"] = "MapState",
+                        ["inquiryOpen"] = true,
+                        ["inquiry"] = visibleInquiry.DeepClone()
+                    }
+                }
+            },
+            ["allowedActions"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["action"] = "respondInquiry",
+                    ["arguments"] = new JsonArray("choice"),
+                    ["argumentValues"] = new JsonObject { ["choice"] = allowedChoices.DeepClone() }
+                }
+            },
+            ["allowedControls"] = new JsonArray("done"),
+            ["allowedChoices"] = allowedChoices.DeepClone()
         };
     }
 
@@ -206,6 +395,9 @@ internal static class AgentHostNativeInquiryResolution
             _open = false;
             return Task.FromResult(JsonDocument.Parse("{\"status\":\"completed\",\"action\":\"respondInquiry\"}"));
         }
+
+        public Task<JsonDocument> SubmitStoryModeClanNameAsync(string token, string clanName, CancellationToken cancellationToken) =>
+            throw new AgentHostException("native-inquiry-selftest-unexpected-clan-name", "The yes/no inquiry fixture does not accept a clan-name submission.");
     }
 
     private sealed class FakeDecisionProvider(string choice) : IAgentHostDecisionProvider
@@ -223,7 +415,7 @@ internal static class AgentHostNativeInquiryResolution
             if (!systemPrompt.Contains("currently visible to the player", StringComparison.Ordinal))
                 throw new AgentHostException("native-inquiry-selftest-prompt-invalid", "The resolver did not state that the prompt is the current player-visible Native inquiry.");
             return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 12, 2, "self-test",
-                new JsonObject { ["choice"] = choice, ["reason"] = "Current visible choice." }, "self-test", "json_schema"));
+                new JsonObject { ["action"] = "respondInquiry", ["arguments"] = new JsonObject { ["choice"] = choice }, ["rationale"] = "Current visible choice." }, "self-test", "json_schema"));
         }
         public void Dispose() { }
     }

@@ -249,6 +249,16 @@ internal sealed class ChronicleAgentProtocol
                 case "sceneNotification":
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentSceneNotification.BuildJson());
                     break;
+                case "continueSceneNotification":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentSceneNotification.ContinueFirstBannerNotification());
+                    break;
+                case "submitStoryModeClanName":
+                    WriteResponse(commandId, action, "completed", behavior, null,
+                        ChronicleInquiryAdapter.RespondStoryModeClanName(ReadString(command, "token"), ReadString(command, "text")));
+                    break;
+                case "bannerEditorDone":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBannerEditor.CompleteCurrentEditor());
+                    break;
                 case "harnessSeedMapNotificationFixture":
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentMapNotifications.SeedHarnessFixture());
                     break;
@@ -475,8 +485,8 @@ internal sealed class ChronicleAgentProtocol
                 case "harnessNativeInquiryDiagnostics":
                     var inquiryDiagnosticsMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
                     var inquiryDiagnosticsRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
-                    if (!string.Equals(inquiryDiagnosticsMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(inquiryDiagnosticsRoot) || !Directory.Exists(inquiryDiagnosticsRoot))
-                        throw new InvalidOperationException("harnessNativeInquiryDiagnostics is restricted to a visual Harness run with a Harness temp directory");
+                    if (inquiryDiagnosticsMode is not ("visual-capture" or "fresh-campaign-renown") || string.IsNullOrWhiteSpace(inquiryDiagnosticsRoot) || !Directory.Exists(inquiryDiagnosticsRoot))
+                        throw new InvalidOperationException("harnessNativeInquiryDiagnostics is restricted to a visual/fresh-campaign Harness run with a Harness temp directory");
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleInquiryAdapter.BuildHarnessInquiryDiagnosticsJson());
                     break;
                 case "harnessPrepareAlleyLeaderFixture":

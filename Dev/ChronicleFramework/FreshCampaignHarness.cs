@@ -12,6 +12,8 @@ using TaleWorlds.CampaignSystem.Settlements;
 using TaleWorlds.Core;
 using TaleWorlds.InputSystem;
 using TaleWorlds.MountAndBlade;
+using TaleWorlds.MountAndBlade.View.Screens;
+using TaleWorlds.ScreenSystem;
 
 namespace ChronicleFramework;
 
@@ -36,6 +38,8 @@ internal static class FreshCampaignHarness
     private static bool _tutorialSkipConfirmed;
     private static bool _tutorialSkipConversationContinued;
     private static DateTime _tutorialSkipConversationContinuedUtc;
+    private static int _tutorialSkipPostConfirmationContinueCount;
+    private static bool _tutorialSkipConversationUiEndedLogged;
     private static DateTime _tutorialSkipNextAdvanceUtc;
     private static bool _tutorialSkipPostConfirmationOptionsLogged;
     private static Mission _trainingFieldFallbackLeaveMission;
@@ -337,10 +341,24 @@ internal static class FreshCampaignHarness
                     }
                     return;
                 }
+                if (!_tutorialSkipConversationUiEndedLogged && _tutorialSkipPostConfirmationContinueCount > 0 && !IsNativeMissionConversationUiActive())
+                {
+                    _tutorialSkipConversationUiEndedLogged = true;
+                    _tutorialSkipConversationContinued = true;
+                    _tutorialSkipConversationContinuedUtc = DateTime.UtcNow;
+                    ChronicleDiagnostics.Write("fresh-storymode-training-field-exit|status=conversation-ui-ended-manager-still-active|via=verified-native-mission-screen|managerInProgress=True|clickableOptions=0|nativeConversationUiActive=False|continueCount=" + _tutorialSkipPostConfirmationContinueCount);
+                    return;
+                }
+                if (_tutorialSkipPostConfirmationContinueCount >= 8)
+                {
+                    WriteStoryModeFailure("post-confirmation-dialogue-remained-active-after-8-native-continues-uiActive=" + IsNativeMissionConversationUiActive());
+                    return;
+                }
                 if (DateTime.UtcNow < _tutorialSkipNextAdvanceUtc) return;
                 manager.ContinueConversation();
+                _tutorialSkipPostConfirmationContinueCount++;
                 _tutorialSkipNextAdvanceUtc = DateTime.UtcNow.AddSeconds(1.5);
-                ChronicleDiagnostics.Write("fresh-storymode-training-field-exit|status=post-confirmation-dialogue-advanced|via=NativeConversationManager");
+                ChronicleDiagnostics.Write("fresh-storymode-training-field-exit|status=post-confirmation-dialogue-advanced|via=NativeConversationManager|continueCount=" + _tutorialSkipPostConfirmationContinueCount + "|conversationUiActive=" + IsNativeMissionConversationUiActive());
                 return;
             }
 
@@ -422,9 +440,12 @@ internal static class FreshCampaignHarness
             if (completed) _trainingFieldMissionExitLogged = true;
         }
 
+        var conversationManager = Campaign.Current?.ConversationManager;
+        var conversationStillVisible = conversationManager?.IsConversationInProgress == true &&
+            (conversationManager.CurOptions.Count > 0 || IsNativeMissionConversationUiActive());
         if (_trainingFieldMissionExitLogged || !_tutorialSkipConfirmed || !_tutorialSkipConversationContinued ||
             _trainingFieldFallbackLeaveRequested || _trainingFieldFallbackLeaveMission != null || mission == null || mission.MissionEnded ||
-            Campaign.Current?.ConversationManager?.IsConversationInProgress == true ||
+            conversationStillVisible ||
             GameStateManager.Current?.ActiveState?.GetType().Name != "MissionState" ||
             Settlement.CurrentSettlement?.StringId != "tutorial_training_field" ||
             DateTime.UtcNow - _tutorialSkipConversationContinuedUtc < TimeSpan.FromSeconds(3))
@@ -448,6 +469,9 @@ internal static class FreshCampaignHarness
             WriteStoryModeFailure("native-training-field-leave-fallback-failed-" + exception.GetType().Name);
         }
     }
+
+    private static bool IsNativeMissionConversationUiActive() =>
+        ScreenManager.TopScreen is MissionScreen missionScreen && missionScreen.IsConversationActive;
 
     private static void LogStoryModeReadyIfVerified()
     {

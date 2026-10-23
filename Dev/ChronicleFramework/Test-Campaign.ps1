@@ -16,11 +16,15 @@ $lifecycleSave = Join-Path $saveDirectory "$LifecycleSaveName.sav"
 $diagnosticLog = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\Configs\ModLogs\chronicle-framework.log'
 $engineConfig = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\Configs\engine_config.txt'
 . (Join-Path $PSScriptRoot 'Test-WindowLayout.ps1')
+. (Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1')
 
 if (-not (Test-Path $launcher)) { throw "BLSE Standalone was not found: $launcher" }
 if (-not (Test-Path $fixtureSave)) { throw "Clean fixture was not found: $fixtureSave" }
 if (Get-Process Bannerlord -ErrorAction SilentlyContinue) { throw 'Bannerlord is already running.' }
 if (Test-Path $lifecycleSave) { Remove-Item -LiteralPath $lifecycleSave -Force }
+$steamRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $gameRoot))
+$steamReadiness = Ensure-ChronicleSteamClientReady -SteamRoot $steamRoot -TimeoutSeconds 45
+if (-not $steamReadiness.readiness.Ready) { throw 'Steam did not reach the stable WebHelper readiness gate; Campaign test launch was refused.' }
 
 $modules = @(
     'Bannerlord.Harmony',
@@ -79,7 +83,7 @@ function Invoke-CampaignLifecycleRun {
     $env:CHRONICLE_HARNESS_SAVE_NAME = $LifecycleSaveName
     try {
         $arguments = "/continuesave $LoadSaveName $moduleArgument /anticheat"
-        $launcherProcess = Start-Process -FilePath $launcher -ArgumentList $arguments -WorkingDirectory $binDirectory -WindowStyle Minimized -PassThru
+        $launcherProcess = Start-ChronicleSteamGame -FilePath $launcher -ArgumentList $arguments -WorkingDirectory $binDirectory -WindowStyle Minimized
     }
     finally {
         $env:CHRONICLE_HARNESS_MODE = $previousMode

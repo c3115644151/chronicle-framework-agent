@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -8,6 +9,10 @@ internal static class AgentHostEstablishClanCompanionLoop
 {
     private const string QuestId = "rebuild_player_clan_storymode_quest";
     private const int MaxDecisions = 96;
+    // This is a per-decision choice window, not a world-entity cap. After a
+    // selected Town is visited, the Native target query is refreshed against
+    // visitedTowns and exposes the next nearest unvisited candidates.
+    private const int SafeTownDecisionWindowSize = 12;
     private static readonly TimeSpan MaxElapsed = TimeSpan.FromMinutes(45);
     private static readonly HashSet<string> HiringDialogueOptions = new(StringComparer.Ordinal)
     {
@@ -85,6 +90,30 @@ internal static class AgentHostEstablishClanCompanionLoop
         if (safeMap.Count != 1 || ReadString(safeMap[0] as JsonObject, "id") != "town-a")
             throw new AgentHostException("establish-clan-companion-safe-town-filter-failed", "The Companion executor must visit only newly observed safe Town targets.");
 
+        var manySafeTowns = new JsonArray(Enumerable.Range(0, 21).Select(index => (JsonNode?)new JsonObject
+        {
+            ["id"] = "town-" + index.ToString("D2", CultureInfo.InvariantCulture),
+            ["name"] = "Town " + index.ToString("D2", CultureInfo.InvariantCulture),
+            ["type"] = "town",
+            ["distance"] = index + 1,
+            ["hostile"] = false,
+            ["underSiege"] = false,
+            ["isInspected"] = false
+        }).ToArray());
+        var firstTownPage = FilterSafeTowns(manySafeTowns, null, new HashSet<string>(StringComparer.Ordinal));
+        var firstTownWindow = BuildSafeTownDecisionWindow(firstTownPage);
+        var mapTargetCatalog = BuildActionCatalog(new JsonObject { ["context"] = new JsonObject { ["gameState"] = "MapState", ["menuId"] = "" } },
+            new JsonArray(), new JsonObject(), firstTownPage, null, null, null, false,
+            new HashSet<string>(StringComparer.Ordinal), new HashSet<string>(StringComparer.Ordinal));
+        var moveChoices = mapTargetCatalog.OfType<JsonObject>().FirstOrDefault(action => ReadString(action, "action") == "move")?[
+            "argumentValues"]?["SettlementId"] as JsonArray;
+        var visitedFirstWindow = new HashSet<string>(firstTownWindow.OfType<JsonObject>().Select(town => ReadString(town, "id")!), StringComparer.Ordinal);
+        var nextTownWindow = BuildSafeTownDecisionWindow(FilterSafeTowns(manySafeTowns, null, visitedFirstWindow));
+        if (firstTownPage.Count != 21 || firstTownWindow.Count != SafeTownDecisionWindowSize ||
+            ReadString(firstTownWindow[0] as JsonObject, "id") != "town-00" || moveChoices?.Count != SafeTownDecisionWindowSize ||
+            nextTownWindow.Count != 9 || ReadString(nextTownWindow[0] as JsonObject, "id") != "town-12")
+            throw new AgentHostException("establish-clan-companion-town-window-paging-failed", "Map target context must bound each model choice window while retaining all world targets across the visited-Town refresh cycle.");
+
         var options = BuildActionCatalog(new JsonObject
         {
             ["context"] = new JsonObject { ["gameState"] = "MissionState" },
@@ -100,6 +129,7 @@ internal static class AgentHostEstablishClanCompanionLoop
 
         return [
             new { scenario = "establish-clan-companion-targets-only-current-safe-unvisited-town-and-friendly-wanderer", passed = true },
+            new { scenario = "establish-clan-companion-town-choice-window-pages-without-world-target-cap", passed = true, totalWorldTargets = 21, choiceWindow = SafeTownDecisionWindowSize },
             new { scenario = "establish-clan-companion-dialogue-catalog-excludes-unrelated-native-options", passed = true },
             new { scenario = "establish-clan-companion-nearby-target-uses-native-interact", passed = true }
         ];
@@ -118,7 +148,26 @@ internal static class AgentHostEstablishClanCompanionLoop
             !client.Actions.SequenceEqual(expected, StringComparer.Ordinal) || client.Gold != 1340 || client.CompanionCount != 1 ||
             ReadBoolean((result["objectiveSnapshot"] as JsonObject)?["companions"] as JsonObject, "met") != true)
             throw new AgentHostException("establish-clan-companion-transport-self-test-failed", "The injected Native/Provider route did not follow the observed Tavern path, hire one quoted Wanderer, and verify refreshed original Journal progress. status=" + ReadString(result, "status") + "; termination=" + ReadString(result["termination"] as JsonObject, "reason") + "; failureCode=" + ReadString(result, "failureCode") + "; failure=" + ReadString(result, "failure") + "; actions=" + string.Join(",", client.Actions) + "; calls=" + provider.CallCount + "; journalMet=" + ReadBoolean((result["objectiveSnapshot"] as JsonObject)?["companions"] as JsonObject, "met"));
-        return [new { scenario = "establish-clan-companion-runtime-observe-travel-tavern-native-dialogue-hire-and-journal-verify", decisions = provider.CallCount, nativeActions = client.Actions.ToArray(), passed = true }];
+        var movementWaitResult = await RunMapMovementWaitSelfTestAsync();
+        return [
+            new { scenario = "establish-clan-companion-runtime-observe-travel-tavern-native-dialogue-hire-and-journal-verify", decisions = provider.CallCount, nativeActions = client.Actions.ToArray(), passed = true },
+            movementWaitResult
+        ];
+    }
+
+    private static async Task<object> RunMapMovementWaitSelfTestAsync()
+    {
+        var client = new FakeMovementCompanionClient();
+        var provider = new FakeMovementDecisionProvider();
+        using var request = JsonDocument.Parse("{\"runId\":\"establish-clan-companion-map-movement-selftest\",\"goal\":\"Reach a friendly Town Tavern to hire one Companion.\",\"maxDecisions\":4,\"maxElapsedSeconds\":30}");
+        var result = await RunAsync(request.RootElement, client, client, provider, CancellationToken.None);
+        var expectedActions = new[] { "mapSettlementTargets", "move", "continueSceneNotification", "menuSelect" };
+        if (provider.CallCount != 4 || client.Actions.Count != expectedActions.Length ||
+            !client.Actions.SequenceEqual(expectedActions, StringComparer.Ordinal) || client.ActiveMovementStateReads < 2 ||
+            client.ExplicitClockActions != 0 || client.SceneNotificationContinueCount != 1 || !provider.SawSceneNotification ||
+            ReadInt(result, "actionsExecuted", 0) != expectedActions.Length)
+            throw new AgentHostException("establish-clan-companion-map-movement-wait-selftest-failed", "A safe Native scene notification must interrupt passive travel waiting, be visible to the model as the only action, close through its Native handler, then resume passive movement without time controls or repeated decisions. status=" + ReadString(result, "status") + "; termination=" + ReadString(result["termination"] as JsonObject, "reason") + "; actions=" + string.Join(",", client.Actions) + "; decisions=" + provider.CallCount + "; passiveReads=" + client.ActiveMovementStateReads + "; sceneCloses=" + client.SceneNotificationContinueCount + "; modelSawModal=" + provider.SawSceneNotification + "; clockActions=" + client.ExplicitClockActions + "; actionCount=" + ReadInt(result, "actionsExecuted", 0));
+        return new { scenario = "establish-clan-companion-native-map-scene-notification-closes-then-movement-resumes", decisions = provider.CallCount, nativeActions = client.Actions.ToArray(), passiveMovementStateReads = client.ActiveMovementStateReads, sceneNotificationContinueCount = client.SceneNotificationContinueCount, explicitClockActions = client.ExplicitClockActions, passed = true };
     }
 
     internal static async Task<JsonObject> RunAsync(
@@ -158,7 +207,7 @@ internal static class AgentHostEstablishClanCompanionLoop
         try
         {
             await provider.CheckConfiguredModelAsync(elapsed.Token);
-            for (var iteration = 0; iteration < maxDecisions - decisions; iteration++)
+            while (decisions < maxDecisions)
             {
                 elapsed.Token.ThrowIfCancellationRequested();
                 using var nativeState = await campaignClient.ReadStateAsync(elapsed.Token);
@@ -172,6 +221,11 @@ internal static class AgentHostEstablishClanCompanionLoop
                     return BuildResult("interrupted", "native-modal-out-of-scope", "A Native modal interrupted the Companion route; the executor did not guess a response.", "companion-native-modal", state);
                 if (ReadBoolean(context?["captivity"] as JsonObject, "isCaptive") || AgentHostCampaignStateFacts.IsActiveEncounter(state))
                     return BuildResult("interrupted", "campaign-interruption", "Captivity or an encounter interrupts the Tavern hiring route and must be handled by its own Native subflow.", "companion-campaign-interruption", state);
+                var sceneNotification = context?["sceneNotification"] as JsonObject;
+                var sceneNotificationActive = ReadBoolean(sceneNotification, "hasActiveNotification");
+                var sceneNotificationCanContinue = ReadBoolean(sceneNotification, "canContinue");
+                if (sceneNotificationActive && !sceneNotificationCanContinue)
+                    return BuildResult("interrupted", "native-scene-notification-out-of-scope", "A Native scene notification is visible, but its current type or close behavior is not in the verified no-choice allowlist.", "companion-scene-notification-out-of-scope", state);
 
                 var journal = await ReadJournalAsync(companionClient, elapsed.Token);
                 var objective = AgentHostEstablishYourClanGoalLoop.BuildObjectiveSnapshot(journal);
@@ -213,12 +267,22 @@ internal static class AgentHostEstablishClanCompanionLoop
                 var mapMovementPending = gameState == "MapState" && !string.IsNullOrWhiteSpace(moveTargetId) &&
                     !string.Equals(currentSettlementId, moveTargetId, StringComparison.Ordinal) && (nativeMoveActive || moveStartPending);
 
+                if (!sceneNotificationActive && (mapMovementPending || menuArrivalPending))
+                {
+                    // Native map movement already selects its normal StoppablePlay mode.
+                    // Let that original movement advance and poll Native state passively;
+                    // do not spend a model decision or issue another move/time command.
+                    await Task.Delay(TimeSpan.FromSeconds(1), elapsed.Token);
+                    continue;
+                }
+
                 var missionNavigationActive = gameState == "MissionState" && ReadBoolean(state["mission"]?["navigation"] as JsonObject, "active");
                 var missionLeaveActive = gameState == "MissionState" && ReadBoolean(state["mission"]?["leave"] as JsonObject, "active");
-                var controls = BuildControlCatalog(mapMovementPending || menuArrivalPending, missionNavigationActive, missionLeaveActive || missionTransitionPending);
+                var actionPending = !sceneNotificationActive && (mapMovementPending || menuArrivalPending || missionNavigationActive || missionLeaveActive || missionTransitionPending);
+                var controls = BuildControlCatalog(!sceneNotificationActive && (mapMovementPending || menuArrivalPending), missionNavigationActive, missionLeaveActive || missionTransitionPending);
                 var catalog = BuildActionCatalog(state, journal, objective, safeTowns, sceneAgentsReceipt, selectedHeroId,
-                    moveTargetId, mapMovementPending || menuArrivalPending || missionNavigationActive || missionLeaveActive || missionTransitionPending, visitedTowns, visitedHeroes);
-                if (liveGoalAhead)
+                    moveTargetId, actionPending, visitedTowns, visitedHeroes);
+                if (liveGoalAhead && !sceneNotificationActive)
                 {
                     catalog = gameState == "MissionState"
                         ? new JsonArray(new JsonObject { ["action"] = "missionLeave", ["arguments"] = new JsonArray() })
@@ -270,7 +334,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                 }
 
                 if (!TryResolveAction(decision.Decision, catalog, state, sceneAgentsReceipt, selectedHeroId, moveTargetId,
-                        mapMovementPending || menuArrivalPending || missionNavigationActive || missionLeaveActive || missionTransitionPending,
+                        actionPending,
                         out var action, out var arguments, out var selectedSettlementId, out var targetHeroId, out var rejection))
                 {
                     trace.Add(BuildStep(decisions, observation, decision.Decision, null, state, "rejected",
@@ -280,7 +344,7 @@ internal static class AgentHostEstablishClanCompanionLoop
 
                 JsonDocument response;
                 var actionStarted = DateTime.UtcNow.ToString("O");
-                if (action is "mapSettlementTargets" or "move")
+                if (action is "mapSettlementTargets" or "move" or "continueSceneNotification")
                     response = await campaignClient.ExecuteCampaignActionAsync(action, arguments, elapsed.Token);
                 else
                     response = await companionClient.ExecuteCompanionHiringActionAsync(action, arguments, elapsed.Token);
@@ -290,7 +354,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                         ?? throw new AgentHostException("companion-native-response-invalid", "Native returned no Companion action receipt.");
                     if (ReadString(receipt, "status") != "completed")
                     {
-                        trace.Add(BuildStep(decisions, observation, decision.Decision, SafeReceipt(receipt, action, selectedSettlementId, targetHeroId), state, actionStarted));
+                        trace.Add(BuildStep(decisions, observation, decision.Decision, SafeReceipt(receipt, action, selectedSettlementId, targetHeroId, safeTowns), state, actionStarted));
                         continue;
                     }
                     actionsExecuted++;
@@ -301,7 +365,9 @@ internal static class AgentHostEstablishClanCompanionLoop
                     }
                     else if (action == "move")
                     {
-                        moveTargetId = targetSettlementId;
+                        // Keep the newly selected Native target. targetSettlementId is the
+                        // target from the pre-action observation and may still be null here.
+                        moveTargetId = selectedSettlementId;
                         moveStartPending = true;
                         safeTowns = null;
                         sceneAgentsReceipt = null;
@@ -355,7 +421,7 @@ internal static class AgentHostEstablishClanCompanionLoop
 
                     using var refreshed = await campaignClient.ReadStateAsync(elapsed.Token);
                     var afterState = ReadState(refreshed.RootElement);
-                    trace.Add(BuildStep(decisions, observation, decision.Decision, SafeReceipt(receipt, action, selectedSettlementId, targetHeroId), afterState, actionStarted));
+                    trace.Add(BuildStep(decisions, observation, decision.Decision, SafeReceipt(receipt, action, selectedSettlementId, targetHeroId, safeTowns), afterState, actionStarted));
                 }
             }
 
@@ -418,6 +484,13 @@ internal static class AgentHostEstablishClanCompanionLoop
         var catalog = new JsonArray();
         var context = state["context"] as JsonObject;
         var gameState = ReadString(context, "gameState");
+        var sceneNotification = context?["sceneNotification"] as JsonObject;
+        if (ReadBoolean(sceneNotification, "hasActiveNotification"))
+        {
+            if (!pending && gameState == "MapState" && ReadBoolean(sceneNotification, "canContinue"))
+                catalog.Add(new JsonObject { ["action"] = "continueSceneNotification", ["arguments"] = new JsonArray() });
+            return catalog;
+        }
         if (pending || ReadBoolean(context, "inquiryOpen") || ReadBoolean(context, "escapeMenuOpen") ||
             AgentHostCampaignStateFacts.IsActiveEncounter(state) || ReadBoolean(context?["captivity"] as JsonObject, "isCaptive")) return catalog;
 
@@ -440,8 +513,9 @@ internal static class AgentHostEstablishClanCompanionLoop
                 catalog.Add(new JsonObject { ["action"] = "mapSettlementTargets", ["arguments"] = new JsonArray() });
             else if (string.IsNullOrWhiteSpace(moveTargetId) && safeTowns?.Count > 0)
             {
+                var visibleTowns = BuildSafeTownDecisionWindow(safeTowns);
                 var action = new JsonObject { ["action"] = "move", ["arguments"] = new JsonArray("SettlementId") };
-                action["argumentValues"] = new JsonObject { ["SettlementId"] = new JsonArray(safeTowns.OfType<JsonObject>()
+                action["argumentValues"] = new JsonObject { ["SettlementId"] = new JsonArray(visibleTowns.OfType<JsonObject>()
                     .Select(town => (JsonNode?)JsonValue.Create(ReadString(town, "id"))).ToArray()) };
                 catalog.Add(action);
             }
@@ -544,6 +618,10 @@ internal static class AgentHostEstablishClanCompanionLoop
             case "missionSceneAgents" when supplied.Count == 0:
             case "missionLeave" when supplied.Count == 0:
             case "dialogueContinue" when supplied.Count == 0:
+                return true;
+            case "continueSceneNotification" when supplied.Count == 0 &&
+                                                   ReadBoolean(state["context"]?["sceneNotification"] as JsonObject, "hasActiveNotification") &&
+                                                   ReadBoolean(state["context"]?["sceneNotification"] as JsonObject, "canContinue"):
                 return true;
             case "move":
                 var requestedSettlementId = ReadString(supplied, "SettlementId");
@@ -683,7 +761,9 @@ internal static class AgentHostEstablishClanCompanionLoop
             ["state"] = state.DeepClone(),
             ["journalObjectiveSnapshot"] = journal.DeepClone(),
             ["objectiveSnapshot"] = objective.DeepClone(),
-            ["visibleSafeTownTargets"] = safeTowns?.DeepClone(),
+            ["visibleSafeTownTargets"] = BuildSafeTownDecisionWindow(safeTowns),
+            ["safeTownTargetCount"] = safeTowns?.Count ?? 0,
+            ["additionalSafeTownTargetsAvailable"] = safeTowns is not null && safeTowns.Count > SafeTownDecisionWindowSize,
             ["sceneObservationScope"] = ReadString(sceneAgentsReceipt?["data"] as JsonObject, "scope"),
             ["sceneAgentCount"] = ReadInt(sceneAgentsReceipt?["data"] as JsonObject, "activeAgentCount", 0),
             ["currentSceneWandererCandidates"] = compactCandidates,
@@ -694,13 +774,32 @@ internal static class AgentHostEstablishClanCompanionLoop
         };
     }
 
-    private static JsonObject SafeReceipt(JsonObject receipt, string action, string? targetSettlementId, string? targetHeroId) => new()
+    private static JsonArray BuildSafeTownDecisionWindow(JsonArray? safeTowns) => new(
+        (safeTowns?.OfType<JsonObject>() ?? Enumerable.Empty<JsonObject>())
+        .OrderBy(town => ReadDouble(town, "distance"))
+        .ThenBy(town => ReadString(town, "id"), StringComparer.Ordinal)
+        .Take(SafeTownDecisionWindowSize)
+        .Select(town => (JsonNode?)new JsonObject
+        {
+            ["id"] = ReadString(town, "id"),
+            ["name"] = ReadString(town, "name"),
+            ["distance"] = ReadDouble(town, "distance")
+        }).ToArray());
+
+    private static JsonObject SafeReceipt(JsonObject receipt, string action, string? targetSettlementId, string? targetHeroId, JsonArray? safeTowns) => new()
     {
         ["action"] = action,
         ["status"] = ReadString(receipt, "status"),
         ["targetSettlementId"] = targetSettlementId,
         ["targetHeroId"] = targetHeroId,
-        ["data"] = receipt["data"]?.DeepClone()
+        ["data"] = action == "mapSettlementTargets"
+            ? new JsonObject
+            {
+                ["safeTownTargetCount"] = safeTowns?.Count ?? 0,
+                ["decisionWindowCount"] = BuildSafeTownDecisionWindow(safeTowns).Count,
+                ["additionalSafeTownTargetsAvailable"] = safeTowns is not null && safeTowns.Count > SafeTownDecisionWindowSize
+            }
+            : receipt["data"]?.DeepClone()
     };
 
     private static JsonObject BuildStep(int decision, JsonObject observation, JsonObject? selectedDecision, JsonObject? receipt,
@@ -754,6 +853,162 @@ internal static class AgentHostEstablishClanCompanionLoop
     private static bool ReadBoolean(JsonObject? node, string name) => node?[name] is JsonValue value && value.TryGetValue<bool>(out var result) && result;
     private static int ReadInt(JsonElement element, string name, int fallback = 0) => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.TryGetInt32(out var result) ? result : fallback;
     private static bool ReadBoolean(JsonElement element, string name) => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
+
+    private sealed class FakeMovementCompanionClient : IAgentHostCampaignNativeClient, IAgentHostCompanionHiringNativeClient
+    {
+        private bool _moveIssued;
+        private bool _arrived;
+        private bool _townMenuAdvanced;
+        private bool _sceneNotificationActive;
+        private bool _sceneNotificationWasContinued;
+        private int _postMoveReads;
+        internal List<string> Actions { get; } = new();
+        internal int ActiveMovementStateReads { get; private set; }
+        internal int ExplicitClockActions { get; private set; }
+        internal int SceneNotificationContinueCount { get; private set; }
+        internal double CampaignDay { get; } = 91077.375;
+
+        public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_moveIssued && !_arrived && !_sceneNotificationActive)
+            {
+                _postMoveReads++;
+                if (_postMoveReads == 1 && !_sceneNotificationWasContinued) _sceneNotificationActive = true;
+                else if (_postMoveReads >= 4) _arrived = true;
+                else ActiveMovementStateReads++;
+            }
+            var menuId = !_arrived ? null : (_townMenuAdvanced ? "town_backstreet" : "town");
+            var options = !_arrived ? new JsonArray() : new JsonArray(new JsonObject
+            {
+                ["id"] = _townMenuAdvanced ? "town_tavern" : "town_backstreet",
+                ["available"] = true,
+                ["enabled"] = true,
+                ["isLeave"] = false
+            });
+            var state = new JsonObject
+            {
+                ["context"] = new JsonObject
+                {
+                    ["gameState"] = "MapState", ["menuId"] = menuId, ["encounterActive"] = false,
+                    ["inquiryOpen"] = false, ["escapeMenuOpen"] = false,
+                    ["timeControlMode"] = _moveIssued ? "StoppablePlay" : "Stop",
+                    ["campaignDay"] = CampaignDay,
+                    ["sceneNotification"] = _sceneNotificationActive ? new JsonObject
+                    {
+                        ["available"] = true, ["hasActiveNotification"] = true, ["isShown"] = true, ["isReady"] = true,
+                        ["dataType"] = "FindingFirstBannerPieceSceneNotificationItem", ["titleText"] = "A Native map scene notification",
+                        ["clickToContinueText"] = "Click to continue", ["affirmativeButtonShown"] = false,
+                        ["negativeButtonShown"] = false, ["pauseActiveState"] = true, ["canContinue"] = true
+                    } : new JsonObject { ["available"] = true, ["hasActiveNotification"] = false },
+                    ["captivity"] = new JsonObject { ["isCaptive"] = false }
+                },
+                ["availableMenuOptions"] = options,
+                ["location"] = new JsonObject
+                {
+                    ["currentSettlementId"] = _arrived ? "town-a" : null,
+                    ["targetSettlementId"] = _moveIssued ? "town-a" : null
+                },
+                ["party"] = new JsonObject { ["members"] = 1, ["isMoving"] = _moveIssued && !_arrived },
+                ["economy"] = new JsonObject { ["gold"] = 1000 },
+                ["storyModeEstablishClan"] = new JsonObject { ["companions"] = new JsonObject { ["current"] = 0, ["target"] = 1 } }
+            };
+            return Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["state"] = state }.ToJsonString()));
+        }
+
+        public Task<JsonDocument> ReadQuestDetailsAsync(string questId, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (questId != QuestId) throw new AgentHostException("companion-movement-selftest-wrong-quest", "Movement waiting read an unexpected Journal.");
+            var stages = new JsonArray(
+                new JsonObject { ["hasTask"] = true, ["currentProgress"] = 1000, ["targetProgress"] = 2000, ["description"] = "gold" },
+                new JsonObject { ["hasTask"] = true, ["currentProgress"] = 1, ["targetProgress"] = 25, ["description"] = "partySize" },
+                new JsonObject { ["hasTask"] = true, ["currentProgress"] = 20, ["targetProgress"] = 50, ["description"] = "renown" },
+                new JsonObject { ["hasTask"] = true, ["currentProgress"] = 0, ["targetProgress"] = 1, ["description"] = "companions" });
+            return Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["data"] = new JsonObject { ["questId"] = QuestId, ["journalStages"] = stages } }.ToJsonString()));
+        }
+
+        public Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Actions.Add(action);
+            if (action == "mapSettlementTargets")
+                return Receipt(action, new JsonObject { ["mapSettlementTargets"] = new JsonArray(new JsonObject { ["id"] = "town-a", ["name"] = "Town A", ["type"] = "town", ["distance"] = 1.0, ["hostile"] = false, ["underSiege"] = false }) });
+            if (action == "move" && ReadString(arguments, "settlementId") == "town-a")
+            {
+                _moveIssued = true;
+                return Receipt(action, new JsonObject { ["targetSettlementId"] = "town-a", ["timeControlMode"] = "StoppablePlay" });
+            }
+            if (action == "continueSceneNotification" && arguments.Count == 0 && _sceneNotificationActive)
+            {
+                _sceneNotificationActive = false;
+                _sceneNotificationWasContinued = true;
+                SceneNotificationContinueCount++;
+                return Receipt(action, new JsonObject { ["nativeHandler"] = "SceneNotificationVM.ExecuteClose", ["notificationStillActive"] = false, ["campaignDayBefore"] = CampaignDay, ["campaignDayAfter"] = CampaignDay });
+            }
+            if (action is "pause" or "resume" or "fastForward") ExplicitClockActions++;
+            throw new AgentHostException("companion-movement-selftest-unexpected-map-action", "Movement waiting issued an unexpected Native map command.");
+        }
+
+        public Task<JsonDocument> ExecuteCompanionHiringActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Actions.Add(action);
+            if (action == "menuSelect" && ReadString(arguments, "menuId") == "town" && ReadString(arguments, "optionId") == "town_backstreet")
+            {
+                _townMenuAdvanced = true;
+                return Receipt(action, new JsonObject { ["menuId"] = "town", ["optionId"] = "town_backstreet" });
+            }
+            throw new AgentHostException("companion-movement-selftest-unexpected-town-action", "The companion loop resumed at an unexpected Town menu option.");
+        }
+
+        private static Task<JsonDocument> Receipt(string action, JsonObject data) =>
+            Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["action"] = action, ["data"] = data }.ToJsonString()));
+    }
+
+    private sealed class FakeMovementDecisionProvider : IAgentHostDecisionProvider
+    {
+        internal int CallCount { get; private set; }
+        internal bool SawSceneNotification { get; private set; }
+        public string ModelId => "deterministic-companion-map-movement-selftest";
+        public string ConfigurationSource => "harness-fake-provider";
+        public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) { cancellationToken.ThrowIfCancellationRequested(); return Task.CompletedTask; }
+
+        public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CallCount++;
+            var observedState = request.GetProperty("observation").GetProperty("state");
+            if (observedState.GetProperty("context").TryGetProperty("sceneNotification", out var sceneNotification) &&
+                sceneNotification.TryGetProperty("hasActiveNotification", out var hasActive) && hasActive.GetBoolean() &&
+                sceneNotification.TryGetProperty("canContinue", out var canContinue) && canContinue.GetBoolean()) SawSceneNotification = true;
+            var actions = request.GetProperty("allowedActions").EnumerateArray().ToArray();
+            JsonObject decision;
+            var mapTargets = actions.FirstOrDefault(action => action.GetProperty("action").GetString() == "mapSettlementTargets");
+            var move = actions.FirstOrDefault(action => action.GetProperty("action").GetString() == "move");
+            var menu = actions.FirstOrDefault(action => action.GetProperty("action").GetString() == "menuSelect");
+            var notificationContinue = actions.FirstOrDefault(action => action.GetProperty("action").GetString() == "continueSceneNotification");
+            if (mapTargets.ValueKind == JsonValueKind.Object)
+                decision = new JsonObject { ["action"] = "mapSettlementTargets", ["arguments"] = new JsonObject() };
+            else if (move.ValueKind == JsonValueKind.Object)
+                decision = new JsonObject { ["action"] = "move", ["arguments"] = new JsonObject { ["SettlementId"] = move.GetProperty("argumentValues").GetProperty("SettlementId")[0].GetString() } };
+            else if (menu.ValueKind == JsonValueKind.Object)
+                decision = new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject
+                {
+                    ["MenuId"] = menu.GetProperty("argumentValues").GetProperty("MenuId")[0].GetString(),
+                    ["OptionId"] = menu.GetProperty("argumentValues").GetProperty("OptionId")[0].GetString()
+                } };
+            else if (notificationContinue.ValueKind == JsonValueKind.Object)
+                decision = new JsonObject { ["action"] = "continueSceneNotification", ["arguments"] = new JsonObject() };
+            else if (request.GetProperty("allowedControls").EnumerateArray().Any(control => control.GetString() == "observeAgain"))
+                decision = new JsonObject { ["control"] = "observeAgain", ["waitSeconds"] = 1, ["reason"] = "Current Native movement is active." };
+            else
+                throw new AgentHostException("companion-movement-selftest-no-action", "No current Native movement test action/control was listed.");
+            return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "self-test", decision, "self-test", "json_schema"));
+        }
+
+        public void Dispose() { }
+    }
 
     private sealed class FakeCompanionClient : IAgentHostCampaignNativeClient, IAgentHostCompanionHiringNativeClient
     {

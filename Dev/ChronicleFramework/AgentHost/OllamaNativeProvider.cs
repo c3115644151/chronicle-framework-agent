@@ -375,7 +375,11 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     var remaining = requestDeadlineUtc - DateTimeOffset.UtcNow;
                     lastRateLimitRetryFitsDeadline = retryHint.Delay.HasValue && retryHint.Delay.Value + MinimumRateLimitRetryRequestBudget <= remaining;
                 }
-                var maximumRateLimitRetries = retryHint.Source == "body-exhaustion" ? 1 : 2;
+                // A FreeLLMAPI request may traverse several provider/model candidates and expose
+                // a new Retry-After window on each 429. Permit one more bounded header retry so
+                // an early short wait cannot consume the budget before a later, still-in-deadline
+                // reset hint. Pool-exhaustion bodies remain limited to one retry.
+                var maximumRateLimitRetries = retryHint.Source == "body-exhaustion" ? 1 : 3;
                 if (rateLimitRetryAttempts < maximumRateLimitRetries && retryHint.Delay.HasValue && lastRateLimitRetryFitsDeadline == true)
                 {
                     response.Dispose();

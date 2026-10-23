@@ -8,7 +8,7 @@ namespace ChronicleFramework.AgentHost;
 internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeClient, IAgentHostBattleSimulationNativeClient,
     IAgentHostQuestDetailsNativeClient, IAgentHostCaptivityRecoveryNativeClient, IAgentHostGoldSaleNativeClient,
     IAgentHostRecruitmentNativeClient, IAgentHostCompanionHiringNativeClient, IAgentHostStoryModeBootstrapNativeClient,
-    IAgentHostNativeInquiryClient
+    IAgentHostNativeInquiryClient, IAgentHostStoryModeBannerEditorNativeClient
 {
     private static readonly HashSet<string> SupplySliceActions = new(StringComparer.Ordinal)
     {
@@ -61,6 +61,15 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
         return SendAsync("respondInquiry", new JsonObject { ["token"] = token, ["choice"] = choice }, acceptedResponseExpected: false, cancellationToken);
     }
 
+    public Task<JsonDocument> SubmitStoryModeClanNameAsync(string token, string clanName, CancellationToken cancellationToken)
+    {
+        ValidateStoryModeClanNameSubmission(token, clanName);
+        return SendAsync("submitStoryModeClanName", new JsonObject { ["token"] = token, ["text"] = clanName }, acceptedResponseExpected: false, cancellationToken);
+    }
+
+    public Task<JsonDocument> CompleteStoryModeBannerEditorAsync(CancellationToken cancellationToken) =>
+        SendAsync("bannerEditorDone", new JsonObject(), acceptedResponseExpected: false, cancellationToken);
+
     internal static void ValidateNativeInquiryResponse(string token, string choice)
     {
         if (string.IsNullOrWhiteSpace(token) || token.Length > 256 || choice is not ("affirmative" or "negative"))
@@ -81,6 +90,27 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             catch (AgentHostException exception) when (exception.Code == "native-inquiry-response-arguments-invalid") { }
         }
         return [new { scenario = "native-inquiry-mailbox-accepts-only-token-bound-explicit-yes-no-choices", passed = true }];
+    }
+
+    internal static void ValidateStoryModeClanNameSubmission(string token, string clanName)
+    {
+        if (string.IsNullOrWhiteSpace(token) || token.Length > 256 || string.IsNullOrWhiteSpace(clanName) || clanName.Length > 64)
+            throw new AgentHostException("native-storymode-clan-name-arguments-invalid", "The StoryMode clan-name adapter requires a current token and 1-64 non-whitespace characters.");
+    }
+
+    internal static IReadOnlyList<object> RunStoryModeClanNameContractSelfTests()
+    {
+        ValidateStoryModeClanNameSubmission("current-token", "Chronicle Vanguard");
+        foreach (var item in new[] { (Token: "", Name: "Chronicle Vanguard"), (Token: "token", Name: " "), (Token: "token", Name: new string('x', 65)) })
+        {
+            try
+            {
+                ValidateStoryModeClanNameSubmission(item.Token, item.Name);
+                throw new AgentHostException("native-storymode-clan-name-invalid-accepted", "The Native clan-name adapter accepted an empty token, blank name, or overlong value.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "native-storymode-clan-name-arguments-invalid") { }
+        }
+        return [new { scenario = "storymode-clan-name-mailbox-requires-current-token-and-bounded-nonblank-text", passed = true }];
     }
 
     Task<JsonDocument> IAgentHostCampaignNativeClient.ReadStateAsync(CancellationToken cancellationToken) => ReadStateAsync(cancellationToken);
@@ -134,7 +164,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
         static bool HasOnlyKeys(JsonObject value, params string[] keys) => value.Count == keys.Length && keys.All(value.ContainsKey);
         var valid = action switch
         {
-            "missionSceneAgents" or "missionLeave" or "dialogueContinue" => arguments.Count == 0,
+            "missionSceneAgents" or "missionLeave" or "dialogueContinue" or "continueSceneNotification" => arguments.Count == 0,
             "menuSelect" => HasOnlyKeys(arguments, "menuId", "optionId") && HasText(arguments, "menuId") && HasText(arguments, "optionId"),
             "missionNavigateToAgent" => (arguments.Count == 1 || arguments.Count == 2) && IsIndex(arguments, "agentIndex") &&
                 (!arguments.ContainsKey("durationSeconds") || arguments["durationSeconds"] is JsonValue durationNode && durationNode.TryGetValue<int>(out var duration) && duration is >= 1 and <= 20),
@@ -308,6 +338,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
         switch (action)
         {
             case "mapSettlementTargets" when arguments.Count == 0:
+            case "continueSceneNotification" when arguments.Count == 0:
                 break;
             case "move" when arguments.Count == 1 &&
                               arguments.TryGetPropertyValue("settlementId", out var settlementIdNode) &&
