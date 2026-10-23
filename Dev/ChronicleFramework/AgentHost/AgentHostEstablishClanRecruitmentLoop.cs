@@ -102,6 +102,15 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             throw new AgentHostException("establish-clan-recruitment-runtime-self-test-failed", "The recruitment subloop must query current offers, commit one affordable volunteer through the Native adapter and stop only after the Journal target refreshes.");
         results.Add(new { scenario = "establish-clan-recruitment-runtime-observe-decide-native-commit-journal-verify", passed = true });
 
+        var stopClient = new FakeRecruitmentNativeClient();
+        var stopProvider = new FakeRecruitmentStopProvider();
+        var stopResult = await RunAsync(request.RootElement, stopClient, stopClient, stopClient, stopProvider, CancellationToken.None);
+        if (ReadString(stopResult, "status") != "interrupted" ||
+            ReadString(stopResult["termination"] as JsonObject, "reason") != "recruitment-model-stopped" ||
+            ReadInt(stopResult, "actionsExecuted", 0) != 0 || stopProvider.CallCount != 1 || stopClient.Actions.Count != 0)
+            throw new AgentHostException("establish-clan-recruitment-safe-stop-self-test-failed", "A listed stop control must safely stop PartySize without being rejected as unavailable or executing a Native recruitment action.");
+        results.Add(new { scenario = "establish-clan-recruitment-listed-stop-interrupts-with-zero-native-actions", passed = true });
+
         var unavailableClient = new FakeRecruitmentNativeClient(startOnMap: false);
         var unavailableProvider = new FakeRecruitmentDecisionProvider();
         var unavailable = await RunAsync(request.RootElement, unavailableClient, unavailableClient, unavailableClient, unavailableProvider, CancellationToken.None);
@@ -265,6 +274,9 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                     ["promptTokens"] = decision.PromptTokens,
                     ["completionTokens"] = decision.CompletionTokens
                 });
+
+                if (ReadBoolean(decision.Decision, "stop"))
+                    return BuildResult("interrupted", "recruitment-model-stopped", ReadString(decision.Decision, "reason") ?? "The model safely stopped the PartySize subgoal before another Native action.", "recruitment-model-stopped", state, currentRecruitOffers, journal, objective);
 
                 if (ReadString(decision.Decision, "control") == "observeAgain")
                 {
@@ -592,7 +604,12 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         return result;
     }
 
-    private static JsonArray BuildControlCatalog(bool moving, int actionCount) => moving && actionCount == 0 ? new JsonArray("observeAgain") : new JsonArray();
+    private static JsonArray BuildControlCatalog(bool moving, int actionCount)
+    {
+        var controls = new JsonArray("stop");
+        if (moving && actionCount == 0) controls.Add("observeAgain");
+        return controls;
+    }
 
     private static JsonObject RejectedFeedback(string kind, string message) => new() { ["kind"] = kind, ["message"] = message };
 
@@ -821,6 +838,24 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                 ["action"] = action,
                 ["arguments"] = arguments
             }));
+        }
+        public void Dispose() { }
+    }
+
+    private sealed class FakeRecruitmentStopProvider : IAgentHostDecisionProvider
+    {
+        internal int CallCount { get; private set; }
+        public string ModelId => "deterministic-recruitment-stop-selftest";
+        public string ConfigurationSource => "harness-fake-provider";
+        public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) { cancellationToken.ThrowIfCancellationRequested(); return Task.CompletedTask; }
+        public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CallCount++;
+            if (!request.GetProperty("allowedControls").EnumerateArray().Any(control => control.GetString() == "stop"))
+                throw new AgentHostException("recruitment-stop-selftest-control-not-listed", "The recruitment system prompt supports a safe stop, so the current control catalog must expose it.");
+            return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "self-test",
+                new JsonObject { ["stop"] = true, ["reason"] = "No safe volunteer route now." }, "self-test", "json_schema"));
         }
         public void Dispose() { }
     }

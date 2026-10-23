@@ -194,8 +194,16 @@ internal static class AgentHostDecisionCycle
     internal static Task<ProviderDecisionResult> DecideEstablishYourClanGoalAsync(
         IAgentHostDecisionProvider provider,
         JsonObject request,
-        CancellationToken cancellationToken) =>
-        DecideAsync(provider, request, EstablishYourClanGoalPlannerPrompt, cancellationToken);
+        CancellationToken cancellationToken)
+    {
+        var prompt = EstablishYourClanGoalPlannerPrompt;
+        var feedback = request["decisionFeedback"] as JsonObject;
+        if (ReadString(feedback, "kind") == "objective-selection-rejected-before-native")
+            prompt += " RECOVERY DIRECTIVE: Your prior objective selection was rejected before any Native action because it was not in the current catalog. " +
+                (ReadString(feedback, "requiredNextStep") ?? "Re-read the fresh allowedActions.argumentValues.ObjectiveId list and choose one of its values.") +
+                " Treat the current allowedActions list as exact; omitted routes are unavailable. This correction request has no gameplay side effect.";
+        return DecideAsync(provider, request, prompt, cancellationToken);
+    }
 
     internal static Task<ProviderDecisionResult> DecideNativeInquiryResponseAsync(
         IAgentHostDecisionProvider provider,

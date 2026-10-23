@@ -212,6 +212,7 @@ $storyModeAgentProgressEntries = [System.Collections.Generic.List[object]]::new(
 $storyModeAgentNativeActionsExecuted = 0
 $storyModeAgentDecisionCount = 0
 $storyModeAgentFailureCode = $null
+$storyModeOriginalEstablishYourClanCompleted = $false
 $storyModeAgentHostReceiptPath = if ([string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) { $null } else { Join-Path $env:CHRONICLE_HARNESS_TEMP 'AgentHostLifecycleHostReceipt.json' }
 $storyModeNativeFrameNames = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
 $storyModeNativeFrameHashes = [ordered]@{}
@@ -983,6 +984,8 @@ if ($StoryModeEycLiveModelEvaluation -and $storyModeAgentHostReceiptPath -and (T
         $storyModeAgentNativeActionsExecuted = [Math]::Max(0, [int]$storyModeHostReceipt.actionsExecuted)
         $storyModeAgentDecisionCount = [Math]::Max(0, [int]$storyModeHostReceipt.decisionCount)
         $storyModeAgentFailureCode = [string]$storyModeHostReceipt.failureCode
+        $storyModeOriginalEstablishYourClanCompleted = $storyModeHostReceipt.status -eq 'completed' -and
+            $storyModeHostReceipt.termination.goalVerified -eq $true
     }
     catch { $harnessFailureObserved = $true }
 }
@@ -1159,6 +1162,7 @@ $result = [ordered]@{
     StoryModeAgentDecisionCount = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentDecisionCount } else { $null }
     StoryModeAgentNativeActionsExecuted = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentNativeActionsExecuted } else { $null }
     StoryModeAgentFailureCode = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentFailureCode } else { $null }
+    StoryModeOriginalEstablishYourClanCompleted = if ($StoryModeEycLiveModelEvaluation) { $storyModeOriginalEstablishYourClanCompleted } else { $null }
     FreeLLMAPIProfile = if ($StoryModeEycLiveModelEvaluation) { $freeLlmApiProfile } else { $null }
     StoryModeAgentProgressPath = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentProgressPath } else { $null }
     StoryModeAgentDecisions = if ($StoryModeEycLiveModelEvaluation) { @($storyModeAgentProgressEntries) } else { $null }

@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.292'
+$contractVersion = '7.293'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -1180,6 +1180,9 @@ if (-not (Test-Path (Join-Path $harnessRoot 'AgentHost\AgentHostCampaignStateFac
     $agentHostCampaignStateFactsSource -notmatch 'campaign-state-facts-hostile-encounter-misclassified' -or
     $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-training-field-menu-misclassified' -or
     $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-training-field-menu-not-exitable' -or
+    $agentHostRecruitmentLoopSource -notmatch 'new JsonArray\("stop"\)' -or
+    $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-listed-stop-interrupts-with-zero-native-actions' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'recruitment-model-stopped' -or
     $agentHostGoldSaleLoopSource -notmatch 'gold-sale-self-test-training-field-menu-not-exitable' -or
     $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-self-test-training-field-menu-not-exitable' -or
     $agentHostProviderContractSelfTestSource -notmatch 'AgentHostCampaignStateFacts.RunContractSelfTests') { throw 'EYC objective subflows must distinguish the verified Native training-field Leave menu from a hostile Party encounter and keep the same leave path out of hostile encounter handling.' }
@@ -1291,6 +1294,9 @@ if ($freshCampaignSource -notmatch 'StoryModeNewGame' -or
     $freshCampaignTest -notmatch '\$env:FREELLMAPI_API_KEY = \$userFreeLlmApiKey' -or
     $freshCampaignTest -notmatch '\$previousFreeLlmApiKey' -or
     $freshCampaignTest -notmatch 'StoryModeAgentHostStarted' -or
+    $freshCampaignTest -notmatch 'StoryModeOriginalEstablishYourClanCompleted' -or
+    $freshCampaignTest -notmatch '\$storyModeHostReceipt\.status -eq ''completed'' -and' -or
+    $freshCampaignTest -notmatch '\$storyModeHostReceipt\.termination\.goalVerified -eq \$true' -or
     $freshCampaignTest -notmatch 'StoryModeAgentProgressPath' -or
     $freshCampaignTest -notmatch 'Initialize-FreeLLMAPIProfile' -or
     $freshCampaignTest -notmatch 'storyModeLiveProviderPreflightReady' -or
@@ -1319,7 +1325,7 @@ if ($freshCampaignSource -notmatch 'StoryModeNewGame' -or
     $agentHostStoryModeBootstrapLoopSource -notmatch 'HasLeftTrainingField' -or
     $agentHostEstablishClanAutonomySource -notmatch 'AgentHostStoryModeBootstrapLoop.IsEligibleTrainingFieldBootstrapState\(initialState.RootElement\)' -or
     $agentHostEstablishClanAutonomySource -notmatch 'companion-model-stopped' -or
-    $agentHostEstablishClanAutonomySource -notmatch 'establish-clan-autonomy-safe-companion-stop-marks-route-unavailable-and-allows-replan' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'establish-clan-autonomy-safe-companion-and-recruitment-stops-mark-route-unavailable-and-allow-replan' -or
     $freshCampaignSource -notmatch '_storyModeAgentAutostartArmed' -or
     $freshCampaignSource -notmatch 'if \(_storyModeAgentAutostartArmed\) return' -or
     $freshCampaignTest -notmatch 'storyModeLiveModelProducedDecision' -or
@@ -1349,6 +1355,11 @@ if ($agentHostCompanionLoopSource -notmatch 'new JsonArray\("stop"\)' -or
     $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-listed-safe-stop-is-interrupted-with-zero-native-actions' -or
     $agentHostProviderSource -notmatch 'ContainsString\(request, "allowedControls", "stop"\)' -or
     $agentHostProviderContractSelfTestSource -notmatch 'provider-normalizes-only-workflow-listed-safe-stop-control') { throw 'The Companion prompt may request a safe stop only when the control is explicitly listed, normalized as non-success, and tested to emit zero Native actions.' }
+if ($agentHostEstablishClanPlannerSource -notmatch 'objective-selection-rejected-before-native' -or
+    $agentHostEstablishClanPlannerSource -notmatch 'allowed ObjectiveId values are exactly' -or
+    $agentHostDecisionCycleSource -notmatch 'Treat the current allowedActions list as exact' -or
+    $agentHostEstablishClanPlannerSource -notmatch 'establish-clan-objective-invalid-choice-correction-failed' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'objective-planner-failed') { throw 'The EYC planner must make at most one correction for an objective omitted from the current allowed catalog, preserve the request/evidence counts, and fail explicitly only after the bounded correction.' }
 if ($harnessScript -notmatch "'FreshStoryModeNativeInquiryResponseEvaluation' \{ @\('Preflight', 'Build', 'FreshStoryModeNativeInquiryResponseEvaluation'\) \}" -or
     $harnessScript -notmatch '-StoryModeNativeMenuLeaveEvaluation -StoryModeNativeInquiryResponseEvaluation' -or
     $freshCampaignTest -notmatch '\[switch\]\$StoryModeNativeInquiryResponseEvaluation' -or

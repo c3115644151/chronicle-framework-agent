@@ -82,6 +82,20 @@ internal static class AgentHostEstablishYourClanGoalLoop
             providerCatalog[0]!["argumentValues"]!["ObjectiveId"]!.AsArray().Any(value => value?.GetValue<string>() is "gold" or "renown"))
             throw new AgentHostException("establish-clan-objective-planner-runtime-failed", "The read-only planner did not select an unmet objective from the exact current quest catalog.");
 
+        var correctionNative = new FakeNativeClient(snapshot);
+        var correctionProvider = new FakeObjectiveCorrectionProvider("companions", "partySize");
+        var correctionSupported = new HashSet<string>(StringComparer.Ordinal) { "partySize" };
+        var correctedPlan = await RunAsync(request.RootElement, correctionNative, correctionNative, correctionProvider, CancellationToken.None,
+            supportedObjectives: correctionSupported);
+        var correctedCatalog = correctionProvider.Requests.Count > 1 ? correctionProvider.Requests[1]["allowedActions"] as JsonArray : null;
+        if (ReadString(correctedPlan, "status") != "completed" || ReadString(correctedPlan["selection"] as JsonObject, "objectiveId") != "partySize" ||
+            ReadInt(correctedPlan, "decisions", 0) != 2 || correctionProvider.CallCount != 2 || correctionNative.MutatingActionCount != 0 ||
+            correctedCatalog?[0]?["argumentValues"]?["ObjectiveId"]?.AsArray().Any(value => value?.GetValue<string>() == "companions") == true ||
+            ReadString(correctionProvider.Requests[1]["decisionFeedback"] as JsonObject, "kind") != "objective-selection-rejected-before-native" ||
+            ReadString(correctionProvider.Requests[1]["decisionFeedback"] as JsonObject, "requiredNextStep")?.Contains("partySize", StringComparison.Ordinal) != true ||
+            ReadString(correctionProvider.Requests[1]["decisionFeedback"] as JsonObject, "requiredNextStep")?.Contains("companions", StringComparison.Ordinal) == true)
+            throw new AgentHostException("establish-clan-objective-invalid-choice-correction-failed", "An excluded objective must be rejected before gameplay, then receive one bounded correction request constrained to current supported routes.");
+
         var inconsistentSnapshot = (JsonObject)snapshot.DeepClone();
         inconsistentSnapshot["partySize"]!["current"] = 20;
         inconsistentSnapshot["partySize"]!["met"] = true;
@@ -214,45 +228,100 @@ internal static class AgentHostEstablishYourClanGoalLoop
             ["allowedActions"] = actionCatalog,
             ["allowedControls"] = new JsonArray()
         };
-        var decision = await AgentHostDecisionCycle.DecideEstablishYourClanGoalAsync(provider, modelRequest, cancellationToken);
-        var selectedObjective = ReadString(decision.Decision["arguments"] as JsonObject, "ObjectiveId");
-        var selectedGoal = selectedObjective is null ? null : snapshot[selectedObjective] as JsonObject;
-        if (ReadString(decision.Decision, "action") != "selectEstablishYourClanObjective" ||
-            selectedGoal is null || ReadBoolean(selectedGoal, "met") != false ||
-            !actionCatalog[0]!["argumentValues"]!["ObjectiveId"]!.AsArray().Any(value => value?.GetValue<string>() == selectedObjective))
-            throw new AgentHostException("establish-clan-objective-selection-invalid", "The model did not select exactly one currently unmet, catalog-listed objective.");
-
         var routeHistory = priorProviderRouteHistory?.DeepClone() as JsonArray ?? new JsonArray();
-        routeHistory.Add(new JsonObject
-        {
-            ["decision"] = priorDecisions + 1,
-            ["requestedModelId"] = provider.ModelId,
-            ["responseModelId"] = decision.ModelId,
-            ["routedVia"] = decision.RoutedVia,
-            ["responseFormatMode"] = decision.ResponseFormatMode,
-            ["promptTokens"] = decision.PromptTokens,
-            ["completionTokens"] = decision.CompletionTokens
-        });
         var trace = priorTrace?.DeepClone() as JsonArray ?? new JsonArray();
-        trace.Add(new JsonObject
+        ProviderDecisionResult decision = null!;
+        string? selectedObjective = null;
+        JsonObject? selectedGoal = null;
+        var plannerDecisionCount = 0;
+        long plannerPromptTokens = 0;
+        long plannerCompletionTokens = 0;
+        var validSelection = false;
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            ["iteration"] = priorDecisions + 1,
-            ["decision"] = decision.Decision.DeepClone(),
-            ["planningOnly"] = true,
-            ["nativeActionExecuted"] = false,
-            ["nativeQuestDetailsRead"] = QuestId,
-            ["selectedObjectiveId"] = selectedObjective
-        });
+            modelRequest["iteration"] = priorDecisions + plannerDecisionCount + 1;
+            if (attempt == 1)
+            {
+                var allowedObjectiveIds = actionCatalog[0]!["argumentValues"]!["ObjectiveId"]!.AsArray()
+                    .Select(value => value?.GetValue<string>())
+                    .Where(value => !string.IsNullOrWhiteSpace(value))
+                    .ToArray();
+                modelRequest["decisionFeedback"] = new JsonObject
+                {
+                    ["kind"] = "objective-selection-rejected-before-native",
+                    ["requiredNextStep"] = "The allowed ObjectiveId values are exactly [" + string.Join(", ", allowedObjectiveIds) + "]. Choose one listed value; do not repeat an omitted route. No Native action was taken."
+                };
+            }
+
+            decision = await AgentHostDecisionCycle.DecideEstablishYourClanGoalAsync(provider, modelRequest, cancellationToken);
+            plannerDecisionCount++;
+            plannerPromptTokens += decision.PromptTokens ?? 0;
+            plannerCompletionTokens += decision.CompletionTokens ?? 0;
+            routeHistory.Add(new JsonObject
+            {
+                ["decision"] = priorDecisions + plannerDecisionCount,
+                ["requestedModelId"] = provider.ModelId,
+                ["responseModelId"] = decision.ModelId,
+                ["routedVia"] = decision.RoutedVia,
+                ["responseFormatMode"] = decision.ResponseFormatMode,
+                ["promptTokens"] = decision.PromptTokens,
+                ["completionTokens"] = decision.CompletionTokens
+            });
+
+            selectedObjective = ReadString(decision.Decision["arguments"] as JsonObject, "ObjectiveId");
+            selectedGoal = selectedObjective is null ? null : snapshot[selectedObjective] as JsonObject;
+            validSelection = ReadString(decision.Decision, "action") == "selectEstablishYourClanObjective" &&
+                selectedGoal is not null && ReadBoolean(selectedGoal, "met") == false &&
+                actionCatalog[0]!["argumentValues"]!["ObjectiveId"]!.AsArray().Any(value => value?.GetValue<string>() == selectedObjective);
+            trace.Add(new JsonObject
+            {
+                ["iteration"] = priorDecisions + plannerDecisionCount,
+                ["decision"] = decision.Decision.DeepClone(),
+                ["planningOnly"] = true,
+                ["nativeActionExecuted"] = false,
+                ["nativeQuestDetailsRead"] = QuestId,
+                ["selectedObjectiveId"] = selectedObjective,
+                ["allowedObjectiveIds"] = actionCatalog[0]!["argumentValues"]!["ObjectiveId"]!.DeepClone(),
+                ["selectionValid"] = validSelection,
+                ["rejectionCode"] = validSelection ? null : "establish-clan-objective-selection-invalid"
+            });
+            if (validSelection) break;
+        }
+
+        if (!validSelection)
+            return new JsonObject
+            {
+                ["status"] = "failed",
+                ["resultKind"] = "objective-selection-invalid",
+                ["providerModelId"] = provider.ModelId,
+                ["providerConfigurationSource"] = provider.ConfigurationSource,
+                ["decisions"] = priorDecisions + plannerDecisionCount,
+                ["actionsExecuted"] = 1,
+                ["promptTokens"] = priorPromptTokens + plannerPromptTokens,
+                ["completionTokens"] = priorCompletionTokens + plannerCompletionTokens,
+                ["providerRouteHistory"] = routeHistory,
+                ["trace"] = trace,
+                ["questDetails"] = receipt.DeepClone(),
+                ["objectiveSnapshot"] = snapshot.DeepClone(),
+                ["journalObjectiveSnapshot"] = journalObjectives.DeepClone(),
+                ["targetConsistency"] = targetConsistency.DeepClone(),
+                ["liveMetricDifferences"] = liveMetricDifferences.DeepClone(),
+                ["selection"] = null,
+                ["failureCode"] = "establish-clan-objective-selection-invalid",
+                ["failure"] = "The model selected no current unmet objective after one bounded catalog correction.",
+                ["termination"] = new JsonObject { ["reason"] = "objective-selection-invalid-after-correction", ["completedByProvider"] = false, ["goalVerified"] = false }
+            };
+
         return new JsonObject
         {
             ["status"] = "completed",
             ["resultKind"] = "objective-plan",
             ["providerModelId"] = provider.ModelId,
             ["providerConfigurationSource"] = provider.ConfigurationSource,
-            ["decisions"] = priorDecisions + 1,
+            ["decisions"] = priorDecisions + plannerDecisionCount,
             ["actionsExecuted"] = 1,
-            ["promptTokens"] = priorPromptTokens + (decision.PromptTokens ?? 0),
-            ["completionTokens"] = priorCompletionTokens + (decision.CompletionTokens ?? 0),
+            ["promptTokens"] = priorPromptTokens + plannerPromptTokens,
+            ["completionTokens"] = priorCompletionTokens + plannerCompletionTokens,
             ["providerRouteHistory"] = routeHistory,
             ["trace"] = trace,
             ["questDetails"] = receipt.DeepClone(),
@@ -263,7 +332,7 @@ internal static class AgentHostEstablishYourClanGoalLoop
             ["selection"] = new JsonObject
             {
                 ["objectiveId"] = selectedObjective,
-                ["current"] = selectedGoal["current"]?.DeepClone(),
+                ["current"] = selectedGoal!["current"]?.DeepClone(),
                 ["target"] = selectedGoal["target"]?.DeepClone(),
                 ["met"] = false,
                 ["rationale"] = decision.Decision["rationale"]?.DeepClone(),
@@ -366,6 +435,7 @@ internal static class AgentHostEstablishYourClanGoalLoop
 
     private static string? ReadString(JsonObject? value, string key) => value?[key] is JsonValue item && item.TryGetValue<string>(out var text) ? text : null;
     private static string? ReadString(JsonElement value, string key) => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(key, out var property) && property.ValueKind == JsonValueKind.String ? property.GetString() : null;
+    private static int ReadInt(JsonObject? value, string key, int fallback = 0) => value?[key] is JsonValue item && item.TryGetValue<int>(out var integer) ? integer : fallback;
     private static bool? ReadBoolean(JsonObject? value, string key) => value?[key] is JsonValue item && item.TryGetValue<bool>(out var result) ? result : null;
     private static double? ReadNumber(JsonObject? value, string key)
     {
@@ -416,6 +486,30 @@ internal static class AgentHostEstablishYourClanGoalLoop
             };
             return Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["data"] = data }.ToJsonString()));
         }
+    }
+
+    private sealed class FakeObjectiveCorrectionProvider(params string[] selections) : IAgentHostDecisionProvider
+    {
+        internal int CallCount { get; private set; }
+        internal List<JsonObject> Requests { get; } = new();
+        public string ModelId => "deterministic-establish-clan-objective-correction-self-test";
+        public string ConfigurationSource => "harness-fake-provider";
+        public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (CallCount >= selections.Length) throw new AgentHostException("objective-correction-provider-exhausted", "The correction self-test received more decisions than configured.");
+            Requests.Add(JsonNode.Parse(request.GetRawText())?.AsObject() ?? new JsonObject());
+            var selectedObjective = selections[CallCount++];
+            return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 5, 1, "self-test",
+                new JsonObject
+                {
+                    ["action"] = "selectEstablishYourClanObjective",
+                    ["arguments"] = new JsonObject { ["ObjectiveId"] = selectedObjective },
+                    ["rationale"] = "Choose one objective."
+                }, "self-test", "json_schema"));
+        }
+        public void Dispose() { }
     }
 
     private sealed class FakeDecisionProvider(string selectedObjective) : IAgentHostDecisionProvider

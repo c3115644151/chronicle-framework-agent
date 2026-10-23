@@ -58,9 +58,11 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         };
         if (!IsSafeObjectiveRouteUnavailable("companions", "companion-model-stopped", freeMap: true) ||
             IsSafeObjectiveRouteUnavailable("companions", "companion-model-stopped", freeMap: false) ||
-            IsSafeObjectiveRouteUnavailable("gold", "companion-model-stopped", freeMap: true))
-            throw new AgentHostException("establish-clan-autonomy-safe-stop-replan-policy-failed", "A safe Companion stop may mark only that route unavailable on a free Map; it must not hide an unrelated failure or encounter/captive state.");
-        results.Add(new { scenario = "establish-clan-autonomy-safe-companion-stop-marks-route-unavailable-and-allows-replan", passed = true });
+            IsSafeObjectiveRouteUnavailable("gold", "companion-model-stopped", freeMap: true) ||
+            !IsSafeObjectiveRouteUnavailable("partySize", "recruitment-model-stopped", freeMap: true) ||
+            IsSafeObjectiveRouteUnavailable("partySize", "recruitment-model-stopped", freeMap: false))
+            throw new AgentHostException("establish-clan-autonomy-safe-stop-replan-policy-failed", "Safe Companion/PartySize stops may block only that route on a free Map; they must not hide unrelated failures or encounter/captive state.");
+        results.Add(new { scenario = "establish-clan-autonomy-safe-companion-and-recruitment-stops-mark-route-unavailable-and-allow-replan", passed = true });
 
         var native = new FakeNativeClient(activeQuest: true, lifecycle: "active", initialGold: 100);
         var provider = new FakeObjectiveProvider("gold");
@@ -364,6 +366,12 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 trace = planner["trace"]?.DeepClone() as JsonArray ?? trace;
                 routes = planner["providerRouteHistory"]?.DeepClone() as JsonArray ?? routes;
 
+                if (ReadString(planner, "status") == "failed")
+                    return BuildResult("failed", "objective-planner-failed", false,
+                        ReadString(planner, "failure") ?? "The objective planner could not select from the current Native-supported routes after bounded correction.",
+                        ReadString(planner, "failureCode") ?? "establish-clan-objective-selection-invalid",
+                        journalObjectives, snapshot, differences);
+
                 var resultKind = ReadString(planner, "resultKind");
                 if (resultKind == "no-implemented-objective-route")
                 {
@@ -645,7 +653,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
     {
         if (!freeMap) return false;
         if (objectiveId is "partySize" or "companions")
-            return termination is "native-journal-refresh-pending" or "recruitment-route-unavailable" or "companion-route-unavailable" or "companion-model-stopped";
+            return termination is "native-journal-refresh-pending" or "recruitment-route-unavailable" or "companion-route-unavailable" or "companion-model-stopped" or "recruitment-model-stopped";
         return objectiveId == "renown" && termination == "no-safe-action";
     }
 
