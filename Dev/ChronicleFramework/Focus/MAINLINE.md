@@ -838,6 +838,10 @@ FreeLLMAPI官方目录将NVIDIA Llama 3.2 11B Vision和Poolside Laguna S 2.1分�
 
 为先确认是否只有Nemo不可用，在不启动游戏的情况下各做一次受限`AgentHostProvider`真实远端诊断：`TestResults/20261023-034916`指定`gpt-oss-20b`、`20261023-035105`指定`gpt-oss-120b`，两次FreeLLMAPI都返回HTTP429/Retry-After=85，`lastSuccessfulRoute=ovh`；0模型决策/0token/0Native命令。FreeLLMAPI目录中gpt-oss-20b随后也变为`exhausted`，gpt-oss-120b虽仍标ready但这次真实请求同样限流。再对独立`kilo-auto`做一次provider smoke（`TestResults/20261023-035715`），网关直接返回HTTP429、`freeLlmApiPoolExhausted=true`和RetryAfter 43200秒，仍0 tokens/0决策/0动作。由此当前证据足以停止继续试打这些被实测限流的路由，而不是通过重复调用消耗上游配额：本轮被验证的多个“ready”远端别名实际落到OVH或耗尽的FreeLLMAPI池并返回502/429，真实LLM下一步应等待服务状态恢复或使用已在FreeLLMAPI添加的其它Provider key。当前没有证据证明Groq key已添加，不能假定其路由可用。
 
+FreeLLMAPI 官方 CLI 现已从 Electron Local Storage 的本地 dashboard session（仅进程内、未显示/持久化）完成只读`keys list`调用：提供商key状态为`custom`/`aihorde`/`ovh`/`kilo`/`google`，其中Groq未配置。`/api/models`安全元数据表有9个Groq模型行，其中GPT-OSS 20B/120B已注册但`keyCount=0`；本次实际尝试的模型即使目录标`ready`也返回限流。FreeLLMAPI AIHorde候选确认为35行但没有Tools能力；安装版Host的结构化输出预检不支持这类模型，不能假装它们可以驱动当前Agent，也未添加未验证的纯文本JSON绕过。
+
+另有当前`custom`端点指向BlockRun，配置了Nemotron、Cohere North和Poolside等6个远端模型，均声明支持Tools。BlockRun官方模型目录把Nemotron 3.5 Lightning列在免费模型中；不过`TestResults/20261023-144206`真实FreeLLMAPI请求收到HTTP429/Retry-After=85，等待85秒后`144805`重测仍同样429，因此不再重复调用。该情况定位为BlockRun当前按IP/上游限流，而非本地模型或Host动作错误。[BlockRun官方免费/计费模型目录](https://blockrun.ai/docs/api-reference/models)
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager
