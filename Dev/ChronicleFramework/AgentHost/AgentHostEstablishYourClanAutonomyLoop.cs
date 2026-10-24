@@ -56,6 +56,13 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             new { scenario = "establish-clan-autonomy-offers-only-integrated-unmet-objectives", passed = true },
             new { scenario = "establish-clan-autonomy-never-selects-unimplemented-or-met-objectives", passed = true }
         };
+        if (!IsRecoverableObjectiveProviderFailure("provider-http-error", "FreeLLMAPI returned HTTP 502. fallbackAttempts=2") ||
+            !IsRecoverableObjectiveProviderFailure("provider-http-error", "FreeLLMAPI returned HTTP 503. fallbackAttempts=1") ||
+            !IsRecoverableObjectiveProviderFailure("provider-http-error", "FreeLLMAPI returned HTTP 504. fallbackAttempts=1") ||
+            IsRecoverableObjectiveProviderFailure("provider-http-error", "FreeLLMAPI returned HTTP 401. fallbackAttempts=0") ||
+            IsRecoverableObjectiveProviderFailure("provider-http-error", "FreeLLMAPI returned HTTP 429. rateLimitRetryAttempts=3"))
+            throw new AgentHostException("establish-clan-autonomy-transient-provider-http-recovery-classifier-failed", "Only exhausted transient gateway statuses 502/503/504 may replan from a separately verified safe Native state; auth errors and rate limits remain terminal.");
+        results.Add(new { scenario = "establish-clan-autonomy-replans-only-exhausted-transient-gateway-errors", passed = true });
         if (!IsSafeObjectiveRouteUnavailable("companions", "companion-model-stopped", freeMap: true) ||
             IsSafeObjectiveRouteUnavailable("companions", "companion-model-stopped", freeMap: false) ||
             IsSafeObjectiveRouteUnavailable("gold", "companion-model-stopped", freeMap: true) ||
@@ -258,7 +265,8 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         ["promptTokens"] = priorPromptTokens, ["completionTokens"] = priorCompletionTokens,
                         ["trace"] = priorTrace.DeepClone(), ["providerRouteHistory"] = priorRoutes.DeepClone(),
                         ["termination"] = new JsonObject { ["reason"] = "companion-loop-failed" },
-                        ["failureCode"] = "provider-decision-field-unavailable"
+                        ["failureCode"] = "provider-http-error",
+                        ["failure"] = "FreeLLMAPI returned HTTP 502. lastSuccessfulRoute=ovh; fallbackAttempts=2"
                     };
                 }
                 if (companionProviderFailureChildCalls != 3 || companionProviderFailureNative.IsInCompanionMission ||
@@ -616,11 +624,12 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         continue;
                     }
 
-                    // A provider-format/choice failure after a Companion Native Mission action is
+                    // A recoverable provider failure (including an exhausted transient gateway
+                    // status) after a Companion Native Mission action is
                     // not a reason to terminate the entire EYC Agent. Leave only from a verified
                     // friendly Town/Tavern Mission with no modal, conversation or active lease;
                     // then replan from fresh Map/Journal state without replaying any child action.
-                    if (IsRecoverableObjectiveProviderFailure(childFailureCode))
+                    if (IsRecoverableObjectiveProviderFailure(childFailureCode, ReadString(child, "failure")))
                     {
                         if (InitiallyIntegratedObjectives.Contains(objectiveId) && freeMap && IsSafeMapForObjectiveProviderReplan(failedState.RootElement) &&
                             AgentHostEstablishYourClanGoalLoop.HasActiveQuest(failedState.RootElement))
@@ -929,8 +938,14 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         return false;
     }
 
-    private static bool IsRecoverableObjectiveProviderFailure(string? failureCode) =>
-        failureCode == "companion-action-recovery-exhausted" || AgentHostProviderDecisionRecovery.CanRetry(failureCode ?? string.Empty, rejectedDecisions: 0);
+    private static bool IsRecoverableObjectiveProviderFailure(string? failureCode, string? failure = null) =>
+        failureCode == "companion-action-recovery-exhausted" || AgentHostProviderDecisionRecovery.CanRetry(failureCode ?? string.Empty, rejectedDecisions: 0) ||
+        failureCode == "provider-http-error" && IsTransientGatewayFailure(failure);
+
+    private static bool IsTransientGatewayFailure(string? failure) =>
+        failure?.Contains("returned HTTP 502", StringComparison.OrdinalIgnoreCase) == true ||
+        failure?.Contains("returned HTTP 503", StringComparison.OrdinalIgnoreCase) == true ||
+        failure?.Contains("returned HTTP 504", StringComparison.OrdinalIgnoreCase) == true;
 
     private static bool IsSupportedHostileBanditEncounter(JsonElement native)
     {
