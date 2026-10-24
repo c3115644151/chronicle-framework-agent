@@ -401,7 +401,7 @@ try {
         $gameStarted = $gameStarted -or [bool]($newLines -match "pid=$bannerlordPid\|game-start$")
         if ($StoryModeEycLiveModelEvaluation) {
             foreach ($line in $newLines) {
-                if ($line -match "pid=$bannerlordPid\|harness-focus-loss-escape-guard-installed\|scope=(visual-capture|agent-host-lifecycle-test)$") { $storyModeFocusLossEscapeMenuGuardInstalled = $true }
+                if ($line -match "pid=$bannerlordPid\|harness-focus-loss-escape-guard-installed\|scope=(visual-capture|agent-host-lifecycle-test|fresh-campaign-renown)$") { $storyModeFocusLossEscapeMenuGuardInstalled = $true }
                 if ($line -match "pid=$bannerlordPid\|harness-agent-lifecycle-auto-start$") { $storyModeAgentHostStartRequested = $true }
                 if ($line -match "pid=$bannerlordPid\|agent-host-state\|state=Starting\|") { $storyModeAgentHostStartRequested = $true }
                 if ($line -match "pid=$bannerlordPid\|agent-host-process-started\|pid=(\d+)\|") { $storyModeAgentHostStarted = $true }

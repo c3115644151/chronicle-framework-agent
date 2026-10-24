@@ -105,7 +105,7 @@ public sealed class SubModule : MBSubModuleBase
     private static bool IsHarnessFocusLossEscapeMenuGuardMode()
     {
         var mode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
-        return mode == "visual-capture" || mode == "agent-host-lifecycle-test";
+        return mode == "visual-capture" || mode == "agent-host-lifecycle-test" || mode == "fresh-campaign-renown";
     }
 
     internal static bool HarnessFocusLossEscapeMenuGuardInstalled => _harnessFocusLossEscapeMenuGuardInstalled;

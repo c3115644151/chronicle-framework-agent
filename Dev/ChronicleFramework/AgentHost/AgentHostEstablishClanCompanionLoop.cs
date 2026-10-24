@@ -172,8 +172,9 @@ internal static class AgentHostEstablishClanCompanionLoop
             ReadString(result["termination"] as JsonObject, "reason") != "native-companion-journal-target-met" ||
             ReadInt(result, "actionsExecuted", 0) != expected.Length || provider.CallCount != expected.Length ||
             !client.Actions.SequenceEqual(expected, StringComparer.Ordinal) || client.Gold != 1340 || client.CompanionCount != 1 ||
+            client.ActiveMissionNavigationStateReads < 2 || provider.SawActiveMissionNavigation ||
             ReadBoolean((result["objectiveSnapshot"] as JsonObject)?["companions"] as JsonObject, "met") != true)
-            throw new AgentHostException("establish-clan-companion-transport-self-test-failed", "The injected Native/Provider route did not follow the observed Tavern path, hire one quoted Wanderer, and verify refreshed original Journal progress. status=" + ReadString(result, "status") + "; termination=" + ReadString(result["termination"] as JsonObject, "reason") + "; failureCode=" + ReadString(result, "failureCode") + "; failure=" + ReadString(result, "failure") + "; actions=" + string.Join(",", client.Actions) + "; calls=" + provider.CallCount + "; journalMet=" + ReadBoolean((result["objectiveSnapshot"] as JsonObject)?["companions"] as JsonObject, "met"));
+            throw new AgentHostException("establish-clan-companion-transport-self-test-failed", "The injected Native/Provider route did not passively wait for current Mission navigation, follow the observed Tavern path, hire one quoted Wanderer, and verify refreshed original Journal progress. status=" + ReadString(result, "status") + "; termination=" + ReadString(result["termination"] as JsonObject, "reason") + "; failureCode=" + ReadString(result, "failureCode") + "; failure=" + ReadString(result, "failure") + "; actions=" + string.Join(",", client.Actions) + "; calls=" + provider.CallCount + "; activeNavigationReads=" + client.ActiveMissionNavigationStateReads + "; providerSawActiveNavigation=" + provider.SawActiveMissionNavigation + "; journalMet=" + ReadBoolean((result["objectiveSnapshot"] as JsonObject)?["companions"] as JsonObject, "met"));
         var stopClient = new FakeCompanionClient();
         var stopProvider = new FakeCompanionStopProvider();
         using var stopRequest = JsonDocument.Parse("{\"runId\":\"establish-clan-companion-safe-stop-selftest\",\"goal\":\"Hire one Companion.\",\"maxDecisions\":1,\"maxElapsedSeconds\":10}");
@@ -193,11 +194,27 @@ internal static class AgentHostEstablishClanCompanionLoop
             throw new AgentHostException("establish-clan-companion-mission-stop-did-not-recover-to-map", "A model stop inside a Tavern Mission must be corrected to a listed Native exit, return to Map, and only then allow safe parent replanning.");
         var movementWaitResult = await RunMapMovementWaitSelfTestAsync();
         return [
-            new { scenario = "establish-clan-companion-runtime-observe-travel-tavern-native-dialogue-hire-and-journal-verify", decisions = provider.CallCount, nativeActions = client.Actions.ToArray(), passed = true },
+            new { scenario = "establish-clan-companion-passively-waits-for-native-mission-navigation-before-next-model-decision", activeNavigationReads = client.ActiveMissionNavigationStateReads, decisions = provider.CallCount, nativeActions = client.Actions.ToArray(), passed = true },
             new { scenario = "establish-clan-companion-listed-safe-stop-is-interrupted-with-zero-native-actions", decisions = stopProvider.CallCount, passed = true },
             new { scenario = "establish-clan-companion-mission-stop-is-corrected-to-native-leave-before-parent-replan", decisions = missionStopProvider.CallCount, nativeActions = missionStopClient.Actions.ToArray(), passed = true },
+            await RunInvalidActionRecoverySelfTestAsync(request.RootElement),
             movementWaitResult
         ];
+    }
+
+    private static async Task<object> RunInvalidActionRecoverySelfTestAsync(JsonElement request)
+    {
+        var client = new FakeCompanionClient();
+        var provider = new FakeInvalidCompanionActionProvider();
+        var result = await RunAsync(request, client, client, provider, CancellationToken.None);
+        var expectedActions = new[] { "menuSelect", "menuSelect", "missionSceneAgents" };
+        if (ReadString(result, "status") != "failed" ||
+            ReadString(result["termination"] as JsonObject, "reason") != "companion-action-recovery-exhausted" ||
+            ReadInt(result, "actionsExecuted", 0) != expectedActions.Length ||
+            provider.CallCount != 5 || !provider.SawBoundedRecoveryFeedback ||
+            !client.Actions.SequenceEqual(expectedActions, StringComparer.Ordinal))
+            throw new AgentHostException("establish-clan-companion-invalid-action-recovery-self-test-failed", "Two invalid Companion decisions must receive only bounded catalog feedback and terminate before any unlisted Native action is sent.");
+        return new { scenario = "establish-clan-companion-bounds-unlisted-action-retries-before-native", decisions = provider.CallCount, nativeActions = client.Actions.ToArray(), passed = true };
     }
 
     private static async Task<object> RunMapMovementWaitSelfTestAsync()
@@ -246,6 +263,8 @@ internal static class AgentHostEstablishClanCompanionLoop
         var visitedTowns = new HashSet<string>(StringComparer.Ordinal);
         var visitedHeroes = new HashSet<string>(StringComparer.Ordinal);
         var rejectedProviderDecisions = 0;
+        var rejectedActionDecisions = 0;
+        var missionWaitPending = false;
         JsonObject? decisionFeedback = null;
         var start = Stopwatch.GetTimestamp();
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -325,6 +344,27 @@ internal static class AgentHostEstablishClanCompanionLoop
 
                 var missionNavigationActive = gameState == "MissionState" && ReadBoolean(state["mission"]?["navigation"] as JsonObject, "active");
                 var missionLeaveActive = gameState == "MissionState" && ReadBoolean(state["mission"]?["leave"] as JsonObject, "active");
+                if (!sceneNotificationActive && (missionNavigationActive || missionLeaveActive || missionTransitionPending))
+                {
+                    // Native Mission navigation/Leave already owns the MainAgent or input context.
+                    // Poll Native state passively; do not spend a remote model decision on observeAgain.
+                    await Task.Delay(TimeSpan.FromSeconds(1), elapsed.Token);
+                    missionWaitPending = true;
+                    continue;
+                }
+                if (missionWaitPending)
+                {
+                    trace.Add(new JsonObject
+                    {
+                        ["stage"] = "native-mission-activity-ended",
+                        ["gameState"] = gameState,
+                        ["menuId"] = ReadString(context, "menuId"),
+                        ["navigationActive"] = missionNavigationActive,
+                        ["leaveActive"] = missionLeaveActive,
+                        ["nativeActionSent"] = false
+                    });
+                    missionWaitPending = false;
+                }
                 var actionPending = !sceneNotificationActive && (mapMovementPending || menuArrivalPending || missionNavigationActive || missionLeaveActive || missionTransitionPending);
                 var controls = BuildControlCatalog(gameState == "MapState", !sceneNotificationActive && (mapMovementPending || menuArrivalPending), missionNavigationActive, missionLeaveActive || missionTransitionPending);
                 var catalog = BuildActionCatalog(state, journal, objective, safeTowns, sceneAgentsReceipt, selectedHeroId,
@@ -408,6 +448,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                         throw new AgentHostException("companion-observe-not-allowed", "Passive observation is allowed only while Native movement/navigation/leave transition is active.");
                     var waitSeconds = ReadInt(decision.Decision, "waitSeconds", 0);
                     if (waitSeconds is < 1 or > 10) throw new AgentHostException("companion-observe-interval-invalid", "observeAgain requires a bounded 1-10 second host-side wait.");
+                    rejectedActionDecisions = 0;
                     await Task.Delay(TimeSpan.FromSeconds(waitSeconds), elapsed.Token);
                     using var afterWait = await campaignClient.ReadStateAsync(elapsed.Token);
                     var waitedState = ReadState(afterWait.RootElement);
@@ -419,10 +460,21 @@ internal static class AgentHostEstablishClanCompanionLoop
                         actionPending,
                         out var action, out var arguments, out var selectedSettlementId, out var targetHeroId, out var rejection))
                 {
+                    rejectedActionDecisions++;
+                    decisionFeedback = AgentHostProviderDecisionRecovery.BuildFeedback("provider-action-unavailable", catalog, controls);
                     trace.Add(BuildStep(decisions, observation, decision.Decision, null, state, "rejected",
-                        new JsonObject { ["kind"] = "decision-rejected-before-native", ["message"] = rejection }));
+                        new JsonObject
+                        {
+                            ["kind"] = "decision-rejected-before-native",
+                            ["message"] = rejection,
+                            ["nativeActionSent"] = false,
+                            ["recovery"] = decisionFeedback.DeepClone()
+                        }));
+                    if (!AgentHostProviderDecisionRecovery.CanRetry("provider-action-unavailable", rejectedActionDecisions))
+                        return BuildResult("failed", "companion-action-recovery-exhausted", "The model repeatedly selected a Companion action that did not match the current Native catalog; no Native action was sent.", "companion-action-recovery-exhausted", state, journal, objective);
                     continue;
                 }
+                rejectedActionDecisions = 0;
 
                 JsonDocument response;
                 var actionStarted = DateTime.UtcNow.ToString("O");
@@ -1103,6 +1155,8 @@ internal static class AgentHostEstablishClanCompanionLoop
     {
         private int _stage;
         private bool _navigated;
+        private int _missionNavigationActiveReadsRemaining;
+        internal int ActiveMissionNavigationStateReads { get; private set; }
         internal List<string> Actions { get; } = new();
         internal int Gold => _stage >= 8 ? 1340 : 2000;
         internal int CompanionCount => _stage >= 8 ? 1 : 0;
@@ -1120,6 +1174,12 @@ internal static class AgentHostEstablishClanCompanionLoop
             else
             {
                 state = BuildState("MissionState", null, new JsonArray());
+                var navigationActive = _missionNavigationActiveReadsRemaining > 0;
+                if (navigationActive)
+                {
+                    _missionNavigationActiveReadsRemaining--;
+                    ActiveMissionNavigationStateReads++;
+                }
                 if (_stage == 5)
                     state["conversation"] = BuildConversation("wanderer-a", "Wanderer business offer", "wanderer_meet_player_response2");
                 else if (_stage == 6)
@@ -1130,9 +1190,9 @@ internal static class AgentHostEstablishClanCompanionLoop
                     state["mission"] = new JsonObject
                     {
                         ["nearbySceneAgents"] = _navigated
-                            ? new JsonArray(new JsonObject { ["agentIndex"] = 4, ["heroId"] = "wanderer-a", ["occupation"] = "Wanderer", ["isNotable"] = false, ["isEnemy"] = false, ["isInteractable"] = true, ["distance"] = 1.2 })
+                            ? new JsonArray(new JsonObject { ["agentIndex"] = 4, ["heroId"] = "wanderer-a", ["occupation"] = "Wanderer", ["isNotable"] = false, ["isEnemy"] = false, ["isInteractable"] = !navigationActive, ["distance"] = navigationActive ? 3.0 : 1.2 })
                             : new JsonArray(),
-                        ["navigation"] = new JsonObject { ["active"] = false }, ["leave"] = null
+                        ["navigation"] = new JsonObject { ["active"] = navigationActive, ["targetAgentIndex"] = _navigated ? 4 : null }, ["leave"] = null
                     };
             }
             state["campaignDay"] = 10.0;
@@ -1184,7 +1244,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                         ["agents"] = new JsonArray(new JsonObject { ["agentIndex"] = 4, ["heroId"] = "wanderer-a", ["occupation"] = "Wanderer", ["isNotable"] = false, ["isEnemy"] = false, ["distance"] = 6.0 })
                     };
                     return Receipt(action, data);
-                case "missionNavigateToAgent": _stage = 4; _navigated = true; data = new JsonObject { ["targetAgentIndex"] = 4, ["status"] = "arrived" }; return Receipt(action, data);
+                case "missionNavigateToAgent": _stage = 4; _navigated = true; _missionNavigationActiveReadsRemaining = 3; data = new JsonObject { ["targetAgentIndex"] = 4, ["status"] = "navigating" }; return Receipt(action, data);
                 case "missionInteract": _stage = 5; data = new JsonObject { ["targetHeroId"] = "wanderer-a", ["conversationStarted"] = true }; return Receipt(action, data);
                 case "dialogueSelect":
                     var optionId = ReadString(arguments, "optionId");
@@ -1233,12 +1293,18 @@ internal static class AgentHostEstablishClanCompanionLoop
             ("dialogueSelect", new JsonObject { ["OptionId"] = "player_companion_hire_response_1" })
         ];
         internal int CallCount { get; private set; }
+        internal bool SawActiveMissionNavigation { get; private set; }
         public string ModelId => "deterministic-establish-clan-companion-selftest";
         public string ConfigurationSource => "harness-fake-provider";
         public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) { cancellationToken.ThrowIfCancellationRequested(); return Task.CompletedTask; }
         public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var state = request.GetProperty("observation").GetProperty("state");
+            if (state.TryGetProperty("mission", out var mission) && mission.ValueKind == JsonValueKind.Object &&
+                mission.TryGetProperty("navigation", out var navigation) && navigation.ValueKind == JsonValueKind.Object &&
+                navigation.TryGetProperty("active", out var active) && active.ValueKind == JsonValueKind.True)
+                SawActiveMissionNavigation = true;
             if (CallCount >= Decisions.Length) throw new AgentHostException("companion-selftest-provider-exhausted", "The fake provider received too many Tavern decisions.");
             var selected = Decisions[CallCount++];
             return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "fake-companion-selftest", new JsonObject
@@ -1266,6 +1332,58 @@ internal static class AgentHostEstablishClanCompanionLoop
             return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "self-test",
                 new JsonObject { ["stop"] = true, ["reason"] = "No safe action now." }, "self-test", "json_schema"));
         }
+        public void Dispose() { }
+    }
+
+    private sealed class FakeInvalidCompanionActionProvider : IAgentHostDecisionProvider
+    {
+        internal int CallCount { get; private set; }
+        internal bool SawBoundedRecoveryFeedback { get; private set; }
+        public string ModelId => "deterministic-establish-clan-companion-invalid-action-selftest";
+        public string ConfigurationSource => "harness-fake-provider";
+        public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) { cancellationToken.ThrowIfCancellationRequested(); return Task.CompletedTask; }
+
+        public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CallCount++;
+            var catalog = request.GetProperty("allowedActions").EnumerateArray()
+                .FirstOrDefault(action => action.GetProperty("action").GetString() == "missionNavigateToAgent");
+            JsonObject decision;
+            if (CallCount == 1)
+                decision = new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "town", ["OptionId"] = "town_backstreet" } };
+            else if (CallCount == 2)
+                decision = new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "town_backstreet", ["OptionId"] = "town_tavern" } };
+            else if (CallCount == 3)
+                decision = new JsonObject { ["action"] = "missionSceneAgents", ["arguments"] = new JsonObject() };
+            else
+            {
+                if (catalog.ValueKind != JsonValueKind.Object)
+                    throw new AgentHostException("companion-invalid-action-selftest-catalog-missing", "The rejected-response test requires the exact current Native navigation catalog.");
+                var feedback = request.TryGetProperty("decisionFeedback", out var feedbackNode) && feedbackNode.ValueKind == JsonValueKind.Object
+                    ? feedbackNode
+                    : default;
+                if (CallCount == 4)
+                {
+                    if (feedback.ValueKind != JsonValueKind.Undefined)
+                        throw new AgentHostException("companion-invalid-action-selftest-feedback-too-early", "The first bounded decision must receive the original action catalog without recovery feedback.");
+                }
+                else
+                {
+                    var allowedNames = feedback.ValueKind == JsonValueKind.Object && feedback.TryGetProperty("allowedActionNames", out var allowed) && allowed.ValueKind == JsonValueKind.Array
+                        ? allowed.EnumerateArray().Select(item => item.GetString()).ToArray()
+                        : Array.Empty<string?>();
+                    if (!feedback.TryGetProperty("nativeActionSent", out var sent) || sent.ValueKind != JsonValueKind.False ||
+                        !allowedNames.Contains("missionNavigateToAgent", StringComparer.Ordinal) ||
+                        !feedback.TryGetProperty("requiredNextStep", out var nextStep) || nextStep.ValueKind != JsonValueKind.String)
+                        throw new AgentHostException("companion-invalid-action-selftest-recovery-feedback-invalid", "The recovery request must state no Native action was sent and list only the current Native action catalog.");
+                    SawBoundedRecoveryFeedback = true;
+                }
+                decision = new JsonObject { ["action"] = "missionNavigateToAgent", ["arguments"] = new JsonObject { ["AgentIndex"] = 999, ["DurationSeconds"] = 8 } };
+            }
+            return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "self-test", decision, "self-test", "json_schema"));
+        }
+
         public void Dispose() { }
     }
 
