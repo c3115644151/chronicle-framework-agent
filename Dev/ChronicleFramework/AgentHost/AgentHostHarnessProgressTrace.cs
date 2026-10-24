@@ -136,8 +136,8 @@ internal static class AgentHostHarnessProgressTrace
                 ["decisions"] = Copy(result, "decisions"),
                 ["promptTokens"] = Copy(result, "promptTokens"),
                 ["completionTokens"] = Copy(result, "completionTokens"),
-                ["nativeStateBefore"] = BuildNativeStateSummary(result["initialNativeState"] as JsonObject),
-                ["nativeStateAfter"] = BuildNativeStateSummary(result["finalNativeState"] as JsonObject ?? result["finalState"] as JsonObject)
+                ["nativeStateBefore"] = result["nativeStateBefore"]?.DeepClone() ?? BuildNativeStateSummary(result["initialNativeState"] as JsonObject),
+                ["nativeStateAfter"] = result["nativeStateAfter"]?.DeepClone() ?? BuildNativeStateSummary(result["finalNativeState"] as JsonObject ?? result["finalState"] as JsonObject)
             };
             AppendLine(tracePath, Encoding.UTF8.GetBytes(payload.ToJsonString() + Environment.NewLine));
         }

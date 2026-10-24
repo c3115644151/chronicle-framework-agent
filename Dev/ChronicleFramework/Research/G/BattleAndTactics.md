@@ -10,6 +10,8 @@
 
 普通 `encounter` 菜单的原生选项可能包括攻击、坐镇指挥、试图逃脱、投降、离开、放弃军团；是否可选由原生条件决定。加入他人战斗时则可能要求选择帮助攻击方/防守方、离开或放弃Army；围城与村庄遭遇另有突围、援助、防守、强征/掠夺等专属入口。Army交战还能提供与军团领袖或成员会面、加入/攻击/离开的不同选项。因此 Agent 不能把“接触一个队伍”简化为必然开战。
 
+`TestResults/20261024-190745`真实自然战役进一步证实这组入口不能仅按“攻击”文字合并：MainParty只有MainHero 1人时遭遇`looters_595`，Native encounter菜单当前`attack`为enabled而`str_order_attack`为disabled。旧实验性Host fallback选择`attack`后，Native post-action state为`MissionState`、菜单仍为`encounter`且`battleSimulationActive=false`，引擎时间线显示战斗场景加载画面；Host因该状态无受支持的Simulation动作而停止，`goalVerified=false`。这证明`attack`不是可用的坐镇替代选项，不能靠按钮名/枚举别名推断战斗模式。已反编译本机v1.4.8的`MenuHelper.EncounterOrderAttackCondition`核实启用条件：当前MapEvent须有双方存活战力、对侧有Leader，且玩家侧至少有一名健康的非MainHero成员；它还会检查玩家侧士气，士气不足时将选项禁用。若MainParty只有MainHero且无其他己方增援，条件中的玩家侧合格兵力为0，原版不提供`str_order_attack`；若玩家侧其他Party有兵而MainParty自身没有，选项文字会变成“Leave it to the others.”。其callback `EncounterOrderAttack`调用`PlayerEncounter.InitSimulation`并由`MapState.StartBattleSimulation`启动坐镇；相对地`attack`走`MenuHelper.EncounterAttackConsequence`的实时Mission路径。BattleSimulation动作契约因此只在当前Native `str_order_attack`确实enabled时暴露坐镇入口；若它被禁用，当前Encounter对该Agent没有合规的战斗模拟动作，`attack`虽启用也必须保持不可选。源码条件说明了本次一人队伍为何不能坐镇，但其他Party组成、士气和Encounter类型仍须按各自Native实时状态检查，不把它简化成固定人数阈值。
+
 ### 从遭遇到 MapEvent
 
 `PlayerEncounter.StartBattleInternal` 按上下文建立不同的 `MapEvent`：野战、Raid、围城、突围/出击、Hideout、强征志愿者/物资、Blockade或Ambush等。附近队伍能否进入由 `CheckNearbyPartiesToJoinPlayerMapEvent`、`MapEvent.CanPartyJoinBattle` 等规则过滤；所属阵营、Army、战斗事件类别、距离与活动状态都会改变参与者和敌我侧。点攻击只会令原版入口继续到符合上下文的战斗处理，不等于胜负已经产生。

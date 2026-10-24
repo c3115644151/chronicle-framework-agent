@@ -27,7 +27,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.302'
+$HarnessContractVersion = '7.304'
 $effectiveSmokeTimeoutSeconds = if ($Phase -in @('FreshStoryModeModelEvaluation','FreshStoryModeNativeInquiryResponseEvaluation','AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostEstablishClanAutonomyEvaluation','AgentHostCaptivityRecoveryEvaluation','AgentHostEstablishClanGoldSaleEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max($SmokeTimeoutSeconds, 240) } else { $SmokeTimeoutSeconds }
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
@@ -37,6 +37,7 @@ $repositoryRoot = [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot)
 $gameRoot = [IO.Path]::GetFullPath([string]$localSettings.gameRoot)
 if (-not (Test-Path -LiteralPath $repositoryRoot -PathType Container)) { throw "Repository root not found: $repositoryRoot" }
 if (-not (Test-Path -LiteralPath (Join-Path $gameRoot 'bin\Win64_Shipping_Client\Bannerlord.exe'))) { throw "Configured Bannerlord game root is invalid: $gameRoot" }
+$script:BannerlordAutoSaveRecoveryOnHarnessStart = Restore-ChronicleHarnessAutoSaveSetting
 $env:CHRONICLE_GAME_ROOT = $gameRoot
 $env:CHRONICLE_REPOSITORY_ROOT = $repositoryRoot
 $evidenceRoot = Join-Path $harnessRoot 'TestResults'

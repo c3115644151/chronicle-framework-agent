@@ -68,6 +68,38 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         if (TryResolveRecruitmentAction(stale, recruitmentMenu, null, offers, null, false, out _, out _, out _, out _))
             throw new AgentHostException("establish-clan-recruitment-stale-offer-accepted", "A recruitment slot not present in the fresh Native RecruitmentVM receipt was accepted.");
 
+        var unavailableOffers = new JsonObject
+        {
+            ["data"] = new JsonObject
+            {
+                ["gold"] = 1000,
+                ["partySize"] = 1,
+                ["partyCapacity"] = 20,
+                ["offers"] = new JsonArray
+                {
+                    new JsonObject { ["ownerId"] = "notable-a", ["troopId"] = "imperial_recruit", ["slot"] = 0, ["cost"] = 20, ["available"] = false },
+                    new JsonObject { ["ownerId"] = "notable-b", ["troopId"] = "imperial_recruit", ["slot"] = 1, ["cost"] = 20, ["available"] = false }
+                }
+            }
+        };
+        var townWithoutRecruitableOffers = new JsonObject
+        {
+            ["context"] = new JsonObject
+            {
+                ["gameState"] = "MapState", ["menuId"] = "town", ["encounterActive"] = true,
+                ["encounteredPartyId"] = "town-a", ["captivity"] = new JsonObject { ["isCaptive"] = false }
+            },
+            ["location"] = new JsonObject { ["currentSettlementId"] = "town-a" },
+            ["availableMenuOptions"] = new JsonArray(
+                new JsonObject { ["id"] = RecruitmentMenuOptionId, ["available"] = true, ["enabled"] = true },
+                new JsonObject { ["id"] = "town_leave", ["available"] = true, ["enabled"] = true, ["isLeave"] = true })
+        };
+        var noOfferCatalog = BuildActionCatalog(townWithoutRecruitableOffers,
+            new JsonObject { ["partySize"] = new JsonObject { ["target"] = 20 } }, null, unavailableOffers, null, false);
+        var noOfferLeaveOption = noOfferCatalog.Count == 0 ? null : (noOfferCatalog[0]?["argumentValues"]?["OptionId"] as JsonArray)?[0]?.GetValue<string>();
+        if (noOfferCatalog.Count != 1 || ReadString(noOfferCatalog[0] as JsonObject, "action") != "menuSelect" || noOfferLeaveOption != "town_leave")
+            throw new AgentHostException("establish-clan-recruitment-unavailable-offers-looped", "After the current Native RecruitmentVM returns no affordable/available volunteers, the subgoal must expose the current settlement's Native Leave action instead of querying the same unavailable offers again.");
+
         var trainingFieldMenu = new JsonObject
         {
             ["context"] = new JsonObject
@@ -87,7 +119,8 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         {
             new { scenario = "establish-clan-recruitment-travels-only-to-current-safe-town-village-targets", passed = true },
             new { scenario = "establish-clan-recruitment-offers-only-current-affordable-volunteers", passed = true },
-            new { scenario = "establish-clan-recruitment-rejects-stale-volunteer-identifiers", passed = true }
+            new { scenario = "establish-clan-recruitment-rejects-stale-volunteer-identifiers", passed = true },
+            new { scenario = "establish-clan-recruitment-leaves-town-after-current-vm-has-no-available-affordable-volunteers", passed = true }
         };
 
         var fakeClient = new FakeRecruitmentNativeClient();
@@ -118,9 +151,11 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             ReadString(unavailable["termination"] as JsonObject, "reason") != "campaign-map-unavailable" ||
             ReadString(unavailable, "failureCode") != "recruitment-map-unavailable" ||
             string.IsNullOrWhiteSpace(ReadString(unavailable, "failure")) ||
+            ReadString(unavailable["nativeStateAfter"] as JsonObject, "gameState") != "MenuState" ||
+            ReadString(unavailable["nativeStateAfter"] as JsonObject, "menuId") != "town" ||
             ReadInt(unavailable, "actionsExecuted", -1) != 0 || unavailableProvider.CallCount != 0)
-            throw new AgentHostException("establish-clan-recruitment-failure-receipt-failed", "A Native map precondition failure must preserve its termination, failure code and safe summary without calling the Provider or executing an action.");
-        results.Add(new { scenario = "establish-clan-recruitment-failure-receipt-preserves-map-precondition-code", passed = true });
+            throw new AgentHostException("establish-clan-recruitment-failure-receipt-failed", "A Native map precondition failure must preserve its code and sanitized final Native gameState/menu, without calling the Provider or executing an action.");
+        results.Add(new { scenario = "establish-clan-recruitment-failure-receipt-preserves-safe-native-state-summary", passed = true });
 
         var trainingFieldClient = new FakeRecruitmentNativeClient(startAtTrainingField: true);
         var trainingFieldProvider = new FakeObservedRecruitmentDecisionProvider();
@@ -180,6 +215,10 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         var moveStartPending = false;
         JsonObject? previousReceipt = null;
         JsonObject? feedback = null;
+        JsonObject? initialNativeState = null;
+        JsonObject? lastNativeState = null;
+        double? initialCampaignDay = null;
+        double? lastCampaignDay = null;
         var rejectedDecisions = 0;
         var start = Stopwatch.GetTimestamp();
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -194,6 +233,14 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                 using var nativeState = await campaignClient.ReadStateAsync(elapsed.Token);
                 var state = ReadState(nativeState.RootElement)
                     ?? throw new AgentHostException("recruitment-state-unavailable", "Native did not provide the current Campaign state.");
+                var campaignDay = ReadDouble(nativeState.RootElement, "campaignDay");
+                if (double.IsFinite(campaignDay))
+                {
+                    initialCampaignDay ??= campaignDay;
+                    lastCampaignDay = campaignDay;
+                }
+                initialNativeState ??= state.DeepClone() as JsonObject;
+                lastNativeState = state;
                 var context = state["context"] as JsonObject;
                 if (ReadString(context, "gameState") != "MapState")
                     return BuildResult("failed", "campaign-map-unavailable", "Recruitment can only proceed from the original Campaign MapState.", "recruitment-map-unavailable", state, currentRecruitOffers);
@@ -404,12 +451,22 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                 ["trace"] = trace.DeepClone(),
                 ["lastRecruitmentOffers"] = offers?.DeepClone(),
                 ["livePartySize"] = live?["partySize"]?.DeepClone(),
+                ["nativeStateBefore"] = SummarizeNativeState(initialNativeState, initialCampaignDay),
+                ["nativeStateAfter"] = SummarizeNativeState(finalState ?? lastNativeState, lastCampaignDay),
                 ["journalObjectiveSnapshot"] = journal?.DeepClone(),
                 ["objectiveSnapshot"] = objective?.DeepClone(),
                 ["failure"] = failure,
                 ["failureCode"] = failureCode,
                 ["termination"] = new JsonObject { ["reason"] = termination, ["goalVerified"] = ReadBoolean(objective?["partySize"] as JsonObject, "met") }
             };
+        }
+
+        static JsonObject? SummarizeNativeState(JsonObject? state, double? campaignDay)
+        {
+            if (state is null) return null;
+            var native = new JsonObject { ["state"] = state.DeepClone() };
+            if (campaignDay is double day && double.IsFinite(day)) native["campaignDay"] = day;
+            return AgentHostHarnessProgressTrace.BuildNativeStateSummary(native);
         }
     }
 
@@ -426,26 +483,14 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         {
             var offers = BuildRecruitmentActionCatalog(recruitOptions, objective);
             if (offers.Count > 0) return offers;
+            if (state is not null && AgentHostCampaignStateFacts.IsNativeLocationMenu(state))
+                return BuildLocationLeaveActionCatalog(state, ReadString(context, "menuId"));
         }
 
         var menuId = ReadString(context, "menuId");
         var menuOptions = state?["availableMenuOptions"] as JsonArray ?? new JsonArray();
         if (!IsRecruitmentMenu(menuId) && state is not null && AgentHostCampaignStateFacts.IsNativeLocationMenu(state))
-        {
-            var leaveOptions = menuOptions.OfType<JsonObject>()
-                .Where(option => ReadBoolean(option, "available") && ReadBoolean(option, "enabled") && ReadBoolean(option, "isLeave"))
-                .Select(option => ReadString(option, "id"))
-                .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToArray();
-            if (leaveOptions.Length == 0) return catalog;
-            var leaveAction = new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonArray("MenuId", "OptionId") };
-            leaveAction["argumentValues"] = new JsonObject
-            {
-                ["MenuId"] = new JsonArray(menuId),
-                ["OptionId"] = new JsonArray(leaveOptions.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray())
-            };
-            catalog.Add(leaveAction);
-            return catalog;
-        }
+            return BuildLocationLeaveActionCatalog(state, menuId);
         if (IsRecruitmentMenu(menuId) && HasEnabledOption(menuOptions, RecruitmentMenuOptionId))
         {
             catalog.Add(new JsonObject { ["action"] = "recruitOptions", ["arguments"] = new JsonArray() });
@@ -481,6 +526,24 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                 .Select(target => (JsonNode?)JsonValue.Create(ReadString(target, "id"))).ToArray()) };
             catalog.Add(action);
         }
+        return catalog;
+    }
+
+    private static JsonArray BuildLocationLeaveActionCatalog(JsonObject state, string? menuId)
+    {
+        var catalog = new JsonArray();
+        var leaveOptions = (state["availableMenuOptions"] as JsonArray ?? new JsonArray()).OfType<JsonObject>()
+            .Where(option => ReadBoolean(option, "available") && ReadBoolean(option, "enabled") && ReadBoolean(option, "isLeave"))
+            .Select(option => ReadString(option, "id"))
+            .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToArray();
+        if (leaveOptions.Length == 0) return catalog;
+        var leaveAction = new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonArray("MenuId", "OptionId") };
+        leaveAction["argumentValues"] = new JsonObject
+        {
+            ["MenuId"] = new JsonArray(menuId),
+            ["OptionId"] = new JsonArray(leaveOptions.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray())
+        };
+        catalog.Add(leaveAction);
         return catalog;
     }
 

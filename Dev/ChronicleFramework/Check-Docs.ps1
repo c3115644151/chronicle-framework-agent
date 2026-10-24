@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.302'
+$contractVersion = '7.304'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -46,6 +46,7 @@ foreach ($scriptFile in $harnessPowerShellFiles) {
 }
 
 $harnessScript = Get-Content (Join-Path $harnessRoot 'Run-Harness.ps1') -Raw -Encoding UTF8
+$harnessStartupEvidenceSource = Get-Content (Join-Path $harnessRoot 'HarnessStartupEvidence.ps1') -Raw -Encoding UTF8
 $testResultsRetentionScript = Join-Path $harnessRoot 'Prune-TestResults.ps1'
 $agentCliSource = Get-Content (Join-Path $harnessRoot 'Agent-Cli.ps1') -Raw -Encoding UTF8
 $testWindowLayoutSource = Get-Content (Join-Path $harnessRoot 'Test-WindowLayout.ps1') -Raw -Encoding UTF8
@@ -460,7 +461,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $harnessRoot 'AgentHost\AgentHostCam
     $agentHostCampaignStateFactsSource -notmatch 'campaign-state-facts-hostile-encounter-misclassified' -or
     $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-training-field-menu-misclassified' -or
     $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-training-field-menu-not-exitable' -or
-    $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-failure-receipt-preserves-map-precondition-code' -or
+    $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-failure-receipt-preserves-safe-native-state-summary' -or
     $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-native-training-field-leave-to-volunteer-to-journal-verification' -or
     $agentHostRecruitmentLoopSource -notmatch '\["failureCode"\] = failureCode' -or
     $agentHostGoldSaleLoopSource -notmatch 'gold-sale-self-test-training-field-menu-not-exitable' -or
@@ -1189,6 +1190,14 @@ if ($agentHostCompanionLoopSource -notmatch 'BuildControlCatalog\(gameState == "
 if ($agentHostEstablishClanAutonomySource -notmatch 'IsFreeMapForObjectiveReplan\(failedState\.RootElement\)' -or
     $agentHostEstablishClanAutonomySource -notmatch 'AgentHostCampaignStateFacts\.IsActiveEncounter\(state\)' -or
     $agentHostEstablishClanAutonomySource -notmatch 'town-menu-is-free-map-for-objective-replan-but-hostile-encounter-is-not') { throw 'Parent EYC replan safety must use the shared Native location-menu classifier so a Town menu is not mistaken for a hostile Party encounter, while real encounters remain blocked.' }
+if ($agentHostEstablishClanAutonomySource -notmatch 'IsRecoverableObjectiveProviderFailure' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'IsSafeMapForObjectiveProviderReplan' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'IsSafeTavernMissionForCompanionProviderRecovery' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'companion-provider-failure-native-leave-started' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'companion-provider-failure-leave-unverified' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'objective-provider-failure-route-blocked-on-free-map' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'establish-clan-autonomy-leaves-tavern-replans-and-retries-companion-only-after-journal-progress' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'replayedChildActions') { throw 'Companion provider failure may replan only after a supported, modal-free Tavern Native Leave has returned to a free Map; the failed subflow is never replayed and may re-enter the objective only after fresh Journal progress.' }
 if ($agentHostEstablishClanAutonomySource -notmatch 'IsFreeMapForObjectiveReplan\(failedState\.RootElement\)' -or
     $agentHostEstablishClanAutonomySource -notmatch 'AgentHostCampaignStateFacts\.IsActiveEncounter\(state\)' -or
     $agentHostEstablishClanAutonomySource -notmatch 'town-menu-is-free-map-for-objective-replan-but-hostile-encounter-is-not') { throw 'Parent EYC replan safety must use the shared Native location-menu classifier so a Town menu is not mistaken for a hostile Party encounter, while true encounters remain blocked.' }
@@ -1281,6 +1290,18 @@ if ($agentProtocolSource -match 'var (quickTalkData|visitData) = [^\r\n]*(hasIss
 $freshCampaignSource = Get-Content (Join-Path $harnessRoot 'FreshCampaignHarness.cs') -Raw -Encoding UTF8
 $freshCampaignTelemetry = Get-Content (Join-Path $harnessRoot 'SubModule.cs') -Raw -Encoding UTF8
 $freshCampaignTest = Get-Content (Join-Path $harnessRoot 'Test-AgentFreshCampaign.ps1') -Raw -Encoding UTF8
+if ($harnessStartupEvidenceSource -notmatch 'function Disable-ChronicleHarnessAutoSave' -or
+    $harnessStartupEvidenceSource -notmatch 'BannerlordConfig\.chronicle-autosave-backup\.json' -or
+    $harnessStartupEvidenceSource -notmatch 'function Restore-ChronicleHarnessAutoSaveSetting' -or
+    $harnessStartupEvidenceSource -notmatch 'AutoSaveInterval=\(-\?\\d\+\)' -or
+    $freshCampaignTest -notmatch 'Disable-ChronicleHarnessAutoSave' -or
+    $freshCampaignTest -notmatch 'bannerlordAutoSaveDisabledDuringRun' -or
+    $freshCampaignTest -notmatch 'noNativeAutoSaveObserved' -or
+    $freshCampaignTest -notmatch 'AutoSaveCurrentGame' -or
+    $harnessScript -notmatch 'Restore-ChronicleHarnessAutoSaveSetting') { throw 'FreshCampaign must disable Native AutoSaveInterval through its exact -1 off value, restore the prior setting after game cleanup, and recover stale backups before later Harness runs.' }
+foreach ($autosaveHelper in @('Get-ChronicleBannerlordAutoSavePaths', 'Get-ChronicleBannerlordAutoSaveInterval', 'Set-ChronicleBannerlordAutoSaveInterval', 'Restore-ChronicleHarnessAutoSaveSetting', 'Disable-ChronicleHarnessAutoSave')) {
+    if ([regex]::Matches($harnessStartupEvidenceSource, "(?m)^function $([regex]::Escape($autosaveHelper))\b").Count -ne 1) { throw "HarnessStartupEvidence.ps1 must define exactly one '$autosaveHelper' autosave helper." }
+}
 $pursuitTestSource = Get-Content (Join-Path $harnessRoot 'Test-AgentPursuit.ps1') -Raw -Encoding UTF8
 $moveToPointTestSource = Get-Content (Join-Path $harnessRoot 'Test-AgentMoveToPoint.ps1') -Raw -Encoding UTF8
 $protocolTestSource = Get-Content (Join-Path $harnessRoot 'Test-AgentProtocol.ps1') -Raw -Encoding UTF8
@@ -1346,7 +1367,7 @@ if ($freshCampaignSource -notmatch 'StoryModeNewGame' -or
     $agentHostStoryModeBootstrapLoopSource -notmatch 'HasLeftTrainingField' -or
     $agentHostEstablishClanAutonomySource -notmatch 'AgentHostStoryModeBootstrapLoop.IsEligibleTrainingFieldBootstrapState\(initialState.RootElement\)' -or
     $agentHostEstablishClanAutonomySource -notmatch 'companion-model-stopped' -or
-    $agentHostEstablishClanAutonomySource -notmatch 'establish-clan-autonomy-safe-companion-and-recruitment-stops-mark-route-unavailable-and-allow-replan' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'establish-clan-autonomy-safe-no-goods-and-companion-recruitment-stops-mark-route-unavailable-and-allow-replan' -or
     $freshCampaignSource -notmatch '_storyModeAgentAutostartArmed' -or
     $freshCampaignSource -notmatch 'if \(_storyModeAgentAutostartArmed\) return' -or
     $freshCampaignTest -notmatch 'storyModeLiveModelProducedDecision' -or

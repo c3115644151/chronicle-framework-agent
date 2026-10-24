@@ -22,6 +22,16 @@ internal static class AgentHostNativeInquiryResolution
             throw new AgentHostException("native-inquiry-resolution-selftest-failed", "The resolver must show only current enabled Native choices, bind the token internally, and verify the modal closed after the model's choice.");
         results.Add(new { scenario = "native-map-inquiry-is-resolved-only-by-a-model-choice-from-current-visible-enabled-buttons", passed = true });
 
+        var recoveringNative = new FakeNativeInquiryClient();
+        var recoveringProvider = new FakeDecisionProvider("affirmative", failFirstCall: true);
+        var recoveredInquiry = RunAsync(recoveringNative, recoveringNative, recoveringProvider, CancellationToken.None, "inquiry-selftest-provider-retry").GetAwaiter().GetResult();
+        if (ReadString(recoveredInquiry, "status") != "resolved" || ReadInt(recoveredInquiry, "decisions", 0) != 2 ||
+            ReadInt(recoveredInquiry, "actionsExecuted", 0) != 1 || recoveringProvider.CallCount != 2 ||
+            recoveringNative.LastChoice != "affirmative" || recoveringNative.ResponsesReceived != 1 ||
+            recoveredInquiry["providerRouteHistory"] is not JsonArray retryRoutes || retryRoutes.Count != 2)
+            throw new AgentHostException("native-inquiry-provider-retry-selftest-failed", "A recoverable provider-format error must retry one visible Inquiry choice without submitting more than one Native response.");
+        results.Add(new { scenario = "native-inquiry-retries-one-recoverable-provider-error-without-duplicating-native-response", passed = true });
+
         var invalidNative = new FakeNativeInquiryClient();
         var invalidProvider = new FakeDecisionProvider("negative");
         var invalidChoice = RunAsync(invalidNative, invalidNative, invalidProvider, CancellationToken.None, "inquiry-selftest-invalid").GetAwaiter().GetResult();
@@ -49,6 +59,16 @@ internal static class AgentHostNativeInquiryResolution
             ReadString((clanNameProvider.LastRequest?["allowedActions"] as JsonArray)?[0] as JsonObject, "action") != "submitStoryModeClanName")
             throw new AgentHostException("storymode-clan-name-resolution-selftest-failed", "The family-name TextInquiry resolver must use the normal model decision envelope, keep the Native token hidden, submit text through the Native handler and verify BannerEditorState.");
         results.Add(new { scenario = "storymode-family-name-text-inquiry-uses-model-text-and-native-handler-before-banner-editor", passed = true });
+
+        var recoveringClanNameNative = new FakeStoryModeClanNameInquiryClient();
+        var recoveringClanNameProvider = new FakeStoryModeClanNameProvider(failFirstCall: true);
+        var recoveredClanName = RunAsync(recoveringClanNameNative, recoveringClanNameNative, recoveringClanNameProvider, CancellationToken.None, "storymode-name-provider-retry-selftest").GetAwaiter().GetResult();
+        if (ReadString(recoveredClanName, "status") != "resolved" || ReadInt(recoveredClanName, "decisions", 0) != 2 ||
+            ReadInt(recoveredClanName, "actionsExecuted", 0) != 1 || recoveringClanNameProvider.CallCount != 2 ||
+            recoveringClanNameNative.SubmittedName != "Chronicle Wolves" ||
+            recoveredClanName["providerRouteHistory"] is not JsonArray clanNameRetryRoutes || clanNameRetryRoutes.Count != 2)
+            throw new AgentHostException("storymode-clan-name-provider-retry-selftest-failed", "A recoverable provider-format error must retry the current family-name prompt and invoke the Native text handler only once.");
+        results.Add(new { scenario = "storymode-family-name-inquiry-retries-one-recoverable-provider-error-before-native-submit", passed = true });
         return results;
     }
 
@@ -91,8 +111,18 @@ internal static class AgentHostNativeInquiryResolution
         var visibleInquiry = inquiry.DeepClone() as JsonObject ?? new JsonObject();
         visibleInquiry.Remove("token");
         var request = BuildDecisionRequest(runId, visibleInquiry, allowedChoices);
-
-        var decision = await AgentHostDecisionCycle.DecideNativeInquiryResponseAsync(provider, request, cancellationToken);
+        var providerRoutes = new JsonArray();
+        var decision = await AgentHostProviderDecisionRecovery.DecideWithSingleRetryAsync(request,
+            token => AgentHostDecisionCycle.DecideNativeInquiryResponseAsync(provider, request, token),
+            code => providerRoutes.Add(new JsonObject
+            {
+                ["requestedModelId"] = provider.ModelId,
+                ["status"] = "provider-failure-before-decision",
+                ["failureCode"] = code,
+                ["nativeActionSent"] = false,
+                ["tokenUsageAvailable"] = false
+            }), cancellationToken);
+        providerRoutes.Add(BuildProviderRoute(decision));
         using (var requestDocument = JsonDocument.Parse(request.ToJsonString()))
             AgentHostHarnessProgressTrace.RecordDecision(requestDocument.RootElement, decision);
 
@@ -106,12 +136,13 @@ internal static class AgentHostNativeInquiryResolution
                 ["status"] = "failed",
                 ["failureCode"] = "native-inquiry-choice-not-currently-enabled",
                 ["failure"] = "The model did not choose the current respondInquiry action and a response shown and enabled by the Native Inquiry.",
-                ["decisions"] = 1,
+                ["decisions"] = providerRoutes.Count,
                 ["actionsExecuted"] = 0,
                 ["promptTokens"] = decision.PromptTokens ?? 0,
                 ["completionTokens"] = decision.CompletionTokens ?? 0,
                 ["decision"] = decision.Decision.DeepClone(),
-                ["providerRoute"] = BuildProviderRoute(decision)
+                ["providerRoute"] = BuildProviderRoute(decision),
+                ["providerRouteHistory"] = providerRoutes
             };
 
         using var nativeReceiptDocument = await inquiryClient.RespondNativeInquiryAsync(token, selectedChoice, cancellationToken);
@@ -128,7 +159,7 @@ internal static class AgentHostNativeInquiryResolution
             ["status"] = nativeCompleted && !stillOpen ? "resolved" : "failed",
             ["failureCode"] = nativeCompleted && !stillOpen ? null : "native-inquiry-transition-unverified",
             ["failure"] = nativeCompleted && !stillOpen ? null : "The selected Native Inquiry handler did not leave a verified unblocked MapState.",
-            ["decisions"] = 1,
+            ["decisions"] = providerRoutes.Count,
             ["actionsExecuted"] = nativeCompleted ? 1 : 0,
             ["promptTokens"] = decision.PromptTokens ?? 0,
             ["completionTokens"] = decision.CompletionTokens ?? 0,
@@ -136,6 +167,7 @@ internal static class AgentHostNativeInquiryResolution
             ["choice"] = selectedChoice,
             ["decision"] = decision.Decision.DeepClone(),
             ["providerRoute"] = BuildProviderRoute(decision),
+            ["providerRouteHistory"] = providerRoutes,
             ["nativeReceipt"] = nativeReceipt,
             ["nativeStateAfter"] = AgentHostHarnessProgressTrace.BuildNativeStateSummary(JsonNode.Parse(after.RootElement.GetRawText()) as JsonObject)
         };
@@ -155,7 +187,18 @@ internal static class AgentHostNativeInquiryResolution
         var visibleInquiry = inquiry.DeepClone() as JsonObject ?? new JsonObject();
         visibleInquiry.Remove("token");
         var request = BuildStoryModeClanNameDecisionRequest(runId, visibleInquiry);
-        var decision = await AgentHostDecisionCycle.DecideStoryModeClanNameAsync(provider, request, cancellationToken);
+        var providerRoutes = new JsonArray();
+        var decision = await AgentHostProviderDecisionRecovery.DecideWithSingleRetryAsync(request,
+            token => AgentHostDecisionCycle.DecideStoryModeClanNameAsync(provider, request, token),
+            code => providerRoutes.Add(new JsonObject
+            {
+                ["requestedModelId"] = provider.ModelId,
+                ["status"] = "provider-failure-before-decision",
+                ["failureCode"] = code,
+                ["nativeActionSent"] = false,
+                ["tokenUsageAvailable"] = false
+            }), cancellationToken);
+        providerRoutes.Add(BuildProviderRoute(decision));
         using (var requestDocument = JsonDocument.Parse(request.ToJsonString()))
             AgentHostHarnessProgressTrace.RecordDecision(requestDocument.RootElement, decision);
 
@@ -166,9 +209,10 @@ internal static class AgentHostNativeInquiryResolution
             {
                 ["status"] = "failed", ["failureCode"] = "storymode-clan-name-decision-invalid",
                 ["failure"] = "The model did not return one nonblank, bounded current clan-name submission.",
-                ["decisions"] = 1, ["actionsExecuted"] = 0,
+                ["decisions"] = providerRoutes.Count, ["actionsExecuted"] = 0,
                 ["promptTokens"] = decision.PromptTokens ?? 0, ["completionTokens"] = decision.CompletionTokens ?? 0,
-                ["decision"] = decision.Decision.DeepClone(), ["providerRoute"] = BuildProviderRoute(decision)
+                ["decision"] = decision.Decision.DeepClone(), ["providerRoute"] = BuildProviderRoute(decision),
+                ["providerRouteHistory"] = providerRoutes
             };
 
         using var receiptDocument = await inquiryClient.SubmitStoryModeClanNameAsync(token, clanName, cancellationToken);
@@ -186,13 +230,14 @@ internal static class AgentHostNativeInquiryResolution
             ["status"] = completed ? "resolved" : "failed",
             ["failureCode"] = completed ? null : "storymode-clan-name-transition-unverified",
             ["failure"] = completed ? null : "The Native family-name handler did not transition to the verified player BannerEditorState.",
-            ["decisions"] = 1, ["actionsExecuted"] = ReadString(receipt, "status") == "completed" ? 1 : 0,
+            ["decisions"] = providerRoutes.Count, ["actionsExecuted"] = ReadString(receipt, "status") == "completed" ? 1 : 0,
             ["promptTokens"] = decision.PromptTokens ?? 0, ["completionTokens"] = decision.CompletionTokens ?? 0,
             ["storyModeSetupStage"] = "family-name",
             ["clanName"] = clanName,
             ["bannerEditorEntered"] = enteredBannerEditor,
             ["decision"] = decision.Decision.DeepClone(),
             ["providerRoute"] = BuildProviderRoute(decision),
+            ["providerRouteHistory"] = providerRoutes,
             ["nativeReceipt"] = receipt,
             ["nativeStateAfter"] = AgentHostHarnessProgressTrace.BuildNativeStateSummary(afterRoot)
         };
@@ -271,9 +316,10 @@ internal static class AgentHostNativeInquiryResolution
         }
     }
 
-    private sealed class FakeStoryModeClanNameProvider : IAgentHostDecisionProvider
+    private sealed class FakeStoryModeClanNameProvider(bool failFirstCall = false) : IAgentHostDecisionProvider
     {
         internal JsonObject? LastRequest { get; private set; }
+        internal int CallCount { get; private set; }
         public string ModelId => "storymode-clan-name-selftest-model";
         public string ConfigurationSource => "harness-fake-provider";
         public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) => Task.CompletedTask;
@@ -281,9 +327,12 @@ internal static class AgentHostNativeInquiryResolution
         public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            CallCount++;
             LastRequest = JsonNode.Parse(request.GetRawText()) as JsonObject;
             if (!systemPrompt.Contains("family name", StringComparison.Ordinal))
                 throw new AgentHostException("storymode-name-selftest-prompt-invalid", "The name-specific Native text prompt was not used.");
+            if (failFirstCall && CallCount == 1)
+                throw new AgentHostException("provider-decision-field-unavailable", "The fake provider emitted one unsupported name field before correction.");
             return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 15, 3, "self-test",
                 new JsonObject { ["action"] = "submitStoryModeClanName", ["arguments"] = new JsonObject { ["text"] = "Chronicle Wolves" }, ["rationale"] = "A concise in-world family name." }, "self-test", "json_schema"));
         }
@@ -361,6 +410,7 @@ internal static class AgentHostNativeInquiryResolution
         private bool _open = true;
         internal string? LastToken { get; private set; }
         internal string? LastChoice { get; private set; }
+        internal int ResponsesReceived { get; private set; }
 
         public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
         {
@@ -392,6 +442,7 @@ internal static class AgentHostNativeInquiryResolution
             if (!_open || token != "inquiry-token-1") throw new AgentHostException("native-inquiry-selftest-token-invalid", "The resolver did not bind the current active inquiry token.");
             LastToken = token;
             LastChoice = choice;
+            ResponsesReceived++;
             _open = false;
             return Task.FromResult(JsonDocument.Parse("{\"status\":\"completed\",\"action\":\"respondInquiry\"}"));
         }
@@ -400,7 +451,7 @@ internal static class AgentHostNativeInquiryResolution
             throw new AgentHostException("native-inquiry-selftest-unexpected-clan-name", "The yes/no inquiry fixture does not accept a clan-name submission.");
     }
 
-    private sealed class FakeDecisionProvider(string choice) : IAgentHostDecisionProvider
+    private sealed class FakeDecisionProvider(string choice, bool failFirstCall = false) : IAgentHostDecisionProvider
     {
         internal int CallCount { get; private set; }
         internal JsonObject? LastRequest { get; private set; }
@@ -414,6 +465,8 @@ internal static class AgentHostNativeInquiryResolution
             LastRequest = JsonNode.Parse(request.GetRawText()) as JsonObject;
             if (!systemPrompt.Contains("currently visible to the player", StringComparison.Ordinal))
                 throw new AgentHostException("native-inquiry-selftest-prompt-invalid", "The resolver did not state that the prompt is the current player-visible Native inquiry.");
+            if (failFirstCall && CallCount == 1)
+                throw new AgentHostException("provider-response-truncated", "The fake provider returned one truncated Native Inquiry decision.");
             return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 12, 2, "self-test",
                 new JsonObject { ["action"] = "respondInquiry", ["arguments"] = new JsonObject { ["choice"] = choice }, ["rationale"] = "Current visible choice." }, "self-test", "json_schema"));
         }

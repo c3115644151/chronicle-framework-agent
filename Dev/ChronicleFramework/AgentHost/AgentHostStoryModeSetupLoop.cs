@@ -21,9 +21,19 @@ internal static class AgentHostStoryModeSetupLoop
             provider.CallCount != expected.Length || native.Actions.Count != expected.Length ||
             !native.Actions.SequenceEqual(expected, StringComparer.Ordinal) || native.SubmittedClanName != "Chronicle Wolves")
             throw new AgentHostException("storymode-setup-loop-selftest-failed", "The Native startup chain must continue the verified banner notification, use TextQueryPopUpVM for a model-selected family name, commit the current BannerEditor through Done, answer the resulting tutorial inquiry, and return to Map. status=" + ReadString(result, "status") + "; actions=" + string.Join(",", native.Actions) + "; decisions=" + provider.CallCount);
+        var recoveringNative = new FakeStoryModeSetupNativeClient();
+        var recoveringProvider = new FakeStoryModeSetupDecisionProvider(failOnCall: 2);
+        var recoveredResult = await RunAsync(request.RootElement, recoveringNative, recoveringNative, recoveringNative, recoveringProvider, CancellationToken.None);
+        if (ReadString(recoveredResult, "status") != "completed" ||
+            ReadString(recoveredResult["termination"] as JsonObject, "reason") != "storymode-post-tutorial-setup-returned-to-map" ||
+            ReadInt(recoveredResult, "decisions", 0) != expected.Length + 1 || recoveringProvider.CallCount != expected.Length + 1 ||
+            recoveringNative.Actions.Count != expected.Length || !recoveringNative.Actions.SequenceEqual(expected, StringComparer.Ordinal) ||
+            (recoveredResult["trace"] as JsonArray)?.OfType<JsonObject>().All(step => ReadString(step, "stage") != "storymode-setup-provider-retry") == true)
+            throw new AgentHostException("storymode-setup-provider-retry-selftest-failed", "One recoverable malformed provider response must be corrected with a bounded no-action retry, then the original Native setup chain must still complete exactly once.");
         return
         [
             new { scenario = "storymode-post-tutorial-native-notification-family-name-banner-editor-and-follow-up-inquiry-loop", decisions = provider.CallCount, nativeActions = native.Actions.ToArray(), passed = true },
+            new { scenario = "storymode-setup-recovers-one-provider-format-error-without-replaying-native-actions", decisions = recoveringProvider.CallCount, nativeActions = recoveringNative.Actions.ToArray(), passed = true },
             new { scenario = "storymode-setup-waits-for-scene-notification-native-readiness-without-spending-model-call", readinessPolls = native.NotificationReadinessPolls, passed = native.NotificationReadinessPolls == 2 }
         ];
     }
@@ -92,7 +102,8 @@ internal static class AgentHostStoryModeSetupLoop
                     var modelRequest = BuildActionRequest(runId, decisions + 1,
                         "Complete the current Native StoryMode first-banner notification and continue the original setup.",
                         observation, new JsonObject { ["action"] = "continueSceneNotification", ["arguments"] = new JsonArray() });
-                    var decision = await AgentHostDecisionCycle.DecideStoryModeSceneNotificationAsync(provider, modelRequest, cancellationToken);
+                    var decision = await DecideWithRecoveryAsync(
+                        token => AgentHostDecisionCycle.DecideStoryModeSceneNotificationAsync(provider, modelRequest, token), modelRequest);
                     CountDecision(decision);
                     var chosen = ReadString(decision.Decision, "action");
                     if (chosen != "continueSceneNotification" || HasArguments(decision.Decision))
@@ -126,7 +137,9 @@ internal static class AgentHostStoryModeSetupLoop
                     actions += ReadInt(resolution, "actionsExecuted", 0);
                     promptTokens += ReadLong(resolution, "promptTokens", 0);
                     completionTokens += ReadLong(resolution, "completionTokens", 0);
-                    if (resolution["providerRoute"] is JsonObject route) routes.Add(route.DeepClone());
+                    if (resolution["providerRouteHistory"] is JsonArray inquiryRoutes)
+                        foreach (var route in inquiryRoutes) routes.Add(route?.DeepClone());
+                    else if (resolution["providerRoute"] is JsonObject route) routes.Add(route.DeepClone());
                     trace.Add(new JsonObject
                     {
                         ["stage"] = "storymode-setup-inquiry",
@@ -157,7 +170,8 @@ internal static class AgentHostStoryModeSetupLoop
                     var modelRequest = BuildActionRequest(runId, decisions + 1,
                         "Complete the current Native BannerEditor setup using its current banner unless a requested customization is supported.",
                         observation, new JsonObject { ["action"] = "bannerEditorDone", ["arguments"] = new JsonArray() });
-                    var decision = await AgentHostDecisionCycle.DecideStoryModeBannerEditorAsync(provider, modelRequest, cancellationToken);
+                    var decision = await DecideWithRecoveryAsync(
+                        token => AgentHostDecisionCycle.DecideStoryModeBannerEditorAsync(provider, modelRequest, token), modelRequest);
                     CountDecision(decision);
                     if (ReadString(decision.Decision, "action") != "bannerEditorDone" || HasArguments(decision.Decision))
                         return Result("failed", "storymode-banner-editor-decision-invalid", "The model did not choose the current Native BannerEditor Done action.", decision.Decision);
@@ -205,6 +219,42 @@ internal static class AgentHostStoryModeSetupLoop
                 ["completionTokens"] = decision.CompletionTokens
             });
             decisions++;
+        }
+
+        async Task<ProviderDecisionResult> DecideWithRecoveryAsync(
+            Func<CancellationToken, Task<ProviderDecisionResult>> decide,
+            JsonObject request)
+        {
+            string? previousFailure = null;
+            for (var attempt = 0; attempt < 2; attempt++)
+            {
+                if (attempt > 0 && previousFailure is not null)
+                    request["decisionFeedback"] = AgentHostProviderDecisionRecovery.BuildFeedback(previousFailure,
+                        request["allowedActions"] as JsonArray ?? new JsonArray(),
+                        request["allowedControls"] as JsonArray ?? new JsonArray());
+                try { return await decide(cancellationToken); }
+                catch (AgentHostException exception) when (AgentHostProviderDecisionRecovery.CanRetry(exception.Code, attempt))
+                {
+                    decisions++;
+                    previousFailure = exception.Code;
+                    routes.Add(new JsonObject
+                    {
+                        ["decision"] = decisions,
+                        ["requestedModelId"] = provider.ModelId,
+                        ["status"] = "provider-failure-before-decision",
+                        ["failureCode"] = exception.Code,
+                        ["nativeActionSent"] = false
+                    });
+                    trace.Add(new JsonObject
+                    {
+                        ["stage"] = "storymode-setup-provider-retry",
+                        ["failureCode"] = exception.Code,
+                        ["nativeActionSent"] = false,
+                        ["retryAttempt"] = attempt + 1
+                    });
+                }
+            }
+            throw new AgentHostException(previousFailure ?? "storymode-setup-provider-retry-exhausted", "The bounded StoryMode setup provider retry ended without a parsed decision.");
         }
 
         void AddTrace(string stage, ProviderDecisionResult decision, JsonObject receipt, JsonObject observation)
@@ -366,7 +416,7 @@ internal static class AgentHostStoryModeSetupLoop
             Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["action"] = action, ["data"] = data }.ToJsonString()));
     }
 
-    private sealed class FakeStoryModeSetupDecisionProvider : IAgentHostDecisionProvider
+    private sealed class FakeStoryModeSetupDecisionProvider(int failOnCall = 0) : IAgentHostDecisionProvider
     {
         internal int CallCount { get; private set; }
         public string ModelId => "storymode-setup-selftest-model";
@@ -377,6 +427,8 @@ internal static class AgentHostStoryModeSetupLoop
         {
             cancellationToken.ThrowIfCancellationRequested();
             CallCount++;
+            if (failOnCall > 0 && CallCount == failOnCall)
+                throw new AgentHostException("provider-decision-field-unavailable", "The fake provider emitted one unsupported field before correction.");
             var actions = request.GetProperty("allowedActions").EnumerateArray().ToArray();
             var action = actions.Single().GetProperty("action").GetString();
             JsonObject decision = action switch

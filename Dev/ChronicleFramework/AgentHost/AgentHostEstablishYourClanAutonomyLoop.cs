@@ -59,10 +59,25 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         if (!IsSafeObjectiveRouteUnavailable("companions", "companion-model-stopped", freeMap: true) ||
             IsSafeObjectiveRouteUnavailable("companions", "companion-model-stopped", freeMap: false) ||
             IsSafeObjectiveRouteUnavailable("gold", "companion-model-stopped", freeMap: true) ||
+            !IsSafeObjectiveRouteUnavailable("gold", "gold-sale-no-transferable-goods", freeMap: true) ||
+            IsSafeObjectiveRouteUnavailable("gold", "gold-sale-no-transferable-goods", freeMap: false) ||
             !IsSafeObjectiveRouteUnavailable("partySize", "recruitment-model-stopped", freeMap: true) ||
-            IsSafeObjectiveRouteUnavailable("partySize", "recruitment-model-stopped", freeMap: false))
-            throw new AgentHostException("establish-clan-autonomy-safe-stop-replan-policy-failed", "Safe Companion/PartySize stops may block only that route on a free Map; they must not hide unrelated failures or encounter/captive state.");
-        results.Add(new { scenario = "establish-clan-autonomy-safe-companion-and-recruitment-stops-mark-route-unavailable-and-allow-replan", passed = true });
+            IsSafeObjectiveRouteUnavailable("partySize", "recruitment-model-stopped", freeMap: false) ||
+            !IsSafeObjectiveRouteUnavailable("companions", "companion-provider-failure-returned-to-map", freeMap: true) ||
+            IsSafeObjectiveRouteUnavailable("companions", "companion-provider-failure-returned-to-map", freeMap: false))
+            throw new AgentHostException("establish-clan-autonomy-safe-stop-replan-policy-failed", "A Gold no-goods outcome and safe Companion/PartySize stops may block only that route on a free Map; they must not hide unrelated failures or encounter/captive state.");
+        results.Add(new { scenario = "establish-clan-autonomy-safe-no-goods-and-companion-recruitment-stops-mark-route-unavailable-and-allow-replan", passed = true });
+
+        using var safeTavernMission = JsonDocument.Parse("""
+            {"status":"completed","state":{"context":{"gameState":"MissionState","inquiryOpen":false,"escapeMenuOpen":false,"encounterActive":false,"captivity":{"isCaptive":false}},"mission":{"active":true,"missionEnded":false,"mode":"StartUp","sceneName":"town_ES3_tavern","conversation":null,"navigation":{"active":false},"leave":{"active":false}},"quests":[{"id":"rebuild_player_clan_storymode_quest"}]}}
+            """);
+        using var activeConversationMission = JsonDocument.Parse("""
+            {"status":"completed","state":{"context":{"gameState":"MissionState","inquiryOpen":false,"escapeMenuOpen":false,"encounterActive":false,"captivity":{"isCaptive":false}},"mission":{"active":true,"missionEnded":false,"mode":"StartUp","sceneName":"town_ES3_tavern","navigation":{"active":false},"leave":{"active":false}},"conversation":{"heroId":"wanderer-a"},"quests":[{"id":"rebuild_player_clan_storymode_quest"}]}}
+            """);
+        if (!IsSafeTavernMissionForCompanionProviderRecovery(safeTavernMission.RootElement) ||
+            IsSafeTavernMissionForCompanionProviderRecovery(activeConversationMission.RootElement))
+            throw new AgentHostException("establish-clan-autonomy-companion-provider-mission-leave-policy-failed", "Provider failure may recover with Native Leave only from a friendly Town/Tavern Mission with no active conversation or modal.");
+        results.Add(new { scenario = "establish-clan-autonomy-companion-provider-recovery-allows-safe-tavern-leave-but-not-active-conversation", passed = true });
 
         using var townLocationMenu = JsonDocument.Parse("""
             {"status":"completed","state":{"context":{"gameState":"MapState","menuId":"town","encounterActive":true,"encounteredPartyId":"town_ES3","captivity":{"isCaptive":false}},"location":{"currentSettlementId":"town_ES3"}}}
@@ -73,6 +88,32 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         if (!IsFreeMapForObjectiveReplan(townLocationMenu.RootElement) || IsFreeMapForObjectiveReplan(hostileEncounter.RootElement))
             throw new AgentHostException("establish-clan-autonomy-town-menu-free-map-classification-failed", "A Native Town location menu may report encounterActive=true but must remain a free Map for safe objective replanning; a real party encounter must still block it.");
         results.Add(new { scenario = "establish-clan-autonomy-native-town-menu-is-free-map-for-objective-replan-but-hostile-encounter-is-not", passed = true });
+
+        using var hostileBanditInterruption = JsonDocument.Parse("""
+            {"status":"completed","state":{"context":{"gameState":"MapState","menuId":"encounter_meeting","encounterActive":true,"encounteredPartyId":"mountain_bandits_221","captivity":{"isCaptive":false}},"nearbyParties":[{"id":"mountain_bandits_221","type":"bandit","hostile":true,"members":5}]}}
+            """);
+        using var nonHostileBanditInterruption = JsonDocument.Parse("""
+            {"status":"completed","state":{"context":{"gameState":"MapState","menuId":"encounter_meeting","encounterActive":true,"encounteredPartyId":"mountain_bandits_221","captivity":{"isCaptive":false}},"nearbyParties":[{"id":"mountain_bandits_221","type":"bandit","hostile":false,"members":5}]}}
+            """);
+        using var hostileLordInterruption = JsonDocument.Parse("""
+            {"status":"completed","state":{"context":{"gameState":"MapState","menuId":"encounter_meeting","encounterActive":true,"encounteredPartyId":"lord_party","captivity":{"isCaptive":false}},"nearbyParties":[{"id":"lord_party","type":"lord","hostile":true,"members":103}]}}
+            """);
+        if (!IsSupportedHostileBanditEncounter(hostileBanditInterruption.RootElement) ||
+            IsSupportedHostileBanditEncounter(nonHostileBanditInterruption.RootElement) ||
+            IsSupportedHostileBanditEncounter(hostileLordInterruption.RootElement))
+            throw new AgentHostException("establish-clan-autonomy-incidental-battle-classification-failed", "Only a currently active, observed, hostile Bandit encounter may be handed to the existing Campaign BattleSimulation route; neutral and lord encounters must not be reclassified.");
+        results.Add(new { scenario = "establish-clan-autonomy-resolves-only-current-observed-hostile-bandit-interruptions-through-battle-simulation", passed = true });
+
+        using var safeObjectiveProviderMap = JsonDocument.Parse("""
+            {"status":"completed","state":{"context":{"gameState":"MapState","inquiryOpen":false,"escapeMenuOpen":false,"isWaitMenu":false,"isWaitActive":false,"encounterActive":false,"captivity":{"isCaptive":false},"sceneNotification":{"hasActiveNotification":false}},"party":{"isMoving":false}}}
+            """);
+        using var movingObjectiveProviderMap = JsonDocument.Parse("""
+            {"status":"completed","state":{"context":{"gameState":"MapState","inquiryOpen":false,"escapeMenuOpen":false,"isWaitMenu":false,"isWaitActive":false,"encounterActive":false,"captivity":{"isCaptive":false},"sceneNotification":{"hasActiveNotification":false}},"party":{"isMoving":true}}}
+            """);
+        if (!IsSafeMapForObjectiveProviderReplan(safeObjectiveProviderMap.RootElement) ||
+            IsSafeMapForObjectiveProviderReplan(movingObjectiveProviderMap.RootElement))
+            throw new AgentHostException("establish-clan-autonomy-provider-failure-map-safety-failed", "Provider failure may replan objectives only from a free, nonmoving, nonmodal Native Map state.");
+        results.Add(new { scenario = "establish-clan-autonomy-provider-failure-replan-requires-safe-nonmoving-free-map", passed = true });
 
         var native = new FakeNativeClient(activeQuest: true, lifecycle: "active", initialGold: 100);
         var provider = new FakeObjectiveProvider("gold");
@@ -197,6 +238,70 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 !ReadBoolean(step, "replayedChildActions")) ?? false))
             throw new AgentHostException("establish-clan-autonomy-native-inquiry-recovery-selftest-failed", "A failed objective that already sent a Native action may resolve the current inquiry, but only a fresh parent-model decision may choose the next objective action; no child action is silently resumed.");
         results.Add(new { scenario = "establish-clan-autonomy-model-resolves-native-modal-after-prior-action-then-replans-from-fresh-state", passed = true });
+
+        var companionProviderFailureNative = new FakeNativeClient(activeQuest: true, lifecycle: "active", initialGold: 100, initialCompanions: 0);
+        var companionProviderFailurePlanner = new FakeObjectiveProvider("companions", "gold", "companions");
+        var companionProviderFailureChildCalls = 0;
+        async Task<JsonObject> RecoverCompanionProviderFailure(string objectiveId, int priorDecisions, long priorPromptTokens, long priorCompletionTokens,
+            JsonArray priorTrace, JsonArray priorRoutes, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            companionProviderFailureChildCalls++;
+            if (objectiveId == "companions")
+            {
+                if (companionProviderFailureChildCalls == 1)
+                {
+                    companionProviderFailureNative.EnterTavernMission();
+                    return new JsonObject
+                    {
+                        ["status"] = "failed", ["actionsExecuted"] = 4, ["decisions"] = priorDecisions,
+                        ["promptTokens"] = priorPromptTokens, ["completionTokens"] = priorCompletionTokens,
+                        ["trace"] = priorTrace.DeepClone(), ["providerRouteHistory"] = priorRoutes.DeepClone(),
+                        ["termination"] = new JsonObject { ["reason"] = "companion-loop-failed" },
+                        ["failureCode"] = "provider-decision-field-unavailable"
+                    };
+                }
+                if (companionProviderFailureChildCalls != 3 || companionProviderFailureNative.IsInCompanionMission ||
+                    !companionProviderFailureNative.CompanionNativeActions.SequenceEqual(["missionLeave"], StringComparer.Ordinal))
+                    throw new AgentHostException("autonomy-selftest-companion-retry-state-invalid", "A failed Companion route may be attempted again only after separate Journal progress and one verified Native Leave; its prior actions must not be replayed.");
+                companionProviderFailureNative.CompleteSuccessfully();
+                return new JsonObject
+                {
+                    ["status"] = "completed", ["actionsExecuted"] = 1, ["decisions"] = priorDecisions,
+                    ["promptTokens"] = priorPromptTokens, ["completionTokens"] = priorCompletionTokens,
+                    ["trace"] = priorTrace.DeepClone(), ["providerRouteHistory"] = priorRoutes.DeepClone(),
+                    ["termination"] = new JsonObject { ["reason"] = "native-companion-journal-target-met" }
+                };
+            }
+            if (objectiveId != "gold" || companionProviderFailureNative.IsInCompanionMission ||
+                !companionProviderFailureNative.CompanionNativeActions.SequenceEqual(["missionLeave"], StringComparer.Ordinal))
+                throw new AgentHostException("autonomy-selftest-companion-provider-replan-state-invalid", "The next objective may run only after one verified Native missionLeave from the failed Tavern route; no Companion action may be replayed.");
+            companionProviderFailureNative.CompleteGoldObjective();
+            return new JsonObject
+            {
+                ["status"] = "completed", ["actionsExecuted"] = 1, ["decisions"] = priorDecisions,
+                ["promptTokens"] = priorPromptTokens, ["completionTokens"] = priorCompletionTokens,
+                ["trace"] = priorTrace.DeepClone(), ["providerRouteHistory"] = priorRoutes.DeepClone(),
+                ["termination"] = new JsonObject { ["reason"] = "one-native-objective-subflow-completed" }
+            };
+        }
+        var companionProviderRecovered = RunAsync(request.RootElement, companionProviderFailureNative, companionProviderFailureNative,
+            companionProviderFailurePlanner, RecoverCompanionProviderFailure, CancellationToken.None).GetAwaiter().GetResult();
+        var companionProviderAllowedObjectives = companionProviderFailurePlanner.AllowedObjectiveIds;
+        if (ReadString(companionProviderRecovered, "status") != "completed" ||
+            ReadBoolean(companionProviderRecovered["termination"] as JsonObject, "goalVerified") != true ||
+            ReadInt(companionProviderRecovered, "actionsExecuted", 0) != 7 ||
+            companionProviderFailurePlanner.CallCount != 3 || companionProviderFailureChildCalls != 3 ||
+            companionProviderFailureNative.CompanionNativeActions.Count != 1 ||
+            companionProviderAllowedObjectives.Count != 3 ||
+            !companionProviderAllowedObjectives[0].Contains("companions", StringComparer.Ordinal) ||
+            !companionProviderAllowedObjectives[1].SequenceEqual(["gold"], StringComparer.Ordinal) ||
+            !companionProviderAllowedObjectives[2].SequenceEqual(["companions"], StringComparer.Ordinal) ||
+            !((companionProviderRecovered["trace"] as JsonArray)?.OfType<JsonObject>().Any(step =>
+                ReadString(step, "stage") == "objective-route-blocked-after-companion-provider-failure" &&
+                ReadBoolean(step, "nativeLeaveVerified") && !ReadBoolean(step, "replayedChildActions")) ?? false))
+            throw new AgentHostException("establish-clan-autonomy-companion-provider-failure-recovery-selftest-failed", "A provider error inside a supported Tavern Mission must return through Native Leave, replan another objective, and may retry Companion only after verified Journal progress; no previous action may be replayed. status=" + ReadString(companionProviderRecovered, "status") + "; termination=" + ReadString(companionProviderRecovered["termination"] as JsonObject, "reason") + "; goalVerified=" + ReadBoolean(companionProviderRecovered["termination"] as JsonObject, "goalVerified") + "; actions=" + ReadInt(companionProviderRecovered, "actionsExecuted", 0) + "; plannerCalls=" + companionProviderFailurePlanner.CallCount + "; childCalls=" + companionProviderFailureChildCalls + "; leaveActions=" + string.Join(",", companionProviderFailureNative.CompanionNativeActions) + "; allowed=" + string.Join("|", companionProviderAllowedObjectives.Select(ids => string.Join(",", ids))));
+        results.Add(new { scenario = "establish-clan-autonomy-leaves-tavern-replans-and-retries-companion-only-after-journal-progress", modelDecisions = companionProviderFailurePlanner.CallCount, nativeActions = companionProviderRecovered["actionsExecuted"]?.GetValue<int>(), passed = true });
         return results;
     }
 
@@ -433,6 +538,160 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         ? contextData
                         : default;
                     var freeMap = IsFreeMapForObjectiveReplan(failedState.RootElement);
+                    var childFailureCode = ReadString(child, "failureCode");
+
+                    // A hostile Bandit can interrupt ordinary Campaign travel. The child
+                    // objective must not reinterpret that encounter as a Companion/Gold
+                    // failure or discard it; resolve it through the existing Native
+                    // BattleSimulation contract, then resume planning from fresh Journal state.
+                    if (IsSupportedHostileBanditEncounter(failedState.RootElement) &&
+                        client is IAgentHostBattleSimulationNativeClient incidentBattleClient)
+                    {
+                        var incidentBattle = await AgentHostBattleSimulationLoop.RunAsync(
+                            request, incidentBattleClient, provider, elapsed.Token,
+                            priorDecisions: decisions,
+                            priorPromptTokens: promptTokens,
+                            priorCompletionTokens: completionTokens,
+                            priorTrace: trace,
+                            priorProviderRouteHistory: routes);
+                        AgentHostHarnessProgressTrace.RecordObjectiveSubflowResult("incidentBattleSimulation", incidentBattle);
+                        decisions = ReadInt(incidentBattle, "decisions", decisions);
+                        promptTokens = ReadLong(incidentBattle, "promptTokens", promptTokens);
+                        completionTokens = ReadLong(incidentBattle, "completionTokens", completionTokens);
+                        nativeActions += ReadInt(incidentBattle, "actionsExecuted", 0);
+                        trace = incidentBattle["trace"]?.DeepClone() as JsonArray ?? trace;
+                        routes = incidentBattle["providerRouteHistory"]?.DeepClone() as JsonArray ?? routes;
+                        objectiveRuns.Add(new JsonObject
+                        {
+                            ["objectiveId"] = "incidentBattleSimulation",
+                            ["interruptedObjectiveId"] = objectiveId,
+                            ["status"] = ReadString(incidentBattle, "status"),
+                            ["termination"] = ReadString(incidentBattle, "termination"),
+                            ["actionsExecuted"] = ReadInt(incidentBattle, "actionsExecuted", 0),
+                            ["playerOutcome"] = ReadString(incidentBattle, "playerOutcome")
+                        });
+
+                        using var afterIncidentBattle = await client.ReadStateAsync(elapsed.Token);
+                        if (IsPlayerCaptive(afterIncidentBattle.RootElement))
+                        {
+                            unavailableObjectives.Add(objectiveId);
+                            trace.Add(new JsonObject
+                            {
+                                ["stage"] = "incident-bandit-battle-returned-player-captive",
+                                ["interruptedObjectiveId"] = objectiveId,
+                                ["replayedChildActions"] = false,
+                                ["nextStep"] = "native-captivity-recovery"
+                            });
+                            continue;
+                        }
+                        if (ReadString(incidentBattle, "status") != "completed")
+                            return BuildResult("failed", "incident-bandit-battle-failed", false,
+                                ReadString(incidentBattle, "failure") ?? "The interrupted hostile Bandit encounter did not reach a verified Native BattleSimulation return.",
+                                ReadString(incidentBattle, "failureCode") ?? "incident-bandit-battle-failed",
+                                journalObjectives, snapshot, differences);
+
+                        if (!IsSafeMapForObjectiveProviderReplan(afterIncidentBattle.RootElement) ||
+                            !AgentHostEstablishYourClanGoalLoop.HasActiveQuest(afterIncidentBattle.RootElement))
+                            return BuildResult("failed", "incident-bandit-battle-return-state-unverified", false,
+                                "The Native battle ended, but a safe nonmoving Campaign Map and the original EYC Journal were not both reverified.",
+                                "incident-bandit-battle-return-state-unverified", journalObjectives, snapshot, differences);
+
+                        using var afterIncidentDetails = await questDetailsClient.ReadQuestDetailsAsync(QuestId, elapsed.Token);
+                        var afterIncidentData = ReadQuestDetailsData(afterIncidentDetails.RootElement);
+                        var afterIncidentJournal = AgentHostEstablishYourClanGoalLoop.BuildJournalObjectives(afterIncidentData);
+                        if (HasJournalProgressChanged(journalObjectives, afterIncidentJournal))
+                            unavailableObjectives.Clear();
+                        else
+                            unavailableObjectives.Add(objectiveId);
+                        trace.Add(new JsonObject
+                        {
+                            ["stage"] = "hostile-bandit-interruption-resolved-and-parent-replanned",
+                            ["interruptedObjectiveId"] = objectiveId,
+                            ["journalProgressChanged"] = HasJournalProgressChanged(journalObjectives, afterIncidentJournal),
+                            ["replayedChildActions"] = false,
+                            ["nativeBattleResult"] = ReadString(incidentBattle, "battleResult"),
+                            ["renownBefore"] = incidentBattle["renownBefore"]?.DeepClone(),
+                            ["renownAfter"] = incidentBattle["renownAfter"]?.DeepClone()
+                        });
+                        continue;
+                    }
+
+                    // A provider-format/choice failure after a Companion Native Mission action is
+                    // not a reason to terminate the entire EYC Agent. Leave only from a verified
+                    // friendly Town/Tavern Mission with no modal, conversation or active lease;
+                    // then replan from fresh Map/Journal state without replaying any child action.
+                    if (IsRecoverableObjectiveProviderFailure(childFailureCode))
+                    {
+                        if (InitiallyIntegratedObjectives.Contains(objectiveId) && freeMap && IsSafeMapForObjectiveProviderReplan(failedState.RootElement) &&
+                            AgentHostEstablishYourClanGoalLoop.HasActiveQuest(failedState.RootElement))
+                        {
+                            unavailableObjectives.Add(objectiveId);
+                            trace.Add(new JsonObject
+                            {
+                                ["stage"] = "objective-provider-failure-route-blocked-on-free-map",
+                                ["objectiveId"] = objectiveId,
+                                ["failureCode"] = childFailureCode,
+                                ["childActionsExecuted"] = ReadInt(child, "actionsExecuted", 0),
+                                ["nativeLeaveSent"] = false,
+                                ["replayedChildActions"] = false
+                            });
+                            continue;
+                        }
+
+                        if (objectiveId == "companions" && client is IAgentHostCompanionHiringNativeClient companionRecoveryClient &&
+                            IsSafeTavernMissionForCompanionProviderRecovery(failedState.RootElement))
+                        {
+                            using var leaveResponse = await companionRecoveryClient.ExecuteCompanionHiringActionAsync("missionLeave", new JsonObject(), elapsed.Token);
+                            var leaveReceipt = JsonNode.Parse(leaveResponse.RootElement.GetRawText())?.AsObject()
+                                ?? throw new AgentHostException("companion-provider-failure-native-leave-receipt-invalid", "Native returned no recovery Leave receipt for the failed Tavern decision.");
+                            if (ReadString(leaveReceipt, "status") != "completed")
+                                return BuildResult("failed", "companion-provider-failure-native-leave-rejected", false,
+                                    "The Companion provider failed in a Tavern Mission and Native Leave was not accepted; no parent replan was attempted.",
+                                    "companion-provider-failure-native-leave-rejected", journalObjectives, snapshot, differences);
+
+                            nativeActions++;
+                            trace.Add(new JsonObject
+                            {
+                                ["stage"] = "companion-provider-failure-native-leave-started",
+                                ["objectiveId"] = objectiveId,
+                                ["failureCode"] = childFailureCode,
+                                ["nativeAction"] = "missionLeave",
+                                ["nativeActionStatus"] = "completed",
+                                ["childActionsExecuted"] = ReadInt(child, "actionsExecuted", 0),
+                                ["replayedChildActions"] = false
+                            });
+
+                            var returnedToMap = false;
+                            for (var wait = 0; wait < 30; wait++)
+                            {
+                                await Task.Delay(TimeSpan.FromSeconds(1), elapsed.Token);
+                                using var afterLeave = await client.ReadStateAsync(elapsed.Token);
+                                if (!IsFreeMapForObjectiveReplan(afterLeave.RootElement) || !IsSafeMapForObjectiveProviderReplan(afterLeave.RootElement)) continue;
+                                if (!AgentHostEstablishYourClanGoalLoop.HasActiveQuest(afterLeave.RootElement))
+                                    return BuildResult("failed", "companion-provider-failure-quest-state-unverified", false,
+                                        "Native Leave returned to Map after a Companion provider failure, but the original EYC Journal was no longer active.",
+                                        "companion-provider-failure-quest-state-unverified", journalObjectives, snapshot, differences);
+                                returnedToMap = true;
+                                break;
+                            }
+                            if (!returnedToMap)
+                                return BuildResult("failed", "companion-provider-failure-leave-unverified", false,
+                                    "Native Leave was accepted after a Companion provider failure, but a safe free Map state was not verified within the bounded recovery window.",
+                                    "companion-provider-failure-leave-unverified", journalObjectives, snapshot, differences);
+
+                            unavailableObjectives.Add(objectiveId);
+                            trace.Add(new JsonObject
+                            {
+                                ["stage"] = "objective-route-blocked-after-companion-provider-failure",
+                                ["objectiveId"] = objectiveId,
+                                ["failureCode"] = childFailureCode,
+                                ["nativeLeaveVerified"] = true,
+                                ["childActionsExecuted"] = ReadInt(child, "actionsExecuted", 0),
+                                ["replayedChildActions"] = false
+                            });
+                            continue;
+                        }
+                    }
 
                     // A child objective can stop when a Native modal appears, either before or
                     // after other Native actions. Resolve only the current supported prompt;
@@ -496,7 +755,9 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         promptTokens += ReadLong(resolution, "promptTokens", 0);
                         completionTokens += ReadLong(resolution, "completionTokens", 0);
                         nativeActions += ReadInt(resolution, "actionsExecuted", 0);
-                        if (resolution["providerRoute"] is JsonObject inquiryRoute)
+                        if (resolution["providerRouteHistory"] is JsonArray inquiryRoutes)
+                            foreach (var inquiryRoute in inquiryRoutes) routes.Add(inquiryRoute?.DeepClone());
+                        else if (resolution["providerRoute"] is JsonObject inquiryRoute)
                             routes.Add(inquiryRoute.DeepClone());
                         trace.Add(new JsonObject
                         {
@@ -591,7 +852,10 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         }
         catch (Exception exception)
         {
-            return BuildResult("failed", "autonomy-loop-failed", false, exception.GetType().Name, "establish-clan-autonomy-unexpected-error");
+            // Preserve the exception message and stack in the Host receipt. The prior
+            // type-only failure hid the exact boundary needed to diagnose live Campaign
+            // failures and made repeat runs expensive without improving safety.
+            return BuildResult("failed", "autonomy-loop-failed", false, exception.ToString(), "establish-clan-autonomy-unexpected-error");
         }
 
         JsonObject BuildResult(string status, string reason, bool goalVerified, string? failure, string? failureCode,
@@ -658,9 +922,65 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
     internal static bool IsSafeObjectiveRouteUnavailable(string objectiveId, string? termination, bool freeMap)
     {
         if (!freeMap) return false;
+        if (objectiveId == "gold") return termination is "provider-failure-returned-to-map" or "gold-sale-no-transferable-goods";
+        if (objectiveId == "renown") return termination is "provider-failure-returned-to-map" or "no-safe-action";
         if (objectiveId is "partySize" or "companions")
-            return termination is "native-journal-refresh-pending" or "recruitment-route-unavailable" or "companion-route-unavailable" or "companion-model-stopped" or "recruitment-model-stopped";
-        return objectiveId == "renown" && termination == "no-safe-action";
+            return termination is "native-journal-refresh-pending" or "recruitment-route-unavailable" or "companion-route-unavailable" or "companion-model-stopped" or "recruitment-model-stopped" or "provider-failure-returned-to-map" or "companion-provider-failure-returned-to-map";
+        return false;
+    }
+
+    private static bool IsRecoverableObjectiveProviderFailure(string? failureCode) =>
+        failureCode == "companion-action-recovery-exhausted" || AgentHostProviderDecisionRecovery.CanRetry(failureCode ?? string.Empty, rejectedDecisions: 0);
+
+    private static bool IsSupportedHostileBanditEncounter(JsonElement native)
+    {
+        if (native.ValueKind != JsonValueKind.Object || !native.TryGetProperty("state", out var stateElement) || stateElement.ValueKind != JsonValueKind.Object)
+            return false;
+        var state = JsonNode.Parse(stateElement.GetRawText())?.AsObject();
+        var context = state?["context"] as JsonObject;
+        var encounteredPartyId = ReadString(context, "encounteredPartyId");
+        return state is not null && ReadString(context, "gameState") == "MapState" &&
+               AgentHostCampaignStateFacts.IsActiveEncounter(state) && !IsPlayerCaptive(native) &&
+               !string.IsNullOrWhiteSpace(encounteredPartyId) &&
+               (state["nearbyParties"] as JsonArray)?.OfType<JsonObject>().Any(party =>
+                   ReadString(party, "id") == encounteredPartyId && ReadString(party, "type") == "bandit" && ReadBoolean(party, "hostile")) == true;
+    }
+
+    private static bool IsSafeMapForObjectiveProviderReplan(JsonElement native)
+    {
+        if (native.ValueKind != JsonValueKind.Object || !native.TryGetProperty("state", out var stateElement) || stateElement.ValueKind != JsonValueKind.Object)
+            return false;
+        var state = JsonNode.Parse(stateElement.GetRawText())?.AsObject();
+        var context = state?["context"] as JsonObject;
+        var party = state?["party"] as JsonObject;
+        return state is not null && ReadString(context, "gameState") == "MapState" &&
+               !ReadBoolean(context, "inquiryOpen") && !ReadBoolean(context, "escapeMenuOpen") &&
+               !ReadBoolean(context, "isWaitMenu") && !ReadBoolean(context, "isWaitActive") &&
+               !ReadBoolean(context?["sceneNotification"] as JsonObject, "hasActiveNotification") &&
+               party?["isMoving"] is JsonValue movingNode && movingNode.TryGetValue<bool>(out var isMoving) && !isMoving &&
+               !AgentHostCampaignStateFacts.IsActiveEncounter(state) && !IsPlayerCaptive(native);
+    }
+
+    private static bool IsSafeTavernMissionForCompanionProviderRecovery(JsonElement native)
+    {
+        if (native.ValueKind != JsonValueKind.Object || !native.TryGetProperty("state", out var stateElement) || stateElement.ValueKind != JsonValueKind.Object)
+            return false;
+        var state = JsonNode.Parse(stateElement.GetRawText())?.AsObject();
+        var context = state?["context"] as JsonObject;
+        var mission = state?["mission"] as JsonObject;
+        var sceneName = ReadString(mission, "sceneName");
+        var supportedLocationScene = sceneName?.Contains("tavern", StringComparison.OrdinalIgnoreCase) == true ||
+                                     sceneName?.Contains("_town_", StringComparison.OrdinalIgnoreCase) == true;
+        return state is not null && ReadString(context, "gameState") == "MissionState" &&
+               ReadString(mission, "mode") == "StartUp" && supportedLocationScene &&
+               ReadBoolean(mission, "active") && !ReadBoolean(mission, "missionEnded") &&
+               state["conversation"] is null &&
+               !ReadBoolean(context, "inquiryOpen") && !ReadBoolean(context, "escapeMenuOpen") &&
+               !ReadBoolean(context?["sceneNotification"] as JsonObject, "hasActiveNotification") &&
+               !ReadBoolean(mission?["navigation"] as JsonObject, "active") &&
+               !ReadBoolean(mission?["leave"] as JsonObject, "active") &&
+               !AgentHostCampaignStateFacts.IsActiveEncounter(state) && !IsPlayerCaptive(native) &&
+               AgentHostEstablishYourClanGoalLoop.HasActiveQuest(native);
     }
 
     internal static bool IsFreeMapForObjectiveReplan(JsonElement native)
@@ -698,14 +1018,20 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
     private static long ReadLong(JsonObject? node, string name, long fallback) => node?[name] is JsonValue value && value.TryGetValue<long>(out var result) ? result : fallback;
     private static double ReadDouble(JsonObject? node, string name) => node?[name] is JsonValue value && value.TryGetValue<double>(out var result) ? result : double.NaN;
 
-    private sealed class FakeNativeClient(bool activeQuest, string lifecycle, int initialGold, bool initialCaptive = false) : IAgentHostCampaignNativeClient, IAgentHostQuestDetailsNativeClient, IAgentHostNativeInquiryClient
+    private sealed class FakeNativeClient(bool activeQuest, string lifecycle, int initialGold, bool initialCaptive = false, int initialCompanions = 1) : IAgentHostCompanionHiringNativeClient, IAgentHostNativeInquiryClient
     {
         private bool _activeQuest = activeQuest;
         private string _lifecycle = lifecycle;
         private int _gold = initialGold;
+        private int _companions = initialCompanions;
         internal bool IsFree => !_captive;
+        internal bool IsInCompanionMission => _companionMission;
+        internal List<string> CompanionNativeActions { get; } = new();
         private bool _captive = initialCaptive;
         private bool _inquiryOpen;
+        private bool _companionMission;
+        private bool _missionLeaveRequested;
+        private int _missionLeaveActiveReadsRemaining;
         internal bool InquiryOpen => _inquiryOpen;
         internal string? LastInquiryChoice { get; private set; }
         internal string? LastInquiryToken { get; private set; }
@@ -714,24 +1040,42 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         internal void CompleteSuccessfully()
         {
             _gold = 2000;
+            _companions = 1;
             _activeQuest = false;
             _lifecycle = "completed";
         }
 
+        internal void CompleteGoldObjective() => _gold = 2000;
+
         internal void LeaveCaptivity() => _captive = false;
         internal void OpenInquiry() => _inquiryOpen = true;
+        internal void EnterTavernMission() => _companionMission = true;
 
         public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var missionLeaveActive = false;
+            if (_companionMission && _missionLeaveRequested && _missionLeaveActiveReadsRemaining > 0)
+            {
+                missionLeaveActive = true;
+                _missionLeaveActiveReadsRemaining--;
+            }
+            else if (_companionMission && _missionLeaveRequested)
+            {
+                _companionMission = false;
+                _missionLeaveRequested = false;
+            }
             var quests = new JsonArray();
             if (_activeQuest) quests.Add(new JsonObject { ["id"] = QuestId });
             var state = new JsonObject
             {
                 ["context"] = new JsonObject
                 {
-                    ["gameState"] = "MapState", ["captivity"] = new JsonObject { ["isCaptive"] = _captive },
+                    ["gameState"] = _companionMission ? "MissionState" : "MapState", ["captivity"] = new JsonObject { ["isCaptive"] = _captive },
                     ["inquiryOpen"] = _inquiryOpen,
+                    ["escapeMenuOpen"] = false,
+                    ["encounterActive"] = false,
+                    ["sceneNotification"] = new JsonObject { ["hasActiveNotification"] = false },
                     ["inquiry"] = _inquiryOpen ? new JsonObject
                     {
                         ["supported"] = true, ["kind"] = "YesNoInquiry", ["token"] = "inquiry-token",
@@ -741,8 +1085,23 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                     } : null
                 },
                 ["quests"] = quests,
+                ["party"] = new JsonObject { ["isMoving"] = false },
                 ["storyModeEstablishClanStatus"] = new JsonObject { ["status"] = _lifecycle }
             };
+            if (_companionMission)
+            {
+                state["location"] = new JsonObject { ["currentSettlementId"] = "town_ES3" };
+                state["conversation"] = null;
+                state["mission"] = new JsonObject
+                {
+                    ["active"] = true,
+                    ["missionEnded"] = false,
+                    ["mode"] = "StartUp",
+                    ["sceneName"] = "town_ES3_tavern",
+                    ["navigation"] = new JsonObject { ["active"] = false },
+                    ["leave"] = new JsonObject { ["active"] = missionLeaveActive }
+                };
+            }
             return Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["state"] = state }.ToJsonString()));
         }
 
@@ -755,13 +1114,13 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 Objective("gold", _gold, 2000),
                 Objective("partySize", 20, 20),
                 Objective("renown", 50, 50),
-                Objective("companions", 1, 1));
+                Objective("companions", _companions, 1));
             var live = new JsonObject
             {
                 ["gold"] = new JsonObject { ["current"] = _gold, ["target"] = 2000, ["met"] = _gold >= 2000 },
                 ["partySize"] = new JsonObject { ["current"] = 20, ["target"] = 20, ["met"] = true },
                 ["renown"] = new JsonObject { ["current"] = 50, ["target"] = 50, ["met"] = true },
-                ["companions"] = new JsonObject { ["current"] = 1, ["target"] = 1, ["met"] = true }
+                ["companions"] = new JsonObject { ["current"] = _companions, ["target"] = 1, ["met"] = _companions >= 1 }
             };
             var data = new JsonObject { ["questId"] = QuestId, ["title"] = "Establish Your Clan", ["journalStages"] = journal, ["storyModeEstablishClan"] = live };
             return Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["data"] = data }.ToJsonString()));
@@ -769,6 +1128,17 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
 
         public Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken) =>
             throw new AgentHostException("autonomy-selftest-unexpected-native-action", "The fake parent-loop test injects the objective executor and must not directly send Native actions.");
+
+        public Task<JsonDocument> ExecuteCompanionHiringActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (action != "missionLeave" || arguments.Count != 0 || !_companionMission || _missionLeaveRequested)
+                throw new AgentHostException("autonomy-selftest-companion-leave-invalid", "Only one original Native missionLeave may recover the safe Companion Tavern failure fixture.");
+            CompanionNativeActions.Add(action);
+            _missionLeaveRequested = true;
+            _missionLeaveActiveReadsRemaining = 2;
+            return Task.FromResult(JsonDocument.Parse("{\"status\":\"completed\",\"action\":\"missionLeave\"}"));
+        }
 
         public Task<JsonDocument> RespondNativeInquiryAsync(string token, string choice, CancellationToken cancellationToken)
         {
@@ -793,15 +1163,24 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         };
     }
 
-    private sealed class FakeObjectiveProvider(string selectedObjective) : IAgentHostDecisionProvider
+    private sealed class FakeObjectiveProvider(params string[] selectedObjectives) : IAgentHostDecisionProvider
     {
         internal int CallCount { get; private set; }
+        internal List<string[]> AllowedObjectiveIds { get; } = new();
         public string ModelId => "deterministic-establish-clan-autonomy-selftest";
         public string ConfigurationSource => "harness-fake-provider";
         public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) => Task.CompletedTask;
         public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var allowedAction = request.GetProperty("allowedActions").EnumerateArray()
+                .FirstOrDefault(action => action.GetProperty("action").GetString() == "selectEstablishYourClanObjective");
+            if (allowedAction.ValueKind != JsonValueKind.Object)
+                throw new AgentHostException("autonomy-selftest-objective-catalog-missing", "The fake planner requires the current Native-backed ObjectiveId catalog.");
+            var allowedIds = allowedAction.GetProperty("argumentValues").GetProperty("ObjectiveId")
+                .EnumerateArray().Select(value => value.GetString() ?? string.Empty).ToArray();
+            AllowedObjectiveIds.Add(allowedIds);
+            var selectedObjective = selectedObjectives[Math.Min(CallCount, selectedObjectives.Length - 1)];
             CallCount++;
             return Task.FromResult(new ProviderDecisionResult("completed", ModelId, null, null, "self-test", new JsonObject
             {

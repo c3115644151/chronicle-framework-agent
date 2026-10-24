@@ -23,8 +23,17 @@ $launcher = Join-Path $gameRoot 'bin\Win64_Shipping_Client\Bannerlord.BLSE.Stand
 $gameBinDirectory = Join-Path $gameRoot 'bin\Win64_Shipping_Client'
 $steamRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $gameRoot))
 $engineConfig = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\Configs\engine_config.txt'
+$bannerlordAutoSavePaths = Get-ChronicleBannerlordAutoSavePaths
+$bannerlordConfigPath = $bannerlordAutoSavePaths.ConfigPath
 $diagnosticLog = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\Configs\ModLogs\chronicle-framework.log'
 $saveDirectory = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\Game Saves'
+$autoSaveIntervalBefore = Get-ChronicleBannerlordAutoSaveInterval -LiteralPath $bannerlordConfigPath
+$autoSaveIntervalDuring = $null
+$autoSaveIntervalAfter = $null
+$autoSaveSettingGuard = $null
+$autoSaveSettingRestoration = $null
+$autoSaveSettingRestorationError = $null
+$nativeAutoSaveDetected = $false
 $agentCli = Join-Path $harnessRoot 'Agent-Cli.ps1'
 $agentDecisionLoop = Join-Path $harnessRoot 'Agent-DecisionLoop.ps1'
 $agentLoopProvider = Join-Path $harnessRoot 'Test-AgentLoopProvider.ps1'
@@ -144,8 +153,18 @@ try {
     if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) { throw 'BLSE standalone launcher was not found in the configured Bannerlord installation.' }
     $steamReadiness = Ensure-ChronicleSteamClientReady -SteamRoot $steamRoot -TimeoutSeconds 45
     if (-not $steamReadiness.Readiness.Ready) { throw 'Steam did not reach the stable WebHelper readiness gate; FreshCampaign launch was refused.' }
+    $autoSaveSettingGuard = Disable-ChronicleHarnessAutoSave
+    $autoSaveIntervalDuring = Get-ChronicleBannerlordAutoSaveInterval -LiteralPath $bannerlordConfigPath
+    if ($autoSaveIntervalDuring -ne -1) { throw 'Native Bannerlord auto-save must be disabled for every FreshCampaign fixture before the game can start.' }
     Set-SafeExitMarker
     $launcherProcess = Start-ChronicleSteamGame -FilePath $launcher -ArgumentList $arguments -WorkingDirectory $gameBinDirectory -WindowStyle Minimized
+}
+catch {
+    if ($autoSaveSettingGuard) {
+        try { $autoSaveSettingRestoration = Restore-ChronicleHarnessAutoSaveSetting }
+        catch { $autoSaveSettingRestorationError = $_.Exception.Message }
+    }
+    throw
 }
 finally {
     $env:CHRONICLE_HARNESS_MODE = $previousMode
@@ -759,6 +778,29 @@ do {
     Start-Sleep -Milliseconds 200
 } while ((Get-Date) -lt $cleanupDeadline)
 
+if ($autoSaveSettingGuard) {
+    try {
+        $autoSaveSettingRestoration = Restore-ChronicleHarnessAutoSaveSetting
+        if (-not $autoSaveSettingRestoration.Restored) {
+            $autoSaveSettingRestorationError = "Autosave setting restoration was not completed: $($autoSaveSettingRestoration.Status)"
+            $harnessFailureObserved = $true
+        }
+        $autoSaveIntervalAfter = Get-ChronicleBannerlordAutoSaveInterval -LiteralPath $bannerlordConfigPath
+        if ($autoSaveIntervalAfter -ne $autoSaveIntervalBefore) {
+            $autoSaveSettingRestorationError = "Bannerlord AutoSaveInterval did not return to its pre-test value ($autoSaveIntervalBefore)."
+            $harnessFailureObserved = $true
+        }
+    }
+    catch {
+        $autoSaveSettingRestorationError = $_.Exception.Message
+        $harnessFailureObserved = $true
+    }
+}
+if ($bannerlordPid -and $rglLog -and (Test-Path -LiteralPath $rglLog -PathType Leaf)) {
+    try { $nativeAutoSaveDetected = [string](Get-Content -LiteralPath $rglLog -Raw -Encoding UTF8) -match 'AutoSaveCurrentGame' }
+    catch { $nativeAutoSaveDetected = $true }
+}
+
 if ($ValidateRecruitmentProgression) {
     try {
         if (-not $gameStarted) { throw "FreshCampaign process did not reach game-start; crashDetected=$crashDetected window='$crashWindowTitle' startupDialog='$startupDialogFailure'." }
@@ -1012,6 +1054,9 @@ $acceptanceChecks = [ordered]@{
     noHarnessFailure = (-not $harnessFailureObserved)
     noUnplannedCampaignSave = (-not $campaignSaveRequested)
     unrelatedSaveManifestUnchanged = $saveStateUnchanged
+    bannerlordAutoSaveDisabledDuringRun = ($null -ne $autoSaveSettingGuard -and $autoSaveIntervalDuring -eq -1)
+    bannerlordAutoSaveSettingRestored = ($null -ne $autoSaveSettingRestoration -and [bool]$autoSaveSettingRestoration.Restored -and $autoSaveIntervalAfter -eq $autoSaveIntervalBefore)
+    noNativeAutoSaveObserved = (-not $nativeAutoSaveDetected)
     requestedDisposableSaveRetained = (-not $RetainDisposableSave -or $retainedDisposableSave)
     windowLayout = ($windowLayoutApplied -and $windowLayout.Width -eq 840 -and $windowLayout.Height -eq 472)
     gameProcessesClean = $gameProcessesClean
@@ -1191,6 +1236,13 @@ $result = [ordered]@{
     WindowHeight = if ($windowLayout) { $windowLayout.Height } else { $null }
     NoSaveRequested = -not $campaignSaveRequested
     SaveDirectoryMetadataUnchanged = $saveStateUnchanged
+    BannerlordAutoSaveIntervalBefore = $autoSaveIntervalBefore
+    BannerlordAutoSaveIntervalDuring = $autoSaveIntervalDuring
+    BannerlordAutoSaveIntervalAfter = $autoSaveIntervalAfter
+    BannerlordAutoSaveDisabledForHarness = [bool]($autoSaveSettingGuard -and $autoSaveIntervalDuring -eq -1)
+    BannerlordAutoSaveRestorationStatus = if ($autoSaveSettingRestoration) { $autoSaveSettingRestoration.Status } else { $null }
+    BannerlordAutoSaveRestorationError = $autoSaveSettingRestorationError
+    NativeAutoSaveObserved = $nativeAutoSaveDetected
     AcceptanceChecks = $acceptanceChecks
     RglLog = $rglLog
     WatchdogLog = $watchdogLog

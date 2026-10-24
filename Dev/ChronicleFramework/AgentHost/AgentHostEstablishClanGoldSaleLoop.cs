@@ -79,6 +79,8 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         if (movementCatalog.Count != 1 || ReadString(movementCatalog[0] as JsonObject, "action") != "move" ||
             movementTargets?.Count != 1 || movementTargets[0]?.GetValue<string>() != "safe-town")
             throw new AgentHostException("gold-sale-self-test-safe-town-movement-failed", "The sale route must use only currently visible, non-hostile, non-sieged Towns.");
+        if (FilterSafeTowns(moveTargetReceipt, new HashSet<string>(StringComparer.Ordinal) { "safe-town" }).Count != 0)
+            throw new AgentHostException("gold-sale-self-test-visited-town-reoffered", "A Town already left during a no-goods market sweep must not be selected again from the next Native map-target observation.");
         if (!TryResolveAction(noSettlement, null, movementCatalog, new JsonObject
             {
                 ["action"] = "move",
@@ -118,6 +120,47 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         if (trainingFieldExit.Count != 1 || ReadString(trainingFieldExit[0] as JsonObject, "action") != "menuSelect" ||
             trainingFieldExitOption != "training_field_leave" || !IsFreeCampaignMap(nativeTrainingFieldMenu))
             throw new AgentHostException("gold-sale-self-test-training-field-menu-not-exitable", "The original Tutorial skip can leave the training-field Native location menu even though its context marks the location as an encounter.");
+        var townBackstreetMenu = MapState("town_backstreet", "town_ES3", new JsonArray(
+            new JsonObject { ["id"] = "town_tavern", ["available"] = true, ["enabled"] = true },
+            new JsonObject { ["id"] = "town_backstreet_back", ["available"] = true, ["enabled"] = true, ["isLeave"] = true }));
+        townBackstreetMenu["context"]!["encounterActive"] = true;
+        townBackstreetMenu["context"]!["encounteredPartyId"] = "town_ES3";
+        townBackstreetMenu["location"]!["targetSettlementId"] = "town_ES3";
+        var townBackstreetCatalog = BuildActionCatalog(townBackstreetMenu, null, null, null);
+        var townBackstreetExitOption = townBackstreetCatalog.Count == 0 ? null : (townBackstreetCatalog[0]?["argumentValues"]?["OptionId"] as JsonArray)?[0]?.GetValue<string>();
+        if (townBackstreetCatalog.Count != 1 || ReadString(townBackstreetCatalog[0] as JsonObject, "action") != "menuSelect" ||
+            townBackstreetExitOption != "town_backstreet_back" || !IsFreeCampaignMap(townBackstreetMenu) ||
+            !TryResolveAction(townBackstreetMenu, null, townBackstreetCatalog, new JsonObject
+            {
+                ["action"] = "menuSelect",
+                ["arguments"] = new JsonObject { ["MenuId"] = "town_backstreet", ["OptionId"] = "town_backstreet_back" }
+            }, null, null, out var backstreetAction, out var backstreetArguments, out _) ||
+            backstreetAction != "menuSelect" || ReadString(backstreetArguments, "menuId") != "town_backstreet" ||
+            ReadString(backstreetArguments, "optionId") != "town_backstreet_back")
+            throw new AgentHostException("gold-sale-self-test-town-backstreet-not-returnable", "When a prior target id still equals the current settlement, the currently enabled Native Town Backstreet Leave option must remain available so the Gold route can return to the main Town menu and reach Native Trade.");
+        var townReachedAfterMovement = MapState("town", "town-a", new JsonArray(new JsonObject { ["id"] = "trade", ["available"] = true, ["enabled"] = true }));
+        townReachedAfterMovement["location"]!["targetSettlementId"] = "town-a";
+        if (!HasReachedMoveTargetMenu(townReachedAfterMovement, "town-a") || HasReachedMoveTargetMenu(townReachedAfterMovement, "town-b"))
+            throw new AgentHostException("gold-sale-self-test-arrival-does-not-clear-native-move-target", "A completed move target may be cleared only after fresh Native location state confirms arrival and presents the settlement menu.");
+        var emptyTradeTown = MapState("town", "town-a", new JsonArray(
+            new JsonObject { ["id"] = "trade", ["available"] = true, ["enabled"] = true },
+            new JsonObject { ["id"] = "town_leave", ["available"] = true, ["enabled"] = true, ["isLeave"] = true }));
+        emptyTradeTown["context"]!["encounterActive"] = true;
+        emptyTradeTown["context"]!["encounteredPartyId"] = "town-a";
+        emptyTradeTown["location"]!["targetSettlementId"] = "town-a";
+        var cancelReceipt = new JsonObject { ["action"] = "tradeCancel", ["status"] = "completed" };
+        var emptyTradeCatalog = BuildActionCatalog(emptyTradeTown, cancelReceipt, null, null);
+        var emptyTradeLeaveOption = emptyTradeCatalog.Count == 0 ? null : (emptyTradeCatalog[0]?["argumentValues"]?["OptionId"] as JsonArray)?[0]?.GetValue<string>();
+        if (emptyTradeCatalog.Count != 1 || ReadString(emptyTradeCatalog[0] as JsonObject, "action") != "menuSelect" || emptyTradeLeaveOption != "town_leave" ||
+            !TryResolveAction(emptyTradeTown, cancelReceipt, emptyTradeCatalog,
+                new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "town", ["OptionId"] = "town_leave" } },
+                null, null, out var emptyMarketAction, out _, out _) || emptyMarketAction != "menuSelect")
+            throw new AgentHostException("gold-sale-self-test-empty-market-not-exitable", "After Native Trade returns no transferable Goods, expose and accept only the current Town's Native Leave option so the route can inspect another market.");
+        var mapAfterTownLeave = MapState(null, null, []);
+        mapAfterTownLeave["location"]!["targetSettlementId"] = "town-a";
+        if (BuildActionCatalog(mapAfterTownLeave, null, null, null).Count != 0 ||
+            ReadString(BuildActionCatalog(mapAfterTownLeave, null, null, null, allowMapAfterNativeTownLeave: true)[0] as JsonObject, "action") != "mapSettlementTargets")
+            throw new AgentHostException("gold-sale-self-test-native-town-leave-stale-target-blocked-map", "Only after a verified Native Town Leave may a stale targetSettlementId equal to the departed Town be ignored for a fresh map-target query.");
         var hostileEncounter = MapState("encounter", null, []);
         hostileEncounter["context"]!["encounterActive"] = true;
         hostileEncounter["context"]!["encounteredPartyId"] = "bandit_party";
@@ -129,7 +172,8 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             new { scenario = "gold-sale-binds-one-current-native-goods-offer-and-positive-quote", passed = true },
             new { scenario = "gold-sale-native-move-start-transition-uses-one-bounded-observation", passed = true },
             new { scenario = "gold-sale-rejects-stale-offers-unsafe-targets-and-disabled-native-options", passed = true },
-            new { scenario = "gold-sale-allows-native-town-menu-and-training-field-exit-but-rejects-hostile-party-encounter", passed = true }
+            new { scenario = "gold-sale-allows-native-town-menu-and-training-field-exit-but-rejects-hostile-party-encounter", passed = true },
+            new { scenario = "gold-sale-returns-through-current-native-town-backstreet-leave-before-trading", passed = true }
         ];
     }
 
@@ -157,11 +201,11 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         if (ReadString(result, "status") != "failed" || ReadString(result, "failureCode") != "provider-http-error" ||
             ReadInt(result, "actionsExecuted", 0) != 1 || trace?.Count != 2 || ReadString(firstAction, "action") != "mapSettlementTargets" ||
             ReadString(failedRoute, "failureCode") != "provider-http-error" || client.MapTargetQueries != 1 ||
-            provider.CallCount != 3 || !provider.FeedbackObserved || !rejectedDecisionRecorded ||
+            provider.CallCount != 3 || provider.IsDisposed || !provider.FeedbackObserved || !rejectedDecisionRecorded ||
             compactTargetCandidates?.Count != 12 || compactTargetArgumentValues?.Count != 12 || rawTargetCandidates?.Count != 18 ||
             compactTargetCandidates.OfType<JsonObject>().Any(target => ReadString(target, "type") != "town" || ReadBoolean(target, "hostile") || ReadBoolean(target, "underSiege")))
-            throw new AgentHostException("gold-sale-failure-receipt-selftest-failed", "The Host must correct malformed arguments before Native, preserve the full Native map receipt in trace, send only the current safe Town candidates to the model, and preserve a later transport failure without replay.");
-        return [new { scenario = "gold-sale-compacts-full-native-map-query-to-the-current-safe-town-decision-catalog", passed = true }];
+            throw new AgentHostException("gold-sale-failure-receipt-selftest-failed", "The Host must correct malformed arguments before Native, preserve the full Native map receipt in trace, send only the current safe Town candidates to the model, preserve a later transport failure without replay, and leave the borrowed provider alive for its Campaign parent.");
+        return [new { scenario = "gold-sale-compacts-safe-town-targets-and-does-not-dispose-the-borrowed-campaign-provider", passed = true }];
     }
 
     internal static async Task<JsonObject> RunAsync(
@@ -192,6 +236,8 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         var moveStartPending = false;
         var rejectedProviderDecisions = 0;
         JsonArray? safeTowns = null;
+        var visitedTowns = new HashSet<string>(StringComparer.Ordinal);
+        var allowMapAfterNativeTownLeave = false;
         JsonObject? previousReceipt = null;
         JsonObject? decisionFeedback = null;
         JsonObject? saleReceipt = null;
@@ -207,8 +253,8 @@ internal static class AgentHostEstablishClanGoldSaleLoop
 
         try
         {
-        using (provider)
-        {
+            // The Campaign Host owns the shared decision provider. This objective
+            // borrows it; disposing it here would break the parent's next plan call.
             await provider.CheckConfiguredModelAsync(elapsed.Token);
             using (var initial = await stateClient.ReadStateAsync(elapsed.Token)) initialNative = ParseObject(initial.RootElement);
             currentNative = initialNative.DeepClone() as JsonObject ?? throw new AgentHostException("gold-sale-initial-state-invalid", "Native returned no initial Campaign state.");
@@ -261,10 +307,23 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 if (IsActiveEncounter(state) || ReadBoolean((state["context"] as JsonObject)?["captivity"] as JsonObject, "isCaptive"))
                     throw new AgentHostException("gold-sale-encounter-out-of-scope", "A new encounter or Captivity interrupted the sale path; no battle or unverified recovery was started.");
 
-                var actionCatalog = BuildActionCatalog(state, previousReceipt, safeTowns, moveTargetId);
+                if (HasReachedMoveTargetMenu(state, moveTargetId))
+                {
+                    moveTargetId = null;
+                    moveStartPending = false;
+                }
+
+                var actionCatalog = BuildActionCatalog(state, previousReceipt, safeTowns, moveTargetId, allowMapAfterNativeTownLeave);
                 var controls = BuildControlCatalog(state, moveTargetId, moveStartPending);
                 if (actionCatalog.Count == 0 && controls.Count == 0)
-                    throw new AgentHostException("gold-sale-no-safe-native-action", DescribeNoAction(state, previousReceipt));
+                {
+                    var currentSettlementId = ReadString(state["location"] as JsonObject, "currentSettlementId");
+                    var noUnvisitedSafeMarket = visitedTowns.Count > 0 && safeTowns is { Count: 0 } && string.IsNullOrWhiteSpace(currentSettlementId);
+                    throw new AgentHostException(noUnvisitedSafeMarket ? "gold-sale-no-transferable-goods" : "gold-sale-no-safe-native-action",
+                        noUnvisitedSafeMarket
+                            ? "The current visible safe Town candidates have been exhausted and no Native transferable Goods offer was found; Gold did not advance."
+                            : DescribeNoAction(state, previousReceipt));
+                }
 
                 var observation = BuildObservation(currentNative, state, objectiveSnapshotBefore, liveMetricDifferencesBefore, saleReceipt);
                 var providerPreviousReceipt = BuildProviderPreviousReceipt(previousReceipt, safeTowns);
@@ -336,11 +395,21 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 if (ReadString(receipt, "status") != "completed")
                     throw new AgentHostException("gold-sale-native-action-rejected", $"Native rejected the current {action} action; no replay was attempted.");
 
-                if (action == "mapSettlementTargets") safeTowns = FilterSafeTowns(receipt);
+                if (action == "mapSettlementTargets") safeTowns = FilterSafeTowns(receipt, visitedTowns);
                 if (action == "move")
                 {
                     moveTargetId = ReadMoveTargetId(arguments);
                     moveStartPending = moveTargetId is not null;
+                    allowMapAfterNativeTownLeave = false;
+                }
+                if (action == "menuSelect" && ReadString(arguments, "menuId") == "town" && ReadString(arguments, "optionId") == "town_leave")
+                {
+                    var exitedSettlementId = ReadString(state["location"] as JsonObject, "currentSettlementId");
+                    if (!string.IsNullOrWhiteSpace(exitedSettlementId)) visitedTowns.Add(exitedSettlementId);
+                    moveTargetId = null;
+                    moveStartPending = false;
+                    safeTowns = null;
+                    allowMapAfterNativeTownLeave = true;
                 }
                 if (action == "trade")
                 {
@@ -369,9 +438,6 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 trace.Add(BuildStep(decisionCount, observation, modelDecision.Decision, previousReceipt, started, startedTicks, null,
                     BuildObservation(currentNative, currentNative["state"] as JsonObject ?? new JsonObject(), objectiveSnapshotBefore, liveMetricDifferencesBefore, saleReceipt)));
 
-                if (action == "tradeCancel")
-                    throw new AgentHostException("gold-sale-no-transferable-goods", "The current Native Town has no allowed transferable Goods sell offer; the unmodified Trade screen was closed and the Gold goal remains unmet.");
-
                 if (saleReceipt is not null)
                 {
                     var finalState = currentNative["state"] as JsonObject ?? new JsonObject();
@@ -389,7 +455,6 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                         timeControlModeBefore, initialCaptivityRecovery);
                 }
             }
-        }
         throw new AgentHostException("gold-sale-budget-exhausted", "The bounded Native Gold sale loop did not complete one verified positive sale.");
         }
         catch (OperationCanceledException)
@@ -444,7 +509,8 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         }
     }
 
-    private static JsonArray BuildActionCatalog(JsonObject state, JsonObject? previousReceipt, JsonArray? safeTowns, string? moveTargetId)
+    private static JsonArray BuildActionCatalog(JsonObject state, JsonObject? previousReceipt, JsonArray? safeTowns, string? moveTargetId,
+        bool allowMapAfterNativeTownLeave = false)
     {
         var context = state["context"] as JsonObject;
         var gameState = ReadString(context, "gameState");
@@ -483,11 +549,29 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         if (gameState != "MapState") return new JsonArray();
         if (moveTargetId is not null && !string.Equals(ReadString(state["location"] as JsonObject, "currentSettlementId"), moveTargetId, StringComparison.Ordinal))
             return new JsonArray();
-        if (moveTargetId is null && (ReadBoolean(state["party"] as JsonObject, "isMoving") ||
-            !string.IsNullOrWhiteSpace(ReadString(state["location"] as JsonObject, "targetSettlementId")))) return new JsonArray();
+        var location = state["location"] as JsonObject;
+        var currentSettlementId = ReadString(location, "currentSettlementId");
+        var targetSettlementId = ReadString(location, "targetSettlementId");
+        if (moveTargetId is null &&
+            (ReadBoolean(state["party"] as JsonObject, "isMoving") ||
+             (!allowMapAfterNativeTownLeave && !string.Equals(targetSettlementId, currentSettlementId, StringComparison.Ordinal) &&
+              !string.IsNullOrWhiteSpace(targetSettlementId)))) return new JsonArray();
         var menuId = ReadString(context, "menuId");
         if (!string.IsNullOrWhiteSpace(menuId))
         {
+            if (menuId == "town" && ReadString(previousReceipt, "action") == "tradeCancel" && ReadString(previousReceipt, "status") == "completed")
+            {
+                var townLeaveOptions = GetEnabledOptions(state).OfType<JsonObject>()
+                    .Where(option => ReadBoolean(option, "isLeave"))
+                    .Select(option => ReadString(option, "id"))
+                    .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToArray();
+                if (townLeaveOptions.Length == 0) return new JsonArray();
+                return new JsonArray(new JsonObject
+                {
+                    ["action"] = "menuSelect", ["arguments"] = new JsonArray("MenuId", "OptionId"),
+                    ["argumentValues"] = new JsonObject { ["MenuId"] = new JsonArray("town"), ["OptionId"] = new JsonArray(townLeaveOptions.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray()) }
+                });
+            }
             if (menuId != "town")
             {
                 if (!AgentHostCampaignStateFacts.IsNativeLocationMenu(state)) return new JsonArray();
@@ -510,8 +594,6 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 ["argumentValues"] = new JsonObject { ["MenuId"] = new JsonArray("town"), ["OptionId"] = new JsonArray("trade") }
             });
         }
-        var location = state["location"] as JsonObject;
-        var currentSettlementId = ReadString(location, "currentSettlementId");
         if (!string.IsNullOrWhiteSpace(currentSettlementId)) return new JsonArray();
         if (safeTowns is null) return new JsonArray(new JsonObject { ["action"] = "mapSettlementTargets", ["arguments"] = new JsonArray() });
         var ids = safeTowns.OfType<JsonObject>().Select(target => ReadString(target, "id"))
@@ -539,6 +621,15 @@ internal static class AgentHostEstablishClanGoldSaleLoop
     }
 
     private static string? ReadMoveTargetId(JsonObject? arguments) => ReadString(arguments, "settlementId");
+
+    private static bool HasReachedMoveTargetMenu(JsonObject state, string? moveTargetId)
+    {
+        if (string.IsNullOrWhiteSpace(moveTargetId)) return false;
+        var location = state["location"] as JsonObject;
+        var context = state["context"] as JsonObject;
+        return string.Equals(ReadString(location, "currentSettlementId"), moveTargetId, StringComparison.Ordinal) &&
+               !string.IsNullOrWhiteSpace(ReadString(context, "menuId"));
+    }
 
     private static bool TryResolveAction(JsonObject state, JsonObject? previousReceipt, JsonArray catalog,
         JsonObject decision, JsonArray? safeTowns, string? moveTargetId,
@@ -576,10 +667,15 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         {
             var menuId = ReadString(supplied, "MenuId");
             var optionId = ReadString(supplied, "OptionId");
-            if (menuId != ReadString(state["context"] as JsonObject, "menuId") || menuId != "town" || optionId != "trade" ||
-                !GetEnabledOptions(state).OfType<JsonObject>().Any(option => ReadString(option, "id") == optionId))
+            var currentMenuId = ReadString(state["context"] as JsonObject, "menuId");
+            var currentOption = GetEnabledOptions(state).OfType<JsonObject>().FirstOrDefault(option => ReadString(option, "id") == optionId);
+            var isMainTownTrade = menuId == "town" && optionId == "trade";
+            var isTownLeaveAfterEmptyTrade = menuId == "town" && ReadString(previousReceipt, "action") == "tradeCancel" && ReadBoolean(currentOption, "isLeave");
+            var isNativeLocationLeave = AgentHostCampaignStateFacts.IsNativeLocationMenu(state) && ReadBoolean(currentOption, "isLeave") &&
+                                        (menuId != "town" || isTownLeaveAfterEmptyTrade);
+            if (menuId != currentMenuId || (!isMainTownTrade && !isNativeLocationLeave) || currentOption is null)
             {
-                rejection = "Only the current enabled Trade entry in the Native Town menu can be selected.";
+                rejection = "Only the current Native Town Trade entry or a visible Native location-menu Leave option can be selected.";
                 return false;
             }
             arguments = new JsonObject { ["menuId"] = menuId, ["optionId"] = optionId };
@@ -618,11 +714,12 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 ReadInt(offer, "inventoryLogicUnitPrice", 0) > 0 && !string.IsNullOrWhiteSpace(ReadString(offer, "viewModelItemId")))
             .Select(offer => (JsonObject)offer.DeepClone()).ToArray() ?? Array.Empty<JsonObject>();
 
-    private static JsonArray FilterSafeTowns(JsonObject receipt)
+    private static JsonArray FilterSafeTowns(JsonObject receipt, HashSet<string>? visitedTowns = null)
     {
         if (ReadString(receipt, "status") != "completed" || receipt["data"]?["mapSettlementTargets"] is not JsonArray targets) return new JsonArray();
         var candidates = targets.OfType<JsonObject>()
             .Where(target => ReadString(target, "type") == "town" && !ReadBoolean(target, "hostile") && !ReadBoolean(target, "underSiege") &&
+                (visitedTowns is null || !visitedTowns.Contains(ReadString(target, "id") ?? string.Empty)) &&
                 ReadDouble(target, "distance", double.MaxValue) > 1.0 && !string.IsNullOrWhiteSpace(ReadString(target, "id")) && !string.IsNullOrWhiteSpace(ReadString(target, "name")))
             .OrderBy(target => ReadDouble(target, "distance", double.MaxValue))
             .ThenBy(target => ReadString(target, "id"), StringComparer.Ordinal)
@@ -929,6 +1026,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
     {
         internal int CallCount { get; private set; }
         internal bool FeedbackObserved { get; private set; }
+        internal bool IsDisposed { get; private set; }
         internal JsonObject? LastRequest { get; private set; }
         public string ModelId => "deterministic-gold-sale-failure-selftest";
         public string ConfigurationSource => "harness-fake-provider";
@@ -950,6 +1048,6 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 }));
             throw new AgentHostException("provider-http-error", "Fake external provider rate-limit summary; no Native command followed.");
         }
-        public void Dispose() { }
+        public void Dispose() { IsDisposed = true; }
     }
 }

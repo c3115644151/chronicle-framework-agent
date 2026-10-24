@@ -43,6 +43,97 @@ function ConvertTo-ChronicleLogTail {
     @($Lines | ForEach-Object { [pscustomobject]@{ text = $_.ToString() } })
 }
 
+function Get-ChronicleBannerlordAutoSavePaths {
+    $documents = [Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)
+    if ([string]::IsNullOrWhiteSpace($documents)) { throw 'Windows Documents directory could not be resolved for Bannerlord auto-save isolation.' }
+    $configDirectory = Join-Path (Join-Path $documents 'Mount and Blade II Bannerlord') 'Configs'
+    [pscustomobject]@{
+        ConfigPath = Join-Path $configDirectory 'BannerlordConfig.txt'
+        BackupPath = Join-Path $configDirectory 'BannerlordConfig.chronicle-autosave-backup.json'
+    }
+}
+
+function Get-ChronicleBannerlordAutoSaveInterval {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$LiteralPath)
+    if (-not (Test-Path -LiteralPath $LiteralPath -PathType Leaf)) { throw "Bannerlord configuration file not found: $LiteralPath" }
+    $content = [IO.File]::ReadAllText($LiteralPath)
+    $matches = [regex]::Matches($content, '(?m)^AutoSaveInterval=(-?\d+)\r?$')
+    if ($matches.Count -ne 1) { throw 'BannerlordConfig.txt must contain exactly one AutoSaveInterval setting; refusing to guess.' }
+    [int]$value = 0
+    if (-not [int]::TryParse($matches[0].Groups[1].Value, [Globalization.NumberStyles]::Integer, [Globalization.CultureInfo]::InvariantCulture, [ref]$value)) { throw 'BannerlordConfig.txt AutoSaveInterval is not a valid integer.' }
+    $value
+}
+
+function Set-ChronicleBannerlordAutoSaveInterval {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$LiteralPath, [Parameter(Mandatory)][int]$Value)
+    $content = [IO.File]::ReadAllText($LiteralPath)
+    $pattern = '(?m)^AutoSaveInterval=(-?\d+)(\r?)$'
+    $matches = [regex]::Matches($content, $pattern)
+    if ($matches.Count -ne 1) { throw 'BannerlordConfig.txt must contain exactly one AutoSaveInterval setting; refusing to change configuration.' }
+    $regex = [regex]::new($pattern)
+    $updated = $regex.Replace($content, [Text.RegularExpressions.MatchEvaluator]{ param($match) "AutoSaveInterval=$Value$($match.Groups[2].Value)" }, 1)
+    [IO.File]::WriteAllText($LiteralPath, $updated, [Text.UTF8Encoding]::new($true))
+    $actual = Get-ChronicleBannerlordAutoSaveInterval -LiteralPath $LiteralPath
+    if ($actual -ne $Value) { throw "Bannerlord AutoSaveInterval did not accept the requested Harness value ($Value)." }
+}
+
+function Restore-ChronicleHarnessAutoSaveSetting {
+    [CmdletBinding()]
+    param()
+    $paths = Get-ChronicleBannerlordAutoSavePaths
+    if (-not (Test-Path -LiteralPath $paths.BackupPath -PathType Leaf)) { return [pscustomobject]@{ Status = 'not-needed'; Restored = $true } }
+    $runningGames = @(Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue)
+    if ($runningGames.Count -gt 0) { return [pscustomobject]@{ Status = 'deferred-game-running'; Restored = $false; ProcessIds = @($runningGames.Id) } }
+
+    $backup = Get-Content -LiteralPath $paths.BackupPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ([int]$backup.schemaVersion -ne 1 -or [IO.Path]::GetFullPath([string]$backup.configPath) -ne [IO.Path]::GetFullPath($paths.ConfigPath)) {
+        return [pscustomobject]@{ Status = 'backup-invalid'; Restored = $false }
+    }
+    $current = Get-ChronicleBannerlordAutoSaveInterval -LiteralPath $paths.ConfigPath
+    $original = [int]$backup.originalAutoSaveInterval
+    if ($current -eq $original) {
+        Remove-Item -LiteralPath $paths.BackupPath -Force
+        return [pscustomobject]@{ Status = 'already-restored'; Restored = $true; AutoSaveInterval = $current }
+    }
+    if ($current -ne -1) {
+        return [pscustomobject]@{ Status = 'configuration-conflict'; Restored = $false; CurrentAutoSaveInterval = $current; ExpectedHarnessValue = -1 }
+    }
+    Set-ChronicleBannerlordAutoSaveInterval -LiteralPath $paths.ConfigPath -Value $original
+    $restored = Get-ChronicleBannerlordAutoSaveInterval -LiteralPath $paths.ConfigPath
+    if ($restored -ne $original) { throw 'Restoring the original Bannerlord AutoSaveInterval did not verify.' }
+    Remove-Item -LiteralPath $paths.BackupPath -Force
+    [pscustomobject]@{ Status = 'restored'; Restored = $true; AutoSaveInterval = $restored }
+}
+
+function Disable-ChronicleHarnessAutoSave {
+    [CmdletBinding()]
+    param()
+    $paths = Get-ChronicleBannerlordAutoSavePaths
+    if (@(Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue).Count -gt 0) { throw 'Refusing to change Bannerlord auto-save settings while a game process is running.' }
+    if (Test-Path -LiteralPath $paths.BackupPath -PathType Leaf) {
+        $recovery = Restore-ChronicleHarnessAutoSaveSetting
+        if (-not $recovery.Restored) { throw "An unresolved Bannerlord auto-save backup prevents a fresh test ($($recovery.Status)); no game was started." }
+    }
+    $original = Get-ChronicleBannerlordAutoSaveInterval -LiteralPath $paths.ConfigPath
+    if ($original -eq -1) { return [pscustomobject]@{ Status = 'already-disabled'; OriginalAutoSaveInterval = -1; SettingDuringTest = -1; BackupPath = $null } }
+    $backup = [ordered]@{
+        schemaVersion = 1
+        configPath = [IO.Path]::GetFullPath($paths.ConfigPath)
+        originalAutoSaveInterval = $original
+        createdUtc = [DateTime]::UtcNow.ToString('O')
+        recoveryRule = 'Restore only when no Bannerlord process is running and current AutoSaveInterval is still exactly -1.'
+    }
+    [IO.File]::WriteAllText($paths.BackupPath, ($backup | ConvertTo-Json -Depth 4), [Text.UTF8Encoding]::new($true))
+    try { Set-ChronicleBannerlordAutoSaveInterval -LiteralPath $paths.ConfigPath -Value -1 }
+    catch {
+        try { [void](Restore-ChronicleHarnessAutoSaveSetting) } catch { }
+        throw
+    }
+    [pscustomobject]@{ Status = 'disabled'; OriginalAutoSaveInterval = $original; SettingDuringTest = -1; BackupPath = $paths.BackupPath }
+}
+
 function Get-ChronicleSteamClientReadiness {
     [CmdletBinding()]
     param(

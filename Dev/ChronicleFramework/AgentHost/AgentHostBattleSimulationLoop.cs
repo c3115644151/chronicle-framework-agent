@@ -436,8 +436,18 @@ internal static class AgentHostBattleSimulationLoop
                 if (validBandit && string.Equals(ReadString(context, "menuId"), "encounter", StringComparison.Ordinal))
                 {
                     if (battleWasStarted) return catalog;
-                    var attackVisible = CurrentEnabledMenuOption(state, "str_order_attack");
-                    if (attackVisible) Add(catalog, "menuSelect", "MenuId", "OptionId");
+                    var attackOptionId = CurrentEnabledMenuOption(state, "str_order_attack") ? "str_order_attack" : null;
+                    if (attackOptionId is not null)
+                        catalog.Add(new JsonObject
+                        {
+                            ["action"] = "menuSelect",
+                            ["arguments"] = new JsonArray("MenuId", "OptionId"),
+                            ["argumentValues"] = new JsonObject
+                            {
+                                ["MenuId"] = new JsonArray("encounter"),
+                                ["OptionId"] = new JsonArray(attackOptionId)
+                            }
+                        });
                 }
                 return catalog;
             }
@@ -549,7 +559,7 @@ internal static class AgentHostBattleSimulationLoop
                 {
                     if (ReadString(context, "menuId") != ReadString(arguments, "menuId") ||
                         ReadString(arguments, "optionId") != "str_order_attack" || !CurrentEnabledMenuOption(state, "str_order_attack"))
-                    { rejection = "Only the currently enabled Native str_order_attack option in the active encounter may be selected."; return false; }
+                    { rejection = "Only the currently enabled Native send-troops/BattleSimulation option may be selected; real-time attack Missions are outside this loop."; return false; }
                     var encounteredId = ReadString(state["context"] as JsonObject, "encounteredPartyId");
                     if (!observedTargets.OfType<JsonObject>().Any(x => ReadString(x, "id") == encounteredId && ReadString(x, "type") == "bandit" && ReadBoolean(x, "hostile")))
                     { rejection = "The active encounter party must match a currently observed hostile bandit target."; return false; }
@@ -636,7 +646,17 @@ internal static class AgentHostBattleSimulationLoop
         var wrongMenu = new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "encounter", ["OptionId"] = "str_order_retreat" } };
         if (TryResolveDecision(wrongMenu, fight, new JsonArray(), encounter["state"]!.AsObject(), candidates, "bandit-1", out _, out _, out _, out _))
             throw new AgentHostException("battle-loop-self-test-non-attack-choice-accepted", "The bounded loop must not expose retreat, ransom, toll or unsupported encounter choices.");
-        results.Add(new { scenario = "battle-loop-selects-only-native-enabled-attack-option", passed = true });
+        var playerFacingAttackMenu = ParseState("MapState", "encounter", true, null, null);
+        playerFacingAttackMenu["state"]!["context"]!["encounteredPartyId"] = "bandit-1";
+        playerFacingAttackMenu["state"]!["availableMenuOptions"] = new JsonArray(
+            new JsonObject { ["id"] = "attack", ["enabled"] = true, ["available"] = true },
+            new JsonObject { ["id"] = "str_order_attack", ["enabled"] = false, ["available"] = false });
+        var playerFacingAttackCatalog = BuildActionCatalog(playerFacingAttackMenu["state"]!.AsObject(), candidates, "bandit-1", false, true);
+        var playerFacingAttackDecision = new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "encounter", ["OptionId"] = "attack" } };
+        if (playerFacingAttackCatalog.Count != 0 ||
+            TryResolveDecision(playerFacingAttackDecision, playerFacingAttackCatalog, new JsonArray(), playerFacingAttackMenu["state"]!.AsObject(), candidates, "bandit-1", out _, out _, out _, out _))
+            throw new AgentHostException("battle-loop-realtime-attack-mission-not-exposed-as-simulation", "An enabled Native attack option that would enter a real-time Mission must remain unavailable when str_order_attack is disabled.");
+        results.Add(new { scenario = "battle-loop-requires-native-send-troops-option-and-rejects-realtime-attack-mission", passed = true });
 
         var banditMeeting = ParseState("MapState", "encounter_meeting", true, null, null);
         banditMeeting["state"]!["context"]!["encounteredPartyId"] = "bandit-1";

@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.302
+Contract version: 7.304
 
 `FreshStoryModeNativeMenuLeaveEvaluation`是非模型的窄Native集成测试：同一个新Campaign先通过兄长对话的原版“跳过教程”及确认，原生推进对话后自然结束训练场Mission并进入活动EYC的首个MapState；该状态仍位于`training_field_menu`。Harness只选择当前启用的原版`training_field_leave`并通过`GameMenu.RunMenuOptionConsequence`调用原版处理器，随后验证回到地图、训练场菜单/地点退出、EYC仍活动、CampaignDay与Stop档位未变、无存档写入，并捕获前后引擎画面和Native post-action观察（包括若出现的Inquiry）。`TestResults/20261022-194410`完整通过；`20261022-195530`复测后还在收据中明确记录`brother-dialogue-path-no-tab-fallback`。两次教程Mission离开均由原版兄长对话路径完成，没有使用Tab兜底。这项测试只验证开局准备与单项Native菜单动作，不计作AI决策或长程EYC目标进展。`TestResults/20261022-193820`曾在兄长对话仍活跃时过早模拟原版Leave Area并触发游戏空引用崩溃；现Harness改为每1.5秒推进一次原版“点击继续”，且仅在ConversationManager已结束对话、场景仍未退出时才启动2.5秒Native Leave Area兜底。该兜底在训练场场景尚未单独实测，严禁在对话仍活跃时触发；其它Town Mission Leave证据不能替代该特定验证。后续弹出的通知/询问也不会由本测试自动确认。
 
@@ -13,7 +13,7 @@ Fresh StoryMode observer的原版Native菜单退出快照是schema JSON根对象
 ## 当前产品边界
 
 自2026-10-19起，产品主线是AI自主控制MainHero/MainParty游玩单机Campaign。一个Agent需支持持续自主推进与玩家临时交办两种模式；临时指令完成/受阻后回到自主目标循环，不能退化为玩家逐步点选的遥控器。首个长程门禁是由真实模型从自然StoryMode流程完成原版`Establish Your Clan`四项目标并由Native判定任务完成；本首测允许玩家先走原版TrainingField兄长对话并确认Tutorial skip，AI从随后首个稳定Campaign MapState接管；不允许使用预备存档或注入进度。Tutorial skip是玩家原版开局操作，不算Agent能力，完整未跳过教程自治留作后续扩展。此次门禁只证明首段闭环，不等于整个自主玩家产品完成。NPC/同伴Agent保留为后续玩法候选，但同伴加入MainParty本身没有独立Campaign Party Think循环，因此不假设其比MainHero更容易接入。工作顺序以GitHub Project中MainHero StoryMode门禁唯一进行中的产品Issue为准。
-当前StoryMode父循环已把Gold、动态PartySize、Renown及Companion四个目标接入已有Native子流程。Town Tavern Companion路由只用当前菜单、同一Mission内观察到的Wanderer、原版导航/交谈及当前可点击雇佣对话；Native AgentNavigator/Leave输入租约活动时由Host只读轮询状态，不再为`observeAgain`额外调用模型；当前目录不接受的回复最多给两次本目录反馈，超限后安全失败且不重放Native动作。Host包Fake Native/Provider回归验证这些边界，不等同真实Campaign或真实模型通过。此区别和当前四目标集成状态以Focus/MAINLINE为准。
+当前StoryMode父循环已把Gold、动态PartySize、Renown及Companion四个目标接入已有Native子流程。Town Tavern Companion路由只用当前菜单、同一Mission内观察到的Wanderer、原版导航/交谈及当前可点击雇佣对话；Native AgentNavigator/Leave输入租约活动时由Host只读轮询状态，不再为`observeAgain`额外调用模型；当前目录不接受的回复最多给两次本目录反馈，超限后安全失败且不重放Native动作。可恢复的Provider输出错误若发生在无对话/弹窗、无敌对遭遇/移动的自由Campaign Map，父Host可仅把当前未完成路线暂时排除并基于新鲜Journal重新规划。若错误发生在Companion的友好Town/Tavern `StartUp` Mission内，父Host仅调用一次原版`missionLeave`，验证返回仍有EYC Quest的自由Map后再排除Companion路线；其他Mission、战斗、捕获、对话和未验证状态仍fail closed。Host包Fake Native/Provider回归验证这些边界，不等同真实Campaign或真实模型通过。此区别和当前四目标集成状态以Focus/MAINLINE为准。
 Gold子流程遇到Provider/Native故障时返回失败收据，其中保留已有子流程Trace、Native动作计数、路由和安全失败码；父级不得因失败后验缺失而宣称执行了未记录的动作，更不得重放非幂等交易。真实响应错误文本仅限安全摘要长度，不保存模型prompt/回复正文或认证信息。
 新增的`AgentHostEstablishClanAutonomyEvaluation`是后续真实模型集成调试入口：从已有活动StoryMode存档的逐字节临时副本加载，真实模型可驱动四目标父循环，随后清理副本；它不是新战役门禁。产品验收仍要求玩家原版Tutorial skip后从首个稳定MapState接管，并在两个独立自然新建的StoryMode战役完成原版Quest。
 
@@ -46,6 +46,8 @@ Companion子目标仅在无捕获/遭遇/模态且处于Campaign Map时允许`st
 父循环判定子目标是否能安全replan时也必须使用`AgentHostCampaignStateFacts.IsActiveEncounter`；仅检查Native `encounterActive`会把Town/训练场的菜单遭遇态误判成敌对Party遭遇。Town菜单的上下文`menuId`和当前`SettlementId`匹配时是原版地点菜单，允许在Map返回后标记路线不可用并重规划；真正的`encounter`菜单/遭遇、Captivity与BattleSimulation继续阻断。`AgentHostEstablishYourClanAutonomyLoop`合同自检覆盖Town menu可replan、真实劫匪遭遇不可replan。
 
 地图原生Escape overlay可能由窗口失焦自动弹出；测试运行时只应阻止这一条自动焦点回调，不屏蔽真实玩家手动打开。`TryInstallHarnessFocusLossEscapeMenuGuard`仅在存在Harness临时目录的`visual-capture`、`agent-host-lifecycle-test`及`fresh-campaign-renown`模式修改Native `MapViewsContainer.IsOpeningEscapeMenuOnFocusChangeAllowedForAll`，普通游戏模式不打补丁。自然StoryMode长测收据必须确认guard已安装，否则该次焦点/地图移动测试无效；MOVE等Native命令仍在原版Escape overlay确实打开时拒绝。这个焦点守卫只修Harness环境的自动弹窗，不会替Agent关掉真实游戏内弹窗，也不会改变正常玩家行为。
+
+FreshCampaign Harness在启动任何新战役前将`BannerlordConfig.txt`里的Native `AutoSaveInterval`临时设为`-1`。本机游戏程序集`SandBoxSaveManager.IsAutoSaveDisabled()`已确认`-1`是自动保存关闭哨兵。原设置写入固定小型JSON备份；测试结束并确认Bannerlord进程已退出后只恢复该项原值。若Harness突然中断，下一次`Run-Harness`尝试恢复；若游戏仍运行或当前设置不是Harness所写的`-1`，则保留并报告冲突而不覆盖用户设置。FreshCampaign收据还检查Native `AutoSaveCurrentGame`日志及Save目录manifest，避免把“没有手动Save动作”误称为“没有任何自动写盘”。
 
 该Escape焦点守卫只允许对审计过的`SubModule.cs`版本作例外构建；每次改动都必须同步更新`HarnessResearchReadiness.ps1`中`AuditedHarnessDiagnosticSha256`，并证明它仅影响Harness模式的焦点失效菜单行为，没有扩大到正常玩家行为。
 
