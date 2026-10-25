@@ -132,6 +132,7 @@ internal static class AgentHostHarnessProgressTrace
                 ["status"] = Copy(result, "status"),
                 ["termination"] = Copy(termination, "reason") ?? Copy(result, "termination"),
                 ["failureCode"] = Copy(result, "failureCode"),
+                ["providerHttpStatus"] = ReadProviderHttpStatus(result),
                 ["actionsExecuted"] = Copy(result, "actionsExecuted"),
                 ["decisions"] = Copy(result, "decisions"),
                 ["promptTokens"] = Copy(result, "promptTokens"),
@@ -296,12 +297,12 @@ internal static class AgentHostHarnessProgressTrace
             {
                 ["status"] = "failed",
                 ["termination"] = "recruitment-route-unavailable",
-                ["failureCode"] = "recruitment-route-unavailable",
+                ["failureCode"] = "provider-http-error",
                 ["actionsExecuted"] = 0,
                 ["decisions"] = 2,
                 ["promptTokens"] = 900,
                 ["completionTokens"] = 60,
-                ["failure"] = "Free text must not be copied into this bounded diagnostics line.",
+                ["failure"] = "FreeLLMAPI returned HTTP 502. do not copy this free-text diagnostic.",
                 ["initialNativeState"] = new JsonObject
                 {
                     ["campaignDay"] = 1,
@@ -332,7 +333,8 @@ internal static class AgentHostHarnessProgressTrace
             if (File.ReadAllLines(path).Length != 3 ||
                 ReadString(objectiveLine, "event") != "objective-subflow-result" ||
                 ReadString(objectiveLine, "objectiveId") != "partySize" ||
-                ReadString(objectiveLine, "failureCode") != "recruitment-route-unavailable" ||
+                ReadString(objectiveLine, "failureCode") != "provider-http-error" ||
+                ReadInt(objectiveLine, "providerHttpStatus") != 502 ||
                 ReadString(objectiveLine["nativeStateBefore"] as JsonObject, "menuId") != "training_field_menu" ||
                 ReadString(objectiveLine["nativeStateAfter"] as JsonObject, "menuId") is not null ||
                 objectiveLine.ToJsonString().Contains("do not copy", StringComparison.Ordinal) ||
@@ -359,8 +361,21 @@ internal static class AgentHostHarnessProgressTrace
 
     private static JsonNode? Copy(JsonObject? source, string name) => source?[name]?.DeepClone();
 
+    private static JsonNode? ReadProviderHttpStatus(JsonObject result)
+    {
+        if (ReadString(result, "failureCode") != "provider-http-error" || ReadString(result, "failure") is not string failure)
+            return null;
+        var marker = failure.IndexOf("HTTP ", StringComparison.OrdinalIgnoreCase);
+        if (marker < 0 || marker + 8 > failure.Length) return null;
+        var digits = failure.Substring(marker + 5, 3);
+        return int.TryParse(digits, out var status) && status is >= 100 and <= 599 ? JsonValue.Create(status) : null;
+    }
+
     private static bool ReadBoolean(JsonObject? source, string name) =>
         source?[name] is JsonValue value && value.TryGetValue<bool>(out var result) && result;
+
+    private static int? ReadInt(JsonObject? source, string name) =>
+        source?[name] is JsonValue value && value.TryGetValue<int>(out var result) ? result : null;
 
     private static string? ReadString(JsonElement source, string name) =>
         source.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;

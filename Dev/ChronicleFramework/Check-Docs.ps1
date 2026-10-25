@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.304'
+$contractVersion = '7.305'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -451,6 +451,7 @@ if ($agentHostDecisionCycleSource -notmatch 'AgentHostHarnessProgressTrace\.Reco
     $agentHostHarnessProgressTraceSource -notmatch 'BuildNativeStateSummary' -or
     $agentHostHarnessProgressTraceSource -notmatch 'nativeStateBefore' -or
     $agentHostHarnessProgressTraceSource -notmatch 'nativeStateAfter' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'providerHttpStatus' -or
     $agentHostProviderContractSelfTestSource -notmatch 'AgentHostHarnessProgressTrace\.RunContractSelfTests') {
     throw 'Real Host decisions must be incrementally persisted only in bounded Harness visual-capture/lifecycle modes, including the selected Native argument and route but excluding rationale/raw prompt content.'
 }
