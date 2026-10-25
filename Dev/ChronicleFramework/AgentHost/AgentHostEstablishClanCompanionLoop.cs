@@ -101,6 +101,23 @@ internal static class AgentHostEstablishClanCompanionLoop
         if (!missionCandidateCatalog.OfType<JsonObject>().Any(action => ReadString(action, "action") == "missionNavigateToAgent") ||
             !missionCandidateCatalog.OfType<JsonObject>().Any(action => ReadString(action, "action") == "missionLeave"))
             throw new AgentHostException("establish-clan-companion-mission-exit-not-listed", "A Tavern Mission with a Wanderer candidate must offer both the Native hiring route and a Native exit so the model can leave safely and replan.");
+
+        var wrappedIndexDecision = new JsonObject
+        {
+            ["action"] = "missionNavigateToAgent",
+            ["arguments"] = new JsonObject { ["AgentIndex"] = "[4]", ["DurationSeconds"] = "**8**" }
+        };
+        if (!TryResolveAction(wrappedIndexDecision, missionCandidateCatalog, missionCandidateState, missionCandidateReceipt,
+                selectedHeroId: null, moveTargetId: null, pending: false, out var normalizedNavigationAction, out var normalizedNavigationArguments,
+                out _, out var normalizedTargetHeroId, out _) ||
+            normalizedNavigationAction != "missionNavigateToAgent" || normalizedTargetHeroId != "wanderer-a" ||
+            ReadInt(normalizedNavigationArguments, "agentIndex", -1) != 4 || ReadInt(normalizedNavigationArguments, "durationSeconds", -1) != 8)
+            throw new AgentHostException("establish-clan-companion-current-catalog-integer-normalization-failed", "Bracket/Markdown formatting may be removed from numeric Native candidate arguments only when the canonical integer exactly matches the fresh current catalog.");
+        var outOfCatalogWrappedIndex = wrappedIndexDecision.DeepClone().AsObject();
+        outOfCatalogWrappedIndex["arguments"]!["AgentIndex"] = "[5]";
+        if (TryResolveAction(outOfCatalogWrappedIndex, missionCandidateCatalog, missionCandidateState, missionCandidateReceipt,
+                selectedHeroId: null, moveTargetId: null, pending: false, out _, out _, out _, out _, out _))
+            throw new AgentHostException("establish-clan-companion-out-of-catalog-formatted-index-accepted", "Removing output formatting must never bypass the current Native AgentIndex list.");
         if (BuildControlCatalog(false, false, false, false).Any(control => control?.GetValue<string>() == "stop") ||
             !BuildControlCatalog(true, false, false, false).Any(control => control?.GetValue<string>() == "stop"))
             throw new AgentHostException("establish-clan-companion-stop-scope-invalid", "A subgoal may stop for parent replan only from a free Native Map, never from inside a Mission.");
@@ -157,7 +174,8 @@ internal static class AgentHostEstablishClanCompanionLoop
             new { scenario = "establish-clan-companion-targets-only-current-safe-unvisited-town-and-friendly-wanderer", passed = true },
             new { scenario = "establish-clan-companion-town-choice-window-pages-without-world-target-cap", passed = true, totalWorldTargets = 21, choiceWindow = SafeTownDecisionWindowSize },
             new { scenario = "establish-clan-companion-dialogue-catalog-excludes-unrelated-native-options", passed = true },
-            new { scenario = "establish-clan-companion-nearby-target-uses-native-interact", passed = true }
+            new { scenario = "establish-clan-companion-nearby-target-uses-native-interact", passed = true },
+            new { scenario = "establish-clan-companion-normalizes-only-formatted-numbers-present-in-current-native-catalog", passed = true }
         ];
     }
 
@@ -777,8 +795,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                 return true;
             case "missionNavigateToAgent":
             case "missionInteract":
-                var agentIndex = ReadInt(supplied, "AgentIndex", -1);
-                if (agentIndex < 0 || !listed["argumentValues"]?["AgentIndex"]?.AsArray().Any(value => value?.GetValue<int>() == agentIndex) == true) return false;
+                if (!TryReadListedInteger(supplied["AgentIndex"], listed["argumentValues"]?["AgentIndex"] as JsonArray, out var agentIndex)) return false;
                 var candidate = (sceneAgentsReceipt?["data"]?["agents"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(item => ReadInt(item, "agentIndex", -1) == agentIndex &&
                     ReadString(item, "occupation") == "Wanderer" && !ReadBoolean(item, "isEnemy") && !ReadBoolean(item, "isNotable") && !string.IsNullOrWhiteSpace(ReadString(item, "heroId")));
                 var currentConversationHero = ReadString(state["conversation"] as JsonObject, "heroId");
@@ -787,8 +804,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                 arguments["agentIndex"] = agentIndex;
                 if (action == "missionNavigateToAgent")
                 {
-                    var duration = ReadInt(supplied, "DurationSeconds", -1);
-                    if (!listed["argumentValues"]?["DurationSeconds"]?.AsArray().Any(value => value?.GetValue<int>() == duration) == true) return false;
+                    if (!TryReadListedInteger(supplied["DurationSeconds"], listed["argumentValues"]?["DurationSeconds"] as JsonArray, out var duration)) return false;
                     arguments["durationSeconds"] = duration;
                 }
                 else if (!(state["mission"]?["nearbySceneAgents"] as JsonArray)?.OfType<JsonObject>().Any(local => ReadInt(local, "agentIndex", -1) == agentIndex && ReadBoolean(local, "isInteractable")) == true)
@@ -806,6 +822,28 @@ internal static class AgentHostEstablishClanCompanionLoop
             default:
                 return false;
         }
+    }
+
+    private static bool TryReadListedInteger(JsonNode? supplied, JsonArray? allowedValues, out int result)
+    {
+        result = -1;
+        if (supplied is not JsonValue suppliedValue) return false;
+        if (!suppliedValue.TryGetValue<int>(out result))
+        {
+            if (!suppliedValue.TryGetValue<string>(out var text) || string.IsNullOrWhiteSpace(text)) return false;
+            text = text.Trim();
+            if (text.Length >= 2 && text.StartsWith("[", StringComparison.Ordinal) && text.EndsWith("]", StringComparison.Ordinal))
+                text = text[1..^1].Trim();
+            else if (text.Length >= 4 && text.StartsWith("**", StringComparison.Ordinal) && text.EndsWith("**", StringComparison.Ordinal))
+                text = text[2..^2].Trim();
+            else if (text.Length >= 2 && text.StartsWith("`", StringComparison.Ordinal) && text.EndsWith("`", StringComparison.Ordinal))
+                text = text[1..^1].Trim();
+
+            if (!int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out result)) return false;
+        }
+
+        var parsedValue = result;
+        return allowedValues?.OfType<JsonValue>().Any(value => value.TryGetValue<int>(out var allowed) && allowed == parsedValue) == true;
     }
 
     private static JsonArray FilterWandererCandidates(JsonArray? agents, HashSet<string> visitedHeroes)

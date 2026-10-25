@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.308'
+$contractVersion = '7.309'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -1417,6 +1417,9 @@ if ($agentHostCompanionLoopSource -notmatch 'BuildControlCatalog\(gameState == "
     $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-listed-safe-stop-is-interrupted-with-zero-native-actions' -or
     $agentHostProviderSource -notmatch 'ContainsString\(request, "allowedControls", "stop"\)' -or
     $agentHostProviderContractSelfTestSource -notmatch 'provider-normalizes-only-workflow-listed-safe-stop-control') { throw 'The Companion may stop only on free Map; Mission stop requests must be corrected against the current Native catalog, and only the original Native missionLeave may return it to Map for parent replanning.' }
+if ($agentHostCompanionLoopSource -notmatch 'TryReadListedInteger' -or
+    $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-current-catalog-integer-normalization-failed' -or
+    $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-out-of-catalog-formatted-index-accepted') { throw 'Companion integer arguments may be format-normalized only when the canonical numeric value is present in the fresh Native candidate catalog; formatted out-of-catalog values must remain rejected.' }
 if ($agentHostEstablishClanPlannerSource -notmatch 'objective-selection-rejected-before-native' -or
     $agentHostEstablishClanPlannerSource -notmatch 'allowed ObjectiveId values are exactly' -or
     $agentHostDecisionCycleSource -notmatch 'Treat the current allowedActions list as exact' -or

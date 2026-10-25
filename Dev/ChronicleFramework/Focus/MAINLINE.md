@@ -921,6 +921,8 @@ FreeLLMAPI 官方 CLI 现已从 Electron Local Storage 的本地 dashboard sessi
 
 `TestResults/20261025-183732`使用`f0c68e9`后的真实`auto:reliable`模型评估。AI自行完成Skip Tutorial后的通知/旗帜卡片/家族名“Khergit”/默认Banner Done/后续Inquiry并自然激活原版EYC。Companion首次安全停止后，PartySize在Town主菜单调用一次RecruitmentVM报价观察，模型仍stop两次；父级将该目标临时标为不可用，继续到Gold，真实Native Grain sale从1000→1029并由Journal确认。之后复试Companion时收到FreeLLMAPI HTTP429，遵循门禁不重试非网关限流、不回放动作，整个Host以`provider-http-error`结束，`goalVerified=false`；本轮没有遇到`town_backstreet`，所以没有验证新Backstreet专用Leave恢复。总计29个模型决定、19条Native命令；无崩溃、正式存档、自动存档或存档目录变更，AutoSave 10→-1→10恢复，游戏/Host清理和录像覆盖15257/15257通过。它真实证明“PartySize受阻→父级继续Gold并获得原版Journal进度”，不证明士兵增长、Renown、同伴招募或Quest完成。
 
+该轮的Companion Native命令收据还显示模型输出`missionNavigateToAgent`时把当前观察到的数值索引/时长格式化为带方括号的字符串，Native动作边界未接受该参数，后续请求又触到429，未产生雇佣或Journal进度。现在只在Host规范化后数值仍精确存在当前`missionSceneAgents`的候选索引及动作`argumentValues`时允许执行：如`"[4]"`、`"**4**"`及反引号包裹的4可解析为4，但绝不扩展候选或接受任意数字；负向测试确认`"[5]"`即使可解析，未在本轮候选中也被拒。`TestResults/20261025-193149`Build/AgentHostPackage通过；这是自托管参数合同，不代表模型已成功导航/招募。后续自然Campaign仍需确认真实参数格式恢复，且最终以Original EYC Journal/Quest验收。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager
