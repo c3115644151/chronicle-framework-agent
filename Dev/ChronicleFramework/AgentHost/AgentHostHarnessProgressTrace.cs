@@ -137,6 +137,7 @@ internal static class AgentHostHarnessProgressTrace
                 ["decisions"] = Copy(result, "decisions"),
                 ["promptTokens"] = Copy(result, "promptTokens"),
                 ["completionTokens"] = Copy(result, "completionTokens"),
+                ["recruitmentOfferSummary"] = BuildRecruitmentOfferSummary(result["lastRecruitmentOffers"] as JsonObject),
                 ["nativeStateBefore"] = result["nativeStateBefore"]?.DeepClone() ?? BuildNativeStateSummary(result["initialNativeState"] as JsonObject),
                 ["nativeStateAfter"] = result["nativeStateAfter"]?.DeepClone() ?? BuildNativeStateSummary(result["finalNativeState"] as JsonObject ?? result["finalState"] as JsonObject)
             };
@@ -303,6 +304,19 @@ internal static class AgentHostHarnessProgressTrace
                 ["promptTokens"] = 900,
                 ["completionTokens"] = 60,
                 ["failure"] = "FreeLLMAPI returned HTTP 502. do not copy this free-text diagnostic.",
+                ["lastRecruitmentOffers"] = new JsonObject
+                {
+                    ["data"] = new JsonObject
+                    {
+                        ["gold"] = 100,
+                        ["partySize"] = 3,
+                        ["partyCapacity"] = 20,
+                        ["offers"] = new JsonArray(
+                            new JsonObject { ["ownerId"] = "never-copy-notable-id", ["troopId"] = "never-copy-troop-id", ["cost"] = 25, ["available"] = true },
+                            new JsonObject { ["ownerId"] = "never-copy-notable-id-2", ["troopId"] = "never-copy-troop-id-2", ["cost"] = 150, ["available"] = true },
+                            new JsonObject { ["ownerId"] = "never-copy-notable-id-3", ["troopId"] = "never-copy-troop-id-3", ["cost"] = 10, ["available"] = false })
+                    }
+                },
                 ["initialNativeState"] = new JsonObject
                 {
                     ["campaignDay"] = 1,
@@ -335,11 +349,16 @@ internal static class AgentHostHarnessProgressTrace
                 ReadString(objectiveLine, "objectiveId") != "partySize" ||
                 ReadString(objectiveLine, "failureCode") != "provider-http-error" ||
                 ReadInt(objectiveLine, "providerHttpStatus") != 502 ||
+                ReadInt(objectiveLine["recruitmentOfferSummary"] as JsonObject, "offerCount") != 3 ||
+                ReadInt(objectiveLine["recruitmentOfferSummary"] as JsonObject, "availableOfferCount") != 2 ||
+                ReadInt(objectiveLine["recruitmentOfferSummary"] as JsonObject, "affordableAvailableOfferCount") != 1 ||
+                ReadInt(objectiveLine["recruitmentOfferSummary"] as JsonObject, "lowestAffordableCost") != 25 ||
                 ReadString(objectiveLine["nativeStateBefore"] as JsonObject, "menuId") != "training_field_menu" ||
                 ReadString(objectiveLine["nativeStateAfter"] as JsonObject, "menuId") is not null ||
                 objectiveLine.ToJsonString().Contains("do not copy", StringComparison.Ordinal) ||
+                objectiveLine.ToJsonString().Contains("never-copy", StringComparison.Ordinal) ||
                 objectiveLine.ContainsKey("failure"))
-                throw new AgentHostException("host-progress-trace-objective-subflow", "Harness diagnostics must record bounded failure codes and safe before/after Native state summaries without copying free-text failure details.");
+                throw new AgentHostException("host-progress-trace-objective-subflow", "Harness diagnostics must record bounded failure codes, safe before/after Native state and aggregate recruitment offer counts without copying free-text failures or Native Hero/Troop IDs.");
 
             Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "normal");
             RecordDecision(request.RootElement, new ProviderDecisionResult("completed", "selftest-model", 1, 1, "stop", decision, "selftest/route"));
@@ -348,6 +367,7 @@ internal static class AgentHostHarnessProgressTrace
             return [
                 new { scenario = "harness-progress-trace-records-current-modal-and-visible-buttons-without-one-use-token", passed = true },
                 new { scenario = "harness-progress-trace-persists-native-decision-and-route-without-free-text-in-visual-capture-and-lifecycle-modes", passed = true },
+                new { scenario = "harness-progress-trace-reports-only-aggregate-affordable-recruitment-offer-counts", passed = true },
                 new { scenario = "harness-progress-trace-records-objective-subflow-termination-and-safe-native-state-summaries", passed = true }
             ];
         }
@@ -369,6 +389,30 @@ internal static class AgentHostHarnessProgressTrace
         if (marker < 0 || marker + 8 > failure.Length) return null;
         var digits = failure.Substring(marker + 5, 3);
         return int.TryParse(digits, out var status) && status is >= 100 and <= 599 ? JsonValue.Create(status) : null;
+    }
+
+    private static JsonObject? BuildRecruitmentOfferSummary(JsonObject? receipt)
+    {
+        if (receipt?["data"] is not JsonObject data || data["offers"] is not JsonArray offers ||
+            ReadInt(data, "gold") is not int gold || ReadInt(data, "partySize") is not int partySize ||
+            ReadInt(data, "partyCapacity") is not int partyCapacity) return null;
+
+        var entries = offers.OfType<JsonObject>().ToArray();
+        var availableCount = entries.Count(offer => ReadBoolean(offer, "available"));
+        var affordableCosts = entries
+            .Where(offer => ReadBoolean(offer, "available") && ReadInt(offer, "cost") is int cost && cost <= gold)
+            .Select(offer => ReadInt(offer, "cost")!.Value)
+            .ToArray();
+        return new JsonObject
+        {
+            ["gold"] = gold,
+            ["partySize"] = partySize,
+            ["partyCapacity"] = partyCapacity,
+            ["offerCount"] = entries.Length,
+            ["availableOfferCount"] = availableCount,
+            ["affordableAvailableOfferCount"] = affordableCosts.Length,
+            ["lowestAffordableCost"] = affordableCosts.Length > 0 ? affordableCosts.Min() : null
+        };
     }
 
     private static bool ReadBoolean(JsonObject? source, string name) =>

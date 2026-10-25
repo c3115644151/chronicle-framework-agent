@@ -925,6 +925,8 @@ FreeLLMAPI 官方 CLI 现已从 Electron Local Storage 的本地 dashboard sessi
 
 `TestResults/20261025-194213`使用`a88f2a6`的真实模型再次从自然新StoryMode运行。真实模型完成开局命名“Khergit”和默认旗帜、PartySize尝试后安全stop、Gold出售粮食，随后遭遇`looters_366`。它选择原版Fight对话和Native `str_order_attack`后，成功用BattleSimulation执行`battleSkip`/`battleFinish`，返回地图并验证原版Encounter结束；这一局开战时MainParty仍只有1名成员。Native源码此前显示坐镇选项条件是MapEvent玩家侧有健康非MainHero战斗成员，因此该观察证明“MainParty总人数1必然禁用坐镇”的简单推断不成立，实际合格成员来自同一事件其他友军还是其他Roster上下文仍未收集，不能猜来源。战后Clan Renown仍为20，Party仍为1；随后Renown目标无当前Bandit候选，原版Journal未推进，完整StoryMode Quest最终以所有当前路线不可用安全结束（`goalVerified=false`），未进实时战斗Mission。总计69个模型决策、42条Native命令；无崩溃/正式存档/自动存档，AutoSave 10→-1→10恢复，存档目录manifest不变，游戏进程清理，录像覆盖31132/31132帧。该轮是首次自然Campaign中真正完成坐镇指挥模拟的证据，但不是Renown增长或EYC通关证明；Backstreet-only Host fallback没有被触发，模型本轮选择了当前Native返回选项。
 
+该轮的PartySize模型在Town菜单执行了一次RecruitmentVM报价查询，然后安全停止；此前的Objective子流程收据只记录停止码/队伍与金币，不包含Offer数据，因此不能判定它当时看到了没有可负担志愿兵，还是看到了报价却拒绝继续。新的Harness `AgentHostProgress.jsonl`对子目标只增加脱敏聚合量（Gold、队伍人数/容量、报价总数、可用及可负担数量、最低可负担价格），不保存Notable/Troop ID、名称或自由文本。它只改善诊断，不替模型选择/招募；`TestResults/20261025-193149`自测试检查这一信息边界。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager
