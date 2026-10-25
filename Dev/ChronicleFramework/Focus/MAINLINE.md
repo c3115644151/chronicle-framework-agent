@@ -936,6 +936,8 @@ FreeLLMAPI 官方 CLI 现已从 Electron Local Storage 的本地 dashboard sessi
 
 `TestResults/20261026-010410`是在Observer schema 27和PartySize自动VillagersInNeed恢复改动合入后跑的真实`auto:reliable`Campaign。AI自行完成教程后续通知/旗帜卡片/家族名/旗帜确认；Companion多次受阻，Gold在ES3售卖粮食，PartySize在town_ES6读取到8个Volunteer报价，其中7个可用且当前Gold可负担，之后FreeLLMAPI 502阻断了招募决定。当前StoryMode自然流没有再次进village_ES3_2，所以CharacterId gate和村民“先处理别的事”分支未得到实机验证。Host最终在81个模型决策、53条Native动作、269511输入/7461输出Token后停止，EYC未完成。复核Root receipt和My Documents AgentRuns response events发现Native snapshot含`"characterName":"劫匪""heroId":null`：AgentObserver新增CharacterName后漏了下一字段分隔逗号，导致原版Bandit对话MapState响应成为无效JSON，Host在NativeMailbox读取时终止。已补`prependComma=true`，并让Check-Docs锁定该分隔符约束；`TestResults/20261026-024216`AgentHostPackage通过（233 Provider、16 Campaign、9 BattleSimulation自测，模型/Native命令0），`TestResults/20261026-024428`Docs通过。下一项窄验证应重新运行一个原版当前地图对话的Native切片，确认当前Character/Hero字段序列化可被Host解析；随后再用真实AI自然到村验证schema27 CharacterId识别和拒绝Villa启动路线。全Run未崩溃、未写正式存档/Native自动存档，AutoSave 10→-1→10恢复、存档目录manifest不变，进程和视频清理通过；阶段`Passed=true`不代表EYC完成。
 
+`TestResults/20261026-024929`EncounterSurrender窄Native回归在当前schema27的实际Bandit会话中读取到`conversation.characterId=looter`、`characterName=劫匪`、`heroId=null`，随后通过原版Fight/SendTroops前置、Surrender、captivity后验并成功收尾；源档SHA一致、Host/游戏进程停止。它正好覆盖`TestResults/20261026-010410`触发过的非Hero对话对象类型并确认补逗号后的Snapshot是完整JSON，不代表StoryMode村民拒绝分支已实机通过。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager
