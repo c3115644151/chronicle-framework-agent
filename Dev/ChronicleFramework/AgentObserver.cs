@@ -169,7 +169,7 @@ internal static class ChronicleAgentObserver
             json.Append('{');
             Property(json, "characterId", conversationManager.OneToOneConversationCharacter?.StringId);
             Property(json, "characterName", conversationManager.OneToOneConversationCharacter?.Name?.ToString(), true);
-            Property(json, "heroId", conversationManager.OneToOneConversationHero?.StringId);
+            Property(json, "heroId", conversationManager.OneToOneConversationHero?.StringId, true);
             Property(json, "heroName", conversationManager.OneToOneConversationHero?.Name?.ToString(), true);
             Property(json, "sentenceText", conversationManager.CurrentSentenceText, true);
             json.Append(",\"options\":[");
