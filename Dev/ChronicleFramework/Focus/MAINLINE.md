@@ -923,6 +923,8 @@ FreeLLMAPI 官方 CLI 现已从 Electron Local Storage 的本地 dashboard sessi
 
 该轮的Companion Native命令收据还显示模型输出`missionNavigateToAgent`时把当前观察到的数值索引/时长格式化为带方括号的字符串，Native动作边界未接受该参数，后续请求又触到429，未产生雇佣或Journal进度。现在只在Host规范化后数值仍精确存在当前`missionSceneAgents`的候选索引及动作`argumentValues`时允许执行：如`"[4]"`、`"**4**"`及反引号包裹的4可解析为4，但绝不扩展候选或接受任意数字；负向测试确认`"[5]"`即使可解析，未在本轮候选中也被拒。`TestResults/20261025-193149`Build/AgentHostPackage通过；这是自托管参数合同，不代表模型已成功导航/招募。后续自然Campaign仍需确认真实参数格式恢复，且最终以Original EYC Journal/Quest验收。
 
+`TestResults/20261025-194213`使用`a88f2a6`的真实模型再次从自然新StoryMode运行。真实模型完成开局命名“Khergit”和默认旗帜、PartySize尝试后安全stop、Gold出售粮食，随后遭遇`looters_366`。它选择原版Fight对话和Native `str_order_attack`后，成功用BattleSimulation执行`battleSkip`/`battleFinish`，返回地图并验证原版Encounter结束；这一局开战时MainParty仍只有1名成员。Native源码此前显示坐镇选项条件是MapEvent玩家侧有健康非MainHero战斗成员，因此该观察证明“MainParty总人数1必然禁用坐镇”的简单推断不成立，实际合格成员来自同一事件其他友军还是其他Roster上下文仍未收集，不能猜来源。战后Clan Renown仍为20，Party仍为1；随后Renown目标无当前Bandit候选，原版Journal未推进，完整StoryMode Quest最终以所有当前路线不可用安全结束（`goalVerified=false`），未进实时战斗Mission。总计69个模型决策、42条Native命令；无崩溃/正式存档/自动存档，AutoSave 10→-1→10恢复，存档目录manifest不变，游戏进程清理，录像覆盖31132/31132帧。该轮是首次自然Campaign中真正完成坐镇指挥模拟的证据，但不是Renown增长或EYC通关证明；Backstreet-only Host fallback没有被触发，模型本轮选择了当前Native返回选项。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager
