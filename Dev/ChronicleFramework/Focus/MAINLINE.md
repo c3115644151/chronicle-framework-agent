@@ -913,6 +913,12 @@ FreeLLMAPI 官方 CLI 现已从 Electron Local Storage 的本地 dashboard sessi
 
 因为151729的恢复提示只列动作类型，没解释当前唯一安全动作的用途，PartySize恢复反馈现按当前目录补充具体解释：`recruitOptions`只读取Native RecruitmentVM报价、不招兵也不花金币；`menuSelect`提示使用当前启用的原版选项；地图目标查询提示只读且不移动。`TestResults/20261025-161254` Build/AgentHostPackage通过（228 Provider、16 Campaign、9 BattleSimulation场景；模型调用0、Native命令0），包括读招募选项提示的回归。它仍未由新的真实模型战役验证；之后继续完成EYC必须保留“真实Journal进度+最终原版Quest完成”，不能把一次成功招募或金币交易当作过关。
 
+`TestResults/20261025-164902`真实新Campaign验证了父循环在多个目标受阻时继续工作的路径：教程后原版命名/默认旗帜链完成；Companion两次失败；PartySize收到两个stop后临时不可用；父级随后在ES3通过原版交易卖出谷物并由Journal验证Gold进展，又重新尝试Companion、PartySize和Gold。之后普通地图移动自然遇到`looters_339`，Battle子流程走原版威胁对话选择Fight，但Native菜单仅`attack`启用、`str_order_attack`禁用，现有动作层不进入实时Mission，于是以`incident-bandit-battle-failed`安全结束，`goalVerified=false`。主队当时只有MainHero一人，没有坐镇指挥条件；Native在战斗菜单里仍显示攻击/投降等选项，但本Agent只支持Send Troops，未把这些选项伪装成已解决战斗。该轮69个模型决策、50条Native命令；无崩溃、正式保存、Native自动存档或存档目录变更，AutoSave 10→-1→10恢复，游戏进程清理通过，连续录像覆盖33923/33923帧并按Harness规则压成126张时间线关键帧后删除MP4。父循环的安全重规划已由真实模型运行验证；战斗适配/新增士兵的可持续路径仍是未完成门禁。
+
+针对164902中Backstreet的模型stop阻断招兵，PartySize现在只在精确条件下用原版导航返回：模型已经收到一次恢复提示后再次停止、State仍是MapState的`town_backstreet`、目录只有当前启用的`town_backstreet_back` Leave时，Host调用当前原版菜单处理器一次，并后验要求同一Settlement的`town` Map菜单、EYC仍活动、没有Inquiry或真实敌对Encounter，然后继续模型招募循环。其他位置或返回验证失败一律不做替代动作。`TestResults/20261025-182805` Build/AgentHostPackage通过（228 Provider、16 Campaign、9 BattleSimulation场景；模型调用0、Native命令0），假Native/Provider测试以“模型stop两次→Native backstreet leave→Town菜单→招募报价→一名志愿兵→Journal达标”覆盖这条恢复；它尚未由新的真实Campaign运行验证。
+
+`TestResults/20261025-162307`对上述具体恢复提示作真实新战役复验。AI再次自然完成Tutorial-skip后的通知、棕色龙旗卡片、模型命名“哈拉图”、BannerEditor Done与后续Inquiry，并自然激活原版EYC；Companion子目标由模型安全停止（2条Native动作，未声称招募）。PartySize在波罗斯Town菜单启动时，原版`recruit_volunteers`选项可用、MainParty仍为1人、Gold 1000；真实模型连续两次选择stop，Host按安全边界没有发出任何PartySize动作，结果为`recruitment-model-stopped-with-safe-actions`。当时父循环不识别这个新终止名，导致整轮停止而没有继续其它目标。该次14个模型决策、8条Native动作、没有Gold/Renown/Party/Journal进展，`goalVerified=false`；不应把Host按约束安全中断称为模型完成或原版问题。无游戏崩溃、正式保存/自动存档或保存目录变化，AutoSave 10→-1→10恢复且进程清理通过。现在父循环只在可用free Map上把这个PartySize路线临时加入`unavailableObjectives`，继续其他未完成目标；之后Native Journal进展可清空临时阻塞集合，重试该目标。`TestResults/20261025-164525` Build/AgentHostPackage通过（228 Provider、16 Campaign、9 BattleSimulation场景；模型调用0、Native命令0），该父循环修复的真实Campaign效果待下一轮验证。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager

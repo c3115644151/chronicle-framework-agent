@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.306'
+$contractVersion = '7.308'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -1218,8 +1218,14 @@ if (-not (Test-Path (Join-Path $harnessRoot 'AgentHost\AgentHostCampaignStateFac
     $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-recruit-options-recovery-unclear' -or
     $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-bounds-premature-stop-while-safe-native-actions-remain' -or
     $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-rejects-premature-stop-and-replans-from-current-native-catalog' -or
+    $agentHostRecruitmentLoopSource -notmatch 'TryResolveBackstreetLeave' -or
+    $agentHostRecruitmentLoopSource -notmatch 'host-safe-backstreet-exit-after-model-stop' -or
+    $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-native-backstreet-exit-recovery-resumes-on-town-menu' -or
     $agentHostDecisionCycleSource -notmatch 'RECOVERY DIRECTIVE: The previous stop was rejected before any Native action' -or
     $agentHostEstablishClanAutonomySource -notmatch 'recruitment-model-stopped' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'recruitment-model-stopped-with-safe-actions' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'unavailableObjectives.Add\(objectiveId\)' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'establish-clan-autonomy-safe-stop-replan-policy-failed' -or
     $agentHostGoldSaleLoopSource -notmatch 'gold-sale-self-test-training-field-menu-not-exitable' -or
     $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-self-test-training-field-menu-not-exitable' -or
     $agentHostProviderContractSelfTestSource -notmatch 'AgentHostCampaignStateFacts.RunContractSelfTests') { throw 'EYC objective subflows must distinguish the verified Native training-field Leave menu from a hostile Party encounter and keep the same leave path out of hostile encounter handling.' }

@@ -173,7 +173,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         results.Add(new { scenario = "establish-clan-recruitment-native-training-field-leave-to-volunteer-to-journal-verification", passed = true });
 
         var stopRecoveryClient = new FakeRecruitmentNativeClient(startAtTrainingField: true);
-        var stopRecoveryProvider = new FakeObservedRecruitmentDecisionProvider(returnStopFirst: true);
+        var stopRecoveryProvider = new FakeObservedRecruitmentDecisionProvider(returnStopCount: 1);
         var stopRecoveryRun = await RunAsync(request.RootElement, stopRecoveryClient, stopRecoveryClient, stopRecoveryClient, stopRecoveryProvider, CancellationToken.None);
         var stopRecoveryTrace = stopRecoveryRun["trace"] as JsonArray ?? new JsonArray();
         if (ReadString(stopRecoveryRun, "status") != "completed" ||
@@ -182,6 +182,17 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             !stopRecoveryTrace.OfType<JsonObject>().Any(step => ReadString(step["decisionFeedback"] as JsonObject, "kind") == "safe-stop-rejected-with-listed-actions"))
             throw new AgentHostException("establish-clan-recruitment-safe-stop-recovery-self-test-failed", "A model stop while a safe Native action is listed must be rejected without a Native command, then the model may continue from the current catalog and complete the original recruitment route. status=" + ReadString(stopRecoveryRun, "status") + "; termination=" + ReadString(stopRecoveryRun["termination"] as JsonObject, "reason") + "; actions=" + string.Join(",", stopRecoveryClient.Actions) + "; calls=" + stopRecoveryProvider.CallCount + "; feedbackSteps=" + stopRecoveryTrace.OfType<JsonObject>().Count(step => ReadString(step["decisionFeedback"] as JsonObject, "kind") == "safe-stop-rejected-with-listed-actions"));
         results.Add(new { scenario = "establish-clan-recruitment-rejects-premature-stop-and-replans-from-current-native-catalog", passed = true });
+
+        var backstreetRecoveryClient = new FakeRecruitmentNativeClient(startAtBackstreet: true);
+        var backstreetRecoveryProvider = new FakeObservedRecruitmentDecisionProvider(returnStopCount: 2);
+        var backstreetRecoveryRun = await RunAsync(request.RootElement, backstreetRecoveryClient, backstreetRecoveryClient, backstreetRecoveryClient, backstreetRecoveryProvider, CancellationToken.None);
+        var backstreetRecoveryTrace = backstreetRecoveryRun["trace"] as JsonArray ?? new JsonArray();
+        if (ReadString(backstreetRecoveryRun, "status") != "completed" ||
+            ReadInt(backstreetRecoveryRun, "actionsExecuted", 0) != 3 || backstreetRecoveryProvider.CallCount != 4 ||
+            !backstreetRecoveryClient.Actions.SequenceEqual(["menuSelect", "recruitOptions", "recruit"], StringComparer.Ordinal) ||
+            !backstreetRecoveryTrace.OfType<JsonObject>().Any(step => ReadString(step["decisionFeedback"] as JsonObject, "kind") == "host-safe-backstreet-exit-after-model-stop"))
+            throw new AgentHostException("establish-clan-recruitment-backstreet-stop-recovery-self-test-failed", "After two model stop decisions in Backstreet, Host may use only the sole currently enabled original Back option, verify return to the same Town and active EYC, then resume model decisions; no recruit or other action may be substituted.");
+        results.Add(new { scenario = "establish-clan-recruitment-native-backstreet-exit-recovery-resumes-on-town-menu", passed = true });
         return results;
     }
 
@@ -342,7 +353,42 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                 if (ReadBoolean(decision.Decision, "stop") && catalog.Count > 0)
                 {
                     if (rejectedPrematureStops >= 1)
+                    {
+                        if (TryResolveBackstreetLeave(state, catalog, lastMapTargets, currentRecruitOffers, moveTargetId, movementPending, out var leaveArguments))
+                        {
+                            var leaveStartedAt = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+                            using var leaveResponse = await recruitmentClient.ExecuteRecruitmentActionAsync("menuSelect", leaveArguments, elapsed.Token);
+                            var leaveReceipt = JsonNode.Parse(leaveResponse.RootElement.GetRawText())?.AsObject()
+                                ?? throw new AgentHostException("recruitment-backstreet-leave-receipt-invalid", "Native returned no receipt for the exact enabled Backstreet Leave option.");
+                            if (ReadString(leaveReceipt, "status") != "completed")
+                                return BuildResult("failed", "recruitment-backstreet-leave-rejected", "The exact enabled Native Backstreet Leave option was submitted after repeated model stop, but Native did not confirm it.", "recruitment-backstreet-leave-rejected", state, currentRecruitOffers, journal, objective);
+
+                            actionsExecuted++;
+                            using var afterLeave = await campaignClient.ReadStateAsync(elapsed.Token);
+                            var afterLeaveState = ReadState(afterLeave.RootElement);
+                            var afterContext = afterLeaveState?["context"] as JsonObject;
+                            var beforeSettlement = ReadString(state["location"] as JsonObject, "currentSettlementId");
+                            var afterSettlement = ReadString(afterLeaveState?["location"] as JsonObject, "currentSettlementId");
+                            if (ReadString(afterContext, "gameState") != "MapState" ||
+                                ReadString(afterContext, "menuId") != "town" ||
+                                string.IsNullOrWhiteSpace(beforeSettlement) || beforeSettlement != afterSettlement ||
+                                ReadBoolean(afterContext, "inquiryOpen") || AgentHostCampaignStateFacts.IsActiveEncounter(afterLeaveState ?? state) ||
+                                !AgentHostEstablishYourClanGoalLoop.HasActiveQuest(afterLeave.RootElement))
+                                return BuildResult("failed", "recruitment-backstreet-leave-postcondition-unverified", "The Native Backstreet Leave receipt completed, but the fresh state did not verify return to the same Town menu with the original EYC still active and no modal or encounter.", "recruitment-backstreet-leave-postcondition-unverified", afterLeaveState ?? state, currentRecruitOffers, journal, objective);
+
+                            trace.Add(BuildStep(decisions, observation, decision.Decision,
+                                SafeReceipt(leaveReceipt, "menuSelect", null),
+                                new JsonObject { ["kind"] = "host-safe-backstreet-exit-after-model-stop", ["nativeAction"] = "menuSelect", ["menuId"] = "town_backstreet", ["optionId"] = "town_backstreet_back", ["hostRecoveryKind"] = "single-enabled-location-leave", ["modelGameplayActionsCommitted"] = 0 },
+                                afterLeaveState, leaveStartedAt,
+                                new JsonObject { ["campaignDayBefore"] = ReadDouble(state, "campaignDay"), ["campaignDayAfter"] = ReadDouble(afterLeave.RootElement, "campaignDay"), ["nativeTimeControlMode"] = ReadString(afterLeave.RootElement, "timeControlMode") }));
+                            previousReceipt = SafeReceipt(leaveReceipt, "menuSelect", null);
+                            feedback = null;
+                            rejectedPrematureStops = 0;
+                            currentRecruitOffers = null;
+                            continue;
+                        }
                         return BuildResult("interrupted", "recruitment-model-stopped-with-safe-actions", "The model repeated stop after one recovery request while the current Native state still exposed safe actions; no gameplay action was substituted.", "recruitment-model-stopped-with-safe-actions", state, currentRecruitOffers, journal, objective);
+                    }
                     rejectedPrematureStops++;
                     var availableActions = catalog.OfType<JsonObject>()
                         .Select(item => ReadString(item, "action"))
@@ -669,6 +715,36 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         }
     }
 
+    private static bool TryResolveBackstreetLeave(JsonObject state, JsonArray catalog, JsonArray? safeTargets,
+        JsonObject? offers, string? moveTargetId, bool moving, out JsonObject arguments)
+    {
+        arguments = new JsonObject();
+        var context = state["context"] as JsonObject;
+        var options = state["availableMenuOptions"] as JsonArray;
+        if (catalog.Count != 1 || ReadString(context, "gameState") != "MapState" || ReadString(context, "menuId") != "town_backstreet" ||
+            ReadBoolean(context, "inquiryOpen") || AgentHostCampaignStateFacts.IsActiveEncounter(state) ||
+            options?.OfType<JsonObject>().Any(option => ReadString(option, "id") == "town_backstreet_back" &&
+                ReadBoolean(option, "available") && ReadBoolean(option, "enabled") && ReadBoolean(option, "isLeave")) != true)
+            return false;
+
+        var catalogAction = catalog[0] as JsonObject;
+        if (ReadString(catalogAction, "action") != "menuSelect") return false;
+        var values = catalogAction?["argumentValues"] as JsonObject;
+        var menuIds = values?["MenuId"] as JsonArray;
+        var optionIds = values?["OptionId"] as JsonArray;
+        if (menuIds?.Count != 1 || optionIds?.Count != 1 ||
+            menuIds[0]?.GetValue<string>() != "town_backstreet" || optionIds[0]?.GetValue<string>() != "town_backstreet_back")
+            return false;
+
+        var decision = new JsonObject
+        {
+            ["action"] = "menuSelect",
+            ["arguments"] = new JsonObject { ["MenuId"] = "town_backstreet", ["OptionId"] = "town_backstreet_back" }
+        };
+        return TryResolveRecruitmentAction(decision, state, safeTargets, offers, moveTargetId, moving,
+            out var action, out arguments, out _, out _) && action == "menuSelect";
+    }
+
     private static JsonArray FilterRecruitmentTargets(JsonArray? targets, string? currentSettlementId, HashSet<string> visited)
     {
         var result = new JsonArray();
@@ -811,11 +887,14 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         private bool _recruited;
         private readonly bool _startOnMap;
         private readonly bool _startAtTrainingField;
+        private readonly bool _startAtBackstreet;
         private bool _trainingFieldLeft;
-        internal FakeRecruitmentNativeClient(bool startOnMap = true, bool startAtTrainingField = false)
+        private bool _backstreetLeft;
+        internal FakeRecruitmentNativeClient(bool startOnMap = true, bool startAtTrainingField = false, bool startAtBackstreet = false)
         {
             _startOnMap = startOnMap;
             _startAtTrainingField = startAtTrainingField;
+            _startAtBackstreet = startAtBackstreet;
         }
         internal int RecruitedMembers => _recruited ? 5 : 4;
         internal int Gold => _recruited ? 80 : 100;
@@ -825,6 +904,8 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         {
             cancellationToken.ThrowIfCancellationRequested();
             var atTrainingField = _startAtTrainingField && !_trainingFieldLeft;
+            var atBackstreet = _startAtBackstreet && !_backstreetLeft;
+            var menuId = atTrainingField ? "training_field_menu" : atBackstreet ? "town_backstreet" : "town";
             var state = new JsonObject
             {
                 ["campaignDay"] = 10.0,
@@ -832,17 +913,23 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                 ["context"] = new JsonObject
                 {
                     ["gameState"] = _startOnMap ? "MapState" : "MenuState",
-                    ["menuId"] = atTrainingField ? "training_field_menu" : "town",
-                    ["encounterActive"] = atTrainingField,
-                    ["encounteredPartyId"] = atTrainingField ? "tutorial_training_field" : null,
+                    ["menuId"] = menuId,
+                    ["encounterActive"] = atTrainingField || atBackstreet,
+                    ["encounteredPartyId"] = atTrainingField ? "tutorial_training_field" : (atBackstreet ? "town-a" : null),
                     ["inquiryOpen"] = false,
                     ["captivity"] = new JsonObject { ["isCaptive"] = false }
                 },
                 ["availableMenuOptions"] = atTrainingField
                     ? new JsonArray(new JsonObject { ["id"] = "training_field_leave", ["available"] = true, ["enabled"] = true, ["isLeave"] = true })
-                    : new JsonArray(new JsonObject { ["id"] = RecruitmentMenuOptionId, ["available"] = true, ["enabled"] = true }),
+                    : atBackstreet
+                        ? new JsonArray(
+                            new JsonObject { ["id"] = "town_tavern", ["available"] = true, ["enabled"] = true },
+                            new JsonObject { ["id"] = "recruit_mercenaries", ["available"] = true, ["enabled"] = false },
+                            new JsonObject { ["id"] = "town_backstreet_back", ["available"] = true, ["enabled"] = true, ["isLeave"] = true })
+                        : new JsonArray(new JsonObject { ["id"] = RecruitmentMenuOptionId, ["available"] = true, ["enabled"] = true }),
                 ["location"] = new JsonObject { ["currentSettlementId"] = atTrainingField ? "tutorial_training_field" : "town-a", ["targetSettlementId"] = null },
                 ["party"] = new JsonObject { ["isMoving"] = false },
+                ["quests"] = new JsonArray(new JsonObject { ["id"] = QuestId }),
                 ["storyModeEstablishClan"] = new JsonObject { ["partySize"] = new JsonObject { ["current"] = RecruitedMembers, ["target"] = 5 } }
             };
             return Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["state"] = state }.ToJsonString()));
@@ -882,6 +969,12 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             {
                 _trainingFieldLeft = true;
                 return Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["data"] = new JsonObject { ["menuId"] = "training_field_menu", ["optionId"] = "training_field_leave" } }.ToJsonString()));
+            }
+            if (action == "menuSelect" && _startAtBackstreet && !_backstreetLeft &&
+                ReadString(arguments, "menuId") == "town_backstreet" && ReadString(arguments, "optionId") == "town_backstreet_back")
+            {
+                _backstreetLeft = true;
+                return Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["data"] = new JsonObject { ["menuId"] = "town_backstreet", ["optionId"] = "town_backstreet_back" } }.ToJsonString()));
             }
             if (action == "recruitOptions")
             {
@@ -930,9 +1023,9 @@ internal static class AgentHostEstablishClanRecruitmentLoop
 
     private sealed class FakeObservedRecruitmentDecisionProvider : IAgentHostDecisionProvider
     {
-        private readonly bool _returnStopFirst;
+        private readonly int _returnStopCount;
 
-        internal FakeObservedRecruitmentDecisionProvider(bool returnStopFirst = false) => _returnStopFirst = returnStopFirst;
+        internal FakeObservedRecruitmentDecisionProvider(int returnStopCount = 0) => _returnStopCount = returnStopCount;
 
         internal int CallCount { get; private set; }
         public string ModelId => "deterministic-training-field-recruitment-selftest";
@@ -941,7 +1034,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (_returnStopFirst && CallCount == 0)
+            if (CallCount < _returnStopCount)
             {
                 CallCount++;
                 return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "fake-training-field-premature-stop", new JsonObject
@@ -950,7 +1043,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                     ["reason"] = "There is an action but stopping is simpler."
                 }));
             }
-            if (_returnStopFirst && CallCount == 1 &&
+            if (_returnStopCount > 0 && CallCount == 1 &&
                 (systemPrompt.Contains("RECOVERY DIRECTIVE", StringComparison.Ordinal) != true ||
                  request.GetProperty("decisionFeedback").GetProperty("kind").GetString() != "safe-stop-rejected-with-listed-actions" ||
                  !request.GetProperty("decisionFeedback").GetProperty("requiredNextStep").GetString()!.Contains("menuSelect", StringComparison.Ordinal)))
