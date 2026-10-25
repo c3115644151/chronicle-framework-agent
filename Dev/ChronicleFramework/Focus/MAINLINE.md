@@ -931,6 +931,8 @@ FreeLLMAPI 官方 CLI 现已从 Electron Local Storage 的本地 dashboard sessi
 
 该Run还证明单看模型决策和屏幕关键帧，仍无法回答重复导航有没有缩短到目标的实际距离：progress trace原先不保存Native导航收据及之后的新观察之间的距离关联。当前Harness增量给子流程结果增加脱敏`companionNavigationSummary`，只汇总扫描/导航次数、重复同一目标次数、起始距离与后续观测距离范围、可交互观察次数、交互尝试及成功打开对话次数；目标身份/姓名只用于内存关联，不落盘。它与上述已增加的`recruitmentOfferSummary`一样只诊断，不下达替代动作。下一轮自然运行需核验此摘要是否能区分“接近路径无进展”和“已可交谈但模型没交互”；若仍未进入RecruitmentVM，则不能从offer摘要推断招聘条件。
 
+`TestResults/20261025-232055`在`18b8642`构建后再次从自然StoryMode开局，AI完成教程后续通知、棕色龙旗卡片、家族名“盖·加尔多”、默认旗帜确认及后续Inquiry，EYC自然激活。真实模型把PartySize候选选为当前可见村庄`village_ES3_2`；原版Map旅行后进入Village `MissionState`，Host在11个目标决策、2个PartySize动作后以`recruitment-map-unavailable`安全失败。截图`TimelineFrames/054-capture-MapState---after.jpg`显示角色进入村庄3D场景，和“帝国农民”处在一段原版“点击继续”对话中；当帧未见可选回答。此状态不是坐镇遭遇或已进入RecruitmentVM，当前不能断言该对话是否要求接取新任务，也不能假设自动离开。Gold/Party/Renown/Companion均未推进，原版Quest未完成，`goalVerified=false`。Party子流程收据中两种新增摘要均为null，分别因为未读取RecruitmentVM报价、未进入Companion酒馆路线；因此这个Run并未实测两项摘要。整轮8条Native动作、11次真实模型决策、约86346输入/535输出token；画面录制覆盖5768/5768帧并转换为54张关键帧后删除视频。无崩溃/正式存档/Native自动存档，AutoSave 10→-1→10恢复、Save目录manifest不变，游戏/Host/ffmpeg进程清理通过。Harness `Passed=true`只证明启动、收尾和证据门禁完成，不能当作产品目标成功。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager
