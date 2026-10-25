@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.311'
+$contractVersion = '7.312'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -1225,6 +1225,8 @@ if (-not (Test-Path (Join-Path $harnessRoot 'AgentHost\AgentHostCampaignStateFac
     $agentHostRecruitmentLoopSource -notmatch 'TryResolveBackstreetLeave' -or
     $agentHostRecruitmentLoopSource -notmatch 'host-safe-backstreet-exit-after-model-stop' -or
     $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-native-backstreet-exit-recovery-resumes-on-town-menu' -or
+    $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-resumes-after-native-villagers-in-need-deferral' -or
+    $agentHostRecruitmentLoopSource -notmatch 'VillagersInNeedConversation' -or
     $agentHostDecisionCycleSource -notmatch 'RECOVERY DIRECTIVE: The previous stop was rejected before any Native action' -or
     $agentHostEstablishClanAutonomySource -notmatch 'recruitment-model-stopped' -or
     $agentHostEstablishClanAutonomySource -notmatch 'recruitment-model-stopped-with-safe-actions' -or
