@@ -138,6 +138,7 @@ internal static class AgentHostHarnessProgressTrace
                 ["promptTokens"] = Copy(result, "promptTokens"),
                 ["completionTokens"] = Copy(result, "completionTokens"),
                 ["recruitmentOfferSummary"] = BuildRecruitmentOfferSummary(result["lastRecruitmentOffers"] as JsonObject),
+                ["companionNavigationSummary"] = BuildCompanionNavigationSummary(result["trace"] as JsonArray),
                 ["nativeStateBefore"] = result["nativeStateBefore"]?.DeepClone() ?? BuildNativeStateSummary(result["initialNativeState"] as JsonObject),
                 ["nativeStateAfter"] = result["nativeStateAfter"]?.DeepClone() ?? BuildNativeStateSummary(result["finalNativeState"] as JsonObject ?? result["finalState"] as JsonObject)
             };
@@ -317,6 +318,44 @@ internal static class AgentHostHarnessProgressTrace
                             new JsonObject { ["ownerId"] = "never-copy-notable-id-3", ["troopId"] = "never-copy-troop-id-3", ["cost"] = 10, ["available"] = false })
                     }
                 },
+                ["trace"] = new JsonArray(
+                    new JsonObject
+                    {
+                        ["selectedDecision"] = new JsonObject { ["action"] = "missionNavigateToAgent" },
+                        ["nativeReceipt"] = new JsonObject
+                        {
+                            ["action"] = "missionNavigateToAgent",
+                            ["targetHeroId"] = "never-copy-wanderer-id",
+                            ["data"] = new JsonObject { ["targetDistance"] = 10.0, ["navState"] = "Moving" }
+                        },
+                        ["observation"] = new JsonObject
+                        {
+                            ["selectedWandererHeroId"] = "never-copy-wanderer-id",
+                            ["currentSceneWandererCandidates"] = new JsonArray(new JsonObject { ["heroId"] = "never-copy-wanderer-id", ["name"] = "never-copy-wanderer-name", ["distance"] = 8.0 }),
+                            ["nearbyInteractableWanderers"] = new JsonArray()
+                        }
+                    },
+                    new JsonObject
+                    {
+                        ["selectedDecision"] = new JsonObject { ["action"] = "missionSceneAgents" },
+                        ["nativeReceipt"] = new JsonObject { ["action"] = "missionSceneAgents" },
+                        ["observation"] = new JsonObject
+                        {
+                            ["selectedWandererHeroId"] = "never-copy-wanderer-id",
+                            ["currentSceneWandererCandidates"] = new JsonArray(new JsonObject { ["heroId"] = "never-copy-wanderer-id", ["name"] = "never-copy-wanderer-name", ["distance"] = 6.0 }),
+                            ["nearbyInteractableWanderers"] = new JsonArray(new JsonObject { ["heroId"] = "never-copy-wanderer-id", ["name"] = "never-copy-wanderer-name", ["distance"] = 6.0, ["isInteractable"] = true })
+                        }
+                    },
+                    new JsonObject
+                    {
+                        ["selectedDecision"] = new JsonObject { ["action"] = "missionInteract" },
+                        ["nativeReceipt"] = new JsonObject
+                        {
+                            ["action"] = "missionInteract",
+                            ["data"] = new JsonObject { ["targetHeroId"] = "never-copy-wanderer-id", ["conversationStarted"] = true }
+                        },
+                        ["observation"] = new JsonObject()
+                    }),
                 ["initialNativeState"] = new JsonObject
                 {
                     ["campaignDay"] = 1,
@@ -353,12 +392,17 @@ internal static class AgentHostHarnessProgressTrace
                 ReadInt(objectiveLine["recruitmentOfferSummary"] as JsonObject, "availableOfferCount") != 2 ||
                 ReadInt(objectiveLine["recruitmentOfferSummary"] as JsonObject, "affordableAvailableOfferCount") != 1 ||
                 ReadInt(objectiveLine["recruitmentOfferSummary"] as JsonObject, "lowestAffordableCost") != 25 ||
+                ReadInt(objectiveLine["companionNavigationSummary"] as JsonObject, "navigationAttemptCount") != 1 ||
+                ReadDouble(objectiveLine["companionNavigationSummary"] as JsonObject, "navigationStartDistanceMin") != 10.0 ||
+                ReadDouble(objectiveLine["companionNavigationSummary"] as JsonObject, "selectedTargetObservedDistanceMin") != 6.0 ||
+                ReadInt(objectiveLine["companionNavigationSummary"] as JsonObject, "nearbyInteractableObservationCount") != 1 ||
+                ReadInt(objectiveLine["companionNavigationSummary"] as JsonObject, "successfulConversationStartCount") != 1 ||
                 ReadString(objectiveLine["nativeStateBefore"] as JsonObject, "menuId") != "training_field_menu" ||
                 ReadString(objectiveLine["nativeStateAfter"] as JsonObject, "menuId") is not null ||
                 objectiveLine.ToJsonString().Contains("do not copy", StringComparison.Ordinal) ||
                 objectiveLine.ToJsonString().Contains("never-copy", StringComparison.Ordinal) ||
                 objectiveLine.ContainsKey("failure"))
-                throw new AgentHostException("host-progress-trace-objective-subflow", "Harness diagnostics must record bounded failure codes, safe before/after Native state and aggregate recruitment offer counts without copying free-text failures or Native Hero/Troop IDs.");
+                throw new AgentHostException("host-progress-trace-objective-subflow", "Harness diagnostics must record bounded failure codes and aggregate offer/navigation outcomes without copying free text or Native Hero/Troop IDs and names.");
 
             Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "normal");
             RecordDecision(request.RootElement, new ProviderDecisionResult("completed", "selftest-model", 1, 1, "stop", decision, "selftest/route"));
@@ -368,6 +412,7 @@ internal static class AgentHostHarnessProgressTrace
                 new { scenario = "harness-progress-trace-records-current-modal-and-visible-buttons-without-one-use-token", passed = true },
                 new { scenario = "harness-progress-trace-persists-native-decision-and-route-without-free-text-in-visual-capture-and-lifecycle-modes", passed = true },
                 new { scenario = "harness-progress-trace-reports-only-aggregate-affordable-recruitment-offer-counts", passed = true },
+                new { scenario = "harness-progress-trace-reports-only-aggregate-companion-navigation-progress", passed = true },
                 new { scenario = "harness-progress-trace-records-objective-subflow-termination-and-safe-native-state-summaries", passed = true }
             ];
         }
@@ -415,11 +460,94 @@ internal static class AgentHostHarnessProgressTrace
         };
     }
 
+    private static JsonObject? BuildCompanionNavigationSummary(JsonArray? trace)
+    {
+        if (trace is null) return null;
+
+        var navigationAttempts = 0;
+        var sceneAgentReadCount = 0;
+        var interactionAttemptCount = 0;
+        var successfulConversationStartCount = 0;
+        var sameTargetNavigationRepeatCount = 0;
+        var nearbyInteractableObservationCount = 0;
+        double? navigationStartDistanceMin = null;
+        double? navigationStartDistanceMax = null;
+        double? selectedTargetObservedDistanceMin = null;
+        double? selectedTargetObservedDistanceMax = null;
+        var priorNavigationHeroId = (string?)null;
+
+        foreach (var step in trace.OfType<JsonObject>())
+        {
+            var receipt = step["nativeReceipt"] as JsonObject;
+            var receiptAction = ReadString(receipt, "action");
+            var observation = step["observation"] as JsonObject;
+            var selectedHeroId = ReadString(observation, "selectedWandererHeroId");
+            if (receiptAction == "missionSceneAgents") sceneAgentReadCount++;
+            if (receiptAction == "missionNavigateToAgent")
+            {
+                navigationAttempts++;
+                var targetHeroId = ReadString(receipt, "targetHeroId");
+                if (targetHeroId is not null && targetHeroId == priorNavigationHeroId) sameTargetNavigationRepeatCount++;
+                if (targetHeroId is not null) priorNavigationHeroId = targetHeroId;
+                var startDistance = ReadDouble(receipt?["data"] as JsonObject, "targetDistance");
+                if (startDistance is double observedStartDistance && double.IsFinite(observedStartDistance))
+                {
+                    navigationStartDistanceMin = navigationStartDistanceMin is null ? observedStartDistance : Math.Min(navigationStartDistanceMin.Value, observedStartDistance);
+                    navigationStartDistanceMax = navigationStartDistanceMax is null ? observedStartDistance : Math.Max(navigationStartDistanceMax.Value, observedStartDistance);
+                }
+            }
+            if (receiptAction == "missionInteract")
+            {
+                interactionAttemptCount++;
+                if (ReadBoolean(receipt?["data"] as JsonObject, "conversationStarted")) successfulConversationStartCount++;
+            }
+
+            if (selectedHeroId is null) continue;
+            if (observation?["currentSceneWandererCandidates"] is JsonArray candidates)
+            {
+                var target = candidates.OfType<JsonObject>().FirstOrDefault(candidate => ReadString(candidate, "heroId") == selectedHeroId);
+                var distance = ReadDouble(target, "distance");
+                if (distance is double observedDistance && double.IsFinite(observedDistance))
+                {
+                    selectedTargetObservedDistanceMin = selectedTargetObservedDistanceMin is null ? observedDistance : Math.Min(selectedTargetObservedDistanceMin.Value, observedDistance);
+                    selectedTargetObservedDistanceMax = selectedTargetObservedDistanceMax is null ? observedDistance : Math.Max(selectedTargetObservedDistanceMax.Value, observedDistance);
+                }
+            }
+            if (observation?["nearbyInteractableWanderers"] is JsonArray nearby &&
+                nearby.OfType<JsonObject>().Any(agent => ReadString(agent, "heroId") == selectedHeroId && ReadBoolean(agent, "isInteractable")))
+                nearbyInteractableObservationCount++;
+        }
+
+        if (navigationAttempts == 0 && sceneAgentReadCount == 0 && interactionAttemptCount == 0) return null;
+        return new JsonObject
+        {
+            ["sceneAgentReadCount"] = sceneAgentReadCount,
+            ["navigationAttemptCount"] = navigationAttempts,
+            ["sameTargetNavigationRepeatCount"] = sameTargetNavigationRepeatCount,
+            ["navigationStartDistanceMin"] = navigationStartDistanceMin,
+            ["navigationStartDistanceMax"] = navigationStartDistanceMax,
+            ["selectedTargetObservedDistanceMin"] = selectedTargetObservedDistanceMin,
+            ["selectedTargetObservedDistanceMax"] = selectedTargetObservedDistanceMax,
+            ["nearbyInteractableObservationCount"] = nearbyInteractableObservationCount,
+            ["interactionAttemptCount"] = interactionAttemptCount,
+            ["successfulConversationStartCount"] = successfulConversationStartCount
+        };
+    }
+
     private static bool ReadBoolean(JsonObject? source, string name) =>
         source?[name] is JsonValue value && value.TryGetValue<bool>(out var result) && result;
 
     private static int? ReadInt(JsonObject? source, string name) =>
         source?[name] is JsonValue value && value.TryGetValue<int>(out var result) ? result : null;
+
+    private static double? ReadDouble(JsonObject? source, string name)
+    {
+        if (source?[name] is not JsonValue value) return null;
+        if (value.TryGetValue<double>(out var doubleValue)) return doubleValue;
+        if (value.TryGetValue<int>(out var intValue)) return intValue;
+        if (value.TryGetValue<long>(out var longValue)) return longValue;
+        return null;
+    }
 
     private static string? ReadString(JsonElement source, string name) =>
         source.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;

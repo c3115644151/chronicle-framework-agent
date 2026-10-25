@@ -927,6 +927,10 @@ FreeLLMAPI 官方 CLI 现已从 Electron Local Storage 的本地 dashboard sessi
 
 该轮的PartySize模型在Town菜单执行了一次RecruitmentVM报价查询，然后安全停止；此前的Objective子流程收据只记录停止码/队伍与金币，不包含Offer数据，因此不能判定它当时看到了没有可负担志愿兵，还是看到了报价却拒绝继续。新的Harness `AgentHostProgress.jsonl`对子目标只增加脱敏聚合量（Gold、队伍人数/容量、报价总数、可用及可负担数量、最低可负担价格），不保存Notable/Troop ID、名称或自由文本。它只改善诊断，不替模型选择/招募；`TestResults/20261025-193149`自测试检查这一信息边界。
 
+`TestResults/20261025-214713`使用`auto:reliable`真实路由从全新自然StoryMode开始。AI完成教程跳过后的棕色龙旗卡片、家族名“盖·克鲁沙白”、默认旗帜确认及后续Inquiry，原版EYC自然激活。首个PartySize尝试共9个决策、1个动作，在取得`RecruitmentVM`报价前遇`provider-response-truncated`，故本次无法判断志愿兵报价是否可用。父级继续到Companions：AI进入ES3酒馆，在Tavern Mission中进行了33个原版动作/51个决策；完整Progress trace里有21次`missionNavigateToAgent`与17次`missionSceneAgents`，输入263908 token，随后以`companion-action-recovery-exhausted`结束。酒馆连续关键帧显示角色在场景中移动，但未留下成功对话/招募后验。父级继续Gold并通过原版粮食交易使金币1000→1027、Journal前进；再次尝试Companions时又执行5个动作后遭FreeLLMAPI HTTP429，最终`goalVerified=false`。全Run共64个模型决策、51条已执行Native动作、累计模型用量约321780输入/4647输出token；未完成Original Quest。自动存档10→-1→10恢复、存档目录manifest未变，无原版自动存档调用/崩溃/遗留游戏或录屏进程。Harness `Passed=true`仅说明各阶段、保护与收尾完成；两次Companion失败说明当前循环没有持续有效推进，不能因父级重规划后Gold成功而算作闭环。
+
+该Run还证明单看模型决策和屏幕关键帧，仍无法回答重复导航有没有缩短到目标的实际距离：progress trace原先不保存Native导航收据及之后的新观察之间的距离关联。当前Harness增量给子流程结果增加脱敏`companionNavigationSummary`，只汇总扫描/导航次数、重复同一目标次数、起始距离与后续观测距离范围、可交互观察次数、交互尝试及成功打开对话次数；目标身份/姓名只用于内存关联，不落盘。它与上述已增加的`recruitmentOfferSummary`一样只诊断，不下达替代动作。下一轮自然运行需核验此摘要是否能区分“接近路径无进展”和“已可交谈但模型没交互”；若仍未进入RecruitmentVM，则不能从offer摘要推断招聘条件。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager
