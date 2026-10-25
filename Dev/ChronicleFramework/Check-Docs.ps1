@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.305'
+$contractVersion = '7.306'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -1210,8 +1210,15 @@ if (-not (Test-Path (Join-Path $harnessRoot 'AgentHost\AgentHostCampaignStateFac
     $agentHostCampaignStateFactsSource -notmatch 'campaign-state-facts-hostile-encounter-misclassified' -or
     $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-training-field-menu-misclassified' -or
     $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-training-field-menu-not-exitable' -or
-    $agentHostRecruitmentLoopSource -notmatch 'new JsonArray\("stop"\)' -or
-    $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-listed-stop-interrupts-with-zero-native-actions' -or
+    $agentHostRecruitmentLoopSource -notmatch 'while \(decisions < maxDecisions\)' -or
+    $agentHostRecruitmentLoopSource -notmatch 'decision.Decision, "stop"\) && catalog.Count > 0' -or
+    $agentHostRecruitmentLoopSource -notmatch 'safe-stop-rejected-with-listed-actions' -or
+    $agentHostRecruitmentLoopSource -notmatch 'Choose the currently listed recruitOptions action now' -or
+    $agentHostRecruitmentLoopSource -notmatch 'does not recruit anyone or spend Gold' -or
+    $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-recruit-options-recovery-unclear' -or
+    $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-bounds-premature-stop-while-safe-native-actions-remain' -or
+    $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-rejects-premature-stop-and-replans-from-current-native-catalog' -or
+    $agentHostDecisionCycleSource -notmatch 'RECOVERY DIRECTIVE: The previous stop was rejected before any Native action' -or
     $agentHostEstablishClanAutonomySource -notmatch 'recruitment-model-stopped' -or
     $agentHostGoldSaleLoopSource -notmatch 'gold-sale-self-test-training-field-menu-not-exitable' -or
     $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-self-test-training-field-menu-not-exitable' -or

@@ -100,6 +100,11 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         if (noOfferCatalog.Count != 1 || ReadString(noOfferCatalog[0] as JsonObject, "action") != "menuSelect" || noOfferLeaveOption != "town_leave")
             throw new AgentHostException("establish-clan-recruitment-unavailable-offers-looped", "After the current Native RecruitmentVM returns no affordable/available volunteers, the subgoal must expose the current settlement's Native Leave action instead of querying the same unavailable offers again.");
 
+        var recruitOptionsRecovery = BuildSafeStopRecoveryInstruction(new JsonArray(new JsonObject { ["action"] = "recruitOptions" }));
+        if (!recruitOptionsRecovery.Contains("does not recruit anyone or spend Gold", StringComparison.Ordinal) ||
+            !recruitOptionsRecovery.Contains("current original RecruitmentVM", StringComparison.Ordinal))
+            throw new AgentHostException("establish-clan-recruitment-recruit-options-recovery-unclear", "When a model stops while only the Native offer query remains, recovery must explicitly explain that recruitOptions is read-only before asking the model to use it.");
+
         var trainingFieldMenu = new JsonObject
         {
             ["context"] = new JsonObject
@@ -139,10 +144,10 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         var stopProvider = new FakeRecruitmentStopProvider();
         var stopResult = await RunAsync(request.RootElement, stopClient, stopClient, stopClient, stopProvider, CancellationToken.None);
         if (ReadString(stopResult, "status") != "interrupted" ||
-            ReadString(stopResult["termination"] as JsonObject, "reason") != "recruitment-model-stopped" ||
-            ReadInt(stopResult, "actionsExecuted", 0) != 0 || stopProvider.CallCount != 1 || stopClient.Actions.Count != 0)
-            throw new AgentHostException("establish-clan-recruitment-safe-stop-self-test-failed", "A listed stop control must safely stop PartySize without being rejected as unavailable or executing a Native recruitment action.");
-        results.Add(new { scenario = "establish-clan-recruitment-listed-stop-interrupts-with-zero-native-actions", passed = true });
+            ReadString(stopResult["termination"] as JsonObject, "reason") != "recruitment-model-stopped-with-safe-actions" ||
+            ReadInt(stopResult, "actionsExecuted", 0) != 0 || stopProvider.CallCount != 2 || stopClient.Actions.Count != 0)
+            throw new AgentHostException("establish-clan-recruitment-premature-stop-self-test-failed", "Repeated model stop decisions while safe Native actions remain listed must stop after bounded feedback without sending or substituting a Native recruitment action.");
+        results.Add(new { scenario = "establish-clan-recruitment-bounds-premature-stop-while-safe-native-actions-remain", passed = true });
 
         var unavailableClient = new FakeRecruitmentNativeClient(startOnMap: false);
         var unavailableProvider = new FakeRecruitmentDecisionProvider();
@@ -166,6 +171,17 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             !trainingFieldClient.Actions.SequenceEqual(["menuSelect", "recruitOptions", "recruit"], StringComparer.Ordinal))
             throw new AgentHostException("establish-clan-recruitment-training-field-runtime-self-test-failed", "The Native PartySize subflow must leave the original training-field location menu before querying a Town RecruitmentVM and verifying a volunteer in the Journal.");
         results.Add(new { scenario = "establish-clan-recruitment-native-training-field-leave-to-volunteer-to-journal-verification", passed = true });
+
+        var stopRecoveryClient = new FakeRecruitmentNativeClient(startAtTrainingField: true);
+        var stopRecoveryProvider = new FakeObservedRecruitmentDecisionProvider(returnStopFirst: true);
+        var stopRecoveryRun = await RunAsync(request.RootElement, stopRecoveryClient, stopRecoveryClient, stopRecoveryClient, stopRecoveryProvider, CancellationToken.None);
+        var stopRecoveryTrace = stopRecoveryRun["trace"] as JsonArray ?? new JsonArray();
+        if (ReadString(stopRecoveryRun, "status") != "completed" ||
+            ReadInt(stopRecoveryRun, "actionsExecuted", 0) != 3 || stopRecoveryProvider.CallCount != 4 ||
+            !stopRecoveryClient.Actions.SequenceEqual(["menuSelect", "recruitOptions", "recruit"], StringComparer.Ordinal) ||
+            !stopRecoveryTrace.OfType<JsonObject>().Any(step => ReadString(step["decisionFeedback"] as JsonObject, "kind") == "safe-stop-rejected-with-listed-actions"))
+            throw new AgentHostException("establish-clan-recruitment-safe-stop-recovery-self-test-failed", "A model stop while a safe Native action is listed must be rejected without a Native command, then the model may continue from the current catalog and complete the original recruitment route. status=" + ReadString(stopRecoveryRun, "status") + "; termination=" + ReadString(stopRecoveryRun["termination"] as JsonObject, "reason") + "; actions=" + string.Join(",", stopRecoveryClient.Actions) + "; calls=" + stopRecoveryProvider.CallCount + "; feedbackSteps=" + stopRecoveryTrace.OfType<JsonObject>().Count(step => ReadString(step["decisionFeedback"] as JsonObject, "kind") == "safe-stop-rejected-with-listed-actions"));
+        results.Add(new { scenario = "establish-clan-recruitment-rejects-premature-stop-and-replans-from-current-native-catalog", passed = true });
         return results;
     }
 
@@ -220,6 +236,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         double? initialCampaignDay = null;
         double? lastCampaignDay = null;
         var rejectedDecisions = 0;
+        var rejectedPrematureStops = 0;
         var start = Stopwatch.GetTimestamp();
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxSeconds));
@@ -227,7 +244,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         try
         {
             await provider.CheckConfiguredModelAsync(elapsed.Token);
-            for (var iteration = 0; iteration < maxDecisions - decisions; iteration++)
+            while (decisions < maxDecisions)
             {
                 elapsed.Token.ThrowIfCancellationRequested();
                 using var nativeState = await campaignClient.ReadStateAsync(elapsed.Token);
@@ -322,6 +339,25 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                     ["completionTokens"] = decision.CompletionTokens
                 });
 
+                if (ReadBoolean(decision.Decision, "stop") && catalog.Count > 0)
+                {
+                    if (rejectedPrematureStops >= 1)
+                        return BuildResult("interrupted", "recruitment-model-stopped-with-safe-actions", "The model repeated stop after one recovery request while the current Native state still exposed safe actions; no gameplay action was substituted.", "recruitment-model-stopped-with-safe-actions", state, currentRecruitOffers, journal, objective);
+                    rejectedPrematureStops++;
+                    var availableActions = catalog.OfType<JsonObject>()
+                        .Select(item => ReadString(item, "action"))
+                        .Where(name => !string.IsNullOrWhiteSpace(name))
+                        .Select(name => name!)
+                        .Distinct(StringComparer.Ordinal)
+                        .ToArray();
+                    feedback = new JsonObject
+                    {
+                        ["kind"] = "safe-stop-rejected-with-listed-actions",
+                        ["requiredNextStep"] = BuildSafeStopRecoveryInstruction(catalog, availableActions)
+                    };
+                    trace.Add(BuildStep(decisions, observation, decision.Decision, null, feedback.DeepClone() as JsonObject, state, null));
+                    continue;
+                }
                 if (ReadBoolean(decision.Decision, "stop"))
                     return BuildResult("interrupted", "recruitment-model-stopped", ReadString(decision.Decision, "reason") ?? "The model safely stopped the PartySize subgoal before another Native action.", "recruitment-model-stopped", state, currentRecruitOffers, journal, objective);
 
@@ -355,6 +391,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                         return BuildResult("failed", "model-rejection-limit", "The Native recruitment action boundary rejected repeated stale/unsupported decisions.", "recruitment-rejection-limit", state, currentRecruitOffers, journal, objective);
                     continue;
                 }
+                rejectedPrematureStops = 0;
 
                 var actionStarted = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
                 JsonDocument response;
@@ -676,6 +713,33 @@ internal static class AgentHostEstablishClanRecruitmentLoop
 
     private static JsonObject RejectedFeedback(string kind, string message) => new() { ["kind"] = kind, ["message"] = message };
 
+    private static string BuildSafeStopRecoveryInstruction(JsonArray catalog, string[]? actionNames = null)
+    {
+        var names = actionNames ?? catalog.OfType<JsonObject>()
+            .Select(item => ReadString(item, "action"))
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name!)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        if (names.Length == 1)
+        {
+            var action = names[0];
+            if (action == "recruitOptions")
+                return "Choose the currently listed recruitOptions action now. It only reads the current original RecruitmentVM offers; it does not recruit anyone or spend Gold. Then choose only an exact offer from the fresh Native result, or leave if no affordable offer is listed.";
+            if (action == "menuSelect")
+                return "Choose the currently listed Native menuSelect action and one exact enabled option from its current argumentValues. If it is the settlement Leave option, use it to return to the campaign map and search another visible safe Town/Village.";
+            if (action == "mapSettlementTargets")
+                return "Choose the currently listed mapSettlementTargets query. It only reads visible safe settlement targets and does not move the party or change world time.";
+            if (action == "move")
+                return "Choose one currently listed settlement ID for the original Native move action, then passively observe until that move ends.";
+            if (action == "recruit")
+                return "Choose one currently listed affordable offer using its exact current ownerId, troopId, slot, and confirmation value; Native will revalidate those values before recruitment.";
+        }
+
+        return "A safe stop is not available while the current Native catalog lists " + string.Join(", ", names) + ". Choose one action from the current allowedActions catalog; it will be revalidated against fresh Native state before any game action is sent.";
+    }
+
     private static JsonObject BuildStep(int iteration, JsonObject observation, JsonObject? decision, JsonObject? receipt,
         JsonObject? feedback, JsonObject? afterState, string? startedAt, JsonObject? timing = null)
     {
@@ -866,6 +930,10 @@ internal static class AgentHostEstablishClanRecruitmentLoop
 
     private sealed class FakeObservedRecruitmentDecisionProvider : IAgentHostDecisionProvider
     {
+        private readonly bool _returnStopFirst;
+
+        internal FakeObservedRecruitmentDecisionProvider(bool returnStopFirst = false) => _returnStopFirst = returnStopFirst;
+
         internal int CallCount { get; private set; }
         public string ModelId => "deterministic-training-field-recruitment-selftest";
         public string ConfigurationSource => "harness-fake-provider";
@@ -873,6 +941,20 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (_returnStopFirst && CallCount == 0)
+            {
+                CallCount++;
+                return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "fake-training-field-premature-stop", new JsonObject
+                {
+                    ["stop"] = true,
+                    ["reason"] = "There is an action but stopping is simpler."
+                }));
+            }
+            if (_returnStopFirst && CallCount == 1 &&
+                (systemPrompt.Contains("RECOVERY DIRECTIVE", StringComparison.Ordinal) != true ||
+                 request.GetProperty("decisionFeedback").GetProperty("kind").GetString() != "safe-stop-rejected-with-listed-actions" ||
+                 !request.GetProperty("decisionFeedback").GetProperty("requiredNextStep").GetString()!.Contains("menuSelect", StringComparison.Ordinal)))
+                throw new AgentHostException("training-field-premature-stop-feedback-invalid", "The recovery decision must receive the current Native menu action and a concise instruction before any Native action is issued.");
             var allowed = request.GetProperty("allowedActions");
             if (allowed.GetArrayLength() == 0) throw new AgentHostException("training-field-selftest-action-catalog-empty", "The fake Native training-field route exposed no currently allowed action.");
             var selected = allowed[0];

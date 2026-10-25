@@ -255,8 +255,15 @@ internal static class AgentHostDecisionCycle
     internal static Task<ProviderDecisionResult> DecideEstablishClanRecruitmentAsync(
         IAgentHostDecisionProvider provider,
         JsonObject request,
-        CancellationToken cancellationToken) =>
-        DecideAsync(provider, request, EstablishClanRecruitmentSystemPrompt, cancellationToken);
+        CancellationToken cancellationToken)
+    {
+        var prompt = EstablishClanRecruitmentSystemPrompt;
+        var feedback = request["decisionFeedback"] as JsonObject;
+        if (ReadString(feedback, "kind") == "safe-stop-rejected-with-listed-actions")
+            prompt += " RECOVERY DIRECTIVE: The previous stop was rejected before any Native action because the current Native catalog still contains safe actions. Follow the exact required next step using only the current allowedActions; do not return stop again unless the current catalog is empty. " +
+                (ReadString(feedback, "requiredNextStep") ?? "Choose one listed Native action; stop is allowed only when no action is currently listed.");
+        return DecideAsync(provider, request, prompt, cancellationToken);
+    }
 
     internal static Task<ProviderDecisionResult> DecideEstablishClanGoldSaleAsync(
         IAgentHostDecisionProvider provider,
