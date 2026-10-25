@@ -147,7 +147,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                 villagersInNeedChoiceState, null, null, null, false, out _, out _, out _, out _))
             throw new AgentHostException("establish-clan-villagers-in-need-options-not-current", "Only clickable answers from the exact current VillagersInNeed ConversationManager list may be selected.");
 
-        var unrelatedMissionState = VillagersInNeedConversationState(new JsonArray(), "unrelated_hero");
+        var unrelatedMissionState = VillagersInNeedConversationState(new JsonArray(), "unrelated_character");
         if (BuildActionCatalog(unrelatedMissionState, new JsonObject { ["partySize"] = new JsonObject { ["target"] = 5 } }, null, null, null, false).Count != 0)
             throw new AgentHostException("establish-clan-recruitment-unrelated-mission-action-leaked", "A generic Village/Town Mission must not inherit this one StoryMode-specific conversation recovery route.");
 
@@ -239,13 +239,13 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         return results;
     }
 
-    private static JsonObject VillagersInNeedConversationState(JsonArray options, string heroId = VillagersInNeedHeroId) => new()
+    private static JsonObject VillagersInNeedConversationState(JsonArray options, string characterId = VillagersInNeedHeroId) => new()
     {
         ["context"] = new JsonObject
         {
             ["gameState"] = "MissionState", ["menuId"] = "village", ["encounterActive"] = true,
             ["encounteredPartyId"] = VillagersInNeedVillageId,
-            ["conversation"] = new JsonObject { ["heroId"] = heroId, ["sentenceText"] = "Native villager line", ["options"] = options.DeepClone() },
+            ["conversation"] = new JsonObject { ["characterId"] = characterId, ["sentenceText"] = "Native villager line", ["options"] = options.DeepClone() },
             ["captivity"] = new JsonObject { ["isCaptive"] = false }
         },
         ["location"] = new JsonObject { ["currentSettlementId"] = VillagersInNeedVillageId },
@@ -685,7 +685,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         var conversation = context?["conversation"] as JsonObject;
         return ReadString(context, "gameState") == "MissionState" &&
                ReadString(location, "currentSettlementId") == VillagersInNeedVillageId &&
-               ReadString(conversation, "heroId") == VillagersInNeedHeroId &&
+               ReadString(conversation, "characterId") == VillagersInNeedHeroId &&
                state?["quests"] is JsonArray quests &&
                quests.OfType<JsonObject>().Any(quest => ReadString(quest, "id") == VillagersInNeedQuestId);
     }
@@ -1170,7 +1170,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                     ["inquiryOpen"] = false,
                     ["conversation"] = inVillagerConversation ? new JsonObject
                     {
-                        ["heroId"] = VillagersInNeedHeroId,
+                    ["characterId"] = VillagersInNeedHeroId,
                         ["sentenceText"] = _dialogueStage is 1 or 3 ? "Native VillagersInNeed answer line" : "Native VillagersInNeed NPC line",
                         ["options"] = conversationOptions
                     } : null,

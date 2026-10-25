@@ -56,7 +56,7 @@ try {
         ProcessStopped = $stop.processStopped
     }
     $result.Passed = (
-        $snapshot.schemaVersion -eq 21 -and
+        $snapshot.schemaVersion -eq 27 -and
         $null -eq $snapshot.mission -and
         $snapshot.location.PSObject.Properties['targetPosition'] -and
         ($null -eq $snapshot.location.targetPosition -or ($null -ne $snapshot.location.targetPosition.x -and $null -ne $snapshot.location.targetPosition.y -and $null -ne $snapshot.location.targetPosition.isOnLand)) -and

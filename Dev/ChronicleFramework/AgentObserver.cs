@@ -54,7 +54,7 @@ internal static class ChronicleAgentObserver
 
         var json = new StringBuilder(4096);
         json.Append('{');
-        json.Append("\"schemaVersion\":26");
+        json.Append("\"schemaVersion\":27");
         json.Append(",\"campaignDay\":").Append(Number(CampaignTime.Now.ToDays));
         json.Append(",\"identity\":{");
         Property(json, "heroId", hero.StringId); Property(json, "heroName", hero.Name?.ToString(), true);
@@ -167,6 +167,8 @@ internal static class ChronicleAgentObserver
         else
         {
             json.Append('{');
+            Property(json, "characterId", conversationManager.OneToOneConversationCharacter?.StringId);
+            Property(json, "characterName", conversationManager.OneToOneConversationCharacter?.Name?.ToString(), true);
             Property(json, "heroId", conversationManager.OneToOneConversationHero?.StringId);
             Property(json, "heroName", conversationManager.OneToOneConversationHero?.Name?.ToString(), true);
             Property(json, "sentenceText", conversationManager.CurrentSentenceText, true);
