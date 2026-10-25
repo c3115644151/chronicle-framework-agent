@@ -919,6 +919,8 @@ FreeLLMAPI 官方 CLI 现已从 Electron Local Storage 的本地 dashboard sessi
 
 `TestResults/20261025-162307`对上述具体恢复提示作真实新战役复验。AI再次自然完成Tutorial-skip后的通知、棕色龙旗卡片、模型命名“哈拉图”、BannerEditor Done与后续Inquiry，并自然激活原版EYC；Companion子目标由模型安全停止（2条Native动作，未声称招募）。PartySize在波罗斯Town菜单启动时，原版`recruit_volunteers`选项可用、MainParty仍为1人、Gold 1000；真实模型连续两次选择stop，Host按安全边界没有发出任何PartySize动作，结果为`recruitment-model-stopped-with-safe-actions`。当时父循环不识别这个新终止名，导致整轮停止而没有继续其它目标。该次14个模型决策、8条Native动作、没有Gold/Renown/Party/Journal进展，`goalVerified=false`；不应把Host按约束安全中断称为模型完成或原版问题。无游戏崩溃、正式保存/自动存档或保存目录变化，AutoSave 10→-1→10恢复且进程清理通过。现在父循环只在可用free Map上把这个PartySize路线临时加入`unavailableObjectives`，继续其他未完成目标；之后Native Journal进展可清空临时阻塞集合，重试该目标。`TestResults/20261025-164525` Build/AgentHostPackage通过（228 Provider、16 Campaign、9 BattleSimulation场景；模型调用0、Native命令0），该父循环修复的真实Campaign效果待下一轮验证。
 
+`TestResults/20261025-183732`使用`f0c68e9`后的真实`auto:reliable`模型评估。AI自行完成Skip Tutorial后的通知/旗帜卡片/家族名“Khergit”/默认Banner Done/后续Inquiry并自然激活原版EYC。Companion首次安全停止后，PartySize在Town主菜单调用一次RecruitmentVM报价观察，模型仍stop两次；父级将该目标临时标为不可用，继续到Gold，真实Native Grain sale从1000→1029并由Journal确认。之后复试Companion时收到FreeLLMAPI HTTP429，遵循门禁不重试非网关限流、不回放动作，整个Host以`provider-http-error`结束，`goalVerified=false`；本轮没有遇到`town_backstreet`，所以没有验证新Backstreet专用Leave恢复。总计29个模型决定、19条Native命令；无崩溃、正式存档、自动存档或存档目录变更，AutoSave 10→-1→10恢复，游戏/Host清理和录像覆盖15257/15257通过。它真实证明“PartySize受阻→父级继续Gold并获得原版Journal进度”，不证明士兵增长、Renown、同伴招募或Quest完成。
+
 ## 主要来源
 
 - Voyager: https://github.com/MineDojo/Voyager
