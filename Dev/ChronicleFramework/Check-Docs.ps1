@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.314'
+$contractVersion = '7.316'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -76,6 +76,7 @@ $agentHostHarnessProgressTraceSource = Get-Content (Join-Path $harnessRoot 'Agen
 $agentHostProviderContractSelfTestSource = Get-Content (Join-Path $harnessRoot 'AgentHost\ProviderContractSelfTest.cs') -Raw -Encoding UTF8
 $agentHostProviderSource = Get-Content (Join-Path $harnessRoot 'AgentHost\OllamaNativeProvider.cs') -Raw -Encoding UTF8
 $agentHostRuntimeControllerSource = Get-Content (Join-Path $harnessRoot 'AgentHostRuntimeController.cs') -Raw -Encoding UTF8
+$agentPlayerInputOwnershipSource = Get-Content (Join-Path $harnessRoot 'AgentPlayerInputOwnership.cs') -Raw -Encoding UTF8
 $agentHostLifecycleReceiptSource = Get-Content (Join-Path $harnessRoot 'AgentHostLifecycleReceipt.cs') -Raw -Encoding UTF8
 $agentHostLifecycleEvaluationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostLifecycleEvaluation.ps1') -Raw -Encoding UTF8
 $agentHostDecisionCycleSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostDecisionCycle.cs') -Raw -Encoding UTF8
@@ -873,7 +874,37 @@ if ($harnessScript -notmatch "'AgentHostLifecycleEvaluation' \{ @\('Preflight', 
     $agentHostRuntimeControllerSource -notmatch 'ReadLineAsync\(\)\.ConfigureAwait\(false\)' -or
     $agentHostRuntimeControllerSource -notmatch '!_hostOutput\.IsCompleted' -or
     $subModuleSource -notmatch 'Instance\?\.StartAgent\?\.Invoke\(\)' -or
-    $agentHostRuntimeControllerSource -notmatch 'Instance\?\.StopAgent') {
+    $agentHostRuntimeControllerSource -notmatch 'Instance\?\.StopAgent' -or
+    $agentHostRuntimeControllerSource -notmatch 'TryPrepareForAgentStart\(\)' -or
+    $agentHostRuntimeControllerSource -notmatch 'ShouldOwnPlayerInput' -or
+    $agentHostRuntimeControllerSource -notmatch 'agent-host-process-exit-observed' -or
+    $agentPlayerInputOwnershipSource -notmatch 'ScreenManager\.AddGlobalLayer' -or
+    $agentPlayerInputOwnershipSource -notmatch 'InputUsageMask\.All' -or
+    $agentPlayerInputOwnershipSource -notmatch 'MissionState\.Current\?\.CurrentMission' -or
+    $agentPlayerInputOwnershipSource -notmatch 'MapViewsContainer' -or
+    $agentPlayerInputOwnershipSource -notmatch 'TryRepairDefaultToggleBinding' -or
+    $agentPlayerInputOwnershipSource -notmatch 'HotKeyManager\.MarkForSave' -or
+    $agentPlayerInputOwnershipSource -notmatch 'StopGameOnFocusLost = true' -or
+    $agentPlayerInputOwnershipSource -notmatch 'ScreenManager\.OnGameWindowFocusChange\(focusGained: false\)' -or
+    $agentPlayerInputOwnershipSource -notmatch 'TestFocusGuardPrefix' -or
+    $agentPlayerInputOwnershipSource -notmatch 'DescribeFocusPermissionPatchOwners' -or
+    $agentPlayerInputOwnershipSource -notmatch 'Input\.PressKey\(InputKey\.Escape\)' -or
+    $agentPlayerInputOwnershipSource -notmatch 'ForceMouseDownForRoutingProbe' -or
+    $agentPlayerInputOwnershipSource -notmatch 'harmony\.Unpatch\(target, HarmonyPatchType\.All' -or
+    $agentPlayerInputOwnershipSource -notmatch 'BannerlordConfig\.StopGameOnFocusLost = priorStopOnFocusLoss' -or
+    $agentPlayerInputOwnershipSource -match 'SendInput|keybd_event|SetCursorPos' -or
+    $agentHostLifecycleHarness -notmatch 'InputOwnershipSafeHandoffVerified' -or
+    $agentHostLifecycleHarness -notmatch 'InputOwnershipAutoReleasedAfterHostExit' -or
+    $agentHostLifecycleHarness -notmatch 'FocusGuardOwnerPrefixVerified' -or
+    $agentHostLifecycleHarness -notmatch 'FocusGuardPlayerPrefixPassthroughVerified' -or
+    $agentHostLifecycleHarness -notmatch 'ScreenLayerCaptureConfigurationVerified' -or
+    $agentHostLifecycleHarness -notmatch 'SyntheticScreenInputRoutingVerified' -or
+    $agentHostLifecycleHarness -notmatch 'HostExitObservedEvents' -or
+    $agentHostLifecycleHarness -notmatch 'agent-input-focus-guard-installed' -or
+    $agentHostLifecycleHarness -notmatch 'FocusLossEscapeSuppressionVerified' -or
+    $agentHostLifecycleHarness -notmatch 'CHRONICLE_HARNESS_AGENT_INPUT_FOCUS_TEST' -or
+    $agentHostLifecycleHarness -notmatch 'diagnosticRunStartedUtc' -or
+    $agentHostLifecycleHarness -notmatch '\[DateTimeOffset\]::Parse') {
     throw 'Agent Host lifecycle verification must remain opt-in, use a disposable Campaign, exercise the registered MCM action delegates, require a versioned Native-PID handshake before Running, stop safely, and preserve source fixture/process cleanup.'
 }
 if ($harnessScript -notmatch "'AgentHostLifecycleCompletionEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostLifecycleCompletionEvaluation'\) \}" -or
@@ -1142,7 +1173,7 @@ $persuasionAdapterSource = Get-Content (Join-Path $harnessRoot 'AgentPersuasionA
 $persuasionFixtureSource = Get-Content (Join-Path $harnessRoot 'HarnessPersuasionFixture.cs') -Raw -Encoding UTF8
 $persuasionDetailsTest = Get-Content (Join-Path $harnessRoot 'Test-AgentPersuasionDetails.ps1') -Raw -Encoding UTF8
 if (-not (Test-Path (Join-Path $harnessRoot 'AgentPersuasionAdapter.cs')) -or -not (Test-Path (Join-Path $harnessRoot 'HarnessPersuasionFixture.cs')) -or -not (Test-Path (Join-Path $harnessRoot 'Test-AgentPersuasionDetails.ps1')) -or $harnessScript -notmatch "'PersuasionDetails'\s*\{\s*@\('Preflight', 'Build', 'PersuasionDetails'\)" -or $harnessScript -notmatch "Invoke-Stage -Name 'PersuasionDetails'" -or $agentCliSource -notmatch "'persuasionDetails'" -or $agentCliSource -notmatch "'harnessCurrentConversationAnswers'" -or $agentProtocolSource -notmatch 'case "persuasionDetails"' -or $agentProtocolSource -notmatch 'ChroniclePersuasionAdapter.ReadCurrentPersuasion' -or $agentProtocolSource -notmatch 'ChroniclePersuasionAdapter.IsVisiblePersuasionOption' -or $agentProtocolSource -notmatch 'case "harnessCurrentConversationAnswers"' -or $agentProtocolSource -notmatch 'ReadCurrentNativeAnswerList' -or $agentDecisionLoopSource -notmatch "\['persuasionDetails'\]\s*=\s*@\(\)" -or $persuasionAdapterSource -notmatch 'MapConversationVM' -or $persuasionAdapterSource -notmatch 'AnswerList' -or $persuasionAdapterSource -notmatch 'PersuasionItem' -or $persuasionAdapterSource -notmatch 'SuccessChance' -or $persuasionAdapterSource -match 'StartPersuasion|CommitProgress|DoOption\(' -or $persuasionFixtureSource -notmatch 'visual-capture' -or $persuasionFixtureSource -notmatch 'currently rendered, enabled Native AnswerList' -or $persuasionDetailsTest -notmatch 'VisibleCurrentPersuasionOptionAccepted' -or $persuasionDetailsTest -notmatch 'harnessCurrentConversationAnswers' -or $persuasionDetailsTest -notmatch 'answerCount' -or $persuasionDetailsTest -notmatch 'FixtureUnchanged' -or $persuasionDetailsTest -notmatch 'ProcessStopped') { throw 'PersuasionDetails must wait for the Native answer list, bind Persuasion data only to its visible options, submit through dialogueSelect, and prove fixture/process safety.' }
-if ($subModuleSource -notmatch 'TryInstallHarnessFocusLossEscapeMenuGuard' -or $subModuleSource -notmatch 'IsOpeningEscapeMenuOnFocusChangeAllowedForAll' -or $subModuleSource -notmatch 'IsHarnessFocusLossEscapeMenuGuardMode' -or $subModuleSource -notmatch 'mode == "agent-host-lifecycle-test"' -or $subModuleSource -notmatch 'mode == "fresh-campaign-renown"' -or $subModuleSource -notmatch 'visual-capture' -or $subModuleSource -notmatch 'KeepNativeEscapeMenuClosedWhenHarnessLosesFocus' -or $agentProtocolSource -notmatch 'MapScreen.Instance\?\.IsEscapeMenuOpened == true' -or $agentProtocolSource -notmatch 'mapStateForPursuit.AtMenu' -or $agentProtocolSource -notmatch 'harnessFocusLossEscapeMenuGuardInstalled' -or $mapPartyQuestAcceptanceTest -notmatch 'harnessMapDiagnostics' -or $mapPartyQuestAcceptanceTest -notmatch 'mapStateAtMenu' -or $mapPartyQuestAcceptanceTest -notmatch 'escapeMenuOpen' -or $mapPartyQuestAcceptanceTest -notmatch 'harnessFocusLossEscapeMenuGuardInstalled') { throw 'Background visual, lifecycle, and fresh-campaign Harness runs must suppress only automatic focus-loss Escape overlays, while continuing to reject map actions when an Escape menu is genuinely open.' }
+if ($subModuleSource -notmatch 'TryInstallHarnessFocusLossEscapeMenuGuard' -or $subModuleSource -notmatch 'IsOpeningEscapeMenuOnFocusChangeAllowedForAll' -or $subModuleSource -notmatch 'IsHarnessFocusLossEscapeMenuGuardMode' -or $subModuleSource -notmatch 'mode == "agent-host-lifecycle-test"' -or $subModuleSource -notmatch 'CHRONICLE_HARNESS_AGENT_INPUT_FOCUS_TEST' -or $subModuleSource -notmatch 'mode == "fresh-campaign-renown"' -or $subModuleSource -notmatch 'visual-capture' -or $subModuleSource -notmatch 'KeepNativeEscapeMenuClosedWhenHarnessLosesFocus' -or $agentProtocolSource -notmatch 'MapScreen.Instance\?\.IsEscapeMenuOpened == true' -or $agentProtocolSource -notmatch 'mapStateForPursuit.AtMenu' -or $agentProtocolSource -notmatch 'harnessFocusLossEscapeMenuGuardInstalled' -or $mapPartyQuestAcceptanceTest -notmatch 'harnessMapDiagnostics' -or $mapPartyQuestAcceptanceTest -notmatch 'mapStateAtMenu' -or $mapPartyQuestAcceptanceTest -notmatch 'escapeMenuOpen' -or $mapPartyQuestAcceptanceTest -notmatch 'harnessFocusLossEscapeMenuGuardInstalled') { throw 'Background visual, lifecycle, and fresh-campaign Harness runs must suppress only automatic focus-loss Escape overlays, while the dedicated input-ownership probe bypasses that Harness guard to test the product guard; map actions continue to reject a genuinely open Escape menu.' }
 $mainHeroSkillsTest = Get-Content (Join-Path $harnessRoot 'Test-AgentMainHeroSkills.ps1') -Raw -Encoding UTF8
 if ($mainHeroSkillsTest -notmatch 'mainHeroSkills' -or $mainHeroSkillsTest -notmatch 'harnessPlayerSkillsDiagnostics' -or $mainHeroSkillsTest -notmatch 'LevelsMatchNative' -or $mainHeroSkillsTest -notmatch 'SnapshotUnchanged' -or $mainHeroSkillsTest -notmatch 'FixtureUnchanged' -or $mainHeroSkillsTest -notmatch 'ProcessStopped') { throw 'MainHeroSkills must compare the read-only state snapshot to native Hero.GetSkillValue values and prove state/fixture/process safety.' }
 $characterDevelopmentTest = Get-Content (Join-Path $harnessRoot 'Test-AgentCharacterDevelopment.ps1') -Raw -Encoding UTF8
@@ -1454,6 +1485,8 @@ if ($harnessScript -notmatch "'FreshStoryModeNativeInquiryResponseEvaluation' \{
 if ($harnessScript -notmatch 'function Remove-RetainedAgentHostPackage' -or
     $harnessScript -notmatch 'CHRONICLE_AGENT_HOST_TEST_PATH' -or
     $harnessScript -notmatch 'Remove-RetainedAgentHostPackage \$script:retainedAgentHostPackageRoot' -or
+    $harnessScript -notmatch 'retainPackageForSameSessionRuntime = \$Phase -in @\([^\r\n]*''AgentHostLifecycleEvaluation''' -or
+    $harnessScript -notmatch 'finally \{[\s\S]*?Remove-RetainedAgentHostPackage \$script:retainedAgentHostPackageRoot[\s\S]*?AgentHostLifecycleEvaluation' -or
     $harnessScript -notmatch 'Test-AgentHostPackage\.ps1' -or $harnessScript -notmatch '-CleanupPackageRoot' -or
     $agentHostPackageSource -notmatch 'Cleanup-only mode refuses while a Bannerlord or Agent Host process may still use the package') { throw 'Same-session MCM runtime testing must use the verified self-contained D: package artifact and remove only its unique temporary folder after game/Host processes are gone.' }
 if ($freshCampaignTest -notmatch 'FreshStoryModeSetup\.mp4' -or

@@ -27,7 +27,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.314'
+$HarnessContractVersion = '7.316'
 $effectiveSmokeTimeoutSeconds = if ($Phase -in @('FreshStoryModeModelEvaluation','FreshStoryModeNativeInquiryResponseEvaluation','AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostEstablishClanAutonomyEvaluation','AgentHostCaptivityRecoveryEvaluation','AgentHostEstablishClanGoldSaleEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max($SmokeTimeoutSeconds, 240) } else { $SmokeTimeoutSeconds }
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
@@ -722,7 +722,7 @@ foreach ($stage in $requestedStages) {
         'AgentHostPackage' {
             Invoke-Stage -Name 'AgentHostPackage' -Action {
                 $packageEvidencePath = Join-Path $harnessTempDirectory 'AgentHostPackage'
-                $retainPackageForSameSessionRuntime = $Phase -eq 'FreshStoryModeModelEvaluation'
+                $retainPackageForSameSessionRuntime = $Phase -in @('FreshStoryModeModelEvaluation', 'AgentHostLifecycleEvaluation', 'AgentHostLifecycleCompletionEvaluation')
                 $packageArguments = @('-ProjectPath', $agentHostProjectPath, '-EvidencePath', $packageEvidencePath)
                 if ($retainPackageForSameSessionRuntime) { $packageArguments += '-RetainRuntimePackage' }
                 try {
@@ -837,18 +837,34 @@ foreach ($stage in $requestedStages) {
         }
         'AgentHostLifecycleEvaluation' {
             Invoke-Stage -Name 'AgentHostLifecycleEvaluation' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostLifecycleEvaluationScript -Scenario $LifecycleScenario 2>&1 | Out-String
-                $testExitCode = $LASTEXITCODE
-                if ($testExitCode -ne 0) { throw "Game-owned Agent Host lifecycle test failed with exit code $testExitCode.`n$testOutput" }
-                $testOutput
+                try {
+                    $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostLifecycleEvaluationScript -Scenario $LifecycleScenario 2>&1 | Out-String
+                    $testExitCode = $LASTEXITCODE
+                    if ($testExitCode -ne 0) { throw "Game-owned Agent Host lifecycle test failed with exit code $testExitCode.`n$testOutput" }
+                    $testOutput
+                }
+                finally {
+                    if ($script:retainedAgentHostPackageRoot) { Remove-RetainedAgentHostPackage $script:retainedAgentHostPackageRoot }
+                    $script:retainedAgentHostPackageRoot = $null
+                    $script:retainedAgentHostExecutablePath = $null
+                    [Environment]::SetEnvironmentVariable('CHRONICLE_AGENT_HOST_TEST_PATH', $previousAgentHostTestPath, 'Process')
+                }
             }
         }
         'AgentHostLifecycleCompletionEvaluation' {
             Invoke-Stage -Name 'AgentHostLifecycleCompletionEvaluation' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostLifecycleEvaluationScript -Scenario Complete -TimeoutSeconds 300 2>&1 | Out-String
-                $testExitCode = $LASTEXITCODE
-                if ($testExitCode -ne 0) { throw "Game-owned real-model Host completion test failed with exit code $testExitCode.`n$testOutput" }
-                $testOutput
+                try {
+                    $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostLifecycleEvaluationScript -Scenario Complete -TimeoutSeconds 300 2>&1 | Out-String
+                    $testExitCode = $LASTEXITCODE
+                    if ($testExitCode -ne 0) { throw "Game-owned real-model Host completion test failed with exit code $testExitCode.`n$testOutput" }
+                    $testOutput
+                }
+                finally {
+                    if ($script:retainedAgentHostPackageRoot) { Remove-RetainedAgentHostPackage $script:retainedAgentHostPackageRoot }
+                    $script:retainedAgentHostPackageRoot = $null
+                    $script:retainedAgentHostExecutablePath = $null
+                    [Environment]::SetEnvironmentVariable('CHRONICLE_AGENT_HOST_TEST_PATH', $previousAgentHostTestPath, 'Process')
+                }
             }
         }
         'Observation' {

@@ -105,7 +105,8 @@ public sealed class SubModule : MBSubModuleBase
     private static bool IsHarnessFocusLossEscapeMenuGuardMode()
     {
         var mode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
-        return mode == "visual-capture" || mode == "agent-host-lifecycle-test" || mode == "fresh-campaign-renown";
+        return mode == "visual-capture" || mode == "fresh-campaign-renown" ||
+               (mode == "agent-host-lifecycle-test" && Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_INPUT_FOCUS_TEST") != "1");
     }
 
     internal static bool HarnessFocusLossEscapeMenuGuardInstalled => _harnessFocusLossEscapeMenuGuardInstalled;
@@ -160,6 +161,7 @@ public sealed class SubModule : MBSubModuleBase
     protected override void OnBeforeInitialModuleScreenSetAsRoot()
     {
         base.OnBeforeInitialModuleScreenSetAsRoot();
+        ChroniclePlayerInputOwnership.Tick();
         FreshCampaignHarness.ArmIfRequested();
         if (Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") == "smoke")
         {
@@ -185,6 +187,7 @@ public sealed class SubModule : MBSubModuleBase
         base.OnApplicationTick(dt);
         TrySkipHarnessStartupVideo();
         ChronicleAgentRuntimeController.Tick();
+        ChroniclePlayerInputOwnership.Tick();
         if (AgentHostCampaignTransitionHarness.Tick()) return;
         var harnessStartState = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_START_STATE") == "InventoryState" ? "InventoryState" : "MapState";
         if (!_harnessAgentLifecycleStartRequested &&
@@ -228,6 +231,7 @@ public sealed class SubModule : MBSubModuleBase
             ChronicleDiagnostics.Write("campaign-agent-behavior-rebound|reason=current-campaign");
         }
         _campaignBehavior?.PollAgentProtocol();
+        ChroniclePlayerInputOwnership.Tick();
     }
 
     private static bool IsNativeCampaignMusicInitialized()
@@ -315,6 +319,7 @@ public sealed class SubModule : MBSubModuleBase
     {
         ChronicleDiagnostics.Write("submodule-unload");
         ChronicleAgentRuntimeController.StopForSubModuleUnload();
+        ChroniclePlayerInputOwnership.Release();
         base.OnSubModuleUnloaded();
     }
 }

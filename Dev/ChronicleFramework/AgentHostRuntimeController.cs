@@ -38,6 +38,7 @@ internal static class ChronicleAgentRuntimeController
     private static bool _stopRequested;
     private static bool _stopSignalSent;
     private static bool _shutdownRequested;
+    private static bool _hostExitObservedLogged;
     private static DateTime _hostReadyUtc;
     private static string _runId = string.Empty;
     private static string _forcedFailureDetail = string.Empty;
@@ -111,6 +112,8 @@ internal static class ChronicleAgentRuntimeController
     internal static string StatusMessage => string.IsNullOrWhiteSpace(_detail) ? StatusText : StatusText + "：" + _detail;
     internal static bool IsHostRunning => _state == RuntimeState.Running && _process != null && !_process.HasExited;
     internal static bool OwnsHost => _process != null;
+    internal static bool ShouldOwnPlayerInput => _startRequested ||
+        (_process != null && !_process.HasExited && _state is RuntimeState.Starting or RuntimeState.Running or RuntimeState.Stopping);
 
     internal static void RequestStatus() => ShowMessage(StatusMessage);
 
@@ -122,9 +125,16 @@ internal static class ChronicleAgentRuntimeController
             return;
         }
 
+        if (!ChroniclePlayerInputOwnership.TryPrepareForAgentStart())
+        {
+            SetState(RuntimeState.Failed, "游戏内输入保护未就绪；Host未启动");
+            return;
+        }
+
         _startRequested = true;
         _stopRequested = false;
         _stopSignalSent = false;
+        _hostExitObservedLogged = false;
         SetState(RuntimeState.Starting, "等待Campaign与Host初始化");
     }
 
@@ -159,6 +169,7 @@ internal static class ChronicleAgentRuntimeController
         if (_process == null) return;
         if (_process.HasExited)
         {
+            RecordHostProcessExitObserved("process-exit-detected");
             CompleteExitedHost();
             return;
         }
@@ -526,9 +537,14 @@ internal static class ChronicleAgentRuntimeController
     {
         try
         {
-            if (!IsOwnedLiveProcess()) return;
+            if (!IsOwnedLiveProcess())
+            {
+                if (_process != null && _process.HasExited) RecordHostProcessExitObserved("already-exited-at-stop-timeout");
+                return;
+            }
             _process.Kill();
             _process.WaitForExit(1000);
+            if (_process.HasExited) RecordHostProcessExitObserved("terminated-after-stop-timeout");
             SetState(RuntimeState.Failed, "Host未在停止时限内退出；进程已结束，动作结果可能不确定且不会重放");
         }
         catch (Exception exception)
@@ -539,6 +555,17 @@ internal static class ChronicleAgentRuntimeController
         {
             DisposeProcessHandles();
         }
+    }
+
+    private static void RecordHostProcessExitObserved(string reason)
+    {
+        if (_hostExitObservedLogged) return;
+        _hostExitObservedLogged = true;
+        var exitCode = -1;
+        try { if (_process != null && _process.HasExited) exitCode = _process.ExitCode; }
+        catch { }
+        try { ChronicleDiagnostics.Write("agent-host-process-exit-observed|pid=" + _ownedProcessId + "|exitCode=" + exitCode + "|reason=" + reason); }
+        catch { }
     }
 
     private static bool IsOwnedLiveProcess()

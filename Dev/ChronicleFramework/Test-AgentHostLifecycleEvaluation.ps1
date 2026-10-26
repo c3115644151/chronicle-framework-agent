@@ -71,18 +71,20 @@ $profilePath = Join-Path $profileDirectory 'ChronicleAgentSettings.json'
 $fixtureHashBefore = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
 $hostResponseFilesBefore = @(Get-ChildItem -LiteralPath $responseRoot -File -Filter 'host-*.json' -ErrorAction SilentlyContinue | ForEach-Object Name)
 $priorValues = @{}
-foreach ($name in @('CHRONICLE_HARNESS_MODE','CHRONICLE_AGENT_PROFILE_PATH','CHRONICLE_AGENT_HOST_TEST_PATH','CHRONICLE_HARNESS_AGENT_AUTO_START','CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS','CHRONICLE_HARNESS_AGENT_GOAL','CHRONICLE_HARNESS_AGENT_NO_MODEL','CHRONICLE_HARNESS_AGENT_FAILURE_CASE','CHRONICLE_HARNESS_AGENT_IGNORE_STOP','CHRONICLE_HARNESS_AGENT_START_STATE','CHRONICLE_HARNESS_AGENT_ROUNDTRIP','CHRONICLE_HARNESS_AGENT_ROUNDTRIP_SAVE_ID')) {
+foreach ($name in @('CHRONICLE_HARNESS_MODE','CHRONICLE_AGENT_PROFILE_PATH','CHRONICLE_AGENT_HOST_TEST_PATH','CHRONICLE_HARNESS_AGENT_AUTO_START','CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS','CHRONICLE_HARNESS_AGENT_GOAL','CHRONICLE_HARNESS_AGENT_NO_MODEL','CHRONICLE_HARNESS_AGENT_FAILURE_CASE','CHRONICLE_HARNESS_AGENT_IGNORE_STOP','CHRONICLE_HARNESS_AGENT_START_STATE','CHRONICLE_HARNESS_AGENT_ROUNDTRIP','CHRONICLE_HARNESS_AGENT_ROUNDTRIP_SAVE_ID','CHRONICLE_HARNESS_AGENT_INPUT_FOCUS_TEST')) {
     $priorValues[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
 $gameProcessId = 0
 $hostProcessId = 0
 $loadReceipt = $null
 $baseline = $null
+$trainingFieldMenuExitApplied = $false
 $endingState = $null
 $stopReceipt = $null
 $failure = $null
 $states = @()
 $hostReadyEvents = @()
+$inputOwnershipEvents = @()
 $nativeHandshakeVerified = $false
 $nativeSessionGuardVerified = $false
 $startupRejectionCases = @()
@@ -105,6 +107,7 @@ $roundtripSaveHash = $null
 $lastMoveTargetId = $null
 $nativeWriteActions = @()
 $hostExitEvents = @()
+$hostExitObservedEvents = @()
 $watch = [Diagnostics.Stopwatch]::StartNew()
 
 function Invoke-LifecycleCli([string]$Action, [string[]]$Arguments = @()) {
@@ -125,14 +128,29 @@ try {
     $env:CHRONICLE_HARNESS_AGENT_FAILURE_CASE = if ($expectsFailure) { $Scenario } else { '' }
     $env:CHRONICLE_HARNESS_AGENT_IGNORE_STOP = if ($Scenario -eq 'StopTimeout') { '1' } else { '' }
     $env:CHRONICLE_HARNESS_AGENT_START_STATE = if ($Scenario -eq 'NonMap') { 'InventoryState' } else { 'MapState' }
+    $env:CHRONICLE_HARNESS_AGENT_INPUT_FOCUS_TEST = if ($Scenario -eq 'Stop') { '1' } else { '0' }
     $env:CHRONICLE_HARNESS_AGENT_ROUNDTRIP = if ($Scenario -eq 'CampaignRoundtrip') { '1' } else { '' }
     $env:CHRONICLE_HARNESS_AGENT_ROUNDTRIP_SAVE_ID = if ($Scenario -eq 'CampaignRoundtrip') { $roundtripSaveName.Substring('ChronicleRT-'.Length) } else { '' }
 
+    $diagnosticRunStartedUtc = [DateTime]::UtcNow
     $loadReceipt = Invoke-LifecycleCli 'load' @('-SaveName', $SaveName)
     if ($loadReceipt.status -ne 'completed' -or -not $loadReceipt.session.processId) { throw 'The lifecycle fixture did not reach its Native Campaign handshake.' }
     $gameProcessId = [int]$loadReceipt.session.processId
     $baseline = Invoke-LifecycleCli 'state'
     if ($baseline.status -ne 'completed' -or $baseline.state.context.gameState -ne 'MapState') { throw 'Lifecycle baseline was not a current Campaign Map observation.' }
+    if ($baseline.state.context.menuId -eq 'training_field_menu') {
+        $nativeLeave = @($baseline.state.availableMenuOptions | Where-Object { $_.id -eq 'training_field_leave' -and $_.enabled -eq $true })
+        if ($nativeLeave.Count -ne 1) { throw 'Training-field lifecycle fixture has no current enabled Native Leave option.' }
+        $leaveTrainingField = Invoke-LifecycleCli 'menuSelect' @('-MenuId','training_field_menu','-OptionId','training_field_leave')
+        if ($leaveTrainingField.status -ne 'completed') { throw 'Disposable lifecycle fixture could not leave the training field through the current Native menu option.' }
+        $trainingFieldMenuExitApplied = $true
+        $baseline = Invoke-LifecycleCli 'state'
+        if ($baseline.status -ne 'completed' -or $baseline.state.context.gameState -ne 'MapState' -or
+            $baseline.state.context.menuId -eq 'training_field_menu' -or $baseline.state.context.inquiryOpen -eq $true -or
+            $baseline.state.context.escapeMenuOpen -eq $true) {
+            throw 'Lifecycle focus-loss baseline did not settle on the free Campaign Map after the Native training-field Leave.'
+        }
+    }
     if ($Scenario -eq 'NonMap') {
         $inventoryReceipt = Invoke-LifecycleCli 'inventoryOpen'
         if ($inventoryReceipt.status -ne 'completed') { throw 'The non-map fixture could not open the existing Native inventory entry.' }
@@ -172,24 +190,37 @@ try {
         Start-Sleep -Milliseconds 250
         if (-not (Test-Path -LiteralPath $diagnosticLog -PathType Leaf)) { continue }
         $lines = @(Get-Content -LiteralPath $diagnosticLog -Encoding UTF8)
-        $gameLines = @($lines | Where-Object { $_ -match "\|pid=$gameProcessId\|agent-host-" })
-        $rejectionLines = @($lines | Where-Object { $_ -match "\|pid=$gameProcessId\|harness-agent-start-rejection\|" })
-        if (@($lines | Where-Object { $_ -match "\|pid=$gameProcessId\|harness-agent-start-rejection-failed\|" }).Count -gt 0) {
+        $runLines = @($lines | Where-Object {
+            $timestampMatch = [regex]::Match($_, '^(?<utc>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\|')
+            if (-not $timestampMatch.Success) { return $false }
+            [DateTimeOffset]::Parse($timestampMatch.Groups['utc'].Value).UtcDateTime -ge $diagnosticRunStartedUtc
+        })
+        $gameLines = @($runLines | Where-Object { $_ -match "\|pid=$gameProcessId\|agent-host-" })
+        $rejectionLines = @($runLines | Where-Object { $_ -match "\|pid=$gameProcessId\|harness-agent-start-rejection\|" })
+        if (@($runLines | Where-Object { $_ -match "\|pid=$gameProcessId\|harness-agent-start-rejection-failed\|" }).Count -gt 0) {
             throw 'A startup rejection fixture failed; no normal Host launch was attempted.'
         }
-        $duplicateStartLines = @($lines | Where-Object { $_ -match "\|pid=$gameProcessId\|harness-agent-duplicate-start\|" })
+        $duplicateStartLines = @($runLines | Where-Object { $_ -match "\|pid=$gameProcessId\|harness-agent-duplicate-start\|" })
         $states = @($gameLines | Where-Object { $_ -match '\|agent-host-state\|' })
         $hostReadyEvents = @($gameLines | Where-Object { $_ -match '\|agent-host-ready\|' })
         $startedLine = @($gameLines | Where-Object { $_ -match '\|agent-host-process-started\|' } | Select-Object -Last 1)
         $hostExitEvents = @($gameLines | Where-Object { $_ -match '\|agent-host-process-exit\|' })
-        $roundtripLines = @($lines | Where-Object { $_ -match "\|pid=$gameProcessId\|harness-agent-campaign-roundtrip-complete\|" })
-        if (@($lines | Where-Object { $_ -match "\|pid=$gameProcessId\|harness-agent-campaign-roundtrip-failed\|" }).Count -gt 0) { throw 'Native Campaign roundtrip fixture failed; see the game diagnostics.' }
+        $hostExitObservedEvents = @($gameLines | Where-Object { $_ -match '\|agent-host-process-exit-observed\|' })
+        $inputOwnershipEvents = @($runLines | Where-Object {
+            $_ -match "\|pid=$gameProcessId\|agent-input-(layer-installed|focus-guard-installed|mission-input-blocked|mission-input-restored|focus-baseline|layer-probe|routing-probe(-injected)?)\|" -or
+            $_ -match "\|pid=$gameProcessId\|agent-input-routing-probe\|" -or
+            $_ -match "\|pid=$gameProcessId\|agent-input-focus-(probe|restored-probe)\|" -or
+            $_ -match "\|pid=$gameProcessId\|agent-player-input-owner\|"
+        })
+        $roundtripLines = @($runLines | Where-Object { $_ -match "\|pid=$gameProcessId\|harness-agent-campaign-roundtrip-complete\|" })
+        if (@($runLines | Where-Object { $_ -match "\|pid=$gameProcessId\|harness-agent-campaign-roundtrip-failed\|" }).Count -gt 0) { throw 'Native Campaign roundtrip fixture failed; see the game diagnostics.' }
         if ($Scenario -eq 'CampaignRoundtrip' -and $roundtripLines.Count -eq 1) { break }
         if ($startedLine.Count -gt 0 -and $startedLine[0] -match '\|agent-host-process-started\|pid=(\d+)\|') { $hostProcessId = [int]$Matches[1] }
         $sawStopped = @($states | Where-Object { $_ -match '\|state=Stopped\|' }).Count -gt 0
         $sawCompleted = @($states | Where-Object { $_ -match '\|state=Completed\|' }).Count -gt 0
         $sawFailed = @($states | Where-Object { $_ -match '\|state=Failed\|' }).Count -gt 0
         if ($Scenario -eq 'NonMap' -and $sawFailed) { break }
+        if ($Scenario -eq 'Stop' -and $sawFailed -and $startedLine.Count -eq 0) { break }
         if ($Scenario -eq 'ParentExited' -and $hostProcessId -gt 0 -and $hostReadyEvents.Count -gt 0) { break }
         if ($Scenario -ne 'CampaignRoundtrip' -and ((($sawStopped -or $sawCompleted) -and $hostExitEvents.Count -gt 0) -or ($sawFailed -and $startedLine.Count -gt 0))) { break }
     } while ([DateTime]::UtcNow -lt $deadline)
@@ -386,6 +417,29 @@ $sessionClean = -not (Test-Path -LiteralPath $sessionPath -PathType Leaf)
 $fixtureHashAfter = if (Test-Path -LiteralPath $savePath -PathType Leaf) { (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash } else { $null }
 $fixtureUnchanged = $fixtureHashBefore -eq $fixtureHashAfter
 $roundtripSaveRemoved = ($Scenario -ne 'CampaignRoundtrip')
+$inputLayerInstalled = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-input-layer-installed\|' }).Count -eq 1
+$focusGuardInstalled = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-input-focus-guard-installed\|' }).Count -eq 1
+$agentOwnerEvent = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-player-input-owner\|owner=agent$' } | Select-Object -First 1)
+$playerOwnerEvent = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-player-input-owner\|owner=player$' } | Select-Object -Last 1)
+$focusProbeEvents = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-input-focus-probe\|' })
+$focusSuppressionEvent = @($focusProbeEvents | Where-Object { $_ -match '\|passed=True\|.*\|nativeBaselinePermission=True\|' })
+$focusGuardOwnerPrefixEvent = @($focusProbeEvents | Where-Object { $_ -match '\|guardPrefixOverride=True\|' })
+$focusCallbackEscapeClosedEvent = @($focusProbeEvents | Where-Object { $_ -match '\|callbackEscapeStayedClosed=True\|' })
+$focusRestorationEvent = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-input-focus-restored-probe\|passed=True\|' })
+$focusGuardPlayerPrefixEvent = @($focusRestorationEvent | Where-Object { $_ -match '\|guardPrefixPassthrough=True(?:\||$)' })
+$screenLayerProbeEvent = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-input-layer-probe\|passed=True\|present=True\|topmost=True\|mask=All\|focus=True\|hitTest=True$' })
+$screenInputRoutingEvent = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-input-routing-probe\|' })
+$screenInputRoutingPassed = @($screenInputRoutingEvent | Where-Object { $_ -match '\|mousePassed=True\|escapePassed=True\|' }).Count -eq 1
+$hostExitEvent = @($hostExitObservedEvents | Select-Object -Last 1)
+$inputOwnershipAutoReleasedAfterHostExit = $agentOwnerEvent.Count -eq 1 -and $playerOwnerEvent.Count -eq 1 -and $hostExitEvent.Count -eq 1 -and
+    [string]$playerOwnerEvent[0] -match '^([^|]+)\|' -and [string]$hostExitEvent[0] -match '^([^|]+)\|' -and
+    [DateTime]::Parse([string]$hostExitEvent[0].Split('|')[0]).ToUniversalTime() -le [DateTime]::Parse([string]$playerOwnerEvent[0].Split('|')[0]).ToUniversalTime()
+$inputOwnershipSafeHandoffVerified = $inputLayerInstalled -and $focusGuardInstalled -and $agentOwnerEvent.Count -eq 1 -and
+    $playerOwnerEvent.Count -eq 1 -and $hostExitEvent.Count -eq 1 -and $focusGuardOwnerPrefixEvent.Count -eq 1 -and $focusGuardPlayerPrefixEvent.Count -eq 1 -and $focusRestorationEvent.Count -eq 1 -and $screenLayerProbeEvent.Count -eq 1 -and
+    [string]$agentOwnerEvent[0] -match '^([^|]+)\|' -and [string]$playerOwnerEvent[0] -match '^([^|]+)\|' -and
+    [string]$hostExitEvent[0] -match '^([^|]+)\|' -and
+    [DateTime]::Parse([string]$agentOwnerEvent[0].Split('|')[0]).ToUniversalTime() -le [DateTime]::Parse([string]$hostExitEvent[0].Split('|')[0]).ToUniversalTime() -and
+    [DateTime]::Parse([string]$hostExitEvent[0].Split('|')[0]).ToUniversalTime() -le [DateTime]::Parse([string]$playerOwnerEvent[0].Split('|')[0]).ToUniversalTime()
 if ($Scenario -eq 'CampaignRoundtrip' -and $roundtripSaveCreationRequested -and $processesStopped -and (Test-Path -LiteralPath $roundtripSavePath -PathType Leaf)) {
     $allowedSaveRoot = [IO.Path]::GetFullPath($saveDirectory).TrimEnd('\') + '\'
     $actualRoundtripPath = [IO.Path]::GetFullPath($roundtripSavePath)
@@ -395,12 +449,13 @@ if ($Scenario -eq 'CampaignRoundtrip' -and $roundtripSaveCreationRequested -and 
     }
     $roundtripSaveRemoved = -not (Test-Path -LiteralPath $roundtripSavePath -PathType Leaf)
 }
-$passed = ($null -eq $failure -and $gameProcessId -gt 0 -and ($hostProcessId -gt 0 -or $nonMapRejected) -and $processesStopped -and $sessionClean -and $fixtureUnchanged -and ($Scenario -ne 'Stop' -or $nativeWriteActions.Count -eq 0) -and ($Scenario -ne 'ParentExited' -or $parentExitVerified) -and ($Scenario -ne 'CampaignRoundtrip' -or ($campaignRoundtripVerified -and $roundtripSaveCreated -and $roundtripSaveRemoved)))
+$passed = ($null -eq $failure -and $gameProcessId -gt 0 -and ($hostProcessId -gt 0 -or $nonMapRejected) -and $processesStopped -and $sessionClean -and $fixtureUnchanged -and ($Scenario -ne 'Stop' -or ($nativeWriteActions.Count -eq 0 -and $inputOwnershipSafeHandoffVerified)) -and ($Scenario -ne 'StopTimeout' -or $inputOwnershipAutoReleasedAfterHostExit) -and ($Scenario -ne 'ParentExited' -or $parentExitVerified) -and ($Scenario -ne 'CampaignRoundtrip' -or ($campaignRoundtripVerified -and $roundtripSaveCreated -and $roundtripSaveRemoved)))
 $result = [pscustomobject][ordered]@{
     Passed = [bool]$passed
     Scenario = $Scenario
     ProviderKind = if ($expectsProviderPreflightFailure) { 'Local provider health rejection; zero generation and Native commands' } elseif ($expectsUnsupportedGoal) { 'Real local 4b goal classification through the game-launched Host' } elseif ($usesIdleProvider) { 'Harness-only idle provider; no model service or generation' } else { 'Real local 4b model through the game-launched Host' }
     GameProcessId = $gameProcessId
+    DiagnosticsRunStartedUtc = $diagnosticRunStartedUtc.ToString('O')
     AgentHostProcessId = $hostProcessId
     ModelId = if ($hostReceipt) { $hostReceipt.providerModelId } else { $providerModelId }
     HostReceipt = $hostReceipt
@@ -423,11 +478,23 @@ $result = [pscustomobject][ordered]@{
     AutoStopAfterMilliseconds = $AutoStopAfterMilliseconds
     LifecycleStates = @($states | ForEach-Object { [string]$_ })
     NativeHandshakeVerified = [bool]$nativeHandshakeVerified
+    TrainingFieldMenuExitApplied = [bool]$trainingFieldMenuExitApplied
+    InputOwnershipSafeHandoffVerified = [bool]$inputOwnershipSafeHandoffVerified
+    InputOwnershipAutoReleasedAfterHostExit = [bool]$inputOwnershipAutoReleasedAfterHostExit
+    FocusLossEscapeSuppressionVerified = [bool]($focusSuppressionEvent.Count -eq 1)
+    FocusGuardOwnerPrefixVerified = [bool]($focusGuardOwnerPrefixEvent.Count -eq 1)
+    FocusGuardPlayerPrefixPassthroughVerified = [bool]($focusGuardPlayerPrefixEvent.Count -eq 1)
+    FocusCallbackEscapeStayedClosed = [bool]($focusCallbackEscapeClosedEvent.Count -eq 1)
+    NativeFocusEscapePermissionAllowedAtBaseline = [bool](@($focusProbeEvents | Where-Object { $_ -match '\|nativeBaselinePermission=True\|' }).Count -gt 0)
+    ScreenLayerCaptureConfigurationVerified = [bool]($screenLayerProbeEvent.Count -eq 1)
+    SyntheticScreenInputRoutingVerified = [bool]$screenInputRoutingPassed
+    InputOwnershipEvents = @($inputOwnershipEvents | ForEach-Object { [string]$_ })
     NativeSessionGuardVerified = [bool]$nativeSessionGuardVerified
     StartupRejectionCases = @($startupRejectionCases)
     DuplicateStartVerified = [bool]$duplicateStartVerified
     HostReadyEvents = @($hostReadyEvents | ForEach-Object { [string]$_ })
     HostExitEvents = @($hostExitEvents | ForEach-Object { [string]$_ })
+    HostExitObservedEvents = @($hostExitObservedEvents | ForEach-Object { [string]$_ })
     NativeGoalActions = @($nativeWriteActions | ForEach-Object { [string]$_ })
     GameStillUsableAfterHostStop = [bool]($endingState -and $endingState.status -eq 'completed')
     NativeLocationUnchanged = if ($Scenario -eq 'Stop') { [bool]($endingState -and $baseline -and $endingState.state.location.currentSettlementId -ceq $baseline.state.location.currentSettlementId) } else { $null }
