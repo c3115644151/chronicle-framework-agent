@@ -11,6 +11,7 @@ using TaleWorlds.InputSystem;
 using TaleWorlds.Library;
 using TaleWorlds.Localization;
 using TaleWorlds.MountAndBlade;
+using TaleWorlds.MountAndBlade.ViewModelCollection.GameOptions.GameKeys;
 using TaleWorlds.ScreenSystem;
 
 namespace ChronicleFramework;
@@ -179,13 +180,22 @@ internal static class ChroniclePlayerInputOwnership
         {
             var textManager = TaleWorlds.MountAndBlade.Module.CurrentModule.GlobalTextManager;
             var category = textManager.FindText("str_key_category_name", ChronicleAgentControlGameKeyContext.CategoryId)?.ToString();
-            var keyName = textManager.FindText("str_key_name", ChronicleAgentControlGameKeyContext.CategoryId + "_ToggleAgentControl")?.ToString();
-            var keyDescription = textManager.FindText("str_key_description", ChronicleAgentControlGameKeyContext.CategoryId + "_ToggleAgentControl")?.ToString();
+            var keyTextId = ChronicleAgentControlGameKeyContext.CategoryId + "_" + ((GameKeyDefinition)ChronicleAgentControlGameKeyContext.ToggleControl).ToString();
+            var keyName = textManager.FindText("str_key_name", keyTextId)?.ToString();
+            var keyDescription = textManager.FindText("str_key_description", keyTextId)?.ToString();
             var loaded = !string.IsNullOrWhiteSpace(category) && !category.Contains(ChronicleAgentControlGameKeyContext.CategoryId) &&
-                         !string.IsNullOrWhiteSpace(keyName) && !keyName.Contains("ToggleAgentControl") &&
-                         !string.IsNullOrWhiteSpace(keyDescription) && !keyDescription.Contains("ToggleAgentControl");
+                         !string.IsNullOrWhiteSpace(keyName) && !keyName.Contains(keyTextId) &&
+                         !string.IsNullOrWhiteSpace(keyDescription) && !keyDescription.Contains(keyTextId);
+            var options = new GameKeyOptionCategoryVM(_ => { }, new[] { GameKeyMainCategories.CampaignMapCategory }, Array.Empty<int>());
+            var option = options.GameKeyGroups.SelectMany(group => group.GameKeys).FirstOrDefault(item =>
+                item.CurrentGameKey.GroupId == ChronicleAgentControlGameKeyContext.CategoryId &&
+                item.CurrentGameKey.Id == ChronicleAgentControlGameKeyContext.ToggleControl);
+            var listedInNativeOptions = option != null && option.Name == keyName &&
+                                       option.Description == keyDescription && option.CurrentKey != null;
+            options.OnFinalize();
             ChronicleDiagnostics.Write("agent-input-key-display-text|loaded=" + loaded + "|categoryPresent=" + !string.IsNullOrWhiteSpace(category) +
-                "|namePresent=" + !string.IsNullOrWhiteSpace(keyName) + "|descriptionPresent=" + !string.IsNullOrWhiteSpace(keyDescription));
+                "|namePresent=" + !string.IsNullOrWhiteSpace(keyName) + "|descriptionPresent=" + !string.IsNullOrWhiteSpace(keyDescription) +
+                "|optionsVisible=" + listedInNativeOptions + "|optionsKey=" + (option?.OptionValueText ?? "missing"));
         }
         catch (Exception exception)
         {
@@ -781,7 +791,7 @@ internal sealed class ChronicleAgentControlGameKeyContext : GameKeyContext
     internal const int ToggleControl = 0;
 
     internal ChronicleAgentControlGameKeyContext()
-        : base(CategoryId, 1, GameKeyContextType.AuxiliarySerializedAndShownInOptions)
+        : base(CategoryId, 1, GameKeyContextType.Default)
     {
         RegisterGameKey(new GameKey(ToggleControl, "ToggleAgentControl", CategoryId, InputKey.F10, InputKey.Invalid,
             GameKeyMainCategories.CampaignMapCategory));

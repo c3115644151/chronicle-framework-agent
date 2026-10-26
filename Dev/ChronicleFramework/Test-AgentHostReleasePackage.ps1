@@ -167,9 +167,12 @@ function Invoke-PackagedSmoke([string]$IsolatedRoot) {
     $stdoutPath = Join-Path $harnessTemp 'ReleasePackageSmoke.stdout.log'
     $stderrPath = Join-Path $harnessTemp 'ReleasePackageSmoke.stderr.log'
     $previousGameRoot = [Environment]::GetEnvironmentVariable('CHRONICLE_GAME_ROOT','Process')
+    $previousSteamRoot = [Environment]::GetEnvironmentVariable('CHRONICLE_STEAM_ROOT','Process')
     $previousHarnessMode = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_MODE','Process')
     $process = $null
     [Environment]::SetEnvironmentVariable('CHRONICLE_GAME_ROOT',$IsolatedRoot,'Process')
+    $realSteamRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $gameRoot))
+    [Environment]::SetEnvironmentVariable('CHRONICLE_STEAM_ROOT',$realSteamRoot,'Process')
     [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_MODE','smoke','Process')
     try {
         $startInfo = [Diagnostics.ProcessStartInfo]::new()
@@ -207,6 +210,7 @@ function Invoke-PackagedSmoke([string]$IsolatedRoot) {
         }
         if ($process) { $process.Dispose() }
         [Environment]::SetEnvironmentVariable('CHRONICLE_GAME_ROOT',$previousGameRoot,'Process')
+        [Environment]::SetEnvironmentVariable('CHRONICLE_STEAM_ROOT',$previousSteamRoot,'Process')
         [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_MODE',$previousHarnessMode,'Process')
     }
 }

@@ -36,7 +36,7 @@ if ('GameText:global_strings' -notin $moduleGameTextXml) { throw 'Chronicle SubM
 $globalStringsPath = Join-Path $modulePath 'ModuleData\global_strings.xml'
 if (-not (Test-Path -LiteralPath $globalStringsPath -PathType Leaf)) { throw 'Chronicle native key display strings were not deployed to ModuleData.' }
 [xml]$globalStrings = Get-Content -LiteralPath $globalStringsPath -Raw -Encoding UTF8
-foreach ($stringId in @('str_key_category_name.ChronicleAgentControl','str_key_name.ChronicleAgentControl_ToggleAgentControl','str_key_description.ChronicleAgentControl_ToggleAgentControl')) {
+foreach ($stringId in @('str_key_category_name.ChronicleAgentControl','str_key_name.ChronicleAgentControl_Up','str_key_description.ChronicleAgentControl_Up')) {
     if (@($globalStrings.strings.string | Where-Object { $_.id -eq $stringId -and -not [string]::IsNullOrWhiteSpace([string]$_.text) }).Count -ne 1) {
         throw "Chronicle native control-key display string is missing or duplicated: $stringId"
     }
@@ -90,7 +90,11 @@ if (-not $WithoutChronicle) {
 $moduleArgument = '_MODULES_*' + ($modules -join '*') + '*_MODULES_'
 $arguments = "/singleplayer $moduleArgument /anticheat /no_watchdog"
 
-$steamRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $gameRoot))
+$steamRoot = if (-not [string]::IsNullOrWhiteSpace($env:CHRONICLE_STEAM_ROOT)) {
+    [IO.Path]::GetFullPath($env:CHRONICLE_STEAM_ROOT)
+} else {
+    Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $gameRoot))
+}
 $steamStatus = Ensure-ChronicleSteamClientReady -SteamRoot $steamRoot
 Set-ChronicleTestDisplayConfig -EngineConfigPath $engineConfig
 if (Test-Path $engineConfig) {
@@ -115,6 +119,7 @@ $lifecycleLoadObserved = $WithoutChronicle.IsPresent
 $gameStartObserved = $WithoutChronicle.IsPresent
 $mcmSettingsRegistered = $WithoutChronicle.IsPresent
 $inputControlKeyDisplayTextLoaded = $WithoutChronicle.IsPresent
+$inputControlKeyVisibleInNativeOptions = $WithoutChronicle.IsPresent
 $mcmSettingPropertyIds = @()
 $mcmButtonPropertyIds = @()
 $validationButtonType = if ($WithoutChronicle) { 'not-tested' } else { 'missing' }
@@ -178,6 +183,7 @@ while ((Get-Date) -lt $deadline) {
         $inputControlKeyTextLines = @($newDiagnosticLines | Where-Object { $_ -match '\|agent-input-key-display-text\|' })
         if ($inputControlKeyTextLines.Count -gt 0) {
             $inputControlKeyDisplayTextLoaded = [bool]([string]$inputControlKeyTextLines[-1] -match '\|loaded=True\|categoryPresent=True\|namePresent=True\|descriptionPresent=True')
+            $inputControlKeyVisibleInNativeOptions = [bool]([string]$inputControlKeyTextLines[-1] -match '\|optionsVisible=True\|optionsKey=.+')
         }
         if ($mcmSettingsLines.Count -gt 0) {
             $mcmSettingsLine = [string]$mcmSettingsLines[-1]
@@ -196,7 +202,7 @@ while ((Get-Date) -lt $deadline) {
     $mcmDefinitionComplete = $WithoutChronicle.IsPresent -or ($mcmSettingsRegistered -and $validationButtonType -eq 'Button' -and
         @($requiredMcmPropertyIds | Where-Object { $_ -notin $mcmSettingPropertyIds }).Count -eq 0 -and
         @($requiredMcmButtonPropertyIds | Where-Object { $_ -notin $mcmButtonPropertyIds }).Count -eq 0 -and
-        $inputControlKeyDisplayTextLoaded)
+        $inputControlKeyDisplayTextLoaded -and $inputControlKeyVisibleInNativeOptions)
     if ($finishedAll -and -not $crashDetected -and $assemblyLoaded -and $lifecycleLoadObserved -and $mcmDefinitionComplete) {
         $startupReadySeconds = [Math]::Round($startupWatch.Elapsed.TotalSeconds, 2)
         break
@@ -278,6 +284,7 @@ $result = [ordered]@{
     GameStartObserved = $gameStartObserved
     McmSettingsRegistered = $mcmSettingsRegistered
     InputControlKeyDisplayTextLoaded = $inputControlKeyDisplayTextLoaded
+    InputControlKeyVisibleInNativeOptions = $inputControlKeyVisibleInNativeOptions
     McmSettingPropertyIds = $mcmSettingPropertyIds
     McmButtonPropertyIds = $mcmButtonPropertyIds
     McmValidationButtonType = $validationButtonType
@@ -331,6 +338,6 @@ $receiptJson | Set-Content -LiteralPath $resultPath -Encoding UTF8
 Add-Content -LiteralPath $receiptStagePath -Value 'write-complete'
 Write-Output $receiptJson
 
-if (-not $finishedAll -or -not $stabilityCompleted -or $crashDetected -or $processExitedUnexpectedly -or (-not $WithoutChronicle -and (-not $assemblyLoaded -or -not $lifecycleLoadObserved -or -not $mcmDefinitionComplete -or -not $inputControlKeyDisplayTextLoaded))) {
+if (-not $finishedAll -or -not $stabilityCompleted -or $crashDetected -or $processExitedUnexpectedly -or (-not $WithoutChronicle -and (-not $assemblyLoaded -or -not $lifecycleLoadObserved -or -not $mcmDefinitionComplete -or -not $inputControlKeyDisplayTextLoaded -or -not $inputControlKeyVisibleInNativeOptions))) {
     exit 1
 }

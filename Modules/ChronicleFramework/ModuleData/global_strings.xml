@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <strings>
   <string id="str_key_category_name.ChronicleAgentControl" text="Chronicle AI 控制" />
-  <string id="str_key_name.ChronicleAgentControl_ToggleAgentControl" text="切换 AI / 玩家控制权" />
-  <string id="str_key_description.ChronicleAgentControl_ToggleAgentControl" text="AI控制时请求安全停止并交还玩家；玩家控制时仅可在战役地图启动AI。" />
+  <string id="str_key_name.ChronicleAgentControl_Up" text="切换 AI / 玩家控制权" />
+  <string id="str_key_description.ChronicleAgentControl_Up" text="AI控制时请求安全停止并交还玩家；玩家控制时仅可在战役地图启动AI。" />
 </strings>

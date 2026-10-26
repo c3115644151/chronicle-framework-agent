@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.324'
+$contractVersion = '7.326'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -749,6 +749,8 @@ if ($harnessScript -notmatch "'ReleasePackage' \{ @\('Preflight', 'AgentHostPack
     $releasePackageTestSource -notmatch 'ManifestValidated' -or
     $releasePackageTestSource -notmatch 'New-IsolatedGameRoot' -or
     $releasePackageTestSource -notmatch 'Test-Module\.ps1' -or
+    $releasePackageTestSource -notmatch 'CHRONICLE_STEAM_ROOT' -or
+    $smokeModuleSource -notmatch 'CHRONICLE_STEAM_ROOT' -or
     $releasePackageTestSource -notmatch 'FormalSaveHashesUnchanged' -or
     $releasePackageTestSource -notmatch 'UpdateRollbackCycleVerified' -or
     $releasePackageTestSource -notmatch 'SyntheticUpdateFixture' -or
@@ -888,6 +890,9 @@ if ($harnessScript -notmatch "'AgentHostLifecycleEvaluation' \{ @\('Preflight', 
     $agentPlayerInputOwnershipSource -notmatch 'TryRepairDefaultToggleBinding' -or
     $agentPlayerInputOwnershipSource -notmatch 'AdvanceOwnershipToggleHarnessProbe' -or
     $agentPlayerInputOwnershipSource -notmatch 'NativeInput.PressKey' -or
+    $agentPlayerInputOwnershipSource -notmatch 'GameKeyContextType.Default' -or
+    $agentPlayerInputOwnershipSource -notmatch 'GameKeyOptionCategoryVM' -or
+    $agentPlayerInputOwnershipSource -notmatch 'optionsVisible=' -or
     $agentPlayerInputOwnershipSource -notmatch 'agent-input-toggle-harness-probe' -or
     $agentPlayerInputOwnershipSource -notmatch '_toggleKeyWasDown' -or
     $agentPlayerInputOwnershipSource -notmatch 'CHRONICLE_HARNESS_AGENT_INPUT_TOGGLE_TEST' -or
@@ -922,13 +927,14 @@ if ($harnessScript -notmatch "'AgentHostLifecycleEvaluation' \{ @\('Preflight', 
 }
 if ($moduleManifestSource -notmatch '<XmlName id="GameText" path="global_strings"' -or
     $moduleStringsSource -notmatch 'str_key_category_name\.ChronicleAgentControl' -or
-    $moduleStringsSource -notmatch 'str_key_name\.ChronicleAgentControl_ToggleAgentControl' -or
-    $moduleStringsSource -notmatch 'str_key_description\.ChronicleAgentControl_ToggleAgentControl' -or
+    $moduleStringsSource -notmatch 'str_key_name\.ChronicleAgentControl_Up' -or
+    $moduleStringsSource -notmatch 'str_key_description\.ChronicleAgentControl_Up' -or
     $harnessScript -notmatch 'Join-Path \$repositoryRoot ''Modules\\ChronicleFramework\\ModuleData''' -or
     $harnessScript -notmatch 'Copy-Item -LiteralPath \$moduleDataEntry\.FullName -Destination \$runtimeModuleData -Recurse -Force' -or
     $smokeModuleSource -notmatch 'ModuleData\\global_strings\.xml' -or
-    $smokeModuleSource -notmatch 'str_key_description\.ChronicleAgentControl_ToggleAgentControl' -or
+    $smokeModuleSource -notmatch 'str_key_description\.ChronicleAgentControl_Up' -or
     $smokeModuleSource -notmatch 'InputControlKeyDisplayTextLoaded' -or
+    $smokeModuleSource -notmatch 'InputControlKeyVisibleInNativeOptions' -or
     $smokeModuleSource -notmatch 'agent-input-key-display-text' -or
     $releasePackageSource -notmatch 'ModuleData' -or
     $releasePackageSource -notmatch 'moduleDataSource') {
