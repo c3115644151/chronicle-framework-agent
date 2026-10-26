@@ -6,7 +6,7 @@ param(
     [string]$FreshStoryModeModel = 'gpt-oss-20b',
     [int]$SmokeTimeoutSeconds = 45,
     [int]$SmokeStabilitySeconds = 8,
-    [ValidateSet('Stop','Complete','UnsupportedGoal','MissingModel','ServiceUnavailable','ParentExited','StopTimeout','NonMap','CampaignRoundtrip')][string]$LifecycleScenario = 'Stop',
+    [ValidateSet('Stop','Complete','UnsupportedGoal','MissingModel','ServiceUnavailable','ParentExited','StopTimeout','NonMap','CampaignRoundtrip','InputToggle')][string]$LifecycleScenario = 'Stop',
     [string]$TargetSettlementId = 'town_V1',
     [string]$ApproachSettlementId = 'town_V1',
     [string]$QuickTalkTargetSettlementId = 'village_V1_1',
@@ -27,7 +27,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.316'
+$HarnessContractVersion = '7.324'
 $effectiveSmokeTimeoutSeconds = if ($Phase -in @('FreshStoryModeModelEvaluation','FreshStoryModeNativeInquiryResponseEvaluation','AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostEstablishClanAutonomyEvaluation','AgentHostCaptivityRecoveryEvaluation','AgentHostEstablishClanGoldSaleEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max($SmokeTimeoutSeconds, 240) } else { $SmokeTimeoutSeconds }
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
@@ -464,6 +464,13 @@ foreach ($stage in $requestedStages) {
                 $sourceManifestHash = (Get-FileHash -LiteralPath $sourceManifestPath -Algorithm SHA256).Hash
                 $runtimeManifestHash = if (Test-Path -LiteralPath $manifestPath) { (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash } else { '' }
                 if ($sourceManifestHash -ne $runtimeManifestHash) { Copy-Item -LiteralPath $sourceManifestPath -Destination $manifestPath -Force }
+                $sourceModuleData = Join-Path $repositoryRoot 'Modules\ChronicleFramework\ModuleData'
+                $runtimeModuleData = Join-Path (Split-Path -Parent $manifestPath) 'ModuleData'
+                if (-not (Test-Path -LiteralPath $sourceModuleData -PathType Container)) { throw 'Chronicle ModuleData source is missing.' }
+                New-Item -ItemType Directory -Path $runtimeModuleData -Force | Out-Null
+                foreach ($moduleDataEntry in Get-ChildItem -LiteralPath $sourceModuleData -Force) {
+                    Copy-Item -LiteralPath $moduleDataEntry.FullName -Destination $runtimeModuleData -Recurse -Force
+                }
                 $buildOutput = & dotnet build $projectPath --configuration Release --no-restore "-p:ChronicleGameRoot=$gameRoot" 2>&1 | Out-String
                 $buildExitCode = $LASTEXITCODE
                 if ($buildExitCode -ne 0) { throw "Build failed with exit code $buildExitCode.`n$buildOutput" }

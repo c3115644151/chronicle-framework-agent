@@ -28,11 +28,13 @@ if ($OutputRoot.StartsWith($repoPrefix, [StringComparison]::OrdinalIgnoreCase)) 
 if ($OutputRoot -notmatch '^D:\\') { throw 'Release staging must be located on D:.' }
 
 $moduleSource = Join-Path $repositoryRoot 'Modules\ChronicleFramework\SubModule.xml'
+$moduleDataSource = Join-Path $repositoryRoot 'Modules\ChronicleFramework\ModuleData'
 $moduleProject = Join-Path $harnessRoot 'ChronicleFramework.csproj'
 $hostProject = Join-Path $harnessRoot 'AgentHost\ChronicleAgentHost.csproj'
 $gameExecutable = Join-Path $GameRoot 'bin\Win64_Shipping_Client\Bannerlord.exe'
 if (-not (Test-Path -LiteralPath $gameExecutable -PathType Leaf)) { throw 'GameRoot is not a Bannerlord installation.' }
 foreach ($path in @($moduleSource, $moduleProject, $hostProject)) { if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required source file is missing: $path" } }
+if (-not (Test-Path -LiteralPath $moduleDataSource -PathType Container)) { throw "Required module data directory is missing: $moduleDataSource" }
 
 [xml]$sourceManifest = Get-Content -LiteralPath $moduleSource -Raw -Encoding UTF8
 $moduleId = [string]$sourceManifest.Module.Id.value
@@ -76,6 +78,7 @@ foreach ($name in @('NUGET_PACKAGES','HTTP_PROXY','HTTPS_PROXY','http_proxy','ht
 
 try {
     Copy-Item -LiteralPath $moduleSource -Destination (Join-Path $moduleStage 'SubModule.xml')
+    Copy-Item -LiteralPath $moduleDataSource -Destination $moduleStage -Recurse -Force
     $moduleBuildArguments = @('build',$moduleProject,'--configuration','Release','--no-restore',
         "-p:ChronicleGameRoot=$GameRoot", "-p:OutputPath=$moduleBinaryDirectory\", '-p:AppendTargetFrameworkToOutputPath=false')
     $moduleBuildLog = & dotnet @moduleBuildArguments 2>&1 | Out-String

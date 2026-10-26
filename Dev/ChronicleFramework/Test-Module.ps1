@@ -31,6 +31,16 @@ if (-not $SkipBuild) {
 }
 
 [xml]$manifest = Get-Content (Join-Path $modulePath 'SubModule.xml')
+$moduleGameTextXml = @($manifest.Module.Xmls.XmlNode | ForEach-Object { [string]$_.XmlName.id + ':' + [string]$_.XmlName.path })
+if ('GameText:global_strings' -notin $moduleGameTextXml) { throw 'Chronicle SubModule.xml must register its native control-key display strings.' }
+$globalStringsPath = Join-Path $modulePath 'ModuleData\global_strings.xml'
+if (-not (Test-Path -LiteralPath $globalStringsPath -PathType Leaf)) { throw 'Chronicle native key display strings were not deployed to ModuleData.' }
+[xml]$globalStrings = Get-Content -LiteralPath $globalStringsPath -Raw -Encoding UTF8
+foreach ($stringId in @('str_key_category_name.ChronicleAgentControl','str_key_name.ChronicleAgentControl_ToggleAgentControl','str_key_description.ChronicleAgentControl_ToggleAgentControl')) {
+    if (@($globalStrings.strings.string | Where-Object { $_.id -eq $stringId -and -not [string]::IsNullOrWhiteSpace([string]$_.text) }).Count -ne 1) {
+        throw "Chronicle native control-key display string is missing or duplicated: $stringId"
+    }
+}
 $manifestId = [string]$manifest.Module.Id.value
 if ($manifestId -ne 'ChronicleFramework') {
     throw "Manifest Id '$manifestId' does not match the module directory and test target."
@@ -104,6 +114,7 @@ $processExitedUnexpectedly = $false
 $lifecycleLoadObserved = $WithoutChronicle.IsPresent
 $gameStartObserved = $WithoutChronicle.IsPresent
 $mcmSettingsRegistered = $WithoutChronicle.IsPresent
+$inputControlKeyDisplayTextLoaded = $WithoutChronicle.IsPresent
 $mcmSettingPropertyIds = @()
 $mcmButtonPropertyIds = @()
 $validationButtonType = if ($WithoutChronicle) { 'not-tested' } else { 'missing' }
@@ -164,6 +175,10 @@ while ((Get-Date) -lt $deadline) {
         $lifecycleLoadObserved = [bool]($newDiagnosticLines -match '\|submodule-load$')
         $gameStartObserved = [bool]($newDiagnosticLines -match '\|game-start$')
         $mcmSettingsLines = @($newDiagnosticLines | Where-Object { $_ -match '\|harness-mcm-settings\|' })
+        $inputControlKeyTextLines = @($newDiagnosticLines | Where-Object { $_ -match '\|agent-input-key-display-text\|' })
+        if ($inputControlKeyTextLines.Count -gt 0) {
+            $inputControlKeyDisplayTextLoaded = [bool]([string]$inputControlKeyTextLines[-1] -match '\|loaded=True\|categoryPresent=True\|namePresent=True\|descriptionPresent=True')
+        }
         if ($mcmSettingsLines.Count -gt 0) {
             $mcmSettingsLine = [string]$mcmSettingsLines[-1]
             if ($mcmSettingsLine -match '\|propertyIds=([^|]*)\|buttonPropertyIds=([^|]*)\|validationButtonType=([^|\r\n]*)') {
@@ -180,7 +195,8 @@ while ((Get-Date) -lt $deadline) {
     }
     $mcmDefinitionComplete = $WithoutChronicle.IsPresent -or ($mcmSettingsRegistered -and $validationButtonType -eq 'Button' -and
         @($requiredMcmPropertyIds | Where-Object { $_ -notin $mcmSettingPropertyIds }).Count -eq 0 -and
-        @($requiredMcmButtonPropertyIds | Where-Object { $_ -notin $mcmButtonPropertyIds }).Count -eq 0)
+        @($requiredMcmButtonPropertyIds | Where-Object { $_ -notin $mcmButtonPropertyIds }).Count -eq 0 -and
+        $inputControlKeyDisplayTextLoaded)
     if ($finishedAll -and -not $crashDetected -and $assemblyLoaded -and $lifecycleLoadObserved -and $mcmDefinitionComplete) {
         $startupReadySeconds = [Math]::Round($startupWatch.Elapsed.TotalSeconds, 2)
         break
@@ -261,6 +277,7 @@ $result = [ordered]@{
     LifecycleLoadObserved = $lifecycleLoadObserved
     GameStartObserved = $gameStartObserved
     McmSettingsRegistered = $mcmSettingsRegistered
+    InputControlKeyDisplayTextLoaded = $inputControlKeyDisplayTextLoaded
     McmSettingPropertyIds = $mcmSettingPropertyIds
     McmButtonPropertyIds = $mcmButtonPropertyIds
     McmValidationButtonType = $validationButtonType
@@ -314,6 +331,6 @@ $receiptJson | Set-Content -LiteralPath $resultPath -Encoding UTF8
 Add-Content -LiteralPath $receiptStagePath -Value 'write-complete'
 Write-Output $receiptJson
 
-if (-not $finishedAll -or -not $stabilityCompleted -or $crashDetected -or $processExitedUnexpectedly -or (-not $WithoutChronicle -and (-not $assemblyLoaded -or -not $lifecycleLoadObserved -or -not $mcmDefinitionComplete))) {
+if (-not $finishedAll -or -not $stabilityCompleted -or $crashDetected -or $processExitedUnexpectedly -or (-not $WithoutChronicle -and (-not $assemblyLoaded -or -not $lifecycleLoadObserved -or -not $mcmDefinitionComplete -or -not $inputControlKeyDisplayTextLoaded))) {
     exit 1
 }

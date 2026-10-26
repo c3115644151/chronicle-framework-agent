@@ -27,6 +27,7 @@ internal static class ChroniclePlayerInputOwnership
     private static EmptyInputContext _missionBlockedInput;
     private static bool _conflictWarningShown;
     private static bool _initializationFailureLogged;
+    private static bool _keyDisplayTextLogged;
     private static bool _focusProbeBaselineCaptured;
     private static bool _focusProbeBaselineAttempted;
     private static bool _focusProbeBaselineAllowed;
@@ -37,6 +38,8 @@ internal static class ChroniclePlayerInputOwnership
     private static bool _syntheticMouseRoutePassed;
     private static bool _syntheticEscapeRoutePassed;
     private static bool _syntheticMouseProbeActive;
+    private static int _ownershipToggleHarnessProbeStage;
+    private static bool _toggleKeyWasDown;
 
     internal static bool IsLocked => _locked;
 
@@ -104,11 +107,13 @@ internal static class ChroniclePlayerInputOwnership
             TryRunFocusRestoreProbe();
         if (runFocusProbe && ChronicleAgentRuntimeController.ShouldOwnPlayerInput && _focusLossProbeCompleted)
             AdvanceSyntheticInputRoutingProbe();
+        if (Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_INPUT_TOGGLE_TEST") == "1")
+            AdvanceOwnershipToggleHarnessProbe();
     }
 
     internal static void Release()
     {
-        SetLocked(false);
+        SetLocked(false, notifyPlayer: false);
         RestoreMissionInput();
         if (_globalLayer == null) return;
         try
@@ -128,6 +133,7 @@ internal static class ChroniclePlayerInputOwnership
         try
         {
             RegisterGameKeyContext();
+            TryLogKeyDisplayText();
             if (_globalLayer == null)
             {
                 var globalLayer = new ChronicleInputOwnershipGlobalLayer(_gameKeyContext);
@@ -163,6 +169,28 @@ internal static class ChroniclePlayerInputOwnership
 
         _gameKeyContext ??= new ChronicleAgentControlGameKeyContext();
         HotKeyManager.RegisterContext(_gameKeyContext);
+    }
+
+    private static void TryLogKeyDisplayText()
+    {
+        if (_keyDisplayTextLogged || TaleWorlds.MountAndBlade.Module.CurrentModule?.GlobalTextManager == null) return;
+        _keyDisplayTextLogged = true;
+        try
+        {
+            var textManager = TaleWorlds.MountAndBlade.Module.CurrentModule.GlobalTextManager;
+            var category = textManager.FindText("str_key_category_name", ChronicleAgentControlGameKeyContext.CategoryId)?.ToString();
+            var keyName = textManager.FindText("str_key_name", ChronicleAgentControlGameKeyContext.CategoryId + "_ToggleAgentControl")?.ToString();
+            var keyDescription = textManager.FindText("str_key_description", ChronicleAgentControlGameKeyContext.CategoryId + "_ToggleAgentControl")?.ToString();
+            var loaded = !string.IsNullOrWhiteSpace(category) && !category.Contains(ChronicleAgentControlGameKeyContext.CategoryId) &&
+                         !string.IsNullOrWhiteSpace(keyName) && !keyName.Contains("ToggleAgentControl") &&
+                         !string.IsNullOrWhiteSpace(keyDescription) && !keyDescription.Contains("ToggleAgentControl");
+            ChronicleDiagnostics.Write("agent-input-key-display-text|loaded=" + loaded + "|categoryPresent=" + !string.IsNullOrWhiteSpace(category) +
+                "|namePresent=" + !string.IsNullOrWhiteSpace(keyName) + "|descriptionPresent=" + !string.IsNullOrWhiteSpace(keyDescription));
+        }
+        catch (Exception exception)
+        {
+            ChronicleDiagnostics.Write("agent-input-key-display-text|loaded=False|type=" + exception.GetType().Name);
+        }
     }
 
     private static void TryInstallFocusGuard()
@@ -501,7 +529,7 @@ internal static class ChroniclePlayerInputOwnership
     private static bool KeysOverlap(Key first, Key second) =>
         first != null && second != null && first.InputKey != InputKey.Invalid && first.InputKey == second.InputKey;
 
-    private static void SetLocked(bool locked)
+    private static void SetLocked(bool locked, bool notifyPlayer = true)
     {
         if (_locked == locked)
         {
@@ -519,6 +547,17 @@ internal static class ChroniclePlayerInputOwnership
             else if (wasFocused) ScreenManager.TryLoseFocus(_globalLayer.ControlLayer);
         }
         ChronicleDiagnostics.Write("agent-player-input-owner|owner=" + (locked ? "agent" : "player"));
+        if (!notifyPlayer) return;
+        if (locked)
+        {
+            var binding = _gameKeyContext?.GetGameKey(ChronicleAgentControlGameKeyContext.ToggleControl)?.ToString();
+            if (string.IsNullOrWhiteSpace(binding) || binding == "invalid") binding = "按键设置中的 Chronicle Agent Control 切换键";
+            ShowSafetyMessage("AI已接管玩家控制；按“" + binding + "”安全停止AI并交还控制。可在选项→控制→战役地图中更改按键。");
+        }
+        else
+        {
+            ShowSafetyMessage("AI已停止，玩家控制已恢复。");
+        }
     }
 
     private static void SyncMissionInput(bool lockInput)
@@ -580,12 +619,12 @@ internal static class ChroniclePlayerInputOwnership
                !ChronicleInquiryAdapter.IsInquiryOpen && Campaign.Current != null;
     }
 
-    private static bool IsToggleKeyPressed()
+    private static bool IsToggleKeyDown()
     {
         var gameKey = _gameKeyContext?.GetGameKey(ChronicleAgentControlGameKeyContext.ToggleControl);
         if (gameKey == null) return false;
-        return (gameKey.KeyboardKey != null && gameKey.KeyboardKey.InputKey != InputKey.Invalid && Input.IsKeyPressed(gameKey.KeyboardKey.InputKey)) ||
-               (gameKey.ControllerKey != null && gameKey.ControllerKey.InputKey != InputKey.Invalid && Input.IsKeyPressed(gameKey.ControllerKey.InputKey));
+        return (gameKey.KeyboardKey != null && gameKey.KeyboardKey.InputKey != InputKey.Invalid && Input.IsKeyDown(gameKey.KeyboardKey.InputKey)) ||
+               (gameKey.ControllerKey != null && gameKey.ControllerKey.InputKey != InputKey.Invalid && Input.IsKeyDown(gameKey.ControllerKey.InputKey));
     }
 
     private static void HandleToggle()
@@ -621,7 +660,13 @@ internal static class ChroniclePlayerInputOwnership
 
     private static void PollToggleKey()
     {
-        if (!IsToggleKeyPressed()) return;
+        if (!IsToggleKeyDown())
+        {
+            _toggleKeyWasDown = false;
+            return;
+        }
+        if (_toggleKeyWasDown) return;
+        _toggleKeyWasDown = true;
         if (HasToggleBindingConflict())
         {
             if (ChronicleAgentRuntimeController.ShouldOwnPlayerInput)
@@ -632,6 +677,65 @@ internal static class ChroniclePlayerInputOwnership
             return;
         }
         HandleToggle();
+    }
+
+    private static void AdvanceOwnershipToggleHarnessProbe()
+    {
+        if (_ownershipToggleHarnessProbeStage == 0 && ChronicleAgentRuntimeController.IsHostRunning)
+        {
+            if (!PressHarnessToggleKey("agent-to-player"))
+            {
+                ChronicleDiagnostics.Write("agent-input-toggle-harness-probe|passed=False|reason=native-key-unavailable");
+                _ownershipToggleHarnessProbeStage = 4;
+                return;
+            }
+            _ownershipToggleHarnessProbeStage = 1;
+            return;
+        }
+
+        if (_ownershipToggleHarnessProbeStage == 1 && !ChronicleAgentRuntimeController.ShouldOwnPlayerInput && !ChronicleAgentRuntimeController.OwnsHost)
+        {
+            Input.ClearKeys();
+            PollToggleKey();
+            if (!PressHarnessToggleKey("player-to-agent"))
+            {
+                ChronicleDiagnostics.Write("agent-input-toggle-harness-probe|passed=False|reason=native-key-unavailable");
+                _ownershipToggleHarnessProbeStage = 4;
+                return;
+            }
+            _ownershipToggleHarnessProbeStage = 2;
+            return;
+        }
+
+        if (_ownershipToggleHarnessProbeStage == 2 && ChronicleAgentRuntimeController.IsHostRunning)
+        {
+            Input.ClearKeys();
+            PollToggleKey();
+            if (!PressHarnessToggleKey("agent-to-player"))
+            {
+                ChronicleDiagnostics.Write("agent-input-toggle-harness-probe|passed=False|reason=native-key-unavailable");
+                _ownershipToggleHarnessProbeStage = 4;
+                return;
+            }
+            _ownershipToggleHarnessProbeStage = 3;
+            return;
+        }
+
+        if (_ownershipToggleHarnessProbeStage == 3 && !ChronicleAgentRuntimeController.ShouldOwnPlayerInput && !ChronicleAgentRuntimeController.OwnsHost)
+        {
+            ChronicleDiagnostics.Write("agent-input-toggle-harness-probe|passed=True|cycle=agent-player-agent-player");
+            _ownershipToggleHarnessProbeStage = 4;
+        }
+    }
+
+    private static bool PressHarnessToggleKey(string direction)
+    {
+        var key = _gameKeyContext?.GetGameKey(ChronicleAgentControlGameKeyContext.ToggleControl)?.KeyboardKey;
+        if (key == null || key.InputKey == InputKey.Invalid) return false;
+        ChronicleDiagnostics.Write("agent-input-toggle-harness-probe|press=" + direction + "|key=" + key.InputKey + "|source=NativeInput.PressKey");
+        Input.PressKey(key.InputKey);
+        PollToggleKey();
+        return true;
     }
 
     private sealed class ChronicleInputOwnershipGlobalLayer : GlobalLayer

@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.316'
+$contractVersion = '7.324'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -573,6 +573,9 @@ $rootAgents = Get-Content (Join-Path $projectRoot 'AGENTS.md') -Raw -Encoding UT
 $runtimeGameRoot = if ($localSettings -and $localSettings.gameRoot) { [IO.Path]::GetFullPath([string]$localSettings.gameRoot) } else { $null }
 $gitIgnore = Get-Content (Join-Path $projectRoot '.gitignore') -Raw -Encoding UTF8
 $sourceManifestPath = Join-Path $projectRoot 'Modules\ChronicleFramework\SubModule.xml'
+$moduleStringsSourcePath = Join-Path $projectRoot 'Modules\ChronicleFramework\ModuleData\global_strings.xml'
+$moduleStringsSource = Get-Content $moduleStringsSourcePath -Raw -Encoding UTF8
+$moduleManifestSource = Get-Content $sourceManifestPath -Raw -Encoding UTF8
 $mainlinePath = Join-Path $harnessRoot ([string]$contextState.current.path)
 $mainlineDoc = Get-Content $mainlinePath -Raw -Encoding UTF8
 if (-not (Test-Path (Join-Path $harnessRoot 'ContextState.json'))) { throw 'ContextState.json is missing.' }
@@ -883,7 +886,14 @@ if ($harnessScript -notmatch "'AgentHostLifecycleEvaluation' \{ @\('Preflight', 
     $agentPlayerInputOwnershipSource -notmatch 'MissionState\.Current\?\.CurrentMission' -or
     $agentPlayerInputOwnershipSource -notmatch 'MapViewsContainer' -or
     $agentPlayerInputOwnershipSource -notmatch 'TryRepairDefaultToggleBinding' -or
+    $agentPlayerInputOwnershipSource -notmatch 'AdvanceOwnershipToggleHarnessProbe' -or
+    $agentPlayerInputOwnershipSource -notmatch 'NativeInput.PressKey' -or
+    $agentPlayerInputOwnershipSource -notmatch 'agent-input-toggle-harness-probe' -or
+    $agentPlayerInputOwnershipSource -notmatch '_toggleKeyWasDown' -or
+    $agentPlayerInputOwnershipSource -notmatch 'CHRONICLE_HARNESS_AGENT_INPUT_TOGGLE_TEST' -or
     $agentPlayerInputOwnershipSource -notmatch 'HotKeyManager\.MarkForSave' -or
+    $agentPlayerInputOwnershipSource -notmatch 'AI已接管玩家控制' -or
+    $agentPlayerInputOwnershipSource -notmatch 'AI已停止，玩家控制已恢复' -or
     $agentPlayerInputOwnershipSource -notmatch 'StopGameOnFocusLost = true' -or
     $agentPlayerInputOwnershipSource -notmatch 'ScreenManager\.OnGameWindowFocusChange\(focusGained: false\)' -or
     $agentPlayerInputOwnershipSource -notmatch 'TestFocusGuardPrefix' -or
@@ -895,6 +905,9 @@ if ($harnessScript -notmatch "'AgentHostLifecycleEvaluation' \{ @\('Preflight', 
     $agentPlayerInputOwnershipSource -match 'SendInput|keybd_event|SetCursorPos' -or
     $agentHostLifecycleHarness -notmatch 'InputOwnershipSafeHandoffVerified' -or
     $agentHostLifecycleHarness -notmatch 'InputOwnershipAutoReleasedAfterHostExit' -or
+    $agentHostLifecycleHarness -notmatch 'InputTogglePlayerReturnVerified' -or
+    $agentHostLifecycleHarness -notmatch 'CHRONICLE_HARNESS_AGENT_INPUT_TOGGLE_TEST' -or
+    $agentHostLifecycleHarness -notmatch "'InputToggle'" -or
     $agentHostLifecycleHarness -notmatch 'FocusGuardOwnerPrefixVerified' -or
     $agentHostLifecycleHarness -notmatch 'FocusGuardPlayerPrefixPassthroughVerified' -or
     $agentHostLifecycleHarness -notmatch 'ScreenLayerCaptureConfigurationVerified' -or
@@ -906,6 +919,20 @@ if ($harnessScript -notmatch "'AgentHostLifecycleEvaluation' \{ @\('Preflight', 
     $agentHostLifecycleHarness -notmatch 'diagnosticRunStartedUtc' -or
     $agentHostLifecycleHarness -notmatch '\[DateTimeOffset\]::Parse') {
     throw 'Agent Host lifecycle verification must remain opt-in, use a disposable Campaign, exercise the registered MCM action delegates, require a versioned Native-PID handshake before Running, stop safely, and preserve source fixture/process cleanup.'
+}
+if ($moduleManifestSource -notmatch '<XmlName id="GameText" path="global_strings"' -or
+    $moduleStringsSource -notmatch 'str_key_category_name\.ChronicleAgentControl' -or
+    $moduleStringsSource -notmatch 'str_key_name\.ChronicleAgentControl_ToggleAgentControl' -or
+    $moduleStringsSource -notmatch 'str_key_description\.ChronicleAgentControl_ToggleAgentControl' -or
+    $harnessScript -notmatch 'Join-Path \$repositoryRoot ''Modules\\ChronicleFramework\\ModuleData''' -or
+    $harnessScript -notmatch 'Copy-Item -LiteralPath \$moduleDataEntry\.FullName -Destination \$runtimeModuleData -Recurse -Force' -or
+    $smokeModuleSource -notmatch 'ModuleData\\global_strings\.xml' -or
+    $smokeModuleSource -notmatch 'str_key_description\.ChronicleAgentControl_ToggleAgentControl' -or
+    $smokeModuleSource -notmatch 'InputControlKeyDisplayTextLoaded' -or
+    $smokeModuleSource -notmatch 'agent-input-key-display-text' -or
+    $releasePackageSource -notmatch 'ModuleData' -or
+    $releasePackageSource -notmatch 'moduleDataSource') {
+    throw 'The native configurable AI/player toggle must ship its GameText category/name/description resources in the installed module and release package.'
 }
 if ($harnessScript -notmatch "'AgentHostLifecycleCompletionEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostLifecycleCompletionEvaluation'\) \}" -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostLifecycleCompletionEvaluation'" -or

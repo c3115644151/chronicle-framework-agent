@@ -2,7 +2,7 @@
 param(
     [ValidateRange(90,300)][int]$TimeoutSeconds = 180,
     [ValidateRange(250,10000)][int]$AutoStopAfterMilliseconds = 250,
-    [ValidateSet('Stop','Complete','UnsupportedGoal','MissingModel','ServiceUnavailable','ParentExited','StopTimeout','NonMap','CampaignRoundtrip')][string]$Scenario = 'Stop',
+    [ValidateSet('Stop','Complete','UnsupportedGoal','MissingModel','ServiceUnavailable','ParentExited','StopTimeout','NonMap','CampaignRoundtrip','InputToggle')][string]$Scenario = 'Stop',
     [string]$SaveName = 'AgentBridgeLifecycle'
 )
 
@@ -35,7 +35,7 @@ if (Test-Path -LiteralPath $sessionPath -PathType Leaf) { throw 'Refusing to rep
 $expectsFailure = $Scenario -in @('MissingModel','ServiceUnavailable','UnsupportedGoal')
 $expectsUnsupportedGoal = $Scenario -eq 'UnsupportedGoal'
 $expectsProviderPreflightFailure = $Scenario -in @('MissingModel','ServiceUnavailable')
-$usesIdleProvider = $Scenario -in @('Stop','ParentExited','StopTimeout','NonMap','CampaignRoundtrip')
+$usesIdleProvider = $Scenario -in @('Stop','ParentExited','StopTimeout','NonMap','CampaignRoundtrip','InputToggle')
 $providerBaseUrl = if ($Scenario -eq 'ServiceUnavailable') { 'http://127.0.0.1:11433/v1' } else { 'http://127.0.0.1:11434/v1' }
 $providerModelId = if ($usesIdleProvider) { 'harness-lifecycle-no-model' } elseif ($Scenario -eq 'MissingModel') { 'chronicle-harness-model-not-installed' } else { 'qwen3.5:4b-q4_K_M' }
 if ($Scenario -eq 'MissingModel') {
@@ -71,7 +71,7 @@ $profilePath = Join-Path $profileDirectory 'ChronicleAgentSettings.json'
 $fixtureHashBefore = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
 $hostResponseFilesBefore = @(Get-ChildItem -LiteralPath $responseRoot -File -Filter 'host-*.json' -ErrorAction SilentlyContinue | ForEach-Object Name)
 $priorValues = @{}
-foreach ($name in @('CHRONICLE_HARNESS_MODE','CHRONICLE_AGENT_PROFILE_PATH','CHRONICLE_AGENT_HOST_TEST_PATH','CHRONICLE_HARNESS_AGENT_AUTO_START','CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS','CHRONICLE_HARNESS_AGENT_GOAL','CHRONICLE_HARNESS_AGENT_NO_MODEL','CHRONICLE_HARNESS_AGENT_FAILURE_CASE','CHRONICLE_HARNESS_AGENT_IGNORE_STOP','CHRONICLE_HARNESS_AGENT_START_STATE','CHRONICLE_HARNESS_AGENT_ROUNDTRIP','CHRONICLE_HARNESS_AGENT_ROUNDTRIP_SAVE_ID','CHRONICLE_HARNESS_AGENT_INPUT_FOCUS_TEST')) {
+foreach ($name in @('CHRONICLE_HARNESS_MODE','CHRONICLE_AGENT_PROFILE_PATH','CHRONICLE_AGENT_HOST_TEST_PATH','CHRONICLE_HARNESS_AGENT_AUTO_START','CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS','CHRONICLE_HARNESS_AGENT_GOAL','CHRONICLE_HARNESS_AGENT_NO_MODEL','CHRONICLE_HARNESS_AGENT_FAILURE_CASE','CHRONICLE_HARNESS_AGENT_IGNORE_STOP','CHRONICLE_HARNESS_AGENT_START_STATE','CHRONICLE_HARNESS_AGENT_ROUNDTRIP','CHRONICLE_HARNESS_AGENT_ROUNDTRIP_SAVE_ID','CHRONICLE_HARNESS_AGENT_INPUT_FOCUS_TEST','CHRONICLE_HARNESS_AGENT_INPUT_TOGGLE_TEST')) {
     $priorValues[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
 $gameProcessId = 0
@@ -122,13 +122,15 @@ try {
     $env:CHRONICLE_AGENT_PROFILE_PATH = $profilePath
     $env:CHRONICLE_AGENT_HOST_TEST_PATH = $hostPath
     $env:CHRONICLE_HARNESS_AGENT_AUTO_START = '1'
-    $env:CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS = if ($Scenario -in @('Stop','StopTimeout')) { [string]$AutoStopAfterMilliseconds } else { '0' }
+    $effectiveAutoStopAfterMilliseconds = if ($Scenario -eq 'InputToggle') { 10000 } else { $AutoStopAfterMilliseconds }
+    $env:CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS = if ($Scenario -in @('Stop','StopTimeout','InputToggle')) { [string]$effectiveAutoStopAfterMilliseconds } else { '0' }
     $env:CHRONICLE_HARNESS_AGENT_GOAL = if ($Scenario -eq 'Stop') { 'Inspect the current Native Campaign state and wait for the explicit stop request without changing the Campaign.' } elseif ($expectsUnsupportedGoal) { 'Become clan tier 1 (50 renown).' } else { 'Move the current party to any one currently visible safe settlement.' }
     $env:CHRONICLE_HARNESS_AGENT_NO_MODEL = if ($usesIdleProvider) { '1' } else { '0' }
     $env:CHRONICLE_HARNESS_AGENT_FAILURE_CASE = if ($expectsFailure) { $Scenario } else { '' }
     $env:CHRONICLE_HARNESS_AGENT_IGNORE_STOP = if ($Scenario -eq 'StopTimeout') { '1' } else { '' }
     $env:CHRONICLE_HARNESS_AGENT_START_STATE = if ($Scenario -eq 'NonMap') { 'InventoryState' } else { 'MapState' }
     $env:CHRONICLE_HARNESS_AGENT_INPUT_FOCUS_TEST = if ($Scenario -eq 'Stop') { '1' } else { '0' }
+    $env:CHRONICLE_HARNESS_AGENT_INPUT_TOGGLE_TEST = if ($Scenario -eq 'InputToggle') { '1' } else { '0' }
     $env:CHRONICLE_HARNESS_AGENT_ROUNDTRIP = if ($Scenario -eq 'CampaignRoundtrip') { '1' } else { '' }
     $env:CHRONICLE_HARNESS_AGENT_ROUNDTRIP_SAVE_ID = if ($Scenario -eq 'CampaignRoundtrip') { $roundtripSaveName.Substring('ChronicleRT-'.Length) } else { '' }
 
@@ -207,14 +209,19 @@ try {
         $hostExitEvents = @($gameLines | Where-Object { $_ -match '\|agent-host-process-exit\|' })
         $hostExitObservedEvents = @($gameLines | Where-Object { $_ -match '\|agent-host-process-exit-observed\|' })
         $inputOwnershipEvents = @($runLines | Where-Object {
-            $_ -match "\|pid=$gameProcessId\|agent-input-(layer-installed|focus-guard-installed|mission-input-blocked|mission-input-restored|focus-baseline|layer-probe|routing-probe(-injected)?)\|" -or
+            $_ -match "\|pid=$gameProcessId\|agent-input-(layer-installed|focus-guard-installed|mission-input-blocked|mission-input-restored|focus-baseline|layer-probe|routing-probe(-injected)?|toggle-harness-probe)\|" -or
+            $_ -match "\|pid=$gameProcessId\|agent-input-toggle\|" -or
             $_ -match "\|pid=$gameProcessId\|agent-input-routing-probe\|" -or
             $_ -match "\|pid=$gameProcessId\|agent-input-focus-(probe|restored-probe)\|" -or
             $_ -match "\|pid=$gameProcessId\|agent-player-input-owner\|"
         })
+        $toggleCycleCompleteLines = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-input-toggle-harness-probe\|passed=True\|cycle=agent-player-agent-player$' })
+        $toggleCycleFailedLines = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-input-toggle-harness-probe\|passed=False\|' })
         $roundtripLines = @($runLines | Where-Object { $_ -match "\|pid=$gameProcessId\|harness-agent-campaign-roundtrip-complete\|" })
         if (@($runLines | Where-Object { $_ -match "\|pid=$gameProcessId\|harness-agent-campaign-roundtrip-failed\|" }).Count -gt 0) { throw 'Native Campaign roundtrip fixture failed; see the game diagnostics.' }
         if ($Scenario -eq 'CampaignRoundtrip' -and $roundtripLines.Count -eq 1) { break }
+        if ($Scenario -eq 'InputToggle' -and $toggleCycleCompleteLines.Count -eq 1 -and $hostExitEvents.Count -ge 2) { break }
+        if ($Scenario -eq 'InputToggle' -and $toggleCycleFailedLines.Count -gt 0) { break }
         if ($startedLine.Count -gt 0 -and $startedLine[0] -match '\|agent-host-process-started\|pid=(\d+)\|') { $hostProcessId = [int]$Matches[1] }
         $sawStopped = @($states | Where-Object { $_ -match '\|state=Stopped\|' }).Count -gt 0
         $sawCompleted = @($states | Where-Object { $_ -match '\|state=Completed\|' }).Count -gt 0
@@ -222,7 +229,7 @@ try {
         if ($Scenario -eq 'NonMap' -and $sawFailed) { break }
         if ($Scenario -eq 'Stop' -and $sawFailed -and $startedLine.Count -eq 0) { break }
         if ($Scenario -eq 'ParentExited' -and $hostProcessId -gt 0 -and $hostReadyEvents.Count -gt 0) { break }
-        if ($Scenario -ne 'CampaignRoundtrip' -and ((($sawStopped -or $sawCompleted) -and $hostExitEvents.Count -gt 0) -or ($sawFailed -and $startedLine.Count -gt 0))) { break }
+        if ($Scenario -notin @('CampaignRoundtrip','InputToggle') -and ((($sawStopped -or $sawCompleted) -and $hostExitEvents.Count -gt 0) -or ($sawFailed -and $startedLine.Count -gt 0))) { break }
     } while ([DateTime]::UtcNow -lt $deadline)
 
     $hostReceiptPath = Join-Path $harnessTemp 'AgentHostLifecycleHostReceipt.json'
@@ -253,8 +260,14 @@ try {
         }
         $startupRejectionCases += $case
     }
-    $duplicateStartVerified = (@($duplicateStartLines | Where-Object { $_ -match "\|hostPid=$hostProcessId\|unchanged=True" }).Count -eq 1 -and
-        @($gameLines | Where-Object { $_ -match '\|agent-host-process-started\|' }).Count -eq 1)
+    $hostStartLines = @($gameLines | Where-Object { $_ -match '\|agent-host-process-started\|' })
+    if ($Scenario -eq 'InputToggle') {
+        $startPids = @($hostStartLines | ForEach-Object { if ($_ -match '\|agent-host-process-started\|pid=(\d+)\|') { $Matches[1] } })
+        $duplicateStartVerified = $startPids.Count -eq 2 -and $startPids[0] -ne $startPids[1] -and $hostExitEvents.Count -ge 2
+    }
+    else {
+        $duplicateStartVerified = (@($duplicateStartLines | Where-Object { $_ -match "\|hostPid=$hostProcessId\|unchanged=True" }).Count -eq 1 -and $hostStartLines.Count -eq 1)
+    }
     if (-not $expectsProviderPreflightFailure -and -not $duplicateStartVerified) { throw 'Repeated MCM Start did not preserve exactly one owned Host process.' }
     $nativeHandshakeVerified = @($hostReadyEvents | Where-Object {
         $_ -match "\|agent-host-ready\|hostPid=$hostProcessId\|protocol=1\|version=.+"
@@ -305,7 +318,7 @@ try {
         }
     }
     else {
-    $expectedStates = if ($expectsFailure -and -not $expectsUnsupportedGoal) { @('Starting','Failed') } elseif ($expectsUnsupportedGoal) { @('Starting','Running','Failed') } elseif ($Scenario -eq 'StopTimeout') { @('Starting','Running','Stopping','Failed') } elseif ($Scenario -eq 'Stop') { @('Starting','Running','Stopping','Stopped') } else { @('Starting','Running','Completed') }
+    $expectedStates = if ($expectsFailure -and -not $expectsUnsupportedGoal) { @('Starting','Failed') } elseif ($expectsUnsupportedGoal) { @('Starting','Running','Failed') } elseif ($Scenario -eq 'StopTimeout') { @('Starting','Running','Stopping','Failed') } elseif ($Scenario -in @('Stop','InputToggle')) { @('Starting','Running','Stopping','Stopped') } else { @('Starting','Running','Completed') }
     foreach ($expectedState in $expectedStates) {
         if (@($states | Where-Object { $_ -match "\|state=$expectedState\|" }).Count -eq 0) {
             throw "The lifecycle controller did not report expected state: $expectedState"
@@ -320,7 +333,7 @@ try {
         if (-not $stopTimeoutVerified) { throw 'Stop timeout did not end the owned Host and report its explicit timeout failure.' }
     }
     else {
-    $expectedTerminalState = if ($expectsFailure) { 'Failed' } elseif ($Scenario -eq 'Stop') { 'Stopped' } else { 'Completed' }
+    $expectedTerminalState = if ($expectsFailure) { 'Failed' } elseif ($Scenario -in @('Stop','InputToggle')) { 'Stopped' } else { 'Completed' }
     $expectedExitCode = if ($expectsFailure) { 1 } else { 0 }
     if (@($hostExitEvents | Where-Object { $_ -match "\|pid=$hostProcessId\|exitCode=$expectedExitCode\|state=$expectedTerminalState" }).Count -ne 1) {
         throw 'The owned Host did not exit with its expected successful terminal state.'
@@ -364,7 +377,7 @@ try {
             throw 'Provider or goal-scope failure did not stop before a Native action with its expected classification.'
         }
     }
-    elseif ($Scenario -eq 'Stop') {
+    elseif ($Scenario -in @('Stop','InputToggle')) {
         if ($nativeWriteActions.Count -gt 0 -or $hostReceipt.decisionCount -ne 0 -or $hostReceipt.actionsExecuted -ne 0 -or
             $hostReceipt.providerConfigurationSource -ne 'harness-only-no-model-lifecycle-test') {
             throw 'Stop fixture must remain an idle-provider lifecycle test with zero decisions and goal actions.'
@@ -430,10 +443,19 @@ $focusGuardPlayerPrefixEvent = @($focusRestorationEvent | Where-Object { $_ -mat
 $screenLayerProbeEvent = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-input-layer-probe\|passed=True\|present=True\|topmost=True\|mask=All\|focus=True\|hitTest=True$' })
 $screenInputRoutingEvent = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-input-routing-probe\|' })
 $screenInputRoutingPassed = @($screenInputRoutingEvent | Where-Object { $_ -match '\|mousePassed=True\|escapePassed=True\|' }).Count -eq 1
+$inputToggleRequestEvent = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-input-toggle\|direction=agent-to-player$' })
+$inputToggleResumeEvent = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-input-toggle\|direction=player-to-agent$' })
+$inputToggleHarnessPassEvent = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-input-toggle-harness-probe\|passed=True\|cycle=agent-player-agent-player$' })
+$inputToggleAgentOwnerEvents = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-player-input-owner\|owner=agent$' })
+$inputTogglePlayerOwnerEvents = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-player-input-owner\|owner=player$' })
 $hostExitEvent = @($hostExitObservedEvents | Select-Object -Last 1)
 $inputOwnershipAutoReleasedAfterHostExit = $agentOwnerEvent.Count -eq 1 -and $playerOwnerEvent.Count -eq 1 -and $hostExitEvent.Count -eq 1 -and
     [string]$playerOwnerEvent[0] -match '^([^|]+)\|' -and [string]$hostExitEvent[0] -match '^([^|]+)\|' -and
     [DateTime]::Parse([string]$hostExitEvent[0].Split('|')[0]).ToUniversalTime() -le [DateTime]::Parse([string]$playerOwnerEvent[0].Split('|')[0]).ToUniversalTime()
+$inputTogglePlayerReturnVerified = $Scenario -eq 'InputToggle' -and $inputToggleRequestEvent.Count -eq 2 -and $inputToggleResumeEvent.Count -eq 1 -and
+    $inputToggleHarnessPassEvent.Count -eq 1 -and $inputToggleAgentOwnerEvents.Count -eq 2 -and
+    $inputTogglePlayerOwnerEvents.Count -eq 2 -and $hostReadyEvents.Count -eq 2 -and $hostExitEvents.Count -ge 2 -and
+    $duplicateStartVerified -and $nativeWriteActions.Count -eq 0
 $inputOwnershipSafeHandoffVerified = $inputLayerInstalled -and $focusGuardInstalled -and $agentOwnerEvent.Count -eq 1 -and
     $playerOwnerEvent.Count -eq 1 -and $hostExitEvent.Count -eq 1 -and $focusGuardOwnerPrefixEvent.Count -eq 1 -and $focusGuardPlayerPrefixEvent.Count -eq 1 -and $focusRestorationEvent.Count -eq 1 -and $screenLayerProbeEvent.Count -eq 1 -and
     [string]$agentOwnerEvent[0] -match '^([^|]+)\|' -and [string]$playerOwnerEvent[0] -match '^([^|]+)\|' -and
@@ -449,7 +471,7 @@ if ($Scenario -eq 'CampaignRoundtrip' -and $roundtripSaveCreationRequested -and 
     }
     $roundtripSaveRemoved = -not (Test-Path -LiteralPath $roundtripSavePath -PathType Leaf)
 }
-$passed = ($null -eq $failure -and $gameProcessId -gt 0 -and ($hostProcessId -gt 0 -or $nonMapRejected) -and $processesStopped -and $sessionClean -and $fixtureUnchanged -and ($Scenario -ne 'Stop' -or ($nativeWriteActions.Count -eq 0 -and $inputOwnershipSafeHandoffVerified)) -and ($Scenario -ne 'StopTimeout' -or $inputOwnershipAutoReleasedAfterHostExit) -and ($Scenario -ne 'ParentExited' -or $parentExitVerified) -and ($Scenario -ne 'CampaignRoundtrip' -or ($campaignRoundtripVerified -and $roundtripSaveCreated -and $roundtripSaveRemoved)))
+$passed = ($null -eq $failure -and $gameProcessId -gt 0 -and ($hostProcessId -gt 0 -or $nonMapRejected) -and $processesStopped -and $sessionClean -and $fixtureUnchanged -and ($Scenario -ne 'Stop' -or ($nativeWriteActions.Count -eq 0 -and $inputOwnershipSafeHandoffVerified)) -and ($Scenario -ne 'StopTimeout' -or $inputOwnershipAutoReleasedAfterHostExit) -and ($Scenario -ne 'InputToggle' -or $inputTogglePlayerReturnVerified) -and ($Scenario -ne 'ParentExited' -or $parentExitVerified) -and ($Scenario -ne 'CampaignRoundtrip' -or ($campaignRoundtripVerified -and $roundtripSaveCreated -and $roundtripSaveRemoved)))
 $result = [pscustomobject][ordered]@{
     Passed = [bool]$passed
     Scenario = $Scenario
@@ -475,12 +497,13 @@ $result = [pscustomobject][ordered]@{
     ParentExitSeconds = $parentExitSeconds
     EngineConfigRestoredAfterParentExit = if ($Scenario -eq 'ParentExited') { [bool]($stopReceipt -and $stopReceipt.restored) } else { $null }
     LastMoveTargetId = $lastMoveTargetId
-    AutoStopAfterMilliseconds = $AutoStopAfterMilliseconds
+    AutoStopAfterMilliseconds = $effectiveAutoStopAfterMilliseconds
     LifecycleStates = @($states | ForEach-Object { [string]$_ })
     NativeHandshakeVerified = [bool]$nativeHandshakeVerified
     TrainingFieldMenuExitApplied = [bool]$trainingFieldMenuExitApplied
     InputOwnershipSafeHandoffVerified = [bool]$inputOwnershipSafeHandoffVerified
     InputOwnershipAutoReleasedAfterHostExit = [bool]$inputOwnershipAutoReleasedAfterHostExit
+    InputTogglePlayerReturnVerified = [bool]$inputTogglePlayerReturnVerified
     FocusLossEscapeSuppressionVerified = [bool]($focusSuppressionEvent.Count -eq 1)
     FocusGuardOwnerPrefixVerified = [bool]($focusGuardOwnerPrefixEvent.Count -eq 1)
     FocusGuardPlayerPrefixPassthroughVerified = [bool]($focusGuardPlayerPrefixEvent.Count -eq 1)
