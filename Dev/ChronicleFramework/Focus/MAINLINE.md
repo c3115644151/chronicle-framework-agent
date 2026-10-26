@@ -966,3 +966,6 @@ vidiallama-3.2-11b-vision在无游戏Provider Smoke中返回HTTP503，0决策/0�
 
 
 TestResults/20261026-184919再次对FreeLLMAPI当时目录标ready的qwen3.6-27b做无游戏真实Provider Smoke，单请求预算150秒；上游两次返回429，第一次Retry-After=85秒已实际等待约85秒，第二次Retry-After=75秒加最小重试预算超出剩余时限而安全停止。结果是0决策/0Native命令；之后目录状态由ready转exhausted，未发起StoryMode，也没有重放此前请求。该复测确认提升Smoke时间预算仍未获得可用Qwen响应；当前应先恢复/添加有效上游Provider key，不继续对Qwen/OVH路线试探。
+
+
+经FreeLLMAPI上游文档核验了一个可供用户配置的候选：FreeLLMAPI注册了需用户Key的Groq OpenAI兼容提供商（[FreeLLMAPI平台目录](https://github.com/tashfeenahmed/freellmapi/blob/main/docs/en/providers/01-supported-platforms.md)）；Groq官方qwen/qwen3.8-27b页面列出Tool Use与JSON Schema能力（[Groq Qwen 3.8文档](https://console.groq.com/docs/model/qwen/qwen3.8-27b)）。Groq文档同时说明Tool Use与Structured Outputs不在同一请求中并用；Chronicle Provider当前根据目录能力二选一输出格式，仍须真实AllowedActions smoke验证。FreeLLMAPI尚未配置/实测Groq Key，且当前Qwen别名曾被路由到OVH，所以这只是待验候选，不是当前可用路由。拿到一个免费上游Key后，先走无游戏结构化动作请求，确认X-Routed-Via和Native动作格式，再启动自然StoryMode，不再把eady或分类Smoke当作闭环证据。
