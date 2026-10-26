@@ -969,3 +969,6 @@ TestResults/20261026-184919再次对FreeLLMAPI当时目录标ready的qwen3.6-27b
 
 
 经FreeLLMAPI上游文档核验了一个可供用户配置的候选：FreeLLMAPI注册了需用户Key的Groq OpenAI兼容提供商（[FreeLLMAPI平台目录](https://github.com/tashfeenahmed/freellmapi/blob/main/docs/en/providers/01-supported-platforms.md)）；Groq官方qwen/qwen3.8-27b页面列出Tool Use与JSON Schema能力（[Groq Qwen 3.8文档](https://console.groq.com/docs/model/qwen/qwen3.8-27b)）。Groq文档同时说明Tool Use与Structured Outputs不在同一请求中并用；Chronicle Provider当前根据目录能力二选一输出格式，仍须真实AllowedActions smoke验证。FreeLLMAPI尚未配置/实测Groq Key，且当前Qwen别名曾被路由到OVH，所以这只是待验候选，不是当前可用路由。拿到一个免费上游Key后，先走无游戏结构化动作请求，确认X-Routed-Via和Native动作格式，再启动自然StoryMode，不再把eady或分类Smoke当作闭环证据。
+
+
+TestResults/20261026-191500改用FreeLLMAPI keyless kilo-auto做单次Provider Smoke；模型目录曾显示ready，Host未到游戏/Native层，网关返回HTTP429并标记reeLlmApiPoolExhausted=true、Retry-After=82800秒（约23小时），0决策/0Native命令。该Kilo池已因IP/共享free额度耗尽，不重试。至此本机当前可见的OVH Qwen、Groq候选未配置、NVIDIA、Gemma与Kilo路线中，尚无可完成结构化模型调用的上游；继续轮询/换模型ID不能替代有效Provider密钥。
