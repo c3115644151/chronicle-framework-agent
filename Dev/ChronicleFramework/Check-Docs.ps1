@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.338'
+$contractVersion = '7.340'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -463,6 +463,9 @@ if ($agentHostDecisionCycleSource -notmatch 'AgentHostHarnessProgressTrace\.Reco
     $agentHostHarnessProgressTraceSource -notmatch 'BuildVillagersInNeedStartupSummary' -or
     $agentHostHarnessProgressTraceSource -notmatch 'host-progress-trace-villagers-conversation-startup-self-test' -or
     $agentHostHarnessProgressTraceSource -notmatch 'BuildObjectiveSnapshotSummary' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'BuildNativeProgressionContextSummary' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'nativeProgressionContext' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'host-progress-trace-progression-context-self-test' -or
     $agentHostHarnessProgressTraceSource -notmatch 'harness-progress-trace-records-dynamic-journal-current-target-met-summary' -or
     $agentHostRecruitmentLoopSource -notmatch 'safe-stop-rejected-with-observe-again-control' -or
     $agentHostRecruitmentLoopSource -notmatch 'The currently issued Native map move is still active' -or
@@ -889,6 +892,11 @@ if ($agentHostCampaignLoopSource -notmatch 'supportedEstablishYourClanGoal' -or
     $agentHostEstablishClanPlannerSource -notmatch 'goalVerified.*false' -or
     $agentHostDecisionCycleSource -notmatch 'EstablishYourClanGoalPlannerPrompt' -or
     $agentHostDecisionCycleSource -notmatch 'JournalLog current/target values' -or
+    $agentHostDecisionCycleSource -notmatch 'nativeProgressionContext.partySizeLimit' -or
+    $agentHostDecisionCycleSource -notmatch 'DefaultPartySizeLimitModel' -or
+    $agentHostDecisionCycleSource -notmatch 'confirmPartySizeWarning=1' -or
+    $agentHostEstablishClanPlannerSource -notmatch 'BuildNativeProgressionContext' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'observedNativeState: JsonNode.Parse\(current.RootElement.GetRawText\(\)\)' -or
     $agentHostProviderSource -notmatch 'supported-establish-your-clan') {
     throw 'The Establish Your Clan planner must be gated by the active original quest, use the four official JournalLog values as tracked progress, retain live metric differences diagnostically, allow only unmet Journal objectives, and never claim gameplay completion.'
 }

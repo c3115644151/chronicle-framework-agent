@@ -32,8 +32,11 @@ internal static class AgentHostEstablishYourClanGoalLoop
         if (!plannerSystemPrompt.Contains("str_order_attack", StringComparison.Ordinal) ||
             !plannerSystemPrompt.Contains("real-time Mission", StringComparison.Ordinal) ||
             !plannerSystemPrompt.Contains("partySize or companions", StringComparison.Ordinal) ||
-            !plannerSystemPrompt.Contains("actual Native action availability", StringComparison.Ordinal))
-            throw new AgentHostException("establish-clan-planner-native-renown-prerequisite-prompt-missing", "The read-only objective planner must know that Renown uses only Native BattleSimulation, not a real-time attack Mission, and may depend on party growth.");
+            !plannerSystemPrompt.Contains("actual Native action availability", StringComparison.Ordinal) ||
+            !plannerSystemPrompt.Contains("nativeProgressionContext.partySizeLimit", StringComparison.Ordinal) ||
+            !plannerSystemPrompt.Contains("Tier1", StringComparison.Ordinal) ||
+            !plannerSystemPrompt.Contains("Over Limit confirmation", StringComparison.Ordinal))
+            throw new AgentHostException("establish-clan-planner-native-renown-prerequisite-prompt-missing", "The read-only objective planner must know that Renown uses only Native BattleSimulation, not a real-time attack Mission, and must reason about Journal PartySize versus the observed native limit, over-limit RecruitmentVM confirmation and Tier1 capacity.");
 
         var snapshot = new JsonObject
         {
@@ -85,6 +88,8 @@ internal static class AgentHostEstablishYourClanGoalLoop
             ReadString(provider.FirstRequest?["observation"] as JsonObject, "scope") != "read-only-active-storymode-quest-objective-planning" ||
             provider.FirstRequest?["observation"]?["state"]?["objectiveSnapshot"] is not JsonObject modelObjectiveSnapshot ||
             modelObjectiveSnapshot.Count != ObjectiveIds.Length ||
+            provider.FirstRequest?["observation"]?["state"]?["nativeProgressionContext"] is not JsonObject nativeProgressionContext ||
+            ReadInt(nativeProgressionContext, "partySizeLimit", -1) != 20 || ReadInt(nativeProgressionContext, "clanTier", -1) != 0 ||
             !providerCatalog[0]!["argumentValues"]!["ObjectiveId"]!.AsArray().Any(value => value?.GetValue<string>() == "partySize") ||
             providerCatalog[0]!["argumentValues"]!["ObjectiveId"]!.AsArray().Any(value => value?.GetValue<string>() is "gold" or "renown"))
             throw new AgentHostException("establish-clan-objective-planner-runtime-failed", "The read-only planner did not select an unmet objective from the exact current quest catalog.");
@@ -139,6 +144,7 @@ internal static class AgentHostEstablishYourClanGoalLoop
         }
         return [
             new { scenario = "establish-clan-objective-planner-knows-native-renown-simulation-and-party-growth-prerequisite", passed = true },
+            new { scenario = "establish-clan-planner-observes-current-native-capacity-and-tier", passed = true },
             new { scenario = "establish-clan-planner-offers-only-currently-unmet-objectives", passed = true },
             new { scenario = "establish-clan-planner-reads-native-quest-and-never-mutates-campaign", passed = true },
             new { scenario = "establish-clan-planner-boundedly-retries-a-truncated-provider-response-before-native-actions", passed = true },
@@ -160,11 +166,13 @@ internal static class AgentHostEstablishYourClanGoalLoop
         JsonArray? priorProviderRouteHistory = null,
         IReadOnlySet<string>? supportedObjectives = null,
         JsonObject? observedQuestDetails = null,
+        JsonObject? observedNativeState = null,
         bool activeQuestAlreadyVerified = false)
     {
         if (!activeQuestAlreadyVerified)
         {
             using var current = await client.ReadStateAsync(cancellationToken);
+            observedNativeState ??= JsonNode.Parse(current.RootElement.GetRawText())?.AsObject();
             if (!HasActiveQuest(current.RootElement))
                 throw new AgentHostException("establish-clan-quest-no-longer-active", "The exact StoryMode quest is no longer in the fresh Native active-quest list.");
         }
@@ -237,7 +245,8 @@ internal static class AgentHostEstablishYourClanGoalLoop
                     ["objectiveSnapshot"] = snapshot.DeepClone(),
                     ["journalObjectiveSnapshot"] = journalObjectives.DeepClone(),
                     ["targetConsistency"] = targetConsistency.DeepClone(),
-                    ["liveMetricDifferences"] = liveMetricDifferences.DeepClone()
+                    ["liveMetricDifferences"] = liveMetricDifferences.DeepClone(),
+                    ["nativeProgressionContext"] = BuildNativeProgressionContext(observedNativeState)
                 }
             },
             ["journalObjectiveSnapshot"] = journalObjectives.DeepClone(),
@@ -441,6 +450,32 @@ internal static class AgentHostEstablishYourClanGoalLoop
         return result;
     }
 
+    private static JsonObject? BuildNativeProgressionContext(JsonObject? nativeReceipt)
+    {
+        var state = nativeReceipt?["state"] as JsonObject;
+        if (state is null) return null;
+        var context = state["context"] as JsonObject;
+        var identity = state["identity"] as JsonObject;
+        var party = state["party"] as JsonObject;
+        var economy = state["economy"] as JsonObject;
+        var location = state["location"] as JsonObject;
+        var captivity = context?["captivity"] as JsonObject;
+        return new JsonObject
+        {
+            ["gameState"] = context?["gameState"]?.DeepClone(),
+            ["menuId"] = context?["menuId"]?.DeepClone(),
+            ["currentSettlementId"] = location?["currentSettlementId"]?.DeepClone(),
+            ["clanTier"] = identity?["clanTier"]?.DeepClone(),
+            ["clanRenown"] = economy?["renown"]?.DeepClone(),
+            ["gold"] = economy?["gold"]?.DeepClone(),
+            ["partyMembers"] = party?["members"]?.DeepClone(),
+            ["partySizeLimit"] = party?["sizeLimit"]?.DeepClone(),
+            ["partyIsMoving"] = party?["isMoving"]?.DeepClone(),
+            ["encounterActive"] = context?["encounterActive"]?.DeepClone(),
+            ["isCaptive"] = captivity?["isCaptive"]?.DeepClone()
+        };
+    }
+
     internal static JsonObject BuildObjectiveSnapshot(JsonArray journalObjectives)
     {
         var result = new JsonObject();
@@ -509,7 +544,22 @@ internal static class AgentHostEstablishYourClanGoalLoop
             var quests = activeQuest
                 ? new JsonArray(new JsonObject { ["id"] = QuestId, ["title"] = "Establish Your Clan" })
                 : new JsonArray();
-            var state = new JsonObject { ["status"] = "completed", ["processId"] = 321, ["state"] = new JsonObject { ["quests"] = quests } };
+            var state = new JsonObject
+            {
+                ["status"] = "completed", ["processId"] = 321,
+                ["state"] = new JsonObject
+                {
+                    ["quests"] = quests,
+                    ["context"] = new JsonObject { ["gameState"] = "MapState", ["encounterActive"] = false },
+                    ["identity"] = new JsonObject { ["clanTier"] = 0 },
+                    ["party"] = new JsonObject { ["members"] = (int)(ReadNumber(snapshot["partySize"] as JsonObject, "current") ?? 0), ["sizeLimit"] = 20, ["isMoving"] = false },
+                    ["economy"] = new JsonObject
+                    {
+                        ["gold"] = (int)(ReadNumber(snapshot["gold"] as JsonObject, "current") ?? 0),
+                        ["renown"] = (int)(ReadNumber(snapshot["renown"] as JsonObject, "current") ?? 0)
+                    }
+                }
+            };
             return Task.FromResult(JsonDocument.Parse(state.ToJsonString()));
         }
 

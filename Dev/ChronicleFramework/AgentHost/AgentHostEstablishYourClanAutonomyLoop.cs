@@ -484,6 +484,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                     priorProviderRouteHistory: routes,
                     supportedObjectives: selectableObjectives,
                     observedQuestDetails: detailsReceipt,
+                    observedNativeState: JsonNode.Parse(current.RootElement.GetRawText())?.AsObject(),
                     activeQuestAlreadyVerified: true);
                 decisions = ReadInt(planner, "decisions", decisions);
                 promptTokens = ReadLong(planner, "promptTokens", promptTokens);

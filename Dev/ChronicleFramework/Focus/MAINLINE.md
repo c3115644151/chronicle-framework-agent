@@ -1044,4 +1044,10 @@ TestResults/20261026-191500改用FreeLLMAPI keyless kilo-auto做单次Provider S
 
 自然运行`TestResults/20261027-055510`首帧已直接看到原版村民和当前选项，模型选择 我得先处理另一件事 后回Village MapState并Native招募6人（Party 1→7、Gold 1000→880）；本场ConversationManager第一次可操作快照已就绪，异步settle等待计数为0。因此本轮确认了即时状态下的推迟与招募链；pending MissionState→Character准备完成的延迟分支仍没有真实运行证据，不能仅以包测试验收。单Run在¥5保守预留上限下结束，EYC仍active/未完成。
 
-AgentHost失败/中断收据另加入Journal目标摘要（gold/partySize/renown/companions各自current、target、met），不带description/free text；下轮自然run可核对AI中止时实际门槛，避免把动态PartySize 7/8等判断成完成或缺人。Package self-test验证partySize 3/5未达标被照实记录；`TestResults/20261027-062055`Build/AgentHostPackage通过。Harness contract version为7.338。
+AgentHost失败/中断收据另加入Journal目标摘要（gold/partySize/renown/companions各自current、target、met），不带description/free text；下轮自然run可核对AI中止时实际门槛，避免把动态PartySize 7/8等判断成完成或缺人。Package self-test验证partySize 3/5未达标被照实记录；`TestResults/20261027-062055`Build/AgentHostPackage通过。Harness contract version为7.339。
+
+`TestResults/20261027-062528`记录了Journal PartySize 5/25与Native MainParty limit20、ClanTier=0同屏出现。已安装1.4.8源码`DefaultPartySizeLimitModel`以基础20计算移动Party容量；Clan leader从Tier1起每级+25，`StewardPartySizeBonus`按Quartermaster Steward技能计算。原版RecruitmentVM在当前超限offer上打开Over Limit Inquiry，明确affirmative确认的Native 20→21已有`TestResults/20261022-042203`运行证据；自然EYC用确认分支继续到25仍未实测。只读目标Planner现接收当前PartySizeLimit/ClanTier并提示模型考虑当前Native over-limit报价或Renown50/Tier1扩容路线；Journal目标仍权威，不硬编码顺序或伪造容量。`TestResults/20261027-065553`AgentHostPackage通过该上下文合同，真实策略结果待下一自然Campaign验证。
+
+### 2026-10-27 planner 决策依据追踪
+
+原有逐次模型Trace记录了动作、路由、token成本与普通Campaign状态，但没有保存只读目标Planner实际收到的Journal四项目标值和Native成长上下文，因此自然测试即使显示Planner选择了PartySize，也不能确认当时模型是否看到了`partySizeLimit=20`与`clanTier=0`。现将这两类有限数据加入Harness专用`AgentHostProgress.jsonl`：四个Journal目标各只保留current/target/met；Native上下文按固定字段白名单保留Clan Tier、party capacity、Gold、Renown、位置、遭遇/移动/俘虏状态。不会记录system prompt、自由文本理由或任意Native字段。Package自测包含Journal PartySize 5/25、Native容量20/Tier0，并放入一个私有诊断字段确认不会泄露；Harness contract 7.340。下一次真实Campaign可直接核对每次Planner决策时看到的进度依据及所选目标；这仍不能单独证明模型因该信息而改变了选择。

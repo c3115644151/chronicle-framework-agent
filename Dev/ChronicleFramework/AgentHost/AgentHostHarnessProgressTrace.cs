@@ -128,6 +128,8 @@ internal static class AgentHostHarnessProgressTrace
                     ["gold"] = Copy(economy, "gold"),
                     ["renown"] = Copy(economy, "renown"),
                     ["partyMembers"] = Copy(party, "members"),
+                    ["objectiveSnapshot"] = BuildObjectiveSnapshotSummary(state?["objectiveSnapshot"] as JsonObject),
+                    ["nativeProgressionContext"] = BuildNativeProgressionContextSummary(state?["nativeProgressionContext"] as JsonObject),
                     ["questCount"] = quests.Count,
                     ["quests"] = quests,
                     ["issueMarkers"] = markers,
@@ -347,7 +349,7 @@ internal static class AgentHostHarnessProgressTrace
             Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "visual-capture");
             Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_TEMP", temporaryDirectory);
             using var request = JsonDocument.Parse("""
-                {"runId":"trace-test","observation":{"state":{"campaignDay":12.5,"context":{"gameState":"MapState","menuId":"village","conversation":{"sentenceText":"Tools are needed.","options":[{"id":"issue_offer_player_accept_quest","text":"I can do it.","clickable":true}] }},"location":{"currentSettlementId":"village-1"},"economy":{"gold":920,"renown":20},"party":{"members":5},"quests":[],"settlementOverlayCharacters":[]}}}
+                {"runId":"trace-test","observation":{"state":{"campaignDay":12.5,"context":{"gameState":"MapState","menuId":"village","conversation":{"sentenceText":"Tools are needed.","options":[{"id":"issue_offer_player_accept_quest","text":"I can do it.","clickable":true}] }},"location":{"currentSettlementId":"village-1"},"economy":{"gold":920,"renown":20},"party":{"members":5},"objectiveSnapshot":{"gold":{"current":920,"target":2000,"met":false},"partySize":{"current":5,"target":25,"met":false},"renown":{"current":20,"target":50,"met":false},"companions":{"current":0,"target":1,"met":false}},"nativeProgressionContext":{"clanTier":0,"partySizeLimit":20,"partyMembers":5,"partyIsMoving":false,"privateDiagnostic":"must-not-appear"},"quests":[],"settlementOverlayCharacters":[]}}}
                 """);
             var decision = JsonNode.Parse("""{"action":"dialogueSelect","arguments":{"OptionId":"issue_offer_player_accept_quest"},"rationale":"Rationale is deliberately excluded."}""")!.AsObject();
             RecordDecision(request.RootElement, new ProviderDecisionResult("completed", "selftest-model", 123, 17, "stop", decision, "selftest/route",
@@ -369,6 +371,14 @@ internal static class AgentHostHarnessProgressTrace
                 Math.Abs((ReadDouble(recorded, "reservedCostUpperBoundCny") ?? -1) - 0.001) > 0.0000001 ||
                 recorded!.ContainsKey("systemPrompt") || recorded.ContainsKey("userPayload") || recorded.ContainsKey("requestBody"))
                 throw new AgentHostException("host-progress-trace-self-test-content", "Harness trace must preserve route, Native choice, request/cache/cost diagnostics and state-field sizes while excluding prompt or body text.");
+            var traceObservation = recorded["observation"] as JsonObject;
+            var traceProgression = traceObservation?["nativeProgressionContext"] as JsonObject;
+            var traceObjectives = traceObservation?["objectiveSnapshot"] as JsonObject;
+            if (ReadInt(traceProgression, "partySizeLimit") != 20 || ReadInt(traceProgression, "clanTier") != 0 ||
+                traceProgression?.ContainsKey("privateDiagnostic") == true ||
+                ReadDouble(traceObjectives?["partySize"] as JsonObject, "target") != 25 ||
+                ReadBoolean(traceObjectives?["partySize"] as JsonObject, "met"))
+                throw new AgentHostException("host-progress-trace-progression-context-self-test", "The bounded model-decision trace must retain only allowlisted Native capacity context and the four Journal objective metrics needed to audit the planner's decision.");
             var stateFieldSizes = recorded["observationStateFieldByteSizes"] as JsonArray;
             if (stateFieldSizes?.OfType<JsonObject>().Any(item => ReadString(item, "field") == "economy" && (ReadInt(item, "bytes") ?? 0) > 0) != true)
                 throw new AgentHostException("host-progress-trace-state-field-size-self-test", "Harness trace must identify oversized observation fields by name and byte count without persisting their values.");
@@ -661,6 +671,17 @@ internal static class AgentHostHarnessProgressTrace
                 ["target"] = Copy(value, "target"),
                 ["met"] = Copy(value, "met")
             };
+        }
+        return summary;
+    }
+
+    private static JsonObject? BuildNativeProgressionContextSummary(JsonObject? context)
+    {
+        if (context is null) return null;
+        var summary = new JsonObject();
+        foreach (var name in new[] { "gameState", "menuId", "currentSettlementId", "clanTier", "clanRenown", "gold", "partyMembers", "partySizeLimit", "partyIsMoving", "encounterActive", "isCaptive" })
+        {
+            if (context.ContainsKey(name)) summary[name] = context[name]?.DeepClone();
         }
         return summary;
     }
