@@ -954,3 +954,12 @@ FreeLLMAPI 官方 CLI 现已从 Electron Local Storage 的本地 dashboard sessi
 - JARVIS-1: https://github.com/CraftJarvis/JARVIS-1
 - Mindcraft: https://github.com/mindcraft-bots/mindcraft
 - MCU: https://github.com/CraftJarvis/MCU
+
+
+TestResults/20261026-174205使用FreeLLMAPI本机目录为eady的qwen3.8-27b执行无游戏真实模型分类：路由到ovh/Qwen3.8-27B，完成 supported-village-tools-quest分类，527输入/188输出tokens，0 Native命令。随后自然StoryMode首次真实接管仍未产生命令：Host对当前EYC菜单状态选择equired_tool_call输出格式，FreeLLMAPI回HTTP 502（allbackAttempts=1）、0决策/0动作；Campaign在教程跳过后自然激活EYC，未改存档/关闭Autosave恢复/游戏无崩溃，Host退出后交还玩家控制。这说明无游戏分类成功不等于带行动目录的模型可用，且provider失败发生于Native动作前；qwen3.8-27b随后目录标记exhausted，停止重试。
+
+TestResults/20261026-180613将当前配置临时覆盖为FreeLLMAPI qwen3.6-27b做一条无游戏生产分类请求，收到HTTP429/Retry-After=85秒，因本次Provider Smoke显式90秒请求预算不足以覆盖85秒等待加最小20秒重试预算而安全失败，没有模型决策或Native命令；目录此前标ready不代表当前可执行。该模型的FreshStoryMode Host单请求预算为300秒，可覆盖此已观察等待窗；下次自然StoryMode单次尝试使用qwen3.6-27b验证完整Campaign Host实际可恢复性，不重复重试qwen3.8或缩短Retry-After。
+
+
+TestResults/20261026-173814的FreeLLMAPI默认用户路由
+vidiallama-3.2-11b-vision在无游戏Provider Smoke中返回HTTP503，0决策/0动作；模型目录虽然显示ready，但真实上游调用未成功。TestResults/20261026-174205把请求限制为一次小型EYC目标分类，qwen3.8-27b经ovh/Qwen3.8-27B成功返回 supported-village-tools-quest分类（527输入/188输出token，0 Native命令）。随后完整自然StoryMode TestResults/20261026-175234却在输出格式切换到equired_tool_call时收到HTTP502，0决策/0动作；该模型当前已被FreeLLMAPI标为exhausted。这个差异说明分类Smoke不能证明行动目录请求协议可用。TestResults/20261026-180613的qwen3.6-27bSmoke收到429 Retry-After=85秒，但单次Smoke有90秒总预算，按Native最小重试预算判定不可等待并停止，没有重放。之后完整自然战役 TestResults/20261026-181615采用300秒生产请求预算，自然激活EYC；模型请求先等85秒再发，下一次429带Retry-After=585秒，超出本次300秒界限，Host以provider-http-error结束，0决策/0Native动作。TestResults/20261026-182645FreeLLMAPI uto:reliable路由尝试17次后仍HTTP502，日志摘要可读到的候选包括custom OpenAI gpt-4.1-nano额度不足及Google Gemini 3.5/3.6/3.8 forbidden；TestResults/20261026-183324查询gemma-4-31b-it时本地目录已标xhausted，Harness在发出推理前安全拒绝。上述几次完整自然Campaign均在Tutorial skip/EYC激活后失败，未发Native命令，无存档修改/崩溃，Host/Game/Autosave恢复通过。当前直接障碍从Host协议/游戏交互前移为FreeLLMAPI上游可用凭据/额度或模型路由能力；先恢复至少一个可承担结构化工具请求的可用免费Provider，再继续两个StoryMode通关门禁，不再重复上述已失败路由。
