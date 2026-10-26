@@ -171,6 +171,7 @@ internal static class AgentHostHarnessProgressTrace
                 ["decisions"] = Copy(result, "decisions"),
                 ["promptTokens"] = Copy(result, "promptTokens"),
                 ["completionTokens"] = Copy(result, "completionTokens"),
+                ["objectiveSnapshot"] = BuildObjectiveSnapshotSummary(result["objectiveSnapshot"] as JsonObject),
                 ["recruitmentOfferSummary"] = BuildRecruitmentOfferSummary(result["lastRecruitmentOffers"] as JsonObject),
                 ["companionNavigationSummary"] = BuildCompanionNavigationSummary(result["trace"] as JsonArray),
                 ["villagersInNeedStartupSummary"] = BuildVillagersInNeedStartupSummary(result["trace"] as JsonArray),
@@ -388,6 +389,13 @@ internal static class AgentHostHarnessProgressTrace
                 ["decisions"] = 2,
                 ["promptTokens"] = 900,
                 ["completionTokens"] = 60,
+                ["objectiveSnapshot"] = new JsonObject
+                {
+                    ["gold"] = new JsonObject { ["current"] = 1000, ["target"] = 2000, ["met"] = false },
+                    ["partySize"] = new JsonObject { ["current"] = 3, ["target"] = 5, ["met"] = false },
+                    ["renown"] = new JsonObject { ["current"] = 20, ["target"] = 50, ["met"] = false },
+                    ["companions"] = new JsonObject { ["current"] = 0, ["target"] = 1, ["met"] = false }
+                },
                 ["failure"] = "FreeLLMAPI returned HTTP 502. do not copy this free-text diagnostic.",
                 ["lastRecruitmentOffers"] = new JsonObject
                 {
@@ -472,6 +480,9 @@ internal static class AgentHostHarnessProgressTrace
                 ReadString(objectiveLine, "objectiveId") != "partySize" ||
                 ReadString(objectiveLine, "failureCode") != "provider-http-error" ||
                 ReadInt(objectiveLine, "providerHttpStatus") != 502 ||
+                ReadInt(objectiveLine["objectiveSnapshot"]?["partySize"] as JsonObject, "current") != 3 ||
+                ReadInt(objectiveLine["objectiveSnapshot"]?["partySize"] as JsonObject, "target") != 5 ||
+                ReadBoolean(objectiveLine["objectiveSnapshot"]?["partySize"] as JsonObject, "met") ||
                 ReadInt(objectiveLine["recruitmentOfferSummary"] as JsonObject, "offerCount") != 3 ||
                 ReadInt(objectiveLine["recruitmentOfferSummary"] as JsonObject, "availableOfferCount") != 2 ||
                 ReadInt(objectiveLine["recruitmentOfferSummary"] as JsonObject, "affordableAvailableOfferCount") != 1 ||
@@ -498,7 +509,8 @@ internal static class AgentHostHarnessProgressTrace
                 new { scenario = "provider-progress-trace-records-request-size-cache-and-cost-without-request-content", passed = true },
                 new { scenario = "harness-progress-trace-reports-only-aggregate-affordable-recruitment-offer-counts", passed = true },
                 new { scenario = "harness-progress-trace-reports-only-aggregate-companion-navigation-progress", passed = true },
-                new { scenario = "harness-progress-trace-records-objective-subflow-termination-and-safe-native-state-summaries", passed = true }
+                new { scenario = "harness-progress-trace-records-objective-subflow-termination-and-safe-native-state-summaries", passed = true },
+                new { scenario = "harness-progress-trace-records-dynamic-journal-current-target-met-summary", passed = true }
             ];
         }
         finally
@@ -633,6 +645,24 @@ internal static class AgentHostHarnessProgressTrace
             ["lastBeforeTimeControlMode"] = Copy(transitions[^1], "beforeTimeControlMode"),
             ["lastAfterTimeControlMode"] = Copy(transitions[^1], "afterTimeControlMode")
         };
+    }
+
+    private static JsonObject? BuildObjectiveSnapshotSummary(JsonObject? objective)
+    {
+        if (objective is null) return null;
+        var summary = new JsonObject();
+        foreach (var name in new[] { "gold", "partySize", "renown", "companions" })
+        {
+            var value = objective[name] as JsonObject;
+            if (value is null) continue;
+            summary[name] = new JsonObject
+            {
+                ["current"] = Copy(value, "current"),
+                ["target"] = Copy(value, "target"),
+                ["met"] = Copy(value, "met")
+            };
+        }
+        return summary;
     }
 
     private static bool ReadBoolean(JsonObject? source, string name) =>

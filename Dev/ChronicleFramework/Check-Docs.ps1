@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-    $contractVersion = '7.337'
+$contractVersion = '7.338'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -462,6 +462,8 @@ if ($agentHostDecisionCycleSource -notmatch 'AgentHostHarnessProgressTrace\.Reco
     $agentHostHarnessProgressTraceSource -notmatch 'conversationOptions' -or
     $agentHostHarnessProgressTraceSource -notmatch 'BuildVillagersInNeedStartupSummary' -or
     $agentHostHarnessProgressTraceSource -notmatch 'host-progress-trace-villagers-conversation-startup-self-test' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'BuildObjectiveSnapshotSummary' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'harness-progress-trace-records-dynamic-journal-current-target-met-summary' -or
     $agentHostRecruitmentLoopSource -notmatch 'safe-stop-rejected-with-observe-again-control' -or
     $agentHostRecruitmentLoopSource -notmatch 'The currently issued Native map move is still active' -or
     $agentHostRecruitmentLoopSource -notmatch 'BuildRecruitmentOffersObservation' -or
