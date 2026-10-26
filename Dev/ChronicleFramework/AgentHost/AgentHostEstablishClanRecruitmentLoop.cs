@@ -12,6 +12,8 @@ internal static class AgentHostEstablishClanRecruitmentLoop
     private const string VillagersInNeedQuestId = "talk_to_villagers_in_village_quest";
     private const string VillagersInNeedVillageId = "village_ES3_2";
     private const string VillagersInNeedHeroId = "tutorial_npc_questgiver_villager";
+    private const string VillagersInNeedVillaMissionStartTextId = "glarczej";
+    private const string VillagersInNeedDeferTextId = "nhSLTzHk";
     private const int MaxRejectedDecisions = 2;
     private const int MaxDecisions = 64;
     private static readonly TimeSpan MaxElapsed = TimeSpan.FromMinutes(30);
@@ -30,6 +32,17 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         }, "current-village", new HashSet<string>(StringComparer.Ordinal));
         if (targets.Count != 2 || targets.Any(target => ReadString(target as JsonObject, "id") is not ("town-a" or "village-a")))
             throw new AgentHostException("establish-clan-recruitment-target-filter-failed", "Only newly observed, safe Town/Village targets may be offered for troop recruitment travel.");
+        var mapTargetsReceipt = new JsonObject
+        {
+            ["status"] = "completed",
+            ["data"] = new JsonObject { ["mapSettlementTargets"] = targets.DeepClone() }
+        };
+        var compactMapTargetsReceipt = SafeReceipt(mapTargetsReceipt, "mapSettlementTargets", null);
+        var mapTargetsObservation = BuildObservation(new JsonObject(), new JsonArray(), new JsonObject(), targets, null, compactMapTargetsReceipt, null);
+        if (ReadInt(compactMapTargetsReceipt["data"] as JsonObject, "visibleTargetCount", -1) != 2 ||
+            compactMapTargetsReceipt["data"] is JsonObject mapReceiptData && mapReceiptData.ContainsKey("mapSettlementTargets") ||
+            (mapTargetsObservation["visibleSafeRecruitmentSettlements"] as JsonArray)?.Count != 2)
+            throw new AgentHostException("establish-clan-recruitment-duplicate-map-target-payload", "The current safe map targets must remain available once in the observation while the previous query receipt carries only its target count.");
 
         var offers = new JsonObject
         {
@@ -53,6 +66,15 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             troopIds is null || troopIds.Count != 1 || troopIds[0]?.GetValue<string>() != "vlandian_recruit" ||
             slots is null || slots.Count != 1 || slots[0]?.GetValue<int>() != 0)
             throw new AgentHostException("establish-clan-recruitment-catalog-failed", "The recruitment catalog must bind an affordable offer to its exact current owner, troop and VM slot; unaffordable/stale offers stay hidden.");
+        var compactOfferSummary = BuildRecruitmentOffersObservation(offers);
+        var compactOfferReceipt = SafeReceipt(offers, "recruitOptions", null);
+        var offerObservation = BuildObservation(new JsonObject(), new JsonArray(), new JsonObject(), null, offers, compactOfferReceipt, null);
+        var currentActionOffers = recruitCatalog[0]?["currentOffers"] as JsonArray;
+        if (ReadInt(compactOfferSummary, "affordableOfferCount", -1) != 1 ||
+            offerObservation["currentRecruitmentOffers"] is not JsonObject offerSummary || offerSummary.ContainsKey("offers") ||
+            compactOfferReceipt["data"] is not JsonObject offerReceiptSummary || offerReceiptSummary.ContainsKey("offers") ||
+            currentActionOffers?.Count != 1 || ReadString(currentActionOffers[0] as JsonObject, "ownerId") != "notable-a")
+            throw new AgentHostException("establish-clan-recruitment-duplicate-offer-payload", "The decision observation must provide aggregate RecruitmentVM counts while the listed recruit action alone retains exact current affordable offers.");
 
         var selection = new JsonObject
         {
@@ -66,6 +88,16 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         };
         if (!TryResolveRecruitmentAction(selection, recruitmentMenu, null, offers, null, false, out var action, out _, out _, out _) || action != "recruit")
             throw new AgentHostException("establish-clan-recruitment-current-offer-rejected", "The current affordable Native volunteer offer was not resolvable.");
+        var stringNumericSelection = selection.DeepClone().AsObject();
+        stringNumericSelection["arguments"]!["slot"] = "0";
+        stringNumericSelection["arguments"]!["confirmPartySizeWarning"] = "1";
+        if (!TryResolveRecruitmentAction(stringNumericSelection, recruitmentMenu, null, offers, null, false, out var canonicalAction, out var canonicalArguments, out _, out _) ||
+            canonicalAction != "recruit" || ReadInt(canonicalArguments, "slot", -1) != 0 || ReadInt(canonicalArguments, "confirmPartySizeWarning", -1) != 1)
+            throw new AgentHostException("establish-clan-recruitment-string-integer-not-normalized", "Canonical decimal integer strings from the provider must normalize to the same in-range native offer values.");
+        var nonCanonicalStringNumericSelection = selection.DeepClone().AsObject();
+        nonCanonicalStringNumericSelection["arguments"]!["slot"] = "00";
+        if (TryResolveRecruitmentAction(nonCanonicalStringNumericSelection, recruitmentMenu, null, offers, null, false, out _, out _, out _, out _))
+            throw new AgentHostException("establish-clan-recruitment-noncanonical-integer-accepted", "Noncanonical numeric strings must not be normalized into a Native offer.");
         var stale = selection.DeepClone().AsObject();
         stale["arguments"]!["slot"] = 7;
         if (TryResolveRecruitmentAction(stale, recruitmentMenu, null, offers, null, false, out _, out _, out _, out _))
@@ -132,20 +164,22 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             throw new AgentHostException("establish-clan-villagers-in-need-continue-not-listed", "The exact Native VillagersInNeed conversation may advance only through dialogueContinue while it has no selectable option.");
 
         var villagersInNeedChoiceState = VillagersInNeedConversationState(new JsonArray(
-            new JsonObject { ["id"] = "villagers_lead_on", ["text"] = "Lead on.", ["clickable"] = true },
-            new JsonObject { ["id"] = "villagers_defer", ["text"] = "I have to take care of something else, first.", ["clickable"] = true },
+            new JsonObject { ["id"] = "adg:131", ["textId"] = VillagersInNeedVillaMissionStartTextId, ["text"] = "Lead on.", ["clickable"] = true },
+            new JsonObject { ["id"] = "adg:132", ["textId"] = VillagersInNeedDeferTextId, ["text"] = "I have to take care of something else, first.", ["clickable"] = true },
             new JsonObject { ["id"] = "villagers_hidden", ["text"] = "hidden", ["clickable"] = false }));
         var villagersChoiceCatalog = BuildActionCatalog(villagersInNeedChoiceState,
             new JsonObject { ["partySize"] = new JsonObject { ["target"] = 5 } }, null, null, null, false);
         var villagersOptionIds = villagersChoiceCatalog.Count == 1 ? villagersChoiceCatalog[0]? ["argumentValues"]? ["OptionId"] as JsonArray : null;
         if (villagersChoiceCatalog.Count != 1 || ReadString(villagersChoiceCatalog[0] as JsonObject, "action") != "dialogueSelect" ||
-            villagersOptionIds?.Count != 2 || !villagersOptionIds.Any(option => option?.GetValue<string>() == "villagers_defer") ||
+            villagersOptionIds?.Count != 1 || villagersOptionIds[0]?.GetValue<string>() != "adg:132" ||
             villagersOptionIds.Any(option => option?.GetValue<string>() == "villagers_hidden") ||
-            !TryResolveRecruitmentAction(new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "villagers_defer" } },
+            !TryResolveRecruitmentAction(new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "adg:132" } },
                 villagersInNeedChoiceState, null, null, null, false, out var selectAction, out _, out _, out _) || selectAction != "dialogueSelect" ||
+            TryResolveRecruitmentAction(new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "adg:131" } },
+                villagersInNeedChoiceState, null, null, null, false, out _, out _, out _, out _) ||
             TryResolveRecruitmentAction(new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "villagers_hidden" } },
                 villagersInNeedChoiceState, null, null, null, false, out _, out _, out _, out _))
-            throw new AgentHostException("establish-clan-villagers-in-need-options-not-current", "Only clickable answers from the exact current VillagersInNeed ConversationManager list may be selected.");
+            throw new AgentHostException("establish-clan-villagers-in-need-options-not-current", "Only current clickable VillagersInNeed answers may be selected; the localized Native option that starts the excluded Villa Mission must be omitted and rejected.");
 
         var unrelatedMissionState = VillagersInNeedConversationState(new JsonArray(), "unrelated_character");
         if (BuildActionCatalog(unrelatedMissionState, new JsonObject { ["partySize"] = new JsonObject { ["target"] = 5 } }, null, null, null, false).Count != 0)
@@ -226,16 +260,18 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         results.Add(new { scenario = "establish-clan-recruitment-native-backstreet-exit-recovery-resumes-on-town-menu", passed = true });
 
         var villagersInNeedClient = new FakeVillagersInNeedRecruitmentClient();
-        var villagersInNeedProvider = new FakeVillagersInNeedDecisionProvider();
+        var villagersInNeedProvider = new FakeVillagersInNeedDecisionProvider(stopWhileMovingOnce: true);
         using var villagersInNeedRequest = JsonDocument.Parse("{\"runId\":\"establish-clan-villagers-in-need-selftest\",\"goal\":\"Raise the active Journal PartySize target.\",\"maxDecisions\":16,\"maxElapsedSeconds\":30}");
         var villagersInNeedRun = await RunAsync(villagersInNeedRequest.RootElement, villagersInNeedClient, villagersInNeedClient, villagersInNeedClient,
             villagersInNeedProvider, CancellationToken.None);
         if (ReadString(villagersInNeedRun, "status") != "completed" ||
             ReadString(villagersInNeedRun["termination"] as JsonObject, "reason") != "native-party-size-journal-target-met" ||
             ReadInt(villagersInNeedRun, "actionsExecuted", 0) != 8 || villagersInNeedClient.StealthMissionStarted ||
+            !villagersInNeedProvider.PrematureMoveStopRecovered ||
             !villagersInNeedClient.Actions.SequenceEqual(["mapSettlementTargets", "move", "dialogueContinue", "dialogueSelect", "dialogueContinue", "dialogueSelect", "recruitOptions", "recruit"], StringComparer.Ordinal))
-            throw new AgentHostException("establish-clan-villagers-in-need-party-size-recovery-failed", "The bounded PartySize subgoal must finish the current Native VillagersInNeed text, defer the original Villa mission, return to the Village menu and continue with the current RecruitmentVM offer.");
+            throw new AgentHostException("establish-clan-villagers-in-need-party-size-recovery-failed", "The bounded PartySize subgoal must reject a premature stop while Native movement exposes observeAgain, finish the current VillagersInNeed text, defer the original Villa mission, return to the Village menu and continue with the current RecruitmentVM offer.");
         results.Add(new { scenario = "establish-clan-recruitment-resumes-after-native-villagers-in-need-deferral", passed = true });
+        results.Add(new { scenario = "establish-clan-recruitment-rejects-stop-while-native-move-exposes-observe-again", passed = true });
         return results;
     }
 
@@ -409,7 +445,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                     ["completionTokens"] = decision.CompletionTokens
                 });
 
-                if (ReadBoolean(decision.Decision, "stop") && catalog.Count > 0)
+                if (ReadBoolean(decision.Decision, "stop") && (catalog.Count > 0 || controls.Count > 0))
                 {
                     if (rejectedPrematureStops >= 1)
                     {
@@ -455,10 +491,13 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                         .Select(name => name!)
                         .Distinct(StringComparer.Ordinal)
                         .ToArray();
+                    var observeAgainOnly = catalog.Count == 0 && controls.Any(control => control?.GetValue<string>() == "observeAgain");
                     feedback = new JsonObject
                     {
-                        ["kind"] = "safe-stop-rejected-with-listed-actions",
-                        ["requiredNextStep"] = BuildSafeStopRecoveryInstruction(catalog, availableActions)
+                        ["kind"] = observeAgainOnly ? "safe-stop-rejected-with-observe-again-control" : "safe-stop-rejected-with-listed-actions",
+                        ["requiredNextStep"] = observeAgainOnly
+                            ? "The currently issued Native map move is still active. Choose observeAgain with waitSeconds 1-10 for a fresh observation; do not stop or change the game clock."
+                            : BuildSafeStopRecoveryInstruction(catalog, availableActions)
                     };
                     trace.Add(BuildStep(decisions, observation, decision.Decision, null, feedback.DeepClone() as JsonObject, state, null));
                     continue;
@@ -466,7 +505,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                 if (ReadBoolean(decision.Decision, "stop"))
                     return BuildResult("interrupted", "recruitment-model-stopped", ReadString(decision.Decision, "reason") ?? "The model safely stopped the PartySize subgoal before another Native action.", "recruitment-model-stopped", state, currentRecruitOffers, journal, objective);
 
-                if (ReadString(decision.Decision, "control") == "observeAgain")
+                if (AgentHostDecisionCycle.IsObserveAgainDecision(decision.Decision))
                 {
                     var waitSeconds = ReadInt(decision.Decision, "waitSeconds", 0);
                     if (!movementPending || waitSeconds is < 1 or > 10)
@@ -500,7 +539,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
 
                 var actionStarted = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
                 JsonDocument response;
-                if (action is "mapSettlementTargets" or "move" or "dialogueContinue" or "dialogueSelect")
+                if (action is "mapSettlementTargets" or "move")
                     response = await campaignClient.ExecuteCampaignActionAsync(action, arguments, elapsed.Token);
                 else
                     response = await recruitmentClient.ExecuteRecruitmentActionAsync(action, arguments, elapsed.Token);
@@ -698,6 +737,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
 
         var optionIds = options.OfType<JsonObject>()
             .Where(option => ReadBoolean(option, "clickable"))
+            .Where(option => !string.Equals(ReadString(option, "textId"), VillagersInNeedVillaMissionStartTextId, StringComparison.Ordinal))
             .Select(option => ReadString(option, "id"))
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Distinct(StringComparer.Ordinal)
@@ -792,7 +832,8 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                 var dialogueOptionId = ReadString(supplied, "OptionId") ?? ReadString(supplied, "optionId");
                 var conversationOptions = state?["context"]?["conversation"]?["options"] as JsonArray;
                 if (supplied.Count != 1 || !IsVillagersInNeedConversation(state) || string.IsNullOrWhiteSpace(dialogueOptionId) ||
-                    conversationOptions?.OfType<JsonObject>().Any(option => ReadString(option, "id") == dialogueOptionId && ReadBoolean(option, "clickable")) != true)
+                    conversationOptions?.OfType<JsonObject>().Any(option => ReadString(option, "id") == dialogueOptionId && ReadBoolean(option, "clickable") &&
+                        !string.Equals(ReadString(option, "textId"), VillagersInNeedVillaMissionStartTextId, StringComparison.Ordinal)) != true)
                     return false;
                 arguments["optionId"] = dialogueOptionId;
                 return true;
@@ -809,8 +850,8 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             case "recruit":
                 var ownerId = ReadString(supplied, "ownerId");
                 var troopId = ReadString(supplied, "troopId");
-                var slot = (int)(ReadNumber(supplied, "slot") ?? -1);
-                var confirm = (int)(ReadNumber(supplied, "confirmPartySizeWarning") ?? -1);
+                if (!TryReadCanonicalInteger(supplied, "slot", out var slot) ||
+                    !TryReadCanonicalInteger(supplied, "confirmPartySizeWarning", out var confirm)) return false;
                 var offer = optionsReceipt?["data"]?["offers"]?.AsArray().OfType<JsonObject>().FirstOrDefault(item =>
                     ReadString(item, "ownerId") == ownerId && ReadString(item, "troopId") == troopId && (int)(ReadNumber(item, "slot") ?? -2) == slot &&
                     ReadBoolean(item, "available") && (ReadNumber(item, "cost") ?? double.MaxValue) <= (ReadNumber(optionsReceipt["data"] as JsonObject, "gold") ?? 0));
@@ -887,7 +928,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             ["journalObjectiveSnapshot"] = journal.DeepClone(),
             ["objectiveSnapshot"] = objective.DeepClone(),
             ["visibleSafeRecruitmentSettlements"] = safeTargets?.DeepClone(),
-            ["currentRecruitmentOffers"] = offers?.DeepClone(),
+            ["currentRecruitmentOffers"] = BuildRecruitmentOffersObservation(offers),
             ["previousNativeReceipt"] = previousReceipt?.DeepClone(),
             ["decisionFeedback"] = feedback?.DeepClone()
         };
@@ -951,13 +992,50 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         return step;
     }
 
-    private static JsonObject SafeReceipt(JsonObject receipt, string action, string? selectedSettlementId) => new()
+    private static JsonObject SafeReceipt(JsonObject receipt, string action, string? selectedSettlementId)
     {
-        ["action"] = action,
-        ["status"] = ReadString(receipt, "status"),
-        ["selectedSettlementId"] = selectedSettlementId,
-        ["data"] = receipt["data"]?.DeepClone()
-    };
+        var safe = new JsonObject
+        {
+            ["action"] = action,
+            ["status"] = ReadString(receipt, "status"),
+            ["selectedSettlementId"] = selectedSettlementId
+        };
+        if (action == "mapSettlementTargets")
+        {
+            var count = (receipt["data"]?["mapSettlementTargets"] as JsonArray)?.Count ?? 0;
+            safe["data"] = new JsonObject { ["visibleTargetCount"] = count };
+        }
+        else if (action == "recruitOptions")
+        {
+            safe["data"] = BuildRecruitmentOffersObservation(receipt);
+        }
+        else
+        {
+            safe["data"] = receipt["data"]?.DeepClone();
+        }
+        return safe;
+    }
+
+    private static JsonObject? BuildRecruitmentOffersObservation(JsonObject? receipt)
+    {
+        var data = receipt?["data"] as JsonObject;
+        if (data is null) return null;
+        var offers = data["offers"] as JsonArray;
+        var gold = ReadNumber(data, "gold") ?? 0;
+        var available = offers?.OfType<JsonObject>().Where(offer => ReadBoolean(offer, "available")).ToArray() ?? Array.Empty<JsonObject>();
+        var affordable = available.Where(offer => (ReadNumber(offer, "cost") ?? double.MaxValue) <= gold).ToArray();
+        var lowest = affordable.Select(offer => ReadNumber(offer, "cost")).Where(cost => cost.HasValue).Select(cost => cost!.Value).DefaultIfEmpty(double.NaN).Min();
+        return new JsonObject
+        {
+            ["gold"] = data["gold"]?.DeepClone(),
+            ["partySize"] = data["partySize"]?.DeepClone(),
+            ["partyCapacity"] = data["partyCapacity"]?.DeepClone(),
+            ["offerCount"] = offers?.Count ?? 0,
+            ["availableOfferCount"] = available.Length,
+            ["affordableOfferCount"] = affordable.Length,
+            ["lowestAffordableCost"] = double.IsFinite(lowest) ? JsonValue.Create(lowest) : null
+        };
+    }
 
     private static string DescribeNoAction(JsonObject state, JsonObject? options)
     {
@@ -998,6 +1076,15 @@ internal static class AgentHostEstablishClanRecruitmentLoop
     private static bool ReadBoolean(JsonObject? node, string name) => node?[name] is JsonValue value && value.TryGetValue<bool>(out var result) && result;
     private static int ReadInt(JsonElement element, string name, int fallback) => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.TryGetInt32(out var result) ? result : fallback;
     private static int ReadInt(JsonObject? node, string name, int fallback) => node?[name] is JsonValue value && value.TryGetValue<int>(out var result) ? result : fallback;
+    private static bool TryReadCanonicalInteger(JsonObject node, string name, out int result)
+    {
+        result = -1;
+        if (node[name] is not JsonValue value) return false;
+        if (value.TryGetValue<int>(out result)) return true;
+        if (!value.TryGetValue<string>(out var text) || !int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out result))
+            return false;
+        return string.Equals(text, result.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
+    }
     private static string? ReadString(JsonElement element, string name) => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     private sealed class FakeRecruitmentNativeClient : IAgentHostCampaignNativeClient, IAgentHostQuestDetailsNativeClient, IAgentHostRecruitmentNativeClient
@@ -1137,7 +1224,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (_moveIssued && !_arrived && _readsAfterMove++ >= 1)
+            if (_moveIssued && !_arrived && _readsAfterMove++ >= 3)
             {
                 _arrived = true;
                 _dialogueStage = 0;
@@ -1152,8 +1239,8 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                     new JsonObject { ["id"] = "villagers_wait_for_opening", ["text"] = "Wait until the bandits turn their backs.", ["clickable"] = true },
                     new JsonObject { ["id"] = "villagers_pass_unseen", ["text"] = "Pass through unseen.", ["clickable"] = true }),
                 3 => new JsonArray(
-                    new JsonObject { ["id"] = "villagers_lead_on", ["text"] = "Lead on.", ["clickable"] = true },
-                    new JsonObject { ["id"] = "villagers_defer", ["text"] = "I have to take care of something else, first.", ["clickable"] = true }),
+                    new JsonObject { ["id"] = "adg:131", ["textId"] = VillagersInNeedVillaMissionStartTextId, ["text"] = "Lead on.", ["clickable"] = true },
+                    new JsonObject { ["id"] = "adg:132", ["textId"] = VillagersInNeedDeferTextId, ["text"] = "I have to take care of something else, first.", ["clickable"] = true }),
                 _ => new JsonArray()
             };
             var state = new JsonObject
@@ -1239,12 +1326,21 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                 _moveIssued = true;
                 return Task.FromResult(JsonDocument.Parse("{\"status\":\"completed\",\"data\":{\"targetSettlementId\":\"village_ES3_2\"}}"));
             }
-            if (action == "dialogueContinue" && _arrived && _dialogueStage is 0 or 2)
+            throw new AgentHostException("villagers-in-need-selftest-unexpected-campaign-action", "The fake Native VillagersInNeed route received an unsupported or out-of-order action.");
+        }
+
+        public Task<JsonDocument> ExecuteRecruitmentActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Actions.Add(action);
+            if (!_arrived)
+                throw new AgentHostException("villagers-in-need-selftest-recruited-before-deferral", "Recruitment must wait for the original conversation deferral and return to the Village menu.");
+            if (action == "dialogueContinue" && _dialogueStage is 0 or 2)
             {
                 _dialogueStage++;
                 return Task.FromResult(JsonDocument.Parse("{\"status\":\"completed\"}"));
             }
-            if (action == "dialogueSelect" && _arrived)
+            if (action == "dialogueSelect")
             {
                 var optionId = ReadString(arguments, "optionId");
                 if (_dialogueStage == 1 && optionId is "villagers_wait_for_opening" or "villagers_pass_unseen")
@@ -1253,7 +1349,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                     _dialogueStage = 2;
                     return Task.FromResult(JsonDocument.Parse("{\"status\":\"completed\"}"));
                 }
-                if (_dialogueStage == 3 && optionId == "villagers_defer")
+                if (_dialogueStage == 3 && optionId == "adg:132")
                 {
                     _deferredVillaMission = true;
                     _dialogueStage = 4;
@@ -1261,14 +1357,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                 }
                 if (_dialogueStage == 3 && optionId == "villagers_lead_on") _stealthMissionStarted = true;
             }
-            throw new AgentHostException("villagers-in-need-selftest-unexpected-campaign-action", "The fake Native VillagersInNeed route received an unsupported or out-of-order action.");
-        }
-
-        public Task<JsonDocument> ExecuteRecruitmentActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Actions.Add(action);
-            if (!_arrived || _dialogueStage != 4)
+            if (_dialogueStage != 4)
                 throw new AgentHostException("villagers-in-need-selftest-recruited-before-deferral", "Recruitment must wait for the original conversation deferral and return to the Village menu.");
             if (action == "recruitOptions")
                 return Task.FromResult(JsonDocument.Parse(new JsonObject
@@ -1298,7 +1387,10 @@ internal static class AgentHostEstablishClanRecruitmentLoop
 
     private sealed class FakeVillagersInNeedDecisionProvider : IAgentHostDecisionProvider
     {
+        private bool _stopWhileMovingOnce;
         internal int CallCount { get; private set; }
+        internal bool PrematureMoveStopRecovered { get; private set; }
+        internal FakeVillagersInNeedDecisionProvider(bool stopWhileMovingOnce = false) => _stopWhileMovingOnce = stopWhileMovingOnce;
         public string ModelId => "deterministic-villagers-in-need-recruitment-selftest";
         public string ConfigurationSource => "harness-fake-provider";
         public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) { cancellationToken.ThrowIfCancellationRequested(); return Task.CompletedTask; }
@@ -1309,10 +1401,30 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             CallCount++;
             var controls = request.GetProperty("allowedControls");
             if (controls.EnumerateArray().Any(control => control.GetString() == "observeAgain"))
+            {
+                var feedback = request.TryGetProperty("decisionFeedback", out var feedbackNode) ? feedbackNode : default;
+                if (_stopWhileMovingOnce)
+                {
+                    _stopWhileMovingOnce = false;
+                    CallCount++;
+                    return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "villagers-in-need-selftest", new JsonObject
+                    {
+                        ["stop"] = true, ["reason"] = "Pause this subgoal while movement is still active."
+                    }));
+                }
+                if (feedback.ValueKind == JsonValueKind.Object && ReadString(feedback, "kind") == "safe-stop-rejected-with-observe-again-control")
+                {
+                    var instruction = ReadString(feedback, "requiredNextStep");
+                    if (instruction?.Contains("observeAgain", StringComparison.Ordinal) != true || instruction.Contains("change the game clock", StringComparison.Ordinal) != true)
+                        throw new AgentHostException("villagers-in-need-observe-again-recovery-unclear", "The Host recovery instruction must name passive observeAgain and forbid clock changes.");
+                    PrematureMoveStopRecovered = true;
+                }
+                CallCount++;
                 return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "villagers-in-need-selftest", new JsonObject
                 {
                     ["observeAgain"] = true, ["waitSeconds"] = 1
                 }));
+            }
 
             var catalog = request.GetProperty("allowedActions");
             foreach (var item in catalog.EnumerateArray())
@@ -1334,7 +1446,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                 if (action == "dialogueSelect")
                 {
                     var optionIds = values.GetProperty("OptionId").EnumerateArray().Select(value => value.GetString()).ToArray();
-                    var selected = optionIds.Contains("villagers_defer", StringComparer.Ordinal) ? "villagers_defer" : optionIds.FirstOrDefault();
+                    var selected = optionIds.Contains("adg:132", StringComparer.Ordinal) ? "adg:132" : optionIds.FirstOrDefault();
                     if (selected is null) throw new AgentHostException("villagers-in-need-selftest-no-option", "The fake conversation exposed no current answer.");
                     return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "villagers-in-need-selftest", new JsonObject
                     {

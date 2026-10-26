@@ -25,6 +25,30 @@ internal static class AgentHostHarnessProgressTrace
             var requestNode = JsonNode.Parse(request.GetRawText()) as JsonObject;
             var observation = requestNode?["observation"] as JsonObject;
             var state = observation?["state"] as JsonObject ?? observation;
+            var observationFieldByteSizes = new JsonArray();
+            if (observation is not null)
+            {
+                foreach (var property in observation.Select(property => new
+                {
+                    Name = property.Key,
+                    Bytes = Encoding.UTF8.GetByteCount(property.Value?.ToJsonString() ?? "null")
+                }).OrderByDescending(property => property.Bytes).ThenBy(property => property.Name, StringComparer.Ordinal).Take(12))
+                {
+                    observationFieldByteSizes.Add(new JsonObject { ["field"] = property.Name, ["bytes"] = property.Bytes });
+                }
+            }
+            var stateFieldByteSizes = new JsonArray();
+            if (state is not null)
+            {
+                foreach (var property in state.Select(property => new
+                {
+                    Name = property.Key,
+                    Bytes = Encoding.UTF8.GetByteCount(property.Value?.ToJsonString() ?? "null")
+                }).OrderByDescending(property => property.Bytes).ThenBy(property => property.Name, StringComparer.Ordinal).Take(12))
+                {
+                    stateFieldByteSizes.Add(new JsonObject { ["field"] = property.Name, ["bytes"] = property.Bytes });
+                }
+            }
             var context = state?["context"] as JsonObject;
             var location = state?["location"] as JsonObject;
             var conversation = context?["conversation"] as JsonObject;
@@ -81,6 +105,16 @@ internal static class AgentHostHarnessProgressTrace
                 ["responseFormatMode"] = result.ResponseFormatMode,
                 ["promptTokens"] = result.PromptTokens,
                 ["completionTokens"] = result.CompletionTokens,
+                ["promptCacheHitTokens"] = result.PromptCacheHitTokens,
+                ["promptCacheMissTokens"] = result.PromptCacheMissTokens,
+                ["requestBodyBytes"] = result.RequestBodyBytes,
+                ["systemPromptBytes"] = result.SystemPromptBytes,
+                ["userPayloadBytes"] = result.UserPayloadBytes,
+                ["observationBytes"] = result.ObservationBytes,
+                ["observationFieldByteSizes"] = observationFieldByteSizes,
+                ["observationStateFieldByteSizes"] = stateFieldByteSizes,
+                ["estimatedCostCny"] = result.EstimatedCostCny,
+                ["reservedCostUpperBoundCny"] = result.ReservedCostUpperBoundCny,
                 ["decision"] = decision,
                 ["observation"] = new JsonObject
                 {
@@ -167,6 +201,7 @@ internal static class AgentHostHarnessProgressTrace
         if (state is null) return null;
         var context = state["context"] as JsonObject;
         var location = state["location"] as JsonObject;
+        var conversation = context?["conversation"] as JsonObject;
         var economy = state["economy"] as JsonObject;
         var party = state["party"] as JsonObject;
         var captivity = context?["captivity"] as JsonObject;
@@ -189,6 +224,17 @@ internal static class AgentHostHarnessProgressTrace
             foreach (var quest in quests.OfType<JsonObject>())
                 questIds.Add(Copy(quest, "id"));
         }
+        var conversationOptions = new JsonArray();
+        if (conversation?["options"] is JsonArray sourceConversationOptions)
+        {
+            foreach (var option in sourceConversationOptions.OfType<JsonObject>())
+                conversationOptions.Add(new JsonObject
+                {
+                    ["id"] = Copy(option, "id"),
+                    ["textId"] = Copy(option, "textId"),
+                    ["clickable"] = Copy(option, "clickable")
+                });
+        }
         return new JsonObject
         {
             ["campaignDay"] = Copy(native, "campaignDay"),
@@ -197,6 +243,9 @@ internal static class AgentHostHarnessProgressTrace
             ["currentSettlementId"] = Copy(location, "currentSettlementId"),
             ["targetSettlementId"] = Copy(location, "targetSettlementId"),
             ["targetPartyId"] = Copy(location, "targetPartyId"),
+            ["conversationCharacterId"] = Copy(conversation, "characterId"),
+            ["conversationHeroId"] = Copy(conversation, "heroId"),
+            ["conversationOptions"] = conversationOptions,
             ["encounteredPartyId"] = Copy(context, "encounteredPartyId"),
             ["encounterActive"] = Copy(context, "encounterActive"),
             ["escapeMenuOpen"] = Copy(context, "escapeMenuOpen"),
@@ -248,6 +297,11 @@ internal static class AgentHostHarnessProgressTrace
                 ["context"] = new JsonObject
                 {
                     ["gameState"] = "MapState", ["escapeMenuOpen"] = false, ["inquiryOpen"] = true,
+                    ["conversation"] = new JsonObject
+                    {
+                        ["characterId"] = "tutorial_npc_questgiver_villager",
+                        ["options"] = new JsonArray(new JsonObject { ["id"] = "adg:131", ["textId"] = "glarczej", ["clickable"] = true })
+                    },
                     ["inquiry"] = new JsonObject
                     {
                         ["supported"] = true, ["kind"] = "YesNoInquiry", ["token"] = "never-copy-this-token",
@@ -260,8 +314,12 @@ internal static class AgentHostHarnessProgressTrace
             }
         });
         var summarizedInquiry = modalSummary?["inquiry"] as JsonObject;
+        var summarizedConversationOption = (modalSummary?["conversationOptions"] as JsonArray)?[0] as JsonObject;
         if (ReadBoolean(modalSummary, "inquiryOpen") != true || ReadString(summarizedInquiry, "kind") != "YesNoInquiry" ||
             ReadString(summarizedInquiry, "text") != "Native alert body" ||
+            ReadString(modalSummary, "conversationCharacterId") != "tutorial_npc_questgiver_villager" ||
+            ReadString(summarizedConversationOption, "id") != "adg:131" || ReadString(summarizedConversationOption, "textId") != "glarczej" ||
+            ReadBoolean(summarizedConversationOption, "clickable") != true ||
             ReadString(summarizedInquiry?["affirmative"] as JsonObject, "text") != "好" ||
             summarizedInquiry?.ContainsKey("token") == true || ReadBoolean(modalSummary, "partyScreenOpen") || ReadBoolean(modalSummary, "inventoryScreenOpen"))
             throw new AgentHostException("host-progress-trace-native-modal-self-test", "The bounded progress trace must identify current modal blockers and visible button labels without leaking one-use tokens or claiming unrelated screens.");
@@ -278,18 +336,31 @@ internal static class AgentHostHarnessProgressTrace
                 {"runId":"trace-test","observation":{"state":{"campaignDay":12.5,"context":{"gameState":"MapState","menuId":"village","conversation":{"sentenceText":"Tools are needed.","options":[{"id":"issue_offer_player_accept_quest","text":"I can do it.","clickable":true}] }},"location":{"currentSettlementId":"village-1"},"economy":{"gold":920,"renown":20},"party":{"members":5},"quests":[],"settlementOverlayCharacters":[]}}}
                 """);
             var decision = JsonNode.Parse("""{"action":"dialogueSelect","arguments":{"OptionId":"issue_offer_player_accept_quest"},"rationale":"Rationale is deliberately excluded."}""")!.AsObject();
-            RecordDecision(request.RootElement, new ProviderDecisionResult("completed", "selftest-model", 123, 17, "stop", decision, "selftest/route"));
+            RecordDecision(request.RootElement, new ProviderDecisionResult("completed", "selftest-model", 123, 17, "stop", decision, "selftest/route",
+                RequestBodyBytes: 40000, SystemPromptBytes: 1000, UserPayloadBytes: 30000, ObservationBytes: 5000,
+                PromptCacheHitTokens: 50, PromptCacheMissTokens: 73, EstimatedCostCny: 0.0005, ReservedCostUpperBoundCny: 0.001));
             var lines = File.ReadAllLines(path);
             if (lines.Length != 1) throw new AgentHostException("host-progress-trace-self-test-line-count", "Harness progress trace did not append exactly one decision.");
-            var recorded = JsonNode.Parse(lines[0])!.AsObject();
+            var recorded = JsonNode.Parse(lines[0]) as JsonObject ?? throw new AgentHostException("host-progress-trace-self-test-json", "Harness progress trace did not contain one JSON object.");
             var recordedDecision = recorded["decision"] as JsonObject;
             if (ReadString(recorded, "routedVia") != "selftest/route" ||
                 ReadString(recordedDecision, "action") != "dialogueSelect" ||
                 ReadString(recordedDecision?["arguments"] as JsonObject, "OptionId") != "issue_offer_player_accept_quest" ||
                 recordedDecision?.ContainsKey("rationale") == true ||
-                ReadString(recorded?["observation"] as JsonObject, "menuId") != "village")
-                throw new AgentHostException("host-progress-trace-self-test-content", "Harness trace must preserve route and chosen Native argument without rationale or prompt content.");
-
+                ReadString(recorded?["observation"] as JsonObject, "menuId") != "village" ||
+                (ReadInt(recorded, "requestBodyBytes") ?? 0) != 40000 || (ReadInt(recorded, "systemPromptBytes") ?? 0) != 1000 ||
+                (ReadInt(recorded, "userPayloadBytes") ?? 0) != 30000 || (ReadInt(recorded, "observationBytes") ?? 0) != 5000 ||
+                (ReadInt(recorded, "promptCacheHitTokens") ?? 0) != 50 || (ReadInt(recorded, "promptCacheMissTokens") ?? 0) != 73 ||
+                Math.Abs((ReadDouble(recorded, "estimatedCostCny") ?? -1) - 0.0005) > 0.0000001 ||
+                Math.Abs((ReadDouble(recorded, "reservedCostUpperBoundCny") ?? -1) - 0.001) > 0.0000001 ||
+                recorded!.ContainsKey("systemPrompt") || recorded.ContainsKey("userPayload") || recorded.ContainsKey("requestBody"))
+                throw new AgentHostException("host-progress-trace-self-test-content", "Harness trace must preserve route, Native choice, request/cache/cost diagnostics and state-field sizes while excluding prompt or body text.");
+            var stateFieldSizes = recorded["observationStateFieldByteSizes"] as JsonArray;
+            if (stateFieldSizes?.OfType<JsonObject>().Any(item => ReadString(item, "field") == "economy" && (ReadInt(item, "bytes") ?? 0) > 0) != true)
+                throw new AgentHostException("host-progress-trace-state-field-size-self-test", "Harness trace must identify oversized observation fields by name and byte count without persisting their values.");
+            var observationFieldSizes = recorded["observationFieldByteSizes"] as JsonArray;
+            if (observationFieldSizes?.OfType<JsonObject>().Any(item => ReadString(item, "field") == "state" && (ReadInt(item, "bytes") ?? 0) > 0) != true)
+                throw new AgentHostException("host-progress-trace-observation-field-size-self-test", "Harness trace must identify which bounded observation section contributes request size without persisting its contents.");
             Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "agent-host-lifecycle-test");
             RecordDecision(request.RootElement, new ProviderDecisionResult("completed", "selftest-model", 1, 1, "stop", decision, "lifecycle/selftest-route"));
             if (File.ReadAllLines(path).Length != 2)
@@ -411,6 +482,7 @@ internal static class AgentHostHarnessProgressTrace
             return [
                 new { scenario = "harness-progress-trace-records-current-modal-and-visible-buttons-without-one-use-token", passed = true },
                 new { scenario = "harness-progress-trace-persists-native-decision-and-route-without-free-text-in-visual-capture-and-lifecycle-modes", passed = true },
+                new { scenario = "provider-progress-trace-records-request-size-cache-and-cost-without-request-content", passed = true },
                 new { scenario = "harness-progress-trace-reports-only-aggregate-affordable-recruitment-offer-counts", passed = true },
                 new { scenario = "harness-progress-trace-reports-only-aggregate-companion-navigation-progress", passed = true },
                 new { scenario = "harness-progress-trace-records-objective-subflow-termination-and-safe-native-state-summaries", passed = true }

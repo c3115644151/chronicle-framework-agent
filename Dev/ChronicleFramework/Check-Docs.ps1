@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.327'
+$contractVersion = '7.335'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -49,6 +49,7 @@ $harnessScript = Get-Content (Join-Path $harnessRoot 'Run-Harness.ps1') -Raw -En
 $harnessStartupEvidenceSource = Get-Content (Join-Path $harnessRoot 'HarnessStartupEvidence.ps1') -Raw -Encoding UTF8
 $testResultsRetentionScript = Join-Path $harnessRoot 'Prune-TestResults.ps1'
 $agentCliSource = Get-Content (Join-Path $harnessRoot 'Agent-Cli.ps1') -Raw -Encoding UTF8
+$testCampaignSource = Get-Content (Join-Path $harnessRoot 'Test-Campaign.ps1') -Raw -Encoding UTF8
 $testWindowLayoutSource = Get-Content (Join-Path $harnessRoot 'Test-WindowLayout.ps1') -Raw -Encoding UTF8
 $shaderDialogSource = Get-Content (Join-Path $harnessRoot 'HarnessShaderCacheDialog.ps1') -Raw -Encoding UTF8
 $agentProtocolSource = Get-Content (Join-Path $harnessRoot 'AgentProtocol.cs') -Raw -Encoding UTF8
@@ -157,7 +158,7 @@ $shaderDialogTestCases = @(
 )
 if (-not $shaderDialogTestCases[0] -or $shaderDialogTestCases[1] -or $shaderDialogTestCases[2] -or $shaderDialogTestCases[3]) { throw 'Shader-cache dialog classifier must accept only the exact known title, cache text, and a unique affirmative action.' }
 if ($agentCliSource -notmatch 'Invoke-ChronicleShaderCacheDialogAcknowledgement' -or $shaderDialogSource -notmatch 'InvokePattern' -or $shaderDialogSource -notmatch 'LegacyIAccessiblePattern' -or $shaderDialogSource -notmatch 'Current\.ProcessId -ne \$ProcessId' -or $shaderDialogSource -notmatch 'GetWindowThreadProcessId' -or $shaderDialogSource -notmatch '0x00F5' -or $shaderDialogSource -notmatch '\$maxAcknowledgements\s*=\s*3' -or $shaderDialogSource -notmatch 'AcknowledgementAttempts' -or $shaderDialogSource -match 'SendInput|mouse_event|keybd_event|SetForegroundWindow|SetFocus' -or $inventoryNavigationSource -notmatch 'StartupDialogReceipts') { throw 'The shader-cache prompt must use a verified process-owned UIA/native-button action, bounded same-dialog retries, preserve its receipt, and never use global input or foreground activation.' }
-if ($agentCliSource -notmatch "'moveToPoint'" -or $agentCliSource -notmatch "'missionInput'" -or $agentCliSource -notmatch "ValidateSet\('land'\)" -or $agentProtocolSource -notmatch 'case "moveToPoint"' -or $agentProtocolSource -notmatch 'case "missionInput"' -or $agentProtocolSource -notmatch 'boundedLease' -or $agentProtocolSource -notmatch 'UpdateMissionInputLease' -or $agentProtocolSource -notmatch 'ReadRequiredFiniteDouble' -or $agentProtocolSource -notmatch 'ProcessTravel\(requestedPoint\)' -or $agentProtocolSource -notmatch 'naval/sea transition belongs to a separately tested adapter' -or $agentDecisionLoopSource -notmatch "moveToPoint = @\('X','Y','Surface'\)" -or $agentDecisionLoopSource -notmatch "missionInput = @\('X','Y','DurationSeconds'\)" -or $agentObserverSource -notmatch 'schemaVersion\\":27' -or $agentObserverSource -notmatch 'characterId' -or $agentObserverSource -notmatch 'OneToOneConversationCharacter' -or $agentObserverSource -notmatch 'bannerEditor' -or $agentObserverSource -notmatch 'isWaitMenu' -or $agentObserverSource -notmatch 'isWaitActive' -or $agentObserverSource -notmatch 'storyModeEstablishClanStatus' -or $agentObserverSource -notmatch 'questMarkerFlags' -or $agentObserverSource -notmatch 'OptionQuestData' -or $agentObserverSource -notmatch 'CanInteractWithAgent' -or $agentObserverSource -notmatch 'isInteractable' -or $agentObserverSource -notmatch 'targetPosition' -or $agentObserverSource -notmatch 'BuildMissionObservationJson' -or $agentObserverSource -notmatch 'combatType' -or $agentObserverSource -notmatch 'movementInput' -or $agentObserverSource -notmatch 'CameraBearing' -or $agentObserverSource -notmatch 'CameraElevation' -or $agentObserverSource -notmatch 'nativeFocus' -or $agentObserverSource -notmatch 'nearbySceneAgents' -or $agentObserverSource -notmatch 'BuildMissionNavigationObservationJson' -or $agentObserverSource -notmatch 'isPlayerControlled' -or $agentObserverSource -notmatch 'isAIControlled' -or $agentObserverSource -notmatch 'settlementOverlayCharacters' -or $agentProtocolSource -notmatch 'case "talkToSettlementHero"' -or $agentProtocolSource -notmatch 'case "visitSettlementHero"' -or $agentDecisionLoopSource -notmatch "talkToSettlementHero = @\('HeroId'\)" -or $agentDecisionLoopSource -notmatch "visitSettlementHero = @\('HeroId'\)") { throw 'W2-B land-point observation and W2-D native menu quest-marker and Mission camera/focus/input observations must coexist under the current schema.' }
+if ($agentCliSource -notmatch "'moveToPoint'" -or $agentCliSource -notmatch "'missionInput'" -or $agentCliSource -notmatch "ValidateSet\('land'\)" -or $agentProtocolSource -notmatch 'case "moveToPoint"' -or $agentProtocolSource -notmatch 'case "missionInput"' -or $agentProtocolSource -notmatch 'boundedLease' -or $agentProtocolSource -notmatch 'UpdateMissionInputLease' -or $agentProtocolSource -notmatch 'ReadRequiredFiniteDouble' -or $agentProtocolSource -notmatch 'ProcessTravel\(requestedPoint\)' -or $agentProtocolSource -notmatch 'naval/sea transition belongs to a separately tested adapter' -or $agentDecisionLoopSource -notmatch "moveToPoint = @\('X','Y','Surface'\)" -or $agentDecisionLoopSource -notmatch "missionInput = @\('X','Y','DurationSeconds'\)" -or $agentObserverSource -notmatch 'schemaVersion\\":28' -or $agentObserverSource -notmatch 'characterId' -or $agentObserverSource -notmatch 'OneToOneConversationCharacter' -or $agentObserverSource -notmatch 'textId' -or $agentObserverSource -notmatch 'GetID\(\)' -or $agentObserverSource -notmatch 'bannerEditor' -or $agentObserverSource -notmatch 'isWaitMenu' -or $agentObserverSource -notmatch 'isWaitActive' -or $agentObserverSource -notmatch 'storyModeEstablishClanStatus' -or $agentObserverSource -notmatch 'questMarkerFlags' -or $agentObserverSource -notmatch 'OptionQuestData' -or $agentObserverSource -notmatch 'CanInteractWithAgent' -or $agentObserverSource -notmatch 'isInteractable' -or $agentObserverSource -notmatch 'targetPosition' -or $agentObserverSource -notmatch 'BuildMissionObservationJson' -or $agentObserverSource -notmatch 'combatType' -or $agentObserverSource -notmatch 'movementInput' -or $agentObserverSource -notmatch 'CameraBearing' -or $agentObserverSource -notmatch 'CameraElevation' -or $agentObserverSource -notmatch 'nativeFocus' -or $agentObserverSource -notmatch 'nearbySceneAgents' -or $agentObserverSource -notmatch 'BuildMissionNavigationObservationJson' -or $agentObserverSource -notmatch 'isPlayerControlled' -or $agentObserverSource -notmatch 'isAIControlled' -or $agentObserverSource -notmatch 'settlementOverlayCharacters' -or $agentProtocolSource -notmatch 'case "talkToSettlementHero"' -or $agentProtocolSource -notmatch 'case "visitSettlementHero"' -or $agentDecisionLoopSource -notmatch "talkToSettlementHero = @\('HeroId'\)" -or $agentDecisionLoopSource -notmatch "visitSettlementHero = @\('HeroId'\)") { throw 'W2-B land-point observation and W2-D native menu quest-marker and Mission camera/focus/input observations must coexist under the current schema.' }
 if ($agentObserverSource -notmatch 'Property\(json, "characterName", conversationManager\.OneToOneConversationCharacter\?\.Name\?\.ToString\(\), true\)' -or
     $agentObserverSource -notmatch 'Property\(json, "heroId", conversationManager\.OneToOneConversationHero\?\.StringId, true\)' -or
     $agentObserverSource -notmatch 'Property\(json, "sentenceText", conversationManager\.CurrentSentenceText, true\)') {
@@ -457,6 +458,14 @@ if ($agentHostDecisionCycleSource -notmatch 'AgentHostHarnessProgressTrace\.Reco
     $agentHostHarnessProgressTraceSource -notmatch 'BuildNativeStateSummary' -or
     $agentHostHarnessProgressTraceSource -notmatch 'nativeStateBefore' -or
     $agentHostHarnessProgressTraceSource -notmatch 'nativeStateAfter' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'conversationCharacterId' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'conversationOptions' -or
+    $agentHostRecruitmentLoopSource -notmatch 'safe-stop-rejected-with-observe-again-control' -or
+    $agentHostRecruitmentLoopSource -notmatch 'The currently issued Native map move is still active' -or
+    $agentHostRecruitmentLoopSource -notmatch 'BuildRecruitmentOffersObservation' -or
+    $agentHostRecruitmentLoopSource -notmatch 'visibleTargetCount' -or
+    $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-duplicate-map-target-payload' -or
+    $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-duplicate-offer-payload' -or
     $agentHostHarnessProgressTraceSource -notmatch 'providerHttpStatus' -or
     $agentHostHarnessProgressTraceSource -notmatch 'BuildRecruitmentOfferSummary' -or
     $agentHostHarnessProgressTraceSource -notmatch 'harness-progress-trace-reports-only-aggregate-affordable-recruitment-offer-counts' -or
@@ -471,6 +480,8 @@ if (-not (Test-Path -LiteralPath (Join-Path $harnessRoot 'AgentHost\AgentHostCam
     $agentHostCampaignStateFactsSource -notmatch 'campaign-state-facts-training-field-menu-misclassified' -or
     $agentHostCampaignStateFactsSource -notmatch 'campaign-state-facts-hostile-encounter-misclassified' -or
     $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-training-field-menu-misclassified' -or
+    $agentHostCompanionLoopSource -notmatch 'companion-navigation-stall-policy-excludes-only-after-two-no-progress-native-approaches' -or
+    $agentHostCompanionLoopSource -notmatch 'MinimumCompanionNavigationProgressDistance = 0.1d' -or
     $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-training-field-menu-not-exitable' -or
     $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-failure-receipt-preserves-safe-native-state-summary' -or
     $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-native-training-field-leave-to-volunteer-to-journal-verification' -or
@@ -635,9 +646,9 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $sourceModuleManifest -notmatch 'DependedModule Id="SandBox" DependentVersion="[^"]+" Optional="false"' -or
     $providerSettingsSource -notmatch 'AttributeGlobalSettings<ChronicleAgentProviderSettings>' -or $providerSettingsSource -notmatch 'FormatType => "json"' -or
     $providerSettingsSource -notmatch 'OllamaBaseUrl' -or $providerSettingsSource -notmatch 'ModelId' -or
-    $providerSettingsSource -notmatch '127.0.0.1:31415/v1' -or $providerSettingsSource -notmatch 'auto' -or
-    $providerSettingsSource -notmatch 'FreeLLMAPI' -or $providerSettingsSource -notmatch 'FREELLMAPI_API_KEY' -or
-    $providerSettingsSource -notmatch 'provider-freellmapi-endpoint-required' -or
+    $providerSettingsSource -notmatch 'api.deepseek.com/v1' -or $providerSettingsSource -notmatch 'deepseek-flash' -or
+    $providerSettingsSource -notmatch 'OpenAI 兼容服务地址' -or $providerSettingsSource -notmatch 'CHRONICLE_LLM_API_KEY' -or
+    $providerSettingsSource -notmatch 'EnvironmentVariableTarget.User' -or $providerSettingsSource -notmatch 'OutputMode' -or $providerSettingsSource -notmatch 'DeepSeekRunCostLimitCny' -or
     $providerSettingsSource -notmatch 'SettingPropertyButton' -or $providerSettingsSource -notmatch 'AgentProviderConfigurationValidator\.GetErrorCode' -or
     $providerSettingsSource -notmatch 'MBInformationManager\.AddQuickInformation' -or
     $providerSettingsSource -notmatch '(?s)public Action ValidateLocalConfiguration\s*\{\s*get => ShowConfigurationValidation;\s*set \{\s*\}\s*\}' -or
@@ -646,12 +657,17 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $agentHostRuntimeControllerSource -notmatch 'RequestStart' -or $agentHostRuntimeControllerSource -notmatch 'RequestStop' -or $agentHostRuntimeControllerSource -notmatch 'host-stop-requested' -or
     $agentHostRuntimeControllerSource -notmatch 'Kill\(\)' -or $agentHostRuntimeControllerSource -notmatch 'IsOwnedLiveProcess' -or
     $agentHostRuntimeControllerSource -notmatch 'CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS' -or
-    $agentHostRuntimeControllerSource -notmatch '实时模型连接只允许本机FreeLLMAPI网关' -or
+    $agentHostRuntimeControllerSource -notmatch 'providerIsRemote' -or $agentHostRuntimeControllerSource -notmatch 'EnvironmentVariableTarget.User' -or
+    $agentHostRuntimeControllerSource -notmatch 'settings.OutputMode' -or $agentHostRuntimeControllerSource -notmatch 'settings.DeepSeekRunCostLimitCny' -or
     $agentHostLifecycleEvaluationSource -notmatch 'AgentHostPackage\.log' -or $agentHostLifecycleEvaluationSource -notmatch 'agent-host-process-started' -or
     $agentHostLifecycleEvaluationSource -notmatch 'agent-host-process-exit' -or $agentHostLifecycleEvaluationSource -notmatch 'FixtureUnchanged' -or
-    $providerValidatorSource -notmatch 'Uri\.IsLoopback' -or $agentHostProjectSource -notmatch 'AgentProviderConfigurationValidator\.cs' -or
+    $providerValidatorSource -notmatch 'uri.Scheme == "http" && !uri.IsLoopback' -or $agentHostProjectSource -notmatch 'AgentProviderConfigurationValidator\.cs' -or
     $providerProfileSource -notmatch 'AgentProviderConfigurationValidator\.GetErrorCode' -or
-    $providerProfileTestSource -notmatch 'mcm-profile-rejects-remote-endpoint' -or
+    $providerProfileTestSource -notmatch 'mcm-profile-accepts-generic-https-openai-compatible-provider' -or
+    $providerProfileTestSource -notmatch 'deepseek-auto-profile-selects-bounded-non-thinking-strict-tool-calls' -or
+    $providerProfileTestSource -notmatch 'mcm-profile-rejects-insecure-remote-http' -or
+    $providerProfileTestSource -notmatch 'mcm-profile-rejects-nonpositive-deepseek-run-budget' -or
+    $providerProfileTestSource -notmatch 'deepseek-auto-profile-selects-bounded-non-thinking-strict-tool-calls' -or
     $providerProfileTestSource -notmatch 'mcm-global-profile-tolerates-legacy-and-unknown-fields' -or
     $providerProfileTestSource -notmatch 'provider-profile-reads-without-migrating-user-file' -or
     $providerProfileTestSource -notmatch 'provider-profile-error-path-mutated-file' -or
@@ -681,7 +697,7 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerProfileTestSource -notmatch 'freellmapi-retry-after-delay-respects-overall-provider-timeout' -or
     $providerSmokeSource -notmatch 'function Resolve-ProviderSmokeTimeoutSeconds' -or
     $providerSmokeSource -notmatch 'Resolve-ProviderSmokeTimeoutSeconds \$null\) -ne 360' -or
-    $providerSmokeSource -notmatch "CHRONICLE_LLM_MAX_TOKENS = '1024'" -or
+    $providerSmokeSource -notmatch "CHRONICLE_LLM_MAX_TOKENS = '128'" -or
     $providerSmokeSource -notmatch 'EffectiveMaxOutputTokens = \[int\]\$env:CHRONICLE_LLM_MAX_TOKENS' -or
     $providerSmokeSource -match '\[ref\]\$effectiveTimeout' -or
     $providerProfileTestSource -notmatch 'freellmapi-429-accepts-observed-315-second-retry-and-fails-closed-outside-bounds' -or
@@ -692,15 +708,15 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerProfileTestSource -notmatch 'freellmapi-ovh-model-rate-window-is-route-specific' -or
     $providerProfileTestSource -notmatch 'max_tokens' -or
     $providerProfileTestSource -notmatch 'mistralRequestShapeValid' -or
-    $providerHostSource -notmatch 'IsMistralSmall32' -or $providerHostSource -notmatch 'GetMinimumRequestInterval' -or $providerHostSource -notmatch 'WaitForProviderRateWindowAsync' -or $providerHostSource -notmatch 'ShouldRetryTransientFreeLlmApiFailure' -or $providerHostSource -notmatch 'GetBoundedRateLimitRetryAfter' -or $providerHostSource -notmatch 'transientProviderRetriesUsed' -or $providerHostSource -notmatch 'retryDelaySeconds = transientProviderRetriesUsed == 0 \? 5 : 15' -or $providerHostSource -notmatch 'retryAfter=' -or $providerHostSource -notmatch 'failedRoute.Contains\("ovh/Mistral-Small"' -or $providerHostSource -notmatch 'payload.Remove\("max_completion_tokens"\)' -or $providerHostSource -notmatch 'ReadIntegerEnvironment\("CHRONICLE_LLM_MAX_TOKENS", 1024, 64, 4096\)' -or
+    $providerHostSource -notmatch 'IsMistralSmall32' -or $providerHostSource -notmatch 'GetMinimumRequestInterval' -or $providerHostSource -notmatch 'WaitForProviderRateWindowAsync' -or $providerHostSource -notmatch 'ShouldRetryTransientFreeLlmApiFailure' -or $providerHostSource -notmatch 'GetBoundedRateLimitRetryAfter' -or $providerHostSource -notmatch 'transientProviderRetriesUsed' -or $providerHostSource -notmatch 'retryDelaySeconds = transientProviderRetriesUsed == 0 \? 5 : 15' -or $providerHostSource -notmatch 'retryAfter=' -or $providerHostSource -notmatch 'failedRoute.Contains\("ovh/Mistral-Small"' -or $providerHostSource -notmatch 'payload.Remove\("max_completion_tokens"\)' -or $providerHostSource -notmatch 'ReadIntegerEnvironment\("CHRONICLE_LLM_MAX_TOKENS", 256, 64, 4096\)' -or
     $providerProfileTestSource -notmatch 'freellmapi-missing-key-fails-before-network-request' -or
     $providerSmokeSource -notmatch 'goalScopeClassificationRequired = \$true' -or
     $providerSmokeSource -notmatch 'goalScopeContract = ''native-campaign-goal-classification-v1''' -or
     $providerSmokeSource -notmatch 'No goal-specific game action has run yet' -or
     $providerSmokeSource -notmatch 'supportedVillageToolsQuestGoal' -or
     $providerSmokeSource -notmatch 'NativeCommands = 0' -or
-    $providerSmokeSource -notmatch 'GatewayStartedByHarness = \[bool\]\$freeLlmApiProfile\.GatewayStartedByHarness' -or
-    $providerSmokeSource -notmatch 'LocalProxyBootstrapApplied = \[bool\]\$freeLlmApiProfile\.LocalProxyBootstrapApplied' -or
+    $providerSmokeSource -notmatch 'GatewayStartedByHarness = if \(\$freeLlmApiProfile\)' -or
+    $providerSmokeSource -notmatch 'LocalProxyBootstrapApplied = if \(\$freeLlmApiProfile\)' -or
     $providerSmokeSource -notmatch 'DecisionClassification = \[string\]\$result.decision.goalClassification' -or
     $providerProgramSource -notmatch 'AgentHostDecisionCycle.DecideCampaignAsync' -or
     $providerSmokeSource -notmatch 'ResponseFormatMode = \[string\]\$result\.responseFormatMode' -or
@@ -714,7 +730,7 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerProfileSource -notmatch 'Configs.*ModSettings.*Global.*ChronicleFramework.*ChronicleAgentSettings\.json' -or
     $providerHostSource -notmatch 'FromConfiguredProfile' -or
     $supplyHostSource -notmatch 'OllamaNativeProvider\.FromConfiguredProfile') {
-    throw 'Player model settings must expose MCM Global JSON fields with an explicit safe format check, and the Agent Host must consume that same loopback-only profile outside Harness overrides.'
+    throw 'Player model settings must expose an OpenAI-compatible endpoint with HTTPS-only remote transport, process/user-scoped secret lookup, and a matching Agent Host profile outside Harness overrides.'
 }
 if ($providerHostSource -notmatch 'defaultTimeoutSeconds = nativeOllama \? 60 : 360' -or
     $providerHostSource -notmatch 'maximumTimeoutSeconds = nativeOllama \? 240 : 360' -or
@@ -795,9 +811,14 @@ $agentHostSupplyLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\Agen
 $agentHostMailboxSource = Get-Content (Join-Path $harnessRoot 'AgentHost\NativeMailboxClient.cs') -Raw -Encoding UTF8
 if ($agentHostProviderSource -notmatch 'CheckConfiguredModelAsync' -or $agentHostProviderSource -notmatch '/models' -or
     $agentHostProviderSource -notmatch 'FREELLMAPI_API_KEY' -or $agentHostProviderSource -notmatch 'X-Routed-Via' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'generic-https-openai-compatible-provider-health-auth-and-structured-decision' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'canonical-observe-again-decision-is-recognized-by-native-subloops' -or
     $agentHostProviderSource -notmatch 'IsListedSingleArgumentValue' -or $agentHostProviderSource -notmatch 'IsStoryModeClanNameTextArgument' -or
     $agentHostProviderContractSelfTestSource -notmatch 'provider-repairs-only-exact-listed-single-enum-argument-shorthand' -or
     $agentHostProviderContractSelfTestSource -notmatch 'provider-repairs-single-storymode-clan-name-text-shorthand-for-native-validation' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'deepseek-run-cost-reservation-rejects-over-budget-before-http' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'provider-progress-trace-records-request-size-cache-and-cost-without-request-content' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'observationFieldByteSizes' -or $agentHostHarnessProgressTraceSource -notmatch 'observationStateFieldByteSizes' -or
     $agentHostProviderSource -notmatch 'auto:reliable' -or
     $agentHostProviderSelfTestSource -notmatch 'freellmapi-health-accepts-documented-auto-reliable-strategy-not-listed-as-model' -or
     $agentHostProviderSelfTestSource -notmatch 'freellmapi-health-rejects-unknown-auto-profile-not-listed-as-model' -or
@@ -1084,22 +1105,37 @@ if (-not (Test-ChronicleSteamClientReadiness)) { throw 'Steam API readiness regr
 if ($startupEvidenceSource -notmatch 'function Ensure-ChronicleSteamClientReady' -or
     $startupEvidenceSource -notmatch "ArgumentList '-silent'.*-WindowStyle Hidden" -or
     $startupEvidenceSource -notmatch 'function Start-ChronicleSteamGame' -or
+    $startupEvidenceSource -notmatch 'function Disable-ChronicleHarnessGameSound' -or
+    $startupEvidenceSource -notmatch 'function Restore-ChronicleHarnessGameSound' -or
+    $startupEvidenceSource -notmatch 'disable_sound\\s\*=\\s\*' -or
+    $harnessScript -notmatch 'BannerlordSoundRecoveryOnHarnessStart' -or
     $startupEvidenceSource -notmatch "steam_appid\.txt" -or
     $startupEvidenceSource -notmatch "SetEnvironmentVariable\('SteamAppId'" -or
     $startupEvidenceSource -notmatch "SetEnvironmentVariable\('SteamGameId'" -or
     $agentCliSource -notmatch 'Ensure-ChronicleSteamClientReady' -or
     $agentCliSource -notmatch 'Start-ChronicleSteamGame -FilePath \$launcher' -or
+    $agentCliSource -notmatch 'Disable-ChronicleHarnessGameSound' -or
+    $agentCliSource -notmatch 'Restore-ChronicleHarnessGameSound' -or
     $freshCampaignSource -notmatch 'Start-ChronicleSteamGame -FilePath \$launcher' -or
+    $freshCampaignSource -notmatch 'Disable-ChronicleHarnessGameSound' -or
+    $freshCampaignSource -notmatch 'Restore-ChronicleHarnessGameSound' -or
+    $freshCampaignSource -notmatch 'BannerlordSoundMutedForHarness' -or
     $campaignTestSource -notmatch 'Start-ChronicleSteamGame -FilePath \$launcher' -or
+    $campaignTestSource -notmatch 'Disable-ChronicleHarnessGameSound' -or
+    $campaignTestSource -notmatch 'Restore-ChronicleHarnessGameSound' -or
     $campaignTestSource -notmatch 'Ensure-ChronicleSteamClientReady' -or
     $smokeModuleSource -notmatch 'Ensure-ChronicleSteamClientReady' -or
     $smokeModuleSource -notmatch 'Start-ChronicleSteamGame -FilePath \$gameExe' -or
+    $smokeModuleSource -notmatch 'Disable-ChronicleHarnessGameSound' -or
+    $smokeModuleSource -notmatch 'Restore-ChronicleHarnessGameSound' -or
+    $smokeModuleSource -notmatch 'BannerlordSoundMutedForHarness' -or
+    $smokeModuleSource -notmatch 'BannerlordSoundRestored' -or
     $smokeModuleSource -notmatch 'SteamClient = \[ordered\]@\{' -or
     $smokeModuleSource -notmatch 'startedByHarness = \[bool\]\$steamStatus\.startedByHarness' -or
     $smokeModuleSource -notmatch 'SteamProcessCount = \[int\]\$steamStatus\.readiness\.SteamProcessCount' -or
     $smokeModuleSource -notmatch 'WebHelperStableSeconds = \[double\]\$steamStatus\.readiness\.WebHelperStableSeconds' -or
     $smokeModuleSource.IndexOf('Ensure-ChronicleSteamClientReady', [StringComparison]::Ordinal) -gt $smokeModuleSource.IndexOf('Start-ChronicleSteamGame -FilePath $gameExe', [StringComparison]::Ordinal)) {
-    throw 'Every Bannerlord launch must use the shared Steam readiness gate and Steam App ID environment wrapper; Smoke must record readiness before launch.'
+    throw 'Every Harness-owned Bannerlord launch must use the shared Steam readiness gate and reversible game-only sound guard; Smoke must record readiness and sound restoration.'
 }
 if (-not (Test-ChronicleStartupDialogEvidenceSerialization)) { throw 'Startup dialog evidence retained a live UI Automation object instead of a serializable snapshot.' }
 if (-not (Test-ChronicleReceiptSerialization)) { throw 'Receipt normalization changed primitive/list data or retained PowerShell object metadata.' }
@@ -1284,7 +1320,7 @@ if (-not (Test-Path (Join-Path $harnessRoot 'AgentHost\AgentHostCampaignStateFac
     $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-training-field-menu-misclassified' -or
     $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-training-field-menu-not-exitable' -or
     $agentHostRecruitmentLoopSource -notmatch 'while \(decisions < maxDecisions\)' -or
-    $agentHostRecruitmentLoopSource -notmatch 'decision.Decision, "stop"\) && catalog.Count > 0' -or
+    $agentHostRecruitmentLoopSource -notmatch 'decision.Decision, "stop"\) && \(catalog.Count > 0 \|\| controls.Count > 0\)' -or
     $agentHostRecruitmentLoopSource -notmatch 'safe-stop-rejected-with-listed-actions' -or
     $agentHostRecruitmentLoopSource -notmatch 'Choose the currently listed recruitOptions action now' -or
     $agentHostRecruitmentLoopSource -notmatch 'does not recruit anyone or spend Gold' -or
@@ -1296,6 +1332,11 @@ if (-not (Test-Path (Join-Path $harnessRoot 'AgentHost\AgentHostCampaignStateFac
     $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-native-backstreet-exit-recovery-resumes-on-town-menu' -or
     $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-resumes-after-native-villagers-in-need-deferral' -or
     $agentHostRecruitmentLoopSource -notmatch 'VillagersInNeedConversation' -or
+    $agentHostRecruitmentLoopSource -notmatch 'AgentHostDecisionCycle.IsObserveAgainDecision' -or
+    $agentHostRecruitmentLoopSource -notmatch 'action is "mapSettlementTargets" or "move"' -or
+    $agentHostMailboxSource -notmatch '"dialogueContinue" => arguments.Count == 0' -or
+    $agentHostMailboxSource -notmatch '"dialogueSelect" => arguments.Count == 1 && HasText\(arguments, "optionId"\)' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'canonical-observe-again-decision-is-recognized-by-native-subloops' -or
     $agentHostDecisionCycleSource -notmatch 'RECOVERY DIRECTIVE: The previous stop was rejected before any Native action' -or
     $agentHostEstablishClanAutonomySource -notmatch 'recruitment-model-stopped' -or
     $agentHostEstablishClanAutonomySource -notmatch 'recruitment-model-stopped-with-safe-actions' -or
@@ -1303,7 +1344,8 @@ if (-not (Test-Path (Join-Path $harnessRoot 'AgentHost\AgentHostCampaignStateFac
     $agentHostEstablishClanAutonomySource -notmatch 'establish-clan-autonomy-safe-stop-replan-policy-failed' -or
     $agentHostGoldSaleLoopSource -notmatch 'gold-sale-self-test-training-field-menu-not-exitable' -or
     $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-self-test-training-field-menu-not-exitable' -or
-    $agentHostProviderContractSelfTestSource -notmatch 'AgentHostCampaignStateFacts.RunContractSelfTests') { throw 'EYC objective subflows must distinguish the verified Native training-field Leave menu from a hostile Party encounter and keep the same leave path out of hostile encounter handling.' }
+    $agentHostProviderContractSelfTestSource -notmatch 'AgentHostCampaignStateFacts.RunContractSelfTests' -or
+    $agentHostMailboxSource -notmatch 'native-recruitment-mailbox-allows-quest-scoped-dialogue-and-current-offer-actions') { throw 'EYC objective subflows must distinguish the verified Native training-field Leave menu from a hostile Party encounter and keep the same leave path out of hostile encounter handling; PartySize VillagersInNeed dialogue must use its bounded recruitment Native transport.' }
 $partyRoleAdapterSource = Get-Content (Join-Path $harnessRoot 'AgentPartyRoleAdapter.cs') -Raw -Encoding UTF8
 $partyRoleTest = Get-Content (Join-Path $harnessRoot 'Test-AgentPartyRoles.ps1') -Raw -Encoding UTF8
 if ($agentProtocolSource -notmatch 'case "partyRoles"' -or $agentProtocolSource -notmatch 'case "setPartyRole"' -or $agentProtocolSource -notmatch 'case "unassignPartyRole"' -or $agentCliSource -notmatch "'partyRoles'" -or $agentCliSource -notmatch "'setPartyRole'" -or $agentCliSource -notmatch "'unassignPartyRole'" -or $agentDecisionLoopSource -notmatch 'partyRoles = @\(\)' -or $agentDecisionLoopSource -notmatch "setPartyRole = @\('RoleId','HeroId'\)" -or $agentDecisionLoopSource -notmatch "unassignPartyRole = @\('RoleId'\)" -or $partyRoleAdapterSource -notmatch 'GetAssignablePartyRoles' -or $partyRoleAdapterSource -notmatch 'ExecuteAssignHeroToRole' -or $partyRoleAdapterSource -notmatch 'GetMapScreenActionIsEnabledWithReason' -or $partyRoleAdapterSource -match 'SetPartyQuartermaster|SetPartyScout|SetPartySurgeon|SetPartyEngineer' -or $agentProtocolSource -notmatch 'PartyRole fixture/diagnostics are restricted to visual Harness runs' -or $agentDecisionLoopSource -match 'harnessSeedPartyRoleFixture|harnessPartyRoleDiagnostics') { throw 'PartyRoles must query native role VM candidates, apply native Campaign action gating and call its native handler; fixture seeding/diagnostics stay Harness-only and bypassing role setters is forbidden.' }
@@ -1421,9 +1463,14 @@ if ($freshCampaignSource -notmatch 'StoryModeNewGame' -or
     $freshCampaignSource -notmatch '_tutorialSkipConfirmationFrameCaptured' -or
     $freshCampaignTest -notmatch '\[switch\]\$StoryModeEycSetup' -or
     $freshCampaignTest -notmatch '\[switch\]\$StoryModeEycLiveModelEvaluation' -or
-    $freshCampaignTest -notmatch "GetEnvironmentVariable\('FREELLMAPI_API_KEY', 'User'\)" -or
-    $freshCampaignTest -notmatch '\$env:FREELLMAPI_API_KEY = \$userFreeLlmApiKey' -or
-    $freshCampaignTest -notmatch '\$previousFreeLlmApiKey' -or
+    $freshCampaignTest -notmatch 'providerEnvironmentNames' -or
+    $freshCampaignTest -notmatch 'GetEnvironmentVariable\(\$name,''User''\)' -or
+    $freshCampaignTest -notmatch 'CHRONICLE_LLM_API_KEY' -or
+    $freshCampaignTest -notmatch 'https' -or
+    $freshCampaignTest -notmatch '/models' -or
+    $freshCampaignTest -notmatch 'Configured model ID is absent from the remote provider catalog' -or
+    $freshCampaignTest -notmatch 'providerApiKey' -or
+    $freshCampaignTest -notmatch 'DeepSeekRunCostLimitCny' -or
     $freshCampaignTest -notmatch 'StoryModeAgentHostStarted' -or
     $freshCampaignTest -notmatch 'StoryModeOriginalEstablishYourClanCompleted' -or
     $freshCampaignTest -notmatch '\$storyModeHostReceipt\.status -eq ''completed'' -and' -or
@@ -1431,6 +1478,8 @@ if ($freshCampaignSource -notmatch 'StoryModeNewGame' -or
     $freshCampaignTest -notmatch 'StoryModeAgentProgressPath' -or
     $freshCampaignTest -notmatch 'Initialize-FreeLLMAPIProfile' -or
     $freshCampaignTest -notmatch 'storyModeLiveProviderPreflightReady' -or
+    $freshCampaignTest -notmatch 'StoryModeModelProviderProfile' -or
+    $freshCampaignTest -notmatch 'Remote provider read-only /models preflight failed' -or
     $freshCampaignTest -notmatch 'cleanupDeadline = \(Get-Date\)\.AddSeconds\(15\)' -or
     $freshCampaignTest -notmatch 'CHRONICLE_FRESH_CAMPAIGN_STORYMODE' -or
     $freshCampaignTest -notmatch '\$diagnosticStartLineCount = \$allLines\.Count' -or
@@ -1444,7 +1493,7 @@ if ($freshCampaignSource -notmatch 'StoryModeNewGame' -or
     $harnessScript -notmatch "CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS', '7200000'" -or
     $harnessScript -notmatch "CHRONICLE_LLM_TIMEOUT_SECONDS', '300'" -or
     $agentHostRuntimeControllerSource -notmatch 'autoStopMilliseconds <= 7200000' -or
-    $harnessScript -notmatch "ValidateSet\('gpt-oss-20b','openai-gpt-oss-20b','nvidiallama-3.2-11b-vision','poolside-laguna-s-2.1','free-router','gemini-2.5-flash','mistral-nemo','mistral-small-3.2-24b','qwen3.6-27b','auto:reliable'\)" -or
+    $harnessScript -notmatch "ValidateSet\('deepseek-flash','gpt-oss-20b','openai-gpt-oss-20b','nvidiallama-3.2-11b-vision','poolside-laguna-s-2.1','free-router','gemini-2.5-flash','mistral-nemo','mistral-small-3.2-24b','qwen3.6-27b','auto:reliable'\)" -or
     $harnessScript -notmatch 'CHRONICLE_HARNESS_AGENT_MODEL.*\$FreshStoryModeModel' -or
     $agentHostRuntimeControllerSource -notmatch 'CHRONICLE_HARNESS_AGENT_MODEL' -or
     $agentHostCampaignLoopSource -notmatch 'HasPostTutorialTrainingFieldMap' -or

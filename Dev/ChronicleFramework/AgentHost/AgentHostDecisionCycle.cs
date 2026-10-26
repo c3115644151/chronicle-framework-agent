@@ -286,6 +286,11 @@ internal static class AgentHostDecisionCycle
         return VillageToolsQuestSystemPrompt + " RECOVERY DIRECTIVE: " + retryPolicy + " " + requiredNextStep;
     }
 
+    internal static bool IsObserveAgainDecision(JsonObject? decision) =>
+        ReadBoolean(decision, "observeAgain") ||
+        string.Equals(ReadString(decision, "control"), "observeAgain", StringComparison.Ordinal) ||
+        string.Equals(ReadString(decision, "action"), "observeAgain", StringComparison.Ordinal);
+
     private static string? ReadString(JsonObject? value, string name) =>
         value?[name] is JsonValue node && node.TryGetValue<string>(out var result) ? result : null;
 

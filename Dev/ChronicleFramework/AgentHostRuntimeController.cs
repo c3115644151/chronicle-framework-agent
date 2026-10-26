@@ -54,7 +54,7 @@ internal static class ChronicleAgentRuntimeController
         {
             new KeyValuePair<string, Action<ChronicleAgentProviderSettings>>("empty-goal", settings => settings.CampaignGoal = string.Empty),
             new KeyValuePair<string, Action<ChronicleAgentProviderSettings>>("oversized-goal", settings => settings.CampaignGoal = new string('x', 1001)),
-            new KeyValuePair<string, Action<ChronicleAgentProviderSettings>>("remote-endpoint", settings => settings.OllamaBaseUrl = "https://example.com/v1"),
+            new KeyValuePair<string, Action<ChronicleAgentProviderSettings>>("insecure-remote-endpoint", settings => settings.OllamaBaseUrl = "http://example.com/v1"),
             new KeyValuePair<string, Action<ChronicleAgentProviderSettings>>("empty-model", settings => settings.ModelId = string.Empty),
             new KeyValuePair<string, Action<ChronicleAgentProviderSettings>>("missing-host", settings => { })
         };
@@ -289,19 +289,12 @@ internal static class ChronicleAgentRuntimeController
             FailStart(configError == "provider-profile-endpoint-invalid" ? "模型网关地址无效" : "模型名称无效");
             return;
         }
-        var usesFreeLlmApi = Uri.TryCreate(settings.OllamaBaseUrl, UriKind.Absolute, out var providerUri) &&
-                             providerUri.IsLoopback && providerUri.Port == 31415 && providerUri.AbsolutePath.TrimEnd('/') == "/v1";
         var noModelLifecycleProbe = IsLifecycleHarnessMode() && Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_NO_MODEL") == "1";
-        if (!usesFreeLlmApi && !noModelLifecycleProbe && !IsLifecycleHarnessMode())
+        var providerIsRemote = Uri.TryCreate(settings.OllamaBaseUrl, UriKind.Absolute, out var providerUri) && !providerUri.IsLoopback;
+        var configuredApiKey = ResolveApiKey();
+        if (providerIsRemote && string.IsNullOrWhiteSpace(configuredApiKey) && !noModelLifecycleProbe)
         {
-            FailStart("实时模型连接只允许本机FreeLLMAPI网关；禁止调用本地模型或其它端点");
-            return;
-        }
-        var hasFreeLlmApiKey = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("FREELLMAPI_API_KEY")) ||
-                               !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CHRONICLE_LLM_API_KEY"));
-        if (usesFreeLlmApi && !hasFreeLlmApiKey && !noModelLifecycleProbe)
-        {
-            FailStart("FreeLLMAPI客户端密钥未配置；请在启动Bannerlord前设置FREELLMAPI_API_KEY环境变量");
+            FailStart("远程模型API密钥未配置；请设置CHRONICLE_LLM_API_KEY后重启游戏启动器");
             return;
         }
         if (TaleWorlds.CampaignSystem.Campaign.Current == null ||
@@ -347,6 +340,18 @@ internal static class ChronicleAgentRuntimeController
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
+        if (!string.IsNullOrWhiteSpace(configuredApiKey))
+            startInfo.EnvironmentVariables["CHRONICLE_LLM_API_KEY"] = configuredApiKey;
+        foreach (var name in new[]
+        {
+            "CHRONICLE_LLM_MAX_TOKENS", "CHRONICLE_LLM_MAX_TOKEN_PARAMETER", "CHRONICLE_LLM_THINKING_MODE",
+            "CHRONICLE_LLM_REASONING_EFFORT", "CHRONICLE_LLM_TIMEOUT_SECONDS", "CHRONICLE_LLM_MAX_RUN_COST_CNY"
+        })
+        {
+            var value = Environment.GetEnvironmentVariable(name);
+            if (string.IsNullOrWhiteSpace(value)) value = Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.User);
+            if (!string.IsNullOrWhiteSpace(value)) startInfo.EnvironmentVariables[name] = value;
+        }
 
         try
         {
@@ -372,7 +377,8 @@ internal static class ChronicleAgentRuntimeController
                               ",\"parentProcessStartTimeUtcTicks\":" + gameProcessStartTimeTicks.ToString(CultureInfo.InvariantCulture) +
                               ",\"nativeSessionId\":\"" + EscapeJson(nativeSessionId) + "\"" +
                               ",\"providerConfiguration\":{\"OllamaBaseUrl\":\"" + EscapeJson(settings.OllamaBaseUrl) +
-                              "\",\"ModelId\":\"" + EscapeJson(settings.ModelId) + "\"}" +
+                              "\",\"ModelId\":\"" + EscapeJson(settings.ModelId) + "\",\"OutputMode\":\"" + EscapeJson(settings.OutputMode) +
+                              "\",\"DeepSeekRunCostLimitCny\":\"" + EscapeJson(settings.DeepSeekRunCostLimitCny) + "\"}" +
                               ",\"goal\":\"" + EscapeJson(goal.Trim()) +
                               "\",\"maxDecisions\":160,\"maxElapsedSeconds\":7200,\"allowedActionNames\":[\"mapSettlementTargets\",\"move\",\"menuSelect\",\"talkToSettlementHero\",\"dialogueSelect\",\"dialogueContinue\",\"questDetails\",\"tradeOptions\",\"trade\",\"tradeConfirm\",\"tradeCancel\",\"tradeCancelChanges\",\"barterOptions\",\"barterAutoBalance\",\"barterOffer\",\"barterCancel\",\"inventoryOpen\",\"heroEquipmentOptions\",\"inventoryCancel\",\"mapPartyTargets\",\"pursue\",\"battleSkip\",\"battleFinish\",\"partyTakeAll\",\"partyScreenDone\",\"inventoryTakeAll\",\"inventoryDone\",\"recruitOptions\",\"recruit\",\"missionSceneAgents\",\"missionNavigateToAgent\",\"missionInteract\",\"missionLeave\"]}";
             _hostInput.WriteLine(requestJson);
@@ -389,6 +395,15 @@ internal static class ChronicleAgentRuntimeController
             if (_process != null) TerminateOwnedHostAfterTimeout();
             FailStart("Host启动失败（" + exception.GetType().Name + "）");
         }
+    }
+
+    private static string ResolveApiKey()
+    {
+        var key = Environment.GetEnvironmentVariable("CHRONICLE_LLM_API_KEY");
+        if (string.IsNullOrWhiteSpace(key)) key = Environment.GetEnvironmentVariable("CHRONICLE_LLM_API_KEY", EnvironmentVariableTarget.User);
+        if (string.IsNullOrWhiteSpace(key)) key = Environment.GetEnvironmentVariable("FREELLMAPI_API_KEY");
+        if (string.IsNullOrWhiteSpace(key)) key = Environment.GetEnvironmentVariable("FREELLMAPI_API_KEY", EnvironmentVariableTarget.User);
+        return key?.Trim() ?? string.Empty;
     }
 
     private static string ResolveHostExecutablePath()
@@ -451,15 +466,15 @@ internal static class ChronicleAgentRuntimeController
         else if (output.IndexOf("\"status\":\"completed\"", StringComparison.Ordinal) >= 0 && exitCode == 0)
             SetState(RuntimeState.Completed, "当前目标已由Native状态核实完成");
         else if (ContainsAny(output, errorOutput, "provider-api-key-missing"))
-            SetState(RuntimeState.Failed, "FreeLLMAPI客户端密钥未配置；请在启动Bannerlord前设置FREELLMAPI_API_KEY");
+            SetState(RuntimeState.Failed, "远程模型API密钥未配置；请检查CHRONICLE_LLM_API_KEY环境变量");
         else if (ContainsAny(output, errorOutput, "provider-model-unavailable", "not listed by the local model service"))
-            SetState(RuntimeState.Failed, "FreeLLMAPI当前没有可用的配置模型/路由");
+            SetState(RuntimeState.Failed, "模型服务没有列出配置的模型ID");
         else if (ContainsAny(output, errorOutput, "provider-unavailable", "could not be reached"))
-            SetState(RuntimeState.Failed, "FreeLLMAPI网关不可连接；请检查应用运行状态");
+            SetState(RuntimeState.Failed, "模型服务不可连接；请检查服务地址和网络");
         else if (ContainsAny(output, errorOutput, "provider-timeout"))
-            SetState(RuntimeState.Failed, "FreeLLMAPI未按时回复；Host已停止，请检查网关/上游服务");
+            SetState(RuntimeState.Failed, "模型服务未按时回复；Host已停止");
         else if (ContainsAny(output, errorOutput, "provider-http-error", "provider-unreachable"))
-            SetState(RuntimeState.Failed, "FreeLLMAPI模型请求失败；请检查可用额度和上游状态");
+            SetState(RuntimeState.Failed, "模型请求失败；请检查服务商额度、限流和上游状态");
         else if (ContainsAny(output, errorOutput, "campaign-goal-unsupported"))
             SetState(RuntimeState.Failed, "当前目标超出Agent已接入范围；未执行战役行动");
         else if (ContainsAny(output, errorOutput, "provider-profile-missing", "profile-missing"))

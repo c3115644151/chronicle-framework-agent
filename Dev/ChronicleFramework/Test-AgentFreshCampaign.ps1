@@ -23,6 +23,7 @@ $launcher = Join-Path $gameRoot 'bin\Win64_Shipping_Client\Bannerlord.BLSE.Stand
 $gameBinDirectory = Join-Path $gameRoot 'bin\Win64_Shipping_Client'
 $steamRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $gameRoot))
 $engineConfig = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\Configs\engine_config.txt'
+$gameSoundDisabledBefore = Get-ChronicleBannerlordSoundDisabled -LiteralPath $engineConfig
 $bannerlordAutoSavePaths = Get-ChronicleBannerlordAutoSavePaths
 $bannerlordConfigPath = $bannerlordAutoSavePaths.ConfigPath
 $diagnosticLog = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\Configs\ModLogs\chronicle-framework.log'
@@ -33,6 +34,11 @@ $autoSaveIntervalAfter = $null
 $autoSaveSettingGuard = $null
 $autoSaveSettingRestoration = $null
 $autoSaveSettingRestorationError = $null
+$gameSoundSettingGuard = $null
+$gameSoundSettingRestoration = $null
+$gameSoundSettingRestorationError = $null
+$gameSoundDisabledDuring = $null
+$gameSoundDisabledAfter = $null
 $nativeAutoSaveDetected = $false
 $agentCli = Join-Path $harnessRoot 'Agent-Cli.ps1'
 $agentDecisionLoop = Join-Path $harnessRoot 'Agent-DecisionLoop.ps1'
@@ -116,7 +122,14 @@ $previousMode = $env:CHRONICLE_HARNESS_MODE
 $previousStoryModeFlag = $env:CHRONICLE_FRESH_CAMPAIGN_STORYMODE
 $previousStoryModeStartAgent = $env:CHRONICLE_FRESH_CAMPAIGN_START_AGENT
 $previousStoryModeNativeMenuLeaveTest = $env:CHRONICLE_FRESH_CAMPAIGN_NATIVE_MENU_LEAVE_TEST
-$previousFreeLlmApiKey = $env:FREELLMAPI_API_KEY
+$providerEnvironmentNames = @(
+    'CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL','CHRONICLE_LLM_API_KEY','FREELLMAPI_API_KEY',
+    'CHRONICLE_LLM_PROTOCOL','CHRONICLE_LLM_MAX_TOKENS','CHRONICLE_LLM_MAX_TOKEN_PARAMETER',
+    'CHRONICLE_LLM_THINKING_MODE','CHRONICLE_LLM_REASONING_EFFORT','CHRONICLE_LLM_TIMEOUT_SECONDS',
+    'CHRONICLE_LLM_OUTPUT_MODE','CHRONICLE_LLM_MAX_RUN_COST_CNY'
+)
+$previousProviderEnvironment = [ordered]@{}
+foreach ($name in $providerEnvironmentNames) { $previousProviderEnvironment[$name] = [Environment]::GetEnvironmentVariable($name,'Process') }
 $previousIssueProbeFlag = $env:CHRONICLE_FRESH_CAMPAIGN_SKIP_ISSUE_PROBE
 $previousFreshSaveName = $env:CHRONICLE_FRESH_CAMPAIGN_SAVE_NAME
 $previousCrashCaptureFlag = $env:CHRONICLE_CAPTURE_CRASH_EXCEPTION
@@ -129,26 +142,48 @@ if ($StoryModeNativeMenuLeaveEvaluation) { $env:CHRONICLE_FRESH_CAMPAIGN_NATIVE_
 else { Remove-Item Env:CHRONICLE_FRESH_CAMPAIGN_NATIVE_MENU_LEAVE_TEST -ErrorAction SilentlyContinue }
 $env:CHRONICLE_CAPTURE_CRASH_EXCEPTION = '1'
 $freeLlmApiProfile = $null
+$providerProfile = $null
 if ($ValidateRecruitmentProgression -or $RetainDisposableSave) {
     $env:CHRONICLE_FRESH_CAMPAIGN_SKIP_ISSUE_PROBE = '1'
     $env:CHRONICLE_FRESH_CAMPAIGN_SAVE_NAME = $progressionSaveName
 }
 try {
-    if ($StoryModeEycLiveModelEvaluation -and [string]::IsNullOrWhiteSpace($env:FREELLMAPI_API_KEY)) {
-        $userFreeLlmApiKey = [Environment]::GetEnvironmentVariable('FREELLMAPI_API_KEY', 'User')
-        if ([string]::IsNullOrWhiteSpace($userFreeLlmApiKey)) { throw 'The FreeLLMAPI user-scoped client key is unavailable; Bannerlord was not started and no key value was displayed.' }
-        $env:FREELLMAPI_API_KEY = $userFreeLlmApiKey
-        $userFreeLlmApiKey = $null
-    }
     if ($StoryModeEycLiveModelEvaluation) {
-        . (Join-Path $harnessRoot 'Get-FreeLLMAPIProfile.ps1')
-        if ([string]::IsNullOrWhiteSpace($env:CHRONICLE_LLM_BASE_URL) -and [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable('CHRONICLE_LLM_BASE_URL', 'User'))) {
-            $env:CHRONICLE_LLM_BASE_URL = 'http://127.0.0.1:31415/v1'
+        foreach ($name in $providerEnvironmentNames) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name,'Process'))) {
+                $userValue = [Environment]::GetEnvironmentVariable($name,'User')
+                if (-not [string]::IsNullOrWhiteSpace($userValue)) { [Environment]::SetEnvironmentVariable($name,$userValue,'Process') }
+            }
         }
-        if ([string]::IsNullOrWhiteSpace($env:CHRONICLE_LLM_MODEL) -and [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL', 'User'))) {
-            $env:CHRONICLE_LLM_MODEL = 'auto'
+        $providerBaseUrl = [string]$env:CHRONICLE_LLM_BASE_URL
+        $providerModelId = [string]$env:CHRONICLE_LLM_MODEL
+        $providerApiKey = if (-not [string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_API_KEY)) { [string]$env:CHRONICLE_LLM_API_KEY } else { [string]$env:FREELLMAPI_API_KEY }
+        $providerUri = $null
+        if ([string]::IsNullOrWhiteSpace($providerModelId) -or -not [Uri]::TryCreate($providerBaseUrl,[UriKind]::Absolute,[ref]$providerUri)) {
+            throw 'StoryMode live-model preflight requires the configured provider base URL and model ID; Bannerlord was not started.'
         }
-        $freeLlmApiProfile = Initialize-FreeLLMAPIProfile
+        if ($providerUri.IsLoopback -and $providerUri.Port -eq 31415 -and $providerUri.AbsolutePath.TrimEnd('/') -eq '/v1') {
+            if ([string]::IsNullOrWhiteSpace($providerApiKey)) { throw 'FreeLLMAPI client key is unavailable; Bannerlord was not started and no key value was displayed.' }
+            . (Join-Path $harnessRoot 'Get-FreeLLMAPIProfile.ps1')
+            $freeLlmApiProfile = Initialize-FreeLLMAPIProfile
+            if ($freeLlmApiProfile.ModelExecutionStatus -notin @('ready','router')) { throw 'Configured FreeLLMAPI model is not currently available; Bannerlord was not started.' }
+            $providerProfile = [pscustomobject]@{ ProviderHost=$providerUri.Host; ModelId=$providerModelId; OutputMode=[string]$env:CHRONICLE_LLM_OUTPUT_MODE; DeepSeekRunCostLimitCny=[double]$env:CHRONICLE_LLM_MAX_RUN_COST_CNY; CatalogListed=$true; FreeLLMAPI=$true }
+        }
+        else {
+            if ($providerUri.Scheme -ne 'https' -or [string]::IsNullOrWhiteSpace($providerApiKey)) {
+                throw 'Remote StoryMode model preflight requires HTTPS and CHRONICLE_LLM_API_KEY; Bannerlord was not started.'
+            }
+            $modelsUri = [UriBuilder]::new($providerUri)
+            $modelsUri.Path = $providerUri.AbsolutePath.TrimEnd('/') + '/models'
+            $modelsUri.Query = ''
+            try { $modelRows = @(Invoke-RestMethod -Uri $modelsUri.Uri -Headers @{ Authorization="Bearer $providerApiKey" } -TimeoutSec 15 | Select-Object -ExpandProperty data) }
+            catch { throw 'Remote provider read-only /models preflight failed; no inference request was sent and Bannerlord was not started.' }
+            if (-not @($modelRows | Where-Object { [string]$_.id -ceq $providerModelId }).Count) {
+                throw 'Configured model ID is absent from the remote provider catalog; Bannerlord was not started.'
+            }
+            $providerProfile = [pscustomobject]@{ ProviderHost=$providerUri.Host; ModelId=$providerModelId; OutputMode=[string]$env:CHRONICLE_LLM_OUTPUT_MODE; DeepSeekRunCostLimitCny=[double]$env:CHRONICLE_LLM_MAX_RUN_COST_CNY; CatalogListed=$true; FreeLLMAPI=$false; AvailableModelCount=$modelRows.Count }
+        }
+        $providerApiKey = $null
     }
     if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) { throw 'BLSE standalone launcher was not found in the configured Bannerlord installation.' }
     $steamReadiness = Ensure-ChronicleSteamClientReady -SteamRoot $steamRoot -TimeoutSeconds 45
@@ -156,6 +191,10 @@ try {
     $autoSaveSettingGuard = Disable-ChronicleHarnessAutoSave
     $autoSaveIntervalDuring = Get-ChronicleBannerlordAutoSaveInterval -LiteralPath $bannerlordConfigPath
     if ($autoSaveIntervalDuring -ne -1) { throw 'Native Bannerlord auto-save must be disabled for every FreshCampaign fixture before the game can start.' }
+    $gameSoundDisabledBefore = Get-ChronicleBannerlordSoundDisabled -LiteralPath $engineConfig
+    $gameSoundSettingGuard = Disable-ChronicleHarnessGameSound
+    $gameSoundDisabledDuring = Get-ChronicleBannerlordSoundDisabled -LiteralPath $engineConfig
+    if ($gameSoundDisabledDuring -ne 1) { throw 'Bannerlord audio must be disabled by the temporary Harness engine-config guard before the game can start.' }
     Set-SafeExitMarker
     $launcherProcess = Start-ChronicleSteamGame -FilePath $launcher -ArgumentList $arguments -WorkingDirectory $gameBinDirectory -WindowStyle Minimized
 }
@@ -163,6 +202,10 @@ catch {
     if ($autoSaveSettingGuard) {
         try { $autoSaveSettingRestoration = Restore-ChronicleHarnessAutoSaveSetting }
         catch { $autoSaveSettingRestorationError = $_.Exception.Message }
+    }
+    if ($gameSoundSettingGuard) {
+        try { $gameSoundSettingRestoration = Restore-ChronicleHarnessGameSound }
+        catch { $gameSoundSettingRestorationError = $_.Exception.Message }
     }
     throw
 }
@@ -174,8 +217,11 @@ finally {
     else { $env:CHRONICLE_FRESH_CAMPAIGN_START_AGENT = $previousStoryModeStartAgent }
     if ($null -eq $previousStoryModeNativeMenuLeaveTest) { Remove-Item Env:CHRONICLE_FRESH_CAMPAIGN_NATIVE_MENU_LEAVE_TEST -ErrorAction SilentlyContinue }
     else { $env:CHRONICLE_FRESH_CAMPAIGN_NATIVE_MENU_LEAVE_TEST = $previousStoryModeNativeMenuLeaveTest }
-    if ($null -eq $previousFreeLlmApiKey) { Remove-Item Env:FREELLMAPI_API_KEY -ErrorAction SilentlyContinue }
-    else { $env:FREELLMAPI_API_KEY = $previousFreeLlmApiKey }
+    foreach ($name in $providerEnvironmentNames) {
+        $previousValue = [string]$previousProviderEnvironment[$name]
+        if ([string]::IsNullOrEmpty($previousValue)) { Remove-Item -LiteralPath ("Env:" + $name) -ErrorAction SilentlyContinue }
+        else { [Environment]::SetEnvironmentVariable($name,$previousValue,'Process') }
+    }
     if ($null -eq $previousCrashCaptureFlag) { Remove-Item Env:CHRONICLE_CAPTURE_CRASH_EXCEPTION -ErrorAction SilentlyContinue }
     else { $env:CHRONICLE_CAPTURE_CRASH_EXCEPTION = $previousCrashCaptureFlag }
             if ($null -eq $previousIssueProbeFlag) { Remove-Item Env:CHRONICLE_FRESH_CAMPAIGN_SKIP_ISSUE_PROBE -ErrorAction SilentlyContinue }
@@ -231,6 +277,12 @@ $storyModeAgentProgressLineCount = 0
 $storyModeAgentProgressEntries = [System.Collections.Generic.List[object]]::new()
 $storyModeAgentNativeActionsExecuted = 0
 $storyModeAgentDecisionCount = 0
+$storyModeAgentPromptTokens = 0
+$storyModeAgentCompletionTokens = 0
+$storyModeAgentPromptCacheHitTokens = $null
+$storyModeAgentPromptCacheMissTokens = $null
+$storyModeAgentActualCostEstimateCny = $null
+$storyModeAgentReservedCostUpperBoundCny = $null
 $storyModeAgentFailureCode = $null
 $storyModeOriginalEstablishYourClanCompleted = $false
 $storyModeAgentHostReceiptPath = if ([string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) { $null } else { Join-Path $env:CHRONICLE_HARNESS_TEMP 'AgentHostLifecycleHostReceipt.json' }
@@ -796,6 +848,24 @@ if ($autoSaveSettingGuard) {
         $harnessFailureObserved = $true
     }
 }
+if ($gameSoundSettingGuard) {
+    try {
+        $gameSoundSettingRestoration = Restore-ChronicleHarnessGameSound
+        if (-not $gameSoundSettingRestoration.Restored) {
+            $gameSoundSettingRestorationError = "Game sound setting restoration was not completed: $($gameSoundSettingRestoration.Status)"
+            $harnessFailureObserved = $true
+        }
+        $gameSoundDisabledAfter = Get-ChronicleBannerlordSoundDisabled -LiteralPath $engineConfig
+        if ($gameSoundDisabledAfter -ne $gameSoundDisabledBefore) {
+            $gameSoundSettingRestorationError = "Bannerlord disable_sound did not return to its pre-test value ($gameSoundDisabledBefore)."
+            $harnessFailureObserved = $true
+        }
+    }
+    catch {
+        $gameSoundSettingRestorationError = $_.Exception.Message
+        $harnessFailureObserved = $true
+    }
+}
 if ($bannerlordPid -and $rglLog -and (Test-Path -LiteralPath $rglLog -PathType Leaf)) {
     try { $nativeAutoSaveDetected = [string](Get-Content -LiteralPath $rglLog -Raw -Encoding UTF8) -match 'AutoSaveCurrentGame' }
     catch { $nativeAutoSaveDetected = $true }
@@ -1027,6 +1097,12 @@ if ($StoryModeEycLiveModelEvaluation -and $storyModeAgentHostReceiptPath -and (T
         $storyModeHostReceipt = Get-Content -LiteralPath $storyModeAgentHostReceiptPath -Raw -Encoding UTF8 | ConvertFrom-Json
         $storyModeAgentNativeActionsExecuted = [Math]::Max(0, [int]$storyModeHostReceipt.actionsExecuted)
         $storyModeAgentDecisionCount = [Math]::Max(0, [int]$storyModeHostReceipt.decisionCount)
+        $storyModeAgentPromptTokens = [Math]::Max(0, [long]$storyModeHostReceipt.promptTokens)
+        $storyModeAgentCompletionTokens = [Math]::Max(0, [long]$storyModeHostReceipt.completionTokens)
+        $storyModeAgentPromptCacheHitTokens = $storyModeHostReceipt.providerPromptCacheHitTokens
+        $storyModeAgentPromptCacheMissTokens = $storyModeHostReceipt.providerPromptCacheMissTokens
+        $storyModeAgentActualCostEstimateCny = $storyModeHostReceipt.providerActualCostEstimateCny
+        $storyModeAgentReservedCostUpperBoundCny = $storyModeHostReceipt.providerReservedCostUpperCny
         $storyModeAgentFailureCode = [string]$storyModeHostReceipt.failureCode
         $storyModeOriginalEstablishYourClanCompleted = $storyModeHostReceipt.status -eq 'completed' -and
             $storyModeHostReceipt.termination.goalVerified -eq $true
@@ -1056,6 +1132,8 @@ $acceptanceChecks = [ordered]@{
     unrelatedSaveManifestUnchanged = $saveStateUnchanged
     bannerlordAutoSaveDisabledDuringRun = ($null -ne $autoSaveSettingGuard -and $autoSaveIntervalDuring -eq -1)
     bannerlordAutoSaveSettingRestored = ($null -ne $autoSaveSettingRestoration -and [bool]$autoSaveSettingRestoration.Restored -and $autoSaveIntervalAfter -eq $autoSaveIntervalBefore)
+    bannerlordSoundMutedDuringRun = ($null -ne $gameSoundSettingGuard -and $gameSoundDisabledDuring -eq 1)
+    bannerlordSoundSettingRestored = ($null -ne $gameSoundSettingRestoration -and [bool]$gameSoundSettingRestoration.Restored -and $gameSoundDisabledAfter -eq $gameSoundDisabledBefore)
     noNativeAutoSaveObserved = (-not $nativeAutoSaveDetected)
     requestedDisposableSaveRetained = (-not $RetainDisposableSave -or $retainedDisposableSave)
     windowLayout = ($windowLayoutApplied -and $windowLayout.Width -eq 840 -and $windowLayout.Height -eq 472)
@@ -1115,7 +1193,7 @@ if ($StoryModeEycSetup) {
         $acceptanceChecks.storyModeFocusLossEscapeMenuGuardInstalled = $storyModeFocusLossEscapeMenuGuardInstalled
         $acceptanceChecks.storyModeLiveModelProducedDecision = $storyModeAgentProgressEntries.Count -gt 0
         $acceptanceChecks.storyModeLiveNativeActionExecuted = $storyModeAgentNativeActionsExecuted -gt 0
-        $acceptanceChecks.storyModeLiveProviderPreflightReady = [bool]($freeLlmApiProfile -and $freeLlmApiProfile.ApiKeyPresent -and $freeLlmApiProfile.ModelExecutionStatus -in @('ready','router'))
+        $acceptanceChecks.storyModeLiveProviderPreflightReady = [bool]($providerProfile -and $providerProfile.CatalogListed -and -not [string]::IsNullOrWhiteSpace([string]$providerProfile.ModelId))
     }
 }
 else {
@@ -1210,9 +1288,16 @@ $result = [ordered]@{
     StoryModeAgentHostTerminalDetail = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentHostTerminalDetail } else { $null }
     StoryModeAgentDecisionCount = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentDecisionCount } else { $null }
     StoryModeAgentNativeActionsExecuted = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentNativeActionsExecuted } else { $null }
+    StoryModeAgentPromptTokens = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentPromptTokens } else { $null }
+    StoryModeAgentCompletionTokens = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentCompletionTokens } else { $null }
+    StoryModeAgentPromptCacheHitTokens = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentPromptCacheHitTokens } else { $null }
+    StoryModeAgentPromptCacheMissTokens = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentPromptCacheMissTokens } else { $null }
+    StoryModeAgentActualCostEstimateCny = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentActualCostEstimateCny } else { $null }
+    StoryModeAgentReservedCostUpperBoundCny = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentReservedCostUpperBoundCny } else { $null }
     StoryModeAgentFailureCode = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentFailureCode } else { $null }
     StoryModeOriginalEstablishYourClanCompleted = if ($StoryModeEycLiveModelEvaluation) { $storyModeOriginalEstablishYourClanCompleted } else { $null }
     FreeLLMAPIProfile = if ($StoryModeEycLiveModelEvaluation) { $freeLlmApiProfile } else { $null }
+    StoryModeModelProviderProfile = if ($StoryModeEycLiveModelEvaluation) { $providerProfile } else { $null }
     StoryModeAgentProgressPath = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentProgressPath } else { $null }
     StoryModeAgentDecisions = if ($StoryModeEycLiveModelEvaluation) { @($storyModeAgentProgressEntries) } else { $null }
     BannerlordProcessesCleanAtExit = $gameProcessesClean
@@ -1242,6 +1327,12 @@ $result = [ordered]@{
     BannerlordAutoSaveDisabledForHarness = [bool]($autoSaveSettingGuard -and $autoSaveIntervalDuring -eq -1)
     BannerlordAutoSaveRestorationStatus = if ($autoSaveSettingRestoration) { $autoSaveSettingRestoration.Status } else { $null }
     BannerlordAutoSaveRestorationError = $autoSaveSettingRestorationError
+    BannerlordSoundDisabledBefore = $gameSoundDisabledBefore
+    BannerlordSoundDisabledDuring = $gameSoundDisabledDuring
+    BannerlordSoundDisabledAfter = $gameSoundDisabledAfter
+    BannerlordSoundMutedForHarness = [bool]($gameSoundSettingGuard -and $gameSoundDisabledDuring -eq 1)
+    BannerlordSoundRestorationStatus = if ($gameSoundSettingRestoration) { $gameSoundSettingRestoration.Status } else { $null }
+    BannerlordSoundRestorationError = $gameSoundSettingRestorationError
     NativeAutoSaveObserved = $nativeAutoSaveDetected
     AcceptanceChecks = $acceptanceChecks
     RglLog = $rglLog

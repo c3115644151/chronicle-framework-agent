@@ -102,6 +102,10 @@ if (Test-Path $engineConfig) {
     $engineText = $engineText -replace 'safely_exited\s*=\s*0', 'safely_exited = 1'
     Set-Content -Path $engineConfig -Value $engineText -NoNewline
 }
+$soundDisabledBefore = Get-ChronicleBannerlordSoundDisabled -LiteralPath $engineConfig
+$soundGuard = Disable-ChronicleHarnessGameSound
+$soundDisabledDuring = Get-ChronicleBannerlordSoundDisabled -LiteralPath $engineConfig
+if ($soundDisabledDuring -ne 1) { throw 'Bannerlord game sound must be disabled by the temporary Harness guard before startup.' }
 
 $launchStart = Get-Date
 $startupWatch = [Diagnostics.Stopwatch]::StartNew()
@@ -123,7 +127,7 @@ $inputControlKeyVisibleInNativeOptions = $WithoutChronicle.IsPresent
 $mcmSettingPropertyIds = @()
 $mcmButtonPropertyIds = @()
 $validationButtonType = if ($WithoutChronicle) { 'not-tested' } else { 'missing' }
-$requiredMcmPropertyIds = @('OllamaBaseUrl', 'ModelId', 'ValidateLocalConfiguration', 'CampaignGoal', 'StartAgent', 'StopAgent', 'ViewAgentStatus')
+$requiredMcmPropertyIds = @('OllamaBaseUrl', 'ModelId', 'OutputMode', 'DeepSeekRunCostLimitCny', 'ValidateLocalConfiguration', 'CampaignGoal', 'StartAgent', 'StopAgent', 'ViewAgentStatus')
 $requiredMcmButtonPropertyIds = @('ValidateLocalConfiguration', 'StartAgent', 'StopAgent', 'ViewAgentStatus')
 $mcmDefinitionComplete = $WithoutChronicle.IsPresent
 $startupReadySeconds = $null
@@ -252,6 +256,13 @@ if ($stillRunning -or $childIds.Count -gt 0 -or $candidateProcesses.Count -gt 0)
         Stop-Process -Id $childId -Force -ErrorAction SilentlyContinue
     }
 }
+$soundRestoreDeadline = (Get-Date).AddSeconds(10)
+do {
+    if (@(Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue).Count -eq 0) { break }
+    Start-Sleep -Milliseconds 150
+} while ((Get-Date) -lt $soundRestoreDeadline)
+$soundRestoration = Restore-ChronicleHarnessGameSound
+$soundDisabledAfter = Get-ChronicleBannerlordSoundDisabled -LiteralPath $engineConfig
 if (Test-Path $engineConfig) {
     $engineText = Get-Content $engineConfig -Raw
     $engineText = $engineText -replace 'safely_exited\s*=\s*0', 'safely_exited = 1'
@@ -288,6 +299,12 @@ $result = [ordered]@{
     McmSettingPropertyIds = $mcmSettingPropertyIds
     McmButtonPropertyIds = $mcmButtonPropertyIds
     McmValidationButtonType = $validationButtonType
+    BannerlordSoundDisabledBefore = $soundDisabledBefore
+    BannerlordSoundDisabledDuring = $soundDisabledDuring
+    BannerlordSoundDisabledAfter = $soundDisabledAfter
+    BannerlordSoundMutedForHarness = [bool]($soundGuard -and $soundDisabledDuring -eq 1)
+    BannerlordSoundRestorationStatus = $soundRestoration.Status
+    BannerlordSoundRestored = [bool]$soundRestoration.Restored
     FinishedAll = $finishedAll
     CrashDetected = $crashDetected
     ProcessExitedUnexpectedly = $processExitedUnexpectedly
@@ -338,6 +355,6 @@ $receiptJson | Set-Content -LiteralPath $resultPath -Encoding UTF8
 Add-Content -LiteralPath $receiptStagePath -Value 'write-complete'
 Write-Output $receiptJson
 
-if (-not $finishedAll -or -not $stabilityCompleted -or $crashDetected -or $processExitedUnexpectedly -or (-not $WithoutChronicle -and (-not $assemblyLoaded -or -not $lifecycleLoadObserved -or -not $mcmDefinitionComplete -or -not $inputControlKeyDisplayTextLoaded -or -not $inputControlKeyVisibleInNativeOptions))) {
+if (-not $soundRestoration.Restored -or -not $finishedAll -or -not $stabilityCompleted -or $crashDetected -or $processExitedUnexpectedly -or (-not $WithoutChronicle -and (-not $assemblyLoaded -or -not $lifecycleLoadObserved -or -not $mcmDefinitionComplete -or -not $inputControlKeyDisplayTextLoaded -or -not $inputControlKeyVisibleInNativeOptions))) {
     exit 1
 }

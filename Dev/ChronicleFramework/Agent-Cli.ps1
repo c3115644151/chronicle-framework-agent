@@ -96,6 +96,7 @@ function Restore-ChronicleTestEngineConfig([string]$BackupPath) {
     Copy-Item -LiteralPath $backupFullPath -Destination $engineConfig -Force
     Set-SafeExitMarker
     Remove-Item -LiteralPath $backupFullPath -Force
+    [void](Restore-ChronicleHarnessGameSound)
     return $true
 }
 
@@ -241,6 +242,7 @@ if ($Action -in @('start','load')) {
     }
     try {
         Set-ChronicleTestDisplayConfig -EngineConfigPath $engineConfig
+        $gameSoundGuard = Disable-ChronicleHarnessGameSound
         Set-SafeExitMarker
         $process = Start-ChronicleSteamGame -FilePath $launcher -ArgumentList "/continuesave $SaveName $moduleArgument /anticheat" -WorkingDirectory $binDirectory -WindowStyle Minimized
     }

@@ -81,9 +81,17 @@ function Invoke-CampaignLifecycleRun {
     $previousSaveName = $env:CHRONICLE_HARNESS_SAVE_NAME
     $env:CHRONICLE_HARNESS_MODE = $Mode
     $env:CHRONICLE_HARNESS_SAVE_NAME = $LifecycleSaveName
+    $soundDisabledBefore = Get-ChronicleBannerlordSoundDisabled -LiteralPath $engineConfig
+    $soundGuard = Disable-ChronicleHarnessGameSound
+    $soundDisabledDuring = Get-ChronicleBannerlordSoundDisabled -LiteralPath $engineConfig
+    if ($soundDisabledDuring -ne 1) { throw 'Bannerlord game sound must be disabled by the temporary Harness guard before startup.' }
     try {
         $arguments = "/continuesave $LoadSaveName $moduleArgument /anticheat"
         $launcherProcess = Start-ChronicleSteamGame -FilePath $launcher -ArgumentList $arguments -WorkingDirectory $binDirectory -WindowStyle Minimized
+    }
+    catch {
+        try { if ($soundGuard) { [void](Restore-ChronicleHarnessGameSound) } } catch { }
+        throw
     }
     finally {
         $env:CHRONICLE_HARNESS_MODE = $previousMode
@@ -100,6 +108,7 @@ function Invoke-CampaignLifecycleRun {
     $saveSyncObserved = $false
     $finishedAll = $false
     $crashDetected = $false
+    $soundRestoration = $null
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
 
     try {
@@ -162,10 +171,13 @@ function Invoke-CampaignLifecycleRun {
         }
     }
     finally {
-        Stop-CampaignProcessTree -LauncherProcess $launcherProcess -BannerlordPid $bannerlordPid
+        try { Stop-CampaignProcessTree -LauncherProcess $launcherProcess -BannerlordPid $bannerlordPid }
+        finally { $soundRestoration = Restore-ChronicleHarnessGameSound }
     }
 
-    $passed = $gameStartObserved -and $behaviorRegistered -and $loadObserved -and $campaignLoadedObserved -and $finishedAll -and -not $crashDetected
+    $soundDisabledAfter = Get-ChronicleBannerlordSoundDisabled -LiteralPath $engineConfig
+    $soundRestored = [bool]($soundRestoration -and $soundRestoration.Restored -and $soundDisabledAfter -eq $soundDisabledBefore)
+    $passed = $soundRestored -and $gameStartObserved -and $behaviorRegistered -and $loadObserved -and $campaignLoadedObserved -and $finishedAll -and -not $crashDetected
     if ($ExpectSave) {
         $passed = $passed -and $dailyTickObserved -and $saveRequestedObserved -and $saveSyncObserved -and (Test-Path $lifecycleSave)
     }
@@ -182,6 +194,12 @@ function Invoke-CampaignLifecycleRun {
         SaveSyncObserved = $saveSyncObserved
         FinishedAll = $finishedAll
         CrashDetected = $crashDetected
+        SoundDisabledBefore = $soundDisabledBefore
+        SoundDisabledDuring = $soundDisabledDuring
+        SoundDisabledAfter = $soundDisabledAfter
+        SoundMutedForHarness = [bool]($soundGuard -and $soundDisabledDuring -eq 1)
+        SoundRestorationStatus = if ($soundRestoration) { $soundRestoration.Status } else { $null }
+        SoundRestored = $soundRestored
         Passed = $passed
     }
 }

@@ -25,8 +25,20 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     private DateTimeOffset _lastProviderRequestUtc;
     private string? _lastProviderRoute;
     private bool _useRequiredToolCallStrategy;
+    private double _reservedDeepSeekCostCny;
+    private double _actualDeepSeekCostEstimateCny;
+    private long _deepSeekPromptCacheHitTokens;
+    private long _deepSeekPromptCacheMissTokens;
+    private const double DeepSeekInputPeakCnyPerMillion = 2.4d;
+    private const double DeepSeekOutputPeakCnyPerMillion = 9.6d;
     internal string ModelId => _settings.Model;
     internal int MaxOutputTokens => _settings.MaxOutputTokens;
+    internal string OutputMode => _settings.OutputMode;
+    internal bool? ThinkingMode => _settings.Thinking;
+    internal double? ReservedCostUpperBoundCny => IsDeepSeekApi(_settings.Endpoint) ? _reservedDeepSeekCostCny : null;
+    internal double? ActualCostEstimateCny => IsDeepSeekApi(_settings.Endpoint) ? _actualDeepSeekCostEstimateCny : null;
+    internal long? PromptCacheHitTokens => IsDeepSeekApi(_settings.Endpoint) ? _deepSeekPromptCacheHitTokens : null;
+    internal long? PromptCacheMissTokens => IsDeepSeekApi(_settings.Endpoint) ? _deepSeekPromptCacheMissTokens : null;
     internal string ConfigurationSource { get; }
 
     string IAgentHostDecisionProvider.ModelId => ModelId;
@@ -38,6 +50,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         _client = client ?? new HttpClient { Timeout = settings.Timeout };
         _ownsClient = client is null;
         ConfigurationSource = configurationSource;
+        _useRequiredToolCallStrategy = string.Equals(settings.OutputMode, "required_tool_call", StringComparison.Ordinal);
     }
 
     internal static OllamaNativeProvider FromEnvironment()
@@ -46,17 +59,19 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         if (string.IsNullOrWhiteSpace(protocol)) protocol = "openai-compatible";
         var nativeOllama = string.Equals(protocol, "ollama-native", StringComparison.OrdinalIgnoreCase);
         if (!nativeOllama && !string.Equals(protocol, "openai-compatible", StringComparison.OrdinalIgnoreCase))
-            throw new AgentHostException("provider-protocol-unsupported", "This Host stage only permits the configured local Ollama-compatible provider.");
+            throw new AgentHostException("provider-protocol-unsupported", "The configured provider protocol is not supported.");
 
         var baseUrl = Environment.GetEnvironmentVariable("CHRONICLE_LLM_BASE_URL");
         var model = Environment.GetEnvironmentVariable("CHRONICLE_LLM_MODEL");
         if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(model))
-            throw new AgentHostException("provider-configuration-missing", "Local Ollama URL and model configuration are required.");
+            throw new AgentHostException("provider-configuration-missing", "Provider URL and model ID configuration are required.");
         if (model.Length > 160)
             throw new AgentHostException("provider-model-invalid", "Configured model identifier is too long.");
 
-        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var baseUri) || baseUri.Scheme is not ("http" or "https") || !baseUri.IsLoopback)
-            throw new AgentHostException("provider-endpoint-invalid", "The Ollama endpoint must be a local loopback HTTP(S) URL.");
+        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var baseUri) || baseUri.Scheme is not ("http" or "https") ||
+            (baseUri.Scheme == "http" && !baseUri.IsLoopback) || !string.IsNullOrEmpty(baseUri.UserInfo) ||
+            !string.IsNullOrEmpty(baseUri.Query) || !string.IsNullOrEmpty(baseUri.Fragment))
+            throw new AgentHostException("provider-endpoint-invalid", "The provider URL must use HTTPS (HTTP is allowed only on loopback) and cannot include credentials, query, or fragment.");
         var endpointBuilder = new UriBuilder(baseUri);
         endpointBuilder.Path = nativeOllama ? "/api/chat" : endpointBuilder.Path.TrimEnd('/') + "/chat/completions";
         var endpoint = endpointBuilder.Uri;
@@ -81,6 +96,13 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         if (string.IsNullOrWhiteSpace(maxTokenParameter)) maxTokenParameter = "max_completion_tokens";
         if (maxTokenParameter is not ("max_completion_tokens" or "max_tokens"))
             throw new AgentHostException("provider-token-parameter-invalid", "The configured output-token parameter is unsupported.");
+        var outputMode = Environment.GetEnvironmentVariable("CHRONICLE_LLM_OUTPUT_MODE");
+        if (string.IsNullOrWhiteSpace(outputMode)) outputMode = "auto";
+        if (outputMode is not ("auto" or "json_schema" or "json_object" or "required_tool_call"))
+            throw new AgentHostException("provider-output-mode-invalid", "Output mode must be auto, json_schema, json_object, or required_tool_call.");
+        if (outputMode == "required_tool_call" && thinking != false)
+            throw new AgentHostException("provider-output-mode-thinking-conflict", "Required tool calls need CHRONICLE_LLM_THINKING_MODE=disabled for this API protocol.");
+        var maxRunCostCny = ReadOptionalDoubleEnvironment("CHRONICLE_LLM_MAX_RUN_COST_CNY", 0.01d, 1000d) ?? 5d;
 
         return new OllamaNativeProvider(new OllamaProviderSettings(
             endpoint,
@@ -92,7 +114,9 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             thinking,
             reasoningEffort,
             maxTokenParameter,
-            ReadApiKey()));
+            ReadApiKey(),
+            outputMode,
+            maxRunCostCny));
     }
 
     internal static OllamaNativeProvider FromConfiguredProfile()
@@ -124,24 +148,59 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     private static OllamaNativeProvider FromProfile(AgentProviderProfile profile)
     {
         var endpoint = new Uri(profile.BaseUrl.TrimEnd('/') + "/chat/completions", UriKind.Absolute);
+        var maxTokenParameter = Environment.GetEnvironmentVariable("CHRONICLE_LLM_MAX_TOKEN_PARAMETER");
+        if (string.IsNullOrWhiteSpace(maxTokenParameter))
+            maxTokenParameter = string.Equals(endpoint.Host, "api.deepseek.com", StringComparison.OrdinalIgnoreCase) ? "max_tokens" : "max_completion_tokens";
+        if (maxTokenParameter is not ("max_completion_tokens" or "max_tokens"))
+            throw new AgentHostException("provider-token-parameter-invalid", "The configured output-token parameter is unsupported.");
+        var outputMode = profile.OutputMode;
+        if (outputMode == "auto" && string.Equals(endpoint.Host, "api.deepseek.com", StringComparison.OrdinalIgnoreCase))
+            outputMode = "required_tool_call";
+        var reasoningEffort = Environment.GetEnvironmentVariable("CHRONICLE_LLM_REASONING_EFFORT");
+        if (string.IsNullOrWhiteSpace(reasoningEffort)) reasoningEffort = "none";
+        if (reasoningEffort is not ("none" or "low" or "medium" or "high"))
+            throw new AgentHostException("provider-reasoning-effort-invalid", "Reasoning effort is outside the supported values.");
+        var thinking = ReadOptionalThinkingModeEnvironment();
+        if (outputMode == "required_tool_call" && thinking is null && string.Equals(endpoint.Host, "api.deepseek.com", StringComparison.OrdinalIgnoreCase))
+            thinking = false;
+        if (outputMode == "required_tool_call" && thinking != false)
+            throw new AgentHostException("provider-output-mode-thinking-conflict", "Required tool calls need CHRONICLE_LLM_THINKING_MODE=disabled for this API protocol.");
+        var maxRunCostCny = profile.DeepSeekRunCostLimitCny;
         return new OllamaNativeProvider(new OllamaProviderSettings(
             endpoint,
             profile.ModelId,
             NativeOllama: false,
             Timeout: TimeSpan.FromSeconds(ReadIntegerEnvironment("CHRONICLE_LLM_TIMEOUT_SECONDS", 360, 5, 360)),
-            MaxOutputTokens: ReadIntegerEnvironment("CHRONICLE_LLM_MAX_TOKENS", 1024, 64, 4096),
+            MaxOutputTokens: ReadIntegerEnvironment("CHRONICLE_LLM_MAX_TOKENS", 256, 64, 4096),
             Temperature: 0d,
-            Thinking: null,
-            ReasoningEffort: "none",
-            MaxTokenParameter: "max_completion_tokens",
-            ApiKey: ReadApiKey()),
+            Thinking: thinking,
+            ReasoningEffort: reasoningEffort,
+            MaxTokenParameter: maxTokenParameter,
+            ApiKey: ReadApiKey(),
+            OutputMode: outputMode,
+            MaxEstimatedRunCostCny: maxRunCostCny),
             configurationSource: profile.Source);
+    }
+
+    private static bool? ReadOptionalThinkingModeEnvironment()
+    {
+        var mode = Environment.GetEnvironmentVariable("CHRONICLE_LLM_THINKING_MODE");
+        if (string.IsNullOrWhiteSpace(mode)) mode = Environment.GetEnvironmentVariable("CHRONICLE_LLM_THINKING_MODE", EnvironmentVariableTarget.User);
+        return mode switch
+        {
+            null or "" => null,
+            "enabled" => true,
+            "disabled" => false,
+            _ => throw new AgentHostException("provider-thinking-mode-invalid", "Thinking mode must be enabled, disabled, or omitted.")
+        };
     }
 
     private static string? ReadApiKey()
     {
         var key = Environment.GetEnvironmentVariable("CHRONICLE_LLM_API_KEY");
+        if (string.IsNullOrWhiteSpace(key)) key = Environment.GetEnvironmentVariable("CHRONICLE_LLM_API_KEY", EnvironmentVariableTarget.User);
         if (string.IsNullOrWhiteSpace(key)) key = Environment.GetEnvironmentVariable("FREELLMAPI_API_KEY");
+        if (string.IsNullOrWhiteSpace(key)) key = Environment.GetEnvironmentVariable("FREELLMAPI_API_KEY", EnvironmentVariableTarget.User);
         return string.IsNullOrWhiteSpace(key) ? null : key.Trim();
     }
 
@@ -158,7 +217,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         var endpointPath = _settings.Endpoint.AbsolutePath;
         const string completionSuffix = "/chat/completions";
         if (!endpointPath.EndsWith(completionSuffix, StringComparison.OrdinalIgnoreCase))
-            throw new AgentHostException("provider-health-endpoint-invalid", "The configured local provider URL does not have the supported chat-completions path.");
+            throw new AgentHostException("provider-health-endpoint-invalid", "The configured provider URL does not have the supported chat-completions path.");
 
         var modelsUriBuilder = new UriBuilder(_settings.Endpoint)
         {
@@ -166,10 +225,10 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             Query = string.Empty,
             Fragment = string.Empty
         };
-        if (!string.IsNullOrWhiteSpace(_settings.ApiKey))
+        if (IsFreeLlmApi(_settings.Endpoint) && !string.IsNullOrWhiteSpace(_settings.ApiKey))
             modelsUriBuilder.Query = "available=true";
-        if (IsFreeLlmApi(_settings.Endpoint) && string.IsNullOrWhiteSpace(_settings.ApiKey))
-            throw new AgentHostException("provider-api-key-missing", "FreeLLMAPI requires its unified API key in FREELLMAPI_API_KEY or CHRONICLE_LLM_API_KEY.");
+        if ((!_settings.Endpoint.IsLoopback || IsFreeLlmApi(_settings.Endpoint)) && string.IsNullOrWhiteSpace(_settings.ApiKey))
+            throw new AgentHostException("provider-api-key-missing", "This provider requires an API key; configure CHRONICLE_LLM_API_KEY without placing it in the model profile.");
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(8));
@@ -179,15 +238,15 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             AddAuthorization(healthRequest);
             using var response = await _client.SendAsync(healthRequest, HttpCompletionOption.ResponseContentRead, timeout.Token);
             if (!response.IsSuccessStatusCode)
-                throw new AgentHostException("provider-unavailable", "The local model service rejected its model-list health check.");
+                throw new AgentHostException("provider-unavailable", "The configured model service rejected its model-list health check.");
 
             var bytes = await response.Content.ReadAsByteArrayAsync(timeout.Token);
             if (bytes.Length is <= 0 or > 128 * 1024)
-                throw new AgentHostException("provider-health-response-invalid", "The local model service returned an empty or oversized model-list response.");
+                throw new AgentHostException("provider-health-response-invalid", "The configured model service returned an empty or oversized model-list response.");
 
             using var document = JsonDocument.Parse(bytes);
             if (!document.RootElement.TryGetProperty("data", out var models) || models.ValueKind != JsonValueKind.Array)
-                throw new AgentHostException("provider-health-response-invalid", "The local model service returned an unsupported model-list response.");
+                throw new AgentHostException("provider-health-response-invalid", "The configured model service returned an unsupported model-list response.");
 
             JsonElement selectedModel = default;
             foreach (var model in models.EnumerateArray())
@@ -199,7 +258,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             var modelFound = selectedModel.ValueKind == JsonValueKind.Object;
             var documentedFreeLlmApiRouterStrategy = IsFreeLlmApi(_settings.Endpoint) && FreeLlmApiRouterStrategies.Contains(_settings.Model);
             if (!modelFound && !documentedFreeLlmApiRouterStrategy)
-                throw new AgentHostException("provider-model-unavailable", "The configured model is not listed by the local model service.");
+                throw new AgentHostException("provider-model-unavailable", "The configured model is not listed by the provider model service.");
 
             _useRequiredToolCallStrategy = false;
             if (IsFreeLlmApi(_settings.Endpoint) && modelFound &&
@@ -225,6 +284,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     throw new AgentHostException("provider-structured-output-unsupported", "The configured FreeLLMAPI model advertises neither response_format nor required tool-calling support; no decision request was sent.");
                 }
             }
+            if (_settings.OutputMode == "required_tool_call") _useRequiredToolCallStrategy = true;
+            else if (_settings.OutputMode is "json_schema" or "json_object") _useRequiredToolCallStrategy = false;
         }
         catch (AgentHostException)
         {
@@ -248,6 +309,11 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     {
         ValidateDecisionRequest(request);
         var userContent = JsonSerializer.Serialize(request, JsonOptions);
+        var userPayloadBytes = Encoding.UTF8.GetByteCount(userContent);
+        var systemPromptBytes = Encoding.UTF8.GetByteCount(systemPrompt);
+        var observationBytes = request.TryGetProperty("observation", out var observationElement)
+            ? Encoding.UTF8.GetByteCount(observationElement.GetRawText())
+            : 0;
         using var decisionRequestSnapshot = JsonDocument.Parse(userContent);
         var messages = new[]
         {
@@ -282,6 +348,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                         {
                             name = "submit_chronicle_decision",
                             description = "Submit exactly one proposed Chronicle decision. This function is an output format only; it does not execute any game action.",
+                            strict = true,
                             parameters = BuildDecisionSchema(request)
                         }
                     }
@@ -303,8 +370,21 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         }
 
         var body = JsonSerializer.Serialize(payload, JsonOptions);
-        if (Encoding.UTF8.GetByteCount(body) > MaxRequestBytes)
+        var bodyBytes = Encoding.UTF8.GetByteCount(body);
+        if (bodyBytes > MaxRequestBytes)
             throw new AgentHostException("provider-request-too-large", "The structured model request exceeds the Host size limit.");
+        var reservedCostForRequest = 0d;
+        if (IsDeepSeekApi(_settings.Endpoint))
+        {
+            // One UTF-8 request byte is reserved as one input token; this is a
+            // deliberately conservative upper bound. All input is priced as a
+            // peak-hour cache miss and all completion capacity is reserved.
+            reservedCostForRequest = (bodyBytes * DeepSeekInputPeakCnyPerMillion +
+                                      _settings.MaxOutputTokens * DeepSeekOutputPeakCnyPerMillion) / 1000000d;
+            if (_reservedDeepSeekCostCny + reservedCostForRequest > _settings.MaxEstimatedRunCostCny)
+                throw new AgentHostException("provider-budget-exhausted", "The DeepSeek run cost ceiling would be exceeded; no additional model request was sent.");
+            _reservedDeepSeekCostCny = Math.Round(_reservedDeepSeekCostCny + reservedCostForRequest, 8);
+        }
 
         using var requestTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         requestTimeout.CancelAfter(_settings.Timeout);
@@ -456,6 +536,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             string? content;
             int? promptTokens;
             int? completionTokens;
+            int? promptCacheHitTokens = null;
+            int? promptCacheMissTokens = null;
             if (_settings.NativeOllama)
             {
                 if (root.TryGetProperty("done", out var completed) && completed.ValueKind == JsonValueKind.False)
@@ -502,6 +584,12 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 var usage = root.TryGetProperty("usage", out var usageValue) ? usageValue : default;
                 promptTokens = ReadNonNegativeInt(usage, "prompt_tokens");
                 completionTokens = ReadNonNegativeInt(usage, "completion_tokens");
+                promptCacheHitTokens = ReadNonNegativeInt(usage, "prompt_cache_hit_tokens");
+                if (promptCacheHitTokens is null && usage.ValueKind == JsonValueKind.Object && usage.TryGetProperty("prompt_tokens_details", out var promptDetails))
+                    promptCacheHitTokens = ReadNonNegativeInt(promptDetails, "cached_tokens");
+                promptCacheMissTokens = ReadNonNegativeInt(usage, "prompt_cache_miss_tokens");
+                if (promptCacheMissTokens is null && promptTokens.HasValue)
+                    promptCacheMissTokens = Math.Max(0, promptTokens.Value - (promptCacheHitTokens ?? 0));
             }
             if (finishReason is "length" or "max_tokens")
                 throw new AgentHostException("provider-response-truncated", "The local model provider reached its output-token limit.");
@@ -512,6 +600,17 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
 
             var routedVia = ReadResponseHeader(response, "X-Routed-Via");
             if (!string.IsNullOrWhiteSpace(routedVia)) _lastProviderRoute = routedVia;
+            double? estimatedCostCny = null;
+            if (IsDeepSeekApi(_settings.Endpoint) && promptTokens.HasValue && completionTokens.HasValue)
+            {
+                var cacheHit = promptCacheHitTokens ?? 0;
+                var cacheMiss = promptCacheMissTokens ?? Math.Max(0, promptTokens.Value - cacheHit);
+                estimatedCostCny = (cacheHit * 0.048d + cacheMiss * DeepSeekInputPeakCnyPerMillion +
+                                    completionTokens.Value * DeepSeekOutputPeakCnyPerMillion) / 1000000d;
+                _deepSeekPromptCacheHitTokens += cacheHit;
+                _deepSeekPromptCacheMissTokens += cacheMiss;
+                _actualDeepSeekCostEstimateCny = Math.Round(_actualDeepSeekCostEstimateCny + estimatedCostCny.Value, 8);
+            }
             return new ProviderDecisionResult(
                 "completed",
                 responseModel ?? _settings.Model,
@@ -520,11 +619,21 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 finishReason ?? (ReadBoolean(root, "done") == true ? "stop" : "unknown"),
                 decision,
                 routedVia,
-                responseFormatMode);
+                responseFormatMode,
+                IsDeepSeekApi(_settings.Endpoint) ? _reservedDeepSeekCostCny : null,
+                bodyBytes,
+                systemPromptBytes,
+                userPayloadBytes,
+                observationBytes,
+                promptCacheHitTokens,
+                promptCacheMissTokens,
+                estimatedCostCny);
         }
     }
 
     private static bool IsFreeLlmApi(Uri endpoint) => endpoint.Port == 31415 && (endpoint.Host is "127.0.0.1" or "localhost");
+
+    private static bool IsDeepSeekApi(Uri endpoint) => string.Equals(endpoint.Host, "api.deepseek.com", StringComparison.OrdinalIgnoreCase);
 
     internal sealed record RateLimitRetryHint(TimeSpan? Delay, TimeSpan? ObservedDelay, string Source, bool IsPoolExhaustion);
 
@@ -681,8 +790,11 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     }
 
     private bool UsesJsonObjectCompatibilityMode() =>
-        IsFreeLlmApi(_settings.Endpoint) &&
-        IsMistralSmall32(_settings.Model);
+        // Remote OpenAI-compatible APIs do not share a standard JSON-Schema response
+        // format. Use the broadly supported JSON-object contract remotely; the Host
+        // still validates every returned field against the Native catalog.
+        _settings.OutputMode == "json_object" ||
+        (_settings.OutputMode == "auto" && (!_settings.Endpoint.IsLoopback || IsMistralSmall32(_settings.Model)));
 
     private static string ResolveMaxTokenParameter(string model, string configured) =>
         IsMistralSmall32(model) ? "max_tokens" : configured;
@@ -1121,8 +1233,17 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
 
     private static void EnsureOnlyProperties(JsonElement value, params string[] allowed)
     {
-        if (value.EnumerateObject().Any(property => !allowed.Contains(property.Name, StringComparer.Ordinal)))
-            throw new AgentHostException("provider-decision-field-unavailable", "The local model returned a field outside the decision contract.");
+        var unexpected = value.EnumerateObject()
+            .Select(property => property.Name)
+            .Where(name => !allowed.Contains(name, StringComparer.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .Take(8)
+            .ToArray();
+        if (unexpected.Length > 0)
+        {
+            var safeNames = string.Join(',', unexpected.Select(name => name[..Math.Min(name.Length, 40)]));
+            throw new AgentHostException("provider-decision-field-unavailable", "The model returned unsupported field names: " + safeNames + ".");
+        }
     }
 
     private static string ValidateReason(string? value)
@@ -1184,7 +1305,9 @@ internal sealed record OllamaProviderSettings(
     bool? Thinking,
     string? ReasoningEffort,
     string MaxTokenParameter,
-    string? ApiKey = null);
+    string? ApiKey = null,
+    string OutputMode = "auto",
+    double MaxEstimatedRunCostCny = 5d);
 
 internal sealed record ProviderDecisionResult(
     string Status,
@@ -1194,7 +1317,15 @@ internal sealed record ProviderDecisionResult(
     string FinishReason,
     JsonObject Decision,
     string? RoutedVia = null,
-    string ResponseFormatMode = "json_schema");
+    string ResponseFormatMode = "json_schema",
+    double? ReservedCostUpperBoundCny = null,
+    int RequestBodyBytes = 0,
+    int SystemPromptBytes = 0,
+    int UserPayloadBytes = 0,
+    int ObservationBytes = 0,
+    int? PromptCacheHitTokens = null,
+    int? PromptCacheMissTokens = null,
+    double? EstimatedCostCny = null);
 
 internal sealed class AgentHostException : Exception
 {

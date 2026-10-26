@@ -14,6 +14,11 @@ internal static class ProviderContractSelfTest
     internal static async Task<object> RunAsync()
     {
         var results = new List<object>();
+        if (!AgentHostDecisionCycle.IsObserveAgainDecision(new JsonObject { ["observeAgain"] = true, ["waitSeconds"] = 2 }) ||
+            !AgentHostDecisionCycle.IsObserveAgainDecision(new JsonObject { ["control"] = "observeAgain", ["waitSeconds"] = 2 }) ||
+            AgentHostDecisionCycle.IsObserveAgainDecision(new JsonObject { ["done"] = true }))
+            throw new AgentHostException("observe-again-normalized-shape-self-test-failed", "Movement subloops must recognize the canonical boolean observeAgain decision as well as its pre-normalized control alias.");
+        results.Add(new { scenario = "canonical-observe-again-decision-is-recognized-by-native-subloops", passed = true });
         results.AddRange(AgentHostProviderDecisionRecovery.RunContractSelfTests());
         results.AddRange(StoryModeEstablishClanLifecycleStatus.RunContractSelfTests());
         results.AddRange(AgentHostHarnessProgressTrace.RunContractSelfTests());
@@ -108,17 +113,37 @@ internal static class ProviderContractSelfTest
         {
             var profile = AgentProviderProfile.Parse(validProfile.RootElement);
             if (profile.BaseUrl != "http://127.0.0.1:31415/v1" || profile.ModelId != "auto")
-                throw new AgentHostException("provider-profile-self-test-normalization-failed", "The global MCM profile did not load the FreeLLMAPI gateway and default route identifier.");
+                throw new AgentHostException("provider-profile-self-test-normalization-failed", "The global MCM profile did not preserve its legacy provider URL and model identifier.");
             if (AgentProviderProfile.GetSettingsValidationError(profile.BaseUrl, profile.ModelId) is not null)
                 throw new AgentHostException("provider-profile-self-test-settings-check-failed", "The MCM configuration check rejected valid local model settings.");
             results.Add(new { scenario = "mcm-global-profile-values-normalized", passed = true });
             results.Add(new { scenario = "mcm-global-profile-tolerates-legacy-and-unknown-fields", passed = true });
         }
 
-        ExpectInvalidProfile("{\"OllamaBaseUrl\":\"https://example.com/v1\",\"ModelId\":\"test\"}", "provider-profile-endpoint-invalid", "mcm-profile-rejects-remote-endpoint");
-        if (AgentProviderProfile.GetSettingsValidationError("https://example.com/v1", "test") != "provider-profile-endpoint-invalid")
-            throw new AgentHostException("provider-profile-self-test-settings-check-failed", "The MCM configuration check accepted a remote endpoint.");
-        results.Add(new { scenario = "mcm-profile-rejects-remote-endpoint", passed = true });
+        using (var remoteProfile = JsonDocument.Parse("{\"ProviderBaseUrl\":\"https://api.deepseek.com/v1\",\"ModelId\":\"deepseek-flash\"}"))
+        {
+            var profile = AgentProviderProfile.Parse(remoteProfile.RootElement);
+            if (profile.BaseUrl != "https://api.deepseek.com/v1" || profile.ModelId != "deepseek-flash" || profile.DeepSeekRunCostLimitCny != 5d ||
+                AgentProviderProfile.GetSettingsValidationError(profile.BaseUrl, profile.ModelId) is not null)
+                throw new AgentHostException("provider-profile-self-test-remote-endpoint-failed", "A generic HTTPS OpenAI-compatible profile was not accepted.");
+            results.Add(new { scenario = "mcm-profile-accepts-generic-https-openai-compatible-provider", passed = true });
+        }
+        var previousThinkingMode = Environment.GetEnvironmentVariable("CHRONICLE_LLM_THINKING_MODE");
+        try
+        {
+            Environment.SetEnvironmentVariable("CHRONICLE_LLM_THINKING_MODE", "disabled");
+            using var deepSeekLaunch = JsonDocument.Parse("{\"providerConfiguration\":{\"ProviderBaseUrl\":\"https://api.deepseek.com/v1\",\"ModelId\":\"deepseek-flash\",\"OutputMode\":\"auto\"}} ");
+            using var deepSeekProvider = OllamaNativeProvider.FromCampaignRequest(deepSeekLaunch.RootElement);
+            if (deepSeekProvider.OutputMode != "required_tool_call" || deepSeekProvider.ThinkingMode != false ||
+                deepSeekProvider.MaxOutputTokens != 256 || deepSeekProvider.ReservedCostUpperBoundCny != 0d)
+                throw new AgentHostException("deepseek-provider-profile-self-test-failed", "The DeepSeek MCM profile did not select bounded, non-thinking strict tool-call output from auto mode.");
+            results.Add(new { scenario = "deepseek-auto-profile-selects-bounded-non-thinking-strict-tool-calls", passed = true });
+        }
+        finally { Environment.SetEnvironmentVariable("CHRONICLE_LLM_THINKING_MODE", previousThinkingMode); }
+        ExpectInvalidProfile("{\"ProviderBaseUrl\":\"http://example.com/v1\",\"ModelId\":\"test\"}", "provider-profile-endpoint-invalid", "mcm-profile-rejects-insecure-remote-http");
+        results.Add(new { scenario = "mcm-profile-rejects-insecure-remote-http", passed = true });
+        ExpectInvalidProfile("{\"ProviderBaseUrl\":\"https://api.deepseek.com/v1\",\"ModelId\":\"deepseek-flash\",\"DeepSeekRunCostLimitCny\":\"0\"}", "provider-profile-run-cost-invalid", "mcm-profile-rejects-nonpositive-deepseek-run-budget");
+        results.Add(new { scenario = "mcm-profile-rejects-nonpositive-deepseek-run-budget", passed = true });
         ExpectInvalidProfile("{\"OllamaBaseUrl\":\"http://user:pass@127.0.0.1:31415/v1\",\"ModelId\":\"test\"}", "provider-profile-endpoint-invalid", "mcm-profile-rejects-credentials");
         results.Add(new { scenario = "mcm-profile-rejects-credentials", passed = true });
         ExpectInvalidProfile("{\"OllamaBaseUrl\":\"http://127.0.0.1:31415/v1?token=not-used\",\"ModelId\":\"test\"}", "provider-profile-endpoint-invalid", "mcm-profile-rejects-query-string");
@@ -154,7 +179,7 @@ internal static class ProviderContractSelfTest
             Environment.SetEnvironmentVariable("CHRONICLE_LLM_MAX_TOKENS", priorMaxTokens);
             Environment.SetEnvironmentVariable("CHRONICLE_LLM_TIMEOUT_SECONDS", priorTimeoutSeconds);
         }
-        using (var invalidLaunch = JsonDocument.Parse("{\"providerConfiguration\":{\"OllamaBaseUrl\":\"https://example.com/v1\",\"ModelId\":\"test\"}}"))
+        using (var invalidLaunch = JsonDocument.Parse("{\"providerConfiguration\":{\"OllamaBaseUrl\":\"http://example.com/v1\",\"ModelId\":\"test\"}}"))
         {
             try
             {
@@ -353,6 +378,60 @@ internal static class ProviderContractSelfTest
             if (freeLlmApiHandler.LastAuthorization?.Scheme != "Bearer" || result.RoutedVia != "google/gemini-test-model")
                 throw new AgentHostException("freellmapi-routing-evidence-self-test-failed", "FreeLLMAPI inference must carry bearer auth and preserve the actual routed provider/model header.");
             results.Add(new { scenario = "freellmapi-bearer-auth-available-model-preflight-and-routed-model-evidence", passed = true });
+        }
+
+        var genericRemoteSettings = settings with
+        {
+            Endpoint = new Uri("https://api.deepseek.com/v1/chat/completions"),
+            Model = "deepseek-flash",
+            ApiKey = "generic-remote-self-test-secret"
+        };
+        var genericRemoteHandler = new StubHandler((request, _) =>
+        {
+            if (request.Method == HttpMethod.Get)
+                return Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"deepseek-flash\"}]}"));
+            return Task.FromResult(JsonResponse(BuildChatResponse(ValidDecision, "stop")));
+        });
+        using (var genericRemoteClient = new HttpClient(genericRemoteHandler) { Timeout = genericRemoteSettings.Timeout })
+        using (var genericRemoteProvider = new OllamaNativeProvider(genericRemoteSettings, genericRemoteClient))
+        using (var request = JsonDocument.Parse(BuildDecisionRequest()))
+        {
+            await genericRemoteProvider.CheckConfiguredModelAsync(CancellationToken.None);
+            if (genericRemoteHandler.LastAuthorization?.Scheme != "Bearer" ||
+                genericRemoteHandler.LastAuthorization.Parameter != "generic-remote-self-test-secret" ||
+                genericRemoteHandler.LastRequestUri?.Query.Length > 0)
+                throw new AgentHostException("generic-remote-provider-health-self-test-failed", "A generic HTTPS provider must use bearer auth and its standard models endpoint without FreeLLMAPI-only query parameters.");
+            var result = await genericRemoteProvider.DecideAsync(request.RootElement, CancellationToken.None);
+            using var remoteRequestBody = JsonDocument.Parse(genericRemoteHandler.LastRequestBody ?? "{}");
+            if (result.Status != "completed" || genericRemoteHandler.LastAuthorization?.Parameter != "generic-remote-self-test-secret" ||
+                remoteRequestBody.RootElement.GetProperty("model").GetString() != "deepseek-flash" ||
+                remoteRequestBody.RootElement.GetProperty("response_format").GetProperty("type").GetString() != "json_object" ||
+                result.ResponseFormatMode != "json_object_compatibility")
+                throw new AgentHostException("generic-remote-provider-decision-self-test-failed", "The generic HTTPS provider did not complete a structured Chronicle decision using its configured model and bearer key.");
+            results.Add(new { scenario = "generic-https-openai-compatible-provider-health-auth-and-structured-decision", passed = true });
+        }
+        var budgetGuardHandler = new StubHandler((_, _) => Task.FromResult(JsonResponse(BuildChatResponse(ValidDecision, "stop"))));
+        var budgetGuardSettings = genericRemoteSettings with
+        {
+            OutputMode = "required_tool_call",
+            Thinking = false,
+            MaxEstimatedRunCostCny = 0.01d
+        };
+        using (var budgetGuardClient = new HttpClient(budgetGuardHandler) { Timeout = budgetGuardSettings.Timeout })
+        using (var budgetGuardProvider = new OllamaNativeProvider(budgetGuardSettings, budgetGuardClient))
+        using (var request = JsonDocument.Parse(BuildDecisionRequest()))
+        {
+            try
+            {
+                await budgetGuardProvider.DecideAsync(request.RootElement, CancellationToken.None);
+                throw new AgentHostException("deepseek-run-budget-self-test-failed", "The request exceeded the configured DeepSeek ceiling but reached the provider.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-budget-exhausted")
+            {
+                if (budgetGuardHandler.LastRequestUri is not null)
+                    throw new AgentHostException("deepseek-run-budget-request-sent", "A cost-budget rejection must happen before any model request is sent.");
+            }
+            results.Add(new { scenario = "deepseek-run-cost-reservation-rejects-over-budget-before-http", passed = true });
         }
 
         var toolCallRequestCount = 0;

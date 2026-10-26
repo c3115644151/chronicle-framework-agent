@@ -13,7 +13,7 @@ New-Item -ItemType Directory -Path $evidencePath -Force | Out-Null
 foreach ($setting in @(
     'CHRONICLE_LLM_PROTOCOL', 'CHRONICLE_LLM_BASE_URL', 'CHRONICLE_LLM_MODEL', 'CHRONICLE_LLM_API_KEY', 'FREELLMAPI_API_KEY',
     'CHRONICLE_LLM_TIMEOUT_SECONDS', 'CHRONICLE_LLM_MAX_TOKENS', 'CHRONICLE_LLM_MAX_TOKEN_PARAMETER',
-    'CHRONICLE_LLM_REASONING_EFFORT', 'CHRONICLE_LLM_THINKING_MODE', 'CHRONICLE_LLM_TEMPERATURE'
+    'CHRONICLE_LLM_REASONING_EFFORT', 'CHRONICLE_LLM_THINKING_MODE', 'CHRONICLE_LLM_TEMPERATURE', 'CHRONICLE_LLM_OUTPUT_MODE', 'CHRONICLE_LLM_MAX_RUN_COST_CNY'
 )) {
     $current = [string][Environment]::GetEnvironmentVariable($setting, 'Process')
     if ([string]::IsNullOrWhiteSpace($current)) {
@@ -22,11 +22,9 @@ foreach ($setting in @(
     }
 }
 
-# The one-shot provider entry point defaults to 256 output tokens, while the
-# in-game MCM profile defaults to 1024. Keep this real-provider smoke aligned
-# with production unless the user explicitly configured a token budget.
+# Bound real provider smoke output to a small response unless explicitly configured.
 if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_MAX_TOKENS)) {
-    $env:CHRONICLE_LLM_MAX_TOKENS = '1024'
+    $env:CHRONICLE_LLM_MAX_TOKENS = '128'
 }
 
 $protocolSelfTestOutput = & dotnet $hostDll --provider-self-test 2>&1 | Out-String
@@ -36,28 +34,53 @@ if (-not $protocolSelfTest.passed -or $protocolSelfTest.modelCalls -ne 0 -or $pr
     throw 'Provider contract self-test returned an invalid pass summary.'
 }
 
-. (Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1')
-$readinessFixture = @(
-    [pscustomobject]@{ id = 'ready-model'; execution_status = 'ready' },
-    [pscustomobject]@{ id = 'blocked-model'; execution_status = 'exhausted' },
-    [pscustomobject]@{ id = 'missing-key-model'; execution_status = 'needsKey' },
-    [pscustomobject]@{ id = 'unknown-model' }
-)
-if (-not (Test-FreeLLMAPIModelExecutionReady -ModelRows $readinessFixture -ModelId 'ready-model') -or
-    (Test-FreeLLMAPIModelExecutionReady -ModelRows $readinessFixture -ModelId 'blocked-model') -or
-    (Test-FreeLLMAPIModelExecutionReady -ModelRows $readinessFixture -ModelId 'missing-key-model') -or
-    (Test-FreeLLMAPIModelExecutionReady -ModelRows $readinessFixture -ModelId 'unknown-model') -or
-    (Get-FreeLLMAPIModelExecutionStatus -ModelRows $readinessFixture -ModelId 'absent-model') -ne 'not-listed' -or
-    (Get-FreeLLMAPIModelExecutionStatus -ModelRows $readinessFixture -ModelId 'auto:typo-profile') -ne 'not-listed' -or
-    -not (Test-FreeLLMAPIModelExecutionReady -ModelRows @([pscustomobject]@{ id = 'auto:noema-free' }) -ModelId 'auto:noema-free') -or
-    -not (Test-FreeLLMAPIModelExecutionReady -ModelRows $readinessFixture -ModelId 'auto:reliable')) {
-    throw 'FreeLLMAPI execution-readiness preflight did not reject exhausted, missing-key, unknown, absent or typo router entries while retaining named profiles and documented auto strategy aliases.'
+$providerBaseUrl = [string]$env:CHRONICLE_LLM_BASE_URL
+$model = [string]$env:CHRONICLE_LLM_MODEL
+$providerUri = $null
+if (-not [Uri]::TryCreate($providerBaseUrl, [UriKind]::Absolute, [ref]$providerUri) -or [string]::IsNullOrWhiteSpace($model)) {
+    throw 'Provider smoke requires a configured absolute base URL and model ID; no inference request was sent.'
 }
-$freeLlmApiProfile = Initialize-FreeLLMAPIProfile
-$model = [string]$freeLlmApiProfile.RequestedModelId
 $protocol = 'openai-compatible'
+$freeLlmApiProfile = $null
+$modelCatalog = $null
+if ($providerUri.IsLoopback -and $providerUri.Port -eq 31415 -and $providerUri.AbsolutePath.TrimEnd('/') -eq '/v1') {
+    . (Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1')
+    $readinessFixture = @(
+        [pscustomobject]@{ id = 'ready-model'; execution_status = 'ready' },
+        [pscustomobject]@{ id = 'blocked-model'; execution_status = 'exhausted' },
+        [pscustomobject]@{ id = 'missing-key-model'; execution_status = 'needsKey' },
+        [pscustomobject]@{ id = 'unknown-model' }
+    )
+    if (-not (Test-FreeLLMAPIModelExecutionReady -ModelRows $readinessFixture -ModelId 'ready-model') -or
+        (Test-FreeLLMAPIModelExecutionReady -ModelRows $readinessFixture -ModelId 'blocked-model') -or
+        (Test-FreeLLMAPIModelExecutionReady -ModelRows $readinessFixture -ModelId 'missing-key-model') -or
+        (Test-FreeLLMAPIModelExecutionReady -ModelRows $readinessFixture -ModelId 'unknown-model') -or
+        (Get-FreeLLMAPIModelExecutionStatus -ModelRows $readinessFixture -ModelId 'absent-model') -ne 'not-listed' -or
+        (Get-FreeLLMAPIModelExecutionStatus -ModelRows $readinessFixture -ModelId 'auto:typo-profile') -ne 'not-listed' -or
+        -not (Test-FreeLLMAPIModelExecutionReady -ModelRows @([pscustomobject]@{ id = 'auto:noema-free' }) -ModelId 'auto:noema-free') -or
+        -not (Test-FreeLLMAPIModelExecutionReady -ModelRows $readinessFixture -ModelId 'auto:reliable')) {
+        throw 'FreeLLMAPI execution-readiness preflight readiness contract failed.'
+    }
+    $freeLlmApiProfile = Initialize-FreeLLMAPIProfile
+    $model = [string]$freeLlmApiProfile.RequestedModelId
+    $modelCatalog = @()
+    if ($freeLlmApiProfile.ModelExecutionStatus -notin @('ready','router')) { throw 'Configured FreeLLMAPI route is not currently available; no inference request was sent.' }
+}
+else {
+    if ($providerUri.Scheme -ne 'https') { throw 'Remote provider smoke requires HTTPS; no inference request was sent.' }
+    if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_API_KEY)) { throw 'Remote provider API key is missing; no inference request was sent.' }
+    $modelsUri = [UriBuilder]::new($providerUri)
+    $modelsUri.Path = $providerUri.AbsolutePath.TrimEnd('/') + '/models'
+    $modelsUri.Query = ''
+    try { $modelCatalog = @(Invoke-RestMethod -Uri $modelsUri.Uri -Headers @{ Authorization = "Bearer $env:CHRONICLE_LLM_API_KEY" } -TimeoutSec 15 | Select-Object -ExpandProperty data) }
+    catch { throw 'Remote provider /models preflight failed; no inference request was sent.' }
+    if (-not @($modelCatalog | Where-Object { [string]$_.id -ceq $model }).Count) { throw 'Configured model ID is absent from the remote provider catalog; no inference request was sent.' }
+}
 
-$decisionRequest = [ordered]@{ goal = '完成当前可见的村庄工具委托'; goalScopeClassificationRequired = $true; goalScopeContract = 'native-campaign-goal-classification-v1'; observation = [ordered]@{ scope = 'goal-classification-only'; message = 'No goal-specific game action has run yet. Classify the complete requested outcome against the listed supported goals; only the selected goal executor will become available after this gate.' }; allowedActions = @(); allowedControls = @('supportedMapArrivalGoal','supportedVillageToolsQuestGoal','unsupportedGoal') }
+$expectedClassification = if ($freeLlmApiProfile) { 'supported-village-tools-quest' } else { 'supported-map-arrival' }
+$decisionGoal = if ($freeLlmApiProfile) { '完成当前可见的村庄工具委托' } else { '前往一个目前可见且安全的定居点' }
+$scopeControls = if ($freeLlmApiProfile) { @('supportedMapArrivalGoal','supportedVillageToolsQuestGoal','unsupportedGoal') } else { @('supportedMapArrivalGoal','unsupportedGoal') }
+$decisionRequest = [ordered]@{ goal = $decisionGoal; goalScopeClassificationRequired = $true; goalScopeContract = 'native-campaign-goal-classification-v1'; observation = [ordered]@{ scope = 'goal-classification-only'; message = 'No goal-specific game action has run yet. Classify the complete requested outcome against the listed supported goals; only the selected goal executor will become available after this gate.' }; allowedActions = @(); allowedControls = $scopeControls }
 $startInfo = [Diagnostics.ProcessStartInfo]::new()
 $startInfo.FileName = (Get-Command dotnet -ErrorAction Stop).Source
 $startInfo.Arguments = '"{0}" --decision-once' -f $hostDll
@@ -95,28 +118,29 @@ if (-not $process.WaitForExit(($effectiveTimeout + 15) * 1000)) {
 }
 $stdout = $stdoutTask.GetAwaiter().GetResult()
 $stderr = $stderrTask.GetAwaiter().GetResult()
-if ($process.ExitCode -ne 0) { throw "Local provider returned an error (exit=$($process.ExitCode)); response text is omitted. $stderr" }
+if ($process.ExitCode -ne 0) { throw "Configured provider returned an error (exit=$($process.ExitCode)); response text is omitted. $stderr" }
 try { $result = $stdout | ConvertFrom-Json }
 catch { throw 'Local provider Host returned invalid structured JSON; raw response is omitted.' }
-if ($result.status -ne 'completed' -or $result.decision.goalClassification -cne 'supported-village-tools-quest' -or
+if ($result.status -ne 'completed' -or $result.decision.goalClassification -cne $expectedClassification -or
     [string]::IsNullOrWhiteSpace([string]$result.decision.reason)) {
     $classificationReason = [string]$result.decision.reason
     if ($classificationReason.Length -gt 160) { $classificationReason = $classificationReason.Substring(0, 160) }
-    throw "FreeLLMAPI-routed model missed the production goal-classification smoke (status=$($result.status); goalClassification=$($result.decision.goalClassification); route=$($result.routedVia); reason=$classificationReason)."
+    throw "Configured provider missed the bounded goal-classification smoke (status=$($result.status); goalClassification=$($result.decision.goalClassification); reason=$classificationReason)."
 }
 
 $summary = [ordered]@{
     Passed = $true
     ProviderProtocol = $protocol
-    FreeLLMAPIReachable = $true
-    GatewayStartedByHarness = [bool]$freeLlmApiProfile.GatewayStartedByHarness
-    LocalProxyBootstrapApplied = [bool]$freeLlmApiProfile.LocalProxyBootstrapApplied
-    ConfiguredRouteAvailable = $freeLlmApiProfile.RequestedModelId
-    ConfiguredRouteExecutionStatus = $freeLlmApiProfile.ModelExecutionStatus
+    ProviderHost = $providerUri.Host
+    FreeLLMAPIReachable = [bool]$freeLlmApiProfile
+    GatewayStartedByHarness = if ($freeLlmApiProfile) { [bool]$freeLlmApiProfile.GatewayStartedByHarness } else { $false }
+    LocalProxyBootstrapApplied = if ($freeLlmApiProfile) { [bool]$freeLlmApiProfile.LocalProxyBootstrapApplied } else { $false }
+    ConfiguredModelId = $model
+    ConfiguredRouteExecutionStatus = if ($freeLlmApiProfile) { $freeLlmApiProfile.ModelExecutionStatus } else { 'catalog-listed' }
     EffectiveMaxOutputTokens = [int]$env:CHRONICLE_LLM_MAX_TOKENS
     MaxTokenParameter = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER)) { 'max_completion_tokens' } else { [string]$env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER }
-    AvailableModelCount = $freeLlmApiProfile.AvailableModelCount
-    AvailableModelCatalogSha256 = $freeLlmApiProfile.AvailableModelCatalogSha256
+    AvailableModelCount = if ($freeLlmApiProfile) { $freeLlmApiProfile.AvailableModelCount } else { $modelCatalog.Count }
+    AvailableModelCatalogSha256 = if ($freeLlmApiProfile) { $freeLlmApiProfile.AvailableModelCatalogSha256 } else { $null }
     RoutedVia = [string]$result.routedVia
     ResultStatus = [string]$result.status
     ResponseFormatMode = [string]$result.responseFormatMode
@@ -125,9 +149,24 @@ $summary = [ordered]@{
     ReasonWordCount = ([string]$result.decision.reason -split '\s+' | Where-Object { $_ }).Count
     PromptTokens = $result.promptTokens
     CompletionTokens = $result.completionTokens
+    PromptCacheHitTokens = $result.promptCacheHitTokens
+    PromptCacheMissTokens = $result.promptCacheMissTokens
+    EstimatedUsageCostCny = $result.estimatedCostCny
+    EstimatedPeakCostCny = if ($providerUri.Host -eq 'api.deepseek.com' -and $null -ne $result.promptTokens -and $null -ne $result.completionTokens) {
+        [Math]::Round(([double]$result.promptTokens * 2.4 + [double]$result.completionTokens * 9.6) / 1000000, 8)
+    } else { $null }
+    ReservedCostUpperBoundCny = $result.reservedCostUpperBoundCny
+    DeepSeekRunCostCeilingCny = if ($providerUri.Host -eq 'api.deepseek.com') { [double]$env:CHRONICLE_LLM_MAX_RUN_COST_CNY } else { $null }
     NativeCommands = 0
-    RouterCatalog = 'FreeLLMAPI currently available catalog; actual provider captured in RoutedVia'
+    RouterCatalog = if ($freeLlmApiProfile) { 'FreeLLMAPI currently available catalog; actual provider captured in RoutedVia' } else { 'Configured OpenAI-compatible provider model catalog' }
     NoModelEndpointOrCredentialLogged = $true
-    ProviderContract = $protocolSelfTest
+    ProviderContract = [ordered]@{
+        Passed = [bool]$protocolSelfTest.passed
+        ScenarioCount = @($protocolSelfTest.scenarios).Count
+        ModelCalls = [int]$protocolSelfTest.modelCalls
+        NativeCommands = [int]$protocolSelfTest.nativeCommands
+    }
 }
-$summary | ConvertTo-Json -Depth 7
+$summaryJson = $summary | ConvertTo-Json -Depth 7
+Set-Content -LiteralPath (Join-Path $evidencePath 'ProviderSmoke.json') -Value $summaryJson -Encoding utf8
+$summaryJson

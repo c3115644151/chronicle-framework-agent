@@ -7,6 +7,8 @@ namespace ChronicleFramework.AgentHost;
 
 internal static class AgentHostEstablishClanCompanionLoop
 {
+    private const double MinimumCompanionNavigationProgressDistance = 0.1d;
+    private const int MaxCompanionNavigationNoProgressAttempts = 2;
     private const string QuestId = "rebuild_player_clan_storymode_quest";
     private const int MaxDecisions = 96;
     // This is a per-decision choice window, not a world-entity cap. After a
@@ -22,6 +24,13 @@ internal static class AgentHostEstablishClanCompanionLoop
 
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
+        var stalledNavigationFirstAttempt = EvaluateNavigationNoProgress(1.39d, 1.65d, 0, false);
+        var stalledNavigationSecondAttempt = EvaluateNavigationNoProgress(1.39d, 1.65d, stalledNavigationFirstAttempt.Attempts, false);
+        var measuredApproach = EvaluateNavigationNoProgress(10d, 9.5d, 1, false);
+        var nowInteractable = EvaluateNavigationNoProgress(1.39d, 1.39d, 1, true);
+        if (stalledNavigationFirstAttempt.ExcludeTarget || stalledNavigationSecondAttempt.Attempts != 2 || !stalledNavigationSecondAttempt.ExcludeTarget ||
+            measuredApproach.Attempts != 0 || measuredApproach.ExcludeTarget || nowInteractable.Attempts != 0 || nowInteractable.ExcludeTarget)
+            throw new AgentHostException("companion-navigation-stall-policy-self-test-failed", "Only repeated completed Native navigation with less than 0.1 distance improvement and no interactable observation may temporarily exclude a target.");
         var candidates = FilterWandererCandidates(new JsonArray
         {
             new JsonObject { ["agentIndex"] = 4, ["heroId"] = "wanderer-a", ["occupation"] = "Wanderer", ["isNotable"] = false, ["isEnemy"] = false, ["distance"] = 6.0 },
@@ -171,6 +180,7 @@ internal static class AgentHostEstablishClanCompanionLoop
             throw new AgentHostException("establish-clan-companion-native-interaction-route-failed", "An observed, interactable local Wanderer must use Native Agent interaction while retaining the Native option to leave its Mission safely.");
 
         return [
+            new { scenario = "companion-navigation-stall-policy-excludes-only-after-two-no-progress-native-approaches", passed = true },
             new { scenario = "establish-clan-companion-targets-only-current-safe-unvisited-town-and-friendly-wanderer", passed = true },
             new { scenario = "establish-clan-companion-town-choice-window-pages-without-world-target-cap", passed = true, totalWorldTargets = 21, choiceWindow = SafeTownDecisionWindowSize },
             new { scenario = "establish-clan-companion-dialogue-catalog-excludes-unrelated-native-options", passed = true },
@@ -279,7 +289,10 @@ internal static class AgentHostEstablishClanCompanionLoop
         var moveStartPending = false;
         var missionTransitionPending = false;
         var visitedTowns = new HashSet<string>(StringComparer.Ordinal);
-        var visitedHeroes = new HashSet<string>(StringComparer.Ordinal);
+        var excludedHeroes = new HashSet<string>(StringComparer.Ordinal);
+        var navigationNoProgressAttempts = new Dictionary<string, int>(StringComparer.Ordinal);
+        string? navigationProgressTargetHeroId = null;
+        double? navigationProgressStartDistance = null;
         var rejectedProviderDecisions = 0;
         var rejectedActionDecisions = 0;
         var missionWaitPending = false;
@@ -386,7 +399,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                 var actionPending = !sceneNotificationActive && (mapMovementPending || menuArrivalPending || missionNavigationActive || missionLeaveActive || missionTransitionPending);
                 var controls = BuildControlCatalog(gameState == "MapState", !sceneNotificationActive && (mapMovementPending || menuArrivalPending), missionNavigationActive, missionLeaveActive || missionTransitionPending);
                 var catalog = BuildActionCatalog(state, journal, objective, safeTowns, sceneAgentsReceipt, selectedHeroId,
-                    moveTargetId, actionPending, visitedTowns, visitedHeroes);
+                    moveTargetId, actionPending, visitedTowns, excludedHeroes);
                 if (liveGoalAhead && !sceneNotificationActive)
                 {
                     catalog = gameState == "MissionState"
@@ -460,7 +473,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                 if (ReadBoolean(decision.Decision, "stop"))
                     return BuildResult("interrupted", "companion-model-stopped", ReadString(decision.Decision, "reason") ?? "The model safely stopped this Companion subgoal before another Native action.", "companion-model-stopped", state, journal, objective);
 
-                if (ReadString(decision.Decision, "control") == "observeAgain")
+                if (AgentHostDecisionCycle.IsObserveAgainDecision(decision.Decision))
                 {
                     if (!controls.Any(control => control?.GetValue<string>() == "observeAgain"))
                         throw new AgentHostException("companion-observe-not-allowed", "Passive observation is allowed only while Native movement/navigation/leave transition is active.");
@@ -539,10 +552,52 @@ internal static class AgentHostEstablishClanCompanionLoop
                             visitedTowns.Add(currentSettlementId);
                     }
                     else if (action == "missionSceneAgents")
+                    {
                         sceneAgentsReceipt = receipt.DeepClone() as JsonObject;
+                        if (!string.IsNullOrWhiteSpace(navigationProgressTargetHeroId) && navigationProgressStartDistance.HasValue)
+                        {
+                            var targetDistance = FindWandererDistance(sceneAgentsReceipt, navigationProgressTargetHeroId);
+                            var targetInteractable = IsWandererInteractable(state, navigationProgressTargetHeroId);
+                            if (targetDistance.HasValue && !targetInteractable)
+                            {
+                                var progress = EvaluateNavigationNoProgress(navigationProgressStartDistance, targetDistance,
+                                    navigationNoProgressAttempts.GetValueOrDefault(navigationProgressTargetHeroId), targetInteractable);
+                                var madeProgress = progress.Attempts == 0;
+                                var attempts = progress.Attempts;
+                                if (madeProgress) navigationNoProgressAttempts.Remove(navigationProgressTargetHeroId);
+                                else navigationNoProgressAttempts[navigationProgressTargetHeroId] = attempts;
+                                if (!madeProgress)
+                                {
+                                    selectedHeroId = null;
+                                    interactTargetHeroId = null;
+                                    var candidateBlocked = progress.ExcludeTarget;
+                                    decisionFeedback = new JsonObject
+                                    {
+                                        ["kind"] = candidateBlocked ? "native-navigation-target-stalled" : "native-navigation-no-measured-approach",
+                                        ["message"] = candidateBlocked
+                                            ? "Two completed Native navigation attempts did not measurably reduce this Wanderer's distance. This candidate is temporarily excluded; choose another current candidate or a listed Native leave action."
+                                            : "The last Native navigation ended without a measured approach. Do not repeat this target immediately; inspect the full current scene candidate catalog."
+                                    };
+                                    if (candidateBlocked)
+                                    {
+                                        excludedHeroes.Add(navigationProgressTargetHeroId);
+                                        navigationNoProgressAttempts.Remove(navigationProgressTargetHeroId);
+                                    }
+                                }
+                            }
+                            else if (targetInteractable)
+                            {
+                                navigationNoProgressAttempts.Remove(navigationProgressTargetHeroId);
+                            }
+                            navigationProgressTargetHeroId = null;
+                            navigationProgressStartDistance = null;
+                        }
+                    }
                     else if (action == "missionNavigateToAgent")
                     {
                         selectedHeroId = targetHeroId;
+                        navigationProgressTargetHeroId = targetHeroId;
+                        navigationProgressStartDistance = FindWandererDistance(sceneAgentsReceipt, targetHeroId);
                         sceneAgentsReceipt = null;
                     }
                     else if (action == "missionInteract")
@@ -562,7 +617,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                     {
                         var selectedDialogueOption = ReadString(arguments, "optionId");
                         if (selectedDialogueOption == "player_companion_hire_response_2" || selectedDialogueOption == "player_companion_hire_response_1")
-                            visitedHeroes.Add(selectedHeroId ?? string.Empty);
+                            excludedHeroes.Add(selectedHeroId ?? string.Empty);
                         if (selectedDialogueOption == "player_companion_hire_response_2")
                         {
                             selectedHeroId = null;
@@ -631,7 +686,7 @@ internal static class AgentHostEstablishClanCompanionLoop
 
     private static JsonArray BuildActionCatalog(JsonObject state, JsonArray journal, JsonObject objective, JsonArray? safeTowns,
         JsonObject? sceneAgentsReceipt, string? selectedHeroId, string? moveTargetId, bool pending,
-        HashSet<string> visitedTowns, HashSet<string> visitedHeroes)
+        HashSet<string> visitedTowns, HashSet<string> excludedHeroes)
     {
         var catalog = new JsonArray();
         var context = state["context"] as JsonObject;
@@ -698,7 +753,7 @@ internal static class AgentHostEstablishClanCompanionLoop
             return catalog;
         }
 
-        var candidates = FilterWandererCandidates(sceneAgentsReceipt?["data"]?["agents"] as JsonArray, visitedHeroes);
+        var candidates = FilterWandererCandidates(sceneAgentsReceipt?["data"]?["agents"] as JsonArray, excludedHeroes);
         if (!string.IsNullOrWhiteSpace(selectedHeroId))
         {
             var selected = candidates.OfType<JsonObject>().Where(candidate => ReadString(candidate, "heroId") == selectedHeroId).ToArray();
@@ -846,14 +901,36 @@ internal static class AgentHostEstablishClanCompanionLoop
         return allowedValues?.OfType<JsonValue>().Any(value => value.TryGetValue<int>(out var allowed) && allowed == parsedValue) == true;
     }
 
-    private static JsonArray FilterWandererCandidates(JsonArray? agents, HashSet<string> visitedHeroes)
+    private static double? FindWandererDistance(JsonObject? receipt, string? heroId)
+    {
+        if (string.IsNullOrWhiteSpace(heroId) || receipt?["data"]?["agents"] is not JsonArray agents) return null;
+        var candidate = agents.OfType<JsonObject>().FirstOrDefault(agent => ReadString(agent, "heroId") == heroId);
+        return candidate is null ? null : ReadDouble(candidate, "distance");
+    }
+
+    private static bool IsWandererInteractable(JsonObject? state, string? heroId) =>
+        !string.IsNullOrWhiteSpace(heroId) &&
+        (state?["mission"]?["nearbySceneAgents"] as JsonArray)?.OfType<JsonObject>().Any(agent =>
+            ReadString(agent, "heroId") == heroId && ReadBoolean(agent, "isInteractable")) == true;
+
+    internal static (int Attempts, bool ExcludeTarget) EvaluateNavigationNoProgress(double? startDistance, double? observedDistance,
+        int previousAttempts, bool isInteractable)
+    {
+        if (isInteractable || !startDistance.HasValue || !observedDistance.HasValue ||
+            observedDistance.Value <= startDistance.Value - MinimumCompanionNavigationProgressDistance)
+            return (0, false);
+        var attempts = Math.Max(0, previousAttempts) + 1;
+        return (attempts, attempts >= MaxCompanionNavigationNoProgressAttempts);
+    }
+
+    private static JsonArray FilterWandererCandidates(JsonArray? agents, HashSet<string> excludedHeroes)
     {
         var result = new JsonArray();
         if (agents is null) return result;
         foreach (var agent in agents.OfType<JsonObject>())
         {
             var id = ReadString(agent, "heroId");
-            if (string.IsNullOrWhiteSpace(id) || ReadString(agent, "occupation") != "Wanderer" || ReadBoolean(agent, "isNotable") || ReadBoolean(agent, "isEnemy") || visitedHeroes.Contains(id)) continue;
+            if (string.IsNullOrWhiteSpace(id) || ReadString(agent, "occupation") != "Wanderer" || ReadBoolean(agent, "isNotable") || ReadBoolean(agent, "isEnemy") || excludedHeroes.Contains(id)) continue;
             result.Add(agent.DeepClone());
         }
         return result;

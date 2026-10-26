@@ -134,6 +134,96 @@ function Disable-ChronicleHarnessAutoSave {
     [pscustomobject]@{ Status = 'disabled'; OriginalAutoSaveInterval = $original; SettingDuringTest = -1; BackupPath = $paths.BackupPath }
 }
 
+function Get-ChronicleEngineConfigPath {
+    $documents = [Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)
+    if ([string]::IsNullOrWhiteSpace($documents)) { throw 'Windows Documents directory could not be resolved for Bannerlord sound isolation.' }
+    Join-Path (Join-Path $documents 'Mount and Blade II Bannerlord\Configs') 'engine_config.txt'
+}
+
+function Get-ChronicleBannerlordSoundDisabled {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$LiteralPath)
+    if (-not (Test-Path -LiteralPath $LiteralPath -PathType Leaf)) { throw 'Bannerlord engine_config.txt was not found; sound will remain unchanged.' }
+    $content = [IO.File]::ReadAllText($LiteralPath)
+    $matches = [regex]::Matches($content, '(?m)^disable_sound\s*=\s*(\d+)\s*\r?$')
+    if ($matches.Count -ne 1) { throw 'engine_config.txt must contain exactly one disable_sound setting; refusing to guess.' }
+    $value = 0
+    if (-not [int]::TryParse($matches[0].Groups[1].Value, [Globalization.NumberStyles]::Integer, [Globalization.CultureInfo]::InvariantCulture, [ref]$value) -or $value -notin @(0,1)) {
+        throw 'engine_config.txt disable_sound must be either 0 or 1.'
+    }
+    return $value
+}
+
+function Set-ChronicleBannerlordSoundDisabled {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$LiteralPath, [Parameter(Mandatory)][ValidateSet(0,1)][int]$Value)
+    $content = [IO.File]::ReadAllText($LiteralPath)
+    $pattern = '(?m)^(disable_sound\s*=\s*)(\d+)(\s*\r?)$'
+    $matches = [regex]::Matches($content, $pattern)
+    if ($matches.Count -ne 1) { throw 'engine_config.txt must contain exactly one disable_sound setting; refusing to change configuration.' }
+    $bytes = [IO.File]::ReadAllBytes($LiteralPath)
+    $hasUtf8Bom = $bytes.Length -ge 3 -and $bytes[0] -eq 239 -and $bytes[1] -eq 187 -and $bytes[2] -eq 191
+    $encoding = [Text.UTF8Encoding]::new($hasUtf8Bom)
+    $updated = ([regex]::new($pattern)).Replace($content, [Text.RegularExpressions.MatchEvaluator]{ param($match) "$($match.Groups[1].Value)$Value$($match.Groups[3].Value)" }, 1)
+    [IO.File]::WriteAllText($LiteralPath, $updated, $encoding)
+    $actual = Get-ChronicleBannerlordSoundDisabled -LiteralPath $LiteralPath
+    if ($actual -ne $Value) { throw "Bannerlord disable_sound did not accept the requested Harness value ($Value)." }
+}
+
+function Restore-ChronicleHarnessGameSound {
+    [CmdletBinding()]
+    param()
+    $configPath = Get-ChronicleEngineConfigPath
+    $backupPath = "$configPath.chronicle-sound-backup.json"
+    if (-not (Test-Path -LiteralPath $backupPath -PathType Leaf)) { return [pscustomobject]@{ Status = 'not-needed'; Restored = $true } }
+    $runningGames = @(Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue)
+    if ($runningGames.Count -gt 0) { return [pscustomobject]@{ Status = 'deferred-game-running'; Restored = $false; ProcessIds = @($runningGames.Id) } }
+    $backup = Get-Content -LiteralPath $backupPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ([int]$backup.schemaVersion -ne 1 -or [IO.Path]::GetFullPath([string]$backup.configPath) -ne [IO.Path]::GetFullPath($configPath)) {
+        return [pscustomobject]@{ Status = 'backup-invalid'; Restored = $false }
+    }
+    $current = Get-ChronicleBannerlordSoundDisabled -LiteralPath $configPath
+    $original = [int]$backup.originalDisableSound
+    if ($current -eq $original) {
+        Remove-Item -LiteralPath $backupPath -Force
+        return [pscustomobject]@{ Status = 'already-restored'; Restored = $true; DisableSound = $current }
+    }
+    if ($current -ne 1) { return [pscustomobject]@{ Status = 'configuration-conflict'; Restored = $false; CurrentDisableSound = $current; ExpectedHarnessValue = 1 } }
+    Set-ChronicleBannerlordSoundDisabled -LiteralPath $configPath -Value $original
+    $restored = Get-ChronicleBannerlordSoundDisabled -LiteralPath $configPath
+    if ($restored -ne $original) { throw 'Restoring the original Bannerlord disable_sound setting did not verify.' }
+    Remove-Item -LiteralPath $backupPath -Force
+    [pscustomobject]@{ Status = 'restored'; Restored = $true; DisableSound = $restored }
+}
+
+function Disable-ChronicleHarnessGameSound {
+    [CmdletBinding()]
+    param()
+    $configPath = Get-ChronicleEngineConfigPath
+    if (@(Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue).Count -gt 0) { throw 'Refusing to change game sound configuration while Bannerlord is running.' }
+    $backupPath = "$configPath.chronicle-sound-backup.json"
+    if (Test-Path -LiteralPath $backupPath -PathType Leaf) {
+        $recovery = Restore-ChronicleHarnessGameSound
+        if (-not $recovery.Restored) { throw "An unresolved Bannerlord sound backup prevents a fresh test ($($recovery.Status)); no game was started." }
+    }
+    $original = Get-ChronicleBannerlordSoundDisabled -LiteralPath $configPath
+    if ($original -eq 1) { return [pscustomobject]@{ Status = 'already-disabled'; OriginalDisableSound = 1; DisableSoundDuringTest = 1; BackupPath = $null } }
+    $backup = [ordered]@{
+        schemaVersion = 1
+        configPath = [IO.Path]::GetFullPath($configPath)
+        originalDisableSound = $original
+        createdUtc = [DateTime]::UtcNow.ToString('O')
+        recoveryRule = 'Restore only when no Bannerlord process is running and disable_sound is still exactly 1.'
+    }
+    [IO.File]::WriteAllText($backupPath, ($backup | ConvertTo-Json -Depth 4), [Text.UTF8Encoding]::new($true))
+    try { Set-ChronicleBannerlordSoundDisabled -LiteralPath $configPath -Value 1 }
+    catch {
+        try { [void](Restore-ChronicleHarnessGameSound) } catch { }
+        throw
+    }
+    [pscustomobject]@{ Status = 'disabled'; OriginalDisableSound = $original; DisableSoundDuringTest = 1; BackupPath = $backupPath }
+}
+
 function Get-ChronicleSteamClientReadiness {
     [CmdletBinding()]
     param(

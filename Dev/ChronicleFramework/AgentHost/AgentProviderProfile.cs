@@ -1,9 +1,10 @@
 using System.Text.Json;
+using System.Globalization;
 using ChronicleFramework;
 
 namespace ChronicleFramework.AgentHost;
 
-internal sealed record AgentProviderProfile(string BaseUrl, string ModelId, string Source)
+internal sealed record AgentProviderProfile(string BaseUrl, string ModelId, string OutputMode, double DeepSeekRunCostLimitCny, string Source)
 {
     private const int MaxProfileBytes = 32 * 1024;
 
@@ -23,7 +24,7 @@ internal sealed record AgentProviderProfile(string BaseUrl, string ModelId, stri
     internal static AgentProviderProfile Load(string path, string source)
     {
         if (!File.Exists(path))
-            throw new AgentHostException("provider-profile-missing", "Open Chronicle Framework's global Mod Settings and configure the FreeLLMAPI gateway URL and model route before starting the Agent.");
+            throw new AgentHostException("provider-profile-missing", "Open Chronicle Framework's global Mod Settings and configure an OpenAI-compatible provider URL and model identifier before starting the Agent.");
 
         var fileInfo = new FileInfo(path);
         if (fileInfo.Length is <= 0 or > MaxProfileBytes)
@@ -49,27 +50,35 @@ internal sealed record AgentProviderProfile(string BaseUrl, string ModelId, stri
         if (root.ValueKind != JsonValueKind.Object)
             throw new AgentHostException("provider-profile-shape-invalid", "The global model profile must be a JSON object.");
 
-        var baseUrl = ReadString(root, "OllamaBaseUrl");
+        // `OllamaBaseUrl` is retained as a migration key for existing MCM profiles.
+        var baseUrl = ReadString(root, "ProviderBaseUrl") ?? ReadString(root, "OllamaBaseUrl");
         var modelId = ReadString(root, "ModelId");
-        return ParseValues(baseUrl, modelId, source);
+        var outputMode = ReadString(root, "OutputMode") ?? "auto";
+        var deepSeekRunCostLimitCny = ReadString(root, "DeepSeekRunCostLimitCny") ?? "5";
+        return ParseValues(baseUrl, modelId, outputMode, deepSeekRunCostLimitCny, source);
     }
 
-    internal static string? GetSettingsValidationError(string? baseUrl, string? modelId)
+    internal static string? GetSettingsValidationError(string? baseUrl, string? modelId, string? outputMode = null, string? deepSeekRunCostLimitCny = null)
     {
-        return AgentProviderConfigurationValidator.GetErrorCode(baseUrl, modelId);
+        return AgentProviderConfigurationValidator.GetErrorCode(baseUrl, modelId, outputMode, deepSeekRunCostLimitCny);
     }
 
-    private static AgentProviderProfile ParseValues(string? baseUrl, string? modelId, string source)
+    private static AgentProviderProfile ParseValues(string? baseUrl, string? modelId, string? outputMode, string? deepSeekRunCostLimitCny, string source)
     {
-        var errorCode = AgentProviderConfigurationValidator.GetErrorCode(baseUrl, modelId);
+        var errorCode = AgentProviderConfigurationValidator.GetErrorCode(baseUrl, modelId, outputMode, deepSeekRunCostLimitCny);
         if (errorCode == "provider-profile-endpoint-invalid")
-            throw new AgentHostException(errorCode, "The configured model gateway URL must be a loopback HTTP(S) address without credentials, query, or fragment.");
+            throw new AgentHostException(errorCode, "The configured provider URL must use HTTPS (HTTP is allowed only on loopback) and must not include credentials, query, or fragment.");
         if (errorCode == "provider-profile-model-invalid")
-            throw new AgentHostException(errorCode, "The configured model or FreeLLMAPI route identifier is missing or too long.");
+            throw new AgentHostException(errorCode, "The configured model identifier is missing or too long.");
+        if (errorCode == "provider-profile-output-mode-invalid")
+            throw new AgentHostException(errorCode, "The structured output mode must be auto, json_schema, json_object, or required_tool_call.");
+        if (errorCode == "provider-profile-run-cost-invalid")
+            throw new AgentHostException(errorCode, "The DeepSeek per-run cost ceiling must be a number from 0.01 through 1000 CNY.");
 
         var uri = new Uri(baseUrl!.Trim(), UriKind.Absolute);
 
-        return new AgentProviderProfile(uri.ToString().TrimEnd('/'), modelId!.Trim(), source);
+        return new AgentProviderProfile(uri.ToString().TrimEnd('/'), modelId!.Trim(), string.IsNullOrWhiteSpace(outputMode) ? "auto" : outputMode,
+            double.Parse(string.IsNullOrWhiteSpace(deepSeekRunCostLimitCny) ? "5" : deepSeekRunCostLimitCny, CultureInfo.InvariantCulture), source);
     }
 
     private static string? ReadString(JsonElement root, string propertyName)

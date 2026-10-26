@@ -211,6 +211,8 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
 
     internal static void ValidateRecruitmentAction(string action, JsonObject arguments)
     {
+        // Dialogue is admitted only as a transport shape here; PartySize's current
+        // VillagersInNeed catalog binds it to the exact active quest, hero and option.
         static bool HasText(JsonObject value, string key) => value[key] is JsonValue node && node.TryGetValue<string>(out var text) && !string.IsNullOrWhiteSpace(text);
         var valid = action switch
         {
@@ -219,6 +221,8 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             "recruit" => arguments.Count == 4 && HasText(arguments, "ownerId") && HasText(arguments, "troopId") &&
                          arguments["slot"] is JsonValue slotNode && slotNode.TryGetValue<int>(out var slot) && slot >= 0 &&
                          arguments["confirmPartySizeWarning"] is JsonValue confirmNode && confirmNode.TryGetValue<int>(out var confirm) && confirm is 0 or 1,
+            "dialogueContinue" => arguments.Count == 0,
+            "dialogueSelect" => arguments.Count == 1 && HasText(arguments, "optionId"),
             _ => false
         };
         if (!valid)
@@ -230,12 +234,16 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
         ValidateRecruitmentAction("recruitOptions", new JsonObject());
         ValidateRecruitmentAction("menuSelect", JsonNode.Parse("{\"menuId\":\"village\",\"optionId\":\"leave\"}")!.AsObject());
         ValidateRecruitmentAction("recruit", JsonNode.Parse("{\"ownerId\":\"notable-a\",\"troopId\":\"vlandian_recruit\",\"slot\":0,\"confirmPartySizeWarning\":0}")!.AsObject());
+        ValidateRecruitmentAction("dialogueContinue", new JsonObject());
+        ValidateRecruitmentAction("dialogueSelect", JsonNode.Parse("{\"optionId\":\"villagers_defer\"}")!.AsObject());
         foreach (var item in new (string Action, string Json)[]
         {
             ("recruitOptions", "{\"slot\":0}"),
             ("recruit", "{\"ownerId\":\"notable-a\",\"troopId\":\"vlandian_recruit\",\"slot\":-1,\"confirmPartySizeWarning\":0}"),
             ("recruit", "{\"ownerId\":\"notable-a\",\"troopId\":\"vlandian_recruit\",\"slot\":0,\"confirmPartySizeWarning\":2}"),
-            ("recruit", "{\"ownerId\":\"notable-a\",\"troopId\":\"vlandian_recruit\",\"slot\":0,\"confirmPartySizeWarning\":0,\"extra\":true}")
+            ("recruit", "{\"ownerId\":\"notable-a\",\"troopId\":\"vlandian_recruit\",\"slot\":0,\"confirmPartySizeWarning\":0,\"extra\":true}"),
+            ("dialogueContinue", "{\"optionId\":\"villagers_defer\"}"),
+            ("dialogueSelect", "{\"optionId\":\"villagers_defer\",\"extra\":true}")
         })
         {
             try
@@ -245,7 +253,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             }
             catch (AgentHostException exception) when (exception.Code == "native-action-not-in-recruitment-scope") { }
         }
-        return [new { scenario = "native-recruitment-mailbox-requires-current-offer-identity-and-binary-over-capacity-confirmation", passed = true }];
+        return [new { scenario = "native-recruitment-mailbox-allows-quest-scoped-dialogue-and-current-offer-actions", passed = true }];
     }
 
     internal static void ValidateGoldSaleAction(string action, JsonObject arguments)

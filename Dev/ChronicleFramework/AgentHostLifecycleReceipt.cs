@@ -21,6 +21,10 @@ internal sealed class AgentHostLifecycleReceipt
     [DataMember(Name = "firstDecisionListsUnsupportedGoalClassification")] public bool FirstDecisionListsUnsupportedGoalClassification { get; set; }
     [DataMember(Name = "promptTokens")] public long PromptTokens { get; set; }
     [DataMember(Name = "completionTokens")] public long CompletionTokens { get; set; }
+    [DataMember(Name = "providerPromptCacheHitTokens")] public long? PromptCacheHitTokens { get; set; }
+    [DataMember(Name = "providerPromptCacheMissTokens")] public long? PromptCacheMissTokens { get; set; }
+    [DataMember(Name = "providerActualCostEstimateCny")] public double? ActualCostEstimateCny { get; set; }
+    [DataMember(Name = "providerReservedCostUpperCny")] public double? ReservedCostUpperBoundCny { get; set; }
     [DataMember(Name = "failureCode")] public string FailureCode { get; set; }
     [DataMember(Name = "failure")] public string Failure { get; set; }
     [DataMember(Name = "error")] public string ErrorCode { get; set; }

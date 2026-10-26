@@ -54,7 +54,7 @@ internal static class ChronicleAgentObserver
 
         var json = new StringBuilder(4096);
         json.Append('{');
-        json.Append("\"schemaVersion\":27");
+        json.Append("\"schemaVersion\":28");
         json.Append(",\"campaignDay\":").Append(Number(CampaignTime.Now.ToDays));
         json.Append(",\"identity\":{");
         Property(json, "heroId", hero.StringId); Property(json, "heroName", hero.Name?.ToString(), true);
@@ -181,6 +181,7 @@ internal static class ChronicleAgentObserver
                 json.Append('{');
                 Property(json, "id", option.Id);
                 Property(json, "text", option.Text?.ToString(), true);
+                Property(json, "textId", option.Text?.GetID(), true);
                 json.Append(",\"clickable\":").Append(Bool(option.IsClickable));
                 Property(json, "hint", option.HintText?.ToString(), true);
                 json.Append('}');
