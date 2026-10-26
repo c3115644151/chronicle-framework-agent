@@ -173,6 +173,7 @@ internal static class AgentHostHarnessProgressTrace
                 ["completionTokens"] = Copy(result, "completionTokens"),
                 ["recruitmentOfferSummary"] = BuildRecruitmentOfferSummary(result["lastRecruitmentOffers"] as JsonObject),
                 ["companionNavigationSummary"] = BuildCompanionNavigationSummary(result["trace"] as JsonArray),
+                ["villagersInNeedStartupSummary"] = BuildVillagersInNeedStartupSummary(result["trace"] as JsonArray),
                 ["nativeStateBefore"] = result["nativeStateBefore"]?.DeepClone() ?? BuildNativeStateSummary(result["initialNativeState"] as JsonObject),
                 ["nativeStateAfter"] = result["nativeStateAfter"]?.DeepClone() ?? BuildNativeStateSummary(result["finalNativeState"] as JsonObject ?? result["finalState"] as JsonObject)
             };
@@ -323,6 +324,18 @@ internal static class AgentHostHarnessProgressTrace
             ReadString(summarizedInquiry?["affirmative"] as JsonObject, "text") != "好" ||
             summarizedInquiry?.ContainsKey("token") == true || ReadBoolean(modalSummary, "partyScreenOpen") || ReadBoolean(modalSummary, "inventoryScreenOpen"))
             throw new AgentHostException("host-progress-trace-native-modal-self-test", "The bounded progress trace must identify current modal blockers and visible button labels without leaking one-use tokens or claiming unrelated screens.");
+        var conversationStartupSummary = BuildVillagersInNeedStartupSummary(new JsonArray(new JsonObject
+        {
+            ["kind"] = "native-villagers-in-need-conversation-startup-settle",
+            ["before"] = new JsonObject { ["gameState"] = "MissionState", ["conversationCharacterId"] = null },
+            ["after"] = new JsonObject { ["gameState"] = "MissionState", ["conversationCharacterId"] = "tutorial_npc_questgiver_villager" },
+            ["beforeTimeControlMode"] = "Stop", ["afterTimeControlMode"] = "Stop"
+        }));
+        if (ReadInt(conversationStartupSummary, "waitCount") != 1 ||
+            ReadString(conversationStartupSummary?["firstBefore"] as JsonObject, "conversationCharacterId") is not null ||
+            ReadString(conversationStartupSummary?["lastAfter"] as JsonObject, "conversationCharacterId") != "tutorial_npc_questgiver_villager" ||
+            ReadString(conversationStartupSummary, "lastAfterTimeControlMode") != "Stop")
+            throw new AgentHostException("host-progress-trace-villagers-conversation-startup-self-test", "The bounded Host result must distinguish a pending native conversation load from the resolved Character identity without storing raw dialogue text.");
         var previousMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
         var previousTemp = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
         var temporaryDirectory = Path.Combine(Path.GetTempPath(), "ChronicleAgentHostProgress-" + Guid.NewGuid().ToString("N"));
@@ -603,6 +616,22 @@ internal static class AgentHostHarnessProgressTrace
             ["nearbyInteractableObservationCount"] = nearbyInteractableObservationCount,
             ["interactionAttemptCount"] = interactionAttemptCount,
             ["successfulConversationStartCount"] = successfulConversationStartCount
+        };
+    }
+
+    private static JsonObject? BuildVillagersInNeedStartupSummary(JsonArray? trace)
+    {
+        var transitions = trace?.OfType<JsonObject>()
+            .Where(step => ReadString(step, "kind") == "native-villagers-in-need-conversation-startup-settle")
+            .ToArray() ?? Array.Empty<JsonObject>();
+        if (transitions.Length == 0) return null;
+        return new JsonObject
+        {
+            ["waitCount"] = transitions.Length,
+            ["firstBefore"] = transitions[0]["before"]?.DeepClone(),
+            ["lastAfter"] = transitions[^1]["after"]?.DeepClone(),
+            ["lastBeforeTimeControlMode"] = Copy(transitions[^1], "beforeTimeControlMode"),
+            ["lastAfterTimeControlMode"] = Copy(transitions[^1], "afterTimeControlMode")
         };
     }
 

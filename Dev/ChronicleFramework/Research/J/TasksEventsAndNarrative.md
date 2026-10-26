@@ -166,3 +166,7 @@ Chronicle Observer目前重点覆盖Campaign状态、附近对象和Quest摘要�
 
 1.4.8 `TextObject`公开`GetID()`；当前StoryMode XML把Villa Mission入口与拒绝入口分别标为`glarczej`/`nhSLTzHk`。真实中文界面中的可选项运行ID是`adg:131`、`adg:132`，说明模型必须按当前可见option ID提交，但安全策略不能把每次变化的运行ID当作语义身份。Chronicle Observer schema 28在每条Conversation option同时传送运行ID、可见文本与原版TextObject `textId`；StoryMode首轮不把`glarczej`加入PartySize子循环允许目录，`nhSLTzHk`仍作为当前可见原版推迟选择。`TestResults/20261027-020732`真实模型曾选择“带路吧”并启动Mission转场；`20261027-022308`只通过包内模拟对动态ID+稳定TextId门禁，真实`GetID()`与推迟后的原版返回状态仍待实机验证。
 `TestResults/20261027-022658`实机进一步确认最终拒绝分支的后验：当前NPC对话以动态option `adg:132`提交后返回`MapState`和`sandbox village`菜单，`recruit_volunteers`在同一Native状态可用；没有进入庄园Mission。它随后因Agent输出的`slot`/确认值类型为JSON字符串而在Host参数校验被拒，未执行招募。故原版对话拒绝与返回路径得到运行证据；RecruitmentVM交易仍待新的类型修复运行验证。
+
+`TestResults/20261027-053836`再次从地图移动进入`village_ES3_2`后，Native快照已是`MissionState`、该VillagersInNeed Quest仍active，但ConversationManager的Character ID与选项当时为空；PartySize Host因未识别到已就绪人物而在执行任何对话动作前安全停止。该边界说明`CampaignMission.OpenConversationMission`进入MissionState与当前ConversationManager形成可操作对话之间存在异步帧差。Host只在固定村庄、对应Quest仍活动且MissionState尚无Character ID时最多被动等待10次×500ms并重复Native观察，之后继续严格检查确切Character，不调用时钟/任务修改。Fake Native/Host回归模拟“MissionState无对话→Character/选项就绪→继续当前对话→拒绝Villa Mission→Village菜单”，`TestResults/20261027-054956`Package通过；真实运行还需确认等待期间Mission返回不会变化，以及推迟入口后继续招募。
+
+自然运行`TestResults/20261027-055510`同样移动进入此Quest村庄，但首次可操作Native观察时ConversationManager人物和可选回答已经准备好，故pending-settle计数为0。模型按当前答案选择推迟，返回Village MapState，再由原版RecruitmentVM招募6人；此时PartySize Journal仍未达标。该运行验证已准备完成的对话路径，不证明MissionState无Character的过渡等待分支。

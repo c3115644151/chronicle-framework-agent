@@ -1032,8 +1032,14 @@ TestResults/20261026-191500改用FreeLLMAPI keyless kilo-auto做单次Provider S
 
 从`TestResults/20261027-031721`实测看，单次地图移动请求有68,584 prompt tokens：Native `state`仅3.2 KB，而同一全图安全目标列表同时出现在`visibleSafeRecruitmentSettlements`和`previousNativeReceipt.data`，两段分别48,196 / 58,414 bytes。招募决策又把约8 KB完整`currentRecruitmentOffers`回执和同一action catalog的`currentOffers`候选重复发送。现在PartySize observation仍只保留当前过滤后的safe target详情；上一步地图receipt降为`visibleTargetCount`。当前RecruitmentVM只在Native action catalog的`currentOffers`列表保留具体、可验证的owner/troop/slot/cost，observation与上一回执改成Gold/Party/容量/报价总数、可用/可负担数、最低可负担成本。`TestResults/20261027-033959`Build/AgentHostPackage通过：Fake Native确认两个安全地图目标仍在本轮输入，旧地图receipt只有数量；报价摘要没有offer实体，而action catalog仍保留唯一当前可负担精确报价。
 
-这只证明协议重构与合同正确，尚未量到真实请求节省比例，也不证明模型规划表现不变。下一次真实Provider收据要对照move及recruitOptions/recruit请求大小、目标选择ID和VM报价候选，检查Native命令次数、Journal/Gold/Party后验；单Run上限维持¥5，不能把测试合同通过当作成本效果验证。Harness contract version为7.335。
+这只证明前序地图receipt/招募报价去重合同正确；其实现后续再加了安全聚落字段投影，当前Harness contract version为7.337。
 
 随后真实运行`TestResults/20261027-034322`对同型村庄`move`请求进行了直测：首个`move`从`TestResults/20261027-031721`的68,584 prompt tokens / 305,849 bytes / 110,659 observation bytes降至25,417 / 107,889 / 52,739。当前safe settlement候选仍保留，重复的前序地图列表已由116-byte附近的count摘要替代。按该单次动作比较少43,167 prompt tokens（约63%）；完整自然run 346,211 prompt / 5,456 completion，实际usage费用估算¥0.73893197、总保守预留¥3.9936312。
 
 这场实机在村庄分支Native招募数次、PartySize子流程记录Roster 1→6 / Gold 1000→900；之后遇到遭遇和Roster损失、父循环再次规划，最终Provider预算内未完成EYC。不同运行的随机遭遇和目标路径不相同，故整Run费用差异不作为单独归因；move同型请求才是目前直接的成本证据。招募决策平均数据也经去重改为仅Observation计数、action catalog传当前offer；此部分实际Token收益与模型选择表现仍需继续跟踪。
+
+本轮进一步把每个安全聚落由Native对象投影为`id/name/type/distance`，移除已过滤确认为false的hostile/siege字段和本子目标不使用的`isInspected`，不对候选集合设数量上限。`TestResults/20261027-053521` AgentHostPackage内的32个动态Town/Village样本确认所有ID仍可选。自然Run `TestResults/20261027-053836`的首个村庄move为19,733 prompt tokens / 79,553 request bytes / 34,433 observation bytes；相比去重但未投影的`034322`再降约22%，相比原始`031721`移动请求合计少约71%。该Run随后因MissionState首帧ConversationManager角色尚未就绪停止，候选投影没有完成长Run目标验收。
+
+`TestResults/20261027-053836`结束时Native receipt显示：主队已进`village_ES3_2`，当前`MissionState` / encounter active、VillagersInNeed Journal任务仍active，但ConversationCharacterId=null、选项空；不是前次`022658`那样已经打开人物对话。真实入口调用/剧情分支与Mission起始帧之间存在异步过渡。PartySize现在只对精确村庄+StoryMode Quest+MissionState+无Character身份等待最多20×500ms的Native重读；等待期间不发游戏动作、不控制时钟，并在Host result中记录前后Native身份/选项ID、CampaignDay及timeControlMode。只有当前已确认村民出现后才开放原版Continue/Select；其它Settlement/Mission仍fail closed。Fake Native package route专门从ConversationManager尚未建立的MissionState转成该村民选项，再完成推迟/招募；`TestResults/20261027-054956`Build/AgentHostPackage通过。`TestResults/20261027-054857`的Package Build错误是progress-summary自测使用了不存在的`ReadInt`三参重载，不涉及游戏/Provider且未启动自然Campaign；修复后包测试通过。Docs `TestResults/20261027-055423`通过，当前Harness contract version 7.337。
+
+自然运行`TestResults/20261027-055510`首帧已直接看到原版村民和当前选项，模型选择 我得先处理另一件事 后回Village MapState并Native招募6人（Party 1→7、Gold 1000→880）；本场ConversationManager第一次可操作快照已就绪，异步settle等待计数为0。因此本轮确认了即时状态下的推迟与招募链；pending MissionState→Character准备完成的延迟分支仍没有真实运行证据，不能仅以包测试验收。单Run在¥5保守预留上限下结束，EYC仍active/未完成。
