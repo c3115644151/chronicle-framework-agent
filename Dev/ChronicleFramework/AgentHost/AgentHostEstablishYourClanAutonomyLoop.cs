@@ -21,6 +21,10 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
 
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
+        if (!ShouldReconsiderUnavailableObjectives(journalProgressChanged: false, nativeActionsExecuted: 18) ||
+            !ShouldReconsiderUnavailableObjectives(journalProgressChanged: true, nativeActionsExecuted: 0) ||
+            ShouldReconsiderUnavailableObjectives(journalProgressChanged: false, nativeActionsExecuted: 0))
+            throw new AgentHostException("establish-clan-autonomy-child-retry-invalidation-failed", "A failed subgoal must reopen previously blocked routes only after measurable Native actions or authoritative Journal progress; a no-action stop remains temporarily unavailable.");
         var snapshot = new JsonObject
         {
             ["gold"] = new JsonObject { ["current"] = 32, ["target"] = 2000, ["met"] = false },
@@ -54,8 +58,19 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         var results = new List<object>
         {
             new { scenario = "establish-clan-autonomy-offers-only-integrated-unmet-objectives", passed = true },
-            new { scenario = "establish-clan-autonomy-never-selects-unimplemented-or-met-objectives", passed = true }
+            new { scenario = "establish-clan-autonomy-never-selects-unimplemented-or-met-objectives", passed = true },
+            new { scenario = "establish-clan-autonomy-child-native-actions-reopen-prior-route-blocks", passed = true }
         };
+        var retryBefore = AgentHostEstablishYourClanGoalLoop.BuildObjectiveSnapshot(new JsonArray(
+            new JsonObject { ["objectiveId"] = "gold", ["current"] = 920.0, ["target"] = 2000.0 },
+            new JsonObject { ["objectiveId"] = "partySize", ["current"] = 1.0, ["target"] = 25.0 },
+            new JsonObject { ["objectiveId"] = "renown", ["current"] = 20.0, ["target"] = 50.0 },
+            new JsonObject { ["objectiveId"] = "companions", ["current"] = 0.0, ["target"] = 1.0 }));
+        var retryAfter = (JsonObject)retryBefore.DeepClone();
+        retryAfter["partySize"]!["current"] = 5.0;
+        if (!HasObjectiveSnapshotProgressChanged(retryBefore, retryAfter) || HasObjectiveSnapshotProgressChanged(retryAfter, retryAfter))
+            throw new AgentHostException("establish-clan-autonomy-child-journal-progress-detection-failed", "A child result whose official Journal snapshot progressed must be recognized even if that child safely stopped before its target.");
+        results.Add(new { scenario = "establish-clan-autonomy-retries-partial-objective-after-child-journal-progress", passed = true });
         if (!IsRecoverableObjectiveProviderFailure("provider-http-error", "FreeLLMAPI returned HTTP 502. fallbackAttempts=2") ||
             !IsRecoverableObjectiveProviderFailure("provider-http-error", "FreeLLMAPI returned HTTP 503. fallbackAttempts=1") ||
             !IsRecoverableObjectiveProviderFailure("provider-http-error", "FreeLLMAPI returned HTTP 504. fallbackAttempts=1") ||
@@ -543,6 +558,20 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 if (ReadString(child, "status") != "completed")
                 {
                     var termination = ReadString(child, "termination") ?? ReadString(child["termination"] as JsonObject, "reason");
+                    var failedChildActions = ReadInt(child, "actionsExecuted", 0);
+                    var failedChildJournalProgress = HasObjectiveSnapshotProgressChanged(snapshot, child["objectiveSnapshot"] as JsonObject);
+                    if (ShouldReconsiderUnavailableObjectives(journalProgressChanged: failedChildJournalProgress, nativeActionsExecuted: failedChildActions))
+                    {
+                        unavailableObjectives.Clear();
+                        trace.Add(new JsonObject
+                        {
+                            ["stage"] = "failed-objective-native-actions-reopened-other-routes",
+                            ["objectiveId"] = objectiveId,
+                            ["journalProgressChanged"] = failedChildJournalProgress,
+                            ["nativeActionsExecuted"] = failedChildActions,
+                            ["replayedActions"] = false
+                        });
+                    }
                     using var failedState = await client.ReadStateAsync(elapsed.Token);
                     var failedContext = failedState.RootElement.TryGetProperty("state", out var failedStateData) && failedStateData.ValueKind == JsonValueKind.Object &&
                                         failedStateData.TryGetProperty("context", out var contextData) && contextData.ValueKind == JsonValueKind.Object
@@ -849,8 +878,15 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
 
                     if (IsSafeObjectiveRouteUnavailable(objectiveId, termination, freeMap))
                     {
-                        unavailableObjectives.Add(objectiveId);
-                        trace.Add(new JsonObject { ["stage"] = "objective-route-blocked", ["objectiveId"] = objectiveId, ["termination"] = termination, ["failureCode"] = ReadString(child, "failureCode") });
+                        if (!failedChildJournalProgress) unavailableObjectives.Add(objectiveId);
+                        trace.Add(new JsonObject
+                        {
+                            ["stage"] = failedChildJournalProgress ? "objective-route-retry-after-partial-journal-progress" : "objective-route-blocked",
+                            ["objectiveId"] = objectiveId,
+                            ["termination"] = termination,
+                            ["journalProgressChanged"] = failedChildJournalProgress,
+                            ["failureCode"] = ReadString(child, "failureCode")
+                        });
                         continue;
                     }
                     return BuildResult("failed", "objective-subflow-failed", false,
@@ -866,7 +902,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 using var afterDetails = await questDetailsClient.ReadQuestDetailsAsync(QuestId, elapsed.Token);
                 var afterData = ReadQuestDetailsData(afterDetails.RootElement);
                 var afterJournal = AgentHostEstablishYourClanGoalLoop.BuildJournalObjectives(afterData);
-                if (HasJournalProgressChanged(journalObjectives, afterJournal) || ReadInt(child, "actionsExecuted", 0) > 0)
+                if (ShouldReconsiderUnavailableObjectives(HasJournalProgressChanged(journalObjectives, afterJournal), ReadInt(child, "actionsExecuted", 0)))
                     unavailableObjectives.Clear();
                 else
                     unavailableObjectives.Add(objectiveId);
@@ -950,6 +986,23 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         }
         return false;
     }
+
+    internal static bool HasObjectiveSnapshotProgressChanged(JsonObject? before, JsonObject? after)
+    {
+        if (before is null || after is null) return false;
+        foreach (var objectiveId in AgentHostEstablishYourClanGoalLoop.ObjectiveIds)
+        {
+            var oldObjective = before[objectiveId] as JsonObject;
+            var newObjective = after[objectiveId] as JsonObject;
+            if (ReadDouble(oldObjective, "current") != ReadDouble(newObjective, "current") ||
+                ReadDouble(oldObjective, "target") != ReadDouble(newObjective, "target"))
+                return true;
+        }
+        return false;
+    }
+
+    internal static bool ShouldReconsiderUnavailableObjectives(bool journalProgressChanged, int nativeActionsExecuted) =>
+        journalProgressChanged || nativeActionsExecuted > 0;
 
     private static JsonObject ReadQuestDetailsData(JsonElement receipt)
     {

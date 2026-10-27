@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.371'
+$contractVersion = '7.372'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -570,6 +570,11 @@ if ($agentHostEstablishClanAutonomySource -notmatch 'priorProviderRouteHistory: 
     $agentHostBattleSimulationLoopSource -notmatch 'surrender only as a survival fallback' -or
     $agentHostDecisionCycleSource -notmatch 'Never choose surrender in the ordinary Renown BattleSimulation route') {
     throw 'Only an approved incidental encounter in Captivity-recovery mode may use current Native surrender after Send Troops and Leave are disabled; ordinary Renown Simulation must remain separate.'
+}
+if ($agentHostEstablishClanAutonomySource -notmatch 'failed-objective-native-actions-reopened-other-routes' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'HasObjectiveSnapshotProgressChanged\(snapshot, child\["objectiveSnapshot"\] as JsonObject\)' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'objective-route-retry-after-partial-journal-progress') {
+    throw 'A failed EYC subgoal with authoritative Journal progress must remain eligible for another attempt; route blocks must not survive real partial progress.'
 }
 if ($agentLiveModelLoopSource -notmatch 'Get-FreeLLMAPIModelExecutionStatus -ModelRows @\(\$availableModelsResponse\.data\)' -or
     $agentLiveModelLoopSource -notmatch 'if \(\$modelExecutionStatus -eq ''not-listed''\)' -or
