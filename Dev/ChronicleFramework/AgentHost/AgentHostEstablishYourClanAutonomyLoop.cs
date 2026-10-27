@@ -564,7 +564,8 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                             priorPromptTokens: promptTokens,
                             priorCompletionTokens: completionTokens,
                             priorTrace: trace,
-                            priorProviderRouteHistory: routes);
+                            priorProviderRouteHistory: routes,
+                            recoverPlayerCaptivity: true);
                         AgentHostHarnessProgressTrace.RecordObjectiveSubflowResult("incidentBattleSimulation", incidentBattle);
                         decisions = ReadInt(incidentBattle, "decisions", decisions);
                         promptTokens = ReadLong(incidentBattle, "promptTokens", promptTokens);

@@ -511,6 +511,17 @@ internal static class AgentHostBattleSimulationLoop
                                 ["OptionId"] = new JsonArray("leave")
                             }
                         });
+                    else if (recoverPlayerCaptivity && CurrentEnabledMenuOption(state, "surrender"))
+                        catalog.Add(new JsonObject
+                        {
+                            ["action"] = "menuSelect",
+                            ["arguments"] = new JsonArray("MenuId", "OptionId"),
+                            ["argumentValues"] = new JsonObject
+                            {
+                                ["MenuId"] = new JsonArray("encounter"),
+                                ["OptionId"] = new JsonArray("surrender")
+                            }
+                        });
                 }
                 return catalog;
             }
@@ -632,8 +643,10 @@ internal static class AgentHostBattleSimulationLoop
                     var sendTroopsEnabled = CurrentEnabledMenuOption(state, "str_order_attack");
                     var allowedSendTroops = selectedOptionId == "str_order_attack" && sendTroopsEnabled;
                     var allowedLeave = selectedOptionId == "leave" && !sendTroopsEnabled && CurrentEnabledMenuOption(state, "leave");
-                    if (ReadString(context, "menuId") != ReadString(arguments, "menuId") || !(allowedSendTroops || allowedLeave))
-                    { rejection = "Select only the current enabled Native str_order_attack, or the current Native leave option when send-troops is unavailable; real-time attack Missions are outside this loop."; return false; }
+                    var allowedSurrenderFallback = recoverPlayerCaptivity && !sendTroopsEnabled && !CurrentEnabledMenuOption(state, "leave") &&
+                        selectedOptionId == "surrender" && CurrentEnabledMenuOption(state, "surrender");
+                    if (ReadString(context, "menuId") != ReadString(arguments, "menuId") || !(allowedSendTroops || allowedLeave || allowedSurrenderFallback))
+                    { rejection = "Select the current enabled Native str_order_attack; if unavailable, Native leave; or only in captivity-recovery mode, surrender when both Send Troops and Leave are disabled. Real-time attack Missions are outside this loop."; return false; }
                     var encounteredId = ReadString(state["context"] as JsonObject, "encounteredPartyId");
                     if (!observedTargets.OfType<JsonObject>().Any(x => ReadString(x, "id") == encounteredId && ReadString(x, "type") == "bandit" && ReadBoolean(x, "hostile")))
                     { rejection = "The active encounter party must match a currently observed hostile bandit target."; return false; }
@@ -687,6 +700,9 @@ internal static class AgentHostBattleSimulationLoop
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
         var results = new List<object>();
+        if (!AgentHostDecisionCycle.BattleAndCaptivitySystemPrompt.Contains("surrender only as a survival fallback", StringComparison.Ordinal) ||
+            AgentHostDecisionCycle.BattleSimulationSystemPrompt.Contains("surrender only as a survival fallback", StringComparison.Ordinal))
+            throw new AgentHostException("battle-loop-self-test-surrender-fallback-prompt-scope-failed", "Native surrender fallback guidance belongs only to explicit BattleAndCaptivity recovery mode, never the ordinary Renown BattleSimulation objective.");
         var map = ParseState("MapState", menuId: null, encounterActive: false, partyTarget: null, battle: null);
         var candidates = new JsonArray(new JsonObject { ["id"] = "bandit-1", ["type"] = "bandit", ["hostile"] = true });
         var mapState = map["state"]!.AsObject();
@@ -758,6 +774,32 @@ internal static class AgentHostBattleSimulationLoop
         noSendTroopsState["availableMenuOptions"]![2]!["available"] = false;
         if (BuildActionCatalog(noSendTroopsState, candidates, "bandit-1", false, true).Count != 0)
             throw new AgentHostException("battle-loop-self-test-disabled-native-leave-listed", "Native Leave must not be listed after the encounter menu reports it disabled.");
+        noSendTroopsState["availableMenuOptions"]!.AsArray().Add(new JsonObject { ["id"] = "surrender", ["enabled"] = true, ["available"] = true });
+        var ordinarySurrenderCatalog = BuildActionCatalog(noSendTroopsState, candidates, "bandit-1", false, true, recoverPlayerCaptivity: false);
+        var captivitySurrenderCatalog = BuildActionCatalog(noSendTroopsState, candidates, "bandit-1", false, true, recoverPlayerCaptivity: true);
+        var surrenderFallbackDecision = new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "encounter", ["OptionId"] = "surrender" } };
+        if (ordinarySurrenderCatalog.Count != 0 || captivitySurrenderCatalog.Count != 1 ||
+            ReadString(captivitySurrenderCatalog[0] as JsonObject, "action") != "menuSelect" ||
+            (captivitySurrenderCatalog[0]?["argumentValues"]?["OptionId"] as JsonArray)?.Any(value => value?.GetValue<string>() == "surrender") != true ||
+            !TryResolveDecision(surrenderFallbackDecision, captivitySurrenderCatalog, new JsonArray(), noSendTroopsState, candidates, "bandit-1",
+                out var surrenderFallbackAction, out var surrenderFallbackArguments, out _, out _, recoverPlayerCaptivity: true) ||
+            surrenderFallbackAction != "menuSelect" || ReadString(surrenderFallbackArguments, "optionId") != "surrender" ||
+            TryResolveDecision(surrenderFallbackDecision, captivitySurrenderCatalog, new JsonArray(), noSendTroopsState, candidates, "bandit-1",
+                out _, out _, out _, out _, recoverPlayerCaptivity: false))
+            throw new AgentHostException("battle-loop-self-test-native-surrender-captivity-fallback-failed", "Only explicit captivity-recovery mode may surrender when Native disables Send Troops and Leave; ordinary Renown BattleSimulation must keep it closed.");
+        var noEnabledSurrender = (JsonObject)noSendTroopsState.DeepClone();
+        noEnabledSurrender["availableMenuOptions"]![3]!["enabled"] = false;
+        noEnabledSurrender["availableMenuOptions"]![3]!["available"] = false;
+        if (BuildActionCatalog(noEnabledSurrender, candidates, "bandit-1", false, true, recoverPlayerCaptivity: true).Count != 0)
+            throw new AgentHostException("battle-loop-self-test-disabled-surrender-fallback-listed", "Captivity recovery may expose surrender only when the current Native encounter menu marks it available and enabled.");
+        var leavePreferredState = (JsonObject)noSendTroopsState.DeepClone();
+        leavePreferredState["availableMenuOptions"]![2]!["enabled"] = true;
+        leavePreferredState["availableMenuOptions"]![2]!["available"] = true;
+        var leavePreferredCatalog = BuildActionCatalog(leavePreferredState, candidates, "bandit-1", false, true, recoverPlayerCaptivity: true);
+        var leavePreferredIds = leavePreferredCatalog.FirstOrDefault()?["argumentValues"]?["OptionId"] as JsonArray;
+        if (leavePreferredIds?.Count != 1 || leavePreferredIds[0]?.GetValue<string>() != "leave")
+            throw new AgentHostException("battle-loop-self-test-leave-prioritized-over-surrender", "When Native Leave is enabled, it remains the no-capture fallback and surrender must not be offered.");
+        results.Add(new { scenario = "battle-loop-surrenders-only-as-last-resort-in-explicit-captivity-recovery-mode", passed = true });
         var encounterLeftMap = new JsonObject
         {
             ["context"] = new JsonObject { ["gameState"] = "MapState", ["menuId"] = null, ["escapeMenuOpen"] = false, ["inquiryOpen"] = false,

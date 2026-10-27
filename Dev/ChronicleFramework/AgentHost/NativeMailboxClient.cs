@@ -506,6 +506,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             ("mapPartyTargets", "{}"),
             ("pursue", "{\"partyId\":\"observed-bandit\"}"),
             ("menuSelect", "{\"menuId\":\"encounter\",\"optionId\":\"str_order_attack\"}"),
+            ("menuSelect", "{\"menuId\":\"encounter\",\"optionId\":\"surrender\"}"),
             ("battleSkip", "{}"),
             ("battleFinish", "{}"),
             ("partyTakeAll", "{\"troopType\":\"members\"}"),

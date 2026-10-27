@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.367'
+$contractVersion = '7.371'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -564,6 +564,12 @@ if ($agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S
     $agentHostVillageToolsQuestLoopSource -notmatch 'Math\.Clamp\(ReadInt\(request, "maxElapsedSeconds", 7200\), 1, 7200\)' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'Math\.Clamp\(ReadInt\(request, "maxDecisions", 160\), 1, 160\)') {
     throw 'The EYC Host request and all nested objective loops must share the 7200-second/320-decision cumulative ceiling; separate loops must not restart the full decision allowance when prior decisions are carried forward.'
+}
+if ($agentHostEstablishClanAutonomySource -notmatch 'priorProviderRouteHistory: routes,[\s\S]{0,100}recoverPlayerCaptivity: true' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'allowedSurrenderFallback = recoverPlayerCaptivity && !sendTroopsEnabled' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'surrender only as a survival fallback' -or
+    $agentHostDecisionCycleSource -notmatch 'Never choose surrender in the ordinary Renown BattleSimulation route') {
+    throw 'Only an approved incidental encounter in Captivity-recovery mode may use current Native surrender after Send Troops and Leave are disabled; ordinary Renown Simulation must remain separate.'
 }
 if ($agentLiveModelLoopSource -notmatch 'Get-FreeLLMAPIModelExecutionStatus -ModelRows @\(\$availableModelsResponse\.data\)' -or
     $agentLiveModelLoopSource -notmatch 'if \(\$modelExecutionStatus -eq ''not-listed''\)' -or
