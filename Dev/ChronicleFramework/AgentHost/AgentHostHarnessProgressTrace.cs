@@ -108,6 +108,7 @@ internal static class AgentHostHarnessProgressTrace
                 ["promptCacheHitTokens"] = result.PromptCacheHitTokens,
                 ["promptCacheMissTokens"] = result.PromptCacheMissTokens,
                 ["deepSeekEstimatedInputTokens"] = result.DeepSeekEstimatedInputTokens,
+                ["deepSeekRawRequestTokens"] = result.DeepSeekRawRequestTokens,
                 ["deepSeekReservedInputTokens"] = result.DeepSeekReservedInputTokens,
                 ["deepSeekInputTokenEstimator"] = result.DeepSeekInputTokenEstimator,
                 ["requestBodyBytes"] = result.RequestBodyBytes,
@@ -358,7 +359,8 @@ internal static class AgentHostHarnessProgressTrace
             RecordDecision(request.RootElement, new ProviderDecisionResult("completed", "selftest-model", 123, 17, "stop", decision, "selftest/route",
                 RequestBodyBytes: 40000, SystemPromptBytes: 1000, UserPayloadBytes: 30000, ObservationBytes: 5000,
                 PromptCacheHitTokens: 50, PromptCacheMissTokens: 73, EstimatedCostCny: 0.0005, ReservedCostUpperBoundCny: 0.001,
-                DeepSeekEstimatedInputTokens: 35000, DeepSeekReservedInputTokens: 42000, DeepSeekInputTokenEstimator: "deepseek-v4-byte-level-bpe-json-body"));
+                DeepSeekEstimatedInputTokens: 35000, DeepSeekRawRequestTokens: 41000, DeepSeekReservedInputTokens: 42000,
+                DeepSeekInputTokenEstimator: "deepseek-v4-chat-template-plus-structured-metadata"));
             var lines = File.ReadAllLines(path);
             if (lines.Length != 1) throw new AgentHostException("host-progress-trace-self-test-line-count", "Harness progress trace did not append exactly one decision.");
             var recorded = JsonNode.Parse(lines[0]) as JsonObject ?? throw new AgentHostException("host-progress-trace-self-test-json", "Harness progress trace did not contain one JSON object.");
@@ -370,8 +372,9 @@ internal static class AgentHostHarnessProgressTrace
                 ReadString(recorded?["observation"] as JsonObject, "menuId") != "village" ||
                 (ReadInt(recorded, "requestBodyBytes") ?? 0) != 40000 || (ReadInt(recorded, "systemPromptBytes") ?? 0) != 1000 ||
                 (ReadInt(recorded, "deepSeekEstimatedInputTokens") ?? 0) != 35000 ||
+                (ReadInt(recorded, "deepSeekRawRequestTokens") ?? 0) != 41000 ||
                 (ReadInt(recorded, "deepSeekReservedInputTokens") ?? 0) != 42000 ||
-                ReadString(recorded, "deepSeekInputTokenEstimator") != "deepseek-v4-byte-level-bpe-json-body" ||
+                ReadString(recorded, "deepSeekInputTokenEstimator") != "deepseek-v4-chat-template-plus-structured-metadata" ||
                 (ReadInt(recorded, "userPayloadBytes") ?? 0) != 30000 || (ReadInt(recorded, "observationBytes") ?? 0) != 5000 ||
                 (ReadInt(recorded, "promptCacheHitTokens") ?? 0) != 50 || (ReadInt(recorded, "promptCacheMissTokens") ?? 0) != 73 ||
                 Math.Abs((ReadDouble(recorded, "estimatedCostCny") ?? -1) - 0.0005) > 0.0000001 ||

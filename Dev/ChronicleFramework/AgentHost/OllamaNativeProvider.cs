@@ -381,7 +381,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             // request, add an empirically calibrated wrapper margin, and reserve
             // every output token at the peak rate. Returned usage remains the
             // billing source of truth and is compared with this estimate per request.
-            deepSeekInputTokenEstimate = DeepSeekPromptTokenEstimator.EstimateRequestBody(body);
+            deepSeekInputTokenEstimate = DeepSeekPromptTokenEstimator.EstimateRequest(body, systemPrompt, userContent, payload);
             reservedCostForRequest = (deepSeekInputTokenEstimate.ReservedTokens * DeepSeekInputPeakCnyPerMillion +
                                       _settings.MaxOutputTokens * DeepSeekOutputPeakCnyPerMillion) / 1000000d;
             if (_reservedDeepSeekCostCny + reservedCostForRequest > _settings.MaxEstimatedRunCostCny)
@@ -632,6 +632,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 promptCacheMissTokens,
                 estimatedCostCny,
                 deepSeekInputTokenEstimate?.TokenizerTokens,
+                deepSeekInputTokenEstimate?.RawRequestTokens,
                 deepSeekInputTokenEstimate?.ReservedTokens,
                 deepSeekInputTokenEstimate?.Method);
         }
@@ -1352,6 +1353,7 @@ internal sealed record ProviderDecisionResult(
     int? PromptCacheMissTokens = null,
     double? EstimatedCostCny = null,
     int? DeepSeekEstimatedInputTokens = null,
+    int? DeepSeekRawRequestTokens = null,
     int? DeepSeekReservedInputTokens = null,
     string? DeepSeekInputTokenEstimator = null);
 

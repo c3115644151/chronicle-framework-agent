@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.363'
+$contractVersion = '7.364'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -1093,9 +1093,10 @@ if (-not (Test-Path -LiteralPath $deepSeekTokenizerAsset -PathType Leaf) -or
     $deepSeekTokenEstimatorSource -notmatch 'ReservationMargin' -or
     $deepSeekTokenEstimatorSource -notmatch 'utf8-byte-fallback' -or
     $deepSeekTokenEstimatorSource -notmatch 'OfficialTokenizerAssetSha256' -or
-    $providerHostSource -notmatch 'DeepSeekPromptTokenEstimator\.EstimateRequestBody' -or
+    $providerHostSource -notmatch 'DeepSeekPromptTokenEstimator\.EstimateRequest\(' -or
     $providerProfileTestSource -notmatch 'DeepSeekPromptTokenEstimator\.RunContractSelfTests' -or
     $agentHostHarnessProgressTraceSource -notmatch 'deepSeekEstimatedInputTokens' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'deepSeekRawRequestTokens' -or
     $agentHostHarnessProgressTraceSource -notmatch 'deepSeekReservedInputTokens') {
     throw 'DeepSeek token-cost estimation must use the hash-pinned official tokenizer asset, byte-level BPE, a conservative margin, and its safe byte-bound fallback.'
 }

@@ -62,7 +62,7 @@ internal sealed class ChronicleAgentProviderSettings : AttributeGlobalSettings<C
         }
     }
 
-    [SettingPropertyText("DeepSeek 单次运行预算（CNY）", Order = 3, RequireRestart = false, HintText = "仅 DeepSeek 使用；使用官方BPE tokenizer估计输入token，加20%余量与256 token服务开销，按峰时缓存未命中费率并预留全部输出上限。默认5元。平台usage返回后记录实际费用；估算可能偏高或偏低，此值是请求前预留停止门槛，不是账单硬上限。达到门槛后，Host会在发送下一请求前停止。其他服务商费用规则不同，目前按请求/输出限制并记录usage。")]
+    [SettingPropertyText("DeepSeek 单次运行预算（CNY）", Order = 3, RequireRestart = false, HintText = "仅 DeepSeek 使用；按官方BPE tokenizer估计聊天文本和结构化工具说明，加15%余量与256 token服务开销，按峰时缓存未命中费率并预留全部输出上限。默认5元。平台usage返回后记录实际费用；估算可能偏高或偏低，此值是请求前预留停止门槛，不是账单硬上限。达到门槛后，Host会在发送下一请求前停止。其他服务商费用规则不同，目前按请求/输出限制并记录usage。")]
     [SettingPropertyGroup("模型服务", GroupOrder = 0)]
     public string DeepSeekRunCostLimitCny
     {

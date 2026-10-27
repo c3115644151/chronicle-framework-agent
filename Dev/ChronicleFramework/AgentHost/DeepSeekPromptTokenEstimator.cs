@@ -7,43 +7,62 @@ using Microsoft.ML.Tokenizers;
 
 namespace ChronicleFramework.AgentHost;
 
-internal sealed record DeepSeekInputTokenEstimate(int TokenizerTokens, int ReservedTokens, string Method);
+internal sealed record DeepSeekInputTokenEstimate(int TokenizerTokens, int RawRequestTokens, int ReservedTokens, string Method);
 
 internal static class DeepSeekPromptTokenEstimator
 {
     internal const string OfficialTokenizerAssetSha256 = "E7310D1DAFE0A86D8A5629FE78A7C763760F651DB9B8682718A1781DCD6FE495";
     private const string TokenizerResourceName = "ChronicleFramework.AgentHost.deepseek_v4_tokenizer.zip";
-    private const double ReservationMargin = 1.20d;
+    private const double ReservationMargin = 1.15d;
     private const int ServiceProtocolOverheadTokens = 256;
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private static readonly Lazy<BpeTokenizer> DeepSeekBpe = new(CreateTokenizer, LazyThreadSafetyMode.ExecutionAndPublication);
 
-    internal static DeepSeekInputTokenEstimate EstimateRequestBody(string requestBody)
+    internal static DeepSeekInputTokenEstimate EstimateRequest(string requestBody, string systemPrompt, string userContent,
+        IReadOnlyDictionary<string, object?> providerPayload)
     {
         ArgumentNullException.ThrowIfNull(requestBody);
+        ArgumentNullException.ThrowIfNull(systemPrompt);
+        ArgumentNullException.ThrowIfNull(userContent);
+        ArgumentNullException.ThrowIfNull(providerPayload);
         try
         {
-            var tokenizerTokens = DeepSeekBpe.Value.CountTokens(requestBody);
+            var tokenizer = DeepSeekBpe.Value;
+            var renderedChat = "<｜begin▁of▁sentence｜>" + systemPrompt + "<｜User｜>" + userContent + "<｜Assistant｜>";
+            var renderedChatTokens = tokenizer.CountTokens(renderedChat);
+            var structuredMetadata = providerPayload
+                .Where(pair => pair.Key is "tools" or "tool_choice" or "response_format")
+                .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+            var structuredMetadataTokens = structuredMetadata.Count == 0
+                ? 0
+                : tokenizer.CountTokens(JsonSerializer.Serialize(structuredMetadata, JsonOptions));
+            var tokenizerTokens = checked(renderedChatTokens + structuredMetadataTokens);
+            var rawRequestTokens = tokenizer.CountTokens(requestBody);
             var reservedTokens = checked((int)Math.Ceiling(tokenizerTokens * ReservationMargin) + ServiceProtocolOverheadTokens);
-            return new DeepSeekInputTokenEstimate(tokenizerTokens, reservedTokens, "deepseek-v4-byte-level-bpe-json-body");
+            return new DeepSeekInputTokenEstimate(tokenizerTokens, rawRequestTokens, reservedTokens, "deepseek-v4-chat-template-plus-structured-metadata");
         }
         catch
         {
             // Preserve the previous conservative bound if an embedded model asset or tokenizer fails.
             var utf8Bytes = Encoding.UTF8.GetByteCount(requestBody);
-            return new DeepSeekInputTokenEstimate(utf8Bytes, utf8Bytes, "utf8-byte-fallback");
+            return new DeepSeekInputTokenEstimate(utf8Bytes, utf8Bytes, utf8Bytes, "utf8-byte-fallback");
         }
     }
 
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
-        var estimate = EstimateRequestBody("{\"model\":\"deepseek-flash\",\"max_tokens\":256}");
-        if (estimate.Method != "deepseek-v4-byte-level-bpe-json-body" || estimate.TokenizerTokens != 16 || estimate.ReservedTokens < estimate.TokenizerTokens + ServiceProtocolOverheadTokens)
-            throw new AgentHostException("deepseek-tokenizer-self-test-failed", "The pinned DeepSeek tokenizer did not return its expected JSON token count or safety margin.");
-        var cjk = DeepSeekBpe.Value.CountTokens("这是一次骑砍战役观察。");
+        var tokenizer = DeepSeekBpe.Value;
+        var cjk = tokenizer.CountTokens("这是一次骑砍战役观察。");
         if (cjk != 9)
             throw new AgentHostException("deepseek-tokenizer-cjk-self-test-failed", "The pinned DeepSeek tokenizer did not reproduce its known CJK sample count.");
+        var body = "{\"model\":\"deepseek-flash\",\"messages\":[{\"role\":\"system\",\"content\":\"Choose an action.\"},{\"role\":\"user\",\"content\":\"{\\\"x\\\":1}\"}],\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"f\"}}],\"tool_choice\":\"required\"}";
+        var payload = new Dictionary<string, object?> { ["model"] = "deepseek-flash", ["tools"] = new[] { new { type = "function", function = new { name = "f" } } }, ["tool_choice"] = "required" };
+        var estimate = EstimateRequest(body, "Choose an action.", "{\"x\":1}", payload);
+        if (estimate.Method != "deepseek-v4-chat-template-plus-structured-metadata" || estimate.TokenizerTokens <= 0 ||
+            estimate.RawRequestTokens <= 0 || estimate.ReservedTokens != (int)Math.Ceiling(estimate.TokenizerTokens * ReservationMargin) + ServiceProtocolOverheadTokens)
+            throw new AgentHostException("deepseek-tokenizer-self-test-failed", "The pinned DeepSeek tokenizer did not estimate chat text, structured metadata, and its conservative reservation margin.");
         return [
-            new { scenario = "deepseek-tokenizer-asset-is-pinned-and-counts-json", rawInputTokens = estimate.TokenizerTokens, reservedInputTokens = estimate.ReservedTokens, passed = true },
+            new { scenario = "deepseek-tokenizer-estimates-chat-and-tool-metadata-with-margin", tokenizerInputTokens = estimate.TokenizerTokens, rawBodyTokens = estimate.RawRequestTokens, reservedInputTokens = estimate.ReservedTokens, passed = true },
             new { scenario = "deepseek-tokenizer-byte-level-cjk-count", cjkTokens = cjk, passed = true }
         ];
     }
