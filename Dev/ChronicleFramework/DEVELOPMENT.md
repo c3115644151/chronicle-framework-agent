@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.378
+Contract version: 7.379
 
 Model connection is an OpenAI-compatible provider contract, not a FreeLLMAPI product dependency. MCM Global settings store the HTTPS base URL, model ID, structured-output mode (`auto`, `json_schema`, `json_object`, or `required_tool_call`), and the DeepSeek-only per-run CNY ceiling; API keys stay in the current user's environment and the game passes them only to its owned Agent Host child. HTTP is accepted only for loopback endpoints. The legacy MCM `OllamaBaseUrl` JSON property is still read for migration, although its UI label and behavior are provider-neutral.
 
@@ -792,4 +792,7 @@ StoryMode复跑 `TestResults/20261027-193328` 在 EYC 仍未达成时进入真�
 
 开发用的`PersistentEycCampaign`现沿用本机Native `SaveAs`和`load`：首次走原版StoryMode新战役并保存到唯一前缀`ChronicleEycDev-*`，之后每次从同一Campaign instance读取并续跑；Host退出后只在MapState保存新检查点，先核hash/存档身份，再更新机器用的续跑manifest。保留当前与前一个有效检查点，孤立旧文件仅按该专用前缀清理。Host没有完成EYC时，Harness阶段仍标失败，但已确认的新检查点保留供下一轮继续；不会把Harness清理成功当作游戏目标完成。该长期路径尚待首次运行核验。最终产品验收仍是Issue #130规定的两份相互独立新战役；开发中的连续检查点不能替代它们。
 
-为在“所有目标子路线暂时blocked”时保持游戏目标循环，EYC父循环现复用既有`AgentHostCampaignLoop`，将唯一可选动作收窄为当前可见、安全聚落的Native Map arrival。走到新聚落后父循环重新读原版Journal与状态，再决定下个未完成目标；移动本身不加时钟命令，Campaign时间仅按Native移动自然流动。共享原模型provider、决策/Token预算和同一条trace，控制器不把这次旅行称为EYC进度。`TestResults/20261028-010824` Build/AgentHostPackage通过，包含嵌套共享预算/trace和地图到达分类回归；自然持续战役中是否能凭它解除停滞尚未实测。Harness contract version 7.378。
+为在“所有目标子路线暂时blocked”时保持游戏目标循环，EYC父循环现复用既有`AgentHostCampaignLoop`，将唯一可选动作收窄为当前可见、安全聚落的Native Map arrival。走到新聚落后父循环重新读原版Journal与状态，再决定下个未完成目标；移动本身不加时钟命令，Campaign时间仅按Native移动自然流动。共享原模型provider、决策/Token预算和同一条trace，控制器不把这次旅行称为EYC进度。`TestResults/20261028-010824` Build/AgentHostPackage通过，包含嵌套共享预算/trace和地图到达分类回归；自然持续战役中是否能凭它解除停滞尚未实测。Harness contract version 7.379。
+
+
+`TestResults/20261028-013058`证明构建失败来自NuGet漏洞索引TLS不可达（NU1900），不是代码。Harness现在只在该错误出现时确认Host依赖仍是单一锁定的Microsoft.ML.Tokenizers 2.0.1，然后用locked restore并跳过不可达的审计端点；Build重试通过，未升级依赖，未启动游戏。7890代理能连端口但TLS握手到NuGet/GitHub失败，提交d832f79已本地提交、等待推送。Persistent EYC Campaign仍待首次连续运行。

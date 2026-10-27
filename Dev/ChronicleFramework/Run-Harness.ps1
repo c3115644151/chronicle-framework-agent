@@ -28,7 +28,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.378'
+$HarnessContractVersion = '7.379'
 $effectiveSmokeTimeoutSeconds = if ($Phase -in @('FreshStoryModeModelEvaluation','PersistentEycCampaign','FreshStoryModeNativeInquiryResponseEvaluation','AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostEstablishClanAutonomyEvaluation','AgentHostCaptivityRecoveryEvaluation','AgentHostEstablishClanGoldSaleEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max($SmokeTimeoutSeconds, 240) } else { $SmokeTimeoutSeconds }
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
@@ -480,8 +480,29 @@ foreach ($stage in $requestedStages) {
                 if ($buildExitCode -ne 0) { throw "Build failed with exit code $buildExitCode.`n$buildOutput" }
                 $agentHostBuildOutput = & dotnet build $agentHostProjectPath --configuration Release 2>&1 | Out-String
                 $agentHostBuildExitCode = $LASTEXITCODE
+                $agentHostNuGetAuditFallbackUsed = $false
+                if ($agentHostBuildExitCode -ne 0 -and $agentHostBuildOutput -match 'NU1900') {
+                    $agentHostProjectDirectory = Split-Path -Parent $agentHostProjectPath
+                    $agentHostProjectXml = [xml](Get-Content -LiteralPath $agentHostProjectPath -Raw -Encoding UTF8)
+                    $agentHostPackageReferences = @($agentHostProjectXml.SelectNodes('//PackageReference'))
+                    $agentHostPackageLockPath = Join-Path $agentHostProjectDirectory 'packages.lock.json'
+                    $pinnedHostPackage = ($agentHostPackageReferences.Count -eq 1 -and
+                        $agentHostPackageReferences[0].GetAttribute('Include') -ceq 'Microsoft.ML.Tokenizers' -and
+                        $agentHostPackageReferences[0].GetAttribute('Version') -ceq '[2.0.1]' -and
+                        (Test-Path -LiteralPath $agentHostPackageLockPath -PathType Leaf))
+                    if (-not $pinnedHostPackage) {
+                        throw "NuGet vulnerability feed returned NU1900; the offline audit fallback is allowed only for the single locked Microsoft.ML.Tokenizers 2.0.1 Host dependency. $agentHostBuildOutput"
+                    }
+                    $fallbackRestoreOutput = & dotnet restore $agentHostProjectPath --locked-mode -p:NuGetAudit=false 2>&1 | Out-String
+                    $fallbackRestoreExitCode = $LASTEXITCODE
+                    if ($fallbackRestoreExitCode -ne 0) { throw "NuGet audit metadata was unavailable and locked local dependency restore failed (exit=$fallbackRestoreExitCode).`n$fallbackRestoreOutput" }
+                    $fallbackHostBuildOutput = & dotnet build $agentHostProjectPath --configuration Release --no-restore 2>&1 | Out-String
+                    $agentHostBuildExitCode = $LASTEXITCODE
+                    $agentHostBuildOutput = "Initial Host build could not reach the vulnerability feed (NU1900); the project has one pinned lockfile dependency, so restore retried in locked mode without the unavailable audit endpoint.`n$fallbackRestoreOutput`nHost build after locked restore:`n$fallbackHostBuildOutput"
+                    $agentHostNuGetAuditFallbackUsed = $true
+                }
                 if ($agentHostBuildExitCode -ne 0) { throw "Local Agent Host build failed with exit code $agentHostBuildExitCode.`n$agentHostBuildOutput" }
-                [ordered]@{ gameModBuild = $buildOutput; localAgentHostBuild = $agentHostBuildOutput } | ConvertTo-Json -Depth 4
+                [ordered]@{ gameModBuild = $buildOutput; localAgentHostBuild = $agentHostBuildOutput; nugetAuditFallbackUsed = $agentHostNuGetAuditFallbackUsed } | ConvertTo-Json -Depth 4
             }
         }
         'Smoke' {

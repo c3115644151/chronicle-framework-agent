@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.378'
+$contractVersion = '7.379'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -1768,6 +1768,12 @@ if ($decisionLoopSource -notmatch "moveToPoint = @\('X','Y','Surface'\)" -or $ag
 if ($decisionLoopSource -notmatch 'fastForward = @\(\)' -or $agentLoopProviderSource -notmatch "CHRONICLE_TEST_PROVIDER_MODE -eq 'timeModes'" -or $agentLoopProviderSource -notmatch "3 \{ 'pause' \}" -or $agentLoopProviderSource -notmatch "CHRONICLE_TEST_PROVIDER_MODE -eq 'waitingResume'" -or $agentLoopTest -notmatch '\$TimeControlOnly' -or $agentLoopTest -notmatch 'NativeTimeControlActionsRouted' -or $agentLoopTest -notmatch 'PlayModeNaturallyAdvancedBeforeFastForwardSelection' -or $agentLoopTest -notmatch 'FastForwardNaturallyAdvanced' -or $agentLoopTest -notmatch 'PauseHeldCampaignDay' -or $agentLoopTest -notmatch 'WaitingHoldThenResumeAdvancedNaturally' -or $harnessScript -notmatch "'TimeControlLoop'" -or $developmentDoc -notmatch 'TimeControlLoop') { throw 'Native time controls must verify Play/FastForward/Pause and Hold-waiting resume through their own bounded decision-loop phase, separate from the read-only AgentLoop and Harness-only advance.' }
 if ($harnessScript -notmatch 'Agent decision loop test failed with exit code \$testExitCode' -or $harnessScript -notmatch '\$testOutput = & powershell .*\$agentLoopScript 2>&1 \| Out-String') { throw 'AgentLoop failures must preserve the child test output in the owning Harness run receipt.' }
 if ($harnessScript -notmatch '\$buildOutput = & dotnet build .*2>&1 \| Out-String' -or $harnessScript -notmatch 'Build failed with exit code \$buildExitCode') { throw 'Build failures must retain the compiler diagnostic output in the owning Harness run receipt.' }
+if (-not $harnessScript.Contains("agentHostBuildOutput -match 'NU1900'") -or
+    -not $harnessScript.Contains("GetAttribute('Include') -ceq 'Microsoft.ML.Tokenizers'") -or
+    -not $harnessScript.Contains("GetAttribute('Version') -ceq '[2.0.1]'") -or
+    -not $harnessScript.Contains('--locked-mode') -or
+    -not $harnessScript.Contains('NuGetAudit=false') -or
+    -not $harnessScript.Contains('nugetAuditFallbackUsed')) { throw 'Harness Build may bypass NuGet vulnerability metadata only for the single pinned Host dependency, with locked restore and an explicit receipt.' }
 if ($harnessScript -notmatch 'Agent movement test failed with exit code \$testExitCode' -or $harnessScript -notmatch '\$testOutput = & powershell .*\$movementScript 2>&1 \| Out-String') { throw 'Movement failures must preserve the child test output in the owning Harness run receipt.' }
 if ($harnessScript -notmatch 'Agent recruitment test failed with exit code \$testExitCode' -or $harnessScript -notmatch '\$testOutput = & powershell .*\$recruitmentScript 2>&1 \| Out-String') { throw 'Recruitment failures must preserve the child test output in the owning Harness run receipt.' }
 if ($movementTestSource -notmatch 'mapSettlementTargets' -or $movementTestSource -notmatch 'TargetSource = ''mapSettlementTargets''' -or $movementTestSource -notmatch 'Capture-HarnessFailureFrame' -or $movementTestSource -notmatch 'reuse it instead of issuing a second identical read' -or $movementTestSource -notmatch 'not currently exposed as a visible Campaign map target') { throw 'Movement regression must navigate from Native visible-marker observations, reuse the arrival receipt, capture an in-engine last frame when possible, and match the current hidden/missing target rejection boundary.' }

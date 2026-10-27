@@ -233,8 +233,7 @@ try {
         $checkpointSaveName = $sourceSaveName
         if ($checkpointSaved) { $checkpointSaveHash = $sourceHash }
         $eycCompleted = [bool]$seedEvidence.StoryModeOriginalEstablishYourClanCompleted
-        if ($checkpointSaved -and $eycCompleted -and $seed.ExitCode -eq 0 -and [bool]$seedEvidence.Passed) { $hostRunVerified = $true }
-        elseif (-not $checkpointSaved) { $failure = 'The natural StoryMode run produced no verified persistent Native checkpoint; the campaign will not be reset automatically.' }
+        if (-not $checkpointSaved) { $failure = 'The natural StoryMode run produced no verified persistent Native checkpoint; the campaign will not be reset automatically.' }
         elseif (-not $eycCompleted) { $failure = 'The natural StoryMode Host run ended before EYC completion; its Native checkpoint is retained for the next continuation.' }
         else { $failure = 'The Native EYC completion signal lacks a fully passing fresh-run cleanup or visual receipt.' }
     }

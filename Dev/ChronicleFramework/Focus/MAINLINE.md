@@ -1111,4 +1111,7 @@ Fresh StoryMode run `TestResults/20261027-135719` on commit `aa44ef6` confirms t
 
 现在新增唯一的开发续跑路径`PersistentEycCampaign`：第一次由原版自然新战役开始并保存到隔离前缀`ChronicleEycDev-*`；之后每轮加载最新Native SaveAs检查点，校验hash和Campaign instance相同，Host停止后仅在稳定MapState存下一份新命名检查点，再原子更新Machine-only manifest，保留最新和上一个有效档。模型/Host没完成时Harness仍报告未完成，但验证过的Campaign存档继续供下次同一测试使用。最终Issue #130门禁仍要求两份互相独立的新战役，连续开发存档不会替代最终验收。
 
-所有EYC子路线暂时blocked时，父循环现在只调用已有`AgentHostCampaignLoop`做一次受限的“到达当前可见安全聚落”原生移动，再重读Journal；不新增Native动作，也不把行走期间自然流动的Campaign时间伪装成显式时钟命令。子循环共享同一Provider、累计决策/Token budget和trace，且分类只允许map-arrival目标。`TestResults/20261028-010824`Build与AgentHostPackage通过；连续自然存档上的运行结果待验证。Harness contract version 7.378。
+所有EYC子路线暂时blocked时，父循环现在只调用已有`AgentHostCampaignLoop`做一次受限的“到达当前可见安全聚落”原生移动，再重读Journal；不新增Native动作，也不把行走期间自然流动的Campaign时间伪装成显式时钟命令。子循环共享同一Provider、累计决策/Token budget和trace，且分类只允许map-arrival目标。`TestResults/20261028-010824`Build与AgentHostPackage通过；连续自然存档上的运行结果待验证。Harness contract version 7.379。
+
+
+Build恢复证据：`TestResults/20261028-013058`的初次Host Build遇到NuGet服务索引TLS错误NU1900；Harness确认唯一依赖版本锁定后，以locked restore跳过不可达漏洞索引并完成本地Build，未升级依赖。7890代理TLS故障仍阻止GitHub推送；PersistentEycCampaign尚未创建检查点，下一步启动同一条长测。
