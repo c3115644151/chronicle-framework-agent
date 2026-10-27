@@ -21,10 +21,9 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
 
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
-        if (!ShouldReconsiderUnavailableObjectives(journalProgressChanged: false, nativeActionsExecuted: 18) ||
-            !ShouldReconsiderUnavailableObjectives(journalProgressChanged: true, nativeActionsExecuted: 0) ||
-            ShouldReconsiderUnavailableObjectives(journalProgressChanged: false, nativeActionsExecuted: 0))
-            throw new AgentHostException("establish-clan-autonomy-child-retry-invalidation-failed", "A failed subgoal must reopen previously blocked routes only after measurable Native actions or authoritative Journal progress; a no-action stop remains temporarily unavailable.");
+        if (!ShouldReconsiderUnavailableObjectives(journalProgressChanged: true) ||
+            ShouldReconsiderUnavailableObjectives(journalProgressChanged: false))
+            throw new AgentHostException("establish-clan-autonomy-child-retry-invalidation-failed", "A previously blocked objective route must reopen only after authoritative original Journal progress; a no-progress attempt remains temporarily unavailable.");
         var snapshot = new JsonObject
         {
             ["gold"] = new JsonObject { ["current"] = 32, ["target"] = 2000, ["met"] = false },
@@ -558,9 +557,8 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 if (ReadString(child, "status") != "completed")
                 {
                     var termination = ReadString(child, "termination") ?? ReadString(child["termination"] as JsonObject, "reason");
-                    var failedChildActions = ReadInt(child, "actionsExecuted", 0);
                     var failedChildJournalProgress = HasObjectiveSnapshotProgressChanged(snapshot, child["objectiveSnapshot"] as JsonObject);
-                    if (ShouldReconsiderUnavailableObjectives(journalProgressChanged: failedChildJournalProgress, nativeActionsExecuted: failedChildActions))
+                    if (ShouldReconsiderUnavailableObjectives(journalProgressChanged: failedChildJournalProgress))
                     {
                         unavailableObjectives.Clear();
                         trace.Add(new JsonObject
@@ -568,7 +566,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                             ["stage"] = "failed-objective-native-actions-reopened-other-routes",
                             ["objectiveId"] = objectiveId,
                             ["journalProgressChanged"] = failedChildJournalProgress,
-                            ["nativeActionsExecuted"] = failedChildActions,
+                            ["nativeActionsExecuted"] = ReadInt(child, "actionsExecuted", 0),
                             ["replayedActions"] = false
                         });
                     }
@@ -902,7 +900,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 using var afterDetails = await questDetailsClient.ReadQuestDetailsAsync(QuestId, elapsed.Token);
                 var afterData = ReadQuestDetailsData(afterDetails.RootElement);
                 var afterJournal = AgentHostEstablishYourClanGoalLoop.BuildJournalObjectives(afterData);
-                if (ShouldReconsiderUnavailableObjectives(HasJournalProgressChanged(journalObjectives, afterJournal), ReadInt(child, "actionsExecuted", 0)))
+                if (HasJournalProgressChanged(journalObjectives, afterJournal))
                     unavailableObjectives.Clear();
                 else
                     unavailableObjectives.Add(objectiveId);
@@ -1001,8 +999,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         return false;
     }
 
-    internal static bool ShouldReconsiderUnavailableObjectives(bool journalProgressChanged, int nativeActionsExecuted) =>
-        journalProgressChanged || nativeActionsExecuted > 0;
+    internal static bool ShouldReconsiderUnavailableObjectives(bool journalProgressChanged) => journalProgressChanged;
 
     private static JsonObject ReadQuestDetailsData(JsonElement receipt)
     {

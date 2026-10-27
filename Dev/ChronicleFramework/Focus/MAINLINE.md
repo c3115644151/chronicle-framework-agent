@@ -1100,4 +1100,4 @@ Fresh StoryMode run `TestResults/20261027-135719` on commit `aa44ef6` confirms t
 
 `TestResults/20261027-202355`真实Campaign执行用户批准的条件化投降：模型选当前Native`surrender`，之后选当前Captivity赎金选项`mno_captivity_end_ransom_accept`，Native返回自由Map/可用MainParty（1人）；不算Battle胜利或Renown。Host继续自然规划后仍因`no-current-integrated-route-available`失败，EYC保持active。
 
-失败审计显示PartySize的Native/Journal从1→5/25，但模型因当前RecruitmentVM无继续动作而stop，父循环将PartySize整条route标为unavailable；随后其它目标未推进Journal，父循环最终永久屏蔽所有集成目标。Autonomy现在比较失败子流程返回的权威Journal快照和父级选择前快照；若任何Journal进度改变，或已完成Native动作，则清除先前route blocks。安全停止本身不算完成，若无Journal进度且无Native动作，当前route仍block。此逻辑由`TestResults/20261027-205657`包回归通过，真实模型再次执行并完成EYC仍未验证。Harness contract version 7.372。
+失败审计显示PartySize的Native/Journal从1→5/25，但模型因当前RecruitmentVM无继续动作而stop，父循环将PartySize整条route标为unavailable；随后其它目标未推进Journal，父循环最终永久屏蔽所有集成目标。Autonomy现在比较失败子流程返回的权威Journal快照和父级选择前快照；仅当权威Journal current/target有进步时清除先前route blocks；单独执行只读查询或无进度菜单动作不会无限重开停滞路线。安全停止本身不算完成，当前Journal无进步则保留该route block。此逻辑由`TestResults/20261027-205657`包回归通过，真实模型再次执行并完成EYC仍未验证。Harness contract version 7.373。
