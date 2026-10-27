@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.377'
+$contractVersion = '7.378'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -121,6 +121,7 @@ if ($agentProviderBudgetSource -notmatch 'function New-AgentProviderBudget' -or 
 if ($agentProviderBudgetSource -notmatch 'function Get-AgentProviderBudgetLedgerPath' -or $agentProviderBudgetSource -notmatch 'function Read-AgentProviderBudgetLedger' -or $agentProviderBudgetSource -notmatch 'function Merge-AgentProviderBudgetStates' -or $agentProviderBudgetSource -notmatch 'function Write-AgentProviderBudgetLedger' -or $agentDecisionLoopSource -notmatch 'CHRONICLE_PROVIDER_BUDGET_LEDGER_ROOT' -or $agentDecisionLoopSource -notmatch 'Sync-AgentProviderBudgetLedger' -or $agentOpenAiProviderTestSource -notmatch 'DurableBudgetLedgerPersistsPendingSpend') { throw 'Every billable task must have a durable host-side metadata-only budget ledger, merge newer ledger reservations over restored saves, and verify that pending charges cannot be refunded by task resume.' }
 if ($agentProviderBudgetSource -notmatch 'File\]::Replace' -or $agentDecisionLoopSource -notmatch 'Get-SafeProviderErrorSummary' -or $agentDecisionLoopSource -notmatch 'response body omitted' -or $agentDecisionLoopSource -notmatch 'requestAttemptsUnavailableCalls' -or $agentDecisionLoopSource -notmatch 'requestAttemptsStatus = ''unknown''' -or $agentDecisionLoopSource -notmatch 'Write-AgentProviderBudgetLedger' -or $agentDecisionLoopSource -notmatch 'Initialize-AgentProviderBudgetLedger' -or $agentDecisionLoopSource -notmatch 'checkpoint-recovered-uncertain-provider-call' -or $agentDecisionLoopTestSource -notmatch 'checkpointBudgetRoundtripVerified' -or $agentDecisionLoopTestSource -notmatch 'ProviderBudgetCheckpointLedgerRoundtripVerified' -or $agentDecisionLoopTestSource -notmatch 'ProviderBudgetExhaustedAcrossCheckpointResume' -or $agentDecisionLoopTestSource -notmatch 'goalResumeTrace\.providerBudget\.reservedProviderCalls') { throw 'Budget reservations must be durable and resumable; unknown HTTP attempts cannot become zero, and error summaries must omit provider response bodies.' }
 $agentLiveModelLoopSource = Get-Content (Join-Path $harnessRoot 'Test-AgentLiveModelLoop.ps1') -Raw -Encoding UTF8
+$persistentEycCampaignSource = Get-Content (Join-Path $harnessRoot 'Test-AgentPersistentStoryModeCampaign.ps1') -Raw -Encoding UTF8
 $agentHostCampaignLoopEvaluationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostCampaignLoopEvaluation.ps1') -Raw -Encoding UTF8
 if ($agentLiveModelLoopSource -notmatch 'ProviderProtocol' -or $agentLiveModelLoopSource -notmatch 'CHRONICLE_LLM_PROTOCOL' -or $agentLiveModelLoopSource -notmatch 'isFreeLlmApi' -or $agentLiveModelLoopSource -notmatch 'FREELLMAPI_API_KEY' -or $agentLiveModelLoopSource -notmatch 'available=true' -or $agentLiveModelLoopSource -notmatch 'configured provider model-list preflight' -or $agentLiveModelLoopSource -notmatch 'remote OpenAI-compatible provider requires an environment API key' -or $agentLiveModelLoopSource -notmatch 'no inference request was sent' -or $agentLiveModelLoopSource -notmatch 'ProviderRouteHistory' -or $agentLiveModelLoopSource -notmatch 'sargot-three-day-food-v1' -or $agentLiveModelLoopSource -notmatch 'CompletionContractBase64' -or $agentLiveModelLoopSource -notmatch 'termination.goalVerified') { throw 'Live Campaign evaluation must health-check the configured OpenAI-compatible provider, require a key for remote HTTPS endpoints, retain FreeLLMAPI execution-status validation for its route, record actual routing, and preserve Native goal verification.' }
 if ($freeLlmApiProfileSource -notmatch 'Initialize-FreeLLMAPIProfile' -or $freeLlmApiProfileSource -notmatch 'FREELLMAPI_API_KEY' -or $freeLlmApiProfileSource -notmatch 'CHRONICLE_LLM_API_KEY' -or $freeLlmApiProfileSource -notmatch '31415' -or $freeLlmApiProfileSource -notmatch 'available=true' -or $freeLlmApiProfileSource -notmatch 'api/ping' -or $freeLlmApiProfileSource -notmatch 'Start-Process -FilePath \$ExecutablePath -WindowStyle Hidden' -or $freeLlmApiProfileSource -notmatch 'listenerDeadline' -or $freeLlmApiProfileSource -notmatch 'never read from UI or printed' -or $freeLlmApiProfileSource -notmatch 'Start-FreeLLMAPIWithInheritedProxy' -or $freeLlmApiProfileSource -notmatch 'Test-ChronicleLocalProxyListener' -or $freeLlmApiProfileSource -notmatch '127\.0\.0\.1.*7890' -or $freeLlmApiProfileSource -notmatch 'LocalProxyBootstrapApplied' -or $freeLlmApiProfileSource -notmatch 'originalValues') { throw 'Shared FreeLLMAPI preflight must reject local inference, start the installed desktop gateway hidden if stopped, pass persisted proxy configuration or the confirmed local 7890 proxy to that child only, wait for its local ping, retrieve credentials only from process/user environment, restore the parent environment, and never expose the key.' }
@@ -278,7 +279,7 @@ if ($harnessScript -notmatch "'AgentHostCampaignLoopEvaluation' \{ @\('Preflight
     throw 'The Host campaign loop must remain opt-in and prove its bounded Native map-arrival contract, natural time progression, real local-model path, visual evidence and cleanup.'
 }
 if ($harnessScript -notmatch "'AgentHostVillageToolsQuestEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostVillageToolsQuestEvaluation'\) \}" -or
-    -not $harnessScript.Contains("effectiveSmokeTimeoutSeconds = if (`$Phase -in @('FreshStoryModeModelEvaluation','FreshStoryModeNativeInquiryResponseEvaluation','AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostEstablishClanAutonomyEvaluation','AgentHostCaptivityRecoveryEvaluation','AgentHostEstablishClanGoldSaleEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max(`$SmokeTimeoutSeconds, 240) }") -or
+    -not $harnessScript.Contains("effectiveSmokeTimeoutSeconds = if (`$Phase -in @('FreshStoryModeModelEvaluation','PersistentEycCampaign','FreshStoryModeNativeInquiryResponseEvaluation','AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostEstablishClanAutonomyEvaluation','AgentHostCaptivityRecoveryEvaluation','AgentHostEstablishClanGoldSaleEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max(`$SmokeTimeoutSeconds, 240) }") -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostVillageToolsQuestEvaluation'" -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'VerifyQuestInventoryDelta' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'village-tools-direct-quest-option-unavailable' -or
@@ -1634,6 +1635,23 @@ if ($freshCampaignSource -notmatch 'StoryModeNewGame' -or
     $freshCampaignTest -notmatch 'StoryModeAgentNativeActionsExecuted' -or
     $freshCampaignTest -notmatch 'AgentHostLifecycleHostReceipt\.json' -or
     $freshCampaignTest -notmatch 'AgentHostProgress\.jsonl') { throw 'Fresh StoryMode setup must use the original StoryMode Campaign and exact skip-tutorial/confirmation dialogue choices, verify natural EYC activation, and never call the tutorial completion function directly; its optional live Host slice must use bounded same-session MCM startup with a real decision trace.' }
+if ($harnessScript -notmatch "'PersistentEycCampaign' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'PersistentEycCampaign'\) \}" -or
+    $harnessScript -match "'All' \{[^\r\n]*'PersistentEycCampaign'" -or
+    $freshCampaignTest -notmatch '\[switch\]\$StoryModeEycPersistentSeed' -or
+    $freshCampaignTest -notmatch 'Native SaveAs did not confirm completion of the persistent StoryMode fixture' -or
+    $freshCampaignTest -notmatch 'PersistentStoryModeSaveRetained' -or
+    $agentLiveModelLoopSource -notmatch '\[string\]\$CheckpointSaveName' -or
+    $agentLiveModelLoopSource -notmatch 'stable Native Campaign Map without active encounter or modal UI' -or
+    $agentLiveModelLoopSource -notmatch 'CheckpointSaveHash' -or
+    $persistentEycCampaignSource -notmatch 'campaignInstanceId' -or
+    $persistentEycCampaignSource -notmatch 'Get-Sha256' -or
+    $persistentEycCampaignSource -notmatch 'Remove-ObsoleteOwnedSaves' -or
+    $persistentEycCampaignSource -notmatch '-StoryModeEycLiveModelEvaluation' -or
+    $persistentEycCampaignSource -notmatch "CHRONICLE_HARNESS_AGENT_AUTO_START','1'" -or
+    $persistentEycCampaignSource -notmatch 'cumulativeProviderActualCostEstimateCny' -or
+    $persistentEycCampaignSource -notmatch 'no verified Native checkpoint') {
+    throw 'Persistent EYC Harness must seed from a natural StoryMode campaign, resume only a hash- and Campaign-ID-matched Native save, checkpoint only from a stable Map, bound save retention and retain cumulative run-cost evidence.'
+}
 if ($harnessScript -notmatch "'FreshStoryModeNativeMenuLeaveEvaluation' \{ @\('Preflight', 'Build', 'FreshStoryModeNativeMenuLeaveEvaluation'\) \}" -or
     $harnessScript -notmatch '-StoryModeNativeMenuLeaveEvaluation -TimeoutSeconds 360' -or
     $freshCampaignTest -notmatch '\[switch\]\$StoryModeNativeMenuLeaveEvaluation' -or

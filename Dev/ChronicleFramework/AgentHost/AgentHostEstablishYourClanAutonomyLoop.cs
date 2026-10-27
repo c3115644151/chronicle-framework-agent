@@ -554,9 +554,80 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         .Where(id => !InitiallyIntegratedObjectives.Contains(id))
                         .Select(id => (JsonNode?)JsonValue.Create(id)).ToArray());
                     var allIntegratedRoutesBlocked = unimplemented.Count == 0 && unavailableObjectives.Count > 0;
+                    if (allIntegratedRoutesBlocked && decisions < maxDecisions)
+                    {
+                        using var beforeRefresh = await client.ReadStateAsync(elapsed.Token);
+                        var beforeRefreshState = beforeRefresh.RootElement.TryGetProperty("state", out var beforeStateElement) && beforeStateElement.ValueKind == JsonValueKind.Object
+                            ? JsonNode.Parse(beforeStateElement.GetRawText())?.AsObject() ?? new JsonObject()
+                            : new JsonObject();
+                        var beforeRefreshLocation = beforeRefreshState["location"] as JsonObject;
+                        var beforeRefreshSettlementId = ReadString(beforeRefreshLocation, "currentSettlementId");
+                        var remainingSeconds = Math.Max(1, maxElapsedSeconds - (int)Stopwatch.GetElapsedTime(start).TotalSeconds);
+                        var refreshRequestNode = JsonNode.Parse(request.GetRawText())?.AsObject()
+                            ?? throw new AgentHostException("establish-clan-opportunity-refresh-request-invalid", "The active Native EYC request could not be cloned for safe settlement re-navigation.");
+                        refreshRequestNode["goal"] = "All currently integrated Establish Your Clan objective routes are temporarily unavailable at this free Campaign Map. Travel to one currently visible, safe settlement using the Native map target list. This refreshes the local recruitment, trade and encounter opportunities; do not claim EYC progress, and return control to the parent so it can re-read the original Journal.";
+                        refreshRequestNode["scopeRestriction"] = "safe-settlement-arrival";
+                        refreshRequestNode["maxDecisions"] = maxDecisions;
+                        refreshRequestNode["maxElapsedSeconds"] = remainingSeconds;
+                        using var refreshRequest = JsonDocument.Parse(refreshRequestNode.ToJsonString());
+                        trace.Add(new JsonObject
+                        {
+                            ["stage"] = "no-integrated-route-safe-settlement-refresh-started",
+                            ["objectiveIdsBlocked"] = new JsonArray(unavailableObjectives.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray()),
+                            ["fromSettlementId"] = beforeRefreshSettlementId,
+                            ["campaignDayBefore"] = ReadDouble(beforeRefresh.RootElement, "campaignDay", double.NaN),
+                            ["timeControlModeBefore"] = ReadString(beforeRefresh.RootElement, "timeControlMode")
+                        });
+                        var refresh = await AgentHostCampaignLoop.RunAsync(
+                            refreshRequest.RootElement, client, provider, elapsed.Token,
+                            disposeProvider: false,
+                            priorDecisions: decisions,
+                            priorPromptTokens: promptTokens,
+                            priorCompletionTokens: completionTokens,
+                            priorTrace: trace,
+                            priorProviderRouteHistory: routes);
+                        decisions = ReadInt(refresh, "decisions", decisions);
+                        nativeActions += ReadInt(refresh, "actionsExecuted", 0);
+                        promptTokens = ReadLong(refresh, "promptTokens", promptTokens);
+                        completionTokens = ReadLong(refresh, "completionTokens", completionTokens);
+                        trace = refresh["trace"]?.DeepClone() as JsonArray ?? trace;
+                        routes = refresh["providerRouteHistory"]?.DeepClone() as JsonArray ?? routes;
+                        using var afterRefresh = await client.ReadStateAsync(elapsed.Token);
+                        var afterRefreshState = afterRefresh.RootElement.TryGetProperty("state", out var afterStateElement) && afterStateElement.ValueKind == JsonValueKind.Object
+                            ? JsonNode.Parse(afterStateElement.GetRawText())?.AsObject() ?? new JsonObject()
+                            : new JsonObject();
+                        var afterRefreshSettlementId = ReadString(afterRefreshState["location"] as JsonObject, "currentSettlementId");
+                        var verifiedArrival = ReadString(refresh, "status") == "completed" &&
+                            ReadString(refresh["termination"] as JsonObject, "reason") == "native-settlement-arrival-verified" &&
+                            ReadBoolean(refresh["termination"] as JsonObject, "goalVerified") &&
+                            !string.IsNullOrWhiteSpace(afterRefreshSettlementId) &&
+                            !string.Equals(beforeRefreshSettlementId, afterRefreshSettlementId, StringComparison.Ordinal);
+                        trace.Add(new JsonObject
+                        {
+                            ["stage"] = verifiedArrival ? "no-integrated-route-safe-settlement-refresh-arrived" : "no-integrated-route-safe-settlement-refresh-failed",
+                            ["fromSettlementId"] = beforeRefreshSettlementId,
+                            ["toSettlementId"] = afterRefreshSettlementId,
+                            ["campaignDayBefore"] = ReadDouble(beforeRefresh.RootElement, "campaignDay", double.NaN),
+                            ["campaignDayAfter"] = ReadDouble(afterRefresh.RootElement, "campaignDay", double.NaN),
+                            ["timeControlModeBefore"] = ReadString(beforeRefresh.RootElement, "timeControlMode"),
+                            ["timeControlModeAfter"] = ReadString(afterRefresh.RootElement, "timeControlMode"),
+                            ["nativeMoveActions"] = ReadInt(refresh, "actionsExecuted", 0),
+                            ["nativeArrivalVerified"] = verifiedArrival,
+                            ["refreshFailureCode"] = ReadString(refresh, "failureCode")
+                        });
+                        objectiveRuns.Add(new JsonObject
+                        {
+                            ["objectiveId"] = "safeSettlementRefresh",
+                            ["status"] = verifiedArrival ? "completed" : "failed",
+                            ["termination"] = verifiedArrival ? "native-settlement-arrival-verified" : ReadString(refresh["termination"] as JsonObject, "reason"),
+                            ["actionsExecuted"] = ReadInt(refresh, "actionsExecuted", 0),
+                            ["decisions"] = decisions
+                        });
+                        if (verifiedArrival) continue;
+                    }
                     return BuildResult("failed", allIntegratedRoutesBlocked ? "no-current-integrated-route-available" : "objective-route-not-yet-integrated", false,
                         allIntegratedRoutesBlocked
-                            ? "Every currently integrated objective route was rejected or unavailable in the fresh Native state; the quest remains active."
+                            ? "Every integrated objective route remained blocked after one bounded Native safe-settlement refresh; the original Quest remains active."
                             : "The current Host build has no integrated Native executor for every unmet objective; the quest remains active.",
                         allIntegratedRoutesBlocked ? "establish-clan-objective-routes-currently-unavailable" : "establish-clan-objective-route-unavailable",
                         journalObjectives, snapshot, differences, unimplemented);
@@ -1172,6 +1243,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
     private static string? ReadString(JsonObject? node, string name) => node?[name] is JsonValue value && value.TryGetValue<string>(out var result) ? result : null;
     private static string? ReadString(JsonElement element, string name) => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
     private static int ReadInt(JsonElement element, string name, int fallback) => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.TryGetInt32(out var result) ? result : fallback;
+    private static double ReadDouble(JsonElement element, string name, double fallback) => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.TryGetDouble(out var result) ? result : fallback;
     private static int ReadInt(JsonObject? node, string name, int fallback) => node?[name] is JsonValue value && value.TryGetValue<int>(out var result) ? result : fallback;
     private static long ReadLong(JsonObject? node, string name, long fallback) => node?[name] is JsonValue value && value.TryGetValue<long>(out var result) ? result : fallback;
     private static double ReadDouble(JsonObject? node, string name) => node?[name] is JsonValue value && value.TryGetValue<double>(out var result) ? result : double.NaN;

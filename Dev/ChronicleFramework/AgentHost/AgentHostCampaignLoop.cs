@@ -109,6 +109,16 @@ internal static class AgentHostCampaignLoop
         {
             ["quests"] = new JsonArray(new JsonObject { ["id"] = "rebuild_player_clan_storymode_quest" })
         });
+        var mapRefreshOnlyControls = BuildGoalScopeClassificationControls(new JsonObject
+        {
+            ["quests"] = new JsonArray(new JsonObject { ["id"] = "rebuild_player_clan_storymode_quest" })
+        }, safeSettlementArrivalOnly: true);
+        if (mapRefreshOnlyControls.Count != 2 ||
+            !mapRefreshOnlyControls.Any(control => control?.GetValue<string>() == "supportedMapArrivalGoal") ||
+            !mapRefreshOnlyControls.Any(control => control?.GetValue<string>() == "unsupportedGoal") ||
+            mapRefreshOnlyControls.Any(control => control?.GetValue<string>() == "supportedEstablishYourClanGoal"))
+            throw new AgentHostException("campaign-loop-self-test-settlement-refresh-scope-leaked", "A safe-settlement refresh may classify only bounded map arrival; it cannot recursively select an already blocked EYC route.");
+        results.Add(new { scenario = "campaign-loop-settlement-refresh-only-classifies-native-map-arrival", passed = true });
         if (!ShouldReconsiderUnsupportedEycScope(activeEycGoal, activeEycControls, false, 0) ||
             ShouldReconsiderUnsupportedEycScope("Sell a sword to a nearby merchant.", activeEycControls, false, 0) ||
             ShouldReconsiderUnsupportedEycScope(activeEycGoal, BuildGoalScopeClassificationControls(), false, 0) ||
@@ -205,6 +215,26 @@ internal static class AgentHostCampaignLoop
             throw new AgentHostException("campaign-loop-self-test-arrival-runtime-failed", "The injected Native/Provider loop did not observe, move once, passively re-observe, and verify arrival.");
         results.Add(new { scenario = "campaign-loop-runtime-observe-decide-act-observe-arrival", passed = true });
 
+        var refreshRequestNode = JsonNode.Parse(request.RootElement.GetRawText())?.AsObject() ?? throw new AgentHostException("campaign-loop-self-test-refresh-request-invalid", "The settlement refresh request could not be cloned.");
+        refreshRequestNode["scopeRestriction"] = "safe-settlement-arrival";
+        using var refreshRequest = JsonDocument.Parse(refreshRequestNode.ToJsonString());
+        var sharedProvider = new FakeCampaignDecisionProvider(timeoutOnMove: false);
+        var sharedArrivalClient = new FakeCampaignNativeClient(timeoutOnMove: false, includeActiveEycQuest: true);
+        var sharedArrival = await RunAsync(refreshRequest.RootElement, sharedArrivalClient, sharedProvider, CancellationToken.None,
+            disposeProvider: false, priorDecisions: 3, priorPromptTokens: 20, priorCompletionTokens: 2,
+            priorTrace: new JsonArray(new JsonObject { ["stage"] = "prior-objective-trace" }),
+            priorProviderRouteHistory: new JsonArray(new JsonObject { ["decision"] = 3, ["responseModelId"] = sharedProvider.ModelId }));
+        if (ReadString(sharedArrival, "status") != "completed" || ReadInt(sharedArrival, "decisions", 0) != 8 ||
+            sharedArrival["promptTokens"]?.GetValue<long>() != 20 || sharedArrival["completionTokens"]?.GetValue<long>() != 2 ||
+            ReadInt(sharedArrival, "actionsExecuted", 0) != 2 || sharedArrivalClient.MoveCount != 1 || sharedProvider.CallCount != 5 ||
+            sharedProvider.DisposeCount != 0 || sharedProvider.FirstRequest?["allowedControls"] is not JsonArray refreshControls || refreshControls.Count != 2 ||
+            refreshControls.Any(control => control?.GetValue<string>() == "supportedEstablishYourClanGoal") ||
+            sharedArrival["trace"] is not JsonArray sharedTrace || sharedTrace.Count <= 5 ||
+            sharedArrival["providerRouteHistory"] is not JsonArray sharedRoutes || sharedRoutes.Count <= 5)
+            throw new AgentHostException("campaign-loop-self-test-shared-provider-arrival-budget-failed", "A nested safe-map refresh must preserve the shared provider lifetime, cumulative decisions/token counters, prior trace and map-arrival-only scope.");
+        sharedProvider.Dispose();
+        results.Add(new { scenario = "campaign-loop-nested-map-arrival-shares-provider-budget-and-trace", passed = true });
+
         var timeoutClient = new FakeCampaignNativeClient(timeoutOnMove: true);
         var timeoutProvider = new FakeCampaignDecisionProvider(timeoutOnMove: true);
         var timeout = await RunAsync(request.RootElement, timeoutClient, timeoutProvider, CancellationToken.None);
@@ -274,7 +304,13 @@ internal static class AgentHostCampaignLoop
         IAgentHostCampaignNativeClient client,
         IAgentHostDecisionProvider provider,
         CancellationToken cancellationToken,
-        Action<int>? onReady = null)
+        Action<int>? onReady = null,
+        bool disposeProvider = true,
+        int priorDecisions = 0,
+        long priorPromptTokens = 0,
+        long priorCompletionTokens = 0,
+        JsonArray? priorTrace = null,
+        JsonArray? priorProviderRouteHistory = null)
     {
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
         var expectedParentProcessId = ReadInt(request, "parentProcessId", 0);
@@ -288,19 +324,19 @@ internal static class AgentHostCampaignLoop
             !IsSupportedRequestedActionSet(requestedActions))
             throw new AgentHostException("campaign-loop-request-invalid", "The Host requires a bounded goal and one exact approved Campaign action set.");
 
-        using (provider)
+        using (disposeProvider ? provider : null)
         {
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxElapsedSeconds));
 
-        var trace = new JsonArray();
-        var providerRouteHistory = new JsonArray();
-        var decisionCount = 0;
+        var trace = priorTrace?.DeepClone() as JsonArray ?? new JsonArray();
+        var providerRouteHistory = priorProviderRouteHistory?.DeepClone() as JsonArray ?? new JsonArray();
+        var decisionCount = priorDecisions;
         var rejectedDecisionCount = 0;
         var prematureCompletionCount = 0;
         var actionsExecuted = 0;
-        long promptTokens = 0;
-        long completionTokens = 0;
+        long promptTokens = priorPromptTokens;
+        long completionTokens = priorCompletionTokens;
         JsonObject? currentNative = null;
         JsonObject? previousReceipt = null;
         JsonObject? feedback = null;
@@ -332,7 +368,7 @@ internal static class AgentHostCampaignLoop
                 throw new AgentHostException("native-parent-process-mismatch", "The Native mailbox answered from a different Bannerlord process than the Host owner.");
             onReady?.Invoke(nativeProcessId);
 
-            for (var iteration = 1; iteration <= maxDecisions; iteration++)
+            for (var iteration = decisionCount + 1; iteration <= maxDecisions; iteration++)
             {
                 elapsed.Token.ThrowIfCancellationRequested();
                 var before = currentNative ?? throw new AgentHostException("native-observation-missing", "The Host lost its current Native observation.");
@@ -365,7 +401,8 @@ internal static class AgentHostCampaignLoop
                     : new JsonArray();
                 var controls = goalScopeClassified
                     ? BuildControlCatalog(movingToTarget, targetReached)
-                    : BuildGoalScopeClassificationControls(before["state"] as JsonObject);
+                    : BuildGoalScopeClassificationControls(before["state"] as JsonObject,
+                        safeSettlementArrivalOnly: ReadString(request, "scopeRestriction") == "safe-settlement-arrival");
                 if (actionCatalog.Count == 0 && controls.Count == 0)
                 {
                     failure = "No safe map query, movement action or waiting control is available in the current Native state.";
@@ -813,8 +850,9 @@ internal static class AgentHostCampaignLoop
         return controls;
     }
 
-    internal static JsonArray BuildGoalScopeClassificationControls(JsonObject? currentState = null)
+    internal static JsonArray BuildGoalScopeClassificationControls(JsonObject? currentState = null, bool safeSettlementArrivalOnly = false)
     {
+        if (safeSettlementArrivalOnly) return new JsonArray("supportedMapArrivalGoal", "unsupportedGoal");
         var controls = new JsonArray("supportedMapArrivalGoal", "supportedVillageToolsQuestGoal", "supportedBattleSimulationGoal", "supportedBattleAndCaptivityGoal");
         var activeEycQuest = HasObservedEstablishYourClanQuest(currentState);
         if (activeEycQuest || HasPostTutorialTrainingFieldMap(currentState))
@@ -1155,6 +1193,7 @@ internal static class AgentHostCampaignLoop
         private readonly bool _reconsiderEycScope;
 
         internal int CallCount { get; private set; }
+        internal int DisposeCount { get; private set; }
         internal JsonObject? FirstRequest { get; private set; }
         internal JsonObject? SecondRequest { get; private set; }
         internal string? SecondSystemPrompt { get; private set; }
@@ -1201,7 +1240,7 @@ internal static class AgentHostCampaignLoop
             return Task.FromResult(new ProviderDecisionResult("completed", ModelId, null, null, "stop", decision));
         }
 
-        public void Dispose() { }
+        public void Dispose() => DisposeCount++;
     }
 
     private sealed record CampaignTarget(string Id, string Name, string Type);

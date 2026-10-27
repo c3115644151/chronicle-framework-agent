@@ -1,7 +1,9 @@
 ﻿[CmdletBinding()]
 param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
+    [string]$CheckpointSaveName,
     [int]$TimeoutSeconds = 180,
+    [ValidateRange(60,7200)][int]$HostMaxElapsedSeconds = 7200,
     [ValidateRange(5,30)][int]$FrameRate = 10,
     [switch]$ArrivalLoop,
     [switch]$RecruitmentLoop,
@@ -28,10 +30,16 @@ $documentsPath = [Environment]::GetFolderPath([Environment+SpecialFolder]::MyDoc
 if ([string]::IsNullOrWhiteSpace($documentsPath)) { throw 'Windows Documents directory could not be resolved for the live-model fixture.' }
 $documentsRoot = Join-Path $documentsPath 'Mount and Blade II Bannerlord'
 $savePath = Join-Path $documentsRoot "Game Saves\$LoadSaveName.sav"
+$checkpointSavePath = if (-not [string]::IsNullOrWhiteSpace($CheckpointSaveName)) { Join-Path $documentsRoot "Game Saves\$CheckpointSaveName.sav" } else { $null }
 $sessionPath = Join-Path $documentsRoot 'AgentRuns\ChronicleAgent\session.json'
 
 if (Get-Process -Name Bannerlord* -ErrorAction SilentlyContinue) {
     throw 'Refusing to start a live-model Campaign test while any Bannerlord client is already running.'
+}
+if ($CheckpointSaveName) {
+    if (-not $EstablishYourClanAutonomyLoop -or -not $AgentHostRuntime) { throw 'CheckpointSaveName is only supported for the Native AgentHost EYC development campaign.' }
+    if ($CheckpointSaveName -notmatch '^[A-Za-z0-9_-]{1,48}$' -or $CheckpointSaveName -ceq $LoadSaveName) { throw 'A Native EYC checkpoint requires a unique 1-48 character save name distinct from its source.' }
+    if (Test-Path -LiteralPath $checkpointSavePath) { throw 'The Native EYC checkpoint name already exists; refusing to overwrite it.' }
 }
 if (@($ArrivalLoop, $RecruitmentLoop, $RoadsideBanditNegotiationLoop, $SupplyManagementLoop, $VillageToolsQuestLoop, $BattleSimulationLoop, $BattleAndCaptivityLoop, $CaptivityRecoveryLoop, $EstablishYourClanGoalPlanner, $EstablishYourClanAutonomyLoop, $EstablishClanGoldSaleLoop | Where-Object { $_ }).Count -gt 1) { throw 'Select only one LiveModel test goal per run.' }
 if ($AgentHostRuntime -and -not ($SupplyManagementLoop -or $ArrivalLoop -or $VillageToolsQuestLoop -or $BattleSimulationLoop -or $BattleAndCaptivityLoop -or $CaptivityRecoveryLoop -or $EstablishYourClanGoalPlanner -or $EstablishYourClanAutonomyLoop -or $EstablishClanGoldSaleLoop)) { throw 'AgentHostRuntime supports only frozen Native supply, arrival, supported Quest, battle/captivity, StoryMode planner/autonomy/recovery, and Gold-sale slices.' }
@@ -40,7 +48,7 @@ if ($EstablishYourClanGoalPlanner -and -not $AgentHostRuntime) { throw 'Establis
 if ($EstablishYourClanAutonomyLoop -and -not $AgentHostRuntime) { throw 'EstablishYourClanAutonomyLoop requires the in-game .NET Agent Host route; the older PowerShell decision loop is not product evidence.' }
 if ($EstablishClanGoldSaleLoop -and -not $AgentHostRuntime) { throw 'EstablishClanGoldSaleLoop requires the in-game .NET Agent Host route; the older PowerShell decision loop is not product evidence.' }
 if ($RoadsideBanditNegotiationLoop -and -not $RecruitmentLoop) { throw 'RoadsideBanditNegotiationLoop requires RecruitmentLoop so the encounter resolves into the existing growth goal.' }
-foreach ($setting in @('CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL','CHRONICLE_LLM_API_KEY','FREELLMAPI_API_KEY','CHRONICLE_LLM_TIMEOUT_SECONDS','CHRONICLE_LLM_MAX_TOKENS','CHRONICLE_LLM_MAX_TOKEN_PARAMETER','CHRONICLE_LLM_REASONING_EFFORT','CHRONICLE_LLM_THINKING_MODE','CHRONICLE_LLM_TEMPERATURE','CHRONICLE_LLM_PROTOCOL')) {
+foreach ($setting in @('CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL','CHRONICLE_LLM_API_KEY','FREELLMAPI_API_KEY','CHRONICLE_LLM_OUTPUT_MODE','CHRONICLE_LLM_MAX_RUN_COST_CNY','CHRONICLE_LLM_TIMEOUT_SECONDS','CHRONICLE_LLM_MAX_TOKENS','CHRONICLE_LLM_MAX_TOKEN_PARAMETER','CHRONICLE_LLM_REASONING_EFFORT','CHRONICLE_LLM_THINKING_MODE','CHRONICLE_LLM_TEMPERATURE','CHRONICLE_LLM_PROTOCOL')) {
     $configuredValue = [string][Environment]::GetEnvironmentVariable($setting, 'Process')
     if ([string]::IsNullOrWhiteSpace($configuredValue)) {
         $configuredValue = [string][Environment]::GetEnvironmentVariable($setting, 'User')
@@ -139,10 +147,15 @@ $engineFrameBeforePath = Join-Path $runDirectory 'LiveModelEngine-before.bmp'
 $engineFrameAfterPath = Join-Path $runDirectory 'LiveModelEngine-after.bmp'
 $engineFrameFailurePath = Join-Path $runDirectory 'LiveModelEngine-failure.bmp'
 $fixtureHashBefore = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
+$campaignInstanceId = $null
 $priorHarnessMode = $env:CHRONICLE_HARNESS_MODE
 $priorModelTimeout = $env:CHRONICLE_LLM_TIMEOUT_SECONDS
 $priorModelMaxTokens = $env:CHRONICLE_LLM_MAX_TOKENS
 $sessionStarted = $false
+$checkpointSaveOwned = $false
+$checkpointSaveCompleted = $false
+$checkpointSaveHash = $null
+$checkpointSaveFailure = $null
 $capture = $null
 $captureResult = $null
 $captureRecoveryProof = $null
@@ -237,6 +250,13 @@ try {
     $baseline = Invoke-AgentCli 'state'
     if ($baseline.status -ne 'completed' -or $baseline.state.context.gameState -ne 'MapState') {
         throw 'Live-model fixture must load into Native Campaign Map state.'
+    }
+    if ($EstablishYourClanAutonomyLoop) {
+        $campaignIdentity = Invoke-AgentCli 'agentCheckpointGet'
+        if ($campaignIdentity.status -ne 'completed' -or [string]::IsNullOrWhiteSpace([string]$campaignIdentity.data.campaignInstanceId)) {
+            throw 'StoryMode continuation requires a verified Native campaign-instance identity before model inference.'
+        }
+        $campaignInstanceId = [string]$campaignIdentity.data.campaignInstanceId
     }
     if ($VillageToolsQuestLoop) {
         $visibleToolsMarker = @($baseline.state.settlementOverlayCharacters | Where-Object {
@@ -443,7 +463,7 @@ try {
     elseif ($EstablishYourClanAutonomyLoop) {
         $goal = 'Autonomously complete the exact currently active original StoryMode Establish Your Clan quest. Use its current Journal values to choose among Gold, dynamic PartySize, Renown and Companion targets; execute only the current Native routes, re-read Journal after each subgoal, and stop only after Native original quest history confirms completion. Do not inject progress, use preplanned action sequences, or hide time changes inside actions.'
         $maxDecisions = 160
-        $maxElapsedSeconds = 7200
+        $maxElapsedSeconds = $HostMaxElapsedSeconds
         $allowedActions = 'mapSettlementTargets,move,menuSelect,talkToSettlementHero,dialogueSelect,dialogueContinue,questDetails,tradeOptions,trade,tradeConfirm,tradeCancel,tradeCancelChanges,barterOptions,barterAutoBalance,barterOffer,barterCancel,inventoryOpen,heroEquipmentOptions,inventoryCancel,mapPartyTargets,pursue,battleSkip,battleFinish,partyTakeAll,partyScreenDone,inventoryTakeAll,inventoryDone,recruitOptions,recruit,missionSceneAgents,missionNavigateToAgent,missionInteract,missionLeave'
         Set-LiveModelProviderTimeout 360
         $env:CHRONICLE_LLM_MAX_TOKENS = '1024'
@@ -545,6 +565,12 @@ try {
                 maxDecisions = $maxDecisions
                 maxElapsedSeconds = $maxElapsedSeconds
                 allowedActionNames = @($allowedActions.Split(',') | ForEach-Object { $_.Trim() })
+                providerConfiguration = [ordered]@{
+                    ProviderBaseUrl = [string]$env:CHRONICLE_LLM_BASE_URL
+                    ModelId = [string]$env:CHRONICLE_LLM_MODEL
+                    OutputMode = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_OUTPUT_MODE)) { 'auto' } else { [string]$env:CHRONICLE_LLM_OUTPUT_MODE }
+                    DeepSeekRunCostLimitCny = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_MAX_RUN_COST_CNY)) { '5' } else { [string]$env:CHRONICLE_LLM_MAX_RUN_COST_CNY }
+                }
             }
         }
         $hostStartInfo = [Diagnostics.ProcessStartInfo]::new()
@@ -1458,8 +1484,36 @@ finally {
         }
         $capture = $null
     }
+    if ($CheckpointSaveName -and $sessionStarted) {
+        $checkpointSaveOwned = $true
+        try {
+            $checkpointState = Invoke-AgentCli 'state'
+            if ($checkpointState.status -ne 'completed' -or [string]$checkpointState.state.context.gameState -cne 'MapState' -or
+                [bool]$checkpointState.state.context.escapeMenuOpen -or [bool]$checkpointState.state.context.inquiryOpen -or
+                [bool]$checkpointState.state.context.encounterActive -or [bool]$checkpointState.state.partyScreenOpen -or [bool]$checkpointState.state.inventoryScreenOpen) {
+                throw 'A persistent EYC checkpoint can be written only from a stable Native Campaign Map without active encounter or modal UI.'
+            }
+            $checkpointSave = Invoke-AgentCli 'save' @('-SaveName', $CheckpointSaveName, '-CommandId', ('eyc-continuous-checkpoint-' + [Guid]::NewGuid().ToString('N')))
+            if ($checkpointSave.status -ne 'completed') { throw 'Native SaveAs did not return a successful OnSaveOver receipt for the EYC checkpoint.' }
+            if (-not (Test-Path -LiteralPath $checkpointSavePath -PathType Leaf) -or (Get-Item -LiteralPath $checkpointSavePath).Length -lt 4096) {
+                throw 'Native SaveAs returned success, but the new EYC checkpoint file is missing or incomplete.'
+            }
+            $checkpointSaveHash = (Get-FileHash -LiteralPath $checkpointSavePath -Algorithm SHA256).Hash
+            $checkpointSaveCompleted = $true
+        }
+        catch {
+            $checkpointSaveFailure = $_.Exception.Message
+            if (-not $failure) { $failure = "Persistent EYC checkpoint failed: $checkpointSaveFailure" }
+        }
+    }
     if ($sessionStarted -or (Test-Path -LiteralPath $sessionPath -PathType Leaf)) {
         try { $stop = Invoke-AgentCli 'stop' } catch { if (-not $failure) { $failure = "Agent session cleanup failed: $($_.Exception.Message)" } }
+    }
+    if ($checkpointSaveOwned -and -not $checkpointSaveCompleted -and (Test-Path -LiteralPath $checkpointSavePath -PathType Leaf)) {
+        $saveRoot = [IO.Path]::GetFullPath((Join-Path $documentsRoot 'Game Saves')).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+        $fullCheckpointPath = [IO.Path]::GetFullPath($checkpointSavePath)
+        if (-not $fullCheckpointPath.StartsWith($saveRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Failed EYC checkpoint cleanup path escaped Game Saves.' }
+        Remove-Item -LiteralPath $fullCheckpointPath -Force
     }
     if ($null -eq $priorHarnessMode) { Remove-Item Env:CHRONICLE_HARNESS_MODE -ErrorAction SilentlyContinue }
     else { $env:CHRONICLE_HARNESS_MODE = $priorHarnessMode }
@@ -1473,6 +1527,7 @@ $fixtureHashAfter = if (Test-Path -LiteralPath $savePath -PathType Leaf) { (Get-
 $fixtureUnchanged = ($fixtureHashBefore -ceq $fixtureHashAfter)
 $processStopped = ([bool]$stop.processStopped -and -not (Test-Path -LiteralPath $sessionPath -PathType Leaf) -and -not (Get-Process -Name Bannerlord* -ErrorAction SilentlyContinue))
 $capturePassed = ($captureResult -and $captureResult.Passed -and [double]$captureResult.FrameCoverageRatio -ge 0.9 -and $captureResult.WindowTitle -match 'Bannerlord')
+$checkpointSaveRetained = [bool]($CheckpointSaveName -and $checkpointSaveCompleted -and (Test-Path -LiteralPath $checkpointSavePath -PathType Leaf))
 $passed = (-not $failure -and $null -ne $liveModelTrace -and $fixtureUnchanged -and $processStopped -and $capturePassed)
 
 if ($captureResult -and $captureResult.Passed -and $captureResult.VideoRemovedAfterEvidence -and $liveModelTrace.VisualEvidence) {
@@ -1490,6 +1545,12 @@ $result = [ordered]@{
     FailureEngineFrameCaptured = $failureEngineFrameCaptured
     FailureEvidenceError = $failureEvidenceError
     FailureEngineFramePath = if ($failureEngineFrameCaptured) { $engineFrameFailurePath } else { $null }
+    CheckpointSaveName = if ($CheckpointSaveName) { $CheckpointSaveName } else { $null }
+    CheckpointSavePath = if ($checkpointSaveRetained) { $checkpointSavePath } else { $null }
+    CheckpointSaveHash = if ($checkpointSaveRetained) { $checkpointSaveHash } else { $null }
+    CheckpointSaveRetained = $checkpointSaveRetained
+    CheckpointSaveFailure = $checkpointSaveFailure
+    CampaignInstanceId = $campaignInstanceId
     ProcessId = if ($start -and $start.session) { $start.session.processId } else { $null }
     HostReadyMessages = @($hostReadyMessages)
     CaptureRecoveryProof = $captureRecoveryProof

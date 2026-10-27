@@ -2,6 +2,8 @@
 param(
     [int]$TimeoutSeconds = 240,
     [switch]$StoryModeEycSetup,
+    [switch]$StoryModeEycPersistentSeed,
+    [string]$PersistentStoryModeSaveName,
     [switch]$StoryModeEycLiveModelEvaluation,
     [switch]$StoryModeNativeMenuLeaveEvaluation,
     [switch]$StoryModeNativeInquiryResponseEvaluation,
@@ -16,6 +18,10 @@ $harnessRoot = $PSScriptRoot
 . (Join-Path $harnessRoot 'HarnessShaderCacheDialog.ps1')
 . (Join-Path $harnessRoot 'HarnessStartupEvidence.ps1')
 if ($StoryModeEycSetup -and [string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) { throw 'StoryModeEycSetup requires an active Run-Harness temp/evidence directory.' }
+if ($StoryModeEycPersistentSeed -and (-not $StoryModeEycSetup -or $StoryModeNativeMenuLeaveEvaluation -or [string]::IsNullOrWhiteSpace($PersistentStoryModeSaveName))) {
+    throw 'StoryModeEycPersistentSeed requires a StoryMode tutorial-skip run and a caller-owned disposable save name.'
+}
+if ($StoryModeEycPersistentSeed -and $PersistentStoryModeSaveName -notmatch '^[A-Za-z0-9_-]{1,48}$') { throw 'Persistent StoryMode save names must be 1-48 ASCII letters, digits, underscores or hyphens.' }
 $storyModeEvidenceRoot = if ($StoryModeEycSetup) { Split-Path -Parent $env:CHRONICLE_HARNESS_TEMP } else { $null }
 $gameRoot = if ($env:CHRONICLE_GAME_ROOT -and (Test-Path -LiteralPath $env:CHRONICLE_GAME_ROOT)) { [IO.Path]::GetFullPath($env:CHRONICLE_GAME_ROOT) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
 $gameExe = Join-Path $gameRoot 'bin\Win64_Shipping_Client\Bannerlord.exe'
@@ -55,7 +61,7 @@ $disposableSaveOwned = $false
 $previousSessionExisted = Test-Path -LiteralPath $agentSessionPath
 $previousSessionBytes = if ($previousSessionExisted) { [IO.File]::ReadAllBytes($agentSessionPath) } else { $null }
 if ($ValidateRecruitmentProgression -and (Test-Path -LiteralPath $agentCommandPath)) { throw 'A pending Agent command exists; refusing to overwrite it for FreshCampaign progression.' }
-if ($StoryModeEycSetup -and ($ValidateRecruitmentProgression -or $RealModelRecruitment -or $RetainDisposableSave)) { throw 'StoryModeEycSetup is a no-save Native StoryMode/tutorial-skip setup probe; it cannot be combined with Sandbox recruitment progression or disposable-save retention.' }
+if ($StoryModeEycSetup -and ($ValidateRecruitmentProgression -or $RealModelRecruitment -or ($RetainDisposableSave -and -not $StoryModeEycPersistentSeed))) { throw 'StoryModeEycSetup is a no-save Native StoryMode/tutorial-skip setup probe unless the dedicated persistent disposable StoryMode seed mode is selected.' }
 if ($StoryModeEycLiveModelEvaluation -and (-not $StoryModeEycSetup -or $ValidateRecruitmentProgression -or $RealModelRecruitment -or $RetainDisposableSave)) { throw 'StoryModeEycLiveModelEvaluation requires the no-save StoryModeEycSetup path and cannot be combined with Sandbox progression or retained saves.' }
 if ($StoryModeNativeMenuLeaveEvaluation -and (-not $StoryModeEycSetup -or $StoryModeEycLiveModelEvaluation -or $ValidateRecruitmentProgression -or $RealModelRecruitment -or $RetainDisposableSave)) { throw 'StoryModeNativeMenuLeaveEvaluation requires the no-save StoryModeEycSetup path and cannot be combined with a live-model run, Sandbox progression or retained saves.' }
 if ($StoryModeNativeInquiryResponseEvaluation -and (-not $StoryModeNativeMenuLeaveEvaluation -or -not $StoryModeEycSetup)) { throw 'StoryModeNativeInquiryResponseEvaluation requires the no-save StoryModeNativeMenuLeaveEvaluation path.' }
@@ -64,6 +70,8 @@ if ($StoryModeNativeInquiryResponseEvaluation -and (Test-Path -LiteralPath $agen
 if ($RealModelRecruitment -and -not $ValidateRecruitmentProgression) { throw 'RealModelRecruitment requires ValidateRecruitmentProgression so the new Campaign is saved as a protected disposable fixture before the model starts.' }
 if ($RetainDisposableSave -and -not $ValidateRecruitmentProgression) { throw 'RetainDisposableSave requires ValidateRecruitmentProgression so only a verified Native New Campaign save can be retained.' }
 if ($progressionSavePath -and (Test-Path -LiteralPath $progressionSavePath)) { throw 'Generated disposable-save name already exists; refusing to overwrite.' }
+$persistentStoryModeSavePath = if ($StoryModeEycPersistentSeed) { Join-Path $saveDirectory "$PersistentStoryModeSaveName.sav" } else { $null }
+if ($persistentStoryModeSavePath -and (Test-Path -LiteralPath $persistentStoryModeSavePath)) { throw 'Persistent StoryMode seed name already exists; refusing to overwrite a save not created by this run.' }
 . (Join-Path $harnessRoot 'Test-WindowLayout.ps1')
 
 function Invoke-FreshCampaignAgentCli([string]$Action, [string[]]$Arguments = @{}, [int]$CommandTimeout = 15) {
@@ -308,6 +316,9 @@ $issueConversationClockAfter = $null
 $issueConversationOptions = @()
 $harnessFailureObserved = $false
 $campaignSaveRequested = $false
+$persistentStoryModeSaveOwned = $false
+$persistentStoryModeSaveCompleted = $false
+$persistentStoryModeSaveHash = $null
 $crashDetected = $false
 $windowLayoutApplied = $false
 $windowLayout = $null
@@ -777,6 +788,40 @@ try {
         Start-Sleep -Milliseconds 300
     }
 
+    if ($StoryModeEycPersistentSeed) {
+        if (-not $creationReady -or -not $storyModeEycReadyObserved -or -not (Test-Path -LiteralPath $agentSessionPath -PathType Leaf)) {
+            throw 'Persistent EYC seed save requires the original Tutorial skip, naturally active Quest and stable Native Campaign Map before saving.'
+        }
+        $beforeSaveState = Invoke-FreshCampaignAgentCli 'state' @('-CommandId', "$progressionCommandPrefix-storymode-before-save")
+        $beforeSaveEycStatus = [string]$beforeSaveState.state.storyModeEstablishClanStatus.status
+        $beforeSaveEycQuestCount = @($beforeSaveState.state.quests | Where-Object { $_.id -ceq 'rebuild_player_clan_storymode_quest' }).Count
+        $beforeSaveEycTerminalStateValid = ($beforeSaveEycStatus -ceq 'active' -and $beforeSaveEycQuestCount -eq 1) -or ($beforeSaveEycStatus -ceq 'completed' -and $beforeSaveEycQuestCount -eq 0)
+        if ($beforeSaveState.status -ne 'completed' -or $beforeSaveState.state.context.gameState -cne 'MapState' -or -not $beforeSaveEycTerminalStateValid) {
+            throw 'Persistent EYC seed state is not a stable Campaign Map with the original Quest active or completed.'
+        }
+        $persistentStoryModeSaveOwned = $true
+        $saveReceipt = Invoke-FreshCampaignAgentCli 'save' @('-SaveName', $PersistentStoryModeSaveName, '-CommandId', "$progressionCommandPrefix-storymode-seed-save") -CommandTimeout ([Math]::Max(30, [Math]::Min($TimeoutSeconds, 300)))
+        if ($saveReceipt.status -ne 'completed') { throw 'Native SaveAs did not confirm completion of the persistent StoryMode fixture.' }
+        if (-not (Test-Path -LiteralPath $persistentStoryModeSavePath -PathType Leaf) -or (Get-Item -LiteralPath $persistentStoryModeSavePath).Length -lt 4096) {
+            throw 'Native SaveAs returned completed, but the persistent StoryMode fixture file is missing or incomplete.'
+        }
+        $persistentStoryModeSaveHash = (Get-FileHash -LiteralPath $persistentStoryModeSavePath -Algorithm SHA256).Hash
+        $campaignSaveRequested = $true
+        $afterSaveState = Invoke-FreshCampaignAgentCli 'state' @('-CommandId', "$progressionCommandPrefix-storymode-after-save")
+        $afterSaveEycQuestCount = @($afterSaveState.state.quests | Where-Object { $_.id -ceq 'rebuild_player_clan_storymode_quest' }).Count
+        if ($afterSaveState.status -ne 'completed' -or $afterSaveState.state.context.gameState -cne 'MapState' -or
+            [string]$afterSaveState.state.storyModeEstablishClanStatus.status -cne $beforeSaveEycStatus -or $afterSaveEycQuestCount -ne $beforeSaveEycQuestCount -or
+            [Math]::Abs([double]$afterSaveState.campaignDay - [double]$beforeSaveState.campaignDay) -gt 0.001) {
+            throw 'Native SaveAs did not preserve the active StoryMode Quest/map state or changed Campaign time.'
+        }
+        $checkpointIdentity = Invoke-FreshCampaignAgentCli 'agentCheckpointGet' @('-CommandId', "$progressionCommandPrefix-storymode-seed-identity")
+        if ($checkpointIdentity.status -ne 'completed' -or [string]::IsNullOrWhiteSpace([string]$checkpointIdentity.data.campaignInstanceId)) {
+            throw 'Native persistent EYC save completed, but Campaign identity verification failed; the save will be cleaned.'
+        }
+        $campaignInstanceId = [string]$checkpointIdentity.data.campaignInstanceId
+        $persistentStoryModeSaveCompleted = $true
+    }
+
 }
 finally {
     if ($storyModeVideoCapture) {
@@ -1051,6 +1096,13 @@ if ($ValidateRecruitmentProgression) {
             if (-not $fullDisposableSavePath.StartsWith($saveRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Disposable save cleanup path escaped Game Saves.' }
             Get-ChildItem -LiteralPath $saveDirectory -File -Filter "$progressionSaveName*" | Remove-Item -Force
         }
+        $keepPersistentStoryModeSave = $StoryModeEycPersistentSeed -and $persistentStoryModeSaveOwned -and $persistentStoryModeSaveCompleted -and $storyModeEycReadyObserved -and -not $crashDetected
+        if ($persistentStoryModeSaveOwned -and -not $keepPersistentStoryModeSave -and (Test-Path -LiteralPath $persistentStoryModeSavePath)) {
+            $saveRoot = [IO.Path]::GetFullPath($saveDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+            $fullPersistentSavePath = [IO.Path]::GetFullPath($persistentStoryModeSavePath)
+            if (-not $fullPersistentSavePath.StartsWith($saveRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Persistent StoryMode save cleanup path escaped Game Saves.' }
+            Remove-Item -LiteralPath $fullPersistentSavePath -Force
+        }
     }
 }
 
@@ -1089,9 +1141,12 @@ if ($storyModeNativeInquiryTestSessionCreated) {
         $storyModeNativeInquiryResponseFailure = 'Bannerlord process cleanup was not verified after the Native Inquiry test.'
     }
 }
-$saveDigestForComparison = if ($RetainDisposableSave -and $progressionSaveName) { Get-SaveManifestDigest -ExcludeSaveName $progressionSaveName } else { $saveDigestAfter }
+$saveDigestForComparison = if ($RetainDisposableSave -and $progressionSaveName) { Get-SaveManifestDigest -ExcludeSaveName $progressionSaveName }
+elseif ($StoryModeEycPersistentSeed -and $PersistentStoryModeSaveName) { Get-SaveManifestDigest -ExcludeSaveName $PersistentStoryModeSaveName }
+else { $saveDigestAfter }
 $saveStateUnchanged = $saveDigestBefore -eq $saveDigestForComparison
 $retainedDisposableSave = [bool]($RetainDisposableSave -and $disposableSaveOwned -and $progressionSaveName -and (Test-Path -LiteralPath $progressionSavePath))
+$retainedPersistentStoryModeSave = [bool]($StoryModeEycPersistentSeed -and $persistentStoryModeSaveOwned -and $persistentStoryModeSaveCompleted -and (Test-Path -LiteralPath $persistentStoryModeSavePath))
 if ($StoryModeEycLiveModelEvaluation -and $storyModeAgentHostReceiptPath -and (Test-Path -LiteralPath $storyModeAgentHostReceiptPath -PathType Leaf)) {
     try {
         $storyModeHostReceipt = Get-Content -LiteralPath $storyModeAgentHostReceiptPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -1128,7 +1183,7 @@ $acceptanceChecks = [ordered]@{
     mapState = ($mapState -eq 'MapState')
     noCrash = (-not $crashDetected)
     noHarnessFailure = (-not $harnessFailureObserved)
-    noUnplannedCampaignSave = (-not $campaignSaveRequested)
+    noUnplannedCampaignSave = (-not $campaignSaveRequested -or ($StoryModeEycPersistentSeed -and $persistentStoryModeSaveCompleted))
     unrelatedSaveManifestUnchanged = $saveStateUnchanged
     bannerlordAutoSaveDisabledDuringRun = ($null -ne $autoSaveSettingGuard -and $autoSaveIntervalDuring -eq -1)
     bannerlordAutoSaveSettingRestored = ($null -ne $autoSaveSettingRestoration -and [bool]$autoSaveSettingRestoration.Restored -and $autoSaveIntervalAfter -eq $autoSaveIntervalBefore)
@@ -1136,6 +1191,7 @@ $acceptanceChecks = [ordered]@{
     bannerlordSoundSettingRestored = ($null -ne $gameSoundSettingRestoration -and [bool]$gameSoundSettingRestoration.Restored -and $gameSoundDisabledAfter -eq $gameSoundDisabledBefore)
     noNativeAutoSaveObserved = (-not $nativeAutoSaveDetected)
     requestedDisposableSaveRetained = (-not $RetainDisposableSave -or $retainedDisposableSave)
+    requestedPersistentStoryModeSaveRetained = (-not $StoryModeEycPersistentSeed -or $retainedPersistentStoryModeSave)
     windowLayout = ($windowLayoutApplied -and $windowLayout.Width -eq 840 -and $windowLayout.Height -eq 472)
     gameProcessesClean = $gameProcessesClean
 }
@@ -1234,6 +1290,11 @@ $result = [ordered]@{
     DisposableSaveName = $progressionSaveName
     DisposableSavePath = if ($progressionSavePath -and (Test-Path -LiteralPath $progressionSavePath)) { $progressionSavePath } else { $null }
     DisposableSaveRetained = $retainedDisposableSave
+    PersistentStoryModeSeed = [bool]$StoryModeEycPersistentSeed
+    PersistentStoryModeSaveName = if ($StoryModeEycPersistentSeed) { $PersistentStoryModeSaveName } else { $null }
+    PersistentStoryModeSavePath = if ($retainedPersistentStoryModeSave) { $persistentStoryModeSavePath } else { $null }
+    PersistentStoryModeSaveHash = if ($retainedPersistentStoryModeSave) { $persistentStoryModeSaveHash } else { $null }
+    PersistentStoryModeSaveRetained = $retainedPersistentStoryModeSave
     RecruitmentProgressionError = $recruitmentProgressionError
     CharacterCreationCompleted = $creationCompleted
     StoryModeOfficialTutorialSkipSelected = if ($StoryModeEycSetup) { $storyModeTutorialSkipSelected } else { $null }
@@ -1319,7 +1380,7 @@ $result = [ordered]@{
     WindowY = if ($windowLayout) { $windowLayout.Y } else { $null }
     WindowWidth = if ($windowLayout) { $windowLayout.Width } else { $null }
     WindowHeight = if ($windowLayout) { $windowLayout.Height } else { $null }
-    NoSaveRequested = -not $campaignSaveRequested
+    NoSaveRequested = (-not $campaignSaveRequested -and -not $StoryModeEycPersistentSeed)
     SaveDirectoryMetadataUnchanged = $saveStateUnchanged
     BannerlordAutoSaveIntervalBefore = $autoSaveIntervalBefore
     BannerlordAutoSaveIntervalDuring = $autoSaveIntervalDuring
@@ -1349,5 +1410,9 @@ $result = [ordered]@{
     CrashModuleCaptureError = $crashModuleCaptureError
     Passed = (@($acceptanceChecks.Values | Where-Object { -not [bool]$_ }).Count -eq 0)
 }
-$result | ConvertTo-Json -Depth 6
+$resultJson = $result | ConvertTo-Json -Depth 8
+if ($env:CHRONICLE_HARNESS_TEMP -and (Test-Path -LiteralPath $env:CHRONICLE_HARNESS_TEMP -PathType Container)) {
+    Set-Content -LiteralPath (Join-Path $env:CHRONICLE_HARNESS_TEMP 'FreshCampaignResult.json') -Value $resultJson -Encoding UTF8
+}
+$resultJson
 if (-not $result.Passed) { exit 1 }
