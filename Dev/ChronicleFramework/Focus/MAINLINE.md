@@ -956,19 +956,23 @@ FreeLLMAPI 官方 CLI 现已从 Electron Local Storage 的本地 dashboard sessi
 - MCU: https://github.com/CraftJarvis/MCU
 
 
-TestResults/20261026-174205使用FreeLLMAPI本机目录为eady的qwen3.8-27b执行无游戏真实模型分类：路由到ovh/Qwen3.8-27B，完成 supported-village-tools-quest分类，527输入/188输出tokens，0 Native命令。随后自然StoryMode首次真实接管仍未产生命令：Host对当前EYC菜单状态选择equired_tool_call输出格式，FreeLLMAPI回HTTP 502（allbackAttempts=1）、0决策/0动作；Campaign在教程跳过后自然激活EYC，未改存档/关闭Autosave恢复/游戏无崩溃，Host退出后交还玩家控制。这说明无游戏分类成功不等于带行动目录的模型可用，且provider失败发生于Native动作前；qwen3.8-27b随后目录标记exhausted，停止重试。
+TestResults/20261026-174205使用FreeLLMAPI本机目录为
+eady的qwen3.8-27b执行无游戏真实模型分类：路由到ovh/Qwen3.8-27B，完成 supported-village-tools-quest分类，527输入/188输出tokens，0 Native命令。随后自然StoryMode首次真实接管仍未产生命令：Host对当前EYC菜单状态选择
+equired_tool_call输出格式，FreeLLMAPI回HTTP 502（allbackAttempts=1）、0决策/0动作；Campaign在教程跳过后自然激活EYC，未改存档/关闭Autosave恢复/游戏无崩溃，Host退出后交还玩家控制。这说明无游戏分类成功不等于带行动目录的模型可用，且provider失败发生于Native动作前；qwen3.8-27b随后目录标记exhausted，停止重试。
 
 TestResults/20261026-180613将当前配置临时覆盖为FreeLLMAPI qwen3.6-27b做一条无游戏生产分类请求，收到HTTP429/Retry-After=85秒，因本次Provider Smoke显式90秒请求预算不足以覆盖85秒等待加最小20秒重试预算而安全失败，没有模型决策或Native命令；目录此前标ready不代表当前可执行。该模型的FreshStoryMode Host单请求预算为300秒，可覆盖此已观察等待窗；下次自然StoryMode单次尝试使用qwen3.6-27b验证完整Campaign Host实际可恢复性，不重复重试qwen3.8或缩短Retry-After。
 
 
 TestResults/20261026-173814的FreeLLMAPI默认用户路由
-vidiallama-3.2-11b-vision在无游戏Provider Smoke中返回HTTP503，0决策/0动作；模型目录虽然显示ready，但真实上游调用未成功。TestResults/20261026-174205把请求限制为一次小型EYC目标分类，qwen3.8-27b经ovh/Qwen3.8-27B成功返回 supported-village-tools-quest分类（527输入/188输出token，0 Native命令）。随后完整自然StoryMode TestResults/20261026-175234却在输出格式切换到equired_tool_call时收到HTTP502，0决策/0动作；该模型当前已被FreeLLMAPI标为exhausted。这个差异说明分类Smoke不能证明行动目录请求协议可用。TestResults/20261026-180613的qwen3.6-27bSmoke收到429 Retry-After=85秒，但单次Smoke有90秒总预算，按Native最小重试预算判定不可等待并停止，没有重放。之后完整自然战役 TestResults/20261026-181615采用300秒生产请求预算，自然激活EYC；模型请求先等85秒再发，下一次429带Retry-After=585秒，超出本次300秒界限，Host以provider-http-error结束，0决策/0Native动作。TestResults/20261026-182645FreeLLMAPI uto:reliable路由尝试17次后仍HTTP502，日志摘要可读到的候选包括custom OpenAI gpt-4.1-nano额度不足及Google Gemini 3.5/3.6/3.8 forbidden；TestResults/20261026-183324查询gemma-4-31b-it时本地目录已标xhausted，Harness在发出推理前安全拒绝。上述几次完整自然Campaign均在Tutorial skip/EYC激活后失败，未发Native命令，无存档修改/崩溃，Host/Game/Autosave恢复通过。当前直接障碍从Host协议/游戏交互前移为FreeLLMAPI上游可用凭据/额度或模型路由能力；先恢复至少一个可承担结构化工具请求的可用免费Provider，再继续两个StoryMode通关门禁，不再重复上述已失败路由。
+vidiallama-3.2-11b-vision在无游戏Provider Smoke中返回HTTP503，0决策/0动作；模型目录虽然显示ready，但真实上游调用未成功。TestResults/20261026-174205把请求限制为一次小型EYC目标分类，qwen3.8-27b经ovh/Qwen3.8-27B成功返回 supported-village-tools-quest分类（527输入/188输出token，0 Native命令）。随后完整自然StoryMode TestResults/20261026-175234却在输出格式切换到
+equired_tool_call时收到HTTP502，0决策/0动作；该模型当前已被FreeLLMAPI标为exhausted。这个差异说明分类Smoke不能证明行动目录请求协议可用。TestResults/20261026-180613的qwen3.6-27bSmoke收到429 Retry-After=85秒，但单次Smoke有90秒总预算，按Native最小重试预算判定不可等待并停止，没有重放。之后完整自然战役 TestResults/20261026-181615采用300秒生产请求预算，自然激活EYC；模型请求先等85秒再发，下一次429带Retry-After=585秒，超出本次300秒界限，Host以provider-http-error结束，0决策/0Native动作。TestResults/20261026-182645FreeLLMAPI uto:reliable路由尝试17次后仍HTTP502，日志摘要可读到的候选包括custom OpenAI gpt-4.1-nano额度不足及Google Gemini 3.5/3.6/3.8 forbidden；TestResults/20261026-183324查询gemma-4-31b-it时本地目录已标xhausted，Harness在发出推理前安全拒绝。上述几次完整自然Campaign均在Tutorial skip/EYC激活后失败，未发Native命令，无存档修改/崩溃，Host/Game/Autosave恢复通过。当前直接障碍从Host协议/游戏交互前移为FreeLLMAPI上游可用凭据/额度或模型路由能力；先恢复至少一个可承担结构化工具请求的可用免费Provider，再继续两个StoryMode通关门禁，不再重复上述已失败路由。
 
 
 TestResults/20261026-184919再次对FreeLLMAPI当时目录标ready的qwen3.6-27b做无游戏真实Provider Smoke，单请求预算150秒；上游两次返回429，第一次Retry-After=85秒已实际等待约85秒，第二次Retry-After=75秒加最小重试预算超出剩余时限而安全停止。结果是0决策/0Native命令；之后目录状态由ready转exhausted，未发起StoryMode，也没有重放此前请求。该复测确认提升Smoke时间预算仍未获得可用Qwen响应；当前应先恢复/添加有效上游Provider key，不继续对Qwen/OVH路线试探。
 
 
-经FreeLLMAPI上游文档核验了一个可供用户配置的候选：FreeLLMAPI注册了需用户Key的Groq OpenAI兼容提供商（[FreeLLMAPI平台目录](https://github.com/tashfeenahmed/freellmapi/blob/main/docs/en/providers/01-supported-platforms.md)）；Groq官方qwen/qwen3.8-27b页面列出Tool Use与JSON Schema能力（[Groq Qwen 3.8文档](https://console.groq.com/docs/model/qwen/qwen3.8-27b)）。Groq文档同时说明Tool Use与Structured Outputs不在同一请求中并用；Chronicle Provider当前根据目录能力二选一输出格式，仍须真实AllowedActions smoke验证。FreeLLMAPI尚未配置/实测Groq Key，且当前Qwen别名曾被路由到OVH，所以这只是待验候选，不是当前可用路由。拿到一个免费上游Key后，先走无游戏结构化动作请求，确认X-Routed-Via和Native动作格式，再启动自然StoryMode，不再把eady或分类Smoke当作闭环证据。
+经FreeLLMAPI上游文档核验了一个可供用户配置的候选：FreeLLMAPI注册了需用户Key的Groq OpenAI兼容提供商（[FreeLLMAPI平台目录](https://github.com/tashfeenahmed/freellmapi/blob/main/docs/en/providers/01-supported-platforms.md)）；Groq官方qwen/qwen3.8-27b页面列出Tool Use与JSON Schema能力（[Groq Qwen 3.8文档](https://console.groq.com/docs/model/qwen/qwen3.8-27b)）。Groq文档同时说明Tool Use与Structured Outputs不在同一请求中并用；Chronicle Provider当前根据目录能力二选一输出格式，仍须真实AllowedActions smoke验证。FreeLLMAPI尚未配置/实测Groq Key，且当前Qwen别名曾被路由到OVH，所以这只是待验候选，不是当前可用路由。拿到一个免费上游Key后，先走无游戏结构化动作请求，确认X-Routed-Via和Native动作格式，再启动自然StoryMode，不再把
+eady或分类Smoke当作闭环证据。
 
 
 TestResults/20261026-191500改用FreeLLMAPI keyless kilo-auto做单次Provider Smoke；模型目录曾显示ready，Host未到游戏/Native层，网关返回HTTP429并标记reeLlmApiPoolExhausted=true、Retry-After=82800秒（约23小时），0决策/0Native命令。该Kilo池已因IP/共享free额度耗尽，不重试。至此本机当前可见的OVH Qwen、Groq候选未配置、NVIDIA、Gemma与Kilo路线中，尚无可完成结构化模型调用的上游；继续轮询/换模型ID不能替代有效Provider密钥。
@@ -1113,7 +1117,11 @@ Fresh StoryMode run `TestResults/20261027-135719` on commit `aa44ef6` confirms t
 
 所有EYC子路线暂时blocked时，父循环现在只调用已有`AgentHostCampaignLoop`做一次受限的“到达当前可见安全聚落”原生移动，再重读Journal；不新增Native动作，也不把行走期间自然流动的Campaign时间伪装成显式时钟命令。子循环共享同一Provider、累计决策/Token budget和trace，且分类只允许map-arrival目标。`TestResults/20261028-010824`Build与AgentHostPackage通过；连续自然存档上的运行结果待验证。Harness contract version 7.381。
 
-短测用于快速定位单一代码边界，不能代替从零到EYC的纵向运行。`035939`建立自然StoryMode Seed，`042208`、`044954`均从相同Campaign ID续跑。当前manifest为`ChronicleEycDev-20261028045206-abac5517`，checkpointCount 3。`044954`Host报告4个父层决策、55条Native动作，真实Progress记录96次Provider决定/¥0.307；Party 13、Gold 272、Renown 20，EYC仍active。连续安全聚落刷新5次都去泽翁尼卡，无Journal进度；Town菜单Native SaveAs已成功。下一版在Host内记录已访问的安全聚落，排除重复目标，并允许仅限非围城、当前Settlement ID匹配且无战斗/模态的聚落菜单保存。Docs `20261028-050918`、Build `20261028-051001`通过；现已加入本Host安全聚落去重，并允许当前非围城town/village/castle菜单作为稳定checkpoint；需用窄Host回归及同档运行验证。manifest累计值改为AgentHostProgress实际provider-decision/token/cost事件，旧manifest通过同Campaign receipts回算；`052652`在manifest旧格式迁移时失败，未启动游戏/消耗推理：PowerShell PSCustomObject缺少usageMetric属性；已加安全Add-Member迁移。Build/Docs待验。manifest仍指向045206，Provider计数/成本仍待重算；下次先验证迁移收据与AgentHostPackage自检，再从同一档继续，不新建战役。最终Epic仍需两份独立新战役。Harness contract version 7.397。
+### 2026-10-28：P5同一Campaign纵向续跑与收入路线缺口
+
+纵向主测从自然新StoryMode起点开始，Campaign ID为`05896845153e4f019caeb20ebb3603c1`。`TestResults/20261028-035939`首轮外层收据因子结果路径错误失败；其Native存档随后经唯一SaveAs收据和SHA256恢复。`042208`、`044954`及`053200`持续使用同一Campaign ID，不应计作重开战役。最新`053200`从`ChronicleEycDev-20261028045206-abac5517`续跑，做138次真实Provider决策（480,955输入/8,655输出token，估算¥0.994），Native SaveAs建立第4个检查点`ChronicleEycDev-20261028053410-e26fd299`；Campaign身份不变、游戏进程已清理。EYC仍未完成，这是纵向运行证据，不是产品通过。Gold子流程在27次模型决定、6个Native动作后因`gold-sale-no-transferable-goods`退出；当时Gold 0、Renown 20、MainParty 18人。该结果揭示收入路线缺口：没有可卖商品时，当前Gold目标无法赚到2000，需研究并接入真实可用的原版任务/委托收入来源，不能重开档掩盖停滞或直接改资源。
+
+测试分工：同一自然Campaign从AI接手前的开局连续续跑，是纵向门禁；短测只定位单一Native/代码故障，不算Campaign通过。当前Campaign链已从新战役起步，但第一个可续存档是在AI已有进展后才写出；未来应尽可能在首个可安全保存的AI接管边界建立初始检查点。完整EYC成功后仍需第二份独立新战役复验。Harness Docs `20261028-053730`通过。
 
 
 Build恢复证据：`TestResults/20261028-013058`的初次Host Build遇到NuGet服务索引TLS错误NU1900；Harness确认唯一依赖版本锁定后，以locked restore跳过不可达漏洞索引并完成本地Build，未升级依赖。7890代理TLS故障仍阻止GitHub推送；PersistentEycCampaign尚未创建检查点，下一步启动同一条长测。
