@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.380
+Contract version: 7.383
 
 Model connection is an OpenAI-compatible provider contract, not a FreeLLMAPI product dependency. MCM Global settings store the HTTPS base URL, model ID, structured-output mode (`auto`, `json_schema`, `json_object`, or `required_tool_call`), and the DeepSeek-only per-run CNY ceiling; API keys stay in the current user's environment and the game passes them only to its owned Agent Host child. HTTP is accepted only for loopback endpoints. The legacy MCM `OllamaBaseUrl` JSON property is still read for migration, although its UI label and behavior are provider-neutral.
 
@@ -801,3 +801,5 @@ StoryMode复跑 `TestResults/20261027-193328` 在 EYC 仍未达成时进入真�
 
 
 `TestResults/20261028-015136`已证明新档教程跳过、Quest自然激活和MapState截图都通过，但首轮检查点保存失败：新战役由Harness的Host自动启动，进程没有Agent CLI session，故在保存时误走了需要该session的CLI路径；没有`ChronicleEycDev-*`存档，进程已退出。现在保存不再调用CLI：FreshCampaign收到Host结束且MapState稳定的Harness ready signal后，由Native `SubModule`在ApplicationTick触发`SaveHandler.SaveAs`，要求无Inquiry/ESC，记录Campaign ID、时间和时钟档前后值。Build `TestResults/20261028-021628`已通过，ready-signal运行实测仍待执行。Contract version 7.380。
+
+`TestResults/20261028-023331`、`030259`、`031004`连续战役首档分别在教程跳过确认后停于`training_field_menu`；未崩溃、没有接管或保存证据。第一轮怀疑音乐检查，第二轮发现并修复“跳过Issue探测时连StoryMode地图观察也被跳过”的条件，但第三次仍没有地图接管日志，因此这项修复尚未证实。当前为SubModule加入一次性诊断，记录Native游戏状态管理器与静态状态管理器各自看到的状态，以及Campaign/Mission是否仍存在，借此判断状态源不一致还是教程Mission尚未结束；不再凭猜测改机制。最新Docs `TestResults/20261028-032158`和Build `032235`通过；第三轮自然测试是在加诊断前停止的，诊断尚未实机验证。前三次都没有`ChronicleEycDev-*`存档/续跑Manifest，也没有EYC进度。下一步只需一次自然开局验证此诊断并建立首个可续跑检查点；之后继续同一Campaign。局部短测负责快回归，长测负责覆盖跨阶段变化，两者不可互相替代。Contract version 7.383。

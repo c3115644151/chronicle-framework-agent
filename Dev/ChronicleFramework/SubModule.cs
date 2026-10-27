@@ -24,6 +24,7 @@ public sealed class SubModule : MBSubModuleBase
     private ChronicleCampaignBehavior _campaignBehavior;
     private bool _freshCampaignMusicWaitLogged;
     private bool _freshCampaignMusicReadyLogged;
+    private bool _freshStoryModePostSkipMapProbeLogged;
     private bool _harnessMcmSettingsProbeCompleted;
     private float _harnessMcmSettingsProbeElapsed;
     private bool _harnessMcmSettingsWaitLogged;
@@ -208,7 +209,8 @@ public sealed class SubModule : MBSubModuleBase
         }
         ProbeHarnessMcmSettingsRegistration(dt);
         TryInstallHarnessFocusLossEscapeMenuGuard();
-        if (Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") == FreshCampaignHarness.Mode && !IsNativeCampaignMusicInitialized())
+        var isFreshCampaignHarness = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") == FreshCampaignHarness.Mode;
+        if (isFreshCampaignHarness && !_freshCampaignMusicReadyLogged && !IsNativeCampaignMusicInitialized())
         {
             if (!_freshCampaignMusicWaitLogged)
             {
@@ -217,7 +219,7 @@ public sealed class SubModule : MBSubModuleBase
             }
             return;
         }
-        if (Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") == FreshCampaignHarness.Mode && !_freshCampaignMusicReadyLogged)
+        if (isFreshCampaignHarness && !_freshCampaignMusicReadyLogged)
         {
             _freshCampaignMusicReadyLogged = true;
             ChronicleDiagnostics.Write("fresh-campaign-start-ready|nativeCampaignMusicInitialized=True");
@@ -225,7 +227,18 @@ public sealed class SubModule : MBSubModuleBase
         FreshCampaignHarness.TryStartCampaign();
         var skipProgressionIssueProbe = Environment.GetEnvironmentVariable("CHRONICLE_FRESH_CAMPAIGN_SKIP_ISSUE_PROBE") == "1" &&
             Game.Current?.GameStateManager?.ActiveState?.GetType().Name == "MapState";
-        if (!skipProgressionIssueProbe) FreshCampaignHarness.AdvanceCharacterCreation();
+        var storyModeProgressionHarness = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") == FreshCampaignHarness.Mode &&
+            Environment.GetEnvironmentVariable("CHRONICLE_FRESH_CAMPAIGN_STORYMODE") == "1";
+        if (skipProgressionIssueProbe && storyModeProgressionHarness && !_freshStoryModePostSkipMapProbeLogged)
+        {
+            _freshStoryModePostSkipMapProbeLogged = true;
+            ChronicleDiagnostics.Write("fresh-storymode-post-skip-app-tick-probe|gameManagerState=" +
+                (Game.Current?.GameStateManager?.ActiveState?.GetType().Name ?? "null") + "|staticState=" +
+                (GameStateManager.Current?.ActiveState?.GetType().Name ?? "null") + "|campaignPresent=" +
+                (Campaign.Current != null) + "|missionPresent=" + (Mission.Current != null) + "|missionEnded=" +
+                (Mission.Current?.MissionEnded.ToString() ?? "null"));
+        }
+        if (!skipProgressionIssueProbe || storyModeProgressionHarness) FreshCampaignHarness.AdvanceCharacterCreation();
         var activeCampaignBehavior = Campaign.Current?.CampaignBehaviorManager?.GetBehavior<ChronicleCampaignBehavior>();
         if (activeCampaignBehavior != null && !ReferenceEquals(activeCampaignBehavior, _campaignBehavior))
         {
