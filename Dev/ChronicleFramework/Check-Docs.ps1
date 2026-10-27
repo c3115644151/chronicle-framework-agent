@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.340'
+$contractVersion = '7.347'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -159,6 +159,8 @@ $shaderDialogTestCases = @(
 if (-not $shaderDialogTestCases[0] -or $shaderDialogTestCases[1] -or $shaderDialogTestCases[2] -or $shaderDialogTestCases[3]) { throw 'Shader-cache dialog classifier must accept only the exact known title, cache text, and a unique affirmative action.' }
 if ($agentCliSource -notmatch 'Invoke-ChronicleShaderCacheDialogAcknowledgement' -or $shaderDialogSource -notmatch 'InvokePattern' -or $shaderDialogSource -notmatch 'LegacyIAccessiblePattern' -or $shaderDialogSource -notmatch 'Current\.ProcessId -ne \$ProcessId' -or $shaderDialogSource -notmatch 'GetWindowThreadProcessId' -or $shaderDialogSource -notmatch '0x00F5' -or $shaderDialogSource -notmatch '\$maxAcknowledgements\s*=\s*3' -or $shaderDialogSource -notmatch 'AcknowledgementAttempts' -or $shaderDialogSource -match 'SendInput|mouse_event|keybd_event|SetForegroundWindow|SetFocus' -or $inventoryNavigationSource -notmatch 'StartupDialogReceipts') { throw 'The shader-cache prompt must use a verified process-owned UIA/native-button action, bounded same-dialog retries, preserve its receipt, and never use global input or foreground activation.' }
 if ($agentCliSource -notmatch "'moveToPoint'" -or $agentCliSource -notmatch "'missionInput'" -or $agentCliSource -notmatch "ValidateSet\('land'\)" -or $agentProtocolSource -notmatch 'case "moveToPoint"' -or $agentProtocolSource -notmatch 'case "missionInput"' -or $agentProtocolSource -notmatch 'boundedLease' -or $agentProtocolSource -notmatch 'UpdateMissionInputLease' -or $agentProtocolSource -notmatch 'ReadRequiredFiniteDouble' -or $agentProtocolSource -notmatch 'ProcessTravel\(requestedPoint\)' -or $agentProtocolSource -notmatch 'naval/sea transition belongs to a separately tested adapter' -or $agentDecisionLoopSource -notmatch "moveToPoint = @\('X','Y','Surface'\)" -or $agentDecisionLoopSource -notmatch "missionInput = @\('X','Y','DurationSeconds'\)" -or $agentObserverSource -notmatch 'schemaVersion\\":28' -or $agentObserverSource -notmatch 'characterId' -or $agentObserverSource -notmatch 'OneToOneConversationCharacter' -or $agentObserverSource -notmatch 'textId' -or $agentObserverSource -notmatch 'GetID\(\)' -or $agentObserverSource -notmatch 'bannerEditor' -or $agentObserverSource -notmatch 'isWaitMenu' -or $agentObserverSource -notmatch 'isWaitActive' -or $agentObserverSource -notmatch 'storyModeEstablishClanStatus' -or $agentObserverSource -notmatch 'questMarkerFlags' -or $agentObserverSource -notmatch 'OptionQuestData' -or $agentObserverSource -notmatch 'CanInteractWithAgent' -or $agentObserverSource -notmatch 'isInteractable' -or $agentObserverSource -notmatch 'targetPosition' -or $agentObserverSource -notmatch 'BuildMissionObservationJson' -or $agentObserverSource -notmatch 'combatType' -or $agentObserverSource -notmatch 'movementInput' -or $agentObserverSource -notmatch 'CameraBearing' -or $agentObserverSource -notmatch 'CameraElevation' -or $agentObserverSource -notmatch 'nativeFocus' -or $agentObserverSource -notmatch 'nearbySceneAgents' -or $agentObserverSource -notmatch 'BuildMissionNavigationObservationJson' -or $agentObserverSource -notmatch 'isPlayerControlled' -or $agentObserverSource -notmatch 'isAIControlled' -or $agentObserverSource -notmatch 'settlementOverlayCharacters' -or $agentProtocolSource -notmatch 'case "talkToSettlementHero"' -or $agentProtocolSource -notmatch 'case "visitSettlementHero"' -or $agentDecisionLoopSource -notmatch "talkToSettlementHero = @\('HeroId'\)" -or $agentDecisionLoopSource -notmatch "visitSettlementHero = @\('HeroId'\)") { throw 'W2-B land-point observation and W2-D native menu quest-marker and Mission camera/focus/input observations must coexist under the current schema.' }
+if ($agentObserverSource -notmatch 'mainAgent\.CanInteractWithAgent\(item\.Agent, mainAgentController\.MissionScreen\.CameraElevation\)' -or
+    $agentObserverSource -notmatch 'isInteractable') { throw 'Current local Mission agents must carry Native CanInteractWithAgent eligibility so the Companion route can distinguish a reachable conversation target from a merely nearby Hero.' }
 if ($agentObserverSource -notmatch 'Property\(json, "characterName", conversationManager\.OneToOneConversationCharacter\?\.Name\?\.ToString\(\), true\)' -or
     $agentObserverSource -notmatch 'Property\(json, "heroId", conversationManager\.OneToOneConversationHero\?\.StringId, true\)' -or
     $agentObserverSource -notmatch 'Property\(json, "sentenceText", conversationManager\.CurrentSentenceText, true\)') {
@@ -408,6 +410,10 @@ if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Prefl
     $agentHostBattleSimulationLoopSource -notmatch 'battleSimulation' -or
     $agentHostBattleSimulationLoopSource -notmatch 'nativeReturnToMapVerified' -or
     $agentHostBattleSimulationLoopSource -notmatch 'prisoner_wait' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'partyTakeAll' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'argumentValues' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'members or prisoners' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-self-test-loot-type-alias-not-rejected' -or
     $agentHostBattleSimulationLoopSource -notmatch 'playerOutcome' -or
     $agentHostBattleSimulationLoopSource -notmatch '\["providerConfigurationSource"\] = provider\.ConfigurationSource' -or
     $agentHostBattleSimulationLoopSource -notmatch 'ReadString\(result, "providerConfigurationSource"\)' -or
@@ -1555,9 +1561,25 @@ if ($agentHostCompanionLoopSource -notmatch 'BuildControlCatalog\(gameState == "
     $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-listed-safe-stop-is-interrupted-with-zero-native-actions' -or
     $agentHostProviderSource -notmatch 'ContainsString\(request, "allowedControls", "stop"\)' -or
     $agentHostProviderContractSelfTestSource -notmatch 'provider-normalizes-only-workflow-listed-safe-stop-control') { throw 'The Companion may stop only on free Map; Mission stop requests must be corrected against the current Native catalog, and only the original Native missionLeave may return it to Map for parent replanning.' }
-if ($agentHostCompanionLoopSource -notmatch 'TryReadListedInteger' -or
+if ($agentHostCompanionLoopSource -notmatch 'ReadConversation\(state\)' -or
+    $agentHostCompanionLoopSource -notmatch 'state\?\["context"\]\?\["conversation"\]' -or
+    $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-native-conversation-shape-failed' -or
+    $agentHostCompanionLoopSource -notmatch 'TryReadListedInteger' -or
     $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-current-catalog-integer-normalization-failed' -or
     $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-out-of-catalog-formatted-index-accepted') { throw 'Companion integer arguments may be format-normalized only when the canonical numeric value is present in the fresh Native candidate catalog; formatted out-of-catalog values must remain rejected.' }
+if ($agentHostCompanionLoopSource -notmatch 'var journalTargetMet = ReadBoolean\(companionObjective, "met"\)' -or
+    $agentHostCompanionLoopSource -notmatch 'journalTargetMet && gameState != "MissionState"' -or
+    $agentHostCompanionLoopSource -notmatch 'journalTargetMet && gameState == "MissionState"' -or
+    $agentHostCompanionLoopSource -notmatch '"dialogueSelect", "missionLeave"' -or
+    $agentHostCompanionLoopSource -notmatch 'case "missionLeave": _stage = 9') { throw 'Companion completion must close its Native Tavern Mission with the original Leave Area action before the parent selects its next campaign objective.' }
+if ($agentHostCompanionLoopSource -notmatch 'player_is_leaving_neutral_or_friendly' -or
+    $agentHostCompanionLoopSource -notmatch 'currentConversationHeroDeclined' -or
+    $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-declined-wanderer-exit-not-gated' -or
+    $agentHostDecisionCycleSource -notmatch 'After declining, if the same Wanderer asks') { throw 'A declined Wanderer quote must expose the current Native conversation exit and prevent reopening that same hire offer.' }
+if ($agentHostCompanionLoopSource -notmatch 'establish-clan-companion-unlisted-navigation-duration-feedback-failed' -or
+    $agentHostCompanionLoopSource -notmatch 'AgentIndex \[\{allowedIndexes\}\]' -or
+    $agentHostCompanionLoopSource -notmatch 'DurationSeconds \[\{allowedDurationValues\}\]' -or
+    $agentHostDecisionCycleSource -notmatch 'DurationSeconds pair without interpolation') { throw 'An unlisted Tavern navigation lease must be rejected before Native execution with the exact current AgentIndex and DurationSeconds values for a bounded correction.' }
 if ($agentHostEstablishClanPlannerSource -notmatch 'objective-selection-rejected-before-native' -or
     $agentHostEstablishClanPlannerSource -notmatch 'allowed ObjectiveId values are exactly' -or
     $agentHostDecisionCycleSource -notmatch 'Treat the current allowedActions list as exact' -or

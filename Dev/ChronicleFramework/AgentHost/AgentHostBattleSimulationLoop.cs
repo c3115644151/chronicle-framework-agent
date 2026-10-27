@@ -471,8 +471,16 @@ internal static class AgentHostBattleSimulationLoop
 
         if (battleWasStarted && string.Equals(gameState, "PartyState", StringComparison.Ordinal) && partyScreen is not null && ReadString(partyScreen, "mode") == "Loot")
         {
-            if (HasTransferableRoster(partyScreen["leftMembers"] as JsonArray)) Add(catalog, "partyTakeAll", "TroopType");
-            if (HasTransferableRoster(partyScreen["leftPrisoners"] as JsonArray)) Add(catalog, "partyTakeAll", "TroopType");
+            var lootTypes = new JsonArray();
+            if (HasTransferableRoster(partyScreen["leftMembers"] as JsonArray)) lootTypes.Add("members");
+            if (HasTransferableRoster(partyScreen["leftPrisoners"] as JsonArray)) lootTypes.Add("prisoners");
+            if (lootTypes.Count > 0)
+                catalog.Add(new JsonObject
+                {
+                    ["action"] = "partyTakeAll",
+                    ["arguments"] = new JsonArray("TroopType"),
+                    ["argumentValues"] = new JsonObject { ["TroopType"] = lootTypes }
+                });
             if (ReadBoolean(partyScreen, "canDone")) Add(catalog, "partyScreenDone");
             return catalog;
         }
@@ -584,7 +592,11 @@ internal static class AgentHostBattleSimulationLoop
             }
             if (action == "partyTakeAll")
             {
-                var rosterName = ReadString(arguments, "troopType") == "members" ? "leftMembers" : "leftPrisoners";
+                var troopType = ReadString(arguments, "troopType");
+                var listedTroopTypes = template["argumentValues"]?["TroopType"] as JsonArray;
+                if (troopType is null || listedTroopTypes?.OfType<JsonValue>().Any(value => value.TryGetValue<string>(out var listedType) && listedType == troopType) != true)
+                { rejection = "TroopType must exactly match a currently listed transferable Native loot roster: members or prisoners."; return false; }
+                var rosterName = troopType == "members" ? "leftMembers" : "leftPrisoners";
                 if (!HasTransferableRoster((state["partyScreen"] as JsonObject)?[rosterName] as JsonArray))
                 { rejection = "Take-all troop type must have a currently observed transferable Native roster."; return false; }
             }
@@ -697,11 +709,25 @@ internal static class AgentHostBattleSimulationLoop
         var party = new JsonObject { ["context"] = new JsonObject { ["gameState"] = "PartyState" }, ["partyScreen"] = new JsonObject
         {
             ["mode"] = "Loot", ["canDone"] = true, ["leftMembers"] = new JsonArray(new JsonObject { ["count"] = 1, ["transferable"] = true }),
-            ["leftPrisoners"] = new JsonArray(), ["rightMembers"] = new JsonArray(), ["rightPrisoners"] = new JsonArray()
+            ["leftPrisoners"] = new JsonArray(new JsonObject { ["count"] = 1, ["transferable"] = true }), ["rightMembers"] = new JsonArray(), ["rightPrisoners"] = new JsonArray()
         } };
         var partyActions = BuildActionCatalog(party, new JsonArray(), null, true, true);
-        if (!CatalogContains(partyActions, "partyTakeAll") || !CatalogContains(partyActions, "partyScreenDone"))
+        var takeAllAction = partyActions.OfType<JsonObject>().FirstOrDefault(action => ReadString(action, "action") == "partyTakeAll");
+        var takeAllTypes = takeAllAction?["argumentValues"]?["TroopType"] as JsonArray;
+        if (takeAllTypes?.Count != 2 || !takeAllTypes.OfType<JsonValue>().Any(value => value.GetValue<string>() == "members") ||
+            !takeAllTypes.OfType<JsonValue>().Any(value => value.GetValue<string>() == "prisoners") || !CatalogContains(partyActions, "partyScreenDone"))
             throw new AgentHostException("battle-loop-self-test-party-aftermath-not-listed", "Native PartyState loot actions must be exposed only from observed roster/canDone state.");
+        var invalidLootType = new JsonObject { ["action"] = "partyTakeAll", ["arguments"] = new JsonObject { ["TroopType"] = "looter" } };
+        if (TryResolveDecision(invalidLootType, partyActions, new JsonArray(), party, new JsonArray(), null, out _, out _, out _, out var invalidLootRejection, recoverPlayerCaptivity: false) ||
+            !invalidLootRejection.Contains("members or prisoners", StringComparison.Ordinal))
+            throw new AgentHostException("battle-loop-self-test-loot-type-alias-not-rejected", "The displayed troop class 'looter' must not be mistaken for the current Native PartyScreen roster type.");
+        foreach (var validLootType in new[] { "members", "prisoners" })
+        {
+            var validLoot = new JsonObject { ["action"] = "partyTakeAll", ["arguments"] = new JsonObject { ["TroopType"] = validLootType } };
+            if (!TryResolveDecision(validLoot, partyActions, new JsonArray(), party, new JsonArray(), null, out var resolvedLootAction, out var resolvedLootArguments, out _, out _, recoverPlayerCaptivity: false) ||
+                resolvedLootAction != "partyTakeAll" || ReadString(resolvedLootArguments, "troopType") != validLootType)
+                throw new AgentHostException("battle-loop-self-test-native-loot-type-not-resolvable", "Each currently observed transferable Native roster type must normalize to the exact PartyScreen handler value.");
+        }
         var inventory = new JsonObject { ["context"] = new JsonObject { ["gameState"] = "InventoryState" }, ["inventoryScreen"] = new JsonObject { ["mode"] = "Loot", ["lootItemCount"] = 2 } };
         var inventoryActions = BuildActionCatalog(inventory, new JsonArray(), null, true, true);
         if (inventoryActions.Count != 1 || ReadString(inventoryActions[0] as JsonObject, "action") != "inventoryTakeAll")

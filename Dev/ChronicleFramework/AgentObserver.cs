@@ -977,6 +977,8 @@ internal static class ChronicleAgentObserver
             json.Append(",\"isNotable\":").Append(Bool(item.Hero?.IsNotable ?? false));
             json.Append(",\"isEnemy\":").Append(Bool(item.Agent.IsEnemyOf(mainAgent)));
             json.Append(",\"distance\":").Append(Number(item.Distance));
+            var isInteractable = mainAgentController?.MissionScreen != null && mainAgent.CanInteractWithAgent(item.Agent, mainAgentController.MissionScreen.CameraElevation);
+            json.Append(",\"isInteractable\":").Append(Bool(isInteractable));
             json.Append(",\"position\":{\"x\":").Append(Number(item.Agent.Position.X));
             json.Append(",\"y\":").Append(Number(item.Agent.Position.Y)).Append(",\"z\":").Append(Number(item.Agent.Position.Z)).Append("}}");
         }

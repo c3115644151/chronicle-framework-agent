@@ -19,7 +19,7 @@ internal static class AgentHostEstablishClanCompanionLoop
     private static readonly HashSet<string> HiringDialogueOptions = new(StringComparer.Ordinal)
     {
         "wanderer_meet_player_response2", "main_option_faction_hire",
-        "player_companion_hire_response_1", "player_companion_hire_response_2"
+        "player_companion_hire_response_1", "player_companion_hire_response_2", "player_is_leaving_neutral_or_friendly"
     };
 
     internal static IReadOnlyList<object> RunContractSelfTests()
@@ -73,21 +73,44 @@ internal static class AgentHostEstablishClanCompanionLoop
 
         var journey = new JsonObject
         {
-            ["context"] = new JsonObject { ["gameState"] = "MissionState" },
-            ["conversation"] = new JsonObject
+            ["context"] = new JsonObject
             {
-                ["heroId"] = "wanderer-a",
-                ["options"] = new JsonArray(
-                    new JsonObject { ["id"] = "main_option_faction_hire", ["clickable"] = true },
-                    new JsonObject { ["id"] = "unrelated_option", ["clickable"] = true })
+                ["gameState"] = "MissionState",
+                ["conversation"] = new JsonObject
+                {
+                    ["heroId"] = "wanderer-a",
+                    ["options"] = new JsonArray(
+                        new JsonObject { ["id"] = "main_option_faction_hire", ["clickable"] = true },
+                        new JsonObject { ["id"] = "unrelated_option", ["clickable"] = true })
+                }
             }
         };
         var dialogue = BuildActionCatalog(journey, new JsonArray(), new JsonObject(), null, null, null, null, false,
             new HashSet<string>(StringComparer.Ordinal), new HashSet<string>(StringComparer.Ordinal));
         var listed = dialogue.OfType<JsonObject>().FirstOrDefault(action => ReadString(action, "action") == "dialogueSelect");
         var optionIds = listed?["argumentValues"]?["OptionId"] as JsonArray;
-        if (optionIds is null || optionIds.Count != 1 || optionIds[0]?.GetValue<string>() != "main_option_faction_hire")
-            throw new AgentHostException("establish-clan-companion-unrelated-dialogue-leaked", "The companion executor may expose only the source-verified hiring conversation options.");
+        if (dialogue.Count != 1 || ReadString(dialogue[0] as JsonObject, "action") != "dialogueSelect" || optionIds is null || optionIds.Count != 1 || optionIds[0]?.GetValue<string>() != "main_option_faction_hire")
+            throw new AgentHostException("establish-clan-companion-native-conversation-shape-failed", "The original Native context.conversation must take precedence over Tavern scene queries and expose only its current source-verified hiring option.");
+
+        var declinedConversation = new JsonObject
+        {
+            ["context"] = new JsonObject
+            {
+                ["gameState"] = "MissionState",
+                ["conversation"] = new JsonObject
+                {
+                    ["heroId"] = "wanderer-a",
+                    ["options"] = new JsonArray(
+                        new JsonObject { ["id"] = "main_option_faction_hire", ["clickable"] = true },
+                        new JsonObject { ["id"] = "player_is_leaving_neutral_or_friendly", ["clickable"] = true })
+                }
+            }
+        };
+        var declinedCatalog = BuildActionCatalog(declinedConversation, new JsonArray(), new JsonObject(), null, null, null, null, false,
+            new HashSet<string>(StringComparer.Ordinal), new HashSet<string>(["wanderer-a"], StringComparer.Ordinal));
+        var declinedOptionIds = declinedCatalog.OfType<JsonObject>().SingleOrDefault(action => ReadString(action, "action") == "dialogueSelect")?["argumentValues"]?["OptionId"] as JsonArray;
+        if (declinedCatalog.Count != 1 || declinedOptionIds?.Count != 1 || declinedOptionIds[0]?.GetValue<string>() != "player_is_leaving_neutral_or_friendly")
+            throw new AgentHostException("establish-clan-companion-declined-wanderer-exit-not-gated", "After declining a Wanderer's quote, the current Native follow-up must allow its leave response and must not reopen the same hire offer.");
 
         var missionCandidateState = new JsonObject
         {
@@ -127,6 +150,17 @@ internal static class AgentHostEstablishClanCompanionLoop
         if (TryResolveAction(outOfCatalogWrappedIndex, missionCandidateCatalog, missionCandidateState, missionCandidateReceipt,
                 selectedHeroId: null, moveTargetId: null, pending: false, out _, out _, out _, out _, out _))
             throw new AgentHostException("establish-clan-companion-out-of-catalog-formatted-index-accepted", "Removing output formatting must never bypass the current Native AgentIndex list.");
+        var unlistedDurationDecision = new JsonObject
+        {
+            ["action"] = "missionNavigateToAgent",
+            ["arguments"] = new JsonObject { ["AgentIndex"] = 4, ["DurationSeconds"] = 12 }
+        };
+        if (TryResolveAction(unlistedDurationDecision, missionCandidateCatalog, missionCandidateState, missionCandidateReceipt,
+                selectedHeroId: null, moveTargetId: null, pending: false, out _, out _, out _, out _, out var durationRejection) ||
+            !durationRejection.Contains("AgentIndex [4]", StringComparison.Ordinal) ||
+            !durationRejection.Contains("DurationSeconds [8, 20]", StringComparison.Ordinal) ||
+            !durationRejection.Contains("no Native action was sent", StringComparison.Ordinal))
+            throw new AgentHostException("establish-clan-companion-unlisted-navigation-duration-feedback-failed", "An unlisted navigation lease must be rejected before Native execution and identify only the current exact agent/duration values.");
         if (BuildControlCatalog(false, false, false, false).Any(control => control?.GetValue<string>() == "stop") ||
             !BuildControlCatalog(true, false, false, false).Any(control => control?.GetValue<string>() == "stop"))
             throw new AgentHostException("establish-clan-companion-stop-scope-invalid", "A subgoal may stop for parent replan only from a free Native Map, never from inside a Mission.");
@@ -185,6 +219,7 @@ internal static class AgentHostEstablishClanCompanionLoop
             new { scenario = "establish-clan-companion-town-choice-window-pages-without-world-target-cap", passed = true, totalWorldTargets = 21, choiceWindow = SafeTownDecisionWindowSize },
             new { scenario = "establish-clan-companion-dialogue-catalog-excludes-unrelated-native-options", passed = true },
             new { scenario = "establish-clan-companion-nearby-target-uses-native-interact", passed = true },
+            new { scenario = "establish-clan-companion-rejects-unlisted-navigation-duration-with-current-catalog-values", passed = true },
             new { scenario = "establish-clan-companion-normalizes-only-formatted-numbers-present-in-current-native-catalog", passed = true }
         ];
     }
@@ -195,7 +230,7 @@ internal static class AgentHostEstablishClanCompanionLoop
         var provider = new FakeCompanionProvider();
         using var request = JsonDocument.Parse("{\"runId\":\"establish-clan-companion-selftest\",\"goal\":\"Reach the original Journal companion target.\",\"maxDecisions\":24,\"maxElapsedSeconds\":60}");
         var result = await RunAsync(request.RootElement, client, client, provider, CancellationToken.None);
-            var expected = new[] { "menuSelect", "menuSelect", "missionSceneAgents", "missionNavigateToAgent", "missionSceneAgents", "missionInteract", "dialogueSelect", "dialogueSelect", "dialogueSelect" };
+        var expected = new[] { "menuSelect", "menuSelect", "missionSceneAgents", "missionNavigateToAgent", "missionSceneAgents", "missionInteract", "dialogueSelect", "dialogueSelect", "dialogueSelect", "missionLeave" };
         if (ReadString(result, "status") != "completed" ||
             ReadString(result["termination"] as JsonObject, "reason") != "native-companion-journal-target-met" ||
             ReadInt(result, "actionsExecuted", 0) != expected.Length || provider.CallCount != expected.Length ||
@@ -328,17 +363,18 @@ internal static class AgentHostEstablishClanCompanionLoop
                 var objective = AgentHostEstablishYourClanGoalLoop.BuildObjectiveSnapshot(journal);
                 var companionObjective = objective["companions"] as JsonObject
                     ?? throw new AgentHostException("companion-objective-missing", "The original EYC Journal omitted its Companion target.");
-                if (ReadBoolean(companionObjective, "met"))
+                var journalTargetMet = ReadBoolean(companionObjective, "met");
+                if (journalTargetMet && gameState != "MissionState")
                     return BuildResult("completed", "native-companion-journal-target-met", null, null, state, journal, objective);
                 var liveCompanions = ReadDouble(state["storyModeEstablishClan"]?["companions"] as JsonObject, "current");
                 var journalTarget = ReadDouble(companionObjective, "target");
-                var liveGoalAhead = liveCompanions >= journalTarget && !double.IsNaN(journalTarget);
+                var liveGoalAhead = (liveCompanions >= journalTarget && !double.IsNaN(journalTarget)) || (journalTargetMet && gameState == "MissionState");
 
                 var location = state["location"] as JsonObject;
                 var currentSettlementId = ReadString(location, "currentSettlementId");
                 var targetSettlementId = ReadString(location, "targetSettlementId");
                 var menuId = ReadString(context, "menuId");
-                if (liveGoalAhead && gameState == "MapState" && string.IsNullOrWhiteSpace(menuId))
+                if (!journalTargetMet && liveGoalAhead && gameState == "MapState" && string.IsNullOrWhiteSpace(menuId))
                     return BuildResult("interrupted", "native-journal-refresh-pending", "The live Clan companion count has reached the Journal target, but the authoritative Journal has not refreshed; no second hire was attempted.", "companion-journal-refresh-pending", state, journal, objective);
                 if (gameState == "MapState" && !string.IsNullOrWhiteSpace(moveTargetId) && string.Equals(currentSettlementId, moveTargetId, StringComparison.Ordinal))
                 {
@@ -351,7 +387,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                         selectedHeroId = null;
                     }
                 }
-                if (gameState == "MissionState" && state["conversation"] is JsonObject conversation && ReadString(conversation, "heroId") is string conversationHeroId)
+                if (gameState == "MissionState" && ReadConversation(state) is JsonObject conversation && ReadString(conversation, "heroId") is string conversationHeroId)
                     selectedHeroId = conversationHeroId;
                 if (missionTransitionPending && (gameState != "MissionState" || state["mission"]?["leave"] is JsonObject leaveState && !ReadBoolean(leaveState, "active")))
                     missionTransitionPending = false;
@@ -493,6 +529,9 @@ internal static class AgentHostEstablishClanCompanionLoop
                 {
                     rejectedActionDecisions++;
                     decisionFeedback = AgentHostProviderDecisionRecovery.BuildFeedback("provider-action-unavailable", catalog, controls);
+                    if (ReadString(decision.Decision, "action") == "missionNavigateToAgent" &&
+                        rejection.StartsWith("Native navigation requires current listed AgentIndex and DurationSeconds values:", StringComparison.Ordinal))
+                        decisionFeedback["requiredNextStep"] = rejection;
                     trace.Add(BuildStep(decisions, observation, decision.Decision, null, state, "rejected",
                         new JsonObject
                         {
@@ -618,7 +657,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                         var selectedDialogueOption = ReadString(arguments, "optionId");
                         if (selectedDialogueOption == "player_companion_hire_response_2" || selectedDialogueOption == "player_companion_hire_response_1")
                             excludedHeroes.Add(selectedHeroId ?? string.Empty);
-                        if (selectedDialogueOption == "player_companion_hire_response_2")
+                        if (selectedDialogueOption is "player_companion_hire_response_2" or "player_is_leaving_neutral_or_friendly")
                         {
                             selectedHeroId = null;
                             interactTargetHeroId = null;
@@ -730,12 +769,15 @@ internal static class AgentHostEstablishClanCompanionLoop
         }
 
         if (gameState != "MissionState") return catalog;
-        var conversation = state["conversation"] as JsonObject;
+        var conversation = ReadConversation(state);
         if (conversation is not null)
         {
             var currentOptions = conversation["options"] as JsonArray ?? new JsonArray();
+            var currentConversationHeroId = ReadString(conversation, "heroId");
+            var currentConversationHeroDeclined = currentConversationHeroId is not null && excludedHeroes.Contains(currentConversationHeroId);
             var allowedOptions = currentOptions.OfType<JsonObject>()
-                .Where(option => HiringDialogueOptions.Contains(ReadString(option, "id") ?? string.Empty) && ReadBoolean(option, "clickable"))
+                .Where(option => HiringDialogueOptions.Contains(ReadString(option, "id") ?? string.Empty) && ReadBoolean(option, "clickable") &&
+                    (!currentConversationHeroDeclined || ReadString(option, "id") == "player_is_leaving_neutral_or_friendly"))
                 .Select(option => ReadString(option, "id"))
                 .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToArray();
             if (allowedOptions.Length > 0)
@@ -853,26 +895,35 @@ internal static class AgentHostEstablishClanCompanionLoop
                 if (!TryReadListedInteger(supplied["AgentIndex"], listed["argumentValues"]?["AgentIndex"] as JsonArray, out var agentIndex)) return false;
                 var candidate = (sceneAgentsReceipt?["data"]?["agents"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(item => ReadInt(item, "agentIndex", -1) == agentIndex &&
                     ReadString(item, "occupation") == "Wanderer" && !ReadBoolean(item, "isEnemy") && !ReadBoolean(item, "isNotable") && !string.IsNullOrWhiteSpace(ReadString(item, "heroId")));
-                var currentConversationHero = ReadString(state["conversation"] as JsonObject, "heroId");
+                var currentConversationHero = ReadString(ReadConversation(state), "heroId");
                 if (candidate is null || (selectedHeroId is not null && ReadString(candidate, "heroId") != selectedHeroId) || currentConversationHero is not null) return false;
                 targetHeroId = ReadString(candidate, "heroId");
                 arguments["agentIndex"] = agentIndex;
                 if (action == "missionNavigateToAgent")
                 {
-                    if (!TryReadListedInteger(supplied["DurationSeconds"], listed["argumentValues"]?["DurationSeconds"] as JsonArray, out var duration)) return false;
+                    var allowedDurations = listed["argumentValues"]?["DurationSeconds"] as JsonArray;
+                    if (!TryReadListedInteger(supplied["DurationSeconds"], allowedDurations, out var duration))
+                    {
+                        var allowedIndexes = string.Join(", ", ((listed["argumentValues"]?["AgentIndex"] as JsonArray)?.OfType<JsonValue>() ?? Enumerable.Empty<JsonValue>())
+                            .Select(value => value.TryGetValue<int>(out var index) ? index.ToString(CultureInfo.InvariantCulture) : null).Where(value => value is not null));
+                        var allowedDurationValues = string.Join(", ", (allowedDurations?.OfType<JsonValue>() ?? Enumerable.Empty<JsonValue>())
+                            .Select(value => value.TryGetValue<int>(out var seconds) ? seconds.ToString(CultureInfo.InvariantCulture) : null).Where(value => value is not null));
+                        rejection = $"Native navigation requires current listed AgentIndex and DurationSeconds values: AgentIndex [{allowedIndexes}], DurationSeconds [{allowedDurationValues}]. Use one exact listed pair; no Native action was sent.";
+                        return false;
+                    }
                     arguments["durationSeconds"] = duration;
                 }
                 else if (!(state["mission"]?["nearbySceneAgents"] as JsonArray)?.OfType<JsonObject>().Any(local => ReadInt(local, "agentIndex", -1) == agentIndex && ReadBoolean(local, "isInteractable")) == true)
                     return false;
                 return true;
             case "dialogueSelect":
-                var currentOptions = state["conversation"]?["options"] as JsonArray;
+                var currentOptions = ReadConversation(state)?["options"] as JsonArray;
                 var selectedOption = ReadString(supplied, "OptionId");
                 if (selectedOption is null || !HiringDialogueOptions.Contains(selectedOption) ||
                     !listed["argumentValues"]?["OptionId"]?.AsArray().Any(value => value?.GetValue<string>() == selectedOption) == true ||
                     !currentOptions?.OfType<JsonObject>().Any(option => ReadString(option, "id") == selectedOption && ReadBoolean(option, "clickable")) == true) return false;
                 arguments["optionId"] = selectedOption;
-                targetHeroId = ReadString(state["conversation"] as JsonObject, "heroId");
+                targetHeroId = ReadString(ReadConversation(state), "heroId");
                 return targetHeroId is not null;
             default:
                 return false;
@@ -907,6 +958,8 @@ internal static class AgentHostEstablishClanCompanionLoop
         var candidate = agents.OfType<JsonObject>().FirstOrDefault(agent => ReadString(agent, "heroId") == heroId);
         return candidate is null ? null : ReadDouble(candidate, "distance");
     }
+
+    private static JsonObject? ReadConversation(JsonObject? state) => state?["context"]?["conversation"] as JsonObject;
 
     private static bool IsWandererInteractable(JsonObject? state, string? heroId) =>
         !string.IsNullOrWhiteSpace(heroId) &&
@@ -1286,6 +1339,10 @@ internal static class AgentHostEstablishClanCompanionLoop
                 var optionId = _stage == 0 ? "town_backstreet" : "town_tavern";
                 state = BuildState("MapState", menuId, new JsonArray(new JsonObject { ["id"] = optionId, ["available"] = true, ["enabled"] = true, ["isLeave"] = false }));
             }
+            else if (_stage >= 9)
+            {
+                state = BuildState("MapState", null, new JsonArray());
+            }
             else
             {
                 state = BuildState("MissionState", null, new JsonArray());
@@ -1296,11 +1353,11 @@ internal static class AgentHostEstablishClanCompanionLoop
                     ActiveMissionNavigationStateReads++;
                 }
                 if (_stage == 5)
-                    state["conversation"] = BuildConversation("wanderer-a", "Wanderer business offer", "wanderer_meet_player_response2");
+                    state["context"]!["conversation"] = BuildConversation("wanderer-a", "Wanderer business offer", "wanderer_meet_player_response2");
                 else if (_stage == 6)
-                    state["conversation"] = BuildConversation("wanderer-a", "Company offer", "main_option_faction_hire");
+                    state["context"]!["conversation"] = BuildConversation("wanderer-a", "Company offer", "main_option_faction_hire");
                 else if (_stage == 7)
-                    state["conversation"] = BuildConversation("wanderer-a", "Wanderer asks for 660 denars", "player_companion_hire_response_1", "player_companion_hire_response_2");
+                    state["context"]!["conversation"] = BuildConversation("wanderer-a", "Wanderer asks for 660 denars", "player_companion_hire_response_1", "player_companion_hire_response_2");
                 else if (_stage >= 4)
                     state["mission"] = new JsonObject
                     {
@@ -1361,6 +1418,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                     return Receipt(action, data);
                 case "missionNavigateToAgent": _stage = 4; _navigated = true; _missionNavigationActiveReadsRemaining = 3; data = new JsonObject { ["targetAgentIndex"] = 4, ["status"] = "navigating" }; return Receipt(action, data);
                 case "missionInteract": _stage = 5; data = new JsonObject { ["targetHeroId"] = "wanderer-a", ["conversationStarted"] = true }; return Receipt(action, data);
+                case "missionLeave": _stage = 9; data = new JsonObject { ["status"] = "holding-native-leave-area" }; return Receipt(action, data);
                 case "dialogueSelect":
                     var optionId = ReadString(arguments, "optionId");
                     _stage = optionId switch
@@ -1405,7 +1463,8 @@ internal static class AgentHostEstablishClanCompanionLoop
             ("missionInteract", new JsonObject { ["AgentIndex"] = 4 }),
             ("dialogueSelect", new JsonObject { ["OptionId"] = "wanderer_meet_player_response2" }),
             ("dialogueSelect", new JsonObject { ["OptionId"] = "main_option_faction_hire" }),
-            ("dialogueSelect", new JsonObject { ["OptionId"] = "player_companion_hire_response_1" })
+            ("dialogueSelect", new JsonObject { ["OptionId"] = "player_companion_hire_response_1" }),
+            ("missionLeave", new JsonObject())
         ];
         internal int CallCount { get; private set; }
         internal bool SawActiveMissionNavigation { get; private set; }
