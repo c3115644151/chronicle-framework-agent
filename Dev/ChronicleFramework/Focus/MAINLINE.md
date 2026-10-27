@@ -1100,4 +1100,9 @@ Fresh StoryMode run `TestResults/20261027-135719` on commit `aa44ef6` confirms t
 
 `TestResults/20261027-202355`真实Campaign执行用户批准的条件化投降：模型选当前Native`surrender`，之后选当前Captivity赎金选项`mno_captivity_end_ransom_accept`，Native返回自由Map/可用MainParty（1人）；不算Battle胜利或Renown。Host继续自然规划后仍因`no-current-integrated-route-available`失败，EYC保持active。
 
-失败审计显示PartySize的Native/Journal从1→5/25，但模型因当前RecruitmentVM无继续动作而stop，父循环将PartySize整条route标为unavailable；随后其它目标未推进Journal，父循环最终永久屏蔽所有集成目标。Autonomy现在比较失败子流程返回的权威Journal快照和父级选择前快照；仅当权威Journal current/target有进步时清除先前route blocks；单独执行只读查询或无进度菜单动作不会无限重开停滞路线。安全停止本身不算完成，当前Journal无进步则保留该route block。此逻辑由`TestResults/20261027-205657`包回归通过，真实模型再次执行并完成EYC仍未验证。Harness contract version 7.373。
+失败审计显示PartySize的Native/Journal从1→5/25，但模型因当前RecruitmentVM无继续动作而stop，父循环将PartySize整条route标为unavailable；随后其它目标未推进Journal，父循环最终永久屏蔽所有集成目标。Autonomy现在比较失败子流程返回的权威Journal快照和父级选择前快照；仅当权威Journal current/target有进步时重开当前失败路线；其它暂时blocked routes记录Native上下文指纹，并在CampaignDay/时钟档、地图/菜单、Party/Economy/Captivity或可见敌对队伍变化后重开。纯只读查询不会解锁；安全停止本身不算完成，Journal未进步且Native上下文未变时保留route block。此逻辑由`TestResults/20261027-205657`包回归通过，真实模型再次执行并完成EYC仍未验证。Harness contract version 7.373。
+### 2026-10-27 自然投降恢复与Autonomy剩余路线
+
+`TestResults/20261027-212720`真实StoryMode中，模型通过`recoverPlayerCaptivity`条件分支在Send Troops/Leave不可用时选择Native surrender、接受当前赎金并回到Map；Companion Journal达到1/1，MainParty一度达到13人。运行以`no-current-integrated-route-available`失败结束，未完成EYC：Renown仍20，PartySize仍未达到目标，Gold远低于2000。Host汇总193个真实模型决定、121条Native动作，估算¥1.498/预留¥2.431；录屏88事件/88时间线选择无失败，原MP4已删除，游戏和Host清理。外层Harness Passed不代表EYC完成。
+
+上轮的“只按Journal进展重开route”避免了无数据变化的空转，但动态世界中同一条路在地图、自然CampaignDay或周边敌方Party改变后可能重新可行。现在每个暂时blocked route保存一份Native可行动状态指纹；进入新Autonomy周期时，仅当Journal current/target已变，或CampaignDay/时间模式、地图位置/目标、菜单、MainParty/Gold/Renown/Captivity、可见附近Party有真实变化时才解锁。只调用`mapSettlementTargets`、`recruitOptions`等只读查询不会解锁。`TestResults/20261027-205657`覆盖纯Journal进展与无进展判定；`TestResults/20261027-221924`AgentHostPackage通过状态指纹同值保持blocked、CampaignDay变化重新开放的回归。真实自然战役是否能从这种条件恢复继续完成四项目标仍需验证。Harness contract version 7.376。

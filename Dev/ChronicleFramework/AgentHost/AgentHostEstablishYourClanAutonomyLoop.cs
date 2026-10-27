@@ -69,6 +69,12 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         retryAfter["partySize"]!["current"] = 5.0;
         if (!HasObjectiveSnapshotProgressChanged(retryBefore, retryAfter) || HasObjectiveSnapshotProgressChanged(retryAfter, retryAfter))
             throw new AgentHostException("establish-clan-autonomy-child-journal-progress-detection-failed", "A child result whose official Journal snapshot progressed must be recognized even if that child safely stopped before its target.");
+        using var routeStateBefore = JsonDocument.Parse("""{"campaignDay":1.0,"timeControlMode":"StoppablePlay","state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false,"captivity":{"isCaptive":false}},"location":{"currentSettlementId":null,"targetSettlementId":"town-a","targetPartyId":null},"party":{"members":11},"economy":{"gold":332,"renown":20},"nearbyParties":[]}}""");
+        using var routeStateSame = JsonDocument.Parse(routeStateBefore.RootElement.GetRawText());
+        using var routeStateChanged = JsonDocument.Parse("""{"campaignDay":2.0,"timeControlMode":"StoppablePlay","state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false,"captivity":{"isCaptive":false}},"location":{"currentSettlementId":null,"targetSettlementId":"town-a","targetPartyId":null},"party":{"members":11},"economy":{"gold":332,"renown":20},"nearbyParties":[]}}""");
+        if (BuildObjectiveRouteAvailabilityFingerprint(routeStateBefore.RootElement) != BuildObjectiveRouteAvailabilityFingerprint(routeStateSame.RootElement) ||
+            BuildObjectiveRouteAvailabilityFingerprint(routeStateBefore.RootElement) == BuildObjectiveRouteAvailabilityFingerprint(routeStateChanged.RootElement))
+            throw new AgentHostException("establish-clan-autonomy-route-state-fingerprint-failed", "Route blocks must remain stable while relevant Native state is unchanged and reopen when Campaign world state changes.");
         results.Add(new { scenario = "establish-clan-autonomy-retries-partial-objective-after-child-journal-progress", passed = true });
         if (!IsRecoverableObjectiveProviderFailure("provider-http-error", "FreeLLMAPI returned HTTP 502. fallbackAttempts=2") ||
             !IsRecoverableObjectiveProviderFailure("provider-http-error", "FreeLLMAPI returned HTTP 503. fallbackAttempts=1") ||
@@ -287,7 +293,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 }
                 if (companionProviderFailureChildCalls != 3 || companionProviderFailureNative.IsInCompanionMission ||
                     !companionProviderFailureNative.CompanionNativeActions.SequenceEqual(["missionLeave"], StringComparer.Ordinal))
-                    throw new AgentHostException("autonomy-selftest-companion-retry-state-invalid", "A failed Companion route may be attempted again only after separate Journal progress and one verified Native Leave; its prior actions must not be replayed.");
+                    throw new AgentHostException("autonomy-selftest-companion-retry-state-invalid", "A failed Companion route may be attempted again only after one verified Native Leave changed the player from Tavern Mission to free Map; its prior actions must not be replayed.");
                 companionProviderFailureNative.CompleteSuccessfully();
                 return new JsonObject
                 {
@@ -319,13 +325,14 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             companionProviderFailureNative.CompanionNativeActions.Count != 1 ||
             companionProviderAllowedObjectives.Count != 3 ||
             !companionProviderAllowedObjectives[0].Contains("companions", StringComparer.Ordinal) ||
-            !companionProviderAllowedObjectives[1].SequenceEqual(["gold"], StringComparer.Ordinal) ||
+            !companionProviderAllowedObjectives[1].Contains("gold", StringComparer.Ordinal) ||
+            !companionProviderAllowedObjectives[1].Contains("companions", StringComparer.Ordinal) ||
             !companionProviderAllowedObjectives[2].SequenceEqual(["companions"], StringComparer.Ordinal) ||
             !((companionProviderRecovered["trace"] as JsonArray)?.OfType<JsonObject>().Any(step =>
                 ReadString(step, "stage") == "objective-route-blocked-after-companion-provider-failure" &&
                 ReadBoolean(step, "nativeLeaveVerified") && !ReadBoolean(step, "replayedChildActions")) ?? false))
-            throw new AgentHostException("establish-clan-autonomy-companion-provider-failure-recovery-selftest-failed", "A provider error inside a supported Tavern Mission must return through Native Leave, replan another objective, and may retry Companion only after verified Journal progress; no previous action may be replayed. status=" + ReadString(companionProviderRecovered, "status") + "; termination=" + ReadString(companionProviderRecovered["termination"] as JsonObject, "reason") + "; goalVerified=" + ReadBoolean(companionProviderRecovered["termination"] as JsonObject, "goalVerified") + "; actions=" + ReadInt(companionProviderRecovered, "actionsExecuted", 0) + "; plannerCalls=" + companionProviderFailurePlanner.CallCount + "; childCalls=" + companionProviderFailureChildCalls + "; leaveActions=" + string.Join(",", companionProviderFailureNative.CompanionNativeActions) + "; allowed=" + string.Join("|", companionProviderAllowedObjectives.Select(ids => string.Join(",", ids))));
-        results.Add(new { scenario = "establish-clan-autonomy-leaves-tavern-replans-and-retries-companion-only-after-journal-progress", modelDecisions = companionProviderFailurePlanner.CallCount, nativeActions = companionProviderRecovered["actionsExecuted"]?.GetValue<int>(), passed = true });
+            throw new AgentHostException("establish-clan-autonomy-companion-provider-failure-recovery-selftest-failed", "A provider error inside a supported Tavern Mission must return through Native Leave; the changed Native Map context can reopen Companion while another objective is considered, without replaying the failed child action. status=" + ReadString(companionProviderRecovered, "status") + "; termination=" + ReadString(companionProviderRecovered["termination"] as JsonObject, "reason") + "; goalVerified=" + ReadBoolean(companionProviderRecovered["termination"] as JsonObject, "goalVerified") + "; actions=" + ReadInt(companionProviderRecovered, "actionsExecuted", 0) + "; plannerCalls=" + companionProviderFailurePlanner.CallCount + "; childCalls=" + companionProviderFailureChildCalls + "; leaveActions=" + string.Join(",", companionProviderFailureNative.CompanionNativeActions) + "; allowed=" + string.Join("|", companionProviderAllowedObjectives.Select(ids => string.Join(",", ids))));
+        results.Add(new { scenario = "establish-clan-autonomy-leaves-tavern-replans-and-retries-companion-after-native-map-return", modelDecisions = companionProviderFailurePlanner.CallCount, nativeActions = companionProviderRecovered["actionsExecuted"]?.GetValue<int>(), passed = true });
         return results;
     }
 
@@ -352,6 +359,17 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         long promptTokens = priorPromptTokens;
         long completionTokens = priorCompletionTokens;
         var unavailableObjectives = new HashSet<string>(StringComparer.Ordinal);
+        var unavailableObjectiveFingerprints = new Dictionary<string, string>(StringComparer.Ordinal);
+        void MarkObjectiveUnavailable(string objectiveId, JsonElement native)
+        {
+            unavailableObjectives.Add(objectiveId);
+            unavailableObjectiveFingerprints[objectiveId] = BuildObjectiveRouteAvailabilityFingerprint(native);
+        }
+        void ClearUnavailableObjectives()
+        {
+            unavailableObjectives.Clear();
+            unavailableObjectiveFingerprints.Clear();
+        }
         var objectiveRuns = new JsonArray();
         var start = Stopwatch.GetTimestamp();
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -428,6 +446,19 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             {
                 elapsed.Token.ThrowIfCancellationRequested();
                 using var current = await client.ReadStateAsync(elapsed.Token);
+                var currentRouteFingerprint = BuildObjectiveRouteAvailabilityFingerprint(current.RootElement);
+                foreach (var previouslyBlocked in unavailableObjectiveFingerprints
+                             .Where(entry => !string.Equals(entry.Value, currentRouteFingerprint, StringComparison.Ordinal))
+                             .Select(entry => entry.Key).ToArray())
+                {
+                    unavailableObjectives.Remove(previouslyBlocked);
+                    unavailableObjectiveFingerprints.Remove(previouslyBlocked);
+                    trace.Add(new JsonObject
+                    {
+                        ["stage"] = "objective-route-reopened-after-native-state-change",
+                        ["objectiveId"] = previouslyBlocked
+                    });
+                }
                 var lifecycle = ReadLifecycleStatus(current.RootElement);
                 if (!AgentHostEstablishYourClanGoalLoop.HasActiveQuest(current.RootElement))
                 {
@@ -560,7 +591,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                     var failedChildJournalProgress = HasObjectiveSnapshotProgressChanged(snapshot, child["objectiveSnapshot"] as JsonObject);
                     if (ShouldReconsiderUnavailableObjectives(journalProgressChanged: failedChildJournalProgress))
                     {
-                        unavailableObjectives.Clear();
+                        ClearUnavailableObjectives();
                         trace.Add(new JsonObject
                         {
                             ["stage"] = "failed-objective-native-actions-reopened-other-routes",
@@ -613,7 +644,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         using var afterIncidentBattle = await client.ReadStateAsync(elapsed.Token);
                         if (IsPlayerCaptive(afterIncidentBattle.RootElement))
                         {
-                            unavailableObjectives.Add(objectiveId);
+                            MarkObjectiveUnavailable(objectiveId, afterIncidentBattle.RootElement);
                             trace.Add(new JsonObject
                             {
                                 ["stage"] = "incident-bandit-battle-returned-player-captive",
@@ -630,7 +661,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                                 return BuildResult("failed", "incident-bandit-leave-return-state-unverified", false,
                                     "The current Native Leave option was used because Send Troops was unavailable, but a safe Map and active EYC were not reverified.",
                                     "incident-bandit-leave-return-state-unverified", journalObjectives, snapshot, differences);
-                            unavailableObjectives.Add(objectiveId);
+                            MarkObjectiveUnavailable(objectiveId, afterIncidentBattle.RootElement);
                             trace.Add(new JsonObject
                             {
                                 ["stage"] = "incident-bandit-native-leave-without-simulation-replanned",
@@ -657,9 +688,9 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         var afterIncidentData = ReadQuestDetailsData(afterIncidentDetails.RootElement);
                         var afterIncidentJournal = AgentHostEstablishYourClanGoalLoop.BuildJournalObjectives(afterIncidentData);
                         if (HasJournalProgressChanged(journalObjectives, afterIncidentJournal))
-                            unavailableObjectives.Clear();
+                            ClearUnavailableObjectives();
                         else
-                            unavailableObjectives.Add(objectiveId);
+                            MarkObjectiveUnavailable(objectiveId, afterIncidentBattle.RootElement);
                         trace.Add(new JsonObject
                         {
                             ["stage"] = "hostile-bandit-interruption-resolved-and-parent-replanned",
@@ -675,7 +706,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
 
                     if (IsPlayerCaptive(failedState.RootElement))
                     {
-                        unavailableObjectives.Add(objectiveId);
+                        MarkObjectiveUnavailable(objectiveId, failedState.RootElement);
                         trace.Add(new JsonObject
                         {
                             ["stage"] = "objective-child-returned-mainhero-captive",
@@ -696,7 +727,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         if (InitiallyIntegratedObjectives.Contains(objectiveId) && freeMap && IsSafeMapForObjectiveProviderReplan(failedState.RootElement) &&
                             AgentHostEstablishYourClanGoalLoop.HasActiveQuest(failedState.RootElement))
                         {
-                            unavailableObjectives.Add(objectiveId);
+                            MarkObjectiveUnavailable(objectiveId, failedState.RootElement);
                             trace.Add(new JsonObject
                             {
                                 ["stage"] = "objective-provider-failure-route-blocked-on-free-map",
@@ -750,7 +781,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                                     "Native Leave was accepted after a Companion provider failure, but a safe free Map state was not verified within the bounded recovery window.",
                                     "companion-provider-failure-leave-unverified", journalObjectives, snapshot, differences);
 
-                            unavailableObjectives.Add(objectiveId);
+                            MarkObjectiveUnavailable(objectiveId, failedState.RootElement);
                             trace.Add(new JsonObject
                             {
                                 ["stage"] = "objective-route-blocked-after-companion-provider-failure",
@@ -876,7 +907,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
 
                     if (IsSafeObjectiveRouteUnavailable(objectiveId, termination, freeMap))
                     {
-                        if (!failedChildJournalProgress) unavailableObjectives.Add(objectiveId);
+                        if (!failedChildJournalProgress) MarkObjectiveUnavailable(objectiveId, failedState.RootElement);
                         trace.Add(new JsonObject
                         {
                             ["stage"] = failedChildJournalProgress ? "objective-route-retry-after-partial-journal-progress" : "objective-route-blocked",
@@ -901,9 +932,9 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 var afterData = ReadQuestDetailsData(afterDetails.RootElement);
                 var afterJournal = AgentHostEstablishYourClanGoalLoop.BuildJournalObjectives(afterData);
                 if (HasJournalProgressChanged(journalObjectives, afterJournal))
-                    unavailableObjectives.Clear();
+                    ClearUnavailableObjectives();
                 else
-                    unavailableObjectives.Add(objectiveId);
+                    MarkObjectiveUnavailable(objectiveId, afterState.RootElement);
             }
 
             var latestState = await client.ReadStateAsync(elapsed.Token);
@@ -997,6 +1028,29 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 return true;
         }
         return false;
+    }
+
+    internal static string BuildObjectiveRouteAvailabilityFingerprint(JsonElement native)
+    {
+        var root = JsonNode.Parse(native.GetRawText())?.AsObject() ?? new JsonObject();
+        var state = root["state"] as JsonObject ?? new JsonObject();
+        var context = state["context"] as JsonObject;
+        var location = state["location"] as JsonObject;
+        var party = state["party"] as JsonObject;
+        var economy = state["economy"] as JsonObject;
+        var captivity = context?["captivity"] as JsonObject;
+        var nearbyPartyFingerprint = string.Join(",", (state["nearbyParties"] as JsonArray ?? new JsonArray())
+            .OfType<JsonObject>()
+            .Select(item => string.Join(":", ReadString(item, "id"), ReadString(item, "type"), ReadBoolean(item, "hostile"), ReadInt(item, "members", -1)))
+            .OrderBy(value => value, StringComparer.Ordinal));
+        return string.Join("|",
+            ReadDouble(root, "campaignDay").ToString("R", CultureInfo.InvariantCulture),
+            ReadString(root, "timeControlMode") ?? ReadString(context, "timeControlMode"),
+            ReadString(context, "gameState"), ReadString(context, "menuId"), ReadBoolean(context, "encounterActive"),
+            ReadString(location, "currentSettlementId"), ReadString(location, "targetSettlementId"), ReadString(location, "targetPartyId"),
+            ReadInt(party, "members", -1), ReadInt(economy, "gold", -1),
+            ReadDouble(economy, "renown").ToString("R", CultureInfo.InvariantCulture), ReadBoolean(captivity, "isCaptive"),
+            nearbyPartyFingerprint);
     }
 
     internal static bool ShouldReconsiderUnavailableObjectives(bool journalProgressChanged) => journalProgressChanged;

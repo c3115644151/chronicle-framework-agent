@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.373'
+$contractVersion = '7.376'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -573,6 +573,8 @@ if ($agentHostEstablishClanAutonomySource -notmatch 'priorProviderRouteHistory: 
 }
 if ($agentHostEstablishClanAutonomySource -notmatch 'failed-objective-native-actions-reopened-other-routes' -or
     $agentHostEstablishClanAutonomySource -notmatch 'HasObjectiveSnapshotProgressChanged\(snapshot, child\["objectiveSnapshot"\] as JsonObject\)' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'BuildObjectiveRouteAvailabilityFingerprint' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'objective-route-reopened-after-native-state-change' -or
     $agentHostEstablishClanAutonomySource -notmatch 'objective-route-retry-after-partial-journal-progress') {
     throw 'A failed EYC subgoal with authoritative Journal progress must remain eligible for another attempt; route blocks must not survive real partial progress.'
 }
@@ -1426,8 +1428,8 @@ if ($agentHostEstablishClanAutonomySource -notmatch 'IsRecoverableObjectiveProvi
     $agentHostEstablishClanAutonomySource -notmatch 'companion-provider-failure-native-leave-started' -or
     $agentHostEstablishClanAutonomySource -notmatch 'companion-provider-failure-leave-unverified' -or
     $agentHostEstablishClanAutonomySource -notmatch 'objective-provider-failure-route-blocked-on-free-map' -or
-    $agentHostEstablishClanAutonomySource -notmatch 'establish-clan-autonomy-leaves-tavern-replans-and-retries-companion-only-after-journal-progress' -or
-    $agentHostEstablishClanAutonomySource -notmatch 'replayedChildActions') { throw 'Companion provider failure may replan only after a supported, modal-free Tavern Native Leave has returned to a free Map; the failed subflow is never replayed and may re-enter the objective only after fresh Journal progress.' }
+    $agentHostEstablishClanAutonomySource -notmatch 'establish-clan-autonomy-leaves-tavern-replans-and-retries-companion-after-native-map-return' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'replayedChildActions') { throw 'Companion provider failure may replan only after a supported, modal-free Tavern Native Leave has returned to a free Map; the failed subflow is never replayed and route availability may refresh after verified Native state changes.' }
 if ($agentHostEstablishClanAutonomySource -notmatch 'IsFreeMapForObjectiveReplan\(failedState\.RootElement\)' -or
     $agentHostEstablishClanAutonomySource -notmatch 'AgentHostCampaignStateFacts\.IsActiveEncounter\(state\)' -or
     $agentHostEstablishClanAutonomySource -notmatch 'town-menu-is-free-map-for-objective-replan-but-hostile-encounter-is-not') { throw 'Parent EYC replan safety must use the shared Native location-menu classifier so a Town menu is not mistaken for a hostile Party encounter, while true encounters remain blocked.' }
