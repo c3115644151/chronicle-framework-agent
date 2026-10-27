@@ -265,6 +265,8 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
         {
             "mapSettlementTargets" or "tradeOptions" or "tradeConfirm" or "tradeCancel" or "tradeCancelChanges" => arguments.Count == 0,
             "move" => HasOnlyKeys(arguments, "settlementId") && HasText(arguments, "settlementId"),
+            "dialogueContinue" => arguments.Count == 0,
+            "dialogueSelect" => HasOnlyKeys(arguments, "optionId") && HasText(arguments, "optionId"),
             "menuSelect" => HasOnlyKeys(arguments, "menuId", "optionId") && HasText(arguments, "menuId") && HasText(arguments, "optionId"),
             "trade" => HasOnlyKeys(arguments, "direction", "itemViewModelId", "inventorySide", "amount") &&
                 arguments["direction"] is JsonValue directionNode && directionNode.TryGetValue<string>(out var direction) && direction == "sell" &&
@@ -272,7 +274,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
                 HasText(arguments, "itemViewModelId") && arguments["amount"] is JsonValue amountNode && amountNode.TryGetValue<int>(out var amount) && amount == 1,
             _ => false
         };
-        if (!valid) throw new AgentHostException("native-action-not-in-gold-sale-scope", "The W7-P Native adapter allows only safe movement, current Town trade navigation, one exact sale, transaction confirmation, or explicit cancellation.");
+        if (!valid) throw new AgentHostException("native-action-not-in-gold-sale-scope", "The W7-P Native adapter allows safe movement, a currently observed Campaign conversation step, current Town trade navigation, one exact sale, transaction confirmation, or explicit cancellation.");
     }
 
     internal static IReadOnlyList<object> RunGoldSaleActionContractSelfTests()
@@ -281,6 +283,8 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
         {
             ("mapSettlementTargets", "{}"),
             ("move", "{\"settlementId\":\"visible-safe-town\"}"),
+            ("dialogueContinue", "{}"),
+            ("dialogueSelect", "{\"optionId\":\"current-visible-option\"}"),
             ("menuSelect", "{\"menuId\":\"town\",\"optionId\":\"trade\"}"),
             ("tradeOptions", "{}"),
             ("trade", "{\"direction\":\"sell\",\"itemViewModelId\":\"current-goods-id\",\"inventorySide\":\"PlayerInventory\",\"amount\":1}"),
@@ -293,6 +297,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
         var invalidCases = new (string Action, string Json)[]
         {
             ("pause", "{}"),
+            ("dialogueSelect", "{\"optionId\":\"unobserved\",\"force\":true}"),
             ("trade", "{\"direction\":\"buy\",\"itemViewModelId\":\"market-goods\",\"inventorySide\":\"OtherInventory\",\"amount\":1}"),
             ("trade", "{\"direction\":\"sell\",\"itemViewModelId\":\"current-goods-id\",\"inventorySide\":\"PlayerInventory\",\"amount\":2}"),
             ("trade", "{\"direction\":\"sell\",\"itemViewModelId\":\"current-goods-id\",\"inventorySide\":\"OtherInventory\",\"amount\":1}"),

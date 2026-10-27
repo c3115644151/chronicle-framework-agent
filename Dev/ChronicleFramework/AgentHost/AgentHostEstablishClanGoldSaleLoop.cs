@@ -111,6 +111,57 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         existingMove["location"]!["targetSettlementId"] = "user-existing-target";
         if (BuildActionCatalog(existingMove, null, null, null).Count != 0)
             throw new AgentHostException("gold-sale-self-test-existing-move-overwritten", "The Gold sale loop must not replace a Native movement order it did not issue.");
+
+        var travelConversation = MapState(null, null, []);
+        travelConversation["party"]!["isMoving"] = true;
+        travelConversation["location"]!["targetSettlementId"] = "safe-town";
+        travelConversation["context"]!["conversation"] = new JsonObject
+        {
+            ["sentenceText"] = "My lord, I have something to discuss.",
+            ["options"] = new JsonArray(new JsonObject { ["id"] = "grievance_requested", ["text"] = "Continue, I am listening.", ["clickable"] = true })
+        };
+        var travelDialogueCatalog = BuildActionCatalog(travelConversation, null, null, "safe-town");
+        var travelDialogueOptionIds = travelDialogueCatalog.FirstOrDefault()?["argumentValues"]?["OptionId"] as JsonArray;
+        if (travelDialogueCatalog.Count != 1 || ReadString(travelDialogueCatalog[0] as JsonObject, "action") != "dialogueSelect" ||
+            travelDialogueOptionIds?.Count != 1 || travelDialogueOptionIds[0]?.GetValue<string>() != "grievance_requested" ||
+            BuildControlCatalog(travelConversation, "safe-town").Count != 0)
+            throw new AgentHostException("gold-sale-self-test-map-dialogue-does-not-yield-to-wait", "An active Native MapState conversation must replace movement waits with only its currently clickable Native options.");
+        if (!TryResolveAction(travelConversation, null, travelDialogueCatalog,
+            new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "grievance_requested" } },
+            null, "safe-town", out var travelDialogueAction, out var travelDialogueArguments, out _) ||
+            travelDialogueAction != "dialogueSelect" || ReadString(travelDialogueArguments, "optionId") != "grievance_requested")
+            throw new AgentHostException("gold-sale-self-test-map-dialogue-current-option-not-resolved", "MapState dialogue must resolve exactly the current visible clickable option through the existing Native action.");
+        if (TryResolveAction(travelConversation, null, travelDialogueCatalog,
+            new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "stale-option" } },
+            null, "safe-town", out _, out _, out _))
+            throw new AgentHostException("gold-sale-self-test-map-dialogue-stale-option-accepted", "A previous or unlisted conversation option must be rejected before Native dispatch.");
+        var travelDialogueText = MapState(null, null, []);
+        travelDialogueText["context"]!["conversation"] = new JsonObject { ["sentenceText"] = "The Native NPC continues speaking.", ["options"] = new JsonArray() };
+        var travelDialogueContinueCatalog = BuildActionCatalog(travelDialogueText, null, null, null);
+        if (travelDialogueContinueCatalog.Count != 1 || ReadString(travelDialogueContinueCatalog[0] as JsonObject, "action") != "dialogueContinue" ||
+            !TryResolveAction(travelDialogueText, null, travelDialogueContinueCatalog,
+                new JsonObject { ["action"] = "dialogueContinue", ["arguments"] = new JsonObject() }, null, null,
+                out var continueAction, out var continueArguments, out _) || continueAction != "dialogueContinue" || continueArguments?.Count != 0)
+            throw new AgentHostException("gold-sale-self-test-map-dialogue-continue-not-bounded", "Native Continue may be offered only for an active MapState conversation with no listed options.");
+        var disabledDialogueOptions = MapState(null, null, []);
+        disabledDialogueOptions["context"]!["conversation"] = new JsonObject
+        {
+            ["options"] = new JsonArray(new JsonObject { ["id"] = "disabled", ["clickable"] = false })
+        };
+        if (BuildActionCatalog(disabledDialogueOptions, null, null, null).Count != 0 || BuildControlCatalog(disabledDialogueOptions, "safe-town").Count != 0)
+            throw new AgentHostException("gold-sale-self-test-disabled-map-dialogue-not-fail-closed", "A MapState conversation with no clickable Native option must not fall through to waiting or an unrelated action.");
+        var dialogueEndedStoppedMove = MapState(null, null, []);
+        if (!IsInterruptedMapMove(dialogueEndedStoppedMove, "safe-town", moveStartPending: false) ||
+            IsInterruptedMapMove(moveStarting, "safe-town", moveStartPending: true))
+            throw new AgentHostException("gold-sale-self-test-cleared-native-move-target-not-replanned", "If a map dialogue ends after Native clears the issued move, re-query current targets; do not clear a move that is still starting.");
+        dialogueEndedStoppedMove["location"]!["targetSettlementId"] = "safe-town";
+        if (!IsInterruptedMapMove(dialogueEndedStoppedMove, "safe-town", moveStartPending: false))
+            throw new AgentHostException("gold-sale-self-test-stale-native-target-blocks-replanning", "A stale Native target ID without isMoving must not keep the sale route from re-querying map targets.");
+        var dialogueEndedMoving = MapState(null, null, []);
+        dialogueEndedMoving["party"]!["isMoving"] = true;
+        dialogueEndedMoving["location"]!["targetSettlementId"] = "safe-town";
+        if (IsInterruptedMapMove(dialogueEndedMoving, "safe-town", moveStartPending: false))
+            throw new AgentHostException("gold-sale-self-test-resumed-native-move-cleared", "Keep passively observing when the original Native travel target remains active after the conversation.");
         var disabledTradeMenu = MapState("town", "sargot", new JsonArray(new JsonObject { ["id"] = "trade", ["available"] = true, ["enabled"] = false }));
         if (BuildActionCatalog(disabledTradeMenu, null, null, null).Count != 0)
             throw new AgentHostException("gold-sale-self-test-disabled-trade-menu-leaked", "A disabled Native Trade menu entry must not become an agent action.");
@@ -317,6 +368,14 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 var state = currentNative["state"] as JsonObject ?? throw new AgentHostException("gold-sale-state-missing", "Native returned no Campaign state.");
                 if (IsActiveEncounter(state) || ReadBoolean((state["context"] as JsonObject)?["captivity"] as JsonObject, "isCaptive"))
                     throw new AgentHostException("gold-sale-encounter-out-of-scope", "A new encounter or Captivity interrupted the sale path; no battle or unverified recovery was started.");
+
+                if (IsInterruptedMapMove(state, moveTargetId, moveStartPending))
+                {
+                    // A Native map conversation can interrupt and clear an issued move. Do not
+                    // keep waiting on a stale target; re-query current safe Towns after it ends.
+                    moveTargetId = null;
+                    safeTowns = null;
+                }
 
                 if (HasReachedMoveTargetMenu(state, moveTargetId))
                 {
@@ -560,6 +619,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             return new JsonArray(new JsonObject { ["action"] = "tradeOptions", ["arguments"] = new JsonArray() });
         }
         if (gameState != "MapState") return new JsonArray();
+        if (IsMapConversationActive(state)) return BuildMapConversationActionCatalog(state);
         if (moveTargetId is not null && !string.Equals(ReadString(state["location"] as JsonObject, "currentSettlementId"), moveTargetId, StringComparison.Ordinal))
             return new JsonArray();
         var location = state["location"] as JsonObject;
@@ -622,6 +682,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
     private static JsonArray BuildControlCatalog(JsonObject state, string? moveTargetId, bool moveStartPending = false)
     {
         var context = state["context"] as JsonObject;
+        if (IsMapConversationActive(state)) return new JsonArray();
         if (ReadString(context, "gameState") != "MapState" || moveTargetId is null) return new JsonArray();
         var location = state["location"] as JsonObject;
         var targetIsCurrent = ReadString(location, "targetSettlementId") == moveTargetId;
@@ -630,6 +691,49 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             return new JsonArray("observeAgain");
         if (ReadString(location, "currentSettlementId") == moveTargetId && string.IsNullOrWhiteSpace(ReadString(context, "menuId")))
             return new JsonArray("observeAgain");
+        return new JsonArray();
+    }
+
+    private static bool IsMapConversationActive(JsonObject state) =>
+        ReadString(state["context"] as JsonObject, "gameState") == "MapState" &&
+        state["context"]?["conversation"] is JsonObject;
+
+    private static bool IsInterruptedMapMove(JsonObject state, string? moveTargetId, bool moveStartPending)
+    {
+        if (string.IsNullOrWhiteSpace(moveTargetId) || IsMapConversationActive(state)) return false;
+        var context = state["context"] as JsonObject;
+        var location = state["location"] as JsonObject;
+        return ReadString(context, "gameState") == "MapState" &&
+            ReadString(location, "currentSettlementId") != moveTargetId &&
+            !ReadBoolean(state["party"] as JsonObject, "isMoving") &&
+            !moveStartPending;
+    }
+
+    private static JsonArray BuildMapConversationActionCatalog(JsonObject state)
+    {
+        var conversation = state["context"]?["conversation"] as JsonObject;
+        if (conversation is null) return new JsonArray();
+        var options = conversation["options"] as JsonArray ?? new JsonArray();
+        var clickable = options.OfType<JsonObject>()
+            .Where(option => ReadBoolean(option, "clickable"))
+            .Select(option => ReadString(option, "id"))
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (clickable.Length > 0)
+        {
+            return new JsonArray(new JsonObject
+            {
+                ["action"] = "dialogueSelect",
+                ["arguments"] = new JsonArray("OptionId"),
+                ["argumentValues"] = new JsonObject
+                {
+                    ["OptionId"] = new JsonArray(clickable.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray())
+                }
+            });
+        }
+        if (options.Count == 0)
+            return new JsonArray(new JsonObject { ["action"] = "dialogueContinue", ["arguments"] = new JsonArray() });
         return new JsonArray();
     }
 
@@ -663,6 +767,33 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         {
             rejection = "Native action arguments do not match the current Gold sale catalog.";
             return false;
+        }
+        if (action == "dialogueSelect")
+        {
+            var optionId = ReadString(supplied, "OptionId");
+            var options = state["context"]?["conversation"]?["options"] as JsonArray;
+            var currentOption = options?.OfType<JsonObject>().FirstOrDefault(option =>
+                ReadString(option, "id") == optionId && ReadBoolean(option, "clickable"));
+            var listedOptionIds = listed["argumentValues"]?["OptionId"] as JsonArray;
+            if (!IsMapConversationActive(state) || string.IsNullOrWhiteSpace(optionId) || currentOption is null ||
+                listedOptionIds?.Any(value => value?.GetValue<string>() == optionId) != true)
+            {
+                rejection = "Choose only a currently clickable Native option from the active MapState conversation.";
+                return false;
+            }
+            arguments = new JsonObject { ["optionId"] = optionId };
+            return true;
+        }
+        if (action == "dialogueContinue")
+        {
+            var options = state["context"]?["conversation"]?["options"] as JsonArray;
+            if (supplied.Count != 0 || !IsMapConversationActive(state) || options is null || options.Count != 0)
+            {
+                rejection = "Native dialogueContinue is valid only when the active MapState conversation has no options.";
+                return false;
+            }
+            arguments = new JsonObject();
+            return true;
         }
         if (action == "move")
         {
