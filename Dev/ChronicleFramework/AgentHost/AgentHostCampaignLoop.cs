@@ -26,7 +26,8 @@ internal static class AgentHostCampaignLoop
     };
     internal static readonly HashSet<string> RecruitmentActions = new(StringComparer.Ordinal) { "recruitOptions", "recruit" };
     internal static readonly HashSet<string> CompanionHiringActions = new(StringComparer.Ordinal) { "missionSceneAgents", "missionNavigateToAgent", "missionInteract", "missionLeave" };
-    internal static readonly HashSet<string> AllSupportedActions = new(ApprovedActions.Concat(BattleSimulationActions).Concat(GoldSaleActions).Concat(RecruitmentActions).Concat(CompanionHiringActions), StringComparer.Ordinal);
+    internal static readonly HashSet<string> TrainingIssueActions = new(StringComparer.Ordinal) { "partyUpgradeOptions", "upgradeTroop" };
+    internal static readonly HashSet<string> AllSupportedActions = new(ApprovedActions.Concat(BattleSimulationActions).Concat(GoldSaleActions).Concat(RecruitmentActions).Concat(CompanionHiringActions).Concat(TrainingIssueActions), StringComparer.Ordinal);
 
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
@@ -184,6 +185,16 @@ internal static class AgentHostCampaignLoop
             !string.Equals(movingControls[0]?.GetValue<string>(), "observeAgain", StringComparison.Ordinal))
             throw new AgentHostException("campaign-loop-self-test-natural-wait-failed", "During movement the Host may only passively re-observe; it must not offer a game clock action.");
         results.Add(new { scenario = "campaign-loop-movement-exposes-only-passive-observation", passed = true });
+
+        var movementInterruptedByBanditMeeting = new JsonObject
+        {
+            ["context"] = new JsonObject { ["gameState"] = "MapState", ["menuId"] = "encounter_meeting", ["encounterActive"] = true, ["encounteredPartyId"] = "looters-1" },
+            ["party"] = new JsonObject { ["isMoving"] = true },
+            ["location"] = new JsonObject { ["targetSettlementId"] = "safe", ["targetPartyId"] = "looters-1" }
+        };
+        if (BuildControlCatalog(moving: true, goalVerified: false, movementInterruptedByBanditMeeting).Count != 0)
+            throw new AgentHostException("campaign-loop-self-test-hostile-meeting-does-not-wait", "A map EncounterMeeting interrupts a settlement move; passive observeAgain must not be listed until the existing BattleSimulation recovery handles it.");
+        results.Add(new { scenario = "campaign-loop-hostile-encounter-meeting-interrupts-passive-movement-wait", passed = true });
 
         var doneControls = BuildControlCatalog(moving: false, goalVerified: true);
         if (doneControls.Count != 1 || !string.Equals(doneControls[0]?.GetValue<string>(), "done", StringComparison.Ordinal))
@@ -425,7 +436,7 @@ internal static class AgentHostCampaignLoop
                     ? BuildActionCatalog(visibleTargets, movingToTarget, targetReached)
                     : new JsonArray();
                 var controls = goalScopeClassified
-                    ? BuildControlCatalog(movingToTarget, targetReached)
+                    ? BuildControlCatalog(movingToTarget, targetReached, before["state"] as JsonObject)
                     : BuildGoalScopeClassificationControls(before["state"] as JsonObject,
                         safeSettlementArrivalOnly: ReadString(request, "scopeRestriction") == "safe-settlement-arrival");
                 if (actionCatalog.Count == 0 && controls.Count == 0)
@@ -602,6 +613,7 @@ internal static class AgentHostCampaignLoop
                     if (client is not IAgentHostQuestDetailsNativeClient questDetailsClient ||
                         client is not IAgentHostGoldSaleNativeClient goldSaleClient ||
                         client is not IAgentHostBattleSimulationNativeClient battleClient ||
+                        client is not IAgentHostEstablishClanTrainingIssueNativeClient trainingIssueClient ||
                         client is not IAgentHostRecruitmentNativeClient recruitmentClient ||
                         client is not IAgentHostCompanionHiringNativeClient companionClient)
                         throw new AgentHostException("establish-clan-autonomy-native-client-unavailable", "The Native transport does not implement the reviewed Quest Journal, Trade-sale, recruitment, Tavern Mission and BattleSimulation subgoal contracts.");
@@ -624,11 +636,84 @@ internal static class AgentHostCampaignLoop
                             _ => throw new AgentHostException("establish-clan-objective-route-unavailable", "No integrated Native objective executor is registered for this StoryMode target.")
                         };
                         using var childRequest = JsonDocument.Parse(childRequestNode.ToJsonString());
+                        async Task<JsonObject> ExecuteGoldObjectiveAsync()
+                        {
+                            var sale = await AgentHostEstablishClanGoldSaleLoop.RunAsync(childRequest.RootElement, client, goldSaleClient, provider, subToken,
+                                priorDecisions: priorSubDecisions, priorPromptTokens: priorSubPromptTokens, priorCompletionTokens: priorSubCompletionTokens,
+                                priorTrace: priorSubTrace, priorProviderRouteHistory: priorSubRoutes);
+                            if (!AgentHostEstablishYourClanAutonomyLoop.ShouldUseBattleLootFallback(sale)) return sale;
+
+                            var trainingRequestNode = JsonNode.Parse(childRequest.RootElement.GetRawText())?.AsObject()
+                                ?? throw new AgentHostException("establish-clan-training-issue-request-invalid", "The active Gold objective could not be cloned for a current visible Native training Issue.");
+                            trainingRequestNode["goal"] = "Raise the current original Establish Your Clan Gold Journal by completing a currently visible direct Native Train Troops for Retainers Issue, upgrading its borrowed troops through PartyVM and returning them to the giver through the visible Native inquiry. Re-read the EYC Journal after the real payout.";
+                            using var trainingRequest = JsonDocument.Parse(trainingRequestNode.ToJsonString());
+                            var training = await AgentHostEstablishClanTrainingIssueLoop.RunAsync(trainingRequest.RootElement, trainingIssueClient, battleClient, provider, subToken,
+                                priorDecisions: ReadInt(sale, "decisions", priorSubDecisions),
+                                priorPromptTokens: ReadLong(sale, "promptTokens", priorSubPromptTokens),
+                                priorCompletionTokens: ReadLong(sale, "completionTokens", priorSubCompletionTokens),
+                                priorTrace: sale["trace"] as JsonArray ?? priorSubTrace,
+                                priorProviderRouteHistory: sale["providerRouteHistory"] as JsonArray ?? priorSubRoutes);
+                            AgentHostHarnessProgressTrace.RecordObjectiveSubflowResult("goldTrainingIssueIncome", training);
+                            training["resultKind"] = "establish-clan-gold-sale-with-training-issue-route";
+                            training["actionsExecuted"] = ReadInt(sale, "actionsExecuted", 0) + ReadInt(training, "actionsExecuted", 0);
+                            training["saleActionsExecuted"] = ReadInt(sale, "saleActionsExecuted", 0);
+                            training["goldSaleFailureCode"] = ReadString(sale, "failureCode");
+                            training["goldObjectiveVerified"] = training["eycGoldJournalDelta"] is JsonValue trainingDeltaNode &&
+                                trainingDeltaNode.TryGetValue<double>(out var trainingGoldDelta) && trainingGoldDelta > 0;
+                            if (ReadString(training, "status") == "completed" || ReadBoolean(training, "directOfferAccepted")) return training;
+
+                            var retryableIssueSearch = ReadString(training, "failureCode") is "training-issue-no-visible-direct-offer" or "training-issue-no-safe-settlement-visible";
+                            var trainingFinalContext = (training["finalNativeState"]?["state"]?["context"] as JsonObject);
+                            var trainingEndedOnFreeMap = ReadString(trainingFinalContext, "gameState") == "MapState" &&
+                                ReadString(trainingFinalContext, "menuId") is null && !ReadBoolean(trainingFinalContext, "encounterActive") &&
+                                !ReadBoolean(trainingFinalContext, "escapeMenuOpen") && !ReadBoolean(trainingFinalContext, "inquiryOpen") &&
+                                !ReadBoolean((trainingFinalContext?["captivity"] as JsonObject), "isCaptive");
+                            if (!retryableIssueSearch || !trainingEndedOnFreeMap) return training;
+
+                            var battleRequestNode = JsonNode.Parse(trainingRequest.RootElement.GetRawText())?.AsObject()
+                                ?? throw new AgentHostException("establish-clan-gold-loot-request-invalid", "The Native no-goods sale result could not be cloned for its bounded battle-loot fallback.");
+                            battleRequestNode["goal"] = "The original Establish Your Clan Gold Journal objective is unmet and the current Native PlayerInventory has no transferable Goods. Resolve one currently visible hostile Bandit through the original Campaign BattleSimulation, take only currently offered Native loot, and return to the EYC planner. This may produce saleable goods but does not prove Gold progress; do not enter a real-time Mission or control the Campaign clock.";
+                            using var battleRequest = JsonDocument.Parse(battleRequestNode.ToJsonString());
+                            var battle = await AgentHostBattleSimulationLoop.RunAsync(battleRequest.RootElement, battleClient, provider, subToken,
+                                priorDecisions: ReadInt(training, "decisions", priorSubDecisions),
+                                priorPromptTokens: ReadLong(training, "promptTokens", priorSubPromptTokens),
+                                priorCompletionTokens: ReadLong(training, "completionTokens", priorSubCompletionTokens),
+                                priorTrace: training["trace"] as JsonArray ?? priorSubTrace,
+                                priorProviderRouteHistory: training["providerRouteHistory"] as JsonArray ?? priorSubRoutes,
+                                recoverPlayerCaptivity: true);
+                            AgentHostHarnessProgressTrace.RecordObjectiveSubflowResult("goldLootBattleFallback", battle);
+                            battle["resultKind"] = "establish-clan-gold-sale-with-battle-loot-fallback";
+                            battle["actionsExecuted"] = ReadInt(sale, "actionsExecuted", 0) + ReadInt(training, "actionsExecuted", 0) + ReadInt(battle, "actionsExecuted", 0);
+                            battle["saleActionsExecuted"] = ReadInt(sale, "saleActionsExecuted", 0);
+                            battle["trainingIssueAttempt"] = new JsonObject
+                            {
+                                ["failureCode"] = ReadString(training, "failureCode"),
+                                ["termination"] = ReadString(training, "termination"),
+                                ["directOfferAccepted"] = ReadBoolean(training, "directOfferAccepted"),
+                                ["issueQuestId"] = ReadString(training, "trainingIssueQuestId")
+                            };
+                            battle["goldSaleFailureCode"] = ReadString(sale, "failureCode");
+                            battle["goldSaleTermination"] = ReadString(sale["termination"] as JsonObject, "reason");
+                            battle["goldObjectiveVerified"] = false;
+                            var battleFinalContext = (battle["finalNativeState"]?["state"]?["context"] as JsonObject);
+                            var battleEndedOnFreeMap = ReadString(battleFinalContext, "gameState") == "MapState" &&
+                                ReadString(battleFinalContext, "menuId") is null &&
+                                !ReadBoolean(battleFinalContext, "encounterActive") &&
+                                !ReadBoolean(battleFinalContext, "escapeMenuOpen") &&
+                                !ReadBoolean(battleFinalContext, "inquiryOpen") &&
+                                !ReadBoolean((battleFinalContext?["captivity"] as JsonObject), "isCaptive");
+                            if (ReadString(battle, "status") == "failed" &&
+                                ReadString(battle, "termination") == "no-safe-action" &&
+                                ReadBoolean(battle, "battleStarted") != true && battleEndedOnFreeMap)
+                            {
+                                battle["failureCode"] = "gold-loot-no-current-visible-bandit";
+                                battle["termination"] = "gold-loot-no-current-visible-bandit";
+                            }
+                            return battle;
+                        }
                         return objectiveId switch
                         {
-                            "gold" => await AgentHostEstablishClanGoldSaleLoop.RunAsync(childRequest.RootElement, client, goldSaleClient, provider, subToken,
-                                priorDecisions: priorSubDecisions, priorPromptTokens: priorSubPromptTokens, priorCompletionTokens: priorSubCompletionTokens,
-                                priorTrace: priorSubTrace, priorProviderRouteHistory: priorSubRoutes),
+                            "gold" => await ExecuteGoldObjectiveAsync(),
                             "partySize" => await AgentHostEstablishClanRecruitmentLoop.RunAsync(childRequest.RootElement, client, recruitmentClient, questDetailsClient, provider, subToken,
                                 priorDecisions: priorSubDecisions, priorPromptTokens: priorSubPromptTokens, priorCompletionTokens: priorSubCompletionTokens,
                                 priorTrace: priorSubTrace, priorProviderRouteHistory: priorSubRoutes),
@@ -867,9 +952,14 @@ internal static class AgentHostCampaignLoop
         return catalog;
     }
 
-    private static JsonArray BuildControlCatalog(bool moving, bool goalVerified)
+    private static JsonArray BuildControlCatalog(bool moving, bool goalVerified, JsonObject? state = null)
     {
         var controls = new JsonArray();
+        var context = state?["context"] as JsonObject;
+        if (state is not null &&
+            ((AgentHostCampaignStateFacts.IsActiveEncounter(state) && !AgentHostCampaignStateFacts.IsNativeLocationMenu(state)) ||
+             ReadBoolean(context, "escapeMenuOpen") || ReadBoolean(context, "inquiryOpen") || context?["conversation"] is JsonObject))
+            return controls;
         if (moving) controls.Add("observeAgain");
         if (goalVerified) controls.Add("done");
         return controls;
@@ -973,7 +1063,7 @@ internal static class AgentHostCampaignLoop
         };
     }
 
-    private static JsonArray BuildSafeVisibleTargets(JsonObject receipt, HashSet<string>? excludedSettlementIds = null)
+    internal static JsonArray BuildSafeVisibleTargets(JsonObject receipt, HashSet<string>? excludedSettlementIds = null)
     {
         if (ReadString(receipt, "status") != "completed" || receipt["data"] is not JsonObject data || data["mapSettlementTargets"] is not JsonArray targets)
             return new JsonArray();
@@ -1131,6 +1221,7 @@ internal static class AgentHostCampaignLoop
     private static bool ReadNodeBoolean(JsonNode? value) => value is JsonValue jsonValue && jsonValue.TryGetValue<bool>(out var result) && result;
     private static int ReadNodeInt(JsonNode? value, int fallback) => value is JsonValue jsonValue && jsonValue.TryGetValue<int>(out var result) ? result : fallback;
     private static int ReadInt(JsonObject? value, string key, int fallback) => value?[key] is JsonValue jsonValue && jsonValue.TryGetValue<int>(out var result) ? result : fallback;
+    private static long ReadLong(JsonObject? value, string key, long fallback) => value?[key] is JsonValue jsonValue && jsonValue.TryGetValue<long>(out var result) ? result : fallback;
     private static double ReadDouble(JsonObject? value, string key, double fallback) => value?[key] is JsonValue jsonValue && jsonValue.TryGetValue<double>(out var result) ? result : fallback;
     private static string? ReadStateString(JsonObject native, string section, string key) => native["state"] is JsonObject state && state[section] is JsonObject nested ? ReadString(nested, key) : null;
     private static bool ReadStateBoolean(JsonObject native, string section, string key) => native["state"] is JsonObject state && state[section] is JsonObject nested && ReadBoolean(nested, key);

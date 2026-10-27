@@ -8,7 +8,7 @@ namespace ChronicleFramework.AgentHost;
 internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeClient, IAgentHostBattleSimulationNativeClient,
     IAgentHostQuestDetailsNativeClient, IAgentHostCaptivityRecoveryNativeClient, IAgentHostGoldSaleNativeClient,
     IAgentHostRecruitmentNativeClient, IAgentHostCompanionHiringNativeClient, IAgentHostStoryModeBootstrapNativeClient,
-    IAgentHostNativeInquiryClient, IAgentHostStoryModeBannerEditorNativeClient
+    IAgentHostNativeInquiryClient, IAgentHostStoryModeBannerEditorNativeClient, IAgentHostEstablishClanTrainingIssueNativeClient
 {
     private static readonly HashSet<string> SupplySliceActions = new(StringComparer.Ordinal)
     {
@@ -372,6 +372,64 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
 
     Task<JsonDocument> IAgentHostCampaignNativeClient.ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken) =>
         ExecuteCampaignActionAsync(action, arguments, cancellationToken);
+
+    public Task<JsonDocument> ExecuteTrainingIssueActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+    {
+        ValidateTrainingIssueAction(action, arguments);
+        return SendAsync(action, arguments, acceptedResponseExpected: false, cancellationToken);
+    }
+
+    internal static void ValidateTrainingIssueAction(string action, JsonObject arguments)
+    {
+        static bool HasOnlyKeys(JsonObject value, params string[] keys) =>
+            value.Count == keys.Length && keys.All(value.ContainsKey);
+        static bool HasText(JsonObject value, string key) =>
+            value[key] is JsonValue node && node.TryGetValue<string>(out var text) && !string.IsNullOrWhiteSpace(text);
+
+        var valid = action switch
+        {
+            "mapSettlementTargets" or "dialogueContinue" => arguments.Count == 0,
+            "move" => HasOnlyKeys(arguments, "settlementId") && HasText(arguments, "settlementId"),
+            "menuSelect" => HasOnlyKeys(arguments, "menuId", "optionId") && HasText(arguments, "menuId") && HasText(arguments, "optionId"),
+            "talkToSettlementHero" => HasOnlyKeys(arguments, "heroId") && HasText(arguments, "heroId"),
+            "dialogueSelect" => HasOnlyKeys(arguments, "optionId") && HasText(arguments, "optionId"),
+            "partyUpgradeOptions" => arguments.Count == 0,
+            "upgradeTroop" => HasOnlyKeys(arguments, "troopId", "upgradeTargetIndex") && HasText(arguments, "troopId") &&
+                arguments["upgradeTargetIndex"] is JsonValue targetNode && targetNode.TryGetValue<int>(out var targetIndex) && targetIndex >= 0,
+            _ => false
+        };
+        if (!valid)
+            throw new AgentHostException("native-training-issue-arguments-invalid", "The training-issue adapter accepts only a fresh Native PartyVM upgrade-options read or one current troop/upgrade-target selection.");
+    }
+
+    internal static IReadOnlyList<object> RunTrainingIssueActionContractSelfTests()
+    {
+        ValidateTrainingIssueAction("mapSettlementTargets", new JsonObject());
+        ValidateTrainingIssueAction("move", JsonNode.Parse("{\"settlementId\":\"village-a\"}")!.AsObject());
+        ValidateTrainingIssueAction("menuSelect", JsonNode.Parse("{\"menuId\":\"village\",\"optionId\":\"leave\"}")!.AsObject());
+        ValidateTrainingIssueAction("talkToSettlementHero", JsonNode.Parse("{\"heroId\":\"hero-training\"}")!.AsObject());
+        ValidateTrainingIssueAction("dialogueSelect", JsonNode.Parse("{\"optionId\":\"issue_offer_player_accept_quest\"}")!.AsObject());
+        ValidateTrainingIssueAction("dialogueContinue", new JsonObject());
+        ValidateTrainingIssueAction("partyUpgradeOptions", new JsonObject());
+        ValidateTrainingIssueAction("upgradeTroop", JsonNode.Parse("{\"troopId\":\"borrowed_troop\",\"upgradeTargetIndex\":0}")!.AsObject());
+        foreach (var item in new (string Action, string Json)[]
+        {
+            ("partyUpgradeOptions", "{\"troopId\":\"borrowed_troop\"}"),
+            ("upgradeTroop", "{\"troopId\":\"\",\"upgradeTargetIndex\":0}"),
+            ("upgradeTroop", "{\"troopId\":\"borrowed_troop\",\"upgradeTargetIndex\":-1}"),
+            ("upgradeTroop", "{\"troopId\":\"borrowed_troop\",\"upgradeTargetIndex\":0,\"amount\":20}"),
+            ("recruit", "{}")
+        })
+        {
+            try
+            {
+                ValidateTrainingIssueAction(item.Action, JsonNode.Parse(item.Json)!.AsObject());
+                throw new AgentHostException("native-training-issue-contract-self-test-invalid-accepted", "A malformed or unrelated action passed the bounded training-issue upgrade transport.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "native-training-issue-arguments-invalid") { }
+        }
+        return [new { scenario = "training-issue-mailbox-allows-current-overlay-dialogue-party-upgrade-and-single-upgrade-shapes", validCases = 8, invalidCases = 5, passed = true }];
+    }
 
     public Task<JsonDocument> ExecuteVillageToolsQuestActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
     {

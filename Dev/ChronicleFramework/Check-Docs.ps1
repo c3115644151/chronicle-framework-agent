@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.397'
+$contractVersion = '7.401'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -248,11 +248,12 @@ if ($harnessScript -notmatch "'AgentHostCampaignLoopEvaluation' \{ @\('Preflight
     $agentHostDecisionCycleSource -notmatch 'DecideCampaignAsync' -or
     $agentHostCampaignLoopSource -notmatch 'mapSettlementTargets' -or
     $agentHostCampaignLoopSource -notmatch 'ExecuteCampaignActionAsync' -or
-    $agentHostCampaignLoopSource -notmatch 'BuildControlCatalog\(movingToTarget, targetReached\)' -or
+    $agentHostCampaignLoopSource -notmatch 'BuildControlCatalog\(movingToTarget, targetReached, before\["state"\] as JsonObject\)' -or
     $agentHostCampaignLoopSource -notmatch 'campaign-loop-requires-goal-scope-classification-before-native-actions' -or
     $agentHostCampaignLoopSource -notmatch 'campaign-loop-unsupported-goal-stops-before-native-actions' -or
     $agentHostCampaignLoopSource -notmatch 'campaign-loop-target-query-precedes-move-and-completion' -or
     $agentHostCampaignLoopSource -notmatch 'campaign-loop-does-not-repeat-map-query-after-empty-result' -or
+    $agentHostCampaignLoopSource -notmatch 'campaign-loop-self-test-hostile-meeting-does-not-wait' -or
     $agentHostCampaignLoopSource -notmatch 'provider-goal-classification-unavailable' -or
     $agentHostCampaignLoopSource -notmatch 'provider-arguments-invalid-json' -or
     $agentHostCampaignLoopSource -notmatch 'Native move is already active' -or

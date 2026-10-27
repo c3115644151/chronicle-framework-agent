@@ -78,6 +78,24 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             BuildObjectiveRouteAvailabilityFingerprint(routeStateBefore.RootElement) == BuildObjectiveRouteAvailabilityFingerprint(routeStateChanged.RootElement))
             throw new AgentHostException("establish-clan-autonomy-route-state-fingerprint-failed", "Natural Campaign time and time-mode changes alone must not reopen a blocked route; meaningful Native location, Party or economy changes must.");
         results.Add(new { scenario = "establish-clan-autonomy-retries-partial-objective-after-child-journal-progress", passed = true });
+        var noGoodsSaleOnFreeMap = new JsonObject
+        {
+            ["status"] = "failed",
+            ["failureCode"] = "gold-sale-no-transferable-goods",
+            ["finalNativeState"] = JsonNode.Parse("""{"status":"completed","state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false,"escapeMenuOpen":false,"inquiryOpen":false,"captivity":{"isCaptive":false}},"partyScreen":null,"inventoryScreen":null}}""")
+        };
+        var providerFailedSale = (JsonObject)noGoodsSaleOnFreeMap.DeepClone();
+        providerFailedSale["failureCode"] = "provider-http-error";
+        var noGoodsSaleInEncounter = (JsonObject)noGoodsSaleOnFreeMap.DeepClone();
+        noGoodsSaleInEncounter["finalNativeState"]!["state"]!["context"]!["encounterActive"] = true;
+        var noGoodsSaleInMission = (JsonObject)noGoodsSaleOnFreeMap.DeepClone();
+        noGoodsSaleInMission["finalNativeState"]!["state"]!["context"]!["gameState"] = "MissionState";
+        if (!ShouldUseBattleLootFallback(noGoodsSaleOnFreeMap) ||
+            ShouldUseBattleLootFallback(providerFailedSale) ||
+            ShouldUseBattleLootFallback(noGoodsSaleInEncounter) ||
+            ShouldUseBattleLootFallback(noGoodsSaleInMission))
+            throw new AgentHostException("establish-clan-autonomy-gold-loot-fallback-gate-failed", "The BattleSimulation fallback is allowed only after the exact no-transferable-goods result on a free Campaign Map; Provider failures, active encounters and Missions must not trigger it.");
+        results.Add(new { scenario = "establish-clan-autonomy-gold-falls-back-to-battle-loot-only-after-verified-no-goods-on-free-map", passed = true });
         if (!IsRecoverableObjectiveProviderFailure("provider-http-error", "FreeLLMAPI returned HTTP 502. fallbackAttempts=2") ||
             !IsRecoverableObjectiveProviderFailure("provider-http-error", "FreeLLMAPI returned HTTP 503. fallbackAttempts=1") ||
             !IsRecoverableObjectiveProviderFailure("provider-http-error", "FreeLLMAPI returned HTTP 504. fallbackAttempts=1") ||
@@ -89,7 +107,9 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             IsSafeObjectiveRouteUnavailable("companions", "companion-model-stopped", freeMap: false) ||
             IsSafeObjectiveRouteUnavailable("gold", "companion-model-stopped", freeMap: true) ||
             !IsSafeObjectiveRouteUnavailable("gold", "gold-sale-no-transferable-goods", freeMap: true) ||
+            !IsSafeObjectiveRouteUnavailable("gold", "gold-loot-no-current-visible-bandit", freeMap: true) ||
             IsSafeObjectiveRouteUnavailable("gold", "gold-sale-no-transferable-goods", freeMap: false) ||
+            IsSafeObjectiveRouteUnavailable("gold", "gold-loot-no-current-visible-bandit", freeMap: false) ||
             !IsSafeObjectiveRouteUnavailable("partySize", "recruitment-model-stopped", freeMap: true) ||
             IsSafeObjectiveRouteUnavailable("partySize", "recruitment-model-stopped", freeMap: false) ||
             !IsSafeObjectiveRouteUnavailable("partySize", "recruitment-model-stopped-with-safe-actions", freeMap: true) ||
@@ -617,6 +637,39 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                             !string.IsNullOrWhiteSpace(afterRefreshSettlementId) &&
                             !string.Equals(beforeRefreshSettlementId, afterRefreshSettlementId, StringComparison.Ordinal);
                         if (verifiedArrival) safeSettlementRefreshVisitedIds.Add(afterRefreshSettlementId!);
+
+                        if (!verifiedArrival && decisions < maxDecisions &&
+                            IsSupportedHostileBanditEncounter(afterRefresh.RootElement) &&
+                            client is IAgentHostBattleSimulationNativeClient refreshBattleClient)
+                        {
+                            var interruptedBattle = await AgentHostBattleSimulationLoop.RunAsync(
+                                request, refreshBattleClient, provider, elapsed.Token,
+                                priorDecisions: decisions,
+                                priorPromptTokens: promptTokens,
+                                priorCompletionTokens: completionTokens,
+                                priorTrace: trace,
+                                priorProviderRouteHistory: routes,
+                                recoverPlayerCaptivity: true);
+                            AgentHostHarnessProgressTrace.RecordObjectiveSubflowResult("safeSettlementRefreshBanditInterruption", interruptedBattle);
+                            decisions = ReadInt(interruptedBattle, "decisions", decisions);
+                            promptTokens = ReadLong(interruptedBattle, "promptTokens", promptTokens);
+                            completionTokens = ReadLong(interruptedBattle, "completionTokens", completionTokens);
+                            nativeActions += ReadInt(interruptedBattle, "actionsExecuted", 0);
+                            trace = interruptedBattle["trace"]?.DeepClone() as JsonArray ?? trace;
+                            routes = interruptedBattle["providerRouteHistory"]?.DeepClone() as JsonArray ?? routes;
+                            using var afterInterruptedBattle = await client.ReadStateAsync(elapsed.Token);
+                            var canReplanAfterEncounter = IsSafeMapForObjectiveProviderReplan(afterInterruptedBattle.RootElement);
+                            trace.Add(new JsonObject
+                            {
+                                ["stage"] = canReplanAfterEncounter ? "safe-settlement-refresh-bandit-resolved-or-left" : "safe-settlement-refresh-bandit-unresolved",
+                                ["battleStatus"] = ReadString(interruptedBattle, "status"),
+                                ["battleTermination"] = ReadString(interruptedBattle, "termination"),
+                                ["playerOutcome"] = ReadString(interruptedBattle, "playerOutcome"),
+                                ["freeMapReplanVerified"] = canReplanAfterEncounter
+                            });
+                            if (canReplanAfterEncounter) continue;
+                        }
+
                         trace.Add(new JsonObject
                         {
                             ["stage"] = verifiedArrival ? "no-integrated-route-safe-settlement-refresh-arrived" : "no-integrated-route-safe-settlement-refresh-failed",
@@ -1161,11 +1214,25 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
     internal static bool IsSafeObjectiveRouteUnavailable(string objectiveId, string? termination, bool freeMap)
     {
         if (!freeMap) return false;
-        if (objectiveId == "gold") return termination is "provider-failure-returned-to-map" or "gold-sale-no-transferable-goods";
+        if (objectiveId == "gold") return termination is "provider-failure-returned-to-map" or "gold-sale-no-transferable-goods" or
+            "gold-loot-no-current-visible-bandit" or "training-issue-no-visible-direct-offer" or "training-issue-no-safe-settlement-visible" or
+            "training-issue-no-current-native-action" or "training-issue-battle-subflow-failed" or "training-issue-action-rejection-limit";
         if (objectiveId == "renown") return termination is "provider-failure-returned-to-map" or "no-safe-action" or "native-encounter-left-no-battle";
         if (objectiveId is "partySize" or "companions")
             return termination is "native-journal-refresh-pending" or "recruitment-route-unavailable" or "companion-route-unavailable" or "companion-model-stopped" or "recruitment-model-stopped" or "recruitment-model-stopped-with-safe-actions" or "provider-failure-returned-to-map" or "companion-provider-failure-returned-to-map";
         return false;
+    }
+
+    internal static bool ShouldUseBattleLootFallback(JsonObject saleResult)
+    {
+        if (ReadString(saleResult, "status") != "failed" || ReadString(saleResult, "failureCode") != "gold-sale-no-transferable-goods" ||
+            saleResult["finalNativeState"] is not JsonObject native || native["state"] is not JsonObject state)
+            return false;
+        var context = state["context"] as JsonObject;
+        var captivity = context?["captivity"] as JsonObject;
+        return ReadString(context, "gameState") == "MapState" && ReadString(context, "menuId") is null &&
+               !ReadBoolean(context, "encounterActive") && !ReadBoolean(context, "escapeMenuOpen") && !ReadBoolean(context, "inquiryOpen") &&
+               !ReadBoolean(captivity, "isCaptive") && state["partyScreen"] is null && state["inventoryScreen"] is null;
     }
 
     private static bool IsRecoverableObjectiveProviderFailure(string? failureCode, string? failure = null) =>

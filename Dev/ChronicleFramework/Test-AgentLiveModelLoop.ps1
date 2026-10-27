@@ -465,7 +465,7 @@ try {
         $goal = 'Autonomously complete the exact currently active original StoryMode Establish Your Clan quest. Use its current Journal values to choose among Gold, dynamic PartySize, Renown and Companion targets; execute only the current Native routes, re-read Journal after each subgoal, and stop only after Native original quest history confirms completion. Do not inject progress, use preplanned action sequences, or hide time changes inside actions.'
         $maxDecisions = 160
         $maxElapsedSeconds = $HostMaxElapsedSeconds
-        $allowedActions = 'mapSettlementTargets,move,menuSelect,talkToSettlementHero,dialogueSelect,dialogueContinue,questDetails,tradeOptions,trade,tradeConfirm,tradeCancel,tradeCancelChanges,barterOptions,barterAutoBalance,barterOffer,barterCancel,inventoryOpen,heroEquipmentOptions,inventoryCancel,mapPartyTargets,pursue,battleSkip,battleFinish,partyTakeAll,partyScreenDone,inventoryTakeAll,inventoryDone,recruitOptions,recruit,missionSceneAgents,missionNavigateToAgent,missionInteract,missionLeave'
+        $allowedActions = 'mapSettlementTargets,move,menuSelect,talkToSettlementHero,dialogueSelect,dialogueContinue,questDetails,tradeOptions,trade,tradeConfirm,tradeCancel,tradeCancelChanges,barterOptions,barterAutoBalance,barterOffer,barterCancel,inventoryOpen,heroEquipmentOptions,inventoryCancel,partyUpgradeOptions,upgradeTroop,mapPartyTargets,pursue,battleSkip,battleFinish,partyTakeAll,partyScreenDone,inventoryTakeAll,inventoryDone,recruitOptions,recruit,missionSceneAgents,missionNavigateToAgent,missionInteract,missionLeave'
         Set-LiveModelProviderTimeout 360
         $env:CHRONICLE_LLM_MAX_TOKENS = '1024'
     }

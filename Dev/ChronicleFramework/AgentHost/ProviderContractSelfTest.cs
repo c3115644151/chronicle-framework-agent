@@ -40,6 +40,7 @@ internal static class ProviderContractSelfTest
         results.AddRange(NativeMailboxClient.RunBattleSimulationActionContractSelfTests());
         results.AddRange(NativeMailboxClient.RunGoldSaleActionContractSelfTests());
         results.AddRange(NativeMailboxClient.RunRecruitmentActionContractSelfTests());
+        results.AddRange(NativeMailboxClient.RunTrainingIssueActionContractSelfTests());
         results.AddRange(NativeMailboxClient.RunCompanionHiringActionContractSelfTests());
         try { results.AddRange(await AgentHostEstablishClanRecruitmentLoop.RunContractSelfTestsAsync()); }
         catch (Exception exception) { throw new AgentHostException("establish-clan-recruitment-loop-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
@@ -50,6 +51,7 @@ internal static class ProviderContractSelfTest
         try { results.AddRange(await AgentHostStoryModeSetupLoop.RunContractSelfTestsAsync()); }
         catch (Exception exception) { throw new AgentHostException("storymode-setup-loop-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
         results.AddRange(AgentHostEstablishClanGoldSaleLoop.RunContractSelfTests());
+        results.AddRange(AgentHostEstablishClanTrainingIssueLoop.RunContractSelfTests());
         results.AddRange(NativeMailboxClient.RunQuestDetailsReadActionContractSelfTests());
         results.AddRange(AgentHostCaptivityRecoveryLoop.RunContractSelfTests());
         results.AddRange(AgentHostEstablishClanGoldSaleLoop.RunContractSelfTests());

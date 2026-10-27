@@ -21,6 +21,13 @@ internal static class AgentHostNativeInquiryResolution
             provider.LastRequest?["observation"]?["state"]?["context"]?["inquiry"]?["token"] is not null)
             throw new AgentHostException("native-inquiry-resolution-selftest-failed", "The resolver must show only current enabled Native choices, bind the token internally, and verify the modal closed after the model's choice.");
         results.Add(new { scenario = "native-map-inquiry-is-resolved-only-by-a-model-choice-from-current-visible-enabled-buttons", passed = true });
+        var trainingReturnRequest = BuildDecisionRequest("training-inquiry-selftest",
+            new JsonObject { ["supported"] = true, ["kind"] = "YesNoInquiry", ["title"] = "", ["text"] = "Return the trained borrowed troops?" },
+            new JsonArray("affirmative", "negative"),
+            "Return the trained borrowed troops to the quest giver to finish the current Native training Issue.");
+        if (ReadString(trainingReturnRequest, "goal") != "Return the trained borrowed troops to the quest giver to finish the current Native training Issue.")
+            throw new AgentHostException("native-inquiry-contextual-goal-selftest-failed", "A subgoal-specific Native Yes/No inquiry must preserve the parent objective context while still offering only current Native choices.");
+        results.Add(new { scenario = "native-inquiry-can-inherit-current-training-issue-goal", passed = true });
 
         var recoveringNative = new FakeNativeInquiryClient();
         var recoveringProvider = new FakeDecisionProvider("affirmative", failFirstCall: true);
@@ -77,7 +84,8 @@ internal static class AgentHostNativeInquiryResolution
         IAgentHostNativeInquiryClient inquiryClient,
         IAgentHostDecisionProvider provider,
         CancellationToken cancellationToken,
-        string runId)
+        string runId,
+        string? goal = null)
     {
         using var current = await stateClient.ReadStateAsync(cancellationToken);
         var currentRoot = JsonNode.Parse(current.RootElement.GetRawText()) as JsonObject;
@@ -110,7 +118,7 @@ internal static class AgentHostNativeInquiryResolution
 
         var visibleInquiry = inquiry.DeepClone() as JsonObject ?? new JsonObject();
         visibleInquiry.Remove("token");
-        var request = BuildDecisionRequest(runId, visibleInquiry, allowedChoices);
+        var request = BuildDecisionRequest(runId, visibleInquiry, allowedChoices, goal);
         var providerRoutes = new JsonArray();
         var decision = await AgentHostProviderDecisionRecovery.DecideWithSingleRetryAsync(request,
             token => AgentHostDecisionCycle.DecideNativeInquiryResponseAsync(provider, request, token),
@@ -340,13 +348,15 @@ internal static class AgentHostNativeInquiryResolution
         public void Dispose() { }
     }
 
-    internal static JsonObject BuildDecisionRequest(string runId, JsonObject visibleInquiry, JsonArray allowedChoices)
+    internal static JsonObject BuildDecisionRequest(string runId, JsonObject visibleInquiry, JsonArray allowedChoices, string? goal = null)
     {
         return new JsonObject
         {
             ["schemaVersion"] = 1,
             ["runId"] = runId,
-            ["goal"] = "Respond to the one current Native Bannerlord Map inquiry using only a currently visible and enabled choice.",
+            ["goal"] = string.IsNullOrWhiteSpace(goal)
+                ? "Respond to the one current Native Bannerlord Map inquiry using only a currently visible and enabled choice."
+                : goal,
             ["observation"] = new JsonObject
             {
                 ["scope"] = "one-current-native-map-inquiry",

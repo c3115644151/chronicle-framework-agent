@@ -29,6 +29,20 @@ W2-E #29先以Sargot Gang Leader证明`CanPlayerTakeQuestConditions`不满足时
 
 以上是安装版1.4.8.119303的反编译源码事实，不证明自然Campaign里任务出现率、Offer文本可读性、战斗目标总能被地图可见或AI已能跑通这些任务。入口必须先从Native `AvailableIssue` marker和当前Notable QuickConversation观察；只有当前对话实际开放Quest路径才接受，Alternative/Lord方案不可自动当作等价收入动作。该Quest的进度Journal调用把`AddDiscreteLog`标为`hideInformation:true`，但其运行时是否仍会出现在Agent按需读取的QuestDetails里尚未验证；本地还会发出“已猎杀x/y”QuickInformation。正式集成前需检查真实Native QuestDetails/屏幕，不能假定能读到隐藏进度。任务完成以原版Quest完成状态与MainHero Gold前后差值确认，不能只凭文本奖励金额。
 
+### 2026-10-28：Train Troops for Retainers 的金币与升级链
+
+本机 `TaleWorlds.CampaignSystem.dll` v1.4.8.119303 反编译确认：`LandlordTrainingForRetainersIssue`直接Quest路线不要求技能或预付金币；关系低于-10、发起聚落与玩家交战、或`MainParty.TotalManCount + BorrowedTroopCount > PartySizeLimit`时不能接。任务时限60天，借调人数为`3 + ceil(17 × IssueDifficultyMultiplier)`，奖励`2000 + 4000 × IssueDifficultyMultiplier`。这些条件与奖励公式是源码事实，不代表随机Issue每局都会生成；本轮自然Campaign的Native本地人物overlay观察到了“为卡诺洛斯的宇忒洛斯训练士兵”AvailableIssue标记，但尚未接取。
+
+直接路线由原版把`borrowed_troop`加入MainParty，监听`PlayerUpgradedTroopsEvent`，要求将它们升级为`veteran_borrowed_troop`。全部训练后Native打开Yes/No Inquiry，文本要求把借调士兵送回发起人；affirmative按钮“将士兵调回”提交后才结算。Total/Partial/Weak success都调用原版`GiveGoldAction`支付该任务的`RewardGold`；Total Success额外增加2 Renown，另外两个成功等级各增加1。原版升级事件与奖励回调负责进度/资源，不能通过直接改Roster完成。
+
+Chronicle已存在原版PartyVM单人升级适配：`partyUpgradeOptions`打开Normal PartyState读取当前升级报价并Cancel清理，`upgradeTroop`调用`PartyVM.ExecuteUpgrade`及Done提交一个人，包含当前经验/金币/物品/Perk前置。它此前未加入EYC Host动作目录。训练委托必须依据当前marker、当前QuickConversation直Quest选项、Journal及PartyVM现时报价运行；Alternative会派同伴/队伍，不能视为同一路线。Native inquiry只在文本确认为“借调士兵已训练/送回”时选择affirmative，其他Yes/No Inquiry安全停止。
+
+静态机制来源：`LandlordTrainingForRetainersIssueBehavior.LandlordTrainingForRetainersIssue`/`LandlordTrainingForRetainersIssueQuest`、`PlayerUpgradedTroopsEvent`、`InquiryData`、`GiveGoldAction`；原版训练选项TextObject ID `QxEPwLyp`，回收询问文本`LO7EjoY7`、affirmative按钮`ikDX1Fd7`。当前运行在AgentHostPackage中已为该链增加当前AvailableIssue、直接Quest TextObject、借调兵种升级报价和专用Inquiry的窄回归；自然Campaign实际接取、升级经历、回收询问和金币/Journal结算仍未验证。
+### Chronicle EYC 金币目标的可见 Issue 复用边界（2026-10-28）
+
+W7 当前候选复用`LandlordTrainingForRetainersIssue`，不是保证随机生成的收入来源：Host仅从本轮 `settlementOverlayCharacters`中的Native `AvailableIssue`联系人开始QuickConversation，直接Quest接受必须是当前可点击的`issue_offer_player_accept_quest`且Native TextObject ID为`QxEPwLyp`；Alternative/Lord接取选项不进入该动作目录。接取后只以当前活动Issue的Journal值、当前原版PartyVM升级报价、当前Yes/No Inquiry为依据；训练升级动作是`borrowed_troop`→`veteran_borrowed_troop`，使用现有PartyVM adapter单人`ExecuteUpgrade+Done`事务。Inquiry只在可见文本/按钮匹配“借调士兵已经验丰富/将士兵调回”时交给模型响应，affirmative后必须读取原版EYC Gold Journal及Gold差值。
+
+该Host路线不是确定性Gold脚本；模型仍要从玩家当前可见Notable/对话中识别并接受Direct Quest，PartyVM前置不足或当前Issue缺失时不能伪报完成。若GoldSale的完整PlayerInventory报价已确认没有可转让Goods，Host可尝试当前Training Issue；该路无当前AvailableIssue时才允许既有当前可见Bandit BattleSimulation回退。现有包测试覆盖目录/交易边界、直接Offer TextObject、借调兵升级范围、询问范围与遭遇等待门禁；真实Campaign接取/训练/Inquiry/奖励仍未通过验收。
 ## J02 Quests：任务生命周期与结果
 
 `QuestBase`管理Quest giver、期限、奖励、状态、追踪对象、任务Logs和任务回调；`QuestManager`统合开始、Hourly/Daily/Weekly tick、超时、完成、取消和追踪对象。各Quest子类创建时 `SetDialogs`、注册事件，并定义 `OnStartQuest/OnCompleteWithSuccess/OnFailed/OnCanceled/OnTimedOut`等路径；Quest类型共享生命周期但并无相同条件、付款或失败后果。
