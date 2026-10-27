@@ -74,43 +74,48 @@ function Set-LiveModelProviderTimeout([ValidateRange(5,360)][int]$ScenarioDefaul
 }
 $configuredProtocol = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_PROTOCOL)) { 'openai-compatible' } else { [string]$env:CHRONICLE_LLM_PROTOCOL }
 $providerEndpoint = $null
-if ($configuredProtocol -ceq 'ollama-native' -or
+if ($configuredProtocol -cne 'openai-compatible' -or
     -not [Uri]::TryCreate([string]$env:CHRONICLE_LLM_BASE_URL, [UriKind]::Absolute, [ref]$providerEndpoint) -or
-    -not $providerEndpoint.IsLoopback -or $providerEndpoint.Port -ne 31415 -or $providerEndpoint.AbsolutePath.TrimEnd('/') -ne '/v1') {
-    throw 'This live Campaign stage is FreeLLMAPI-only. Local Ollama inference and non-FreeLLMAPI endpoints are refused before Campaign launch.'
+    $providerEndpoint.Scheme -notin @('http','https') -or ($providerEndpoint.Scheme -eq 'http' -and -not $providerEndpoint.IsLoopback) -or
+    -not [string]::IsNullOrWhiteSpace($providerEndpoint.UserInfo) -or -not [string]::IsNullOrWhiteSpace($providerEndpoint.Query) -or
+    -not [string]::IsNullOrWhiteSpace($providerEndpoint.Fragment)) {
+    throw 'This live Campaign stage requires a configured OpenAI-compatible HTTPS provider (HTTP only on loopback); unsupported inference protocols are refused before Campaign launch.'
 }
-$freeLlmApiKey = if (-not [string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_API_KEY)) { [string]$env:CHRONICLE_LLM_API_KEY } else { [string]$env:FREELLMAPI_API_KEY }
-if ([string]::IsNullOrWhiteSpace($freeLlmApiKey)) {
-    throw 'FreeLLMAPI authentication is missing. Configure FREELLMAPI_API_KEY or CHRONICLE_LLM_API_KEY before Campaign launch; the key is never printed.'
+$isFreeLlmApi = $providerEndpoint.IsLoopback -and $providerEndpoint.Port -eq 31415 -and $providerEndpoint.AbsolutePath.TrimEnd('/') -eq '/v1'
+$providerApiKey = if (-not [string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_API_KEY)) { [string]$env:CHRONICLE_LLM_API_KEY } else { [string]$env:FREELLMAPI_API_KEY }
+if (-not $providerEndpoint.IsLoopback -and [string]::IsNullOrWhiteSpace($providerApiKey)) {
+    throw 'The configured remote OpenAI-compatible provider requires an environment API key; no key is printed or written to the model profile.'
 }
 $modelsUri = [UriBuilder]::new($providerEndpoint)
 $modelsUri.Path = $providerEndpoint.AbsolutePath.TrimEnd('/') + '/models'
-$modelsUri.Query = 'available=true'
+$modelsUri.Query = if ($isFreeLlmApi) { 'available=true' } else { '' }
 try {
-    $availableModelsResponse = Invoke-RestMethod -Uri $modelsUri.Uri -Method Get -Headers @{ Authorization = "Bearer $freeLlmApiKey" } -TimeoutSec 8
+    $providerHeaders = if ([string]::IsNullOrWhiteSpace($providerApiKey)) { @{} } else { @{ Authorization = "Bearer $providerApiKey" } }
+    $availableModelsResponse = Invoke-RestMethod -Uri $modelsUri.Uri -Method Get -Headers $providerHeaders -TimeoutSec 8
 }
-catch { throw 'FreeLLMAPI /v1/models available-only preflight failed before Campaign launch; no inference request was sent and no fixture was started.' }
-finally { $freeLlmApiKey = $null }
-$modelExecutionStatus = Get-FreeLLMAPIModelExecutionStatus -ModelRows @($availableModelsResponse.data) -ModelId ([string]$env:CHRONICLE_LLM_MODEL)
-if ($modelExecutionStatus -eq 'not-listed') {
-    throw 'The configured model/route is not listed by FreeLLMAPI as currently available; no inference request was sent and no fixture was started.'
+catch {
+    $providerApiKey = $null
+    $providerHeaders = $null
+    throw 'The configured provider model-list preflight failed before Campaign launch; no inference request was sent and no fixture was started.'
 }
-if ($modelExecutionStatus -notin @('ready', 'router')) {
-    throw "The configured FreeLLMAPI route is not executable now (execution_status=$modelExecutionStatus); no inference request was sent and no fixture was started. Wait for provider recovery or select another ready route."
+finally {
+    $providerApiKey = $null
+    $providerHeaders = $null
 }
-if ($configuredProtocol -ceq 'ollama-native') {
-    $ollamaEndpoint = $null
-    if (-not [Uri]::TryCreate([string]$env:CHRONICLE_LLM_BASE_URL, [UriKind]::Absolute, [ref]$ollamaEndpoint) -or -not $ollamaEndpoint.IsLoopback) {
-        throw 'Ollama-native live-model preflight requires a loopback HTTP endpoint; no Campaign fixture was started.'
+if ($null -eq $availableModelsResponse -or $null -eq $availableModelsResponse.data) {
+    throw 'The configured provider model-list response did not contain a data list; no inference request was sent and no fixture was started.'
+}
+if ($isFreeLlmApi) {
+    $modelExecutionStatus = Get-FreeLLMAPIModelExecutionStatus -ModelRows @($availableModelsResponse.data) -ModelId ([string]$env:CHRONICLE_LLM_MODEL)
+    if ($modelExecutionStatus -eq 'not-listed') {
+        throw 'The configured model/route is not listed by FreeLLMAPI as currently available; no inference request was sent and no fixture was started.'
     }
-    $ollamaTagsUri = [UriBuilder]::new($ollamaEndpoint)
-    $ollamaTagsUri.Path = '/api/tags'
-    try { $ollamaTags = Invoke-RestMethod -Uri $ollamaTagsUri.Uri -Method Get -TimeoutSec 5 }
-    catch { throw "Configured local Ollama service is unreachable before Campaign launch (host=$($ollamaEndpoint.Host)); no fixture was started." }
-    $availableLocalModels = @($ollamaTags.models | ForEach-Object { [string]$_.name })
-    if ([string]$env:CHRONICLE_LLM_MODEL -notin $availableLocalModels) {
-        throw "Configured local Ollama model '$($env:CHRONICLE_LLM_MODEL)' is not installed on the reachable service; no Campaign fixture was started."
+    if ($modelExecutionStatus -notin @('ready', 'router')) {
+        throw "The configured FreeLLMAPI route is not executable now (execution_status=$modelExecutionStatus); no inference request was sent and no fixture was started. Wait for provider recovery or select another ready route."
     }
+}
+elseif (@($availableModelsResponse.data | ForEach-Object { [string]$_.id }) -notcontains [string]$env:CHRONICLE_LLM_MODEL) {
+    throw 'The configured model identifier is not listed by the configured provider; no inference request was sent and no fixture was started.'
 }
 $sourceCommitOutput = & git.exe -C $PSScriptRoot rev-parse HEAD 2>&1
 if ($LASTEXITCODE -ne 0) { throw 'Live-model verification could not record the source commit.' }

@@ -30,6 +30,42 @@ $saveDirectory = Join-Path $documentsPath 'Mount and Blade II Bannerlord\Game Sa
 $sessionPath = Join-Path $protocolRoot 'session.json'
 $results = [System.Collections.Generic.List[object]]::new()
 
+function Initialize-ChronicleCampaignLoopProviderProfile {
+    $baseUrl = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_BASE_URL', 'Process')
+    if ([string]::IsNullOrWhiteSpace($baseUrl)) { $baseUrl = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_BASE_URL', 'User') }
+    $modelId = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL', 'Process')
+    if ([string]::IsNullOrWhiteSpace($modelId)) { $modelId = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL', 'User') }
+    $protocol = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_PROTOCOL', 'Process')
+    if ([string]::IsNullOrWhiteSpace($protocol)) { $protocol = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_PROTOCOL', 'User') }
+    if ([string]::IsNullOrWhiteSpace($protocol)) { $protocol = 'openai-compatible' }
+
+    if ([string]::IsNullOrWhiteSpace($baseUrl) -or [string]::IsNullOrWhiteSpace($modelId)) {
+        . (Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1')
+        return Initialize-FreeLLMAPIProfile
+    }
+    $endpoint = $null
+    if ($protocol -ne 'openai-compatible' -or
+        -not [Uri]::TryCreate($baseUrl, [UriKind]::Absolute, [ref]$endpoint) -or
+        $endpoint.Scheme -notin @('http','https') -or ($endpoint.Scheme -eq 'http' -and -not $endpoint.IsLoopback) -or
+        -not [string]::IsNullOrWhiteSpace($endpoint.UserInfo) -or -not [string]::IsNullOrWhiteSpace($endpoint.Query) -or
+        -not [string]::IsNullOrWhiteSpace($endpoint.Fragment)) {
+        throw 'Configured provider must be an OpenAI-compatible HTTPS endpoint (HTTP is allowed only on loopback), without credentials, query, or fragment.'
+    }
+    $apiKey = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_API_KEY', 'Process')
+    if ([string]::IsNullOrWhiteSpace($apiKey)) { $apiKey = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_API_KEY', 'User') }
+    if ([string]::IsNullOrWhiteSpace($apiKey)) { $apiKey = [string][Environment]::GetEnvironmentVariable('FREELLMAPI_API_KEY', 'Process') }
+    if ([string]::IsNullOrWhiteSpace($apiKey)) { $apiKey = [string][Environment]::GetEnvironmentVariable('FREELLMAPI_API_KEY', 'User') }
+    if (-not $endpoint.IsLoopback -and [string]::IsNullOrWhiteSpace($apiKey)) {
+        throw 'The configured remote OpenAI-compatible provider requires a user/process API key; no key was printed or written to the provider profile.'
+    }
+    [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_BASE_URL', $baseUrl.TrimEnd('/'), 'Process')
+    [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_MODEL', $modelId.Trim(), 'Process')
+    [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_PROTOCOL', 'openai-compatible', 'Process')
+    if (-not [string]::IsNullOrWhiteSpace($apiKey)) { [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_API_KEY', $apiKey, 'Process') }
+    $apiKey = $null
+    [pscustomobject]@{ BaseUrl = $baseUrl.TrimEnd('/'); RequestedModelId = $modelId.Trim(); ProviderSource = 'configured-openai-compatible-provider' }
+}
+
 if (-not [string]::IsNullOrWhiteSpace($CleanupPreparedSaveName)) {
     if (-not ($CleanupPreparedSaveName.StartsWith('ChronicleW7K-', [StringComparison]::Ordinal) -or $CleanupPreparedSaveName.StartsWith('ChronicleW7L-', [StringComparison]::Ordinal) -or $CleanupPreparedSaveName.StartsWith('ChronicleW7N-', [StringComparison]::Ordinal) -or $CleanupPreparedSaveName.StartsWith('ChronicleW7O-', [StringComparison]::Ordinal) -or $CleanupPreparedSaveName.StartsWith('ChronicleW7P-', [StringComparison]::Ordinal))) { throw 'Cleanup-only mode accepts only Harness-owned ChronicleW7K/W7L/W7N/W7O/W7P prepared save names.' }
     if (Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue) { throw 'Refusing prepared-save cleanup while a Bannerlord process is running.' }
@@ -98,6 +134,9 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
     $priorTemp = $env:TEMP
     $priorTmp = $env:TMP
     $priorProviderProfilePath = $env:CHRONICLE_AGENT_PROFILE_PATH
+    $providerEnvironmentNames = @('CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL','CHRONICLE_LLM_PROTOCOL','CHRONICLE_LLM_API_KEY')
+    $priorProviderEnvironment = @{}
+    foreach ($name in $providerEnvironmentNames) { $priorProviderEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
     $env:CHRONICLE_HARNESS_TEMP = $runTemp
     $env:TEMP = $runTemp
     $env:TMP = $runTemp
@@ -122,15 +161,14 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
     $saleVerification = $null
     $failure = $null
     try {
-        . (Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1')
-        $freeLlmApiProfile = Initialize-FreeLLMAPIProfile
-        $providerBaseUrl = [string]$freeLlmApiProfile.BaseUrl
-        $providerModelId = [string]$freeLlmApiProfile.RequestedModelId
+        $providerProfile = Initialize-ChronicleCampaignLoopProviderProfile
+        $providerBaseUrl = [string]$providerProfile.BaseUrl
+        $providerModelId = [string]$providerProfile.RequestedModelId
 
         $mcmFixtureDirectory = Join-Path $runTemp 'MCM\Global\ChronicleFramework'
         New-Item -ItemType Directory -Path $mcmFixtureDirectory -Force | Out-Null
         $profilePath = Join-Path $mcmFixtureDirectory 'ChronicleAgentSettings.json'
-        [ordered]@{ OllamaBaseUrl = $providerBaseUrl; ModelId = $providerModelId } | ConvertTo-Json -Compress | Set-Content -LiteralPath $profilePath -Encoding UTF8
+        [ordered]@{ ProviderBaseUrl = $providerBaseUrl; ModelId = $providerModelId; OutputMode = 'auto' } | ConvertTo-Json -Compress | Set-Content -LiteralPath $profilePath -Encoding UTF8
         $env:CHRONICLE_AGENT_PROFILE_PATH = $profilePath
         if ($VillageToolsQuest) {
             $prepOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Test-AgentVillageToolsQuestFixturePreparation.ps1') -SourceSaveName 'AgentBridgeLifecycle' -MaxVillages 4 2>&1 | Out-String
@@ -249,6 +287,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         $env:TMP = $priorTmp
         if ($null -eq $priorProviderProfilePath) { Remove-Item Env:CHRONICLE_AGENT_PROFILE_PATH -ErrorAction SilentlyContinue }
         else { $env:CHRONICLE_AGENT_PROFILE_PATH = $priorProviderProfilePath }
+        foreach ($name in $providerEnvironmentNames) { [Environment]::SetEnvironmentVariable($name, $priorProviderEnvironment[$name], 'Process') }
     }
 
     $trace = if ($liveResult) { $liveResult.Trace } else { $null }
@@ -429,7 +468,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
             [bool]$liveResult.VisualEvidencePassed -and [double]$liveResult.Capture.FrameCoverageRatio -ge 0.9 -and
             [bool]$liveResult.Capture.VideoRemovedAfterEvidence -and $noGameProcesses -and $noSessionFile
         )
-        if (-not $passed -and -not $failure) { $failure = 'One or more FreeLLMAPI objective-selection, active-Quest, read-only world/time preservation, source hash, visual, or cleanup assertions failed.' }
+        if (-not $passed -and -not $failure) { $failure = 'One or more configured-provider objective-selection, active-Quest, read-only world/time preservation, source hash, visual, or cleanup assertions failed.' }
     }
     elseif ($VillageToolsQuest) {
         $requiredActions = @('talkToSettlementHero','dialogueSelect','questDetails','tradeOptions','trade','tradeConfirm','inventoryOpen','heroEquipmentOptions','inventoryCancel')
@@ -547,7 +586,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
 
 $result = [ordered]@{
     Passed = ($results.Count -eq $Runs -and @($results | Where-Object { $_.passed }).Count -eq $Runs)
-    ProviderKind = 'FreeLLMAPI-routed external model through the configured free endpoint'
+    ProviderKind = if ($providerProfile -and -not [string]::IsNullOrWhiteSpace([string]$providerProfile.ProviderSource)) { [string]$providerProfile.ProviderSource } else { 'configured openai-compatible external provider' }
     RunCount = $Runs
     DistinctCampaignSeeds = 1
     Threshold = if ($CaptivityRecoveryFromExisting) {
@@ -600,7 +639,7 @@ $result = [ordered]@{
             requiresNaturallyActiveOriginalQuest = 'rebuild_player_clan_storymode_quest'
             requiredObjectives = @('gold','partySize','renown','companions')
             requiresNativeJournalAndDynamicThresholdConsistency = $true
-            requiresFreeLlmApiModelDecision = $true
+            requiresConfiguredOpenAiCompatibleModelDecision = $true
             nativeGameplayActionsAllowed = 0
             nativeReadOnlyQuestDetailsCalls = 1
             requiresWorldGoldPartyRenownQuestAndTimeUnchanged = $true
@@ -628,7 +667,7 @@ $result = [ordered]@{
             maximumTotalDecisions = 100
             requiredModelNativeActions = @('talkToSettlementHero','dialogueSelect','questDetails','tradeOptions','trade','tradeConfirm','inventoryOpen','heroEquipmentOptions','inventoryCancel')
             requiresVisibleNativeIssueMarker = $true
-            requiresFreeLlmApiRoutedModel = $true
+            requiresConfiguredOpenAiCompatibleRoutedModel = $true
             exactJournalInventoryDelta = $true
             explicitClockActions = 0
             visualCoverageRatio = 0.9
