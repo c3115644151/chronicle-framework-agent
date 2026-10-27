@@ -122,7 +122,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     internal static OllamaNativeProvider FromConfiguredProfile()
     {
         if (Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") is string harnessMode &&
-            (string.Equals(harnessMode, "visual-capture", StringComparison.Ordinal) || string.Equals(harnessMode, "agent-host-lifecycle-test", StringComparison.Ordinal)) &&
+            (string.Equals(harnessMode, "visual-capture", StringComparison.Ordinal) || string.Equals(harnessMode, "agent-host-lifecycle-test", StringComparison.Ordinal) || string.Equals(harnessMode, "visual-battle-fixture", StringComparison.Ordinal)) &&
             !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CHRONICLE_AGENT_PROFILE_PATH")))
         {
             var overridePath = Path.GetFullPath(Environment.GetEnvironmentVariable("CHRONICLE_AGENT_PROFILE_PATH")!);

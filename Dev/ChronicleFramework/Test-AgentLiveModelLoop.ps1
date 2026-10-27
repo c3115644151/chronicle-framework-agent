@@ -229,7 +229,7 @@ try {
     . $videoLibrary
     $captureRecoveryProof = Test-ChronicleFragmentedCaptureResilience -EvidencePath (Join-Path $runDirectory 'FragmentedCaptureRecovery.json')
     Set-Content -LiteralPath $eventTracePath -Value '' -Encoding UTF8
-    $env:CHRONICLE_HARNESS_MODE = 'visual-capture'
+    $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { 'visual-battle-fixture' } else { 'visual-capture' }
     $loadArguments = @('-SaveName', $LoadSaveName)
     if ($EstablishYourClanGoalPlanner -or $EstablishYourClanAutonomyLoop -or $CaptivityRecoveryLoop -or $EstablishClanGoldSaleLoop) { $loadArguments += '-IncludeChronicleFramework' }
     $start = Invoke-AgentCli 'load' $loadArguments

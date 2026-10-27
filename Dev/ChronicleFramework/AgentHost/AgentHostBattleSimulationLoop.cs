@@ -427,8 +427,23 @@ internal static class AgentHostBattleSimulationLoop
                 if (conversation is not null)
                 {
                     var clickable = (conversation["options"] as JsonArray)?.OfType<JsonObject>().Where(x => ReadBoolean(x, "clickable")).ToArray() ?? Array.Empty<JsonObject>();
-                    if (clickable.Any(x => ReadString(x, "id") == "bandit_start_defender_1"))
-                        Add(catalog, "dialogueSelect", "OptionId");
+                    var allowedEncounterOptions = clickable
+                        .Select(x => ReadString(x, "id"))
+                        .Where(id => id is "bandit_start_defender_1" or "common_encounter_ultimatum" or "common_bandit_surrender_declined")
+                        .Distinct(StringComparer.Ordinal)
+                        .ToArray();
+                    if (allowedEncounterOptions.Length > 0)
+                    {
+                        catalog.Add(new JsonObject
+                        {
+                            ["action"] = "dialogueSelect",
+                            ["arguments"] = new JsonArray("OptionId"),
+                            ["argumentValues"] = new JsonObject
+                            {
+                                ["OptionId"] = new JsonArray(allowedEncounterOptions.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray())
+                            }
+                        });
+                    }
                     else if (clickable.Length == 0 && !string.IsNullOrWhiteSpace(ReadString(conversation, "sentenceText")))
                         Add(catalog, "dialogueContinue");
                     return catalog;
@@ -578,10 +593,10 @@ internal static class AgentHostBattleSimulationLoop
                 var conversation = (state["context"] as JsonObject)?["conversation"] as JsonObject;
                 var optionId = ReadString(arguments, "optionId");
                 var encounteredId = ReadString(state["context"] as JsonObject, "encounteredPartyId");
-                if (optionId != "bandit_start_defender_1" || conversation is null ||
+                if (optionId is not ("bandit_start_defender_1" or "common_encounter_ultimatum" or "common_bandit_surrender_declined") || conversation is null ||
                     !(conversation["options"] as JsonArray)?.OfType<JsonObject>().Any(x => ReadString(x, "id") == optionId && ReadBoolean(x, "clickable")) == true ||
                     !observedTargets.OfType<JsonObject>().Any(x => ReadString(x, "id") == encounteredId && ReadString(x, "type") == "bandit" && ReadBoolean(x, "hostile")))
-                { rejection = "Only the current clickable Native bandit_start_defender_1 Fight option for the observed hostile bandit may be selected."; return false; }
+                { rejection = "Only a current clickable Native bandit fight or continue-hostile option for the observed hostile bandit may be selected; release, toll, surrender and recruitment options remain unavailable."; return false; }
             }
             if (action == "dialogueContinue")
             {
@@ -680,9 +695,50 @@ internal static class AgentHostBattleSimulationLoop
         var meetingActions = BuildActionCatalog(banditMeeting["state"]!.AsObject(), candidates, "bandit-1", false, true);
         if (meetingActions.Count != 1 || ReadString(meetingActions[0] as JsonObject, "action") != "dialogueSelect")
             throw new AgentHostException("battle-loop-self-test-bandit-fight-dialogue-not-listed", "The Native Bandit meeting must expose only its current Fight response, not toll dialogue.");
+        var meetingOptionValues = meetingActions[0]?["argumentValues"]?["OptionId"] as JsonArray;
+        if (meetingOptionValues?.Count != 1 || meetingOptionValues[0]?.GetValue<string>() != "bandit_start_defender_1")
+            throw new AgentHostException("battle-loop-self-test-bandit-option-catalog-not-exact", "The Bandit dialogue action must list only the current allowed Native fight option.");
         var toll = new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "bandit_toll" } };
         if (TryResolveDecision(toll, meetingActions, new JsonArray(), banditMeeting["state"]!.AsObject(), candidates, "bandit-1", out _, out _, out _, out _))
             throw new AgentHostException("battle-loop-self-test-bandit-toll-choice-accepted", "A bandit toll option must not be mistaken for the requested BattleSimulation path.");
+
+        banditMeeting["state"]!["context"]!["conversation"] = new JsonObject
+        {
+            ["sentenceText"] = "If you surrender, I'll let you go; otherwise prepare for battle!",
+            ["options"] = new JsonArray(
+                new JsonObject { ["id"] = "common_encounter_ultimatum", ["clickable"] = true },
+                new JsonObject { ["id"] = "common_encounter_fight", ["clickable"] = true },
+                new JsonObject { ["id"] = "bandit_start_barter", ["clickable"] = true })
+        };
+        var banditThreatActions = BuildActionCatalog(banditMeeting["state"]!.AsObject(), candidates, "bandit-1", false, true);
+        var threatOptionValues = banditThreatActions[0]?["argumentValues"]?["OptionId"] as JsonArray;
+        var issueUltimatum = new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "common_encounter_ultimatum" } };
+        if (threatOptionValues?.Count != 1 || threatOptionValues[0]?.GetValue<string>() != "common_encounter_ultimatum" ||
+            !TryResolveDecision(issueUltimatum, banditThreatActions, new JsonArray(), banditMeeting["state"]!.AsObject(), candidates, "bandit-1", out _, out _, out _, out _))
+            throw new AgentHostException("battle-loop-self-test-bandit-threat-path-not-listed", "A Native player-threat response must be allowed when the observed hostile Bandit meeting exposes it.");
+        foreach (var disallowedBanditResponse in new[] { "common_encounter_fight", "bandit_start_barter" })
+        {
+            var disallowed = new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = disallowedBanditResponse } };
+            if (TryResolveDecision(disallowed, banditThreatActions, new JsonArray(), banditMeeting["state"]!.AsObject(), candidates, "bandit-1", out _, out _, out _, out _))
+                throw new AgentHostException("battle-loop-self-test-bandit-release-or-barter-accepted", "The Native let-the-bandits-go and Barter options must stay unavailable in the battle-growth slice.");
+        }
+        banditMeeting["state"]!["context"]!["conversation"] = new JsonObject
+        {
+            ["sentenceText"] = "You have no choice but to surrender!",
+            ["options"] = new JsonArray(
+                new JsonObject { ["id"] = "common_bandit_surrender_accept", ["clickable"] = true },
+                new JsonObject { ["id"] = "common_bandit_surrender_declined", ["clickable"] = true })
+        };
+        var declineSurrenderActions = BuildActionCatalog(banditMeeting["state"]!.AsObject(), candidates, "bandit-1", false, true);
+        var declineOptionValues = declineSurrenderActions[0]?["argumentValues"]?["OptionId"] as JsonArray;
+        var declineSurrender = new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "common_bandit_surrender_declined" } };
+        var acceptSurrender = new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "common_bandit_surrender_accept" } };
+        if (declineOptionValues?.Count != 1 || declineOptionValues[0]?.GetValue<string>() != "common_bandit_surrender_declined" ||
+            !TryResolveDecision(declineSurrender, declineSurrenderActions, new JsonArray(), banditMeeting["state"]!.AsObject(), candidates, "bandit-1", out _, out _, out _, out _) ||
+            TryResolveDecision(acceptSurrender, declineSurrenderActions, new JsonArray(), banditMeeting["state"]!.AsObject(), candidates, "bandit-1", out _, out _, out _, out _))
+            throw new AgentHostException("battle-loop-self-test-bandit-surrender-decision-not-bounded", "A Native surrender roll must permit only the current decline response, never accepting surrender.");
+        results.Add(new { scenario = "battle-loop-supports-bandit-initiated-threat-and-decline-surrender", passed = true });
+
         banditMeeting["state"]!["context"]!["conversation"] = new JsonObject { ["sentenceText"] = "Prepare yourself.", ["options"] = new JsonArray() };
         var responseActions = BuildActionCatalog(banditMeeting["state"]!.AsObject(), candidates, "bandit-1", false, true);
         if (responseActions.Count != 1 || ReadString(responseActions[0] as JsonObject, "action") != "dialogueContinue")

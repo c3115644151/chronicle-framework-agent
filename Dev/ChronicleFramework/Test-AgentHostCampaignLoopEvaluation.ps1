@@ -301,6 +301,37 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         $battleTargetId = if ($battleOutcome) { [string]$battleOutcome.TargetPartyId } else { '' }
         $clockActions = if ($trace) { @($trace.NativeClockActions | Where-Object { [string]$_ -in @('advance','pause','resume','fastForward') }) } else { @() }
         $battleActionSequence = @($nativeActions | ForEach-Object { [string]$_.actionReceipt.action })
+        $dialogueChoiceSteps = @($modelSteps | Where-Object { $_.actionExecuted -and [string]$_.decision.action -ceq 'dialogueSelect' })
+        $dialogueChoiceAudit = @($dialogueChoiceSteps | ForEach-Object {
+            $optionId = [string]$_.decision.arguments.OptionId
+            $allowedIds = @($_.allowedActions | Where-Object { [string]$_.action -ceq 'dialogueSelect' } | ForEach-Object { @($_.argumentValues.OptionId) })
+            $currentIds = @($_.observationBefore.state.context.conversation.options | Where-Object { [bool]$_.clickable } | ForEach-Object { [string]$_.id })
+            [pscustomobject]@{
+                optionId = $optionId
+                currentlyCatalogued = $allowedIds -contains $optionId
+                currentlyClickable = $currentIds -contains $optionId
+                visibleOptions = $currentIds
+            }
+        })
+        $dialogueChoiceIds = @($dialogueChoiceAudit | ForEach-Object { [string]$_.optionId })
+        $dialogueChoicesConform = @($dialogueChoiceAudit | Where-Object { -not $_.currentlyCatalogued -or -not $_.currentlyClickable }).Count -eq 0
+        $meetingSteps = @($modelSteps | Where-Object { [string]$_.observationBefore.state.context.menuId -ceq 'encounter_meeting' })
+        $requiredMeetingChoicesSatisfied = $true
+        foreach ($meetingStep in $meetingSteps) {
+            $visibleIds = @($meetingStep.observationBefore.state.context.conversation.options | Where-Object { [bool]$_.clickable } | ForEach-Object { [string]$_.id })
+            $expectedMeetingChoice = if ($visibleIds -contains 'bandit_start_defender_1') { 'bandit_start_defender_1' }
+                elseif ($visibleIds -contains 'common_encounter_ultimatum') { 'common_encounter_ultimatum' }
+                else { $null }
+            if ($expectedMeetingChoice -and $dialogueChoiceIds -notcontains $expectedMeetingChoice) { $requiredMeetingChoicesSatisfied = $false }
+        }
+        $declinedVisibleSurrender = @($modelSteps | Where-Object {
+            @($_.observationBefore.state.context.conversation.options | Where-Object { [string]$_.id -ceq 'common_bandit_surrender_declined' -and [bool]$_.clickable }).Count -gt 0
+        }).Count -gt 0
+        $surrenderDeclinedWhenOffered = -not $declinedVisibleSurrender -or $dialogueChoiceIds -contains 'common_bandit_surrender_declined'
+        if ($battleOutcome) {
+            $battleOutcome | Add-Member -NotePropertyName NativeDialogueChoiceIds -NotePropertyValue $dialogueChoiceIds -Force
+            $battleOutcome | Add-Member -NotePropertyName NativeDialogueChoiceAudit -NotePropertyValue $dialogueChoiceAudit -Force
+        }
         $providerRoutes = if ($trace -and $trace.ProviderRouteHistory) { @($trace.ProviderRouteHistory) } else { @() }
         $renownBeforeFinite = ($null -ne $trace.BattleRenownBefore -and -not [double]::IsNaN([double]$trace.BattleRenownBefore) -and -not [double]::IsInfinity([double]$trace.BattleRenownBefore))
         $renownAfterFinite = ($null -ne $trace.BattleRenownAfter -and -not [double]::IsNaN([double]$trace.BattleRenownAfter) -and -not [double]::IsInfinity([double]$trace.BattleRenownAfter))
@@ -318,6 +349,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
             $battleTargetId.Length -gt 0 -and $renownBeforeFinite -and $renownAfterFinite -and $clockActions.Count -eq 0 -and
             $battleActionSequence.Contains('mapPartyTargets') -and $battleActionSequence.Contains('menuSelect') -and
             $battleActionSequence.Contains('battleFinish') -and
+            $dialogueChoicesConform -and $requiredMeetingChoicesSatisfied -and $surrenderDeclinedWhenOffered -and
             [string]$battleOutcome.SendTroopsOption -ceq 'str_order_attack' -and [string]$battleOutcome.SimulationState -ne 'unknown' -and
             $playerOutcomeVerified -and
             [string]$battleOutcome.BattleFinishReceipt.status -ceq 'completed' -and
@@ -653,7 +685,9 @@ $result = [ordered]@{
         [ordered]@{
             successfulRuns = $Runs
             targetMustBeCurrentNativeVisibleHostileBandit = $true
-            requiresNativeBanditFightDialogueWhenMeeting = 'bandit_start_defender_1'
+            acceptsCurrentNativeMeetingBranch = @('bandit_start_defender_1', 'common_encounter_ultimatum')
+            ifCurrentNativeSurrenderOfferAppears = 'common_bandit_surrender_declined'
+            everyDialogueChoiceMustMatchCurrentCatalogAndClickableOption = $true
             requiresNativeSendTroopsOption = 'str_order_attack'
             requiresBattleSimulationAndNativeAftermath = $true
             requiresReturnToMapAndRenownBeforeAfter = $true

@@ -373,12 +373,16 @@ internal static class ChronicleAgentRuntimeController
             while (HostReadySignals.TryDequeue(out _)) { }
             _hostOutput = PumpHostOutputAsync(process.StandardOutput);
             _hostError = process.StandardError.ReadToEndAsync();
+            var useDisposableBattleFixtureProfile = string.Equals(Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE"), "visual-battle-fixture", StringComparison.Ordinal) &&
+                !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CHRONICLE_AGENT_PROFILE_PATH"));
+            var providerConfiguration = useDisposableBattleFixtureProfile
+                ? string.Empty
+                : ",\"providerConfiguration\":{\"OllamaBaseUrl\":\"" + EscapeJson(settings.OllamaBaseUrl) +
+                  "\",\"ModelId\":\"" + EscapeJson(settings.ModelId) + "\",\"OutputMode\":\"" + EscapeJson(settings.OutputMode) +
+                  "\",\"DeepSeekRunCostLimitCny\":\"" + EscapeJson(settings.DeepSeekRunCostLimitCny) + "\"}";
             var requestJson = "{\"runId\":\"" + _runId + "\",\"parentProcessId\":" + gameProcessId.ToString(CultureInfo.InvariantCulture) +
                               ",\"parentProcessStartTimeUtcTicks\":" + gameProcessStartTimeTicks.ToString(CultureInfo.InvariantCulture) +
-                              ",\"nativeSessionId\":\"" + EscapeJson(nativeSessionId) + "\"" +
-                              ",\"providerConfiguration\":{\"OllamaBaseUrl\":\"" + EscapeJson(settings.OllamaBaseUrl) +
-                              "\",\"ModelId\":\"" + EscapeJson(settings.ModelId) + "\",\"OutputMode\":\"" + EscapeJson(settings.OutputMode) +
-                              "\",\"DeepSeekRunCostLimitCny\":\"" + EscapeJson(settings.DeepSeekRunCostLimitCny) + "\"}" +
+                              ",\"nativeSessionId\":\"" + EscapeJson(nativeSessionId) + "\"" + providerConfiguration +
                               ",\"goal\":\"" + EscapeJson(goal.Trim()) +
                               "\",\"maxDecisions\":160,\"maxElapsedSeconds\":7200,\"allowedActionNames\":[\"mapSettlementTargets\",\"move\",\"menuSelect\",\"talkToSettlementHero\",\"dialogueSelect\",\"dialogueContinue\",\"questDetails\",\"tradeOptions\",\"trade\",\"tradeConfirm\",\"tradeCancel\",\"tradeCancelChanges\",\"barterOptions\",\"barterAutoBalance\",\"barterOffer\",\"barterCancel\",\"inventoryOpen\",\"heroEquipmentOptions\",\"inventoryCancel\",\"mapPartyTargets\",\"pursue\",\"battleSkip\",\"battleFinish\",\"partyTakeAll\",\"partyScreenDone\",\"inventoryTakeAll\",\"inventoryDone\",\"recruitOptions\",\"recruit\",\"missionSceneAgents\",\"missionNavigateToAgent\",\"missionInteract\",\"missionLeave\"]}";
             _hostInput.WriteLine(requestJson);

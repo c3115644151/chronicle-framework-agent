@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.349'
+$contractVersion = '7.352'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -401,11 +401,22 @@ if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Prefl
     $agentHostCampaignLoopEvaluationSource -notmatch 'SourceSha256Before' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'battleSourceHashAfter' -or
     $agentHostLiveModelLoopSource -notmatch '\[switch\]\$BattleSimulationLoop' -or
+    $agentHostLiveModelLoopSource -notmatch 'visual-battle-fixture' -or
+    $agentHostRuntimeControllerSource -notmatch 'useDisposableBattleFixtureProfile' -or
+    $agentHostRuntimeControllerSource -notmatch 'CHRONICLE_AGENT_PROFILE_PATH' -or
+    $agentHostRuntimeControllerSource -notmatch 'providerConfiguration = useDisposableBattleFixtureProfile' -or
+    $subModuleSource -notmatch 'CreateDisposableBattleFixture' -or
     $agentHostLiveModelLoopSource -notmatch 'BattleTargetPreflight\.json' -or
     $agentHostLiveModelLoopSource -notmatch 'ModelInferenceStarted = \$false' -or
     $agentHostRuntimeControllerSource -notmatch 'battleSkip' -or
     $agentHostRuntimeControllerSource -notmatch 'dialogueSelect' -or
     $agentHostBattleSimulationLoopSource -notmatch 'bandit_start_defender_1' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'common_encounter_ultimatum' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'common_bandit_surrender_declined' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'common_encounter_fight' -or
+    $agentHostDecisionCycleSource -notmatch 'common_encounter_ultimatum' -or
+    $agentHostDecisionCycleSource -notmatch 'common_bandit_surrender_declined' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'everyDialogueChoiceMustMatchCurrentCatalogAndClickableOption' -or
     $agentHostBattleSimulationLoopSource -notmatch 'str_order_attack' -or
     $agentHostBattleSimulationLoopSource -notmatch 'battleSimulation' -or
     $agentHostBattleSimulationLoopSource -notmatch 'nativeReturnToMapVerified' -or
