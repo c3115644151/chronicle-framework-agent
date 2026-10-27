@@ -368,6 +368,15 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
     }
     elseif ($EstablishClanGoldSaleFromStoryMode) {
         $saleVerification = $trace.EstablishClanGoldSaleVerification
+        $journalGoldBeforeValue = $saleVerification.objectiveJournalBefore.JournalGoldCurrent
+        $journalGoldAfterValue = $saleVerification.objectiveJournalAfter.current
+        $journalGoldTargetValue = $saleVerification.objectiveJournalAfter.target
+        $journalGoldBefore = if ($null -ne $journalGoldBeforeValue) { [double]$journalGoldBeforeValue } else { [double]::NaN }
+        $journalGoldAfter = if ($null -ne $journalGoldAfterValue) { [double]$journalGoldAfterValue } else { [double]::NaN }
+        $journalGoldTarget = if ($null -ne $journalGoldTargetValue) { [double]$journalGoldTargetValue } else { [double]::NaN }
+        $journalGoldEvidenceComplete = -not [double]::IsNaN($journalGoldBefore) -and -not [double]::IsInfinity($journalGoldBefore) -and
+            -not [double]::IsNaN($journalGoldAfter) -and -not [double]::IsInfinity($journalGoldAfter) -and
+            -not [double]::IsNaN($journalGoldTarget) -and -not [double]::IsInfinity($journalGoldTarget)
         $saleReceipts = @($nativeActions | Where-Object { [string]$_.actionReceipt.action -eq 'trade' -and [string]$_.actionReceipt.data.direction -ceq 'sell' })
         $tradeOptionsReceipts = @($nativeActions | Where-Object { [string]$_.actionReceipt.action -eq 'tradeOptions' })
         $tradeCommits = @($nativeActions | Where-Object { [string]$_.actionReceipt.action -eq 'tradeConfirm' -and [bool]$_.actionReceipt.data.postconditionPassed })
@@ -382,52 +391,18 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
             [bool]$trace.EstablishClanGoldSaleVerified -and [bool]$saleVerification.passed -and
             [string]$trace.SourceCommit -eq (git.exe -C $PSScriptRoot rev-parse HEAD).Trim() -and [bool]$trace.SourceTrackedTreeClean -and
             [string]$trace.EstablishClanGoldSaleBaseline.QuestId -ceq 'rebuild_player_clan_storymode_quest' -and
-            [double]$saleVerification.journalGoldAfter -gt [double]$saleVerification.journalGoldBefore -and
-            [double]$saleVerification.journalGoldTarget -eq 2000 -and
-            $saleReceipts.Count -eq 1 -and $tradeOptionsReceipts.Count -eq 1 -and $tradeCommits.Count -eq 1 -and
-            [string]$saleReceipts[0].decision.arguments.Direction -ceq 'sell' -and
-            [string]$saleReceipts[0].decision.arguments.InventorySide -ceq 'PlayerInventory' -and [int]$saleReceipts[0].decision.arguments.Amount -eq 1 -and
-            [bool]$saleVerification.nativeTradeTimeChanged -eq $false -and
-            -not [bool]$trace.EstablishClanGoldSaleVerification.fullQuestCompletionClaimed -and
-            (-not [bool]$trace.EstablishClanGoldSaleBaseline.CaptiveAtStart -or [bool]$saleVerification.captivityPreludeVerified) -and
-            $clockActions.Count -eq $allowedClockActions.Count -and
-            @($clockActions | Where-Object { $_ -notin $allowedClockActions }).Count -eq 0 -and
-            $safeActions.Count -eq $nativeActions.Count -and
-            [bool]$liveResult.VisualEvidencePassed -and [double]$liveResult.Capture.FrameCoverageRatio -ge 0.9 -and
-            [bool]$liveResult.Capture.VideoRemovedAfterEvidence -and $plannerFixtureRemoved -and
-            [bool]$plannerSourceHashBefore -and $plannerSourceHashBefore -ceq $plannerSourceHashAfter -and
-            $noGameProcesses -and $noSessionFile
-        )
-        if (-not $passed -and -not $failure) { $failure = 'One or more Native sale offer, exact Gold/inventory delta, Journal progress, no-clock, source integrity, visual or cleanup assertions failed.' }
-    }
-    elseif ($EstablishClanGoldSaleFromStoryMode) {
-        $saleVerification = $trace.EstablishClanGoldSaleVerification
-        $saleReceipts = @($nativeActions | Where-Object { [string]$_.actionReceipt.action -eq 'trade' -and [string]$_.decision.arguments.Direction -ceq 'sell' })
-        $tradeOptionsReceipts = @($nativeActions | Where-Object { [string]$_.actionReceipt.action -eq 'tradeOptions' })
-        $tradeCommits = @($nativeActions | Where-Object { [string]$_.actionReceipt.action -eq 'tradeConfirm' -and [bool]$_.actionReceipt.data.postconditionPassed })
-        $clockActions = @($trace.NativeClockActions | Where-Object { [string]$_ -in @('advance','pause','resume','fastForward') })
-        $allowedClockActions = if ([bool]$trace.EstablishClanGoldSaleBaseline.CaptiveAtStart) { @('resume') } else { @() }
-        $safeActions = @($nativeActions | Where-Object { [string]$_.actionReceipt.action -in @('mapSettlementTargets','move','menuSelect','tradeOptions','trade','tradeConfirm','tradeCancel','tradeCancelChanges','resume') })
-        $passed = (
-            $childExitCode -eq 0 -and $liveResult -and [bool]$liveResult.Passed -and
-            [bool]$liveResult.FixtureUnchanged -and [bool]$liveResult.ProcessStopped -and
-            [string]$trace.ModelConfigurationSource -eq 'harness-mcm-profile-fixture' -and
-            [string]$trace.AcceptanceSlice -eq 'Real-model Native StoryMode Gold objective progress through one market sale' -and
-            [bool]$trace.EstablishClanGoldSaleVerified -and [bool]$saleVerification.passed -and
-            [string]$trace.SourceCommit -eq (git.exe -C $PSScriptRoot rev-parse HEAD).Trim() -and [bool]$trace.SourceTrackedTreeClean -and
-            [string]$trace.EstablishClanGoldSaleBaseline.QuestId -ceq 'rebuild_player_clan_storymode_quest' -and
-            [double]$saleVerification.journalGoldAfter -gt [double]$saleVerification.journalGoldBefore -and
-            [double]$saleVerification.journalGoldTarget -eq 2000 -and
+            $journalGoldEvidenceComplete -and $journalGoldAfter -gt $journalGoldBefore -and $journalGoldTarget -eq 2000 -and
             $saleReceipts.Count -eq 1 -and $tradeOptionsReceipts.Count -eq 1 -and $tradeCommits.Count -eq 1 -and
             [string]$saleReceipts[0].decision.arguments.Direction -ceq 'sell' -and
             [string]$saleReceipts[0].decision.arguments.InventorySide -ceq 'PlayerInventory' -and [int]$saleReceipts[0].decision.arguments.Amount -eq 1 -and
             [bool]$saleVerification.nativeTradeTimeChanged -eq $false -and
             -not [bool]$saleVerification.originalQuestCompletionClaimed -and
             (-not [bool]$trace.EstablishClanGoldSaleBaseline.CaptiveAtStart -or [bool]$saleVerification.captivityPreludeVerified) -and
-            $clockActions.Count -eq $allowedClockActions.Count -and @($clockActions | Where-Object { $_ -notin $allowedClockActions }).Count -eq 0 -and
+            $clockActions.Count -eq $allowedClockActions.Count -and
+            @($clockActions | Where-Object { $_ -notin $allowedClockActions }).Count -eq 0 -and
             $safeActions.Count -eq $nativeActions.Count -and
             [bool]$liveResult.VisualEvidencePassed -and [double]$liveResult.Capture.FrameCoverageRatio -ge 0.9 -and
-            [bool]$liveResult.Capture.VideoRemovedAfterEvidence -and [bool]$plannerFixtureRemoved -and
+            [bool]$liveResult.Capture.VideoRemovedAfterEvidence -and $plannerFixtureRemoved -and
             [bool]$plannerSourceHashBefore -and $plannerSourceHashBefore -ceq $plannerSourceHashAfter -and
             $noGameProcesses -and $noSessionFile
         )

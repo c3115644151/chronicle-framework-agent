@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.354'
+$contractVersion = '7.356'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -390,6 +390,9 @@ if ($harnessScript -notmatch "'AgentHostEstablishClanGoldSaleEvaluation' \{ @\('
     $harnessScript -notmatch 'StoryModePlannerSourceSaveName = ''save002''' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'StartsWith\(''ChronicleW7P-''' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'storyModeGoldSaleSourceHashBefore' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'objectiveJournalBefore\.JournalGoldCurrent' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'objectiveJournalAfter\.current' -or
+    $agentHostCampaignLoopEvaluationSource -match '\$saleVerification\.journalGoldAfter|\$saleVerification\.journalGoldBefore|\$saleVerification\.journalGoldTarget' -or
     $agentHostLiveModelLoopSource -notmatch 'JournalGoldCurrent' -or
     $agentHostLiveModelLoopSource -notmatch 'EstablishClanGoldSaleVerification') {
     throw 'W7-P must remain opt-in, use one current Native Goods sale with a real transaction receipt, isolate its campaign goal scope, and preserve source/visual/cleanup evidence.'
