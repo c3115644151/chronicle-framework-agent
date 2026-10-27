@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.356'
+$contractVersion = '7.357'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -1594,7 +1594,8 @@ if ($agentHostCompanionLoopSource -notmatch 'var journalTargetMet = ReadBoolean\
 if ($agentHostCompanionLoopSource -notmatch 'player_is_leaving_neutral_or_friendly' -or
     $agentHostCompanionLoopSource -notmatch 'currentConversationHeroDeclined' -or
     $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-declined-wanderer-exit-not-gated' -or
-    $agentHostDecisionCycleSource -notmatch 'After declining, if the same Wanderer asks') { throw 'A declined Wanderer quote must expose the current Native conversation exit and prevent reopening that same hire offer.' }
+    $agentHostDecisionCycleSource -notmatch 'After declining, if the same Wanderer asks' -or
+    $agentHostDecisionCycleSource -notmatch 'Do not decline only to preserve Gold for the separate Gold objective') { throw 'A declined Wanderer quote must expose the current Native conversation exit and prevent reopening that same hire offer; an enabled affordable offer should advance the unmet Companion objective instead of preserving Gold without a concrete constraint.' }
 if ($agentHostCompanionLoopSource -notmatch 'establish-clan-companion-unlisted-navigation-duration-feedback-failed' -or
     $agentHostCompanionLoopSource -notmatch 'AgentIndex \[\{allowedIndexes\}\]' -or
     $agentHostCompanionLoopSource -notmatch 'DurationSeconds \[\{allowedDurationValues\}\]' -or
