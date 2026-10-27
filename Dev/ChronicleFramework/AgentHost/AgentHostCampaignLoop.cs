@@ -31,6 +31,10 @@ internal static class AgentHostCampaignLoop
     {
         var results = new List<object>();
         results.AddRange(AgentHostStoryModeBootstrapLoop.RunContractSelfTests());
+        if (new[] { 0, 30, 80, 159 }.Any(prior => prior >= GetCumulativeDecisionLimit(160)) ||
+            GetCumulativeDecisionLimit(8) != 8 || GetCumulativeDecisionLimit(0) != 1 || GetCumulativeDecisionLimit(1000) != 160)
+            throw new AgentHostException("campaign-loop-self-test-child-decision-limit-shrank", "Nested objective loops must keep the parent's cumulative decision ceiling and carry prior decisions separately.");
+        results.Add(new { scenario = "campaign-loop-nested-objectives-share-cumulative-decision-ceiling", passed = true });
         var initialActions = new JsonArray();
         var initialControls = BuildGoalScopeClassificationControls();
         if (initialActions.Count != 0 || initialControls.Count != 5 ||
@@ -170,6 +174,8 @@ internal static class AgentHostCampaignLoop
         results.Add(new { scenario = "campaign-loop-rejects-unobserved-targets-and-clock-actions", passed = true });
         return results;
     }
+
+    internal static int GetCumulativeDecisionLimit(int parentMaximum) => Math.Clamp(parentMaximum, 1, 160);
 
     internal static async Task<IReadOnlyList<object>> RunTransportSelfTestsAsync()
     {
@@ -542,9 +548,8 @@ internal static class AgentHostCampaignLoop
                     {
                         var childRequestNode = JsonNode.Parse(request.GetRawText())?.AsObject()
                             ?? throw new AgentHostException("establish-clan-subgoal-request-invalid", "The active StoryMode request could not be cloned for a bounded objective subgoal.");
-                        var remainingDecisions = Math.Max(1, maxDecisions - priorSubDecisions);
                         var remainingSeconds = Math.Max(1, maxElapsedSeconds - (int)Stopwatch.GetElapsedTime(loopStartedTicks).TotalSeconds);
-                        childRequestNode["maxDecisions"] = remainingDecisions;
+                        childRequestNode["maxDecisions"] = GetCumulativeDecisionLimit(maxDecisions);
                         childRequestNode["maxElapsedSeconds"] = remainingSeconds;
                         childRequestNode["goal"] = objectiveId switch
                         {
