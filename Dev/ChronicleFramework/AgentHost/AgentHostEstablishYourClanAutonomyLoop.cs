@@ -595,6 +595,24 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                             });
                             continue;
                         }
+                        if (ReadString(incidentBattle, "termination") == "native-encounter-left-no-battle")
+                        {
+                            if (!IsSafeMapForObjectiveProviderReplan(afterIncidentBattle.RootElement) ||
+                                !AgentHostEstablishYourClanGoalLoop.HasActiveQuest(afterIncidentBattle.RootElement))
+                                return BuildResult("failed", "incident-bandit-leave-return-state-unverified", false,
+                                    "The current Native Leave option was used because Send Troops was unavailable, but a safe Map and active EYC were not reverified.",
+                                    "incident-bandit-leave-return-state-unverified", journalObjectives, snapshot, differences);
+                            unavailableObjectives.Add(objectiveId);
+                            trace.Add(new JsonObject
+                            {
+                                ["stage"] = "incident-bandit-native-leave-without-simulation-replanned",
+                                ["interruptedObjectiveId"] = objectiveId,
+                                ["nativeBattleStarted"] = false,
+                                ["renownProgressClaimed"] = false,
+                                ["replayedChildActions"] = false
+                            });
+                            continue;
+                        }
                         if (ReadString(incidentBattle, "status") != "completed")
                             return BuildResult("failed", "incident-bandit-battle-failed", false,
                                 ReadString(incidentBattle, "failure") ?? "The interrupted hostile Bandit encounter did not reach a verified Native BattleSimulation return.",
@@ -623,6 +641,19 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                             ["nativeBattleResult"] = ReadString(incidentBattle, "battleResult"),
                             ["renownBefore"] = incidentBattle["renownBefore"]?.DeepClone(),
                             ["renownAfter"] = incidentBattle["renownAfter"]?.DeepClone()
+                        });
+                        continue;
+                    }
+
+                    if (IsPlayerCaptive(failedState.RootElement))
+                    {
+                        unavailableObjectives.Add(objectiveId);
+                        trace.Add(new JsonObject
+                        {
+                            ["stage"] = "objective-child-returned-mainhero-captive",
+                            ["objectiveId"] = objectiveId,
+                            ["replayedChildActions"] = false,
+                            ["nextStep"] = "native-captivity-recovery"
                         });
                         continue;
                     }
@@ -939,7 +970,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
     {
         if (!freeMap) return false;
         if (objectiveId == "gold") return termination is "provider-failure-returned-to-map" or "gold-sale-no-transferable-goods";
-        if (objectiveId == "renown") return termination is "provider-failure-returned-to-map" or "no-safe-action";
+        if (objectiveId == "renown") return termination is "provider-failure-returned-to-map" or "no-safe-action" or "native-encounter-left-no-battle";
         if (objectiveId is "partySize" or "companions")
             return termination is "native-journal-refresh-pending" or "recruitment-route-unavailable" or "companion-route-unavailable" or "companion-model-stopped" or "recruitment-model-stopped" or "recruitment-model-stopped-with-safe-actions" or "provider-failure-returned-to-map" or "companion-provider-failure-returned-to-map";
         return false;

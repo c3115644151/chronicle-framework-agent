@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.358'
+$contractVersion = '7.359'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -434,6 +434,12 @@ if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Prefl
     $agentHostBattleSimulationLoopSource -notmatch 'argumentValues' -or
     $agentHostBattleSimulationLoopSource -notmatch 'members or prisoners' -or
     $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-self-test-loot-type-alias-not-rejected' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-self-test-native-leave-not-bounded' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-self-test-native-leave-postcondition-not-verified' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'IsVerifiedMapTerminalAfterNativeEncounterLeave' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'native-encounter-left-no-battle' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'nativeEncounterLeft: true' -or
+    $agentHostDecisionCycleSource -notmatch 'current Native leave option is enabled' -or
     $agentHostBattleSimulationLoopSource -notmatch 'playerOutcome' -or
     $agentHostBattleSimulationLoopSource -notmatch '\["providerConfigurationSource"\] = provider\.ConfigurationSource' -or
     $agentHostBattleSimulationLoopSource -notmatch 'ReadString\(result, "providerConfigurationSource"\)' -or
