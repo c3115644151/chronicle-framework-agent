@@ -69,12 +69,14 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         retryAfter["partySize"]!["current"] = 5.0;
         if (!HasObjectiveSnapshotProgressChanged(retryBefore, retryAfter) || HasObjectiveSnapshotProgressChanged(retryAfter, retryAfter))
             throw new AgentHostException("establish-clan-autonomy-child-journal-progress-detection-failed", "A child result whose official Journal snapshot progressed must be recognized even if that child safely stopped before its target.");
-        using var routeStateBefore = JsonDocument.Parse("""{"campaignDay":1.0,"timeControlMode":"StoppablePlay","state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false,"captivity":{"isCaptive":false}},"location":{"currentSettlementId":null,"targetSettlementId":"town-a","targetPartyId":null},"party":{"members":11},"economy":{"gold":332,"renown":20},"nearbyParties":[]}}""");
+        using var routeStateBefore = JsonDocument.Parse("""{"campaignDay":1.0,"timeControlMode":"StoppablePlay","state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false,"captivity":{"isCaptive":false}},"location":{"currentSettlementId":null,"targetSettlementId":"town-a","targetPartyId":null},"party":{"members":11,"itemCount":1},"economy":{"gold":332,"renown":20},"nearbyParties":[]}}""");
         using var routeStateSame = JsonDocument.Parse(routeStateBefore.RootElement.GetRawText());
-        using var routeStateChanged = JsonDocument.Parse("""{"campaignDay":2.0,"timeControlMode":"StoppablePlay","state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false,"captivity":{"isCaptive":false}},"location":{"currentSettlementId":null,"targetSettlementId":"town-a","targetPartyId":null},"party":{"members":11},"economy":{"gold":332,"renown":20},"nearbyParties":[]}}""");
+        using var routeStateTimeOnly = JsonDocument.Parse("""{"campaignDay":2.0,"timeControlMode":"UnstoppableFastForward","state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false,"captivity":{"isCaptive":false}},"location":{"currentSettlementId":null,"targetSettlementId":"town-a","targetPartyId":null},"party":{"members":11,"itemCount":1},"economy":{"gold":332,"renown":20},"nearbyParties":[]}}""");
+        using var routeStateChanged = JsonDocument.Parse("""{"campaignDay":2.0,"timeControlMode":"StoppablePlay","state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false,"captivity":{"isCaptive":false}},"location":{"currentSettlementId":"town-a","targetSettlementId":"town-b","targetPartyId":null},"party":{"members":13,"itemCount":2},"economy":{"gold":432,"renown":20},"nearbyParties":[]}}""");
         if (BuildObjectiveRouteAvailabilityFingerprint(routeStateBefore.RootElement) != BuildObjectiveRouteAvailabilityFingerprint(routeStateSame.RootElement) ||
+            BuildObjectiveRouteAvailabilityFingerprint(routeStateBefore.RootElement) != BuildObjectiveRouteAvailabilityFingerprint(routeStateTimeOnly.RootElement) ||
             BuildObjectiveRouteAvailabilityFingerprint(routeStateBefore.RootElement) == BuildObjectiveRouteAvailabilityFingerprint(routeStateChanged.RootElement))
-            throw new AgentHostException("establish-clan-autonomy-route-state-fingerprint-failed", "Route blocks must remain stable while relevant Native state is unchanged and reopen when Campaign world state changes.");
+            throw new AgentHostException("establish-clan-autonomy-route-state-fingerprint-failed", "Natural Campaign time and time-mode changes alone must not reopen a blocked route; meaningful Native location, Party or economy changes must.");
         results.Add(new { scenario = "establish-clan-autonomy-retries-partial-objective-after-child-journal-progress", passed = true });
         if (!IsRecoverableObjectiveProviderFailure("provider-http-error", "FreeLLMAPI returned HTTP 502. fallbackAttempts=2") ||
             !IsRecoverableObjectiveProviderFailure("provider-http-error", "FreeLLMAPI returned HTTP 503. fallbackAttempts=1") ||
@@ -1044,11 +1046,9 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             .Select(item => string.Join(":", ReadString(item, "id"), ReadString(item, "type"), ReadBoolean(item, "hostile"), ReadInt(item, "members", -1)))
             .OrderBy(value => value, StringComparer.Ordinal));
         return string.Join("|",
-            ReadDouble(root, "campaignDay").ToString("R", CultureInfo.InvariantCulture),
-            ReadString(root, "timeControlMode") ?? ReadString(context, "timeControlMode"),
             ReadString(context, "gameState"), ReadString(context, "menuId"), ReadBoolean(context, "encounterActive"),
             ReadString(location, "currentSettlementId"), ReadString(location, "targetSettlementId"), ReadString(location, "targetPartyId"),
-            ReadInt(party, "members", -1), ReadInt(economy, "gold", -1),
+            ReadInt(party, "members", -1), ReadInt(party, "itemCount", -1), ReadInt(economy, "gold", -1),
             ReadDouble(economy, "renown").ToString("R", CultureInfo.InvariantCulture), ReadBoolean(captivity, "isCaptive"),
             nearbyPartyFingerprint);
     }

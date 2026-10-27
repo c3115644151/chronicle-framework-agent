@@ -50,6 +50,14 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             saleAmountValues?.Count != 1 || saleAmountValues[0]?.GetValue<int>() != 1 ||
             saleCatalog[0]?["arguments"]?[1]?.GetValue<string>() != "ItemViewModelId")
             throw new AgentHostException("gold-sale-self-test-current-sell-offer-scope-failed", "The sale catalog must expose exactly one current transferable Goods offer at the quoted positive price and limit the slice to one unit.");
+        var noGoodsQuote = tradeOptions.DeepClone() as JsonObject ?? throw new AgentHostException("gold-sale-self-test-no-goods-quote-invalid", "The no-goods quote fixture could not be cloned.");
+        noGoodsQuote["data"]!["sellOffers"] = new JsonArray(
+            new JsonObject { ["viewModelItemId"] = "bound-banner", ["nativeTooltipType"] = "Banner", ["inventorySide"] = "PlayerInventory", ["stock"] = 1, ["inventoryLogicUnitPrice"] = 1, ["isTransferable"] = false });
+        var zeroPricedGoodsQuote = tradeOptions.DeepClone() as JsonObject ?? throw new AgentHostException("gold-sale-self-test-zero-price-quote-invalid", "The zero-priced quote fixture could not be cloned.");
+        zeroPricedGoodsQuote["data"]!["sellOffers"] = new JsonArray(
+            new JsonObject { ["viewModelItemId"] = "zero-price-goods", ["nativeTooltipType"] = "Goods", ["inventorySide"] = "PlayerInventory", ["stock"] = 1, ["inventoryLogicUnitPrice"] = 0, ["isTransferable"] = true });
+        if (HasTransferableGoodsInventory(noGoodsQuote) || !HasTransferableGoodsInventory(zeroPricedGoodsQuote))
+            throw new AgentHostException("gold-sale-self-test-transferable-inventory-classification-failed", "The route may stop early only when the complete Native PlayerInventory quote contains no transferable Goods at any price; bound quest items are not sale stock, while zero-priced Goods may be worth checking at another market.");
 
         var staleQuote = tradeOptions.DeepClone() as JsonObject ?? throw new AgentHostException("gold-sale-self-test-stale-quote-invalid", "The current quote fixture could not be cloned.");
         staleQuote["data"]!["sellOffers"]![0]!["viewModelItemId"] = "old-goods-id";
@@ -292,6 +300,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         var decisionCount = priorDecisions;
         var actionCount = 0;
         var saleActionCount = 0;
+        var noTransferableGoodsInPlayerInventory = false;
         long promptTokens = priorPromptTokens;
         long completionTokens = priorCompletionTokens;
         string? moveTargetId = null;
@@ -491,6 +500,8 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                         ReadString(data, "inventorySide") != "PlayerInventory")
                         throw new AgentHostException("gold-sale-native-draft-invalid", "The Native Trade handler did not produce the expected one-unit sell draft.");
                 }
+                if (action == "tradeOptions")
+                    noTransferableGoodsInPlayerInventory = !HasTransferableGoodsInventory(receipt);
                 if (action == "tradeConfirm")
                 {
                     var data = receipt["data"] as JsonObject ?? new JsonObject();
@@ -509,6 +520,10 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 using (var fresh = await stateClient.ReadStateAsync(elapsed.Token)) currentNative = ParseObject(fresh.RootElement);
                 trace.Add(BuildStep(decisionCount, observation, modelDecision.Decision, previousReceipt, started, startedTicks, null,
                     BuildObservation(currentNative, currentNative["state"] as JsonObject ?? new JsonObject(), objectiveSnapshotBefore, liveMetricDifferencesBefore, saleReceipt)));
+
+                if (action == "menuSelect" && ReadString(arguments, "menuId") == "town" && ReadString(arguments, "optionId") == "town_leave" &&
+                    noTransferableGoodsInPlayerInventory)
+                    throw new AgentHostException("gold-sale-no-transferable-goods", "The complete Native PlayerInventory quote contained no transferable Goods; changing Town cannot make a bound or quest item sellable, so the Gold route stopped after Native Town leave instead of visiting more markets.");
 
                 if (saleReceipt is not null)
                 {
@@ -857,6 +872,12 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 ReadBoolean(offer, "isTransferable") && ReadInt(offer, "stock", 0) >= 1 &&
                 ReadInt(offer, "inventoryLogicUnitPrice", 0) > 0 && !string.IsNullOrWhiteSpace(ReadString(offer, "viewModelItemId")))
             .Select(offer => (JsonObject)offer.DeepClone()).ToArray() ?? Array.Empty<JsonObject>();
+
+    private static bool HasTransferableGoodsInventory(JsonObject? receipt) =>
+        (receipt?["data"]?["sellOffers"] as JsonArray)?.OfType<JsonObject>().Any(offer =>
+            ReadString(offer, "nativeTooltipType") == "Goods" &&
+            ReadString(offer, "inventorySide") == "PlayerInventory" &&
+            ReadBoolean(offer, "isTransferable") && ReadInt(offer, "stock", 0) >= 1) == true;
 
     private static JsonArray FilterSafeTowns(JsonObject receipt, HashSet<string>? visitedTowns = null)
     {
