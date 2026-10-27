@@ -789,8 +789,10 @@ try {
     }
 
     if ($StoryModeEycPersistentSeed) {
-        if (-not $creationReady -or -not $storyModeEycReadyObserved -or -not (Test-Path -LiteralPath $agentSessionPath -PathType Leaf)) {
-            throw 'Persistent EYC seed save requires the original Tutorial skip, naturally active Quest and stable Native Campaign Map before saving.'
+        if (-not $creationReady -or -not $storyModeEycReadyObserved) {
+            $hostDetail = [string]$storyModeAgentHostTerminalDetail
+            if ($hostDetail.Length -gt 500) { $hostDetail = $hostDetail.Substring(0,500) + '...[truncated]' }
+            throw "Persistent EYC seed save requires the original Tutorial skip, naturally active Quest and stable Native Campaign Map before saving. creationReady=$creationReady; eycActive=$storyModeEycReadyObserved; tutorialSkip=$storyModeTutorialSkipConfirmed; mapReady=$storyModeTakeoverMapReady; hostStarted=$storyModeAgentHostStarted; hostReady=$storyModeAgentHostReady; hostStartRequested=$storyModeAgentHostStartRequested; hostTerminal=$storyModeAgentHostTerminalState; hostDetail=$hostDetail."
         }
         $beforeSaveState = Invoke-FreshCampaignAgentCli 'state' @('-CommandId', "$progressionCommandPrefix-storymode-before-save")
         $beforeSaveEycStatus = [string]$beforeSaveState.state.storyModeEstablishClanStatus.status

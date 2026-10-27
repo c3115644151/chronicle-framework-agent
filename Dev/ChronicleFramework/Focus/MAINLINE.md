@@ -1115,3 +1115,5 @@ Fresh StoryMode run `TestResults/20261027-135719` on commit `aa44ef6` confirms t
 
 
 Build恢复证据：`TestResults/20261028-013058`的初次Host Build遇到NuGet服务索引TLS错误NU1900；Harness确认唯一依赖版本锁定后，以locked restore跳过不可达漏洞索引并完成本地Build，未升级依赖。7890代理TLS故障仍阻止GitHub推送；PersistentEycCampaign尚未创建检查点，下一步启动同一条长测。
+
+`TestResults/20261028-013950`首轮持久战役测试在SaveAs前失败：Harness误把`PersistentEycCampaign`阶段运行两次，触发两次开局；没有存档建立且无游戏进程残留。重复分支已移除，种子失败会记录具体准备条件；一次新Seed验证通过后，后续都从最新哈希/身份已核验的同一Native Campaign检查点续跑。

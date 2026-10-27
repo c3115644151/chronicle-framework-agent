@@ -1636,6 +1636,7 @@ if ($freshCampaignSource -notmatch 'StoryModeNewGame' -or
     $freshCampaignTest -notmatch 'AgentHostLifecycleHostReceipt\.json' -or
     $freshCampaignTest -notmatch 'AgentHostProgress\.jsonl') { throw 'Fresh StoryMode setup must use the original StoryMode Campaign and exact skip-tutorial/confirmation dialogue choices, verify natural EYC activation, and never call the tutorial completion function directly; its optional live Host slice must use bounded same-session MCM startup with a real decision trace.' }
 if ($harnessScript -notmatch "'PersistentEycCampaign' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'PersistentEycCampaign'\) \}" -or
+    [regex]::Matches($harnessScript, "(?m)^        'PersistentEycCampaign' \{").Count -ne 1 -or
     $harnessScript -match "'All' \{[^\r\n]*'PersistentEycCampaign'" -or
     $freshCampaignTest -notmatch '\[switch\]\$StoryModeEycPersistentSeed' -or
     $freshCampaignTest -notmatch 'Native SaveAs did not confirm completion of the persistent StoryMode fixture' -or

@@ -634,27 +634,6 @@ foreach ($stage in $requestedStages) {
                         -HostMaxElapsedSeconds $PersistentEycHostMaxElapsedSeconds -StartupTimeoutSeconds 240 -FrameRate 5 2>&1 | Out-String
                     $testExitCode = $LASTEXITCODE
                     if ($testExitCode -ne 0) {
-                        throw "Persistent natural StoryMode campaign has not verified original EYC completion (exit=$testExitCode). A Native checkpoint is advanced only after its save receipt and Campaign identity are verified."
-                    }
-                    $testOutput
-                }
-                finally {
-                    [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_MODEL', $savedLlmModel, 'Process')
-                    [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL', $savedHarnessModel, 'Process')
-                }
-            }
-        }
-        'PersistentEycCampaign' {
-            Invoke-Stage -Name 'PersistentEycCampaign' -Action {
-                $savedLlmModel = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL', 'Process')
-                $savedHarnessModel = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL', 'Process')
-                try {
-                    [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_MODEL', $FreshStoryModeModel, 'Process')
-                    [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL', $FreshStoryModeModel, 'Process')
-                    $testOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $persistentEycCampaignScript `
-                        -HostMaxElapsedSeconds $PersistentEycHostMaxElapsedSeconds -StartupTimeoutSeconds 240 -FrameRate 5 2>&1 | Out-String
-                    $testExitCode = $LASTEXITCODE
-                    if ($testExitCode -ne 0) {
                         throw "Persistent natural StoryMode campaign has not verified original EYC completion (exit=$testExitCode). A Native checkpoint, if verified, remains selected for the next continuation."
                     }
                     $testOutput

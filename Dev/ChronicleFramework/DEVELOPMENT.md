@@ -796,3 +796,5 @@ StoryMode复跑 `TestResults/20261027-193328` 在 EYC 仍未达成时进入真�
 
 
 `TestResults/20261028-013058`证明构建失败来自NuGet漏洞索引TLS不可达（NU1900），不是代码。Harness现在只在该错误出现时确认Host依赖仍是单一锁定的Microsoft.ML.Tokenizers 2.0.1，然后用locked restore并跳过不可达的审计端点；Build重试通过，未升级依赖，未启动游戏。7890代理能连端口但TLS握手到NuGet/GitHub失败，提交d832f79已本地提交、等待推送。Persistent EYC Campaign仍待首次连续运行。
+
+`TestResults/20261028-013950`首轮续跑尝试失败在种子存档前：Harness中同一`PersistentEycCampaign`阶段意外注册了两次，因而重复启动了两次种子流程；StoryMode seed readiness随后退出，未创建`ChronicleEycDev-*`存档，测试进程已清理。现已删除重复分支，并将准备失败中的教程/Quest/Host readiness细节写入错误收据；接下来只重试一次，确认原版开局Seed能保存后才继续长测。
