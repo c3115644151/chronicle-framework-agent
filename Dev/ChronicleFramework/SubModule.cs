@@ -234,18 +234,25 @@ public sealed class SubModule : MBSubModuleBase
             var gameManagerState = Game.Current?.GameStateManager?.ActiveState?.GetType().Name ?? "null";
             var staticState = GameStateManager.Current?.ActiveState?.GetType().Name ?? "null";
             var campaignPresent = Campaign.Current != null;
-            var missionPresent = Mission.Current != null;
-            var missionEnded = Mission.Current?.MissionEnded.ToString() ?? "null";
-            var settlementId = Settlement.CurrentSettlement?.StringId ?? "none";
-            var menuId = Campaign.Current?.CurrentMenuContext?.GameMenu?.StringId ?? "none";
-            var signature = string.Join("|", gameManagerState, staticState, campaignPresent, missionPresent, missionEnded, settlementId, menuId, skipProgressionIssueProbe);
+            var missionPresent = false;
+            var missionEnded = "unknown";
+            try
+            {
+                var mission = Mission.Current;
+                missionPresent = mission != null;
+                missionEnded = mission?.MissionEnded.ToString() ?? "none";
+            }
+            catch (Exception exception) { missionEnded = "unavailable-" + exception.GetType().Name; }
+            var menuId = "unknown";
+            try { menuId = Campaign.Current?.CurrentMenuContext?.GameMenu?.StringId ?? "none"; }
+            catch (Exception exception) { menuId = "unavailable-" + exception.GetType().Name; }
+            var signature = string.Join("|", gameManagerState, staticState, campaignPresent, missionPresent, missionEnded, menuId, skipProgressionIssueProbe);
             if (!string.Equals(signature, _freshStoryModeLastStateProbeSignature, StringComparison.Ordinal))
             {
                 _freshStoryModeLastStateProbeSignature = signature;
                 ChronicleDiagnostics.Write("fresh-storymode-app-state-transition-probe|gameManagerState=" + gameManagerState +
                     "|staticState=" + staticState + "|campaignPresent=" + campaignPresent + "|missionPresent=" +
-                    missionPresent + "|missionEnded=" + missionEnded + "|settlement=" + settlementId + "|menu=" +
-                    menuId + "|skipIssueProbe=" + skipProgressionIssueProbe);
+                    missionPresent + "|missionEnded=" + missionEnded + "|menu=" + menuId + "|skipIssueProbe=" + skipProgressionIssueProbe);
             }
         }
         if (!skipProgressionIssueProbe || storyModeProgressionHarness) FreshCampaignHarness.AdvanceCharacterCreation();

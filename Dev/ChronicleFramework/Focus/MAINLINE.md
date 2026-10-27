@@ -1113,7 +1113,7 @@ Fresh StoryMode run `TestResults/20261027-135719` on commit `aa44ef6` confirms t
 
 所有EYC子路线暂时blocked时，父循环现在只调用已有`AgentHostCampaignLoop`做一次受限的“到达当前可见安全聚落”原生移动，再重读Journal；不新增Native动作，也不把行走期间自然流动的Campaign时间伪装成显式时钟命令。子循环共享同一Provider、累计决策/Token budget和trace，且分类只允许map-arrival目标。`TestResults/20261028-010824`Build与AgentHostPackage通过；连续自然存档上的运行结果待验证。Harness contract version 7.381。
 
-短测用于快速定位单一代码边界，不能代替从零到EYC的纵向运行。开发应维护唯一可续跑的Native Campaign checkpoint；合法首档还未建立时，不反复开档。`TestResults/20261028-023331`、`030259`、`031004`均停在教程跳过后的训练场菜单，无接管/存档/EYC进度。StoryMode地图观察与Issue探测条件冲突已修复，但自然运行仍未出现接管日志。当前按Native状态变化记录两个状态管理器、菜单、Campaign与Mission；教程确认后180秒没发起Host或启动后90秒未ready就快速失败，避免2小时空转。连续视频在首个稳定Campaign MapState后停止，只保留索引关键帧。Docs/Build已重新核验，启动诊断与长程恢复未实测。下一次自然开局验证接管和首个Native checkpoint，之后长测必须继承同一Campaign instance/hash；Epic终验仍要求两份独立新战役。Harness contract version 7.385。
+短测用于快速定位单一代码边界，不能代替从零到EYC的纵向运行。开发应维护唯一可续跑的Native Campaign checkpoint；合法首档还未建立时，不反复开档。`TestResults/20261028-023331`、`030259`、`031004`停在教程跳过后的训练场菜单，无接管/存档/EYC进度。新诊断运行`033718`在角色创建期触发Harness空引用崩溃，调用栈指向`SubModule.OnApplicationTick`读取尚未就绪的聚落对象；现移除该访问并保护可选状态读取，Build/Docs待验。启动握手超时和稳定MapState后停止录像也待实测。下一次自然开局验证接管/Native存档；之后长测继承同一Campaign instance/hash，Epic终验仍需两份独立新战役。Harness contract version 7.386。
 
 
 Build恢复证据：`TestResults/20261028-013058`的初次Host Build遇到NuGet服务索引TLS错误NU1900；Harness确认唯一依赖版本锁定后，以locked restore跳过不可达漏洞索引并完成本地Build，未升级依赖。7890代理TLS故障仍阻止GitHub推送；PersistentEycCampaign尚未创建检查点，下一步启动同一条长测。

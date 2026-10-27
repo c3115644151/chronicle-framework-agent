@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.385'
+$contractVersion = '7.386'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -1568,6 +1568,8 @@ if ($subModuleSource -notmatch 'isFreshCampaignHarness && !_freshCampaignMusicRe
     $subModuleSource -notmatch 'if \(isFreshCampaignHarness && !_freshCampaignMusicReadyLogged\)' -or
     $subModuleSource -notmatch 'if \(!skipProgressionIssueProbe \|\| storyModeProgressionHarness\) FreshCampaignHarness\.AdvanceCharacterCreation\(\)' -or
     $subModuleSource -notmatch 'fresh-storymode-app-state-transition-probe' -or
+    $subModuleSource -notmatch 'unavailable-.*exception\.GetType\(\)\.Name' -or
+    $subModuleSource -match 'Settlement\.CurrentSettlement' -or
     $freshCampaignTest -notmatch 'storyModeTutorialSkipConfirmedAt\.AddSeconds\(180\)' -or
     $freshCampaignTest -notmatch 'storyModeAgentHostStartRequestedAt\.AddSeconds\(90\)' -or
     $freshCampaignTest -notmatch 'if \(\$StoryModeEycLiveModelEvaluation -and \$storyModeMapSettledObserved -and \$storyModeVideoCapture -and \$storyModeVideoCaptureActive\)' -or
