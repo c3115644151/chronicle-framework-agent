@@ -1103,7 +1103,7 @@ if ($StoryModeEycLiveModelEvaluation -and $storyModeAgentHostReceiptPath -and (T
         $storyModeAgentPromptCacheMissTokens = $storyModeHostReceipt.providerPromptCacheMissTokens
         $storyModeAgentActualCostEstimateCny = $storyModeHostReceipt.providerActualCostEstimateCny
         $storyModeAgentReservedCostUpperBoundCny = $storyModeHostReceipt.providerReservedCostUpperCny
-        $storyModeAgentFailureCode = [string]$storyModeHostReceipt.failureCode
+        $storyModeAgentFailureCode = if (-not [string]::IsNullOrWhiteSpace([string]$storyModeHostReceipt.failureCode)) { [string]$storyModeHostReceipt.failureCode } else { [string]$storyModeHostReceipt.error }
         $storyModeOriginalEstablishYourClanCompleted = $storyModeHostReceipt.status -eq 'completed' -and
             $storyModeHostReceipt.termination.goalVerified -eq $true
     }

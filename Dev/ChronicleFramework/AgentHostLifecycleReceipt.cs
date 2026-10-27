@@ -28,11 +28,15 @@ internal sealed class AgentHostLifecycleReceipt
     [DataMember(Name = "failureCode")] public string FailureCode { get; set; }
     [DataMember(Name = "failure")] public string Failure { get; set; }
     [DataMember(Name = "error")] public string ErrorCode { get; set; }
+    [DataMember(Name = "message")] public string Message { get; set; }
+    [DataMember(Name = "exceptionType")] public string ExceptionType { get; set; }
+    [DataMember(Name = "providerSelfTestDetail")] public string ProviderSelfTestDetail { get; set; }
     [DataMember(Name = "termination")] public AgentHostLifecycleTermination Termination { get; set; }
 
     internal static void CaptureForHarness(string output, string errorOutput)
     {
-        if (Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") != "agent-host-lifecycle-test") return;
+        var harnessMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+        if (harnessMode is not ("agent-host-lifecycle-test" or "fresh-campaign-renown")) return;
         var repositoryRoot = Environment.GetEnvironmentVariable("CHRONICLE_REPOSITORY_ROOT");
         var evidenceTemp = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
         if (string.IsNullOrWhiteSpace(repositoryRoot) || string.IsNullOrWhiteSpace(evidenceTemp)) return;
@@ -47,6 +51,9 @@ internal sealed class AgentHostLifecycleReceipt
             AgentHostLifecycleReceipt receipt;
             using (var input = new MemoryStream(Encoding.UTF8.GetBytes(json)))
                 receipt = (AgentHostLifecycleReceipt)serializer.ReadObject(input);
+            receipt.Message = SanitizeDiagnostic(receipt.Message);
+            receipt.Failure = SanitizeDiagnostic(receipt.Failure);
+            receipt.ProviderSelfTestDetail = SanitizeDiagnostic(receipt.ProviderSelfTestDetail);
             receipt.DecisionCount = Math.Max(receipt.DecisionCount, receipt.DecisionCountAlias);
             receipt.DecisionCountAlias = 0;
             using (var file = File.Create(Path.Combine(actualTemp, "AgentHostLifecycleHostReceipt.json")))
@@ -60,6 +67,16 @@ internal sealed class AgentHostLifecycleReceipt
             if (detail.Length > 240) detail = detail.Substring(0, 240);
             ChronicleDiagnostics.Write("harness-agent-host-receipt-failed|type=" + exception.GetType().Name + "|detail=" + detail);
         }
+    }
+
+    private static string SanitizeDiagnostic(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return value;
+        value = Regex.Replace(value, @"(?i)(bearer\s+)\S+", "$1<redacted>");
+        value = Regex.Replace(value, @"(?i)sk-[A-Za-z0-9_-]+", "<redacted>");
+        value = Regex.Replace(value, @"(?i)((?:api.?key|token|secret)\s*[:=]\s*)[^\s,;]+", "$1<redacted>");
+        value = value.Replace('|', '/').Replace('\r', ' ').Replace('\n', ' ').Trim();
+        return value.Length > 240 ? value.Substring(0, 240) : value;
     }
 }
 

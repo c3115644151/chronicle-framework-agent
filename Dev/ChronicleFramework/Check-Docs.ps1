@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.360'
+$contractVersion = '7.362'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -80,6 +80,7 @@ $agentHostRuntimeControllerSource = Get-Content (Join-Path $harnessRoot 'AgentHo
 $agentPlayerInputOwnershipSource = Get-Content (Join-Path $harnessRoot 'AgentPlayerInputOwnership.cs') -Raw -Encoding UTF8
 $agentHostLifecycleReceiptSource = Get-Content (Join-Path $harnessRoot 'AgentHostLifecycleReceipt.cs') -Raw -Encoding UTF8
 $agentHostLifecycleEvaluationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostLifecycleEvaluation.ps1') -Raw -Encoding UTF8
+$freshCampaignTest = Get-Content (Join-Path $harnessRoot 'Test-AgentFreshCampaign.ps1') -Raw -Encoding UTF8
 $agentHostDecisionCycleSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostDecisionCycle.cs') -Raw -Encoding UTF8
 $agentHostCampaignLoopEvaluationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostCampaignLoopEvaluation.ps1') -Raw -Encoding UTF8
 $agentHostLiveModelLoopSource = Get-Content (Join-Path $harnessRoot 'Test-AgentLiveModelLoop.ps1') -Raw -Encoding UTF8
@@ -1014,6 +1015,11 @@ if ($harnessScript -notmatch "'AgentHostLifecycleCompletionEvaluation' \{ @\('Pr
     $harnessScript -notmatch '\-Scenario Complete' -or $agentHostLifecycleHarness -notmatch 'NativeArrivalCompleted' -or
     $agentHostLifecycleHarness -notmatch 'AgentHostLifecycleHostReceipt\.json' -or
     $agentHostRuntimeControllerSource -notmatch 'AgentHostLifecycleReceipt\.CaptureForHarness' -or
+    $agentHostLifecycleReceiptSource -notmatch 'fresh-campaign-renown' -or
+    $agentHostLifecycleReceiptSource -notmatch 'DataMember\(Name = "message"\)' -or
+    $agentHostLifecycleReceiptSource -notmatch 'SanitizeDiagnostic\(receipt\.Message\)' -or
+    $agentHostLifecycleReceiptSource -notmatch 'sk-\[A-Za-z0-9_-' -or
+    $freshCampaignTest -notmatch 'storyModeHostReceipt\.error' -or
     $agentHostLifecycleReceiptSource -notmatch 'DecisionCountAlias' -or
     $agentHostLifecycleReceiptSource -notmatch 'DecisionCount = Math\.Max' -or
     $agentHostHarnessProgressTraceSource -notmatch 'RecordObjectiveSubflowResult' -or
@@ -1468,7 +1474,6 @@ if ($harnessScript -notmatch "'All' \{ [^}]*'MissionLeave'[^}]*\}") { throw 'Mis
 if ($agentProtocolSource -match 'var (quickTalkData|visitData) = [^\r\n]*(hasIssue|issueType|RequestedItem|numberOfRequested|locationId)' -or $agentProtocolSource -notmatch 'var quickTalkData = .*heroName' -or $agentProtocolSource -notmatch 'var visitData = .*heroName') { throw 'Settlement overlay conversation actions may echo only the currently observed target identity; Quest/Issue implementation fields and internal Location IDs are not player-visible knowledge.' }
 $freshCampaignSource = Get-Content (Join-Path $harnessRoot 'FreshCampaignHarness.cs') -Raw -Encoding UTF8
 $freshCampaignTelemetry = Get-Content (Join-Path $harnessRoot 'SubModule.cs') -Raw -Encoding UTF8
-$freshCampaignTest = Get-Content (Join-Path $harnessRoot 'Test-AgentFreshCampaign.ps1') -Raw -Encoding UTF8
 if ($harnessStartupEvidenceSource -notmatch 'function Disable-ChronicleHarnessAutoSave' -or
     $harnessStartupEvidenceSource -notmatch 'BannerlordConfig\.chronicle-autosave-backup\.json' -or
     $harnessStartupEvidenceSource -notmatch 'function Restore-ChronicleHarnessAutoSaveSetting' -or
