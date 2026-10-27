@@ -17,6 +17,17 @@ Issue是带有发起者、频率/冷却、解决条件和后果的Campaign委托
 W2-AU已将Native Party Nameplate marker类别扩展到当前`mapPartyTargets`候选；它只返回有限marker信息，不等于全局Issue发现，也不是地图Party的交谈/接Quest入口。
 
 W2-E #29先以Sargot Gang Leader证明`CanPlayerTakeQuestConditions`不满足时原版不显示合法接取选项、Quest保持0；其后`TestResults/20260927-084700/Temp/SettlementOverlayQuest-QuestAccepted-Result.json`已在自然可见Village Notable上经原版`issue_offer_player_accept_quest`启动一条Issue Quest，Quest计数0→1，time/存档/进程断言通过。W2-AI再以`TestResults/20261002-035659`完整接受并交付一件VillageNeedsToolsIssue任务，证明的是一个特定任务闭环，不宣称Alternative/Lord Solution、其他任务子类或全局任务发现/刷新均已覆盖。
+### Gold 奖励类 Issue 的源码样本（v1.4.8.119303）
+
+本机 `TaleWorlds.CampaignSystem.dll` 的 Issue 子类中，金币奖励并非统一规则，必须按当前任务文本/Journal和具体 Issue 前置判断，不能把所有蓝色标记视为可盈利任务。
+
+| 原版 Issue | Native 金币/前置/完成事实 | 对首轮 EYC 收入路线的意义 |
+|---|---|---|
+| Merchant Needs Help with Outlaws | `RewardGold = (int)(400 + 1500 × IssueDifficultyMultiplier)`；直接 Quest 路线要求与发起者关系不低于 -10、主队至少 5 名健康成员、双方不在战争状态，`requiredGold=0`；时限20天；要求在发起者附近摧毁或招募指定数量的合格匪徒队伍，范围由当前难度决定。成功回调给MainHero支付`RewardGold`并增加Clan Renown 1。Alternative是另行派遣同伴/部队的路线，副作用不同。 | 与无预付资金状态兼容，并可能同时增加声望；任务是否在当前世界出现、原版可接文本是否明确呈现奖励及当前遭遇是否属于该Quest目标，仍须观察实际标记/对话/Journal。地图遭遇坐镇指挥与父循环的匪徒遭遇处理代码存在可复用候选，端到端未验证。 |
+| Gang Leader Needs Recruits | `RewardGold = 2000 + RequestedRecruitCount × 100`；`CanPlayerTakeQuestConditions` 的已反编译路径不要求技能或金币，关系低于 -10 会阻止接取。该Issue的目标描述需要向帮派领袖提供自愿加入者；俘虏招募及任务接受后的完整结算路径未在当前收入链验证。 | 奖励足以覆盖EYC金币目标，但它需要特定招募来源和交付链；不能仅由奖励公式推断为更容易或保证自然可用。 |
+| Village Needs Tools | `RewardGold = 500 + requestedCount × (localPrice + item.Value) / 2`；关系低于 -10或与发起方处于战争会阻止接取；请求数量工具须送达，奖励可能按原版报价支付金币，也可能以指定物品交换。 | 有前期购买/取得工具成本，且不保证纯金币；当前金币为0时不能默认可行。 |
+
+以上是安装版1.4.8.119303的反编译源码事实，不证明自然Campaign里任务出现率、Offer文本可读性、战斗目标总能被地图可见或AI已能跑通这些任务。入口必须先从Native `AvailableIssue` marker和当前Notable QuickConversation观察；只有当前对话实际开放Quest路径才接受，Alternative/Lord方案不可自动当作等价收入动作。该Quest的进度Journal调用把`AddDiscreteLog`标为`hideInformation:true`，但其运行时是否仍会出现在Agent按需读取的QuestDetails里尚未验证；本地还会发出“已猎杀x/y”QuickInformation。正式集成前需检查真实Native QuestDetails/屏幕，不能假定能读到隐藏进度。任务完成以原版Quest完成状态与MainHero Gold前后差值确认，不能只凭文本奖励金额。
 
 ## J02 Quests：任务生命周期与结果
 

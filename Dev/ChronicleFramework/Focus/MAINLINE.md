@@ -1119,9 +1119,9 @@ Fresh StoryMode run `TestResults/20261027-135719` on commit `aa44ef6` confirms t
 
 ### 2026-10-28：P5同一Campaign纵向续跑与收入路线缺口
 
-纵向主测从自然新StoryMode起点开始，Campaign ID为`05896845153e4f019caeb20ebb3603c1`。`TestResults/20261028-035939`首轮外层收据因子结果路径错误失败；其Native存档随后经唯一SaveAs收据和SHA256恢复。`042208`、`044954`及`053200`持续使用同一Campaign ID，不应计作重开战役。最新`053200`从`ChronicleEycDev-20261028045206-abac5517`续跑，做138次真实Provider决策（480,955输入/8,655输出token，估算¥0.994），Native SaveAs建立第4个检查点`ChronicleEycDev-20261028053410-e26fd299`；Campaign身份不变、游戏进程已清理。EYC仍未完成，这是纵向运行证据，不是产品通过。Gold子流程在27次模型决定、6个Native动作后因`gold-sale-no-transferable-goods`退出；当时Gold 0、Renown 20、MainParty 18人。该结果揭示收入路线缺口：没有可卖商品时，当前Gold目标无法赚到2000，需研究并接入真实可用的原版任务/委托收入来源，不能重开档掩盖停滞或直接改资源。
+纵向主测从自然新StoryMode起点开始，Campaign ID为`05896845153e4f019caeb20ebb3603c1`。`TestResults/20261028-035939`首轮外层收据因子结果路径错误失败；其Native存档随后经唯一SaveAs收据和SHA256恢复。`042208`、`044954`及`053200`持续使用同一Campaign ID，不应计作重开战役。最新`053200`从`ChronicleEycDev-20261028045206-abac5517`续跑，做138次真实Provider决策（480,955输入/8,655输出token，估算¥0.994），Native SaveAs建立第4个检查点`ChronicleEycDev-20261028053410-e26fd299`；Campaign身份不变、游戏进程已清理。EYC仍未完成，这是纵向运行证据，不是产品通过。Gold子流程在27次模型决定、6个Native动作后因`gold-sale-no-transferable-goods`退出；当时Gold 0、Renown 20、MainParty 18人。该结果揭示收入路线缺口：没有可卖商品时，当前Gold目标无法赚到2000，不能重开档掩盖停滞或直接改资源。本机源码已核实一个候选原版Quest `Merchant Needs Help with Outlaws`：无需预付金币，需关系≥-10、至少5名健康队员且无战争，接受后20天内清剿/招募附近指定数量匪徒；公式奖励为400+1500×IssueDifficultyMultiplier，并增加1点Clan Renown。它和已有匪徒坐镇指挥可能复用，但单次奖励不保证达到2000；Native任务标记在当前战役是否出现、界面文本/Journal能提供什么进度、模型能否走完整收尾均未验。另一个奖励≥2000的Gang Leader招募任务有未验证的俘虏招募/交付链，暂不选作确定路线。下一步先给当前可见AvailableIssue/QuickConversation和Journal读取做窄契约回归，再增加受限的任务收入候选；仅接受原版当下可见的Quest分支，不把Alternative/Lord解决方案当同一动作。
 
-测试分工：同一自然Campaign从AI接手前的开局连续续跑，是纵向门禁；短测只定位单一Native/代码故障，不算Campaign通过。当前Campaign链已从新战役起步，但第一个可续存档是在AI已有进展后才写出；未来应尽可能在首个可安全保存的AI接管边界建立初始检查点。完整EYC成功后仍需第二份独立新战役复验。Harness Docs `20261028-053730`通过。
+测试分工：同一自然Campaign从AI接手前的开局连续续跑，是纵向门禁；短测只定位单一Native/代码故障，不算Campaign通过。当前Campaign链已从新战役起步，但第一个可续存档是在AI已有进展后才写出；未来应尽可能在首个可安全保存的AI接管边界建立初始检查点。完整EYC成功后仍需第二份独立新战役复验。本次源码/研究更新经Harness Docs `20261028-055456`通过；研究详见`Research/J/TasksEventsAndNarrative.md` J01。
 
 
 Build恢复证据：`TestResults/20261028-013058`的初次Host Build遇到NuGet服务索引TLS错误NU1900；Harness确认唯一依赖版本锁定后，以locked restore跳过不可达漏洞索引并完成本地Build，未升级依赖。7890代理TLS故障仍阻止GitHub推送；PersistentEycCampaign尚未创建检查点，下一步启动同一条长测。
