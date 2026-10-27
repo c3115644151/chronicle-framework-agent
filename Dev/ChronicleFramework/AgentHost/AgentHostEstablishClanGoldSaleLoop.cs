@@ -283,7 +283,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         JsonArray? priorProviderRouteHistory = null)
     {
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
-        var maxDecisions = Math.Clamp(ReadInt(request, "maxDecisions", 48), 1, 160);
+        var maxDecisions = Math.Clamp(ReadInt(request, "maxDecisions", AgentHostCampaignLoop.MaxCumulativeDecisions), 1, AgentHostCampaignLoop.MaxCumulativeDecisions);
         var maxElapsedSeconds = Math.Clamp(ReadInt(request, "maxElapsedSeconds", 1800), 10, 7200);
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxElapsedSeconds));
@@ -362,7 +362,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             if (ReadBoolean(goldBefore, "met") == true)
                 throw new AgentHostException("gold-sale-objective-already-met", "The official Journal Gold objective is already met; no sale was performed.");
 
-            for (var iteration = 1; decisionCount - priorDecisions < maxDecisions; iteration++)
+            for (var iteration = 1; decisionCount < maxDecisions; iteration++)
             {
                 elapsed.Token.ThrowIfCancellationRequested();
                 var state = currentNative["state"] as JsonObject ?? throw new AgentHostException("gold-sale-state-missing", "Native returned no Campaign state.");

@@ -10,7 +10,7 @@ internal static class AgentHostEstablishClanCompanionLoop
     private const double MinimumCompanionNavigationProgressDistance = 0.1d;
     private const int MaxCompanionNavigationNoProgressAttempts = 2;
     private const string QuestId = "rebuild_player_clan_storymode_quest";
-    private const int MaxDecisions = 96;
+    private const int MaxDecisions = AgentHostCampaignLoop.MaxCumulativeDecisions;
     // This is a per-decision choice window, not a world-entity cap. After a
     // selected Town is visited, the Native target query is refreshed against
     // visitedTowns and exposes the next nearest unvisited candidates.

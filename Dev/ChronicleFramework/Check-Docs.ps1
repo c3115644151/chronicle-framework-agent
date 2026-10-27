@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.365'
+$contractVersion = '7.367'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -91,7 +91,7 @@ $agentHostBattleSimulationLoopSource = Get-Content (Join-Path $harnessRoot 'Agen
 $agentHostCampaignStateFactsSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostCampaignStateFacts.cs') -Raw -Encoding UTF8
 $agentHostCompanionLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostEstablishClanCompanionLoop.cs') -Raw -Encoding UTF8
 $agentHostRecruitmentLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostEstablishClanRecruitmentLoop.cs') -Raw -Encoding UTF8
-if ($agentHostRecruitmentLoopSource -notmatch 'MaxDecisions = 160' -or $agentHostRecruitmentLoopSource -notmatch 'TimeSpan\.FromHours\(2\)' -or $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-budget-mismatch') { throw 'PartySize execution must share the autonomous EYC parent budget of 160 decisions and 2 hours so a child loop cannot terminate early.' }
+if ($agentHostRecruitmentLoopSource -notmatch 'MaxDecisions = AgentHostCampaignLoop\.MaxCumulativeDecisions' -or $agentHostRecruitmentLoopSource -notmatch 'TimeSpan\.FromHours\(2\)' -or $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-budget-mismatch') { throw 'PartySize execution must share the autonomous EYC parent cumulative-decision budget and 2-hour limit so a child loop cannot terminate early.' }
 $agentHostCaptivityRecoveryLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostCaptivityRecoveryLoop.cs') -Raw -Encoding UTF8
 $agentHostGoldSaleLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostEstablishClanGoldSaleLoop.cs') -Raw -Encoding UTF8
 $agentHostMailboxSource = Get-Content (Join-Path $harnessRoot 'AgentHost\NativeMailboxClient.cs') -Raw -Encoding UTF8
@@ -549,14 +549,21 @@ if ($agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S
 }
 if ($agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S]{0,400}\$maxElapsedSeconds = 7200' -or
     $agentLiveModelLoopSource -notmatch '\$maxDecisions = 160' -or
-    $agentHostRuntimeControllerSource -notmatch 'maxDecisions\\":160,\\"maxElapsedSeconds\\":7200' -or
-    $agentHostCampaignLoopSource -notmatch 'maxDecisions is < 1 or > 160' -or
+    $agentHostRuntimeControllerSource -notmatch 'maxDecisions\\":320,\\"maxElapsedSeconds\\":7200' -or
+    $agentHostCampaignLoopSource -notmatch 'maxDecisions is < 1 or > MaxCumulativeDecisions' -or
+    $agentHostCampaignLoopSource -notmatch 'MaxCumulativeDecisions = 320' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'ReadInt\(request, "maxDecisions", AgentHostCampaignLoop\.MaxCumulativeDecisions\)' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'ReadInt\(request, "maxDecisions", AgentHostCampaignLoop\.MaxCumulativeDecisions\)' -or
+    $agentHostRecruitmentLoopSource -notmatch 'MaxDecisions = AgentHostCampaignLoop\.MaxCumulativeDecisions' -or
+    $agentHostCompanionLoopSource -notmatch 'MaxDecisions = AgentHostCampaignLoop\.MaxCumulativeDecisions' -or
+    $agentHostGoldSaleLoopSource -notmatch 'for \(var iteration = 1; decisionCount < maxDecisions; iteration\+\+\)' -or
+    $agentHostCaptivityRecoveryLoopSource -notmatch 'for \(var loopIndex = 1; decisions < maxDecisions; loopIndex\+\+\)' -or
     $agentHostCampaignLoopSource -notmatch 'GetCumulativeDecisionLimit\(maxDecisions\)' -or
     $agentHostCampaignLoopSource -notmatch 'campaign-loop-self-test-child-decision-limit-shrank' -or
     $agentHostCampaignLoopSource -notmatch 'maxElapsedSeconds is < 1 or > 7200' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'Math\.Clamp\(ReadInt\(request, "maxElapsedSeconds", 7200\), 1, 7200\)' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'Math\.Clamp\(ReadInt\(request, "maxDecisions", 160\), 1, 160\)') {
-    throw 'The live quest run, MCM Campaign Host request, parent classifier and quest loop must share the evidence-based 7200-second/160-decision budget; the prior real run timed out at 3600 seconds before reaching another safe Town.'
+    throw 'The EYC Host request and all nested objective loops must share the 7200-second/320-decision cumulative ceiling; separate loops must not restart the full decision allowance when prior decisions are carried forward.'
 }
 if ($agentLiveModelLoopSource -notmatch 'Get-FreeLLMAPIModelExecutionStatus -ModelRows @\(\$availableModelsResponse\.data\)' -or
     $agentLiveModelLoopSource -notmatch 'if \(\$modelExecutionStatus -eq ''not-listed''\)' -or

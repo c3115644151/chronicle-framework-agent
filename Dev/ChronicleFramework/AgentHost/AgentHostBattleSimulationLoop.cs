@@ -25,7 +25,7 @@ internal static class AgentHostBattleSimulationLoop
     {
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
         var goal = ReadString(request, "goal") ?? string.Empty;
-        var maxDecisions = Math.Clamp(ReadInt(request, "maxDecisions", 160), 1, 160);
+        var maxDecisions = Math.Clamp(ReadInt(request, "maxDecisions", AgentHostCampaignLoop.MaxCumulativeDecisions), 1, AgentHostCampaignLoop.MaxCumulativeDecisions);
         var maxElapsedSeconds = Math.Clamp(ReadInt(request, "maxElapsedSeconds", 7200), 1, 7200);
         var allowedActionNames = request.TryGetProperty("allowedActionNames", out var names) && names.ValueKind == JsonValueKind.Array
             ? names.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!).ToHashSet(StringComparer.Ordinal)
@@ -960,6 +960,23 @@ internal static class AgentHostBattleSimulationLoop
         }
         if (!client.Actions.SequenceEqual(new[] { "mapPartyTargets", "pursue", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone" }))
             throw new AgentHostException("battle-loop-self-test-native-order-failed", "The battle loop emitted an unexpected Native action order.");
+        using var cumulativeRequest = JsonDocument.Parse("{\"runId\":\"selftest-battle-after-objective-budget\",\"goal\":\"Resolve one active incident battle after prior objective decisions.\",\"parentProcessId\":321,\"maxDecisions\":320,\"maxElapsedSeconds\":20,\"allowedActionNames\":" + actionNames + "}");
+        var cumulativeClient = new FakeBattleSimulationNativeClient();
+        var cumulativeProvider = new FakeBattleSimulationDecisionProvider();
+        var priorCampaignTrace = new JsonArray();
+        var priorCampaignRoutes = new JsonArray();
+        for (var prior = 0; prior < 201; prior++)
+        {
+            priorCampaignTrace.Add(new JsonObject { ["iteration"] = prior + 1, ["stage"] = "prior-objective-decision" });
+            priorCampaignRoutes.Add(new JsonObject { ["decision"] = prior + 1, ["requestedModelId"] = cumulativeProvider.ModelId, ["routedVia"] = "prior-objective" });
+        }
+        var cumulativeBattle = await RunAsync(cumulativeRequest.RootElement, cumulativeClient, cumulativeProvider, CancellationToken.None,
+            priorDecisions: 201, priorTrace: priorCampaignTrace, priorProviderRouteHistory: priorCampaignRoutes);
+        if (ReadString(cumulativeBattle, "status") != "completed" || ReadInt(cumulativeBattle, "decisions", 0) != 215 ||
+            cumulativeProvider.CallCount != 14 || ReadInt(cumulativeBattle, "actionsExecuted", 0) != 12 ||
+            (cumulativeBattle["trace"] as JsonArray)?.Count != 215 ||
+            (cumulativeBattle["providerRouteHistory"] as JsonArray)?.Count != 215)
+            throw new AgentHostException("battle-loop-self-test-cumulative-budget-interruption-failed", "A real-time incident BattleSimulation must retain enough shared decision budget after earlier objective planning/actions and preserve global trace numbering.");
         var recoveryClient = new FakeBattleSimulationNativeClient(simulateCaptivity: true);
         var recoveryProvider = new FakeBattleCaptivityDecisionProvider();
         var recovery = await RunAsync(request.RootElement, recoveryClient, recoveryProvider, CancellationToken.None,
@@ -974,6 +991,7 @@ internal static class AgentHostBattleSimulationLoop
             throw new AgentHostException("battle-loop-self-test-captivity-recovery-failed", $"A fake Native battle-capture-ransom cycle failed: status={ReadString(recovery, "status")}, outcome={ReadString(recovery, "playerOutcome")}, captivity={ReadBoolean(recovery, "captivityObserved")}, recovery={ReadBoolean(recovery, "captivityRecoveryVerified")}, action={ReadString(recovery, "captivityChoiceOptionId")}, actions={string.Join(",", recoveryClient.Actions)}.");
         return [
             new { scenario = "battle-loop-native-observe-pursue-send-troops-aftermath-return-and-verify", decisions = ReadInt(result, "decisions", 0), nativeActions = client.Actions.ToArray(), renownBefore = ReadDouble(result, "renownBefore", double.NaN), renownAfter = ReadDouble(result, "renownAfter", double.NaN), explicitClockActions = ReadInt(result, "explicitClockActionCount", -1), passed = true },
+            new { scenario = "battle-loop-incident-after-201-parent-decisions-retains-global-budget", decisions = ReadInt(cumulativeBattle, "decisions", 0), passed = true },
             new { scenario = "battle-loop-native-capture-passive-wait-ransom-release-and-map-return", decisions = ReadInt(recovery, "decisions", 0), nativeActions = recoveryClient.Actions.ToArray(), captivityChoiceOptionId = ReadString(recovery, "captivityChoiceOptionId"), mainPartyMembersAtReturn = ReadInt(recovery, "mainPartyMembersAtReturn", 0), explicitClockActions = ReadInt(recovery, "explicitClockActionCount", -1), passed = true }
         ];
     }

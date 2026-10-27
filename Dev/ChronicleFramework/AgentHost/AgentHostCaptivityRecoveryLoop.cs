@@ -230,7 +230,7 @@ internal static class AgentHostCaptivityRecoveryLoop
         bool planObjectiveAfterRecovery = true)
     {
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
-        var maxDecisions = Math.Clamp(ReadInt(request, "maxDecisions", 80), 1, 160);
+        var maxDecisions = Math.Clamp(ReadInt(request, "maxDecisions", AgentHostCampaignLoop.MaxCumulativeDecisions), 1, AgentHostCampaignLoop.MaxCumulativeDecisions);
         var maxElapsedSeconds = Math.Clamp(ReadInt(request, "maxElapsedSeconds", 7200), 5, 7200);
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxElapsedSeconds));
@@ -255,7 +255,7 @@ internal static class AgentHostCaptivityRecoveryLoop
         var initialMode = ReadString(initialState["context"] as JsonObject, "timeControlMode");
         var current = initialNative.DeepClone() as JsonObject ?? throw new AgentHostException("captivity-recovery-observation-invalid", "The initial Native state could not be cloned.");
 
-        for (var loopIndex = 1; decisions - priorDecisions < maxDecisions; loopIndex++)
+        for (var loopIndex = 1; decisions < maxDecisions; loopIndex++)
         {
             elapsed.Token.ThrowIfCancellationRequested();
             var state = current["state"] as JsonObject ?? throw new AgentHostException("captivity-recovery-state-missing", "Native returned no current Campaign state.");

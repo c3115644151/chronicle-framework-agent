@@ -7,6 +7,7 @@ namespace ChronicleFramework.AgentHost;
 
 internal static class AgentHostCampaignLoop
 {
+    internal const int MaxCumulativeDecisions = 320;
     private const int MaxRejectedDecisions = 2;
     private const int MaxUnsupportedEycScopeReconsiderations = 1;
     internal static readonly HashSet<string> ApprovedActions = new(StringComparer.Ordinal)
@@ -31,8 +32,8 @@ internal static class AgentHostCampaignLoop
     {
         var results = new List<object>();
         results.AddRange(AgentHostStoryModeBootstrapLoop.RunContractSelfTests());
-        if (new[] { 0, 30, 80, 159 }.Any(prior => prior >= GetCumulativeDecisionLimit(160)) ||
-            GetCumulativeDecisionLimit(8) != 8 || GetCumulativeDecisionLimit(0) != 1 || GetCumulativeDecisionLimit(1000) != 160)
+        if (new[] { 0, 30, 80, 159, 319 }.Any(prior => prior >= GetCumulativeDecisionLimit(MaxCumulativeDecisions)) ||
+            GetCumulativeDecisionLimit(8) != 8 || GetCumulativeDecisionLimit(0) != 1 || GetCumulativeDecisionLimit(1000) != MaxCumulativeDecisions)
             throw new AgentHostException("campaign-loop-self-test-child-decision-limit-shrank", "Nested objective loops must keep the parent's cumulative decision ceiling and carry prior decisions separately.");
         results.Add(new { scenario = "campaign-loop-nested-objectives-share-cumulative-decision-ceiling", passed = true });
         var initialActions = new JsonArray();
@@ -175,7 +176,7 @@ internal static class AgentHostCampaignLoop
         return results;
     }
 
-    internal static int GetCumulativeDecisionLimit(int parentMaximum) => Math.Clamp(parentMaximum, 1, 160);
+    internal static int GetCumulativeDecisionLimit(int parentMaximum) => Math.Clamp(parentMaximum, 1, MaxCumulativeDecisions);
 
     internal static async Task<IReadOnlyList<object>> RunTransportSelfTestsAsync()
     {
@@ -283,7 +284,7 @@ internal static class AgentHostCampaignLoop
         var requestedActions = request.TryGetProperty("allowedActionNames", out var actionNames) && actionNames.ValueKind == JsonValueKind.Array
             ? actionNames.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String).Select(item => item.GetString()!).ToHashSet(StringComparer.Ordinal)
             : new HashSet<string>(StringComparer.Ordinal);
-        if (string.IsNullOrWhiteSpace(goal) || goal.Length > 1000 || maxDecisions is < 1 or > 160 || maxElapsedSeconds is < 1 or > 7200 ||
+        if (string.IsNullOrWhiteSpace(goal) || goal.Length > 1000 || maxDecisions is < 1 or > MaxCumulativeDecisions || maxElapsedSeconds is < 1 or > 7200 ||
             !IsSupportedRequestedActionSet(requestedActions))
             throw new AgentHostException("campaign-loop-request-invalid", "The Host requires a bounded goal and one exact approved Campaign action set.");
 
