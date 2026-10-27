@@ -75,6 +75,22 @@ $harnessTempRoot = [IO.Path]::GetFullPath($harnessTemp).TrimEnd([IO.Path]::Direc
 if (-not $evidenceRoot.StartsWith($harnessTempRoot, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Agent Host package evidence must remain inside the current disposable Harness run.'
 }
+$projectDirectory = Split-Path -Parent $project
+[xml]$hostProject = Get-Content -LiteralPath $project -Raw -Encoding UTF8
+$packageReferences = @($hostProject.SelectNodes('//PackageReference'))
+$unsupportedPackageReferences = @($packageReferences | Where-Object { $_.Include -ne 'Microsoft.ML.Tokenizers' -or $_.Version -ne '[2.0.1]' })
+$packageLockPath = Join-Path $projectDirectory 'packages.lock.json'
+if ($packageReferences.Count -ne 1 -or $unsupportedPackageReferences.Count -gt 0 -or
+    $hostProject.Project.PropertyGroup.RestorePackagesWithLockFile -ne 'true' -or
+    -not (Test-Path -LiteralPath $packageLockPath -PathType Leaf)) {
+    throw 'Agent Host requires one reviewed, exactly pinned tokenizer package and a committed dependency lock file.'
+}
+$packageLock = Get-Content -LiteralPath $packageLockPath -Raw -Encoding UTF8 | ConvertFrom-Json
+if ([string]$packageLock.dependencies.'net8.0'.'Microsoft.ML.Tokenizers'.resolved -ne '2.0.1' -or
+    [string]$packageLock.dependencies.'net8.0'.'Google.Protobuf'.resolved -ne '3.30.2' -or
+    $null -eq $packageLock.dependencies.'net8.0/win-x64') {
+    throw 'Agent Host package lock does not match the reviewed Microsoft tokenizer and Protocol Buffers dependency versions.'
+}
 $stalePackageCleanup = Invoke-StaleAgentHostPackageCleanup
 
 function Test-BoundedTcpPort
@@ -150,13 +166,13 @@ try {
         [Environment]::SetEnvironmentVariable($name, $proxyUri, 'Process')
     }
 $baseOutputArgument = "-p:BaseOutputPath=$buildOutputRoot\"
-$publishArguments = @('publish',$project,'--configuration','Release','--runtime','win-x64','--self-contained','true','-p:UseAppHost=true',$baseOutputArgument,'-o',$publishRoot)
+$publishArguments = @('publish',$project,'--configuration','Release','--runtime','win-x64','--self-contained','true','-p:UseAppHost=true','-p:RestoreLockedMode=true',$baseOutputArgument,'-o',$publishRoot)
 $buildLog = & dotnet @publishArguments 2>&1 | Out-String
 $buildExitCode = $LASTEXITCODE
 if ($buildExitCode -ne 0 -and $buildLog -match 'NU1900') {
-    [xml]$hostProject = Get-Content -LiteralPath $project -Raw -Encoding UTF8
-    if ($hostProject.SelectNodes('//PackageReference').Count -gt 0) {
-        throw "NuGet audit metadata was unreachable and this Host project contains package dependencies; refusing an unaudited fallback. $buildLog"
+    if ($packageReferences.Count -ne 1 -or $unsupportedPackageReferences.Count -gt 0 -or
+        -not (Test-Path -LiteralPath $packageLockPath -PathType Leaf)) {
+        throw "NuGet audit metadata was unreachable and the Host project contains an unreviewed/unlocked dependency; refusing an unaudited fallback. $buildLog"
     }
     $auditFallbackArguments = @($publishArguments[0..($publishArguments.Count - 1)]) + '-p:NuGetAudit=false'
     $auditFallbackLog = & dotnet @auditFallbackArguments 2>&1 | Out-String
@@ -176,6 +192,11 @@ if ($buildExitCode -ne 0) { throw "Self-contained win-x64 publish failed (exit=$
 $hostExe = Join-Path $publishRoot 'ChronicleAgentHost.exe'
 $requiredRuntimeFiles = @('hostfxr.dll', 'hostpolicy.dll', 'coreclr.dll', 'System.Private.CoreLib.dll')
 $missingRuntimeFiles = @($requiredRuntimeFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path $publishRoot $_) -PathType Leaf) })
+foreach ($noticeFile in @('THIRD-PARTY-NOTICES.txt','DeepSeekV4Tokenizer-LICENSE.txt','Microsoft.ML.Tokenizers-LICENSE.txt','Microsoft.ML.Tokenizers-THIRD-PARTY-NOTICES.txt','Google.Protobuf-LICENSE.txt')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $publishRoot (Join-Path 'Resources' $noticeFile)) -PathType Leaf)) {
+        throw "The Agent Host distribution is missing third-party notice '$noticeFile'."
+    }
+}
 if (-not (Test-Path -LiteralPath $hostExe -PathType Leaf) -or $missingRuntimeFiles.Count -gt 0) {
     throw "The publish output is incomplete for a self-contained Windows runtime. Missing=$($missingRuntimeFiles -join ',')"
 }

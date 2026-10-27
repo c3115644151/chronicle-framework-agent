@@ -1,0 +1,13 @@
+Chronicle Framework Agent Host third-party notices
+
+DeepSeek V4.1 tokenizer asset
+The embedded tokenizer data is from DeepSeek's official tokenizer archive, distributed under the MIT License. See DeepSeekV4Tokenizer-LICENSE.txt.
+Source: https://cdn.deepseek.com/api-docs/deepseek_v4_tokenizer.zip
+
+Microsoft.ML.Tokenizers 2.0.1
+The Agent Host uses Microsoft's BPE/byte-level tokenizer library under the MIT License. See Microsoft.ML.Tokenizers-LICENSE.txt and Microsoft.ML.Tokenizers-THIRD-PARTY-NOTICES.txt.
+Source: https://www.nuget.org/packages/Microsoft.ML.Tokenizers/2.0.1
+
+Google.Protobuf 3.30.2
+Transitive dependency of Microsoft.ML.Tokenizers, licensed under BSD 3-Clause. See Google.Protobuf-LICENSE.txt.
+Source: https://www.nuget.org/packages/Google.Protobuf/3.30.2

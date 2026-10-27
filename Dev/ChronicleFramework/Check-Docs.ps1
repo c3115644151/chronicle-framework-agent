@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.362'
+$contractVersion = '7.363'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -81,6 +81,9 @@ $agentPlayerInputOwnershipSource = Get-Content (Join-Path $harnessRoot 'AgentPla
 $agentHostLifecycleReceiptSource = Get-Content (Join-Path $harnessRoot 'AgentHostLifecycleReceipt.cs') -Raw -Encoding UTF8
 $agentHostLifecycleEvaluationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostLifecycleEvaluation.ps1') -Raw -Encoding UTF8
 $freshCampaignTest = Get-Content (Join-Path $harnessRoot 'Test-AgentFreshCampaign.ps1') -Raw -Encoding UTF8
+$deepSeekTokenEstimatorSource = Get-Content (Join-Path $harnessRoot 'AgentHost\DeepSeekPromptTokenEstimator.cs') -Raw -Encoding UTF8
+$deepSeekTokenizerAsset = Join-Path $harnessRoot 'AgentHost\Resources\deepseek_v4_tokenizer.zip'
+$deepSeekTokenizerLicense = Join-Path $harnessRoot 'AgentHost\Resources\DeepSeekV4Tokenizer-LICENSE.txt'
 $agentHostDecisionCycleSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostDecisionCycle.cs') -Raw -Encoding UTF8
 $agentHostCampaignLoopEvaluationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostCampaignLoopEvaluation.ps1') -Raw -Encoding UTF8
 $agentHostLiveModelLoopSource = Get-Content (Join-Path $harnessRoot 'Test-AgentLiveModelLoop.ps1') -Raw -Encoding UTF8
@@ -97,7 +100,12 @@ $agentHostVillageToolsQuestLoopSource = Get-Content (Join-Path $harnessRoot 'Age
 $agentHostVillageToolsQuestPolicySource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostVillageToolsQuestPolicy.cs') -Raw -Encoding UTF8
 $agentHostVillageToolsFixturePreparationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentVillageToolsQuestFixturePreparation.ps1') -Raw -Encoding UTF8
 $agentHostPackageSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostPackage.ps1') -Raw -Encoding UTF8
-if ($agentHostPackageSource -notmatch "SelectNodes\('//PackageReference'\)\.Count -gt 0" -or $agentHostPackageSource -notmatch "-match 'NU1900'") { throw 'Package publish may only retry without unreachable NuGet audit metadata after structurally checking that the Host project has no PackageReference dependencies.' }
+if ($agentHostPackageSource -notmatch "SelectNodes\('//PackageReference'\)" -or
+    $agentHostPackageSource -notmatch "Microsoft.ML.Tokenizers" -or
+    $agentHostPackageSource -notmatch "Version -ne '\[2.0.1\]'" -or
+    $agentHostPackageSource -notmatch 'packages.lock.json' -or
+    $agentHostPackageSource -notmatch 'RestoreLockedMode=true' -or
+    $agentHostPackageSource -notmatch "-match 'NU1900'") { throw 'NuGet audit fallback must reject every Host dependency except the single pinned Microsoft.ML.Tokenizers 2.0.1 package.' }
 $agentHostProviderSelfTestSource = Get-Content (Join-Path $harnessRoot 'AgentHost\ProviderContractSelfTest.cs') -Raw -Encoding UTF8
 $agentHostProviderSmokeSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostProvider.ps1') -Raw -Encoding UTF8
 if ($agentOpenAiProviderSource -notmatch "reason = 'invalid-action-arguments'" -or $agentOpenAiProviderSource -notmatch 'unsupportedArguments' -or $agentDecisionLoopSource -notmatch 'invalid-action-arguments' -or $agentDecisionLoopSource -notmatch 'noNativeActionSent' -or $agentOpenAiProviderTestSource -notmatch 'UnsupportedActionArgumentReturnsRecoverableRejection' -or $agentDecisionLoopTestSource -notmatch 'InvalidActionArgumentsRecoverWithoutNativeMutation' -or $agentDecisionTestProviderSource -notmatch 'invalidArgumentRecovery') { throw 'Unsupported model argument names must be rejected before Native, passed back with a fresh state, and covered in the provider and loop regressions.' }
@@ -673,6 +681,23 @@ if ($projectFile -notmatch 'Reference Include="SandBox\.View"' -or $projectFile 
 $providerSettingsSource = Get-Content (Join-Path $harnessRoot 'AgentProviderSettings.cs') -Raw -Encoding UTF8
 $providerValidatorSource = Get-Content (Join-Path $harnessRoot 'AgentProviderConfigurationValidator.cs') -Raw -Encoding UTF8
 $agentHostProjectSource = Get-Content (Join-Path $harnessRoot 'AgentHost\ChronicleAgentHost.csproj') -Raw -Encoding UTF8
+if ($agentHostProjectSource -notmatch '<PackageReference Include="Microsoft\.ML\.Tokenizers" Version="\[2\.0\.1\]"' -or
+    $agentHostProjectSource -notmatch '<RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>' -or
+    $agentHostProjectSource -notmatch '<RuntimeIdentifiers>win-x64</RuntimeIdentifiers>' -or
+    $agentHostProjectSource -notmatch 'CopyToPublishDirectory="PreserveNewest"' -or
+    $agentHostProjectSource -notmatch 'deepseek_v4_tokenizer\.zip' -or
+    $agentHostProjectSource -notmatch 'DeepSeekV4Tokenizer-LICENSE\.txt' -or
+    $agentHostProjectSource -notmatch 'Resources\\\*\.txt') {
+    throw 'The Agent Host must ship the pinned, MIT-noticed DeepSeek tokenizer data and its matching Microsoft tokenizer package.'
+}
+$tokenizerLockPath = Join-Path $harnessRoot 'AgentHost\packages.lock.json'
+if (-not (Test-Path -LiteralPath $tokenizerLockPath -PathType Leaf)) { throw 'The Agent Host tokenizer package lock file is missing.' }
+$tokenizerLock = Get-Content -LiteralPath $tokenizerLockPath -Raw -Encoding UTF8 | ConvertFrom-Json
+if ([string]$tokenizerLock.dependencies.'net8.0'.'Microsoft.ML.Tokenizers'.resolved -ne '2.0.1' -or
+    [string]$tokenizerLock.dependencies.'net8.0'.'Google.Protobuf'.resolved -ne '3.30.2' -or
+    $null -eq $tokenizerLock.dependencies.'net8.0/win-x64') {
+    throw 'The Agent Host package lock must pin Microsoft.ML.Tokenizers 2.0.1 and its reviewed Google.Protobuf transitive dependency.'
+}
 $providerProfileSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentProviderProfile.cs') -Raw -Encoding UTF8
 $providerProfileTestSource = Get-Content (Join-Path $harnessRoot 'AgentHost\ProviderContractSelfTest.cs') -Raw -Encoding UTF8
 $providerHostSource = Get-Content (Join-Path $harnessRoot 'AgentHost\OllamaNativeProvider.cs') -Raw -Encoding UTF8
@@ -1049,8 +1074,30 @@ if ($agentHostLifecycleHarness -notmatch "'CampaignRoundtrip'" -or
 $agentHostPackageSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostPackage.ps1') -Raw -Encoding UTF8
 $agentHostProgramSource = Get-Content (Join-Path $harnessRoot 'AgentHost\Program.cs') -Raw -Encoding UTF8
 if ($agentHostPackageSource -notmatch 'NU1900' -or $agentHostPackageSource -notmatch 'NuGetAudit=false' -or
-    $agentHostPackageSource -notmatch 'PackageReference') {
-    throw 'NuGet audit fallback must be limited to a failed NU1900 vulnerability feed and a Host project with no third-party package references.'
+    $agentHostPackageSource -notmatch 'PackageReference' -or
+    $agentHostPackageSource -notmatch 'Microsoft.ML.Tokenizers' -or
+    $agentHostPackageSource -notmatch '2.0.1' -or
+    $agentHostPackageSource -notmatch 'Google.Protobuf' -or
+    $agentHostPackageSource -notmatch 'THIRD-PARTY-NOTICES.txt') {
+    throw 'NuGet audit fallback must be limited to a failed NU1900 vulnerability feed and the reviewed, pinned tokenizer dependency.'
+}
+if (-not (Test-Path -LiteralPath $deepSeekTokenizerAsset -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $deepSeekTokenizerLicense -PathType Leaf) -or
+    -not (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $deepSeekTokenizerAsset) 'Microsoft.ML.Tokenizers-LICENSE.txt') -PathType Leaf) -or
+    -not (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $deepSeekTokenizerAsset) 'Microsoft.ML.Tokenizers-THIRD-PARTY-NOTICES.txt') -PathType Leaf) -or
+    -not (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $deepSeekTokenizerAsset) 'Google.Protobuf-LICENSE.txt') -PathType Leaf) -or
+    -not (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $deepSeekTokenizerAsset) 'THIRD-PARTY-NOTICES.txt') -PathType Leaf) -or
+    (Get-FileHash -LiteralPath $deepSeekTokenizerAsset -Algorithm SHA256).Hash -ne 'E7310D1DAFE0A86D8A5629FE78A7C763760F651DB9B8682718A1781DCD6FE495' -or
+    $deepSeekTokenEstimatorSource -notmatch 'BpeOptions' -or
+    $deepSeekTokenEstimatorSource -notmatch 'ByteLevel = true' -or
+    $deepSeekTokenEstimatorSource -notmatch 'ReservationMargin' -or
+    $deepSeekTokenEstimatorSource -notmatch 'utf8-byte-fallback' -or
+    $deepSeekTokenEstimatorSource -notmatch 'OfficialTokenizerAssetSha256' -or
+    $providerHostSource -notmatch 'DeepSeekPromptTokenEstimator\.EstimateRequestBody' -or
+    $providerProfileTestSource -notmatch 'DeepSeekPromptTokenEstimator\.RunContractSelfTests' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'deepSeekEstimatedInputTokens' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'deepSeekReservedInputTokens') {
+    throw 'DeepSeek token-cost estimation must use the hash-pinned official tokenizer asset, byte-level BPE, a conservative margin, and its safe byte-bound fallback.'
 }
 if ($harnessScript -notmatch "'AgentHostPackage'\s*\{ @\('Preflight', 'Build', 'AgentHostPackage'\) \}" -or
     $harnessScript -match "'All'\s*\{[^\r\n]*'AgentHostPackage'" -or

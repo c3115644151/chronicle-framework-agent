@@ -14,6 +14,7 @@ internal static class ProviderContractSelfTest
     internal static async Task<object> RunAsync()
     {
         var results = new List<object>();
+        results.AddRange(DeepSeekPromptTokenEstimator.RunContractSelfTests());
         if (!AgentHostDecisionCycle.IsObserveAgainDecision(new JsonObject { ["observeAgain"] = true, ["waitSeconds"] = 2 }) ||
             !AgentHostDecisionCycle.IsObserveAgainDecision(new JsonObject { ["control"] = "observeAgain", ["waitSeconds"] = 2 }) ||
             AgentHostDecisionCycle.IsObserveAgainDecision(new JsonObject { ["done"] = true }))
@@ -441,7 +442,8 @@ internal static class ProviderContractSelfTest
         {
             OutputMode = "required_tool_call",
             Thinking = false,
-            MaxEstimatedRunCostCny = 0.01d
+            MaxOutputTokens = 64,
+            MaxEstimatedRunCostCny = 0.0007d
         };
         using (var budgetGuardClient = new HttpClient(budgetGuardHandler) { Timeout = budgetGuardSettings.Timeout })
         using (var budgetGuardProvider = new OllamaNativeProvider(budgetGuardSettings, budgetGuardClient))

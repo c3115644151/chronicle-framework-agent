@@ -374,15 +374,18 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         if (bodyBytes > MaxRequestBytes)
             throw new AgentHostException("provider-request-too-large", "The structured model request exceeds the Host size limit.");
         var reservedCostForRequest = 0d;
+        DeepSeekInputTokenEstimate? deepSeekInputTokenEstimate = null;
         if (IsDeepSeekApi(_settings.Endpoint))
         {
-            // One UTF-8 request byte is reserved as one input token; this is a
-            // deliberately conservative upper bound. All input is priced as a
-            // peak-hour cache miss and all completion capacity is reserved.
-            reservedCostForRequest = (bodyBytes * DeepSeekInputPeakCnyPerMillion +
+            // Count the pinned DeepSeek tokenizer over the exact serialized API
+            // request, add an empirically calibrated wrapper margin, and reserve
+            // every output token at the peak rate. Returned usage remains the
+            // billing source of truth and is compared with this estimate per request.
+            deepSeekInputTokenEstimate = DeepSeekPromptTokenEstimator.EstimateRequestBody(body);
+            reservedCostForRequest = (deepSeekInputTokenEstimate.ReservedTokens * DeepSeekInputPeakCnyPerMillion +
                                       _settings.MaxOutputTokens * DeepSeekOutputPeakCnyPerMillion) / 1000000d;
             if (_reservedDeepSeekCostCny + reservedCostForRequest > _settings.MaxEstimatedRunCostCny)
-                throw new AgentHostException("provider-budget-exhausted", "The DeepSeek run cost ceiling would be exceeded; no additional model request was sent.");
+                throw new AgentHostException("provider-budget-exhausted", "The DeepSeek estimated cost reservation would exceed the configured per-run threshold; no additional model request was sent.");
             _reservedDeepSeekCostCny = Math.Round(_reservedDeepSeekCostCny + reservedCostForRequest, 8);
         }
 
@@ -627,7 +630,10 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 observationBytes,
                 promptCacheHitTokens,
                 promptCacheMissTokens,
-                estimatedCostCny);
+                estimatedCostCny,
+                deepSeekInputTokenEstimate?.TokenizerTokens,
+                deepSeekInputTokenEstimate?.ReservedTokens,
+                deepSeekInputTokenEstimate?.Method);
         }
     }
 
@@ -1344,7 +1350,10 @@ internal sealed record ProviderDecisionResult(
     int ObservationBytes = 0,
     int? PromptCacheHitTokens = null,
     int? PromptCacheMissTokens = null,
-    double? EstimatedCostCny = null);
+    double? EstimatedCostCny = null,
+    int? DeepSeekEstimatedInputTokens = null,
+    int? DeepSeekReservedInputTokens = null,
+    string? DeepSeekInputTokenEstimator = null);
 
 internal sealed class AgentHostException : Exception
 {
