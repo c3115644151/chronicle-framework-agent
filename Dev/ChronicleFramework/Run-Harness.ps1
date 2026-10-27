@@ -28,7 +28,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.386'
+$HarnessContractVersion = '7.388'
 $effectiveSmokeTimeoutSeconds = if ($Phase -in @('FreshStoryModeModelEvaluation','PersistentEycCampaign','FreshStoryModeNativeInquiryResponseEvaluation','AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostEstablishClanAutonomyEvaluation','AgentHostCaptivityRecoveryEvaluation','AgentHostEstablishClanGoldSaleEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max($SmokeTimeoutSeconds, 240) } else { $SmokeTimeoutSeconds }
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
@@ -775,7 +775,7 @@ foreach ($stage in $requestedStages) {
         'AgentHostPackage' {
             Invoke-Stage -Name 'AgentHostPackage' -Action {
                 $packageEvidencePath = Join-Path $harnessTempDirectory 'AgentHostPackage'
-                $retainPackageForSameSessionRuntime = $Phase -in @('FreshStoryModeModelEvaluation', 'AgentHostLifecycleEvaluation', 'AgentHostLifecycleCompletionEvaluation')
+                $retainPackageForSameSessionRuntime = $Phase -in @('FreshStoryModeModelEvaluation', 'PersistentEycCampaign', 'AgentHostLifecycleEvaluation', 'AgentHostLifecycleCompletionEvaluation')
                 $packageArguments = @('-ProjectPath', $agentHostProjectPath, '-EvidencePath', $packageEvidencePath)
                 if ($retainPackageForSameSessionRuntime) { $packageArguments += '-RetainRuntimePackage' }
                 try {

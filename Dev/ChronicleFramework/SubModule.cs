@@ -600,8 +600,7 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
 
     internal void TrySavePersistentStoryModeSeedOnReadyMap()
     {
-        if (Environment.GetEnvironmentVariable(HarnessModeVariable) != FreshCampaignHarness.Mode ||
-            Environment.GetEnvironmentVariable("CHRONICLE_FRESH_CAMPAIGN_STORYMODE") != "1" ||
+        if (!IsPersistentStoryModeSeedHarness() ||
             !_freshProgressionSavePending || Campaign.Current == null ||
             Game.Current?.GameStateManager?.ActiveState is not MapState ||
             ChronicleInquiryAdapter.IsInquiryOpen || MapScreen.Instance?.IsEscapeMenuOpened == true)
@@ -630,6 +629,17 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
             var detail = exception.ToString().Replace('\r', ' ').Replace('\n', ' ');
             ChronicleDiagnostics.Write($"fresh-campaign-failed|stage=persistent-storymode-save|detail={detail}");
         }
+    }
+
+    private static bool IsPersistentStoryModeSeedHarness()
+    {
+        var harnessMode = Environment.GetEnvironmentVariable(HarnessModeVariable);
+        var modeOwnsStorySeed = harnessMode == FreshCampaignHarness.Mode || harnessMode == "agent-host-lifecycle-test";
+        return modeOwnsStorySeed &&
+               Environment.GetEnvironmentVariable("CHRONICLE_FRESH_CAMPAIGN_STORYMODE") == "1" &&
+               !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CHRONICLE_FRESH_CAMPAIGN_SAVE_NAME")) &&
+               !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CHRONICLE_FRESH_CAMPAIGN_SAVE_READY_FILE")) &&
+               !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP"));
     }
 
     private void OnCampaignTick(float deltaTime)
@@ -695,7 +705,9 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
     private void OnSaveOver(bool successful, string saveName)
     {
         var disposableSaveName = Environment.GetEnvironmentVariable("CHRONICLE_FRESH_CAMPAIGN_SAVE_NAME");
-        if (Environment.GetEnvironmentVariable(HarnessModeVariable) == FreshCampaignHarness.Mode && !string.IsNullOrWhiteSpace(disposableSaveName) &&
+        var isFreshCampaignHarnessSave = Environment.GetEnvironmentVariable(HarnessModeVariable) == FreshCampaignHarness.Mode &&
+            !string.IsNullOrWhiteSpace(disposableSaveName);
+        if ((isFreshCampaignHarnessSave || IsPersistentStoryModeSeedHarness()) && !string.IsNullOrWhiteSpace(disposableSaveName) &&
             string.Equals(Path.GetFileNameWithoutExtension(saveName), Path.GetFileNameWithoutExtension(disposableSaveName), StringComparison.Ordinal))
         {
             ChronicleDiagnostics.Write($"fresh-campaign-disposable-save-complete|name={disposableSaveName}|successful={successful}");

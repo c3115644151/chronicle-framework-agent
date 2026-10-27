@@ -1,5 +1,5 @@
 ﻿$script:AuditedHarnessDiagnosticSource = 'SubModule.cs'
-$script:AuditedHarnessDiagnosticSha256 = 'cf7312199ef27aabe57f57b077c72f2cfca8d2ddc3805717144287499a26faf7'
+$script:AuditedHarnessDiagnosticSha256 = '9d87b32694c0f3ef9d6bd7992ab56e66e6185f6683315cefe65924fb1cb07969'
 
 function Get-ChronicleCanonicalTextSha256 {
     [CmdletBinding()]
@@ -41,7 +41,7 @@ function Get-ChronicleResearchReadiness {
     }
     if ($changed.Count -eq 1 -and $changed[0] -eq $script:AuditedHarnessDiagnosticSource -and
         $AuditedHarnessDiagnosticSha256 -eq $script:AuditedHarnessDiagnosticSha256) {
-        return [pscustomobject]@{ Allowed = $true; ChangedSources = $changed; Reason = 'exact reviewed SubModule Harness-only controls; player input ownership is unchanged, initial music readiness is one-time, StoryMode continues observing when the Issue probe is skipped, and the bounded state-transition trace handles Native globals that are unavailable during character creation without adding a player action' }
+        return [pscustomobject]@{ Allowed = $true; ChangedSources = $changed; Reason = 'exact reviewed SubModule Harness-only controls; player input ownership is unchanged, initial music readiness is one-time, StoryMode continues observing when the Issue probe is skipped, seed SaveAs remains scoped to the owned StoryMode environment after the Host lifecycle mode transition, and state-transition diagnostics handle unavailable pre-campaign globals' }
     }
     [pscustomobject]@{
         Allowed = $false
