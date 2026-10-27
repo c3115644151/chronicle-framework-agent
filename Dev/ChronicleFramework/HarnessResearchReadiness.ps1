@@ -1,5 +1,5 @@
 ﻿$script:AuditedHarnessDiagnosticSource = 'SubModule.cs'
-$script:AuditedHarnessDiagnosticSha256 = '9d9316ed46b966898222990185c7c865f13f197f3a515835ae2f0420d57ee043'
+$script:AuditedHarnessDiagnosticSha256 = 'b081f4e7a18f7f711e62fdab01df27ef2481e2c2b1cd842dcabdf2496c9cd8b6'
 
 function Get-ChronicleCanonicalTextSha256 {
     [CmdletBinding()]
@@ -41,7 +41,7 @@ function Get-ChronicleResearchReadiness {
     }
     if ($changed.Count -eq 1 -and $changed[0] -eq $script:AuditedHarnessDiagnosticSource -and
         $AuditedHarnessDiagnosticSha256 -eq $script:AuditedHarnessDiagnosticSha256) {
-        return [pscustomobject]@{ Allowed = $true; ChangedSources = $changed; Reason = 'exact reviewed SubModule runtime-control wiring baseline; delegates control/input state and adds no standalone gameplay action' }
+        return [pscustomobject]@{ Allowed = $true; ChangedSources = $changed; Reason = 'exact reviewed SubModule Harness-only controls; player input ownership is unchanged and the opt-in StoryMode save path uses a ready signal plus Native SaveAs from MapState without adding a player action' }
     }
     [pscustomobject]@{
         Allowed = $false

@@ -7,7 +7,9 @@ using System.Reflection;
 using System.Text;
 using HarmonyLib;
 using MCM.Abstractions;
+using SandBox.View.Map;
 using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.GameState;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Party.PartyComponents;
 using TaleWorlds.CampaignSystem.Settlements;
@@ -230,6 +232,7 @@ public sealed class SubModule : MBSubModuleBase
             _campaignBehavior = activeCampaignBehavior;
             ChronicleDiagnostics.Write("campaign-agent-behavior-rebound|reason=current-campaign");
         }
+        _campaignBehavior?.TrySavePersistentStoryModeSeedOnReadyMap();
         _campaignBehavior?.PollAgentProtocol();
         ChroniclePlayerInputOwnership.Tick();
     }
@@ -339,6 +342,10 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
     private bool _campaignActorThinkTraceCaptured;
     private float _campaignActorThinkTraceScanElapsed;
     private bool _freshProgressionSavePending;
+    private double _freshProgressionSaveCampaignDayBefore = double.NaN;
+    private string _freshProgressionSaveTimeControlModeBefore = string.Empty;
+    private string _freshProgressionSaveCampaignInstanceId = string.Empty;
+    private string _freshProgressionSaveReadyFile = string.Empty;
     private bool _freshProgressionCampaignPollLogged;
     private ChronicleAgentProtocol _agentProtocol;
 
@@ -561,6 +568,40 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
         }
     }
 
+    internal void TrySavePersistentStoryModeSeedOnReadyMap()
+    {
+        if (Environment.GetEnvironmentVariable(HarnessModeVariable) != FreshCampaignHarness.Mode ||
+            Environment.GetEnvironmentVariable("CHRONICLE_FRESH_CAMPAIGN_STORYMODE") != "1" ||
+            !_freshProgressionSavePending || Campaign.Current == null ||
+            Game.Current?.GameStateManager?.ActiveState is not MapState ||
+            ChronicleInquiryAdapter.IsInquiryOpen || MapScreen.Instance?.IsEscapeMenuOpened == true)
+            return;
+
+        var saveName = Environment.GetEnvironmentVariable("CHRONICLE_FRESH_CAMPAIGN_SAVE_NAME");
+        var readyFile = Environment.GetEnvironmentVariable("CHRONICLE_FRESH_CAMPAIGN_SAVE_READY_FILE");
+        var tempDirectory = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+        if (string.IsNullOrWhiteSpace(saveName) || string.IsNullOrWhiteSpace(readyFile) || string.IsNullOrWhiteSpace(tempDirectory)) return;
+        try
+        {
+            var allowedRoot = Path.GetFullPath(tempDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var fullReadyFile = Path.GetFullPath(readyFile);
+            if (!fullReadyFile.StartsWith(allowedRoot, StringComparison.OrdinalIgnoreCase) || !File.Exists(fullReadyFile)) return;
+
+            _freshProgressionSaveCampaignInstanceId = AgentCampaignInstanceId;
+            _freshProgressionSavePending = false;
+            _freshProgressionSaveCampaignDayBefore = CampaignTime.Now.ToDays;
+            _freshProgressionSaveTimeControlModeBefore = Campaign.Current.TimeControlMode.ToString();
+            _freshProgressionSaveReadyFile = fullReadyFile;
+            Campaign.Current.SaveHandler.SaveAs(saveName);
+            ChronicleDiagnostics.Write($"fresh-campaign-disposable-save-requested|name={saveName}|via=PersistentStoryModeReadyMapTick");
+        }
+        catch (Exception exception)
+        {
+            var detail = exception.ToString().Replace('\r', ' ').Replace('\n', ' ');
+            ChronicleDiagnostics.Write($"fresh-campaign-failed|stage=persistent-storymode-save|detail={detail}");
+        }
+    }
+
     private void OnCampaignTick(float deltaTime)
     {
         if (Environment.GetEnvironmentVariable(HarnessModeVariable) == "campaign-actor-think-trace" && !_campaignActorThinkTraceCaptured)
@@ -580,7 +621,9 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
             }
         }
 
-        if (Environment.GetEnvironmentVariable(HarnessModeVariable) == FreshCampaignHarness.Mode && _freshProgressionSavePending)
+        var persistentStoryModeSave = Environment.GetEnvironmentVariable("CHRONICLE_FRESH_CAMPAIGN_STORYMODE") == "1" &&
+            !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CHRONICLE_FRESH_CAMPAIGN_SAVE_READY_FILE"));
+        if (Environment.GetEnvironmentVariable(HarnessModeVariable) == FreshCampaignHarness.Mode && _freshProgressionSavePending && !persistentStoryModeSave)
         {
             var freshSaveName = Environment.GetEnvironmentVariable("CHRONICLE_FRESH_CAMPAIGN_SAVE_NAME");
             if (!string.IsNullOrWhiteSpace(freshSaveName))
@@ -624,7 +667,18 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
         var disposableSaveName = Environment.GetEnvironmentVariable("CHRONICLE_FRESH_CAMPAIGN_SAVE_NAME");
         if (Environment.GetEnvironmentVariable(HarnessModeVariable) == FreshCampaignHarness.Mode && !string.IsNullOrWhiteSpace(disposableSaveName) &&
             string.Equals(Path.GetFileNameWithoutExtension(saveName), Path.GetFileNameWithoutExtension(disposableSaveName), StringComparison.Ordinal))
+        {
             ChronicleDiagnostics.Write($"fresh-campaign-disposable-save-complete|name={disposableSaveName}|successful={successful}");
+            if (!string.IsNullOrWhiteSpace(_freshProgressionSaveReadyFile))
+            {
+                var campaignDayAfter = CampaignTime.Now.ToDays;
+                var timeControlModeAfter = Campaign.Current?.TimeControlMode.ToString() ?? string.Empty;
+                ChronicleDiagnostics.Write($"fresh-campaign-disposable-save-time-check|name={disposableSaveName}|campaignDayBefore={_freshProgressionSaveCampaignDayBefore.ToString("R", CultureInfo.InvariantCulture)}|campaignDayAfter={campaignDayAfter.ToString("R", CultureInfo.InvariantCulture)}|timeControlModeBefore={_freshProgressionSaveTimeControlModeBefore}|timeControlModeAfter={timeControlModeAfter}|campaignInstanceId={_freshProgressionSaveCampaignInstanceId}");
+                try { if (File.Exists(_freshProgressionSaveReadyFile)) File.Delete(_freshProgressionSaveReadyFile); }
+                catch (Exception exception) { ChronicleDiagnostics.Write("fresh-campaign-save-ready-signal-cleanup-failed|" + exception.GetType().Name); }
+                _freshProgressionSaveReadyFile = string.Empty;
+            }
+        }
         _agentProtocol?.OnSaveOver(successful, saveName, this);
     }
 }

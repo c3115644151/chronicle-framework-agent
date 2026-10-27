@@ -2,7 +2,8 @@
 param(
     [ValidateRange(60,7200)][int]$HostMaxElapsedSeconds = 7200,
     [ValidateRange(5,30)][int]$FrameRate = 5,
-    [int]$StartupTimeoutSeconds = 240
+    [int]$StartupTimeoutSeconds = 240,
+    [ValidateRange(300,7500)][int]$FreshStoryModeHostTimeoutSeconds = 7500
 )
 
 $ErrorActionPreference = 'Stop'
@@ -125,7 +126,7 @@ try {
             [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL',[Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL','Process'),'Process')
             Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
             $seed = Invoke-JsonChild $freshCampaignScript @('-StoryModeEycSetup','-StoryModeEycLiveModelEvaluation','-StoryModeEycPersistentSeed',
-                '-PersistentStoryModeSaveName',$sourceSaveName,'-TimeoutSeconds',[string]$StartupTimeoutSeconds)
+                '-PersistentStoryModeSaveName',$sourceSaveName,'-TimeoutSeconds',[string]$FreshStoryModeHostTimeoutSeconds)
         }
         finally {
             [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_START',$savedAutoStart,'Process')

@@ -57,6 +57,9 @@ $agentResponseRoot = Join-Path $agentProtocolRoot 'responses'
 $progressionCommandPrefix = 'freshp5-' + [Guid]::NewGuid().ToString('N')
 $progressionSaveName = if ($ValidateRecruitmentProgression) { 'ChronicleP5Fresh-' + (Get-Date -Format 'yyyyMMddHHmmss') + '-' + [Guid]::NewGuid().ToString('N').Substring(0,8) } else { $null }
 $progressionSavePath = if ($progressionSaveName) { Join-Path $saveDirectory "$progressionSaveName.sav" } else { $null }
+$freshCampaignSaveName = if ($StoryModeEycPersistentSeed) { $PersistentStoryModeSaveName } elseif ($progressionSaveName) { $progressionSaveName } else { $null }
+$persistentStoryModeSaveReadyFile = if ($StoryModeEycPersistentSeed) { Join-Path $env:CHRONICLE_HARNESS_TEMP ('persistent-storymode-save-ready-' + [Guid]::NewGuid().ToString('N') + '.flag') } else { $null }
+$persistentStoryModeSaveTimeCheck = $null
 $disposableSaveOwned = $false
 $previousSessionExisted = Test-Path -LiteralPath $agentSessionPath
 $previousSessionBytes = if ($previousSessionExisted) { [IO.File]::ReadAllBytes($agentSessionPath) } else { $null }
@@ -140,6 +143,7 @@ $previousProviderEnvironment = [ordered]@{}
 foreach ($name in $providerEnvironmentNames) { $previousProviderEnvironment[$name] = [Environment]::GetEnvironmentVariable($name,'Process') }
 $previousIssueProbeFlag = $env:CHRONICLE_FRESH_CAMPAIGN_SKIP_ISSUE_PROBE
 $previousFreshSaveName = $env:CHRONICLE_FRESH_CAMPAIGN_SAVE_NAME
+$previousFreshSaveReadyFile = $env:CHRONICLE_FRESH_CAMPAIGN_SAVE_READY_FILE
 $previousCrashCaptureFlag = $env:CHRONICLE_CAPTURE_CRASH_EXCEPTION
 $env:CHRONICLE_HARNESS_MODE = 'fresh-campaign-renown'
 if ($StoryModeEycSetup) { $env:CHRONICLE_FRESH_CAMPAIGN_STORYMODE = '1' }
@@ -151,9 +155,14 @@ else { Remove-Item Env:CHRONICLE_FRESH_CAMPAIGN_NATIVE_MENU_LEAVE_TEST -ErrorAct
 $env:CHRONICLE_CAPTURE_CRASH_EXCEPTION = '1'
 $freeLlmApiProfile = $null
 $providerProfile = $null
-if ($ValidateRecruitmentProgression -or $RetainDisposableSave) {
+if ($ValidateRecruitmentProgression -or $RetainDisposableSave -or $StoryModeEycPersistentSeed) {
     $env:CHRONICLE_FRESH_CAMPAIGN_SKIP_ISSUE_PROBE = '1'
-    $env:CHRONICLE_FRESH_CAMPAIGN_SAVE_NAME = $progressionSaveName
+    $env:CHRONICLE_FRESH_CAMPAIGN_SAVE_NAME = $freshCampaignSaveName
+}
+if ($StoryModeEycPersistentSeed) {
+    $env:CHRONICLE_FRESH_CAMPAIGN_SAVE_READY_FILE = $persistentStoryModeSaveReadyFile
+} else {
+    Remove-Item Env:CHRONICLE_FRESH_CAMPAIGN_SAVE_READY_FILE -ErrorAction SilentlyContinue
 }
 try {
     if ($StoryModeEycLiveModelEvaluation) {
@@ -236,6 +245,14 @@ finally {
     else { $env:CHRONICLE_FRESH_CAMPAIGN_SKIP_ISSUE_PROBE = $previousIssueProbeFlag }
     if ($null -eq $previousFreshSaveName) { Remove-Item Env:CHRONICLE_FRESH_CAMPAIGN_SAVE_NAME -ErrorAction SilentlyContinue }
     else { $env:CHRONICLE_FRESH_CAMPAIGN_SAVE_NAME = $previousFreshSaveName }
+    if ($null -eq $previousFreshSaveReadyFile) { Remove-Item Env:CHRONICLE_FRESH_CAMPAIGN_SAVE_READY_FILE -ErrorAction SilentlyContinue }
+    else { $env:CHRONICLE_FRESH_CAMPAIGN_SAVE_READY_FILE = $previousFreshSaveReadyFile }
+    if ($persistentStoryModeSaveReadyFile -and (Test-Path -LiteralPath $persistentStoryModeSaveReadyFile -PathType Leaf)) {
+        $tempRoot = [IO.Path]::GetFullPath($env:CHRONICLE_HARNESS_TEMP).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+        $fullReadySignalPath = [IO.Path]::GetFullPath($persistentStoryModeSaveReadyFile)
+        if (-not $fullReadySignalPath.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Persistent StoryMode ready-signal cleanup path escaped the Harness temp directory.' }
+        Remove-Item -LiteralPath $fullReadySignalPath -Force
+    }
 }
 
 $bannerlordPid = 0
@@ -344,6 +361,7 @@ $recruitmentProgressionPassed = -not $ValidateRecruitmentProgression
 $disposableSaveRequested = $false
 $disposableSaveCompleted = $false
 $disposableSaveSuccessful = $false
+$disposableSaveFailed = $false
 $storyModeVideoCapture = $null
 $storyModeVideoCaptureResult = $null
 $storyModeVideoCaptureError = $null
@@ -601,12 +619,18 @@ try {
         $introSkippedObserved = $introSkippedObserved -or [bool]($newLines -match 'fresh-campaign-intro-skipped\|via=native-video-completion\|mode=harness$')
         $harnessFailureObserved = $harnessFailureObserved -or [bool]($newLines -match 'fresh-campaign-failed\||fresh-storymode-e2e-failed\|')
         $campaignSaveRequested = $campaignSaveRequested -or [bool]($newLines -match 'campaign-save-requested\|')
-        $disposableSaveRequested = $disposableSaveRequested -or [bool]($newLines -match "fresh-campaign-disposable-save-requested\|name=$([regex]::Escape($progressionSaveName))\|via=CampaignTick$")
-        $disposableSaveCompleted = $disposableSaveCompleted -or [bool]($newLines -match "fresh-campaign-disposable-save-complete\|name=$([regex]::Escape($progressionSaveName))\|successful=True$")
+        $disposableSaveRequested = $disposableSaveRequested -or [bool]($newLines -match "fresh-campaign-disposable-save-requested\|name=$([regex]::Escape($freshCampaignSaveName))\|via=[^|]+$")
+        $disposableSaveCompleted = $disposableSaveCompleted -or [bool]($newLines -match "fresh-campaign-disposable-save-complete\|name=$([regex]::Escape($freshCampaignSaveName))\|successful=True$")
+        $disposableSaveFailed = $disposableSaveFailed -or [bool]($newLines -match "fresh-campaign-disposable-save-complete\|name=$([regex]::Escape($freshCampaignSaveName))\|successful=False$")
         $disposableSaveSuccessful = $disposableSaveSuccessful -or $disposableSaveCompleted
         $disposableSaveOwned = $disposableSaveOwned -or $disposableSaveRequested
         $disposableSaveSuccessful = $disposableSaveSuccessful -or $disposableSaveCompleted
         if ($disposableSaveRequested) { $disposableSaveOwned = $true }
+        foreach ($saveCheckLine in $newLines) {
+            if ($StoryModeEycPersistentSeed -and $saveCheckLine -match "fresh-campaign-disposable-save-time-check\|name=$([regex]::Escape($freshCampaignSaveName))\|campaignDayBefore=([^|]+)\|campaignDayAfter=([^|]+)\|timeControlModeBefore=([^|]+)\|timeControlModeAfter=([^|]+)\|campaignInstanceId=([^|]*)$") {
+                $persistentStoryModeSaveTimeCheck = [ordered]@{ CampaignDayBefore=$Matches[1]; CampaignDayAfter=$Matches[2]; TimeControlModeBefore=$Matches[3]; TimeControlModeAfter=$Matches[4]; CampaignInstanceId=$Matches[5] }
+            }
+        }
         foreach ($line in $newLines) {
             if ($line -match 'fresh-campaign-stage\|index=(\d+)') { [void]$stageIndices.Add([int]$Matches[1]) }
             if ($StoryModeEycSetup -and $line -match 'fresh-storymode-training-field-exit\|status=mission-ended\|via=brother-dialogue$') {
@@ -794,33 +818,41 @@ try {
             if ($hostDetail.Length -gt 500) { $hostDetail = $hostDetail.Substring(0,500) + '...[truncated]' }
             throw "Persistent EYC seed save requires the original Tutorial skip, naturally active Quest and stable Native Campaign Map before saving. creationReady=$creationReady; eycActive=$storyModeEycReadyObserved; tutorialSkip=$storyModeTutorialSkipConfirmed; mapReady=$storyModeTakeoverMapReady; hostStarted=$storyModeAgentHostStarted; hostReady=$storyModeAgentHostReady; hostStartRequested=$storyModeAgentHostStartRequested; hostTerminal=$storyModeAgentHostTerminalState; hostDetail=$hostDetail."
         }
-        $beforeSaveState = Invoke-FreshCampaignAgentCli 'state' @('-CommandId', "$progressionCommandPrefix-storymode-before-save")
-        $beforeSaveEycStatus = [string]$beforeSaveState.state.storyModeEstablishClanStatus.status
-        $beforeSaveEycQuestCount = @($beforeSaveState.state.quests | Where-Object { $_.id -ceq 'rebuild_player_clan_storymode_quest' }).Count
-        $beforeSaveEycTerminalStateValid = ($beforeSaveEycStatus -ceq 'active' -and $beforeSaveEycQuestCount -eq 1) -or ($beforeSaveEycStatus -ceq 'completed' -and $beforeSaveEycQuestCount -eq 0)
-        if ($beforeSaveState.status -ne 'completed' -or $beforeSaveState.state.context.gameState -cne 'MapState' -or -not $beforeSaveEycTerminalStateValid) {
-            throw 'Persistent EYC seed state is not a stable Campaign Map with the original Quest active or completed.'
-        }
         $persistentStoryModeSaveOwned = $true
-        $saveReceipt = Invoke-FreshCampaignAgentCli 'save' @('-SaveName', $PersistentStoryModeSaveName, '-CommandId', "$progressionCommandPrefix-storymode-seed-save") -CommandTimeout ([Math]::Max(30, [Math]::Min($TimeoutSeconds, 300)))
-        if ($saveReceipt.status -ne 'completed') { throw 'Native SaveAs did not confirm completion of the persistent StoryMode fixture.' }
+        if (Test-Path -LiteralPath $persistentStoryModeSaveReadyFile) { throw 'The unique persistent StoryMode save-ready signal already exists.' }
+        [IO.File]::WriteAllText($persistentStoryModeSaveReadyFile, 'Native MapState ready for disposable SaveAs', [Text.UTF8Encoding]::new($false))
+        $saveDeadline = (Get-Date).AddSeconds([Math]::Max(60, [Math]::Min($TimeoutSeconds, 180)))
+        while ((-not $disposableSaveCompleted -or $null -eq $persistentStoryModeSaveTimeCheck) -and -not $disposableSaveFailed -and (Get-Date) -lt $saveDeadline) {
+            $allDiagnosticLines = if (Test-Path -LiteralPath $diagnosticLog -PathType Leaf) { @(Get-Content -LiteralPath $diagnosticLog -Encoding UTF8) } else { @() }
+            $saveDiagnosticLines = if ($allDiagnosticLines.Count -gt $diagnosticStartLineCount) { @($allDiagnosticLines[$diagnosticStartLineCount..($allDiagnosticLines.Count - 1)]) } else { @() }
+            $diagnosticStartLineCount = $allDiagnosticLines.Count
+            foreach ($saveLine in $saveDiagnosticLines) {
+                if ($saveLine -match "fresh-campaign-disposable-save-requested\|name=$([regex]::Escape($freshCampaignSaveName))\|via=[^|]+$") { $disposableSaveRequested = $true }
+                if ($saveLine -match "fresh-campaign-disposable-save-complete\|name=$([regex]::Escape($freshCampaignSaveName))\|successful=True$") { $disposableSaveCompleted = $true }
+                if ($saveLine -match "fresh-campaign-disposable-save-complete\|name=$([regex]::Escape($freshCampaignSaveName))\|successful=False$") { $disposableSaveFailed = $true }
+                if ($saveLine -match "fresh-campaign-disposable-save-time-check\|name=$([regex]::Escape($freshCampaignSaveName))\|campaignDayBefore=([^|]+)\|campaignDayAfter=([^|]+)\|timeControlModeBefore=([^|]+)\|timeControlModeAfter=([^|]+)\|campaignInstanceId=([^|]*)$") {
+                    $persistentStoryModeSaveTimeCheck = [ordered]@{ CampaignDayBefore=[double]$Matches[1]; CampaignDayAfter=[double]$Matches[2]; TimeControlModeBefore=$Matches[3]; TimeControlModeAfter=$Matches[4]; CampaignInstanceId=$Matches[5] }
+                }
+            }
+            $disposableSaveOwned = $disposableSaveOwned -or $disposableSaveRequested
+            $disposableSaveSuccessful = $disposableSaveSuccessful -or $disposableSaveCompleted
+            if ($disposableSaveFailed -or ($disposableSaveCompleted -and $null -ne $persistentStoryModeSaveTimeCheck)) { break }
+            Start-Sleep -Milliseconds 250
+        }
+        if (-not $disposableSaveRequested -or -not $disposableSaveCompleted -or $disposableSaveFailed) {
+            throw 'Native SaveHandler did not confirm SaveAs for the stable MapState before the persistent seed timeout.'
+        }
         if (-not (Test-Path -LiteralPath $persistentStoryModeSavePath -PathType Leaf) -or (Get-Item -LiteralPath $persistentStoryModeSavePath).Length -lt 4096) {
             throw 'Native SaveAs returned completed, but the persistent StoryMode fixture file is missing or incomplete.'
         }
         $persistentStoryModeSaveHash = (Get-FileHash -LiteralPath $persistentStoryModeSavePath -Algorithm SHA256).Hash
         $campaignSaveRequested = $true
-        $afterSaveState = Invoke-FreshCampaignAgentCli 'state' @('-CommandId', "$progressionCommandPrefix-storymode-after-save")
-        $afterSaveEycQuestCount = @($afterSaveState.state.quests | Where-Object { $_.id -ceq 'rebuild_player_clan_storymode_quest' }).Count
-        if ($afterSaveState.status -ne 'completed' -or $afterSaveState.state.context.gameState -cne 'MapState' -or
-            [string]$afterSaveState.state.storyModeEstablishClanStatus.status -cne $beforeSaveEycStatus -or $afterSaveEycQuestCount -ne $beforeSaveEycQuestCount -or
-            [Math]::Abs([double]$afterSaveState.campaignDay - [double]$beforeSaveState.campaignDay) -gt 0.001) {
-            throw 'Native SaveAs did not preserve the active StoryMode Quest/map state or changed Campaign time.'
+        if ($null -eq $persistentStoryModeSaveTimeCheck -or [string]::IsNullOrWhiteSpace([string]$persistentStoryModeSaveTimeCheck.CampaignInstanceId) -or
+            [Math]::Abs([double]$persistentStoryModeSaveTimeCheck.CampaignDayAfter - [double]$persistentStoryModeSaveTimeCheck.CampaignDayBefore) -gt 0.001 -or
+            [string]$persistentStoryModeSaveTimeCheck.TimeControlModeBefore -cne [string]$persistentStoryModeSaveTimeCheck.TimeControlModeAfter) {
+            throw 'Native SaveAs completion did not preserve Campaign time/mode and Campaign instance identity.'
         }
-        $checkpointIdentity = Invoke-FreshCampaignAgentCli 'agentCheckpointGet' @('-CommandId', "$progressionCommandPrefix-storymode-seed-identity")
-        if ($checkpointIdentity.status -ne 'completed' -or [string]::IsNullOrWhiteSpace([string]$checkpointIdentity.data.campaignInstanceId)) {
-            throw 'Native persistent EYC save completed, but Campaign identity verification failed; the save will be cleaned.'
-        }
-        $campaignInstanceId = [string]$checkpointIdentity.data.campaignInstanceId
+        $campaignInstanceId = [string]$persistentStoryModeSaveTimeCheck.CampaignInstanceId
         $persistentStoryModeSaveCompleted = $true
     }
 

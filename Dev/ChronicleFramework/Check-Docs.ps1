@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.379'
+$contractVersion = '7.380'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -1639,8 +1639,16 @@ if ($harnessScript -notmatch "'PersistentEycCampaign' \{ @\('Preflight', 'Build'
     [regex]::Matches($harnessScript, "(?m)^        'PersistentEycCampaign' \{").Count -ne 1 -or
     $harnessScript -match "'All' \{[^\r\n]*'PersistentEycCampaign'" -or
     $freshCampaignTest -notmatch '\[switch\]\$StoryModeEycPersistentSeed' -or
-    $freshCampaignTest -notmatch 'Native SaveAs did not confirm completion of the persistent StoryMode fixture' -or
+    $freshCampaignTest -notmatch 'CHRONICLE_FRESH_CAMPAIGN_SAVE_READY_FILE' -or
+    $freshCampaignTest -notmatch 'fresh-campaign-disposable-save-time-check' -or
+    $freshCampaignTest -match "Invoke-FreshCampaignAgentCli 'save'" -or
     $freshCampaignTest -notmatch 'PersistentStoryModeSaveRetained' -or
+    $subModuleSource -notmatch 'TrySavePersistentStoryModeSeedOnReadyMap' -or
+    $subModuleSource -notmatch 'PersistentStoryModeReadyMapTick' -or
+    $subModuleSource -notmatch 'Game.Current\?\.GameStateManager\?\.ActiveState is not MapState' -or
+    $subModuleSource -notmatch 'ChronicleInquiryAdapter.IsInquiryOpen' -or
+    $subModuleSource -notmatch 'campaignDayBefore=' -or
+    $subModuleSource -notmatch 'timeControlModeAfter=' -or
     $agentLiveModelLoopSource -notmatch '\[string\]\$CheckpointSaveName' -or
     $agentLiveModelLoopSource -notmatch 'stable Native Campaign Map without active encounter or modal UI' -or
     $agentLiveModelLoopSource -notmatch 'CheckpointSaveHash' -or
@@ -1649,6 +1657,7 @@ if ($harnessScript -notmatch "'PersistentEycCampaign' \{ @\('Preflight', 'Build'
     $persistentEycCampaignSource -notmatch 'Remove-ObsoleteOwnedSaves' -or
     $persistentEycCampaignSource -notmatch '-StoryModeEycLiveModelEvaluation' -or
     $persistentEycCampaignSource -notmatch "CHRONICLE_HARNESS_AGENT_AUTO_START','1'" -or
+    $persistentEycCampaignSource -notmatch 'FreshStoryModeHostTimeoutSeconds = 7500' -or
     $persistentEycCampaignSource -notmatch 'cumulativeProviderActualCostEstimateCny' -or
     $persistentEycCampaignSource -notmatch 'no verified Native checkpoint') {
     throw 'Persistent EYC Harness must seed from a natural StoryMode campaign, resume only a hash- and Campaign-ID-matched Native save, checkpoint only from a stable Map, bound save retention and retain cumulative run-cost evidence.'

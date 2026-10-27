@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.379
+Contract version: 7.380
 
 Model connection is an OpenAI-compatible provider contract, not a FreeLLMAPI product dependency. MCM Global settings store the HTTPS base URL, model ID, structured-output mode (`auto`, `json_schema`, `json_object`, or `required_tool_call`), and the DeepSeek-only per-run CNY ceiling; API keys stay in the current user's environment and the game passes them only to its owned Agent Host child. HTTP is accepted only for loopback endpoints. The legacy MCM `OllamaBaseUrl` JSON property is still read for migration, although its UI label and behavior are provider-neutral.
 
@@ -83,7 +83,7 @@ Companion子目标仅在无捕获/遭遇/模态且处于Campaign Map时允许`st
 
 FreshCampaign Harness在启动任何新战役前将`BannerlordConfig.txt`里的Native `AutoSaveInterval`临时设为`-1`。本机游戏程序集`SandBoxSaveManager.IsAutoSaveDisabled()`已确认`-1`是自动保存关闭哨兵。原设置写入固定小型JSON备份；测试结束并确认Bannerlord进程已退出后只恢复该项原值。若Harness突然中断，下一次`Run-Harness`尝试恢复；若游戏仍运行或当前设置不是Harness所写的`-1`，则保留并报告冲突而不覆盖用户设置。FreshCampaign收据还检查Native `AutoSaveCurrentGame`日志及Save目录manifest，避免把“没有手动Save动作”误称为“没有任何自动写盘”。
 
-`SubModule.cs`只有一个精确审计版本可在Research Gate未就绪时例外构建；它只负责把游戏生命周期/Host状态接到独立控制器，不实现任何游戏动作。每次修改都必须先检查完整diff、Build、Smoke和所属控制功能证据，再更新`HarnessResearchReadiness.ps1`中的`AuditedHarnessDiagnosticSha256`；该例外不替代新玩家交互或Native能力的机制契约。
+`SubModule.cs`仅允许精确审计的Harness例外在Research Gate未就绪时构建；除已有生命周期/Host控制连接外，StoryMode长测的专用分支只在Harness显式ready signal、Native MapState且没有Inquiry/ESC时调用原版SaveHandler.SaveAs，保存检查点并记录Campaign instance、时间和时钟档前后值。它不加入Agent玩家动作、不改玩家可见玩法，也不允许保存正式存档。每次修改都必须先检查完整diff、Build、Smoke和所属Harness证据，再更新`HarnessResearchReadiness.ps1`中的`AuditedHarnessDiagnosticSha256`；该例外不替代新玩家交互或Native能力的机制契约。
 
 当前EYC子流程失败后若fresh Native Map仍被活动Inquiry阻塞（无论该子流程此前是否已执行动作），AgentHost仅将当前已验证Native `YesNoInquiry`及其真实可见、启用按钮交给模型；Host保管一次性Inquiry token，按模型选择调用原版`respondInquiry` handler，并检查新Native状态是否确已回到无Inquiry的MapState且EYC仍active后，重新读取Journal并请求一个全新的父目标计划。不可见/禁用选项、未知Inquiry VM或状态未转场时均安全失败；从不自动恢复/重放已失败的子流程动作。进度trace为定位此类中断记录当前Inquiry类别、标题/截断文案、按钮可见/启用与pause标志，不记token；`AgentHostPackage`自检覆盖此前已执行一动作后弹窗处理与新计划的集成，但Fake通过不代表真实模型开局已处理成功。
 
@@ -792,9 +792,12 @@ StoryMode复跑 `TestResults/20261027-193328` 在 EYC 仍未达成时进入真�
 
 开发用的`PersistentEycCampaign`现沿用本机Native `SaveAs`和`load`：首次走原版StoryMode新战役并保存到唯一前缀`ChronicleEycDev-*`，之后每次从同一Campaign instance读取并续跑；Host退出后只在MapState保存新检查点，先核hash/存档身份，再更新机器用的续跑manifest。保留当前与前一个有效检查点，孤立旧文件仅按该专用前缀清理。Host没有完成EYC时，Harness阶段仍标失败，但已确认的新检查点保留供下一轮继续；不会把Harness清理成功当作游戏目标完成。该长期路径尚待首次运行核验。最终产品验收仍是Issue #130规定的两份相互独立新战役；开发中的连续检查点不能替代它们。
 
-为在“所有目标子路线暂时blocked”时保持游戏目标循环，EYC父循环现复用既有`AgentHostCampaignLoop`，将唯一可选动作收窄为当前可见、安全聚落的Native Map arrival。走到新聚落后父循环重新读原版Journal与状态，再决定下个未完成目标；移动本身不加时钟命令，Campaign时间仅按Native移动自然流动。共享原模型provider、决策/Token预算和同一条trace，控制器不把这次旅行称为EYC进度。`TestResults/20261028-010824` Build/AgentHostPackage通过，包含嵌套共享预算/trace和地图到达分类回归；自然持续战役中是否能凭它解除停滞尚未实测。Harness contract version 7.379。
+为在“所有目标子路线暂时blocked”时保持游戏目标循环，EYC父循环现复用既有`AgentHostCampaignLoop`，将唯一可选动作收窄为当前可见、安全聚落的Native Map arrival。走到新聚落后父循环重新读原版Journal与状态，再决定下个未完成目标；移动本身不加时钟命令，Campaign时间仅按Native移动自然流动。共享原模型provider、决策/Token预算和同一条trace，控制器不把这次旅行称为EYC进度。`TestResults/20261028-010824` Build/AgentHostPackage通过，包含嵌套共享预算/trace和地图到达分类回归；自然持续战役中是否能凭它解除停滞尚未实测。Harness contract version 7.380。
 
 
 `TestResults/20261028-013058`证明构建失败来自NuGet漏洞索引TLS不可达（NU1900），不是代码。Harness现在只在该错误出现时确认Host依赖仍是单一锁定的Microsoft.ML.Tokenizers 2.0.1，然后用locked restore并跳过不可达的审计端点；Build重试通过，未升级依赖，未启动游戏。7890代理能连端口但TLS握手到NuGet/GitHub失败，提交d832f79已本地提交、等待推送。Persistent EYC Campaign仍待首次连续运行。
 
 `TestResults/20261028-013950`首轮续跑尝试失败在种子存档前：Harness中同一`PersistentEycCampaign`阶段意外注册了两次，因而重复启动了两次种子流程；StoryMode seed readiness随后退出，未创建`ChronicleEycDev-*`存档，测试进程已清理。现已删除重复分支，并将准备失败中的教程/Quest/Host readiness细节写入错误收据；接下来只重试一次，确认原版开局Seed能保存后才继续长测。
+
+
+`TestResults/20261028-015136`已证明新档教程跳过、Quest自然激活和MapState截图都通过，但首轮检查点保存失败：新战役由Harness的Host自动启动，进程没有Agent CLI session，故在保存时误走了需要该session的CLI路径；没有`ChronicleEycDev-*`存档，进程已退出。现在保存不再调用CLI：FreshCampaign收到Host结束且MapState稳定的Harness ready signal后，由Native `SubModule`在ApplicationTick触发`SaveHandler.SaveAs`，要求无Inquiry/ESC，记录Campaign ID、时间和时钟档前后值。Build `TestResults/20261028-021628`已通过，ready-signal运行实测仍待执行。Contract version 7.380。
