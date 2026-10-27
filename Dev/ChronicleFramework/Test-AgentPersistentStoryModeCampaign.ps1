@@ -34,6 +34,30 @@ function Get-SavePath([string]$SaveName) {
 
 function Get-Sha256([string]$Path) { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash }
 
+function Get-VerifiedOrphanSeedReceipt([string]$SaveName) {
+    $savePath = Get-SavePath $SaveName
+    if (-not (Test-Path -LiteralPath $savePath -PathType Leaf)) { return @() }
+    $saveHash = Get-Sha256 $savePath
+    $receiptRoot = Join-Path $PSScriptRoot 'TestResults'
+    $matches = [Collections.Generic.List[object]]::new()
+    foreach ($runDirectory in Get-ChildItem -LiteralPath $receiptRoot -Directory -ErrorAction SilentlyContinue) {
+        $receiptPath = Join-Path $runDirectory.FullName 'Temp\FreshCampaignResult.json'
+        if (-not (Test-Path -LiteralPath $receiptPath -PathType Leaf)) { continue }
+        try { $receipt = Get-Content -LiteralPath $receiptPath -Raw -Encoding UTF8 | ConvertFrom-Json }
+        catch { continue }
+        $receiptSavePath = [string]$receipt.PersistentStoryModeSavePath
+        if ([string]$receipt.PersistentStoryModeSaveName -cne $SaveName -or
+            -not [bool]$receipt.PersistentStoryModeSaveRetained -or [bool]$receipt.CrashDetected -or
+            -not [bool]$receipt.BannerlordProcessesCleanAtExit -or
+            [string]::IsNullOrWhiteSpace([string]$receipt.ChronicleCampaignInstanceId) -or
+            [string]$receipt.PersistentStoryModeSaveHash -cne $saveHash) { continue }
+        if ([string]::IsNullOrWhiteSpace($receiptSavePath) -or
+            [IO.Path]::GetFullPath($receiptSavePath) -cne $savePath) { continue }
+        $matches.Add([pscustomobject]@{ Receipt = $receipt; ReceiptPath = $receiptPath; SavePath = $savePath; Sha256 = $saveHash })
+    }
+    return @($matches)
+}
+
 function Write-PersistentManifest([object]$Manifest) {
     $temporaryPath = $manifestPath + '.' + [Guid]::NewGuid().ToString('N') + '.tmp'
     $json = $Manifest | ConvertTo-Json -Depth 8
@@ -41,10 +65,36 @@ function Write-PersistentManifest([object]$Manifest) {
     Move-Item -LiteralPath $temporaryPath -Destination $manifestPath -Force
 }
 
-function Invoke-JsonChild([string]$ScriptPath, [string[]]$Arguments) {
+function New-PersistentSeedManifest([object]$Receipt, [string]$SaveName, [string]$SaveHash) {
+    return [pscustomobject]@{
+        schemaVersion = 1
+        project = 'ChronicleFramework'
+        campaignInstanceId = [string]$Receipt.ChronicleCampaignInstanceId
+        saveName = $SaveName
+        sha256 = $SaveHash
+        previousSaveName = $null
+        previousSha256 = $null
+        seedRunUtc = [DateTime]::UtcNow.ToString('O')
+        lastCheckpointUtc = [DateTime]::UtcNow.ToString('O')
+        checkpointCount = 1
+        cumulativeDecisions = if ($null -ne $Receipt.StoryModeAgentDecisionCount) { [int]$Receipt.StoryModeAgentDecisionCount } else { 0 }
+        cumulativePromptTokens = if ($null -ne $Receipt.StoryModeAgentPromptTokens) { [long]$Receipt.StoryModeAgentPromptTokens } else { 0L }
+        cumulativeCompletionTokens = if ($null -ne $Receipt.StoryModeAgentCompletionTokens) { [long]$Receipt.StoryModeAgentCompletionTokens } else { 0L }
+        cumulativeProviderActualCostEstimateCny = if ($null -ne $Receipt.StoryModeAgentActualCostEstimateCny) { [double]$Receipt.StoryModeAgentActualCostEstimateCny } else { 0d }
+        lastHostStatus = [string]$Receipt.StoryModeAgentHostTerminalState
+        lastFailureCode = [string]$Receipt.StoryModeAgentFailureCode
+    }
+}
+
+function Invoke-JsonChild([string]$ScriptPath, [string[]]$Arguments, [string]$ChildResultFileName) {
+    if ([string]::IsNullOrWhiteSpace($ChildResultFileName) -or [IO.Path]::GetFileName($ChildResultFileName) -cne $ChildResultFileName) {
+        throw 'Persistent EYC child result file must be one safe file name inside the current Harness temp directory.'
+    }
+    $childResultPath = Join-Path $env:CHRONICLE_HARNESS_TEMP $ChildResultFileName
+    Remove-Item -LiteralPath $childResultPath -Force -ErrorAction SilentlyContinue
     $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ScriptPath @Arguments 2>&1 | Out-String
     $exitCode = $LASTEXITCODE
-    try { $evidence = Get-Content -LiteralPath $resultPath -Raw -Encoding UTF8 | ConvertFrom-Json }
+    try { $evidence = Get-Content -LiteralPath $childResultPath -Raw -Encoding UTF8 | ConvertFrom-Json }
     catch { throw "Persistent EYC child script returned no structured evidence (exit=$exitCode)." }
     return [pscustomobject]@{ ExitCode = $exitCode; Evidence = $evidence; Output = $output }
 }
@@ -67,6 +117,7 @@ $sourceSaveName = $null
 $sourceHash = $null
 $sourceCampaignInstanceId = $null
 $seedCreated = $false
+$seedRecoveredFromReceipt = $false
 $liveExitCode = $null
 $liveEvidence = $null
 $liveTrace = $null
@@ -108,79 +159,90 @@ try {
     }
     else {
         $orphanSaves = @(Get-ChildItem -LiteralPath $saveDirectory -File -Filter ($persistentSavePrefix + '*.sav') -ErrorAction SilentlyContinue)
-        if ($orphanSaves.Count -gt 0) {
-            throw 'Harness-owned EYC save files exist without a manifest; refusing to replace or choose among them automatically.'
+        if ($orphanSaves.Count -gt 1) {
+            throw 'Multiple Harness-owned EYC saves exist without a manifest; refusing to choose among them automatically.'
         }
-        $sourceSaveName = New-PersistentSaveName
-        $sourcePath = Get-SavePath $sourceSaveName
-        if (Test-Path -LiteralPath $sourcePath) { throw 'Generated EYC seed save name already exists; refusing to overwrite it.' }
-        Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
-        $savedAutoStart = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_START','Process')
-        $savedAutoStop = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS','Process')
-        $savedGoal = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_GOAL','Process')
-        $savedHarnessModel = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL','Process')
-        try {
-            [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_START','1','Process')
-            [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS','7200000','Process')
-            [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_GOAL','自主完成原版主线任务“建立你的家族”。','Process')
-            [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL',[Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL','Process'),'Process')
+        if ($orphanSaves.Count -eq 1) {
+            $sourceSaveName = [IO.Path]::GetFileNameWithoutExtension($orphanSaves[0].Name)
+            $verifiedReceipts = @(Get-VerifiedOrphanSeedReceipt $sourceSaveName)
+            if ($verifiedReceipts.Count -ne 1) {
+                throw 'One Harness-owned EYC save exists without a manifest, but it has no unique matching Native SaveAs/hash/process-cleanup receipt; refusing to load it.'
+            }
+            $seedEvidence = $verifiedReceipts[0].Receipt
+            $sourcePath = [string]$verifiedReceipts[0].SavePath
+            $sourceHash = [string]$verifiedReceipts[0].Sha256
+            if (-not [bool]$seedEvidence.StoryModeOfficialTutorialSkipConfirmed -or
+                -not [bool]$seedEvidence.StoryModeFirstMapStateObserved -or
+                -not [bool]$seedEvidence.OriginalEstablishYourClanQuestNaturallyActive) {
+                throw 'The orphan Native checkpoint does not prove the required natural StoryMode tutorial/Quest start state.'
+            }
+            $sourceCampaignInstanceId = [string]$seedEvidence.ChronicleCampaignInstanceId
+            $manifest = New-PersistentSeedManifest -Receipt $seedEvidence -SaveName $sourceSaveName -SaveHash $sourceHash
+            Write-PersistentManifest $manifest
+            $manifestUpdated = $true
+            $seedRecoveredFromReceipt = $true
+            $liveRunActualCost = [double]$manifest.cumulativeProviderActualCostEstimateCny
+            $liveRunDecisions = [int]$manifest.cumulativeDecisions
+            $liveRunPromptTokens = [long]$manifest.cumulativePromptTokens
+            $liveRunCompletionTokens = [long]$manifest.cumulativeCompletionTokens
+            $seedHostStatus = [string]$manifest.lastHostStatus
+            $seedHostFailureCode = [string]$manifest.lastFailureCode
+        }
+        else {
+            $sourceSaveName = New-PersistentSaveName
+            $sourcePath = Get-SavePath $sourceSaveName
+            if (Test-Path -LiteralPath $sourcePath) { throw 'Generated EYC seed save name already exists; refusing to overwrite it.' }
             Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
-            $seed = Invoke-JsonChild $freshCampaignScript @('-StoryModeEycSetup','-StoryModeEycLiveModelEvaluation','-StoryModeEycPersistentSeed',
-                '-PersistentStoryModeSaveName',$sourceSaveName,'-TimeoutSeconds',[string]$FreshStoryModeHostTimeoutSeconds)
+            $savedAutoStart = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_START','Process')
+            $savedAutoStop = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS','Process')
+            $savedGoal = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_GOAL','Process')
+            $savedHarnessModel = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL','Process')
+            try {
+                [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_START','1','Process')
+                [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS','7200000','Process')
+                [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_GOAL','自主完成原版主线任务“建立你的家族”。','Process')
+                [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL',[Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL','Process'),'Process')
+                Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
+                $seed = Invoke-JsonChild $freshCampaignScript @('-StoryModeEycSetup','-StoryModeEycLiveModelEvaluation','-StoryModeEycPersistentSeed',
+                    '-PersistentStoryModeSaveName',$sourceSaveName,'-TimeoutSeconds',[string]$FreshStoryModeHostTimeoutSeconds) 'FreshCampaignResult.json'
+            }
+            finally {
+                [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_START',$savedAutoStart,'Process')
+                [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS',$savedAutoStop,'Process')
+                [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_GOAL',$savedGoal,'Process')
+                [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL',$savedHarnessModel,'Process')
+            }
+            $seedEvidence = $seed.Evidence
+            if (-not [bool]$seedEvidence.PersistentStoryModeSaveRetained -or [bool]$seedEvidence.CrashDetected -or
+                -not [bool]$seedEvidence.BannerlordProcessesCleanAtExit -or
+                [string]$seedEvidence.PersistentStoryModeSaveName -cne $sourceSaveName -or
+                [string]::IsNullOrWhiteSpace([string]$seedEvidence.ChronicleCampaignInstanceId)) {
+                throw 'Natural StoryMode seed/save did not verify Native setup, Tutorial skip, Campaign identity, save receipt and process cleanup.'
+            }
+            if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw 'Seed receipt passed but the Native StoryMode save file is missing.' }
+            $sourceHash = Get-Sha256 $sourcePath
+            if ($sourceHash -cne [string]$seedEvidence.PersistentStoryModeSaveHash) { throw 'StoryMode seed save hash changed after Native SaveAs receipt.' }
+            $sourceCampaignInstanceId = [string]$seedEvidence.ChronicleCampaignInstanceId
+            $seedCreated = $true
+            $liveExitCode = $seed.ExitCode
+            $liveTrace = $null
+            $liveRunActualCost = if ($null -ne $seedEvidence.StoryModeAgentActualCostEstimateCny) { [double]$seedEvidence.StoryModeAgentActualCostEstimateCny } else { 0d }
+            $liveRunDecisions = if ($null -ne $seedEvidence.StoryModeAgentDecisionCount) { [int]$seedEvidence.StoryModeAgentDecisionCount } else { 0 }
+            $liveRunPromptTokens = if ($null -ne $seedEvidence.StoryModeAgentPromptTokens) { [long]$seedEvidence.StoryModeAgentPromptTokens } else { 0L }
+            $liveRunCompletionTokens = if ($null -ne $seedEvidence.StoryModeAgentCompletionTokens) { [long]$seedEvidence.StoryModeAgentCompletionTokens } else { 0L }
+            $seedHostStatus = [string]$seedEvidence.StoryModeAgentHostTerminalState
+            $seedHostFailureCode = [string]$seedEvidence.StoryModeAgentFailureCode
+            $checkpointSaveName = $sourceSaveName
+            $checkpointSaved = $true
+            $campaignContinued = $true
+            $eycCompleted = [bool]$seedEvidence.StoryModeOriginalEstablishYourClanCompleted
+            if ($seed.ExitCode -ne 0 -or -not [bool]$seedEvidence.Passed) {
+                $failure = 'The natural StoryMode seed Host did not pass the bounded Host/visual/cleanup checks; its verified Native checkpoint is retained for diagnosis or continuation.'
+            }
+            $manifest = New-PersistentSeedManifest -Receipt $seedEvidence -SaveName $sourceSaveName -SaveHash $sourceHash
+            Write-PersistentManifest $manifest
+            $manifestUpdated = $true
         }
-        finally {
-            [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_START',$savedAutoStart,'Process')
-            [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS',$savedAutoStop,'Process')
-            [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_GOAL',$savedGoal,'Process')
-            [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL',$savedHarnessModel,'Process')
-        }
-        $seedEvidence = $seed.Evidence
-        if (-not [bool]$seedEvidence.PersistentStoryModeSaveRetained -or [bool]$seedEvidence.CrashDetected -or
-            -not [bool]$seedEvidence.BannerlordProcessesCleanAtExit -or
-            [string]$seedEvidence.PersistentStoryModeSaveName -cne $sourceSaveName -or
-            [string]::IsNullOrWhiteSpace([string]$seedEvidence.ChronicleCampaignInstanceId)) {
-            throw 'Natural StoryMode seed/save did not verify Native setup, Tutorial skip, Campaign identity, save receipt and process cleanup.'
-        }
-        if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw 'Seed receipt passed but the Native StoryMode save file is missing.' }
-        $sourceHash = Get-Sha256 $sourcePath
-        if ($sourceHash -cne [string]$seedEvidence.PersistentStoryModeSaveHash) { throw 'StoryMode seed save hash changed after Native SaveAs receipt.' }
-        $sourceCampaignInstanceId = [string]$seedEvidence.ChronicleCampaignInstanceId
-        $seedCreated = $true
-        $liveExitCode = $seed.ExitCode
-        $liveTrace = $null
-        $liveRunActualCost = if ($null -ne $seedEvidence.StoryModeAgentActualCostEstimateCny) { [double]$seedEvidence.StoryModeAgentActualCostEstimateCny } else { 0d }
-        $liveRunDecisions = if ($null -ne $seedEvidence.StoryModeAgentDecisionCount) { [int]$seedEvidence.StoryModeAgentDecisionCount } else { 0 }
-        $liveRunPromptTokens = if ($null -ne $seedEvidence.StoryModeAgentPromptTokens) { [long]$seedEvidence.StoryModeAgentPromptTokens } else { 0L }
-        $liveRunCompletionTokens = if ($null -ne $seedEvidence.StoryModeAgentCompletionTokens) { [long]$seedEvidence.StoryModeAgentCompletionTokens } else { 0L }
-        $seedHostStatus = [string]$seedEvidence.StoryModeAgentHostTerminalState
-        $seedHostFailureCode = [string]$seedEvidence.StoryModeAgentFailureCode
-        $checkpointSaveName = $sourceSaveName
-        $checkpointSaved = $true
-        $campaignContinued = $true
-        $eycCompleted = [bool]$seedEvidence.StoryModeOriginalEstablishYourClanCompleted
-        if ($seed.ExitCode -ne 0 -or -not [bool]$seedEvidence.Passed) {
-            $failure = 'The natural StoryMode seed Host did not pass the bounded Host/visual/cleanup checks; its verified Native checkpoint is retained for diagnosis or continuation.'
-        }
-        $manifest = [pscustomobject]@{
-            schemaVersion = 1
-            project = 'ChronicleFramework'
-            campaignInstanceId = $sourceCampaignInstanceId
-            saveName = $sourceSaveName
-            sha256 = $sourceHash
-            previousSaveName = $null
-            previousSha256 = $null
-            seedRunUtc = [DateTime]::UtcNow.ToString('O')
-            lastCheckpointUtc = [DateTime]::UtcNow.ToString('O')
-            checkpointCount = 1
-            cumulativeDecisions = $liveRunDecisions
-            cumulativePromptTokens = $liveRunPromptTokens
-            cumulativeCompletionTokens = $liveRunCompletionTokens
-            cumulativeProviderActualCostEstimateCny = $liveRunActualCost
-            lastHostStatus = $seedHostStatus
-            lastFailureCode = $seedHostFailureCode
-        }
-        Write-PersistentManifest $manifest
-        $manifestUpdated = $true
     }
 
     if (-not $seedCreated) {
@@ -188,7 +250,7 @@ try {
         Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
         $live = Invoke-JsonChild $liveModelScript @('-LoadSaveName',$sourceSaveName,'-CheckpointSaveName',$checkpointSaveName,
             '-EstablishYourClanAutonomyLoop','-AgentHostRuntime','-FrameRate',[string]$FrameRate,
-            '-TimeoutSeconds',[string]$StartupTimeoutSeconds,'-HostMaxElapsedSeconds',[string]$HostMaxElapsedSeconds)
+            '-TimeoutSeconds',[string]$StartupTimeoutSeconds,'-HostMaxElapsedSeconds',[string]$HostMaxElapsedSeconds) 'LiveModelLoopResult.json'
         $liveExitCode = $live.ExitCode
         $liveEvidence = $live.Evidence
         $liveTrace = $liveEvidence.Trace
@@ -251,6 +313,7 @@ $result = [ordered]@{
     Passed = [string]::IsNullOrWhiteSpace($failure) -and $checkpointSaved -and $campaignContinued -and $eycCompleted -and $manifestUpdated
     Failure = $failure
     SeedCreated = $seedCreated
+    SeedRecoveredFromReceipt = $seedRecoveredFromReceipt
     SourceSaveName = $sourceSaveName
     SourceSaveSha256 = $sourceHash
     CampaignInstanceId = $sourceCampaignInstanceId

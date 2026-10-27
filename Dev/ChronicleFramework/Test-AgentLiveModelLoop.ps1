@@ -156,6 +156,7 @@ $checkpointSaveOwned = $false
 $checkpointSaveCompleted = $false
 $checkpointSaveHash = $null
 $checkpointSaveFailure = $null
+$checkpointSaveStateDisposition = $null
 $capture = $null
 $captureResult = $null
 $captureRecoveryProof = $null
@@ -1488,10 +1489,27 @@ finally {
         $checkpointSaveOwned = $true
         try {
             $checkpointState = Invoke-AgentCli 'state'
-            if ($checkpointState.status -ne 'completed' -or [string]$checkpointState.state.context.gameState -cne 'MapState' -or
-                [bool]$checkpointState.state.context.escapeMenuOpen -or [bool]$checkpointState.state.context.inquiryOpen -or
-                [bool]$checkpointState.state.context.encounterActive -or [bool]$checkpointState.state.partyScreenOpen -or [bool]$checkpointState.state.inventoryScreenOpen) {
-                throw 'A persistent EYC checkpoint can be written only from a stable Native Campaign Map without active encounter or modal UI.'
+            $checkpointNativeState = $checkpointState.state
+            $checkpointContext = $checkpointNativeState.context
+            $checkpointLocation = $checkpointNativeState.location
+            $checkpointCurrentSettlementId = [string]$checkpointLocation.currentSettlementId
+            $checkpointEncounterIsStableSettlementMenu = $false
+            if ([bool]$checkpointContext.encounterActive -and
+                [string]$checkpointContext.menuId -in @('town','village','castle') -and
+                -not [string]::IsNullOrWhiteSpace($checkpointCurrentSettlementId) -and
+                [string]$checkpointContext.encounteredPartyId -ceq $checkpointCurrentSettlementId -and
+                $null -eq $checkpointContext.battleSimulation -and $null -eq $checkpointContext.conversation -and
+                ($null -eq $checkpointContext.lootItemCount -or [int]$checkpointContext.lootItemCount -eq 0)) {
+                $currentSettlement = @($checkpointNativeState.nearbySettlements | Where-Object { [string]$_.id -ceq $checkpointCurrentSettlementId } | Select-Object -First 1)
+                $checkpointEncounterIsStableSettlementMenu = $currentSettlement.Count -eq 1 -and
+                    [string]$currentSettlement[0].type -in @('town','village','castle') -and -not [bool]$currentSettlement[0].underSiege
+            }
+            $checkpointStateDisposition = if ($checkpointEncounterIsStableSettlementMenu) { 'native-settlement-menu' } else { 'native-campaign-map' }
+            if ($checkpointState.status -ne 'completed' -or [string]$checkpointContext.gameState -cne 'MapState' -or
+                [bool]$checkpointContext.escapeMenuOpen -or [bool]$checkpointContext.inquiryOpen -or
+                ([bool]$checkpointContext.encounterActive -and -not $checkpointEncounterIsStableSettlementMenu) -or
+                $null -ne $checkpointContext.battleSimulation -or [bool]$checkpointNativeState.partyScreenOpen -or [bool]$checkpointNativeState.inventoryScreenOpen) {
+                throw "A persistent EYC checkpoint requires a stable Native Campaign Map or a safe non-sieged settlement menu; current state=$($checkpointContext.gameState), menu=$($checkpointContext.menuId), encounter=$($checkpointContext.encounterActive), settlement=$checkpointCurrentSettlementId."
             }
             $checkpointSave = Invoke-AgentCli 'save' @('-SaveName', $CheckpointSaveName, '-CommandId', ('eyc-continuous-checkpoint-' + [Guid]::NewGuid().ToString('N')))
             if ($checkpointSave.status -ne 'completed') { throw 'Native SaveAs did not return a successful OnSaveOver receipt for the EYC checkpoint.' }
@@ -1550,6 +1568,7 @@ $result = [ordered]@{
     CheckpointSaveHash = if ($checkpointSaveRetained) { $checkpointSaveHash } else { $null }
     CheckpointSaveRetained = $checkpointSaveRetained
     CheckpointSaveFailure = $checkpointSaveFailure
+    CheckpointSaveStateDisposition = $checkpointSaveStateDisposition
     CampaignInstanceId = $campaignInstanceId
     ProcessId = if ($start -and $start.session) { $start.session.processId } else { $null }
     HostReadyMessages = @($hostReadyMessages)

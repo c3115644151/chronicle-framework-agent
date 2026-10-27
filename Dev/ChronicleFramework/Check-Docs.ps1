@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.388'
+$contractVersion = '7.392'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -1664,17 +1664,24 @@ if ($harnessScript -notmatch "'PersistentEycCampaign' \{ @\('Preflight', 'Build'
     $subModuleSource -notmatch 'campaignDayBefore=' -or
     $subModuleSource -notmatch 'timeControlModeAfter=' -or
     $agentLiveModelLoopSource -notmatch '\[string\]\$CheckpointSaveName' -or
-    $agentLiveModelLoopSource -notmatch 'stable Native Campaign Map without active encounter or modal UI' -or
+    $agentLiveModelLoopSource -notmatch 'stable Native Campaign Map or a safe non-sieged settlement menu' -or
     $agentLiveModelLoopSource -notmatch 'CheckpointSaveHash' -or
     $persistentEycCampaignSource -notmatch 'campaignInstanceId' -or
     $persistentEycCampaignSource -notmatch 'Get-Sha256' -or
+    $persistentEycCampaignSource -notmatch 'Get-VerifiedOrphanSeedReceipt' -or
+    $persistentEycCampaignSource -notmatch 'FreshCampaignResult\.json' -or
+    $persistentEycCampaignSource -notmatch 'LiveModelLoopResult\.json' -or
+    $persistentEycCampaignSource -notmatch 'no unique matching Native SaveAs/hash/process-cleanup receipt' -or
     $persistentEycCampaignSource -notmatch 'Remove-ObsoleteOwnedSaves' -or
     $persistentEycCampaignSource -notmatch '-StoryModeEycLiveModelEvaluation' -or
     $persistentEycCampaignSource -notmatch "CHRONICLE_HARNESS_AGENT_AUTO_START','1'" -or
     $persistentEycCampaignSource -notmatch 'FreshStoryModeHostTimeoutSeconds = 7500' -or
+    $agentLiveModelLoopSource -notmatch 'checkpointEncounterIsStableSettlementMenu' -or
+    $agentLiveModelLoopSource -notmatch 'native-settlement-menu' -or
+    $agentLiveModelLoopSource -notmatch 'underSiege' -or
     $persistentEycCampaignSource -notmatch 'cumulativeProviderActualCostEstimateCny' -or
     $persistentEycCampaignSource -notmatch 'no verified Native checkpoint') {
-    throw 'Persistent EYC Harness must seed from a natural StoryMode campaign, resume only a hash- and Campaign-ID-matched Native save, checkpoint only from a stable Map, bound save retention and retain cumulative run-cost evidence.'
+    throw 'Persistent EYC Harness must seed from natural StoryMode, resume only a hash- and Campaign-ID-matched Native save, checkpoint from a stable map or verified non-sieged settlement menu, bound save retention and retain cumulative run-cost evidence.'
 }
 if ($harnessScript -notmatch "'FreshStoryModeNativeMenuLeaveEvaluation' \{ @\('Preflight', 'Build', 'FreshStoryModeNativeMenuLeaveEvaluation'\) \}" -or
     $harnessScript -notmatch '-StoryModeNativeMenuLeaveEvaluation -TimeoutSeconds 360' -or
@@ -1754,7 +1761,6 @@ if ($harnessScript -notmatch "'FreshStoryModeNativeInquiryResponseEvaluation' \{
 if ($harnessScript -notmatch 'function Remove-RetainedAgentHostPackage' -or
     $harnessScript -notmatch 'CHRONICLE_AGENT_HOST_TEST_PATH' -or
     $harnessScript -notmatch 'Remove-RetainedAgentHostPackage \$script:retainedAgentHostPackageRoot' -or
-    $harnessScript -notmatch 'retainPackageForSameSessionRuntime = \$Phase -in @\(''FreshStoryModeModelEvaluation'', ''PersistentEycCampaign'', ''AgentHostLifecycleEvaluation'', ''AgentHostLifecycleCompletionEvaluation''\)' -or
     $harnessScript -notmatch 'retainPackageForSameSessionRuntime = \$Phase -in @\(''FreshStoryModeModelEvaluation'', ''PersistentEycCampaign'', ''AgentHostLifecycleEvaluation'', ''AgentHostLifecycleCompletionEvaluation''\)' -or
     $harnessScript -notmatch 'finally \{[\s\S]*?Remove-RetainedAgentHostPackage \$script:retainedAgentHostPackageRoot[\s\S]*?AgentHostLifecycleEvaluation' -or
     $harnessScript -notmatch 'Test-AgentHostPackage\.ps1' -or $harnessScript -notmatch '-CleanupPackageRoot' -or
