@@ -275,6 +275,9 @@ $storyModeRenderSettledObserved = $false
 $storyModeAgentHostStarted = $false
 $storyModeAgentHostReady = $false
 $storyModeAgentHostStartRequested = $false
+$storyModeTutorialSkipConfirmedAt = $null
+$storyModeAgentHostStartRequestedAt = $null
+$storyModeStartupFailure = $null
 $storyModeFocusLossEscapeMenuGuardInstalled = $false
 $storyModeAgentHostTerminalDetail = $null
 $storyModeNativeLeaveRequested = $false
@@ -502,8 +505,8 @@ try {
         if ($StoryModeEycLiveModelEvaluation) {
             foreach ($line in $newLines) {
                 if ($line -match "pid=$bannerlordPid\|harness-focus-loss-escape-guard-installed\|scope=(visual-capture|agent-host-lifecycle-test|fresh-campaign-renown)$") { $storyModeFocusLossEscapeMenuGuardInstalled = $true }
-                if ($line -match "pid=$bannerlordPid\|harness-agent-lifecycle-auto-start$") { $storyModeAgentHostStartRequested = $true }
-                if ($line -match "pid=$bannerlordPid\|agent-host-state\|state=Starting\|") { $storyModeAgentHostStartRequested = $true }
+                if ($line -match "pid=$bannerlordPid\|harness-agent-lifecycle-auto-start$") { $storyModeAgentHostStartRequested = $true; if (-not $storyModeAgentHostStartRequestedAt) { $storyModeAgentHostStartRequestedAt = Get-Date } }
+                if ($line -match "pid=$bannerlordPid\|agent-host-state\|state=Starting\|") { $storyModeAgentHostStartRequested = $true; if (-not $storyModeAgentHostStartRequestedAt) { $storyModeAgentHostStartRequestedAt = Get-Date } }
                 if ($line -match "pid=$bannerlordPid\|agent-host-process-started\|pid=(\d+)\|") { $storyModeAgentHostStarted = $true }
                 if ($line -match "pid=$bannerlordPid\|agent-host-ready\|hostPid=(\d+)\|") { $storyModeAgentHostReady = $true; Write-StoryModeCaptureEvent 'agent-host-ready' 'hostReady' 'completed' 'MapState' '' }
                 if ($line -match "pid=$bannerlordPid\|agent-host-state\|state=(Stopped|Completed|Failed)\|detail=(.*)$") { $storyModeAgentHostTerminalState = $Matches[1]; $storyModeAgentHostTerminalDetail = $Matches[2]; Write-StoryModeCaptureEvent 'agent-host-terminal' $storyModeAgentHostTerminalState 'completed' 'MapState' '' }
@@ -662,6 +665,7 @@ try {
             }
             if ($StoryModeEycSetup -and $line -match 'fresh-storymode-tutorial-skip\|status=original-confirmation-selected\|option=end_tutorial_yes$') {
                 $storyModeTutorialSkipConfirmed = $true
+                if (-not $storyModeTutorialSkipConfirmedAt) { $storyModeTutorialSkipConfirmedAt = Get-Date }
                 Write-StoryModeCaptureEvent 'tutorial-skip-confirmed' 'dialogueSelect' 'completed' 'MissionState' 'training_field'
             }
             if ($StoryModeEycSetup -and $line -match 'fresh-storymode-post-skip-map-ready\|gameState=MapState\|menuId=([^|]*)\|settlement=([^|]*)\|eycActive=(True|False)$') {
@@ -798,6 +802,19 @@ try {
             else { $crashWindowCaptureError = 'Harness temp directory is unavailable for crash capture.' }
         }
 
+        if ($StoryModeEycLiveModelEvaluation -and $storyModeMapSettledObserved -and $storyModeVideoCapture -and $storyModeVideoCaptureActive) {
+            try {
+                Write-StoryModeCaptureEvent 'capture-end-after-map-settled' 'capture' 'completed' 'MapState' ([string]$storyModeMapMenuId)
+                $storyModeVideoCaptureResult = Stop-ChronicleWindowVideoCapture -Capture $storyModeVideoCapture -ContactSheetPath $storyModeVideoContactPath -EventTracePath $storyModeVideoEventsPath
+                $storyModeVideoCaptureActive = $false
+                $storyModeVideoCapture = $null
+            }
+            catch {
+                $storyModeVideoCaptureError = $_.Exception.Message
+                $storyModeVideoCaptureRetained = Test-Path -LiteralPath $storyModeVideoPath
+                $storyModeVideoCaptureActive = $false
+            }
+        }
         $storyModeTakeoverMapReady = if ($StoryModeEycLiveModelEvaluation) { $storyModeMapReadyObserved -and $storyModeMapSettledObserved } else { $storyModeEycReadyObserved -and $storyModeRenderSettledObserved }
         $creationReady = if ($StoryModeEycSetup) {
             $creationCompleted -and $initialSnapshotCaptured -and $storyModeTutorialSkipSelected -and $storyModeTutorialSkipConfirmed -and $storyModeTakeoverMapReady -and (-not $StoryModeNativeMenuLeaveEvaluation -or $storyModeNativeLeaveVerified)
@@ -806,6 +823,22 @@ try {
         }
         $saveReady = -not $ValidateRecruitmentProgression -or $disposableSaveCompleted
         $storyModeAgentReadyForExit = -not $StoryModeEycLiveModelEvaluation -or (($storyModeAgentHostStarted -and $storyModeAgentHostReady -and -not [string]::IsNullOrWhiteSpace($storyModeAgentHostTerminalState)) -or ($storyModeAgentHostStartRequested -and $storyModeAgentHostTerminalState -eq 'Failed'))
+        if ($StoryModeEycLiveModelEvaluation -and $storyModeTutorialSkipConfirmedAt -and -not $storyModeAgentHostStartRequested -and
+            (Get-Date) -ge $storyModeTutorialSkipConfirmedAt.AddSeconds(180)) {
+            $storyModeStartupFailure = 'Native tutorial skip was confirmed, but no Agent Host start request was observed within 180 seconds.'
+            $storyModeAgentHostTerminalState = 'Failed'
+            $storyModeAgentHostTerminalDetail = $storyModeStartupFailure
+            $harnessFailureObserved = $true
+            ChronicleDiagnostics.Write('fresh-storymode-startup-timeout|stage=host-start-request|seconds=180')
+        }
+        elseif ($StoryModeEycLiveModelEvaluation -and $storyModeAgentHostStartRequestedAt -and -not $storyModeAgentHostReady -and
+            (Get-Date) -ge $storyModeAgentHostStartRequestedAt.AddSeconds(90)) {
+            $storyModeStartupFailure = 'The Agent Host start was requested, but its ready handshake was not observed within 90 seconds.'
+            $storyModeAgentHostTerminalState = 'Failed'
+            $storyModeAgentHostTerminalDetail = $storyModeStartupFailure
+            $harnessFailureObserved = $true
+            ChronicleDiagnostics.Write('fresh-storymode-startup-timeout|stage=host-ready|seconds=90')
+        }
         $crashCaptureGraceActive = $crashWindowCapture -and $crashWindowCaptureUntil -and (Get-Date) -lt $crashWindowCaptureUntil
         if (($creationReady -and $saveReady -and $storyModeAgentReadyForExit) -or (($crashDetected -or $harnessFailureObserved) -and -not $crashCaptureGraceActive)) { break }
         if (-not (Get-Process -Id $launcherProcess.Id -ErrorAction SilentlyContinue) -and -not (Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue)) { break }
@@ -1381,6 +1414,7 @@ $result = [ordered]@{
     StoryModeFocusLossEscapeMenuGuardInstalled = if ($StoryModeEycLiveModelEvaluation) { $storyModeFocusLossEscapeMenuGuardInstalled } else { $null }
     StoryModeAgentHostTerminalState = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentHostTerminalState } else { $null }
     StoryModeAgentHostTerminalDetail = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentHostTerminalDetail } else { $null }
+    StoryModeStartupFailure = if ($StoryModeEycLiveModelEvaluation) { $storyModeStartupFailure } else { $null }
     StoryModeAgentDecisionCount = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentDecisionCount } else { $null }
     StoryModeAgentNativeActionsExecuted = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentNativeActionsExecuted } else { $null }
     StoryModeAgentPromptTokens = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentPromptTokens } else { $null }

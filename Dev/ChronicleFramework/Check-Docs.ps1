@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.383'
+$contractVersion = '7.385'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -1567,7 +1567,12 @@ if ($freshCampaignTelemetry -notmatch 'Campaign\.Current\?\.CampaignBehaviorMana
 if ($subModuleSource -notmatch 'isFreshCampaignHarness && !_freshCampaignMusicReadyLogged && !IsNativeCampaignMusicInitialized\(\)' -or
     $subModuleSource -notmatch 'if \(isFreshCampaignHarness && !_freshCampaignMusicReadyLogged\)' -or
     $subModuleSource -notmatch 'if \(!skipProgressionIssueProbe \|\| storyModeProgressionHarness\) FreshCampaignHarness\.AdvanceCharacterCreation\(\)' -or
-    $subModuleSource -notmatch 'fresh-storymode-post-skip-app-tick-probe') { throw 'Fresh Campaign startup gates must not suppress StoryMode post-skip MapState observation when the local Issue probe is intentionally skipped, and must record the compared Native state sources.' }
+    $subModuleSource -notmatch 'fresh-storymode-app-state-transition-probe' -or
+    $freshCampaignTest -notmatch 'storyModeTutorialSkipConfirmedAt\.AddSeconds\(180\)' -or
+    $freshCampaignTest -notmatch 'storyModeAgentHostStartRequestedAt\.AddSeconds\(90\)' -or
+    $freshCampaignTest -notmatch 'if \(\$StoryModeEycLiveModelEvaluation -and \$storyModeMapSettledObserved -and \$storyModeVideoCapture -and \$storyModeVideoCaptureActive\)' -or
+    $freshCampaignTest -notmatch 'capture-end-after-map-settled' -or
+    $freshCampaignTest -notmatch 'StoryModeStartupFailure') { throw 'Fresh StoryMode startup must preserve post-skip observation, record state-source transitions and fail quickly when the Native takeover/Host handshake never starts.' }
 if ($freshCampaignSource -notmatch 'CHRONICLE_HARNESS_MODE' -or $freshCampaignSource -notmatch 'OnNarrativeMenuOptionSelected' -or $freshCampaignSource -notmatch 'adulthood_defeated_enemy_option' -or $freshCampaignSource -notmatch 'manager\.NextStage\(\)' -or $freshCampaignSource -notmatch 'CanUserSkip' -or $freshCampaignSource -notmatch 'OnVideoFinished\(\)' -or $freshCampaignSource -notmatch 'CampaignMapConversation.OpenConversation' -or $freshCampaignSource -notmatch 'hero_give_issue' -or $freshCampaignSource -notmatch 'issueOfferDenied' -or $freshCampaignSource -notmatch 'lord_meet_player_response1' -or $freshCampaignSource -notmatch 'issue_explanation_player_response_pre_quest_solution') { throw 'Fresh campaign test must exercise native creation and classify local Issue offer/precondition outcomes.' }
 if ($freshCampaignSource -notmatch 'StoryModeNewGame' -or
     $freshCampaignSource -notmatch 'GetInitialStateOptions\(\)' -or

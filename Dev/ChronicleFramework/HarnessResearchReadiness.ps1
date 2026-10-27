@@ -1,5 +1,5 @@
 ﻿$script:AuditedHarnessDiagnosticSource = 'SubModule.cs'
-$script:AuditedHarnessDiagnosticSha256 = '15b77153db3fe08398fce6699615ad66b3fc16bed5cca1bb2be7a0eb8676e5a4'
+$script:AuditedHarnessDiagnosticSha256 = '2351baf621130173903a4a953ebdd86c629b327a103b3f21ca0a88ffa1c7a22b'
 
 function Get-ChronicleCanonicalTextSha256 {
     [CmdletBinding()]
@@ -41,7 +41,7 @@ function Get-ChronicleResearchReadiness {
     }
     if ($changed.Count -eq 1 -and $changed[0] -eq $script:AuditedHarnessDiagnosticSource -and
         $AuditedHarnessDiagnosticSha256 -eq $script:AuditedHarnessDiagnosticSha256) {
-        return [pscustomobject]@{ Allowed = $true; ChangedSources = $changed; Reason = 'exact reviewed SubModule Harness-only controls; player input ownership is unchanged, initial music readiness is a one-time startup gate, skipped Issue probes still leave StoryMode post-skip observation active, and the observer records both Native state sources without adding a player action' }
+        return [pscustomobject]@{ Allowed = $true; ChangedSources = $changed; Reason = 'exact reviewed SubModule Harness-only controls; player input ownership is unchanged, initial music readiness is one-time, StoryMode continues observing when the Issue probe is skipped, and a bounded state-transition trace records both Native state sources without adding a player action' }
     }
     [pscustomobject]@{
         Allowed = $false

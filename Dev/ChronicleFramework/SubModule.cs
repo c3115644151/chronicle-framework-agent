@@ -24,7 +24,7 @@ public sealed class SubModule : MBSubModuleBase
     private ChronicleCampaignBehavior _campaignBehavior;
     private bool _freshCampaignMusicWaitLogged;
     private bool _freshCampaignMusicReadyLogged;
-    private bool _freshStoryModePostSkipMapProbeLogged;
+    private string _freshStoryModeLastStateProbeSignature = string.Empty;
     private bool _harnessMcmSettingsProbeCompleted;
     private float _harnessMcmSettingsProbeElapsed;
     private bool _harnessMcmSettingsWaitLogged;
@@ -229,14 +229,24 @@ public sealed class SubModule : MBSubModuleBase
             Game.Current?.GameStateManager?.ActiveState?.GetType().Name == "MapState";
         var storyModeProgressionHarness = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") == FreshCampaignHarness.Mode &&
             Environment.GetEnvironmentVariable("CHRONICLE_FRESH_CAMPAIGN_STORYMODE") == "1";
-        if (skipProgressionIssueProbe && storyModeProgressionHarness && !_freshStoryModePostSkipMapProbeLogged)
+        if (storyModeProgressionHarness)
         {
-            _freshStoryModePostSkipMapProbeLogged = true;
-            ChronicleDiagnostics.Write("fresh-storymode-post-skip-app-tick-probe|gameManagerState=" +
-                (Game.Current?.GameStateManager?.ActiveState?.GetType().Name ?? "null") + "|staticState=" +
-                (GameStateManager.Current?.ActiveState?.GetType().Name ?? "null") + "|campaignPresent=" +
-                (Campaign.Current != null) + "|missionPresent=" + (Mission.Current != null) + "|missionEnded=" +
-                (Mission.Current?.MissionEnded.ToString() ?? "null"));
+            var gameManagerState = Game.Current?.GameStateManager?.ActiveState?.GetType().Name ?? "null";
+            var staticState = GameStateManager.Current?.ActiveState?.GetType().Name ?? "null";
+            var campaignPresent = Campaign.Current != null;
+            var missionPresent = Mission.Current != null;
+            var missionEnded = Mission.Current?.MissionEnded.ToString() ?? "null";
+            var settlementId = Settlement.CurrentSettlement?.StringId ?? "none";
+            var menuId = Campaign.Current?.CurrentMenuContext?.GameMenu?.StringId ?? "none";
+            var signature = string.Join("|", gameManagerState, staticState, campaignPresent, missionPresent, missionEnded, settlementId, menuId, skipProgressionIssueProbe);
+            if (!string.Equals(signature, _freshStoryModeLastStateProbeSignature, StringComparison.Ordinal))
+            {
+                _freshStoryModeLastStateProbeSignature = signature;
+                ChronicleDiagnostics.Write("fresh-storymode-app-state-transition-probe|gameManagerState=" + gameManagerState +
+                    "|staticState=" + staticState + "|campaignPresent=" + campaignPresent + "|missionPresent=" +
+                    missionPresent + "|missionEnded=" + missionEnded + "|settlement=" + settlementId + "|menu=" +
+                    menuId + "|skipIssueProbe=" + skipProgressionIssueProbe);
+            }
         }
         if (!skipProgressionIssueProbe || storyModeProgressionHarness) FreshCampaignHarness.AdvanceCharacterCreation();
         var activeCampaignBehavior = Campaign.Current?.CampaignBehaviorManager?.GetBehavior<ChronicleCampaignBehavior>();
