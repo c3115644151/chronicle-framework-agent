@@ -889,7 +889,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 var required = new JsonArray("control");
                 if (string.Equals(controlName, "observeAgain", StringComparison.Ordinal))
                 {
-                    properties["waitSeconds"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 10 };
+                    var waitBounds = GetObserveAgainWaitBounds(request);
+                    properties["waitSeconds"] = new JsonObject { ["type"] = "integer", ["minimum"] = waitBounds.Minimum, ["maximum"] = waitBounds.Maximum };
                     required.Add("waitSeconds");
                 }
                 properties["reason"] = new JsonObject { ["type"] = "string" };
@@ -985,8 +986,10 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 : decision.TryGetProperty("arguments", out var arguments) && arguments.ValueKind == JsonValueKind.Object && arguments.TryGetProperty("waitSeconds", out var nestedWait)
                     ? nestedWait
                     : default;
-            if (waitValue.ValueKind != JsonValueKind.Number || !waitValue.TryGetInt32(out var waitSeconds) || waitSeconds is < 1 or > 10)
-                throw new AgentHostException("provider-control-arguments-invalid", "observeAgain must request an integer wait from 1 to 10 seconds.");
+            var waitBounds = GetObserveAgainWaitBounds(request);
+            if (waitValue.ValueKind != JsonValueKind.Number || !waitValue.TryGetInt32(out var waitSeconds) ||
+                waitSeconds < waitBounds.Minimum || waitSeconds > waitBounds.Maximum)
+                throw new AgentHostException("provider-control-arguments-invalid", $"observeAgain must request an integer wait from {waitBounds.Minimum} to {waitBounds.Maximum} seconds.");
             return new JsonObject
             {
                 ["observeAgain"] = true,
@@ -1219,6 +1222,22 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     {
         return parent.TryGetProperty(arrayName, out var array) && array.ValueKind == JsonValueKind.Array &&
             array.EnumerateArray().Any(item => item.ValueKind == JsonValueKind.String && string.Equals(item.GetString(), value, StringComparison.Ordinal));
+    }
+
+    private static (int Minimum, int Maximum) GetObserveAgainWaitBounds(JsonElement request)
+    {
+        var minimum = 1;
+        var maximum = 10;
+        if (request.TryGetProperty("controlArguments", out var controlArguments) && controlArguments.ValueKind == JsonValueKind.Object &&
+            controlArguments.TryGetProperty("observeAgain", out var observeAgain) && observeAgain.ValueKind == JsonValueKind.Object &&
+            observeAgain.TryGetProperty("waitSeconds", out var waitSeconds) && waitSeconds.ValueKind == JsonValueKind.Object)
+        {
+            if (waitSeconds.TryGetProperty("minimum", out var minimumValue) && minimumValue.TryGetInt32(out var parsedMinimum)) minimum = parsedMinimum;
+            if (waitSeconds.TryGetProperty("maximum", out var maximumValue) && maximumValue.TryGetInt32(out var parsedMaximum)) maximum = parsedMaximum;
+        }
+        if (minimum is < 1 or > 10 || maximum is < 1 or > 10 || minimum > maximum)
+            throw new AgentHostException("decision-request-control-arguments-invalid", "observeAgain wait bounds must remain within 1-10 seconds and minimum cannot exceed maximum.");
+        return (minimum, maximum);
     }
 
     private static void ValidateDecisionRequest(JsonElement request)

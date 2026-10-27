@@ -8,6 +8,7 @@ namespace ChronicleFramework.AgentHost;
 internal static class AgentHostEstablishClanGoldSaleLoop
 {
     private const string QuestId = "rebuild_player_clan_storymode_quest";
+    private const int MinimumActiveMapTravelObserveSeconds = 5;
 
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
@@ -95,6 +96,16 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         if (!BuildControlCatalog(moveStarting, ReadMoveTargetId(resolvedMoveArguments), moveStartPending: true).Any(control => control?.GetValue<string>() == "observeAgain") ||
             BuildControlCatalog(moveStarting, ReadMoveTargetId(resolvedMoveArguments), moveStartPending: false).Count != 0)
             throw new AgentHostException("gold-sale-self-test-native-move-start-transition-poll-failed", "After its own Native move sets the target but before isMoving updates, allow one bounded read-only poll and no replayed movement or clock action.");
+        var movementWaitControls = new JsonArray("observeAgain");
+        var startPollRequest = BuildDecisionRequest("gold-sale-self-test", "sale", 1, new JsonObject(), null, null,
+            new JsonArray(), movementWaitControls, moveStartPending: true);
+        var activeTravelRequest = BuildDecisionRequest("gold-sale-self-test", "sale", 1, new JsonObject(), null, null,
+            new JsonArray(), movementWaitControls, moveStartPending: false);
+        if (ReadInt(startPollRequest["controlArguments"]?["observeAgain"]?["waitSeconds"] as JsonObject, "minimum", 0) != 1 ||
+            ReadInt(activeTravelRequest["controlArguments"]?["observeAgain"]?["waitSeconds"] as JsonObject, "minimum", 0) != MinimumActiveMapTravelObserveSeconds ||
+            !IsSupportedObserveInterval(1, moveStartPending: true) || IsSupportedObserveInterval(1, moveStartPending: false) ||
+            !IsSupportedObserveInterval(MinimumActiveMapTravelObserveSeconds, moveStartPending: false) || !IsSupportedObserveInterval(10, moveStartPending: false))
+            throw new AgentHostException("gold-sale-self-test-active-map-observation-cadence-failed", "The one movement-start poll may be 1 second, while an active map journey must wait at least 5 seconds and at most 10 seconds.");
         var existingMove = MapState(null, null, []);
         existingMove["party"]!["isMoving"] = true;
         existingMove["location"]!["targetSettlementId"] = "user-existing-target";
@@ -328,7 +339,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 var observation = BuildObservation(currentNative, state, objectiveSnapshotBefore, liveMetricDifferencesBefore, saleReceipt);
                 var providerPreviousReceipt = BuildProviderPreviousReceipt(previousReceipt, safeTowns);
                 var modelRequest = BuildDecisionRequest(runId, ReadString(request, "goal"), iteration + decisionCount,
-                    observation, providerPreviousReceipt, decisionFeedback, actionCatalog, controls);
+                    observation, providerPreviousReceipt, decisionFeedback, actionCatalog, controls, moveStartPending);
                 var started = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
                 var startedTicks = Stopwatch.GetTimestamp();
                 ProviderDecisionResult modelDecision;
@@ -374,7 +385,9 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                     if (!controls.Any(control => control?.GetValue<string>() == "observeAgain"))
                         throw new AgentHostException("gold-sale-observe-not-allowed", "The Host cannot wait unless the current Native state confirms movement or settlement arrival pending.");
                     var seconds = ReadInt(modelDecision.Decision, "waitSeconds", 0);
-                    if (seconds is < 1 or > 10) throw new AgentHostException("gold-sale-observe-interval-invalid", "observeAgain must request a bounded 1-10 second Host poll.");
+                    var minimumWait = GetMinimumObserveInterval(moveStartPending);
+                    if (!IsSupportedObserveInterval(seconds, moveStartPending))
+                        throw new AgentHostException("gold-sale-observe-interval-invalid", $"observeAgain requires a {minimumWait}-10 second Host poll in the current Native map-movement state.");
                     await Task.Delay(TimeSpan.FromSeconds(seconds), elapsed.Token);
                     using var afterWait = await stateClient.ReadStateAsync(elapsed.Token);
                     currentNative = ParseObject(afterWait.RootElement);
@@ -751,19 +764,42 @@ internal static class AgentHostEstablishClanGoldSaleLoop
     };
 
     private static JsonObject BuildDecisionRequest(string runId, string? goal, int iteration, JsonObject observation,
-        JsonObject? previousReceipt, JsonObject? feedback, JsonArray actionCatalog, JsonArray controls) => new()
+        JsonObject? previousReceipt, JsonObject? feedback, JsonArray actionCatalog, JsonArray controls, bool moveStartPending)
     {
-        ["runId"] = runId,
-        ["goal"] = goal,
-        ["goalKind"] = "active-establish-clan-gold-sale",
-        ["goalScopeClassificationRequired"] = false,
-        ["iteration"] = iteration,
-        ["observation"] = observation.DeepClone(),
-        ["previousActionReceipt"] = previousReceipt?.DeepClone(),
-        ["decisionFeedback"] = feedback?.DeepClone(),
-        ["allowedActions"] = actionCatalog.DeepClone(),
-        ["allowedControls"] = controls.DeepClone()
-    };
+        var request = new JsonObject
+        {
+            ["runId"] = runId,
+            ["goal"] = goal,
+            ["goalKind"] = "active-establish-clan-gold-sale",
+            ["goalScopeClassificationRequired"] = false,
+            ["iteration"] = iteration,
+            ["observation"] = observation.DeepClone(),
+            ["previousActionReceipt"] = previousReceipt?.DeepClone(),
+            ["decisionFeedback"] = feedback?.DeepClone(),
+            ["allowedActions"] = actionCatalog.DeepClone(),
+            ["allowedControls"] = controls.DeepClone()
+        };
+        request["controlArguments"] = controls.Any(control => control?.GetValue<string>() == "observeAgain")
+            ? new JsonObject
+            {
+                ["observeAgain"] = new JsonObject
+                {
+                    ["waitSeconds"] = new JsonObject
+                    {
+                        ["type"] = "integer",
+                        ["minimum"] = GetMinimumObserveInterval(moveStartPending),
+                        ["maximum"] = 10
+                    }
+                }
+            }
+            : new JsonObject();
+        return request;
+    }
+
+    private static int GetMinimumObserveInterval(bool moveStartPending) => moveStartPending ? 1 : MinimumActiveMapTravelObserveSeconds;
+
+    private static bool IsSupportedObserveInterval(int seconds, bool moveStartPending) =>
+        seconds >= GetMinimumObserveInterval(moveStartPending) && seconds <= 10;
 
     private static JsonObject? BuildProviderPreviousReceipt(JsonObject? previousReceipt, JsonArray? safeTowns)
     {

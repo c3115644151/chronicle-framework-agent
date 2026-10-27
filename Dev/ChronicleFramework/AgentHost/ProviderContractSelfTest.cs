@@ -274,6 +274,32 @@ internal static class ProviderContractSelfTest
             results.Add(new { scenario = "provider-repairs-single-storymode-clan-name-text-shorthand-for-native-validation", passed = true });
         }
 
+        using (var movementWaitRequest = JsonDocument.Parse("""
+        {"goal":"Passively observe active Native map travel.","observation":{"state":{"party":{"isMoving":true}}},"allowedActions":[],"allowedControls":["observeAgain"],"controlArguments":{"observeAgain":{"waitSeconds":{"type":"integer","minimum":5,"maximum":10}}}}
+        """))
+        {
+            var schema = OllamaNativeProvider.BuildDecisionSchema(movementWaitRequest.RootElement);
+            var observeBranch = (schema["properties"]?["decision"]?["anyOf"] as JsonArray)?.OfType<JsonObject>()
+                .FirstOrDefault(branch => branch["properties"]?["control"]?["enum"]?[0]?.GetValue<string>() == "observeAgain");
+            if (observeBranch?["properties"]?["waitSeconds"]?["minimum"]?.GetValue<int>() != 5 ||
+                observeBranch["properties"]?["waitSeconds"]?["maximum"]?.GetValue<int>() != 10)
+                throw new AgentHostException("provider-self-test-observe-again-schema-ignored-current-bounds", "Structured output must use the current movement wait bounds instead of a generic interval.");
+
+            using var tooShort = JsonDocument.Parse("{\"control\":\"observeAgain\",\"waitSeconds\":1,\"reason\":\"Wait briefly.\"}");
+            try
+            {
+                _ = OllamaNativeProvider.NormalizeDecision(tooShort.RootElement, movementWaitRequest.RootElement);
+                throw new AgentHostException("provider-self-test-observe-again-short-wait-accepted", "A 1-second poll must not pass the active-travel decision contract.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-control-arguments-invalid") { }
+
+            using var validWait = JsonDocument.Parse("{\"control\":\"observeAgain\",\"waitSeconds\":8,\"reason\":\"Continue map travel.\"}");
+            var normalizedWait = OllamaNativeProvider.NormalizeDecision(validWait.RootElement, movementWaitRequest.RootElement);
+            if (normalizedWait["waitSeconds"]?.GetValue<int>() != 8 || normalizedWait["observeAgain"]?.GetValue<bool>() != true)
+                throw new AgentHostException("provider-self-test-observe-again-valid-wait-not-normalized", "An in-range active-travel observation interval must remain a passive wait decision.");
+            results.Add(new { scenario = "provider-structured-output-enforces-context-specific-active-travel-observe-interval", passed = true });
+        }
+
         using (var listedStopRequest = JsonDocument.Parse("{\"goal\":\"Safely stop this subgoal.\",\"observation\":{},\"allowedActions\":[],\"allowedControls\":[\"stop\"]}"))
         using (var stopDecision = JsonDocument.Parse("{\"control\":\"stop\",\"reason\":\"No safe action now.\"}"))
         {

@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.352'
+$contractVersion = '7.354'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -378,6 +378,11 @@ if ($harnessScript -notmatch "'AgentHostEstablishClanGoldSaleEvaluation' \{ @\('
     $agentHostGoldSaleLoopSource -notmatch 'nativeTooltipType"\) == "Goods"' -or
     $agentHostGoldSaleLoopSource -notmatch 'gold-sale-native-commit-unverified' -or
     $agentHostGoldSaleLoopSource -notmatch 'gold-sale-self-test-native-move-start-transition-poll-failed' -or
+    $agentHostGoldSaleLoopSource -notmatch 'MinimumActiveMapTravelObserveSeconds' -or
+    $agentHostGoldSaleLoopSource -notmatch 'gold-sale-self-test-active-map-observation-cadence-failed' -or
+    $agentHostProviderSource -notmatch 'GetObserveAgainWaitBounds' -or
+    $agentHostProviderSelfTestSource -notmatch 'provider-structured-output-enforces-context-specific-active-travel-observe-interval' -or
+    $agentHostDecisionCycleSource -notmatch '5-10 second Host-side wait' -or
     $agentHostGoldSaleLoopSource -notmatch 'moveStartPending' -or
     $agentHostDecisionCycleSource -notmatch 'Immediately after your own move, Native may briefly show the selected target before isMoving becomes true' -or
     $agentHostMailboxSource -notmatch 'ValidateGoldSaleAction' -or
