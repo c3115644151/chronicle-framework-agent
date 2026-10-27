@@ -225,6 +225,12 @@ try {
         }
         $sourceHash = [string]$manifest.sha256
         $sourceCampaignInstanceId = [string]$manifest.campaignInstanceId
+        if ($null -eq $manifest.PSObject.Properties['usageMetric']) {
+            $manifest | Add-Member -NotePropertyName usageMetric -NotePropertyValue $null
+        }
+        if ($null -eq $manifest.PSObject.Properties['usageReceiptRunCount']) {
+            $manifest | Add-Member -NotePropertyName usageReceiptRunCount -NotePropertyValue 0
+        }
         if ([string]$manifest.usageMetric -cne 'AgentHostProgress.jsonl provider-decision events') {
             $historicalUsage = Get-VerifiedCampaignProgressUsage $sourceCampaignInstanceId
             if ($historicalUsage.ProviderDecisions -gt 0) {
