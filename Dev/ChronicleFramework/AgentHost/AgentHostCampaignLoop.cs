@@ -154,6 +154,21 @@ internal static class AgentHostCampaignLoop
         if (safeTargets.Count != 1 || ReadString(safeTargets[0] as JsonObject, "id") != "safe")
             throw new AgentHostException("campaign-loop-self-test-target-filter-failed", "Only non-hostile, non-besieged, non-current visible settlements may be offered.");
         results.Add(new { scenario = "campaign-loop-filters-unsafe-current-and-unknown-risk-targets", passed = true });
+        var excludedSafeTargets = BuildSafeVisibleTargets(new JsonObject
+        {
+            ["status"] = "completed",
+            ["data"] = new JsonObject
+            {
+                ["mapSettlementTargets"] = new JsonArray
+                {
+                    new JsonObject { ["id"] = "safe", ["name"] = "Safe Town", ["type"] = "town", ["distance"] = 4.0, ["hostile"] = false, ["underSiege"] = false },
+                    new JsonObject { ["id"] = "previously-visited", ["name"] = "Previously Visited Town", ["type"] = "town", ["distance"] = 2.0, ["hostile"] = false, ["underSiege"] = false }
+                }
+            }
+        }, new HashSet<string>(["previously-visited"], StringComparer.Ordinal));
+        if (excludedSafeTargets.Count != 1 || ReadString(excludedSafeTargets[0] as JsonObject, "id") != "safe")
+            throw new AgentHostException("campaign-loop-self-test-safe-refresh-exclusion-failed", "A safe-settlement refresh must honor previously visited destinations and retain a different visible safe target.");
+        results.Add(new { scenario = "campaign-loop-safe-arrival-excludes-recently-visited-settlements", passed = true });
 
         var targetActions = BuildActionCatalog(safeTargets, moving: false, goalVerified: false);
         if (targetActions.Count != 1 || ReadString(targetActions[0] as JsonObject, "action") != "move")
@@ -331,6 +346,16 @@ internal static class AgentHostCampaignLoop
 
         var trace = priorTrace?.DeepClone() as JsonArray ?? new JsonArray();
         var providerRouteHistory = priorProviderRouteHistory?.DeepClone() as JsonArray ?? new JsonArray();
+        var safeSettlementArrivalOnly = string.Equals(ReadString(request, "scopeRestriction"), "safe-settlement-arrival", StringComparison.Ordinal);
+        var excludedSettlementIds = new HashSet<string>(StringComparer.Ordinal);
+        if (safeSettlementArrivalOnly && request.TryGetProperty("excludedSettlementIds", out var excludedSettlementArray) && excludedSettlementArray.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var excludedSettlement in excludedSettlementArray.EnumerateArray())
+            {
+                if (excludedSettlement.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(excludedSettlement.GetString()))
+                    excludedSettlementIds.Add(excludedSettlement.GetString()!);
+            }
+        }
         var decisionCount = priorDecisions;
         var rejectedDecisionCount = 0;
         var prematureCompletionCount = 0;
@@ -760,7 +785,7 @@ internal static class AgentHostCampaignLoop
                 var actionCompleted = string.Equals(ReadString(nativeReceipt, "status"), "completed", StringComparison.Ordinal);
                 actionsExecuted += actionCompleted ? 1 : 0;
                 previousReceipt = BuildSafeReceipt(nativeReceipt, nativeAction!, selectedTarget);
-                if (nativeAction == "mapSettlementTargets") visibleTargets = BuildSafeVisibleTargets(nativeReceipt);
+                if (nativeAction == "mapSettlementTargets") visibleTargets = BuildSafeVisibleTargets(nativeReceipt, safeSettlementArrivalOnly ? excludedSettlementIds : null);
                 else if (nativeAction == "move" && actionCompleted)
                 {
                     moveTargetId = selectedTarget?.Id;
@@ -948,14 +973,15 @@ internal static class AgentHostCampaignLoop
         };
     }
 
-    private static JsonArray BuildSafeVisibleTargets(JsonObject receipt)
+    private static JsonArray BuildSafeVisibleTargets(JsonObject receipt, HashSet<string>? excludedSettlementIds = null)
     {
         if (ReadString(receipt, "status") != "completed" || receipt["data"] is not JsonObject data || data["mapSettlementTargets"] is not JsonArray targets)
             return new JsonArray();
         var candidates = targets.OfType<JsonObject>()
             .Where(target => HasExplicitBoolean(target, "hostile", expected: false) && HasExplicitBoolean(target, "underSiege", expected: false) &&
                              ReadDouble(target, "distance", double.MaxValue) > 1.0 &&
-                             !string.IsNullOrWhiteSpace(ReadString(target, "id")) && !string.IsNullOrWhiteSpace(ReadString(target, "name")))
+                             !string.IsNullOrWhiteSpace(ReadString(target, "id")) && !string.IsNullOrWhiteSpace(ReadString(target, "name")) &&
+                             (excludedSettlementIds == null || !excludedSettlementIds.Contains(ReadString(target, "id")!)))
             .OrderBy(target => ReadDouble(target, "distance", double.MaxValue))
             .ThenBy(target => ReadString(target, "id"), StringComparer.Ordinal)
             .Take(12)

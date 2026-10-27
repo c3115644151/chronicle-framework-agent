@@ -1504,7 +1504,7 @@ finally {
                 $checkpointEncounterIsStableSettlementMenu = $currentSettlement.Count -eq 1 -and
                     [string]$currentSettlement[0].type -in @('town','village','castle') -and -not [bool]$currentSettlement[0].underSiege
             }
-            $checkpointStateDisposition = if ($checkpointEncounterIsStableSettlementMenu) { 'native-settlement-menu' } else { 'native-campaign-map' }
+            $checkpointSaveStateDisposition = if ($checkpointEncounterIsStableSettlementMenu) { 'native-settlement-menu' } else { 'native-campaign-map' }
             if ($checkpointState.status -ne 'completed' -or [string]$checkpointContext.gameState -cne 'MapState' -or
                 [bool]$checkpointContext.escapeMenuOpen -or [bool]$checkpointContext.inquiryOpen -or
                 ([bool]$checkpointContext.encounterActive -and -not $checkpointEncounterIsStableSettlementMenu) -or

@@ -34,6 +34,67 @@ function Get-SavePath([string]$SaveName) {
 
 function Get-Sha256([string]$Path) { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash }
 
+function Get-AgentHostProgressUsage([string]$ProgressPath) {
+    $providerDecisions = 0
+    [long]$promptTokens = 0
+    [long]$completionTokens = 0
+    [double]$costEstimateCny = 0
+    if (Test-Path -LiteralPath $ProgressPath -PathType Leaf) {
+        foreach ($line in Get-Content -LiteralPath $ProgressPath -Encoding UTF8) {
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+            try { $entry = $line | ConvertFrom-Json } catch { continue }
+            if ([string]$entry.event -cne 'provider-decision') { continue }
+            $providerDecisions++
+            $promptTokens += [long]$entry.promptTokens
+            $completionTokens += [long]$entry.completionTokens
+            $costEstimateCny += [double]$entry.estimatedCostCny
+        }
+    }
+    [pscustomobject]@{
+        ProviderDecisions = $providerDecisions
+        PromptTokens = $promptTokens
+        CompletionTokens = $completionTokens
+        CostEstimateCny = [Math]::Round($costEstimateCny, 9)
+    }
+}
+
+function Get-VerifiedCampaignProgressUsage([string]$CampaignInstanceId) {
+    $total = [ordered]@{ ProviderDecisions = 0; PromptTokens = [long]0; CompletionTokens = [long]0; CostEstimateCny = [double]0; ReceiptRunCount = 0 }
+    $resultsRoot = Join-Path $PSScriptRoot 'TestResults'
+    foreach ($runDirectory in Get-ChildItem -LiteralPath $resultsRoot -Directory -ErrorAction SilentlyContinue) {
+        $tempDirectory = Join-Path $runDirectory.FullName 'Temp'
+        $freshReceiptPath = Join-Path $tempDirectory 'FreshCampaignResult.json'
+        $liveReceiptPath = Join-Path $tempDirectory 'LiveModelLoopResult.json'
+        $runBelongsToCampaign = $false
+        if (Test-Path -LiteralPath $freshReceiptPath -PathType Leaf) {
+            try {
+                $receipt = Get-Content -LiteralPath $freshReceiptPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                $runBelongsToCampaign = [bool]$receipt.PersistentStoryModeSeed -and
+                    [string]$receipt.ChronicleCampaignInstanceId -ceq $CampaignInstanceId -and
+                    [string]$receipt.PersistentStoryModeSaveName -match '^ChronicleEycDev-'
+            }
+            catch { $runBelongsToCampaign = $false }
+        }
+        if (-not $runBelongsToCampaign -and (Test-Path -LiteralPath $liveReceiptPath -PathType Leaf)) {
+            try {
+                $receipt = Get-Content -LiteralPath $liveReceiptPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                $runBelongsToCampaign = [string]$receipt.CampaignInstanceId -ceq $CampaignInstanceId -and
+                    [string]$receipt.CheckpointSaveName -match '^ChronicleEycDev-'
+            }
+            catch { $runBelongsToCampaign = $false }
+        }
+        if (-not $runBelongsToCampaign) { continue }
+        $usage = Get-AgentHostProgressUsage (Join-Path $tempDirectory 'AgentHostProgress.jsonl')
+        $total.ProviderDecisions += [int]$usage.ProviderDecisions
+        $total.PromptTokens += [long]$usage.PromptTokens
+        $total.CompletionTokens += [long]$usage.CompletionTokens
+        $total.CostEstimateCny += [double]$usage.CostEstimateCny
+        $total.ReceiptRunCount++
+    }
+    $total.CostEstimateCny = [Math]::Round([double]$total.CostEstimateCny, 9)
+    [pscustomobject]$total
+}
+
 function Get-VerifiedOrphanSeedReceipt([string]$SaveName) {
     $savePath = Get-SavePath $SaveName
     if (-not (Test-Path -LiteralPath $savePath -PathType Leaf)) { return @() }
@@ -65,7 +126,13 @@ function Write-PersistentManifest([object]$Manifest) {
     Move-Item -LiteralPath $temporaryPath -Destination $manifestPath -Force
 }
 
-function New-PersistentSeedManifest([object]$Receipt, [string]$SaveName, [string]$SaveHash) {
+function New-PersistentSeedManifest([object]$Receipt, [string]$SaveName, [string]$SaveHash, [object]$Usage) {
+    if ($null -eq $Usage) {
+        $Usage = [pscustomobject]@{ ProviderDecisions = 0; PromptTokens = [long]0; CompletionTokens = [long]0; CostEstimateCny = [double]0; ReceiptRunCount = 0 }
+    }
+    if ($null -eq $Usage) {
+        $Usage = [pscustomobject]@{ ProviderDecisions = 0; PromptTokens = [long]0; CompletionTokens = [long]0; CostEstimateCny = [double]0; ReceiptRunCount = 0 }
+    }
     return [pscustomobject]@{
         schemaVersion = 1
         project = 'ChronicleFramework'
@@ -77,10 +144,12 @@ function New-PersistentSeedManifest([object]$Receipt, [string]$SaveName, [string
         seedRunUtc = [DateTime]::UtcNow.ToString('O')
         lastCheckpointUtc = [DateTime]::UtcNow.ToString('O')
         checkpointCount = 1
-        cumulativeDecisions = if ($null -ne $Receipt.StoryModeAgentDecisionCount) { [int]$Receipt.StoryModeAgentDecisionCount } else { 0 }
-        cumulativePromptTokens = if ($null -ne $Receipt.StoryModeAgentPromptTokens) { [long]$Receipt.StoryModeAgentPromptTokens } else { 0L }
-        cumulativeCompletionTokens = if ($null -ne $Receipt.StoryModeAgentCompletionTokens) { [long]$Receipt.StoryModeAgentCompletionTokens } else { 0L }
-        cumulativeProviderActualCostEstimateCny = if ($null -ne $Receipt.StoryModeAgentActualCostEstimateCny) { [double]$Receipt.StoryModeAgentActualCostEstimateCny } else { 0d }
+        usageMetric = 'AgentHostProgress.jsonl provider-decision events'
+        usageReceiptRunCount = if ($null -ne $Usage) { [int]$Usage.ReceiptRunCount } else { 0 }
+        cumulativeDecisions = [int]$Usage.ProviderDecisions
+        cumulativePromptTokens = [long]$Usage.PromptTokens
+        cumulativeCompletionTokens = [long]$Usage.CompletionTokens
+        cumulativeProviderActualCostEstimateCny = [double]$Usage.CostEstimateCny
         lastHostStatus = [string]$Receipt.StoryModeAgentHostTerminalState
         lastFailureCode = [string]$Receipt.StoryModeAgentFailureCode
     }
@@ -156,6 +225,19 @@ try {
         }
         $sourceHash = [string]$manifest.sha256
         $sourceCampaignInstanceId = [string]$manifest.campaignInstanceId
+        if ([string]$manifest.usageMetric -cne 'AgentHostProgress.jsonl provider-decision events') {
+            $historicalUsage = Get-VerifiedCampaignProgressUsage $sourceCampaignInstanceId
+            if ($historicalUsage.ProviderDecisions -gt 0) {
+                $manifest.usageMetric = 'AgentHostProgress.jsonl provider-decision events'
+                $manifest.usageReceiptRunCount = [int]$historicalUsage.ReceiptRunCount
+                $manifest.cumulativeDecisions = [int]$historicalUsage.ProviderDecisions
+                $manifest.cumulativePromptTokens = [long]$historicalUsage.PromptTokens
+                $manifest.cumulativeCompletionTokens = [long]$historicalUsage.CompletionTokens
+                $manifest.cumulativeProviderActualCostEstimateCny = [double]$historicalUsage.CostEstimateCny
+                Write-PersistentManifest $manifest
+                $manifestUpdated = $true
+            }
+        }
     }
     else {
         $orphanSaves = @(Get-ChildItem -LiteralPath $saveDirectory -File -Filter ($persistentSavePrefix + '*.sav') -ErrorAction SilentlyContinue)
@@ -177,7 +259,8 @@ try {
                 throw 'The orphan Native checkpoint does not prove the required natural StoryMode tutorial/Quest start state.'
             }
             $sourceCampaignInstanceId = [string]$seedEvidence.ChronicleCampaignInstanceId
-            $manifest = New-PersistentSeedManifest -Receipt $seedEvidence -SaveName $sourceSaveName -SaveHash $sourceHash
+            $historicalUsage = Get-VerifiedCampaignProgressUsage $sourceCampaignInstanceId
+            $manifest = New-PersistentSeedManifest -Receipt $seedEvidence -SaveName $sourceSaveName -SaveHash $sourceHash -Usage $historicalUsage
             Write-PersistentManifest $manifest
             $manifestUpdated = $true
             $seedRecoveredFromReceipt = $true
@@ -226,10 +309,11 @@ try {
             $seedCreated = $true
             $liveExitCode = $seed.ExitCode
             $liveTrace = $null
-            $liveRunActualCost = if ($null -ne $seedEvidence.StoryModeAgentActualCostEstimateCny) { [double]$seedEvidence.StoryModeAgentActualCostEstimateCny } else { 0d }
-            $liveRunDecisions = if ($null -ne $seedEvidence.StoryModeAgentDecisionCount) { [int]$seedEvidence.StoryModeAgentDecisionCount } else { 0 }
-            $liveRunPromptTokens = if ($null -ne $seedEvidence.StoryModeAgentPromptTokens) { [long]$seedEvidence.StoryModeAgentPromptTokens } else { 0L }
-            $liveRunCompletionTokens = if ($null -ne $seedEvidence.StoryModeAgentCompletionTokens) { [long]$seedEvidence.StoryModeAgentCompletionTokens } else { 0L }
+            $seedUsage = Get-AgentHostProgressUsage (Join-Path $env:CHRONICLE_HARNESS_TEMP 'AgentHostProgress.jsonl')
+            $liveRunActualCost = [double]$seedUsage.CostEstimateCny
+            $liveRunDecisions = [int]$seedUsage.ProviderDecisions
+            $liveRunPromptTokens = [long]$seedUsage.PromptTokens
+            $liveRunCompletionTokens = [long]$seedUsage.CompletionTokens
             $seedHostStatus = [string]$seedEvidence.StoryModeAgentHostTerminalState
             $seedHostFailureCode = [string]$seedEvidence.StoryModeAgentFailureCode
             $checkpointSaveName = $sourceSaveName
@@ -239,7 +323,7 @@ try {
             if ($seed.ExitCode -ne 0 -or -not [bool]$seedEvidence.Passed) {
                 $failure = 'The natural StoryMode seed Host did not pass the bounded Host/visual/cleanup checks; its verified Native checkpoint is retained for diagnosis or continuation.'
             }
-            $manifest = New-PersistentSeedManifest -Receipt $seedEvidence -SaveName $sourceSaveName -SaveHash $sourceHash
+            $manifest = New-PersistentSeedManifest -Receipt $seedEvidence -SaveName $sourceSaveName -SaveHash $sourceHash -Usage $seedUsage
             Write-PersistentManifest $manifest
             $manifestUpdated = $true
         }
@@ -254,10 +338,11 @@ try {
         $liveExitCode = $live.ExitCode
         $liveEvidence = $live.Evidence
         $liveTrace = $liveEvidence.Trace
-        $liveRunActualCost = if ($null -ne $liveTrace.providerActualCostEstimateCny) { [double]$liveTrace.providerActualCostEstimateCny } else { 0d }
-        $liveRunDecisions = if ($null -ne $liveTrace.decisions) { [int]$liveTrace.decisions } else { 0 }
-        $liveRunPromptTokens = if ($null -ne $liveTrace.promptTokens) { [long]$liveTrace.promptTokens } else { 0L }
-        $liveRunCompletionTokens = if ($null -ne $liveTrace.completionTokens) { [long]$liveTrace.completionTokens } else { 0L }
+        $liveUsage = Get-AgentHostProgressUsage (Join-Path $env:CHRONICLE_HARNESS_TEMP 'AgentHostProgress.jsonl')
+        $liveRunActualCost = [double]$liveUsage.CostEstimateCny
+        $liveRunDecisions = [int]$liveUsage.ProviderDecisions
+        $liveRunPromptTokens = [long]$liveUsage.PromptTokens
+        $liveRunCompletionTokens = [long]$liveUsage.CompletionTokens
         $campaignContinued = [string]$liveEvidence.CampaignInstanceId -ceq $sourceCampaignInstanceId
         $checkpointPath = Get-SavePath $checkpointSaveName
         $checkpointSaved = ([bool]$liveEvidence.CheckpointSaveRetained -and
@@ -282,6 +367,10 @@ try {
             $manifest.cumulativePromptTokens = [long]$manifest.cumulativePromptTokens + $liveRunPromptTokens
             $manifest.cumulativeCompletionTokens = [long]$manifest.cumulativeCompletionTokens + $liveRunCompletionTokens
             $manifest.cumulativeProviderActualCostEstimateCny = [Math]::Round([double]$manifest.cumulativeProviderActualCostEstimateCny + $liveRunActualCost, 6)
+            if ($liveRunDecisions -gt 0) {
+                $manifest.usageMetric = 'AgentHostProgress.jsonl provider-decision events'
+                $manifest.usageReceiptRunCount = [int]$manifest.usageReceiptRunCount + 1
+            }
             $manifest.lastHostStatus = [string]$liveTrace.status
             $manifest.lastFailureCode = if ($liveTrace.failureCode) { [string]$liveTrace.failureCode } else { $null }
             Write-PersistentManifest $manifest
