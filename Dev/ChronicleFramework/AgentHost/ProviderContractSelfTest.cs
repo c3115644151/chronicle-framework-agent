@@ -53,6 +53,8 @@ internal static class ProviderContractSelfTest
         results.AddRange(AgentHostEstablishClanGoldSaleLoop.RunContractSelfTests());
         results.AddRange(AgentHostEstablishClanTrainingIssueLoop.RunContractSelfTests());
         results.AddRange(NativeMailboxClient.RunQuestDetailsReadActionContractSelfTests());
+        results.AddRange(NativeMailboxClient.RunQuestTroopScreenActionContractSelfTests());
+        results.AddRange(AgentHostQuestTroopScreenLoop.RunContractSelfTests());
         results.AddRange(AgentHostCaptivityRecoveryLoop.RunContractSelfTests());
         results.AddRange(AgentHostEstablishClanGoldSaleLoop.RunContractSelfTests());
         try { results.AddRange(await AgentHostEstablishClanGoldSaleLoop.RunFailureTransportSelfTestsAsync()); }

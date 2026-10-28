@@ -8,7 +8,8 @@ namespace ChronicleFramework.AgentHost;
 internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeClient, IAgentHostBattleSimulationNativeClient,
     IAgentHostQuestDetailsNativeClient, IAgentHostCaptivityRecoveryNativeClient, IAgentHostGoldSaleNativeClient,
     IAgentHostRecruitmentNativeClient, IAgentHostCompanionHiringNativeClient, IAgentHostStoryModeBootstrapNativeClient,
-    IAgentHostNativeInquiryClient, IAgentHostStoryModeBannerEditorNativeClient, IAgentHostEstablishClanTrainingIssueNativeClient
+    IAgentHostNativeInquiryClient, IAgentHostStoryModeBannerEditorNativeClient, IAgentHostEstablishClanTrainingIssueNativeClient,
+    IAgentHostQuestTroopScreenNativeClient
 {
     private static readonly HashSet<string> SupplySliceActions = new(StringComparer.Ordinal)
     {
@@ -387,6 +388,52 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
 
     Task<JsonDocument> IAgentHostCampaignNativeClient.ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken) =>
         ExecuteCampaignActionAsync(action, arguments, cancellationToken);
+
+    public Task<JsonDocument> ExecuteQuestTroopScreenActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+    {
+        ValidateQuestTroopScreenAction(action, arguments);
+        return SendAsync(action, arguments, acceptedResponseExpected: false, cancellationToken);
+    }
+
+    internal static void ValidateQuestTroopScreenAction(string action, JsonObject arguments)
+    {
+        static bool HasOnlyKeys(JsonObject value, params string[] keys) => value.Count == keys.Length && keys.All(value.ContainsKey);
+        static bool HasText(JsonObject value, string key) => value[key] is JsonValue node && node.TryGetValue<string>(out var text) && !string.IsNullOrWhiteSpace(text);
+        var valid = action switch
+        {
+            "questTroopTransfer" => HasOnlyKeys(arguments, "troopId", "sourceSide") && HasText(arguments, "troopId") &&
+                arguments["sourceSide"] is JsonValue sideNode && sideNode.TryGetValue<string>(out var side) && side is "mainParty" or "quest",
+            "questTroopScreenDone" or "questTroopScreenCancel" => arguments.Count == 0,
+            _ => false
+        };
+        if (!valid)
+            throw new AgentHostException("native-action-not-in-quest-troop-screen-scope", "QuestTroopManage accepts only one exact troop/side transfer, Native Done when enabled, or Native Cancel when enabled.");
+    }
+
+    internal static IReadOnlyList<object> RunQuestTroopScreenActionContractSelfTests()
+    {
+        ValidateQuestTroopScreenAction("questTroopTransfer", JsonNode.Parse("{\"troopId\":\"imperial_recruit\",\"sourceSide\":\"mainParty\"}")!.AsObject());
+        ValidateQuestTroopScreenAction("questTroopTransfer", JsonNode.Parse("{\"troopId\":\"imperial_recruit\",\"sourceSide\":\"quest\"}")!.AsObject());
+        ValidateQuestTroopScreenAction("questTroopScreenDone", new JsonObject());
+        ValidateQuestTroopScreenAction("questTroopScreenCancel", new JsonObject());
+        foreach (var item in new[]
+        {
+            (Action: "questTroopTransfer", Json: "{\"troopId\":\"\",\"sourceSide\":\"mainParty\"}"),
+            (Action: "questTroopTransfer", Json: "{\"troopId\":\"hero\",\"sourceSide\":\"left\"}"),
+            (Action: "questTroopTransfer", Json: "{\"troopId\":\"troop\",\"sourceSide\":\"hidden\"}"),
+            (Action: "questTroopScreenDone", Json: "{\"choice\":\"yes\"}"),
+            (Action: "questTroopScreenCancel", Json: "{\"force\":true}")
+        })
+        {
+            try
+            {
+                ValidateQuestTroopScreenAction(item.Action, JsonNode.Parse(item.Json)!.AsObject());
+                throw new AgentHostException("native-quest-troop-screen-invalid-action-accepted", "The QuestTroopManage mailbox accepted an unknown side, hidden target or extra argument.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "native-action-not-in-quest-troop-screen-scope") { }
+        }
+        return [new { scenario = "quest-troop-screen-mailbox-is-limited-to-observed-side-and-current-native-controls", passed = true }];
+    }
 
     public Task<JsonDocument> ExecuteTrainingIssueActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
     {

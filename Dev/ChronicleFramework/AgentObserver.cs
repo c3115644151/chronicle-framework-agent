@@ -54,7 +54,7 @@ internal static class ChronicleAgentObserver
 
         var json = new StringBuilder(4096);
         json.Append('{');
-        json.Append("\"schemaVersion\":29");
+        json.Append("\"schemaVersion\":30");
         json.Append(",\"campaignDay\":").Append(Number(CampaignTime.Now.ToDays));
         json.Append(",\"identity\":{");
         Property(json, "heroId", hero.StringId); Property(json, "heroName", hero.Name?.ToString(), true);
@@ -220,8 +220,18 @@ internal static class ChronicleAgentObserver
             json.Append('{');
             Property(json, "mode", activePartyState.PartyScreenMode.ToString());
             json.Append(",\"canDone\":").Append(Bool(screen.IsDoneActive()));
+            Property(json, "doneReason", screen.DoneReasonString, true);
             Property(json, "leftPartyId", screen.LeftOwnerParty?.Id, true);
             Property(json, "rightPartyId", screen.RightOwnerParty?.Id, true);
+            if (activePartyState.PartyScreenMode == PartyScreenHelper.PartyScreenMode.QuestTroopManage)
+            {
+                json.Append(",\"questTroopAssignment\":{\"currentCount\":")
+                    .Append(screen.GetCurrentQuestCurrentCount(includePrisoners: false, includeMembers: true))
+                    .Append(",\"requiredCount\":").Append(screen.GetCurrentQuestRequiredCount())
+                    .Append(",\"doneAvailable\":").Append(Bool(screen.IsDoneActive()))
+                    .Append(",\"cancelAvailable\":").Append(Bool(screen.IsCancelActive()))
+                    .Append('}');
+            }
             AppendPartyRoster(json, "leftMembers", screen, PartyScreenLogic.PartyRosterSide.Left, PartyScreenLogic.TroopType.Member);
             AppendPartyRoster(json, "leftPrisoners", screen, PartyScreenLogic.PartyRosterSide.Left, PartyScreenLogic.TroopType.Prisoner);
             AppendPartyRoster(json, "rightMembers", screen, PartyScreenLogic.PartyRosterSide.Right, PartyScreenLogic.TroopType.Member);

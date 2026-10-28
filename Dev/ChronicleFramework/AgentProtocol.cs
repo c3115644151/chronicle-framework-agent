@@ -1441,6 +1441,16 @@ internal sealed class ChronicleAgentProtocol
                     partyScreenHandler.ExecuteDoneScript();
                     WriteResponse(commandId, action, "completed", behavior);
                     break;
+                case "questTroopTransfer":
+                    WriteResponse(commandId, action, "completed", behavior, null,
+                        ChronicleQuestTroopScreenAdapter.TransferOne(ReadString(command, "troopId"), ReadString(command, "sourceSide")));
+                    break;
+                case "questTroopScreenDone":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleQuestTroopScreenAdapter.Done());
+                    break;
+                case "questTroopScreenCancel":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleQuestTroopScreenAdapter.Cancel());
+                    break;
                 case "alleyRosterTransfer":
                     WriteResponse(commandId, action, "completed", behavior, null,
                         ChronicleAlleyRosterAdapter.TransferOne(ReadString(command, "troopId"), ReadString(command, "sourceSide")));

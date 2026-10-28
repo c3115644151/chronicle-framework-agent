@@ -534,6 +534,41 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 elapsed.Token.ThrowIfCancellationRequested();
                 using var current = await client.ReadStateAsync(elapsed.Token);
                 RememberCurrentSettlement(current.RootElement);
+                if (AgentHostQuestTroopScreenLoop.IsActive(current.RootElement))
+                {
+                    if (client is not IAgentHostQuestTroopScreenNativeClient questTroopScreenClient)
+                        return BuildResult("failed", "quest-troop-screen-native-client-unavailable", false,
+                            "Native is waiting in an original QuestTroopManage PartyScreen but the transport cannot perform its visible Native transfer/Done actions.",
+                            "quest-troop-screen-native-client-unavailable");
+
+                    var questTroopRunRequest = JsonNode.Parse(request.GetRawText())?.AsObject()
+                        ?? throw new AgentHostException("quest-troop-screen-request-invalid", "The current EYC run request could not be copied into the QuestTroopManage decision envelope.");
+                    var questTroopScreen = await AgentHostQuestTroopScreenLoop.RunAsync(
+                        questTroopRunRequest, client, questTroopScreenClient, provider, elapsed.Token,
+                        priorDecisions: decisions,
+                        priorPromptTokens: promptTokens,
+                        priorCompletionTokens: completionTokens,
+                        priorTrace: trace,
+                        priorProviderRouteHistory: routes);
+                    decisions = ReadInt(questTroopScreen, "decisions", decisions);
+                    promptTokens = ReadLong(questTroopScreen, "promptTokens", promptTokens);
+                    completionTokens = ReadLong(questTroopScreen, "completionTokens", completionTokens);
+                    nativeActions += ReadInt(questTroopScreen, "actionsExecuted", 0);
+                    trace = questTroopScreen["trace"]?.DeepClone() as JsonArray ?? trace;
+                    routes = questTroopScreen["providerRouteHistory"]?.DeepClone() as JsonArray ?? routes;
+                    objectiveRuns.Add(new JsonObject
+                    {
+                        ["objectiveId"] = "nativeQuestTroopAssignment",
+                        ["status"] = ReadString(questTroopScreen, "status"),
+                        ["termination"] = questTroopScreen["termination"]?.DeepClone(),
+                        ["actionsExecuted"] = ReadInt(questTroopScreen, "actionsExecuted", 0)
+                    });
+                    if (ReadString(questTroopScreen, "status") is not ("completed" or "interrupted"))
+                        return BuildResult("failed", "native-quest-troop-assignment-failed", false,
+                            ReadString(questTroopScreen, "failure") ?? "The original Issue PartyScreen assignment did not reach a verified Native close state.",
+                            ReadString(questTroopScreen["termination"] as JsonObject, "reason"));
+                    continue;
+                }
                 if (AgentHostMapIncidentLoop.IsActive(current.RootElement))
                 {
                     var mapIncident = await AgentHostMapIncidentLoop.RunAsync(
