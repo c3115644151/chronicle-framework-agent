@@ -217,23 +217,29 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
         var valid = action switch
         {
             "recruitOptions" => arguments.Count == 0,
+            "prisonerRecruitmentOptions" => arguments.Count == 0,
             "menuSelect" => arguments.Count == 2 && HasText(arguments, "menuId") && HasText(arguments, "optionId"),
             "recruit" => arguments.Count == 4 && HasText(arguments, "ownerId") && HasText(arguments, "troopId") &&
                          arguments["slot"] is JsonValue slotNode && slotNode.TryGetValue<int>(out var slot) && slot >= 0 &&
                          arguments["confirmPartySizeWarning"] is JsonValue confirmNode && confirmNode.TryGetValue<int>(out var confirm) && confirm is 0 or 1,
+            "recruitPrisoner" => arguments.Count == 3 && HasText(arguments, "troopId") &&
+                                  arguments["confirmPartySizeWarning"] is JsonValue prisonerPartyConfirmNode && prisonerPartyConfirmNode.TryGetValue<int>(out var prisonerPartyConfirm) && prisonerPartyConfirm is 0 or 1 &&
+                                  arguments["confirmPrisonerLimitWarning"] is JsonValue prisonerLimitConfirmNode && prisonerLimitConfirmNode.TryGetValue<int>(out var prisonerLimitConfirm) && prisonerLimitConfirm is 0 or 1,
             "dialogueContinue" => arguments.Count == 0,
             "dialogueSelect" => arguments.Count == 1 && HasText(arguments, "optionId"),
             _ => false
         };
         if (!valid)
-            throw new AgentHostException("native-action-not-in-recruitment-scope", "The recruitment adapter accepts only a fresh options query or one exact Native volunteer offer with a binary capacity-confirmation choice.");
+            throw new AgentHostException("native-action-not-in-recruitment-scope", "The recruitment adapter accepts only fresh volunteer/prisoner option queries, exact current offers, and their separate Native troop-size or prisoner-limit confirmation choices.");
     }
 
     internal static IReadOnlyList<object> RunRecruitmentActionContractSelfTests()
     {
         ValidateRecruitmentAction("recruitOptions", new JsonObject());
+        ValidateRecruitmentAction("prisonerRecruitmentOptions", new JsonObject());
         ValidateRecruitmentAction("menuSelect", JsonNode.Parse("{\"menuId\":\"village\",\"optionId\":\"leave\"}")!.AsObject());
         ValidateRecruitmentAction("recruit", JsonNode.Parse("{\"ownerId\":\"notable-a\",\"troopId\":\"vlandian_recruit\",\"slot\":0,\"confirmPartySizeWarning\":0}")!.AsObject());
+        ValidateRecruitmentAction("recruitPrisoner", JsonNode.Parse("{\"troopId\":\"looter\",\"confirmPartySizeWarning\":0,\"confirmPrisonerLimitWarning\":0}")!.AsObject());
         ValidateRecruitmentAction("dialogueContinue", new JsonObject());
         ValidateRecruitmentAction("dialogueSelect", JsonNode.Parse("{\"optionId\":\"villagers_defer\"}")!.AsObject());
         foreach (var item in new (string Action, string Json)[]
@@ -242,6 +248,8 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             ("recruit", "{\"ownerId\":\"notable-a\",\"troopId\":\"vlandian_recruit\",\"slot\":-1,\"confirmPartySizeWarning\":0}"),
             ("recruit", "{\"ownerId\":\"notable-a\",\"troopId\":\"vlandian_recruit\",\"slot\":0,\"confirmPartySizeWarning\":2}"),
             ("recruit", "{\"ownerId\":\"notable-a\",\"troopId\":\"vlandian_recruit\",\"slot\":0,\"confirmPartySizeWarning\":0,\"extra\":true}"),
+            ("recruitPrisoner", "{\"troopId\":\"looter\",\"confirmPartySizeWarning\":0,\"confirmPrisonerLimitWarning\":2}"),
+            ("recruitPrisoner", "{\"troopId\":\"looter\",\"confirmPartySizeWarning\":0}"),
             ("dialogueContinue", "{\"optionId\":\"villagers_defer\"}"),
             ("dialogueSelect", "{\"optionId\":\"villagers_defer\",\"extra\":true}")
         })

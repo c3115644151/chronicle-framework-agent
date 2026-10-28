@@ -324,7 +324,10 @@ internal sealed class ChronicleAgentProtocol
                 case "recruitPrisoner":
                     if (Game.Current?.GameStateManager?.ActiveState is not MapState)
                         throw new InvalidOperationException("recruitPrisoner requires the Campaign Map state");
-                    WriteResponse(commandId, action, "completed", behavior, null, ChroniclePartyPrisonerRecruitmentAdapter.RecruitOneJson(ReadString(command, "troopId"), ReadDouble(command, "confirmPartySizeWarning") > 0.5));
+                    WriteResponse(commandId, action, "completed", behavior, null, ChroniclePartyPrisonerRecruitmentAdapter.RecruitOneJson(
+                        ReadString(command, "troopId"),
+                        ReadDouble(command, "confirmPartySizeWarning") > 0.5,
+                        ReadDouble(command, "confirmPrisonerLimitWarning") > 0.5));
                     break;
                 case "harnessSeedPartyUpgradeFixture":
                     var upgradeFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");

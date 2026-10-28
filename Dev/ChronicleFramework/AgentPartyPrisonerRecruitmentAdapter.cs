@@ -34,6 +34,18 @@ internal static class ChroniclePartyPrisonerRecruitmentAdapter
                 ChroniclePartyUpgradeAdapter.Property(json, "nativeDoneConfirmationTitle", new TextObject("{=uJro3Bua}Over Limit").ToString());
                 ChroniclePartyUpgradeAdapter.Property(json, "nativeDoneConfirmationText", GameTexts.FindText("str_party_over_limit_troops").ToString());
             }
+            var prisonerCount = party.PrisonRoster.TotalManCount;
+            var prisonerLimit = viewModel.PartyScreenLogic.RightPartyPrisonersSizeLimit;
+            var prisonerLimitWarningAfterOneRecruit = prisonerLimit < prisonerCount - 1;
+            json.Append(",\"mainPartyPrisonerCount\":").Append(prisonerCount);
+            json.Append(",\"mainPartyPrisonerLimit\":").Append(prisonerLimit);
+            json.Append(",\"nativePrisonerLimitWarningAfterOneRecruit\":").Append(ChroniclePartyUpgradeAdapter.Bool(prisonerLimitWarningAfterOneRecruit));
+            if (prisonerLimitWarningAfterOneRecruit)
+            {
+                GameTexts.SetVariable("newline", "\n");
+                ChroniclePartyUpgradeAdapter.Property(json, "nativePrisonerLimitConfirmationTitle", new TextObject("{=uJro3Bua}Over Limit").ToString());
+                ChroniclePartyUpgradeAdapter.Property(json, "nativePrisonerLimitConfirmationText", GameTexts.FindText("str_party_over_limit_prisoners").ToString());
+            }
             json.Append(",\"timeControlModeBefore\":\"").Append(ChroniclePartyUpgradeAdapter.Escape(beforeMode)).Append('"');
             json.Append(",\"timeControlModeDuring\":\"").Append(ChroniclePartyUpgradeAdapter.Escape(Campaign.Current.TimeControlMode.ToString())).Append('"');
             json.Append(",\"campaignDayBefore\":").Append(beforeDay.ToString("F3", System.Globalization.CultureInfo.InvariantCulture));
@@ -78,7 +90,7 @@ internal static class ChroniclePartyPrisonerRecruitmentAdapter
         }
     }
 
-    internal static string RecruitOneJson(string troopId, bool confirmPartySizeWarning)
+    internal static string RecruitOneJson(string troopId, bool confirmPartySizeWarning, bool confirmPrisonerLimitWarning)
     {
         if (string.IsNullOrWhiteSpace(troopId))
             throw new InvalidOperationException("recruitPrisoner requires a current ordinary MainParty prisonerId");
@@ -113,8 +125,13 @@ internal static class ChroniclePartyPrisonerRecruitmentAdapter
                 throw new InvalidOperationException("the native PartyVM did not stage exactly one prisoner recruitment");
             if (viewModel.IsMainTroopsLimitWarningEnabled && !confirmPartySizeWarning)
                 throw new InvalidOperationException("the native PartyScreen requires confirmation because recruiting this prisoner exceeds the MainParty size limit; observe nativeDoneConfirmationText and retry with confirmPartySizeWarning=true only if accepted");
+            var prisonerLimitWarning = viewModel.IsMainPrisonersLimitWarningEnabled;
+            if (prisonerLimitWarning && !confirmPrisonerLimitWarning)
+                throw new InvalidOperationException("the native PartyScreen requires a separate confirmation because recruiting this prisoner still exceeds the MainParty prisoner limit; observe nativePrisonerLimitConfirmationText and retry with confirmPrisonerLimitWarning=true only if accepted");
+            if (!prisonerLimitWarning && confirmPrisonerLimitWarning)
+                throw new InvalidOperationException("confirmPrisonerLimitWarning was supplied but the current Native PartyVM does not show a prisoner-limit confirmation after this recruitment");
             var moralePreview = viewModel.PartyScreenLogic.CurrentData.PartyMoraleChangeAmount;
-            var nativeLimitConfirmation = ChroniclePartyScreenAdapter.ExecuteDoneAndConfirmNativeOverLimit(viewModel, confirmPartySizeWarning);
+            var nativeLimitConfirmation = ChroniclePartyScreenAdapter.ExecuteDoneAndConfirmNativeOverLimit(viewModel, confirmPartySizeWarning, confirmPrisonerLimitWarning);
             if (Game.Current?.GameStateManager?.ActiveState is not MapState)
                 throw new InvalidOperationException("PartyScreen did not complete its native Done/close transition");
 
@@ -137,6 +154,8 @@ internal static class ChroniclePartyPrisonerRecruitmentAdapter
             json.Append(",\"partySizeLimit\":").Append(party.Party.PartySizeLimit);
             json.Append(",\"partySizeWarningBefore\":").Append(ChroniclePartyUpgradeAdapter.Bool(memberTotalBefore >= party.Party.PartySizeLimit));
             json.Append(",\"nativeLimitConfirmationAccepted\":").Append(ChroniclePartyUpgradeAdapter.Bool(nativeLimitConfirmation != null));
+            json.Append(",\"prisonerLimitWarningBeforeDone\":").Append(ChroniclePartyUpgradeAdapter.Bool(prisonerLimitWarning));
+            json.Append(",\"nativePrisonerLimitConfirmationAccepted\":").Append(ChroniclePartyUpgradeAdapter.Bool(nativeLimitConfirmation != null && !viewModel.IsMainTroopsLimitWarningEnabled && prisonerLimitWarning));
             ChroniclePartyUpgradeAdapter.Property(json, "nativeConfirmationTitle", nativeLimitConfirmation?.TitleText);
             ChroniclePartyUpgradeAdapter.Property(json, "nativeConfirmationText", nativeLimitConfirmation?.Text);
             json.Append(",\"nativeMoralePreviewDelta\":").Append(moralePreview);

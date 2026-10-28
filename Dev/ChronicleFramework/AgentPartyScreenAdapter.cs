@@ -70,13 +70,18 @@ internal static class ChroniclePartyScreenAdapter
         }
     }
 
-    internal static InquiryData ExecuteDoneAndConfirmNativeOverLimit(PartyVM viewModel, bool confirmPartySizeWarning)
+    internal static InquiryData ExecuteDoneAndConfirmNativeOverLimit(PartyVM viewModel, bool confirmPartySizeWarning, bool confirmPrisonerLimitWarning = false)
     {
         InquiryData confirmation = null;
         var expectedTitle = new TextObject("{=uJro3Bua}Over Limit").ToString();
+        var mainTroopLimitWarning = viewModel.IsMainTroopsLimitWarningEnabled;
+        var mainPrisonerLimitWarning = viewModel.IsMainPrisonersLimitWarningEnabled;
         Action<InquiryData, bool, bool> handler = (inquiry, pauseGameActiveState, prioritize) =>
         {
-            if (!confirmPartySizeWarning || confirmation != null || inquiry == null || !inquiry.IsAffirmativeOptionShown || inquiry.AffirmativeAction == null || !string.Equals(inquiry.TitleText, expectedTitle, StringComparison.Ordinal))
+            var explicitlyConfirmed = mainTroopLimitWarning
+                ? confirmPartySizeWarning
+                : mainPrisonerLimitWarning && confirmPrisonerLimitWarning;
+            if (!explicitlyConfirmed || confirmation != null || inquiry == null || !inquiry.IsAffirmativeOptionShown || inquiry.AffirmativeAction == null || !string.Equals(inquiry.TitleText, expectedTitle, StringComparison.Ordinal))
                 return;
             confirmation = inquiry;
             InformationManager.HideInquiry();

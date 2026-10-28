@@ -28,6 +28,7 @@ param(
     [string]$OwnerId,
     [string]$TroopId,
     [switch]$ConfirmPartySizeWarning,
+    [switch]$ConfirmPrisonerLimitWarning,
     [ValidateSet('members','prisoners')][string]$LootType,
     [ValidateSet('alley','mainParty')][string]$RosterSide,
     [int]$VolunteerSlot = -1,
@@ -525,7 +526,7 @@ switch ($Action) {
     'prisonerRecruitmentOptions' { $result = Invoke-ProtocolCommand 'prisonerRecruitmentOptions' }
     'recruitPrisoner' {
         if (-not $TroopId) { throw '-TroopId is required and must be selected from the latest prisonerRecruitmentOptions observation.' }
-        $result = Invoke-ProtocolCommand 'recruitPrisoner' @{ troopId = $TroopId; confirmPartySizeWarning = [int]$ConfirmPartySizeWarning.IsPresent }
+        $result = Invoke-ProtocolCommand 'recruitPrisoner' @{ troopId = $TroopId; confirmPartySizeWarning = [int]$ConfirmPartySizeWarning.IsPresent; confirmPrisonerLimitWarning = [int]$ConfirmPrisonerLimitWarning.IsPresent }
     }
     'characterDevelopment' { $result = Invoke-ProtocolCommand 'characterDevelopment' }
     'questDetails' {

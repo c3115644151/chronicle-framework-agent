@@ -34,6 +34,16 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 ReadDouble(child?["parentEycObjectives"]?["renown"] as JsonObject, "current") != 21.136)
                 throw new AgentHostException("establish-clan-battle-context-selftest-failed", "The EYC battle interruption envelope must overwrite stale parent metrics with the latest original Journal values.");
         }
+        using (var parentRequest = JsonDocument.Parse("{\"goal\":\"Complete the original StoryMode Establish Your Clan quest.\",\"parentEycObjectives\":{\"partySize\":{\"current\":0,\"target\":20}}}"))
+        {
+            var inquiryGoal = BuildCurrentEycNativeInquiryGoalAsync(parentRequest.RootElement,
+                new FakeBattleInterruptionQuestDetailsClient(), "partySize", CancellationToken.None).GetAwaiter().GetResult();
+            if (!inquiryGoal.Contains("Complete the original StoryMode Establish Your Clan quest.", StringComparison.Ordinal) ||
+                !inquiryGoal.Contains("partySize", StringComparison.Ordinal) ||
+                !inquiryGoal.Contains("11", StringComparison.Ordinal) || !inquiryGoal.Contains("25", StringComparison.Ordinal) ||
+                !inquiryGoal.Contains("Do not use a fixed answer", StringComparison.Ordinal))
+                throw new AgentHostException("establish-clan-inquiry-context-selftest-failed", "The EYC Host must give Native inquiry decisions a fresh Journal snapshot and an objective-specific, non-fixed-choice instruction.");
+        }
 
         if (!ShouldReconsiderUnavailableObjectives(journalProgressChanged: true) ||
             ShouldReconsiderUnavailableObjectives(journalProgressChanged: false))
@@ -1160,9 +1170,10 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                                 "A Native inquiry blocks the Campaign map and this Host transport cannot answer it.", "native-inquiry-client-unavailable",
                                 journalObjectives, snapshot, differences);
 
+                        var inquiryGoal = await BuildCurrentEycNativeInquiryGoalAsync(request, questDetailsClient, objectiveId, elapsed.Token);
                         var resolution = await AgentHostNativeInquiryResolution.RunAsync(
                             client, inquiryClient, provider, elapsed.Token,
-                            runId + "-inquiry-" + (decisions + 1).ToString(CultureInfo.InvariantCulture));
+                            runId + "-inquiry-" + (decisions + 1).ToString(CultureInfo.InvariantCulture), inquiryGoal);
                         decisions += ReadInt(resolution, "decisions", 0);
                         promptTokens += ReadLong(resolution, "promptTokens", 0);
                         completionTokens += ReadLong(resolution, "completionTokens", 0);
@@ -1370,6 +1381,19 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         var objectives = AgentHostEstablishYourClanGoalLoop.BuildJournalObjectives(ReadQuestDetailsData(details.RootElement));
         return BuildBattleInterruptionRequest(parentRequest,
             AgentHostEstablishYourClanGoalLoop.BuildObjectiveSnapshot(objectives), interruptedObjectiveId);
+    }
+
+    private static async Task<string> BuildCurrentEycNativeInquiryGoalAsync(JsonElement parentRequest,
+        IAgentHostQuestDetailsNativeClient questDetailsClient, string interruptedObjectiveId, CancellationToken cancellationToken)
+    {
+        using var current = await BuildCurrentBattleInterruptionRequestAsync(parentRequest, questDetailsClient, interruptedObjectiveId, cancellationToken);
+        var currentObjectives = current.RootElement.TryGetProperty("parentEycObjectives", out var objectives) && objectives.ValueKind == JsonValueKind.Object
+            ? JsonNode.Parse(objectives.GetRawText())?.ToJsonString() ?? "unavailable"
+            : "unavailable";
+        var parentGoal = ReadString(parentRequest, "goal") ?? "Complete the original StoryMode Establish Your Clan quest.";
+        return "Overall user goal: " + parentGoal + ". The interrupted EYC objective is " + interruptedObjectiveId +
+            ". Fresh original EYC Journal objectives: " + currentObjectives +
+            ". Resolve the currently visible Native Inquiry according to these live objectives, the current Native party/inventory state, and the exact visible consequences. Do not use a fixed answer; choose only a currently visible enabled response.";
     }
 
     private static JsonDocument BuildBattleInterruptionRequest(JsonElement parentRequest, JsonObject currentObjectives, string interruptedObjectiveId)
