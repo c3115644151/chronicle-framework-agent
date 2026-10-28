@@ -31,6 +31,81 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
             .Any(action => ReadString(action, "action") == "talkToSettlementHero"))
             throw new AgentHostException("training-issue-self-test-hidden-giver-leaked", "An Issue giver outside the current Native settlement overlay must not be contactable.");
 
+        var unrelatedIssue = NativeState("town", "town-a", new JsonArray(
+            new JsonObject { ["id"] = "leave", ["available"] = true, ["enabled"] = true, ["isLeave"] = true }), new JsonArray(
+            new JsonObject
+            {
+                ["heroId"] = "hero-gang-issue",
+                ["questMarkers"] = new JsonArray(new JsonObject { ["type"] = "AvailableIssue", ["title"] = "敌对帮派入侵波罗斯" })
+            }));
+        var unrelatedCatalog = BuildActionCatalog(unrelatedIssue, null, null, null, talkedToIssueGiver: false);
+        if (unrelatedCatalog.OfType<JsonObject>().Any(action => ReadString(action, "action") == "talkToSettlementHero"))
+            throw new AgentHostException("training-issue-self-test-unrelated-issue-giver-leaked", "The Gold retainer-training subgoal must not enter unrelated Issue conversations such as hostile-gang quests.");
+
+        var mixedIssues = NativeState("town", "town-a", new JsonArray(
+            new JsonObject { ["id"] = "leave", ["available"] = true, ["enabled"] = true, ["isLeave"] = true }), new JsonArray(
+            new JsonObject
+            {
+                ["heroId"] = "hero-gang-issue",
+                ["questMarkers"] = new JsonArray(new JsonObject { ["type"] = "AvailableIssue", ["title"] = "敌对帮派入侵波罗斯" })
+            },
+            new JsonObject
+            {
+                ["heroId"] = "hero-training",
+                ["questMarkers"] = new JsonArray(new JsonObject { ["type"] = "AvailableIssue", ["title"] = "为卡诺洛斯的宇忒洛斯训练士兵" })
+            }));
+        var mixedCatalog = BuildActionCatalog(mixedIssues, null, null, null, talkedToIssueGiver: false);
+        var mixedGivers = mixedCatalog.OfType<JsonObject>().FirstOrDefault(action => ReadString(action, "action") == "talkToSettlementHero")?
+            ["argumentValues"]?["HeroId"] as JsonArray;
+        if (mixedGivers?.Count != 1 || mixedGivers[0]?.GetValue<string>() != "hero-training")
+            throw new AgentHostException("training-issue-self-test-mixed-issue-filter-failed", "Only a visible AvailableIssue marker whose Native title identifies retainer training may be contacted for the Gold training route.");
+
+        var unavailableOfferConversation = new JsonObject
+        {
+            ["options"] = new JsonArray(
+                new JsonObject { ["id"] = "issue_offer_player_accept_quest", ["textId"] = DirectTrainingResponseTextId, ["text"] = "I'll take your men.", ["clickable"] = false },
+                new JsonObject { ["id"] = "issue_offer_player_accept_alternative", ["text"] = "Send a companion.", ["clickable"] = false },
+                new JsonObject { ["id"] = "issue_offer_player_response_reject", ["text"] = "Sorry, not now.", ["clickable"] = true })
+        };
+        if (!IsFinalTrainingOfferWithoutDirectAcceptance(unavailableOfferConversation))
+            throw new AgentHostException("training-issue-self-test-disabled-direct-offer-not-detected", "A visible final training offer with a disabled direct option must be recognized as currently infeasible, not retried indefinitely.");
+        var returnFromUnavailableOffer = new JsonObject
+        {
+            ["options"] = new JsonArray(
+                new JsonObject { ["id"] = "hero_give_issue", ["text"] = "I heard you have a problem.", ["clickable"] = true },
+                new JsonObject { ["id"] = "player_is_leaving_neutral_or_friendly", ["text"] = "I must be going.", ["clickable"] = true })
+        };
+        var exitCatalog = BuildConversationCatalog(returnFromUnavailableOffer, talkedToIssueGiver: true,
+            activeTrainingIssue: false, offerRefusalPendingExit: true);
+        var exitOptionIds = exitCatalog.OfType<JsonObject>().FirstOrDefault(action => ReadString(action, "action") == "dialogueSelect")?
+            ["argumentValues"]?["OptionId"] as JsonArray;
+        if (exitOptionIds?.Count != 1 || exitOptionIds[0]?.GetValue<string>() != "player_is_leaving_neutral_or_friendly")
+            throw new AgentHostException("training-issue-self-test-unavailable-offer-reopens-issue", "After rejecting a disabled direct offer, the Host must expose only the Native conversation exit and must not reopen the same issue.");
+
+        var rawMapReceipt = new JsonObject
+        {
+            ["action"] = "mapSettlementTargets", ["status"] = "completed",
+            ["data"] = new JsonObject
+            {
+                ["mapSettlementTargets"] = new JsonArray(
+                    new JsonObject { ["id"] = "visited-village", ["name"] = "Visited" },
+                    new JsonObject { ["id"] = "current-safe-town", ["name"] = "Current Safe Town" })
+            }
+        };
+        var availableMapTargets = new JsonArray(new JsonObject { ["id"] = "current-safe-town", ["name"] = "Current Safe Town" });
+        var filteredReceipt = BuildSafeModelPreviousReceipt(rawMapReceipt, availableMapTargets);
+        var mapStateWithVisitedTarget = MapState(null);
+        mapStateWithVisitedTarget["state"]!["nearbySettlements"] = new JsonArray(
+            new JsonObject { ["id"] = "visited-village", ["name"] = "Visited", ["distance"] = 0 },
+            new JsonObject { ["id"] = "current-safe-town", ["name"] = "Current Safe Town", ["distance"] = 3 });
+        var filteredMapState = BuildModelState(mapStateWithVisitedTarget, availableMapTargets);
+        if (filteredReceipt?["data"]?["mapSettlementTargets"]?.AsArray().Count != 1 ||
+            filteredReceipt["data"]!["mapSettlementTargets"]![0]! ["id"]?.GetValue<string>() != "current-safe-town" ||
+            rawMapReceipt["data"]!["mapSettlementTargets"]!.AsArray().Count != 2 ||
+            filteredMapState["nearbySettlements"]?.AsArray().Count != 1 ||
+            filteredMapState["nearbySettlements"]![0]!["id"]?.GetValue<string>() != "current-safe-town")
+            throw new AgentHostException("training-issue-self-test-stale-settlement-target-leaked", "When selecting a move, the model must not receive visited settlement IDs that the current Native action catalog rejects.");
+
         var directAndAlternative = new JsonObject
         {
             ["state"] = new JsonObject
@@ -130,6 +205,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
 
         return [
             new { scenario = "training-issue-targets-only-current-visible-available-issue-givers", passed = true },
+            new { scenario = "training-issue-movement-observation-hides-settlement-targets-rejected-by-current-catalog", passed = true },
             new { scenario = "training-issue-accepts-only-the-source-identified-direct-quest-option", passed = true },
             new { scenario = "training-issue-upgrade-catalog-is-limited-to-current-borrowed-retainers", passed = true },
             new { scenario = "training-issue-movement-observation-does-not-add-clock-controls", passed = true }
@@ -182,6 +258,8 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
         string? issueGiverSettlementId = null;
         var talkedToIssueGiver = false;
         var directOfferAccepted = false;
+        var offerRefusalPendingExit = false;
+        string? directOfferExitFailureCode = null;
         JsonObject? issueDetails = null;
         JsonObject? eycJournalBefore = null;
         JsonObject? eycJournalAfter = null;
@@ -273,6 +351,16 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                 }
 
                 var context = state["context"] as JsonObject;
+                var currentConversation = context?["conversation"] as JsonObject;
+                if (offerRefusalPendingExit && currentConversation is null && !activeTrainingIssue)
+                {
+                    failureCode = directOfferExitFailureCode ?? "training-issue-direct-offer-unavailable";
+                    failure = failureCode == "training-issue-direct-offer-rejected"
+                        ? "The real model declined the current direct Native training offer; the Host closed the dialogue and will not reopen the same giver."
+                        : "The direct Native training offer was not currently clickable; the Host closed the dialogue and will not retry the same giver.";
+                    termination = failureCode;
+                    break;
+                }
                 if (AgentHostCampaignStateFacts.IsActiveEncounter(state) && !AgentHostCampaignStateFacts.IsNativeLocationMenu(state))
                 {
                     failure = "A Native encounter interrupted the training Issue; the parent Campaign loop must resolve the currently observed encounter before the Issue route resumes.";
@@ -328,7 +416,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                 }
 
                 var catalog = BuildActionCatalog(currentNative!, previousReceipt, upgradeOptionsReceipt, visibleSafeTargets,
-                    talkedToIssueGiver, activeTrainingIssue, contactedIssueGivers);
+                    talkedToIssueGiver, activeTrainingIssue, contactedIssueGivers, offerRefusalPendingExit);
                 var upgradeOptionsKnown = ReadString(previousReceipt, "action") == "partyUpgradeOptions" && ReadString(previousReceipt, "status") == "completed";
                 var currentlyUpgradable = upgradeOptionsKnown && HasAvailableBorrowedUpgrade(upgradeOptionsReceipt ?? previousReceipt);
                 var controls = BuildControlCatalog(currentNative!, activeTrainingIssue, upgradeOptionsKnown, currentlyUpgradable);
@@ -342,10 +430,11 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                     break;
                 }
 
+                var modelPreviousReceipt = BuildSafeModelPreviousReceipt(previousReceipt, visibleSafeTargets);
                 var observation = BuildObservation(currentNative!, eycJournalAfter, issueDetails, trackedIssueQuestId,
-                    upgradeOptionsReceipt, previousReceipt, feedback);
+                    upgradeOptionsReceipt, modelPreviousReceipt, feedback, visibleSafeTargets);
                 var decisionIndex = decisions + 1;
-                var modelRequest = BuildDecisionRequest(runId, decisionIndex, goal, observation, previousReceipt, feedback, catalog, controls);
+                var modelRequest = BuildDecisionRequest(runId, decisionIndex, goal, observation, modelPreviousReceipt, feedback, catalog, controls);
                 ProviderDecisionResult providerResult;
                 try
                 {
@@ -450,6 +539,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                 var nativeCompleted = ReadString(nativeReceipt, "status") == "completed";
                 if (nativeCompleted) actionsExecuted++;
                 var currentOptionId = ReadString(arguments, "optionId");
+                var directOfferWasClickable = IsTrainingDirectOfferClickable(state["context"]?["conversation"] as JsonObject);
                 if (action == "talkToSettlementHero" && nativeCompleted)
                 {
                     talkedToIssueGiver = true;
@@ -457,9 +547,18 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                     issueGiverSettlementId = ReadString(state["location"] as JsonObject, "currentSettlementId");
                 }
                 if (action == "dialogueSelect" && nativeCompleted && currentOptionId == "issue_offer_player_accept_quest") directOfferAccepted = true;
+                if (action == "dialogueSelect" && nativeCompleted && currentOptionId == "issue_offer_player_response_reject" &&
+                    ((state["context"]?["conversation"] as JsonObject) is JsonObject finalOffer &&
+                     IsFinalTrainingOffer(finalOffer)))
+                {
+                    offerRefusalPendingExit = true;
+                    directOfferExitFailureCode = directOfferWasClickable
+                        ? "training-issue-direct-offer-rejected"
+                        : "training-issue-direct-offer-unavailable";
+                }
                 if (action == "menuSelect" && nativeCompleted) talkedToIssueGiver = false;
                 if (action == "mapSettlementTargets" && nativeCompleted)
-                    visibleSafeTargets = AgentHostCampaignLoop.BuildSafeVisibleTargets(nativeReceipt, visitedSettlements);
+                    visibleSafeTargets = AgentHostCampaignLoop.BuildSafeVisibleTargets(nativeReceipt, visitedSettlements, settlementsOnly: true);
                 if (action == "move" && nativeCompleted)
                 {
                     if (ReadString(arguments, "settlementId") is string moved && !string.IsNullOrWhiteSpace(moved)) visitedSettlements.Add(moved);
@@ -534,7 +633,8 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
     }
 
     internal static JsonArray BuildActionCatalog(JsonObject native, JsonObject? previousReceipt, JsonObject? upgradeOptionsReceipt,
-        JsonArray? visibleSafeTargets, bool talkedToIssueGiver, bool activeTrainingIssue = false, IReadOnlySet<string>? contactedIssueGivers = null)
+        JsonArray? visibleSafeTargets, bool talkedToIssueGiver, bool activeTrainingIssue = false, IReadOnlySet<string>? contactedIssueGivers = null,
+        bool offerRefusalPendingExit = false)
     {
         var state = native["state"] as JsonObject;
         var context = state?["context"] as JsonObject;
@@ -542,25 +642,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
         var conversation = context["conversation"] as JsonObject;
         if (conversation is not null)
         {
-            if (!talkedToIssueGiver && !activeTrainingIssue) return new JsonArray();
-            var clickable = (conversation["options"] as JsonArray)?.OfType<JsonObject>()
-                .Where(option => ReadBoolean(option, "clickable") && !IsOutOfScopeIssueAcceptance(option) &&
-                    (!IsTrainingDirectOffer(option) || ReadString(option, "textId") == DirectTrainingResponseTextId))
-                .Select(option => (JsonObject)option.DeepClone()).ToArray() ?? Array.Empty<JsonObject>();
-            if (clickable.Length > 0)
-            {
-                return new JsonArray(new JsonObject
-                {
-                    ["action"] = "dialogueSelect", ["arguments"] = new JsonArray("OptionId"),
-                    ["argumentValues"] = new JsonObject
-                    {
-                        ["OptionId"] = new JsonArray(clickable.Select(option => (JsonNode?)JsonValue.Create(ReadString(option, "id"))).ToArray())
-                    }
-                });
-            }
-            if (!HasClickableConversationOptions(conversation))
-                return new JsonArray(new JsonObject { ["action"] = "dialogueContinue", ["arguments"] = new JsonArray() });
-            return new JsonArray();
+            return BuildConversationCatalog(conversation, talkedToIssueGiver, activeTrainingIssue, offerRefusalPendingExit);
         }
 
         var menuId = ReadString(context, "menuId");
@@ -575,7 +657,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                 (!ReadBoolean(context, "encounterActive") || string.Equals(settlementId, ReadString(context, "encounteredPartyId"), StringComparison.Ordinal));
             if (isSettlementMenu && !activeTrainingIssue)
             {
-                var giverIds = GetVisibleAvailableIssueGivers(state, contactedIssueGivers);
+                var giverIds = GetVisibleAvailableTrainingIssueGivers(state, contactedIssueGivers);
                 if (giverIds.Length > 0)
                     catalog.Add(new JsonObject
                     {
@@ -620,6 +702,51 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
         }
         return new JsonArray();
     }
+
+    internal static JsonArray BuildConversationCatalog(JsonObject conversation, bool talkedToIssueGiver, bool activeTrainingIssue,
+        bool offerRefusalPendingExit)
+    {
+        var options = (conversation["options"] as JsonArray)?.OfType<JsonObject>().ToArray() ?? Array.Empty<JsonObject>();
+        if (offerRefusalPendingExit)
+        {
+            var leave = options.Where(option => ReadBoolean(option, "clickable") && ReadString(option, "id") == "player_is_leaving_neutral_or_friendly").ToArray();
+            return DialogueCatalog(leave);
+        }
+        if (!talkedToIssueGiver && !activeTrainingIssue) return new JsonArray();
+        var directOfferUnavailable = !activeTrainingIssue && IsFinalTrainingOfferWithoutDirectAcceptance(conversation);
+        var clickable = options.Where(option => ReadBoolean(option, "clickable") && !IsOutOfScopeIssueAcceptance(option) &&
+                (!IsTrainingDirectOffer(option) || ReadString(option, "textId") == DirectTrainingResponseTextId))
+            .Where(option => !directOfferUnavailable || ReadString(option, "id") == "issue_offer_player_response_reject")
+            .Select(option => (JsonObject)option.DeepClone()).ToArray();
+        if (clickable.Length > 0) return DialogueCatalog(clickable);
+        if (!HasClickableConversationOptions(conversation))
+            return new JsonArray(new JsonObject { ["action"] = "dialogueContinue", ["arguments"] = new JsonArray() });
+        return new JsonArray();
+
+        static JsonArray DialogueCatalog(JsonObject[] choices) => choices.Length == 0
+            ? new JsonArray()
+            : new JsonArray(new JsonObject
+            {
+                ["action"] = "dialogueSelect", ["arguments"] = new JsonArray("OptionId"),
+                ["argumentValues"] = new JsonObject { ["OptionId"] = new JsonArray(choices.Select(option => (JsonNode?)JsonValue.Create(ReadString(option, "id"))).ToArray()) }
+            });
+    }
+
+    internal static bool IsFinalTrainingOfferWithoutDirectAcceptance(JsonObject? conversation)
+    {
+        var options = (conversation?["options"] as JsonArray)?.OfType<JsonObject>().ToArray() ?? Array.Empty<JsonObject>();
+        var reject = options.Any(option => ReadString(option, "id") == "issue_offer_player_response_reject" && ReadBoolean(option, "clickable"));
+        return reject && !IsTrainingDirectOfferClickable(conversation);
+    }
+
+    private static bool IsFinalTrainingOffer(JsonObject conversation) =>
+        (conversation["options"] as JsonArray)?.OfType<JsonObject>().Any(option =>
+            ReadString(option, "id") == "issue_offer_player_response_reject" && ReadBoolean(option, "clickable")) == true;
+
+    private static bool IsTrainingDirectOfferClickable(JsonObject? conversation) =>
+        (conversation?["options"] as JsonArray)?.OfType<JsonObject>().Any(option =>
+            ReadString(option, "id") == "issue_offer_player_accept_quest" && ReadBoolean(option, "clickable") &&
+            ReadString(option, "textId") == DirectTrainingResponseTextId) == true;
 
     internal static JsonArray BuildControlCatalog(JsonObject native, bool activeTrainingIssue, bool upgradeOptionsKnown = false, bool currentlyUpgradable = false)
     {
@@ -694,9 +821,11 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
         });
     }
 
-    private static string[] GetVisibleAvailableIssueGivers(JsonObject state, IReadOnlySet<string>? excludedHeroIds = null) =>
+    private static string[] GetVisibleAvailableTrainingIssueGivers(JsonObject state, IReadOnlySet<string>? excludedHeroIds = null) =>
         (state["settlementOverlayCharacters"] as JsonArray)?.OfType<JsonObject>()
-            .Where(hero => (hero["questMarkers"] as JsonArray)?.OfType<JsonObject>().Any(marker => ReadString(marker, "type") == "AvailableIssue") == true)
+            .Where(hero => (hero["questMarkers"] as JsonArray)?.OfType<JsonObject>().Any(marker =>
+                ReadString(marker, "type") == "AvailableIssue" &&
+                IsTrainingIssueTitle(string.Join(" ", ReadString(marker, "title"), ReadString(marker, "hint")))) == true)
             .Select(hero => ReadString(hero, "heroId"))
             .Where(id => !string.IsNullOrWhiteSpace(id) && (excludedHeroIds is null || !excludedHeroIds.Contains(id)))
             .Cast<string>().Distinct(StringComparer.Ordinal).ToArray() ?? Array.Empty<string>();
@@ -759,13 +888,39 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                 affirmative.Contains("send the troops back", StringComparison.OrdinalIgnoreCase));
     }
 
+    internal static JsonObject? BuildSafeModelPreviousReceipt(JsonObject? receipt, JsonArray? visibleSafeTargets)
+    {
+        if (receipt is null) return null;
+        var copy = (JsonObject)receipt.DeepClone();
+        if (ReadString(copy, "action") == "mapSettlementTargets" && visibleSafeTargets is not null &&
+            copy["data"] is JsonObject data && data["mapSettlementTargets"] is JsonArray)
+        {
+            data["mapSettlementTargets"] = visibleSafeTargets.DeepClone();
+            copy["dataSummary"] = new JsonObject
+            {
+                ["visibleTargetCount"] = visibleSafeTargets.Count,
+                ["safeCandidateCount"] = visibleSafeTargets.Count
+            };
+        }
+        return copy;
+    }
+
+    internal static JsonObject BuildModelState(JsonObject nativeState, JsonArray? visibleSafeTargets)
+    {
+        var modelState = (JsonObject)(nativeState["state"]?.DeepClone() ?? new JsonObject());
+        if (visibleSafeTargets is not null)
+            modelState["nearbySettlements"] = visibleSafeTargets.DeepClone();
+        return modelState;
+    }
+
     private static JsonObject BuildObservation(JsonObject native, JsonObject? eycGoldSnapshot, JsonObject? issueDetails,
-        string? issueQuestId, JsonObject? upgradeOptionsReceipt, JsonObject? previousReceipt, JsonObject? feedback) => new()
+        string? issueQuestId, JsonObject? upgradeOptionsReceipt, JsonObject? previousReceipt, JsonObject? feedback,
+        JsonArray? visibleSafeTargets) => new()
     {
         ["status"] = "completed",
         ["campaignDay"] = native["campaignDay"]?.DeepClone(),
         ["timeControlMode"] = native["timeControlMode"]?.DeepClone(),
-        ["state"] = native["state"]?.DeepClone(),
+        ["state"] = BuildModelState(native, visibleSafeTargets),
         ["currentEycGoldObjective"] = eycGoldSnapshot?["gold"]?.DeepClone(),
         ["activeTrainingIssueQuestId"] = issueQuestId,
         ["activeTrainingIssueJournal"] = issueDetails?["data"]?.DeepClone(),
@@ -814,8 +969,8 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
         if (selectedAction == "talkToSettlementHero")
         {
             var heroId = ReadString(supplied, "HeroId");
-            if (heroId is null || !GetVisibleAvailableIssueGivers(state).Contains(heroId, StringComparer.Ordinal))
-            { rejection = "talkToSettlementHero requires a HeroId from the current visible AvailableIssue overlay."; return false; }
+            if (heroId is null || !GetVisibleAvailableTrainingIssueGivers(state).Contains(heroId, StringComparer.Ordinal))
+            { rejection = "talkToSettlementHero requires a HeroId whose current visible AvailableIssue marker identifies the Landlord Training for Retainers route."; return false; }
         }
         if (selectedAction == "dialogueSelect")
         {

@@ -108,6 +108,8 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             IsSafeObjectiveRouteUnavailable("gold", "companion-model-stopped", freeMap: true) ||
             !IsSafeObjectiveRouteUnavailable("gold", "gold-sale-no-transferable-goods", freeMap: true) ||
             !IsSafeObjectiveRouteUnavailable("gold", "gold-loot-no-current-visible-bandit", freeMap: true) ||
+            !IsSafeObjectiveRouteUnavailable("gold", "training-issue-direct-offer-unavailable", freeMap: true) ||
+            !IsSafeObjectiveRouteUnavailable("gold", "training-issue-direct-offer-rejected", freeMap: true) ||
             IsSafeObjectiveRouteUnavailable("gold", "gold-sale-no-transferable-goods", freeMap: false) ||
             IsSafeObjectiveRouteUnavailable("gold", "gold-loot-no-current-visible-bandit", freeMap: false) ||
             !IsSafeObjectiveRouteUnavailable("partySize", "recruitment-model-stopped", freeMap: true) ||
@@ -116,7 +118,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             IsSafeObjectiveRouteUnavailable("partySize", "recruitment-model-stopped-with-safe-actions", freeMap: false) ||
             !IsSafeObjectiveRouteUnavailable("companions", "companion-provider-failure-returned-to-map", freeMap: true) ||
             IsSafeObjectiveRouteUnavailable("companions", "companion-provider-failure-returned-to-map", freeMap: false))
-            throw new AgentHostException("establish-clan-autonomy-safe-stop-replan-policy-failed", "A Gold no-goods outcome and safe Companion/PartySize stops, including a bounded stop rejection, may block only that route on a free Map; they must not hide unrelated failures or encounter/captive state.");
+            throw new AgentHostException("establish-clan-autonomy-safe-stop-replan-policy-failed", "A Gold no-goods outcome, unavailable/rejected Native training offer, and safe Companion/PartySize stops may block only that route on a free Map; they must not hide unrelated failures or encounter/captive state.");
         results.Add(new { scenario = "establish-clan-autonomy-safe-no-goods-and-companion-recruitment-stops-mark-route-unavailable-and-allow-replan", passed = true });
 
         using var safeTavernMission = JsonDocument.Parse("""
@@ -1216,7 +1218,8 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         if (!freeMap) return false;
         if (objectiveId == "gold") return termination is "provider-failure-returned-to-map" or "gold-sale-no-transferable-goods" or
             "gold-loot-no-current-visible-bandit" or "training-issue-no-visible-direct-offer" or "training-issue-no-safe-settlement-visible" or
-            "training-issue-no-current-native-action" or "training-issue-battle-subflow-failed" or "training-issue-action-rejection-limit";
+            "training-issue-no-current-native-action" or "training-issue-battle-subflow-failed" or "training-issue-action-rejection-limit" or
+            "training-issue-direct-offer-unavailable" or "training-issue-direct-offer-rejected";
         if (objectiveId == "renown") return termination is "provider-failure-returned-to-map" or "no-safe-action" or "native-encounter-left-no-battle";
         if (objectiveId is "partySize" or "companions")
             return termination is "native-journal-refresh-pending" or "recruitment-route-unavailable" or "companion-route-unavailable" or "companion-model-stopped" or "recruitment-model-stopped" or "recruitment-model-stopped-with-safe-actions" or "provider-failure-returned-to-map" or "companion-provider-failure-returned-to-map";

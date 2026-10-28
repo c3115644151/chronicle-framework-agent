@@ -155,6 +155,21 @@ internal static class AgentHostCampaignLoop
         if (safeTargets.Count != 1 || ReadString(safeTargets[0] as JsonObject, "id") != "safe")
             throw new AgentHostException("campaign-loop-self-test-target-filter-failed", "Only non-hostile, non-besieged, non-current visible settlements may be offered.");
         results.Add(new { scenario = "campaign-loop-filters-unsafe-current-and-unknown-risk-targets", passed = true });
+        var settlementOnlyTargets = BuildSafeVisibleTargets(new JsonObject
+        {
+            ["status"] = "completed",
+            ["data"] = new JsonObject
+            {
+                ["mapSettlementTargets"] = new JsonArray
+                {
+                    new JsonObject { ["id"] = "training-field", ["name"] = "Training Field", ["type"] = "other", ["distance"] = 2.0, ["hostile"] = false, ["underSiege"] = false },
+                    new JsonObject { ["id"] = "safe-village", ["name"] = "Safe Village", ["type"] = "village", ["distance"] = 4.0, ["hostile"] = false, ["underSiege"] = false }
+                }
+            }
+        }, settlementsOnly: true);
+        if (settlementOnlyTargets.Count != 1 || ReadString(settlementOnlyTargets[0] as JsonObject, "id") != "safe-village")
+            throw new AgentHostException("campaign-loop-self-test-settlement-only-target-filter-failed", "A goal that searches settlement menus must not travel to a non-settlement map target such as the tutorial training field.");
+        results.Add(new { scenario = "campaign-loop-settlement-refresh-excludes-non-settlement-targets", passed = true });
         var excludedSafeTargets = BuildSafeVisibleTargets(new JsonObject
         {
             ["status"] = "completed",
@@ -662,7 +677,8 @@ internal static class AgentHostCampaignLoop
                                 trainingDeltaNode.TryGetValue<double>(out var trainingGoldDelta) && trainingGoldDelta > 0;
                             if (ReadString(training, "status") == "completed" || ReadBoolean(training, "directOfferAccepted")) return training;
 
-                            var retryableIssueSearch = ReadString(training, "failureCode") is "training-issue-no-visible-direct-offer" or "training-issue-no-safe-settlement-visible";
+                            var retryableIssueSearch = ReadString(training, "failureCode") is "training-issue-no-visible-direct-offer" or
+                                "training-issue-no-safe-settlement-visible" or "training-issue-direct-offer-unavailable";
                             var trainingFinalContext = (training["finalNativeState"]?["state"]?["context"] as JsonObject);
                             var trainingEndedOnFreeMap = ReadString(trainingFinalContext, "gameState") == "MapState" &&
                                 ReadString(trainingFinalContext, "menuId") is null && !ReadBoolean(trainingFinalContext, "encounterActive") &&
@@ -870,7 +886,8 @@ internal static class AgentHostCampaignLoop
                 var actionCompleted = string.Equals(ReadString(nativeReceipt, "status"), "completed", StringComparison.Ordinal);
                 actionsExecuted += actionCompleted ? 1 : 0;
                 previousReceipt = BuildSafeReceipt(nativeReceipt, nativeAction!, selectedTarget);
-                if (nativeAction == "mapSettlementTargets") visibleTargets = BuildSafeVisibleTargets(nativeReceipt, safeSettlementArrivalOnly ? excludedSettlementIds : null);
+                if (nativeAction == "mapSettlementTargets") visibleTargets = BuildSafeVisibleTargets(nativeReceipt,
+                    safeSettlementArrivalOnly ? excludedSettlementIds : null, settlementsOnly: safeSettlementArrivalOnly);
                 else if (nativeAction == "move" && actionCompleted)
                 {
                     moveTargetId = selectedTarget?.Id;
@@ -1063,7 +1080,7 @@ internal static class AgentHostCampaignLoop
         };
     }
 
-    internal static JsonArray BuildSafeVisibleTargets(JsonObject receipt, HashSet<string>? excludedSettlementIds = null)
+    internal static JsonArray BuildSafeVisibleTargets(JsonObject receipt, HashSet<string>? excludedSettlementIds = null, bool settlementsOnly = false)
     {
         if (ReadString(receipt, "status") != "completed" || receipt["data"] is not JsonObject data || data["mapSettlementTargets"] is not JsonArray targets)
             return new JsonArray();
@@ -1071,6 +1088,7 @@ internal static class AgentHostCampaignLoop
             .Where(target => HasExplicitBoolean(target, "hostile", expected: false) && HasExplicitBoolean(target, "underSiege", expected: false) &&
                              ReadDouble(target, "distance", double.MaxValue) > 1.0 &&
                              !string.IsNullOrWhiteSpace(ReadString(target, "id")) && !string.IsNullOrWhiteSpace(ReadString(target, "name")) &&
+                             (!settlementsOnly || ReadString(target, "type") is "town" or "village" or "castle") &&
                              (excludedSettlementIds == null || !excludedSettlementIds.Contains(ReadString(target, "id")!)))
             .OrderBy(target => ReadDouble(target, "distance", double.MaxValue))
             .ThenBy(target => ReadString(target, "id"), StringComparer.Ordinal)

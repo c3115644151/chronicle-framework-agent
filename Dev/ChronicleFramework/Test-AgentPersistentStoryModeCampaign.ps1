@@ -360,15 +360,17 @@ try {
         $eycCompleted = ($liveTrace.status -ceq 'completed' -and [bool]$liveTrace.termination.goalVerified -and
             [string]$liveTrace.termination.reason -ceq 'native-establish-your-clan-quest-success-verified')
 
-        if ($checkpointSaved -and $campaignContinued) {
-            $oldCurrentName = [string]$manifest.saveName
-            $oldCurrentHash = [string]$manifest.sha256
-            $manifest.previousSaveName = $oldCurrentName
-            $manifest.previousSha256 = $oldCurrentHash
-            $manifest.saveName = $checkpointSaveName
-            $manifest.sha256 = [string]$liveEvidence.CheckpointSaveHash
-            $manifest.lastCheckpointUtc = [DateTime]::UtcNow.ToString('O')
-            $manifest.checkpointCount = [int]$manifest.checkpointCount + 1
+        if ($campaignContinued) {
+            if ($checkpointSaved) {
+                $oldCurrentName = [string]$manifest.saveName
+                $oldCurrentHash = [string]$manifest.sha256
+                $manifest.previousSaveName = $oldCurrentName
+                $manifest.previousSha256 = $oldCurrentHash
+                $manifest.saveName = $checkpointSaveName
+                $manifest.sha256 = [string]$liveEvidence.CheckpointSaveHash
+                $manifest.lastCheckpointUtc = [DateTime]::UtcNow.ToString('O')
+                $manifest.checkpointCount = [int]$manifest.checkpointCount + 1
+            }
             $manifest.cumulativeDecisions = [int]$manifest.cumulativeDecisions + $liveRunDecisions
             $manifest.cumulativePromptTokens = [long]$manifest.cumulativePromptTokens + $liveRunPromptTokens
             $manifest.cumulativeCompletionTokens = [long]$manifest.cumulativeCompletionTokens + $liveRunCompletionTokens
@@ -381,7 +383,7 @@ try {
             $manifest.lastFailureCode = if ($liveTrace.failureCode) { [string]$liveTrace.failureCode } else { $null }
             Write-PersistentManifest $manifest
             $manifestUpdated = $true
-            Remove-ObsoleteOwnedSaves @([string]$manifest.saveName,[string]$manifest.previousSaveName)
+            if ($checkpointSaved) { Remove-ObsoleteOwnedSaves @([string]$manifest.saveName,[string]$manifest.previousSaveName) }
         }
     }
 

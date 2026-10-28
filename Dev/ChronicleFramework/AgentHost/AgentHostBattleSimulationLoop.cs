@@ -9,6 +9,7 @@ internal static class AgentHostBattleSimulationLoop
 {
     private const int MaxRejectedDecisions = 2;
     private const string ContractId = "native-campaign-battle-simulation-v1";
+    private const string WeakPartySurrenderResponseTextId = "LLEffOga";
 
     internal static async Task<JsonObject> RunAsync(
         JsonElement request,
@@ -464,9 +465,13 @@ internal static class AgentHostBattleSimulationLoop
                 if (conversation is not null)
                 {
                     var clickable = (conversation["options"] as JsonArray)?.OfType<JsonObject>().Where(x => ReadBoolean(x, "clickable")).ToArray() ?? Array.Empty<JsonObject>();
+                    var hasFightResponse = clickable.Any(option => ReadString(option, "id") == "bandit_start_defender_1");
+                    var canUseWeakPartySurrender = recoverPlayerCaptivity && !hasFightResponse && clickable.Any(option =>
+                        ReadString(option, "id") == "bandit_start_defender_3" && ReadString(option, "textId") == WeakPartySurrenderResponseTextId);
                     var allowedEncounterOptions = clickable
                         .Select(x => ReadString(x, "id"))
-                        .Where(id => id is "bandit_start_defender_1" or "common_encounter_ultimatum" or "common_bandit_surrender_declined")
+                        .Where(id => id is "bandit_start_defender_1" or "common_encounter_ultimatum" or "common_bandit_surrender_declined" ||
+                                     canUseWeakPartySurrender && id == "bandit_start_defender_3")
                         .Distinct(StringComparer.Ordinal)
                         .ToArray();
                     if (allowedEncounterOptions.Length > 0)
@@ -657,10 +662,16 @@ internal static class AgentHostBattleSimulationLoop
                 var conversation = (state["context"] as JsonObject)?["conversation"] as JsonObject;
                 var optionId = ReadString(arguments, "optionId");
                 var encounteredId = ReadString(state["context"] as JsonObject, "encounteredPartyId");
-                if (optionId is not ("bandit_start_defender_1" or "common_encounter_ultimatum" or "common_bandit_surrender_declined") || conversation is null ||
-                    !(conversation["options"] as JsonArray)?.OfType<JsonObject>().Any(x => ReadString(x, "id") == optionId && ReadBoolean(x, "clickable")) == true ||
+                var currentOptions = (conversation?["options"] as JsonArray)?.OfType<JsonObject>().ToArray() ?? Array.Empty<JsonObject>();
+                var hasFightResponse = currentOptions.Any(x =>
+                    ReadString(x, "id") == "bandit_start_defender_1" && ReadBoolean(x, "clickable"));
+                var allowedWeakPartySurrender = recoverPlayerCaptivity && !hasFightResponse && optionId == "bandit_start_defender_3" &&
+                    currentOptions.Any(x => ReadString(x, "id") == optionId && ReadString(x, "textId") == WeakPartySurrenderResponseTextId && ReadBoolean(x, "clickable"));
+                var allowedKnownFightResponse = optionId is "bandit_start_defender_1" or "common_encounter_ultimatum" or "common_bandit_surrender_declined";
+                if (!(allowedKnownFightResponse || allowedWeakPartySurrender) || conversation is null ||
+                    !currentOptions.Any(x => ReadString(x, "id") == optionId && ReadBoolean(x, "clickable")) ||
                     !observedTargets.OfType<JsonObject>().Any(x => ReadString(x, "id") == encounteredId && ReadString(x, "type") == "bandit" && ReadBoolean(x, "hostile")))
-                { rejection = "Only a current clickable Native bandit fight or continue-hostile option for the observed hostile bandit may be selected; release, toll, surrender and recruitment options remain unavailable."; return false; }
+                { rejection = "Only a current clickable Native fight/ultimatum response is allowed; the exact weak-party surrender line is allowed only in captivity-recovery mode when no Fight response is available."; return false; }
             }
             if (action == "dialogueContinue")
             {
@@ -867,6 +878,31 @@ internal static class AgentHostBattleSimulationLoop
             if (TryResolveDecision(disallowed, banditThreatActions, new JsonArray(), banditMeeting["state"]!.AsObject(), candidates, "bandit-1", out _, out _, out _, out _))
                 throw new AgentHostException("battle-loop-self-test-bandit-release-or-barter-accepted", "The Native let-the-bandits-go and Barter options must stay unavailable in the battle-growth slice.");
         }
+
+        banditMeeting["state"]!["context"]!["conversation"] = new JsonObject
+        {
+            ["sentenceText"] = "We're in no shape to fight. We're at your mercy.",
+            ["options"] = new JsonArray(
+                new JsonObject { ["id"] = "bandit_start_defender_3", ["textId"] = WeakPartySurrenderResponseTextId, ["clickable"] = true },
+                new JsonObject { ["id"] = "bandit_start_defender_2", ["textId"] = "aQYMefHU", ["clickable"] = true })
+        };
+        var ordinaryWeakPartyOptions = BuildActionCatalog(banditMeeting["state"]!.AsObject(), candidates, "bandit-1", false, true,
+            recoverPlayerCaptivity: false);
+        var recoveryWeakPartyOptions = BuildActionCatalog(banditMeeting["state"]!.AsObject(), candidates, "bandit-1", false, true,
+            recoverPlayerCaptivity: true);
+        var weakPartySurrenderDecision = new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "bandit_start_defender_3" } };
+        var weakPartyNegotiationDecision = new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "bandit_start_defender_2" } };
+        var recoveryOptionIds = recoveryWeakPartyOptions.OfType<JsonObject>().FirstOrDefault(action => ReadString(action, "action") == "dialogueSelect")?
+            ["argumentValues"]?["OptionId"] as JsonArray;
+        if (ordinaryWeakPartyOptions.Count != 0 || recoveryOptionIds?.Count != 1 || recoveryOptionIds[0]?.GetValue<string>() != "bandit_start_defender_3" ||
+            !TryResolveDecision(weakPartySurrenderDecision, recoveryWeakPartyOptions, new JsonArray(), banditMeeting["state"]!.AsObject(), candidates, "bandit-1",
+                out _, out _, out _, out _, recoverPlayerCaptivity: true) ||
+            TryResolveDecision(weakPartySurrenderDecision, recoveryWeakPartyOptions, new JsonArray(), banditMeeting["state"]!.AsObject(), candidates, "bandit-1",
+                out _, out _, out _, out _, recoverPlayerCaptivity: false) ||
+            TryResolveDecision(weakPartyNegotiationDecision, recoveryWeakPartyOptions, new JsonArray(), banditMeeting["state"]!.AsObject(), candidates, "bandit-1",
+                out _, out _, out _, out _, recoverPlayerCaptivity: true))
+            throw new AgentHostException("battle-loop-self-test-weak-party-surrender-fallback-scope-failed", "Only a recovery-enabled Host may use the current Native weak-party surrender response when Fight is absent; safe-passage/barter stays outside this battle route.");
+        results.Add(new { scenario = "battle-and-captivity-recovery-allows-native-weak-party-surrender-only-when-no-fight-choice-exists", passed = true });
         banditMeeting["state"]!["context"]!["conversation"] = new JsonObject
         {
             ["sentenceText"] = "You have no choice but to surrender!",
