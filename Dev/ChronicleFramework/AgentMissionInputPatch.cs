@@ -1,4 +1,5 @@
 using System;
+using TaleWorlds.CampaignSystem;
 using HarmonyLib;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.View.MissionViews;
@@ -20,7 +21,16 @@ internal static class AgentMissionInputPatch
     {
         if (mission == null || mission.MissionEnded) return false;
         var mode = mission.Mode.ToString();
-        return (string.Equals(mode, "StartUp", StringComparison.Ordinal) || string.Equals(mode, "Conversation", StringComparison.Ordinal)) && IsSupportedLocationScene(mission);
+        if (string.Equals(mode, "Conversation", StringComparison.Ordinal)) return IsSupportedLocationScene(mission);
+        if (!string.Equals(mode, "StartUp", StringComparison.Ordinal)) return false;
+        return IsSupportedLocationScene(mission) || IsSupportedTownArenaLeaveMission(mission);
+    }
+
+    private static bool IsSupportedTownArenaLeaveMission(Mission mission)
+    {
+        return mission != null && !mission.MissionEnded &&
+            string.Equals(Campaign.Current?.CurrentMenuContext?.GameMenu?.StringId, "town_arena", StringComparison.Ordinal) &&
+            mission.IsFriendlyMission;
     }
 
     private static bool IsSupportedLocationScene(Mission mission)
