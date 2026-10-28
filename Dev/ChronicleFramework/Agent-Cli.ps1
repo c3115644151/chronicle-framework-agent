@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet('start','load','recoverTestConfig','state','agentCheckpointGet','agentCheckpointSet','harnessSeedAgentCheckpointFailure','closeEscapeMenu','respondInquiry','respondMultiSelectionInquiry','mapSettlementTargets','mapNotifications','quickInformation','sceneNotification','continueSceneNotification','submitStoryModeClanName','bannerEditorDone','mapPartyTargets','mapPartyComposition','mapPartyBehavior','partyUpgradeOptions','upgradeTroop','prisonerRecruitmentOptions','recruitPrisoner','characterDevelopment','spendSkillFocus','questDetails','partyRoster','partyRoles','inventoryOpen','heroEquipmentOptions','equipHeroItem','unequipHeroItem','inventoryConfirm','inventoryCancel','inventoryCancelChanges','tradeConfirm','tradeCancel','tradeCancelChanges','barterOptions','barterEdit','barterReset','barterAutoBalance','barterOffer','barterCancel','setPartyRole','unassignPartyRole','captureFrame','harnessMissionDiagnostics','harnessMapDiagnostics','harnessOpenMapEscapeMenu','harnessOpenNativeInquiry','harnessOpenRecruitmentInquiry','harnessNativeInquiryDiagnostics','harnessPrepareAlleyLeaderFixture','harnessAlleyLeaderDiagnostics','harnessPrepareAlleyRosterFixture','harnessSeedAlleyAttackFixture','harnessSeedPersuasionFixture','harnessCurrentConversationAnswers','harnessAlleyRosterDiagnostics','harnessPlayerSkillsDiagnostics','harnessCharacterDevelopmentDiagnostics','harnessQuestDetailsDiagnostics','harnessQuestDeadlinePrivacyDiagnostics','harnessPartyRosterDiagnostics','harnessMapPartyDiagnostics','harnessMapPartyCompositionDiagnostics','harnessCreateMapArmyFixture','harnessPrepareMovingArmyEncounter','harnessArmyEncounterDiagnostics','harnessPrepareSiegeJoinFixture','harnessSiegeJoinDiagnostics','harnessSeedMapPartyIssueMarker','harnessPrepareSafePassageFixture','harnessSeedCaptivityObservationFixture','harnessSeedPrisonCaptivityFixture','harnessSwitchCaptivityObservationMenu','harnessCaptivityDiagnostics','harnessPrepareSurrenderCondition','harnessSeedTryGetAwayFixture','harnessTryGetAwayDiagnostics','harnessSeedNpcBattleForPlayerJoin','harnessPrepareArmyMemberForCurrentJoinEncounter','harnessJoinEncounterDiagnostics','harnessPreparePursuitVisibilityFixture','harnessSeedPartyUpgradeFixture','harnessSeedPrisonerRecruitmentFixture','harnessSeedRecruitmentCapacityFixture','harnessPrepareCompanionHiringFixture','harnessCompanionHiringDiagnostics','harnessSeedPartyRoleFixture','harnessPartyRoleDiagnostics','harnessSeedEquipmentModifierFixture','harnessClearEquipmentModifierFixture','harnessSeedTradeRumorFixture','harnessTradeRumorTooltipDiagnostics','harnessSeedMapNotificationFixture','harnessSeedQuickInformationFixture','harnessSeedSceneNotificationFixture','harnessOpenInventoryState','harnessCloseInventoryState','harnessInventoryStateDiagnostics','talkToSettlementHero','visitSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','fastForward','move','moveToPoint','missionSceneAgents','missionInput','missionNavigateToAgent','missionLeave','missionInteract','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','persuasionDetails','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','alleyRosterTransfer','alleyRosterCancel','rest','recruitOptions','recruit','foodOptions','tradeOptions','tradeRumors','trade','provision','save','stop')]
+    [ValidateSet('start','load','recoverTestConfig','state','agentCheckpointGet','agentCheckpointSet','harnessSeedAgentCheckpointFailure','closeEscapeMenu','respondInquiry','respondMultiSelectionInquiry','mapSettlementTargets','mapNotifications','quickInformation','sceneNotification','continueSceneNotification','incidentSelect','submitStoryModeClanName','bannerEditorDone','mapPartyTargets','mapPartyComposition','mapPartyBehavior','partyUpgradeOptions','upgradeTroop','prisonerRecruitmentOptions','recruitPrisoner','characterDevelopment','spendSkillFocus','questDetails','partyRoster','partyRoles','inventoryOpen','heroEquipmentOptions','equipHeroItem','unequipHeroItem','inventoryConfirm','inventoryCancel','inventoryCancelChanges','tradeConfirm','tradeCancel','tradeCancelChanges','barterOptions','barterEdit','barterReset','barterAutoBalance','barterOffer','barterCancel','setPartyRole','unassignPartyRole','captureFrame','harnessMissionDiagnostics','harnessMapDiagnostics','harnessOpenMapEscapeMenu','harnessOpenNativeInquiry','harnessOpenRecruitmentInquiry','harnessNativeInquiryDiagnostics','harnessPrepareAlleyLeaderFixture','harnessAlleyLeaderDiagnostics','harnessPrepareAlleyRosterFixture','harnessSeedAlleyAttackFixture','harnessSeedPersuasionFixture','harnessCurrentConversationAnswers','harnessAlleyRosterDiagnostics','harnessPlayerSkillsDiagnostics','harnessCharacterDevelopmentDiagnostics','harnessQuestDetailsDiagnostics','harnessQuestDeadlinePrivacyDiagnostics','harnessPartyRosterDiagnostics','harnessMapPartyDiagnostics','harnessMapPartyCompositionDiagnostics','harnessCreateMapArmyFixture','harnessPrepareMovingArmyEncounter','harnessArmyEncounterDiagnostics','harnessPrepareSiegeJoinFixture','harnessSiegeJoinDiagnostics','harnessSeedMapPartyIssueMarker','harnessPrepareSafePassageFixture','harnessSeedCaptivityObservationFixture','harnessSeedPrisonCaptivityFixture','harnessSwitchCaptivityObservationMenu','harnessCaptivityDiagnostics','harnessPrepareSurrenderCondition','harnessSeedTryGetAwayFixture','harnessTryGetAwayDiagnostics','harnessSeedNpcBattleForPlayerJoin','harnessPrepareArmyMemberForCurrentJoinEncounter','harnessJoinEncounterDiagnostics','harnessPreparePursuitVisibilityFixture','harnessSeedPartyUpgradeFixture','harnessSeedPrisonerRecruitmentFixture','harnessSeedRecruitmentCapacityFixture','harnessPrepareCompanionHiringFixture','harnessCompanionHiringDiagnostics','harnessSeedPartyRoleFixture','harnessPartyRoleDiagnostics','harnessSeedEquipmentModifierFixture','harnessClearEquipmentModifierFixture','harnessSeedTradeRumorFixture','harnessTradeRumorTooltipDiagnostics','harnessSeedMapNotificationFixture','harnessSeedQuickInformationFixture','harnessSeedSceneNotificationFixture','harnessOpenInventoryState','harnessCloseInventoryState','harnessInventoryStateDiagnostics','talkToSettlementHero','visitSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','fastForward','move','moveToPoint','missionSceneAgents','missionInput','missionNavigateToAgent','missionLeave','tournamentJoin','tournamentSkipRound','tournamentSkipAllRounds','tournamentWatchRound','tournamentLeave','missionInteract','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','persuasionDetails','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyScreenDone','alleyRosterTransfer','alleyRosterCancel','rest','recruitOptions','recruit','foodOptions','tradeOptions','tradeRumors','trade','provision','save','stop')]
     [string]$Action,
     [string]$SaveName,
     [switch]$IncludeChronicleFramework,
@@ -20,6 +20,7 @@ param(
     [int]$AgentIndex = -1,
     [string]$MenuId,
     [string]$OptionId,
+    [int]$OptionIndex = -1,
     [string]$InquiryToken,
     [ValidateSet('affirmative','negative')][string]$InquiryChoice,
     [string]$Text,
@@ -61,7 +62,18 @@ param(
 . (Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1')
 
 $ErrorActionPreference = 'Stop'
-$gameRoot = if ($env:CHRONICLE_GAME_ROOT -and (Test-Path -LiteralPath $env:CHRONICLE_GAME_ROOT)) { [IO.Path]::GetFullPath($env:CHRONICLE_GAME_ROOT) } else { Split-Path -Parent (Split-Path -Parent $PSScriptRoot) }
+$localSettingsPath = Join-Path $PSScriptRoot 'harness.local.json'
+$localSettings = if (Test-Path -LiteralPath $localSettingsPath -PathType Leaf) {
+    Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+} else { $null }
+$configuredGameRoot = if ($env:CHRONICLE_GAME_ROOT -and (Test-Path -LiteralPath $env:CHRONICLE_GAME_ROOT)) {
+    [IO.Path]::GetFullPath($env:CHRONICLE_GAME_ROOT)
+} elseif ($localSettings -and $localSettings.gameRoot -and (Test-Path -LiteralPath ([string]$localSettings.gameRoot))) {
+    [IO.Path]::GetFullPath([string]$localSettings.gameRoot)
+} else {
+    Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+}
+$gameRoot = [IO.Path]::GetFullPath($configuredGameRoot)
 $binDirectory = Join-Path $gameRoot 'bin\Win64_Shipping_Client'
 $launcher = Join-Path $binDirectory 'Bannerlord.BLSE.Standalone.exe'
 $steamRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $gameRoot))
@@ -489,6 +501,10 @@ switch ($Action) {
     'quickInformation' { $result = Invoke-ProtocolCommand 'quickInformation' }
     'sceneNotification' { $result = Invoke-ProtocolCommand 'sceneNotification' }
     'continueSceneNotification' { $result = Invoke-ProtocolCommand 'continueSceneNotification' }
+    'incidentSelect' {
+        if ($OptionIndex -lt 0) { throw '-OptionIndex must come from the current Native mapIncident.options observation.' }
+        $result = Invoke-ProtocolCommand 'incidentSelect' @{ optionIndex = $OptionIndex }
+    }
     'submitStoryModeClanName' { $result = Invoke-ProtocolCommand 'submitStoryModeClanName' @{ token = $InquiryToken; text = $Text } }
     'bannerEditorDone' { $result = Invoke-ProtocolCommand 'bannerEditorDone' }
     'mapPartyTargets' { $result = Invoke-ProtocolCommand 'mapPartyTargets' }
@@ -696,6 +712,11 @@ switch ($Action) {
         $result = Invoke-ProtocolCommand 'missionNavigateToAgent' @{ agentIndex = $AgentIndex; durationSeconds = $DurationSeconds }
     }
     'missionLeave' { $result = Invoke-ProtocolCommand 'missionLeave' @{} }
+    'tournamentJoin' { $result = Invoke-ProtocolCommand 'tournamentJoin' }
+    'tournamentSkipRound' { $result = Invoke-ProtocolCommand 'tournamentSkipRound' }
+    'tournamentSkipAllRounds' { $result = Invoke-ProtocolCommand 'tournamentSkipAllRounds' }
+    'tournamentWatchRound' { $result = Invoke-ProtocolCommand 'tournamentWatchRound' }
+    'tournamentLeave' { $result = Invoke-ProtocolCommand 'tournamentLeave' }
     'missionInteract' {
         if ($AgentIndex -lt 0) { throw '-AgentIndex is required and must come from nearbySceneAgents in the current Mission observation.' }
         $result = Invoke-ProtocolCommand 'missionInteract' @{ agentIndex = $AgentIndex }

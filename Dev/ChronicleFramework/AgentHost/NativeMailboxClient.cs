@@ -353,6 +353,11 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             case "mapSettlementTargets" when arguments.Count == 0:
             case "continueSceneNotification" when arguments.Count == 0:
                 break;
+            case "incidentSelect" when arguments.Count == 1 &&
+                                          arguments.TryGetPropertyValue("optionIndex", out var incidentOptionNode) &&
+                                          incidentOptionNode is JsonValue incidentOptionValue &&
+                                          incidentOptionValue.TryGetValue<int>(out var incidentOptionIndex) && incidentOptionIndex >= 0:
+                break;
             case "move" when arguments.Count == 1 &&
                               arguments.TryGetPropertyValue("settlementId", out var settlementIdNode) &&
                               settlementIdNode is JsonValue settlementIdValue &&
@@ -361,6 +366,8 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
                 break;
             case "mapSettlementTargets":
                 throw new AgentHostException("native-map-target-arguments-invalid", "mapSettlementTargets does not accept arguments.");
+            case "incidentSelect":
+                throw new AgentHostException("native-map-incident-arguments-invalid", "incidentSelect requires only a non-negative optionIndex from the current Native mapIncident observation.");
             case "move":
                 throw new AgentHostException("native-move-arguments-invalid", "move requires only a non-empty observed settlementId.");
             default:

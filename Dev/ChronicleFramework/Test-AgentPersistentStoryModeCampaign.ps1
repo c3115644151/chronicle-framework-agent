@@ -20,6 +20,10 @@ $manifestPath = Join-Path $PSScriptRoot 'TestResults\PersistentEycCampaign.json'
 $persistentSavePrefix = 'ChronicleEycDev-'
 $freshCampaignScript = Join-Path $harnessRoot 'Test-AgentFreshCampaign.ps1'
 $liveModelScript = Join-Path $harnessRoot 'Test-AgentLiveModelLoop.ps1'
+$bannerlordConfigPath = Join-Path $documentsPath 'Mount and Blade II Bannerlord\Configs\BannerlordConfig.txt'
+$focusPauseLease = $null
+$focusPauseContract = $null
+$focusPauseRestoreResult = [pscustomobject]@{ changedByHarness = $false; restored = $true; reason = 'not-applied' }
 
 function New-PersistentSaveName {
     return $persistentSavePrefix + (Get-Date -Format 'yyyyMMddHHmmss') + '-' + [Guid]::NewGuid().ToString('N').Substring(0,8)
@@ -33,6 +37,71 @@ function Get-SavePath([string]$SaveName) {
 }
 
 function Get-Sha256([string]$Path) { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash }
+
+function Get-Utf8FileState([string]$Path) {
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    $hasBom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+    $encoding = [Text.UTF8Encoding]::new($hasBom)
+    $offset = if ($hasBom) { 3 } else { 0 }
+    [pscustomobject]@{ Bytes = $bytes; Text = $encoding.GetString($bytes, $offset, $bytes.Length - $offset); Encoding = $encoding; HasBom = $hasBom }
+}
+
+function Set-HarnessFocusPauseLease([string]$ConfigurationPath = $bannerlordConfigPath) {
+    if (-not (Test-Path -LiteralPath $ConfigurationPath -PathType Leaf)) {
+        throw 'BannerlordConfig.txt is required to inspect the Native StopGameOnFocusLost preference before a persistent long test.'
+    }
+    $file = Get-Utf8FileState $ConfigurationPath
+    $pattern = '(?m)^(StopGameOnFocusLost=)(True|False)(?=\r?$)'
+    $matches = [regex]::Matches($file.Text, $pattern)
+    if ($matches.Count -ne 1) { throw 'BannerlordConfig.txt must contain exactly one StopGameOnFocusLost setting; no game was launched.' }
+    $originalValue = $matches[0].Groups[2].Value
+    if ($originalValue -ceq 'False') {
+        return [pscustomobject]@{ path = $ConfigurationPath; changedByHarness = $false; originalValue = $originalValue; expectedHarnessValue = $originalValue; hasBom = $file.HasBom }
+    }
+    $updated = [regex]::Replace($file.Text, $pattern, '${1}False', 1)
+    [IO.File]::WriteAllText($ConfigurationPath, $updated, $file.Encoding)
+    return [pscustomobject]@{ path = $ConfigurationPath; changedByHarness = $true; originalValue = $originalValue; expectedHarnessValue = 'False'; hasBom = $file.HasBom }
+}
+
+function Restore-HarnessFocusPauseLease([object]$Lease) {
+    if ($null -eq $Lease -or -not [bool]$Lease.changedByHarness) {
+        return [pscustomobject]@{ changedByHarness = [bool]($Lease -and $Lease.changedByHarness); restored = $true; reason = 'no-override-needed' }
+    }
+    if (Get-Process -Name Bannerlord* -ErrorAction SilentlyContinue) {
+        return [pscustomobject]@{ changedByHarness = $true; restored = $false; reason = 'game-process-still-running'; settingPath = $Lease.path }
+    }
+    $file = Get-Utf8FileState ([string]$Lease.path)
+    $pattern = '(?m)^(StopGameOnFocusLost=)(True|False)(?=\r?$)'
+    $matches = [regex]::Matches($file.Text, $pattern)
+    if ($matches.Count -ne 1) {
+        return [pscustomobject]@{ changedByHarness = $true; restored = $false; reason = 'setting-was-removed-or-duplicated'; settingPath = $Lease.path }
+    }
+    if ($matches[0].Groups[2].Value -cne [string]$Lease.expectedHarnessValue) {
+        return [pscustomobject]@{ changedByHarness = $true; restored = $false; reason = 'setting-was-changed-during-test'; settingPath = $Lease.path }
+    }
+    $updated = [regex]::Replace($file.Text, $pattern, ('${1}' + [string]$Lease.originalValue), 1)
+    [IO.File]::WriteAllText([string]$Lease.path, $updated, $file.Encoding)
+    return [pscustomobject]@{ changedByHarness = $true; restored = $true; reason = 'original-user-value-restored'; restoredValue = [string]$Lease.originalValue }
+}
+
+function Test-HarnessFocusPauseLeaseContract {
+    $path = Join-Path $env:CHRONICLE_HARNESS_TEMP 'FocusPauseLeaseContract-BannerlordConfig.txt'
+    try {
+        [IO.File]::WriteAllText($path, "MapDoubleClickBehavior=0`r`nStopGameOnFocusLost=True`r`n", [Text.UTF8Encoding]::new($false))
+        $lease = Set-HarnessFocusPauseLease $path
+        $disabled = Get-Utf8FileState $path
+        if (-not $lease.changedByHarness -or $disabled.Text -notmatch '(?m)^StopGameOnFocusLost=False\r?$') {
+            throw 'The Harness did not disable only the focus-loss pause setting in the disposable config contract.'
+        }
+        $restored = Restore-HarnessFocusPauseLease $lease
+        $after = Get-Utf8FileState $path
+        if (-not $restored.restored -or $after.Text -cne "MapDoubleClickBehavior=0`r`nStopGameOnFocusLost=True`r`n") {
+            throw 'The Harness did not restore the original focus-loss setting and preserve neighboring config values.'
+        }
+        return [pscustomobject]@{ passed = $true; temporaryValue = 'False'; restoredValue = 'True'; unrelatedSettingPreserved = $true }
+    }
+    finally { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
+}
 
 function Get-AgentHostProgressUsage([string]$ProgressPath) {
     $providerDecisions = 0
@@ -210,6 +279,8 @@ try {
         -not (Test-Path -LiteralPath $liveModelScript -PathType Leaf)) {
         throw 'Persistent EYC save directory or supporting Harness script is unavailable.'
     }
+    $focusPauseContract = Test-HarnessFocusPauseLeaseContract
+    $focusPauseLease = Set-HarnessFocusPauseLease
 
     if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
         $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -406,6 +477,15 @@ catch {
     if (-not $failure) { $failure = $_.Exception.Message }
 }
 
+try { $focusPauseRestoreResult = Restore-HarnessFocusPauseLease $focusPauseLease }
+catch {
+    $focusPauseRestoreResult = [pscustomobject]@{ changedByHarness = [bool]($focusPauseLease -and $focusPauseLease.changedByHarness); restored = $false; reason = 'restore-exception' }
+    if (-not $failure) { $failure = "Harness could not restore Bannerlord StopGameOnFocusLost: $($_.Exception.Message)" }
+}
+if (-not [bool]$focusPauseRestoreResult.restored -and -not $failure) {
+    $failure = "Harness could not safely restore Bannerlord StopGameOnFocusLost ($($focusPauseRestoreResult.reason))."
+}
+
 $result = [ordered]@{
     Passed = [string]::IsNullOrWhiteSpace($failure) -and $checkpointSaved -and $campaignContinued -and $eycCompleted -and $manifestUpdated
     Failure = $failure
@@ -429,6 +509,8 @@ $result = [ordered]@{
     CumulativeActualCostEstimateCny = if ($manifest) { [double]$manifest.cumulativeProviderActualCostEstimateCny } else { $null }
     ManifestPath = $manifestPath
     ManifestUpdated = $manifestUpdated
+    FocusPauseLeaseContract = $focusPauseContract
+    FocusLossPauseIsolation = $focusPauseRestoreResult
     GameProcessesClean = if ($liveEvidence) { [bool]$liveEvidence.ProcessStopped } elseif ($seedEvidence) { [bool]$seedEvidence.BannerlordProcessesCleanAtExit } else { $null }
 }
 $json = $result | ConvertTo-Json -Depth 6

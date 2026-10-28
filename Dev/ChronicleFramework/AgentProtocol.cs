@@ -77,6 +77,7 @@ internal sealed class ChronicleAgentProtocol
         _activeInstance = this;
         AgentMissionInputPatch.Install();
         ChronicleAgentBarterViewCapture.Install();
+        ChronicleTournamentAdapter.Install();
         var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
         _root = Path.Combine(documentsPath, "Mount and Blade II Bannerlord", "AgentRuns", "ChronicleAgent");
         _responseRoot = Path.Combine(_root, "responses");
@@ -251,6 +252,10 @@ internal sealed class ChronicleAgentProtocol
                     break;
                 case "continueSceneNotification":
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentSceneNotification.ContinueFirstBannerNotification());
+                    break;
+                case "incidentSelect":
+                    WriteResponse(commandId, action, "completed", behavior, null,
+                        ChronicleAgentMapIncidentAdapter.SelectAndConfirm(ReadRequiredInteger(command, "optionIndex")));
                     break;
                 case "submitStoryModeClanName":
                     WriteResponse(commandId, action, "completed", behavior, null,
@@ -1113,6 +1118,13 @@ internal sealed class ChronicleAgentProtocol
                     var leaveReceipt = "{\"schemaVersion\":1,\"nativeInputContext\":\"Mission.InputManager.IsGameKeyDown(LeaveArea)\",\"holdSeconds\":" + LeaveAreaHoldSeconds.ToString("R", CultureInfo.InvariantCulture) + ",\"missionEndTimeInSeconds\":" + leaveMission.GetMissionEndTimeInSeconds().ToString("R", CultureInfo.InvariantCulture) + ",\"campaignDay\":" + CampaignTime.Now.ToDays.ToString("F6", CultureInfo.InvariantCulture) + ",\"timeControlMode\":\"" + Campaign.Current.TimeControlMode + "\"}";
                     WriteResponse(commandId, action, "completed", behavior, null, leaveReceipt);
                     break;
+                case "tournamentJoin":
+                case "tournamentSkipRound":
+                case "tournamentSkipAllRounds":
+                case "tournamentWatchRound":
+                case "tournamentLeave":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleTournamentAdapter.Invoke(action));
+                    break;
                 case "missionInteract":
                     var missionInteractionIndex = ReadRequiredFiniteDouble(command, "agentIndex");
                     if (missionInteractionIndex < 0 || missionInteractionIndex > int.MaxValue || missionInteractionIndex != Math.Floor(missionInteractionIndex))
@@ -1221,7 +1233,19 @@ internal sealed class ChronicleAgentProtocol
                     WriteResponse(commandId, action, "completed", behavior, null, provisionResult);
                     break;
                 case "tradeConfirm":
-                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentTradeAdapter.CommitCurrentNativeTradeTransaction());
+                    var tradeCommitReceipt = ChronicleAgentTradeAdapter.CommitCurrentNativeTradeTransaction();
+                    if (tradeCommitReceipt.IndexOf("\"postconditionPassed\":true", StringComparison.Ordinal) >= 0)
+                    {
+                        WriteResponse(commandId, action, "completed", behavior, null, tradeCommitReceipt);
+                    }
+                    else if (ChronicleInquiryAdapter.IsInquiryOpen)
+                    {
+                        WriteResponse(commandId, action, "accepted", behavior, null, tradeCommitReceipt);
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException("Native Trade Done did not commit and no Native confirmation inquiry is open");
+                    }
                     break;
                 case "tradeCancel":
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentTradeAdapter.CancelCurrentNativeTradeTransaction(confirmDiscardChanges: false));
@@ -1365,12 +1389,11 @@ internal sealed class ChronicleAgentProtocol
                     WriteResponse(commandId, action, "completed", behavior);
                     break;
                 case "missionRetreat":
-                    var missionToRetreat = Mission.Current;
-                    var missionRetreatState = Game.Current?.GameStateManager?.ActiveState as MissionState;
-                    if (missionToRetreat == null || missionToRetreat.MissionEnded || missionRetreatState == null)
-                        throw new InvalidOperationException("missionRetreat requires an active battle MissionState");
-                    if (missionToRetreat.MainAgent == null || !missionToRetreat.MainAgent.IsActive() || !missionToRetreat.MainAgent.IsPlayerControlled)
-                        throw new InvalidOperationException("missionRetreat requires the active Player-controlled MainAgent");
+                    var missionRetreatGameState = Game.Current?.GameStateManager?.ActiveState;
+                    var missionRetreatCurrentMission = missionRetreatGameState?.GetType().GetProperty("CurrentMission")?.GetValue(missionRetreatGameState) as Mission;
+                    var missionToRetreat = Mission.Current ?? missionRetreatCurrentMission;
+                    if (missionToRetreat == null || !string.Equals(missionRetreatGameState?.GetType().Name, "MissionState", StringComparison.Ordinal))
+                        throw new InvalidOperationException("missionRetreat requires an active Native MissionState with a current Mission, including its postbattle results phase");
                     var battleEndLogic = missionToRetreat.GetMissionBehavior<BattleEndLogic>();
                     if (battleEndLogic == null) throw new InvalidOperationException("active mission does not expose native BattleEndLogic");
                     var exitResult = battleEndLogic.TryExit();

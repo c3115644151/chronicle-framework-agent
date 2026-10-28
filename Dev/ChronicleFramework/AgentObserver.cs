@@ -54,7 +54,7 @@ internal static class ChronicleAgentObserver
 
         var json = new StringBuilder(4096);
         json.Append('{');
-        json.Append("\"schemaVersion\":28");
+        json.Append("\"schemaVersion\":29");
         json.Append(",\"campaignDay\":").Append(Number(CampaignTime.Now.ToDays));
         json.Append(",\"identity\":{");
         Property(json, "heroId", hero.StringId); Property(json, "heroName", hero.Name?.ToString(), true);
@@ -95,6 +95,21 @@ internal static class ChronicleAgentObserver
         json.Append(",\"sizeLimit\":").Append(party.Party.PartySizeLimit);
         json.Append(",\"speed\":").Append(Number(party.Speed));
         json.Append(",\"morale\":").Append(Number(party.Morale));
+        json.Append(",\"moraleContext\":");
+        if (party.Morale <= 0f)
+        {
+            json.Append('{');
+            json.Append("\"recentEventsMorale\":").Append(Number(party.RecentEventsMorale));
+            json.Append(",\"isStarving\":").Append(Bool(party.Party.IsStarving));
+            json.Append(",\"unpaidWages\":").Append(Number(party.HasUnpaidWages));
+            json.Append(",\"foodVariety\":").Append(party.ItemRoster.FoodVariety);
+            json.Append(",\"effectiveMorale\":").Append(Number(party.MoraleExplained.ResultNumber));
+            json.Append('}');
+        }
+        else
+        {
+            json.Append("null");
+        }
         json.Append(",\"food\":").Append(Number(party.Food));
         json.Append(",\"foodInventory\":").Append(party.TotalFoodAtInventory);
         json.Append(",\"foodChange\":").Append(Number(party.FoodChange));
@@ -125,16 +140,19 @@ internal static class ChronicleAgentObserver
         json.Append(",\"context\":{");
         Property(json, "gameState", Game.Current?.GameStateManager?.ActiveState?.GetType().Name);
         Property(json, "timeControlMode", campaign.TimeControlMode.ToString(), true);
+        json.Append(",\"timeControlModeLocked\":").Append(Bool(campaign.TimeControlModeLock));
         Property(json, "menuId", menu?.StringId, true);
         json.Append(",\"isWaitMenu\":").Append(Bool(menu?.IsWaitMenu == true));
         json.Append(",\"isWaitActive\":").Append(Bool(menu?.IsWaitActive == true));
         json.Append(",\"escapeMenuOpen\":").Append(Bool(Game.Current?.GameStateManager?.ActiveState is MapState && MapScreen.Instance?.IsEscapeMenuOpened == true));
         var activeGameState = Game.Current?.GameStateManager?.ActiveState;
-        var nativeInquiryOpen = (activeGameState is MapState || activeGameState is MissionState) && ChronicleInquiryAdapter.IsInquiryOpen;
+        var nativeInquiryOpen = (activeGameState is MapState || activeGameState is MissionState || activeGameState is InventoryState || activeGameState is PartyState) && ChronicleInquiryAdapter.IsInquiryOpen;
         json.Append(",\"inquiryOpen\":").Append(Bool(nativeInquiryOpen));
         json.Append(",\"inquiry\":").Append(nativeInquiryOpen ? ChronicleInquiryAdapter.BuildMapInquiryJson() : "null");
         json.Append(",\"sceneNotification\":").Append(ChronicleAgentSceneNotification.BuildJson(includeClockAudit: false));
+        json.Append(",\"mapIncident\":").Append(ChronicleAgentMapIncidentAdapter.BuildJson());
         json.Append(",\"bannerEditor\":").Append(ChronicleAgentBannerEditor.BuildJson());
+        json.Append(",\"tournament\":").Append(ChronicleTournamentAdapter.BuildJson());
         json.Append(",\"encounterActive\":").Append(Bool(PlayerEncounter.IsActive));
         json.Append(",\"lootItemCount\":");
         if (PlayerEncounter.Current == null) json.Append("null");
@@ -844,8 +862,24 @@ internal static class ChronicleAgentObserver
 
     private static string BuildMissionObservationJson()
     {
-        var mission = Mission.Current;
-        if (mission == null || mission.MissionEnded) return "null";
+        var activeGameState = Game.Current?.GameStateManager?.ActiveState;
+        var currentMissionProperty = activeGameState?.GetType().GetProperty("CurrentMission");
+        var stateMission = currentMissionProperty?.GetValue(activeGameState) as Mission;
+        var mission = Mission.Current ?? stateMission;
+        if (mission == null)
+        {
+            if (activeGameState?.GetType().Name != "MissionState") return "null";
+            var missionless = new StringBuilder(256);
+            missionless.Append("{\"active\":false,\"missionEnded\":true,\"currentMissionPresent\":false");
+            Property(missionless, "activeGameStateType", activeGameState.GetType().FullName, true);
+            missionless.Append(",\"missionStateCurrentMissionPropertyPresent\":").Append(Bool(currentMissionProperty != null));
+            missionless.Append(",\"missionCurrentStaticPresent\":").Append(Bool(Mission.Current != null));
+            missionless.Append('}');
+            return missionless.ToString();
+        }
+
+        var missionStateActive = string.Equals(activeGameState?.GetType().Name, "MissionState", StringComparison.Ordinal);
+        var missionSource = Mission.Current != null ? "Mission.Current" : "MissionState.CurrentMission";
 
         var mainAgent = mission.MainAgent;
         var mainAgentController = mission.MissionBehaviors.OfType<MissionMainAgentController>().FirstOrDefault();
@@ -874,8 +908,12 @@ internal static class ChronicleAgentObserver
 
         var json = new StringBuilder(2048);
         json.Append('{');
-        json.Append("\"active\":true");
-        json.Append(",\"missionEnded\":false");
+        json.Append("\"active\":").Append(Bool(!mission.MissionEnded));
+        json.Append(",\"missionEnded\":").Append(Bool(mission.MissionEnded));
+        json.Append(",\"nativeMissionStateActive\":").Append(Bool(missionStateActive));
+        Property(json, "activeGameStateType", activeGameState?.GetType().FullName, true);
+        Property(json, "missionObservationSource", missionSource, true);
+        Property(json, "nativeMissionCurrentState", mission.CurrentState.ToString(), true);
         Property(json, "sceneName", mission.SceneName, true);
         Property(json, "mode", mission.Mode.ToString(), true);
         Property(json, "combatType", mission.CombatType.ToString(), true);
@@ -1074,6 +1112,7 @@ internal static class ChronicleAgentObserver
             json.Append('{');
             Property(json, "id", option.IdString);
             Property(json, "text", option.Text?.ToString(), true);
+            Property(json, "tooltip", option.Tooltip?.ToString(), true);
             json.Append(",\"questMarkerFlags\":").Append((int)option.OptionQuestData);
             Property(json, "questMarkerNames", option.OptionQuestData.ToString(), true);
             json.Append(",\"available\":").Append(Bool(available));

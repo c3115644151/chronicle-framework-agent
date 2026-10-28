@@ -21,6 +21,15 @@ internal static class AgentHostNativeInquiryResolution
             provider.LastRequest?["observation"]?["state"]?["context"]?["inquiry"]?["token"] is not null)
             throw new AgentHostException("native-inquiry-resolution-selftest-failed", "The resolver must show only current enabled Native choices, bind the token internally, and verify the modal closed after the model's choice.");
         results.Add(new { scenario = "native-map-inquiry-is-resolved-only-by-a-model-choice-from-current-visible-enabled-buttons", passed = true });
+        var partyNative = new FakeNativeInquiryClient(gameState: "PartyState");
+        var partyProvider = new FakeDecisionProvider("negative");
+        var partyInquiry = RunAsync(partyNative, partyNative, partyProvider, CancellationToken.None, "party-screen-inquiry-selftest",
+            "Complete the active EYC goal; current MainParty is 11/25 and five visible Imperial peasants remain in the Native loot roster.").GetAwaiter().GetResult();
+        if (ReadString(partyInquiry, "status") != "resolved" || partyNative.LastChoice != "negative" ||
+            ReadString(partyProvider.LastRequest?["observation"]?["state"]?["context"] as JsonObject, "gameState") != "PartyState" ||
+            partyProvider.LastRequest?["observation"]?["state"]?["partyScreen"]?["leftMembers"] is not JsonArray partyLeft || partyLeft.Count != 1)
+            throw new AgentHostException("party-screen-inquiry-resolution-selftest-failed", "The shared Native inquiry resolver must expose the current PartyState loot context and answer only its visible enabled button.");
+        results.Add(new { scenario = "native-party-state-done-inquiry-preserves-visible-rosters-and-current-goal", passed = true });
         var trainingReturnRequest = BuildDecisionRequest("training-inquiry-selftest",
             new JsonObject { ["supported"] = true, ["kind"] = "YesNoInquiry", ["title"] = "", ["text"] = "Return the trained borrowed troops?" },
             new JsonArray("affirmative", "negative"),
@@ -96,13 +105,17 @@ internal static class AgentHostNativeInquiryResolution
 
         var inquiry = context?["inquiry"] as JsonObject;
         var gameState = ReadString(context, "gameState");
-        if (gameState != "MapState" || inquiry is null || !ReadBoolean(inquiry, "supported"))
-            return Failure("native-inquiry-kind-unsupported", "The current Native prompt is not a supported Campaign Map Yes/No Inquiry.");
+        if (gameState is not ("MapState" or "MissionState" or "InventoryState" or "PartyState") || inquiry is null || !ReadBoolean(inquiry, "supported"))
+            return Failure("native-inquiry-kind-unsupported", "The current Native prompt is not a supported Campaign, Mission, Inventory, or PartyState Yes/No Inquiry.");
 
         if (ReadString(inquiry, "kind") == "StoryModeClanNameTextInquiry")
+        {
+            if (gameState != "MapState")
+                return Failure("native-inquiry-kind-unsupported", "The original StoryMode family-name TextInquiry is only supported on Campaign MapState.");
             return await RunStoryModeClanNameAsync(stateClient, inquiryClient, provider, runId, inquiry, cancellationToken);
+        }
         if (ReadString(inquiry, "kind") != "YesNoInquiry")
-            return Failure("native-inquiry-kind-unsupported", "The current Native prompt is not a supported Campaign Map Yes/No Inquiry or StoryMode family-name TextInquiry.");
+            return Failure("native-inquiry-kind-unsupported", "The current Native prompt is not a supported Yes/No Inquiry or Campaign Map StoryMode family-name TextInquiry.");
 
         var token = ReadString(inquiry, "token");
         if (string.IsNullOrWhiteSpace(token))
@@ -118,7 +131,7 @@ internal static class AgentHostNativeInquiryResolution
 
         var visibleInquiry = inquiry.DeepClone() as JsonObject ?? new JsonObject();
         visibleInquiry.Remove("token");
-        var request = BuildDecisionRequest(runId, visibleInquiry, allowedChoices, goal);
+        var request = BuildDecisionRequest(runId, visibleInquiry, allowedChoices, goal, gameState, state);
         var providerRoutes = new JsonArray();
         var decision = await AgentHostProviderDecisionRecovery.DecideWithSingleRetryAsync(request,
             token => AgentHostDecisionCycle.DecideNativeInquiryResponseAsync(provider, request, token),
@@ -166,7 +179,7 @@ internal static class AgentHostNativeInquiryResolution
         {
             ["status"] = nativeCompleted && !stillOpen ? "resolved" : "failed",
             ["failureCode"] = nativeCompleted && !stillOpen ? null : "native-inquiry-transition-unverified",
-            ["failure"] = nativeCompleted && !stillOpen ? null : "The selected Native Inquiry handler did not leave a verified unblocked MapState.",
+            ["failure"] = nativeCompleted && !stillOpen ? null : "The selected Native Inquiry handler did not close the current Native modal.",
             ["decisions"] = providerRoutes.Count,
             ["actionsExecuted"] = nativeCompleted ? 1 : 0,
             ["promptTokens"] = decision.PromptTokens ?? 0,
@@ -348,27 +361,31 @@ internal static class AgentHostNativeInquiryResolution
         public void Dispose() { }
     }
 
-    internal static JsonObject BuildDecisionRequest(string runId, JsonObject visibleInquiry, JsonArray allowedChoices, string? goal = null)
+    internal static JsonObject BuildDecisionRequest(string runId, JsonObject visibleInquiry, JsonArray allowedChoices, string? goal = null,
+        string gameState = "MapState", JsonObject? currentState = null)
     {
+        var visibleState = new JsonObject
+        {
+            ["context"] = new JsonObject
+            {
+                ["gameState"] = gameState,
+                ["inquiryOpen"] = true,
+                ["inquiry"] = visibleInquiry.DeepClone()
+            }
+        };
+        foreach (var property in new[] { "identity", "economy", "party", "partyScreen", "quests", "storyModeEstablishClanStatus" })
+            if (currentState?[property] is JsonNode value) visibleState[property] = value.DeepClone();
         return new JsonObject
         {
             ["schemaVersion"] = 1,
             ["runId"] = runId,
             ["goal"] = string.IsNullOrWhiteSpace(goal)
-                ? "Respond to the one current Native Bannerlord Map inquiry using only a currently visible and enabled choice."
+                ? "Respond to the one current Native Bannerlord inquiry using only a currently visible and enabled choice."
                 : goal,
             ["observation"] = new JsonObject
             {
-                ["scope"] = "one-current-native-map-inquiry",
-                ["state"] = new JsonObject
-                {
-                    ["context"] = new JsonObject
-                    {
-                        ["gameState"] = "MapState",
-                        ["inquiryOpen"] = true,
-                        ["inquiry"] = visibleInquiry.DeepClone()
-                    }
-                }
+                ["scope"] = "one-current-native-inquiry",
+                ["state"] = visibleState
             },
             ["allowedActions"] = new JsonArray
             {
@@ -415,7 +432,7 @@ internal static class AgentHostNativeInquiryResolution
     private static int ReadInt(JsonObject? value, string name, int fallback) =>
         value?[name] is JsonValue node && node.TryGetValue<int>(out var result) ? result : fallback;
 
-    private sealed class FakeNativeInquiryClient(bool supported = true) : IAgentHostCampaignNativeClient, IAgentHostNativeInquiryClient
+    private sealed class FakeNativeInquiryClient(bool supported = true, string gameState = "MapState") : IAgentHostCampaignNativeClient, IAgentHostNativeInquiryClient
     {
         private bool _open = true;
         internal string? LastToken { get; private set; }
@@ -427,20 +444,33 @@ internal static class AgentHostNativeInquiryResolution
             cancellationToken.ThrowIfCancellationRequested();
             var context = new JsonObject
             {
-                ["gameState"] = "MapState",
+                ["gameState"] = gameState,
                 ["inquiryOpen"] = _open,
                 ["inquiry"] = _open ? new JsonObject
                 {
                     ["supported"] = supported,
                     ["kind"] = supported ? "YesNoInquiry" : "TextInquiry",
                     ["token"] = "inquiry-token-1",
-                    ["title"] = "通知",
-                    ["text"] = "原版游戏内容",
+                    ["title"] = gameState == "PartyState" ? "Leaving troops behind" : "通知",
+                    ["text"] = gameState == "PartyState" ? "Five Imperial peasants remain. Leave them behind?" : "原版游戏内容",
                     ["affirmative"] = new JsonObject { ["visible"] = true, ["enabled"] = true, ["text"] = "好" },
-                    ["negative"] = new JsonObject { ["visible"] = false, ["enabled"] = false, ["text"] = "" }
+                    ["negative"] = new JsonObject { ["visible"] = gameState == "PartyState", ["enabled"] = gameState == "PartyState", ["text"] = gameState == "PartyState" ? "不" : "" }
                 } : null
             };
-            return Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["state"] = new JsonObject { ["context"] = context } }.ToJsonString()));
+            var state = new JsonObject { ["context"] = context };
+            if (gameState == "PartyState")
+            {
+                state["party"] = new JsonObject { ["members"] = 11, ["prisoners"] = 4 };
+                state["partyScreen"] = new JsonObject
+                {
+                    ["mode"] = "Loot", ["canDone"] = true,
+                    ["leftMembers"] = new JsonArray(new JsonObject { ["troopId"] = "villager_empire", ["name"] = "Imperial Peasant", ["count"] = 5, ["transferable"] = true }),
+                    ["leftPrisoners"] = new JsonArray(),
+                    ["rightMembers"] = new JsonArray(),
+                    ["rightPrisoners"] = new JsonArray(new JsonObject { ["troopId"] = "looter", ["name"] = "Bandit", ["count"] = 4, ["transferable"] = true })
+                };
+            }
+            return Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["state"] = state }.ToJsonString()));
         }
 
         public Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken) =>

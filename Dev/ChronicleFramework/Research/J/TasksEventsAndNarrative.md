@@ -73,7 +73,7 @@ Chronicle返回有限活动Quest摘要并可按需查看一个已观察活动Que
 
 已确认的地图触发源包括进入/离开城镇、城堡、村庄以及围 siege/等待等上下文；全局最小/最大cooldown、事件触发概率随战役模型调整。选择一个事件选项可能消耗资源、改变队伍/聚落/关系或触发任务；UI直接逐个显示效果不代表后果Action只调用一次。用户此前已经用MAINLINE记录过incidentSelect：原生VM确认/关闭和直接API跳过清理不是等价路径。
 
-Chronicle仅在指定Harness研究接口中能读取/选择有限Incident，产品协议未提供通用随机Incident观察/交互；当前MAINLINE标注选择事件的时间锁/恢复证据。证据：`Incident`、`IncidentsCampaignBehaviour.TryInvokeIncident/InvokeIncident/OnGameMenuOptionSelected`、`IncidentModel/DefaultIncidentModel`及Map incident UI；未知所有注册Incident列表、各概率真实值/随机分布、被禁用/过期事件筛选和不同触发环境下玩家界面、事件结果结算的完整覆盖。
+Chronicle现已把J05的玩家界面接入产品协议：`context.mapIncident`只呈现当前活动`MapIncidentView`的IncidentType、标题/说明、Done按钮状态与当前VM选项索引/文本/提示/选择态；`incidentSelect(OptionIndex)`只接受本次观察的索引，并经原生`MapIncidentOptionVM.ExecuteSelect`后调用`MapIncidentVM.ExecuteConfirm`。Host在EYC父循环中先处理活动Incident，再恢复目标规划；子路线被Incident打断后也先处理弹窗，不能把弹窗当作地图已停住而重发移动。事件结果仍以提交后全新的Native状态为准。同一自然Campaign运行`TestResults/20261029-incident-runtime/manual-evidence.json`实际识别并提交PartyCampLife“老兵要特权”，Native锁由true恢复false，之后地图move恢复原版StoppablePlay并自然到达；Host包回归测试由Fake Provider/Native执行，未调用真实模型。未知所有注册Incident列表、各概率真实值/随机分布、被禁用/过期事件筛选和不同触发环境下完整UI/结果覆盖，仍需真实模型长程验收。
 
 ## J06 Rumors：传闻和流言信息
 

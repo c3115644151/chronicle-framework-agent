@@ -112,8 +112,8 @@ internal static class ChronicleInquiryAdapter
     {
         EnsureLifecycleTracking();
         var activeState = Game.Current?.GameStateManager?.ActiveState;
-        if (activeState is not MapState && activeState is not MissionState)
-            throw new InvalidOperationException("respondInquiry supports active Native Campaign Map or Mission inquiries only");
+        if (activeState is not MapState && activeState is not MissionState && activeState is not InventoryState && activeState is not PartyState)
+            throw new InvalidOperationException("respondInquiry supports active Native Campaign Map, Mission, Inventory, or PartyState inquiries only");
         if (!IsInquiryOpen) throw new InvalidOperationException("respondInquiry requires a currently active Native Inquiry");
         if (!TryReadNativeActiveQuery(out var queryData, out var dataSource, out _, out var failure))
             throw new InvalidOperationException("Current Native Inquiry is unavailable: " + failure);

@@ -46,6 +46,9 @@ internal static class ChronicleAgentTradeAdapter
         var json = new StringBuilder(8192);
         json.Append('{').Append("\"schemaVersion\":1");
         ChroniclePartyUpgradeAdapter.Property(json, "settlementId", settlement.StringId);
+        ChroniclePartyUpgradeAdapter.Property(json, "settlementType", settlement.IsVillage ? "village" : settlement.IsTown ? "town" : "other");
+        ChroniclePartyUpgradeAdapter.Property(json, "nativeMenuId", Campaign.Current?.CurrentMenuContext?.GameMenu?.StringId);
+        json.Append(",\"isVillageProvision\":").Append(ChroniclePartyUpgradeAdapter.Bool(settlement.IsVillage));
         ChroniclePartyUpgradeAdapter.Property(json, "inventoryMode", inventoryState.InventoryMode.ToString());
         ChroniclePartyUpgradeAdapter.Property(json, "equipmentMode", Enum.GetName(typeof(SPInventoryVM.EquipmentModes), viewModel.EquipmentMode));
         ChroniclePartyUpgradeAdapter.Property(json, "timeControlMode", Campaign.Current.TimeControlMode.ToString());
@@ -438,8 +441,12 @@ internal static class ChronicleAgentTradeAdapter
         viewModel = ChronicleInventoryStateAdapter.GetNativeViewModel(inventoryState);
         if (ChronicleInventoryStateAdapter.GetCurrentCharacter(viewModel)?.HeroObject != Hero.MainHero)
             throw new InvalidOperationException("Trade actions currently require the Native Trade VM to show MainHero");
-        if (Settlement.CurrentSettlement?.IsTown != true || Settlement.CurrentSettlement.SettlementComponent == null)
-            throw new InvalidOperationException("Trade actions require the main party in a Town with an active merchant");
+        var settlement = Settlement.CurrentSettlement;
+        var isTownMerchantTrade = settlement?.IsTown == true && settlement.SettlementComponent != null;
+        var isVillageProvisionTrade = settlement?.IsVillage == true && settlement.Village != null &&
+            string.Equals(Campaign.Current?.CurrentMenuContext?.GameMenu?.StringId, "village", StringComparison.Ordinal);
+        if (!isTownMerchantTrade && !isVillageProvisionTrade)
+            throw new InvalidOperationException("Trade actions require a Native Town merchant Trade screen or the Village 'Buy Provisions' Trade screen");
         return inventoryState;
     }
 

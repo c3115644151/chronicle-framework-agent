@@ -22,7 +22,8 @@ internal static class AgentHostBattleSimulationLoop
         JsonArray? priorTrace = null,
         JsonArray? priorProviderRouteHistory = null,
         bool recoverPlayerCaptivity = false,
-        int passiveCaptivityPollSeconds = 15)
+        int passiveCaptivityPollSeconds = 15,
+        IAgentHostNativeInquiryClient? inquiryClient = null)
     {
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
         var goal = ReadString(request, "goal") ?? string.Empty;
@@ -97,6 +98,54 @@ internal static class AgentHostBattleSimulationLoop
                 {
                     battleResult = ReadString(simulation, "battleState") ?? battleResult;
                     playerRetreated = ReadBoolean(simulation, "playerRetreated");
+                }
+
+                if (ReadBoolean(context, "inquiryOpen"))
+                {
+                    var activeInquiryClient = inquiryClient ?? client as IAgentHostNativeInquiryClient;
+                    if (activeInquiryClient == null)
+                    {
+                        failure = "The active Native Yes/No Inquiry interrupted BattleSimulation, but the Native Inquiry client is unavailable.";
+                        failureCode = "native-inquiry-client-unavailable";
+                        termination = "native-inquiry-client-unavailable";
+                        break;
+                    }
+                    var inquiryGoal = ReadString(request, "parentGoal") ?? goal;
+                    if (string.Equals(gameState, "PartyState", StringComparison.Ordinal))
+                    {
+                        var objectiveSnapshot = request.TryGetProperty("parentEycObjectives", out var objectiveElement) && objectiveElement.ValueKind == JsonValueKind.Object
+                            ? JsonNode.Parse(objectiveElement.GetRawText())?.ToJsonString() ?? "unavailable"
+                            : "unavailable";
+                        inquiryGoal = "Overall user goal: " + inquiryGoal + ". Current Battle subgoal: " + goal + ". Current original EYC Journal objectives: " + objectiveSnapshot + ". Resolve the current post-battle Native confirmation according to those goals and the exact current PartyState roster; do not assume friendly or neutral survivors are bandit prisoners. The model must choose the current visible affirmative/negative option, or return to the Native PartyScreen only if its current buttons make that appropriate.";
+                    }
+                    var inquiry = await AgentHostNativeInquiryResolution.RunAsync(
+                        client, activeInquiryClient, provider, elapsed.Token,
+                        runId + "-battle-inquiry-" + (decisions + 1).ToString(CultureInfo.InvariantCulture), inquiryGoal);
+                    decisions += ReadInt(inquiry, "decisions", 0);
+                    actionsExecuted += ReadInt(inquiry, "actionsExecuted", 0);
+                    promptTokens += ReadLong(inquiry, "promptTokens", 0);
+                    completionTokens += ReadLong(inquiry, "completionTokens", 0);
+                    if (inquiry["providerRouteHistory"] is JsonArray inquiryRoutes)
+                        foreach (var route in inquiryRoutes) routes.Add(route?.DeepClone());
+                    trace.Add(new JsonObject
+                    {
+                        ["stage"] = "postbattle-native-inquiry",
+                        ["gameState"] = gameState,
+                        ["status"] = ReadString(inquiry, "status"),
+                        ["choice"] = ReadString(inquiry, "choice"),
+                        ["decision"] = inquiry["decision"]?.DeepClone(),
+                        ["nativeReceipt"] = inquiry["nativeReceipt"]?.DeepClone()
+                    });
+                    if (ReadString(inquiry, "status") != "resolved")
+                    {
+                        failure = ReadString(inquiry, "failure") ?? "The post-battle Native Inquiry did not close successfully.";
+                        failureCode = ReadString(inquiry, "failureCode") ?? "postbattle-native-inquiry-unresolved";
+                        termination = "postbattle-native-inquiry-unresolved";
+                        break;
+                    }
+                    using var afterInquiry = await client.ReadStateAsync(elapsed.Token);
+                    currentNative = ParseObject(afterInquiry.RootElement);
+                    continue;
                 }
 
                 if (nativeEncounterLeaveIssued)
@@ -1038,6 +1087,30 @@ internal static class AgentHostBattleSimulationLoop
         }
         if (!client.Actions.SequenceEqual(new[] { "mapPartyTargets", "pursue", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone" }))
             throw new AgentHostException("battle-loop-self-test-native-order-failed", "The battle loop emitted an unexpected Native action order.");
+
+        var inquiryClient = new FakeBattleSimulationNativeClient(simulatePartyInquiry: true);
+        var inquiryProvider = new FakeBattleSimulationDecisionProvider(simulatePartyInquiry: true);
+        var inquiryRequestNode = JsonNode.Parse(request.RootElement.GetRawText())!.AsObject();
+        inquiryRequestNode["parentGoal"] = "Complete the original StoryMode Establish Your Clan objective set.";
+        inquiryRequestNode["parentEycObjectives"] = new JsonObject
+        {
+            ["partySize"] = new JsonObject { ["current"] = 11, ["target"] = 25 },
+            ["renown"] = new JsonObject { ["current"] = 21.378, ["target"] = 50 }
+        };
+        using var inquiryRequest = JsonDocument.Parse(inquiryRequestNode.ToJsonString());
+        var partyInquiryResult = await RunAsync(inquiryRequest.RootElement, inquiryClient, inquiryProvider, CancellationToken.None,
+            inquiryClient: inquiryClient);
+        if (ReadString(partyInquiryResult, "status") != "completed" || ReadString(partyInquiryResult, "termination") != "battle-resolved-and-verified" ||
+            ReadString(partyInquiryResult, "playerOutcome") != "resolved-native-battle" || inquiryClient.LastInquiryChoice != "negative" ||
+            !inquiryClient.Actions.SequenceEqual(new[] { "mapPartyTargets", "pursue", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone" }) ||
+            inquiryProvider.LastInquiryRequest?[
+                "observation"]?["state"]?["partyScreen"]?["leftMembers"]?[0]?["count"]?.GetValue<int>() != 5 ||
+            ReadString(inquiryProvider.LastInquiryRequest?["observation"]?["state"]?["context"] as JsonObject, "gameState") != "PartyState" ||
+            !ReadString(inquiryProvider.LastInquiryRequest, "goal")!.Contains("11", StringComparison.Ordinal) ||
+            ReadInt(partyInquiryResult, "explicitClockActionCount", -1) != 0 ||
+            partyInquiryResult["trace"] is not JsonArray inquiryTrace || !inquiryTrace.OfType<JsonObject>().Any(line => ReadString(line, "stage") == "postbattle-native-inquiry"))
+            throw new AgentHostException("battle-loop-self-test-party-inquiry-goal-recovery-failed", $"The battle loop did not resolve a current PartyState Inquiry from EYC/roster context and resume Native loot: status={ReadString(partyInquiryResult, "status")}, termination={ReadString(partyInquiryResult, "termination")}, choice={inquiryClient.LastInquiryChoice}, actions={string.Join(",", inquiryClient.Actions)}.");
+
         using var cumulativeRequest = JsonDocument.Parse("{\"runId\":\"selftest-battle-after-objective-budget\",\"goal\":\"Resolve one active incident battle after prior objective decisions.\",\"parentProcessId\":321,\"maxDecisions\":320,\"maxElapsedSeconds\":20,\"allowedActionNames\":" + actionNames + "}");
         var cumulativeClient = new FakeBattleSimulationNativeClient();
         var cumulativeProvider = new FakeBattleSimulationDecisionProvider();
@@ -1069,6 +1142,7 @@ internal static class AgentHostBattleSimulationLoop
             throw new AgentHostException("battle-loop-self-test-captivity-recovery-failed", $"A fake Native battle-capture-ransom cycle failed: status={ReadString(recovery, "status")}, outcome={ReadString(recovery, "playerOutcome")}, captivity={ReadBoolean(recovery, "captivityObserved")}, recovery={ReadBoolean(recovery, "captivityRecoveryVerified")}, action={ReadString(recovery, "captivityChoiceOptionId")}, actions={string.Join(",", recoveryClient.Actions)}.");
         return [
             new { scenario = "battle-loop-native-observe-pursue-send-troops-aftermath-return-and-verify", decisions = ReadInt(result, "decisions", 0), nativeActions = client.Actions.ToArray(), renownBefore = ReadDouble(result, "renownBefore", double.NaN), renownAfter = ReadDouble(result, "renownAfter", double.NaN), explicitClockActions = ReadInt(result, "explicitClockActionCount", -1), passed = true },
+            new { scenario = "battle-loop-resolves-party-loot-inquiry-from-current-eyc-goal-and-roster-then-resumes-native-aftermath", decisions = ReadInt(partyInquiryResult, "decisions", 0), nativeActions = inquiryClient.Actions.ToArray(), inquiryChoice = inquiryClient.LastInquiryChoice, passed = true },
             new { scenario = "battle-loop-incident-after-201-parent-decisions-retains-global-budget", decisions = ReadInt(cumulativeBattle, "decisions", 0), passed = true },
             new { scenario = "battle-loop-native-capture-passive-wait-ransom-release-and-map-return", decisions = ReadInt(recovery, "decisions", 0), nativeActions = recoveryClient.Actions.ToArray(), captivityChoiceOptionId = ReadString(recovery, "captivityChoiceOptionId"), mainPartyMembersAtReturn = ReadInt(recovery, "mainPartyMembersAtReturn", 0), explicitClockActions = ReadInt(recovery, "explicitClockActionCount", -1), passed = true }
         ];
@@ -1389,6 +1463,7 @@ internal static class AgentHostBattleSimulationLoop
     private static string? ReadString(JsonObject? value, string name) => value?[name] is JsonValue node && node.TryGetValue<string>(out var result) ? result : null;
     private static bool ReadBoolean(JsonObject? value, string name) => value?[name] is JsonValue node && node.TryGetValue<bool>(out var result) && result;
     private static int ReadInt(JsonObject? value, string name, int fallback) => value?[name] is JsonValue node && node.TryGetValue<int>(out var result) ? result : fallback;
+    private static long ReadLong(JsonObject? value, string name, long fallback) => value?[name] is JsonValue node && node.TryGetValue<long>(out var result) ? result : fallback;
     private static double ReadDouble(JsonObject? value, string name, double fallback) => value?[name] is JsonValue node && node.TryGetValue<double>(out var result) ? result : fallback;
     private static string? ReadString(JsonElement value, string name) => value.TryGetProperty(name, out var node) && node.ValueKind == JsonValueKind.String ? node.GetString() : null;
     private static int ReadInt(JsonElement value, string name, int fallback) => value.TryGetProperty(name, out var node) && node.TryGetInt32(out var result) ? result : fallback;
@@ -1397,17 +1472,24 @@ internal static class AgentHostBattleSimulationLoop
     private static JsonArray CloneArray(JsonElement value) => value.ValueKind == JsonValueKind.Array ? JsonNode.Parse(value.GetRawText())?.AsArray() ?? new JsonArray() : new JsonArray();
     private static string Truncate(string value, int max) => value.Length <= max ? value : value[..max];
 
-    private sealed class FakeBattleSimulationNativeClient : IAgentHostBattleSimulationNativeClient
+    private sealed class FakeBattleSimulationNativeClient : IAgentHostBattleSimulationNativeClient, IAgentHostNativeInquiryClient
     {
         private readonly bool _simulateCaptivity;
+        private readonly bool _simulatePartyInquiry;
         private int _stage;
         private int _movingReads;
         private int _captivityPolls;
         private bool _memberLootTaken;
+        private bool _prisonerLootTaken;
         private int _inventoryLootCount = 2;
         internal List<string> Actions { get; } = [];
+        internal string? LastInquiryChoice { get; private set; }
 
-        internal FakeBattleSimulationNativeClient(bool simulateCaptivity = false) => _simulateCaptivity = simulateCaptivity;
+        internal FakeBattleSimulationNativeClient(bool simulateCaptivity = false, bool simulatePartyInquiry = false)
+        {
+            _simulateCaptivity = simulateCaptivity;
+            _simulatePartyInquiry = simulatePartyInquiry;
+        }
 
         public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
         {
@@ -1437,8 +1519,11 @@ internal static class AgentHostBattleSimulationLoop
                     break;
                 case "battleSkip": _stage = 6; break;
                 case "battleFinish": _stage = _simulateCaptivity ? 10 : 7; break;
-                case "partyTakeAll": _memberLootTaken = true; break;
-                case "partyScreenDone": _stage = 8; break;
+                case "partyTakeAll":
+                    if (ReadString(arguments, "troopType") == "prisoners") _prisonerLootTaken = true;
+                    else _memberLootTaken = true;
+                    break;
+                case "partyScreenDone": _stage = _simulatePartyInquiry && !_memberLootTaken ? 13 : 8; break;
                 case "inventoryTakeAll": _inventoryLootCount = 0; break;
                 case "inventoryDone": _stage = 9; break;
             }
@@ -1454,9 +1539,22 @@ internal static class AgentHostBattleSimulationLoop
             return Task.FromResult(JsonDocument.Parse(response.ToJsonString()));
         }
 
+        public Task<JsonDocument> RespondNativeInquiryAsync(string token, string choice, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!_simulatePartyInquiry || _stage != 13 || token != "party-loot-inquiry-token")
+                throw new AgentHostException("battle-self-test-party-inquiry-token-invalid", "The battle loop did not respond to the exact current PartyState Inquiry.");
+            LastInquiryChoice = choice;
+            _stage = choice == "negative" ? 7 : 8;
+            return Task.FromResult(JsonDocument.Parse("{\"status\":\"completed\",\"action\":\"respondInquiry\"}"));
+        }
+
+        public Task<JsonDocument> SubmitStoryModeClanNameAsync(string token, string clanName, CancellationToken cancellationToken) =>
+            throw new AgentHostException("battle-self-test-unexpected-clan-name", "The battle aftermath fixture does not accept a family-name submission.");
+
         private JsonObject BuildState()
         {
-            var stateName = _stage switch { 7 => "PartyState", 8 => "InventoryState", _ => "MapState" };
+            var stateName = _stage switch { 7 or 13 => "PartyState", 8 => "InventoryState", _ => "MapState" };
             var menuId = _stage is 2 or 3 ? "encounter_meeting" : _stage is 4 or 5 or 6 ? "encounter" : _stage == 10 ? "prisoner_wait" : _stage == 11 ? "menu_captivity_end_propose_ransom_wilderness" : null;
             var encounterActive = _stage is 2 or 3 or 4 or 5 or 6;
             JsonObject? simulation = null;
@@ -1492,13 +1590,25 @@ internal static class AgentHostBattleSimulationLoop
                 };
             if (_stage == 3)
                 state["context"]!["conversation"] = new JsonObject { ["sentenceText"] = "Prepare yourself.", ["options"] = new JsonArray() };
-            if (_stage == 7)
+            if (_stage is 7 or 13)
                 state["partyScreen"] = new JsonObject
                 {
-                    ["mode"] = "Loot", ["canDone"] = _memberLootTaken,
-                    ["leftMembers"] = _memberLootTaken ? new JsonArray() : new JsonArray(new JsonObject { ["count"] = 1, ["transferable"] = true }),
-                    ["leftPrisoners"] = new JsonArray(), ["rightMembers"] = new JsonArray(), ["rightPrisoners"] = new JsonArray()
+                    ["mode"] = "Loot", ["canDone"] = true,
+                    ["leftMembers"] = _memberLootTaken ? new JsonArray() : new JsonArray(new JsonObject { ["troopId"] = "villager_empire", ["name"] = "帝国农民", ["count"] = 5, ["transferable"] = true }),
+                    ["leftPrisoners"] = _prisonerLootTaken ? new JsonArray() : new JsonArray(new JsonObject { ["troopId"] = "looter", ["name"] = "劫匪", ["count"] = 4, ["transferable"] = true }),
+                    ["rightMembers"] = new JsonArray(), ["rightPrisoners"] = _prisonerLootTaken ? new JsonArray(new JsonObject { ["troopId"] = "looter", ["name"] = "劫匪", ["count"] = 4, ["transferable"] = true }) : new JsonArray()
                 };
+            if (_stage == 13)
+            {
+                state["context"]!["inquiryOpen"] = true;
+                state["context"]!["inquiry"] = new JsonObject
+                {
+                    ["supported"] = true, ["kind"] = "YesNoInquiry", ["token"] = "party-loot-inquiry-token",
+                    ["title"] = "Leaving troops behind", ["text"] = "Five Imperial peasants remain. Leave them behind?",
+                    ["affirmative"] = new JsonObject { ["visible"] = true, ["enabled"] = true, ["text"] = "是" },
+                    ["negative"] = new JsonObject { ["visible"] = true, ["enabled"] = true, ["text"] = "否" }
+                };
+            }
             if (_stage == 8)
                 state["inventoryScreen"] = new JsonObject { ["mode"] = "Loot", ["lootItemCount"] = _inventoryLootCount, ["playerItemCount"] = 12 };
             return new JsonObject { ["processId"] = 321, ["campaignDay"] = _stage is 1 or 2 ? 5.1 : _stage == 10 ? 5.2 : 5.0, ["timeControlMode"] = _stage == 10 ? "UnstoppableFastForward" : "Stop", ["state"] = state };
@@ -1508,19 +1618,26 @@ internal static class AgentHostBattleSimulationLoop
     private sealed class FakeBattleSimulationDecisionProvider : IAgentHostDecisionProvider
     {
         private static readonly string[] ExpectedActions = ["mapPartyTargets", "pursue", "observeAgain", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone", "done"];
+        private static readonly string[] ExpectedInquiryActions = ["mapPartyTargets", "pursue", "observeAgain", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "respondInquiry", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone", "done"];
+        private readonly bool _simulatePartyInquiry;
         internal int CallCount { get; private set; }
+        internal JsonObject? LastInquiryRequest { get; private set; }
         public string ModelId => "deterministic-battle-loop-self-test";
         public string ConfigurationSource => "harness-fake-provider";
+        internal FakeBattleSimulationDecisionProvider(bool simulatePartyInquiry = false) => _simulatePartyInquiry = simulatePartyInquiry;
         public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) { cancellationToken.ThrowIfCancellationRequested(); return Task.CompletedTask; }
 
         public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var index = CallCount++;
-            if (index >= ExpectedActions.Length) throw new AgentHostException("battle-loop-self-test-provider-exhausted", "The fake provider received more decisions than the Native battle protocol requires.");
-            var expected = ExpectedActions[index];
+            var expectedActions = _simulatePartyInquiry ? ExpectedInquiryActions : ExpectedActions;
+            if (index >= expectedActions.Length) throw new AgentHostException("battle-loop-self-test-provider-exhausted", "The fake provider received more decisions than the Native battle protocol requires.");
+            var expected = expectedActions[index];
+            if (expected == "respondInquiry") LastInquiryRequest = JsonNode.Parse(request.GetRawText()) as JsonObject;
             JsonObject decision;
-            if (expected == "done") decision = new JsonObject { ["done"] = true, ["reason"] = "Native battle and return verified." };
+            if (expected == "respondInquiry") decision = new JsonObject { ["action"] = "respondInquiry", ["arguments"] = new JsonObject { ["choice"] = "negative" }, ["rationale"] = "Keep reviewing the five villagers because the active party-size objective is 11 of 25." };
+            else if (expected == "done") decision = new JsonObject { ["done"] = true, ["reason"] = "Native battle and return verified." };
             else if (expected == "observeAgain") decision = new JsonObject { ["control"] = "observeAgain", ["waitSeconds"] = 1, ["reason"] = "Observe current pursuit." };
             else decision = new JsonObject
             {
@@ -1529,6 +1646,8 @@ internal static class AgentHostBattleSimulationLoop
                 {
                     "pursue" => new JsonObject { ["PartyId"] = "bandit-1" },
                     "dialogueSelect" => new JsonObject { ["OptionId"] = "bandit_start_defender_1" },
+                    "partyTakeAll" when _simulatePartyInquiry && index == 9 => new JsonObject { ["TroopType"] = "prisoners" },
+                    "partyTakeAll" when _simulatePartyInquiry && index == 12 => new JsonObject { ["TroopType"] = "members" },
                     "menuSelect" => new JsonObject { ["MenuId"] = "encounter", ["OptionId"] = "str_order_attack" },
                     "partyTakeAll" => new JsonObject { ["TroopType"] = "members" },
                     _ => new JsonObject()

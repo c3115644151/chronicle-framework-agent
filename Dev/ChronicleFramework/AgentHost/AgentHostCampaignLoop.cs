@@ -13,7 +13,7 @@ internal static class AgentHostCampaignLoop
     internal static readonly HashSet<string> ApprovedActions = new(StringComparer.Ordinal)
     {
         "mapSettlementTargets", "move", "menuSelect", "talkToSettlementHero", "dialogueSelect", "dialogueContinue",
-        "questDetails", "tradeOptions", "trade", "tradeConfirm", "tradeCancel", "tradeCancelChanges", "barterOptions", "barterAutoBalance", "barterOffer", "barterCancel", "inventoryOpen", "heroEquipmentOptions", "inventoryCancel"
+        "questDetails", "tradeOptions", "trade", "tradeConfirm", "tradeCancel", "tradeCancelChanges", "barterOptions", "barterAutoBalance", "barterOffer", "barterCancel", "inventoryOpen", "heroEquipmentOptions", "inventoryCancel", "incidentSelect"
     };
     internal static readonly HashSet<string> BattleSimulationActions = new(StringComparer.Ordinal)
     {
@@ -32,6 +32,7 @@ internal static class AgentHostCampaignLoop
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
         var results = new List<object>();
+        results.AddRange(AgentHostMapIncidentLoop.RunContractSelfTestsAsync().GetAwaiter().GetResult());
         results.AddRange(AgentHostStoryModeBootstrapLoop.RunContractSelfTests());
         if (new[] { 0, 30, 80, 159, 319 }.Any(prior => prior >= GetCumulativeDecisionLimit(MaxCumulativeDecisions)) ||
             GetCumulativeDecisionLimit(8) != 8 || GetCumulativeDecisionLimit(0) != 1 || GetCumulativeDecisionLimit(1000) != MaxCumulativeDecisions)
@@ -231,7 +232,7 @@ internal static class AgentHostCampaignLoop
 
     internal static async Task<IReadOnlyList<object>> RunTransportSelfTestsAsync()
     {
-        var requestJson = "{\"runId\":\"selftest-arrival\",\"goal\":\"Reach the observed safe settlement.\",\"parentProcessId\":321,\"maxDecisions\":8,\"maxElapsedSeconds\":10,\"allowedActionNames\":[\"mapSettlementTargets\",\"move\",\"menuSelect\",\"talkToSettlementHero\",\"dialogueSelect\",\"dialogueContinue\",\"questDetails\",\"tradeOptions\",\"trade\",\"tradeConfirm\",\"tradeCancel\",\"tradeCancelChanges\",\"barterOptions\",\"barterAutoBalance\",\"barterOffer\",\"barterCancel\",\"inventoryOpen\",\"heroEquipmentOptions\",\"inventoryCancel\"]}";
+        var requestJson = "{\"runId\":\"selftest-arrival\",\"goal\":\"Reach the observed safe settlement.\",\"parentProcessId\":321,\"maxDecisions\":8,\"maxElapsedSeconds\":10,\"allowedActionNames\":[\"mapSettlementTargets\",\"move\",\"menuSelect\",\"talkToSettlementHero\",\"dialogueSelect\",\"dialogueContinue\",\"questDetails\",\"tradeOptions\",\"trade\",\"tradeConfirm\",\"tradeCancel\",\"tradeCancelChanges\",\"barterOptions\",\"barterAutoBalance\",\"barterOffer\",\"barterCancel\",\"inventoryOpen\",\"heroEquipmentOptions\",\"inventoryCancel\",\"incidentSelect\"]}";
         using var request = JsonDocument.Parse(requestJson);
         var results = new List<object>();
 
@@ -650,6 +651,17 @@ internal static class AgentHostCampaignLoop
                             "captivityRecovery" => "Recover MainHero from the currently observed Native captivity menus without starting another battle, verify a usable free Campaign Map, then return control to the Establish Your Clan objective loop.",
                             _ => throw new AgentHostException("establish-clan-objective-route-unavailable", "No integrated Native objective executor is registered for this StoryMode target.")
                         };
+                        childRequestNode["parentGoal"] = ReadString(request, "goal");
+                        childRequestNode["parentObjectiveId"] = objectiveId;
+                        if (objectiveId is "gold" or "renown")
+                        {
+                            using var parentDetails = await questDetailsClient.ReadQuestDetailsAsync("rebuild_player_clan_storymode_quest", subToken);
+                            var parentRoot = JsonNode.Parse(parentDetails.RootElement.GetRawText()) as JsonObject;
+                            var parentData = parentRoot?["data"] as JsonObject
+                                ?? throw new AgentHostException("establish-clan-parent-objectives-unavailable", "The current Native EYC Journal details did not include structured objective progress for the battle aftermath decision.");
+                            var parentObjectives = AgentHostEstablishYourClanGoalLoop.BuildJournalObjectives(parentData);
+                            childRequestNode["parentEycObjectives"] = AgentHostEstablishYourClanGoalLoop.BuildObjectiveSnapshot(parentObjectives);
+                        }
                         using var childRequest = JsonDocument.Parse(childRequestNode.ToJsonString());
                         async Task<JsonObject> ExecuteGoldObjectiveAsync()
                         {
