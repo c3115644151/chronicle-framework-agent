@@ -515,6 +515,9 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
         return SendAsync(action, arguments, acceptedResponseExpected: false, cancellationToken);
     }
 
+    public Task<JsonDocument> PauseForVisibleHostileDecisionAsync(CancellationToken cancellationToken) =>
+        SendAsync("pause", new JsonObject(), acceptedResponseExpected: false, cancellationToken);
+
     internal static void ValidateBattleSimulationAction(string action, JsonObject arguments)
     {
         if (!BattleSimulationActions.Contains(action))

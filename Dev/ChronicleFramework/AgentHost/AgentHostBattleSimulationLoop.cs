@@ -94,6 +94,48 @@ internal static class AgentHostBattleSimulationLoop
                 var simulation = context["battleSimulation"] as JsonObject;
                 var partyScreen = state["partyScreen"] as JsonObject;
                 var inventoryScreen = state["inventoryScreen"] as JsonObject;
+
+                // Preserve the current player-visible hostile target while the model decides
+                // whether to pursue it. This is a distinct Native Pause command, never folded
+                // into Move/Pursue, and it is skipped while that exact target is already being
+                // pursued so ordinary Native chase behavior can continue.
+                if (ShouldPauseForVisibleHostileDecision(native))
+                {
+                    var modeBeforePause = ReadString(native, "timeControlMode");
+                    var dayBeforePause = ReadDouble(native, "campaignDay", double.NaN);
+                    var pauseStartedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+                    using var pauseResponse = await client.PauseForVisibleHostileDecisionAsync(elapsed.Token);
+                    var pauseReceipt = SafeReceipt("pause", pauseResponse.RootElement);
+                    var pauseCompletedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+                    if (ReadString(pauseReceipt, "status") == "completed") actionsExecuted++;
+                    using var stateAfterPause = await client.ReadStateAsync(elapsed.Token);
+                    currentNative = ParseObject(stateAfterPause.RootElement);
+                    var modeAfterPause = ReadString(currentNative, "timeControlMode");
+                    var dayAfterPause = ReadDouble(currentNative, "campaignDay", double.NaN);
+                    trace.Add(new JsonObject
+                    {
+                        ["stage"] = "visible-hostile-decision-paused-before-model",
+                        ["iteration"] = iteration,
+                        ["nativeAction"] = "pause",
+                        ["nativeActionReceipt"] = pauseReceipt.DeepClone(),
+                        ["timeControlModeBefore"] = modeBeforePause,
+                        ["timeControlModeAfter"] = modeAfterPause,
+                        ["campaignDayBefore"] = double.IsFinite(dayBeforePause) ? JsonValue.Create(dayBeforePause) : null,
+                        ["campaignDayAfter"] = double.IsFinite(dayAfterPause) ? JsonValue.Create(dayAfterPause) : null,
+                        ["actionStartedUtc"] = pauseStartedUtc,
+                        ["actionCompletedUtc"] = pauseCompletedUtc,
+                        ["modelDecisionMade"] = false
+                    });
+                    if (ReadString(pauseReceipt, "status") != "completed" || modeAfterPause != "Stop")
+                    {
+                        failure = "A visible hostile party needs a stable decision window, but the Native Campaign Pause did not verify stopped time.";
+                        failureCode = "visible-hostile-native-pause-unverified";
+                        termination = "visible-hostile-native-pause-unverified";
+                        break;
+                    }
+                    continue;
+                }
+
                 if (simulation is not null)
                 {
                     battleResult = ReadString(simulation, "battleState") ?? battleResult;
@@ -786,6 +828,30 @@ internal static class AgentHostBattleSimulationLoop
         if (!AgentHostDecisionCycle.BattleAndCaptivitySystemPrompt.Contains("surrender only as a survival fallback", StringComparison.Ordinal) ||
             AgentHostDecisionCycle.BattleSimulationSystemPrompt.Contains("surrender only as a survival fallback", StringComparison.Ordinal))
             throw new AgentHostException("battle-loop-self-test-surrender-fallback-prompt-scope-failed", "Native surrender fallback guidance belongs only to explicit BattleAndCaptivity recovery mode, never the ordinary Renown BattleSimulation objective.");
+        var visibleBanditNeedsDecisionPause = ParseObject(JsonDocument.Parse("""
+            {"timeControlMode":"StoppablePlay","state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false,"inquiryOpen":false,"escapeMenuOpen":false,"isWaitMenu":false,"isWaitActive":false,"mapIncident":{"active":false},"sceneNotification":{"hasActiveNotification":false},"captivity":{"isCaptive":false}},"location":{"targetPartyId":null},"party":{"isMoving":true},"nearbyParties":[{"id":"bandit-a","type":"bandit","hostile":true}]}}
+            """).RootElement);
+        var alreadyPursuingVisibleBandit = (JsonObject)visibleBanditNeedsDecisionPause.DeepClone();
+        alreadyPursuingVisibleBandit["state"]!["location"]!["targetPartyId"] = "bandit-a";
+        var stoppedVisibleBandit = (JsonObject)visibleBanditNeedsDecisionPause.DeepClone();
+        stoppedVisibleBandit["timeControlMode"] = "Stop";
+        var visibleNeutralParty = (JsonObject)visibleBanditNeedsDecisionPause.DeepClone();
+        visibleNeutralParty["state"]!["nearbyParties"]![0]!["hostile"] = false;
+        var visibleHostileLord = (JsonObject)visibleBanditNeedsDecisionPause.DeepClone();
+        visibleHostileLord["state"]!["nearbyParties"]![0]!["type"] = "lord";
+        var visibleBanditUnderNativeMenu = (JsonObject)visibleBanditNeedsDecisionPause.DeepClone();
+        visibleBanditUnderNativeMenu["state"]!["context"]!["menuId"] = "town";
+        var visibleBanditDuringEncounter = (JsonObject)visibleBanditNeedsDecisionPause.DeepClone();
+        visibleBanditDuringEncounter["state"]!["context"]!["encounterActive"] = true;
+        if (!ShouldPauseForVisibleHostileDecision(visibleBanditNeedsDecisionPause) ||
+            ShouldPauseForVisibleHostileDecision(alreadyPursuingVisibleBandit) ||
+            ShouldPauseForVisibleHostileDecision(stoppedVisibleBandit) ||
+            ShouldPauseForVisibleHostileDecision(visibleNeutralParty) ||
+            ShouldPauseForVisibleHostileDecision(visibleHostileLord) ||
+            ShouldPauseForVisibleHostileDecision(visibleBanditUnderNativeMenu) ||
+            ShouldPauseForVisibleHostileDecision(visibleBanditDuringEncounter))
+            throw new AgentHostException("battle-loop-visible-threat-pause-classification-failed", "Only a visible hostile bandit on an active free map, before that exact party is already pursued, may trigger the separately recorded Native Pause.");
+        results.Add(new { scenario = "battle-loop-pauses-time-separately-before-a-visible-hostile-decision-but-not-during-an-active-pursuit-or-modal", passed = true });
         var map = ParseState("MapState", menuId: null, encounterActive: false, partyTarget: null, battle: null);
         var candidates = new JsonArray(new JsonObject { ["id"] = "bandit-1", ["type"] = "bandit", ["hostile"] = true });
         var mapState = map["state"]!.AsObject();
@@ -1133,6 +1199,21 @@ internal static class AgentHostBattleSimulationLoop
         if (!client.Actions.SequenceEqual(new[] { "mapPartyTargets", "pursue", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone" }))
             throw new AgentHostException("battle-loop-self-test-native-order-failed", "The battle loop emitted an unexpected Native action order.");
 
+        var visibleThreatClient = new FakeBattleSimulationNativeClient(visibleHostileAtStart: true);
+        var visibleThreatProvider = new FakeBattleSimulationDecisionProvider();
+        var visibleThreatResult = await RunAsync(request.RootElement, visibleThreatClient, visibleThreatProvider, CancellationToken.None);
+        var visibleThreatTrace = visibleThreatResult["trace"] as JsonArray;
+        if (ReadString(visibleThreatResult, "status") != "completed" ||
+            !visibleThreatClient.ClockActions.SequenceEqual(["pause"]) ||
+            ReadInt(visibleThreatResult, "explicitClockActionCount", -1) != 1 ||
+            ReadInt(visibleThreatResult, "actionsExecuted", -1) != 13 ||
+            visibleThreatTrace?.FirstOrDefault() is not JsonObject pauseStep ||
+            ReadString(pauseStep, "stage") != "visible-hostile-decision-paused-before-model" ||
+            ReadString(visibleThreatProvider.FirstRequest?["observation"]?["state"]?["context"] as JsonObject, "timeControlMode") != "Stop" ||
+            (visibleThreatProvider.FirstRequest?["observation"]?["state"]?["nearbyParties"] as JsonArray)?.Count != 1 ||
+            !visibleThreatTrace.OfType<JsonObject>().Any(step => ReadString(step["decision"] as JsonObject, "action") == "pursue"))
+            throw new AgentHostException("battle-loop-visible-threat-pause-before-model-failed", "A visible, unpursued bandit must trigger a distinct audited Native Pause before the first model decision; the model must then decide using the still-visible party. Already-active pursuits and all ordinary movement remain on Native clock behavior.");
+
         var inquiryClient = new FakeBattleSimulationNativeClient(simulatePartyInquiry: true);
         var inquiryProvider = new FakeBattleSimulationDecisionProvider(simulatePartyInquiry: true);
         var inquiryRequestNode = JsonNode.Parse(request.RootElement.GetRawText())!.AsObject();
@@ -1269,7 +1350,9 @@ internal static class AgentHostBattleSimulationLoop
             ["campaignDayEnd"] = finalNative?["campaignDay"]?.DeepClone(),
             ["timeControlModeStart"] = ReadString(initialNative?["timeControlMode"] as JsonObject, "mode") ?? ReadString(initialNative, "timeControlMode"),
             ["timeControlModeEnd"] = ReadString(finalNative?["timeControlMode"] as JsonObject, "mode") ?? ReadString(finalNative, "timeControlMode"),
-            ["explicitClockActionCount"] = 0,
+            ["explicitClockActionCount"] = trace.OfType<JsonObject>().Count(step =>
+                ReadString(step, "stage") == "visible-hostile-decision-paused-before-model" &&
+                ReadString(step["nativeActionReceipt"] as JsonObject, "status") == "completed"),
             ["targetPartyId"] = targetId,
             ["battleStarted"] = battleStarted,
             ["battleState"] = battleResult,
@@ -1346,6 +1429,34 @@ internal static class AgentHostBattleSimulationLoop
 
     private static bool IsPlayerCaptive(JsonObject? state) =>
         ReadBoolean((state?["context"] as JsonObject)?["captivity"] as JsonObject, "isCaptive");
+
+    internal static bool ShouldPauseForVisibleHostileDecision(JsonObject native)
+    {
+        var state = native["state"] as JsonObject;
+        var context = state?["context"] as JsonObject;
+        var timeMode = ReadString(native, "timeControlMode") ?? ReadString(context, "timeControlMode");
+        if (state is null || context is null || timeMode is null or "Stop" ||
+            ReadString(context, "gameState") != "MapState" || !string.IsNullOrWhiteSpace(ReadString(context, "menuId")) ||
+            ReadBoolean(context, "encounterActive") || ReadBoolean(context, "escapeMenuOpen") || ReadBoolean(context, "inquiryOpen") ||
+            ReadBoolean(context, "isWaitMenu") || ReadBoolean(context, "isWaitActive") ||
+            ReadBoolean(context?["sceneNotification"] as JsonObject, "hasActiveNotification") ||
+            ReadBoolean(context?["mapIncident"] as JsonObject, "active") ||
+            ReadBoolean(context?["bannerEditor"] as JsonObject, "active") || IsPlayerCaptive(state) ||
+            state["partyScreen"] is not null || state["inventoryScreen"] is not null ||
+            AgentHostCampaignStateFacts.IsActiveEncounter(state))
+            return false;
+
+        var pursuingPartyId = ReadString(state["location"] as JsonObject, "targetPartyId");
+        IEnumerable<JsonObject> partyRows = state["nearbyParties"] switch
+        {
+            JsonArray parties => parties.OfType<JsonObject>(),
+            JsonObject party => [party],
+            _ => Array.Empty<JsonObject>()
+        };
+        return partyRows.Any(party => ReadString(party, "type") == "bandit" &&
+            ReadBoolean(party, "hostile") && !string.IsNullOrWhiteSpace(ReadString(party, "id")) &&
+            !string.Equals(ReadString(party, "id"), pursuingPartyId, StringComparison.Ordinal));
+    }
 
     internal static bool ShouldPassivelyWaitForCaptivity(JsonObject state, bool recoverPlayerCaptivity) =>
         recoverPlayerCaptivity && IsPlayerCaptive(state) &&
@@ -1556,19 +1667,24 @@ internal static class AgentHostBattleSimulationLoop
     {
         private readonly bool _simulateCaptivity;
         private readonly bool _simulatePartyInquiry;
+        private readonly bool _visibleHostileAtStart;
         private int _stage;
         private int _movingReads;
         private int _captivityPolls;
         private bool _memberLootTaken;
         private bool _prisonerLootTaken;
         private int _inventoryLootCount = 2;
+        private string _timeControlMode = "Stop";
         internal List<string> Actions { get; } = [];
+        internal List<string> ClockActions { get; } = [];
         internal string? LastInquiryChoice { get; private set; }
 
-        internal FakeBattleSimulationNativeClient(bool simulateCaptivity = false, bool simulatePartyInquiry = false)
+        internal FakeBattleSimulationNativeClient(bool simulateCaptivity = false, bool simulatePartyInquiry = false, bool visibleHostileAtStart = false)
         {
             _simulateCaptivity = simulateCaptivity;
             _simulatePartyInquiry = simulatePartyInquiry;
+            _visibleHostileAtStart = visibleHostileAtStart;
+            if (visibleHostileAtStart) _timeControlMode = "StoppablePlay";
         }
 
         public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
@@ -1582,6 +1698,16 @@ internal static class AgentHostBattleSimulationLoop
         public Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken) =>
             throw new AgentHostException("battle-self-test-unexpected-campaign-action", "Campaign arrival actions are outside this fake battle transport.");
 
+        public Task<JsonDocument> PauseForVisibleHostileDecisionAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!_visibleHostileAtStart || _stage != 0 || _timeControlMode == "Stop")
+                throw new AgentHostException("battle-self-test-unexpected-visible-hostile-pause", "Only the visible, not-yet-pursued moving-bandit fixture may receive the explicit Host Pause.");
+            ClockActions.Add("pause");
+            _timeControlMode = "Stop";
+            return Task.FromResult(JsonDocument.Parse("{\"processId\":321,\"status\":\"completed\",\"action\":\"pause\",\"commandId\":\"fake-visible-threat-pause\"}"));
+        }
+
         public Task<JsonDocument> ExecuteBattleSimulationActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -1589,7 +1715,7 @@ internal static class AgentHostBattleSimulationLoop
             Actions.Add(action);
             switch (action)
             {
-                case "pursue": _stage = 1; _movingReads = 0; break;
+                case "pursue": _stage = 1; _movingReads = 0; _timeControlMode = "StoppablePlay"; break;
                 case "dialogueSelect": _stage = 3; break;
                 case "dialogueContinue": _stage = 4; break;
                 case "menuSelect":
@@ -1642,7 +1768,7 @@ internal static class AgentHostBattleSimulationLoop
                 simulation = new JsonObject { ["finished"] = _stage == 6, ["playerRetreated"] = false, ["battleState"] = "AttackerVictory" };
             var state = new JsonObject
             {
-                ["context"] = new JsonObject { ["gameState"] = stateName, ["menuId"] = menuId, ["encounterActive"] = encounterActive, ["battleSimulation"] = simulation, ["encounteredPartyId"] = encounterActive ? "bandit-1" : null },
+                ["context"] = new JsonObject { ["gameState"] = stateName, ["menuId"] = menuId, ["encounterActive"] = encounterActive, ["battleSimulation"] = simulation, ["encounteredPartyId"] = encounterActive ? "bandit-1" : null, ["timeControlMode"] = _timeControlMode },
                 ["economy"] = new JsonObject { ["renown"] = 10.0, ["influence"] = 0.0, ["gold"] = _stage == 12 ? 169 : 500 },
                 ["party"] = new JsonObject { ["members"] = _stage is 10 or 11 ? 0 : _stage == 12 ? 1 : _memberLootTaken ? 41 : 40, ["healthy"] = 39, ["wounded"] = 1, ["prisoners"] = 0, ["itemCount"] = 12 },
                 ["location"] = new JsonObject { ["targetPartyId"] = _stage == 1 ? "bandit-1" : null },
@@ -1654,6 +1780,8 @@ internal static class AgentHostBattleSimulationLoop
                             new JsonObject { ["id"] = "captivity_end_ransom_deny", ["available"] = true, ["enabled"] = true })
                         : new JsonArray()
             };
+            if (_visibleHostileAtStart && _stage == 0)
+                state["nearbyParties"] = new JsonArray(new JsonObject { ["id"] = "bandit-1", ["name"] = "Bandit Party", ["type"] = "bandit", ["distance"] = 2.0, ["hostile"] = true });
             if (_stage is 10 or 11)
                 state["context"]!["captivity"] = new JsonObject
                 {
@@ -1692,7 +1820,8 @@ internal static class AgentHostBattleSimulationLoop
             }
             if (_stage == 8)
                 state["inventoryScreen"] = new JsonObject { ["mode"] = "Loot", ["lootItemCount"] = _inventoryLootCount, ["playerItemCount"] = 12 };
-            return new JsonObject { ["processId"] = 321, ["campaignDay"] = _stage is 1 or 2 ? 5.1 : _stage == 10 ? 5.2 : 5.0, ["timeControlMode"] = _stage == 10 ? "UnstoppableFastForward" : "Stop", ["state"] = state };
+            var timeControlMode = _stage == 10 ? "UnstoppableFastForward" : _timeControlMode;
+            return new JsonObject { ["processId"] = 321, ["campaignDay"] = _stage is 1 or 2 ? 5.1 : _stage == 10 ? 5.2 : 5.0, ["timeControlMode"] = timeControlMode, ["state"] = state };
         }
     }
 
@@ -1702,6 +1831,7 @@ internal static class AgentHostBattleSimulationLoop
         private static readonly string[] ExpectedInquiryActions = ["mapPartyTargets", "pursue", "observeAgain", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "respondInquiry", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone", "done"];
         private readonly bool _simulatePartyInquiry;
         internal int CallCount { get; private set; }
+        internal JsonObject? FirstRequest { get; private set; }
         internal JsonObject? LastInquiryRequest { get; private set; }
         public string ModelId => "deterministic-battle-loop-self-test";
         public string ConfigurationSource => "harness-fake-provider";
@@ -1711,6 +1841,7 @@ internal static class AgentHostBattleSimulationLoop
         public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (CallCount == 0) FirstRequest = ParseObject(request);
             var index = CallCount++;
             var expectedActions = _simulatePartyInquiry ? ExpectedInquiryActions : ExpectedActions;
             if (index >= expectedActions.Length) throw new AgentHostException("battle-loop-self-test-provider-exhausted", "The fake provider received more decisions than the Native battle protocol requires.");
