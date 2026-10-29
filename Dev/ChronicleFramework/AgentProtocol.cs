@@ -1425,6 +1425,10 @@ internal sealed class ChronicleAgentProtocol
                     activeLootPartyState.PartyScreenLogic.RemoveZeroCounts();
                     WriteResponse(commandId, action, "completed", behavior);
                     break;
+                case "partyLootTransferOne":
+                    WriteResponse(commandId, action, "completed", behavior, null,
+                        ChronicleLootPartyTransferAdapter.TransferOne(ReadString(command, "troopId"), ReadString(command, "troopType")));
+                    break;
                 case "partyScreenDone":
                     if (ChronicleAlleyRosterAdapter.IsCurrentNativeAlleyPartyScreen())
                     {

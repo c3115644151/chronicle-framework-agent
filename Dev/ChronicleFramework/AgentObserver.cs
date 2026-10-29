@@ -54,7 +54,7 @@ internal static class ChronicleAgentObserver
 
         var json = new StringBuilder(4096);
         json.Append('{');
-        json.Append("\"schemaVersion\":30");
+        json.Append("\"schemaVersion\":31");
         json.Append(",\"campaignDay\":").Append(Number(CampaignTime.Now.ToDays));
         json.Append(",\"identity\":{");
         Property(json, "heroId", hero.StringId); Property(json, "heroName", hero.Name?.ToString(), true);
@@ -223,6 +223,11 @@ internal static class ChronicleAgentObserver
             Property(json, "doneReason", screen.DoneReasonString, true);
             Property(json, "leftPartyId", screen.LeftOwnerParty?.Id, true);
             Property(json, "rightPartyId", screen.RightOwnerParty?.Id, true);
+            if (activePartyState.PartyScreenMode == PartyScreenHelper.PartyScreenMode.Loot)
+            {
+                json.Append(",\"rightMemberLimit\":").Append(screen.RightPartyMembersSizeLimit)
+                    .Append(",\"rightPrisonerLimit\":").Append(screen.RightPartyPrisonersSizeLimit);
+            }
             if (activePartyState.PartyScreenMode == PartyScreenHelper.PartyScreenMode.QuestTroopManage)
             {
                 json.Append(",\"questTroopAssignment\":{\"currentCount\":")

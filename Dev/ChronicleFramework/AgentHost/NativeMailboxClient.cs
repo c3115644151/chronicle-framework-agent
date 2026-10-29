@@ -25,7 +25,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
     };
     private static readonly HashSet<string> BattleSimulationActions = new(StringComparer.Ordinal)
     {
-        "mapPartyTargets", "pursue", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone"
+        "mapPartyTargets", "pursue", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyLootTransferOne", "partyScreenDone", "inventoryTakeAll", "inventoryDone"
     };
 
     private readonly string _root;
@@ -524,6 +524,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             "dialogueSelect" => HasOnlyKeys(arguments, "optionId") && HasText(arguments, "optionId"),
             "menuSelect" => HasOnlyKeys(arguments, "menuId", "optionId") && HasText(arguments, "menuId") && HasText(arguments, "optionId"),
             "partyTakeAll" => HasOnlyKeys(arguments, "troopType") && arguments["troopType"] is JsonValue troopTypeNode && troopTypeNode.TryGetValue<string>(out var troopType) && troopType is "members" or "prisoners",
+            "partyLootTransferOne" => HasOnlyKeys(arguments, "troopId", "troopType") && HasText(arguments, "troopId") && arguments["troopType"] is JsonValue lootTroopTypeNode && lootTroopTypeNode.TryGetValue<string>(out var lootTroopType) && lootTroopType is "members" or "prisoners",
             _ => false
         };
         if (!valid)
@@ -631,6 +632,8 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             ("battleFinish", "{}"),
             ("partyTakeAll", "{\"troopType\":\"members\"}"),
             ("partyTakeAll", "{\"troopType\":\"prisoners\"}"),
+            ("partyLootTransferOne", "{\"troopId\":\"mounted_ransacker\",\"troopType\":\"prisoners\"}"),
+            ("partyLootTransferOne", "{\"troopId\":\"caravan_guard_empire\",\"troopType\":\"members\"}"),
             ("partyScreenDone", "{}"),
             ("inventoryTakeAll", "{}"),
             ("inventoryDone", "{}")
@@ -645,6 +648,8 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             ("menuSelect", "{\"menuId\":\"encounter\"}"),
             ("pursue", "{\"partyId\":\"\"}"),
             ("partyTakeAll", "{\"troopType\":\"companions\"}"),
+            ("partyLootTransferOne", "{\"troopId\":\"mounted_ransacker\",\"troopType\":\"looter\"}"),
+            ("partyLootTransferOne", "{\"troopType\":\"prisoners\"}"),
             ("inventoryDone", "{\"skipLoot\":true}")
         };
         foreach (var item in invalidCases)

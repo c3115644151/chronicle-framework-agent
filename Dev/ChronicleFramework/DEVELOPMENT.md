@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.421
+Contract version: 7.423
 
 Engine delegation principle: the Agent chooses long-term goals, targets, commitments and consequential responses, and verifies the result. When a particular Native task already starts an NPC-controlled Mission or an original tactical simulation, let the game engine perform continuous movement/combat and observe its result; do not build frame-level control simply because the player entered 3D. This is route-specific, not a blanket claim that all battles are delegable: if the Native encounter disables simulation, record a distinct capability gap and only then decide whether direct control or a different strategy is needed. Never treat starting/ending a Mission as proof of success; check the Native quest/reward aftermath.
 

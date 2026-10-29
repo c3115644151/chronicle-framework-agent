@@ -599,9 +599,18 @@ internal static class AgentHostBattleSimulationLoop
 
         if (battleWasStarted && string.Equals(gameState, "PartyState", StringComparison.Ordinal) && partyScreen is not null && ReadString(partyScreen, "mode") == "Loot")
         {
+            var transferPairs = BuildLootTransferPairs(partyScreen);
+            if (transferPairs.Count > 0)
+                catalog.Add(new JsonObject
+                {
+                    ["action"] = "partyLootTransferOne",
+                    ["arguments"] = new JsonArray("TroopId", "TroopType"),
+                    ["argumentPairs"] = transferPairs
+                });
+
             var lootTypes = new JsonArray();
-            if (HasTransferableRoster(partyScreen["leftMembers"] as JsonArray)) lootTypes.Add("members");
-            if (HasTransferableRoster(partyScreen["leftPrisoners"] as JsonArray)) lootTypes.Add("prisoners");
+            if (CanTakeWholeRoster(partyScreen, "members")) lootTypes.Add("members");
+            if (CanTakeWholeRoster(partyScreen, "prisoners")) lootTypes.Add("prisoners");
             if (lootTypes.Count > 0)
                 catalog.Add(new JsonObject
                 {
@@ -738,6 +747,20 @@ internal static class AgentHostBattleSimulationLoop
                 var rosterName = troopType == "members" ? "leftMembers" : "leftPrisoners";
                 if (!HasTransferableRoster((state["partyScreen"] as JsonObject)?[rosterName] as JsonArray))
                 { rejection = "Take-all troop type must have a currently observed transferable Native roster."; return false; }
+            }
+            if (action == "partyLootTransferOne")
+            {
+                var troopId = ReadString(arguments, "troopId");
+                var troopType = ReadString(arguments, "troopType");
+                var allowedPairs = template["argumentPairs"] as JsonArray;
+                var pairIsCurrent = allowedPairs?.OfType<JsonObject>().Any(pair =>
+                    ReadString(pair, "TroopId") == troopId && ReadString(pair, "TroopType") == troopType) == true;
+                var rosterName = troopType == "members" ? "leftMembers" : troopType == "prisoners" ? "leftPrisoners" : string.Empty;
+                var visibleRowIsCurrent = !string.IsNullOrWhiteSpace(rosterName) &&
+                    (state["partyScreen"] as JsonObject)?[rosterName] is JsonArray rows &&
+                    rows.OfType<JsonObject>().Any(row => ReadString(row, "troopId") == troopId && ReadBoolean(row, "transferable") && ReadInt(row, "count", 0) > 0);
+                if (!pairIsCurrent || !visibleRowIsCurrent)
+                { rejection = "Loot transfer must match one currently visible transferable Native left-roster row and its exact current members/prisoners type."; return false; }
             }
             return true;
         }
@@ -994,26 +1017,48 @@ internal static class AgentHostBattleSimulationLoop
 
         var party = new JsonObject { ["context"] = new JsonObject { ["gameState"] = "PartyState" }, ["partyScreen"] = new JsonObject
         {
-            ["mode"] = "Loot", ["canDone"] = true, ["leftMembers"] = new JsonArray(new JsonObject { ["count"] = 1, ["transferable"] = true }),
-            ["leftPrisoners"] = new JsonArray(new JsonObject { ["count"] = 1, ["transferable"] = true }), ["rightMembers"] = new JsonArray(), ["rightPrisoners"] = new JsonArray()
+            ["mode"] = "Loot", ["canDone"] = true,
+            ["leftMembers"] = new JsonArray(new JsonObject { ["troopId"] = "caravan_guard_empire", ["count"] = 1, ["transferable"] = true }),
+            ["leftPrisoners"] = new JsonArray(new JsonObject { ["troopId"] = "mounted_ransacker", ["count"] = 5, ["transferable"] = true }),
+            ["rightMembers"] = new JsonArray(new JsonObject { ["troopId"] = "main_hero", ["count"] = 1, ["transferable"] = false }),
+            ["rightPrisoners"] = new JsonArray(new JsonObject { ["troopId"] = "looter", ["count"] = 16, ["transferable"] = true }),
+            ["rightMemberLimit"] = 20,
+            ["rightPrisonerLimit"] = 18
         } };
         var partyActions = BuildActionCatalog(party, new JsonArray(), null, true, true);
         var takeAllAction = partyActions.OfType<JsonObject>().FirstOrDefault(action => ReadString(action, "action") == "partyTakeAll");
         var takeAllTypes = takeAllAction?["argumentValues"]?["TroopType"] as JsonArray;
-        if (takeAllTypes?.Count != 2 || !takeAllTypes.OfType<JsonValue>().Any(value => value.GetValue<string>() == "members") ||
-            !takeAllTypes.OfType<JsonValue>().Any(value => value.GetValue<string>() == "prisoners") || !CatalogContains(partyActions, "partyScreenDone"))
-            throw new AgentHostException("battle-loop-self-test-party-aftermath-not-listed", "Native PartyState loot actions must be exposed only from observed roster/canDone state.");
+        if (takeAllTypes?.Count != 1 || !takeAllTypes.OfType<JsonValue>().Any(value => value.GetValue<string>() == "members") ||
+            takeAllTypes.OfType<JsonValue>().Any(value => value.GetValue<string>() == "prisoners") || !CatalogContains(partyActions, "partyScreenDone"))
+            throw new AgentHostException("battle-loop-self-test-party-aftermath-not-listed", "Native take-all may be listed only when the whole currently transferable roster fits the current receive limit; single-row prisoner transfers remain available.");
+        var singleTransfer = partyActions.OfType<JsonObject>().FirstOrDefault(action => ReadString(action, "action") == "partyLootTransferOne");
+        var transferPairs = singleTransfer?["argumentPairs"] as JsonArray;
+        if (transferPairs?.Count != 2 || !transferPairs.OfType<JsonObject>().Any(pair => ReadString(pair, "TroopId") == "caravan_guard_empire" && ReadString(pair, "TroopType") == "members") ||
+            !transferPairs.OfType<JsonObject>().Any(pair => ReadString(pair, "TroopId") == "mounted_ransacker" && ReadString(pair, "TroopType") == "prisoners"))
+            throw new AgentHostException("battle-loop-self-test-loot-single-transfer-pairs-missing", "Loot single transfers must bind exact currently visible member/prisoner ids to their Native roster types.");
+        var validSingleTransfer = new JsonObject { ["action"] = "partyLootTransferOne", ["arguments"] = new JsonObject { ["TroopId"] = "mounted_ransacker", ["TroopType"] = "prisoners" } };
+        if (!TryResolveDecision(validSingleTransfer, partyActions, new JsonArray(), party, new JsonArray(), null, out var singleAction, out var singleArguments, out _, out _, recoverPlayerCaptivity: false) ||
+            singleAction != "partyLootTransferOne" || ReadString(singleArguments, "troopId") != "mounted_ransacker" || ReadString(singleArguments, "troopType") != "prisoners")
+            throw new AgentHostException("battle-loop-self-test-loot-single-transfer-current-pair-not-resolvable", "The Host must resolve one exact current Native Loot prisoner row.");
+        var staleSingleTransfer = new JsonObject { ["action"] = "partyLootTransferOne", ["arguments"] = new JsonObject { ["TroopId"] = "unobserved", ["TroopType"] = "prisoners" } };
+        if (TryResolveDecision(staleSingleTransfer, partyActions, new JsonArray(), party, new JsonArray(), null, out _, out _, out _, out _, recoverPlayerCaptivity: false))
+            throw new AgentHostException("battle-loop-self-test-loot-single-transfer-stale-row-accepted", "The Host must reject stale or hidden Loot rows before any Native transfer.");
+        results.Add(new { scenario = "battle-loop-binds-single-loot-transfer-to-current-visible-row-and-roster-type", passed = true });
         var invalidLootType = new JsonObject { ["action"] = "partyTakeAll", ["arguments"] = new JsonObject { ["TroopType"] = "looter" } };
         if (TryResolveDecision(invalidLootType, partyActions, new JsonArray(), party, new JsonArray(), null, out _, out _, out _, out var invalidLootRejection, recoverPlayerCaptivity: false) ||
             !invalidLootRejection.Contains("members or prisoners", StringComparison.Ordinal))
             throw new AgentHostException("battle-loop-self-test-loot-type-alias-not-rejected", "The displayed troop class 'looter' must not be mistaken for the current Native PartyScreen roster type.");
-        foreach (var validLootType in new[] { "members", "prisoners" })
+        foreach (var validLootType in new[] { "members" })
         {
             var validLoot = new JsonObject { ["action"] = "partyTakeAll", ["arguments"] = new JsonObject { ["TroopType"] = validLootType } };
             if (!TryResolveDecision(validLoot, partyActions, new JsonArray(), party, new JsonArray(), null, out var resolvedLootAction, out var resolvedLootArguments, out _, out _, recoverPlayerCaptivity: false) ||
                 resolvedLootAction != "partyTakeAll" || ReadString(resolvedLootArguments, "troopType") != validLootType)
                 throw new AgentHostException("battle-loop-self-test-native-loot-type-not-resolvable", "Each currently observed transferable Native roster type must normalize to the exact PartyScreen handler value.");
         }
+        var overLimitPrisonerTakeAll = new JsonObject { ["action"] = "partyTakeAll", ["arguments"] = new JsonObject { ["TroopType"] = "prisoners" } };
+        if (TryResolveDecision(overLimitPrisonerTakeAll, partyActions, new JsonArray(), party, new JsonArray(), null, out _, out _, out _, out _, recoverPlayerCaptivity: false))
+            throw new AgentHostException("battle-loop-self-test-over-limit-prisoner-take-all-accepted", "Take-all prisoners must be omitted and rejected when the full current left stack exceeds Native capacity; single transfers remain available.");
+        results.Add(new { scenario = "battle-loop-suppresses-whole-prisoner-take-when-native-capacity-would-be-exceeded", passed = true });
         var inventory = new JsonObject { ["context"] = new JsonObject { ["gameState"] = "InventoryState" }, ["inventoryScreen"] = new JsonObject { ["mode"] = "Loot", ["lootItemCount"] = 2 } };
         var inventoryActions = BuildActionCatalog(inventory, new JsonArray(), null, true, true);
         if (inventoryActions.Count != 1 || ReadString(inventoryActions[0] as JsonObject, "action") != "inventoryTakeAll")
@@ -1064,7 +1109,7 @@ internal static class AgentHostBattleSimulationLoop
 
     internal static async Task<IReadOnlyList<object>> RunTransportSelfTestsAsync()
     {
-        const string actionNames = "[\"mapPartyTargets\",\"pursue\",\"dialogueSelect\",\"dialogueContinue\",\"menuSelect\",\"battleSkip\",\"battleFinish\",\"partyTakeAll\",\"partyScreenDone\",\"inventoryTakeAll\",\"inventoryDone\"]";
+        const string actionNames = "[\"mapPartyTargets\",\"pursue\",\"dialogueSelect\",\"dialogueContinue\",\"menuSelect\",\"battleSkip\",\"battleFinish\",\"partyTakeAll\",\"partyLootTransferOne\",\"partyScreenDone\",\"inventoryTakeAll\",\"inventoryDone\"]";
         using var request = JsonDocument.Parse("{\"runId\":\"selftest-battle\",\"goal\":\"Resolve one visible bandit battle with Send Troops and verify outcomes.\",\"parentProcessId\":321,\"maxDecisions\":30,\"maxElapsedSeconds\":20,\"allowedActionNames\":" + actionNames + "}");
         var client = new FakeBattleSimulationNativeClient();
         var provider = new FakeBattleSimulationDecisionProvider();
@@ -1410,6 +1455,41 @@ internal static class AgentHostBattleSimulationLoop
     private static bool HasTransferableRoster(JsonArray? roster) =>
         roster?.OfType<JsonObject>().Any(x => ReadInt(x, "count", 0) > 0 && ReadBoolean(x, "transferable")) == true;
 
+    private static JsonArray BuildLootTransferPairs(JsonObject partyScreen)
+    {
+        var pairs = new JsonArray();
+        AddRows(partyScreen["leftMembers"] as JsonArray, "rightMembers", "members", ReadInt(partyScreen, "rightMemberLimit", -1));
+        AddRows(partyScreen["leftPrisoners"] as JsonArray, "rightPrisoners", "prisoners", ReadInt(partyScreen, "rightPrisonerLimit", -1));
+        return pairs;
+
+        void AddRows(JsonArray? rows, string targetRosterName, string troopType, int targetLimit)
+        {
+            if (rows is null || targetLimit < 0 || CountRoster(partyScreen[targetRosterName] as JsonArray) >= targetLimit) return;
+            foreach (var row in rows.OfType<JsonObject>())
+            {
+                var troopId = ReadString(row, "troopId");
+                if (string.IsNullOrWhiteSpace(troopId) || ReadBoolean(row, "transferable") != true || ReadInt(row, "count", 0) < 1)
+                    continue;
+                pairs.Add(new JsonObject { ["TroopId"] = troopId, ["TroopType"] = troopType });
+            }
+        }
+    }
+
+    private static bool CanTakeWholeRoster(JsonObject partyScreen, string troopType)
+    {
+        var isMembers = troopType == "members";
+        var leftName = isMembers ? "leftMembers" : "leftPrisoners";
+        var rightName = isMembers ? "rightMembers" : "rightPrisoners";
+        var limit = ReadInt(partyScreen, isMembers ? "rightMemberLimit" : "rightPrisonerLimit", -1);
+        if (limit < 0 || !HasTransferableRoster(partyScreen[leftName] as JsonArray)) return false;
+        return CountRoster(partyScreen[rightName] as JsonArray) + CountTransferableRoster(partyScreen[leftName] as JsonArray) <= limit;
+    }
+
+    private static int CountRoster(JsonArray? roster) => roster?.OfType<JsonObject>().Sum(row => ReadInt(row, "count", 0)) ?? 0;
+
+    private static int CountTransferableRoster(JsonArray? roster) =>
+        roster?.OfType<JsonObject>().Where(row => ReadBoolean(row, "transferable")).Sum(row => ReadInt(row, "count", 0)) ?? 0;
+
     private static bool CatalogContains(JsonArray catalog, string action) =>
         catalog.OfType<JsonObject>().Any(x => string.Equals(ReadString(x, "action"), action, StringComparison.Ordinal));
 
@@ -1596,7 +1676,8 @@ internal static class AgentHostBattleSimulationLoop
                     ["mode"] = "Loot", ["canDone"] = true,
                     ["leftMembers"] = _memberLootTaken ? new JsonArray() : new JsonArray(new JsonObject { ["troopId"] = "villager_empire", ["name"] = "帝国农民", ["count"] = 5, ["transferable"] = true }),
                     ["leftPrisoners"] = _prisonerLootTaken ? new JsonArray() : new JsonArray(new JsonObject { ["troopId"] = "looter", ["name"] = "劫匪", ["count"] = 4, ["transferable"] = true }),
-                    ["rightMembers"] = new JsonArray(), ["rightPrisoners"] = _prisonerLootTaken ? new JsonArray(new JsonObject { ["troopId"] = "looter", ["name"] = "劫匪", ["count"] = 4, ["transferable"] = true }) : new JsonArray()
+                    ["rightMembers"] = new JsonArray(), ["rightPrisoners"] = _prisonerLootTaken ? new JsonArray(new JsonObject { ["troopId"] = "looter", ["name"] = "劫匪", ["count"] = 4, ["transferable"] = true }) : new JsonArray(),
+                    ["rightMemberLimit"] = 25, ["rightPrisonerLimit"] = 18
                 };
             if (_stage == 13)
             {

@@ -17,7 +17,7 @@ internal static class AgentHostCampaignLoop
     };
     internal static readonly HashSet<string> BattleSimulationActions = new(StringComparer.Ordinal)
     {
-        "mapPartyTargets", "pursue", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone"
+        "mapPartyTargets", "pursue", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyLootTransferOne", "partyScreenDone", "inventoryTakeAll", "inventoryDone"
     };
     internal static readonly HashSet<string> CaptivityRecoveryActions = new(StringComparer.Ordinal) { "resume", "menuSelect" };
     internal static readonly HashSet<string> GoldSaleActions = new(StringComparer.Ordinal)

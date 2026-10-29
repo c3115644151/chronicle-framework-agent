@@ -188,6 +188,9 @@ try {
     $partyLootAfterTransfer = $null
     $partyLootTransfersVerified = $false
     $partyLootTransferCounts = $null
+    $partyLootSingleTransferVerified = $false
+    $partyLootSingleTransferReceipt = $null
+    $partyDoneInquiryReceipt = $null
     if ($Scenario -eq 'Retreat') {
         $simulationRetreat = Invoke-AgentCli 'battleRetreat' @('-CommandId', "$prefix-simulation-retreat")
         $retreatedState = $simulationRetreat.state.context.battleSimulation
@@ -244,6 +247,37 @@ try {
         Capture-BattleFrame 'loot-02-party-aftermath' $postBattleState
         if ($partyScreenObserved) {
             $partyLootBefore = $postBattleState.state.partyScreen
+            $singleSourceType = $null
+            $singleSourceRow = @($partyLootBefore.leftPrisoners | Where-Object { $_.count -gt 0 -and $_.transferable } | Select-Object -First 1)
+            if ($singleSourceRow.Count -eq 1) { $singleSourceType = 'prisoners' }
+            else {
+                $singleSourceRow = @($partyLootBefore.leftMembers | Where-Object { $_.count -gt 0 -and $_.transferable } | Select-Object -First 1)
+                if ($singleSourceRow.Count -eq 1) { $singleSourceType = 'members' }
+            }
+            if ($singleSourceRow.Count -eq 1) {
+                $singleTroopId = [string]$singleSourceRow[0].troopId
+                $singleSourceRosterName = if ($singleSourceType -eq 'prisoners') { 'leftPrisoners' } else { 'leftMembers' }
+                $singleTargetRosterName = if ($singleSourceType -eq 'prisoners') { 'rightPrisoners' } else { 'rightMembers' }
+                $countSingleTroop = {
+                    param($Roster, [string]$TroopId)
+                    $total = 0
+                    foreach ($entry in @($Roster | Where-Object { [string]$_.troopId -eq $TroopId })) { $total += [int]$entry.count }
+                    return $total
+                }
+                $singleSourceBefore = & $countSingleTroop $partyLootBefore.$singleSourceRosterName $singleTroopId
+                $singleTargetBefore = & $countSingleTroop $partyLootBefore.$singleTargetRosterName $singleTroopId
+                $partyLootSingleTransferReceipt = Invoke-AgentCli 'partyLootTransferOne' @('-TroopId', $singleTroopId, '-LootType', $singleSourceType, '-CommandId', "$prefix-loot-single-transfer")
+                $postBattleState = Invoke-AgentCli 'state' @('-CommandId', "$prefix-after-loot-single-transfer")
+                $singleAfterScreen = $postBattleState.state.partyScreen
+                $singleSourceAfter = & $countSingleTroop $singleAfterScreen.$singleSourceRosterName $singleTroopId
+                $singleTargetAfter = & $countSingleTroop $singleAfterScreen.$singleTargetRosterName $singleTroopId
+                $partyLootSingleTransferVerified = ($partyLootSingleTransferReceipt.status -eq 'completed' -and
+                    [int]$partyLootSingleTransferReceipt.data.transferredCount -eq 1 -and
+                    $singleSourceBefore -eq ($singleSourceAfter + 1) -and $singleTargetAfter -eq ($singleTargetBefore + 1) -and
+                    [int]$partyLootSingleTransferReceipt.data.transferredCount -eq 1)
+                if (-not $partyLootSingleTransferVerified) { throw "Native single-row Loot transfer did not move exactly one current $singleSourceType unit for '$singleTroopId'." }
+                Capture-BattleFrame 'loot-02b-single-transfer' $postBattleState
+            }
             $leftMemberCount = @($partyLootBefore.leftMembers | Where-Object { $_.count -gt 0 -and $_.transferable }).Count
             $leftPrisonerCount = @($partyLootBefore.leftPrisoners | Where-Object { $_.count -gt 0 -and $_.transferable }).Count
             if ($leftMemberCount -gt 0) {
@@ -276,6 +310,19 @@ try {
             $partyDone = Invoke-AgentCli 'partyScreenDone' @('-CommandId', "$prefix-party-done")
             if ($partyDone.status -ne 'completed') { throw 'Native PartyScreen Done handler did not accept the postbattle screen.' }
             $postBattleState = Invoke-AgentCli 'state' @('-CommandId', "$prefix-after-party-done")
+            if ($postBattleState.state.context.inquiryOpen -and $postBattleState.state.context.inquiry.kind -eq 'YesNoInquiry') {
+                Capture-BattleFrame 'loot-02c-party-done-inquiry' $postBattleState
+                $remainingLootRows = 0
+                foreach ($entry in @($postBattleState.state.partyScreen.leftMembers) + @($postBattleState.state.partyScreen.leftPrisoners)) {
+                    if ($entry.transferable -and [int]$entry.count -gt 0) { $remainingLootRows += [int]$entry.count }
+                }
+                if ($remainingLootRows -ne 0) {
+                    throw "Native PartyScreen Done raised an Inquiry while $remainingLootRows transferable Loot members/prisoners remained; the disposable PostBattle fixture cannot silently accept a loss/over-cap option."
+                }
+                $partyDoneInquiryReceipt = Invoke-AgentCli 'respondInquiry' @('-InquiryToken', [string]$postBattleState.state.context.inquiry.token, '-InquiryChoice', 'affirmative', '-CommandId', "$prefix-party-done-confirm-no-leftovers")
+                if ($partyDoneInquiryReceipt.status -ne 'completed') { throw 'The original Yes/No choice for a fully collected Loot roster was not resolved.' }
+                $postBattleState = Invoke-AgentCli 'state' @('-CommandId', "$prefix-after-party-done-confirmation")
+            }
             if ($postBattleState.state.context.gameState -eq 'PartyState' -and $postBattleState.state.partyScreen.mode -eq 'Loot') {
                 throw 'Native PartyScreen Done did not advance beyond the Aftermath state.'
             }
@@ -392,6 +439,9 @@ try {
         PartyScreenLootPrisonersAfterTransfer = if ($partyLootAfterTransfer) { @($partyLootAfterTransfer.leftPrisoners | ForEach-Object { [ordered]@{ troopId = $_.troopId; count = $_.count; transferable = $_.transferable } }) } else { @() }
         PartyScreenLootTransferCounts = $partyLootTransferCounts
         PartyScreenLootTransfersVerified = $partyLootTransfersVerified
+        PartyScreenLootSingleTransferVerified = $partyLootSingleTransferVerified
+        PartyScreenLootSingleTransferReceipt = if ($partyLootSingleTransferReceipt) { $partyLootSingleTransferReceipt.data } else { $null }
+        PartyScreenDoneInquiryReceipt = if ($partyDoneInquiryReceipt) { $partyDoneInquiryReceipt.data } else { $null }
         InventoryLootObserved = $inventoryScreenObserved
         InventoryLootItemCountBefore = $inventoryLootItemCountBefore
         InventoryLootItemCountAfter = $inventoryLootItemCountAfter
@@ -412,7 +462,7 @@ try {
     $scenarioPassed = if ($Scenario -eq 'Retreat') {
         $result.NativeSimulationRetreat -and $result.EncounterReturnedAfterRetreat -and $missionEntered -and $result.NativeMissionEnded -and $missionReturnedToCampaign
     } else {
-        $simulationFinished -and $null -ne $simulationFinish -and $partyLootTransfersVerified -and $inventoryScreenObserved -and $prematureInventoryDoneRejected -and $prematureInventoryDonePreservedLoot -and $inventoryItemsTransferred -gt 0 -and $inventoryDoneStatus -eq 'completed' -and $postBattleTransition
+        $simulationFinished -and $null -ne $simulationFinish -and $partyLootTransfersVerified -and $partyLootSingleTransferVerified -and $inventoryScreenObserved -and $prematureInventoryDoneRejected -and $prematureInventoryDonePreservedLoot -and $inventoryItemsTransferred -gt 0 -and $inventoryDoneStatus -eq 'completed' -and $postBattleTransition
     }
     $videoCapturePassed = ($Scenario -ne 'PostBattle' -or -not $CaptureFrames -or ($videoCaptureResult -and $videoCaptureResult.Passed -and $videoCaptureResult.FrameCoverageRatio -ge 0.9))
     $renownProgressionPassed = $Scenario -ne 'PostBattle' -or ($null -ne $result.ClanRenownDelta -and [double]$result.ClanRenownDelta -gt 0)
