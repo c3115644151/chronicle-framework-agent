@@ -1,4 +1,4 @@
-# F 类研究：军事、队伍与战役 AI
+﻿# F 类研究：军事、队伍与战役 AI
 
 适用本体：Bannerlord v1.4.8.119303。本文是 F 域唯一研究资料；按 F01-F13 系统清单编号组织事实、现有适配和未知，跨域内容以链接为主。
 
@@ -355,7 +355,7 @@ Chronicle 主队观察输出俘虏总数，当前 PartyState 观察分别序列�
 
 `partyTakeAll`只在Loot模式走本体handler；这是战后接收Roster的现有Harness适配，不代表常规PartyScreen俘虏招募、日常容器转移或Hero处置已完整支持。
 
-普通主队俘虏出售是另一种原生Roster事务：Town Backstreet“选择要卖的俘虏”打开Ransom PartyScreen，逐人由`PartyCharacterVM.ExecuteTransferSingle`暂存到买方左侧，Done才通过`IPartyScreenPrisonHandler`提交`SellPrisonersAction`。用户确认玩家可按目标选择其中一部分；俘虏降低地图队伍速度，超出俘虏上限后会逃跑，因此不应把“卖出/接收全部”写成通用Agent策略。Chronicle新增的Ransom适配和EYC Gold sale目录仅把当前Native右侧可转移行逐名开放，并要求用当前非零金币草稿/Done状态核验；2026-10-29源代码及AgentHost离线契约测试通过，但Bannerlord客户端仍加载旧DLL，本次尚无新适配的运行时提交证据。具体移速变化、逃跑时间/数量、卖出Hero的关系及技能影响未在本次确认，不外推用户提供的规则。
+普通主队俘虏出售是另一种原生Roster事务：Town Backstreet“选择要卖的俘虏”打开Ransom PartyScreen，逐人由`PartyCharacterVM.ExecuteTransferSingle`暂存到买方左侧，Done才通过`IPartyScreenPrisonHandler`提交`SellPrisonersAction`。用户确认玩家可按目标选择其中一部分；俘虏降低地图队伍速度，超出俘虏上限后会逃跑，因此不应把“卖出/接收全部”写成通用Agent策略。Chronicle的Ransom适配逐名呈现当前Native可转移行，并读取当前累计Gold草稿与Cancel可用性；Agent Host可按当前EYC金币目标和队伍需要继续增选、原版Done提交或通过原版PartyVM取消回滚。取消调用链经1.4.8 `PartyVM` IL及用户界面观察双重核对。2026-10-30 Host动作边界/离线合同测试、模块编译、Ransom逐人暂存/取消/部分提交游戏内验证均通过，详细Native回执见`TestResults/20261030-012146/RansomCancelRuntime.json`。取消回到`town_backstreet`且不改变金币、俘虏或时间；单人提交结算为1823→1873 Gold、7→6俘虏。临时存档未改写。具体移速变化、逃跑时间/数量、卖出Hero的关系及技能影响未在本次确认，不外推用户提供的规则。
 
 ### 被俘
 

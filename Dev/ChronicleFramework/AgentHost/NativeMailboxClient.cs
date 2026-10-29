@@ -282,6 +282,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
                 arguments["inventorySide"] is JsonValue sideNode && sideNode.TryGetValue<string>(out var side) && side == "PlayerInventory" &&
                 HasText(arguments, "itemViewModelId") && arguments["amount"] is JsonValue amountNode && amountNode.TryGetValue<int>(out var amount) && amount == 1,
             "sellPrisonerOne" => HasOnlyKeys(arguments, "troopId") && HasText(arguments, "troopId"),
+            "partyScreenCancel" => arguments.Count == 0,
             "partyScreenDone" => arguments.Count == 0,
             _ => false
         };
@@ -300,6 +301,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             ("tradeOptions", "{}"),
             ("trade", "{\"direction\":\"sell\",\"itemViewModelId\":\"current-goods-id\",\"inventorySide\":\"PlayerInventory\",\"amount\":1}"),
             ("sellPrisonerOne", "{\"troopId\":\"mounted_ransacker\"}"),
+            ("partyScreenCancel", "{}"),
             ("partyScreenDone", "{}"),
             ("tradeConfirm", "{}"),
             ("tradeCancel", "{}"),
@@ -315,6 +317,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             ("trade", "{\"direction\":\"sell\",\"itemViewModelId\":\"current-goods-id\",\"inventorySide\":\"PlayerInventory\",\"amount\":2}"),
             ("trade", "{\"direction\":\"sell\",\"itemViewModelId\":\"current-goods-id\",\"inventorySide\":\"OtherInventory\",\"amount\":1}"),
             ("sellPrisonerOne", "{\"troopId\":\"mounted_ransacker\",\"count\":7}"),
+            ("partyScreenCancel", "{\"confirm\":true}"),
             ("move", "{\"settlementId\":\"visible-safe-town\",\"resume\":true}")
         };
         foreach (var item in invalidCases)

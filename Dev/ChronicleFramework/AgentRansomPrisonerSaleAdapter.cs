@@ -129,6 +129,56 @@ internal static class ChronicleRansomPrisonerSaleAdapter
             ",\"partyScreenClosed\":" + (stateAfter != state ? "true" : "false") + "}";
     }
 
+    internal static string Cancel()
+    {
+        var state = Game.Current?.GameStateManager?.ActiveState as PartyState;
+        if (state?.PartyScreenLogic == null || state.PartyScreenMode != PartyScreenHelper.PartyScreenMode.Ransom ||
+            state.PartyScreenLogic.RightOwnerParty?.MobileParty != MobileParty.MainParty)
+            throw new InvalidOperationException("Ransom Cancel requires the current Native Ransom PartyState for MainParty");
+        if (ChronicleInquiryAdapter.IsInquiryOpen)
+            throw new InvalidOperationException("Ransom Cancel is blocked by an active Native inquiry");
+        var logic = state.PartyScreenLogic;
+        if (!logic.IsCancelActive()) throw new InvalidOperationException("Native Ransom PartyScreen Cancel is unavailable");
+
+        var goldBefore = Hero.MainHero?.Gold ?? 0;
+        var prisonerCountBefore = MobileParty.MainParty.PrisonRoster.TotalManCount;
+        var selectedCount = logic.GetRoster(PartyScreenLogic.PartyRosterSide.Left, PartyScreenLogic.TroopType.Prisoner).TotalManCount;
+        var draftGoldChange = logic.CurrentData.PartyGoldChangeAmount;
+        var dayBefore = CampaignTime.Now.ToDays;
+        var modeBefore = Campaign.Current?.TimeControlMode.ToString() ?? string.Empty;
+        var viewModel = ChroniclePartyScreenAdapter.AttachToActivePartyScreen(state);
+        try
+        {
+            // Native party screens use this same VM command for their visible Cancel control.
+            // In Ransom mode ExecuteCancel(false) resets the draft and closes without a query.
+            viewModel.ExecuteCancelWithoutInquiry();
+        }
+        finally
+        {
+            ChroniclePartyScreenAdapter.Finalize(viewModel);
+        }
+
+        var goldAfter = Hero.MainHero?.Gold ?? 0;
+        var prisonerCountAfter = MobileParty.MainParty.PrisonRoster.TotalManCount;
+        var dayAfter = CampaignTime.Now.ToDays;
+        var modeAfter = Campaign.Current?.TimeControlMode.ToString() ?? string.Empty;
+        var stateAfter = Game.Current?.GameStateManager?.ActiveState;
+        var closed = stateAfter != state;
+        var passed = closed && goldAfter == goldBefore && prisonerCountAfter == prisonerCountBefore &&
+            Math.Abs(dayAfter - dayBefore) <= 0.000001 && modeBefore == modeAfter;
+
+        return "{\"schemaVersion\":1,\"postconditionPassed\":" + (passed ? "true" : "false") +
+            ",\"nativeHandler\":\"PartyVM.ExecuteCancelWithoutInquiry->ExecuteCancel(false)\"" +
+            ",\"selectedCountDiscarded\":" + selectedCount +
+            ",\"nativeGoldChangeDiscarded\":" + draftGoldChange.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+            ",\"playerGoldBefore\":" + goldBefore + ",\"playerGoldAfter\":" + goldAfter +
+            ",\"prisonerCountBefore\":" + prisonerCountBefore + ",\"prisonerCountAfter\":" + prisonerCountAfter +
+            ",\"timeControlModeBefore\":\"" + modeBefore + "\",\"timeControlModeAfter\":\"" + modeAfter + "\"" +
+            ",\"campaignDayBefore\":" + dayBefore.ToString("R", System.Globalization.CultureInfo.InvariantCulture) +
+            ",\"campaignDayAfter\":" + dayAfter.ToString("R", System.Globalization.CultureInfo.InvariantCulture) +
+            ",\"partyScreenClosed\":" + (closed ? "true" : "false") + "}";
+    }
+
     private static void Property(StringBuilder builder, string name, string value)
     {
         builder.Append(",\"").Append(name).Append("\":\"").Append((value ?? string.Empty)

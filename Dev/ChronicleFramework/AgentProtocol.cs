@@ -1447,6 +1447,12 @@ internal sealed class ChronicleAgentProtocol
                     WriteResponse(commandId, action, "completed", behavior, null,
                         ChronicleRansomPrisonerSaleAdapter.TransferOne(ReadString(command, "troopId")));
                     break;
+                case "partyScreenCancel":
+                    var activeCancelPartyState = Game.Current.GameStateManager.ActiveState as PartyState;
+                    if (activeCancelPartyState?.PartyScreenMode.ToString() != "Ransom")
+                        throw new InvalidOperationException("partyScreenCancel requires the native prisoner-sale Ransom PartyState");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleRansomPrisonerSaleAdapter.Cancel());
+                    break;
                 case "partyScreenDone":
                     if (ChronicleAlleyRosterAdapter.IsCurrentNativeAlleyPartyScreen())
                     {

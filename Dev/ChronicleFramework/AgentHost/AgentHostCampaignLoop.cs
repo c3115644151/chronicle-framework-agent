@@ -22,7 +22,8 @@ internal static class AgentHostCampaignLoop
     internal static readonly HashSet<string> CaptivityRecoveryActions = new(StringComparer.Ordinal) { "resume", "menuSelect" };
     internal static readonly HashSet<string> GoldSaleActions = new(StringComparer.Ordinal)
     {
-        "mapSettlementTargets", "move", "menuSelect", "tradeOptions", "trade", "tradeConfirm", "tradeCancel", "tradeCancelChanges"
+        "mapSettlementTargets", "move", "menuSelect", "tradeOptions", "trade", "tradeConfirm", "tradeCancel", "tradeCancelChanges",
+        "sellPrisonerOne", "partyScreenDone", "partyScreenCancel"
     };
     internal static readonly HashSet<string> RecruitmentActions = new(StringComparer.Ordinal) { "recruitOptions", "recruit", "prisonerRecruitmentOptions", "recruitPrisoner" };
     internal static readonly HashSet<string> CompanionHiringActions = new(StringComparer.Ordinal) { "missionSceneAgents", "missionNavigateToAgent", "missionInteract", "missionLeave" };
@@ -32,6 +33,10 @@ internal static class AgentHostCampaignLoop
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
         var results = new List<object>();
+        if (!GoldSaleActions.Contains("sellPrisonerOne") || !GoldSaleActions.Contains("partyScreenDone") || !GoldSaleActions.Contains("partyScreenCancel") ||
+            !AllSupportedActions.Contains("sellPrisonerOne") || !AllSupportedActions.Contains("partyScreenCancel"))
+            throw new AgentHostException("campaign-loop-ransom-sale-actions-missing", "The current Gold sale scope and product MCM start catalog must include Native one-prisoner Ransom transfer, Done and Cancel.");
+        results.Add(new { scenario = "campaign-loop-gold-sale-scope-includes-native-ransom-transfer-done-cancel", passed = true });
         results.AddRange(AgentHostMapIncidentLoop.RunContractSelfTestsAsync().GetAwaiter().GetResult());
         results.AddRange(AgentHostStoryModeBootstrapLoop.RunContractSelfTests());
         if (new[] { 0, 30, 80, 159, 319 }.Any(prior => prior >= GetCumulativeDecisionLimit(MaxCumulativeDecisions)) ||

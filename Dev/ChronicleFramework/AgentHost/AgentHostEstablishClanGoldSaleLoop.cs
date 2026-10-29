@@ -214,13 +214,18 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         if (backstreetSaleCatalog.Count != 1 || ReadString(backstreetSaleCatalog[0] as JsonObject, "action") != "menuSelect" ||
             (backstreetSaleCatalog[0]?["argumentValues"]?["OptionId"] as JsonArray)?.Count != 2)
             throw new AgentHostException("gold-sale-self-test-backstreet-prisoner-option-missing", "Offer the currently enabled prisoner-selection entry alongside the Native Leave option, without exposing full-sale or invented menu choices.");
+        var ransomCancelReceipt = new JsonObject { ["action"] = "partyScreenCancel", ["status"] = "completed" };
+        var backstreetAfterCancelCatalog = BuildActionCatalog(backstreetWithSale, ransomCancelReceipt, null, null);
+        if (backstreetAfterCancelCatalog.Count != 1 || ReadString(backstreetAfterCancelCatalog[0] as JsonObject, "action") != "menuSelect" ||
+            (backstreetAfterCancelCatalog[0]?["argumentValues"]?["OptionId"] as JsonArray)?.Any(value => value?.GetValue<string>() == "sell_some_prisoners") == true)
+            throw new AgentHostException("gold-sale-self-test-ransom-cancel-reopened-same-sale", "After Native Ransom Cancel, do not re-enter the identical sale immediately; only current Backstreet Leave options remain available.");
 
         var ransomState = new JsonObject
         {
             ["context"] = new JsonObject { ["gameState"] = "PartyState", ["menuId"] = null, ["inquiryOpen"] = false, ["captivity"] = null },
             ["partyScreen"] = new JsonObject
             {
-                ["mode"] = "Ransom", ["canDone"] = true, ["rightPartyId"] = "player_party", ["ransomGoldChangeAmount"] = 0,
+                ["mode"] = "Ransom", ["canDone"] = true, ["cancelAvailable"] = true, ["rightPartyId"] = "player_party", ["ransomGoldChangeAmount"] = 0,
                 ["leftPrisoners"] = new JsonArray(),
                 ["rightPrisoners"] = new JsonArray
                 {
@@ -231,7 +236,8 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         };
         var ransomCatalog = BuildActionCatalog(ransomState, null, null, null);
         var ransomTroopIds = ransomCatalog.FirstOrDefault()?["argumentValues"]?["TroopId"] as JsonArray;
-        if (ransomCatalog.Count != 1 || ReadString(ransomCatalog[0] as JsonObject, "action") != "sellPrisonerOne" ||
+        if (ransomCatalog.Count != 2 || !ransomCatalog.OfType<JsonObject>().Any(item => ReadString(item, "action") == "sellPrisonerOne") ||
+            !ransomCatalog.OfType<JsonObject>().Any(item => ReadString(item, "action") == "partyScreenCancel") ||
             ransomTroopIds?.Count != 2 || ransomTroopIds[0]?.GetValue<string>() != "mounted_ransacker" ||
             !TryResolveAction(ransomState, null, ransomCatalog, new JsonObject
             {
@@ -243,16 +249,43 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         selectedRansomState["partyScreen"]!["leftPrisoners"] = new JsonArray(new JsonObject { ["troopId"] = "mounted_ransacker", ["count"] = 1 });
         selectedRansomState["partyScreen"]!["ransomGoldChangeAmount"] = 47d;
         var selectedRansomCatalog = BuildActionCatalog(selectedRansomState, null, null, null);
-        if (selectedRansomCatalog.Count != 1 || ReadString(selectedRansomCatalog[0] as JsonObject, "action") != "partyScreenDone")
-            throw new AgentHostException("gold-sale-self-test-ransom-submit-gate-failed", $"After one Native prisoner selection, only Native Done should be offered to commit the current partial sale; got={selectedRansomCatalog.ToJsonString()}.");
+        if (!selectedRansomCatalog.OfType<JsonObject>().Any(item => ReadString(item, "action") == "partyScreenDone") ||
+            !selectedRansomCatalog.OfType<JsonObject>().Any(item => ReadString(item, "action") == "partyScreenCancel") ||
+            !selectedRansomCatalog.OfType<JsonObject>().Any(item => ReadString(item, "action") == "sellPrisonerOne"))
+            throw new AgentHostException("gold-sale-self-test-ransom-draft-choice-missing", "A current Ransom draft must let the model observe its quote and choose to add a current prisoner, commit, or cancel.");
+        if (!TryResolveAction(selectedRansomState, null, selectedRansomCatalog, new JsonObject
+            {
+                ["action"] = "partyScreenCancel", ["arguments"] = new JsonObject()
+            }, null, null, out var cancelAction, out var cancelArguments, out _) ||
+            cancelAction != "partyScreenCancel" || cancelArguments?.Count != 0)
+            throw new AgentHostException("gold-sale-self-test-ransom-cancel-resolution-failed", "The Native Ransom cancel command must resolve only from the current cancel-enabled PartyState without additional arguments.");
         var zeroValueRansomState = selectedRansomState.DeepClone().AsObject();
         zeroValueRansomState["partyScreen"]!["ransomGoldChangeAmount"] = 0;
-        if (BuildActionCatalog(zeroValueRansomState, null, null, null).Count != 0 ||
+        var zeroValueRansomCatalog = BuildActionCatalog(zeroValueRansomState, null, null, null);
+        if (zeroValueRansomCatalog.OfType<JsonObject>().Any(item => ReadString(item, "action") == "partyScreenDone") ||
+            !zeroValueRansomCatalog.OfType<JsonObject>().Any(item => ReadString(item, "action") == "partyScreenCancel") ||
+            !zeroValueRansomCatalog.OfType<JsonObject>().Any(item => ReadString(item, "action") == "sellPrisonerOne") ||
             TryResolveAction(zeroValueRansomState, null, selectedRansomCatalog, new JsonObject
             {
                 ["action"] = "partyScreenDone", ["arguments"] = new JsonObject()
             }, null, null, out _, out _, out _))
-            throw new AgentHostException("gold-sale-self-test-ransom-zero-value-commit-accepted", "Do not submit a Native prisoner selection that does not show an actual Gold change.");
+            throw new AgentHostException("gold-sale-self-test-ransom-zero-value-commit-accepted", "A zero-value draft cannot be submitted, but the original Native Cancel must remain available to discard it.");
+        var negativeValueRansomState = selectedRansomState.DeepClone().AsObject();
+        negativeValueRansomState["partyScreen"]!["ransomGoldChangeAmount"] = -47d;
+        if (BuildActionCatalog(negativeValueRansomState, null, null, null).OfType<JsonObject>().Any(item => ReadString(item, "action") == "partyScreenDone") ||
+            TryResolveAction(negativeValueRansomState, null, selectedRansomCatalog, new JsonObject
+            {
+                ["action"] = "partyScreenDone", ["arguments"] = new JsonObject()
+            }, null, null, out _, out _, out _))
+            throw new AgentHostException("gold-sale-self-test-negative-ransom-commit-accepted", "A prisoner-sale draft that would reduce MainHero Gold must not expose Native Done.");
+        var disabledRansomCancel = selectedRansomState.DeepClone().AsObject();
+        disabledRansomCancel["partyScreen"]!["cancelAvailable"] = false;
+        if (BuildActionCatalog(disabledRansomCancel, null, null, null).OfType<JsonObject>().Any(item => ReadString(item, "action") == "partyScreenCancel") ||
+            TryResolveAction(disabledRansomCancel, null, selectedRansomCatalog, new JsonObject
+            {
+                ["action"] = "partyScreenCancel", ["arguments"] = new JsonObject()
+            }, null, null, out _, out _, out _))
+            throw new AgentHostException("gold-sale-self-test-ransom-disabled-cancel-exposed", "Do not expose Native Ransom Cancel when the current PartyVM says it is unavailable.");
         var townReachedAfterMovement = MapState("town", "town-a", new JsonArray(new JsonObject { ["id"] = "trade", ["available"] = true, ["enabled"] = true }));
         townReachedAfterMovement["location"]!["targetSettlementId"] = "town-a";
         if (!HasReachedMoveTargetMenu(townReachedAfterMovement, "town-a") || HasReachedMoveTargetMenu(townReachedAfterMovement, "town-b"))
@@ -565,9 +598,8 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                     var data = receipt["data"] as JsonObject ?? new JsonObject();
                     if (ReadInt(data, "transferredCount", 0) != 1 ||
                         ReadInt(data, "sourceCountAfter", -1) != ReadInt(data, "sourceCountBefore", -1) - 1 ||
-                        ReadInt(data, "saleCountAfter", -1) != ReadInt(data, "saleCountBefore", -1) + 1 ||
-                        ReadInt(data, "nativeGoldChangeAfter", 0) == ReadInt(data, "nativeGoldChangeBefore", 0))
-                        throw new AgentHostException("gold-sale-ransom-native-draft-invalid", "Native did not move exactly one selected prisoner or produce a visible non-zero Ransom quote change.");
+                        ReadInt(data, "saleCountAfter", -1) != ReadInt(data, "saleCountBefore", -1) + 1)
+                        throw new AgentHostException("gold-sale-ransom-native-draft-invalid", "Native did not move exactly one selected prisoner into the current Ransom draft.");
                 }
                 if (action == "partyScreenDone")
                 {
@@ -579,6 +611,17 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                         throw new AgentHostException("gold-sale-ransom-native-commit-unverified", "Native Ransom Done did not prove a positive Gold gain, exact prisoner removal, and unchanged Campaign time state.");
                     saleReceipt = data.DeepClone() as JsonObject;
                     saleActionCount++;
+                }
+                if (action == "partyScreenCancel")
+                {
+                    var data = receipt["data"] as JsonObject ?? new JsonObject();
+                    if (ReadBoolean(data, "postconditionPassed") != true ||
+                        ReadInt(data, "playerGoldAfter", -1) != ReadInt(data, "playerGoldBefore", -2) ||
+                        ReadInt(data, "prisonerCountAfter", -1) != ReadInt(data, "prisonerCountBefore", -2) ||
+                        ReadBoolean(data, "partyScreenClosed") != true ||
+                        ReadString(data, "timeControlModeBefore") != ReadString(data, "timeControlModeAfter") ||
+                        Math.Abs(ReadDouble(data, "campaignDayBefore", double.NaN) - ReadDouble(data, "campaignDayAfter", double.NaN)) > 0.000001)
+                        throw new AgentHostException("gold-sale-ransom-cancel-unverified", "Native Cancel did not prove it discarded the current Ransom draft without Gold, prisoner, time or page-close side effects.");
                 }
 
                 previousReceipt = BuildReceipt(action!, arguments!, receipt);
@@ -708,18 +751,23 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             var leftRows = screen["leftPrisoners"] as JsonArray;
             var selected = CountRoster(leftRows);
             var goldDraft = ReadDouble(screen, "ransomGoldChangeAmount", 0);
-            if (selected > 0 && goldDraft != 0 && ReadBoolean(screen, "canDone"))
-                return new JsonArray(new JsonObject { ["action"] = "partyScreenDone", ["arguments"] = new JsonArray() });
-            if (selected > 0) return new JsonArray();
             var ransomIds = rightRows?.OfType<JsonObject>().Where(row => ReadBoolean(row, "transferable") && ReadInt(row, "count", 0) > 0)
                 .Select(row => ReadString(row, "troopId")).Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToArray()
                 ?? Array.Empty<string>();
-            if (ransomIds.Length == 0) return new JsonArray();
-            return new JsonArray(new JsonObject
+            var actions = new JsonArray();
+            if (ransomIds.Length > 0)
             {
-                ["action"] = "sellPrisonerOne", ["arguments"] = new JsonArray("TroopId"),
-                ["argumentValues"] = new JsonObject { ["TroopId"] = new JsonArray(ransomIds.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray()) }
-            });
+                actions.Add(new JsonObject
+                {
+                    ["action"] = "sellPrisonerOne", ["arguments"] = new JsonArray("TroopId"),
+                    ["argumentValues"] = new JsonObject { ["TroopId"] = new JsonArray(ransomIds.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray()) }
+                });
+            }
+            if (selected > 0 && goldDraft > 0 && ReadBoolean(screen, "canDone"))
+                actions.Add(new JsonObject { ["action"] = "partyScreenDone", ["arguments"] = new JsonArray() });
+            if (ReadBoolean(screen, "cancelAvailable"))
+                actions.Add(new JsonObject { ["action"] = "partyScreenCancel", ["arguments"] = new JsonArray() });
+            return actions;
         }
         if (gameState != "MapState") return new JsonArray();
         if (IsMapConversationActive(state)) return BuildMapConversationActionCatalog(state);
@@ -753,8 +801,9 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 if (!AgentHostCampaignStateFacts.IsNativeLocationMenu(state)) return new JsonArray();
                 if (menuId == "town_backstreet")
                 {
+                    var cancelJustReturned = ReadString(previousReceipt, "action") == "partyScreenCancel" && ReadString(previousReceipt, "status") == "completed";
                     var entries = GetEnabledOptions(state).OfType<JsonObject>()
-                        .Where(option => ReadString(option, "id") == "sell_some_prisoners" || ReadBoolean(option, "isLeave"))
+                        .Where(option => (!cancelJustReturned && ReadString(option, "id") == "sell_some_prisoners") || ReadBoolean(option, "isLeave"))
                         .Select(option => ReadString(option, "id")).Where(id => !string.IsNullOrWhiteSpace(id))
                         .Distinct(StringComparer.Ordinal).ToArray();
                     if (entries.Contains("sell_some_prisoners", StringComparer.Ordinal))
@@ -975,14 +1024,26 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             arguments = new JsonObject { ["troopId"] = troopId };
             return true;
         }
+        if (action == "partyScreenCancel")
+        {
+            var screen = state["partyScreen"] as JsonObject;
+            if (ReadString(state["context"] as JsonObject, "gameState") != "PartyState" || ReadString(screen, "mode") != "Ransom" ||
+                ReadString(screen, "rightPartyId") != "player_party" || !ReadBoolean(screen, "cancelAvailable") || supplied.Count != 0)
+            {
+                rejection = "Cancel only the current MainParty Ransom draft when the Native PartyVM says Cancel is available.";
+                return false;
+            }
+            arguments = new JsonObject();
+            return true;
+        }
         if (action == "partyScreenDone")
         {
             var screen = state["partyScreen"] as JsonObject;
             if (ReadString(state["context"] as JsonObject, "gameState") != "PartyState" || ReadString(screen, "mode") != "Ransom" ||
                 ReadString(screen, "rightPartyId") != "player_party" || !ReadBoolean(screen, "canDone") ||
-                CountRoster(screen?["leftPrisoners"] as JsonArray) < 1 || ReadDouble(screen, "ransomGoldChangeAmount", 0) == 0 || supplied.Count != 0)
+                CountRoster(screen?["leftPrisoners"] as JsonArray) < 1 || ReadDouble(screen, "ransomGoldChangeAmount", 0) <= 0 || supplied.Count != 0)
             {
-                rejection = "Commit only a current Native Ransom draft with selected prisoners and a non-zero visible gold change.";
+                rejection = "Commit only a current Native Ransom draft that adds Gold and shows the current Done button enabled.";
                 return false;
             }
             arguments = new JsonObject();
