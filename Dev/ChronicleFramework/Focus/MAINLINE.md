@@ -1254,3 +1254,9 @@ Companion路线验证了“委托原版连续执行、Agent保留决策和结果
 这完成了该开发门禁要求的“从现存完整检查点到原版建立家族Journal消失”的实战路径；但当前Campaign不是新建存档，而且不是LLM自主决策验收。后续要修正Loot单人transfer viewmodel映射并在同类超限Loot屏复验，再将这条成功手动路径做成可重放、分阶段记录的EYC纵测。护送商队Issue在战斗中从活动列表消失，但没有可读Closed Quest History；结论保留为未判定，不能把战后胜利或声望变化单独归因为护送Issue成功。
 
 商队护送后续设计约束（用户补充）：以“在商队附近护行、能对来袭敌队反应、保持商队存活”为实际玩家目标；普通推进中不因EscortParty/同地等待每秒请求模型。用户确认敌队可在路上靠近，玩家可预先拦截或等到交战后支援；追求主动任务闭环时需基于Journal当前下一目的地和可见敌队/MapEvent做有界事件决策。安装键位文件中Native `MapFollowModifier=LeftAlt`已核验，但它是地图点击修饰键，不是独立“跟随键”。本次Caravan任务历史结局仍不可见且没有计作已完成。
+
+### 2026-10-29 真正新建StoryMode的Tutorial-skip种子
+
+`TestResults/20261029-100439/FreshStoryModeSetup.json`/`Temp/FreshCampaignResult.json`以Harness流程从原版`InitialState→StoryModeNewGame`创建了一个全新StoryMode，无正式旧档、无Native autosave、无崩溃。原版兄长对话的Tutorial skip option与确认均出现并被选择；首个稳定状态为`MapState`, `menuId=training_field_menu`, 当前聚落`tutorial_training_field`，EYC已由原版事件自然激活。Harness以唯一开发名`ChronicleEycDev-20261029-fresh-skip-seed`保存了这个无预处理资源的disposable首个Map检查点（SHA-256 `627A3C271B282D611F35B8118EC8D0C40D75C6CCAC4B0D7420A8C649A0A44A2`）。Stats在初始捕获为Gold1000、Renown20、Party1、Tier0，Tutorial skip前未已有EYC进度。
+
+这次Setup为了建立可复跑种子而由Harness按Native创角界面自动选择Vlandian culture/背景，并自动选择Tutorial skip，不曾调用真实模型；因此它仅证实原版新建Campaign到首个Map/EYC激活和安全留存的路径，不算AI/LLM自主新建或完成EYC的验收，也不作为两个Issue #130新Campaign门禁中的一例。接下来从此新档手动验证Name/旗帜/开局提示/目标执行时，逐项记录Native步骤；不能把setup脚本选择包装成模型决策。
