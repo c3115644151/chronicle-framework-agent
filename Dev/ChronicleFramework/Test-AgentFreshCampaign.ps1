@@ -139,6 +139,7 @@ $providerEnvironmentNames = @(
     'CHRONICLE_LLM_THINKING_MODE','CHRONICLE_LLM_REASONING_EFFORT','CHRONICLE_LLM_TIMEOUT_SECONDS',
     'CHRONICLE_LLM_OUTPUT_MODE','CHRONICLE_LLM_MAX_RUN_COST_CNY'
 )
+$providerEnvironmentImportNames = @($providerEnvironmentNames | Where-Object { $_ -notin @('CHRONICLE_LLM_API_KEY','FREELLMAPI_API_KEY') })
 $previousProviderEnvironment = [ordered]@{}
 foreach ($name in $providerEnvironmentNames) { $previousProviderEnvironment[$name] = [Environment]::GetEnvironmentVariable($name,'Process') }
 $previousIssueProbeFlag = $env:CHRONICLE_FRESH_CAMPAIGN_SKIP_ISSUE_PROBE
@@ -166,7 +167,7 @@ if ($StoryModeEycPersistentSeed) {
 }
 try {
     if ($StoryModeEycLiveModelEvaluation) {
-        foreach ($name in $providerEnvironmentNames) {
+        foreach ($name in $providerEnvironmentImportNames) {
             if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name,'Process'))) {
                 $userValue = [Environment]::GetEnvironmentVariable($name,'User')
                 if (-not [string]::IsNullOrWhiteSpace($userValue)) { [Environment]::SetEnvironmentVariable($name,$userValue,'Process') }
@@ -174,14 +175,15 @@ try {
         }
         $providerBaseUrl = [string]$env:CHRONICLE_LLM_BASE_URL
         $providerModelId = [string]$env:CHRONICLE_LLM_MODEL
-        $providerApiKey = if (-not [string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_API_KEY)) { [string]$env:CHRONICLE_LLM_API_KEY } else { [string]$env:FREELLMAPI_API_KEY }
         $providerUri = $null
         if ([string]::IsNullOrWhiteSpace($providerModelId) -or -not [Uri]::TryCreate($providerBaseUrl,[UriKind]::Absolute,[ref]$providerUri)) {
             throw 'StoryMode live-model preflight requires the configured provider base URL and model ID; Bannerlord was not started.'
         }
+        . (Join-Path $harnessRoot 'Get-FreeLLMAPIProfile.ps1')
+        $providerCredential = Get-ChronicleProviderCredential -Endpoint $providerUri
+        $providerApiKey = [string]$providerCredential.Value
         if ($providerUri.IsLoopback -and $providerUri.Port -eq 31415 -and $providerUri.AbsolutePath.TrimEnd('/') -eq '/v1') {
             if ([string]::IsNullOrWhiteSpace($providerApiKey)) { throw 'FreeLLMAPI client key is unavailable; Bannerlord was not started and no key value was displayed.' }
-            . (Join-Path $harnessRoot 'Get-FreeLLMAPIProfile.ps1')
             $freeLlmApiProfile = Initialize-FreeLLMAPIProfile
             if ($freeLlmApiProfile.ModelExecutionStatus -notin @('ready','router')) { throw 'Configured FreeLLMAPI model is not currently available; Bannerlord was not started.' }
             $providerProfile = [pscustomobject]@{ ProviderHost=$providerUri.Host; ModelId=$providerModelId; OutputMode=[string]$env:CHRONICLE_LLM_OUTPUT_MODE; DeepSeekRunCostLimitCny=[double]$env:CHRONICLE_LLM_MAX_RUN_COST_CNY; CatalogListed=$true; FreeLLMAPI=$true }

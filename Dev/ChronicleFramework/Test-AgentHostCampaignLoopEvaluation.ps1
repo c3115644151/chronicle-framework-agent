@@ -15,6 +15,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1')
 if (@($VillageToolsQuest, $EstablishYourClanGoalPlanner, $EstablishYourClanAutonomyLoop, $CaptivityRecoveryFromExisting, $EstablishClanGoldSaleFromStoryMode, $BattleSimulationLoop, $BattleAndCaptivityLoop | Where-Object { $_ }).Count -gt 1) { throw 'Select only one Agent Host Campaign evaluation slice per run.' }
 $liveTest = Join-Path $PSScriptRoot 'Test-AgentLiveModelLoop.ps1'
 $outerTemp = $env:CHRONICLE_HARNESS_TEMP
@@ -40,7 +41,6 @@ function Initialize-ChronicleCampaignLoopProviderProfile {
     if ([string]::IsNullOrWhiteSpace($protocol)) { $protocol = 'openai-compatible' }
 
     if ([string]::IsNullOrWhiteSpace($baseUrl) -or [string]::IsNullOrWhiteSpace($modelId)) {
-        . (Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1')
         return Initialize-FreeLLMAPIProfile
     }
     $endpoint = $null
@@ -51,10 +51,11 @@ function Initialize-ChronicleCampaignLoopProviderProfile {
         -not [string]::IsNullOrWhiteSpace($endpoint.Fragment)) {
         throw 'Configured provider must be an OpenAI-compatible HTTPS endpoint (HTTP is allowed only on loopback), without credentials, query, or fragment.'
     }
-    $apiKey = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_API_KEY', 'Process')
-    if ([string]::IsNullOrWhiteSpace($apiKey)) { $apiKey = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_API_KEY', 'User') }
-    if ([string]::IsNullOrWhiteSpace($apiKey)) { $apiKey = [string][Environment]::GetEnvironmentVariable('FREELLMAPI_API_KEY', 'Process') }
-    if ([string]::IsNullOrWhiteSpace($apiKey)) { $apiKey = [string][Environment]::GetEnvironmentVariable('FREELLMAPI_API_KEY', 'User') }
+    if ($endpoint.IsLoopback -and $endpoint.Port -eq 31415 -and $endpoint.AbsolutePath.TrimEnd('/') -eq '/v1') {
+        return Initialize-FreeLLMAPIProfile
+    }
+    $credential = Get-ChronicleProviderCredential -Endpoint $endpoint
+    $apiKey = [string]$credential.Value
     if (-not $endpoint.IsLoopback -and [string]::IsNullOrWhiteSpace($apiKey)) {
         throw 'The configured remote OpenAI-compatible provider requires a user/process API key; no key was printed or written to the provider profile.'
     }

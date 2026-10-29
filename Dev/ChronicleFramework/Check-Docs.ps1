@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.434'
+$contractVersion = '7.436'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -130,8 +130,12 @@ if ($agentProviderBudgetSource -notmatch 'File\]::Replace' -or $agentDecisionLoo
 $agentLiveModelLoopSource = Get-Content (Join-Path $harnessRoot 'Test-AgentLiveModelLoop.ps1') -Raw -Encoding UTF8
 $persistentEycCampaignSource = Get-Content (Join-Path $harnessRoot 'Test-AgentPersistentStoryModeCampaign.ps1') -Raw -Encoding UTF8
 $agentHostCampaignLoopEvaluationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostCampaignLoopEvaluation.ps1') -Raw -Encoding UTF8
-if ($agentLiveModelLoopSource -notmatch 'ProviderProtocol' -or $agentLiveModelLoopSource -notmatch 'CHRONICLE_LLM_PROTOCOL' -or $agentLiveModelLoopSource -notmatch 'isFreeLlmApi' -or $agentLiveModelLoopSource -notmatch 'FREELLMAPI_API_KEY' -or $agentLiveModelLoopSource -notmatch 'available=true' -or $agentLiveModelLoopSource -notmatch 'configured provider model-list preflight' -or $agentLiveModelLoopSource -notmatch 'remote OpenAI-compatible provider requires an environment API key' -or $agentLiveModelLoopSource -notmatch 'no inference request was sent' -or $agentLiveModelLoopSource -notmatch 'ProviderRouteHistory' -or $agentLiveModelLoopSource -notmatch 'sargot-three-day-food-v1' -or $agentLiveModelLoopSource -notmatch 'CompletionContractBase64' -or $agentLiveModelLoopSource -notmatch 'termination.goalVerified') { throw 'Live Campaign evaluation must health-check the configured OpenAI-compatible provider, require a key for remote HTTPS endpoints, retain FreeLLMAPI execution-status validation for its route, record actual routing, and preserve Native goal verification.' }
+if ($agentLiveModelLoopSource -notmatch 'ProviderProtocol' -or $agentLiveModelLoopSource -notmatch 'CHRONICLE_LLM_PROTOCOL' -or $agentLiveModelLoopSource -notmatch 'isFreeLlmApi' -or $agentLiveModelLoopSource -notmatch 'Get-ChronicleProviderCredential' -or $agentLiveModelLoopSource -notmatch 'available=true' -or $agentLiveModelLoopSource -notmatch 'configured provider model-list preflight' -or $agentLiveModelLoopSource -notmatch 'remote OpenAI-compatible provider requires an environment API key' -or $agentLiveModelLoopSource -notmatch 'no inference request was sent' -or $agentLiveModelLoopSource -notmatch 'ProviderRouteHistory' -or $agentLiveModelLoopSource -notmatch 'sargot-three-day-food-v1' -or $agentLiveModelLoopSource -notmatch 'CompletionContractBase64' -or $agentLiveModelLoopSource -notmatch 'termination.goalVerified') { throw 'Live Campaign evaluation must health-check the configured OpenAI-compatible provider, require a key for remote HTTPS endpoints, retain FreeLLMAPI execution-status validation for its route, record actual routing, and preserve Native goal verification.' }
+$freeLlmApiDedicatedUserKeyIndex = $freeLlmApiProfileSource.IndexOf("@{ Name = 'FREELLMAPI_API_KEY'; Target = 'User' }", [StringComparison]::Ordinal)
+$freeLlmApiGenericUserKeyIndex = $freeLlmApiProfileSource.IndexOf("@{ Name = 'CHRONICLE_LLM_API_KEY'; Target = 'User' }", [StringComparison]::Ordinal)
+if ($freeLlmApiDedicatedUserKeyIndex -lt 0 -or $freeLlmApiGenericUserKeyIndex -le $freeLlmApiDedicatedUserKeyIndex -or $freeLlmApiProfileSource -notmatch 'ApiKeySource = \$apiKeySource') { throw 'The FreeLLMAPI preflight must prefer its dedicated user credential over the generic model-provider key.' }
 if ($freeLlmApiProfileSource -notmatch 'Initialize-FreeLLMAPIProfile' -or $freeLlmApiProfileSource -notmatch 'FREELLMAPI_API_KEY' -or $freeLlmApiProfileSource -notmatch 'CHRONICLE_LLM_API_KEY' -or $freeLlmApiProfileSource -notmatch '31415' -or $freeLlmApiProfileSource -notmatch 'available=true' -or $freeLlmApiProfileSource -notmatch 'api/ping' -or $freeLlmApiProfileSource -notmatch 'Start-Process -FilePath \$ExecutablePath -WindowStyle Hidden' -or $freeLlmApiProfileSource -notmatch 'listenerDeadline' -or $freeLlmApiProfileSource -notmatch 'never read from UI or printed' -or $freeLlmApiProfileSource -notmatch 'Start-FreeLLMAPIWithInheritedProxy' -or $freeLlmApiProfileSource -notmatch 'Test-ChronicleLocalProxyListener' -or $freeLlmApiProfileSource -notmatch '127\.0\.0\.1.*7890' -or $freeLlmApiProfileSource -notmatch 'LocalProxyBootstrapApplied' -or $freeLlmApiProfileSource -notmatch 'originalValues') { throw 'Shared FreeLLMAPI preflight must reject local inference, start the installed desktop gateway hidden if stopped, pass persisted proxy configuration or the confirmed local 7890 proxy to that child only, wait for its local ping, retrieve credentials only from process/user environment, restore the parent environment, and never expose the key.' }
+if ($freeLlmApiProfileSource -notmatch 'function Get-ChronicleProviderCredential' -or $agentHostProviderSmokeSource -notmatch 'Get-ChronicleProviderCredential' -or $agentLiveModelLoopSource -notmatch 'Get-ChronicleProviderCredential' -or $agentHostCampaignLoopEvaluationSource -notmatch 'Get-ChronicleProviderCredential' -or $freshCampaignTest -notmatch 'Get-ChronicleProviderCredential') { throw 'Provider preflights must select the credential for the configured endpoint rather than reuse a paid-provider key against FreeLLMAPI.' }
 $freeLlmApiProfileTokens = $null
 $freeLlmApiProfileParseErrors = $null
 [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $harnessRoot 'Get-FreeLLMAPIProfile.ps1'), [ref]$freeLlmApiProfileTokens, [ref]$freeLlmApiProfileParseErrors) | Out-Null
@@ -759,6 +763,7 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerSettingsSource -notmatch 'OpenAI 兼容服务地址' -or $providerSettingsSource -notmatch 'CHRONICLE_LLM_API_KEY' -or
     $providerSettingsSource -notmatch 'EnvironmentVariableTarget.User' -or $providerSettingsSource -notmatch 'OutputMode' -or $providerSettingsSource -notmatch 'DeepSeekRunCostLimitCny' -or
     $providerSettingsSource -notmatch 'SettingPropertyButton' -or $providerSettingsSource -notmatch 'AgentProviderConfigurationValidator\.GetErrorCode' -or
+    $providerSettingsSource -notmatch 'AgentProviderConfigurationValidator\.SelectApiKey' -or
     $providerSettingsSource -notmatch 'MBInformationManager\.AddQuickInformation' -or
     $providerSettingsSource -notmatch '(?s)public Action ValidateLocalConfiguration\s*\{\s*get => ShowConfigurationValidation;\s*set \{\s*\}\s*\}' -or
     $providerSettingsSource -notmatch 'CampaignGoal' -or $providerSettingsSource -notmatch 'StartAgent' -or $providerSettingsSource -notmatch 'StopAgent' -or $providerSettingsSource -notmatch 'ViewAgentStatus' -or
@@ -766,14 +771,15 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $agentHostRuntimeControllerSource -notmatch 'RequestStart' -or $agentHostRuntimeControllerSource -notmatch 'RequestStop' -or $agentHostRuntimeControllerSource -notmatch 'host-stop-requested' -or
     $agentHostRuntimeControllerSource -notmatch 'Kill\(\)' -or $agentHostRuntimeControllerSource -notmatch 'IsOwnedLiveProcess' -or
     $agentHostRuntimeControllerSource -notmatch 'CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS' -or
-    $agentHostRuntimeControllerSource -notmatch 'providerIsRemote' -or $agentHostRuntimeControllerSource -notmatch 'EnvironmentVariableTarget.User' -or
+    $agentHostRuntimeControllerSource -notmatch 'providerIsRemote' -or $agentHostRuntimeControllerSource -notmatch 'ResolveApiKey\(settings\.OllamaBaseUrl\)' -or $agentHostRuntimeControllerSource -notmatch 'EnvironmentVariableTarget.User' -or
     $agentHostRuntimeControllerSource -notmatch 'settings.OutputMode' -or $agentHostRuntimeControllerSource -notmatch 'settings.DeepSeekRunCostLimitCny' -or
     $agentHostLifecycleEvaluationSource -notmatch 'AgentHostPackage\.log' -or $agentHostLifecycleEvaluationSource -notmatch 'agent-host-process-started' -or
     $agentHostLifecycleEvaluationSource -notmatch 'agent-host-process-exit' -or $agentHostLifecycleEvaluationSource -notmatch 'FixtureUnchanged' -or
-    $providerValidatorSource -notmatch 'uri.Scheme == "http" && !uri.IsLoopback' -or $agentHostProjectSource -notmatch 'AgentProviderConfigurationValidator\.cs' -or
+    $providerValidatorSource -notmatch 'uri.Scheme == "http" && !uri.IsLoopback' -or $providerValidatorSource -notmatch 'SelectApiKey' -or $agentHostProjectSource -notmatch 'AgentProviderConfigurationValidator\.cs' -or
     $providerProfileSource -notmatch 'AgentProviderConfigurationValidator\.GetErrorCode' -or
     $providerProfileTestSource -notmatch 'mcm-profile-accepts-generic-https-openai-compatible-provider' -or
     $providerProfileTestSource -notmatch 'deepseek-auto-profile-selects-bounded-non-thinking-strict-tool-calls' -or
+    $providerProfileTestSource -notmatch 'provider-credential-selection-is-endpoint-scoped' -or
     $providerProfileTestSource -notmatch 'mcm-profile-rejects-insecure-remote-http' -or
     $providerProfileTestSource -notmatch 'mcm-profile-rejects-nonpositive-deepseek-run-budget' -or
     $providerProfileTestSource -notmatch 'deepseek-auto-profile-selects-bounded-non-thinking-strict-tool-calls' -or
@@ -783,7 +789,7 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerProfileTestSource -notmatch 'freellmapi-bearer-auth-available-model-preflight-and-routed-model-evidence' -or
     $providerProfileTestSource -notmatch 'freellmapi-profile-uses-bounded-512-token-live-model-budget' -or
     $providerProfileTestSource -notmatch 'provider-action-rationale-is-optional-and-native-catalog-still-gates' -or
-    $providerHostSource -notmatch '\["anyOf"\]' -or $providerHostSource -match '\["oneOf"\]' -or
+    $providerHostSource -notmatch 'SelectApiKey' -or $providerHostSource -notmatch '\["anyOf"\]' -or $providerHostSource -match '\["oneOf"\]' -or
     $providerProfileTestSource -notmatch 'village-tools-prompt-uses-exact-native-action-id' -or
     $providerProfileTestSource -notmatch 'conversation is already open: never talk to that hero again' -or
     $providerProfileTestSource -notmatch 'only before a conversation is open, and only if talkToSettlementHero is currently listed' -or

@@ -48,7 +48,7 @@ if ($EstablishYourClanGoalPlanner -and -not $AgentHostRuntime) { throw 'Establis
 if ($EstablishYourClanAutonomyLoop -and -not $AgentHostRuntime) { throw 'EstablishYourClanAutonomyLoop requires the in-game .NET Agent Host route; the older PowerShell decision loop is not product evidence.' }
 if ($EstablishClanGoldSaleLoop -and -not $AgentHostRuntime) { throw 'EstablishClanGoldSaleLoop requires the in-game .NET Agent Host route; the older PowerShell decision loop is not product evidence.' }
 if ($RoadsideBanditNegotiationLoop -and -not $RecruitmentLoop) { throw 'RoadsideBanditNegotiationLoop requires RecruitmentLoop so the encounter resolves into the existing growth goal.' }
-foreach ($setting in @('CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL','CHRONICLE_LLM_API_KEY','FREELLMAPI_API_KEY','CHRONICLE_LLM_OUTPUT_MODE','CHRONICLE_LLM_MAX_RUN_COST_CNY','CHRONICLE_LLM_TIMEOUT_SECONDS','CHRONICLE_LLM_MAX_TOKENS','CHRONICLE_LLM_MAX_TOKEN_PARAMETER','CHRONICLE_LLM_REASONING_EFFORT','CHRONICLE_LLM_THINKING_MODE','CHRONICLE_LLM_TEMPERATURE','CHRONICLE_LLM_PROTOCOL')) {
+foreach ($setting in @('CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL','CHRONICLE_LLM_OUTPUT_MODE','CHRONICLE_LLM_MAX_RUN_COST_CNY','CHRONICLE_LLM_TIMEOUT_SECONDS','CHRONICLE_LLM_MAX_TOKENS','CHRONICLE_LLM_MAX_TOKEN_PARAMETER','CHRONICLE_LLM_REASONING_EFFORT','CHRONICLE_LLM_THINKING_MODE','CHRONICLE_LLM_TEMPERATURE','CHRONICLE_LLM_PROTOCOL')) {
     $configuredValue = [string][Environment]::GetEnvironmentVariable($setting, 'Process')
     if ([string]::IsNullOrWhiteSpace($configuredValue)) {
         $configuredValue = [string][Environment]::GetEnvironmentVariable($setting, 'User')
@@ -90,7 +90,8 @@ if ($configuredProtocol -cne 'openai-compatible' -or
     throw 'This live Campaign stage requires a configured OpenAI-compatible HTTPS provider (HTTP only on loopback); unsupported inference protocols are refused before Campaign launch.'
 }
 $isFreeLlmApi = $providerEndpoint.IsLoopback -and $providerEndpoint.Port -eq 31415 -and $providerEndpoint.AbsolutePath.TrimEnd('/') -eq '/v1'
-$providerApiKey = if (-not [string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_API_KEY)) { [string]$env:CHRONICLE_LLM_API_KEY } else { [string]$env:FREELLMAPI_API_KEY }
+$providerCredential = Get-ChronicleProviderCredential -Endpoint $providerEndpoint
+$providerApiKey = [string]$providerCredential.Value
 if (-not $providerEndpoint.IsLoopback -and [string]::IsNullOrWhiteSpace($providerApiKey)) {
     throw 'The configured remote OpenAI-compatible provider requires an environment API key; no key is printed or written to the model profile.'
 }

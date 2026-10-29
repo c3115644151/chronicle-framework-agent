@@ -127,7 +127,7 @@ internal sealed class ChronicleAgentProviderSettings : AttributeGlobalSettings<C
         var errorCode = AgentProviderConfigurationValidator.GetErrorCode(OllamaBaseUrl, ModelId, OutputMode, DeepSeekRunCostLimitCny);
         if (errorCode is null && Uri.TryCreate(OllamaBaseUrl, UriKind.Absolute, out var configuredUri) &&
             !configuredUri.IsLoopback &&
-            string.IsNullOrWhiteSpace(ResolveApiKey()))
+            string.IsNullOrWhiteSpace(ResolveApiKey(OllamaBaseUrl)))
             errorCode = "provider-api-key-missing";
         var message = errorCode switch
         {
@@ -142,12 +142,14 @@ internal sealed class ChronicleAgentProviderSettings : AttributeGlobalSettings<C
         MBInformationManager.AddQuickInformation(new TextObject(message), 7000);
     }
 
-    private static string? ResolveApiKey()
+    private static string? ResolveApiKey(string baseUrl)
     {
-        var key = Environment.GetEnvironmentVariable("CHRONICLE_LLM_API_KEY");
-        if (string.IsNullOrWhiteSpace(key)) key = Environment.GetEnvironmentVariable("CHRONICLE_LLM_API_KEY", EnvironmentVariableTarget.User);
-        if (string.IsNullOrWhiteSpace(key)) key = Environment.GetEnvironmentVariable("FREELLMAPI_API_KEY");
-        if (string.IsNullOrWhiteSpace(key)) key = Environment.GetEnvironmentVariable("FREELLMAPI_API_KEY", EnvironmentVariableTarget.User);
-        return string.IsNullOrWhiteSpace(key) ? null : key;
+        var credential = AgentProviderConfigurationValidator.SelectApiKey(
+            baseUrl,
+            Environment.GetEnvironmentVariable("CHRONICLE_LLM_API_KEY"),
+            Environment.GetEnvironmentVariable("CHRONICLE_LLM_API_KEY", EnvironmentVariableTarget.User),
+            Environment.GetEnvironmentVariable("FREELLMAPI_API_KEY"),
+            Environment.GetEnvironmentVariable("FREELLMAPI_API_KEY", EnvironmentVariableTarget.User));
+        return credential.ApiKey;
     }
 }

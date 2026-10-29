@@ -291,7 +291,7 @@ internal static class ChronicleAgentRuntimeController
         }
         var noModelLifecycleProbe = IsLifecycleHarnessMode() && Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_NO_MODEL") == "1";
         var providerIsRemote = Uri.TryCreate(settings.OllamaBaseUrl, UriKind.Absolute, out var providerUri) && !providerUri.IsLoopback;
-        var configuredApiKey = ResolveApiKey();
+        var configuredApiKey = ResolveApiKey(settings.OllamaBaseUrl);
         if (providerIsRemote && string.IsNullOrWhiteSpace(configuredApiKey) && !noModelLifecycleProbe)
         {
             FailStart("远程模型API密钥未配置；请设置CHRONICLE_LLM_API_KEY后重启游戏启动器");
@@ -401,13 +401,15 @@ internal static class ChronicleAgentRuntimeController
         }
     }
 
-    private static string ResolveApiKey()
+    private static string ResolveApiKey(string baseUrl)
     {
-        var key = Environment.GetEnvironmentVariable("CHRONICLE_LLM_API_KEY");
-        if (string.IsNullOrWhiteSpace(key)) key = Environment.GetEnvironmentVariable("CHRONICLE_LLM_API_KEY", EnvironmentVariableTarget.User);
-        if (string.IsNullOrWhiteSpace(key)) key = Environment.GetEnvironmentVariable("FREELLMAPI_API_KEY");
-        if (string.IsNullOrWhiteSpace(key)) key = Environment.GetEnvironmentVariable("FREELLMAPI_API_KEY", EnvironmentVariableTarget.User);
-        return key?.Trim() ?? string.Empty;
+        var credential = AgentProviderConfigurationValidator.SelectApiKey(
+            baseUrl,
+            Environment.GetEnvironmentVariable("CHRONICLE_LLM_API_KEY"),
+            Environment.GetEnvironmentVariable("CHRONICLE_LLM_API_KEY", EnvironmentVariableTarget.User),
+            Environment.GetEnvironmentVariable("FREELLMAPI_API_KEY"),
+            Environment.GetEnvironmentVariable("FREELLMAPI_API_KEY", EnvironmentVariableTarget.User));
+        return credential.ApiKey?.Trim() ?? string.Empty;
     }
 
     private static string ResolveHostExecutablePath()

@@ -114,7 +114,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             thinking,
             reasoningEffort,
             maxTokenParameter,
-            ReadApiKey(),
+            ReadApiKey(baseUri),
             outputMode,
             maxRunCostCny));
     }
@@ -147,6 +147,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
 
     private static OllamaNativeProvider FromProfile(AgentProviderProfile profile)
     {
+        var baseUri = new Uri(profile.BaseUrl.TrimEnd('/'), UriKind.Absolute);
         var endpoint = new Uri(profile.BaseUrl.TrimEnd('/') + "/chat/completions", UriKind.Absolute);
         var maxTokenParameter = Environment.GetEnvironmentVariable("CHRONICLE_LLM_MAX_TOKEN_PARAMETER");
         if (string.IsNullOrWhiteSpace(maxTokenParameter))
@@ -176,7 +177,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             Thinking: thinking,
             ReasoningEffort: reasoningEffort,
             MaxTokenParameter: maxTokenParameter,
-            ApiKey: ReadApiKey(),
+            ApiKey: ReadApiKey(baseUri),
             OutputMode: outputMode,
             MaxEstimatedRunCostCny: maxRunCostCny),
             configurationSource: profile.Source);
@@ -195,13 +196,15 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         };
     }
 
-    private static string? ReadApiKey()
+    private static string? ReadApiKey(Uri baseUri)
     {
-        var key = Environment.GetEnvironmentVariable("CHRONICLE_LLM_API_KEY");
-        if (string.IsNullOrWhiteSpace(key)) key = Environment.GetEnvironmentVariable("CHRONICLE_LLM_API_KEY", EnvironmentVariableTarget.User);
-        if (string.IsNullOrWhiteSpace(key)) key = Environment.GetEnvironmentVariable("FREELLMAPI_API_KEY");
-        if (string.IsNullOrWhiteSpace(key)) key = Environment.GetEnvironmentVariable("FREELLMAPI_API_KEY", EnvironmentVariableTarget.User);
-        return string.IsNullOrWhiteSpace(key) ? null : key.Trim();
+        var credential = AgentProviderConfigurationValidator.SelectApiKey(
+            baseUri.AbsoluteUri.TrimEnd('/'),
+            Environment.GetEnvironmentVariable("CHRONICLE_LLM_API_KEY"),
+            Environment.GetEnvironmentVariable("CHRONICLE_LLM_API_KEY", EnvironmentVariableTarget.User),
+            Environment.GetEnvironmentVariable("FREELLMAPI_API_KEY"),
+            Environment.GetEnvironmentVariable("FREELLMAPI_API_KEY", EnvironmentVariableTarget.User));
+        return string.IsNullOrWhiteSpace(credential.ApiKey) ? null : credential.ApiKey.Trim();
     }
 
     internal Task<ProviderDecisionResult> DecideAsync(JsonElement request, CancellationToken cancellationToken) =>

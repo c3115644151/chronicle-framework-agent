@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.434
+Contract version: 7.436
 
 Engine delegation principle: the Agent chooses long-term goals, targets, commitments and consequential responses, and verifies the result. When a particular Native task already starts an NPC-controlled Mission or an original tactical simulation, let the game engine perform continuous movement/combat and observe its result; do not build frame-level control simply because the player entered 3D. This is route-specific, not a blanket claim that all battles are delegable: if the Native encounter disables simulation, record a distinct capability gap and only then decide whether direct control or a different strategy is needed. Never treat starting/ending a Mission as proof of success; check the Native quest/reward aftermath.
 
@@ -652,6 +652,8 @@ Native Barter目录按当前VM会话和成功回执逐阶段开放：没有当�
 先查 Harness，再查启动器/版本/模块集与生命周期，最后核实战役行为；只有故障证据落在功能层才改功能代码。
 
 FreeLLMAPI/HTTP诊断须分别记录HTTP状态码、可选响应头和网关路由日志：可选头一律用TryGetValues读取，缺头不能被报告成传输失败；429/超时按是否实际尝试上游、候选冷却和Retry-After区分。若Windows curl经代理可通而FreeLLMAPI报TLS断连，在同一时段对同一上游比较传输客户端并核验应用实际proxy source/mode及key级覆盖；请求对照应匹配HTTP方法、目标端点和相关格式参数，GET `/models`成功只证明目录GET通，不代表POST `/chat/completions`推理可用。不能只凭`curl`成功就宣称模型路由可用，也不先改代理协议。诊断不记录统一key或完整错误正文。
+
+Provider 凭据由共享 `SelectApiKey` 按目标端点选取，并用于 MCM、游戏内Host及Harness：FreeLLMAPI loopback优先专用 `FREELLMAPI_API_KEY`，绝不把远程provider的通用 `CHRONICLE_LLM_API_KEY`意外送给本地路由；非FreeLLMAPI端点只用通用provider key。预检只可输出所选变量名，不输出值；Host合同测试须使用合成密钥分别验证两种端点的选择顺序。
 
 FreeLLMAPI可用性诊断默认不重复调用自动回退路由：一次请求可能触发多家上游尝试并消耗免费额度。优先用单个明确的免费模型做至多一次小型探测；若失败先读本机网关请求ID及各上游失败记录，区分调用格式、上游限额、模型目录/映射与代理传输问题；只有错误证据表明可恢复且等待在当前deadline内，才重试。目录`ready`或`/api/ping`成功仅代表目录/本地服务可访问，不算推理通过。
 

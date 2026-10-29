@@ -5,13 +5,14 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1')
 $hostDll = [IO.Path]::GetFullPath($HostDllPath)
 $evidencePath = [IO.Path]::GetFullPath($EvidencePath)
 if (-not (Test-Path -LiteralPath $hostDll -PathType Leaf)) { throw 'Local Agent Host binary is missing.' }
 New-Item -ItemType Directory -Path $evidencePath -Force | Out-Null
 
 foreach ($setting in @(
-    'CHRONICLE_LLM_PROTOCOL', 'CHRONICLE_LLM_BASE_URL', 'CHRONICLE_LLM_MODEL', 'CHRONICLE_LLM_API_KEY', 'FREELLMAPI_API_KEY',
+    'CHRONICLE_LLM_PROTOCOL', 'CHRONICLE_LLM_BASE_URL', 'CHRONICLE_LLM_MODEL',
     'CHRONICLE_LLM_TIMEOUT_SECONDS', 'CHRONICLE_LLM_MAX_TOKENS', 'CHRONICLE_LLM_MAX_TOKEN_PARAMETER',
     'CHRONICLE_LLM_REASONING_EFFORT', 'CHRONICLE_LLM_THINKING_MODE', 'CHRONICLE_LLM_TEMPERATURE', 'CHRONICLE_LLM_OUTPUT_MODE', 'CHRONICLE_LLM_MAX_RUN_COST_CNY'
 )) {
@@ -68,11 +69,12 @@ if ($providerUri.IsLoopback -and $providerUri.Port -eq 31415 -and $providerUri.A
 }
 else {
     if ($providerUri.Scheme -ne 'https') { throw 'Remote provider smoke requires HTTPS; no inference request was sent.' }
-    if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_API_KEY)) { throw 'Remote provider API key is missing; no inference request was sent.' }
+    $providerCredential = Get-ChronicleProviderCredential -Endpoint $providerUri
+    if ([string]::IsNullOrWhiteSpace([string]$providerCredential.Value)) { throw 'Remote provider API key is missing; no inference request was sent.' }
     $modelsUri = [UriBuilder]::new($providerUri)
     $modelsUri.Path = $providerUri.AbsolutePath.TrimEnd('/') + '/models'
     $modelsUri.Query = ''
-    try { $modelCatalog = @(Invoke-RestMethod -Uri $modelsUri.Uri -Headers @{ Authorization = "Bearer $env:CHRONICLE_LLM_API_KEY" } -TimeoutSec 15 | Select-Object -ExpandProperty data) }
+    try { $modelCatalog = @(Invoke-RestMethod -Uri $modelsUri.Uri -Headers @{ Authorization = "Bearer $($providerCredential.Value)" } -TimeoutSec 15 | Select-Object -ExpandProperty data) }
     catch { throw 'Remote provider /models preflight failed; no inference request was sent.' }
     if (-not @($modelCatalog | Where-Object { [string]$_.id -ceq $model }).Count) { throw 'Configured model ID is absent from the remote provider catalog; no inference request was sent.' }
 }

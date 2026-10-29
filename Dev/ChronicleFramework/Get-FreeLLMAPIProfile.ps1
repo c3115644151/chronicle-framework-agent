@@ -32,6 +32,33 @@ function Test-FreeLLMAPIModelExecutionReady {
     return (Get-FreeLLMAPIModelExecutionStatus -ModelRows $ModelRows -ModelId $ModelId) -in @('ready', 'router')
 }
 
+function Get-ChronicleProviderCredential {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][Uri]$Endpoint)
+
+    $isFreeLlmApi = $Endpoint.IsLoopback -and $Endpoint.Port -eq 31415 -and $Endpoint.AbsolutePath.TrimEnd('/') -eq '/v1'
+    $candidates = if ($isFreeLlmApi) {
+        @(
+            @{ Name = 'FREELLMAPI_API_KEY'; Target = 'Process' },
+            @{ Name = 'FREELLMAPI_API_KEY'; Target = 'User' },
+            @{ Name = 'CHRONICLE_LLM_API_KEY'; Target = 'Process' },
+            @{ Name = 'CHRONICLE_LLM_API_KEY'; Target = 'User' }
+        )
+    } else {
+        @(
+            @{ Name = 'CHRONICLE_LLM_API_KEY'; Target = 'Process' },
+            @{ Name = 'CHRONICLE_LLM_API_KEY'; Target = 'User' }
+        )
+    }
+    foreach ($candidate in $candidates) {
+        $value = [string][Environment]::GetEnvironmentVariable($candidate.Name, $candidate.Target)
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+            return [pscustomobject]@{ Value = $value; Source = "$($candidate.Name):$($candidate.Target)"; IsFreeLLMAPI = $isFreeLlmApi }
+        }
+    }
+    return [pscustomobject]@{ Value = $null; Source = $null; IsFreeLLMAPI = $isFreeLlmApi }
+}
+
 function Initialize-FreeLLMAPIProfile {
     [CmdletBinding()]
     param()
@@ -53,10 +80,9 @@ function Initialize-FreeLLMAPIProfile {
     }
     if ([string]::IsNullOrWhiteSpace($modelId)) { throw 'FreeLLMAPI route/model name is not configured; no model request was sent.' }
 
-    $apiKey = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_API_KEY', 'Process')
-    if ([string]::IsNullOrWhiteSpace($apiKey)) { $apiKey = [string][Environment]::GetEnvironmentVariable('FREELLMAPI_API_KEY', 'Process') }
-    if ([string]::IsNullOrWhiteSpace($apiKey)) { $apiKey = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_API_KEY', 'User') }
-    if ([string]::IsNullOrWhiteSpace($apiKey)) { $apiKey = [string][Environment]::GetEnvironmentVariable('FREELLMAPI_API_KEY', 'User') }
+    $credential = Get-ChronicleProviderCredential -Endpoint $endpoint
+    $apiKey = [string]$credential.Value
+    $apiKeySource = [string]$credential.Source
     if ([string]::IsNullOrWhiteSpace($apiKey)) { throw 'FreeLLMAPI unified key is missing from the process/user environment; the key is never read from UI or printed.' }
 
     [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_BASE_URL', $baseUrl.TrimEnd('/'), 'Process')
@@ -178,6 +204,7 @@ function Initialize-FreeLLMAPIProfile {
         AvailableModelCount = $availableModelIds.Count
         AvailableModelCatalogSha256 = $catalogHash
         ApiKeyPresent = $true
+        ApiKeySource = $apiKeySource
         GatewayStartedByHarness = $gatewayStartedByHarness
         LocalProxyBootstrapApplied = $localProxyBootstrapApplied
     }

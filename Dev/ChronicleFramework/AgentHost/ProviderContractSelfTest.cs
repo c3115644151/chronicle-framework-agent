@@ -114,6 +114,18 @@ internal static class ProviderContractSelfTest
             throw new AgentHostException("provider-profile-path-self-test-failed", "The Host global profile path does not match the MCM Global folder/id convention.");
         results.Add(new { scenario = "host-default-path-matches-mcm-global-folder-and-id", passed = true });
 
+        var localGatewayCredential = AgentProviderConfigurationValidator.SelectApiKey(
+            "http://127.0.0.1:31415/v1", "sk-paid-provider", "sk-paid-user", null, "freellmapi-user");
+        var remoteProviderCredential = AgentProviderConfigurationValidator.SelectApiKey(
+            "https://api.deepseek.com/v1", "sk-process-provider", "sk-user-provider", null, "freellmapi-user");
+        var remoteRejectsDedicatedGatewayKey = AgentProviderConfigurationValidator.SelectApiKey(
+            "https://api.deepseek.com/v1", null, null, null, "freellmapi-user");
+        if (localGatewayCredential.ApiKey != "freellmapi-user" || localGatewayCredential.Source != "FREELLMAPI_API_KEY:User" ||
+            remoteProviderCredential.ApiKey != "sk-process-provider" || remoteProviderCredential.Source != "CHRONICLE_LLM_API_KEY:Process" ||
+            remoteRejectsDedicatedGatewayKey.ApiKey is not null)
+            throw new AgentHostException("provider-credential-selection-self-test-failed", "Provider credentials must follow the configured endpoint: dedicated FreeLLMAPI key for its local loopback gateway and generic key only for other providers.");
+        results.Add(new { scenario = "provider-credential-selection-is-endpoint-scoped", passed = true });
+
         using (var validProfile = JsonDocument.Parse("{\"OllamaBaseUrl\":\"http://127.0.0.1:31415/v1\",\"ModelId\":\"auto\",\"schemaVersion\":0,\"LegacySetting\":true,\"CampaignGoal\":\"older-MCM-key\"}"))
         {
             var profile = AgentProviderProfile.Parse(validProfile.RootElement);
@@ -133,9 +145,15 @@ internal static class ProviderContractSelfTest
                 throw new AgentHostException("provider-profile-self-test-remote-endpoint-failed", "A generic HTTPS OpenAI-compatible profile was not accepted.");
             results.Add(new { scenario = "mcm-profile-accepts-generic-https-openai-compatible-provider", passed = true });
         }
-        var previousThinkingMode = Environment.GetEnvironmentVariable("CHRONICLE_LLM_THINKING_MODE");
+        var providerEnvironmentNames = new[]
+        {
+            "CHRONICLE_LLM_THINKING_MODE", "CHRONICLE_LLM_MAX_TOKENS", "CHRONICLE_LLM_MAX_TOKEN_PARAMETER",
+            "CHRONICLE_LLM_REASONING_EFFORT", "CHRONICLE_LLM_MAX_RUN_COST_CNY", "CHRONICLE_LLM_TEMPERATURE"
+        };
+        var previousProviderEnvironment = providerEnvironmentNames.ToDictionary(name => name, name => Environment.GetEnvironmentVariable(name), StringComparer.Ordinal);
         try
         {
+            foreach (var name in providerEnvironmentNames) Environment.SetEnvironmentVariable(name, null);
             Environment.SetEnvironmentVariable("CHRONICLE_LLM_THINKING_MODE", "disabled");
             using var deepSeekLaunch = JsonDocument.Parse("{\"providerConfiguration\":{\"ProviderBaseUrl\":\"https://api.deepseek.com/v1\",\"ModelId\":\"deepseek-flash\",\"OutputMode\":\"auto\"}} ");
             using var deepSeekProvider = OllamaNativeProvider.FromCampaignRequest(deepSeekLaunch.RootElement);
@@ -144,7 +162,11 @@ internal static class ProviderContractSelfTest
                 throw new AgentHostException("deepseek-provider-profile-self-test-failed", "The DeepSeek MCM profile did not select bounded, non-thinking strict tool-call output from auto mode.");
             results.Add(new { scenario = "deepseek-auto-profile-selects-bounded-non-thinking-strict-tool-calls", passed = true });
         }
-        finally { Environment.SetEnvironmentVariable("CHRONICLE_LLM_THINKING_MODE", previousThinkingMode); }
+        finally
+        {
+            foreach (var name in providerEnvironmentNames)
+                Environment.SetEnvironmentVariable(name, previousProviderEnvironment[name]);
+        }
         ExpectInvalidProfile("{\"ProviderBaseUrl\":\"http://example.com/v1\",\"ModelId\":\"test\"}", "provider-profile-endpoint-invalid", "mcm-profile-rejects-insecure-remote-http");
         results.Add(new { scenario = "mcm-profile-rejects-insecure-remote-http", passed = true });
         ExpectInvalidProfile("{\"ProviderBaseUrl\":\"https://api.deepseek.com/v1\",\"ModelId\":\"deepseek-flash\",\"DeepSeekRunCostLimitCny\":\"0\"}", "provider-profile-run-cost-invalid", "mcm-profile-rejects-nonpositive-deepseek-run-budget");
