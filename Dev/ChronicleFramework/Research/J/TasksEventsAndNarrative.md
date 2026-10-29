@@ -43,6 +43,16 @@ Chronicle已存在原版PartyVM单人升级适配：`partyUpgradeOptions`打开N
 W7 当前候选复用`LandlordTrainingForRetainersIssue`，不是保证随机生成的收入来源：Host仅从本轮 `settlementOverlayCharacters`中的Native `AvailableIssue`联系人开始QuickConversation，直接Quest接受必须是当前可点击的`issue_offer_player_accept_quest`且Native TextObject ID为`QxEPwLyp`；Alternative/Lord接取选项不进入该动作目录。接取后只以当前活动Issue的Journal值、当前原版PartyVM升级报价、当前Yes/No Inquiry为依据；训练升级动作是`borrowed_troop`→`veteran_borrowed_troop`，使用现有PartyVM adapter单人`ExecuteUpgrade+Done`事务。Inquiry只在可见文本/按钮匹配“借调士兵已经验丰富/将士兵调回”时交给模型响应，affirmative后必须读取原版EYC Gold Journal及Gold差值。
 
 该Host路线不是确定性Gold脚本；模型仍要从玩家当前可见Notable/对话中识别并接受Direct Quest，PartyVM前置不足或当前Issue缺失时不能伪报完成。若GoldSale的完整PlayerInventory报价已确认没有可转让Goods，Host可尝试当前Training Issue；该路无当前AvailableIssue时才允许既有当前可见Bandit BattleSimulation回退。现有包测试覆盖目录/交易边界、直接Offer TextObject、借调兵升级范围、询问范围与遭遇等待门禁；真实Campaign接取/训练/Inquiry/奖励仍未通过验收。
+
+### Escort Merchant Caravan：玩家护送距离、Native目的地与遭遇风险（2026-10-29）
+
+用户确认正常玩法：玩家需要保持在任务商队附近；商队行程中可能有敌对队伍接近，玩家可以在它靠近前主动拦截，也可以等商队与敌人交战后加入支援；不能让商队全军覆没。通过原版“跟随商队”靠近后主队会停在其身边、有效地图时间可能停止，因此若Agent每秒把“我在等/没有移动”当成需要一次LLM决定，会造成没有游戏进展的高频循环。这是目标路径的时间/观察设计约束，不用隐藏Clock macro填补。
+
+本机1.4.8 `EscortMerchantCaravanIssueBehavior`源码确认：直接Quest会创建一个任务专属Caravan，初始化时将其标记为Quest Party、禁止常规AI另做决定；`TryToFindAndSetTargetToNextSettlement`由任务自身用原版寻路在符合条件的城镇中选下一站，并调用Native `SetPartyAiAction.GetActionForVisitingSettlement`。玩家无需替商队挑路。任务的关键判定在原版`OnSettlementEntered`：商队进目标城镇、该地不为家乡且玩家主队在聚落`SeeingRange+2`内，才把一个Settlement计入2站任务进度；每次应优先以Journal当前站数/目标地点和可见主队地图位置判断，而不是只看队伍关系或等候时间。源码还确认委托生成的埋伏队伍会试图袭击商队，Native `MapEventEnded`在商队失败时结算Issue失败，因此护送队与敌队的胜负是高影响后验。
+
+本机安装目录的`BannerlordGameKeys.xml`将Native `MapFollowModifier`绑定到LeftAlt（它是鼠标地图点击的修饰键，不是独立“Follow”动作键）。同一Campaign中使用原版follow入口后观察到`DefaultBehavior=EscortParty`、主队与商队位置重合；商队初始留在发起城镇时主队`isWaiting=true`且CampaignDay不变，明确把Native时间档切到FastForward后，任务商队自行上路，主队进入Escort行为。进入遭遇后Campaign时间自然Stop。后续AI设计应围绕Journal路标/地图状态/遭遇事件做有界等待：停在商队旁且无目标事件时，不循环呼叫模型；商队接近其Journal路线下一目标或出现可见敌队/MapEvent时再观察和决策。该循环阈值/触发信号还需Native运行细化，不把`nearbyParties`内部候选当成玩家能看见的目标。
+
+本次同Campaign测试选择跟随、观察到任务党走动与18人Quest Raider遭遇，随后坐镇后奖励Clan Renown增加4.987；但任务从活动列表消失且战后Loot左侧含商队领队/商贩/护卫。由于原版闭合Quest历史不可查询，本次无法确认Quest自身最终成功或失败，且没有观察到其每日350第纳尔奖励；不把战斗胜利、Quest移除或商队对话文案单独作为任务完成证据。今后的验收要同时要求两处目的地进度、商队存活与主动Journal/完成日志/奖励后验。
 ## J02 Quests：任务生命周期与结果
 
 `QuestBase`管理Quest giver、期限、奖励、状态、追踪对象、任务Logs和任务回调；`QuestManager`统合开始、Hourly/Daily/Weekly tick、超时、完成、取消和追踪对象。各Quest子类创建时 `SetDialogs`、注册事件，并定义 `OnStartQuest/OnCompleteWithSuccess/OnFailed/OnCanceled/OnTimedOut`等路径；Quest类型共享生命周期但并无相同条件、付款或失败后果。

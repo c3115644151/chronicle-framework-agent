@@ -1252,3 +1252,5 @@ Companion路线验证了“委托原版连续执行、Agent保留决策和结果
 原版战后Loot处置中收到俘虏超限确认后，按当前容量不接受额外超限；因旧CLI仅支持全取，本轮弃置了1名可捕俘虏，继续由原版Loot Inventory取走13件战利品。随后通过原版“prisoner recruitment”面板连续单人招募6名：19→25，Prisoners16→10，士气51.163→39.263。Journal目标全部达成后，Native `rebuild_player_clan_storymode_quest`从活动列表消失、`questDetails`返回null；Renown由51.758→76.758（EYC完成奖励+25）。结束于Gold2012、ClanRenown76.758、ClanTier1、MainParty25/45、Prisoners10、Food5、Morale39.263，已保存检查点`ChronicleEycDev-20261029-eyc-completed`，SHA-256 `DA3040D6B14F20211E73B1118ECF0A9A4E291A94DB52DBCD83FB847AAAF9D3D7`。
 
 这完成了该开发门禁要求的“从现存完整检查点到原版建立家族Journal消失”的实战路径；但当前Campaign不是新建存档，而且不是LLM自主决策验收。后续要修正Loot单人transfer viewmodel映射并在同类超限Loot屏复验，再将这条成功手动路径做成可重放、分阶段记录的EYC纵测。护送商队Issue在战斗中从活动列表消失，但没有可读Closed Quest History；结论保留为未判定，不能把战后胜利或声望变化单独归因为护送Issue成功。
+
+商队护送后续设计约束（用户补充）：以“在商队附近护行、能对来袭敌队反应、保持商队存活”为实际玩家目标；普通推进中不因EscortParty/同地等待每秒请求模型。用户确认敌队可在路上靠近，玩家可预先拦截或等到交战后支援；追求主动任务闭环时需基于Journal当前下一目的地和可见敌队/MapEvent做有界事件决策。安装键位文件中Native `MapFollowModifier=LeftAlt`已核验，但它是地图点击修饰键，不是独立“跟随键”。本次Caravan任务历史结局仍不可见且没有计作已完成。
