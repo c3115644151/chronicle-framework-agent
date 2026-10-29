@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.423
+Contract version: 7.424
 
 Engine delegation principle: the Agent chooses long-term goals, targets, commitments and consequential responses, and verifies the result. When a particular Native task already starts an NPC-controlled Mission or an original tactical simulation, let the game engine perform continuous movement/combat and observe its result; do not build frame-level control simply because the player entered 3D. This is route-specific, not a blanket claim that all battles are delegable: if the Native encounter disables simulation, record a distinct capability gap and only then decide whether direct control or a different strategy is needed. Never treat starting/ending a Mission as proof of success; check the Native quest/reward aftermath.
 
@@ -125,7 +125,7 @@ AgentHost对“模型响应已返回但未通过动作/控制目录校验”的�
 
 下文标注为“历史”的NPC Actor产品路线已降为未来研究；MainHero GoldSale等历史切片若未有通过收据仍视为失败/未完成证据，只在当前W7缺口审计确认相关时才重跑。
 
-失败测试的录像也要经过证据收尾：按事件抽取关键帧，并把均匀联系表的样本数限制为最多64帧。只有录像无法解码或关键证据无法生成时才保留原始MP4；联系表和事件索引齐全后删除原片。这样保留的是能解释测试结果的证据，不是整段重复播放的大文件。
+失败测试的录像也要经过证据收尾：按事件抽取关键帧；联系表按源视频实际帧号等距选样，最多64帧，并由真实样本数决定行列、强制偶数宽高与JPEG全范围像素。不能依赖固定低帧率抽样（很短的录像可能被舍弃为零帧），也不能把固定4列写死（会造成空白格或编码错误）。联系表和事件关键帧索引可读后删除原MP4；解码或证据生成失败时保留原片供诊断。修复后的`HarnessShortClipProbe`在实机窗口22帧短录中生成联系表和6个事件帧，并清除了成功原片；具体运行收据记录在`TestResults/20261029-live-storymode`。这样保留的是能解释测试结果的证据，不是整段重复播放的大文件。
 
 W7-K恢复测试专用的`ChronicleW7K-`派生存档时，只允许在Bannerlord和CLI会话都已结束后，通过`Test-AgentHostCampaignLoopEvaluation.ps1 -CleanupPreparedSaveName`按精确Game Saves路径清理。该恢复入口不能接受正式存档名；普通产品失败不得跳过本规则。
 
@@ -421,6 +421,8 @@ The next natural run `TestResults/20261027-074559` confirmed that the observatio
 Natural run `TestResults/20261027-075756` verified that the model then traversed the real Tavern dialogue: it selected the business response, opened the Native quote, and hired one Companion. The original Journal showed Companions 1/1. The next parent objective immediately failed `recruitment-map-unavailable` because the child returned while `GameState=MissionState`, `menuId=town_backstreet`. The Companion child now keeps the objective complete state pending until it chooses the existing Native `missionLeave` action and observes MapState; only then does it return completed to the parent. Package self-test expects the hire→Native Leave Area→Map→completed sequence; `TestResults/20261027-080844` Build/AgentHostPackage passed this regression. This does not automatically leave the settlement or change Campaign time.
 
 Natural run `TestResults/20261027-081126` exercised that exit handoff: after declining a quote, the model finished the hiring dialogue, left the Tavern by Native `missionLeave`, exited the town menu, and revisited another town. In that later Tavern it reached the Wanderer quote but alternated the Native `player_companion_hire_response_2` decline with `main_option_faction_hire` on the same Hero, despite a currently clickable `player_is_leaving_neutral_or_friendly` exit. It consumed 96 Companion decisions/412,036 prompt tokens; Journal Companions stayed 0/1 and the run did not complete EYC. The action catalog now adds that visible Native exit and, after a decline, exposes only that exit for the same current Wanderer instead of letting the model reopen hiring. A narrow fake Native self-test covers the current option catalog and decline state. The following run `TestResults/20261027-083134` did not reach a Tavern decline; the model safely stopped the Companion child before an action, then completed one battle simulation with the MainHero captured and returned to recruitment. EYC remained incomplete. Harness contract 7.345; natural verification of the decline/exit path remains outstanding.
+
+`missionLeave`新增Native父菜单前置：只在`Campaign.Current.CurrentMenuContext.GameMenu`仍存在时才发送2.5秒LeaveArea；若菜单已消失，表示上一个原版离场请求可能正在过渡，Host应等待/重新观察，不得再叠加输入。依据是2026-10-29 Tavern实验中原版`town_leave`后Observer仍为MissionState但`menuId=null`，随后missionLeave数秒内发生`0xC0000005`；时间关联不能单独证实因果，故先用门禁排除已可识别的重复退出请求。2026-10-29后续Build与AgentHostPackage（282 Provider/22 Campaign/16 BattleSimulation场景，0 LLM/Native命令）通过，且已有原生MissionLeave阶段`TestResults/20261029-111607`在Arena父菜单仍有效时返回MapState并正常清理。它没有覆盖此前Tavern异常时序；必须从安全存档复测该路，确认退出请求只能有一个所有者，之后再恢复长期手动进度。
 
 `CompanionHiring`是一项端到端Tavern原版对话验收：Test-only fixture可把玩家Gold精确设到Native报价或报价+1，用于测试严格`Gold > price`门槛；它不进入Agent决策白名单、不保存存档。该阶段要验证按本次Conversation选项启动雇佣、报价实值、Clan/MainParty结果与不足报价时不发生扣款/加入，不直接调用原版Hire动作API。
 

@@ -200,13 +200,17 @@ function Stop-ChronicleWindowVideoCapture {
     $expectedFrames = [Math]::Floor($duration * $Capture.FrameRate)
     $coverage = if ($expectedFrames -gt 0) { $frames / [double]$expectedFrames } else { 0 }
     if ($frames -lt ($expectedFrames * 0.9) -or $duration -lt 1) { throw "Captured clip is incomplete: duration=${duration}s frames=$frames expected~$expectedFrames coverage=$coverage." }
-    # Bound the contact sheet's pixel dimensions. A fixed 4 fps sample rate
-    # made long failed runs exceed JPEG's 65,500px dimension limit, which
-    # then prevented the normal post-process path from removing the raw MP4.
+    # Bound the contact sheet to 64 source-frame samples. Selecting by frame
+    # index avoids time-based FPS rounding away every frame from short clips;
+    # the derived grid also avoids a fixed number of empty montage cells.
     $contactFrameBudget = 64.0
-    $contactRate = [Math]::Min(0.25, $contactFrameBudget / [Math]::Max(1.0, $duration))
-    $contactRows = [Math]::Max(1, [Math]::Ceiling($duration * $contactRate / 4))
-    & (Get-Command ffmpeg.exe -ErrorAction Stop).Source -hide_banner -loglevel error -y -i $Capture.OutputPath -vf "fps=$contactRate,scale=480:-1,tile=4x$contactRows" -frames:v 1 -q:v 3 $ContactSheetPath
+    $contactStride = [Math]::Max(1, [Math]::Ceiling($frames / $contactFrameBudget))
+    $contactSampleCount = [Math]::Max(1, [Math]::Ceiling($frames / [double]$contactStride))
+    $contactColumns = [Math]::Min(4, $contactSampleCount)
+    while ($contactColumns -gt 1 -and ($contactSampleCount % $contactColumns) -ne 0) { $contactColumns-- }
+    $contactRows = [Math]::Max(1, [Math]::Ceiling($contactSampleCount / [double]$contactColumns))
+    $contactTile = "${contactColumns}x${contactRows}:nb_frames=${contactSampleCount}:color=black"
+    & (Get-Command ffmpeg.exe -ErrorAction Stop).Source -hide_banner -loglevel error -y -i $Capture.OutputPath -vf "select='not(mod(n\,$contactStride))',scale=480:-2,format=yuvj420p,tile=$contactTile" -frames:v 1 -q:v 3 $ContactSheetPath
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $ContactSheetPath)) { throw 'Could not extract contact sheet from captured clip.' }
 
     $timelineDirectory = Join-Path (Split-Path -Parent $Capture.OutputPath) 'TimelineFrames'

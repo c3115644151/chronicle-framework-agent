@@ -1104,6 +1104,8 @@ internal sealed class ChronicleAgentProtocol
                     var leaveMainAgent = leaveMission?.MainAgent;
                     if (leaveMission == null || leaveMission.MissionEnded || leaveMissionState == null || leaveMainAgent == null || !leaveMainAgent.IsActive() || !leaveMainAgent.IsPlayerControlled)
                         throw new InvalidOperationException("missionLeave requires an active Location Mission with the Player-controlled MainAgent");
+                    if (Campaign.Current?.CurrentMenuContext?.GameMenu == null)
+                        throw new InvalidOperationException("missionLeave refuses a second Leave Area input after the Native parent menu has closed; observe the pending location exit until MapState returns");
                     if (!AgentMissionInputPatch.IsSupportedLocationLeaveMission(leaveMission) || !leaveMission.IsFriendlyMission)
                         throw new InvalidOperationException("missionLeave requires a supported friendly Town, Tavern or Village Mission, including its active native Conversation mode");
                     if (Campaign.Current?.TimeControlMode != CampaignTimeControlMode.Stop)
