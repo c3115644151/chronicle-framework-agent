@@ -1658,7 +1658,9 @@ internal static class ProviderContractSelfTest
 
         using var sentRequest = JsonDocument.Parse(handler.LastRequestBody);
         var systemContent = sentRequest.RootElement.GetProperty("messages")[0].GetProperty("content").GetString();
-        var expectedPrompt = expectedPromptMember == "SupplySystemPrompt" ? AgentHostDecisionCycle.SupplySystemPrompt : AgentHostDecisionCycle.CampaignSystemPrompt;
+        var expectedPrompt = expectedPromptMember == "SupplySystemPrompt"
+            ? AgentHostDecisionCycle.SupplySystemPrompt
+            : AgentHostDecisionCycle.CampaignSystemPrompt + " " + AgentHostDecisionCycle.QuestTerminalOutcomeRule;
         if (!string.Equals(systemContent, expectedPrompt, StringComparison.Ordinal))
             throw new AgentHostException("agent-host-shared-decision-prompt-failed", $"The shared Host decision cycle did not apply the {expectedPromptMember} policy.");
         results.Add(new { scenario = "shared-agent-host-decision-cycle-" + (expectedPromptMember == "SupplySystemPrompt" ? "supply" : "campaign"), passed = true, action = actionName });

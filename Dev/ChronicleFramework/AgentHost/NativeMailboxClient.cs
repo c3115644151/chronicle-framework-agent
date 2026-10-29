@@ -281,9 +281,11 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
                 arguments["direction"] is JsonValue directionNode && directionNode.TryGetValue<string>(out var direction) && direction == "sell" &&
                 arguments["inventorySide"] is JsonValue sideNode && sideNode.TryGetValue<string>(out var side) && side == "PlayerInventory" &&
                 HasText(arguments, "itemViewModelId") && arguments["amount"] is JsonValue amountNode && amountNode.TryGetValue<int>(out var amount) && amount == 1,
+            "sellPrisonerOne" => HasOnlyKeys(arguments, "troopId") && HasText(arguments, "troopId"),
+            "partyScreenDone" => arguments.Count == 0,
             _ => false
         };
-        if (!valid) throw new AgentHostException("native-action-not-in-gold-sale-scope", "The W7-P Native adapter allows safe movement, a currently observed Campaign conversation step, current Town trade navigation, one exact sale, transaction confirmation, or explicit cancellation.");
+        if (!valid) throw new AgentHostException("native-action-not-in-gold-sale-scope", "The W7-P Native adapter allows safe movement, current Town trade, one exact Goods or Ransom-prisoner sale, Native PartyScreen Done, transaction confirmation, or explicit cancellation.");
     }
 
     internal static IReadOnlyList<object> RunGoldSaleActionContractSelfTests()
@@ -297,6 +299,8 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             ("menuSelect", "{\"menuId\":\"town\",\"optionId\":\"trade\"}"),
             ("tradeOptions", "{}"),
             ("trade", "{\"direction\":\"sell\",\"itemViewModelId\":\"current-goods-id\",\"inventorySide\":\"PlayerInventory\",\"amount\":1}"),
+            ("sellPrisonerOne", "{\"troopId\":\"mounted_ransacker\"}"),
+            ("partyScreenDone", "{}"),
             ("tradeConfirm", "{}"),
             ("tradeCancel", "{}"),
             ("tradeCancelChanges", "{}")
@@ -310,6 +314,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             ("trade", "{\"direction\":\"buy\",\"itemViewModelId\":\"market-goods\",\"inventorySide\":\"OtherInventory\",\"amount\":1}"),
             ("trade", "{\"direction\":\"sell\",\"itemViewModelId\":\"current-goods-id\",\"inventorySide\":\"PlayerInventory\",\"amount\":2}"),
             ("trade", "{\"direction\":\"sell\",\"itemViewModelId\":\"current-goods-id\",\"inventorySide\":\"OtherInventory\",\"amount\":1}"),
+            ("sellPrisonerOne", "{\"troopId\":\"mounted_ransacker\",\"count\":7}"),
             ("move", "{\"settlementId\":\"visible-safe-town\",\"resume\":true}")
         };
         foreach (var item in invalidCases)

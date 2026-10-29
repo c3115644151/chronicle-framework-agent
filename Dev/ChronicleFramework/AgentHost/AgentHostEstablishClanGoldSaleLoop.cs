@@ -208,6 +208,51 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             backstreetAction != "menuSelect" || ReadString(backstreetArguments, "menuId") != "town_backstreet" ||
             ReadString(backstreetArguments, "optionId") != "town_backstreet_back")
             throw new AgentHostException("gold-sale-self-test-town-backstreet-not-returnable", "When a prior target id still equals the current settlement, the currently enabled Native Town Backstreet Leave option must remain available so the Gold route can return to the main Town menu and reach Native Trade.");
+        var backstreetWithSale = townBackstreetMenu.DeepClone().AsObject();
+        backstreetWithSale["availableMenuOptions"]!.AsArray().Insert(0, new JsonObject { ["id"] = "sell_some_prisoners", ["available"] = true, ["enabled"] = true });
+        var backstreetSaleCatalog = BuildActionCatalog(backstreetWithSale, null, null, null);
+        if (backstreetSaleCatalog.Count != 1 || ReadString(backstreetSaleCatalog[0] as JsonObject, "action") != "menuSelect" ||
+            (backstreetSaleCatalog[0]?["argumentValues"]?["OptionId"] as JsonArray)?.Count != 2)
+            throw new AgentHostException("gold-sale-self-test-backstreet-prisoner-option-missing", "Offer the currently enabled prisoner-selection entry alongside the Native Leave option, without exposing full-sale or invented menu choices.");
+
+        var ransomState = new JsonObject
+        {
+            ["context"] = new JsonObject { ["gameState"] = "PartyState", ["menuId"] = null, ["inquiryOpen"] = false, ["captivity"] = null },
+            ["partyScreen"] = new JsonObject
+            {
+                ["mode"] = "Ransom", ["canDone"] = true, ["rightPartyId"] = "player_party", ["ransomGoldChangeAmount"] = 0,
+                ["leftPrisoners"] = new JsonArray(),
+                ["rightPrisoners"] = new JsonArray
+                {
+                    new JsonObject { ["troopId"] = "mounted_ransacker", ["count"] = 2, ["transferable"] = true },
+                    new JsonObject { ["troopId"] = "mounted_pillager", ["count"] = 5, ["transferable"] = true }
+                }
+            }
+        };
+        var ransomCatalog = BuildActionCatalog(ransomState, null, null, null);
+        var ransomTroopIds = ransomCatalog.FirstOrDefault()?["argumentValues"]?["TroopId"] as JsonArray;
+        if (ransomCatalog.Count != 1 || ReadString(ransomCatalog[0] as JsonObject, "action") != "sellPrisonerOne" ||
+            ransomTroopIds?.Count != 2 || ransomTroopIds[0]?.GetValue<string>() != "mounted_ransacker" ||
+            !TryResolveAction(ransomState, null, ransomCatalog, new JsonObject
+            {
+                ["action"] = "sellPrisonerOne", ["arguments"] = new JsonObject { ["TroopId"] = "mounted_ransacker" }
+            }, null, null, out var ransomAction, out var ransomArguments, out _) ||
+            ransomAction != "sellPrisonerOne" || ReadString(ransomArguments, "troopId") != "mounted_ransacker")
+            throw new AgentHostException("gold-sale-self-test-ransom-roster-scope-failed", "A Native Ransom screen must expose individual transferable MainParty prisoners, never a bulk sale.");
+        var selectedRansomState = ransomState.DeepClone().AsObject();
+        selectedRansomState["partyScreen"]!["leftPrisoners"] = new JsonArray(new JsonObject { ["troopId"] = "mounted_ransacker", ["count"] = 1 });
+        selectedRansomState["partyScreen"]!["ransomGoldChangeAmount"] = 47d;
+        var selectedRansomCatalog = BuildActionCatalog(selectedRansomState, null, null, null);
+        if (selectedRansomCatalog.Count != 1 || ReadString(selectedRansomCatalog[0] as JsonObject, "action") != "partyScreenDone")
+            throw new AgentHostException("gold-sale-self-test-ransom-submit-gate-failed", $"After one Native prisoner selection, only Native Done should be offered to commit the current partial sale; got={selectedRansomCatalog.ToJsonString()}.");
+        var zeroValueRansomState = selectedRansomState.DeepClone().AsObject();
+        zeroValueRansomState["partyScreen"]!["ransomGoldChangeAmount"] = 0;
+        if (BuildActionCatalog(zeroValueRansomState, null, null, null).Count != 0 ||
+            TryResolveAction(zeroValueRansomState, null, selectedRansomCatalog, new JsonObject
+            {
+                ["action"] = "partyScreenDone", ["arguments"] = new JsonObject()
+            }, null, null, out _, out _, out _))
+            throw new AgentHostException("gold-sale-self-test-ransom-zero-value-commit-accepted", "Do not submit a Native prisoner selection that does not show an actual Gold change.");
         var townReachedAfterMovement = MapState("town", "town-a", new JsonArray(new JsonObject { ["id"] = "trade", ["available"] = true, ["enabled"] = true }));
         townReachedAfterMovement["location"]!["targetSettlementId"] = "town-a";
         if (!HasReachedMoveTargetMenu(townReachedAfterMovement, "town-a") || HasReachedMoveTargetMenu(townReachedAfterMovement, "town-b"))
@@ -515,6 +560,26 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                     saleReceipt = data.DeepClone() as JsonObject;
                     saleActionCount++;
                 }
+                if (action == "sellPrisonerOne")
+                {
+                    var data = receipt["data"] as JsonObject ?? new JsonObject();
+                    if (ReadInt(data, "transferredCount", 0) != 1 ||
+                        ReadInt(data, "sourceCountAfter", -1) != ReadInt(data, "sourceCountBefore", -1) - 1 ||
+                        ReadInt(data, "saleCountAfter", -1) != ReadInt(data, "saleCountBefore", -1) + 1 ||
+                        ReadInt(data, "nativeGoldChangeAfter", 0) == ReadInt(data, "nativeGoldChangeBefore", 0))
+                        throw new AgentHostException("gold-sale-ransom-native-draft-invalid", "Native did not move exactly one selected prisoner or produce a visible non-zero Ransom quote change.");
+                }
+                if (action == "partyScreenDone")
+                {
+                    var data = receipt["data"] as JsonObject ?? new JsonObject();
+                    if (ReadBoolean(data, "postconditionPassed") != true || ReadInt(data, "playerGoldAfter", 0) <= ReadInt(data, "playerGoldBefore", 0) ||
+                        ReadInt(data, "prisonerCountAfter", -1) != ReadInt(data, "prisonerCountBefore", -1) - ReadInt(data, "selectedCount", 0) ||
+                        ReadString(data, "timeControlModeBefore") != ReadString(data, "timeControlModeAfter") ||
+                        Math.Abs(ReadDouble(data, "campaignDayBefore", double.NaN) - ReadDouble(data, "campaignDayAfter", double.NaN)) > 0.000001)
+                        throw new AgentHostException("gold-sale-ransom-native-commit-unverified", "Native Ransom Done did not prove a positive Gold gain, exact prisoner removal, and unchanged Campaign time state.");
+                    saleReceipt = data.DeepClone() as JsonObject;
+                    saleActionCount++;
+                }
 
                 previousReceipt = BuildReceipt(action!, arguments!, receipt);
                 using (var fresh = await stateClient.ReadStateAsync(elapsed.Token)) currentNative = ParseObject(fresh.RootElement);
@@ -601,7 +666,9 @@ internal static class AgentHostEstablishClanGoldSaleLoop
     {
         var context = state["context"] as JsonObject;
         var gameState = ReadString(context, "gameState");
-        if (ReadBoolean(context?["captivity"] as JsonObject, "isCaptive") || IsActiveEncounter(state) ||
+        var ransomSaleState = gameState == "PartyState" && ReadString(state["partyScreen"] as JsonObject, "mode") == "Ransom" &&
+            ReadString(state["partyScreen"] as JsonObject, "rightPartyId") == "player_party";
+        if (ReadBoolean(context?["captivity"] as JsonObject, "isCaptive") || (!ransomSaleState && IsActiveEncounter(state)) ||
             ReadBoolean(context, "escapeMenuOpen") || ReadBoolean(context, "inquiryOpen")) return new JsonArray();
         if (gameState == "InventoryState")
         {
@@ -633,6 +700,27 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             if (ReadBoolean(inventory, "hasPendingChanges")) return new JsonArray();
             return new JsonArray(new JsonObject { ["action"] = "tradeOptions", ["arguments"] = new JsonArray() });
         }
+        if (gameState == "PartyState")
+        {
+            var screen = state["partyScreen"] as JsonObject;
+            if (screen is null || ReadString(screen, "mode") != "Ransom" || ReadString(screen, "rightPartyId") != "player_party") return new JsonArray();
+            var rightRows = screen["rightPrisoners"] as JsonArray;
+            var leftRows = screen["leftPrisoners"] as JsonArray;
+            var selected = CountRoster(leftRows);
+            var goldDraft = ReadDouble(screen, "ransomGoldChangeAmount", 0);
+            if (selected > 0 && goldDraft != 0 && ReadBoolean(screen, "canDone"))
+                return new JsonArray(new JsonObject { ["action"] = "partyScreenDone", ["arguments"] = new JsonArray() });
+            if (selected > 0) return new JsonArray();
+            var ransomIds = rightRows?.OfType<JsonObject>().Where(row => ReadBoolean(row, "transferable") && ReadInt(row, "count", 0) > 0)
+                .Select(row => ReadString(row, "troopId")).Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToArray()
+                ?? Array.Empty<string>();
+            if (ransomIds.Length == 0) return new JsonArray();
+            return new JsonArray(new JsonObject
+            {
+                ["action"] = "sellPrisonerOne", ["arguments"] = new JsonArray("TroopId"),
+                ["argumentValues"] = new JsonObject { ["TroopId"] = new JsonArray(ransomIds.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray()) }
+            });
+        }
         if (gameState != "MapState") return new JsonArray();
         if (IsMapConversationActive(state)) return BuildMapConversationActionCatalog(state);
         if (moveTargetId is not null && !string.Equals(ReadString(state["location"] as JsonObject, "currentSettlementId"), moveTargetId, StringComparison.Ordinal))
@@ -663,6 +751,19 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             if (menuId != "town")
             {
                 if (!AgentHostCampaignStateFacts.IsNativeLocationMenu(state)) return new JsonArray();
+                if (menuId == "town_backstreet")
+                {
+                    var entries = GetEnabledOptions(state).OfType<JsonObject>()
+                        .Where(option => ReadString(option, "id") == "sell_some_prisoners" || ReadBoolean(option, "isLeave"))
+                        .Select(option => ReadString(option, "id")).Where(id => !string.IsNullOrWhiteSpace(id))
+                        .Distinct(StringComparer.Ordinal).ToArray();
+                    if (entries.Contains("sell_some_prisoners", StringComparer.Ordinal))
+                        return new JsonArray(new JsonObject
+                        {
+                            ["action"] = "menuSelect", ["arguments"] = new JsonArray("MenuId", "OptionId"),
+                            ["argumentValues"] = new JsonObject { ["MenuId"] = new JsonArray("town_backstreet"), ["OptionId"] = new JsonArray(entries.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray()) }
+                        });
+                }
                 var leaveOptions = GetEnabledOptions(state).OfType<JsonObject>()
                     .Where(option => ReadBoolean(option, "isLeave"))
                     .Select(option => ReadString(option, "id"))
@@ -829,10 +930,11 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             var currentMenuId = ReadString(state["context"] as JsonObject, "menuId");
             var currentOption = GetEnabledOptions(state).OfType<JsonObject>().FirstOrDefault(option => ReadString(option, "id") == optionId);
             var isMainTownTrade = menuId == "town" && optionId == "trade";
+            var isSelectPrisonersForSale = menuId == "town_backstreet" && optionId == "sell_some_prisoners";
             var isTownLeaveAfterEmptyTrade = menuId == "town" && ReadString(previousReceipt, "action") == "tradeCancel" && ReadBoolean(currentOption, "isLeave");
             var isNativeLocationLeave = AgentHostCampaignStateFacts.IsNativeLocationMenu(state) && ReadBoolean(currentOption, "isLeave") &&
                                         (menuId != "town" || isTownLeaveAfterEmptyTrade);
-            if (menuId != currentMenuId || (!isMainTownTrade && !isNativeLocationLeave) || currentOption is null)
+            if (menuId != currentMenuId || (!isMainTownTrade && !isSelectPrisonersForSale && !isNativeLocationLeave) || currentOption is null)
             {
                 rejection = "Only the current Native Town Trade entry or a visible Native location-menu Leave option can be selected.";
                 return false;
@@ -854,6 +956,36 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 return false;
             }
             arguments = new JsonObject { ["direction"] = "sell", ["itemViewModelId"] = itemId, ["inventorySide"] = "PlayerInventory", ["amount"] = 1 };
+            return true;
+        }
+        if (action == "sellPrisonerOne")
+        {
+            var troopId = ReadString(supplied, "TroopId");
+            var rows = state["partyScreen"]?["rightPrisoners"] as JsonArray;
+            var row = rows?.OfType<JsonObject>().FirstOrDefault(item => ReadString(item, "troopId") == troopId &&
+                ReadBoolean(item, "transferable") && ReadInt(item, "count", 0) > 0);
+            if (ReadString(state["context"] as JsonObject, "gameState") != "PartyState" ||
+                ReadString(state["partyScreen"] as JsonObject, "mode") != "Ransom" ||
+                ReadString(state["partyScreen"] as JsonObject, "rightPartyId") != "player_party" || row is null ||
+                listed["argumentValues"]?["TroopId"]?.AsArray().Any(value => value?.GetValue<string>() == troopId) != true)
+            {
+                rejection = "Choose one currently observed transferable prisoner from MainParty in the Native Ransom screen.";
+                return false;
+            }
+            arguments = new JsonObject { ["troopId"] = troopId };
+            return true;
+        }
+        if (action == "partyScreenDone")
+        {
+            var screen = state["partyScreen"] as JsonObject;
+            if (ReadString(state["context"] as JsonObject, "gameState") != "PartyState" || ReadString(screen, "mode") != "Ransom" ||
+                ReadString(screen, "rightPartyId") != "player_party" || !ReadBoolean(screen, "canDone") ||
+                CountRoster(screen?["leftPrisoners"] as JsonArray) < 1 || ReadDouble(screen, "ransomGoldChangeAmount", 0) == 0 || supplied.Count != 0)
+            {
+                rejection = "Commit only a current Native Ransom draft with selected prisoners and a non-zero visible gold change.";
+                return false;
+            }
+            arguments = new JsonObject();
             return true;
         }
         if ((action is "mapSettlementTargets" or "tradeOptions" or "tradeConfirm" or "tradeCancel" or "tradeCancelChanges") && supplied.Count == 0)
@@ -901,6 +1033,8 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         (state["availableMenuOptions"] as JsonArray)?.OfType<JsonObject>()
             .Where(option => ReadBoolean(option, "available") && ReadBoolean(option, "enabled")).ToArray() is { } options
             ? new JsonArray(options.Select(option => (JsonNode?)option.DeepClone()).ToArray()) : new JsonArray();
+
+    private static int CountRoster(JsonArray? rows) => rows?.OfType<JsonObject>().Sum(row => Math.Max(0, ReadInt(row, "count", 0))) ?? 0;
 
     private static JsonObject BuildObservation(JsonObject native, JsonObject state, JsonObject goldObjective,
         JsonArray liveDifferences, JsonObject? saleReceipt) => new()

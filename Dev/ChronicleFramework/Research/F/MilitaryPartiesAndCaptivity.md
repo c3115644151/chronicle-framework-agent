@@ -351,7 +351,11 @@ Chronicle 主队观察输出俘虏总数，当前 PartyState 观察分别序列�
 
 战后普通兵俘虏另有明确玩家处置点：`PlayerEncounter`先以`DoFreeOrCapturePrisonerHeroes`把仍被敌方关押的Hero移出待分配成员Roster，使用`FreeOrCapturePrisonerHero`对话处理；之后若存在普通成员或俘虏Roster，`DoLootMembersAndPrisonersOfParty`打开`PartyScreenHelper.OpenScreenAsLoot`的`Aftermath` PartyScreen。`DefaultDoneHandler`按本次Roster差异分别将玩家接收的俘虏交给`TakePrisonerAction.ApplyByTakenFromPartyScreen`，并将玩家放弃的俘虏交给`EndCaptivityAction.ApplyByReleasedByChoice`，Encounter随后清理临时战后Roster。此战后普通兵俘分配记为`ACT-F12-11`，不与日常普通兵俘招募`ACT-H04-02`或Hero俘虏对话合并。自然战斗中不同MapEvent/胜负条件是否始终到达该界面、容量反馈和取消后的完整迁移仍待运行核验。
 
+玩家确认，战后可逐项挑选俘虏，不必全收；应按当前目标决定接收哪些人。玩家同时指出俘虏会拖慢队伍，超出容量时还会逃跑。故EYC等长程目标不能把`Take All`当作固定策略：每次都要比较当前目标进度、可用俘虏、当前容量/超限后果与队伍后续移动需要，再提交原版Roster选择；超限确认必须基于当时UI/Native状态重新决策。该段是玩家经验确认，具体移动减速幅度、逃跑时点和概率仍以1.4.8源码/运行证据为准，不能从本次回答推定数值。
+
 `partyTakeAll`只在Loot模式走本体handler；这是战后接收Roster的现有Harness适配，不代表常规PartyScreen俘虏招募、日常容器转移或Hero处置已完整支持。
+
+普通主队俘虏出售是另一种原生Roster事务：Town Backstreet“选择要卖的俘虏”打开Ransom PartyScreen，逐人由`PartyCharacterVM.ExecuteTransferSingle`暂存到买方左侧，Done才通过`IPartyScreenPrisonHandler`提交`SellPrisonersAction`。用户确认玩家可按目标选择其中一部分；俘虏降低地图队伍速度，超出俘虏上限后会逃跑，因此不应把“卖出/接收全部”写成通用Agent策略。Chronicle新增的Ransom适配和EYC Gold sale目录仅把当前Native右侧可转移行逐名开放，并要求用当前非零金币草稿/Done状态核验；2026-10-29源代码及AgentHost离线契约测试通过，但Bannerlord客户端仍加载旧DLL，本次尚无新适配的运行时提交证据。具体移速变化、逃跑时间/数量、卖出Hero的关系及技能影响未在本次确认，不外推用户提供的规则。
 
 ### 被俘
 

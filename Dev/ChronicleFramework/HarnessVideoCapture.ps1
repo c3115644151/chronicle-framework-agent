@@ -114,7 +114,8 @@ function Start-ChronicleWindowVideoCapture {
     param(
         [Parameter(Mandatory = $true)][int]$ProcessId,
         [Parameter(Mandatory = $true)][string]$OutputPath,
-        [ValidateRange(5,60)][int]$FrameRate = 30
+        [ValidateRange(5,60)][int]$FrameRate = 30,
+        [ValidateRange(0, 7200)][int]$DurationLimitSeconds = 0
     )
 
     $ffmpeg = (Get-Command ffmpeg.exe -ErrorAction Stop).Source
@@ -123,6 +124,7 @@ function Start-ChronicleWindowVideoCapture {
     if (-not ('ChronicleFramework.WindowApi' -as [type])) { . (Join-Path $PSScriptRoot 'Test-WindowLayout.ps1') }
     $handle = [ChronicleFramework.WindowApi]::FindProcessWindow($ProcessId)
     if ($handle -eq [IntPtr]::Zero) { throw "No visible Bannerlord window found for process $ProcessId." }
+    if ([ChronicleFramework.WindowApi]::IsIconic($handle)) { throw "Bannerlord window for process $ProcessId is minimized; live-window capture will not restore or move the user's window." }
     $titleBuffer = New-Object System.Text.StringBuilder 512
     [void][ChronicleFramework.WindowApi]::GetWindowText($handle, $titleBuffer, $titleBuffer.Capacity)
     $title = $titleBuffer.ToString()
@@ -134,7 +136,8 @@ function Start-ChronicleWindowVideoCapture {
     $quotedOutput = '"' + $OutputPath.Replace('"','\"') + '"'
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
     $startInfo.FileName = $ffmpeg
-    $startInfo.Arguments = "-hide_banner -loglevel warning -y -f lavfi -i $quotedFilter -an -vf `"hwdownload,format=bgra,pad=ceil(iw/2)*2:ceil(ih/2)*2`" -c:v libx264 -preset ultrafast -crf 22 -pix_fmt yuv420p -g $keyframeInterval -keyint_min $keyframeInterval -fps_mode cfr -movflags +frag_keyframe+empty_moov+default_base_moof $quotedOutput"
+    $durationLimitArgument = if ($DurationLimitSeconds -gt 0) { "-t $DurationLimitSeconds " } else { '' }
+    $startInfo.Arguments = "-hide_banner -loglevel warning -y -f lavfi -i $quotedFilter -an -vf `"hwdownload,format=bgra,pad=ceil(iw/2)*2:ceil(ih/2)*2`" -c:v libx264 -preset ultrafast -crf 22 -pix_fmt yuv420p -g $keyframeInterval -keyint_min $keyframeInterval -fps_mode cfr -movflags +frag_keyframe+empty_moov+default_base_moof $durationLimitArgument$quotedOutput"
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardInput = $true
@@ -157,6 +160,7 @@ function Start-ChronicleWindowVideoCapture {
         WindowHandle = $hwndValue
         WindowTitle = $title
         FrameRate = $FrameRate
+        DurationLimitSeconds = $DurationLimitSeconds
         StartedUtc = $captureRequestedUtc
         StartedTicks = $captureRequestedTicks
         StopwatchFrequency = [Diagnostics.Stopwatch]::Frequency
@@ -175,15 +179,20 @@ function Stop-ChronicleWindowVideoCapture {
     $process = $Capture.Process
     $stopRequestedUtc = (Get-Date).ToUniversalTime().ToString('O')
     $stopRequestedTicks = [Diagnostics.Stopwatch]::GetTimestamp()
+    $stopTimedOut = $false
     if ($process -and -not $process.HasExited) {
         try { $process.StandardInput.WriteLine('q'); $process.StandardInput.Flush() } catch { }
-        if (-not $process.WaitForExit(8000)) {
-            try { $process.Kill() } catch { }
-            throw 'FFmpeg did not stop cleanly after q; the clip is not accepted.'
+        $gracefulStopWaitMilliseconds = if ([int]$Capture.DurationLimitSeconds -gt 0) { [Math]::Max(8000, ([int]$Capture.DurationLimitSeconds + 2) * 1000) } else { 8000 }
+        if (-not $process.WaitForExit($gracefulStopWaitMilliseconds)) {
+            try { $process.Kill(); $process.WaitForExit() } catch { }
+            $stopTimedOut = $true
         }
     }
     $stoppedUtc = (Get-Date).ToUniversalTime().ToString('O')
     $stoppedTicks = [Diagnostics.Stopwatch]::GetTimestamp()
+    $ffmpegStdout = if ($Capture.StdoutTask -and $Capture.StdoutTask.IsCompleted) { [string]$Capture.StdoutTask.GetAwaiter().GetResult() } else { '' }
+    $ffmpegStderr = if ($Capture.StderrTask -and $Capture.StderrTask.IsCompleted) { [string]$Capture.StderrTask.GetAwaiter().GetResult() } else { '' }
+    if ($stopTimedOut) { throw "FFmpeg did not stop cleanly after q; the clip is not accepted. stderr='$ffmpegStderr' stdout='$ffmpegStdout'" }
     if ($process.ExitCode -ne 0) { throw "FFmpeg gfxcapture failed ($($process.ExitCode)): $($Capture.StderrTask.Result)" }
     if (-not (Test-Path -LiteralPath $Capture.OutputPath) -or (Get-Item -LiteralPath $Capture.OutputPath).Length -lt 4096) { throw 'FFmpeg gfxcapture produced no usable clip.' }
 
@@ -200,14 +209,31 @@ function Stop-ChronicleWindowVideoCapture {
     $expectedFrames = [Math]::Floor($duration * $Capture.FrameRate)
     $coverage = if ($expectedFrames -gt 0) { $frames / [double]$expectedFrames } else { 0 }
     if ($frames -lt ($expectedFrames * 0.9) -or $duration -lt 1) { throw "Captured clip is incomplete: duration=${duration}s frames=$frames expected~$expectedFrames coverage=$coverage." }
-    # Bound the contact sheet to 64 source-frame samples. Selecting by frame
-    # index avoids time-based FPS rounding away every frame from short clips;
-    # the derived grid also avoids a fixed number of empty montage cells.
-    $contactFrameBudget = 64.0
+    # Keep the overview readable and avoid repeating an unchanged screen. Add
+    # up to three samples per observed Native state transition, then cap at 24.
+    # State-aligned before/event/after frames are indexed separately below.
+    $stateChangeCountForSheet = 0
+    $sheetEventRows = @()
+    if (Test-Path -LiteralPath $EventTracePath) {
+        $sheetEventRows = @(Get-Content -LiteralPath $EventTracePath -Encoding UTF8 | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_ | ConvertFrom-Json })
+        $sheetPriorSignature = $null
+        $sheetPreviousWasBoundary = $false
+        foreach ($sheetEvent in $sheetEventRows) {
+            $sheetSignature = if ($sheetEvent.stateFingerprint) {
+                @([string]$sheetEvent.gameState,[string]$sheetEvent.menuId,[string]$sheetEvent.partyScreenMode,[string]$sheetEvent.inventoryMode,[string]$sheetEvent.stateFingerprint) -join '|'
+            } else {
+                @([string]$sheetEvent.gameState,[string]$sheetEvent.menuId,[string]$sheetEvent.partyScreenMode,[string]$sheetEvent.inventoryMode) -join '|'
+            }
+            $sheetIsBoundary = [string]$sheetEvent.event -in @('capture-start','capture-end')
+            if ($null -ne $sheetPriorSignature -and -not $sheetPreviousWasBoundary -and -not $sheetIsBoundary -and $sheetSignature -ne $sheetPriorSignature) { $stateChangeCountForSheet++ }
+            $sheetPriorSignature = $sheetSignature
+            $sheetPreviousWasBoundary = $sheetIsBoundary
+        }
+    }
+    $contactFrameBudget = [Math]::Min(24.0, [Math]::Max(1.0, 1.0 + (3.0 * $stateChangeCountForSheet)))
     $contactStride = [Math]::Max(1, [Math]::Ceiling($frames / $contactFrameBudget))
     $contactSampleCount = [Math]::Max(1, [Math]::Ceiling($frames / [double]$contactStride))
     $contactColumns = [Math]::Min(4, $contactSampleCount)
-    while ($contactColumns -gt 1 -and ($contactSampleCount % $contactColumns) -ne 0) { $contactColumns-- }
     $contactRows = [Math]::Max(1, [Math]::Ceiling($contactSampleCount / [double]$contactColumns))
     $contactTile = "${contactColumns}x${contactRows}:nb_frames=${contactSampleCount}:color=black"
     & (Get-Command ffmpeg.exe -ErrorAction Stop).Source -hide_banner -loglevel error -y -i $Capture.OutputPath -vf "select='not(mod(n\,$contactStride))',scale=480:-2,format=yuvj420p,tile=$contactTile" -frames:v 1 -q:v 3 $ContactSheetPath
@@ -222,11 +248,13 @@ function Stop-ChronicleWindowVideoCapture {
         $eventRows = @(Get-Content -LiteralPath $EventTracePath -Encoding UTF8 | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_ | ConvertFrom-Json })
         $importantActions = @('menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','partyTakeAll','partyScreenDone','inventoryTakeAll','inventoryDone','mapSettlementTargets','move','recruitOptions','recruit','provision','tradeConfirm','rest','providerDone','modelLoopFailure','crashReport','crashReportExpanded','crashReportScroll','crashObserved')
         $priorSignature = $null
+        $priorWasBoundary = $false
         foreach ($event in $eventRows) {
-            $signature = @([string]$event.gameState,[string]$event.menuId,[string]$event.partyScreenMode,[string]$event.inventoryMode) -join '|'
-            $stateChanged = $null -ne $priorSignature -and $signature -ne $priorSignature
-            $priorSignature = $signature
+            $signature = @([string]$event.gameState,[string]$event.menuId,[string]$event.partyScreenMode,[string]$event.inventoryMode,[string]$event.stateFingerprint) -join '|'
             $isBoundary = [string]$event.event -in @('capture-start','capture-end')
+            $stateChanged = $null -ne $priorSignature -and -not $priorWasBoundary -and -not $isBoundary -and $signature -ne $priorSignature
+            $priorSignature = $signature
+            $priorWasBoundary = $isBoundary
             $isImportantAction = [string]$event.action -in $importantActions
             if (-not $stateChanged -and -not $isBoundary -and -not $isImportantAction) { continue }
             $frameDuration = 1.0 / [Math]::Max(1.0, [double]$Capture.FrameRate)

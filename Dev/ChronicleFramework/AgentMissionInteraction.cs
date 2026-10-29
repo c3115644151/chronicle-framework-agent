@@ -19,8 +19,10 @@ internal static class ChronicleMissionInteraction
         var mainAgent = mission?.MainAgent;
         if (mission == null || mission.MissionEnded || missionState == null || mainAgent == null || !mainAgent.IsActive() || !mainAgent.IsPlayerControlled)
             throw new InvalidOperationException("missionInteract requires an active Location Mission with the live player MainAgent");
-        if (!AgentMissionInputPatch.IsSupportedLocationMission(mission))
-            throw new InvalidOperationException("missionInteract requires a supported non-battle town or Tavern Location Mission");
+        var supportedLocationMission = AgentMissionInputPatch.IsSupportedLocationMission(mission);
+        var supportedArenaMission = AgentMissionInputPatch.IsSupportedTownArenaLeaveMission(mission);
+        if (!supportedLocationMission && !supportedArenaMission)
+            throw new InvalidOperationException("missionInteract requires a supported friendly Town, Tavern, Village or Arena Master Mission context");
         if (Campaign.Current.TimeControlMode != CampaignTimeControlMode.Stop)
             throw new InvalidOperationException("missionInteract requires the Campaign clock to remain stopped");
         if (mission.IsTeleportingAgents)
@@ -43,6 +45,8 @@ internal static class ChronicleMissionInteraction
         var target = observedLocalAgents.FirstOrDefault(agent => agent.Index == agentIndex);
         if (target == null)
             throw new InvalidOperationException("missionInteract requires an active human AgentIndex from nearbySceneAgents in the current Mission observation");
+        if (supportedArenaMission && !string.Equals((target.Character as CharacterObject)?.StringId, "tournament_master_empire", StringComparison.Ordinal))
+            throw new InvalidOperationException("Arena Mission interaction is restricted to the currently observed Native Arena Master");
         if (target.IsEnemyOf(mainAgent))
             throw new InvalidOperationException("missionInteract rejects hostile local Agents");
         var distance = target.GetDistanceTo(mainAgent);

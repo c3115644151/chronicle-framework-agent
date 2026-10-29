@@ -49,7 +49,8 @@ internal static class ChronicleAgentObserver
             .ToArray();
         var hostileParties = parties.Where(item => IsHostile(party.MapFaction, item.Item.MapFaction)).ToArray();
         var quests = campaign.QuestManager?.Quests.Where(item => item.IsOngoing).Take(12).ToArray() ?? Array.Empty<QuestBase>();
-        var menu = campaign.CurrentMenuContext?.GameMenu;
+        var visibleMenuContext = AgentMissionInputPatch.IsNativeMenuVisible() ? campaign.CurrentMenuContext : null;
+        var menu = visibleMenuContext?.GameMenu;
         var encounteredParty = PlayerEncounter.IsActive ? PlayerEncounter.EncounteredParty : null;
 
         var json = new StringBuilder(4096);
@@ -228,6 +229,11 @@ internal static class ChronicleAgentObserver
                 json.Append(",\"rightMemberLimit\":").Append(screen.RightPartyMembersSizeLimit)
                     .Append(",\"rightPrisonerLimit\":").Append(screen.RightPartyPrisonersSizeLimit);
             }
+            else if (activePartyState.PartyScreenMode == PartyScreenHelper.PartyScreenMode.Ransom)
+            {
+                json.Append(",\"rightPrisonerLimit\":").Append(screen.RightPartyPrisonersSizeLimit)
+                    .Append(",\"ransomGoldChangeAmount\":").Append(Number(screen.CurrentData.PartyGoldChangeAmount));
+            }
             if (activePartyState.PartyScreenMode == PartyScreenHelper.PartyScreenMode.QuestTroopManage)
             {
                 json.Append(",\"questTroopAssignment\":{\"currentCount\":")
@@ -268,8 +274,8 @@ internal static class ChronicleAgentObserver
             json.Append(",\"hasHandler\":").Append(Bool(activeInventoryState.Handler != null));
             json.Append('}');
         }
-        json.Append(",\"availableMenuOptions\":").Append(BuildMenuOptionsJson(campaign.CurrentMenuContext));
-        json.Append(",\"settlementOverlayCharacters\":").Append(BuildSettlementOverlayCharactersJson(campaign.CurrentMenuContext));
+        json.Append(",\"availableMenuOptions\":").Append(BuildMenuOptionsJson(visibleMenuContext));
+        json.Append(",\"settlementOverlayCharacters\":").Append(BuildSettlementOverlayCharactersJson(visibleMenuContext));
         json.Append(",\"nearbySettlements\":[");
         for (var index = 0; index < settlements.Length; index++)
         {
@@ -735,12 +741,23 @@ internal static class ChronicleAgentObserver
     }
 
     internal static string BuildQuestDetailsJson(QuestBase quest)
+        => BuildQuestDetailsJson(quest, null);
+
+    internal static string BuildQuestTerminalOutcomeJson(QuestBase quest, QuestBase.QuestCompleteDetails details)
+        => BuildQuestDetailsJson(quest, details);
+
+    private static string BuildQuestDetailsJson(QuestBase quest, QuestBase.QuestCompleteDetails? terminalDetails)
     {
-        if (quest == null || !quest.IsOngoing) return "null";
+        if (quest == null || (!quest.IsOngoing && !terminalDetails.HasValue)) return "null";
         var hiddenTime = quest.IsRemainingTimeHidden;
         var journalEntries = quest.JournalEntries;
         var json = new StringBuilder(2048);
-        json.Append('{').Append("\"schemaVersion\":1");
+        json.Append('{').Append("\"schemaVersion\":1,\"isTerminal\":").Append(Bool(terminalDetails.HasValue));
+        if (terminalDetails.HasValue)
+        {
+            Property(json, "terminalStatus", terminalDetails.Value.ToString(), true);
+            json.Append(",\"completedAtCampaignDay\":").Append(Number(CampaignTime.Now.ToDays));
+        }
         Property(json, "questId", quest.StringId, true);
         Property(json, "title", quest.Title?.ToString(), true);
         json.Append(",\"isSpecialQuest\":").Append(Bool(quest.IsSpecialQuest));
@@ -755,7 +772,12 @@ internal static class ChronicleAgentObserver
             Property(json, "name", quest.QuestGiver.Name?.ToString(), true);
             json.Append('}');
         }
-        AppendQuestDeadline(json, hiddenTime, (int)(quest.QuestDueTime - CampaignTime.Now).ToDays);
+        if (terminalDetails.HasValue)
+        {
+            json.Append(",\"isRemainingTimeHidden\":").Append(Bool(hiddenTime));
+            json.Append(",\"daysRemaining\":null");
+        }
+        else AppendQuestDeadline(json, hiddenTime, (int)(quest.QuestDueTime - CampaignTime.Now).ToDays);
         json.Append(",\"journalStages\":[");
         for (var index = 0; index < journalEntries.Count; index++)
         {

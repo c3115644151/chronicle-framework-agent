@@ -1,6 +1,9 @@
 using System;
+using System.Linq;
 using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.GameState;
 using HarmonyLib;
+using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
 using TaleWorlds.MountAndBlade.View.MissionViews;
 
@@ -11,6 +14,18 @@ internal static class AgentMissionInputPatch
     private const string HarmonyId = "ChronicleFramework.TavernMissionInput";
 
     internal static bool IsInstalled { get; private set; }
+
+    internal static bool IsNativeMenuVisible()
+    {
+        var activeState = Game.Current?.GameStateManager?.ActiveState;
+        if (activeState is MapState) return true;
+        if (activeState is not MissionState || Mission.Current == null || Mission.Current.MissionEnded ||
+            !string.Equals(Mission.Current.Mode.ToString(), "Conversation", StringComparison.Ordinal))
+            return false;
+
+        var mainAgentController = Mission.Current.MissionBehaviors.OfType<MissionMainAgentController>().FirstOrDefault();
+        return mainAgentController?.MissionScreen != null && !mainAgentController.MissionScreen.IsConversationActive;
+    }
 
     internal static bool IsSupportedLocationMission(Mission mission)
     {
@@ -26,11 +41,20 @@ internal static class AgentMissionInputPatch
         return IsSupportedLocationScene(mission) || IsSupportedTownArenaLeaveMission(mission);
     }
 
-    private static bool IsSupportedTownArenaLeaveMission(Mission mission)
+    internal static bool IsSupportedTownArenaLeaveMission(Mission mission)
     {
-        return mission != null && !mission.MissionEnded &&
-            string.Equals(Campaign.Current?.CurrentMenuContext?.GameMenu?.StringId, "town_arena", StringComparison.Ordinal) &&
-            mission.IsFriendlyMission;
+        if (mission == null || mission.MissionEnded || !mission.IsFriendlyMission ||
+            !string.Equals(mission.Mode.ToString(), "StartUp", StringComparison.Ordinal))
+            return false;
+
+        var currentMenuId = Campaign.Current?.CurrentMenuContext?.GameMenu?.StringId;
+        var arenaScene = mission.SceneName?.StartsWith("arena_", StringComparison.OrdinalIgnoreCase) == true;
+        if (!arenaScene) return false;
+
+        // The Native town_arena menu and town_enter_arena option lead into an
+        // arena_* StartUp scene; the latter may clear CurrentMenuContext. Scope
+        // this exception to that exact scene family and friendly mission.
+        return string.Equals(currentMenuId, "town_arena", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(currentMenuId);
     }
 
     private static bool IsSupportedLocationScene(Mission mission)

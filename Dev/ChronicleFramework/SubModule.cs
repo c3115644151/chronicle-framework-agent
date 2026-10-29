@@ -367,6 +367,7 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
     private string _agentCampaignInstanceId = string.Empty;
     private readonly string _agentRuntimeSessionId = Guid.NewGuid().ToString("N");
     private string _agentCheckpointJson = string.Empty;
+    private string _questTerminalOutcomeLedgerV1 = string.Empty;
     private bool _harnessSaveRequested;
     private bool _harnessTimeControlApplied;
     private bool _campaignActorThinkTraceCaptured;
@@ -420,8 +421,35 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
         CampaignEvents.TickEvent.AddNonSerializedListener(this, OnCampaignTick);
         CampaignEvents.OnGameLoadedEvent.AddNonSerializedListener(this, OnGameLoaded);
         CampaignEvents.OnSaveOverEvent.AddNonSerializedListener(this, OnSaveOver);
+        CampaignEvents.OnQuestCompletedEvent.AddNonSerializedListener(this, OnQuestCompleted);
         if (Environment.GetEnvironmentVariable(HarnessModeVariable) == FreshCampaignHarness.Mode)
             CampaignEvents.OnCharacterCreationIsOverEvent.AddNonSerializedListener(this, OnFreshCharacterCreationFinished);
+    }
+
+    internal string FindQuestTerminalOutcomeJson(string questId)
+    {
+        if (string.IsNullOrWhiteSpace(questId) || string.IsNullOrWhiteSpace(_questTerminalOutcomeLedgerV1)) return null;
+        var idToken = Convert.ToBase64String(Encoding.UTF8.GetBytes(questId)) + "|";
+        foreach (var entry in _questTerminalOutcomeLedgerV1.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!entry.StartsWith(idToken, StringComparison.Ordinal)) continue;
+            try { return Encoding.UTF8.GetString(Convert.FromBase64String(entry.Substring(idToken.Length))); }
+            catch (FormatException) { return null; }
+        }
+        return null;
+    }
+
+    private void OnQuestCompleted(QuestBase quest, QuestBase.QuestCompleteDetails details)
+    {
+        if (quest == null || string.IsNullOrWhiteSpace(quest.StringId)) return;
+        var outcomeJson = ChronicleAgentObserver.BuildQuestTerminalOutcomeJson(quest, details);
+        var idToken = Convert.ToBase64String(Encoding.UTF8.GetBytes(quest.StringId)) + "|";
+        var entries = (_questTerminalOutcomeLedgerV1 ?? string.Empty).Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries)
+            .Where(entry => !entry.StartsWith(idToken, StringComparison.Ordinal))
+            .ToArray();
+        var outcomeToken = Convert.ToBase64String(Encoding.UTF8.GetBytes(outcomeJson));
+        _questTerminalOutcomeLedgerV1 = string.Join("\n", entries.Concat(new[] { idToken + outcomeToken }));
+        ChronicleDiagnostics.Write($"quest-terminal|id={quest.StringId}|details={details}|day={CampaignTime.Now.ToDays:F3}");
     }
 
     private void CaptureCampaignActorThink(MobileParty party, PartyThinkParams thinkParams)
@@ -529,6 +557,7 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
         dataStore.SyncData("chronicle_last_daily_tick_day", ref _lastDailyTickDay);
         dataStore.SyncData("chronicle_agent_campaign_instance_v1", ref _agentCampaignInstanceId);
         dataStore.SyncData("chronicle_agent_checkpoint_json_v1", ref _agentCheckpointJson);
+        dataStore.SyncData("chronicle_quest_terminal_outcomes_v1", ref _questTerminalOutcomeLedgerV1);
         var mode = dataStore.IsSaving ? "save" : dataStore.IsLoading ? "load" : "unknown";
         ChronicleDiagnostics.Write($"campaign-sync|mode={mode}|version={_stateVersion}|count={_dailyTickCount}|day={_lastDailyTickDay:F3}|agentCampaignIdPresent={!string.IsNullOrWhiteSpace(_agentCampaignInstanceId)}|agentCheckpointChars={(_agentCheckpointJson ?? string.Empty).Length}");
     }

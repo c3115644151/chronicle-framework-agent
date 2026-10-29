@@ -399,8 +399,20 @@ internal sealed class ChronicleAgentProtocol
                     break;
                 case "questDetails":
                     var questDetailsId = ReadString(command, "questId");
-                    var observedQuest = FindObservedOngoingQuest(questDetailsId);
-                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentObserver.BuildQuestDetailsJson(observedQuest));
+                    if (string.IsNullOrWhiteSpace(questDetailsId)) throw new InvalidOperationException("questId must come from a previously observed Quest entry");
+                    var activeQuestDetails = Campaign.Current?.QuestManager?.Quests
+                        .Where(quest => quest != null && quest.IsOngoing)
+                        .Take(12)
+                        .FirstOrDefault(quest => string.Equals(quest.StringId, questDetailsId, StringComparison.Ordinal));
+                    if (activeQuestDetails != null)
+                    {
+                        WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentObserver.BuildQuestDetailsJson(activeQuestDetails));
+                        break;
+                    }
+                    var terminalQuestDetails = behavior.FindQuestTerminalOutcomeJson(questDetailsId);
+                    if (string.IsNullOrWhiteSpace(terminalQuestDetails))
+                        throw new InvalidOperationException("questId is not active or a Native terminal outcome previously observed in this Campaign");
+                    WriteResponse(commandId, action, "completed", behavior, null, terminalQuestDetails);
                     break;
                 case "partyRoster":
                     if (Game.Current?.GameStateManager?.ActiveState is not MapState)
@@ -1104,8 +1116,6 @@ internal sealed class ChronicleAgentProtocol
                     var leaveMainAgent = leaveMission?.MainAgent;
                     if (leaveMission == null || leaveMission.MissionEnded || leaveMissionState == null || leaveMainAgent == null || !leaveMainAgent.IsActive() || !leaveMainAgent.IsPlayerControlled)
                         throw new InvalidOperationException("missionLeave requires an active Location Mission with the Player-controlled MainAgent");
-                    if (Campaign.Current?.CurrentMenuContext?.GameMenu == null)
-                        throw new InvalidOperationException("missionLeave refuses a second Leave Area input after the Native parent menu has closed; observe the pending location exit until MapState returns");
                     if (!AgentMissionInputPatch.IsSupportedLocationLeaveMission(leaveMission) || !leaveMission.IsFriendlyMission)
                         throw new InvalidOperationException("missionLeave requires a supported friendly Town, Tavern or Village Mission, including its active native Conversation mode");
                     if (Campaign.Current?.TimeControlMode != CampaignTimeControlMode.Stop)
@@ -1284,6 +1294,8 @@ internal sealed class ChronicleAgentProtocol
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBarterAdapter.CancelProposal());
                     break;
                 case "menuSelect":
+                    if (!AgentMissionInputPatch.IsNativeMenuVisible())
+                        throw new InvalidOperationException("menuSelect requires a visible Native Campaign menu; do not use a stale parent menu while a 3D Mission or active dialogue is on screen");
                     var menuContext = TaleWorlds.CampaignSystem.Campaign.Current.CurrentMenuContext;
                     var expectedMenuId = ReadString(command, "menuId");
                     var optionId = ReadString(command, "optionId");
@@ -1431,6 +1443,10 @@ internal sealed class ChronicleAgentProtocol
                     WriteResponse(commandId, action, "completed", behavior, null,
                         ChronicleLootPartyTransferAdapter.TransferOne(ReadString(command, "troopId"), ReadString(command, "troopType")));
                     break;
+                case "sellPrisonerOne":
+                    WriteResponse(commandId, action, "completed", behavior, null,
+                        ChronicleRansomPrisonerSaleAdapter.TransferOne(ReadString(command, "troopId")));
+                    break;
                 case "partyScreenDone":
                     if (ChronicleAlleyRosterAdapter.IsCurrentNativeAlleyPartyScreen())
                     {
@@ -1438,10 +1454,16 @@ internal sealed class ChronicleAgentProtocol
                         WriteResponse(commandId, action, "completed", behavior, null, alleyRosterDone);
                         break;
                     }
+                    var activeDonePartyState = Game.Current.GameStateManager.ActiveState as PartyState;
+                    if (activeDonePartyState?.PartyScreenMode.ToString() == "Ransom")
+                    {
+                        WriteResponse(commandId, action, "completed", behavior, null, ChronicleRansomPrisonerSaleAdapter.Done());
+                        break;
+                    }
                     var lootPartyStateToClose = Game.Current.GameStateManager.ActiveState as PartyState;
-                    if (lootPartyStateToClose?.PartyScreenLogic == null || lootPartyStateToClose.PartyScreenMode.ToString() != "Loot")
-                        throw new InvalidOperationException("partyScreenDone requires the native postbattle loot PartyState");
-                    if (!lootPartyStateToClose.PartyScreenLogic.IsDoneActive()) throw new InvalidOperationException("native loot PartyScreen Done is unavailable");
+                    if (lootPartyStateToClose?.PartyScreenLogic == null || lootPartyStateToClose.PartyScreenMode.ToString() is not ("Loot" or "Ransom"))
+                        throw new InvalidOperationException("partyScreenDone requires the native postbattle Loot or prisoner-sale Ransom PartyState");
+                    if (!lootPartyStateToClose.PartyScreenLogic.IsDoneActive()) throw new InvalidOperationException("native PartyScreen Done is unavailable");
                     var partyScreenHandler = lootPartyStateToClose.Handler as IPartyScreenPrisonHandler;
                     if (partyScreenHandler == null) throw new InvalidOperationException("native PartyScreen Done handler is unavailable");
                     partyScreenHandler.ExecuteDoneScript();
@@ -1467,6 +1489,8 @@ internal sealed class ChronicleAgentProtocol
                 case "save":
                     var saveName = ReadString(command, "name");
                     if (string.IsNullOrWhiteSpace(saveName)) throw new InvalidOperationException("save name is required");
+                    if (Game.Current?.GameStateManager?.ActiveState is MissionState)
+                        throw new InvalidOperationException("save cannot be requested while a Native Mission is active; return to Campaign Map before saving");
                     _pendingSaveName = saveName;
                     _pendingSaveCommandId = commandId;
                     TaleWorlds.CampaignSystem.Campaign.Current.SaveHandler.SaveAs(saveName);

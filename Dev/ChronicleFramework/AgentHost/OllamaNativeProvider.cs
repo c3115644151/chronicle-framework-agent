@@ -205,7 +205,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     }
 
     internal Task<ProviderDecisionResult> DecideAsync(JsonElement request, CancellationToken cancellationToken) =>
-        DecideAsync(request, AgentHostDecisionCycle.CampaignSystemPrompt, cancellationToken);
+        DecideAsync(request, AgentHostDecisionCycle.CampaignSystemPrompt + " " + AgentHostDecisionCycle.QuestTerminalOutcomeRule, cancellationToken);
 
     Task<ProviderDecisionResult> IAgentHostDecisionProvider.DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken) =>
         DecideAsync(request, systemPrompt, cancellationToken);
