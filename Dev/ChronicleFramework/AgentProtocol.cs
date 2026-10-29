@@ -1489,8 +1489,10 @@ internal sealed class ChronicleAgentProtocol
                 case "save":
                     var saveName = ReadString(command, "name");
                     if (string.IsNullOrWhiteSpace(saveName)) throw new InvalidOperationException("save name is required");
-                    if (Game.Current?.GameStateManager?.ActiveState is MissionState)
-                        throw new InvalidOperationException("save cannot be requested while a Native Mission is active; return to Campaign Map before saving");
+                    if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+                        throw new InvalidOperationException("save requires the Native Campaign MapState; the current game state cannot complete the Harness SaveAs request");
+                    if (!string.IsNullOrWhiteSpace(_pendingSaveCommandId))
+                        throw new InvalidOperationException("another Native SaveAs request is still awaiting its SaveOver completion; no second save was queued");
                     _pendingSaveName = saveName;
                     _pendingSaveCommandId = commandId;
                     TaleWorlds.CampaignSystem.Campaign.Current.SaveHandler.SaveAs(saveName);
