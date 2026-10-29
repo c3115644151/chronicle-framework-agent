@@ -95,6 +95,22 @@ internal static class AgentHostBattleSimulationLoop
                 var partyScreen = state["partyScreen"] as JsonObject;
                 var inventoryScreen = state["inventoryScreen"] as JsonObject;
 
+                if (IsActiveMapIncident(native))
+                {
+                    failure = "A Native Map Incident opened before the battle decision; the parent EYC loop must resolve its current visible choices before resuming.";
+                    failureCode = "native-map-incident-interrupted-battle-planning";
+                    termination = "native-map-incident-interrupted-battle-planning";
+                    trace.Add(new JsonObject
+                    {
+                        ["stage"] = "battle-planning-interrupted-by-native-map-incident",
+                        ["iteration"] = iteration,
+                        ["modelDecisionMade"] = false,
+                        ["nativeActionMade"] = false,
+                        ["mapIncident"] = (context["mapIncident"] as JsonObject)?.DeepClone()
+                    });
+                    break;
+                }
+
                 // Preserve the current player-visible hostile target while the model decides
                 // whether to pursue it. This is a distinct Native Pause command, never folded
                 // into Move/Pursue, and it is skipped while that exact target is already being
@@ -1214,6 +1230,16 @@ internal static class AgentHostBattleSimulationLoop
             !visibleThreatTrace.OfType<JsonObject>().Any(step => ReadString(step["decision"] as JsonObject, "action") == "pursue"))
             throw new AgentHostException("battle-loop-visible-threat-pause-before-model-failed", "A visible, unpursued bandit must trigger a distinct audited Native Pause before the first model decision; the model must then decide using the still-visible party. Already-active pursuits and all ordinary movement remain on Native clock behavior.");
 
+        var incidentClient = new FakeBattleSimulationNativeClient(mapIncidentAtStart: true);
+        var incidentProvider = new FakeBattleSimulationDecisionProvider();
+        var incidentInterruptedBattle = await RunAsync(request.RootElement, incidentClient, incidentProvider, CancellationToken.None);
+        if (ReadString(incidentInterruptedBattle, "status") != "failed" ||
+            ReadString(incidentInterruptedBattle, "termination") != "native-map-incident-interrupted-battle-planning" ||
+            incidentProvider.CallCount != 0 || incidentClient.Actions.Count != 0 || incidentClient.ClockActions.Count != 0 ||
+            incidentInterruptedBattle["trace"] is not JsonArray incidentTrace ||
+            !incidentTrace.OfType<JsonObject>().Any(step => ReadString(step, "stage") == "battle-planning-interrupted-by-native-map-incident" &&
+                ReadBoolean(step, "modelDecisionMade") == false && ReadBoolean(step, "nativeActionMade") == false))
+            throw new AgentHostException("battle-loop-map-incident-was-not-left-to-parent", "A Native map incident must interrupt the battle child before any model or movement action so the parent can resolve the current incident and replan.");
         var inquiryClient = new FakeBattleSimulationNativeClient(simulatePartyInquiry: true);
         var inquiryProvider = new FakeBattleSimulationDecisionProvider(simulatePartyInquiry: true);
         var inquiryRequestNode = JsonNode.Parse(request.RootElement.GetRawText())!.AsObject();
@@ -1268,6 +1294,7 @@ internal static class AgentHostBattleSimulationLoop
             throw new AgentHostException("battle-loop-self-test-captivity-recovery-failed", $"A fake Native battle-capture-ransom cycle failed: status={ReadString(recovery, "status")}, outcome={ReadString(recovery, "playerOutcome")}, captivity={ReadBoolean(recovery, "captivityObserved")}, recovery={ReadBoolean(recovery, "captivityRecoveryVerified")}, action={ReadString(recovery, "captivityChoiceOptionId")}, actions={string.Join(",", recoveryClient.Actions)}.");
         return [
             new { scenario = "battle-loop-native-observe-pursue-send-troops-aftermath-return-and-verify", decisions = ReadInt(result, "decisions", 0), nativeActions = client.Actions.ToArray(), renownBefore = ReadDouble(result, "renownBefore", double.NaN), renownAfter = ReadDouble(result, "renownAfter", double.NaN), explicitClockActions = ReadInt(result, "explicitClockActionCount", -1), passed = true },
+            new { scenario = "battle-loop-map-incident-interrupts-before-model-or-native-actions", passed = true },
             new { scenario = "battle-loop-resolves-party-loot-inquiry-from-current-eyc-goal-and-roster-then-resumes-native-aftermath", decisions = ReadInt(partyInquiryResult, "decisions", 0), nativeActions = inquiryClient.Actions.ToArray(), inquiryChoice = inquiryClient.LastInquiryChoice, passed = true },
             new { scenario = "battle-loop-incident-after-201-parent-decisions-retains-global-budget", decisions = ReadInt(cumulativeBattle, "decisions", 0), passed = true },
             new { scenario = "battle-loop-native-capture-passive-wait-ransom-release-and-map-return", decisions = ReadInt(recovery, "decisions", 0), nativeActions = recoveryClient.Actions.ToArray(), captivityChoiceOptionId = ReadString(recovery, "captivityChoiceOptionId"), mainPartyMembersAtReturn = ReadInt(recovery, "mainPartyMembersAtReturn", 0), explicitClockActions = ReadInt(recovery, "explicitClockActionCount", -1), passed = true }
@@ -1429,6 +1456,9 @@ internal static class AgentHostBattleSimulationLoop
 
     private static bool IsPlayerCaptive(JsonObject? state) =>
         ReadBoolean((state?["context"] as JsonObject)?["captivity"] as JsonObject, "isCaptive");
+
+    private static bool IsActiveMapIncident(JsonObject native) =>
+        ReadBoolean(((native["state"] as JsonObject)?["context"] as JsonObject)?["mapIncident"] as JsonObject, "active");
 
     internal static bool ShouldPauseForVisibleHostileDecision(JsonObject native)
     {
@@ -1668,6 +1698,7 @@ internal static class AgentHostBattleSimulationLoop
         private readonly bool _simulateCaptivity;
         private readonly bool _simulatePartyInquiry;
         private readonly bool _visibleHostileAtStart;
+        private readonly bool _mapIncidentAtStart;
         private int _stage;
         private int _movingReads;
         private int _captivityPolls;
@@ -1679,11 +1710,12 @@ internal static class AgentHostBattleSimulationLoop
         internal List<string> ClockActions { get; } = [];
         internal string? LastInquiryChoice { get; private set; }
 
-        internal FakeBattleSimulationNativeClient(bool simulateCaptivity = false, bool simulatePartyInquiry = false, bool visibleHostileAtStart = false)
+        internal FakeBattleSimulationNativeClient(bool simulateCaptivity = false, bool simulatePartyInquiry = false, bool visibleHostileAtStart = false, bool mapIncidentAtStart = false)
         {
             _simulateCaptivity = simulateCaptivity;
             _simulatePartyInquiry = simulatePartyInquiry;
             _visibleHostileAtStart = visibleHostileAtStart;
+            _mapIncidentAtStart = mapIncidentAtStart;
             if (visibleHostileAtStart) _timeControlMode = "StoppablePlay";
         }
 
@@ -1782,6 +1814,8 @@ internal static class AgentHostBattleSimulationLoop
             };
             if (_visibleHostileAtStart && _stage == 0)
                 state["nearbyParties"] = new JsonArray(new JsonObject { ["id"] = "bandit-1", ["name"] = "Bandit Party", ["type"] = "bandit", ["distance"] = 2.0, ["hostile"] = true });
+            if (_mapIncidentAtStart && _stage == 0)
+                state["context"]!["mapIncident"] = new JsonObject { ["schemaVersion"] = 1, ["active"] = true, ["supported"] = true, ["incidentType"] = "PlightOfCivilians" };
             if (_stage is 10 or 11)
                 state["context"]!["captivity"] = new JsonObject
                 {

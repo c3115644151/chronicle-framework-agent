@@ -5,9 +5,11 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Reflection;
 using System.Text;
+using TaleWorlds.CampaignSystem.CampaignBehaviors;
 using SandBox.View.Map;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.GameState;
+using TaleWorlds.CampaignSystem.Incidents;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
 
@@ -16,6 +18,38 @@ namespace ChronicleFramework;
 internal static class ChronicleAgentMapIncidentAdapter
 {
     private const BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
+    internal static string SeedHarnessFixture()
+    {
+        if (!string.Equals(Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE"), "visual-capture", StringComparison.Ordinal) ||
+            string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP")))
+            throw new InvalidOperationException("harnessSeedMapIncidentFixture is restricted to a disposable visual Harness run");
+        if (Game.Current?.GameStateManager?.ActiveState is not MapState mapState || MapScreen.Instance == null)
+            throw new InvalidOperationException("harnessSeedMapIncidentFixture requires the original Campaign Map and MapScreen");
+        if (IsActive()) throw new InvalidOperationException("harnessSeedMapIncidentFixture requires no existing Native Map Incident");
+
+        var incident = new Incident("chronicle_harness_modal_input_guard");
+        incident.Initialize(
+            "Chronicle Harness input guard",
+            "This harmless disposable modal verifies that map movement cannot bypass the original Native Incident UI.",
+            IncidentsCampaignBehaviour.IncidentTrigger.LeavingTown,
+            IncidentsCampaignBehaviour.IncidentType.PlightOfCivilians,
+            CampaignTime.Hours(1f),
+            _ => true);
+        incident.AddOption("Close harness incident (no campaign effects)", new List<IncidentEffect>());
+        mapState.StartIncident(incident);
+
+        var observation = BuildJson();
+        if (!IsActive()) throw new InvalidOperationException("The original MapState did not activate the disposable Native Map Incident view");
+        return "{\"schemaVersion\":1,\"testOnly\":true,\"type\":\"PlightOfCivilians\",\"observation\":" + observation + "}";
+    }
+
+    internal static bool IsActive()
+    {
+        if (Game.Current?.GameStateManager?.ActiveState is not MapState) return false;
+        var mapScreen = MapScreen.Instance;
+        return mapScreen != null && (mapScreen.IsMapIncidentActive || mapScreen.GetMapView<MapIncidentView>() != null);
+    }
 
     internal static string BuildJson()
     {

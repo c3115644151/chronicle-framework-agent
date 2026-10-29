@@ -257,6 +257,9 @@ internal sealed class ChronicleAgentProtocol
                     WriteResponse(commandId, action, "completed", behavior, null,
                         ChronicleAgentMapIncidentAdapter.SelectAndConfirm(ReadRequiredInteger(command, "optionIndex")));
                     break;
+                case "harnessSeedMapIncidentFixture":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentMapIncidentAdapter.SeedHarnessFixture());
+                    break;
                 case "submitStoryModeClanName":
                     WriteResponse(commandId, action, "completed", behavior, null,
                         ChronicleInquiryAdapter.RespondStoryModeClanName(ReadString(command, "token"), ReadString(command, "text")));
@@ -898,6 +901,7 @@ internal sealed class ChronicleAgentProtocol
                     WriteResponse(commandId, action, "accepted", behavior);
                     break;
                 case "pursue":
+                    EnsureNoActiveMapIncident("pursuit");
                     var mapStateForPursuit = Game.Current?.GameStateManager?.ActiveState as MapState;
                     if (mapStateForPursuit == null || mapStateForPursuit.AtMenu || MapScreen.Instance?.IsEscapeMenuOpened == true || ChronicleInquiryAdapter.IsInquiryOpen)
                         throw new InvalidOperationException("pursuit requires the unobstructed Campaign Map; a native Map menu, Escape menu, or Inquiry is open");
@@ -915,6 +919,7 @@ internal sealed class ChronicleAgentProtocol
                     WriteResponse(commandId, action, "completed", behavior);
                     break;
                 case "follow":
+                    EnsureNoActiveMapIncident("escort");
                     if (PlayerEncounter.IsActive || MobileParty.MainParty.CurrentSettlement != null || MobileParty.MainParty.MapEvent != null)
                         throw new InvalidOperationException("escort requires the campaign map with no active encounter");
                     var escortPartyId = ReadString(command, "partyId");
@@ -929,6 +934,7 @@ internal sealed class ChronicleAgentProtocol
                     WriteResponse(commandId, action, "completed", behavior);
                     break;
                 case "hold":
+                    EnsureNoActiveMapIncident("hold");
                     MobileParty.MainParty.SetMoveModeHold();
                     ApplyMapClickTimeChange(isDoubleClick: false);
                     WriteResponse(commandId, action, "completed", behavior);
@@ -943,6 +949,7 @@ internal sealed class ChronicleAgentProtocol
                     WriteResponse(commandId, action, "completed", behavior, null, SetNativeTimeSpeed(2));
                     break;
                 case "move":
+                    EnsureNoActiveMapIncident("settlement movement");
                     if (ChronicleInquiryAdapter.IsInquiryOpen || MapScreen.Instance?.IsEscapeMenuOpened == true || PlayerEncounter.IsActive || MobileParty.MainParty.CurrentSettlement != null || MobileParty.MainParty.MapEvent != null)
                         throw new InvalidOperationException("settlement movement requires the unobstructed Campaign Map with no Native menu, Escape menu, Inquiry, or active Encounter");
                     var settlementId = ReadString(command, "settlementId");
@@ -961,6 +968,7 @@ internal sealed class ChronicleAgentProtocol
                     WriteResponse(commandId, action, "completed", behavior);
                     break;
                 case "moveToPoint":
+                    EnsureNoActiveMapIncident("point movement");
                     if (ChronicleInquiryAdapter.IsInquiryOpen || MapScreen.Instance?.IsEscapeMenuOpened == true || PlayerEncounter.IsActive || MobileParty.MainParty.CurrentSettlement != null || MobileParty.MainParty.MapEvent != null)
                         throw new InvalidOperationException("point movement requires the unobstructed Campaign Map with no Native menu, Escape menu, Inquiry, or active Encounter");
                     var mapStateForPointMove = Game.Current.GameStateManager.ActiveState as MapState;
@@ -2597,6 +2605,12 @@ internal sealed class ChronicleAgentProtocol
                 campaign.TimeControlMode = campaign.TimeControlMode == CampaignTimeControlMode.StoppableFastForward ? CampaignTimeControlMode.StoppableFastForward : CampaignTimeControlMode.StoppablePlay;
                 break;
         }
+    }
+
+    private static void EnsureNoActiveMapIncident(string action)
+    {
+        if (ChronicleAgentMapIncidentAdapter.IsActive())
+            throw new InvalidOperationException(action + " requires the unobstructed Campaign Map; a Native Map Incident is open and must be resolved first");
     }
 
     private void FinalizeVolunteerRecruitmentViewModel()
