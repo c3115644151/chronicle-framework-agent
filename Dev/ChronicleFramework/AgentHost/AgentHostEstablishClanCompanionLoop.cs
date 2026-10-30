@@ -9,6 +9,7 @@ internal static class AgentHostEstablishClanCompanionLoop
 {
     private const double MinimumCompanionNavigationProgressDistance = 0.1d;
     private const int MaxCompanionNavigationNoProgressAttempts = 2;
+    private const int MaxTavernMissionStartupWaits = 20;
     private const string QuestId = "rebuild_player_clan_storymode_quest";
     private const int MaxDecisions = AgentHostCampaignLoop.MaxCumulativeDecisions;
     // This is a per-decision choice window, not a world-entity cap. After a
@@ -199,6 +200,18 @@ internal static class AgentHostEstablishClanCompanionLoop
             nextTownWindow.Count != 9 || ReadString(nextTownWindow[0] as JsonObject, "id") != "town-12")
             throw new AgentHostException("establish-clan-companion-town-window-paging-failed", "Map target context must bound each model choice window while retaining all world targets across the visited-Town refresh cycle.");
 
+        var tavernStartupState = new JsonObject
+        {
+            ["context"] = new JsonObject { ["gameState"] = "MissionState", ["menuId"] = null, ["encounterActive"] = true, ["encounteredPartyId"] = "town-a" },
+            ["location"] = new JsonObject { ["currentSettlementId"] = "town-a" },
+            ["mission"] = new JsonObject { ["active"] = true, ["sceneName"] = "empire_house_c_tavern_a", ["mode"] = "StartUp", ["nativeMissionCurrentState"] = "Initializing" }
+        };
+        var tavernStartupCatalog = BuildActionCatalog(tavernStartupState, new JsonArray(), new JsonObject(), null, null, null, null, false,
+            new HashSet<string>(StringComparer.Ordinal), new HashSet<string>(StringComparer.Ordinal));
+        if (!IsNativeTavernMissionState(tavernStartupState) || !AgentHostCampaignStateFacts.IsActiveEncounter(tavernStartupState) ||
+            tavernStartupCatalog.Count != 1 || ReadString(tavernStartupCatalog[0] as JsonObject, "action") != "missionSceneAgents")
+            throw new AgentHostException("establish-clan-companion-tavern-mission-not-distinguished-from-encounter", "A MissionState at its own friendly settlement in a Native tavern scene must be distinguishable from a hostile/party encounter while preserving the current scene-agent query route.");
+
         var options = BuildActionCatalog(new JsonObject
         {
             ["context"] = new JsonObject { ["gameState"] = "MissionState" },
@@ -235,9 +248,9 @@ internal static class AgentHostEstablishClanCompanionLoop
             ReadString(result["termination"] as JsonObject, "reason") != "native-companion-journal-target-met" ||
             ReadInt(result, "actionsExecuted", 0) != expected.Length || provider.CallCount != expected.Length ||
             !client.Actions.SequenceEqual(expected, StringComparer.Ordinal) || client.Gold != 1340 || client.CompanionCount != 1 ||
-            client.ActiveMissionNavigationStateReads < 2 || provider.SawActiveMissionNavigation ||
+            client.ActiveMissionNavigationStateReads < 2 || client.TavernMissionStartupStateReads < 2 || provider.SawActiveMissionNavigation ||
             ReadBoolean((result["objectiveSnapshot"] as JsonObject)?["companions"] as JsonObject, "met") != true)
-            throw new AgentHostException("establish-clan-companion-transport-self-test-failed", "The injected Native/Provider route did not passively wait for current Mission navigation, follow the observed Tavern path, hire one quoted Wanderer, and verify refreshed original Journal progress. status=" + ReadString(result, "status") + "; termination=" + ReadString(result["termination"] as JsonObject, "reason") + "; failureCode=" + ReadString(result, "failureCode") + "; failure=" + ReadString(result, "failure") + "; actions=" + string.Join(",", client.Actions) + "; calls=" + provider.CallCount + "; activeNavigationReads=" + client.ActiveMissionNavigationStateReads + "; providerSawActiveNavigation=" + provider.SawActiveMissionNavigation + "; journalMet=" + ReadBoolean((result["objectiveSnapshot"] as JsonObject)?["companions"] as JsonObject, "met"));
+            throw new AgentHostException("establish-clan-companion-transport-self-test-failed", "The injected Native/Provider route did not passively settle the original Tavern Mission before decisions, wait for Native navigation, follow the observed Tavern path, hire one quoted Wanderer, and verify refreshed original Journal progress. status=" + ReadString(result, "status") + "; termination=" + ReadString(result["termination"] as JsonObject, "reason") + "; failureCode=" + ReadString(result, "failureCode") + "; failure=" + ReadString(result, "failure") + "; actions=" + string.Join(",", client.Actions) + "; calls=" + provider.CallCount + "; activeNavigationReads=" + client.ActiveMissionNavigationStateReads + "; startupReads=" + client.TavernMissionStartupStateReads + "; providerSawActiveNavigation=" + provider.SawActiveMissionNavigation + "; journalMet=" + ReadBoolean((result["objectiveSnapshot"] as JsonObject)?["companions"] as JsonObject, "met"));
         var stopClient = new FakeCompanionClient();
         var stopProvider = new FakeCompanionStopProvider();
         using var stopRequest = JsonDocument.Parse("{\"runId\":\"establish-clan-companion-safe-stop-selftest\",\"goal\":\"Hire one Companion.\",\"maxDecisions\":1,\"maxElapsedSeconds\":10}");
@@ -257,6 +270,7 @@ internal static class AgentHostEstablishClanCompanionLoop
             throw new AgentHostException("establish-clan-companion-mission-stop-did-not-recover-to-map", "A model stop inside a Tavern Mission must be corrected to a listed Native exit, return to Map, and only then allow safe parent replanning.");
         var movementWaitResult = await RunMapMovementWaitSelfTestAsync();
         return [
+            new { scenario = "establish-clan-companion-passively-settles-friendly-tavern-mission-startup-before-decisions", startupReads = client.TavernMissionStartupStateReads, passed = true },
             new { scenario = "establish-clan-companion-passively-waits-for-native-mission-navigation-before-next-model-decision", activeNavigationReads = client.ActiveMissionNavigationStateReads, decisions = provider.CallCount, nativeActions = client.Actions.ToArray(), passed = true },
             new { scenario = "establish-clan-companion-listed-safe-stop-is-interrupted-with-zero-native-actions", decisions = stopProvider.CallCount, passed = true },
             new { scenario = "establish-clan-companion-mission-stop-is-corrected-to-native-leave-before-parent-replan", decisions = missionStopProvider.CallCount, nativeActions = missionStopClient.Actions.ToArray(), passed = true },
@@ -331,6 +345,7 @@ internal static class AgentHostEstablishClanCompanionLoop
         var rejectedProviderDecisions = 0;
         var rejectedActionDecisions = 0;
         var missionWaitPending = false;
+        var tavernMissionStartupWaits = 0;
         JsonObject? decisionFeedback = null;
         var start = Stopwatch.GetTimestamp();
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -351,13 +366,43 @@ internal static class AgentHostEstablishClanCompanionLoop
                     return BuildResult("interrupted", "native-state-out-of-scope", "The current Native state is outside Campaign Map/Town Tavern Companion handling; no new game action was attempted.", "companion-state-out-of-scope", state);
                 if (ReadBoolean(context, "inquiryOpen") || ReadBoolean(context, "escapeMenuOpen"))
                     return BuildResult("interrupted", "native-modal-out-of-scope", "A Native modal interrupted the Companion route; the executor did not guess a response.", "companion-native-modal", state);
-                if (ReadBoolean(context?["captivity"] as JsonObject, "isCaptive") || AgentHostCampaignStateFacts.IsActiveEncounter(state))
+                if (ReadBoolean(context?["captivity"] as JsonObject, "isCaptive") ||
+                    (AgentHostCampaignStateFacts.IsActiveEncounter(state) && !IsNativeTavernMissionState(state)))
                     return BuildResult("interrupted", "campaign-interruption", "Captivity or an encounter interrupts the Tavern hiring route and must be handled by its own Native subflow.", "companion-campaign-interruption", state);
                 var sceneNotification = context?["sceneNotification"] as JsonObject;
                 var sceneNotificationActive = ReadBoolean(sceneNotification, "hasActiveNotification");
                 var sceneNotificationCanContinue = ReadBoolean(sceneNotification, "canContinue");
                 if (sceneNotificationActive && !sceneNotificationCanContinue)
                     return BuildResult("interrupted", "native-scene-notification-out-of-scope", "A Native scene notification is visible, but its current type or close behavior is not in the verified no-choice allowlist.", "companion-scene-notification-out-of-scope", state);
+
+                if (IsNativeTavernMissionState(state) &&
+                    ReadString(state["mission"] as JsonObject, "nativeMissionCurrentState") == "Initializing")
+                {
+                    if (tavernMissionStartupWaits >= MaxTavernMissionStartupWaits)
+                        return BuildResult("failed", "native-tavern-mission-startup-timeout", "The exact friendly Town Tavern Mission remained in Native initialization after bounded passive reads; no model decision or game action was sent.", "native-tavern-mission-startup-timeout", state);
+
+                    var startupCampaignDayBefore = ReadDouble(state, "campaignDay");
+                    tavernMissionStartupWaits++;
+                    await Task.Delay(TimeSpan.FromMilliseconds(500), elapsed.Token);
+                    using var settledMissionState = await campaignClient.ReadStateAsync(elapsed.Token);
+                    var settledState = ReadState(settledMissionState.RootElement)
+                        ?? throw new AgentHostException("companion-state-unavailable", "Native did not provide a state after passive Tavern Mission startup settling.");
+                    if (!AgentHostEstablishYourClanGoalLoop.HasActiveQuest(settledMissionState.RootElement))
+                        return BuildResult("failed", "native-tavern-mission-startup-lost-eyc", "The exact Tavern Mission startup wait did not preserve the original active EYC Quest.", "native-tavern-mission-startup-lost-eyc", settledState);
+                    var startupCampaignDayAfter = ReadDouble(settledState, "campaignDay");
+                    trace.Add(new JsonObject
+                    {
+                        ["stage"] = "native-tavern-mission-startup-settle",
+                        ["attempt"] = tavernMissionStartupWaits,
+                        ["before"] = AgentHostHarnessProgressTrace.BuildNativeStateSummary(new JsonObject { ["state"] = state.DeepClone(), ["campaignDay"] = double.IsFinite(startupCampaignDayBefore) ? JsonValue.Create(startupCampaignDayBefore) : null }),
+                        ["after"] = AgentHostHarnessProgressTrace.BuildNativeStateSummary(new JsonObject { ["state"] = settledState.DeepClone(), ["campaignDay"] = double.IsFinite(startupCampaignDayAfter) ? JsonValue.Create(startupCampaignDayAfter) : null }),
+                        ["beforeNativeMissionCurrentState"] = ReadString(state["mission"] as JsonObject, "nativeMissionCurrentState"),
+                        ["afterNativeMissionCurrentState"] = ReadString(settledState["mission"] as JsonObject, "nativeMissionCurrentState"),
+                        ["nativeActionSent"] = false,
+                        ["modelDecisionSent"] = false
+                    });
+                    continue;
+                }
 
                 var journal = await ReadJournalAsync(companionClient, elapsed.Token);
                 var objective = AgentHostEstablishYourClanGoalLoop.BuildObjectiveSnapshot(journal);
@@ -723,6 +768,20 @@ internal static class AgentHostEstablishClanCompanionLoop
         }
     }
 
+    private static bool IsNativeTavernMissionState(JsonObject state)
+    {
+        var context = state["context"] as JsonObject;
+        var mission = state["mission"] as JsonObject;
+        var location = state["location"] as JsonObject;
+        var currentSettlementId = ReadString(location, "currentSettlementId");
+        return ReadString(context, "gameState") == "MissionState" &&
+               ReadBoolean(mission, "active") &&
+               !string.IsNullOrWhiteSpace(ReadString(mission, "sceneName")) &&
+               ReadString(mission, "sceneName")!.Contains("tavern", StringComparison.OrdinalIgnoreCase) &&
+               !string.IsNullOrWhiteSpace(currentSettlementId) &&
+               string.Equals(ReadString(context, "encounteredPartyId"), currentSettlementId, StringComparison.Ordinal);
+    }
+
     private static JsonArray BuildActionCatalog(JsonObject state, JsonArray journal, JsonObject objective, JsonArray? safeTowns,
         JsonObject? sceneAgentsReceipt, string? selectedHeroId, string? moveTargetId, bool pending,
         HashSet<string> visitedTowns, HashSet<string> excludedHeroes)
@@ -738,7 +797,8 @@ internal static class AgentHostEstablishClanCompanionLoop
             return catalog;
         }
         if (pending || ReadBoolean(context, "inquiryOpen") || ReadBoolean(context, "escapeMenuOpen") ||
-            AgentHostCampaignStateFacts.IsActiveEncounter(state) || ReadBoolean(context?["captivity"] as JsonObject, "isCaptive")) return catalog;
+            (AgentHostCampaignStateFacts.IsActiveEncounter(state) && !IsNativeTavernMissionState(state)) ||
+            ReadBoolean(context?["captivity"] as JsonObject, "isCaptive")) return catalog;
 
         if (gameState == "MapState")
         {
@@ -1323,8 +1383,10 @@ internal static class AgentHostEstablishClanCompanionLoop
     {
         private int _stage;
         private bool _navigated;
+        private int _tavernMissionStartupReadsRemaining = 2;
         private int _missionNavigationActiveReadsRemaining;
         internal int ActiveMissionNavigationStateReads { get; private set; }
+        internal int TavernMissionStartupStateReads { get; private set; }
         internal List<string> Actions { get; } = new();
         internal int Gold => _stage >= 8 ? 1340 : 2000;
         internal int CompanionCount => _stage >= 8 ? 1 : 0;
@@ -1366,6 +1428,26 @@ internal static class AgentHostEstablishClanCompanionLoop
                             : new JsonArray(),
                         ["navigation"] = new JsonObject { ["active"] = navigationActive, ["targetAgentIndex"] = _navigated ? 4 : null }, ["leave"] = null
                     };
+                state["mission"] ??= new JsonObject();
+                state["location"] ??= new JsonObject();
+                state["context"]!["encounterActive"] = true;
+                state["context"]!["encounteredPartyId"] = "town-a";
+                state["mission"]!["active"] = true;
+                state["mission"]!["sceneName"] = "empire_house_c_tavern_a";
+                state["location"]!["currentSettlementId"] = "town-a";
+                if (_stage == 2 && _tavernMissionStartupReadsRemaining > 0)
+                {
+                    _tavernMissionStartupReadsRemaining--;
+                    TavernMissionStartupStateReads++;
+                    state["mission"]!["mode"] = "StartUp";
+                    state["mission"]!["nativeMissionCurrentState"] = "Initializing";
+                    state["mission"]!["activeAgentCount"] = 0;
+                }
+                else
+                {
+                    state["mission"]!["nativeMissionCurrentState"] = "Continuing";
+                    state["mission"]!["activeAgentCount"] = 25;
+                }
             }
             state["campaignDay"] = 10.0;
             state["economy"] = new JsonObject { ["gold"] = Gold };
@@ -1437,7 +1519,13 @@ internal static class AgentHostEstablishClanCompanionLoop
         private static JsonObject BuildState(string gameState, string? menuId, JsonArray menuOptions)
         {
             var context = new JsonObject { ["gameState"] = gameState, ["menuId"] = menuId, ["encounterActive"] = false, ["inquiryOpen"] = false, ["captivity"] = new JsonObject { ["isCaptive"] = false } };
-            return new JsonObject { ["context"] = context, ["availableMenuOptions"] = menuOptions, ["party"] = new JsonObject { ["isMoving"] = false } };
+            return new JsonObject
+            {
+                ["context"] = context,
+                ["availableMenuOptions"] = menuOptions,
+                ["quests"] = new JsonArray(new JsonObject { ["id"] = QuestId }),
+                ["party"] = new JsonObject { ["isMoving"] = false }
+            };
         }
 
         private static JsonObject BuildConversation(string heroId, string text, params string[] options) => new()

@@ -367,9 +367,25 @@ internal static class AgentHostCampaignLoop
         var requestedActions = request.TryGetProperty("allowedActionNames", out var actionNames) && actionNames.ValueKind == JsonValueKind.Array
             ? actionNames.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String).Select(item => item.GetString()!).ToHashSet(StringComparer.Ordinal)
             : new HashSet<string>(StringComparer.Ordinal);
-        if (string.IsNullOrWhiteSpace(goal) || goal.Length > 1000 || maxDecisions is < 1 or > MaxCumulativeDecisions || maxElapsedSeconds is < 1 or > 7200 ||
-            !IsSupportedRequestedActionSet(requestedActions))
-            throw new AgentHostException("campaign-loop-request-invalid", "The Host requires a bounded goal and one exact approved Campaign action set.");
+        var goalValid = !string.IsNullOrWhiteSpace(goal) && goal.Length <= 1000;
+        var decisionLimitValid = maxDecisions is >= 1 and <= MaxCumulativeDecisions;
+        var elapsedLimitValid = maxElapsedSeconds is >= 1 and <= 7200;
+        var actionSetValid = IsSupportedRequestedActionSet(requestedActions);
+        if (!goalValid || !decisionLimitValid || !elapsedLimitValid || !actionSetValid)
+        {
+            var missingApprovedActions = AllSupportedActions.Except(requestedActions).OrderBy(action => action, StringComparer.Ordinal);
+            var unexpectedActions = requestedActions.Except(AllSupportedActions).OrderBy(action => action, StringComparer.Ordinal);
+            var requestedProfiles = new[]
+            {
+                (Name: "approved", Actions: ApprovedActions),
+                (Name: "battle", Actions: BattleSimulationActions),
+                (Name: "gold-sale", Actions: GoldSaleActions),
+                (Name: "captivity", Actions: CaptivityRecoveryActions),
+                (Name: "all-supported", Actions: AllSupportedActions)
+            }.Where(profile => requestedActions.SetEquals(profile.Actions)).Select(profile => profile.Name);
+            var diagnostics = $"goalValid={goalValid}; goalLength={goal?.Length ?? 0}; maxDecisions={maxDecisions}; maxElapsedSeconds={maxElapsedSeconds}; actionCount={requestedActions.Count}; exactProfile={string.Join(",", requestedProfiles)}; missingApproved=[{string.Join(",", missingApprovedActions)}]; unexpected=[{string.Join(",", unexpectedActions)}]";
+            throw new AgentHostException("campaign-loop-request-invalid", "The Host requires a bounded goal and one exact approved Campaign action set. " + diagnostics);
+        }
 
         using (disposeProvider ? provider : null)
         {

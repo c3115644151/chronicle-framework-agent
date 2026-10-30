@@ -251,12 +251,21 @@ internal static class ChronicleAgentRuntimeController
             return;
         }
         var harnessProviderModel = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_MODEL");
-        if (harnessSettings == null && IsLifecycleHarnessMode() && !string.IsNullOrWhiteSpace(harnessProviderModel))
+        if (string.IsNullOrWhiteSpace(harnessProviderModel)) harnessProviderModel = Environment.GetEnvironmentVariable("CHRONICLE_LLM_MODEL");
+        var harnessProviderBaseUrl = Environment.GetEnvironmentVariable("CHRONICLE_LLM_BASE_URL");
+        var harnessProviderOutputMode = Environment.GetEnvironmentVariable("CHRONICLE_LLM_OUTPUT_MODE");
+        var harnessProviderRunCost = Environment.GetEnvironmentVariable("CHRONICLE_LLM_MAX_RUN_COST_CNY");
+        var useHarnessProviderEnvironment = harnessSettings == null && IsLifecycleHarnessMode() &&
+            (!string.IsNullOrWhiteSpace(harnessProviderModel) || !string.IsNullOrWhiteSpace(harnessProviderBaseUrl) ||
+             !string.IsNullOrWhiteSpace(harnessProviderOutputMode) || !string.IsNullOrWhiteSpace(harnessProviderRunCost));
+        if (useHarnessProviderEnvironment)
         {
             settings = new ChronicleAgentProviderSettings
             {
-                OllamaBaseUrl = settings.OllamaBaseUrl,
-                ModelId = harnessProviderModel.Trim(),
+                OllamaBaseUrl = string.IsNullOrWhiteSpace(harnessProviderBaseUrl) ? settings.OllamaBaseUrl : harnessProviderBaseUrl.Trim(),
+                ModelId = string.IsNullOrWhiteSpace(harnessProviderModel) ? settings.ModelId : harnessProviderModel.Trim(),
+                OutputMode = string.IsNullOrWhiteSpace(harnessProviderOutputMode) ? settings.OutputMode : harnessProviderOutputMode.Trim(),
+                DeepSeekRunCostLimitCny = string.IsNullOrWhiteSpace(harnessProviderRunCost) ? settings.DeepSeekRunCostLimitCny : harnessProviderRunCost.Trim(),
                 CampaignGoal = settings.CampaignGoal
             };
         }
@@ -375,16 +384,18 @@ internal static class ChronicleAgentRuntimeController
             _hostError = process.StandardError.ReadToEndAsync();
             var useDisposableBattleFixtureProfile = string.Equals(Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE"), "visual-battle-fixture", StringComparison.Ordinal) &&
                 !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CHRONICLE_AGENT_PROFILE_PATH"));
+            var providerConfigurationSource = useHarnessProviderEnvironment ? "harness-environment-override" : "mcm-start-request";
             var providerConfiguration = useDisposableBattleFixtureProfile
                 ? string.Empty
                 : ",\"providerConfiguration\":{\"OllamaBaseUrl\":\"" + EscapeJson(settings.OllamaBaseUrl) +
                   "\",\"ModelId\":\"" + EscapeJson(settings.ModelId) + "\",\"OutputMode\":\"" + EscapeJson(settings.OutputMode) +
-                  "\",\"DeepSeekRunCostLimitCny\":\"" + EscapeJson(settings.DeepSeekRunCostLimitCny) + "\"}";
+                  "\",\"DeepSeekRunCostLimitCny\":\"" + EscapeJson(settings.DeepSeekRunCostLimitCny) + "\"},\"providerConfigurationSource\":\"" +
+                  EscapeJson(providerConfigurationSource) + "\"";
             var requestJson = "{\"runId\":\"" + _runId + "\",\"parentProcessId\":" + gameProcessId.ToString(CultureInfo.InvariantCulture) +
                               ",\"parentProcessStartTimeUtcTicks\":" + gameProcessStartTimeTicks.ToString(CultureInfo.InvariantCulture) +
                               ",\"nativeSessionId\":\"" + EscapeJson(nativeSessionId) + "\"" + providerConfiguration +
                               ",\"goal\":\"" + EscapeJson(goal.Trim()) +
-                              "\",\"maxDecisions\":320,\"maxElapsedSeconds\":7200,\"allowedActionNames\":[\"mapSettlementTargets\",\"move\",\"menuSelect\",\"talkToSettlementHero\",\"dialogueSelect\",\"dialogueContinue\",\"questDetails\",\"tradeOptions\",\"trade\",\"tradeConfirm\",\"tradeCancel\",\"tradeCancelChanges\",\"barterOptions\",\"barterAutoBalance\",\"barterOffer\",\"barterCancel\",\"inventoryOpen\",\"heroEquipmentOptions\",\"inventoryCancel\",\"partyUpgradeOptions\",\"upgradeTroop\",\"mapPartyTargets\",\"pursue\",\"battleSkip\",\"battleFinish\",\"partyTakeAll\",\"sellPrisonerOne\",\"partyScreenCancel\",\"partyScreenDone\",\"inventoryTakeAll\",\"inventoryDone\",\"recruitOptions\",\"recruit\",\"missionSceneAgents\",\"missionNavigateToAgent\",\"missionInteract\",\"missionLeave\"]}";
+                              "\",\"maxDecisions\":320,\"maxElapsedSeconds\":7200,\"allowedActionNames\":[\"mapSettlementTargets\",\"move\",\"menuSelect\",\"talkToSettlementHero\",\"dialogueSelect\",\"dialogueContinue\",\"questDetails\",\"tradeOptions\",\"trade\",\"tradeConfirm\",\"tradeCancel\",\"tradeCancelChanges\",\"barterOptions\",\"barterAutoBalance\",\"barterOffer\",\"barterCancel\",\"inventoryOpen\",\"heroEquipmentOptions\",\"inventoryCancel\",\"incidentSelect\",\"partyUpgradeOptions\",\"upgradeTroop\",\"mapPartyTargets\",\"pursue\",\"battleSkip\",\"battleFinish\",\"partyTakeAll\",\"partyLootTransferOne\",\"sellPrisonerOne\",\"partyScreenCancel\",\"partyScreenDone\",\"inventoryTakeAll\",\"inventoryDone\",\"recruitOptions\",\"recruit\",\"prisonerRecruitmentOptions\",\"recruitPrisoner\",\"missionSceneAgents\",\"missionNavigateToAgent\",\"missionInteract\",\"missionLeave\"]}";
             _hostInput.WriteLine(requestJson);
             _hostInput.Flush();
             _stopSignalSent = false;

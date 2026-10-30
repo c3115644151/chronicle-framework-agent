@@ -39,9 +39,12 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         };
         var tradeState = new JsonObject
         {
-            ["context"] = new JsonObject { ["gameState"] = "InventoryState", ["menuId"] = null, ["captivity"] = null },
-            ["inventoryScreen"] = new JsonObject { ["mode"] = "Trade", ["hasPendingChanges"] = false }
+            ["context"] = new JsonObject { ["gameState"] = "InventoryState", ["menuId"] = null, ["captivity"] = null, ["encounterActive"] = true, ["encounteredPartyId"] = "sargot" },
+            ["location"] = new JsonObject { ["currentSettlementId"] = "sargot" },
+            ["inventoryScreen"] = new JsonObject { ["mode"] = "Trade", ["hasHandler"] = true, ["hasPendingChanges"] = false }
         };
+        if (AgentHostCampaignStateFacts.IsActiveEncounter(tradeState) && IsActiveEncounter(tradeState))
+            throw new AgentHostException("gold-sale-self-test-native-trade-misclassified-as-encounter", "The original settlement Trade InventoryState must not be treated as a hostile encounter when the Native encounter owner is the same current settlement.");
         var saleCatalog = BuildActionCatalog(tradeState, tradeOptions, null, null);
         var saleItemIds = saleCatalog[0]?["argumentValues"]?["ItemViewModelId"] as JsonArray;
         var saleAmountValues = saleCatalog[0]?["argumentValues"]?["Amount"] as JsonArray;
@@ -1224,7 +1227,14 @@ internal static class AgentHostEstablishClanGoldSaleLoop
 
     private static bool IsActiveEncounter(JsonObject state)
     {
-        return AgentHostCampaignStateFacts.IsActiveEncounter(state);
+        var context = state["context"] as JsonObject;
+        var inventory = state["inventoryScreen"] as JsonObject;
+        var currentSettlementId = ReadString(state["location"] as JsonObject, "currentSettlementId");
+        var nativeSettlementTrade = ReadString(context, "gameState") == "InventoryState" &&
+            ReadString(inventory, "mode") == "Trade" && ReadBoolean(inventory, "hasHandler") &&
+            !string.IsNullOrWhiteSpace(currentSettlementId) &&
+            string.Equals(ReadString(context, "encounteredPartyId"), currentSettlementId, StringComparison.Ordinal);
+        return AgentHostCampaignStateFacts.IsActiveEncounter(state) && !nativeSettlementTrade;
     }
 
     private static JsonObject MapState(string? menuId, string? settlementId, JsonArray options) => new()

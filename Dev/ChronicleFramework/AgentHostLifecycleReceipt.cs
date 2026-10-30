@@ -13,14 +13,14 @@ internal sealed class AgentHostLifecycleReceipt
     [DataMember(Name = "status")] public string Status { get; set; }
     [DataMember(Name = "providerModelId")] public string ModelId { get; set; }
     [DataMember(Name = "providerConfigurationSource")] public string ConfigurationSource { get; set; }
-    [DataMember(Name = "decisionCount")] public int DecisionCount { get; set; }
-    [DataMember(Name = "decisions", EmitDefaultValue = false)] public int DecisionCountAlias { get; set; }
-    [DataMember(Name = "actionsExecuted")] public int ActionsExecuted { get; set; }
-    [DataMember(Name = "firstDecisionRequiresGoalClassification")] public bool FirstDecisionRequiresGoalClassification { get; set; }
-    [DataMember(Name = "firstDecisionListsSupportedGoalClassification")] public bool FirstDecisionListsSupportedGoalClassification { get; set; }
-    [DataMember(Name = "firstDecisionListsUnsupportedGoalClassification")] public bool FirstDecisionListsUnsupportedGoalClassification { get; set; }
-    [DataMember(Name = "promptTokens")] public long PromptTokens { get; set; }
-    [DataMember(Name = "completionTokens")] public long CompletionTokens { get; set; }
+    [DataMember(Name = "decisionCount")] public int? DecisionCount { get; set; }
+    [DataMember(Name = "decisions", EmitDefaultValue = false)] public int? DecisionCountAlias { get; set; }
+    [DataMember(Name = "actionsExecuted")] public int? ActionsExecuted { get; set; }
+    [DataMember(Name = "firstDecisionRequiresGoalClassification")] public bool? FirstDecisionRequiresGoalClassification { get; set; }
+    [DataMember(Name = "firstDecisionListsSupportedGoalClassification")] public bool? FirstDecisionListsSupportedGoalClassification { get; set; }
+    [DataMember(Name = "firstDecisionListsUnsupportedGoalClassification")] public bool? FirstDecisionListsUnsupportedGoalClassification { get; set; }
+    [DataMember(Name = "promptTokens")] public long? PromptTokens { get; set; }
+    [DataMember(Name = "completionTokens")] public long? CompletionTokens { get; set; }
     [DataMember(Name = "providerPromptCacheHitTokens")] public long? PromptCacheHitTokens { get; set; }
     [DataMember(Name = "providerPromptCacheMissTokens")] public long? PromptCacheMissTokens { get; set; }
     [DataMember(Name = "providerActualCostEstimateCny")] public double? ActualCostEstimateCny { get; set; }
@@ -54,8 +54,8 @@ internal sealed class AgentHostLifecycleReceipt
             receipt.Message = SanitizeDiagnostic(receipt.Message);
             receipt.Failure = SanitizeDiagnostic(receipt.Failure);
             receipt.ProviderSelfTestDetail = SanitizeDiagnostic(receipt.ProviderSelfTestDetail);
-            receipt.DecisionCount = Math.Max(receipt.DecisionCount, receipt.DecisionCountAlias);
-            receipt.DecisionCountAlias = 0;
+            receipt.DecisionCount = Math.Max(receipt.DecisionCount ?? 0, receipt.DecisionCountAlias ?? 0);
+            receipt.DecisionCountAlias = null;
             using (var file = File.Create(Path.Combine(actualTemp, "AgentHostLifecycleHostReceipt.json")))
                 serializer.WriteObject(file, receipt);
         }
@@ -84,6 +84,6 @@ internal sealed class AgentHostLifecycleReceipt
 internal sealed class AgentHostLifecycleTermination
 {
     [DataMember(Name = "reason")] public string Reason { get; set; }
-    [DataMember(Name = "completedByProvider")] public bool CompletedByProvider { get; set; }
-    [DataMember(Name = "goalVerified")] public bool GoalVerified { get; set; }
+    [DataMember(Name = "completedByProvider")] public bool? CompletedByProvider { get; set; }
+    [DataMember(Name = "goalVerified")] public bool? GoalVerified { get; set; }
 }

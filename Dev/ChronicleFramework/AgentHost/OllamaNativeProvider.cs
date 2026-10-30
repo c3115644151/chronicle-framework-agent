@@ -141,7 +141,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     internal static OllamaNativeProvider FromCampaignRequest(JsonElement request)
     {
         if (request.TryGetProperty("providerConfiguration", out var configuration))
-            return FromProfile(AgentProviderProfile.Parse(configuration, "mcm-start-request"));
+            return FromProfile(AgentProviderProfile.Parse(configuration, ReadString(request, "providerConfigurationSource") ?? "mcm-start-request"));
         return FromConfiguredProfile();
     }
 
@@ -562,9 +562,14 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 var choices = root.TryGetProperty("choices", out var choiceArray) && choiceArray.ValueKind == JsonValueKind.Array
                     ? choiceArray.EnumerateArray().ToArray()
                     : Array.Empty<JsonElement>();
-                if (choices.Length != 1 || choices[0].ValueKind != JsonValueKind.Object ||
+                if (choices.Length != 1)
+                    throw new AgentHostException("provider-content-missing", $"The local OpenAI-compatible provider did not return one structured message (choiceCount={choices.Length}; hasError={root.TryGetProperty("error", out _)}; format={responseFormatMode}).");
+                if (choices[0].ValueKind != JsonValueKind.Object ||
                     !choices[0].TryGetProperty("message", out var messageElement) || messageElement.ValueKind != JsonValueKind.Object)
-                    throw new AgentHostException("provider-content-missing", "The local OpenAI-compatible provider did not return one structured message.");
+                {
+                    var choiceHasMessage = choices[0].ValueKind == JsonValueKind.Object && choices[0].TryGetProperty("message", out _);
+                    throw new AgentHostException("provider-content-missing", $"The local OpenAI-compatible provider returned no message object (choiceKind={choices[0].ValueKind}; hasMessage={choiceHasMessage}; format={responseFormatMode}).");
+                }
                 if (!string.IsNullOrWhiteSpace(ReadString(messageElement, "refusal")))
                     throw new AgentHostException("provider-refused", "The local model provider refused the decision request.");
                 finishReason = ReadString(choices[0], "finish_reason");
@@ -584,7 +589,12 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 else
                 {
                     if (!messageElement.TryGetProperty("content", out var contentElement) || contentElement.ValueKind != JsonValueKind.String)
-                        throw new AgentHostException("provider-content-missing", "The local OpenAI-compatible provider did not return one structured message.");
+                    {
+                        var hasToolCalls = messageElement.TryGetProperty("tool_calls", out var toolCalls);
+                        var toolCallCount = hasToolCalls && toolCalls.ValueKind == JsonValueKind.Array ? toolCalls.GetArrayLength() : 0;
+                        var hasContent = messageElement.TryGetProperty("content", out var missingContent);
+                        throw new AgentHostException("provider-content-missing", $"The local OpenAI-compatible provider returned an incomplete structured message (hasContent={hasContent}; contentKind={(hasContent ? missingContent.ValueKind : JsonValueKind.Undefined)}; hasToolCalls={hasToolCalls}; toolCallCount={toolCallCount}; finishReason={finishReason}; format={responseFormatMode}).");
+                    }
                     content = contentElement.GetString();
                 }
                 var usage = root.TryGetProperty("usage", out var usageValue) ? usageValue : default;

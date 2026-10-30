@@ -190,6 +190,10 @@ StoryMode是独立Campaign mode内容，不是所有Sandbox战役必有的任务
 
 ### 自然新档进入 Establish Your Clan 的 Tutorial 关键依赖
 
+2026-10-31自然新档实测补证：跳过教程、完成家族名/旗帜后，真实模型选择PartySize目标并把主队移动到`village_ES3_2`；原版`OnSettlementEntered`自动打开上述VillagersInNeed村民对话。Native观察显示`MissionState/Conversation`、Character ID `tutorial_npc_questgiver_villager`、当前多段NPC文本、没有可选答案，Campaign时间停止。模型在两个决策窗口都选择stop，PartySize安全中断；没有启动不需要的Villa Mission，也没有伪称完成EYC。用户确认这种“点击继续”只推进对话文本，直到原版答案出现；其余停留与结束方式按实际对话状态处理。AgentHost现在只对精确的EYC PartySize + VillagersInNeed Quest/角色/村庄身份，且Native没有可选答案时，逐句调用原版`dialogueContinue`并每次重读状态；实际答案出现后仍交给模型，模型可选择当前可见的推迟选项。若当前文本无进展、调用未被Native确认或状态离开已验证分支，Host安全失败。Fake Native regression验证两次无选项继续、可见回答选择推迟、回村庄招聘并完成Journal人数目标；`TestResults/20261031-013854`的AgentHostPackage通过。自然Campaign中的这项新自动继续仍待实机复验。
+
+后续自然新档`TestResults/20261031-021221`确认：根因是PartySize把“当前 Settlement 已等菜单、menuId=null”不当地应用于所有GameState；当地图移动已经切入VillagersInNeed的MissionState时，Host仍把Movement视为待完成，`BuildActionCatalog`因此没有暴露唯一Native Continue。用户先前确认的“时间停止/多段文本需要点击继续”与这份Native状态一致。Movement等待现在仅对`MapState`成立；MissionState中的no-choice文本进入Native Continue处理。`TestResults/20261031-021848`Build/AgentHostPackage加入了对真实`MissionState` + `menuId=null`的假Native回归；下一次自然Campaign仍需确认确实出现自动Continue和可见推迟答案。
+
 按本机1.4.8.119303 `StoryMode.dll` 的 `TutorialPhaseCampaignBehavior`、`TutorialPhase`、教程 Quest 和 `FindHideoutTutorialQuest`调用链，可确认以下源码路径：
 
 1. 新战役第99号 `OnNewGameCreatedPartialFollowUp` 执行 `InitializeTutorial`：设置/加入长兄、创建指定村庄头人并准备教程粮食；Tutorial 状态是保存中的StoryMode阶段数据，不应仅凭地名或Quest标题推断。`TrainingFieldCampaignBehavior.OnCharacterCreationIsOver` 在`SkipTutorialMission==false`时会把MainParty放到`tutorial_training_field`并立即打开`training_field` Location Mission。该Mission内兄长对话提供继续教程或“Skip tutorial”选择；选择后还会出现“这会结束教程并开始完整单人战役”的确认，确认只设置原版`_completeTutorial`，结束该Mission时调用`CompleteTutorialPhase(true)`。所以“玩家创建角色，Agent在首个稳定Campaign MapState接管”本身无法让Agent选择这条跳过分支——选择发生在首个MapState之前；若AI负责完整未跳过Tutorial，它的接管边界也必须延伸到这个初始训练场Mission。

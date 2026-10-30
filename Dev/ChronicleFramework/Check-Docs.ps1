@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.451'
+$contractVersion = '7.455'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -82,8 +82,53 @@ $agentHostHarnessProgressTraceSource = Get-Content (Join-Path $harnessRoot 'Agen
 $agentHostProviderContractSelfTestSource = Get-Content (Join-Path $harnessRoot 'AgentHost\ProviderContractSelfTest.cs') -Raw -Encoding UTF8
 $agentHostProviderSource = Get-Content (Join-Path $harnessRoot 'AgentHost\OllamaNativeProvider.cs') -Raw -Encoding UTF8
 $agentHostRuntimeControllerSource = Get-Content (Join-Path $harnessRoot 'AgentHostRuntimeController.cs') -Raw -Encoding UTF8
-$agentPlayerInputOwnershipSource = Get-Content (Join-Path $harnessRoot 'AgentPlayerInputOwnership.cs') -Raw -Encoding UTF8
 $agentHostLifecycleReceiptSource = Get-Content (Join-Path $harnessRoot 'AgentHostLifecycleReceipt.cs') -Raw -Encoding UTF8
+$agentHostActionProfileNames = @('ApprovedActions','BattleSimulationActions','GoldSaleActions','RecruitmentActions','CompanionHiringActions','TrainingIssueActions')
+$agentHostSupportedActions = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+foreach ($profileName in $agentHostActionProfileNames) {
+    $profilePattern = [regex]::Escape($profileName) + '\s*=\s*new\(StringComparer\.Ordinal\)\s*\{(?<actions>[\s\S]*?)\};'
+    $profileMatch = [regex]::Match($agentHostCampaignLoopSource, $profilePattern)
+    if (-not $profileMatch.Success) { throw "AgentHost action profile $profileName could not be read for the MCM request-contract check." }
+    foreach ($actionMatch in [regex]::Matches($profileMatch.Groups['actions'].Value, '"(?<action>[A-Za-z][A-Za-z0-9]*)"')) {
+        [void]$agentHostSupportedActions.Add($actionMatch.Groups['action'].Value)
+    }
+}
+$startRequestLine = @([regex]::Split($agentHostRuntimeControllerSource, '\r?\n') | Where-Object { $_.Contains('allowedActionNames') } | Select-Object -First 1)
+if ($startRequestLine.Count -ne 1) { throw 'AgentHostRuntimeController must emit one canonical Campaign action request catalog.' }
+$startActionCatalogLine = [string]$startRequestLine[0]
+$startActionMarkerIndex = $startActionCatalogLine.IndexOf('allowedActionNames', [StringComparison]::Ordinal)
+$startActionArrayOpen = $startActionCatalogLine.IndexOf('[', $startActionMarkerIndex)
+$startActionArrayClose = $startActionCatalogLine.IndexOf(']', $startActionArrayOpen + 1)
+if ($startActionArrayOpen -lt 0 -or $startActionArrayClose -lt 0) { throw 'AgentHostRuntimeController Campaign action request catalog is not a bounded JSON array.' }
+$startActions = @($startActionCatalogLine.Substring($startActionArrayOpen + 1, $startActionArrayClose - $startActionArrayOpen - 1).Split(',') | ForEach-Object { $_ -replace '[^A-Za-z0-9]', '' } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+$missingMcmActions = @($agentHostSupportedActions | Where-Object { $_ -notin $startActions })
+$unexpectedMcmActions = @($startActions | Where-Object { $_ -notin $agentHostSupportedActions })
+if ($missingMcmActions.Count -gt 0 -or $unexpectedMcmActions.Count -gt 0 -or $startActions.Count -ne $agentHostSupportedActions.Count) {
+    throw "AgentHostRuntimeController start catalog must exactly match AgentHostCampaignLoop.AllSupportedActions (missing=$($missingMcmActions -join ','); unexpected=$($unexpectedMcmActions -join ','))."
+}
+if ($agentHostCampaignLoopSource -notmatch 'goalValid=' -or
+    $agentHostCampaignLoopSource -notmatch 'missingApproved=\[' -or
+    $agentHostLifecycleReceiptSource -notmatch 'bool\? FirstDecisionRequiresGoalClassification' -or
+    $agentHostLifecycleReceiptSource -notmatch 'long\? PromptTokens') {
+    throw 'Rejected Campaign request receipts must preserve safe validation details even when the Host has not produced decision metrics.'
+}
+if ($agentHostRuntimeControllerSource -notmatch 'CHRONICLE_LLM_BASE_URL' -or
+    $agentHostRuntimeControllerSource -notmatch 'useHarnessProviderEnvironment' -or
+    $agentHostRuntimeControllerSource -notmatch 'harness-environment-override' -or
+    $agentHostRuntimeControllerSource -notmatch 'CHRONICLE_LLM_OUTPUT_MODE' -or
+    $agentHostRuntimeControllerSource -notmatch 'CHRONICLE_LLM_MAX_RUN_COST_CNY' -or
+    $agentHostProviderSource -notmatch 'providerConfigurationSource' -or
+    $agentHostCampaignLoopSource -notmatch 'missingApproved=\[' -or
+    $agentHostLifecycleReceiptSource -notmatch 'bool\? FirstDecisionRequiresGoalClassification') {
+    throw 'An explicit lifecycle Harness provider override must be forwarded into the Host request without changing the saved MCM provider profile.'
+}
+if ($agentHostProviderSource -notmatch 'choiceCount=' -or
+    $agentHostProviderSource -notmatch 'hasToolCalls=' -or
+    $agentHostProviderSource -notmatch 'contentKind=' -or
+    $agentHostProviderSource -notmatch 'finishReason=') {
+    throw 'A malformed OpenAI-compatible response must report only its structural envelope, never prompt or response body, to separate provider-format failures from Host decision failures.'
+}
+$agentPlayerInputOwnershipSource = Get-Content (Join-Path $harnessRoot 'AgentPlayerInputOwnership.cs') -Raw -Encoding UTF8
 $agentHostLifecycleEvaluationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostLifecycleEvaluation.ps1') -Raw -Encoding UTF8
 $freshCampaignTest = Get-Content (Join-Path $harnessRoot 'Test-AgentFreshCampaign.ps1') -Raw -Encoding UTF8
 $deepSeekTokenEstimatorSource = Get-Content (Join-Path $harnessRoot 'AgentHost\DeepSeekPromptTokenEstimator.cs') -Raw -Encoding UTF8
@@ -603,7 +648,7 @@ if ($agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S
 if ($agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S]{0,400}\$maxElapsedSeconds = 7200' -or
     $agentLiveModelLoopSource -notmatch '\$maxDecisions = 160' -or
     $agentHostRuntimeControllerSource -notmatch 'maxDecisions\\":320,\\"maxElapsedSeconds\\":7200' -or
-    $agentHostCampaignLoopSource -notmatch 'maxDecisions is < 1 or > MaxCumulativeDecisions' -or
+    $agentHostCampaignLoopSource -notmatch 'maxDecisions is >= 1 and <= MaxCumulativeDecisions' -or
     $agentHostCampaignLoopSource -notmatch 'MaxCumulativeDecisions = 320' -or
     $agentHostEstablishClanAutonomySource -notmatch 'ReadInt\(request, "maxDecisions", AgentHostCampaignLoop\.MaxCumulativeDecisions\)' -or
     $agentHostBattleSimulationLoopSource -notmatch 'ReadInt\(request, "maxDecisions", AgentHostCampaignLoop\.MaxCumulativeDecisions\)' -or
@@ -613,7 +658,7 @@ if ($agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S
     $agentHostCaptivityRecoveryLoopSource -notmatch 'for \(var loopIndex = 1; decisions < maxDecisions; loopIndex\+\+\)' -or
     $agentHostCampaignLoopSource -notmatch 'GetCumulativeDecisionLimit\(maxDecisions\)' -or
     $agentHostCampaignLoopSource -notmatch 'campaign-loop-self-test-child-decision-limit-shrank' -or
-    $agentHostCampaignLoopSource -notmatch 'maxElapsedSeconds is < 1 or > 7200' -or
+    $agentHostCampaignLoopSource -notmatch 'maxElapsedSeconds is >= 1 and <= 7200' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'Math\.Clamp\(ReadInt\(request, "maxElapsedSeconds", 7200\), 1, 7200\)' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'Math\.Clamp\(ReadInt\(request, "maxDecisions", 160\), 1, 160\)') {
     throw 'The EYC Host request and all nested objective loops must share the 7200-second/320-decision cumulative ceiling; separate loops must not restart the full decision allowance when prior decisions are carried forward.'

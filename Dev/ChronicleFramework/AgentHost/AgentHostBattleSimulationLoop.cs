@@ -849,6 +849,11 @@ internal static class AgentHostBattleSimulationLoop
             """).RootElement);
         var alreadyPursuingVisibleBandit = (JsonObject)visibleBanditNeedsDecisionPause.DeepClone();
         alreadyPursuingVisibleBandit["state"]!["location"]!["targetPartyId"] = "bandit-a";
+        var activePursuitWithSecondBandit = (JsonObject)visibleBanditNeedsDecisionPause.DeepClone();
+        activePursuitWithSecondBandit["state"]!["location"]!["targetPartyId"] = "bandit-a";
+        activePursuitWithSecondBandit["state"]!["party"]!["defaultBehavior"] = "EngageParty";
+        activePursuitWithSecondBandit["state"]!["party"]!["isMoving"] = false;
+        (activePursuitWithSecondBandit["state"]!["nearbyParties"] as JsonArray)!.Add(new JsonObject { ["id"] = "bandit-b", ["type"] = "bandit", ["hostile"] = true });
         var stoppedVisibleBandit = (JsonObject)visibleBanditNeedsDecisionPause.DeepClone();
         stoppedVisibleBandit["timeControlMode"] = "Stop";
         var visibleNeutralParty = (JsonObject)visibleBanditNeedsDecisionPause.DeepClone();
@@ -861,13 +866,14 @@ internal static class AgentHostBattleSimulationLoop
         visibleBanditDuringEncounter["state"]!["context"]!["encounterActive"] = true;
         if (!ShouldPauseForVisibleHostileDecision(visibleBanditNeedsDecisionPause) ||
             ShouldPauseForVisibleHostileDecision(alreadyPursuingVisibleBandit) ||
+            ShouldPauseForVisibleHostileDecision(activePursuitWithSecondBandit) ||
             ShouldPauseForVisibleHostileDecision(stoppedVisibleBandit) ||
             ShouldPauseForVisibleHostileDecision(visibleNeutralParty) ||
             ShouldPauseForVisibleHostileDecision(visibleHostileLord) ||
             ShouldPauseForVisibleHostileDecision(visibleBanditUnderNativeMenu) ||
             ShouldPauseForVisibleHostileDecision(visibleBanditDuringEncounter))
-            throw new AgentHostException("battle-loop-visible-threat-pause-classification-failed", "Only a visible hostile bandit on an active free map, before that exact party is already pursued, may trigger the separately recorded Native Pause.");
-        results.Add(new { scenario = "battle-loop-pauses-time-separately-before-a-visible-hostile-decision-but-not-during-an-active-pursuit-or-modal", passed = true });
+            throw new AgentHostException("battle-loop-visible-threat-pause-classification-failed", "Only a visible hostile bandit on an active free map, with no Native pursuit already active, may trigger the separately recorded Native Pause; another visible bandit must not interrupt an existing pursuit.");
+        results.Add(new { scenario = "battle-loop-pauses-before-a-new-hostile-decision-but-never-interrupts-an-existing-native-bandit-pursuit", passed = true });
         var map = ParseState("MapState", menuId: null, encounterActive: false, partyTarget: null, battle: null);
         var candidates = new JsonArray(new JsonObject { ["id"] = "bandit-1", ["type"] = "bandit", ["hostile"] = true });
         var mapState = map["state"]!.AsObject();
@@ -1483,6 +1489,12 @@ internal static class AgentHostBattleSimulationLoop
             JsonObject party => [party],
             _ => Array.Empty<JsonObject>()
         };
+        var mainParty = state["party"] as JsonObject;
+        var activeNativeBanditPursuit = !string.IsNullOrWhiteSpace(pursuingPartyId) &&
+            ReadString(mainParty, "defaultBehavior") == "EngageParty" &&
+            partyRows.Any(party => ReadString(party, "type") == "bandit" && ReadBoolean(party, "hostile") &&
+                string.Equals(ReadString(party, "id"), pursuingPartyId, StringComparison.Ordinal));
+        if (activeNativeBanditPursuit) return false;
         return partyRows.Any(party => ReadString(party, "type") == "bandit" &&
             ReadBoolean(party, "hostile") && !string.IsNullOrWhiteSpace(ReadString(party, "id")) &&
             !string.Equals(ReadString(party, "id"), pursuingPartyId, StringComparison.Ordinal));
