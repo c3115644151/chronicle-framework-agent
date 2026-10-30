@@ -129,7 +129,7 @@ internal static class AgentHostBattleSimulationLoop
                     var conversationCharacterId = ReadString(mapConversation, "characterId");
                     var conversationTextBefore = ReadString(mapConversation, "sentenceText");
                     var continueStartedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
-                    using var continueResponse = await client.ExecuteCampaignActionAsync("dialogueContinue", new JsonObject(), elapsed.Token);
+                    using var continueResponse = await client.ExecuteBattleSimulationActionAsync("dialogueContinue", new JsonObject(), elapsed.Token);
                     var continueReceipt = SafeReceipt("dialogueContinue", continueResponse.RootElement);
                     if (ReadString(continueReceipt, "status") != "completed")
                     {
@@ -1889,17 +1889,8 @@ internal static class AgentHostBattleSimulationLoop
             return Task.FromResult(JsonDocument.Parse(BuildState().ToJsonString()));
         }
 
-        public Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (_mapConversationAtStart && !_mapConversationContinued && action == "dialogueContinue")
-            {
-                _mapConversationContinued = true;
-                Actions.Add(action);
-                return Task.FromResult(JsonDocument.Parse("{\"processId\":321,\"status\":\"completed\",\"action\":\"dialogueContinue\",\"commandId\":\"fake-map-dialogue-continue\"}"));
-            }
-            throw new AgentHostException("battle-self-test-unexpected-campaign-action", "Only the explicitly configured no-choice Native Map dialogue can use the Campaign action transport in this fake battle fixture.");
-        }
+        public Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken) =>
+            throw new AgentHostException("battle-self-test-unexpected-campaign-action", "Campaign arrival actions are outside this fake battle transport.");
 
         public Task<JsonDocument> PauseForVisibleHostileDecisionAsync(CancellationToken cancellationToken)
         {
@@ -1920,7 +1911,10 @@ internal static class AgentHostBattleSimulationLoop
             {
                 case "pursue": _stage = 1; _movingReads = 0; _timeControlMode = "StoppablePlay"; break;
                 case "dialogueSelect": _stage = 3; break;
-                case "dialogueContinue": _stage = 4; break;
+                case "dialogueContinue":
+                    if (_mapConversationAtStart && !_mapConversationContinued && _stage == 0) _mapConversationContinued = true;
+                    else _stage = 4;
+                    break;
                 case "menuSelect":
                     if (_stage == 4) _stage = 5;
                     else if (_simulateCaptivity && _stage == 11 && ReadString(arguments, "optionId") == "mno_captivity_end_ransom_accept") _stage = 12;
