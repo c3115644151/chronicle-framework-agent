@@ -165,7 +165,7 @@ Persuasion是J08对话内的一种状态化子流程。`PersuasionTask`包含任
 
 `TournamentCampaignBehavior`按城镇DailyTick创建/结束赛事；城镇叛乱、围 siege、参赛者与场地状态会使它不可用或结束。玩家从到达Town后的Arena/Tournament菜单查看参与/观战/排行榜选项；选择参与会进入特定Tournament Mission（部分项目有单独规则/控制器），分轮淘汰后由TournamentManager更新参赛者、胜场和奖品。点“参加”不是直接获得胜利或固定Renown，玩家需在Mission中通过实际比赛。
 
-奖品、金钱下注/同伴比赛或声望影响分别由TournamentModel/结果处理、参加者与胜负决定；TournamentSimulation对NPC可用抽象结果，但玩家加入比赛会切换真实Mission，Campaign时间在Mission内停止。Chronicle当前无竞技场Tournament Mission控制、赛事状态/对手/排名观察或胜利动作；tier评测文档只引用锦标赛奖励公式，不代表可用路线。证据：`TournamentCampaignBehavior/TournamentManager/TournamentGame`、`TournamentModel`、Sandbox `TournamentMissionStarter`与Mission controllers、城镇相关GameMenus；未知赛事生成概率、每种比赛的玩家完整菜单路径、投注/奖品的全套结算和自然运行统计。
+奖金、金钱下注/同伴比赛/声望仍分别由TournamentModel与胜负处理；NPC TournamentSimulation使用抽象评分，但玩家Tournament会进入`MissionState`，Campaign时间保持Stop。1.4.8 `DefaultTournamentModel.GetRenownReward`对胜者给基础3 Renown，启用Duelist/SelfPromoter会修改数值；这不等于报名或跳过轮次必然得到Renown。Chronicle接入原版`TournamentVM`与`ExecuteJoinTournament`/`ExecuteSkipRound`/`ExecuteSkipAllRounds`/`ExecuteWatchRound`/`ExecuteLeave`。正常`state.mission.nearbySceneAgents`可在`arena_empire_a/StartUp`观察唯一ArenaMaster，`missionInteract`精确校验`tournament_master_empire`并调用Native `Agent.OnUse`。附加`missionSceneAgents`查询仍只支持Town/Tavern/Village；它在Arena被拒不影响标准state→missionInteract路径。`TestResults/20261030-arena-tournament-evaluation/ManualEycAmprelaTournament.json`：ArenaMaster告知Myzea/Amprela有赛，玩家在Amprela经原版报名/确认进入TournamentVM；Native skip-all到`canPlayerJoin=true`后skip该轮，再skip-all令`isOver=true`，但Gold3387、Renown31均不变。Tournament winner/current match result未由Bridge输出，因此不声称胜利或3 Renown奖励。未覆盖赛事生成频率、真实Tournament Mission战斗/玩家胜负、下注奖品完整结算、Host自主选择/赢得赛事。此为手动Native路径，0模型调用。
 
 ## J11 Board Games：酒馆棋盘游戏
 
