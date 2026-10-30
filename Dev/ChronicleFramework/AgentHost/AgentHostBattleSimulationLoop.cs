@@ -53,6 +53,7 @@ internal static class AgentHostBattleSimulationLoop
         var requestedTargetId = (string?)null;
         var observedTargets = new JsonArray();
         var mapPartyTargetsQueried = false;
+        var mapConversationContinuationCount = 0;
         var battleWasStarted = false;
         var nativeEncounterLeaveIssued = false;
         var captivityObserved = false;
@@ -109,6 +110,83 @@ internal static class AgentHostBattleSimulationLoop
                         ["mapIncident"] = (context["mapIncident"] as JsonObject)?.DeepClone()
                     });
                     break;
+                }
+
+                var mapConversation = context["conversation"] as JsonObject;
+                var mapConversationOptions = mapConversation?["options"] as JsonArray;
+                if (gameState == "MapState" && mapConversation is not null &&
+                    !AgentHostCampaignStateFacts.IsActiveEncounter(state) &&
+                    mapConversationOptions?.Count == 0 &&
+                    !string.IsNullOrWhiteSpace(ReadString(mapConversation, "sentenceText")))
+                {
+                    if (mapConversationContinuationCount >= 32)
+                    {
+                        failure = "The active Native map conversation exceeded the bounded no-choice Continue sequence; no quest choice or clock action was invented.";
+                        failureCode = "native-map-conversation-continue-limit";
+                        termination = "native-map-conversation-continue-limit";
+                        break;
+                    }
+                    var conversationCharacterId = ReadString(mapConversation, "characterId");
+                    var conversationTextBefore = ReadString(mapConversation, "sentenceText");
+                    var continueStartedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+                    using var continueResponse = await client.ExecuteCampaignActionAsync("dialogueContinue", new JsonObject(), elapsed.Token);
+                    var continueReceipt = SafeReceipt("dialogueContinue", continueResponse.RootElement);
+                    if (ReadString(continueReceipt, "status") != "completed")
+                    {
+                        failure = "Native did not confirm its original dialogueContinue handler for the active no-choice Map conversation.";
+                        failureCode = "native-map-conversation-continue-rejected";
+                        termination = "native-map-conversation-continue-rejected";
+                        break;
+                    }
+                    actionsExecuted++;
+                    mapConversationContinuationCount++;
+                    using var afterContinue = await client.ReadStateAsync(elapsed.Token);
+                    var afterContinueNative = ParseObject(afterContinue.RootElement);
+                    var afterContinueState = afterContinueNative["state"] as JsonObject;
+                    var afterContinueContext = afterContinueState?["context"] as JsonObject;
+                    var afterConversation = afterContinueContext?["conversation"] as JsonObject;
+                    var afterOptions = afterConversation?["options"] as JsonArray;
+                    if (ReadString(afterContinueContext, "gameState") != "MapState")
+                    {
+                        currentNative = afterContinueNative;
+                        failure = "The original map dialogueContinue left MapState; this Renown subflow will not begin an unverified scene or quest route.";
+                        failureCode = "native-map-conversation-left-map";
+                        termination = "native-map-conversation-left-map";
+                        break;
+                    }
+                    if (afterConversation is not null && afterOptions?.Count == 0 &&
+                        ReadString(afterConversation, "characterId") == conversationCharacterId &&
+                        ReadString(afterConversation, "sentenceText") == conversationTextBefore)
+                    {
+                        currentNative = afterContinueNative;
+                        failure = "Native accepted dialogueContinue but returned the same no-choice map sentence; Host stopped without repeating it.";
+                        failureCode = "native-map-conversation-continue-no-progress";
+                        termination = "native-map-conversation-continue-no-progress";
+                        break;
+                    }
+                    if (afterConversation is null || afterOptions?.Any(option => ReadBoolean(option as JsonObject, "clickable")) == true ||
+                        ReadString(afterConversation, "characterId") != conversationCharacterId)
+                        mapConversationContinuationCount = 0;
+                    var continueCampaignDayBefore = ReadDouble(native, "campaignDay", double.NaN);
+                    var continueCampaignDayAfter = ReadDouble(afterContinueNative, "campaignDay", double.NaN);
+                    trace.Add(new JsonObject
+                    {
+                        ["stage"] = "native-map-conversation-no-choice-continued",
+                        ["iteration"] = iteration,
+                        ["nativeAction"] = "dialogueContinue",
+                        ["nativeActionReceipt"] = continueReceipt.DeepClone(),
+                        ["characterId"] = conversationCharacterId,
+                        ["lineAdvancedOrConversationClosed"] = true,
+                        ["campaignDayBefore"] = double.IsFinite(continueCampaignDayBefore) ? JsonValue.Create(continueCampaignDayBefore) : null,
+                        ["campaignDayAfter"] = double.IsFinite(continueCampaignDayAfter) ? JsonValue.Create(continueCampaignDayAfter) : null,
+                        ["timeControlModeBefore"] = ReadString(native, "timeControlMode"),
+                        ["timeControlModeAfter"] = ReadString(afterContinueNative, "timeControlMode"),
+                        ["modelDecisionMade"] = false
+                    });
+                    currentNative = afterContinueNative;
+                    feedback = null;
+                    previousReceipt = new JsonObject { ["action"] = "dialogueContinue", ["status"] = "completed", ["nativeChoiceRequired"] = false };
+                    continue;
                 }
 
                 // Preserve the current player-visible hostile target while the model decides
@@ -638,6 +716,32 @@ internal static class AgentHostBattleSimulationLoop
                 return catalog;
             }
 
+            var mapConversation = context["conversation"] as JsonObject;
+            if (mapConversation is not null)
+            {
+                var clickableMapOptions = (mapConversation["options"] as JsonArray)?.OfType<JsonObject>()
+                    .Where(option => ReadBoolean(option, "clickable"))
+                    .Select(option => ReadString(option, "id"))
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray() ?? Array.Empty<string>();
+                if (clickableMapOptions.Length > 0)
+                {
+                    catalog.Add(new JsonObject
+                    {
+                        ["action"] = "dialogueSelect",
+                        ["arguments"] = new JsonArray("OptionId"),
+                        ["argumentValues"] = new JsonObject
+                        {
+                            ["OptionId"] = new JsonArray(clickableMapOptions.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray())
+                        }
+                    });
+                }
+                else if (!string.IsNullOrWhiteSpace(ReadString(mapConversation, "sentenceText")))
+                    Add(catalog, "dialogueContinue");
+                return catalog;
+            }
+
             if (!string.IsNullOrWhiteSpace(ReadString(context, "menuId")) || ReadBoolean(context, "escapeMenuOpen") || ReadBoolean(context, "inquiryOpen") ||
                 !string.IsNullOrWhiteSpace(ReadString(state["location"] as JsonObject, "currentSettlementId")))
                 return catalog;
@@ -775,10 +879,18 @@ internal static class AgentHostBattleSimulationLoop
             }
             if (action == "dialogueSelect")
             {
-                var conversation = (state["context"] as JsonObject)?["conversation"] as JsonObject;
+                var context = state["context"] as JsonObject;
+                var conversation = context?["conversation"] as JsonObject;
                 var optionId = ReadString(arguments, "optionId");
                 var encounteredId = ReadString(state["context"] as JsonObject, "encounteredPartyId");
                 var currentOptions = (conversation?["options"] as JsonArray)?.OfType<JsonObject>().ToArray() ?? Array.Empty<JsonObject>();
+                if (ReadString(context, "gameState") == "MapState" && conversation is not null && !AgentHostCampaignStateFacts.IsActiveEncounter(state))
+                {
+                    if (currentOptions.Any(option => ReadString(option, "id") == optionId && ReadBoolean(option, "clickable")))
+                        return true;
+                    rejection = "Map conversation choices must exactly match a current clickable Native option.";
+                    return false;
+                }
                 var hasFightResponse = currentOptions.Any(x =>
                     ReadString(x, "id") == "bandit_start_defender_1" && ReadBoolean(x, "clickable"));
                 var allowedWeakPartySurrender = recoverPlayerCaptivity && !hasFightResponse && optionId == "bandit_start_defender_3" &&
@@ -882,6 +994,29 @@ internal static class AgentHostBattleSimulationLoop
             throw new AgentHostException("battle-loop-self-test-map-query-missing", "The initial battle loop must query currently visible Native party targets.");
         if (BuildActionCatalog(mapState, new JsonArray(), null, false, true).Count != 0)
             throw new AgentHostException("battle-loop-self-test-empty-party-query-repeated", "After an empty visible-party query, the Host must safely stop rather than requery the same world state indefinitely.");
+        var noChoiceMapConversation = ParseState("MapState", menuId: null, encounterActive: false, partyTarget: null, battle: null)["state"]!.AsObject();
+        noChoiceMapConversation["context"]!["conversation"] = new JsonObject
+        {
+            ["characterId"] = "notable-a", ["sentenceText"] = "We part ways.", ["options"] = new JsonArray()
+        };
+        var mapContinueCatalog = BuildActionCatalog(noChoiceMapConversation, new JsonArray(), null, false, true);
+        if (mapContinueCatalog.Count != 1 || ReadString(mapContinueCatalog[0] as JsonObject, "action") != "dialogueContinue" ||
+            !TryResolveDecision(new JsonObject { ["action"] = "dialogueContinue", ["arguments"] = new JsonObject() }, mapContinueCatalog,
+                new JsonArray(), noChoiceMapConversation, new JsonArray(), null, out var mapContinueAction, out _, out _, out _) || mapContinueAction != "dialogueContinue")
+            throw new AgentHostException("battle-loop-map-no-choice-conversation-continue-not-listed", "An active Native MapState conversation with no selectable answers must expose only its original dialogueContinue handler before any passive pursuit wait.");
+        var choiceMapConversation = (JsonObject)noChoiceMapConversation.DeepClone();
+        choiceMapConversation["context"]!["conversation"]!["options"] = new JsonArray(
+            new JsonObject { ["id"] = "notable_decline", ["clickable"] = true },
+            new JsonObject { ["id"] = "notable_hidden", ["clickable"] = false });
+        var mapChoiceCatalog = BuildActionCatalog(choiceMapConversation, new JsonArray(), null, false, true);
+        var mapOptionIds = mapChoiceCatalog.OfType<JsonObject>().SingleOrDefault(action => ReadString(action, "action") == "dialogueSelect")? ["argumentValues"]? ["OptionId"] as JsonArray;
+        if (mapChoiceCatalog.Count != 1 || mapOptionIds?.Count != 1 || mapOptionIds[0]?.GetValue<string>() != "notable_decline" ||
+            !TryResolveDecision(new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "notable_decline" } },
+                mapChoiceCatalog, new JsonArray(), choiceMapConversation, new JsonArray(), null, out var mapSelectAction, out _, out _, out _) || mapSelectAction != "dialogueSelect" ||
+            TryResolveDecision(new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "unlisted" } },
+                mapChoiceCatalog, new JsonArray(), choiceMapConversation, new JsonArray(), null, out _, out _, out _, out _))
+            throw new AgentHostException("battle-loop-map-conversation-choice-catalog-invalid", "An active Native Map conversation must expose only its current clickable answer IDs and reject all other selections.");
+        results.Add(new { scenario = "battle-loop-resolves-active-map-conversation-before-pursuit-wait-and-uses-only-current-options", passed = true });
         var trainingFieldMenu = ParseState("MapState", "training_field_menu", true, null, null)["state"]!.AsObject();
         trainingFieldMenu["context"]!["encounteredPartyId"] = "tutorial_training_field";
         trainingFieldMenu["location"]!["currentSettlementId"] = "tutorial_training_field";
@@ -1246,6 +1381,17 @@ internal static class AgentHostBattleSimulationLoop
             !incidentTrace.OfType<JsonObject>().Any(step => ReadString(step, "stage") == "battle-planning-interrupted-by-native-map-incident" &&
                 ReadBoolean(step, "modelDecisionMade") == false && ReadBoolean(step, "nativeActionMade") == false))
             throw new AgentHostException("battle-loop-map-incident-was-not-left-to-parent", "A Native map incident must interrupt the battle child before any model or movement action so the parent can resolve the current incident and replan.");
+        var mapConversationClient = new FakeBattleSimulationNativeClient(mapConversationAtStart: true);
+        var mapConversationProvider = new FakeBattleSimulationDecisionProvider();
+        var mapConversationResult = await RunAsync(request.RootElement, mapConversationClient, mapConversationProvider, CancellationToken.None);
+        if (ReadString(mapConversationResult, "status") != "completed" ||
+            ReadInt(mapConversationResult, "actionsExecuted", 0) != 13 || mapConversationProvider.CallCount != 14 ||
+            mapConversationClient.Actions.Count != 13 || mapConversationClient.Actions[0] != "dialogueContinue" ||
+            !((mapConversationResult["trace"] as JsonArray)?.OfType<JsonObject>().Any(step => ReadString(step, "stage") == "native-map-conversation-no-choice-continued" &&
+                ReadBoolean(step, "modelDecisionMade") == false) ?? false) ||
+            ReadString(mapConversationProvider.FirstRequest?["observation"]?["state"]?["context"] as JsonObject, "gameState") != "MapState" ||
+            mapConversationProvider.FirstRequest?["observation"]?["state"]?["context"]?["conversation"] is not null)
+            throw new AgentHostException("battle-loop-map-conversation-native-continue-failed", "The Host must advance only the active no-choice Native Map conversation before requesting the Renown decision, then resume from the fresh Map state. status=" + ReadString(mapConversationResult, "status") + "; termination=" + ReadString(mapConversationResult, "termination") + "; actions=" + ReadInt(mapConversationResult, "actionsExecuted", -1) + "; providerCalls=" + mapConversationProvider.CallCount + "; nativeActions=" + string.Join(",", mapConversationClient.Actions) + "; firstRequestConversation=" + (mapConversationProvider.FirstRequest?["observation"]?["state"]?["context"]?["conversation"] is not null) + "; traceStages=" + string.Join(",", (mapConversationResult["trace"] as JsonArray)?.OfType<JsonObject>().Select(step => ReadString(step, "stage") ?? ReadString(step["decision"] as JsonObject, "action") ?? "step") ?? Array.Empty<string>()));
         var inquiryClient = new FakeBattleSimulationNativeClient(simulatePartyInquiry: true);
         var inquiryProvider = new FakeBattleSimulationDecisionProvider(simulatePartyInquiry: true);
         var inquiryRequestNode = JsonNode.Parse(request.RootElement.GetRawText())!.AsObject();
@@ -1300,6 +1446,7 @@ internal static class AgentHostBattleSimulationLoop
             throw new AgentHostException("battle-loop-self-test-captivity-recovery-failed", $"A fake Native battle-capture-ransom cycle failed: status={ReadString(recovery, "status")}, outcome={ReadString(recovery, "playerOutcome")}, captivity={ReadBoolean(recovery, "captivityObserved")}, recovery={ReadBoolean(recovery, "captivityRecoveryVerified")}, action={ReadString(recovery, "captivityChoiceOptionId")}, actions={string.Join(",", recoveryClient.Actions)}.");
         return [
             new { scenario = "battle-loop-native-observe-pursue-send-troops-aftermath-return-and-verify", decisions = ReadInt(result, "decisions", 0), nativeActions = client.Actions.ToArray(), renownBefore = ReadDouble(result, "renownBefore", double.NaN), renownAfter = ReadDouble(result, "renownAfter", double.NaN), explicitClockActions = ReadInt(result, "explicitClockActionCount", -1), passed = true },
+            new { scenario = "battle-loop-auto-continues-active-no-choice-map-dialogue-before-renown-planning", nativeActions = mapConversationClient.Actions.ToArray(), passed = true },
             new { scenario = "battle-loop-map-incident-interrupts-before-model-or-native-actions", passed = true },
             new { scenario = "battle-loop-resolves-party-loot-inquiry-from-current-eyc-goal-and-roster-then-resumes-native-aftermath", decisions = ReadInt(partyInquiryResult, "decisions", 0), nativeActions = inquiryClient.Actions.ToArray(), inquiryChoice = inquiryClient.LastInquiryChoice, passed = true },
             new { scenario = "battle-loop-incident-after-201-parent-decisions-retains-global-budget", decisions = ReadInt(cumulativeBattle, "decisions", 0), passed = true },
@@ -1711,9 +1858,11 @@ internal static class AgentHostBattleSimulationLoop
         private readonly bool _simulatePartyInquiry;
         private readonly bool _visibleHostileAtStart;
         private readonly bool _mapIncidentAtStart;
+        private readonly bool _mapConversationAtStart;
         private int _stage;
         private int _movingReads;
         private int _captivityPolls;
+        private bool _mapConversationContinued;
         private bool _memberLootTaken;
         private bool _prisonerLootTaken;
         private int _inventoryLootCount = 2;
@@ -1722,12 +1871,13 @@ internal static class AgentHostBattleSimulationLoop
         internal List<string> ClockActions { get; } = [];
         internal string? LastInquiryChoice { get; private set; }
 
-        internal FakeBattleSimulationNativeClient(bool simulateCaptivity = false, bool simulatePartyInquiry = false, bool visibleHostileAtStart = false, bool mapIncidentAtStart = false)
+        internal FakeBattleSimulationNativeClient(bool simulateCaptivity = false, bool simulatePartyInquiry = false, bool visibleHostileAtStart = false, bool mapIncidentAtStart = false, bool mapConversationAtStart = false)
         {
             _simulateCaptivity = simulateCaptivity;
             _simulatePartyInquiry = simulatePartyInquiry;
             _visibleHostileAtStart = visibleHostileAtStart;
             _mapIncidentAtStart = mapIncidentAtStart;
+            _mapConversationAtStart = mapConversationAtStart;
             if (visibleHostileAtStart) _timeControlMode = "StoppablePlay";
         }
 
@@ -1739,8 +1889,17 @@ internal static class AgentHostBattleSimulationLoop
             return Task.FromResult(JsonDocument.Parse(BuildState().ToJsonString()));
         }
 
-        public Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken) =>
-            throw new AgentHostException("battle-self-test-unexpected-campaign-action", "Campaign arrival actions are outside this fake battle transport.");
+        public Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_mapConversationAtStart && !_mapConversationContinued && action == "dialogueContinue")
+            {
+                _mapConversationContinued = true;
+                Actions.Add(action);
+                return Task.FromResult(JsonDocument.Parse("{\"processId\":321,\"status\":\"completed\",\"action\":\"dialogueContinue\",\"commandId\":\"fake-map-dialogue-continue\"}"));
+            }
+            throw new AgentHostException("battle-self-test-unexpected-campaign-action", "Only the explicitly configured no-choice Native Map dialogue can use the Campaign action transport in this fake battle fixture.");
+        }
 
         public Task<JsonDocument> PauseForVisibleHostileDecisionAsync(CancellationToken cancellationToken)
         {
@@ -1826,6 +1985,11 @@ internal static class AgentHostBattleSimulationLoop
             };
             if (_visibleHostileAtStart && _stage == 0)
                 state["nearbyParties"] = new JsonArray(new JsonObject { ["id"] = "bandit-1", ["name"] = "Bandit Party", ["type"] = "bandit", ["distance"] = 2.0, ["hostile"] = true });
+            if (_mapConversationAtStart && !_mapConversationContinued && _stage == 0)
+                state["context"]!["conversation"] = new JsonObject
+                {
+                    ["characterId"] = "notable-a", ["sentenceText"] = "We part ways.", ["options"] = new JsonArray()
+                };
             if (_mapIncidentAtStart && _stage == 0)
                 state["context"]!["mapIncident"] = new JsonObject { ["schemaVersion"] = 1, ["active"] = true, ["supported"] = true, ["incidentType"] = "PlightOfCivilians" };
             if (_stage is 10 or 11)

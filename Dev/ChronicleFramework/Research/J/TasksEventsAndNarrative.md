@@ -153,6 +153,8 @@ Chronicle新增按需`mapNotifications`，仅在Campaign Map状态读取`Campaig
 
 原有关系反馈的边界见 I01/I04/I09与本J文关系段：文本/选项由Identity、Faction、Trait、关系、任务和世界状态筛选，关系不一定作为独立历史来源呈现。Chronicle通用Conversation适配目前只覆盖Map Lord会面首段：pursuit自然接触→Observe开放选项→invalid option/Continue guard→选择当前intro response→re-observe新Sentence/选项。运行收据`TestResults/20260926-214832/Temp/AgentConversationResult.json`显示问候后出现`hero_give_issue`等后续选项，本测试未选择Quest/Barter/关系分支；该垂直切片证明Protocol操作已进入ConversationManager，不代表全量对话目录或自动跑3D接近。来源：Campaign `ConversationManager/ConversationSentence/CampaignMapConversation`、Sandbox DialogFlow/ConversationBehaviors、ViewModelCollection `ConversationVM`、当前Chronicle Protocol。未知全体ConversationFlow/条件去重分母、对话状态被任务/战斗打断后的恢复、不同语言和Mods扩展的动态选项。
 
+2026-10-31 Fresh StoryMode长测的Native快照记录到MapState `ConversationManager.IsConversationInProgress=true`、Character `CharacterObject_2092`、告别句“很高兴见到你，如果以后你有什么需要可以来找我。”、当前options数组为空；BattleSimulation子循环没有Conversation操作目录，误把其余场景当作追击等待，导致模型反复ObserveAgain。`AgentProtocol.dialogueContinue`源码确认仅当当前Native ConversationManager仍在进度中且当前CurOptions为空时调用原版`ContinueConversation()`；这正适合当前无选项文本。AgentHost现仅对非遭遇MapState里的这一精确活动状态，逐句调用该原版handler并每步重读，出现可点选项则只给模型当前可点选ID；不会按UI文字猜测或推进Campaign时钟。假Native测试`TestResults/20261031-035940`Build/AgentHostPackage通过。用户已被问到这句告别文本的实际玩家操作表现，runtime内准确可见外观待其确认，新的自然Campaign仍需验收此完整路径。
+
 ## J09 Persuasion Dialogues：说服过程
 
 Persuasion是J08对话内的一种状态化子流程。`PersuasionTask`包含任务预备的`Options`及对话文本字段；它没有独立的“剩余尝试次数”字段。`DefaultPersuasionModel`以目标Trait、关系、ArgumentStrength、玩家Skill/Perk和difficulty multiplier等参数计算success/critical/failure概率和下一阶段/封锁选项效果。实际尝试以当前Conversation开放的argument为入口，结果再由该Task/Conversation consequences决定增加进度、继续、失败、关系变化或Quest后果。
