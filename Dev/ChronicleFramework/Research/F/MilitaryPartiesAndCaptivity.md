@@ -357,6 +357,8 @@ Chronicle 主队观察输出俘虏总数，当前 PartyState 观察分别序列�
 
 普通主队俘虏出售是另一种原生Roster事务：Town Backstreet“选择要卖的俘虏”打开Ransom PartyScreen，逐人由`PartyCharacterVM.ExecuteTransferSingle`暂存到买方左侧，Done才通过`IPartyScreenPrisonHandler`提交`SellPrisonersAction`。用户确认玩家可按目标选择其中一部分；俘虏降低地图队伍速度，超出俘虏上限后会逃跑，因此不应把“卖出/接收全部”写成通用Agent策略。Chronicle的Ransom适配逐名呈现当前Native可转移行，并读取当前累计Gold草稿与Cancel可用性；Agent Host可按当前EYC金币目标和队伍需要继续增选、原版Done提交或通过原版PartyVM取消回滚。取消调用链经1.4.8 `PartyVM` IL及用户界面观察双重核对。2026-10-30 Host动作边界/离线合同测试、模块编译、Ransom逐人暂存/取消/部分提交游戏内验证均通过，详细Native回执见`TestResults/20261030-012146/RansomCancelRuntime.json`。取消回到`town_backstreet`且不改变金币、俘虏或时间；单人提交结算为1823→1873 Gold、7→6俘虏。临时存档未改写。具体移速变化、逃跑时间/数量、卖出Hero的关系及技能影响未在本次确认，不外推用户提供的规则。
 
+玩家补充：其所称“赎俘界面”有取消按钮，取消后回到酒馆区。这个玩家可见返回结果先作为补充观察记录；该回答未明确是从酒馆场景、聚落Backstreet菜单或其他入口打开，也尚无对应Native运行收据，因此不把它与上段已验证的`town_backstreet` PartyScreen取消路径视为同一入口或同一测试。
+
 ### 被俘
 
 `TakePrisonerAction` 主要执行：

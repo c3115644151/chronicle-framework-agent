@@ -128,6 +128,27 @@ function Write-Result($Value) {
     $builder.ToString()
 }
 
+function Write-ChronicleStartupTrace {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Stage,
+        [int]$RootProcessId = 0,
+        [int]$ProcessId = 0,
+        [hashtable]$Details = @{}
+    )
+    try {
+        $record = [ordered]@{
+            utc = [DateTime]::UtcNow.ToString('O')
+            stage = $Stage
+            rootProcessId = $RootProcessId
+            processId = $ProcessId
+        }
+        foreach ($key in $Details.Keys) { $record[[string]$key] = $Details[$key] }
+        Add-Content -LiteralPath $Path -Value ($record | ConvertTo-Json -Compress -Depth 5) -Encoding UTF8
+    }
+    catch { }
+}
+
 if ($Action -eq 'recoverTestConfig') {
     if (Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue) { throw 'Refusing to restore test engine settings while a Bannerlord client is running.' }
     $restored = Restore-ChronicleTestEngineConfig -BackupPath $engineConfigBackupPath
@@ -259,6 +280,10 @@ if ($Action -in @('start','load')) {
         $gameSoundGuard = Disable-ChronicleHarnessGameSound
         Set-SafeExitMarker
         $process = Start-ChronicleSteamGame -FilePath $launcher -ArgumentList "/continuesave $SaveName $moduleArgument /anticheat" -WorkingDirectory $binDirectory -WindowStyle Minimized
+        $startupTraceDirectory = if (-not [string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) { $env:CHRONICLE_HARNESS_TEMP } else { $protocolRoot }
+        New-Item -ItemType Directory -Force -Path $startupTraceDirectory | Out-Null
+        $startupProgressPath = Join-Path $startupTraceDirectory "agent-cli-startup-$($process.Id).jsonl"
+        Write-ChronicleStartupTrace -Path $startupProgressPath -Stage 'process-launched' -RootProcessId $process.Id -ProcessId $process.Id -Details @{ saveName = $SaveName; harnessMode = $expectedHarnessMode }
     }
     catch {
         if ($engineConfigBackupCreated) { Restore-ChronicleTestEngineConfig -BackupPath $engineConfigBackupPath | Out-Null }
@@ -269,12 +294,18 @@ if ($Action -in @('start','load')) {
     $readyProcessId = 0
     $windowLayout = $null
     $lastWindowLayoutAttemptUtc = [DateTime]::MinValue
+    $lastProgressTraceUtc = [DateTime]::UtcNow
     $startupDialogReceipts = [System.Collections.Generic.List[object]]::new()
     $observedStartupProcessIds = [System.Collections.Generic.HashSet[int]]::new()
     [void]$observedStartupProcessIds.Add([int]$process.Id)
     $launchStartedUtc = $process.StartTime.ToUniversalTime()
     $programDataLogs = Join-Path $env:ProgramData 'Mount and Blade II Bannerlord\logs'
     while ((Get-Date) -lt $deadline) {
+        $traceThisStartupCycle = ([DateTime]::UtcNow - $lastProgressTraceUtc).TotalSeconds -ge 5
+        if ($traceThisStartupCycle) {
+            $lastProgressTraceUtc = [DateTime]::UtcNow
+            Write-ChronicleStartupTrace -Path $startupProgressPath -Stage 'startup-loop-enter' -RootProcessId $process.Id -ProcessId $process.Id
+        }
         $launchProcess = Get-Process -Id $process.Id -ErrorAction SilentlyContinue
         $currentDescendants = @(Get-DescendantProcessIds -ParentId $process.Id)
         foreach ($descendantId in $currentDescendants) { [void]$observedStartupProcessIds.Add([int]$descendantId) }
@@ -284,6 +315,7 @@ if ($Action -in @('start','load')) {
         foreach ($bannerlordProcess in $startedBannerlordProcesses) { [void]$observedStartupProcessIds.Add([int]$bannerlordProcess.Id) }
         if (-not $launchProcess) { $launchProcess = $startedBannerlordProcesses | Select-Object -First 1 }
         if (-not $launchProcess) { break }
+        if ($traceThisStartupCycle) { Write-ChronicleStartupTrace -Path $startupProgressPath -Stage 'startup-loop-process-discovery-complete' -RootProcessId $process.Id -ProcessId $launchProcess.Id -Details @{ elapsedSeconds = [Math]::Round(([DateTime]::UtcNow - $launchStartedUtc).TotalSeconds, 1); observedProcessIds = @($observedStartupProcessIds) } }
         $crashCandidate = $null
         $crashTail = @()
         $unhandledException = @()
@@ -302,6 +334,7 @@ if ($Action -in @('start','load')) {
                 break
             }
         }
+        if ($traceThisStartupCycle) { Write-ChronicleStartupTrace -Path $startupProgressPath -Stage 'startup-loop-crash-scan-complete' -RootProcessId $process.Id -ProcessId $launchProcess.Id }
         if ($crashCandidate) {
                 $crashEvidenceRoot = if (-not [string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) { $env:CHRONICLE_HARNESS_TEMP } else { $protocolRoot }
                 New-Item -ItemType Directory -Force -Path $crashEvidenceRoot | Out-Null
@@ -363,12 +396,16 @@ if ($Action -in @('start','load')) {
             catch { $startupFault = "Bannerlord Warning dialog could not be read safely: $($_.Exception.Message)" }
             break
         }
+        if ($traceThisStartupCycle) { Write-ChronicleStartupTrace -Path $startupProgressPath -Stage 'startup-loop-dialog-check-complete' -RootProcessId $process.Id -ProcessId $launchProcess.Id }
         $windowAttemptDue = ([DateTime]::UtcNow - $lastWindowLayoutAttemptUtc).TotalSeconds -ge 2
         if ((-not $windowLayout -or -not $windowLayout.Applied) -and $windowAttemptDue) {
             $lastWindowLayoutAttemptUtc = [DateTime]::UtcNow
+            Write-ChronicleStartupTrace -Path $startupProgressPath -Stage 'window-layout-attempt-start' -RootProcessId $process.Id -ProcessId $launchProcess.Id -Details @{ windowTitle = [string]$launchProcess.MainWindowTitle }
             $candidateLayout = Set-ChronicleTestWindow -ProcessId $launchProcess.Id
+            Write-ChronicleStartupTrace -Path $startupProgressPath -Stage 'window-layout-attempt-finished' -RootProcessId $process.Id -ProcessId $launchProcess.Id -Details @{ layout = $candidateLayout }
             if ($candidateLayout -and $candidateLayout.Applied) { $windowLayout = $candidateLayout }
         }
+        if ($traceThisStartupCycle) { Write-ChronicleStartupTrace -Path $startupProgressPath -Stage 'startup-loop-before-telemetry-read' -RootProcessId $process.Id -ProcessId $launchProcess.Id }
         if (Test-Path $diagnosticLog) {
             $diagnosticStream = $null
             $diagnosticReader = $null
@@ -404,6 +441,7 @@ if ($Action -in @('start','load')) {
                             if ($candidateReadyProcess -and $candidateReadyProcess.ProcessName -like 'Bannerlord*' -and $candidateReadyPid -in @($observedStartupProcessIds)) {
                                 $ready = $true
                                 $readyProcessId = $candidateReadyPid
+                                Write-ChronicleStartupTrace -Path $startupProgressPath -Stage 'campaign-loaded-marker-observed' -RootProcessId $process.Id -ProcessId $candidateReadyPid -Details @{ marker = [string]$readyLine[0] }
                             }
                         }
                     }
@@ -415,6 +453,7 @@ if ($Action -in @('start','load')) {
                 if ($diagnosticStream) { $diagnosticStream.Dispose() }
             }
         }
+        if ($traceThisStartupCycle) { Write-ChronicleStartupTrace -Path $startupProgressPath -Stage 'startup-loop-telemetry-read-complete' -RootProcessId $process.Id -ProcessId $launchProcess.Id -Details @{ ready = $ready; readyProcessId = $readyProcessId } }
         if ($ready) { break }
         Start-Sleep -Milliseconds 250
     }
@@ -464,7 +503,9 @@ if ($Action -in @('start','load')) {
         throw "$startupFailureMessage Startup evidence: $startupEvidencePath"
     }
     if ($readyProcessId -le 0) { throw 'Campaign reached a ready marker without recording its process identity.' }
+    Write-ChronicleStartupTrace -Path $startupProgressPath -Stage 'window-layout-final-start' -RootProcessId $process.Id -ProcessId $readyProcessId
     $windowLayout = Set-ChronicleTestWindow -ProcessId $readyProcessId
+    Write-ChronicleStartupTrace -Path $startupProgressPath -Stage 'window-layout-final-finished' -RootProcessId $process.Id -ProcessId $readyProcessId -Details @{ layout = $windowLayout }
     if (-not $windowLayout -or -not $windowLayout.Applied) {
         $launchStopped = Stop-ChronicleStartupProcessTree -RootProcessId $process.Id -KnownProcessIds @($observedStartupProcessIds)
         Set-SafeExitMarker
@@ -474,11 +515,14 @@ if ($Action -in @('start','load')) {
     $performanceProfile = [ordered]@{ maxFramerate = 30; width = [int]$windowLayout.Width; height = [int]$windowLayout.Height; configRestoredAfterStop = [bool]$engineConfigBackupCreated }
     $session = [ordered]@{ protocolVersion = 1; processId = $readyProcessId; rootProcessId = $process.Id; observedProcessIds = @($observedStartupProcessIds); saveName = $SaveName; moduleSet = $modules; startedUtc = (Get-Date).ToUniversalTime().ToString('O'); windowLayout = $windowLayout; performanceProfile = $performanceProfile; steamClient = $steamStatus; engineConfigBackupPath = if ($engineConfigBackupCreated) { $engineConfigBackupPath } else { $null }; startupDialogReceipts = @($startupDialogReceipts) }
     $session | ConvertTo-Json | Set-Content -Path $sessionPath -Encoding UTF8
+    Write-ChronicleStartupTrace -Path $startupProgressPath -Stage 'session-written' -RootProcessId $process.Id -ProcessId $readyProcessId -Details @{ sessionPath = $sessionPath }
     $configuredTimeout = $TimeoutSeconds
     $TimeoutSeconds = [Math]::Min(30, $TimeoutSeconds)
     try {
+        Write-ChronicleStartupTrace -Path $startupProgressPath -Stage 'protocol-probe-start' -RootProcessId $process.Id -ProcessId $readyProcessId
         $protocolProbe = Invoke-ProtocolCommand 'state'
         if ($protocolProbe.status -ne 'completed' -or -not $protocolProbe.state) { throw 'Agent protocol returned no structured initial state.' }
+        Write-ChronicleStartupTrace -Path $startupProgressPath -Stage 'protocol-probe-finished' -RootProcessId $process.Id -ProcessId $readyProcessId -Details @{ status = $protocolProbe.status }
     }
     catch {
         $handshakeError = $_.Exception.Message

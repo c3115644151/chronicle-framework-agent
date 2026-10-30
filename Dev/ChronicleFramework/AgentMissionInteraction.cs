@@ -45,14 +45,19 @@ internal static class ChronicleMissionInteraction
         var target = observedLocalAgents.FirstOrDefault(agent => agent.Index == agentIndex);
         if (target == null)
             throw new InvalidOperationException("missionInteract requires an active human AgentIndex from nearbySceneAgents in the current Mission observation");
-        if (supportedArenaMission && !string.Equals((target.Character as CharacterObject)?.StringId, "tournament_master_empire", StringComparison.Ordinal))
-            throw new InvalidOperationException("Arena Mission interaction is restricted to the currently observed Native Arena Master");
+        var arenaTargetCharacter = target.Character as CharacterObject;
+        if (supportedArenaMission && !IsNativeArenaMaster(arenaTargetCharacter))
+            throw new InvalidOperationException("Arena Mission interaction is restricted to the currently observed Native Arena Master for this culture");
         if (target.IsEnemyOf(mainAgent))
             throw new InvalidOperationException("missionInteract rejects hostile local Agents");
         var distance = target.GetDistanceTo(mainAgent);
 
         var conversationLogic = mission.MissionBehaviors.OfType<MissionConversationLogic>().FirstOrDefault();
-        if (conversationLogic == null || !conversationLogic.IsThereAgentAction(mainAgent, target))
+        if (conversationLogic == null)
+            throw new InvalidOperationException("the current Mission has no Native MissionConversationLogic");
+        if (conversationLogic.ConversationManager == null)
+            throw new InvalidOperationException("Native Mission conversation setup is not ready; wait for the original MissionScreen rendering lifecycle");
+        if (!conversationLogic.IsThereAgentAction(mainAgent, target))
             throw new InvalidOperationException("the current Native MissionConversationLogic reports no conversation action for this Agent");
         var mainAgentController = mission.MissionBehaviors.OfType<MissionMainAgentController>().FirstOrDefault();
         if (mainAgentController?.MissionScreen == null || !mainAgent.CanInteractWithAgent(target, mainAgentController.MissionScreen.CameraElevation))
@@ -73,5 +78,13 @@ internal static class ChronicleMissionInteraction
             throw new InvalidOperationException("Native conversation started with a different Hero than the observed target");
 
         return "{\"schemaVersion\":1,\"nativeEntry\":\"Agent.OnUse\",\"missionBehavior\":\"MissionConversationLogic\",\"conversationStarted\":true,\"targetAgentIndex\":" + agentIndex.ToString(CultureInfo.InvariantCulture) + ",\"targetCharacterId\":\"" + ChronicleAgentProtocol.Escape(targetCharacter?.StringId) + "\",\"targetHeroId\":" + (targetHero == null ? "null" : "\"" + ChronicleAgentProtocol.Escape(targetHero.StringId) + "\"") + ",\"conversationHeroId\":" + (activeTarget == null ? "null" : "\"" + ChronicleAgentProtocol.Escape(activeTarget.StringId) + "\"") + ",\"distance\":" + distance.ToString("R", CultureInfo.InvariantCulture) + ",\"timeControlModeBefore\":\"" + ChronicleAgentProtocol.Escape(beforeMode) + "\",\"timeControlModeAfter\":\"" + ChronicleAgentProtocol.Escape(Campaign.Current.TimeControlMode.ToString()) + "\",\"campaignDayBefore\":" + beforeDay.ToString("F3", CultureInfo.InvariantCulture) + ",\"campaignDayAfter\":" + CampaignTime.Now.ToDays.ToString("F3", CultureInfo.InvariantCulture) + "}";
+    }
+
+    private static bool IsNativeArenaMaster(CharacterObject character)
+    {
+        return character != null &&
+            string.Equals(character.Occupation.ToString(), "ArenaMaster", StringComparison.Ordinal) &&
+            !string.IsNullOrWhiteSpace(character.StringId) &&
+            character.StringId.StartsWith("tournament_master_", StringComparison.Ordinal);
     }
 }

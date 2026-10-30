@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 using Helpers;
+using SandBox.Conversation.MissionLogics;
 using SandBox.View.Map;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.GameMenus;
@@ -55,7 +56,7 @@ internal static class ChronicleAgentObserver
 
         var json = new StringBuilder(4096);
         json.Append('{');
-        json.Append("\"schemaVersion\":32");
+        json.Append("\"schemaVersion\":33");
         json.Append(",\"campaignDay\":").Append(Number(CampaignTime.Now.ToDays));
         json.Append(",\"identity\":{");
         Property(json, "heroId", hero.StringId); Property(json, "heroName", hero.Name?.ToString(), true);
@@ -921,6 +922,7 @@ internal static class ChronicleAgentObserver
 
         var mainAgent = mission.MainAgent;
         var mainAgentController = mission.MissionBehaviors.OfType<MissionMainAgentController>().FirstOrDefault();
+        var missionConversationLogic = mission.MissionBehaviors.OfType<MissionConversationLogic>().FirstOrDefault();
         var focusedObject = mainAgentController?.InteractionComponent?.CurrentFocusedObject;
         var focusedAgent = focusedObject as Agent;
         var missionAgents = mission.Agents.Where(agent => agent != null && agent != mainAgent && agent.IsActive()).ToArray();
@@ -955,6 +957,7 @@ internal static class ChronicleAgentObserver
         Property(json, "sceneName", mission.SceneName, true);
         Property(json, "mode", mission.Mode.ToString(), true);
         Property(json, "combatType", mission.CombatType.ToString(), true);
+        json.Append(",\"nativeConversationReady\":").Append(Bool(missionConversationLogic?.ConversationManager != null));
         json.Append(",\"activeAgentCount\":").Append(missionAgents.Length);
         json.Append(",\"camera\":");
         if (mainAgentController?.MissionScreen == null)
