@@ -1083,9 +1083,10 @@ internal static class ChronicleAgentObserver
             .OrderBy(agent => Distance3D(mainAgent.Position, agent.Position))
             .ThenBy(agent => agent.Index)
             .ToArray();
+        var conversationLogic = mission.MissionBehaviors.OfType<MissionConversationLogic>().FirstOrDefault();
 
-        var json = new StringBuilder(Math.Max(512, observedAgents.Length * 192));
-        json.Append("{\"schemaVersion\":1,\"scope\":\"active human Agents instantiated in the current friendly Location Mission; not a Campaign/global list or camera-visibility claim\"");
+        var json = new StringBuilder(Math.Max(512, observedAgents.Length * 224));
+        json.Append("{\"schemaVersion\":2,\"scope\":\"active human Agents instantiated in the current friendly Location Mission; not a Campaign/global list or camera-visibility claim\"");
         Property(json, "sceneName", mission.SceneName, true);
         json.Append(",\"activeAgentCount\":").Append(observedAgents.Length);
         json.Append(",\"agents\":[");
@@ -1103,6 +1104,8 @@ internal static class ChronicleAgentObserver
             Property(json, "occupation", hero?.Occupation.ToString() ?? character?.Occupation.ToString(), true);
             json.Append(",\"isNotable\":").Append(Bool(hero?.IsNotable ?? false));
             json.Append(",\"isEnemy\":").Append(Bool(agent.IsEnemyOf(mainAgent)));
+            var hasNativeConversationAction = conversationLogic?.ConversationManager != null && conversationLogic.IsThereAgentAction(mainAgent, agent);
+            json.Append(",\"nativeConversationActionAvailable\":").Append(Bool(hasNativeConversationAction));
             json.Append(",\"distance\":").Append(Number(Distance3D(mainAgent.Position, agent.Position)));
             json.Append(",\"position\":{\"x\":").Append(Number(agent.Position.X));
             json.Append(",\"y\":").Append(Number(agent.Position.Y)).Append(",\"z\":").Append(Number(agent.Position.Z)).Append("}}");

@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.455'
+$contractVersion = '7.456'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -247,7 +247,12 @@ if ($harnessScript -notmatch "'MapIncidentInputGuard' \{ @\('Preflight', 'Build'
 if ($agentObserverSource -notmatch 'activeGameState is PartyState' -or $agentInquiryAdapterSource -notmatch 'activeState is not PartyState' -or $agentHostNativeInquiryResolutionSource -notmatch 'PartyState' -or $agentHostNativeInquiryResolutionSource -notmatch 'partyScreen' -or $agentHostBattleSimulationLoopSource -notmatch 'postbattle-native-inquiry' -or $agentHostBattleSimulationLoopSource -notmatch 'parentEycObjectives') { throw 'Postbattle PartyState Yes/No inquiries must be visible with the current loot roster, resolved through the Native Inquiry handler, and informed by the current EYC goal/progress.' }
 if ($agentObserverSource -notmatch 'activeGameState is PartyState' -or $agentInquiryAdapterSource -notmatch 'activeState is not PartyState' -or $agentHostNativeInquiryResolutionSource -notmatch 'PartyState' -or $agentHostBattleSimulationLoopSource -notmatch 'postbattle-native-inquiry' -or $agentHostBattleSimulationLoopSource -notmatch 'AgentHostNativeInquiryResolution.RunAsync' -or $agentHostBattleSimulationLoopSource -notmatch 'parentEycObjectives') { throw 'Postbattle PartyState Yes/No inquiries must be visible with the current loot roster, resolved through the Native inquiry handler, and informed by the current EYC goals.' }
 if ($agentObserverSource -notmatch 'mainAgent\.CanInteractWithAgent\(item\.Agent, mainAgentController\.MissionScreen\.CameraElevation\)' -or
-    $agentObserverSource -notmatch 'isInteractable') { throw 'Current local Mission agents must carry Native CanInteractWithAgent eligibility so the Companion route can distinguish a reachable conversation target from a merely nearby Hero.' }
+    $agentObserverSource -notmatch 'IsThereAgentAction\(mainAgent, agent\)' -or
+    $agentObserverSource -notmatch 'nativeConversationActionAvailable' -or
+    $agentObserverSource -notmatch 'schemaVersion\\":2,\\"scope\\":\\"active human Agents instantiated' -or
+    $agentHostCompanionLoopSource -notmatch 'ReadBoolean\(candidate, "nativeConversationActionAvailable"\)' -or
+    $agentHostCompanionLoopSource -notmatch 'missionNavigateToAgent' -or
+    $agentHostCompanionLoopSource -notmatch 'ReadBoolean\(local, "isInteractable"\)') { throw 'Current local Mission agents must report immediate Native dialogue availability; that range/pose-sensitive value may gate Agent.OnUse, but must not remove distant Wanderers from the navigation candidate list.' }
 if ($agentObserverSource -notmatch 'Property\(json, "characterName", conversationManager\.OneToOneConversationCharacter\?\.Name\?\.ToString\(\), true\)' -or
     $agentObserverSource -notmatch 'Property\(json, "heroId", conversationManager\.OneToOneConversationHero\?\.StringId, true\)' -or
     $agentObserverSource -notmatch 'Property\(json, "sentenceText", conversationManager\.CurrentSentenceText, true\)') {

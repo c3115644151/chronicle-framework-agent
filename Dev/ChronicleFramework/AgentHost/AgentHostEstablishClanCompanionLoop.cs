@@ -34,13 +34,15 @@ internal static class AgentHostEstablishClanCompanionLoop
             throw new AgentHostException("companion-navigation-stall-policy-self-test-failed", "Only repeated completed Native navigation with less than 0.1 distance improvement and no interactable observation may temporarily exclude a target.");
         var candidates = FilterWandererCandidates(new JsonArray
         {
-            new JsonObject { ["agentIndex"] = 4, ["heroId"] = "wanderer-a", ["occupation"] = "Wanderer", ["isNotable"] = false, ["isEnemy"] = false, ["distance"] = 6.0 },
+            new JsonObject { ["agentIndex"] = 4, ["heroId"] = "wanderer-a", ["occupation"] = "Wanderer", ["isNotable"] = false, ["isEnemy"] = false, ["nativeConversationActionAvailable"] = true, ["distance"] = 6.0 },
             new JsonObject { ["agentIndex"] = 5, ["heroId"] = "notable-a", ["occupation"] = "Merchant", ["isNotable"] = true, ["isEnemy"] = false, ["distance"] = 2.0 },
             new JsonObject { ["agentIndex"] = 6, ["heroId"] = "hostile-wanderer", ["occupation"] = "Wanderer", ["isNotable"] = false, ["isEnemy"] = true, ["distance"] = 1.0 },
-            new JsonObject { ["agentIndex"] = 7, ["heroId"] = null, ["occupation"] = "Wanderer", ["isNotable"] = false, ["isEnemy"] = false, ["distance"] = 3.0 }
+            new JsonObject { ["agentIndex"] = 7, ["heroId"] = null, ["occupation"] = "Wanderer", ["isNotable"] = false, ["isEnemy"] = false, ["distance"] = 3.0 },
+            new JsonObject { ["agentIndex"] = 8, ["heroId"] = "wanderer-no-dialogue", ["occupation"] = "Wanderer", ["isNotable"] = false, ["isEnemy"] = false, ["nativeConversationActionAvailable"] = false, ["distance"] = 2.5 }
         }, new HashSet<string>(StringComparer.Ordinal));
-        if (candidates.Count != 1 || ReadString(candidates[0] as JsonObject, "heroId") != "wanderer-a")
-            throw new AgentHostException("establish-clan-companion-candidate-filter-failed", "Only a current, unowned, friendly Wanderer Hero may enter the Companion objective candidate catalog.");
+        if (candidates.Count != 2 || !candidates.Any(candidate => ReadString(candidate as JsonObject, "heroId") == "wanderer-a") ||
+            !candidates.Any(candidate => ReadString(candidate as JsonObject, "heroId") == "wanderer-no-dialogue"))
+            throw new AgentHostException("establish-clan-companion-candidate-filter-failed", "A current, unowned, friendly Wanderer remains a navigation candidate even when the Native conversation action is not available from the current distance/pose.");
 
         var nativeTrainingFieldMenu = new JsonObject
         {
@@ -125,7 +127,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                 ["agents"] = new JsonArray(new JsonObject
                 {
                     ["agentIndex"] = 4, ["heroId"] = "wanderer-a", ["occupation"] = "Wanderer",
-                    ["isNotable"] = false, ["isEnemy"] = false, ["distance"] = 6.0
+                    ["isNotable"] = false, ["isEnemy"] = false, ["nativeConversationActionAvailable"] = false, ["distance"] = 6.0
                 })
             }
         };
@@ -133,7 +135,7 @@ internal static class AgentHostEstablishClanCompanionLoop
             missionCandidateReceipt, null, null, false, new HashSet<string>(StringComparer.Ordinal), new HashSet<string>(StringComparer.Ordinal));
         if (!missionCandidateCatalog.OfType<JsonObject>().Any(action => ReadString(action, "action") == "missionNavigateToAgent") ||
             !missionCandidateCatalog.OfType<JsonObject>().Any(action => ReadString(action, "action") == "missionLeave"))
-            throw new AgentHostException("establish-clan-companion-mission-exit-not-listed", "A Tavern Mission with a Wanderer candidate must offer both the Native hiring route and a Native exit so the model can leave safely and replan.");
+            throw new AgentHostException("establish-clan-companion-mission-exit-not-listed", "A nearby Wanderer without a current conversation action must remain navigable, while the Native exit remains available.");
 
         var wrappedIndexDecision = new JsonObject
         {
@@ -204,7 +206,7 @@ internal static class AgentHostEstablishClanCompanionLoop
         {
             ["context"] = new JsonObject { ["gameState"] = "MissionState", ["menuId"] = null, ["encounterActive"] = true, ["encounteredPartyId"] = "town-a" },
             ["location"] = new JsonObject { ["currentSettlementId"] = "town-a" },
-            ["mission"] = new JsonObject { ["active"] = true, ["sceneName"] = "empire_house_c_tavern_a", ["mode"] = "StartUp", ["nativeMissionCurrentState"] = "Initializing" }
+            ["mission"] = new JsonObject { ["active"] = true, ["sceneName"] = "empire_house_c_tavern_a", ["mode"] = "StartUp", ["nativeMissionCurrentState"] = "Initializing", ["nativeConversationReady"] = false }
         };
         var tavernStartupCatalog = BuildActionCatalog(tavernStartupState, new JsonArray(), new JsonObject(), null, null, null, null, false,
             new HashSet<string>(StringComparer.Ordinal), new HashSet<string>(StringComparer.Ordinal));
@@ -212,19 +214,30 @@ internal static class AgentHostEstablishClanCompanionLoop
             tavernStartupCatalog.Count != 1 || ReadString(tavernStartupCatalog[0] as JsonObject, "action") != "missionSceneAgents")
             throw new AgentHostException("establish-clan-companion-tavern-mission-not-distinguished-from-encounter", "A MissionState at its own friendly settlement in a Native tavern scene must be distinguishable from a hostile/party encounter while preserving the current scene-agent query route.");
 
-        var options = BuildActionCatalog(new JsonObject
+        var nonActionableTargetState = new JsonObject
         {
             ["context"] = new JsonObject { ["gameState"] = "MissionState" },
             ["mission"] = new JsonObject
             {
                 ["nearbySceneAgents"] = new JsonArray(new JsonObject { ["agentIndex"] = 4, ["heroId"] = "wanderer-a", ["occupation"] = "Wanderer", ["isNotable"] = false, ["isEnemy"] = false, ["isInteractable"] = true, ["distance"] = 1.2 })
             }
-        }, new JsonArray(), new JsonObject(), null,
-            new JsonObject { ["data"] = new JsonObject { ["agents"] = new JsonArray(new JsonObject { ["agentIndex"] = 4, ["heroId"] = "wanderer-a", ["occupation"] = "Wanderer", ["isNotable"] = false, ["isEnemy"] = false, ["distance"] = 6.0 }) } },
+        };
+        var options = BuildActionCatalog(nonActionableTargetState, new JsonArray(), new JsonObject(), null,
+            new JsonObject { ["data"] = new JsonObject { ["agents"] = new JsonArray(new JsonObject { ["agentIndex"] = 4, ["heroId"] = "wanderer-a", ["occupation"] = "Wanderer", ["isNotable"] = false, ["isEnemy"] = false, ["nativeConversationActionAvailable"] = false, ["distance"] = 1.2 }) } },
             "wanderer-a", null, false, new HashSet<string>(StringComparer.Ordinal), new HashSet<string>(StringComparer.Ordinal));
-        if (!options.OfType<JsonObject>().Any(action => ReadString(action, "action") == "missionInteract") ||
-            !options.OfType<JsonObject>().Any(action => ReadString(action, "action") == "missionLeave"))
-            throw new AgentHostException("establish-clan-companion-native-interaction-route-failed", "An observed, interactable local Wanderer must use Native Agent interaction while retaining the Native option to leave its Mission safely.");
+        if (!options.OfType<JsonObject>().Any(action => ReadString(action, "action") == "missionNavigateToAgent") ||
+            options.OfType<JsonObject>().Any(action => ReadString(action, "action") == "missionInteract"))
+            throw new AgentHostException("establish-clan-companion-native-interaction-route-failed", "The Host must not invoke Agent.OnUse until the current Native MissionConversationLogic action is available, even if a nearby-state heuristic says interactable.");
+        var actionableTargetCatalog = new JsonObject { ["data"] = new JsonObject { ["agents"] = new JsonArray(new JsonObject
+        {
+            ["agentIndex"] = 4, ["heroId"] = "wanderer-a", ["occupation"] = "Wanderer", ["isNotable"] = false, ["isEnemy"] = false,
+            ["nativeConversationActionAvailable"] = true, ["distance"] = 1.2
+        }) } };
+        var actionableOptions = BuildActionCatalog(nonActionableTargetState, new JsonArray(), new JsonObject(), null, actionableTargetCatalog,
+            "wanderer-a", null, false, new HashSet<string>(StringComparer.Ordinal), new HashSet<string>(StringComparer.Ordinal));
+        if (!actionableOptions.OfType<JsonObject>().Any(action => ReadString(action, "action") == "missionInteract") ||
+            !actionableOptions.OfType<JsonObject>().Any(action => ReadString(action, "action") == "missionLeave"))
+            throw new AgentHostException("establish-clan-companion-native-interaction-route-failed", "Once Native MissionConversationLogic reports a current action and the local Agent is interactable, use Native Agent interaction while retaining the Native exit.");
 
         return [
             new { scenario = "companion-navigation-stall-policy-excludes-only-after-two-no-progress-native-approaches", passed = true },
@@ -375,8 +388,10 @@ internal static class AgentHostEstablishClanCompanionLoop
                 if (sceneNotificationActive && !sceneNotificationCanContinue)
                     return BuildResult("interrupted", "native-scene-notification-out-of-scope", "A Native scene notification is visible, but its current type or close behavior is not in the verified no-choice allowlist.", "companion-scene-notification-out-of-scope", state);
 
+                var nativeTavernMission = state["mission"] as JsonObject;
                 if (IsNativeTavernMissionState(state) &&
-                    ReadString(state["mission"] as JsonObject, "nativeMissionCurrentState") == "Initializing")
+                    (ReadString(nativeTavernMission, "nativeMissionCurrentState") == "Initializing" ||
+                     !ReadBoolean(nativeTavernMission, "nativeConversationReady")))
                 {
                     if (tavernMissionStartupWaits >= MaxTavernMissionStartupWaits)
                         return BuildResult("failed", "native-tavern-mission-startup-timeout", "The exact friendly Town Tavern Mission remained in Native initialization after bounded passive reads; no model decision or game action was sent.", "native-tavern-mission-startup-timeout", state);
@@ -874,8 +889,8 @@ internal static class AgentHostEstablishClanCompanionLoop
         }
 
         var localAgents = state["mission"]?["nearbySceneAgents"] as JsonArray ?? new JsonArray();
-        var nearbyInteractable = candidates.OfType<JsonObject>().Where(candidate => localAgents.OfType<JsonObject>().Any(local =>
-            ReadString(local, "heroId") == ReadString(candidate, "heroId") && ReadBoolean(local, "isInteractable"))).ToArray();
+        var nearbyInteractable = candidates.OfType<JsonObject>().Where(candidate => ReadBoolean(candidate, "nativeConversationActionAvailable") &&
+            localAgents.OfType<JsonObject>().Any(local => ReadString(local, "heroId") == ReadString(candidate, "heroId") && ReadBoolean(local, "isInteractable"))).ToArray();
         if (nearbyInteractable.Length > 0)
         {
             var indexes = nearbyInteractable.Select(candidate => (JsonNode?)JsonValue.Create(ReadInt(candidate, "agentIndex", -1))).Where(node => node is not null).ToArray();
@@ -1043,7 +1058,8 @@ internal static class AgentHostEstablishClanCompanionLoop
         foreach (var agent in agents.OfType<JsonObject>())
         {
             var id = ReadString(agent, "heroId");
-            if (string.IsNullOrWhiteSpace(id) || ReadString(agent, "occupation") != "Wanderer" || ReadBoolean(agent, "isNotable") || ReadBoolean(agent, "isEnemy") || excludedHeroes.Contains(id)) continue;
+            if (string.IsNullOrWhiteSpace(id) || ReadString(agent, "occupation") != "Wanderer" || ReadBoolean(agent, "isNotable") ||
+                ReadBoolean(agent, "isEnemy") || excludedHeroes.Contains(id)) continue;
             result.Add(agent.DeepClone());
         }
         return result;
@@ -1441,11 +1457,13 @@ internal static class AgentHostEstablishClanCompanionLoop
                     TavernMissionStartupStateReads++;
                     state["mission"]!["mode"] = "StartUp";
                     state["mission"]!["nativeMissionCurrentState"] = "Initializing";
+                    state["mission"]!["nativeConversationReady"] = false;
                     state["mission"]!["activeAgentCount"] = 0;
                 }
                 else
                 {
                     state["mission"]!["nativeMissionCurrentState"] = "Continuing";
+                    state["mission"]!["nativeConversationReady"] = true;
                     state["mission"]!["activeAgentCount"] = 25;
                 }
             }
@@ -1495,7 +1513,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                     data = new JsonObject
                     {
                         ["scope"] = "current-location-mission",
-                        ["agents"] = new JsonArray(new JsonObject { ["agentIndex"] = 4, ["heroId"] = "wanderer-a", ["occupation"] = "Wanderer", ["isNotable"] = false, ["isEnemy"] = false, ["distance"] = 6.0 })
+                        ["agents"] = new JsonArray(new JsonObject { ["agentIndex"] = 4, ["heroId"] = "wanderer-a", ["occupation"] = "Wanderer", ["isNotable"] = false, ["isEnemy"] = false, ["nativeConversationActionAvailable"] = true, ["distance"] = 6.0 })
                     };
                     return Receipt(action, data);
                 case "missionNavigateToAgent": _stage = 4; _navigated = true; _missionNavigationActiveReadsRemaining = 3; data = new JsonObject { ["targetAgentIndex"] = 4, ["status"] = "navigating" }; return Receipt(action, data);

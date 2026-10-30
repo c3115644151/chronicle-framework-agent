@@ -80,15 +80,21 @@ function Invoke-CompanionHiringScenario([int]$GoldOffset, [string]$Scenario) {
     if ($tavern.Count -ne 1) { throw "$Scenario Tavern district lacked an enabled Visit Tavern option." }
     $mission = Invoke-AgentCli 'menuSelect' @('-MenuId', 'town_backstreet', '-OptionId', 'town_tavern', '-CommandId', "$scenarioPrefix-enter-tavern")
     $sceneDeadline = [DateTime]::UtcNow.AddSeconds(60)
-    while ((-not $mission.state.mission -or -not $mission.state.mission.mainAgent) -and [DateTime]::UtcNow -lt $sceneDeadline) {
+    while ((-not $mission.state.mission -or -not $mission.state.mission.mainAgent -or -not $mission.state.mission.nativeConversationReady) -and [DateTime]::UtcNow -lt $sceneDeadline) {
         Start-Sleep -Milliseconds 500
         $mission = Invoke-AgentCli 'state' @('-CommandId', "$scenarioPrefix-scene-$([Guid]::NewGuid().ToString('N'))")
     }
-    if (-not $mission.state.mission.mainAgent -or $mission.state.mission.sceneName -notmatch 'tavern' -or $mission.state.context.timeControlMode -ne 'Stop') { throw "$Scenario did not enter a stopped native Tavern Location Mission." }
+    if (-not $mission.state.mission.mainAgent -or -not $mission.state.mission.nativeConversationReady -or $mission.state.mission.sceneName -notmatch 'tavern' -or $mission.state.context.timeControlMode -ne 'Stop') { throw "$Scenario did not enter a stopped native Tavern Location Mission with its rendering-time conversation manager initialized." }
 
     $wanderer = @($mission.state.mission.nearbySceneAgents | Where-Object { $_.heroId -and $_.occupation -eq 'Wanderer' -and -not $_.isEnemy } | Sort-Object distance | Select-Object -First 1)
     if ($wanderer.Count -ne 1) { throw "$Scenario current local Tavern observation contains no friendly Wanderer." }
     $heroId = [string]$wanderer[0].heroId
+    $sceneAgentCatalog = Invoke-AgentCli 'missionSceneAgents' @('-CommandId', "$scenarioPrefix-local-agent-catalog")
+    $catalogWanderer = @($sceneAgentCatalog.data.agents | Where-Object { $_.heroId -eq $heroId -and [int]$_.agentIndex -eq [int]$wanderer[0].agentIndex })
+    if ([int]$sceneAgentCatalog.data.schemaVersion -lt 2 -or $catalogWanderer.Count -ne 1 -or $null -eq $catalogWanderer[0].nativeConversationActionAvailable)
+        { throw "$Scenario missionSceneAgents response did not include the schema-v2 Native conversation-action eligibility field for the observed Wanderer." }
+    $initialNativeConversationActionAvailable = [bool]$catalogWanderer[0].nativeConversationActionAvailable
+    $initialCatalogDistance = [double]$catalogWanderer[0].distance
     $fixture = Invoke-AgentCli 'harnessPrepareCompanionHiringFixture' @('-HeroId', $heroId, '-GoldOffset', [string]$GoldOffset, '-CommandId', "$scenarioPrefix-prepare-gold")
     $beforeHiring = Invoke-AgentCli 'harnessCompanionHiringDiagnostics' @('-HeroId', $heroId, '-CommandId', "$scenarioPrefix-before-hire")
     if ($beforeHiring.data.isPlayerCompanion -or [int]$beforeHiring.data.playerGold -ne ([int]$beforeHiring.data.nativeHiringPrice + $GoldOffset) -or [int]$beforeHiring.data.playerCompanionCount -ge [int]$beforeHiring.data.companionLimit)
@@ -118,6 +124,13 @@ function Invoke-CompanionHiringScenario([int]$GoldOffset, [string]$Scenario) {
             if (-not $nearby.state.mission.mainAgent.isPlayerControlled) { throw "$Scenario cancelled navigation did not restore Player control." }
         }
     }
+
+    $sceneAgentCatalog = Invoke-AgentCli 'missionSceneAgents' @('-CommandId', "$scenarioPrefix-nearby-agent-catalog")
+    $catalogWanderer = @($sceneAgentCatalog.data.agents | Where-Object { $_.heroId -eq $heroId -and [int]$_.agentIndex -eq [int]$wanderer[0].agentIndex })
+    if ($catalogWanderer.Count -ne 1 -or -not $catalogWanderer[0].nativeConversationActionAvailable)
+        { throw "$Scenario Native navigation reached the Wanderer, but current MissionConversationLogic still reports no conversation action for this Agent." }
+    $nearbyNativeConversationActionAvailable = [bool]$catalogWanderer[0].nativeConversationActionAvailable
+    $nearbyCatalogDistance = [double]$catalogWanderer[0].distance
 
     $script:diagnosticStep = "${Scenario}: start native conversation with agent $($currentWanderer[0].agentIndex) at $($currentWanderer[0].distance) meters"
     $interaction = Invoke-AgentCli 'missionInteract' @('-AgentIndex', [string]$currentWanderer[0].agentIndex, '-CommandId', "$scenarioPrefix-start-dialogue")
@@ -152,6 +165,10 @@ function Invoke-CompanionHiringScenario([int]$GoldOffset, [string]$Scenario) {
         $result = [ordered]@{
             Scenario = $Scenario
             Wanderer = $wanderer[0]
+            NativeConversationActionBeforeApproach = $initialNativeConversationActionAvailable
+            CatalogDistanceBeforeApproach = $initialCatalogDistance
+            NativeConversationActionAfterApproach = $nearbyNativeConversationActionAvailable
+            CatalogDistanceAfterApproach = $nearbyCatalogDistance
             NativePrice = $nativePrice
             QuoteText = $quoteText
             GoldAtPrice = $goldBeforeChoice
@@ -177,6 +194,10 @@ function Invoke-CompanionHiringScenario([int]$GoldOffset, [string]$Scenario) {
     return [ordered]@{
         Scenario = $Scenario
         Wanderer = $wanderer[0]
+        NativeConversationActionBeforeApproach = $initialNativeConversationActionAvailable
+        CatalogDistanceBeforeApproach = $initialCatalogDistance
+        NativeConversationActionAfterApproach = $nearbyNativeConversationActionAvailable
+        CatalogDistanceAfterApproach = $nearbyCatalogDistance
         NavigationReceipt = $navigator.data
         NavigationState = $nearby.state.mission.navigation
         InteractionReceipt = $interaction.data
@@ -203,6 +224,7 @@ try {
     $fixtureHashAfter = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
     $assertions = [ordered]@{
         NativeCurrentTavernWandererHired = [bool]$positive.HireCommitted
+        NativeConversationActionRefreshesAfterApproach = [bool]$positive.NativeConversationActionAfterApproach -and [double]$positive.CatalogDistanceAfterApproach -lt 2.0
         NativePriceQuoteMatchesModel = [bool]$positive.QuoteMatchesNativePrice
         StrictGoldEqualityRejected = ([int]$strictGold.GoldAtPrice -eq [int]$strictGold.NativePrice -and -not [bool]$strictGold.AcceptOptionVisible -and [bool]$strictGold.NoPartialHire)
         SourceFixtureUnchanged = ($fixtureHashBefore -eq $fixtureHashAfter -and [bool]$positive.SourceFixtureUnchanged -and [bool]$strictGold.SourceFixtureUnchanged)
