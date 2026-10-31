@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.456'
+$contractVersion = '7.458'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -553,6 +553,7 @@ if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Prefl
     $agentHostLiveModelLoopSource -notmatch 'NativeMapReturnMenuId = \[string\]\$loopTrace\.nativeMapReturnMenuId' -or
     $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-native-observe-pursue-send-troops-aftermath-return-and-verify' -or
     $agentHostBattleSimulationLoopSource -notmatch 'mapPartyTargetsQueried' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-native-pursuit-loss-rescans-visible-targets-without-idle-wait' -or
     $agentHostBattleSimulationLoopSource -notmatch 'ShouldPauseForVisibleHostileDecision' -or
     $agentHostBattleSimulationLoopSource -notmatch 'visible-hostile-decision-paused-before-model' -or
     $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-visible-threat-pause-before-model-failed' -or

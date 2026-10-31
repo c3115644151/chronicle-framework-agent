@@ -1037,6 +1037,22 @@ internal static class AgentHostBattleSimulationLoop
             throw new AgentHostException("battle-loop-self-test-hidden-party-accepted", "The Host accepted a party absent from the current visible hostile bandit observation.");
         results.Add(new { scenario = "battle-loop-requires-current-visible-hostile-bandit-for-pursuit", passed = true });
 
+        var nativePursuitLostTarget = ParseState("MapState", menuId: null, encounterActive: false, partyTarget: null, battle: null)["state"]!.AsObject();
+        nativePursuitLostTarget["context"]!["timeControlMode"] = "StoppablePlay";
+        nativePursuitLostTarget["context"]!["isWaiting"] = true;
+        nativePursuitLostTarget["location"]!["targetPartyId"] = null;
+        nativePursuitLostTarget["party"] = new JsonObject { ["moveMode"] = "Hold", ["defaultBehavior"] = "Hold", ["isMoving"] = false };
+        nativePursuitLostTarget["nearbyParties"] = new JsonArray();
+        var lostPursuitCatalog = BuildActionCatalog(nativePursuitLostTarget, new JsonArray(), "bandit-1", false, false);
+        var lostPursuitControls = BuildControlCatalog(nativePursuitLostTarget, "bandit-1", false);
+        var lostPursuitRescan = new JsonObject { ["action"] = "mapPartyTargets", ["arguments"] = new JsonObject() };
+        if (lostPursuitCatalog.Count != 1 || ReadString(lostPursuitCatalog[0] as JsonObject, "action") != "mapPartyTargets" ||
+            lostPursuitControls.Count != 0 ||
+            !TryResolveDecision(lostPursuitRescan, lostPursuitCatalog, lostPursuitControls, nativePursuitLostTarget, new JsonArray(), "bandit-1", out var rescanAction, out _, out _, out _) ||
+            rescanAction != "mapPartyTargets")
+            throw new AgentHostException("battle-loop-self-test-native-pursuit-loss-does-not-rescan", "When Native EngageParty loses visibility and settles into waiting Hold, the Host must rescan current visible targets instead of offering an idle observeAgain control.");
+        results.Add(new { scenario = "battle-loop-native-pursuit-loss-rescans-visible-targets-without-idle-wait", passed = true });
+
         var encounter = ParseState("MapState", "encounter", true, null, null);
         encounter["state"]!["context"]!["encounteredPartyId"] = "bandit-1";
         encounter["state"]!["availableMenuOptions"] = new JsonArray(new JsonObject { ["id"] = "str_order_attack", ["enabled"] = true, ["available"] = true });

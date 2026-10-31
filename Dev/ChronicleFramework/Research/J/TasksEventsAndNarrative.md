@@ -153,7 +153,9 @@ Chronicle新增按需`mapNotifications`，仅在Campaign Map状态读取`Campaig
 
 原有关系反馈的边界见 I01/I04/I09与本J文关系段：文本/选项由Identity、Faction、Trait、关系、任务和世界状态筛选，关系不一定作为独立历史来源呈现。Chronicle通用Conversation适配目前只覆盖Map Lord会面首段：pursuit自然接触→Observe开放选项→invalid option/Continue guard→选择当前intro response→re-observe新Sentence/选项。运行收据`TestResults/20260926-214832/Temp/AgentConversationResult.json`显示问候后出现`hero_give_issue`等后续选项，本测试未选择Quest/Barter/关系分支；该垂直切片证明Protocol操作已进入ConversationManager，不代表全量对话目录或自动跑3D接近。来源：Campaign `ConversationManager/ConversationSentence/CampaignMapConversation`、Sandbox DialogFlow/ConversationBehaviors、ViewModelCollection `ConversationVM`、当前Chronicle Protocol。未知全体ConversationFlow/条件去重分母、对话状态被任务/战斗打断后的恢复、不同语言和Mods扩展的动态选项。
 
-2026-10-31 Fresh StoryMode长测的Native快照记录到MapState `ConversationManager.IsConversationInProgress=true`、Character `CharacterObject_2092`、告别句“很高兴见到你，如果以后你有什么需要可以来找我。”、当前options数组为空；BattleSimulation子循环没有Conversation操作目录，误把其余场景当作追击等待，导致模型反复ObserveAgain。`AgentProtocol.dialogueContinue`源码确认仅当当前Native ConversationManager仍在进度中且当前CurOptions为空时调用原版`ContinueConversation()`；这正适合当前无选项文本。AgentHost现仅对非遭遇MapState里的这一精确活动状态，逐句调用该原版handler并每步重读，出现可点选项则只给模型当前可点选ID；不会按UI文字猜测或推进Campaign时钟。假Native测试`TestResults/20261031-035940`Build/AgentHostPackage通过。用户已被问到这句告别文本的实际玩家操作表现，runtime内准确可见外观待其确认，新的自然Campaign仍需验收此完整路径。
+2026-10-31 Fresh StoryMode长测的Native快照记录到MapState `ConversationManager.IsConversationInProgress=true`、Character `CharacterObject_2092`、告别句“很高兴见到你，如果以后你有什么需要可以来找我。”、当前options数组为空；BattleSimulation子循环没有Conversation操作目录，误把其余场景当作追击等待，导致模型反复ObserveAgain。`AgentProtocol.dialogueContinue`源码确认仅当当前Native ConversationManager仍在进度中且当前CurOptions为空时调用原版`ContinueConversation()`；这正适合当前无选项文本。AgentHost现仅对非遭遇MapState里的这一精确活动状态，逐句调用该原版handler并每步重读，出现可点选项则只给模型当前可点选ID；不会按UI文字猜测或推进Campaign时钟。假Native测试`TestResults/20261031-035940`Build/AgentHostPackage通过。用户对具体告别句是否需要按继续/点击回复不确定；可见外观仍未知，Native Continue/runtime完整路径仍需自然Campaign验收。
+
+对2026-10-31地图追击记录中的告别句“我们就此别过吧，但记住：那凡是行于义途的人，必蒙上天的护佑。”，用户不确定实际玩家是否还需按“继续”/点击，也不确定具体视觉交互提示。此玩家输入未确认任何继续操作或界面外观；Agent依据Native `ConversationManager`当前选项为空及原版 `ContinueConversation()` handler契约处理，不依据文字内容推断可见控件。
 
 ## J09 Persuasion Dialogues：说服过程
 

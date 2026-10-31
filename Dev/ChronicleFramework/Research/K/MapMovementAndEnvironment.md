@@ -64,6 +64,10 @@ Chronicle不观测当前天气、局部雨雪参数、湿润/风、时间与区�
 
 地图目标视觉点击可自动引发会面或战斗接触，直接API发起 `StartBattleAction`会跳过MapScreen点击时间档和前置UI选项条件。实时Mission时Campaign地图时钟停止，BattleSimulation和WaitGameMenu走另外时钟规则；Chronicle现有地图移动和Encounter/Simulation研究桥以实际状态复核，不能声称覆盖每种Encounter入口。来源：MAINLINE机制契约、F/G唯一研究文档、`MapScreen`与`PlayerEncounter`；特殊兵种/水陆模式输入未知。
 
+### 2026-10-31 Native EngageParty 丢失目标后的等待
+
+`TestResults/20261031-150443/Temp/AgentEngageVisibilityResult.json`以Harness Native fixture验证：在明确暂停 Campaign 后用原版 Native fixture 建立一支距离6、5人的 hostile Looters Party，同时fixture将 MainParty 1→101；随后调用产品 `pursue`，由原版点击时间策略进入 `StoppablePlay`。两个有效地图观察中目标仍是可见Marker/附近Party、主队 `DefaultBehavior=EngageParty`。下一观察目标同时退出Marker和Nearby Party集合，原版状态变为 `targetPartyId=null`、`MoveMode=Hold`、`DefaultBehavior=Hold`、`isWaiting=true`；虽时间模式字段仍为 `StoppablePlay`，目标丢失后8.43秒 CampaignDay 未变化，三张引擎帧中稳定停留在同一地图状态。源fixture hash未变、Host/游戏进程已关闭。该测试证实的是“测试fixture里一次原版追近目标消失→Native Hold/有效停表”的状态链，不是自然Bandit逃跑率、地形截停能力或EYC声望进度。
+
 ## K07 Hideout：藏身处发现、接近与清剿
 
 Hideout是地图Settlement/Hideout实体与相关Bandit Party、场景Mission、Wait/夜袭选项组成的活动，不等同于普通地图落单Party。玩家需先在地图情报中发现相应Hideout，再接近/进入其原生Encounter/menu；具体是否可以谈话、等夜间潜入、直接突击、坐镇指挥或派兵结果取决于敌方数量/时间/玩家状态。 `HideoutCampaignBehavior`与`PlayerEncounter`把此链路分发到Mission、BattleSimulation、等待和Loot/伤亡结算。
