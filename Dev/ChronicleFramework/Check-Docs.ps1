@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.478'
+$contractVersion = '7.480'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -73,6 +73,7 @@ $agentOpenAiProviderTestSource = Get-Content (Join-Path $harnessRoot 'Test-Agent
 $agentEvaluationLiveModelSupplySource = Get-Content (Join-Path $harnessRoot 'Test-AgentEvaluationLiveModelSupply.ps1') -Raw -Encoding UTF8
 $agentHostCampaignLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostCampaignLoop.cs') -Raw -Encoding UTF8
 $agentHostNativeMapMovementMonitorSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostNativeMapMovementMonitor.cs') -Raw -Encoding UTF8
+$agentHostNativeMapMovementProbeSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostNativeMapMovementMonitorProbe.ps1') -Raw -Encoding UTF8
 $agentHostSupplyLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostSupplyLoop.cs') -Raw -Encoding UTF8
 $agentHostDecisionCycleSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostDecisionCycle.cs') -Raw -Encoding UTF8
 $agentHostEstablishClanPlannerSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostEstablishYourClanGoalLoop.cs') -Raw -Encoding UTF8
@@ -1619,6 +1620,7 @@ if ($agentHostEstablishClanAutonomySource -notmatch 'IsFreeMapForObjectiveReplan
     $agentHostEstablishClanAutonomySource -notmatch 'town-menu-is-free-map-for-objective-replan-but-hostile-encounter-is-not') { throw 'Parent EYC replan safety must use the shared Native location-menu classifier so a Town menu is not mistaken for a hostile Party encounter, while true encounters remain blocked.' }
 if ($agentHostCompanionLoopSource -notmatch 'SafeTownDecisionWindowSize' -or $agentHostCompanionLoopSource -notmatch 'BuildSafeTownDecisionWindow' -or $agentHostCompanionLoopSource -notmatch 'additionalSafeTownTargetsAvailable' -or $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-town-choice-window-pages-without-world-target-cap' -or $agentHostCompanionLoopSource -notmatch 'while \(decisions < maxDecisions\)' -or $agentHostCompanionLoopSource -notmatch 'do not spend a model decision or issue another move/time command' -or $agentHostDecisionCycleSource -notmatch 'nearest unvisited decision window') { throw 'Companion map travel must use a bounded nearest-Town decision window that preserves access to the remaining world, and must observe active Native movement without repeated model calls or hidden clock actions.' }
 if ($agentHostNativeMapMovementMonitorSource -notmatch 'MapPartyTargets' -or $agentHostNativeMapMovementMonitorSource -notmatch 'PauseForVisibleHostileDecisionAsync' -or $agentHostCampaignLoopSource -notmatch 'AgentHostNativeMapMovementMonitor\.WaitAsync' -or $agentHostEstablishClanAutonomySource -notmatch 'ShouldRouteToBattleSimulation\(failedState\.RootElement, childFailureCode\)' -or $agentHostEstablishClanAutonomySource -notmatch 'ShouldRouteToBattleSimulation\(afterRefresh\.RootElement, refreshFailureCode\)' -or $agentHostEstablishClanAutonomySource -notmatch 'failureCode == AgentHostNativeMapMovementMonitor\.FailureCode') { throw 'EYC travel must observe current Native visible parties, record any separate Native Pause, require the exact interruption cause and route only a fresh paused Bandit map state into the existing BattleSimulation loop.' }
+if ($agentHostProgramSource -notmatch '--native-map-movement-monitor-probe' -or $agentHostProgramSource -notmatch 'agent-host-native-map-movement-monitor-probe' -or $agentHostProgramSource -notmatch 'AgentHostNativeMapMovementMonitor\.WaitAsync' -or $agentHostNativeMapMovementProbeSource -notmatch 'ChronicleW7P-manual-' -or $agentHostNativeMapMovementProbeSource -notmatch 'modelCalls' -or $harnessScript -notmatch 'AgentHostNativeMapMovementMonitorProbe' -or $harnessScript -notmatch 'AgentHostProbeBuild') { throw 'The live movement-monitor diagnostic must run the production Host monitor on an active disposable EYC map session, make no model call, and remain available as a dedicated Harness phase.' }
 if (-not (Test-Path (Join-Path $harnessRoot 'AgentHost\AgentHostCampaignStateFacts.cs')) -or
     $agentHostCampaignStateFactsSource -notmatch 'IsNativeLocationMenu' -or
     $agentHostCampaignStateFactsSource -notmatch 'IsActiveEncounter' -or

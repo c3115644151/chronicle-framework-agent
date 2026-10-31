@@ -31,12 +31,15 @@ internal static class AgentHostEstablishYourClanGoalLoop
         var plannerSystemPrompt = AgentHostDecisionCycle.EstablishYourClanGoalPlannerPrompt;
         if (!plannerSystemPrompt.Contains("str_order_attack", StringComparison.Ordinal) ||
             !plannerSystemPrompt.Contains("real-time Mission", StringComparison.Ordinal) ||
-            !plannerSystemPrompt.Contains("partySize or companions", StringComparison.Ordinal) ||
+            !plannerSystemPrompt.Contains("when companions remain unmet", StringComparison.Ordinal) ||
             !plannerSystemPrompt.Contains("actual Native action availability", StringComparison.Ordinal) ||
             !plannerSystemPrompt.Contains("nativeProgressionContext.partySizeLimit", StringComparison.Ordinal) ||
             !plannerSystemPrompt.Contains("Tier1", StringComparison.Ordinal) ||
-            !plannerSystemPrompt.Contains("Over Limit confirmation", StringComparison.Ordinal))
-            throw new AgentHostException("establish-clan-planner-native-renown-prerequisite-prompt-missing", "The read-only objective planner must know that Renown uses only Native BattleSimulation, not a real-time attack Mission, and must reason about Journal PartySize versus the observed native limit, over-limit RecruitmentVM confirmation and Tier1 capacity.");
+            !plannerSystemPrompt.Contains("confirmPartySizeWarning=1", StringComparison.Ordinal) ||
+            !plannerSystemPrompt.Contains("prefer the Renown objective before temporary over-limit recruitment", StringComparison.Ordinal) ||
+            !plannerSystemPrompt.Contains("Gold objective tracks current carried balance, not cumulative earnings", StringComparison.Ordinal) ||
+            !plannerSystemPrompt.Contains("Prefer completing Gold after other feasible objectives", StringComparison.Ordinal))
+            throw new AgentHostException("establish-clan-planner-native-renown-prerequisite-prompt-missing", "The read-only objective planner must know the Native Renown route, the current party limit/Tier1 over-limit attrition dependency and the volatile current-balance Gold objective.");
 
         var snapshot = new JsonObject
         {

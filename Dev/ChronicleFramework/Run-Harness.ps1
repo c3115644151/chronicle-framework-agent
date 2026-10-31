@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'ReleasePackage', 'Campaign', 'CampaignActorThinkTrace', 'FreshCampaign', 'FreshStoryModeSetup', 'FreshStoryModeModelEvaluation', 'PersistentEycCampaign', 'FreshStoryModeNativeMenuLeaveEvaluation', 'FreshStoryModeNativeInquiryResponseEvaluation', 'FreshCampaignProgression', 'FreshCampaignBaselineMatrix', 'FreshCampaignLiveModelEvaluation', 'FreshCampaignSupplyBaseline', 'FreshCampaignRecruitmentFallback', 'Protocol', 'AgentHostProvider', 'AgentHostPackage', 'AgentHostSupplyEvaluation', 'AgentHostCampaignLoopEvaluation', 'AgentHostVillageToolsQuestEvaluation', 'AgentHostEstablishClanGoalPlannerEvaluation', 'AgentHostEstablishClanAutonomyEvaluation', 'AgentHostCaptivityRecoveryEvaluation', 'AgentHostEstablishClanGoldSaleEvaluation', 'AgentHostBattleSimulationEvaluation', 'AgentHostBattleAndCaptivityEvaluation', 'AgentHostLifecycleEvaluation', 'AgentHostLifecycleCompletionEvaluation', 'AgentLoop', 'LiveModel', 'LiveModelArrival', 'LiveModelRecruitment', 'LiveModelSafePassageRecruitment', 'LiveModelRecruitmentEvaluation', 'LiveModelSupplyEvaluation', 'CheckpointPersistence', 'LiveModelResume', 'LiveModelRuntimeResume', 'LiveModelActionRecovery', 'CheckpointValidation', 'RecruitmentBaseline', 'MultiDaySupplyBaseline', 'TimeControlLoop', 'BattleFixture', 'PostBattle', 'Observation', 'CaptivityObservation', 'CaptivityOutcome', 'EncounterSurrender', 'EncounterEscape', 'JoinEncounterDefenders', 'JoinEncounterEligibility', 'JoinEncounterAbandonArmy', 'MovingArmyJoin', 'JoinSiegeEvent', 'MapNotifications', 'MapIncidentInputGuard', 'QuickInformation', 'SceneNotification', 'MissionLeave', 'VillageToolsDelivery', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyQuestMarkers', 'MapPartyQuestAcceptance', 'MapEscapeMenu', 'MapInquiry', 'AlleyLeaderInquiry', 'AlleyRosterManagement', 'AlleyAbandonment', 'AlleyEntryMenu', 'MissionSceneNavigation', 'AlleyVolunteerBranches', 'AlleyAttackYield', 'AlleyAttackFightMission', 'PersuasionDetails', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'BarterFightRoute', 'MissionInteraction', 'ArenaMasterInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EngageVisibility', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuickTalk', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'SettlementOverlayQuickTalkIssueGateProbe', 'VisualCapture', 'All')]
+    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'ReleasePackage', 'Campaign', 'CampaignActorThinkTrace', 'FreshCampaign', 'FreshStoryModeSetup', 'FreshStoryModeModelEvaluation', 'PersistentEycCampaign', 'FreshStoryModeNativeMenuLeaveEvaluation', 'FreshStoryModeNativeInquiryResponseEvaluation', 'FreshCampaignProgression', 'FreshCampaignBaselineMatrix', 'FreshCampaignLiveModelEvaluation', 'FreshCampaignSupplyBaseline', 'FreshCampaignRecruitmentFallback', 'Protocol', 'AgentHostProvider', 'AgentHostPackage', 'AgentHostSupplyEvaluation', 'AgentHostCampaignLoopEvaluation', 'AgentHostNativeMapMovementMonitorProbe', 'AgentHostVillageToolsQuestEvaluation', 'AgentHostEstablishClanGoalPlannerEvaluation', 'AgentHostEstablishClanAutonomyEvaluation', 'AgentHostCaptivityRecoveryEvaluation', 'AgentHostEstablishClanGoldSaleEvaluation', 'AgentHostBattleSimulationEvaluation', 'AgentHostBattleAndCaptivityEvaluation', 'AgentHostLifecycleEvaluation', 'AgentHostLifecycleCompletionEvaluation', 'AgentLoop', 'LiveModel', 'LiveModelArrival', 'LiveModelRecruitment', 'LiveModelSafePassageRecruitment', 'LiveModelRecruitmentEvaluation', 'LiveModelSupplyEvaluation', 'CheckpointPersistence', 'LiveModelResume', 'LiveModelRuntimeResume', 'LiveModelActionRecovery', 'CheckpointValidation', 'RecruitmentBaseline', 'MultiDaySupplyBaseline', 'TimeControlLoop', 'BattleFixture', 'PostBattle', 'Observation', 'CaptivityObservation', 'CaptivityOutcome', 'EncounterSurrender', 'EncounterEscape', 'JoinEncounterDefenders', 'JoinEncounterEligibility', 'JoinEncounterAbandonArmy', 'MovingArmyJoin', 'JoinSiegeEvent', 'MapNotifications', 'MapIncidentInputGuard', 'QuickInformation', 'SceneNotification', 'MissionLeave', 'VillageToolsDelivery', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyQuestMarkers', 'MapPartyQuestAcceptance', 'MapEscapeMenu', 'MapInquiry', 'AlleyLeaderInquiry', 'AlleyRosterManagement', 'AlleyAbandonment', 'AlleyEntryMenu', 'MissionSceneNavigation', 'AlleyVolunteerBranches', 'AlleyAttackYield', 'AlleyAttackFightMission', 'PersuasionDetails', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'BarterFightRoute', 'MissionInteraction', 'ArenaMasterInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EngageVisibility', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuickTalk', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'SettlementOverlayQuickTalkIssueGateProbe', 'VisualCapture', 'All')]
     [string]$Phase = 'All',
     [ValidateSet('deepseek-flash','gpt-oss-20b','openai-gpt-oss-20b','nvidiallama-3.2-11b-vision','poolside-laguna-s-2.1','free-router','gemini-2.5-flash','mistral-nemo','mistral-small-3.2-24b','qwen3.6-27b','auto:reliable')]
     [string]$FreshStoryModeModel = 'deepseek-flash',
@@ -20,7 +20,8 @@ param(
     [ValidateRange(1,10)][int]$RecruitmentFallbackMaxAttempts = 10,
     [string]$BattleSimulationSourceSaveName = 'AgentBridgeLifecycle',
     [string]$StoryModePlannerSourceSaveName = 'save002',
-    [ValidateRange(60,7200)][int]$PersistentEycHostMaxElapsedSeconds = 7200
+    [ValidateRange(60,7200)][int]$PersistentEycHostMaxElapsedSeconds = 7200,
+    [ValidateRange(1,10)][int]$NativeMapMovementProbeWaitSeconds = 8
 )
 
 $ErrorActionPreference = 'Stop'
@@ -28,7 +29,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.478'
+$HarnessContractVersion = '7.480'
 $effectiveSmokeTimeoutSeconds = if ($Phase -in @('FreshStoryModeModelEvaluation','PersistentEycCampaign','FreshStoryModeNativeInquiryResponseEvaluation','AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostEstablishClanAutonomyEvaluation','AgentHostCaptivityRecoveryEvaluation','AgentHostEstablishClanGoldSaleEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max($SmokeTimeoutSeconds, 240) } else { $SmokeTimeoutSeconds }
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
@@ -54,6 +55,7 @@ $gameExe = Join-Path $gameRoot 'bin\Win64_Shipping_Client\Bannerlord.exe'
 $projectPath = Join-Path $harnessRoot 'ChronicleFramework.csproj'
 $agentHostProjectPath = Join-Path $harnessRoot 'AgentHost\ChronicleAgentHost.csproj'
 $agentHostDllPath = Join-Path $harnessRoot 'AgentHost\bin\Release\net8.0\ChronicleAgentHost.dll'
+$agentHostMovementProbeScript = Join-Path $harnessRoot 'Test-AgentHostNativeMapMovementMonitorProbe.ps1'
 $apiScript = Join-Path (Split-Path -Parent $harnessRoot) 'ApiProbe\Inspect-CampaignApi.ps1'
 $smokeScript = Join-Path $harnessRoot 'Test-Module.ps1'
 $campaignScript = Join-Path $harnessRoot 'Test-Campaign.ps1'
@@ -262,6 +264,7 @@ $requestedStages = switch ($Phase) {
     'Protocol' { @('Preflight', 'Build', 'Protocol') }
     'AgentHostProvider' { @('Preflight', 'Build', 'AgentHostProvider') }
     'AgentHostPackage' { @('Preflight', 'Build', 'AgentHostPackage') }
+    'AgentHostNativeMapMovementMonitorProbe' { @('AgentHostProbeBuild', 'NativeMapMovementMonitorProbe') }
     'AgentHostSupplyEvaluation' { @('Preflight', 'Build', 'AgentHostSupplyEvaluation') }
     'AgentHostCampaignLoopEvaluation' { @('Preflight', 'Build', 'AgentHostCampaignLoopEvaluation') }
     'AgentHostVillageToolsQuestEvaluation' { @('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostVillageToolsQuestEvaluation') }
@@ -507,6 +510,20 @@ foreach ($stage in $requestedStages) {
                 }
                 if ($agentHostBuildExitCode -ne 0) { throw "Local Agent Host build failed with exit code $agentHostBuildExitCode.`n$agentHostBuildOutput" }
                 [ordered]@{ gameModBuild = $buildOutput; localAgentHostBuild = $agentHostBuildOutput; nugetAuditFallbackUsed = $agentHostNuGetAuditFallbackUsed } | ConvertTo-Json -Depth 4
+            }
+        }
+        'AgentHostProbeBuild' {
+            Invoke-Stage -Name 'AgentHostProbeBuild' -Action {
+                $probeBuildOutput = & dotnet build $agentHostProjectPath --configuration Release --no-restore 2>&1 | Out-String
+                if ($LASTEXITCODE -ne 0) { throw "Agent Host-only probe build failed with exit code $LASTEXITCODE.`n$probeBuildOutput" }
+                $probeBuildOutput
+            }
+        }
+        'NativeMapMovementMonitorProbe' {
+            Invoke-Stage -Name 'NativeMapMovementMonitorProbe' -Action {
+                $probeOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostMovementProbeScript -WaitSeconds $NativeMapMovementProbeWaitSeconds 2>&1 | Out-String
+                if ($LASTEXITCODE -ne 0) { throw "Live Native map-movement monitor probe failed with exit code $LASTEXITCODE.`n$probeOutput" }
+                $probeOutput
             }
         }
         'Smoke' {

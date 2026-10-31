@@ -16,6 +16,13 @@ internal static class Program
     {
         try
         {
+            if (args.Length > 0 && string.Equals(args[0], "--native-map-movement-monitor-probe", StringComparison.Ordinal))
+            {
+                if (args.Length != 2 || !int.TryParse(args[1], out var movementMonitorWaitSeconds) || movementMonitorWaitSeconds is < 1 or > 10)
+                    throw new AgentHostException("native-map-movement-probe-arguments-invalid", "The Harness-only Native map movement probe requires one wait interval from 1 to 10 seconds.");
+                return await RunNativeMapMovementMonitorProbeAsync(movementMonitorWaitSeconds);
+            }
+
             if (args.Length == 1 && string.Equals(args[0], "--parent-process-self-test-probe", StringComparison.Ordinal))
             {
                 await Task.Delay(TimeSpan.FromSeconds(1));
@@ -155,6 +162,75 @@ internal static class Program
             }, OutputJsonOptions));
             return 3;
         }
+    }
+
+    private static async Task<int> RunNativeMapMovementMonitorProbeAsync(int waitSeconds)
+    {
+        var harnessTemp = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+        if (Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") != "agent-host-native-map-movement-monitor-probe" ||
+            string.IsNullOrWhiteSpace(harnessTemp) || !Directory.Exists(harnessTemp))
+            throw new AgentHostException("native-map-movement-probe-not-authorized", "The live Native movement probe is restricted to its explicit disposable Harness phase and temp directory.");
+
+        var protocolRoot = NativeMailboxClient.GetDefaultProtocolRoot();
+        var client = new NativeMailboxClient(protocolRoot, TimeSpan.FromSeconds(15));
+        using var initialResponse = await client.ReadStateAsync(CancellationToken.None);
+        var initial = CloneObject(initialResponse.RootElement);
+        var state = initial["state"] as JsonObject;
+        var context = state?["context"] as JsonObject;
+        var location = state?["location"] as JsonObject;
+        var party = state?["party"] as JsonObject;
+        var targetSettlementId = NodeString(location, "targetSettlementId");
+        var currentSettlementId = NodeString(location, "currentSettlementId");
+        var timeControlMode = ReadString(initialResponse.RootElement, "timeControlMode") ?? NodeString(context, "timeControlMode");
+        var activeEycQuest = AgentHostNativeMapMovementMonitor.HasActiveEycQuest(initial);
+        var validMovementPrecondition = ReadString(initialResponse.RootElement, "status") == "completed" && state is not null &&
+            NodeString(context, "gameState") == "MapState" && activeEycQuest &&
+            !string.IsNullOrWhiteSpace(targetSettlementId) && !string.Equals(targetSettlementId, currentSettlementId, StringComparison.Ordinal) &&
+            timeControlMode is not null and not "Stop" && NodeBoolean(party, "isMoving") &&
+            string.IsNullOrWhiteSpace(NodeString(context, "menuId")) && !NodeBoolean(context, "escapeMenuOpen") &&
+            !NodeBoolean(context, "inquiryOpen") && !NodeBoolean(context, "encounterActive") &&
+            !NodeBoolean(context, "isWaitMenu") && !NodeBoolean(context, "isWaitActive");
+        if (!validMovementPrecondition)
+            throw new AgentHostException("native-map-movement-probe-precondition-failed", "The disposable live probe requires a free moving EYC Map with live time; status=" +
+                ReadString(initialResponse.RootElement, "status") + "; gameState=" + NodeString(context, "gameState") + "; menuId=" + NodeString(context, "menuId") +
+                "; timeControlMode=" + timeControlMode + "; currentSettlementId=" + currentSettlementId + "; targetSettlementId=" + targetSettlementId +
+                "; isMoving=" + NodeBoolean(party, "isMoving") + "; encounter=" + NodeBoolean(context, "encounterActive") + "; activeEycQuest=" + activeEycQuest + ".");
+
+        double? ReadCampaignDay(JsonObject native) => native["campaignDay"] is JsonValue day && day.TryGetValue<double>(out var value) ? value : null;
+        var movement = await AgentHostNativeMapMovementMonitor.WaitAsync(
+            client,
+            client,
+            initial,
+            targetSettlementId,
+            waitSeconds,
+            monitorVisibleBandits: true,
+            CancellationToken.None);
+        var result = new JsonObject
+        {
+            ["passed"] = movement.MapPartyTargetPollCount > 0,
+            ["status"] = "completed",
+            ["probe"] = "native-map-movement-monitor",
+            ["waitSeconds"] = waitSeconds,
+            ["targetSettlementId"] = targetSettlementId,
+            ["campaignDayBefore"] = ReadCampaignDay(initial),
+            ["campaignDayAfter"] = ReadCampaignDay(movement.NativeReceipt),
+            ["timeControlModeBefore"] = timeControlMode,
+            ["timeControlModeAfter"] = NodeString(movement.NativeReceipt, "timeControlMode"),
+            ["mapPartyTargetPollCount"] = movement.MapPartyTargetPollCount,
+            ["visibleHostileBanditTargets"] = movement.VisibleHostileBanditTargets.DeepClone(),
+            ["nativePauseReceipt"] = movement.PauseReceipt?.DeepClone(),
+            ["interruptedByVisibleHostileBandit"] = movement.InterruptedByVisibleHostileBandit,
+            ["freshPausedMapStillShowsBandit"] = movement.PauseReceipt is not null && AgentHostNativeMapMovementMonitor.IsPausedVisibleBanditMove(movement.NativeReceipt),
+            ["finalNativeState"] = AgentHostHarnessProgressTrace.BuildNativeStateSummary(movement.NativeReceipt),
+            ["modelCalls"] = 0
+        };
+        Console.Out.WriteLine(JsonSerializer.Serialize(result, OutputJsonOptions));
+        return result["passed"]?.GetValue<bool>() == true ? 0 : 1;
+
+        static string? NodeString(JsonObject? value, string property) =>
+            value?[property] is JsonValue node && node.TryGetValue<string>(out var text) ? text : null;
+        static bool NodeBoolean(JsonObject? value, string property) =>
+            value?[property] is JsonValue node && node.TryGetValue<bool>(out var flag) && flag;
     }
 
     internal static async Task<bool> WaitForStopSignalAsync(TextReader input, CancellationToken cancellationToken)
