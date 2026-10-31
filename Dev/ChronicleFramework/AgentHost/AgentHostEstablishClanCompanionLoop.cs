@@ -239,10 +239,61 @@ internal static class AgentHostEstablishClanCompanionLoop
             !actionableOptions.OfType<JsonObject>().Any(action => ReadString(action, "action") == "missionLeave"))
             throw new AgentHostException("establish-clan-companion-native-interaction-route-failed", "Once Native MissionConversationLogic reports a current action and the local Agent is interactable, use Native Agent interaction while retaining the Native exit.");
 
+        var noisyNearbyAgents = new JsonArray(Enumerable.Range(0, 40).Select(index => (JsonNode?)new JsonObject
+        {
+            ["agentIndex"] = index,
+            ["heroId"] = "scene-agent-" + index.ToString(CultureInfo.InvariantCulture),
+            ["name"] = "Observed Tavern character " + index.ToString(CultureInfo.InvariantCulture),
+            ["occupation"] = index == 0 ? "Wanderer" : "Other",
+            ["isNotable"] = false,
+            ["isEnemy"] = false,
+            ["isInteractable"] = index == 0,
+            ["distance"] = 1.2 + index
+        }).ToArray());
+        var noisyTavernState = new JsonObject
+        {
+            ["context"] = new JsonObject { ["gameState"] = "MissionState", ["menuId"] = null, ["encounterActive"] = true },
+            ["location"] = new JsonObject { ["currentSettlementId"] = "town-a" },
+            ["mission"] = new JsonObject
+            {
+                ["active"] = true,
+                ["sceneName"] = "empire_house_c_tavern_a",
+                ["navigation"] = new JsonObject { ["active"] = false },
+                ["leave"] = new JsonObject { ["active"] = false },
+                ["nearbySceneAgents"] = noisyNearbyAgents.DeepClone()
+            }
+        };
+        var noisySceneReceipt = new JsonObject
+        {
+            ["data"] = new JsonObject
+            {
+                ["scope"] = "active-location-scene",
+                ["activeAgentCount"] = 40,
+                ["agents"] = new JsonArray(new JsonObject
+                {
+                    ["agentIndex"] = 0, ["heroId"] = "scene-agent-0", ["name"] = "Observed Tavern character 0",
+                    ["occupation"] = "Wanderer", ["isNotable"] = false, ["isEnemy"] = false,
+                    ["nativeConversationActionAvailable"] = true, ["distance"] = 1.2
+                })
+            }
+        };
+        var projectedCompanionObservation = BuildObservation(noisyTavernState, new JsonArray(), new JsonObject(), null,
+            noisySceneReceipt, "scene-agent-0", "scene-agent-0", 0);
+        var originalMissionBytes = System.Text.Encoding.UTF8.GetByteCount(noisyTavernState["mission"]!.ToJsonString());
+        var projectedMission = projectedCompanionObservation["state"]?["mission"] as JsonObject;
+        var projectedMissionBytes = projectedMission is null ? int.MaxValue : System.Text.Encoding.UTF8.GetByteCount(projectedMission.ToJsonString());
+        var projectedCandidates = projectedCompanionObservation["currentSceneWandererCandidates"] as JsonArray;
+        var projectedNearby = projectedCompanionObservation["nearbyInteractableWanderers"] as JsonArray;
+        if (projectedMission is null || projectedMission.ContainsKey("nearbySceneAgents") ||
+            ReadString(projectedMission, "sceneName") != "empire_house_c_tavern_a" ||
+            projectedCandidates?.Count != 1 || ReadString(projectedCandidates[0] as JsonObject, "heroId") != "scene-agent-0" ||
+            projectedNearby?.Count != 1 || originalMissionBytes - projectedMissionBytes < 2000)
+            throw new AgentHostException("establish-clan-companion-observation-projection-failed", "The model payload must omit the duplicated raw Tavern agent roster while preserving the Native scene identity and current Wanderer candidate summaries; byte reduction must be measurable. originalMissionBytes=" + originalMissionBytes + "; projectedMissionBytes=" + projectedMissionBytes + "; candidates=" + projectedCandidates?.Count + "; nearby=" + projectedNearby?.Count);
         return [
             new { scenario = "companion-navigation-stall-policy-excludes-only-after-two-no-progress-native-approaches", passed = true },
             new { scenario = "establish-clan-companion-targets-only-current-safe-unvisited-town-and-friendly-wanderer", passed = true },
             new { scenario = "establish-clan-companion-town-choice-window-pages-without-world-target-cap", passed = true, totalWorldTargets = 21, choiceWindow = SafeTownDecisionWindowSize },
+            new { scenario = "establish-clan-companion-model-observation-compacts-raw-mission-agent-roster-and-preserves-current-wanderer-candidates", originalMissionBytes, projectedMissionBytes, missionBytesSaved = originalMissionBytes - projectedMissionBytes, passed = true },
             new { scenario = "establish-clan-companion-dialogue-catalog-excludes-unrelated-native-options", passed = true },
             new { scenario = "establish-clan-companion-nearby-target-uses-native-interact", passed = true },
             new { scenario = "establish-clan-companion-rejects-unlisted-navigation-duration-with-current-catalog-values", passed = true },
@@ -1120,6 +1171,9 @@ internal static class AgentHostEstablishClanCompanionLoop
     private static JsonObject BuildObservation(JsonObject state, JsonArray journal, JsonObject objective, JsonArray? safeTowns,
         JsonObject? sceneAgentsReceipt, string? selectedHeroId, string? interactTargetHeroId, int traceCount)
     {
+        var projectedState = state.DeepClone() as JsonObject ?? new JsonObject();
+        if (projectedState["mission"] is JsonObject projectedMission)
+            projectedMission.Remove("nearbySceneAgents");
         var sceneCandidates = FilterWandererCandidates(sceneAgentsReceipt?["data"]?["agents"] as JsonArray, new HashSet<string>(StringComparer.Ordinal));
         var compactCandidates = new JsonArray(sceneCandidates.OfType<JsonObject>().Select(candidate => (JsonNode?)new JsonObject
         {
@@ -1143,7 +1197,7 @@ internal static class AgentHostEstablishClanCompanionLoop
         return new JsonObject
         {
             ["scope"] = "native-storymode-companion-hiring",
-            ["state"] = state.DeepClone(),
+            ["state"] = projectedState,
             ["journalObjectiveSnapshot"] = journal.DeepClone(),
             ["objectiveSnapshot"] = objective.DeepClone(),
             ["visibleSafeTownTargets"] = BuildSafeTownDecisionWindow(safeTowns),

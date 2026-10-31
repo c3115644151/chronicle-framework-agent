@@ -271,7 +271,8 @@ internal static class AgentHostDecisionCycle
         JsonObject request,
         CancellationToken cancellationToken)
     {
-        var prompt = EstablishClanCompanionSystemPrompt;
+        var prompt = EstablishClanCompanionSystemPrompt +
+            " OBSERVATION PROJECTION: This hiring subgoal omits the bulky raw state.mission.nearbySceneAgents rows; use the complete currentSceneWandererCandidates and nearbyInteractableWanderers summaries instead. These summaries remain derived from the same current Native Tavern observation, while Host action validation still uses the full Native state.";
         var feedback = request["decisionFeedback"] as JsonObject;
         if (ReadString(feedback, "kind") == "decision-rejected-before-native")
             prompt += " RECOVERY DIRECTIVE: The prior response was rejected before any Native action. Follow this exact next step using only the current catalog; do not repeat the rejected response. " +
