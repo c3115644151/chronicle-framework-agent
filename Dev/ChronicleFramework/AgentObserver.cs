@@ -56,7 +56,7 @@ internal static class ChronicleAgentObserver
 
         var json = new StringBuilder(4096);
         json.Append('{');
-        json.Append("\"schemaVersion\":33");
+        json.Append("\"schemaVersion\":34");
         json.Append(",\"campaignDay\":").Append(Number(CampaignTime.Now.ToDays));
         json.Append(",\"identity\":{");
         Property(json, "heroId", hero.StringId); Property(json, "heroName", hero.Name?.ToString(), true);
@@ -164,6 +164,7 @@ internal static class ChronicleAgentObserver
         json.Append(",\"isWaiting\":").Append(Bool(campaign.IsMainPartyWaiting));
         json.Append(",\"captivity\":");
         AppendPlayerCaptivityContext(json, campaign, menu?.StringId);
+        json.Append(",\"encounterEscape\":").Append(BuildEncounterEscapeContextJson(campaign, party, menu));
         var battleSimulation = PlayerEncounter.CurrentBattleSimulation;
         json.Append(",\"battleSimulation\":");
         if (battleSimulation == null)
@@ -1245,6 +1246,32 @@ internal static class ChronicleAgentObserver
         if (ransomOfferVisible) json.Append(playerCaptivity.CurrentRansomAmount);
         else json.Append("null");
         json.Append('}');
+    }
+
+    private static string BuildEncounterEscapeContextJson(Campaign campaign, MobileParty party, GameMenu menu)
+    {
+        if (menu == null || !PlayerEncounter.IsActive || PlayerEncounter.Current == null || PlayerEncounter.Battle == null ||
+            !string.Equals(menu?.StringId, "try_to_get_away", StringComparison.Ordinal))
+            return "null";
+
+        var sacrificeModel = campaign.Models.TroopSacrificeModel;
+        var canTryToGetAway = sacrificeModel.CanPlayerGetAwayFromEncounter(out var disabledReason);
+        var troopLoss = sacrificeModel.GetNumberOfTroopsSacrificedForTryingToGetAway(
+            PlayerEncounter.Current.PlayerSide, PlayerEncounter.Battle);
+        var healthyNonHeroes = Math.Max(0, party.Party.NumberOfHealthyMembers - party.MemberRoster.TotalHeroes);
+        var json = new StringBuilder(512);
+        json.Append('{').Append("\"schemaVersion\":1");
+        Property(json, "menuId", menu.StringId, true);
+        Property(json, "menuText", menu.GetText()?.ToString(), true);
+        json.Append(",\"canTryToGetAway\":").Append(Bool(canTryToGetAway));
+        json.Append(",\"nativeTroopsSacrificedForTry\":").Append(troopLoss);
+        Property(json, "nativeTryDisabledReason", disabledReason?.ToString(), true);
+        json.Append(",\"mainPartyMembers\":").Append(party.MemberRoster.TotalManCount);
+        json.Append(",\"healthyNonHeroMembers\":").Append(healthyNonHeroes);
+        json.Append(",\"gold\":").Append(Hero.MainHero?.Gold ?? 0);
+        json.Append(",\"grain\":").Append(party.ItemRoster.GetItemNumber(DefaultItems.Grain));
+        json.Append(",\"itemCount\":").Append(TotalItemCount(party.ItemRoster));
+        return json.Append('}').ToString();
     }
 
     internal static string GetPartyTypeForObservation(MobileParty party) => PartyType(party);

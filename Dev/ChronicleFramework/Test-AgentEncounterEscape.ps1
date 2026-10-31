@@ -141,6 +141,14 @@ function Invoke-NativeEscapeTrial([ValidateSet('Reject','Accept')][string]$Choic
         if ($warning.state.context.menuId -ne 'try_to_get_away')
             { throw "$Choice trial did not enter the Native Try-to-get-away warning menu; got '$($warning.state.context.menuId)'." }
         $warningDiag = Invoke-AgentCli 'harnessTryGetAwayDiagnostics' @('-CommandId', "$prefix-$suffix-warning-diagnostics") 30
+        $nativeEscapeObservation = $warning.state.context.encounterEscape
+        if (-not $nativeEscapeObservation -or
+            -not [bool]$nativeEscapeObservation.canTryToGetAway -or
+            [string]$nativeEscapeObservation.menuText -ne [string]$warningDiag.data.menuText -or
+            [int]$nativeEscapeObservation.nativeTroopsSacrificedForTry -ne [int]$warningDiag.data.nativeTroopsSacrificedForTry -or
+            [int]$nativeEscapeObservation.healthyNonHeroMembers -ne [int]$warningDiag.data.healthyNonHeroCount) {
+            throw "$Choice trial did not expose the exact current Native Try-to-get-away warning and sacrifice estimate in the normal Agent observation."
+        }
         Capture-EngineFrame $warningFrame "$suffix-warning-frame"
         $warningOptions = @($warning.state.availableMenuOptions | Where-Object { $_.available -and $_.enabled })
         $acceptOption = @($warningOptions | Where-Object { $_.id -eq 'try_to_get_away_accept' })
@@ -166,7 +174,8 @@ function Invoke-NativeEscapeTrial([ValidateSet('Reject','Accept')][string]$Choic
                 Choice = $Choice; ProcessId = $start.session.processId; PartyFixture = $seed.data; BanditFixture = $banditFixture.data
                 PlayerApproach = $approach; BanditFightDialogueChoice = $fightChoice; EncounterFrame = $encounterFrame
                 EncounterDiagnostic = $encounterDiag.data; WarningDiagnostic = $warningDiag.data
-                CurrentWarningText = $warningDiag.data.menuText; VisibleOptions = @($warningOptions | ForEach-Object { [ordered]@{ id = $_.id; text = $_.text } })
+                CurrentWarningText = $warningDiag.data.menuText; NativeEscapeObservation = $nativeEscapeObservation
+                VisibleOptions = @($warningOptions | ForEach-Object { [ordered]@{ id = $_.id; text = $_.text } })
                 NativeDecision = $rejectReceipt; After = $after.state; AfterDiagnostic = $afterDiag.data
                 NoWorldStateChangesOnReject = $nativeNoChange; ReturnedToOriginalEncounter = $stillEncountered
                 EngineFrames = @($meetingFrame,$encounterFrame,$warningFrame,$outcomeFrame)
@@ -203,7 +212,7 @@ function Invoke-NativeEscapeTrial([ValidateSet('Reject','Accept')][string]$Choic
         return [ordered]@{
             Choice = $Choice; ProcessId = $start.session.processId; PartyFixture = $seed.data; BanditFixture = $banditFixture.data
             PlayerApproach = $approach; BanditFightDialogueChoice = $fightChoice; EncounterDiagnostic = $encounterDiag.data
-            WarningDiagnostic = $warningDiag.data; CurrentWarningText = $warningDiag.data.menuText
+            WarningDiagnostic = $warningDiag.data; NativeEscapeObservation = $nativeEscapeObservation; CurrentWarningText = $warningDiag.data.menuText
             VisibleDecisionOptions = @($warningOptions | ForEach-Object { [ordered]@{ id = $_.id; text = $_.text } })
             AcceptReceipt = $acceptReceipt; AfterDiagnostic = $afterDiag.data; Debrief = $debrief.state
             ExpectedNativeTroopLoss = $nativeExpectedLoss; ActualHealthyTroopLoss = $actualTroopLoss; NativeLossMatches = $nativeLossMatches

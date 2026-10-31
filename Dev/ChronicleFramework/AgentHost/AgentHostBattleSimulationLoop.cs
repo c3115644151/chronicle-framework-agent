@@ -56,6 +56,8 @@ internal static class AgentHostBattleSimulationLoop
         var mapConversationContinuationCount = 0;
         var battleWasStarted = false;
         var nativeEncounterLeaveIssued = false;
+        var nativeEscapeAccepted = false;
+        var nativeEscapeCompleted = false;
         var captivityObserved = false;
         string? captivityChoiceOptionId = null;
         JsonObject? previousReceipt = null;
@@ -95,6 +97,40 @@ internal static class AgentHostBattleSimulationLoop
                 var simulation = context["battleSimulation"] as JsonObject;
                 var partyScreen = state["partyScreen"] as JsonObject;
                 var inventoryScreen = state["inventoryScreen"] as JsonObject;
+
+                if (nativeEscapeCompleted)
+                {
+                    if (!IsVerifiedMapTerminalAfterNativeEscape(state))
+                    {
+                        failure = "Native Try-to-get-away Continue did not return MainHero to a free Campaign Map with an active MainParty.";
+                        failureCode = "native-try-to-get-away-return-unverified";
+                        termination = "native-try-to-get-away-return-unverified";
+                        break;
+                    }
+                    var escapeRenownAfter = ReadRenown(state);
+                    if (!double.IsFinite(renownBefore) || !double.IsFinite(escapeRenownAfter))
+                    {
+                        failure = "The Native escape returned to Map, but Renown was not readable before and after the attempt.";
+                        failureCode = "battle-renown-unobservable";
+                        termination = "outcome-verification-incomplete";
+                        break;
+                    }
+                    trace.Add(new JsonObject
+                    {
+                        ["stage"] = "native-try-to-get-away-return-verified",
+                        ["battleSimulationStarted"] = false,
+                        ["playerOutcome"] = "escaped-with-sacrifice",
+                        ["nativeRiskContext"] = state["context"]?["encounterEscape"]?.DeepClone(),
+                        ["renownBefore"] = renownBefore,
+                        ["renownAfter"] = escapeRenownAfter
+                    });
+                    return BuildResult(runId, provider, "completed", decisions, actionsExecuted, promptTokens, completionTokens,
+                        "native-try-to-get-away-completed", null, null, startDay, initialNative, native, trace, routes,
+                        renownBefore, escapeRenownAfter, "native-try-to-get-away", playerRetreated: true,
+                        targetId: requestedTargetId, battleStarted: false, battleFinishReceipt: null,
+                        captivityRecoveryRequested: recoverPlayerCaptivity, captivityObserved: captivityObserved,
+                        captivityChoiceOptionId: captivityChoiceOptionId, nativeEscapeCompleted: true);
+                }
 
                 if (IsActiveMapIncident(native))
                 {
@@ -518,6 +554,23 @@ internal static class AgentHostBattleSimulationLoop
                 {
                     nativeEncounterLeaveIssued = true;
                 }
+                else if (completed && action == "menuSelect" &&
+                         string.Equals(ReadString((state["context"] as JsonObject), "menuId"), "try_to_get_away", StringComparison.Ordinal))
+                {
+                    var selectedOptionId = ReadString(arguments, "optionId");
+                    nativeEscapeAccepted = selectedOptionId == "try_to_get_away_accept";
+                    if (selectedOptionId == "try_to_get_away_reject")
+                        playerRetreated = false;
+                }
+                else if (completed && action == "menuSelect" &&
+                         string.Equals(ReadString((state["context"] as JsonObject), "menuId"), "try_to_get_away_debrief", StringComparison.Ordinal) &&
+                         string.Equals(ReadString(arguments, "optionId"), "try_to_get_away_continue", StringComparison.Ordinal) &&
+                         nativeEscapeAccepted)
+                {
+                    nativeEscapeCompleted = true;
+                    playerRetreated = true;
+                    battleResult = "native-try-to-get-away";
+                }
                 else if (completed && action == "battleSkip")
                 {
                     battleWasStarted = true;
@@ -638,6 +691,21 @@ internal static class AgentHostBattleSimulationLoop
             }
             if (AgentHostCampaignStateFacts.IsActiveEncounter(state))
             {
+                var encounterMenuId = ReadString(context, "menuId");
+                if (encounterMenuId == "try_to_get_away")
+                {
+                    AddNativeMenuSelectAction(catalog, encounterMenuId,
+                        new[] { "try_to_get_away_accept", "try_to_get_away_reject" }
+                            .Where(optionId => CurrentEnabledMenuOption(state, optionId)));
+                    return catalog;
+                }
+                if (encounterMenuId == "try_to_get_away_debrief")
+                {
+                    AddNativeMenuSelectAction(catalog, encounterMenuId,
+                        new[] { "try_to_get_away_continue" }
+                            .Where(optionId => CurrentEnabledMenuOption(state, optionId)));
+                    return catalog;
+                }
                 var encounteredId = ReadString(context, "encounteredPartyId");
                 var validBandit = observedTargets.OfType<JsonObject>().Any(x =>
                     ReadString(x, "id") == encounteredId && ReadString(x, "type") == "bandit" && ReadBoolean(x, "hostile"));
@@ -678,40 +746,12 @@ internal static class AgentHostBattleSimulationLoop
                 if (validBandit && string.Equals(ReadString(context, "menuId"), "encounter", StringComparison.Ordinal))
                 {
                     if (battleWasStarted) return catalog;
-                    var attackOptionId = CurrentEnabledMenuOption(state, "str_order_attack") ? "str_order_attack" : null;
-                    if (attackOptionId is not null)
-                        catalog.Add(new JsonObject
-                        {
-                            ["action"] = "menuSelect",
-                            ["arguments"] = new JsonArray("MenuId", "OptionId"),
-                            ["argumentValues"] = new JsonObject
-                            {
-                                ["MenuId"] = new JsonArray("encounter"),
-                                ["OptionId"] = new JsonArray(attackOptionId)
-                            }
-                        });
-                    else if (CurrentEnabledMenuOption(state, "leave"))
-                        catalog.Add(new JsonObject
-                        {
-                            ["action"] = "menuSelect",
-                            ["arguments"] = new JsonArray("MenuId", "OptionId"),
-                            ["argumentValues"] = new JsonObject
-                            {
-                                ["MenuId"] = new JsonArray("encounter"),
-                                ["OptionId"] = new JsonArray("leave")
-                            }
-                        });
+                    var encounterOptions = new[] { "str_order_attack", "leave_soldiers_behind", "leave" }
+                        .Where(optionId => CurrentEnabledMenuOption(state, optionId)).ToArray();
+                    if (encounterOptions.Length > 0)
+                        AddNativeMenuSelectAction(catalog, "encounter", encounterOptions);
                     else if (recoverPlayerCaptivity && CurrentEnabledMenuOption(state, "surrender"))
-                        catalog.Add(new JsonObject
-                        {
-                            ["action"] = "menuSelect",
-                            ["arguments"] = new JsonArray("MenuId", "OptionId"),
-                            ["argumentValues"] = new JsonObject
-                            {
-                                ["MenuId"] = new JsonArray("encounter"),
-                                ["OptionId"] = new JsonArray("surrender")
-                            }
-                        });
+                        AddNativeMenuSelectAction(catalog, "encounter", ["surrender"]);
                 }
                 return catalog;
             }
@@ -843,35 +883,59 @@ internal static class AgentHostBattleSimulationLoop
             if (action == "menuSelect")
             {
                 var context = state["context"] as JsonObject;
+                var currentMenuId = ReadString(context, "menuId");
                 if (AgentHostCampaignStateFacts.IsNativeLocationMenu(state))
                 {
-                    var menuId = ReadString(context, "menuId");
                     var optionId = ReadString(arguments, "optionId");
-                    if (menuId != ReadString(arguments, "menuId") ||
+                    if (currentMenuId != ReadString(arguments, "menuId") ||
                         string.IsNullOrWhiteSpace(optionId) ||
                         !(state["availableMenuOptions"] as JsonArray)?.OfType<JsonObject>().Any(option =>
                             ReadString(option, "id") == optionId && ReadBoolean(option, "available") &&
                             ReadBoolean(option, "enabled") && ReadBoolean(option, "isLeave")) == true)
                     { rejection = "A Native location menu may only select its currently enabled Leave option before this battle subflow proceeds."; return false; }
                 }
+                else if (currentMenuId == "try_to_get_away")
+                {
+                    var optionId = ReadString(arguments, "optionId");
+                    var selectedCurrentWarningChoice = optionId is "try_to_get_away_accept" or "try_to_get_away_reject" &&
+                        CurrentEnabledMenuOption(state, optionId!);
+                    var hasNativeRiskEvidence = context?["encounterEscape"] is JsonObject escapeContext &&
+                        ReadBoolean(escapeContext, "canTryToGetAway") == true &&
+                        !string.IsNullOrWhiteSpace(ReadString(escapeContext, "menuText")) &&
+                        ReadInt(escapeContext, "nativeTroopsSacrificedForTry", -1) >= 0;
+                    if (currentMenuId != ReadString(arguments, "menuId") || !selectedCurrentWarningChoice ||
+                        optionId == "try_to_get_away_accept" && !hasNativeRiskEvidence)
+                    { rejection = "A Try-to-get-away warning may select only its current Native Accept/Reject option; Accept also requires the original visible loss estimate."; return false; }
+                }
+                else if (currentMenuId == "try_to_get_away_debrief")
+                {
+                    var optionId = ReadString(arguments, "optionId");
+                    if (currentMenuId != ReadString(arguments, "menuId") || optionId != "try_to_get_away_continue" ||
+                        !CurrentEnabledMenuOption(state, optionId))
+                    { rejection = "Only the currently enabled Native debrief Continue option may close an accepted Try-to-get-away flow."; return false; }
+                }
                 else if (recoverPlayerCaptivity && IsPlayerCaptive(state))
                 {
                     var optionId = ReadString(arguments, "optionId");
-                    if (!IsSupportedCaptivityRansomMenu(ReadString(context, "menuId")) ||
-                        ReadString(context, "menuId") != ReadString(arguments, "menuId") ||
+                    if (!IsSupportedCaptivityRansomMenu(currentMenuId) ||
+                        currentMenuId != ReadString(arguments, "menuId") ||
                         !IsSupportedCaptivityRansomOption(optionId) || !CurrentEnabledMenuOption(state, optionId!))
                     { rejection = "Only a currently enabled Native Accept/Reject option in an observed MainHero ransom offer may be selected."; return false; }
                 }
                 else
                 {
                     var selectedOptionId = ReadString(arguments, "optionId");
+                    if (currentMenuId != "encounter" || currentMenuId != ReadString(arguments, "menuId"))
+                    { rejection = "Battle menu choices are restricted to the current Native Encounter or the specifically observed Try-to-get-away warning/debrief."; return false; }
                     var sendTroopsEnabled = CurrentEnabledMenuOption(state, "str_order_attack");
                     var allowedSendTroops = selectedOptionId == "str_order_attack" && sendTroopsEnabled;
-                    var allowedLeave = selectedOptionId == "leave" && !sendTroopsEnabled && CurrentEnabledMenuOption(state, "leave");
-                    var allowedSurrenderFallback = recoverPlayerCaptivity && !sendTroopsEnabled && !CurrentEnabledMenuOption(state, "leave") &&
+                    var escapeOptionEnabled = CurrentEnabledMenuOption(state, "leave_soldiers_behind");
+                    var allowedLeave = selectedOptionId == "leave" && CurrentEnabledMenuOption(state, "leave");
+                    var allowedTryToGetAway = selectedOptionId == "leave_soldiers_behind" && escapeOptionEnabled;
+                    var allowedSurrenderFallback = recoverPlayerCaptivity && !sendTroopsEnabled && !CurrentEnabledMenuOption(state, "leave") && !escapeOptionEnabled &&
                         selectedOptionId == "surrender" && CurrentEnabledMenuOption(state, "surrender");
-                    if (ReadString(context, "menuId") != ReadString(arguments, "menuId") || !(allowedSendTroops || allowedLeave || allowedSurrenderFallback))
-                    { rejection = "Select the current enabled Native str_order_attack; if unavailable, Native leave; or only in captivity-recovery mode, surrender when both Send Troops and Leave are disabled. Real-time attack Missions are outside this loop."; return false; }
+                    if (!(allowedSendTroops || allowedLeave || allowedTryToGetAway || allowedSurrenderFallback))
+                    { rejection = "Select only a current enabled Native Send Troops, Leave, or Try-to-get-away option; surrender is recovery-only when those choices are unavailable. Real-time attack Missions are outside this loop."; return false; }
                     var encounteredId = ReadString(state["context"] as JsonObject, "encounteredPartyId");
                     if (!observedTargets.OfType<JsonObject>().Any(x => ReadString(x, "id") == encounteredId && ReadString(x, "type") == "bandit" && ReadBoolean(x, "hostile")))
                     { rejection = "The active encounter party must match a currently observed hostile bandit target."; return false; }
@@ -953,9 +1017,12 @@ internal static class AgentHostBattleSimulationLoop
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
         var results = new List<object>();
-        if (!AgentHostDecisionCycle.BattleAndCaptivitySystemPrompt.Contains("surrender only as a survival fallback", StringComparison.Ordinal) ||
-            AgentHostDecisionCycle.BattleSimulationSystemPrompt.Contains("surrender only as a survival fallback", StringComparison.Ordinal))
-            throw new AgentHostException("battle-loop-self-test-surrender-fallback-prompt-scope-failed", "Native surrender fallback guidance belongs only to explicit BattleAndCaptivity recovery mode, never the ordinary Renown BattleSimulation objective.");
+        if (!AgentHostDecisionCycle.BattleAndCaptivitySystemPrompt.Contains("surrender only as an emergency survival fallback", StringComparison.Ordinal) ||
+            AgentHostDecisionCycle.BattleSimulationSystemPrompt.Contains("surrender only as a survival fallback", StringComparison.Ordinal) ||
+            !AgentHostDecisionCycle.BattleSimulationSystemPrompt.Contains("nearby hostile parties may join the same battle", StringComparison.Ordinal) ||
+            !AgentHostDecisionCycle.BattleSimulationSystemPrompt.Contains("context.encounterEscape.menuText", StringComparison.Ordinal) ||
+            !AgentHostDecisionCycle.BattleSimulationSystemPrompt.Contains("try_to_get_away_reject", StringComparison.Ordinal))
+            throw new AgentHostException("battle-loop-self-test-risk-aware-retreat-prompt-scope-failed", "BattleSimulation must assess nearby same-faction hostile force and the current Native Try-to-get-away loss warning, while surrender remains recovery-only.");
         var visibleBanditNeedsDecisionPause = ParseObject(JsonDocument.Parse("""
             {"timeControlMode":"StoppablePlay","state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false,"inquiryOpen":false,"escapeMenuOpen":false,"isWaitMenu":false,"isWaitActive":false,"mapIncident":{"active":false},"sceneNotification":{"hasActiveNotification":false},"captivity":{"isCaptive":false}},"location":{"targetPartyId":null},"party":{"isMoving":true},"nearbyParties":[{"id":"bandit-a","type":"bandit","hostile":true}]}}
             """).RootElement);
@@ -1062,6 +1129,53 @@ internal static class AgentHostBattleSimulationLoop
         var wrongMenu = new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "encounter", ["OptionId"] = "str_order_retreat" } };
         if (TryResolveDecision(wrongMenu, fight, new JsonArray(), encounter["state"]!.AsObject(), candidates, "bandit-1", out _, out _, out _, out _))
             throw new AgentHostException("battle-loop-self-test-non-attack-choice-accepted", "The bounded loop must not expose retreat, ransom, toll or unsupported encounter choices.");
+
+        var escapeChoiceEncounter = ParseState("MapState", "encounter", true, null, null);
+        escapeChoiceEncounter["state"]!["context"]!["encounteredPartyId"] = "bandit-1";
+        escapeChoiceEncounter["state"]!["availableMenuOptions"] = new JsonArray(
+            new JsonObject { ["id"] = "str_order_attack", ["enabled"] = true, ["available"] = true },
+            new JsonObject { ["id"] = "leave_soldiers_behind", ["enabled"] = true, ["available"] = true },
+            new JsonObject { ["id"] = "leave", ["enabled"] = false, ["available"] = false });
+        var escapeChoiceCatalog = BuildActionCatalog(escapeChoiceEncounter["state"]!.AsObject(), candidates, "bandit-1", false, true);
+        var encounterOptionIds = escapeChoiceCatalog.Single()? ["argumentValues"]? ["OptionId"] as JsonArray;
+        var tryToGetAwayDecision = new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "encounter", ["OptionId"] = "leave_soldiers_behind" } };
+        if (escapeChoiceCatalog.Count != 1 || encounterOptionIds?.Count != 2 ||
+            !encounterOptionIds.Any(option => option?.GetValue<string>() == "str_order_attack") ||
+            !encounterOptionIds.Any(option => option?.GetValue<string>() == "leave_soldiers_behind") ||
+            !TryResolveDecision(tryToGetAwayDecision, escapeChoiceCatalog, new JsonArray(), escapeChoiceEncounter["state"]!.AsObject(), candidates, "bandit-1", out _, out _, out _, out _))
+            throw new AgentHostException("battle-loop-self-test-native-try-to-get-away-not-offered", "When the Native encounter enables both Send Troops and Try-to-get-away, the model must receive both exact current options so it can weigh battle risk.");
+
+        var escapeWarning = ParseState("MapState", "try_to_get_away", true, null, null);
+        escapeWarning["state"]!["context"]!["encounteredPartyId"] = "bandit-1";
+        escapeWarning["state"]!["context"]!["encounterEscape"] = new JsonObject
+        {
+            ["schemaVersion"] = 1, ["menuId"] = "try_to_get_away", ["menuText"] = "You may lose 7 troops and some cargo.",
+            ["canTryToGetAway"] = true, ["nativeTroopsSacrificedForTry"] = 7, ["healthyNonHeroMembers"] = 12
+        };
+        escapeWarning["state"]!["availableMenuOptions"] = new JsonArray(
+            new JsonObject { ["id"] = "try_to_get_away_accept", ["enabled"] = true, ["available"] = true },
+            new JsonObject { ["id"] = "try_to_get_away_reject", ["enabled"] = true, ["available"] = true });
+        var escapeWarningCatalog = BuildActionCatalog(escapeWarning["state"]!.AsObject(), candidates, "bandit-1", false, true);
+        var acceptEscape = new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "try_to_get_away", ["OptionId"] = "try_to_get_away_accept" } };
+        var rejectEscape = new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "try_to_get_away", ["OptionId"] = "try_to_get_away_reject" } };
+        if (escapeWarningCatalog.Count != 1 ||
+            !(escapeWarningCatalog[0]? ["argumentValues"]? ["OptionId"] as JsonArray)?.Any(option => option?.GetValue<string>() == "try_to_get_away_accept") == true ||
+            !TryResolveDecision(acceptEscape, escapeWarningCatalog, new JsonArray(), escapeWarning["state"]!.AsObject(), candidates, "bandit-1", out _, out _, out _, out _) ||
+            !TryResolveDecision(rejectEscape, escapeWarningCatalog, new JsonArray(), escapeWarning["state"]!.AsObject(), candidates, "bandit-1", out _, out _, out _, out _))
+            throw new AgentHostException("battle-loop-self-test-native-escape-warning-not-bounded", "The Native Try-to-get-away warning may expose only its current Accept/Reject choices, and Accept must require the visible Native troop-loss warning.");
+        var escapeWarningWithoutRisk = (JsonObject)escapeWarning["state"]!.AsObject().DeepClone();
+        escapeWarningWithoutRisk["context"]!["encounterEscape"] = null;
+        if (TryResolveDecision(acceptEscape, escapeWarningCatalog, new JsonArray(), escapeWarningWithoutRisk, candidates, "bandit-1", out _, out _, out _, out _) ||
+            !TryResolveDecision(rejectEscape, escapeWarningCatalog, new JsonArray(), escapeWarningWithoutRisk, candidates, "bandit-1", out _, out _, out _, out _))
+            throw new AgentHostException("battle-loop-self-test-native-escape-accept-without-risk-evidence", "The Host must fail closed on Native escape Accept when its exact loss estimate is not observed, while preserving the zero-cost Reject.");
+        var escapeDebrief = ParseState("MapState", "try_to_get_away_debrief", true, null, null)["state"]!.AsObject();
+        escapeDebrief["context"]!["encounteredPartyId"] = "bandit-1";
+        escapeDebrief["availableMenuOptions"] = new JsonArray(new JsonObject { ["id"] = "try_to_get_away_continue", ["enabled"] = true, ["available"] = true });
+        var escapeContinueCatalog = BuildActionCatalog(escapeDebrief, candidates, "bandit-1", false, true);
+        if (escapeContinueCatalog.Count != 1 ||
+            !TryResolveDecision(new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "try_to_get_away_debrief", ["OptionId"] = "try_to_get_away_continue" } }, escapeContinueCatalog, new JsonArray(), escapeDebrief, candidates, "bandit-1", out _, out _, out _, out _) ||
+            TryResolveDecision(new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "try_to_get_away_debrief", ["OptionId"] = "surrender" } }, escapeContinueCatalog, new JsonArray(), escapeDebrief, candidates, "bandit-1", out _, out _, out _, out _))
+            throw new AgentHostException("battle-loop-self-test-native-escape-debrief-not-bounded", "After an accepted Native escape, the Host may submit only the current Continue option in the original debrief.");
         var playerFacingAttackMenu = ParseState("MapState", "encounter", true, null, null);
         playerFacingAttackMenu["state"]!["context"]!["encounteredPartyId"] = "bandit-1";
         playerFacingAttackMenu["state"]!["availableMenuOptions"] = new JsonArray(
@@ -1372,6 +1486,19 @@ internal static class AgentHostBattleSimulationLoop
         if (!client.Actions.SequenceEqual(new[] { "mapPartyTargets", "pursue", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone" }))
             throw new AgentHostException("battle-loop-self-test-native-order-failed", "The battle loop emitted an unexpected Native action order.");
 
+        var escapeClient = new FakeBattleSimulationNativeClient(simulateNativeEscape: true);
+        var escapeProvider = new FakeTryToGetAwayDecisionProvider();
+        var escapeResult = await RunAsync(request.RootElement, escapeClient, escapeProvider, CancellationToken.None);
+        if (ReadString(escapeResult, "status") != "completed" ||
+            ReadString(escapeResult, "termination") != "native-try-to-get-away-completed" ||
+            ReadString(escapeResult, "playerOutcome") != "escaped-with-sacrifice" ||
+            ReadBoolean(escapeResult, "battleStarted") || ReadBoolean(escapeResult, "nativeEscapeCompleted") != true ||
+            ReadBoolean(escapeResult, "nativeReturnToMapVerified") != true ||
+            ReadDouble(escapeResult, "renownBefore", double.NaN) != 10 || ReadDouble(escapeResult, "renownAfter", double.NaN) != 10 ||
+            escapeProvider.CallCount != 9 || escapeProvider.WarningRequest? ["observation"]? ["state"]? ["context"]? ["encounterEscape"]? ["nativeTroopsSacrificedForTry"]?.GetValue<int>() != 7 ||
+            escapeClient.Actions.SequenceEqual(new[] { "mapPartyTargets", "pursue", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "menuSelect", "menuSelect" }) != true ||
+            escapeClient.Actions.Contains("battleSkip") || escapeClient.Actions.Contains("battleFinish"))
+            throw new AgentHostException("battle-loop-native-escape-not-integrated", $"The model must be able to inspect the original risk warning, choose Try-to-get-away, accept its observed cost, continue its debrief, and return without claiming BattleSimulation/Renown. status={ReadString(escapeResult, "status")}, termination={ReadString(escapeResult, "termination")}, outcome={ReadString(escapeResult, "playerOutcome")}, actions={string.Join(",", escapeClient.Actions)}.");
         var visibleThreatClient = new FakeBattleSimulationNativeClient(visibleHostileAtStart: true);
         var visibleThreatProvider = new FakeBattleSimulationDecisionProvider();
         var visibleThreatResult = await RunAsync(request.RootElement, visibleThreatClient, visibleThreatProvider, CancellationToken.None);
@@ -1462,6 +1589,7 @@ internal static class AgentHostBattleSimulationLoop
             throw new AgentHostException("battle-loop-self-test-captivity-recovery-failed", $"A fake Native battle-capture-ransom cycle failed: status={ReadString(recovery, "status")}, outcome={ReadString(recovery, "playerOutcome")}, captivity={ReadBoolean(recovery, "captivityObserved")}, recovery={ReadBoolean(recovery, "captivityRecoveryVerified")}, action={ReadString(recovery, "captivityChoiceOptionId")}, actions={string.Join(",", recoveryClient.Actions)}.");
         return [
             new { scenario = "battle-loop-native-observe-pursue-send-troops-aftermath-return-and-verify", decisions = ReadInt(result, "decisions", 0), nativeActions = client.Actions.ToArray(), renownBefore = ReadDouble(result, "renownBefore", double.NaN), renownAfter = ReadDouble(result, "renownAfter", double.NaN), explicitClockActions = ReadInt(result, "explicitClockActionCount", -1), passed = true },
+            new { scenario = "battle-loop-model-chooses-observed-native-try-to-get-away-cost-and-returns-without-claiming-renown", nativeActions = escapeClient.Actions.ToArray(), playerOutcome = ReadString(escapeResult, "playerOutcome"), nativeEscapeCompleted = ReadBoolean(escapeResult, "nativeEscapeCompleted"), passed = true },
             new { scenario = "battle-loop-auto-continues-active-no-choice-map-dialogue-before-renown-planning", nativeActions = mapConversationClient.Actions.ToArray(), passed = true },
             new { scenario = "battle-loop-map-incident-interrupts-before-model-or-native-actions", passed = true },
             new { scenario = "battle-loop-resolves-party-loot-inquiry-from-current-eyc-goal-and-roster-then-resumes-native-aftermath", decisions = ReadInt(partyInquiryResult, "decisions", 0), nativeActions = inquiryClient.Actions.ToArray(), inquiryChoice = inquiryClient.LastInquiryChoice, passed = true },
@@ -1510,11 +1638,13 @@ internal static class AgentHostBattleSimulationLoop
         int actionsExecuted, long promptTokens, long completionTokens, string termination, string? failure, string? failureCode,
         double startDay, JsonObject? initialNative, JsonObject? finalNative, JsonArray trace, JsonArray routes, double renownBefore, double renownAfter,
         string battleResult, bool playerRetreated, string? targetId, bool battleStarted, JsonObject? battleFinishReceipt,
-        bool captivityRecoveryRequested, bool captivityObserved, string? captivityChoiceOptionId, bool nativeEncounterLeft = false)
+        bool captivityRecoveryRequested, bool captivityObserved, string? captivityChoiceOptionId, bool nativeEncounterLeft = false,
+        bool nativeEscapeCompleted = false)
     {
         var state = finalNative?["state"] as JsonObject;
         var verifiedReturn = state is not null &&
-            (nativeEncounterLeft ? IsVerifiedMapTerminalAfterNativeEncounterLeave(state) : IsVerifiedMapTerminalAfterBattle(state, battleStarted));
+            (nativeEscapeCompleted ? IsVerifiedMapTerminalAfterNativeEscape(state) :
+                nativeEncounterLeft ? IsVerifiedMapTerminalAfterNativeEncounterLeave(state) : IsVerifiedMapTerminalAfterBattle(state, battleStarted));
         var finalContext = state?["context"] as JsonObject;
         var finalCaptivity = finalContext?["captivity"] as JsonObject;
         var captiveAtReturn = verifiedReturn && ReadBoolean(finalCaptivity, "isCaptive");
@@ -1523,7 +1653,7 @@ internal static class AgentHostBattleSimulationLoop
         var finalParty = state?["party"] as JsonObject;
         var finalPartyMembers = ReadInt(finalParty, "members", 0);
         var captivityRecoveryVerified = captivityRecoveryRequested && captivityObserved && verifiedReturn && !captiveAtReturn && nativeFreeMapReturned && finalPartyMembers > 0;
-        var finalPlayerOutcome = captiveAtReturn ? "captured" :
+        var finalPlayerOutcome = nativeEscapeCompleted ? "escaped-with-sacrifice" : captiveAtReturn ? "captured" :
             nativeEncounterLeft ? "left-encounter-without-battle" :
             playerRetreated ? "retreated" : captivityRecoveryVerified ? "captured-then-recovered" :
             string.IsNullOrWhiteSpace(battleResult) || battleResult == "unknown" ? "unknown" : "resolved-native-battle";
@@ -1551,6 +1681,7 @@ internal static class AgentHostBattleSimulationLoop
                 ReadString(step["nativeActionReceipt"] as JsonObject, "status") == "completed"),
             ["targetPartyId"] = targetId,
             ["battleStarted"] = battleStarted,
+            ["nativeEscapeCompleted"] = nativeEscapeCompleted,
             ["battleState"] = battleResult,
             ["battleFinishReceipt"] = battleFinishReceipt?.DeepClone(),
             ["playerRetreated"] = playerRetreated,
@@ -1601,6 +1732,9 @@ internal static class AgentHostBattleSimulationLoop
     {
         return battleStarted && IsVerifiedMapTerminalState(state);
     }
+
+    private static bool IsVerifiedMapTerminalAfterNativeEscape(JsonObject state) =>
+        IsVerifiedMapTerminalState(state) && !IsPlayerCaptive(state) && ReadInt(state["party"] as JsonObject, "members", 0) > 0;
 
     private static bool IsVerifiedMapTerminalAfterNativeEncounterLeave(JsonObject state) => IsVerifiedMapTerminalState(state);
 
@@ -1820,6 +1954,22 @@ internal static class AgentHostBattleSimulationLoop
         });
     }
 
+    private static void AddNativeMenuSelectAction(JsonArray catalog, string menuId, IEnumerable<string> optionIds)
+    {
+        var options = optionIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToArray();
+        if (options.Length == 0) return;
+        catalog.Add(new JsonObject
+        {
+            ["action"] = "menuSelect",
+            ["arguments"] = new JsonArray("MenuId", "OptionId"),
+            ["argumentValues"] = new JsonObject
+            {
+                ["MenuId"] = new JsonArray(menuId),
+                ["OptionId"] = new JsonArray(options.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray())
+            }
+        });
+    }
+
     private static string ExplainNoAction(JsonObject state, bool battleWasStarted, JsonArray observedTargets)
     {
         var context = state["context"] as JsonObject;
@@ -1875,6 +2025,7 @@ internal static class AgentHostBattleSimulationLoop
         private readonly bool _visibleHostileAtStart;
         private readonly bool _mapIncidentAtStart;
         private readonly bool _mapConversationAtStart;
+        private readonly bool _simulateNativeEscape;
         private int _stage;
         private int _movingReads;
         private int _captivityPolls;
@@ -1887,13 +2038,14 @@ internal static class AgentHostBattleSimulationLoop
         internal List<string> ClockActions { get; } = [];
         internal string? LastInquiryChoice { get; private set; }
 
-        internal FakeBattleSimulationNativeClient(bool simulateCaptivity = false, bool simulatePartyInquiry = false, bool visibleHostileAtStart = false, bool mapIncidentAtStart = false, bool mapConversationAtStart = false)
+        internal FakeBattleSimulationNativeClient(bool simulateCaptivity = false, bool simulatePartyInquiry = false, bool visibleHostileAtStart = false, bool mapIncidentAtStart = false, bool mapConversationAtStart = false, bool simulateNativeEscape = false)
         {
             _simulateCaptivity = simulateCaptivity;
             _simulatePartyInquiry = simulatePartyInquiry;
             _visibleHostileAtStart = visibleHostileAtStart;
             _mapIncidentAtStart = mapIncidentAtStart;
             _mapConversationAtStart = mapConversationAtStart;
+            _simulateNativeEscape = simulateNativeEscape;
             if (visibleHostileAtStart) _timeControlMode = "StoppablePlay";
         }
 
@@ -1932,7 +2084,11 @@ internal static class AgentHostBattleSimulationLoop
                     else _stage = 4;
                     break;
                 case "menuSelect":
-                    if (_stage == 4) _stage = 5;
+                    if (_simulateNativeEscape && _stage == 4 && ReadString(arguments, "optionId") == "leave_soldiers_behind") _stage = 14;
+                    else if (_simulateNativeEscape && _stage == 14 && ReadString(arguments, "optionId") == "try_to_get_away_accept") _stage = 15;
+                    else if (_simulateNativeEscape && _stage == 14 && ReadString(arguments, "optionId") == "try_to_get_away_reject") _stage = 4;
+                    else if (_simulateNativeEscape && _stage == 15 && ReadString(arguments, "optionId") == "try_to_get_away_continue") _stage = 16;
+                    else if (_stage == 4) _stage = 5;
                     else if (_simulateCaptivity && _stage == 11 && ReadString(arguments, "optionId") == "mno_captivity_end_ransom_accept") _stage = 12;
                     else throw new AgentHostException("battle-self-test-menu-choice-invalid", "The fake Native menu did not have the selected enabled option.");
                     break;
@@ -1974,8 +2130,8 @@ internal static class AgentHostBattleSimulationLoop
         private JsonObject BuildState()
         {
             var stateName = _stage switch { 7 or 13 => "PartyState", 8 => "InventoryState", _ => "MapState" };
-            var menuId = _stage is 2 or 3 ? "encounter_meeting" : _stage is 4 or 5 or 6 ? "encounter" : _stage == 10 ? "prisoner_wait" : _stage == 11 ? "menu_captivity_end_propose_ransom_wilderness" : null;
-            var encounterActive = _stage is 2 or 3 or 4 or 5 or 6;
+            var menuId = _stage is 2 or 3 ? "encounter_meeting" : _stage is 4 or 5 or 6 ? "encounter" : _stage == 10 ? "prisoner_wait" : _stage == 11 ? "menu_captivity_end_propose_ransom_wilderness" : _stage == 14 ? "try_to_get_away" : _stage == 15 ? "try_to_get_away_debrief" : null;
+            var encounterActive = _stage is 2 or 3 or 4 or 5 or 6 or 14 or 15;
             JsonObject? simulation = null;
             if (_stage is 5 or 6)
                 simulation = new JsonObject { ["finished"] = _stage == 6, ["playerRetreated"] = false, ["battleState"] = "AttackerVictory" };
@@ -1986,13 +2142,36 @@ internal static class AgentHostBattleSimulationLoop
                 ["party"] = new JsonObject { ["members"] = _stage is 10 or 11 ? 0 : _stage == 12 ? 1 : _memberLootTaken ? 41 : 40, ["healthy"] = 39, ["wounded"] = 1, ["prisoners"] = 0, ["itemCount"] = 12 },
                 ["location"] = new JsonObject { ["targetPartyId"] = _stage == 1 ? "bandit-1" : null },
                 ["availableMenuOptions"] = _stage == 4
-                    ? new JsonArray(new JsonObject { ["id"] = "str_order_attack", ["available"] = true, ["enabled"] = true })
+                    ? _simulateNativeEscape
+                        ? new JsonArray(
+                            new JsonObject { ["id"] = "str_order_attack", ["available"] = true, ["enabled"] = true },
+                            new JsonObject { ["id"] = "leave_soldiers_behind", ["available"] = true, ["enabled"] = true })
+                        : new JsonArray(new JsonObject { ["id"] = "str_order_attack", ["available"] = true, ["enabled"] = true })
                     : _stage == 11
                         ? new JsonArray(
                             new JsonObject { ["id"] = "mno_captivity_end_ransom_accept", ["available"] = true, ["enabled"] = true },
                             new JsonObject { ["id"] = "captivity_end_ransom_deny", ["available"] = true, ["enabled"] = true })
+                    : _stage == 14
+                        ? new JsonArray(
+                            new JsonObject { ["id"] = "try_to_get_away_accept", ["available"] = true, ["enabled"] = true },
+                            new JsonObject { ["id"] = "try_to_get_away_reject", ["available"] = true, ["enabled"] = true })
+                    : _stage == 15
+                        ? new JsonArray(new JsonObject { ["id"] = "try_to_get_away_continue", ["available"] = true, ["enabled"] = true })
                         : new JsonArray()
             };
+            if (_stage == 14)
+                state["context"]!["encounterEscape"] = new JsonObject
+                {
+                    ["schemaVersion"] = 1,
+                    ["menuId"] = "try_to_get_away",
+                    ["menuText"] = "You may lose 7 troops and some cargo.",
+                    ["canTryToGetAway"] = true,
+                    ["nativeTroopsSacrificedForTry"] = 7,
+                    ["healthyNonHeroMembers"] = 39,
+                    ["gold"] = 500,
+                    ["grain"] = 20,
+                    ["itemCount"] = 12
+                };
             if (_visibleHostileAtStart && _stage == 0)
                 state["nearbyParties"] = new JsonArray(new JsonObject { ["id"] = "bandit-1", ["name"] = "Bandit Party", ["type"] = "bandit", ["distance"] = 2.0, ["hostile"] = true });
             if (_mapConversationAtStart && !_mapConversationContinued && _stage == 0)
@@ -2043,6 +2222,46 @@ internal static class AgentHostBattleSimulationLoop
             var timeControlMode = _stage == 10 ? "UnstoppableFastForward" : _timeControlMode;
             return new JsonObject { ["processId"] = 321, ["campaignDay"] = _stage is 1 or 2 ? 5.1 : _stage == 10 ? 5.2 : 5.0, ["timeControlMode"] = timeControlMode, ["state"] = state };
         }
+    }
+
+    private sealed class FakeTryToGetAwayDecisionProvider : IAgentHostDecisionProvider
+    {
+        private static readonly string[] ExpectedSteps =
+        ["mapPartyTargets", "pursue", "observeAgain", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "escape-start", "escape-accept", "escape-continue"];
+
+        internal int CallCount { get; private set; }
+        internal JsonObject? WarningRequest { get; private set; }
+        public string ModelId => "deterministic-native-escape-self-test";
+        public string ConfigurationSource => "harness-fake-provider";
+
+        public Task CheckConfiguredModelAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        }
+
+        public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (CallCount >= ExpectedSteps.Length)
+                throw new AgentHostException("battle-loop-native-escape-self-test-provider-exhausted", "The fake provider exceeded the bounded Native Try-to-get-away route.");
+            var step = ExpectedSteps[CallCount++];
+            if (step == "escape-accept") WarningRequest = ParseObject(request);
+            JsonObject decision = step switch
+            {
+                "observeAgain" => new JsonObject { ["control"] = "observeAgain", ["waitSeconds"] = 1, ["reason"] = "Wait for the Native pursuit transition." },
+                "pursue" => new JsonObject { ["action"] = "pursue", ["arguments"] = new JsonObject { ["PartyId"] = "bandit-1" }, ["rationale"] = "Pursue the current visible hostile." },
+                "dialogueSelect" => new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "bandit_start_defender_1" }, ["rationale"] = "Follow the visible Native fight choice." },
+                "dialogueContinue" => new JsonObject { ["action"] = "dialogueContinue", ["arguments"] = new JsonObject(), ["rationale"] = "Advance the current no-choice Native line." },
+                "escape-start" => new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "encounter", ["OptionId"] = "leave_soldiers_behind" }, ["rationale"] = "Open the current Native retreat risk warning." },
+                "escape-accept" => new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "try_to_get_away", ["OptionId"] = "try_to_get_away_accept" }, ["rationale"] = "Accept the currently observed loss estimate." },
+                "escape-continue" => new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "try_to_get_away_debrief", ["OptionId"] = "try_to_get_away_continue" }, ["rationale"] = "Complete the current Native debrief." },
+                _ => new JsonObject { ["action"] = step, ["arguments"] = new JsonObject(), ["rationale"] = "Use the current Native action." }
+            };
+            return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "fake-test-route", decision));
+        }
+
+        public void Dispose() { }
     }
 
     private sealed class FakeBattleSimulationDecisionProvider : IAgentHostDecisionProvider
