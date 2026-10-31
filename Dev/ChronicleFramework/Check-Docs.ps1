@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.462'
+$contractVersion = '7.463'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -1209,6 +1209,12 @@ if ($agentHostPackageSource -notmatch 'NU1900' -or $agentHostPackageSource -notm
     $agentHostPackageSource -notmatch 'THIRD-PARTY-NOTICES.txt') {
     throw 'NuGet audit fallback must be limited to a failed NU1900 vulnerability feed and the reviewed, pinned tokenizer dependency.'
 }
+if ($agentHostPackageSource -notmatch 'CompanionObservationProjection' -or
+    $agentHostPackageSource -notmatch 'missionBytesSaved' -or
+    $agentHostPackageSource -notmatch 'estimatedPromptTokensSaved' -or
+    $agentHostPackageSource -notmatch 'ProviderContractSelfTestScenarioCount') {
+    throw 'AgentHostPackage must retain a structured per-run receipt for the Companion observation projection and tokenizer-estimated prompt reduction.'
+}
 if (-not (Test-Path -LiteralPath $deepSeekTokenizerAsset -PathType Leaf) -or
     -not (Test-Path -LiteralPath $deepSeekTokenizerLicense -PathType Leaf) -or
     -not (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $deepSeekTokenizerAsset) 'Microsoft.ML.Tokenizers-LICENSE.txt') -PathType Leaf) -or
@@ -1566,6 +1572,13 @@ if ($agentCliSource -notmatch 'Write-ChronicleStartupTrace' -or
     throw 'Agent-Cli startup must preserve phase evidence through process discovery, crash scan, telemetry reading, window layout and the initial protocol probe.'
 }
 $companionHiringTest = Get-Content (Join-Path $harnessRoot 'Test-AgentCompanionHiring.ps1') -Raw -Encoding UTF8
+if ($agentHostCompanionLoopSource -notmatch 'projectedMission\.Remove\("nearbySceneAgents"\)' -or
+    $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-model-observation-compacts-raw-mission-agent-roster-and-preserves-current-wanderer-candidates' -or
+    $agentHostCompanionLoopSource -notmatch 'DeepSeekPromptTokenEstimator\.EstimateRequest\(' -or
+    $agentHostCompanionLoopSource -notmatch 'currentSceneWandererCandidates' -or
+    $agentHostCompanionLoopSource -notmatch 'nearbyInteractableWanderers') {
+    throw 'Companion model input projection must remove only the duplicated raw scene roster, preserve the current candidate summaries and Native validation, and estimate its prompt-token reduction.'
+}
 if ($companionHiringTest -notmatch 'missionNavigateToAgent' -or $companionHiringTest -notmatch 'missionInteract' -or $companionHiringTest -notmatch 'missionSceneAgents' -or $companionHiringTest -notmatch 'dialogueSelect' -or $companionHiringTest -notmatch 'main_option_faction_hire' -or $companionHiringTest -notmatch 'player_companion_hire_response_1' -or $companionHiringTest -notmatch 'HireCommitted' -or $companionHiringTest -notmatch 'StrictGoldEqualityRejected' -or $companionHiringTest -notmatch 'BelowNativeQuoteRejected' -or $companionHiringTest -notmatch 'harnessPrepareCompanionHiringFixture' -or $companionHiringTest -notmatch 'harnessCompanionHiringDiagnostics' -or $companionHiringTest -notmatch 'FixtureUnchanged' -or $companionHiringTest -notmatch 'ProcessStopped' -or $agentCliSource -notmatch 'GoldOffset -notin @\(-63, 0, 1\)' -or $agentProtocolSource -notmatch 'goldOffset is not \(-63 or 0 or 1\)' -or $agentProtocolSource -notmatch 'harnessPrepareCompanionHiringFixture is restricted to a visual Harness run' -or $agentProtocolSource -notmatch 'harnessCompanionHiringDiagnostics is restricted to a visual Harness run' -or $agentDecisionLoopSource -match 'harnessPrepareCompanionHiringFixture|harnessCompanionHiringDiagnostics') { throw 'CompanionHiring must traverse the current Native Tavern scene catalog/dialogue, verify above/equal/below-quote behavior and exact Clan/Party result, and keep narrow Gold fixture writes Harness-only.' }
 if ($agentHostCompanionLoopSource -notmatch 'BuildControlCatalog\(gameState == "MapState"' -or
     $agentHostCompanionLoopSource -notmatch 'missionStopProvider' -or

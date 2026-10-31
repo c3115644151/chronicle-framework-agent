@@ -284,16 +284,28 @@ internal static class AgentHostEstablishClanCompanionLoop
         var projectedMissionBytes = projectedMission is null ? int.MaxValue : System.Text.Encoding.UTF8.GetByteCount(projectedMission.ToJsonString());
         var projectedCandidates = projectedCompanionObservation["currentSceneWandererCandidates"] as JsonArray;
         var projectedNearby = projectedCompanionObservation["nearbyInteractableWanderers"] as JsonArray;
+        var fullSceneObservation = projectedCompanionObservation.DeepClone().AsObject();
+        fullSceneObservation["state"]!["mission"]!["nearbySceneAgents"] = noisyNearbyAgents.DeepClone();
+        const string cacheCostEstimationSystemPrompt = "Stable EYC cost-estimation prefix. Choose only current listed Native actions.";
+        var fullSceneContent = fullSceneObservation.ToJsonString();
+        var projectedSceneContent = projectedCompanionObservation.ToJsonString();
+        var fullSceneTokenEstimate = DeepSeekPromptTokenEstimator.EstimateRequest(fullSceneContent, cacheCostEstimationSystemPrompt,
+            fullSceneContent, new Dictionary<string, object?>());
+        var projectedSceneTokenEstimate = DeepSeekPromptTokenEstimator.EstimateRequest(projectedSceneContent, cacheCostEstimationSystemPrompt,
+            projectedSceneContent, new Dictionary<string, object?>());
         if (projectedMission is null || projectedMission.ContainsKey("nearbySceneAgents") ||
             ReadString(projectedMission, "sceneName") != "empire_house_c_tavern_a" ||
             projectedCandidates?.Count != 1 || ReadString(projectedCandidates[0] as JsonObject, "heroId") != "scene-agent-0" ||
-            projectedNearby?.Count != 1 || originalMissionBytes - projectedMissionBytes < 2000)
-            throw new AgentHostException("establish-clan-companion-observation-projection-failed", "The model payload must omit the duplicated raw Tavern agent roster while preserving the Native scene identity and current Wanderer candidate summaries; byte reduction must be measurable. originalMissionBytes=" + originalMissionBytes + "; projectedMissionBytes=" + projectedMissionBytes + "; candidates=" + projectedCandidates?.Count + "; nearby=" + projectedNearby?.Count);
+            projectedNearby?.Count != 1 || originalMissionBytes - projectedMissionBytes < 2000 ||
+            fullSceneTokenEstimate.Method != "deepseek-v4-chat-template-plus-structured-metadata" ||
+            projectedSceneTokenEstimate.Method != fullSceneTokenEstimate.Method ||
+            fullSceneTokenEstimate.TokenizerTokens <= projectedSceneTokenEstimate.TokenizerTokens)
+            throw new AgentHostException("establish-clan-companion-observation-projection-failed", "The model payload must omit the duplicated raw Tavern agent roster while preserving the Native scene identity and current Wanderer candidate summaries; byte and token-estimate reductions must be measurable. originalMissionBytes=" + originalMissionBytes + "; projectedMissionBytes=" + projectedMissionBytes + "; candidates=" + projectedCandidates?.Count + "; nearby=" + projectedNearby?.Count + "; fullPromptTokens=" + fullSceneTokenEstimate.TokenizerTokens + "; projectedPromptTokens=" + projectedSceneTokenEstimate.TokenizerTokens);
         return [
             new { scenario = "companion-navigation-stall-policy-excludes-only-after-two-no-progress-native-approaches", passed = true },
             new { scenario = "establish-clan-companion-targets-only-current-safe-unvisited-town-and-friendly-wanderer", passed = true },
             new { scenario = "establish-clan-companion-town-choice-window-pages-without-world-target-cap", passed = true, totalWorldTargets = 21, choiceWindow = SafeTownDecisionWindowSize },
-            new { scenario = "establish-clan-companion-model-observation-compacts-raw-mission-agent-roster-and-preserves-current-wanderer-candidates", originalMissionBytes, projectedMissionBytes, missionBytesSaved = originalMissionBytes - projectedMissionBytes, passed = true },
+            new { scenario = "establish-clan-companion-model-observation-compacts-raw-mission-agent-roster-and-preserves-current-wanderer-candidates", originalMissionBytes, projectedMissionBytes, missionBytesSaved = originalMissionBytes - projectedMissionBytes, fullPromptTokens = fullSceneTokenEstimate.TokenizerTokens, projectedPromptTokens = projectedSceneTokenEstimate.TokenizerTokens, estimatedPromptTokensSaved = fullSceneTokenEstimate.TokenizerTokens - projectedSceneTokenEstimate.TokenizerTokens, passed = true },
             new { scenario = "establish-clan-companion-dialogue-catalog-excludes-unrelated-native-options", passed = true },
             new { scenario = "establish-clan-companion-nearby-target-uses-native-interact", passed = true },
             new { scenario = "establish-clan-companion-rejects-unlisted-navigation-duration-with-current-catalog-values", passed = true },

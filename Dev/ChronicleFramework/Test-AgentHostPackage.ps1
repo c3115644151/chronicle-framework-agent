@@ -299,6 +299,22 @@ if ([int]$providerSelfTest.modelCalls -ne 0 -or [int]$providerSelfTest.nativeCom
     @($providerSelfTest.scenarios | Where-Object { -not $_.passed }).Count -gt 0) {
     throw 'The packaged Host provider/decision-loop regression must complete without a live model or Native game command.'
 }
+$companionProjection = @($providerSelfTest.scenarios | Where-Object { $_.scenario -eq 'establish-clan-companion-model-observation-compacts-raw-mission-agent-roster-and-preserves-current-wanderer-candidates' })
+if ($companionProjection.Count -ne 1 -or -not [bool]$companionProjection[0].passed -or
+    [int]$companionProjection[0].missionBytesSaved -le 0 -or
+    [int]$companionProjection[0].estimatedPromptTokensSaved -le 0) {
+    throw 'The packaged Host must retain a machine-readable Companion observation-projection receipt with both byte and tokenizer-estimate savings.'
+}
+$companionProjectionSummary = [ordered]@{
+    scenario = [string]$companionProjection[0].scenario
+    originalMissionBytes = [int]$companionProjection[0].originalMissionBytes
+    projectedMissionBytes = [int]$companionProjection[0].projectedMissionBytes
+    missionBytesSaved = [int]$companionProjection[0].missionBytesSaved
+    fullPromptTokens = [int]$companionProjection[0].fullPromptTokens
+    projectedPromptTokens = [int]$companionProjection[0].projectedPromptTokens
+    estimatedPromptTokensSaved = [int]$companionProjection[0].estimatedPromptTokensSaved
+    passed = [bool]$companionProjection[0].passed
+}
 if (-not [bool]$unboundParentProbe.Passed) { throw 'Packaged Host did not enforce its Bannerlord parent process identity before starting a campaign loop.' }
 
 $files = @(Get-ChildItem -LiteralPath $publishRoot -Recurse -File | Sort-Object FullName | ForEach-Object {
@@ -319,6 +335,7 @@ $manifest = [ordered]@{
     fileCount = $files.Count
     totalBytes = $totalBytes
     executable = 'ChronicleAgentHost.exe'
+    companionObservationProjection = $companionProjectionSummary
     files = $files
 }
 $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
@@ -336,6 +353,7 @@ $result = [ordered]@{
     CampaignLoopSelfTestScenarioCount = @($providerSelfTest.scenarios | Where-Object { $_.scenario -like 'campaign-loop-*' }).Count
     BattleSimulationLoopSelfTestScenarioCount = @($providerSelfTest.scenarios | Where-Object { $_.scenario -like 'battle-loop-*' }).Count
     SharedDecisionCycleScenarioCount = @($providerSelfTest.scenarios | Where-Object { $_.scenario -like 'shared-agent-host-decision-cycle-*' }).Count
+    CompanionObservationProjection = $companionProjectionSummary
     SelfTestModelCalls = [int]$providerSelfTest.modelCalls
     SelfTestNativeCommands = [int]$providerSelfTest.nativeCommands
     UnboundParentRejected = [bool]$unboundParentProbe.Passed
