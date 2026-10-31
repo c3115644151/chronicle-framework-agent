@@ -254,6 +254,17 @@ internal static class AgentHostEstablishClanCompanionLoop
         {
             ["context"] = new JsonObject { ["gameState"] = "MissionState", ["menuId"] = null, ["encounterActive"] = true },
             ["location"] = new JsonObject { ["currentSettlementId"] = "town-a" },
+            ["economy"] = new JsonObject { ["gold"] = 597 },
+            ["mainHeroSkills"] = new JsonObject
+            {
+                ["skills"] = new JsonArray(Enumerable.Range(0, 12).Select(index => (JsonNode?)new JsonObject
+                {
+                    ["id"] = "skill_" + index.ToString(CultureInfo.InvariantCulture),
+                    ["displayName"] = "Skill " + index.ToString(CultureInfo.InvariantCulture),
+                    ["level"] = 100 + index,
+                    ["focus"] = 5
+                }).ToArray())
+            },
             ["mission"] = new JsonObject
             {
                 ["active"] = true,
@@ -282,10 +293,14 @@ internal static class AgentHostEstablishClanCompanionLoop
         var originalMissionBytes = System.Text.Encoding.UTF8.GetByteCount(noisyTavernState["mission"]!.ToJsonString());
         var projectedMission = projectedCompanionObservation["state"]?["mission"] as JsonObject;
         var projectedMissionBytes = projectedMission is null ? int.MaxValue : System.Text.Encoding.UTF8.GetByteCount(projectedMission.ToJsonString());
+        var originalStateBytes = System.Text.Encoding.UTF8.GetByteCount(noisyTavernState.ToJsonString());
+        var projectedState = projectedCompanionObservation["state"] as JsonObject;
+        var projectedStateBytes = projectedState is null ? int.MaxValue : System.Text.Encoding.UTF8.GetByteCount(projectedState.ToJsonString());
         var projectedCandidates = projectedCompanionObservation["currentSceneWandererCandidates"] as JsonArray;
         var projectedNearby = projectedCompanionObservation["nearbyInteractableWanderers"] as JsonArray;
         var fullSceneObservation = projectedCompanionObservation.DeepClone().AsObject();
         fullSceneObservation["state"]!["mission"]!["nearbySceneAgents"] = noisyNearbyAgents.DeepClone();
+        fullSceneObservation["state"]!["mainHeroSkills"] = noisyTavernState["mainHeroSkills"]!.DeepClone();
         const string cacheCostEstimationSystemPrompt = "Stable EYC cost-estimation prefix. Choose only current listed Native actions.";
         var fullSceneContent = fullSceneObservation.ToJsonString();
         var projectedSceneContent = projectedCompanionObservation.ToJsonString();
@@ -295,12 +310,14 @@ internal static class AgentHostEstablishClanCompanionLoop
             projectedSceneContent, new Dictionary<string, object?>());
         if (projectedMission is null || projectedMission.ContainsKey("nearbySceneAgents") ||
             ReadString(projectedMission, "sceneName") != "empire_house_c_tavern_a" ||
+            projectedState is null || projectedState.ContainsKey("mainHeroSkills") ||
+            ReadInt(projectedState["economy"] as JsonObject, "gold", -1) != 597 ||
             projectedCandidates?.Count != 1 || ReadString(projectedCandidates[0] as JsonObject, "heroId") != "scene-agent-0" ||
-            projectedNearby?.Count != 1 || originalMissionBytes - projectedMissionBytes < 2000 ||
+            projectedNearby?.Count != 1 || originalMissionBytes - projectedMissionBytes < 2000 || originalStateBytes - projectedStateBytes < 2500 ||
             fullSceneTokenEstimate.Method != "deepseek-v4-chat-template-plus-structured-metadata" ||
             projectedSceneTokenEstimate.Method != fullSceneTokenEstimate.Method ||
             fullSceneTokenEstimate.TokenizerTokens <= projectedSceneTokenEstimate.TokenizerTokens)
-            throw new AgentHostException("establish-clan-companion-observation-projection-failed", "The model payload must omit the duplicated raw Tavern agent roster while preserving the Native scene identity and current Wanderer candidate summaries; byte and token-estimate reductions must be measurable. originalMissionBytes=" + originalMissionBytes + "; projectedMissionBytes=" + projectedMissionBytes + "; candidates=" + projectedCandidates?.Count + "; nearby=" + projectedNearby?.Count + "; fullPromptTokens=" + fullSceneTokenEstimate.TokenizerTokens + "; projectedPromptTokens=" + projectedSceneTokenEstimate.TokenizerTokens);
+            throw new AgentHostException("establish-clan-companion-observation-projection-failed", "The model payload must omit the raw Tavern agent roster and irrelevant MainHero skill list while preserving Native scene identity, current Wanderer summaries, and current Gold; byte/token savings must be measurable. originalMissionBytes=" + originalMissionBytes + "; projectedMissionBytes=" + projectedMissionBytes + "; originalStateBytes=" + originalStateBytes + "; projectedStateBytes=" + projectedStateBytes + "; candidates=" + projectedCandidates?.Count + "; nearby=" + projectedNearby?.Count + "; fullPromptTokens=" + fullSceneTokenEstimate.TokenizerTokens + "; projectedPromptTokens=" + projectedSceneTokenEstimate.TokenizerTokens);
         return [
             new { scenario = "companion-navigation-stall-policy-excludes-only-after-two-no-progress-native-approaches", passed = true },
             new { scenario = "establish-clan-companion-targets-only-current-safe-unvisited-town-and-friendly-wanderer", passed = true },
@@ -1184,6 +1201,7 @@ internal static class AgentHostEstablishClanCompanionLoop
         JsonObject? sceneAgentsReceipt, string? selectedHeroId, string? interactTargetHeroId, int traceCount)
     {
         var projectedState = state.DeepClone() as JsonObject ?? new JsonObject();
+        projectedState.Remove("mainHeroSkills");
         if (projectedState["mission"] is JsonObject projectedMission)
             projectedMission.Remove("nearbySceneAgents");
         var sceneCandidates = FilterWandererCandidates(sceneAgentsReceipt?["data"]?["agents"] as JsonArray, new HashSet<string>(StringComparer.Ordinal));

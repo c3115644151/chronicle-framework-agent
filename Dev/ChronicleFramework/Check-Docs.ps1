@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.463'
+$contractVersion = '7.464'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -1576,6 +1576,7 @@ if ($agentHostCompanionLoopSource -notmatch 'projectedMission\.Remove\("nearbySc
     $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-model-observation-compacts-raw-mission-agent-roster-and-preserves-current-wanderer-candidates' -or
     $agentHostCompanionLoopSource -notmatch 'DeepSeekPromptTokenEstimator\.EstimateRequest\(' -or
     $agentHostCompanionLoopSource -notmatch 'currentSceneWandererCandidates' -or
+    $agentHostCompanionLoopSource -notmatch 'projectedState\.Remove\("mainHeroSkills"\)' -or
     $agentHostCompanionLoopSource -notmatch 'SawCompanionObservationProjection' -or
     $agentHostCompanionLoopSource -notmatch 'nearbyInteractableWanderers') {
     throw 'Companion model input projection must remove only the duplicated raw scene roster, preserve the current candidate summaries and Native validation, and estimate its prompt-token reduction.'

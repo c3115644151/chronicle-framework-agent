@@ -272,7 +272,7 @@ internal static class AgentHostDecisionCycle
         CancellationToken cancellationToken)
     {
         var prompt = EstablishClanCompanionSystemPrompt +
-            " OBSERVATION PROJECTION: This hiring subgoal omits the bulky raw state.mission.nearbySceneAgents rows; use the complete currentSceneWandererCandidates and nearbyInteractableWanderers summaries instead. These summaries remain derived from the same current Native Tavern observation, while Host action validation still uses the full Native state.";
+            " OBSERVATION PROJECTION: This hiring subgoal omits raw state.mission.nearbySceneAgents rows and the MainHero skill list. The current Native offer text and clickable response already reflect the live hiring conditions; use that quote and the exact current options, never estimate them from skills. Use the complete currentSceneWandererCandidates and nearbyInteractableWanderers summaries and current Gold. Host action validation still uses the full Native state.";
         var feedback = request["decisionFeedback"] as JsonObject;
         if (ReadString(feedback, "kind") == "decision-rejected-before-native")
             prompt += " RECOVERY DIRECTIVE: The prior response was rejected before any Native action. Follow this exact next step using only the current catalog; do not repeat the rejected response. " +
