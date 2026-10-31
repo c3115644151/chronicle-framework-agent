@@ -1355,3 +1355,4 @@ MapState对话漏路已在BattleSimulation子循环补上：Native Observer只�
 ### 2026-10-31 EYC 父循环预算修正
 
 自然Campaign收据`TestResults/20261031-042808`显示EYC父循环在20个目标周期、243/320累计模型决策后结束，仍留有77个决策名额；根因是父循环独立的`cycle < 20`硬上限，而非Provider/模型/Native失败。现已移除固定20轮限制，父循环周期与该次请求的累计决策预算一致，2小时elapsed和token预算保持原值。`TestResults/20261031-185533`AgentHostPackage通过新增21轮Fake Native回归：前20轮各让Gold Journal有部分进展，第21轮才让Native Quest lifecycle变为completed；只有读取到这一原版终态时父循环才报告成功。该自测无模型调用、无游戏命令，证明Host不再因旧循环上限提前截断，不能证明自然模型Campaign完成。
+2026-10-31 Native Renown reward probe：`TestResults/20261031-200259/PostBattle.log`在`AgentBridgeLifecycle`受控Bandit BattleSimulation夹具中记录Clan Renown 20→22.562。原版`BattleRewardTelemetry`为胜方Renown基值2.440、玩家贡献1562、玩家队伍分配2.562，和Native前后值完全一致；PostBattle经Party/Inventory返回Map。测试不使用LLM，物品Loot由visual-only夹具添加且标记`naturalDrop=false`，源档未改、进程清理。此样本证明Native坐镇战斗可产生真实Renown；不证明自然StoryMode的平均收益、EYC Journal刷新或真实模型达到50。`AgentHostBattleSimulationEvaluation`仍是EYC Renown路径的直接自动化执行器；完整两档门禁未通过。
