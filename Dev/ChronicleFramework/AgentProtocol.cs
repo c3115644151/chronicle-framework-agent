@@ -228,7 +228,12 @@ internal sealed class ChronicleAgentProtocol
                 case "respondInquiry":
                     var inquiryChoice = ReadString(command, "choice");
                     var inquiryToken = ReadString(command, "token");
-                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleInquiryAdapter.Respond(inquiryToken, inquiryChoice));
+                    var inquiryResponse = ChronicleInquiryAdapter.Respond(inquiryToken, inquiryChoice);
+                    var tradeInquiryResolution = ChronicleAgentTradeAdapter.ResolvePendingConfirmationInquiry(inquiryToken, inquiryChoice);
+                    var inquiryResponseData = tradeInquiryResolution == null
+                        ? inquiryResponse
+                        : "{\"nativeInquiryResponse\":" + inquiryResponse + ",\"tradeResolution\":" + tradeInquiryResolution + "}";
+                    WriteResponse(commandId, action, "completed", behavior, null, inquiryResponseData);
                     break;
                 case "respondMultiSelectionInquiry":
                     var multiInquiryChoice = ReadString(command, "choice");

@@ -45,6 +45,13 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         };
         if (AgentHostCampaignStateFacts.IsActiveEncounter(tradeState) && IsActiveEncounter(tradeState))
             throw new AgentHostException("gold-sale-self-test-native-trade-misclassified-as-encounter", "The original settlement Trade InventoryState must not be treated as a hostile encounter when the Native encounter owner is the same current settlement.");
+        var tradeInquiryState = (JsonObject)tradeState.DeepClone();
+        tradeInquiryState["context"]!["inquiryOpen"] = true;
+        var acceptedTradeConfirmation = new JsonObject { ["action"] = "tradeConfirm", ["status"] = "accepted" };
+        if (!IsPendingNativeTradeConfirmation(tradeInquiryState, acceptedTradeConfirmation) ||
+            IsPendingNativeTradeConfirmation(tradeInquiryState, new JsonObject { ["action"] = "tradeConfirm", ["status"] = "completed" }) ||
+            IsPendingNativeTradeConfirmation(MapState(null, null, []), acceptedTradeConfirmation))
+            throw new AgentHostException("gold-sale-self-test-trade-inquiry-gate-failed", "Only a current InventoryState Trade inquiry immediately following an accepted Native tradeConfirm may enter the shared inquiry resolver.");
         var saleCatalog = BuildActionCatalog(tradeState, tradeOptions, null, null);
         var saleItemIds = saleCatalog[0]?["argumentValues"]?["ItemViewModelId"] as JsonArray;
         var saleAmountValues = saleCatalog[0]?["argumentValues"]?["Amount"] as JsonArray;
@@ -511,6 +518,85 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             {
                 elapsed.Token.ThrowIfCancellationRequested();
                 var state = currentNative["state"] as JsonObject ?? throw new AgentHostException("gold-sale-state-missing", "Native returned no Campaign state.");
+                if (ReadBoolean(state["context"] as JsonObject, "inquiryOpen"))
+                {
+                    if (!IsPendingNativeTradeConfirmation(state, previousReceipt))
+                        throw new AgentHostException("gold-sale-unexpected-native-inquiry", "The Gold sale loop will resolve only the Native Trade Done confirmation that it just received as accepted.");
+                    var inquiry = await AgentHostNativeInquiryResolution.RunAsync(stateClient, actionClient, provider, elapsed.Token,
+                        runId + "-trade-inquiry-" + (decisionCount + 1).ToString(CultureInfo.InvariantCulture),
+                        "Reach the current original Establish Your Clan Gold Journal target. Decide whether to accept the exact Native Trade capacity warning using the current sale amount and party state; accepting keeps the over-capacity risk, declining must leave the sale uncommitted.");
+                    decisionCount += ReadInt(inquiry, "decisions", 0);
+                    actionCount += ReadInt(inquiry, "actionsExecuted", 0);
+                    promptTokens += ReadLong(inquiry, "promptTokens", 0);
+                    completionTokens += ReadLong(inquiry, "completionTokens", 0);
+                    if (inquiry["providerRouteHistory"] is JsonArray inquiryRoutes)
+                        foreach (var route in inquiryRoutes) routeHistory.Add(route?.DeepClone());
+                    var inquiryData = inquiry["nativeReceipt"]?["data"] as JsonObject;
+                    var tradeResolution = inquiryData?["tradeResolution"] as JsonObject;
+                    trace.Add(new JsonObject
+                    {
+                        ["stage"] = "native-trade-capacity-inquiry",
+                        ["status"] = ReadString(inquiry, "status"),
+                        ["choice"] = ReadString(inquiry, "choice"),
+                        ["decision"] = inquiry["decision"]?.DeepClone(),
+                        ["nativeReceipt"] = inquiry["nativeReceipt"]?.DeepClone(),
+                        ["tradeResolution"] = tradeResolution?.DeepClone()
+                    });
+                    if (ReadString(inquiry, "status") != "resolved" || tradeResolution is null || ReadBoolean(tradeResolution, "postconditionPassed") != true)
+                        throw new AgentHostException(ReadString(inquiry, "failureCode") ?? "gold-sale-native-inquiry-unverified",
+                            ReadString(inquiry, "failure") ?? "The original Trade confirmation choice did not produce a verified Native result.");
+
+                    if (ReadString(inquiry, "choice") == "affirmative")
+                    {
+                        if (ReadBoolean(tradeResolution, "transactionCommitted") != true ||
+                            ReadString(tradeResolution, "direction") != "sell" || ReadInt(tradeResolution, "amount", 0) != 1 ||
+                            ReadInt(tradeResolution, "playerGoldAfter", 0) <= ReadInt(tradeResolution, "playerGoldBefore", 0) ||
+                            ReadInt(tradeResolution, "playerCountAfter", -1) != ReadInt(tradeResolution, "playerCountBefore", -1) - 1 ||
+                            ReadString(tradeResolution, "timeControlModeBefore") != ReadString(tradeResolution, "timeControlModeAfter") ||
+                            Math.Abs(ReadDouble(tradeResolution, "campaignDayBefore", double.NaN) - ReadDouble(tradeResolution, "campaignDayAfter", double.NaN)) > 0.000001 ||
+                            ReadInt(tradeResolution, "playerGoldAfter", 0) - ReadInt(tradeResolution, "playerGoldBefore", 0) != Math.Abs(ReadInt(tradeResolution, "nativeTransactionAmount", 0)))
+                            throw new AgentHostException("gold-sale-native-commit-unverified", "The Native Trade capacity confirmation did not prove one positive sale with matching Gold, inventory and unchanged Campaign time.");
+                        saleReceipt = tradeResolution.DeepClone() as JsonObject
+                            ?? throw new AgentHostException("gold-sale-trade-resolution-invalid", "The Native Trade Inquiry returned no structured commit receipt.");
+                        saleActionCount++;
+                        previousReceipt = new JsonObject { ["action"] = "tradeConfirm", ["status"] = "completed", ["data"] = tradeResolution.DeepClone() };
+                        using (var fresh = await stateClient.ReadStateAsync(elapsed.Token)) currentNative = ParseObject(fresh.RootElement);
+                        trace.Add(new JsonObject { ["stage"] = "native-trade-confirmed-state", ["nativeState"] = AgentHostHarnessProgressTrace.BuildNativeStateSummary(currentNative) });
+                        var finalState = currentNative["state"] as JsonObject ?? new JsonObject();
+                        if (!IsFreeCampaignMap(finalState) || !HasActiveQuest(finalState))
+                            throw new AgentHostException("gold-sale-final-map-or-quest-invalid", "After the confirmed sale, Native did not return to a free Map with the original StoryMode quest still active.");
+                        using var afterDetails = await actionClient.ReadQuestDetailsAsync(QuestId, elapsed.Token);
+                        (objectiveSnapshotAfter, liveMetricDifferencesAfter) = ReadGoldJournal(afterDetails.RootElement);
+                        var beforeGold = objectiveSnapshotBefore["gold"] as JsonObject;
+                        var afterGold = objectiveSnapshotAfter["gold"] as JsonObject;
+                        if (ReadDouble(afterGold, "current", double.MinValue) <= ReadDouble(beforeGold, "current", double.MaxValue))
+                            throw new AgentHostException("gold-sale-journal-not-increased", "Native proved the transaction, but the original Quest Journal Gold progress did not advance; no further sale was attempted.");
+                        return BuildSuccess(runId, provider, initialNative, currentNative, objectiveSnapshotBefore, objectiveSnapshotAfter,
+                            liveMetricDifferencesBefore, liveMetricDifferencesAfter, saleReceipt, previousReceipt, trace, routeHistory,
+                            decisionCount, actionCount, saleActionCount, promptTokens, completionTokens, campaignDayBefore,
+                            timeControlModeBefore, initialCaptivityRecovery);
+                    }
+
+                    if (ReadString(inquiry, "choice") != "negative" || ReadBoolean(tradeResolution, "transactionCommitted") ||
+                        ReadBoolean(tradeResolution, "nativeDraftStillPending") != true)
+                        throw new AgentHostException("gold-sale-negative-inquiry-result-invalid", "Declining the capacity warning must leave the sale uncommitted and the Native draft explicitly pending for cancellation.");
+                    using (var cancel = await actionClient.ExecuteGoldSaleActionAsync("tradeCancelChanges", new JsonObject(), elapsed.Token))
+                    {
+                        var cancelReceipt = ParseObject(cancel.RootElement);
+                        actionCount++;
+                        var cancelData = cancelReceipt["data"] as JsonObject;
+                        if (ReadString(cancelReceipt, "status") != "completed" || ReadBoolean(cancelData, "discardConfirmed") != true ||
+                            ReadBoolean(cancelData, "returnedToMap") != true || ReadBoolean(cancelData, "tradeStateStillActive") == true ||
+                            ReadInt(tradeResolution, "playerGoldAfter", -1) != ReadInt(tradeResolution, "playerGoldBefore", -2) ||
+                            ReadInt(tradeResolution, "playerCountAfter", -1) != ReadInt(tradeResolution, "playerCountBefore", -2))
+                            throw new AgentHostException("gold-sale-negative-inquiry-cancel-unverified", "The Native decline left its draft open, but Native Trade Cancel did not discard it and return to the Campaign Map without committing the sale.");
+                        previousReceipt = BuildReceipt("tradeCancelChanges", new JsonObject(), cancelReceipt);
+                        using var fresh = await stateClient.ReadStateAsync(elapsed.Token);
+                        currentNative = ParseObject(fresh.RootElement);
+                        trace.Add(new JsonObject { ["stage"] = "native-trade-draft-declined-and-discarded", ["nativeReceipt"] = cancelReceipt.DeepClone(), ["nativeState"] = AgentHostHarnessProgressTrace.BuildNativeStateSummary(currentNative) });
+                    }
+                    continue;
+                }
                 if (IsActiveEncounter(state) || ReadBoolean((state["context"] as JsonObject)?["captivity"] as JsonObject, "isCaptive"))
                     throw new AgentHostException("gold-sale-encounter-out-of-scope", "A new encounter or Captivity interrupted the sale path; no battle or unverified recovery was started.");
 
@@ -626,6 +712,15 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 using var actionResponse = await actionClient.ExecuteGoldSaleActionAsync(action!, arguments!, elapsed.Token);
                 var receipt = ParseObject(actionResponse.RootElement);
                 actionCount++;
+                if (action == "tradeConfirm" && ReadString(receipt, "status") == "accepted")
+                {
+                    previousReceipt = BuildReceipt(action!, arguments!, receipt);
+                    using (var fresh = await stateClient.ReadStateAsync(elapsed.Token)) currentNative = ParseObject(fresh.RootElement);
+                    trace.Add(BuildStep(decisionCount, observation, modelDecision.Decision, previousReceipt, started, startedTicks,
+                        new JsonObject { ["kind"] = "native-capacity-confirmation-pending", ["nativeConfirmationAccepted"] = true },
+                        BuildObservation(currentNative, currentNative["state"] as JsonObject ?? new JsonObject(), objectiveSnapshotBefore, liveMetricDifferencesBefore, saleReceipt)));
+                    continue;
+                }
                 if (ReadString(receipt, "status") != "completed")
                     throw new AgentHostException("gold-sale-native-action-rejected", $"Native rejected the current {action} action; no replay was attempted.");
 
@@ -918,6 +1013,13 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             ["argumentValues"] = new JsonObject { ["SettlementId"] = new JsonArray(ids.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray()) }
         });
     }
+
+    private static bool IsPendingNativeTradeConfirmation(JsonObject state, JsonObject? previousReceipt) =>
+        ReadString(state["context"] as JsonObject, "gameState") == "InventoryState" &&
+        ReadString(state["inventoryScreen"] as JsonObject, "mode") == "Trade" &&
+        ReadBoolean(state["context"] as JsonObject, "inquiryOpen") &&
+        ReadString(previousReceipt, "action") == "tradeConfirm" &&
+        ReadString(previousReceipt, "status") == "accepted";
 
     private static JsonArray BuildControlCatalog(JsonObject state, string? moveTargetId, bool moveStartPending = false)
     {
@@ -1464,6 +1566,12 @@ internal static class AgentHostEstablishClanGoldSaleLoop
 
         public Task<JsonDocument> ExecuteCaptivityRecoveryActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken) =>
             throw new AgentHostException("gold-sale-failure-selftest-unexpected-captivity-action", "The fake Native source is not captive.");
+
+        public Task<JsonDocument> RespondNativeInquiryAsync(string token, string choice, CancellationToken cancellationToken) =>
+            throw new AgentHostException("gold-sale-failure-selftest-unexpected-inquiry", "The provider-failure fake must stop before any Native Inquiry is opened or answered.");
+
+        public Task<JsonDocument> SubmitStoryModeClanNameAsync(string token, string clanName, CancellationToken cancellationToken) =>
+            throw new AgentHostException("gold-sale-failure-selftest-unexpected-clan-name", "The provider-failure fake must not enter StoryMode family-name setup.");
 
         public Task<JsonDocument> ExecuteGoldSaleActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
         {

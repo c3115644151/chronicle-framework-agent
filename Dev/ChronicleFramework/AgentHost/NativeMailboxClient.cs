@@ -143,7 +143,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
     public Task<JsonDocument> ExecuteGoldSaleActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
     {
         ValidateGoldSaleAction(action, arguments);
-        return SendAsync(action, arguments, acceptedResponseExpected: false, cancellationToken);
+        return SendAsync(action, arguments, acceptedResponseExpected: action == "tradeConfirm", cancellationToken);
     }
 
     public Task<JsonDocument> ExecuteRecruitmentActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
@@ -330,6 +330,58 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             catch (AgentHostException exception) when (exception.Code == "native-action-not-in-gold-sale-scope") { }
         }
         return [new { scenario = "gold-sale-native-mailbox-allows-only-one-current-player-inventory-sale-and-no-clock-controls", validCases = validCases.Length, invalidCases = invalidCases.Length, passed = true }];
+    }
+
+    internal static async Task<IReadOnlyList<object>> RunGoldSaleAcceptedResponseTransportSelfTestsAsync()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ChronicleGoldSaleAcceptedMailbox-" + Guid.NewGuid().ToString("N"));
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        Task<JsonDocument>? pendingCommand = null;
+        try
+        {
+            var responses = Path.Combine(root, "responses");
+            Directory.CreateDirectory(responses);
+            var client = new NativeMailboxClient(root, TimeSpan.FromSeconds(2));
+            pendingCommand = client.ExecuteGoldSaleActionAsync("tradeConfirm", new JsonObject(), cancellation.Token);
+            var commandPath = Path.Combine(root, "command.json");
+            JsonObject? command = null;
+            for (var attempt = 0; attempt < 100 && command is null; attempt++)
+            {
+                if (File.Exists(commandPath))
+                {
+                    try { command = JsonNode.Parse(await File.ReadAllTextAsync(commandPath)) as JsonObject; }
+                    catch (IOException) { }
+                    catch (JsonException) { }
+                }
+                if (command is null) await Task.Delay(10);
+            }
+            var commandId = command?["id"]?.GetValue<string>();
+            if (string.IsNullOrWhiteSpace(commandId) || command?["action"]?.GetValue<string>() != "tradeConfirm")
+                throw new AgentHostException("gold-sale-accepted-mailbox-command-missing", "The Native Trade confirm transport did not publish its correlated command.");
+            var accepted = new JsonObject
+            {
+                ["protocolVersion"] = 1,
+                ["commandId"] = commandId,
+                ["action"] = "tradeConfirm",
+                ["status"] = "accepted"
+            };
+            await File.WriteAllTextAsync(Path.Combine(responses, commandId + ".accepted.json"), accepted.ToJsonString());
+            using var response = await pendingCommand;
+            if (response.RootElement.GetProperty("status").GetString() != "accepted")
+                throw new AgentHostException("gold-sale-accepted-mailbox-response-lost", "The Native Trade confirm transport did not return the correlated accepted Inquiry response.");
+            return [new { scenario = "gold-sale-trade-confirm-returns-native-accepted-inquiry-before-commit", passed = true }];
+        }
+        finally
+        {
+            cancellation.Cancel();
+            if (pendingCommand is { IsCompleted: false })
+            {
+                try { using var ignored = await pendingCommand; }
+                catch (OperationCanceledException) { }
+                catch (AgentHostException) { }
+            }
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
     }
 
     internal static JsonObject BuildQuestDetailsArguments(string questId)

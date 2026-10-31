@@ -34,6 +34,7 @@ internal static class ChronicleAgentTradeAdapter
         internal int TransactionAmount;
         internal string TimeControlModeBefore;
         internal double CampaignDayBefore;
+        internal string ConfirmationInquiryToken;
     }
 
     private static PendingTradeDraft _pendingDraft;
@@ -361,6 +362,8 @@ internal static class ChronicleAgentTradeAdapter
         var state = Game.Current?.GameStateManager?.ActiveState;
         var returnedToMapState = state is MapState;
         var tradeStillOpen = state is InventoryState remainingInventory && remainingInventory.InventoryMode == InventoryScreenHelper.InventoryMode.Trade;
+        if (!returnedToMapState && tradeStillOpen && ChronicleInquiryAdapter.IsInquiryOpen)
+            pending.ConfirmationInquiryToken = ChronicleInquiryAdapter.GetCurrentYesNoInquiryToken();
         var currentSettlement = Settlement.CurrentSettlement;
         var playerCountAfter = CountExact(MobileParty.MainParty.ItemRoster, pending.Element);
         var marketCountAfter = CountExact(currentSettlement?.SettlementComponent?.Owner?.ItemRoster, pending.Element);
@@ -399,6 +402,71 @@ internal static class ChronicleAgentTradeAdapter
         ChroniclePartyUpgradeAdapter.Property(json, "timeControlModeBefore", pending.TimeControlModeBefore);
         ChroniclePartyUpgradeAdapter.Property(json, "timeControlModeAfter", timeModeBefore);
         json.Append(",\"campaignDayAtCommit\":").Append(dayBefore.ToString("F6", System.Globalization.CultureInfo.InvariantCulture));
+        return json.Append('}').ToString();
+    }
+
+    internal static string ResolvePendingConfirmationInquiry(string token, string choice)
+    {
+        var pending = _pendingDraft;
+        if (pending == null || string.IsNullOrWhiteSpace(pending.ConfirmationInquiryToken) ||
+            !string.Equals(token, pending.ConfirmationInquiryToken, StringComparison.Ordinal)) return null;
+        if (choice is not ("affirmative" or "negative")) throw new InvalidOperationException("A Native Trade confirmation requires its current affirmative or negative choice");
+
+        var state = Game.Current?.GameStateManager?.ActiveState;
+        var currentSettlement = Settlement.CurrentSettlement;
+        var playerCountAfter = CountExact(MobileParty.MainParty.ItemRoster, pending.Element);
+        var marketCountAfter = CountExact(currentSettlement?.SettlementComponent?.Owner?.ItemRoster, pending.Element);
+        var playerGoldAfter = Hero.MainHero.Gold;
+        var merchantGoldAfter = currentSettlement?.SettlementComponent?.Gold ?? 0;
+        var timeModeAfter = Campaign.Current.TimeControlMode.ToString();
+        var campaignDayAfter = CampaignTime.Now.ToDays;
+        var timeUnchanged = string.Equals(pending.TimeControlModeBefore, timeModeAfter, StringComparison.Ordinal) &&
+            Math.Abs(pending.CampaignDayBefore - campaignDayAfter) <= 0.000001;
+        var expectedPlayerCount = pending.Direction == "buy" ? pending.PlayerCountBefore + pending.Amount : pending.PlayerCountBefore - pending.Amount;
+        var expectedMarketCount = pending.Direction == "buy" ? pending.MarketCountBefore - pending.Amount : pending.MarketCountBefore + pending.Amount;
+        var expectedPlayerGold = pending.PlayerGoldBefore - pending.TransactionAmount;
+        var expectedMerchantGold = pending.MerchantGoldBefore + pending.TransactionAmount;
+        var transactionCommitted = playerCountAfter == expectedPlayerCount && marketCountAfter == expectedMarketCount &&
+            playerGoldAfter == expectedPlayerGold && merchantGoldAfter == expectedMerchantGold;
+        var transactionUnchanged = playerCountAfter == pending.PlayerCountBefore && marketCountAfter == pending.MarketCountBefore &&
+            playerGoldAfter == pending.PlayerGoldBefore && merchantGoldAfter == pending.MerchantGoldBefore;
+        var tradeStillOpen = state is InventoryState inventory && inventory.InventoryMode == InventoryScreenHelper.InventoryMode.Trade;
+        var nativeDraftStillPending = tradeStillOpen && ((InventoryState)state).InventoryLogic.IsThereAnyChanges();
+        var mapReturned = state is MapState;
+        var postconditionPassed = choice == "affirmative"
+            ? mapReturned && transactionCommitted && timeUnchanged
+            : transactionUnchanged && timeUnchanged && (nativeDraftStillPending || mapReturned);
+
+        if (choice == "affirmative" && mapReturned) _pendingDraft = null;
+        else if (choice == "negative" && postconditionPassed && nativeDraftStillPending) pending.ConfirmationInquiryToken = null;
+        else if (choice == "negative" && postconditionPassed && mapReturned) _pendingDraft = null;
+        else if (mapReturned) _pendingDraft = null;
+
+        var json = new StringBuilder(1024);
+        json.Append('{').Append("\"schemaVersion\":1");
+        ChroniclePartyUpgradeAdapter.Property(json, "choice", choice);
+        ChroniclePartyUpgradeAdapter.Property(json, "direction", pending.Direction);
+        ChroniclePartyUpgradeAdapter.Property(json, "settlementId", pending.SettlementId);
+        ChroniclePartyUpgradeAdapter.Property(json, "itemId", pending.Element.Item?.StringId);
+        ChroniclePartyUpgradeAdapter.Property(json, "modifierId", pending.Element.ItemModifier?.StringId);
+        json.Append(",\"amount\":").Append(pending.Amount);
+        json.Append(",\"nativeTransactionAmount\":").Append(pending.TransactionAmount);
+        json.Append(",\"postconditionPassed\":").Append(ChroniclePartyUpgradeAdapter.Bool(postconditionPassed));
+        json.Append(",\"transactionCommitted\":").Append(ChroniclePartyUpgradeAdapter.Bool(transactionCommitted));
+        json.Append(",\"nativeDraftStillPending\":").Append(ChroniclePartyUpgradeAdapter.Bool(nativeDraftStillPending));
+        json.Append(",\"nativeTransactionClosed\":").Append(ChroniclePartyUpgradeAdapter.Bool(mapReturned));
+        json.Append(",\"playerCountBefore\":").Append(pending.PlayerCountBefore);
+        json.Append(",\"playerCountAfter\":").Append(playerCountAfter);
+        json.Append(",\"marketCountBefore\":").Append(pending.MarketCountBefore);
+        json.Append(",\"marketCountAfter\":").Append(marketCountAfter);
+        json.Append(",\"playerGoldBefore\":").Append(pending.PlayerGoldBefore);
+        json.Append(",\"playerGoldAfter\":").Append(playerGoldAfter);
+        json.Append(",\"merchantGoldBefore\":").Append(pending.MerchantGoldBefore);
+        json.Append(",\"merchantGoldAfter\":").Append(merchantGoldAfter);
+        json.Append(",\"campaignDayBefore\":").Append(pending.CampaignDayBefore.ToString("F6", System.Globalization.CultureInfo.InvariantCulture));
+        json.Append(",\"campaignDayAfter\":").Append(campaignDayAfter.ToString("F6", System.Globalization.CultureInfo.InvariantCulture));
+        ChroniclePartyUpgradeAdapter.Property(json, "timeControlModeBefore", pending.TimeControlModeBefore);
+        ChroniclePartyUpgradeAdapter.Property(json, "timeControlModeAfter", timeModeAfter);
         return json.Append('}').ToString();
     }
 

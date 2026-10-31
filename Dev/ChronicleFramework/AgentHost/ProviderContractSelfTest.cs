@@ -39,6 +39,8 @@ internal static class ProviderContractSelfTest
         results.AddRange(NativeMailboxClient.RunStoryModeClanNameContractSelfTests());
         results.AddRange(NativeMailboxClient.RunBattleSimulationActionContractSelfTests());
         results.AddRange(NativeMailboxClient.RunGoldSaleActionContractSelfTests());
+        try { results.AddRange(await NativeMailboxClient.RunGoldSaleAcceptedResponseTransportSelfTestsAsync()); }
+        catch (Exception exception) { throw new AgentHostException("gold-sale-accepted-response-transport-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
         results.AddRange(NativeMailboxClient.RunRecruitmentActionContractSelfTests());
         results.AddRange(NativeMailboxClient.RunTrainingIssueActionContractSelfTests());
         results.AddRange(NativeMailboxClient.RunCompanionHiringActionContractSelfTests());

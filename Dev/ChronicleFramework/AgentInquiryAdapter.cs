@@ -41,6 +41,13 @@ internal static class ChronicleInquiryAdapter
 
     internal static bool IsInquiryOpen => InformationManager.IsAnyInquiryActive();
 
+    internal static string GetCurrentYesNoInquiryToken()
+    {
+        EnsureLifecycleTracking();
+        if (!IsInquiryOpen || !TryReadNativeActiveQuery(out var queryData, out _, out _, out _)) return null;
+        return queryData is InquiryData inquiry ? GetToken(inquiry) : null;
+    }
+
     internal static string BuildMapInquiryJson()
     {
         EnsureLifecycleTracking();

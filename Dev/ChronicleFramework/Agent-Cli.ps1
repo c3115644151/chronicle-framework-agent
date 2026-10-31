@@ -859,7 +859,7 @@ switch ($Action) {
         if (-not $ItemViewModelId -or $Amount -le 0) { throw '-ItemViewModelId and a positive -Amount from the current native foodOptions result are required for provision.' }
         $result = Invoke-ProtocolCommand 'provision' @{ itemViewModelId = $ItemViewModelId; amount = $Amount }
     }
-    'tradeConfirm' { $result = Invoke-ProtocolCommand 'tradeConfirm' }
+    'tradeConfirm' { $result = Invoke-ProtocolCommand 'tradeConfirm' @{} -ReturnWhenAccepted:$ReturnWhenAccepted }
     'tradeCancel' { $result = Invoke-ProtocolCommand 'tradeCancel' }
     'tradeCancelChanges' { $result = Invoke-ProtocolCommand 'tradeCancelChanges' }
     'barterOptions' { $result = Invoke-ProtocolCommand 'barterOptions' }

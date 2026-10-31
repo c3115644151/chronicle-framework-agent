@@ -59,7 +59,8 @@ internal interface IAgentHostBattleSimulationNativeClient : IAgentHostCampaignNa
     Task<JsonDocument> PauseForVisibleHostileDecisionAsync(CancellationToken cancellationToken);
 }
 
-internal interface IAgentHostGoldSaleNativeClient : IAgentHostCampaignNativeClient, IAgentHostQuestDetailsNativeClient, IAgentHostCaptivityRecoveryNativeClient
+internal interface IAgentHostGoldSaleNativeClient : IAgentHostCampaignNativeClient, IAgentHostQuestDetailsNativeClient,
+    IAgentHostCaptivityRecoveryNativeClient, IAgentHostNativeInquiryClient
 {
     Task<JsonDocument> ExecuteGoldSaleActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken);
 }
