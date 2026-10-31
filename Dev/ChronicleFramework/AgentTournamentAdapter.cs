@@ -70,7 +70,23 @@ internal static class ChronicleTournamentAdapter
         AppendBoolean(json, "canPlayerJoin", ReadBoolean(viewModel, "CanPlayerJoin"));
         AppendBoolean(json, "isCurrentMatchActive", ReadBoolean(viewModel, "IsCurrentMatchActive"));
         AppendBoolean(json, "isTournamentIncomplete", ReadBoolean(viewModel, "IsTournamentIncomplete"));
-        AppendBoolean(json, "isOver", ReadBoolean(viewModel, "IsOver"));
+        var isOver = ReadBoolean(viewModel, "IsOver");
+        AppendBoolean(json, "isOver", isOver);
+        var winner = isOver ? ReadProperty(tournament, "Winner") : null;
+        var winnerCharacter = ReadProperty(winner, "Character");
+        json.Append(",\"result\":");
+        if (!isOver) json.Append("null");
+        else
+        {
+            json.Append("{\"resolved\":").Append(winnerCharacter != null ? "true" : "false");
+            if (winnerCharacter != null)
+            {
+                AppendString(json, "winnerCharacterId", ReadString(winnerCharacter, "StringId"));
+                AppendString(json, "winnerName", ReadProperty(winnerCharacter, "Name")?.ToString());
+                AppendBoolean(json, "playerWon", ReadBoolean(winnerCharacter, "IsPlayerCharacter"));
+            }
+            json.Append('}');
+        }
         AppendBoolean(json, "isBetButtonEnabled", ReadBoolean(viewModel, "IsBetButtonEnabled"));
         AppendInteger(json, "activeRoundIndex", ReadInteger(viewModel, "ActiveRoundIndex"));
         AppendInteger(json, "maximumBetValue", ReadInteger(viewModel, "MaximumBetValue"));
