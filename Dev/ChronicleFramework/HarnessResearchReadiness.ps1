@@ -1,5 +1,5 @@
 ﻿$script:AuditedHarnessDiagnosticSource = 'SubModule.cs'
-$script:AuditedHarnessDiagnosticSha256 = 'c4582802ec4db2d8714134c0af41b3f6f0ec0a47b91931734fda2e071882a3db'
+$script:AuditedHarnessDiagnosticSha256 = '4b027bfa5d5543a8f715d031e87ccfa33d2a5ab8dbf8acddf80f94dc4c8a665d'
 
 function Get-ChronicleCanonicalTextSha256 {
     [CmdletBinding()]
@@ -41,7 +41,7 @@ function Get-ChronicleResearchReadiness {
     }
     if ($changed.Count -eq 1 -and $changed[0] -eq $script:AuditedHarnessDiagnosticSource -and
         $AuditedHarnessDiagnosticSha256 -eq $script:AuditedHarnessDiagnosticSha256) {
-        return [pscustomobject]@{ Allowed = $true; ChangedSources = $changed; Reason = 'exact reviewed SubModule Harness-only controls; player input ownership is unchanged, initial music readiness is one-time, StoryMode continues observing when the Issue probe is skipped, seed SaveAs remains scoped to the owned StoryMode environment after the Host lifecycle mode transition, and state-transition diagnostics handle unavailable pre-campaign globals' }
+        return [pscustomobject]@{ Allowed = $true; ChangedSources = $changed; Reason = 'exact reviewed SubModule Harness-only controls; player input ownership is unchanged, initial music readiness is one-time, StoryMode continues observing when the Issue probe is skipped, seed SaveAs remains scoped to the owned StoryMode environment after the Host lifecycle mode transition, state-transition diagnostics handle unavailable pre-campaign globals, and disposable battle fixtures cap recruitment and disable AI only on the temporary PostBattle opponent' }
     }
     [pscustomobject]@{
         Allowed = $false

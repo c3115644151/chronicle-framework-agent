@@ -9,6 +9,7 @@ using HarmonyLib;
 using MCM.Abstractions;
 using SandBox.View.Map;
 using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.CampaignSystem.GameState;
 using TaleWorlds.CampaignSystem.Party;
 using TaleWorlds.CampaignSystem.Party.PartyComponents;
@@ -586,10 +587,10 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
         var harnessMode = Environment.GetEnvironmentVariable(HarnessModeVariable);
         ChronicleDiagnostics.Write($"campaign-loaded|mode={harnessMode ?? "normal"}|version={_stateVersion}|count={_dailyTickCount}|day={_lastDailyTickDay:F3}");
         if (harnessMode == "battle-fixture" || harnessMode == "visual-battle-fixture")
-            CreateDisposableBattleFixture(harnessMode == "visual-battle-fixture");
+            CreateDisposableBattleFixture(harnessMode == "visual-battle-fixture", harnessMode == "visual-battle-fixture");
     }
 
-    private static void CreateDisposableBattleFixture(bool seedItemLoot)
+    private static void CreateDisposableBattleFixture(bool seedItemLoot, bool disableOpponentAiForBattleProbe)
     {
         try
         {
@@ -611,14 +612,25 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
             if (hostileClan == null || partyTemplate == null || looterCharacter == null || testRecruit == null || homeSettlement == null || (seedItemLoot && testLootItem == null))
                 throw new InvalidOperationException("Native hostile clan, looter template or home settlement is unavailable.");
 
-            mainParty.MemberRoster.AddToCounts(testRecruit, 19, insertAtFront: false, woundedCount: 0, xpChange: 0, removeDepleted: true, index: -1);
+            // Keep the disposable test encounter near the same scale for either
+            // the one-person lifecycle seed or a progressed StoryMode checkpoint.
+            var recruitsToAdd = Math.Max(0, 20 - mainParty.MemberRoster.TotalManCount);
+            if (recruitsToAdd > 0)
+                mainParty.MemberRoster.AddToCounts(testRecruit, recruitsToAdd, insertAtFront: false, woundedCount: 0, xpChange: 0, removeDepleted: true, index: -1);
 
             var enemyParty = BanditPartyComponent.CreateLooterParty(
                 "chronicle_harness_looters", hostileClan, homeSettlement, false, partyTemplate, mainParty.Position + new Vec2(0.5f, 0f));
             enemyParty.MemberRoster.Clear();
             enemyParty.MemberRoster.AddToCounts(looterCharacter, 19, insertAtFront: false, woundedCount: 0, xpChange: 0, removeDepleted: true, index: -1);
-            enemyParty.SetMoveEngageParty(mainParty, MobileParty.NavigationType.Default);
-            ChronicleDiagnostics.Write($"battle-fixture-ready|party={enemyParty.StringId}|hostile={FactionManager.IsAtWarAgainstFaction(mainParty.MapFaction, enemyParty.MapFaction)}|enemyCount={enemyParty.MemberRoster.TotalManCount}|playerCount={mainParty.MemberRoster.TotalManCount}|lootFixtureEnabled={seedItemLoot}|lootFixtureItemId={testLootItem?.StringId}|playerMode={mainParty.DefaultBehavior}|clock={Campaign.Current.TimeControlMode}");
+            if (disableOpponentAiForBattleProbe)
+            {
+                enemyParty.Ai.DisableAi();
+            }
+            else
+            {
+                enemyParty.SetMoveEngageParty(mainParty, MobileParty.NavigationType.Default);
+            }
+            ChronicleDiagnostics.Write($"battle-fixture-ready|party={enemyParty.StringId}|hostile={FactionManager.IsAtWarAgainstFaction(mainParty.MapFaction, enemyParty.MapFaction)}|enemyCount={enemyParty.MemberRoster.TotalManCount}|playerCount={mainParty.MemberRoster.TotalManCount}|lootFixtureEnabled={seedItemLoot}|lootFixtureItemId={testLootItem?.StringId}|opponentAiDisabledForBattleProbe={disableOpponentAiForBattleProbe}|playerMode={mainParty.DefaultBehavior}|clock={Campaign.Current.TimeControlMode}");
         }
         catch (Exception exception)
         {

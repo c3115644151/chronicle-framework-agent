@@ -28,7 +28,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.464'
+$HarnessContractVersion = '7.473'
 $effectiveSmokeTimeoutSeconds = if ($Phase -in @('FreshStoryModeModelEvaluation','PersistentEycCampaign','FreshStoryModeNativeInquiryResponseEvaluation','AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostEstablishClanAutonomyEvaluation','AgentHostCaptivityRecoveryEvaluation','AgentHostEstablishClanGoldSaleEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max($SmokeTimeoutSeconds, 240) } else { $SmokeTimeoutSeconds }
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
@@ -1558,14 +1558,20 @@ foreach ($stage in $requestedStages) {
         }
         'BattleFixture' {
             Invoke-Stage -Name 'BattleFixture' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $battleFixtureScript
-                if ($LASTEXITCODE -ne 0) { throw "Battle fixture test failed with exit code $LASTEXITCODE." }
+                $childOutputPath = Join-Path $harnessTempDirectory 'BattleFixtureChild.log'
+                $childOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $battleFixtureScript -LoadSaveName $BattleSimulationSourceSaveName 2>&1 | Out-String
+                $childOutput | Set-Content -LiteralPath $childOutputPath -Encoding UTF8
+                if ($LASTEXITCODE -ne 0) { throw "Battle fixture test failed with exit code $LASTEXITCODE. Child output: $childOutput" }
+                $childOutput
             }
         }
         'PostBattle' {
             Invoke-Stage -Name 'PostBattle' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $battleFixtureScript -Scenario PostBattle -CaptureFrames
-                if ($LASTEXITCODE -ne 0) { throw "Postbattle test failed with exit code $LASTEXITCODE." }
+                $childOutputPath = Join-Path $harnessTempDirectory 'PostBattleChild.log'
+                $childOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $battleFixtureScript -LoadSaveName $BattleSimulationSourceSaveName -Scenario PostBattle -CaptureFrames 2>&1 | Out-String
+                $childOutput | Set-Content -LiteralPath $childOutputPath -Encoding UTF8
+                if ($LASTEXITCODE -ne 0) { throw "Postbattle test failed with exit code $LASTEXITCODE. Child output: $childOutput" }
+                $childOutput
             }
         }
         'VisualCapture' {

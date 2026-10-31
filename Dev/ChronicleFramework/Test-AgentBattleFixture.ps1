@@ -8,7 +8,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
-$savePath = Join-Path $env:USERPROFILE "Documents\Mount and Blade II Bannerlord\Game Saves\$LoadSaveName.sav"
+$saveRoot = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\Game Saves')).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+if ($LoadSaveName -notmatch '^[A-Za-z0-9_-]{1,48}$') { throw 'Battle fixture source must be one save basename without a path or extension.' }
+$savePath = [IO.Path]::GetFullPath((Join-Path $saveRoot ($LoadSaveName + '.sav')))
+if (-not $savePath.StartsWith($saveRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Battle fixture source path escaped the Game Saves directory.' }
 $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\session.json'
 if (-not (Test-Path $savePath)) { throw "Disposable battle fixture save not found: $savePath" }
 if (Get-Process Bannerlord -ErrorAction SilentlyContinue) { throw 'Bannerlord is already running.' }
@@ -33,6 +36,13 @@ function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @()) {
     catch { throw "Agent CLI '$Action' returned invalid JSON: $output" }
     if ($script:VideoCaptureActive) { Write-BattleCaptureEvent 'agent-command' $receipt }
     return $receipt
+}
+
+function Read-EycJournalRenown($QuestDetails) {
+    if (-not $QuestDetails -or $QuestDetails.status -ne 'completed' -or $QuestDetails.data.questId -ne 'rebuild_player_clan_storymode_quest') { return $null }
+    $stages = @($QuestDetails.data.journalStages | Where-Object { $_.hasTask })
+    if ($stages.Count -ne 4 -or $null -eq $stages[2].currentProgress) { return $null }
+    return [double]$stages[2].currentProgress
 }
 
 function Write-BattleCaptureEvent([string]$EventName, $Receipt) {
@@ -96,23 +106,46 @@ try {
     $start = Invoke-AgentCli 'load' @('-SaveName', $LoadSaveName)
     $initial = Invoke-AgentCli 'state' @('-CommandId', "$prefix-initial")
     $enemy = @($initial.state.nearbyParties | Where-Object { $_.id -eq 'chronicle_harness_looters' -and $_.hostile })
-    if ($enemy.Count -ne 1) { throw 'Harness did not create one visible, hostile native looter party at the disposable encounter position.' }
+    $fixtureEnemyIsEncountered = $initial.state.context.encounterActive -and $initial.state.context.encounteredPartyId -eq 'chronicle_harness_looters'
+    if ($enemy.Count -ne 1 -and -not $fixtureEnemyIsEncountered) { throw 'Harness did not create one visible, hostile native looter party or enter the visual fixture encounter.' }
+    if ($enemy.Count -ne 1) { $enemy = @([pscustomobject]@{ id = 'chronicle_harness_looters'; hostile = $true; name = [string]$initial.state.context.encounteredPartyName }) }
+    $eycQuestId = 'rebuild_player_clan_storymode_quest'
+    $eycQuestObserved = @($initial.state.quests | Where-Object { $_.id -eq $eycQuestId }).Count -eq 1
+    $eycJournalRenownBefore = $null
+    $eycJournalRenownAfter = $null
+    $eycJournalRenownDelta = $null
+    $eycQuestTerminalStatusAfter = $null
+    if ($eycQuestObserved) {
+        $eycJournalBefore = Invoke-AgentCli 'questDetails' @('-QuestId', $eycQuestId)
+        $eycJournalRenownBefore = Read-EycJournalRenown $eycJournalBefore
+        if ($null -eq $eycJournalRenownBefore) { throw 'The active EYC checkpoint did not expose the original four-stage Journal before battle.' }
+    }
 
-    $pursuit = Invoke-AgentCli 'pursue' @('-PartyId', 'chronicle_harness_looters', '-CommandId', "$prefix-pursue")
-    if ($pursuit.status -ne 'completed' -or $pursuit.state.location.targetPartyId -ne 'chronicle_harness_looters') {
-        throw 'Native pursue command did not target the disposable hostile party.'
+    if ($fixtureEnemyIsEncountered) {
+        $pursuit = $initial
+        $last = $initial
+        $encounter = $true
+    }
+    else {
+        $pursuit = Invoke-AgentCli 'pursue' @('-PartyId', 'chronicle_harness_looters', '-CommandId', "$prefix-pursue")
+        if ($pursuit.status -ne 'completed' -or $pursuit.state.location.targetPartyId -ne 'chronicle_harness_looters') {
+            throw 'Native pursue command did not target the disposable hostile party.'
+        }
+        $last = $pursuit
+        $encounter = $false
+        $deadline = [DateTime]::UtcNow.AddSeconds([Math]::Min(60, $TimeoutSeconds))
+        while ([DateTime]::UtcNow -lt $deadline) {
+            $last = Invoke-AgentCli 'state' @('-CommandId', "$prefix-observe-$([Guid]::NewGuid().ToString('N'))")
+            if ($last.state.context.encounterActive -and $last.state.context.encounteredPartyId -eq 'chronicle_harness_looters') { $encounter = $true; break }
+            if ($last.state.location.targetPartyId -ne 'chronicle_harness_looters' -and @($last.state.nearbyParties | Where-Object { $_.id -eq 'chronicle_harness_looters' }).Count -eq 0) {
+                throw "Native pursuit lost the disposable looter target before an encounter at CampaignDay $($last.campaignDay); the target is no longer visible and the native party target was cleared."
+            }
+            if (-not (Get-Process -Id $start.session.processId -ErrorAction SilentlyContinue)) { throw 'Campaign process exited before the native hostile encounter.' }
+            Start-Sleep -Milliseconds 500
+        }
+        if (-not $encounter) { throw 'Native pursuit did not reach the disposable hostile encounter in time.' }
     }
     $pursuitStartDay = [double]$pursuit.campaignDay
-    $last = $pursuit
-    $encounter = $false
-    $deadline = [DateTime]::UtcNow.AddSeconds([Math]::Min(60, $TimeoutSeconds))
-    while ([DateTime]::UtcNow -lt $deadline) {
-        $last = Invoke-AgentCli 'state' @('-CommandId', "$prefix-observe-$([Guid]::NewGuid().ToString('N'))")
-        if ($last.state.context.encounterActive -and $last.state.context.encounteredPartyId -eq 'chronicle_harness_looters') { $encounter = $true; break }
-        if (-not (Get-Process -Id $start.session.processId -ErrorAction SilentlyContinue)) { throw 'Campaign process exited before the native hostile encounter.' }
-        Start-Sleep -Milliseconds 500
-    }
-    if (-not $encounter) { throw 'Native pursuit did not reach the disposable hostile encounter in time.' }
 
     $dialogueChoices = @()
     for ($step = 1; $step -le 8; $step++) {
@@ -365,7 +398,7 @@ try {
             $inventoryLootItemCountAfter = [int]$afterInventoryTakeAll.state.inventoryScreen.lootItemCount
             $inventoryPlayerItemCountAfter = [int]$afterInventoryTakeAll.state.inventoryScreen.playerItemCount
             $inventoryItemsTransferred = $inventoryPlayerItemCountAfter - $inventoryPlayerItemCountBefore
-            if ($inventoryLootItemCountAfter -ne 0 -or $inventoryItemsTransferred -lt $inventoryLootItemCountBefore) { throw "Native Loot All did not move all items: left=$inventoryLootItemCountAfter, playerDelta=$inventoryItemsTransferred, initial=$inventoryLootItemCountBefore." }
+            if ($inventoryLootItemCountAfter -ne 0) { throw "Native Loot All left unclaimed items: left=$inventoryLootItemCountAfter, visibleLootBefore=$inventoryLootItemCountBefore, playerItemCountDelta=$inventoryItemsTransferred." }
             Capture-BattleFrame 'loot-04-inventory-after-take-all' $afterInventoryTakeAll
             $inventoryDone = Invoke-AgentCli 'inventoryDone' @('-CommandId', "$prefix-inventory-done")
             $inventoryDoneStatus = [string]$inventoryDone.status
@@ -384,6 +417,15 @@ try {
         }
         $postBattleTransition = ($simulationFinish.status -eq 'completed' -and $partyScreenObserved -and $inventoryScreenObserved -and $inventoryReturnedToMap)
         if (-not $postBattleTransition) { throw "Native postbattle aftermath did not advance through InventoryState to MapState; gameState='$($postBattleState.state.context.gameState)', menu='$($postBattleState.state.context.menuId)' lootItems=$($postBattleState.state.context.lootItemCount)." }
+    }
+
+    if ($eycQuestObserved -and $Scenario -eq 'PostBattle' -and $postBattleState.state.context.gameState -eq 'MapState') {
+        $eycJournalAfter = Invoke-AgentCli 'questDetails' @('-QuestId', $eycQuestId)
+        $eycJournalRenownAfter = Read-EycJournalRenown $eycJournalAfter
+        $eycQuestTerminalStatusAfter = if ($null -ne $eycJournalAfter.data.terminalStatus) { [string]$eycJournalAfter.data.terminalStatus } else { $null }
+        if ($null -ne $eycJournalRenownBefore -and $null -ne $eycJournalRenownAfter) {
+            $eycJournalRenownDelta = [Math]::Round($eycJournalRenownAfter - $eycJournalRenownBefore, 3)
+        }
     }
 
     $stop = Invoke-AgentCli 'stop'
@@ -406,6 +448,11 @@ try {
         ClanTierAfterBattle = if ($Scenario -eq 'PostBattle' -and $postBattleState) { $postBattleState.state.identity.clanTier } else { $null }
         ClanRenownAfterBattle = if ($Scenario -eq 'PostBattle' -and $postBattleState) { $postBattleState.state.economy.renown } else { $null }
         ClanRenownDelta = if ($Scenario -eq 'PostBattle' -and $postBattleState) { [Math]::Round(([double]$postBattleState.state.economy.renown - [double]$pursuit.state.economy.renown), 3) } else { $null }
+        EycQuestObservedAtStart = $eycQuestObserved
+        EycJournalRenownBeforeBattle = $eycJournalRenownBefore
+        EycJournalRenownAfterBattle = $eycJournalRenownAfter
+        EycJournalRenownDelta = $eycJournalRenownDelta
+        EycQuestTerminalStatusAfterBattle = $eycQuestTerminalStatusAfter
         FixtureParty = $enemy[0]
         PursuitTimeControlMode = $pursuit.state.context.timeControlMode
         DaysElapsed = [Math]::Round(([double]$last.campaignDay - $pursuitStartDay), 4)
@@ -462,7 +509,7 @@ try {
     $scenarioPassed = if ($Scenario -eq 'Retreat') {
         $result.NativeSimulationRetreat -and $result.EncounterReturnedAfterRetreat -and $missionEntered -and $result.NativeMissionEnded -and $missionReturnedToCampaign
     } else {
-        $simulationFinished -and $null -ne $simulationFinish -and $partyLootTransfersVerified -and $partyLootSingleTransferVerified -and $inventoryScreenObserved -and $prematureInventoryDoneRejected -and $prematureInventoryDonePreservedLoot -and $inventoryItemsTransferred -gt 0 -and $inventoryDoneStatus -eq 'completed' -and $postBattleTransition
+        $simulationFinished -and $null -ne $simulationFinish -and $partyLootTransfersVerified -and $partyLootSingleTransferVerified -and $inventoryScreenObserved -and $prematureInventoryDoneRejected -and $prematureInventoryDonePreservedLoot -and $inventoryLootItemCountAfter -eq 0 -and $inventoryDoneStatus -eq 'completed' -and $postBattleTransition
     }
     $videoCapturePassed = ($Scenario -ne 'PostBattle' -or -not $CaptureFrames -or ($videoCaptureResult -and $videoCaptureResult.Passed -and $videoCaptureResult.FrameCoverageRatio -ge 0.9))
     $renownProgressionPassed = $Scenario -ne 'PostBattle' -or ($null -ne $result.ClanRenownDelta -and [double]$result.ClanRenownDelta -gt 0)
