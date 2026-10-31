@@ -59,8 +59,22 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         var mapTargetsObservation = BuildObservation(new JsonObject(), new JsonArray(), new JsonObject(), targets, null, compactMapTargetsReceipt, null);
         if (ReadInt(compactMapTargetsReceipt["data"] as JsonObject, "visibleTargetCount", -1) != 2 ||
             compactMapTargetsReceipt["data"] is JsonObject mapReceiptData && mapReceiptData.ContainsKey("mapSettlementTargets") ||
-            (mapTargetsObservation["visibleSafeRecruitmentSettlements"] as JsonArray)?.Count != 2)
+            (mapTargetsObservation["visibleSafeRecruitmentSettlements"] as JsonArray)?.Count != 2 ||
+            mapTargetsObservation.ContainsKey("previousNativeReceipt"))
             throw new AgentHostException("establish-clan-recruitment-duplicate-map-target-payload", "The current safe map targets must remain available once in the observation while the previous query receipt carries only its target count.");
+
+        var largePriorReceipt = new JsonObject { ["action"] = "menuSelect", ["data"] = new JsonObject { ["nativeDiagnostic"] = new string('x', 4096) } };
+        var singleReceiptRequest = new JsonObject
+        {
+            ["observation"] = BuildObservation(new JsonObject(), new JsonArray(), new JsonObject(), null, null, largePriorReceipt, null),
+            ["previousActionReceipt"] = largePriorReceipt.DeepClone()
+        };
+        var duplicatedReceiptRequest = (JsonObject)singleReceiptRequest.DeepClone();
+        (duplicatedReceiptRequest["observation"] as JsonObject)!["previousNativeReceipt"] = largePriorReceipt.DeepClone();
+        var duplicateReceiptBytesRemoved = System.Text.Encoding.UTF8.GetByteCount(duplicatedReceiptRequest.ToJsonString()) -
+                                           System.Text.Encoding.UTF8.GetByteCount(singleReceiptRequest.ToJsonString());
+        if (duplicateReceiptBytesRemoved < 4096)
+            throw new AgentHostException("establish-clan-recruitment-previous-receipt-deduplication-failed", "The model request must include the previous Native receipt once at top level, not duplicate it in the observation.");
 
         var offers = new JsonObject
         {
@@ -256,6 +270,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
 
         var results = new List<object>
         {
+            new { scenario = "establish-clan-recruitment-sends-previous-native-receipt-once", duplicateReceiptBytesRemoved, passed = true },
             new { scenario = "establish-clan-party-size-executor-matches-autonomous-parent-budget", maxDecisions = MaxDecisions, maxElapsedSeconds = (int)MaxElapsed.TotalSeconds, passed = true },
             new { scenario = "establish-clan-recruitment-travels-only-to-current-safe-town-village-targets", passed = true },
             new { scenario = "establish-clan-recruitment-offers-only-current-affordable-volunteers", passed = true },
@@ -1240,7 +1255,6 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             ["visibleSafeRecruitmentSettlements"] = safeTargets?.DeepClone(),
             ["currentRecruitmentOffers"] = BuildRecruitmentOffersObservation(offers),
             ["currentPrisonerRecruitmentOptions"] = BuildPrisonerRecruitmentOptionsObservation(prisonerOptions),
-            ["previousNativeReceipt"] = previousReceipt?.DeepClone(),
             ["decisionFeedback"] = feedback?.DeepClone()
         };
         return result;
