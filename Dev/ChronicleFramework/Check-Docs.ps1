@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.477'
+$contractVersion = '7.478'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -1214,9 +1214,10 @@ if ($agentHostPackageSource -notmatch 'CompanionObservationProjection' -or
     $agentHostPackageSource -notmatch 'missionBytesSaved' -or
     $agentHostPackageSource -notmatch 'estimatedPromptTokensSaved' -or
     $agentHostPackageSource -notmatch 'RecruitmentPromptCachePrefix' -or
+    $agentHostPackageSource -notmatch 'GoldSalePromptCachePrefix' -or
     $agentHostPackageSource -notmatch 'cacheablePrefixTokenGain' -or
     $agentHostPackageSource -notmatch 'ProviderContractSelfTestScenarioCount') {
-    throw 'AgentHostPackage must retain structured per-run receipts for Companion observation reduction and PartySize reusable-prefix token gain.'
+    throw 'AgentHostPackage must retain structured per-run receipts for Companion observation reduction and PartySize/Gold reusable-prefix token gains.'
 }
 if (-not (Test-Path -LiteralPath $deepSeekTokenizerAsset -PathType Leaf) -or
     -not (Test-Path -LiteralPath $deepSeekTokenizerLicense -PathType Leaf) -or

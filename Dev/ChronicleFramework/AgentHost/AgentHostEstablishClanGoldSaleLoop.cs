@@ -117,6 +117,60 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             !IsSupportedObserveInterval(1, moveStartPending: true) || IsSupportedObserveInterval(1, moveStartPending: false) ||
             !IsSupportedObserveInterval(MinimumActiveMapTravelObserveSeconds, moveStartPending: false) || !IsSupportedObserveInterval(10, moveStartPending: false))
             throw new AgentHostException("gold-sale-self-test-active-map-observation-cadence-failed", "The one movement-start poll may be 1 second, while an active map journey must wait at least 5 seconds and at most 10 seconds.");
+
+        var goldMoveStateBefore = MapState(null, null, []);
+        goldMoveStateBefore["location"]!["targetSettlementId"] = "safe-town";
+        goldMoveStateBefore["location"]!["mapPositionX"] = 100.0;
+        goldMoveStateBefore["party"] = new JsonObject { ["isMoving"] = true, ["speed"] = 4.2 };
+        var goldMoveStateAfter = (JsonObject)goldMoveStateBefore.DeepClone();
+        goldMoveStateAfter["location"]!["mapPositionX"] = 101.0;
+        var goldNativeBefore = new JsonObject { ["status"] = "completed", ["campaignDay"] = 1.0, ["timeControlMode"] = "StoppablePlay", ["state"] = goldMoveStateBefore.DeepClone() };
+        var goldNativeAfter = new JsonObject { ["status"] = "completed", ["campaignDay"] = 1.01, ["timeControlMode"] = "StoppablePlay", ["state"] = goldMoveStateAfter.DeepClone() };
+        var stableGoldObjective = new JsonObject { ["current"] = 1000, ["target"] = 2000, ["met"] = false };
+        var stableGoldDifferences = new JsonArray();
+        var stableMoveReceipt = new JsonObject { ["action"] = "move", ["status"] = "completed", ["targetSettlementId"] = "safe-town" };
+        var stableObserveControls = new JsonArray("observeAgain");
+        JsonObject BuildLegacyGoldSaleRequest(JsonObject native, int iteration)
+        {
+            var oldState = native["state"] as JsonObject ?? new JsonObject();
+            var oldObservation = new JsonObject
+            {
+                ["status"] = ReadString(native, "status"),
+                ["campaignDay"] = native["campaignDay"]?.DeepClone(),
+                ["timeControlMode"] = ReadString(native, "timeControlMode"),
+                ["state"] = oldState.DeepClone(),
+                ["activeStoryModeQuest"] = QuestId,
+                ["goldObjective"] = stableGoldObjective.DeepClone(),
+                ["liveMetricDifferences"] = stableGoldDifferences.DeepClone(),
+                ["saleReceipt"] = null
+            };
+            return new JsonObject
+            {
+                ["runId"] = "gold-cache-prefix-probe",
+                ["goal"] = "Reach the current original EYC Gold target.",
+                ["goalKind"] = "active-establish-clan-gold-sale",
+                ["goalScopeClassificationRequired"] = false,
+                ["iteration"] = iteration,
+                ["observation"] = oldObservation,
+                ["previousActionReceipt"] = stableMoveReceipt.DeepClone(),
+                ["decisionFeedback"] = null,
+                ["allowedActions"] = new JsonArray(),
+                ["allowedControls"] = stableObserveControls.DeepClone(),
+                ["controlArguments"] = new JsonObject { ["observeAgain"] = new JsonObject { ["waitSeconds"] = new JsonObject { ["type"] = "integer", ["minimum"] = 5, ["maximum"] = 10 } } }
+            };
+        }
+        var legacyGoldPrefixTokens = DeepSeekPromptTokenEstimator.CountCommonPrefixTokens(AgentHostDecisionCycle.EstablishClanGoldSaleSystemPrompt,
+            BuildLegacyGoldSaleRequest(goldNativeBefore, 1).ToJsonString(), BuildLegacyGoldSaleRequest(goldNativeAfter, 2).ToJsonString());
+        var cacheOrderedGoldPrefixTokens = DeepSeekPromptTokenEstimator.CountCommonPrefixTokens(AgentHostDecisionCycle.EstablishClanGoldSaleSystemPrompt,
+            BuildDecisionRequest("gold-cache-prefix-probe", "Reach the current original EYC Gold target.", 1,
+                BuildObservation(goldNativeBefore, goldMoveStateBefore, stableGoldObjective, stableGoldDifferences, null), stableMoveReceipt, null,
+                new JsonArray(), stableObserveControls, moveStartPending: false).ToJsonString(),
+            BuildDecisionRequest("gold-cache-prefix-probe", "Reach the current original EYC Gold target.", 2,
+                BuildObservation(goldNativeAfter, goldMoveStateAfter, stableGoldObjective, stableGoldDifferences, null), stableMoveReceipt, null,
+                new JsonArray(), stableObserveControls, moveStartPending: false).ToJsonString());
+        var goldCacheablePrefixGain = cacheOrderedGoldPrefixTokens - legacyGoldPrefixTokens;
+        if (goldCacheablePrefixGain < 50)
+            throw new AgentHostException("gold-sale-cache-prefix-order-failed", "Stable EYC goal/receipt context must precede the changing Native movement state and iteration field; exact tokenizer prefix gain was only " + goldCacheablePrefixGain + " tokens.");
         var existingMove = MapState(null, null, []);
         existingMove["party"]!["isMoving"] = true;
         existingMove["location"]!["targetSettlementId"] = "user-existing-target";
@@ -319,6 +373,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             throw new AgentHostException("gold-sale-self-test-hostile-encounter-not-blocked", "An active non-settlement encounter must remain outside the bounded Gold trade subflow.");
 
         return [
+            new { scenario = "gold-sale-orders-stable-goal-and-receipt-context-before-changing-map-state-for-prefix-cache", legacyCommonPrefixTokens = legacyGoldPrefixTokens, cacheOrderedCommonPrefixTokens = cacheOrderedGoldPrefixTokens, cacheablePrefixTokenGain = goldCacheablePrefixGain, passed = true },
             new { scenario = "gold-sale-offers-only-current-enabled-town-trade-entry", passed = true },
             new { scenario = "gold-sale-binds-one-current-native-goods-offer-and-positive-quote", passed = true },
             new { scenario = "gold-sale-native-move-start-transition-uses-one-bounded-observation", passed = true },
@@ -1120,14 +1175,14 @@ internal static class AgentHostEstablishClanGoldSaleLoop
     private static JsonObject BuildObservation(JsonObject native, JsonObject state, JsonObject goldObjective,
         JsonArray liveDifferences, JsonObject? saleReceipt) => new()
     {
-        ["status"] = ReadString(native, "status"),
-        ["campaignDay"] = native["campaignDay"]?.DeepClone(),
-        ["timeControlMode"] = ReadString(native, "timeControlMode"),
-        ["state"] = state.DeepClone(),
         ["activeStoryModeQuest"] = QuestId,
         ["goldObjective"] = goldObjective.DeepClone(),
         ["liveMetricDifferences"] = liveDifferences.DeepClone(),
-        ["saleReceipt"] = saleReceipt?.DeepClone()
+        ["saleReceipt"] = saleReceipt?.DeepClone(),
+        ["status"] = ReadString(native, "status"),
+        ["timeControlMode"] = ReadString(native, "timeControlMode"),
+        ["campaignDay"] = native["campaignDay"]?.DeepClone(),
+        ["state"] = state.DeepClone()
     };
 
     private static JsonObject BuildDecisionRequest(string runId, string? goal, int iteration, JsonObject observation,
@@ -1139,10 +1194,9 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             ["goal"] = goal,
             ["goalKind"] = "active-establish-clan-gold-sale",
             ["goalScopeClassificationRequired"] = false,
-            ["iteration"] = iteration,
-            ["observation"] = observation.DeepClone(),
             ["previousActionReceipt"] = previousReceipt?.DeepClone(),
             ["decisionFeedback"] = feedback?.DeepClone(),
+            ["observation"] = observation.DeepClone(),
             ["allowedActions"] = actionCatalog.DeepClone(),
             ["allowedControls"] = controls.DeepClone()
         };
@@ -1160,6 +1214,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 }
             }
             : new JsonObject();
+        request["iteration"] = iteration;
         return request;
     }
 

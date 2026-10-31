@@ -327,6 +327,18 @@ $recruitmentPromptCachePrefixSummary = [ordered]@{
     cacheablePrefixTokenGain = [int]$recruitmentPrefixScenario[0].cacheablePrefixTokenGain
     passed = [bool]$recruitmentPrefixScenario[0].passed
 }
+$goldSalePrefixScenario = @($providerSelfTest.scenarios | Where-Object { $_.scenario -eq 'gold-sale-orders-stable-goal-and-receipt-context-before-changing-map-state-for-prefix-cache' })
+if ($goldSalePrefixScenario.Count -lt 1 -or
+    @($goldSalePrefixScenario | Where-Object { -not [bool]$_.passed -or [int]$_.cacheablePrefixTokenGain -le 0 }).Count -gt 0) {
+    throw 'The packaged Host must retain tokenizer evidence that placing stable Gold objective context before changing map state increases the exact reusable prompt prefix.'
+}
+$goldSalePromptCachePrefixSummary = [ordered]@{
+    scenario = [string]$goldSalePrefixScenario[0].scenario
+    legacyCommonPrefixTokens = [int]$goldSalePrefixScenario[0].legacyCommonPrefixTokens
+    cacheOrderedCommonPrefixTokens = [int]$goldSalePrefixScenario[0].cacheOrderedCommonPrefixTokens
+    cacheablePrefixTokenGain = [int]$goldSalePrefixScenario[0].cacheablePrefixTokenGain
+    passed = [bool]$goldSalePrefixScenario[0].passed
+}
 if (-not [bool]$unboundParentProbe.Passed) { throw 'Packaged Host did not enforce its Bannerlord parent process identity before starting a campaign loop.' }
 
 $files = @(Get-ChildItem -LiteralPath $publishRoot -Recurse -File | Sort-Object FullName | ForEach-Object {
@@ -349,6 +361,7 @@ $manifest = [ordered]@{
     executable = 'ChronicleAgentHost.exe'
     companionObservationProjection = $companionProjectionSummary
     recruitmentPromptCachePrefix = $recruitmentPromptCachePrefixSummary
+    goldSalePromptCachePrefix = $goldSalePromptCachePrefixSummary
     files = $files
 }
 $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
@@ -368,6 +381,7 @@ $result = [ordered]@{
     SharedDecisionCycleScenarioCount = @($providerSelfTest.scenarios | Where-Object { $_.scenario -like 'shared-agent-host-decision-cycle-*' }).Count
     CompanionObservationProjection = $companionProjectionSummary
     RecruitmentPromptCachePrefix = $recruitmentPromptCachePrefixSummary
+    GoldSalePromptCachePrefix = $goldSalePromptCachePrefixSummary
     SelfTestModelCalls = [int]$providerSelfTest.modelCalls
     SelfTestNativeCommands = [int]$providerSelfTest.nativeCommands
     UnboundParentRejected = [bool]$unboundParentProbe.Passed
