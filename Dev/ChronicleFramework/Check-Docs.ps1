@@ -1576,6 +1576,7 @@ if ($agentHostCompanionLoopSource -notmatch 'projectedMission\.Remove\("nearbySc
     $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-model-observation-compacts-raw-mission-agent-roster-and-preserves-current-wanderer-candidates' -or
     $agentHostCompanionLoopSource -notmatch 'DeepSeekPromptTokenEstimator\.EstimateRequest\(' -or
     $agentHostCompanionLoopSource -notmatch 'currentSceneWandererCandidates' -or
+    $agentHostCompanionLoopSource -notmatch 'SawCompanionObservationProjection' -or
     $agentHostCompanionLoopSource -notmatch 'nearbyInteractableWanderers') {
     throw 'Companion model input projection must remove only the duplicated raw scene roster, preserve the current candidate summaries and Native validation, and estimate its prompt-token reduction.'
 }

@@ -324,9 +324,9 @@ internal static class AgentHostEstablishClanCompanionLoop
             ReadString(result["termination"] as JsonObject, "reason") != "native-companion-journal-target-met" ||
             ReadInt(result, "actionsExecuted", 0) != expected.Length || provider.CallCount != expected.Length ||
             !client.Actions.SequenceEqual(expected, StringComparer.Ordinal) || client.Gold != 1340 || client.CompanionCount != 1 ||
-            client.ActiveMissionNavigationStateReads < 2 || client.TavernMissionStartupStateReads < 2 || provider.SawActiveMissionNavigation ||
+            client.ActiveMissionNavigationStateReads < 2 || client.TavernMissionStartupStateReads < 2 || provider.SawActiveMissionNavigation || !provider.SawCompanionObservationProjection ||
             ReadBoolean((result["objectiveSnapshot"] as JsonObject)?["companions"] as JsonObject, "met") != true)
-            throw new AgentHostException("establish-clan-companion-transport-self-test-failed", "The injected Native/Provider route did not passively settle the original Tavern Mission before decisions, wait for Native navigation, follow the observed Tavern path, hire one quoted Wanderer, and verify refreshed original Journal progress. status=" + ReadString(result, "status") + "; termination=" + ReadString(result["termination"] as JsonObject, "reason") + "; failureCode=" + ReadString(result, "failureCode") + "; failure=" + ReadString(result, "failure") + "; actions=" + string.Join(",", client.Actions) + "; calls=" + provider.CallCount + "; activeNavigationReads=" + client.ActiveMissionNavigationStateReads + "; startupReads=" + client.TavernMissionStartupStateReads + "; providerSawActiveNavigation=" + provider.SawActiveMissionNavigation + "; journalMet=" + ReadBoolean((result["objectiveSnapshot"] as JsonObject)?["companions"] as JsonObject, "met"));
+            throw new AgentHostException("establish-clan-companion-transport-self-test-failed", "The injected Native/Provider route did not passively settle the original Tavern Mission before decisions, preserve projected current Wanderer candidates without sending the raw scene roster, wait for Native navigation, hire one quoted Wanderer, and verify refreshed original Journal progress. status=" + ReadString(result, "status") + "; termination=" + ReadString(result["termination"] as JsonObject, "reason") + "; failureCode=" + ReadString(result, "failureCode") + "; failure=" + ReadString(result, "failure") + "; actions=" + string.Join(",", client.Actions) + "; calls=" + provider.CallCount + "; activeNavigationReads=" + client.ActiveMissionNavigationStateReads + "; startupReads=" + client.TavernMissionStartupStateReads + "; providerSawActiveNavigation=" + provider.SawActiveMissionNavigation + "; providerSawProjection=" + provider.SawCompanionObservationProjection + "; journalMet=" + ReadBoolean((result["objectiveSnapshot"] as JsonObject)?["companions"] as JsonObject, "met"));
         var stopClient = new FakeCompanionClient();
         var stopProvider = new FakeCompanionStopProvider();
         using var stopRequest = JsonDocument.Parse("{\"runId\":\"establish-clan-companion-safe-stop-selftest\",\"goal\":\"Hire one Companion.\",\"maxDecisions\":1,\"maxElapsedSeconds\":10}");
@@ -1640,13 +1640,22 @@ internal static class AgentHostEstablishClanCompanionLoop
         ];
         internal int CallCount { get; private set; }
         internal bool SawActiveMissionNavigation { get; private set; }
+        internal bool SawCompanionObservationProjection { get; private set; }
         public string ModelId => "deterministic-establish-clan-companion-selftest";
         public string ConfigurationSource => "harness-fake-provider";
         public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) { cancellationToken.ThrowIfCancellationRequested(); return Task.CompletedTask; }
         public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var state = request.GetProperty("observation").GetProperty("state");
+            var observation = request.GetProperty("observation");
+            var state = observation.GetProperty("state");
+            if (state.TryGetProperty("mission", out var companionMission) && companionMission.ValueKind == JsonValueKind.Object &&
+                !companionMission.TryGetProperty("nearbySceneAgents", out _) &&
+                observation.TryGetProperty("currentSceneWandererCandidates", out var currentCandidates) && currentCandidates.ValueKind == JsonValueKind.Array &&
+                currentCandidates.EnumerateArray().Any(candidate => ReadString(candidate, "heroId") == "wanderer-a") &&
+                observation.TryGetProperty("nearbyInteractableWanderers", out var nearbyCandidates) && nearbyCandidates.ValueKind == JsonValueKind.Array &&
+                nearbyCandidates.EnumerateArray().Any(candidate => ReadString(candidate, "heroId") == "wanderer-a"))
+                SawCompanionObservationProjection = true;
             if (state.TryGetProperty("mission", out var mission) && mission.ValueKind == JsonValueKind.Object &&
                 mission.TryGetProperty("navigation", out var navigation) && navigation.ValueKind == JsonValueKind.Object &&
                 navigation.TryGetProperty("active", out var active) && active.ValueKind == JsonValueKind.True)
