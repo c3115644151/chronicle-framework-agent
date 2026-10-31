@@ -49,6 +49,25 @@ internal static class DeepSeekPromptTokenEstimator
         }
     }
 
+    internal static int CountCommonPrefixTokens(string systemPrompt, string firstUserContent, string secondUserContent)
+    {
+        ArgumentNullException.ThrowIfNull(systemPrompt);
+        ArgumentNullException.ThrowIfNull(firstUserContent);
+        ArgumentNullException.ThrowIfNull(secondUserContent);
+        var tokenizer = DeepSeekBpe.Value;
+        var first = tokenizer.EncodeToIds(
+            "<｜begin▁of▁sentence｜>" + systemPrompt + "<｜User｜>" + firstUserContent + "<｜Assistant｜>",
+            considerPreTokenization: true,
+            considerNormalization: true);
+        var second = tokenizer.EncodeToIds(
+            "<｜begin▁of▁sentence｜>" + systemPrompt + "<｜User｜>" + secondUserContent + "<｜Assistant｜>",
+            considerPreTokenization: true,
+            considerNormalization: true);
+        var shared = 0;
+        while (shared < first.Count && shared < second.Count && first[shared] == second[shared]) shared++;
+        return shared;
+    }
+
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
         var tokenizer = DeepSeekBpe.Value;

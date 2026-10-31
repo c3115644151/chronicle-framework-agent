@@ -50,6 +50,62 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         var manyTargetCatalog = BuildActionCatalog(manyTargetState, new JsonObject { ["partySize"] = new JsonObject { ["target"] = 5 } }, manyTargets, null, null, false);
         if (manyTargets.Count != 32 || (manyTargetCatalog[0]?["argumentValues"]?["SettlementId"] as JsonArray)?.Count != 32)
             throw new AgentHostException("establish-clan-recruitment-target-projection-capped-dynamic-map-set", "Compact recruitment targets must preserve every currently visible safe target, not only the example-sized subset.");
+
+        var prefixStateBefore = (JsonObject)manyTargetState.DeepClone();
+        prefixStateBefore["location"] = new JsonObject { ["currentSettlementId"] = null, ["targetSettlementId"] = "settlement-00", ["mapPositionX"] = 100.0 };
+        prefixStateBefore["party"] = new JsonObject { ["isMoving"] = true, ["speed"] = 4.2 };
+        var prefixStateAfter = (JsonObject)prefixStateBefore.DeepClone();
+        prefixStateAfter["location"]!["mapPositionX"] = 101.0;
+        var prefixJournal = new JsonArray(new JsonObject { ["objectiveId"] = "partySize", ["current"] = 4, ["target"] = 25 });
+        var prefixObjective = new JsonObject { ["partySize"] = new JsonObject { ["current"] = 4, ["target"] = 25, ["met"] = false } };
+        var movementCatalog = BuildActionCatalog(prefixStateBefore, prefixObjective, manyTargets, null, "settlement-00", moving: true);
+        var movementControls = BuildControlCatalog(moving: true, movementCatalog.Count);
+        JsonObject BuildLegacyPromptRequest(JsonObject state, int iteration)
+        {
+            var oldObservation = new JsonObject
+            {
+                ["scope"] = "native-storymode-party-size-recruitment",
+                ["state"] = state.DeepClone(),
+                ["journalObjectiveSnapshot"] = prefixJournal.DeepClone(),
+                ["objectiveSnapshot"] = prefixObjective.DeepClone(),
+                ["visibleSafeRecruitmentSettlements"] = manyTargets.DeepClone(),
+                ["currentRecruitmentOffers"] = null,
+                ["currentPrisonerRecruitmentOptions"] = null,
+                ["decisionFeedback"] = null
+            };
+            return new JsonObject
+            {
+                ["runId"] = "cache-prefix-probe",
+                ["goal"] = "Raise the active Journal PartySize target.",
+                ["goalKind"] = "active-storymode-establish-clan-party-size",
+                ["iteration"] = iteration,
+                ["observation"] = oldObservation,
+                ["previousActionReceipt"] = null,
+                ["decisionFeedback"] = null,
+                ["allowedActions"] = movementCatalog.DeepClone(),
+                ["allowedControls"] = movementControls.DeepClone()
+            };
+        }
+        JsonObject BuildCacheOrderedPromptRequest(JsonObject state, int iteration) => new()
+        {
+            ["runId"] = "cache-prefix-probe",
+            ["goal"] = "Raise the active Journal PartySize target.",
+            ["goalKind"] = "active-storymode-establish-clan-party-size",
+            ["observation"] = BuildObservation(state, prefixJournal, prefixObjective, manyTargets, null, null, null),
+            ["previousActionReceipt"] = null,
+            ["decisionFeedback"] = null,
+            ["allowedActions"] = movementCatalog.DeepClone(),
+            ["allowedControls"] = movementControls.DeepClone(),
+            ["iteration"] = iteration
+        };
+        var legacyCommonPrefixTokens = DeepSeekPromptTokenEstimator.CountCommonPrefixTokens(SystemPrompt,
+            BuildLegacyPromptRequest(prefixStateBefore, 1).ToJsonString(), BuildLegacyPromptRequest(prefixStateAfter, 2).ToJsonString());
+        var cacheOrderedCommonPrefixTokens = DeepSeekPromptTokenEstimator.CountCommonPrefixTokens(SystemPrompt,
+            BuildCacheOrderedPromptRequest(prefixStateBefore, 1).ToJsonString(), BuildCacheOrderedPromptRequest(prefixStateAfter, 2).ToJsonString());
+        var cacheablePrefixTokenGain = cacheOrderedCommonPrefixTokens - legacyCommonPrefixTokens;
+        if (cacheablePrefixTokenGain < 100)
+            throw new AgentHostException("establish-clan-recruitment-cache-prefix-order-failed", "Stable Journal/objective/visible settlement context must precede the changing Native movement state and iteration field in the serialized PartySize request; exact tokenizer prefix gain was only " + cacheablePrefixTokenGain + " tokens.");
+
         var mapTargetsReceipt = new JsonObject
         {
             ["status"] = "completed",
@@ -270,6 +326,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
 
         var results = new List<object>
         {
+            new { scenario = "establish-clan-recruitment-orders-stable-context-before-changing-map-state-for-prefix-cache", legacyCommonPrefixTokens, cacheOrderedCommonPrefixTokens, cacheablePrefixTokenGain, passed = true },
             new { scenario = "establish-clan-recruitment-sends-previous-native-receipt-once", duplicateReceiptBytesRemoved, passed = true },
             new { scenario = "establish-clan-party-size-executor-matches-autonomous-parent-budget", maxDecisions = MaxDecisions, maxElapsedSeconds = (int)MaxElapsed.TotalSeconds, passed = true },
             new { scenario = "establish-clan-recruitment-travels-only-to-current-safe-town-village-targets", passed = true },
@@ -615,12 +672,12 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                     ["runId"] = runId,
                     ["goal"] = ReadString(request, "goal"),
                     ["goalKind"] = "active-storymode-establish-clan-party-size",
-                    ["iteration"] = decisions + 1,
                     ["observation"] = observation,
                     ["previousActionReceipt"] = previousReceipt?.DeepClone(),
                     ["decisionFeedback"] = feedback?.DeepClone(),
                     ["allowedActions"] = catalog.DeepClone(),
-                    ["allowedControls"] = controls.DeepClone()
+                    ["allowedControls"] = controls.DeepClone(),
+                    ["iteration"] = decisions + 1
                 };
                 var providerStarted = Stopwatch.GetTimestamp();
                 var decision = await AgentHostDecisionCycle.DecideEstablishClanRecruitmentAsync(provider, modelRequest, elapsed.Token);
@@ -1249,13 +1306,13 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         var result = new JsonObject
         {
             ["scope"] = "native-storymode-party-size-recruitment",
-            ["state"] = state.DeepClone(),
             ["journalObjectiveSnapshot"] = journal.DeepClone(),
             ["objectiveSnapshot"] = objective.DeepClone(),
             ["visibleSafeRecruitmentSettlements"] = safeTargets?.DeepClone(),
             ["currentRecruitmentOffers"] = BuildRecruitmentOffersObservation(offers),
             ["currentPrisonerRecruitmentOptions"] = BuildPrisonerRecruitmentOptionsObservation(prisonerOptions),
-            ["decisionFeedback"] = feedback?.DeepClone()
+            ["decisionFeedback"] = feedback?.DeepClone(),
+            ["state"] = state.DeepClone()
         };
         return result;
     }

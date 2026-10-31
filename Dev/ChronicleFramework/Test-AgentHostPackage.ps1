@@ -315,6 +315,18 @@ $companionProjectionSummary = [ordered]@{
     estimatedPromptTokensSaved = [int]$companionProjection[0].estimatedPromptTokensSaved
     passed = [bool]$companionProjection[0].passed
 }
+$recruitmentPrefixScenario = @($providerSelfTest.scenarios | Where-Object { $_.scenario -eq 'establish-clan-recruitment-orders-stable-context-before-changing-map-state-for-prefix-cache' })
+if ($recruitmentPrefixScenario.Count -ne 1 -or -not [bool]$recruitmentPrefixScenario[0].passed -or
+    [int]$recruitmentPrefixScenario[0].cacheablePrefixTokenGain -le 0) {
+    throw 'The packaged Host must retain tokenizer evidence that placing stable PartySize context before changing map state increases the exact reusable prompt prefix.'
+}
+$recruitmentPromptCachePrefixSummary = [ordered]@{
+    scenario = [string]$recruitmentPrefixScenario[0].scenario
+    legacyCommonPrefixTokens = [int]$recruitmentPrefixScenario[0].legacyCommonPrefixTokens
+    cacheOrderedCommonPrefixTokens = [int]$recruitmentPrefixScenario[0].cacheOrderedCommonPrefixTokens
+    cacheablePrefixTokenGain = [int]$recruitmentPrefixScenario[0].cacheablePrefixTokenGain
+    passed = [bool]$recruitmentPrefixScenario[0].passed
+}
 if (-not [bool]$unboundParentProbe.Passed) { throw 'Packaged Host did not enforce its Bannerlord parent process identity before starting a campaign loop.' }
 
 $files = @(Get-ChildItem -LiteralPath $publishRoot -Recurse -File | Sort-Object FullName | ForEach-Object {
@@ -336,6 +348,7 @@ $manifest = [ordered]@{
     totalBytes = $totalBytes
     executable = 'ChronicleAgentHost.exe'
     companionObservationProjection = $companionProjectionSummary
+    recruitmentPromptCachePrefix = $recruitmentPromptCachePrefixSummary
     files = $files
 }
 $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
@@ -354,6 +367,7 @@ $result = [ordered]@{
     BattleSimulationLoopSelfTestScenarioCount = @($providerSelfTest.scenarios | Where-Object { $_.scenario -like 'battle-loop-*' }).Count
     SharedDecisionCycleScenarioCount = @($providerSelfTest.scenarios | Where-Object { $_.scenario -like 'shared-agent-host-decision-cycle-*' }).Count
     CompanionObservationProjection = $companionProjectionSummary
+    RecruitmentPromptCachePrefix = $recruitmentPromptCachePrefixSummary
     SelfTestModelCalls = [int]$providerSelfTest.modelCalls
     SelfTestNativeCommands = [int]$providerSelfTest.nativeCommands
     UnboundParentRejected = [bool]$unboundParentProbe.Passed
