@@ -188,7 +188,11 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             {"status":"completed","timeControlMode":"Stop","state":{"context":{"gameState":"MapState","menuId":null,"escapeMenuOpen":false,"inquiryOpen":false,"encounterActive":false,"isWaitMenu":false,"isWaitActive":false,"captivity":{"isCaptive":false}},"quests":[{"id":"rebuild_player_clan_storymode_quest"}],"party":{"isMoving":true},"location":{"currentSettlementId":null,"targetSettlementId":"town-a","targetPartyId":null},"nearbyParties":[{"id":"patrol-visible","type":"patrol","hostile":false,"members":9}]}}
             """);
         if (!AgentHostNativeMapMovementMonitor.IsPausedVisibleBanditMove(pausedVisibleBanditTravel.RootElement) ||
-            AgentHostNativeMapMovementMonitor.IsPausedVisibleBanditMove(pausedVisibleNeutralTravel.RootElement))
+            AgentHostNativeMapMovementMonitor.IsPausedVisibleBanditMove(pausedVisibleNeutralTravel.RootElement) ||
+            !ShouldRouteToBattleSimulation(pausedVisibleBanditTravel.RootElement, AgentHostNativeMapMovementMonitor.FailureCode) ||
+            ShouldRouteToBattleSimulation(pausedVisibleBanditTravel.RootElement, failureCode: null) ||
+            ShouldRouteToBattleSimulation(pausedVisibleNeutralTravel.RootElement, AgentHostNativeMapMovementMonitor.FailureCode) ||
+            !ShouldRouteToBattleSimulation(hostileBanditInterruption.RootElement, failureCode: null))
             throw new AgentHostException("establish-clan-autonomy-paused-visible-bandit-route-classification-failed", "The parent may route to BattleSimulation only when its movement monitor explicitly reported a hostile bandit and a fresh paused EYC Map still confirms the visible party and original settlement move.");
         results.Add(new { scenario = "establish-clan-autonomy-routes-only-monitor-confirmed-paused-visible-bandit-travel-to-battle-simulation", passed = true });
 
@@ -885,10 +889,8 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         if (verifiedArrival) safeSettlementRefreshVisitedIds.Add(afterRefreshSettlementId!);
 
                         var refreshFailureCode = ReadString(refresh, "failureCode");
-                        var refreshInterruptedByVisibleBandit = refreshFailureCode == AgentHostNativeMapMovementMonitor.FailureCode &&
-                            AgentHostNativeMapMovementMonitor.IsPausedVisibleBanditMove(afterRefresh.RootElement);
                         if (!verifiedArrival && decisions < maxDecisions &&
-                            (IsSupportedHostileBanditEncounter(afterRefresh.RootElement) || refreshInterruptedByVisibleBandit) &&
+                            ShouldRouteToBattleSimulation(afterRefresh.RootElement, refreshFailureCode) &&
                             client is IAgentHostBattleSimulationNativeClient refreshBattleClient)
                         {
                             using var refreshBattleRequest = await BuildCurrentBattleInterruptionRequestAsync(request, questDetailsClient, "safeSettlementRefresh", elapsed.Token);
@@ -1040,9 +1042,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                     // objective must not reinterpret that encounter as a Companion/Gold
                     // failure or discard it; resolve it through the existing Native
                     // BattleSimulation contract, then resume planning from fresh Journal state.
-                    var childInterruptedByVisibleBandit = childFailureCode == AgentHostNativeMapMovementMonitor.FailureCode &&
-                        AgentHostNativeMapMovementMonitor.IsPausedVisibleBanditMove(failedState.RootElement);
-                    if ((IsSupportedHostileBanditEncounter(failedState.RootElement) || childInterruptedByVisibleBandit) &&
+                    if (ShouldRouteToBattleSimulation(failedState.RootElement, childFailureCode) &&
                         client is IAgentHostBattleSimulationNativeClient incidentBattleClient)
                     {
                         using var incidentBattleRequest = await BuildCurrentBattleInterruptionRequestAsync(request, questDetailsClient, objectiveId, elapsed.Token);
@@ -1598,6 +1598,10 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                (state["nearbyParties"] as JsonArray)?.OfType<JsonObject>().Any(party =>
                    ReadString(party, "id") == encounteredPartyId && ReadString(party, "type") == "bandit" && ReadBoolean(party, "hostile")) == true;
     }
+
+    private static bool ShouldRouteToBattleSimulation(JsonElement native, string? failureCode) =>
+        IsSupportedHostileBanditEncounter(native) ||
+        failureCode == AgentHostNativeMapMovementMonitor.FailureCode && AgentHostNativeMapMovementMonitor.IsPausedVisibleBanditMove(native);
 
     private static bool IsSafeMapForObjectiveProviderReplan(JsonElement native)
     {
