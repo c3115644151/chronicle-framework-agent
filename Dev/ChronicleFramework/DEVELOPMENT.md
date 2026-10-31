@@ -1,6 +1,6 @@
 ﻿# Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.459
+Contract version: 7.460
 
 2026-10-31 Native Tournament result observation: installed 1.4.8 `TournamentVM.OnTournamentEnd` reads the original `TournamentBehavior.Winner` and displays the winner to the player. The state adapter now returns `tournament.result=null` until the Native TournamentVM says `IsOver`; afterward it exposes whether the original result resolves, winner Character ID/name and whether that Character is the player. `TestResults/20261031-160048` Build/AgentHostPackage passed. Runtime verification `TestResults/20261030-arena-tournament-evaluation/NativeTournamentWinnerFollowup.json` followed the original ArenaMaster sign-up→town event join→TournamentVM skip route: original result was resolved to Lord `lord_1_3` / 曼忒俄斯, `playerWon=false`, and EYC Clan Renown stayed31. The source save hash was unchanged and process cleanup passed. This verifies the read-only result observation in one live tournament; the existing EYC Host still has no tournament entry/decision route, and completing a skipped tournament does not itself prove Renown.
 
@@ -398,6 +398,8 @@ Provider默认使用OpenAI-compatible协议；仅支持Ollama原生`/api/chat`�
 
 `Run-Harness.ps1` 顺序执行阶段、首错停止、把原始输出和 JSON 写入 `TestResults/<run-id>`，并更新 `TestResults/latest.json`。
 
+`CompanionHiring`阶段调用的独立PowerShell子测试必须把stdout/stderr合并写入父阶段日志；若子测试返回非零，异常同时携带原始错误内容，不能只留下退出码。这样真实Native交互失败可区分是游戏前置、测试夹具、动作断言还是清理问题。该规则是Harness诊断契约，不改变Mod功能。
+
 Inventory/market专项阶段：`InventoryNavigation`验证玩家Map Inventory入口与Trade之外的原生InventoryState；`EquipmentTransactions`验证MainHero Native SPInventoryVM装备事务；`TradeTransactions`验证Town菜单Trade入口、市场买卖/食物筛选、按当前ItemViewModelId读取异地贸易传闻及Native `ItemMenuVM`提示一致性；`BarterTransactions`走真实Lord对话入口，验证原生BarterVM普通物品/金币谈判草稿、Native Auto Balance、Offer/Cancel结果。Trade rumor测试传闻仅注入到disposable Campaign内存，比较商品市场/玩家两侧原生tooltip文本，不模拟Windows鼠标；真实物理悬停视觉仍未覆盖。Town菜单不允许原版显式时钟控件时，测试不调用pause/resume，而是记录当前档并确认Trade查询/事务不改写它。Barter的普通、Peace/SafePassage/Defection/Marriage UI共用VM适配层，但各Context的初始Barterable与最终世界效果不可混为一谈；Diplomatic/Ransom的AI Barter不属于玩家UI接口。
 
 `BarterContexts` 用独立的visual-capture Harness进程验证Bandit Safe Passage。夹具通过本机1.4.8 `BanditPartyComponent.CreateLooterParty`建立临时BanditFaction party，按原版遭遇半径/关系计入附近可加入玩家侧的队伍与`CustomStrength`；逐步增加劫匪编制，直到其强度至少为玩家侧的1.56倍，再调用原生`SetMoveEngageParty(MainParty)`。生成位置须先通过原版导航检查，且`SettlementHelper.FindNearestSettlementToMobileParty`须找到Town/Village，避免无效夹具位置触发原版条件中的空引用。
@@ -444,7 +446,7 @@ Natural run `TestResults/20261027-081126` exercised that exit handoff: after dec
 
 3D `StartUp` Location Mission仍必须通过原版Leave Area游戏键退出，且`menuSelect`不能拿底层`Campaign.Current.CurrentMenuContext`冒充可见菜单。1.4.8状态层存在残留父菜单：Tavern的`MissionState`中会继续显示`town_backstreet`/`town`等menuId与选项，但画面是3D场景；2026-10-29我们先在该场景调用`menuSelect town_leave`再尝试missionLeave，约5秒后遇到`0xC0000005`。时间关系不足以证明native故障由哪一步引起，但现有录像证明该菜单没有显示在玩家屏幕；因此`AgentObserver`现在只在Native菜单确实可见时暴露`menuId`/选项，`menuSelect`在3D StartUp Mission和正在显示对话UI时被拒。Conversation UI结束后，若回到用户确认的村庄菜单，仍可在Conversation Mission里看见并选择当前菜单。`missionLeave`继续对有效的友善Location Mission调用限时原版Leave Area输入，不要求一个已隐藏的GameMenu；同时支持由`town_enter_arena`进入的友善StartUp `arena_*`场景（实测`arena_empire_a`、menuId空、TournamentVM未激活）。这让Tavern在menuId为空时仍能用正确的TAB动作离场，并阻止重复调用底层菜单退出。Native SaveHandler在MissionState被请求后仅返回accepted，19分钟无SaveOver回执/存档文件；CLI `save`已改为MissionState直接拒绝，须先回Campaign Map。`missionInteract`现在也允许在该受支持的友善Arena Mission中，与当前本地观察到且Native认定可交互的`tournament_master_empire`交谈；仍拒绝其他竞技场Agent。安全存档实测进入竞技场后Native交谈、读取“当前无赛事”分支，再从当前选项正常退出，随后Leave Area返回Campaign Map；Campaign时间、金币、声望、队伍均未改变。此为手动原生路径、0模型调用，EYC Host并未因此新增竞技场/锦标赛目标路线。Build和AgentHostPackage通过；菜单过滤、ArenaMaster白名单交谈、Tavern/Arena离场和Mission save fail-fast已由结构化状态/Native回执核验，玩家界面完整视觉捕获、竞技场报名/锦标赛VM及奖励仍未验证。
 
-`CompanionHiring`是一项端到端Tavern原版对话验收：Test-only fixture可把玩家Gold精确设到Native报价或报价+1，用于测试严格`Gold > price`门槛；它不进入Agent决策白名单、不保存存档。该阶段要验证按本次Conversation选项启动雇佣、报价实值、Clan/MainParty结果与不足报价时不发生扣款/加入，不直接调用原版Hire动作API。
+`CompanionHiring`是一项端到端Tavern原版对话验收：测试先读完整当前Native `missionSceneAgents`候选，避免把“周围近距离观察暂时没有旅人”误判成整个Tavern没有可用人选；随后按原版Town→Tavern→导航→交谈→报价流程验证原生对话。Test-only fixture只允许将Gold设到Native报价-63、报价或报价+1，用于验证严格`Gold > price`门槛在报价下方、相等及上方三种结果；该夹具动作不进入Agent决策白名单、不保存存档。验收核对报价文字、接受/拒绝选项、Clan/MainParty成员、金币前后值、源档哈希与进程清理，不直接调用原版Hire动作API。Harness阶段必须把内层PowerShell子测试的stdout/stderr写入阶段失败日志，不能只暴露退出码。
 
 ## Harness 架构
 

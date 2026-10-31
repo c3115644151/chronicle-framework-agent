@@ -714,7 +714,7 @@ switch ($Action) {
     'harnessSeedRecruitmentCapacityFixture' { $result = Invoke-ProtocolCommand 'harnessSeedRecruitmentCapacityFixture' }
     'harnessPrepareCompanionHiringFixture' {
         if (-not $HeroId) { throw '-HeroId is required from the current local Mission observation for this Harness fixture.' }
-        if ($GoldOffset -lt 0 -or $GoldOffset -gt 1) { throw '-GoldOffset must be 0 (at quote price) or 1 (one gold above price) in Harness.' }
+        if ($GoldOffset -notin @(-63, 0, 1)) { throw '-GoldOffset must be -63 (below quote), 0 (at quote price), or 1 (one gold above price) in Harness.' }
         $result = Invoke-ProtocolCommand 'harnessPrepareCompanionHiringFixture' @{ heroId = $HeroId; goldOffset = $GoldOffset }
     }
     'harnessCompanionHiringDiagnostics' {

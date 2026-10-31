@@ -2179,8 +2179,8 @@ internal sealed class ChronicleAgentProtocol
         var playerClan = Clan.PlayerClan;
         if (candidate.IsPlayerCompanion || candidate.PartyBelongedTo != null || candidate.Clan != null)
             throw new InvalidOperationException("Companion hiring fixture target must be an unowned, unparty Wanderer Hero");
-        if (goldOffset < 0 || goldOffset > 1)
-            throw new InvalidOperationException("Companion hiring Harness goldOffset must be exactly 0 (insufficient) or 1 (eligible)");
+        if (goldOffset is not (-63 or 0 or 1))
+            throw new InvalidOperationException("Companion hiring Harness goldOffset must be exactly -63 (below quote), 0 (equal quote), or 1 (above quote)");
         var price = Campaign.Current.Models.CompanionHiringPriceCalculationModel.GetCompanionHiringPrice(candidate);
         var priceGold = Hero.MainHero.Gold;
         var desiredGold = price + goldOffset;

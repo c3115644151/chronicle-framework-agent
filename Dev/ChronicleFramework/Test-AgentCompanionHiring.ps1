@@ -86,10 +86,10 @@ function Invoke-CompanionHiringScenario([int]$GoldOffset, [string]$Scenario) {
     }
     if (-not $mission.state.mission.mainAgent -or -not $mission.state.mission.nativeConversationReady -or $mission.state.mission.sceneName -notmatch 'tavern' -or $mission.state.context.timeControlMode -ne 'Stop') { throw "$Scenario did not enter a stopped native Tavern Location Mission with its rendering-time conversation manager initialized." }
 
-    $wanderer = @($mission.state.mission.nearbySceneAgents | Where-Object { $_.heroId -and $_.occupation -eq 'Wanderer' -and -not $_.isEnemy } | Sort-Object distance | Select-Object -First 1)
-    if ($wanderer.Count -ne 1) { throw "$Scenario current local Tavern observation contains no friendly Wanderer." }
+    $sceneAgentCatalog = Invoke-AgentCli 'missionSceneAgents' @('-CommandId', "$scenarioPrefix-scene-agent-catalog")
+    $wanderer = @($sceneAgentCatalog.data.agents | Where-Object { $_.heroId -and $_.occupation -eq 'Wanderer' -and -not $_.isNotable -and -not $_.isEnemy } | Sort-Object distance | Select-Object -First 1)
+    if ($wanderer.Count -ne 1) { throw "$Scenario current Native Tavern scene catalog contains no friendly, unowned Wanderer candidate." }
     $heroId = [string]$wanderer[0].heroId
-    $sceneAgentCatalog = Invoke-AgentCli 'missionSceneAgents' @('-CommandId', "$scenarioPrefix-local-agent-catalog")
     $catalogWanderer = @($sceneAgentCatalog.data.agents | Where-Object { $_.heroId -eq $heroId -and [int]$_.agentIndex -eq [int]$wanderer[0].agentIndex })
     if ([int]$sceneAgentCatalog.data.schemaVersion -lt 2 -or $catalogWanderer.Count -ne 1 -or $null -eq $catalogWanderer[0].nativeConversationActionAvailable)
         { throw "$Scenario missionSceneAgents response did not include the schema-v2 Native conversation-action eligibility field for the observed Wanderer." }
@@ -155,8 +155,8 @@ function Invoke-CompanionHiringScenario([int]$GoldOffset, [string]$Scenario) {
     $quoteMatchesNativePrice = $quoteDigits.Contains($nativePrice.ToString([Globalization.CultureInfo]::InvariantCulture))
     $goldBeforeChoice = [int]$quoteState.state.economy.gold
 
-    if ($GoldOffset -eq 0) {
-        if ($acceptOption.Count -ne 0 -or $declineOption.Count -ne 1) { throw 'At exact asking price, Native dialogue did not block the strict-Gold acceptance option or offer the no-purchase response.' }
+    if ($GoldOffset -le 0) {
+        if ($acceptOption.Count -ne 0 -or $declineOption.Count -ne 1) { throw 'At or below the asking price, Native dialogue did not block acceptance or offer the no-purchase response.' }
         $decline = Invoke-AgentCli 'dialogueSelect' @('-OptionId', [string]$declineOption[0].id, '-CommandId', "$scenarioPrefix-decline")
         $afterRefusal = Invoke-AgentCli 'state' @('-CommandId', "$scenarioPrefix-after-refusal")
         $refusalDiagnostics = Invoke-AgentCli 'harnessCompanionHiringDiagnostics' @('-HeroId', $heroId, '-CommandId', "$scenarioPrefix-after-refusal-diagnostics")
@@ -164,6 +164,7 @@ function Invoke-CompanionHiringScenario([int]$GoldOffset, [string]$Scenario) {
         $scenarioFixtureHashAfter = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
         $result = [ordered]@{
             Scenario = $Scenario
+            GoldOffset = $GoldOffset
             Wanderer = $wanderer[0]
             NativeConversationActionBeforeApproach = $initialNativeConversationActionAvailable
             CatalogDistanceBeforeApproach = $initialCatalogDistance
@@ -173,6 +174,7 @@ function Invoke-CompanionHiringScenario([int]$GoldOffset, [string]$Scenario) {
             QuoteText = $quoteText
             GoldAtPrice = $goldBeforeChoice
             AcceptOptionVisible = ($acceptOption.Count -gt 0)
+            DeclineOptionVisible = ($declineOption.Count -eq 1)
             DeclineOptionStatus = [string]$decline.status
             NoPartialHire = (-not [bool]$refusalDiagnostics.data.isPlayerCompanion -and -not [bool]$refusalDiagnostics.data.isInPlayerClan -and -not [bool]$refusalDiagnostics.data.isInMainParty -and [int]$afterRefusal.state.economy.gold -eq $goldBeforeChoice)
             CompanionDiagnostics = $refusalDiagnostics.data
@@ -217,28 +219,31 @@ function Invoke-CompanionHiringScenario([int]$GoldOffset, [string]$Scenario) {
 }
 
 try {
-    $diagnosticStep = 'positive and strict-Gold acceptance scenarios'
+    $diagnosticStep = 'above-price, exact-price and below-price Native acceptance scenarios'
     $env:CHRONICLE_HARNESS_MODE = 'visual-capture'
     $positive = Invoke-CompanionHiringScenario 1 'positive'
     $strictGold = Invoke-CompanionHiringScenario 0 'strict-gold'
+    $belowQuote = Invoke-CompanionHiringScenario -63 'below-quote'
     $fixtureHashAfter = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
     $assertions = [ordered]@{
         NativeCurrentTavernWandererHired = [bool]$positive.HireCommitted
         NativeConversationActionRefreshesAfterApproach = [bool]$positive.NativeConversationActionAfterApproach -and [double]$positive.CatalogDistanceAfterApproach -lt 2.0
         NativePriceQuoteMatchesModel = [bool]$positive.QuoteMatchesNativePrice
         StrictGoldEqualityRejected = ([int]$strictGold.GoldAtPrice -eq [int]$strictGold.NativePrice -and -not [bool]$strictGold.AcceptOptionVisible -and [bool]$strictGold.NoPartialHire)
-        SourceFixtureUnchanged = ($fixtureHashBefore -eq $fixtureHashAfter -and [bool]$positive.SourceFixtureUnchanged -and [bool]$strictGold.SourceFixtureUnchanged)
-        AllProcessesStopped = ([bool]$positive.ProcessStopped -and [bool]$strictGold.ProcessStopped)
+        BelowNativeQuoteRejected = ([int]$belowQuote.GoldAtPrice -lt [int]$belowQuote.NativePrice -and -not [bool]$belowQuote.AcceptOptionVisible -and [bool]$belowQuote.DeclineOptionVisible -and [bool]$belowQuote.NoPartialHire)
+        SourceFixtureUnchanged = ($fixtureHashBefore -eq $fixtureHashAfter -and [bool]$positive.SourceFixtureUnchanged -and [bool]$strictGold.SourceFixtureUnchanged -and [bool]$belowQuote.SourceFixtureUnchanged)
+        AllProcessesStopped = ([bool]$positive.ProcessStopped -and [bool]$strictGold.ProcessStopped -and [bool]$belowQuote.ProcessStopped)
     }
     $failedAssertions = @($assertions.Keys | Where-Object { -not [bool]$assertions[$_] })
     $result = [ordered]@{
         Positive = $positive
         StrictGold = $strictGold
+        BelowQuote = $belowQuote
         Assertions = $assertions
         FailedAssertions = $failedAssertions
         FixtureHashBefore = $fixtureHashBefore
         FixtureHashAfter = $fixtureHashAfter
-        ProcessStopped = [bool]$positive.ProcessStopped -and [bool]$strictGold.ProcessStopped
+        ProcessStopped = [bool]$positive.ProcessStopped -and [bool]$strictGold.ProcessStopped -and [bool]$belowQuote.ProcessStopped
         Passed = ($failedAssertions.Count -eq 0)
     }
     $result | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $resultPath -Encoding UTF8

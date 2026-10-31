@@ -28,7 +28,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.459'
+$HarnessContractVersion = '7.460'
 $effectiveSmokeTimeoutSeconds = if ($Phase -in @('FreshStoryModeModelEvaluation','PersistentEycCampaign','FreshStoryModeNativeInquiryResponseEvaluation','AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostEstablishClanAutonomyEvaluation','AgentHostCaptivityRecoveryEvaluation','AgentHostEstablishClanGoldSaleEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max($SmokeTimeoutSeconds, 240) } else { $SmokeTimeoutSeconds }
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
@@ -1375,8 +1375,10 @@ foreach ($stage in $requestedStages) {
         }
         'CompanionHiring' {
             Invoke-Stage -Name 'CompanionHiring' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $companionHiringScript
-                if ($LASTEXITCODE -ne 0) { throw "Native Wanderer companion-hiring flow failed with exit code $LASTEXITCODE." }
+                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $companionHiringScript 2>&1 | Out-String
+                $testExitCode = $LASTEXITCODE
+                if ($testExitCode -ne 0) { throw "Native Wanderer companion-hiring flow failed with exit code $testExitCode.`n$testOutput" }
+                $testOutput
             }
         }
         'PartyRoles' {
