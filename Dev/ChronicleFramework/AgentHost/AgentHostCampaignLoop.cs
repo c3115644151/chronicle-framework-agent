@@ -33,6 +33,7 @@ internal static class AgentHostCampaignLoop
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
         var results = new List<object>();
+        results.AddRange(AgentHostNativeMapMovementMonitor.RunContractSelfTests());
         if (!GoldSaleActions.Contains("sellPrisonerOne") || !GoldSaleActions.Contains("partyScreenDone") || !GoldSaleActions.Contains("partyScreenCancel") ||
             !AllSupportedActions.Contains("sellPrisonerOne") || !AllSupportedActions.Contains("partyScreenCancel"))
             throw new AgentHostException("campaign-loop-ransom-sale-actions-missing", "The current Gold sale scope and product MCM start catalog must include Native one-prisoner Ransom transfer, Done and Cancel.");
@@ -869,16 +870,37 @@ internal static class AgentHostCampaignLoop
                         trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision, providerStartedUtc, providerDoneUtc, providerStartedTicks, feedback));
                         continue;
                     }
-                    await Task.Delay(TimeSpan.FromSeconds(waitSeconds), elapsed.Token);
-                    using var waitedState = await client.ReadStateAsync(elapsed.Token);
-                    currentNative = CloneObject(waitedState.RootElement);
+                    var movementMonitor = await AgentHostNativeMapMovementMonitor.WaitAsync(
+                        client,
+                        client as IAgentHostBattleSimulationNativeClient,
+                        before,
+                        moveTargetId,
+                        waitSeconds,
+                        monitorVisibleBandits: HasObservedEstablishYourClanQuest(before["state"] as JsonObject),
+                        elapsed.Token);
+                    currentNative = movementMonitor.NativeReceipt;
+                    actionsExecuted += movementMonitor.MapPartyTargetPollCount + (movementMonitor.PauseReceipt is null ? 0 : 1);
                     var arrivalAfterWait = moveTargetId != null && string.Equals(ReadStateString(currentNative, "location", "currentSettlementId"), moveTargetId, StringComparison.Ordinal);
                     var afterWait = BuildObservation(currentNative, visibleTargets, moveTargetId, moveTargetName, arrivalAfterWait);
                     var waitStep = BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision, providerStartedUtc, providerDoneUtc, providerStartedTicks, null);
                     waitStep["observationAfter"] = afterWait;
-                    waitStep["control"] = new JsonObject { ["kind"] = "bounded-observe-again", ["waitSeconds"] = waitSeconds };
+                    waitStep["control"] = new JsonObject
+                    {
+                        ["kind"] = movementMonitor.InterruptedByVisibleHostileBandit ? AgentHostNativeMapMovementMonitor.FailureCode : "bounded-observe-again",
+                        ["waitSeconds"] = waitSeconds,
+                        ["nativeMapPartyTargetPollCount"] = movementMonitor.MapPartyTargetPollCount,
+                        ["visibleHostileBanditTargets"] = movementMonitor.VisibleHostileBanditTargets.DeepClone(),
+                        ["nativePauseReceipt"] = movementMonitor.PauseReceipt?.DeepClone()
+                    };
                     trace.Add(waitStep);
                     feedback = null;
+                    if (movementMonitor.InterruptedByVisibleHostileBandit)
+                    {
+                        failure = "A currently visible hostile Bandit interrupted Native settlement travel; the Host issued a separate Native Pause and returned this current target for EYC battle handling.";
+                        failureCode = AgentHostNativeMapMovementMonitor.FailureCode;
+                        terminationReason = AgentHostNativeMapMovementMonitor.FailureCode;
+                        break;
+                    }
                     continue;
                 }
 

@@ -540,11 +540,44 @@ internal static class AgentHostEstablishClanCompanionLoop
                 var mapMovementPending = gameState == "MapState" && !string.IsNullOrWhiteSpace(moveTargetId) &&
                     !string.Equals(currentSettlementId, moveTargetId, StringComparison.Ordinal) && (nativeMoveActive || moveStartPending);
 
-                if (!sceneNotificationActive && (mapMovementPending || menuArrivalPending))
+                if (!sceneNotificationActive && mapMovementPending)
                 {
                     // Native map movement already selects its normal StoppablePlay mode.
-                    // Let that original movement advance and poll Native state passively;
-                    // do not spend a model decision or issue another move/time command.
+                    // Watch Native visible Bandits during that natural travel. This is a
+                    // bounded nearest-Town decision window: observe active Native movement
+                    // During Native movement, do not spend a model decision or issue another move/time command.
+                    var movementNative = JsonNode.Parse(nativeState.RootElement.GetRawText())?.AsObject()
+                        ?? throw new AgentHostException("companion-movement-state-invalid", "The current Native Map observation could not be cloned for the hostile-party monitor.");
+                    var movementWatch = await AgentHostNativeMapMovementMonitor.WaitAsync(
+                        campaignClient,
+                        campaignClient as IAgentHostBattleSimulationNativeClient,
+                        movementNative,
+                        moveTargetId,
+                        1,
+                        monitorVisibleBandits: AgentHostNativeMapMovementMonitor.HasActiveEycQuest(movementNative),
+                        elapsed.Token);
+                    state = movementWatch.NativeState;
+                    actionsExecuted += movementWatch.MapPartyTargetPollCount + (movementWatch.PauseReceipt is null ? 0 : 1);
+                    trace.Add(new JsonObject
+                    {
+                        ["stage"] = movementWatch.InterruptedByVisibleHostileBandit ? AgentHostNativeMapMovementMonitor.FailureCode : "native-map-move-passive-observation",
+                        ["targetSettlementId"] = moveTargetId,
+                        ["mapPartyTargetPollCount"] = movementWatch.MapPartyTargetPollCount,
+                        ["visibleHostileBanditTargets"] = movementWatch.VisibleHostileBanditTargets.DeepClone(),
+                        ["nativePauseReceipt"] = movementWatch.PauseReceipt?.DeepClone(),
+                        ["stateAfter"] = AgentHostHarnessProgressTrace.BuildNativeStateSummary(movementWatch.NativeReceipt)
+                    });
+                    if (movementWatch.InterruptedByVisibleHostileBandit)
+                        return BuildResult("interrupted", AgentHostNativeMapMovementMonitor.FailureCode,
+                            "A Native visible hostile Bandit interrupted Companion travel. The EYC parent must resolve the current map target before resuming the Companion route.",
+                            AgentHostNativeMapMovementMonitor.FailureCode, state, journal, objective);
+                    continue;
+                }
+
+                if (!sceneNotificationActive && menuArrivalPending)
+                {
+                    // Arrival and menu construction are Native transitions; wait for
+                    // the original Town/Village menu without querying or steering it.
                     await Task.Delay(TimeSpan.FromSeconds(1), elapsed.Token);
                     continue;
                 }
@@ -656,10 +689,41 @@ internal static class AgentHostEstablishClanCompanionLoop
                     var waitSeconds = ReadInt(decision.Decision, "waitSeconds", 0);
                     if (waitSeconds is < 1 or > 10) throw new AgentHostException("companion-observe-interval-invalid", "observeAgain requires a bounded 1-10 second host-side wait.");
                     rejectedActionDecisions = 0;
-                    await Task.Delay(TimeSpan.FromSeconds(waitSeconds), elapsed.Token);
-                    using var afterWait = await campaignClient.ReadStateAsync(elapsed.Token);
-                    var waitedState = ReadState(afterWait.RootElement);
-                    trace.Add(BuildStep(decisions, observation, decision.Decision, null, waitedState, "bounded-native-observation"));
+                    if (gameState == "MapState" && !string.IsNullOrWhiteSpace(moveTargetId))
+                    {
+                        var moveNative = JsonNode.Parse(nativeState.RootElement.GetRawText())?.AsObject()
+                            ?? throw new AgentHostException("companion-movement-state-invalid", "The current Native Map observation could not be cloned for the hostile-party monitor.");
+                        var movementWatch = await AgentHostNativeMapMovementMonitor.WaitAsync(
+                            campaignClient,
+                            campaignClient as IAgentHostBattleSimulationNativeClient,
+                            moveNative,
+                            moveTargetId,
+                            waitSeconds,
+                            monitorVisibleBandits: AgentHostNativeMapMovementMonitor.HasActiveEycQuest(moveNative),
+                            elapsed.Token);
+                        var waitedState = movementWatch.NativeState;
+                        actionsExecuted += movementWatch.MapPartyTargetPollCount + (movementWatch.PauseReceipt is null ? 0 : 1);
+                        var waitStep = BuildStep(decisions, observation, decision.Decision, null, waitedState,
+                            movementWatch.InterruptedByVisibleHostileBandit ? AgentHostNativeMapMovementMonitor.FailureCode : "bounded-native-observation");
+                        waitStep["movementMonitor"] = new JsonObject
+                        {
+                            ["mapPartyTargetPollCount"] = movementWatch.MapPartyTargetPollCount,
+                            ["visibleHostileBanditTargets"] = movementWatch.VisibleHostileBanditTargets.DeepClone(),
+                            ["nativePauseReceipt"] = movementWatch.PauseReceipt?.DeepClone()
+                        };
+                        trace.Add(waitStep);
+                        if (movementWatch.InterruptedByVisibleHostileBandit)
+                            return BuildResult("interrupted", AgentHostNativeMapMovementMonitor.FailureCode,
+                                "A Native visible hostile Bandit interrupted Companion travel. The EYC parent must resolve the current map target before resuming the Companion route.",
+                                AgentHostNativeMapMovementMonitor.FailureCode, waitedState, journal, objective);
+                    }
+                    else
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(waitSeconds), elapsed.Token);
+                        using var afterWait = await campaignClient.ReadStateAsync(elapsed.Token);
+                        var waitedState = ReadState(afterWait.RootElement);
+                        trace.Add(BuildStep(decisions, observation, decision.Decision, null, waitedState, "bounded-native-observation"));
+                    }
                     continue;
                 }
 

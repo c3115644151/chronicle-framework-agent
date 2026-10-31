@@ -690,16 +690,37 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                     else
                     {
                         var waitStarted = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
-                        await Task.Delay(TimeSpan.FromSeconds(waitSeconds), elapsed.Token);
-                        using var waited = await campaignClient.ReadStateAsync(elapsed.Token);
-                        var waitedState = ReadState(waited.RootElement);
+                        var waitNative = JsonNode.Parse(nativeState.RootElement.GetRawText())?.AsObject()
+                            ?? throw new AgentHostException("recruitment-movement-state-invalid", "The current Native state could not be cloned for the movement monitor.");
+                        var movementWatch = await AgentHostNativeMapMovementMonitor.WaitAsync(
+                            campaignClient,
+                            campaignClient as IAgentHostBattleSimulationNativeClient,
+                            waitNative,
+                            moveTargetId,
+                            waitSeconds,
+                            monitorVisibleBandits: AgentHostEstablishYourClanGoalLoop.HasActiveQuest(nativeState.RootElement),
+                            elapsed.Token);
+                        var waitedState = movementWatch.NativeState;
+                        actionsExecuted += movementWatch.MapPartyTargetPollCount + (movementWatch.PauseReceipt is null ? 0 : 1);
                         moveStartPending = false;
-                        trace.Add(BuildStep(decisions, observation, decision.Decision, null,
-                            new JsonObject { ["kind"] = "bounded-observe-again", ["waitSeconds"] = waitSeconds }, waitedState, waitStarted));
+                        var movementStep = BuildStep(decisions, observation, decision.Decision, null,
+                            new JsonObject
+                            {
+                                ["kind"] = movementWatch.InterruptedByVisibleHostileBandit ? AgentHostNativeMapMovementMonitor.FailureCode : "bounded-observe-again",
+                                ["waitSeconds"] = waitSeconds,
+                                ["nativeMapPartyTargetPollCount"] = movementWatch.MapPartyTargetPollCount,
+                                ["visibleHostileBanditTargets"] = movementWatch.VisibleHostileBanditTargets.DeepClone(),
+                                ["nativePauseReceipt"] = movementWatch.PauseReceipt?.DeepClone()
+                            }, waitedState, waitStarted);
+                        trace.Add(movementStep);
                         previousReceipt = new JsonObject { ["control"] = "observeAgain", ["waitSeconds"] = waitSeconds, ["status"] = "completed" };
                         feedback = null;
                         currentRecruitOffers = null;
                         currentPrisonerRecruitOptions = null;
+                        if (movementWatch.InterruptedByVisibleHostileBandit)
+                            return BuildResult("interrupted", AgentHostNativeMapMovementMonitor.FailureCode,
+                                "A Native visible hostile Bandit interrupted the PartySize settlement move. The EYC parent should resolve it through the existing BattleSimulation route before replanning.",
+                                AgentHostNativeMapMovementMonitor.FailureCode, waitedState, currentRecruitOffers, journal, objective);
                     }
                     continue;
                 }

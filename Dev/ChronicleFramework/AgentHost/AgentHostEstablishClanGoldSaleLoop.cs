@@ -537,13 +537,30 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                     var minimumWait = GetMinimumObserveInterval(moveStartPending);
                     if (!IsSupportedObserveInterval(seconds, moveStartPending))
                         throw new AgentHostException("gold-sale-observe-interval-invalid", $"observeAgain requires a {minimumWait}-10 second Host poll in the current Native map-movement state.");
-                    await Task.Delay(TimeSpan.FromSeconds(seconds), elapsed.Token);
-                    using var afterWait = await stateClient.ReadStateAsync(elapsed.Token);
-                    currentNative = ParseObject(afterWait.RootElement);
+                    var movementWatch = await AgentHostNativeMapMovementMonitor.WaitAsync(
+                        stateClient,
+                        stateClient as IAgentHostBattleSimulationNativeClient,
+                        currentNative,
+                        moveTargetId,
+                        seconds,
+                        monitorVisibleBandits: AgentHostNativeMapMovementMonitor.HasActiveEycQuest(currentNative),
+                        elapsed.Token);
+                    currentNative = movementWatch.NativeReceipt;
+                    actionCount += movementWatch.MapPartyTargetPollCount + (movementWatch.PauseReceipt is null ? 0 : 1);
                     if (moveStartPending) moveStartPending = false;
                     trace.Add(BuildStep(decisionCount, observation, modelDecision.Decision, null, started, startedTicks,
-                        new JsonObject { ["kind"] = "bounded-host-observation", ["waitSeconds"] = seconds },
+                        new JsonObject
+                        {
+                            ["kind"] = movementWatch.InterruptedByVisibleHostileBandit ? AgentHostNativeMapMovementMonitor.FailureCode : "bounded-host-observation",
+                            ["waitSeconds"] = seconds,
+                            ["nativeMapPartyTargetPollCount"] = movementWatch.MapPartyTargetPollCount,
+                            ["visibleHostileBanditTargets"] = movementWatch.VisibleHostileBanditTargets.DeepClone(),
+                            ["nativePauseReceipt"] = movementWatch.PauseReceipt?.DeepClone()
+                        },
                         BuildObservation(currentNative, currentNative["state"] as JsonObject ?? new JsonObject(), objectiveSnapshotBefore, liveMetricDifferencesBefore, saleReceipt)));
+                    if (movementWatch.InterruptedByVisibleHostileBandit)
+                        return BuildFailure(AgentHostNativeMapMovementMonitor.FailureCode,
+                            "A Native visible hostile Bandit interrupted movement toward a sale Town. The EYC parent must resolve the current encounter/map target before replanning.");
                     continue;
                 }
 
