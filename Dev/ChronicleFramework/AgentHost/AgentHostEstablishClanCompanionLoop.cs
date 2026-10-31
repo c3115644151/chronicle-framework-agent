@@ -343,7 +343,7 @@ internal static class AgentHostEstablishClanCompanionLoop
             !client.Actions.SequenceEqual(expected, StringComparer.Ordinal) || client.Gold != 1340 || client.CompanionCount != 1 ||
             client.ActiveMissionNavigationStateReads < 2 || client.TavernMissionStartupStateReads < 2 || provider.SawActiveMissionNavigation || !provider.SawCompanionObservationProjection ||
             ReadBoolean((result["objectiveSnapshot"] as JsonObject)?["companions"] as JsonObject, "met") != true)
-            throw new AgentHostException("establish-clan-companion-transport-self-test-failed", "The injected Native/Provider route did not passively settle the original Tavern Mission before decisions, preserve projected current Wanderer candidates without sending the raw scene roster, wait for Native navigation, hire one quoted Wanderer, and verify refreshed original Journal progress. status=" + ReadString(result, "status") + "; termination=" + ReadString(result["termination"] as JsonObject, "reason") + "; failureCode=" + ReadString(result, "failureCode") + "; failure=" + ReadString(result, "failure") + "; actions=" + string.Join(",", client.Actions) + "; calls=" + provider.CallCount + "; activeNavigationReads=" + client.ActiveMissionNavigationStateReads + "; startupReads=" + client.TavernMissionStartupStateReads + "; providerSawActiveNavigation=" + provider.SawActiveMissionNavigation + "; providerSawProjection=" + provider.SawCompanionObservationProjection + "; journalMet=" + ReadBoolean((result["objectiveSnapshot"] as JsonObject)?["companions"] as JsonObject, "met"));
+            throw new AgentHostException("establish-clan-companion-transport-self-test-failed", "The injected Native/Provider route did not passively settle the original Tavern Mission before decisions, preserve projected current Wanderer candidates without sending the raw scene roster or MainHero skill list, wait for Native navigation, hire one quoted Wanderer, and verify refreshed original Journal progress. status=" + ReadString(result, "status") + "; termination=" + ReadString(result["termination"] as JsonObject, "reason") + "; failureCode=" + ReadString(result, "failureCode") + "; failure=" + ReadString(result, "failure") + "; actions=" + string.Join(",", client.Actions) + "; calls=" + provider.CallCount + "; activeNavigationReads=" + client.ActiveMissionNavigationStateReads + "; startupReads=" + client.TavernMissionStartupStateReads + "; providerSawActiveNavigation=" + provider.SawActiveMissionNavigation + "; providerSawProjection=" + provider.SawCompanionObservationProjection + "; journalMet=" + ReadBoolean((result["objectiveSnapshot"] as JsonObject)?["companions"] as JsonObject, "met"));
         var stopClient = new FakeCompanionClient();
         var stopProvider = new FakeCompanionStopProvider();
         using var stopRequest = JsonDocument.Parse("{\"runId\":\"establish-clan-companion-safe-stop-selftest\",\"goal\":\"Hire one Companion.\",\"maxDecisions\":1,\"maxElapsedSeconds\":10}");
@@ -1625,6 +1625,7 @@ internal static class AgentHostEstablishClanCompanionLoop
             {
                 ["context"] = context,
                 ["availableMenuOptions"] = menuOptions,
+                ["mainHeroSkills"] = new JsonObject { ["skills"] = new JsonArray(new JsonObject { ["id"] = "leadership", ["level"] = 10 }) },
                 ["quests"] = new JsonArray(new JsonObject { ["id"] = QuestId }),
                 ["party"] = new JsonObject { ["isMoving"] = false }
             };
@@ -1667,7 +1668,8 @@ internal static class AgentHostEstablishClanCompanionLoop
             cancellationToken.ThrowIfCancellationRequested();
             var observation = request.GetProperty("observation");
             var state = observation.GetProperty("state");
-            if (state.TryGetProperty("mission", out var companionMission) && companionMission.ValueKind == JsonValueKind.Object &&
+            if (!state.TryGetProperty("mainHeroSkills", out _) &&
+                state.TryGetProperty("mission", out var companionMission) && companionMission.ValueKind == JsonValueKind.Object &&
                 !companionMission.TryGetProperty("nearbySceneAgents", out _) &&
                 observation.TryGetProperty("currentSceneWandererCandidates", out var currentCandidates) && currentCandidates.ValueKind == JsonValueKind.Array &&
                 currentCandidates.EnumerateArray().Any(candidate => ReadString(candidate, "heroId") == "wanderer-a") &&
