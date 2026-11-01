@@ -273,7 +273,8 @@ internal static class AgentHostDecisionCycle
         CancellationToken cancellationToken)
     {
         var prompt = EstablishClanCompanionSystemPrompt +
-            " OBSERVATION PROJECTION: This hiring subgoal omits raw state.mission.nearbySceneAgents rows and the MainHero skill list. The current Native offer text and clickable response already reflect the live hiring conditions; use that quote and the exact current options, never estimate them from skills. Use the complete currentSceneWandererCandidates and nearbyInteractableWanderers summaries and current Gold. Host action validation still uses the full Native state.";
+            " OBSERVATION PROJECTION: This hiring subgoal omits raw state.mission.nearbySceneAgents rows and the MainHero skill list. The current Native offer text and clickable response already reflect the live hiring conditions; use that quote and the exact current options, never estimate them from skills. Use the complete currentSceneWandererCandidates and nearbyInteractableWanderers summaries and current Gold. Host action validation still uses the full Native state." +
+            " MAP DIALOGUE INTERRUPTION: During ordinary MapState travel, a current Native conversation interrupts the move and its catalog exposes only the currently clickable dialogueSelect options, or dialogueContinue when no choice is clickable. Decide from the current text/options; do not accept unrelated quests, start Missions or choose combat. After the original response, reread Native state and continue the Companion route only when it is safe.";
         var feedback = request["decisionFeedback"] as JsonObject;
         if (ReadString(feedback, "kind") == "decision-rejected-before-native")
             prompt += " RECOVERY DIRECTIVE: The prior response was rejected before any Native action. Follow this exact next step using only the current catalog; do not repeat the rejected response. " +

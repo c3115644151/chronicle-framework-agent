@@ -115,6 +115,46 @@ internal static class AgentHostEstablishClanCompanionLoop
         if (declinedCatalog.Count != 1 || declinedOptionIds?.Count != 1 || declinedOptionIds[0]?.GetValue<string>() != "player_is_leaving_neutral_or_friendly")
             throw new AgentHostException("establish-clan-companion-declined-wanderer-exit-not-gated", "After declining a Wanderer's quote, the current Native follow-up must allow its leave response and must not reopen the same hire offer.");
 
+        var mapTravelConversation = new JsonObject
+        {
+            ["context"] = new JsonObject
+            {
+                ["gameState"] = "MapState",
+                ["menuId"] = null,
+                ["conversation"] = new JsonObject
+                {
+                    ["characterId"] = "notable-a",
+                    ["sentenceText"] = "A current Native map dialogue line.",
+                    ["options"] = new JsonArray(
+                        new JsonObject { ["id"] = "map-current", ["text"] = "A visible answer.", ["clickable"] = true },
+                        new JsonObject { ["id"] = "map-hidden", ["text"] = "Unavailable answer.", ["clickable"] = false })
+                }
+            },
+            ["location"] = new JsonObject { ["currentSettlementId"] = null, ["targetSettlementId"] = "town-a" },
+            ["party"] = new JsonObject { ["isMoving"] = true }
+        };
+        var mapTravelCatalog = BuildActionCatalog(mapTravelConversation, new JsonArray(), new JsonObject(), null, null, null, "town-a", false,
+            new HashSet<string>(StringComparer.Ordinal), new HashSet<string>(StringComparer.Ordinal));
+        var mapTravelOptionIds = mapTravelCatalog.OfType<JsonObject>().SingleOrDefault(action => ReadString(action, "action") == "dialogueSelect")?[
+            "argumentValues"]?["OptionId"] as JsonArray;
+        if (mapTravelCatalog.Count != 1 || mapTravelOptionIds?.Count != 1 || mapTravelOptionIds[0]?.GetValue<string>() != "map-current" ||
+            !TryResolveAction(new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "map-current" } },
+                mapTravelCatalog, mapTravelConversation, null, null, "town-a", false, out var mapDialogueAction, out var mapDialogueArguments, out _, out var mapDialogueHero, out _) ||
+            mapDialogueAction != "dialogueSelect" || mapDialogueArguments["optionId"]?.GetValue<string>() != "map-current" || mapDialogueHero is not null ||
+            TryResolveAction(new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "map-hidden" } },
+                mapTravelCatalog, mapTravelConversation, null, null, "town-a", false, out _, out _, out _, out _, out _))
+            throw new AgentHostException("establish-clan-companion-map-conversation-options-not-current", "A MapState conversation during Companion travel must expose only current clickable Native options and must not be treated as a Wanderer hire conversation.");
+
+        var mapTravelNoChoice = (JsonObject)mapTravelConversation.DeepClone();
+        ((mapTravelNoChoice["context"]?["conversation"] as JsonObject)!["options"] as JsonArray)!.Clear();
+        var mapContinueCatalog = BuildActionCatalog(mapTravelNoChoice, new JsonArray(), new JsonObject(), null, null, null, "town-a", false,
+            new HashSet<string>(StringComparer.Ordinal), new HashSet<string>(StringComparer.Ordinal));
+        if (mapContinueCatalog.Count != 1 || ReadString(mapContinueCatalog[0] as JsonObject, "action") != "dialogueContinue" ||
+            !TryResolveAction(new JsonObject { ["action"] = "dialogueContinue", ["arguments"] = new JsonObject() },
+                mapContinueCatalog, mapTravelNoChoice, null, null, "town-a", false, out var mapContinueAction, out _, out _, out _, out _) ||
+            mapContinueAction != "dialogueContinue")
+            throw new AgentHostException("establish-clan-companion-map-conversation-continue-not-current", "A no-choice MapState conversation must expose only the original Native dialogueContinue before a Companion route resumes.");
+
         var missionCandidateState = new JsonObject
         {
             ["context"] = new JsonObject { ["gameState"] = "MissionState", ["encounterActive"] = false },
@@ -324,6 +364,8 @@ internal static class AgentHostEstablishClanCompanionLoop
             new { scenario = "establish-clan-companion-town-choice-window-pages-without-world-target-cap", passed = true, totalWorldTargets = 21, choiceWindow = SafeTownDecisionWindowSize },
             new { scenario = "establish-clan-companion-model-observation-compacts-raw-mission-agent-roster-and-preserves-current-wanderer-candidates", originalMissionBytes, projectedMissionBytes, missionBytesSaved = originalMissionBytes - projectedMissionBytes, fullPromptTokens = fullSceneTokenEstimate.TokenizerTokens, projectedPromptTokens = projectedSceneTokenEstimate.TokenizerTokens, estimatedPromptTokensSaved = fullSceneTokenEstimate.TokenizerTokens - projectedSceneTokenEstimate.TokenizerTokens, passed = true },
             new { scenario = "establish-clan-companion-dialogue-catalog-excludes-unrelated-native-options", passed = true },
+            new { scenario = "establish-clan-companion-resolves-current-map-dialogue-before-resuming-travel", passed = true },
+            new { scenario = "establish-clan-companion-continues-only-no-choice-map-dialogue", passed = true },
             new { scenario = "establish-clan-companion-nearby-target-uses-native-interact", passed = true },
             new { scenario = "establish-clan-companion-rejects-unlisted-navigation-duration-with-current-catalog-values", passed = true },
             new { scenario = "establish-clan-companion-normalizes-only-formatted-numbers-present-in-current-native-catalog", passed = true }
@@ -535,9 +577,10 @@ internal static class AgentHostEstablishClanCompanionLoop
                 var nativeMoveActive = !string.IsNullOrWhiteSpace(moveTargetId) &&
                     (ReadBoolean(state["party"] as JsonObject, "isMoving") || string.Equals(targetSettlementId, moveTargetId, StringComparison.Ordinal));
                 if (nativeMoveActive) moveStartPending = false;
-                var menuArrivalPending = gameState == "MapState" && !string.IsNullOrWhiteSpace(moveTargetId) &&
+                var mapConversationActive = IsMapStateConversation(state);
+                var menuArrivalPending = !mapConversationActive && gameState == "MapState" && !string.IsNullOrWhiteSpace(moveTargetId) &&
                     string.Equals(currentSettlementId, moveTargetId, StringComparison.Ordinal) && string.IsNullOrWhiteSpace(menuId);
-                var mapMovementPending = gameState == "MapState" && !string.IsNullOrWhiteSpace(moveTargetId) &&
+                var mapMovementPending = !mapConversationActive && gameState == "MapState" && !string.IsNullOrWhiteSpace(moveTargetId) &&
                     !string.Equals(currentSettlementId, moveTargetId, StringComparison.Ordinal) && (nativeMoveActive || moveStartPending);
 
                 if (!sceneNotificationActive && mapMovementPending)
@@ -856,7 +899,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                         interactTargetHeroId = null;
                         sceneAgentsReceipt = null;
                     }
-                    else if (action == "dialogueSelect")
+                    else if (action == "dialogueSelect" && !IsMapStateConversation(state))
                     {
                         var selectedDialogueOption = ReadString(arguments, "optionId");
                         if (selectedDialogueOption == "player_companion_hire_response_2" || selectedDialogueOption == "player_companion_hire_response_1")
@@ -955,9 +998,13 @@ internal static class AgentHostEstablishClanCompanionLoop
                 catalog.Add(new JsonObject { ["action"] = "continueSceneNotification", ["arguments"] = new JsonArray() });
             return catalog;
         }
-        if (pending || ReadBoolean(context, "inquiryOpen") || ReadBoolean(context, "escapeMenuOpen") ||
+        var mapConversationActive = IsMapStateConversation(state);
+        if ((pending && !mapConversationActive) || ReadBoolean(context, "inquiryOpen") || ReadBoolean(context, "escapeMenuOpen") ||
             (AgentHostCampaignStateFacts.IsActiveEncounter(state) && !IsNativeTavernMissionState(state)) ||
             ReadBoolean(context?["captivity"] as JsonObject, "isCaptive")) return catalog;
+
+        if (mapConversationActive)
+            return BuildMapConversationActionCatalog(state);
 
         if (gameState == "MapState")
         {
@@ -1087,8 +1134,17 @@ internal static class AgentHostEstablishClanCompanionLoop
             case "mapSettlementTargets" when supplied.Count == 0:
             case "missionSceneAgents" when supplied.Count == 0:
             case "missionLeave" when supplied.Count == 0:
-            case "dialogueContinue" when supplied.Count == 0:
                 return true;
+            case "dialogueContinue":
+            {
+                var conversation = ReadConversation(state);
+                var options = conversation?["options"] as JsonArray;
+                if (supplied.Count != 0 || conversation is null || options?.OfType<JsonObject>().Any(option => ReadBoolean(option, "clickable")) == true)
+                    return false;
+                if (IsMapStateConversation(state) && string.IsNullOrWhiteSpace(ReadString(conversation, "sentenceText"))) return false;
+                if (ReadString(state["context"] as JsonObject, "gameState") is not ("MapState" or "MissionState")) return false;
+                return true;
+            }
             case "continueSceneNotification" when supplied.Count == 0 &&
                                                    ReadBoolean(state["context"]?["sceneNotification"] as JsonObject, "hasActiveNotification") &&
                                                    ReadBoolean(state["context"]?["sceneNotification"] as JsonObject, "canContinue"):
@@ -1136,14 +1192,18 @@ internal static class AgentHostEstablishClanCompanionLoop
                     return false;
                 return true;
             case "dialogueSelect":
+            {
                 var currentOptions = ReadConversation(state)?["options"] as JsonArray;
                 var selectedOption = ReadString(supplied, "OptionId");
-                if (selectedOption is null || !HiringDialogueOptions.Contains(selectedOption) ||
+                var isMapConversation = IsMapStateConversation(state);
+                if (selectedOption is null || (!isMapConversation && !HiringDialogueOptions.Contains(selectedOption)) ||
                     !listed["argumentValues"]?["OptionId"]?.AsArray().Any(value => value?.GetValue<string>() == selectedOption) == true ||
                     !currentOptions?.OfType<JsonObject>().Any(option => ReadString(option, "id") == selectedOption && ReadBoolean(option, "clickable")) == true) return false;
                 arguments["optionId"] = selectedOption;
+                if (isMapConversation) return true;
                 targetHeroId = ReadString(ReadConversation(state), "heroId");
                 return targetHeroId is not null;
+            }
             default:
                 return false;
         }
@@ -1179,6 +1239,33 @@ internal static class AgentHostEstablishClanCompanionLoop
     }
 
     private static JsonObject? ReadConversation(JsonObject? state) => state?["context"]?["conversation"] as JsonObject;
+
+    private static bool IsMapStateConversation(JsonObject? state) =>
+        ReadString(state?["context"] as JsonObject, "gameState") == "MapState" && ReadConversation(state) is not null;
+
+    private static JsonArray BuildMapConversationActionCatalog(JsonObject state)
+    {
+        var conversation = ReadConversation(state);
+        if (conversation is null) return new JsonArray();
+        var options = conversation["options"] as JsonArray ?? new JsonArray();
+        var clickableIds = options.OfType<JsonObject>()
+            .Where(option => ReadBoolean(option, "clickable"))
+            .Select(option => ReadString(option, "id"))
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .Cast<string>()
+            .ToArray();
+        if (clickableIds.Length > 0)
+            return [new JsonObject
+            {
+                ["action"] = "dialogueSelect",
+                ["arguments"] = new JsonArray("OptionId"),
+                ["argumentValues"] = new JsonObject { ["OptionId"] = new JsonArray(clickableIds.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray()) }
+            }];
+        if (options.Count == 0 && !string.IsNullOrWhiteSpace(ReadString(conversation, "sentenceText")))
+            return [new JsonObject { ["action"] = "dialogueContinue", ["arguments"] = new JsonArray() }];
+        return new JsonArray();
+    }
 
     private static bool IsWandererInteractable(JsonObject? state, string? heroId) =>
         !string.IsNullOrWhiteSpace(heroId) &&
