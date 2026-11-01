@@ -380,6 +380,8 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             new { scenario = "establish-clan-recruitment-rejects-stale-volunteer-identifiers", passed = true },
             new { scenario = "establish-clan-recruitment-leaves-town-after-current-vm-has-no-available-affordable-volunteers", passed = true }
         };
+        results.Add(new { scenario = "establish-clan-recruitment-resolves-current-map-conversation-before-resuming-movement", passed = true });
+        results.Add(new { scenario = "establish-clan-recruitment-continues-only-no-choice-map-conversation", passed = true });
 
         var fakeClient = new FakeRecruitmentNativeClient();
         var fakeProvider = new FakeRecruitmentDecisionProvider();
