@@ -68,6 +68,8 @@ Chronicle不观测当前天气、局部雨雪参数、湿润/风、时间与区�
 
 `TestResults/20261031-150443/Temp/AgentEngageVisibilityResult.json`以Harness Native fixture验证：在明确暂停 Campaign 后用原版 Native fixture 建立一支距离6、5人的 hostile Looters Party，同时fixture将 MainParty 1→101；随后调用产品 `pursue`，由原版点击时间策略进入 `StoppablePlay`。两个有效地图观察中目标仍是可见Marker/附近Party、主队 `DefaultBehavior=EngageParty`。下一观察目标同时退出Marker和Nearby Party集合，原版状态变为 `targetPartyId=null`、`MoveMode=Hold`、`DefaultBehavior=Hold`、`isWaiting=true`；虽时间模式字段仍为 `StoppablePlay`，目标丢失后8.43秒 CampaignDay 未变化，三张引擎帧中稳定停留在同一地图状态。源fixture hash未变、Host/游戏进程已关闭。该测试证实的是“测试fixture里一次原版追近目标消失→Native Hold/有效停表”的状态链，不是自然Bandit逃跑率、地形截停能力或EYC声望进度。
 
+同一手动StoryMode Campaign的自然地图补证（`TestResults/20261101-073523/Temp/ManualCampaignProgress-20261101-later.json`）：Map上当前可见的5人 looter `looters_3786`（距6.2）收到一次Native `pursue`后，下一次可观察状态已经是`targetPartyId=null`、`MoveMode=Hold`、`DefaultBehavior=Hold`、`isWaiting=true`；raw `TimeControlMode`仍为`StoppablePlay`。5秒后CampaignDay仍为91150.808，尝试重发旧目标被Native以`active visible target party not found`拒绝，没有发生遭遇/战斗。这个自然实例与用户描述的“目标跑出可见范围后停住、世界时间不推进”一致；时间状态必须同时读raw mode、`isWaiting`和CampaignDay。输入来自Native Bridge `pursue`，没有物理鼠标双击或屏幕视锥录像，因此不声称已视觉复现玩家实际点击时序，也不证明AI能卡位追上更快的Party。
+
 ## K07 Hideout：藏身处发现、接近与清剿
 
 Hideout是地图Settlement/Hideout实体与相关Bandit Party、场景Mission、Wait/夜袭选项组成的活动，不等同于普通地图落单Party。玩家需先在地图情报中发现相应Hideout，再接近/进入其原生Encounter/menu；具体是否可以谈话、等夜间潜入、直接突击、坐镇指挥或派兵结果取决于敌方数量/时间/玩家状态。 `HideoutCampaignBehavior`与`PlayerEncounter`把此链路分发到Mission、BattleSimulation、等待和Loot/伤亡结算。
