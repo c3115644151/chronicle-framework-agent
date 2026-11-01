@@ -246,6 +246,18 @@ internal static class ChronicleAgentObserver
                     .Append(",\"cancelAvailable\":").Append(Bool(screen.IsCancelActive()))
                     .Append('}');
             }
+            if (ChronicleQuestTroopScreenAdapter.TryGetCurrentGangLeaderRecruitHandoff(activePartyState, out var gangRecruitQuest))
+            {
+                var assignedCount = screen.GetRoster(PartyScreenLogic.PartyRosterSide.Left, PartyScreenLogic.TroopType.Member).TotalManCount;
+                json.Append(",\"issueTroopAssignment\":{\"kind\":\"gangLeaderRecruitHandoff\"");
+                Property(json, "questId", gangRecruitQuest.StringId, true);
+                Property(json, "questGiverHeroId", gangRecruitQuest.QuestGiver?.StringId, true);
+                json.Append(",\"assignedCount\":").Append(assignedCount)
+                    .Append(",\"assignmentLimit\":").Append(screen.LeftPartyMembersSizeLimit)
+                    .Append(",\"doneAvailable\":").Append(Bool(screen.IsDoneActive()))
+                    .Append(",\"cancelAvailable\":").Append(Bool(screen.IsCancelActive()))
+                    .Append('}');
+            }
             AppendPartyRoster(json, "leftMembers", screen, PartyScreenLogic.PartyRosterSide.Left, PartyScreenLogic.TroopType.Member);
             AppendPartyRoster(json, "leftPrisoners", screen, PartyScreenLogic.PartyRosterSide.Left, PartyScreenLogic.TroopType.Prisoner);
             AppendPartyRoster(json, "rightMembers", screen, PartyScreenLogic.PartyRosterSide.Right, PartyScreenLogic.TroopType.Member);

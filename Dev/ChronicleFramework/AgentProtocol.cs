@@ -7,6 +7,8 @@ using System.Linq;
 using System.Text;
 using SandBox;
 using SandBox.View.Map;
+using SandBox.View.Map.Managers;
+using SandBox.View.Map.Visuals;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.CampaignSystem.GameState;
@@ -43,6 +45,8 @@ internal sealed class ChronicleAgentProtocol
     private float _waitForDoubleClickUntilTime;
     private string _restCommandId;
     private double? _restTargetDay;
+    private double? _restStartDay;
+    private double? _restRequestedDays;
     private RecruitmentVM _recruitmentViewModel;
     private bool _freshProgressionPollLogged;
     private bool _freshProgressionCommandLogged;
@@ -896,14 +900,73 @@ internal sealed class ChronicleAgentProtocol
                     WriteResponse(commandId, action, "accepted", behavior);
                     break;
                 case "rest":
-                    var currentMenu = TaleWorlds.CampaignSystem.Campaign.Current.CurrentMenuContext?.GameMenu;
-                    if (currentMenu == null || currentMenu.StringId != "town_wait_menus" || !currentMenu.IsWaitMenu || !Campaign.Current.IsMainPartyWaiting)
-                        throw new InvalidOperationException("rest requires the native town settlement wait menu");
+                    var currentMenuContext = TaleWorlds.CampaignSystem.Campaign.Current.CurrentMenuContext;
+                    var currentMenu = currentMenuContext?.GameMenu;
+                    var atTownMenu = currentMenu != null && currentMenu.StringId == "town" && !currentMenu.IsWaitMenu;
+                    var atWaitMenu = currentMenu != null && currentMenu.StringId == "town_wait_menus" && currentMenu.IsWaitMenu && Campaign.Current.IsMainPartyWaiting;
+                    if (!atTownMenu && !atWaitMenu)
+                        throw new InvalidOperationException("rest requires the current Native Town menu or an active native town_wait_menus screen");
                     if (_restCommandId != null) throw new InvalidOperationException("another rest command is active");
-                    var restDays = Math.Max(0.01, ReadDouble(command, "days"));
+                    var requestedRestDays = ReadDouble(command, "days");
+                    if (double.IsNaN(requestedRestDays) || double.IsInfinity(requestedRestDays) || requestedRestDays <= 0d)
+                        throw new InvalidOperationException("rest requires a positive finite Native wait duration in Campaign days");
+                    var restDays = Math.Max(0.01, requestedRestDays);
+                    var restStartDay = CampaignTime.Now.ToDays;
                     _restCommandId = commandId;
-                    _restTargetDay = CampaignTime.Now.ToDays + restDays;
-                    WriteResponse(commandId, action, "accepted", behavior);
+                    _restStartDay = restStartDay;
+                    _restRequestedDays = restDays;
+                    _restTargetDay = restStartDay + restDays;
+                    if (atTownMenu)
+                    {
+                        var townWaitOptions = currentMenu.MenuOptions.ToList();
+                        var townWaitOptionIndex = townWaitOptions.FindIndex(option => string.Equals(option.IdString, "town_wait", StringComparison.Ordinal));
+                        if (townWaitOptionIndex < 0 ||
+                            !townWaitOptions[townWaitOptionIndex].GetConditionsHold(TaleWorlds.Core.Game.Current, currentMenuContext) ||
+                            !townWaitOptions[townWaitOptionIndex].IsEnabled)
+                        {
+                            Campaign.Current.TimeControlMode = CampaignTimeControlMode.Stop;
+                            _restCommandId = null;
+                            _restStartDay = null;
+                            _restRequestedDays = null;
+                            _restTargetDay = null;
+                            throw new InvalidOperationException("the current Native Town menu does not offer an enabled town_wait option");
+                        }
+
+                        try
+                        {
+                            currentMenu.RunMenuOptionConsequence(currentMenuContext, townWaitOptionIndex);
+                        }
+                        catch
+                        {
+                            Campaign.Current.TimeControlMode = CampaignTimeControlMode.Stop;
+                            _restCommandId = null;
+                            _restStartDay = null;
+                            _restRequestedDays = null;
+                            _restTargetDay = null;
+                            throw;
+                        }
+
+                        var waitMenuAfterStart = Campaign.Current.CurrentMenuContext?.GameMenu;
+                        if (waitMenuAfterStart == null || waitMenuAfterStart.StringId != "town_wait_menus" ||
+                            !waitMenuAfterStart.IsWaitMenu || !Campaign.Current.IsMainPartyWaiting)
+                        {
+                            Campaign.Current.TimeControlMode = CampaignTimeControlMode.Stop;
+                            _restCommandId = null;
+                            _restStartDay = null;
+                            _restRequestedDays = null;
+                            _restTargetDay = null;
+                            throw new InvalidOperationException("the original town_wait option did not enter its active Native Wait menu");
+                        }
+                    }
+                    else if (Campaign.Current.TimeControlMode is CampaignTimeControlMode.Stop or CampaignTimeControlMode.FastForwardStop)
+                    {
+                        Campaign.Current.TimeControlMode = CampaignTimeControlMode.UnstoppableFastForward;
+                    }
+
+                    var restAcceptedData = "{\"requestedDays\":" + restDays.ToString("R", CultureInfo.InvariantCulture) +
+                        ",\"startCampaignDay\":" + restStartDay.ToString("R", CultureInfo.InvariantCulture) +
+                        ",\"targetCampaignDay\":" + _restTargetDay.Value.ToString("R", CultureInfo.InvariantCulture) + "}";
+                    WriteResponse(commandId, action, "accepted", behavior, null, restAcceptedData);
                     break;
                 case "pursue":
                     EnsureNoActiveMapIncident("pursuit");
@@ -957,6 +1020,11 @@ internal sealed class ChronicleAgentProtocol
                     EnsureNoActiveMapIncident("settlement movement");
                     if (ChronicleInquiryAdapter.IsInquiryOpen || MapScreen.Instance?.IsEscapeMenuOpened == true || PlayerEncounter.IsActive || MobileParty.MainParty.CurrentSettlement != null || MobileParty.MainParty.MapEvent != null)
                         throw new InvalidOperationException("settlement movement requires the unobstructed Campaign Map with no Native menu, Escape menu, Inquiry, or active Encounter");
+                    var mapStateForSettlementMove = Game.Current?.GameStateManager?.ActiveState as MapState;
+                    if (mapStateForSettlementMove == null || mapStateForSettlementMove.AtMenu)
+                        throw new InvalidOperationException("settlement movement requires the unobstructed native Campaign Map");
+                    if (MapScreen.Instance?.MapCameraView?.ProcessCameraInput != true)
+                        throw new InvalidOperationException("Native MapScreen is not currently accepting map camera clicks");
                     var settlementId = ReadString(command, "settlementId");
                     var settlement = string.IsNullOrWhiteSpace(settlementId) ? null : Settlement.Find(settlementId);
                     if (settlement == null || !settlement.IsActive || !settlement.IsVisible) throw new InvalidOperationException("settlement is not currently exposed as a visible Campaign map target");
@@ -966,9 +1034,21 @@ internal sealed class ChronicleAgentProtocol
                         settlement.SiegeEvent.CanPartyJoinSide(PartyBase.MainParty, BattleSideEnum.Attacker);
                     if (settlement.MapFaction != null && FactionManager.IsAtWarAgainstFaction(MobileParty.MainParty.MapFaction, settlement.MapFaction) && !canJoinExistingSiegeAsAttacker)
                         throw new InvalidOperationException("hostile settlement rejected by safe movement policy");
-                    Helpers.NavigationHelper.GetInteractionDataForMainParty(settlement, out var canNavigateToSettlement, out var navigationType, out var targetingPort);
+                    Helpers.NavigationHelper.GetInteractionDataForMainParty(settlement, out var canNavigateToSettlement, out _, out _);
                     if (!canNavigateToSettlement) throw new InvalidOperationException("settlement is not currently navigable by the main party");
-                    MobileParty.MainParty.SetMoveGoToSettlement(settlement, navigationType, targetingPort);
+                    var settlementVisual = settlement.Party == null
+                        ? null
+                        : SettlementVisualManager.Current?.GetVisualOfEntity(settlement.Party) as SettlementVisual;
+                    if (settlementVisual == null)
+                        throw new InvalidOperationException("Native SettlementVisual is not currently visible for this settlement target");
+                    var targetInteractionFace = settlementVisual.InteractionPositionForPlayer.Face;
+                    var currentNavigationFace = MobileParty.MainParty.CurrentNavigationFace;
+                    var nativeMapScene = MapScreen.Instance.MapScene;
+                    if (nativeMapScene == null || targetInteractionFace.FaceIndex < 0 || currentNavigationFace.FaceIndex < 0 ||
+                        !nativeMapScene.DoesPathExistBetweenFaces(targetInteractionFace.FaceIndex, currentNavigationFace.FaceIndex, false))
+                        throw new InvalidOperationException("Native MapScreen would reject this settlement click because no path exists between the current party face and the settlement marker face");
+                    if (!settlementVisual.OnMapClick(followModifierUsed: false))
+                        throw new InvalidOperationException("Native SettlementVisual.OnMapClick declined this settlement target");
                     ApplyMapClickTimeChange(isDoubleClick: false);
                     WriteResponse(commandId, action, "completed", behavior);
                     break;
@@ -2570,17 +2650,38 @@ internal sealed class ChronicleAgentProtocol
         var commandId = _restCommandId;
         if (menu == null || menu.StringId != "town_wait_menus" || !menu.IsWaitMenu || !Campaign.Current.IsMainPartyWaiting)
         {
-            WriteResponse(commandId, "rest", "failed", behavior, "settlement wait was interrupted before the requested time elapsed");
+            Campaign.Current.TimeControlMode = CampaignTimeControlMode.Stop;
+            var interruptedData = BuildRestTimingDataJson(CampaignTime.Now.ToDays);
+            WriteResponse(commandId, "rest", "failed", behavior, "settlement wait was interrupted before the requested time elapsed", interruptedData);
             _restCommandId = null;
+            _restStartDay = null;
+            _restRequestedDays = null;
             _restTargetDay = null;
             return;
         }
         if (CampaignTime.Now.ToDays >= _restTargetDay.Value)
         {
-            WriteResponse(commandId, "rest", "completed", behavior);
+            Campaign.Current.TimeControlMode = CampaignTimeControlMode.Stop;
+            var completedData = BuildRestTimingDataJson(CampaignTime.Now.ToDays);
+            WriteResponse(commandId, "rest", "completed", behavior, null, completedData);
             _restCommandId = null;
+            _restStartDay = null;
+            _restRequestedDays = null;
             _restTargetDay = null;
         }
+    }
+
+    private string BuildRestTimingDataJson(double actualCampaignDay)
+    {
+        var startDay = _restStartDay ?? actualCampaignDay;
+        var targetDay = _restTargetDay ?? actualCampaignDay;
+        var requestedDays = _restRequestedDays ?? Math.Max(0d, targetDay - startDay);
+        var overshootDays = Math.Max(0d, actualCampaignDay - targetDay);
+        return "{\"requestedDays\":" + requestedDays.ToString("R", CultureInfo.InvariantCulture) +
+            ",\"startCampaignDay\":" + startDay.ToString("R", CultureInfo.InvariantCulture) +
+            ",\"targetCampaignDay\":" + targetDay.ToString("R", CultureInfo.InvariantCulture) +
+            ",\"actualCampaignDay\":" + actualCampaignDay.ToString("R", CultureInfo.InvariantCulture) +
+            ",\"overshootDays\":" + overshootDays.ToString("R", CultureInfo.InvariantCulture) + "}";
     }
 
     private void ApplyMapClickTimeChange(bool isDoubleClick)

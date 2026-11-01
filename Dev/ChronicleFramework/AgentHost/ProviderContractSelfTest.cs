@@ -21,6 +21,7 @@ internal static class ProviderContractSelfTest
             throw new AgentHostException("observe-again-normalized-shape-self-test-failed", "Movement subloops must recognize the canonical boolean observeAgain decision as well as its pre-normalized control alias.");
         results.Add(new { scenario = "canonical-observe-again-decision-is-recognized-by-native-subloops", passed = true });
         results.AddRange(AgentHostProviderDecisionRecovery.RunContractSelfTests());
+        results.AddRange(AgentHostSupplyLoop.RunContractSelfTests());
         results.AddRange(StoryModeEstablishClanLifecycleStatus.RunContractSelfTests());
         results.AddRange(AgentHostHarnessProgressTrace.RunContractSelfTests());
         results.AddRange(AgentHostNativeInquiryResolution.RunContractSelfTests());

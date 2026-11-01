@@ -14,6 +14,51 @@ internal static class AgentHostSupplyLoop
         "menuSelect", "foodOptions", "provision", "tradeConfirm", "rest"
     };
 
+    internal static IReadOnlyList<object> RunContractSelfTests()
+    {
+        var townState = new JsonObject
+        {
+            ["context"] = new JsonObject { ["gameState"] = "MapState", ["menuId"] = "town", ["isWaitMenu"] = false, ["isWaiting"] = true },
+            ["location"] = new JsonObject { ["currentSettlementId"] = "town_ES4" },
+            ["party"] = new JsonObject { ["foodInventory"] = 13 },
+            ["inventoryScreen"] = null,
+            ["availableMenuOptions"] = new JsonArray(new JsonObject { ["id"] = "town_wait", ["available"] = true, ["enabled"] = true })
+        };
+        var townResponse = new JsonObject { ["dailyTickCount"] = 10, ["state"] = townState };
+        var townCatalog = BuildActionCatalog(townResponse, new JsonObject { ["action"] = "tradeConfirm", ["status"] = "completed" }, "town_ES4", 10, goalMet: false, foodPurchaseCommitted: true);
+        if (townCatalog.Count != 1 || ReadString(townCatalog[0] as JsonObject, "action") != "rest")
+            throw new AgentHostException("supply-rest-town-catalog-failed", "After the Native food purchase, the Town menu must expose one bounded rest action and no unbounded town_wait menuSelect.");
+
+        if (!TryBuildNativeArguments("rest", new JsonObject { ["Days"] = 3 }, townResponse, new JsonObject { ["action"] = "tradeConfirm", ["status"] = "completed" }, "town_ES4", 10, goalMet: false, foodPurchaseCommitted: true, out var restArguments, out _) ||
+            ReadInt(restArguments, "days", 0) != 3)
+            throw new AgentHostException("supply-rest-town-arguments-failed", "A bounded three-day rest must be eligible directly from Town, before native FastForward begins.");
+
+        if (TryBuildNativeArguments("menuSelect", new JsonObject { ["OptionId"] = "town_wait" }, townResponse, new JsonObject { ["action"] = "tradeConfirm", ["status"] = "completed" }, "town_ES4", 10, goalMet: false, foodPurchaseCommitted: true, out _, out _))
+            throw new AgentHostException("supply-unbounded-town-wait-accepted", "The Host must not split native town_wait from its bounded duration request.");
+
+        var waitState = new JsonObject
+        {
+            ["context"] = new JsonObject { ["gameState"] = "MapState", ["menuId"] = "town_wait_menus", ["isWaitMenu"] = true, ["isWaiting"] = true },
+            ["location"] = new JsonObject { ["currentSettlementId"] = "town_ES4" },
+            ["party"] = new JsonObject { ["foodInventory"] = 13 },
+            ["inventoryScreen"] = null,
+            ["availableMenuOptions"] = new JsonArray(new JsonObject { ["id"] = "wait_leave", ["available"] = true, ["enabled"] = true })
+        };
+        var pendingWait = new JsonObject { ["dailyTickCount"] = 11, ["state"] = waitState };
+        var pendingCatalog = BuildActionCatalog(pendingWait, new JsonObject { ["action"] = "rest", ["status"] = "accepted" }, "town_ES4", 10, goalMet: false, foodPurchaseCommitted: true);
+        if (pendingCatalog.Count != 0)
+            throw new AgentHostException("supply-rest-pending-catalog-not-empty", "While the bounded Native rest is pending, the model must not receive another time-changing action.");
+        var completedWait = new JsonObject { ["dailyTickCount"] = 13, ["state"] = waitState.DeepClone() };
+        var completedCatalog = BuildActionCatalog(completedWait, new JsonObject { ["action"] = "rest", ["status"] = "completed" }, "town_ES4", 10, goalMet: false, foodPurchaseCommitted: true);
+        var completedAction = completedCatalog.Count == 1 ? completedCatalog[0] as JsonObject : null;
+        var completedArguments = completedAction?["arguments"] as JsonArray;
+        if (completedAction == null || ReadString(completedAction, "action") != "menuSelect" || completedArguments?.Count != 1 ||
+            completedArguments[0]?.GetValue<string>() != "OptionId")
+            throw new AgentHostException("supply-rest-completion-catalog-failed", "After the requested Native daily ticks and automatic clock stop, the only wait action must be the visible wait_leave handler.");
+
+        return [new { scenario = "bounded-native-rest-starts-atomically-from-town-and-only-exits-wait-after-requested-ticks", passed = true }];
+    }
+
     internal static async Task<JsonObject> RunAsync(JsonElement request, string protocolRoot, CancellationToken cancellationToken)
     {
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
@@ -663,7 +708,8 @@ internal static class AgentHostSupplyLoop
         {
             var hasPurchased = foodPurchaseCommitted || ReadInt(state["party"]!.AsObject(), "foodInventory", 0) > 0 || ReadString(previousReceipt, "action") == "tradeConfirm";
             var targetOption = hasPurchased ? "town_wait" : "trade";
-            if (IsEnabledMenuOption(state, targetOption)) catalog.Add(Action("menuSelect", "OptionId"));
+            if (IsEnabledMenuOption(state, targetOption) && (!hasPurchased || tick < startingDailyTick + 3))
+                catalog.Add(hasPurchased ? Action("rest", "Days") : Action("menuSelect", "OptionId"));
         }
         else if (gameState == "InventoryState" && ReadString(inventory, "mode") == "Trade")
         {
@@ -725,7 +771,7 @@ internal static class AgentHostSupplyLoop
         else if (action is "provision" or "tradeConfirm" or "rest")
         {
             var safeData = new JsonObject();
-            foreach (var name in new[] { "verified", "committed", "postconditionPassed", "nativeTransactionAmount", "itemId", "amount", "days" })
+            foreach (var name in new[] { "verified", "committed", "postconditionPassed", "nativeTransactionAmount", "itemId", "amount", "days", "requestedDays", "startCampaignDay", "targetCampaignDay", "actualCampaignDay", "overshootDays" })
                 if (data.TryGetPropertyValue(name, out var value)) safeData[name] = value?.DeepClone();
             if (action == "provision") safeData["hasPendingChanges"] = ReadString(receipt, "status") == "completed";
             safe["data"] = safeData;
@@ -756,6 +802,7 @@ internal static class AgentHostSupplyLoop
                 var optionId = ReadString(arguments, "OptionId");
                 if (string.IsNullOrWhiteSpace(optionId) || !IsEnabledMenuOption(state, optionId)) { error = "OptionId is not an enabled current Native option."; return false; }
                 if (foodPurchaseCommitted && menuId == "town" && optionId == "trade") { error = "The frozen supply slice permits one committed food purchase; Trade cannot be reopened."; return false; }
+                if (menuId == "town" && optionId == "town_wait") { error = "Use the bounded rest action from Town; selecting town_wait separately starts unbounded Native fast-forward."; return false; }
                 if (menuId == "town" && optionId != (ReadInt(state["party"]!.AsObject(), "foodInventory", 0) > 0 ? "town_wait" : "trade")) { error = "Town option violates the prepared supply step order."; return false; }
                 if (menuId == "town_wait_menus" && (optionId != "wait_leave" || ReadInt(nativeResponse, "dailyTickCount", -1) < startingDailyTick + 3)) { error = "Wait may be exited only after three Native daily ticks."; return false; }
                 nativeArguments["optionId"] = optionId;
@@ -778,8 +825,12 @@ internal static class AgentHostSupplyLoop
                 if (ReadString(context, "gameState") != "InventoryState" || ReadString(state["inventoryScreen"] as JsonObject, "mode") != "Trade" || ReadString(previousReceipt, "action") != "provision" || ReadString(previousReceipt, "status") != "completed") { error = "tradeConfirm requires one current Native provision draft."; return false; }
                 return true;
             case "rest":
-                if (ReadString(context, "gameState") != "MapState" || menuId != "town_wait_menus" || !ReadBool(context, "isWaiting") ||
-                    (ReadString(previousReceipt, "action") == "rest" && ReadString(previousReceipt, "status") is "accepted" or "completed")) { error = "rest requires the active Native Town Wait before a rest request has been accepted."; return false; }
+                var withinRestBudget = ReadInt(nativeResponse, "dailyTickCount", -1) < startingDailyTick + 3;
+                var restFromTown = withinRestBudget && ReadString(context, "gameState") == "MapState" && menuId == "town" && IsEnabledMenuOption(state, "town_wait") &&
+                    (foodPurchaseCommitted || ReadInt(state["party"]!.AsObject(), "foodInventory", 0) > 0 || ReadString(previousReceipt, "action") == "tradeConfirm");
+                var restFromExistingWait = withinRestBudget && ReadString(context, "gameState") == "MapState" && menuId == "town_wait_menus" && ReadBool(context, "isWaitMenu") && ReadBool(context, "isWaiting");
+                if ((!restFromTown && !restFromExistingWait) ||
+                    (ReadString(previousReceipt, "action") == "rest" && ReadString(previousReceipt, "status") is "accepted" or "completed")) { error = "rest requires an enabled Town wait option or the active Native Town Wait, before another rest request has been accepted."; return false; }
                 if (ReadInt(arguments, "Days", 0) != 3) { error = "The frozen Native supply slice requests exactly three days."; return false; }
                 nativeArguments["days"] = 3;
                 return true;
@@ -839,7 +890,7 @@ internal static class AgentHostSupplyLoop
         if (gameState == "InventoryState" && ReadString(state?["inventoryScreen"] as JsonObject, "mode") == "Trade" && ReadString(previousReceipt, "action") == "provision")
             return "The provision receipt is only an uncommitted TradeVM draft; select the currently enabled tradeConfirm once before waiting.";
         if (gameState == "MapState" && menuId == "town" && ReadString(state?["location"] as JsonObject, "currentSettlementId") == settlementId && ReadInt(state?["party"] as JsonObject, "foodInventory", 0) > 0 && tick < startingDailyTick + 3)
-            return "Select the currently enabled town_wait menu option, then schedule one Native rest of three days.";
+            return "Choose the currently listed bounded rest action with Days=3 directly from the Town menu; it will invoke Native town_wait only after registering the deadline.";
         if (gameState == "MapState" && menuId == "town_wait_menus" && tick < startingDailyTick + 3 && ReadBool(context, "isWaiting") && ReadString(previousReceipt, "action") != "rest")
             return "Town Wait has begun but no Native rest request has been accepted; choose the listed rest action with Days=3.";
         if (gameState == "MapState" && menuId == "town_wait_menus" && tick < startingDailyTick + 3 && ReadString(previousReceipt, "action") == "rest" && ReadString(previousReceipt, "status") == "accepted")
