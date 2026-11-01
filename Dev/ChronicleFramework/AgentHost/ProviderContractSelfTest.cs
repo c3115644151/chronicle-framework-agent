@@ -563,6 +563,40 @@ internal static class ProviderContractSelfTest
             results.Add(new { scenario = "freellmapi-model-capabilities-select-required-tool-call-with-local-decision-validation", passed = true, model = "north-mini-code", modelCalls = 1, nativeCommands = 0 });
         }
 
+        var exactWaitToolCallPayloadValid = false;
+        var exactWaitToolCallHandler = new StubHandler((httpRequest, _) =>
+        {
+            if (httpRequest.Method == HttpMethod.Get)
+                return Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"north-mini-code\",\"supported_parameters\":[\"tools\",\"tool_choice\"]}]}"));
+
+            using var payloadDocument = JsonDocument.Parse(httpRequest.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            var payload = payloadDocument.RootElement;
+            var anyOf = payload.GetProperty("tools")[0].GetProperty("function").GetProperty("parameters")
+                .GetProperty("properties").GetProperty("decision").GetProperty("anyOf");
+            var observeAgainBranch = anyOf.EnumerateArray().FirstOrDefault(branch =>
+                branch.GetProperty("properties").GetProperty("control").GetProperty("enum")[0].GetString() == "observeAgain");
+            exactWaitToolCallPayloadValid =
+                payload.GetProperty("tool_choice").GetString() == "required" &&
+                observeAgainBranch.ValueKind == JsonValueKind.Object &&
+                observeAgainBranch.GetProperty("properties").GetProperty("waitSeconds").GetProperty("minimum").GetInt32() == 10 &&
+                observeAgainBranch.GetProperty("properties").GetProperty("waitSeconds").GetProperty("maximum").GetInt32() == 10;
+            return Task.FromResult(JsonResponse(BuildToolCallChatResponse(
+                "{\"decision\":{\"control\":\"observeAgain\",\"waitSeconds\":10,\"reason\":\"Continue the observed move.\"}}", "tool_calls")));
+        });
+        using (var exactWaitToolCallClient = new HttpClient(exactWaitToolCallHandler) { Timeout = freeLlmApiSettings.Timeout })
+        using (var exactWaitToolCallProvider = new OllamaNativeProvider(freeLlmApiSettings with { Model = "north-mini-code" }, exactWaitToolCallClient))
+        using (var exactWaitRequest = JsonDocument.Parse("""
+        {"goal":"Passively observe an active PartySize settlement move.","observation":{"state":{"party":{"isMoving":true}}},"allowedActions":[],"allowedControls":["observeAgain"],"controlArguments":{"observeAgain":{"waitSeconds":{"type":"integer","minimum":10,"maximum":10}}}}
+        """))
+        {
+            await exactWaitToolCallProvider.CheckConfiguredModelAsync(CancellationToken.None);
+            var result = await exactWaitToolCallProvider.DecideAsync(exactWaitRequest.RootElement, CancellationToken.None);
+            if (!exactWaitToolCallPayloadValid || result.ResponseFormatMode != "required_tool_call" ||
+                result.Decision["observeAgain"]?.GetValue<bool>() != true || result.Decision["waitSeconds"]?.GetValue<int>() != 10)
+                throw new AgentHostException("provider-self-test-exact-party-size-tool-schema-not-sent", "The required-tool-call provider payload must carry the exact PartySize wait bound and validate the returned ten-second control.");
+            results.Add(new { scenario = "openai-compatible-required-tool-call-sends-exact-party-size-wait-schema", passed = true, modelCalls = 0, nativeCommands = 0 });
+        }
+
         var invalidToolCallRequests = 0;
         var invalidToolCallHandler = new StubHandler((httpRequest, _) =>
         {
