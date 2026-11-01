@@ -218,6 +218,45 @@ internal static class AgentHostCampaignLoop
             throw new AgentHostException("campaign-loop-self-test-hostile-meeting-does-not-wait", "A map EncounterMeeting interrupts a settlement move; passive observeAgain must not be listed until the existing BattleSimulation recovery handles it.");
         results.Add(new { scenario = "campaign-loop-hostile-encounter-meeting-interrupts-passive-movement-wait", passed = true });
 
+        var mapDialogueState = new JsonObject
+        {
+            ["context"] = new JsonObject
+            {
+                ["gameState"] = "MapState", ["menuId"] = null, ["encounterActive"] = false,
+                ["conversation"] = new JsonObject
+                {
+                    ["characterId"] = "notable-a", ["sentenceText"] = "A current Native map conversation.",
+                    ["options"] = new JsonArray(
+                        new JsonObject { ["id"] = "current-map-answer", ["clickable"] = true },
+                        new JsonObject { ["id"] = "disabled-map-answer", ["clickable"] = false })
+                }
+            },
+            ["location"] = new JsonObject { ["currentSettlementId"] = null, ["targetSettlementId"] = "safe" },
+            ["party"] = new JsonObject { ["isMoving"] = true }
+        };
+        var mapDialogueCatalog = BuildActionCatalog(safeTargets, moving: true, goalVerified: false,
+            state: mapDialogueState, mapDialogueActionsAvailable: true);
+        var mapDialogueOptionIds = mapDialogueCatalog.Count == 1
+            ? mapDialogueCatalog[0]?["argumentValues"]?["OptionId"] as JsonArray
+            : null;
+        if (mapDialogueCatalog.Count != 1 || ReadString(mapDialogueCatalog[0] as JsonObject, "action") != "dialogueSelect" ||
+            mapDialogueOptionIds?.Count != 1 || mapDialogueOptionIds[0]?.GetValue<string>() != "current-map-answer" ||
+            BuildControlCatalog(moving: true, goalVerified: false, state: mapDialogueState).Count != 0 ||
+            !TryResolveCampaignAction(new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "current-map-answer" } },
+                safeTargets, out var mapDialogueAction, out var mapDialogueArguments, out _, out _, mapDialogueState) ||
+            mapDialogueAction != "dialogueSelect" || mapDialogueArguments?["optionId"]?.GetValue<string>() != "current-map-answer" ||
+            TryResolveCampaignAction(new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "disabled-map-answer" } },
+                safeTargets, out _, out _, out _, out _, mapDialogueState))
+            throw new AgentHostException("campaign-loop-self-test-map-conversation-interrupts-move", "A current non-encounter MapState conversation must replace a pending movement wait with its clickable Native replies and reject disabled options.");
+        var mapNoChoice = (JsonObject)mapDialogueState.DeepClone();
+        ((mapNoChoice["context"]?["conversation"] as JsonObject)!["options"] as JsonArray)!.Clear();
+        var mapContinueCatalog = BuildActionCatalog(safeTargets, moving: true, goalVerified: false, state: mapNoChoice, mapDialogueActionsAvailable: true);
+        if (mapContinueCatalog.Count != 1 || ReadString(mapContinueCatalog[0] as JsonObject, "action") != "dialogueContinue" ||
+            !TryResolveCampaignAction(new JsonObject { ["action"] = "dialogueContinue", ["arguments"] = new JsonObject() },
+                safeTargets, out var mapContinueAction, out _, out _, out _, mapNoChoice) || mapContinueAction != "dialogueContinue")
+            throw new AgentHostException("campaign-loop-self-test-map-conversation-continue-current-line", "A current no-choice MapState line must expose only Native dialogueContinue before travel resumes.");
+        results.Add(new { scenario = "campaign-loop-resolves-current-map-conversation-before-movement-or-arrival", passed = true });
+
         var doneControls = BuildControlCatalog(moving: false, goalVerified: true);
         if (doneControls.Count != 1 || !string.Equals(doneControls[0]?.GetValue<string>(), "done", StringComparison.Ordinal))
             throw new AgentHostException("campaign-loop-self-test-completion-gate-failed", "The done control must appear only after Native arrival is verified.");
@@ -471,7 +510,8 @@ internal static class AgentHostCampaignLoop
 
                 targetReached = moveTargetId != null && string.Equals(ReadStateString(before, "location", "currentSettlementId"), moveTargetId, StringComparison.Ordinal);
                 var actionCatalog = goalScopeClassified
-                    ? BuildActionCatalog(visibleTargets, movingToTarget, targetReached)
+                    ? BuildActionCatalog(visibleTargets, movingToTarget, targetReached,
+                        before["state"] as JsonObject, client is IAgentHostBattleSimulationNativeClient)
                     : new JsonArray();
                 var controls = goalScopeClassified
                     ? BuildControlCatalog(movingToTarget, targetReached, before["state"] as JsonObject)
@@ -904,7 +944,8 @@ internal static class AgentHostCampaignLoop
                     continue;
                 }
 
-                if (!TryResolveCampaignAction(decision, visibleTargets, out var nativeAction, out var nativeArguments, out var selectedTarget, out var rejection))
+                if (!TryResolveCampaignAction(decision, visibleTargets, out var nativeAction, out var nativeArguments, out var selectedTarget, out var rejection,
+                        before["state"] as JsonObject))
                 {
                     feedback = new JsonObject
                     {
@@ -923,8 +964,18 @@ internal static class AgentHostCampaignLoop
                 nativeActionInFlight = nativeAction;
                 try
                 {
-                    using var response = await client.ExecuteCampaignActionAsync(nativeAction!, nativeArguments!, elapsed.Token);
-                    nativeReceipt = CloneObject(response.RootElement);
+                    JsonDocument response;
+                    if (nativeAction is "dialogueSelect" or "dialogueContinue")
+                    {
+                        if (client is not IAgentHostBattleSimulationNativeClient dialogueClient)
+                            throw new AgentHostException("campaign-map-conversation-adapter-unavailable", "The current Native MapState conversation requires the existing BattleSimulation dialogue adapter; no fallback action was sent.");
+                        response = await dialogueClient.ExecuteBattleSimulationActionAsync(nativeAction!, nativeArguments!, elapsed.Token);
+                    }
+                    else
+                    {
+                        response = await client.ExecuteCampaignActionAsync(nativeAction!, nativeArguments!, elapsed.Token);
+                    }
+                    using (response) nativeReceipt = CloneObject(response.RootElement);
                 }
                 catch (AgentHostException exception) when (exception.Code == "native-command-timeout")
                 {
@@ -1013,15 +1064,51 @@ internal static class AgentHostCampaignLoop
         }
     }
 
-    private static JsonArray BuildActionCatalog(JsonArray? targets, bool moving, bool goalVerified)
+    private static JsonArray BuildActionCatalog(JsonArray? targets, bool moving, bool goalVerified,
+        JsonObject? state = null, bool mapDialogueActionsAvailable = false)
     {
         var catalog = new JsonArray();
+        if (IsCampaignMapConversation(state))
+            return mapDialogueActionsAvailable ? BuildMapConversationActionCatalog(state!) : catalog;
         if (moving || goalVerified) return catalog;
         if (targets is null)
             catalog.Add(new JsonObject { ["action"] = "mapSettlementTargets", ["arguments"] = new JsonArray() });
         else if (targets.Count > 0)
             catalog.Add(new JsonObject { ["action"] = "move", ["arguments"] = new JsonArray(JsonValue.Create("SettlementId")) });
         return catalog;
+    }
+
+    private static bool IsCampaignMapConversation(JsonObject? state)
+    {
+        var context = state?["context"] as JsonObject;
+        return ReadString(context, "gameState") == "MapState" && context?["conversation"] is JsonObject &&
+               !AgentHostCampaignStateFacts.IsActiveEncounter(state!) &&
+               !ReadBoolean(context, "escapeMenuOpen") && !ReadBoolean(context, "inquiryOpen") &&
+               !ReadBoolean(context?["sceneNotification"] as JsonObject, "hasActiveNotification");
+    }
+
+    private static JsonArray BuildMapConversationActionCatalog(JsonObject state)
+    {
+        var conversation = state["context"]?["conversation"] as JsonObject;
+        if (conversation is null) return new JsonArray();
+        var options = conversation["options"] as JsonArray ?? new JsonArray();
+        var clickableIds = options.OfType<JsonObject>()
+            .Where(option => ReadBoolean(option, "clickable"))
+            .Select(option => ReadString(option, "id"))
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .Cast<string>()
+            .ToArray();
+        if (clickableIds.Length > 0)
+            return [new JsonObject
+            {
+                ["action"] = "dialogueSelect",
+                ["arguments"] = new JsonArray("OptionId"),
+                ["argumentValues"] = new JsonObject { ["OptionId"] = new JsonArray(clickableIds.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray()) }
+            }];
+        if (options.Count == 0 && !string.IsNullOrWhiteSpace(ReadString(conversation, "sentenceText")))
+            return [new JsonObject { ["action"] = "dialogueContinue", ["arguments"] = new JsonArray() }];
+        return new JsonArray();
     }
 
     private static JsonArray BuildControlCatalog(bool moving, bool goalVerified, JsonObject? state = null)
@@ -1161,11 +1248,44 @@ internal static class AgentHostCampaignLoop
         return new JsonArray(candidates.Cast<JsonNode?>().ToArray());
     }
 
-    private static bool TryResolveCampaignAction(JsonObject decision, JsonArray? visibleTargets, out string? action, out JsonObject? arguments, out CampaignTarget? selectedTarget, out string rejection)
+    private static bool TryResolveCampaignAction(JsonObject decision, JsonArray? visibleTargets, out string? action, out JsonObject? arguments, out CampaignTarget? selectedTarget, out string rejection,
+        JsonObject? state = null)
     {
         action = ReadNodeString(decision["action"]);
         arguments = null;
         selectedTarget = null;
+        if (action is "dialogueSelect" or "dialogueContinue")
+        {
+            if (!IsCampaignMapConversation(state) || decision["arguments"] is not JsonObject dialogueArguments)
+            {
+                rejection = "Dialogue is allowed only for the current non-encounter Native MapState conversation.";
+                return false;
+            }
+            var conversation = state!["context"]?["conversation"] as JsonObject;
+            var options = conversation?["options"] as JsonArray ?? new JsonArray();
+            if (action == "dialogueContinue")
+            {
+                if (dialogueArguments.Count != 0 || options.Count != 0 || string.IsNullOrWhiteSpace(ReadString(conversation, "sentenceText")))
+                {
+                    rejection = "Native dialogueContinue is allowed only for the current MapState text line with no listed options.";
+                    return false;
+                }
+                arguments = new JsonObject();
+                rejection = string.Empty;
+                return true;
+            }
+
+            var optionId = ReadString(dialogueArguments, "OptionId") ?? ReadString(dialogueArguments, "optionId");
+            if (dialogueArguments.Count != 1 || string.IsNullOrWhiteSpace(optionId) ||
+                !options.OfType<JsonObject>().Any(option => ReadString(option, "id") == optionId && ReadBoolean(option, "clickable")))
+            {
+                rejection = "dialogueSelect must use an exact current clickable option from the active MapState conversation.";
+                return false;
+            }
+            arguments = new JsonObject { ["optionId"] = optionId };
+            rejection = string.Empty;
+            return true;
+        }
         if (action == "mapSettlementTargets" && decision["arguments"] is JsonObject queryArguments && queryArguments.Count == 0)
         {
             arguments = new JsonObject();

@@ -130,6 +130,9 @@ internal static class AgentHostDecisionCycle
                      classification.TryGetValue<bool>(out var required) && required
             ? BuildCampaignGoalClassificationPrompt(request)
             : CampaignSystemPrompt + " " + QuestTerminalOutcomeRule;
+        if (request["allowedActions"] is JsonArray actions && actions.OfType<JsonObject>()
+            .Any(action => ReadString(action, "action") is "dialogueSelect" or "dialogueContinue"))
+            prompt += " MAP DIALOGUE INTERRUPTION: A current Native non-encounter MapState conversation interrupted travel. Choose only the listed current dialogueSelect option, or dialogueContinue when no clickable choice is available. Read the exact visible text/options; do not accept an unrelated quest, start a Mission or enter combat. After the Native response, reread state and resume settlement travel only if the selected move is still active.";
         return DecideAsync(provider, request, prompt, cancellationToken);
     }
 
