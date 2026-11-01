@@ -332,6 +332,35 @@ internal static class ProviderContractSelfTest
             results.Add(new { scenario = "provider-structured-output-enforces-context-specific-active-travel-observe-interval", passed = true });
         }
 
+        using (var fixedMovementWaitRequest = JsonDocument.Parse("""
+        {"goal":"Passively observe an active PartySize settlement move.","observation":{"state":{"party":{"isMoving":true}}},"allowedActions":[],"allowedControls":["observeAgain"],"controlArguments":{"observeAgain":{"waitSeconds":{"type":"integer","minimum":10,"maximum":10}}}}
+        """))
+        {
+            var schema = OllamaNativeProvider.BuildDecisionSchema(fixedMovementWaitRequest.RootElement);
+            var observeBranch = (schema["properties"]?["decision"]?["anyOf"] as JsonArray)?.OfType<JsonObject>()
+                .FirstOrDefault(branch => branch["properties"]?["control"]?["enum"]?[0]?.GetValue<string>() == "observeAgain");
+            if (observeBranch?["properties"]?["waitSeconds"]?["minimum"]?.GetValue<int>() != 10 ||
+                observeBranch["properties"]?["waitSeconds"]?["maximum"]?.GetValue<int>() != 10)
+                throw new AgentHostException("provider-self-test-fixed-observe-again-schema-invalid", "The PartySize control schema sent to the structured-output provider must require exactly ten seconds.");
+
+            foreach (var invalidSeconds in new[] { 9, 11 })
+            {
+                using var invalidDecision = JsonDocument.Parse($"{{\"control\":\"observeAgain\",\"waitSeconds\":{invalidSeconds},\"reason\":\"Continue map travel.\"}}");
+                try
+                {
+                    _ = OllamaNativeProvider.NormalizeDecision(invalidDecision.RootElement, fixedMovementWaitRequest.RootElement);
+                    throw new AgentHostException("provider-self-test-fixed-observe-again-boundary-accepted", $"The exact-ten-second PartySize contract accepted {invalidSeconds} seconds.");
+                }
+                catch (AgentHostException exception) when (exception.Code == "provider-control-arguments-invalid") { }
+            }
+
+            using var validDecision = JsonDocument.Parse("{\"control\":\"observeAgain\",\"waitSeconds\":10,\"reason\":\"Continue map travel.\"}");
+            var normalized = OllamaNativeProvider.NormalizeDecision(validDecision.RootElement, fixedMovementWaitRequest.RootElement);
+            if (normalized["waitSeconds"]?.GetValue<int>() != 10 || normalized["observeAgain"]?.GetValue<bool>() != true)
+                throw new AgentHostException("provider-self-test-fixed-observe-again-valid-decision-not-normalized", "An exact-ten-second PartySize observation must remain an observeAgain control.");
+            results.Add(new { scenario = "provider-structured-output-enforces-exact-party-size-movement-wait", passed = true });
+        }
+
         using (var listedStopRequest = JsonDocument.Parse("{\"goal\":\"Safely stop this subgoal.\",\"observation\":{},\"allowedActions\":[],\"allowedControls\":[\"stop\"]}"))
         using (var stopDecision = JsonDocument.Parse("{\"control\":\"stop\",\"reason\":\"No safe action now.\"}"))
         {
