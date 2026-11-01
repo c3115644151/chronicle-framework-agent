@@ -141,9 +141,18 @@ internal static class AgentHostNativeMapMovementMonitor
         if (noInterruption.InterruptedByVisibleHostileBandit || neutral.PauseCount != 0)
             throw new AgentHostException("campaign-map-movement-neutral-interrupt-self-test-failed", "A neutral party during Native settlement movement must not receive an automatic time pause.");
 
+        var mapConversation = new FakeVisibleBanditMoveClient(visibleHostileBandit: false, openConversationAfterFirstPoll: true);
+        var conversationWatch = WaitAsync(mapConversation, mapConversation, mapConversation.CurrentNative, "safe-town", 4, monitorVisibleBandits: true, CancellationToken.None)
+            .GetAwaiter().GetResult();
+        if (mapConversation.MapPartyTargetPollCount != 1 || mapConversation.PauseCount != 0 ||
+            conversationWatch.NativeState["context"]?["conversation"] is not JsonObject conversation ||
+            string.IsNullOrWhiteSpace(ReadString(conversation, "sentenceText")))
+            throw new AgentHostException("campaign-map-movement-conversation-interrupt-self-test-failed", "Passive movement monitoring must return immediately when a current Native MapState conversation appears, leaving its visible text/options for the Agent decision loop without changing the clock.");
+
         return [
             new { scenario = "campaign-map-movement-passively-polls-visible-hostile-bandits-and-pauses-as-a-separate-native-control", partyTargetPolls = visible.MapPartyTargetPollCount, pauseCount = visible.PauseCount, extraModelDecisions = 0, passed = true },
-            new { scenario = "campaign-map-movement-does-not-pause-for-neutral-party-observations", partyTargetPolls = neutral.MapPartyTargetPollCount, pauseCount = neutral.PauseCount, passed = true }
+            new { scenario = "campaign-map-movement-does-not-pause-for-neutral-party-observations", partyTargetPolls = neutral.MapPartyTargetPollCount, pauseCount = neutral.PauseCount, passed = true },
+            new { scenario = "campaign-map-movement-returns-current-map-conversation-before-wait-window-ends", partyTargetPolls = mapConversation.MapPartyTargetPollCount, pauseCount = mapConversation.PauseCount, clockChanged = false, passed = true }
         ];
     }
 
@@ -155,8 +164,10 @@ internal static class AgentHostNativeMapMovementMonitor
         var party = state?["party"] as JsonObject;
         var current = ReadString(location, "currentSettlementId");
         var timeMode = ReadString(native, "timeControlMode") ?? ReadString(context, "timeControlMode");
+        var conversationActive = context?["conversation"] is JsonObject;
         return ReadString(native, "status") == "completed" && ReadString(context, "gameState") == "MapState" &&
                timeMode is not null and not "Stop" && string.IsNullOrWhiteSpace(ReadString(context, "menuId")) &&
+               !conversationActive &&
                !ReadBoolean(context, "escapeMenuOpen") && !ReadBoolean(context, "inquiryOpen") &&
                !ReadBoolean(context, "encounterActive") && !ReadBoolean(context, "isWaitMenu") && !ReadBoolean(context, "isWaitActive") &&
                !ReadBoolean(context?["sceneNotification"] as JsonObject, "hasActiveNotification") &&
@@ -184,9 +195,10 @@ internal static class AgentHostNativeMapMovementMonitor
     private static bool ReadBoolean(JsonObject? value, string name) =>
         value?[name] is JsonValue node && node.TryGetValue<bool>(out var result) && result;
 
-    private sealed class FakeVisibleBanditMoveClient(bool visibleHostileBandit) : IAgentHostBattleSimulationNativeClient
+    private sealed class FakeVisibleBanditMoveClient(bool visibleHostileBandit, bool openConversationAfterFirstPoll = false) : IAgentHostBattleSimulationNativeClient
     {
         private bool _paused;
+        private bool _mapConversationActive;
         internal int MapPartyTargetPollCount { get; private set; }
         internal int PauseCount { get; private set; }
         internal JsonObject CurrentNative => BuildNative(_paused);
@@ -206,7 +218,8 @@ internal static class AgentHostNativeMapMovementMonitor
             if (action != "mapPartyTargets" || arguments.Count != 0)
                 throw new AgentHostException("movement-monitor-self-test-unexpected-battle-action", "Only the current Native mapPartyTargets observation is allowed during passive movement monitoring.");
             MapPartyTargetPollCount++;
-            var native = BuildNative(_paused);
+            if (openConversationAfterFirstPoll && MapPartyTargetPollCount == 1) _mapConversationActive = true;
+            var native = BuildNative(_paused, _mapConversationActive);
             native["data"] = new JsonObject
             {
                 ["mapPartyTargets"] = visibleHostileBandit
@@ -224,7 +237,7 @@ internal static class AgentHostNativeMapMovementMonitor
             return Task.FromResult(Parse(new JsonObject { ["status"] = "completed", ["action"] = "pause", ["timeControlMode"] = "Stop" }));
         }
 
-        private static JsonObject BuildNative(bool paused)
+        private static JsonObject BuildNative(bool paused, bool mapConversationActive = false)
         {
             var state = new JsonObject
             {
@@ -232,6 +245,7 @@ internal static class AgentHostNativeMapMovementMonitor
                 {
                     ["gameState"] = "MapState", ["menuId"] = null, ["escapeMenuOpen"] = false,
                     ["inquiryOpen"] = false, ["encounterActive"] = false, ["isWaitMenu"] = false, ["isWaitActive"] = false,
+                    ["conversation"] = mapConversationActive ? new JsonObject { ["characterId"] = "notable-a", ["sentenceText"] = "We part ways.", ["options"] = new JsonArray() } : null,
                     ["sceneNotification"] = new JsonObject { ["hasActiveNotification"] = false },
                     ["captivity"] = new JsonObject { ["isCaptive"] = false }
                 },
