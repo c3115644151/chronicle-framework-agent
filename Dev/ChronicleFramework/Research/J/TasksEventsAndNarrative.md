@@ -23,7 +23,7 @@ W2-E #29先以Sargot Gang Leader证明`CanPlayerTakeQuestConditions`不满足时
 
 | 原版 Issue | Native 金币/前置/完成事实 | 对首轮 EYC 收入路线的意义 |
 |---|---|---|
-| Merchant Needs Help with Outlaws | `RewardGold = (int)(400 + 1500 × IssueDifficultyMultiplier)`；直接 Quest 路线要求与发起者关系不低于 -10、主队至少 5 名健康成员、双方不在战争状态，`requiredGold=0`；时限20天；要求在发起者附近摧毁或招募指定数量的合格匪徒队伍，范围由当前难度决定。成功回调给MainHero支付`RewardGold`并增加Clan Renown 1。Alternative是另行派遣同伴/部队的路线，副作用不同。 | 与无预付资金状态兼容，并可能同时增加声望；任务是否在当前世界出现、原版可接文本是否明确呈现奖励及当前遭遇是否属于该Quest目标，仍须观察实际标记/对话/Journal。地图遭遇坐镇指挥与父循环的匪徒遭遇处理代码存在可复用候选，端到端未验证。 |
+| Merchant Needs Help with Outlaws | `RewardGold = (int)(400 + 1500 × IssueDifficultyMultiplier)`；直接 Quest 路线要求与发起者关系不低于 -10、主队至少 5 名健康成员、双方不在战争状态，`requiredGold=0`；时限20天；要求在发起者附近摧毁或招募指定数量的合格匪徒队伍，范围由当前难度决定。成功回调给MainHero支付`RewardGold`并增加Clan Renown 1。Alternative是另行派遣同伴/部队的路线，副作用不同。 | 与无预付资金状态兼容，并可能同时增加声望。2026-11-01 Native运行见下：Poros直接Quest接受后Journal为0/2；带`TrackedIssue`标记的当前looter目标战胜并完成战后结算后变为1/2。该手动Campaign未完成第二支队伍，因此没验证奖励结算。 |
 | Gang Leader Needs Recruits | 1.4.8直接Issue接取无技能/预付Gold要求，关系低于-10阻止；目标量6+ceil(10×IssueDifficultyMultiplier)、期限30天。Issue RewardGold属性不等于直接Quest最终付款；direct Quest从2000起，每交Occupation.Bandit成员按Tier≤1/≤3/>3分别加100/150/200。OpenRecruitDeliveryScreen打开PartyScreenMode.TroopsManage，MainParty为Right；普通Bandit成员可转、俘虏不可。Done只拒绝超过剩余请求，部分交付更新Journal并按Tier加奖励；完成后原版ConversationManager自动继续成功对话和回调。| 本手动Campaign把7名Tier1 looter通过原版俘虏招募、明确超限确认和TroopsManage分批移交；Quest terminal Success，实际Gold+2700。Over-delivery拒绝分支、其他Tier奖励尚未测试。该Side Issue不是EYC必经路线，是否接取需看当前现金、主队上限、俘虏XP与期限。 |
 | Village Needs Tools | `RewardGold = 500 + requestedCount × (localPrice + item.Value) / 2`；关系低于 -10或与发起方处于战争会阻止接取；请求数量工具须送达，奖励可能按原版报价支付金币，也可能以指定物品交换。 | 有前期购买/取得工具成本，且不保证纯金币；当前金币为0时不能默认可行。 |
 
@@ -31,9 +31,11 @@ W2-E #29先以Sargot Gang Leader证明`CanPlayerTakeQuestConditions`不满足时
 
 安装版1.4.8源码及实机确认直接路线打开PartyState/TroopsManage，不是QuestTroopManage；MainParty为Right，仅Occupation.Bandit普通成员可转交。Native Done允许部分交付但拒绝超过剩余请求。玩家队伍满员时，我们逐个明确接受原版超限警告，短暂招募后立即交付；警告提示移动变慢、临时士兵会离队。七名Tier1 looter全部经原版PrisonerVM/PartyCharacterVM处理，QuestDetails终端结果Success、7/7，金币增加2700。最终Done后原版ConversationManager自动推进NPC成功台词，无额外玩家回答。手动Native CLI运行，0模型调用。
 
-最新手动EYC状态day91161.308：Gold2803/2000、MainParty21/25、Renown44.834/50、Companions2/1、Clan Tier0。Save ChronicleW7P-manual-1e87e187606e SHA-256 2DEE8B93C15877B5A817C8B33F358936F65B2F9B1910D3CC0EC63920D289E352；源档E57D1C62CD574D619E995ABB6BFBF2C5609E208B4D28D5541AABC3161C6FE0BC未变。收据 TestResults/20261101-195924/Temp/GangRecruitment-final-Native-Done.json、GangRecruitment-terminal-success.json、ManualCampaign-CurrentCheckpoint.json。该Side Issue并非EYC必经路线，Host尚无自动接取/完成策略。
+2026-11-01后续同一Native Campaign：Poros Merchant `CharacterObject_1791`出现该任务的蓝色AvailableIssue标记。原版QuickTalk需先完成初次介绍，再选`hero_give_issue`、`issue_explanation_player_response_pre_quest_solution`及直接路线`issue_offer_player_accept_quest`；Alternative因无同伴而禁用。接受时`QuestDetails`显示目标2、当前0、期限20天、报酬550。之后击败地图上带`TrackedIssue`标记的10人looter队并完成Party/Loot收尾，`QuestDetails`进度升至1/2。EYC成功后该Issue仍为活动状态1/2、余18天，故其第二目标和奖励未验证；整个过程0模型调用。
 
-以上是安装版1.4.8.119303的反编译源码事实，不证明自然Campaign里任务出现率、Offer文本可读性、战斗目标总能被地图可见或AI已能跑通这些任务。入口必须先从Native `AvailableIssue` marker和当前Notable QuickConversation观察；只有当前对话实际开放Quest路径才接受，Alternative/Lord方案不可自动当作等价收入动作。该Quest的进度Journal调用把`AddDiscreteLog`标为`hideInformation:true`，但其运行时是否仍会出现在Agent按需读取的QuestDetails里尚未验证；本地还会发出“已猎杀x/y”QuickInformation。正式集成前需检查真实Native QuestDetails/屏幕，不能假定能读到隐藏进度。任务完成以原版Quest完成状态与MainHero Gold前后差值确认，不能只凭文本奖励金额。
+同一Campaign随后达到StoryMode EYC原版终态：Gold2277、Clan Renown76.146、Clan Tier1、MainParty25/48、Companions2，`QuestDetails(rebuild_player_clan_storymode_quest)`返回`isTerminal=true, terminalStatus=Success`。队伍从22增至25的3人是通过原版俘虏招募入口逐人招募的looter，Prisoner 5→2，Native Morale每人-2；该终态保存于`ChronicleW7P-manual-20261101-eyc-complete.sav`。结构化收据：`TestResults/20261101-212904/Temp/ManualEycCompletion-20261101.json`。这是一个手动Campaign终态，不证明AgentHost或真实模型自治通过；此前的Gang Leader Issue也不是EYC必经路线，Host仍没有自动接取/完成策略。
+
+以上是安装版1.4.8.119303的反编译源码事实，不证明自然Campaign里任务出现率、Offer文本可读性、战斗目标总能被地图可见或AI已能跑通这些任务。入口必须先从Native `AvailableIssue` marker和当前Notable QuickConversation观察；只有当前对话实际开放Quest路径才接受，Alternative/Lord方案不可自动当作等价收入动作。源码把进度`AddDiscreteLog`标为`hideInformation:true`；但2026-11-01这条运行实例的按需`QuestDetails`实际显示了0/2和1/2，因此在本例中隐藏Journal日志不等于Observer读不到Quest状态。其他任务实例仍须独立验证；第二目标、任务终态与奖励尚未观察，不能把“TrackedIssue”标记或单场胜利等同于完成。正式集成仍需用原版Quest terminal状态与MainHero Gold前后差值验证最终结算。
 
 ### 2026-10-28：Train Troops for Retainers 的金币与升级链
 
