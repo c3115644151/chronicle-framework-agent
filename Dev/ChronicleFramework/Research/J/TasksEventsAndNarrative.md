@@ -1,4 +1,4 @@
-﻿# J 类研究：任务、事件与叙事
+# J 类研究：任务、事件与叙事
 
 适用本体：Bannerlord v1.4.8.119303。本文是 J 域唯一研究资料，按 SYSTEM_INVENTORY 的 J01-J12 次序记录。关系数据机制归 B/C/I；此处只研究任务、事件、对话、日志等消费者与玩家入口，不复制个人关系模型。
 
@@ -24,8 +24,12 @@ W2-E #29先以Sargot Gang Leader证明`CanPlayerTakeQuestConditions`不满足时
 | 原版 Issue | Native 金币/前置/完成事实 | 对首轮 EYC 收入路线的意义 |
 |---|---|---|
 | Merchant Needs Help with Outlaws | `RewardGold = (int)(400 + 1500 × IssueDifficultyMultiplier)`；直接 Quest 路线要求与发起者关系不低于 -10、主队至少 5 名健康成员、双方不在战争状态，`requiredGold=0`；时限20天；要求在发起者附近摧毁或招募指定数量的合格匪徒队伍，范围由当前难度决定。成功回调给MainHero支付`RewardGold`并增加Clan Renown 1。Alternative是另行派遣同伴/部队的路线，副作用不同。 | 与无预付资金状态兼容，并可能同时增加声望；任务是否在当前世界出现、原版可接文本是否明确呈现奖励及当前遭遇是否属于该Quest目标，仍须观察实际标记/对话/Journal。地图遭遇坐镇指挥与父循环的匪徒遭遇处理代码存在可复用候选，端到端未验证。 |
-| Gang Leader Needs Recruits | `RewardGold = 2000 + RequestedRecruitCount × 100`；`CanPlayerTakeQuestConditions` 的已反编译路径不要求技能或金币，关系低于 -10 会阻止接取。该Issue的目标描述需要向帮派领袖提供自愿加入者；俘虏招募及任务接受后的完整结算路径未在当前收入链验证。 | 奖励足以覆盖EYC金币目标，但它需要特定招募来源和交付链；不能仅由奖励公式推断为更容易或保证自然可用。 |
+| Gang Leader Needs Recruits | 当前1.4.8源码：直接Issue路径`CanPlayerTakeQuestConditions`不要求技能/预付Gold，关系低于-10会阻止；请求量`6+ceil(10×IssueDifficultyMultiplier)`，时限30天。Issue的`RewardGold=2000+RequestedRecruitCount×100`是Issue属性；直接Quest `_rewardGold`从2000起，每交付1名Occupation.Bandit成员按Tier≤1/≤3/>3分别增加100/150/200。接受后建立Quest与0/N Journal；再次交谈打开原版`PartyScreenMode.TroopsManage`，MainParty是Right，只有MainParty中Occupation.Bandit单位可从Right移到左侧GangLeader。原版Done禁止交付超过剩余要求，按实际交付单位数/等级积累奖励；达到目标后需在Gang Leader的Quest conversation选择领取奖励，Native发Gold、+5关系并完成Quest。任务说明明确需要先将bandit/looter招募成己方主队单位；俘虏本身不能移交。 | 它可能给EYC所需Gold并补充队伍目标，但当前主队满员，交付会从主队移除bandit单位，因此要同时考虑PartySize门槛、过限风险及30天期限。不能把Issue奖励属性当作直接Quest的固定最终金额，也不能仅凭已接到Quest断言路径可完成。 |
 | Village Needs Tools | `RewardGold = 500 + requestedCount × (localPrice + item.Value) / 2`；关系低于 -10或与发起方处于战争会阻止接取；请求数量工具须送达，奖励可能按原版报价支付金币，也可能以指定物品交换。 | 有前期购买/取得工具成本，且不保证纯金币；当前金币为0时不能默认可行。 |
+
+2026-11-01同一手动EYC Campaign的实时界面补证：Lycaron（`town_ES4`）有“帮派需要招新”蓝色AvailableIssue标记；Native QuickTalk中直接Quest接受选项可点，Alternative派同伴选项被禁用并显示“你没有任何的同伴或家族成员”。原版Quest Journal新增`issue_838_quest`，需求7名劫匪/强盗，30天，进度0/7。用户确认任务要求先将这些单位招募成己方部队再交付，不是交付俘虏；此与反编译的`Occupation.Bandit`接收条件一致。尚未进行交付PartyScreen、招募Bandit Prisoner或领取奖励的实机测试。当前EYC Journal是Gold1453/2000、PartySize21/25、Renown41.092/50、Companions2/1达标；Clan Tier0。该Issue当前已接受，状态与Campaign checkpoint记录在`TestResults/20261101-160448/Temp/ManualCampaignProgress-20261101-issue-accepted.json`。这是一段Native手动运行、0 LLM调用，不证明它已推进任何EYC目标。
+
+2026-11-01同一手动EYC Campaign的实时界面补证：Lycaron（`town_ES4`）的Settlement overlay显示Gang Leader `CharacterObject_1685`带蓝色AvailableIssue标记；Native QuickTalk里直接Quest接受选项可点，Alternative派同伴选项禁用，屏幕提示“你没有任何的同伴或家族成员”。接受后Native QuestDetails为`issue_838_quest`，目标7名、剩30天、进度0/7。用户确认需要先把Bandit/looter单位招募进MainParty再交付，不能直接提交俘虏；这与源码Occupation.Bandit筛选一致。当前EYC数值仍是Gold1453/2000、PartySize21/25、Renown41.092/50、Companions2/1；该侧任务尚未开始交付，不代表EYC目标已推进。手动检查点见`TestResults/20261101-160448/Temp/ManualCampaignProgress-issue-accepted.json`，0模型调用。
 
 以上是安装版1.4.8.119303的反编译源码事实，不证明自然Campaign里任务出现率、Offer文本可读性、战斗目标总能被地图可见或AI已能跑通这些任务。入口必须先从Native `AvailableIssue` marker和当前Notable QuickConversation观察；只有当前对话实际开放Quest路径才接受，Alternative/Lord方案不可自动当作等价收入动作。该Quest的进度Journal调用把`AddDiscreteLog`标为`hideInformation:true`，但其运行时是否仍会出现在Agent按需读取的QuestDetails里尚未验证；本地还会发出“已猎杀x/y”QuickInformation。正式集成前需检查真实Native QuestDetails/屏幕，不能假定能读到隐藏进度。任务完成以原版Quest完成状态与MainHero Gold前后差值确认，不能只凭文本奖励金额。
 
