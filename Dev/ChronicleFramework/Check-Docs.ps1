@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.483'
+$contractVersion = '7.486'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -1682,6 +1682,16 @@ if ($agentHostMailboxSource -notmatch 'acceptedResponseExpected: action == "trad
     $agentHostGoldSaleLoopSource -notmatch 'IsPendingNativeTradeConfirmation' -or $agentHostGoldSaleLoopSource -notmatch 'AgentHostNativeInquiryResolution\.RunAsync' -or
     $agentHostGoldSaleLoopSource -notmatch 'tradeCancelChanges' -or $agentHostGoldSaleLoopSource -notmatch 'native-trade-capacity-inquiry') {
     throw 'GoldSale must return Native tradeConfirm accepted immediately, bind the exact current capacity Inquiry, resolve the model-visible Yes/No through Native callbacks, and safely discard a declined draft without replay.'
+}
+if ($agentCliSource -notmatch 'partyScreenDone.*ReturnWhenAccepted:\$ReturnWhenAccepted' -or
+    $agentHostMailboxSource -notmatch 'acceptedResponseExpected: action == "partyScreenDone"' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'postbattle-native-inquiry' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'AgentHostNativeInquiryResolution\.RunAsync' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'var accepted = nativeActionStatus == "accepted"' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'action == "partyScreenDone" && _simulatePartyInquiry && !_memberLootTaken \? "accepted"' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-self-test-accepted-done-action-not-counted' -or
+    $agentHostMailboxSource -notmatch 'battle-party-done-returns-native-leftover-inquiry-before-final-choice') {
+    throw 'BattleSimulation must return an accepted Native PartyScreen Done Inquiry immediately and resolve it through the current goal-aware Native Inquiry handler without timing out.'
 }
 $tradeRumorTestSource = Get-Content (Join-Path $harnessRoot 'Test-AgentTradeTransactions.ps1') -Raw -Encoding UTF8
 $tradeRumorQuerySource = [regex]::Match($tradeAdapterSource, 'internal static string BuildTradeRumorOptionsJson\([\s\S]*?\n    internal static string SeedHarnessTradeRumorFixture').Value

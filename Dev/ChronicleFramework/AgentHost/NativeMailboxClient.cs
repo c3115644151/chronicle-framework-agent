@@ -384,6 +384,58 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
         }
     }
 
+    internal static async Task<IReadOnlyList<object>> RunBattleDoneAcceptedResponseTransportSelfTestsAsync()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ChronicleBattleDoneAcceptedMailbox-" + Guid.NewGuid().ToString("N"));
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        Task<JsonDocument>? pendingCommand = null;
+        try
+        {
+            var responses = Path.Combine(root, "responses");
+            Directory.CreateDirectory(responses);
+            var client = new NativeMailboxClient(root, TimeSpan.FromSeconds(2));
+            pendingCommand = client.ExecuteBattleSimulationActionAsync("partyScreenDone", new JsonObject(), cancellation.Token);
+            var commandPath = Path.Combine(root, "command.json");
+            JsonObject? command = null;
+            for (var attempt = 0; attempt < 100 && command is null; attempt++)
+            {
+                if (File.Exists(commandPath))
+                {
+                    try { command = JsonNode.Parse(await File.ReadAllTextAsync(commandPath)) as JsonObject; }
+                    catch (IOException) { }
+                    catch (JsonException) { }
+                }
+                if (command is null) await Task.Delay(10);
+            }
+            var commandId = command?["id"]?.GetValue<string>();
+            if (string.IsNullOrWhiteSpace(commandId) || command?["action"]?.GetValue<string>() != "partyScreenDone")
+                throw new AgentHostException("battle-done-accepted-mailbox-command-missing", "The Native PartyScreen Done transport did not publish its correlated command.");
+            var accepted = new JsonObject
+            {
+                ["protocolVersion"] = 1,
+                ["commandId"] = commandId,
+                ["action"] = "partyScreenDone",
+                ["status"] = "accepted"
+            };
+            await File.WriteAllTextAsync(Path.Combine(responses, commandId + ".accepted.json"), accepted.ToJsonString());
+            using var response = await pendingCommand;
+            if (response.RootElement.GetProperty("status").GetString() != "accepted")
+                throw new AgentHostException("battle-done-accepted-mailbox-response-lost", "Native PartyScreen Done must return its current accepted Inquiry without waiting for completion.");
+            return [new { scenario = "battle-party-done-returns-native-leftover-inquiry-before-final-choice", passed = true }];
+        }
+        finally
+        {
+            cancellation.Cancel();
+            if (pendingCommand is { IsCompleted: false })
+            {
+                try { using var ignored = await pendingCommand; }
+                catch (OperationCanceledException) { }
+                catch (AgentHostException) { }
+            }
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
     internal static JsonObject BuildQuestDetailsArguments(string questId)
     {
         if (string.IsNullOrWhiteSpace(questId) || questId.Length > 160)
@@ -564,7 +616,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
     public Task<JsonDocument> ExecuteBattleSimulationActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
     {
         ValidateBattleSimulationAction(action, arguments);
-        return SendAsync(action, arguments, acceptedResponseExpected: false, cancellationToken);
+        return SendAsync(action, arguments, acceptedResponseExpected: action == "partyScreenDone", cancellationToken);
     }
 
     public Task<JsonDocument> PauseForVisibleHostileDecisionAsync(CancellationToken cancellationToken) =>

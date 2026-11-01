@@ -523,8 +523,10 @@ internal static class AgentHostBattleSimulationLoop
                     break;
                 }
 
-                var completed = ReadString(receipt, "status") == "completed";
-                if (completed) actionsExecuted++;
+                var nativeActionStatus = ReadString(receipt, "status");
+                var completed = nativeActionStatus == "completed";
+                var accepted = nativeActionStatus == "accepted";
+                if (completed || accepted) actionsExecuted++;
                 if (action == "mapPartyTargets")
                 {
                     observedTargets = CloneArray(receipt["data"]?["mapPartyTargets"] as JsonArray);
@@ -1558,6 +1560,9 @@ internal static class AgentHostBattleSimulationLoop
             partyInquiryResult["trace"] is not JsonArray inquiryTrace || !inquiryTrace.OfType<JsonObject>().Any(line => ReadString(line, "stage") == "postbattle-native-inquiry"))
             throw new AgentHostException("battle-loop-self-test-party-inquiry-goal-recovery-failed", $"The battle loop did not resolve a current PartyState Inquiry from EYC/roster context and resume Native loot: status={ReadString(partyInquiryResult, "status")}, termination={ReadString(partyInquiryResult, "termination")}, choice={inquiryClient.LastInquiryChoice}, actions={string.Join(",", inquiryClient.Actions)}.");
 
+        if (ReadInt(partyInquiryResult, "actionsExecuted", 0) != 15)
+            throw new AgentHostException("battle-loop-self-test-accepted-done-action-not-counted", "Native PartyScreen Done returns accepted while its leftover Inquiry is open; both the Done action and the subsequent model-chosen inquiry response must count as executed Native actions.");
+
         using var cumulativeRequest = JsonDocument.Parse("{\"runId\":\"selftest-battle-after-objective-budget\",\"goal\":\"Resolve one active incident battle after prior objective decisions.\",\"parentProcessId\":321,\"maxDecisions\":320,\"maxElapsedSeconds\":20,\"allowedActionNames\":" + actionNames + "}");
         var cumulativeClient = new FakeBattleSimulationNativeClient();
         var cumulativeProvider = new FakeBattleSimulationDecisionProvider();
@@ -2105,7 +2110,7 @@ internal static class AgentHostBattleSimulationLoop
             var response = new JsonObject
             {
                 ["processId"] = 321,
-                ["status"] = "completed",
+                ["status"] = action == "partyScreenDone" && _simulatePartyInquiry && !_memberLootTaken ? "accepted" : "completed",
                 ["commandId"] = "fake-" + action,
                 ["nativeSessionId"] = "fake-session"
             };

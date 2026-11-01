@@ -821,7 +821,7 @@ switch ($Action) {
         $result = Invoke-ProtocolCommand 'sellPrisonerOne' @{ troopId = $TroopId }
     }
     'partyScreenCancel' { $result = Invoke-ProtocolCommand 'partyScreenCancel' }
-    'partyScreenDone' { $result = Invoke-ProtocolCommand 'partyScreenDone' }
+    'partyScreenDone' { $result = Invoke-ProtocolCommand 'partyScreenDone' @{} -ReturnWhenAccepted:$ReturnWhenAccepted }
     'questTroopTransfer' {
         if (-not $TroopId -or -not $QuestTroopSourceSide) { throw '-TroopId and -QuestTroopSourceSide from the current Native QuestTroopManage PartyScreen are required for questTroopTransfer.' }
         $result = Invoke-ProtocolCommand 'questTroopTransfer' @{ troopId = $TroopId; sourceSide = $QuestTroopSourceSide }
