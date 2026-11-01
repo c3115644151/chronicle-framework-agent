@@ -458,13 +458,13 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             .Count(step => ReadString(step["decisionFeedback"] as JsonObject, "kind") == "host-native-no-choice-dialogue-continue") ?? 0;
         if (ReadString(villagersInNeedRun, "status") != "completed" ||
             ReadString(villagersInNeedRun["termination"] as JsonObject, "reason") != "native-party-size-journal-target-met" ||
-            ReadInt(villagersInNeedRun, "actionsExecuted", 0) != 10 || villagersInNeedClient.MapPartyTargetPollCount != 2 || villagersInNeedClient.StealthMissionStarted ||
+            ReadInt(villagersInNeedRun, "actionsExecuted", 0) != 11 || villagersInNeedClient.MapPartyTargetPollCount != 2 || villagersInNeedClient.StealthMissionStarted ||
             !villagersInNeedProvider.PrematureMoveStopRecovered ||
             !villagersInNeedProvider.InvalidWaitRejected ||
             villagersInNeedProvider.DialogueContinueDecisions != 0 ||
             automaticVillagerContinueCount != 2 ||
-            !villagersInNeedClient.Actions.SequenceEqual(["mapSettlementTargets", "move", "dialogueContinue", "dialogueSelect", "dialogueContinue", "dialogueSelect", "recruitOptions", "recruit"], StringComparer.Ordinal))
-            throw new AgentHostException("establish-clan-villagers-in-need-party-size-recovery-failed", $"The bounded PartySize subgoal must reject a premature stop while Native movement exposes observeAgain, host-advance only no-choice VillagersInNeed text with the original Continue handler, defer the original Villa mission at the visible answer, return to the Village menu and continue with the current RecruitmentVM offer. status={ReadString(villagersInNeedRun, "status")}; termination={ReadString(villagersInNeedRun["termination"] as JsonObject, "reason")}; failureCode={ReadString(villagersInNeedRun, "failureCode")}; failure={ReadString(villagersInNeedRun, "failure")}; actions={ReadInt(villagersInNeedRun, "actionsExecuted", -1)}; automaticContinues={automaticVillagerContinueCount}; modelContinueChoices={villagersInNeedProvider.DialogueContinueDecisions}; providerRecoveredMoveStop={villagersInNeedProvider.PrematureMoveStopRecovered}; nativeActions={string.Join(',', villagersInNeedClient.Actions)}.");
+            !villagersInNeedClient.Actions.SequenceEqual(["mapSettlementTargets", "move", "dialogueSelect", "dialogueContinue", "dialogueSelect", "dialogueContinue", "dialogueSelect", "recruitOptions", "recruit"], StringComparer.Ordinal))
+            throw new AgentHostException("establish-clan-villagers-in-need-party-size-recovery-failed", $"The bounded PartySize subgoal must reject a premature stop and a nine-second wait while movement exposes observeAgain, return a current MapState conversation to the model before movement resumes, then host-advance only no-choice VillagersInNeed Mission text, defer its mission at the visible answer, return to the Village menu and recruit through the current VM offer. status={ReadString(villagersInNeedRun, "status")}; termination={ReadString(villagersInNeedRun["termination"] as JsonObject, "reason")}; failureCode={ReadString(villagersInNeedRun, "failureCode")}; failure={ReadString(villagersInNeedRun, "failure")}; actions={ReadInt(villagersInNeedRun, "actionsExecuted", -1)}; automaticContinues={automaticVillagerContinueCount}; modelContinueChoices={villagersInNeedProvider.DialogueContinueDecisions}; providerRecoveredMoveStop={villagersInNeedProvider.PrematureMoveStopRecovered}; invalidWaitRejected={villagersInNeedProvider.InvalidWaitRejected}; mapTargetPolls={villagersInNeedClient.MapPartyTargetPollCount}; nativeActions={string.Join(',', villagersInNeedClient.Actions)}.");
         results.Add(new { scenario = "establish-clan-recruitment-resumes-after-native-villagers-in-need-deferral", passed = true });
         results.Add(new { scenario = "establish-clan-recruitment-rejects-stop-while-native-move-exposes-observe-again", passed = true });
         results.Add(new { scenario = "establish-clan-recruitment-rejects-observe-again-outside-exact-ten-second-contract", passed = true });
@@ -1749,6 +1749,8 @@ internal static class AgentHostEstablishClanRecruitmentLoop
     {
         private bool _moveIssued;
         private bool _arrived;
+        private bool _mapConversationActive;
+        private bool _mapConversationResolved;
         private int _dialogueStage = -1;
         private bool _talkedToVillagers;
         private bool _deferredVillaMission;
@@ -1793,12 +1795,19 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                     ["encounteredPartyId"] = missionActive ? VillagersInNeedVillageId : null,
                     ["escapeMenuOpen"] = false,
                     ["inquiryOpen"] = false,
-                    ["conversation"] = inVillagerConversation ? new JsonObject
-                    {
-                    ["characterId"] = VillagersInNeedHeroId,
-                        ["sentenceText"] = _dialogueStage is 1 or 3 ? "Native VillagersInNeed answer line" : "Native VillagersInNeed NPC line",
-                        ["options"] = conversationOptions
-                    } : null,
+                    ["conversation"] = _mapConversationActive
+                        ? new JsonObject
+                        {
+                            ["characterId"] = "notable-a",
+                            ["sentenceText"] = "A Native MapState dialogue line.",
+                            ["options"] = new JsonArray(new JsonObject { ["id"] = "map_current", ["text"] = "Continue the conversation.", ["clickable"] = true })
+                        }
+                        : inVillagerConversation ? new JsonObject
+                        {
+                            ["characterId"] = VillagersInNeedHeroId,
+                            ["sentenceText"] = _dialogueStage is 1 or 3 ? "Native VillagersInNeed answer line" : "Native VillagersInNeed NPC line",
+                            ["options"] = conversationOptions
+                        } : null,
                     ["captivity"] = new JsonObject { ["isCaptive"] = false }
                 },
                 ["location"] = new JsonObject
@@ -1880,7 +1889,11 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             if (action != "mapPartyTargets" || arguments.Count != 0)
                 throw new AgentHostException("villagers-in-need-selftest-unexpected-map-poll", "The PartySize movement monitor may only query current Native map-party targets without arguments.");
             MapPartyTargetPollCount++;
-            if (MapPartyTargetPollCount >= 2)
+            if (MapPartyTargetPollCount == 1 && _moveIssued)
+            {
+                _mapConversationActive = true;
+            }
+            else if (MapPartyTargetPollCount >= 2 && _mapConversationResolved)
             {
                 _arrived = true;
                 _dialogueStage = -2;
@@ -1902,6 +1915,14 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         {
             cancellationToken.ThrowIfCancellationRequested();
             Actions.Add(action);
+            if (_mapConversationActive)
+            {
+                if (action != "dialogueSelect" || ReadString(arguments, "optionId") != "map_current")
+                    throw new AgentHostException("villagers-in-need-selftest-map-conversation-invalid-action", "A map conversation during movement must accept only its current Native clickable option before travel resumes.");
+                _mapConversationActive = false;
+                _mapConversationResolved = true;
+                return Task.FromResult(JsonDocument.Parse("{\"status\":\"completed\",\"data\":{\"conversationClosed\":true}}"));
+            }
             if (!_arrived)
                 throw new AgentHostException("villagers-in-need-selftest-recruited-before-deferral", "Recruitment must wait for the original conversation deferral and return to the Village menu.");
             if (action == "dialogueContinue" && _dialogueStage is 0 or 2)
