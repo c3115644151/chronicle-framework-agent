@@ -407,7 +407,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         results.Add(new { scenario = "establish-clan-recruitment-native-backstreet-exit-recovery-resumes-on-town-menu", passed = true });
 
         var villagersInNeedClient = new FakeVillagersInNeedRecruitmentClient();
-        var villagersInNeedProvider = new FakeVillagersInNeedDecisionProvider(stopWhileMovingOnce: true);
+        var villagersInNeedProvider = new FakeVillagersInNeedDecisionProvider(stopWhileMovingOnce: true, returnInvalidWaitOnce: true);
         using var villagersInNeedRequest = JsonDocument.Parse("{\"runId\":\"establish-clan-villagers-in-need-selftest\",\"goal\":\"Raise the active Journal PartySize target.\",\"maxDecisions\":16,\"maxElapsedSeconds\":30}");
         var villagersInNeedRun = await RunAsync(villagersInNeedRequest.RootElement, villagersInNeedClient, villagersInNeedClient, villagersInNeedClient,
             villagersInNeedProvider, CancellationToken.None);
@@ -415,14 +415,16 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             .Count(step => ReadString(step["decisionFeedback"] as JsonObject, "kind") == "host-native-no-choice-dialogue-continue") ?? 0;
         if (ReadString(villagersInNeedRun, "status") != "completed" ||
             ReadString(villagersInNeedRun["termination"] as JsonObject, "reason") != "native-party-size-journal-target-met" ||
-            ReadInt(villagersInNeedRun, "actionsExecuted", 0) != 9 || villagersInNeedClient.MapPartyTargetPollCount != 1 || villagersInNeedClient.StealthMissionStarted ||
+            ReadInt(villagersInNeedRun, "actionsExecuted", 0) != 10 || villagersInNeedClient.MapPartyTargetPollCount != 2 || villagersInNeedClient.StealthMissionStarted ||
             !villagersInNeedProvider.PrematureMoveStopRecovered ||
+            !villagersInNeedProvider.InvalidWaitRejected ||
             villagersInNeedProvider.DialogueContinueDecisions != 0 ||
             automaticVillagerContinueCount != 2 ||
             !villagersInNeedClient.Actions.SequenceEqual(["mapSettlementTargets", "move", "dialogueContinue", "dialogueSelect", "dialogueContinue", "dialogueSelect", "recruitOptions", "recruit"], StringComparer.Ordinal))
             throw new AgentHostException("establish-clan-villagers-in-need-party-size-recovery-failed", $"The bounded PartySize subgoal must reject a premature stop while Native movement exposes observeAgain, host-advance only no-choice VillagersInNeed text with the original Continue handler, defer the original Villa mission at the visible answer, return to the Village menu and continue with the current RecruitmentVM offer. status={ReadString(villagersInNeedRun, "status")}; termination={ReadString(villagersInNeedRun["termination"] as JsonObject, "reason")}; failureCode={ReadString(villagersInNeedRun, "failureCode")}; failure={ReadString(villagersInNeedRun, "failure")}; actions={ReadInt(villagersInNeedRun, "actionsExecuted", -1)}; automaticContinues={automaticVillagerContinueCount}; modelContinueChoices={villagersInNeedProvider.DialogueContinueDecisions}; providerRecoveredMoveStop={villagersInNeedProvider.PrematureMoveStopRecovered}; nativeActions={string.Join(',', villagersInNeedClient.Actions)}.");
         results.Add(new { scenario = "establish-clan-recruitment-resumes-after-native-villagers-in-need-deferral", passed = true });
         results.Add(new { scenario = "establish-clan-recruitment-rejects-stop-while-native-move-exposes-observe-again", passed = true });
+        results.Add(new { scenario = "establish-clan-recruitment-rejects-observe-again-outside-exact-ten-second-contract", passed = true });
 
         using var prisonerRouteRequest = JsonDocument.Parse("{\"runId\":\"establish-clan-prisoner-recruitment-selftest\",\"goal\":\"Raise the original EYC PartySize objective.\",\"maxDecisions\":12,\"maxElapsedSeconds\":30}");
         var prisonerRouteClient = new FakePrisonerRecruitmentNativeClient();
@@ -1660,7 +1662,6 @@ internal static class AgentHostEstablishClanRecruitmentLoop
     {
         private bool _moveIssued;
         private bool _arrived;
-        private int _readsAfterMove;
         private int _dialogueStage = -1;
         private bool _talkedToVillagers;
         private bool _deferredVillaMission;
@@ -1678,12 +1679,6 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (_moveIssued && !_arrived && _readsAfterMove++ >= 3)
-            {
-                _arrived = true;
-                _dialogueStage = -2;
-            }
-
             var conversationStartupPending = _arrived && _dialogueStage == -2;
             var inVillagerConversation = _arrived && _dialogueStage is >= 0 and <= 3;
             var missionActive = conversationStartupPending || inVillagerConversation;
@@ -1798,6 +1793,11 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             if (action != "mapPartyTargets" || arguments.Count != 0)
                 throw new AgentHostException("villagers-in-need-selftest-unexpected-map-poll", "The PartySize movement monitor may only query current Native map-party targets without arguments.");
             MapPartyTargetPollCount++;
+            if (MapPartyTargetPollCount >= 2)
+            {
+                _arrived = true;
+                _dialogueStage = -2;
+            }
             using var stateResponse = ReadStateAsync(cancellationToken).GetAwaiter().GetResult();
             var native = JsonNode.Parse(stateResponse.RootElement.GetRawText())?.AsObject()
                 ?? throw new AgentHostException("villagers-in-need-selftest-map-poll-invalid", "The fake Native movement poll returned no current state.");
@@ -1870,10 +1870,16 @@ internal static class AgentHostEstablishClanRecruitmentLoop
     private sealed class FakeVillagersInNeedDecisionProvider : IAgentHostDecisionProvider
     {
         private bool _stopWhileMovingOnce;
+        private bool _returnInvalidWaitOnce;
         internal int CallCount { get; private set; }
         internal bool PrematureMoveStopRecovered { get; private set; }
+        internal bool InvalidWaitRejected { get; private set; }
         internal int DialogueContinueDecisions { get; private set; }
-        internal FakeVillagersInNeedDecisionProvider(bool stopWhileMovingOnce = false) => _stopWhileMovingOnce = stopWhileMovingOnce;
+        internal FakeVillagersInNeedDecisionProvider(bool stopWhileMovingOnce = false, bool returnInvalidWaitOnce = false)
+        {
+            _stopWhileMovingOnce = stopWhileMovingOnce;
+            _returnInvalidWaitOnce = returnInvalidWaitOnce;
+        }
         public string ModelId => "deterministic-villagers-in-need-recruitment-selftest";
         public string ConfigurationSource => "harness-fake-provider";
         public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) { cancellationToken.ThrowIfCancellationRequested(); return Task.CompletedTask; }
@@ -1905,6 +1911,24 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                         throw new AgentHostException("villagers-in-need-observe-again-recovery-unclear", "The Host recovery instruction must name passive observeAgain and forbid clock changes.");
                     PrematureMoveStopRecovered = true;
                 }
+                if (_returnInvalidWaitOnce)
+                {
+                    _returnInvalidWaitOnce = false;
+                    CallCount++;
+                    return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "villagers-in-need-selftest", new JsonObject
+                    {
+                        ["observeAgain"] = true, ["waitSeconds"] = 9
+                    }));
+                }
+                if (feedback.ValueKind == JsonValueKind.Object && ReadString(feedback, "kind") == "control")
+                {
+                    var message = ReadString(feedback, "message");
+                    if (message?.Contains("requires waitSeconds=10 exactly", StringComparison.Ordinal) != true)
+                        throw new AgentHostException("villagers-in-need-invalid-wait-feedback-unclear", "The Host must explain the exact ten-second wait requirement after rejecting a model response outside the control schema.");
+                    InvalidWaitRejected = true;
+                }
+                if (_returnInvalidWaitOnce || !PrematureMoveStopRecovered)
+                    throw new AgentHostException("villagers-in-need-invalid-wait-selftest-sequence", "The fake provider must first observe Host rejection of both premature stop and an out-of-contract wait before accepting the ten-second wait.");
                 CallCount++;
                 return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "villagers-in-need-selftest", new JsonObject
                 {
