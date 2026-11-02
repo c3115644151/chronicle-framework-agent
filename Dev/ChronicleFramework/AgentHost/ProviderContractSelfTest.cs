@@ -133,6 +133,18 @@ internal static class ProviderContractSelfTest
             throw new AgentHostException("provider-credential-selection-self-test-failed", "Provider credentials must follow the configured endpoint: dedicated FreeLLMAPI key for its local loopback gateway and generic key only for other providers.");
         results.Add(new { scenario = "provider-credential-selection-is-endpoint-scoped", passed = true });
 
+        var remoteProxyEndpoint = new Uri("https://api.deepseek.com/v1");
+        if (ProviderProxySelection.SelectProxyUrl(remoteProxyEndpoint, "http://explicit-https-proxy:8080", "http://http-proxy:8080", null, true) != "http://explicit-https-proxy:8080" ||
+            ProviderProxySelection.SelectProxyUrl(remoteProxyEndpoint, null, "http://explicit-http-proxy:8080", null, true) != "http://explicit-http-proxy:8080" ||
+            ProviderProxySelection.SelectProxyUrl(remoteProxyEndpoint, null, null, null, true) != ProviderProxySelection.LocalFallbackProxyUrl ||
+            ProviderProxySelection.SelectProxyUrl(remoteProxyEndpoint, null, null, null, false) is not null ||
+            ProviderProxySelection.SelectProxyUrl(remoteProxyEndpoint, null, null, null, true, "127.0.0.1,localhost") != ProviderProxySelection.LocalFallbackProxyUrl ||
+            ProviderProxySelection.SelectProxyUrl(remoteProxyEndpoint, "http://explicit-https-proxy:8080", null, null, true, "api.deepseek.com") is not null ||
+            ProviderProxySelection.SelectProxyUrl(new Uri("http://127.0.0.1:31415/v1"), null, null, null, true) is not null ||
+            !ProviderProxySelection.IsNoProxyMatch("api.deepseek.com", ".deepseek.com"))
+            throw new AgentHostException("provider-proxy-selection-self-test-failed", "Remote provider requests must respect an explicit proxy, fall back to the detected local 7890 listener only when needed, and leave loopback providers direct.");
+        results.Add(new { scenario = "provider-proxy-selection-respects-configured-route-and-local-listener-with-loopback-bypass", passed = true });
+
         using (var validProfile = JsonDocument.Parse("{\"OllamaBaseUrl\":\"http://127.0.0.1:31415/v1\",\"ModelId\":\"auto\",\"schemaVersion\":0,\"LegacySetting\":true,\"CampaignGoal\":\"older-MCM-key\"}"))
         {
             var profile = AgentProviderProfile.Parse(validProfile.RootElement);
@@ -741,6 +753,27 @@ internal static class ProviderContractSelfTest
             }
             catch (AgentHostException exception) when (exception.Code == "provider-unavailable") { }
             results.Add(new { scenario = "local-provider-health-distinguishes-http-rejection", passed = true });
+        }
+        var transportFailureHandler = new StubHandler((_, _) => Task.FromException<HttpResponseMessage>(
+            new HttpRequestException(HttpRequestError.SecureConnectionError, "PRIVATE_TRANSPORT_MESSAGE", new System.Security.Authentication.AuthenticationException("PRIVATE_TLS_DETAIL"))));
+        using (var transportFailureClient = new HttpClient(transportFailureHandler) { Timeout = settings.Timeout })
+        using (var transportFailureProvider = new OllamaNativeProvider(settings, transportFailureClient))
+        {
+            try
+            {
+                await transportFailureProvider.CheckConfiguredModelAsync(CancellationToken.None);
+                throw new AgentHostException("provider-health-transport-failure-accepted", "A failed provider transport must not be reported as ready.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-unavailable")
+            {
+                if (!exception.Message.Contains("httpRequestError=SecureConnectionError", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("innerType=AuthenticationException", StringComparison.Ordinal) ||
+                    exception.Message.Contains("PRIVATE_TRANSPORT_MESSAGE", StringComparison.Ordinal) ||
+                    exception.Message.Contains("PRIVATE_TLS_DETAIL", StringComparison.Ordinal) ||
+                    transportFailureHandler.LastRequestMethod != HttpMethod.Get)
+                    throw new AgentHostException("provider-health-transport-diagnostic-invalid", "A bounded read-only health failure must identify the transport class without exposing exception text or request secrets.");
+            }
+            results.Add(new { scenario = "provider-health-classifies-transport-failure-without-raw-exception-text", passed = true, modelCalls = 0, nativeCommands = 0 });
         }
 
         await VerifySharedDecisionCycleAsync(settings, "mapSettlementTargets", "CampaignSystemPrompt", AgentHostDecisionCycle.DecideCampaignAsync, results);

@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -22,6 +23,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     private readonly OllamaProviderSettings _settings;
     private readonly HttpClient _client;
     private readonly bool _ownsClient;
+    private readonly string _proxySelectionSource;
+    private int _availableModelCount;
     private DateTimeOffset _lastProviderRequestUtc;
     private string? _lastProviderRoute;
     private bool _useRequiredToolCallStrategy;
@@ -35,6 +38,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     internal string ProviderHost => _settings.Endpoint.Host;
     internal string StructuredOutputStrategy => _useRequiredToolCallStrategy ? "required_tool_call" :
         _settings.OutputMode == "json_object" ? "json_object" : "json_schema";
+    internal string ProxySelectionSource => _proxySelectionSource;
+    internal int AvailableModelCount => _availableModelCount;
     internal int MaxOutputTokens => _settings.MaxOutputTokens;
     internal string OutputMode => _settings.OutputMode;
     internal bool? ThinkingMode => _settings.Thinking;
@@ -50,10 +55,60 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     internal OllamaNativeProvider(OllamaProviderSettings settings, HttpClient? client = null, string configurationSource = "direct")
     {
         _settings = settings with { MaxTokenParameter = ResolveMaxTokenParameter(settings.Model, settings.MaxTokenParameter) };
-        _client = client ?? new HttpClient { Timeout = settings.Timeout };
+        if (client is null)
+            (_client, _proxySelectionSource) = CreateDefaultHttpClient(_settings);
+        else
+        {
+            _client = client;
+            _proxySelectionSource = "injected-http-client";
+        }
         _ownsClient = client is null;
         ConfigurationSource = configurationSource;
         _useRequiredToolCallStrategy = string.Equals(settings.OutputMode, "required_tool_call", StringComparison.Ordinal);
+    }
+
+    private static (HttpClient Client, string ProxySelectionSource) CreateDefaultHttpClient(OllamaProviderSettings settings)
+    {
+        var processHttps = ReadProxyEnvironment("HTTPS_PROXY", EnvironmentVariableTarget.Process);
+        var userHttps = ReadProxyEnvironment("HTTPS_PROXY", EnvironmentVariableTarget.User);
+        var processHttp = ReadProxyEnvironment("HTTP_PROXY", EnvironmentVariableTarget.Process);
+        var userHttp = ReadProxyEnvironment("HTTP_PROXY", EnvironmentVariableTarget.User);
+        var processAll = ReadProxyEnvironment("ALL_PROXY", EnvironmentVariableTarget.Process);
+        var userAll = ReadProxyEnvironment("ALL_PROXY", EnvironmentVariableTarget.User);
+        var processNoProxy = ReadProxyEnvironment("NO_PROXY", EnvironmentVariableTarget.Process);
+        var userNoProxy = ReadProxyEnvironment("NO_PROXY", EnvironmentVariableTarget.User);
+        var noProxy = processNoProxy ?? userNoProxy;
+        var hasConfiguredProxy = !string.IsNullOrWhiteSpace(processHttps ?? userHttps) ||
+            !string.IsNullOrWhiteSpace(processHttp ?? userHttp) || !string.IsNullOrWhiteSpace(processAll ?? userAll);
+        var localProxyAvailable = !settings.Endpoint.IsLoopback && !hasConfiguredProxy &&
+            !ProviderProxySelection.IsNoProxyMatch(settings.Endpoint.Host, noProxy) && ProviderProxySelection.IsLocalProxyListenerAvailable();
+        var proxyUrl = ProviderProxySelection.SelectProxyUrl(settings.Endpoint,
+            processHttps ?? userHttps, processHttp ?? userHttp, processAll ?? userAll,
+            localProxyAvailable, noProxy);
+        if (string.IsNullOrWhiteSpace(proxyUrl))
+        {
+            var source = settings.Endpoint.IsLoopback ? "loopback-or-system-default" :
+                ProviderProxySelection.IsNoProxyMatch(settings.Endpoint.Host, noProxy) ? "no-proxy-bypass" : "system-default";
+            return (new HttpClient { Timeout = settings.Timeout }, source);
+        }
+        if (!Uri.TryCreate(proxyUrl, UriKind.Absolute, out var proxyUri) || proxyUri.Scheme is not ("http" or "https"))
+            throw new AgentHostException("provider-proxy-invalid", "The configured provider proxy must be an absolute HTTP or HTTPS URL.");
+        var handler = new HttpClientHandler
+        {
+            UseProxy = true,
+            Proxy = new WebProxy(proxyUri) { BypassProxyOnLocal = true }
+        };
+        var selectedByEnvironment = !string.IsNullOrWhiteSpace(processHttps) || !string.IsNullOrWhiteSpace(userHttps) ||
+            !string.IsNullOrWhiteSpace(processHttp) || !string.IsNullOrWhiteSpace(userHttp) ||
+            !string.IsNullOrWhiteSpace(processAll) || !string.IsNullOrWhiteSpace(userAll);
+        var proxySource = selectedByEnvironment ? "configured-proxy-environment" : "detected-local-listener-7890";
+        return (new HttpClient(handler) { Timeout = settings.Timeout }, proxySource);
+    }
+
+    private static string? ReadProxyEnvironment(string name, EnvironmentVariableTarget target)
+    {
+        var value = Environment.GetEnvironmentVariable(name, target);
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 
     internal static OllamaNativeProvider FromEnvironment()
@@ -255,7 +310,9 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 throw new AgentHostException("provider-health-response-invalid", "The configured model service returned an unsupported model-list response.");
 
             JsonElement selectedModel = default;
-            foreach (var model in models.EnumerateArray())
+            var modelRows = models.EnumerateArray().ToArray();
+            _availableModelCount = modelRows.Length;
+            foreach (var model in modelRows)
             {
                 if (!string.Equals(ReadString(model, "id"), _settings.Model, StringComparison.Ordinal)) continue;
                 selectedModel = model;
@@ -303,12 +360,23 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         }
         catch (HttpRequestException exception)
         {
-            throw new AgentHostException("provider-unavailable", "The configured local model service could not be reached.", exception);
+            var socketError = FindSocketException(exception)?.SocketErrorCode.ToString() ?? "none";
+            var statusCode = exception.StatusCode.HasValue ? ((int)exception.StatusCode.Value).ToString(CultureInfo.InvariantCulture) : "none";
+            var innerType = exception.InnerException?.GetType().Name ?? "none";
+            var details = $"httpRequestError={exception.HttpRequestError}; status={statusCode}; innerType={innerType}; socketError={socketError}; hresult=0x{exception.HResult:X8}";
+            throw new AgentHostException("provider-unavailable", "The configured model service could not be reached. " + details, exception);
         }
         catch (JsonException exception)
         {
             throw new AgentHostException("provider-health-response-invalid", "The local model service returned malformed model-list data.", exception);
         }
+    }
+
+    private static SocketException? FindSocketException(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+            if (current is SocketException socket) return socket;
+        return null;
     }
 
     internal async Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)

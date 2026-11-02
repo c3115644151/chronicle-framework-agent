@@ -24,10 +24,8 @@ foreach ($setting in @(
     }
 }
 
-# Bound real provider smoke output to a small response unless explicitly configured.
-if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_MAX_TOKENS)) {
-    $env:CHRONICLE_LLM_MAX_TOKENS = '128'
-}
+# Keep this one-shot smoke bounded even when a larger production setting exists.
+$env:CHRONICLE_LLM_MAX_TOKENS = '128'
 
 $protocolSelfTestOutput = & dotnet $hostDll --provider-self-test 2>&1 | Out-String
 if ($LASTEXITCODE -ne 0) { throw "Provider transport-contract tests failed: $protocolSelfTestOutput" }
@@ -44,7 +42,6 @@ if (-not [Uri]::TryCreate($providerBaseUrl, [UriKind]::Absolute, [ref]$providerU
 }
 $protocol = 'openai-compatible'
 $freeLlmApiProfile = $null
-$modelCatalog = $null
 if ($providerUri.IsLoopback -and $providerUri.Port -eq 31415 -and $providerUri.AbsolutePath.TrimEnd('/') -eq '/v1') {
     . (Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1')
     $readinessFixture = @(
@@ -65,43 +62,37 @@ if ($providerUri.IsLoopback -and $providerUri.Port -eq 31415 -and $providerUri.A
     }
     $freeLlmApiProfile = Initialize-FreeLLMAPIProfile
     $model = [string]$freeLlmApiProfile.RequestedModelId
-    $modelCatalog = @()
     if ($freeLlmApiProfile.ModelExecutionStatus -notin @('ready','router')) { throw 'Configured FreeLLMAPI route is not currently available; no inference request was sent.' }
 }
 else {
     if ($providerUri.Scheme -ne 'https') { throw 'Remote provider smoke requires HTTPS; no inference request was sent.' }
     $providerCredential = Get-ChronicleProviderCredential -Endpoint $providerUri
     if ([string]::IsNullOrWhiteSpace([string]$providerCredential.Value)) { throw 'Remote provider API key is missing; no inference request was sent.' }
-    $modelsUri = [UriBuilder]::new($providerUri)
-    $modelsUri.Path = $providerUri.AbsolutePath.TrimEnd('/') + '/models'
-    $modelsUri.Query = ''
-    try { $modelCatalog = @(Invoke-RestMethod -Uri $modelsUri.Uri -Headers @{ Authorization = "Bearer $($providerCredential.Value)" } -TimeoutSec 15 | Select-Object -ExpandProperty data) }
-    catch { throw 'Remote provider /models preflight failed; no inference request was sent.' }
-    if (-not @($modelCatalog | Where-Object { [string]$_.id -ceq $model }).Count) { throw 'Configured model ID is absent from the remote provider catalog; no inference request was sent.' }
+}
+
+$outputMode = [string]$env:CHRONICLE_LLM_OUTPUT_MODE
+if ([string]::IsNullOrWhiteSpace($outputMode)) { $outputMode = 'auto' }
+$runCostLimit = [string]$env:CHRONICLE_LLM_MAX_RUN_COST_CNY
+if ([string]::IsNullOrWhiteSpace($runCostLimit)) { $runCostLimit = '5' }
+$healthRequest = [ordered]@{
+    providerConfiguration = [ordered]@{
+        ProviderBaseUrl = $providerBaseUrl
+        ModelId = $model
+        OutputMode = $outputMode
+        DeepSeekRunCostLimitCny = $runCostLimit
+    }
+    providerConfigurationSource = 'agent-host-provider-health'
+} | ConvertTo-Json -Depth 5 -Compress
+$healthOutput = $healthRequest | & dotnet $hostDll --provider-health-only 2>&1 | Out-String
+$healthExitCode = $LASTEXITCODE
+if ($healthExitCode -ne 0) { throw "Read-only Agent Host provider health failed (exit=$healthExitCode). No inference request was sent. $healthOutput" }
+try { $hostHealth = $healthOutput | ConvertFrom-Json }
+catch { throw 'Agent Host provider health returned invalid JSON; no inference request was sent.' }
+if ($hostHealth.status -ne 'ready' -or [int]$hostHealth.modelCalls -ne 0 -or [int]$hostHealth.nativeCommands -ne 0) {
+    throw 'Agent Host provider health returned an invalid result; no inference request was sent.'
 }
 
 if ($HealthOnly) {
-    $outputMode = [string]$env:CHRONICLE_LLM_OUTPUT_MODE
-    if ([string]::IsNullOrWhiteSpace($outputMode)) { $outputMode = 'auto' }
-    $runCostLimit = [string]$env:CHRONICLE_LLM_MAX_RUN_COST_CNY
-    if ([string]::IsNullOrWhiteSpace($runCostLimit)) { $runCostLimit = '5' }
-    $healthRequest = [ordered]@{
-        providerConfiguration = [ordered]@{
-            ProviderBaseUrl = $providerBaseUrl
-            ModelId = $model
-            OutputMode = $outputMode
-            DeepSeekRunCostLimitCny = $runCostLimit
-        }
-        providerConfigurationSource = 'agent-host-provider-health'
-    } | ConvertTo-Json -Depth 5 -Compress
-    $healthOutput = $healthRequest | & dotnet $hostDll --provider-health-only 2>&1 | Out-String
-    $healthExitCode = $LASTEXITCODE
-    if ($healthExitCode -ne 0) { throw "Read-only Agent Host provider health failed (exit=$healthExitCode). No inference request was sent. $healthOutput" }
-    try { $hostHealth = $healthOutput | ConvertFrom-Json }
-    catch { throw 'Agent Host provider health returned invalid JSON; no inference request was sent.' }
-    if ($hostHealth.status -ne 'ready' -or [int]$hostHealth.modelCalls -ne 0 -or [int]$hostHealth.nativeCommands -ne 0) {
-        throw 'Agent Host provider health returned an invalid result; no inference request was sent.'
-    }
     $summary = [ordered]@{
         Passed = $true
         Check = 'read-only-provider-health'
@@ -109,8 +100,9 @@ if ($HealthOnly) {
         ConfiguredModelId = [string]$hostHealth.modelId
         StructuredOutputStrategy = [string]$hostHealth.structuredOutputStrategy
         FreeLLMAPIReachable = [bool]$freeLlmApiProfile
+        ProviderProxySelectionSource = [string]$hostHealth.proxySelectionSource
         ConfiguredRouteExecutionStatus = if ($freeLlmApiProfile) { $freeLlmApiProfile.ModelExecutionStatus } else { 'catalog-listed' }
-        AvailableModelCount = if ($freeLlmApiProfile) { $freeLlmApiProfile.AvailableModelCount } else { $modelCatalog.Count }
+        AvailableModelCount = [int]$hostHealth.availableModelCount
         ModelCalls = 0
         NativeCommands = 0
         NoModelEndpointOrCredentialLogged = $true
@@ -179,11 +171,12 @@ $summary = [ordered]@{
     FreeLLMAPIReachable = [bool]$freeLlmApiProfile
     GatewayStartedByHarness = if ($freeLlmApiProfile) { [bool]$freeLlmApiProfile.GatewayStartedByHarness } else { $false }
     LocalProxyBootstrapApplied = if ($freeLlmApiProfile) { [bool]$freeLlmApiProfile.LocalProxyBootstrapApplied } else { $false }
+    ProviderProxySelectionSource = [string]$hostHealth.proxySelectionSource
     ConfiguredModelId = $model
     ConfiguredRouteExecutionStatus = if ($freeLlmApiProfile) { $freeLlmApiProfile.ModelExecutionStatus } else { 'catalog-listed' }
     EffectiveMaxOutputTokens = [int]$env:CHRONICLE_LLM_MAX_TOKENS
     MaxTokenParameter = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER)) { 'max_completion_tokens' } else { [string]$env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER }
-    AvailableModelCount = if ($freeLlmApiProfile) { $freeLlmApiProfile.AvailableModelCount } else { $modelCatalog.Count }
+    AvailableModelCount = [int]$hostHealth.availableModelCount
     AvailableModelCatalogSha256 = if ($freeLlmApiProfile) { $freeLlmApiProfile.AvailableModelCatalogSha256 } else { $null }
     RoutedVia = [string]$result.routedVia
     ResultStatus = [string]$result.status

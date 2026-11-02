@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
 using TaleWorlds.Core;
@@ -349,6 +350,7 @@ internal static class ChronicleAgentRuntimeController
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
+        ConfigureProviderProxyEnvironment(startInfo, providerUri);
         if (!string.IsNullOrWhiteSpace(configuredApiKey))
             startInfo.EnvironmentVariables["CHRONICLE_LLM_API_KEY"] = configuredApiKey;
         foreach (var name in new[]
@@ -409,6 +411,60 @@ internal static class ChronicleAgentRuntimeController
         {
             if (_process != null) TerminateOwnedHostAfterTimeout();
             FailStart("Host启动失败（" + exception.GetType().Name + "）");
+        }
+    }
+
+    private static void ConfigureProviderProxyEnvironment(ProcessStartInfo startInfo, Uri providerUri)
+    {
+        if (providerUri == null || providerUri.IsLoopback) return;
+        var httpsProxy = ReadProxyEnvironment("HTTPS_PROXY");
+        var httpProxy = ReadProxyEnvironment("HTTP_PROXY");
+        var allProxy = ReadProxyEnvironment("ALL_PROXY");
+        var localProxyAvailable = string.IsNullOrWhiteSpace(httpsProxy) && string.IsNullOrWhiteSpace(httpProxy) &&
+                                 string.IsNullOrWhiteSpace(allProxy) && IsLocalProxyListenerAvailable();
+        var selectedProxy = ProviderProxySelection.SelectProxyUrl(providerUri, httpsProxy, httpProxy, allProxy, localProxyAvailable);
+
+        foreach (var name in new[] { "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY" })
+        {
+            var value = ReadProxyEnvironment(name);
+            if (!string.IsNullOrWhiteSpace(value)) startInfo.EnvironmentVariables[name] = value;
+        }
+        if (string.IsNullOrWhiteSpace(selectedProxy)) return;
+
+        // The Host is a separate process. Pass a user-configured proxy through,
+        // or use the already-running local proxy as a process-only fallback.
+        startInfo.EnvironmentVariables["HTTPS_PROXY"] = selectedProxy;
+        if (string.IsNullOrWhiteSpace(httpProxy)) startInfo.EnvironmentVariables["HTTP_PROXY"] = selectedProxy;
+
+        var source = !string.IsNullOrWhiteSpace(httpsProxy) ? "https-proxy-environment" :
+            !string.IsNullOrWhiteSpace(httpProxy) ? "http-proxy-environment" :
+            !string.IsNullOrWhiteSpace(allProxy) ? "all-proxy-environment" : "local-listener";
+        if (Uri.TryCreate(selectedProxy, UriKind.Absolute, out var proxyUri))
+            ChronicleDiagnostics.Write("agent-provider-proxy-selected|source=" + source + "|host=" + proxyUri.Host + "|port=" + proxyUri.Port.ToString(CultureInfo.InvariantCulture));
+        else
+            ChronicleDiagnostics.Write("agent-provider-proxy-selected|source=" + source + "|host=unparsed");
+    }
+
+    private static string ReadProxyEnvironment(string name)
+    {
+        var value = Environment.GetEnvironmentVariable(name);
+        if (string.IsNullOrWhiteSpace(value)) value = Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.User);
+        return value?.Trim() ?? string.Empty;
+    }
+
+    private static bool IsLocalProxyListenerAvailable()
+    {
+        using (var client = new TcpClient())
+        {
+            try
+            {
+                var connect = client.ConnectAsync("127.0.0.1", 7890);
+                return connect.Wait(600) && client.Connected;
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 

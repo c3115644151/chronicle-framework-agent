@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.Globalization;
+using System.Net.Sockets;
 
 namespace ChronicleFramework;
 
@@ -48,5 +49,52 @@ internal static class AgentProviderConfigurationValidator
         if (!double.TryParse(deepSeekRunCostLimitCny, NumberStyles.Float, CultureInfo.InvariantCulture, out var costLimit) || costLimit < 0.01d || costLimit > 1000d)
             return "provider-profile-run-cost-invalid";
         return null;
+    }
+}
+
+internal static class ProviderProxySelection
+{
+    internal const string LocalFallbackProxyUrl = "http://127.0.0.1:7890";
+
+    internal static string? SelectProxyUrl(Uri providerEndpoint, string? httpsProxy, string? httpProxy, string? allProxy,
+        bool localProxyListenerAvailable, string? noProxy = null)
+    {
+        if (providerEndpoint == null || providerEndpoint.IsLoopback) return null;
+        if (IsNoProxyMatch(providerEndpoint.Host, noProxy)) return null;
+        if (!string.IsNullOrWhiteSpace(httpsProxy)) return httpsProxy.Trim();
+        if (!string.IsNullOrWhiteSpace(httpProxy)) return httpProxy.Trim();
+        if (!string.IsNullOrWhiteSpace(allProxy)) return allProxy.Trim();
+        return localProxyListenerAvailable ? LocalFallbackProxyUrl : null;
+    }
+
+    internal static bool IsNoProxyMatch(string host, string? noProxy)
+    {
+        if (string.IsNullOrWhiteSpace(noProxy)) return false;
+        foreach (var rawEntry in noProxy.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var entry = rawEntry.Trim();
+            if (entry == "*") return true;
+            if (entry.Contains("/")) continue;
+            if (entry.StartsWith("*.", StringComparison.Ordinal)) entry = entry.Substring(2);
+            else entry = entry.TrimStart('.');
+            var colon = entry.LastIndexOf(':');
+            if (colon > 0 && entry.IndexOf(']') < colon) entry = entry.Substring(0, colon);
+            if (string.Equals(host, entry, StringComparison.OrdinalIgnoreCase) || host.EndsWith("." + entry, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    internal static bool IsLocalProxyListenerAvailable(int timeoutMilliseconds = 600)
+    {
+        using (var client = new TcpClient())
+        {
+            try
+            {
+                var connection = client.ConnectAsync("127.0.0.1", 7890);
+                return connection.Wait(timeoutMilliseconds) && client.Connected;
+            }
+            catch { return false; }
+        }
     }
 }

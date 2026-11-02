@@ -47,7 +47,9 @@ internal static class Program
                     status = "ready",
                     providerHost = provider.ProviderHost,
                     modelId = provider.ModelId,
+                    availableModelCount = provider.AvailableModelCount,
                     structuredOutputStrategy = provider.StructuredOutputStrategy,
+                    proxySelectionSource = provider.ProxySelectionSource,
                     modelCalls = 0,
                     nativeCommands = 0
                 }, OutputJsonOptions));
