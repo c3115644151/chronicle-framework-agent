@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.508'
+$contractVersion = '7.510'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -131,6 +131,10 @@ if ($agentHostProviderSource -notmatch '"Days" or "Count" or "VolunteerSlot" or 
     throw 'The Native Map Incident model schema must represent current option indices as integer enums and cover that shape in provider contract tests.'
 }
 if ($agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-localized-direct-offer-hidden' -or
+    $agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-discovery-budget-not-bounded' -or
+    $agentHostTrainingIssueLoopSource -notmatch 'training-issue-search-budget-exhausted' -or
+    $agentHostTrainingIssueLoopSource -notmatch 'MaximumTrainingIssueDiscoveryDecisions = 32' -or
+    $agentHostCampaignLoopSource -notmatch 'training-issue-search-budget-exhausted' -or
     $agentHostTrainingIssueLoopSource -notmatch 'localizedDirectOption' -or
     $agentHostTrainingIssueLoopSource -notmatch 'currentTrainingIssueGiverConversation') {
     throw 'The retainer-training Native direct offer must use the current marked giver and clickable option ID, while tolerating a localized placeholder TextObject ID.'

@@ -10,8 +10,25 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
     private const string BorrowedTroopId = "borrowed_troop";
     private const string VeteranBorrowedTroopId = "veteran_borrowed_troop";
     private const int MaxRejectedDecisions = 2;
+    internal const int MaximumTrainingIssueDiscoveryDecisions = 32;
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
+        var discoveryMap = NativeState(null, null, new JsonArray());
+        var discoveryBelowLimit = !ShouldStopUnproductiveTrainingIssueSearch(discoveryMap, MaximumTrainingIssueDiscoveryDecisions - 1, 0,
+            activeTrainingIssue: false, directOfferAccepted: false);
+        var discoveryAtLimit = ShouldStopUnproductiveTrainingIssueSearch(discoveryMap, MaximumTrainingIssueDiscoveryDecisions, 0,
+            activeTrainingIssue: false, directOfferAccepted: false);
+        var activeIssueExempt = !ShouldStopUnproductiveTrainingIssueSearch(discoveryMap, MaximumTrainingIssueDiscoveryDecisions * 4, 0,
+            activeTrainingIssue: true, directOfferAccepted: false);
+        var acceptedOfferExempt = !ShouldStopUnproductiveTrainingIssueSearch(discoveryMap, MaximumTrainingIssueDiscoveryDecisions * 4, 0,
+            activeTrainingIssue: false, directOfferAccepted: true);
+        var movingMap = NativeState(null, null, new JsonArray(), moving: true);
+        var movingNotCutOff = !ShouldStopUnproductiveTrainingIssueSearch(movingMap, MaximumTrainingIssueDiscoveryDecisions, 0,
+            activeTrainingIssue: false, directOfferAccepted: false);
+        if (!discoveryBelowLimit || !discoveryAtLimit || !activeIssueExempt || !acceptedOfferExempt || !movingNotCutOff)
+            throw new AgentHostException("training-issue-self-test-discovery-budget-not-bounded", "Only an unproductive free-map search is capped after 32 local decisions; an accepted or active Native training Issue and an already-moving MainParty remain eligible to finish safely.");
+        var discoveryLimitScenario = new { scenario = "training-issue-search-returns-to-parent-after-32-unproductive-decisions-but-does-not-cut-off-an-active-issue", maximumDiscoveryDecisions = MaximumTrainingIssueDiscoveryDecisions, passed = true };
+
         var villageMenu = NativeState("village", "village-a", new JsonArray(
             new JsonObject { ["id"] = "leave", ["available"] = true, ["enabled"] = true, ["isLeave"] = true }),
             new JsonArray(new JsonObject
@@ -266,6 +283,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
             throw new AgentHostException("training-issue-self-test-inquiry-scope-failed", "Only the visible Native return-borrowed-troops prompt may enter the training Issue completion response path.");
 
         return [
+            discoveryLimitScenario,
             new { scenario = "training-issue-targets-only-current-visible-available-issue-givers", passed = true },
             new { scenario = "training-issue-movement-observation-hides-settlement-targets-rejected-by-current-catalog", passed = true },
             new { scenario = "training-issue-accepts-only-the-source-identified-direct-quest-option", passed = true },
@@ -436,6 +454,24 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                 {
                     trackedIssueQuestId = null;
                     issueDetails = null;
+                }
+
+                if (ShouldStopUnproductiveTrainingIssueSearch(currentNative!, decisions, priorDecisions, activeTrainingIssue, directOfferAccepted))
+                {
+                    failure = $"No visible retainer-training Issue became active within the bounded {MaximumTrainingIssueDiscoveryDecisions}-decision discovery budget; returning free Map control to the Gold objective parent.";
+                    failureCode = "training-issue-search-budget-exhausted";
+                    termination = failureCode;
+                    trace.Add(new JsonObject
+                    {
+                        ["stage"] = "native-training-issue-discovery-budget-exhausted",
+                        ["maxLocalDecisions"] = MaximumTrainingIssueDiscoveryDecisions,
+                        ["localDecisionsUsed"] = decisions - priorDecisions,
+                        ["settlementSearchCount"] = visitedSettlements.Count,
+                        ["currentSettlementId"] = ReadString(state["location"] as JsonObject, "currentSettlementId"),
+                        ["activeTrainingIssue"] = activeTrainingIssue,
+                        ["nativeStateSummary"] = AgentHostHarnessProgressTrace.BuildNativeStateSummary(state)
+                    });
+                    break;
                 }
 
                 var context = state["context"] as JsonObject;
@@ -886,6 +922,20 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
             context?["conversation"] is not JsonObject)
             return new JsonArray("observeAgain");
         return new JsonArray();
+    }
+
+    internal static bool ShouldStopUnproductiveTrainingIssueSearch(JsonObject native, int decisions, int startingDecisions,
+        bool activeTrainingIssue, bool directOfferAccepted)
+    {
+        if (activeTrainingIssue || directOfferAccepted || decisions - startingDecisions < MaximumTrainingIssueDiscoveryDecisions) return false;
+        var state = native["state"] as JsonObject;
+        if (state is null) return false;
+        var context = state["context"] as JsonObject;
+        var captivity = context?["captivity"] as JsonObject;
+        return ReadString(context, "gameState") == "MapState" && ReadString(context, "menuId") is null &&
+               !ReadBoolean(context, "encounterActive") && !ReadBoolean(context, "escapeMenuOpen") && !ReadBoolean(context, "inquiryOpen") &&
+               !ReadBoolean(captivity, "isCaptive") && state["partyScreen"] is null && state["inventoryScreen"] is null &&
+               !ReadBoolean(state["party"] as JsonObject, "isMoving") && GetVisibleAvailableTrainingIssueGivers(state).Length == 0;
     }
 
     internal static bool IsOutOfScopeIssueAcceptance(JsonObject option) =>

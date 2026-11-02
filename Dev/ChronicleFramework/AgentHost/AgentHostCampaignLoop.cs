@@ -752,7 +752,8 @@ internal static class AgentHostCampaignLoop
                             if (ReadString(training, "status") == "completed" || ReadBoolean(training, "directOfferAccepted")) return training;
 
                             var retryableIssueSearch = ReadString(training, "failureCode") is "training-issue-no-visible-direct-offer" or
-                                "training-issue-no-safe-settlement-visible" or "training-issue-direct-offer-unavailable";
+                                "training-issue-no-safe-settlement-visible" or "training-issue-direct-offer-unavailable" or
+                                "training-issue-search-budget-exhausted";
                             var trainingFinalContext = (training["finalNativeState"]?["state"]?["context"] as JsonObject);
                             var trainingEndedOnFreeMap = ReadString(trainingFinalContext, "gameState") == "MapState" &&
                                 ReadString(trainingFinalContext, "menuId") is null && !ReadBoolean(trainingFinalContext, "encounterActive") &&
