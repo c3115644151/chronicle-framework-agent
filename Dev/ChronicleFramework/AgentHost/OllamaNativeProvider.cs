@@ -566,7 +566,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     ? choiceArray.EnumerateArray().ToArray()
                     : Array.Empty<JsonElement>();
                 if (choices.Length != 1)
-                    throw new AgentHostException("provider-content-missing", $"The local OpenAI-compatible provider did not return one structured message (choiceCount={choices.Length}; hasError={root.TryGetProperty("error", out _)}; format={responseFormatMode}).");
+                    throw new AgentHostException("provider-content-missing", $"The local OpenAI-compatible provider did not return one structured message (choiceCount={choices.Length}; hasError={root.TryGetProperty("error", out _)}; format={responseFormatMode}; responseModel={SafeDiagnosticField(ReadString(root, "model"))}; routedVia={SafeDiagnosticField(ReadResponseHeader(response, "X-Routed-Via"))}).");
                 if (choices[0].ValueKind != JsonValueKind.Object ||
                     !choices[0].TryGetProperty("message", out var messageElement) || messageElement.ValueKind != JsonValueKind.Object)
                 {
@@ -671,6 +671,14 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         if (!response.Headers.TryGetValues(headerName, out var values)) return null;
         var value = values.FirstOrDefault()?.Trim();
         return string.IsNullOrWhiteSpace(value) ? null : value[..Math.Min(value.Length, 160)];
+    }
+
+    private static string SafeDiagnosticField(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "not-reported";
+        return new string(value.Take(96).Select(character => char.IsLetterOrDigit(character) || character is '.' or '_' or ':' or '/' or '@' or '+' or '-'
+            ? character
+            : '_').ToArray());
     }
 
     internal string BuildHttpFailureMessage(HttpResponseMessage response, int rateLimitRetryAttempts, long rateLimitRetryWaitMilliseconds, RateLimitRetryHint? retryHint = null, bool? retryFitsDeadline = null)

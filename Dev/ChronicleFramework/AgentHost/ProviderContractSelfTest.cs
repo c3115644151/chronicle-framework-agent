@@ -499,6 +499,38 @@ internal static class ProviderContractSelfTest
             results.Add(new { scenario = "freellmapi-schema-mode-missing-content-records-shape-without-response-data", passed = true, modelCalls = 1, nativeCommands = 0 });
         }
 
+        var emptyChoicesHandler = new StubHandler((httpRequest, _) =>
+        {
+            if (httpRequest.Method == HttpMethod.Get)
+                return Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"free-empty-choices\",\"supported_parameters\":[\"response_format\"]}]}"));
+            var response = JsonResponse("{\"model\":\"gpt-oss-20b\",\"choices\":[],\"error\":{\"message\":\"PRIVATE_UPSTREAM_BODY_MUST_NOT_LEAK\"},\"usage\":{\"prompt_tokens\":449,\"completion_tokens\":113}}");
+            response.Headers.TryAddWithoutValidation("X-Routed-Via", "ovh/gpt-oss-20b");
+            return Task.FromResult(response);
+        });
+        using (var emptyChoicesClient = new HttpClient(emptyChoicesHandler) { Timeout = freeLlmApiSettings.Timeout })
+        using (var emptyChoicesProvider = new OllamaNativeProvider(freeLlmApiSettings with { Model = "free-empty-choices" }, emptyChoicesClient))
+        using (var request = JsonDocument.Parse(BuildDecisionRequest()))
+        {
+            await emptyChoicesProvider.CheckConfiguredModelAsync(CancellationToken.None);
+            try
+            {
+                _ = await emptyChoicesProvider.DecideAsync(request.RootElement, CancellationToken.None);
+                throw new AgentHostException("freellmapi-empty-choices-self-test-failed", "An HTTP-success response without any choices must not become a model decision.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-content-missing")
+            {
+                if (!exception.Message.Contains("choiceCount=0", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("hasError=True", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("format=json_schema", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("responseModel=gpt-oss-20b", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("routedVia=ovh/gpt-oss-20b", StringComparison.Ordinal) ||
+                    exception.Message.Contains("PRIVATE_UPSTREAM_BODY_MUST_NOT_LEAK", StringComparison.Ordinal) ||
+                    emptyChoicesHandler.LastRequestUri?.AbsolutePath != "/v1/chat/completions")
+                    throw new AgentHostException("freellmapi-empty-choices-diagnostic-self-test-failed", "The bounded error must identify the selected route and missing-choice shape without copying the upstream response body.");
+            }
+            results.Add(new { scenario = "freellmapi-empty-choices-reports-route-and-shape-without-upstream-body", passed = true, modelCalls = 1, nativeCommands = 0 });
+        }
+
         var genericRemoteSettings = settings with
         {
             Endpoint = new Uri("https://api.deepseek.com/v1/chat/completions"),
