@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.501'
+$contractVersion = '7.502'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -75,6 +75,7 @@ $agentHostCampaignLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\Ag
 $agentHostProgramSource = Get-Content (Join-Path $harnessRoot 'AgentHost\Program.cs') -Raw -Encoding UTF8
 $agentLiveModelLoopSource = Get-Content (Join-Path $harnessRoot 'Test-AgentLiveModelLoop.ps1') -Raw -Encoding UTF8
 $agentHostRecruitmentLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostEstablishClanRecruitmentLoop.cs') -Raw -Encoding UTF8
+$agentHostTrainingIssueLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostEstablishClanTrainingIssueLoop.cs') -Raw -Encoding UTF8
 $agentHostNativeMapMovementMonitorSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostNativeMapMovementMonitor.cs') -Raw -Encoding UTF8
 $agentHostNativeMapMovementProbeSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostNativeMapMovementMonitorProbe.ps1') -Raw -Encoding UTF8
 $agentHostSupplyLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostSupplyLoop.cs') -Raw -Encoding UTF8
@@ -126,6 +127,11 @@ if ($agentHostRecruitmentLoopSource -notmatch 'AgentHostProviderDecisionRecovery
 if ($agentHostProviderSource -notmatch '"Days" or "Count" or "VolunteerSlot" or "Amount" or "OptionIndex" => "integer"' -or
     $agentHostProviderContractSelfTestSource -notmatch 'provider-map-incident-option-index-is-integer-enum-not-string') {
     throw 'The Native Map Incident model schema must represent current option indices as integer enums and cover that shape in provider contract tests.'
+}
+if ($agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-localized-direct-offer-hidden' -or
+    $agentHostTrainingIssueLoopSource -notmatch 'localizedDirectOption' -or
+    $agentHostTrainingIssueLoopSource -notmatch 'currentTrainingIssueGiverConversation') {
+    throw 'The retainer-training Native direct offer must use the current marked giver and clickable option ID, while tolerating a localized placeholder TextObject ID.'
 }
 if ($agentHostCampaignLoopSource -notmatch 'goalValid=' -or
     $agentHostCampaignLoopSource -notmatch 'missingApproved=\[' -or
