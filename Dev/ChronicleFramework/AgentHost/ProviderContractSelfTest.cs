@@ -469,6 +469,36 @@ internal static class ProviderContractSelfTest
             results.Add(new { scenario = "freellmapi-bearer-auth-available-model-preflight-and-routed-model-evidence", passed = true });
         }
 
+        var incompatibleSchemaResponseBody = "{\"model\":\"free-schema-mismatch\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"private-call-id\",\"type\":\"function\",\"function\":{\"name\":\"submit_chronicle_decision\",\"arguments\":\"PRIVATE_RESPONSE_SHOULD_NOT_LEAK\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":449,\"completion_tokens\":113}}";
+        var incompatibleSchemaHandler = new StubHandler((httpRequest, _) => httpRequest.Method == HttpMethod.Get
+            ? Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"free-schema-mismatch\",\"supported_parameters\":[\"response_format\"]}]}"))
+            : Task.FromResult(JsonResponse(incompatibleSchemaResponseBody)));
+        using (var incompatibleSchemaClient = new HttpClient(incompatibleSchemaHandler) { Timeout = freeLlmApiSettings.Timeout })
+        using (var incompatibleSchemaProvider = new OllamaNativeProvider(freeLlmApiSettings with { Model = "free-schema-mismatch" }, incompatibleSchemaClient))
+        using (var request = JsonDocument.Parse(BuildDecisionRequest()))
+        {
+            await incompatibleSchemaProvider.CheckConfiguredModelAsync(CancellationToken.None);
+            try
+            {
+                _ = await incompatibleSchemaProvider.DecideAsync(request.RootElement, CancellationToken.None);
+                throw new AgentHostException("freellmapi-schema-toolcall-mismatch-self-test-failed", "A tool-call-only reply must not be accepted after the Host selected JSON Schema mode.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-content-missing")
+            {
+                if (!exception.Message.Contains("hasContent=True", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("contentKind=Null", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("hasToolCalls=True", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("toolCallCount=1", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("finishReason=tool_calls", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("format=json_schema", StringComparison.Ordinal) ||
+                    exception.Message.Contains("PRIVATE_RESPONSE_SHOULD_NOT_LEAK", StringComparison.Ordinal) ||
+                    exception.Message.Contains("private-call-id", StringComparison.Ordinal) ||
+                    incompatibleSchemaHandler.LastRequestUri?.AbsolutePath != "/v1/chat/completions")
+                    throw new AgentHostException("freellmapi-schema-mismatch-diagnostic-self-test-failed", "The structured diagnostic must classify the HTTP-success response shape without copying reply content, tool-call IDs or arguments.");
+            }
+            results.Add(new { scenario = "freellmapi-schema-mode-missing-content-records-shape-without-response-data", passed = true, modelCalls = 1, nativeCommands = 0 });
+        }
+
         var genericRemoteSettings = settings with
         {
             Endpoint = new Uri("https://api.deepseek.com/v1/chat/completions"),
