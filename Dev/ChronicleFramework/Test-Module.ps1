@@ -279,6 +279,11 @@ $result = [ordered]@{
         available = [bool]$steamStatus.available
         startedByHarness = [bool]$steamStatus.startedByHarness
         readyUtc = [string]$steamStatus.readyUtc
+        loginState = [ordered]@{
+            ready = [bool]$steamStatus.loginState.Ready
+            reason = [string]$steamStatus.loginState.Reason
+            eventUtc = [string]$steamStatus.loginState.EventUtc
+        }
         readiness = [ordered]@{
             Ready = [bool]$steamStatus.readiness.Ready
             Reason = [string]$steamStatus.readiness.Reason

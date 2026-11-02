@@ -133,6 +133,34 @@ internal static class AgentHostBattleSimulationLoop
                         captivityChoiceOptionId: captivityChoiceOptionId, nativeEscapeCompleted: true);
                 }
 
+                if (recoverPlayerCaptivity && captivityObserved && !isCaptive && !battleWasStarted &&
+                    IsVerifiedMapTerminalAfterNativeEscape(state))
+                {
+                    var recoveryRenownAfter = ReadRenown(state);
+                    if (!double.IsFinite(renownBefore) || !double.IsFinite(recoveryRenownAfter))
+                    {
+                        failure = "Native captivity recovery returned to a free Map without readable Renown before and after recovery.";
+                        failureCode = "battle-renown-unobservable";
+                        termination = "outcome-verification-incomplete";
+                        break;
+                    }
+                    trace.Add(new JsonObject
+                    {
+                        ["stage"] = "native-captivity-recovered-without-battle",
+                        ["battleSimulationStarted"] = false,
+                        ["playerOutcome"] = "captured-then-recovered",
+                        ["captivityChoiceOptionId"] = captivityChoiceOptionId,
+                        ["renownBefore"] = renownBefore,
+                        ["renownAfter"] = recoveryRenownAfter
+                    });
+                    return BuildResult(runId, provider, "completed", decisions, actionsExecuted, promptTokens, completionTokens,
+                        "native-captivity-recovered-without-battle", null, null, startDay, initialNative, native, trace, routes,
+                        renownBefore, recoveryRenownAfter, "native-captivity-recovery", playerRetreated: false,
+                        targetId: requestedTargetId, battleStarted: false, battleFinishReceipt: null,
+                        captivityRecoveryRequested: true, captivityObserved: true,
+                        captivityChoiceOptionId: captivityChoiceOptionId, nativeCaptivityRecoveryWithoutBattle: true);
+                }
+
                 if (IsActiveMapIncident(native))
                 {
                     failure = "A Native Map Incident opened before the battle decision; the parent EYC loop must resolve its current visible choices before resuming.";
@@ -1636,6 +1664,19 @@ internal static class AgentHostBattleSimulationLoop
             ReadInt(recovery, "explicitClockActionCount", -1) != 0 || recoveryClient.Actions.Contains("pause") || recoveryClient.Actions.Contains("advance") ||
             !recoveryClient.Actions.SequenceEqual(new[] { "mapPartyTargets", "pursue", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "menuSelect" }))
             throw new AgentHostException("battle-loop-self-test-captivity-recovery-failed", $"A fake Native battle-capture-ransom cycle failed: status={ReadString(recovery, "status")}, outcome={ReadString(recovery, "playerOutcome")}, captivity={ReadBoolean(recovery, "captivityObserved")}, recovery={ReadBoolean(recovery, "captivityRecoveryVerified")}, action={ReadString(recovery, "captivityChoiceOptionId")}, actions={string.Join(",", recoveryClient.Actions)}.");
+        var surrenderRecoveryClient = new FakeBattleSimulationNativeClient(simulateSurrenderWithoutBattle: true);
+        var surrenderRecoveryProvider = new FakeSurrenderRecoveryDecisionProvider();
+        var surrenderRecovery = await RunAsync(request.RootElement, surrenderRecoveryClient, surrenderRecoveryProvider, CancellationToken.None,
+            recoverPlayerCaptivity: true, passiveCaptivityPollSeconds: 1);
+        if (ReadString(surrenderRecovery, "status") != "completed" ||
+            ReadString(surrenderRecovery, "termination") != "native-captivity-recovered-without-battle" ||
+            ReadString(surrenderRecovery, "playerOutcome") != "captured-then-recovered" ||
+            !ReadBoolean(surrenderRecovery, "captivityObserved") || !ReadBoolean(surrenderRecovery, "captivityRecoveryVerified") ||
+            ReadBoolean(surrenderRecovery, "battleStarted") || ReadString(surrenderRecovery, "captivityChoiceOptionId") != "mno_captivity_end_ransom_accept" ||
+            ReadInt(surrenderRecovery, "mainPartyMembersAtReturn", 0) != 1 || !ReadBoolean(surrenderRecovery, "nativeReturnToMapVerified") ||
+            ReadInt(surrenderRecovery, "explicitClockActionCount", -1) != 0 || surrenderRecoveryClient.ClockActions.Count != 0 ||
+            !surrenderRecoveryClient.Actions.SequenceEqual(new[] { "mapPartyTargets", "pursue", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "menuSelect" }))
+            throw new AgentHostException("battle-loop-self-test-surrender-without-battle-recovers-before-replanning", $"Native surrender without Send Troops must wait through captivity, verify the original ransom release to free Map, and return to the parent planner without claiming battle/Renown. termination={ReadString(surrenderRecovery, "termination")}; outcome={ReadString(surrenderRecovery, "playerOutcome")}; battleStarted={ReadBoolean(surrenderRecovery, "battleStarted")}; actions={string.Join(",", surrenderRecoveryClient.Actions)}.");
         return [
             new { scenario = "battle-loop-native-observe-pursue-send-troops-aftermath-return-and-verify", decisions = ReadInt(result, "decisions", 0), nativeActions = client.Actions.ToArray(), renownBefore = ReadDouble(result, "renownBefore", double.NaN), renownAfter = ReadDouble(result, "renownAfter", double.NaN), explicitClockActions = ReadInt(result, "explicitClockActionCount", -1), passed = true },
             new { scenario = "battle-loop-model-chooses-observed-native-try-to-get-away-cost-and-returns-without-claiming-renown", nativeActions = escapeClient.Actions.ToArray(), playerOutcome = ReadString(escapeResult, "playerOutcome"), nativeEscapeCompleted = ReadBoolean(escapeResult, "nativeEscapeCompleted"), passed = true },
@@ -1643,7 +1684,8 @@ internal static class AgentHostBattleSimulationLoop
             new { scenario = "battle-loop-map-incident-interrupts-before-model-or-native-actions", passed = true },
             new { scenario = "battle-loop-resolves-party-loot-inquiry-from-current-eyc-goal-and-roster-then-resumes-native-aftermath", decisions = ReadInt(partyInquiryResult, "decisions", 0), nativeActions = inquiryClient.Actions.ToArray(), inquiryChoice = inquiryClient.LastInquiryChoice, passed = true },
             new { scenario = "battle-loop-incident-after-201-parent-decisions-retains-global-budget", decisions = ReadInt(cumulativeBattle, "decisions", 0), passed = true },
-            new { scenario = "battle-loop-native-capture-passive-wait-ransom-release-and-map-return", decisions = ReadInt(recovery, "decisions", 0), nativeActions = recoveryClient.Actions.ToArray(), captivityChoiceOptionId = ReadString(recovery, "captivityChoiceOptionId"), mainPartyMembersAtReturn = ReadInt(recovery, "mainPartyMembersAtReturn", 0), explicitClockActions = ReadInt(recovery, "explicitClockActionCount", -1), passed = true }
+            new { scenario = "battle-loop-native-capture-passive-wait-ransom-release-and-map-return", decisions = ReadInt(recovery, "decisions", 0), nativeActions = recoveryClient.Actions.ToArray(), captivityChoiceOptionId = ReadString(recovery, "captivityChoiceOptionId"), mainPartyMembersAtReturn = ReadInt(recovery, "mainPartyMembersAtReturn", 0), explicitClockActions = ReadInt(recovery, "explicitClockActionCount", -1), passed = true },
+            new { scenario = "battle-loop-native-surrender-without-battle-recovery-replans-after-free-map", decisions = ReadInt(surrenderRecovery, "decisions", 0), nativeActions = surrenderRecoveryClient.Actions.ToArray(), captivityChoiceOptionId = ReadString(surrenderRecovery, "captivityChoiceOptionId"), mainPartyMembersAtReturn = ReadInt(surrenderRecovery, "mainPartyMembersAtReturn", 0), explicitClockActions = ReadInt(surrenderRecovery, "explicitClockActionCount", -1), passed = true }
         ];
     }
 
@@ -1688,12 +1730,14 @@ internal static class AgentHostBattleSimulationLoop
         double startDay, JsonObject? initialNative, JsonObject? finalNative, JsonArray trace, JsonArray routes, double renownBefore, double renownAfter,
         string battleResult, bool playerRetreated, string? targetId, bool battleStarted, JsonObject? battleFinishReceipt,
         bool captivityRecoveryRequested, bool captivityObserved, string? captivityChoiceOptionId, bool nativeEncounterLeft = false,
-        bool nativeEscapeCompleted = false)
+        bool nativeEscapeCompleted = false, bool nativeCaptivityRecoveryWithoutBattle = false)
     {
         var state = finalNative?["state"] as JsonObject;
         var verifiedReturn = state is not null &&
             (nativeEscapeCompleted ? IsVerifiedMapTerminalAfterNativeEscape(state) :
-                nativeEncounterLeft ? IsVerifiedMapTerminalAfterNativeEncounterLeave(state) : IsVerifiedMapTerminalAfterBattle(state, battleStarted));
+                nativeEncounterLeft ? IsVerifiedMapTerminalAfterNativeEncounterLeave(state) :
+                nativeCaptivityRecoveryWithoutBattle ? IsVerifiedMapTerminalAfterNativeEscape(state) :
+                IsVerifiedMapTerminalAfterBattle(state, battleStarted));
         var finalContext = state?["context"] as JsonObject;
         var finalCaptivity = finalContext?["captivity"] as JsonObject;
         var captiveAtReturn = verifiedReturn && ReadBoolean(finalCaptivity, "isCaptive");
@@ -1731,6 +1775,7 @@ internal static class AgentHostBattleSimulationLoop
             ["targetPartyId"] = targetId,
             ["battleStarted"] = battleStarted,
             ["nativeEscapeCompleted"] = nativeEscapeCompleted,
+            ["nativeCaptivityRecoveryWithoutBattle"] = nativeCaptivityRecoveryWithoutBattle,
             ["battleState"] = battleResult,
             ["battleFinishReceipt"] = battleFinishReceipt?.DeepClone(),
             ["playerRetreated"] = playerRetreated,
@@ -2089,6 +2134,7 @@ internal static class AgentHostBattleSimulationLoop
         private readonly bool _mapIncidentAtStart;
         private readonly bool _mapConversationAtStart;
         private readonly bool _simulateNativeEscape;
+        private readonly bool _simulateSurrenderWithoutBattle;
         private int _stage;
         private int _movingReads;
         private int _captivityPolls;
@@ -2101,14 +2147,15 @@ internal static class AgentHostBattleSimulationLoop
         internal List<string> ClockActions { get; } = [];
         internal string? LastInquiryChoice { get; private set; }
 
-        internal FakeBattleSimulationNativeClient(bool simulateCaptivity = false, bool simulatePartyInquiry = false, bool visibleHostileAtStart = false, bool mapIncidentAtStart = false, bool mapConversationAtStart = false, bool simulateNativeEscape = false)
+        internal FakeBattleSimulationNativeClient(bool simulateCaptivity = false, bool simulatePartyInquiry = false, bool visibleHostileAtStart = false, bool mapIncidentAtStart = false, bool mapConversationAtStart = false, bool simulateNativeEscape = false, bool simulateSurrenderWithoutBattle = false)
         {
-            _simulateCaptivity = simulateCaptivity;
+            _simulateCaptivity = simulateCaptivity || simulateSurrenderWithoutBattle;
             _simulatePartyInquiry = simulatePartyInquiry;
             _visibleHostileAtStart = visibleHostileAtStart;
             _mapIncidentAtStart = mapIncidentAtStart;
             _mapConversationAtStart = mapConversationAtStart;
             _simulateNativeEscape = simulateNativeEscape;
+            _simulateSurrenderWithoutBattle = simulateSurrenderWithoutBattle;
             if (visibleHostileAtStart) _timeControlMode = "StoppablePlay";
         }
 
@@ -2147,7 +2194,8 @@ internal static class AgentHostBattleSimulationLoop
                     else _stage = 4;
                     break;
                 case "menuSelect":
-                    if (_simulateNativeEscape && _stage == 4 && ReadString(arguments, "optionId") == "leave_soldiers_behind") _stage = 14;
+                    if (_simulateSurrenderWithoutBattle && _stage == 4 && ReadString(arguments, "optionId") == "surrender") _stage = 10;
+                    else if (_simulateNativeEscape && _stage == 4 && ReadString(arguments, "optionId") == "leave_soldiers_behind") _stage = 14;
                     else if (_simulateNativeEscape && _stage == 14 && ReadString(arguments, "optionId") == "try_to_get_away_accept") _stage = 15;
                     else if (_simulateNativeEscape && _stage == 14 && ReadString(arguments, "optionId") == "try_to_get_away_reject") _stage = 4;
                     else if (_simulateNativeEscape && _stage == 15 && ReadString(arguments, "optionId") == "try_to_get_away_continue") _stage = 16;
@@ -2198,13 +2246,19 @@ internal static class AgentHostBattleSimulationLoop
             JsonObject? simulation = null;
             if (_stage is 5 or 6)
                 simulation = new JsonObject { ["finished"] = _stage == 6, ["playerRetreated"] = false, ["battleState"] = "AttackerVictory" };
-            var state = new JsonObject
+                var state = new JsonObject
             {
                 ["context"] = new JsonObject { ["gameState"] = stateName, ["menuId"] = menuId, ["encounterActive"] = encounterActive, ["battleSimulation"] = simulation, ["encounteredPartyId"] = encounterActive ? "bandit-1" : null, ["timeControlMode"] = _timeControlMode },
                 ["economy"] = new JsonObject { ["renown"] = 10.0, ["influence"] = 0.0, ["gold"] = _stage == 12 ? 169 : 500 },
                 ["party"] = new JsonObject { ["members"] = _stage is 10 or 11 ? 0 : _stage == 12 ? 1 : _memberLootTaken ? 41 : 40, ["healthy"] = 39, ["wounded"] = 1, ["prisoners"] = 0, ["itemCount"] = 12 },
                 ["location"] = new JsonObject { ["targetPartyId"] = _stage == 1 ? "bandit-1" : null },
-                ["availableMenuOptions"] = _stage == 4
+                    ["availableMenuOptions"] = _stage == 4 && _simulateSurrenderWithoutBattle
+                        ? new JsonArray(
+                            new JsonObject { ["id"] = "str_order_attack", ["available"] = false, ["enabled"] = false },
+                            new JsonObject { ["id"] = "leave", ["available"] = false, ["enabled"] = false },
+                            new JsonObject { ["id"] = "leave_soldiers_behind", ["available"] = false, ["enabled"] = false },
+                            new JsonObject { ["id"] = "surrender", ["available"] = true, ["enabled"] = true })
+                    : _stage == 4
                     ? _simulateNativeEscape
                         ? new JsonArray(
                             new JsonObject { ["id"] = "str_order_attack", ["available"] = true, ["enabled"] = true },
@@ -2253,11 +2307,17 @@ internal static class AgentHostBattleSimulationLoop
                     ["currentVisibleRansomAmount"] = _stage == 11 ? 331 : null
                 };
             if (_stage == 2)
-                state["context"]!["conversation"] = new JsonObject
-                {
-                    ["sentenceText"] = "Well well, look at this!",
-                    ["options"] = new JsonArray(new JsonObject { ["id"] = "bandit_start_defender_1", ["clickable"] = true }, new JsonObject { ["id"] = "bandit_toll", ["clickable"] = true })
-                };
+                state["context"]!["conversation"] = _simulateSurrenderWithoutBattle
+                    ? new JsonObject
+                    {
+                        ["sentenceText"] = "Well well, look at this!",
+                        ["options"] = new JsonArray(new JsonObject { ["id"] = "bandit_start_defender_3", ["textId"] = WeakPartySurrenderResponseTextId, ["clickable"] = true })
+                    }
+                    : new JsonObject
+                    {
+                        ["sentenceText"] = "Well well, look at this!",
+                        ["options"] = new JsonArray(new JsonObject { ["id"] = "bandit_start_defender_1", ["clickable"] = true }, new JsonObject { ["id"] = "bandit_toll", ["clickable"] = true })
+                    };
             if (_stage == 3)
                 state["context"]!["conversation"] = new JsonObject { ["sentenceText"] = "Prepare yourself.", ["options"] = new JsonArray() };
             if (_stage is 7 or 13)
@@ -2405,6 +2465,39 @@ internal static class AgentHostBattleSimulationLoop
             };
             return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "fake-test-route", decision));
         }
+        public void Dispose() { }
+    }
+
+    private sealed class FakeSurrenderRecoveryDecisionProvider : IAgentHostDecisionProvider
+    {
+        private static readonly string[] ExpectedActions = ["mapPartyTargets", "pursue", "observeAgain", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "menuSelect"];
+        internal int CallCount { get; private set; }
+        public string ModelId => "deterministic-surrender-recovery-self-test";
+        public string ConfigurationSource => "harness-fake-provider";
+        public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) { cancellationToken.ThrowIfCancellationRequested(); return Task.CompletedTask; }
+
+        public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var index = CallCount++;
+            if (index >= ExpectedActions.Length) throw new AgentHostException("surrender-recovery-self-test-provider-exhausted", "The fake provider exceeded the no-battle surrender/recovery route.");
+            var expected = ExpectedActions[index];
+            var arguments = expected switch
+            {
+                "pursue" => new JsonObject { ["PartyId"] = "bandit-1" },
+                "dialogueSelect" => new JsonObject { ["OptionId"] = "bandit_start_defender_3" },
+                "menuSelect" when index == 6 => new JsonObject { ["MenuId"] = "encounter", ["OptionId"] = "surrender" },
+                "menuSelect" => new JsonObject { ["MenuId"] = "menu_captivity_end_propose_ransom_wilderness", ["OptionId"] = "mno_captivity_end_ransom_accept" },
+                _ => new JsonObject()
+            };
+            var decision = expected switch
+            {
+                "observeAgain" => new JsonObject { ["observeAgain"] = true, ["waitSeconds"] = 1, ["reason"] = "Wait for the current Native pursuit transition." },
+                _ => new JsonObject { ["action"] = expected, ["arguments"] = arguments, ["rationale"] = "Use the current Native action and recover through Native captivity." }
+            };
+            return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "fake-test-route", decision));
+        }
+
         public void Dispose() { }
     }
 }

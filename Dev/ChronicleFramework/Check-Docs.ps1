@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.506'
+$contractVersion = '7.508'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -594,6 +594,7 @@ if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Prefl
     $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-self-test-loot-type-alias-not-rejected' -or
     $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-self-test-native-leave-not-bounded' -or
     $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-self-test-join-encounter-native-options-not-bounded' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-self-test-surrender-without-battle-recovers-before-replanning' -or
     $agentHostDecisionCycleSource -notmatch 'If Native menuId is join_encounter' -or
     $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-self-test-native-leave-postcondition-not-verified' -or
     $agentHostBattleSimulationLoopSource -notmatch 'IsVerifiedMapTerminalAfterNativeEncounterLeave' -or
@@ -1405,6 +1406,8 @@ if (-not (Test-ChronicleStartupAssessment)) { throw 'Startup evidence regression
 $startupEvidenceSource = Get-Content -LiteralPath $startupEvidenceScript -Raw -Encoding UTF8
 if (-not (Test-ChronicleSteamClientReadiness)) { throw 'Steam API readiness regression checks failed.' }
 if ($startupEvidenceSource -notmatch 'function Ensure-ChronicleSteamClientReady' -or
+    $startupEvidenceSource -notmatch 'function Get-ChronicleSteamLoginState' -or
+    $startupEvidenceSource -notmatch 'steam-user-logged-on' -or
     $startupEvidenceSource -notmatch "ArgumentList '-silent'.*-WindowStyle Hidden" -or
     $startupEvidenceSource -notmatch 'function Start-ChronicleSteamGame' -or
     $startupEvidenceSource -notmatch 'function Disable-ChronicleHarnessGameSound' -or
@@ -1434,6 +1437,8 @@ if ($startupEvidenceSource -notmatch 'function Ensure-ChronicleSteamClientReady'
     $smokeModuleSource -notmatch 'BannerlordSoundRestored' -or
     $smokeModuleSource -notmatch 'SteamClient = \[ordered\]@\{' -or
     $smokeModuleSource -notmatch 'startedByHarness = \[bool\]\$steamStatus\.startedByHarness' -or
+    $smokeModuleSource -notmatch 'loginState = \[ordered\]@\{' -or
+    $smokeModuleSource -notmatch 'eventUtc = \[string\]\$steamStatus\.loginState\.EventUtc' -or
     $smokeModuleSource -notmatch 'SteamProcessCount = \[int\]\$steamStatus\.readiness\.SteamProcessCount' -or
     $smokeModuleSource -notmatch 'WebHelperStableSeconds = \[double\]\$steamStatus\.readiness\.WebHelperStableSeconds' -or
     $smokeModuleSource.IndexOf('Ensure-ChronicleSteamClientReady', [StringComparison]::Ordinal) -gt $smokeModuleSource.IndexOf('Start-ChronicleSteamGame -FilePath $gameExe', [StringComparison]::Ordinal)) {

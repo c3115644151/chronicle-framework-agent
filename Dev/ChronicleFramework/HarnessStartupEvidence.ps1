@@ -230,12 +230,14 @@ function Get-ChronicleSteamClientReadiness {
         [Parameter(Mandatory)][int]$SteamProcessCount,
         [Parameter(Mandatory)][int]$WebHelperProcessCount,
         [Parameter(Mandatory)][double]$WebHelperStableSeconds,
+        [bool]$SteamLoginReady = $false,
         [ValidateRange(0,60)][double]$RequiredStableSeconds = 5
     )
 
     $reason = if ($SteamProcessCount -le 0) { 'steam-process-missing' }
         elseif ($WebHelperProcessCount -le 0) { 'steam-webhelper-not-started' }
         elseif ($WebHelperStableSeconds -lt $RequiredStableSeconds) { 'steam-webhelper-not-stable' }
+        elseif (-not $SteamLoginReady) { 'steam-user-not-logged-on' }
         else { 'ready' }
     [pscustomobject]@{
         Ready = ($reason -eq 'ready')
@@ -243,8 +245,36 @@ function Get-ChronicleSteamClientReadiness {
         SteamProcessCount = $SteamProcessCount
         WebHelperProcessCount = $WebHelperProcessCount
         WebHelperStableSeconds = [Math]::Round($WebHelperStableSeconds,2)
+        SteamLoginReady = $SteamLoginReady
         RequiredStableSeconds = $RequiredStableSeconds
     }
+}
+
+function Get-ChronicleSteamLoginState {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][AllowEmptyString()][string[]]$Lines,
+        [datetime]$RequireEventAfterUtc = [datetime]::MinValue
+    )
+
+    $latestState = $null
+    foreach ($line in $Lines) {
+        if ($line -notmatch '^\[(?<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s+\[(?<state>Logged On|Logged Off),') { continue }
+        $localTimestamp = [datetime]::MinValue
+        if (-not [datetime]::TryParseExact($Matches.timestamp, 'yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture,
+                [Globalization.DateTimeStyles]::AssumeLocal, [ref]$localTimestamp)) { continue }
+        $latestState = [pscustomobject]@{
+            LoggedOn = ($Matches.state -eq 'Logged On')
+            EventUtc = $localTimestamp.ToUniversalTime()
+        }
+    }
+
+    if ($null -eq $latestState) { return [pscustomobject]@{ Ready = $false; Reason = 'steam-login-state-unavailable'; EventUtc = $null } }
+    if (-not $latestState.LoggedOn) { return [pscustomobject]@{ Ready = $false; Reason = 'steam-user-not-logged-on'; EventUtc = $latestState.EventUtc.ToString('O') } }
+    if ($RequireEventAfterUtc -ne [datetime]::MinValue -and $latestState.EventUtc -lt $RequireEventAfterUtc) {
+        return [pscustomobject]@{ Ready = $false; Reason = 'steam-login-event-predates-current-client-start'; EventUtc = $latestState.EventUtc.ToString('O') }
+    }
+    return [pscustomobject]@{ Ready = $true; Reason = 'steam-user-logged-on'; EventUtc = $latestState.EventUtc.ToString('O') }
 }
 
 function Ensure-ChronicleSteamClientReady {
@@ -262,11 +292,14 @@ function Ensure-ChronicleSteamClientReady {
     }
 
     $startedByHarness = $false
+    $steamStartedUtc = [datetime]::MinValue
     if (@(Get-Process -Name 'steam' -ErrorAction SilentlyContinue).Count -eq 0) {
+        $steamStartedUtc = [DateTime]::UtcNow
         Start-Process -FilePath $steamExe -ArgumentList '-silent' -WorkingDirectory $resolvedSteamRoot -WindowStyle Hidden | Out-Null
         $startedByHarness = $true
     }
 
+    $connectionLogPath = Join-Path $resolvedSteamRoot 'logs\connection_log.txt'
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     $steamProcesses = @()
     $webHelperProcesses = @()
@@ -286,7 +319,9 @@ function Ensure-ChronicleSteamClientReady {
             $webHelperStableSinceUtc = [DateTime]::UtcNow
         }
         $stableSeconds = if ($webHelperStableSinceUtc) { ([DateTime]::UtcNow - $webHelperStableSinceUtc).TotalSeconds } else { 0 }
-        $readiness = Get-ChronicleSteamClientReadiness -SteamProcessCount $steamProcesses.Count -WebHelperProcessCount $webHelperProcesses.Count -WebHelperStableSeconds $stableSeconds -RequiredStableSeconds $RequiredStableSeconds
+        $connectionLines = if (Test-Path -LiteralPath $connectionLogPath -PathType Leaf) { @(Get-Content -LiteralPath $connectionLogPath -Tail 512 -Encoding UTF8) } else { @() }
+        $loginState = Get-ChronicleSteamLoginState -Lines $connectionLines -RequireEventAfterUtc $steamStartedUtc
+        $readiness = Get-ChronicleSteamClientReadiness -SteamProcessCount $steamProcesses.Count -WebHelperProcessCount $webHelperProcesses.Count -WebHelperStableSeconds $stableSeconds -SteamLoginReady $loginState.Ready -RequiredStableSeconds $RequiredStableSeconds
         if ($readiness.Ready) {
             return [ordered]@{
                 available = $true
@@ -294,6 +329,7 @@ function Ensure-ChronicleSteamClientReady {
                 processIds = @($steamProcesses | ForEach-Object { [int]$_.Id })
                 webHelperProcessIds = @($webHelperProcesses | ForEach-Object { [int]$_.Id })
                 readyUtc = [DateTime]::UtcNow.ToString('O')
+                loginState = $loginState
                 readiness = $readiness
             }
         }
@@ -301,7 +337,7 @@ function Ensure-ChronicleSteamClientReady {
     }
 
     $reason = if ($readiness) { [string]$readiness.Reason } else { 'no-readiness-sample' }
-    throw "Steam client did not reach stable local API readiness within $TimeoutSeconds seconds (reason='$reason', steamProcesses=$($steamProcesses.Count), webHelperProcesses=$($webHelperProcesses.Count)). Bannerlord was not launched."
+    throw "Steam client did not reach stable API/login readiness within $TimeoutSeconds seconds (reason='$reason', steamProcesses=$($steamProcesses.Count), webHelperProcesses=$($webHelperProcesses.Count), loginReason='$($loginState.Reason)'). Bannerlord was not launched."
 }
 
 function Start-ChronicleSteamGame {
@@ -344,10 +380,21 @@ function Test-ChronicleSteamClientReadiness {
     $missingSteam = Get-ChronicleSteamClientReadiness -SteamProcessCount 0 -WebHelperProcessCount 0 -WebHelperStableSeconds 0
     $startingClient = Get-ChronicleSteamClientReadiness -SteamProcessCount 1 -WebHelperProcessCount 0 -WebHelperStableSeconds 0
     $warmingHelper = Get-ChronicleSteamClientReadiness -SteamProcessCount 1 -WebHelperProcessCount 1 -WebHelperStableSeconds 4.9
-    $readyClient = Get-ChronicleSteamClientReadiness -SteamProcessCount 1 -WebHelperProcessCount 1 -WebHelperStableSeconds 5
+    $stableButLoggedOut = Get-ChronicleSteamClientReadiness -SteamProcessCount 1 -WebHelperProcessCount 1 -WebHelperStableSeconds 8 -SteamLoginReady $false
+    $readyClient = Get-ChronicleSteamClientReadiness -SteamProcessCount 1 -WebHelperProcessCount 1 -WebHelperStableSeconds 5 -SteamLoginReady $true
+    $requireAfterUtc = [datetime]::SpecifyKind([datetime]::ParseExact('2026-11-03 05:19:42', 'yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture), [DateTimeKind]::Local).ToUniversalTime()
+    $loggedOnLines = @('[2026-11-03 05:19:44] [Connecting, 4, 7] Logging on', '[2026-11-03 05:19:47] [Logged On, 4, 7] processing complete')
+    $loggedOffLines = @('[2026-11-03 05:19:44] [Logged On, 4, 7] processing complete', '[2026-11-03 05:19:48] [Logged Off, 4, 0] connection closed')
+    $loggedOn = Get-ChronicleSteamLoginState -Lines $loggedOnLines -RequireEventAfterUtc $requireAfterUtc
+    $predatesStart = Get-ChronicleSteamLoginState -Lines $loggedOnLines -RequireEventAfterUtc ($requireAfterUtc.AddMinutes(1))
+    $loggedOff = Get-ChronicleSteamLoginState -Lines $loggedOffLines
     return (-not $missingSteam.Ready -and $missingSteam.Reason -eq 'steam-process-missing' -and
         -not $startingClient.Ready -and $startingClient.Reason -eq 'steam-webhelper-not-started' -and
         -not $warmingHelper.Ready -and $warmingHelper.Reason -eq 'steam-webhelper-not-stable' -and
+        -not $stableButLoggedOut.Ready -and $stableButLoggedOut.Reason -eq 'steam-user-not-logged-on' -and
+        $loggedOn.Ready -and $loggedOn.Reason -eq 'steam-user-logged-on' -and
+        -not $predatesStart.Ready -and $predatesStart.Reason -eq 'steam-login-event-predates-current-client-start' -and
+        -not $loggedOff.Ready -and $loggedOff.Reason -eq 'steam-user-not-logged-on' -and
         $readyClient.Ready -and $readyClient.Reason -eq 'ready')
 }
 
