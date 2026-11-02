@@ -943,7 +943,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     var valueType = argumentName switch
                     {
                         "ConfirmPartySizeWarning" => "boolean",
-                        "Days" or "Count" or "VolunteerSlot" or "Amount" => "integer",
+                        "Days" or "Count" or "VolunteerSlot" or "Amount" or "OptionIndex" => "integer",
                         _ => "string"
                     };
                     var argumentSchema = new JsonObject { ["type"] = valueType };

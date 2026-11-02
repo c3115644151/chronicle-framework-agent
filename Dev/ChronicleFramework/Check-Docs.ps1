@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.500'
+$contractVersion = '7.501'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -122,6 +122,10 @@ if ($agentHostRecruitmentLoopSource -notmatch 'AgentHostProviderDecisionRecovery
     $agentHostDecisionCycleSource -notmatch 'The previous model response selected an unavailable action or control' -or
     $agentHostRecruitmentLoopSource -notmatch 'provider-control-unavailable') {
     throw 'The EYC PartySize route must give one bounded current-catalog recovery when the model selects an unavailable action/control, and verify that no Native action was sent.'
+}
+if ($agentHostProviderSource -notmatch '"Days" or "Count" or "VolunteerSlot" or "Amount" or "OptionIndex" => "integer"' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'provider-map-incident-option-index-is-integer-enum-not-string') {
+    throw 'The Native Map Incident model schema must represent current option indices as integer enums and cover that shape in provider contract tests.'
 }
 if ($agentHostCampaignLoopSource -notmatch 'goalValid=' -or
     $agentHostCampaignLoopSource -notmatch 'missingApproved=\[' -or

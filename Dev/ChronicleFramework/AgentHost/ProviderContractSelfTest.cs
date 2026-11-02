@@ -290,6 +290,22 @@ internal static class ProviderContractSelfTest
             results.Add(new { scenario = "provider-decision-schema-uses-strict-compatible-root-wrapper", passed = true });
         }
 
+        using (var mapIncidentRequest = JsonDocument.Parse("""
+        {"goal":"Resolve the current Native incident.","observation":{"state":{"context":{"mapIncident":{"active":true}}}},"allowedActions":[{"action":"incidentSelect","arguments":["OptionIndex"],"argumentValues":{"OptionIndex":[0,1,2]}}],"allowedControls":[]}
+        """))
+        using (var numericIncidentDecision = JsonDocument.Parse("{\"action\":\"incidentSelect\",\"arguments\":{\"OptionIndex\":1}}"))
+        {
+            var schema = OllamaNativeProvider.BuildDecisionSchema(mapIncidentRequest.RootElement);
+            var optionIndexSchema = schema["properties"]?["decision"]?["anyOf"]?[0]?["properties"]?["arguments"]?["properties"]?["OptionIndex"] as JsonObject;
+            var normalized = OllamaNativeProvider.NormalizeDecision(numericIncidentDecision.RootElement, mapIncidentRequest.RootElement);
+            if (optionIndexSchema?["type"]?.GetValue<string>() != "integer" ||
+                optionIndexSchema["enum"] is not JsonArray optionIndexEnum || optionIndexEnum.Count != 3 ||
+                optionIndexEnum[0]?.GetValue<int>() != 0 || optionIndexEnum[1]?.GetValue<int>() != 1 || optionIndexEnum[2]?.GetValue<int>() != 2 ||
+                normalized["arguments"]?["OptionIndex"]?.GetValue<int>() != 1)
+                throw new AgentHostException("provider-map-incident-index-schema-invalid", "The current Native incident option index must be a bounded integer enum in the model's structured-output schema and normalization path.");
+            results.Add(new { scenario = "provider-map-incident-option-index-is-integer-enum-not-string", passed = true });
+        }
+
         using (var oneChoiceArgumentRequest = JsonDocument.Parse("""
         {"goal":"Answer the current Native inquiry.","observation":{"state":{"context":{"inquiryOpen":true}}},"allowedActions":[{"action":"respondInquiry","arguments":["choice"],"argumentValues":{"choice":["affirmative","negative"]}}],"allowedControls":[]}
         """))
