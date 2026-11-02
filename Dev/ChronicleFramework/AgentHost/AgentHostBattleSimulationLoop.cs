@@ -56,6 +56,7 @@ internal static class AgentHostBattleSimulationLoop
         var mapConversationContinuationCount = 0;
         var battleWasStarted = false;
         var nativeEncounterLeaveIssued = false;
+        string? nativeEncounterLeaveOptionId = null;
         var nativeEscapeAccepted = false;
         var nativeEscapeCompleted = false;
         var captivityObserved = false;
@@ -329,7 +330,7 @@ internal static class AgentHostBattleSimulationLoop
                         {
                             ["stage"] = "native-encounter-left-without-battlesimulation",
                             ["nativeAction"] = "menuSelect",
-                            ["optionId"] = "leave",
+                            ["optionId"] = nativeEncounterLeaveOptionId,
                             ["battleSimulationStarted"] = false,
                             ["campaignDayAfter"] = native["campaignDay"]?.DeepClone(),
                             ["timeControlModeAfter"] = native["timeControlMode"]?.DeepClone(),
@@ -549,12 +550,11 @@ internal static class AgentHostBattleSimulationLoop
                 {
                     battleWasStarted = true;
                 }
-                else if (completed && action == "menuSelect" &&
-                         string.Equals(ReadString((state["context"] as JsonObject), "menuId"), "encounter", StringComparison.Ordinal) &&
-                         string.Equals(ReadString(arguments, "menuId"), "encounter", StringComparison.Ordinal) &&
-                         string.Equals(ReadString(arguments, "optionId"), "leave", StringComparison.Ordinal) && !battleWasStarted)
+                else if (completed && action == "menuSelect" && !battleWasStarted &&
+                         IsNativeEncounterLeaveSelection(state, arguments!))
                 {
                     nativeEncounterLeaveIssued = true;
+                    nativeEncounterLeaveOptionId = ReadString(arguments, "optionId");
                 }
                 else if (completed && action == "menuSelect" &&
                          string.Equals(ReadString((state["context"] as JsonObject), "menuId"), "try_to_get_away", StringComparison.Ordinal))
@@ -714,6 +714,16 @@ internal static class AgentHostBattleSimulationLoop
                 if (!validBandit)
                 {
                     if (!mapPartyTargetsQueried) Add(catalog, "mapPartyTargets");
+                    return catalog;
+                }
+                if (encounterMenuId == "join_encounter")
+                {
+                    var joinEncounterOptionIds = new[]
+                    {
+                        "join_encounter_help_attackers", "join_encounter_help_defenders",
+                        "join_encounter_abandon", "join_encounter_leave"
+                    }.Where(optionId => CurrentEnabledMenuOption(state, optionId));
+                    AddNativeMenuSelectAction(catalog, encounterMenuId, joinEncounterOptionIds);
                     return catalog;
                 }
                 var conversation = context["conversation"] as JsonObject;
@@ -924,6 +934,18 @@ internal static class AgentHostBattleSimulationLoop
                         !IsSupportedCaptivityRansomOption(optionId) || !CurrentEnabledMenuOption(state, optionId!))
                     { rejection = "Only a currently enabled Native Accept/Reject option in an observed MainHero ransom offer may be selected."; return false; }
                 }
+                else if (currentMenuId == "join_encounter")
+                {
+                    var selectedOptionId = ReadString(arguments, "optionId");
+                    var allowedJoinOption = selectedOptionId is "join_encounter_help_attackers" or "join_encounter_help_defenders" or
+                        "join_encounter_abandon" or "join_encounter_leave";
+                    if (currentMenuId != ReadString(arguments, "menuId") || !allowedJoinOption ||
+                        !CurrentEnabledMenuOption(state, selectedOptionId!))
+                    { rejection = "A Native join-encounter choice must match a currently enabled Help, Abandon, or Leave menu option."; return false; }
+                    var encounteredId = ReadString(state["context"] as JsonObject, "encounteredPartyId");
+                    if (!observedTargets.OfType<JsonObject>().Any(x => ReadString(x, "id") == encounteredId && ReadString(x, "type") == "bandit" && ReadBoolean(x, "hostile")))
+                    { rejection = "The join-encounter choice must belong to a currently observed hostile bandit interruption."; return false; }
+                }
                 else
                 {
                     var selectedOptionId = ReadString(arguments, "optionId");
@@ -1121,6 +1143,28 @@ internal static class AgentHostBattleSimulationLoop
             rescanAction != "mapPartyTargets")
             throw new AgentHostException("battle-loop-self-test-native-pursuit-loss-does-not-rescan", "When Native EngageParty loses visibility and settles into waiting Hold, the Host must rescan current visible targets instead of offering an idle observeAgain control.");
         results.Add(new { scenario = "battle-loop-native-pursuit-loss-rescans-visible-targets-without-idle-wait", passed = true });
+
+        var joinEncounter = ParseState("MapState", "join_encounter", true, null, null);
+        joinEncounter["state"]!["context"]!["encounteredPartyId"] = "bandit-1";
+        joinEncounter["state"]!["availableMenuOptions"] = new JsonArray(
+            new JsonObject { ["id"] = "join_encounter_help_attackers", ["enabled"] = true, ["available"] = true },
+            new JsonObject { ["id"] = "join_encounter_help_defenders", ["enabled"] = false, ["available"] = false },
+            new JsonObject { ["id"] = "join_encounter_abandon", ["enabled"] = false, ["available"] = false },
+            new JsonObject { ["id"] = "join_encounter_leave", ["enabled"] = true, ["available"] = true });
+        var joinEncounterCatalog = BuildActionCatalog(joinEncounter["state"]!.AsObject(), candidates, "bandit-1", false, true);
+        var joinEncounterOptionIds = joinEncounterCatalog.SingleOrDefault()? ["argumentValues"]? ["OptionId"] as JsonArray;
+        var helpBanditSide = new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "join_encounter", ["OptionId"] = "join_encounter_help_attackers" } };
+        var leaveJoinEncounter = new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "join_encounter", ["OptionId"] = "join_encounter_leave" } };
+        var disabledJoinEncounterOption = new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "join_encounter", ["OptionId"] = "join_encounter_help_defenders" } };
+        var joinHelpResolves = TryResolveDecision(helpBanditSide, joinEncounterCatalog, new JsonArray(), joinEncounter["state"]!.AsObject(), candidates, "bandit-1", out _, out _, out _, out _);
+        var joinLeaveResolves = TryResolveDecision(leaveJoinEncounter, joinEncounterCatalog, new JsonArray(), joinEncounter["state"]!.AsObject(), candidates, "bandit-1", out _, out _, out _, out _);
+        var disabledJoinOptionResolves = TryResolveDecision(disabledJoinEncounterOption, joinEncounterCatalog, new JsonArray(), joinEncounter["state"]!.AsObject(), candidates, "bandit-1", out _, out _, out _, out _);
+        var leaveSelectionRecognized = IsNativeEncounterLeaveSelection(joinEncounter["state"]!.AsObject(), new JsonObject { ["menuId"] = "join_encounter", ["optionId"] = "join_encounter_leave" });
+        var helpSelectionMisrecognizedAsLeave = IsNativeEncounterLeaveSelection(joinEncounter["state"]!.AsObject(), new JsonObject { ["menuId"] = "join_encounter", ["optionId"] = "join_encounter_help_attackers" });
+        if (joinEncounterCatalog.Count != 1 || joinEncounterOptionIds?.Count != 2 || !joinHelpResolves || !joinLeaveResolves ||
+            disabledJoinOptionResolves || !leaveSelectionRecognized || helpSelectionMisrecognizedAsLeave)
+            throw new AgentHostException("battle-loop-self-test-join-encounter-native-options-not-bounded", $"For an observed hostile Bandit interrupt, list only current enabled Native join/leave options and recognize the Native join_encounter_leave option for no-battle return verification. catalog={joinEncounterCatalog.ToJsonString()}; help={joinHelpResolves}; leave={joinLeaveResolves}; disabled={disabledJoinOptionResolves}; leaveRecognized={leaveSelectionRecognized}; helpAsLeave={helpSelectionMisrecognizedAsLeave}.");
+        results.Add(new { scenario = "battle-loop-observed-bandit-join-encounter-exposes-current-native-help-or-leave-and-verifies-leave-choice", passed = true });
 
         var encounter = ParseState("MapState", "encounter", true, null, null);
         encounter["state"]!["context"]!["encounteredPartyId"] = "bandit-1";
@@ -1742,6 +1786,20 @@ internal static class AgentHostBattleSimulationLoop
         IsVerifiedMapTerminalState(state) && !IsPlayerCaptive(state) && ReadInt(state["party"] as JsonObject, "members", 0) > 0;
 
     private static bool IsVerifiedMapTerminalAfterNativeEncounterLeave(JsonObject state) => IsVerifiedMapTerminalState(state);
+
+    private static bool IsNativeEncounterLeaveSelection(JsonObject state, JsonObject arguments)
+    {
+        var menuId = ReadString(state["context"] as JsonObject, "menuId");
+        var expectedOptionId = menuId switch
+        {
+            "encounter" => "leave",
+            "join_encounter" => "join_encounter_leave",
+            _ => null
+        };
+        return expectedOptionId is not null &&
+               string.Equals(ReadString(arguments, "menuId"), menuId, StringComparison.Ordinal) &&
+               string.Equals(ReadString(arguments, "optionId"), expectedOptionId, StringComparison.Ordinal);
+    }
 
     private static bool IsVerifiedMapTerminalState(JsonObject state)
     {

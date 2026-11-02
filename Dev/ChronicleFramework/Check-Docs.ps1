@@ -593,6 +593,8 @@ if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Prefl
     $agentHostBattleSimulationLoopSource -notmatch 'members or prisoners' -or
     $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-self-test-loot-type-alias-not-rejected' -or
     $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-self-test-native-leave-not-bounded' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-self-test-join-encounter-native-options-not-bounded' -or
+    $agentHostDecisionCycleSource -notmatch 'If Native menuId is join_encounter' -or
     $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-self-test-native-leave-postcondition-not-verified' -or
     $agentHostBattleSimulationLoopSource -notmatch 'IsVerifiedMapTerminalAfterNativeEncounterLeave' -or
     $agentHostBattleSimulationLoopSource -notmatch 'native-encounter-left-no-battle' -or
