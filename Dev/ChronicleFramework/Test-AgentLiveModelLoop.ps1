@@ -466,7 +466,18 @@ try {
         $goal = 'Autonomously complete the exact currently active original StoryMode Establish Your Clan quest. Use its current Journal values to choose among Gold, dynamic PartySize, Renown and Companion targets; execute only the current Native routes, re-read Journal after each subgoal, and stop only after Native original quest history confirms completion. Do not inject progress, use preplanned action sequences, or hide time changes inside actions.'
         $maxDecisions = 160
         $maxElapsedSeconds = $HostMaxElapsedSeconds
-        $allowedActions = 'mapSettlementTargets,move,menuSelect,talkToSettlementHero,dialogueSelect,dialogueContinue,questDetails,tradeOptions,trade,tradeConfirm,tradeCancel,tradeCancelChanges,barterOptions,barterAutoBalance,barterOffer,barterCancel,inventoryOpen,heroEquipmentOptions,inventoryCancel,partyUpgradeOptions,upgradeTroop,mapPartyTargets,pursue,battleSkip,battleFinish,partyTakeAll,partyScreenDone,inventoryTakeAll,inventoryDone,recruitOptions,recruit,missionSceneAgents,missionNavigateToAgent,missionInteract,missionLeave'
+        $agentHostDllForCatalog = Join-Path $PSScriptRoot 'AgentHost\bin\Release\net8.0\ChronicleAgentHost.dll'
+        if (-not (Test-Path -LiteralPath $agentHostDllForCatalog -PathType Leaf)) { throw 'The current Agent Host action catalog is missing; no game was launched.' }
+        $catalogOutput = & dotnet $agentHostDllForCatalog --campaign-action-catalog 2>&1 | Out-String
+        $catalogExitCode = $LASTEXITCODE
+        if ($catalogExitCode -ne 0) { throw "The current Agent Host action catalog could not be read (exit=$catalogExitCode); no game was launched." }
+        try { $catalog = $catalogOutput | ConvertFrom-Json }
+        catch { throw 'The current Agent Host action catalog returned invalid JSON; no game was launched.' }
+        $catalogActions = @($catalog.actions | ForEach-Object { [string]$_ })
+        if ($catalogActions.Count -eq 0 -or @($catalogActions | Sort-Object -Unique).Count -ne $catalogActions.Count) {
+            throw 'The current Agent Host action catalog is empty or contains duplicate names; no game was launched.'
+        }
+        $allowedActions = [string]::Join(',', $catalogActions)
         Set-LiveModelProviderTimeout 360
         $env:CHRONICLE_LLM_MAX_TOKENS = '1024'
     }

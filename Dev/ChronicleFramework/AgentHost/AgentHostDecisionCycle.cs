@@ -295,6 +295,9 @@ internal static class AgentHostDecisionCycle
         if (ReadString(feedback, "kind") == "safe-stop-rejected-with-listed-actions")
             prompt += " RECOVERY DIRECTIVE: The previous stop was rejected before any Native action because the current Native catalog still contains safe actions. Follow the exact required next step using only the current allowedActions; do not return stop again unless the current catalog is empty. " +
                 (ReadString(feedback, "requiredNextStep") ?? "Choose one listed Native action; stop is allowed only when no action is currently listed.");
+        if (ReadString(feedback, "kind") == "decision-rejected-before-native")
+            prompt += " RECOVERY DIRECTIVE: The previous model response selected an unavailable action or control and was rejected before Native execution. Follow the exact requiredNextStep, use only the currently listed action/control catalog, and do not repeat the rejected response. " +
+                (ReadString(feedback, "requiredNextStep") ?? "Choose exactly one currently listed action or control.");
         return DecideAsync(provider, request, prompt, cancellationToken);
     }
 

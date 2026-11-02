@@ -450,7 +450,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         results.Add(new { scenario = "establish-clan-recruitment-native-backstreet-exit-recovery-resumes-on-town-menu", passed = true });
 
         var villagersInNeedClient = new FakeVillagersInNeedRecruitmentClient();
-        var villagersInNeedProvider = new FakeVillagersInNeedDecisionProvider(stopWhileMovingOnce: true, returnInvalidWaitOnce: true);
+        var villagersInNeedProvider = new FakeVillagersInNeedDecisionProvider(stopWhileMovingOnce: true, returnInvalidWaitOnce: true, rejectUnavailableControlOnce: true);
         using var villagersInNeedRequest = JsonDocument.Parse("{\"runId\":\"establish-clan-villagers-in-need-selftest\",\"goal\":\"Raise the active Journal PartySize target.\",\"maxDecisions\":16,\"maxElapsedSeconds\":30}");
         var villagersInNeedRun = await RunAsync(villagersInNeedRequest.RootElement, villagersInNeedClient, villagersInNeedClient, villagersInNeedClient,
             villagersInNeedProvider, CancellationToken.None);
@@ -461,6 +461,10 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             ReadInt(villagersInNeedRun, "actionsExecuted", 0) != 11 || villagersInNeedClient.MapPartyTargetPollCount != 2 || villagersInNeedClient.StealthMissionStarted ||
             !villagersInNeedProvider.PrematureMoveStopRecovered ||
             !villagersInNeedProvider.InvalidWaitRejected ||
+            !villagersInNeedProvider.ProviderControlUnavailableRecovered ||
+            !((villagersInNeedRun["trace"] as JsonArray)?.OfType<JsonObject>().Any(step =>
+                ReadString(step["decisionFeedback"] as JsonObject, "kind") == "decision-rejected-before-native" &&
+                ReadString(step["decisionFeedback"] as JsonObject, "code") == "provider-control-unavailable") ?? false) ||
             villagersInNeedProvider.DialogueContinueDecisions != 0 ||
             automaticVillagerContinueCount != 2 ||
             !villagersInNeedClient.Actions.SequenceEqual(["mapSettlementTargets", "move", "dialogueSelect", "dialogueContinue", "dialogueSelect", "dialogueContinue", "dialogueSelect", "recruitOptions", "recruit"], StringComparer.Ordinal))
@@ -732,7 +736,17 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                     ["iteration"] = decisions + 1
                 };
                 var providerStarted = Stopwatch.GetTimestamp();
-                var decision = await AgentHostDecisionCycle.DecideEstablishClanRecruitmentAsync(provider, modelRequest, elapsed.Token);
+                var decision = await AgentHostProviderDecisionRecovery.DecideWithSingleRetryAsync(
+                    modelRequest,
+                    token => AgentHostDecisionCycle.DecideEstablishClanRecruitmentAsync(provider, modelRequest, token),
+                    errorCode =>
+                    {
+                        decisions++;
+                        var recoveryFeedback = AgentHostProviderDecisionRecovery.BuildFeedback(errorCode, catalog, controls);
+                        trace.Add(BuildStep(decisions, observation, null, null, recoveryFeedback, state,
+                            DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture)));
+                    },
+                    elapsed.Token);
                 decisions++;
                 promptTokens += decision.PromptTokens ?? 0;
                 completionTokens += decision.CompletionTokens ?? 0;
@@ -1979,14 +1993,18 @@ internal static class AgentHostEstablishClanRecruitmentLoop
     {
         private bool _stopWhileMovingOnce;
         private bool _returnInvalidWaitOnce;
+        private bool _rejectUnavailableControlOnce;
+        private bool _unavailableControlRejected;
         internal int CallCount { get; private set; }
         internal bool PrematureMoveStopRecovered { get; private set; }
         internal bool InvalidWaitRejected { get; private set; }
+        internal bool ProviderControlUnavailableRecovered { get; private set; }
         internal int DialogueContinueDecisions { get; private set; }
-        internal FakeVillagersInNeedDecisionProvider(bool stopWhileMovingOnce = false, bool returnInvalidWaitOnce = false)
+        internal FakeVillagersInNeedDecisionProvider(bool stopWhileMovingOnce = false, bool returnInvalidWaitOnce = false, bool rejectUnavailableControlOnce = false)
         {
             _stopWhileMovingOnce = stopWhileMovingOnce;
             _returnInvalidWaitOnce = returnInvalidWaitOnce;
+            _rejectUnavailableControlOnce = rejectUnavailableControlOnce;
         }
         public string ModelId => "deterministic-villagers-in-need-recruitment-selftest";
         public string ConfigurationSource => "harness-fake-provider";
@@ -2034,6 +2052,21 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                     if (message?.Contains("requires waitSeconds=10 exactly", StringComparison.Ordinal) != true)
                         throw new AgentHostException("villagers-in-need-invalid-wait-feedback-unclear", "The Host must explain the exact ten-second wait requirement after rejecting a model response outside the control schema.");
                     InvalidWaitRejected = true;
+                }
+                if (_rejectUnavailableControlOnce && !_unavailableControlRejected && InvalidWaitRejected)
+                {
+                    _unavailableControlRejected = true;
+                    CallCount++;
+                    throw new AgentHostException("provider-control-unavailable", "Synthetic response selected a control that is not listed while Native movement is active.");
+                }
+                if (feedback.ValueKind == JsonValueKind.Object && ReadString(feedback, "kind") == "decision-rejected-before-native")
+                {
+                    var allowedControls = request.GetProperty("decisionFeedback").GetProperty("allowedControls");
+                    if (ReadString(feedback, "code") != "provider-control-unavailable" ||
+                        !allowedControls.EnumerateArray().Any(control => control.GetString() == "observeAgain") ||
+                        !systemPrompt.Contains("RECOVERY DIRECTIVE", StringComparison.Ordinal))
+                        throw new AgentHostException("villagers-in-need-provider-control-recovery-unclear", "The retry must receive the exact unavailable-control error, the current observeAgain catalog, and recovery instructions before any Native action.");
+                    ProviderControlUnavailableRecovered = true;
                 }
                 if (_returnInvalidWaitOnce || !PrematureMoveStopRecovered)
                     throw new AgentHostException("villagers-in-need-invalid-wait-selftest-sequence", "The fake provider must first observe Host rejection of both premature stop and an out-of-contract wait before accepting the ten-second wait.");

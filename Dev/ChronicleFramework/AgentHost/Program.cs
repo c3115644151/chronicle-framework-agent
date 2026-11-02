@@ -56,6 +56,15 @@ internal static class Program
                 return 0;
             }
 
+            if (args.Length == 1 && string.Equals(args[0], "--campaign-action-catalog", StringComparison.Ordinal))
+            {
+                Console.Out.WriteLine(JsonSerializer.Serialize(new
+                {
+                    actions = AgentHostCampaignLoop.AllSupportedActions.OrderBy(action => action, StringComparer.Ordinal).ToArray()
+                }, OutputJsonOptions));
+                return 0;
+            }
+
             if (args.Length == 1 && string.Equals(args[0], "--version", StringComparison.Ordinal))
             {
                 Console.Out.WriteLine(JsonSerializer.Serialize(GetPackageHealth(), OutputJsonOptions));
