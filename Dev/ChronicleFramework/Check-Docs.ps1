@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.502'
+$contractVersion = '7.505'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -73,6 +73,7 @@ $agentOpenAiProviderTestSource = Get-Content (Join-Path $harnessRoot 'Test-Agent
 $agentEvaluationLiveModelSupplySource = Get-Content (Join-Path $harnessRoot 'Test-AgentEvaluationLiveModelSupply.ps1') -Raw -Encoding UTF8
 $agentHostCampaignLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostCampaignLoop.cs') -Raw -Encoding UTF8
 $agentHostProgramSource = Get-Content (Join-Path $harnessRoot 'AgentHost\Program.cs') -Raw -Encoding UTF8
+$agentHostRuntimeProgressLogSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostRuntimeProgressLog.cs') -Raw -Encoding UTF8
 $agentLiveModelLoopSource = Get-Content (Join-Path $harnessRoot 'Test-AgentLiveModelLoop.ps1') -Raw -Encoding UTF8
 $agentHostRecruitmentLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostEstablishClanRecruitmentLoop.cs') -Raw -Encoding UTF8
 $agentHostTrainingIssueLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostEstablishClanTrainingIssueLoop.cs') -Raw -Encoding UTF8
@@ -88,6 +89,7 @@ $agentHostHarnessProgressTraceSource = Get-Content (Join-Path $harnessRoot 'Agen
 $agentHostProviderContractSelfTestSource = Get-Content (Join-Path $harnessRoot 'AgentHost\ProviderContractSelfTest.cs') -Raw -Encoding UTF8
 $agentHostProviderSource = Get-Content (Join-Path $harnessRoot 'AgentHost\OllamaNativeProvider.cs') -Raw -Encoding UTF8
 $agentHostRuntimeControllerSource = Get-Content (Join-Path $harnessRoot 'AgentHostRuntimeController.cs') -Raw -Encoding UTF8
+$providerSettingsSource = Get-Content (Join-Path $harnessRoot 'AgentProviderSettings.cs') -Raw -Encoding UTF8
 $agentHostLifecycleReceiptSource = Get-Content (Join-Path $harnessRoot 'AgentHostLifecycleReceipt.cs') -Raw -Encoding UTF8
 $agentHostActionProfileNames = @('ApprovedActions','BattleSimulationActions','GoldSaleActions','RecruitmentActions','CompanionHiringActions','TrainingIssueActions')
 $agentHostSupportedActions = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
@@ -132,6 +134,23 @@ if ($agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-locali
     $agentHostTrainingIssueLoopSource -notmatch 'localizedDirectOption' -or
     $agentHostTrainingIssueLoopSource -notmatch 'currentTrainingIssueGiverConversation') {
     throw 'The retainer-training Native direct offer must use the current marked giver and clickable option ID, while tolerating a localized placeholder TextObject ID.'
+}
+if ($agentHostHarnessProgressTraceSource -notmatch 'AgentHostRuntimeProgressLog\.RecordDecision' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'AgentHostRuntimeProgressLog\.RecordObjectiveSubflowResult' -or
+    $agentHostProgramSource -notmatch 'AgentHostRuntimeProgressLog\.RecordRunStarted' -or
+    $agentHostProgramSource -notmatch 'AgentHostRuntimeProgressLog\.RecordRunSummary' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'MaximumRunLogBytes' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'MaximumRetainedRunLogs' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'WriteUsageSignal\(result, configuredRunCostLimitCny\)' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'RunContractSelfTests' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'promptsLogged.*false' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'credentialsLogged.*false' -or
+    $agentHostRuntimeControllerSource -notmatch 'AgentHostUsageSignalPrefix' -or
+    $agentHostRuntimeControllerSource -notmatch 'BuildProviderUsageSummary' -or
+    $agentHostRuntimeControllerSource -notmatch 'UpdateProviderUsage' -or
+    $providerSettingsSource -notmatch 'AgentRuns' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'runtime-progress-log-preserves-cost-usage-without-prompts-responses-or-argument-values') {
+    throw 'Normal MCM runs must record bounded per-decision token/cache/cost diagnostics without prompts or credentials, expose current usage to ViewAgentStatus, and retain an owned rotating local log.'
 }
 if ($agentHostCampaignLoopSource -notmatch 'goalValid=' -or
     $agentHostCampaignLoopSource -notmatch 'missingApproved=\[' -or
@@ -839,7 +858,6 @@ if ($projectFile -notmatch '<Content Remove="TestResults/\*\*/\*"' -or $projectF
     throw 'Harness TestResults and AgentHost runtime outputs must be excluded from Mod project candidate assembly search paths so packaged runtimes cannot shadow game references.'
 }
 if ($projectFile -notmatch 'Reference Include="SandBox\.View"' -or $projectFile -notmatch 'Modules\\SandBox\\bin\\Win64_Shipping_Client\\SandBox\.View\.dll' -or $projectFile -notmatch 'Reference Include="TaleWorlds\.Core\.ViewModelCollection"' -or $projectFile -notmatch 'TaleWorlds\.Core\.ViewModelCollection\.dll' -or $projectFile -notmatch 'Reference Include="TaleWorlds\.InputSystem"' -or $projectFile -notmatch 'TaleWorlds\.InputSystem\.dll') { throw 'Native map inventory/menu and RecruitmentVM lifecycle support must bind to the installed 1.4.8 View, ViewModel, and InputSystem assemblies.' }
-$providerSettingsSource = Get-Content (Join-Path $harnessRoot 'AgentProviderSettings.cs') -Raw -Encoding UTF8
 $providerValidatorSource = Get-Content (Join-Path $harnessRoot 'AgentProviderConfigurationValidator.cs') -Raw -Encoding UTF8
 $agentHostProjectSource = Get-Content (Join-Path $harnessRoot 'AgentHost\ChronicleAgentHost.csproj') -Raw -Encoding UTF8
 if ($agentHostProjectSource -notmatch '<PackageReference Include="Microsoft\.ML\.Tokenizers" Version="\[2\.0\.1\]"' -or

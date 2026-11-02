@@ -353,8 +353,22 @@ internal static class AgentHostDecisionCycle
         CancellationToken cancellationToken)
     {
         using var document = JsonDocument.Parse(request.ToJsonString());
-        var result = await provider.DecideAsync(document.RootElement, systemPrompt, cancellationToken);
-        AgentHostHarnessProgressTrace.RecordDecision(document.RootElement, result);
-        return result;
+        try
+        {
+            var result = await provider.DecideAsync(document.RootElement, systemPrompt, cancellationToken);
+            AgentHostHarnessProgressTrace.RecordDecision(document.RootElement, result,
+                provider is OllamaNativeProvider costMeter ? costMeter.MaxEstimatedRunCostCny : null);
+            return result;
+        }
+        catch (AgentHostException exception)
+        {
+            AgentHostRuntimeProgressLog.RecordProviderFailure(document.RootElement, exception.Code);
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            AgentHostRuntimeProgressLog.RecordProviderFailure(document.RootElement, "provider-cancelled");
+            throw;
+        }
     }
 }

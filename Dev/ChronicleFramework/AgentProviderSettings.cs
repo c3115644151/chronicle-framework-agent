@@ -114,7 +114,7 @@ internal sealed class ChronicleAgentProviderSettings : AttributeGlobalSettings<C
         set { }
     }
 
-    [SettingPropertyButton("查看Agent状态", Order = 3, RequireRestart = false, HintText = "查看自主Agent当前状态；状态变化时也会显示游戏内通知。", Content = "查看")]
+    [SettingPropertyButton("查看Agent状态", Order = 3, RequireRestart = false, HintText = "查看自主Agent状态、Token/缓存统计和估算费用。逐次脱敏日志保存在 Documents\\Mount and Blade II Bannerlord\\Configs\\ModLogs\\AgentRuns。估算不是服务商最终账单。", Content = "查看")]
     [SettingPropertyGroup("自主Agent", GroupOrder = 1)]
     public Action ViewAgentStatus
     {

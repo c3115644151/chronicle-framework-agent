@@ -9,8 +9,9 @@ internal static class AgentHostHarnessProgressTrace
     private const long MaximumBytes = 16L * 1024 * 1024;
     private static readonly object WriteGate = new();
 
-    internal static void RecordDecision(JsonElement request, ProviderDecisionResult result)
+    internal static void RecordDecision(JsonElement request, ProviderDecisionResult result, double? configuredRunCostLimitCny = null)
     {
+        AgentHostRuntimeProgressLog.RecordDecision(request, result, configuredRunCostLimitCny);
         var harnessMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
         if (!string.Equals(harnessMode, "visual-capture", StringComparison.Ordinal) &&
             !string.Equals(harnessMode, "agent-host-lifecycle-test", StringComparison.Ordinal)) return;
@@ -152,6 +153,7 @@ internal static class AgentHostHarnessProgressTrace
 
     internal static void RecordObjectiveSubflowResult(string objectiveId, JsonObject result)
     {
+        AgentHostRuntimeProgressLog.RecordObjectiveSubflowResult(objectiveId, result);
         var harnessMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
         if (!string.Equals(harnessMode, "visual-capture", StringComparison.Ordinal) &&
             !string.Equals(harnessMode, "agent-host-lifecycle-test", StringComparison.Ordinal)) return;

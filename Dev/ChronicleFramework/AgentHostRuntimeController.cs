@@ -14,6 +14,9 @@ namespace ChronicleFramework;
 
 internal static class ChronicleAgentRuntimeController
 {
+    private const string AgentHostUsageSignalPrefix = "CHRONICLE_AGENT_HOST_USAGE|";
+    private static readonly object ProviderUsageLock = new();
+
     private enum RuntimeState
     {
         Stopped,
@@ -42,7 +45,17 @@ internal static class ChronicleAgentRuntimeController
     private static bool _hostExitObservedLogged;
     private static DateTime _hostReadyUtc;
     private static string _runId = string.Empty;
+    private static string _lastRunId = string.Empty;
     private static string _forcedFailureDetail = string.Empty;
+    private static int _providerDecisionCount;
+    private static long _providerPromptTokens;
+    private static long _providerCompletionTokens;
+    private static long _providerCacheHitTokens;
+    private static long _providerCacheMissTokens;
+    private static double _providerEstimatedCostCny;
+    private static double _providerReservedCostUpperCny;
+    private static double? _providerRunCostLimitCny;
+    private static bool _providerCostEstimateKnown = true;
     private static TaleWorlds.CampaignSystem.Campaign _ownedCampaign;
     private static bool _harnessStartProbeActive;
     private static bool _harnessDuplicateStartProbed;
@@ -110,13 +123,30 @@ internal static class ChronicleAgentRuntimeController
         _ => "状态未知"
     };
 
-    internal static string StatusMessage => string.IsNullOrWhiteSpace(_detail) ? StatusText : StatusText + "：" + _detail;
+    internal static string StatusMessage
+    {
+        get
+        {
+            var message = string.IsNullOrWhiteSpace(_detail) ? StatusText : StatusText + "：" + _detail;
+            var usage = BuildProviderUsageSummary();
+            return string.IsNullOrWhiteSpace(usage) ? message : message + " | " + usage;
+        }
+    }
     internal static bool IsHostRunning => _state == RuntimeState.Running && _process != null && !_process.HasExited;
     internal static bool OwnsHost => _process != null;
     internal static bool ShouldOwnPlayerInput => _startRequested ||
         (_process != null && !_process.HasExited && _state is RuntimeState.Starting or RuntimeState.Running or RuntimeState.Stopping);
 
-    internal static void RequestStatus() => ShowMessage(StatusMessage);
+    internal static void RequestStatus()
+    {
+        var runId = string.IsNullOrWhiteSpace(_runId) ? _lastRunId : _runId;
+        var message = StatusMessage;
+        if (_providerDecisionCount > 0 && !string.IsNullOrWhiteSpace(runId))
+        {
+            message = StatusText + " | " + BuildProviderUsageSummary() + " | 日志: AgentRuns\\" + runId + ".jsonl";
+        }
+        ShowMessage(Shorten(message, 180));
+    }
 
     internal static void RequestStart()
     {
@@ -136,6 +166,7 @@ internal static class ChronicleAgentRuntimeController
         _stopRequested = false;
         _stopSignalSent = false;
         _hostExitObservedLogged = false;
+        ResetProviderUsage();
         SetState(RuntimeState.Starting, "等待Campaign与Host初始化");
     }
 
@@ -339,6 +370,7 @@ internal static class ChronicleAgentRuntimeController
         var gameProcessId = gameProcess.Id;
         var gameProcessStartTimeTicks = gameProcess.StartTime.ToUniversalTime().Ticks;
         _runId = "mcm-" + Guid.NewGuid().ToString("N");
+        _lastRunId = _runId;
         var startInfo = new ProcessStartInfo
         {
             FileName = hostPath,
@@ -611,6 +643,11 @@ internal static class ChronicleAgentRuntimeController
         string line;
         while ((line = await output.ReadLineAsync().ConfigureAwait(false)) != null)
         {
+            if (line.StartsWith(AgentHostUsageSignalPrefix, StringComparison.Ordinal))
+            {
+                UpdateProviderUsage(line);
+                continue;
+            }
             if (line.StartsWith(AgentHostReadyProtocol.Prefix, StringComparison.Ordinal))
             {
                 HostReadySignals.Enqueue(line);
@@ -619,6 +656,71 @@ internal static class ChronicleAgentRuntimeController
             result.AppendLine(line);
         }
         return result.ToString();
+    }
+
+    private static void ResetProviderUsage()
+    {
+        lock (ProviderUsageLock)
+        {
+            _providerDecisionCount = 0;
+            _providerPromptTokens = 0;
+            _providerCompletionTokens = 0;
+            _providerCacheHitTokens = 0;
+            _providerCacheMissTokens = 0;
+            _providerEstimatedCostCny = 0;
+            _providerReservedCostUpperCny = 0;
+            _providerRunCostLimitCny = null;
+            _providerCostEstimateKnown = true;
+        }
+    }
+
+    private static void UpdateProviderUsage(string line)
+    {
+        try
+        {
+            var values = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var field in line.Substring(AgentHostUsageSignalPrefix.Length).Split('|'))
+            {
+                var separator = field.IndexOf('=');
+                if (separator <= 0) continue;
+                values[field.Substring(0, separator)] = field.Substring(separator + 1);
+            }
+            lock (ProviderUsageLock)
+            {
+                _providerDecisionCount++;
+                _providerPromptTokens += ReadUsageLong(values, "promptTokens");
+                _providerCompletionTokens += ReadUsageLong(values, "completionTokens");
+                _providerCacheHitTokens += ReadUsageLong(values, "cacheHitTokens");
+                _providerCacheMissTokens += ReadUsageLong(values, "cacheMissTokens");
+                if (TryReadUsageDouble(values, "estimatedCostCny", out var estimatedCost)) _providerEstimatedCostCny += estimatedCost;
+                else _providerCostEstimateKnown = false;
+                if (TryReadUsageDouble(values, "reservedCostUpperBoundCny", out var reserved)) _providerReservedCostUpperCny = reserved;
+                if (TryReadUsageDouble(values, "runCostLimitCny", out var limit)) _providerRunCostLimitCny = limit;
+            }
+        }
+        catch { }
+    }
+
+    private static long ReadUsageLong(IReadOnlyDictionary<string, string> values, string name) =>
+        long.TryParse(values.TryGetValue(name, out var raw) ? raw : null, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : 0;
+
+    private static bool TryReadUsageDouble(IReadOnlyDictionary<string, string> values, string name, out double value) =>
+        double.TryParse(values.TryGetValue(name, out var raw) ? raw : null, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+
+    private static string BuildProviderUsageSummary()
+    {
+        lock (ProviderUsageLock)
+        {
+            if (_providerDecisionCount == 0) return string.Empty;
+            var cost = _providerCostEstimateKnown ? "估算¥" + _providerEstimatedCostCny.ToString("0.####", CultureInfo.InvariantCulture) : "费用估算未知";
+            var reservation = _providerRunCostLimitCny.HasValue
+                ? "/预留¥" + _providerReservedCostUpperCny.ToString("0.####", CultureInfo.InvariantCulture) + "（上限¥" + _providerRunCostLimitCny.Value.ToString("0.####", CultureInfo.InvariantCulture) + ")"
+                : string.Empty;
+            return "模型" + _providerDecisionCount.ToString(CultureInfo.InvariantCulture) + "次，Token " +
+                   _providerPromptTokens.ToString("N0", CultureInfo.InvariantCulture) + "/" + _providerCompletionTokens.ToString("N0", CultureInfo.InvariantCulture) +
+                   "，缓存命中/未命中 " + _providerCacheHitTokens.ToString("N0", CultureInfo.InvariantCulture) + "/" + _providerCacheMissTokens.ToString("N0", CultureInfo.InvariantCulture) +
+                   "，" + cost + reservation;
+        }
     }
 
     private static void TerminateOwnedHostAfterTimeout()

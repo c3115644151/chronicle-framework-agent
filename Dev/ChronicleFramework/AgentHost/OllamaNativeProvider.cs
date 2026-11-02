@@ -45,6 +45,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     internal bool? ThinkingMode => _settings.Thinking;
     internal double? ReservedCostUpperBoundCny => IsDeepSeekApi(_settings.Endpoint) ? _reservedDeepSeekCostCny : null;
     internal double? ActualCostEstimateCny => IsDeepSeekApi(_settings.Endpoint) ? _actualDeepSeekCostEstimateCny : null;
+    internal double? MaxEstimatedRunCostCny => IsDeepSeekApi(_settings.Endpoint) ? _settings.MaxEstimatedRunCostCny : null;
     internal long? PromptCacheHitTokens => IsDeepSeekApi(_settings.Endpoint) ? _deepSeekPromptCacheHitTokens : null;
     internal long? PromptCacheMissTokens => IsDeepSeekApi(_settings.Endpoint) ? _deepSeekPromptCacheMissTokens : null;
     internal string ConfigurationSource { get; }

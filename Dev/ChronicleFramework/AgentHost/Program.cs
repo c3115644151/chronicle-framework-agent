@@ -113,6 +113,7 @@ internal static class Program
                 if (string.IsNullOrWhiteSpace(requestJson))
                     throw new AgentHostException("campaign-loop-request-missing", "Agent Host received no Campaign goal request.");
                 using var requestDocument = JsonDocument.Parse(requestJson);
+                AgentHostRuntimeProgressLog.RecordRunStarted(requestDocument.RootElement);
                 using var parentProcess = OpenBoundParentProcess(requestDocument.RootElement);
                 using var parentMonitorCancellation = new CancellationTokenSource();
                 using var stopToken = new CancellationTokenSource();
@@ -147,6 +148,7 @@ internal static class Program
                 }
                 var loopResult = await loopTask;
                 if (parentExited) MarkParentExited(loopResult);
+                AgentHostRuntimeProgressLog.RecordRunSummary(requestDocument.RootElement, loopResult);
                 Console.Out.WriteLine(JsonSerializer.Serialize(loopResult, OutputJsonOptions));
                 var terminationReason = (loopResult["termination"] as JsonObject)?["reason"]?.GetValue<string>();
                 return loopResult["status"]?.GetValue<string>() == "completed" || terminationReason == "host-stop-requested" ? 0 : 1;
