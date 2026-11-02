@@ -264,6 +264,30 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
         ];
     }
 
+    internal static async Task<IReadOnlyList<object>> RunMapDialogueTransportSelfTestsAsync()
+    {
+        var client = new FakeMapDialogueNativeClient();
+        var provider = new FakeMapDialogueDecisionProvider();
+        using var request = JsonDocument.Parse(JsonSerializer.Serialize(new
+        {
+            runId = "training-issue-map-dialogue-self-test",
+            goal = "Earn original EYC Gold through the Native retainer-training Issue.",
+            maxDecisions = 4,
+            maxElapsedSeconds = 10,
+            allowedActionNames = AgentHostCampaignLoop.AllSupportedActions.ToArray()
+        }));
+        var result = await RunAsync(request.RootElement, client, client, provider, CancellationToken.None);
+        if (ReadString(result, "status") != "failed" ||
+            ReadString(result, "termination") != "training-issue-interrupted-by-encounter" ||
+            ReadInt(result, "decisions") != 1 || ReadInt(result, "actionsExecuted") != 1 ||
+            ReadInt(result, "explicitClockActionCount") != 0 || provider.Calls != 1 || !provider.ReceivedOnlyCurrentSafeMapReply ||
+            client.Actions.Count != 1 || client.Actions[0].Action != "dialogueSelect" || client.Actions[0].OptionId != "map-safe-reply")
+            throw new AgentHostException("training-issue-loop-map-dialogue-transport-failed",
+                "The complete Native training-issue loop must send exactly one current safe map reply, suppress the unrelated quest acceptance and observeAgain, then yield an encounter to the parent without clock actions.");
+
+        return [new { scenario = "training-issue-map-dialogue-loop-selects-only-current-safe-reply-then-yields-encounter", passed = true }];
+    }
+
 
     internal static async Task<JsonObject> RunAsync(
         JsonElement request,
@@ -1161,6 +1185,125 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
     private static bool IsObservedHostileBandit(JsonObject state) =>
         (state["nearbyParties"] as JsonArray)?.OfType<JsonObject>()
             .Any(item => ReadString(item, "type") == "bandit" && ReadBoolean(item, "hostile")) == true;
+
+    private sealed class FakeMapDialogueNativeClient : IAgentHostEstablishClanTrainingIssueNativeClient, IAgentHostBattleSimulationNativeClient
+    {
+        private bool _encounterActive;
+        internal List<(string Action, string? OptionId)> Actions { get; } = [];
+
+        public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(JsonDocument.Parse(BuildState().ToJsonString()));
+        }
+
+        public Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken) =>
+            throw new AgentHostException("training-issue-map-dialogue-unexpected-campaign-action", "The map-dialogue transport test must use the task-scoped Native adapter.");
+
+        public Task<JsonDocument> ExecuteTrainingIssueActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var optionId = ReadString(arguments, "optionId");
+            Actions.Add((action, optionId));
+            if (action != "dialogueSelect" || optionId != "map-safe-reply")
+                throw new AgentHostException("training-issue-map-dialogue-invalid-native-action", "Only the current safe map-conversation response is accepted by this fake Native route.");
+            _encounterActive = true;
+            return Task.FromResult(JsonDocument.Parse(new JsonObject
+            {
+                ["status"] = "completed", ["processId"] = 321, ["action"] = action,
+                ["data"] = new JsonObject { ["optionId"] = optionId }
+            }.ToJsonString()));
+        }
+
+        public Task<JsonDocument> ReadQuestDetailsAsync(string questId, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (questId != EycQuestId)
+                throw new AgentHostException("training-issue-map-dialogue-unexpected-quest", "Only the active original EYC Journal may be read in this test.");
+            var stages = new JsonArray(
+                JournalStage(0, 2000), JournalStage(0, 25), JournalStage(0, 50), JournalStage(0, 1));
+            return Task.FromResult(JsonDocument.Parse(new JsonObject
+            {
+                ["status"] = "completed",
+                ["data"] = new JsonObject { ["questId"] = EycQuestId, ["journalStages"] = stages }
+            }.ToJsonString()));
+        }
+
+        public Task<JsonDocument> RespondNativeInquiryAsync(string token, string choice, CancellationToken cancellationToken) =>
+            throw new AgentHostException("training-issue-map-dialogue-unexpected-inquiry", "No inquiry is part of the map-dialogue transport case.");
+
+        public Task<JsonDocument> SubmitStoryModeClanNameAsync(string token, string clanName, CancellationToken cancellationToken) =>
+            throw new AgentHostException("training-issue-map-dialogue-unexpected-clan-name", "No StoryMode setup action is part of the map-dialogue transport case.");
+
+        public Task<JsonDocument> ExecuteBattleSimulationActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken) =>
+            throw new AgentHostException("training-issue-map-dialogue-unexpected-battle-action", "A map-dialogue interruption must yield an encounter to the parent without starting a battle subflow.");
+
+        public Task<JsonDocument> PauseForVisibleHostileDecisionAsync(CancellationToken cancellationToken) =>
+            throw new AgentHostException("training-issue-map-dialogue-unexpected-pause", "This test must not issue a clock action.");
+
+        private JsonObject BuildState()
+        {
+            var conversation = _encounterActive ? null : new JsonObject
+            {
+                ["characterId"] = "unrelated-map-notable",
+                ["sentenceText"] = "A different current Native map conversation.",
+                ["options"] = new JsonArray(
+                    new JsonObject { ["id"] = "map-safe-reply", ["text"] = "A visible reply.", ["clickable"] = true },
+                    new JsonObject { ["id"] = "issue_offer_player_accept_quest", ["textId"] = DirectTrainingResponseTextId, ["text"] = "Accept another issue.", ["clickable"] = true })
+            };
+            return new JsonObject
+            {
+                ["status"] = "completed", ["processId"] = 321, ["campaignDay"] = 10.0, ["timeControlMode"] = "StoppablePlay",
+                ["state"] = new JsonObject
+                {
+                    ["context"] = new JsonObject
+                    {
+                        ["gameState"] = "MapState", ["menuId"] = _encounterActive ? "encounter" : null,
+                        ["conversation"] = conversation, ["encounterActive"] = _encounterActive,
+                        ["encounteredPartyId"] = _encounterActive ? "looter-party" : null,
+                        ["escapeMenuOpen"] = false, ["inquiryOpen"] = false, ["battleSimulation"] = null
+                    },
+                    ["quests"] = new JsonArray(new JsonObject { ["id"] = EycQuestId, ["title"] = "Establish Your Clan" }),
+                    ["location"] = new JsonObject { ["currentSettlementId"] = null, ["targetSettlementId"] = "settlement-target" },
+                    ["party"] = new JsonObject { ["isMoving"] = !_encounterActive },
+                    ["nearbyParties"] = new JsonArray()
+                }
+            };
+        }
+
+        private static JsonObject JournalStage(double current, double target) => new()
+        {
+            ["hasTask"] = true, ["currentProgress"] = current, ["targetProgress"] = target
+        };
+    }
+
+    private sealed class FakeMapDialogueDecisionProvider : IAgentHostDecisionProvider
+    {
+        public string ModelId => "training-issue-map-dialogue-self-test";
+        public string ConfigurationSource => "harness-fake-provider";
+        internal int Calls { get; private set; }
+        internal bool ReceivedOnlyCurrentSafeMapReply { get; private set; }
+        public void Dispose() { }
+        public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls++;
+            var actions = request.GetProperty("allowedActions").EnumerateArray().ToArray();
+            var controls = request.GetProperty("allowedControls").EnumerateArray().Select(item => item.GetString()).ToArray();
+            var optionIds = actions.SingleOrDefault(item => item.GetProperty("action").GetString() == "dialogueSelect")
+                .GetProperty("argumentValues").GetProperty("OptionId").EnumerateArray().Select(item => item.GetString()).ToArray();
+            ReceivedOnlyCurrentSafeMapReply = Calls == 1 && actions.Length == 1 &&
+                optionIds.SequenceEqual(new[] { "map-safe-reply" }, StringComparer.Ordinal) &&
+                !controls.Contains("observeAgain", StringComparer.Ordinal) &&
+                systemPrompt.Contains("MAP DIALOGUE INTERRUPTION", StringComparison.Ordinal);
+            if (!ReceivedOnlyCurrentSafeMapReply)
+                throw new AgentHostException("training-issue-map-dialogue-provider-catalog-invalid", "The fake model did not receive exactly the current safe reply with no movement wait or issue acceptance.");
+            return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 10, 3, "stop",
+                new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "map-safe-reply" } }));
+        }
+    }
 
     private static JsonObject ParseObject(JsonElement value) => JsonNode.Parse(value.GetRawText())?.AsObject()
         ?? throw new AgentHostException("training-issue-native-response-invalid", "The Native training-issue route received no JSON object.");

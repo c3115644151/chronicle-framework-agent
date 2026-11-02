@@ -57,6 +57,8 @@ internal static class ProviderContractSelfTest
         catch (Exception exception) { throw new AgentHostException("storymode-setup-loop-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
         results.AddRange(AgentHostEstablishClanGoldSaleLoop.RunContractSelfTests());
         results.AddRange(AgentHostEstablishClanTrainingIssueLoop.RunContractSelfTests());
+        try { results.AddRange(await AgentHostEstablishClanTrainingIssueLoop.RunMapDialogueTransportSelfTestsAsync()); }
+        catch (Exception exception) { throw new AgentHostException("training-issue-map-dialogue-transport-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
         results.AddRange(NativeMailboxClient.RunQuestDetailsReadActionContractSelfTests());
         results.AddRange(NativeMailboxClient.RunQuestTroopScreenActionContractSelfTests());
         results.AddRange(AgentHostQuestTroopScreenLoop.RunContractSelfTests());
