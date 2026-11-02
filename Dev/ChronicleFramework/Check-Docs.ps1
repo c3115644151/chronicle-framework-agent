@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.510'
+$contractVersion = '7.511'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -749,6 +749,12 @@ if ($agentLiveModelLoopSource -notmatch 'Get-FreeLLMAPIModelExecutionStatus -Mod
     $agentLiveModelLoopSource -notmatch 'if \(\$modelExecutionStatus -eq ''not-listed''\)' -or
     $agentLiveModelLoopSource -match '\[string\]\$env:CHRONICLE_LLM_MODEL -notin \$availableModelIds') {
     throw 'Live-model preflight must use FreeLLMAPI router-aware execution status so documented auto strategy routes are not rejected for being absent from the model rows, while unknown profiles still fail before inference.'
+}
+$eycAutonomyLoopIndex = $agentLiveModelLoopSource.IndexOf('elseif ($EstablishYourClanAutonomyLoop)', [StringComparison]::Ordinal)
+$eycAutonomyLoopSource = if ($eycAutonomyLoopIndex -ge 0) { $agentLiveModelLoopSource.Substring($eycAutonomyLoopIndex, [Math]::Min(2500, $agentLiveModelLoopSource.Length - $eycAutonomyLoopIndex)) } else { '' }
+if ($eycAutonomyLoopSource -notmatch "CHRONICLE_LLM_MAX_TOKENS = '256'" -or
+    $agentHostProviderSource -notmatch 'ReadIntegerEnvironment\("CHRONICLE_LLM_MAX_TOKENS", 256, 64, 4096\)') {
+    throw 'The real EYC Harness must use the player MCM Host 256-token default so per-call cost reservation matches product settings and does not fail early on a test-only output cap.'
 }
 if ($agentActionLoopSource -notmatch 'function Get-EffectiveActionCatalog' -or $agentActionLoopSource -notmatch 'recruit_volunteers' -or $agentActionLoopSource -notmatch 'rejected-before-native' -or $agentActionLoopSource -notmatch 'control-unavailable' -or $agentActionLoopSource -notmatch 'control-rejected-before-native' -or $nativeRejectedActionBranch -match '\$previousActionReceipt\s*=\s*\$actionResult' -or $nativeRejectedActionBranch -notmatch 'Keep the last completed Native receipt available' -or $agentDecisionLoopPolicySource -notmatch 'StoppablePlay' -or $agentDecisionLoopPolicySource -notmatch 'encounterActive' -or $agentDecisionLoopPolicySource -notmatch 'town_wait_menus' -or $agentDecisionLoopSource -notmatch 'Convert-ReceiptForDecision' -or $agentDecisionLoopSource -notmatch 'consecutiveDecisionRejections' -or $agentDecisionLoopSource -notmatch 'decisionRejected' -or $agentOpenAiProviderSource -notmatch 'decisionRejected' -or $agentOpenAiProviderSource -notmatch 'decisionFeedback' -or $agentOpenAiProviderTestSource -notmatch 'invalidActionDecision\.decisionRejected' -or $agentEvaluationRecruitmentBaselineProviderSource -notmatch 'recruitment actions leaked' -or $agentDecisionTestProviderSource -notmatch 'staleOfferRecovery' -or $agentDecisionTestProviderSource -notmatch 'unlistedResumeRecovery' -or $agentDecisionLoopTestSource -notmatch 'ObserveAgainPolicySeparatesNaturalTimeFromStoppedEncounter' -or $agentDecisionLoopTestSource -notmatch 'ObserveAgainCanMonitorAcceptedNativeTownWait' -or $agentDecisionLoopTestSource -notmatch 'StaleOfferRecoveryVerified' -or $agentDecisionLoopTestSource -notmatch 'StaleOfferBlockedWithoutNativeMutation' -or $agentDecisionLoopTestSource -notmatch 'UnlistedResumeRejectedWithoutNativeAction' -or $agentDecisionLoopTestSource -notmatch 'StaleObserveAgainRejectedWithoutNativeAction') { throw 'The Agent decision catalog must respect current Native entries, keep the last successful receipt after rejection, permit bounded observation of accepted Native Town Wait, reject waits while time is stopped/encountered, and bound recovery without Native mutation.' }
 if ($agentHostVillageToolsQuestPolicySource -notmatch 'QuoteMatchesBalancedDraft' -or

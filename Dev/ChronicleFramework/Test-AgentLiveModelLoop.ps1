@@ -479,7 +479,9 @@ try {
         }
         $allowedActions = [string]::Join(',', $catalogActions)
         Set-LiveModelProviderTimeout 360
-        $env:CHRONICLE_LLM_MAX_TOKENS = '1024'
+        # Match the normal MCM Host default. A larger test-only cap over-reserves
+        # output cost before each call and can stop a run earlier than the player build.
+        $env:CHRONICLE_LLM_MAX_TOKENS = '256'
     }
     elseif ($EstablishYourClanAutonomyLoop) {
         $finalNativeState = Invoke-AgentCli 'state'
