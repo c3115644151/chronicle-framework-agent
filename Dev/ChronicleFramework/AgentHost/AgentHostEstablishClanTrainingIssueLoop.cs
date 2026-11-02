@@ -124,7 +124,10 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                 }
             }
         };
-        var offerCatalog = BuildActionCatalog(directAndAlternative, null, null, null, talkedToIssueGiver: true);
+        var contactedTrainingGiver = new HashSet<string>(StringComparer.Ordinal) { "hero-training" };
+        directAndAlternative["state"]!["context"]!["conversation"]!["heroId"] = "hero-training";
+        var offerCatalog = BuildActionCatalog(directAndAlternative, null, null, null, talkedToIssueGiver: true,
+            contactedIssueGivers: contactedTrainingGiver);
         var offerIds = offerCatalog.OfType<JsonObject>().FirstOrDefault(action => ReadString(action, "action") == "dialogueSelect")?
             ["argumentValues"]?["OptionId"] as JsonArray;
         if (offerIds?.Count != 1 || offerIds[0]?.GetValue<string>() != "issue_offer_player_accept_quest")
@@ -132,7 +135,8 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
 
         var wrongDirectOption = (JsonObject)directAndAlternative.DeepClone();
         wrongDirectOption["state"]!["context"]!["conversation"]!["options"]![0]!["textId"] = "unrelated-issue-acceptance";
-        if (BuildActionCatalog(wrongDirectOption, null, null, null, talkedToIssueGiver: true).OfType<JsonObject>()
+        if (BuildActionCatalog(wrongDirectOption, null, null, null, talkedToIssueGiver: true,
+                contactedIssueGivers: contactedTrainingGiver).OfType<JsonObject>()
             .Any(action => (action["argumentValues"]?["OptionId"] as JsonArray)?.Any(id => id?.GetValue<string>() == "issue_offer_player_accept_quest") == true))
             throw new AgentHostException("training-issue-self-test-wrong-direct-text-identity-accepted", "A generic issue-accept option with a different Native TextObject identity must not be accepted as the retainer-training task.");
 
@@ -176,6 +180,53 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
             throw new AgentHostException("training-issue-self-test-upgrade-scope-failed", "Only the currently observed borrowed issue troop may be upgraded toward its current veteran target; ordinary player troops must not enter this task-specific catalog.");
 
         var noTimeControls = BuildControlCatalog(MapState(null, moving: true), activeTrainingIssue: false);
+        var mapDialogueNative = MapState(null, moving: true);
+        var mapDialogueState = mapDialogueNative["state"] as JsonObject ?? new JsonObject();
+        mapDialogueState["context"]!["conversation"] = new JsonObject
+        {
+            ["characterId"] = "notable-other",
+            ["sentenceText"] = "A different current Native map conversation.",
+            ["options"] = new JsonArray(
+                new JsonObject { ["id"] = "map-safe-reply", ["text"] = "A visible reply.", ["clickable"] = true },
+                new JsonObject { ["id"] = "map-hidden-reply", ["text"] = "Unavailable reply.", ["clickable"] = false },
+                new JsonObject { ["id"] = "issue_offer_player_accept_quest", ["textId"] = DirectTrainingResponseTextId, ["text"] = "Accept this unrelated issue.", ["clickable"] = true })
+        };
+        var mapDialogueCatalog = BuildActionCatalog(mapDialogueNative, null, null, null, talkedToIssueGiver: false);
+        var mapDialogueIds = mapDialogueCatalog.OfType<JsonObject>().SingleOrDefault(action => ReadString(action, "action") == "dialogueSelect")?
+            ["argumentValues"]?["OptionId"] as JsonArray;
+        if (mapDialogueCatalog.Count != 1 || mapDialogueIds?.Count != 1 || mapDialogueIds[0]?.GetValue<string>() != "map-safe-reply" ||
+            BuildControlCatalog(mapDialogueNative, activeTrainingIssue: false).OfType<JsonValue>().Any(control => control.GetValue<string>() == "observeAgain") ||
+            !TryResolveDecision(new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "map-safe-reply" } },
+                mapDialogueCatalog, mapDialogueState, null, null, false, false, out var mapDialogueAction, out var mapDialogueArguments, out _, new HashSet<string>(StringComparer.Ordinal)) ||
+            mapDialogueAction != "dialogueSelect" || mapDialogueArguments?["optionId"]?.GetValue<string>() != "map-safe-reply" ||
+            TryResolveDecision(new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "issue_offer_player_accept_quest" } },
+                mapDialogueCatalog, mapDialogueState, null, null, false, false, out _, out _, out _, new HashSet<string>(StringComparer.Ordinal)))
+            throw new AgentHostException("training-issue-self-test-map-dialogue-scope-failed", "A non-issue MapState conversation during movement must expose only current safe clickable options, hide direct quest acceptance, reject stale options, and suppress observeAgain.");
+        var contactedGiverInterrupt = MapState(null, moving: true);
+        contactedGiverInterrupt["state"]!["context"]!["conversation"] = new JsonObject
+        {
+            ["characterId"] = "notable-other", ["sentenceText"] = "A different conversation after talking to the issue giver.",
+            ["options"] = new JsonArray(new JsonObject { ["id"] = "other-safe-reply", ["text"] = "A visible reply.", ["clickable"] = true })
+        };
+        var contactedGiverCatalog = BuildActionCatalog(contactedGiverInterrupt, null, null, null, talkedToIssueGiver: true,
+            contactedIssueGivers: contactedTrainingGiver);
+        var contactedGiverOptions = contactedGiverCatalog.OfType<JsonObject>().SingleOrDefault(action => ReadString(action, "action") == "dialogueSelect")?
+            ["argumentValues"]?["OptionId"] as JsonArray;
+        if (contactedGiverCatalog.Count != 1 || contactedGiverOptions?.Count != 1 ||
+            contactedGiverOptions[0]?.GetValue<string>() != "other-safe-reply")
+            throw new AgentHostException("training-issue-self-test-unrelated-map-conversation-not-isolated", "After speaking with an Issue giver, a different current MapState conversation must not inherit the Issue acceptance catalog.");
+        var mapDialogueNoChoiceNative = MapState(null, moving: true);
+        var mapDialogueNoChoiceState = mapDialogueNoChoiceNative["state"] as JsonObject ?? new JsonObject();
+        mapDialogueNoChoiceState["context"]!["conversation"] = new JsonObject
+        {
+            ["characterId"] = "notable-other", ["sentenceText"] = "A no-choice map text line.", ["options"] = new JsonArray()
+        };
+        var mapDialogueContinueCatalog = BuildActionCatalog(mapDialogueNoChoiceNative, null, null, null, talkedToIssueGiver: false);
+        if (mapDialogueContinueCatalog.Count != 1 || ReadString(mapDialogueContinueCatalog[0] as JsonObject, "action") != "dialogueContinue" ||
+            !TryResolveDecision(new JsonObject { ["action"] = "dialogueContinue", ["arguments"] = new JsonObject() },
+                mapDialogueContinueCatalog, mapDialogueNoChoiceState, null, null, false, false, out var mapDialogueContinueAction, out _, out _, new HashSet<string>(StringComparer.Ordinal)) ||
+            mapDialogueContinueAction != "dialogueContinue")
+            throw new AgentHostException("training-issue-self-test-map-dialogue-continue-scope-failed", "A no-choice map conversation must expose only the current Native Continue action before the training route resumes.");
         var visibleBanditMap = MapState(null);
         visibleBanditMap["state"]!["nearbyParties"] = new JsonArray(new JsonObject { ["id"] = "bandit-a", ["type"] = "bandit", ["hostile"] = true });
         var trainingBattleControl = BuildControlCatalog(visibleBanditMap, activeTrainingIssue: true, upgradeOptionsKnown: true, currentlyUpgradable: false);
@@ -208,6 +259,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
             new { scenario = "training-issue-movement-observation-hides-settlement-targets-rejected-by-current-catalog", passed = true },
             new { scenario = "training-issue-accepts-only-the-source-identified-direct-quest-option", passed = true },
             new { scenario = "training-issue-upgrade-catalog-is-limited-to-current-borrowed-retainers", passed = true },
+            new { scenario = "training-issue-resolves-unrelated-current-map-conversation-without-quest-acceptance-or-waiting", passed = true },
             new { scenario = "training-issue-movement-observation-does-not-add-clock-controls", passed = true }
         ];
     }
@@ -469,7 +521,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                 }
 
                 if (!TryResolveDecision(decision, catalog, state, visibleSafeTargets, upgradeOptionsReceipt,
-                    talkedToIssueGiver, activeTrainingIssue, out var action, out var arguments, out var rejection))
+                    talkedToIssueGiver, activeTrainingIssue, out var action, out var arguments, out var rejection, contactedIssueGivers))
                 {
                     rejected++;
                     feedback = new JsonObject { ["kind"] = "decision-rejected-before-native", ["message"] = rejection, ["nativeActionSent"] = false };
@@ -642,6 +694,8 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
         var conversation = context["conversation"] as JsonObject;
         if (conversation is not null)
         {
+            if (IsMapStateConversation(state) && !IsCurrentTrainingIssueMapConversation(state, talkedToIssueGiver, activeTrainingIssue, contactedIssueGivers))
+                return BuildGenericMapConversationCatalog(conversation);
             return BuildConversationCatalog(conversation, talkedToIssueGiver, activeTrainingIssue, offerRefusalPendingExit);
         }
 
@@ -732,6 +786,38 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
             });
     }
 
+    private static bool IsMapStateConversation(JsonObject? state) =>
+        ReadString(state?["context"] as JsonObject, "gameState") == "MapState" &&
+        state?["context"]?["conversation"] is JsonObject && !AgentHostCampaignStateFacts.IsActiveEncounter(state!);
+
+    private static bool IsCurrentTrainingIssueMapConversation(JsonObject? state, bool talkedToIssueGiver, bool activeTrainingIssue,
+        IReadOnlySet<string>? contactedIssueGivers)
+    {
+        if (!talkedToIssueGiver && !activeTrainingIssue || contactedIssueGivers is null || contactedIssueGivers.Count == 0) return false;
+        var conversation = state?["context"]?["conversation"] as JsonObject;
+        var conversationIds = new[] { ReadString(conversation, "heroId"), ReadString(conversation, "characterId") }
+            .Where(id => !string.IsNullOrWhiteSpace(id));
+        return conversationIds.Any(id => contactedIssueGivers.Contains(id!));
+    }
+
+    private static JsonArray BuildGenericMapConversationCatalog(JsonObject conversation)
+    {
+        var options = (conversation["options"] as JsonArray)?.OfType<JsonObject>().ToArray() ?? Array.Empty<JsonObject>();
+        var clickableIds = options.Where(option => ReadBoolean(option, "clickable") &&
+                !IsOutOfScopeIssueAcceptance(option) && !IsTrainingDirectOffer(option))
+            .Select(option => ReadString(option, "id"))
+            .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).Cast<string>().ToArray();
+        if (clickableIds.Length > 0)
+            return new JsonArray(new JsonObject
+            {
+                ["action"] = "dialogueSelect", ["arguments"] = new JsonArray("OptionId"),
+                ["argumentValues"] = new JsonObject { ["OptionId"] = new JsonArray(clickableIds.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray()) }
+            });
+        if (options.Length == 0 && !string.IsNullOrWhiteSpace(ReadString(conversation, "sentenceText")))
+            return new JsonArray(new JsonObject { ["action"] = "dialogueContinue", ["arguments"] = new JsonArray() });
+        return new JsonArray();
+    }
+
     internal static bool IsFinalTrainingOfferWithoutDirectAcceptance(JsonObject? conversation)
     {
         var options = (conversation?["options"] as JsonArray)?.OfType<JsonObject>().ToArray() ?? Array.Empty<JsonObject>();
@@ -759,7 +845,8 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                 .Any(item => ReadString(item, "type") == "bandit" && ReadBoolean(item, "hostile")) == true)
             return new JsonArray("resolveVisibleBandit");
         if (ReadString(context, "gameState") == "MapState" && ReadString(context, "menuId") is null && ReadBoolean(party, "isMoving") &&
-            !ReadBoolean(context, "escapeMenuOpen") && !ReadBoolean(context, "inquiryOpen") && !ReadBoolean(context, "encounterActive"))
+            !ReadBoolean(context, "escapeMenuOpen") && !ReadBoolean(context, "inquiryOpen") && !ReadBoolean(context, "encounterActive") &&
+            context?["conversation"] is not JsonObject)
             return new JsonArray("observeAgain");
         return new JsonArray();
     }
@@ -947,7 +1034,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
 
     private static bool TryResolveDecision(JsonObject decision, JsonArray catalog, JsonObject state, JsonArray? visibleSafeTargets,
         JsonObject? upgradeOptionsReceipt, bool talkedToIssueGiver, bool activeTrainingIssue,
-        out string? action, out JsonObject? nativeArguments, out string rejection)
+        out string? action, out JsonObject? nativeArguments, out string rejection, IReadOnlySet<string>? contactedIssueGivers = null)
     {
         action = ReadString(decision, "action");
         nativeArguments = null;
@@ -972,14 +1059,24 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
             if (heroId is null || !GetVisibleAvailableTrainingIssueGivers(state).Contains(heroId, StringComparer.Ordinal))
             { rejection = "talkToSettlementHero requires a HeroId whose current visible AvailableIssue marker identifies the Landlord Training for Retainers route."; return false; }
         }
+        if (selectedAction == "dialogueContinue")
+        {
+            var conversation = (state["context"] as JsonObject)?["conversation"] as JsonObject;
+            if (conversation is null || HasClickableConversationOptions(conversation) ||
+                IsMapStateConversation(state) && string.IsNullOrWhiteSpace(ReadString(conversation, "sentenceText")))
+            { rejection = "dialogueContinue is valid only for a current Native conversation with no clickable choice."; return false; }
+        }
         if (selectedAction == "dialogueSelect")
         {
-            if (!talkedToIssueGiver && !activeTrainingIssue)
+            var mapConversation = IsMapStateConversation(state);
+            var currentIssueGiverConversation = IsCurrentTrainingIssueMapConversation(state, talkedToIssueGiver, activeTrainingIssue, contactedIssueGivers);
+            if (!mapConversation && !talkedToIssueGiver && !activeTrainingIssue)
             { rejection = "The Native Issue conversation was not opened from a current AvailableIssue marker."; return false; }
             var optionId = ReadString(supplied, "OptionId");
             var conversation = (state["context"] as JsonObject)?["conversation"] as JsonObject;
             var option = (conversation?["options"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(item => ReadString(item, "id") == optionId && ReadBoolean(item, "clickable"));
-            if (option is null || IsOutOfScopeIssueAcceptance(option) || IsTrainingDirectOffer(option) && ReadString(option, "textId") != DirectTrainingResponseTextId)
+            if (option is null || IsOutOfScopeIssueAcceptance(option) || IsTrainingDirectOffer(option) &&
+                (!currentIssueGiverConversation || ReadString(option, "textId") != DirectTrainingResponseTextId))
             { rejection = "Only current clickable issue dialogue options are allowed, and direct acceptance must match the Native training response."; return false; }
         }
         if (selectedAction == "move")

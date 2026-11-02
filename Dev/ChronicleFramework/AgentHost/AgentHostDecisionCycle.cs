@@ -314,7 +314,8 @@ internal static class AgentHostDecisionCycle
         IAgentHostDecisionProvider provider,
         JsonObject request,
         CancellationToken cancellationToken) =>
-        DecideAsync(provider, request, EstablishClanTrainingIssueSystemPrompt, cancellationToken);
+        DecideAsync(provider, request, EstablishClanTrainingIssueSystemPrompt +
+            " MAP DIALOGUE INTERRUPTION: If an unrelated Native MapState conversation interrupts settlement travel, use only the currently listed clickable option or no-choice Continue. Do not accept another Issue/Quest, start a Mission, or choose combat. Re-read Native state after the current response before resuming the training route.", cancellationToken);
 
     internal static string BuildVillageToolsQuestSystemPrompt(JsonObject request)
     {
