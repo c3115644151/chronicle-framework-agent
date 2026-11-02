@@ -36,6 +36,24 @@ internal static class Program
                 return 0;
             }
 
+            if (args.Length == 1 && string.Equals(args[0], "--provider-health-only", StringComparison.Ordinal))
+            {
+                var requestJson = await Console.In.ReadToEndAsync();
+                using var request = JsonDocument.Parse(requestJson);
+                using var provider = OllamaNativeProvider.FromCampaignRequest(request.RootElement);
+                await provider.CheckConfiguredModelAsync(CancellationToken.None);
+                Console.Out.WriteLine(JsonSerializer.Serialize(new
+                {
+                    status = "ready",
+                    providerHost = provider.ProviderHost,
+                    modelId = provider.ModelId,
+                    structuredOutputStrategy = provider.StructuredOutputStrategy,
+                    modelCalls = 0,
+                    nativeCommands = 0
+                }, OutputJsonOptions));
+                return 0;
+            }
+
             if (args.Length == 1 && string.Equals(args[0], "--version", StringComparison.Ordinal))
             {
                 Console.Out.WriteLine(JsonSerializer.Serialize(GetPackageHealth(), OutputJsonOptions));

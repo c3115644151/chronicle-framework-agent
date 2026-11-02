@@ -32,6 +32,9 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     private const double DeepSeekInputPeakCnyPerMillion = 2.4d;
     private const double DeepSeekOutputPeakCnyPerMillion = 9.6d;
     internal string ModelId => _settings.Model;
+    internal string ProviderHost => _settings.Endpoint.Host;
+    internal string StructuredOutputStrategy => _useRequiredToolCallStrategy ? "required_tool_call" :
+        _settings.OutputMode == "json_object" ? "json_object" : "json_schema";
     internal int MaxOutputTokens => _settings.MaxOutputTokens;
     internal string OutputMode => _settings.OutputMode;
     internal bool? ThinkingMode => _settings.Thinking;

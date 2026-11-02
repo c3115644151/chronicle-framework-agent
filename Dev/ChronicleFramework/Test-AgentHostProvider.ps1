@@ -1,7 +1,8 @@
 ﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$HostDllPath,
-    [Parameter(Mandatory = $true)][string]$EvidencePath
+    [Parameter(Mandatory = $true)][string]$EvidencePath,
+    [switch]$HealthOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -77,6 +78,47 @@ else {
     try { $modelCatalog = @(Invoke-RestMethod -Uri $modelsUri.Uri -Headers @{ Authorization = "Bearer $($providerCredential.Value)" } -TimeoutSec 15 | Select-Object -ExpandProperty data) }
     catch { throw 'Remote provider /models preflight failed; no inference request was sent.' }
     if (-not @($modelCatalog | Where-Object { [string]$_.id -ceq $model }).Count) { throw 'Configured model ID is absent from the remote provider catalog; no inference request was sent.' }
+}
+
+if ($HealthOnly) {
+    $outputMode = [string]$env:CHRONICLE_LLM_OUTPUT_MODE
+    if ([string]::IsNullOrWhiteSpace($outputMode)) { $outputMode = 'auto' }
+    $runCostLimit = [string]$env:CHRONICLE_LLM_MAX_RUN_COST_CNY
+    if ([string]::IsNullOrWhiteSpace($runCostLimit)) { $runCostLimit = '5' }
+    $healthRequest = [ordered]@{
+        providerConfiguration = [ordered]@{
+            ProviderBaseUrl = $providerBaseUrl
+            ModelId = $model
+            OutputMode = $outputMode
+            DeepSeekRunCostLimitCny = $runCostLimit
+        }
+        providerConfigurationSource = 'agent-host-provider-health'
+    } | ConvertTo-Json -Depth 5 -Compress
+    $healthOutput = $healthRequest | & dotnet $hostDll --provider-health-only 2>&1 | Out-String
+    $healthExitCode = $LASTEXITCODE
+    if ($healthExitCode -ne 0) { throw "Read-only Agent Host provider health failed (exit=$healthExitCode). No inference request was sent. $healthOutput" }
+    try { $hostHealth = $healthOutput | ConvertFrom-Json }
+    catch { throw 'Agent Host provider health returned invalid JSON; no inference request was sent.' }
+    if ($hostHealth.status -ne 'ready' -or [int]$hostHealth.modelCalls -ne 0 -or [int]$hostHealth.nativeCommands -ne 0) {
+        throw 'Agent Host provider health returned an invalid result; no inference request was sent.'
+    }
+    $summary = [ordered]@{
+        Passed = $true
+        Check = 'read-only-provider-health'
+        ProviderHost = [string]$hostHealth.providerHost
+        ConfiguredModelId = [string]$hostHealth.modelId
+        StructuredOutputStrategy = [string]$hostHealth.structuredOutputStrategy
+        FreeLLMAPIReachable = [bool]$freeLlmApiProfile
+        ConfiguredRouteExecutionStatus = if ($freeLlmApiProfile) { $freeLlmApiProfile.ModelExecutionStatus } else { 'catalog-listed' }
+        AvailableModelCount = if ($freeLlmApiProfile) { $freeLlmApiProfile.AvailableModelCount } else { $modelCatalog.Count }
+        ModelCalls = 0
+        NativeCommands = 0
+        NoModelEndpointOrCredentialLogged = $true
+    }
+    $summaryJson = $summary | ConvertTo-Json -Depth 6
+    Set-Content -LiteralPath (Join-Path $evidencePath 'ProviderHealth.json') -Value $summaryJson -Encoding utf8
+    $summaryJson
+    return
 }
 
 $expectedClassification = if ($freeLlmApiProfile) { 'supported-village-tools-quest' } else { 'supported-map-arrival' }

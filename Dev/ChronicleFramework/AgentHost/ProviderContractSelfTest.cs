@@ -586,6 +586,8 @@ internal static class ProviderContractSelfTest
         using (var request = JsonDocument.Parse(BuildDecisionRequest()))
         {
             await toolCallProvider.CheckConfiguredModelAsync(CancellationToken.None);
+            if (toolCallProvider.StructuredOutputStrategy != "required_tool_call")
+                throw new AgentHostException("provider-self-test-tool-call-health-strategy-invalid", "FreeLLMAPI's advertised tools/tool_choice capabilities must select required_tool_call during the read-only health check.");
             var result = await toolCallProvider.DecideAsync(request.RootElement, CancellationToken.None);
             if (!toolCallPayloadValid || toolCallRequestCount != 1 ||
                 result.ResponseFormatMode != "required_tool_call" ||
