@@ -15,14 +15,17 @@ internal static class AgentHostRuntimeProgressLog
     internal const string UsageSignalPrefix = "CHRONICLE_AGENT_HOST_USAGE|";
     private const long MaximumRunLogBytes = 8L * 1024 * 1024;
     private const int MaximumRetainedRunLogs = 10;
-    private const string OwnedRunIdPattern = "^mcm-[a-f0-9]{32}$";
+    private const string OwnedRunIdPattern = "^(mcm-[a-f0-9]{32})(?:-[A-Za-z0-9_-]{1,64})?$";
     private static readonly object WriteGate = new();
+    private static readonly HashSet<string> ActiveProductRunIds = new(StringComparer.Ordinal);
 
     internal static void RecordRunStarted(JsonElement request)
     {
-        if (!TryGetPath(ReadString(request, "runId"), out var path)) return;
+        var runId = ReadString(request, "runId");
+        if (!TryGetPath(runId, out var path) || !TryGetBaseRunId(runId, out var baseRunId)) return;
         try
         {
+            lock (WriteGate) ActiveProductRunIds.Add(baseRunId);
             var configuration = request.TryGetProperty("providerConfiguration", out var node) && node.ValueKind == JsonValueKind.Object
                 ? node
                 : default;
@@ -50,7 +53,7 @@ internal static class AgentHostRuntimeProgressLog
     internal static void RecordDecision(JsonElement request, ProviderDecisionResult result, double? configuredRunCostLimitCny)
     {
         var runId = ReadString(request, "runId");
-        if (!TryGetPath(runId, out var path)) return;
+        if (!IsActiveProductRun(runId) || !TryGetPath(runId, out var path)) return;
         try
         {
             AppendEvent(path, BuildDecisionEvent(request, result, configuredRunCostLimitCny));
@@ -111,6 +114,7 @@ internal static class AgentHostRuntimeProgressLog
             ["userPayloadBytes"] = result.UserPayloadBytes,
             ["observationBytes"] = result.ObservationBytes,
             ["decisionAction"] = decisionAction,
+            ["goalClassification"] = ReadString(result.Decision, "goalClassification"),
             ["decisionControl"] = decisionControl,
             ["argumentNames"] = argumentNames,
             ["allowedActions"] = allowedActions,
@@ -137,7 +141,8 @@ internal static class AgentHostRuntimeProgressLog
 
     internal static void RecordProviderFailure(JsonElement request, string failureCode)
     {
-        if (!TryGetPath(ReadString(request, "runId"), out var path)) return;
+        var runId = ReadString(request, "runId");
+        if (!IsActiveProductRun(runId) || !TryGetPath(runId, out var path)) return;
         try
         {
             AppendEvent(path, new JsonObject
@@ -157,7 +162,8 @@ internal static class AgentHostRuntimeProgressLog
 
     internal static void RecordObjectiveSubflowResult(string objectiveId, JsonObject result)
     {
-        if (!TryGetPath(ReadString(result, "runId"), out var path)) return;
+        var runId = ReadString(result, "runId");
+        if (!IsActiveProductRun(runId) || !TryGetPath(runId, out var path)) return;
         try
         {
             AppendEvent(path, new JsonObject
@@ -185,7 +191,7 @@ internal static class AgentHostRuntimeProgressLog
     internal static void RecordRunSummary(JsonElement request, JsonObject result)
     {
         var runId = ReadString(request, "runId");
-        if (!TryGetPath(runId, out var path)) return;
+        if (!IsActiveProductRun(runId) || !TryGetPath(runId, out var path)) return;
         try
         {
             AppendEvent(path, new JsonObject
@@ -212,15 +218,20 @@ internal static class AgentHostRuntimeProgressLog
             });
         }
         catch { }
+        finally
+        {
+            if (TryGetBaseRunId(runId, out var baseRunId))
+                lock (WriteGate) ActiveProductRunIds.Remove(baseRunId);
+        }
     }
 
     internal static string? ResolvePlayerRunLogPath(string documentsDirectory, string runId)
     {
-        if (string.IsNullOrWhiteSpace(documentsDirectory) || !Regex.IsMatch(runId ?? string.Empty, OwnedRunIdPattern, RegexOptions.CultureInvariant))
+        if (string.IsNullOrWhiteSpace(documentsDirectory) || !TryGetBaseRunId(runId, out var baseRunId))
             return null;
         var root = Path.GetFullPath(Path.Combine(documentsDirectory, "Mount and Blade II Bannerlord", "Configs", "ModLogs", "AgentRuns"));
         var rootPrefix = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        var path = Path.GetFullPath(Path.Combine(root, runId + ".jsonl"));
+        var path = Path.GetFullPath(Path.Combine(root, baseRunId + ".jsonl"));
         return path.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase) ? path : null;
     }
 
@@ -261,6 +272,7 @@ internal static class AgentHostRuntimeProgressLog
         var decision = new JsonObject
         {
             ["action"] = "dialogueSelect",
+            ["goalClassification"] = "supported-map-arrival",
             ["arguments"] = new JsonObject { ["OptionId"] = "issue_offer_player_accept_quest", ["PrivateValue"] = "PRIVATE_ACTION_VALUE" },
             ["rationale"] = "PRIVATE_RATIONALE"
         };
@@ -287,10 +299,23 @@ internal static class AgentHostRuntimeProgressLog
             {
                 Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "agent-host-package");
                 Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_TEMP", tempRoot);
+                RecordDecision(request.RootElement, new ProviderDecisionResult("completed", "deepseek-flash", 321, 40,
+                    "required_tool_call", decision, "deepseek-flash", PromptCacheHitTokens: 12, PromptCacheMissTokens: 34,
+                    EstimatedCostCny: 0.01, ReservedCostUpperBoundCny: 0.04), configuredRunCostLimitCny: 5);
+                var unstartedLogPath = Path.Combine(tempRoot, "AgentHostRuntimeProgressLog", validRun + ".jsonl");
+                if (File.Exists(unstartedLogPath))
+                    throw new AgentHostException("runtime-progress-log-unowned-decision-recorded", "A provider one-shot with an MCM-shaped ID must not create a player run log unless the Campaign run was registered first.");
                 RecordRunStarted(request.RootElement);
                 RecordDecision(request.RootElement, new ProviderDecisionResult("completed", "deepseek-flash", 321, 40,
                     "required_tool_call", decision, "deepseek-flash", PromptCacheHitTokens: 12, PromptCacheMissTokens: 34,
                     EstimatedCostCny: 0.01, ReservedCostUpperBoundCny: 0.04), configuredRunCostLimitCny: 5);
+                var childRequest = JsonNode.Parse(request.RootElement.GetRawText()) as JsonObject
+                    ?? throw new AgentHostException("runtime-progress-child-request-self-test-failed", "The child subflow request fixture must be an object.");
+                childRequest["runId"] = validRun + "-battle-inquiry-1";
+                using var childRequestDocument = JsonDocument.Parse(childRequest.ToJsonString());
+                RecordDecision(childRequestDocument.RootElement, new ProviderDecisionResult("completed", "deepseek-flash", 99, 12,
+                    "required_tool_call", decision, "deepseek-flash", PromptCacheHitTokens: 0, PromptCacheMissTokens: 99,
+                    EstimatedCostCny: 0.002, ReservedCostUpperBoundCny: 0.005), configuredRunCostLimitCny: 5);
                 RecordObjectiveSubflowResult("gold", new JsonObject { ["runId"] = validRun, ["status"] = "failed", ["termination"] = "self-test" });
                 RecordRunSummary(request.RootElement, new JsonObject
                 {
@@ -306,11 +331,15 @@ internal static class AgentHostRuntimeProgressLog
             }
             var productLog = Path.Combine(tempRoot, "AgentHostRuntimeProgressLog", validRun + ".jsonl");
             var productLogLines = File.ReadAllLines(productLog);
-            if (productLogLines.Length != 4 || productLogLines.Any(line => line.Contains("PRIVATE_", StringComparison.Ordinal) ||
+            var childDecision = productLogLines.Length > 2 ? JsonNode.Parse(productLogLines[2]) as JsonObject : null;
+            if (productLogLines.Length != 5 || productLogLines.Any(line => line.Contains("PRIVATE_", StringComparison.Ordinal) ||
                     line.Contains("PRIVATE_OPTION_VALUE", StringComparison.Ordinal)) ||
                 ReadString(JsonNode.Parse(productLogLines[1]) as JsonObject, "event") != "provider-decision" ||
-                ReadString(JsonNode.Parse(productLogLines[2]) as JsonObject, "objectiveId") != "gold" ||
-                ReadString(JsonNode.Parse(productLogLines[3]) as JsonObject, "event") != "run-summary")
+                ReadString(childDecision, "event") != "provider-decision" ||
+                ReadString(childDecision, "runId") != validRun + "-battle-inquiry-1" ||
+                ReadString(childDecision, "goalClassification") != "supported-map-arrival" ||
+                ReadString(JsonNode.Parse(productLogLines[3]) as JsonObject, "objectiveId") != "gold" ||
+                ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "event") != "run-summary")
             {
                 var loggedEvents = string.Join(",", productLogLines.Select(line => ReadString(JsonNode.Parse(line) as JsonObject, "event") ?? "unknown"));
                 var privateMarkerFound = productLogLines.Any(line => line.Contains("PRIVATE_", StringComparison.Ordinal));
@@ -334,11 +363,32 @@ internal static class AgentHostRuntimeProgressLog
             try { if (Directory.Exists(tempRoot)) Directory.Delete(tempRoot, recursive: true); } catch { }
         }
 
+        var previousConsoleOut = Console.Out;
+        string usageSignal;
+        try
+        {
+            using var signalWriter = new StringWriter(CultureInfo.InvariantCulture);
+            Console.SetOut(signalWriter);
+            WriteUsageSignal(new ProviderDecisionResult("completed", "deepseek-flash", 321, 40, "required_tool_call",
+                new JsonObject { ["goalClassification"] = "supported-map-arrival" },
+                PromptCacheHitTokens: 12, PromptCacheMissTokens: 34, EstimatedCostCny: 0.01, ReservedCostUpperBoundCny: 0.04), 5);
+            usageSignal = signalWriter.ToString();
+        }
+        finally { Console.SetOut(previousConsoleOut); }
+        if (!usageSignal.StartsWith(UsageSignalPrefix, StringComparison.Ordinal) ||
+            !usageSignal.Contains("promptTokens=321", StringComparison.Ordinal) ||
+            !usageSignal.Contains("cacheHitTokens=12", StringComparison.Ordinal) ||
+            !usageSignal.Contains("estimatedCostCny=0.01", StringComparison.Ordinal) ||
+            !usageSignal.Contains("reservedCostUpperBoundCny=0.04", StringComparison.Ordinal) ||
+            !usageSignal.Contains("runCostLimitCny=5", StringComparison.Ordinal))
+            throw new AgentHostException("runtime-progress-usage-signal-self-test-failed", "The game-process usage signal must carry token, cache, estimate, reservation and cap fields in the documented machine-readable format.");
+
         return new object[]
         {
-            new { scenario = "runtime-progress-log-preserves-cost-usage-without-prompts-responses-or-argument-values", passed = true },
+            new { scenario = "runtime-progress-log-preserves-cost-usage-without-prompts-responses-or-argument-values-including-numbered-subflows", passed = true },
             new { scenario = "runtime-progress-log-path-is-run-scoped-and-rejects-path-traversal", passed = true },
-            new { scenario = "runtime-progress-log-retention-is-bounded-and-only-removes-owned-jsonl", passed = true }
+            new { scenario = "runtime-progress-log-retention-is-bounded-and-only-removes-owned-jsonl", passed = true },
+            new { scenario = "runtime-progress-usage-signal-is-machine-readable-for-live-status", passed = true }
         };
     }
 
@@ -349,11 +399,10 @@ internal static class AgentHostRuntimeProgressLog
         if (string.Equals(harnessMode, "agent-host-package", StringComparison.Ordinal))
         {
             var harnessTemp = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
-            if (string.IsNullOrWhiteSpace(harnessTemp) || string.IsNullOrWhiteSpace(runId) ||
-                !Regex.IsMatch(runId, OwnedRunIdPattern, RegexOptions.CultureInvariant)) return false;
+            if (string.IsNullOrWhiteSpace(harnessTemp) || !TryGetBaseRunId(runId, out var baseRunId)) return false;
             var testRoot = Path.GetFullPath(Path.Combine(harnessTemp, "AgentHostRuntimeProgressLog"));
             var rootPrefix = testRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            var testPath = Path.GetFullPath(Path.Combine(testRoot, runId + ".jsonl"));
+            var testPath = Path.GetFullPath(Path.Combine(testRoot, baseRunId + ".jsonl"));
             if (!testPath.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase)) return false;
             path = testPath;
             return true;
@@ -363,6 +412,22 @@ internal static class AgentHostRuntimeProgressLog
         var resolved = ResolvePlayerRunLogPath(documents, runId ?? string.Empty);
         if (resolved is null) return false;
         path = resolved;
+        return true;
+    }
+
+    private static bool IsActiveProductRun(string? runId)
+    {
+        if (!TryGetBaseRunId(runId, out var baseRunId)) return false;
+        lock (WriteGate) return ActiveProductRunIds.Contains(baseRunId);
+    }
+
+    private static bool TryGetBaseRunId(string? runId, out string baseRunId)
+    {
+        baseRunId = string.Empty;
+        if (string.IsNullOrWhiteSpace(runId)) return false;
+        var match = Regex.Match(runId, OwnedRunIdPattern, RegexOptions.CultureInvariant);
+        if (!match.Success) return false;
+        baseRunId = match.Groups[1].Value;
         return true;
     }
 

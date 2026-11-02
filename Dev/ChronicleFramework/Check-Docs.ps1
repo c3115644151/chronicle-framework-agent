@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.505'
+$contractVersion = '7.506'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -149,7 +149,7 @@ if ($agentHostHarnessProgressTraceSource -notmatch 'AgentHostRuntimeProgressLog\
     $agentHostRuntimeControllerSource -notmatch 'BuildProviderUsageSummary' -or
     $agentHostRuntimeControllerSource -notmatch 'UpdateProviderUsage' -or
     $providerSettingsSource -notmatch 'AgentRuns' -or
-    $agentHostRuntimeProgressLogSource -notmatch 'runtime-progress-log-preserves-cost-usage-without-prompts-responses-or-argument-values') {
+    $agentHostRuntimeProgressLogSource -notmatch 'runtime-progress-log-preserves-cost-usage-without-prompts-responses-or-argument-values-including-numbered-subflows') {
     throw 'Normal MCM runs must record bounded per-decision token/cache/cost diagnostics without prompts or credentials, expose current usage to ViewAgentStatus, and retain an owned rotating local log.'
 }
 if ($agentHostCampaignLoopSource -notmatch 'goalValid=' -or
