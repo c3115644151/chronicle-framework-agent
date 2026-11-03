@@ -460,7 +460,12 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             reservedCostForRequest = (deepSeekInputTokenEstimate.ReservedTokens * DeepSeekInputPeakCnyPerMillion +
                                       _settings.MaxOutputTokens * DeepSeekOutputPeakCnyPerMillion) / 1000000d;
             if (_reservedDeepSeekCostCny + reservedCostForRequest > _settings.MaxEstimatedRunCostCny)
+            {
+                AgentHostHarnessProgressTrace.RecordBudgetReservationRejected(request, _settings.Model,
+                    deepSeekInputTokenEstimate.TokenizerTokens, deepSeekInputTokenEstimate.ReservedTokens, _settings.MaxOutputTokens,
+                    _reservedDeepSeekCostCny, reservedCostForRequest, _settings.MaxEstimatedRunCostCny);
                 throw new AgentHostException("provider-budget-exhausted", "The DeepSeek estimated cost reservation would exceed the configured per-run threshold; no additional model request was sent.");
+            }
             _reservedDeepSeekCostCny = Math.Round(_reservedDeepSeekCostCny + reservedCostForRequest, 8);
         }
 

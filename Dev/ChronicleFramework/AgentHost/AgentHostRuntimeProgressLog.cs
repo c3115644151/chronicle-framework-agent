@@ -63,6 +63,35 @@ internal static class AgentHostRuntimeProgressLog
             WriteUsageSignal(result, configuredRunCostLimitCny);
     }
 
+    internal static void RecordBudgetReservationRejected(JsonElement request, string modelId, int estimatedInputTokens, int reservedInputTokens,
+        int outputTokenCeiling, double reservedBeforeCny, double nextRequestUpperBoundCny, double runLimitCny)
+    {
+        var runId = ReadString(request, "runId");
+        if (!IsActiveProductRun(runId) || !TryGetPath(runId, out var path)) return;
+        try
+        {
+            AppendEvent(path, new JsonObject
+            {
+                ["event"] = "provider-budget-reservation-rejected",
+                ["schemaVersion"] = 1,
+                ["utc"] = UtcNow(),
+                ["runId"] = runId,
+                ["modelId"] = modelId,
+                ["estimatedInputTokens"] = estimatedInputTokens,
+                ["reservedInputTokens"] = reservedInputTokens,
+                ["outputTokenCeiling"] = outputTokenCeiling,
+                ["reservedBeforeCny"] = Math.Round(reservedBeforeCny, 8),
+                ["nextRequestUpperBoundCny"] = Math.Round(nextRequestUpperBoundCny, 8),
+                ["runLimitCny"] = Math.Round(runLimitCny, 8),
+                ["projectedReservedAfterCny"] = Math.Round(reservedBeforeCny + nextRequestUpperBoundCny, 8),
+                ["nativeActionSent"] = false,
+                ["promptsLogged"] = false,
+                ["credentialsLogged"] = false
+            });
+        }
+        catch { }
+    }
+
     internal static JsonObject BuildDecisionEvent(JsonElement request, ProviderDecisionResult result, double? configuredRunCostLimitCny)
     {
         var runId = ReadString(request, "runId");
@@ -76,6 +105,8 @@ internal static class AgentHostRuntimeProgressLog
         var conversation = context?["conversation"] as JsonObject;
         var inquiry = context?["inquiry"] as JsonObject;
         var partyScreen = state?["partyScreen"] as JsonObject;
+        var objectiveId = ReadString(request, "objectiveId") ?? ReadString(observation, "objectiveId") ?? ReadString(state, "objectiveId");
+        var scope = ReadString(request, "scopeRestriction") ?? ReadString(observation, "scope") ?? ReadString(state, "scope");
         var actionArguments = result.Decision["arguments"] as JsonObject;
         var decisionAction = ReadString(result.Decision, "action");
         var decisionControl = ReadString(result.Decision, "control");
@@ -118,6 +149,8 @@ internal static class AgentHostRuntimeProgressLog
             ["decisionAction"] = decisionAction,
             ["goalClassification"] = ReadString(result.Decision, "goalClassification"),
             ["decisionControl"] = decisionControl,
+            ["objectiveId"] = objectiveId,
+            ["scope"] = scope,
             ["argumentNames"] = argumentNames,
             ["allowedActions"] = allowedActions,
             ["allowedControls"] = allowedControls,
@@ -215,6 +248,7 @@ internal static class AgentHostRuntimeProgressLog
         if (!IsActiveProductRun(runId) || !TryGetPath(runId, out var path)) return;
         try
         {
+            var loggedUsage = BuildLoggedUsageSummary(path, runId, result);
             AppendEvent(path, new JsonObject
             {
                 ["event"] = "run-summary",
@@ -233,6 +267,7 @@ internal static class AgentHostRuntimeProgressLog
                 ["promptCacheMissTokens"] = Copy(result, "providerPromptCacheMissTokens"),
                 ["estimatedCostCny"] = Copy(result, "providerActualCostEstimateCny"),
                 ["reservedCostUpperBoundCny"] = Copy(result, "providerReservedCostUpperCny"),
+                ["loggedProviderUsage"] = loggedUsage,
                 ["goalVerified"] = Copy(result["termination"] as JsonObject, "goalVerified"),
                 ["failureTextLogged"] = false,
                 ["credentialsLogged"] = false
@@ -277,6 +312,106 @@ internal static class AgentHostRuntimeProgressLog
         }
     }
 
+    private static JsonObject BuildLoggedUsageSummary(string path, string? runId, JsonObject result)
+    {
+        var hasBaseRunId = TryGetBaseRunId(runId, out var baseRunId);
+        var rows = new List<JsonObject>();
+        var providerFailureEventsWithoutUsage = 0;
+        var budgetReservationRejections = 0;
+        try
+        {
+            foreach (var line in File.ReadLines(path))
+            {
+                JsonObject? item;
+                try { item = JsonNode.Parse(line) as JsonObject; }
+                catch { continue; }
+                if (item is null) continue;
+                var itemRunId = ReadString(item, "runId");
+                if (hasBaseRunId && (!TryGetBaseRunId(itemRunId, out var itemBaseRunId) || itemBaseRunId != baseRunId)) continue;
+                switch (ReadString(item, "event"))
+                {
+                    case "provider-decision": rows.Add(item); break;
+                    case "provider-failure": providerFailureEventsWithoutUsage++; break;
+                    case "provider-budget-reservation-rejected": budgetReservationRejections++; break;
+                }
+            }
+        }
+        catch { }
+
+        long? Sum(string field) => rows.Count > 0 && rows.All(row => ReadLong(row, field).HasValue)
+            ? rows.Sum(row => ReadLong(row, field)!.Value)
+            : null;
+        double? SumDouble(string field) => rows.Count > 0 && rows.All(row => ReadDouble(row, field).HasValue)
+            ? Math.Round(rows.Sum(row => ReadDouble(row, field)!.Value), 8)
+            : null;
+        var reportedDecisions = ReadInt(result, "decisions");
+        var terminalPromptTokens = ReadLong(result, "promptTokens");
+        var terminalCompletionTokens = ReadLong(result, "completionTokens");
+        var terminalEstimatedCost = ReadDouble(result, "providerActualCostEstimateCny");
+        var loggedPromptTokens = Sum("promptTokens");
+        var loggedCompletionTokens = Sum("completionTokens");
+        var loggedEstimatedCost = SumDouble("estimatedCostCny");
+        var cacheHitTokens = Sum("promptCacheHitTokens");
+        var cacheMissTokens = Sum("promptCacheMissTokens");
+        var cacheTotal = cacheHitTokens.HasValue && cacheMissTokens.HasValue ? cacheHitTokens.Value + cacheMissTokens.Value : 0;
+        var missingUsageRows = rows.Count(row => !ReadLong(row, "promptTokens").HasValue ||
+            !ReadLong(row, "completionTokens").HasValue || !ReadDouble(row, "estimatedCostCny").HasValue);
+        return new JsonObject
+        {
+            ["accountingSource"] = "provider-decision-log-rows",
+            ["providerResponseRows"] = rows.Count,
+            ["rowsMissingTokenOrCostUsage"] = missingUsageRows,
+            ["providerUsageRowsComplete"] = rows.Count > 0 && missingUsageRows == 0,
+            ["costEstimateScope"] = "successfully parsed provider responses only; provider failures may have unreported usage",
+            ["providerFailureEventsWithoutUsage"] = providerFailureEventsWithoutUsage,
+            ["budgetReservationRejectionEvents"] = budgetReservationRejections,
+            ["reportedLoopDecisionCount"] = reportedDecisions,
+            ["reportedLoopDecisionCountMinusProviderRows"] = reportedDecisions.HasValue ? reportedDecisions.Value - rows.Count : null,
+            ["promptTokensFromRows"] = loggedPromptTokens,
+            ["completionTokensFromRows"] = loggedCompletionTokens,
+            ["promptCacheHitTokensFromRows"] = cacheHitTokens,
+            ["promptCacheMissTokensFromRows"] = cacheMissTokens,
+            ["promptCacheHitRatioFromRows"] = cacheTotal > 0 ? Math.Round((double)cacheHitTokens!.Value / cacheTotal, 6) : null,
+            ["estimatedCostCnyFromRows"] = loggedEstimatedCost,
+            ["providerPromptTokensFromTerminal"] = terminalPromptTokens,
+            ["providerCompletionTokensFromTerminal"] = terminalCompletionTokens,
+            ["providerEstimatedCostCnyFromTerminal"] = terminalEstimatedCost,
+            ["promptTokensRowsMinusTerminal"] = loggedPromptTokens.HasValue && terminalPromptTokens.HasValue ? loggedPromptTokens.Value - terminalPromptTokens.Value : null,
+            ["completionTokensRowsMinusTerminal"] = loggedCompletionTokens.HasValue && terminalCompletionTokens.HasValue ? loggedCompletionTokens.Value - terminalCompletionTokens.Value : null,
+            ["estimatedCostCnyRowsMinusTerminal"] = loggedEstimatedCost.HasValue && terminalEstimatedCost.HasValue ? Math.Round(loggedEstimatedCost.Value - terminalEstimatedCost.Value, 8) : null,
+            ["lastBudgetReservationRejection"] = ReadLastBudgetRejection(path, baseRunId, hasBaseRunId)
+        };
+    }
+
+    private static JsonObject? ReadLastBudgetRejection(string path, string baseRunId, bool hasBaseRunId)
+    {
+        try
+        {
+            foreach (var line in File.ReadLines(path).Reverse())
+            {
+                JsonObject? item;
+                try { item = JsonNode.Parse(line) as JsonObject; }
+                catch { continue; }
+                if (item is null || ReadString(item, "event") != "provider-budget-reservation-rejected") continue;
+                var itemRunId = ReadString(item, "runId");
+                if (hasBaseRunId && (!TryGetBaseRunId(itemRunId, out var itemBaseRunId) || itemBaseRunId != baseRunId)) continue;
+                return new JsonObject
+                {
+                    ["reservedBeforeCny"] = Copy(item, "reservedBeforeCny"),
+                    ["nextRequestUpperBoundCny"] = Copy(item, "nextRequestUpperBoundCny"),
+                    ["projectedReservedAfterCny"] = Copy(item, "projectedReservedAfterCny"),
+                    ["runLimitCny"] = Copy(item, "runLimitCny"),
+                    ["estimatedInputTokens"] = Copy(item, "estimatedInputTokens"),
+                    ["reservedInputTokens"] = Copy(item, "reservedInputTokens"),
+                    ["outputTokenCeiling"] = Copy(item, "outputTokenCeiling"),
+                    ["nativeActionSent"] = Copy(item, "nativeActionSent")
+                };
+            }
+        }
+        catch { }
+        return null;
+    }
+
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
         var documents = Path.Combine(Path.GetTempPath(), "ChronicleRuntimeLogContract");
@@ -288,7 +423,7 @@ internal static class AgentHostRuntimeProgressLog
             throw new AgentHostException("runtime-progress-log-path-self-test-failed", "Player progress logs must stay in the owned ModLogs\\AgentRuns folder and reject untrusted run IDs.");
 
         using var request = JsonDocument.Parse("""
-            {"runId":"mcm-0123456789abcdef0123456789abcdef","goal":"PRIVATE_GOAL_TEXT","observation":{"state":{"campaignDay":42.5,"context":{"gameState":"PartyState","menuId":null,"timeControlMode":"Stop","encounterActive":false,"inquiryOpen":true,"inquiry":{"supported":true,"kind":"YesNoInquiry","token":"PRIVATE_INQUIRY_TOKEN","title":"Leaving troops behind","text":"PRIVATE_INQUIRY_BODY","affirmative":{"visible":true,"enabled":true,"text":"Yes"},"negative":{"visible":true,"enabled":true,"text":"No"}},"encounteredPartyId":null},"location":{"currentSettlementId":"village-1","targetPartyId":null},"economy":{"gold":100,"renown":20},"party":{"members":5,"sizeLimit":20,"healthy":3,"wounded":1,"prisoners":1,"morale":12.5,"food":0.5,"foodChange":-0.25,"isMoving":false,"moveMode":"Party","defaultBehavior":"Hold"},"partyScreen":{"mode":"Loot","canDone":true,"doneReason":"Leaving troops behind","rightMemberLimit":20,"leftMembers":[{"troopId":"hidden-native-id","count":5,"transferable":true}],"leftPrisoners":[],"rightMembers":[{"troopId":"looter","count":5,"transferable":false}],"rightPrisoners":[]},"objectiveSnapshot":{"gold":{"current":100,"target":2000,"met":false}}}},"allowedActions":[{"action":"respondInquiry","arguments":["choice"]},{"action":"partyScreenDone","arguments":[]}],"allowedControls":[]}
+            {"runId":"mcm-0123456789abcdef0123456789abcdef","goal":"PRIVATE_GOAL_TEXT","objectiveId":"gold","scopeRestriction":"safe-settlement-arrival","observation":{"state":{"campaignDay":42.5,"context":{"gameState":"PartyState","menuId":null,"timeControlMode":"Stop","encounterActive":false,"inquiryOpen":true,"inquiry":{"supported":true,"kind":"YesNoInquiry","token":"PRIVATE_INQUIRY_TOKEN","title":"Leaving troops behind","text":"PRIVATE_INQUIRY_BODY","affirmative":{"visible":true,"enabled":true,"text":"Yes"},"negative":{"visible":true,"enabled":true,"text":"No"}},"encounteredPartyId":null},"location":{"currentSettlementId":"village-1","targetPartyId":null},"economy":{"gold":100,"renown":20},"party":{"members":5,"sizeLimit":20,"healthy":3,"wounded":1,"prisoners":1,"morale":12.5,"food":0.5,"foodChange":-0.25,"isMoving":false,"moveMode":"Party","defaultBehavior":"Hold"},"partyScreen":{"mode":"Loot","canDone":true,"doneReason":"Leaving troops behind","rightMemberLimit":20,"leftMembers":[{"troopId":"hidden-native-id","count":5,"transferable":true}],"leftPrisoners":[],"rightMembers":[{"troopId":"looter","count":5,"transferable":false}],"rightPrisoners":[]},"objectiveSnapshot":{"gold":{"current":100,"target":2000,"met":false}}}},"allowedActions":[{"action":"respondInquiry","arguments":["choice"]},{"action":"partyScreenDone","arguments":[]}],"allowedControls":[]}
             """);
         var decision = new JsonObject
         {
@@ -306,6 +441,7 @@ internal static class AgentHostRuntimeProgressLog
             ReadInt(loggedDecision, "promptCacheHitTokens") != 12 || ReadInt(loggedDecision, "promptCacheMissTokens") != 34 ||
             Math.Abs((ReadDouble(loggedDecision, "estimatedCostCny") ?? -1) - 0.01) > 0.0000001 ||
             Math.Abs((ReadDouble(loggedDecision, "configuredRunCostLimitCny") ?? -1) - 5) > 0.0000001 ||
+            ReadString(loggedDecision, "objectiveId") != "gold" || ReadString(loggedDecision, "scope") != "safe-settlement-arrival" ||
             ReadBoolean(loggedDecision, "partyIsMoving") || ReadBoolean(loggedDecision, "encounterActive") ||
             ReadString(loggedDecision, "encounteredPartyId") is not null || ReadString(loggedDecision, "partyDefaultBehavior") != "Hold" ||
             ReadInt(loggedDecision, "partyWounded") != 1 || ReadInt(loggedDecision, "partyPrisoners") != 1 ||
@@ -353,6 +489,8 @@ internal static class AgentHostRuntimeProgressLog
                 RecordDecision(childRequestDocument.RootElement, new ProviderDecisionResult("completed", "deepseek-flash", 99, 12,
                     "required_tool_call", decision, "deepseek-flash", PromptCacheHitTokens: 0, PromptCacheMissTokens: 99,
                     EstimatedCostCny: 0.002, ReservedCostUpperBoundCny: 0.005), configuredRunCostLimitCny: 5);
+                RecordBudgetReservationRejected(childRequestDocument.RootElement, "deepseek-flash", 900, 990, 256, 4.9, 0.2, 5);
+                RecordProviderFailure(request.RootElement, "provider-timeout");
                 RecordObjectiveSubflowResult("gold", new JsonObject { ["runId"] = validRun, ["status"] = "failed", ["termination"] = "self-test" });
                 RecordRunSummary(request.RootElement, new JsonObject
                 {
@@ -369,18 +507,32 @@ internal static class AgentHostRuntimeProgressLog
             var productLog = Path.Combine(tempRoot, "AgentHostRuntimeProgressLog", validRun + ".jsonl");
             var productLogLines = File.ReadAllLines(productLog);
             var childDecision = productLogLines.Length > 2 ? JsonNode.Parse(productLogLines[2]) as JsonObject : null;
-            if (productLogLines.Length != 5 || productLogLines.Any(line => line.Contains("PRIVATE_", StringComparison.Ordinal) ||
+            var budgetEvent = productLogLines.Length > 3 ? JsonNode.Parse(productLogLines[3]) as JsonObject : null;
+            var summaryEvent = productLogLines.Length > 6 ? JsonNode.Parse(productLogLines[6]) as JsonObject : null;
+            var summaryUsage = summaryEvent?["loggedProviderUsage"] as JsonObject;
+            if (productLogLines.Length != 7 || productLogLines.Any(line => line.Contains("PRIVATE_", StringComparison.Ordinal) ||
                     line.Contains("PRIVATE_OPTION_VALUE", StringComparison.Ordinal)) ||
                 ReadString(JsonNode.Parse(productLogLines[1]) as JsonObject, "event") != "provider-decision" ||
                 ReadString(childDecision, "event") != "provider-decision" ||
                 ReadString(childDecision, "runId") != validRun + "-battle-inquiry-1" ||
                 ReadString(childDecision, "goalClassification") != "supported-map-arrival" ||
-                ReadString(JsonNode.Parse(productLogLines[3]) as JsonObject, "objectiveId") != "gold" ||
-                ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "event") != "run-summary")
+                ReadString(budgetEvent, "event") != "provider-budget-reservation-rejected" ||
+                ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "event") != "provider-failure" ||
+                ReadString(JsonNode.Parse(productLogLines[5]) as JsonObject, "objectiveId") != "gold" ||
+                ReadString(summaryEvent, "event") != "run-summary" ||
+                ReadInt(summaryUsage, "providerResponseRows", -1) != 2 ||
+                ReadInt(summaryUsage, "providerFailureEventsWithoutUsage", -1) != 1 ||
+                ReadInt(summaryUsage, "budgetReservationRejectionEvents", -1) != 1 ||
+                ReadInt(summaryUsage, "reportedLoopDecisionCountMinusProviderRows", 0) != -1 ||
+                ReadLong(summaryUsage, "promptTokensRowsMinusTerminal") != 99 ||
+                Math.Abs((ReadDouble(summaryUsage, "estimatedCostCnyFromRows") ?? -1) - 0.012) > 0.0000001 ||
+                Math.Abs((ReadDouble(summaryUsage, "estimatedCostCnyRowsMinusTerminal") ?? -1) - 0.002) > 0.0000001 ||
+                Math.Abs((ReadDouble(summaryUsage, "promptCacheHitRatioFromRows") ?? -1) - (12d / 145d)) > 0.000001 ||
+                Math.Abs((ReadDouble(budgetEvent, "projectedReservedAfterCny") ?? -1) - 5.1) > 0.0000001)
             {
                 var loggedEvents = string.Join(",", productLogLines.Select(line => ReadString(JsonNode.Parse(line) as JsonObject, "event") ?? "unknown"));
                 var privateMarkerFound = productLogLines.Any(line => line.Contains("PRIVATE_", StringComparison.Ordinal));
-                throw new AgentHostException("runtime-progress-log-end-to-end-self-test-failed", $"A MCM run must persist per-decision cost data and a final summary while omitting secret markers and free-text payloads. lines={productLogLines.Length}; events={loggedEvents}; privateMarker={privateMarkerFound}.");
+                throw new AgentHostException("runtime-progress-log-end-to-end-self-test-failed", $"A MCM run must persist per-decision cost data and reconcile the final summary while omitting secret markers and free-text payloads. lines={productLogLines.Length}; events={loggedEvents}; privateMarker={privateMarkerFound}; providerRows={ReadInt(summaryUsage, "providerResponseRows", -1)}; decisionDelta={ReadInt(summaryUsage, "reportedLoopDecisionCountMinusProviderRows", 0)}; promptDelta={ReadLong(summaryUsage, "promptTokensRowsMinusTerminal")}; rowCost={ReadDouble(summaryUsage, "estimatedCostCnyFromRows")}; costDelta={ReadDouble(summaryUsage, "estimatedCostCnyRowsMinusTerminal")}; projectedReserve={ReadDouble(budgetEvent, "projectedReservedAfterCny")}.");
             }
 
             var currentPath = Path.Combine(tempRoot, validRun + ".jsonl");
@@ -513,6 +665,14 @@ internal static class AgentHostRuntimeProgressLog
     private static int? ReadInt(JsonObject? parent, string name) =>
         parent?[name] is JsonValue node && node.TryGetValue<int>(out var value) ? value : null;
     private static int ReadInt(JsonObject? parent, string name, int fallback) => ReadInt(parent, name) ?? fallback;
+    private static long? ReadLong(JsonObject? parent, string name)
+    {
+        if (parent?[name] is not JsonValue node) return null;
+        if (node.TryGetValue<long>(out var value)) return value;
+        if (node.TryGetValue<int>(out var intValue)) return intValue;
+        if (node.TryGetValue<JsonElement>(out var element) && element.ValueKind == JsonValueKind.Number && element.TryGetInt64(out value)) return value;
+        return null;
+    }
     private static double? ReadDouble(JsonObject? parent, string name) =>
         parent?[name] is JsonValue node && node.TryGetValue<double>(out var value) ? value : null;
     private static string? ReadString(JsonObject? parent, string name) =>

@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.520'
+$contractVersion = '7.521'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -149,6 +149,13 @@ if ($agentHostHarnessProgressTraceSource -notmatch 'AgentHostRuntimeProgressLog\
     $agentHostRuntimeProgressLogSource -notmatch 'MaximumRunLogBytes' -or
     $agentHostRuntimeProgressLogSource -notmatch 'MaximumRetainedRunLogs' -or
     $agentHostRuntimeProgressLogSource -notmatch 'WriteUsageSignal\(result, configuredRunCostLimitCny\)' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'BuildLoggedUsageSummary' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'providerResponseRows' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'providerFailureEventsWithoutUsage' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'promptCacheHitRatioFromRows' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'successfully parsed provider responses only' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'RecordBudgetReservationRejected' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'provider-budget-reservation-rejected' -or
     $agentHostRuntimeProgressLogSource -notmatch 'RunContractSelfTests' -or
     $agentHostRuntimeProgressLogSource -notmatch 'promptsLogged.*false' -or
     $agentHostRuntimeProgressLogSource -notmatch 'credentialsLogged.*false' -or

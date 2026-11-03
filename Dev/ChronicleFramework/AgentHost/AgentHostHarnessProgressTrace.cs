@@ -213,6 +213,45 @@ internal static class AgentHostHarnessProgressTrace
         }
     }
 
+    internal static void RecordBudgetReservationRejected(JsonElement request, string modelId, int estimatedInputTokens, int reservedInputTokens,
+        int outputTokenCeiling, double reservedBeforeCny, double nextRequestUpperBoundCny, double runLimitCny)
+    {
+        AgentHostRuntimeProgressLog.RecordBudgetReservationRejected(request, modelId, estimatedInputTokens, reservedInputTokens,
+            outputTokenCeiling, reservedBeforeCny, nextRequestUpperBoundCny, runLimitCny);
+        var harnessMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+        if (harnessMode is not ("visual-capture" or "agent-host-lifecycle-test")) return;
+        var directory = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory)) return;
+        try
+        {
+            var rootPath = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var tracePath = Path.GetFullPath(Path.Combine(rootPath, "AgentHostProgress.jsonl"));
+            if (!tracePath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase)) return;
+            var payload = new JsonObject
+            {
+                ["event"] = "provider-budget-reservation-rejected",
+                ["utc"] = DateTime.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+                ["runId"] = ReadString(request, "runId"),
+                ["modelId"] = modelId,
+                ["estimatedInputTokens"] = estimatedInputTokens,
+                ["reservedInputTokens"] = reservedInputTokens,
+                ["outputTokenCeiling"] = outputTokenCeiling,
+                ["reservedBeforeCny"] = Math.Round(reservedBeforeCny, 8),
+                ["nextRequestUpperBoundCny"] = Math.Round(nextRequestUpperBoundCny, 8),
+                ["runLimitCny"] = Math.Round(runLimitCny, 8),
+                ["projectedReservedAfterCny"] = Math.Round(reservedBeforeCny + nextRequestUpperBoundCny, 8),
+                ["nativeActionSent"] = false,
+                ["promptsLogged"] = false,
+                ["credentialsLogged"] = false
+            };
+            AppendLine(tracePath, Encoding.UTF8.GetBytes(payload.ToJsonString() + Environment.NewLine));
+        }
+        catch
+        {
+            // Budget diagnostics must never alter provider behavior or the safety cap.
+        }
+    }
+
     private static void AppendLine(string tracePath, byte[] line)
     {
         lock (WriteGate)
@@ -628,9 +667,17 @@ internal static class AgentHostHarnessProgressTrace
                 objectiveLine.ContainsKey("failure"))
                 throw new AgentHostException("host-progress-trace-objective-subflow", "Harness diagnostics must record bounded failure codes and aggregate offer/navigation outcomes without copying free text or Native Hero/Troop IDs and names.");
 
+            RecordBudgetReservationRejected(request.RootElement, "deepseek-flash", 900, 990, 256, 4.9, 0.2, 5);
+            var budgetLine = JsonNode.Parse(File.ReadAllLines(path).Last()) as JsonObject;
+            if (ReadString(budgetLine, "event") != "provider-budget-reservation-rejected" ||
+                ReadInt(budgetLine, "estimatedInputTokens") != 900 ||
+                Math.Abs((ReadDouble(budgetLine, "projectedReservedAfterCny") ?? -1) - 5.1) > 0.0000001 ||
+                ReadBoolean(budgetLine, "nativeActionSent") || budgetLine?.ContainsKey("prompt") == true || budgetLine?.ContainsKey("apiKey") == true)
+                throw new AgentHostException("host-progress-trace-budget-rejection", "Budget diagnostics must record the preflight cost arithmetic without logging prompt contents, credentials, or a Native action.");
+
             Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "normal");
             RecordDecision(request.RootElement, new ProviderDecisionResult("completed", "selftest-model", 1, 1, "stop", decision, "selftest/route"));
-            if (File.ReadAllLines(path).Length != 4)
+            if (File.ReadAllLines(path).Length != 5)
                 throw new AgentHostException("host-progress-trace-self-test-mode-gate", "Progress tracing must be disabled outside Harness visual-capture/lifecycle modes.");
             return [
                 new { scenario = "harness-progress-trace-records-current-modal-and-visible-buttons-without-one-use-token", passed = true },
@@ -639,7 +686,8 @@ internal static class AgentHostHarnessProgressTrace
                 new { scenario = "harness-progress-trace-reports-only-aggregate-affordable-recruitment-offer-counts", passed = true },
                 new { scenario = "harness-progress-trace-reports-only-aggregate-companion-navigation-progress", passed = true },
                 new { scenario = "harness-progress-trace-records-objective-subflow-termination-and-safe-native-state-summaries", passed = true },
-                new { scenario = "harness-progress-trace-records-dynamic-journal-current-target-met-summary", passed = true }
+                new { scenario = "harness-progress-trace-records-dynamic-journal-current-target-met-summary", passed = true },
+                new { scenario = "harness-progress-trace-records-token-budget-rejection-arithmetic-without-prompt-or-key-material", passed = true }
             ];
         }
         finally
