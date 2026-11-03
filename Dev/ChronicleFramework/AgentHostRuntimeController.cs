@@ -561,7 +561,7 @@ internal static class ChronicleAgentRuntimeController
             if (_hostError != null) errorOutput = _hostError.GetAwaiter().GetResult();
         }
         catch { }
-        AgentHostLifecycleReceipt.CaptureForHarness(output, errorOutput);
+        var hostReceipt = AgentHostLifecycleReceipt.CaptureForHarness(output, errorOutput, exitCode);
         if (!string.IsNullOrWhiteSpace(_forcedFailureDetail))
             SetState(RuntimeState.Failed, _forcedFailureDetail);
         else if (output.IndexOf("\"reason\":\"native-action-result-ambiguous\"", StringComparison.Ordinal) >= 0)
@@ -580,6 +580,8 @@ internal static class ChronicleAgentRuntimeController
             SetState(RuntimeState.Failed, "模型服务未按时回复；Host已停止");
         else if (ContainsAny(output, errorOutput, "provider-http-error", "provider-unreachable"))
             SetState(RuntimeState.Failed, "模型请求失败；请检查服务商额度、限流和上游状态");
+        else if (ContainsAny(output, errorOutput, "provider-budget-exhausted"))
+            SetState(RuntimeState.Failed, "本轮DeepSeek费用预留将超过单次预算；Host已停止发送模型请求");
         else if (ContainsAny(output, errorOutput, "campaign-goal-unsupported"))
             SetState(RuntimeState.Failed, "当前目标超出Agent已接入范围；未执行战役行动");
         else if (ContainsAny(output, errorOutput, "provider-profile-missing", "profile-missing"))
@@ -592,6 +594,12 @@ internal static class ChronicleAgentRuntimeController
             SetState(RuntimeState.Failed, "战役会话已变化；Host已停止，未重放行动");
         else if (ContainsAny(output, errorOutput, "host-already-running"))
             SetState(RuntimeState.Failed, "已有Host占用当前协议会话");
+        else if (hostReceipt != null && (!string.IsNullOrWhiteSpace(hostReceipt.FailureCode) || !string.IsNullOrWhiteSpace(hostReceipt.ErrorCode)))
+        {
+            var code = AgentHostLifecycleReceipt.SanitizeDiagnostic(
+                !string.IsNullOrWhiteSpace(hostReceipt.FailureCode) ? hostReceipt.FailureCode : hostReceipt.ErrorCode);
+            SetState(RuntimeState.Failed, "Host失败（" + code + "，退出码 " + exitCode + "）");
+        }
         else if (_stopRequested && exitCode == 0)
             SetState(RuntimeState.Stopped, "Host已停止");
         else

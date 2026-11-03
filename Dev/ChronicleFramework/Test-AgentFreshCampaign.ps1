@@ -9,7 +9,8 @@ param(
     [switch]$StoryModeNativeInquiryResponseEvaluation,
     [switch]$ValidateRecruitmentProgression,
     [switch]$RealModelRecruitment,
-    [switch]$RetainDisposableSave
+    [switch]$RetainDisposableSave,
+    [switch]$TestAgentUsageTraceSummary
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,6 +18,55 @@ $harnessRoot = $PSScriptRoot
 . (Join-Path $harnessRoot 'Test-AgentSupport.ps1')
 . (Join-Path $harnessRoot 'HarnessShaderCacheDialog.ps1')
 . (Join-Path $harnessRoot 'HarnessStartupEvidence.ps1')
+
+function Measure-StoryModeAgentUsageFromTrace {
+    param([AllowNull()][object[]]$Entries)
+
+    $providerEvents = @($Entries | Where-Object { $_.event -eq 'provider-decision' })
+    if ($providerEvents.Count -eq 0) {
+        return [pscustomobject]@{ DecisionCount = 0; PromptTokens = 0; CompletionTokens = 0; PromptCacheHitTokens = $null; PromptCacheMissTokens = $null; EstimatedCostCny = $null; AllDecisionCostRowsPresent = $false; ReservedCostUpperBoundCny = $null }
+    }
+
+    $sumField = {
+        param([string]$Name)
+        $values = @($providerEvents | Where-Object { $null -ne $_.$Name } | ForEach-Object { [double]$_.$Name })
+        if ($values.Count -eq 0) { return $null }
+        return ($values | Measure-Object -Sum).Sum
+    }
+    $prompt = & $sumField 'promptTokens'
+    $completion = & $sumField 'completionTokens'
+    $cacheHitValues = @($providerEvents | Where-Object { $null -ne $_.promptCacheHitTokens } | ForEach-Object { [double]$_.promptCacheHitTokens })
+    $cacheMissValues = @($providerEvents | Where-Object { $null -ne $_.promptCacheMissTokens } | ForEach-Object { [double]$_.promptCacheMissTokens })
+    $costValues = @($providerEvents | Where-Object { $null -ne $_.estimatedCostCny } | ForEach-Object { [double]$_.estimatedCostCny })
+    $reservedValues = @($providerEvents | Where-Object { $null -ne $_.reservedCostUpperBoundCny } | ForEach-Object { [double]$_.reservedCostUpperBoundCny })
+    return [pscustomobject]@{
+        DecisionCount = $providerEvents.Count
+        PromptTokens = [long]$prompt
+        CompletionTokens = [long]$completion
+        PromptCacheHitTokens = if ($cacheHitValues.Count -eq $providerEvents.Count) { [long](($cacheHitValues | Measure-Object -Sum).Sum) } else { $null }
+        PromptCacheMissTokens = if ($cacheMissValues.Count -eq $providerEvents.Count) { [long](($cacheMissValues | Measure-Object -Sum).Sum) } else { $null }
+        EstimatedCostCny = if ($costValues.Count -gt 0) { [Math]::Round(($costValues | Measure-Object -Sum).Sum, 8) } else { $null }
+        AllDecisionCostRowsPresent = $costValues.Count -eq $providerEvents.Count
+        ReservedCostUpperBoundCny = if ($reservedValues.Count -gt 0) { [Math]::Round($reservedValues[-1], 8) } else { $null }
+    }
+}
+
+if ($TestAgentUsageTraceSummary) {
+    $sample = @(
+        [pscustomobject]@{ event = 'provider-decision'; promptTokens = 100; completionTokens = 5; promptCacheHitTokens = 40; promptCacheMissTokens = 60; estimatedCostCny = 0.01; reservedCostUpperBoundCny = 0.02 },
+        [pscustomobject]@{ event = 'objective-subflow-result'; promptTokens = 900; completionTokens = 900; estimatedCostCny = 900 },
+        [pscustomobject]@{ event = 'provider-decision'; promptTokens = 200; completionTokens = 7; promptCacheHitTokens = 60; promptCacheMissTokens = 140; estimatedCostCny = 0.02; reservedCostUpperBoundCny = 0.05 }
+    )
+    $summary = Measure-StoryModeAgentUsageFromTrace $sample
+    if ($summary.DecisionCount -ne 2 -or $summary.PromptTokens -ne 300 -or $summary.CompletionTokens -ne 12 -or
+        $summary.PromptCacheHitTokens -ne 100 -or $summary.PromptCacheMissTokens -ne 200 -or
+        [Math]::Abs($summary.EstimatedCostCny - 0.03) -gt 0.0000001 -or -not $summary.AllDecisionCostRowsPresent -or
+        [Math]::Abs($summary.ReservedCostUpperBoundCny - 0.05) -gt 0.0000001) {
+        throw 'StoryMode provider-usage trace aggregation did not preserve decision totals, cache/cost totals or the last cumulative reservation.'
+    }
+    $summary | ConvertTo-Json -Compress
+    return
+}
 if ($StoryModeEycSetup -and [string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) { throw 'StoryModeEycSetup requires an active Run-Harness temp/evidence directory.' }
 if ($StoryModeEycPersistentSeed -and (-not $StoryModeEycSetup -or $StoryModeNativeMenuLeaveEvaluation -or [string]::IsNullOrWhiteSpace($PersistentStoryModeSaveName))) {
     throw 'StoryModeEycPersistentSeed requires a StoryMode tutorial-skip run and a caller-owned disposable save name.'
@@ -303,6 +353,10 @@ $storyModeNativeInquiryTestSessionCreated = $false
 $storyModeNativeInquiryResponseCommandId = $null
 $storyModeNativeInquiryStateCommandId = $null
 $storyModeAgentHostTerminalState = $null
+$storyModeAgentHostReceiptCaptured = $false
+$storyModeAgentUsageSource = 'unavailable'
+$storyModeAgentProviderDecisionCostsComplete = $false
+$storyModeAgentNativeActionTraceObserved = $false
 $storyModeAgentProgressLineCount = 0
 $storyModeAgentProgressEntries = [System.Collections.Generic.List[object]]::new()
 $storyModeAgentNativeActionsExecuted = 0
@@ -1219,6 +1273,8 @@ $retainedPersistentStoryModeSave = [bool]($StoryModeEycPersistentSeed -and $pers
 if ($StoryModeEycLiveModelEvaluation -and $storyModeAgentHostReceiptPath -and (Test-Path -LiteralPath $storyModeAgentHostReceiptPath -PathType Leaf)) {
     try {
         $storyModeHostReceipt = Get-Content -LiteralPath $storyModeAgentHostReceiptPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $storyModeAgentHostReceiptCaptured = $true
+        $storyModeAgentUsageSource = 'host-lifecycle-receipt'
         $storyModeAgentNativeActionsExecuted = [Math]::Max(0, [int]$storyModeHostReceipt.actionsExecuted)
         $storyModeAgentDecisionCount = [Math]::Max(0, [int]$storyModeHostReceipt.decisionCount)
         $storyModeAgentPromptTokens = [Math]::Max(0, [long]$storyModeHostReceipt.promptTokens)
@@ -1233,6 +1289,24 @@ if ($StoryModeEycLiveModelEvaluation -and $storyModeAgentHostReceiptPath -and (T
     }
     catch { $harnessFailureObserved = $true }
 }
+if ($StoryModeEycLiveModelEvaluation -and -not $storyModeAgentHostReceiptCaptured) {
+    $traceUsage = Measure-StoryModeAgentUsageFromTrace $storyModeAgentProgressEntries.ToArray()
+    if ($traceUsage.DecisionCount -gt 0) {
+        $storyModeAgentUsageSource = 'harness-provider-decision-trace'
+        $storyModeAgentDecisionCount = $traceUsage.DecisionCount
+        $storyModeAgentPromptTokens = $traceUsage.PromptTokens
+        $storyModeAgentCompletionTokens = $traceUsage.CompletionTokens
+        $storyModeAgentPromptCacheHitTokens = $traceUsage.PromptCacheHitTokens
+        $storyModeAgentPromptCacheMissTokens = $traceUsage.PromptCacheMissTokens
+        $storyModeAgentActualCostEstimateCny = $traceUsage.EstimatedCostCny
+        $storyModeAgentProviderDecisionCostsComplete = $traceUsage.AllDecisionCostRowsPresent
+        $storyModeAgentReservedCostUpperBoundCny = $traceUsage.ReservedCostUpperBoundCny
+        $storyModeAgentNativeActionsExecuted = $null
+    }
+}
+$storyModeAgentNativeActionTraceObserved = @($storyModeAgentProgressEntries | Where-Object {
+    $_.event -eq 'objective-subflow-result' -and $null -ne $_.actionsExecuted -and [int]$_.actionsExecuted -gt 0
+}).Count -gt 0
 $issueProbeExpected = -not $StoryModeEycSetup -and -not $ValidateRecruitmentProgression -and [bool]($visibleIssueTypes -match ':[^,]+')
 $issueConversationProbeApplicable = $issueProbeExpected
 $issueConversationProbePassed = if ($issueProbeExpected) {
@@ -1317,7 +1391,7 @@ if ($StoryModeEycSetup) {
         $acceptanceChecks.storyModeLiveHostTerminated = $storyModeAgentHostTerminalState -in @('Stopped','Completed','Failed')
         $acceptanceChecks.storyModeFocusLossEscapeMenuGuardInstalled = $storyModeFocusLossEscapeMenuGuardInstalled
         $acceptanceChecks.storyModeLiveModelProducedDecision = $storyModeAgentProgressEntries.Count -gt 0
-        $acceptanceChecks.storyModeLiveNativeActionExecuted = $storyModeAgentNativeActionsExecuted -gt 0
+        $acceptanceChecks.storyModeLiveNativeActionExecuted = ($storyModeAgentNativeActionsExecuted -gt 0) -or $storyModeAgentNativeActionTraceObserved
         $acceptanceChecks.storyModeLiveProviderPreflightReady = [bool]($providerProfile -and $providerProfile.CatalogListed -and -not [string]::IsNullOrWhiteSpace([string]$providerProfile.ModelId))
     }
 }
@@ -1416,6 +1490,10 @@ $result = [ordered]@{
     StoryModeFocusLossEscapeMenuGuardInstalled = if ($StoryModeEycLiveModelEvaluation) { $storyModeFocusLossEscapeMenuGuardInstalled } else { $null }
     StoryModeAgentHostTerminalState = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentHostTerminalState } else { $null }
     StoryModeAgentHostTerminalDetail = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentHostTerminalDetail } else { $null }
+    StoryModeAgentHostReceiptCaptured = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentHostReceiptCaptured } else { $null }
+    StoryModeAgentUsageSource = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentUsageSource } else { $null }
+    StoryModeAgentProviderDecisionCostsComplete = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentProviderDecisionCostsComplete } else { $null }
+    StoryModeAgentNativeActionTraceObserved = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentNativeActionTraceObserved } else { $null }
     StoryModeStartupFailure = if ($StoryModeEycLiveModelEvaluation) { $storyModeStartupFailure } else { $null }
     StoryModeAgentDecisionCount = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentDecisionCount } else { $null }
     StoryModeAgentNativeActionsExecuted = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentNativeActionsExecuted } else { $null }

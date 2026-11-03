@@ -941,19 +941,19 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 var argumentProperties = new JsonObject();
                 foreach (var argumentName in argumentNames)
                 {
-                    var valueType = argumentName switch
+                    JsonElement values = default;
+                    var hasEnumeratedValues = action.TryGetProperty("argumentValues", out var argumentValues) &&
+                        argumentValues.ValueKind == JsonValueKind.Object && argumentValues.TryGetProperty(argumentName, out values) &&
+                        values.ValueKind == JsonValueKind.Array;
+                    var inferredValueType = hasEnumeratedValues ? InferEnumeratedJsonSchemaType(values) : null;
+                    var valueType = inferredValueType ?? argumentName switch
                     {
-                        "ConfirmPartySizeWarning" => "boolean",
-                        "Days" or "Count" or "VolunteerSlot" or "Amount" or "OptionIndex" => "integer",
+                        "Days" or "Count" or "VolunteerSlot" or "Amount" or "OptionIndex" or "slot" or
+                            "confirmPartySizeWarning" or "ConfirmPartySizeWarning" or "ConfirmPrisonerLimitWarning" => "integer",
                         _ => "string"
                     };
                     var argumentSchema = new JsonObject { ["type"] = valueType };
-                    if (action.TryGetProperty("argumentValues", out var argumentValues) &&
-                        argumentValues.ValueKind == JsonValueKind.Object && argumentValues.TryGetProperty(argumentName, out var values) &&
-                        values.ValueKind == JsonValueKind.Array &&
-                        ((valueType == "string" && values.EnumerateArray().All(item => item.ValueKind == JsonValueKind.String)) ||
-                         (valueType == "integer" && values.EnumerateArray().All(item => item.ValueKind == JsonValueKind.Number && item.TryGetInt32(out _))) ||
-                         (valueType == "boolean" && values.EnumerateArray().All(item => item.ValueKind is JsonValueKind.True or JsonValueKind.False))))
+                    if (inferredValueType == valueType)
                     {
                         argumentSchema["enum"] = JsonNode.Parse(values.GetRawText());
                     }
@@ -1017,6 +1017,16 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             ["required"] = new JsonArray("decision"),
             ["additionalProperties"] = false
         };
+    }
+
+    private static string? InferEnumeratedJsonSchemaType(JsonElement values)
+    {
+        if (values.ValueKind != JsonValueKind.Array || values.GetArrayLength() == 0) return null;
+        var items = values.EnumerateArray().ToArray();
+        if (items.All(item => item.ValueKind == JsonValueKind.String)) return "string";
+        if (items.All(item => item.ValueKind == JsonValueKind.Number && item.TryGetInt32(out _))) return "integer";
+        if (items.All(item => item.ValueKind is JsonValueKind.True or JsonValueKind.False)) return "boolean";
+        return null;
     }
 
     internal static JsonObject NormalizeDecision(JsonElement decision, JsonElement request)

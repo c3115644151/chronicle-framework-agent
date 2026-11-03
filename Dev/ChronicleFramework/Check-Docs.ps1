@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.513'
+$contractVersion = '7.515'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -126,9 +126,10 @@ if ($agentHostRecruitmentLoopSource -notmatch 'AgentHostProviderDecisionRecovery
     $agentHostRecruitmentLoopSource -notmatch 'provider-control-unavailable') {
     throw 'The EYC PartySize route must give one bounded current-catalog recovery when the model selects an unavailable action/control, and verify that no Native action was sent.'
 }
-if ($agentHostProviderSource -notmatch '"Days" or "Count" or "VolunteerSlot" or "Amount" or "OptionIndex" => "integer"' -or
-    $agentHostProviderContractSelfTestSource -notmatch 'provider-map-incident-option-index-is-integer-enum-not-string') {
-    throw 'The Native Map Incident model schema must represent current option indices as integer enums and cover that shape in provider contract tests.'
+if ($agentHostProviderSource -notmatch 'InferEnumeratedJsonSchemaType' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'provider-map-incident-option-index-is-integer-enum-not-string' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'provider-prisoner-recruitment-confirmations-follow-native-integer-enums') {
+    throw 'The model schema must infer JSON argument types from the current Native catalog and test both integer option and confirmation enums.'
 }
 if ($agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-localized-direct-offer-hidden' -or
     $agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-discovery-budget-not-bounded' -or
@@ -1237,8 +1238,10 @@ if ($harnessScript -notmatch "'AgentHostLifecycleCompletionEvaluation' \{ @\('Pr
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostLifecycleCompletionEvaluation'" -or
     $harnessScript -notmatch '\-Scenario Complete' -or $agentHostLifecycleHarness -notmatch 'NativeArrivalCompleted' -or
     $agentHostLifecycleHarness -notmatch 'AgentHostLifecycleHostReceipt\.json' -or
-    $agentHostRuntimeControllerSource -notmatch 'AgentHostLifecycleReceipt\.CaptureForHarness' -or
+    $agentHostRuntimeControllerSource -notmatch 'AgentHostLifecycleReceipt\.CaptureForHarness\(output, errorOutput, exitCode\)' -or
     $agentHostLifecycleReceiptSource -notmatch 'fresh-campaign-renown' -or
+    $agentHostLifecycleReceiptSource -notmatch 'TryDeserializeReceipt' -or
+    $agentHostLifecycleReceiptSource -notmatch 'HostExitCode' -or
     $agentHostLifecycleReceiptSource -notmatch 'DataMember\(Name = "message"\)' -or
     $agentHostLifecycleReceiptSource -notmatch 'SanitizeDiagnostic\(receipt\.Message\)' -or
     $agentHostLifecycleReceiptSource -notmatch 'sk-\[A-Za-z0-9_-' -or
@@ -1926,6 +1929,13 @@ if ($freshCampaignSource -notmatch 'StoryModeNewGame' -or
     $freshCampaignTest -notmatch 'storyModeLiveModelProducedDecision' -or
     $freshCampaignTest -notmatch 'storyModeLiveNativeActionExecuted' -or
     $freshCampaignTest -notmatch 'StoryModeAgentNativeActionsExecuted' -or
+    $freshCampaignTest -notmatch 'TestAgentUsageTraceSummary' -or
+    $freshCampaignTest -notmatch 'Measure-StoryModeAgentUsageFromTrace' -or
+    $freshCampaignTest -notmatch 'AllDecisionCostRowsPresent' -or
+    $freshCampaignTest -notmatch 'harness-provider-decision-trace' -or
+    $freshCampaignTest -notmatch 'StoryModeAgentHostReceiptCaptured' -or
+    $freshCampaignTest -notmatch 'StoryModeAgentProviderDecisionCostsComplete' -or
+    $freshCampaignTest -notmatch 'StoryModeAgentNativeActionTraceObserved' -or
     $freshCampaignTest -notmatch 'AgentHostLifecycleHostReceipt\.json' -or
     $freshCampaignTest -notmatch 'AgentHostProgress\.jsonl') { throw 'Fresh StoryMode setup must use the original StoryMode Campaign and exact skip-tutorial/confirmation dialogue choices, verify natural EYC activation, and never call the tutorial completion function directly; its optional live Host slice must use bounded same-session MCM startup with a real decision trace.' }
 if ($harnessScript -notmatch "'PersistentEycCampaign' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'PersistentEycCampaign'\) \}" -or

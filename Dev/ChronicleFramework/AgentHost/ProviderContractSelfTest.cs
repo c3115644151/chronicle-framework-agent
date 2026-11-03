@@ -307,6 +307,26 @@ internal static class ProviderContractSelfTest
             results.Add(new { scenario = "provider-map-incident-option-index-is-integer-enum-not-string", passed = true });
         }
 
+        using (var prisonerRecruitmentRequest = JsonDocument.Parse("""
+        {"goal":"Recruit one eligible Native prisoner.","observation":{"state":{"party":{"members":13}}},"allowedActions":[{"action":"recruitPrisoner","arguments":["TroopId","ConfirmPartySizeWarning","ConfirmPrisonerLimitWarning"],"argumentValues":{"TroopId":["looter"],"ConfirmPartySizeWarning":[0,1],"ConfirmPrisonerLimitWarning":[1]}}],"allowedControls":[]}
+        """))
+        {
+            var schema = OllamaNativeProvider.BuildDecisionSchema(prisonerRecruitmentRequest.RootElement);
+            var properties = schema["properties"]?["decision"]?["anyOf"]?[0]?["properties"]?["arguments"]?["properties"];
+            var troopIdSchema = properties?["TroopId"] as JsonObject;
+            var partyWarningSchema = properties?["ConfirmPartySizeWarning"] as JsonObject;
+            var prisonerWarningSchema = properties?["ConfirmPrisonerLimitWarning"] as JsonObject;
+            if (troopIdSchema?["type"]?.GetValue<string>() != "string" ||
+                partyWarningSchema?["type"]?.GetValue<string>() != "integer" ||
+                partyWarningSchema["enum"] is not JsonArray partyWarningEnum || partyWarningEnum.Count != 2 ||
+                partyWarningEnum[0]?.GetValue<int>() != 0 || partyWarningEnum[1]?.GetValue<int>() != 1 ||
+                prisonerWarningSchema?["type"]?.GetValue<string>() != "integer" ||
+                prisonerWarningSchema["enum"] is not JsonArray prisonerWarningEnum || prisonerWarningEnum.Count != 1 ||
+                prisonerWarningEnum[0]?.GetValue<int>() != 1)
+                throw new AgentHostException("provider-prisoner-recruitment-enum-schema-invalid", "The current Native prisoner recruitment catalog supplies integer confirmation enums; the model schema must preserve their JSON number type and exact values.");
+            results.Add(new { scenario = "provider-prisoner-recruitment-confirmations-follow-native-integer-enums", passed = true });
+        }
+
         using (var oneChoiceArgumentRequest = JsonDocument.Parse("""
         {"goal":"Answer the current Native inquiry.","observation":{"state":{"context":{"inquiryOpen":true}}},"allowedActions":[{"action":"respondInquiry","arguments":["choice"],"argumentValues":{"choice":["affirmative","negative"]}}],"allowedControls":[]}
         """))
