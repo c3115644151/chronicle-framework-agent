@@ -595,7 +595,12 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         using (response)
         {
             if (!response.IsSuccessStatusCode)
-                throw new AgentHostException("provider-http-error", BuildHttpFailureMessage(response, rateLimitRetryAttempts, rateLimitRetryWaitMilliseconds, lastRateLimitRetryHint, lastRateLimitRetryFitsDeadline) + " outputFormat=" + responseFormatMode);
+                throw new AgentHostException("provider-http-error", BuildHttpFailureMessage(response, rateLimitRetryAttempts, rateLimitRetryWaitMilliseconds, lastRateLimitRetryHint, lastRateLimitRetryFitsDeadline) + " outputFormat=" + responseFormatMode,
+                    providerHttpStatus: (int)response.StatusCode,
+                    providerRoute: SafeDiagnosticField(ReadResponseHeader(response, "X-Routed-Via") ?? _lastProviderRoute),
+                    providerOutputFormat: responseFormatMode,
+                    providerRetryAttempts: rateLimitRetryAttempts,
+                    providerRetryWaitMilliseconds: rateLimitRetryWaitMilliseconds);
 
             if (response.Content.Headers.ContentLength is > MaxResponseBytes)
                 throw new AgentHostException("provider-response-too-large", "The local model response exceeds the Host size limit.");
@@ -1467,6 +1472,21 @@ internal sealed record ProviderDecisionResult(
 
 internal sealed class AgentHostException : Exception
 {
-    internal AgentHostException(string code, string message, Exception? innerException = null) : base(message, innerException) => Code = code;
+    internal AgentHostException(string code, string message, Exception? innerException = null, int? providerHttpStatus = null,
+        string? providerRoute = null, string? providerOutputFormat = null, int? providerRetryAttempts = null, long? providerRetryWaitMilliseconds = null) : base(message, innerException)
+    {
+        Code = code;
+        ProviderHttpStatus = providerHttpStatus;
+        ProviderRoute = providerRoute;
+        ProviderOutputFormat = providerOutputFormat;
+        ProviderRetryAttempts = providerRetryAttempts;
+        ProviderRetryWaitMilliseconds = providerRetryWaitMilliseconds;
+    }
+
     internal string Code { get; }
+    internal int? ProviderHttpStatus { get; }
+    internal string? ProviderRoute { get; }
+    internal string? ProviderOutputFormat { get; }
+    internal int? ProviderRetryAttempts { get; }
+    internal long? ProviderRetryWaitMilliseconds { get; }
 }

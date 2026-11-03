@@ -365,12 +365,12 @@ internal static class AgentHostDecisionCycle
         }
         catch (AgentHostException exception)
         {
-            AgentHostRuntimeProgressLog.RecordProviderFailure(document.RootElement, exception.Code);
+            AgentHostHarnessProgressTrace.RecordProviderFailure(document.RootElement, exception);
             throw;
         }
         catch (OperationCanceledException)
         {
-            AgentHostRuntimeProgressLog.RecordProviderFailure(document.RootElement, "provider-cancelled");
+            AgentHostHarnessProgressTrace.RecordProviderFailure(document.RootElement, "provider-cancelled");
             throw;
         }
     }
