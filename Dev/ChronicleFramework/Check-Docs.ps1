@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.532'
+$contractVersion = '7.533'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -734,7 +734,12 @@ if ($agentHostDecisionCycleSource -notmatch 'AgentHostHarnessProgressTrace\.Reco
     $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-duplicate-map-target-payload' -or
     $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-duplicate-offer-payload' -or
     $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-target-projection-retains-redundant-flags' -or
-    $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-target-projection-capped-dynamic-map-set' -or
+    $agentHostRecruitmentLoopSource -notmatch 'SettlementTargetPageSize' -or
+    $agentHostRecruitmentLoopSource -notmatch 'GetRecruitmentSettlementTargetPage' -or
+    $agentHostRecruitmentLoopSource -notmatch 'mapSettlementTargetsMore' -or
+    $agentHostRecruitmentLoopSource -notmatch 'safeSettlementTargetPage' -or
+    $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-target-pagination-failed' -or
+    $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-pages-complete-safe-settlement-set' -or
     $agentHostHarnessProgressTraceSource -notmatch 'providerHttpStatus' -or
     $agentHostHarnessProgressTraceSource -notmatch 'BuildRecruitmentOfferSummary' -or
     $agentHostHarnessProgressTraceSource -notmatch 'harness-progress-trace-reports-only-aggregate-affordable-recruitment-offer-counts' -or

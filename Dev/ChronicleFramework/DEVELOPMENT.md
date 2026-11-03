@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.532
+Contract version: 7.533
 
 2026-11-02 Native map-conversation movement interrupt: `AgentHostNativeMapMovementMonitor.IsActiveMapMove` now ends a passive travel-observation window as soon as the current MapState includes an active Native `context.conversation` object. The fresh state returns to the calling Agent loop to handle its visible no-choice Continue or clickable answers; the monitor issues no clock action. A Fake Native regression opens a map conversation on its first monitored poll and proves the wait exits before its four-second deadline, without Pause. This change is source/contract-level only; natural map-conversation interruption during a live model travel wait remains unverified.
 
