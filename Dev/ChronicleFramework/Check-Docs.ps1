@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.530'
+$contractVersion = '7.532'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -87,6 +87,7 @@ $agentHostMapIncidentLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost
 $agentHostStoryModeBootstrapLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostStoryModeBootstrapLoop.cs') -Raw -Encoding UTF8
 $agentHostHarnessProgressTraceSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostHarnessProgressTrace.cs') -Raw -Encoding UTF8
 $agentHostProviderContractSelfTestSource = Get-Content (Join-Path $harnessRoot 'AgentHost\ProviderContractSelfTest.cs') -Raw -Encoding UTF8
+$freshCampaignTestSource = Get-Content (Join-Path $harnessRoot 'Test-AgentFreshCampaign.ps1') -Raw -Encoding UTF8
 $agentHostProviderSource = Get-Content (Join-Path $harnessRoot 'AgentHost\OllamaNativeProvider.cs') -Raw -Encoding UTF8
 $agentHostRuntimeControllerSource = Get-Content (Join-Path $harnessRoot 'AgentHostRuntimeController.cs') -Raw -Encoding UTF8
 $providerSettingsSource = Get-Content (Join-Path $harnessRoot 'AgentProviderSettings.cs') -Raw -Encoding UTF8
@@ -130,6 +131,12 @@ if ($agentHostProviderSource -notmatch 'InferEnumeratedJsonSchemaType' -or
     $agentHostProviderContractSelfTestSource -notmatch 'provider-map-incident-option-index-is-integer-enum-not-string' -or
     $agentHostProviderContractSelfTestSource -notmatch 'provider-prisoner-recruitment-confirmations-follow-native-integer-enums' -or
     $agentHostProgramSource -notmatch 'BuildCampaignLoopTerminalReceipt' -or
+    $agentHostProgramSource -notmatch 'failureExceptionType' -or
+    $agentHostProgramSource -notmatch 'failureLocation' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'NullReferenceException' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'AgentHostEstablishYourClanAutonomyLoop.RunAsync' -or
+    $freshCampaignTestSource -notmatch 'StoryModeAgentFailureExceptionType' -or
+    $freshCampaignTestSource -notmatch 'StoryModeAgentFailureLocation' -or
     $agentHostProviderContractSelfTestSource -notmatch 'campaign-loop-emits-compact-cost-and-failure-receipt-without-trace-or-free-text') {
     throw 'The model schema must infer current Native argument types, and the Campaign Host must emit a tested compact terminal receipt instead of discarding error/cost evidence in a large trace.'
 }

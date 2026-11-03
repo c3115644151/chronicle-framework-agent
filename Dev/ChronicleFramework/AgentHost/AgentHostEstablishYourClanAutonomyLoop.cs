@@ -1427,12 +1427,15 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             // Preserve the exception message and stack in the Host receipt. The prior
             // type-only failure hid the exact boundary needed to diagnose live Campaign
             // failures and made repeat runs expensive without improving safety.
-            return BuildResult("failed", "autonomy-loop-failed", false, exception.ToString(), "establish-clan-autonomy-unexpected-error");
+            var target = exception.TargetSite;
+            var failureLocation = target is null ? null : (target.DeclaringType?.Name ?? "unknown-type") + "." + target.Name;
+            return BuildResult("failed", "autonomy-loop-failed", false, exception.ToString(), "establish-clan-autonomy-unexpected-error",
+                failureExceptionType: exception.GetType().Name, failureLocation: failureLocation);
         }
 
         JsonObject BuildResult(string status, string reason, bool goalVerified, string? failure, string? failureCode,
             JsonArray? journal = null, JsonObject? snapshotResult = null, JsonArray? metricDifferences = null, JsonArray? unimplemented = null,
-            string? completionEvidence = null)
+            string? completionEvidence = null, string? failureExceptionType = null, string? failureLocation = null)
         {
             var elapsedSeconds = Stopwatch.GetElapsedTime(start).TotalSeconds;
             return new JsonObject
@@ -1460,6 +1463,8 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 ["liveMetricDifferences"] = metricDifferences?.DeepClone(),
                 ["unimplementedObjectives"] = unimplemented?.DeepClone() ?? new JsonArray(),
                 ["completionEvidence"] = completionEvidence,
+                ["failureExceptionType"] = failureExceptionType,
+                ["failureLocation"] = failureLocation,
                 ["termination"] = new JsonObject { ["reason"] = reason, ["completedByProvider"] = false, ["goalVerified"] = goalVerified },
                 ["failure"] = failure,
                 ["failureCode"] = failureCode

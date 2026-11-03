@@ -265,6 +265,8 @@ internal static class AgentHostRuntimeProgressLog
                 ["status"] = Copy(result, "status"),
                 ["termination"] = Copy(result["termination"] as JsonObject, "reason") ?? Copy(result, "termination"),
                 ["failureCode"] = Copy(result, "failureCode"),
+                ["failureExceptionType"] = Copy(result, "failureExceptionType"),
+                ["failureLocation"] = Copy(result, "failureLocation"),
                 ["decisions"] = Copy(result, "decisions"),
                 ["actionsExecuted"] = Copy(result, "actionsExecuted"),
                 ["promptTokens"] = Copy(result, "promptTokens"),

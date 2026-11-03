@@ -20,7 +20,8 @@ internal static class ProviderContractSelfTest
             ["decisions"] = 12, ["actionsExecuted"] = 4, ["promptTokens"] = 1200, ["completionTokens"] = 90,
             ["providerPromptCacheHitTokens"] = 600, ["providerPromptCacheMissTokens"] = 600,
             ["providerActualCostEstimateCny"] = 0.03, ["providerReservedCostUpperCny"] = 0.05,
-            ["failureCode"] = "provider-budget-exhausted", ["failure"] = "PRIVATE_FAILURE_TEXT",
+            ["failureCode"] = "provider-budget-exhausted", ["failureExceptionType"] = "NullReferenceException",
+            ["failureLocation"] = "AgentHostEstablishYourClanAutonomyLoop.RunAsync", ["failure"] = "PRIVATE_FAILURE_TEXT",
             ["trace"] = new JsonArray("PRIVATE_TRACE"), ["conversationText"] = "PRIVATE_DIALOGUE_TEXT",
             ["termination"] = new JsonObject { ["reason"] = "provider-budget-exhausted", ["goalVerified"] = false }
         });
@@ -28,6 +29,8 @@ internal static class ProviderContractSelfTest
             terminalReceipt["failureCode"]?.GetValue<string>() != "provider-budget-exhausted" ||
             terminalReceipt["decisionCount"]?.GetValue<int>() != 12 ||
             terminalReceipt["providerActualCostEstimateCny"]?.GetValue<double>() != 0.03 ||
+            terminalReceipt["failureExceptionType"]?.GetValue<string>() != "NullReferenceException" ||
+            terminalReceipt["failureLocation"]?.GetValue<string>() != "AgentHostEstablishYourClanAutonomyLoop.RunAsync" ||
             terminalReceipt.ContainsKey("trace") || terminalReceipt.ContainsKey("failure") || terminalReceipt.ContainsKey("conversationText") ||
             terminalReceipt.ToJsonString().Contains("PRIVATE_", StringComparison.Ordinal))
             throw new AgentHostException("campaign-terminal-receipt-self-test-failed", "The game-facing campaign terminal receipt must keep structured outcome/cost fields and omit the full trace and free text.");

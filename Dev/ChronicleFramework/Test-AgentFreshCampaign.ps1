@@ -368,6 +368,8 @@ $storyModeAgentPromptCacheMissTokens = $null
 $storyModeAgentActualCostEstimateCny = $null
 $storyModeAgentReservedCostUpperBoundCny = $null
 $storyModeAgentFailureCode = $null
+$storyModeAgentFailureExceptionType = $null
+$storyModeAgentFailureLocation = $null
 $storyModeOriginalEstablishYourClanCompleted = $false
 $storyModeAgentHostReceiptPath = if ([string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) { $null } else { Join-Path $env:CHRONICLE_HARNESS_TEMP 'AgentHostLifecycleHostReceipt.json' }
 $storyModeNativeFrameNames = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
@@ -1284,6 +1286,8 @@ if ($StoryModeEycLiveModelEvaluation -and $storyModeAgentHostReceiptPath -and (T
         $storyModeAgentActualCostEstimateCny = $storyModeHostReceipt.providerActualCostEstimateCny
         $storyModeAgentReservedCostUpperBoundCny = $storyModeHostReceipt.providerReservedCostUpperCny
         $storyModeAgentFailureCode = if (-not [string]::IsNullOrWhiteSpace([string]$storyModeHostReceipt.failureCode)) { [string]$storyModeHostReceipt.failureCode } else { [string]$storyModeHostReceipt.error }
+        $storyModeAgentFailureExceptionType = [string]$storyModeHostReceipt.failureExceptionType
+        $storyModeAgentFailureLocation = [string]$storyModeHostReceipt.failureLocation
         $storyModeOriginalEstablishYourClanCompleted = $storyModeHostReceipt.status -eq 'completed' -and
             $storyModeHostReceipt.termination.goalVerified -eq $true
     }
@@ -1504,6 +1508,8 @@ $result = [ordered]@{
     StoryModeAgentActualCostEstimateCny = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentActualCostEstimateCny } else { $null }
     StoryModeAgentReservedCostUpperBoundCny = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentReservedCostUpperBoundCny } else { $null }
     StoryModeAgentFailureCode = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentFailureCode } else { $null }
+    StoryModeAgentFailureExceptionType = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentFailureExceptionType } else { $null }
+    StoryModeAgentFailureLocation = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentFailureLocation } else { $null }
     StoryModeOriginalEstablishYourClanCompleted = if ($StoryModeEycLiveModelEvaluation) { $storyModeOriginalEstablishYourClanCompleted } else { $null }
     FreeLLMAPIProfile = if ($StoryModeEycLiveModelEvaluation) { $freeLlmApiProfile } else { $null }
     StoryModeModelProviderProfile = if ($StoryModeEycLiveModelEvaluation) { $providerProfile } else { $null }

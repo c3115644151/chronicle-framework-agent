@@ -212,6 +212,8 @@ internal static class Program
             ["providerActualCostEstimateCny"] = result["providerActualCostEstimateCny"]?.DeepClone(),
             ["providerReservedCostUpperCny"] = result["providerReservedCostUpperCny"]?.DeepClone(),
             ["failureCode"] = result["failureCode"]?.DeepClone(),
+            ["failureExceptionType"] = result["failureExceptionType"]?.DeepClone(),
+            ["failureLocation"] = result["failureLocation"]?.DeepClone(),
             ["termination"] = sourceTermination is null ? null : new JsonObject
             {
                 ["reason"] = sourceTermination["reason"]?.DeepClone(),
