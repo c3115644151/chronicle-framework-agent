@@ -58,11 +58,19 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         using var endedQuestAfterLostBandit = JsonDocument.Parse("""
             {"status":"completed","state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false,"escapeMenuOpen":false,"inquiryOpen":false,"isWaitMenu":false,"isWaitActive":false,"captivity":{"isCaptive":false}},"party":{"isMoving":false,"members":4},"quests":[]}}
             """);
+        using var pausedSettlementMoveAfterDeferredBandit = JsonDocument.Parse("""
+            {"status":"completed","timeControlMode":"Stop","state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false,"escapeMenuOpen":false,"inquiryOpen":false,"isWaitMenu":false,"isWaitActive":false,"captivity":{"isCaptive":false}},"party":{"isMoving":true},"location":{"currentSettlementId":null,"targetSettlementId":"town-a"},"quests":[{"id":"rebuild_player_clan_storymode_quest"}]}}
+            """);
+        using var pausedPartyMoveWithoutSettlementTarget = JsonDocument.Parse("""
+            {"status":"completed","timeControlMode":"Stop","state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false,"escapeMenuOpen":false,"inquiryOpen":false,"isWaitMenu":false,"isWaitActive":false,"captivity":{"isCaptive":false}},"party":{"isMoving":true},"location":{"currentSettlementId":null,"targetSettlementId":null},"quests":[{"id":"rebuild_player_clan_storymode_quest"}]}}
+            """);
         if (!ShouldReplanAfterIncidentBattleNoSafeAction(failedLostBandit, safeMapAfterLostBandit.RootElement) ||
             ShouldReplanAfterIncidentBattleNoSafeAction(failedLostBandit, activeEncounterAfterLostBandit.RootElement) ||
             ShouldReplanAfterIncidentBattleNoSafeAction(new JsonObject { ["status"] = "completed", ["termination"] = "no-safe-action" }, safeMapAfterLostBandit.RootElement) ||
-            ShouldReplanAfterIncidentBattleNoSafeAction(failedLostBandit, endedQuestAfterLostBandit.RootElement))
-            throw new AgentHostException("establish-clan-incident-lost-target-safe-map-replan-gate-failed", "A lost hostile target may reopen EYC planning only after the no-safe-action BattleSimulation result returns to a free Map with the original quest still active; an active encounter or completed result must use its own contract.");
+            ShouldReplanAfterIncidentBattleNoSafeAction(failedLostBandit, endedQuestAfterLostBandit.RootElement) ||
+            !ShouldReplanAfterIncidentBattleNoSafeAction(failedLostBandit, pausedSettlementMoveAfterDeferredBandit.RootElement) ||
+            ShouldReplanAfterIncidentBattleNoSafeAction(failedLostBandit, pausedPartyMoveWithoutSettlementTarget.RootElement))
+            throw new AgentHostException("establish-clan-incident-lost-target-safe-map-replan-gate-failed", "A no-safe-action hostile interruption may reopen EYC planning from a free nonmoving Map or a stopped Native settlement move that the parent can safely reissue; an active encounter, unanchored paused move, or ended quest must remain blocked.");
         var snapshot = new JsonObject
         {
             ["gold"] = new JsonObject { ["current"] = 32, ["target"] = 2000, ["met"] = false },
@@ -1642,7 +1650,27 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
 
     internal static bool ShouldReplanAfterIncidentBattleNoSafeAction(JsonObject? battleResult, JsonElement nativeAfter) =>
         ReadString(battleResult, "status") == "failed" && ReadString(battleResult, "termination") == "no-safe-action" &&
-        IsSafeMapForObjectiveProviderReplan(nativeAfter) && AgentHostEstablishYourClanGoalLoop.HasActiveQuest(nativeAfter);
+        (IsSafeMapForObjectiveProviderReplan(nativeAfter) || IsSafeStoppedSettlementMoveForObjectiveReplan(nativeAfter)) &&
+        AgentHostEstablishYourClanGoalLoop.HasActiveQuest(nativeAfter);
+
+    internal static bool IsSafeStoppedSettlementMoveForObjectiveReplan(JsonElement native)
+    {
+        if (native.ValueKind != JsonValueKind.Object || ReadString(native, "status") != "completed" ||
+            ReadString(native, "timeControlMode") != "Stop" ||
+            !native.TryGetProperty("state", out var stateElement) || stateElement.ValueKind != JsonValueKind.Object)
+            return false;
+        var state = JsonNode.Parse(stateElement.GetRawText())?.AsObject();
+        var context = state?["context"] as JsonObject;
+        var party = state?["party"] as JsonObject;
+        var location = state?["location"] as JsonObject;
+        var captivity = context?["captivity"] as JsonObject;
+        return ReadString(context, "gameState") == "MapState" && ReadString(context, "menuId") is null &&
+               !ReadBoolean(context, "encounterActive") && !ReadBoolean(context, "escapeMenuOpen") && !ReadBoolean(context, "inquiryOpen") &&
+               !ReadBoolean(context, "isWaitMenu") && !ReadBoolean(context, "isWaitActive") && !ReadBoolean(captivity, "isCaptive") &&
+               !ReadBoolean(context?["sceneNotification"] as JsonObject, "hasActiveNotification") &&
+               ReadBoolean(party, "isMoving") && !string.IsNullOrWhiteSpace(ReadString(location, "targetSettlementId")) &&
+               state?["partyScreen"] is null && state?["inventoryScreen"] is null;
+    }
 
     private static bool IsSafeMapForObjectiveProviderReplan(JsonElement native)
     {

@@ -140,6 +140,7 @@ internal static class AgentHostBattleSimulationLoop
                         ["renownBefore"] = renownBefore,
                         ["renownAfter"] = escapeRenownAfter
                     });
+                    trace.Add(BuildDeferredPartyTargetTraceStep(requestedTargetId, observedTargets, state));
                     return BuildResult(runId, provider, "completed", decisions, actionsExecuted, promptTokens, completionTokens,
                         "native-try-to-get-away-completed", null, null, startDay, initialNative, native, trace, routes,
                         renownBefore, escapeRenownAfter, "native-try-to-get-away", playerRetreated: true,
@@ -168,6 +169,7 @@ internal static class AgentHostBattleSimulationLoop
                         ["renownBefore"] = renownBefore,
                         ["renownAfter"] = recoveryRenownAfter
                     });
+                    trace.Add(BuildDeferredPartyTargetTraceStep(requestedTargetId, observedTargets, state));
                     return BuildResult(runId, provider, "completed", decisions, actionsExecuted, promptTokens, completionTokens,
                         "native-captivity-recovered-without-battle", null, null, startDay, initialNative, native, trace, routes,
                         renownBefore, recoveryRenownAfter, "native-captivity-recovery", playerRetreated: false,
@@ -763,7 +765,7 @@ internal static class AgentHostBattleSimulationLoop
         var deferred = new HashSet<string>(StringComparer.Ordinal);
         foreach (var attempt in priorTrace.OfType<JsonObject>())
         {
-            if (ReadString(attempt, "stage") != "native-encounter-left-without-battlesimulation") continue;
+            if (ReadString(attempt, "stage") != "native-bandit-target-deferred-after-no-battle") continue;
             var targetId = ReadString(attempt, "targetPartyId");
             if (string.IsNullOrWhiteSpace(targetId) || !currentTargetMembers.TryGetValue(targetId, out var currentTargetCount)) continue;
             if (!string.Equals(ReadString(attempt, "playerPartyFingerprint"), currentPlayerFingerprint, StringComparison.Ordinal)) continue;
@@ -779,7 +781,7 @@ internal static class AgentHostBattleSimulationLoop
     {
         return new JsonObject
         {
-            ["stage"] = "native-encounter-left-without-battlesimulation",
+            ["stage"] = "native-bandit-target-deferred-after-no-battle",
             ["targetPartyId"] = targetPartyId,
             ["targetPartyMembers"] = ReadObservedTargetMembers(observedTargets, targetPartyId),
             ["playerPartyFingerprint"] = BuildPartyStrengthFingerprint(state)
@@ -1736,12 +1738,15 @@ internal static class AgentHostBattleSimulationLoop
         var escapeClient = new FakeBattleSimulationNativeClient(simulateNativeEscape: true);
         var escapeProvider = new FakeTryToGetAwayDecisionProvider();
         var escapeResult = await RunAsync(request.RootElement, escapeClient, escapeProvider, CancellationToken.None);
+        var escapeDeferredTraceStep = (escapeResult["trace"] as JsonArray)?.OfType<JsonObject>()
+            .FirstOrDefault(step => ReadString(step, "stage") == "native-bandit-target-deferred-after-no-battle");
         if (ReadString(escapeResult, "status") != "completed" ||
             ReadString(escapeResult, "termination") != "native-try-to-get-away-completed" ||
             ReadString(escapeResult, "playerOutcome") != "escaped-with-sacrifice" ||
             ReadBoolean(escapeResult, "battleStarted") || ReadBoolean(escapeResult, "nativeEscapeCompleted") != true ||
             ReadBoolean(escapeResult, "nativeReturnToMapVerified") != true ||
             ReadDouble(escapeResult, "renownBefore", double.NaN) != 10 || ReadDouble(escapeResult, "renownAfter", double.NaN) != 10 ||
+            escapeDeferredTraceStep is null || ReadString(escapeDeferredTraceStep, "targetPartyId") != "bandit-1" ||
             escapeProvider.CallCount != 9 || escapeProvider.WarningRequest? ["observation"]? ["state"]? ["context"]? ["encounterEscape"]? ["nativeTroopsSacrificedForTry"]?.GetValue<int>() != 7 ||
             escapeClient.Actions.SequenceEqual(new[] { "mapPartyTargets", "pursue", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "menuSelect", "menuSelect" }) != true ||
             escapeClient.Actions.Contains("battleSkip") || escapeClient.Actions.Contains("battleFinish"))
@@ -1853,6 +1858,14 @@ internal static class AgentHostBattleSimulationLoop
         var surrenderRecoveryProvider = new FakeSurrenderRecoveryDecisionProvider();
         var surrenderRecovery = await RunAsync(request.RootElement, surrenderRecoveryClient, surrenderRecoveryProvider, CancellationToken.None,
             recoverPlayerCaptivity: true, passiveCaptivityPollSeconds: 1);
+        var surrenderDeferredTraceStep = (surrenderRecovery["trace"] as JsonArray)?.OfType<JsonObject>()
+            .FirstOrDefault(step => ReadString(step, "stage") == "native-bandit-target-deferred-after-no-battle");
+        var surrenderRecoveredMapState = surrenderRecovery["finalNativeState"]?["state"] as JsonObject;
+        var surrenderTargetMembers = ReadInt(surrenderDeferredTraceStep, "targetPartyMembers", -1);
+        var surrenderDeferredIds = surrenderDeferredTraceStep is null || surrenderRecoveredMapState is null
+            ? new HashSet<string>(StringComparer.Ordinal)
+            : BuildDeferredPartyTargetIds(new JsonArray(surrenderDeferredTraceStep.DeepClone()), surrenderRecoveredMapState,
+                new JsonArray(new JsonObject { ["id"] = "bandit-1", ["type"] = "bandit", ["hostile"] = true, ["members"] = surrenderTargetMembers }));
         if (ReadString(surrenderRecovery, "status") != "completed" ||
             ReadString(surrenderRecovery, "termination") != "native-captivity-recovered-without-battle" ||
             ReadString(surrenderRecovery, "playerOutcome") != "captured-then-recovered" ||
@@ -1860,8 +1873,9 @@ internal static class AgentHostBattleSimulationLoop
             ReadBoolean(surrenderRecovery, "battleStarted") || ReadString(surrenderRecovery, "captivityChoiceOptionId") != "mno_captivity_end_ransom_accept" ||
             ReadInt(surrenderRecovery, "mainPartyMembersAtReturn", 0) != 1 || !ReadBoolean(surrenderRecovery, "nativeReturnToMapVerified") ||
             ReadInt(surrenderRecovery, "explicitClockActionCount", -1) != 0 || surrenderRecoveryClient.ClockActions.Count != 0 ||
+            surrenderDeferredTraceStep is null || ReadString(surrenderDeferredTraceStep, "targetPartyId") != "bandit-1" || !surrenderDeferredIds.Contains("bandit-1") ||
             !surrenderRecoveryClient.Actions.SequenceEqual(new[] { "mapPartyTargets", "pursue", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "menuSelect" }))
-            throw new AgentHostException("battle-loop-self-test-surrender-without-battle-recovers-before-replanning", $"Native surrender without Send Troops must wait through captivity, verify the original ransom release to free Map, and return to the parent planner without claiming battle/Renown. termination={ReadString(surrenderRecovery, "termination")}; outcome={ReadString(surrenderRecovery, "playerOutcome")}; battleStarted={ReadBoolean(surrenderRecovery, "battleStarted")}; actions={string.Join(",", surrenderRecoveryClient.Actions)}.");
+            throw new AgentHostException("battle-loop-self-test-surrender-without-battle-recovers-before-replanning", $"Native surrender without Send Troops must wait through captivity, verify the original ransom release to free Map, and defer the same unchanged hostile target before returning to the parent planner. termination={ReadString(surrenderRecovery, "termination")}; outcome={ReadString(surrenderRecovery, "playerOutcome")}; battleStarted={ReadBoolean(surrenderRecovery, "battleStarted")}; target={ReadString(surrenderDeferredTraceStep, "targetPartyId")}; deferred={surrenderDeferredIds.Contains("bandit-1")}; actions={string.Join(",", surrenderRecoveryClient.Actions)}.");
         return [
             new { scenario = "battle-loop-native-observe-pursue-send-troops-aftermath-return-and-verify", decisions = ReadInt(result, "decisions", 0), nativeActions = client.Actions.ToArray(), renownBefore = ReadDouble(result, "renownBefore", double.NaN), renownAfter = ReadDouble(result, "renownAfter", double.NaN), explicitClockActions = ReadInt(result, "explicitClockActionCount", -1), passed = true },
             new { scenario = "battle-loop-model-chooses-observed-native-try-to-get-away-cost-and-returns-without-claiming-renown", nativeActions = escapeClient.Actions.ToArray(), playerOutcome = ReadString(escapeResult, "playerOutcome"), nativeEscapeCompleted = ReadBoolean(escapeResult, "nativeEscapeCompleted"), passed = true },
