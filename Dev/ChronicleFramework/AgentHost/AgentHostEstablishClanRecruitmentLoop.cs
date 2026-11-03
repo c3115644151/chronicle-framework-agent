@@ -39,6 +39,21 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             throw new AgentHostException("establish-clan-recruitment-target-filter-failed", "Only newly observed, safe Town/Village targets may be offered for troop recruitment travel.");
         if (targets.OfType<JsonObject>().Any(target => target.ContainsKey("hostile") || target.ContainsKey("underSiege") || target.ContainsKey("isInspected")))
             throw new AgentHostException("establish-clan-recruitment-target-projection-retains-redundant-flags", "After filtering safe targets, the per-target observation must omit hostility/siege flags already proven false and inspection state unused by this subgoal.");
+        var sameDayNoOfferTrace = new JsonArray(new JsonObject
+        {
+            ["stage"] = "recruitment-settlement-no-affordable-volunteer-offers",
+            ["settlementId"] = "town-a",
+            ["campaignDay"] = 91077.90,
+            ["gold"] = 100
+        });
+        var sameDayNoOfferCooldown = BuildNoAffordableVolunteerSettlementCooldowns(sameDayNoOfferTrace, 91077.99, 100);
+        var nextDayNoOfferCooldown = BuildNoAffordableVolunteerSettlementCooldowns(sameDayNoOfferTrace, 91078.01, 100);
+        var fundedNoOfferCooldown = BuildNoAffordableVolunteerSettlementCooldowns(sameDayNoOfferTrace, 91077.99, 101);
+        if (!sameDayNoOfferCooldown.Contains("town-a") || nextDayNoOfferCooldown.Contains("town-a") || fundedNoOfferCooldown.Contains("town-a") ||
+            FilterRecruitmentTargets(new JsonArray(new JsonObject { ["id"] = "town-a", ["type"] = "town", ["distance"] = 4 },
+                new JsonObject { ["id"] = "village-b", ["type"] = "village", ["distance"] = 3 }), null, sameDayNoOfferCooldown)
+                .OfType<JsonObject>().Any(target => ReadString(target, "id") == "town-a"))
+            throw new AgentHostException("establish-clan-recruitment-no-offer-same-day-cooldown-failed", "A settlement with no currently affordable volunteer offers should be skipped only while the game day and Gold remain unchanged, then become eligible for a fresh Native query.");
         if (MaxDecisions != AgentHostCampaignLoop.MaxCumulativeDecisions || MaxElapsed != TimeSpan.FromHours(2))
             throw new AgentHostException("establish-clan-recruitment-budget-mismatch", "The PartySize executor must honor the autonomous parent's cumulative decision and 2-hour run budgets rather than terminating its child route early.");
         var manyTargets = FilterRecruitmentTargets(new JsonArray(Enumerable.Range(0, 32).Select(index => (JsonNode?)new JsonObject
@@ -158,6 +173,16 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             troopIds is null || troopIds.Count != 1 || troopIds[0]?.GetValue<string>() != "vlandian_recruit" ||
             slots is null || slots.Count != 1 || slots[0]?.GetValue<int>() != 0)
             throw new AgentHostException("establish-clan-recruitment-catalog-failed", "The recruitment catalog must bind an affordable offer to its exact current owner, troop and VM slot; unaffordable/stale offers stay hidden.");
+        var underfundedOffers = (JsonObject)offers.DeepClone();
+        underfundedOffers["data"]!["gold"] = 10;
+        var settlementState = new JsonObject { ["location"] = new JsonObject { ["currentSettlementId"] = "town-a" } };
+        var noAffordableEvent = BuildNoAffordableVolunteerOfferTraceStep(underfundedOffers,
+            new JsonObject { ["partySize"] = new JsonObject { ["target"] = 5 } }, settlementState, 91077.9);
+        var fundedEvent = BuildNoAffordableVolunteerOfferTraceStep(offers,
+            new JsonObject { ["partySize"] = new JsonObject { ["target"] = 5 } }, settlementState, 91077.9);
+        if (noAffordableEvent is null || ReadString(noAffordableEvent, "settlementId") != "town-a" ||
+            ReadDouble(noAffordableEvent, "campaignDay") != 91077.9 || ReadDouble(noAffordableEvent, "gold") != 10 || fundedEvent is not null)
+            throw new AgentHostException("establish-clan-recruitment-no-offer-trace-builder-failed", "Only an exact current settlement RecruitmentVM snapshot with zero affordable volunteer actions may create the same-day no-offer cooldown record.");
 
         var currentPrisonerOptions = new JsonObject
         {
@@ -561,6 +586,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         var rejectedDecisions = 0;
         var rejectedPrematureStops = 0;
         var villagersInNeedConversationStartupWaits = 0;
+        var noOfferSettlementEventKeys = BuildNoAffordableVolunteerSettlementEventKeys(priorTrace);
         var start = Stopwatch.GetTimestamp();
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxSeconds));
@@ -580,6 +606,9 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                     initialCampaignDay ??= campaignDay;
                     lastCampaignDay = campaignDay;
                 }
+                var currentGold = ReadNumber(state["economy"] as JsonObject, "gold") ?? double.NaN;
+                foreach (var cooldownSettlementId in BuildNoAffordableVolunteerSettlementCooldowns(trace, campaignDay, currentGold))
+                    visitedSettlements.Add(cooldownSettlementId);
                 initialNativeState ??= state.DeepClone() as JsonObject;
                 lastNativeState = state;
                 var context = state["context"] as JsonObject;
@@ -901,7 +930,18 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                         currentPrisonerRecruitOptions = null;
                     }
                     else if (action == "recruitOptions")
+                    {
                         currentRecruitOffers = receipt.DeepClone() as JsonObject;
+                        var noOfferStep = BuildNoAffordableVolunteerOfferTraceStep(receipt, objective, state, campaignDay);
+                        if (noOfferStep is not null)
+                        {
+                            var settlementId = ReadString(noOfferStep, "settlementId")!;
+                            var offerEventKey = BuildNoOfferSettlementEventKey(settlementId, campaignDay, currentGold);
+                            visitedSettlements.Add(settlementId);
+                            if (noOfferSettlementEventKeys.Add(offerEventKey))
+                                trace.Add(noOfferStep);
+                        }
+                    }
                     else if (action == "prisonerRecruitmentOptions")
                         currentPrisonerRecruitOptions = receipt.DeepClone() as JsonObject;
                     else if (action == "recruit")
@@ -1225,6 +1265,23 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         return [action];
     }
 
+    internal static JsonObject? BuildNoAffordableVolunteerOfferTraceStep(JsonObject optionsReceipt, JsonObject objective,
+        JsonObject? state, double campaignDay)
+    {
+        if (BuildRecruitmentActionCatalog(optionsReceipt, objective).Count != 0) return null;
+        var settlementId = ReadString(state?["location"] as JsonObject, "currentSettlementId");
+        if (string.IsNullOrWhiteSpace(settlementId)) return null;
+        var data = optionsReceipt["data"] as JsonObject;
+        return new JsonObject
+        {
+            ["stage"] = "recruitment-settlement-no-affordable-volunteer-offers",
+            ["settlementId"] = settlementId,
+            ["campaignDay"] = double.IsFinite(campaignDay) ? JsonValue.Create(campaignDay) : null,
+            ["gold"] = ReadNumber(data, "gold") is double gold ? JsonValue.Create(gold) : null,
+            ["affordableOfferActionCount"] = 0
+        };
+    }
+
     private static JsonArray BuildPrisonerRecruitmentActionCatalog(JsonObject optionsReceipt, JsonObject objective)
     {
         var data = optionsReceipt["data"] as JsonObject;
@@ -1405,6 +1462,38 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             });
         }
         return result;
+    }
+
+    internal static HashSet<string> BuildNoAffordableVolunteerSettlementCooldowns(JsonArray? trace, double campaignDay, double gold)
+    {
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        if (!double.IsFinite(campaignDay) || !double.IsFinite(gold) || trace is null) return result;
+        var currentGameDay = Math.Floor(campaignDay);
+        foreach (var entry in trace.OfType<JsonObject>())
+        {
+            if (ReadString(entry, "stage") != "recruitment-settlement-no-affordable-volunteer-offers") continue;
+            var settlementId = ReadString(entry, "settlementId");
+            var observedDay = ReadDouble(entry, "campaignDay", double.NaN);
+            var observedGold = ReadDouble(entry, "gold", double.NaN);
+            if (string.IsNullOrWhiteSpace(settlementId) || !double.IsFinite(observedDay) || !double.IsFinite(observedGold)) continue;
+            if (Math.Floor(observedDay) == currentGameDay && gold <= observedGold)
+                result.Add(settlementId);
+        }
+        return result;
+    }
+
+    private static HashSet<string> BuildNoAffordableVolunteerSettlementEventKeys(JsonArray? trace) =>
+        trace?.OfType<JsonObject>()
+            .Where(entry => ReadString(entry, "stage") == "recruitment-settlement-no-affordable-volunteer-offers")
+            .Select(entry => BuildNoOfferSettlementEventKey(ReadString(entry, "settlementId") ?? string.Empty,
+                ReadDouble(entry, "campaignDay", double.NaN), ReadDouble(entry, "gold", double.NaN)))
+            .ToHashSet(StringComparer.Ordinal) ?? new HashSet<string>(StringComparer.Ordinal);
+
+    private static string BuildNoOfferSettlementEventKey(string settlementId, double campaignDay, double gold)
+    {
+        var dayKey = double.IsFinite(campaignDay) ? Math.Floor(campaignDay).ToString("0", CultureInfo.InvariantCulture) : "unknown-day";
+        var goldKey = double.IsFinite(gold) ? gold.ToString("R", CultureInfo.InvariantCulture) : "unknown-gold";
+        return settlementId + "|" + dayKey + "|" + goldKey;
     }
 
     private static bool IsRecruitmentMenu(string? menuId) => menuId is "town" or "town_backstreet" or "village";
