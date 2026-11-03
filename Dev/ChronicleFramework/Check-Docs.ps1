@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.527'
+$contractVersion = '7.528'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -755,9 +755,9 @@ if ($agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S
 }
 if ($agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S]{0,400}\$maxElapsedSeconds = 7200' -or
     $agentLiveModelLoopSource -notmatch '\$maxDecisions = 160' -or
-    $agentHostRuntimeControllerSource -notmatch 'maxDecisions\\":320,\\"maxElapsedSeconds\\":7200' -or
+    $agentHostRuntimeControllerSource -notmatch 'maxDecisions\\":2048,\\"maxElapsedSeconds\\":7200' -or
     $agentHostCampaignLoopSource -notmatch 'maxDecisions is >= 1 and <= MaxCumulativeDecisions' -or
-    $agentHostCampaignLoopSource -notmatch 'MaxCumulativeDecisions = 320' -or
+    $agentHostCampaignLoopSource -notmatch 'MaxCumulativeDecisions = 2048' -or
     $agentHostEstablishClanAutonomySource -notmatch 'ReadInt\(request, "maxDecisions", AgentHostCampaignLoop\.MaxCumulativeDecisions\)' -or
     $agentHostBattleSimulationLoopSource -notmatch 'ReadInt\(request, "maxDecisions", AgentHostCampaignLoop\.MaxCumulativeDecisions\)' -or
     $agentHostRecruitmentLoopSource -notmatch 'MaxDecisions = AgentHostCampaignLoop\.MaxCumulativeDecisions' -or
@@ -769,7 +769,7 @@ if ($agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S
     $agentHostCampaignLoopSource -notmatch 'maxElapsedSeconds is >= 1 and <= 7200' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'Math\.Clamp\(ReadInt\(request, "maxElapsedSeconds", 7200\), 1, 7200\)' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'Math\.Clamp\(ReadInt\(request, "maxDecisions", 160\), 1, 160\)') {
-    throw 'The EYC Host request and all nested objective loops must share the 7200-second/320-decision cumulative ceiling; separate loops must not restart the full decision allowance when prior decisions are carried forward.'
+    throw 'The EYC Host request and all nested objective loops must share the 7200-second/2048-decision cumulative ceiling; separate loops must not restart the full decision allowance when prior decisions are carried forward.'
 }
 if ($agentHostEstablishClanAutonomySource -notmatch 'priorProviderRouteHistory: routes,[\s\S]{0,100}recoverPlayerCaptivity: true' -or
     $agentHostBattleSimulationLoopSource -notmatch 'allowedSurrenderFallback = recoverPlayerCaptivity && !sendTroopsEnabled' -or

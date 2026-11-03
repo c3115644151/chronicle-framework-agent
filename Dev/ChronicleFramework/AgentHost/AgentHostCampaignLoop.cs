@@ -7,7 +7,7 @@ namespace ChronicleFramework.AgentHost;
 
 internal static class AgentHostCampaignLoop
 {
-    internal const int MaxCumulativeDecisions = 320;
+    internal const int MaxCumulativeDecisions = 2048;
     private const int MaxRejectedDecisions = 2;
     private const int MaxUnsupportedEycScopeReconsiderations = 1;
     internal static readonly HashSet<string> ApprovedActions = new(StringComparer.Ordinal)
@@ -40,8 +40,9 @@ internal static class AgentHostCampaignLoop
         results.Add(new { scenario = "campaign-loop-gold-sale-scope-includes-native-ransom-transfer-done-cancel", passed = true });
         results.AddRange(AgentHostMapIncidentLoop.RunContractSelfTestsAsync().GetAwaiter().GetResult());
         results.AddRange(AgentHostStoryModeBootstrapLoop.RunContractSelfTests());
-        if (new[] { 0, 30, 80, 159, 319 }.Any(prior => prior >= GetCumulativeDecisionLimit(MaxCumulativeDecisions)) ||
-            GetCumulativeDecisionLimit(8) != 8 || GetCumulativeDecisionLimit(0) != 1 || GetCumulativeDecisionLimit(1000) != MaxCumulativeDecisions)
+        if (new[] { 0, 30, 80, 159, MaxCumulativeDecisions - 1 }.Any(prior => prior >= GetCumulativeDecisionLimit(MaxCumulativeDecisions)) ||
+            GetCumulativeDecisionLimit(8) != 8 || GetCumulativeDecisionLimit(0) != 1 ||
+            GetCumulativeDecisionLimit(1000) != 1000 || GetCumulativeDecisionLimit(MaxCumulativeDecisions + 1) != MaxCumulativeDecisions)
             throw new AgentHostException("campaign-loop-self-test-child-decision-limit-shrank", "Nested objective loops must keep the parent's cumulative decision ceiling and carry prior decisions separately.");
         results.Add(new { scenario = "campaign-loop-nested-objectives-share-cumulative-decision-ceiling", passed = true });
         var initialActions = new JsonArray();

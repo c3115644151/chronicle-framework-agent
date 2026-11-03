@@ -287,15 +287,15 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         results.Add(new { scenario = "establish-clan-autonomy-dispatches-selected-route-and-requires-native-quest-success", passed = true });
 
         var longRunNative = new FakeNativeClient(activeQuest: true, lifecycle: "active", initialGold: 100);
-        var longRunProvider = new FakeObjectiveProvider(Enumerable.Repeat("gold", 21).ToArray());
+        var longRunProvider = new FakeObjectiveProvider(Enumerable.Repeat("gold", 321).ToArray());
         var longRunChildCalls = 0;
-        Task<JsonObject> ExecuteAfterTwentyCycles(string objectiveId, int priorRunDecisions, long priorRunPromptTokens,
+        Task<JsonObject> ExecuteAfterThreeHundredTwentyCycles(string objectiveId, int priorRunDecisions, long priorRunPromptTokens,
             long priorRunCompletionTokens, JsonArray priorRunTrace, JsonArray priorRunRoutes, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (objectiveId != "gold") throw new AgentHostException("autonomy-long-run-selftest-unexpected-objective", "The long-run fixture selects only the current unmet Gold route.");
             longRunChildCalls++;
-            if (longRunChildCalls == 21)
+            if (longRunChildCalls == 321)
             {
                 longRunNative.CompleteSuccessfully();
                 return Task.FromResult(new JsonObject
@@ -333,14 +333,14 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 ["termination"] = new JsonObject { ["reason"] = "gold-sale-no-transferable-goods" }
             });
         }
-        using var longRunRequest = JsonDocument.Parse("{\"goal\":\"Complete the original StoryMode Establish Your Clan quest.\",\"parentProcessId\":321,\"maxDecisions\":24,\"maxElapsedSeconds\":30,\"allowedActionNames\":[]}");
+        using var longRunRequest = JsonDocument.Parse("{\"goal\":\"Complete the original StoryMode Establish Your Clan quest.\",\"parentProcessId\":321,\"maxDecisions\":321,\"maxElapsedSeconds\":30,\"allowedActionNames\":[]}");
         var longRun = RunAsync(longRunRequest.RootElement, longRunNative, longRunNative, longRunProvider,
-            ExecuteAfterTwentyCycles, CancellationToken.None).GetAwaiter().GetResult();
+            ExecuteAfterThreeHundredTwentyCycles, CancellationToken.None).GetAwaiter().GetResult();
         if (ReadString(longRun, "status") != "completed" ||
             ReadBoolean(longRun["termination"] as JsonObject, "goalVerified") != true ||
-            ReadInt(longRun, "decisions", 0) != 21 || longRunChildCalls != 21 || longRunProvider.CallCount != 21)
-            throw new AgentHostException("establish-clan-autonomy-cycle-cap-truncated-long-campaign", "The parent loop must allow more than 20 objective cycles when the configured cumulative decision budget remains; the original Native Quest still gates completion. status=" + ReadString(longRun, "status") + "; reason=" + ReadString(longRun["termination"] as JsonObject, "reason") + "; failureCode=" + ReadString(longRun, "failureCode") + "; failure=" + ReadString(longRun, "failure") + "; decisions=" + ReadInt(longRun, "decisions", 0) + "; childCalls=" + longRunChildCalls + "; plannerCalls=" + longRunProvider.CallCount);
-        results.Add(new { scenario = "establish-clan-autonomy-allows-over-twenty-objective-cycles-under-cumulative-decision-budget", decisions = longRunProvider.CallCount, passed = true });
+            ReadInt(longRun, "decisions", 0) != 321 || longRunChildCalls != 321 || longRunProvider.CallCount != 321)
+            throw new AgentHostException("establish-clan-autonomy-cycle-cap-truncated-long-campaign", "The parent loop must allow more than 320 objective cycles when the configured cumulative decision budget remains; the original Native Quest still gates completion. status=" + ReadString(longRun, "status") + "; reason=" + ReadString(longRun["termination"] as JsonObject, "reason") + "; failureCode=" + ReadString(longRun, "failureCode") + "; failure=" + ReadString(longRun, "failure") + "; decisions=" + ReadInt(longRun, "decisions", 0) + "; childCalls=" + longRunChildCalls + "; plannerCalls=" + longRunProvider.CallCount);
+        results.Add(new { scenario = "establish-clan-autonomy-allows-over-320-objective-cycles-under-cumulative-decision-budget", decisions = longRunProvider.CallCount, passed = true });
 
         var captiveNative = new FakeNativeClient(activeQuest: true, lifecycle: "active", initialGold: 100, initialCaptive: true);
         var captiveProvider = new FakeObjectiveProvider("gold");
