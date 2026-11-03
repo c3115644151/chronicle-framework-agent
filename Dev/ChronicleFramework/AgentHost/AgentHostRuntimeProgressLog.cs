@@ -80,7 +80,7 @@ internal static class AgentHostRuntimeProgressLog
                 ["runId"] = runId,
                 ["modelId"] = modelId,
                 ["objectiveId"] = ReadString(request, "objectiveId") ?? ReadString(observation, "objectiveId"),
-                ["scope"] = ReadString(request, "scopeRestriction") ?? ReadString(observation, "scope"),
+                ["scope"] = ReadString(request, "scopeRestriction") ?? ReadString(observation, "scope") ?? "campaign-agent-loop",
                 ["estimatedInputTokens"] = estimatedInputTokens,
                 ["reservedInputTokens"] = reservedInputTokens,
                 ["outputTokenCeiling"] = outputTokenCeiling,
@@ -110,7 +110,7 @@ internal static class AgentHostRuntimeProgressLog
         var inquiry = context?["inquiry"] as JsonObject;
         var partyScreen = state?["partyScreen"] as JsonObject;
         var objectiveId = ReadString(request, "objectiveId") ?? ReadString(observation, "objectiveId") ?? ReadString(state, "objectiveId");
-        var scope = ReadString(request, "scopeRestriction") ?? ReadString(observation, "scope") ?? ReadString(state, "scope");
+        var scope = ReadString(request, "scopeRestriction") ?? ReadString(observation, "scope") ?? ReadString(state, "scope") ?? "campaign-agent-loop";
         var actionArguments = result.Decision["arguments"] as JsonObject;
         var decisionAction = ReadString(result.Decision, "action");
         var decisionControl = ReadString(result.Decision, "control");
@@ -221,7 +221,7 @@ internal static class AgentHostRuntimeProgressLog
                 ["runId"] = ReadString(request, "runId"),
                 ["failureCode"] = SanitizeCode(failureCode),
                 ["objectiveId"] = ReadString(request, "objectiveId") ?? ReadString(observation, "objectiveId"),
-                ["scope"] = ReadString(request, "scopeRestriction") ?? ReadString(observation, "scope"),
+                ["scope"] = ReadString(request, "scopeRestriction") ?? ReadString(observation, "scope") ?? "campaign-agent-loop",
                 ["providerHttpStatus"] = providerHttpStatus,
                 ["providerRoute"] = providerRoute,
                 ["providerOutputFormat"] = providerOutputFormat,
@@ -414,8 +414,37 @@ internal static class AgentHostRuntimeProgressLog
             ["promptTokensRowsMinusTerminal"] = loggedPromptTokens.HasValue && terminalPromptTokens.HasValue ? loggedPromptTokens.Value - terminalPromptTokens.Value : null,
             ["completionTokensRowsMinusTerminal"] = loggedCompletionTokens.HasValue && terminalCompletionTokens.HasValue ? loggedCompletionTokens.Value - terminalCompletionTokens.Value : null,
             ["estimatedCostCnyRowsMinusTerminal"] = loggedEstimatedCost.HasValue && terminalEstimatedCost.HasValue ? Math.Round(loggedEstimatedCost.Value - terminalEstimatedCost.Value, 8) : null,
+            ["providerUsageByScope"] = BuildLoggedUsageByScope(rows),
             ["lastBudgetReservationRejection"] = ReadLastBudgetRejection(path, baseRunId, hasBaseRunId)
         };
+    }
+
+    private static JsonObject BuildLoggedUsageByScope(IReadOnlyList<JsonObject> rows)
+    {
+        var result = new JsonObject();
+        foreach (var group in rows.GroupBy(row => ReadString(row, "scope") ?? "campaign-agent-loop", StringComparer.Ordinal))
+        {
+            var key = SanitizeCode(group.Key);
+            var entries = group.ToArray();
+            long? SumLong(string field) => entries.All(row => ReadLong(row, field).HasValue)
+                ? entries.Sum(row => ReadLong(row, field)!.Value)
+                : null;
+            double? SumDouble(string field) => entries.All(row => ReadDouble(row, field).HasValue)
+                ? Math.Round(entries.Sum(row => ReadDouble(row, field)!.Value), 8)
+                : null;
+            result[key] = new JsonObject
+            {
+                ["providerResponseRows"] = entries.Length,
+                ["promptTokens"] = SumLong("promptTokens"),
+                ["completionTokens"] = SumLong("completionTokens"),
+                ["promptCacheHitTokens"] = SumLong("promptCacheHitTokens"),
+                ["promptCacheMissTokens"] = SumLong("promptCacheMissTokens"),
+                ["estimatedCostCny"] = SumDouble("estimatedCostCny"),
+                ["rowsMissingUsage"] = entries.Count(row => !ReadLong(row, "promptTokens").HasValue ||
+                    !ReadLong(row, "completionTokens").HasValue || !ReadDouble(row, "estimatedCostCny").HasValue)
+            };
+        }
+        return result;
     }
 
     private static JsonObject? ReadLastBudgetRejection(string path, string baseRunId, bool hasBaseRunId)
@@ -523,6 +552,8 @@ internal static class AgentHostRuntimeProgressLog
                 var childRequest = JsonNode.Parse(request.RootElement.GetRawText()) as JsonObject
                     ?? throw new AgentHostException("runtime-progress-child-request-self-test-failed", "The child subflow request fixture must be an object.");
                 childRequest["runId"] = validRun + "-battle-inquiry-1";
+                childRequest["scopeRestriction"] = null;
+                (childRequest["observation"] as JsonObject)!["scope"] = "native-battle-inquiry";
                 using var childRequestDocument = JsonDocument.Parse(childRequest.ToJsonString());
                 RecordDecision(childRequestDocument.RootElement, new ProviderDecisionResult("completed", "deepseek-flash", 99, 12,
                     "required_tool_call", decision, "deepseek-flash", PromptCacheHitTokens: 0, PromptCacheMissTokens: 99,
@@ -550,6 +581,7 @@ internal static class AgentHostRuntimeProgressLog
             var budgetEvent = productLogLines.Length > 3 ? JsonNode.Parse(productLogLines[3]) as JsonObject : null;
             var summaryEvent = productLogLines.Length > 6 ? JsonNode.Parse(productLogLines[6]) as JsonObject : null;
             var summaryUsage = summaryEvent?["loggedProviderUsage"] as JsonObject;
+            var usageByScope = summaryUsage?["providerUsageByScope"] as JsonObject;
             if (productLogLines.Length != 7 || productLogLines.Any(line => line.Contains("PRIVATE_", StringComparison.Ordinal) ||
                     line.Contains("PRIVATE_OPTION_VALUE", StringComparison.Ordinal)) ||
                 ReadString(JsonNode.Parse(productLogLines[1]) as JsonObject, "event") != "provider-decision" ||
@@ -579,6 +611,10 @@ internal static class AgentHostRuntimeProgressLog
                 ReadInt(summaryUsage, "providerResponseRows", -1) != 2 ||
                 ReadInt(summaryUsage, "providerFailureEventsWithoutUsage", -1) != 1 ||
                 ReadInt(summaryUsage, "budgetReservationRejectionEvents", -1) != 1 ||
+                ReadInt(usageByScope?["safe-settlement-arrival"] as JsonObject, "providerResponseRows", -1) != 1 ||
+                ReadInt(usageByScope?["native-battle-inquiry"] as JsonObject, "providerResponseRows", -1) != 1 ||
+                Math.Abs((ReadDouble(usageByScope?["safe-settlement-arrival"] as JsonObject, "estimatedCostCny") ?? -1) - 0.01) > 0.0000001 ||
+                Math.Abs((ReadDouble(usageByScope?["native-battle-inquiry"] as JsonObject, "estimatedCostCny") ?? -1) - 0.002) > 0.0000001 ||
                 ReadInt(summaryUsage, "reportedLoopDecisionCountMinusProviderRows", 0) != -1 ||
                 ReadLong(summaryUsage, "promptTokensRowsMinusTerminal") != 99 ||
                 Math.Abs((ReadDouble(summaryUsage, "estimatedCostCnyFromRows") ?? -1) - 0.012) > 0.0000001 ||
