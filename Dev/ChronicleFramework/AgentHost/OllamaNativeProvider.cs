@@ -485,7 +485,10 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             }
             catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
             {
-                throw new AgentHostException("provider-timeout", "The model provider exceeded its configured timeout while waiting for the provider rate window.", exception);
+                throw new AgentHostException("provider-timeout", "The model provider exceeded its configured timeout while waiting for the provider rate window.", exception,
+                    providerFailureStage: "provider-rate-window-wait", providerProxySelectionSource: _proxySelectionSource,
+                    providerTimeoutSeconds: (int)_settings.Timeout.TotalSeconds, providerRequestBodyBytes: Encoding.UTF8.GetByteCount(requestBody),
+                    providerRetryAttempts: rateLimitRetryAttempts, providerTransportErrorType: exception.GetType().Name);
             }
             using var message = new HttpRequestMessage(HttpMethod.Post, _settings.Endpoint)
             {
@@ -498,11 +501,18 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             }
             catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
             {
-                throw new AgentHostException("provider-timeout", "The model provider did not respond within its configured timeout.", exception);
+                throw new AgentHostException("provider-timeout", "The model provider did not respond within its configured timeout.", exception,
+                    providerFailureStage: "http-send-response", providerProxySelectionSource: _proxySelectionSource,
+                    providerTimeoutSeconds: (int)_settings.Timeout.TotalSeconds, providerRequestBodyBytes: Encoding.UTF8.GetByteCount(requestBody),
+                    providerRetryAttempts: rateLimitRetryAttempts, providerTransportErrorType: exception.GetType().Name);
             }
             catch (HttpRequestException exception)
             {
-                throw new AgentHostException("provider-unreachable", "The configured model provider could not be reached.", exception);
+                throw new AgentHostException("provider-unreachable", "The configured model provider could not be reached.", exception,
+                    providerFailureStage: "http-send-response", providerProxySelectionSource: _proxySelectionSource,
+                    providerTimeoutSeconds: (int)_settings.Timeout.TotalSeconds, providerRequestBodyBytes: Encoding.UTF8.GetByteCount(requestBody),
+                    providerRetryAttempts: rateLimitRetryAttempts, providerTransportErrorType: exception.GetType().Name,
+                    providerHttpStatus: exception.StatusCode.HasValue ? (int)exception.StatusCode.Value : null);
             }
         }
 
@@ -514,7 +524,10 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             }
             catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
             {
-                throw new AgentHostException("provider-timeout", $"The model provider exceeded its configured timeout {description}.", exception);
+                throw new AgentHostException("provider-timeout", $"The model provider exceeded its configured timeout {description}.", exception,
+                    providerFailureStage: "rate-limit-retry-delay", providerProxySelectionSource: _proxySelectionSource,
+                    providerTimeoutSeconds: (int)_settings.Timeout.TotalSeconds, providerRetryAttempts: rateLimitRetryAttempts,
+                    providerTransportErrorType: exception.GetType().Name);
             }
         }
 
@@ -530,7 +543,11 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 }
                 catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
                 {
-                    throw new AgentHostException("provider-timeout", "The model provider exceeded its configured timeout while reading rate-limit guidance.", exception);
+                    throw new AgentHostException("provider-timeout", "The model provider exceeded its configured timeout while reading rate-limit guidance.", exception,
+                        providerFailureStage: "rate-limit-guidance-read", providerProxySelectionSource: _proxySelectionSource,
+                        providerTimeoutSeconds: (int)_settings.Timeout.TotalSeconds, providerRetryAttempts: rateLimitRetryAttempts,
+                        providerTransportErrorType: exception.GetType().Name,
+                        providerHttpStatus: (int)response.StatusCode);
                 }
                 if (response.StatusCode == HttpStatusCode.TooManyRequests)
                 {
@@ -600,7 +617,9 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     providerRoute: SafeDiagnosticField(ReadResponseHeader(response, "X-Routed-Via") ?? _lastProviderRoute),
                     providerOutputFormat: responseFormatMode,
                     providerRetryAttempts: rateLimitRetryAttempts,
-                    providerRetryWaitMilliseconds: rateLimitRetryWaitMilliseconds);
+                    providerRetryWaitMilliseconds: rateLimitRetryWaitMilliseconds,
+                    providerFailureStage: "http-response-status", providerProxySelectionSource: _proxySelectionSource,
+                    providerTimeoutSeconds: (int)_settings.Timeout.TotalSeconds, providerRequestBodyBytes: bodyBytes);
 
             if (response.Content.Headers.ContentLength is > MaxResponseBytes)
                 throw new AgentHostException("provider-response-too-large", "The local model response exceeds the Host size limit.");
@@ -612,7 +631,11 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             }
             catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
             {
-                throw new AgentHostException("provider-timeout", "The local model provider response exceeded its configured timeout.", exception);
+                throw new AgentHostException("provider-timeout", "The local model provider response exceeded its configured timeout.", exception,
+                    providerFailureStage: "response-body-read", providerProxySelectionSource: _proxySelectionSource,
+                    providerTimeoutSeconds: (int)_settings.Timeout.TotalSeconds, providerRequestBodyBytes: bodyBytes,
+                    providerRetryAttempts: rateLimitRetryAttempts, providerTransportErrorType: exception.GetType().Name,
+                    providerHttpStatus: (int)response.StatusCode);
             }
             if (responseBytes.Length > MaxResponseBytes)
                 throw new AgentHostException("provider-response-too-large", "The local model response exceeds the Host size limit.");
@@ -1473,7 +1496,9 @@ internal sealed record ProviderDecisionResult(
 internal sealed class AgentHostException : Exception
 {
     internal AgentHostException(string code, string message, Exception? innerException = null, int? providerHttpStatus = null,
-        string? providerRoute = null, string? providerOutputFormat = null, int? providerRetryAttempts = null, long? providerRetryWaitMilliseconds = null) : base(message, innerException)
+        string? providerRoute = null, string? providerOutputFormat = null, int? providerRetryAttempts = null, long? providerRetryWaitMilliseconds = null,
+        string? providerFailureStage = null, string? providerProxySelectionSource = null, int? providerTimeoutSeconds = null,
+        int? providerRequestBodyBytes = null, string? providerTransportErrorType = null) : base(message, innerException)
     {
         Code = code;
         ProviderHttpStatus = providerHttpStatus;
@@ -1481,6 +1506,11 @@ internal sealed class AgentHostException : Exception
         ProviderOutputFormat = providerOutputFormat;
         ProviderRetryAttempts = providerRetryAttempts;
         ProviderRetryWaitMilliseconds = providerRetryWaitMilliseconds;
+        ProviderFailureStage = providerFailureStage;
+        ProviderProxySelectionSource = providerProxySelectionSource;
+        ProviderTimeoutSeconds = providerTimeoutSeconds;
+        ProviderRequestBodyBytes = providerRequestBodyBytes;
+        ProviderTransportErrorType = providerTransportErrorType;
     }
 
     internal string Code { get; }
@@ -1489,4 +1519,9 @@ internal sealed class AgentHostException : Exception
     internal string? ProviderOutputFormat { get; }
     internal int? ProviderRetryAttempts { get; }
     internal long? ProviderRetryWaitMilliseconds { get; }
+    internal string? ProviderFailureStage { get; }
+    internal string? ProviderProxySelectionSource { get; }
+    internal int? ProviderTimeoutSeconds { get; }
+    internal int? ProviderRequestBodyBytes { get; }
+    internal string? ProviderTransportErrorType { get; }
 }

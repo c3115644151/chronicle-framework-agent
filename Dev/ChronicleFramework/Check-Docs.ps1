@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.523'
+$contractVersion = '7.524'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -154,6 +154,9 @@ if ($agentHostHarnessProgressTraceSource -notmatch 'AgentHostRuntimeProgressLog\
     $agentHostRuntimeProgressLogSource -notmatch 'BuildLoggedUsageSummary' -or
     $agentHostRuntimeProgressLogSource -notmatch 'providerResponseRows' -or
     $agentHostRuntimeProgressLogSource -notmatch 'providerHttpStatus' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'providerFailureStage' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'providerProxySelectionSource' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'providerRequestBodyBytes' -or
     $agentHostRuntimeProgressLogSource -notmatch 'providerFailureEventsWithoutUsage' -or
     $agentHostRuntimeProgressLogSource -notmatch 'promptCacheHitRatioFromRows' -or
     $agentHostRuntimeProgressLogSource -notmatch 'successfully parsed provider responses only' -or

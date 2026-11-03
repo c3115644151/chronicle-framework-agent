@@ -194,7 +194,9 @@ internal static class AgentHostRuntimeProgressLog
     }
 
     internal static void RecordProviderFailure(JsonElement request, string failureCode, int? providerHttpStatus = null,
-        string? providerRoute = null, string? providerOutputFormat = null, int? providerRetryAttempts = null, long? providerRetryWaitMilliseconds = null)
+        string? providerRoute = null, string? providerOutputFormat = null, int? providerRetryAttempts = null, long? providerRetryWaitMilliseconds = null,
+        string? providerFailureStage = null, string? providerProxySelectionSource = null, int? providerTimeoutSeconds = null,
+        int? providerRequestBodyBytes = null, string? providerTransportErrorType = null)
     {
         var runId = ReadString(request, "runId");
         if (!IsActiveProductRun(runId) || !TryGetPath(runId, out var path)) return;
@@ -212,6 +214,11 @@ internal static class AgentHostRuntimeProgressLog
                 ["providerOutputFormat"] = providerOutputFormat,
                 ["providerRetryAttempts"] = providerRetryAttempts,
                 ["providerRetryWaitMilliseconds"] = providerRetryWaitMilliseconds,
+                ["providerFailureStage"] = providerFailureStage,
+                ["providerProxySelectionSource"] = providerProxySelectionSource,
+                ["providerTimeoutSeconds"] = providerTimeoutSeconds,
+                ["providerRequestBodyBytes"] = providerRequestBodyBytes,
+                ["providerTransportErrorType"] = providerTransportErrorType,
                 ["nativeActionSent"] = false,
                 ["responseBodiesLogged"] = false,
                 ["credentialsLogged"] = false
@@ -496,7 +503,8 @@ internal static class AgentHostRuntimeProgressLog
                     "required_tool_call", decision, "deepseek-flash", PromptCacheHitTokens: 0, PromptCacheMissTokens: 99,
                     EstimatedCostCny: 0.002, ReservedCostUpperBoundCny: 0.005), configuredRunCostLimitCny: 5);
                 RecordBudgetReservationRejected(childRequestDocument.RootElement, "deepseek-flash", 900, 990, 256, 4.9, 0.2, 5);
-                RecordProviderFailure(request.RootElement, "provider-http-error", 429, "api.deepseek.com", "required_tool_call", 2, 1500);
+                RecordProviderFailure(request.RootElement, "provider-http-error", 429, "api.deepseek.com", "required_tool_call", 2, 1500,
+                    "http-response-status", "detected-local-listener-7890", 360, 12000, "HttpRequestException");
                 RecordObjectiveSubflowResult("gold", new JsonObject { ["runId"] = validRun, ["status"] = "failed", ["termination"] = "self-test" });
                 RecordRunSummary(request.RootElement, new JsonObject
                 {
@@ -527,6 +535,10 @@ internal static class AgentHostRuntimeProgressLog
                 ReadInt(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerHttpStatus") != 429 ||
                 ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerRoute") != "api.deepseek.com" ||
                 ReadInt(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerRetryAttempts") != 2 ||
+                ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerFailureStage") != "http-response-status" ||
+                ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerProxySelectionSource") != "detected-local-listener-7890" ||
+                ReadInt(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerTimeoutSeconds") != 360 ||
+                ReadInt(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerRequestBodyBytes") != 12000 ||
                 ReadString(JsonNode.Parse(productLogLines[5]) as JsonObject, "objectiveId") != "gold" ||
                 ReadString(summaryEvent, "event") != "run-summary" ||
                 ReadInt(summaryUsage, "providerResponseRows", -1) != 2 ||
