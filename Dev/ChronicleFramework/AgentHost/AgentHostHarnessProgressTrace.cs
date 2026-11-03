@@ -121,11 +121,17 @@ internal static class AgentHostHarnessProgressTrace
                 ["estimatedCostCny"] = result.EstimatedCostCny,
                 ["reservedCostUpperBoundCny"] = result.ReservedCostUpperBoundCny,
                 ["decision"] = decision,
+                ["allowedActions"] = SummarizeAllowedActionNames(requestNode?["allowedActions"] as JsonArray),
+                ["allowedControls"] = requestNode?["allowedControls"]?.DeepClone(),
+                ["decisionFeedbackKind"] = Copy((observation?["decisionFeedback"] as JsonObject), "kind"),
                 ["observation"] = new JsonObject
                 {
                     ["campaignDay"] = Copy(state, "campaignDay"),
                     ["gameState"] = Copy(context, "gameState"),
                     ["menuId"] = Copy(context, "menuId"),
+                    ["inquiryOpen"] = Copy(context, "inquiryOpen"),
+                    ["inquiry"] = BuildInquirySummary(context?["inquiry"] as JsonObject),
+                    ["partyScreen"] = BuildPartyScreenSummary(state?["partyScreen"] as JsonObject),
                     ["timeControlMode"] = Copy(context, "timeControlMode"),
                     ["isWaiting"] = Copy(context, "isWaiting"),
                     ["encounterActive"] = Copy(context, "encounterActive"),
@@ -275,6 +281,7 @@ internal static class AgentHostHarnessProgressTrace
             ["inquiryOpen"] = Copy(context, "inquiryOpen"),
             ["inquiry"] = BuildInquirySummary(context?["inquiry"] as JsonObject),
             ["partyScreenOpen"] = state["partyScreen"] is JsonObject,
+            ["partyScreen"] = BuildPartyScreenSummary(state["partyScreen"] as JsonObject),
             ["inventoryScreenOpen"] = state["inventoryScreen"] is JsonObject,
             ["battleSimulationActive"] = context?["battleSimulation"] is JsonObject,
             ["isCaptive"] = Copy(captivity, "isCaptive"),
@@ -298,7 +305,7 @@ internal static class AgentHostHarnessProgressTrace
         };
     }
 
-    private static JsonObject? BuildInquirySummary(JsonObject? inquiry)
+    internal static JsonObject? BuildInquirySummary(JsonObject? inquiry)
     {
         if (inquiry is null) return null;
         return new JsonObject
@@ -306,7 +313,7 @@ internal static class AgentHostHarnessProgressTrace
             ["supported"] = Copy(inquiry, "supported"),
             ["kind"] = Copy(inquiry, "kind"),
             ["title"] = Copy(inquiry, "title"),
-            ["text"] = Truncate(ReadString(inquiry, "text"), 800),
+            ["text"] = Truncate(ReadString(inquiry, "text"), 400),
             ["affirmative"] = BuildInquiryOption(inquiry["affirmative"] as JsonObject),
             ["negative"] = BuildInquiryOption(inquiry["negative"] as JsonObject),
             ["pauseGameActiveState"] = Copy(inquiry, "pauseGameActiveState")
@@ -319,6 +326,44 @@ internal static class AgentHostHarnessProgressTrace
         ["enabled"] = Copy(option, "enabled"),
         ["text"] = Copy(option, "text")
     };
+
+    internal static JsonArray SummarizeAllowedActionNames(JsonArray? actions) => new((actions?.OfType<JsonObject>() ?? Enumerable.Empty<JsonObject>())
+        .Select(item => ReadString(item, "action"))
+        .Where(name => !string.IsNullOrWhiteSpace(name))
+        .Distinct(StringComparer.Ordinal)
+        .Select(name => (JsonNode?)JsonValue.Create(name))
+        .ToArray());
+
+    internal static JsonObject? BuildPartyScreenSummary(JsonObject? screen)
+    {
+        if (screen is null) return null;
+        return new JsonObject
+        {
+            ["mode"] = Copy(screen, "mode"),
+            ["canDone"] = Copy(screen, "canDone"),
+            ["doneReason"] = Truncate(ReadString(screen, "doneReason"), 300),
+            ["rightMemberLimit"] = Copy(screen, "rightMemberLimit"),
+            ["rightPrisonerLimit"] = Copy(screen, "rightPrisonerLimit"),
+            ["leftMembers"] = BuildRosterSummary(screen["leftMembers"] as JsonArray),
+            ["leftPrisoners"] = BuildRosterSummary(screen["leftPrisoners"] as JsonArray),
+            ["rightMembers"] = BuildRosterSummary(screen["rightMembers"] as JsonArray),
+            ["rightPrisoners"] = BuildRosterSummary(screen["rightPrisoners"] as JsonArray)
+        };
+    }
+
+    private static JsonObject BuildRosterSummary(JsonArray? rows)
+    {
+        var sourceRows = rows?.OfType<JsonObject>().ToArray() ?? Array.Empty<JsonObject>();
+        var count = sourceRows.Sum(row => Math.Max(0, ReadInt(row, "count", 0)));
+        var transferableCount = sourceRows.Where(row => ReadBoolean(row, "transferable"))
+            .Sum(row => Math.Max(0, ReadInt(row, "count", 0)));
+        return new JsonObject
+        {
+            ["rowCount"] = sourceRows.Length,
+            ["count"] = count,
+            ["transferableCount"] = transferableCount
+        };
+    }
 
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
@@ -430,9 +475,38 @@ internal static class AgentHostHarnessProgressTrace
             var observationFieldSizes = recorded["observationFieldByteSizes"] as JsonArray;
             if (observationFieldSizes?.OfType<JsonObject>().Any(item => ReadString(item, "field") == "state" && (ReadInt(item, "bytes") ?? 0) > 0) != true)
                 throw new AgentHostException("host-progress-trace-observation-field-size-self-test", "Harness trace must identify which bounded observation section contributes request size without persisting its contents.");
+
+            using var partyRequest = JsonDocument.Parse("""
+                {"runId":"trace-test","observation":{"scope":"native-postbattle-party-screen","state":{"context":{"gameState":"PartyState","inquiryOpen":true,"inquiry":{"supported":true,"kind":"YesNoInquiry","token":"PRIVATE_INQUIRY_TOKEN","title":"Leaving troops behind","text":"PRIVATE_INQUIRY_BODY","affirmative":{"visible":true,"enabled":true,"text":"Yes"},"negative":{"visible":true,"enabled":true,"text":"No"}}},"party":{"members":5,"sizeLimit":20},"partyScreen":{"mode":"Loot","canDone":true,"doneReason":"Leaving troops behind","rightMemberLimit":20,"rightPrisonerLimit":18,"leftMembers":[{"troopId":"hidden-native-id","count":5,"transferable":true}],"leftPrisoners":[],"rightMembers":[{"troopId":"hidden-player-id","count":5,"transferable":false}],"rightPrisoners":[]}}},"allowedActions":[{"action":"partyTakeAll","arguments":["TroopType"]},{"action":"partyScreenDone","arguments":[]}],"allowedControls":[]}
+                """);
+            var partyDecision = JsonNode.Parse("""{"action":"respondInquiry","arguments":{"choice":"negative"},"rationale":"Private model rationale."}""")!.AsObject();
+            RecordDecision(partyRequest.RootElement, new ProviderDecisionResult("completed", "selftest-model", 51, 12, "required_tool_call", partyDecision, "selftest/party-inquiry"));
+            var partyLines = File.ReadAllLines(path);
+            if (partyLines.Length != 2)
+                throw new AgentHostException("host-progress-trace-party-screen-event-count", "PartyState progress trace did not append the expected second decision event.");
+            var partyEvent = JsonNode.Parse(partyLines[1]) as JsonObject ?? throw new AgentHostException("host-progress-trace-party-screen-event-json", "PartyState progress trace did not contain a JSON event.");
+            var partyObservation = partyEvent["observation"] as JsonObject;
+            var inquirySummary = partyObservation?["inquiry"] as JsonObject;
+            var partyScreenSummary = partyObservation?["partyScreen"] as JsonObject;
+            var loggedAllowedActions = partyEvent["allowedActions"] as JsonArray;
+            var partyEventJson = partyEvent.ToJsonString();
+            if (ReadString(partyObservation, "gameState") != "PartyState" ||
+                ReadString(inquirySummary, "kind") != "YesNoInquiry" || ReadString(inquirySummary, "title") != "Leaving troops behind" ||
+                ReadString(inquirySummary?["affirmative"] as JsonObject, "text") != "Yes" ||
+                ReadString(inquirySummary?["negative"] as JsonObject, "text") != "No" ||
+                ReadString(partyScreenSummary, "mode") != "Loot" || ReadBoolean(partyScreenSummary, "canDone") != true ||
+                ReadInt(partyScreenSummary?["leftMembers"] as JsonObject, "count", -1) != 5 ||
+                ReadInt(partyScreenSummary?["leftMembers"] as JsonObject, "transferableCount", -1) != 5 ||
+                loggedAllowedActions?.Any(action => action?.GetValue<string>() == "partyTakeAll") != true ||
+                loggedAllowedActions.Any(action => action?.GetValue<string>() == "partyScreenDone") != true ||
+                !partyEventJson.Contains("PRIVATE_INQUIRY_BODY", StringComparison.Ordinal) ||
+                partyEventJson.Contains("PRIVATE_INQUIRY_TOKEN", StringComparison.Ordinal) || partyEventJson.Contains("hidden-native-id", StringComparison.Ordinal) ||
+                partyEventJson.Contains("Private model rationale", StringComparison.Ordinal))
+                throw new AgentHostException("host-progress-trace-party-screen-context-self-test", "PartyState traces must retain current Inquiry labels, available action names and compact roster counts without tokens, free body/rationale text or troop IDs.");
+
             Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "agent-host-lifecycle-test");
             RecordDecision(request.RootElement, new ProviderDecisionResult("completed", "selftest-model", 1, 1, "stop", decision, "lifecycle/selftest-route"));
-            if (File.ReadAllLines(path).Length != 2)
+            if (File.ReadAllLines(path).Length != 3)
                 throw new AgentHostException("host-progress-trace-lifecycle-mode", "Lifecycle Harness model evaluation must retain the same bounded decision trace as visual-capture runs.");
 
             var objectiveResult = new JsonObject
@@ -529,8 +603,8 @@ internal static class AgentHostHarnessProgressTrace
                 }
             };
             RecordObjectiveSubflowResult("partySize", objectiveResult);
-            var objectiveLine = JsonNode.Parse(File.ReadAllLines(path)[2])!.AsObject();
-            if (File.ReadAllLines(path).Length != 3 ||
+            var objectiveLine = JsonNode.Parse(File.ReadAllLines(path)[3])!.AsObject();
+            if (File.ReadAllLines(path).Length != 4 ||
                 ReadString(objectiveLine, "event") != "objective-subflow-result" ||
                 ReadString(objectiveLine, "objectiveId") != "partySize" ||
                 ReadString(objectiveLine, "failureCode") != "provider-http-error" ||
@@ -556,7 +630,7 @@ internal static class AgentHostHarnessProgressTrace
 
             Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "normal");
             RecordDecision(request.RootElement, new ProviderDecisionResult("completed", "selftest-model", 1, 1, "stop", decision, "selftest/route"));
-            if (File.ReadAllLines(path).Length != 3)
+            if (File.ReadAllLines(path).Length != 4)
                 throw new AgentHostException("host-progress-trace-self-test-mode-gate", "Progress tracing must be disabled outside Harness visual-capture/lifecycle modes.");
             return [
                 new { scenario = "harness-progress-trace-records-current-modal-and-visible-buttons-without-one-use-token", passed = true },
@@ -736,6 +810,8 @@ internal static class AgentHostHarnessProgressTrace
 
     private static int? ReadInt(JsonObject? source, string name) =>
         source?[name] is JsonValue value && value.TryGetValue<int>(out var result) ? result : null;
+
+    private static int ReadInt(JsonObject? source, string name, int fallback) => ReadInt(source, name) ?? fallback;
 
     private static double? ReadDouble(JsonObject? source, string name)
     {

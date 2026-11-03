@@ -74,6 +74,8 @@ internal static class AgentHostRuntimeProgressLog
         var party = state?["party"] as JsonObject;
         var economy = state?["economy"] as JsonObject;
         var conversation = context?["conversation"] as JsonObject;
+        var inquiry = context?["inquiry"] as JsonObject;
+        var partyScreen = state?["partyScreen"] as JsonObject;
         var actionArguments = result.Decision["arguments"] as JsonObject;
         var decisionAction = ReadString(result.Decision, "action");
         var decisionControl = ReadString(result.Decision, "control");
@@ -125,6 +127,12 @@ internal static class AgentHostRuntimeProgressLog
             ["menuId"] = Copy(context, "menuId"),
             ["timeControlMode"] = Copy(context, "timeControlMode"),
             ["isWaiting"] = Copy(context, "isWaiting"),
+            ["inquiryOpen"] = Copy(context, "inquiryOpen"),
+            ["inquiryKind"] = Copy(inquiry, "kind"),
+            ["inquiryTitle"] = Truncate(ReadString(inquiry, "title"), 120),
+            ["inquiryAffirmativeText"] = Truncate(ReadString(inquiry?["affirmative"] as JsonObject, "text"), 80),
+            ["inquiryNegativeText"] = Truncate(ReadString(inquiry?["negative"] as JsonObject, "text"), 80),
+            ["nativePartyScreen"] = AgentHostHarnessProgressTrace.BuildPartyScreenSummary(partyScreen),
             ["encounterActive"] = Copy(context, "encounterActive"),
             ["encounteredPartyId"] = Copy(context, "encounteredPartyId"),
             ["battleSimulationActive"] = context?["battleSimulation"] is JsonObject,
@@ -280,7 +288,7 @@ internal static class AgentHostRuntimeProgressLog
             throw new AgentHostException("runtime-progress-log-path-self-test-failed", "Player progress logs must stay in the owned ModLogs\\AgentRuns folder and reject untrusted run IDs.");
 
         using var request = JsonDocument.Parse("""
-            {"runId":"mcm-0123456789abcdef0123456789abcdef","goal":"PRIVATE_GOAL_TEXT","observation":{"state":{"campaignDay":42.5,"context":{"gameState":"MapState","menuId":"village","timeControlMode":"Stop","encounterActive":true,"encounteredPartyId":"bandit-a"},"location":{"currentSettlementId":"village-1","targetPartyId":"bandit-a"},"economy":{"gold":100,"renown":20},"party":{"members":5,"sizeLimit":20,"healthy":3,"wounded":1,"prisoners":1,"morale":12.5,"food":0.5,"foodChange":-0.25,"isMoving":true,"moveMode":"Party","defaultBehavior":"EngageParty"},"objectiveSnapshot":{"gold":{"current":100,"target":2000,"met":false}}}},"allowedActions":[{"action":"dialogueSelect","arguments":["OptionId"]}],"allowedControls":[]}
+            {"runId":"mcm-0123456789abcdef0123456789abcdef","goal":"PRIVATE_GOAL_TEXT","observation":{"state":{"campaignDay":42.5,"context":{"gameState":"PartyState","menuId":null,"timeControlMode":"Stop","encounterActive":false,"inquiryOpen":true,"inquiry":{"supported":true,"kind":"YesNoInquiry","token":"PRIVATE_INQUIRY_TOKEN","title":"Leaving troops behind","text":"PRIVATE_INQUIRY_BODY","affirmative":{"visible":true,"enabled":true,"text":"Yes"},"negative":{"visible":true,"enabled":true,"text":"No"}},"encounteredPartyId":null},"location":{"currentSettlementId":"village-1","targetPartyId":null},"economy":{"gold":100,"renown":20},"party":{"members":5,"sizeLimit":20,"healthy":3,"wounded":1,"prisoners":1,"morale":12.5,"food":0.5,"foodChange":-0.25,"isMoving":false,"moveMode":"Party","defaultBehavior":"Hold"},"partyScreen":{"mode":"Loot","canDone":true,"doneReason":"Leaving troops behind","rightMemberLimit":20,"leftMembers":[{"troopId":"hidden-native-id","count":5,"transferable":true}],"leftPrisoners":[],"rightMembers":[{"troopId":"looter","count":5,"transferable":false}],"rightPrisoners":[]},"objectiveSnapshot":{"gold":{"current":100,"target":2000,"met":false}}}},"allowedActions":[{"action":"respondInquiry","arguments":["choice"]},{"action":"partyScreenDone","arguments":[]}],"allowedControls":[]}
             """);
         var decision = new JsonObject
         {
@@ -298,8 +306,8 @@ internal static class AgentHostRuntimeProgressLog
             ReadInt(loggedDecision, "promptCacheHitTokens") != 12 || ReadInt(loggedDecision, "promptCacheMissTokens") != 34 ||
             Math.Abs((ReadDouble(loggedDecision, "estimatedCostCny") ?? -1) - 0.01) > 0.0000001 ||
             Math.Abs((ReadDouble(loggedDecision, "configuredRunCostLimitCny") ?? -1) - 5) > 0.0000001 ||
-            ReadBoolean(loggedDecision, "partyIsMoving") != true || ReadBoolean(loggedDecision, "encounterActive") != true ||
-            ReadString(loggedDecision, "encounteredPartyId") != "bandit-a" || ReadString(loggedDecision, "partyDefaultBehavior") != "EngageParty" ||
+            ReadBoolean(loggedDecision, "partyIsMoving") || ReadBoolean(loggedDecision, "encounterActive") ||
+            ReadString(loggedDecision, "encounteredPartyId") is not null || ReadString(loggedDecision, "partyDefaultBehavior") != "Hold" ||
             ReadInt(loggedDecision, "partyWounded") != 1 || ReadInt(loggedDecision, "partyPrisoners") != 1 ||
             Math.Abs((ReadDouble(loggedDecision, "partyMorale") ?? -1) - 12.5) > 0.0000001 ||
             Math.Abs((ReadDouble(loggedDecision, "partyFood") ?? -1) - 0.5) > 0.0000001 ||
@@ -307,6 +315,16 @@ internal static class AgentHostRuntimeProgressLog
             loggedJson.Contains("PRIVATE_", StringComparison.Ordinal) || loggedJson.Contains("issue_offer_player_accept_quest", StringComparison.Ordinal) ||
             (loggedDecision["argumentNames"] as JsonArray)?.Count != 2)
             throw new AgentHostException("runtime-progress-log-privacy-or-usage-self-test-failed", "The player runtime log must retain token/cache/cost metadata and safe argument names while omitting goals, argument values, response text and rationales.");
+
+        if (ReadBoolean(loggedDecision, "inquiryOpen") != true ||
+            ReadString(loggedDecision, "inquiryKind") != "YesNoInquiry" ||
+            ReadString(loggedDecision, "inquiryTitle") != "Leaving troops behind" ||
+            ReadString(loggedDecision, "inquiryAffirmativeText") != "Yes" || ReadString(loggedDecision, "inquiryNegativeText") != "No" ||
+            ReadString(loggedDecision["nativePartyScreen"] as JsonObject, "mode") != "Loot" ||
+            ReadInt(loggedDecision["nativePartyScreen"]?["leftMembers"] as JsonObject, "count", -1) != 5 ||
+            ReadInt(loggedDecision["nativePartyScreen"]?["leftMembers"] as JsonObject, "transferableCount", -1) != 5 ||
+            loggedJson.Contains("PRIVATE_INQUIRY", StringComparison.Ordinal) || loggedJson.Contains("hidden-native-id", StringComparison.Ordinal))
+            throw new AgentHostException("runtime-progress-log-native-party-ui-self-test-failed", "The player run log must record compact modal/PartyScreen context while omitting one-use tokens, inquiry body text and roster entity IDs.");
 
         var tempRoot = Path.Combine(Path.GetTempPath(), "ChronicleRuntimeLogRetention-" + Guid.NewGuid().ToString("N"));
         try
@@ -488,11 +506,13 @@ internal static class AgentHostRuntimeProgressLog
 
     private static string UtcNow() => DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
     private static JsonNode? Copy(JsonObject? source, string name) => source?[name]?.DeepClone();
+    private static string? Truncate(string? value, int max) => string.IsNullOrEmpty(value) ? value : value.Length <= max ? value : value[..max];
     private static string? ReadString(JsonElement parent, string name) =>
         parent.ValueKind == JsonValueKind.Object && parent.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
             ? value.GetString() : null;
     private static int? ReadInt(JsonObject? parent, string name) =>
         parent?[name] is JsonValue node && node.TryGetValue<int>(out var value) ? value : null;
+    private static int ReadInt(JsonObject? parent, string name, int fallback) => ReadInt(parent, name) ?? fallback;
     private static double? ReadDouble(JsonObject? parent, string name) =>
         parent?[name] is JsonValue node && node.TryGetValue<double>(out var value) ? value : null;
     private static string? ReadString(JsonObject? parent, string name) =>

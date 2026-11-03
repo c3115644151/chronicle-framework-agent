@@ -29,6 +29,11 @@ internal static class AgentHostBattleSimulationLoop
         var goal = ReadString(request, "goal") ?? string.Empty;
         var maxDecisions = Math.Clamp(ReadInt(request, "maxDecisions", AgentHostCampaignLoop.MaxCumulativeDecisions), 1, AgentHostCampaignLoop.MaxCumulativeDecisions);
         var maxElapsedSeconds = Math.Clamp(ReadInt(request, "maxElapsedSeconds", 7200), 1, 7200);
+        var parentEycObjectives = request.TryGetProperty("parentEycObjectives", out var parentEycObjectivesElement) && parentEycObjectivesElement.ValueKind == JsonValueKind.Object
+            ? JsonNode.Parse(parentEycObjectivesElement.GetRawText()) as JsonObject
+            : null;
+        var parentPartySizeObjective = parentEycObjectives?["partySize"] as JsonObject;
+        var parentPartySizeObjectiveUnmet = parentPartySizeObjective is not null && !ReadBoolean(parentPartySizeObjective, "met");
         var allowedActionNames = request.TryGetProperty("allowedActionNames", out var names) && names.ValueKind == JsonValueKind.Array
             ? names.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!).ToHashSet(StringComparer.Ordinal)
             : new HashSet<string>(StringComparer.Ordinal);
@@ -61,6 +66,9 @@ internal static class AgentHostBattleSimulationLoop
         var nativeEscapeCompleted = false;
         var captivityObserved = false;
         string? captivityChoiceOptionId = null;
+        string? blockedPartyScreenDoneFingerprint = null;
+        var repeatedPartyScreenNegativeInquiryCount = 0;
+        var partyScreenDoneAwaitingInquiry = false;
         JsonObject? previousReceipt = null;
         JsonObject? battleFinishReceipt = null;
         JsonObject? feedback = null;
@@ -93,6 +101,13 @@ internal static class AgentHostBattleSimulationLoop
                 var context = state["context"] as JsonObject ?? new JsonObject();
                 var gameState = ReadString(context, "gameState");
                 var menuId = ReadString(context, "menuId");
+                var currentPartyScreenFingerprint = BuildPartyScreenFingerprint(state);
+                if (blockedPartyScreenDoneFingerprint is not null && !string.Equals(blockedPartyScreenDoneFingerprint, currentPartyScreenFingerprint, StringComparison.Ordinal))
+                {
+                    blockedPartyScreenDoneFingerprint = null;
+                    repeatedPartyScreenNegativeInquiryCount = 0;
+                    if (ReadString(feedback, "kind") == "postbattle-party-screen-negative-needs-roster-change") feedback = null;
+                }
                 var isCaptive = IsPlayerCaptive(state);
                 captivityObserved |= isCaptive;
                 var simulation = context["battleSimulation"] as JsonObject;
@@ -318,6 +333,8 @@ internal static class AgentHostBattleSimulationLoop
                             ? JsonNode.Parse(objectiveElement.GetRawText())?.ToJsonString() ?? "unavailable"
                             : "unavailable";
                         inquiryGoal = "Overall user goal: " + inquiryGoal + ". Current Battle subgoal: " + goal + ". Current original EYC Journal objectives: " + objectiveSnapshot + ". Resolve the current post-battle Native confirmation according to those goals and the exact current PartyState roster; do not assume friendly or neutral survivors are bandit prisoners. The model must choose the current visible affirmative/negative option, or return to the Native PartyScreen only if its current buttons make that appropriate.";
+                        if (partyScreenDoneAwaitingInquiry)
+                            inquiryGoal += " A Native partyScreenDone just opened this prompt. If you choose negative, the same PartyScreen draft returns. Do not create a negative/Done cycle: after declining, transfer a currently listed roster row that advances an unmet Journal objective before trying Done again. If no useful transfer is available, decide from the current objective whether to accept leaving the remaining troops or stop safely.";
                     }
                     var inquiry = await AgentHostNativeInquiryResolution.RunAsync(
                         client, activeInquiryClient, provider, elapsed.Token,
@@ -335,7 +352,8 @@ internal static class AgentHostBattleSimulationLoop
                         ["status"] = ReadString(inquiry, "status"),
                         ["choice"] = ReadString(inquiry, "choice"),
                         ["decision"] = inquiry["decision"]?.DeepClone(),
-                        ["nativeReceipt"] = inquiry["nativeReceipt"]?.DeepClone()
+                        ["nativeReceipt"] = inquiry["nativeReceipt"]?.DeepClone(),
+                        ["nativeStateAfter"] = inquiry["nativeStateAfter"]?.DeepClone()
                     });
                     if (ReadString(inquiry, "status") != "resolved")
                     {
@@ -346,6 +364,37 @@ internal static class AgentHostBattleSimulationLoop
                     }
                     using var afterInquiry = await client.ReadStateAsync(elapsed.Token);
                     currentNative = ParseObject(afterInquiry.RootElement);
+                    var selectedInquiryChoice = ReadString(inquiry, "choice");
+                    var afterInquiryState = currentNative["state"] as JsonObject;
+                    var afterInquiryContext = afterInquiryState?["context"] as JsonObject;
+                    if (afterInquiryState is not null && partyScreenDoneAwaitingInquiry && parentPartySizeObjectiveUnmet && gameState == "PartyState" && selectedInquiryChoice == "negative" &&
+                        ReadString(afterInquiryContext, "gameState") == "PartyState")
+                    {
+                        var afterFingerprint = BuildPartyScreenFingerprint(afterInquiryState);
+                        if (afterFingerprint is not null)
+                        {
+                            repeatedPartyScreenNegativeInquiryCount = string.Equals(blockedPartyScreenDoneFingerprint, afterFingerprint, StringComparison.Ordinal)
+                                ? repeatedPartyScreenNegativeInquiryCount + 1
+                                : 1;
+                            blockedPartyScreenDoneFingerprint = afterFingerprint;
+                            feedback = new JsonObject
+                            {
+                                ["kind"] = "postbattle-party-screen-negative-needs-roster-change",
+                                ["requiredNextStep"] = "The current negative response returned to the unchanged Native PartyScreen. Choose a listed partyTakeAll or partyLootTransferOne that advances an unmet Journal objective before selecting Done again; do not repeat the same negative/Done sequence."
+                            };
+                            var currentPartyCatalog = BuildActionCatalog(afterInquiryState, observedTargets, requestedTargetId, battleWasStarted,
+                                mapPartyTargetsQueried, recoverPlayerCaptivity);
+                            var hasRosterTransfer = HasPartyScreenTransferAction(currentPartyCatalog);
+                            if (!hasRosterTransfer && repeatedPartyScreenNegativeInquiryCount >= 2)
+                            {
+                                failure = "The same Native PartyScreen Inquiry was declined twice without a transferable roster action or state change; the loop stopped without replaying another Done or Inquiry.";
+                                failureCode = "party-screen-inquiry-negative-no-progress";
+                                termination = "party-screen-inquiry-no-progress";
+                                break;
+                            }
+                        }
+                    }
+                    partyScreenDoneAwaitingInquiry = false;
                     continue;
                 }
 
@@ -441,6 +490,23 @@ internal static class AgentHostBattleSimulationLoop
                 }
 
                 var catalog = BuildActionCatalog(state, observedTargets, requestedTargetId, battleWasStarted, mapPartyTargetsQueried, recoverPlayerCaptivity);
+                var partyScreenDoneSuppressed = false;
+                if (parentPartySizeObjectiveUnmet && blockedPartyScreenDoneFingerprint is not null &&
+                    string.Equals(blockedPartyScreenDoneFingerprint, currentPartyScreenFingerprint, StringComparison.Ordinal) &&
+                    HasPartyScreenTransferAction(catalog))
+                {
+                    var doneIndex = catalog.IndexOf(catalog.OfType<JsonObject>().FirstOrDefault(action => ReadString(action, "action") == "partyScreenDone"));
+                    if (doneIndex >= 0)
+                    {
+                        catalog.RemoveAt(doneIndex);
+                        partyScreenDoneSuppressed = true;
+                        feedback = new JsonObject
+                        {
+                            ["kind"] = "postbattle-party-screen-negative-needs-roster-change",
+                            ["requiredNextStep"] = "Done is temporarily unavailable because the previous negative Inquiry returned the unchanged roster. Choose a currently listed partyTakeAll or partyLootTransferOne that advances an unmet Journal objective."
+                        };
+                    }
+                }
                 var controls = BuildControlCatalog(state, requestedTargetId, battleWasStarted, recoverPlayerCaptivity);
                 if (catalog.Count == 0 && controls.Count == 0)
                 {
@@ -465,7 +531,6 @@ internal static class AgentHostBattleSimulationLoop
                         : await AgentHostDecisionCycle.DecideBattleSimulationAsync(provider, requestNow, elapsed.Token);
                     providerCompletedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
                     decisions++;
-                    rejected = 0;
                     AddRoute(routes, provider, result, decisions, ref promptTokens, ref completionTokens);
                 }
                 catch (AgentHostException exception) when (IsRecoverableProviderError(exception.Code) && rejected < MaxRejectedDecisions)
@@ -490,6 +555,8 @@ internal static class AgentHostBattleSimulationLoop
                 if (!TryResolveDecision(decision, catalog, controls, state, observedTargets, requestedTargetId,
                         out var action, out var arguments, out var waitSeconds, out var rejection, recoverPlayerCaptivity))
                 {
+                    if (partyScreenDoneSuppressed && action == "partyScreenDone")
+                        rejection = "The current PartyScreen roster is unchanged after a negative Inquiry. Choose a listed roster transfer before Done; do not repeat the same negative/Done sequence.";
                     rejected++;
                     feedback = new JsonObject
                     {
@@ -519,6 +586,7 @@ internal static class AgentHostBattleSimulationLoop
                         break;
                     }
                     await Task.Delay(TimeSpan.FromSeconds(waitSeconds.Value), elapsed.Token);
+                    rejected = 0;
                     var schedulerWaitCompletedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
                     using var waited = await client.ReadStateAsync(elapsed.Token);
                     currentNative = ParseObject(waited.RootElement);
@@ -533,6 +601,7 @@ internal static class AgentHostBattleSimulationLoop
 
                 JsonObject receipt;
                 var actionStartedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+                partyScreenDoneAwaitingInquiry = false;
                 try
                 {
                     using var actionResponse = await client.ExecuteBattleSimulationActionAsync(action, arguments!, elapsed.Token);
@@ -625,12 +694,26 @@ internal static class AgentHostBattleSimulationLoop
                 var actionCompletedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
                 previousReceipt = receipt;
                 using (var refreshed = await client.ReadStateAsync(elapsed.Token)) currentNative = ParseObject(refreshed.RootElement);
+                if (action == "partyScreenDone")
+                {
+                    var refreshedContext = (currentNative["state"] as JsonObject)?["context"] as JsonObject;
+                    partyScreenDoneAwaitingInquiry = accepted && ReadString(refreshedContext, "gameState") == "PartyState" && ReadBoolean(refreshedContext, "inquiryOpen");
+                }
+                else if (action is "partyTakeAll" or "partyLootTransferOne")
+                {
+                    var refreshedScreen = BuildPartyScreenFingerprint(currentNative["state"] as JsonObject);
+                    if (!string.Equals(blockedPartyScreenDoneFingerprint, refreshedScreen, StringComparison.Ordinal))
+                    {
+                        blockedPartyScreenDoneFingerprint = null;
+                        repeatedPartyScreenNegativeInquiryCount = 0;
+                    }
+                }
                 var observationCompleted = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
                 feedback = completed ? null : new JsonObject { ["kind"] = "native-action-rejected", ["action"] = action, ["receipt"] = receipt.DeepClone() };
                 trace.Add(BuildTraceStep(iteration, providerStarted, requestNow, decision, feedback, receipt, currentNative,
                     actionExecuted: completed, providerCompletedUtc: providerCompletedUtc, actionStartedUtc: actionStartedUtc,
                     actionCompletedUtc: actionCompletedUtc, observationCompletedUtc: observationCompleted));
-                if (completed) rejected = 0;
+                if (completed || accepted) rejected = 0;
                 else if (++rejected > MaxRejectedDecisions)
                 {
                     failure = "Native rejected more than the bounded action allowance.";
@@ -872,6 +955,12 @@ internal static class AgentHostBattleSimulationLoop
         return catalog;
     }
 
+    private static bool HasPartyScreenTransferAction(JsonArray? catalog) => catalog?.OfType<JsonObject>().Any(action =>
+        ReadString(action, "action") is "partyTakeAll" or "partyLootTransferOne") == true;
+
+    private static string? BuildPartyScreenFingerprint(JsonObject? state) =>
+        state?["partyScreen"] is JsonObject partyScreen ? partyScreen.ToJsonString() : null;
+
     internal static JsonArray BuildControlCatalog(JsonObject state, string? targetId, bool battleWasStarted, bool recoverPlayerCaptivity = false)
     {
         var controls = new JsonArray();
@@ -1073,7 +1162,8 @@ internal static class AgentHostBattleSimulationLoop
             AgentHostDecisionCycle.BattleSimulationSystemPrompt.Contains("surrender only as a survival fallback", StringComparison.Ordinal) ||
             !AgentHostDecisionCycle.BattleSimulationSystemPrompt.Contains("nearby hostile parties may join the same battle", StringComparison.Ordinal) ||
             !AgentHostDecisionCycle.BattleSimulationSystemPrompt.Contains("context.encounterEscape.menuText", StringComparison.Ordinal) ||
-            !AgentHostDecisionCycle.BattleSimulationSystemPrompt.Contains("try_to_get_away_reject", StringComparison.Ordinal))
+            !AgentHostDecisionCycle.BattleSimulationSystemPrompt.Contains("try_to_get_away_reject", StringComparison.Ordinal) ||
+            !AgentHostDecisionCycle.BattleSimulationSystemPrompt.Contains("do not repeat a negative/Done cycle", StringComparison.Ordinal))
             throw new AgentHostException("battle-loop-self-test-risk-aware-retreat-prompt-scope-failed", "BattleSimulation must assess nearby same-faction hostile force and the current Native Try-to-get-away loss warning, while surrender remains recovery-only.");
         var visibleBanditNeedsDecisionPause = ParseObject(JsonDocument.Parse("""
             {"timeControlMode":"StoppablePlay","state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false,"inquiryOpen":false,"escapeMenuOpen":false,"isWaitMenu":false,"isWaitActive":false,"mapIncident":{"active":false},"sceneNotification":{"hasActiveNotification":false},"captivity":{"isCaptive":false}},"location":{"targetPartyId":null},"party":{"isMoving":true},"nearbyParties":[{"id":"bandit-a","type":"bandit","hostile":true}]}}
@@ -1635,6 +1725,18 @@ internal static class AgentHostBattleSimulationLoop
         if (ReadInt(partyInquiryResult, "actionsExecuted", 0) != 15)
             throw new AgentHostException("battle-loop-self-test-accepted-done-action-not-counted", "Native PartyScreen Done returns accepted while its leftover Inquiry is open; both the Done action and the subsequent model-chosen inquiry response must count as executed Native actions.");
 
+        var repeatedDoneClient = new FakeBattleSimulationNativeClient(simulatePartyInquiry: true);
+        var repeatedDoneProvider = new FakeBattleSimulationDecisionProvider(simulatePartyInquiry: true, repeatPartyScreenDoneAfterDecline: true);
+        var repeatedDoneResult = await RunAsync(inquiryRequest.RootElement, repeatedDoneClient, repeatedDoneProvider, CancellationToken.None,
+            inquiryClient: repeatedDoneClient);
+        var repeatedDoneTrace = repeatedDoneResult["trace"] as JsonArray;
+        if (ReadString(repeatedDoneResult, "status") != "completed" || repeatedDoneProvider.CallCount != 18 ||
+            !repeatedDoneClient.Actions.SequenceEqual(new[] { "mapPartyTargets", "pursue", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone" }) ||
+            repeatedDoneTrace?.OfType<JsonObject>().Any(step => ReadString(step["decision"] as JsonObject, "action") == "partyScreenDone" &&
+                ReadString(step["decisionFeedback"] as JsonObject, "kind") == "decision-rejected-before-native" &&
+                (ReadString(step["decisionFeedback"] as JsonObject, "requiredNextStep") ?? string.Empty).Contains("roster transfer", StringComparison.Ordinal)) != true)
+            throw new AgentHostException("battle-loop-self-test-negative-party-inquiry-prevents-done-loop", $"The same party roster must not re-open Done after a negative Inquiry when transfers are available; status={ReadString(repeatedDoneResult, "status")}, providerCalls={repeatedDoneProvider.CallCount}, nativeActions={string.Join(",", repeatedDoneClient.Actions)}.");
+
         using var cumulativeRequest = JsonDocument.Parse("{\"runId\":\"selftest-battle-after-objective-budget\",\"goal\":\"Resolve one active incident battle after prior objective decisions.\",\"parentProcessId\":321,\"maxDecisions\":320,\"maxElapsedSeconds\":20,\"allowedActionNames\":" + actionNames + "}");
         var cumulativeClient = new FakeBattleSimulationNativeClient();
         var cumulativeProvider = new FakeBattleSimulationDecisionProvider();
@@ -1683,6 +1785,7 @@ internal static class AgentHostBattleSimulationLoop
             new { scenario = "battle-loop-auto-continues-active-no-choice-map-dialogue-before-renown-planning", nativeActions = mapConversationClient.Actions.ToArray(), passed = true },
             new { scenario = "battle-loop-map-incident-interrupts-before-model-or-native-actions", passed = true },
             new { scenario = "battle-loop-resolves-party-loot-inquiry-from-current-eyc-goal-and-roster-then-resumes-native-aftermath", decisions = ReadInt(partyInquiryResult, "decisions", 0), nativeActions = inquiryClient.Actions.ToArray(), inquiryChoice = inquiryClient.LastInquiryChoice, passed = true },
+            new { scenario = "battle-loop-blocks-repeating-done-after-negative-inquiry-until-native-roster-changes", providerCalls = repeatedDoneProvider.CallCount, nativeActions = repeatedDoneClient.Actions.ToArray(), passed = true },
             new { scenario = "battle-loop-incident-after-201-parent-decisions-retains-global-budget", decisions = ReadInt(cumulativeBattle, "decisions", 0), passed = true },
             new { scenario = "battle-loop-native-capture-passive-wait-ransom-release-and-map-return", decisions = ReadInt(recovery, "decisions", 0), nativeActions = recoveryClient.Actions.ToArray(), captivityChoiceOptionId = ReadString(recovery, "captivityChoiceOptionId"), mainPartyMembersAtReturn = ReadInt(recovery, "mainPartyMembersAtReturn", 0), explicitClockActions = ReadInt(recovery, "explicitClockActionCount", -1), passed = true },
             new { scenario = "battle-loop-native-surrender-without-battle-recovery-replans-after-free-map", decisions = ReadInt(surrenderRecovery, "decisions", 0), nativeActions = surrenderRecoveryClient.Actions.ToArray(), captivityChoiceOptionId = ReadString(surrenderRecovery, "captivityChoiceOptionId"), mainPartyMembersAtReturn = ReadInt(surrenderRecovery, "mainPartyMembersAtReturn", 0), explicitClockActions = ReadInt(surrenderRecovery, "explicitClockActionCount", -1), passed = true }
@@ -2391,13 +2494,19 @@ internal static class AgentHostBattleSimulationLoop
     {
         private static readonly string[] ExpectedActions = ["mapPartyTargets", "pursue", "observeAgain", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone", "done"];
         private static readonly string[] ExpectedInquiryActions = ["mapPartyTargets", "pursue", "observeAgain", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "respondInquiry", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone", "done"];
+        private static readonly string[] ExpectedInquiryDoneRepeatActions = ["mapPartyTargets", "pursue", "observeAgain", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "respondInquiry", "partyScreenDone", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone", "done"];
         private readonly bool _simulatePartyInquiry;
+        private readonly bool _repeatPartyScreenDoneAfterDecline;
         internal int CallCount { get; private set; }
         internal JsonObject? FirstRequest { get; private set; }
         internal JsonObject? LastInquiryRequest { get; private set; }
         public string ModelId => "deterministic-battle-loop-self-test";
         public string ConfigurationSource => "harness-fake-provider";
-        internal FakeBattleSimulationDecisionProvider(bool simulatePartyInquiry = false) => _simulatePartyInquiry = simulatePartyInquiry;
+        internal FakeBattleSimulationDecisionProvider(bool simulatePartyInquiry = false, bool repeatPartyScreenDoneAfterDecline = false)
+        {
+            _simulatePartyInquiry = simulatePartyInquiry;
+            _repeatPartyScreenDoneAfterDecline = repeatPartyScreenDoneAfterDecline;
+        }
         public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) { cancellationToken.ThrowIfCancellationRequested(); return Task.CompletedTask; }
 
         public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
@@ -2405,7 +2514,8 @@ internal static class AgentHostBattleSimulationLoop
             cancellationToken.ThrowIfCancellationRequested();
             if (CallCount == 0) FirstRequest = ParseObject(request);
             var index = CallCount++;
-            var expectedActions = _simulatePartyInquiry ? ExpectedInquiryActions : ExpectedActions;
+            var expectedActions = !_simulatePartyInquiry ? ExpectedActions :
+                _repeatPartyScreenDoneAfterDecline ? ExpectedInquiryDoneRepeatActions : ExpectedInquiryActions;
             if (index >= expectedActions.Length) throw new AgentHostException("battle-loop-self-test-provider-exhausted", "The fake provider received more decisions than the Native battle protocol requires.");
             var expected = expectedActions[index];
             if (expected == "respondInquiry") LastInquiryRequest = JsonNode.Parse(request.GetRawText()) as JsonObject;
@@ -2421,7 +2531,7 @@ internal static class AgentHostBattleSimulationLoop
                     "pursue" => new JsonObject { ["PartyId"] = "bandit-1" },
                     "dialogueSelect" => new JsonObject { ["OptionId"] = "bandit_start_defender_1" },
                     "partyTakeAll" when _simulatePartyInquiry && index == 9 => new JsonObject { ["TroopType"] = "prisoners" },
-                    "partyTakeAll" when _simulatePartyInquiry && index == 12 => new JsonObject { ["TroopType"] = "members" },
+                    "partyTakeAll" when _simulatePartyInquiry && index == (_repeatPartyScreenDoneAfterDecline ? 13 : 12) => new JsonObject { ["TroopType"] = "members" },
                     "menuSelect" => new JsonObject { ["MenuId"] = "encounter", ["OptionId"] = "str_order_attack" },
                     "partyTakeAll" => new JsonObject { ["TroopType"] = "members" },
                     _ => new JsonObject()

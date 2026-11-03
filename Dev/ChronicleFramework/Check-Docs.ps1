@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.516'
+$contractVersion = '7.518'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -154,7 +154,11 @@ if ($agentHostHarnessProgressTraceSource -notmatch 'AgentHostRuntimeProgressLog\
     $agentHostRuntimeProgressLogSource -notmatch 'credentialsLogged.*false' -or
     $agentHostRuntimeProgressLogSource -notmatch '\["partyFoodChange"\]' -or
     $agentHostRuntimeProgressLogSource -notmatch '\["encounteredPartyId"\]' -or
+    $agentHostRuntimeProgressLogSource -notmatch '\["inquiryTitle"\]' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'BuildPartyScreenSummary' -or
     $agentHostHarnessProgressTraceSource -notmatch 'host-progress-trace-party-state-self-test' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'host-progress-trace-party-screen-context-self-test' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'SummarizeAllowedActionNames' -or
     $agentHostHarnessProgressTraceSource -notmatch '\["partyDefaultBehavior"\]' -or
     $agentHostRuntimeControllerSource -notmatch 'AgentHostUsageSignalPrefix' -or
     $agentHostRuntimeControllerSource -notmatch 'BuildProviderUsageSummary' -or
@@ -1755,6 +1759,11 @@ if ($agentCliSource -notmatch 'partyScreenDone.*ReturnWhenAccepted:\$ReturnWhenA
     $agentHostMailboxSource -notmatch 'acceptedResponseExpected: action == "partyScreenDone"' -or
     $agentHostBattleSimulationLoopSource -notmatch 'postbattle-native-inquiry' -or
     $agentHostBattleSimulationLoopSource -notmatch 'AgentHostNativeInquiryResolution\.RunAsync' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'party-screen-inquiry-negative-no-progress' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'postbattle-party-screen-negative-needs-roster-change' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'partyScreenDoneSuppressed' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-self-test-negative-party-inquiry-prevents-done-loop' -or
+    $agentHostDecisionCycleSource -notmatch 'do not repeat a negative/Done cycle' -or
     $agentHostBattleSimulationLoopSource -notmatch 'var accepted = nativeActionStatus == "accepted"' -or
     $agentHostBattleSimulationLoopSource -notmatch 'action == "partyScreenDone" && _simulatePartyInquiry && !_memberLootTaken \? "accepted"' -or
     $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-self-test-accepted-done-action-not-counted' -or
