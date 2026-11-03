@@ -243,12 +243,16 @@ internal static class AgentHostHarnessProgressTrace
             var rootPath = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
             var tracePath = Path.GetFullPath(Path.Combine(rootPath, "AgentHostProgress.jsonl"));
             if (!tracePath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase)) return;
+            var requestNode = JsonNode.Parse(request.GetRawText()) as JsonObject;
+            var observation = requestNode?["observation"] as JsonObject;
             var payload = new JsonObject
             {
                 ["event"] = "provider-failure",
                 ["utc"] = DateTime.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
                 ["runId"] = ReadString(request, "runId"),
                 ["failureCode"] = failureCode,
+                ["objectiveId"] = ReadString(requestNode, "objectiveId") ?? ReadString(observation, "objectiveId"),
+                ["scope"] = ReadString(requestNode, "scopeRestriction") ?? ReadString(observation, "scope"),
                 ["providerHttpStatus"] = providerHttpStatus,
                 ["providerRoute"] = providerRoute,
                 ["providerOutputFormat"] = providerOutputFormat,
@@ -290,12 +294,16 @@ internal static class AgentHostHarnessProgressTrace
             var rootPath = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
             var tracePath = Path.GetFullPath(Path.Combine(rootPath, "AgentHostProgress.jsonl"));
             if (!tracePath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase)) return;
+            var requestNode = JsonNode.Parse(request.GetRawText()) as JsonObject;
+            var observation = requestNode?["observation"] as JsonObject;
             var payload = new JsonObject
             {
                 ["event"] = "provider-budget-reservation-rejected",
                 ["utc"] = DateTime.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
                 ["runId"] = ReadString(request, "runId"),
                 ["modelId"] = modelId,
+                ["objectiveId"] = ReadString(requestNode, "objectiveId") ?? ReadString(observation, "objectiveId"),
+                ["scope"] = ReadString(requestNode, "scopeRestriction") ?? ReadString(observation, "scope"),
                 ["estimatedInputTokens"] = estimatedInputTokens,
                 ["reservedInputTokens"] = reservedInputTokens,
                 ["outputTokenCeiling"] = outputTokenCeiling,

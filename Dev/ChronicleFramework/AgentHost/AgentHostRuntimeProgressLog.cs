@@ -70,6 +70,8 @@ internal static class AgentHostRuntimeProgressLog
         if (!IsActiveProductRun(runId) || !TryGetPath(runId, out var path)) return;
         try
         {
+            var observation = request.ValueKind == JsonValueKind.Object && request.TryGetProperty("observation", out var observationValue) && observationValue.ValueKind == JsonValueKind.Object
+                ? observationValue : default;
             AppendEvent(path, new JsonObject
             {
                 ["event"] = "provider-budget-reservation-rejected",
@@ -77,6 +79,8 @@ internal static class AgentHostRuntimeProgressLog
                 ["utc"] = UtcNow(),
                 ["runId"] = runId,
                 ["modelId"] = modelId,
+                ["objectiveId"] = ReadString(request, "objectiveId") ?? ReadString(observation, "objectiveId"),
+                ["scope"] = ReadString(request, "scopeRestriction") ?? ReadString(observation, "scope"),
                 ["estimatedInputTokens"] = estimatedInputTokens,
                 ["reservedInputTokens"] = reservedInputTokens,
                 ["outputTokenCeiling"] = outputTokenCeiling,
@@ -206,6 +210,8 @@ internal static class AgentHostRuntimeProgressLog
         if (!IsActiveProductRun(runId) || !TryGetPath(runId, out var path)) return;
         try
         {
+            var observation = request.ValueKind == JsonValueKind.Object && request.TryGetProperty("observation", out var observationValue) && observationValue.ValueKind == JsonValueKind.Object
+                ? observationValue : default;
             AppendEvent(path, new JsonObject
             {
                 ["event"] = "provider-failure",
@@ -213,6 +219,8 @@ internal static class AgentHostRuntimeProgressLog
                 ["utc"] = UtcNow(),
                 ["runId"] = ReadString(request, "runId"),
                 ["failureCode"] = SanitizeCode(failureCode),
+                ["objectiveId"] = ReadString(request, "objectiveId") ?? ReadString(observation, "objectiveId"),
+                ["scope"] = ReadString(request, "scopeRestriction") ?? ReadString(observation, "scope"),
                 ["providerHttpStatus"] = providerHttpStatus,
                 ["providerRoute"] = providerRoute,
                 ["providerOutputFormat"] = providerOutputFormat,
