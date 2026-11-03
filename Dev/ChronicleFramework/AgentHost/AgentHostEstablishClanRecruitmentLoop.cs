@@ -184,6 +184,25 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             ReadDouble(noAffordableEvent, "campaignDay") != 91077.9 || ReadDouble(noAffordableEvent, "gold") != 10 || fundedEvent is not null)
             throw new AgentHostException("establish-clan-recruitment-no-offer-trace-builder-failed", "Only an exact current settlement RecruitmentVM snapshot with zero affordable volunteer actions may create the same-day no-offer cooldown record.");
 
+        using var noOfferCooldownRequest = JsonDocument.Parse("""
+            {"runId":"same-day-no-offer-cooldown-selftest","goal":"Raise the active Journal PartySize target.","maxDecisions":12,"maxElapsedSeconds":10}
+            """);
+        var firstNoOfferClient = new FakeNoOfferCooldownNativeClient(startAtTown: true);
+        var firstNoOfferProvider = new FakeNoOfferCooldownDecisionProvider(queryMapTargets: false);
+        var firstNoOfferRun = await RunAsync(noOfferCooldownRequest.RootElement, firstNoOfferClient, firstNoOfferClient,
+            firstNoOfferClient, firstNoOfferProvider, CancellationToken.None);
+        var noOfferEvent = (firstNoOfferRun["trace"] as JsonArray)?.OfType<JsonObject>()
+            .FirstOrDefault(step => ReadString(step, "stage") == "recruitment-settlement-no-affordable-volunteer-offers");
+        var secondNoOfferClient = new FakeNoOfferCooldownNativeClient(startAtTown: false);
+        var secondNoOfferProvider = new FakeNoOfferCooldownDecisionProvider(queryMapTargets: true);
+        var secondNoOfferRun = await RunAsync(noOfferCooldownRequest.RootElement, secondNoOfferClient, secondNoOfferClient,
+            secondNoOfferClient, secondNoOfferProvider, CancellationToken.None, priorTrace: firstNoOfferRun["trace"] as JsonArray);
+        if (ReadString(firstNoOfferRun["termination"] as JsonObject, "reason") != "recruitment-model-stopped-with-safe-actions" ||
+            noOfferEvent is null || ReadString(noOfferEvent, "settlementId") != "town-a" ||
+            ReadString(secondNoOfferRun["termination"] as JsonObject, "reason") != "recruitment-model-stopped-with-safe-actions" ||
+            !secondNoOfferProvider.MoveCatalogObserved || secondNoOfferProvider.LastMoveSettlementIds is null ||
+            secondNoOfferProvider.LastMoveSettlementIds.Contains("town-a") || !secondNoOfferProvider.LastMoveSettlementIds.Contains("village-b"))
+            throw new AgentHostException("establish-clan-recruitment-cross-subflow-no-offer-cooldown-failed", "A same-day Native no-affordable-offer trace must survive the PartySize child restart and remove only that previously exhausted settlement from the next safe move catalog. first=" + ReadString(firstNoOfferRun["termination"] as JsonObject, "reason") + "; event=" + ReadString(noOfferEvent, "settlementId") + "; second=" + ReadString(secondNoOfferRun["termination"] as JsonObject, "reason") + "; sawMove=" + secondNoOfferProvider.MoveCatalogObserved + "; moveTargets=" + string.Join(",", secondNoOfferProvider.LastMoveSettlementIds ?? new HashSet<string>(StringComparer.Ordinal)) + "; firstActions=" + string.Join(",", firstNoOfferClient.Actions) + "; secondActions=" + string.Join(",", secondNoOfferClient.Actions) + "; secondCalls=" + secondNoOfferProvider.CallCount + ".");
         var currentPrisonerOptions = new JsonObject
         {
             ["status"] = "completed",
@@ -403,7 +422,8 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             new { scenario = "establish-clan-recruitment-offers-only-current-affordable-volunteers", passed = true },
             new { scenario = "establish-clan-party-size-offers-current-prisoner-route-and-separate-native-prisoner-limit-confirmation", passed = true },
             new { scenario = "establish-clan-recruitment-rejects-stale-volunteer-identifiers", passed = true },
-            new { scenario = "establish-clan-recruitment-leaves-town-after-current-vm-has-no-available-affordable-volunteers", passed = true }
+            new { scenario = "establish-clan-recruitment-leaves-town-after-current-vm-has-no-available-affordable-volunteers", passed = true },
+            new { scenario = "establish-clan-recruitment-same-day-no-offer-memory-survives-party-size-subflow-restart", passed = true }
         };
         results.Add(new { scenario = "establish-clan-recruitment-resolves-current-map-conversation-before-resuming-movement", passed = true });
         results.Add(new { scenario = "establish-clan-recruitment-continues-only-no-choice-map-conversation", passed = true });
@@ -1103,7 +1123,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             foreach (var leaveAction in leaveActions) catalog.Add(leaveAction?.DeepClone());
             return catalog;
         }
-        if (IsRecruitmentMenu(menuId) && HasEnabledOption(menuOptions, RecruitmentMenuOptionId))
+        if (IsRecruitmentMenu(menuId) && HasEnabledOption(menuOptions, RecruitmentMenuOptionId) && recruitOptions is null)
         {
             catalog.Add(new JsonObject { ["action"] = "recruitOptions", ["arguments"] = new JsonArray() });
             return catalog;
@@ -2435,6 +2455,149 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "self-test",
                 new JsonObject { ["stop"] = true, ["reason"] = "No safe volunteer route now." }, "self-test", "json_schema"));
         }
+        public void Dispose() { }
+    }
+
+    private sealed class FakeNoOfferCooldownNativeClient : IAgentHostCampaignNativeClient, IAgentHostQuestDetailsNativeClient, IAgentHostRecruitmentNativeClient
+    {
+        private readonly bool _startAtTown;
+        private bool _leftTown;
+        internal List<string> Actions { get; } = new();
+
+        internal FakeNoOfferCooldownNativeClient(bool startAtTown) => _startAtTown = startAtTown;
+
+        public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var atTown = _startAtTown && !_leftTown;
+            var state = new JsonObject
+            {
+                ["context"] = new JsonObject
+                {
+                    ["gameState"] = "MapState", ["menuId"] = atTown ? "town" : null,
+                    ["escapeMenuOpen"] = false, ["inquiryOpen"] = false, ["encounterActive"] = false,
+                    ["isWaitMenu"] = false, ["isWaitActive"] = false,
+                    ["captivity"] = new JsonObject { ["isCaptive"] = false }
+                },
+                ["location"] = new JsonObject { ["currentSettlementId"] = atTown ? "town-a" : null, ["targetSettlementId"] = null, ["targetPartyId"] = null },
+                ["party"] = new JsonObject { ["members"] = 1, ["healthy"] = 1, ["wounded"] = 0, ["prisoners"] = 0, ["isMoving"] = false },
+                ["economy"] = new JsonObject { ["gold"] = 100, ["renown"] = 0 },
+                ["quests"] = new JsonArray(new JsonObject { ["id"] = QuestId }),
+                ["storyModeEstablishClan"] = new JsonObject { ["partySize"] = new JsonObject { ["current"] = 1, ["target"] = 5 } },
+                ["availableMenuOptions"] = atTown
+                    ? new JsonArray(
+                        new JsonObject { ["id"] = RecruitmentMenuOptionId, ["available"] = true, ["enabled"] = true },
+                        new JsonObject { ["id"] = "town_leave", ["available"] = true, ["enabled"] = true, ["isLeave"] = true })
+                    : new JsonArray()
+            };
+            return Task.FromResult(JsonDocument.Parse(new JsonObject
+            {
+                ["status"] = "completed", ["campaignDay"] = 10.25, ["timeControlMode"] = "Stop", ["state"] = state
+            }.ToJsonString()));
+        }
+
+        public Task<JsonDocument> ReadQuestDetailsAsync(string questId, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (questId != QuestId) throw new AgentHostException("no-offer-selftest-wrong-quest", "The no-offer cooldown fake received an unexpected Journal request.");
+            var stages = new JsonArray(
+                new JsonObject { ["hasTask"] = true, ["currentProgress"] = 100, ["targetProgress"] = 2000, ["description"] = "gold" },
+                new JsonObject { ["hasTask"] = true, ["currentProgress"] = 1, ["targetProgress"] = 5, ["description"] = "partySize" },
+                new JsonObject { ["hasTask"] = true, ["currentProgress"] = 0, ["targetProgress"] = 50, ["description"] = "renown" },
+                new JsonObject { ["hasTask"] = true, ["currentProgress"] = 0, ["targetProgress"] = 1, ["description"] = "companions" });
+            return Task.FromResult(JsonDocument.Parse(new JsonObject
+            {
+                ["status"] = "completed", ["data"] = new JsonObject { ["questId"] = QuestId, ["journalStages"] = stages }
+            }.ToJsonString()));
+        }
+
+        public Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Actions.Add(action);
+            if (action != "mapSettlementTargets")
+                throw new AgentHostException("no-offer-selftest-unexpected-campaign-action", "The cross-subflow cooldown fake only needs to return current map targets.");
+            return Task.FromResult(JsonDocument.Parse(new JsonObject
+            {
+                ["status"] = "completed",
+                ["data"] = new JsonObject
+                {
+                    ["mapSettlementTargets"] = new JsonArray(
+                        new JsonObject { ["id"] = "town-a", ["name"] = "Town A", ["type"] = "town", ["distance"] = 1.0, ["hostile"] = false, ["underSiege"] = false },
+                        new JsonObject { ["id"] = "village-b", ["name"] = "Village B", ["type"] = "village", ["distance"] = 2.0, ["hostile"] = false, ["underSiege"] = false })
+                }
+            }.ToJsonString()));
+        }
+
+        public Task<JsonDocument> ExecuteRecruitmentActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Actions.Add(action);
+            if (action == "recruitOptions")
+                return Task.FromResult(JsonDocument.Parse(new JsonObject
+                {
+                    ["status"] = "completed",
+                    ["data"] = new JsonObject { ["gold"] = 100, ["partySize"] = 1, ["partyCapacity"] = 20, ["offers"] = new JsonArray() }
+                }.ToJsonString()));
+            if (action == "menuSelect" && ReadString(arguments, "menuId") == "town" && ReadString(arguments, "optionId") == "town_leave" && _startAtTown && !_leftTown)
+            {
+                _leftTown = true;
+                return Task.FromResult(JsonDocument.Parse(new JsonObject
+                {
+                    ["status"] = "completed", ["data"] = new JsonObject { ["menuId"] = "town", ["optionId"] = "town_leave" }
+                }.ToJsonString()));
+            }
+            throw new AgentHostException("no-offer-selftest-unexpected-recruitment-action", "The no-offer cooldown fake accepts only its current empty RecruitmentVM query and enabled Town Leave.");
+        }
+    }
+
+    private sealed class FakeNoOfferCooldownDecisionProvider : IAgentHostDecisionProvider
+    {
+        private readonly bool _queryMapTargets;
+        internal int CallCount { get; private set; }
+        internal bool MoveCatalogObserved { get; private set; }
+        internal HashSet<string>? LastMoveSettlementIds { get; private set; }
+        public string ModelId => "deterministic-no-offer-cooldown-selftest";
+        public string ConfigurationSource => "harness-fake-provider";
+
+        internal FakeNoOfferCooldownDecisionProvider(bool queryMapTargets) => _queryMapTargets = queryMapTargets;
+        public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) { cancellationToken.ThrowIfCancellationRequested(); return Task.CompletedTask; }
+
+        public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CallCount++;
+            var actionCatalog = request.GetProperty("allowedActions");
+            var selected = actionCatalog.EnumerateArray().FirstOrDefault();
+            var selectedAction = selected.ValueKind == JsonValueKind.Object ? selected.GetProperty("action").GetString() : null;
+            if (selectedAction == "recruitOptions")
+                return Decision(new JsonObject { ["action"] = "recruitOptions", ["arguments"] = new JsonObject() });
+            if (selectedAction == "menuSelect")
+            {
+                var values = selected.GetProperty("argumentValues");
+                return Decision(new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject
+                {
+                    ["MenuId"] = values.GetProperty("MenuId")[0].GetString(),
+                    ["OptionId"] = values.GetProperty("OptionId")[0].GetString()
+                }});
+            }
+            if (selectedAction == "mapSettlementTargets" && _queryMapTargets)
+                return Decision(new JsonObject { ["action"] = "mapSettlementTargets", ["arguments"] = new JsonObject() });
+            if (selectedAction == "move")
+            {
+                var ids = selected.GetProperty("argumentValues").GetProperty("SettlementId").EnumerateArray()
+                    .Select(value => value.GetString() ?? string.Empty).ToHashSet(StringComparer.Ordinal);
+                MoveCatalogObserved = true;
+                LastMoveSettlementIds = ids;
+                return Decision(new JsonObject { ["stop"] = true, ["reason"] = "Inspect the current safe settlement targets." });
+            }
+            if (selectedAction == "mapSettlementTargets" || request.GetProperty("allowedControls").EnumerateArray().Any(control => control.GetString() == "stop"))
+                return Decision(new JsonObject { ["stop"] = true, ["reason"] = "No further fake action is required for this bounded route test." });
+            throw new AgentHostException("no-offer-selftest-empty-action-catalog", "The fake no-offer route exposed neither an expected action nor a safe stop.");
+        }
+
+        private Task<ProviderDecisionResult> Decision(JsonObject decision) => Task.FromResult(new ProviderDecisionResult(
+            "completed", ModelId, 1, 1, "fake-no-offer-cooldown", decision, "self-test", "json_schema"));
         public void Dispose() { }
     }
 }
