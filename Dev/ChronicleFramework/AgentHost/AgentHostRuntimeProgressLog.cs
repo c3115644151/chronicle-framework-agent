@@ -204,7 +204,8 @@ internal static class AgentHostRuntimeProgressLog
         string? providerFailureStage = null, string? providerProxySelectionSource = null, int? providerTimeoutSeconds = null,
         int? providerRequestBodyBytes = null, string? providerTransportErrorType = null, string? providerProxyEndpointHostPort = null,
         string? providerResponseServer = null, string? providerResponseVia = null, string? providerResponseRequestId = null,
-        string? providerRetryAfter = null)
+        string? providerRetryAfter = null, string? providerErrorBodyKind = null, string? providerErrorContentType = null,
+        string? providerErrorType = null, string? providerErrorCode = null)
     {
         var runId = ReadString(request, "runId");
         if (!IsActiveProductRun(runId) || !TryGetPath(runId, out var path)) return;
@@ -236,6 +237,10 @@ internal static class AgentHostRuntimeProgressLog
                 ["providerResponseVia"] = providerResponseVia,
                 ["providerResponseRequestId"] = providerResponseRequestId,
                 ["providerRetryAfter"] = providerRetryAfter,
+                ["providerErrorBodyKind"] = providerErrorBodyKind,
+                ["providerErrorContentType"] = providerErrorContentType,
+                ["providerErrorType"] = providerErrorType,
+                ["providerErrorCode"] = providerErrorCode,
                 ["nativeActionSent"] = false,
                 ["responseBodiesLogged"] = false,
                 ["credentialsLogged"] = false
@@ -525,7 +530,7 @@ internal static class AgentHostRuntimeProgressLog
                 RecordBudgetReservationRejected(childRequestDocument.RootElement, "deepseek-flash", 900, 990, 256, 4.9, 0.2, 5);
                 RecordProviderFailure(request.RootElement, "provider-http-error", 429, "api.deepseek.com", "required_tool_call", 2, 1500,
                     "http-response-status", "local-listener", 360, 12000, "HttpRequestException",
-                    "127.0.0.1:7890", "cloudflare", "1.1 proxy", "req-123", "30");
+                    "127.0.0.1:7890", "cloudflare", "1.1 proxy", "req-123", "30", "json-error", "application/json", "server_error", "overloaded");
                 RecordObjectiveSubflowResult("gold", new JsonObject { ["runId"] = validRun, ["status"] = "failed", ["termination"] = "self-test" });
                 RecordRunSummary(request.RootElement, new JsonObject
                 {
@@ -565,6 +570,10 @@ internal static class AgentHostRuntimeProgressLog
                 ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerResponseVia") != "1.1 proxy" ||
                 ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerResponseRequestId") != "req-123" ||
                 ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerRetryAfter") != "30" ||
+                ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerErrorBodyKind") != "json-error" ||
+                ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerErrorContentType") != "application/json" ||
+                ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerErrorType") != "server_error" ||
+                ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerErrorCode") != "overloaded" ||
                 ReadString(JsonNode.Parse(productLogLines[5]) as JsonObject, "objectiveId") != "gold" ||
                 ReadString(summaryEvent, "event") != "run-summary" ||
                 ReadInt(summaryUsage, "providerResponseRows", -1) != 2 ||

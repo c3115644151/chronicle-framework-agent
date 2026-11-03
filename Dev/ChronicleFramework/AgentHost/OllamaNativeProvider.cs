@@ -627,6 +627,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         using (response)
         {
             if (!response.IsSuccessStatusCode)
+            {
+                var errorMetadata = await ReadSafeProviderErrorMetadataAsync(response, requestTimeout.Token);
                 throw new AgentHostException("provider-http-error", BuildHttpFailureMessage(response, rateLimitRetryAttempts, rateLimitRetryWaitMilliseconds, lastRateLimitRetryHint, lastRateLimitRetryFitsDeadline) + " outputFormat=" + responseFormatMode,
                     providerHttpStatus: (int)response.StatusCode,
                     providerRoute: SafeDiagnosticField(ReadResponseHeader(response, "X-Routed-Via") ?? _lastProviderRoute),
@@ -638,9 +640,12 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     providerTimeoutSeconds: (int)_settings.Timeout.TotalSeconds, providerRequestBodyBytes: bodyBytes,
                     providerResponseServer: SafeOptionalDiagnosticField(ReadResponseHeader(response, "Server")),
                     providerResponseVia: SafeOptionalDiagnosticField(ReadResponseHeader(response, "Via")),
-                    providerResponseRequestId: SafeOptionalDiagnosticField(ReadResponseHeader(response, "X-Request-Id") ??
-                        ReadResponseHeader(response, "X-Correlation-Id") ?? ReadResponseHeader(response, "CF-Ray")),
-                    providerRetryAfter: SafeOptionalDiagnosticField(response.Headers.RetryAfter?.ToString()));
+                    providerRetryAfter: SafeOptionalDiagnosticField(response.Headers.RetryAfter?.ToString()),
+                    providerErrorBodyKind: errorMetadata.BodyKind, providerErrorContentType: errorMetadata.ContentType,
+                    providerErrorType: errorMetadata.ErrorType, providerErrorCode: errorMetadata.ErrorCode,
+                    providerResponseRequestId: errorMetadata.RequestId ?? SafeOptionalDiagnosticField(ReadResponseHeader(response, "X-Request-Id") ??
+                        ReadResponseHeader(response, "X-Correlation-Id") ?? ReadResponseHeader(response, "CF-Ray")));
+            }
 
             if (response.Content.Headers.ContentLength is > MaxResponseBytes)
                 throw new AgentHostException("provider-response-too-large", "The local model response exceeds the Host size limit.");
@@ -785,6 +790,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     private static bool IsDeepSeekApi(Uri endpoint) => string.Equals(endpoint.Host, "api.deepseek.com", StringComparison.OrdinalIgnoreCase);
 
     internal sealed record RateLimitRetryHint(TimeSpan? Delay, TimeSpan? ObservedDelay, string Source, bool IsPoolExhaustion);
+    private sealed record ProviderErrorMetadata(string BodyKind, string? ContentType, string? ErrorType, string? ErrorCode, string? RequestId);
 
     private void AddAuthorization(HttpRequestMessage request)
     {
@@ -809,6 +815,54 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
 
     private static string? SafeOptionalDiagnosticField(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : SafeDiagnosticField(value);
+
+    private static async Task<ProviderErrorMetadata> ReadSafeProviderErrorMetadataAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        const int maximumBytes = 8192;
+        var contentType = SafeOptionalDiagnosticField(response.Content.Headers.ContentType?.MediaType);
+        if (response.Content.Headers.ContentLength is long length && length > maximumBytes)
+            return new ProviderErrorMetadata("oversized", contentType, null, null, null);
+        if (contentType is not null && !contentType.Contains("json", StringComparison.OrdinalIgnoreCase))
+            return new ProviderErrorMetadata("non-json", contentType, null, null, null);
+
+        using var boundedRead = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        boundedRead.CancelAfter(TimeSpan.FromSeconds(2));
+        try
+        {
+            await using var stream = await response.Content.ReadAsStreamAsync(boundedRead.Token);
+            var buffer = new byte[maximumBytes + 1];
+            var total = 0;
+            while (total < buffer.Length)
+            {
+                var read = await stream.ReadAsync(buffer.AsMemory(total, buffer.Length - total), boundedRead.Token);
+                if (read == 0) break;
+                total += read;
+            }
+            if (total > maximumBytes) return new ProviderErrorMetadata("oversized", contentType, null, null, null);
+            if (total == 0) return new ProviderErrorMetadata("empty", contentType, null, null, null);
+            using var document = JsonDocument.Parse(buffer.AsMemory(0, total));
+            var root = document.RootElement;
+            var error = root.ValueKind == JsonValueKind.Object && root.TryGetProperty("error", out var errorNode) && errorNode.ValueKind == JsonValueKind.Object
+                ? errorNode : root;
+            var errorType = SafeOptionalDiagnosticField(ReadString(error, "type"));
+            var errorCode = SafeOptionalDiagnosticField(ReadString(error, "code"));
+            var requestId = SafeOptionalDiagnosticField(ReadString(error, "request_id") ?? ReadString(root, "request_id"));
+            var kind = errorType is null && errorCode is null ? "json-without-error-code" : "json-error";
+            return new ProviderErrorMetadata(kind, contentType, errorType, errorCode, requestId);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new ProviderErrorMetadata("metadata-read-timeout", contentType, null, null, null);
+        }
+        catch (JsonException)
+        {
+            return new ProviderErrorMetadata("invalid-json", contentType, null, null, null);
+        }
+        catch
+        {
+            return new ProviderErrorMetadata("metadata-unavailable", contentType, null, null, null);
+        }
+    }
 
     internal string BuildHttpFailureMessage(HttpResponseMessage response, int rateLimitRetryAttempts, long rateLimitRetryWaitMilliseconds, RateLimitRetryHint? retryHint = null, bool? retryFitsDeadline = null)
     {
@@ -1528,7 +1582,8 @@ internal sealed class AgentHostException : Exception
         string? providerRoute = null, string? providerOutputFormat = null, int? providerRetryAttempts = null, long? providerRetryWaitMilliseconds = null,
         string? providerFailureStage = null, string? providerProxySelectionSource = null, string? providerProxyEndpointHostPort = null, int? providerTimeoutSeconds = null,
         int? providerRequestBodyBytes = null, string? providerTransportErrorType = null, string? providerResponseServer = null,
-        string? providerResponseVia = null, string? providerResponseRequestId = null, string? providerRetryAfter = null) : base(message, innerException)
+        string? providerResponseVia = null, string? providerResponseRequestId = null, string? providerRetryAfter = null,
+        string? providerErrorBodyKind = null, string? providerErrorContentType = null, string? providerErrorType = null, string? providerErrorCode = null) : base(message, innerException)
     {
         Code = code;
         ProviderHttpStatus = providerHttpStatus;
@@ -1546,6 +1601,10 @@ internal sealed class AgentHostException : Exception
         ProviderResponseVia = providerResponseVia;
         ProviderResponseRequestId = providerResponseRequestId;
         ProviderRetryAfter = providerRetryAfter;
+        ProviderErrorBodyKind = providerErrorBodyKind;
+        ProviderErrorContentType = providerErrorContentType;
+        ProviderErrorType = providerErrorType;
+        ProviderErrorCode = providerErrorCode;
     }
 
     internal string Code { get; }
@@ -1564,4 +1623,8 @@ internal sealed class AgentHostException : Exception
     internal string? ProviderResponseVia { get; }
     internal string? ProviderResponseRequestId { get; }
     internal string? ProviderRetryAfter { get; }
+    internal string? ProviderErrorBodyKind { get; }
+    internal string? ProviderErrorContentType { get; }
+    internal string? ProviderErrorType { get; }
+    internal string? ProviderErrorCode { get; }
 }
