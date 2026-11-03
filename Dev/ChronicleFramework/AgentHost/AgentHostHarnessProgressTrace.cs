@@ -101,6 +101,9 @@ internal static class AgentHostHarnessProgressTrace
                 ["event"] = "provider-decision",
                 ["utc"] = DateTime.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
                 ["runId"] = ReadString(request, "runId"),
+                ["objectiveId"] = ReadString(requestNode, "objectiveId"),
+                ["scope"] = ReadString(observation, "scope"),
+                ["scopeRestriction"] = ReadString(requestNode, "scopeRestriction"),
                 ["modelId"] = result.ModelId,
                 ["routedVia"] = result.RoutedVia,
                 ["responseFormatMode"] = result.ResponseFormatMode,
@@ -461,7 +464,7 @@ internal static class AgentHostHarnessProgressTrace
             Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "visual-capture");
             Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_TEMP", temporaryDirectory);
             using var request = JsonDocument.Parse("""
-                {"runId":"trace-test","observation":{"state":{"campaignDay":12.5,"context":{"gameState":"MapState","menuId":"village","encounterActive":true,"encounteredPartyId":"bandit-a","conversation":{"sentenceText":"Tools are needed.","options":[{"id":"issue_offer_player_accept_quest","text":"I can do it.","clickable":true}] }},"location":{"currentSettlementId":"village-1","targetPartyId":"bandit-a"},"economy":{"gold":920,"renown":20},"party":{"members":5,"healthy":3,"wounded":1,"prisoners":1,"morale":12.5,"food":0.5,"foodChange":-0.25,"isMoving":true,"moveMode":"Party","defaultBehavior":"EngageParty"},"objectiveSnapshot":{"gold":{"current":920,"target":2000,"met":false},"partySize":{"current":5,"target":25,"met":false},"renown":{"current":20,"target":50,"met":false},"companions":{"current":0,"target":1,"met":false}},"nativeProgressionContext":{"clanTier":0,"partySizeLimit":20,"partyMembers":5,"partyIsMoving":false,"privateDiagnostic":"must-not-appear"},"quests":[],"settlementOverlayCharacters":[]}}}
+                {"runId":"trace-test","objectiveId":"partySize","observation":{"scope":"native-storymode-party-size-recruitment","state":{"campaignDay":12.5,"context":{"gameState":"MapState","menuId":"village","encounterActive":true,"encounteredPartyId":"bandit-a","conversation":{"sentenceText":"Tools are needed.","options":[{"id":"issue_offer_player_accept_quest","text":"I can do it.","clickable":true}] }},"location":{"currentSettlementId":"village-1","targetPartyId":"bandit-a"},"economy":{"gold":920,"renown":20},"party":{"members":5,"healthy":3,"wounded":1,"prisoners":1,"morale":12.5,"food":0.5,"foodChange":-0.25,"isMoving":true,"moveMode":"Party","defaultBehavior":"EngageParty"},"objectiveSnapshot":{"gold":{"current":920,"target":2000,"met":false},"partySize":{"current":5,"target":25,"met":false},"renown":{"current":20,"target":50,"met":false},"companions":{"current":0,"target":1,"met":false}},"nativeProgressionContext":{"clanTier":0,"partySizeLimit":20,"partyMembers":5,"partyIsMoving":false,"privateDiagnostic":"must-not-appear"},"quests":[],"settlementOverlayCharacters":[]}}}
                 """);
             var decision = JsonNode.Parse("""{"action":"dialogueSelect","arguments":{"OptionId":"issue_offer_player_accept_quest"},"rationale":"Rationale is deliberately excluded."}""")!.AsObject();
             RecordDecision(request.RootElement, new ProviderDecisionResult("completed", "selftest-model", 123, 17, "stop", decision, "selftest/route",
@@ -474,6 +477,8 @@ internal static class AgentHostHarnessProgressTrace
             var recorded = JsonNode.Parse(lines[0]) as JsonObject ?? throw new AgentHostException("host-progress-trace-self-test-json", "Harness progress trace did not contain one JSON object.");
             var recordedDecision = recorded["decision"] as JsonObject;
             if (ReadString(recorded, "routedVia") != "selftest/route" ||
+                ReadString(recorded, "scope") != "native-storymode-party-size-recruitment" ||
+                ReadString(recorded, "objectiveId") != "partySize" ||
                 ReadString(recordedDecision, "action") != "dialogueSelect" ||
                 ReadString(recordedDecision?["arguments"] as JsonObject, "OptionId") != "issue_offer_player_accept_quest" ||
                 recordedDecision?.ContainsKey("rationale") == true ||
@@ -682,7 +687,7 @@ internal static class AgentHostHarnessProgressTrace
             return [
                 new { scenario = "harness-progress-trace-records-current-modal-and-visible-buttons-without-one-use-token", passed = true },
                 new { scenario = "harness-progress-trace-persists-native-decision-and-route-without-free-text-in-visual-capture-and-lifecycle-modes", passed = true },
-                new { scenario = "provider-progress-trace-records-request-size-cache-and-cost-without-request-content", passed = true },
+                new { scenario = "provider-progress-trace-records-request-size-cache-cost-and-goal-scope-without-request-content", passed = true },
                 new { scenario = "harness-progress-trace-reports-only-aggregate-affordable-recruitment-offer-counts", passed = true },
                 new { scenario = "harness-progress-trace-reports-only-aggregate-companion-navigation-progress", passed = true },
                 new { scenario = "harness-progress-trace-records-objective-subflow-termination-and-safe-native-state-summaries", passed = true },

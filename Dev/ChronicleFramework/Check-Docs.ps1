@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.521'
+$contractVersion = '7.522'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -144,6 +144,8 @@ if ($agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-locali
 }
 if ($agentHostHarnessProgressTraceSource -notmatch 'AgentHostRuntimeProgressLog\.RecordDecision' -or
     $agentHostHarnessProgressTraceSource -notmatch 'AgentHostRuntimeProgressLog\.RecordObjectiveSubflowResult' -or
+    $agentHostHarnessProgressTraceSource -notmatch '\["objectiveId"\] = ReadString\(requestNode, "objectiveId"\)' -or
+    $agentHostHarnessProgressTraceSource -notmatch '\["scope"\] = ReadString\(observation, "scope"\)' -or
     $agentHostProgramSource -notmatch 'AgentHostRuntimeProgressLog\.RecordRunStarted' -or
     $agentHostProgramSource -notmatch 'AgentHostRuntimeProgressLog\.RecordRunSummary' -or
     $agentHostRuntimeProgressLogSource -notmatch 'MaximumRunLogBytes' -or
@@ -1098,7 +1100,7 @@ if ($agentHostProviderSource -notmatch 'CheckConfiguredModelAsync' -or $agentHos
     $agentHostProviderContractSelfTestSource -notmatch 'provider-repairs-only-exact-listed-single-enum-argument-shorthand' -or
     $agentHostProviderContractSelfTestSource -notmatch 'provider-repairs-single-storymode-clan-name-text-shorthand-for-native-validation' -or
     $agentHostProviderContractSelfTestSource -notmatch 'deepseek-run-cost-reservation-rejects-over-budget-before-http' -or
-    $agentHostHarnessProgressTraceSource -notmatch 'provider-progress-trace-records-request-size-cache-and-cost-without-request-content' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'provider-progress-trace-records-request-size-cache-cost-and-goal-scope-without-request-content' -or
     $agentHostHarnessProgressTraceSource -notmatch 'observationFieldByteSizes' -or $agentHostHarnessProgressTraceSource -notmatch 'observationStateFieldByteSizes' -or
     $agentHostProviderSource -notmatch 'auto:reliable' -or
     $agentHostProviderSelfTestSource -notmatch 'freellmapi-health-accepts-documented-auto-reliable-strategy-not-listed-as-model' -or
