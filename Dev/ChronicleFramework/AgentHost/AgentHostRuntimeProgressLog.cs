@@ -134,6 +134,8 @@ internal static class AgentHostRuntimeProgressLog
             ["runId"] = runId,
             ["modelId"] = result.ModelId,
             ["routedVia"] = result.RoutedVia,
+            ["proxySelectionSource"] = result.ProxySelectionSource,
+            ["proxyEndpointHostPort"] = result.ProxyEndpointHostPort,
             ["responseFormatMode"] = result.ResponseFormatMode,
             ["promptTokens"] = result.PromptTokens,
             ["completionTokens"] = result.CompletionTokens,
@@ -196,7 +198,9 @@ internal static class AgentHostRuntimeProgressLog
     internal static void RecordProviderFailure(JsonElement request, string failureCode, int? providerHttpStatus = null,
         string? providerRoute = null, string? providerOutputFormat = null, int? providerRetryAttempts = null, long? providerRetryWaitMilliseconds = null,
         string? providerFailureStage = null, string? providerProxySelectionSource = null, int? providerTimeoutSeconds = null,
-        int? providerRequestBodyBytes = null, string? providerTransportErrorType = null)
+        int? providerRequestBodyBytes = null, string? providerTransportErrorType = null, string? providerProxyEndpointHostPort = null,
+        string? providerResponseServer = null, string? providerResponseVia = null, string? providerResponseRequestId = null,
+        string? providerRetryAfter = null)
     {
         var runId = ReadString(request, "runId");
         if (!IsActiveProductRun(runId) || !TryGetPath(runId, out var path)) return;
@@ -216,9 +220,14 @@ internal static class AgentHostRuntimeProgressLog
                 ["providerRetryWaitMilliseconds"] = providerRetryWaitMilliseconds,
                 ["providerFailureStage"] = providerFailureStage,
                 ["providerProxySelectionSource"] = providerProxySelectionSource,
+                ["providerProxyEndpointHostPort"] = providerProxyEndpointHostPort,
                 ["providerTimeoutSeconds"] = providerTimeoutSeconds,
                 ["providerRequestBodyBytes"] = providerRequestBodyBytes,
                 ["providerTransportErrorType"] = providerTransportErrorType,
+                ["providerResponseServer"] = providerResponseServer,
+                ["providerResponseVia"] = providerResponseVia,
+                ["providerResponseRequestId"] = providerResponseRequestId,
+                ["providerRetryAfter"] = providerRetryAfter,
                 ["nativeActionSent"] = false,
                 ["responseBodiesLogged"] = false,
                 ["credentialsLogged"] = false
@@ -447,13 +456,16 @@ internal static class AgentHostRuntimeProgressLog
         };
         var loggedDecision = BuildDecisionEvent(request.RootElement,
             new ProviderDecisionResult("completed", "deepseek-flash", 321, 40, "required_tool_call", decision, "deepseek-flash",
-                PromptCacheHitTokens: 12, PromptCacheMissTokens: 34, EstimatedCostCny: 0.01, ReservedCostUpperBoundCny: 0.04),
+                PromptCacheHitTokens: 12, PromptCacheMissTokens: 34, EstimatedCostCny: 0.01, ReservedCostUpperBoundCny: 0.04,
+                ProxySelectionSource: "local-listener", ProxyEndpointHostPort: "127.0.0.1:7890"),
             configuredRunCostLimitCny: 5);
         var loggedJson = loggedDecision.ToJsonString();
         if (ReadInt(loggedDecision, "promptTokens") != 321 || ReadInt(loggedDecision, "completionTokens") != 40 ||
             ReadInt(loggedDecision, "promptCacheHitTokens") != 12 || ReadInt(loggedDecision, "promptCacheMissTokens") != 34 ||
             Math.Abs((ReadDouble(loggedDecision, "estimatedCostCny") ?? -1) - 0.01) > 0.0000001 ||
             Math.Abs((ReadDouble(loggedDecision, "configuredRunCostLimitCny") ?? -1) - 5) > 0.0000001 ||
+            ReadString(loggedDecision, "proxySelectionSource") != "local-listener" ||
+            ReadString(loggedDecision, "proxyEndpointHostPort") != "127.0.0.1:7890" ||
             ReadString(loggedDecision, "objectiveId") != "gold" || ReadString(loggedDecision, "scope") != "safe-settlement-arrival" ||
             ReadBoolean(loggedDecision, "partyIsMoving") || ReadBoolean(loggedDecision, "encounterActive") ||
             ReadString(loggedDecision, "encounteredPartyId") is not null || ReadString(loggedDecision, "partyDefaultBehavior") != "Hold" ||
@@ -504,7 +516,8 @@ internal static class AgentHostRuntimeProgressLog
                     EstimatedCostCny: 0.002, ReservedCostUpperBoundCny: 0.005), configuredRunCostLimitCny: 5);
                 RecordBudgetReservationRejected(childRequestDocument.RootElement, "deepseek-flash", 900, 990, 256, 4.9, 0.2, 5);
                 RecordProviderFailure(request.RootElement, "provider-http-error", 429, "api.deepseek.com", "required_tool_call", 2, 1500,
-                    "http-response-status", "detected-local-listener-7890", 360, 12000, "HttpRequestException");
+                    "http-response-status", "local-listener", 360, 12000, "HttpRequestException",
+                    "127.0.0.1:7890", "cloudflare", "1.1 proxy", "req-123", "30");
                 RecordObjectiveSubflowResult("gold", new JsonObject { ["runId"] = validRun, ["status"] = "failed", ["termination"] = "self-test" });
                 RecordRunSummary(request.RootElement, new JsonObject
                 {
@@ -536,9 +549,14 @@ internal static class AgentHostRuntimeProgressLog
                 ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerRoute") != "api.deepseek.com" ||
                 ReadInt(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerRetryAttempts") != 2 ||
                 ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerFailureStage") != "http-response-status" ||
-                ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerProxySelectionSource") != "detected-local-listener-7890" ||
+                ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerProxySelectionSource") != "local-listener" ||
+                ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerProxyEndpointHostPort") != "127.0.0.1:7890" ||
                 ReadInt(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerTimeoutSeconds") != 360 ||
                 ReadInt(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerRequestBodyBytes") != 12000 ||
+                ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerResponseServer") != "cloudflare" ||
+                ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerResponseVia") != "1.1 proxy" ||
+                ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerResponseRequestId") != "req-123" ||
+                ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerRetryAfter") != "30" ||
                 ReadString(JsonNode.Parse(productLogLines[5]) as JsonObject, "objectiveId") != "gold" ||
                 ReadString(summaryEvent, "event") != "run-summary" ||
                 ReadInt(summaryUsage, "providerResponseRows", -1) != 2 ||

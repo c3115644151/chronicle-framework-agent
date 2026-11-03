@@ -452,16 +452,23 @@ internal static class ChronicleAgentRuntimeController
         var httpsProxy = ReadProxyEnvironment("HTTPS_PROXY");
         var httpProxy = ReadProxyEnvironment("HTTP_PROXY");
         var allProxy = ReadProxyEnvironment("ALL_PROXY");
+        var noProxy = ReadProxyEnvironment("NO_PROXY");
         var localProxyAvailable = string.IsNullOrWhiteSpace(httpsProxy) && string.IsNullOrWhiteSpace(httpProxy) &&
-                                 string.IsNullOrWhiteSpace(allProxy) && IsLocalProxyListenerAvailable();
-        var selectedProxy = ProviderProxySelection.SelectProxyUrl(providerUri, httpsProxy, httpProxy, allProxy, localProxyAvailable);
+                                 string.IsNullOrWhiteSpace(allProxy) && !ProviderProxySelection.IsNoProxyMatch(providerUri.Host, noProxy) &&
+                                 IsLocalProxyListenerAvailable();
+        var selectedProxy = ProviderProxySelection.SelectProxyUrl(providerUri, httpsProxy, httpProxy, allProxy, localProxyAvailable, noProxy);
 
         foreach (var name in new[] { "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY" })
         {
             var value = ReadProxyEnvironment(name);
             if (!string.IsNullOrWhiteSpace(value)) startInfo.EnvironmentVariables[name] = value;
         }
-        if (string.IsNullOrWhiteSpace(selectedProxy)) return;
+        if (string.IsNullOrWhiteSpace(selectedProxy))
+        {
+            startInfo.EnvironmentVariables["CHRONICLE_LLM_PROXY_SELECTION_SOURCE"] =
+                ProviderProxySelection.IsNoProxyMatch(providerUri.Host, noProxy) ? "no-proxy-bypass" : "system-default";
+            return;
+        }
 
         // The Host is a separate process. Pass a user-configured proxy through,
         // or use the already-running local proxy as a process-only fallback.
@@ -471,6 +478,7 @@ internal static class ChronicleAgentRuntimeController
         var source = !string.IsNullOrWhiteSpace(httpsProxy) ? "https-proxy-environment" :
             !string.IsNullOrWhiteSpace(httpProxy) ? "http-proxy-environment" :
             !string.IsNullOrWhiteSpace(allProxy) ? "all-proxy-environment" : "local-listener";
+        startInfo.EnvironmentVariables["CHRONICLE_LLM_PROXY_SELECTION_SOURCE"] = source;
         if (Uri.TryCreate(selectedProxy, UriKind.Absolute, out var proxyUri))
             ChronicleDiagnostics.Write("agent-provider-proxy-selected|source=" + source + "|host=" + proxyUri.Host + "|port=" + proxyUri.Port.ToString(CultureInfo.InvariantCulture));
         else

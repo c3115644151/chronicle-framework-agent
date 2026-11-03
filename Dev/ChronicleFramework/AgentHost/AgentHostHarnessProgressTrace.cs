@@ -106,6 +106,8 @@ internal static class AgentHostHarnessProgressTrace
                 ["scopeRestriction"] = ReadString(requestNode, "scopeRestriction"),
                 ["modelId"] = result.ModelId,
                 ["routedVia"] = result.RoutedVia,
+                ["proxySelectionSource"] = result.ProxySelectionSource,
+                ["proxyEndpointHostPort"] = result.ProxyEndpointHostPort,
                 ["responseFormatMode"] = result.ResponseFormatMode,
                 ["promptTokens"] = result.PromptTokens,
                 ["completionTokens"] = result.CompletionTokens,
@@ -219,16 +221,19 @@ internal static class AgentHostHarnessProgressTrace
     internal static void RecordProviderFailure(JsonElement request, AgentHostException exception) =>
         RecordProviderFailure(request, exception.Code, exception.ProviderHttpStatus, exception.ProviderRoute,
             exception.ProviderOutputFormat, exception.ProviderRetryAttempts, exception.ProviderRetryWaitMilliseconds, exception.ProviderFailureStage,
-            exception.ProviderProxySelectionSource, exception.ProviderTimeoutSeconds, exception.ProviderRequestBodyBytes, exception.ProviderTransportErrorType);
+            exception.ProviderProxySelectionSource, exception.ProviderTimeoutSeconds, exception.ProviderRequestBodyBytes, exception.ProviderTransportErrorType,
+            exception.ProviderProxyEndpointHostPort, exception.ProviderResponseServer, exception.ProviderResponseVia, exception.ProviderResponseRequestId, exception.ProviderRetryAfter);
 
     internal static void RecordProviderFailure(JsonElement request, string failureCode, int? providerHttpStatus = null,
         string? providerRoute = null, string? providerOutputFormat = null, int? providerRetryAttempts = null, long? providerRetryWaitMilliseconds = null,
         string? providerFailureStage = null, string? providerProxySelectionSource = null, int? providerTimeoutSeconds = null,
-        int? providerRequestBodyBytes = null, string? providerTransportErrorType = null)
+        int? providerRequestBodyBytes = null, string? providerTransportErrorType = null, string? providerProxyEndpointHostPort = null,
+        string? providerResponseServer = null, string? providerResponseVia = null, string? providerResponseRequestId = null, string? providerRetryAfter = null)
     {
         AgentHostRuntimeProgressLog.RecordProviderFailure(request, failureCode, providerHttpStatus, providerRoute,
             providerOutputFormat, providerRetryAttempts, providerRetryWaitMilliseconds, providerFailureStage,
-            providerProxySelectionSource, providerTimeoutSeconds, providerRequestBodyBytes, providerTransportErrorType);
+            providerProxySelectionSource, providerTimeoutSeconds, providerRequestBodyBytes, providerTransportErrorType,
+            providerProxyEndpointHostPort, providerResponseServer, providerResponseVia, providerResponseRequestId, providerRetryAfter);
         var harnessMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
         if (harnessMode is not ("visual-capture" or "agent-host-lifecycle-test")) return;
         var directory = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
@@ -251,9 +256,14 @@ internal static class AgentHostHarnessProgressTrace
                 ["providerRetryWaitMilliseconds"] = providerRetryWaitMilliseconds,
                 ["providerFailureStage"] = providerFailureStage,
                 ["providerProxySelectionSource"] = providerProxySelectionSource,
+                ["providerProxyEndpointHostPort"] = providerProxyEndpointHostPort,
                 ["providerTimeoutSeconds"] = providerTimeoutSeconds,
                 ["providerRequestBodyBytes"] = providerRequestBodyBytes,
                 ["providerTransportErrorType"] = providerTransportErrorType,
+                ["providerResponseServer"] = providerResponseServer,
+                ["providerResponseVia"] = providerResponseVia,
+                ["providerResponseRequestId"] = providerResponseRequestId,
+                ["providerRetryAfter"] = providerRetryAfter,
                 ["nativeActionSent"] = false,
                 ["responseBodiesLogged"] = false,
                 ["credentialsLogged"] = false
@@ -521,12 +531,15 @@ internal static class AgentHostHarnessProgressTrace
                 RequestBodyBytes: 40000, SystemPromptBytes: 1000, UserPayloadBytes: 30000, ObservationBytes: 5000,
                 PromptCacheHitTokens: 50, PromptCacheMissTokens: 73, EstimatedCostCny: 0.0005, ReservedCostUpperBoundCny: 0.001,
                 DeepSeekEstimatedInputTokens: 35000, DeepSeekRawRequestTokens: 41000, DeepSeekReservedInputTokens: 42000,
-                DeepSeekInputTokenEstimator: "deepseek-v4-chat-template-plus-structured-metadata"));
+                DeepSeekInputTokenEstimator: "deepseek-v4-chat-template-plus-structured-metadata",
+                ProxySelectionSource: "local-listener", ProxyEndpointHostPort: "127.0.0.1:7890"));
             var lines = File.ReadAllLines(path);
             if (lines.Length != 1) throw new AgentHostException("host-progress-trace-self-test-line-count", "Harness progress trace did not append exactly one decision.");
             var recorded = JsonNode.Parse(lines[0]) as JsonObject ?? throw new AgentHostException("host-progress-trace-self-test-json", "Harness progress trace did not contain one JSON object.");
             var recordedDecision = recorded["decision"] as JsonObject;
             if (ReadString(recorded, "routedVia") != "selftest/route" ||
+                ReadString(recorded, "proxySelectionSource") != "local-listener" ||
+                ReadString(recorded, "proxyEndpointHostPort") != "127.0.0.1:7890" ||
                 ReadString(recorded, "scope") != "native-storymode-party-size-recruitment" ||
                 ReadString(recorded, "objectiveId") != "partySize" ||
                 ReadString(recordedDecision, "action") != "dialogueSelect" ||
@@ -731,7 +744,8 @@ internal static class AgentHostHarnessProgressTrace
                 throw new AgentHostException("host-progress-trace-budget-rejection", "Budget diagnostics must record the preflight cost arithmetic without logging prompt contents, credentials, or a Native action.");
 
             RecordProviderFailure(request.RootElement, "provider-http-error", 429, "api.deepseek.com", "required_tool_call", 2, 1500,
-                "http-response-status", "detected-local-listener-7890", 360, 12000, "HttpRequestException");
+                "http-response-status", "local-listener", 360, 12000, "HttpRequestException",
+                "127.0.0.1:7890", "cloudflare", "1.1 proxy", "req-123", "30");
             var providerFailureLine = JsonNode.Parse(File.ReadAllLines(path).Last()) as JsonObject;
             if (ReadString(providerFailureLine, "event") != "provider-failure" ||
                 ReadString(providerFailureLine, "failureCode") != "provider-http-error" ||
@@ -740,9 +754,14 @@ internal static class AgentHostHarnessProgressTrace
                 ReadInt(providerFailureLine, "providerRetryAttempts") != 2 ||
                 ReadInt(providerFailureLine, "providerRetryWaitMilliseconds") != 1500 ||
                 ReadString(providerFailureLine, "providerFailureStage") != "http-response-status" ||
-                ReadString(providerFailureLine, "providerProxySelectionSource") != "detected-local-listener-7890" ||
+                ReadString(providerFailureLine, "providerProxySelectionSource") != "local-listener" ||
+                ReadString(providerFailureLine, "providerProxyEndpointHostPort") != "127.0.0.1:7890" ||
                 ReadInt(providerFailureLine, "providerTimeoutSeconds") != 360 ||
                 ReadInt(providerFailureLine, "providerRequestBodyBytes") != 12000 ||
+                ReadString(providerFailureLine, "providerResponseServer") != "cloudflare" ||
+                ReadString(providerFailureLine, "providerResponseVia") != "1.1 proxy" ||
+                ReadString(providerFailureLine, "providerResponseRequestId") != "req-123" ||
+                ReadString(providerFailureLine, "providerRetryAfter") != "30" ||
                 providerFailureLine?.ContainsKey("responseBody") == true || providerFailureLine?.ContainsKey("apiKey") == true)
                 throw new AgentHostException("host-progress-trace-provider-failure", "Harness diagnostics must persist bounded HTTP status/retry metadata without response bodies or credentials.");
 

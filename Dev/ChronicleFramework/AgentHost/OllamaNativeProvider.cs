@@ -24,6 +24,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     private readonly HttpClient _client;
     private readonly bool _ownsClient;
     private readonly string _proxySelectionSource;
+    private readonly string? _proxyEndpointHostPort;
     private int _availableModelCount;
     private DateTimeOffset _lastProviderRequestUtc;
     private string? _lastProviderRoute;
@@ -39,6 +40,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     internal string StructuredOutputStrategy => _useRequiredToolCallStrategy ? "required_tool_call" :
         _settings.OutputMode == "json_object" ? "json_object" : "json_schema";
     internal string ProxySelectionSource => _proxySelectionSource;
+    internal string? ProxyEndpointHostPort => _proxyEndpointHostPort;
     internal int AvailableModelCount => _availableModelCount;
     internal int MaxOutputTokens => _settings.MaxOutputTokens;
     internal string OutputMode => _settings.OutputMode;
@@ -57,18 +59,19 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     {
         _settings = settings with { MaxTokenParameter = ResolveMaxTokenParameter(settings.Model, settings.MaxTokenParameter) };
         if (client is null)
-            (_client, _proxySelectionSource) = CreateDefaultHttpClient(_settings);
+            (_client, _proxySelectionSource, _proxyEndpointHostPort) = CreateDefaultHttpClient(_settings);
         else
         {
             _client = client;
             _proxySelectionSource = "injected-http-client";
+            _proxyEndpointHostPort = null;
         }
         _ownsClient = client is null;
         ConfigurationSource = configurationSource;
         _useRequiredToolCallStrategy = string.Equals(settings.OutputMode, "required_tool_call", StringComparison.Ordinal);
     }
 
-    private static (HttpClient Client, string ProxySelectionSource) CreateDefaultHttpClient(OllamaProviderSettings settings)
+    private static (HttpClient Client, string ProxySelectionSource, string? ProxyEndpointHostPort) CreateDefaultHttpClient(OllamaProviderSettings settings)
     {
         var processHttps = ReadProxyEnvironment("HTTPS_PROXY", EnvironmentVariableTarget.Process);
         var userHttps = ReadProxyEnvironment("HTTPS_PROXY", EnvironmentVariableTarget.User);
@@ -88,9 +91,9 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             localProxyAvailable, noProxy);
         if (string.IsNullOrWhiteSpace(proxyUrl))
         {
-            var source = settings.Endpoint.IsLoopback ? "loopback-or-system-default" :
-                ProviderProxySelection.IsNoProxyMatch(settings.Endpoint.Host, noProxy) ? "no-proxy-bypass" : "system-default";
-            return (new HttpClient { Timeout = settings.Timeout }, source);
+            var source = ReadProxySelectionSourceOverride() ?? (settings.Endpoint.IsLoopback ? "loopback-or-system-default" :
+                ProviderProxySelection.IsNoProxyMatch(settings.Endpoint.Host, noProxy) ? "no-proxy-bypass" : "system-default");
+            return (new HttpClient { Timeout = settings.Timeout }, source, null);
         }
         if (!Uri.TryCreate(proxyUrl, UriKind.Absolute, out var proxyUri) || proxyUri.Scheme is not ("http" or "https"))
             throw new AgentHostException("provider-proxy-invalid", "The configured provider proxy must be an absolute HTTP or HTTPS URL.");
@@ -102,8 +105,15 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         var selectedByEnvironment = !string.IsNullOrWhiteSpace(processHttps) || !string.IsNullOrWhiteSpace(userHttps) ||
             !string.IsNullOrWhiteSpace(processHttp) || !string.IsNullOrWhiteSpace(userHttp) ||
             !string.IsNullOrWhiteSpace(processAll) || !string.IsNullOrWhiteSpace(userAll);
-        var proxySource = selectedByEnvironment ? "configured-proxy-environment" : "detected-local-listener-7890";
-        return (new HttpClient(handler) { Timeout = settings.Timeout }, proxySource);
+        var proxySource = ReadProxySelectionSourceOverride() ?? (selectedByEnvironment ? "configured-proxy-environment" : "detected-local-listener-7890");
+        return (new HttpClient(handler) { Timeout = settings.Timeout }, proxySource, proxyUri.Host + ":" + proxyUri.Port.ToString(CultureInfo.InvariantCulture));
+    }
+
+    private static string? ReadProxySelectionSourceOverride()
+    {
+        var source = Environment.GetEnvironmentVariable("CHRONICLE_LLM_PROXY_SELECTION_SOURCE");
+        return source is "https-proxy-environment" or "http-proxy-environment" or "all-proxy-environment" or
+            "local-listener" or "no-proxy-bypass" or "system-default" ? source : null;
     }
 
     private static string? ReadProxyEnvironment(string name, EnvironmentVariableTarget target)
@@ -487,6 +497,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             {
                 throw new AgentHostException("provider-timeout", "The model provider exceeded its configured timeout while waiting for the provider rate window.", exception,
                     providerFailureStage: "provider-rate-window-wait", providerProxySelectionSource: _proxySelectionSource,
+                    providerProxyEndpointHostPort: _proxyEndpointHostPort,
                     providerTimeoutSeconds: (int)_settings.Timeout.TotalSeconds, providerRequestBodyBytes: Encoding.UTF8.GetByteCount(requestBody),
                     providerRetryAttempts: rateLimitRetryAttempts, providerTransportErrorType: exception.GetType().Name);
             }
@@ -503,6 +514,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             {
                 throw new AgentHostException("provider-timeout", "The model provider did not respond within its configured timeout.", exception,
                     providerFailureStage: "http-send-response", providerProxySelectionSource: _proxySelectionSource,
+                    providerProxyEndpointHostPort: _proxyEndpointHostPort,
                     providerTimeoutSeconds: (int)_settings.Timeout.TotalSeconds, providerRequestBodyBytes: Encoding.UTF8.GetByteCount(requestBody),
                     providerRetryAttempts: rateLimitRetryAttempts, providerTransportErrorType: exception.GetType().Name);
             }
@@ -510,6 +522,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             {
                 throw new AgentHostException("provider-unreachable", "The configured model provider could not be reached.", exception,
                     providerFailureStage: "http-send-response", providerProxySelectionSource: _proxySelectionSource,
+                    providerProxyEndpointHostPort: _proxyEndpointHostPort,
                     providerTimeoutSeconds: (int)_settings.Timeout.TotalSeconds, providerRequestBodyBytes: Encoding.UTF8.GetByteCount(requestBody),
                     providerRetryAttempts: rateLimitRetryAttempts, providerTransportErrorType: exception.GetType().Name,
                     providerHttpStatus: exception.StatusCode.HasValue ? (int)exception.StatusCode.Value : null);
@@ -526,6 +539,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             {
                 throw new AgentHostException("provider-timeout", $"The model provider exceeded its configured timeout {description}.", exception,
                     providerFailureStage: "rate-limit-retry-delay", providerProxySelectionSource: _proxySelectionSource,
+                    providerProxyEndpointHostPort: _proxyEndpointHostPort,
                     providerTimeoutSeconds: (int)_settings.Timeout.TotalSeconds, providerRetryAttempts: rateLimitRetryAttempts,
                     providerTransportErrorType: exception.GetType().Name);
             }
@@ -545,6 +559,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 {
                     throw new AgentHostException("provider-timeout", "The model provider exceeded its configured timeout while reading rate-limit guidance.", exception,
                         providerFailureStage: "rate-limit-guidance-read", providerProxySelectionSource: _proxySelectionSource,
+                        providerProxyEndpointHostPort: _proxyEndpointHostPort,
                         providerTimeoutSeconds: (int)_settings.Timeout.TotalSeconds, providerRetryAttempts: rateLimitRetryAttempts,
                         providerTransportErrorType: exception.GetType().Name,
                         providerHttpStatus: (int)response.StatusCode);
@@ -619,7 +634,13 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     providerRetryAttempts: rateLimitRetryAttempts,
                     providerRetryWaitMilliseconds: rateLimitRetryWaitMilliseconds,
                     providerFailureStage: "http-response-status", providerProxySelectionSource: _proxySelectionSource,
-                    providerTimeoutSeconds: (int)_settings.Timeout.TotalSeconds, providerRequestBodyBytes: bodyBytes);
+                    providerProxyEndpointHostPort: _proxyEndpointHostPort,
+                    providerTimeoutSeconds: (int)_settings.Timeout.TotalSeconds, providerRequestBodyBytes: bodyBytes,
+                    providerResponseServer: SafeOptionalDiagnosticField(ReadResponseHeader(response, "Server")),
+                    providerResponseVia: SafeOptionalDiagnosticField(ReadResponseHeader(response, "Via")),
+                    providerResponseRequestId: SafeOptionalDiagnosticField(ReadResponseHeader(response, "X-Request-Id") ??
+                        ReadResponseHeader(response, "X-Correlation-Id") ?? ReadResponseHeader(response, "CF-Ray")),
+                    providerRetryAfter: SafeOptionalDiagnosticField(response.Headers.RetryAfter?.ToString()));
 
             if (response.Content.Headers.ContentLength is > MaxResponseBytes)
                 throw new AgentHostException("provider-response-too-large", "The local model response exceeds the Host size limit.");
@@ -633,6 +654,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             {
                 throw new AgentHostException("provider-timeout", "The local model provider response exceeded its configured timeout.", exception,
                     providerFailureStage: "response-body-read", providerProxySelectionSource: _proxySelectionSource,
+                    providerProxyEndpointHostPort: _proxyEndpointHostPort,
                     providerTimeoutSeconds: (int)_settings.Timeout.TotalSeconds, providerRequestBodyBytes: bodyBytes,
                     providerRetryAttempts: rateLimitRetryAttempts, providerTransportErrorType: exception.GetType().Name,
                     providerHttpStatus: (int)response.StatusCode);
@@ -752,7 +774,9 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 deepSeekInputTokenEstimate?.TokenizerTokens,
                 deepSeekInputTokenEstimate?.RawRequestTokens,
                 deepSeekInputTokenEstimate?.ReservedTokens,
-                deepSeekInputTokenEstimate?.Method);
+                deepSeekInputTokenEstimate?.Method,
+                _proxySelectionSource,
+                _proxyEndpointHostPort);
         }
     }
 
@@ -782,6 +806,9 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             ? character
             : '_').ToArray());
     }
+
+    private static string? SafeOptionalDiagnosticField(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : SafeDiagnosticField(value);
 
     internal string BuildHttpFailureMessage(HttpResponseMessage response, int rateLimitRetryAttempts, long rateLimitRetryWaitMilliseconds, RateLimitRetryHint? retryHint = null, bool? retryFitsDeadline = null)
     {
@@ -1491,14 +1518,17 @@ internal sealed record ProviderDecisionResult(
     int? DeepSeekEstimatedInputTokens = null,
     int? DeepSeekRawRequestTokens = null,
     int? DeepSeekReservedInputTokens = null,
-    string? DeepSeekInputTokenEstimator = null);
+    string? DeepSeekInputTokenEstimator = null,
+    string? ProxySelectionSource = null,
+    string? ProxyEndpointHostPort = null);
 
 internal sealed class AgentHostException : Exception
 {
     internal AgentHostException(string code, string message, Exception? innerException = null, int? providerHttpStatus = null,
         string? providerRoute = null, string? providerOutputFormat = null, int? providerRetryAttempts = null, long? providerRetryWaitMilliseconds = null,
-        string? providerFailureStage = null, string? providerProxySelectionSource = null, int? providerTimeoutSeconds = null,
-        int? providerRequestBodyBytes = null, string? providerTransportErrorType = null) : base(message, innerException)
+        string? providerFailureStage = null, string? providerProxySelectionSource = null, string? providerProxyEndpointHostPort = null, int? providerTimeoutSeconds = null,
+        int? providerRequestBodyBytes = null, string? providerTransportErrorType = null, string? providerResponseServer = null,
+        string? providerResponseVia = null, string? providerResponseRequestId = null, string? providerRetryAfter = null) : base(message, innerException)
     {
         Code = code;
         ProviderHttpStatus = providerHttpStatus;
@@ -1508,9 +1538,14 @@ internal sealed class AgentHostException : Exception
         ProviderRetryWaitMilliseconds = providerRetryWaitMilliseconds;
         ProviderFailureStage = providerFailureStage;
         ProviderProxySelectionSource = providerProxySelectionSource;
+        ProviderProxyEndpointHostPort = providerProxyEndpointHostPort;
         ProviderTimeoutSeconds = providerTimeoutSeconds;
         ProviderRequestBodyBytes = providerRequestBodyBytes;
         ProviderTransportErrorType = providerTransportErrorType;
+        ProviderResponseServer = providerResponseServer;
+        ProviderResponseVia = providerResponseVia;
+        ProviderResponseRequestId = providerResponseRequestId;
+        ProviderRetryAfter = providerRetryAfter;
     }
 
     internal string Code { get; }
@@ -1521,7 +1556,12 @@ internal sealed class AgentHostException : Exception
     internal long? ProviderRetryWaitMilliseconds { get; }
     internal string? ProviderFailureStage { get; }
     internal string? ProviderProxySelectionSource { get; }
+    internal string? ProviderProxyEndpointHostPort { get; }
     internal int? ProviderTimeoutSeconds { get; }
     internal int? ProviderRequestBodyBytes { get; }
     internal string? ProviderTransportErrorType { get; }
+    internal string? ProviderResponseServer { get; }
+    internal string? ProviderResponseVia { get; }
+    internal string? ProviderResponseRequestId { get; }
+    internal string? ProviderRetryAfter { get; }
 }
