@@ -48,6 +48,21 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         if (!ShouldReconsiderUnavailableObjectives(journalProgressChanged: true) ||
             ShouldReconsiderUnavailableObjectives(journalProgressChanged: false))
             throw new AgentHostException("establish-clan-autonomy-child-retry-invalidation-failed", "A previously blocked objective route must reopen only after authoritative original Journal progress; a no-progress attempt remains temporarily unavailable.");
+        var failedLostBandit = new JsonObject { ["status"] = "failed", ["termination"] = "no-safe-action" };
+        using var safeMapAfterLostBandit = JsonDocument.Parse("""
+            {"status":"completed","state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false,"escapeMenuOpen":false,"inquiryOpen":false,"isWaitMenu":false,"isWaitActive":false,"captivity":{"isCaptive":false}},"party":{"isMoving":false,"members":4},"quests":[{"id":"rebuild_player_clan_storymode_quest"}]}}
+            """);
+        using var activeEncounterAfterLostBandit = JsonDocument.Parse("""
+            {"status":"completed","state":{"context":{"gameState":"MapState","menuId":"encounter","encounterActive":true,"escapeMenuOpen":false,"inquiryOpen":false,"isWaitMenu":false,"isWaitActive":false,"captivity":{"isCaptive":false}},"party":{"isMoving":false,"members":4},"quests":[{"id":"rebuild_player_clan_storymode_quest"}]}}
+            """);
+        using var endedQuestAfterLostBandit = JsonDocument.Parse("""
+            {"status":"completed","state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false,"escapeMenuOpen":false,"inquiryOpen":false,"isWaitMenu":false,"isWaitActive":false,"captivity":{"isCaptive":false}},"party":{"isMoving":false,"members":4},"quests":[]}}
+            """);
+        if (!ShouldReplanAfterIncidentBattleNoSafeAction(failedLostBandit, safeMapAfterLostBandit.RootElement) ||
+            ShouldReplanAfterIncidentBattleNoSafeAction(failedLostBandit, activeEncounterAfterLostBandit.RootElement) ||
+            ShouldReplanAfterIncidentBattleNoSafeAction(new JsonObject { ["status"] = "completed", ["termination"] = "no-safe-action" }, safeMapAfterLostBandit.RootElement) ||
+            ShouldReplanAfterIncidentBattleNoSafeAction(failedLostBandit, endedQuestAfterLostBandit.RootElement))
+            throw new AgentHostException("establish-clan-incident-lost-target-safe-map-replan-gate-failed", "A lost hostile target may reopen EYC planning only after the no-safe-action BattleSimulation result returns to a free Map with the original quest still active; an active encounter or completed result must use its own contract.");
         var snapshot = new JsonObject
         {
             ["gold"] = new JsonObject { ["current"] = 32, ["target"] = 2000, ["met"] = false },
@@ -1103,10 +1118,27 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                             continue;
                         }
                         if (ReadString(incidentBattle, "status") != "completed")
+                        {
+                            if (ShouldReplanAfterIncidentBattleNoSafeAction(incidentBattle, afterIncidentBattle.RootElement))
+                            {
+                                MarkObjectiveUnavailable(objectiveId, afterIncidentBattle.RootElement);
+                                trace.Add(new JsonObject
+                                {
+                                    ["stage"] = "incident-bandit-target-lost-returned-to-safe-map",
+                                    ["interruptedObjectiveId"] = objectiveId,
+                                    ["battleStatus"] = ReadString(incidentBattle, "status"),
+                                    ["battleTermination"] = ReadString(incidentBattle, "termination"),
+                                    ["nativeBattleStarted"] = ReadBoolean(incidentBattle, "battleStarted"),
+                                    ["renownProgressClaimed"] = false,
+                                    ["replayedChildActions"] = false
+                                });
+                                continue;
+                            }
                             return BuildResult("failed", "incident-bandit-battle-failed", false,
                                 ReadString(incidentBattle, "failure") ?? "The interrupted hostile Bandit encounter did not reach a verified Native BattleSimulation return.",
                                 ReadString(incidentBattle, "failureCode") ?? "incident-bandit-battle-failed",
                                 journalObjectives, snapshot, differences);
+                        }
 
                         if (!IsSafeMapForObjectiveProviderReplan(afterIncidentBattle.RootElement) ||
                             !AgentHostEstablishYourClanGoalLoop.HasActiveQuest(afterIncidentBattle.RootElement))
@@ -1602,6 +1634,10 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
     private static bool ShouldRouteToBattleSimulation(JsonElement native, string? failureCode) =>
         IsSupportedHostileBanditEncounter(native) ||
         failureCode == AgentHostNativeMapMovementMonitor.FailureCode && AgentHostNativeMapMovementMonitor.IsPausedVisibleBanditMove(native);
+
+    internal static bool ShouldReplanAfterIncidentBattleNoSafeAction(JsonObject? battleResult, JsonElement nativeAfter) =>
+        ReadString(battleResult, "status") == "failed" && ReadString(battleResult, "termination") == "no-safe-action" &&
+        IsSafeMapForObjectiveProviderReplan(nativeAfter) && AgentHostEstablishYourClanGoalLoop.HasActiveQuest(nativeAfter);
 
     private static bool IsSafeMapForObjectiveProviderReplan(JsonElement native)
     {
