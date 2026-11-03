@@ -403,22 +403,17 @@ internal static class AgentHostBattleSimulationLoop
                     if (IsVerifiedMapTerminalAfterNativeEncounterLeave(state))
                     {
                         var renownAfterLeave = ReadRenown(state);
-                        trace.Add(new JsonObject
-                        {
-                            ["stage"] = "native-encounter-left-without-battlesimulation",
-                            ["nativeAction"] = "menuSelect",
-                            ["optionId"] = nativeEncounterLeaveOptionId,
-                            ["targetPartyId"] = requestedTargetId ?? ReadString(state["context"] as JsonObject, "encounteredPartyId"),
-                            ["targetPartyMembers"] = ReadObservedTargetMembers(observedTargets,
-                                requestedTargetId ?? ReadString(state["context"] as JsonObject, "encounteredPartyId")),
-                            ["playerPartyFingerprint"] = BuildPartyStrengthFingerprint(state),
-                            ["battleSimulationStarted"] = false,
-                            ["campaignDayAfter"] = native["campaignDay"]?.DeepClone(),
-                            ["timeControlModeAfter"] = native["timeControlMode"]?.DeepClone(),
-                            ["renownBefore"] = double.IsFinite(renownBefore) ? JsonValue.Create(renownBefore) : null,
-                            ["renownAfter"] = double.IsFinite(renownAfterLeave) ? JsonValue.Create(renownAfterLeave) : null,
-                            ["playerCaptiveAfter"] = IsPlayerCaptive(state)
-                        });
+                        var leaveTraceStep = BuildDeferredPartyTargetTraceStep(
+                            requestedTargetId ?? ReadString(state["context"] as JsonObject, "encounteredPartyId"), observedTargets, state);
+                        leaveTraceStep["nativeAction"] = "menuSelect";
+                        leaveTraceStep["optionId"] = nativeEncounterLeaveOptionId;
+                        leaveTraceStep["battleSimulationStarted"] = false;
+                        leaveTraceStep["campaignDayAfter"] = native["campaignDay"]?.DeepClone();
+                        leaveTraceStep["timeControlModeAfter"] = native["timeControlMode"]?.DeepClone();
+                        leaveTraceStep["renownBefore"] = double.IsFinite(renownBefore) ? JsonValue.Create(renownBefore) : null;
+                        leaveTraceStep["renownAfter"] = double.IsFinite(renownAfterLeave) ? JsonValue.Create(renownAfterLeave) : null;
+                        leaveTraceStep["playerCaptiveAfter"] = IsPlayerCaptive(state);
+                        trace.Add(leaveTraceStep);
                         return BuildResult(runId, provider, "interrupted", decisions, actionsExecuted, promptTokens, completionTokens,
                             "native-encounter-left-no-battle", "Native Leave closed the encounter without BattleSimulation; no victory or Renown gain is claimed.",
                             "native-encounter-left-no-battle", startDay, initialNative, native, trace, routes, renownBefore, renownAfterLeave,
@@ -778,6 +773,17 @@ internal static class AgentHostBattleSimulationLoop
                 deferred.Add(targetId);
         }
         return deferred;
+    }
+
+    internal static JsonObject BuildDeferredPartyTargetTraceStep(string? targetPartyId, JsonArray observedTargets, JsonObject state)
+    {
+        return new JsonObject
+        {
+            ["stage"] = "native-encounter-left-without-battlesimulation",
+            ["targetPartyId"] = targetPartyId,
+            ["targetPartyMembers"] = ReadObservedTargetMembers(observedTargets, targetPartyId),
+            ["playerPartyFingerprint"] = BuildPartyStrengthFingerprint(state)
+        };
     }
 
     private static int? ReadObservedTargetMembers(JsonArray observedTargets, string? targetId)
@@ -1299,13 +1305,7 @@ internal static class AgentHostBattleSimulationLoop
         var deferredMapState = (JsonObject)mapState.DeepClone();
         deferredMapState["party"] = new JsonObject { ["members"] = 4, ["healthy"] = 4, ["wounded"] = 0, ["prisoners"] = 0 };
         var deferredCandidate = new JsonArray(new JsonObject { ["id"] = "bandit-1", ["type"] = "bandit", ["hostile"] = true, ["members"] = 9 });
-        var deferredTrace = new JsonArray(new JsonObject
-        {
-            ["stage"] = "native-encounter-left-without-battlesimulation",
-            ["targetPartyId"] = "bandit-1",
-            ["targetPartyMembers"] = 9,
-            ["playerPartyFingerprint"] = "4|4|0|0"
-        });
+        var deferredTrace = new JsonArray(BuildDeferredPartyTargetTraceStep("bandit-1", deferredCandidate, deferredMapState));
         var deferredIds = BuildDeferredPartyTargetIds(deferredTrace, deferredMapState, deferredCandidate);
         var deferredCatalog = BuildActionCatalog(deferredMapState, deferredCandidate, null, false, true, deferredPartyTargetIds: deferredIds);
         var strongerPlayer = (JsonObject)deferredMapState.DeepClone();
