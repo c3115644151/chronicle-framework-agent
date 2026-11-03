@@ -408,6 +408,10 @@ internal static class AgentHostBattleSimulationLoop
                             ["stage"] = "native-encounter-left-without-battlesimulation",
                             ["nativeAction"] = "menuSelect",
                             ["optionId"] = nativeEncounterLeaveOptionId,
+                            ["targetPartyId"] = requestedTargetId ?? ReadString(state["context"] as JsonObject, "encounteredPartyId"),
+                            ["targetPartyMembers"] = ReadObservedTargetMembers(observedTargets,
+                                requestedTargetId ?? ReadString(state["context"] as JsonObject, "encounteredPartyId")),
+                            ["playerPartyFingerprint"] = BuildPartyStrengthFingerprint(state),
                             ["battleSimulationStarted"] = false,
                             ["campaignDayAfter"] = native["campaignDay"]?.DeepClone(),
                             ["timeControlModeAfter"] = native["timeControlMode"]?.DeepClone(),
@@ -489,7 +493,9 @@ internal static class AgentHostBattleSimulationLoop
                     break;
                 }
 
-                var catalog = BuildActionCatalog(state, observedTargets, requestedTargetId, battleWasStarted, mapPartyTargetsQueried, recoverPlayerCaptivity);
+                var deferredPartyTargetIds = BuildDeferredPartyTargetIds(trace, state, observedTargets);
+                var catalog = BuildActionCatalog(state, observedTargets, requestedTargetId, battleWasStarted, mapPartyTargetsQueried,
+                    recoverPlayerCaptivity, deferredPartyTargetIds);
                 var partyScreenDoneSuppressed = false;
                 if (parentPartySizeObjectiveUnmet && blockedPartyScreenDoneFingerprint is not null &&
                     string.Equals(blockedPartyScreenDoneFingerprint, currentPartyScreenFingerprint, StringComparison.Ordinal) &&
@@ -749,7 +755,55 @@ internal static class AgentHostBattleSimulationLoop
             recoverPlayerCaptivity, captivityObserved, captivityChoiceOptionId);
     }
 
-    internal static JsonArray BuildActionCatalog(JsonObject state, JsonArray observedTargets, string? targetId, bool battleWasStarted, bool mapPartyTargetsQueried, bool recoverPlayerCaptivity = false)
+    internal static HashSet<string> BuildDeferredPartyTargetIds(JsonArray priorTrace, JsonObject state, JsonArray observedTargets)
+    {
+        var currentPlayerFingerprint = BuildPartyStrengthFingerprint(state);
+        if (currentPlayerFingerprint is null) return new HashSet<string>(StringComparer.Ordinal);
+
+        var currentTargetMembers = observedTargets.OfType<JsonObject>()
+            .Where(target => ReadString(target, "type") == "bandit" && ReadBoolean(target, "hostile"))
+            .Where(target => !string.IsNullOrWhiteSpace(ReadString(target, "id")))
+            .ToDictionary(target => ReadString(target, "id")!, target => ReadInt(target, "members", -1), StringComparer.Ordinal);
+
+        var deferred = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var attempt in priorTrace.OfType<JsonObject>())
+        {
+            if (ReadString(attempt, "stage") != "native-encounter-left-without-battlesimulation") continue;
+            var targetId = ReadString(attempt, "targetPartyId");
+            if (string.IsNullOrWhiteSpace(targetId) || !currentTargetMembers.TryGetValue(targetId, out var currentTargetCount)) continue;
+            if (!string.Equals(ReadString(attempt, "playerPartyFingerprint"), currentPlayerFingerprint, StringComparison.Ordinal)) continue;
+
+            var previousTargetCount = ReadInt(attempt, "targetPartyMembers", -1);
+            if (previousTargetCount < 0 || currentTargetCount < 0 || previousTargetCount == currentTargetCount)
+                deferred.Add(targetId);
+        }
+        return deferred;
+    }
+
+    private static int? ReadObservedTargetMembers(JsonArray observedTargets, string? targetId)
+    {
+        if (string.IsNullOrWhiteSpace(targetId)) return null;
+        var target = observedTargets.OfType<JsonObject>().FirstOrDefault(item => ReadString(item, "id") == targetId);
+        if (target is null) return null;
+        var members = ReadInt(target, "members", -1);
+        return members >= 0 ? members : null;
+    }
+
+    private static string? BuildPartyStrengthFingerprint(JsonObject state)
+    {
+        var party = state["party"] as JsonObject;
+        if (party is null) return null;
+        var members = ReadInt(party, "members", -1);
+        var healthy = ReadInt(party, "healthy", -1);
+        var wounded = ReadInt(party, "wounded", -1);
+        var prisoners = ReadInt(party, "prisoners", -1);
+        if (members < 0 && healthy < 0 && wounded < 0 && prisoners < 0) return null;
+        return string.Join("|", members.ToString(CultureInfo.InvariantCulture), healthy.ToString(CultureInfo.InvariantCulture),
+            wounded.ToString(CultureInfo.InvariantCulture), prisoners.ToString(CultureInfo.InvariantCulture));
+    }
+
+    internal static JsonArray BuildActionCatalog(JsonObject state, JsonArray observedTargets, string? targetId, bool battleWasStarted,
+        bool mapPartyTargetsQueried, bool recoverPlayerCaptivity = false, ISet<string>? deferredPartyTargetIds = null)
     {
         var catalog = new JsonArray();
         var context = state["context"] as JsonObject ?? new JsonObject();
@@ -914,7 +968,8 @@ internal static class AgentHostBattleSimulationLoop
             if (!string.IsNullOrWhiteSpace(targetId) && string.Equals(targetId, activeTarget, StringComparison.Ordinal))
                 return catalog;
             if (!string.IsNullOrWhiteSpace(activeTarget)) return catalog;
-            var visibleBandits = observedTargets.OfType<JsonObject>().Any(x => ReadString(x, "type") == "bandit" && ReadBoolean(x, "hostile") && !string.IsNullOrWhiteSpace(ReadString(x, "id")));
+            var visibleBandits = observedTargets.OfType<JsonObject>().Any(x => ReadString(x, "type") == "bandit" && ReadBoolean(x, "hostile") &&
+                !string.IsNullOrWhiteSpace(ReadString(x, "id")) && deferredPartyTargetIds?.Contains(ReadString(x, "id")!) != true);
             if (visibleBandits)
                 Add(catalog, "pursue", "PartyId");
             else if (!mapPartyTargetsQueried)
@@ -1241,6 +1296,34 @@ internal static class AgentHostBattleSimulationLoop
         var pursue = BuildActionCatalog(mapState, candidates, null, false, true);
         if (pursue.Count != 1 || ReadString(pursue[0] as JsonObject, "action") != "pursue")
             throw new AgentHostException("battle-loop-self-test-pursue-missing", "Pursuit must only be available after a Native bandit target observation.");
+        var deferredMapState = (JsonObject)mapState.DeepClone();
+        deferredMapState["party"] = new JsonObject { ["members"] = 4, ["healthy"] = 4, ["wounded"] = 0, ["prisoners"] = 0 };
+        var deferredCandidate = new JsonArray(new JsonObject { ["id"] = "bandit-1", ["type"] = "bandit", ["hostile"] = true, ["members"] = 9 });
+        var deferredTrace = new JsonArray(new JsonObject
+        {
+            ["stage"] = "native-encounter-left-without-battlesimulation",
+            ["targetPartyId"] = "bandit-1",
+            ["targetPartyMembers"] = 9,
+            ["playerPartyFingerprint"] = "4|4|0|0"
+        });
+        var deferredIds = BuildDeferredPartyTargetIds(deferredTrace, deferredMapState, deferredCandidate);
+        var deferredCatalog = BuildActionCatalog(deferredMapState, deferredCandidate, null, false, true, deferredPartyTargetIds: deferredIds);
+        var strongerPlayer = (JsonObject)deferredMapState.DeepClone();
+        strongerPlayer["party"]!["members"] = 5;
+        strongerPlayer["party"]!["healthy"] = 5;
+        var strongerPlayerIds = BuildDeferredPartyTargetIds(deferredTrace, strongerPlayer, deferredCandidate);
+        var changedEnemy = new JsonArray(new JsonObject { ["id"] = "bandit-1", ["type"] = "bandit", ["hostile"] = true, ["members"] = 10 });
+        var changedEnemyIds = BuildDeferredPartyTargetIds(deferredTrace, deferredMapState, changedEnemy);
+        if (!deferredIds.Contains("bandit-1") || deferredCatalog.Count != 0 || strongerPlayerIds.Contains("bandit-1") || changedEnemyIds.Contains("bandit-1"))
+            throw new AgentHostException("battle-loop-self-test-no-progress-bandit-target-cooldown-failed", "After Native Leave without a battle, the same party must be deferred while both sides retain the observed strength; a changed MainParty roster or changed bandit size must reopen it.");
+        var deferredEncounter = ParseState("MapState", "encounter", true, null, null)["state"]!.AsObject();
+        deferredEncounter["context"]!["encounteredPartyId"] = "bandit-1";
+        deferredEncounter["availableMenuOptions"] = new JsonArray(new JsonObject { ["id"] = "str_order_attack", ["enabled"] = true, ["available"] = true });
+        var deferredEncounterCatalog = BuildActionCatalog(deferredEncounter, deferredCandidate, "bandit-1", false, true,
+            recoverPlayerCaptivity: true, deferredPartyTargetIds: deferredIds);
+        if (deferredEncounterCatalog.Count != 1 || ReadString(deferredEncounterCatalog[0] as JsonObject, "action") != "menuSelect")
+            throw new AgentHostException("battle-loop-self-test-deferred-target-blocked-current-native-encounter", "A prior no-battle cooldown must block only a new pursuit and must still let the Host resolve a current Native encounter.");
+        results.Add(new { scenario = "battle-loop-defers-repeated-no-battle-bandit-pursuit-until-either-side-strength-changes", passed = true });
         var unverified = new JsonObject { ["action"] = "pursue", ["arguments"] = new JsonObject { ["PartyId"] = "other-party" } };
         if (TryResolveDecision(unverified, pursue, new JsonArray(), mapState, candidates, null, out _, out _, out _, out _))
             throw new AgentHostException("battle-loop-self-test-hidden-party-accepted", "The Host accepted a party absent from the current visible hostile bandit observation.");
