@@ -125,12 +125,25 @@ internal static class AgentHostRuntimeProgressLog
             ["menuId"] = Copy(context, "menuId"),
             ["timeControlMode"] = Copy(context, "timeControlMode"),
             ["isWaiting"] = Copy(context, "isWaiting"),
+            ["encounterActive"] = Copy(context, "encounterActive"),
+            ["encounteredPartyId"] = Copy(context, "encounteredPartyId"),
+            ["battleSimulationActive"] = context?["battleSimulation"] is JsonObject,
             ["currentSettlementId"] = Copy(location, "currentSettlementId"),
             ["targetSettlementId"] = Copy(location, "targetSettlementId"),
+            ["targetPartyId"] = Copy(location, "targetPartyId"),
             ["gold"] = Copy(economy, "gold"),
             ["renown"] = Copy(economy, "renown"),
             ["partyMembers"] = Copy(party, "members"),
             ["partyCapacity"] = Copy(party, "sizeLimit"),
+            ["partyHealthy"] = Copy(party, "healthy"),
+            ["partyWounded"] = Copy(party, "wounded"),
+            ["partyPrisoners"] = Copy(party, "prisoners"),
+            ["partyMorale"] = Copy(party, "morale"),
+            ["partyFood"] = Copy(party, "food"),
+            ["partyFoodChange"] = Copy(party, "foodChange"),
+            ["partyIsMoving"] = Copy(party, "isMoving"),
+            ["partyMoveMode"] = Copy(party, "moveMode"),
+            ["partyDefaultBehavior"] = Copy(party, "defaultBehavior"),
             ["objectiveSnapshot"] = state?["objectiveSnapshot"]?.DeepClone(),
             ["promptsLogged"] = false,
             ["responseBodiesLogged"] = false,
@@ -267,7 +280,7 @@ internal static class AgentHostRuntimeProgressLog
             throw new AgentHostException("runtime-progress-log-path-self-test-failed", "Player progress logs must stay in the owned ModLogs\\AgentRuns folder and reject untrusted run IDs.");
 
         using var request = JsonDocument.Parse("""
-            {"runId":"mcm-0123456789abcdef0123456789abcdef","goal":"PRIVATE_GOAL_TEXT","observation":{"state":{"campaignDay":42.5,"context":{"gameState":"MapState","menuId":"village","timeControlMode":"Stop"},"location":{"currentSettlementId":"village-1"},"economy":{"gold":100,"renown":20},"party":{"members":5,"sizeLimit":20},"objectiveSnapshot":{"gold":{"current":100,"target":2000,"met":false}}}},"allowedActions":[{"action":"dialogueSelect","arguments":["OptionId"]}],"allowedControls":[]}
+            {"runId":"mcm-0123456789abcdef0123456789abcdef","goal":"PRIVATE_GOAL_TEXT","observation":{"state":{"campaignDay":42.5,"context":{"gameState":"MapState","menuId":"village","timeControlMode":"Stop","encounterActive":true,"encounteredPartyId":"bandit-a"},"location":{"currentSettlementId":"village-1","targetPartyId":"bandit-a"},"economy":{"gold":100,"renown":20},"party":{"members":5,"sizeLimit":20,"healthy":3,"wounded":1,"prisoners":1,"morale":12.5,"food":0.5,"foodChange":-0.25,"isMoving":true,"moveMode":"Party","defaultBehavior":"EngageParty"},"objectiveSnapshot":{"gold":{"current":100,"target":2000,"met":false}}}},"allowedActions":[{"action":"dialogueSelect","arguments":["OptionId"]}],"allowedControls":[]}
             """);
         var decision = new JsonObject
         {
@@ -285,6 +298,12 @@ internal static class AgentHostRuntimeProgressLog
             ReadInt(loggedDecision, "promptCacheHitTokens") != 12 || ReadInt(loggedDecision, "promptCacheMissTokens") != 34 ||
             Math.Abs((ReadDouble(loggedDecision, "estimatedCostCny") ?? -1) - 0.01) > 0.0000001 ||
             Math.Abs((ReadDouble(loggedDecision, "configuredRunCostLimitCny") ?? -1) - 5) > 0.0000001 ||
+            ReadBoolean(loggedDecision, "partyIsMoving") != true || ReadBoolean(loggedDecision, "encounterActive") != true ||
+            ReadString(loggedDecision, "encounteredPartyId") != "bandit-a" || ReadString(loggedDecision, "partyDefaultBehavior") != "EngageParty" ||
+            ReadInt(loggedDecision, "partyWounded") != 1 || ReadInt(loggedDecision, "partyPrisoners") != 1 ||
+            Math.Abs((ReadDouble(loggedDecision, "partyMorale") ?? -1) - 12.5) > 0.0000001 ||
+            Math.Abs((ReadDouble(loggedDecision, "partyFood") ?? -1) - 0.5) > 0.0000001 ||
+            Math.Abs((ReadDouble(loggedDecision, "partyFoodChange") ?? -1) + 0.25) > 0.0000001 ||
             loggedJson.Contains("PRIVATE_", StringComparison.Ordinal) || loggedJson.Contains("issue_offer_player_accept_quest", StringComparison.Ordinal) ||
             (loggedDecision["argumentNames"] as JsonArray)?.Count != 2)
             throw new AgentHostException("runtime-progress-log-privacy-or-usage-self-test-failed", "The player runtime log must retain token/cache/cost metadata and safe argument names while omitting goals, argument values, response text and rationales.");

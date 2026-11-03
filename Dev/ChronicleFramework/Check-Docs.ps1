@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.512'
+$contractVersion = '7.513'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -149,6 +149,10 @@ if ($agentHostHarnessProgressTraceSource -notmatch 'AgentHostRuntimeProgressLog\
     $agentHostRuntimeProgressLogSource -notmatch 'RunContractSelfTests' -or
     $agentHostRuntimeProgressLogSource -notmatch 'promptsLogged.*false' -or
     $agentHostRuntimeProgressLogSource -notmatch 'credentialsLogged.*false' -or
+    $agentHostRuntimeProgressLogSource -notmatch '\["partyFoodChange"\]' -or
+    $agentHostRuntimeProgressLogSource -notmatch '\["encounteredPartyId"\]' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'host-progress-trace-party-state-self-test' -or
+    $agentHostHarnessProgressTraceSource -notmatch '\["partyDefaultBehavior"\]' -or
     $agentHostRuntimeControllerSource -notmatch 'AgentHostUsageSignalPrefix' -or
     $agentHostRuntimeControllerSource -notmatch 'BuildProviderUsageSummary' -or
     $agentHostRuntimeControllerSource -notmatch 'UpdateProviderUsage' -or

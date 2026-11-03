@@ -128,11 +128,24 @@ internal static class AgentHostHarnessProgressTrace
                     ["menuId"] = Copy(context, "menuId"),
                     ["timeControlMode"] = Copy(context, "timeControlMode"),
                     ["isWaiting"] = Copy(context, "isWaiting"),
+                    ["encounterActive"] = Copy(context, "encounterActive"),
+                    ["encounteredPartyId"] = Copy(context, "encounteredPartyId"),
+                    ["battleSimulationActive"] = context?["battleSimulation"] is JsonObject,
                     ["currentSettlementId"] = Copy(location, "currentSettlementId"),
                     ["targetSettlementId"] = Copy(location, "targetSettlementId"),
+                    ["targetPartyId"] = Copy(location, "targetPartyId"),
                     ["gold"] = Copy(economy, "gold"),
                     ["renown"] = Copy(economy, "renown"),
                     ["partyMembers"] = Copy(party, "members"),
+                    ["partyHealthy"] = Copy(party, "healthy"),
+                    ["partyWounded"] = Copy(party, "wounded"),
+                    ["partyPrisoners"] = Copy(party, "prisoners"),
+                    ["partyMorale"] = Copy(party, "morale"),
+                    ["partyFood"] = Copy(party, "food"),
+                    ["partyFoodChange"] = Copy(party, "foodChange"),
+                    ["partyIsMoving"] = Copy(party, "isMoving"),
+                    ["partyMoveMode"] = Copy(party, "moveMode"),
+                    ["partyDefaultBehavior"] = Copy(party, "defaultBehavior"),
                     ["objectiveSnapshot"] = BuildObjectiveSnapshotSummary(state?["objectiveSnapshot"] as JsonObject),
                     ["nativeProgressionContext"] = BuildNativeProgressionContextSummary(state?["nativeProgressionContext"] as JsonObject),
                     ["questCount"] = quests.Count,
@@ -271,6 +284,15 @@ internal static class AgentHostHarnessProgressTrace
             ["renown"] = Copy(economy, "renown"),
             ["partyMembers"] = Copy(party, "members"),
             ["partySizeLimit"] = Copy(party, "sizeLimit"),
+            ["partyHealthy"] = Copy(party, "healthy"),
+            ["partyWounded"] = Copy(party, "wounded"),
+            ["partyPrisoners"] = Copy(party, "prisoners"),
+            ["partyMorale"] = Copy(party, "morale"),
+            ["partyFood"] = Copy(party, "food"),
+            ["partyFoodChange"] = Copy(party, "foodChange"),
+            ["partyIsMoving"] = Copy(party, "isMoving"),
+            ["partyMoveMode"] = Copy(party, "moveMode"),
+            ["partyDefaultBehavior"] = Copy(party, "defaultBehavior"),
             ["questIds"] = questIds,
             ["availableMenuOptions"] = menuOptions
         };
@@ -355,7 +377,7 @@ internal static class AgentHostHarnessProgressTrace
             Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "visual-capture");
             Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_TEMP", temporaryDirectory);
             using var request = JsonDocument.Parse("""
-                {"runId":"trace-test","observation":{"state":{"campaignDay":12.5,"context":{"gameState":"MapState","menuId":"village","conversation":{"sentenceText":"Tools are needed.","options":[{"id":"issue_offer_player_accept_quest","text":"I can do it.","clickable":true}] }},"location":{"currentSettlementId":"village-1"},"economy":{"gold":920,"renown":20},"party":{"members":5},"objectiveSnapshot":{"gold":{"current":920,"target":2000,"met":false},"partySize":{"current":5,"target":25,"met":false},"renown":{"current":20,"target":50,"met":false},"companions":{"current":0,"target":1,"met":false}},"nativeProgressionContext":{"clanTier":0,"partySizeLimit":20,"partyMembers":5,"partyIsMoving":false,"privateDiagnostic":"must-not-appear"},"quests":[],"settlementOverlayCharacters":[]}}}
+                {"runId":"trace-test","observation":{"state":{"campaignDay":12.5,"context":{"gameState":"MapState","menuId":"village","encounterActive":true,"encounteredPartyId":"bandit-a","conversation":{"sentenceText":"Tools are needed.","options":[{"id":"issue_offer_player_accept_quest","text":"I can do it.","clickable":true}] }},"location":{"currentSettlementId":"village-1","targetPartyId":"bandit-a"},"economy":{"gold":920,"renown":20},"party":{"members":5,"healthy":3,"wounded":1,"prisoners":1,"morale":12.5,"food":0.5,"foodChange":-0.25,"isMoving":true,"moveMode":"Party","defaultBehavior":"EngageParty"},"objectiveSnapshot":{"gold":{"current":920,"target":2000,"met":false},"partySize":{"current":5,"target":25,"met":false},"renown":{"current":20,"target":50,"met":false},"companions":{"current":0,"target":1,"met":false}},"nativeProgressionContext":{"clanTier":0,"partySizeLimit":20,"partyMembers":5,"partyIsMoving":false,"privateDiagnostic":"must-not-appear"},"quests":[],"settlementOverlayCharacters":[]}}}
                 """);
             var decision = JsonNode.Parse("""{"action":"dialogueSelect","arguments":{"OptionId":"issue_offer_player_accept_quest"},"rationale":"Rationale is deliberately excluded."}""")!.AsObject();
             RecordDecision(request.RootElement, new ProviderDecisionResult("completed", "selftest-model", 123, 17, "stop", decision, "selftest/route",
@@ -384,6 +406,17 @@ internal static class AgentHostHarnessProgressTrace
                 recorded!.ContainsKey("systemPrompt") || recorded.ContainsKey("userPayload") || recorded.ContainsKey("requestBody"))
                 throw new AgentHostException("host-progress-trace-self-test-content", "Harness trace must preserve route, Native choice, request/cache/cost diagnostics and state-field sizes while excluding prompt or body text.");
             var traceObservation = recorded["observation"] as JsonObject;
+            if (ReadBoolean(traceObservation, "encounterActive") != true ||
+                ReadString(traceObservation, "encounteredPartyId") != "bandit-a" ||
+                ReadString(traceObservation, "targetPartyId") != "bandit-a" ||
+                ReadBoolean(traceObservation, "partyIsMoving") != true ||
+                ReadString(traceObservation, "partyDefaultBehavior") != "EngageParty" ||
+                ReadInt(traceObservation, "partyHealthy") != 3 || ReadInt(traceObservation, "partyWounded") != 1 ||
+                ReadInt(traceObservation, "partyPrisoners") != 1 ||
+                Math.Abs((ReadDouble(traceObservation, "partyMorale") ?? -1) - 12.5) > 0.0000001 ||
+                Math.Abs((ReadDouble(traceObservation, "partyFood") ?? -1) - 0.5) > 0.0000001 ||
+                Math.Abs((ReadDouble(traceObservation, "partyFoodChange") ?? -1) + 0.25) > 0.0000001)
+                throw new AgentHostException("host-progress-trace-party-state-self-test", "The bounded model-decision trace must retain encounter and Native party context needed to diagnose movement, pursuit and survival decisions.");
             var traceProgression = traceObservation?["nativeProgressionContext"] as JsonObject;
             var traceObjectives = traceObservation?["objectiveSnapshot"] as JsonObject;
             if (ReadInt(traceProgression, "partySizeLimit") != 20 || ReadInt(traceProgression, "clanTier") != 0 ||
