@@ -30,6 +30,31 @@ internal static class AgentHostNativeInquiryResolution
             partyProvider.LastRequest?["observation"]?["state"]?["partyScreen"]?["leftMembers"] is not JsonArray partyLeft || partyLeft.Count != 1)
             throw new AgentHostException("party-screen-inquiry-resolution-selftest-failed", "The shared Native inquiry resolver must expose the current PartyState loot context and answer only its visible enabled button.");
         results.Add(new { scenario = "native-party-state-done-inquiry-preserves-visible-rosters-and-current-goal", passed = true });
+
+        var oldHarnessMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+        var oldHarnessTemp = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+        var traceRoot = Path.Combine(Path.GetTempPath(), "ChronicleNativeInquiryTrace-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(traceRoot);
+        try
+        {
+            Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "visual-capture");
+            Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_TEMP", traceRoot);
+            var traceNative = new FakeNativeInquiryClient(gameState: "PartyState");
+            var traceProvider = new FakeDecisionProvider("negative");
+            _ = RunAsync(traceNative, traceNative, traceProvider, CancellationToken.None, "trace-test-one-provider-inquiry-call").GetAwaiter().GetResult();
+            var tracePath = Path.Combine(traceRoot, "AgentHostProgress.jsonl");
+            var traceRows = File.Exists(tracePath) ? File.ReadAllLines(tracePath) : Array.Empty<string>();
+            if (traceRows.Length != 1 || JsonDocument.Parse(traceRows[0]).RootElement.GetProperty("decision").GetProperty("action").GetString() != "respondInquiry")
+                throw new AgentHostException("native-inquiry-provider-decision-double-logged", "One Native Inquiry model call must produce exactly one token/cost trace row.");
+            results.Add(new { scenario = "native-inquiry-provider-call-is-logged-once-for-cost-accounting", providerCalls = traceProvider.CallCount, traceRows = traceRows.Length, passed = true });
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", oldHarnessMode);
+            Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_TEMP", oldHarnessTemp);
+            if (Directory.Exists(traceRoot)) Directory.Delete(traceRoot, recursive: true);
+        }
+
         var trainingReturnRequest = BuildDecisionRequest("training-inquiry-selftest",
             new JsonObject { ["supported"] = true, ["kind"] = "YesNoInquiry", ["title"] = "", ["text"] = "Return the trained borrowed troops?" },
             new JsonArray("affirmative", "negative"),
@@ -144,8 +169,6 @@ internal static class AgentHostNativeInquiryResolution
                 ["tokenUsageAvailable"] = false
             }), cancellationToken);
         providerRoutes.Add(BuildProviderRoute(decision));
-        using (var requestDocument = JsonDocument.Parse(request.ToJsonString()))
-            AgentHostHarnessProgressTrace.RecordDecision(requestDocument.RootElement, decision);
 
         var actionName = ReadString(decision.Decision, "action");
         var decisionArguments = decision.Decision["arguments"] as JsonObject;
@@ -220,8 +243,6 @@ internal static class AgentHostNativeInquiryResolution
                 ["tokenUsageAvailable"] = false
             }), cancellationToken);
         providerRoutes.Add(BuildProviderRoute(decision));
-        using (var requestDocument = JsonDocument.Parse(request.ToJsonString()))
-            AgentHostHarnessProgressTrace.RecordDecision(requestDocument.RootElement, decision);
 
         var arguments = decision.Decision["arguments"] as JsonObject;
         var clanName = ReadString(arguments, "text");

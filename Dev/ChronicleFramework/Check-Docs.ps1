@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.518'
+$contractVersion = '7.520'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -312,7 +312,7 @@ if ($harnessScript -notmatch "'MapIncidentInputGuard' \{ @\('Preflight', 'Build'
     $mapIncidentInputGuardTestSource -notmatch 'incidentSelect') {
     throw 'The dedicated disposable MapIncident UI regression must block all original map inputs, resolve only through its Native Done handler, preserve the source fixture, and stay out of the default All run.'
 }
-if ($agentObserverSource -notmatch 'activeGameState is PartyState' -or $agentInquiryAdapterSource -notmatch 'activeState is not PartyState' -or $agentHostNativeInquiryResolutionSource -notmatch 'PartyState' -or $agentHostNativeInquiryResolutionSource -notmatch 'partyScreen' -or $agentHostBattleSimulationLoopSource -notmatch 'postbattle-native-inquiry' -or $agentHostBattleSimulationLoopSource -notmatch 'parentEycObjectives') { throw 'Postbattle PartyState Yes/No inquiries must be visible with the current loot roster, resolved through the Native Inquiry handler, and informed by the current EYC goal/progress.' }
+if ($agentObserverSource -notmatch 'activeGameState is PartyState' -or $agentInquiryAdapterSource -notmatch 'activeState is not PartyState' -or $agentHostNativeInquiryResolutionSource -notmatch 'PartyState' -or $agentHostNativeInquiryResolutionSource -notmatch 'partyScreen' -or $agentHostNativeInquiryResolutionSource -match 'AgentHostHarnessProgressTrace\.RecordDecision' -or $agentHostNativeInquiryResolutionSource -notmatch 'native-inquiry-provider-call-is-logged-once-for-cost-accounting' -or $agentHostBattleSimulationLoopSource -notmatch 'postbattle-native-inquiry' -or $agentHostBattleSimulationLoopSource -notmatch 'parentEycObjectives') { throw 'Postbattle PartyState Yes/No inquiries must be visible with the current loot roster, resolved through the Native Inquiry handler exactly once per provider call, and informed by the current EYC goal/progress.' }
 if ($agentObserverSource -notmatch 'activeGameState is PartyState' -or $agentInquiryAdapterSource -notmatch 'activeState is not PartyState' -or $agentHostNativeInquiryResolutionSource -notmatch 'PartyState' -or $agentHostBattleSimulationLoopSource -notmatch 'postbattle-native-inquiry' -or $agentHostBattleSimulationLoopSource -notmatch 'AgentHostNativeInquiryResolution.RunAsync' -or $agentHostBattleSimulationLoopSource -notmatch 'parentEycObjectives') { throw 'Postbattle PartyState Yes/No inquiries must be visible with the current loot roster, resolved through the Native inquiry handler, and informed by the current EYC goals.' }
 if ($agentObserverSource -notmatch 'mainAgent\.CanInteractWithAgent\(item\.Agent, mainAgentController\.MissionScreen\.CameraElevation\)' -or
     $agentObserverSource -notmatch 'IsThereAgentAction\(mainAgent, agent\)' -or
