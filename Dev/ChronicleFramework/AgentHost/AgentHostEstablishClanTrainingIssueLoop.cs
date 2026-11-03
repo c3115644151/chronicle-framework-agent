@@ -207,6 +207,25 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
             upgradeCatalog.OfType<JsonObject>().Any(action => ReadString(action, "action") == "partyUpgradeOptions"))
             throw new AgentHostException("training-issue-self-test-upgrade-scope-failed", "Only the currently observed borrowed issue troop may be upgraded toward its current veteran target; ordinary player troops must not enter this task-specific catalog.");
 
+        var noUpgradeReceipt = new JsonObject
+        {
+            ["status"] = "completed", ["action"] = "partyUpgradeOptions",
+            ["data"] = new JsonObject { ["options"] = new JsonArray(new JsonObject { ["troopId"] = BorrowedTroopId, ["upgradeTargets"] = new JsonArray() }) }
+        };
+        var mapTargetsReceipt = new JsonObject { ["status"] = "completed", ["action"] = "mapSettlementTargets" };
+        var cachedNoUpgrade = UpdateUpgradeOptionsReceipt(null, "partyUpgradeOptions", noUpgradeReceipt, nativeCompleted: true, activeTrainingIssue: true);
+        var retainedNoUpgrade = UpdateUpgradeOptionsReceipt(cachedNoUpgrade, "mapSettlementTargets", mapTargetsReceipt, nativeCompleted: true, activeTrainingIssue: true);
+        var safeTargets = new JsonArray(new JsonObject { ["id"] = "safe-town", ["name"] = "Safe Town" });
+        var afterMapQueryCatalog = BuildActionCatalog(MapState(null), noUpgradeReceipt, cachedNoUpgrade, visibleSafeTargets: null,
+            talkedToIssueGiver: true, activeTrainingIssue: true);
+        var afterMapQueryAndCachedOptionsCatalog = BuildActionCatalog(MapState(null), mapTargetsReceipt, retainedNoUpgrade, safeTargets,
+            talkedToIssueGiver: true, activeTrainingIssue: true);
+        var afterMoveCache = UpdateUpgradeOptionsReceipt(retainedNoUpgrade, "move", new JsonObject { ["status"] = "completed" }, nativeCompleted: true, activeTrainingIssue: true);
+        if (ReadString(afterMapQueryCatalog.FirstOrDefault() as JsonObject, "action") != "mapSettlementTargets" ||
+            ReadString(afterMapQueryAndCachedOptionsCatalog.FirstOrDefault() as JsonObject, "action") != "move" ||
+            afterMapQueryAndCachedOptionsCatalog.OfType<JsonObject>().Any(action => ReadString(action, "action") == "partyUpgradeOptions") ||
+            retainedNoUpgrade is null || afterMoveCache is not null)
+            throw new AgentHostException("training-issue-self-test-no-upgrade-query-loop", "A completed no-upgrade roster read must remain cached through target lookup, allow a current safe move, and refresh only after movement or troop-upgrade change.");
         var noTimeControls = BuildControlCatalog(MapState(null, moving: true), activeTrainingIssue: false);
         var mapDialogueNative = MapState(null, moving: true);
         var mapDialogueState = mapDialogueNative["state"] as JsonObject ?? new JsonObject();
@@ -289,6 +308,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
             new { scenario = "training-issue-accepts-only-the-source-identified-direct-quest-option", passed = true },
             new { scenario = "training-direct-offer-uses-current-giver-and-clickable-option-id-with-unassigned-local-text", passed = true },
             new { scenario = "training-issue-upgrade-catalog-is-limited-to-current-borrowed-retainers", passed = true },
+            new { scenario = "training-issue-caches-no-upgrade-query-across-map-target-read-and-refreshes-after-move", passed = true },
             new { scenario = "training-issue-resolves-unrelated-current-map-conversation-without-quest-acceptance-or-waiting", passed = true },
             new { scenario = "training-issue-movement-observation-does-not-add-clock-controls", passed = true }
         ];
@@ -688,7 +708,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                     if (ReadString(arguments, "settlementId") is string moved && !string.IsNullOrWhiteSpace(moved)) visitedSettlements.Add(moved);
                     visibleSafeTargets = null;
                 }
-                upgradeOptionsReceipt = action == "partyUpgradeOptions" && nativeCompleted ? nativeReceipt : null;
+                upgradeOptionsReceipt = UpdateUpgradeOptionsReceipt(upgradeOptionsReceipt, action, nativeReceipt, nativeCompleted, activeTrainingIssue);
                 previousReceipt = new JsonObject { ["action"] = action, ["status"] = ReadString(nativeReceipt, "status"), ["data"] = nativeReceipt["data"]?.DeepClone() };
                 feedback = nativeCompleted ? null : new JsonObject { ["kind"] = "native-action-not-completed", ["message"] = ReadString(nativeReceipt, "error") };
                 using (var afterAction = await client.ReadStateAsync(elapsed.Token)) currentNative = ParseObject(afterAction.RootElement);
@@ -814,12 +834,12 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
             if (ReadBoolean(state["party"] as JsonObject, "isMoving")) return new JsonArray();
             if (activeTrainingIssue)
             {
-                var optionsWereJustRead = ReadString(previousReceipt, "action") == "partyUpgradeOptions" && ReadString(previousReceipt, "status") == "completed";
-                if (!optionsWereJustRead)
+                var upgradeOptionsAreCurrent = ReadString(upgradeOptionsReceipt, "action") == "partyUpgradeOptions" &&
+                    ReadString(upgradeOptionsReceipt, "status") == "completed";
+                if (!upgradeOptionsAreCurrent)
                     return new JsonArray(new JsonObject { ["action"] = "partyUpgradeOptions", ["arguments"] = new JsonArray() });
                 var actions = new JsonArray();
-                if (optionsWereJustRead)
-                    AddBorrowedTroopUpgradeAction(actions, upgradeOptionsReceipt ?? previousReceipt);
+                AddBorrowedTroopUpgradeAction(actions, upgradeOptionsReceipt);
                 if (actions.OfType<JsonObject>().Any(action => ReadString(action, "action") == "upgradeTroop")) return actions;
                 AddSafeMovementActions(actions, previousReceipt, visibleSafeTargets);
                 return actions;
@@ -829,6 +849,18 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
             return mapActions;
         }
         return new JsonArray();
+    }
+
+    internal static JsonObject? UpdateUpgradeOptionsReceipt(JsonObject? currentReceipt, string? action, JsonObject nativeReceipt,
+        bool nativeCompleted, bool activeTrainingIssue)
+    {
+        if (!activeTrainingIssue) return null;
+        if (action == "partyUpgradeOptions")
+            return nativeCompleted && ReadString(nativeReceipt, "status") == "completed"
+                ? nativeReceipt.DeepClone() as JsonObject
+                : null;
+        if (action is "move" or "upgradeTroop") return null;
+        return currentReceipt;
     }
 
     internal static JsonArray BuildConversationCatalog(JsonObject conversation, bool talkedToIssueGiver, bool activeTrainingIssue,
@@ -1091,6 +1123,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
         string? issueQuestId, JsonObject? upgradeOptionsReceipt, JsonObject? previousReceipt, JsonObject? feedback,
         JsonArray? visibleSafeTargets) => new()
     {
+        ["scope"] = "native-storymode-training-issue-gold",
         ["status"] = "completed",
         ["campaignDay"] = native["campaignDay"]?.DeepClone(),
         ["timeControlMode"] = native["timeControlMode"]?.DeepClone(),

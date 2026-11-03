@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.529'
+$contractVersion = '7.530'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -135,12 +135,15 @@ if ($agentHostProviderSource -notmatch 'InferEnumeratedJsonSchemaType' -or
 }
 if ($agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-localized-direct-offer-hidden' -or
     $agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-discovery-budget-not-bounded' -or
+    $agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-no-upgrade-query-loop' -or
+    $agentHostTrainingIssueLoopSource -notmatch 'UpdateUpgradeOptionsReceipt' -or
+    $agentHostTrainingIssueLoopSource -notmatch 'native-storymode-training-issue-gold' -or
     $agentHostTrainingIssueLoopSource -notmatch 'training-issue-search-budget-exhausted' -or
     $agentHostTrainingIssueLoopSource -notmatch 'MaximumTrainingIssueDiscoveryDecisions = 32' -or
     $agentHostCampaignLoopSource -notmatch 'training-issue-search-budget-exhausted' -or
     $agentHostTrainingIssueLoopSource -notmatch 'localizedDirectOption' -or
     $agentHostTrainingIssueLoopSource -notmatch 'currentTrainingIssueGiverConversation') {
-    throw 'The retainer-training Native direct offer must use the current marked giver and clickable option ID, while tolerating a localized placeholder TextObject ID.'
+    throw 'The retainer-training route must use current Native offers, identify its decision scope, and avoid repeating a no-upgrade query when the same safe-map state has not changed.'
 }
 if ($agentHostHarnessProgressTraceSource -notmatch 'AgentHostRuntimeProgressLog\.RecordDecision' -or
     $agentHostHarnessProgressTraceSource -notmatch 'AgentHostRuntimeProgressLog\.RecordObjectiveSubflowResult' -or
@@ -155,6 +158,7 @@ if ($agentHostHarnessProgressTraceSource -notmatch 'AgentHostRuntimeProgressLog\
     $agentHostRuntimeProgressLogSource -notmatch 'providerResponseRows' -or
     $agentHostRuntimeProgressLogSource -notmatch 'BuildLoggedUsageByScope' -or
     $agentHostRuntimeProgressLogSource -notmatch 'providerUsageByScope' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'campaign-agent-loop' -or
     $agentHostRuntimeProgressLogSource -notmatch 'providerHttpStatus' -or
     $agentHostRuntimeProgressLogSource -notmatch 'providerFailureStage' -or
     $agentHostRuntimeProgressLogSource -notmatch 'providerProxySelectionSource' -or
