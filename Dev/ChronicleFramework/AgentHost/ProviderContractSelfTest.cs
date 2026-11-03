@@ -14,6 +14,24 @@ internal static class ProviderContractSelfTest
     internal static async Task<object> RunAsync()
     {
         var results = new List<object>();
+        var terminalReceipt = Program.BuildCampaignLoopTerminalReceipt(new JsonObject
+        {
+            ["status"] = "failed", ["providerModelId"] = "deepseek-flash", ["providerConfigurationSource"] = "mcm-start-request",
+            ["decisions"] = 12, ["actionsExecuted"] = 4, ["promptTokens"] = 1200, ["completionTokens"] = 90,
+            ["providerPromptCacheHitTokens"] = 600, ["providerPromptCacheMissTokens"] = 600,
+            ["providerActualCostEstimateCny"] = 0.03, ["providerReservedCostUpperCny"] = 0.05,
+            ["failureCode"] = "provider-budget-exhausted", ["failure"] = "PRIVATE_FAILURE_TEXT",
+            ["trace"] = new JsonArray("PRIVATE_TRACE"), ["conversationText"] = "PRIVATE_DIALOGUE_TEXT",
+            ["termination"] = new JsonObject { ["reason"] = "provider-budget-exhausted", ["goalVerified"] = false }
+        });
+        if (terminalReceipt["status"]?.GetValue<string>() != "failed" ||
+            terminalReceipt["failureCode"]?.GetValue<string>() != "provider-budget-exhausted" ||
+            terminalReceipt["decisionCount"]?.GetValue<int>() != 12 ||
+            terminalReceipt["providerActualCostEstimateCny"]?.GetValue<double>() != 0.03 ||
+            terminalReceipt.ContainsKey("trace") || terminalReceipt.ContainsKey("failure") || terminalReceipt.ContainsKey("conversationText") ||
+            terminalReceipt.ToJsonString().Contains("PRIVATE_", StringComparison.Ordinal))
+            throw new AgentHostException("campaign-terminal-receipt-self-test-failed", "The game-facing campaign terminal receipt must keep structured outcome/cost fields and omit the full trace and free text.");
+        results.Add(new { scenario = "campaign-loop-emits-compact-cost-and-failure-receipt-without-trace-or-free-text", passed = true });
         results.AddRange(DeepSeekPromptTokenEstimator.RunContractSelfTests());
         if (!AgentHostDecisionCycle.IsObserveAgainDecision(new JsonObject { ["observeAgain"] = true, ["waitSeconds"] = 2 }) ||
             !AgentHostDecisionCycle.IsObserveAgainDecision(new JsonObject { ["control"] = "observeAgain", ["waitSeconds"] = 2 }) ||

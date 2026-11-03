@@ -149,7 +149,7 @@ internal static class Program
                 var loopResult = await loopTask;
                 if (parentExited) MarkParentExited(loopResult);
                 AgentHostRuntimeProgressLog.RecordRunSummary(requestDocument.RootElement, loopResult);
-                Console.Out.WriteLine(JsonSerializer.Serialize(loopResult, OutputJsonOptions));
+                Console.Out.WriteLine(JsonSerializer.Serialize(BuildCampaignLoopTerminalReceipt(loopResult), OutputJsonOptions));
                 var terminationReason = (loopResult["termination"] as JsonObject)?["reason"]?.GetValue<string>();
                 return loopResult["status"]?.GetValue<string>() == "completed" || terminationReason == "host-stop-requested" ? 0 : 1;
             }
@@ -193,6 +193,32 @@ internal static class Program
             }, OutputJsonOptions));
             return 3;
         }
+    }
+
+    internal static JsonObject BuildCampaignLoopTerminalReceipt(JsonObject result)
+    {
+        var sourceTermination = result["termination"] as JsonObject;
+        return new JsonObject
+        {
+            ["status"] = result["status"]?.DeepClone(),
+            ["providerModelId"] = result["providerModelId"]?.DeepClone(),
+            ["providerConfigurationSource"] = result["providerConfigurationSource"]?.DeepClone(),
+            ["decisionCount"] = result["decisions"]?.DeepClone(),
+            ["actionsExecuted"] = result["actionsExecuted"]?.DeepClone(),
+            ["promptTokens"] = result["promptTokens"]?.DeepClone(),
+            ["completionTokens"] = result["completionTokens"]?.DeepClone(),
+            ["providerPromptCacheHitTokens"] = result["providerPromptCacheHitTokens"]?.DeepClone(),
+            ["providerPromptCacheMissTokens"] = result["providerPromptCacheMissTokens"]?.DeepClone(),
+            ["providerActualCostEstimateCny"] = result["providerActualCostEstimateCny"]?.DeepClone(),
+            ["providerReservedCostUpperCny"] = result["providerReservedCostUpperCny"]?.DeepClone(),
+            ["failureCode"] = result["failureCode"]?.DeepClone(),
+            ["termination"] = sourceTermination is null ? null : new JsonObject
+            {
+                ["reason"] = sourceTermination["reason"]?.DeepClone(),
+                ["goalVerified"] = sourceTermination["goalVerified"]?.DeepClone(),
+                ["completedByProvider"] = sourceTermination["completedByProvider"]?.DeepClone()
+            }
+        };
     }
 
     private static async Task<int> RunNativeMapMovementMonitorProbeAsync(int waitSeconds)

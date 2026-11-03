@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.515'
+$contractVersion = '7.516'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -128,8 +128,10 @@ if ($agentHostRecruitmentLoopSource -notmatch 'AgentHostProviderDecisionRecovery
 }
 if ($agentHostProviderSource -notmatch 'InferEnumeratedJsonSchemaType' -or
     $agentHostProviderContractSelfTestSource -notmatch 'provider-map-incident-option-index-is-integer-enum-not-string' -or
-    $agentHostProviderContractSelfTestSource -notmatch 'provider-prisoner-recruitment-confirmations-follow-native-integer-enums') {
-    throw 'The model schema must infer JSON argument types from the current Native catalog and test both integer option and confirmation enums.'
+    $agentHostProviderContractSelfTestSource -notmatch 'provider-prisoner-recruitment-confirmations-follow-native-integer-enums' -or
+    $agentHostProgramSource -notmatch 'BuildCampaignLoopTerminalReceipt' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'campaign-loop-emits-compact-cost-and-failure-receipt-without-trace-or-free-text') {
+    throw 'The model schema must infer current Native argument types, and the Campaign Host must emit a tested compact terminal receipt instead of discarding error/cost evidence in a large trace.'
 }
 if ($agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-localized-direct-offer-hidden' -or
     $agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-discovery-budget-not-bounded' -or
