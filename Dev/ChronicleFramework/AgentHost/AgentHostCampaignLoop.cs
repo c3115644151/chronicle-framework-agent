@@ -410,7 +410,7 @@ internal static class AgentHostCampaignLoop
             : new HashSet<string>(StringComparer.Ordinal);
         var goalValid = !string.IsNullOrWhiteSpace(goal) && goal.Length <= 1000;
         var decisionLimitValid = maxDecisions is >= 1 and <= MaxCumulativeDecisions;
-        var elapsedLimitValid = maxElapsedSeconds is >= 1 and <= 7200;
+        var elapsedLimitValid = maxElapsedSeconds is >= 1 and <= 86400;
         var actionSetValid = IsSupportedRequestedActionSet(requestedActions);
         if (!goalValid || !decisionLimitValid || !elapsedLimitValid || !actionSetValid)
         {

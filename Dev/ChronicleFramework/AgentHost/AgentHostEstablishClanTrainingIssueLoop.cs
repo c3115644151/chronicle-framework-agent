@@ -354,7 +354,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
         var goal = ReadString(request, "goal") ?? "Earn original EYC Gold through the visible Native retainer-training Issue.";
         var maxDecisions = Math.Clamp(ReadInt(request, "maxDecisions", AgentHostCampaignLoop.MaxCumulativeDecisions), 1, AgentHostCampaignLoop.MaxCumulativeDecisions);
-        var maxElapsedSeconds = Math.Clamp(ReadInt(request, "maxElapsedSeconds", 7200), 1, 7200);
+        var maxElapsedSeconds = Math.Clamp(ReadInt(request, "maxElapsedSeconds", 86400), 1, 86400);
         var allowedNames = request.TryGetProperty("allowedActionNames", out var names) && names.ValueKind == JsonValueKind.Array
             ? names.EnumerateArray().Where(value => value.ValueKind == JsonValueKind.String).Select(value => value.GetString()!).ToHashSet(StringComparer.Ordinal)
             : new HashSet<string>(StringComparer.Ordinal);

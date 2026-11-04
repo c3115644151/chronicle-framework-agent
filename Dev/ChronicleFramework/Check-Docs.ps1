@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.533'
+$contractVersion = '7.534'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -247,7 +247,7 @@ $agentTournamentAdapterSource = Get-Content (Join-Path $harnessRoot 'AgentTourna
 $agentHostCampaignStateFactsSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostCampaignStateFacts.cs') -Raw -Encoding UTF8
 $agentHostCompanionLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostEstablishClanCompanionLoop.cs') -Raw -Encoding UTF8
 $agentHostRecruitmentLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostEstablishClanRecruitmentLoop.cs') -Raw -Encoding UTF8
-if ($agentHostRecruitmentLoopSource -notmatch 'MaxDecisions = AgentHostCampaignLoop\.MaxCumulativeDecisions' -or $agentHostRecruitmentLoopSource -notmatch 'TimeSpan\.FromHours\(2\)' -or $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-budget-mismatch') { throw 'PartySize execution must share the autonomous EYC parent cumulative-decision budget and 2-hour limit so a child loop cannot terminate early.' }
+if ($agentHostRecruitmentLoopSource -notmatch 'MaxDecisions = AgentHostCampaignLoop\.MaxCumulativeDecisions' -or $agentHostRecruitmentLoopSource -notmatch 'TimeSpan\.FromHours\(24\)' -or $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-budget-mismatch') { throw 'PartySize execution must share the autonomous EYC parent cumulative-decision and 24-hour budgets so a child loop cannot terminate early.' }
 if ($agentTournamentAdapterSource -notmatch 'ReadProperty\(tournament, "Winner"\)' -or $agentTournamentAdapterSource -notmatch 'ReadBoolean\(winnerCharacter, "IsPlayerCharacter"\)' -or $agentTournamentAdapterSource -notmatch 'if \(!isOver\) json\.Append\("null"\)' -or $agentTournamentAdapterSource -notmatch 'winnerCharacterId' -or $agentTournamentAdapterSource -notmatch 'playerWon') { throw 'Tournament result observation must expose the Native winner and whether it is the player only after the original TournamentVM reports IsOver; unfinished tournaments must not leak a future result.' }
 $agentHostCaptivityRecoveryLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostCaptivityRecoveryLoop.cs') -Raw -Encoding UTF8
 $agentHostGoldSaleLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostEstablishClanGoldSaleLoop.cs') -Raw -Encoding UTF8
@@ -773,7 +773,7 @@ if ($agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S
 }
 if ($agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S]{0,400}\$maxElapsedSeconds = 7200' -or
     $agentLiveModelLoopSource -notmatch '\$maxDecisions = 160' -or
-    $agentHostRuntimeControllerSource -notmatch 'maxDecisions\\":2048,\\"maxElapsedSeconds\\":7200' -or
+    $agentHostRuntimeControllerSource -notmatch 'maxDecisions\\":2048,\\"maxElapsedSeconds\\":86400' -or
     $agentHostCampaignLoopSource -notmatch 'maxDecisions is >= 1 and <= MaxCumulativeDecisions' -or
     $agentHostCampaignLoopSource -notmatch 'MaxCumulativeDecisions = 2048' -or
     $agentHostEstablishClanAutonomySource -notmatch 'ReadInt\(request, "maxDecisions", AgentHostCampaignLoop\.MaxCumulativeDecisions\)' -or
@@ -784,10 +784,10 @@ if ($agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S
     $agentHostCaptivityRecoveryLoopSource -notmatch 'for \(var loopIndex = 1; decisions < maxDecisions; loopIndex\+\+\)' -or
     $agentHostCampaignLoopSource -notmatch 'GetCumulativeDecisionLimit\(maxDecisions\)' -or
     $agentHostCampaignLoopSource -notmatch 'campaign-loop-self-test-child-decision-limit-shrank' -or
-    $agentHostCampaignLoopSource -notmatch 'maxElapsedSeconds is >= 1 and <= 7200' -or
-    $agentHostVillageToolsQuestLoopSource -notmatch 'Math\.Clamp\(ReadInt\(request, "maxElapsedSeconds", 7200\), 1, 7200\)' -or
+    $agentHostCampaignLoopSource -notmatch 'maxElapsedSeconds is >= 1 and <= 86400' -or
+    $agentHostVillageToolsQuestLoopSource -notmatch 'Math\.Clamp\(ReadInt\(request, "maxElapsedSeconds", 86400\), 1, 86400\)' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'Math\.Clamp\(ReadInt\(request, "maxDecisions", 160\), 1, 160\)') {
-    throw 'The EYC Host request and all nested objective loops must share the 7200-second/2048-decision cumulative ceiling; separate loops must not restart the full decision allowance when prior decisions are carried forward.'
+    throw 'The EYC Host request and all nested objective loops must share the 86400-second/2048-decision cumulative ceiling; separate loops must not restart the full decision allowance when prior decisions are carried forward.'
 }
 if ($agentHostEstablishClanAutonomySource -notmatch 'priorProviderRouteHistory: routes,[\s\S]{0,100}recoverPlayerCaptivity: true' -or
     $agentHostBattleSimulationLoopSource -notmatch 'allowedSurrenderFallback = recoverPlayerCaptivity && !sendTroopsEnabled' -or
@@ -1964,10 +1964,10 @@ if ($freshCampaignSource -notmatch 'StoryModeNewGame' -or
     $harnessScript -notmatch "'FreshStoryModeSetup' \{ @\('Preflight', 'Build', 'FreshStoryModeSetup'\) \}" -or
     $harnessScript -notmatch "-StoryModeEycSetup -TimeoutSeconds 360" -or
     $harnessScript -notmatch "'FreshStoryModeModelEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'FreshStoryModeModelEvaluation'\) \}" -or
-    $harnessScript -notmatch '-StoryModeEycLiveModelEvaluation -TimeoutSeconds 7500' -or
-    $harnessScript -notmatch "CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS', '7200000'" -or
+    $harnessScript -notmatch '-StoryModeEycLiveModelEvaluation -TimeoutSeconds 87000' -or
+    $harnessScript -notmatch "CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS.*, '86400000'" -or
     $harnessScript -notmatch "CHRONICLE_LLM_TIMEOUT_SECONDS', '300'" -or
-    $agentHostRuntimeControllerSource -notmatch 'autoStopMilliseconds <= 7200000' -or
+    $agentHostRuntimeControllerSource -notmatch 'autoStopMilliseconds <= 86400000' -or
     $harnessScript -notmatch "ValidateSet\('deepseek-flash','gpt-oss-20b','openai-gpt-oss-20b','nvidiallama-3.2-11b-vision','poolside-laguna-s-2.1','free-router','gemini-2.5-flash','mistral-nemo','mistral-small-3.2-24b','qwen3.6-27b','auto:reliable'\)" -or
     $harnessScript -notmatch 'CHRONICLE_HARNESS_AGENT_MODEL.*\$FreshStoryModeModel' -or
     $agentHostRuntimeControllerSource -notmatch 'CHRONICLE_HARNESS_AGENT_MODEL' -or
@@ -2027,7 +2027,7 @@ if ($harnessScript -notmatch "'PersistentEycCampaign' \{ @\('Preflight', 'Build'
     $persistentEycCampaignSource -notmatch 'Remove-ObsoleteOwnedSaves' -or
     $persistentEycCampaignSource -notmatch '-StoryModeEycLiveModelEvaluation' -or
     $persistentEycCampaignSource -notmatch "CHRONICLE_HARNESS_AGENT_AUTO_START','1'" -or
-    $persistentEycCampaignSource -notmatch 'FreshStoryModeHostTimeoutSeconds = 7500' -or
+    $persistentEycCampaignSource -notmatch 'FreshStoryModeHostTimeoutSeconds = 87000' -or
     $agentLiveModelLoopSource -notmatch 'checkpointEncounterIsStableSettlementMenu' -or
     $agentLiveModelLoopSource -notmatch 'native-settlement-menu' -or
     $agentLiveModelLoopSource -notmatch 'CheckpointSaveStateDisposition = \$checkpointSaveStateDisposition' -or

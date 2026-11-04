@@ -20,7 +20,7 @@ param(
     [ValidateRange(1,10)][int]$RecruitmentFallbackMaxAttempts = 10,
     [string]$BattleSimulationSourceSaveName = 'AgentBridgeLifecycle',
     [string]$StoryModePlannerSourceSaveName = 'save002',
-    [ValidateRange(60,7200)][int]$PersistentEycHostMaxElapsedSeconds = 7200,
+    [ValidateRange(60,86400)][int]$PersistentEycHostMaxElapsedSeconds = 86400,
     [ValidateRange(1,10)][int]$NativeMapMovementProbeWaitSeconds = 8
 )
 
@@ -29,7 +29,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.533'
+$HarnessContractVersion = '7.534'
 $effectiveSmokeTimeoutSeconds = if ($Phase -in @('FreshStoryModeModelEvaluation','PersistentEycCampaign','FreshStoryModeNativeInquiryResponseEvaluation','AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostEstablishClanAutonomyEvaluation','AgentHostCaptivityRecoveryEvaluation','AgentHostEstablishClanGoldSaleEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max($SmokeTimeoutSeconds, 240) } else { $SmokeTimeoutSeconds }
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
@@ -617,13 +617,13 @@ foreach ($stage in $requestedStages) {
                 $savedProviderTimeout = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_TIMEOUT_SECONDS', 'Process')
                 try {
                     [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_START', '1', 'Process')
-                    [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS', '7200000', 'Process')
+                    [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS', '86400000', 'Process')
                     [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_GOAL', '自主完成原版主线任务“建立你的家族”。', 'Process')
                     # Pin one explicit provider model/route for reproducibility; catalog presence is not proof of a successful provider call. Never use a local custom route or unbounded auto chain.
                     [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL', $FreshStoryModeModel, 'Process')
                     [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_MODEL', $FreshStoryModeModel, 'Process')
                     if ([string]::IsNullOrWhiteSpace($savedProviderTimeout)) { [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_TIMEOUT_SECONDS', '300', 'Process') }
-                    $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $freshCampaignScript -StoryModeEycSetup -StoryModeEycLiveModelEvaluation -TimeoutSeconds 7500 2>&1 | Out-String
+                    $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $freshCampaignScript -StoryModeEycSetup -StoryModeEycLiveModelEvaluation -TimeoutSeconds 87000 2>&1 | Out-String
                     if ($LASTEXITCODE -ne 0) { throw "Fresh natural StoryMode bounded real-model evaluation failed with exit code $LASTEXITCODE. Output: $testOutput" }
                     $testOutput
                 }

@@ -16,7 +16,7 @@ internal static class AgentHostEstablishClanCompanionLoop
     // selected Town is visited, the Native target query is refreshed against
     // visitedTowns and exposes the next nearest unvisited candidates.
     private const int SafeTownDecisionWindowSize = 12;
-    private static readonly TimeSpan MaxElapsed = TimeSpan.FromMinutes(45);
+    private static readonly TimeSpan MaxElapsed = TimeSpan.FromHours(24);
     private static readonly HashSet<string> HiringDialogueOptions = new(StringComparer.Ordinal)
     {
         "wanderer_meet_player_response2", "main_option_faction_hire",
@@ -25,6 +25,8 @@ internal static class AgentHostEstablishClanCompanionLoop
 
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
+        if (MaxElapsed != TimeSpan.FromHours(24))
+            throw new AgentHostException("establish-clan-companion-runtime-budget-contract-failed", "The Companion subgoal must share the autonomous EYC 24-hour elapsed-time envelope rather than terminating before the parent Campaign budget.");
         var stalledNavigationFirstAttempt = EvaluateNavigationNoProgress(1.39d, 1.65d, 0, false);
         var stalledNavigationSecondAttempt = EvaluateNavigationNoProgress(1.39d, 1.65d, stalledNavigationFirstAttempt.Attempts, false);
         var measuredApproach = EvaluateNavigationNoProgress(10d, 9.5d, 1, false);
@@ -458,7 +460,7 @@ internal static class AgentHostEstablishClanCompanionLoop
     {
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
         var maxDecisions = Math.Clamp(ReadInt(request, "maxDecisions", MaxDecisions), 1, MaxDecisions);
-        var maxSeconds = Math.Clamp(ReadInt(request, "maxElapsedSeconds", (int)MaxElapsed.TotalSeconds), 10, 3600);
+        var maxSeconds = Math.Clamp(ReadInt(request, "maxElapsedSeconds", (int)MaxElapsed.TotalSeconds), 10, (int)MaxElapsed.TotalSeconds);
         var decisions = priorDecisions;
         var actionsExecuted = 0;
         long promptTokens = priorPromptTokens;

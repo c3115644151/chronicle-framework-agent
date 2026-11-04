@@ -1,9 +1,9 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateRange(60,7200)][int]$HostMaxElapsedSeconds = 7200,
+    [ValidateRange(60,86400)][int]$HostMaxElapsedSeconds = 86400,
     [ValidateRange(5,30)][int]$FrameRate = 5,
     [int]$StartupTimeoutSeconds = 240,
-    [ValidateRange(300,7500)][int]$FreshStoryModeHostTimeoutSeconds = 7500
+    [ValidateRange(300,87000)][int]$FreshStoryModeHostTimeoutSeconds = 87000
 )
 
 $ErrorActionPreference = 'Stop'
@@ -359,7 +359,7 @@ try {
             $savedHarnessModel = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL','Process')
             try {
                 [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_START','1','Process')
-                [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS','7200000','Process')
+                [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS','86400000','Process')
                 [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_GOAL','自主完成原版主线任务“建立你的家族”。','Process')
                 [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL',[Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL','Process'),'Process')
                 Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue

@@ -28,7 +28,7 @@ internal static class AgentHostBattleSimulationLoop
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
         var goal = ReadString(request, "goal") ?? string.Empty;
         var maxDecisions = Math.Clamp(ReadInt(request, "maxDecisions", AgentHostCampaignLoop.MaxCumulativeDecisions), 1, AgentHostCampaignLoop.MaxCumulativeDecisions);
-        var maxElapsedSeconds = Math.Clamp(ReadInt(request, "maxElapsedSeconds", 7200), 1, 7200);
+        var maxElapsedSeconds = Math.Clamp(ReadInt(request, "maxElapsedSeconds", 86400), 1, 86400);
         var parentEycObjectives = request.TryGetProperty("parentEycObjectives", out var parentEycObjectivesElement) && parentEycObjectivesElement.ValueKind == JsonValueKind.Object
             ? JsonNode.Parse(parentEycObjectivesElement.GetRawText()) as JsonObject
             : null;

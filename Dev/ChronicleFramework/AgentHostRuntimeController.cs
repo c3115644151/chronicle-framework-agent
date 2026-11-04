@@ -214,7 +214,7 @@ internal static class ChronicleAgentRuntimeController
 
         if (!_stopRequested && _state == RuntimeState.Running && IsLifecycleHarnessMode() &&
             int.TryParse(Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS"), out var autoStopMilliseconds) &&
-            autoStopMilliseconds >= 250 && autoStopMilliseconds <= 7200000 &&
+            autoStopMilliseconds >= 250 && autoStopMilliseconds <= 86400000 &&
             DateTime.UtcNow - _hostReadyUtc >= TimeSpan.FromMilliseconds(autoStopMilliseconds))
         {
             var stopButton = ChronicleAgentProviderSettings.Instance?.StopAgent;
@@ -429,7 +429,7 @@ internal static class ChronicleAgentRuntimeController
                               ",\"parentProcessStartTimeUtcTicks\":" + gameProcessStartTimeTicks.ToString(CultureInfo.InvariantCulture) +
                               ",\"nativeSessionId\":\"" + EscapeJson(nativeSessionId) + "\"" + providerConfiguration +
                               ",\"goal\":\"" + EscapeJson(goal.Trim()) +
-                              "\",\"maxDecisions\":2048,\"maxElapsedSeconds\":7200,\"allowedActionNames\":[\"mapSettlementTargets\",\"move\",\"menuSelect\",\"talkToSettlementHero\",\"dialogueSelect\",\"dialogueContinue\",\"questDetails\",\"tradeOptions\",\"trade\",\"tradeConfirm\",\"tradeCancel\",\"tradeCancelChanges\",\"barterOptions\",\"barterAutoBalance\",\"barterOffer\",\"barterCancel\",\"inventoryOpen\",\"heroEquipmentOptions\",\"inventoryCancel\",\"incidentSelect\",\"partyUpgradeOptions\",\"upgradeTroop\",\"mapPartyTargets\",\"pursue\",\"battleSkip\",\"battleFinish\",\"partyTakeAll\",\"partyLootTransferOne\",\"sellPrisonerOne\",\"partyScreenCancel\",\"partyScreenDone\",\"inventoryTakeAll\",\"inventoryDone\",\"recruitOptions\",\"recruit\",\"prisonerRecruitmentOptions\",\"recruitPrisoner\",\"missionSceneAgents\",\"missionNavigateToAgent\",\"missionInteract\",\"missionLeave\"]}";
+                              "\",\"maxDecisions\":2048,\"maxElapsedSeconds\":86400,\"allowedActionNames\":[\"mapSettlementTargets\",\"move\",\"menuSelect\",\"talkToSettlementHero\",\"dialogueSelect\",\"dialogueContinue\",\"questDetails\",\"tradeOptions\",\"trade\",\"tradeConfirm\",\"tradeCancel\",\"tradeCancelChanges\",\"barterOptions\",\"barterAutoBalance\",\"barterOffer\",\"barterCancel\",\"inventoryOpen\",\"heroEquipmentOptions\",\"inventoryCancel\",\"incidentSelect\",\"partyUpgradeOptions\",\"upgradeTroop\",\"mapPartyTargets\",\"pursue\",\"battleSkip\",\"battleFinish\",\"partyTakeAll\",\"partyLootTransferOne\",\"sellPrisonerOne\",\"partyScreenCancel\",\"partyScreenDone\",\"inventoryTakeAll\",\"inventoryDone\",\"recruitOptions\",\"recruit\",\"prisonerRecruitmentOptions\",\"recruitPrisoner\",\"missionSceneAgents\",\"missionNavigateToAgent\",\"missionInteract\",\"missionLeave\"]}";
             _hostInput.WriteLine(requestJson);
             _hostInput.Flush();
             _stopSignalSent = false;

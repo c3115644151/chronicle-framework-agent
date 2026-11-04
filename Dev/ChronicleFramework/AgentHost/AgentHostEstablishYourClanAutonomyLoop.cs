@@ -523,7 +523,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
     {
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
         var maxDecisions = Math.Clamp(ReadInt(request, "maxDecisions", AgentHostCampaignLoop.MaxCumulativeDecisions), 1, AgentHostCampaignLoop.MaxCumulativeDecisions);
-        var maxElapsedSeconds = Math.Clamp(ReadInt(request, "maxElapsedSeconds", 7200), 1, 7200);
+        var maxElapsedSeconds = Math.Clamp(ReadInt(request, "maxElapsedSeconds", 86400), 1, 86400);
         var trace = priorTrace?.DeepClone() as JsonArray ?? new JsonArray();
         var routes = priorProviderRouteHistory?.DeepClone() as JsonArray ?? new JsonArray();
         var decisions = priorDecisions;

@@ -435,7 +435,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
     {
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
         var maxDecisions = Math.Clamp(ReadInt(request, "maxDecisions", AgentHostCampaignLoop.MaxCumulativeDecisions), 1, AgentHostCampaignLoop.MaxCumulativeDecisions);
-        var maxElapsedSeconds = Math.Clamp(ReadInt(request, "maxElapsedSeconds", 1800), 10, 7200);
+        var maxElapsedSeconds = Math.Clamp(ReadInt(request, "maxElapsedSeconds", 1800), 10, 86400);
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxElapsedSeconds));
         var trace = priorTrace?.DeepClone() as JsonArray ?? new JsonArray();
