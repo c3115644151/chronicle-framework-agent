@@ -262,6 +262,17 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             throw new AgentHostException("establish-clan-autonomy-stopped-move-recovery-classification-failed", "Only a stopped in-flight Native settlement move with a visible target and no encounter/modal may be reissued; active movement and party pursuit are excluded.");
         results.Add(new { scenario = "establish-clan-autonomy-detects-only-stopped-in-flight-native-settlement-moves", passed = true });
 
+        var stoppedMoveResumeDays = new Dictionary<string, double>(StringComparer.Ordinal);
+        if (!TryClaimStalledNativeMoveResume(stoppedMoveResumeDays, "town-a", 91080.113, out var firstTownResumeDay) ||
+            double.IsFinite(firstTownResumeDay) ||
+            TryClaimStalledNativeMoveResume(stoppedMoveResumeDays, "town-a", 91080.113, out _) ||
+            !TryClaimStalledNativeMoveResume(stoppedMoveResumeDays, "town-a", 91082.745, out var priorTownResumeDay) ||
+            priorTownResumeDay != 91080.113 ||
+            !TryClaimStalledNativeMoveResume(stoppedMoveResumeDays, "town-b", 91080.113, out _) ||
+            TryClaimStalledNativeMoveResume(stoppedMoveResumeDays, "town-a", double.NaN, out _))
+            throw new AgentHostException("establish-clan-autonomy-stalled-move-retry-progress-guard-failed", "A repeated Native Move to the same target may be retried after Campaign time has advanced since the prior Native re-click, but no repeated retry is allowed at an unchanged or unavailable Campaign day.");
+        results.Add(new { scenario = "establish-clan-autonomy-stalled-move-retry-budget-resets-only-after-native-campaign-time-progress", passed = true });
+
         var native = new FakeNativeClient(activeQuest: true, lifecycle: "active", initialGold: 100);
         var provider = new FakeObjectiveProvider("gold");
         var executorCalls = 0;
@@ -535,7 +546,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         var unavailableObjectives = new HashSet<string>(StringComparer.Ordinal);
         var unavailableObjectiveFingerprints = new Dictionary<string, string>(StringComparer.Ordinal);
         var safeSettlementRefreshVisitedIds = new HashSet<string>(StringComparer.Ordinal);
-        var resumedStalledNativeMoveTargets = new HashSet<string>(StringComparer.Ordinal);
+        var resumedStalledNativeMoveCampaignDays = new Dictionary<string, double>(StringComparer.Ordinal);
         string? RememberCurrentSettlement(JsonElement nativeState)
         {
             var settlementId = ReadStateString(nativeState, "location", "currentSettlementId");
@@ -750,9 +761,14 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
 
                 if (TryGetStalledNativeSettlementMove(current.RootElement, out var stalledMoveTarget))
                 {
-                    if (!resumedStalledNativeMoveTargets.Add(stalledMoveTarget))
+                    var stalledMoveCampaignDay = ReadDouble(current.RootElement, "campaignDay", double.NaN);
+                    if (!double.IsFinite(stalledMoveCampaignDay))
+                        return BuildResult("failed", "native-stalled-move-campaign-day-unavailable", false,
+                            "The stopped Native settlement move has no finite Campaign day, so the Host cannot tell whether another original Move re-click would repeat without progress.",
+                            "native-stalled-move-campaign-day-unavailable");
+                    if (!TryClaimStalledNativeMoveResume(resumedStalledNativeMoveCampaignDays, stalledMoveTarget, stalledMoveCampaignDay, out var previousResumeCampaignDay))
                         return BuildResult("failed", "native-stalled-move-retry-exhausted", false,
-                            "The same Native settlement move remained active while Campaign time was stopped after one original Move re-click; no explicit clock action was issued.",
+                            "The same Native settlement target remained stopped and Campaign time has not advanced since its last original Move re-click; no repeated re-click or explicit clock action was issued.",
                             "native-stalled-move-retry-exhausted");
 
                     var campaignDayBeforeResume = ReadDouble(current.RootElement, "campaignDay", double.NaN);
@@ -786,6 +802,8 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                     {
                         ["stage"] = "native-stopped-move-reissued-through-current-target",
                         ["targetSettlementId"] = stalledMoveTarget,
+                        ["campaignDayAtPreviousResume"] = double.IsFinite(previousResumeCampaignDay) ? JsonValue.Create(previousResumeCampaignDay) : null,
+                        ["campaignDayAtCurrentResume"] = stalledMoveCampaignDay,
                         ["mapTargetsReceipt"] = mapTargetsReceipt.DeepClone(),
                         ["nativeMoveReceipt"] = nativeMoveReceipt.DeepClone(),
                         ["campaignDayBefore"] = double.IsFinite(campaignDayBeforeResume) ? JsonValue.Create(campaignDayBeforeResume) : null,
@@ -1711,6 +1729,23 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         if (ReadString(location, "targetPartyId") is not null) return false;
         targetSettlementId = ReadString(location, "targetSettlementId") ?? string.Empty;
         return !string.IsNullOrWhiteSpace(targetSettlementId);
+    }
+
+    private static bool TryClaimStalledNativeMoveResume(
+        IDictionary<string, double> lastResumeCampaignDays,
+        string targetSettlementId,
+        double campaignDay,
+        out double previousResumeCampaignDay)
+    {
+        previousResumeCampaignDay = double.NaN;
+        if (string.IsNullOrWhiteSpace(targetSettlementId) || !double.IsFinite(campaignDay)) return false;
+        if (lastResumeCampaignDays.TryGetValue(targetSettlementId, out var previous))
+        {
+            previousResumeCampaignDay = previous;
+            if (campaignDay <= previousResumeCampaignDay) return false;
+        }
+        lastResumeCampaignDays[targetSettlementId] = campaignDay;
+        return true;
     }
 
     private static bool IsSafeTavernMissionForCompanionProviderRecovery(JsonElement native)
