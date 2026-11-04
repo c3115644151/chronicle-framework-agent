@@ -363,10 +363,35 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                 "; providerCalls=" + movementProvider.Calls + "; polls=" + movementClient.MapPartyTargetPollCount +
                 "; traceFeedback=" + string.Join(",", movementTrace.OfType<JsonObject>().Select(step => ReadString(step["feedback"] as JsonObject, "kind"))));
 
+        var villagersClient = new FakeMapDialogueNativeClient(villagersInNeed: true);
+        var villagersProvider = new FakeVillagersInNeedTrainingIssueDecisionProvider();
+        using var villagersRequest = JsonDocument.Parse(JsonSerializer.Serialize(new
+        {
+            runId = "training-issue-villagers-in-need-self-test",
+            goal = "Search for a Native training Issue.",
+            maxDecisions = 2,
+            maxElapsedSeconds = 20,
+            allowedActionNames = AgentHostCampaignLoop.AllSupportedActions.ToArray()
+        }));
+        var villagersResult = await RunAsync(villagersRequest.RootElement, villagersClient, villagersClient,
+            villagersProvider, CancellationToken.None);
+        var villagersFinalState = villagersResult["finalNativeState"]?["state"] as JsonObject;
+        if (ReadString(villagersResult, "termination") != "training-issue-budget-exhausted" ||
+            ReadInt(villagersResult, "decisions") != 2 || ReadInt(villagersResult, "actionsExecuted") != 2 ||
+            villagersProvider.Calls != 2 || !villagersClient.VillagersInNeedDeferred || villagersClient.VillaMissionStarted ||
+            !villagersClient.Actions.SequenceEqual(new[] { ("dialogueContinue", (string?)null), ("dialogueSelect", (string?)"adg:132") }) ||
+            ReadString(villagersFinalState?["context"] as JsonObject, "gameState") != "MapState" ||
+            ReadString(villagersFinalState?["context"] as JsonObject, "menuId") != "village" ||
+            ReadString(villagersResult["finalNativeState"] as JsonObject, "timeControlMode") != "Stop")
+            throw new AgentHostException("training-issue-villagers-in-need-cross-route-failed",
+                "The Gold training route must safely advance the known no-choice StoryMode villager dialogue, exclude its Villa Mission start answer, choose the current defer answer, and return to the same Native Village menu without a clock action.");
+
         return [
             new { scenario = "training-issue-map-dialogue-loop-selects-only-current-safe-reply-then-yields-encounter", passed = true },
             new { scenario = "training-issue-movement-wait-uses-shared-native-monitor-with-one-model-decision", providerCalls = movementProvider.Calls,
-                nativeMapPartyTargetPolls = movementClient.MapPartyTargetPollCount, explicitClockActions = 0, passed = true }
+                nativeMapPartyTargetPolls = movementClient.MapPartyTargetPollCount, explicitClockActions = 0, passed = true },
+            new { scenario = "training-issue-reuses-safe-villagers-in-need-deferral-before-resuming-map-route", providerCalls = villagersProvider.Calls,
+                nativeActions = villagersClient.Actions.Count, villaMissionStarted = villagersClient.VillaMissionStarted, passed = true }
         ];
     }
 
@@ -412,6 +437,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
         var visitedSettlements = new HashSet<string>(StringComparer.Ordinal);
         var contactedIssueGivers = new HashSet<string>(StringComparer.Ordinal);
         var initialIssueIds = new HashSet<string>(StringComparer.Ordinal);
+        var villagersInNeedStartupWaits = 0;
         string? trackedIssueQuestId = null;
         string? issueGiverSettlementId = null;
         var talkedToIssueGiver = false;
@@ -466,6 +492,38 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                     break;
                 }
 
+                if (AgentHostEstablishClanRecruitmentLoop.IsPendingVillagersInNeedConversationTransition(state))
+                {
+                    if (villagersInNeedStartupWaits >= AgentHostEstablishClanRecruitmentLoop.MaxVillagersInNeedConversationStartupWaits)
+                    {
+                        failure = "The exact original StoryMode VillagersInNeed ConversationMission opened during travel, but its known NPC conversation did not become Native-visible within the bounded settle window.";
+                        failureCode = "training-issue-villagers-in-need-conversation-startup-timeout";
+                        termination = failureCode;
+                        break;
+                    }
+
+                    var beforeDay = ReadDouble(currentNative, "campaignDay");
+                    var beforeMode = ReadString(currentNative, "timeControlMode");
+                    villagersInNeedStartupWaits++;
+                    await Task.Delay(TimeSpan.FromMilliseconds(500), elapsed.Token);
+                    using var settledVillagerState = await client.ReadStateAsync(elapsed.Token);
+                    var settledVillagerNative = ParseObject(settledVillagerState.RootElement);
+                    var settledVillagerDay = ReadDouble(settledVillagerNative, "campaignDay");
+                    trace.Add(new JsonObject
+                    {
+                        ["stage"] = "training-issue-villagers-in-need-conversation-startup-settle",
+                        ["attempt"] = villagersInNeedStartupWaits,
+                        ["before"] = AgentHostHarnessProgressTrace.BuildNativeStateSummary(currentNative),
+                        ["after"] = AgentHostHarnessProgressTrace.BuildNativeStateSummary(settledVillagerNative),
+                        ["beforeTimeControlMode"] = beforeMode,
+                        ["afterTimeControlMode"] = ReadString(settledVillagerNative, "timeControlMode"),
+                        ["campaignDayBefore"] = double.IsFinite(beforeDay) ? JsonValue.Create(beforeDay) : null,
+                        ["campaignDayAfter"] = double.IsFinite(settledVillagerDay) ? JsonValue.Create(settledVillagerDay) : null
+                    });
+                    currentNative = settledVillagerNative;
+                    continue;
+                }
+
                 eycJournalAfter = await ReadEycJournalAsync(client, elapsed.Token);
                 if (GoldCurrent(eycJournalAfter) > GoldCurrent(eycJournalBefore) || IsGoldObjectiveMet(eycJournalAfter))
                 {
@@ -508,7 +566,9 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                     issueDetails = null;
                 }
 
-                if (ShouldStopUnproductiveTrainingIssueSearch(currentNative!, decisions, priorDecisions, activeTrainingIssue, directOfferAccepted))
+                var villagersInNeedConversation = AgentHostEstablishClanRecruitmentLoop.IsVillagersInNeedConversation(state);
+                if (!villagersInNeedConversation &&
+                    ShouldStopUnproductiveTrainingIssueSearch(currentNative!, decisions, priorDecisions, activeTrainingIssue, directOfferAccepted))
                 {
                     failure = $"No visible retainer-training Issue became active within the bounded {MaximumTrainingIssueDiscoveryDecisions}-decision discovery budget; returning free Map control to the Gold objective parent.";
                     failureCode = "training-issue-search-budget-exhausted";
@@ -537,7 +597,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                     termination = failureCode;
                     break;
                 }
-                if (AgentHostCampaignStateFacts.IsActiveEncounter(state) && !AgentHostCampaignStateFacts.IsNativeLocationMenu(state))
+                if (AgentHostCampaignStateFacts.IsActiveEncounter(state) && !AgentHostCampaignStateFacts.IsNativeLocationMenu(state) && !villagersInNeedConversation)
                 {
                     failure = "A Native encounter interrupted the training Issue; the parent Campaign loop must resolve the currently observed encounter before the Issue route resumes.";
                     failureCode = "training-issue-interrupted-by-encounter";
@@ -839,6 +899,8 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
         var state = native["state"] as JsonObject;
         var context = state?["context"] as JsonObject;
         if (state is null || context is null) return new JsonArray();
+        if (AgentHostEstablishClanRecruitmentLoop.IsVillagersInNeedConversation(state))
+            return AgentHostEstablishClanRecruitmentLoop.BuildVillagersInNeedConversationCatalog(state);
         var conversation = context["conversation"] as JsonObject;
         if (conversation is not null)
         {
@@ -1229,6 +1291,18 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
             if (entry["argumentValues"]?[name] is JsonArray values &&
                 !values.Any(allowed => allowed is not null && JsonNode.DeepEquals(allowed, suppliedValue))) return false;
         }
+        if (AgentHostEstablishClanRecruitmentLoop.IsVillagersInNeedConversation(state) &&
+            selectedAction is "dialogueContinue" or "dialogueSelect")
+        {
+            if (!AgentHostEstablishClanRecruitmentLoop.TryResolveRecruitmentAction(decision, state, null, null, null, false,
+                    out var villagerAction, out var villagerArguments, out _, out _) || villagerAction != selectedAction)
+            {
+                rejection = "The automatic StoryMode VillagersInNeed route permits only its current no-choice Continue or safe visible non-starting answer.";
+                return false;
+            }
+            nativeArguments = villagerArguments;
+            return true;
+        }
         if (selectedAction == "talkToSettlementHero")
         {
             var heroId = ReadString(supplied, "HeroId");
@@ -1341,12 +1415,20 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
     private sealed class FakeMapDialogueNativeClient : IAgentHostEstablishClanTrainingIssueNativeClient, IAgentHostBattleSimulationNativeClient
     {
         private readonly bool _movementOnly;
+        private readonly bool _villagersInNeed;
         private bool _encounterActive;
         private bool _movementCompleted;
+        private int _villagerDialogueStage;
         internal int MapPartyTargetPollCount { get; private set; }
         internal List<(string Action, string? OptionId)> Actions { get; } = [];
+        internal bool VillagersInNeedDeferred => _villagersInNeed && _villagerDialogueStage == 2;
+        internal bool VillaMissionStarted { get; private set; }
 
-        internal FakeMapDialogueNativeClient(bool movementOnly = false) => _movementOnly = movementOnly;
+        internal FakeMapDialogueNativeClient(bool movementOnly = false, bool villagersInNeed = false)
+        {
+            _movementOnly = movementOnly;
+            _villagersInNeed = villagersInNeed;
+        }
 
         public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
         {
@@ -1362,6 +1444,25 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
             cancellationToken.ThrowIfCancellationRequested();
             var optionId = ReadString(arguments, "optionId");
             Actions.Add((action, optionId));
+            if (_villagersInNeed)
+            {
+                if (action == "dialogueContinue" && _villagerDialogueStage == 0)
+                    _villagerDialogueStage = 1;
+                else if (action == "dialogueSelect" && _villagerDialogueStage == 1 && optionId == "adg:132")
+                    _villagerDialogueStage = 2;
+                else if (action == "dialogueSelect" && _villagerDialogueStage == 1 && optionId == "adg:131")
+                {
+                    VillaMissionStarted = true;
+                    throw new AgentHostException("training-issue-villagers-in-need-mission-start-rejected", "The fake current choice represents the excluded Villa Mission start.");
+                }
+                else
+                    throw new AgentHostException("training-issue-villagers-in-need-invalid-dialogue-step", "The VillagersInNeed test route received a stale or unsupported current answer.");
+                return Task.FromResult(JsonDocument.Parse(new JsonObject
+                {
+                    ["status"] = "completed", ["processId"] = 321, ["action"] = action,
+                    ["data"] = new JsonObject { ["optionId"] = optionId }
+                }.ToJsonString()));
+            }
             if (action != "dialogueSelect" || optionId != "map-safe-reply")
                 throw new AgentHostException("training-issue-map-dialogue-invalid-native-action", "Only the current safe map-conversation response is accepted by this fake Native route.");
             _encounterActive = true;
@@ -1411,38 +1512,71 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
 
         private JsonObject BuildState()
         {
-            var conversation = _encounterActive || _movementOnly ? null : new JsonObject
+            JsonObject? conversation;
+            if (_villagersInNeed && _villagerDialogueStage == 0)
             {
-                ["characterId"] = "unrelated-map-notable",
-                ["sentenceText"] = "A different current Native map conversation.",
-                ["options"] = new JsonArray(
-                    new JsonObject { ["id"] = "map-safe-reply", ["text"] = "A visible reply.", ["clickable"] = true },
-                    new JsonObject { ["id"] = "issue_offer_player_accept_quest", ["textId"] = DirectTrainingResponseTextId, ["text"] = "Accept another issue.", ["clickable"] = true })
-            };
+                conversation = new JsonObject
+                {
+                    ["characterId"] = AgentHostEstablishClanRecruitmentLoop.VillagersInNeedHeroId,
+                    ["sentenceText"] = "The village needs help. I will explain.",
+                    ["options"] = new JsonArray()
+                };
+            }
+            else if (_villagersInNeed && _villagerDialogueStage == 1)
+            {
+                conversation = new JsonObject
+                {
+                    ["characterId"] = AgentHostEstablishClanRecruitmentLoop.VillagersInNeedHeroId,
+                    ["sentenceText"] = "The villagers are asking you to lead them to the villa.",
+                    ["options"] = new JsonArray(
+                        new JsonObject { ["id"] = "adg:131", ["textId"] = AgentHostEstablishClanRecruitmentLoop.VillagersInNeedVillaMissionStartTextId, ["text"] = "Lead on.", ["clickable"] = true },
+                        new JsonObject { ["id"] = "adg:132", ["textId"] = AgentHostEstablishClanRecruitmentLoop.VillagersInNeedDeferTextId, ["text"] = "I have to take care of something else, first.", ["clickable"] = true })
+                };
+            }
+            else if (_encounterActive || _movementOnly || _villagersInNeed) conversation = null;
+            else
+            {
+                conversation = new JsonObject
+                {
+                    ["characterId"] = "unrelated-map-notable",
+                    ["sentenceText"] = "A different current Native map conversation.",
+                    ["options"] = new JsonArray(
+                        new JsonObject { ["id"] = "map-safe-reply", ["text"] = "A visible reply.", ["clickable"] = true },
+                        new JsonObject { ["id"] = "issue_offer_player_accept_quest", ["textId"] = DirectTrainingResponseTextId, ["text"] = "Accept another issue.", ["clickable"] = true })
+                };
+            }
             var arrivalObserved = _movementOnly && _movementCompleted;
-            var isMoving = _movementOnly ? !_movementCompleted : !_encounterActive;
+            var isMoving = _villagersInNeed ? false : (_movementOnly ? !_movementCompleted : !_encounterActive);
+            var villagersConversationActive = _villagersInNeed && _villagerDialogueStage < 2;
             return new JsonObject
             {
                 ["status"] = "completed", ["processId"] = 321, ["campaignDay"] = arrivalObserved ? 10.01 : 10.0,
-                ["timeControlMode"] = isMoving ? "StoppablePlay" : "Stop",
+                ["timeControlMode"] = villagersConversationActive ? "Stop" : (isMoving ? "StoppablePlay" : "Stop"),
                 ["state"] = new JsonObject
                 {
                     ["context"] = new JsonObject
                     {
-                        ["gameState"] = "MapState", ["menuId"] = _encounterActive ? "encounter" : (arrivalObserved ? "village" : null),
-                        ["conversation"] = conversation, ["encounterActive"] = _encounterActive,
-                        ["encounteredPartyId"] = _encounterActive ? "looter-party" : null,
+                        ["gameState"] = villagersConversationActive ? "MissionState" : "MapState",
+                        ["menuId"] = _encounterActive ? "encounter" : (villagersConversationActive ? null : (arrivalObserved || _villagersInNeed ? "village" : null)),
+                        ["conversation"] = conversation, ["encounterActive"] = _encounterActive || villagersConversationActive,
+                        ["encounteredPartyId"] = _encounterActive ? "looter-party" : (villagersConversationActive ? AgentHostEstablishClanRecruitmentLoop.VillagersInNeedVillageId : null),
                         ["escapeMenuOpen"] = false, ["inquiryOpen"] = false, ["battleSimulation"] = null
                     },
-                    ["quests"] = new JsonArray(new JsonObject { ["id"] = EycQuestId, ["title"] = "Establish Your Clan" }),
+                    ["quests"] = _villagersInNeed
+                        ? new JsonArray(
+                            new JsonObject { ["id"] = EycQuestId, ["title"] = "Establish Your Clan" },
+                            new JsonObject { ["id"] = AgentHostEstablishClanRecruitmentLoop.VillagersInNeedQuestId, ["title"] = "Villagers In Need" })
+                        : new JsonArray(new JsonObject { ["id"] = EycQuestId, ["title"] = "Establish Your Clan" }),
                     ["location"] = new JsonObject
                     {
-                        ["currentSettlementId"] = arrivalObserved ? "settlement-target" : null,
-                        ["targetSettlementId"] = isMoving ? "settlement-target" : null
+                        ["currentSettlementId"] = _villagersInNeed ? AgentHostEstablishClanRecruitmentLoop.VillagersInNeedVillageId : (arrivalObserved ? "settlement-target" : null),
+                        ["targetSettlementId"] = isMoving && !_villagersInNeed ? "settlement-target" : null
                     },
                     ["party"] = new JsonObject { ["isMoving"] = isMoving },
                     ["nearbyParties"] = new JsonArray(),
-                    ["availableMenuOptions"] = new JsonArray()
+                    ["availableMenuOptions"] = _villagersInNeed && !villagersConversationActive
+                        ? new JsonArray(new JsonObject { ["id"] = "recruit_volunteers", ["available"] = true, ["enabled"] = true })
+                        : new JsonArray()
                 }
             };
         }
@@ -1503,6 +1637,41 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                 ["waitSeconds"] = AgentHostNativeMapMovementMonitor.MaximumWatchWindowSeconds,
                 ["reason"] = "Wait for arrival or an observable interruption."
             }));
+        }
+    }
+
+    private sealed class FakeVillagersInNeedTrainingIssueDecisionProvider : IAgentHostDecisionProvider
+    {
+        internal int Calls { get; private set; }
+        public string ModelId => "training-issue-villagers-in-need-self-test";
+        public string ConfigurationSource => "harness-fake-provider";
+        public void Dispose() { }
+        public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls++;
+            var actions = request.GetProperty("allowedActions").EnumerateArray().ToArray();
+            if (!systemPrompt.Contains("VILLAGERS IN NEED INTERRUPTION", StringComparison.Ordinal))
+                throw new AgentHostException("training-issue-villagers-in-need-prompt-missing", "The Native training route must recognize this one known StoryMode Mission and defer it safely.");
+            if (Calls == 1 && actions.Length == 1 && actions[0].GetProperty("action").GetString() == "dialogueContinue")
+                return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "villagers-in-need-continue", new JsonObject
+                {
+                    ["action"] = "dialogueContinue", ["arguments"] = new JsonObject()
+                }));
+            if (Calls == 2 && actions.Length == 1 && actions[0].GetProperty("action").GetString() == "dialogueSelect")
+            {
+                var allowedOptions = actions[0].GetProperty("argumentValues").GetProperty("OptionId").EnumerateArray()
+                    .Select(option => option.GetString()).ToArray();
+                if (!allowedOptions.SequenceEqual(new[] { "adg:132" }, StringComparer.Ordinal))
+                    throw new AgentHostException("training-issue-villagers-in-need-option-catalog-unsafe", "The Villa Mission start answer must be absent while the current safe defer answer remains available.");
+                return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "villagers-in-need-defer", new JsonObject
+                {
+                    ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "adg:132" }
+                }));
+            }
+            throw new AgentHostException("training-issue-villagers-in-need-decision-sequence-invalid", "The fake provider expected exactly the original no-choice Continue followed by the current safe defer answer.");
         }
     }
 

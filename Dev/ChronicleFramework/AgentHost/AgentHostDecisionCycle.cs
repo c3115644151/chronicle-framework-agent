@@ -321,7 +321,7 @@ internal static class AgentHostDecisionCycle
         JsonObject request,
         CancellationToken cancellationToken) =>
         DecideAsync(provider, request, EstablishClanTrainingIssueSystemPrompt +
-            " MAP DIALOGUE INTERRUPTION: If an unrelated Native MapState conversation interrupts settlement travel, use only the currently listed clickable option or no-choice Continue. Do not accept another Issue/Quest, start a Mission, or choose combat. Re-read Native state after the current response before resuming the training route.", cancellationToken);
+            " MAP DIALOGUE INTERRUPTION: If an unrelated Native MapState conversation interrupts settlement travel, use only the currently listed clickable option or no-choice Continue. Do not accept another Issue/Quest, start a Mission, or choose combat. Re-read Native state after the current response before resuming the training route. VILLAGERS IN NEED INTERRUPTION: If the exact automatic StoryMode VillagersInNeed ConversationMission at village_ES3_2 interrupts travel, treat it as this known non-combat dialogue, not a hostile battle or training Issue. Advance no-choice lines only with currently listed Native dialogueContinue. At clickable answers, use only the current listed non-starting dialogueSelect and never choose Lead on/villa start; choose the visible postpone branch when shown, then reread state and resume. Do not generalize this exception to other Missions.", cancellationToken);
 
     internal static string BuildVillageToolsQuestSystemPrompt(JsonObject request)
     {

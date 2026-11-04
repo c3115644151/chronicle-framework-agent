@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.539'
+$contractVersion = '7.540'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -150,6 +150,9 @@ if ($agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-locali
     $agentHostTrainingIssueLoopSource -notmatch 'AgentHostNativeMapMovementMonitor\.WaitAsync' -or
     $agentHostTrainingIssueLoopSource -notmatch 'waitSeconds != AgentHostNativeMapMovementMonitor\.MaximumWatchWindowSeconds' -or
     $agentHostTrainingIssueLoopSource -notmatch 'training-issue-movement-wait-uses-shared-native-monitor-with-one-model-decision' -or
+    $agentHostTrainingIssueLoopSource -notmatch 'IsPendingVillagersInNeedConversationTransition' -or
+    $agentHostTrainingIssueLoopSource -notmatch 'BuildVillagersInNeedConversationCatalog' -or
+    $agentHostTrainingIssueLoopSource -notmatch 'training-issue-villagers-in-need-cross-route-failed' -or
     $agentHostDecisionCycleSource -notmatch 'waitSeconds=10 exactly' -or
     $agentHostCampaignLoopSource -notmatch 'training-issue-search-budget-exhausted' -or
     $agentHostTrainingIssueLoopSource -notmatch 'localizedDirectOption' -or
