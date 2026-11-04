@@ -335,7 +335,39 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
             throw new AgentHostException("training-issue-loop-map-dialogue-transport-failed",
                 "The complete Native training-issue loop must send exactly one current safe map reply, suppress the unrelated quest acceptance and observeAgain, then yield an encounter to the parent without clock actions.");
 
-        return [new { scenario = "training-issue-map-dialogue-loop-selects-only-current-safe-reply-then-yields-encounter", passed = true }];
+        var movementClient = new FakeMapDialogueNativeClient(movementOnly: true);
+        var movementProvider = new FakeTrainingIssueMovementDecisionProvider();
+        using var movementRequest = JsonDocument.Parse(JsonSerializer.Serialize(new
+        {
+            runId = "training-issue-passive-movement-monitor-self-test",
+            goal = "Search for a Native training Issue.",
+            maxDecisions = 1,
+            maxElapsedSeconds = 20,
+            allowedActionNames = AgentHostCampaignLoop.AllSupportedActions.ToArray()
+        }));
+        var movementResult = await RunAsync(movementRequest.RootElement, movementClient, movementClient,
+            movementProvider, CancellationToken.None);
+        var movementTrace = movementResult["trace"] as JsonArray ?? new JsonArray();
+        if (ReadString(movementResult, "status") != "failed" ||
+            ReadString(movementResult, "termination") != "training-issue-budget-exhausted" ||
+            ReadInt(movementResult, "decisions") != 1 || ReadInt(movementResult, "actionsExecuted") != 1 ||
+            ReadInt(movementResult, "explicitClockActionCount") != 0 || movementProvider.Calls != 1 ||
+            movementClient.MapPartyTargetPollCount != 1 || movementClient.Actions.Count != 0 ||
+            !movementTrace.OfType<JsonObject>().Any(step =>
+                ReadString(step["feedback"] as JsonObject, "kind") == "host-passive-native-movement-monitor" &&
+                ReadInt(step["feedback"] as JsonObject, "nativeMapPartyTargetPollCount") == 1))
+            throw new AgentHostException("training-issue-passive-movement-monitor-self-test-failed",
+                "One 10-second observeAgain choice must delegate movement to the shared per-second Native monitor, return at arrival without extra model calls, and issue no clock action. status=" +
+                ReadString(movementResult, "status") + "; termination=" + ReadString(movementResult, "termination") +
+                "; decisions=" + ReadInt(movementResult, "decisions") + "; nativeActions=" + ReadInt(movementResult, "actionsExecuted") +
+                "; providerCalls=" + movementProvider.Calls + "; polls=" + movementClient.MapPartyTargetPollCount +
+                "; traceFeedback=" + string.Join(",", movementTrace.OfType<JsonObject>().Select(step => ReadString(step["feedback"] as JsonObject, "kind"))));
+
+        return [
+            new { scenario = "training-issue-map-dialogue-loop-selects-only-current-safe-reply-then-yields-encounter", passed = true },
+            new { scenario = "training-issue-movement-wait-uses-shared-native-monitor-with-one-model-decision", providerCalls = movementProvider.Calls,
+                nativeMapPartyTargetPolls = movementClient.MapPartyTargetPollCount, explicitClockActions = 0, passed = true }
+        ];
     }
 
 
@@ -599,15 +631,39 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                 if (ReadBoolean(decision, "observeAgain"))
                 {
                     var waitSeconds = ReadInt(decision, "waitSeconds", 0);
-                    if (!controls.OfType<JsonValue>().Any(value => value.GetValue<string>() == "observeAgain") || waitSeconds is < 1 or > 10)
+                    if (!controls.OfType<JsonValue>().Any(value => value.GetValue<string>() == "observeAgain") || waitSeconds != AgentHostNativeMapMovementMonitor.MaximumWatchWindowSeconds)
                     {
                         feedback = new JsonObject { ["kind"] = "control-rejected-before-wait", ["nativeActionSent"] = false };
                         trace.Add(BuildDecisionStep(decisionIndex, modelRequest, decision, feedback, null, false));
                         continue;
                     }
-                    await Task.Delay(TimeSpan.FromSeconds(waitSeconds), elapsed.Token);
-                    trace.Add(BuildDecisionStep(decisionIndex, modelRequest, decision, null,
-                        new JsonObject { ["kind"] = "bounded-host-observe-again", ["waitSeconds"] = waitSeconds }, false));
+                    var targetSettlementId = ReadString(state["location"] as JsonObject, "targetSettlementId");
+                    var movementWatch = await AgentHostNativeMapMovementMonitor.WaitAsync(client,
+                        battleClient, currentNative!, targetSettlementId,
+                        waitSeconds, monitorVisibleBandits: true, elapsed.Token);
+                    actionsExecuted += movementWatch.MapPartyTargetPollCount + (movementWatch.PauseReceipt is null ? 0 : 1);
+                    currentNative = movementWatch.NativeReceipt;
+                    previousReceipt = new JsonObject
+                    {
+                        ["control"] = "observeAgain",
+                        ["waitSeconds"] = waitSeconds,
+                        ["status"] = "completed",
+                        ["nativeMapPartyTargetPollCount"] = movementWatch.MapPartyTargetPollCount,
+                        ["visibleHostileBanditTargets"] = movementWatch.VisibleHostileBanditTargets.DeepClone(),
+                        ["nativePauseReceipt"] = movementWatch.PauseReceipt?.DeepClone()
+                    };
+                    trace.Add(BuildDecisionStep(decisionIndex, modelRequest, decision,
+                        new JsonObject
+                        {
+                            ["kind"] = movementWatch.InterruptedByVisibleHostileBandit
+                                ? AgentHostNativeMapMovementMonitor.FailureCode
+                                : "host-passive-native-movement-monitor",
+                            ["waitSeconds"] = waitSeconds,
+                            ["nativeMapPartyTargetPollCount"] = movementWatch.MapPartyTargetPollCount,
+                            ["visibleHostileBanditTargets"] = movementWatch.VisibleHostileBanditTargets.DeepClone(),
+                            ["nativePauseReceipt"] = movementWatch.PauseReceipt?.DeepClone(),
+                            ["explicitClockAction"] = movementWatch.PauseReceipt is not null
+                        }, null, false));
                     feedback = null;
                     continue;
                 }
@@ -1284,8 +1340,13 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
 
     private sealed class FakeMapDialogueNativeClient : IAgentHostEstablishClanTrainingIssueNativeClient, IAgentHostBattleSimulationNativeClient
     {
+        private readonly bool _movementOnly;
         private bool _encounterActive;
+        private bool _movementCompleted;
+        internal int MapPartyTargetPollCount { get; private set; }
         internal List<(string Action, string? OptionId)> Actions { get; } = [];
+
+        internal FakeMapDialogueNativeClient(bool movementOnly = false) => _movementOnly = movementOnly;
 
         public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
         {
@@ -1331,15 +1392,26 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
         public Task<JsonDocument> SubmitStoryModeClanNameAsync(string token, string clanName, CancellationToken cancellationToken) =>
             throw new AgentHostException("training-issue-map-dialogue-unexpected-clan-name", "No StoryMode setup action is part of the map-dialogue transport case.");
 
-        public Task<JsonDocument> ExecuteBattleSimulationActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken) =>
-            throw new AgentHostException("training-issue-map-dialogue-unexpected-battle-action", "A map-dialogue interruption must yield an encounter to the parent without starting a battle subflow.");
+        public Task<JsonDocument> ExecuteBattleSimulationActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!_movementOnly || action != "mapPartyTargets")
+                throw new AgentHostException("training-issue-map-dialogue-unexpected-battle-action", "Only the isolated movement-monitor case may poll Native map targets.");
+            MapPartyTargetPollCount++;
+            _movementCompleted = true;
+            var native = BuildState();
+            native["campaignDay"] = 10.01;
+            native["timeControlMode"] = "Stop";
+            native["data"] = new JsonObject { ["mapPartyTargets"] = new JsonArray() };
+            return Task.FromResult(JsonDocument.Parse(native.ToJsonString()));
+        }
 
         public Task<JsonDocument> PauseForVisibleHostileDecisionAsync(CancellationToken cancellationToken) =>
             throw new AgentHostException("training-issue-map-dialogue-unexpected-pause", "This test must not issue a clock action.");
 
         private JsonObject BuildState()
         {
-            var conversation = _encounterActive ? null : new JsonObject
+            var conversation = _encounterActive || _movementOnly ? null : new JsonObject
             {
                 ["characterId"] = "unrelated-map-notable",
                 ["sentenceText"] = "A different current Native map conversation.",
@@ -1347,22 +1419,30 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                     new JsonObject { ["id"] = "map-safe-reply", ["text"] = "A visible reply.", ["clickable"] = true },
                     new JsonObject { ["id"] = "issue_offer_player_accept_quest", ["textId"] = DirectTrainingResponseTextId, ["text"] = "Accept another issue.", ["clickable"] = true })
             };
+            var arrivalObserved = _movementOnly && _movementCompleted;
+            var isMoving = _movementOnly ? !_movementCompleted : !_encounterActive;
             return new JsonObject
             {
-                ["status"] = "completed", ["processId"] = 321, ["campaignDay"] = 10.0, ["timeControlMode"] = "StoppablePlay",
+                ["status"] = "completed", ["processId"] = 321, ["campaignDay"] = arrivalObserved ? 10.01 : 10.0,
+                ["timeControlMode"] = isMoving ? "StoppablePlay" : "Stop",
                 ["state"] = new JsonObject
                 {
                     ["context"] = new JsonObject
                     {
-                        ["gameState"] = "MapState", ["menuId"] = _encounterActive ? "encounter" : null,
+                        ["gameState"] = "MapState", ["menuId"] = _encounterActive ? "encounter" : (arrivalObserved ? "village" : null),
                         ["conversation"] = conversation, ["encounterActive"] = _encounterActive,
                         ["encounteredPartyId"] = _encounterActive ? "looter-party" : null,
                         ["escapeMenuOpen"] = false, ["inquiryOpen"] = false, ["battleSimulation"] = null
                     },
                     ["quests"] = new JsonArray(new JsonObject { ["id"] = EycQuestId, ["title"] = "Establish Your Clan" }),
-                    ["location"] = new JsonObject { ["currentSettlementId"] = null, ["targetSettlementId"] = "settlement-target" },
-                    ["party"] = new JsonObject { ["isMoving"] = !_encounterActive },
-                    ["nearbyParties"] = new JsonArray()
+                    ["location"] = new JsonObject
+                    {
+                        ["currentSettlementId"] = arrivalObserved ? "settlement-target" : null,
+                        ["targetSettlementId"] = isMoving ? "settlement-target" : null
+                    },
+                    ["party"] = new JsonObject { ["isMoving"] = isMoving },
+                    ["nearbyParties"] = new JsonArray(),
+                    ["availableMenuOptions"] = new JsonArray()
                 }
             };
         }
@@ -1398,6 +1478,31 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                 throw new AgentHostException("training-issue-map-dialogue-provider-catalog-invalid", "The fake model did not receive exactly the current safe reply with no movement wait or issue acceptance.");
             return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 10, 3, "stop",
                 new JsonObject { ["action"] = "dialogueSelect", ["arguments"] = new JsonObject { ["OptionId"] = "map-safe-reply" } }));
+        }
+    }
+
+    private sealed class FakeTrainingIssueMovementDecisionProvider : IAgentHostDecisionProvider
+    {
+        internal int Calls { get; private set; }
+        public string ModelId => "training-issue-movement-monitor-self-test";
+        public string ConfigurationSource => "harness-fake-provider";
+        public void Dispose() { }
+        public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls++;
+            var controls = request.GetProperty("allowedControls").EnumerateArray().Select(value => value.GetString()).ToArray();
+            if (Calls != 1 || !controls.SequenceEqual(new[] { "observeAgain" }, StringComparer.Ordinal) ||
+                !systemPrompt.Contains("waitSeconds=10 exactly", StringComparison.Ordinal))
+                throw new AgentHostException("training-issue-movement-monitor-decision-invalid", "The fake model must see only the 10-second passive movement observation control with the Native monitor contract.");
+            return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 10, 1, "fake-movement-monitor", new JsonObject
+            {
+                ["observeAgain"] = true,
+                ["waitSeconds"] = AgentHostNativeMapMovementMonitor.MaximumWatchWindowSeconds,
+                ["reason"] = "Wait for arrival or an observable interruption."
+            }));
         }
     }
 

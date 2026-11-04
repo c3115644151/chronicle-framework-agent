@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.536'
+$contractVersion = '7.539'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -147,10 +147,14 @@ if ($agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-locali
     $agentHostTrainingIssueLoopSource -notmatch 'native-storymode-training-issue-gold' -or
     $agentHostTrainingIssueLoopSource -notmatch 'training-issue-search-budget-exhausted' -or
     $agentHostTrainingIssueLoopSource -notmatch 'MaximumTrainingIssueDiscoveryDecisions = 32' -or
+    $agentHostTrainingIssueLoopSource -notmatch 'AgentHostNativeMapMovementMonitor\.WaitAsync' -or
+    $agentHostTrainingIssueLoopSource -notmatch 'waitSeconds != AgentHostNativeMapMovementMonitor\.MaximumWatchWindowSeconds' -or
+    $agentHostTrainingIssueLoopSource -notmatch 'training-issue-movement-wait-uses-shared-native-monitor-with-one-model-decision' -or
+    $agentHostDecisionCycleSource -notmatch 'waitSeconds=10 exactly' -or
     $agentHostCampaignLoopSource -notmatch 'training-issue-search-budget-exhausted' -or
     $agentHostTrainingIssueLoopSource -notmatch 'localizedDirectOption' -or
     $agentHostTrainingIssueLoopSource -notmatch 'currentTrainingIssueGiverConversation') {
-    throw 'The retainer-training route must use current Native offers, identify its decision scope, and avoid repeating a no-upgrade query when the same safe-map state has not changed.'
+    throw 'The retainer-training route must use current Native offers, identify its decision scope, avoid repeating a no-upgrade query, and use the shared per-second movement monitor instead of repeated model waits.'
 }
 if ($agentHostHarnessProgressTraceSource -notmatch 'AgentHostRuntimeProgressLog\.RecordDecision' -or
     $agentHostHarnessProgressTraceSource -notmatch 'AgentHostRuntimeProgressLog\.RecordObjectiveSubflowResult' -or
@@ -1205,7 +1209,7 @@ if ($agentHostCampaignLoopSource -notmatch 'supportedEstablishYourClanGoal' -or
     $agentHostDecisionCycleSource -notmatch 'JournalLog current/target values' -or
     $agentHostDecisionCycleSource -notmatch 'nativeProgressionContext.partySizeLimit' -or
     $agentHostDecisionCycleSource -notmatch 'DefaultPartySizeLimitModel' -or
-    $agentHostDecisionCycleSource -notmatch 'confirmPartySizeWarning=1' -or
+    $agentHostDecisionCycleSource -notmatch 'do not use temporary MainParty troop-size over-limit volunteer or prisoner recruitment as a substitute' -or
     $agentHostEstablishClanPlannerSource -notmatch 'BuildNativeProgressionContext' -or
     $agentHostEstablishClanAutonomySource -notmatch 'observedNativeState: JsonNode.Parse\(current.RootElement.GetRawText\(\)\)' -or
     $agentHostProviderSource -notmatch 'supported-establish-your-clan') {

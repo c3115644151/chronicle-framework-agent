@@ -35,8 +35,8 @@ internal static class AgentHostEstablishYourClanGoalLoop
             !plannerSystemPrompt.Contains("actual Native action availability", StringComparison.Ordinal) ||
             !plannerSystemPrompt.Contains("nativeProgressionContext.partySizeLimit", StringComparison.Ordinal) ||
             !plannerSystemPrompt.Contains("Tier1", StringComparison.Ordinal) ||
-            !plannerSystemPrompt.Contains("confirmPartySizeWarning=1", StringComparison.Ordinal) ||
-            !plannerSystemPrompt.Contains("prefer the Renown objective before temporary over-limit recruitment", StringComparison.Ordinal) ||
+            !plannerSystemPrompt.Contains("do not use temporary MainParty troop-size over-limit volunteer or prisoner recruitment as a substitute", StringComparison.Ordinal) ||
+            !plannerSystemPrompt.Contains("choose another feasible objective and replan after the Native state changes", StringComparison.Ordinal) ||
             !plannerSystemPrompt.Contains("Gold objective tracks current carried balance, not cumulative earnings", StringComparison.Ordinal) ||
             !plannerSystemPrompt.Contains("Prefer completing Gold after other feasible objectives", StringComparison.Ordinal))
             throw new AgentHostException("establish-clan-planner-native-renown-prerequisite-prompt-missing", "The read-only objective planner must know the Native Renown route, the current party limit/Tier1 over-limit attrition dependency and the volatile current-balance Gold objective.");

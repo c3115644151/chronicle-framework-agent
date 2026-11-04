@@ -22,6 +22,7 @@ internal sealed record AgentHostNativeMapMovementWatchResult(
 internal static class AgentHostNativeMapMovementMonitor
 {
     internal const string FailureCode = "native-visible-hostile-bandit-interrupted-settlement-move";
+    internal const int MaximumWatchWindowSeconds = 10;
 
     internal static async Task<AgentHostNativeMapMovementWatchResult> WaitAsync(
         IAgentHostCampaignNativeClient client,
@@ -34,7 +35,7 @@ internal static class AgentHostNativeMapMovementMonitor
     {
         var latest = (JsonObject)initialNative.DeepClone();
         var pollCount = 0;
-        if (waitSeconds is < 1 or > 10)
+        if (waitSeconds is < 1 or > MaximumWatchWindowSeconds)
             throw new AgentHostException("native-map-movement-watch-interval-invalid", "Passive Native map observation requires a bounded 1-10 second wait.");
 
         // Preserve the existing observe-again contract if this state is not a current

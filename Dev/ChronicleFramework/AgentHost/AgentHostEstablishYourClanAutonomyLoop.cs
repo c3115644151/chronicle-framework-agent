@@ -163,6 +163,8 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             IsSafeObjectiveRouteUnavailable("partySize", "recruitment-model-stopped", freeMap: false) ||
             !IsSafeObjectiveRouteUnavailable("partySize", "recruitment-model-stopped-with-safe-actions", freeMap: true) ||
             IsSafeObjectiveRouteUnavailable("partySize", "recruitment-model-stopped-with-safe-actions", freeMap: false) ||
+            !IsSafeObjectiveRouteUnavailable("partySize", "party-capacity-blocked-until-renown", freeMap: true) ||
+            IsSafeObjectiveRouteUnavailable("partySize", "party-capacity-blocked-until-renown", freeMap: false) ||
             !IsSafeObjectiveRouteUnavailable("companions", "companion-provider-failure-returned-to-map", freeMap: true) ||
             IsSafeObjectiveRouteUnavailable("companions", "companion-provider-failure-returned-to-map", freeMap: false))
             throw new AgentHostException("establish-clan-autonomy-safe-stop-replan-policy-failed", "A Gold no-goods outcome, unavailable/rejected Native training offer, and safe Companion/PartySize stops may block only that route on a free Map; they must not hide unrelated failures or encounter/captive state.");
@@ -1606,7 +1608,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             "training-issue-direct-offer-unavailable" or "training-issue-direct-offer-rejected";
         if (objectiveId == "renown") return termination is "provider-failure-returned-to-map" or "no-safe-action" or "native-encounter-left-no-battle";
         if (objectiveId is "partySize" or "companions")
-            return termination is "native-journal-refresh-pending" or "recruitment-route-unavailable" or "companion-route-unavailable" or "companion-model-stopped" or "recruitment-model-stopped" or "recruitment-model-stopped-with-safe-actions" or "provider-failure-returned-to-map" or "companion-provider-failure-returned-to-map";
+            return termination is "native-journal-refresh-pending" or "recruitment-route-unavailable" or "companion-route-unavailable" or "companion-model-stopped" or "recruitment-model-stopped" or "recruitment-model-stopped-with-safe-actions" or "party-capacity-blocked-until-renown" or "provider-failure-returned-to-map" or "companion-provider-failure-returned-to-map";
         return false;
     }
 
