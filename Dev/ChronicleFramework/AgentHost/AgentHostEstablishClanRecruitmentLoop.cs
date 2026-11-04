@@ -524,6 +524,17 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             throw new AgentHostException("establish-clan-recruitment-runtime-self-test-failed", "The recruitment subloop must query current offers, commit one affordable volunteer through the Native adapter and stop only after the Journal target refreshes.");
         results.Add(new { scenario = "establish-clan-recruitment-runtime-observe-decide-native-commit-journal-verify", passed = true });
 
+        var bulkFakeClient = new FakeRecruitmentNativeClient(useRecruitAll: true);
+        var bulkFakeProvider = new FakeRecruitmentDecisionProvider(useRecruitAll: true);
+        var bulkRuntime = await RunAsync(request.RootElement, bulkFakeClient, bulkFakeClient, bulkFakeClient, bulkFakeProvider, CancellationToken.None);
+        if (ReadString(bulkRuntime, "status") != "completed" ||
+            ReadString(bulkRuntime["termination"] as JsonObject, "reason") != "native-party-size-journal-target-met" ||
+            ReadInt(bulkRuntime, "actionsExecuted", 0) != 2 || bulkFakeProvider.CallCount != 2 ||
+            bulkFakeClient.RecruitedMembers != 6 || bulkFakeClient.Gold != 50 ||
+            !bulkFakeClient.Actions.SequenceEqual(["recruitOptions", "recruitAll"], StringComparer.Ordinal))
+            throw new AgentHostException("establish-clan-recruitment-native-take-all-runtime-self-test-failed", "The real PartySize Host route must expose a safe exact Take All offer, submit it through its RecruitmentVM transport and stop after the refreshed Journal target is met.");
+        results.Add(new { scenario = "establish-clan-recruitment-runtime-uses-native-take-all-and-journal-verifies-batch", passed = true, providerCalls = bulkFakeProvider.CallCount, nativeActions = bulkFakeClient.Actions.Count });
+
         var stopClient = new FakeRecruitmentNativeClient();
         var stopProvider = new FakeRecruitmentStopProvider();
         var stopResult = await RunAsync(request.RootElement, stopClient, stopClient, stopClient, stopProvider, CancellationToken.None);
@@ -1986,16 +1997,19 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         private readonly bool _startOnMap;
         private readonly bool _startAtTrainingField;
         private readonly bool _startAtBackstreet;
+        private readonly bool _useRecruitAll;
         private bool _trainingFieldLeft;
         private bool _backstreetLeft;
-        internal FakeRecruitmentNativeClient(bool startOnMap = true, bool startAtTrainingField = false, bool startAtBackstreet = false)
+        internal FakeRecruitmentNativeClient(bool startOnMap = true, bool startAtTrainingField = false, bool startAtBackstreet = false, bool useRecruitAll = false)
         {
             _startOnMap = startOnMap;
             _startAtTrainingField = startAtTrainingField;
             _startAtBackstreet = startAtBackstreet;
+            _useRecruitAll = useRecruitAll;
         }
-        internal int RecruitedMembers => _recruited ? 5 : 4;
-        internal int Gold => _recruited ? 80 : 100;
+        internal int RecruitedMembers => _recruited ? (_useRecruitAll ? 6 : 5) : 4;
+        internal int JournalPartyTarget => _useRecruitAll ? 6 : 5;
+        internal int Gold => _recruited ? (_useRecruitAll ? 50 : 80) : 100;
         internal List<string> Actions { get; } = new();
 
         public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
@@ -2028,7 +2042,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                 ["location"] = new JsonObject { ["currentSettlementId"] = atTrainingField ? "tutorial_training_field" : "town-a", ["targetSettlementId"] = null },
                 ["party"] = new JsonObject { ["isMoving"] = false },
                 ["quests"] = new JsonArray(new JsonObject { ["id"] = QuestId }),
-                ["storyModeEstablishClan"] = new JsonObject { ["partySize"] = new JsonObject { ["current"] = RecruitedMembers, ["target"] = 5 } }
+                ["storyModeEstablishClan"] = new JsonObject { ["partySize"] = new JsonObject { ["current"] = RecruitedMembers, ["target"] = JournalPartyTarget } }
             };
             return Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["state"] = state }.ToJsonString()));
         }
@@ -2039,7 +2053,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             if (questId != QuestId) throw new AgentHostException("recruitment-selftest-wrong-quest", "The fake client received an unexpected Journal request.");
             var values = new (string Id, int Current, int Target)[]
             {
-                ("gold", Gold, 2000), ("partySize", RecruitedMembers, 5), ("renown", 0, 50), ("companions", 0, 1)
+                ("gold", Gold, 2000), ("partySize", RecruitedMembers, JournalPartyTarget), ("renown", 0, 50), ("companions", 0, 1)
             };
             var stages = new JsonArray(values.Select(value => (JsonNode?)new JsonObject
             {
@@ -2076,17 +2090,43 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             }
             if (action == "recruitOptions")
             {
+                var offers = _useRecruitAll
+                    ? new JsonArray(
+                        new JsonObject { ["ownerId"] = "notable-a", ["troopId"] = "vlandian_recruit", ["slot"] = 0, ["cost"] = 20, ["available"] = true },
+                        new JsonObject { ["ownerId"] = "notable-b", ["troopId"] = "imperial_recruit", ["slot"] = 1, ["cost"] = 30, ["available"] = true })
+                    : new JsonArray(new JsonObject
+                    {
+                        ["ownerId"] = "notable-a", ["troopId"] = "vlandian_recruit", ["slot"] = 0, ["cost"] = 20, ["available"] = true
+                    });
                 var options = new JsonObject
                 {
                     ["gold"] = Gold,
                     ["partySize"] = RecruitedMembers,
                     ["partyCapacity"] = 20,
-                    ["offers"] = new JsonArray(new JsonObject
-                    {
-                        ["ownerId"] = "notable-a", ["troopId"] = "vlandian_recruit", ["slot"] = 0, ["cost"] = 20, ["available"] = true
-                    })
+                    ["offers"] = offers
                 };
                 return Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["data"] = options }.ToJsonString()));
+            }
+            if (action == "recruitAll" && _useRecruitAll && !_recruited)
+            {
+                var expectedHash = ComputeOfferSetSha256(new[]
+                {
+                    new JsonObject { ["ownerId"] = "notable-a", ["troopId"] = "vlandian_recruit", ["slot"] = 0, ["cost"] = 20, ["available"] = true },
+                    new JsonObject { ["ownerId"] = "notable-b", ["troopId"] = "imperial_recruit", ["slot"] = 1, ["cost"] = 30, ["available"] = true }
+                });
+                if (ReadInt(arguments, "expectedCount", -1) != 2 || ReadInt(arguments, "expectedTotalCost", -1) != 50 ||
+                    ReadInt(arguments, "expectedPartySize", -1) != 4 || ReadInt(arguments, "expectedPartyCapacity", -1) != 20 ||
+                    ReadInt(arguments, "expectedJournalTarget", -1) != JournalPartyTarget ||
+                    ReadString(arguments, "expectedOfferSetSha256") != expectedHash)
+                    throw new AgentHostException("recruitment-selftest-invalid-take-all", "The fake Native transport received a stale or malformed Take All transaction.");
+                _recruited = true;
+                var bulkReceipt = new JsonObject
+                {
+                    ["committed"] = true, ["verified"] = true, ["recruitedCount"] = 2, ["totalCost"] = 50,
+                    ["beforeMembers"] = 4, ["afterMembers"] = 6, ["beforeGold"] = 100, ["afterGold"] = 50,
+                    ["partyCapacity"] = 20, ["offerSetSha256"] = expectedHash
+                };
+                return Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["data"] = bulkReceipt }.ToJsonString()));
             }
             if (action != "recruit" || _recruited || ReadString(arguments, "ownerId") != "notable-a" || ReadString(arguments, "troopId") != "vlandian_recruit" || ReadInt(arguments, "slot", -1) != 0 || ReadInt(arguments, "confirmPartySizeWarning", -1) != 0)
                 throw new AgentHostException("recruitment-selftest-invalid-transaction", "The fake recruitment transport received a stale or malformed volunteer transaction.");
@@ -2588,6 +2628,8 @@ internal static class AgentHostEstablishClanRecruitmentLoop
 
     private sealed class FakeRecruitmentDecisionProvider : IAgentHostDecisionProvider
     {
+        private readonly bool _useRecruitAll;
+        internal FakeRecruitmentDecisionProvider(bool useRecruitAll = false) => _useRecruitAll = useRecruitAll;
         internal int CallCount { get; private set; }
         public string ModelId => "deterministic-establish-clan-recruitment-selftest";
         public string ConfigurationSource => "harness-fake-provider";
@@ -2595,14 +2637,34 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var action = CallCount++ == 0 ? "recruitOptions" : "recruit";
+            var action = CallCount++ == 0 ? "recruitOptions" : (_useRecruitAll ? "recruitAll" : "recruit");
+            JsonObject arguments;
+            if (action == "recruitOptions") arguments = new JsonObject();
+            else if (action == "recruitAll")
+            {
+                var bulkAction = request.GetProperty("allowedActions").EnumerateArray()
+                    .FirstOrDefault(candidate => candidate.GetProperty("action").GetString() == "recruitAll");
+                if (bulkAction.ValueKind != JsonValueKind.Object)
+                    throw new AgentHostException("recruitment-selftest-take-all-not-listed", "The fake model expected the exact safe Native Take All candidate to appear in allowedActions.");
+                var values = bulkAction.GetProperty("argumentValues");
+                arguments = new JsonObject
+                {
+                    ["expectedCount"] = JsonNode.Parse(values.GetProperty("expectedCount")[0].GetRawText()),
+                    ["expectedTotalCost"] = JsonNode.Parse(values.GetProperty("expectedTotalCost")[0].GetRawText()),
+                    ["expectedPartySize"] = JsonNode.Parse(values.GetProperty("expectedPartySize")[0].GetRawText()),
+                    ["expectedPartyCapacity"] = JsonNode.Parse(values.GetProperty("expectedPartyCapacity")[0].GetRawText()),
+                    ["expectedJournalTarget"] = JsonNode.Parse(values.GetProperty("expectedJournalTarget")[0].GetRawText()),
+                    ["expectedOfferSetSha256"] = JsonNode.Parse(values.GetProperty("expectedOfferSetSha256")[0].GetRawText())
+                };
+            }
+            else arguments = new JsonObject
+            {
+                ["ownerId"] = "notable-a", ["troopId"] = "vlandian_recruit", ["slot"] = 0, ["confirmPartySizeWarning"] = 0
+            };
             return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "fake-recruitment-selftest", new JsonObject
             {
                 ["action"] = action,
-                ["arguments"] = action == "recruitOptions" ? new JsonObject() : new JsonObject
-                {
-                    ["ownerId"] = "notable-a", ["troopId"] = "vlandian_recruit", ["slot"] = 0, ["confirmPartySizeWarning"] = 0
-                },
+                ["arguments"] = arguments,
                 ["rationale"] = "Use the currently listed Native volunteer offer."
             }));
         }
