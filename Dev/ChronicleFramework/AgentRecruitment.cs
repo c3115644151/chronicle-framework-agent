@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using TaleWorlds.Core;
 using TaleWorlds.CampaignSystem;
@@ -168,6 +169,76 @@ internal static class ChronicleAgentRecruitment
         json.Append(",\"verified\":").Append(completed ? "true" : "false");
         json.Append('}');
         return json.ToString();
+    }
+
+    internal static string RecruitAll(RecruitmentVM viewModel, int expectedCount, int expectedTotalCost,
+        int expectedPartySize, int expectedPartyCapacity, int expectedJournalTarget, string expectedOfferSetSha256)
+    {
+        if (viewModel == null) throw new ArgumentNullException(nameof(viewModel));
+        var currentOffers = GetRecruitableOffers(viewModel);
+        var currentOfferHash = ComputeOfferSetSha256(currentOffers);
+        var currentCost = currentOffers.Sum(offer => offer.Troop.Cost);
+        var beforeMembers = MobileParty.MainParty.MemberRoster.TotalManCount;
+        var beforeGold = Hero.MainHero.Gold;
+
+        if (expectedCount < 2 || currentOffers.Length != expectedCount || currentCost != expectedTotalCost ||
+            !string.Equals(currentOfferHash, expectedOfferSetSha256, StringComparison.Ordinal) ||
+            viewModel.CurrentPartySize != expectedPartySize ||
+            viewModel.PartyCapacity != expectedPartyCapacity ||
+            expectedJournalTarget < viewModel.CurrentPartySize + expectedCount ||
+            viewModel.CurrentPartySize + expectedCount > viewModel.PartyCapacity || currentCost > beforeGold)
+            throw new InvalidOperationException("Native Take All offer set or safety bounds changed after the current RecruitmentVM quote");
+
+        viewModel.ExecuteRecruitAll();
+        var queuedCount = viewModel.TroopsInCart.Count;
+        var queuedCost = viewModel.TroopsInCart.Sum(troop => troop.Cost);
+        if (queuedCount != expectedCount || queuedCost != expectedTotalCost || !viewModel.IsDoneEnabled ||
+            viewModel.CurrentPartySize > viewModel.PartyCapacity)
+        {
+            viewModel.ExecuteReset();
+            throw new InvalidOperationException("Native Take All did not queue the exact affordable in-limit offer set; the draft was reset without committing");
+        }
+
+        viewModel.ExecuteDone();
+        var afterMembers = MobileParty.MainParty.MemberRoster.TotalManCount;
+        var afterGold = Hero.MainHero.Gold;
+        var verified = afterMembers == beforeMembers + expectedCount && afterGold == beforeGold - expectedTotalCost;
+        var json = new StringBuilder();
+        json.Append('{');
+        json.Append("\"committed\":").Append(verified ? "true" : "false");
+        json.Append(",\"verified\":").Append(verified ? "true" : "false");
+        json.Append(",\"recruitedCount\":").Append(expectedCount);
+        json.Append(",\"totalCost\":").Append(expectedTotalCost);
+        json.Append(",\"beforeMembers\":").Append(beforeMembers);
+        json.Append(",\"afterMembers\":").Append(afterMembers);
+        json.Append(",\"beforeGold\":").Append(beforeGold);
+        json.Append(",\"afterGold\":").Append(afterGold);
+        json.Append(",\"partyCapacity\":").Append(expectedPartyCapacity);
+        Property(json, "offerSetSha256", currentOfferHash, true);
+        json.Append('}');
+        return json.ToString();
+    }
+
+    internal static string ComputeOfferSetSha256(RecruitmentVM viewModel) => ComputeOfferSetSha256(GetRecruitableOffers(viewModel));
+
+    private static (RecruitVolunteerVM Owner, RecruitVolunteerTroopVM Troop)[] GetRecruitableOffers(RecruitmentVM viewModel) =>
+        viewModel.VolunteerList
+            .SelectMany(owner => owner.Troops
+                .Where(troop => troop.Character != null && troop.CanBeRecruited)
+                .Select(troop => (Owner: owner, Troop: troop)))
+            .OrderBy(offer => offer.Owner.OwnerHero.StringId, StringComparer.Ordinal)
+            .ThenBy(offer => offer.Troop.Index)
+            .ThenBy(offer => offer.Troop.Character.StringId, StringComparer.Ordinal)
+            .ToArray();
+
+    private static string ComputeOfferSetSha256((RecruitVolunteerVM Owner, RecruitVolunteerTroopVM Troop)[] offers)
+    {
+        var canonical = string.Join("\n", offers.Select(offer =>
+            offer.Owner.OwnerHero.StringId + "\t" + offer.Troop.Character.StringId + "\t" +
+            offer.Troop.Index.ToString(System.Globalization.CultureInfo.InvariantCulture) + "\t" +
+            offer.Troop.Cost.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        using (var sha256 = SHA256.Create())
+            return BitConverter.ToString(sha256.ComputeHash(Encoding.UTF8.GetBytes(canonical))).Replace("-", string.Empty).ToLowerInvariant();
     }
 
     internal static string BeginHarnessNativeCapacityInquiry(RecruitmentVM current, string ownerId, string troopId, int slot, out RecruitmentVM preparedViewModel)

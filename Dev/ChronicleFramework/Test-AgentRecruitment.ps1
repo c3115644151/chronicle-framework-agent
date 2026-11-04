@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
-    [int]$TimeoutSeconds = 180
+    [int]$TimeoutSeconds = 180,
+    [switch]$BulkOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,6 +34,77 @@ function Open-NativeTownTrade([string]$Suffix) {
     if ($open.status -ne 'completed' -or $state.state.context.gameState -ne 'InventoryState' -or $state.state.inventoryScreen.mode -ne 'Trade')
         { throw 'Native Town trade did not open its Trade-mode InventoryState.' }
     return [pscustomobject]@{ Menu = $menu; Open = $open; State = $state }
+}
+
+if ($BulkOnly) {
+    try {
+        $start = Invoke-AgentCli 'load' @('-SaveName', $LoadSaveName, '-TimeoutSeconds', $TimeoutSeconds)
+        $beforeMove = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-bulk-before-move", '-TimeoutSeconds', $TimeoutSeconds)
+        $target = @($beforeMove.state.nearbySettlements | Where-Object { -not $_.hostile -and $_.distance -gt 1.0 } | Sort-Object distance | Select-Object -First 1)
+        if ($target.Count -ne 1) { throw 'No safe visible settlement target exists in the disposable fixture for Recruit All.' }
+        $move = Invoke-AgentCli 'move' @('-SettlementId', [string]$target[0].id, '-CommandId', "$runPrefix-bulk-move", '-TimeoutSeconds', $TimeoutSeconds)
+        if ($move.status -ne 'completed' -or $move.state.location.targetSettlementId -ne $target[0].id) { throw 'Native move order did not target the Recruit All settlement.' }
+        $arrival = Wait-ForAgentSettlementArrival -CliPath $cli -SettlementId ([string]$target[0].id) -CommandPrefix "$runPrefix-bulk-arrival" -TimeoutSeconds $TimeoutSeconds
+        if ($arrival.state.location.currentSettlementId -ne $target[0].id) { throw 'Player party did not reach the Recruit All settlement.' }
+
+        $menu = Invoke-AgentCli 'menu' @('-CommandId', "$runPrefix-bulk-menu", '-TimeoutSeconds', $TimeoutSeconds)
+        $recruitOption = @($menu.state.availableMenuOptions | Where-Object { $_.id -eq 'recruit_volunteers' -and $_.available -and $_.enabled } | Select-Object -First 1)
+        if ($menu.state.context.menuId -notin @('town', 'town_backstreet', 'village') -or $recruitOption.Count -ne 1) { throw 'Native recruit_volunteers was not available in the observed settlement menu.' }
+        $before = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-bulk-before", '-TimeoutSeconds', $TimeoutSeconds)
+        $options = Invoke-AgentCli 'recruitOptions' @('-CommandId', "$runPrefix-bulk-options", '-TimeoutSeconds', $TimeoutSeconds)
+        $offers = @($options.data.offers | Where-Object { $_.available } | Sort-Object @{ Expression = { [string]$_.ownerId }; Ascending = $true }, @{ Expression = { [int]$_.slot }; Ascending = $true }, @{ Expression = { [string]$_.troopId }; Ascending = $true })
+        $expectedCount = $offers.Count
+        $expectedCost = [int](($offers | Measure-Object -Property cost -Sum).Sum)
+        $expectedPartySize = [int]$options.data.partySize
+        $expectedPartyCapacity = [int]$options.data.partyCapacity
+        $expectedTarget = $expectedPartySize + $expectedCount
+        if ($expectedCount -lt 2 -or $expectedCost -gt [int]$options.data.gold -or $expectedPartySize + $expectedCount -gt $expectedPartyCapacity) {
+            throw "The disposable fixture has no safe Native Take All quote: count=$expectedCount, cost=$expectedCost, gold=$($options.data.gold), party=$expectedPartySize/$expectedPartyCapacity."
+        }
+        $canonical = @($offers | ForEach-Object { [string]$_.ownerId + "`t" + [string]$_.troopId + "`t" + [int]$_.slot + "`t" + [int]$_.cost }) -join "`n"
+        $sha256 = [Security.Cryptography.SHA256]::Create()
+        try { $offerSetHash = [BitConverter]::ToString($sha256.ComputeHash([Text.Encoding]::UTF8.GetBytes($canonical))).Replace('-', '').ToLowerInvariant() }
+        finally { $sha256.Dispose() }
+        $receipt = Invoke-AgentCli 'recruitAll' @(
+            '-ExpectedCount', [string]$expectedCount, '-ExpectedTotalCost', [string]$expectedCost,
+            '-ExpectedPartySize', [string]$expectedPartySize, '-ExpectedPartyCapacity', [string]$expectedPartyCapacity,
+            '-ExpectedJournalTarget', [string]$expectedTarget, '-ExpectedOfferSetSha256', $offerSetHash,
+            '-CommandId', "$runPrefix-bulk-recruit", '-TimeoutSeconds', $TimeoutSeconds)
+        $after = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-bulk-after", '-TimeoutSeconds', $TimeoutSeconds)
+        $stop = Invoke-AgentCli 'stop' @('-CommandId', "$runPrefix-bulk-stop", '-TimeoutSeconds', $TimeoutSeconds)
+        $fixtureHashAfter = (Get-FileHash $savePath -Algorithm SHA256).Hash
+        $verified = (
+            $receipt.status -eq 'completed' -and [bool]$receipt.data.verified -and [bool]$receipt.data.committed -and
+            [int]$receipt.data.recruitedCount -eq $expectedCount -and [int]$receipt.data.totalCost -eq $expectedCost -and
+            $receipt.data.offerSetSha256 -eq $offerSetHash -and
+            [int]$after.state.party.members -eq ([int]$before.state.party.members + $expectedCount) -and
+            [int]$after.state.economy.gold -eq ([int]$before.state.economy.gold - $expectedCost) -and
+            $before.state.context.timeControlMode -eq $receipt.timeControlMode -and
+            $before.state.context.timeControlMode -eq $after.state.context.timeControlMode -and
+            $fixtureHashBefore -eq $fixtureHashAfter -and $stop.processStopped)
+        $result = [ordered]@{
+            Passed = $verified
+            Scenario = 'native-recruitment-vm-take-all-exact-current-offer-transaction'
+            DecisionProviderKind = 'none-direct-native-contract-probe'
+            Settlement = $target[0]
+            OfferCount = $expectedCount
+            ExpectedTotalCost = $expectedCost
+            OfferSetSha256 = $offerSetHash
+            Receipt = $receipt.data
+            Before = [ordered]@{ Members = $before.state.party.members; Gold = $before.state.economy.gold; CampaignDay = $before.campaignDay; RawMode = $before.state.context.timeControlMode }
+            After = [ordered]@{ Members = $after.state.party.members; Gold = $after.state.economy.gold; CampaignDay = $after.campaignDay; RawMode = $after.state.context.timeControlMode }
+            FixtureUnchanged = ($fixtureHashBefore -eq $fixtureHashAfter)
+            ProcessStopped = [bool]$stop.processStopped
+        }
+        $result | ConvertTo-Json -Depth 8
+        if (-not $verified) { exit 1 }
+    }
+    finally {
+        if (Test-Path $sessionPath) { try { Invoke-AgentCli 'stop' @('-CommandId', "$runPrefix-bulk-cleanup", '-TimeoutSeconds', '15') | Out-Null } catch { } }
+        if ($null -eq $previousHarnessMode) { Remove-Item Env:CHRONICLE_HARNESS_MODE -ErrorAction SilentlyContinue }
+        else { $env:CHRONICLE_HARNESS_MODE = $previousHarnessMode }
+    }
+    return
 }
 
 try {

@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.534'
+$contractVersion = '7.536'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -1781,7 +1781,7 @@ if (-not (Test-Path (Join-Path $harnessRoot 'AgentHost\AgentHostCampaignStateFac
     $agentHostGoldSaleLoopSource -notmatch 'gold-sale-self-test-training-field-menu-not-exitable' -or
     $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-self-test-training-field-menu-not-exitable' -or
     $agentHostProviderContractSelfTestSource -notmatch 'AgentHostCampaignStateFacts.RunContractSelfTests' -or
-    $agentHostMailboxSource -notmatch 'native-recruitment-mailbox-allows-quest-scoped-dialogue-and-current-offer-actions') { throw 'EYC objective subflows must distinguish the verified Native training-field Leave menu from a hostile Party encounter and keep the same leave path out of hostile encounter handling; PartySize VillagersInNeed dialogue must use its bounded recruitment Native transport.' }
+    $agentHostMailboxSource -notmatch 'native-recruitment-mailbox-allows-quest-dialogue-current-offers-and-bounded-recruit-all') { throw 'EYC objective subflows must distinguish the verified Native training-field Leave menu from a hostile Party encounter and keep the same leave path out of hostile encounter handling; PartySize VillagersInNeed dialogue must use its bounded recruitment Native transport.' }
 $partyRoleAdapterSource = Get-Content (Join-Path $harnessRoot 'AgentPartyRoleAdapter.cs') -Raw -Encoding UTF8
 $partyRoleTest = Get-Content (Join-Path $harnessRoot 'Test-AgentPartyRoles.ps1') -Raw -Encoding UTF8
 if ($agentProtocolSource -notmatch 'case "partyRoles"' -or $agentProtocolSource -notmatch 'case "setPartyRole"' -or $agentProtocolSource -notmatch 'case "unassignPartyRole"' -or $agentCliSource -notmatch "'partyRoles'" -or $agentCliSource -notmatch "'setPartyRole'" -or $agentCliSource -notmatch "'unassignPartyRole'" -or $agentDecisionLoopSource -notmatch 'partyRoles = @\(\)' -or $agentDecisionLoopSource -notmatch "setPartyRole = @\('RoleId','HeroId'\)" -or $agentDecisionLoopSource -notmatch "unassignPartyRole = @\('RoleId'\)" -or $partyRoleAdapterSource -notmatch 'GetAssignablePartyRoles' -or $partyRoleAdapterSource -notmatch 'ExecuteAssignHeroToRole' -or $partyRoleAdapterSource -notmatch 'GetMapScreenActionIsEnabledWithReason' -or $partyRoleAdapterSource -match 'SetPartyQuartermaster|SetPartyScout|SetPartySurgeon|SetPartyEngineer' -or $agentProtocolSource -notmatch 'PartyRole fixture/diagnostics are restricted to visual Harness runs' -or $agentDecisionLoopSource -match 'harnessSeedPartyRoleFixture|harnessPartyRoleDiagnostics') { throw 'PartyRoles must query native role VM candidates, apply native Campaign action gating and call its native handler; fixture seeding/diagnostics stay Harness-only and bypassing role setters is forbidden.' }

@@ -1309,6 +1309,25 @@ internal sealed class ChronicleAgentProtocol
                         FinalizeVolunteerRecruitmentViewModel();
                     }
                     break;
+                case "recruitAll":
+                    _recruitmentViewModel = ChronicleAgentRecruitment.CreateOrRefresh(_recruitmentViewModel);
+                    try
+                    {
+                        var recruitAllResult = ChronicleAgentRecruitment.RecruitAll(
+                            _recruitmentViewModel,
+                            (int)ReadDouble(command, "expectedCount"),
+                            (int)ReadDouble(command, "expectedTotalCost"),
+                            (int)ReadDouble(command, "expectedPartySize"),
+                            (int)ReadDouble(command, "expectedPartyCapacity"),
+                            (int)ReadDouble(command, "expectedJournalTarget"),
+                            ReadString(command, "expectedOfferSetSha256"));
+                        WriteResponse(commandId, action, "completed", behavior, null, recruitAllResult);
+                    }
+                    finally
+                    {
+                        FinalizeVolunteerRecruitmentViewModel();
+                    }
+                    break;
                 case "foodOptions":
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentTradeAdapter.BuildFoodOptionsJson());
                     break;

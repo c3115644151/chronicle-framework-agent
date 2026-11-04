@@ -25,7 +25,7 @@ internal static class AgentHostCampaignLoop
         "mapSettlementTargets", "move", "menuSelect", "tradeOptions", "trade", "tradeConfirm", "tradeCancel", "tradeCancelChanges",
         "sellPrisonerOne", "partyScreenDone", "partyScreenCancel"
     };
-    internal static readonly HashSet<string> RecruitmentActions = new(StringComparer.Ordinal) { "recruitOptions", "recruit", "prisonerRecruitmentOptions", "recruitPrisoner" };
+    internal static readonly HashSet<string> RecruitmentActions = new(StringComparer.Ordinal) { "recruitOptions", "recruit", "recruitAll", "prisonerRecruitmentOptions", "recruitPrisoner" };
     internal static readonly HashSet<string> CompanionHiringActions = new(StringComparer.Ordinal) { "missionSceneAgents", "missionNavigateToAgent", "missionInteract", "missionLeave" };
     internal static readonly HashSet<string> TrainingIssueActions = new(StringComparer.Ordinal) { "partyUpgradeOptions", "upgradeTroop" };
     internal static readonly HashSet<string> AllSupportedActions = new(ApprovedActions.Concat(BattleSimulationActions).Concat(GoldSaleActions).Concat(RecruitmentActions).Concat(CompanionHiringActions).Concat(TrainingIssueActions), StringComparer.Ordinal);

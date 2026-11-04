@@ -215,6 +215,8 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
         // Dialogue is admitted only as a transport shape here; PartySize's current
         // VillagersInNeed catalog binds it to the exact active quest, hero and option.
         static bool HasText(JsonObject value, string key) => value[key] is JsonValue node && node.TryGetValue<string>(out var text) && !string.IsNullOrWhiteSpace(text);
+        static bool HasSha256(JsonObject value, string key) => value[key] is JsonValue node && node.TryGetValue<string>(out var hash) &&
+            hash.Length == 64 && hash.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
         var valid = action switch
         {
             "recruitOptions" => arguments.Count == 0,
@@ -223,6 +225,13 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             "recruit" => arguments.Count == 4 && HasText(arguments, "ownerId") && HasText(arguments, "troopId") &&
                          arguments["slot"] is JsonValue slotNode && slotNode.TryGetValue<int>(out var slot) && slot >= 0 &&
                          arguments["confirmPartySizeWarning"] is JsonValue confirmNode && confirmNode.TryGetValue<int>(out var confirm) && confirm is 0 or 1,
+            "recruitAll" => arguments.Count == 6 &&
+                            arguments["expectedCount"] is JsonValue countNode && countNode.TryGetValue<int>(out var count) && count >= 2 &&
+                            arguments["expectedTotalCost"] is JsonValue totalCostNode && totalCostNode.TryGetValue<int>(out var totalCost) && totalCost >= 0 &&
+                            arguments["expectedPartySize"] is JsonValue partySizeNode && partySizeNode.TryGetValue<int>(out var partySize) && partySize >= 0 &&
+                            arguments["expectedPartyCapacity"] is JsonValue partyCapacityNode && partyCapacityNode.TryGetValue<int>(out var partyCapacity) && partyCapacity >= partySize &&
+                            arguments["expectedJournalTarget"] is JsonValue journalTargetNode && journalTargetNode.TryGetValue<int>(out var journalTarget) && journalTarget >= partySize + count &&
+                            HasSha256(arguments, "expectedOfferSetSha256"),
             "recruitPrisoner" => arguments.Count == 3 && HasText(arguments, "troopId") &&
                                   arguments["confirmPartySizeWarning"] is JsonValue prisonerPartyConfirmNode && prisonerPartyConfirmNode.TryGetValue<int>(out var prisonerPartyConfirm) && prisonerPartyConfirm is 0 or 1 &&
                                   arguments["confirmPrisonerLimitWarning"] is JsonValue prisonerLimitConfirmNode && prisonerLimitConfirmNode.TryGetValue<int>(out var prisonerLimitConfirm) && prisonerLimitConfirm is 0 or 1,
@@ -240,6 +249,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
         ValidateRecruitmentAction("prisonerRecruitmentOptions", new JsonObject());
         ValidateRecruitmentAction("menuSelect", JsonNode.Parse("{\"menuId\":\"village\",\"optionId\":\"leave\"}")!.AsObject());
         ValidateRecruitmentAction("recruit", JsonNode.Parse("{\"ownerId\":\"notable-a\",\"troopId\":\"vlandian_recruit\",\"slot\":0,\"confirmPartySizeWarning\":0}")!.AsObject());
+        ValidateRecruitmentAction("recruitAll", JsonNode.Parse("{\"expectedCount\":2,\"expectedTotalCost\":40,\"expectedPartySize\":1,\"expectedPartyCapacity\":20,\"expectedJournalTarget\":5,\"expectedOfferSetSha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}")!.AsObject());
         ValidateRecruitmentAction("recruitPrisoner", JsonNode.Parse("{\"troopId\":\"looter\",\"confirmPartySizeWarning\":0,\"confirmPrisonerLimitWarning\":0}")!.AsObject());
         ValidateRecruitmentAction("dialogueContinue", new JsonObject());
         ValidateRecruitmentAction("dialogueSelect", JsonNode.Parse("{\"optionId\":\"villagers_defer\"}")!.AsObject());
@@ -249,6 +259,9 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             ("recruit", "{\"ownerId\":\"notable-a\",\"troopId\":\"vlandian_recruit\",\"slot\":-1,\"confirmPartySizeWarning\":0}"),
             ("recruit", "{\"ownerId\":\"notable-a\",\"troopId\":\"vlandian_recruit\",\"slot\":0,\"confirmPartySizeWarning\":2}"),
             ("recruit", "{\"ownerId\":\"notable-a\",\"troopId\":\"vlandian_recruit\",\"slot\":0,\"confirmPartySizeWarning\":0,\"extra\":true}"),
+            ("recruitAll", "{\"expectedCount\":1,\"expectedTotalCost\":20,\"expectedPartySize\":1,\"expectedPartyCapacity\":20,\"expectedJournalTarget\":5,\"expectedOfferSetSha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}"),
+            ("recruitAll", "{\"expectedCount\":2,\"expectedTotalCost\":40,\"expectedPartySize\":1,\"expectedPartyCapacity\":20,\"expectedJournalTarget\":2,\"expectedOfferSetSha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}"),
+            ("recruitAll", "{\"expectedCount\":2,\"expectedTotalCost\":40,\"expectedPartySize\":1,\"expectedPartyCapacity\":20,\"expectedJournalTarget\":5,\"expectedOfferSetSha256\":\"stale\"}"),
             ("recruitPrisoner", "{\"troopId\":\"looter\",\"confirmPartySizeWarning\":0,\"confirmPrisonerLimitWarning\":2}"),
             ("recruitPrisoner", "{\"troopId\":\"looter\",\"confirmPartySizeWarning\":0}"),
             ("dialogueContinue", "{\"optionId\":\"villagers_defer\"}"),
@@ -262,7 +275,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             }
             catch (AgentHostException exception) when (exception.Code == "native-action-not-in-recruitment-scope") { }
         }
-        return [new { scenario = "native-recruitment-mailbox-allows-quest-scoped-dialogue-and-current-offer-actions", passed = true }];
+        return [new { scenario = "native-recruitment-mailbox-allows-quest-dialogue-current-offers-and-bounded-recruit-all", validCases = 8, invalidCases = 11, passed = true }];
     }
 
     internal static void ValidateGoldSaleAction(string action, JsonObject arguments)
