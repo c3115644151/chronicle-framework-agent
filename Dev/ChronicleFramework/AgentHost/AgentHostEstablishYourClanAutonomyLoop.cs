@@ -893,6 +893,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                             priorCompletionTokens: completionTokens,
                             priorTrace: trace,
                             priorProviderRouteHistory: routes);
+                        AgentHostHarnessProgressTrace.RecordObjectiveSubflowResult("safeSettlementRefresh", refresh);
                         decisions = ReadInt(refresh, "decisions", decisions);
                         nativeActions += ReadInt(refresh, "actionsExecuted", 0);
                         promptTokens = ReadLong(refresh, "promptTokens", promptTokens);
