@@ -1988,7 +1988,7 @@ if ($freshCampaignSource -notmatch 'StoryModeNewGame' -or
     $harnessScript -notmatch "CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS.*, '86400000'" -or
     $harnessScript -notmatch "CHRONICLE_LLM_TIMEOUT_SECONDS', '300'" -or
     $agentHostRuntimeControllerSource -notmatch 'autoStopMilliseconds <= 86400000' -or
-    $harnessScript -notmatch "ValidateSet\('deepseek-flash','gpt-oss-20b','openai-gpt-oss-20b','nvidiallama-3.2-11b-vision','poolside-laguna-s-2.1','free-router','gemini-2.5-flash','mistral-nemo','mistral-small-3.2-24b','qwen3.6-27b','qwen3.8-27b','auto:reliable'\)" -or
+    $harnessScript -notmatch "ValidateSet\('deepseek-flash','gpt-oss-20b','openai-gpt-oss-20b','nvidiallama-3.2-11b-vision','poolside-laguna-s-2.1','free-router','dots3-note-preview','gemma-4-31b-it','gemini-2.5-flash','gemini-3.8-flash','mistral-nemo','mistral-small-3.2-24b','qwen3.6-27b','qwen3.8-27b','auto:reliable'\)" -or
     $harnessScript -notmatch 'CHRONICLE_HARNESS_AGENT_MODEL.*\$FreshStoryModeModel' -or
     $agentHostRuntimeControllerSource -notmatch 'CHRONICLE_HARNESS_AGENT_MODEL' -or
     $agentHostCampaignLoopSource -notmatch 'HasPostTutorialTrainingFieldMap' -or
