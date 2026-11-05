@@ -1,7 +1,7 @@
 ﻿[CmdletBinding()]
 param(
     [ValidateRange(60,86400)][int]$HostMaxElapsedSeconds = 86400,
-    [ValidateRange(1,160)][int]$MaxProviderDecisionsPerContinuation = 160,
+    [ValidateRange(1,160)][int]$MaxProviderDecisionsPerContinuation = 1,
     [ValidateRange(5,30)][int]$FrameRate = 5,
     [int]$StartupTimeoutSeconds = 240,
     [ValidateRange(300,87000)][int]$FreshStoryModeHostTimeoutSeconds = 87000

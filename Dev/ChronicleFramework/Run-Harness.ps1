@@ -4,7 +4,7 @@ param(
     [string]$Phase = 'All',
     [switch]$RecruitmentBulkOnly,
     [ValidateSet('deepseek-flash','gpt-oss-20b','openai-gpt-oss-20b','nvidiallama-3.2-11b-vision','poolside-laguna-s-2.1','free-router','dots3-note-preview','gemma-4-31b-heretic','gemma-4-31b-it','gemma-4-e4b-uncensored-hauhaucs-aggressive-q4-k-m','gemini-2.5-flash','gemini-3.8-flash','mistral-nemo','mistral-small-3.2-24b','qwen3.6-27b','qwen3.8-27b','auto:reliable')]
-    [string]$FreshStoryModeModel = 'deepseek-flash',
+    [string]$FreshStoryModeModel = 'gemma-4-e4b-uncensored-hauhaucs-aggressive-q4-k-m',
     [int]$SmokeTimeoutSeconds = 45,
     [int]$SmokeStabilitySeconds = 8,
     [ValidateSet('Stop','Complete','UnsupportedGoal','MissingModel','ServiceUnavailable','ParentExited','StopTimeout','NonMap','CampaignRoundtrip','InputToggle')][string]$LifecycleScenario = 'Stop',
@@ -22,7 +22,7 @@ param(
     [string]$BattleSimulationSourceSaveName = 'AgentBridgeLifecycle',
     [string]$StoryModePlannerSourceSaveName = 'save002',
     [ValidateRange(60,86400)][int]$PersistentEycHostMaxElapsedSeconds = 86400,
-    [ValidateRange(1,160)][int]$PersistentEycMaxProviderDecisionsPerContinuation = 160,
+    [ValidateRange(1,160)][int]$PersistentEycMaxProviderDecisionsPerContinuation = 1,
     [ValidateRange(1,10)][int]$NativeMapMovementProbeWaitSeconds = 8
 )
 
@@ -31,7 +31,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.544'
+$HarnessContractVersion = '7.545'
 $effectiveSmokeTimeoutSeconds = if ($Phase -in @('FreshStoryModeModelEvaluation','PersistentEycCampaign','FreshStoryModeNativeInquiryResponseEvaluation','AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostEstablishClanAutonomyEvaluation','AgentHostCaptivityRecoveryEvaluation','AgentHostEstablishClanGoldSaleEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max($SmokeTimeoutSeconds, 240) } else { $SmokeTimeoutSeconds }
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
