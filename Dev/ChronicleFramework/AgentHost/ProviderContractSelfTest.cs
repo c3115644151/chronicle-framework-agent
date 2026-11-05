@@ -1216,6 +1216,33 @@ internal static class ProviderContractSelfTest
             }
         }
 
+        var perDecisionTransientLimitCalls = 0;
+        var perDecisionTransientLimitHandler = new StubHandler((_, _) =>
+        {
+            perDecisionTransientLimitCalls++;
+            var failed = new HttpResponseMessage(HttpStatusCode.BadGateway);
+            failed.Headers.TryAddWithoutValidation("X-Fallback-Trail", "ovh/qwen3.8-27b key1=upstream_error");
+            return Task.FromResult(failed);
+        });
+        using (var perDecisionTransientLimitClient = new HttpClient(perDecisionTransientLimitHandler) { Timeout = perDecisionRequestLimitSettings.Timeout })
+        using (var perDecisionTransientLimitProvider = new OllamaNativeProvider(perDecisionRequestLimitSettings, perDecisionTransientLimitClient))
+        using (var request = JsonDocument.Parse(BuildActionDecisionRequest()))
+        {
+            var startedUtc = DateTimeOffset.UtcNow;
+            try
+            {
+                await perDecisionTransientLimitProvider.DecideAsync(request.RootElement, CancellationToken.None);
+                throw new AgentHostException("provider-self-test-transient-retry-http-request-budget-accepted", "A transient upstream failure must not send another request after the per-decision request budget is consumed.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-http-request-budget-exhausted")
+            {
+                if (perDecisionTransientLimitCalls != 1 || DateTimeOffset.UtcNow - startedUtc > TimeSpan.FromSeconds(2) ||
+                    exception.ProviderHttpStatus != (int)HttpStatusCode.BadGateway)
+                    throw new AgentHostException("provider-self-test-transient-retry-http-request-budget-not-enforced", "The provider must stop a retryable 502 before its delay or any second HTTP request, preserving the first HTTP status.");
+                results.Add(new { scenario = "freellmapi-per-decision-http-request-cap-blocks-transient-retry-before-delay", passed = true, providerCalls = perDecisionTransientLimitCalls, nativeCommands = 0 });
+            }
+        }
+
         var exhaustionBodyRetryCalls = 0;
         var exhaustionBodyRetryHandler = new StubHandler((_, _) =>
         {

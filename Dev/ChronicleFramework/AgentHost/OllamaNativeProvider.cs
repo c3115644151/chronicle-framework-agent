@@ -612,6 +612,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 }
                 if (transientProviderRetriesUsed < 2 && ShouldRetryTransientFreeLlmApiFailure(_settings.Endpoint, response))
                 {
+                    ThrowIfProviderHttpRequestBudgetExhausted(response);
                     var retryDelaySeconds = transientProviderRetriesUsed == 0 ? 5 : 15;
                     transientProviderRetriesUsed++;
                     var fallbackTrail = ReadResponseHeader(response, "X-Fallback-Trail");
@@ -632,6 +633,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         var response = await SendProviderRequestWithTransientRetryAsync(body);
         if (!_settings.NativeOllama && responseFormatMode == "json_schema" && ShouldRetryWithJsonObject(_settings.Endpoint, response))
         {
+            ThrowIfProviderHttpRequestBudgetExhausted(response);
             var failedRoute = ReadResponseHeader(response, "X-Fallback-Trail");
             if (!string.IsNullOrWhiteSpace(failedRoute) && failedRoute.Contains("ovh/", StringComparison.OrdinalIgnoreCase))
                 _lastProviderRoute = "ovh";
