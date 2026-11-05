@@ -825,6 +825,38 @@ internal static class ProviderContractSelfTest
             results.Add(new { scenario = "freellmapi-model-without-json-or-tool-support-fails-before-inference", passed = true, modelCalls = 0, nativeCommands = 0 });
         }
 
+        var promptOnlyJsonModelCalls = 0;
+        var promptOnlyJsonRequestOmittedUnsupportedFields = false;
+        var promptOnlyJsonHandler = new StubHandler(async (httpRequest, cancellationToken) =>
+        {
+            if (httpRequest.Method == HttpMethod.Get)
+                return JsonResponse("{\"data\":[{\"id\":\"horde-model-without-structured-output\",\"supported_parameters\":[\"max_tokens\",\"stream\"]}]}");
+            promptOnlyJsonModelCalls++;
+            using var bodyDocument = JsonDocument.Parse(await httpRequest.Content!.ReadAsStringAsync(cancellationToken));
+            var systemMessage = bodyDocument.RootElement.GetProperty("messages")[0].GetProperty("content").GetString() ?? string.Empty;
+            promptOnlyJsonRequestOmittedUnsupportedFields = !bodyDocument.RootElement.TryGetProperty("response_format", out _) &&
+                !bodyDocument.RootElement.TryGetProperty("tools", out _) &&
+                systemMessage.Contains("Return exactly one JSON decision object", StringComparison.Ordinal);
+            return JsonResponse(BuildChatResponse("{\"action\":\"tradeConfirm\",\"arguments\":{},\"rationale\":\"Confirm the Native trade draft.\"}", "stop"));
+        });
+        var promptOnlyJsonSettings = freeLlmApiSettings with
+        {
+            Model = "horde-model-without-structured-output",
+            OutputMode = "json_object",
+            MaxHttpRequestsPerDecision = 1
+        };
+        using (var promptOnlyJsonClient = new HttpClient(promptOnlyJsonHandler) { Timeout = promptOnlyJsonSettings.Timeout })
+        using (var promptOnlyJsonProvider = new OllamaNativeProvider(promptOnlyJsonSettings, promptOnlyJsonClient))
+        using (var request = JsonDocument.Parse(BuildActionDecisionRequest()))
+        {
+            await promptOnlyJsonProvider.CheckConfiguredModelAsync(CancellationToken.None);
+            var result = await promptOnlyJsonProvider.DecideAsync(request.RootElement, "Return exactly one JSON decision object. Validate all fields locally.", CancellationToken.None);
+            if (!promptOnlyJsonRequestOmittedUnsupportedFields || promptOnlyJsonModelCalls != 1 || result.ResponseFormatMode != "json_object_prompt_only" ||
+                result.Decision["action"]?.GetValue<string>() != "tradeConfirm")
+                throw new AgentHostException("provider-self-test-prompt-only-json-mode-failed", "Explicit JSON-object mode may use prompt-only output for a model without provider-side structured output only when the returned action still passes local catalog validation.");
+            results.Add(new { scenario = "freellmapi-explicit-json-object-allows-prompt-only-output-with-local-action-validation", passed = true, providerCalls = promptOnlyJsonModelCalls, nativeCommands = 0 });
+        }
+
         var reliableRouterHandler = new StubHandler((_, _) => Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"auto\"}]}")));
         using (var reliableRouterClient = new HttpClient(reliableRouterHandler) { Timeout = settings.Timeout })
         using (var reliableRouter = new OllamaNativeProvider(freeLlmApiSettings with { Model = "auto:reliable" }, reliableRouterClient))

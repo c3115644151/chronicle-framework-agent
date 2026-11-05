@@ -1013,6 +1013,9 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerProfileTestSource -notmatch 'provider-profile-error-path-mutated-file' -or
     $providerProfileTestSource -notmatch 'freellmapi-bearer-auth-available-model-preflight-and-routed-model-evidence' -or
     $providerProfileTestSource -notmatch 'freellmapi-profile-uses-512-token-and-one-http-request-per-decision-default' -or
+    $providerProfileTestSource -notmatch 'freellmapi-model-without-json-or-tool-support-fails-before-inference' -or
+    $providerProfileTestSource -notmatch 'freellmapi-explicit-json-object-allows-prompt-only-output-with-local-action-validation' -or
+    $providerHostSource -notmatch '_usePromptOnlyJsonMode' -or $providerHostSource -notmatch 'json_object_prompt_only' -or
     $providerProfileTestSource -notmatch 'provider-action-rationale-is-optional-and-native-catalog-still-gates' -or
     $providerHostSource -notmatch 'SelectApiKey' -or $providerHostSource -notmatch '\["anyOf"\]' -or $providerHostSource -match '\["oneOf"\]' -or
     $providerProfileTestSource -notmatch 'village-tools-prompt-uses-exact-native-action-id' -or

@@ -29,6 +29,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     private DateTimeOffset _lastProviderRequestUtc;
     private string? _lastProviderRoute;
     private bool _useRequiredToolCallStrategy;
+    private bool _usePromptOnlyJsonMode;
     private double _reservedDeepSeekCostCny;
     private double _actualDeepSeekCostEstimateCny;
     private long _deepSeekPromptCacheHitTokens;
@@ -358,6 +359,10 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 {
                     _useRequiredToolCallStrategy = true;
                 }
+                else if (_settings.OutputMode == "json_object")
+                {
+                    _usePromptOnlyJsonMode = true;
+                }
                 else
                 {
                     throw new AgentHostException("provider-structured-output-unsupported", "The configured FreeLLMAPI model advertises neither response_format nor required tool-calling support; no decision request was sent.");
@@ -445,7 +450,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 };
                 payload["tool_choice"] = "required";
             }
-            else
+            else if (!_usePromptOnlyJsonMode)
             {
                 payload["response_format"] = useJsonObjectCompatibilityMode
                     ? new { type = "json_object" }
@@ -631,7 +636,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
 
         var responseFormatMode = _settings.NativeOllama
             ? "ollama-native"
-            : _useRequiredToolCallStrategy ? "required_tool_call" : useJsonObjectCompatibilityMode ? "json_object_compatibility" : "json_schema";
+            : _usePromptOnlyJsonMode ? "json_object_prompt_only" : _useRequiredToolCallStrategy ? "required_tool_call" : useJsonObjectCompatibilityMode ? "json_object_compatibility" : "json_schema";
         var response = await SendProviderRequestWithTransientRetryAsync(body);
         if (!_settings.NativeOllama && responseFormatMode == "json_schema" && ShouldRetryWithJsonObject(_settings.Endpoint, response))
         {
