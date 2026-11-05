@@ -539,6 +539,46 @@ internal static class ProviderContractSelfTest
             results.Add(new { scenario = "freellmapi-bearer-auth-available-model-preflight-and-routed-model-evidence", passed = true });
         }
 
+        const string privatePlainTextToolFailure = "PRIVATE_FREE_LLM_API_RESPONSE_MUST_NOT_BE_LOGGED";
+        var missingRequiredToolCallHandler = new StubHandler((httpRequest, _) =>
+        {
+            if (httpRequest.Method == HttpMethod.Get)
+                return Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"gpt-oss-20b\",\"supported_parameters\":[\"tools\",\"tool_choice\"]}]}"));
+            var response = JsonResponse(JsonSerializer.Serialize(new
+            {
+                model = "gpt-oss-20b",
+                choices = new[] { new { index = 0, message = new { role = "assistant", content = privatePlainTextToolFailure }, finish_reason = "stop" } },
+                usage = new { prompt_tokens = 602, completion_tokens = 128 }
+            }));
+            response.Headers.TryAddWithoutValidation("X-Routed-Via", "ovh/gpt-oss-20b");
+            return Task.FromResult(response);
+        });
+        using (var missingRequiredToolCallClient = new HttpClient(missingRequiredToolCallHandler) { Timeout = freeLlmApiSettings.Timeout })
+        using (var missingRequiredToolCallProvider = new OllamaNativeProvider(freeLlmApiSettings with { Model = "gpt-oss-20b" }, missingRequiredToolCallClient))
+        using (var request = JsonDocument.Parse(BuildDecisionRequest()))
+        {
+            await missingRequiredToolCallProvider.CheckConfiguredModelAsync(CancellationToken.None);
+            try
+            {
+                _ = await missingRequiredToolCallProvider.DecideAsync(request.RootElement, CancellationToken.None);
+                throw new AgentHostException("provider-required-tool-call-missing-self-test-failed", "A plain-text model response must not be accepted as a Native decision when the Host requires one tool call.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-tool-call-missing")
+            {
+                if (!exception.Message.Contains("toolCallsPresent=False", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("toolCallCount=0", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("contentKind=String", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("finishReason=stop", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("responseModel=gpt-oss-20b", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("routedVia=ovh/gpt-oss-20b", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("promptTokens=602", StringComparison.Ordinal) ||
+                    !exception.Message.Contains("completionTokens=128", StringComparison.Ordinal) ||
+                    exception.Message.Contains(privatePlainTextToolFailure, StringComparison.Ordinal))
+                    throw new AgentHostException("provider-required-tool-call-missing-safe-diagnostic-self-test-failed", "A missing-tool response should log only route/shape/usage metadata, never the plain-text response itself.");
+            }
+            results.Add(new { scenario = "provider-required-tool-call-missing-response-logs-safe-route-shape-and-usage", modelCalls = 0, nativeCommands = 0, passed = true });
+        }
+
         var incompatibleSchemaResponseBody = "{\"model\":\"free-schema-mismatch\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"private-call-id\",\"type\":\"function\",\"function\":{\"name\":\"submit_chronicle_decision\",\"arguments\":\"PRIVATE_RESPONSE_SHOULD_NOT_LEAK\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":449,\"completion_tokens\":113}}";
         var incompatibleSchemaHandler = new StubHandler((httpRequest, _) => httpRequest.Method == HttpMethod.Get
             ? Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"free-schema-mismatch\",\"supported_parameters\":[\"response_format\"]}]}"))

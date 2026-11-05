@@ -708,8 +708,22 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 responseModel = ReadString(root, "model");
                 if (responseFormatMode == "required_tool_call")
                 {
-                    if (!messageElement.TryGetProperty("tool_calls", out var toolCalls) || toolCalls.ValueKind != JsonValueKind.Array || toolCalls.GetArrayLength() != 1)
-                        throw new AgentHostException("provider-tool-call-missing", "The model must return exactly one required decision tool call.");
+                    var hasToolCalls = messageElement.TryGetProperty("tool_calls", out var toolCalls);
+                    var toolCallCount = hasToolCalls && toolCalls.ValueKind == JsonValueKind.Array ? toolCalls.GetArrayLength() : 0;
+                    if (toolCallCount != 1)
+                    {
+                        var hasContent = messageElement.TryGetProperty("content", out var contentElement);
+                        var contentKind = hasContent ? contentElement.ValueKind.ToString() : JsonValueKind.Undefined.ToString();
+                        var contentCharacters = hasContent && contentElement.ValueKind == JsonValueKind.String
+                            ? contentElement.GetString()?.Length ?? 0
+                            : 0;
+                        var responseUsage = root.TryGetProperty("usage", out var responseUsageElement) ? responseUsageElement : default;
+                        var responsePromptTokens = ReadNonNegativeInt(responseUsage, "prompt_tokens");
+                        var responseCompletionTokens = ReadNonNegativeInt(responseUsage, "completion_tokens");
+                        var responseRoute = SafeDiagnosticField(ReadResponseHeader(response, "X-Routed-Via"));
+                        throw new AgentHostException("provider-tool-call-missing",
+                            $"The model must return exactly one required decision tool call (toolCallsPresent={hasToolCalls}; toolCallCount={toolCallCount}; contentKind={contentKind}; contentCharacters={contentCharacters}; finishReason={SafeDiagnosticField(finishReason)}; format={responseFormatMode}; responseModel={SafeDiagnosticField(responseModel)}; routedVia={responseRoute}; promptTokens={responsePromptTokens?.ToString(CultureInfo.InvariantCulture) ?? "unknown"}; completionTokens={responseCompletionTokens?.ToString(CultureInfo.InvariantCulture) ?? "unknown"}).");
+                    }
                     var toolCall = toolCalls[0];
                     if (ReadString(toolCall, "type") != "function" ||
                         !toolCall.TryGetProperty("function", out var function) || function.ValueKind != JsonValueKind.Object ||

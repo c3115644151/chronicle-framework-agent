@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.543'
+$contractVersion = '7.544'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -140,6 +140,14 @@ if ($agentHostProviderSource -notmatch 'InferEnumeratedJsonSchemaType' -or
     $freshCampaignTestSource -notmatch 'StoryModeAgentFailureLocation' -or
     $agentHostProviderContractSelfTestSource -notmatch 'campaign-loop-emits-compact-cost-and-failure-receipt-without-trace-or-free-text') {
     throw 'The model schema must infer current Native argument types, and the Campaign Host must emit a tested compact terminal receipt instead of discarding error/cost evidence in a large trace.'
+}
+if ($agentHostProviderSource -notmatch 'toolCallsPresent=' -or
+    $agentHostProviderSource -notmatch 'contentCharacters=' -or
+    $agentHostProviderSource -notmatch 'promptTokens=' -or
+    $agentHostProviderSource -notmatch 'routedVia=' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'provider-required-tool-call-missing-response-logs-safe-route-shape-and-usage' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'PRIVATE_FREE_LLM_API_RESPONSE_MUST_NOT_BE_LOGGED') {
+    throw 'Missing required tool-call failures must retain only response-shape, route and token-use diagnostics; a self-test must prove response text is not copied into the failure message.'
 }
 if ($agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-localized-direct-offer-hidden' -or
     $agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-discovery-budget-not-bounded' -or
