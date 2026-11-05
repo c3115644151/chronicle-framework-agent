@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.546'
+$contractVersion = '7.547'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -951,6 +951,9 @@ if ($agentHostLiveModelLoopSource -notmatch 'Set-LiveModelProviderTimeout' -or
     $agentHostLiveModelLoopSource -notmatch 'timeoutOverrideContract' -or
     $agentHostLiveModelLoopSource -match '\$env:CHRONICLE_LLM_TIMEOUT_SECONDS\s*=\s*''(180|360)''') {
     throw 'Live-model scenario defaults must honor a bounded explicit CHRONICLE_LLM_TIMEOUT_SECONDS override instead of resetting it.'
+}
+if ($agentLiveModelLoopSource -notmatch 'if\s*\(\[string\]::IsNullOrWhiteSpace\(\$priorModelMaxTokens\)\)\s*\{\s*\$env:CHRONICLE_LLM_MAX_TOKENS\s*=\s*''256''\s*\}\s*else\s*\{\s*\$env:CHRONICLE_LLM_MAX_TOKENS\s*=\s*\$priorModelMaxTokens\s*\}') {
+    throw 'The EYC live-model loop must keep its 256-token default while honoring an explicit caller output-token limit.'
 }
 if ($harnessScript -notmatch 'GitCommit' -or $harnessScript -notmatch 'SourceControl' -or $harnessScript -notmatch 'status --porcelain' -or $harnessScript -match 'TaskBoard|CensusDomainDoneCount|gh project|gh api|githubProjectNumber') { throw 'Harness receipts must record Git provenance and remain independent of GitHub task tracking.' }
 if ($projectFile -notmatch 'ChronicleGameRoot' -or $harnessScript -notmatch 'ChronicleGameRoot=\$gameRoot' -or -not (Test-Path -LiteralPath (Join-Path $harnessRoot 'Initialize-ChronicleWorkspace.ps1'))) { throw 'Cloned repositories must accept a local game path and provide a repeatable workspace initializer.' }

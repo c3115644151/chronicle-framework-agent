@@ -31,7 +31,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.546'
+$HarnessContractVersion = '7.547'
 if ($Phase -in @('FreshStoryModeModelEvaluation','PersistentEycCampaign') -and [string]::IsNullOrWhiteSpace($FreshStoryModeModel)) {
     throw 'Select a verified FreeLLMAPI model explicitly with -FreshStoryModeModel; no game or model request was started.'
 }
