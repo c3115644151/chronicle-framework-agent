@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -37,6 +38,12 @@ internal static class AgentHostNativeMapMovementMonitor
         var pollCount = 0;
         if (waitSeconds is < 1 or > MaximumWatchWindowSeconds)
             throw new AgentHostException("native-map-movement-watch-interval-invalid", "Passive Native map observation requires a bounded 1-10 second wait.");
+
+        // Do not spend a wall-clock wait while Native time is stopped and a settlement
+        // move still appears active. Return this exact state to the caller so its parent
+        // can recover the original Native Move; never turn this into an implicit clock action.
+        if (IsStalledNativeSettlementMove(latest, targetSettlementId))
+            return new AgentHostNativeMapMovementWatchResult(latest, CloneState(latest), new JsonArray(), null, pollCount);
 
         // Preserve the existing observe-again contract if this state is not a current
         // settlement move. CampaignLoop also uses observeAgain outside settlement travel.
@@ -103,6 +110,39 @@ internal static class AgentHostNativeMapMovementMonitor
             .ToArray());
     }
 
+    internal static bool IsCampaignTimeAdvancing(JsonObject? nativeOrState)
+    {
+        if (nativeOrState is null) return false;
+        var state = nativeOrState["state"] as JsonObject ?? nativeOrState;
+        var context = state["context"] as JsonObject;
+        var timeMode = ReadString(nativeOrState, "timeControlMode") ?? ReadString(context, "timeControlMode");
+        return !string.IsNullOrWhiteSpace(timeMode) && !string.Equals(timeMode, "Stop", StringComparison.Ordinal);
+    }
+
+    internal static bool IsStalledNativeSettlementMove(JsonObject? native, string? expectedTargetSettlementId = null)
+    {
+        if (native is null) return false;
+        var state = native["state"] as JsonObject ?? native;
+        var context = state["context"] as JsonObject;
+        var location = state["location"] as JsonObject;
+        var party = state["party"] as JsonObject;
+        var timeMode = ReadString(native, "timeControlMode") ?? ReadString(context, "timeControlMode");
+        var targetSettlementId = ReadString(location, "targetSettlementId");
+        return string.Equals(timeMode, "Stop", StringComparison.Ordinal) &&
+               string.Equals(ReadString(context, "gameState"), "MapState", StringComparison.Ordinal) &&
+               string.IsNullOrWhiteSpace(ReadString(context, "menuId")) &&
+               !ReadBoolean(context, "escapeMenuOpen") && !ReadBoolean(context, "inquiryOpen") &&
+               !ReadBoolean(context, "encounterActive") && !ReadBoolean(context, "isWaitMenu") && !ReadBoolean(context, "isWaitActive") &&
+               context?["conversation"] is not JsonObject &&
+               !ReadBoolean(context?["captivity"] as JsonObject, "isCaptive") &&
+               !ReadBoolean(context?["sceneNotification"] as JsonObject, "hasActiveNotification") &&
+               ReadBoolean(party, "isMoving") && !string.IsNullOrWhiteSpace(targetSettlementId) &&
+               string.IsNullOrWhiteSpace(ReadString(location, "targetPartyId")) &&
+               !string.Equals(ReadString(location, "currentSettlementId"), targetSettlementId, StringComparison.Ordinal) &&
+               (string.IsNullOrWhiteSpace(expectedTargetSettlementId) ||
+                string.Equals(expectedTargetSettlementId, targetSettlementId, StringComparison.Ordinal));
+    }
+
     internal static bool IsPausedVisibleBanditMove(JsonObject native)
     {
         var state = native["state"] as JsonObject;
@@ -150,10 +190,20 @@ internal static class AgentHostNativeMapMovementMonitor
             string.IsNullOrWhiteSpace(ReadString(conversation, "sentenceText")))
             throw new AgentHostException("campaign-map-movement-conversation-interrupt-self-test-failed", "Passive movement monitoring must return immediately when a current Native MapState conversation appears, leaving its visible text/options for the Agent decision loop without changing the clock.");
 
+        var pausedMove = new FakeVisibleBanditMoveClient(visibleHostileBandit: false, initiallyPaused: true);
+        var pausedStarted = Stopwatch.GetTimestamp();
+        var pausedWatch = WaitAsync(pausedMove, pausedMove, pausedMove.CurrentNative, "safe-town", 4, monitorVisibleBandits: true, CancellationToken.None)
+            .GetAwaiter().GetResult();
+        if (Stopwatch.GetElapsedTime(pausedStarted) > TimeSpan.FromSeconds(1) || pausedMove.MapPartyTargetPollCount != 0 ||
+            pausedMove.PauseCount != 0 || !IsStalledNativeSettlementMove(pausedWatch.NativeReceipt, "safe-town") ||
+            IsCampaignTimeAdvancing(pausedWatch.NativeReceipt))
+            throw new AgentHostException("campaign-map-movement-stopped-clock-wait-return-failed", "A settlement move order left active while Native Campaign time is stopped must return immediately to its caller, without ten seconds of model-paid waiting or a clock action.");
+
         return [
             new { scenario = "campaign-map-movement-passively-polls-visible-hostile-bandits-and-pauses-as-a-separate-native-control", partyTargetPolls = visible.MapPartyTargetPollCount, pauseCount = visible.PauseCount, extraModelDecisions = 0, passed = true },
             new { scenario = "campaign-map-movement-does-not-pause-for-neutral-party-observations", partyTargetPolls = neutral.MapPartyTargetPollCount, pauseCount = neutral.PauseCount, passed = true },
-            new { scenario = "campaign-map-movement-returns-current-map-conversation-before-wait-window-ends", partyTargetPolls = mapConversation.MapPartyTargetPollCount, pauseCount = mapConversation.PauseCount, clockChanged = false, passed = true }
+            new { scenario = "campaign-map-movement-returns-current-map-conversation-before-wait-window-ends", partyTargetPolls = mapConversation.MapPartyTargetPollCount, pauseCount = mapConversation.PauseCount, clockChanged = false, passed = true },
+            new { scenario = "campaign-map-movement-returns-paused-native-move-without-wall-clock-delay-or-clock-action", partyTargetPolls = pausedMove.MapPartyTargetPollCount, pauseCount = pausedMove.PauseCount, passed = true }
         ];
     }
 
@@ -164,10 +214,9 @@ internal static class AgentHostNativeMapMovementMonitor
         var location = state?["location"] as JsonObject;
         var party = state?["party"] as JsonObject;
         var current = ReadString(location, "currentSettlementId");
-        var timeMode = ReadString(native, "timeControlMode") ?? ReadString(context, "timeControlMode");
         var conversationActive = context?["conversation"] is JsonObject;
         return ReadString(native, "status") == "completed" && ReadString(context, "gameState") == "MapState" &&
-               timeMode is not null and not "Stop" && string.IsNullOrWhiteSpace(ReadString(context, "menuId")) &&
+               IsCampaignTimeAdvancing(native) && string.IsNullOrWhiteSpace(ReadString(context, "menuId")) &&
                !conversationActive &&
                !ReadBoolean(context, "escapeMenuOpen") && !ReadBoolean(context, "inquiryOpen") &&
                !ReadBoolean(context, "encounterActive") && !ReadBoolean(context, "isWaitMenu") && !ReadBoolean(context, "isWaitActive") &&
@@ -196,9 +245,9 @@ internal static class AgentHostNativeMapMovementMonitor
     private static bool ReadBoolean(JsonObject? value, string name) =>
         value?[name] is JsonValue node && node.TryGetValue<bool>(out var result) && result;
 
-    private sealed class FakeVisibleBanditMoveClient(bool visibleHostileBandit, bool openConversationAfterFirstPoll = false) : IAgentHostBattleSimulationNativeClient
+    private sealed class FakeVisibleBanditMoveClient(bool visibleHostileBandit, bool openConversationAfterFirstPoll = false, bool initiallyPaused = false) : IAgentHostBattleSimulationNativeClient
     {
-        private bool _paused;
+        private bool _paused = initiallyPaused;
         private bool _mapConversationActive;
         internal int MapPartyTargetPollCount { get; private set; }
         internal int PauseCount { get; private set; }

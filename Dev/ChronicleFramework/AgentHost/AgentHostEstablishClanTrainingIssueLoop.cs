@@ -285,6 +285,18 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
             nonTrainingBattleControl.OfType<JsonValue>().Any(control => control.GetValue<string>() == "resolveVisibleBandit"))
             throw new AgentHostException("training-issue-self-test-hidden-clock-control", "Ordinary map movement and bounded Host observations must not introduce an implicit or unrelated clock command.");
 
+        var advancingTrainingMove = MapState(null, moving: true);
+        advancingTrainingMove["timeControlMode"] = "StoppablePlay";
+        ((advancingTrainingMove["state"]?["context"]) as JsonObject)!["timeControlMode"] = "StoppablePlay";
+        var pausedTrainingMove = MapState(null, moving: true);
+        pausedTrainingMove["timeControlMode"] = "Stop";
+        ((pausedTrainingMove["state"]?["context"]) as JsonObject)!["timeControlMode"] = "Stop";
+        pausedTrainingMove["state"]!["location"] = new JsonObject { ["currentSettlementId"] = null, ["targetSettlementId"] = "town-a", ["targetPartyId"] = null };
+        if (!BuildControlCatalog(advancingTrainingMove, activeTrainingIssue: true).OfType<JsonValue>().Any(control => control.GetValue<string>() == "observeAgain") ||
+            BuildControlCatalog(pausedTrainingMove, activeTrainingIssue: true).OfType<JsonValue>().Any(control => control.GetValue<string>() == "observeAgain") ||
+            !AgentHostNativeMapMovementMonitor.IsStalledNativeSettlementMove(pausedTrainingMove))
+            throw new AgentHostException("training-issue-self-test-paused-move-wait-gate-failed", "A TrainingIssue settlement move may expose passive observeAgain only while Native time is advancing; a stopped move must return to the parent for its bounded Native Move recovery.");
+
         var returnInquiry = new JsonObject
         {
             ["supported"] = true, ["kind"] = "YesNoInquiry",
@@ -489,6 +501,22 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                     failure = "The original Establish Your Clan quest is no longer active; this route cannot claim its Journal progress.";
                     failureCode = "training-issue-eyc-not-active";
                     termination = failureCode;
+                    break;
+                }
+
+                if (AgentHostNativeMapMovementMonitor.IsStalledNativeSettlementMove(currentNative))
+                {
+                    failure = "The Native settlement move remains active while Campaign time is stopped; return it to the EYC parent for the existing bounded original-Move recovery.";
+                    failureCode = "native-stalled-move-returned-by-training-issue";
+                    termination = failureCode;
+                    trace.Add(new JsonObject
+                    {
+                        ["stage"] = "training-issue-returned-paused-native-move-to-parent",
+                        ["campaignDay"] = currentNative?["campaignDay"]?.DeepClone(),
+                        ["targetSettlementId"] = ReadString(state["location"] as JsonObject, "targetSettlementId"),
+                        ["nativeMoveReissueRequired"] = true,
+                        ["explicitClockAction"] = false
+                    });
                     break;
                 }
 
@@ -1068,6 +1096,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                 .Any(item => ReadString(item, "type") == "bandit" && ReadBoolean(item, "hostile")) == true)
             return new JsonArray("resolveVisibleBandit");
         if (ReadString(context, "gameState") == "MapState" && ReadString(context, "menuId") is null && ReadBoolean(party, "isMoving") &&
+            AgentHostNativeMapMovementMonitor.IsCampaignTimeAdvancing(native) &&
             !ReadBoolean(context, "escapeMenuOpen") && !ReadBoolean(context, "inquiryOpen") && !ReadBoolean(context, "encounterActive") &&
             context?["conversation"] is not JsonObject)
             return new JsonArray("observeAgain");

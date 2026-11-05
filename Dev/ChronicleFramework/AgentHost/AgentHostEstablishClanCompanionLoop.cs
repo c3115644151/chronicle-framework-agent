@@ -206,8 +206,10 @@ internal static class AgentHostEstablishClanCompanionLoop
             !durationRejection.Contains("DurationSeconds [8, 20]", StringComparison.Ordinal) ||
             !durationRejection.Contains("no Native action was sent", StringComparison.Ordinal))
             throw new AgentHostException("establish-clan-companion-unlisted-navigation-duration-feedback-failed", "An unlisted navigation lease must be rejected before Native execution and identify only the current exact agent/duration values.");
-        if (BuildControlCatalog(false, false, false, false).Any(control => control?.GetValue<string>() == "stop") ||
-            !BuildControlCatalog(true, false, false, false).Any(control => control?.GetValue<string>() == "stop"))
+        if (BuildControlCatalog(false, false, false, false, false).Any(control => control?.GetValue<string>() == "stop") ||
+            !BuildControlCatalog(true, false, false, false, false).Any(control => control?.GetValue<string>() == "stop") ||
+            BuildControlCatalog(true, true, false, false, false).Any(control => control?.GetValue<string>() == "observeAgain") ||
+            !BuildControlCatalog(true, true, false, false, true).Any(control => control?.GetValue<string>() == "observeAgain"))
             throw new AgentHostException("establish-clan-companion-stop-scope-invalid", "A subgoal may stop for parent replan only from a free Native Map, never from inside a Mission.");
 
         var safeMap = FilterSafeTowns(new JsonArray
@@ -585,6 +587,11 @@ internal static class AgentHostEstablishClanCompanionLoop
                 var mapMovementPending = !mapConversationActive && gameState == "MapState" && !string.IsNullOrWhiteSpace(moveTargetId) &&
                     !string.Equals(currentSettlementId, moveTargetId, StringComparison.Ordinal) && (nativeMoveActive || moveStartPending);
 
+                var movementNativeState = JsonNode.Parse(nativeState.RootElement.GetRawText())?.AsObject()
+                    ?? throw new AgentHostException("companion-movement-state-invalid", "The current Native state could not be cloned for the stopped-move recovery check.");
+                if (!sceneNotificationActive && AgentHostNativeMapMovementMonitor.IsStalledNativeSettlementMove(movementNativeState, moveTargetId))
+                    return BuildResult("interrupted", "native-stalled-move-returned-by-companion", "The Native settlement move remains active while Campaign time is stopped; return it to the EYC parent for the existing bounded original-Move recovery.", "native-stalled-move-returned-by-companion", state, journal, objective);
+
                 if (!sceneNotificationActive && mapMovementPending)
                 {
                     // Native map movement already selects its normal StoppablePlay mode.
@@ -651,7 +658,8 @@ internal static class AgentHostEstablishClanCompanionLoop
                     missionWaitPending = false;
                 }
                 var actionPending = !sceneNotificationActive && (mapMovementPending || menuArrivalPending || missionNavigationActive || missionLeaveActive || missionTransitionPending);
-                var controls = BuildControlCatalog(gameState == "MapState", !sceneNotificationActive && (mapMovementPending || menuArrivalPending), missionNavigationActive, missionLeaveActive || missionTransitionPending);
+                var controls = BuildControlCatalog(gameState == "MapState", !sceneNotificationActive && (mapMovementPending || menuArrivalPending), missionNavigationActive, missionLeaveActive || missionTransitionPending,
+                    AgentHostNativeMapMovementMonitor.IsCampaignTimeAdvancing(state));
                 var catalog = BuildActionCatalog(state, journal, objective, safeTowns, sceneAgentsReceipt, selectedHeroId,
                     moveTargetId, actionPending, visitedTowns, excludedHeroes);
                 if (liveGoalAhead && !sceneNotificationActive)
@@ -1342,11 +1350,11 @@ internal static class AgentHostEstablishClanCompanionLoop
         return catalog;
     }
 
-    private static JsonArray BuildControlCatalog(bool allowStop, bool mapMovementPending, bool missionNavigationActive, bool missionLeaveActive)
+    private static JsonArray BuildControlCatalog(bool allowStop, bool mapMovementPending, bool missionNavigationActive, bool missionLeaveActive, bool mapMovementTimeAdvancing)
     {
         var controls = new JsonArray();
         if (allowStop) controls.Add("stop");
-        if (mapMovementPending || missionNavigationActive || missionLeaveActive) controls.Add("observeAgain");
+        if (mapMovementPending && mapMovementTimeAdvancing || missionNavigationActive || missionLeaveActive) controls.Add("observeAgain");
         return controls;
     }
 

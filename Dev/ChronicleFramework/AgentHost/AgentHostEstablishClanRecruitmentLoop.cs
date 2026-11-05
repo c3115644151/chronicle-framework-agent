@@ -104,12 +104,27 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         var prefixStateBefore = (JsonObject)manyTargetState.DeepClone();
         prefixStateBefore["location"] = new JsonObject { ["currentSettlementId"] = null, ["targetSettlementId"] = "settlement-00", ["mapPositionX"] = 100.0 };
         prefixStateBefore["party"] = new JsonObject { ["isMoving"] = true, ["speed"] = 4.2 };
+        var prefixContext = prefixStateBefore["context"] as JsonObject;
+        if (prefixContext is null)
+        {
+            prefixContext = new JsonObject();
+            prefixStateBefore["context"] = prefixContext;
+        }
+        prefixContext["timeControlMode"] = "StoppablePlay";
         var prefixStateAfter = (JsonObject)prefixStateBefore.DeepClone();
         prefixStateAfter["location"]!["mapPositionX"] = 101.0;
         var prefixJournal = new JsonArray(new JsonObject { ["objectiveId"] = "partySize", ["current"] = 4, ["target"] = 25 });
         var prefixObjective = new JsonObject { ["partySize"] = new JsonObject { ["current"] = 4, ["target"] = 25, ["met"] = false } };
         var movementCatalog = BuildActionCatalog(prefixStateBefore, prefixObjective, targetPage0, null, "settlement-00", moving: true);
-        var movementControls = BuildControlCatalog(moving: true, movementCatalog.Count);
+        var movementControls = BuildControlCatalog(prefixStateBefore, moving: true, movementCatalog.Count);
+        var pausedMovementState = (JsonObject)prefixStateBefore.DeepClone();
+        var pausedMovementContext = pausedMovementState["context"] as JsonObject;
+        if (pausedMovementContext is null) throw new AgentHostException("establish-clan-recruitment-paused-move-fixture-invalid", "The movement regression fixture needs its Native context.");
+        pausedMovementContext["timeControlMode"] = "Stop";
+        var pausedMovementControls = BuildControlCatalog(pausedMovementState, moving: true, movementCatalog.Count);
+        if (!movementControls.Any(control => control?.GetValue<string>() == "observeAgain") ||
+            pausedMovementControls.Any(control => control?.GetValue<string>() == "observeAgain"))
+            throw new AgentHostException("establish-clan-recruitment-paused-move-observe-gate-failed", "PartySize may request passive observation only while Campaign time naturally advances; a paused settlement move must return to the EYC parent for Native Move recovery.");
         JsonObject BuildLegacyPromptRequest(JsonObject state, int iteration)
         {
             var oldObservation = new JsonObject
@@ -724,6 +739,8 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             {
                 elapsed.Token.ThrowIfCancellationRequested();
                 using var nativeState = await campaignClient.ReadStateAsync(elapsed.Token);
+                var nativeStateRoot = JsonNode.Parse(nativeState.RootElement.GetRawText())?.AsObject()
+                    ?? throw new AgentHostException("recruitment-state-unavailable", "Native did not provide a cloneable current Campaign state.");
                 var state = ReadState(nativeState.RootElement)
                     ?? throw new AgentHostException("recruitment-state-unavailable", "Native did not provide the current Campaign state.");
                 var campaignDay = ReadDouble(nativeState.RootElement, "campaignDay");
@@ -773,6 +790,8 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                     return BuildResult("failed", "campaign-map-unavailable", "Recruitment can only proceed from the original Campaign MapState or the source-verified StoryMode villager conversation.", "recruitment-map-unavailable", state, currentRecruitOffers);
                 if (AgentHostCampaignStateFacts.IsActiveEncounter(state) && !villagersInNeedConversation)
                     return BuildResult("interrupted", "encounter-resolution-required", "A Native encounter interrupted travel; the EYC supervisor must resolve or leave that encounter before recruiting.", "recruitment-encounter", state, currentRecruitOffers);
+                if (AgentHostNativeMapMovementMonitor.IsStalledNativeSettlementMove(nativeStateRoot))
+                    return BuildResult("interrupted", "native-stalled-move-returned-by-recruitment", "The Native settlement move remains active while Campaign time is stopped; return it to the EYC parent for the existing bounded original-Move recovery.", "native-stalled-move-returned-by-recruitment", state, currentRecruitOffers);
 
                 var journal = await ReadJournalAsync(questDetailsClient, elapsed.Token);
                 var objective = AgentHostEstablishYourClanGoalLoop.BuildObjectiveSnapshot(journal);
@@ -837,7 +856,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                     settlementTargetPageStartIndex + (visibleRecruitmentTargets?.Count ?? 0) < lastMapTargets.Count;
                 var catalog = BuildActionCatalog(state, objective, visibleRecruitmentTargets, currentRecruitOffers, moveTargetId,
                     movementPending, currentPrisonerRecruitOptions, moreSafeRecruitmentTargetsAvailable);
-                var controls = BuildControlCatalog(movementPending, catalog.Count);
+                var controls = BuildControlCatalog(state, movementPending, catalog.Count);
                 var observation = BuildObservation(state, journal, objective, visibleRecruitmentTargets, currentRecruitOffers, previousReceipt,
                     feedback, currentPrisonerRecruitOptions, settlementTargetPageStartIndex, lastMapTargets?.Count ?? 0,
                     moreSafeRecruitmentTargetsAvailable);
@@ -1847,10 +1866,10 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         };
     }
 
-    private static JsonArray BuildControlCatalog(bool moving, int actionCount)
+    private static JsonArray BuildControlCatalog(JsonObject? state, bool moving, int actionCount)
     {
         var controls = new JsonArray("stop");
-        if (moving && actionCount == 0) controls.Add("observeAgain");
+        if (moving && actionCount == 0 && AgentHostNativeMapMovementMonitor.IsCampaignTimeAdvancing(state)) controls.Add("observeAgain");
         return controls;
     }
 

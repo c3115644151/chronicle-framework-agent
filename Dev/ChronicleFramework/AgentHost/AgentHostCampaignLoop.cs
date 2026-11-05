@@ -203,10 +203,20 @@ internal static class AgentHostCampaignLoop
         results.Add(new { scenario = "campaign-loop-does-not-repeat-map-query-after-empty-result", passed = true });
 
         var movingActions = BuildActionCatalog(safeTargets, moving: true, goalVerified: false);
-        var movingControls = BuildControlCatalog(moving: true, goalVerified: false);
+        var advancingMapMove = new JsonObject
+        {
+            ["context"] = new JsonObject { ["gameState"] = "MapState", ["menuId"] = null, ["timeControlMode"] = "StoppablePlay" },
+            ["party"] = new JsonObject { ["isMoving"] = true },
+            ["location"] = new JsonObject { ["currentSettlementId"] = null, ["targetSettlementId"] = "safe" }
+        };
+        var movingControls = BuildControlCatalog(moving: true, goalVerified: false, state: advancingMapMove);
         if (movingActions.Count != 0 || movingControls.Count != 1 ||
             !string.Equals(movingControls[0]?.GetValue<string>(), "observeAgain", StringComparison.Ordinal))
             throw new AgentHostException("campaign-loop-self-test-natural-wait-failed", "During movement the Host may only passively re-observe; it must not offer a game clock action.");
+        var pausedMapMove = (JsonObject)advancingMapMove.DeepClone();
+        pausedMapMove["context"]!["timeControlMode"] = "Stop";
+        if (BuildControlCatalog(moving: true, goalVerified: false, state: pausedMapMove).Any(control => control?.GetValue<string>() == "observeAgain"))
+            throw new AgentHostException("campaign-loop-self-test-stopped-move-does-not-sell-observe-waits", "A stopped Native settlement move must return to its EYC parent; repeated wall-clock waits cannot replace time progression or Native Move recovery.");
         results.Add(new { scenario = "campaign-loop-movement-exposes-only-passive-observation", passed = true });
 
         var movementInterruptedByBanditMeeting = new JsonObject
@@ -486,6 +496,13 @@ internal static class AgentHostCampaignLoop
             {
                 elapsed.Token.ThrowIfCancellationRequested();
                 var before = currentNative ?? throw new AgentHostException("native-observation-missing", "The Host lost its current Native observation.");
+                if (AgentHostNativeMapMovementMonitor.IsStalledNativeSettlementMove(before))
+                {
+                    failure = "The Native settlement move remains active while Campaign time is stopped; return the exact move target to its EYC parent for bounded Native Move recovery.";
+                    failureCode = "native-stalled-move-returned-by-campaign-loop";
+                    terminationReason = failureCode;
+                    break;
+                }
                 var targetReached = moveTargetId != null && string.Equals(ReadStateString(before, "location", "currentSettlementId"), moveTargetId, StringComparison.Ordinal);
                 var isMapState = string.Equals(ReadStateString(before, "context", "gameState"), "MapState", StringComparison.Ordinal);
                 if (!isMapState)
@@ -1121,7 +1138,7 @@ internal static class AgentHostCampaignLoop
             ((AgentHostCampaignStateFacts.IsActiveEncounter(state) && !AgentHostCampaignStateFacts.IsNativeLocationMenu(state)) ||
              ReadBoolean(context, "escapeMenuOpen") || ReadBoolean(context, "inquiryOpen") || context?["conversation"] is JsonObject))
             return controls;
-        if (moving) controls.Add("observeAgain");
+        if (moving && AgentHostNativeMapMovementMonitor.IsCampaignTimeAdvancing(state)) controls.Add("observeAgain");
         if (goalVerified) controls.Add("done");
         return controls;
     }

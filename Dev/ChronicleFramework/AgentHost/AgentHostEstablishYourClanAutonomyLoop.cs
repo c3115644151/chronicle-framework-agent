@@ -245,6 +245,13 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             TryGetStalledNativeSettlementMove(activeSettlementMove.RootElement, out _) ||
             TryGetStalledNativeSettlementMove(stoppedPartyPursuit.RootElement, out _))
             throw new AgentHostException("establish-clan-autonomy-stopped-move-recovery-classification-failed", "Only a stopped in-flight Native settlement move with a current target and no encounter/modal may be reissued; active-time movement and party pursuit must not be rewritten.");
+        var stoppedMoveChildFailure = new JsonObject { ["status"] = "failed", ["failureCode"] = "native-stalled-move-returned-by-training-issue" };
+        if (!ShouldReturnPausedNativeMoveToParent(stoppedMoveChildFailure, stoppedSettlementMove.RootElement, out var returnedStalledTarget) ||
+            returnedStalledTarget != "town-a" ||
+            ShouldReturnPausedNativeMoveToParent(new JsonObject { ["status"] = "completed" }, stoppedSettlementMove.RootElement, out _) ||
+            ShouldReturnPausedNativeMoveToParent(stoppedMoveChildFailure, activeSettlementMove.RootElement, out _))
+            throw new AgentHostException("establish-clan-autonomy-child-paused-move-handoff-failed", "A child route that returns a stopped settlement move must hand the exact current target to the parent recovery; completed children and active-time moves must not be intercepted.");
+        results.Add(new { scenario = "establish-clan-autonomy-reissues-parent-visible-native-move-after-child-paused-clock-without-model-loop", passed = true });
         results.Add(new { scenario = "establish-clan-autonomy-detects-only-stopped-in-flight-native-settlement-moves", passed = true });
 
         using var stoppedVisibleSettlementMove = JsonDocument.Parse("""
@@ -1079,6 +1086,20 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         });
                         continue;
                     }
+                    if (ShouldReturnPausedNativeMoveToParent(child, failedState.RootElement, out var pausedMoveTarget))
+                    {
+                        trace.Add(new JsonObject
+                        {
+                            ["stage"] = "objective-child-returned-paused-native-move-to-parent",
+                            ["objectiveId"] = objectiveId,
+                            ["targetSettlementId"] = pausedMoveTarget,
+                            ["childFailureCode"] = ReadString(child, "failureCode"),
+                            ["nativeMoveReissueRequired"] = true,
+                            ["explicitClockAction"] = false,
+                            ["replayedChildActions"] = false
+                        });
+                        continue;
+                    }
                     var freeMap = IsFreeMapForObjectiveReplan(failedState.RootElement);
                     var childFailureCode = ReadString(child, "failureCode");
 
@@ -1727,6 +1748,20 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             return false;
         var location = JsonNode.Parse(locationElement.GetRawText())?.AsObject();
         if (ReadString(location, "targetPartyId") is not null) return false;
+        targetSettlementId = ReadString(location, "targetSettlementId") ?? string.Empty;
+        return !string.IsNullOrWhiteSpace(targetSettlementId);
+    }
+
+    internal static bool ShouldReturnPausedNativeMoveToParent(JsonObject? child, JsonElement native, out string targetSettlementId)
+    {
+        targetSettlementId = string.Empty;
+        if (ReadString(child, "status") is not ("failed" or "interrupted") ||
+            native.ValueKind != JsonValueKind.Object || ReadString(native, "status") != "completed" ||
+            !native.TryGetProperty("state", out var stateElement) || stateElement.ValueKind != JsonValueKind.Object)
+            return false;
+        var nativeNode = JsonNode.Parse(native.GetRawText())?.AsObject();
+        if (!AgentHostNativeMapMovementMonitor.IsStalledNativeSettlementMove(nativeNode)) return false;
+        var location = nativeNode?["state"]?["location"] as JsonObject;
         targetSettlementId = ReadString(location, "targetSettlementId") ?? string.Empty;
         return !string.IsNullOrWhiteSpace(targetSettlementId);
     }
