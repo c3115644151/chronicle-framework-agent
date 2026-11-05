@@ -762,6 +762,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
 
             var routedVia = ReadResponseHeader(response, "X-Routed-Via");
             if (!string.IsNullOrWhiteSpace(routedVia)) _lastProviderRoute = routedVia;
+            var fallbackAttempts = ReadFallbackAttemptCount(response);
+            var fallbackTrail = SafeFallbackTrail(ReadResponseHeader(response, "X-Fallback-Trail"));
             double? estimatedCostCny = null;
             if (IsDeepSeekApi(_settings.Endpoint) && promptTokens.HasValue && completionTokens.HasValue)
             {
@@ -795,7 +797,9 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 deepSeekInputTokenEstimate?.ReservedTokens,
                 deepSeekInputTokenEstimate?.Method,
                 _proxySelectionSource,
-                _proxyEndpointHostPort);
+                _proxyEndpointHostPort,
+                fallbackAttempts,
+                fallbackTrail);
         }
     }
 
@@ -817,6 +821,22 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         if (!response.Headers.TryGetValues(headerName, out var values)) return null;
         var value = values.FirstOrDefault()?.Trim();
         return string.IsNullOrWhiteSpace(value) ? null : value[..Math.Min(value.Length, 160)];
+    }
+
+    private static int? ReadFallbackAttemptCount(HttpResponseMessage response)
+    {
+        var value = ReadResponseHeader(response, "X-Fallback-Attempts");
+        return int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var count) && count is >= 0 and <= 100
+            ? count
+            : null;
+    }
+
+    private static string? SafeFallbackTrail(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        return new string(value.Take(160).Select(character => char.IsLetterOrDigit(character) || character is '.' or '_' or ':' or '/' or '@' or '+' or '-' or '=' or ';' or ' '
+            ? character
+            : '_').ToArray());
     }
 
     private static string SafeDiagnosticField(string? value)
@@ -1588,7 +1608,9 @@ internal sealed record ProviderDecisionResult(
     int? DeepSeekReservedInputTokens = null,
     string? DeepSeekInputTokenEstimator = null,
     string? ProxySelectionSource = null,
-    string? ProxyEndpointHostPort = null);
+    string? ProxyEndpointHostPort = null,
+    int? FallbackAttempts = null,
+    string? FallbackTrail = null);
 
 internal sealed class AgentHostException : Exception
 {

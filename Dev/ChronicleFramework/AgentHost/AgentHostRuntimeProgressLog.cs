@@ -138,6 +138,8 @@ internal static class AgentHostRuntimeProgressLog
             ["runId"] = runId,
             ["modelId"] = result.ModelId,
             ["routedVia"] = result.RoutedVia,
+            ["fallbackAttempts"] = result.FallbackAttempts,
+            ["fallbackTrail"] = result.FallbackTrail,
             ["proxySelectionSource"] = result.ProxySelectionSource,
             ["proxyEndpointHostPort"] = result.ProxyEndpointHostPort,
             ["responseFormatMode"] = result.ResponseFormatMode,
@@ -550,7 +552,8 @@ internal static class AgentHostRuntimeProgressLog
                 RecordRunStarted(request.RootElement);
                 RecordDecision(request.RootElement, new ProviderDecisionResult("completed", "deepseek-flash", 321, 40,
                     "required_tool_call", decision, "deepseek-flash", PromptCacheHitTokens: 12, PromptCacheMissTokens: 34,
-                    EstimatedCostCny: 0.01, ReservedCostUpperBoundCny: 0.04), configuredRunCostLimitCny: 5);
+                    EstimatedCostCny: 0.01, ReservedCostUpperBoundCny: 0.04, FallbackAttempts: 2,
+                    FallbackTrail: "ovh/model=rate_limited; nvidia/model=upstream_502"), configuredRunCostLimitCny: 5);
                 var childRequest = JsonNode.Parse(request.RootElement.GetRawText()) as JsonObject
                     ?? throw new AgentHostException("runtime-progress-child-request-self-test-failed", "The child subflow request fixture must be an object.");
                 childRequest["runId"] = validRun + "-battle-inquiry-1";
@@ -587,6 +590,8 @@ internal static class AgentHostRuntimeProgressLog
             if (productLogLines.Length != 7 || productLogLines.Any(line => line.Contains("PRIVATE_", StringComparison.Ordinal) ||
                     line.Contains("PRIVATE_OPTION_VALUE", StringComparison.Ordinal)) ||
                 ReadString(JsonNode.Parse(productLogLines[1]) as JsonObject, "event") != "provider-decision" ||
+                ReadInt(JsonNode.Parse(productLogLines[1]) as JsonObject, "fallbackAttempts") != 2 ||
+                ReadString(JsonNode.Parse(productLogLines[1]) as JsonObject, "fallbackTrail") != "ovh/model=rate_limited; nvidia/model=upstream_502" ||
                 ReadString(childDecision, "event") != "provider-decision" ||
                 ReadString(childDecision, "runId") != validRun + "-battle-inquiry-1" ||
                 ReadString(childDecision, "goalClassification") != "supported-map-arrival" ||

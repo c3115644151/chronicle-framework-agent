@@ -980,6 +980,25 @@ internal static class ProviderContractSelfTest
         await ExpectProviderErrorAsync(settings, statusCode: HttpStatusCode.ServiceUnavailable, expectedCode: "provider-http-error", scenario: "http-unavailable");
         results.Add(new { scenario = "http-unavailable", passed = true });
 
+        var successfulFallbackResponse = JsonResponse(BuildChatResponse(ValidDecision, "stop"));
+        successfulFallbackResponse.Headers.TryAddWithoutValidation("X-Routed-Via", "ovh/gpt-oss-20b");
+        successfulFallbackResponse.Headers.TryAddWithoutValidation("X-Fallback-Attempts", "2");
+        successfulFallbackResponse.Headers.TryAddWithoutValidation("X-Fallback-Trail", "groq/model=rate_limited; nvidia/model=upstream_502");
+        using (var successfulFallbackClient = new HttpClient(new StubHandler((_, _) => Task.FromResult(successfulFallbackResponse))) { Timeout = settings.Timeout })
+        using (var successfulFallbackProvider = new OllamaNativeProvider(settings with
+        {
+            Endpoint = new Uri("http://127.0.0.1:31415/v1/chat/completions"),
+            Model = "gpt-oss-20b",
+            ApiKey = "freellmapi-self-test-secret"
+        }, successfulFallbackClient))
+        using (var request = JsonDocument.Parse(BuildDecisionRequest()))
+        {
+            var result = await successfulFallbackProvider.DecideAsync(request.RootElement, CancellationToken.None);
+            if (result.FallbackAttempts != 2 || result.FallbackTrail != "groq/model=rate_limited; nvidia/model=upstream_502" || result.RoutedVia != "ovh/gpt-oss-20b")
+                throw new AgentHostException("provider-self-test-successful-fallback-diagnostics-missing", "A successful FreeLLMAPI response must retain its final route and upstream fallback count/trail for cost and reliability audits.");
+            results.Add(new { scenario = "freellmapi-success-records-routed-via-and-upstream-fallback-trail", passed = true });
+        }
+
         var routedFailureResponse = new HttpResponseMessage(HttpStatusCode.BadGateway);
         routedFailureResponse.Headers.TryAddWithoutValidation("X-Routed-Via", "custom/nvidia/test-model");
         routedFailureResponse.Headers.TryAddWithoutValidation("X-Fallback-Attempts", "2");
