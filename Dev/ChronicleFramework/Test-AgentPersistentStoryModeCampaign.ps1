@@ -1,6 +1,7 @@
 ﻿[CmdletBinding()]
 param(
     [ValidateRange(60,86400)][int]$HostMaxElapsedSeconds = 86400,
+    [ValidateRange(1,160)][int]$MaxProviderDecisionsPerContinuation = 160,
     [ValidateRange(5,30)][int]$FrameRate = 5,
     [int]$StartupTimeoutSeconds = 240,
     [ValidateRange(300,87000)][int]$FreshStoryModeHostTimeoutSeconds = 87000
@@ -410,7 +411,7 @@ try {
         $checkpointSaveName = New-PersistentSaveName
         Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
         $live = Invoke-JsonChild $liveModelScript @('-LoadSaveName',$sourceSaveName,'-CheckpointSaveName',$checkpointSaveName,
-            '-EstablishYourClanAutonomyLoop','-AgentHostRuntime','-FrameRate',[string]$FrameRate,
+            '-EstablishYourClanAutonomyLoop','-AgentHostRuntime','-MaxProviderDecisions',[string]$MaxProviderDecisionsPerContinuation,'-FrameRate',[string]$FrameRate,
             '-TimeoutSeconds',[string]$StartupTimeoutSeconds,'-HostMaxElapsedSeconds',[string]$HostMaxElapsedSeconds) 'LiveModelLoopResult.json'
         $liveExitCode = $live.ExitCode
         $liveEvidence = $live.Evidence

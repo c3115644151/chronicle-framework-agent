@@ -22,6 +22,7 @@ param(
     [string]$BattleSimulationSourceSaveName = 'AgentBridgeLifecycle',
     [string]$StoryModePlannerSourceSaveName = 'save002',
     [ValidateRange(60,86400)][int]$PersistentEycHostMaxElapsedSeconds = 86400,
+    [ValidateRange(1,160)][int]$PersistentEycMaxProviderDecisionsPerContinuation = 160,
     [ValidateRange(1,10)][int]$NativeMapMovementProbeWaitSeconds = 8
 )
 
@@ -654,7 +655,9 @@ foreach ($stage in $requestedStages) {
                     [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_MODEL', $FreshStoryModeModel, 'Process')
                     [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL', $FreshStoryModeModel, 'Process')
                     $testOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $persistentEycCampaignScript `
-                        -HostMaxElapsedSeconds $PersistentEycHostMaxElapsedSeconds -StartupTimeoutSeconds 240 -FrameRate 5 2>&1 | Out-String
+                        -HostMaxElapsedSeconds $PersistentEycHostMaxElapsedSeconds `
+                        -MaxProviderDecisionsPerContinuation $PersistentEycMaxProviderDecisionsPerContinuation `
+                        -StartupTimeoutSeconds 240 -FrameRate 5 2>&1 | Out-String
                     $testExitCode = $LASTEXITCODE
                     if ($testExitCode -ne 0) {
                         throw "Persistent natural StoryMode campaign has not verified original EYC completion (exit=$testExitCode). A Native checkpoint, if verified, remains selected for the next continuation."

@@ -2,6 +2,7 @@
 param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
     [string]$CheckpointSaveName,
+    [ValidateRange(1,160)][int]$MaxProviderDecisions = 160,
     [int]$TimeoutSeconds = 180,
     [ValidateRange(60,86400)][int]$HostMaxElapsedSeconds = 86400,
     [ValidateRange(5,30)][int]$FrameRate = 10,
@@ -464,7 +465,7 @@ try {
     }
     elseif ($EstablishYourClanAutonomyLoop) {
         $goal = 'Autonomously complete the exact currently active original StoryMode Establish Your Clan quest. Use its current Journal values to choose among Gold, dynamic PartySize, Renown and Companion targets; execute only the current Native routes, re-read Journal after each subgoal, and stop only after Native original quest history confirms completion. Do not inject progress, use preplanned action sequences, or hide time changes inside actions.'
-        $maxDecisions = 160
+        $maxDecisions = $MaxProviderDecisions
         $maxElapsedSeconds = $HostMaxElapsedSeconds
         $agentHostDllForCatalog = Join-Path $PSScriptRoot 'AgentHost\bin\Release\net8.0\ChronicleAgentHost.dll'
         if (-not (Test-Path -LiteralPath $agentHostDllForCatalog -PathType Leaf)) { throw 'The current Agent Host action catalog is missing; no game was launched.' }
