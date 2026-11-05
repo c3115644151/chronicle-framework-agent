@@ -196,6 +196,8 @@ if ($agentHostHarnessProgressTraceSource -notmatch 'AgentHostRuntimeProgressLog\
     $agentHostRuntimeProgressLogSource -notmatch 'providerRetryAfter' -or
     $agentHostRuntimeProgressLogSource -notmatch 'providerErrorBodyKind' -or
     $agentHostRuntimeProgressLogSource -notmatch 'providerErrorCode' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'providerFallbackAttempts' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'providerFallbackTrail' -or
     $agentHostProviderSource -notmatch 'ReadSafeProviderErrorMetadataAsync' -or
     $agentHostRuntimeProgressLogSource -notmatch 'providerRequestBodyBytes' -or
     $agentHostRuntimeProgressLogSource -notmatch 'providerFailureEventsWithoutUsage' -or
@@ -204,6 +206,8 @@ if ($agentHostHarnessProgressTraceSource -notmatch 'AgentHostRuntimeProgressLog\
     $agentHostRuntimeProgressLogSource -notmatch 'RecordBudgetReservationRejected' -or
     $agentHostHarnessProgressTraceSource -notmatch 'provider-budget-reservation-rejected' -or
     $agentHostHarnessProgressTraceSource -notmatch 'providerResponseRequestId' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'providerFallbackAttempts' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'providerFallbackTrail' -or
     $agentHostHarnessProgressTraceSource -notmatch 'providerProxyEndpointHostPort' -or
     $agentHostHarnessProgressTraceSource -notmatch 'host-progress-trace-provider-failure' -or
     $agentHostRuntimeControllerSource -notmatch 'CHRONICLE_LLM_PROXY_SELECTION_SOURCE' -or

@@ -1256,6 +1256,8 @@ internal static class ProviderContractSelfTest
         {
             perDecisionTransientLimitCalls++;
             var failed = new HttpResponseMessage(HttpStatusCode.BadGateway);
+            failed.Headers.TryAddWithoutValidation("X-Request-Id", "freeapi-request-1");
+            failed.Headers.TryAddWithoutValidation("X-Fallback-Attempts", "1");
             failed.Headers.TryAddWithoutValidation("X-Fallback-Trail", "ovh/qwen3.8-27b key1=upstream_error");
             return Task.FromResult(failed);
         });
@@ -1272,8 +1274,9 @@ internal static class ProviderContractSelfTest
             catch (AgentHostException exception) when (exception.Code == "provider-http-request-budget-exhausted")
             {
                 if (perDecisionTransientLimitCalls != 1 || DateTimeOffset.UtcNow - startedUtc > TimeSpan.FromSeconds(2) ||
-                    exception.ProviderHttpStatus != (int)HttpStatusCode.BadGateway)
-                    throw new AgentHostException("provider-self-test-transient-retry-http-request-budget-not-enforced", "The provider must stop a retryable 502 before its delay or any second HTTP request, preserving the first HTTP status.");
+                    exception.ProviderHttpStatus != (int)HttpStatusCode.BadGateway || exception.ProviderResponseRequestId != "freeapi-request-1" ||
+                    exception.ProviderFallbackAttempts != 1 || exception.ProviderFallbackTrail != "ovh/qwen3.8-27b key1=upstream_error")
+                    throw new AgentHostException("provider-self-test-transient-retry-http-request-budget-not-enforced", "The provider must stop a retryable 502 before its delay or any second HTTP request, preserving safe status, request ID and fallback metadata.");
                 results.Add(new { scenario = "freellmapi-per-decision-http-request-cap-blocks-transient-retry-before-delay", passed = true, providerCalls = perDecisionTransientLimitCalls, nativeCommands = 0 });
             }
         }

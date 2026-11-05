@@ -506,12 +506,19 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             var providerRoute = SafeOptionalDiagnosticField(precedingResponse is null
                 ? _lastProviderRoute
                 : ReadResponseHeader(precedingResponse, "X-Routed-Via") ?? _lastProviderRoute);
+            var responseRequestId = precedingResponse is null ? null : SafeOptionalDiagnosticField(ReadResponseHeader(precedingResponse, "X-Request-Id") ??
+                ReadResponseHeader(precedingResponse, "X-Correlation-Id") ?? ReadResponseHeader(precedingResponse, "CF-Ray"));
+            var fallbackAttempts = precedingResponse is null ? null : ReadFallbackAttemptCount(precedingResponse);
+            var fallbackTrail = precedingResponse is null ? null : SafeFallbackTrail(ReadResponseHeader(precedingResponse, "X-Fallback-Trail"));
             precedingResponse?.Dispose();
             throw new AgentHostException("provider-http-request-budget-exhausted",
                 $"The per-decision HTTP request limit of {_settings.MaxHttpRequestsPerDecision} was reached after {providerHttpRequestAttempts} request(s); no additional provider request was sent.",
                 providerHttpStatus: statusCode,
                 providerRoute: providerRoute,
                 providerRetryAfter: SafeOptionalDiagnosticField(retryAfter),
+                providerResponseRequestId: responseRequestId,
+                providerFallbackAttempts: fallbackAttempts,
+                providerFallbackTrail: fallbackTrail,
                 providerRetryAttempts: rateLimitRetryAttempts, providerFailureStage: "per-decision-http-request-budget",
                 providerProxySelectionSource: _proxySelectionSource, providerProxyEndpointHostPort: _proxyEndpointHostPort,
                 providerTimeoutSeconds: (int)_settings.Timeout.TotalSeconds);
@@ -1654,7 +1661,8 @@ internal sealed class AgentHostException : Exception
         string? providerFailureStage = null, string? providerProxySelectionSource = null, string? providerProxyEndpointHostPort = null, int? providerTimeoutSeconds = null,
         int? providerRequestBodyBytes = null, string? providerTransportErrorType = null, string? providerResponseServer = null,
         string? providerResponseVia = null, string? providerResponseRequestId = null, string? providerRetryAfter = null,
-        string? providerErrorBodyKind = null, string? providerErrorContentType = null, string? providerErrorType = null, string? providerErrorCode = null) : base(message, innerException)
+        string? providerErrorBodyKind = null, string? providerErrorContentType = null, string? providerErrorType = null, string? providerErrorCode = null,
+        int? providerFallbackAttempts = null, string? providerFallbackTrail = null) : base(message, innerException)
     {
         Code = code;
         ProviderHttpStatus = providerHttpStatus;
@@ -1676,6 +1684,8 @@ internal sealed class AgentHostException : Exception
         ProviderErrorContentType = providerErrorContentType;
         ProviderErrorType = providerErrorType;
         ProviderErrorCode = providerErrorCode;
+        ProviderFallbackAttempts = providerFallbackAttempts;
+        ProviderFallbackTrail = providerFallbackTrail;
     }
 
     internal string Code { get; }
@@ -1698,4 +1708,6 @@ internal sealed class AgentHostException : Exception
     internal string? ProviderErrorContentType { get; }
     internal string? ProviderErrorType { get; }
     internal string? ProviderErrorCode { get; }
+    internal int? ProviderFallbackAttempts { get; }
+    internal string? ProviderFallbackTrail { get; }
 }
