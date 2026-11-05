@@ -232,20 +232,23 @@ internal static class ProviderContractSelfTest
         }
         var priorMaxTokens = Environment.GetEnvironmentVariable("CHRONICLE_LLM_MAX_TOKENS");
         var priorTimeoutSeconds = Environment.GetEnvironmentVariable("CHRONICLE_LLM_TIMEOUT_SECONDS");
+        var priorHttpRequestLimit = Environment.GetEnvironmentVariable("CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION");
         try
         {
             Environment.SetEnvironmentVariable("CHRONICLE_LLM_MAX_TOKENS", "512");
             Environment.SetEnvironmentVariable("CHRONICLE_LLM_TIMEOUT_SECONDS", "180");
+            Environment.SetEnvironmentVariable("CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION", null);
             using var launchWithBudget = JsonDocument.Parse("{\"providerConfiguration\":{\"OllamaBaseUrl\":\"http://127.0.0.1:31415/v1\",\"ModelId\":\"auto\"}}");
             using var budgetProvider = OllamaNativeProvider.FromCampaignRequest(launchWithBudget.RootElement);
-            if (budgetProvider.ModelId != "auto" || budgetProvider.MaxOutputTokens != 512)
+            if (budgetProvider.ModelId != "auto" || budgetProvider.MaxOutputTokens != 512 || budgetProvider.MaxHttpRequestsPerDecision != 1)
                 throw new AgentHostException("freellmapi-profile-budget-self-test-failed", "Host did not apply the bounded FreeLLMAPI output budget from the current process configuration.");
-            results.Add(new { scenario = "freellmapi-profile-uses-bounded-512-token-live-model-budget", passed = true });
+            results.Add(new { scenario = "freellmapi-profile-uses-512-token-and-one-http-request-per-decision-default", passed = true });
         }
         finally
         {
             Environment.SetEnvironmentVariable("CHRONICLE_LLM_MAX_TOKENS", priorMaxTokens);
             Environment.SetEnvironmentVariable("CHRONICLE_LLM_TIMEOUT_SECONDS", priorTimeoutSeconds);
+            Environment.SetEnvironmentVariable("CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION", priorHttpRequestLimit);
         }
         using (var invalidLaunch = JsonDocument.Parse("{\"providerConfiguration\":{\"OllamaBaseUrl\":\"http://example.com/v1\",\"ModelId\":\"test\"}}"))
         {

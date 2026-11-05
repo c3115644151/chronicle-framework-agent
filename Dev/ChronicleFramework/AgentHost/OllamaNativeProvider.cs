@@ -43,6 +43,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     internal string? ProxyEndpointHostPort => _proxyEndpointHostPort;
     internal int AvailableModelCount => _availableModelCount;
     internal int MaxOutputTokens => _settings.MaxOutputTokens;
+    internal int MaxHttpRequestsPerDecision => _settings.MaxHttpRequestsPerDecision;
     internal string OutputMode => _settings.OutputMode;
     internal bool? ThinkingMode => _settings.Thinking;
     internal double? ReservedCostUpperBoundCny => IsDeepSeekApi(_settings.Endpoint) ? _reservedDeepSeekCostCny : null;
@@ -149,7 +150,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         var maximumTimeoutSeconds = nativeOllama ? 240 : 360;
         var timeoutSeconds = ReadIntegerEnvironment("CHRONICLE_LLM_TIMEOUT_SECONDS", defaultTimeoutSeconds, 5, maximumTimeoutSeconds);
         var maxOutputTokens = ReadIntegerEnvironment("CHRONICLE_LLM_MAX_TOKENS", 256, 64, 4096);
-        var maxHttpRequestsPerDecision = ReadIntegerEnvironment("CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION", 8, 1, 8);
+        var maxHttpRequestsDefault = IsFreeLlmApi(endpoint) ? 1 : 8;
+        var maxHttpRequestsPerDecision = ReadIntegerEnvironment("CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION", maxHttpRequestsDefault, 1, 8);
         var temperature = ReadOptionalDoubleEnvironment("CHRONICLE_LLM_TEMPERATURE", 0d, 2d);
         var thinkingMode = Environment.GetEnvironmentVariable("CHRONICLE_LLM_THINKING_MODE");
         bool? thinking = thinkingMode switch
@@ -244,7 +246,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             NativeOllama: false,
             Timeout: TimeSpan.FromSeconds(ReadIntegerEnvironment("CHRONICLE_LLM_TIMEOUT_SECONDS", 360, 5, 360)),
             MaxOutputTokens: ReadIntegerEnvironment("CHRONICLE_LLM_MAX_TOKENS", 256, 64, 4096),
-            MaxHttpRequestsPerDecision: ReadIntegerEnvironment("CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION", 8, 1, 8),
+            MaxHttpRequestsPerDecision: ReadIntegerEnvironment("CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION", IsFreeLlmApi(endpoint) ? 1 : 8, 1, 8),
             Temperature: 0d,
             Thinking: thinking,
             ReasoningEffort: reasoningEffort,

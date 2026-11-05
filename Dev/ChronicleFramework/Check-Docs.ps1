@@ -1012,7 +1012,7 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerProfileTestSource -notmatch 'provider-profile-reads-without-migrating-user-file' -or
     $providerProfileTestSource -notmatch 'provider-profile-error-path-mutated-file' -or
     $providerProfileTestSource -notmatch 'freellmapi-bearer-auth-available-model-preflight-and-routed-model-evidence' -or
-    $providerProfileTestSource -notmatch 'freellmapi-profile-uses-bounded-512-token-live-model-budget' -or
+    $providerProfileTestSource -notmatch 'freellmapi-profile-uses-512-token-and-one-http-request-per-decision-default' -or
     $providerProfileTestSource -notmatch 'provider-action-rationale-is-optional-and-native-catalog-still-gates' -or
     $providerHostSource -notmatch 'SelectApiKey' -or $providerHostSource -notmatch '\["anyOf"\]' -or $providerHostSource -match '\["oneOf"\]' -or
     $providerProfileTestSource -notmatch 'village-tools-prompt-uses-exact-native-action-id' -or
