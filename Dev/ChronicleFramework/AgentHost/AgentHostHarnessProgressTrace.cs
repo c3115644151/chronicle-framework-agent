@@ -225,20 +225,22 @@ internal static class AgentHostHarnessProgressTrace
             exception.ProviderOutputFormat, exception.ProviderRetryAttempts, exception.ProviderRetryWaitMilliseconds, exception.ProviderFailureStage,
             exception.ProviderProxySelectionSource, exception.ProviderTimeoutSeconds, exception.ProviderRequestBodyBytes, exception.ProviderTransportErrorType,
             exception.ProviderProxyEndpointHostPort, exception.ProviderResponseServer, exception.ProviderResponseVia, exception.ProviderResponseRequestId,
-            exception.ProviderRetryAfter, exception.ProviderErrorBodyKind, exception.ProviderErrorContentType, exception.ProviderErrorType, exception.ProviderErrorCode);
+            exception.ProviderRetryAfter, exception.ProviderErrorBodyKind, exception.ProviderErrorContentType, exception.ProviderErrorType, exception.ProviderErrorCode,
+            exception.ProviderFallbackAttempts, exception.ProviderFallbackTrail);
 
     internal static void RecordProviderFailure(JsonElement request, string failureCode, int? providerHttpStatus = null,
         string? providerRoute = null, string? providerOutputFormat = null, int? providerRetryAttempts = null, long? providerRetryWaitMilliseconds = null,
         string? providerFailureStage = null, string? providerProxySelectionSource = null, int? providerTimeoutSeconds = null,
         int? providerRequestBodyBytes = null, string? providerTransportErrorType = null, string? providerProxyEndpointHostPort = null,
         string? providerResponseServer = null, string? providerResponseVia = null, string? providerResponseRequestId = null, string? providerRetryAfter = null,
-        string? providerErrorBodyKind = null, string? providerErrorContentType = null, string? providerErrorType = null, string? providerErrorCode = null)
+        string? providerErrorBodyKind = null, string? providerErrorContentType = null, string? providerErrorType = null, string? providerErrorCode = null,
+        int? providerFallbackAttempts = null, string? providerFallbackTrail = null)
     {
         AgentHostRuntimeProgressLog.RecordProviderFailure(request, failureCode, providerHttpStatus, providerRoute,
             providerOutputFormat, providerRetryAttempts, providerRetryWaitMilliseconds, providerFailureStage,
             providerProxySelectionSource, providerTimeoutSeconds, providerRequestBodyBytes, providerTransportErrorType,
             providerProxyEndpointHostPort, providerResponseServer, providerResponseVia, providerResponseRequestId, providerRetryAfter,
-            providerErrorBodyKind, providerErrorContentType, providerErrorType, providerErrorCode);
+            providerErrorBodyKind, providerErrorContentType, providerErrorType, providerErrorCode, providerFallbackAttempts, providerFallbackTrail);
         var harnessMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
         if (harnessMode is not ("visual-capture" or "agent-host-lifecycle-test")) return;
         var directory = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
@@ -277,6 +279,8 @@ internal static class AgentHostHarnessProgressTrace
                 ["providerErrorContentType"] = providerErrorContentType,
                 ["providerErrorType"] = providerErrorType,
                 ["providerErrorCode"] = providerErrorCode,
+                ["providerFallbackAttempts"] = providerFallbackAttempts,
+                ["providerFallbackTrail"] = providerFallbackTrail,
                 ["nativeActionSent"] = false,
                 ["responseBodiesLogged"] = false,
                 ["credentialsLogged"] = false
@@ -765,7 +769,8 @@ internal static class AgentHostHarnessProgressTrace
 
             RecordProviderFailure(request.RootElement, "provider-http-error", 429, "api.deepseek.com", "required_tool_call", 2, 1500,
                 "http-response-status", "local-listener", 360, 12000, "HttpRequestException",
-                "127.0.0.1:7890", "cloudflare", "1.1 proxy", "req-123", "30", "json-error", "application/json", "server_error", "overloaded");
+                "127.0.0.1:7890", "cloudflare", "1.1 proxy", "req-123", "30", "json-error", "application/json", "server_error", "overloaded",
+                providerFallbackAttempts: 2, providerFallbackTrail: "ovh/model=rate_limited; nvidia/model=upstream_502");
             var providerFailureLine = JsonNode.Parse(File.ReadAllLines(path).Last()) as JsonObject;
             if (ReadString(providerFailureLine, "event") != "provider-failure" ||
                 ReadString(providerFailureLine, "failureCode") != "provider-http-error" ||
@@ -786,6 +791,8 @@ internal static class AgentHostHarnessProgressTrace
                 ReadString(providerFailureLine, "providerErrorContentType") != "application/json" ||
                 ReadString(providerFailureLine, "providerErrorType") != "server_error" ||
                 ReadString(providerFailureLine, "providerErrorCode") != "overloaded" ||
+                ReadInt(providerFailureLine, "providerFallbackAttempts") != 2 ||
+                ReadString(providerFailureLine, "providerFallbackTrail") != "ovh/model=rate_limited; nvidia/model=upstream_502" ||
                 providerFailureLine?.ContainsKey("responseBody") == true || providerFailureLine?.ContainsKey("apiKey") == true)
                 throw new AgentHostException("host-progress-trace-provider-failure", "Harness diagnostics must persist bounded HTTP status/retry metadata without response bodies or credentials.");
 
