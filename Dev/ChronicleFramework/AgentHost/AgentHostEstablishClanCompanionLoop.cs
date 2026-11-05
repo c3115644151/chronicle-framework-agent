@@ -594,19 +594,19 @@ internal static class AgentHostEstablishClanCompanionLoop
 
                 if (!sceneNotificationActive && mapMovementPending)
                 {
-                    // Native map movement already selects its normal StoppablePlay mode.
+                    // Native map movement normally selects StoppablePlay, but it may
+                    // return Stop while the order still appears active. Yield that
+                    // stalled state to the parent instead of spinning this poll loop.
                     // Watch Native visible Bandits during that natural travel. This is a
                     // bounded nearest-Town decision window: observe active Native movement
                     // During Native movement, do not spend a model decision or issue another move/time command.
-                    var movementNative = JsonNode.Parse(nativeState.RootElement.GetRawText())?.AsObject()
-                        ?? throw new AgentHostException("companion-movement-state-invalid", "The current Native Map observation could not be cloned for the hostile-party monitor.");
                     var movementWatch = await AgentHostNativeMapMovementMonitor.WaitAsync(
                         campaignClient,
                         campaignClient as IAgentHostBattleSimulationNativeClient,
-                        movementNative,
+                        movementNativeState,
                         moveTargetId,
                         1,
-                        monitorVisibleBandits: AgentHostNativeMapMovementMonitor.HasActiveEycQuest(movementNative),
+                        monitorVisibleBandits: AgentHostNativeMapMovementMonitor.HasActiveEycQuest(movementNativeState),
                         elapsed.Token);
                     state = movementWatch.NativeState;
                     actionsExecuted += movementWatch.MapPartyTargetPollCount + (movementWatch.PauseReceipt is null ? 0 : 1);
