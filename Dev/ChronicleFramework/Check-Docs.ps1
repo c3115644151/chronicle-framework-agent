@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.545'
+$contractVersion = '7.546'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -932,8 +932,9 @@ if ($harnessScript -notmatch "HarnessContractVersion\s*=\s*'$contractVersion'") 
 }
 if ($harnessScript -notmatch "PersistentEycMaxProviderDecisionsPerContinuation\s*=\s*1" -or
     $persistentStoryModeCampaignScript -notmatch "MaxProviderDecisionsPerContinuation\s*=\s*1" -or
-    $harnessScript -notmatch "FreshStoryModeModel\s*=\s*'gemma-4-e4b-uncensored-hauhaucs-aggressive-q4-k-m'") {
-    throw 'Persistent StoryMode model runs must default to one provider decision and the explicitly selected FreeLLMAPI AI Horde model.'
+    $harnessScript -notmatch "FreshStoryModeModel\s*=\s*''" -or
+    $harnessScript -notmatch "Select a verified FreeLLMAPI model explicitly with -FreshStoryModeModel; no game or model request was started\.") {
+    throw 'Persistent StoryMode runs must default to one provider decision and require explicit model selection before starting the game.'
 }
 $autonomyStages = [regex]::Match($harnessScript, "'AgentHostEstablishClanAutonomyEvaluation'\s*\{\s*@\(([^)]*)\)")
 $autonomyStageList = if ($autonomyStages.Success) { $autonomyStages.Groups[1].Value } else { '' }
