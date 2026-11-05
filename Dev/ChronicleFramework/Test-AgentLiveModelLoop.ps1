@@ -3,7 +3,7 @@ param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
     [string]$CheckpointSaveName,
     [int]$TimeoutSeconds = 180,
-    [ValidateRange(60,7200)][int]$HostMaxElapsedSeconds = 7200,
+    [ValidateRange(60,86400)][int]$HostMaxElapsedSeconds = 86400,
     [ValidateRange(5,30)][int]$FrameRate = 10,
     [switch]$ArrivalLoop,
     [switch]$RecruitmentLoop,
