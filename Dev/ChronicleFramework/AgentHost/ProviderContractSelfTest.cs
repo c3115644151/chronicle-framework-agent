@@ -1183,6 +1183,39 @@ internal static class ProviderContractSelfTest
             results.Add(new { scenario = "freellmapi-changing-retry-after-honors-later-in-deadline-window", passed = true, providerCalls = changingRetryAfterCalls, nativeCommands = 0 });
         }
 
+        var perDecisionRequestLimitCalls = 0;
+        var perDecisionRequestLimitHandler = new StubHandler((_, _) =>
+        {
+            perDecisionRequestLimitCalls++;
+            var limited = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+            limited.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(4));
+            return Task.FromResult(limited);
+        });
+        var perDecisionRequestLimitSettings = freeLlmApiSettings with
+        {
+            Model = "qwen3.8-27b",
+            Timeout = TimeSpan.FromSeconds(20),
+            MaxHttpRequestsPerDecision = 1
+        };
+        using (var perDecisionRequestLimitClient = new HttpClient(perDecisionRequestLimitHandler) { Timeout = perDecisionRequestLimitSettings.Timeout })
+        using (var perDecisionRequestLimitProvider = new OllamaNativeProvider(perDecisionRequestLimitSettings, perDecisionRequestLimitClient))
+        using (var request = JsonDocument.Parse(BuildActionDecisionRequest()))
+        {
+            var startedUtc = DateTimeOffset.UtcNow;
+            try
+            {
+                await perDecisionRequestLimitProvider.DecideAsync(request.RootElement, CancellationToken.None);
+                throw new AgentHostException("provider-self-test-per-decision-http-request-budget-accepted", "A second request must not be sent after a one-request decision budget is consumed.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-http-request-budget-exhausted")
+            {
+                if (perDecisionRequestLimitCalls != 1 || DateTimeOffset.UtcNow - startedUtc > TimeSpan.FromSeconds(2) ||
+                    exception.ProviderHttpStatus != (int)HttpStatusCode.TooManyRequests || exception.ProviderRetryAfter != "4")
+                    throw new AgentHostException("provider-self-test-per-decision-http-request-budget-not-enforced", "A per-decision HTTP request cap must stop before waiting or sending a retry and preserve only safe preceding-response metadata.");
+                results.Add(new { scenario = "freellmapi-per-decision-http-request-cap-blocks-rate-limit-retry-before-wait", passed = true, providerCalls = perDecisionRequestLimitCalls, nativeCommands = 0 });
+            }
+        }
+
         var exhaustionBodyRetryCalls = 0;
         var exhaustionBodyRetryHandler = new StubHandler((_, _) =>
         {

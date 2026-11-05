@@ -149,6 +149,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         var maximumTimeoutSeconds = nativeOllama ? 240 : 360;
         var timeoutSeconds = ReadIntegerEnvironment("CHRONICLE_LLM_TIMEOUT_SECONDS", defaultTimeoutSeconds, 5, maximumTimeoutSeconds);
         var maxOutputTokens = ReadIntegerEnvironment("CHRONICLE_LLM_MAX_TOKENS", 256, 64, 4096);
+        var maxHttpRequestsPerDecision = ReadIntegerEnvironment("CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION", 8, 1, 8);
         var temperature = ReadOptionalDoubleEnvironment("CHRONICLE_LLM_TEMPERATURE", 0d, 2d);
         var thinkingMode = Environment.GetEnvironmentVariable("CHRONICLE_LLM_THINKING_MODE");
         bool? thinking = thinkingMode switch
@@ -185,7 +186,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             maxTokenParameter,
             ReadApiKey(baseUri),
             outputMode,
-            maxRunCostCny));
+            maxRunCostCny,
+            maxHttpRequestsPerDecision));
     }
 
     internal static OllamaNativeProvider FromConfiguredProfile()
@@ -242,6 +244,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             NativeOllama: false,
             Timeout: TimeSpan.FromSeconds(ReadIntegerEnvironment("CHRONICLE_LLM_TIMEOUT_SECONDS", 360, 5, 360)),
             MaxOutputTokens: ReadIntegerEnvironment("CHRONICLE_LLM_MAX_TOKENS", 256, 64, 4096),
+            MaxHttpRequestsPerDecision: ReadIntegerEnvironment("CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION", 8, 1, 8),
             Temperature: 0d,
             Thinking: thinking,
             ReasoningEffort: reasoningEffort,
@@ -487,8 +490,28 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         var rateLimitRetryWaitMilliseconds = 0L;
         RateLimitRetryHint? lastRateLimitRetryHint = null;
         bool? lastRateLimitRetryFitsDeadline = null;
+        var providerHttpRequestAttempts = 0;
+        void ThrowIfProviderHttpRequestBudgetExhausted(HttpResponseMessage? precedingResponse = null)
+        {
+            if (providerHttpRequestAttempts < _settings.MaxHttpRequestsPerDecision) return;
+            var retryAfter = precedingResponse?.Headers.RetryAfter?.ToString();
+            int? statusCode = precedingResponse is null ? null : (int)precedingResponse.StatusCode;
+            var providerRoute = SafeOptionalDiagnosticField(precedingResponse is null
+                ? _lastProviderRoute
+                : ReadResponseHeader(precedingResponse, "X-Routed-Via") ?? _lastProviderRoute);
+            precedingResponse?.Dispose();
+            throw new AgentHostException("provider-http-request-budget-exhausted",
+                $"The per-decision HTTP request limit of {_settings.MaxHttpRequestsPerDecision} was reached after {providerHttpRequestAttempts} request(s); no additional provider request was sent.",
+                providerHttpStatus: statusCode,
+                providerRoute: providerRoute,
+                providerRetryAfter: SafeOptionalDiagnosticField(retryAfter),
+                providerRetryAttempts: rateLimitRetryAttempts, providerFailureStage: "per-decision-http-request-budget",
+                providerProxySelectionSource: _proxySelectionSource, providerProxyEndpointHostPort: _proxyEndpointHostPort,
+                providerTimeoutSeconds: (int)_settings.Timeout.TotalSeconds);
+        }
         async Task<HttpResponseMessage> SendProviderRequestAsync(string requestBody)
         {
+            ThrowIfProviderHttpRequestBudgetExhausted();
             try
             {
                 await WaitForProviderRateWindowAsync(requestTimeout.Token);
@@ -508,6 +531,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             AddAuthorization(message);
             try
             {
+                providerHttpRequestAttempts++;
                 return await _client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, requestTimeout.Token);
             }
             catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
@@ -577,6 +601,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 var maximumRateLimitRetries = retryHint.Source == "body-exhaustion" ? 1 : 3;
                 if (rateLimitRetryAttempts < maximumRateLimitRetries && retryHint.Delay.HasValue && lastRateLimitRetryFitsDeadline == true)
                 {
+                    ThrowIfProviderHttpRequestBudgetExhausted(response);
                     response.Dispose();
                     var retryWaitStartedUtc = DateTimeOffset.UtcNow;
                     await DelayForProviderRetryAsync(retryHint.Delay.Value, "while waiting for the bounded rate-limit retry");
@@ -1584,7 +1609,8 @@ internal sealed record OllamaProviderSettings(
     string MaxTokenParameter,
     string? ApiKey = null,
     string OutputMode = "auto",
-    double MaxEstimatedRunCostCny = 5d);
+    double MaxEstimatedRunCostCny = 5d,
+    int MaxHttpRequestsPerDecision = 8);
 
 internal sealed record ProviderDecisionResult(
     string Status,

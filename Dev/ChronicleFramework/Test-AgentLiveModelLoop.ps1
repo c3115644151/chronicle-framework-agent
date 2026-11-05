@@ -49,7 +49,7 @@ if ($EstablishYourClanGoalPlanner -and -not $AgentHostRuntime) { throw 'Establis
 if ($EstablishYourClanAutonomyLoop -and -not $AgentHostRuntime) { throw 'EstablishYourClanAutonomyLoop requires the in-game .NET Agent Host route; the older PowerShell decision loop is not product evidence.' }
 if ($EstablishClanGoldSaleLoop -and -not $AgentHostRuntime) { throw 'EstablishClanGoldSaleLoop requires the in-game .NET Agent Host route; the older PowerShell decision loop is not product evidence.' }
 if ($RoadsideBanditNegotiationLoop -and -not $RecruitmentLoop) { throw 'RoadsideBanditNegotiationLoop requires RecruitmentLoop so the encounter resolves into the existing growth goal.' }
-foreach ($setting in @('CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL','CHRONICLE_LLM_OUTPUT_MODE','CHRONICLE_LLM_MAX_RUN_COST_CNY','CHRONICLE_LLM_TIMEOUT_SECONDS','CHRONICLE_LLM_MAX_TOKENS','CHRONICLE_LLM_MAX_TOKEN_PARAMETER','CHRONICLE_LLM_REASONING_EFFORT','CHRONICLE_LLM_THINKING_MODE','CHRONICLE_LLM_TEMPERATURE','CHRONICLE_LLM_PROTOCOL')) {
+foreach ($setting in @('CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL','CHRONICLE_LLM_OUTPUT_MODE','CHRONICLE_LLM_MAX_RUN_COST_CNY','CHRONICLE_LLM_TIMEOUT_SECONDS','CHRONICLE_LLM_MAX_TOKENS','CHRONICLE_LLM_MAX_TOKEN_PARAMETER','CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION','CHRONICLE_LLM_REASONING_EFFORT','CHRONICLE_LLM_THINKING_MODE','CHRONICLE_LLM_TEMPERATURE','CHRONICLE_LLM_PROTOCOL')) {
     $configuredValue = [string][Environment]::GetEnvironmentVariable($setting, 'Process')
     if ([string]::IsNullOrWhiteSpace($configuredValue)) {
         $configuredValue = [string][Environment]::GetEnvironmentVariable($setting, 'User')
@@ -153,6 +153,7 @@ $campaignInstanceId = $null
 $priorHarnessMode = $env:CHRONICLE_HARNESS_MODE
 $priorModelTimeout = $env:CHRONICLE_LLM_TIMEOUT_SECONDS
 $priorModelMaxTokens = $env:CHRONICLE_LLM_MAX_TOKENS
+$priorModelMaxHttpRequests = $env:CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION
 $sessionStarted = $false
 $checkpointSaveOwned = $false
 $checkpointSaveCompleted = $false
@@ -246,6 +247,7 @@ try {
     $captureRecoveryProof = Test-ChronicleFragmentedCaptureResilience -EvidencePath (Join-Path $runDirectory 'FragmentedCaptureRecovery.json')
     Set-Content -LiteralPath $eventTracePath -Value '' -Encoding UTF8
     $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { 'visual-battle-fixture' } else { 'visual-capture' }
+    $env:CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION = '1'
     $loadArguments = @('-SaveName', $LoadSaveName)
     if ($EstablishYourClanGoalPlanner -or $EstablishYourClanAutonomyLoop -or $CaptivityRecoveryLoop -or $EstablishClanGoldSaleLoop) { $loadArguments += '-IncludeChronicleFramework' }
     $start = Invoke-AgentCli 'load' $loadArguments
@@ -1554,6 +1556,8 @@ finally {
     else { $env:CHRONICLE_LLM_TIMEOUT_SECONDS = $priorModelTimeout }
     if ($null -eq $priorModelMaxTokens) { Remove-Item Env:CHRONICLE_LLM_MAX_TOKENS -ErrorAction SilentlyContinue }
     else { $env:CHRONICLE_LLM_MAX_TOKENS = $priorModelMaxTokens }
+    if ($null -eq $priorModelMaxHttpRequests) { Remove-Item Env:CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION -ErrorAction SilentlyContinue }
+    else { $env:CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION = $priorModelMaxHttpRequests }
 }
 
 $fixtureHashAfter = if (Test-Path -LiteralPath $savePath -PathType Leaf) { (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash } else { $null }
