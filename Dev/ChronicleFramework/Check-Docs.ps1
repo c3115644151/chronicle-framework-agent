@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.547'
+$contractVersion = '7.548'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -954,6 +954,17 @@ if ($agentHostLiveModelLoopSource -notmatch 'Set-LiveModelProviderTimeout' -or
 }
 if ($agentLiveModelLoopSource -notmatch 'if\s*\(\[string\]::IsNullOrWhiteSpace\(\$priorModelMaxTokens\)\)\s*\{\s*\$env:CHRONICLE_LLM_MAX_TOKENS\s*=\s*''256''\s*\}\s*else\s*\{\s*\$env:CHRONICLE_LLM_MAX_TOKENS\s*=\s*\$priorModelMaxTokens\s*\}') {
     throw 'The EYC live-model loop must keep its 256-token default while honoring an explicit caller output-token limit.'
+}
+if ($freeLlmApiProfileSource -notmatch 'function Get-FreeLLMAPIProxyTrace' -or
+    $freeLlmApiProfileSource -notmatch 'function Test-FreeLLMAPIProxyTraceContract' -or
+    $freshCampaignTestSource -notmatch 'Get-FreeLLMAPIProxyTrace' -or
+    $freshCampaignTestSource -notmatch 'FreeLLMAPIUpstreamTrace') {
+    throw 'Live StoryMode receipts must correlate FreeLLMAPI provider failures with local proxy-attempt metadata.'
+}
+. (Join-Path $harnessRoot 'Get-FreeLLMAPIProfile.ps1')
+$freeLlmApiTraceTest = Test-FreeLLMAPIProxyTraceContract
+if (-not $freeLlmApiTraceTest.Passed -or $freeLlmApiTraceTest.ModelCalls -ne 0 -or $freeLlmApiTraceTest.RawProviderTextLogged) {
+    throw 'FreeLLMAPI request-log correlation must pass its synthetic no-model redaction contract.'
 }
 if ($harnessScript -notmatch 'GitCommit' -or $harnessScript -notmatch 'SourceControl' -or $harnessScript -notmatch 'status --porcelain' -or $harnessScript -match 'TaskBoard|CensusDomainDoneCount|gh project|gh api|githubProjectNumber') { throw 'Harness receipts must record Git provenance and remain independent of GitHub task tracking.' }
 if ($projectFile -notmatch 'ChronicleGameRoot' -or $harnessScript -notmatch 'ChronicleGameRoot=\$gameRoot' -or -not (Test-Path -LiteralPath (Join-Path $harnessRoot 'Initialize-ChronicleWorkspace.ps1'))) { throw 'Cloned repositories must accept a local game path and provide a repeatable workspace initializer.' }

@@ -209,3 +209,106 @@ function Initialize-FreeLLMAPIProfile {
         LocalProxyBootstrapApplied = $localProxyBootstrapApplied
     }
 }
+
+function Resolve-FreeLLMAPIProxyTrace {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][object[]]$ProgressEntries,
+        [Parameter(Mandatory = $true)][string[]]$LogLines,
+        [ValidateRange(1, 60)][int]$CorrelationWindowMinutes = 15
+    )
+
+    $failureEvents = @($ProgressEntries | Where-Object {
+        [string]$_.event -ceq 'provider-failure' -and
+        [string]$_.providerResponseRequestId -match '^[a-fA-F0-9]{8}-'
+    })
+    $correlatedAttempts = [System.Collections.Generic.List[object]]::new()
+    foreach ($failure in $failureEvents) {
+        $requestId = [string]$failure.providerResponseRequestId
+        $requestPrefix = $requestId.Substring(0, 6).ToLowerInvariant()
+        try { $failureUtc = [DateTimeOffset]::Parse([string]$failure.utc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal).UtcDateTime }
+        catch { continue }
+        $requestPrefixPattern = '\[Proxy\].*\b' + [regex]::Escape($requestPrefix) + '\b'
+
+        foreach ($line in $LogLines) {
+            if ($line -notmatch $requestPrefixPattern) { continue }
+            if ($line -notmatch '^(?<utc>\d{4}-\d{2}-\d{2}T[^ ]+)\s+\[[^\]]+\]\s+\[Proxy\]\s+\d{2}:\d{2}:\d{2}\s+(?<event>start|fail|ok)\s+(?<prefix>[a-fA-F0-9]{6})\s+\S+\s+(?<provider>[a-zA-Z0-9_-]+)\s+\S+\s+(?<model>[^\s]+)(?<tail>.*)$') { continue }
+            if ($Matches.prefix -ine $requestPrefix) { continue }
+            try { $logUtc = [DateTimeOffset]::Parse([string]$Matches.utc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal).UtcDateTime }
+            catch { continue }
+            if ([Math]::Abs(($logUtc - $failureUtc).TotalMinutes) -gt $CorrelationWindowMinutes) { continue }
+
+            $eventName = [string]$Matches.event
+            $providerName = [string]$Matches.provider
+            $modelName = [string]$Matches.model
+            $errorKind = $null
+            $latencyMilliseconds = $null
+            $tail = [string]$Matches.tail
+            if ($tail -match '\blat=(\d+)ms') { $latencyMilliseconds = [int]$Matches[1] }
+            if ($eventName -ceq 'fail') {
+                if ($tail -match '(?i)socket hang up|ECONNRESET') { $errorKind = 'connection-reset' }
+                elseif ($tail -match '(?i)truncated JSON|finish_reason=length') { $errorKind = 'truncated-response' }
+                elseif ($tail -match '(?i)429|rate.?limit|exhausted') { $errorKind = 'rate-limited' }
+                elseif ($tail -match '(?i)401|403|invalid.{0,12}key|unauthorized') { $errorKind = 'authorization' }
+                else { $errorKind = 'upstream-error' }
+            }
+
+            $correlatedAttempts.Add([pscustomobject]@{
+                RequestIdPrefix = $requestPrefix
+                Utc = $logUtc.ToString('O')
+                Event = $eventName
+                Provider = $providerName
+                Model = $modelName
+                LatencyMilliseconds = $latencyMilliseconds
+                FailureKind = $errorKind
+            })
+        }
+    }
+    return @($correlatedAttempts | Sort-Object RequestIdPrefix, Utc, Event -Unique)
+}
+
+function Get-FreeLLMAPIProxyTrace {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][object[]]$ProgressEntries,
+        [string]$LogPath = (Join-Path $env:APPDATA 'FreeLLMAPI\logs\freeapi.log')
+    )
+
+    $hasProviderFailure = @($ProgressEntries | Where-Object { [string]$_.event -ceq 'provider-failure' }).Count -gt 0
+    if (-not $hasProviderFailure) { return [pscustomobject]@{ Status = 'no-provider-failure'; Attempts = @() } }
+    if (-not (Test-Path -LiteralPath $LogPath -PathType Leaf)) { return [pscustomobject]@{ Status = 'log-not-found'; Attempts = @() } }
+
+    try { $lines = @(Get-Content -LiteralPath $LogPath -Encoding UTF8) }
+    catch { return [pscustomobject]@{ Status = 'log-unreadable'; Attempts = @() } }
+    $attempts = @(Resolve-FreeLLMAPIProxyTrace -ProgressEntries $ProgressEntries -LogLines $lines)
+    return [pscustomobject]@{
+        Status = if ($attempts.Count -gt 0) { 'correlated' } else { 'request-not-correlated' }
+        Attempts = $attempts
+    }
+}
+
+function Test-FreeLLMAPIProxyTraceContract {
+    [CmdletBinding()]
+    param()
+
+    $entries = @([pscustomobject]@{
+        event = 'provider-failure'
+        utc = '2026-01-01T00:00:02.000Z'
+        providerResponseRequestId = 'abcdef12-3456-7890-abcd-ef1234567890'
+    })
+    $logs = @(
+        '2026-01-01T00:00:01.000Z [log] [Proxy] 00:00:01 start abcdef a0 ovh - gpt-oss-20b req=gpt-oss-20b',
+        '2026-01-01T00:00:02.000Z [log] [Proxy] 00:00:02 fail abcdef a0 ovh - gpt-oss-20b lat=1000ms err="socket hang up"',
+        '2026-01-01T00:00:02.000Z [log] [Proxy] 00:00:02 fail fedcba a0 kilo - unrelated lat=1000ms err="socket hang up"'
+    )
+    $result = @(Resolve-FreeLLMAPIProxyTrace -ProgressEntries $entries -LogLines $logs)
+    $failure = $result | Where-Object { $_.Event -ceq 'fail' } | Select-Object -First 1
+    $fields = @($failure.PSObject.Properties.Name)
+    if ($result.Count -ne 2 -or $null -eq $failure -or
+        $failure.Provider -cne 'ovh' -or $failure.Model -cne 'gpt-oss-20b' -or
+        $failure.FailureKind -cne 'connection-reset' -or $failure.LatencyMilliseconds -ne 1000 -or
+        $fields -contains 'RawError' -or $fields -contains 'ApiKey' -or $fields -contains 'Prompt') {
+        throw 'FreeLLMAPI proxy-log correlation failed request matching, safe-field projection, or error classification.'
+    }
+    return [pscustomobject]@{ Passed = $true; ModelCalls = 0; CorrelatedAttempts = $result.Count; RawProviderTextLogged = $false }
+}

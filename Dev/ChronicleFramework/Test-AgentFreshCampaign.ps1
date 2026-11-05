@@ -436,6 +436,7 @@ $storyModeVideoEventsPath = if ($env:CHRONICLE_HARNESS_TEMP) { Join-Path $env:CH
 $storyModeNativeLeaveSnapshotPath = if ($env:CHRONICLE_HARNESS_TEMP) { Join-Path $env:CHRONICLE_HARNESS_TEMP 'FreshStoryMode.native-menu-leave.json' } else { $null }
 $storyModeTrainingFieldExitPath = $null
 $storyModeAgentProgressPath = if ($env:CHRONICLE_HARNESS_TEMP) { Join-Path $env:CHRONICLE_HARNESS_TEMP 'AgentHostProgress.jsonl' } else { $null }
+$storyModeFreeLLMAPIUpstreamTrace = [pscustomobject]@{ Status = 'not-applicable'; Attempts = @() }
 $storyModeVideoContactPath = if ($env:CHRONICLE_HARNESS_TEMP) { Join-Path $env:CHRONICLE_HARNESS_TEMP 'FreshStoryModeSetup-contact.jpg' } else { $null }
 $deadline = (Get-Date).AddSeconds($(if ($ValidateRecruitmentProgression) { [Math]::Min(90, $TimeoutSeconds) } else { $TimeoutSeconds }))
 
@@ -1397,6 +1398,9 @@ if ($StoryModeEycSetup) {
         $acceptanceChecks.storyModeLiveModelProducedDecision = $storyModeAgentProgressEntries.Count -gt 0
         $acceptanceChecks.storyModeLiveNativeActionExecuted = ($storyModeAgentNativeActionsExecuted -gt 0) -or $storyModeAgentNativeActionTraceObserved
         $acceptanceChecks.storyModeLiveProviderPreflightReady = [bool]($providerProfile -and $providerProfile.CatalogListed -and -not [string]::IsNullOrWhiteSpace([string]$providerProfile.ModelId))
+        if ($freeLlmApiProfile) {
+            $storyModeFreeLLMAPIUpstreamTrace = Get-FreeLLMAPIProxyTrace -ProgressEntries @($storyModeAgentProgressEntries)
+        }
     }
 }
 else {
@@ -1512,6 +1516,7 @@ $result = [ordered]@{
     StoryModeAgentFailureLocation = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentFailureLocation } else { $null }
     StoryModeOriginalEstablishYourClanCompleted = if ($StoryModeEycLiveModelEvaluation) { $storyModeOriginalEstablishYourClanCompleted } else { $null }
     FreeLLMAPIProfile = if ($StoryModeEycLiveModelEvaluation) { $freeLlmApiProfile } else { $null }
+    FreeLLMAPIUpstreamTrace = if ($StoryModeEycLiveModelEvaluation) { $storyModeFreeLLMAPIUpstreamTrace } else { $null }
     StoryModeModelProviderProfile = if ($StoryModeEycLiveModelEvaluation) { $providerProfile } else { $null }
     StoryModeAgentProgressPath = if ($StoryModeEycLiveModelEvaluation) { $storyModeAgentProgressPath } else { $null }
     StoryModeAgentDecisions = if ($StoryModeEycLiveModelEvaluation) { @($storyModeAgentProgressEntries) } else { $null }
