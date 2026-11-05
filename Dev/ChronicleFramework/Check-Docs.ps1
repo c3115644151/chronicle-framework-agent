@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.548'
+$contractVersion = '7.549'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -935,6 +935,9 @@ if ($harnessScript -notmatch "PersistentEycMaxProviderDecisionsPerContinuation\s
     $harnessScript -notmatch "FreshStoryModeModel\s*=\s*''" -or
     $harnessScript -notmatch "Select a verified FreeLLMAPI model explicitly with -FreshStoryModeModel; no game or model request was started\.") {
     throw 'Persistent StoryMode runs must default to one provider decision and require explicit model selection before starting the game.'
+}
+if ($harnessScript -notmatch "'llm7-fast-router'") {
+    throw 'The explicitly selected FreeLLMAPI LLM7 candidate must be accepted by live StoryMode model phases.'
 }
 $autonomyStages = [regex]::Match($harnessScript, "'AgentHostEstablishClanAutonomyEvaluation'\s*\{\s*@\(([^)]*)\)")
 $autonomyStageList = if ($autonomyStages.Success) { $autonomyStages.Groups[1].Value } else { '' }
@@ -2016,7 +2019,7 @@ if ($freshCampaignSource -notmatch 'StoryModeNewGame' -or
     $harnessScript -notmatch "CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS.*, '86400000'" -or
     $harnessScript -notmatch "CHRONICLE_LLM_TIMEOUT_SECONDS', '300'" -or
     $agentHostRuntimeControllerSource -notmatch 'autoStopMilliseconds <= 86400000' -or
-    $harnessScript -notmatch "ValidateSet\('deepseek-flash','gpt-oss-20b','openai-gpt-oss-20b','nvidiallama-3.2-11b-vision','poolside-laguna-s-2.1','free-router','dots3-note-preview','gemma-4-31b-heretic','gemma-4-31b-it','gemma-4-e4b-uncensored-hauhaucs-aggressive-q4-k-m','gemini-2.5-flash','gemini-3.8-flash','mistral-nemo','mistral-small-3.2-24b','qwen3.6-27b','qwen3.8-27b','auto:reliable'\)" -or
+    $harnessScript -notmatch "ValidateSet\('deepseek-flash','gpt-oss-20b','openai-gpt-oss-20b','nvidiallama-3.2-11b-vision','poolside-laguna-s-2.1','free-router','llm7-fast-router','dots3-note-preview','gemma-4-31b-heretic','gemma-4-31b-it','gemma-4-e4b-uncensored-hauhaucs-aggressive-q4-k-m','gemini-2.5-flash','gemini-3.8-flash','mistral-nemo','mistral-small-3.2-24b','qwen3.6-27b','qwen3.8-27b','auto:reliable'\)" -or
     $harnessScript -notmatch 'CHRONICLE_HARNESS_AGENT_MODEL.*\$FreshStoryModeModel' -or
     $agentHostRuntimeControllerSource -notmatch 'CHRONICLE_HARNESS_AGENT_MODEL' -or
     $agentHostCampaignLoopSource -notmatch 'HasPostTutorialTrainingFieldMap' -or
