@@ -146,7 +146,7 @@ Fresh StoryMode observer的原版Native菜单退出快照是schema JSON根对象
 
 EYC Companion子流程现在复用存档中的Campaign-scoped Agent checkpoint保存“当前EYC目标快照下，哪些Town Tavern已确认没有可招募Wanderer”。它只在原版酒馆场景扫描确认无合格候选、且Agent已返回Native MapState后写入`agentCheckpointSet`；Host重启后用`agentCheckpointGet`读取，按Native Campaign identity验证并从候选Town中排除这些地点。EYC Journal四项目标发生变化时，该记忆失效并清空；候选出现时也移除该城镇的旧“无候选”标记。若当前场景没有候选且原版目录仅剩`missionLeave`，Host提交这个唯一可用的原版离场动作并等回Map后再落盘；有任何可选Wanderer或对话时仍由模型决策。它不注入目标进度或改动Quest/资源/游戏时钟。`TestResults/20261107-040422` AgentHostPackage的Fake Native测试确认空酒馆离场、存档写入、跨Host重启过滤与其它Town可选。真实Campaign运行`TestResults/20261107-041139`保存检查点后，`TestResults/20261107-043410`下次启动的安全摘要确认`checkpointReadAttempted=true`、`noCandidateTownCount=1`、`memoryMatchedCurrentJournal=true`、没有发生Journal失效；该轮没有完成EYC目标。检查点读写和记忆复用已获得真实Campaign证据，但同伴招募尚未完成。
 
-若EYC目标子流程因Bandit等事件返回父循环、此时原版 MainParty 仍在前往Settlement，Companion恢复后会继承Native当前`GoToSettlement`目标并被动监视路途；不再重新查询目标表或重复提交相同`move`。当前停止/遭遇仍走既有上层恢复路径。`TestResults/20261107-044809` AgentHostPackage通过对应Fake Native回归；实际敌对遭遇后的同一目标恢复仍需下一段自然Campaign运行核验。
+若EYC目标子流程因Bandit等事件返回父循环、此时原版 MainParty 仍在前往Settlement，Companion恢复后会继承Native当前`GoToSettlement`目标并被动监视路途；不再重新查询目标表或重复提交相同`move`。当前停止/遭遇仍走既有上层恢复路径。`TestResults/20261107-044809` AgentHostPackage通过对应Fake Native回归；DeepSeek自然续跑`TestResults/20261107-050137`也观察到两次Bandit打断/子流程重启后，Agent没有重复查询EW2或重发EW2移动，而是在抵达EW2后继续选择下一城EW3。该运行没有推进EYC Journal目标，但验证了真实地图行军恢复路径。
 
 Campaign地图已在进行原版`GoToSettlement`移动时，如果 EYC Host 从Bandit/其他已处理事件中重启Companion子流程，Host将从当前Native `targetSettlementId`继承路线，并沿用现有被动时间/遭遇观察器；只有到达城镇、出现新状态或需要模型决策时才恢复目标规划。该恢复不发新的移动命令、不更改时间速率，也不替代遇敌决策。
 
