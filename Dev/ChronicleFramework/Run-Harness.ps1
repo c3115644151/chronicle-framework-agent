@@ -31,7 +31,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.550'
+$HarnessContractVersion = '7.552'
 if ($Phase -in @('FreshStoryModeModelEvaluation','PersistentEycCampaign') -and [string]::IsNullOrWhiteSpace($FreshStoryModeModel)) {
     throw 'Select a verified FreeLLMAPI model explicitly with -FreshStoryModeModel; no game or model request was started.'
 }
@@ -259,8 +259,8 @@ $requestedStages = switch ($Phase) {
     'FreshStoryModeSetup' { @('Preflight', 'Build', 'FreshStoryModeSetup') }
     'FreshStoryModeNativeMenuLeaveEvaluation' { @('Preflight', 'Build', 'FreshStoryModeNativeMenuLeaveEvaluation') }
     'FreshStoryModeNativeInquiryResponseEvaluation' { @('Preflight', 'Build', 'FreshStoryModeNativeInquiryResponseEvaluation') }
-    'FreshStoryModeModelEvaluation' { @('Preflight', 'FreeLLMAPIModelPreflight', 'Build', 'Smoke', 'AgentHostPackage', 'FreshStoryModeModelEvaluation') }
-    'PersistentEycCampaign' { @('Preflight', 'FreeLLMAPIModelPreflight', 'Build', 'Smoke', 'AgentHostPackage', 'PersistentEycCampaign') }
+    'FreshStoryModeModelEvaluation' { @('Preflight', 'ConfiguredModelPreflight', 'Build', 'Smoke', 'AgentHostPackage', 'FreshStoryModeModelEvaluation') }
+    'PersistentEycCampaign' { @('Preflight', 'ConfiguredModelPreflight', 'Build', 'Smoke', 'AgentHostPackage', 'PersistentEycCampaign') }
     'FreshCampaignProgression' { @('Preflight', 'Build', 'FreshCampaignProgression') }
     'FreshCampaignBaselineMatrix' { @('Preflight', 'Build', 'FreshCampaignBaselineMatrix') }
     'FreshCampaignSupplyBaseline' { @('Preflight', 'Build', 'FreshCampaignSupplyBaseline') }
@@ -450,21 +450,61 @@ foreach ($stage in $requestedStages) {
                 } | ConvertTo-Json
             }
         }
-        'FreeLLMAPIModelPreflight' {
-            Invoke-Stage -Name 'FreeLLMAPIModelPreflight' -Action {
+        'ConfiguredModelPreflight' {
+            Invoke-Stage -Name 'ConfiguredModelPreflight' -Action {
                 $savedLlmModel = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL', 'Process')
                 try {
                     [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_MODEL', $FreshStoryModeModel, 'Process')
                     . (Join-Path $harnessRoot 'Get-FreeLLMAPIProfile.ps1')
-                    $profile = Initialize-FreeLLMAPIProfile
+                    $providerBaseUrl = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_BASE_URL', 'Process')
+                    if ([string]::IsNullOrWhiteSpace($providerBaseUrl)) { $providerBaseUrl = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_BASE_URL', 'User') }
+                    $providerProtocol = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_PROTOCOL', 'Process')
+                    if ([string]::IsNullOrWhiteSpace($providerProtocol)) { $providerProtocol = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_PROTOCOL', 'User') }
+                    if ([string]::IsNullOrWhiteSpace($providerProtocol)) { $providerProtocol = 'openai-compatible' }
+                    $endpoint = $null
+                    if ($providerProtocol -cne 'openai-compatible' -or -not [Uri]::TryCreate($providerBaseUrl, [UriKind]::Absolute, [ref]$endpoint) -or
+                        -not [string]::IsNullOrWhiteSpace($endpoint.Query) -or -not [string]::IsNullOrWhiteSpace($endpoint.UserInfo) -or
+                        -not [string]::IsNullOrWhiteSpace($endpoint.Fragment)) {
+                        throw 'The selected model provider endpoint is not a safe absolute OpenAI-compatible URL; no inference request was sent.'
+                    }
+
+                    $isFreeLlmApiEndpoint = $endpoint.IsLoopback -and $endpoint.Port -eq 31415 -and $endpoint.AbsolutePath.TrimEnd('/') -eq '/v1'
+                    if ($isFreeLlmApiEndpoint) {
+                        $profile = Initialize-FreeLLMAPIProfile
+                        [ordered]@{
+                            ProviderKind = 'FreeLLMAPI'
+                            ProviderHost = $endpoint.Host
+                            ModelId = $profile.RequestedModelId
+                            ExecutionStatus = $profile.ModelExecutionStatus
+                            AvailableModelCount = $profile.AvailableModelCount
+                            CatalogSha256 = $profile.AvailableModelCatalogSha256
+                            InferenceRequests = 0
+                            BannerlordStarted = $false
+                            GatewayStartedByHarness = [bool]$profile.GatewayStartedByHarness
+                        } | ConvertTo-Json -Depth 4
+                        return
+                    }
+
+                    if ($endpoint.Scheme -cne 'https') { throw 'Remote model preflight requires HTTPS; no inference request was sent.' }
+                    $credential = Get-ChronicleProviderCredential -Endpoint $endpoint
+                    if ([string]::IsNullOrWhiteSpace([string]$credential.Value)) { throw 'The configured remote model API key is unavailable; no inference request was sent.' }
+                    $modelsUri = [UriBuilder]::new($endpoint)
+                    $modelsUri.Path = $endpoint.AbsolutePath.TrimEnd('/') + '/models'
+                    $modelsUri.Query = ''
+                    try { $catalog = Invoke-RestMethod -Uri $modelsUri.Uri -Headers @{ Authorization = "Bearer $($credential.Value)" } -TimeoutSec 12 }
+                    catch { throw 'The configured remote provider read-only model-list preflight failed; no inference request was sent.' }
+                    $modelRows = @($catalog.data)
+                    $modelListed = @($modelRows | Where-Object { [string]$_.id -ceq $FreshStoryModeModel }).Count -gt 0
+                    if (-not $modelListed) { throw 'The selected model is absent from the configured remote provider catalog; no inference request was sent.' }
                     [ordered]@{
-                        ModelId = $profile.RequestedModelId
-                        ExecutionStatus = $profile.ModelExecutionStatus
-                        AvailableModelCount = $profile.AvailableModelCount
-                        CatalogSha256 = $profile.AvailableModelCatalogSha256
+                        ProviderKind = 'direct-remote-openai-compatible'
+                        ProviderHost = $endpoint.Host
+                        ModelId = $FreshStoryModeModel
+                        ExecutionStatus = 'ready'
+                        AvailableModelCount = $modelRows.Count
                         InferenceRequests = 0
                         BannerlordStarted = $false
-                        FreeLLMAPIStartedByHarness = [bool]$profile.GatewayStartedByHarness
+                        FreeLLMAPIStartedByHarness = $false
                     } | ConvertTo-Json -Depth 4
                 }
                 finally {
