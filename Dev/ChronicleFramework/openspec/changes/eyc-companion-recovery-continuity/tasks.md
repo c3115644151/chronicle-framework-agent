@@ -5,7 +5,7 @@
 - [x] 1.1 通过Native checkpoint读写保存Campaign ID绑定的EYC同伴搜索记忆；验证编解码拒绝错战役/无效结构并保留既有字段：`TestResults/20261107-040422/AgentHostPackage.json`。
 - [x] 1.2 空酒馆结果仅在原版Leave返回MapState后落盘；Host重启后按同一Journal快照排除已搜空Town：`TestResults/20261107-040422/AgentHostPackage.json`、`TestResults/20261107-043410/Temp/AgentHostProgress.jsonl`、`TestResults/20261107-050137/Temp/AgentHostProgress.jsonl`。
 - [x] 1.3 无模型Host回归验证：Gold从1000降至670时保留并刷新空Tavern记录、正向Journal进度时清除；同时从旧版仅有Journal指纹的Campaign检查点恢复基线并升级为新快照格式：`TestResults/20261107-064923/AgentHostPackage.log`（361 Provider、26 CampaignLoop、26 BattleSimulationLoop场景；包含该内存自测）。
-- [ ] 1.4 在同一自然Campaign中读取旧格式检查点，发生资源下降后确认空Tavern记录仍生效、已排除的城镇没有重复访问，并从Harness trace核对`memoryReusedAfterJournalDecrease`及检查点写入后验；真实模型调用设定明确的决策数与CNY上限。
+- [ ] 1.4 对`freshB`同一Campaign验证旧格式检查点迁移。首次尝试`TestResults/20261107-065613/Temp/PersistentEycCampaignResult.json`只给1次决策额度；该次用于识别`Establish Your Clan`目标（1549输入/65输出token，估算¥0.001632096），因预算结束而没有目标选择/Native动作，故记忆路径未判定。下一次且仅一次续跑最多3次模型决策（目标识别→子目标选择→可执行动作），`CHRONICLE_LLM_MAX_RUN_COST_CNY=0.05`。假设旧指纹可还原赎金前Journal基线；若自然规划进入Companion，期望trace有`memoryReusedAfterJournalDecrease=true`、旧排除Town未重访、Native确认快照写入且Campaign ID不变；若未进入Companion，记为未判定并转向当前任务板下一条，不追加相同测试。
 
 ## 2. Native Tavern与原版行军恢复
 
