@@ -39,7 +39,8 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             new JsonObject { ["id"] = "hostile-village", ["type"] = "village", ["distance"] = 2, ["hostile"] = true, ["underSiege"] = false },
             new JsonObject { ["id"] = "sieged-town", ["type"] = "town", ["distance"] = 2, ["hostile"] = false, ["underSiege"] = true },
             new JsonObject { ["id"] = "current-village", ["type"] = "village", ["distance"] = 0, ["hostile"] = false, ["underSiege"] = false }
-        }, "current-village", new HashSet<string>(StringComparer.Ordinal));
+        }, "current-village", new HashSet<string>(StringComparer.Ordinal))
+            ?? throw new AgentHostException("establish-clan-recruitment-target-filter-unavailable", "A supplied Native target list must produce a filtered target list.");
         if (targets.Count != 2 || targets.Any(target => ReadString(target as JsonObject, "id") is not ("town-a" or "village-a")))
             throw new AgentHostException("establish-clan-recruitment-target-filter-failed", "Only newly observed, safe Town/Village targets may be offered for troop recruitment travel.");
         if (targets.OfType<JsonObject>().Any(target => target.ContainsKey("hostile") || target.ContainsKey("underSiege") || target.ContainsKey("isInspected")))
@@ -55,9 +56,9 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         var nextDayNoOfferCooldown = BuildNoAffordableVolunteerSettlementCooldowns(sameDayNoOfferTrace, 91078.01, 100);
         var fundedNoOfferCooldown = BuildNoAffordableVolunteerSettlementCooldowns(sameDayNoOfferTrace, 91077.99, 101);
         if (!sameDayNoOfferCooldown.Contains("town-a") || nextDayNoOfferCooldown.Contains("town-a") || fundedNoOfferCooldown.Contains("town-a") ||
-            FilterRecruitmentTargets(new JsonArray(new JsonObject { ["id"] = "town-a", ["type"] = "town", ["distance"] = 4 },
+            (FilterRecruitmentTargets(new JsonArray(new JsonObject { ["id"] = "town-a", ["type"] = "town", ["distance"] = 4 },
                 new JsonObject { ["id"] = "village-b", ["type"] = "village", ["distance"] = 3 }), null, sameDayNoOfferCooldown)
-                .OfType<JsonObject>().Any(target => ReadString(target, "id") == "town-a"))
+                ?? new JsonArray()).OfType<JsonObject>().Any(target => ReadString(target, "id") == "town-a"))
             throw new AgentHostException("establish-clan-recruitment-no-offer-same-day-cooldown-failed", "A settlement with no currently affordable volunteer offers should be skipped only while the game day and Gold remain unchanged, then become eligible for a fresh Native query.");
         if (MaxDecisions != AgentHostCampaignLoop.MaxCumulativeDecisions || MaxElapsed != TimeSpan.FromHours(24))
             throw new AgentHostException("establish-clan-recruitment-budget-mismatch", "The PartySize executor must honor the autonomous parent's cumulative decision and 24-hour run budgets rather than terminating its child route early.");
@@ -65,12 +66,19 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         {
             ["id"] = $"settlement-{index:D2}", ["name"] = $"Settlement {index:D2}", ["type"] = index % 2 == 0 ? "town" : "village",
             ["distance"] = (double)index + 1, ["hostile"] = false, ["underSiege"] = false, ["isInspected"] = index % 2 == 0
-        }).ToArray()), null, new HashSet<string>(StringComparer.Ordinal));
+        }).ToArray()), null, new HashSet<string>(StringComparer.Ordinal))
+            ?? throw new AgentHostException("establish-clan-recruitment-target-list-unavailable", "A supplied Native target list must produce a filtered target list.");
         var manyTargetState = new JsonObject
         {
             ["context"] = new JsonObject { ["gameState"] = "MapState", ["menuId"] = "village", ["encounterActive"] = false },
             ["availableMenuOptions"] = new JsonArray()
         };
+        var unknownTargetCache = FilterRecruitmentTargets(null, null, new HashSet<string>(StringComparer.Ordinal));
+        var refreshTargetsCatalog = BuildActionCatalog(manyTargetState,
+            new JsonObject { ["partySize"] = new JsonObject { ["target"] = 5 } }, unknownTargetCache, null, null, false);
+        if (unknownTargetCache is not null || refreshTargetsCatalog.Count != 1 ||
+            ReadString(refreshTargetsCatalog[0] as JsonObject, "action") != "mapSettlementTargets")
+            throw new AgentHostException("establish-clan-recruitment-invalidated-target-cache-not-refreshed", "An invalidated or never-loaded target cache must remain unknown (null), allowing the model to request the current Native-visible Town/Village list after leaving a no-offer settlement.");
         var targetPage0 = GetRecruitmentSettlementTargetPage(manyTargets, 0);
         var targetPage1 = GetRecruitmentSettlementTargetPage(manyTargets, targetPage0.Count);
         var targetPage2 = GetRecruitmentSettlementTargetPage(manyTargets, targetPage0.Count + targetPage1.Count);
@@ -1739,10 +1747,10 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             out var action, out arguments, out _, out _) && action == "menuSelect";
     }
 
-    private static JsonArray FilterRecruitmentTargets(JsonArray? targets, string? currentSettlementId, HashSet<string> visited)
+    private static JsonArray? FilterRecruitmentTargets(JsonArray? targets, string? currentSettlementId, HashSet<string> visited)
     {
+        if (targets is null) return null;
         var result = new JsonArray();
-        if (targets is null) return result;
         foreach (var target in targets.OfType<JsonObject>())
         {
             var id = ReadString(target, "id");
