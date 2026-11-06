@@ -7,7 +7,7 @@ namespace ChronicleFramework.AgentHost;
 
 internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeClient, IAgentHostBattleSimulationNativeClient,
     IAgentHostQuestDetailsNativeClient, IAgentHostCaptivityRecoveryNativeClient, IAgentHostGoldSaleNativeClient,
-    IAgentHostRecruitmentNativeClient, IAgentHostCompanionHiringNativeClient, IAgentHostStoryModeBootstrapNativeClient,
+    IAgentHostRecruitmentNativeClient, IAgentHostSupplyNativeClient, IAgentHostCompanionHiringNativeClient, IAgentHostStoryModeBootstrapNativeClient,
     IAgentHostNativeInquiryClient, IAgentHostStoryModeBannerEditorNativeClient, IAgentHostEstablishClanTrainingIssueNativeClient,
     IAgentHostQuestTroopScreenNativeClient
 {
@@ -473,7 +473,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
         return [new { scenario = "native-quest-details-is-an-explicit-read-only-adapter-with-one-bounded-id", passed = true }];
     }
 
-    internal Task<JsonDocument> ExecuteSupplyActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+    public Task<JsonDocument> ExecuteSupplyActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
     {
         if (!SupplySliceActions.Contains(action) || action == "state")
             throw new AgentHostException("native-action-not-in-supply-scope", "The Agent Host action is outside the approved Native supply slice.");

@@ -36,6 +36,18 @@ internal static class AgentHostSupplyLoop
         if (TryBuildNativeArguments("menuSelect", new JsonObject { ["OptionId"] = "town_wait" }, townResponse, new JsonObject { ["action"] = "tradeConfirm", ["status"] = "completed" }, "town_ES4", 10, goalMet: false, foodPurchaseCommitted: true, out _, out _))
             throw new AgentHostException("supply-unbounded-town-wait-accepted", "The Host must not split native town_wait from its bounded duration request.");
 
+        var acceptedTownRest = new JsonObject
+        {
+            ["status"] = "accepted", ["campaignDay"] = 1.0, ["timeControlMode"] = "UnstoppableFastForward",
+            ["state"] = townState.DeepClone()
+        };
+        var acceptedHostileRest = (JsonObject)acceptedTownRest.DeepClone();
+        acceptedHostileRest["state"]!["context"]!["encounterActive"] = true;
+        acceptedHostileRest["state"]!["context"]!["encounteredPartyId"] = "hostile-party";
+        if (!IsNativeRestWaitMenuTransitionPending(acceptedTownRest, acceptedTownRest) ||
+            IsNativeRestWaitMenuTransitionPending(acceptedHostileRest, acceptedHostileRest))
+            throw new AgentHostException("supply-rest-wait-menu-settle-policy-failed", "An accepted bounded rest may passively wait for the original Town wait-menu transition at its same settlement, but must stop settling if a hostile encounter or different location appears.");
+
         var waitState = new JsonObject
         {
             ["context"] = new JsonObject { ["gameState"] = "MapState", ["menuId"] = "town_wait_menus", ["isWaitMenu"] = true, ["isWaiting"] = true },
@@ -56,7 +68,31 @@ internal static class AgentHostSupplyLoop
             completedArguments[0]?.GetValue<string>() != "OptionId")
             throw new AgentHostException("supply-rest-completion-catalog-failed", "After the requested Native daily ticks and automatic clock stop, the only wait action must be the visible wait_leave handler.");
 
-        return [new { scenario = "bounded-native-rest-starts-atomically-from-town-and-only-exits-wait-after-requested-ticks", passed = true }];
+        var dailyTickButShortRest = (JsonObject)pendingWait.DeepClone();
+        dailyTickButShortRest["campaignDay"] = 1.238;
+        dailyTickButShortRest["timeControlMode"] = "UnstoppableFastForward";
+        var boundedRestReached = (JsonObject)pendingWait.DeepClone();
+        boundedRestReached["campaignDay"] = 1.601;
+        boundedRestReached["timeControlMode"] = "Stop";
+        if (HasNativeRestReachedTarget(dailyTickButShortRest, 1.6) || !HasNativeRestReachedTarget(boundedRestReached, 1.6))
+            throw new AgentHostException("supply-rest-daily-tick-premature-leave-failed", "The Host must not leave Town Wait merely because a daily tick changed before the requested CampaignDay; it must wait for the Native bounded-rest target and Stop mode.");
+        if (!IsNativeRestWaitMenuTransitionPending(acceptedTownRest, acceptedTownRest))
+            throw new AgentHostException("supply-rest-wait-menu-settle-policy-failed", "After the Native rest is accepted, the Host must passively wait for the original Town wait-menu transition rather than treating the immediate Town snapshot as a failed rest.");
+
+        var fakeRestClient = new FakeEycBoundedRestNativeClient();
+        var eycRestResult = RunBoundedEycRestRecoveryAsync(fakeRestClient, CancellationToken.None).GetAwaiter().GetResult();
+        if (ReadString(eycRestResult, "status") != "completed" ||
+            ReadDouble(eycRestResult, "campaignDayAfter", double.NaN) < 1.598d ||
+            ReadInt(eycRestResult, "dailyTickAfter", -1) != 101 ||
+            !ReadBool(eycRestResult, "healthImproved") ||
+            ReadInt(eycRestResult, "healthyAfter", -1) != 1 || ReadInt(eycRestResult, "woundedAfter", -1) != 0 ||
+            fakeRestClient.RestCalls != 1 || fakeRestClient.LeaveCalls != 1 || fakeRestClient.ClockActionCalls != 0)
+            throw new AgentHostException("eyc-native-rest-premature-daily-tick-exit-failed", "The EYC rest recovery must wait for its requested 0.6 Campaign days after an early DailyTick, then use the current Native wait_leave and verify the health change without any explicit clock action.");
+
+        return [
+            new { scenario = "bounded-native-rest-starts-atomically-from-town-and-only-exits-wait-after-requested-ticks", passed = true },
+            new { scenario = "eyc-bounded-rest-waits-for-campaign-day-target-after-early-daily-tick-and-verifies-health", passed = true }
+        ];
     }
 
     internal static async Task<JsonObject> RunAsync(JsonElement request, string protocolRoot, CancellationToken cancellationToken)
@@ -306,11 +342,16 @@ internal static class AgentHostSupplyLoop
                 if (actionName == "rest" && actionStatus == "accepted")
                 {
                     loopStage = "await-native-rest-completion";
+                    var acceptedRestDay = ReadDouble(actionReceipt, "campaignDay", ReadDouble(currentNative, "campaignDay", double.NaN));
+                    if (!double.IsFinite(acceptedRestDay))
+                        throw new AgentHostException("supply-rest-campaign-day-unavailable", "The accepted Native rest omitted a finite Campaign day; no guessed daily-tick boundary was used.");
                     var restCompletion = await AwaitNativeRestCompletionAsync(
                         client,
                         actionReceipt,
                         iteration,
                         startingDailyTick + 3,
+                        acceptedRestDay + 3d,
+                        3d,
                         nativeGameProcessId,
                         startingIdentity,
                         elapsed.Token);
@@ -403,6 +444,79 @@ internal static class AgentHostSupplyLoop
             throw new AgentHostException("supply-start-fixture-mismatch", "The Native Campaign did not match the prepared W5 supply fixture; Host made no action.");
     }
 
+    internal static async Task<JsonObject> RunBoundedEycRestRecoveryAsync(IAgentHostSupplyNativeClient client, CancellationToken cancellationToken)
+    {
+        const double requestedDays = 0.6d;
+        using var initialResponse = await client.ReadStateAsync(cancellationToken);
+        var initial = CloneObject(initialResponse.RootElement);
+        var state = initial["state"] as JsonObject ?? throw new AgentHostException("eyc-rest-native-state-missing", "The current Native state is missing before EYC rest recovery.");
+        var context = state["context"] as JsonObject ?? throw new AgentHostException("eyc-rest-native-context-missing", "The current Native context is missing before EYC rest recovery.");
+        var party = state["party"] as JsonObject ?? throw new AgentHostException("eyc-rest-native-party-missing", "The current Native MainParty is missing before EYC rest recovery.");
+        var settlementId = ReadString(state["location"] as JsonObject, "currentSettlementId");
+        var dailyTick = ReadInt(initial, "dailyTickCount", -1);
+        var gameProcessId = ReadInt(initial, "processId", -1);
+        if (ReadString(context, "gameState") != "MapState" || ReadString(context, "menuId") != "town" ||
+            string.IsNullOrWhiteSpace(settlementId) || dailyTick < 0 || gameProcessId <= 0 ||
+            ReadBool(context, "escapeMenuOpen") || ReadBool(context, "inquiryOpen") ||
+            ReadBool(context["captivity"] as JsonObject, "isCaptive") ||
+            ReadInt(party, "healthy", 0) != 0 || ReadInt(party, "wounded", 0) <= 0 ||
+            !IsEnabledMenuOption(state, "town_wait"))
+            throw new AgentHostException("eyc-rest-native-precondition-not-met", "EYC rest recovery requires the current safe Native Town menu, an enabled town_wait option, no modal/captivity, and a party with no healthy members but at least one wounded member.");
+
+        var startingIdentity = CloneIdentity(initial);
+        using var restResponse = await client.ExecuteSupplyActionAsync("rest", new JsonObject { ["days"] = requestedDays }, cancellationToken);
+        var acceptedRestReceipt = CloneObject(restResponse.RootElement);
+        if (ReadString(acceptedRestReceipt, "status") != "accepted")
+            throw new AgentHostException("eyc-rest-native-command-not-accepted", "Native did not accept the bounded 0.6-day rest from the current Town menu.");
+        var restStartDay = ReadDouble(acceptedRestReceipt, "campaignDay", ReadDouble(initial, "campaignDay", double.NaN));
+        if (!double.IsFinite(restStartDay))
+            throw new AgentHostException("eyc-rest-native-campaign-day-unavailable", "The accepted Native rest did not expose a finite Campaign day, so the Host cannot verify its bounded duration.");
+        var completion = await AwaitNativeRestCompletionAsync(client, acceptedRestReceipt,
+            iteration: 0,
+            targetDailyTick: dailyTick + 1,
+            targetCampaignDay: restStartDay + requestedDays,
+            requestedDays: requestedDays,
+            nativeGameProcessId: gameProcessId,
+            startingIdentity: startingIdentity,
+            cancellationToken: cancellationToken);
+        var final = completion.CurrentObservation;
+        var finalState = final["state"] as JsonObject ?? throw new AgentHostException("eyc-rest-native-result-state-missing", "The Native bounded rest result omitted its final Campaign state.");
+        var finalParty = finalState["party"] as JsonObject ?? throw new AgentHostException("eyc-rest-native-result-party-missing", "The Native bounded rest result omitted its final MainParty state.");
+        var healthyBefore = ReadInt(party, "healthy", 0);
+        var woundedBefore = ReadInt(party, "wounded", 0);
+        var healthyAfter = ReadInt(finalParty, "healthy", 0);
+        var woundedAfter = ReadInt(finalParty, "wounded", 0);
+        var leftWait = completion.LeaveReceipt is not null;
+        return new JsonObject
+        {
+            ["status"] = completion.RequestedRestCompleted ? "completed" : "interrupted",
+            ["termination"] = completion.RequestedRestCompleted ? "native-rest-target-tick-reached" : "native-rest-interrupted-by-current-game-state",
+            ["requestedDays"] = requestedDays,
+            ["actionsExecuted"] = 1 + (leftWait ? 1 : 0),
+            ["currentSettlementId"] = settlementId,
+            ["campaignDayBefore"] = ReadDouble(initial, "campaignDay", double.NaN),
+            ["campaignDayAfter"] = ReadDouble(final, "campaignDay", double.NaN),
+            ["dailyTickBefore"] = dailyTick,
+            ["dailyTickAfter"] = ReadInt(final, "dailyTickCount", -1),
+            ["nativeTimeControlModeAfter"] = ReadString(final, "timeControlMode"),
+            ["returnedToTownMenu"] = leftWait && ReadString(finalState["context"] as JsonObject, "menuId") == "town",
+            ["healthyBefore"] = healthyBefore,
+            ["healthyAfter"] = healthyAfter,
+            ["woundedBefore"] = woundedBefore,
+            ["woundedAfter"] = woundedAfter,
+            ["healthImproved"] = healthyAfter > healthyBefore || woundedAfter < woundedBefore,
+            ["foodBefore"] = party["food"]?.DeepClone(),
+            ["foodAfter"] = finalParty["food"]?.DeepClone(),
+            ["foodInventoryBefore"] = party["foodInventory"]?.DeepClone(),
+            ["foodInventoryAfter"] = finalParty["foodInventory"]?.DeepClone(),
+            ["timeChangeSource"] = "bounded Native Town wait; no explicit clock action",
+            ["initialNativeState"] = initial.DeepClone(),
+            ["finalNativeState"] = final.DeepClone(),
+            ["monitorStep"] = completion.MonitorStep.DeepClone(),
+            ["leaveStep"] = completion.LeaveStep?.DeepClone()
+        };
+    }
+
     private sealed record NativeRestCompletion(
         JsonObject CurrentObservation,
         JsonObject FinalReceipt,
@@ -414,10 +528,12 @@ internal static class AgentHostSupplyLoop
     private sealed record NativeRestStop(JsonObject? BeforeObservation, JsonObject? Receipt);
 
     private static async Task<NativeRestCompletion> AwaitNativeRestCompletionAsync(
-        NativeMailboxClient client,
+        IAgentHostSupplyNativeClient client,
         JsonObject acceptedRestReceipt,
         int iteration,
         int targetDailyTick,
+        double targetCampaignDay,
+        double requestedDays,
         int nativeGameProcessId,
         JsonObject startingIdentity,
         CancellationToken cancellationToken)
@@ -429,6 +545,7 @@ internal static class AgentHostSupplyLoop
         var current = (JsonObject)acceptedRestReceipt.DeepClone();
         var lastRecordedTick = int.MinValue;
         var pollCount = 0;
+        var waitMenuSettlingPolls = 0;
         RecordTickSample(current, tickSamples, ref lastRecordedTick, "accepted");
 
         try
@@ -443,7 +560,7 @@ internal static class AgentHostSupplyLoop
                     ReadString(context, "menuId") == "town_wait_menus" &&
                     ReadBool(context, "isWaiting");
 
-                if (tick >= targetDailyTick && waitIsActive && IsEnabledMenuOption(state, "wait_leave"))
+                if (HasNativeRestReachedTarget(current, targetCampaignDay))
                 {
                     var nativeArguments = new JsonObject
                     {
@@ -463,15 +580,26 @@ internal static class AgentHostSupplyLoop
                         ReadString(postContext, "timeControlMode") != "Stop")
                         throw new AgentHostException("native-rest-leave-postcondition-failed", "Native wait_leave did not return to the Town menu with time stopped.");
 
-                    var monitorStep = BuildNativeRestMonitorStep(iteration, acceptedRestReceipt, leaveReceipt, waitStartedUtc, actionCompletedUtc, waitStartedTicks, pollCount, targetDailyTick, tickSamples, requestedRestCompleted: true, interrupted: false);
+                    var monitorStep = BuildNativeRestMonitorStep(iteration, acceptedRestReceipt, leaveReceipt, waitStartedUtc, actionCompletedUtc, waitStartedTicks, pollCount, targetDailyTick, targetCampaignDay, requestedDays, tickSamples, requestedRestCompleted: true, interrupted: false);
                     var leaveStep = BuildNativeRestLeaveStep(iteration, current, leaveReceipt, actionStartedUtc, actionCompletedUtc, requestedRestCompleted: true);
                     return new NativeRestCompletion(leaveReceipt, leaveReceipt, leaveReceipt, monitorStep, leaveStep, RequestedRestCompleted: true);
                 }
 
                 if (!waitIsActive)
                 {
+                    if (waitMenuSettlingPolls < 20 && IsNativeRestWaitMenuTransitionPending(current, acceptedRestReceipt))
+                    {
+                        waitMenuSettlingPolls++;
+                        await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
+                        using var settlingResponse = await client.ReadStateAsync(cancellationToken);
+                        current = CloneObject(settlingResponse.RootElement);
+                        VerifySameNativeOwner(current, nativeGameProcessId, startingIdentity);
+                        pollCount++;
+                        RecordTickSample(current, tickSamples, ref lastRecordedTick, "native-wait-menu-settle");
+                        continue;
+                    }
                     var completedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
-                    var monitorStep = BuildNativeRestMonitorStep(iteration, acceptedRestReceipt, current, waitStartedUtc, completedUtc, waitStartedTicks, pollCount, targetDailyTick, tickSamples, requestedRestCompleted: false, interrupted: true);
+                    var monitorStep = BuildNativeRestMonitorStep(iteration, acceptedRestReceipt, current, waitStartedUtc, completedUtc, waitStartedTicks, pollCount, targetDailyTick, targetCampaignDay, requestedDays, tickSamples, requestedRestCompleted: false, interrupted: true);
                     return new NativeRestCompletion(current, acceptedRestReceipt, null, monitorStep, null, RequestedRestCompleted: false);
                 }
 
@@ -490,14 +618,14 @@ internal static class AgentHostSupplyLoop
             {
                 var stoppedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
                 var leaveStep = BuildNativeRestLeaveStep(iteration, safeStop.BeforeObservation, safeStop.Receipt, waitStartedUtc, stoppedUtc, requestedRestCompleted: false);
-                var monitorStep = BuildNativeRestMonitorStep(iteration, acceptedRestReceipt, safeStop.Receipt, waitStartedUtc, stoppedUtc, waitStartedTicks, pollCount, targetDailyTick, tickSamples, requestedRestCompleted: false, interrupted: true);
+                var monitorStep = BuildNativeRestMonitorStep(iteration, acceptedRestReceipt, safeStop.Receipt, waitStartedUtc, stoppedUtc, waitStartedTicks, pollCount, targetDailyTick, targetCampaignDay, requestedDays, tickSamples, requestedRestCompleted: false, interrupted: true);
                 return new NativeRestCompletion(safeStop.Receipt, safeStop.Receipt, safeStop.Receipt, monitorStep, leaveStep, RequestedRestCompleted: false);
             }
             throw;
         }
     }
 
-    private static async Task<NativeRestStop> TryStopNativeTownWaitAsync(NativeMailboxClient client, int nativeGameProcessId, JsonObject startingIdentity)
+    private static async Task<NativeRestStop> TryStopNativeTownWaitAsync(IAgentHostSupplyNativeClient client, int nativeGameProcessId, JsonObject startingIdentity)
     {
         using var cleanupTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
         try
@@ -521,6 +649,38 @@ internal static class AgentHostSupplyLoop
         {
             return new NativeRestStop(null, null);
         }
+    }
+
+    internal static bool HasNativeRestReachedTarget(JsonObject? native, double targetCampaignDay)
+    {
+        if (native is null || !double.IsFinite(targetCampaignDay)) return false;
+        var state = native["state"] as JsonObject;
+        var context = state?["context"] as JsonObject;
+        var campaignDay = ReadDouble(native, "campaignDay", double.NaN);
+        return double.IsFinite(campaignDay) && campaignDay >= targetCampaignDay - 0.002d &&
+               ReadString(native, "timeControlMode") == "Stop" &&
+               ReadString(context, "gameState") == "MapState" &&
+               ReadString(context, "menuId") == "town_wait_menus" && ReadBool(context, "isWaitMenu") &&
+               ReadBool(context, "isWaiting") && state is not null && IsEnabledMenuOption(state, "wait_leave");
+    }
+
+    private static bool IsNativeRestWaitMenuTransitionPending(JsonObject? current, JsonObject acceptedRestReceipt)
+    {
+        if (current?["state"] is not JsonObject state || acceptedRestReceipt["state"] is not JsonObject acceptedState)
+            return false;
+        var context = state["context"] as JsonObject;
+        var acceptedContext = acceptedState["context"] as JsonObject;
+        var location = state["location"] as JsonObject;
+        var acceptedLocation = acceptedState["location"] as JsonObject;
+        var currentSettlementId = ReadString(location, "currentSettlementId");
+        var acceptedSettlementId = ReadString(acceptedLocation, "currentSettlementId");
+        var townContext = ReadString(context, "gameState") == "MapState" && ReadString(context, "menuId") == "town" &&
+                          !ReadBool(context, "escapeMenuOpen") && !ReadBool(context, "inquiryOpen") &&
+                          !ReadBool(context?["captivity"] as JsonObject, "isCaptive") &&
+                          (!ReadBool(context, "encounterActive") || ReadString(context, "encounteredPartyId") == currentSettlementId);
+        var acceptedFromTown = ReadString(acceptedContext, "gameState") == "MapState" && ReadString(acceptedContext, "menuId") == "town";
+        return townContext && acceptedFromTown && !string.IsNullOrWhiteSpace(currentSettlementId) &&
+               string.Equals(currentSettlementId, acceptedSettlementId, StringComparison.Ordinal);
     }
 
     private static void RecordTickSample(JsonObject response, JsonArray samples, ref int lastRecordedTick, string source)
@@ -547,13 +707,15 @@ internal static class AgentHostSupplyLoop
         long startedTicks,
         int pollCount,
         int targetDailyTick,
+        double targetCampaignDay,
+        double requestedDays,
         JsonArray tickSamples,
         bool requestedRestCompleted,
         bool interrupted) =>
         new()
         {
             ["iteration"] = iteration,
-            ["decision"] = new JsonObject { ["hostExecution"] = "await-native-rest", ["requestedDays"] = 3 },
+            ["decision"] = new JsonObject { ["hostExecution"] = "await-native-rest", ["requestedDays"] = requestedDays },
             ["actionAttempted"] = false,
             ["actionExecuted"] = false,
             ["observationBefore"] = acceptedRestReceipt.DeepClone(),
@@ -564,6 +726,7 @@ internal static class AgentHostSupplyLoop
                 ["pollIntervalMilliseconds"] = 500,
                 ["pollCount"] = pollCount,
                 ["targetDailyTick"] = targetDailyTick,
+                ["targetCampaignDay"] = targetCampaignDay,
                 ["tickSamples"] = tickSamples.DeepClone(),
                 ["requestedRestCompleted"] = requestedRestCompleted,
                 ["interrupted"] = interrupted,
@@ -1028,6 +1191,87 @@ internal static class AgentHostSupplyLoop
             if (value is not JsonObject obj || !obj.TryGetPropertyValue(segment, out value)) return null;
         }
         return value;
+    }
+
+    private sealed class FakeEycBoundedRestNativeClient : IAgentHostSupplyNativeClient
+    {
+        private readonly JsonObject[] _stateSequence =
+        [
+            CreateEycRestState(1.0, 100, "Stop", "town", healthy: 0, wounded: 1),
+            CreateEycRestState(1.0, 100, "UnstoppableFastForward", "town_wait_menus", healthy: 0, wounded: 1),
+            CreateEycRestState(1.238, 101, "UnstoppableFastForward", "town_wait_menus", healthy: 0, wounded: 1),
+            CreateEycRestState(1.6, 101, "Stop", "town_wait_menus", healthy: 1, wounded: 0)
+        ];
+        private int _stateReads;
+
+        internal int RestCalls { get; private set; }
+        internal int LeaveCalls { get; private set; }
+        internal int ClockActionCalls { get; private set; }
+
+        public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var index = Math.Min(_stateReads++, _stateSequence.Length - 1);
+            return Task.FromResult(JsonDocument.Parse(_stateSequence[index].ToJsonString()));
+        }
+
+        public Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (action is "pause" or "resume" or "fastForward" or "advance") ClockActionCalls++;
+            throw new InvalidOperationException("The EYC Native rest recovery must use only the bounded rest and original wait_leave Native actions.");
+        }
+
+        public Task<JsonDocument> ExecuteSupplyActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (action == "rest")
+            {
+                RestCalls++;
+                if (ReadDouble(arguments, "days", double.NaN) != 0.6d)
+                    throw new AgentHostException("eyc-rest-selftest-duration-invalid", "EYC recovery must use the verified bounded Native rest duration.");
+                var accepted = CreateEycRestState(1.0, 100, "UnstoppableFastForward", "town", healthy: 0, wounded: 1);
+                accepted["status"] = "accepted";
+                return Task.FromResult(JsonDocument.Parse(accepted.ToJsonString()));
+            }
+            if (action == "menuSelect")
+            {
+                LeaveCalls++;
+                if (ReadString(arguments, "menuId") != "town_wait_menus" || ReadString(arguments, "optionId") != "wait_leave")
+                    throw new AgentHostException("eyc-rest-selftest-leave-invalid", "Recovery must submit the currently observed Native wait_leave option.");
+                return Task.FromResult(JsonDocument.Parse(CreateEycRestState(1.6, 101, "Stop", "town", healthy: 1, wounded: 0).ToJsonString()));
+            }
+            throw new AgentHostException("eyc-rest-selftest-action-invalid", "Unexpected action in the EYC Native rest test.");
+        }
+
+        private static JsonObject CreateEycRestState(double campaignDay, int dailyTick, string timeMode, string menuId, int healthy, int wounded)
+        {
+            var isWaitMenu = menuId == "town_wait_menus";
+            var options = isWaitMenu
+                ? new JsonArray(new JsonObject { ["id"] = "wait_leave", ["available"] = true, ["enabled"] = true, ["isLeave"] = true })
+                : new JsonArray(new JsonObject { ["id"] = "town_wait", ["available"] = true, ["enabled"] = true, ["isLeave"] = false });
+            return new JsonObject
+            {
+                ["status"] = "completed", ["processId"] = 321, ["campaignDay"] = campaignDay,
+                ["dailyTickCount"] = dailyTick, ["timeControlMode"] = timeMode,
+                ["state"] = new JsonObject
+                {
+                    ["context"] = new JsonObject
+                    {
+                        ["gameState"] = "MapState", ["menuId"] = menuId, ["timeControlMode"] = timeMode,
+                        ["isWaitMenu"] = isWaitMenu, ["isWaitActive"] = isWaitMenu, ["isWaiting"] = true,
+                        ["escapeMenuOpen"] = false, ["inquiryOpen"] = false,
+                        ["encounterActive"] = !isWaitMenu, ["encounteredPartyId"] = isWaitMenu ? null : "town_V2",
+                        ["captivity"] = new JsonObject { ["isCaptive"] = false }
+                    },
+                    ["identity"] = new JsonObject { ["heroId"] = "main_hero", ["clanId"] = "player_faction" },
+                    ["location"] = new JsonObject { ["currentSettlementId"] = "town_V2", ["targetSettlementId"] = "town_V2" },
+                    ["party"] = new JsonObject { ["id"] = "player_party", ["members"] = 1, ["healthy"] = healthy, ["wounded"] = wounded, ["isMoving"] = false, ["food"] = -0.05, ["foodInventory"] = 0 },
+                    ["economy"] = new JsonObject { ["gold"] = 0, ["renown"] = 20 },
+                    ["availableMenuOptions"] = options
+                }
+            };
+        }
     }
 
     private static bool IsRecoverableProviderDecisionError(string code) =>

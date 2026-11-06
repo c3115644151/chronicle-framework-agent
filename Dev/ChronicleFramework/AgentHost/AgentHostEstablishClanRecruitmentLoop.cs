@@ -736,6 +736,9 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         var rejectedPrematureStops = 0;
         var villagersInNeedConversationStartupWaits = 0;
         var noOfferSettlementEventKeys = BuildNoAffordableVolunteerSettlementEventKeys(priorTrace);
+        var priorNoProgressRest = trace.OfType<JsonObject>().LastOrDefault(step =>
+            ReadString(step, "stage") == "eyc-native-wounded-party-rest-recovery" && !ReadBoolean(step, "healthImproved"));
+        var lastNoProgressRestFingerprint = ReadString(priorNoProgressRest, "fingerprint");
         var start = Stopwatch.GetTimestamp();
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxSeconds));
@@ -855,6 +858,53 @@ internal static class AgentHostEstablishClanRecruitmentLoop
                     lastMapTargets = null;
                     settlementTargetPageStartIndex = 0;
                     moveStartPending = false;
+                }
+
+                var townRestFingerprint = AgentHostEstablishYourClanAutonomyLoop.BuildNoHealthyTownRestRecoveryFingerprint(nativeState.RootElement);
+                if (townRestFingerprint is not null && !string.Equals(townRestFingerprint, lastNoProgressRestFingerprint, StringComparison.Ordinal))
+                {
+                    lastNoProgressRestFingerprint = townRestFingerprint;
+                    if (campaignClient is not IAgentHostSupplyNativeClient restClient)
+                        return BuildResult("failed", "recruitment-native-rest-client-unavailable",
+                            "The current Town offers Native bounded rest for the completely wounded MainParty, but the Native transport cannot run the existing rest adapter.",
+                            "recruitment-native-rest-client-unavailable", state, currentRecruitOffers, journal, objective);
+
+                    var restRecovery = await AgentHostSupplyLoop.RunBoundedEycRestRecoveryAsync(restClient, elapsed.Token);
+                    restRecovery["runId"] = runId;
+                    AgentHostHarnessProgressTrace.RecordObjectiveSubflowResult("nativeRestRecovery", restRecovery);
+                    var restActionsExecuted = ReadInt(restRecovery, "actionsExecuted", 0);
+                    actionsExecuted += restActionsExecuted;
+                    var restHealthImproved = ReadBoolean(restRecovery, "healthImproved");
+                    if (restRecovery["monitorStep"] is JsonObject restMonitorStep) trace.Add(restMonitorStep.DeepClone());
+                    if (restRecovery["leaveStep"] is JsonObject restLeaveStep) trace.Add(restLeaveStep.DeepClone());
+                    trace.Add(new JsonObject
+                    {
+                        ["stage"] = "eyc-native-wounded-party-rest-recovery",
+                        ["fingerprint"] = townRestFingerprint,
+                        ["status"] = ReadString(restRecovery, "status"),
+                        ["healthImproved"] = restHealthImproved,
+                        ["healthyBefore"] = restRecovery["healthyBefore"]?.DeepClone(),
+                        ["healthyAfter"] = restRecovery["healthyAfter"]?.DeepClone(),
+                        ["woundedBefore"] = restRecovery["woundedBefore"]?.DeepClone(),
+                        ["woundedAfter"] = restRecovery["woundedAfter"]?.DeepClone(),
+                        ["campaignDayBefore"] = restRecovery["campaignDayBefore"]?.DeepClone(),
+                        ["campaignDayAfter"] = restRecovery["campaignDayAfter"]?.DeepClone(),
+                        ["explicitClockAction"] = false
+                    });
+                    lastMapTargets = null;
+                    settlementTargetPageStartIndex = 0;
+                    moveTargetId = null;
+                    moveStartPending = false;
+                    currentRecruitOffers = null;
+                    currentPrisonerRecruitOptions = null;
+                    previousReceipt = new JsonObject
+                    {
+                        ["action"] = "rest",
+                        ["status"] = ReadString(restRecovery, "status"),
+                        ["healthImproved"] = restHealthImproved
+                    };
+                    feedback = null;
+                    continue;
                 }
 
                 var visibleRecruitmentTargets = lastMapTargets is null

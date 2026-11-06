@@ -190,6 +190,24 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         if (!IsFreeMapForObjectiveReplan(townLocationMenu.RootElement) || IsFreeMapForObjectiveReplan(hostileEncounter.RootElement))
             throw new AgentHostException("establish-clan-autonomy-town-menu-free-map-classification-failed", "A Native Town location menu may report encounterActive=true but must remain a free Map for safe objective replanning; a real party encounter must still block it.");
         results.Add(new { scenario = "establish-clan-autonomy-native-town-menu-is-free-map-for-objective-replan-but-hostile-encounter-is-not", passed = true });
+        using var woundedTownRestState = JsonDocument.Parse("""
+            {"status":"completed","timeControlMode":"Stop","campaignDay":1.0,"dailyTickCount":1,"state":{"context":{"gameState":"MapState","menuId":"town","encounterActive":true,"encounteredPartyId":"town-a","escapeMenuOpen":false,"inquiryOpen":false,"isWaitMenu":false,"isWaiting":true,"captivity":{"isCaptive":false}},"location":{"currentSettlementId":"town-a"},"party":{"members":1,"healthy":0,"wounded":1,"isMoving":false,"food":-0.05,"foodInventory":0},"economy":{"gold":0},"availableMenuOptions":[{"id":"town_wait","available":true,"enabled":true}]}}
+            """);
+        var woundedTownRestFingerprint = BuildNoHealthyTownRestRecoveryFingerprint(woundedTownRestState.RootElement);
+        using var healedTownRestState = JsonDocument.Parse("""
+            {"status":"completed","timeControlMode":"Stop","campaignDay":1.6,"dailyTickCount":2,"state":{"context":{"gameState":"MapState","menuId":"town","encounterActive":true,"encounteredPartyId":"town-a","escapeMenuOpen":false,"inquiryOpen":false,"isWaitMenu":false,"isWaiting":false,"captivity":{"isCaptive":false}},"location":{"currentSettlementId":"town-a"},"party":{"members":1,"healthy":1,"wounded":0,"isMoving":false,"food":-0.05,"foodInventory":0},"economy":{"gold":0},"availableMenuOptions":[{"id":"town_wait","available":true,"enabled":true}]}}
+            """);
+        var noWaitTown = JsonNode.Parse(woundedTownRestState.RootElement.GetRawText())!.AsObject();
+        (noWaitTown["state"]!["availableMenuOptions"] as JsonArray)!.Clear();
+        using var noWaitTownDocument = JsonDocument.Parse(noWaitTown.ToJsonString());
+        var hostileTown = JsonNode.Parse(woundedTownRestState.RootElement.GetRawText())!.AsObject();
+        hostileTown["state"]!["context"]!["encounteredPartyId"] = "hostile-party";
+        using var hostileTownDocument = JsonDocument.Parse(hostileTown.ToJsonString());
+        if (woundedTownRestFingerprint is null || BuildNoHealthyTownRestRecoveryFingerprint(healedTownRestState.RootElement) is not null ||
+            BuildNoHealthyTownRestRecoveryFingerprint(noWaitTownDocument.RootElement) is not null ||
+            BuildNoHealthyTownRestRecoveryFingerprint(hostileTownDocument.RootElement) is not null)
+            throw new AgentHostException("establish-clan-autonomy-native-rest-recovery-gate-failed", "The Host may recover a completely wounded party only from a stopped, non-modal Native Town wait entry; it must not mistake a hostile-party encounter for a normal Town menu or keep resting after a healthy member returns.");
+        results.Add(new { scenario = "establish-clan-autonomy-bounded-rest-recovery-only-for-wounded-party-at-native-town-wait", passed = true });
 
         using var hostileBanditInterruption = JsonDocument.Parse("""
             {"status":"completed","state":{"context":{"gameState":"MapState","menuId":"encounter_meeting","encounterActive":true,"encounteredPartyId":"mountain_bandits_221","captivity":{"isCaptive":false}},"nearbyParties":[{"id":"mountain_bandits_221","type":"bandit","hostile":true,"members":5}]}}
@@ -554,6 +572,8 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         var unavailableObjectiveFingerprints = new Dictionary<string, string>(StringComparer.Ordinal);
         var safeSettlementRefreshVisitedIds = new HashSet<string>(StringComparer.Ordinal);
         var resumedStalledNativeMoveCampaignDays = new Dictionary<string, double>(StringComparer.Ordinal);
+        var lastNoProgressTownRestFingerprint = (string?)null;
+        var nativeRestEligibilityRecorded = false;
         string? RememberCurrentSettlement(JsonElement nativeState)
         {
             var settlementId = ReadStateString(nativeState, "location", "currentSettlementId");
@@ -826,6 +846,66 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         return BuildResult("failed", "native-stalled-move-resume-unverified", false,
                             "Reissuing the original Native move did not verify resumed travel, arrival, or a new encounter/modal state; no clock command was substituted.",
                             "native-stalled-move-resume-unverified");
+                    continue;
+                }
+
+                var nativeRestRecoveryFingerprint = BuildNoHealthyTownRestRecoveryFingerprint(current.RootElement);
+                if (!nativeRestEligibilityRecorded)
+                {
+                    nativeRestEligibilityRecorded = true;
+                    AgentHostHarnessProgressTrace.RecordObjectiveSubflowResult("nativeRestRecoveryEligibility", new JsonObject
+                    {
+                        ["runId"] = runId,
+                        ["status"] = nativeRestRecoveryFingerprint is null ? "not-eligible" : "eligible",
+                        ["termination"] = "initial-native-rest-recovery-gate-evaluated",
+                        ["actionsExecuted"] = 0,
+                        ["initialNativeState"] = JsonNode.Parse(current.RootElement.GetRawText())?.AsObject()
+                    });
+                }
+                if (nativeRestRecoveryFingerprint is not null &&
+                    !string.Equals(nativeRestRecoveryFingerprint, lastNoProgressTownRestFingerprint, StringComparison.Ordinal))
+                {
+                    lastNoProgressTownRestFingerprint = nativeRestRecoveryFingerprint;
+                    if (client is not IAgentHostSupplyNativeClient restClient)
+                        return BuildResult("failed", "eyc-native-rest-client-unavailable", false,
+                            "The Native Town wait is available for a fully wounded MainParty, but the current Host client does not implement the already-contracted bounded rest action.",
+                            "eyc-native-rest-client-unavailable");
+
+                    var restRecovery = await AgentHostSupplyLoop.RunBoundedEycRestRecoveryAsync(restClient, elapsed.Token);
+                    restRecovery["runId"] = runId;
+                    AgentHostHarnessProgressTrace.RecordObjectiveSubflowResult("nativeRestRecovery", restRecovery);
+                    var restActionsExecuted = ReadInt(restRecovery, "actionsExecuted", 0);
+                    nativeActions += restActionsExecuted;
+                    var healthImproved = ReadBoolean(restRecovery, "healthImproved");
+                    var restStatus = ReadString(restRecovery, "status");
+                    objectiveRuns.Add(new JsonObject
+                    {
+                        ["objectiveId"] = "nativeRestRecovery",
+                        ["status"] = restStatus,
+                        ["termination"] = ReadString(restRecovery, "termination"),
+                        ["actionsExecuted"] = restActionsExecuted,
+                        ["healthImproved"] = healthImproved,
+                        ["healthyBefore"] = restRecovery["healthyBefore"]?.DeepClone(),
+                        ["healthyAfter"] = restRecovery["healthyAfter"]?.DeepClone(),
+                        ["woundedBefore"] = restRecovery["woundedBefore"]?.DeepClone(),
+                        ["woundedAfter"] = restRecovery["woundedAfter"]?.DeepClone(),
+                        ["campaignDayBefore"] = restRecovery["campaignDayBefore"]?.DeepClone(),
+                        ["campaignDayAfter"] = restRecovery["campaignDayAfter"]?.DeepClone()
+                    });
+                    if (restRecovery["monitorStep"] is JsonObject monitorStep) trace.Add(monitorStep.DeepClone());
+                    if (restRecovery["leaveStep"] is JsonObject leaveStep) trace.Add(leaveStep.DeepClone());
+                    trace.Add(new JsonObject
+                    {
+                        ["stage"] = "eyc-native-wounded-party-rest-recovery",
+                        ["fingerprint"] = nativeRestRecoveryFingerprint,
+                        ["status"] = restStatus,
+                        ["healthImproved"] = healthImproved,
+                        ["timeChangeSource"] = ReadString(restRecovery, "timeChangeSource"),
+                        ["explicitClockAction"] = false
+                    });
+                    // Always re-read Native state after the bounded wait. A recovered member
+                    // reopens the normal objective planner; a no-progress rest is tried only
+                    // once for this unchanged Native health/party/settlement fingerprint.
                     continue;
                 }
 
@@ -1803,6 +1883,34 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                !ReadBoolean(mission?["leave"] as JsonObject, "active") &&
                !AgentHostCampaignStateFacts.IsActiveEncounter(state) && !IsPlayerCaptive(native) &&
                AgentHostEstablishYourClanGoalLoop.HasActiveQuest(native);
+    }
+
+    internal static string? BuildNoHealthyTownRestRecoveryFingerprint(JsonElement native)
+    {
+        if (native.ValueKind != JsonValueKind.Object || ReadString(native, "status") != "completed" ||
+            ReadString(native, "timeControlMode") != "Stop" || !native.TryGetProperty("state", out var stateElement) ||
+            stateElement.ValueKind != JsonValueKind.Object)
+            return null;
+        var state = JsonNode.Parse(stateElement.GetRawText())?.AsObject();
+        var context = state?["context"] as JsonObject;
+        var location = state?["location"] as JsonObject;
+        var party = state?["party"] as JsonObject;
+        var settlementId = ReadString(location, "currentSettlementId");
+        var encounterTarget = ReadString(context, "encounteredPartyId");
+        var inTownEncounterContext = !ReadBoolean(context, "encounterActive") ||
+                                     string.Equals(encounterTarget, settlementId, StringComparison.Ordinal);
+        var townWaitAvailable = state?["availableMenuOptions"] is JsonArray options && options.OfType<JsonObject>()
+            .Any(option => ReadString(option, "id") == "town_wait" && ReadBoolean(option, "available") && ReadBoolean(option, "enabled"));
+        if (state is null || ReadString(context, "gameState") != "MapState" || ReadString(context, "menuId") != "town" ||
+            ReadBoolean(context, "escapeMenuOpen") || ReadBoolean(context, "inquiryOpen") || ReadBoolean(context, "isWaitMenu") ||
+            ReadBoolean(context?["captivity"] as JsonObject, "isCaptive") ||
+            ReadBoolean(context?["sceneNotification"] as JsonObject, "hasActiveNotification") || !inTownEncounterContext ||
+            string.IsNullOrWhiteSpace(settlementId) || ReadBoolean(party, "isMoving") ||
+            ReadInt(party, "healthy", -1) != 0 || ReadInt(party, "wounded", 0) <= 0 || !townWaitAvailable)
+            return null;
+
+        return string.Join("|", settlementId, ReadInt(party, "members", -1), ReadInt(party, "healthy", -1),
+            ReadInt(party, "wounded", -1), ReadInt(party, "foodInventory", -1), ReadInt(state?["economy"] as JsonObject, "gold", -1));
     }
 
     internal static bool IsFreeMapForObjectiveReplan(JsonElement native)

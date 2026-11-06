@@ -17,6 +17,11 @@ internal interface IAgentHostCampaignNativeClient
     Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken);
 }
 
+internal interface IAgentHostSupplyNativeClient : IAgentHostCampaignNativeClient
+{
+    Task<JsonDocument> ExecuteSupplyActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken);
+}
+
 internal interface IAgentHostQuestTroopScreenNativeClient
 {
     Task<JsonDocument> ExecuteQuestTroopScreenActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken);
