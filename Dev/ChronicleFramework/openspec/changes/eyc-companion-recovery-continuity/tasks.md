@@ -16,7 +16,7 @@
 
 ## 3. 继续当前自然Campaign
 
-- [ ] 3.1 从最新安全Native聚落检查点继续同一自然Campaign，由Agent依据Journal与当前Native状态自主选择目标；记录原版Journal的实际增量、Native副作用、provider决策/token/成本，以及同Campaign保存和进程清理。Harness不可预选PartySize或其它目标代替模型。下一轮只续跑一次，最多10个provider决策、`CHRONICLE_LLM_MAX_RUN_COST_CNY=0.10`；预期信号是至少一条来自当前Native目录的原版动作被执行并取得可核验后效。若预算到顶/Host退出，保留安全点，不以同一状态自动重跑。
+- [ ] 3.1 从最新安全Native聚落检查点继续同一自然Campaign，由Agent依据Journal与当前Native状态自主选择目标；记录原版Journal的实际增量、Native副作用、provider决策/token/成本，以及同Campaign保存和进程清理。Harness不可预选PartySize或其它目标代替模型。已尝试的一轮10决策/¥0.10续跑发生费用拒绝：9个请求后预留已达¥0.0921528，下一请求预计¥0.0097224会超限；Host处于`encounter_meeting`，因不能安全保存而保留上一检查点。下一次只续跑一次，最多20个决策、`CHRONICLE_LLM_MAX_RUN_COST_CNY=0.20`，假设该界限可完成当前Encounter恢复/安全回图并保存；信号为原版Journal增量或同Campaign新安全Native SaveAs。若仍无法安全保存或无可见Journal进展，就停止当前连续运行并按证据修代码/循环，不用同一输入自动重试。
 
 ## Workflow follow-up
 
