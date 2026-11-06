@@ -34,6 +34,73 @@ $savePath = Join-Path $documentsRoot "Game Saves\$LoadSaveName.sav"
 $checkpointSavePath = if (-not [string]::IsNullOrWhiteSpace($CheckpointSaveName)) { Join-Path $documentsRoot "Game Saves\$CheckpointSaveName.sav" } else { $null }
 $sessionPath = Join-Path $documentsRoot 'AgentRuns\ChronicleAgent\session.json'
 
+function Get-NativeCheckpointStateDisposition([object]$StateReceipt) {
+    if ($null -eq $StateReceipt -or [string]$StateReceipt.status -cne 'completed' -or $null -eq $StateReceipt.state) { return $null }
+    $state = $StateReceipt.state
+    $context = $state.context
+    if ([string]$context.gameState -cne 'MapState' -or [bool]$context.escapeMenuOpen -or [bool]$context.inquiryOpen -or
+        $null -ne $context.battleSimulation -or $null -ne $context.conversation -or
+        ($null -ne $context.lootItemCount -and [int]$context.lootItemCount -gt 0) -or
+        [bool]$state.partyScreenOpen -or [bool]$state.inventoryScreenOpen -or
+        [bool]$context.captivity.isCaptive) { return $null }
+
+    $menuId = [string]$context.menuId
+    if ([string]::IsNullOrWhiteSpace($menuId) -and -not [bool]$context.encounterActive -and
+        [string]::IsNullOrWhiteSpace([string]$context.encounteredPartyId)) { return 'native-campaign-map' }
+
+    $currentSettlementId = [string]$state.location.currentSettlementId
+    if ([string]::IsNullOrWhiteSpace($currentSettlementId) -or
+        ([bool]$context.encounterActive -and [string]$context.encounteredPartyId -cne $currentSettlementId)) { return $null }
+    $isBackstreet = $menuId -ceq 'town_backstreet'
+    $isStandardSettlementMenu = $menuId -in @('town','village','castle')
+    if (-not $isBackstreet -and -not $isStandardSettlementMenu) { return $null }
+    if ($isBackstreet -and @($state.availableMenuOptions | Where-Object {
+        [string]$_.id -ceq 'town_backstreet_back' -and [bool]$_.available -and [bool]$_.enabled -and [bool]$_.isLeave
+    }).Count -ne 1) { return $null }
+
+    $currentSettlement = @($state.nearbySettlements | Where-Object { [string]$_.id -ceq $currentSettlementId } | Select-Object -First 1)
+    if ($currentSettlement.Count -ne 1 -or [string]$currentSettlement[0].type -notin @('town','village','castle') -or [bool]$currentSettlement[0].underSiege)
+        { return $null }
+    return 'native-settlement-menu'
+}
+
+function Test-NativeCheckpointStateContract {
+    $safeBackstreet = [pscustomobject]@{
+        status = 'completed'
+        state = [pscustomobject]@{
+            context = [pscustomobject]@{
+                gameState='MapState'; menuId='town_backstreet'; encounterActive=$true; encounteredPartyId='town_ES3';
+                escapeMenuOpen=$false; inquiryOpen=$false; battleSimulation=$null; captivity=[pscustomobject]@{ isCaptive=$false }
+            }
+            location=[pscustomobject]@{ currentSettlementId='town_ES3' }
+            partyScreenOpen=$false; inventoryScreenOpen=$false
+            availableMenuOptions=@([pscustomobject]@{ id='town_backstreet_back'; available=$true; enabled=$true; isLeave=$true })
+            nearbySettlements=@([pscustomobject]@{ id='town_ES3'; type='town'; underSiege=$false })
+        }
+    }
+    if ((Get-NativeCheckpointStateDisposition $safeBackstreet) -cne 'native-settlement-menu') {
+        throw 'Native Town Backstreet with a current enabled Back option, matching town encounter and non-sieged settlement must be checkpointable.'
+    }
+    $unsafeBackstreet = $safeBackstreet | ConvertTo-Json -Depth 8 | ConvertFrom-Json
+    $unsafeBackstreet.state.availableMenuOptions[0].enabled = $false
+    if ($null -ne (Get-NativeCheckpointStateDisposition $unsafeBackstreet)) {
+        throw 'A Town Backstreet checkpoint must be rejected when the current Native Back/Leave action is unavailable.'
+    }
+    $unsafeMission = $safeBackstreet | ConvertTo-Json -Depth 8 | ConvertFrom-Json
+    $unsafeMission.state.context.gameState = 'MissionState'
+    if ($null -ne (Get-NativeCheckpointStateDisposition $unsafeMission)) {
+        throw 'A Tavern Mission cannot be treated as a safe Campaign checkpoint merely because its settlement is valid.'
+    }
+    $unsafeSiege = $safeBackstreet | ConvertTo-Json -Depth 8 | ConvertFrom-Json
+    $unsafeSiege.state.nearbySettlements[0].underSiege = $true
+    if ($null -ne (Get-NativeCheckpointStateDisposition $unsafeSiege)) {
+        throw 'A settlement Backstreet under siege cannot be treated as a safe persistent checkpoint.'
+    }
+    return [pscustomobject]@{ passed=$true; safeBackstreet='native-settlement-menu'; unavailableLeaveRejected=$true; missionStateRejected=$true; siegeRejected=$true }
+}
+
+$checkpointStateContract = Test-NativeCheckpointStateContract
+
 if (Get-Process -Name Bannerlord* -ErrorAction SilentlyContinue) {
     throw 'Refusing to start a live-model Campaign test while any Bannerlord client is already running.'
 }
@@ -1515,22 +1582,8 @@ finally {
             $checkpointContext = $checkpointNativeState.context
             $checkpointLocation = $checkpointNativeState.location
             $checkpointCurrentSettlementId = [string]$checkpointLocation.currentSettlementId
-            $checkpointEncounterIsStableSettlementMenu = $false
-            if ([bool]$checkpointContext.encounterActive -and
-                [string]$checkpointContext.menuId -in @('town','village','castle') -and
-                -not [string]::IsNullOrWhiteSpace($checkpointCurrentSettlementId) -and
-                [string]$checkpointContext.encounteredPartyId -ceq $checkpointCurrentSettlementId -and
-                $null -eq $checkpointContext.battleSimulation -and $null -eq $checkpointContext.conversation -and
-                ($null -eq $checkpointContext.lootItemCount -or [int]$checkpointContext.lootItemCount -eq 0)) {
-                $currentSettlement = @($checkpointNativeState.nearbySettlements | Where-Object { [string]$_.id -ceq $checkpointCurrentSettlementId } | Select-Object -First 1)
-                $checkpointEncounterIsStableSettlementMenu = $currentSettlement.Count -eq 1 -and
-                    [string]$currentSettlement[0].type -in @('town','village','castle') -and -not [bool]$currentSettlement[0].underSiege
-            }
-            $checkpointSaveStateDisposition = if ($checkpointEncounterIsStableSettlementMenu) { 'native-settlement-menu' } else { 'native-campaign-map' }
-            if ($checkpointState.status -ne 'completed' -or [string]$checkpointContext.gameState -cne 'MapState' -or
-                [bool]$checkpointContext.escapeMenuOpen -or [bool]$checkpointContext.inquiryOpen -or
-                ([bool]$checkpointContext.encounterActive -and -not $checkpointEncounterIsStableSettlementMenu) -or
-                $null -ne $checkpointContext.battleSimulation -or [bool]$checkpointNativeState.partyScreenOpen -or [bool]$checkpointNativeState.inventoryScreenOpen) {
+            $checkpointSaveStateDisposition = Get-NativeCheckpointStateDisposition $checkpointState
+            if ([string]::IsNullOrWhiteSpace([string]$checkpointSaveStateDisposition)) {
                 throw "A persistent EYC checkpoint requires a stable Native Campaign Map or a safe non-sieged settlement menu; current state=$($checkpointContext.gameState), menu=$($checkpointContext.menuId), encounter=$($checkpointContext.encounterActive), settlement=$checkpointCurrentSettlementId."
             }
             $checkpointSave = Invoke-AgentCli 'save' @('-SaveName', $CheckpointSaveName, '-CommandId', ('eyc-continuous-checkpoint-' + [Guid]::NewGuid().ToString('N')))
@@ -1593,6 +1646,7 @@ $result = [ordered]@{
     CheckpointSaveRetained = $checkpointSaveRetained
     CheckpointSaveFailure = $checkpointSaveFailure
     CheckpointSaveStateDisposition = $checkpointSaveStateDisposition
+    CheckpointStateContract = $checkpointStateContract
     CampaignInstanceId = $campaignInstanceId
     ProcessId = if ($start -and $start.session) { $start.session.processId } else { $null }
     HostReadyMessages = @($hostReadyMessages)

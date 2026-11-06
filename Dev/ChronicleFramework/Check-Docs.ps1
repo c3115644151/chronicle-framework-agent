@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.552'
+$contractVersion = '7.556'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -2057,8 +2057,20 @@ if ($freshCampaignSource -notmatch 'StoryModeNewGame' -or
 if ($harnessScript -notmatch "'PersistentEycCampaign' \{ @\('Preflight', 'ConfiguredModelPreflight', 'Build', 'Smoke', 'AgentHostPackage', 'PersistentEycCampaign'\) \}" -or
     [regex]::Matches($harnessScript, "(?m)^        'PersistentEycCampaign' \{").Count -ne 1 -or
     $harnessScript -match "'All' \{[^\r\n]*'PersistentEycCampaign'" -or
+    $harnessScript -notmatch '\[ValidatePattern\(''\^\(\[A-Za-z0-9_\-\]\{1,8\}\)\?\$''\)\]\[string\]\$PersistentEycCampaignKey' -or
+    -not $harnessScript.Contains('-CampaignKey $PersistentEycCampaignKey') -or
+    $persistentEycCampaignSource -notmatch 'PersistentEycCampaign' -or
+    $persistentEycCampaignSource -notmatch 'ChronicleEycDev-' -or
+    $persistentEycCampaignSource -notmatch 'manifestCampaignKey' -or
+    $persistentEycCampaignSource -notmatch 'campaignKey = \$CampaignKey' -or
+    -not $persistentEycCampaignSource.Contains("'-StoryModeEycSetup','-StoryModeEycPersistentSeed'") -or
+    $persistentEycCampaignSource -match "'-StoryModeEycSetup','-StoryModeEycLiveModelEvaluation','-StoryModeEycPersistentSeed'" -or
+    $persistentEycCampaignSource -notmatch "CHRONICLE_HARNESS_AGENT_AUTO_START','0'" -or
+    $persistentEycCampaignSource -notmatch 'if \(-not \$eycCompleted\)' -or
     $freshCampaignTest -notmatch '\[switch\]\$StoryModeEycPersistentSeed' -or
     $freshCampaignTest -notmatch 'CHRONICLE_FRESH_CAMPAIGN_SAVE_READY_FILE' -or
+    $freshCampaignTest -notmatch 'persistentStoryModeSaveReadySignaled' -or
+    $freshCampaignTest -notmatch '\$creationReady -and \$storyModeEycReadyObserved' -or
     $freshCampaignTest -notmatch 'fresh-campaign-disposable-save-time-check' -or
     $freshCampaignTest -match "Invoke-FreshCampaignAgentCli 'save'" -or
     $freshCampaignTest -notmatch 'PersistentStoryModeSaveRetained' -or
@@ -2071,6 +2083,9 @@ if ($harnessScript -notmatch "'PersistentEycCampaign' \{ @\('Preflight', 'Config
     $agentLiveModelLoopSource -notmatch '\[string\]\$CheckpointSaveName' -or
     $agentLiveModelLoopSource -notmatch 'stable Native Campaign Map or a safe non-sieged settlement menu' -or
     $agentLiveModelLoopSource -notmatch 'CheckpointSaveHash' -or
+    $agentLiveModelLoopSource -notmatch 'function Get-NativeCheckpointStateDisposition' -or
+    $agentLiveModelLoopSource -notmatch 'town_backstreet_back' -or
+    $agentLiveModelLoopSource -notmatch 'Test-NativeCheckpointStateContract' -or
     $persistentEycCampaignSource -notmatch 'campaignInstanceId' -or
     $persistentEycCampaignSource -notmatch 'Get-Sha256' -or
     $persistentEycCampaignSource -notmatch 'Get-VerifiedOrphanSeedReceipt' -or
@@ -2084,14 +2099,20 @@ if ($harnessScript -notmatch "'PersistentEycCampaign' \{ @\('Preflight', 'Config
     $persistentEycCampaignSource -notmatch '\$liveRunActualCost = \[double\]\$liveUsage\.CostEstimateCny' -or
     $persistentEycCampaignSource -notmatch 'cumulativeProviderActualCostEstimateCny = \[double\]\$Usage\.CostEstimateCny' -or
     $persistentEycCampaignSource -notmatch 'Remove-ObsoleteOwnedSaves' -or
-    $persistentEycCampaignSource -notmatch '-StoryModeEycLiveModelEvaluation' -or
-    $persistentEycCampaignSource -notmatch "CHRONICLE_HARNESS_AGENT_AUTO_START','1'" -or
+    $persistentEycCampaignSource -notmatch "CHRONICLE_HARNESS_AGENT_AUTO_START','0'" -or
+    $persistentEycCampaignSource -notmatch "'-StoryModeEycSetup','-StoryModeEycPersistentSeed'" -or
+    $persistentEycCampaignSource -match "'-StoryModeEycSetup','-StoryModeEycLiveModelEvaluation','-StoryModeEycPersistentSeed'" -or
+    $persistentEycCampaignSource -notmatch 'if \(-not \$eycCompleted\)' -or
     $persistentEycCampaignSource -notmatch 'FreshStoryModeHostTimeoutSeconds = 87000' -or
     $agentLiveModelLoopSource -notmatch '\[ValidateRange\(60,86400\)\]\[int\]\$HostMaxElapsedSeconds = 86400' -or
     -not $persistentEycCampaignSource.Contains("'-HostMaxElapsedSeconds',[string]`$HostMaxElapsedSeconds") -or
-    $agentLiveModelLoopSource -notmatch 'checkpointEncounterIsStableSettlementMenu' -or
     $agentLiveModelLoopSource -notmatch 'native-settlement-menu' -or
     $agentLiveModelLoopSource -notmatch 'CheckpointSaveStateDisposition = \$checkpointSaveStateDisposition' -or
+    $agentLiveModelLoopSource -notmatch 'function Get-NativeCheckpointStateDisposition' -or
+    $agentLiveModelLoopSource -notmatch 'function Test-NativeCheckpointStateContract' -or
+    $agentLiveModelLoopSource -notmatch 'town_backstreet_back' -or
+    $agentLiveModelLoopSource -notmatch 'missionStateRejected' -or
+    $agentLiveModelLoopSource -notmatch 'siegeRejected' -or
     $agentLiveModelLoopSource -notmatch 'underSiege' -or
     $agentHostEstablishClanAutonomySource -notmatch 'safeSettlementRefreshVisitedIds' -or
     $agentHostEstablishClanAutonomySource -notmatch 'excludedSettlementIds' -or

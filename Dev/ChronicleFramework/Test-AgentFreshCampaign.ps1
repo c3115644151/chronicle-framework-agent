@@ -396,6 +396,7 @@ $harnessFailureObserved = $false
 $campaignSaveRequested = $false
 $persistentStoryModeSaveOwned = $false
 $persistentStoryModeSaveCompleted = $false
+$persistentStoryModeSaveReadySignaled = $false
 $persistentStoryModeSaveHash = $null
 $crashDetected = $false
 $windowLayoutApplied = $false
@@ -880,6 +881,12 @@ try {
         } else {
             $creationCompleted -and $initialSnapshotCaptured -and $issueConversationProbeStatus -ne 'not-observed'
         }
+        if ($StoryModeEycPersistentSeed -and $creationReady -and $storyModeEycReadyObserved -and -not $persistentStoryModeSaveReadySignaled) {
+            if (Test-Path -LiteralPath $persistentStoryModeSaveReadyFile) { throw 'The unique persistent StoryMode save-ready signal already exists.' }
+            $persistentStoryModeSaveOwned = $true
+            [IO.File]::WriteAllText($persistentStoryModeSaveReadyFile, 'Native MapState ready for disposable SaveAs', [Text.UTF8Encoding]::new($false))
+            $persistentStoryModeSaveReadySignaled = $true
+        }
         $saveReady = -not $ValidateRecruitmentProgression -or $disposableSaveCompleted
         $storyModeAgentReadyForExit = -not $StoryModeEycLiveModelEvaluation -or (($storyModeAgentHostStarted -and $storyModeAgentHostReady -and -not [string]::IsNullOrWhiteSpace($storyModeAgentHostTerminalState)) -or ($storyModeAgentHostStartRequested -and $storyModeAgentHostTerminalState -eq 'Failed'))
         if ($StoryModeEycLiveModelEvaluation -and $storyModeTutorialSkipConfirmedAt -and -not $storyModeAgentHostStartRequested -and
@@ -910,9 +917,9 @@ try {
             if ($hostDetail.Length -gt 500) { $hostDetail = $hostDetail.Substring(0,500) + '...[truncated]' }
             throw "Persistent EYC seed save requires the original Tutorial skip, naturally active Quest and stable Native Campaign Map before saving. creationReady=$creationReady; eycActive=$storyModeEycReadyObserved; tutorialSkip=$storyModeTutorialSkipConfirmed; mapReady=$storyModeTakeoverMapReady; hostStarted=$storyModeAgentHostStarted; hostReady=$storyModeAgentHostReady; hostStartRequested=$storyModeAgentHostStartRequested; hostTerminal=$storyModeAgentHostTerminalState; hostDetail=$hostDetail."
         }
-        $persistentStoryModeSaveOwned = $true
-        if (Test-Path -LiteralPath $persistentStoryModeSaveReadyFile) { throw 'The unique persistent StoryMode save-ready signal already exists.' }
-        [IO.File]::WriteAllText($persistentStoryModeSaveReadyFile, 'Native MapState ready for disposable SaveAs', [Text.UTF8Encoding]::new($false))
+        if (-not $persistentStoryModeSaveReadySignaled) {
+            throw 'The stable Native StoryMode MapState was observed, but no persistent SaveAs readiness signal was issued.'
+        }
         $saveDeadline = (Get-Date).AddSeconds([Math]::Max(60, [Math]::Min($TimeoutSeconds, 180)))
         while ((-not $disposableSaveCompleted -or $null -eq $persistentStoryModeSaveTimeCheck) -and -not $disposableSaveFailed -and (Get-Date) -lt $saveDeadline) {
             $allDiagnosticLines = if (Test-Path -LiteralPath $diagnosticLog -PathType Leaf) { @(Get-Content -LiteralPath $diagnosticLog -Encoding UTF8) } else { @() }

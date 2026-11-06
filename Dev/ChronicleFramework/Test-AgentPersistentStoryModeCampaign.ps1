@@ -4,7 +4,8 @@ param(
     [ValidateRange(1,160)][int]$MaxProviderDecisionsPerContinuation = 1,
     [ValidateRange(5,30)][int]$FrameRate = 5,
     [int]$StartupTimeoutSeconds = 240,
-    [ValidateRange(300,87000)][int]$FreshStoryModeHostTimeoutSeconds = 87000
+    [ValidateRange(300,87000)][int]$FreshStoryModeHostTimeoutSeconds = 87000,
+    [string]$CampaignKey = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,8 +18,11 @@ if ([string]::IsNullOrWhiteSpace($documentsPath)) { throw 'Windows Documents dir
 $saveDirectory = [IO.Path]::GetFullPath((Join-Path $documentsPath 'Mount and Blade II Bannerlord\Game Saves'))
 $saveRoot = $saveDirectory.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
 $resultPath = Join-Path $env:CHRONICLE_HARNESS_TEMP 'PersistentEycCampaignResult.json'
-$manifestPath = Join-Path $PSScriptRoot 'TestResults\PersistentEycCampaign.json'
-$persistentSavePrefix = 'ChronicleEycDev-'
+$CampaignKey = $CampaignKey.Trim()
+if ($CampaignKey -notmatch '^(?:[A-Za-z0-9_-]{1,8})?$') { throw 'CampaignKey must be empty for the primary campaign or 1-8 safe filename characters for an isolated persistent branch.' }
+$campaignFileSuffix = if ([string]::IsNullOrWhiteSpace($CampaignKey)) { '' } else { '-' + $CampaignKey }
+$manifestPath = Join-Path $PSScriptRoot ('TestResults\PersistentEycCampaign' + $campaignFileSuffix + '.json')
+$persistentSavePrefix = 'ChronicleEycDev-' + $(if ([string]::IsNullOrWhiteSpace($CampaignKey)) { '' } else { $CampaignKey + '-' })
 $freshCampaignScript = Join-Path $harnessRoot 'Test-AgentFreshCampaign.ps1'
 $liveModelScript = Join-Path $harnessRoot 'Test-AgentLiveModelLoop.ps1'
 $bannerlordConfigPath = Join-Path $documentsPath 'Mount and Blade II Bannerlord\Configs\BannerlordConfig.txt'
@@ -206,6 +210,7 @@ function New-PersistentSeedManifest([object]$Receipt, [string]$SaveName, [string
     return [pscustomobject]@{
         schemaVersion = 1
         project = 'ChronicleFramework'
+        campaignKey = $CampaignKey
         campaignInstanceId = [string]$Receipt.ChronicleCampaignInstanceId
         saveName = $SaveName
         sha256 = $SaveHash
@@ -290,6 +295,10 @@ try {
             [string]::IsNullOrWhiteSpace([string]$manifest.campaignInstanceId)) {
             throw 'Persistent EYC manifest is invalid; no save was loaded or overwritten.'
         }
+        $manifestCampaignKey = if ($null -ne $manifest.PSObject.Properties['campaignKey']) { [string]$manifest.campaignKey } else { '' }
+        if ($manifestCampaignKey -cne $CampaignKey) {
+            throw 'Persistent EYC manifest belongs to a different CampaignKey; no save was loaded or overwritten.'
+        }
         $sourceSaveName = [string]$manifest.saveName
         $sourcePath = Get-SavePath $sourceSaveName
         if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf) -or (Get-Sha256 $sourcePath) -cne [string]$manifest.sha256) {
@@ -359,12 +368,12 @@ try {
             $savedGoal = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_GOAL','Process')
             $savedHarnessModel = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL','Process')
             try {
-                [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_START','1','Process')
+                [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_START','0','Process')
                 [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS','86400000','Process')
                 [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_GOAL','自主完成原版主线任务“建立你的家族”。','Process')
                 [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL',[Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL','Process'),'Process')
                 Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
-                $seed = Invoke-JsonChild $freshCampaignScript @('-StoryModeEycSetup','-StoryModeEycLiveModelEvaluation','-StoryModeEycPersistentSeed',
+                $seed = Invoke-JsonChild $freshCampaignScript @('-StoryModeEycSetup','-StoryModeEycPersistentSeed',
                     '-PersistentStoryModeSaveName',$sourceSaveName,'-TimeoutSeconds',[string]$FreshStoryModeHostTimeoutSeconds) 'FreshCampaignResult.json'
             }
             finally {
@@ -407,7 +416,7 @@ try {
         }
     }
 
-    if (-not $seedCreated) {
+    if (-not $eycCompleted) {
         $checkpointSaveName = New-PersistentSaveName
         Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
         $live = Invoke-JsonChild $liveModelScript @('-LoadSaveName',$sourceSaveName,'-CheckpointSaveName',$checkpointSaveName,

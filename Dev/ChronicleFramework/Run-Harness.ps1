@@ -23,6 +23,7 @@ param(
     [string]$StoryModePlannerSourceSaveName = 'save002',
     [ValidateRange(60,86400)][int]$PersistentEycHostMaxElapsedSeconds = 86400,
     [ValidateRange(1,160)][int]$PersistentEycMaxProviderDecisionsPerContinuation = 1,
+    [ValidatePattern('^([A-Za-z0-9_-]{1,8})?$')][string]$PersistentEycCampaignKey = '',
     [ValidateRange(1,10)][int]$NativeMapMovementProbeWaitSeconds = 8
 )
 
@@ -31,7 +32,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.552'
+$HarnessContractVersion = '7.556'
 if ($Phase -in @('FreshStoryModeModelEvaluation','PersistentEycCampaign') -and [string]::IsNullOrWhiteSpace($FreshStoryModeModel)) {
     throw 'Select a verified FreeLLMAPI model explicitly with -FreshStoryModeModel; no game or model request was started.'
 }
@@ -722,6 +723,7 @@ foreach ($stage in $requestedStages) {
                     $testOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $persistentEycCampaignScript `
                         -HostMaxElapsedSeconds $PersistentEycHostMaxElapsedSeconds `
                         -MaxProviderDecisionsPerContinuation $PersistentEycMaxProviderDecisionsPerContinuation `
+                        -CampaignKey $PersistentEycCampaignKey `
                         -StartupTimeoutSeconds 240 -FrameRate 5 2>&1 | Out-String
                     $testExitCode = $LASTEXITCODE
                     if ($testExitCode -ne 0) {
