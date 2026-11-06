@@ -16,7 +16,9 @@
 
 ## 3. 继续当前自然Campaign
 
-- [ ] 3.1 从最新安全Native聚落检查点继续同一自然Campaign，由Agent依据Journal与当前Native状态自主选择目标；记录原版Journal的实际增量、Native副作用、provider决策/token/成本，以及同Campaign保存和进程清理。Harness不可预选PartySize或其它目标代替模型。已尝试的一轮10决策/¥0.10续跑发生费用拒绝：9个请求后预留已达¥0.0921528，下一请求预计¥0.0097224会超限；Host处于`encounter_meeting`，因不能安全保存而保留上一检查点。下一次只续跑一次，最多20个决策、`CHRONICLE_LLM_MAX_RUN_COST_CNY=0.20`，假设该界限可完成当前Encounter恢复/安全回图并保存；信号为原版Journal增量或同Campaign新安全Native SaveAs。若仍无法安全保存或无可见Journal进展，就停止当前连续运行并按证据修代码/循环，不用同一输入自动重试。
+- [ ] 3.1 从最新安全Native聚落检查点继续同一自然Campaign，由Agent依据Journal与当前Native状态自主选择目标；Harness不预选目标。`TestResults/20261107-071342`在¥0.10上限前发生费用拒绝：9个请求、估算¥0.04364508、预留¥0.0921528，下一请求需预留¥0.0097224；Host处于`encounter_meeting`，不能安全SaveAs。
+  - [x] 3.1a 仅为诊断该中断而进行的一次同Campaign续跑`TestResults/20261107-072137`将上限提高到20决策/¥0.20：模型选择Native `leave`离开劫匪遭遇，不把它报成胜利；随后由模型选择Renown目标但无安全行动，再选择PartySize并发布到EW3的原版移动。总19决策、54326输入/1069输出token，估算¥0.093680064；Journal仍未增长。安全Native SaveAs成功，保存同一Campaign `ChronicleEycDev-freshB-20261107072404-a9aa2b09`（SHA-256 `943D835DD38AB58483D4E85427F8C6078194FD512CC6D8100AB41BDD28A375F0`），进程清理通过。该存档中一条新格式空Town记忆及移动目标已保存；尚未验证后续Host读取或Gold下降后的复用。
+  - [ ] 3.1b 从该新检查点继续一次，最多20决策、费用硬上限¥0.20。假设Native `GoToSettlement(town_EW3)`移动可直接延续并进入Volunteer UI；预期原版Journal PartySize增长或明示当前招募受限原因，并保存新的同Campaign安全点。若无Journal增长，记下准确卡点后先修复它，不以相同输入重复本轮。
 
 ## Workflow follow-up
 
