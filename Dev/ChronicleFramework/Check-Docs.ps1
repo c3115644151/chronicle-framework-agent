@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.549'
+$contractVersion = '7.550'
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -938,6 +938,13 @@ if ($harnessScript -notmatch "PersistentEycMaxProviderDecisionsPerContinuation\s
 }
 if ($harnessScript -notmatch "'llm7-fast-router'") {
     throw 'The explicitly selected FreeLLMAPI LLM7 candidate must be accepted by live StoryMode model phases.'
+}
+if ($harnessScript -notmatch "'FreshStoryModeModelEvaluation' \{ @\('Preflight', 'FreeLLMAPIModelPreflight', 'Build', 'Smoke', 'AgentHostPackage', 'FreshStoryModeModelEvaluation'\) \}" -or
+    $harnessScript -notmatch "'PersistentEycCampaign' \{ @\('Preflight', 'FreeLLMAPIModelPreflight', 'Build', 'Smoke', 'AgentHostPackage', 'PersistentEycCampaign'\) \}" -or
+    $harnessScript -notmatch "Invoke-Stage -Name 'FreeLLMAPIModelPreflight'" -or
+    $harnessScript -notmatch 'InferenceRequests = 0' -or
+    $harnessScript -notmatch 'BannerlordStarted = \$false') {
+    throw 'Live Campaign phases must reject unavailable FreeLLMAPI routes before Build/Smoke and record that preflight sends no inference request or game launch.'
 }
 $autonomyStages = [regex]::Match($harnessScript, "'AgentHostEstablishClanAutonomyEvaluation'\s*\{\s*@\(([^)]*)\)")
 $autonomyStageList = if ($autonomyStages.Success) { $autonomyStages.Groups[1].Value } else { '' }
@@ -2014,7 +2021,7 @@ if ($freshCampaignSource -notmatch 'StoryModeNewGame' -or
     $freshCampaignTest -notmatch 'storyModeTakeoverMapReady' -or
     $harnessScript -notmatch "'FreshStoryModeSetup' \{ @\('Preflight', 'Build', 'FreshStoryModeSetup'\) \}" -or
     $harnessScript -notmatch "-StoryModeEycSetup -TimeoutSeconds 360" -or
-    $harnessScript -notmatch "'FreshStoryModeModelEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'FreshStoryModeModelEvaluation'\) \}" -or
+    $harnessScript -notmatch "'FreshStoryModeModelEvaluation' \{ @\('Preflight', 'FreeLLMAPIModelPreflight', 'Build', 'Smoke', 'AgentHostPackage', 'FreshStoryModeModelEvaluation'\) \}" -or
     $harnessScript -notmatch '-StoryModeEycLiveModelEvaluation -TimeoutSeconds 87000' -or
     $harnessScript -notmatch "CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS.*, '86400000'" -or
     $harnessScript -notmatch "CHRONICLE_LLM_TIMEOUT_SECONDS', '300'" -or
@@ -2046,7 +2053,7 @@ if ($freshCampaignSource -notmatch 'StoryModeNewGame' -or
     $freshCampaignTest -notmatch 'StoryModeAgentNativeActionTraceObserved' -or
     $freshCampaignTest -notmatch 'AgentHostLifecycleHostReceipt\.json' -or
     $freshCampaignTest -notmatch 'AgentHostProgress\.jsonl') { throw 'Fresh StoryMode setup must use the original StoryMode Campaign and exact skip-tutorial/confirmation dialogue choices, verify natural EYC activation, and never call the tutorial completion function directly; its optional live Host slice must use bounded same-session MCM startup with a real decision trace.' }
-if ($harnessScript -notmatch "'PersistentEycCampaign' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'PersistentEycCampaign'\) \}" -or
+if ($harnessScript -notmatch "'PersistentEycCampaign' \{ @\('Preflight', 'FreeLLMAPIModelPreflight', 'Build', 'Smoke', 'AgentHostPackage', 'PersistentEycCampaign'\) \}" -or
     [regex]::Matches($harnessScript, "(?m)^        'PersistentEycCampaign' \{").Count -ne 1 -or
     $harnessScript -match "'All' \{[^\r\n]*'PersistentEycCampaign'" -or
     $freshCampaignTest -notmatch '\[switch\]\$StoryModeEycPersistentSeed' -or

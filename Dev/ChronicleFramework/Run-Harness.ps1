@@ -31,7 +31,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.549'
+$HarnessContractVersion = '7.550'
 if ($Phase -in @('FreshStoryModeModelEvaluation','PersistentEycCampaign') -and [string]::IsNullOrWhiteSpace($FreshStoryModeModel)) {
     throw 'Select a verified FreeLLMAPI model explicitly with -FreshStoryModeModel; no game or model request was started.'
 }
@@ -259,8 +259,8 @@ $requestedStages = switch ($Phase) {
     'FreshStoryModeSetup' { @('Preflight', 'Build', 'FreshStoryModeSetup') }
     'FreshStoryModeNativeMenuLeaveEvaluation' { @('Preflight', 'Build', 'FreshStoryModeNativeMenuLeaveEvaluation') }
     'FreshStoryModeNativeInquiryResponseEvaluation' { @('Preflight', 'Build', 'FreshStoryModeNativeInquiryResponseEvaluation') }
-    'FreshStoryModeModelEvaluation' { @('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'FreshStoryModeModelEvaluation') }
-    'PersistentEycCampaign' { @('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'PersistentEycCampaign') }
+    'FreshStoryModeModelEvaluation' { @('Preflight', 'FreeLLMAPIModelPreflight', 'Build', 'Smoke', 'AgentHostPackage', 'FreshStoryModeModelEvaluation') }
+    'PersistentEycCampaign' { @('Preflight', 'FreeLLMAPIModelPreflight', 'Build', 'Smoke', 'AgentHostPackage', 'PersistentEycCampaign') }
     'FreshCampaignProgression' { @('Preflight', 'Build', 'FreshCampaignProgression') }
     'FreshCampaignBaselineMatrix' { @('Preflight', 'Build', 'FreshCampaignBaselineMatrix') }
     'FreshCampaignSupplyBaseline' { @('Preflight', 'Build', 'FreshCampaignSupplyBaseline') }
@@ -448,6 +448,28 @@ foreach ($stage in $requestedStages) {
                     Toolchain = @('dotnet', 'ilspycmd', 'Bannerlord.Templates:blmodfx')
                     PackageInfoHint = $packageInfoText
                 } | ConvertTo-Json
+            }
+        }
+        'FreeLLMAPIModelPreflight' {
+            Invoke-Stage -Name 'FreeLLMAPIModelPreflight' -Action {
+                $savedLlmModel = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL', 'Process')
+                try {
+                    [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_MODEL', $FreshStoryModeModel, 'Process')
+                    . (Join-Path $harnessRoot 'Get-FreeLLMAPIProfile.ps1')
+                    $profile = Initialize-FreeLLMAPIProfile
+                    [ordered]@{
+                        ModelId = $profile.RequestedModelId
+                        ExecutionStatus = $profile.ModelExecutionStatus
+                        AvailableModelCount = $profile.AvailableModelCount
+                        CatalogSha256 = $profile.AvailableModelCatalogSha256
+                        InferenceRequests = 0
+                        BannerlordStarted = $false
+                        FreeLLMAPIStartedByHarness = [bool]$profile.GatewayStartedByHarness
+                    } | ConvertTo-Json -Depth 4
+                }
+                finally {
+                    [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_MODEL', $savedLlmModel, 'Process')
+                }
             }
         }
         'Api' {
