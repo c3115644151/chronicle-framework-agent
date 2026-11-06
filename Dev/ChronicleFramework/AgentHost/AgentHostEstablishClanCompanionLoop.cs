@@ -534,12 +534,15 @@ internal static class AgentHostEstablishClanCompanionLoop
         var checkpointClient = campaignClient as IAgentHostCampaignCheckpointNativeClient;
         JsonObject? campaignCheckpoint = null;
         string? storedCompanionJournalFingerprint = null;
+        JsonObject? storedCompanionJournalSnapshot = null;
         string? currentCompanionJournalFingerprint = null;
+        JsonObject? currentCompanionJournalSnapshot = null;
         string? pendingNoCandidateTownId = null;
         var companionSearchMemoryReconciled = false;
         var checkpointWriteCount = 0;
         var memoryMatchedCurrentJournal = false;
         var memoryInvalidatedByJournalProgress = false;
+        var memoryReusedAfterJournalDecrease = false;
         string? lastCheckpointWriteStatus = null;
         var navigationNoProgressAttempts = new Dictionary<string, int>(StringComparer.Ordinal);
         string? navigationProgressTargetHeroId = null;
@@ -560,6 +563,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                 using var checkpointReceipt = await checkpointClient.ReadCampaignCheckpointAsync(elapsed.Token);
                 campaignCheckpoint = AgentHostCampaignCheckpointCodec.ReadFromNativeReceipt(checkpointReceipt.RootElement);
                 storedCompanionJournalFingerprint = AgentHostEycCompanionSearchMemory.ReadJournalFingerprint(campaignCheckpoint);
+                storedCompanionJournalSnapshot = AgentHostEycCompanionSearchMemory.ReadJournalSnapshot(campaignCheckpoint);
                 noCandidateTownIds.UnionWith(AgentHostEycCompanionSearchMemory.ReadNoCandidateTownIds(campaignCheckpoint));
             }
             await provider.CheckConfiguredModelAsync(elapsed.Token);
@@ -627,21 +631,37 @@ internal static class AgentHostEstablishClanCompanionLoop
                         memoryMatchedCurrentJournal = true;
                         visitedTowns.UnionWith(noCandidateTownIds);
                     }
-                    else
+                    else if (AgentHostEycCompanionSearchMemory.HasForwardProgressOrTargetChange(storedCompanionJournalSnapshot, objective))
                     {
                         memoryInvalidatedByJournalProgress = !string.IsNullOrWhiteSpace(storedCompanionJournalFingerprint) || noCandidateTownIds.Count > 0;
                         noCandidateTownIds.Clear();
                         visitedTowns.Clear();
                         companionCheckpointDirty = campaignCheckpoint?["eycCompanionSearchMemoryV1"] is JsonObject;
                     }
+                    else
+                    {
+                        memoryReusedAfterJournalDecrease = true;
+                        visitedTowns.UnionWith(noCandidateTownIds);
+                        companionCheckpointDirty = campaignCheckpoint?["eycCompanionSearchMemoryV1"] is JsonObject;
+                    }
                     currentCompanionJournalFingerprint = objectiveFingerprint;
+                    currentCompanionJournalSnapshot = objective.DeepClone() as JsonObject;
                 }
                 else if (!string.Equals(currentCompanionJournalFingerprint, objectiveFingerprint, StringComparison.Ordinal))
                 {
-                    noCandidateTownIds.Clear();
-                    visitedTowns.Clear();
+                    if (AgentHostEycCompanionSearchMemory.HasForwardProgressOrTargetChange(currentCompanionJournalSnapshot, objective))
+                    {
+                        noCandidateTownIds.Clear();
+                        visitedTowns.Clear();
+                        memoryInvalidatedByJournalProgress = true;
+                    }
+                    else
+                    {
+                        memoryReusedAfterJournalDecrease = true;
+                    }
                     pendingNoCandidateTownId = null;
                     currentCompanionJournalFingerprint = objectiveFingerprint;
+                    currentCompanionJournalSnapshot = objective.DeepClone() as JsonObject;
                     companionCheckpointDirty = campaignCheckpoint?["eycCompanionSearchMemoryV1"] is JsonObject;
                 }
 
@@ -656,7 +676,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                     }
                     if (checkpointClient is not null && campaignCheckpoint is not null)
                     {
-                        var updatedCheckpoint = AgentHostEycCompanionSearchMemory.Store(campaignCheckpoint, objectiveFingerprint, noCandidateTownIds);
+                        var updatedCheckpoint = AgentHostEycCompanionSearchMemory.Store(campaignCheckpoint, objective, noCandidateTownIds);
                         using var checkpointWrite = await checkpointClient.WriteCampaignCheckpointAsync(updatedCheckpoint.ToJsonString(), elapsed.Token);
                         if (ReadString(checkpointWrite.RootElement, "status") != "completed")
                             return BuildResult("failed", "companion-search-checkpoint-write-failed", "Native did not confirm saving the Companion no-candidate town memory; the Host will not rely on an unpersisted exclusion.", "companion-search-checkpoint-write-failed", state, journal, objective);
@@ -1165,6 +1185,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                     ["noCandidateTownCount"] = noCandidateTownIds.Count,
                     ["memoryMatchedCurrentJournal"] = memoryMatchedCurrentJournal,
                     ["memoryInvalidatedByJournalProgress"] = memoryInvalidatedByJournalProgress,
+                    ["memoryReusedAfterJournalDecrease"] = memoryReusedAfterJournalDecrease,
                     ["checkpointWriteCount"] = checkpointWriteCount,
                     ["lastCheckpointWriteStatus"] = lastCheckpointWriteStatus
                 },

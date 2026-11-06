@@ -6,7 +6,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
-$state = Get-Content (Join-Path $root 'ContextState.json') -Raw | ConvertFrom-Json
+$state = Get-Content (Join-Path $root 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$openSpecHarnessPath = Join-Path $root 'OpenSpecHarness.ps1'
+if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
+. $openSpecHarnessPath
+$openSpecSummary = Get-OpenSpecWorkspaceSummary
 $paths = [Collections.Generic.List[string]]::new()
 foreach ($path in $state.defaultRead) { if (-not $paths.Contains([string]$path)) { $paths.Add([string]$path) } }
 
@@ -34,4 +38,5 @@ $documents = @($paths | ForEach-Object {
 [pscustomobject]@{
     Current = $state.current
     Documents = $documents
+    OpenSpec = $openSpecSummary
 } | ConvertTo-Json -Depth 8

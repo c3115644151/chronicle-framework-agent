@@ -27,6 +27,67 @@ internal static class AgentHostEycCompanionSearchMemory
     internal static string? ReadJournalFingerprint(JsonObject campaignCheckpoint) =>
         ReadString(campaignCheckpoint[PropertyName] as JsonObject, "journalFingerprint");
 
+    internal static JsonObject? ReadJournalSnapshot(JsonObject campaignCheckpoint) =>
+        (campaignCheckpoint[PropertyName]?["journalSnapshot"] as JsonObject)?.DeepClone() as JsonObject ??
+        ReadLegacyJournalSnapshot(ReadString(campaignCheckpoint[PropertyName] as JsonObject, "journalFingerprint"));
+
+    private static JsonObject? ReadLegacyJournalSnapshot(string? fingerprint)
+    {
+        if (string.IsNullOrWhiteSpace(fingerprint) || fingerprint.Length > 512)
+            return null;
+
+        var names = new[] { "gold", "partySize", "renown", "companions" };
+        var segments = fingerprint.Split('|');
+        if (segments.Length != names.Length)
+            return null;
+
+        var result = new JsonObject();
+        foreach (var segment in segments)
+        {
+            var colon = segment.IndexOf(':');
+            var slash = segment.IndexOf('/', colon + 1);
+            var statusColon = segment.LastIndexOf(':');
+            if (colon <= 0 || slash <= colon + 1 || statusColon <= slash + 1 || statusColon == segment.Length - 1)
+                return null;
+
+            var name = segment[..colon];
+            if (!names.Contains(name, StringComparer.Ordinal) || result.ContainsKey(name) ||
+                !double.TryParse(segment[(colon + 1)..slash], NumberStyles.Float, CultureInfo.InvariantCulture, out var current) ||
+                !double.TryParse(segment[(slash + 1)..statusColon], NumberStyles.Float, CultureInfo.InvariantCulture, out var target) ||
+                !double.IsFinite(current) || !double.IsFinite(target) ||
+                !bool.TryParse(segment[(statusColon + 1)..], out var met))
+                return null;
+
+            result[name] = new JsonObject
+            {
+                ["current"] = current,
+                ["target"] = target,
+                ["met"] = met
+            };
+        }
+
+        return names.All(result.ContainsKey) ? result : null;
+    }
+
+    internal static bool HasForwardProgressOrTargetChange(JsonObject? previousSnapshot, JsonObject currentSnapshot)
+    {
+        if (previousSnapshot is null) return true;
+        foreach (var name in new[] { "gold", "partySize", "renown", "companions" })
+        {
+            var previous = previousSnapshot[name] as JsonObject;
+            var current = currentSnapshot[name] as JsonObject;
+            if (previous is null || current is null) return true;
+            var previousTarget = ReadNumber(previous, "target");
+            var currentTarget = ReadNumber(current, "target");
+            var previousValue = ReadNumber(previous, "current");
+            var currentValue = ReadNumber(current, "current");
+            if (!double.IsFinite(previousTarget) || !double.IsFinite(currentTarget) || !double.IsFinite(previousValue) || !double.IsFinite(currentValue) ||
+                previousTarget != currentTarget || currentValue > previousValue)
+                return true;
+        }
+        return false;
+    }
+
     internal static HashSet<string> ReadNoCandidateTownIds(JsonObject campaignCheckpoint)
     {
         var result = new HashSet<string>(StringComparer.Ordinal);
@@ -43,8 +104,9 @@ internal static class AgentHostEycCompanionSearchMemory
         return result;
     }
 
-    internal static JsonObject Store(JsonObject campaignCheckpoint, string journalFingerprint, IEnumerable<string> townIds)
+    internal static JsonObject Store(JsonObject campaignCheckpoint, JsonObject objectiveSnapshot, IEnumerable<string> townIds)
     {
+        var journalFingerprint = BuildJournalFingerprint(objectiveSnapshot);
         if (string.IsNullOrWhiteSpace(journalFingerprint) || journalFingerprint.Length > 512)
             throw new AgentHostException("eyc-companion-memory-fingerprint-invalid", "The Companion search checkpoint requires a bounded current Journal fingerprint.");
         var ids = townIds.Where(id => !string.IsNullOrWhiteSpace(id) && id.Length <= 128)
@@ -57,6 +119,7 @@ internal static class AgentHostEycCompanionSearchMemory
         result[PropertyName] = new JsonObject
         {
             ["journalFingerprint"] = journalFingerprint,
+            ["journalSnapshot"] = objectiveSnapshot.DeepClone(),
             ["noCandidateTownIds"] = new JsonArray(ids.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray())
         };
         return result;
@@ -78,20 +141,44 @@ internal static class AgentHostEycCompanionSearchMemory
             ["campaignInstanceId"] = "campaign-memory-fixture",
             ["existingCheckpointField"] = "preserved"
         };
-        var stored = Store(checkpoint, fingerprint, ["town-b", "town-a", "town-a"]);
+        var stored = Store(checkpoint, objective, ["town-b", "town-a", "town-a"]);
         var retrieved = ReadNoCandidateTownIds(stored);
         if (retrieved.Count != 2 || !retrieved.Contains("town-a") || !retrieved.Contains("town-b") ||
             ReadJournalFingerprint(stored) != fingerprint || ReadString(stored, "existingCheckpointField") != "preserved")
             throw new AgentHostException("eyc-companion-memory-self-test-roundtrip-failed", "Campaign-scoped Companion memory must preserve existing checkpoint fields and deduplicate Native town IDs.");
 
-        var progressed = (JsonObject)objective.DeepClone();
-        progressed["gold"]!["current"] = 1200;
-        if (string.Equals(BuildJournalFingerprint(progressed), fingerprint, StringComparison.Ordinal))
-            throw new AgentHostException("eyc-companion-memory-self-test-journal-fingerprint-stale", "A fresh original Journal value change must invalidate the old Companion search fingerprint.");
-        var changed = Store(stored, BuildJournalFingerprint(progressed), []);
-        if (ReadNoCandidateTownIds(changed).Count != 0 || ReadString(changed, "existingCheckpointField") != "preserved")
-            throw new AgentHostException("eyc-companion-memory-self-test-journal-refresh-failed", "An EYC Journal change must be able to clear only the stale Companion search memory.");
-        return [new { scenario = "eyc-companion-search-memory-persists-only-native-no-candidate-towns-and-clears-on-journal-progress", passed = true }];
+        var legacyCheckpoint = new JsonObject
+        {
+            ["eycCompanionSearchMemoryV1"] = new JsonObject
+            {
+                ["journalFingerprint"] = fingerprint,
+                ["noCandidateTownIds"] = new JsonArray("town-a", "town-b")
+            }
+        };
+        var legacySnapshot = ReadJournalSnapshot(legacyCheckpoint);
+        if (legacySnapshot is null || HasForwardProgressOrTargetChange(legacySnapshot, (JsonObject)objective.DeepClone()))
+            throw new AgentHostException("eyc-companion-memory-self-test-legacy-fingerprint-read-failed", "A legacy checkpoint fingerprint must recover its previous EYC objective values before reconciliation.");
+
+        var decreased = (JsonObject)objective.DeepClone();
+        decreased["gold"]!["current"] = 670;
+        if (HasForwardProgressOrTargetChange(objective, decreased))
+            throw new AgentHostException("eyc-companion-memory-self-test-resource-loss-invalidated", "A loss of Gold must not erase verified no-candidate Tavern observations.");
+        var refreshedAfterLoss = Store(stored, decreased, retrieved);
+        if (ReadNoCandidateTownIds(refreshedAfterLoss).Count != 2 || ReadJournalFingerprint(refreshedAfterLoss) == fingerprint)
+            throw new AgentHostException("eyc-companion-memory-self-test-resource-loss-refresh-failed", "A downward Native Journal value must refresh the memory baseline while preserving the verified towns.");
+
+        var refreshedLegacyAfterLoss = Store(legacyCheckpoint, decreased, ReadNoCandidateTownIds(legacyCheckpoint));
+        if (ReadNoCandidateTownIds(refreshedLegacyAfterLoss).Count != 2 || ReadJournalFingerprint(refreshedLegacyAfterLoss) == fingerprint)
+            throw new AgentHostException("eyc-companion-memory-self-test-legacy-resource-loss-failed", "A resource decrease must preserve and upgrade legacy no-candidate checkpoint memory.");
+
+        var increased = (JsonObject)decreased.DeepClone();
+        increased["gold"]!["current"] = 800;
+        if (!HasForwardProgressOrTargetChange(decreased, increased))
+            throw new AgentHostException("eyc-companion-memory-self-test-forward-progress-not-detected", "A positive Journal objective change must invalidate old no-candidate observations.");
+        var cleared = Store(refreshedAfterLoss, increased, []);
+        if (ReadNoCandidateTownIds(cleared).Count != 0 || ReadString(cleared, "existingCheckpointField") != "preserved")
+            throw new AgentHostException("eyc-companion-memory-self-test-journal-refresh-failed", "Positive EYC Journal progress must clear only the stale Companion search memory.");
+        return [new { scenario = "eyc-companion-search-memory-persists-across-restarts-upgrades-legacy-fingerprints-and-invalidates-only-on-forward-journal-progress", passed = true }];
     }
 
     private static string? ReadString(JsonObject? node, string name) =>

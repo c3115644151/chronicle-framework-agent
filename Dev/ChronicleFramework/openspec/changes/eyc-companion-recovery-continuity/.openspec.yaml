@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-11-07
+goal: Avoid repeated model calls and duplicate Native movement across Host
+  continuations while preserving the natural EYC goal and its full acceptance
+  gate.

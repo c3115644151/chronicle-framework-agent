@@ -1,6 +1,8 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.556
+Contract version: 7.557
+
+2026-11-07 OpenSpec 文档治理接入：安装并校验官方独立版 OpenSpec CLI 1.16.0（SHA256与官方发布清单一致）。`Get-ContextPack.ps1`现在会附带唯一活动OpenSpec change及任务/Artifact状态；`Run-Harness.ps1 -Phase Docs`通过`Check-Docs.ps1`执行`openspec validate --all`，拒绝超过一个活动change，并验证CLI解析到当前仓库。OpenSpec生成的技能和变更Markdown由CLI治理，不塞入内容文档路由；GitHub Project仍独占产品顺序/状态，OpenSpec仅记录唯一产品Issue下的一个相干变更，Git记录代码历史，TestResults保存完整收据。`TestResults/20261107-064423` Docs通过（OpenSpec 1.16.0，1个活动change，1/1有效），`20261107-064923` AgentHostPackage通过（361 Provider、26 CampaignLoop、26 BattleSimulationLoop场景，0真实模型调用）。这让新/压缩上下文自动看到当前变更状态，避免只靠重复口头重建进度；它不替代运行证据或GitHub板。
 
 Persistent EYC evaluation supports isolated Campaign branches. Omit `-PersistentEycCampaignKey` to resume the original `PersistentEycCampaign.json` and `ChronicleEycDev-*` lineage; use a distinct 1–8 character key (for example `-PersistentEycCampaignKey freshB`) to create a separate manifest and `ChronicleEycDev-freshB-*` save lineage. A branch validates its own manifest key and only searches/prunes saves with its matching prefix; do not copy or rewrite another branch's manifest to switch campaigns. The keyed seed pass performs only original StoryMode creation/tutorial skip and saves the first stable Native MapState before starting the Agent; the same Harness invocation then runs the real-model continuation from that verified seed and checkpoints it. After continuation, a Native `MapState/town_backstreet` is a checkpointable settlement menu only when the current `town_backstreet_back` Leave option is visible/enabled, the associated town is not under siege, and no Mission/modal/battle screen is active. This is for the two-independent-new-campaign acceptance gate, not a second gameplay mode.
 
@@ -147,6 +149,8 @@ Fresh StoryMode observer的原版Native菜单退出快照是schema JSON根对象
 EYC Companion子流程现在复用存档中的Campaign-scoped Agent checkpoint保存“当前EYC目标快照下，哪些Town Tavern已确认没有可招募Wanderer”。它只在原版酒馆场景扫描确认无合格候选、且Agent已返回Native MapState后写入`agentCheckpointSet`；Host重启后用`agentCheckpointGet`读取，按Native Campaign identity验证并从候选Town中排除这些地点。EYC Journal四项目标发生变化时，该记忆失效并清空；候选出现时也移除该城镇的旧“无候选”标记。若当前场景没有候选且原版目录仅剩`missionLeave`，Host提交这个唯一可用的原版离场动作并等回Map后再落盘；有任何可选Wanderer或对话时仍由模型决策。它不注入目标进度或改动Quest/资源/游戏时钟。`TestResults/20261107-040422` AgentHostPackage的Fake Native测试确认空酒馆离场、存档写入、跨Host重启过滤与其它Town可选。真实Campaign运行`TestResults/20261107-041139`保存检查点后，`TestResults/20261107-043410`下次启动的安全摘要确认`checkpointReadAttempted=true`、`noCandidateTownCount=1`、`memoryMatchedCurrentJournal=true`、没有发生Journal失效；该轮没有完成EYC目标。检查点读写和记忆复用已获得真实Campaign证据，但同伴招募尚未完成。
 
 若EYC目标子流程因Bandit等事件返回父循环、此时原版 MainParty 仍在前往Settlement，Companion恢复后会继承Native当前`GoToSettlement`目标并被动监视路途；不再重新查询目标表或重复提交相同`move`。当前停止/遭遇仍走既有上层恢复路径。`TestResults/20261107-044809` AgentHostPackage与`TestResults/20261107-050137`自然续跑已验证继承移动并避免重复EW2目的地。但真实续跑还显示，监视器为确认可见敌对Bandit而暂停移动后，EYC父循环先按“普通暂停移动”返回处理，压过了下面已经存在的Bandit坐镇路线，导致子流程重选Companion而未处理敌人。现在只有确认当前Native Map有该Bandit时，父循环才先路由已实现的BattleSimulation；没有可见敌人的暂停移动仍走原有Native Move恢复。`TestResults/20261107-051813` AgentHostPackage回归覆盖这条优先级，真实敌对中断尚待复测。
+
+在自然续跑`TestResults/20261107-053329`中，追上敌对劫匪后Native不提供可用坐镇战斗（主队无士兵）；真实模型选择了原版投降，并接受原版赎金询问，Campaign Map恢复。主角/Party仍为1人，金币从1000降到670，Renown维持20。这验证的是原版投降/赎回恢复，不是战斗胜利或EYC目标进度。之后另一次敌对中断也没有可坐镇战斗结果，Agent回到`town_EW3`的原版招募入口并查询志愿者，预算到顶前尚未招募；原版Town菜单安全存档成功，当前EYC仍未完成。
 
 Campaign地图已在进行原版`GoToSettlement`移动时，如果 EYC Host 从Bandit/其他已处理事件中重启Companion子流程，Host将从当前Native `targetSettlementId`继承路线，并沿用现有被动时间/遭遇观察器；只有到达城镇、出现新状态或需要模型决策时才恢复目标规划。该恢复不发新的移动命令、不更改时间速率，也不替代遇敌决策。
 
@@ -760,6 +764,8 @@ FreeLLMAPI可用性诊断默认不重复调用自动回退路由：一次请求�
 - 主线完成或主题切换必须使用 `Complete-ContextFocus.ps1` 原子执行“删除/归档旧MAINLINE + 写入新技术焦点 + 更新路由元数据”；任务Issue另在GitHub关闭或更新，两边不互相复制状态。
 - `Get-ContextPack.ps1` 默认只返回Development Contract + Active Focus；`DESIGN.md`仅设计任务读取，`SYSTEM_INVENTORY.md`与Research仅盘点任务按路由加载，Archive只有显式请求才返回。
 - `Check-Docs.ps1` 检查层级、唯一主线、hash、复核期限、Reference 单文件规则以及 Archive 不进入默认读取列表。
+- OpenSpec 只承载一个当前变更的提案、规格、设计依据和可核验任务；GitHub Project仍是产品事项的排序/状态来源，OpenSpec不复制路线图，`TestResults`仍是完整运行收据。`Get-ContextPack.ps1`向新上下文附上活动变更摘要，`Run-Harness.ps1 -Phase Docs`调用`openspec validate --all`并拒绝多个活动变更；OpenSpec生成的 `.agents/skills/openspec-*` 与 `openspec/` markdown 不加入内容文档路由，OpenSpec CLI负责其结构校验。
+- OpenSpec任务完成框必须链接已存在的精确Harness收据；包测试与自然Campaign/模型运行分别标记。模型测试任务在执行前必须注明假设、新信号、调用上限和费用上限。归档变更不等于关闭GitHub产品Issue。
 - 文档内容过时直接修改权威段落，不新增“新版”“补充”文件。
 - 删除、移动或归档文档时同步修正 `ContextState.json`、根 `AGENTS.md` 和 Docs 检查。
 - Harness、验收、工具链或文档拓扑变化时提升 contract version。

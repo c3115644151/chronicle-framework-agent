@@ -438,6 +438,7 @@ internal static class AgentHostHarnessProgressTrace
             ["noCandidateTownCount"] = Copy(memory, "noCandidateTownCount"),
             ["memoryMatchedCurrentJournal"] = Copy(memory, "memoryMatchedCurrentJournal"),
             ["memoryInvalidatedByJournalProgress"] = Copy(memory, "memoryInvalidatedByJournalProgress"),
+            ["memoryReusedAfterJournalDecrease"] = Copy(memory, "memoryReusedAfterJournalDecrease"),
             ["checkpointWriteCount"] = Copy(memory, "checkpointWriteCount"),
             ["lastCheckpointWriteStatus"] = Copy(memory, "lastCheckpointWriteStatus")
         };

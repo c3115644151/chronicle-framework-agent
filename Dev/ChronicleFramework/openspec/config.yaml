@@ -1,0 +1,29 @@
+schema: spec-driven
+
+context: |
+  Chronicle Framework is a Bannerlord single-player autonomous-player mod. Write OpenSpec artifacts in Simplified Chinese.
+  GitHub Project 5 remains the source for product issue order/status. OpenSpec records one scoped change and its evidence, not a second task board or full roadmap; link the existing parent issue.
+  Before planning, read DEVELOPMENT.md and Focus/MAINLINE.md. Treat exact TestResults receipts as runtime evidence and distinguish package tests from live Native Campaign evidence.
+  Before billable model tests, record the hypothesis, expected new signal, provider-decision cap, and CNY ceiling. Do not repeat the same code/save/prompt combination without a new reason.
+
+rules:
+  proposal:
+    - Link one existing GitHub issue and define only this change's cohesive scope.
+    - Do not copy the full roadmap or GitHub acceptance text.
+  specs:
+    - Describe player-visible Native behavior and observable outcomes; label unknown mechanics explicitly.
+  design:
+    - Cite authoritative source or TestResults evidence for engine-specific claims; separate facts, inferences, and unknowns.
+  tasks:
+    - Use numbered checkboxes. Each verification task names the exact Harness phase and TestResults receipt that will prove it.
+    - Do not treat build/package self-tests as live Campaign acceptance.
+
+operations:
+  apply:
+    guidance:
+      - Continue the single current GitHub In Progress issue; do not create a parallel product board.
+      - Before billable inference, specify a bounded provider-decision limit and CNY ceiling.
+  archive:
+    guidance:
+      - Archive only when implementation and every required task match their named evidence.
+      - Do not close the parent GitHub issue unless its complete acceptance gate has passed.

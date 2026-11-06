@@ -294,6 +294,7 @@ internal static class AgentHostRuntimeProgressLog
             ["noCandidateTownCount"] = Copy(memory, "noCandidateTownCount"),
             ["memoryMatchedCurrentJournal"] = Copy(memory, "memoryMatchedCurrentJournal"),
             ["memoryInvalidatedByJournalProgress"] = Copy(memory, "memoryInvalidatedByJournalProgress"),
+            ["memoryReusedAfterJournalDecrease"] = Copy(memory, "memoryReusedAfterJournalDecrease"),
             ["checkpointWriteCount"] = Copy(memory, "checkpointWriteCount"),
             ["lastCheckpointWriteStatus"] = Copy(memory, "lastCheckpointWriteStatus")
         };
@@ -598,6 +599,7 @@ internal static class AgentHostRuntimeProgressLog
                         ["noCandidateTownCount"] = 1,
                         ["memoryMatchedCurrentJournal"] = true,
                         ["memoryInvalidatedByJournalProgress"] = false,
+                        ["memoryReusedAfterJournalDecrease"] = false,
                         ["checkpointWriteCount"] = 1,
                         ["lastCheckpointWriteStatus"] = "completed",
                         ["privateTownId"] = "PRIVATE_TOWN_ID"
@@ -657,6 +659,7 @@ internal static class AgentHostRuntimeProgressLog
                 ReadBoolean(companionMemorySummary, "checkpointReadAttempted") != true ||
                 ReadInt(companionMemorySummary, "noCandidateTownCount") != 1 ||
                 ReadBoolean(companionMemorySummary, "memoryMatchedCurrentJournal") != true ||
+                ReadBoolean(companionMemorySummary, "memoryReusedAfterJournalDecrease") != false ||
                 ReadInt(companionMemorySummary, "checkpointWriteCount") != 1 ||
                 ReadString(companionMemorySummary, "lastCheckpointWriteStatus") != "completed" ||
                 ReadString(summaryEvent, "event") != "run-summary" ||

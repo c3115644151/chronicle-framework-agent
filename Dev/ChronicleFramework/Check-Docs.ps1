@@ -6,7 +6,13 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.556'
+$contractVersion = '7.557'
+$openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
+if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
+. $openSpecHarnessPath
+$openSpecSummary = Get-OpenSpecWorkspaceSummary -Validate
+if ([IO.Path]::GetFullPath([string]$openSpecSummary.Root) -ne [IO.Path]::GetFullPath($harnessRoot)) { throw 'OpenSpec resolved a different workspace root than the Chronicle Harness.' }
+if ($openSpecSummary.ActiveChangeCount -gt 1) { throw 'OpenSpec must contain at most one active change; GitHub Project remains the product task board.' }
 $contextState = Get-Content (Join-Path $harnessRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
 $requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
@@ -21,6 +27,8 @@ $routedPaths = @(
 # AGENTS.md is an injected work-rules file, not a content document routed through ContextState.
 $actualFiles = @(Get-ChildItem -Path $harnessRoot -Recurse -File -Filter '*.md' | Where-Object {
     $_.FullName -notmatch '[\\/](TestResults|obj|bin)[\\/]' -and
+    $_.FullName -notmatch '[\\/]openspec[\\/]' -and
+    $_.FullName -notmatch '[\\/]\.agents[\\/]skills[\\/]openspec-[^\\/]+[\\/]' -and
     $_.FullName -ne (Join-Path $harnessRoot 'AGENTS.md')
 })
 $actualRelativePaths = @($actualFiles | ForEach-Object { $_.FullName.Substring($harnessRoot.Length + 1).Replace('/', '\') })
@@ -2379,5 +2387,6 @@ if (@($contextState.defaultRead | Where-Object { $_ -like 'Archive/*' }).Count -
     MarkdownBytes = $totalBytes
     DefaultReadMarkdownBytes = $defaultReadBytes
     TaskTrackerUrl = $taskTrackerUrl
+    OpenSpec = $openSpecSummary
     CheckedUtc = (Get-Date).ToUniversalTime().ToString('O')
-} | ConvertTo-Json
+} | ConvertTo-Json -Depth 8
