@@ -6,8 +6,6 @@ namespace ChronicleFramework.AgentHost;
 
 internal static class AgentHostQuestTroopScreenLoop
 {
-    private const int MaxScreenDecisions = 8;
-
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
         var assignment = new JsonObject { ["currentCount"] = 1, ["requiredCount"] = 3, ["doneAvailable"] = false, ["cancelAvailable"] = true };
@@ -36,7 +34,44 @@ internal static class AgentHostQuestTroopScreenLoop
             TryResolveDecision(new JsonObject { ["action"] = "questTroopTransfer", ["arguments"] = new JsonObject { ["TroopId"] = "unobserved", ["QuestTroopSourceSide"] = "mainParty" } }, transferCatalog, out _, out _))
             throw new AgentHostException("quest-troop-screen-self-test-current-target-binding-failed", "The Host must bind each troop transfer to an exact current row and source side.");
 
-        return [new { scenario = "quest-troop-screen-native-catalog-tracks-current-progress-and-excludes-heroes-and-stale-troops", passed = true }];
+        var gangIssueScreen = new JsonObject
+        {
+            ["mode"] = "TroopsManage",
+            ["issueTroopAssignment"] = new JsonObject
+            {
+                ["kind"] = "gangLeaderRecruitHandoff", ["questId"] = "issue_123_quest", ["questGiverHeroId"] = "gang-leader",
+                ["assignedCount"] = 2, ["assignmentLimit"] = 12, ["doneAvailable"] = true, ["cancelAvailable"] = true
+            },
+            ["rightMembers"] = new JsonArray(
+                new JsonObject { ["troopId"] = "looter", ["count"] = 7, ["transferable"] = true, ["isHero"] = false },
+                new JsonObject { ["troopId"] = "imperial_recruit", ["count"] = 4, ["transferable"] = false, ["isHero"] = false },
+                new JsonObject { ["troopId"] = "companion", ["count"] = 1, ["transferable"] = false, ["isHero"] = true })
+        };
+        var gangProgress = BuildAssignmentProgress(gangIssueScreen);
+        var gangCatalog = BuildActionCatalog(gangIssueScreen, gangProgress);
+        using var gangRoot = JsonDocument.Parse(new JsonObject
+        {
+            ["state"] = new JsonObject
+            {
+                ["context"] = new JsonObject { ["gameState"] = "PartyState" },
+                ["partyScreen"] = gangIssueScreen.DeepClone()
+            }
+        }.ToJsonString());
+        var gangTransfers = gangCatalog.OfType<JsonObject>().Where(action => ReadString(action, "action") == "questTroopTransfer").ToArray();
+        if (!IsActive(gangRoot.RootElement) || gangTransfers.Length != 1 ||
+            ReadString(gangTransfers[0]["arguments"] as JsonObject, "TroopId") != "looter" ||
+            !gangCatalog.OfType<JsonObject>().Any(action => ReadString(action, "action") == "questTroopScreenDone") ||
+            !gangCatalog.OfType<JsonObject>().Any(action => ReadString(action, "action") == "questTroopScreenCancel"))
+            throw new AgentHostException("quest-troop-screen-self-test-gang-leader-partial-handoff-catalog-failed", "The original Gang Leader TroopsManage screen must expose only Native-transferable Bandit member rows while allowing Native-enabled partial Done and Cancel.");
+        if (!TryResolveDecision(new JsonObject { ["action"] = "questTroopTransfer", ["arguments"] = new JsonObject { ["TroopId"] = "looter", ["QuestTroopSourceSide"] = "mainParty" } }, gangCatalog, out var gangAction, out _) ||
+            gangAction != "questTroopTransfer" ||
+            TryResolveDecision(new JsonObject { ["action"] = "questTroopTransfer", ["arguments"] = new JsonObject { ["TroopId"] = "imperial_recruit", ["QuestTroopSourceSide"] = "mainParty" } }, gangCatalog, out _, out _))
+            throw new AgentHostException("quest-troop-screen-self-test-gang-leader-current-bandit-binding-failed", "The Gang Leader hand-in must bind the model to a current Native-transferable ordinary Bandit row and reject unrelated members.");
+
+        return [
+            new { scenario = "quest-troop-screen-native-catalog-tracks-current-progress-and-excludes-heroes-and-stale-troops", passed = true },
+            new { scenario = "gang-leader-troop-handoff-uses-native-transferability-and-native-partial-done", passed = true }
+        ];
     }
 
     internal static bool IsActive(JsonElement root)
@@ -44,7 +79,10 @@ internal static class AgentHostQuestTroopScreenLoop
         var state = ReadObject(root, "state");
         var context = ReadObject(state, "context");
         var screen = ReadObject(state, "partyScreen");
-        return ReadString(context, "gameState") == "PartyState" && ReadString(screen, "mode") == "QuestTroopManage";
+        var issueAssignment = ReadObject(screen, "issueTroopAssignment");
+        return ReadString(context, "gameState") == "PartyState" &&
+            (ReadString(screen, "mode") == "QuestTroopManage" ||
+             ReadString(screen, "mode") == "TroopsManage" && ReadString(issueAssignment, "kind") == "gangLeaderRecruitHandoff");
     }
 
     internal static async Task<JsonObject> RunAsync(
@@ -67,21 +105,23 @@ internal static class AgentHostQuestTroopScreenLoop
         var routes = priorProviderRouteHistory?.DeepClone() as JsonArray ?? new JsonArray();
         JsonObject? previousReceipt = null;
 
-        for (var step = 0; step < MaxScreenDecisions; step++)
+        var decisionLimit = Math.Max(decisions,
+            Math.Clamp(ReadInt(runRequest, "maxDecisions", AgentHostCampaignLoop.MaxCumulativeDecisions), 1, AgentHostCampaignLoop.MaxCumulativeDecisions));
+        for (var step = 0; step < decisionLimit && decisions < decisionLimit; step++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             using var current = await client.ReadStateAsync(cancellationToken);
             if (!IsActive(current.RootElement))
             {
-                return BuildResult("completed", "native-quest-troop-party-screen-closed", decisions, actionsExecuted,
-                    promptTokens, completionTokens, trace, routes, "The original QuestTroopManage screen is no longer active; no Issue completion was inferred.");
+                return BuildResult("completed", "native-issue-troop-party-screen-closed", decisions, actionsExecuted,
+                    promptTokens, completionTokens, trace, routes, "The original Native Issue troop-assignment screen is no longer active; no Issue completion was inferred.");
             }
 
             var root = JsonNode.Parse(current.RootElement.GetRawText())?.AsObject()
                 ?? throw new AgentHostException("quest-troop-screen-state-invalid", "Native returned no current state document.");
             var state = root["state"] as JsonObject ?? new JsonObject();
             var partyScreen = state["partyScreen"] as JsonObject ?? new JsonObject();
-            var assignment = partyScreen["questTroopAssignment"] as JsonObject ?? new JsonObject();
+            var assignment = BuildAssignmentProgress(partyScreen);
             var catalog = BuildActionCatalog(partyScreen, assignment);
             if (catalog.Count == 0)
             {
@@ -91,7 +131,7 @@ internal static class AgentHostQuestTroopScreenLoop
                     ["partyScreen"] = partyScreen.DeepClone()
                 });
                 return BuildResult("failed", "quest-troop-screen-no-safe-action", decisions, actionsExecuted,
-                    promptTokens, completionTokens, trace, routes, "The Native QuestTroopManage screen is active but offers no currently enabled safe transfer, Done, or Cancel action.");
+                    promptTokens, completionTokens, trace, routes, "The Native Issue troop-assignment screen is active but offers no currently enabled safe transfer, Done, or Cancel action.");
             }
 
             var modelRequest = new JsonObject
@@ -135,12 +175,12 @@ internal static class AgentHostQuestTroopScreenLoop
                     ["providerElapsedMs"] = Stopwatch.GetElapsedTime(providerStarted).TotalMilliseconds
                 });
                 return BuildResult("failed", "quest-troop-screen-invalid-native-action", decisions, actionsExecuted,
-                    promptTokens, completionTokens, trace, routes, "The model did not choose one exact action and argument set from the current Native QuestTroopManage screen.");
+                    promptTokens, completionTokens, trace, routes, "The model did not choose one exact action and argument set from the current Native Issue troop-assignment screen.");
             }
 
             using var response = await nativeClient.ExecuteQuestTroopScreenActionAsync(action, arguments, cancellationToken);
             var receipt = JsonNode.Parse(response.RootElement.GetRawText())?.AsObject()
-                ?? throw new AgentHostException("quest-troop-screen-native-receipt-invalid", "Native returned no receipt for the current QuestTroopManage action.");
+                ?? throw new AgentHostException("quest-troop-screen-native-receipt-invalid", "Native returned no receipt for the current Issue troop-assignment action.");
             previousReceipt = receipt.DeepClone() as JsonObject;
             actionsExecuted++;
             trace.Add(new JsonObject
@@ -161,7 +201,7 @@ internal static class AgentHostQuestTroopScreenLoop
                 using var after = await client.ReadStateAsync(cancellationToken);
                 if (IsActive(after.RootElement))
                     return BuildResult("failed", "quest-troop-screen-close-unverified", decisions, actionsExecuted,
-                        promptTokens, completionTokens, trace, routes, "Native accepted the PartyVM control, but a fresh observation still reports QuestTroopManage active.");
+                        promptTokens, completionTokens, trace, routes, "Native accepted the PartyVM control, but a fresh observation still reports the Issue assignment screen active.");
                 var result = BuildResult(action == "questTroopScreenDone" ? "completed" : "interrupted",
                     action == "questTroopScreenDone" ? "native-quest-alternative-party-assignment-submitted" : "native-quest-alternative-party-assignment-cancelled",
                     decisions, actionsExecuted, promptTokens, completionTokens, trace, routes,
@@ -174,7 +214,24 @@ internal static class AgentHostQuestTroopScreenLoop
         }
 
         return BuildResult("failed", "quest-troop-screen-decision-limit", decisions, actionsExecuted,
-            promptTokens, completionTokens, trace, routes, "The Native QuestTroopManage screen remained open after the bounded transfer decisions; no clock action or direct roster edit was used.");
+            promptTokens, completionTokens, trace, routes, "The Native Issue troop-assignment screen remained open at the shared Campaign decision limit; no clock action or direct roster edit was used.");
+    }
+
+    private static JsonObject BuildAssignmentProgress(JsonObject partyScreen)
+    {
+        if (partyScreen["questTroopAssignment"] is JsonObject questAssignment)
+            return questAssignment.DeepClone() as JsonObject ?? new JsonObject();
+
+        var issueAssignment = partyScreen["issueTroopAssignment"] as JsonObject;
+        if (issueAssignment is null || ReadString(issueAssignment, "kind") != "gangLeaderRecruitHandoff") return new JsonObject();
+        return new JsonObject
+        {
+            ["currentCount"] = issueAssignment["assignedCount"]?.DeepClone(),
+            ["requiredCount"] = issueAssignment["assignmentLimit"]?.DeepClone(),
+            ["doneAvailable"] = issueAssignment["doneAvailable"]?.DeepClone(),
+            ["cancelAvailable"] = issueAssignment["cancelAvailable"]?.DeepClone(),
+            ["assignmentKind"] = "gangLeaderRecruitHandoff"
+        };
     }
 
     internal static JsonArray BuildActionCatalog(JsonObject partyScreen, JsonObject assignment)
@@ -183,9 +240,7 @@ internal static class AgentHostQuestTroopScreenLoop
         var progress = ReadInt(assignment, "currentCount", -1);
         var required = ReadInt(assignment, "requiredCount", -1);
         var doneAvailable = ReadBoolean(assignment, "doneAvailable");
-        if (doneAvailable)
-            result.Add(new JsonObject { ["action"] = "questTroopScreenDone", ["arguments"] = new JsonObject() });
-        else if (progress >= 0 && required >= 0 && progress < required)
+        if (progress >= 0 && required >= 0 && progress < required)
         {
             if (partyScreen["rightMembers"] is JsonArray rows)
             {
@@ -202,6 +257,8 @@ internal static class AgentHostQuestTroopScreenLoop
                 }
             }
         }
+        if (doneAvailable)
+            result.Add(new JsonObject { ["action"] = "questTroopScreenDone", ["arguments"] = new JsonObject() });
         if (ReadBoolean(assignment, "cancelAvailable"))
             result.Add(new JsonObject { ["action"] = "questTroopScreenCancel", ["arguments"] = new JsonObject() });
         return result;
