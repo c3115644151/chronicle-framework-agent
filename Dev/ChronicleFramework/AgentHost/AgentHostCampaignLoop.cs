@@ -55,6 +55,15 @@ internal static class AgentHostCampaignLoop
             !initialControls.Any(control => control?.GetValue<string>() == "unsupportedGoal"))
             throw new AgentHostException("campaign-loop-self-test-goal-scope-gate-failed", "The first decision must classify the complete user goal before any Native action is available.");
         results.Add(new { scenario = "campaign-loop-requires-goal-scope-classification-before-native-actions", passed = true });
+        var stalledMoveForClassification = JsonNode.Parse("""
+            {"timeControlMode":"Stop","state":{"context":{"gameState":"MapState","menuId":null,"escapeMenuOpen":false,"inquiryOpen":false,"encounterActive":false,"isWaitMenu":false,"isWaitActive":false,"captivity":{"isCaptive":false}},"location":{"currentSettlementId":null,"targetSettlementId":"town-a","targetPartyId":null},"party":{"isMoving":true},"quests":[{"id":"rebuild_player_clan_storymode_quest"}]}}
+            """)?.AsObject() ?? throw new AgentHostException("campaign-loop-self-test-stalled-move-fixture-invalid", "The stalled Native movement classifier fixture could not be created.");
+        if (ShouldReturnStalledMoveToParent(stalledMoveForClassification, goalScopeClassified: false) ||
+            !ShouldReturnStalledMoveToParent(stalledMoveForClassification, goalScopeClassified: true) ||
+            !BuildGoalScopeClassificationControls(stalledMoveForClassification["state"] as JsonObject)
+                .Any(control => control?.GetValue<string>() == "supportedEstablishYourClanGoal"))
+            throw new AgentHostException("campaign-loop-self-test-stalled-move-blocks-eyc-recovery", "A stopped in-flight Native move must still allow read-only goal classification so the EYC parent can perform its existing bounded Native Move recovery; ordinary already-classified map actions remain blocked.");
+        results.Add(new { scenario = "campaign-loop-classifies-goal-before-delegating-stalled-move-to-eyc-recovery", passed = true });
         var storyQuestControls = BuildGoalScopeClassificationControls(new JsonObject
         {
             ["quests"] = new JsonArray(new JsonObject { ["id"] = "rebuild_player_clan_storymode_quest" })
@@ -286,6 +295,9 @@ internal static class AgentHostCampaignLoop
 
     internal static int GetCumulativeDecisionLimit(int parentMaximum) => Math.Clamp(parentMaximum, 1, MaxCumulativeDecisions);
 
+    private static bool ShouldReturnStalledMoveToParent(JsonObject? nativeState, bool goalScopeClassified) =>
+        goalScopeClassified && AgentHostNativeMapMovementMonitor.IsStalledNativeSettlementMove(nativeState);
+
     internal static async Task<IReadOnlyList<object>> RunTransportSelfTestsAsync()
     {
         var requestJson = "{\"runId\":\"selftest-arrival\",\"goal\":\"Reach the observed safe settlement.\",\"parentProcessId\":321,\"maxDecisions\":8,\"maxElapsedSeconds\":10,\"allowedActionNames\":[\"mapSettlementTargets\",\"move\",\"menuSelect\",\"talkToSettlementHero\",\"dialogueSelect\",\"dialogueContinue\",\"questDetails\",\"tradeOptions\",\"trade\",\"tradeConfirm\",\"tradeCancel\",\"tradeCancelChanges\",\"barterOptions\",\"barterAutoBalance\",\"barterOffer\",\"barterCancel\",\"inventoryOpen\",\"heroEquipmentOptions\",\"inventoryCancel\",\"incidentSelect\"]}";
@@ -496,7 +508,7 @@ internal static class AgentHostCampaignLoop
             {
                 elapsed.Token.ThrowIfCancellationRequested();
                 var before = currentNative ?? throw new AgentHostException("native-observation-missing", "The Host lost its current Native observation.");
-                if (AgentHostNativeMapMovementMonitor.IsStalledNativeSettlementMove(before))
+                if (ShouldReturnStalledMoveToParent(before, goalScopeClassified))
                 {
                     failure = "The Native settlement move remains active while Campaign time is stopped; return the exact move target to its EYC parent for bounded Native Move recovery.";
                     failureCode = "native-stalled-move-returned-by-campaign-loop";
