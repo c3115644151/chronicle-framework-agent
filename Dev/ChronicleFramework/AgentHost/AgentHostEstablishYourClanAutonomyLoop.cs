@@ -238,6 +238,13 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             !ShouldRouteToBattleSimulation(hostileBanditInterruption.RootElement, failureCode: null))
             throw new AgentHostException("establish-clan-autonomy-paused-visible-bandit-route-classification-failed", "The parent may route to BattleSimulation only when its movement monitor explicitly reported a hostile bandit and a fresh paused EYC Map still confirms the visible party and original settlement move.");
         results.Add(new { scenario = "establish-clan-autonomy-routes-only-monitor-confirmed-paused-visible-bandit-travel-to-battle-simulation", passed = true });
+        var pausedBanditChildFailure = new JsonObject { ["status"] = "interrupted", ["failureCode"] = AgentHostNativeMapMovementMonitor.FailureCode };
+        var ordinaryPausedMoveChildFailure = new JsonObject { ["status"] = "failed", ["failureCode"] = "native-stalled-move-returned-by-training-issue" };
+        if (ShouldReturnPausedNativeMoveToParent(pausedBanditChildFailure, pausedVisibleBanditTravel.RootElement, out _) ||
+            !ShouldReturnPausedNativeMoveToParent(ordinaryPausedMoveChildFailure, pausedVisibleBanditTravel.RootElement, out var ordinaryPausedTarget) ||
+            ordinaryPausedTarget != "town-a")
+            throw new AgentHostException("establish-clan-autonomy-paused-bandit-priority-failed", "A monitor-confirmed visible hostile Bandit must reach the existing BattleSimulation route before generic stalled-move recovery; ordinary paused settlement moves still return to the parent mover.");
+        results.Add(new { scenario = "establish-clan-autonomy-prioritizes-visible-hostile-bandit-battle-over-generic-paused-move-retry", passed = true });
 
         using var safeObjectiveProviderMap = JsonDocument.Parse("""
             {"status":"completed","state":{"context":{"gameState":"MapState","inquiryOpen":false,"escapeMenuOpen":false,"isWaitMenu":false,"isWaitActive":false,"encounterActive":false,"captivity":{"isCaptive":false},"sceneNotification":{"hasActiveNotification":false}},"party":{"isMoving":false}}}
@@ -1838,6 +1845,10 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         if (ReadString(child, "status") is not ("failed" or "interrupted") ||
             native.ValueKind != JsonValueKind.Object || ReadString(native, "status") != "completed" ||
             !native.TryGetProperty("state", out var stateElement) || stateElement.ValueKind != JsonValueKind.Object)
+            return false;
+        var childFailureCode = ReadString(child, "failureCode");
+        if (string.Equals(childFailureCode, AgentHostNativeMapMovementMonitor.FailureCode, StringComparison.Ordinal) &&
+            ShouldRouteToBattleSimulation(native, childFailureCode))
             return false;
         var nativeNode = JsonNode.Parse(native.GetRawText())?.AsObject();
         if (!AgentHostNativeMapMovementMonitor.IsStalledNativeSettlementMove(nativeNode)) return false;
