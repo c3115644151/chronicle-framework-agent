@@ -208,6 +208,7 @@ internal static class AgentHostHarnessProgressTrace
                 ["objectiveSnapshot"] = BuildObjectiveSnapshotSummary(result["objectiveSnapshot"] as JsonObject),
                 ["recruitmentOfferSummary"] = BuildRecruitmentOfferSummary(result["lastRecruitmentOffers"] as JsonObject),
                 ["companionNavigationSummary"] = BuildCompanionNavigationSummary(result["trace"] as JsonArray),
+                ["companionSearchMemory"] = BuildCompanionSearchMemorySummary(result["companionSearchMemory"] as JsonObject),
                 ["villagersInNeedStartupSummary"] = BuildVillagersInNeedStartupSummary(result["trace"] as JsonArray),
                 ["nativeStateBefore"] = result["nativeStateBefore"]?.DeepClone() ?? BuildNativeStateSummary(result["initialNativeState"] as JsonObject),
                 ["nativeStateAfter"] = result["nativeStateAfter"]?.DeepClone() ?? BuildNativeStateSummary(result["finalNativeState"] as JsonObject ?? result["finalState"] as JsonObject)
@@ -425,6 +426,20 @@ internal static class AgentHostHarnessProgressTrace
             ["partyDefaultBehavior"] = Copy(party, "defaultBehavior"),
             ["questIds"] = questIds,
             ["availableMenuOptions"] = menuOptions
+        };
+    }
+
+    private static JsonObject? BuildCompanionSearchMemorySummary(JsonObject? memory)
+    {
+        if (memory is null) return null;
+        return new JsonObject
+        {
+            ["checkpointReadAttempted"] = Copy(memory, "checkpointReadAttempted"),
+            ["noCandidateTownCount"] = Copy(memory, "noCandidateTownCount"),
+            ["memoryMatchedCurrentJournal"] = Copy(memory, "memoryMatchedCurrentJournal"),
+            ["memoryInvalidatedByJournalProgress"] = Copy(memory, "memoryInvalidatedByJournalProgress"),
+            ["checkpointWriteCount"] = Copy(memory, "checkpointWriteCount"),
+            ["lastCheckpointWriteStatus"] = Copy(memory, "lastCheckpointWriteStatus")
         };
     }
 

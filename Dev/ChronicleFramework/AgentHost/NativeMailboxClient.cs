@@ -9,7 +9,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
     IAgentHostQuestDetailsNativeClient, IAgentHostCaptivityRecoveryNativeClient, IAgentHostGoldSaleNativeClient,
     IAgentHostRecruitmentNativeClient, IAgentHostSupplyNativeClient, IAgentHostCompanionHiringNativeClient, IAgentHostStoryModeBootstrapNativeClient,
     IAgentHostNativeInquiryClient, IAgentHostStoryModeBannerEditorNativeClient, IAgentHostEstablishClanTrainingIssueNativeClient,
-    IAgentHostQuestTroopScreenNativeClient
+    IAgentHostQuestTroopScreenNativeClient, IAgentHostCampaignCheckpointNativeClient
 {
     private static readonly HashSet<string> SupplySliceActions = new(StringComparer.Ordinal)
     {
@@ -55,6 +55,15 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
 
     internal Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken) =>
         SendAsync("state", new JsonObject(), acceptedResponseExpected: false, cancellationToken);
+
+    public Task<JsonDocument> ReadCampaignCheckpointAsync(CancellationToken cancellationToken) =>
+        SendAsync("agentCheckpointGet", new JsonObject(), acceptedResponseExpected: false, cancellationToken);
+
+    public Task<JsonDocument> WriteCampaignCheckpointAsync(string checkpointJson, CancellationToken cancellationToken)
+    {
+        var checkpointBase64 = AgentHostCampaignCheckpointCodec.EncodeForNative(checkpointJson);
+        return SendAsync("agentCheckpointSet", new JsonObject { ["checkpointBase64"] = checkpointBase64 }, acceptedResponseExpected: false, cancellationToken);
+    }
 
     public Task<JsonDocument> RespondNativeInquiryAsync(string token, string choice, CancellationToken cancellationToken)
     {

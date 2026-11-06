@@ -33,6 +33,8 @@ internal static class AgentHostCampaignLoop
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
         var results = new List<object>();
+        results.AddRange(AgentHostCampaignCheckpointCodec.RunContractSelfTests());
+        results.AddRange(AgentHostEycCompanionSearchMemory.RunContractSelfTests());
         results.AddRange(AgentHostNativeMapMovementMonitor.RunContractSelfTests());
         if (!GoldSaleActions.Contains("sellPrisonerOne") || !GoldSaleActions.Contains("partyScreenDone") || !GoldSaleActions.Contains("partyScreenCancel") ||
             !AllSupportedActions.Contains("sellPrisonerOne") || !AllSupportedActions.Contains("partyScreenCancel"))

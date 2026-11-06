@@ -144,6 +144,14 @@ Fresh StoryMode observer的原版Native菜单退出快照是schema JSON根对象
 
 在精确的友好城镇酒馆 Mission 中，Host会先通过既有Native `missionSceneAgents`读取当前场景候选，再把候选交给模型；这类只读感知不再占一次模型决策。仅在当前无对话、同伴目标未由Native状态满足且场景候选尚未读取时执行；当前对话与已达标后的原版离场仍沿原有流程。该观察记录为`native-tavern-scene-observation`，计入Native命令统计但标明没有模型决策和改变游戏状态的输入。`TestResults/20261107-032130` AgentHostPackage覆盖两次场景读取均不增加模型调用、并保留模型导航/交谈/雇佣决策；下一次真实模型长测再测实际token节省，不把包内自测当作运行成本证明。
 
+EYC Companion子流程现在复用存档中的Campaign-scoped Agent checkpoint保存“当前EYC目标快照下，哪些Town Tavern已确认没有可招募Wanderer”。它只在原版酒馆场景扫描确认无合格候选、且Agent已返回Native MapState后写入`agentCheckpointSet`；Host重启后用`agentCheckpointGet`读取，按Native Campaign identity验证并从候选Town中排除这些地点。EYC Journal四项目标发生变化时，该记忆失效并清空；候选出现时也移除该城镇的旧“无候选”标记。若当前场景没有候选且原版目录仅剩`missionLeave`，Host提交这个唯一可用的原版离场动作并等回Map后再落盘；有任何可选Wanderer或对话时仍由模型决策。它不注入目标进度或改动Quest/资源/游戏时钟。`TestResults/20261107-040422` AgentHostPackage的Fake Native测试确认空酒馆离场、存档写入、跨Host重启过滤与其它Town可选。真实Campaign运行`TestResults/20261107-041139`保存检查点后，`TestResults/20261107-043410`下次启动的安全摘要确认`checkpointReadAttempted=true`、`noCandidateTownCount=1`、`memoryMatchedCurrentJournal=true`、没有发生Journal失效；该轮没有完成EYC目标。检查点读写和记忆复用已获得真实Campaign证据，但同伴招募尚未完成。
+
+若EYC目标子流程因Bandit等事件返回父循环、此时原版 MainParty 仍在前往Settlement，Companion恢复后会继承Native当前`GoToSettlement`目标并被动监视路途；不再重新查询目标表或重复提交相同`move`。当前停止/遭遇仍走既有上层恢复路径。`TestResults/20261107-044809` AgentHostPackage通过对应Fake Native回归；实际敌对遭遇后的同一目标恢复仍需下一段自然Campaign运行核验。
+
+Campaign地图已在进行原版`GoToSettlement`移动时，如果 EYC Host 从Bandit/其他已处理事件中重启Companion子流程，Host将从当前Native `targetSettlementId`继承路线，并沿用现有被动时间/遭遇观察器；只有到达城镇、出现新状态或需要模型决策时才恢复目标规划。该恢复不发新的移动命令、不更改时间速率，也不替代遇敌决策。
+
+真实模型续跑`TestResults/20261107-041139`使用DeepSeek和¥0.10预算，进入原版Town ES3 Tavern后没有 eligible Wanderer，Host以唯一可用的原版Leave返回Map，随后Agent选择Town EW2。该段10次模型决策/10条Native命令，估算¥0.05229593、reserved ¥0.0974016；EYC Journal未变化。Native SaveAs将同一Campaign存为`ChronicleEycDev-freshB-20261107041407-7b7149c4`（SHA-256 `D3581AFB22DA8CEAFA9753666D963623172C84530998D8F444C087DAA0A95C92`），进程清理成功。该运行证明自动Leave后Agent继续选了另一个Town；当时的收据没有输出检查点记忆摘要，下一次恢复运行要用新增的安全汇总确认Campaign checkpoint读取、Journal指纹匹配和记忆重用，不能把这一段当作跨重启实测通过。
+
 自2026-10-19起，产品主线是AI自主控制MainHero/MainParty游玩单机Campaign。一个Agent需支持持续自主推进与玩家临时交办两种模式；临时指令完成/受阻后回到自主目标循环，不能退化为玩家逐步点选的遥控器。首个长程门禁是由真实模型从自然StoryMode流程完成原版`Establish Your Clan`四项目标并由Native判定任务完成；本首测允许玩家先走原版TrainingField兄长对话并确认Tutorial skip，AI从随后首个稳定Campaign MapState接管；不允许使用预备存档或注入进度。Tutorial skip是玩家原版开局操作，不算Agent能力，完整未跳过教程自治留作后续扩展。此次门禁只证明首段闭环，不等于整个自主玩家产品完成。NPC/同伴Agent保留为后续玩法候选，但同伴加入MainParty本身没有独立Campaign Party Think循环，因此不假设其比MainHero更容易接入。工作顺序以GitHub Project中MainHero StoryMode门禁唯一进行中的产品Issue为准。
 当前StoryMode父循环已把Gold、动态PartySize、Renown及Companion四个目标接入已有Native子流程。Town Tavern Companion路由只用当前菜单、同一Mission内观察到的Wanderer、原版导航/交谈及当前可点击雇佣对话；Native AgentNavigator/Leave输入租约活动时由Host只读轮询状态，不再为`observeAgain`额外调用模型；当前目录不接受的回复最多给两次本目录反馈，超限后安全失败且不重放Native动作。可恢复的Provider输出错误若发生在无对话/弹窗、无敌对遭遇/移动的自由Campaign Map，父Host可仅把当前未完成路线暂时排除并基于新鲜Journal重新规划。若错误发生在Companion的友好Town/Tavern `StartUp` Mission内，父Host仅调用一次原版`missionLeave`，验证返回仍有EYC Quest的自由Map后再排除Companion路线；其他Mission、战斗、捕获、对话和未验证状态仍fail closed。Host包Fake Native/Provider回归验证这些边界，不等同真实Campaign或真实模型通过。此区别和当前四目标集成状态以Focus/MAINLINE为准。
 EYC父循环每轮最多20个目标周期曾在真实自然运行约243/320个累计模型决策时提前结束，留下至少77个可用决策预算。现移除该独立20轮限制，循环次数以同一请求的累计决策预算为上限；它不增加token预算/耗时预算，也不能覆盖模型停止/失败或原版Quest失败。`TestResults/20261031-185533` AgentHostPackage通过；Fake Native父循环验证连续21次部分Gold进展后，只有第21轮原版Quest Native lifecycle转为completed才允许父循环报告成功。SelfTest发出0次模型调用、0条Native游戏命令。该回归证明删掉20轮截断并保留原版任务后验，不证明自然Campaign完成。
@@ -529,6 +537,8 @@ Mod 内状态、命令与事件遥测
 4. 只读窗口截图，仅在不激活/不前置游戏窗口且确有视觉诊断需要时使用。
 
 TestResults的完整留存和历史清理策略见上文“Harness产物按可复核价值留存”，本节不保留第二份规则。
+
+随包`--provider-self-test`覆盖整个AgentHost合同集，运行超过90秒时曾被旧进程上限误判失败；`Test-AgentHostPackage.ps1`现将该同一自检的等待上限设为180秒，检查范围和断言未变。
 
 共享`AgentRuns/ChronicleAgent/events.jsonl`单文件上限16MiB，超限从新事件重新开始；逐轮trace保存在按上述规则保护的`TestResults`运行目录中。
 

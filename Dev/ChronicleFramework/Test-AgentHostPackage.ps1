@@ -283,7 +283,7 @@ function Invoke-PackagedHostUnboundParentProbe([string]$ExecutablePath)
 
 $packageHealth = Invoke-PackagedHost -ExecutablePath $hostExe -Argument '--package-health'
 $version = Invoke-PackagedHost -ExecutablePath $hostExe -Argument '--version'
-$providerSelfTest = Invoke-PackagedHost -ExecutablePath $hostExe -Argument '--provider-self-test' -TimeoutMilliseconds 90000
+$providerSelfTest = Invoke-PackagedHost -ExecutablePath $hostExe -Argument '--provider-self-test' -TimeoutMilliseconds 180000
 $unboundParentProbe = Invoke-PackagedHostUnboundParentProbe -ExecutablePath $hostExe
 foreach ($receipt in @($packageHealth, $version)) {
     if ($receipt.status -ne 'ready' -or $receipt.product -ne 'ChronicleAgentHost' -or

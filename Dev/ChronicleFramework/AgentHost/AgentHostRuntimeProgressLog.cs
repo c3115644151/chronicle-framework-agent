@@ -276,12 +276,27 @@ internal static class AgentHostRuntimeProgressLog
                 ["actionsExecuted"] = Copy(result, "actionsExecuted"),
                 ["promptTokens"] = Copy(result, "promptTokens"),
                 ["completionTokens"] = Copy(result, "completionTokens"),
+                ["companionSearchMemory"] = BuildCompanionSearchMemorySummary(result["companionSearchMemory"] as JsonObject),
                 ["nativeStateBefore"] = AgentHostHarnessProgressTrace.BuildNativeStateSummary(result["initialNativeState"] as JsonObject),
                 ["nativeStateAfter"] = AgentHostHarnessProgressTrace.BuildNativeStateSummary(result["finalNativeState"] as JsonObject ?? result["finalState"] as JsonObject),
                 ["failureTextLogged"] = false
             });
         }
         catch { }
+    }
+
+    private static JsonObject? BuildCompanionSearchMemorySummary(JsonObject? memory)
+    {
+        if (memory is null) return null;
+        return new JsonObject
+        {
+            ["checkpointReadAttempted"] = Copy(memory, "checkpointReadAttempted"),
+            ["noCandidateTownCount"] = Copy(memory, "noCandidateTownCount"),
+            ["memoryMatchedCurrentJournal"] = Copy(memory, "memoryMatchedCurrentJournal"),
+            ["memoryInvalidatedByJournalProgress"] = Copy(memory, "memoryInvalidatedByJournalProgress"),
+            ["checkpointWriteCount"] = Copy(memory, "checkpointWriteCount"),
+            ["lastCheckpointWriteStatus"] = Copy(memory, "lastCheckpointWriteStatus")
+        };
     }
 
     internal static void RecordRunSummary(JsonElement request, JsonObject result)
@@ -572,6 +587,22 @@ internal static class AgentHostRuntimeProgressLog
                     "127.0.0.1:7890", "cloudflare", "1.1 proxy", "req-123", "30", "json-error", "application/json", "server_error", "overloaded",
                     providerFallbackAttempts: 2, providerFallbackTrail: "ovh/model=rate_limited; nvidia/model=upstream_502");
                 RecordObjectiveSubflowResult("gold", new JsonObject { ["runId"] = validRun, ["status"] = "failed", ["termination"] = "self-test" });
+                RecordObjectiveSubflowResult("companions", new JsonObject
+                {
+                    ["runId"] = validRun,
+                    ["status"] = "interrupted",
+                    ["termination"] = "memory-self-test",
+                    ["companionSearchMemory"] = new JsonObject
+                    {
+                        ["checkpointReadAttempted"] = true,
+                        ["noCandidateTownCount"] = 1,
+                        ["memoryMatchedCurrentJournal"] = true,
+                        ["memoryInvalidatedByJournalProgress"] = false,
+                        ["checkpointWriteCount"] = 1,
+                        ["lastCheckpointWriteStatus"] = "completed",
+                        ["privateTownId"] = "PRIVATE_TOWN_ID"
+                    }
+                });
                 RecordRunSummary(request.RootElement, new JsonObject
                 {
                     ["providerModelId"] = "deepseek-flash", ["status"] = "completed", ["decisions"] = 1,
@@ -588,10 +619,12 @@ internal static class AgentHostRuntimeProgressLog
             var productLogLines = File.ReadAllLines(productLog);
             var childDecision = productLogLines.Length > 2 ? JsonNode.Parse(productLogLines[2]) as JsonObject : null;
             var budgetEvent = productLogLines.Length > 3 ? JsonNode.Parse(productLogLines[3]) as JsonObject : null;
-            var summaryEvent = productLogLines.Length > 6 ? JsonNode.Parse(productLogLines[6]) as JsonObject : null;
+            var companionMemoryEvent = productLogLines.Length > 6 ? JsonNode.Parse(productLogLines[6]) as JsonObject : null;
+            var summaryEvent = productLogLines.Length > 7 ? JsonNode.Parse(productLogLines[7]) as JsonObject : null;
             var summaryUsage = summaryEvent?["loggedProviderUsage"] as JsonObject;
             var usageByScope = summaryUsage?["providerUsageByScope"] as JsonObject;
-            if (productLogLines.Length != 7 || productLogLines.Any(line => line.Contains("PRIVATE_", StringComparison.Ordinal) ||
+            var companionMemorySummary = companionMemoryEvent?["companionSearchMemory"] as JsonObject;
+            if (productLogLines.Length != 8 || productLogLines.Any(line => line.Contains("PRIVATE_", StringComparison.Ordinal) ||
                     line.Contains("PRIVATE_OPTION_VALUE", StringComparison.Ordinal)) ||
                 ReadString(JsonNode.Parse(productLogLines[1]) as JsonObject, "event") != "provider-decision" ||
                 ReadInt(JsonNode.Parse(productLogLines[1]) as JsonObject, "fallbackAttempts") != 2 ||
@@ -620,6 +653,12 @@ internal static class AgentHostRuntimeProgressLog
                 ReadInt(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerFallbackAttempts") != 2 ||
                 ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerFallbackTrail") != "ovh/model=rate_limited; nvidia/model=upstream_502" ||
                 ReadString(JsonNode.Parse(productLogLines[5]) as JsonObject, "objectiveId") != "gold" ||
+                ReadString(companionMemoryEvent, "objectiveId") != "companions" ||
+                ReadBoolean(companionMemorySummary, "checkpointReadAttempted") != true ||
+                ReadInt(companionMemorySummary, "noCandidateTownCount") != 1 ||
+                ReadBoolean(companionMemorySummary, "memoryMatchedCurrentJournal") != true ||
+                ReadInt(companionMemorySummary, "checkpointWriteCount") != 1 ||
+                ReadString(companionMemorySummary, "lastCheckpointWriteStatus") != "completed" ||
                 ReadString(summaryEvent, "event") != "run-summary" ||
                 ReadInt(summaryUsage, "providerResponseRows", -1) != 2 ||
                 ReadInt(summaryUsage, "providerFailureEventsWithoutUsage", -1) != 1 ||

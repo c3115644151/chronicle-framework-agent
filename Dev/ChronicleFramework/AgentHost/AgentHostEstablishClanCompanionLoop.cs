@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -411,6 +412,8 @@ internal static class AgentHostEstablishClanCompanionLoop
             !missionStopProvider.SawMissionStopRecovery)
             throw new AgentHostException("establish-clan-companion-mission-stop-did-not-recover-to-map", "A model stop inside a Tavern Mission must be corrected to a listed Native exit, return to Map, and only then allow safe parent replanning. status=" + ReadString(missionStopRecovered, "status") + "; termination=" + ReadString(missionStopRecovered["termination"] as JsonObject, "reason") + "; actionsExecuted=" + ReadInt(missionStopRecovered, "actionsExecuted", 0) + "; providerCalls=" + missionStopProvider.CallCount + "; nativeActions=" + string.Join(",", missionStopClient.Actions) + "; recoveryFeedback=" + missionStopProvider.SawMissionStopRecovery);
         var movementWaitResult = await RunMapMovementWaitSelfTestAsync();
+        var inheritedMoveResult = await RunInheritedNativeMoveSelfTestAsync();
+        var persistentCompanionMemory = await RunPersistentNoCandidateTownMemorySelfTestAsync();
         return [
             new { scenario = "establish-clan-companion-passively-settles-friendly-tavern-mission-startup-before-decisions", startupReads = client.TavernMissionStartupStateReads, passed = true },
             new { scenario = "establish-clan-companion-passively-waits-for-native-mission-navigation-before-next-model-decision", activeNavigationReads = client.ActiveMissionNavigationStateReads, modelDecisions = provider.CallCount, nativeActions = client.Actions.ToArray(), passed = true },
@@ -418,8 +421,38 @@ internal static class AgentHostEstablishClanCompanionLoop
             new { scenario = "establish-clan-companion-listed-safe-stop-is-interrupted-with-zero-native-actions", decisions = stopProvider.CallCount, passed = true },
             new { scenario = "establish-clan-companion-mission-stop-is-corrected-to-native-leave-before-parent-replan", decisions = missionStopProvider.CallCount, nativeActions = missionStopClient.Actions.ToArray(), passed = true },
             await RunInvalidActionRecoverySelfTestAsync(request.RootElement),
+            persistentCompanionMemory,
+            inheritedMoveResult,
             movementWaitResult
         ];
+    }
+
+    private static async Task<object> RunPersistentNoCandidateTownMemorySelfTestAsync()
+    {
+        var firstClient = new FakePersistentNoCandidateCompanionClient();
+        var firstProvider = new FakeNoCandidateCompanionProvider(firstRun: true);
+        using var request = JsonDocument.Parse("{\"runId\":\"establish-clan-companion-memory-write-selftest\",\"goal\":\"Hire one companion.\",\"maxDecisions\":12,\"maxElapsedSeconds\":60}");
+        var first = await RunAsync(request.RootElement, firstClient, firstClient, firstProvider, CancellationToken.None);
+        using var storedCheckpointReceipt = firstClient.ReadStoredCheckpointReceipt();
+        var checkpoint = AgentHostCampaignCheckpointCodec.ReadFromNativeReceipt(storedCheckpointReceipt.RootElement);
+        var storedTownIds = AgentHostEycCompanionSearchMemory.ReadNoCandidateTownIds(checkpoint);
+        var journalData = new JsonObject { ["journalStages"] = firstClient.ReadJournal() };
+        var expectedFingerprint = AgentHostEycCompanionSearchMemory.BuildJournalFingerprint(AgentHostEstablishYourClanGoalLoop.BuildObjectiveSnapshot(
+            AgentHostEstablishYourClanGoalLoop.BuildJournalObjectives(journalData)));
+        if (!storedTownIds.SetEquals(["town_a"]) ||
+            AgentHostEycCompanionSearchMemory.ReadJournalFingerprint(checkpoint) != expectedFingerprint ||
+            firstClient.CheckpointWrites != 1 || firstProvider.CallCount != 6 || ReadString(first["termination"] as JsonObject, "reason") != "companion-model-stopped")
+            throw new AgentHostException("eyc-companion-memory-write-self-test-failed", "A Native Tavern with no eligible Wanderer must be remembered in the current Campaign save only after the original Mission returns to Map. writes=" + firstClient.CheckpointWrites + "; decisions=" + firstProvider.CallCount + "; nativeActions=" + string.Join(",", firstClient.Actions) + "; rememberedTownCount=" + storedTownIds.Count + "; termination=" + ReadString(first["termination"] as JsonObject, "reason") + "; failureCode=" + ReadString(first, "failureCode") + "; failure=" + ReadString(first, "failure"));
+
+        var resumedClient = new FakePersistentNoCandidateCompanionClient(firstClient.StoredCheckpointJson, startAtFreeMap: true);
+        var resumedProvider = new FakeNoCandidateCompanionProvider(firstRun: false);
+        using var resumeRequest = JsonDocument.Parse("{\"runId\":\"establish-clan-companion-memory-resume-selftest\",\"goal\":\"Hire one companion.\",\"maxDecisions\":4,\"maxElapsedSeconds\":60}");
+        var resumed = await RunAsync(resumeRequest.RootElement, resumedClient, resumedClient, resumedProvider, CancellationToken.None);
+        if (ReadString(resumed["termination"] as JsonObject, "reason") != "companion-model-stopped" ||
+            !resumedProvider.SawOnlyTownBAfterResume || resumedClient.CheckpointWrites != 0)
+            throw new AgentHostException("eyc-companion-memory-resume-self-test-failed", "A new Host on the same saved Campaign must skip the previously verified no-candidate Town without rewriting or losing the checkpoint.");
+
+        return new { scenario = "eyc-companion-no-candidate-town-survives-host-restart-in-same-native-save-and-does-not-exclude-other-towns", firstRunProviderCalls = firstProvider.CallCount, resumedRunProviderCalls = resumedProvider.CallCount, checkpointWrites = firstClient.CheckpointWrites, passed = true };
     }
 
     private static async Task<object> RunInvalidActionRecoverySelfTestAsync(JsonElement request)
@@ -452,6 +485,21 @@ internal static class AgentHostEstablishClanCompanionLoop
         return new { scenario = "establish-clan-companion-native-map-scene-notification-closes-then-movement-resumes", decisions = provider.CallCount, nativeActions = client.Actions.ToArray(), passiveMovementStateReads = client.ActiveMovementStateReads, sceneNotificationContinueCount = client.SceneNotificationContinueCount, explicitClockActions = client.ExplicitClockActions, passed = true };
     }
 
+    private static async Task<object> RunInheritedNativeMoveSelfTestAsync()
+    {
+        var client = new FakeInheritedNativeMoveCompanionClient();
+        var provider = new FakeInheritedNativeMoveProvider();
+        using var request = JsonDocument.Parse("{\"runId\":\"establish-clan-companion-inherited-native-move-selftest\",\"goal\":\"Hire one Companion.\",\"maxDecisions\":1,\"maxElapsedSeconds\":10}");
+        var result = await RunAsync(request.RootElement, client, client, provider, CancellationToken.None);
+        var inheritedTrace = result["trace"] is JsonArray trace
+            ? trace.OfType<JsonObject>().Any(step => ReadString(step, "stage") == "native-settlement-move-inherited-by-companion-route")
+            : false;
+        if (ReadString(result["termination"] as JsonObject, "reason") != "companion-model-stopped" ||
+            ReadInt(result, "actionsExecuted", 0) != 0 || provider.CallCount != 1 || client.Actions.Count != 0 || !provider.SawNoDuplicateMoveAction || !inheritedTrace)
+            throw new AgentHostException("establish-clan-companion-inherited-native-move-self-test-failed", "When Native already moves MainParty toward a Settlement, the Companion route must passively inherit that target and never query/reissue the same move. termination=" + ReadString(result["termination"] as JsonObject, "reason") + "; calls=" + provider.CallCount + "; actions=" + string.Join(",", client.Actions) + "; noDuplicateMove=" + provider.SawNoDuplicateMoveAction + "; inheritedTrace=" + inheritedTrace + "; providerObservation=" + provider.DebugState);
+        return new { scenario = "establish-clan-companion-inherits-current-native-settlement-move-without-reissuing-it", decisions = provider.CallCount, nativeActions = client.Actions.ToArray(), passed = true };
+    }
+
     internal static async Task<JsonObject> RunAsync(
         JsonElement request,
         IAgentHostCampaignNativeClient campaignClient,
@@ -481,7 +529,18 @@ internal static class AgentHostEstablishClanCompanionLoop
         var moveStartPending = false;
         var missionTransitionPending = false;
         var visitedTowns = new HashSet<string>(StringComparer.Ordinal);
+        var noCandidateTownIds = new HashSet<string>(StringComparer.Ordinal);
         var excludedHeroes = new HashSet<string>(StringComparer.Ordinal);
+        var checkpointClient = campaignClient as IAgentHostCampaignCheckpointNativeClient;
+        JsonObject? campaignCheckpoint = null;
+        string? storedCompanionJournalFingerprint = null;
+        string? currentCompanionJournalFingerprint = null;
+        string? pendingNoCandidateTownId = null;
+        var companionSearchMemoryReconciled = false;
+        var checkpointWriteCount = 0;
+        var memoryMatchedCurrentJournal = false;
+        var memoryInvalidatedByJournalProgress = false;
+        string? lastCheckpointWriteStatus = null;
         var navigationNoProgressAttempts = new Dictionary<string, int>(StringComparer.Ordinal);
         string? navigationProgressTargetHeroId = null;
         double? navigationProgressStartDistance = null;
@@ -496,6 +555,13 @@ internal static class AgentHostEstablishClanCompanionLoop
 
         try
         {
+            if (checkpointClient is not null)
+            {
+                using var checkpointReceipt = await checkpointClient.ReadCampaignCheckpointAsync(elapsed.Token);
+                campaignCheckpoint = AgentHostCampaignCheckpointCodec.ReadFromNativeReceipt(checkpointReceipt.RootElement);
+                storedCompanionJournalFingerprint = AgentHostEycCompanionSearchMemory.ReadJournalFingerprint(campaignCheckpoint);
+                noCandidateTownIds.UnionWith(AgentHostEycCompanionSearchMemory.ReadNoCandidateTownIds(campaignCheckpoint));
+            }
             await provider.CheckConfiguredModelAsync(elapsed.Token);
             while (decisions < maxDecisions)
             {
@@ -551,6 +617,64 @@ internal static class AgentHostEstablishClanCompanionLoop
 
                 var journal = await ReadJournalAsync(companionClient, elapsed.Token);
                 var objective = AgentHostEstablishYourClanGoalLoop.BuildObjectiveSnapshot(journal);
+                var objectiveFingerprint = AgentHostEycCompanionSearchMemory.BuildJournalFingerprint(objective);
+                var companionCheckpointDirty = false;
+                if (!companionSearchMemoryReconciled)
+                {
+                    companionSearchMemoryReconciled = true;
+                    if (string.Equals(storedCompanionJournalFingerprint, objectiveFingerprint, StringComparison.Ordinal))
+                    {
+                        memoryMatchedCurrentJournal = true;
+                        visitedTowns.UnionWith(noCandidateTownIds);
+                    }
+                    else
+                    {
+                        memoryInvalidatedByJournalProgress = !string.IsNullOrWhiteSpace(storedCompanionJournalFingerprint) || noCandidateTownIds.Count > 0;
+                        noCandidateTownIds.Clear();
+                        visitedTowns.Clear();
+                        companionCheckpointDirty = campaignCheckpoint?["eycCompanionSearchMemoryV1"] is JsonObject;
+                    }
+                    currentCompanionJournalFingerprint = objectiveFingerprint;
+                }
+                else if (!string.Equals(currentCompanionJournalFingerprint, objectiveFingerprint, StringComparison.Ordinal))
+                {
+                    noCandidateTownIds.Clear();
+                    visitedTowns.Clear();
+                    pendingNoCandidateTownId = null;
+                    currentCompanionJournalFingerprint = objectiveFingerprint;
+                    companionCheckpointDirty = campaignCheckpoint?["eycCompanionSearchMemoryV1"] is JsonObject;
+                }
+
+                if (gameState == "MapState" && (pendingNoCandidateTownId is not null || companionCheckpointDirty) &&
+                    !ReadBoolean(state["context"] as JsonObject, "inquiryOpen") && !ReadBoolean(state["context"] as JsonObject, "escapeMenuOpen") &&
+                    !AgentHostCampaignStateFacts.IsActiveEncounter(state) && !ReadBoolean(state, "partyScreenOpen") && !ReadBoolean(state, "inventoryScreenOpen"))
+                {
+                    if (pendingNoCandidateTownId is not null)
+                    {
+                        noCandidateTownIds.Add(pendingNoCandidateTownId);
+                        visitedTowns.Add(pendingNoCandidateTownId);
+                    }
+                    if (checkpointClient is not null && campaignCheckpoint is not null)
+                    {
+                        var updatedCheckpoint = AgentHostEycCompanionSearchMemory.Store(campaignCheckpoint, objectiveFingerprint, noCandidateTownIds);
+                        using var checkpointWrite = await checkpointClient.WriteCampaignCheckpointAsync(updatedCheckpoint.ToJsonString(), elapsed.Token);
+                        if (ReadString(checkpointWrite.RootElement, "status") != "completed")
+                            return BuildResult("failed", "companion-search-checkpoint-write-failed", "Native did not confirm saving the Companion no-candidate town memory; the Host will not rely on an unpersisted exclusion.", "companion-search-checkpoint-write-failed", state, journal, objective);
+                        campaignCheckpoint = updatedCheckpoint;
+                        checkpointWriteCount++;
+                        lastCheckpointWriteStatus = "completed";
+                    }
+                    trace.Add(new JsonObject
+                    {
+                        ["stage"] = "native-campaign-companion-search-memory-saved",
+                        ["campaignMemoryCount"] = noCandidateTownIds.Count,
+                        ["pendingTownRecorded"] = pendingNoCandidateTownId is not null,
+                        ["nativeCommandSent"] = checkpointClient is not null,
+                        ["nativeStatus"] = checkpointClient is null ? "unsupported" : "completed"
+                    });
+                    pendingNoCandidateTownId = null;
+                }
+
                 var companionObjective = objective["companions"] as JsonObject
                     ?? throw new AgentHostException("companion-objective-missing", "The original EYC Journal omitted its Companion target.");
                 var journalTargetMet = ReadBoolean(companionObjective, "met");
@@ -566,6 +690,21 @@ internal static class AgentHostEstablishClanCompanionLoop
                 var menuId = ReadString(context, "menuId");
                 if (!journalTargetMet && liveGoalAhead && gameState == "MapState" && string.IsNullOrWhiteSpace(menuId))
                     return BuildResult("interrupted", "native-journal-refresh-pending", "The live Clan companion count has reached the Journal target, but the authoritative Journal has not refreshed; no second hire was attempted.", "companion-journal-refresh-pending", state, journal, objective);
+                if (gameState == "MapState" && string.IsNullOrWhiteSpace(moveTargetId) &&
+                    !string.IsNullOrWhiteSpace(targetSettlementId) && targetSettlementId != currentSettlementId &&
+                    string.IsNullOrWhiteSpace(ReadString(location, "targetPartyId")) &&
+                    ReadString(state["party"] as JsonObject, "defaultBehavior") == "GoToSettlement")
+                {
+                    moveTargetId = targetSettlementId;
+                    moveStartPending = false;
+                    trace.Add(new JsonObject
+                    {
+                        ["stage"] = "native-settlement-move-inherited-by-companion-route",
+                        ["targetSettlementId"] = moveTargetId,
+                        ["nativeActionSent"] = false,
+                        ["modelDecisionSent"] = false
+                    });
+                }
                 if (gameState == "MapState" && !string.IsNullOrWhiteSpace(moveTargetId) && string.Equals(currentSettlementId, moveTargetId, StringComparison.Ordinal))
                 {
                     moveStartPending = false;
@@ -673,6 +812,14 @@ internal static class AgentHostEstablishClanCompanionLoop
                         return BuildResult("failed", "companion-scene-observation-failed", "Native could not enumerate the current Tavern scene candidates; the Host did not ask the model to act on missing observation data.", "companion-scene-observation-failed", state, journal, objective);
                     sceneAgentsReceipt = sceneObservationReceipt.DeepClone() as JsonObject
                         ?? throw new AgentHostException("companion-scene-observation-invalid", "The current Tavern scene roster could not be retained for the next observation.");
+                    var currentSceneCandidates = FilterWandererCandidates(sceneAgentsReceipt["data"]?["agents"] as JsonArray, excludedHeroes);
+                    if (currentSceneCandidates.Count == 0 && !string.IsNullOrWhiteSpace(currentSettlementId))
+                        pendingNoCandidateTownId = currentSettlementId;
+                    else if (currentSceneCandidates.Count > 0 && !string.IsNullOrWhiteSpace(currentSettlementId) && noCandidateTownIds.Remove(currentSettlementId))
+                    {
+                        visitedTowns.Remove(currentSettlementId);
+                        companionCheckpointDirty = true;
+                    }
                     actionsExecuted++;
                     var sceneObservation = BuildObservation(state, journal, objective, safeTowns, sceneAgentsReceipt, selectedHeroId, interactTargetHeroId, trace.Count);
                     trace.Add(new JsonObject
@@ -686,6 +833,31 @@ internal static class AgentHostEstablishClanCompanionLoop
                         ["modelDecisionSent"] = false,
                         ["worldChangingInputSent"] = false
                     });
+                    if (currentSceneCandidates.Count == 0)
+                    {
+                        using var emptyTavernLeaveResponse = await companionClient.ExecuteCompanionHiringActionAsync("missionLeave", new JsonObject(), elapsed.Token);
+                        var emptyTavernLeaveReceipt = JsonNode.Parse(emptyTavernLeaveResponse.RootElement.GetRawText())?.AsObject()
+                            ?? throw new AgentHostException("companion-empty-tavern-leave-invalid", "Native returned no receipt for the only available action in an empty Tavern scene.");
+                        if (ReadString(emptyTavernLeaveReceipt, "status") != "completed")
+                            return BuildResult("failed", "companion-empty-tavern-leave-failed", "The current Native Tavern had no eligible Wanderer and its sole Native leave action was rejected.", "companion-empty-tavern-leave-failed", state, journal, objective);
+                        actionsExecuted++;
+                        missionTransitionPending = true;
+                        selectedHeroId = null;
+                        interactTargetHeroId = null;
+                        sceneAgentsReceipt = null;
+                        trace.Add(new JsonObject
+                        {
+                            ["decision"] = decisions,
+                            ["observation"] = sceneObservation.DeepClone(),
+                            ["selectedDecision"] = null,
+                            ["nativeReceipt"] = SafeReceipt(emptyTavernLeaveReceipt, "missionLeave", null, null, safeTowns),
+                            ["afterState"] = state.DeepClone(),
+                            ["stepKind"] = "native-empty-tavern-leave",
+                            ["modelDecisionSent"] = false,
+                            ["worldChangingInputSent"] = true,
+                            ["reason"] = "No eligible current Wanderer existed and missionLeave was the only Native action in the allowlisted catalog."
+                        });
+                    }
                     continue;
                 }
 
@@ -987,6 +1159,15 @@ internal static class AgentHostEstablishClanCompanionLoop
                 ["runId"] = runId,
                 ["providerModelId"] = provider.ModelId,
                 ["providerConfigurationSource"] = provider.ConfigurationSource,
+                ["companionSearchMemory"] = new JsonObject
+                {
+                    ["checkpointReadAttempted"] = checkpointClient is not null,
+                    ["noCandidateTownCount"] = noCandidateTownIds.Count,
+                    ["memoryMatchedCurrentJournal"] = memoryMatchedCurrentJournal,
+                    ["memoryInvalidatedByJournalProgress"] = memoryInvalidatedByJournalProgress,
+                    ["checkpointWriteCount"] = checkpointWriteCount,
+                    ["lastCheckpointWriteStatus"] = lastCheckpointWriteStatus
+                },
                 ["decisions"] = decisions,
                 ["actionsExecuted"] = actionsExecuted,
                 ["promptTokens"] = promptTokens,
@@ -1877,6 +2058,360 @@ internal static class AgentHostEstablishClanCompanionLoop
                 ["rationale"] = "Choose the current Native option for the bounded hiring task."
             }));
         }
+        public void Dispose() { }
+    }
+
+    private sealed class FakePersistentNoCandidateCompanionClient : IAgentHostCampaignNativeClient,
+        IAgentHostCompanionHiringNativeClient, IAgentHostQuestDetailsNativeClient, IAgentHostCampaignCheckpointNativeClient
+    {
+        private enum NativeStage { Town, Backstreet, Tavern, FreeMap }
+        private readonly bool _startAtFreeMap;
+        private NativeStage _stage;
+        private string? _checkpointJson;
+        internal List<string> Actions { get; } = new();
+        internal int CheckpointWrites { get; private set; }
+        internal string? StoredCheckpointJson => _checkpointJson;
+
+        internal FakePersistentNoCandidateCompanionClient(string? checkpointJson = null, bool startAtFreeMap = false)
+        {
+            _checkpointJson = checkpointJson;
+            _startAtFreeMap = startAtFreeMap;
+            _stage = startAtFreeMap ? NativeStage.FreeMap : NativeStage.Town;
+        }
+
+        public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var mission = _stage == NativeStage.Tavern;
+            var menuId = _stage switch
+            {
+                NativeStage.Town => "town",
+                NativeStage.Backstreet => "town_backstreet",
+                _ => null
+            };
+            var options = menuId switch
+            {
+                "town" => new JsonArray(
+                    MenuOption("town_backstreet", leave: false),
+                    MenuOption("town_leave", leave: true)),
+                "town_backstreet" => new JsonArray(
+                    MenuOption("town_tavern", leave: false),
+                    MenuOption("town_backstreet_back", leave: true)),
+                _ => new JsonArray()
+            };
+            var state = new JsonObject
+            {
+                ["context"] = new JsonObject
+                {
+                    ["gameState"] = mission ? "MissionState" : "MapState",
+                    ["menuId"] = menuId,
+                    ["encounteredPartyId"] = mission ? "town_a" : null,
+                    ["encounterActive"] = false,
+                    ["inquiryOpen"] = false,
+                    ["escapeMenuOpen"] = false,
+                    ["captivity"] = new JsonObject { ["isCaptive"] = false }
+                },
+                ["location"] = new JsonObject { ["currentSettlementId"] = _stage == NativeStage.FreeMap ? null : "town_a", ["targetSettlementId"] = null },
+                ["availableMenuOptions"] = options,
+                ["nearbySettlements"] = new JsonArray(
+                    Settlement("town_a", "Town A", 1),
+                    Settlement("town_b", "Town B", 2)),
+                ["party"] = new JsonObject { ["members"] = 1, ["isMoving"] = false, ["food"] = 1, ["morale"] = 50 },
+                ["economy"] = new JsonObject { ["gold"] = 1000, ["renown"] = 20 },
+                ["storyModeEstablishClan"] = new JsonObject { ["companions"] = new JsonObject { ["current"] = 0, ["target"] = 1 } },
+                ["quests"] = new JsonArray(new JsonObject { ["id"] = QuestId }),
+                ["mission"] = mission ? new JsonObject
+                {
+                    ["active"] = true,
+                    ["sceneName"] = "town_a_tavern",
+                    ["nativeMissionCurrentState"] = "Running",
+                    ["nativeConversationReady"] = true,
+                    ["navigation"] = new JsonObject { ["active"] = false },
+                    ["leave"] = new JsonObject { ["active"] = false },
+                    ["nearbySceneAgents"] = new JsonArray()
+                } : null
+            };
+            return Task.FromResult(JsonDocument.Parse(new JsonObject
+            {
+                ["status"] = "completed",
+                ["campaignDay"] = 10.0,
+                ["timeControlMode"] = "Stop",
+                ["state"] = state
+            }.ToJsonString()));
+        }
+
+        public Task<JsonDocument> ReadQuestDetailsAsync(string questId, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (questId != QuestId) throw new AgentHostException("eyc-companion-memory-self-test-wrong-quest", "The persistent Companion memory test queried an unexpected Quest.");
+            return Task.FromResult(JsonDocument.Parse(new JsonObject
+            {
+                ["status"] = "completed",
+                ["data"] = new JsonObject { ["questId"] = QuestId, ["journalStages"] = BuildJournal() }
+            }.ToJsonString()));
+        }
+
+        internal JsonArray ReadJournal() => BuildJournal();
+
+        public Task<JsonDocument> ReadCampaignCheckpointAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var base64 = _checkpointJson is null ? string.Empty : Convert.ToBase64String(Encoding.UTF8.GetBytes(_checkpointJson));
+            return Task.FromResult(JsonDocument.Parse(new JsonObject
+            {
+                ["status"] = "completed",
+                ["data"] = new JsonObject { ["campaignInstanceId"] = "campaign-companion-memory-selftest", ["checkpointBase64"] = base64 }
+            }.ToJsonString()));
+        }
+
+        internal JsonDocument ReadStoredCheckpointReceipt()
+        {
+            var base64 = _checkpointJson is null ? string.Empty : Convert.ToBase64String(Encoding.UTF8.GetBytes(_checkpointJson));
+            return JsonDocument.Parse(new JsonObject
+            {
+                ["status"] = "completed",
+                ["data"] = new JsonObject { ["campaignInstanceId"] = "campaign-companion-memory-selftest", ["checkpointBase64"] = base64 }
+            }.ToJsonString());
+        }
+
+        public Task<JsonDocument> WriteCampaignCheckpointAsync(string checkpointJson, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var base64 = AgentHostCampaignCheckpointCodec.EncodeForNative(checkpointJson);
+            using var saved = JsonDocument.Parse(new UTF8Encoding(false, true).GetString(Convert.FromBase64String(base64)));
+            if (ReadString(saved.RootElement, "campaignInstanceId") != "campaign-companion-memory-selftest")
+                throw new AgentHostException("eyc-companion-memory-self-test-checkpoint-campaign-mismatch", "The checkpoint writer attempted to change Campaign identity.");
+            _checkpointJson = checkpointJson;
+            CheckpointWrites++;
+            return Task.FromResult(JsonDocument.Parse("{\"status\":\"completed\",\"action\":\"agentCheckpointSet\"}"));
+        }
+
+        public Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Actions.Add(action);
+            if (action == "mapSettlementTargets")
+                return Task.FromResult(JsonDocument.Parse(new JsonObject
+                {
+                    ["status"] = "completed", ["action"] = action,
+                    ["data"] = new JsonObject { ["mapSettlementTargets"] = new JsonArray(Settlement("town_a", "Town A", 1), Settlement("town_b", "Town B", 2)) }
+                }.ToJsonString()));
+            if (action != "move") throw new AgentHostException("eyc-companion-memory-self-test-unexpected-campaign-action", "The checkpoint-memory test issued an unexpected Campaign action.");
+            return Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["action"] = action, ["data"] = new JsonObject() }.ToJsonString()));
+        }
+
+        public Task<JsonDocument> ExecuteCompanionHiringActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Actions.Add(action);
+            if (action == "missionSceneAgents")
+                return Task.FromResult(JsonDocument.Parse(new JsonObject
+                {
+                    ["status"] = "completed", ["action"] = action,
+                    ["data"] = new JsonObject { ["scope"] = "current-location-mission", ["activeAgentCount"] = 3, ["agents"] = new JsonArray() }
+                }.ToJsonString()));
+            if (action == "missionLeave" && _stage == NativeStage.Tavern)
+            {
+                _stage = NativeStage.Backstreet;
+                return Task.FromResult(JsonDocument.Parse("{\"status\":\"completed\",\"action\":\"missionLeave\",\"data\":{\"nativeHandler\":\"LeaveMission\"}}"));
+            }
+            if (action == "menuSelect")
+            {
+                var option = ReadString(arguments, "optionId");
+                _stage = option switch
+                {
+                    "town_backstreet" when _stage == NativeStage.Town => NativeStage.Backstreet,
+                    "town_tavern" when _stage == NativeStage.Backstreet => NativeStage.Tavern,
+                    "town_backstreet_back" when _stage == NativeStage.Backstreet => NativeStage.Town,
+                    "town_leave" when _stage == NativeStage.Town => NativeStage.FreeMap,
+                    _ => throw new AgentHostException("eyc-companion-memory-self-test-menu-invalid", "The model selected an unavailable Native Town menu option.")
+                };
+                return Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["action"] = action, ["data"] = new JsonObject { ["optionId"] = option } }.ToJsonString()));
+            }
+            throw new AgentHostException("eyc-companion-memory-self-test-unexpected-companion-action", "The checkpoint-memory test issued an unexpected Tavern action.");
+        }
+
+        private static JsonArray BuildJournal() => new(
+            Objective("gold", 1000, 2000), Objective("partySize", 1, 25),
+            Objective("renown", 20, 50), Objective("companions", 0, 1));
+
+        private static JsonObject Objective(string description, int current, int target) => new()
+        {
+            ["hasTask"] = true, ["currentProgress"] = current, ["targetProgress"] = target, ["description"] = description
+        };
+
+        private static JsonObject MenuOption(string id, bool leave) => new()
+        {
+            ["id"] = id, ["available"] = true, ["enabled"] = true, ["isLeave"] = leave
+        };
+
+        private static JsonObject Settlement(string id, string name, double distance) => new()
+        {
+            ["id"] = id, ["name"] = name, ["type"] = "town", ["distance"] = distance, ["hostile"] = false, ["underSiege"] = false
+        };
+    }
+
+    private sealed class FakeNoCandidateCompanionProvider(bool firstRun) : IAgentHostDecisionProvider
+    {
+        internal int CallCount { get; private set; }
+        internal bool SawOnlyTownBAfterResume { get; private set; }
+        public string ModelId => "deterministic-companion-no-candidate-memory-selftest";
+        public string ConfigurationSource => "harness-fake-provider";
+        public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) { cancellationToken.ThrowIfCancellationRequested(); return Task.CompletedTask; }
+        public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CallCount++;
+            JsonObject decision;
+            if (firstRun)
+            {
+                decision = CallCount switch
+                {
+                    1 => NativeDecision("menuSelect", new JsonObject { ["MenuId"] = "town", ["OptionId"] = "town_backstreet" }),
+                    2 => NativeDecision("menuSelect", new JsonObject { ["MenuId"] = "town_backstreet", ["OptionId"] = "town_tavern" }),
+                    3 => NativeDecision("menuSelect", new JsonObject { ["MenuId"] = "town_backstreet", ["OptionId"] = "town_backstreet_back" }),
+                    4 => NativeDecision("menuSelect", new JsonObject { ["MenuId"] = "town", ["OptionId"] = "town_leave" }),
+                    5 => NativeDecision("mapSettlementTargets", new JsonObject()),
+                    6 => ReadMoveCatalogAndStop(request, requireTownBOnly: true, this, out decision),
+                    _ => throw new AgentHostException("eyc-companion-memory-self-test-provider-exhausted", "The first bounded Companion memory run requested too many model decisions.")
+                };
+            }
+            else if (CallCount == 1)
+                decision = NativeDecision("mapSettlementTargets", new JsonObject());
+            else if (CallCount == 2)
+                decision = ReadMoveCatalogAndStop(request, requireTownBOnly: true, this, out decision);
+            else throw new AgentHostException("eyc-companion-memory-self-test-provider-exhausted", "The resumed Companion memory run requested too many model decisions.");
+
+            return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 0, 0, "selftest", decision, "selftest", "json_schema"));
+        }
+
+        private static JsonObject ReadMoveCatalogAndStop(JsonElement request, bool requireTownBOnly, FakeNoCandidateCompanionProvider provider, out JsonObject decision)
+        {
+            var observation = request.GetProperty("observation");
+            var visible = observation.GetProperty("visibleSafeTownTargets").EnumerateArray().Select(item => item.GetProperty("id").GetString()).ToArray();
+            var move = request.GetProperty("allowedActions").EnumerateArray().FirstOrDefault(item => item.GetProperty("action").GetString() == "move");
+            var ids = move.ValueKind == JsonValueKind.Object
+                ? move.GetProperty("argumentValues").GetProperty("SettlementId").EnumerateArray().Select(item => item.GetString()).ToArray()
+                : Array.Empty<string?>();
+            provider.SawOnlyTownBAfterResume = visible.SequenceEqual(["town_b"], StringComparer.Ordinal) && ids.SequenceEqual(["town_b"], StringComparer.Ordinal);
+            if (requireTownBOnly && !provider.SawOnlyTownBAfterResume)
+                throw new AgentHostException("eyc-companion-memory-self-test-town-not-filtered", "A previously empty Tavern must be omitted after resuming the same Native Campaign checkpoint.");
+            decision = new JsonObject { ["stop"] = true, ["reason"] = "The Native candidate observation was verified." };
+            return decision;
+        }
+
+        private static JsonObject NativeDecision(string action, JsonObject arguments) => new()
+        {
+            ["action"] = action, ["arguments"] = arguments
+        };
+
+        public void Dispose() { }
+    }
+
+    private sealed class FakeInheritedNativeMoveCompanionClient : IAgentHostCampaignNativeClient,
+        IAgentHostCompanionHiringNativeClient, IAgentHostQuestDetailsNativeClient
+    {
+        internal List<string> Actions { get; } = new();
+        private int _stateReads;
+
+        public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _stateReads++;
+            var arrived = _stateReads >= 2;
+            var atTownMenu = _stateReads >= 3;
+            var state = new JsonObject
+            {
+                ["context"] = new JsonObject
+                {
+                    ["gameState"] = "MapState", ["menuId"] = atTownMenu ? "town" : null, ["encounterActive"] = false,
+                    ["inquiryOpen"] = false, ["escapeMenuOpen"] = false,
+                    ["timeControlMode"] = "StoppablePlay", ["captivity"] = new JsonObject { ["isCaptive"] = false }
+                },
+                ["location"] = new JsonObject { ["currentSettlementId"] = arrived ? "town_EW2" : null, ["targetSettlementId"] = "town_EW2", ["targetPartyId"] = null },
+                ["availableMenuOptions"] = atTownMenu ? new JsonArray(
+                    new JsonObject { ["id"] = "town_backstreet", ["available"] = true, ["enabled"] = true },
+                    new JsonObject { ["id"] = "town_leave", ["available"] = true, ["enabled"] = true, ["isLeave"] = true }) : new JsonArray(),
+                ["party"] = new JsonObject { ["members"] = 1, ["isMoving"] = !arrived, ["defaultBehavior"] = arrived ? "Hold" : "GoToSettlement", ["moveMode"] = "Point" },
+                ["economy"] = new JsonObject { ["gold"] = 1000, ["renown"] = 20 },
+                ["storyModeEstablishClan"] = new JsonObject { ["companions"] = new JsonObject { ["current"] = 0, ["target"] = 1 } },
+                ["quests"] = new JsonArray(new JsonObject { ["id"] = QuestId }),
+                ["nearbySettlements"] = new JsonArray(Settlement("town_EW2", "Town EW2", 2))
+            };
+            return Task.FromResult(JsonDocument.Parse(new JsonObject
+            {
+                ["status"] = "completed", ["campaignDay"] = 10.0, ["timeControlMode"] = "StoppablePlay", ["state"] = state
+            }.ToJsonString()));
+        }
+
+        public Task<JsonDocument> ReadQuestDetailsAsync(string questId, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (questId != QuestId) throw new AgentHostException("eyc-companion-inherited-move-wrong-quest", "The inherited movement test queried an unexpected Quest.");
+            return Task.FromResult(JsonDocument.Parse(new JsonObject
+            {
+                ["status"] = "completed", ["data"] = new JsonObject { ["questId"] = QuestId, ["journalStages"] = new JsonArray(
+                    Objective("gold", 1000, 2000), Objective("partySize", 1, 25), Objective("renown", 20, 50), Objective("companions", 0, 1)) }
+            }.ToJsonString()));
+        }
+
+        public Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+        {
+            Actions.Add(action);
+            throw new AgentHostException("eyc-companion-inherited-move-unexpected-campaign-action", "The existing Native settlement move must be observed, not replaced with another map action.");
+        }
+
+        public Task<JsonDocument> ExecuteCompanionHiringActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+        {
+            Actions.Add(action);
+            throw new AgentHostException("eyc-companion-inherited-move-unexpected-hiring-action", "An already moving MainParty must not enter a Tavern or send a duplicate Native move action.");
+        }
+
+        private static JsonObject Objective(string description, int current, int target) => new()
+        {
+            ["hasTask"] = true, ["currentProgress"] = current, ["targetProgress"] = target, ["description"] = description
+        };
+
+        private static JsonObject Settlement(string id, string name, double distance) => new()
+        {
+            ["id"] = id, ["name"] = name, ["type"] = "town", ["distance"] = distance, ["hostile"] = false, ["underSiege"] = false
+        };
+    }
+
+    private sealed class FakeInheritedNativeMoveProvider : IAgentHostDecisionProvider
+    {
+        internal int CallCount { get; private set; }
+        internal bool SawNoDuplicateMoveAction { get; private set; }
+        internal string DebugState { get; private set; } = string.Empty;
+        public string ModelId => "deterministic-companion-inherited-native-move-selftest";
+        public string ConfigurationSource => "harness-fake-provider";
+        public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) { cancellationToken.ThrowIfCancellationRequested(); return Task.CompletedTask; }
+
+        public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CallCount++;
+            var actions = request.GetProperty("allowedActions").EnumerateArray().ToArray();
+            var controls = request.GetProperty("allowedControls").EnumerateArray().Select(control => control.GetString()).ToArray();
+            var observation = request.GetProperty("observation");
+            var actionNames = actions.Select(action => action.GetProperty("action").GetString()).ToArray();
+            var state = observation.TryGetProperty("state", out var stateNode) && stateNode.ValueKind == JsonValueKind.Object ? stateNode : default;
+            var location = state.ValueKind == JsonValueKind.Object && state.TryGetProperty("location", out var locationNode) && locationNode.ValueKind == JsonValueKind.Object ? locationNode : default;
+            var party = state.ValueKind == JsonValueKind.Object && state.TryGetProperty("party", out var partyNode) && partyNode.ValueKind == JsonValueKind.Object ? partyNode : default;
+            var currentSettlement = location.ValueKind == JsonValueKind.Object && location.TryGetProperty("currentSettlementId", out var currentNode) && currentNode.ValueKind == JsonValueKind.String ? currentNode.GetString() : null;
+            var targetSettlement = location.ValueKind == JsonValueKind.Object && location.TryGetProperty("targetSettlementId", out var targetNode) && targetNode.ValueKind == JsonValueKind.String ? targetNode.GetString() : null;
+            var partyMoving = party.ValueKind == JsonValueKind.Object && party.TryGetProperty("isMoving", out var movingNode) && movingNode.ValueKind == JsonValueKind.True;
+            DebugState = "actions=" + string.Join(",", actionNames) + "; controls=" + string.Join(",", controls) + "; current=" + currentSettlement + "; target=" + targetSettlement + "; moving=" + partyMoving;
+            SawNoDuplicateMoveAction = actionNames.Contains("menuSelect", StringComparer.Ordinal) &&
+                !actionNames.Contains("move", StringComparer.Ordinal) && !actionNames.Contains("mapSettlementTargets", StringComparer.Ordinal) &&
+                controls.Contains("stop", StringComparer.Ordinal) &&
+                currentSettlement == "town_EW2";
+            if (!SawNoDuplicateMoveAction)
+                throw new AgentHostException("eyc-companion-inherited-move-self-test-catalog-failed", "After arrival at the already targeted Town, the model must receive the current Town menu without a duplicate move or map-target query. " + DebugState);
+            return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 0, 0, "selftest",
+                new JsonObject { ["stop"] = true, ["reason"] = "The original Native move reached its existing target." }, "selftest", "json_schema"));
+        }
+
         public void Dispose() { }
     }
 
