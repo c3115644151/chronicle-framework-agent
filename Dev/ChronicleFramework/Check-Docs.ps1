@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.558'
+$contractVersion = '7.559'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -324,6 +324,7 @@ $freeLlmApiProfileParseErrors = $null
 [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $harnessRoot 'Get-FreeLLMAPIProfile.ps1'), [ref]$freeLlmApiProfileTokens, [ref]$freeLlmApiProfileParseErrors) | Out-Null
 if (@($freeLlmApiProfileParseErrors).Count -gt 0) { throw 'Get-FreeLLMAPIProfile.ps1 must parse before Harness can start or query the FreeLLMAPI service.' }
 $agentCheckpointPersistenceSource = Get-Content (Join-Path $harnessRoot 'Test-AgentCheckpointPersistence.ps1') -Raw -Encoding UTF8
+$eycObjectiveCheckpointReadbackSource = Get-Content (Join-Path $harnessRoot 'Test-AgentEycObjectiveCheckpointReadback.ps1') -Raw -Encoding UTF8
 $agentCheckpointValidationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentCheckpointValidation.ps1') -Raw -Encoding UTF8
 $agentEvaluationRecruitmentBaselineSource = Get-Content (Join-Path $harnessRoot 'Test-AgentEvaluationRecruitmentBaseline.ps1') -Raw -Encoding UTF8
 $multiDaySupplyBaselineSource = Get-Content (Join-Path $harnessRoot 'Test-AgentMultiDaySupplyBaseline.ps1') -Raw -Encoding UTF8
@@ -1637,8 +1638,19 @@ foreach ($requiredText in @('TestResults/latest.json', 'Computer Use', 'ContextS
         throw "DEVELOPMENT.md is missing contract element '$requiredText'."
     }
 }
-foreach ($requiredScript in @('Agent-DecisionLoop.ps1', 'Agent-ProviderBudget.ps1', 'Agent-SaveMetadata.ps1', 'Test-AgentSaveMetadata.ps1', 'Test-AgentLoop.ps1', 'Test-AgentLoopProvider.ps1', 'Test-AgentOpenAICompatibleProvider.ps1', 'Get-FreeLLMAPIProfile.ps1', 'Test-AgentLiveModelLoop.ps1', 'Test-AgentCheckpointPersistence.ps1', 'Test-AgentLiveModelResume.ps1', 'Test-AgentVillageToolsProvider.ps1', 'Test-AgentVillageToolsDelivery.ps1', 'Test-AgentBattleFixture.ps1', 'Test-AgentVisualCapture.ps1', 'AgentMissionInputPatch.cs', 'Test-AgentTavernMission.ps1', 'Test-AgentTownCenterMission.ps1', 'Test-AgentMissionInteraction.ps1', 'AgentMissionInteraction.cs', 'Test-AgentCompanionHiring.ps1', 'AgentPartyRoleAdapter.cs', 'Test-AgentPartyRoles.ps1', 'AgentInventoryStateAdapter.cs', 'AgentTradeAdapter.cs', 'HarnessEquipmentModifierFixture.cs', 'Test-AgentInventoryNavigation.ps1', 'Test-AgentEquipmentTransactions.ps1', 'Test-AgentTradeTransactions.ps1', 'Test-AgentSettlementOverlayConversation.ps1', 'Test-AgentFreshCampaign.ps1', 'Test-AgentSupport.ps1', 'Test-AgentMoveToPoint.ps1', 'Test-AgentCharacterDevelopment.ps1', 'Test-AgentSpendSkillFocus.ps1', 'Test-AgentPartyRoster.ps1', 'AgentPartyScreenAdapter.cs', 'AgentPartyUpgradeAdapter.cs', 'Test-AgentPartyUpgrade.ps1', 'AgentPartyPrisonerRecruitmentAdapter.cs', 'Test-AgentPartyPrisonerRecruitment.ps1', 'Test-AgentJoinEncounterEligibility.ps1', 'Test-AgentJoinEncounterAbandonArmy.ps1', 'Test-AgentMovingArmyJoin.ps1', 'Test-AgentJoinSiegeEvent.ps1', 'HarnessSiegeJoinFixture.cs', 'HarnessVideoCapture.ps1', 'Prune-TestResults.ps1', 'Set-ContextFocus.ps1')) {
+foreach ($requiredScript in @('Agent-DecisionLoop.ps1', 'Agent-ProviderBudget.ps1', 'Agent-SaveMetadata.ps1', 'Test-AgentSaveMetadata.ps1', 'Test-AgentLoop.ps1', 'Test-AgentLoopProvider.ps1', 'Test-AgentOpenAICompatibleProvider.ps1', 'Get-FreeLLMAPIProfile.ps1', 'Test-AgentLiveModelLoop.ps1', 'Test-AgentCheckpointPersistence.ps1', 'Test-AgentEycObjectiveCheckpointReadback.ps1', 'Test-AgentLiveModelResume.ps1', 'Test-AgentVillageToolsProvider.ps1', 'Test-AgentVillageToolsDelivery.ps1', 'Test-AgentBattleFixture.ps1', 'Test-AgentVisualCapture.ps1', 'AgentMissionInputPatch.cs', 'Test-AgentTavernMission.ps1', 'Test-AgentTownCenterMission.ps1', 'Test-AgentMissionInteraction.ps1', 'AgentMissionInteraction.cs', 'Test-AgentCompanionHiring.ps1', 'AgentPartyRoleAdapter.cs', 'Test-AgentPartyRoles.ps1', 'AgentInventoryStateAdapter.cs', 'AgentTradeAdapter.cs', 'HarnessEquipmentModifierFixture.cs', 'Test-AgentInventoryNavigation.ps1', 'Test-AgentEquipmentTransactions.ps1', 'Test-AgentTradeTransactions.ps1', 'Test-AgentSettlementOverlayConversation.ps1', 'Test-AgentFreshCampaign.ps1', 'Test-AgentSupport.ps1', 'Test-AgentMoveToPoint.ps1', 'Test-AgentCharacterDevelopment.ps1', 'Test-AgentSpendSkillFocus.ps1', 'Test-AgentPartyRoster.ps1', 'AgentPartyScreenAdapter.cs', 'AgentPartyUpgradeAdapter.cs', 'Test-AgentPartyUpgrade.ps1', 'AgentPartyPrisonerRecruitmentAdapter.cs', 'Test-AgentPartyPrisonerRecruitment.ps1', 'Test-AgentJoinEncounterEligibility.ps1', 'Test-AgentJoinEncounterAbandonArmy.ps1', 'Test-AgentMovingArmyJoin.ps1', 'Test-AgentJoinSiegeEvent.ps1', 'HarnessSiegeJoinFixture.cs', 'HarnessVideoCapture.ps1', 'Prune-TestResults.ps1', 'Set-ContextFocus.ps1')) {
     if (-not (Test-Path (Join-Path $harnessRoot $requiredScript))) { throw "Agent loop harness script is missing: $requiredScript" }
+}
+if ($harnessScript -notmatch "'EycObjectiveCheckpointReadback' \{ @\('Preflight', 'EycObjectiveCheckpointReadback'\) \}" -or
+    [regex]::Matches($harnessScript, "(?m)^        'EycObjectiveCheckpointReadback' \{").Count -ne 1 -or
+    $harnessScript -match "'All' \{[^\r\n]*'EycObjectiveCheckpointReadback'" -or
+    $eycObjectiveCheckpointReadbackSource -notmatch "agentCheckpointGet" -or
+    $eycObjectiveCheckpointReadbackSource -notmatch "eycObjectiveAttemptMemoryV1" -or
+    $eycObjectiveCheckpointReadbackSource -notmatch "CampaignInstanceMatched" -or
+    $eycObjectiveCheckpointReadbackSource -notmatch "SourceSaveUnchanged" -or
+    $eycObjectiveCheckpointReadbackSource -notmatch "ProviderCalls = 0" -or
+    $eycObjectiveCheckpointReadbackSource -notmatch "ModelCostCny = 0") {
+    throw 'The EYC checkpoint readback must be a dedicated opt-in Native-only phase, verify saved attempt data and Campaign identity, preserve the source save, and make no model call.'
 }
 if (-not (Test-Path (Join-Path $harnessRoot 'Test-AgentMapSettlementTargets.ps1'))) { throw 'MapSettlementTargets regression script is missing.' }
 foreach ($barterPath in @('AgentBarterAdapter.cs', 'AgentBarterViewCapture.cs', 'Test-AgentBarterTransactions.ps1')) {
