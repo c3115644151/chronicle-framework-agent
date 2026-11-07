@@ -230,6 +230,8 @@ $checkpointSaveStateDisposition = $null
 $capture = $null
 $captureResult = $null
 $captureRecoveryProof = $null
+$agentHostCaptureDecisionCount = 0
+$agentHostCaptureEventsWritten = $false
 $loopTrace = $null
 $hostReadyMessages = @()
 $failure = $null
@@ -758,18 +760,27 @@ try {
             NativeClockActions = $nativeClockActionsDuringRecovery.Count
         }
     }
-    foreach ($step in $steps) {
-        $stepAction = if ($step.decision.done -eq $true) { 'providerDone' } elseif ($step.decision.observeAgain -eq $true) { 'observeAgain' } else { [string]$step.decision.action }
-        $beforeState = if ($step.observationBefore.state) { $step.observationBefore.state } else { $baseline.state }
-        Write-LiveModelCaptureEvent 'provider-response' $step.timing.providerCompletedUtc 'providerDecision' $null $beforeState $null $capture $stepAction
-        if ($step.actionExecuted) {
-            $afterState = if ($step.observationAfter.state) { $step.observationAfter.state } else { $beforeState }
-            Write-LiveModelCaptureEvent 'native-action' $step.timing.actionCompletedUtc ([string]$step.actionReceipt.action) ([string]$step.actionReceipt.commandId) $afterState $step.actionReceipt $capture $stepAction
-            Write-LiveModelCaptureEvent 'post-action-observation' $step.timing.observationCompletedUtc 'state' ([string]$step.actionReceipt.commandId) $afterState $step.actionReceipt $capture $stepAction
-        }
-        elseif ($step.control -and $step.observationAfter) {
-            Write-LiveModelCaptureEvent 'scheduler-wait' $step.timing.schedulerWaitCompletedUtc 'boundedObserveAgain' $null $beforeState $null $capture $stepAction
-            Write-LiveModelCaptureEvent 'post-wait-observation' $step.timing.observationCompletedUtc 'state' $null $step.observationAfter.state $null $capture $stepAction
+    if ($AgentHostRuntime -and -not $agentHostCaptureEventsWritten) {
+        $hostProgressPath = Join-Path $env:CHRONICLE_HARNESS_TEMP 'AgentHostProgress.jsonl'
+        $captureProjectionSelfTest = Test-ChronicleAgentHostCaptureProjection
+        if (-not $captureProjectionSelfTest.Passed) { throw 'AgentHost decision capture projection self-test failed.' }
+        $agentHostCaptureDecisionCount = Add-ChronicleAgentHostProgressCaptureEvents $hostProgressPath $eventTracePath ([string]$capture.StartedUtc)
+        $agentHostCaptureEventsWritten = $true
+    }
+    else {
+        foreach ($step in $steps) {
+            $stepAction = if ($step.decision.done -eq $true) { 'providerDone' } elseif ($step.decision.observeAgain -eq $true) { 'observeAgain' } else { [string]$step.decision.action }
+            $beforeState = if ($step.observationBefore.state) { $step.observationBefore.state } else { $baseline.state }
+            Write-LiveModelCaptureEvent 'provider-response' $step.timing.providerCompletedUtc 'providerDecision' $null $beforeState $null $capture $stepAction
+            if ($step.actionExecuted) {
+                $afterState = if ($step.observationAfter.state) { $step.observationAfter.state } else { $beforeState }
+                Write-LiveModelCaptureEvent 'native-action' $step.timing.actionCompletedUtc ([string]$step.actionReceipt.action) ([string]$step.actionReceipt.commandId) $afterState $step.actionReceipt $capture $stepAction
+                Write-LiveModelCaptureEvent 'post-action-observation' $step.timing.observationCompletedUtc 'state' ([string]$step.actionReceipt.commandId) $afterState $step.actionReceipt $capture $stepAction
+            }
+            elseif ($step.control -and $step.observationAfter) {
+                Write-LiveModelCaptureEvent 'scheduler-wait' $step.timing.schedulerWaitCompletedUtc 'boundedObserveAgain' $null $beforeState $null $capture $stepAction
+                Write-LiveModelCaptureEvent 'post-wait-observation' $step.timing.observationCompletedUtc 'state' $null $step.observationAfter.state $null $capture $stepAction
+            }
         }
     }
 
@@ -1359,6 +1370,7 @@ try {
         ModelId = if ($AgentHostRuntime -and $loopTrace.providerModelId) { [string]$loopTrace.providerModelId } else { [string]$env:CHRONICLE_LLM_MODEL }
         ModelConfigurationSource = if ($AgentHostRuntime) { [string]$loopTrace.providerConfigurationSource } else { 'environment-provider' }
         ProviderRouteHistory = if ($AgentHostRuntime) { $loopTrace.providerRouteHistory } else { $null }
+        AgentHostCaptureDecisionEvents = $agentHostCaptureDecisionCount
         CaptureRecoveryProof = $captureRecoveryProof
         ModelMaxOutputTokens = if ($loopTrace.providerBudget) { [int]$loopTrace.providerBudget.maxOutputTokensPerCall } else { [int]$env:CHRONICLE_LLM_MAX_TOKENS }
         ModelThinkingMode = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_THINKING_MODE)) { 'provider-default' } else { [string]$env:CHRONICLE_LLM_THINKING_MODE }
@@ -1468,6 +1480,7 @@ catch {
             ModelId = [string]$env:CHRONICLE_LLM_MODEL
             ModelConfigurationSource = if ($AgentHostRuntime -and $loopTrace) { [string]$loopTrace.providerConfigurationSource } else { 'failed-before-provider-loop' }
             ProviderRouteHistory = if ($AgentHostRuntime -and $loopTrace) { $loopTrace.providerRouteHistory } else { $null }
+            AgentHostCaptureDecisionEvents = $agentHostCaptureDecisionCount
             CaptureRecoveryProof = $captureRecoveryProof
             ModelMaxOutputTokens = if ($loopTrace.providerBudget) { [int]$loopTrace.providerBudget.maxOutputTokensPerCall } else { [int]$env:CHRONICLE_LLM_MAX_TOKENS }
             ModelThinkingMode = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_THINKING_MODE)) { 'provider-default' } else { [string]$env:CHRONICLE_LLM_THINKING_MODE }
@@ -1551,6 +1564,13 @@ catch {
     }
     if ($capture) {
         try {
+            if ($AgentHostRuntime -and -not $agentHostCaptureEventsWritten) {
+                $hostProgressPath = Join-Path $env:CHRONICLE_HARNESS_TEMP 'AgentHostProgress.jsonl'
+                $captureProjectionSelfTest = Test-ChronicleAgentHostCaptureProjection
+                if (-not $captureProjectionSelfTest.Passed) { throw 'AgentHost decision capture projection self-test failed.' }
+                $agentHostCaptureDecisionCount = Add-ChronicleAgentHostProgressCaptureEvents $hostProgressPath $eventTracePath ([string]$capture.StartedUtc)
+                $agentHostCaptureEventsWritten = $true
+            }
             $failedState = if ($loopTrace -and $loopTrace.lastObservation -and $loopTrace.lastObservation.state) { $loopTrace.lastObservation.state } else { $baseline.state }
             $failedUtc = if ($loopTrace -and $loopTrace.timing -and $loopTrace.timing.providerCompletedUtc) { [string]$loopTrace.timing.providerCompletedUtc } else { [DateTime]::UtcNow.ToString('O') }
             Write-LiveModelCaptureEvent 'model-loop-failed' $failedUtc 'modelLoopFailure' $null $failedState $null $capture

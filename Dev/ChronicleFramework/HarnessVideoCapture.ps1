@@ -168,6 +168,95 @@ function Start-ChronicleWindowVideoCapture {
     }
 }
 
+function Get-ChronicleContactFrameBudget([double]$DurationSeconds, [int]$StateChangeCount) {
+    $durationBudget = [Math]::Ceiling([Math]::Max(0, $DurationSeconds) / 5.0)
+    $transitionBudget = 1 + (3 * [Math]::Max(0, $StateChangeCount))
+    return [int][Math]::Min(24, [Math]::Max($durationBudget, $transitionBudget))
+}
+
+function Convert-ChronicleAgentHostProgressDecisionToCaptureEvent([object]$Record, [string]$CaptureStartedUtc) {
+    if ($null -eq $Record -or [string]$Record.event -cne 'provider-decision' -or
+        [string]::IsNullOrWhiteSpace([string]$Record.utc) -or [string]::IsNullOrWhiteSpace($CaptureStartedUtc)) { return $null }
+    try {
+        $started = [DateTimeOffset]::Parse($CaptureStartedUtc).ToUniversalTime()
+        $occurred = [DateTimeOffset]::Parse([string]$Record.utc).ToUniversalTime()
+    }
+    catch { return $null }
+
+    $observation = $Record.observation
+    $decision = $Record.decision
+    $action = if ($decision -and $decision.action) { [string]$decision.action }
+        elseif ($decision -and $decision.goalClassification) { 'goalClassification' }
+        elseif ($decision -and $decision.observeAgain) { 'observeAgain' }
+        else { 'providerDecision' }
+    $partyScreen = if ($observation) { $observation.partyScreen } else { $null }
+    $inventoryScreen = if ($observation) { $observation.inventoryScreen } else { $null }
+    $gameState = if ($observation) { [string]$observation.gameState } else { '' }
+    $menuId = if ($observation) { [string]$observation.menuId } else { '' }
+    $partyScreenMode = if ($partyScreen) { [string]$partyScreen.mode } else { '' }
+    $inventoryMode = if ($inventoryScreen) { [string]$inventoryScreen.mode } else { '' }
+    $fingerprint = @(
+        $gameState, $menuId, $partyScreenMode, $inventoryMode,
+        [string]$observation.currentSettlementId, [string]$observation.targetSettlementId,
+        [string]$observation.targetPartyId, [string]$observation.partyMembers,
+        [string]$observation.partyIsMoving, [string]$observation.encounterActive,
+        [string]$observation.inquiryOpen
+    ) -join '|'
+
+    return [ordered]@{
+        event = 'agenthost-provider-response'
+        utc = $occurred.ToString('O')
+        offsetMilliseconds = [Math]::Round(($occurred - $started).TotalMilliseconds, 2)
+        commandId = $null
+        action = $action
+        decisionAction = $action
+        gameState = $gameState
+        menuId = $menuId
+        partyScreenMode = $partyScreenMode
+        inventoryMode = $inventoryMode
+        campaignDay = if ($observation) { $observation.campaignDay } else { $null }
+        stateFingerprint = $fingerprint
+    }
+}
+
+function Add-ChronicleAgentHostProgressCaptureEvents([string]$ProgressPath, [string]$EventTracePath, [string]$CaptureStartedUtc) {
+    if (-not (Test-Path -LiteralPath $ProgressPath -PathType Leaf)) { return 0 }
+    $added = 0
+    foreach ($line in Get-Content -LiteralPath $ProgressPath -Encoding UTF8) {
+        if ([string]::IsNullOrWhiteSpace([string]$line)) { continue }
+        try { $record = $line | ConvertFrom-Json -ErrorAction Stop } catch { continue }
+        $event = Convert-ChronicleAgentHostProgressDecisionToCaptureEvent $record $CaptureStartedUtc
+        if ($null -eq $event) { continue }
+        Add-Content -LiteralPath $EventTracePath -Value ($event | ConvertTo-Json -Compress -Depth 6) -Encoding UTF8
+        $added++
+    }
+    return $added
+}
+
+function Test-ChronicleAgentHostCaptureProjection {
+    $record = [pscustomobject]@{
+        event = 'provider-decision'
+        utc = '2026-01-01T00:00:02.0000000Z'
+        decision = [pscustomobject]@{ action = 'missionNavigateToAgent'; rationale = 'PRIVATE_PROMPT_MARKER'; arguments = [pscustomobject]@{ AgentIndex = 1 } }
+        observation = [pscustomobject]@{
+            gameState = 'MissionState'; menuId = ''; partyScreen = $null; inventoryScreen = $null; campaignDay = 42.5
+            currentSettlementId = 'town_A'; targetSettlementId = ''; targetPartyId = ''; partyMembers = 1
+            partyIsMoving = $false; encounterActive = $false; inquiryOpen = $false
+        }
+    }
+    $projected = Convert-ChronicleAgentHostProgressDecisionToCaptureEvent $record '2026-01-01T00:00:00.0000000Z'
+    $serialized = $projected | ConvertTo-Json -Compress -Depth 6
+    if ($projected.event -cne 'agenthost-provider-response' -or $projected.action -cne 'missionNavigateToAgent' -or
+        $projected.gameState -cne 'MissionState' -or [double]$projected.offsetMilliseconds -ne 2000 -or
+        $serialized.Contains('PRIVATE_PROMPT_MARKER') -or $serialized.Contains('rationale')) {
+        throw 'AgentHost visual projection must preserve decision timing/action/state while excluding model rationale and prompt content.'
+    }
+    if ((Get-ChronicleContactFrameBudget 67 0) -ne 14 -or (Get-ChronicleContactFrameBudget 67 10) -ne 24) {
+        throw 'Long clips need periodic overview frames even when Native state fingerprints do not change, while keeping the contact sheet capped at 24 samples.'
+    }
+    return [pscustomobject]@{ Passed = $true; LongClipSampleCount = (Get-ChronicleContactFrameBudget 67 0); MaximumSamples = (Get-ChronicleContactFrameBudget 67 10) }
+}
+
 function Stop-ChronicleWindowVideoCapture {
     [CmdletBinding()]
     param(
@@ -230,7 +319,7 @@ function Stop-ChronicleWindowVideoCapture {
             $sheetPreviousWasBoundary = $sheetIsBoundary
         }
     }
-    $contactFrameBudget = [Math]::Min(24.0, [Math]::Max(1.0, 1.0 + (3.0 * $stateChangeCountForSheet)))
+    $contactFrameBudget = Get-ChronicleContactFrameBudget $duration $stateChangeCountForSheet
     $contactStride = [Math]::Max(1, [Math]::Ceiling($frames / $contactFrameBudget))
     $contactSampleCount = [Math]::Max(1, [Math]::Ceiling($frames / [double]$contactStride))
     $contactColumns = [Math]::Min(4, $contactSampleCount)
@@ -246,7 +335,8 @@ function Stop-ChronicleWindowVideoCapture {
     $timelineFrameCount = 0
     if (Test-Path -LiteralPath $EventTracePath) {
         $eventRows = @(Get-Content -LiteralPath $EventTracePath -Encoding UTF8 | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_ | ConvertFrom-Json })
-        $importantActions = @('menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','partyTakeAll','partyScreenDone','inventoryTakeAll','inventoryDone','mapSettlementTargets','move','recruitOptions','recruit','provision','tradeConfirm','rest','providerDone','modelLoopFailure','crashReport','crashReportExpanded','crashReportScroll','crashObserved')
+        $importantActions = @('menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','partyTakeAll','partyScreenDone','inventoryTakeAll','inventoryDone','mapSettlementTargets','mapPartyTargets','move','pursue','recruitOptions','recruit','provision','tradeConfirm','rest','providerDone','goalClassification','selectEstablishYourClanObjective','missionSceneAgents','missionNavigateToAgent','missionInteract','missionLeave','modelLoopFailure','crashReport','crashReportExpanded','crashReportScroll','crashObserved')
+        $eventOnlyActions = @('observeAgain','missionSceneAgents','missionNavigateToAgent','mapSettlementTargets','mapPartyTargets')
         $priorSignature = $null
         $priorWasBoundary = $false
         foreach ($event in $eventRows) {
@@ -255,7 +345,7 @@ function Stop-ChronicleWindowVideoCapture {
             $stateChanged = $null -ne $priorSignature -and -not $priorWasBoundary -and -not $isBoundary -and $signature -ne $priorSignature
             $priorSignature = $signature
             $priorWasBoundary = $isBoundary
-            $isImportantAction = [string]$event.action -in $importantActions
+            $isImportantAction = [string]$event.action -in $importantActions -or [string]$event.decisionAction -in $importantActions -or [string]$event.event -ceq 'agenthost-provider-response'
             if (-not $stateChanged -and -not $isBoundary -and -not $isImportantAction) { continue }
             $frameDuration = 1.0 / [Math]::Max(1.0, [double]$Capture.FrameRate)
             $lastFrameSeconds = [Math]::Max([double]0.0, [double]$duration - $frameDuration)
@@ -267,6 +357,7 @@ function Stop-ChronicleWindowVideoCapture {
             $timelineSelections += [ordered]@{
                 event = [string]$event.event
                 action = [string]$event.action
+                decisionAction = [string]$event.decisionAction
                 commandId = [string]$event.commandId
                 stateChanged = $stateChanged
                 gameState = [string]$event.gameState
@@ -286,7 +377,8 @@ function Stop-ChronicleWindowVideoCapture {
             New-Item -ItemType Directory -Path $timelineDirectory -Force | Out-Null
             $frameOrdinal = 0
             foreach ($selection in $timelineSelections) {
-                foreach ($edge in @('before','event','after')) {
+                $edges = if ([string]$selection.action -in $eventOnlyActions -or [string]$selection.decisionAction -in $eventOnlyActions) { @('event') } else { @('before','event','after') }
+                foreach ($edge in $edges) {
                     $frameOrdinal++
                     $seconds = [double]$selection[($edge + 'FrameSeconds')]
                     $framePath = Join-Path $timelineDirectory ('{0:D3}-{1}-{2}-{3}.jpg' -f $frameOrdinal,$selection.actionTag,$selection.stateTag,$edge)
@@ -311,6 +403,8 @@ function Stop-ChronicleWindowVideoCapture {
         eventTracePath = $EventTracePath
         timelineFramesDirectory = if ($timelineSelections.Count -gt 0) { $timelineDirectory } else { $null }
         eventCount = $timelineSelections.Count
+        contactSampleCount = $contactSampleCount
+        contactApproxSampleIntervalSeconds = if ($contactSampleCount -gt 0) { [Math]::Round($duration / $contactSampleCount, 3) } else { $null }
         frameExtractionFailures = @($frameExtractionFailures)
         selections = $timelineSelections
     }
