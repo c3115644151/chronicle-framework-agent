@@ -34,6 +34,7 @@ internal static class AgentHostCampaignLoop
     {
         var results = new List<object>();
         results.AddRange(AgentHostCampaignCheckpointCodec.RunContractSelfTests());
+        results.AddRange(AgentHostEycObjectiveAttemptMemory.RunContractSelfTests());
         results.AddRange(AgentHostEycCompanionSearchMemory.RunContractSelfTests());
         results.AddRange(AgentHostNativeMapMovementMonitor.RunContractSelfTests());
         if (!GoldSaleActions.Contains("sellPrisonerOne") || !GoldSaleActions.Contains("partyScreenDone") || !GoldSaleActions.Contains("partyScreenCancel") ||

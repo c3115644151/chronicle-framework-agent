@@ -550,6 +550,92 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 ReadBoolean(step, "nativeLeaveVerified") && !ReadBoolean(step, "replayedChildActions")) ?? false))
             throw new AgentHostException("establish-clan-autonomy-companion-provider-failure-recovery-selftest-failed", "A provider error inside a supported Tavern Mission must return through Native Leave; the changed Native Map context can reopen Companion while another objective is considered, without replaying the failed child action. status=" + ReadString(companionProviderRecovered, "status") + "; termination=" + ReadString(companionProviderRecovered["termination"] as JsonObject, "reason") + "; goalVerified=" + ReadBoolean(companionProviderRecovered["termination"] as JsonObject, "goalVerified") + "; actions=" + ReadInt(companionProviderRecovered, "actionsExecuted", 0) + "; plannerCalls=" + companionProviderFailurePlanner.CallCount + "; childCalls=" + companionProviderFailureChildCalls + "; leaveActions=" + string.Join(",", companionProviderFailureNative.CompanionNativeActions) + "; allowed=" + string.Join("|", companionProviderAllowedObjectives.Select(ids => string.Join(",", ids))));
         results.Add(new { scenario = "establish-clan-autonomy-leaves-tavern-replans-and-retries-companion-after-native-map-return", modelDecisions = companionProviderFailurePlanner.CallCount, nativeActions = companionProviderRecovered["actionsExecuted"]?.GetValue<int>(), passed = true });
+
+        using var attemptRequest = JsonDocument.Parse("{\"goal\":\"Complete the original StoryMode Establish Your Clan quest.\",\"parentProcessId\":321,\"maxDecisions\":1,\"maxElapsedSeconds\":30,\"allowedActionNames\":[\"questDetails\"]}");
+        async Task<JsonObject> StopBeforeObjectiveProgress(string objectiveId, int priorDecisions, long priorPromptTokens, long priorCompletionTokens,
+            JsonArray priorTrace, JsonArray priorRoutes, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return new JsonObject
+            {
+                ["status"] = "failed",
+                ["actionsExecuted"] = 0,
+                ["decisions"] = priorDecisions,
+                ["promptTokens"] = priorPromptTokens,
+                ["completionTokens"] = priorCompletionTokens,
+                ["trace"] = priorTrace.DeepClone(),
+                ["providerRouteHistory"] = priorRoutes.DeepClone(),
+                ["termination"] = new JsonObject { ["reason"] = "decision-budget-exhausted" },
+                ["failureCode"] = "provider-budget-exhausted"
+            };
+        }
+
+        var pendingAttemptNative = new FakeNativeClient(activeQuest: true, lifecycle: "active", initialGold: 100, initialCompanions: 0);
+        var pendingAttemptFirstProvider = new FakeObjectiveProvider("companions");
+        var pendingAttemptChildCalls = 0;
+        async Task<JsonObject> StopPendingCompanion(string objectiveId, int priorDecisions, long priorPromptTokens, long priorCompletionTokens,
+            JsonArray priorTrace, JsonArray priorRoutes, CancellationToken cancellationToken)
+        {
+            pendingAttemptChildCalls++;
+            return await StopBeforeObjectiveProgress(objectiveId, priorDecisions, priorPromptTokens, priorCompletionTokens, priorTrace, priorRoutes, cancellationToken);
+        }
+        _ = RunAsync(attemptRequest.RootElement, pendingAttemptNative, pendingAttemptNative, pendingAttemptFirstProvider,
+            StopPendingCompanion, CancellationToken.None).GetAwaiter().GetResult();
+        var pendingCheckpointReceipt = JsonDocument.Parse(new JsonObject
+        {
+            ["status"] = "completed",
+            ["data"] = new JsonObject { ["campaignInstanceId"] = "autonomy-selftest-campaign", ["checkpointBase64"] = pendingAttemptNative.CampaignCheckpointBase64 }
+        }.ToJsonString());
+        var pendingCheckpoint = AgentHostCampaignCheckpointCodec.ReadFromNativeReceipt(pendingCheckpointReceipt.RootElement);
+        pendingCheckpointReceipt.Dispose();
+        if (pendingAttemptFirstProvider.CallCount != 1 || pendingAttemptChildCalls != 1 || pendingAttemptNative.CampaignCheckpointWrites == 0 ||
+            AgentHostEycObjectiveAttemptMemory.GetPendingObjective(AgentHostEycObjectiveAttemptMemory.Read(pendingCheckpoint),
+                AgentHostEstablishYourClanGoalLoop.BuildObjectiveSnapshot(AgentHostEstablishYourClanGoalLoop.BuildJournalObjectives(
+                    ReadQuestDetailsData(pendingAttemptNative.ReadQuestDetailsAsync(QuestId, CancellationToken.None).GetAwaiter().GetResult().RootElement)))) != "companions")
+            throw new AgentHostException("establish-clan-attempt-memory-pending-not-saved", "A selected EYC objective stopped at its provider budget must be saved as pending in the same Native Campaign checkpoint.");
+
+        var pendingAttemptResumeProvider = new FakeObjectiveProvider("gold");
+        var resumedAttemptChildCalls = 0;
+        async Task<JsonObject> StopResumedCompanion(string objectiveId, int priorDecisions, long priorPromptTokens, long priorCompletionTokens,
+            JsonArray priorTrace, JsonArray priorRoutes, CancellationToken cancellationToken)
+        {
+            resumedAttemptChildCalls++;
+            if (objectiveId != "companions")
+                throw new AgentHostException("establish-clan-attempt-memory-resumed-wrong-objective", "A pending EYC objective must resume the prior model-selected route after a same-Journal restart.");
+            return await StopBeforeObjectiveProgress(objectiveId, priorDecisions, priorPromptTokens, priorCompletionTokens, priorTrace, priorRoutes, cancellationToken);
+        }
+        var pendingResume = RunAsync(attemptRequest.RootElement, pendingAttemptNative, pendingAttemptNative, pendingAttemptResumeProvider,
+            StopResumedCompanion, CancellationToken.None).GetAwaiter().GetResult();
+        if (pendingAttemptResumeProvider.CallCount != 0 || resumedAttemptChildCalls != 1 ||
+            !((pendingResume["trace"] as JsonArray)?.OfType<JsonObject>().Any(step =>
+                ReadString(step, "stage") == "objective-resumed-from-native-campaign-checkpoint" && ReadString(step, "objectiveId") == "companions") ?? false))
+            throw new AgentHostException("establish-clan-attempt-memory-pending-replanned", "A same-Campaign pending objective must resume its existing child after fresh Native observation without another high-level planner decision.");
+
+        var blockedAttemptNative = new FakeNativeClient(activeQuest: true, lifecycle: "active", initialGold: 100, initialCompanions: 0);
+        var blockedAttemptProvider = new FakeObjectiveProvider("companions");
+        async Task<JsonObject> CompanionUnavailable(string objectiveId, int priorDecisions, long priorPromptTokens, long priorCompletionTokens,
+            JsonArray priorTrace, JsonArray priorRoutes, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return new JsonObject
+            {
+                ["status"] = "failed", ["actionsExecuted"] = 0, ["decisions"] = priorDecisions,
+                ["promptTokens"] = priorPromptTokens, ["completionTokens"] = priorCompletionTokens,
+                ["trace"] = priorTrace.DeepClone(), ["providerRouteHistory"] = priorRoutes.DeepClone(),
+                ["termination"] = new JsonObject { ["reason"] = "companion-route-unavailable" },
+                ["failureCode"] = "companion-route-unavailable"
+            };
+        }
+        _ = RunAsync(attemptRequest.RootElement, blockedAttemptNative, blockedAttemptNative, blockedAttemptProvider,
+            CompanionUnavailable, CancellationToken.None).GetAwaiter().GetResult();
+        var blockedAttemptProviderAfterRestart = new FakeObjectiveProvider("gold");
+        var blockedAttemptResume = RunAsync(attemptRequest.RootElement, blockedAttemptNative, blockedAttemptNative, blockedAttemptProviderAfterRestart,
+            StopBeforeObjectiveProgress, CancellationToken.None).GetAwaiter().GetResult();
+        var resumedAllowedObjectives = blockedAttemptProviderAfterRestart.AllowedObjectiveIds.FirstOrDefault() ?? [];
+        if (ReadString(blockedAttemptResume, "status") != "failed" || blockedAttemptProviderAfterRestart.CallCount != 1 ||
+            resumedAllowedObjectives.Contains("companions", StringComparer.Ordinal) || !resumedAllowedObjectives.Contains("gold", StringComparer.Ordinal))
+            throw new AgentHostException("establish-clan-attempt-memory-blocked-route-reoffered", "A same-state no-progress objective must remain out of the model catalog after a same-Campaign Host restart, leaving other unmet routes available.");
+        results.Add(new { scenario = "establish-clan-objective-pending-resumes-without-reselection-and-no-progress-route-is-blocked-across-same-campaign-host-restart", pendingPlannerCalls = pendingAttemptResumeProvider.CallCount, blockedAllowedObjectiveIds = resumedAllowedObjectives, passed = true });
         return results;
     }
 
@@ -573,6 +659,14 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         var routes = priorProviderRouteHistory?.DeepClone() as JsonArray ?? new JsonArray();
         var decisions = priorDecisions;
         var nativeActions = 0;
+        var checkpointClient = client as IAgentHostCampaignCheckpointNativeClient;
+        JsonObject? campaignCheckpoint = null;
+        var objectiveAttemptMemory = AgentHostEycObjectiveAttemptMemory.Empty();
+        var objectiveAttemptCheckpointRead = false;
+        var objectiveAttemptCheckpointDirty = false;
+        var objectiveAttemptPlannerInitialized = false;
+        string? pendingObjectiveId = null;
+        JsonObject? latestJournalSnapshotForAttempt = null;
         long promptTokens = priorPromptTokens;
         long completionTokens = priorCompletionTokens;
         var unavailableObjectives = new HashSet<string>(StringComparer.Ordinal);
@@ -590,17 +684,66 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         void MarkObjectiveUnavailable(string objectiveId, JsonElement native)
         {
             unavailableObjectives.Add(objectiveId);
-            unavailableObjectiveFingerprints[objectiveId] = BuildObjectiveRouteAvailabilityFingerprint(native);
+            var routeFingerprint = BuildObjectiveRouteAvailabilityFingerprint(native);
+            unavailableObjectiveFingerprints[objectiveId] = routeFingerprint;
+            if (objectiveAttemptCheckpointRead && latestJournalSnapshotForAttempt is not null)
+            {
+                objectiveAttemptMemory = AgentHostEycObjectiveAttemptMemory.SetBlocked(
+                    objectiveAttemptMemory, objectiveId, "objective-route-unavailable", latestJournalSnapshotForAttempt, routeFingerprint);
+                objectiveAttemptCheckpointDirty = true;
+            }
         }
         void ClearUnavailableObjectives()
         {
             unavailableObjectives.Clear();
             unavailableObjectiveFingerprints.Clear();
+            if (objectiveAttemptCheckpointRead)
+            {
+                objectiveAttemptMemory = AgentHostEycObjectiveAttemptMemory.ClearAll(objectiveAttemptMemory);
+                objectiveAttemptCheckpointDirty = true;
+            }
         }
         var objectiveRuns = new JsonArray();
         var start = Stopwatch.GetTimestamp();
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxElapsedSeconds));
+
+        async Task EnsureObjectiveAttemptCheckpointAsync(JsonElement nativeState)
+        {
+            if (objectiveAttemptCheckpointRead || checkpointClient is null || !IsSafeObjectiveAttemptCheckpointState(nativeState))
+                return;
+            using var receipt = await checkpointClient.ReadCampaignCheckpointAsync(elapsed.Token);
+            campaignCheckpoint = AgentHostCampaignCheckpointCodec.ReadFromNativeReceipt(receipt.RootElement);
+            objectiveAttemptMemory = AgentHostEycObjectiveAttemptMemory.Read(campaignCheckpoint);
+            objectiveAttemptCheckpointRead = true;
+            trace.Add(new JsonObject
+            {
+                ["stage"] = "eyc-objective-attempt-checkpoint-read",
+                ["attemptCount"] = AgentHostEycObjectiveAttemptMemory.Count(objectiveAttemptMemory),
+                ["campaignBound"] = true
+            });
+        }
+
+        async Task PersistObjectiveAttemptCheckpointAsync(JsonElement nativeState)
+        {
+            if (!objectiveAttemptCheckpointDirty || !objectiveAttemptCheckpointRead || checkpointClient is null ||
+                campaignCheckpoint is null || !IsSafeObjectiveAttemptCheckpointState(nativeState))
+                return;
+
+            var updatedCheckpoint = AgentHostEycObjectiveAttemptMemory.Store(campaignCheckpoint, objectiveAttemptMemory);
+            using var receipt = await checkpointClient.WriteCampaignCheckpointAsync(updatedCheckpoint.ToJsonString(), elapsed.Token);
+            if (ReadString(receipt.RootElement, "status") != "completed")
+                throw new AgentHostException("eyc-objective-attempt-checkpoint-write-failed", "Native did not confirm saving the EYC objective-attempt checkpoint; the Host will not rely on an unpersisted attempt outcome.");
+
+            campaignCheckpoint = updatedCheckpoint;
+            objectiveAttemptCheckpointDirty = false;
+            trace.Add(new JsonObject
+            {
+                ["stage"] = "eyc-objective-attempt-checkpoint-written",
+                ["attemptCount"] = AgentHostEycObjectiveAttemptMemory.Count(objectiveAttemptMemory),
+                ["campaignBound"] = true
+            });
+        }
 
         try
         {
@@ -742,6 +885,10 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                     continue;
                 }
                 var currentRouteFingerprint = BuildObjectiveRouteAvailabilityFingerprint(current.RootElement);
+                if (AgentHostEstablishYourClanGoalLoop.HasActiveQuest(current.RootElement))
+                    await EnsureObjectiveAttemptCheckpointAsync(current.RootElement);
+                if (objectiveAttemptCheckpointDirty && IsSafeObjectiveAttemptCheckpointState(current.RootElement))
+                    await PersistObjectiveAttemptCheckpointAsync(current.RootElement);
                 foreach (var previouslyBlocked in unavailableObjectiveFingerprints
                              .Where(entry => !string.Equals(entry.Value, currentRouteFingerprint, StringComparison.Ordinal))
                              .Select(entry => entry.Key).ToArray())
@@ -922,6 +1069,36 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 var data = ReadQuestDetailsData(details.RootElement);
                 var journalObjectives = AgentHostEstablishYourClanGoalLoop.BuildJournalObjectives(data);
                 var snapshot = AgentHostEstablishYourClanGoalLoop.BuildObjectiveSnapshot(journalObjectives);
+                latestJournalSnapshotForAttempt = snapshot.DeepClone() as JsonObject;
+                if (objectiveAttemptCheckpointRead)
+                {
+                    var previousAttemptMemoryJson = objectiveAttemptMemory.ToJsonString();
+                    objectiveAttemptMemory = AgentHostEycObjectiveAttemptMemory.Reconcile(
+                        objectiveAttemptMemory, snapshot, currentRouteFingerprint);
+                    if (!string.Equals(previousAttemptMemoryJson, objectiveAttemptMemory.ToJsonString(), StringComparison.Ordinal))
+                        objectiveAttemptCheckpointDirty = true;
+
+                    foreach (var blockedObjective in AgentHostEycObjectiveAttemptMemory.GetBlockedObjectives(
+                                 objectiveAttemptMemory, snapshot, currentRouteFingerprint))
+                    {
+                        unavailableObjectives.Add(blockedObjective);
+                        unavailableObjectiveFingerprints[blockedObjective] = currentRouteFingerprint;
+                    }
+
+                    if (!objectiveAttemptPlannerInitialized)
+                    {
+                        pendingObjectiveId = AgentHostEycObjectiveAttemptMemory.GetPendingObjective(objectiveAttemptMemory, snapshot);
+                        objectiveAttemptPlannerInitialized = true;
+                    }
+                    else if (pendingObjectiveId is not null &&
+                             AgentHostEycObjectiveAttemptMemory.GetPendingObjective(objectiveAttemptMemory, snapshot) != pendingObjectiveId)
+                    {
+                        pendingObjectiveId = null;
+                    }
+
+                    if (objectiveAttemptCheckpointDirty && IsSafeObjectiveAttemptCheckpointState(current.RootElement))
+                        await PersistObjectiveAttemptCheckpointAsync(current.RootElement);
+                }
                 var live = data["storyModeEstablishClan"] as JsonObject;
                 var differences = live is null ? new JsonArray() : AgentHostEstablishYourClanGoalLoop.FindLiveMetricDifferences(live, journalObjectives);
                 var allMet = AgentHostEstablishYourClanGoalLoop.ObjectiveIds.All(id => ReadBoolean(snapshot[id] as JsonObject, "met") == true);
@@ -938,17 +1115,47 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
 
                 var selectableObjectives = new HashSet<string>(InitiallyIntegratedObjectives, StringComparer.Ordinal);
                 selectableObjectives.ExceptWith(unavailableObjectives);
-                var planner = await AgentHostEstablishYourClanGoalLoop.RunAsync(
-                    request, client, questDetailsClient, provider, elapsed.Token,
-                    priorDecisions: decisions,
-                    priorPromptTokens: promptTokens,
-                    priorCompletionTokens: completionTokens,
-                    priorTrace: trace,
-                    priorProviderRouteHistory: routes,
-                    supportedObjectives: selectableObjectives,
-                    observedQuestDetails: detailsReceipt,
-                    observedNativeState: JsonNode.Parse(current.RootElement.GetRawText())?.AsObject(),
-                    activeQuestAlreadyVerified: true);
+                JsonObject planner;
+                var resumeObjectiveId = pendingObjectiveId is not null && selectableObjectives.Contains(pendingObjectiveId) &&
+                                        ReadBoolean(snapshot[pendingObjectiveId] as JsonObject, "met") == false
+                    ? pendingObjectiveId
+                    : null;
+                pendingObjectiveId = null;
+                if (resumeObjectiveId is not null)
+                {
+                    trace.Add(new JsonObject
+                    {
+                        ["stage"] = "objective-resumed-from-native-campaign-checkpoint",
+                        ["objectiveId"] = resumeObjectiveId,
+                        ["nativeOptionsWillBeReobserved"] = true,
+                        ["providerDecisionSkipped"] = true
+                    });
+                    planner = new JsonObject
+                    {
+                        ["status"] = "completed",
+                        ["resultKind"] = "objective-plan",
+                        ["decisions"] = decisions,
+                        ["promptTokens"] = promptTokens,
+                        ["completionTokens"] = completionTokens,
+                        ["selection"] = new JsonObject { ["objectiveId"] = resumeObjectiveId },
+                        ["trace"] = trace.DeepClone(),
+                        ["providerRouteHistory"] = routes.DeepClone()
+                    };
+                }
+                else
+                {
+                    planner = await AgentHostEstablishYourClanGoalLoop.RunAsync(
+                        request, client, questDetailsClient, provider, elapsed.Token,
+                        priorDecisions: decisions,
+                        priorPromptTokens: promptTokens,
+                        priorCompletionTokens: completionTokens,
+                        priorTrace: trace,
+                        priorProviderRouteHistory: routes,
+                        supportedObjectives: selectableObjectives,
+                        observedQuestDetails: detailsReceipt,
+                        observedNativeState: JsonNode.Parse(current.RootElement.GetRawText())?.AsObject(),
+                        activeQuestAlreadyVerified: true);
+                }
                 decisions = ReadInt(planner, "decisions", decisions);
                 promptTokens = ReadLong(planner, "promptTokens", promptTokens);
                 completionTokens = ReadLong(planner, "completionTokens", completionTokens);
@@ -1097,6 +1304,15 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                     return BuildResult("failed", "objective-planner-did-not-select-supported-route", false,
                         "The objective planner did not choose one currently supported, unmet route.", "establish-clan-objective-selection-invalid",
                         journalObjectives, snapshot, differences);
+
+                if (objectiveAttemptCheckpointRead && checkpointClient is not null && campaignCheckpoint is not null &&
+                    IsSafeObjectiveAttemptCheckpointState(current.RootElement))
+                {
+                    objectiveAttemptMemory = AgentHostEycObjectiveAttemptMemory.SetPending(
+                        objectiveAttemptMemory, objectiveId, snapshot, currentRouteFingerprint);
+                    objectiveAttemptCheckpointDirty = true;
+                    await PersistObjectiveAttemptCheckpointAsync(current.RootElement);
+                }
 
                 JsonObject child;
                 child = await executeObjective(objectiveId, decisions, promptTokens, completionTokens, trace, routes, elapsed.Token);
@@ -1540,6 +1756,8 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             var latestState = await client.ReadStateAsync(elapsed.Token);
             using (latestState)
             {
+                if (objectiveAttemptCheckpointDirty && IsSafeObjectiveAttemptCheckpointState(latestState.RootElement))
+                    await PersistObjectiveAttemptCheckpointAsync(latestState.RootElement);
                 using var latestDetails = await questDetailsClient.ReadQuestDetailsAsync(QuestId, elapsed.Token);
                 var latestData = ReadQuestDetailsData(latestDetails.RootElement);
                 var latestJournal = AgentHostEstablishYourClanGoalLoop.BuildJournalObjectives(latestData);
@@ -1633,6 +1851,20 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 return true;
         }
         return false;
+    }
+
+    private static bool IsSafeObjectiveAttemptCheckpointState(JsonElement native)
+    {
+        if (native.ValueKind != JsonValueKind.Object || !native.TryGetProperty("state", out var state) || state.ValueKind != JsonValueKind.Object ||
+            !state.TryGetProperty("context", out var context) || context.ValueKind != JsonValueKind.Object ||
+            ReadString(context, "gameState") != "MapState" ||
+            ReadBoolean(context, "encounterActive") || ReadBoolean(context, "escapeMenuOpen") || ReadBoolean(context, "inquiryOpen") ||
+            ReadBoolean(context, "isWaitMenu") || ReadBoolean(context, "isWaitActive") ||
+            ReadBoolean(state, "partyScreenOpen") || ReadBoolean(state, "inventoryScreenOpen") || IsPlayerCaptive(native))
+            return false;
+        if (state.TryGetProperty("location", out var location) && location.ValueKind == JsonValueKind.Object && ReadBoolean(location, "isUnderSiege"))
+            return false;
+        return true;
     }
 
     internal static string BuildObjectiveRouteAvailabilityFingerprint(JsonElement native)
@@ -1952,6 +2184,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
     }
 
     private static bool ReadBoolean(JsonObject? node, string name) => node?[name] is JsonValue value && value.TryGetValue<bool>(out var result) && result;
+    private static bool ReadBoolean(JsonElement element, string name) => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
     private static string? ReadString(JsonObject? node, string name) => node?[name] is JsonValue value && value.TryGetValue<string>(out var result) ? result : null;
     private static string? ReadString(JsonElement element, string name) => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
     private static string? ReadStateString(JsonElement native, string objectName, string propertyName)
@@ -1966,15 +2199,19 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
     private static long ReadLong(JsonObject? node, string name, long fallback) => node?[name] is JsonValue value && value.TryGetValue<long>(out var result) ? result : fallback;
     private static double ReadDouble(JsonObject? node, string name) => node?[name] is JsonValue value && value.TryGetValue<double>(out var result) ? result : double.NaN;
 
-    private sealed class FakeNativeClient(bool activeQuest, string lifecycle, int initialGold, bool initialCaptive = false, int initialCompanions = 1) : IAgentHostCompanionHiringNativeClient, IAgentHostNativeInquiryClient
+    private sealed class FakeNativeClient(bool activeQuest, string lifecycle, int initialGold, bool initialCaptive = false, int initialCompanions = 1) : IAgentHostCompanionHiringNativeClient, IAgentHostNativeInquiryClient, IAgentHostCampaignCheckpointNativeClient
     {
         private bool _activeQuest = activeQuest;
         private string _lifecycle = lifecycle;
         private int _gold = initialGold;
         private int _companions = initialCompanions;
+        private string _checkpointBase64 = string.Empty;
         internal bool IsFree => !_captive;
         internal bool IsInCompanionMission => _companionMission;
         internal List<string> CompanionNativeActions { get; } = new();
+        internal int CampaignCheckpointReads { get; private set; }
+        internal int CampaignCheckpointWrites { get; private set; }
+        internal string CampaignCheckpointBase64 => _checkpointBase64;
         private bool _captive = initialCaptive;
         private bool _inquiryOpen;
         private bool _companionMission;
@@ -2073,6 +2310,25 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             };
             var data = new JsonObject { ["questId"] = QuestId, ["title"] = "Establish Your Clan", ["journalStages"] = journal, ["storyModeEstablishClan"] = live };
             return Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["data"] = data }.ToJsonString()));
+        }
+
+        public Task<JsonDocument> ReadCampaignCheckpointAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CampaignCheckpointReads++;
+            return Task.FromResult(JsonDocument.Parse(new JsonObject
+            {
+                ["status"] = "completed",
+                ["data"] = new JsonObject { ["campaignInstanceId"] = "autonomy-selftest-campaign", ["checkpointBase64"] = _checkpointBase64 }
+            }.ToJsonString()));
+        }
+
+        public Task<JsonDocument> WriteCampaignCheckpointAsync(string checkpointJson, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _checkpointBase64 = AgentHostCampaignCheckpointCodec.EncodeForNative(checkpointJson);
+            CampaignCheckpointWrites++;
+            return Task.FromResult(JsonDocument.Parse("{\"status\":\"completed\",\"action\":\"agentCheckpointSet\"}"));
         }
 
         public Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken) =>
