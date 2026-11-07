@@ -22,7 +22,8 @@
   - [x] 3.1b 从该安全检查点执行一轮20决策/¥0.20续跑：`TestResults/20261107-072945`恢复同一Campaign并读取到1个已保存empty-Town记录；Agent多次自主选择Companion，在途中处理一支劫匪遭遇的原版对话，后选PartySize/Companion交替。19决策、52757输入/1112输出token、估算¥0.091832544。没有招募或Journal进度；安全Town状态Native SaveAs成功为`ChronicleEycDev-freshB-20261107073215-51b70a75`（SHA-256 `F4E2A052BCFBC1C46617B8B538F5E7ABDFE8854B00EB18631C4294465F140503`），进程清理通过。
   - [x] 3.1c `TestResults/20261107-073719`从同一Campaign安全Map存档续跑19决策、¥0.090696288；原版劫匪赎金使Gold 670→424，MainParty暂时归零，之后Host恢复。PartySize / Companions / Renown最终Journal未增长；安全Native SaveAs为`ChronicleEycDev-freshB-20261107073947-178ae0f7`（SHA-256 `290434B413E7BF260B83C933F4654D09724EBD9DC457A562DCBCD3DC4C0EB35C`），进程清理通过。checkpoint仍在前往EW6途中。
   - [x] 3.1d `TestResults/20261107-075155`从当前Campaign map checkpoint续跑，最多30决策/¥0.30；实际26决策、84550输入/1502输出token、估算¥0.150504768。Agent继续Companion搜索并恢复Native移动目标EW3，遭遇/俘虏流程打断后没有PartySize/Gold/Renown/Companion Journal增长；当前EYC仍为Gold 424、PartySize 1、Renown20、Companion0。Native安全SaveAs为`ChronicleEycDev-freshB-20261107075501-f79da9ba`（SHA-256 `06C5FA932950CF6581336F521D53F20565E7624FBAED7C451D3C6898D47267D1`），清理通过。
-  - [ ] 3.1e 从EW3安全Campaign map checkpoint再做一轮，最多30决策、`CHRONICLE_LLM_MAX_RUN_COST_CNY=0.30`。期望进原版志愿者UI并增加PartySize Journal；若继续陷入Companion/Encounter之间并无Journal进度，保存准确阻塞及连续视觉证据，停止同路重复测试并修正父循环目标重选/遭遇恢复。
+  - [x] 3.1e `TestResults/20261107-080214`续跑27决策，估算¥0.142665696（79553输入/1527输出token），没有EYC Journal增量。模型经原版俘虏/赎金路径恢复后选择PartySize并执行`recruitOptions`观察；当前Native屏幕已回到Sargot菜单，27个志愿兵中16个可负担、最低20金币，MainParty上限20。费用预算在模型挑选具体志愿者前停止；Native安全SaveAs为`ChronicleEycDev-freshB-20261107080443-0a5b1e2b`（SHA-256 `985393AEBF350AA0A23D8CE22D83DC4F3891E67CC32F35A175E2C412ACEA44AA`），清理通过。
+  - [ ] 3.1f 从此安全Sargot聚落菜单运行一轮，最多8个模型决策、费用上限`CHRONICLE_LLM_MAX_RUN_COST_CNY=0.10`。目标是完成Agent自主选择的一名原版志愿兵招募并读取PartySize Journal后验；若Agent选择其它路线或拒绝招募，记录当前状态/理由，不重复该存档状态。
 
 ## Workflow follow-up
 
