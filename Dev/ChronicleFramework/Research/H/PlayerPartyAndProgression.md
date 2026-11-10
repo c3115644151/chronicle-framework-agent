@@ -63,6 +63,8 @@ W2-S端到端运行验收：Harness在Tavern本地HeroAgent观察到动态Wander
 
 同伴是Hero，通常以可招募Wanderer身份在Settlement出现；加入PlayerClan后不再只是战斗Roster兵种：有个人技能/Perk/装备、关系和忙碌状态，可进入主队、担任角色、创建家族Party、被俘或离队。伴侣模板按周期由 `CompanionsCampaignBehavior`管理，生成/淘汰与Clan上限、世界人口和模板池有关；不是玩家可随时从固定菜单无限抽取的兵种。
 
+玩家可见操作补充（用户确认）：在酒馆场景走近人物后，按 **F** 发起交谈。该信息确认的是酒馆里的玩家输入键位；不据此推断交互提示图标、精确距离或所有场景NPC都能交谈。Chronicle目前通过当前场景目标的原版 `Agent.OnUse` 触发交谈，不模拟键盘输入。
+
 原版玩家雇佣入口由 `LordConversationsCampaignBehavior` 注册：与未雇用、不是当前Companion、且不属于某个Party的Wanderer交谈，出现“I can use someone like you in my company”；后续对话先显示 `CompanionHiringPriceCalculationModel.GetCompanionHiringPrice`报价。接受选项要求 Main Hero 金币严格大于报价且未达到 `Clan.PlayerClan.CompanionLimit`，确认后依次调用 `GiveGoldAction`、`AddCompanionAction` 与 `AddHeroToPartyAction`，因此结果是支付后加入Clan并加入MainParty；看报价/拒绝/取消本身不会支付。默认价格按候选Hero军用与民用Equipment在城镇的市场价格之和取一半，再加角色等级价格项及玩家Perk修正；不是只按好感度固定报价。死亡、雇佣解雇、任务结果或同伴转为领主等会走不同 `RemoveCompanionAction` 分支，某些离队还需要结束其Party/当前领导状态；不能把“从主队离开”自动等同“从Clan删除”。
 
 已有玩家Companion若被敌方关押，监狱突围成功时走F12 `ACT-F12-14`：同一Hero结束Captivity、恢复Active并`AddHeroToPartyAction`加回MainParty；这不是新的Wanderer雇佣，不触发雇佣报价/Gold门槛，因此H05交叉表引用F12-14而不另造“救援招募同伴”ACT。救援Mission/选择入口和失败后果由F12/G03负责。
