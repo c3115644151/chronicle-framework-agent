@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-11-07
+goal: Read an existing pending EYC objective attempt before model re-selection
+  when the Campaign is already at a verified safe settlement menu, while
+  continuing to reject active hostile encounters and unsafe modal states.

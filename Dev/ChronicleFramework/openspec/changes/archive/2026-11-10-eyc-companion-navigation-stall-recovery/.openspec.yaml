@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-11-10
+goal: After a bounded Native navigation ends, reconcile the current Wanderer
+  distance/action observation regardless of whether the scene list was queried
+  automatically or by the model, preventing repeated paid navigation to a target
+  with no measurable approach.

@@ -6,7 +6,7 @@ Lets the autonomous StoryMode agent resume an unfinished â€œEstablish Your Clanâ
 ## Requirements
 
 ### Requirement: Persist a model-selected EYC objective before its subflow
-The Host MUST record the selected EYC objective, current original Journal snapshot, and Native route-state fingerprint in the existing same-Campaign checkpoint before beginning the objective subflow from a safe MapState.
+The Host MUST record the selected EYC objective, current original Journal snapshot, and Native route-state fingerprint in the existing same-Campaign checkpoint before beginning the objective subflow from a safe Native Campaign MapState, including a verified settlement menu.
 
 #### Scenario: Objective is selected on a safe map
 - **GIVEN** the original EYC Journal has an unmet objective and the model selects that current catalog entry
@@ -17,6 +17,22 @@ The Host MUST record the selected EYC objective, current original Journal snapsh
 - **GIVEN** the last Native state is an active encounter, Mission, inquiry, or other non-checkpointable state
 - **WHEN** the Host or Harness stops
 - **THEN** the system MUST retain the previous verified save and MUST NOT claim that a new in-memory objective record survived restart.
+
+#### Scenario: Safe settlement menu permits a same-Campaign checkpoint
+- **GIVEN** the Native Campaign is in a Town, Village or Castle menu, the current settlement identity matches the settlement encounter, the settlement is not under siege, and no modal, battle, PartyScreen, inventory or captivity state is active
+- **WHEN** the menu is `town_backstreet`
+- **THEN** the Host may read or write its objective-attempt checkpoint only if the current original `town_backstreet_back` option is visible, enabled and marked as Leave; another settlement menu must still match a current Native settlement record.
+
+#### Scenario: Pending objective resumes from a safe settlement menu
+- **GIVEN** a same-Campaign checkpoint contains a pending EYC objective and the original Journal snapshot is unchanged
+- **AND** the loaded Campaign begins at that verified settlement menu
+- **WHEN** the fresh Host reads the checkpoint and current Native Journal
+- **THEN** it resumes the saved objective without another high-level EYC objective-selection call, then re-observes the current Native route before acting.
+
+#### Scenario: Hostile encounter is not a settlement checkpoint
+- **GIVEN** the Campaign has a non-settlement encounter such as a hostile looter or bandit Party
+- **WHEN** the Host reads or writes objective-attempt memory
+- **THEN** it MUST reject that state as a checkpoint location even if the overall GameState is `MapState`.
 
 ### Requirement: Resume a pending objective after budget-limited Host restart
 When a same-Campaign checkpoint contains a model-selected pending objective and its original Journal snapshot is unchanged, the Host MUST resume that objective using fresh Native observations instead of making another high-level objective-selection call.

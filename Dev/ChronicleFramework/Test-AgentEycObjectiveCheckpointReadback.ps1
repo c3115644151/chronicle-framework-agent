@@ -26,7 +26,13 @@ $result = [ordered]@{
     CampaignKey = $CampaignKey
     CampaignInstanceMatched = $false
     ObjectiveAttemptPropertyPresent = $false
-    CompanionAttemptStatus = $null
+    NativeGameState = $null
+    NativeMenuId = $null
+    NativeParty = $null
+    NativeClan = $null
+    JournalQuestId = $null
+    JournalObjectives = @()
+    ObjectiveAttemptEntries = @()
     CheckpointSaveName = $null
     CheckpointSaveSha256 = $null
     SourceSaveUnchanged = $false
@@ -79,17 +85,66 @@ try {
         throw 'The loaded checkpoint payload is not bound to this Campaign instance.'
     }
     $memory = $checkpoint.eycObjectiveAttemptMemoryV1
-    $attempt = $memory.attempts.companions
-    if ([int]$memory.schemaVersion -ne 1 -or $null -eq $attempt -or
-        [string]$attempt.status -notin @('pending','blocked') -or
-        [string]::IsNullOrWhiteSpace([string]$attempt.journalFingerprint) -or
-        [string]::IsNullOrWhiteSpace([string]$attempt.nativeRouteFingerprint) -or
-        [string]::IsNullOrWhiteSpace([string]$attempt.termination) -or $null -eq $attempt.journalSnapshot) {
-        throw 'The saved checkpoint does not contain a well-formed Companion attempt record.'
+    $attempts = $memory.attempts
+    if ([int]$memory.schemaVersion -ne 1 -or $null -eq $attempts -or $attempts -isnot [System.Management.Automation.PSCustomObject]) {
+        throw 'The saved checkpoint does not contain a schema-1 EYC objective-attempt property.'
+    }
+    $attemptEntries = @(
+        foreach ($entry in $attempts.PSObject.Properties) {
+            $attempt = $entry.Value
+            if ([string]$entry.Name -notin @('gold','partySize','renown','companions') -or
+                [string]$attempt.status -notin @('pending','blocked') -or
+                [string]::IsNullOrWhiteSpace([string]$attempt.journalFingerprint) -or
+                [string]::IsNullOrWhiteSpace([string]$attempt.nativeRouteFingerprint) -or
+                [string]::IsNullOrWhiteSpace([string]$attempt.termination) -or $null -eq $attempt.journalSnapshot) {
+                throw "The saved checkpoint contains a malformed EYC objective-attempt entry for '$($entry.Name)' ."
+            }
+            [pscustomobject]@{ objectiveId = [string]$entry.Name; status = [string]$attempt.status; termination = [string]$attempt.termination }
+        }
+    )
+    if ($attemptEntries.Count -eq 0) { throw 'The saved checkpoint contains no pending or blocked EYC objective attempt.' }
+
+    $stateReceipt = Invoke-AgentCli 'state' @('-CommandId', ('eyc-attempt-readback-state-' + [Guid]::NewGuid().ToString('N')))
+    if ($stateReceipt.status -ne 'completed' -or [string]$stateReceipt.state.context.gameState -ne 'MapState') {
+        throw 'The loaded Campaign did not return a stable Native MapState for Journal readback.'
+    }
+    $questId = 'rebuild_player_clan_storymode_quest'
+    $questReceipt = Invoke-AgentCli 'questDetails' @('-QuestId', $questId, '-CommandId', ('eyc-attempt-readback-journal-' + [Guid]::NewGuid().ToString('N')))
+    if ($questReceipt.status -ne 'completed' -or [string]$questReceipt.data.questId -cne $questId -or $null -eq $questReceipt.data.journalStages) {
+        throw 'The Native Journal did not return the original Establish Your Clan quest stages.'
+    }
+    $journalObjectives = @($questReceipt.data.journalStages | ForEach-Object {
+        [pscustomobject]@{ description = [string]$_.description; currentProgress = $_.currentProgress; targetProgress = $_.targetProgress }
+    })
+    if ($journalObjectives.Count -lt 4) { throw 'The original EYC Journal readback contained fewer than four objective stages.' }
+    $nativeParty = $stateReceipt.state.party
+    $nativeEconomy = $stateReceipt.state.economy
+    $nativeIdentity = $stateReceipt.state.identity
+    if ($null -eq $nativeParty -or $null -eq $nativeParty.PSObject.Properties['sizeLimit'] -or
+        $null -eq $nativeIdentity -or $null -eq $nativeIdentity.PSObject.Properties['clanTier']) {
+        throw 'The Native state did not expose current MainParty capacity and Clan tier alongside the Journal.'
     }
     $result.CampaignInstanceMatched = $true
     $result.ObjectiveAttemptPropertyPresent = $true
-    $result.CompanionAttemptStatus = [string]$attempt.status
+    $result.NativeGameState = [string]$stateReceipt.state.context.gameState
+    $result.NativeMenuId = [string]$stateReceipt.state.context.menuId
+    $result.NativeParty = [ordered]@{
+        members = $nativeParty.members
+        healthy = $nativeParty.healthy
+        wounded = $nativeParty.wounded
+        prisoners = $nativeParty.prisoners
+        sizeLimit = $nativeParty.sizeLimit
+        morale = $nativeParty.morale
+        food = $nativeParty.food
+    }
+    $result.NativeClan = [ordered]@{
+        tier = $nativeIdentity.clanTier
+        renown = $nativeEconomy.renown
+        influence = $nativeEconomy.influence
+    }
+    $result.JournalQuestId = $questId
+    $result.JournalObjectives = $journalObjectives
+    $result.ObjectiveAttemptEntries = $attemptEntries
     $stop = Invoke-AgentCli 'stop' @('-CommandId', ('eyc-attempt-readback-stop-' + [Guid]::NewGuid().ToString('N')))
     $sessionStarted = $false
     $result.ProcessStopped = [bool]$stop.processStopped -and -not (Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue) -and -not (Test-Path -LiteralPath $sessionPath -PathType Leaf)

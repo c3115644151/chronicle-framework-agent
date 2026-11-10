@@ -190,6 +190,20 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         if (!IsFreeMapForObjectiveReplan(townLocationMenu.RootElement) || IsFreeMapForObjectiveReplan(hostileEncounter.RootElement))
             throw new AgentHostException("establish-clan-autonomy-town-menu-free-map-classification-failed", "A Native Town location menu may report encounterActive=true but must remain a free Map for safe objective replanning; a real party encounter must still block it.");
         results.Add(new { scenario = "establish-clan-autonomy-native-town-menu-is-free-map-for-objective-replan-but-hostile-encounter-is-not", passed = true });
+        using var safeTownBackstreetCheckpoint = JsonDocument.Parse("""
+            {"status":"completed","state":{"context":{"gameState":"MapState","menuId":"town_backstreet","encounterActive":true,"encounteredPartyId":"town_ES3","escapeMenuOpen":false,"inquiryOpen":false,"isWaitMenu":false,"isWaitActive":false,"captivity":{"isCaptive":false}},"location":{"currentSettlementId":"town_ES3","isUnderSiege":false},"partyScreenOpen":false,"inventoryScreenOpen":false,"availableMenuOptions":[{"id":"town_backstreet_back","available":true,"enabled":true,"isLeave":true}],"nearbySettlements":[{"id":"town_ES3","type":"town","underSiege":false}]}}
+            """);
+        using var unsafeBanditCheckpoint = JsonDocument.Parse("""
+            {"status":"completed","state":{"context":{"gameState":"MapState","menuId":"encounter","encounterActive":true,"encounteredPartyId":"looter-party","escapeMenuOpen":false,"inquiryOpen":false,"captivity":{"isCaptive":false}},"location":{"currentSettlementId":null},"partyScreenOpen":false,"inventoryScreenOpen":false}}
+            """);
+        var disabledBackstreetCheckpoint = JsonNode.Parse(safeTownBackstreetCheckpoint.RootElement.GetRawText())!.AsObject();
+        disabledBackstreetCheckpoint["state"]!["availableMenuOptions"]![0]!["enabled"] = false;
+        using var disabledBackstreetCheckpointDocument = JsonDocument.Parse(disabledBackstreetCheckpoint.ToJsonString());
+        if (!IsSafeObjectiveAttemptCheckpointState(safeTownBackstreetCheckpoint.RootElement) ||
+            IsSafeObjectiveAttemptCheckpointState(unsafeBanditCheckpoint.RootElement) ||
+            IsSafeObjectiveAttemptCheckpointState(disabledBackstreetCheckpointDocument.RootElement))
+            throw new AgentHostException("establish-clan-autonomy-objective-checkpoint-settlement-boundary-failed", "Attempt memory may be read or written at a non-sieged settlement menu only when its current encounter identity matches and Town Backstreet has an enabled Native Leave option; a hostile party encounter is never safe.");
+        results.Add(new { scenario = "establish-clan-attempt-checkpoint-allows-safe-settlement-menu-but-rejects-bandit-or-unleavable-menu", passed = true });
         using var woundedTownRestState = JsonDocument.Parse("""
             {"status":"completed","timeControlMode":"Stop","campaignDay":1.0,"dailyTickCount":1,"state":{"context":{"gameState":"MapState","menuId":"town","encounterActive":true,"encounteredPartyId":"town-a","escapeMenuOpen":false,"inquiryOpen":false,"isWaitMenu":false,"isWaiting":true,"captivity":{"isCaptive":false}},"location":{"currentSettlementId":"town-a"},"party":{"members":1,"healthy":0,"wounded":1,"isMoving":false,"food":-0.05,"foodInventory":0},"economy":{"gold":0},"availableMenuOptions":[{"id":"town_wait","available":true,"enabled":true}]}}
             """);
@@ -595,6 +609,9 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             throw new AgentHostException("establish-clan-attempt-memory-pending-not-saved", "A selected EYC objective stopped at its provider budget must be saved as pending in the same Native Campaign checkpoint.");
 
         var pendingAttemptResumeProvider = new FakeObjectiveProvider("gold");
+        var pendingAttemptResumeNative = new FakeNativeClient(activeQuest: true, lifecycle: "active", initialGold: 100,
+            initialCompanions: 0, startAtSafeTownBackstreet: true);
+        pendingAttemptResumeNative.LoadCampaignCheckpoint(pendingAttemptNative.CampaignCheckpointBase64);
         var resumedAttemptChildCalls = 0;
         async Task<JsonObject> StopResumedCompanion(string objectiveId, int priorDecisions, long priorPromptTokens, long priorCompletionTokens,
             JsonArray priorTrace, JsonArray priorRoutes, CancellationToken cancellationToken)
@@ -604,12 +621,13 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 throw new AgentHostException("establish-clan-attempt-memory-resumed-wrong-objective", "A pending EYC objective must resume the prior model-selected route after a same-Journal restart.");
             return await StopBeforeObjectiveProgress(objectiveId, priorDecisions, priorPromptTokens, priorCompletionTokens, priorTrace, priorRoutes, cancellationToken);
         }
-        var pendingResume = RunAsync(attemptRequest.RootElement, pendingAttemptNative, pendingAttemptNative, pendingAttemptResumeProvider,
+        var pendingResume = RunAsync(attemptRequest.RootElement, pendingAttemptResumeNative, pendingAttemptResumeNative, pendingAttemptResumeProvider,
             StopResumedCompanion, CancellationToken.None).GetAwaiter().GetResult();
-        if (pendingAttemptResumeProvider.CallCount != 0 || resumedAttemptChildCalls != 1 ||
+        if (pendingAttemptResumeProvider.CallCount != 0 || resumedAttemptChildCalls != 1 || pendingAttemptResumeNative.CampaignCheckpointReads != 1 ||
             !((pendingResume["trace"] as JsonArray)?.OfType<JsonObject>().Any(step =>
                 ReadString(step, "stage") == "objective-resumed-from-native-campaign-checkpoint" && ReadString(step, "objectiveId") == "companions") ?? false))
-            throw new AgentHostException("establish-clan-attempt-memory-pending-replanned", "A same-Campaign pending objective must resume its existing child after fresh Native observation without another high-level planner decision.");
+            throw new AgentHostException("establish-clan-attempt-memory-pending-replanned", "A same-Campaign pending objective must be read at a safe Native Town Backstreet checkpoint and resume its existing child without another high-level planner decision.");
+        results.Add(new { scenario = "establish-clan-objective-attempt-resumes-from-safe-native-town-backstreet-without-reselection", providerPlannerCalls = pendingAttemptResumeProvider.CallCount, campaignCheckpointReads = pendingAttemptResumeNative.CampaignCheckpointReads, passed = true });
 
         var blockedAttemptNative = new FakeNativeClient(activeQuest: true, lifecycle: "active", initialGold: 100, initialCompanions: 0);
         var blockedAttemptProvider = new FakeObjectiveProvider("companions");
@@ -1858,12 +1876,55 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         if (native.ValueKind != JsonValueKind.Object || !native.TryGetProperty("state", out var state) || state.ValueKind != JsonValueKind.Object ||
             !state.TryGetProperty("context", out var context) || context.ValueKind != JsonValueKind.Object ||
             ReadString(context, "gameState") != "MapState" ||
-            ReadBoolean(context, "encounterActive") || ReadBoolean(context, "escapeMenuOpen") || ReadBoolean(context, "inquiryOpen") ||
+            ReadBoolean(context, "escapeMenuOpen") || ReadBoolean(context, "inquiryOpen") ||
             ReadBoolean(context, "isWaitMenu") || ReadBoolean(context, "isWaitActive") ||
             ReadBoolean(state, "partyScreenOpen") || ReadBoolean(state, "inventoryScreenOpen") || IsPlayerCaptive(native))
             return false;
-        if (state.TryGetProperty("location", out var location) && location.ValueKind == JsonValueKind.Object && ReadBoolean(location, "isUnderSiege"))
+
+        // A settlement GameMenu is still a Native MapState and is a safe save
+        // point when its visible Leave action is available. The long-campaign
+        // Harness uses this same boundary; treating every settlement encounter
+        // flag as an active party battle prevented a fresh Host from reading an
+        // already saved objective attempt before it asked the model to reselect.
+
+        var location = state.TryGetProperty("location", out var locationElement) && locationElement.ValueKind == JsonValueKind.Object
+            ? JsonNode.Parse(locationElement.GetRawText())?.AsObject()
+            : null;
+        if (location is not null && ReadBoolean(location, "isUnderSiege")) return false;
+
+        var menuId = ReadString(context, "menuId");
+        var activeEncounter = ReadBoolean(context, "encounterActive");
+        var encounteredPartyId = ReadString(context, "encounteredPartyId");
+        if (string.IsNullOrWhiteSpace(menuId))
+            return !activeEncounter && string.IsNullOrWhiteSpace(encounteredPartyId);
+
+        if (menuId is not ("town" or "village" or "castle" or "town_backstreet")) return false;
+        var currentSettlementId = ReadString(location, "currentSettlementId");
+        if (string.IsNullOrWhiteSpace(currentSettlementId) ||
+            (activeEncounter && !string.Equals(encounteredPartyId, currentSettlementId, StringComparison.Ordinal)) ||
+            (!string.IsNullOrWhiteSpace(encounteredPartyId) && !string.Equals(encounteredPartyId, currentSettlementId, StringComparison.Ordinal)))
             return false;
+
+        var nearbySettlements = state.TryGetProperty("nearbySettlements", out var settlementsElement) && settlementsElement.ValueKind == JsonValueKind.Array
+            ? JsonNode.Parse(settlementsElement.GetRawText()) as JsonArray
+            : null;
+        var currentSettlement = nearbySettlements?.OfType<JsonObject>().FirstOrDefault(settlement =>
+            string.Equals(ReadString(settlement, "id"), currentSettlementId, StringComparison.Ordinal));
+        if (currentSettlement is null || ReadString(currentSettlement, "type") is not ("town" or "village" or "castle") ||
+            ReadBoolean(currentSettlement, "underSiege"))
+            return false;
+
+        if (menuId == "town_backstreet")
+        {
+            var options = state.TryGetProperty("availableMenuOptions", out var optionsElement) && optionsElement.ValueKind == JsonValueKind.Array
+                ? JsonNode.Parse(optionsElement.GetRawText()) as JsonArray
+                : null;
+            var leaveEnabled = options?.OfType<JsonObject>().Any(option =>
+                ReadString(option, "id") == "town_backstreet_back" && ReadBoolean(option, "available") &&
+                ReadBoolean(option, "enabled") && ReadBoolean(option, "isLeave")) == true;
+            if (!leaveEnabled) return false;
+        }
+
         return true;
     }
 
@@ -2199,19 +2260,22 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
     private static long ReadLong(JsonObject? node, string name, long fallback) => node?[name] is JsonValue value && value.TryGetValue<long>(out var result) ? result : fallback;
     private static double ReadDouble(JsonObject? node, string name) => node?[name] is JsonValue value && value.TryGetValue<double>(out var result) ? result : double.NaN;
 
-    private sealed class FakeNativeClient(bool activeQuest, string lifecycle, int initialGold, bool initialCaptive = false, int initialCompanions = 1) : IAgentHostCompanionHiringNativeClient, IAgentHostNativeInquiryClient, IAgentHostCampaignCheckpointNativeClient
+    private sealed class FakeNativeClient(bool activeQuest, string lifecycle, int initialGold, bool initialCaptive = false, int initialCompanions = 1,
+        bool startAtSafeTownBackstreet = false) : IAgentHostCompanionHiringNativeClient, IAgentHostNativeInquiryClient, IAgentHostCampaignCheckpointNativeClient
     {
         private bool _activeQuest = activeQuest;
         private string _lifecycle = lifecycle;
         private int _gold = initialGold;
         private int _companions = initialCompanions;
         private string _checkpointBase64 = string.Empty;
+        private readonly bool _startAtSafeTownBackstreet = startAtSafeTownBackstreet;
         internal bool IsFree => !_captive;
         internal bool IsInCompanionMission => _companionMission;
         internal List<string> CompanionNativeActions { get; } = new();
         internal int CampaignCheckpointReads { get; private set; }
         internal int CampaignCheckpointWrites { get; private set; }
         internal string CampaignCheckpointBase64 => _checkpointBase64;
+        internal void LoadCampaignCheckpoint(string checkpointBase64) => _checkpointBase64 = checkpointBase64;
         private bool _captive = initialCaptive;
         private bool _inquiryOpen;
         private bool _companionMission;
@@ -2258,9 +2322,11 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 ["context"] = new JsonObject
                 {
                     ["gameState"] = _companionMission ? "MissionState" : "MapState", ["captivity"] = new JsonObject { ["isCaptive"] = _captive },
+                    ["menuId"] = _startAtSafeTownBackstreet && !_companionMission ? "town_backstreet" : null,
+                    ["encounterActive"] = _startAtSafeTownBackstreet && !_companionMission,
+                    ["encounteredPartyId"] = _startAtSafeTownBackstreet && !_companionMission ? "town_ES3" : null,
                     ["inquiryOpen"] = _inquiryOpen,
                     ["escapeMenuOpen"] = false,
-                    ["encounterActive"] = false,
                     ["sceneNotification"] = new JsonObject { ["hasActiveNotification"] = false },
                     ["inquiry"] = _inquiryOpen ? new JsonObject
                     {
@@ -2287,6 +2353,20 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                     ["navigation"] = new JsonObject { ["active"] = false },
                     ["leave"] = new JsonObject { ["active"] = missionLeaveActive }
                 };
+            }
+            else if (_startAtSafeTownBackstreet)
+            {
+                state["location"] = new JsonObject { ["currentSettlementId"] = "town_ES3" };
+                state["partyScreenOpen"] = false;
+                state["inventoryScreenOpen"] = false;
+                state["availableMenuOptions"] = new JsonArray(new JsonObject
+                {
+                    ["id"] = "town_backstreet_back", ["available"] = true, ["enabled"] = true, ["isLeave"] = true
+                });
+                state["nearbySettlements"] = new JsonArray(new JsonObject
+                {
+                    ["id"] = "town_ES3", ["type"] = "town", ["underSiege"] = false
+                });
             }
             return Task.FromResult(JsonDocument.Parse(new JsonObject { ["status"] = "completed", ["state"] = state }.ToJsonString()));
         }
