@@ -26,6 +26,9 @@ $result = [ordered]@{
     CampaignKey = $CampaignKey
     CampaignInstanceMatched = $false
     ObjectiveAttemptPropertyPresent = $false
+    CompanionSearchMemoryPropertyPresent = $false
+    UnaffordableHeroCount = 0
+    UnaffordableHeroesSuppressedAtCurrentGold = 0
     NativeGameState = $null
     NativeMenuId = $null
     NativeParty = $null
@@ -104,6 +107,23 @@ try {
     )
     if ($attemptEntries.Count -eq 0) { throw 'The saved checkpoint contains no pending or blocked EYC objective attempt.' }
 
+    $companionSearchMemory = $checkpoint.eycCompanionSearchMemoryV1
+    $unaffordableHeroEntries = @()
+    if ($null -ne $companionSearchMemory -and $null -ne $companionSearchMemory.PSObject.Properties['unaffordableHeroes']) {
+        $unaffordableHeroEntries = @($companionSearchMemory.unaffordableHeroes)
+        $unaffordableHeroIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach ($entry in $unaffordableHeroEntries) {
+            if ([string]::IsNullOrWhiteSpace([string]$entry.heroId) -or
+                [string]$entry.heroId -cne ([string]$entry.heroId).Trim() -or
+                [string]$entry.heroId.Length -gt 128 -or
+                $null -eq $entry.goldAtRefusal -or
+                [int]$entry.goldAtRefusal -lt 0 -or
+                -not $unaffordableHeroIds.Add([string]$entry.heroId)) {
+                throw 'The saved checkpoint contains a malformed or duplicate unaffordable Wanderer entry.'
+            }
+        }
+    }
+
     $stateReceipt = Invoke-AgentCli 'state' @('-CommandId', ('eyc-attempt-readback-state-' + [Guid]::NewGuid().ToString('N')))
     if ($stateReceipt.status -ne 'completed' -or [string]$stateReceipt.state.context.gameState -ne 'MapState') {
         throw 'The loaded Campaign did not return a stable Native MapState for Journal readback.'
@@ -126,6 +146,8 @@ try {
     }
     $result.CampaignInstanceMatched = $true
     $result.ObjectiveAttemptPropertyPresent = $true
+    $result.CompanionSearchMemoryPropertyPresent = $null -ne $companionSearchMemory
+    $result.UnaffordableHeroCount = $unaffordableHeroEntries.Count
     $result.NativeGameState = [string]$stateReceipt.state.context.gameState
     $result.NativeMenuId = [string]$stateReceipt.state.context.menuId
     $result.NativeParty = [ordered]@{
@@ -142,6 +164,7 @@ try {
         renown = $nativeEconomy.renown
         influence = $nativeEconomy.influence
     }
+    $result.UnaffordableHeroesSuppressedAtCurrentGold = @($unaffordableHeroEntries | Where-Object { [int]$nativeEconomy.gold -le [int]$_.goldAtRefusal }).Count
     $result.JournalQuestId = $questId
     $result.JournalObjectives = $journalObjectives
     $result.ObjectiveAttemptEntries = $attemptEntries
