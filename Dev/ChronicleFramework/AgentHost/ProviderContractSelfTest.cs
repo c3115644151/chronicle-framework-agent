@@ -99,6 +99,7 @@ internal static class ProviderContractSelfTest
         results.AddRange(AgentHostEstablishYourClanAutonomyLoop.RunContractSelfTests());
         results.AddRange(AgentHostCampaignLoop.RunContractSelfTests());
         results.AddRange(AgentHostBattleSimulationLoop.RunContractSelfTests());
+        results.AddRange(AgentHostBattleMissionLoop.RunContractSelfTests());
         try { results.AddRange(await AgentHostBattleSimulationLoop.RunTransportSelfTestsAsync()); }
         catch (Exception exception) { throw new AgentHostException("battle-simulation-loop-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
         results.AddRange(await AgentHostCampaignLoop.RunTransportSelfTestsAsync());

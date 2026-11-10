@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 namespace ChronicleFramework.AgentHost;
 
 internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeClient, IAgentHostBattleSimulationNativeClient,
+    IAgentHostBattleMissionNativeClient,
     IAgentHostQuestDetailsNativeClient, IAgentHostCaptivityRecoveryNativeClient, IAgentHostGoldSaleNativeClient,
     IAgentHostRecruitmentNativeClient, IAgentHostSupplyNativeClient, IAgentHostCompanionHiringNativeClient, IAgentHostStoryModeBootstrapNativeClient,
     IAgentHostNativeInquiryClient, IAgentHostStoryModeBannerEditorNativeClient, IAgentHostEstablishClanTrainingIssueNativeClient,
@@ -640,6 +641,15 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
         ValidateBattleSimulationAction(action, arguments);
         return SendAsync(action, arguments, acceptedResponseExpected: action == "partyScreenDone", cancellationToken);
     }
+
+    public Task<JsonDocument> ReadBattleMissionStatusAsync(CancellationToken cancellationToken) =>
+        SendAsync("battleMissionStatus", new JsonObject(), acceptedResponseExpected: false, cancellationToken);
+
+    public Task<JsonDocument> DelegateBattleMissionTroopsAsync(CancellationToken cancellationToken) =>
+        SendAsync("missionDelegateTroops", new JsonObject(), acceptedResponseExpected: false, cancellationToken);
+
+    public Task<JsonDocument> ExitEndedBattleMissionAsync(CancellationToken cancellationToken) =>
+        SendAsync("missionRetreat", new JsonObject(), acceptedResponseExpected: false, cancellationToken);
 
     public Task<JsonDocument> PauseForVisibleHostileDecisionAsync(CancellationToken cancellationToken) =>
         SendAsync("pause", new JsonObject(), acceptedResponseExpected: false, cancellationToken);

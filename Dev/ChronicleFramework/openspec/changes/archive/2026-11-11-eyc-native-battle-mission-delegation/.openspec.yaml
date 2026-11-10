@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-11-11
+goal: Allow the Establish Your Clan agent to handle an original battle Mission
+  by delegating its current troop formations to the Native AI, then verify the
+  original battle result while preserving MainHero ownership and Campaign time
+  semantics.

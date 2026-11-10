@@ -60,6 +60,7 @@ internal static class AgentHostBattleSimulationLoop
         var mapPartyTargetsQueried = false;
         var mapConversationContinuationCount = 0;
         var battleWasStarted = false;
+        var nativeBattleMissionRequested = false;
         var nativeEncounterLeaveIssued = false;
         string? nativeEncounterLeaveOptionId = null;
         string? rejectedEscapeOptionFingerprint = null;
@@ -657,6 +658,11 @@ internal static class AgentHostBattleSimulationLoop
                 {
                     battleWasStarted = true;
                 }
+                else if (completed && action == "menuSelect" && string.Equals(ReadString(arguments, "optionId"), "attack", StringComparison.Ordinal))
+                {
+                    battleWasStarted = true;
+                    nativeBattleMissionRequested = true;
+                }
                 else if (completed && action == "menuSelect" && !battleWasStarted &&
                          IsNativeEncounterLeaveSelection(state, arguments!))
                 {
@@ -837,6 +843,54 @@ internal static class AgentHostBattleSimulationLoop
                     failureCode = "native-rejection-limit";
                     termination = "native-rejection-limit";
                     break;
+                }
+
+                if (nativeBattleMissionRequested)
+                {
+                    if (client is not IAgentHostBattleMissionNativeClient missionClient)
+                    {
+                        failure = "The original attack option entered a Battle Mission, but the Native Battle Mission controller is unavailable.";
+                        failureCode = "battle-mission-controller-unavailable";
+                        termination = "battle-mission-controller-unavailable";
+                        break;
+                    }
+                    var missionResult = await AgentHostBattleMissionLoop.RunAsync(client, missionClient, processId, elapsed.Token);
+                    trace.Add(new JsonObject
+                    {
+                        ["stage"] = "native-battle-mission-delegation",
+                        ["iteration"] = iteration,
+                        ["modelDecisionMade"] = false,
+                        ["nativeDelegationIssued"] = missionResult.DelegationIssued,
+                        ["delegatedFormationCount"] = missionResult.DelegatedFormationCount,
+                        ["mainHeroHealthAtStart"] = double.IsFinite(missionResult.MainHeroHealthAtStart) ? JsonValue.Create(missionResult.MainHeroHealthAtStart) : null,
+                        ["mainHeroHealthAtEnd"] = double.IsFinite(missionResult.MainHeroHealthAtEnd) ? JsonValue.Create(missionResult.MainHeroHealthAtEnd) : null,
+                        ["mainHeroStayedPlayerControlled"] = missionResult.MainHeroStayedPlayerControlled,
+                        ["campaignDayAtStart"] = double.IsFinite(missionResult.CampaignDayAtStart) ? JsonValue.Create(missionResult.CampaignDayAtStart) : null,
+                        ["campaignDayAtEnd"] = double.IsFinite(missionResult.CampaignDayAtEnd) ? JsonValue.Create(missionResult.CampaignDayAtEnd) : null,
+                        ["timeControlModeAtStart"] = missionResult.TimeControlModeAtStart,
+                        ["timeControlModeAtEnd"] = missionResult.TimeControlModeAtEnd,
+                        ["passivePollCount"] = missionResult.PassivePollCount,
+                        ["termination"] = missionResult.Termination,
+                        ["finalGameState"] = ReadString(missionResult.FinalNative["state"]?["context"] as JsonObject, "gameState")
+                    });
+                    nativeBattleMissionRequested = false;
+                    if (!missionResult.Completed)
+                    {
+                        failure = "The delegated Native Battle Mission did not return to a verified Native aftermath; no battle outcome is claimed.";
+                        failureCode = missionResult.Termination;
+                        termination = "battle-mission-not-resolved";
+                        break;
+                    }
+                    currentNative = missionResult.FinalNative;
+                    previousReceipt = new JsonObject
+                    {
+                        ["action"] = "native-battle-mission-delegation",
+                        ["status"] = "completed",
+                        ["termination"] = missionResult.Termination,
+                        ["delegatedFormationCount"] = missionResult.DelegatedFormationCount,
+                        ["mainHeroStayedPlayerControlled"] = missionResult.MainHeroStayedPlayerControlled
+                    };
+                    battleResult = "native-battle-mission-ended";
                 }
             }
 
@@ -1062,9 +1116,18 @@ internal static class AgentHostBattleSimulationLoop
                     var retryFingerprint = BuildNativeEscapeRetryFingerprint(state, targetId, observedTargets);
                     var suppressRejectedEscape = !string.IsNullOrWhiteSpace(rejectedEscapeOptionFingerprint) &&
                         string.Equals(retryFingerprint, rejectedEscapeOptionFingerprint, StringComparison.Ordinal);
-                    var encounterOptions = new[] { "str_order_attack", "leave_soldiers_behind", "leave" }
-                        .Where(optionId => CurrentEnabledMenuOption(state, optionId) &&
-                            !(suppressRejectedEscape && optionId == "leave_soldiers_behind")).ToArray();
+                    var sendTroopsEnabled = CurrentEnabledMenuOption(state, "str_order_attack");
+                    var nativeAttackMissionEnabled = !sendTroopsEnabled && CurrentEnabledMenuOption(state, "attack") &&
+                        ReadInt(state["party"] as JsonObject, "healthy", 0) > 0;
+                    var encounterOptions = new[]
+                        {
+                            sendTroopsEnabled ? "str_order_attack" : nativeAttackMissionEnabled ? "attack" : null,
+                            "leave_soldiers_behind", "leave"
+                        }
+                        .Where(optionId => optionId is not null && CurrentEnabledMenuOption(state, optionId) &&
+                            !(suppressRejectedEscape && optionId == "leave_soldiers_behind"))
+                        .Select(optionId => optionId!)
+                        .ToArray();
                     if (encounterOptions.Length > 0)
                         AddNativeMenuSelectAction(catalog, "encounter", encounterOptions);
                     else if (recoverPlayerCaptivity && CurrentEnabledMenuOption(state, "surrender"))
@@ -1270,6 +1333,8 @@ internal static class AgentHostBattleSimulationLoop
                     { rejection = "Battle menu choices are restricted to the current Native Encounter or the specifically observed Try-to-get-away warning/debrief."; return false; }
                     var sendTroopsEnabled = CurrentEnabledMenuOption(state, "str_order_attack");
                     var allowedSendTroops = selectedOptionId == "str_order_attack" && sendTroopsEnabled;
+                    var allowedDelegatedAttackMission = selectedOptionId == "attack" && !sendTroopsEnabled &&
+                        CurrentEnabledMenuOption(state, "attack") && ReadInt(state["party"] as JsonObject, "healthy", 0) > 0;
                     var escapeOptionEnabled = CurrentEnabledMenuOption(state, "leave_soldiers_behind");
                     var allowedLeave = selectedOptionId == "leave" && CurrentEnabledMenuOption(state, "leave");
                     var allowedTryToGetAway = selectedOptionId == "leave_soldiers_behind" && escapeOptionEnabled;
@@ -1279,8 +1344,8 @@ internal static class AgentHostBattleSimulationLoop
                     var allowedSurrenderFallback = recoverPlayerCaptivity && !sendTroopsEnabled && !CurrentEnabledMenuOption(state, "leave") &&
                         (!escapeOptionEnabled || escapeSuppressedForUnchangedEncounter) &&
                         selectedOptionId == "surrender" && CurrentEnabledMenuOption(state, "surrender");
-                    if (!(allowedSendTroops || allowedLeave || allowedTryToGetAway || allowedSurrenderFallback))
-                    { rejection = "Select only a current enabled Native Send Troops, Leave, or Try-to-get-away option; surrender is recovery-only when those choices are unavailable. Real-time attack Missions are outside this loop."; return false; }
+                    if (!(allowedSendTroops || allowedDelegatedAttackMission || allowedLeave || allowedTryToGetAway || allowedSurrenderFallback))
+                    { rejection = "Select only a current enabled Native Send Troops, healthy-troop delegated Attack Mission, Leave, or Try-to-get-away option; surrender is recovery-only when those choices are unavailable."; return false; }
                     var encounteredId = ReadString(state["context"] as JsonObject, "encounteredPartyId");
                     if (!observedTargets.OfType<JsonObject>().Any(x => ReadString(x, "id") == encounteredId && ReadString(x, "type") == "bandit" && ReadBoolean(x, "hostile")))
                     { rejection = "The active encounter party must match a currently observed hostile bandit target."; return false; }
@@ -1604,12 +1669,17 @@ internal static class AgentHostBattleSimulationLoop
         playerFacingAttackMenu["state"]!["availableMenuOptions"] = new JsonArray(
             new JsonObject { ["id"] = "attack", ["enabled"] = true, ["available"] = true },
             new JsonObject { ["id"] = "str_order_attack", ["enabled"] = false, ["available"] = false });
+        playerFacingAttackMenu["state"]!["party"] = new JsonObject { ["healthy"] = 1 };
         var playerFacingAttackCatalog = BuildActionCatalog(playerFacingAttackMenu["state"]!.AsObject(), candidates, "bandit-1", false, true);
         var playerFacingAttackDecision = new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "encounter", ["OptionId"] = "attack" } };
-        if (playerFacingAttackCatalog.Count != 0 ||
-            TryResolveDecision(playerFacingAttackDecision, playerFacingAttackCatalog, new JsonArray(), playerFacingAttackMenu["state"]!.AsObject(), candidates, "bandit-1", out _, out _, out _, out _))
-            throw new AgentHostException("battle-loop-realtime-attack-mission-not-exposed-as-simulation", "An enabled Native attack option that would enter a real-time Mission must remain unavailable when str_order_attack is disabled.");
-        results.Add(new { scenario = "battle-loop-requires-native-send-troops-option-and-rejects-realtime-attack-mission", passed = true });
+        var selectedMissionAttack = playerFacingAttackCatalog.Single()? ["argumentValues"]? ["OptionId"] as JsonArray;
+        var noHealthyMissionAttack = (JsonObject)playerFacingAttackMenu["state"]!.AsObject().DeepClone();
+        noHealthyMissionAttack["party"]!["healthy"] = 0;
+        if (playerFacingAttackCatalog.Count != 1 || selectedMissionAttack?.Count != 1 || selectedMissionAttack[0]?.GetValue<string>() != "attack" ||
+            !TryResolveDecision(playerFacingAttackDecision, playerFacingAttackCatalog, new JsonArray(), playerFacingAttackMenu["state"]!.AsObject(), candidates, "bandit-1", out _, out _, out _, out _) ||
+            BuildActionCatalog(noHealthyMissionAttack, candidates, "bandit-1", false, true).Count != 0)
+            throw new AgentHostException("battle-loop-fallback-native-attack-mission-contract-failed", "When Send Troops is disabled, the original Attack Mission may be offered only when Native attack is enabled and healthy troops are present for immediate delegation.");
+        results.Add(new { scenario = "battle-loop-offers-original-attack-only-as-healthy-troop-delegation-fallback", passed = true });
 
         var noSendTroopsMenu = ParseState("MapState", "encounter", true, null, null);
         noSendTroopsMenu["state"]!["context"]!["encounteredPartyId"] = "bandit-1";
@@ -1909,6 +1979,21 @@ internal static class AgentHostBattleSimulationLoop
         if (!client.Actions.SequenceEqual(new[] { "mapPartyTargets", "pursue", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone" }))
             throw new AgentHostException("battle-loop-self-test-native-order-failed", "The battle loop emitted an unexpected Native action order.");
 
+        var delegatedMissionClient = new FakeDelegatedAttackBattleNativeClient();
+        var delegatedMissionProvider = new FakeDelegatedAttackDecisionProvider();
+        var delegatedMissionResult = await RunAsync(request.RootElement, delegatedMissionClient, delegatedMissionProvider, CancellationToken.None);
+        var delegatedMissionTrace = delegatedMissionResult["trace"] as JsonArray;
+        var delegatedMissionTraceStep = delegatedMissionTrace?.OfType<JsonObject>().SingleOrDefault(step => ReadString(step, "stage") == "native-battle-mission-delegation");
+        if (ReadString(delegatedMissionResult, "status") != "completed" || ReadString(delegatedMissionResult, "termination") != "battle-resolved-and-verified" ||
+            delegatedMissionProvider.CallCount != 3 || delegatedMissionClient.DelegationCalls != 1 || delegatedMissionClient.ExitCalls != 1 ||
+            !delegatedMissionClient.Actions.SequenceEqual(new[] { "mapPartyTargets", "menuSelect:attack", "missionDelegateTroops", "missionRetreat" }) ||
+            delegatedMissionTraceStep is null || ReadBoolean(delegatedMissionTraceStep, "modelDecisionMade") ||
+            !ReadBoolean(delegatedMissionTraceStep, "mainHeroStayedPlayerControlled") ||
+            ReadInt(delegatedMissionTraceStep, "delegatedFormationCount", 0) != 1 ||
+            ReadString(delegatedMissionTraceStep, "timeControlModeAtStart") != "Stop" ||
+            ReadString(delegatedMissionTraceStep, "timeControlModeAtEnd") != "Stop")
+            throw new AgentHostException("battle-loop-self-test-attack-mission-f6-fallback-not-integrated", $"A model-selected Native attack fallback must delegate once, perform no per-poll model calls, return through Native aftermath, and preserve the MainHero/time state. status={ReadString(delegatedMissionResult, "status")}; termination={ReadString(delegatedMissionResult, "termination")}; providerCalls={delegatedMissionProvider.CallCount}; actions={string.Join(",", delegatedMissionClient.Actions)}; trace={delegatedMissionTraceStep?.ToJsonString()}");
+
         var escapeClient = new FakeBattleSimulationNativeClient(simulateNativeEscape: true);
         var escapeProvider = new FakeTryToGetAwayDecisionProvider();
         var escapeResult = await RunAsync(request.RootElement, escapeClient, escapeProvider, CancellationToken.None);
@@ -2100,6 +2185,7 @@ internal static class AgentHostBattleSimulationLoop
             throw new AgentHostException("battle-loop-self-test-surrender-without-battle-recovers-before-replanning", $"Native surrender without Send Troops must wait through captivity, verify the original ransom release to free Map, and defer the same unchanged hostile target before returning to the parent planner. termination={ReadString(surrenderRecovery, "termination")}; outcome={ReadString(surrenderRecovery, "playerOutcome")}; battleStarted={ReadBoolean(surrenderRecovery, "battleStarted")}; target={ReadString(surrenderDeferredTraceStep, "targetPartyId")}; deferred={surrenderDeferredIds.Contains("bandit-1")}; actions={string.Join(",", surrenderRecoveryClient.Actions)}.");
         return [
             new { scenario = "battle-loop-native-observe-pursue-send-troops-aftermath-return-and-verify", decisions = ReadInt(result, "decisions", 0), nativeActions = client.Actions.ToArray(), renownBefore = ReadDouble(result, "renownBefore", double.NaN), renownAfter = ReadDouble(result, "renownAfter", double.NaN), explicitClockActions = ReadInt(result, "explicitClockActionCount", -1), passed = true },
+            new { scenario = "battle-loop-model-selects-native-attack-then-host-delegates-f6-observes-without-model-and-returns-through-aftermath", providerCalls = delegatedMissionProvider.CallCount, nativeActions = delegatedMissionClient.Actions.ToArray(), delegatedFormationCount = ReadInt(delegatedMissionTraceStep, "delegatedFormationCount", 0), passed = true },
             new { scenario = "battle-loop-model-chooses-observed-native-try-to-get-away-cost-and-returns-without-claiming-renown", nativeActions = escapeClient.Actions.ToArray(), playerOutcome = ReadString(escapeResult, "playerOutcome"), nativeEscapeCompleted = ReadBoolean(escapeResult, "nativeEscapeCompleted"), passed = true },
             rejectedEscapeRetryEvidence,
             surrenderAfterRejectedEscapeEvidence,
@@ -2949,6 +3035,142 @@ internal static class AgentHostBattleSimulationLoop
             };
             return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "fake-test-route", decision));
         }
+        public void Dispose() { }
+    }
+
+    private sealed class FakeDelegatedAttackBattleNativeClient : IAgentHostBattleSimulationNativeClient, IAgentHostBattleMissionNativeClient
+    {
+        private int _stage;
+        private int _missionReads;
+        internal int DelegationCalls { get; private set; }
+        internal int ExitCalls { get; private set; }
+        internal List<string> Actions { get; } = [];
+
+        public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var missionActive = _stage == 1;
+            var missionEnded = missionActive && ++_missionReads >= 3;
+            var gameState = missionActive ? "MissionState" : "MapState";
+            var context = new JsonObject
+            {
+                ["gameState"] = gameState,
+                ["timeControlMode"] = "Stop",
+                ["menuId"] = _stage == 0 ? "encounter" : null,
+                ["encounterActive"] = _stage == 0,
+                ["encounteredPartyId"] = _stage == 0 ? "bandit-1" : null,
+                ["battleSimulation"] = null,
+                ["escapeMenuOpen"] = false,
+                ["inquiryOpen"] = false
+            };
+            var state = new JsonObject
+            {
+                ["context"] = context,
+                ["economy"] = new JsonObject { ["renown"] = 10.0, ["gold"] = 100 },
+                ["party"] = new JsonObject { ["members"] = 2, ["healthy"] = 1, ["wounded"] = 0, ["prisoners"] = 0 },
+                ["location"] = new JsonObject { ["targetPartyId"] = null, ["currentSettlementId"] = null },
+                ["availableMenuOptions"] = _stage == 0
+                    ? new JsonArray(
+                        new JsonObject { ["id"] = "attack", ["available"] = true, ["enabled"] = true },
+                        new JsonObject { ["id"] = "str_order_attack", ["available"] = false, ["enabled"] = false },
+                        new JsonObject { ["id"] = "leave", ["available"] = true, ["enabled"] = true })
+                    : new JsonArray(),
+                ["partyScreen"] = null,
+                ["inventoryScreen"] = null,
+                ["quests"] = new JsonArray()
+            };
+            if (missionActive)
+                state["mission"] = new JsonObject
+                {
+                    ["active"] = !missionEnded,
+                    ["missionEnded"] = missionEnded,
+                    ["mode"] = "Battle",
+                    ["mainAgent"] = new JsonObject { ["isPlayerControlled"] = true, ["health"] = 100 }
+                };
+            var root = new JsonObject
+            {
+                ["processId"] = 321,
+                ["campaignDay"] = 100.0,
+                ["timeControlMode"] = "Stop",
+                ["state"] = state
+            };
+            return Task.FromResult(JsonDocument.Parse(root.ToJsonString()));
+        }
+
+        public Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken) =>
+            throw new AgentHostException("battle-mission-integration-unexpected-campaign-action", "The delegated Mission fallback must not issue Campaign actions.");
+
+        public Task<JsonDocument> ExecuteBattleSimulationActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            NativeMailboxClient.ValidateBattleSimulationAction(action, arguments);
+            if (action == "mapPartyTargets")
+            {
+                Actions.Add("mapPartyTargets");
+                return Task.FromResult(JsonDocument.Parse("{\"processId\":321,\"status\":\"completed\",\"action\":\"mapPartyTargets\",\"data\":{\"mapPartyTargets\":[{\"id\":\"bandit-1\",\"name\":\"looters\",\"type\":\"bandit\",\"distance\":0.5,\"hostile\":true,\"members\":12}]}}"));
+            }
+            if (action == "menuSelect" && _stage == 0 && ReadString(arguments, "optionId") == "attack")
+            {
+                Actions.Add("menuSelect:attack");
+                _stage = 1;
+                return Task.FromResult(JsonDocument.Parse("{\"processId\":321,\"status\":\"completed\",\"action\":\"menuSelect\"}"));
+            }
+            throw new AgentHostException("battle-mission-integration-unexpected-simulation-action", $"Unexpected BattleSimulation action '{action}'.");
+        }
+
+        public Task<JsonDocument> PauseForVisibleHostileDecisionAsync(CancellationToken cancellationToken) =>
+            throw new AgentHostException("battle-mission-integration-unexpected-clock-action", "The delegated Mission fallback must not change Campaign time.");
+
+        public Task<JsonDocument> ReadBattleMissionStatusAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_stage != 1)
+                throw new AgentHostException("battle-mission-integration-status-outside-mission", "Mission status is only valid after the Native attack option entered a Mission.");
+            return Task.FromResult(JsonDocument.Parse("{\"processId\":321,\"status\":\"completed\",\"data\":{\"supported\":true,\"missionMode\":\"Battle\",\"mainAgent\":{\"isPlayerControlled\":true},\"playerTeam\":{\"formationCount\":1}}}"));
+        }
+
+        public Task<JsonDocument> DelegateBattleMissionTroopsAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_stage != 1 || DelegationCalls != 0)
+                throw new AgentHostException("battle-mission-integration-delegate-repeated", "Delegate Command must be issued once in the current active Battle Mission.");
+            DelegationCalls++;
+            Actions.Add("missionDelegateTroops");
+            return Task.FromResult(JsonDocument.Parse("{\"processId\":321,\"status\":\"completed\",\"data\":{\"delegatedFormationCount\":1,\"allRequestedFormationsDelegated\":true,\"mainAgentStillPlayerControlled\":true,\"campaignDayBefore\":100.0,\"campaignDayAfter\":100.0,\"timeControlModeBefore\":\"Stop\",\"timeControlModeAfter\":\"Stop\"}}"));
+        }
+
+        public Task<JsonDocument> ExitEndedBattleMissionAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_stage != 1 || _missionReads < 3 || ExitCalls != 0)
+                throw new AgentHostException("battle-mission-integration-exit-before-ended", "Native BattleEnd exit is issued once and only after a MissionEnded observation.");
+            ExitCalls++;
+            Actions.Add("missionRetreat");
+            _stage = 2;
+            return Task.FromResult(JsonDocument.Parse("{\"processId\":321,\"status\":\"completed\",\"action\":\"missionRetreat\"}"));
+        }
+    }
+
+    private sealed class FakeDelegatedAttackDecisionProvider : IAgentHostDecisionProvider
+    {
+        internal int CallCount { get; private set; }
+        public string ModelId => "deterministic-delegated-attack-self-test";
+        public string ConfigurationSource => "fake-provider-no-network";
+        public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) { cancellationToken.ThrowIfCancellationRequested(); return Task.CompletedTask; }
+
+        public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var decision = CallCount++ switch
+            {
+                0 => new JsonObject { ["action"] = "mapPartyTargets", ["arguments"] = new JsonObject(), ["rationale"] = "Read the current hostile marker." },
+                1 => new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "encounter", ["OptionId"] = "attack" }, ["rationale"] = "Use the current Native fallback." },
+                2 => new JsonObject { ["done"] = true, ["reason"] = "Native aftermath returned to Map." },
+                _ => throw new AgentHostException("battle-mission-integration-provider-called-during-mission", "The deterministic provider must not be called during passive Battle Mission observation.")
+            };
+            return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 0, 0, "fake-provider-no-network", decision));
+        }
+
         public void Dispose() { }
     }
 

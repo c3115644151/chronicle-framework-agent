@@ -1082,6 +1082,12 @@ internal sealed class ChronicleAgentProtocol
                     var pointMoveData = "{\"requested\":{\"x\":" + targetX.ToString("R", CultureInfo.InvariantCulture) + ",\"y\":" + targetY.ToString("R", CultureInfo.InvariantCulture) + ",\"surface\":\"" + Escape(surface) + "\"},\"nativeTarget\":{\"x\":" + actualPoint.X.ToString("R", CultureInfo.InvariantCulture) + ",\"y\":" + actualPoint.Y.ToString("R", CultureInfo.InvariantCulture) + ",\"isOnLand\":" + actualPoint.IsOnLand.ToString().ToLowerInvariant() + "},\"nativeBehavior\":\"" + Escape(mainPartyForPointMove.DefaultBehavior.ToString()) + "\"}";
                     WriteResponse(commandId, action, "completed", behavior, null, pointMoveData);
                     break;
+                case "battleMissionStatus":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBattleMissionAdapter.BuildStatusJson());
+                    break;
+                case "missionDelegateTroops":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBattleMissionAdapter.DelegateCurrentTroopFormations());
+                    break;
                 case "missionSceneAgents":
                     var sceneAgentsMission = Mission.Current;
                     var sceneAgentsMissionState = Game.Current?.GameStateManager?.ActiveState as MissionState;

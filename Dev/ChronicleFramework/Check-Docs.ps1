@@ -690,7 +690,7 @@ if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Prefl
     $agentHostBattleSimulationLoopSource -notmatch 'IsVerifiedMapTerminalAfterNativeEncounterLeave' -or
     $agentHostBattleSimulationLoopSource -notmatch 'native-encounter-left-no-battle' -or
     $agentHostBattleSimulationLoopSource -notmatch 'nativeEncounterLeft: true' -or
-    $agentHostDecisionCycleSource -notmatch 'If Send Troops is disabled, use current Native leave if enabled' -or
+    $agentHostDecisionCycleSource -notmatch 'If Send Troops and the enabled healthy-troop Attack Mission fallback are both unavailable, use current Native leave if enabled' -or
     $agentHostDecisionCycleSource -notmatch 'nearby hostile parties may join the same battle' -or
     $agentHostDecisionCycleSource -notmatch 'context.encounterEscape.menuText' -or
     $agentHostBattleSimulationLoopSource -notmatch 'native-try-to-get-away-completed' -or
