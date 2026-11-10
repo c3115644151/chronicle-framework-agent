@@ -27,6 +27,7 @@ internal static class ChronicleAgentBattleMissionAdapter
         var mainAgent = mission?.MainAgent;
         var team = mission?.PlayerTeam;
         var orderController = team?.PlayerOrderController;
+        var mainAgentFormation = mainAgent?.Formation;
         var formations = team?.FormationsIncludingEmpty
             .Where(formation => formation != null && formation.CountOfUnits > 0)
             .OrderBy(formation => formation.FormationIndex)
@@ -56,6 +57,19 @@ internal static class ChronicleAgentBattleMissionAdapter
             json.Append("\"health\":").Append(Number(mainAgent.Health)).Append(',');
             json.Append("\"healthLimit\":").Append(Number(mainAgent.HealthLimit)).Append(',');
             json.Append("\"isActive\":true,");
+            json.Append("\"isDetachedFromFormation\":").Append(mainAgent.IsDetachedFromFormation ? "true" : "false").Append(',');
+            json.Append("\"formation\":");
+            if (mainAgentFormation == null) json.Append("null");
+            else
+            {
+                json.Append('{')
+                    .Append("\"formationIndex\":").Append((int)mainAgentFormation.FormationIndex)
+                    .Append(",\"unitCount\":").Append(mainAgentFormation.CountOfUnits)
+                    .Append(",\"isAIControlled\":").Append(mainAgentFormation.IsAIControlled ? "true" : "false")
+                    .Append(",\"isPlayerOwned\":").Append(mainAgentFormation.PlayerOwner == mainAgent ? "true" : "false")
+                    .Append('}');
+            }
+            json.Append(',');
             json.Append("\"position\":{\"x\":").Append(Number(mainAgent.Position.X))
                 .Append(",\"y\":").Append(Number(mainAgent.Position.Y))
                 .Append(",\"z\":").Append(Number(mainAgent.Position.Z)).Append("}}");
