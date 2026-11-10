@@ -14,6 +14,15 @@ internal sealed record AgentHostNativeMapMovementWatchResult(
     internal bool InterruptedByVisibleHostileBandit => PauseReceipt is not null;
 }
 
+internal sealed record AgentHostNativePartyPursuitWatchResult(
+    JsonObject NativeReceipt,
+    int PollCount,
+    int ElapsedSeconds,
+    string StopReason)
+{
+    internal bool WindowExpired => StopReason == "window-expired";
+}
+
 /// <summary>
 /// Passively watches a Native settlement move for brief, player-visible hostile Bandits.
 /// World time still follows the game's move/wait state. When a current Bandit appears,
@@ -24,6 +33,62 @@ internal static class AgentHostNativeMapMovementMonitor
 {
     internal const string FailureCode = "native-visible-hostile-bandit-interrupted-settlement-move";
     internal const int MaximumWatchWindowSeconds = 10;
+
+    internal static async Task<AgentHostNativePartyPursuitWatchResult> WaitForPartyPursuitAsync(
+        IAgentHostCampaignNativeClient client,
+        JsonObject initialNative,
+        string targetPartyId,
+        int waitSeconds,
+        CancellationToken cancellationToken,
+        TimeSpan? pollInterval = null)
+    {
+        if (waitSeconds is < 1 or > MaximumWatchWindowSeconds)
+            throw new AgentHostException("native-party-pursuit-watch-interval-invalid", "Passive Native party pursuit observation requires a bounded 1-10 second wait.");
+        if (string.IsNullOrWhiteSpace(targetPartyId))
+            throw new AgentHostException("native-party-pursuit-target-missing", "Passive Native party pursuit observation requires the exact target ID selected by the model.");
+
+        var latest = (JsonObject)initialNative.DeepClone();
+        var stopReason = GetPartyPursuitStopReason(latest, targetPartyId);
+        if (stopReason != "pursuit-active")
+            return new AgentHostNativePartyPursuitWatchResult(latest, 0, 0, stopReason);
+
+        var interval = pollInterval ?? TimeSpan.FromSeconds(1);
+        var pollCount = 0;
+        for (var elapsedSeconds = 1; elapsedSeconds <= waitSeconds; elapsedSeconds++)
+        {
+            await Task.Delay(interval, cancellationToken);
+            using var stateResponse = await client.ReadStateAsync(cancellationToken);
+            latest = CloneObject(stateResponse.RootElement);
+            pollCount++;
+            stopReason = GetPartyPursuitStopReason(latest, targetPartyId);
+            if (stopReason != "pursuit-active")
+                return new AgentHostNativePartyPursuitWatchResult(latest, pollCount, elapsedSeconds, stopReason);
+        }
+
+        return new AgentHostNativePartyPursuitWatchResult(latest, pollCount, waitSeconds, "window-expired");
+    }
+
+    internal static string GetPartyPursuitStopReason(JsonObject native, string targetPartyId)
+    {
+        var state = native["state"] as JsonObject ?? native;
+        var context = state["context"] as JsonObject;
+        var location = state["location"] as JsonObject;
+        var party = state["party"] as JsonObject;
+        var gameState = ReadString(context, "gameState");
+        if (!string.Equals(gameState, "MapState", StringComparison.Ordinal)) return "game-state-changed";
+        if (ReadBoolean(context, "encounterActive")) return "encounter-opened";
+        if (context?["conversation"] is JsonObject) return "conversation-opened";
+        if (ReadBoolean(context, "inquiryOpen") || ReadBoolean(context, "escapeMenuOpen") ||
+            !string.IsNullOrWhiteSpace(ReadString(context, "menuId")) ||
+            ReadBoolean(context, "isWaitMenu") || ReadBoolean(context, "isWaitActive") ||
+            ReadBoolean(context? ["sceneNotification"] as JsonObject, "hasActiveNotification"))
+            return "native-ui-interruption";
+        if (ReadBoolean(context?["mapIncident"] as JsonObject, "active")) return "map-incident-opened";
+        if (!string.Equals(ReadString(location, "targetPartyId"), targetPartyId, StringComparison.Ordinal)) return "target-lost-or-changed";
+        if (!ReadBoolean(party, "isMoving")) return "native-pursuit-stopped";
+        if (!IsCampaignTimeAdvancing(native)) return "campaign-time-stopped";
+        return "pursuit-active";
+    }
 
     internal static async Task<AgentHostNativeMapMovementWatchResult> WaitAsync(
         IAgentHostCampaignNativeClient client,
@@ -199,11 +264,68 @@ internal static class AgentHostNativeMapMovementMonitor
             IsCampaignTimeAdvancing(pausedWatch.NativeReceipt))
             throw new AgentHostException("campaign-map-movement-stopped-clock-wait-return-failed", "A settlement move order left active while Native Campaign time is stopped must return immediately to its caller, without ten seconds of model-paid waiting or a clock action.");
 
+        var pursuitEncounter = new FakePartyPursuitClient(stopAfterPoll: "encounter-opened");
+        var pursuitEncounterWatch = WaitForPartyPursuitAsync(pursuitEncounter, pursuitEncounter.CurrentNative, "bandit-1", 5, CancellationToken.None, TimeSpan.FromMilliseconds(1))
+            .GetAwaiter().GetResult();
+        if (pursuitEncounterWatch.StopReason != "encounter-opened" || pursuitEncounterWatch.PollCount != 1 ||
+            pursuitEncounter.ClockActions.Count != 0 || pursuitEncounter.GameplayActions.Count != 0)
+            throw new AgentHostException("campaign-party-pursuit-encounter-interrupt-self-test-failed", "Passive pursuit monitoring must return the fresh Native encounter immediately without a model wait or clock/gameplay action.");
+
+        var pursuitConversation = new FakePartyPursuitClient(stopAfterPoll: "conversation-opened");
+        var pursuitConversationWatch = WaitForPartyPursuitAsync(pursuitConversation, pursuitConversation.CurrentNative, "bandit-1", 5, CancellationToken.None, TimeSpan.FromMilliseconds(1))
+            .GetAwaiter().GetResult();
+        var pursuitIncident = new FakePartyPursuitClient(stopAfterPoll: "map-incident-opened");
+        var pursuitIncidentWatch = WaitForPartyPursuitAsync(pursuitIncident, pursuitIncident.CurrentNative, "bandit-1", 5, CancellationToken.None, TimeSpan.FromMilliseconds(1))
+            .GetAwaiter().GetResult();
+        if (pursuitConversationWatch.StopReason != "conversation-opened" || pursuitIncidentWatch.StopReason != "map-incident-opened" ||
+            pursuitConversationWatch.PollCount != 1 || pursuitIncidentWatch.PollCount != 1)
+            throw new AgentHostException("campaign-party-pursuit-native-interruptions-self-test-failed", "Native map conversation and incident UI must interrupt passive pursuit observation on the first fresh read.");
+
+        var pursuitStoppedClock = new FakePartyPursuitClient(stopAfterPoll: "campaign-time-stopped");
+        var pursuitStoppedClockWatch = WaitForPartyPursuitAsync(pursuitStoppedClock, pursuitStoppedClock.CurrentNative, "bandit-1", 5, CancellationToken.None, TimeSpan.FromMilliseconds(1))
+            .GetAwaiter().GetResult();
+        if (pursuitStoppedClockWatch.StopReason != "campaign-time-stopped" || pursuitStoppedClockWatch.PollCount != 1 ||
+            pursuitStoppedClock.ClockActions.Count != 0 || pursuitStoppedClock.GameplayActions.Count != 0)
+            throw new AgentHostException("campaign-party-pursuit-stopped-clock-self-test-failed", "A Native stopped-clock observation must immediately return without a compensating clock action.");
+
+        var pursuitTargetLoss = new FakePartyPursuitClient(stopAfterPoll: "target-lost-or-changed");
+        var pursuitTargetLossWatch = WaitForPartyPursuitAsync(pursuitTargetLoss, pursuitTargetLoss.CurrentNative, "bandit-1", 5, CancellationToken.None, TimeSpan.FromMilliseconds(1))
+            .GetAwaiter().GetResult();
+        if (pursuitTargetLossWatch.StopReason != "target-lost-or-changed" || pursuitTargetLossWatch.PollCount != 1 ||
+            pursuitTargetLoss.ClockActions.Count != 0 || pursuitTargetLoss.GameplayActions.Count != 0)
+            throw new AgentHostException("campaign-party-pursuit-target-loss-self-test-failed", "A Native target-loss/hold state must return immediately for fresh model replanning, without changing the stopped Campaign clock.");
+
+        var pursuitStillActive = new FakePartyPursuitClient();
+        var pursuitWindow = WaitForPartyPursuitAsync(pursuitStillActive, pursuitStillActive.CurrentNative, "bandit-1", 3, CancellationToken.None, TimeSpan.FromMilliseconds(1))
+            .GetAwaiter().GetResult();
+        if (!pursuitWindow.WindowExpired || pursuitWindow.PollCount != 3 || pursuitStillActive.ClockActions.Count != 0 ||
+            pursuitStillActive.GameplayActions.Count != 0 || pursuitWindow.NativeReceipt["campaignDay"]?.GetValue<double>() != 3.0)
+            throw new AgentHostException("campaign-party-pursuit-bounded-window-self-test-failed", "An unchanged Native pursuit must return fresh state at the bound without issuing clock or gameplay actions.");
+
+        using var canceledWatch = new CancellationTokenSource();
+        canceledWatch.Cancel();
+        var cancellationClient = new FakePartyPursuitClient();
+        var cancellationPropagated = false;
+        try
+        {
+            _ = WaitForPartyPursuitAsync(cancellationClient, cancellationClient.CurrentNative, "bandit-1", 5, canceledWatch.Token, TimeSpan.FromMilliseconds(1))
+                .GetAwaiter().GetResult();
+        }
+        catch (OperationCanceledException) { cancellationPropagated = true; }
+        if (!cancellationPropagated || cancellationClient.PollCount != 0 || cancellationClient.ClockActions.Count != 0 || cancellationClient.GameplayActions.Count != 0)
+            throw new AgentHostException("campaign-party-pursuit-cancellation-self-test-failed", "Host cancellation must stop passive pursuit observation before another read or any Native action.");
+
         return [
             new { scenario = "campaign-map-movement-passively-polls-visible-hostile-bandits-and-pauses-as-a-separate-native-control", partyTargetPolls = visible.MapPartyTargetPollCount, pauseCount = visible.PauseCount, extraModelDecisions = 0, passed = true },
             new { scenario = "campaign-map-movement-does-not-pause-for-neutral-party-observations", partyTargetPolls = neutral.MapPartyTargetPollCount, pauseCount = neutral.PauseCount, passed = true },
             new { scenario = "campaign-map-movement-returns-current-map-conversation-before-wait-window-ends", partyTargetPolls = mapConversation.MapPartyTargetPollCount, pauseCount = mapConversation.PauseCount, clockChanged = false, passed = true },
-            new { scenario = "campaign-map-movement-returns-paused-native-move-without-wall-clock-delay-or-clock-action", partyTargetPolls = pausedMove.MapPartyTargetPollCount, pauseCount = pausedMove.PauseCount, passed = true }
+            new { scenario = "campaign-map-movement-returns-paused-native-move-without-wall-clock-delay-or-clock-action", partyTargetPolls = pausedMove.MapPartyTargetPollCount, pauseCount = pausedMove.PauseCount, passed = true },
+            new { scenario = "campaign-party-pursuit-passive-monitor-returns-on-native-encounter-without-model-or-clock-action", polls = pursuitEncounterWatch.PollCount, stopReason = pursuitEncounterWatch.StopReason, clockActions = pursuitEncounter.ClockActions.Count, gameplayActions = pursuitEncounter.GameplayActions.Count, passed = true },
+            new { scenario = "campaign-party-pursuit-passive-monitor-returns-on-map-conversation-and-incident", conversationStopReason = pursuitConversationWatch.StopReason, incidentStopReason = pursuitIncidentWatch.StopReason, passed = true },
+            new { scenario = "campaign-party-pursuit-passive-monitor-returns-on-stopped-clock-without-clock-action", stopReason = pursuitStoppedClockWatch.StopReason, passed = true },
+            new { scenario = "campaign-party-pursuit-passive-monitor-returns-on-target-loss-without-clock-action", polls = pursuitTargetLossWatch.PollCount, stopReason = pursuitTargetLossWatch.StopReason, clockActions = pursuitTargetLoss.ClockActions.Count, passed = true },
+            new { scenario = "campaign-party-pursuit-passive-monitor-bounds-unchanged-native-observation", polls = pursuitWindow.PollCount, elapsedSeconds = pursuitWindow.ElapsedSeconds, stopReason = pursuitWindow.StopReason, clockActions = pursuitStillActive.ClockActions.Count, passed = true },
+            new { scenario = "campaign-party-pursuit-passive-monitor-honors-host-cancellation", polls = cancellationClient.PollCount, cancellationPropagated, passed = true }
         ];
     }
 
@@ -244,6 +366,69 @@ internal static class AgentHostNativeMapMovementMonitor
 
     private static bool ReadBoolean(JsonObject? value, string name) =>
         value?[name] is JsonValue node && node.TryGetValue<bool>(out var result) && result;
+
+    private sealed class FakePartyPursuitClient(string? stopAfterPoll = null) : IAgentHostCampaignNativeClient
+    {
+        internal int PollCount { get; private set; }
+        internal List<string> ClockActions { get; } = [];
+        internal List<string> GameplayActions { get; } = [];
+        internal JsonObject CurrentNative => BuildNative();
+
+        public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            PollCount++;
+            return Task.FromResult(JsonDocument.Parse(BuildNative().ToJsonString()));
+        }
+
+        public Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            GameplayActions.Add(action);
+            throw new AgentHostException("party-pursuit-monitor-self-test-unexpected-gameplay-action", "Passive pursuit observation must not issue gameplay actions.");
+        }
+
+        public Task<JsonDocument> ExecuteBattleSimulationActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            GameplayActions.Add(action);
+            throw new AgentHostException("party-pursuit-monitor-self-test-unexpected-battle-action", "Passive pursuit observation must not query targets through a gameplay-action endpoint.");
+        }
+
+        public Task<JsonDocument> PauseForVisibleHostileDecisionAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ClockActions.Add("pause");
+            throw new AgentHostException("party-pursuit-monitor-self-test-unexpected-clock-action", "Passive pursuit observation must not issue a Native clock action.");
+        }
+
+        private JsonObject BuildNative()
+        {
+            var interrupted = stopAfterPoll is not null && PollCount >= 1;
+            var context = new JsonObject
+            {
+                ["gameState"] = "MapState", ["menuId"] = null, ["encounterActive"] = false,
+                ["inquiryOpen"] = false, ["escapeMenuOpen"] = false, ["isWaitMenu"] = false,
+                ["isWaitActive"] = false, ["mapIncident"] = new JsonObject { ["active"] = false },
+                ["sceneNotification"] = new JsonObject { ["hasActiveNotification"] = false }
+            };
+            var location = new JsonObject { ["targetPartyId"] = "bandit-1" };
+            var party = new JsonObject { ["isMoving"] = true };
+            switch (interrupted ? stopAfterPoll : null)
+            {
+                case "encounter-opened": context["encounterActive"] = true; context["menuId"] = "encounter"; break;
+                case "conversation-opened": context["conversation"] = new JsonObject { ["sentenceText"] = "Threat" }; break;
+                case "map-incident-opened": context["mapIncident"] = new JsonObject { ["active"] = true }; break;
+                case "target-lost-or-changed": location["targetPartyId"] = null; party["isMoving"] = false; context["isWaiting"] = true; break;
+            }
+            return new JsonObject
+            {
+                ["status"] = "completed", ["processId"] = 321, ["campaignDay"] = 3.0,
+                ["timeControlMode"] = interrupted && stopAfterPoll == "campaign-time-stopped" ? "Stop" : "StoppablePlay",
+                ["state"] = new JsonObject { ["context"] = context, ["location"] = location, ["party"] = party }
+            };
+        }
+    }
 
     private sealed class FakeVisibleBanditMoveClient(bool visibleHostileBandit, bool openConversationAfterFirstPoll = false, bool initiallyPaused = false) : IAgentHostBattleSimulationNativeClient
     {

@@ -218,6 +218,8 @@ internal static class AgentHostDecisionCycle
         var prompt = BattleSimulationSystemPrompt;
         if (feedbackKind == "decision-rejected-before-native" && !string.IsNullOrWhiteSpace(recovery))
             prompt += " RECOVERY DIRECTIVE: This previous response was rejected before a Native command. Follow this exact next step using only the latest catalog and never repeat the rejected choice: " + recovery;
+        else if (feedbackKind == "native-escape-warning-rejected-no-progress" && !string.IsNullOrWhiteSpace(recovery))
+            prompt += " NATIVE ESCAPE RECOVERY DIRECTIVE: The current Try-to-get-away option was rejected and returned to an unchanged encounter. Follow this exact next step using only the latest Native options and do not repeat the rejected escape attempt: " + recovery;
         else if (feedbackKind == "postbattle-party-screen-negative-needs-roster-change" && !string.IsNullOrWhiteSpace(recovery))
             prompt += " PARTYSCREEN RECOVERY DIRECTIVE: The last negative Native Inquiry returned to the same PartyScreen roster. Follow this exact current-state next step; do not repeat partyScreenDone until the roster changes: " + recovery;
         return DecideAsync(provider, request, prompt, cancellationToken);

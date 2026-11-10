@@ -72,6 +72,10 @@ Chronicle不观测当前天气、局部雨雪参数、湿润/风、时间与区�
 
 同一手动StoryMode Campaign的自然地图补证（`TestResults/20261101-073523/Temp/ManualCampaignProgress-20261101-later.json`）：Map上当前可见的5人 looter `looters_3786`（距6.2）收到一次Native `pursue`后，下一次可观察状态已经是`targetPartyId=null`、`MoveMode=Hold`、`DefaultBehavior=Hold`、`isWaiting=true`；raw `TimeControlMode`仍为`StoppablePlay`。5秒后CampaignDay仍为91150.808，尝试重发旧目标被Native以`active visible target party not found`拒绝，没有发生遭遇/战斗。这个自然实例与用户描述的“目标跑出可见范围后停住、世界时间不推进”一致；时间状态必须同时读raw mode、`isWaiting`和CampaignDay。输入来自Native Bridge `pursue`，没有物理鼠标双击或屏幕视锥录像，因此不声称已视觉复现玩家实际点击时序，也不证明AI能卡位追上更快的Party。
 
+`TestResults/20261110-220446`的同一EYC自然战役另显示：Native `pursue`之后，模型连续付费给出3次`observeAgain`，直到下一次遭遇文本。为减少这种没有新地图选择的重复决策，新增Host内部有界观察：在一次被模型确认的`pursue`后，若Native仍报告MapState、同一`targetPartyId`、主队移动且时间档运行，则每秒只读最新Native状态，最多10秒；一旦遭遇/对话/事件、目标变化/丢失、队伍停下或时间停止，立刻回到普通决策链。遭遇刚发生时Host只额外调用只读`mapPartyTargets`重新确认可见敌队身份，不替模型选择对话或菜单。该等待不调用LLM，也不发Pause/Resume/Advance/FastForward。Fake Native/Provider七类边界测试与正式`AgentHostPackage`见`TestResults/20261110-234414`；真实自然遭遇结果见下文。
+
+真实验证`TestResults/20261110-235029`在同Campaign的自然续跑中重新出现追击`looters_404`：模型的`observeAgain`由旧样本3次降为1次，该单一等待决策估算¥0.00504701；旧样本3次合计¥0.01557062。追击之后约10秒被Host观察，目标遇敌后进入Encounter；Campaign时间仍由Native自然时钟模式处理，没有暂停/快进指令。总轮成本为¥0.09978960，但该轮模型之后因反复打开/拒绝Try-to-get-away警告耗尽预算，故总成本不能归因于追击监视，也没有安全检查点。本次真实验证早于Harness监视事件日志，因此具体poll count/stopReason由模型轨迹时间推断；随后已将停止原因、轮询数等加入测试日志和Fake回归，包测见`TestResults/20261111-000638`，不为日志单独重跑付费模型。
+
 ## K07 Hideout：藏身处发现、接近与清剿
 
 Hideout是地图Settlement/Hideout实体与相关Bandit Party、场景Mission、Wait/夜袭选项组成的活动，不等同于普通地图落单Party。玩家需先在地图情报中发现相应Hideout，再接近/进入其原生Encounter/menu；具体是否可以谈话、等夜间潜入、直接突击、坐镇指挥或派兵结果取决于敌方数量/时间/玩家状态。 `HideoutCampaignBehavior`与`PlayerEncounter`把此链路分发到Mission、BattleSimulation、等待和Loot/伤亡结算。

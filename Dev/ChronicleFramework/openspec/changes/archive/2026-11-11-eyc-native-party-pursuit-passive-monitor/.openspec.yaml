@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-11-10
+goal: Reduce paid polling decisions during a committed Native party chase while
+  detecting encounter, target loss, movement stop, and visible interruptions
+  without changing the Campaign clock.

@@ -177,6 +177,36 @@ internal static class AgentHostHarnessProgressTrace
         }
     }
 
+    internal static void RecordPassiveObservation(string eventName, JsonObject observation)
+    {
+        if (string.IsNullOrWhiteSpace(eventName) || eventName.Length > 80 ||
+            eventName.Any(character => !(char.IsAsciiLetterOrDigit(character) || character is '-' or '_'))) return;
+        var harnessMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+        if (!string.Equals(harnessMode, "visual-capture", StringComparison.Ordinal) &&
+            !string.Equals(harnessMode, "agent-host-lifecycle-test", StringComparison.Ordinal)) return;
+        var directory = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory)) return;
+
+        try
+        {
+            var rootPath = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var tracePath = Path.GetFullPath(Path.Combine(rootPath, "AgentHostProgress.jsonl"));
+            if (!tracePath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase)) return;
+            var payload = new JsonObject
+            {
+                ["event"] = eventName,
+                ["utc"] = DateTime.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
+            };
+            foreach (var property in observation)
+                payload[property.Key] = property.Value?.DeepClone();
+            AppendLine(tracePath, Encoding.UTF8.GetBytes(payload.ToJsonString() + Environment.NewLine));
+        }
+        catch
+        {
+            // Diagnostics must never change or block a Native action or provider decision.
+        }
+    }
+
     internal static void RecordObjectiveSubflowResult(string objectiveId, JsonObject result)
     {
         AgentHostRuntimeProgressLog.RecordObjectiveSubflowResult(objectiveId, result);
@@ -812,9 +842,32 @@ internal static class AgentHostHarnessProgressTrace
                 providerFailureLine?.ContainsKey("responseBody") == true || providerFailureLine?.ContainsKey("apiKey") == true)
                 throw new AgentHostException("host-progress-trace-provider-failure", "Harness diagnostics must persist bounded HTTP status/retry metadata without response bodies or credentials.");
 
+            RecordPassiveObservation("native-party-pursuit-passive-window", new JsonObject
+            {
+                ["targetPartyId"] = "bandit-test",
+                ["pollCount"] = 4,
+                ["elapsedSeconds"] = 3,
+                ["stopReason"] = "encounter-opened",
+                ["modelDecisionsDuringWindow"] = 0,
+                ["clockActionsDuringWindow"] = 0,
+                ["campaignDayBefore"] = 100.0,
+                ["campaignDayAfter"] = 100.2,
+                ["timeControlModeBefore"] = "StoppablePlay",
+                ["timeControlModeAfter"] = "Stop"
+            });
+            var passiveObservationLine = JsonNode.Parse(File.ReadAllLines(path).Last()) as JsonObject;
+            if (ReadString(passiveObservationLine, "event") != "native-party-pursuit-passive-window" ||
+                ReadString(passiveObservationLine, "stopReason") != "encounter-opened" ||
+                ReadString(passiveObservationLine, "targetPartyId") != "bandit-test" ||
+                ReadInt(passiveObservationLine, "pollCount") != 4 ||
+                ReadInt(passiveObservationLine, "modelDecisionsDuringWindow") != 0 ||
+                ReadInt(passiveObservationLine, "clockActionsDuringWindow") != 0 ||
+                passiveObservationLine?.ContainsKey("prompt") == true || passiveObservationLine?.ContainsKey("responseBody") == true)
+                throw new AgentHostException("host-progress-trace-passive-observation", "Harness diagnostics must record bounded passive observation boundaries and counts without prompt or response-body content.");
+
             Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "normal");
             RecordDecision(request.RootElement, new ProviderDecisionResult("completed", "selftest-model", 1, 1, "stop", decision, "selftest/route"));
-            if (File.ReadAllLines(path).Length != 6)
+            if (File.ReadAllLines(path).Length != 7)
                 throw new AgentHostException("host-progress-trace-self-test-mode-gate", "Progress tracing must be disabled outside Harness visual-capture/lifecycle modes.");
             return [
                 new { scenario = "harness-progress-trace-records-current-modal-and-visible-buttons-without-one-use-token", passed = true },
@@ -825,7 +878,8 @@ internal static class AgentHostHarnessProgressTrace
                 new { scenario = "harness-progress-trace-records-objective-subflow-termination-and-safe-native-state-summaries", passed = true },
                 new { scenario = "harness-progress-trace-records-dynamic-journal-current-target-met-summary", passed = true },
                 new { scenario = "harness-progress-trace-records-token-budget-rejection-arithmetic-without-prompt-or-key-material", passed = true },
-                new { scenario = "harness-progress-trace-records-provider-http-status-and-retry-without-response-body-or-key", passed = true }
+                new { scenario = "harness-progress-trace-records-provider-http-status-and-retry-without-response-body-or-key", passed = true },
+                new { scenario = "harness-progress-trace-records-native-passive-observation-boundaries-without-prompt-content", passed = true }
             ];
         }
         finally
