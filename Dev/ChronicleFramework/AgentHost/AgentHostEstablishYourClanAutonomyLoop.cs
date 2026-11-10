@@ -152,6 +152,8 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         results.Add(new { scenario = "establish-clan-autonomy-replans-only-exhausted-transient-gateway-errors", passed = true });
         if (!IsSafeObjectiveRouteUnavailable("companions", "companion-model-stopped", freeMap: true) ||
             IsSafeObjectiveRouteUnavailable("companions", "companion-model-stopped", freeMap: false) ||
+            !IsSafeObjectiveRouteUnavailable("companions", "native-tavern-entry-transition-not-observed", freeMap: true) ||
+            IsSafeObjectiveRouteUnavailable("companions", "native-tavern-entry-transition-not-observed", freeMap: false) ||
             IsSafeObjectiveRouteUnavailable("gold", "companion-model-stopped", freeMap: true) ||
             !IsSafeObjectiveRouteUnavailable("gold", "gold-sale-no-transferable-goods", freeMap: true) ||
             !IsSafeObjectiveRouteUnavailable("gold", "gold-loot-no-current-visible-bandit", freeMap: true) ||
@@ -2027,7 +2029,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             "training-issue-direct-offer-unavailable" or "training-issue-direct-offer-rejected";
         if (objectiveId == "renown") return termination is "provider-failure-returned-to-map" or "no-safe-action" or "native-encounter-left-no-battle";
         if (objectiveId is "partySize" or "companions")
-            return termination is "native-journal-refresh-pending" or "recruitment-route-unavailable" or "companion-route-unavailable" or "companion-model-stopped" or "recruitment-model-stopped" or "recruitment-model-stopped-with-safe-actions" or "party-capacity-blocked-until-renown" or "provider-failure-returned-to-map" or "companion-provider-failure-returned-to-map";
+            return termination is "native-journal-refresh-pending" or "native-tavern-entry-transition-not-observed" or "recruitment-route-unavailable" or "companion-route-unavailable" or "companion-model-stopped" or "recruitment-model-stopped" or "recruitment-model-stopped-with-safe-actions" or "party-capacity-blocked-until-renown" or "provider-failure-returned-to-map" or "companion-provider-failure-returned-to-map";
         return false;
     }
 

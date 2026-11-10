@@ -238,6 +238,7 @@ internal static class AgentHostHarnessProgressTrace
                 ["objectiveSnapshot"] = BuildObjectiveSnapshotSummary(result["objectiveSnapshot"] as JsonObject),
                 ["recruitmentOfferSummary"] = BuildRecruitmentOfferSummary(result["lastRecruitmentOffers"] as JsonObject),
                 ["companionNavigationSummary"] = BuildCompanionNavigationSummary(result["trace"] as JsonArray),
+                ["tavernEntryTransitionSummary"] = result["tavernEntryTransitionSummary"]?.DeepClone(),
                 ["companionSearchMemory"] = BuildCompanionSearchMemorySummary(result["companionSearchMemory"] as JsonObject),
                 ["villagersInNeedStartupSummary"] = BuildVillagersInNeedStartupSummary(result["trace"] as JsonArray),
                 ["nativeStateBefore"] = result["nativeStateBefore"]?.DeepClone() ?? BuildNativeStateSummary(result["initialNativeState"] as JsonObject),
@@ -702,6 +703,7 @@ internal static class AgentHostHarnessProgressTrace
                     ["renown"] = new JsonObject { ["current"] = 20, ["target"] = 50, ["met"] = false },
                     ["companions"] = new JsonObject { ["current"] = 0, ["target"] = 1, ["met"] = false }
                 },
+                ["tavernEntryTransitionSummary"] = new JsonObject { ["waitCount"] = 3, ["confirmedCount"] = 1, ["pending"] = false, ["visitedTownMarked"] = true },
                 ["failure"] = "FreeLLMAPI returned HTTP 502. do not copy this free-text diagnostic.",
                 ["lastRecruitmentOffers"] = new JsonObject
                 {
@@ -798,6 +800,9 @@ internal static class AgentHostHarnessProgressTrace
                 ReadDouble(objectiveLine["companionNavigationSummary"] as JsonObject, "selectedTargetObservedDistanceMin") != 6.0 ||
                 ReadInt(objectiveLine["companionNavigationSummary"] as JsonObject, "nearbyInteractableObservationCount") != 1 ||
                 ReadInt(objectiveLine["companionNavigationSummary"] as JsonObject, "successfulConversationStartCount") != 1 ||
+                ReadInt(objectiveLine["tavernEntryTransitionSummary"] as JsonObject, "waitCount", -1) != 3 ||
+                ReadInt(objectiveLine["tavernEntryTransitionSummary"] as JsonObject, "confirmedCount", -1) != 1 ||
+                ReadBoolean(objectiveLine["tavernEntryTransitionSummary"] as JsonObject, "pending") ||
                 ReadString(objectiveLine["nativeStateBefore"] as JsonObject, "menuId") != "training_field_menu" ||
                 ReadString(objectiveLine["nativeStateAfter"] as JsonObject, "menuId") is not null ||
                 objectiveLine.ToJsonString().Contains("do not copy", StringComparison.Ordinal) ||
@@ -875,6 +880,7 @@ internal static class AgentHostHarnessProgressTrace
                 new { scenario = "provider-progress-trace-records-request-size-cache-cost-and-goal-scope-without-request-content", passed = true },
                 new { scenario = "harness-progress-trace-reports-only-aggregate-affordable-recruitment-offer-counts", passed = true },
                 new { scenario = "harness-progress-trace-reports-only-aggregate-companion-navigation-progress", passed = true },
+                new { scenario = "harness-progress-trace-records-bounded-native-tavern-entry-transition-summary", passed = true },
                 new { scenario = "harness-progress-trace-records-objective-subflow-termination-and-safe-native-state-summaries", passed = true },
                 new { scenario = "harness-progress-trace-records-dynamic-journal-current-target-met-summary", passed = true },
                 new { scenario = "harness-progress-trace-records-token-budget-rejection-arithmetic-without-prompt-or-key-material", passed = true },

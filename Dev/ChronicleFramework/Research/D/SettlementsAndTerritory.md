@@ -297,7 +297,9 @@ W2-BD实际入口/发现/接触链：`town→manage_alley`仍是MapState管理�
 | Trade | `InventoryScreenHelper.OpenScreenAsTrade` 打开城镇市场 | SettlementAccessModel 交易许可/市场状态 |
 | Go to keep | 进入 `town_keep` 聚落菜单，不立即进入 lordshall Mission | AccessModel 可能要求伪装/贿赂/拒绝；敌国或 Crime Rating会改变条件 |
 | Go to the arena → Enter the arena | 先到 `town_arena` 再打开 `arena` Location Mission | 仅白天、不可伪装等条件；不是打开城镇管理面板 |
-| Go to tavern district → Visit the tavern | 先到 `town_backstreet` 再打开 `tavern` Location Mission | 人物/Issue/招募候选由具体地点/任务条件动态决定 |
+| Go to tavern district → Visit the tavern | 玩家可见顺序为`town`“前往酒馆区”→`town_backstreet`酒馆菜单→“造访酒馆”→Tavern 3D Location Mission；用户确认进入3D后长按Tab返回酒馆菜单 | 本机1.4.8 `PlayerTownVisitCampaignBehavior` 将`town_backstreet/town_tavern`注册为原版“Visit the tavern”，callback执行`OpenMissionWithSettingPreviousLocation("center","tavern")`。人物/Issue/招募候选由具体地点/任务条件动态决定 |
+
+用户可见验证补充：用户确认`town_backstreet`就是酒馆菜单，选择“造访酒馆”进入3D场景，离开用长按Tab。真实模型运行`TestResults/20261111-012818`中，AI选择原版`town_tavern`后观察到加载画面，但Harness Native状态仍停在`MapState/town_backstreet`，随后的模型请求选择了`town_backstreet_back`，没有看到MissionState或读取酒馆Agent。这个异常与原版源callback冲突，说明Host应先被动等待Mission状态落稳，并在确认进入酒馆3D前不让模型提交Back菜单动作、不把Town记为已访问。当前已在OpenSpec `eyc-native-tavern-entry-transition-observation`中推进。
 | Enter smithy | 打开锻造界面 | Craft 访问权限、角色/耐力等由锻造系统门禁决定 |
 | Take a walk around the town center | `town_streets`→`LocationComplex.Current.GetLocationWithId("center")`，调用`LocationEncounter.CreateAndOpenMissionController`打开中心 Location Mission | `SettlementAccessModel.CanMainHeroAccessLocation`；Condition为center Locations调用`MenuHelper.SetIssueAndQuestDataForLocations`，该入口对center Locations调用Issue/Quest检查；GameMenuOption.OptionQuestData经GameMenuItemVM生成菜单任务标记，不代表本次必有任务Notable |
 | Wait here | 切换到 `town_wait_menus` 原生 Wait menu | 通过 `StartWait` 推进时间；见 A02/MAINLINE，不等价于驻足查看菜单 |

@@ -277,6 +277,7 @@ internal static class AgentHostRuntimeProgressLog
                 ["promptTokens"] = Copy(result, "promptTokens"),
                 ["completionTokens"] = Copy(result, "completionTokens"),
                 ["companionSearchMemory"] = BuildCompanionSearchMemorySummary(result["companionSearchMemory"] as JsonObject),
+                ["tavernEntryTransitionSummary"] = result["tavernEntryTransitionSummary"]?.DeepClone(),
                 ["nativeStateBefore"] = AgentHostHarnessProgressTrace.BuildNativeStateSummary(result["initialNativeState"] as JsonObject),
                 ["nativeStateAfter"] = AgentHostHarnessProgressTrace.BuildNativeStateSummary(result["finalNativeState"] as JsonObject ?? result["finalState"] as JsonObject),
                 ["failureTextLogged"] = false

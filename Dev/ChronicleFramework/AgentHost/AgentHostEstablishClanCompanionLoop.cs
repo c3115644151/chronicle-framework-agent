@@ -11,6 +11,7 @@ internal static class AgentHostEstablishClanCompanionLoop
     private const double MinimumCompanionNavigationProgressDistance = 0.1d;
     private const int MaxCompanionNavigationNoProgressAttempts = 2;
     private const int MaxTavernMissionStartupWaits = 20;
+    private const int MaxTavernEntryTransitionWaits = 10;
     private const string QuestId = "rebuild_player_clan_storymode_quest";
     private const int MaxDecisions = AgentHostCampaignLoop.MaxCumulativeDecisions;
     // This is a per-decision choice window, not a world-entity cap. After a
@@ -444,6 +445,48 @@ internal static class AgentHostEstablishClanCompanionLoop
             ReadBoolean((result["objectiveSnapshot"] as JsonObject)?["companions"] as JsonObject, "met") != true)
             throw new AgentHostException("establish-clan-companion-transport-self-test-failed", "The injected Native/Provider route did not passively settle the original Tavern Mission, gather current scene candidates without a model call, preserve projected Wanderer candidates without the raw scene roster or MainHero skill list, wait for Native navigation, hire one quoted Wanderer, and verify refreshed original Journal progress. status=" + ReadString(result, "status") + "; termination=" + ReadString(result["termination"] as JsonObject, "reason") + "; failureCode=" + ReadString(result, "failureCode") + "; failure=" + ReadString(result, "failure") + "; actions=" + string.Join(",", client.Actions) + "; calls=" + provider.CallCount + "; automaticSceneObservations=" + automaticSceneObservations + "; activeNavigationReads=" + client.ActiveMissionNavigationStateReads + "; startupReads=" + client.TavernMissionStartupStateReads + "; providerSawActiveNavigation=" + provider.SawActiveMissionNavigation + "; providerSawProjection=" + provider.SawCompanionObservationProjection + "; journalMet=" + ReadBoolean((result["objectiveSnapshot"] as JsonObject)?["companions"] as JsonObject, "met"));
 
+        var delayedTavernClient = new FakeCompanionClient(tavernEntryTransitionDelayReads: 3);
+        var delayedTavernProvider = new FakeCompanionProvider();
+        var delayedTavernResult = await RunAsync(request.RootElement, delayedTavernClient, delayedTavernClient, delayedTavernProvider, CancellationToken.None);
+        var delayedTavernWaitRows = (delayedTavernResult["trace"] as JsonArray)?.OfType<JsonObject>()
+            .Where(step => ReadString(step, "stage") == "native-tavern-entry-transition-wait").ToArray() ?? Array.Empty<JsonObject>();
+        var delayedTavernSummary = delayedTavernResult["tavernEntryTransitionSummary"] as JsonObject;
+        if (ReadString(delayedTavernResult, "status") != "completed" ||
+            ReadString(delayedTavernResult["termination"] as JsonObject, "reason") != "native-companion-journal-target-met" ||
+            delayedTavernClient.TavernEntryTransitionMapReads != 3 || delayedTavernWaitRows.Length != 2 ||
+            delayedTavernWaitRows.Any(step => ReadBoolean(step, "modelDecisionSent") || ReadBoolean(step, "nativeActionSent")) ||
+            ReadInt(delayedTavernSummary, "confirmedCount", -1) != 1 || ReadInt(delayedTavernSummary, "waitCount", -1) != 2 ||
+            delayedTavernProvider.CallCount != provider.CallCount ||
+            !delayedTavernClient.Actions.SequenceEqual(client.Actions, StringComparer.Ordinal))
+            throw new AgentHostException("establish-clan-companion-delayed-tavern-entry-not-settled", "After Native town_tavern returns the old Map menu, Host must passively poll without another provider/action until the same settlement's Tavern Mission is observed; then continue the existing companion route.");
+
+        var missingTavernMissionClient = new FakeCompanionClient(neverEnterTavernMission: true);
+        var missingTavernMissionProvider = new FakeCompanionProvider();
+        var missingTavernMission = await RunAsync(request.RootElement, missingTavernMissionClient, missingTavernMissionClient, missingTavernMissionProvider, CancellationToken.None);
+        var missingMissionTrace = missingTavernMission["trace"] as JsonArray;
+        if (ReadString(missingTavernMission, "status") != "interrupted" ||
+            ReadString(missingTavernMission["termination"] as JsonObject, "reason") != "native-tavern-entry-transition-not-observed" ||
+            missingTavernMissionProvider.CallCount != 2 ||
+            !missingTavernMissionClient.Actions.SequenceEqual(new[] { "menuSelect", "menuSelect" }, StringComparer.Ordinal) ||
+            missingTavernMissionClient.Actions.Contains("missionSceneAgents", StringComparer.Ordinal) ||
+            missingMissionTrace?.OfType<JsonObject>().LastOrDefault(step => ReadString(step, "stage") == "native-tavern-entry-transition-not-observed") is not JsonObject missingMissionStep ||
+            ReadBoolean(missingMissionStep, "visitedTownMarked") || ReadBoolean(missingMissionStep, "modelDecisionSent") || ReadBoolean(missingMissionStep, "nativeActionSent") ||
+            ReadInt(missingTavernMission["tavernEntryTransitionSummary"] as JsonObject, "confirmedCount", -1) != 0)
+            throw new AgentHostException("establish-clan-companion-missing-tavern-mission-marked-visited", "If the original menu action never reaches a Tavern Mission within the bound, Host must return without another model/menu action and must not mark the Town visited.");
+
+        using var tavernTransitionCancellation = new CancellationTokenSource();
+        var canceledTavernEntryClient = new FakeCompanionClient(tavernEntryTransitionDelayReads: 1, cancelAfterTavernEntryMapRead: tavernTransitionCancellation);
+        var canceledTavernEntryProvider = new FakeCompanionProvider();
+        var canceledTavernEntry = await RunAsync(request.RootElement, canceledTavernEntryClient, canceledTavernEntryClient,
+            canceledTavernEntryProvider, tavernTransitionCancellation.Token);
+        if (ReadString(canceledTavernEntry, "status") != "failed" ||
+            ReadString(canceledTavernEntry["termination"] as JsonObject, "reason") != "host-stop-or-time-budget" ||
+            canceledTavernEntryProvider.CallCount != 2 ||
+            !canceledTavernEntryClient.Actions.SequenceEqual(new[] { "menuSelect", "menuSelect" }, StringComparer.Ordinal) ||
+            canceledTavernEntryClient.Actions.Contains("missionSceneAgents", StringComparer.Ordinal) ||
+            ReadInt(canceledTavernEntry["tavernEntryTransitionSummary"] as JsonObject, "confirmedCount", -1) != 0)
+            throw new AgentHostException("establish-clan-companion-tavern-entry-cancellation-sent-extra-action", $"Host cancellation during the passive Tavern transition must exit without another provider decision, Native action, scene query or visited-town mark. status={ReadString(canceledTavernEntry, "status")}; termination={ReadString(canceledTavernEntry["termination"] as JsonObject, "reason")}; providers={canceledTavernEntryProvider.CallCount}; actions={string.Join(",", canceledTavernEntryClient.Actions)}; summary={canceledTavernEntry["tavernEntryTransitionSummary"]?.ToJsonString()};");
+
         var stalledClient = new FakeCompanionClient(simulateStalledNavigation: true);
         var stalledProvider = new FakeCompanionStallProvider();
         var stalled = await RunAsync(request.RootElement, stalledClient, stalledClient, stalledProvider, CancellationToken.None);
@@ -475,6 +518,9 @@ internal static class AgentHostEstablishClanCompanionLoop
         var persistentCompanionMemory = await RunPersistentNoCandidateTownMemorySelfTestAsync();
         return [
             new { scenario = "establish-clan-companion-passively-settles-friendly-tavern-mission-startup-before-decisions", startupReads = client.TavernMissionStartupStateReads, passed = true },
+            new { scenario = "establish-clan-companion-waits-out-stale-backstreet-map-state-before-model-can-select-back", transitionMapReads = delayedTavernClient.TavernEntryTransitionMapReads, providerDecisions = delayedTavernProvider.CallCount, waitCount = ReadInt(delayedTavernSummary, "waitCount", -1), passed = true },
+            new { scenario = "establish-clan-companion-tavern-transition-timeout-does-not-mark-town-visited-or-reissue-entry", transitionMapReads = missingTavernMissionClient.TavernEntryTransitionMapReads, providerDecisions = missingTavernMissionProvider.CallCount, passed = true },
+            new { scenario = "establish-clan-companion-tavern-transition-honors-host-cancellation-without-followup-decision-or-action", providerDecisions = canceledTavernEntryProvider.CallCount, nativeActions = canceledTavernEntryClient.Actions.ToArray(), passed = true },
             new { scenario = "establish-clan-companion-passively-waits-for-native-mission-navigation-before-next-model-decision", activeNavigationReads = client.ActiveMissionNavigationStateReads, modelDecisions = provider.CallCount, nativeActions = client.Actions.ToArray(), passed = true },
             new { scenario = "establish-clan-companion-reads-current-tavern-agents-without-spending-a-model-decision", automaticSceneObservations, modelDecisionsSaved = 2, passed = true },
             new { scenario = "establish-clan-companion-automatic-scene-observation-excludes-stalled-wanderer-after-two-native-no-progress-retries", navigationAttempts = stalledClient.NavigationAttemptCount, providerNavigationDecisions = stalledProvider.NavigationDecisionCount, missionLeaves = stalledClient.MissionLeaveCount, passed = true },
@@ -588,6 +634,11 @@ internal static class AgentHostEstablishClanCompanionLoop
         string? interactTargetHeroId = null;
         var moveStartPending = false;
         var missionTransitionPending = false;
+        var tavernEntryTransitionPending = false;
+        string? pendingTavernEntrySettlementId = null;
+        var tavernEntryTransitionWaits = 0;
+        var totalTavernEntryTransitionWaits = 0;
+        var tavernEntryTransitionConfirmedCount = 0;
         var visitedTowns = new HashSet<string>(StringComparer.Ordinal);
         var noCandidateTownIds = new HashSet<string>(StringComparer.Ordinal);
         var excludedHeroes = new HashSet<string>(StringComparer.Ordinal);
@@ -689,6 +740,71 @@ internal static class AgentHostEstablishClanCompanionLoop
                 var sceneNotificationCanContinue = ReadBoolean(sceneNotification, "canContinue");
                 if (sceneNotificationActive && !sceneNotificationCanContinue)
                     return BuildResult("interrupted", "native-scene-notification-out-of-scope", "A Native scene notification is visible, but its current type or close behavior is not in the verified no-choice allowlist.", "companion-scene-notification-out-of-scope", state);
+
+                if (tavernEntryTransitionPending)
+                {
+                    var currentEntrySettlementId = ReadString(state["location"] as JsonObject, "currentSettlementId");
+                    if (IsNativeTavernMissionState(state) &&
+                        !string.IsNullOrWhiteSpace(pendingTavernEntrySettlementId) &&
+                        string.Equals(currentEntrySettlementId, pendingTavernEntrySettlementId, StringComparison.Ordinal))
+                    {
+                        tavernEntryTransitionPending = false;
+                        visitedTowns.Add(pendingTavernEntrySettlementId);
+                        tavernEntryTransitionConfirmedCount++;
+                        trace.Add(new JsonObject
+                        {
+                            ["stage"] = "native-tavern-entry-transition-confirmed",
+                            ["settlementId"] = pendingTavernEntrySettlementId,
+                            ["sceneName"] = ReadString(state["mission"] as JsonObject, "sceneName"),
+                            ["waitCount"] = tavernEntryTransitionWaits,
+                            ["visitedTownMarked"] = true,
+                            ["modelDecisionSent"] = false,
+                            ["nativeActionSent"] = false
+                        });
+                        pendingTavernEntrySettlementId = null;
+                        tavernEntryTransitionWaits = 0;
+                    }
+                    else
+                    {
+                        tavernEntryTransitionWaits++;
+                        totalTavernEntryTransitionWaits++;
+                        var settlementChanged = !string.IsNullOrWhiteSpace(pendingTavernEntrySettlementId) &&
+                            !string.IsNullOrWhiteSpace(currentEntrySettlementId) &&
+                            !string.Equals(currentEntrySettlementId, pendingTavernEntrySettlementId, StringComparison.Ordinal);
+                        if (settlementChanged || tavernEntryTransitionWaits >= MaxTavernEntryTransitionWaits)
+                        {
+                            trace.Add(new JsonObject
+                            {
+                                ["stage"] = "native-tavern-entry-transition-not-observed",
+                                ["expectedSettlementId"] = pendingTavernEntrySettlementId,
+                                ["observedSettlementId"] = currentEntrySettlementId,
+                                ["gameState"] = gameState,
+                                ["menuId"] = ReadString(context, "menuId"),
+                                ["waitCount"] = tavernEntryTransitionWaits,
+                                ["visitedTownMarked"] = false,
+                                ["modelDecisionSent"] = false,
+                                ["nativeActionSent"] = false
+                            });
+                            return BuildResult("interrupted", "native-tavern-entry-transition-not-observed",
+                                "The original Town Tavern menu action did not produce a Native Tavern Mission before its bounded observation ended; the town was not marked visited and no entry action was replayed.",
+                                "native-tavern-entry-transition-not-observed", state);
+                        }
+
+                        trace.Add(new JsonObject
+                        {
+                            ["stage"] = "native-tavern-entry-transition-wait",
+                            ["expectedSettlementId"] = pendingTavernEntrySettlementId,
+                            ["observedGameState"] = gameState,
+                            ["observedMenuId"] = ReadString(context, "menuId"),
+                            ["waitCount"] = tavernEntryTransitionWaits,
+                            ["visitedTownMarked"] = false,
+                            ["modelDecisionSent"] = false,
+                            ["nativeActionSent"] = false
+                        });
+                        await Task.Delay(TimeSpan.FromSeconds(1), elapsed.Token);
+                        continue;
+                    }
+                }
 
                 var nativeTavernMission = state["mission"] as JsonObject;
                 if (IsNativeTavernMissionState(state) &&
@@ -1186,7 +1302,9 @@ internal static class AgentHostEstablishClanCompanionLoop
                         var selectedOption = ReadString(arguments, "optionId");
                         if (selectedOption == "town_tavern" && currentSettlementId is not null)
                         {
-                            visitedTowns.Add(currentSettlementId);
+                            tavernEntryTransitionPending = true;
+                            pendingTavernEntrySettlementId = currentSettlementId;
+                            tavernEntryTransitionWaits = 0;
                             selectedHeroId = null;
                             sceneAgentsReceipt = null;
                         }
@@ -1276,6 +1394,13 @@ internal static class AgentHostEstablishClanCompanionLoop
                 ["runId"] = runId,
                 ["providerModelId"] = provider.ModelId,
                 ["providerConfigurationSource"] = provider.ConfigurationSource,
+                ["tavernEntryTransitionSummary"] = new JsonObject
+                {
+                    ["waitCount"] = totalTavernEntryTransitionWaits,
+                    ["confirmedCount"] = tavernEntryTransitionConfirmedCount,
+                    ["pending"] = tavernEntryTransitionPending,
+                    ["visitedTownMarked"] = pendingTavernEntrySettlementId is null && tavernEntryTransitionConfirmedCount > 0
+                },
                 ["companionSearchMemory"] = new JsonObject
                 {
                     ["checkpointReadAttempted"] = checkpointClient is not null,
@@ -1984,6 +2109,9 @@ internal static class AgentHostEstablishClanCompanionLoop
     private sealed class FakeCompanionClient : IAgentHostCampaignNativeClient, IAgentHostCompanionHiringNativeClient
     {
         private readonly bool _simulateStalledNavigation;
+        private readonly bool _neverEnterTavernMission;
+        private readonly CancellationTokenSource? _cancelAfterTavernEntryMapRead;
+        private int _tavernEntryTransitionDelayReadsRemaining;
         private int _stage;
         private bool _navigated;
         private int _tavernMissionStartupReadsRemaining = 2;
@@ -1991,19 +2119,36 @@ internal static class AgentHostEstablishClanCompanionLoop
         private double _wandererDistance = 10.201;
         internal int ActiveMissionNavigationStateReads { get; private set; }
         internal int TavernMissionStartupStateReads { get; private set; }
+        internal int TavernEntryTransitionMapReads { get; private set; }
         internal int NavigationAttemptCount { get; private set; }
         internal int MissionLeaveCount { get; private set; }
         internal List<string> Actions { get; } = new();
         internal int Gold => !_simulateStalledNavigation && _stage >= 8 ? 1340 : 2000;
         internal int CompanionCount => !_simulateStalledNavigation && _stage >= 8 ? 1 : 0;
 
-        internal FakeCompanionClient(bool simulateStalledNavigation = false) => _simulateStalledNavigation = simulateStalledNavigation;
+        internal FakeCompanionClient(bool simulateStalledNavigation = false, int tavernEntryTransitionDelayReads = 0,
+            bool neverEnterTavernMission = false, CancellationTokenSource? cancelAfterTavernEntryMapRead = null)
+        {
+            _simulateStalledNavigation = simulateStalledNavigation;
+            _tavernEntryTransitionDelayReadsRemaining = Math.Max(0, tavernEntryTransitionDelayReads);
+            _neverEnterTavernMission = neverEnterTavernMission;
+            _cancelAfterTavernEntryMapRead = cancelAfterTavernEntryMapRead;
+        }
 
         public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             JsonObject state;
-            if (_stage < 2)
+            if (_stage == 2 && (_neverEnterTavernMission || _tavernEntryTransitionDelayReadsRemaining > 0))
+            {
+                if (!_neverEnterTavernMission) _tavernEntryTransitionDelayReadsRemaining--;
+                TavernEntryTransitionMapReads++;
+                state = BuildState("MapState", "town_backstreet", new JsonArray(
+                    new JsonObject { ["id"] = "town_tavern", ["available"] = true, ["enabled"] = true, ["isLeave"] = false },
+                    new JsonObject { ["id"] = "town_backstreet_back", ["available"] = true, ["enabled"] = true, ["isLeave"] = true }));
+                if (TavernEntryTransitionMapReads == 1) _cancelAfterTavernEntryMapRead?.Cancel();
+            }
+            else if (_stage < 2)
             {
                 var menuId = _stage == 0 ? "town" : "town_backstreet";
                 var optionId = _stage == 0 ? "town_backstreet" : "town_tavern";
