@@ -26,6 +26,7 @@ $result = [ordered]@{
     CampaignKey = $CampaignKey
     CampaignInstanceMatched = $false
     ObjectiveAttemptPropertyPresent = $false
+    ObjectiveAttemptCount = 0
     CompanionSearchMemoryPropertyPresent = $false
     UnaffordableHeroCount = 0
     UnaffordableHeroesSuppressedAtCurrentGold = 0
@@ -105,7 +106,6 @@ try {
             [pscustomobject]@{ objectiveId = [string]$entry.Name; status = [string]$attempt.status; termination = [string]$attempt.termination }
         }
     )
-    if ($attemptEntries.Count -eq 0) { throw 'The saved checkpoint contains no pending or blocked EYC objective attempt.' }
 
     $companionSearchMemory = $checkpoint.eycCompanionSearchMemoryV1
     $unaffordableHeroEntries = @()
@@ -146,6 +146,7 @@ try {
     }
     $result.CampaignInstanceMatched = $true
     $result.ObjectiveAttemptPropertyPresent = $true
+    $result.ObjectiveAttemptCount = $attemptEntries.Count
     $result.CompanionSearchMemoryPropertyPresent = $null -ne $companionSearchMemory
     $result.UnaffordableHeroCount = $unaffordableHeroEntries.Count
     $result.NativeGameState = [string]$stateReceipt.state.context.gameState

@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.562'
+$contractVersion = '7.563'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -1647,6 +1647,7 @@ if ($harnessScript -notmatch "'EycObjectiveCheckpointReadback' \{ @\('Preflight'
     $eycObjectiveCheckpointReadbackSource -notmatch "agentCheckpointGet" -or
     $eycObjectiveCheckpointReadbackSource -notmatch "eycObjectiveAttemptMemoryV1" -or
     $eycObjectiveCheckpointReadbackSource -notmatch "CampaignInstanceMatched" -or
+    $eycObjectiveCheckpointReadbackSource -notmatch "ObjectiveAttemptCount" -or
     $eycObjectiveCheckpointReadbackSource -notmatch "SourceSaveUnchanged" -or
     $eycObjectiveCheckpointReadbackSource -notmatch "ProviderCalls = 0" -or
     $eycObjectiveCheckpointReadbackSource -notmatch "ModelCostCny = 0" -or
