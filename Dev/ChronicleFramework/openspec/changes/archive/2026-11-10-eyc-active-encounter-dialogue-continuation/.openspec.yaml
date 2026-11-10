@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-11-10
+goal: Do not halt EYC Renown handling on a visible text-only Native encounter
+  line; advance only its original Continue handler and replan from fresh
+  options/state.

@@ -196,9 +196,9 @@ internal static class AgentHostBattleSimulationLoop
 
                 var mapConversation = context["conversation"] as JsonObject;
                 var mapConversationOptions = mapConversation?["options"] as JsonArray;
+                var mapConversationHasClickableOption = mapConversationOptions?.OfType<JsonObject>().Any(option => ReadBoolean(option, "clickable")) == true;
                 if (gameState == "MapState" && mapConversation is not null &&
-                    !AgentHostCampaignStateFacts.IsActiveEncounter(state) &&
-                    mapConversationOptions?.Count == 0 &&
+                    !mapConversationHasClickableOption &&
                     !string.IsNullOrWhiteSpace(ReadString(mapConversation, "sentenceText")))
                 {
                     if (mapConversationContinuationCount >= 32)
@@ -236,7 +236,8 @@ internal static class AgentHostBattleSimulationLoop
                         termination = "native-map-conversation-left-map";
                         break;
                     }
-                    if (afterConversation is not null && afterOptions?.Count == 0 &&
+                    var afterConversationHasClickableOption = afterOptions?.OfType<JsonObject>().Any(option => ReadBoolean(option, "clickable")) == true;
+                    if (afterConversation is not null && !afterConversationHasClickableOption &&
                         ReadString(afterConversation, "characterId") == conversationCharacterId &&
                         ReadString(afterConversation, "sentenceText") == conversationTextBefore)
                     {
@@ -1720,12 +1721,12 @@ internal static class AgentHostBattleSimulationLoop
         var result = await RunAsync(request.RootElement, client, provider, CancellationToken.None, priorDecisions: 1,
             priorPromptTokens: 11, priorCompletionTokens: 3, priorTrace: priorTrace, priorProviderRouteHistory: priorRoutes);
         if (ReadString(result, "status") != "completed" || ReadString(result, "termination") != "battle-resolved-and-verified" ||
-            ReadInt(result, "decisions", 0) != 15 || ReadInt(result, "actionsExecuted", 0) != 12 || provider.CallCount != 14 ||
+            ReadInt(result, "decisions", 0) != 14 || ReadInt(result, "actionsExecuted", 0) != 12 || provider.CallCount != 13 ||
             ReadString(result, "targetPartyId") != "bandit-1" || ReadDouble(result, "renownBefore", double.NaN) != 10 ||
             ReadDouble(result, "renownAfter", double.NaN) != 10 || ReadInt(result, "explicitClockActionCount", -1) != 0 ||
             ReadString(result, "providerConfigurationSource") != provider.ConfigurationSource || ReadString(result, "playerOutcome") != "resolved-native-battle" ||
             !ReadBoolean(result, "nativeReturnToMapVerified") || client.Actions.Contains("pause") || client.Actions.Contains("advance") ||
-            result["trace"] is not JsonArray trace || trace.Count != 15 || result["providerRouteHistory"] is not JsonArray routes || routes.Count != 15)
+            result["trace"] is not JsonArray trace || trace.Count != 15 || result["providerRouteHistory"] is not JsonArray routes || routes.Count != 14)
         {
             var traceSummary = string.Join(" | ", (result["trace"] as JsonArray ?? new JsonArray()).OfType<JsonObject>().Select(x =>
                 $"{ReadInt(x, "iteration", 0)}:{ReadString(x["decision"] as JsonObject, "action") ?? ReadString(x["decision"] as JsonObject, "control") ?? (ReadBoolean(x["decision"] as JsonObject, "done") ? "done" : "")}:" +
@@ -1747,7 +1748,7 @@ internal static class AgentHostBattleSimulationLoop
             ReadBoolean(escapeResult, "nativeReturnToMapVerified") != true ||
             ReadDouble(escapeResult, "renownBefore", double.NaN) != 10 || ReadDouble(escapeResult, "renownAfter", double.NaN) != 10 ||
             escapeDeferredTraceStep is null || ReadString(escapeDeferredTraceStep, "targetPartyId") != "bandit-1" ||
-            escapeProvider.CallCount != 9 || escapeProvider.WarningRequest? ["observation"]? ["state"]? ["context"]? ["encounterEscape"]? ["nativeTroopsSacrificedForTry"]?.GetValue<int>() != 7 ||
+            escapeProvider.CallCount != 8 || escapeProvider.WarningRequest? ["observation"]? ["state"]? ["context"]? ["encounterEscape"]? ["nativeTroopsSacrificedForTry"]?.GetValue<int>() != 7 ||
             escapeClient.Actions.SequenceEqual(new[] { "mapPartyTargets", "pursue", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "menuSelect", "menuSelect" }) != true ||
             escapeClient.Actions.Contains("battleSkip") || escapeClient.Actions.Contains("battleFinish"))
             throw new AgentHostException("battle-loop-native-escape-not-integrated", $"The model must be able to inspect the original risk warning, choose Try-to-get-away, accept its observed cost, continue its debrief, and return without claiming BattleSimulation/Renown. status={ReadString(escapeResult, "status")}, termination={ReadString(escapeResult, "termination")}, outcome={ReadString(escapeResult, "playerOutcome")}, actions={string.Join(",", escapeClient.Actions)}.");
@@ -1780,13 +1781,30 @@ internal static class AgentHostBattleSimulationLoop
         var mapConversationProvider = new FakeBattleSimulationDecisionProvider();
         var mapConversationResult = await RunAsync(request.RootElement, mapConversationClient, mapConversationProvider, CancellationToken.None);
         if (ReadString(mapConversationResult, "status") != "completed" ||
-            ReadInt(mapConversationResult, "actionsExecuted", 0) != 13 || mapConversationProvider.CallCount != 14 ||
+            ReadInt(mapConversationResult, "actionsExecuted", 0) != 13 || mapConversationProvider.CallCount != 13 ||
             mapConversationClient.Actions.Count != 13 || mapConversationClient.Actions[0] != "dialogueContinue" ||
             !((mapConversationResult["trace"] as JsonArray)?.OfType<JsonObject>().Any(step => ReadString(step, "stage") == "native-map-conversation-no-choice-continued" &&
                 ReadBoolean(step, "modelDecisionMade") == false) ?? false) ||
             ReadString(mapConversationProvider.FirstRequest?["observation"]?["state"]?["context"] as JsonObject, "gameState") != "MapState" ||
             mapConversationProvider.FirstRequest?["observation"]?["state"]?["context"]?["conversation"] is not null)
             throw new AgentHostException("battle-loop-map-conversation-native-continue-failed", "The Host must advance only the active no-choice Native Map conversation before requesting the Renown decision, then resume from the fresh Map state. status=" + ReadString(mapConversationResult, "status") + "; termination=" + ReadString(mapConversationResult, "termination") + "; actions=" + ReadInt(mapConversationResult, "actionsExecuted", -1) + "; providerCalls=" + mapConversationProvider.CallCount + "; nativeActions=" + string.Join(",", mapConversationClient.Actions) + "; firstRequestConversation=" + (mapConversationProvider.FirstRequest?["observation"]?["state"]?["context"]?["conversation"] is not null) + "; traceStages=" + string.Join(",", (mapConversationResult["trace"] as JsonArray)?.OfType<JsonObject>().Select(step => ReadString(step, "stage") ?? ReadString(step["decision"] as JsonObject, "action") ?? "step") ?? Array.Empty<string>()));
+
+        var activeEncounterConversationClient = new FakeBattleSimulationNativeClient(mapConversationAtStart: true, mapConversationEncounterAtStart: true);
+        var activeEncounterConversationProvider = new FakeEncounterConversationDecisionProvider();
+        var activeEncounterConversationResult = await RunAsync(request.RootElement, activeEncounterConversationClient, activeEncounterConversationProvider, CancellationToken.None);
+        var activeEncounterActions = new[] { "dialogueContinue", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone" };
+        if (ReadString(activeEncounterConversationResult, "status") != "completed" ||
+            !activeEncounterActions.SequenceEqual(activeEncounterConversationClient.Actions, StringComparer.Ordinal) ||
+            activeEncounterConversationProvider.CallCount != 10 ||
+            activeEncounterConversationProvider.FirstRequest?["observation"]?["state"]?["context"]?["conversation"]?["options"] is not JsonArray firstEncounterOptions ||
+            firstEncounterOptions.OfType<JsonObject>().Any(option => ReadBoolean(option, "clickable")) != true ||
+            ReadString(activeEncounterConversationProvider.FirstRequest?["allowedActions"]?[0] as JsonObject, "action") != "mapPartyTargets" ||
+            ReadString(activeEncounterConversationProvider.FightChoiceRequest?["allowedActions"]?[0] as JsonObject, "action") != "dialogueSelect" ||
+            (activeEncounterConversationProvider.FightChoiceRequest?["observation"]?["currentlyObservedHostileBanditTargets"] as JsonArray)?.Any(target => ReadString(target as JsonObject, "id") == "bandit-1") != true ||
+            ReadInt(activeEncounterConversationResult, "explicitClockActionCount", -1) != 0 || activeEncounterConversationClient.ClockActions.Count != 0 ||
+            !((activeEncounterConversationResult["trace"] as JsonArray)?.OfType<JsonObject>().Any(step =>
+                ReadString(step, "stage") == "native-map-conversation-no-choice-continued" && ReadBoolean(step, "modelDecisionMade") == false) ?? false))
+            throw new AgentHostException("battle-loop-active-encounter-no-choice-dialogue-not-continued", "An active Native Bandit encounter text-only line must use the original Continue handler before the model sees current clickable choices, without an explicit clock action. status=" + ReadString(activeEncounterConversationResult, "status") + "; termination=" + ReadString(activeEncounterConversationResult, "termination") + "; actions=" + string.Join(",", activeEncounterConversationClient.Actions) + "; providerCalls=" + activeEncounterConversationProvider.CallCount + "; firstAllowed=" + (activeEncounterConversationProvider.FirstRequest?["allowedActions"]?.ToJsonString() ?? "null") + "; trace=" + string.Join(" | ", (activeEncounterConversationResult["trace"] as JsonArray)?.OfType<JsonObject>().Select(step => ReadString(step, "failureCode") ?? ReadString(step["decisionFeedback"] as JsonObject, "code") ?? ReadString(step["decision"] as JsonObject, "action") ?? ReadString(step, "stage") ?? "step") ?? Array.Empty<string>()) + "; clockActions=" + string.Join(",", activeEncounterConversationClient.ClockActions));
         var inquiryClient = new FakeBattleSimulationNativeClient(simulatePartyInquiry: true);
         var inquiryProvider = new FakeBattleSimulationDecisionProvider(simulatePartyInquiry: true);
         var inquiryRequestNode = JsonNode.Parse(request.RootElement.GetRawText())!.AsObject();
@@ -1818,7 +1836,7 @@ internal static class AgentHostBattleSimulationLoop
         var repeatedDoneResult = await RunAsync(inquiryRequest.RootElement, repeatedDoneClient, repeatedDoneProvider, CancellationToken.None,
             inquiryClient: repeatedDoneClient);
         var repeatedDoneTrace = repeatedDoneResult["trace"] as JsonArray;
-        if (ReadString(repeatedDoneResult, "status") != "completed" || repeatedDoneProvider.CallCount != 18 ||
+        if (ReadString(repeatedDoneResult, "status") != "completed" || repeatedDoneProvider.CallCount != 17 ||
             !repeatedDoneClient.Actions.SequenceEqual(new[] { "mapPartyTargets", "pursue", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone" }) ||
             repeatedDoneTrace?.OfType<JsonObject>().Any(step => ReadString(step["decision"] as JsonObject, "action") == "partyScreenDone" &&
                 ReadString(step["decisionFeedback"] as JsonObject, "kind") == "decision-rejected-before-native" &&
@@ -1837,10 +1855,10 @@ internal static class AgentHostBattleSimulationLoop
         }
         var cumulativeBattle = await RunAsync(cumulativeRequest.RootElement, cumulativeClient, cumulativeProvider, CancellationToken.None,
             priorDecisions: 201, priorTrace: priorCampaignTrace, priorProviderRouteHistory: priorCampaignRoutes);
-        if (ReadString(cumulativeBattle, "status") != "completed" || ReadInt(cumulativeBattle, "decisions", 0) != 215 ||
-            cumulativeProvider.CallCount != 14 || ReadInt(cumulativeBattle, "actionsExecuted", 0) != 12 ||
+        if (ReadString(cumulativeBattle, "status") != "completed" || ReadInt(cumulativeBattle, "decisions", 0) != 214 ||
+            cumulativeProvider.CallCount != 13 || ReadInt(cumulativeBattle, "actionsExecuted", 0) != 12 ||
             (cumulativeBattle["trace"] as JsonArray)?.Count != 215 ||
-            (cumulativeBattle["providerRouteHistory"] as JsonArray)?.Count != 215)
+            (cumulativeBattle["providerRouteHistory"] as JsonArray)?.Count != 214)
             throw new AgentHostException("battle-loop-self-test-cumulative-budget-interruption-failed", "A real-time incident BattleSimulation must retain enough shared decision budget after earlier objective planning/actions and preserve global trace numbering.");
         var recoveryClient = new FakeBattleSimulationNativeClient(simulateCaptivity: true);
         var recoveryProvider = new FakeBattleCaptivityDecisionProvider();
@@ -1879,7 +1897,8 @@ internal static class AgentHostBattleSimulationLoop
         return [
             new { scenario = "battle-loop-native-observe-pursue-send-troops-aftermath-return-and-verify", decisions = ReadInt(result, "decisions", 0), nativeActions = client.Actions.ToArray(), renownBefore = ReadDouble(result, "renownBefore", double.NaN), renownAfter = ReadDouble(result, "renownAfter", double.NaN), explicitClockActions = ReadInt(result, "explicitClockActionCount", -1), passed = true },
             new { scenario = "battle-loop-model-chooses-observed-native-try-to-get-away-cost-and-returns-without-claiming-renown", nativeActions = escapeClient.Actions.ToArray(), playerOutcome = ReadString(escapeResult, "playerOutcome"), nativeEscapeCompleted = ReadBoolean(escapeResult, "nativeEscapeCompleted"), passed = true },
-            new { scenario = "battle-loop-auto-continues-active-no-choice-map-dialogue-before-renown-planning", nativeActions = mapConversationClient.Actions.ToArray(), passed = true },
+            new { scenario = "battle-loop-auto-continues-no-choice-map-dialogue-before-renown-planning", nativeActions = mapConversationClient.Actions.ToArray(), passed = true },
+            new { scenario = "battle-loop-auto-continues-active-encounter-no-choice-line-before-model-sees-native-options", nativeActions = activeEncounterConversationClient.Actions.ToArray(), providerDecisions = activeEncounterConversationProvider.CallCount, passed = true },
             new { scenario = "battle-loop-map-incident-interrupts-before-model-or-native-actions", passed = true },
             new { scenario = "battle-loop-resolves-party-loot-inquiry-from-current-eyc-goal-and-roster-then-resumes-native-aftermath", decisions = ReadInt(partyInquiryResult, "decisions", 0), nativeActions = inquiryClient.Actions.ToArray(), inquiryChoice = inquiryClient.LastInquiryChoice, passed = true },
             new { scenario = "battle-loop-blocks-repeating-done-after-negative-inquiry-until-native-roster-changes", providerCalls = repeatedDoneProvider.CallCount, nativeActions = repeatedDoneClient.Actions.ToArray(), passed = true },
@@ -2333,6 +2352,7 @@ internal static class AgentHostBattleSimulationLoop
         private readonly bool _visibleHostileAtStart;
         private readonly bool _mapIncidentAtStart;
         private readonly bool _mapConversationAtStart;
+        private readonly bool _mapConversationEncounterAtStart;
         private readonly bool _simulateNativeEscape;
         private readonly bool _simulateSurrenderWithoutBattle;
         private int _stage;
@@ -2347,13 +2367,14 @@ internal static class AgentHostBattleSimulationLoop
         internal List<string> ClockActions { get; } = [];
         internal string? LastInquiryChoice { get; private set; }
 
-        internal FakeBattleSimulationNativeClient(bool simulateCaptivity = false, bool simulatePartyInquiry = false, bool visibleHostileAtStart = false, bool mapIncidentAtStart = false, bool mapConversationAtStart = false, bool simulateNativeEscape = false, bool simulateSurrenderWithoutBattle = false)
+        internal FakeBattleSimulationNativeClient(bool simulateCaptivity = false, bool simulatePartyInquiry = false, bool visibleHostileAtStart = false, bool mapIncidentAtStart = false, bool mapConversationAtStart = false, bool mapConversationEncounterAtStart = false, bool simulateNativeEscape = false, bool simulateSurrenderWithoutBattle = false)
         {
             _simulateCaptivity = simulateCaptivity || simulateSurrenderWithoutBattle;
             _simulatePartyInquiry = simulatePartyInquiry;
             _visibleHostileAtStart = visibleHostileAtStart;
             _mapIncidentAtStart = mapIncidentAtStart;
             _mapConversationAtStart = mapConversationAtStart;
+            _mapConversationEncounterAtStart = mapConversationEncounterAtStart;
             _simulateNativeEscape = simulateNativeEscape;
             _simulateSurrenderWithoutBattle = simulateSurrenderWithoutBattle;
             if (visibleHostileAtStart) _timeControlMode = "StoppablePlay";
@@ -2390,7 +2411,11 @@ internal static class AgentHostBattleSimulationLoop
                 case "pursue": _stage = 1; _movingReads = 0; _timeControlMode = "StoppablePlay"; break;
                 case "dialogueSelect": _stage = 3; break;
                 case "dialogueContinue":
-                    if (_mapConversationAtStart && !_mapConversationContinued && _stage == 0) _mapConversationContinued = true;
+                    if (_mapConversationAtStart && !_mapConversationContinued && _stage == 0)
+                    {
+                        _mapConversationContinued = true;
+                        if (_mapConversationEncounterAtStart) _stage = 2;
+                    }
                     else _stage = 4;
                     break;
                 case "menuSelect":
@@ -2441,8 +2466,9 @@ internal static class AgentHostBattleSimulationLoop
         private JsonObject BuildState()
         {
             var stateName = _stage switch { 7 or 13 => "PartyState", 8 => "InventoryState", _ => "MapState" };
-            var menuId = _stage is 2 or 3 ? "encounter_meeting" : _stage is 4 or 5 or 6 ? "encounter" : _stage == 10 ? "prisoner_wait" : _stage == 11 ? "menu_captivity_end_propose_ransom_wilderness" : _stage == 14 ? "try_to_get_away" : _stage == 15 ? "try_to_get_away_debrief" : null;
-            var encounterActive = _stage is 2 or 3 or 4 or 5 or 6 or 14 or 15;
+            var activeInitialMapConversation = _mapConversationAtStart && _mapConversationEncounterAtStart && !_mapConversationContinued && _stage == 0;
+            var menuId = activeInitialMapConversation || _stage is 2 or 3 ? "encounter_meeting" : _stage is 4 or 5 or 6 ? "encounter" : _stage == 10 ? "prisoner_wait" : _stage == 11 ? "menu_captivity_end_propose_ransom_wilderness" : _stage == 14 ? "try_to_get_away" : _stage == 15 ? "try_to_get_away_debrief" : null;
+            var encounterActive = activeInitialMapConversation || _stage is 2 or 3 or 4 or 5 or 6 or 14 or 15;
             JsonObject? simulation = null;
             if (_stage is 5 or 6)
                 simulation = new JsonObject { ["finished"] = _stage == 6, ["playerRetreated"] = false, ["battleState"] = "AttackerVictory" };
@@ -2494,7 +2520,9 @@ internal static class AgentHostBattleSimulationLoop
             if (_mapConversationAtStart && !_mapConversationContinued && _stage == 0)
                 state["context"]!["conversation"] = new JsonObject
                 {
-                    ["characterId"] = "notable-a", ["sentenceText"] = "We part ways.", ["options"] = new JsonArray()
+                    ["characterId"] = _mapConversationEncounterAtStart ? "looter" : "notable-a",
+                    ["sentenceText"] = _mapConversationEncounterAtStart ? "今儿个不走运啊，伙计。" : "We part ways.",
+                    ["options"] = new JsonArray()
                 };
             if (_mapIncidentAtStart && _stage == 0)
                 state["context"]!["mapIncident"] = new JsonObject { ["schemaVersion"] = 1, ["active"] = true, ["supported"] = true, ["incidentType"] = "PlightOfCivilians" };
@@ -2550,7 +2578,7 @@ internal static class AgentHostBattleSimulationLoop
     private sealed class FakeTryToGetAwayDecisionProvider : IAgentHostDecisionProvider
     {
         private static readonly string[] ExpectedSteps =
-        ["mapPartyTargets", "pursue", "observeAgain", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "escape-start", "escape-accept", "escape-continue"];
+        ["mapPartyTargets", "pursue", "observeAgain", "mapPartyTargets", "dialogueSelect", "escape-start", "escape-accept", "escape-continue"];
 
         internal int CallCount { get; private set; }
         internal JsonObject? WarningRequest { get; private set; }
@@ -2589,9 +2617,9 @@ internal static class AgentHostBattleSimulationLoop
 
     private sealed class FakeBattleSimulationDecisionProvider : IAgentHostDecisionProvider
     {
-        private static readonly string[] ExpectedActions = ["mapPartyTargets", "pursue", "observeAgain", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone", "done"];
-        private static readonly string[] ExpectedInquiryActions = ["mapPartyTargets", "pursue", "observeAgain", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "respondInquiry", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone", "done"];
-        private static readonly string[] ExpectedInquiryDoneRepeatActions = ["mapPartyTargets", "pursue", "observeAgain", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "respondInquiry", "partyScreenDone", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone", "done"];
+        private static readonly string[] ExpectedActions = ["mapPartyTargets", "pursue", "observeAgain", "mapPartyTargets", "dialogueSelect", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone", "done"];
+        private static readonly string[] ExpectedInquiryActions = ["mapPartyTargets", "pursue", "observeAgain", "mapPartyTargets", "dialogueSelect", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "respondInquiry", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone", "done"];
+        private static readonly string[] ExpectedInquiryDoneRepeatActions = ["mapPartyTargets", "pursue", "observeAgain", "mapPartyTargets", "dialogueSelect", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "respondInquiry", "partyScreenDone", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone", "done"];
         private readonly bool _simulatePartyInquiry;
         private readonly bool _repeatPartyScreenDoneAfterDecline;
         internal int CallCount { get; private set; }
@@ -2627,8 +2655,8 @@ internal static class AgentHostBattleSimulationLoop
                 {
                     "pursue" => new JsonObject { ["PartyId"] = "bandit-1" },
                     "dialogueSelect" => new JsonObject { ["OptionId"] = "bandit_start_defender_1" },
-                    "partyTakeAll" when _simulatePartyInquiry && index == 9 => new JsonObject { ["TroopType"] = "prisoners" },
-                    "partyTakeAll" when _simulatePartyInquiry && index == (_repeatPartyScreenDoneAfterDecline ? 13 : 12) => new JsonObject { ["TroopType"] = "members" },
+                    "partyTakeAll" when _simulatePartyInquiry && index == 8 => new JsonObject { ["TroopType"] = "prisoners" },
+                    "partyTakeAll" when _simulatePartyInquiry && index == (_repeatPartyScreenDoneAfterDecline ? 12 : 11) => new JsonObject { ["TroopType"] = "members" },
                     "menuSelect" => new JsonObject { ["MenuId"] = "encounter", ["OptionId"] = "str_order_attack" },
                     "partyTakeAll" => new JsonObject { ["TroopType"] = "members" },
                     _ => new JsonObject()
@@ -2640,9 +2668,64 @@ internal static class AgentHostBattleSimulationLoop
         public void Dispose() { }
     }
 
+    private sealed class FakeEncounterConversationDecisionProvider : IAgentHostDecisionProvider
+    {
+        private static readonly string[] ExpectedActions = ["mapPartyTargets", "dialogueSelect", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone", "done"];
+        internal int CallCount { get; private set; }
+        internal JsonObject? FirstRequest { get; private set; }
+        internal JsonObject? FightChoiceRequest { get; private set; }
+        public string ModelId => "deterministic-active-encounter-dialogue-self-test";
+        public string ConfigurationSource => "harness-fake-provider";
+        public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) { cancellationToken.ThrowIfCancellationRequested(); return Task.CompletedTask; }
+
+        public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (CallCount == 0)
+            {
+                FirstRequest = ParseObject(request);
+                var state = request.GetProperty("observation").GetProperty("state");
+                if (ReadString(state.GetProperty("context"), "gameState") != "MapState" ||
+                    !state.GetProperty("context").GetProperty("encounterActive").GetBoolean() ||
+                    state.GetProperty("context").GetProperty("conversation").GetProperty("options").GetArrayLength() == 0)
+                    throw new AgentHostException("battle-loop-active-encounter-dialogue-self-test-first-request-invalid", "The model must first see fresh clickable encounter choices after the forced no-choice Native line has advanced.");
+            }
+            else if (CallCount == 1)
+            {
+                FightChoiceRequest = ParseObject(request);
+                var state = request.GetProperty("observation").GetProperty("state");
+                var observedTargets = request.GetProperty("observation").GetProperty("currentlyObservedHostileBanditTargets");
+                if (!observedTargets.EnumerateArray().Any(target => ReadString(target, "id") == "bandit-1") ||
+                    ReadString(state.GetProperty("context"), "menuId") != "encounter_meeting")
+                    throw new AgentHostException("battle-loop-active-encounter-dialogue-target-not-observed", "A Bandit encounter choice must remain blocked until the Native target scan confirms the current hostile Party.");
+            }
+            var index = CallCount++;
+            if (index >= ExpectedActions.Length) throw new AgentHostException("battle-loop-active-encounter-dialogue-self-test-exhausted", "The fake provider received more decisions than the active-encounter continuation protocol requires.");
+            var action = ExpectedActions[index];
+            var decision = action == "done"
+                ? new JsonObject { ["done"] = true, ["reason"] = "Native encounter result and return verified." }
+                : new JsonObject
+                {
+                    ["action"] = action,
+                    ["arguments"] = action switch
+                    {
+                        "mapPartyTargets" => new JsonObject(),
+                        "dialogueSelect" => new JsonObject { ["OptionId"] = "bandit_start_defender_1" },
+                        "menuSelect" => new JsonObject { ["MenuId"] = "encounter", ["OptionId"] = "str_order_attack" },
+                        "partyTakeAll" => new JsonObject { ["TroopType"] = "members" },
+                        _ => new JsonObject()
+                    },
+                    ["rationale"] = "Choose only the current Native encounter or aftermath option."
+                };
+            return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "fake-test-route", decision));
+        }
+
+        public void Dispose() { }
+    }
+
     private sealed class FakeBattleCaptivityDecisionProvider : IAgentHostDecisionProvider
     {
-        private static readonly string[] ExpectedActions = ["mapPartyTargets", "pursue", "observeAgain", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "menuSelect", "done"];
+        private static readonly string[] ExpectedActions = ["mapPartyTargets", "pursue", "observeAgain", "mapPartyTargets", "dialogueSelect", "menuSelect", "battleSkip", "battleFinish", "menuSelect", "done"];
         internal int CallCount { get; private set; }
         public string ModelId => "deterministic-battle-captivity-self-test";
         public string ConfigurationSource => "harness-fake-provider";
@@ -2664,7 +2747,7 @@ internal static class AgentHostBattleSimulationLoop
                 {
                     "pursue" => new JsonObject { ["PartyId"] = "bandit-1" },
                     "dialogueSelect" => new JsonObject { ["OptionId"] = "bandit_start_defender_1" },
-                    "menuSelect" when index == 6 => new JsonObject { ["MenuId"] = "encounter", ["OptionId"] = "str_order_attack" },
+                    "menuSelect" when index == 5 => new JsonObject { ["MenuId"] = "encounter", ["OptionId"] = "str_order_attack" },
                     "menuSelect" => new JsonObject { ["MenuId"] = "menu_captivity_end_propose_ransom_wilderness", ["OptionId"] = "mno_captivity_end_ransom_accept" },
                     _ => new JsonObject()
                 },
@@ -2677,7 +2760,7 @@ internal static class AgentHostBattleSimulationLoop
 
     private sealed class FakeSurrenderRecoveryDecisionProvider : IAgentHostDecisionProvider
     {
-        private static readonly string[] ExpectedActions = ["mapPartyTargets", "pursue", "observeAgain", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "menuSelect"];
+        private static readonly string[] ExpectedActions = ["mapPartyTargets", "pursue", "observeAgain", "mapPartyTargets", "dialogueSelect", "menuSelect", "menuSelect"];
         internal int CallCount { get; private set; }
         public string ModelId => "deterministic-surrender-recovery-self-test";
         public string ConfigurationSource => "harness-fake-provider";
@@ -2693,7 +2776,7 @@ internal static class AgentHostBattleSimulationLoop
             {
                 "pursue" => new JsonObject { ["PartyId"] = "bandit-1" },
                 "dialogueSelect" => new JsonObject { ["OptionId"] = "bandit_start_defender_3" },
-                "menuSelect" when index == 6 => new JsonObject { ["MenuId"] = "encounter", ["OptionId"] = "surrender" },
+                "menuSelect" when index == 5 => new JsonObject { ["MenuId"] = "encounter", ["OptionId"] = "surrender" },
                 "menuSelect" => new JsonObject { ["MenuId"] = "menu_captivity_end_propose_ransom_wilderness", ["OptionId"] = "mno_captivity_end_ransom_accept" },
                 _ => new JsonObject()
             };
