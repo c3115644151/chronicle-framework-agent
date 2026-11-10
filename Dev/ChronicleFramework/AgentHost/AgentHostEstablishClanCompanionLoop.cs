@@ -289,6 +289,50 @@ internal static class AgentHostEstablishClanCompanionLoop
             !actionableOptions.OfType<JsonObject>().Any(action => ReadString(action, "action") == "missionLeave"))
             throw new AgentHostException("establish-clan-companion-native-interaction-route-failed", "Once Native MissionConversationLogic reports a current action and the local Agent is interactable, use Native Agent interaction while retaining the Native exit.");
 
+        var affordabilitySnapshot = new JsonObject
+        {
+            ["gold"] = new JsonObject { ["current"] = 64, ["target"] = 2000, ["met"] = false },
+            ["partySize"] = new JsonObject { ["current"] = 19, ["target"] = 25, ["met"] = false },
+            ["renown"] = new JsonObject { ["current"] = 20, ["target"] = 50, ["met"] = false },
+            ["companions"] = new JsonObject { ["current"] = 0, ["target"] = 1, ["met"] = false }
+        };
+        var affordabilityCheckpoint = new JsonObject { ["schemaVersion"] = 2, ["campaignInstanceId"] = "campaign-affordability-fixture" };
+        var affordabilityMemory = new Dictionary<string, int>(StringComparer.Ordinal);
+        var noPayConversation = new JsonObject
+        {
+            ["context"] = new JsonObject
+            {
+                ["gameState"] = "MissionState",
+                ["conversation"] = new JsonObject { ["heroId"] = "wanderer-a", ["options"] = new JsonArray() }
+            },
+            ["economy"] = new JsonObject { ["gold"] = 64 }
+        };
+        if (!RecordUnaffordableNativeResponse(affordabilityMemory, new HashSet<string>(StringComparer.Ordinal), noPayConversation,
+                "dialogueSelect", "player_companion_hire_response_2"))
+            throw new AgentHostException("establish-clan-companion-unaffordable-response-memory-failed", "The exact Native no-pay response must create one current Hero/Gold observation.");
+        affordabilityCheckpoint = AgentHostEycCompanionSearchMemory.Store(affordabilityCheckpoint, affordabilitySnapshot, [], affordabilityMemory);
+        var encodedAffordabilityCheckpoint = AgentHostCampaignCheckpointCodec.EncodeForNative(affordabilityCheckpoint.ToJsonString());
+        using var checkpointRoundTripReceipt = JsonDocument.Parse(new JsonObject
+        {
+            ["status"] = "completed",
+            ["data"] = new JsonObject
+            {
+                ["campaignInstanceId"] = "campaign-affordability-fixture",
+                ["checkpointBase64"] = encodedAffordabilityCheckpoint
+            }
+        }.ToJsonString());
+        var restartedCheckpoint = AgentHostCampaignCheckpointCodec.ReadFromNativeReceipt(checkpointRoundTripReceipt.RootElement);
+        var restartedUnaffordableMemory = AgentHostEycCompanionSearchMemory.ReadUnaffordableHeroGold(restartedCheckpoint);
+        var restartedExcludedHeroes = AgentHostEycCompanionSearchMemory.GetCurrentlyUnaffordableHeroIds(restartedUnaffordableMemory, 64);
+        var twoCurrentCandidates = new JsonArray(
+            new JsonObject { ["heroId"] = "wanderer-a", ["occupation"] = "Wanderer", ["isEnemy"] = false, ["isNotable"] = false },
+            new JsonObject { ["heroId"] = "wanderer-b", ["occupation"] = "Wanderer", ["isEnemy"] = false, ["isNotable"] = false });
+        var currentCandidatesAfterRestart = FilterWandererCandidates(twoCurrentCandidates, restartedExcludedHeroes);
+        if (ReadString(restartedCheckpoint, "campaignInstanceId") != "campaign-affordability-fixture" ||
+            currentCandidatesAfterRestart.Count != 1 || ReadString(currentCandidatesAfterRestart[0] as JsonObject, "heroId") != "wanderer-b" ||
+            AgentHostEycCompanionSearchMemory.GetCurrentlyUnaffordableHeroIds(restartedUnaffordableMemory, 65).Count != 0)
+            throw new AgentHostException("establish-clan-companion-unaffordable-checkpoint-resume-failed", "A saved Native no-pay observation must survive Host restart and leave other Wanderers eligible, then reopen after Gold rises.");
+
         var noisyNearbyAgents = new JsonArray(Enumerable.Range(0, 40).Select(index => (JsonNode?)new JsonObject
         {
             ["agentIndex"] = index,
@@ -547,6 +591,8 @@ internal static class AgentHostEstablishClanCompanionLoop
         var visitedTowns = new HashSet<string>(StringComparer.Ordinal);
         var noCandidateTownIds = new HashSet<string>(StringComparer.Ordinal);
         var excludedHeroes = new HashSet<string>(StringComparer.Ordinal);
+        var unaffordableHeroGold = new Dictionary<string, int>(StringComparer.Ordinal);
+        var unaffordableCheckpointDirty = false;
         var checkpointClient = campaignClient as IAgentHostCampaignCheckpointNativeClient;
         JsonObject? campaignCheckpoint = null;
         string? storedCompanionJournalFingerprint = null;
@@ -620,6 +666,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                 storedCompanionJournalFingerprint = AgentHostEycCompanionSearchMemory.ReadJournalFingerprint(campaignCheckpoint);
                 storedCompanionJournalSnapshot = AgentHostEycCompanionSearchMemory.ReadJournalSnapshot(campaignCheckpoint);
                 noCandidateTownIds.UnionWith(AgentHostEycCompanionSearchMemory.ReadNoCandidateTownIds(campaignCheckpoint));
+                unaffordableHeroGold = AgentHostEycCompanionSearchMemory.ReadUnaffordableHeroGold(campaignCheckpoint);
             }
             await provider.CheckConfiguredModelAsync(elapsed.Token);
             while (decisions < maxDecisions)
@@ -677,7 +724,18 @@ internal static class AgentHostEstablishClanCompanionLoop
                 var journal = await ReadJournalAsync(companionClient, elapsed.Token);
                 var objective = AgentHostEstablishYourClanGoalLoop.BuildObjectiveSnapshot(journal);
                 var objectiveFingerprint = AgentHostEycCompanionSearchMemory.BuildJournalFingerprint(objective);
-                var companionCheckpointDirty = false;
+                var currentGold = ReadInt(state["economy"] as JsonObject, "gold", -1);
+                var newlyAffordableHeroIds = currentGold < 0
+                    ? Array.Empty<string>()
+                    : unaffordableHeroGold.Where(pair => currentGold > pair.Value).Select(pair => pair.Key).ToArray();
+                if (AgentHostEycCompanionSearchMemory.ReconcileUnaffordableHeroGold(unaffordableHeroGold, currentGold))
+                {
+                    unaffordableCheckpointDirty = true;
+                    foreach (var heroId in newlyAffordableHeroIds) excludedHeroes.Remove(heroId);
+                }
+                if (currentGold >= 0)
+                    excludedHeroes.UnionWith(AgentHostEycCompanionSearchMemory.GetCurrentlyUnaffordableHeroIds(unaffordableHeroGold, currentGold));
+                var companionCheckpointDirty = unaffordableCheckpointDirty;
                 if (!companionSearchMemoryReconciled)
                 {
                     companionSearchMemoryReconciled = true;
@@ -731,12 +789,25 @@ internal static class AgentHostEstablishClanCompanionLoop
                     }
                     if (checkpointClient is not null && campaignCheckpoint is not null)
                     {
-                        var updatedCheckpoint = AgentHostEycCompanionSearchMemory.Store(campaignCheckpoint, objective, noCandidateTownIds);
+                        var updatedCheckpoint = AgentHostEycCompanionSearchMemory.Store(campaignCheckpoint, objective, noCandidateTownIds, unaffordableHeroGold);
                         using var checkpointWrite = await checkpointClient.WriteCampaignCheckpointAsync(updatedCheckpoint.ToJsonString(), elapsed.Token);
                         if (ReadString(checkpointWrite.RootElement, "status") != "completed")
                             return BuildResult("failed", "companion-search-checkpoint-write-failed", "Native did not confirm saving the Companion no-candidate town memory; the Host will not rely on an unpersisted exclusion.", "companion-search-checkpoint-write-failed", state, journal, objective);
                         campaignCheckpoint = updatedCheckpoint;
                         checkpointWriteCount++;
+                        if (unaffordableCheckpointDirty)
+                        {
+                            trace.Add(new JsonObject
+                            {
+                                ["stepKind"] = "unaffordable-wanderer-memory-checkpoint-write",
+                                ["status"] = "completed",
+                                ["rememberedHeroCount"] = unaffordableHeroGold.Count,
+                                ["campaignCheckpointWriteCount"] = checkpointWriteCount,
+                                ["nativeGold"] = currentGold,
+                                ["campaignInstanceMatched"] = true
+                            });
+                        }
+                        unaffordableCheckpointDirty = false;
                         lastCheckpointWriteStatus = "completed";
                     }
                     trace.Add(new JsonObject
@@ -1152,8 +1223,15 @@ internal static class AgentHostEstablishClanCompanionLoop
                     else if (action == "dialogueSelect" && !IsMapStateConversation(state))
                     {
                         var selectedDialogueOption = ReadString(arguments, "optionId");
+                        var currentConversationHeroId = ReadString(ReadConversation(state), "heroId") ?? selectedHeroId;
                         if (selectedDialogueOption == "player_companion_hire_response_2" || selectedDialogueOption == "player_companion_hire_response_1")
-                            excludedHeroes.Add(selectedHeroId ?? string.Empty);
+                        {
+                            if (!string.IsNullOrWhiteSpace(currentConversationHeroId)) excludedHeroes.Add(currentConversationHeroId);
+                        }
+                        if (RecordUnaffordableNativeResponse(unaffordableHeroGold, excludedHeroes, state, action, selectedDialogueOption ?? string.Empty))
+                        {
+                            unaffordableCheckpointDirty = true;
+                        }
                         if (selectedDialogueOption is "player_companion_hire_response_2" or "player_is_leaving_neutral_or_friendly")
                         {
                             selectedHeroId = null;
@@ -1205,6 +1283,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                     ["memoryMatchedCurrentJournal"] = memoryMatchedCurrentJournal,
                     ["memoryInvalidatedByJournalProgress"] = memoryInvalidatedByJournalProgress,
                     ["memoryReusedAfterJournalDecrease"] = memoryReusedAfterJournalDecrease,
+                    ["unaffordableHeroCount"] = unaffordableHeroGold.Count,
                     ["checkpointWriteCount"] = checkpointWriteCount,
                     ["lastCheckpointWriteStatus"] = lastCheckpointWriteStatus
                 },
@@ -1554,6 +1633,18 @@ internal static class AgentHostEstablishClanCompanionLoop
             result.Add(agent.DeepClone());
         }
         return result;
+    }
+
+    internal static bool RecordUnaffordableNativeResponse(Dictionary<string, int> unaffordableHeroGold,
+        HashSet<string> excludedHeroes, JsonObject? currentState, string action, string optionId)
+    {
+        var conversationHeroId = ReadString(ReadConversation(currentState), "heroId");
+        var goldAtRefusal = ReadInt(currentState?["economy"] as JsonObject, "gold", -1);
+        if (!AgentHostEycCompanionSearchMemory.RecordUnaffordableHeroGold(
+                unaffordableHeroGold, action, optionId, conversationHeroId, goldAtRefusal))
+            return false;
+        excludedHeroes.Add(conversationHeroId!);
+        return true;
     }
 
     private static JsonArray FilterSafeTowns(JsonArray? targets, string? currentSettlementId, HashSet<string> visited)
