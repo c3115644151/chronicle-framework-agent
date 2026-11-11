@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-11-11
+goal: "Distinguish an AI controller flag from an actionable Native formation
+  behavior, then decide the next MainHero-control path for issue #132 without
+  adding gameplay capability."
+skip_specs: true
