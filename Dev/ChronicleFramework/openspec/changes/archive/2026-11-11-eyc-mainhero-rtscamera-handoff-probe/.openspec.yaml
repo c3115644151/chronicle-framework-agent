@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-11-11
+goal: "Determine whether the older RTSCamera AI-control integration pattern can
+  move MainHero in installed Bannerlord 1.4.8, before deciding whether any
+  Battle Mission capability belongs in issue #132."
+skip_specs: true

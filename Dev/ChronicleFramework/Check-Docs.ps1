@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.565'
+$contractVersion = '7.571'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -1609,6 +1609,7 @@ if ($videoCaptureSource -notmatch "'mapSettlementTargets'.*'move'.*'recruitOptio
 if ($videoCaptureSource -notmatch 'function Test-ChronicleFragmentedCaptureResilience' -or $videoCaptureSource -notmatch 'testsrc2=size=320x180:rate=5' -or $videoCaptureSource -notmatch 'Get-Command ffprobe\.exe' -or $videoCaptureSource -notmatch 'count_frames -select_streams v:0' -or $videoCaptureSource -notmatch 'TemporaryArtifactsRemoved' -or $agentLiveModelLoopSource -notmatch 'Test-ChronicleFragmentedCaptureResilience' -or $agentLiveModelLoopSource -notmatch 'CaptureRecoveryProof') { throw 'Live capture must prove that an abruptly interrupted fragmented MP4 remains decodable before starting a long Campaign run and retain a compact recovery receipt.' }
 $battleFixtureSource = Get-Content (Join-Path $harnessRoot 'Test-AgentBattleFixture.ps1') -Raw -Encoding UTF8
 $battleMissionFormationProbeSource = Get-Content (Join-Path $harnessRoot 'Test-AgentBattleMissionFormationProbe.ps1') -Raw -Encoding UTF8
+$battleMissionAdapterSource = Get-Content (Join-Path $harnessRoot 'AgentBattleMissionAdapter.cs') -Raw -Encoding UTF8
 if ($videoCaptureSource -notmatch 'keyframeInterval = \[Math\]::Max\(1, \$FrameRate \* 2\)' -or $videoCaptureSource -notmatch 'movflags \+frag_keyframe\+empty_moov\+default_base_moof' -or $videoCaptureSource -notmatch 'contactFrameBudget = Get-ChronicleContactFrameBudget' -or $videoCaptureSource -notmatch '\[Math\]::Ceiling\(\$frames / \$contactFrameBudget\)' -or $videoCaptureSource -notmatch '\$contactColumns = \[Math\]::Min\(4, \$contactSampleCount\)' -or $videoCaptureSource -notmatch 'frameExtractionFailures' -or $videoCaptureSource -notmatch 'agenthost-provider-response' -or $videoCaptureSource -notmatch '\$eventOnlyActions = @\(') { throw 'Continuous Bannerlord capture must preserve interrupted clips, include Host decisions, capture repeated motion events, add bounded periodic scene samples, and still remove completed source video after indexing.' }
 if ($agentLiveModelLoopSource -notmatch 'Add-ChronicleAgentHostProgressCaptureEvents' -or $agentLiveModelLoopSource -notmatch 'AgentHostProgress\.jsonl' -or $videoCaptureSource -notmatch 'missionNavigateToAgent' -or $videoCaptureSource -notmatch 'PRIVATE_PROMPT_MARKER') { throw 'AgentHost video evidence must consume its sanitized decision log and cover repeated Native scene-navigation decisions without exposing prompts.' }
 if ([regex]::Matches($agentLiveModelLoopSource, 'Add-ChronicleAgentHostProgressCaptureEvents').Count -lt 2 -or $agentLiveModelLoopSource -notmatch 'agentHostCaptureEventsWritten') { throw 'AgentHost decision timeline events must be merged in both successful and failed model-loop outcomes without duplicate appends.' }
@@ -1634,9 +1635,32 @@ if ($harnessScript -notmatch "'BattleMissionControllerProbe'" -or
     $harnessScript -match "'All' \{[^\r\n]*'BattleMissionControllerProbe'" -or
     $battleMissionFormationProbeSource -notmatch 'ProbeMainAgentAiController' -or
     $battleMissionFormationProbeSource -notmatch "Invoke-AgentCli 'harnessMainAgentAiControllerProbe'" -or
+    $battleMissionFormationProbeSource -notmatch "Invoke-AgentCli 'harnessMainAgentAiSurrogateControllerProbe'" -or
+    $battleMissionFormationProbeSource -notmatch "Invoke-AgentCli 'harnessRefreshMainAgentFormationAiProbe'" -or
+    $battleMissionFormationProbeSource -notmatch "Invoke-AgentCli 'harnessNotifyMainAgentAiMovementOrderProbe'" -or
     $battleMissionFormationProbeSource -notmatch "Invoke-AgentCli 'harnessRestoreMainAgentAiControllerProbe'" -or
+    $battleMissionFormationProbeSource -notmatch 'formation\.hasActiveAiBehavior' -or
+    $battleMissionAdapterSource -notmatch 'hasActiveAiBehavior' -or
+    $battleMissionAdapterSource -notmatch 'activeAiBehaviorType' -or
+    $battleMissionAdapterSource -notmatch 'activeAiOrderType' -or
+    $battleMissionAdapterSource -notmatch 'distanceToActiveAiOrderTarget' -or
+    $battleMissionAdapterSource -notmatch 'GetMethod\("SetWatchState"' -or
+    $battleMissionAdapterSource -notmatch 'IsPlayerTroopInFormation' -or
+    $battleMissionAdapterSource -notmatch 'OnUnitJoinOrLeave\(formation, hero, isJoining: true\)' -or
     $protocolSource -notmatch 'UpdateMainAgentAiControllerProbeLease\(\)' -or
     $protocolSource -notmatch 'ClearMainAgentAiControllerProbeLease\("protocol-stopped"\)' -or
+    $agentCliSource -notmatch 'harnessMainAgentAiSurrogateControllerProbe' -or
+    $agentHostDecisionCycleSource -match 'harnessMainAgentAiSurrogateControllerProbe' -or
+    $agentCliSource -notmatch 'harnessRefreshMainAgentFormationAiProbe' -or
+    $agentHostDecisionCycleSource -match 'harnessRefreshMainAgentFormationAiProbe' -or
+    $agentCliSource -notmatch 'harnessNotifyMainAgentAiMovementOrderProbe' -or
+    $agentHostDecisionCycleSource -match 'harnessNotifyMainAgentAiMovementOrderProbe' -or
+    $harnessScript -notmatch "'BattleMissionRtsCameraProbe' \{ @\('Preflight', 'Build', 'BattleMissionRtsCameraProbe'\) \}" -or
+    $harnessScript -match "'All' \{[^\r\n]*'BattleMissionRtsCameraProbe'" -or
+    $battleMissionFormationProbeSource -notmatch 'ProbeMainAgentRtsCameraBehavior' -or
+    $battleMissionFormationProbeSource -notmatch "Invoke-AgentCli 'harnessMainAgentAiRtsCameraProbe'" -or
+    $agentCliSource -notmatch 'harnessMainAgentAiRtsCameraProbe' -or
+    $agentHostDecisionCycleSource -match 'harnessMainAgentAiRtsCameraProbe' -or
     $agentHostDecisionCycleSource -match 'harnessMainAgentAiControllerProbe') {
     throw 'The opt-in MainAgent AI-controller probe must remain bounded and restorable in Native Harness code, perform no model work, and stay out of the production AgentHost action catalog.'
 }

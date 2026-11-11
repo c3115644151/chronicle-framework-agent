@@ -2,7 +2,8 @@
 param(
     [string]$SourceSaveName = 'AgentBridgeLifecycle',
     [ValidateRange(30,900)][int]$TimeoutSeconds = 300,
-    [switch]$ProbeMainAgentAiController
+    [switch]$ProbeMainAgentAiController,
+    [switch]$ProbeMainAgentRtsCameraBehavior
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,7 +25,7 @@ $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlo
 $priorMode = $env:CHRONICLE_HARNESS_MODE
 $env:CHRONICLE_HARNESS_MODE = 'battle-fixture'
 $prefix = 'battle-mission-formation-' + [Guid]::NewGuid().ToString('N')
-$probeName = if ($ProbeMainAgentAiController) { 'BattleMissionControllerProbe' } else { 'BattleMissionFormationProbe' }
+$probeName = if ($ProbeMainAgentRtsCameraBehavior) { 'BattleMissionRtsCameraProbe' } elseif ($ProbeMainAgentAiController) { 'BattleMissionControllerProbe' } else { 'BattleMissionFormationProbe' }
 $runDirectory = if ($env:CHRONICLE_HARNESS_TEMP) { [IO.Path]::GetFullPath($env:CHRONICLE_HARNESS_TEMP) } else { Join-Path $PSScriptRoot ('TestResults\' + $probeName) }
 New-Item -ItemType Directory -Path $runDirectory -Force | Out-Null
 $script:NativeReceipts = [System.Collections.Generic.List[object]]::new()
@@ -78,13 +79,30 @@ function Invoke-AgentCliExpectedReject([string]$Action, [string[]]$Arguments, [s
 function Get-FormationSnapshot($MissionStatus) {
     $mainAgent = $MissionStatus.data.mainAgent
     if ($null -eq $mainAgent) { throw 'Native Battle Mission status did not expose the current MainAgent.' }
+    if ($null -eq $mainAgent.currentWatchState -or $null -eq $mainAgent.formation -or $null -eq $mainAgent.formation.hasPlayerControlledTroop -or
+        $null -eq $mainAgent.formation.isPlayerTroopInFormation -or $null -eq $mainAgent.formation.hasActiveAiBehavior -or
+        $null -eq $mainAgent.formation.PSObject.Properties['activeAiBehaviorType'] -or
+        $null -eq $mainAgent.formation.PSObject.Properties['activeAiOrderType'] -or
+        $null -eq $mainAgent.formation.PSObject.Properties['activeAiOrderTarget'] -or
+        $null -eq $mainAgent.formation.PSObject.Properties['distanceToActiveAiOrderTarget']) {
+        throw 'Native Battle Mission status did not expose the current MainAgent Formation AI behavior context.'
+    }
     return [ordered]@{
+        agentIndex = [int]$mainAgent.agentIndex
         controller = [string]$mainAgent.controller
+        currentWatchState = [string]$mainAgent.currentWatchState
         isPlayerControlled = [bool]$mainAgent.isPlayerControlled
         health = [double]$mainAgent.health
         healthLimit = [double]$mainAgent.healthLimit
         isDetachedFromFormation = $mainAgent.isDetachedFromFormation
         formation = $mainAgent.formation
+        formationHasPlayerControlledTroop = [bool]$mainAgent.formation.hasPlayerControlledTroop
+        formationIsPlayerTroopInFormation = [bool]$mainAgent.formation.isPlayerTroopInFormation
+        formationHasActiveAiBehavior = [bool]$mainAgent.formation.hasActiveAiBehavior
+        formationActiveAiBehaviorType = [string]$mainAgent.formation.activeAiBehaviorType
+        formationActiveAiOrderType = [string]$mainAgent.formation.activeAiOrderType
+        formationActiveAiOrderTarget = $mainAgent.formation.activeAiOrderTarget
+        formationDistanceToAiOrderTarget = $mainAgent.formation.distanceToActiveAiOrderTarget
         playerFormations = @($MissionStatus.data.playerTeam.formations | ForEach-Object {
             [ordered]@{ formationIndex = $_.formationIndex; unitCount = $_.unitCount; isAIControlled = $_.isAIControlled; isPlayerOwned = $_.isPlayerOwned; isSelected = $_.isSelected }
         })
@@ -228,8 +246,14 @@ try {
     $mainAgentAfter = Get-FormationSnapshot $statusAfter
 
     $controllerProbe = $null
+    $rtsCameraProbe = $null
     $controllerProbeRestore = $null
     $controllerProbeSamples = [System.Collections.Generic.List[object]]::new()
+    $surrogateControllerProbe = $null
+    $surrogateFormationAiRefresh = $null
+    $surrogateMovementOrderRebind = $null
+    $surrogateControllerProbeRestore = $null
+    $surrogateControllerProbeSamples = [System.Collections.Generic.List[object]]::new()
     if ($ProbeMainAgentAiController) {
         $controllerProbe = Invoke-AgentCli 'harnessMainAgentAiControllerProbe' @('-DurationSeconds', '10', '-CommandId', "$prefix-main-agent-ai-probe")
         if ($controllerProbe.status -ne 'completed' -or $controllerProbe.data.scope -ne 'harness-only' -or
@@ -237,6 +261,16 @@ try {
             $controllerProbe.data.timeControlModeBefore -ne 'Stop' -or $controllerProbe.data.timeControlModeAfter -ne 'Stop' -or
             [Math]::Abs([double]$controllerProbe.data.campaignDayAfter - [double]$controllerProbe.data.campaignDayBefore) -gt 0.000001) {
             throw 'The bounded Native MainAgent controller probe did not preserve the Campaign clock or switch Player-to-AI under its guards.'
+        }
+        if ($ProbeMainAgentRtsCameraBehavior) {
+            $rtsCameraProbe = Invoke-AgentCli 'harnessMainAgentAiRtsCameraProbe' @('-CommandId', "$prefix-main-agent-rts-camera-ai")
+            if ($rtsCameraProbe.status -ne 'completed' -or $rtsCameraProbe.data.scope -ne 'harness-only' -or
+                $rtsCameraProbe.data.ownerController -ne 'AI' -or $rtsCameraProbe.data.nativeWatchStateAfter -ne 'Alarmed' -or
+                $rtsCameraProbe.data.isPlayerTroopInFormationAfter -ne $false -or $rtsCameraProbe.data.orderType -ne 'Move' -or
+                $rtsCameraProbe.data.campaignDayBefore -ne $rtsCameraProbe.data.campaignDayAfter -or
+                $rtsCameraProbe.data.timeControlModeBefore -ne 'Stop' -or $rtsCameraProbe.data.timeControlModeAfter -ne 'Stop') {
+                throw 'The Native RTSCamera-pattern MainAgent handoff did not preserve the Campaign clock and its guarded AI/Alarmed state.'
+            }
         }
 
         $controllerProbeDeadline = [DateTime]::UtcNow.AddSeconds(12)
@@ -250,9 +284,11 @@ try {
             $controllerProbeSamples.Add([ordered]@{
                 missionMode = [string]$controllerProbeStatus.data.missionMode
                 controller = [string]$hero.controller
+                currentWatchState = [string]$hero.currentWatchState
                 health = [double]$hero.health
                 position = $hero.position
                 formation = $hero.formation
+                isPlayerTroopInFormation = $hero.formation.isPlayerTroopInFormation
                 lease = $controllerProbeStatus.data.mainAgentAiControllerProbe
             })
             if ($controllerProbeStatus.data.mainAgentAiControllerProbe.active -ne $true) { break }
@@ -267,6 +303,83 @@ try {
             if ($restoredStatus.status -ne 'completed' -or $null -eq $restoredStatus.data.mainAgent -or
                 $restoredStatus.data.mainAgent.controller -ne 'Player' -or $restoredStatus.data.mainAgent.isPlayerControlled -ne $true) {
                 throw 'The current Battle Mission did not read back MainAgent as Player-controlled after the probe restore.'
+            }
+            if ($ProbeMainAgentRtsCameraBehavior -and
+                ($restoredStatus.data.mainAgent.currentWatchState -ne $mainAgentBefore.currentWatchState -or
+                 $restoredStatus.data.mainAgent.formation.isPlayerTroopInFormation -ne $mainAgentBefore.formationIsPlayerTroopInFormation)) {
+                throw 'The RTSCamera-pattern probe did not restore the original MainAgent watch state and player-troop formation flag.'
+            }
+        }
+
+    }
+    if ($ProbeMainAgentAiController -and -not $ProbeMainAgentRtsCameraBehavior) {
+        $surrogateControllerProbe = Invoke-AgentCli 'harnessMainAgentAiSurrogateControllerProbe' @('-DurationSeconds', '10', '-CommandId', "$prefix-main-agent-ai-surrogate-probe")
+        if ($surrogateControllerProbe.status -ne 'completed' -or $surrogateControllerProbe.data.scope -ne 'harness-only' -or
+            $surrogateControllerProbe.data.controllerBefore -ne 'Player' -or $surrogateControllerProbe.data.controllerAfter -ne 'AI' -or
+            $surrogateControllerProbe.data.surrogateAgentIndex -eq $null -or
+            $surrogateControllerProbe.data.missionMainAgentIndexAfter -eq $surrogateControllerProbe.data.originalMainAgentIndex -or
+            $surrogateControllerProbe.data.surrogateControllerAfter -ne 'Player' -or
+            $surrogateControllerProbe.data.timeControlModeBefore -ne 'Stop' -or $surrogateControllerProbe.data.timeControlModeAfter -ne 'Stop' -or
+            [Math]::Abs([double]$surrogateControllerProbe.data.campaignDayAfter - [double]$surrogateControllerProbe.data.campaignDayBefore) -gt 0.000001) {
+            throw 'The Native MainAgent surrogate probe did not hand temporary player control to a friendly Agent under the stopped Campaign clock.'
+        }
+
+        $surrogateProbeDeadline = [DateTime]::UtcNow.AddSeconds(12)
+        while ([DateTime]::UtcNow -lt $surrogateProbeDeadline) {
+            Start-Sleep -Milliseconds 500
+            $surrogateProbeState = Invoke-AgentCli 'state' @('-CommandId', "$prefix-surrogate-state-$([Guid]::NewGuid().ToString('N'))")
+            if ($surrogateProbeState.state.context.gameState -ne 'MissionState' -or $surrogateProbeState.state.mission.missionEnded) { break }
+            $surrogateProbeStatus = Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-surrogate-status-$([Guid]::NewGuid().ToString('N'))")
+            if ($surrogateProbeStatus.status -ne 'completed' -or $null -eq $surrogateProbeStatus.data.mainAgentAiControllerProbe.ownerPosition) { break }
+            $probe = $surrogateProbeStatus.data.mainAgentAiControllerProbe
+            $surrogateControllerProbeSamples.Add([ordered]@{
+                missionMode = [string]$surrogateProbeStatus.data.missionMode
+                missionMainAgentIndex = $probe.missionMainAgentIndex
+                surrogateAgentIndex = $probe.surrogateAgentIndex
+                ownerController = [string]$probe.ownerController
+                health = [double]$probe.ownerHealth
+                position = $probe.ownerPosition
+                formationIndex = $probe.ownerFormationIndex
+                hasActiveAiBehavior = $probe.ownerHasActiveAiBehavior
+                activeAiBehaviorType = $probe.ownerActiveAiBehaviorType
+                activeAiOrderType = $probe.ownerActiveAiOrderType
+                activeAiOrderTarget = $probe.ownerActiveAiOrderTarget
+                distanceToAiOrderTarget = $probe.ownerDistanceToAiOrderTarget
+                phase = if ($null -eq $surrogateFormationAiRefresh) { 'before-formation-refresh' } elseif ($null -eq $surrogateMovementOrderRebind) { 'after-formation-refresh' } else { 'after-movement-order-rebind' }
+                lease = $probe
+            })
+            if ($null -eq $surrogateFormationAiRefresh -and $surrogateControllerProbeSamples.Count -ge 2) {
+                $surrogateFormationAiRefresh = Invoke-AgentCli 'harnessRefreshMainAgentFormationAiProbe' @('-CommandId', "$prefix-surrogate-formation-ai-refresh")
+                if ($surrogateFormationAiRefresh.status -ne 'completed' -or
+                    $surrogateFormationAiRefresh.data.isAIControlledBefore -ne $true -or $surrogateFormationAiRefresh.data.isAIControlledAfter -ne $true -or
+                    $surrogateFormationAiRefresh.data.campaignDayBefore -ne $surrogateFormationAiRefresh.data.campaignDayAfter -or
+                    $surrogateFormationAiRefresh.data.timeControlModeBefore -ne 'Stop' -or $surrogateFormationAiRefresh.data.timeControlModeAfter -ne 'Stop') {
+                    throw 'Native Formation AI refresh did not preserve AI control and the stopped Campaign clock.'
+                }
+                $surrogateMovementOrderRebind = Invoke-AgentCli 'harnessNotifyMainAgentAiMovementOrderProbe' @('-CommandId', "$prefix-surrogate-movement-order-rebind")
+                if ($surrogateMovementOrderRebind.status -ne 'completed' -or
+                    $surrogateMovementOrderRebind.data.controller -ne 'AI' -or
+                    $surrogateMovementOrderRebind.data.orderTypeBefore -ne 'Move' -or $surrogateMovementOrderRebind.data.orderTypeAfter -ne 'Move' -or
+                    $surrogateMovementOrderRebind.data.campaignDayBefore -ne $surrogateMovementOrderRebind.data.campaignDayAfter -or
+                    $surrogateMovementOrderRebind.data.timeControlModeBefore -ne 'Stop' -or $surrogateMovementOrderRebind.data.timeControlModeAfter -ne 'Stop') {
+                    throw 'Native MovementOrder membership notification did not preserve the current Move order and stopped Campaign clock.'
+                }
+            }
+            if ($probe.active -ne $true) { break }
+        }
+        $surrogateControllerProbeRestore = Invoke-AgentCli 'harnessRestoreMainAgentAiControllerProbe' @('-CommandId', "$prefix-surrogate-restore")
+        if ($surrogateControllerProbeRestore.status -ne 'completed' -or $surrogateControllerProbeRestore.data.restored -ne $true -or
+            $surrogateControllerProbeRestore.data.ownerControllerAfter -ne 'Player' -or
+            $surrogateControllerProbeRestore.data.surrogateControllerAfter -ne 'AI' -or
+            $surrogateControllerProbeRestore.data.missionMainAgentIndexAfter -ne $mainAgentBefore.agentIndex) {
+            throw 'The Native MainAgent surrogate probe failed to restore MainHero, the friendly Agent controller, and original Mission.MainAgent.'
+        }
+        $surrogateRestoredState = Invoke-AgentCli 'state' @('-CommandId', "$prefix-surrogate-restored-state")
+        if ($surrogateRestoredState.state.context.gameState -eq 'MissionState' -and -not $surrogateRestoredState.state.mission.missionEnded) {
+            $surrogateRestoredStatus = Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-surrogate-restored-status")
+            if ($surrogateRestoredStatus.status -ne 'completed' -or $surrogateRestoredStatus.data.mainAgent.agentIndex -ne $mainAgentBefore.agentIndex -or
+                $surrogateRestoredStatus.data.mainAgent.controller -ne 'Player') {
+                throw 'Native battle status did not restore MainHero as Mission.MainAgent after the surrogate probe.'
             }
         }
     }
@@ -338,9 +451,40 @@ try {
         nativeAttackWasAvailable = ($attack.Count -eq 1)
         mainAgentFormationBeforeDelegate = $mainAgentBefore
         mainAgentFormationAfterDelegate = $mainAgentAfter
+        mainAgentFormationAiBehavior = $mainAgentAfter.formation
         delegation = $delegation.data
         mainAgentAiControllerProbe = if ($controllerProbe) { $controllerProbe.data } else { $null }
+        mainAgentAiRtsCameraProbe = if ($rtsCameraProbe) { $rtsCameraProbe.data } else { $null }
         mainAgentAiControllerProbeSamples = $controllerProbeSamples.ToArray()
+        mainAgentAiFormationBehaviorPresenceSamples = @($controllerProbeSamples | ForEach-Object { $_.formation.hasActiveAiBehavior } | Sort-Object -Unique)
+        mainAgentAiFormationBehaviorTypes = @($controllerProbeSamples | ForEach-Object { $_.formation.activeAiBehaviorType } | Sort-Object -Unique)
+        mainAgentAiFormationOrderTypes = @($controllerProbeSamples | ForEach-Object { $_.formation.activeAiOrderType } | Sort-Object -Unique)
+        mainAgentAiFormationOrderTargets = @($controllerProbeSamples | ForEach-Object { $_.formation.activeAiOrderTarget } | Sort-Object -Unique)
+        mainAgentAiFormationDistancesToOrderTarget = @($controllerProbeSamples | ForEach-Object { $_.formation.distanceToActiveAiOrderTarget } | Sort-Object -Unique)
+        mainAgentAiSurrogateControllerProbe = if ($surrogateControllerProbe) { $surrogateControllerProbe.data } else { $null }
+        mainAgentAiSurrogateControllerProbeSamples = $surrogateControllerProbeSamples.ToArray()
+        mainAgentAiSurrogateFormationRefresh = if ($surrogateFormationAiRefresh) { $surrogateFormationAiRefresh.data } else { $null }
+        mainAgentAiSurrogateMovementOrderRebind = if ($surrogateMovementOrderRebind) { $surrogateMovementOrderRebind.data } else { $null }
+        mainAgentAiSurrogateControllerProbeRestore = if ($surrogateControllerProbeRestore) { $surrogateControllerProbeRestore.data } else { $null }
+        mainHeroMovedAfterMovementOrderRebind = if ($surrogateMovementOrderRebind -and @($surrogateControllerProbeSamples | Where-Object phase -eq 'after-movement-order-rebind').Count -gt 1) {
+            $postRebindSamples = @($surrogateControllerProbeSamples | Where-Object phase -eq 'after-movement-order-rebind')
+            $initialPostRebindPosition = $postRebindSamples[0].position
+            @($postRebindSamples | Where-Object {
+                $dx = [double]$_.position.x - [double]$initialPostRebindPosition.x
+                $dy = [double]$_.position.y - [double]$initialPostRebindPosition.y
+                $dz = [double]$_.position.z - [double]$initialPostRebindPosition.z
+                [Math]::Sqrt($dx * $dx + $dy * $dy + $dz * $dz) -gt 0.1
+            }).Count -gt 0
+        } else { $null }
+        mainAgentMovedWhileNonMissionMainAgent = if ($surrogateControllerProbeSamples.Count -gt 1) {
+            $initialSurrogateProbePosition = $surrogateControllerProbeSamples[0].position
+            @($surrogateControllerProbeSamples | Where-Object {
+                $dx = [double]$_.position.x - [double]$initialSurrogateProbePosition.x
+                $dy = [double]$_.position.y - [double]$initialSurrogateProbePosition.y
+                $dz = [double]$_.position.z - [double]$initialSurrogateProbePosition.z
+                [Math]::Sqrt($dx * $dx + $dy * $dy + $dz * $dz) -gt 0.1
+            }).Count -gt 0
+        } else { $null }
         mainAgentAiControllerProbeRestore = if ($controllerProbeRestore) { $controllerProbeRestore.data } else { $null }
         mainAgentPositionChangedWhileAiControlled = if ($controllerProbeSamples.Count -gt 1) {
             $initialPosition = $controllerProbeSamples[0].position
