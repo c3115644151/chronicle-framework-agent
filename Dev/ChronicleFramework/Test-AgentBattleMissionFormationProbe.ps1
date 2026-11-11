@@ -3,7 +3,8 @@ param(
     [string]$SourceSaveName = 'AgentBridgeLifecycle',
     [ValidateRange(30,900)][int]$TimeoutSeconds = 300,
     [switch]$ProbeMainAgentAiController,
-    [switch]$ProbeMainAgentRtsCameraBehavior
+    [switch]$ProbeMainAgentRtsCameraBehavior,
+    [switch]$ProbeBattleMovementInput
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,7 +26,7 @@ $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlo
 $priorMode = $env:CHRONICLE_HARNESS_MODE
 $env:CHRONICLE_HARNESS_MODE = 'battle-fixture'
 $prefix = 'battle-mission-formation-' + [Guid]::NewGuid().ToString('N')
-$probeName = if ($ProbeMainAgentRtsCameraBehavior) { 'BattleMissionRtsCameraProbe' } elseif ($ProbeMainAgentAiController) { 'BattleMissionControllerProbe' } else { 'BattleMissionFormationProbe' }
+$probeName = if ($ProbeBattleMovementInput) { 'BattleMissionMovementInputProbe' } elseif ($ProbeMainAgentRtsCameraBehavior) { 'BattleMissionRtsCameraProbe' } elseif ($ProbeMainAgentAiController) { 'BattleMissionControllerProbe' } else { 'BattleMissionFormationProbe' }
 $runDirectory = if ($env:CHRONICLE_HARNESS_TEMP) { [IO.Path]::GetFullPath($env:CHRONICLE_HARNESS_TEMP) } else { Join-Path $PSScriptRoot ('TestResults\' + $probeName) }
 New-Item -ItemType Directory -Path $runDirectory -Force | Out-Null
 $script:NativeReceipts = [System.Collections.Generic.List[object]]::new()
@@ -247,6 +248,7 @@ try {
 
     $controllerProbe = $null
     $rtsCameraProbe = $null
+    $battleMovementInputProbe = $null
     $controllerProbeRestore = $null
     $controllerProbeSamples = [System.Collections.Generic.List[object]]::new()
     $surrogateControllerProbe = $null
@@ -384,6 +386,50 @@ try {
         }
     }
 
+    if ($ProbeBattleMovementInput) {
+        $movementProbeBefore = $statusAfter.data.mainAgent.position
+        $movementProbeDayBefore = [double]$statusAfter.campaignDay
+        $movementProbeModeBefore = [string]$statusAfter.data.campaignTimeControlMode
+        $battleMovementInputProbe = Invoke-AgentCli 'harnessBattleMovementInputProbe' @('-X', '0', '-Y', '-1', '-DurationSeconds', '0.5', '-CommandId', "$prefix-battle-movement-input")
+        if ($battleMovementInputProbe.status -ne 'completed' -or $battleMovementInputProbe.data.scope -ne 'harness-only' -or
+            $battleMovementInputProbe.data.mainAgentController -ne 'Player' -or $battleMovementInputProbe.data.timeControlModeBefore -ne 'Stop' -or
+            $battleMovementInputProbe.data.timeControlModeAfter -ne 'Stop' -or [Math]::Abs([double]$battleMovementInputProbe.data.campaignDayAfter - $movementProbeDayBefore) -gt 0.001) {
+            throw 'The battle movement input probe did not preserve Player control and Campaign time under its field-Battle guards.'
+        }
+        Start-Sleep -Milliseconds 750
+        $movementProbeStateAfter = Invoke-AgentCli 'state' @('-CommandId', "$prefix-battle-movement-input-after")
+        $movementProbeStatusAfter = $null
+        $movementProbePositionAfter = $null
+        if ($movementProbeStateAfter.state.context.gameState -eq 'MissionState' -and -not $movementProbeStateAfter.state.mission.missionEnded) {
+            $movementProbeStatusAfter = Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-battle-movement-input-status-after")
+            if ($movementProbeStatusAfter.status -eq 'completed' -and $movementProbeStatusAfter.data.mainAgent) {
+                $movementProbePositionAfter = $movementProbeStatusAfter.data.mainAgent.position
+            }
+        }
+        $movementProbeDistance = $null
+        if ($null -ne $movementProbePositionAfter) {
+            $dx = [double]$movementProbePositionAfter.x - [double]$movementProbeBefore.x
+            $dy = [double]$movementProbePositionAfter.y - [double]$movementProbeBefore.y
+            $dz = [double]$movementProbePositionAfter.z - [double]$movementProbeBefore.z
+            $movementProbeDistance = [Math]::Sqrt($dx * $dx + $dy * $dy + $dz * $dz)
+        }
+        $battleMovementInputProbe = [ordered]@{
+            request = $battleMovementInputProbe.data
+            campaignDayBefore = $movementProbeDayBefore
+            campaignDayAfter = [double]$movementProbeStateAfter.campaignDay
+            timeControlModeBefore = $movementProbeModeBefore
+            timeControlModeAfter = [string]$movementProbeStateAfter.timeControlMode
+            positionBefore = $movementProbeBefore
+            positionAfter = $movementProbePositionAfter
+            distanceMoved = $movementProbeDistance
+            movementObserved = ($null -ne $movementProbeDistance -and $movementProbeDistance -gt 0.05)
+            missionEndedBeforeReadback = [bool]$movementProbeStateAfter.state.mission.missionEnded
+        }
+        if ($battleMovementInputProbe.campaignDayAfter -ne $movementProbeDayBefore -or $battleMovementInputProbe.timeControlModeAfter -ne 'Stop') {
+            throw 'The bounded battle movement input changed Campaign time or mode.'
+        }
+    }
+
     $missionEnded = $false
     $healthSamples = [System.Collections.Generic.List[double]]::new()
     $positionSamples = [System.Collections.Generic.List[object]]::new()
@@ -455,6 +501,7 @@ try {
         delegation = $delegation.data
         mainAgentAiControllerProbe = if ($controllerProbe) { $controllerProbe.data } else { $null }
         mainAgentAiRtsCameraProbe = if ($rtsCameraProbe) { $rtsCameraProbe.data } else { $null }
+        battleMovementInputProbe = $battleMovementInputProbe
         mainAgentAiControllerProbeSamples = $controllerProbeSamples.ToArray()
         mainAgentAiFormationBehaviorPresenceSamples = @($controllerProbeSamples | ForEach-Object { $_.formation.hasActiveAiBehavior } | Sort-Object -Unique)
         mainAgentAiFormationBehaviorTypes = @($controllerProbeSamples | ForEach-Object { $_.formation.activeAiBehaviorType } | Sort-Object -Unique)

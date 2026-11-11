@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using TaleWorlds.CampaignSystem;
+using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.CampaignSystem.GameState;
 using HarmonyLib;
 using TaleWorlds.Core;
@@ -14,6 +15,37 @@ internal static class AgentMissionInputPatch
     private const string HarmonyId = "ChronicleFramework.TavernMissionInput";
 
     internal static bool IsInstalled { get; private set; }
+    private static Mission _battleMovementProbeMission;
+    private static Agent _battleMovementProbeAgent;
+
+    internal static bool IsSupportedCampaignFieldBattleInput(Mission mission, Agent agent)
+    {
+        return mission != null && agent != null && ReferenceEquals(mission, Mission.Current) && !mission.MissionEnded &&
+            mission.Mode == MissionMode.Battle && mission.IsFieldBattle && !mission.IsFriendlyMission &&
+            Game.Current?.GameStateManager?.ActiveState is MissionState && mission.MainAgent == agent && agent.IsActive() &&
+            agent.Controller == AgentControllerType.Player && PlayerEncounter.IsActive && PlayerEncounter.Battle != null &&
+            Campaign.Current?.TimeControlMode == CampaignTimeControlMode.Stop;
+    }
+
+    internal static bool IsActiveBattleMovementProbe(Mission mission, Agent agent)
+    {
+        return mission != null && agent != null && ReferenceEquals(_battleMovementProbeMission, mission) &&
+            ReferenceEquals(_battleMovementProbeAgent, agent) && IsSupportedCampaignFieldBattleInput(mission, agent);
+    }
+
+    internal static void BeginBattleMovementProbe(Mission mission, Agent agent)
+    {
+        if (!IsSupportedCampaignFieldBattleInput(mission, agent))
+            throw new InvalidOperationException("battle movement input probe requires the active stopped Campaign field Battle Mission and Player-controlled MainAgent");
+        _battleMovementProbeMission = mission;
+        _battleMovementProbeAgent = agent;
+    }
+
+    internal static void ClearBattleMovementProbe()
+    {
+        _battleMovementProbeMission = null;
+        _battleMovementProbeAgent = null;
+    }
 
     internal static bool IsNativeMenuVisible()
     {

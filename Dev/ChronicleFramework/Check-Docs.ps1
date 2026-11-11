@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.571'
+$contractVersion = '7.572'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -1610,6 +1610,7 @@ if ($videoCaptureSource -notmatch 'function Test-ChronicleFragmentedCaptureResil
 $battleFixtureSource = Get-Content (Join-Path $harnessRoot 'Test-AgentBattleFixture.ps1') -Raw -Encoding UTF8
 $battleMissionFormationProbeSource = Get-Content (Join-Path $harnessRoot 'Test-AgentBattleMissionFormationProbe.ps1') -Raw -Encoding UTF8
 $battleMissionAdapterSource = Get-Content (Join-Path $harnessRoot 'AgentBattleMissionAdapter.cs') -Raw -Encoding UTF8
+$missionInputPatchSource = Get-Content (Join-Path $harnessRoot 'AgentMissionInputPatch.cs') -Raw -Encoding UTF8
 if ($videoCaptureSource -notmatch 'keyframeInterval = \[Math\]::Max\(1, \$FrameRate \* 2\)' -or $videoCaptureSource -notmatch 'movflags \+frag_keyframe\+empty_moov\+default_base_moof' -or $videoCaptureSource -notmatch 'contactFrameBudget = Get-ChronicleContactFrameBudget' -or $videoCaptureSource -notmatch '\[Math\]::Ceiling\(\$frames / \$contactFrameBudget\)' -or $videoCaptureSource -notmatch '\$contactColumns = \[Math\]::Min\(4, \$contactSampleCount\)' -or $videoCaptureSource -notmatch 'frameExtractionFailures' -or $videoCaptureSource -notmatch 'agenthost-provider-response' -or $videoCaptureSource -notmatch '\$eventOnlyActions = @\(') { throw 'Continuous Bannerlord capture must preserve interrupted clips, include Host decisions, capture repeated motion events, add bounded periodic scene samples, and still remove completed source video after indexing.' }
 if ($agentLiveModelLoopSource -notmatch 'Add-ChronicleAgentHostProgressCaptureEvents' -or $agentLiveModelLoopSource -notmatch 'AgentHostProgress\.jsonl' -or $videoCaptureSource -notmatch 'missionNavigateToAgent' -or $videoCaptureSource -notmatch 'PRIVATE_PROMPT_MARKER') { throw 'AgentHost video evidence must consume its sanitized decision log and cover repeated Native scene-navigation decisions without exposing prompts.' }
 if ([regex]::Matches($agentLiveModelLoopSource, 'Add-ChronicleAgentHostProgressCaptureEvents').Count -lt 2 -or $agentLiveModelLoopSource -notmatch 'agentHostCaptureEventsWritten') { throw 'AgentHost decision timeline events must be merged in both successful and failed model-loop outcomes without duplicate appends.' }
@@ -1661,6 +1662,22 @@ if ($harnessScript -notmatch "'BattleMissionControllerProbe'" -or
     $battleMissionFormationProbeSource -notmatch "Invoke-AgentCli 'harnessMainAgentAiRtsCameraProbe'" -or
     $agentCliSource -notmatch 'harnessMainAgentAiRtsCameraProbe' -or
     $agentHostDecisionCycleSource -match 'harnessMainAgentAiRtsCameraProbe' -or
+    $harnessScript -notmatch "'BattleMissionMovementInputProbe' \{ @\('Preflight', 'Build', 'BattleMissionMovementInputProbe'\) \}" -or
+    $harnessScript -match "'All' \{[^\r\n]*'BattleMissionMovementInputProbe'" -or
+    $battleMissionFormationProbeSource -notmatch 'ProbeBattleMovementInput' -or
+    $battleMissionFormationProbeSource -notmatch "Invoke-AgentCli 'harnessBattleMovementInputProbe'" -or
+    $agentCliSource -notmatch 'harnessBattleMovementInputProbe' -or
+    $agentHostDecisionCycleSource -match 'harnessBattleMovementInputProbe' -or
+    $protocolSource -notmatch 'BeginBattleMovementProbe\(movementProbeMission, movementProbeMainAgent\)' -or
+    $protocolSource -notmatch 'missionInput requires a supported non-battle town or Tavern Location Mission' -or
+    $harnessScript -notmatch "'BattleMissionMovementInputProbe' \{ @\('Preflight', 'Build', 'BattleMissionMovementInputProbe'\) \}" -or
+    $harnessScript -match "'All' \{[^\r\n]*'BattleMissionMovementInputProbe'" -or
+    $battleMissionFormationProbeSource -notmatch 'ProbeBattleMovementInput' -or
+    $battleMissionFormationProbeSource -notmatch "Invoke-AgentCli 'harnessBattleMovementInputProbe'" -or
+    $protocolSource -notmatch 'harnessBattleMovementInputProbe requires the active stopped Campaign field Battle Mission' -or
+    $protocolSource -notmatch 'missionInput requires a supported non-battle town or Tavern Location Mission' -or
+    $missionInputPatchSource -notmatch 'IsActiveBattleMovementProbe' -or
+    $agentHostDecisionCycleSource -match 'harnessBattleMovementInputProbe' -or
     $agentHostDecisionCycleSource -match 'harnessMainAgentAiControllerProbe') {
     throw 'The opt-in MainAgent AI-controller probe must remain bounded and restorable in Native Harness code, perform no model work, and stay out of the production AgentHost action catalog.'
 }

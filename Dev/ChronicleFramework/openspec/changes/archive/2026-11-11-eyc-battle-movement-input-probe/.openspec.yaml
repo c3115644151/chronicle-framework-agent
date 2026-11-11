@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-11-11
+goal: "Measure a bounded player-like movement input in a disposable battle clone
+  to inform #132; keep it harness-only until the product battle-risk decision is
+  resolved."
+skip_specs: true

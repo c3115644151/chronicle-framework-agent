@@ -1160,6 +1160,50 @@ internal sealed class ChronicleAgentProtocol
                     var missionInputData = "{\"x\":" + inputX.ToString("R", CultureInfo.InvariantCulture) + ",\"y\":" + inputY.ToString("R", CultureInfo.InvariantCulture) + ",\"durationSeconds\":" + durationSeconds.ToString("R", CultureInfo.InvariantCulture) + ",\"boundedLease\":true}";
                     WriteResponse(commandId, action, "completed", behavior, null, missionInputData);
                     break;
+                case "harnessBattleMovementInputProbe":
+                    var movementProbeMission = Mission.Current;
+                    var movementProbeMainAgent = movementProbeMission?.MainAgent;
+                    if (!AgentMissionInputPatch.IsSupportedCampaignFieldBattleInput(movementProbeMission, movementProbeMainAgent))
+                        throw new InvalidOperationException("harnessBattleMovementInputProbe requires the active stopped Campaign field Battle Mission and Player-controlled MainAgent");
+                    if (_missionInputAgent != null)
+                        throw new InvalidOperationException("harnessBattleMovementInputProbe refuses while another MovementInput lease is active");
+                    var probeInputX = ReadRequiredFiniteDouble(command, "x");
+                    var probeInputY = ReadRequiredFiniteDouble(command, "y");
+                    var probeDuration = ReadRequiredFiniteDouble(command, "durationSeconds");
+                    if (probeInputX < -1.0 || probeInputX > 1.0 || probeInputY < -1.0 || probeInputY > 1.0 || probeDuration <= 0.0 || probeDuration > 0.5)
+                        throw new InvalidOperationException("harnessBattleMovementInputProbe requires axes in [-1,1] and a duration in (0,0.5]");
+                    var probeMagnitude = Math.Sqrt(probeInputX * probeInputX + probeInputY * probeInputY);
+                    if (probeMagnitude <= 0.0)
+                        throw new InvalidOperationException("harnessBattleMovementInputProbe requires a nonzero movement vector");
+                    if (probeMagnitude > 1.0)
+                    {
+                        probeInputX /= probeMagnitude;
+                        probeInputY /= probeMagnitude;
+                    }
+                    var probeCampaignDayBefore = CampaignTime.Now.ToDays;
+                    var probeTimeModeBefore = Campaign.Current.TimeControlMode.ToString();
+                    var probePositionBefore = movementProbeMainAgent.Position;
+                    AgentMissionInputPatch.BeginBattleMovementProbe(movementProbeMission, movementProbeMainAgent);
+                    _missionInputAgent = movementProbeMainAgent;
+                    _missionInputVector = new TaleWorlds.Library.Vec2((float)probeInputX, (float)probeInputY);
+                    _missionInputExpiresAt = EngineTime.ApplicationTime + (float)probeDuration;
+                    _missionInputAgent.MovementInputVector = _missionInputVector;
+                    var battleMovementProbeData = new StringBuilder(384);
+                    battleMovementProbeData.Append("{\"schemaVersion\":1,\"scope\":\"harness-only\",\"nativeInput\":\"MainAgent.MovementInputVector after MissionMainAgentController.ControlTick\"")
+                        .Append(",\"x\":").Append(probeInputX.ToString("R", CultureInfo.InvariantCulture))
+                        .Append(",\"y\":").Append(probeInputY.ToString("R", CultureInfo.InvariantCulture))
+                        .Append(",\"durationSeconds\":").Append(probeDuration.ToString("R", CultureInfo.InvariantCulture))
+                        .Append(",\"mainAgentController\":\"").Append(Escape(movementProbeMainAgent.Controller.ToString())).Append('"');
+                    battleMovementProbeData.Append(",\"positionBefore\":{\"x\":").Append(probePositionBefore.X.ToString("R", CultureInfo.InvariantCulture))
+                        .Append(",\"y\":").Append(probePositionBefore.Y.ToString("R", CultureInfo.InvariantCulture))
+                        .Append(",\"z\":").Append(probePositionBefore.Z.ToString("R", CultureInfo.InvariantCulture)).Append('}')
+                        .Append(",\"campaignDayBefore\":").Append(probeCampaignDayBefore.ToString("R", CultureInfo.InvariantCulture))
+                        .Append(",\"campaignDayAfter\":").Append(CampaignTime.Now.ToDays.ToString("R", CultureInfo.InvariantCulture))
+                        .Append(",\"timeControlModeBefore\":\"").Append(Escape(probeTimeModeBefore)).Append('"')
+                        .Append(",\"timeControlModeAfter\":\"").Append(Escape(Campaign.Current.TimeControlMode.ToString())).Append('"');
+                    battleMovementProbeData.Append('}');
+                    WriteResponse(commandId, action, "completed", behavior, null, battleMovementProbeData.ToString());
+                    break;
                 case "missionNavigateToAgent":
                     var navigationMission = Mission.Current;
                     var navigationState = Game.Current.GameStateManager.ActiveState as MissionState;
@@ -2677,13 +2721,14 @@ internal sealed class ChronicleAgentProtocol
 
         var mission = Mission.Current;
         if (mission == null || mission.MissionEnded || mission.MainAgent != agent || !agent.IsActive()) return;
-        if (!AgentMissionInputPatch.IsSupportedLocationMission(mission))
+        if (!AgentMissionInputPatch.IsSupportedLocationMission(mission) && !AgentMissionInputPatch.IsActiveBattleMovementProbe(mission, agent))
             return;
         agent.MovementInputVector = protocol._missionInputVector;
     }
 
     private void ClearMissionInputLease()
     {
+        AgentMissionInputPatch.ClearBattleMovementProbe();
         if (_missionInputAgent != null && _missionInputAgent.IsActive())
             _missionInputAgent.MovementInputVector = TaleWorlds.Library.Vec2.Zero;
         _missionInputAgent = null;
