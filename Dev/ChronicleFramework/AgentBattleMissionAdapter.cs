@@ -2,6 +2,7 @@
 using System;
 using System.Globalization;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using SandBox.View.Map;
 using TaleWorlds.CampaignSystem;
@@ -13,6 +14,8 @@ namespace ChronicleFramework;
 
 internal static class ChronicleAgentBattleMissionAdapter
 {
+    private static Mission? _deploymentFinishSubmittedForMission;
+
     internal static string BuildStatusJson()
     {
         var mission = Mission.Current;
@@ -149,7 +152,86 @@ internal static class ChronicleAgentBattleMissionAdapter
         return json.ToString();
     }
 
+    internal static string FinishCurrentBattleDeployment()
+    {
+        if (!TryGetActiveCampaignFieldBattle(out var mission, out var reason))
+            throw new InvalidOperationException("missionFinishDeployment " + reason);
+        var campaign = Campaign.Current ?? throw new InvalidOperationException("missionFinishDeployment requires an active Campaign");
+        if (campaign.TimeControlMode != CampaignTimeControlMode.Stop)
+            throw new InvalidOperationException("missionFinishDeployment requires the Campaign clock to remain stopped");
+        if (mission.Mode != MissionMode.Deployment)
+            throw new InvalidOperationException("missionFinishDeployment requires the current Native Mission to be in Deployment mode");
+        var mainAgentBefore = mission.MainAgent;
+        if (mainAgentBefore != null && (!mainAgentBefore.IsActive() || !mainAgentBefore.IsPlayerControlled))
+            throw new InvalidOperationException("missionFinishDeployment rejects an active non-Player MainAgent");
+        if (ChronicleInquiryAdapter.IsInquiryOpen)
+            throw new InvalidOperationException("missionFinishDeployment refuses to bypass an active Native Inquiry");
+        if (ReferenceEquals(_deploymentFinishSubmittedForMission, mission))
+            throw new InvalidOperationException("missionFinishDeployment was already submitted for this Native Mission");
+
+        const string orderBattleViewTypeName = "TaleWorlds.MountAndBlade.GauntletUI.Mission.Singleplayer.MissionGauntletOrderOfBattleUIHandler";
+        var orderBattleView = mission.MissionBehaviors.FirstOrDefault(behavior => behavior?.GetType().FullName == orderBattleViewTypeName);
+        if (orderBattleView == null)
+            throw new InvalidOperationException("missionFinishDeployment requires the active Native OrderOfBattle Ready view");
+        var viewModelField = orderBattleView.GetType().GetField("_dataSource", BindingFlags.Instance | BindingFlags.NonPublic);
+        var orderBattleViewModel = viewModelField?.GetValue(orderBattleView);
+        if (orderBattleViewModel == null)
+            throw new InvalidOperationException("missionFinishDeployment could not resolve the active Native OrderOfBattle view-model");
+        var viewModelType = orderBattleViewModel.GetType();
+        var canStartProperty = viewModelType.GetProperty("CanStartMission", BindingFlags.Instance | BindingFlags.Public);
+        if (canStartProperty?.GetValue(orderBattleViewModel) is not bool canStart || !canStart)
+            throw new InvalidOperationException("missionFinishDeployment refuses while the original Native Ready button is disabled");
+        var executeReady = viewModelType.GetMethods(BindingFlags.Instance | BindingFlags.Public)
+            .FirstOrDefault(method => method.Name == "ExecuteBeginMission" && method.GetParameters().Length == 0);
+        if (executeReady == null)
+            throw new InvalidOperationException("missionFinishDeployment could not resolve the original Native OrderOfBattle Ready command");
+
+        var modeBefore = mission.Mode.ToString();
+        var campaignDayBefore = CampaignTime.Now.ToDays;
+        var timeModeBefore = campaign.TimeControlMode.ToString();
+        try
+        {
+            executeReady.Invoke(orderBattleViewModel, null);
+        }
+        catch (TargetInvocationException exception) when (exception.InnerException != null)
+        {
+            throw new InvalidOperationException("missionFinishDeployment original Native Ready command failed", exception.InnerException);
+        }
+        _deploymentFinishSubmittedForMission = mission;
+        var modeAfter = mission.Mode.ToString();
+        var campaignDayAfter = CampaignTime.Now.ToDays;
+        var timeModeAfter = campaign.TimeControlMode.ToString();
+
+        var json = new StringBuilder(512);
+        json.Append("{\"schemaVersion\":1,\"nativeHandler\":\"OrderOfBattleVM.ExecuteBeginMission\",\"nativeDeploymentHandler\":\"DeploymentHandler.FinishDeployment\",\"nativeUiView\":\"OrderOfBattle.xml\",\"canStartMission\":true")
+            .Append(",\"modeBefore\":"); AppendStringValue(json, modeBefore);
+        json.Append(",\"modeAfter\":"); AppendStringValue(json, modeAfter);
+        json.Append(",\"campaignDayBefore\":").Append(Number(campaignDayBefore))
+            .Append(",\"campaignDayAfter\":").Append(Number(campaignDayAfter));
+        json.Append(",\"timeControlModeBefore\":"); AppendStringValue(json, timeModeBefore);
+        json.Append(",\"timeControlModeAfter\":"); AppendStringValue(json, timeModeAfter);
+        json.Append(",\"mainAgentPresentBefore\":").Append(mainAgentBefore != null && mainAgentBefore.IsActive() ? "true" : "false");
+        json.Append(",\"mainAgentControllerBefore\":"); AppendStringValue(json, mainAgentBefore?.Controller.ToString());
+        var mainAgentAfter = mission.MainAgent;
+        json.Append(",\"mainAgentPresentAfter\":").Append(mainAgentAfter != null && mainAgentAfter.IsActive() ? "true" : "false");
+        json.Append(",\"mainAgentControllerAfter\":"); AppendStringValue(json, mainAgentAfter?.Controller.ToString());
+        json.Append('}');
+        return json.ToString();
+    }
+
     private static bool TryGetSupportedBattleMission(out Mission mission, out string reason)
+    {
+        if (!TryGetActiveCampaignFieldBattle(out mission, out reason)) return false;
+        if (mission.Mode != MissionMode.Battle)
+        {
+            reason = "battle mission has not left Native Deployment mode";
+            return false;
+        }
+        reason = string.Empty;
+        return true;
+    }
+
+    private static bool TryGetActiveCampaignFieldBattle(out Mission mission, out string reason)
     {
         mission = Mission.Current!;
         if (Game.Current?.GameStateManager?.ActiveState?.GetType().Name != "MissionState" || mission == null || mission.MissionEnded)
@@ -160,11 +242,6 @@ internal static class ChronicleAgentBattleMissionAdapter
         if (mission.IsFriendlyMission || !mission.IsFieldBattle || !PlayerEncounter.IsActive || PlayerEncounter.Battle == null)
         {
             reason = "requires a Campaign field Battle Mission started from an active Native Encounter";
-            return false;
-        }
-        if (mission.Mode != MissionMode.Battle)
-        {
-            reason = "requires the Native Battle Mission to have started, not be in deployment/transition";
             return false;
         }
         reason = string.Empty;

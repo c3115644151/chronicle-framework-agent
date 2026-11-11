@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-11-11
+goal: Move the bounded no-model Attack→Deployment→Battle→F6→aftermath path
+  forward without clock or manual input

@@ -1,0 +1,329 @@
+[CmdletBinding()]
+param(
+    [string]$SourceSaveName = 'AgentBridgeLifecycle',
+    [ValidateRange(30,900)][int]$TimeoutSeconds = 300
+)
+
+$ErrorActionPreference = 'Stop'
+$cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
+$saveRoot = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\Game Saves')).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+if ($SourceSaveName -notmatch '^[A-Za-z0-9_-]{1,48}$') { throw 'Battle Mission formation probe requires one source save basename without a path or extension.' }
+$sourceSavePath = [IO.Path]::GetFullPath((Join-Path $saveRoot ($SourceSaveName + '.sav')))
+if (-not $sourceSavePath.StartsWith($saveRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Battle Mission source save path escaped the Game Saves directory.' }
+if (-not (Test-Path -LiteralPath $sourceSavePath -PathType Leaf)) { throw "Battle Mission source save not found: $SourceSaveName" }
+if (Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue) { throw 'Bannerlord is already running; the probe will not disturb an existing session.' }
+
+$sourceHashBefore = (Get-FileHash -LiteralPath $sourceSavePath -Algorithm SHA256).Hash
+$disposableSaveName = 'ChronicleW7P-FormationProbe-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
+$disposableSavePath = [IO.Path]::GetFullPath((Join-Path $saveRoot ($disposableSaveName + '.sav')))
+if (-not $disposableSavePath.StartsWith($saveRoot, [StringComparison]::OrdinalIgnoreCase) -or (Test-Path -LiteralPath $disposableSavePath)) { throw 'Unique disposable Battle Mission probe save path is invalid or already exists.' }
+$disposableSaveHash = $null
+$disposableSaveOwned = $false
+$sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\session.json'
+$priorMode = $env:CHRONICLE_HARNESS_MODE
+$env:CHRONICLE_HARNESS_MODE = 'battle-fixture'
+$prefix = 'battle-mission-formation-' + [Guid]::NewGuid().ToString('N')
+$runDirectory = if ($env:CHRONICLE_HARNESS_TEMP) { [IO.Path]::GetFullPath($env:CHRONICLE_HARNESS_TEMP) } else { Join-Path $PSScriptRoot 'TestResults\BattleMissionFormationProbe' }
+New-Item -ItemType Directory -Path $runDirectory -Force | Out-Null
+$script:NativeReceipts = [System.Collections.Generic.List[object]]::new()
+$script:ProcessId = $null
+$nativeReceiptPath = Join-Path $runDirectory 'BattleMissionFormationProbe-NativeReceipts.jsonl'
+[IO.File]::WriteAllText($nativeReceiptPath, '', [Text.UTF8Encoding]::new($false))
+
+function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @()) {
+    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli $Action @Arguments -TimeoutSeconds $TimeoutSeconds -AsJson 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) { throw "Agent CLI '$Action' failed: $output" }
+    try { $receipt = $output | ConvertFrom-Json }
+    catch { throw "Agent CLI '$Action' returned invalid JSON: $output" }
+    if ($script:ProcessId -and [int]$receipt.processId -ne $script:ProcessId) { throw "Agent CLI '$Action' switched Bannerlord process ids." }
+    $script:NativeReceipts.Add([ordered]@{
+        action = $Action
+        commandId = [string]$receipt.commandId
+        status = [string]$receipt.status
+        gameState = [string]$receipt.state.context.gameState
+        menuId = [string]$receipt.state.context.menuId
+        missionMode = [string]$receipt.state.mission.mode
+        missionEnded = [bool]$receipt.state.mission.missionEnded
+        campaignDay = $receipt.campaignDay
+        timeControlMode = [string]$receipt.timeControlMode
+        mainAgentController = [string]$receipt.data.mainAgentControllerAfter
+        error = [string]$receipt.error
+    })
+    $receiptLine = ($receipt | ConvertTo-Json -Depth 10 -Compress) + [Environment]::NewLine
+    [IO.File]::AppendAllText($nativeReceiptPath, $receiptLine, [Text.UTF8Encoding]::new($false))
+    return $receipt
+}
+
+function Invoke-AgentCliExpectedReject([string]$Action, [string[]]$Arguments, [string]$CommandId) {
+    $responseRoot = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\responses'
+    $rejectedPath = Join-Path $responseRoot ($CommandId + '.rejected.json')
+    if (Test-Path -LiteralPath $rejectedPath) { Remove-Item -LiteralPath $rejectedPath }
+    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli $Action @Arguments -CommandId $CommandId -TimeoutSeconds $TimeoutSeconds -AsJson 2>&1 | Out-String
+    $receipt = $null
+    if ($LASTEXITCODE -eq 0) {
+        try { $receipt = $output | ConvertFrom-Json } catch { throw "Native '$Action' returned invalid JSON for an expected rejection: $output" }
+    }
+    elseif (Test-Path -LiteralPath $rejectedPath -PathType Leaf) {
+        $receipt = Get-Content -LiteralPath $rejectedPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    }
+    else { throw "Native '$Action' did not leave its expected rejected receipt: $output" }
+    if ($receipt.status -ne 'rejected' -or $receipt.action -ne $Action) { throw "Native '$Action' returned an invalid rejection receipt." }
+    $script:NativeReceipts.Add([ordered]@{ action = $Action; commandId = $CommandId; status = [string]$receipt.status; error = [string]$receipt.error })
+    [IO.File]::AppendAllText($nativeReceiptPath, (($receipt | ConvertTo-Json -Depth 10 -Compress) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
+    return $receipt
+}
+
+function Get-FormationSnapshot($MissionStatus) {
+    $mainAgent = $MissionStatus.data.mainAgent
+    if ($null -eq $mainAgent) { throw 'Native Battle Mission status did not expose the current MainAgent.' }
+    return [ordered]@{
+        controller = [string]$mainAgent.controller
+        isPlayerControlled = [bool]$mainAgent.isPlayerControlled
+        health = [double]$mainAgent.health
+        healthLimit = [double]$mainAgent.healthLimit
+        isDetachedFromFormation = $mainAgent.isDetachedFromFormation
+        formation = $mainAgent.formation
+        playerFormations = @($MissionStatus.data.playerTeam.formations | ForEach-Object {
+            [ordered]@{ formationIndex = $_.formationIndex; unitCount = $_.unitCount; isAIControlled = $_.isAIControlled; isPlayerOwned = $_.isPlayerOwned; isSelected = $_.isSelected }
+        })
+        campaignDay = [double]$MissionStatus.campaignDay
+        timeControlMode = [string]$MissionStatus.data.campaignTimeControlMode
+    }
+}
+
+try {
+    $loaded = Invoke-AgentCli 'load' @('-SaveName', $SourceSaveName)
+    if ($loaded.status -ne 'completed' -or -not $loaded.session.processId) { throw 'Native disposable Campaign load did not complete.' }
+    $script:ProcessId = [int]$loaded.session.processId
+    $saveAs = Invoke-AgentCli 'save' @('-SaveName', $disposableSaveName)
+    if ($saveAs.status -ne 'completed' -or -not (Test-Path -LiteralPath $disposableSavePath -PathType Leaf)) { throw 'Native SaveAs did not create the uniquely named disposable Battle Mission probe copy.' }
+    $disposableSaveOwned = $true
+    $disposableSaveHash = (Get-FileHash -LiteralPath $disposableSavePath -Algorithm SHA256).Hash
+    $state = Invoke-AgentCli 'state' @('-CommandId', "$prefix-initial")
+    $invalidDeploymentBefore = $state
+    $invalidDeployment = Invoke-AgentCliExpectedReject 'missionFinishDeployment' @() "$prefix-map-deployment-reject"
+    $invalidDeploymentAfter = Invoke-AgentCli 'state' @('-CommandId', "$prefix-after-map-deployment-reject")
+    $invalidDeploymentNoMutation = $invalidDeploymentBefore.state.context.gameState -eq $invalidDeploymentAfter.state.context.gameState -and
+        $invalidDeploymentBefore.campaignDay -eq $invalidDeploymentAfter.campaignDay -and
+        $invalidDeploymentBefore.timeControlMode -eq $invalidDeploymentAfter.timeControlMode -and
+        $invalidDeploymentBefore.state.party.members -eq $invalidDeploymentAfter.state.party.members -and
+        $invalidDeploymentBefore.state.economy.gold -eq $invalidDeploymentAfter.state.economy.gold -and
+        $invalidDeploymentBefore.state.economy.renown -eq $invalidDeploymentAfter.state.economy.renown
+    if (-not $invalidDeploymentNoMutation) { throw 'The out-of-Mission deployment-finish rejection changed Campaign state, time, party, Gold, or Renown.' }
+    $initialMenuId = [string]$state.state.context.menuId
+    if ($state.state.context.gameState -eq 'MapState' -and $initialMenuId -and $initialMenuId -notin @('encounter','encounter_meeting','join_encounter')) {
+        $leaveOption = @($state.state.availableMenuOptions | Where-Object { $_.available -and $_.enabled -and $_.isLeave } | Select-Object -First 1)
+        if ($leaveOption.Count -ne 1) { throw "The disposable source opened map menu '$initialMenuId' without a current Native Leave option; the probe will not use screen coordinates." }
+        $leave = Invoke-AgentCli 'menuSelect' @('-MenuId', $initialMenuId, '-OptionId', [string]$leaveOption[0].id, '-CommandId', "$prefix-leave-initial-location")
+        if ($leave.status -ne 'completed') { throw "The current Native Leave option for '$initialMenuId' was not accepted." }
+        $state = Invoke-AgentCli 'state' @('-CommandId', "$prefix-map-after-location-leave")
+    }
+    $encounteredPartyId = [string]$state.state.context.encounteredPartyId
+    $encounterActive = [bool]$state.state.context.encounterActive
+    if (-not $encounterActive) {
+        $visibleTarget = @($state.state.nearbyParties | Where-Object { $_.hostile -and $_.type -eq 'bandit' } | Sort-Object distance | Select-Object -First 1)
+        if ($visibleTarget.Count -ne 1) { throw 'The source Campaign has no currently visible hostile Bandit party; the disposable copy will be cleaned without pursuing or advancing time.' }
+        $targetId = [string]$visibleTarget[0].id
+        $pursue = Invoke-AgentCli 'pursue' @('-PartyId', $targetId, '-CommandId', "$prefix-pursue")
+        if ($pursue.status -ne 'completed') { throw 'Native pursuit did not accept the exact current visible hostile party.' }
+        $deadline = [DateTime]::UtcNow.AddSeconds([Math]::Min(60, $TimeoutSeconds))
+        do {
+            Start-Sleep -Milliseconds 500
+            $state = Invoke-AgentCli 'state' @('-CommandId', "$prefix-map-observe-$([Guid]::NewGuid().ToString('N'))")
+            $encounterActive = [bool]$state.state.context.encounterActive
+            $encounteredPartyId = [string]$state.state.context.encounteredPartyId
+        } while (-not $encounterActive -and [DateTime]::UtcNow -lt $deadline)
+    }
+    if (-not $encounterActive) { throw "The native pursuit did not reach a currently visible hostile Bandit before its bounded deadline; observed '$encounteredPartyId'." }
+    $targetId = $encounteredPartyId
+
+    $dialogueSteps = 0
+    while ($dialogueSteps++ -lt 8) {
+        $state = Invoke-AgentCli 'menu' @('-CommandId', "$prefix-encounter-menu-$dialogueSteps")
+        if ($state.state.context.menuId -eq 'encounter') { break }
+        $conversation = $state.state.context.conversation
+        if ($null -eq $conversation) { throw "Encounter was interrupted by unsupported game state '$($state.state.context.gameState)' / '$($state.state.context.menuId)'." }
+        $clickable = @($conversation.options | Where-Object { $_.clickable })
+        if ($clickable.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace([string]$conversation.sentenceText)) {
+            $state = Invoke-AgentCli 'dialogueContinue' @('-CommandId', "$prefix-continue-$dialogueSteps")
+            continue
+        }
+        $fight = @($clickable | Where-Object { $_.id -in @('bandit_start_defender_1','common_encounter_ultimatum','common_bandit_surrender_declined') } | Select-Object -First 1)
+        if ($fight.Count -ne 1) { throw "The current hostile dialogue has no supported direct-fight choice; observed ids: $(($clickable | ForEach-Object id) -join ',')." }
+        $state = Invoke-AgentCli 'dialogueSelect' @('-OptionId', [string]$fight[0].id, '-CommandId', "$prefix-fight-dialogue-$dialogueSteps")
+    }
+
+    $encounterMenu = Invoke-AgentCli 'menu' @('-CommandId', "$prefix-final-menu")
+    if ($encounterMenu.state.context.menuId -ne 'encounter') { throw "Expected Native encounter menu; found '$($encounterMenu.state.context.menuId)'." }
+    $sendTroops = @($encounterMenu.state.availableMenuOptions | Where-Object { $_.id -eq 'str_order_attack' -and $_.available -and $_.enabled })
+    $attack = @($encounterMenu.state.availableMenuOptions | Where-Object { $_.id -eq 'attack' -and $_.available -and $_.enabled })
+    if ($attack.Count -ne 1 -or [int]$encounterMenu.state.party.healthy -lt 1) {
+        throw "Native attack Mission probe is unavailable; SendTroops=$($sendTroops.Count), attack=$($attack.Count), healthy=$($encounterMenu.state.party.healthy), morale=$($encounterMenu.state.party.morale)."
+    }
+    $renownBefore = [double]$encounterMenu.state.economy.renown
+    $goldBefore = [long]$encounterMenu.state.economy.gold
+    $attackReceipt = Invoke-AgentCli 'menuSelect' @('-MenuId', 'encounter', '-OptionId', 'attack', '-CommandId', "$prefix-attack")
+    if ($attackReceipt.status -ne 'completed') { throw 'The original Native attack menu handler did not complete.' }
+
+    $missionDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min(45, $TimeoutSeconds))
+    $missionState = $attackReceipt
+    while ([DateTime]::UtcNow -lt $missionDeadline) {
+        $missionState = Invoke-AgentCli 'state' @('-CommandId', "$prefix-mission-enter-$([Guid]::NewGuid().ToString('N'))")
+        if ($missionState.state.context.gameState -eq 'MissionState' -and $missionState.state.mission.mode -in @('Deployment','Battle')) { break }
+        Start-Sleep -Milliseconds 500
+    }
+    if ($missionState.state.context.gameState -ne 'MissionState' -or $missionState.state.mission.mode -notin @('Deployment','Battle')) {
+        throw "The original Attack option did not reach a supported Battle Mission state; state='$($missionState.state.context.gameState)', mode='$($missionState.state.mission.mode)'."
+    }
+
+    $deploymentFinish = $null
+    $deploymentTransitionPollCount = 0
+    if ($missionState.state.mission.mode -eq 'Deployment') {
+        $deploymentFinish = Invoke-AgentCli 'missionFinishDeployment' @('-CommandId', "$prefix-native-finish-deployment")
+        if ($deploymentFinish.status -ne 'completed' -or $deploymentFinish.data.nativeHandler -ne 'OrderOfBattleVM.ExecuteBeginMission' -or
+            $deploymentFinish.data.nativeDeploymentHandler -ne 'DeploymentHandler.FinishDeployment' -or $deploymentFinish.data.canStartMission -ne $true -or
+            $deploymentFinish.data.modeBefore -ne 'Deployment' -or $deploymentFinish.data.timeControlModeBefore -ne 'Stop' -or
+            $deploymentFinish.data.timeControlModeAfter -ne 'Stop') {
+            throw 'Native DeploymentHandler.FinishDeployment did not verify its current Deployment/Stop preconditions and receipt.'
+        }
+    $duplicateDeploymentBefore = Invoke-AgentCli 'state' @('-CommandId', "$prefix-before-duplicate-deployment-finish")
+    $duplicateDeployment = Invoke-AgentCliExpectedReject 'missionFinishDeployment' @() "$prefix-duplicate-deployment-finish"
+    $duplicateDeploymentAfter = Invoke-AgentCli 'state' @('-CommandId', "$prefix-after-duplicate-deployment-finish")
+    $duplicateDeploymentNoMutation = $duplicateDeploymentBefore.state.context.gameState -eq $duplicateDeploymentAfter.state.context.gameState -and
+        $duplicateDeploymentBefore.state.mission.mode -eq $duplicateDeploymentAfter.state.mission.mode -and
+        $duplicateDeploymentBefore.campaignDay -eq $duplicateDeploymentAfter.campaignDay -and
+        $duplicateDeploymentBefore.timeControlMode -eq $duplicateDeploymentAfter.timeControlMode -and
+        $duplicateDeploymentBefore.state.party.members -eq $duplicateDeploymentAfter.state.party.members -and
+        $duplicateDeploymentBefore.state.economy.gold -eq $duplicateDeploymentAfter.state.economy.gold -and
+        $duplicateDeploymentBefore.state.economy.renown -eq $duplicateDeploymentAfter.state.economy.renown
+    if ($duplicateDeployment.status -ne 'rejected' -or -not $duplicateDeploymentNoMutation) { throw 'A duplicate Native deployment-finish request was not safely rejected without a second state change.' }
+        $battleReadyDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min(30, $TimeoutSeconds))
+        while ([DateTime]::UtcNow -lt $battleReadyDeadline) {
+            $missionState = Invoke-AgentCli 'state' @('-CommandId', "$prefix-battle-ready-$([Guid]::NewGuid().ToString('N'))")
+            $deploymentTransitionPollCount++
+            if ($missionState.state.context.gameState -eq 'MissionState' -and $missionState.state.mission.mode -eq 'Battle') { break }
+            if ($missionState.state.context.gameState -ne 'MissionState' -or $missionState.state.mission.missionEnded -or $missionState.state.context.inquiryOpen) {
+                throw "Native FinishDeployment did not advance the same Mission to Battle safely; state='$($missionState.state.context.gameState)', mode='$($missionState.state.mission.mode)', inquiry=$($missionState.state.context.inquiryOpen)."
+            }
+            Start-Sleep -Milliseconds 500
+        }
+        if ($missionState.state.mission.mode -ne 'Battle') { throw 'Native FinishDeployment timed out before Battle mode appeared.' }
+    }
+
+    $statusBefore = Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-status-before")
+    if ($statusBefore.data.supported -ne $true -or $statusBefore.data.missionMode -ne 'Battle') { throw "Battle Mission status rejected the expected field battle: $($statusBefore.data.reason)" }
+    $mainAgentBefore = Get-FormationSnapshot $statusBefore
+    if (-not $mainAgentBefore.isPlayerControlled) { throw 'MainAgent was not Player-controlled before F6-equivalent delegation.' }
+    if ($statusBefore.data.playerTeam.formationCount -lt 1) { throw 'Native status exposed no current player Formation to delegate.' }
+
+    $delegation = Invoke-AgentCli 'missionDelegateTroops' @('-CommandId', "$prefix-delegate")
+    if ($delegation.status -ne 'completed' -or $delegation.data.allRequestedFormationsDelegated -ne $true -or
+        $delegation.data.mainAgentStillPlayerControlled -ne $true -or $delegation.data.timeControlModeBefore -ne 'Stop' -or
+        $delegation.data.timeControlModeAfter -ne 'Stop' -or [Math]::Abs([double]$delegation.data.campaignDayAfter - [double]$delegation.data.campaignDayBefore) -gt 0.000001) {
+        throw 'Native F6-equivalent delegation failed to preserve current formations, MainAgent controller, and Campaign time.'
+    }
+    $statusAfter = Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-status-after")
+    $mainAgentAfter = Get-FormationSnapshot $statusAfter
+
+    $missionEnded = $false
+    $healthSamples = [System.Collections.Generic.List[double]]::new()
+    $positionSamples = [System.Collections.Generic.List[object]]::new()
+    $battleDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min(900, $TimeoutSeconds))
+    while ([DateTime]::UtcNow -lt $battleDeadline) {
+        $state = Invoke-AgentCli 'state' @('-CommandId', "$prefix-mission-watch-$([Guid]::NewGuid().ToString('N'))")
+        if ($state.state.context.gameState -ne 'MissionState') { break }
+        if ($state.state.mission.missionEnded) { $missionEnded = $true; break }
+        $currentStatus = Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-status-watch-$([Guid]::NewGuid().ToString('N'))")
+        if ($currentStatus.status -ne 'completed' -or $currentStatus.data.supported -ne $true) {
+            $latestMissionState = Invoke-AgentCli 'state' @('-CommandId', "$prefix-after-status-boundary-$([Guid]::NewGuid().ToString('N'))")
+            if ($latestMissionState.state.context.gameState -eq 'MissionState' -and $latestMissionState.state.mission.missionEnded) {
+                $missionEnded = $true
+                break
+            }
+            throw 'The supported Battle Mission status stopped being readable before the Native Mission ended.'
+        }
+        $currentHero = $currentStatus.data.mainAgent
+        if ($null -ne $currentHero.health) { $healthSamples.Add([double]$currentHero.health) }
+        $positionSamples.Add($currentHero.position)
+        if ($currentStatus.data.campaignTimeControlMode -ne 'Stop') { throw 'Campaign time mode changed during the passive delegated Mission probe.' }
+        Start-Sleep -Seconds 1
+    }
+    if (-not $missionEnded) { throw 'The delegated Battle Mission did not report MissionEnded within the bounded probe window.' }
+    $missionEndedState = Invoke-AgentCli 'state' @('-CommandId', "$prefix-mission-ended")
+    $exit = Invoke-AgentCli 'missionRetreat' @('-CommandId', "$prefix-native-battle-end-exit")
+    if ($exit.status -ne 'completed') { throw 'Native BattleEnd Mission exit did not accept the ended Mission.' }
+    $campaignReturn = $exit
+    $returnDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min(45, $TimeoutSeconds))
+    while ([DateTime]::UtcNow -lt $returnDeadline -and $campaignReturn.state.context.gameState -eq 'MissionState') {
+        Start-Sleep -Milliseconds 250
+        $campaignReturn = Invoke-AgentCli 'state' @('-CommandId', "$prefix-aftermath-$([Guid]::NewGuid().ToString('N'))")
+    }
+    if ($campaignReturn.state.context.gameState -eq 'MissionState') { throw 'Native BattleEnd did not return out of MissionState.' }
+
+    $stop = Invoke-AgentCli 'stop'
+    $sourceHashAfter = (Get-FileHash -LiteralPath $sourceSavePath -Algorithm SHA256).Hash
+    $disposableSaveHashAfter = (Get-FileHash -LiteralPath $disposableSavePath -Algorithm SHA256).Hash
+    $disposableSaveRemoved = $false
+    if ($disposableSaveOwned -and $disposableSaveHashAfter -eq $disposableSaveHash) {
+        Remove-Item -LiteralPath $disposableSavePath
+        $disposableSaveRemoved = -not (Test-Path -LiteralPath $disposableSavePath)
+    }
+    $finalParty = $campaignReturn.state.party
+    $result = [ordered]@{
+        runId = 'BattleMissionFormationProbe'
+        scenario = 'native-only-no-model-engine-control-probe'
+        modelCalls = 0
+        nativeCommands = $script:NativeReceipts.Count
+        mapStateDeploymentFinishRejected = ($invalidDeployment.status -eq 'rejected')
+        mapStateDeploymentFinishPreservedState = $invalidDeploymentNoMutation
+        sourceSaveName = $SourceSaveName
+        sourceSaveHashBefore = $sourceHashBefore
+        sourceSaveHashAfter = $sourceHashAfter
+        sourceSaveUnchanged = ($sourceHashBefore -eq $sourceHashAfter)
+        disposableSaveName = $disposableSaveName
+        disposableSaveHashBeforeTest = $disposableSaveHash
+        disposableSaveHashAfterTest = $disposableSaveHashAfter
+        disposableSaveRemoved = $disposableSaveRemoved
+        processStopped = [bool]$stop.processStopped
+        initialParty = [ordered]@{ members = $encounterMenu.state.party.members; healthy = $encounterMenu.state.party.healthy; wounded = $encounterMenu.state.party.wounded; morale = $encounterMenu.state.party.morale }
+        opponentPartyId = $targetId
+        sendTroopsWasUnavailable = ($sendTroops.Count -eq 0)
+        hostFallbackEligible = ($sendTroops.Count -eq 0)
+        nativeAttackWasAvailable = ($attack.Count -eq 1)
+        mainAgentFormationBeforeDelegate = $mainAgentBefore
+        mainAgentFormationAfterDelegate = $mainAgentAfter
+        delegation = $delegation.data
+        deploymentFinish = if ($deploymentFinish) { $deploymentFinish.data } else { $null }
+        deploymentTransitionPollCount = $deploymentTransitionPollCount
+        duplicateDeploymentFinishRejected = ($duplicateDeployment.status -eq 'rejected')
+        duplicateDeploymentFinishPreservedState = $duplicateDeploymentNoMutation
+        mainAgentHealthSamples = $healthSamples.ToArray()
+        mainAgentPositionSamples = $positionSamples.ToArray()
+        missionEnded = $missionEnded
+        missionExit = $exit.data
+        postBattleGameState = [string]$campaignReturn.state.context.gameState
+        postBattlePartyScreenMode = [string]$campaignReturn.state.partyScreen.mode
+        mainPartyAfter = if ($finalParty) { [ordered]@{ members = $finalParty.members; healthy = $finalParty.healthy; wounded = $finalParty.wounded; prisoners = $finalParty.prisoners } } else { $null }
+        renownBefore = $renownBefore
+        renownAfter = [double]$campaignReturn.state.economy.renown
+        goldBefore = $goldBefore
+        goldAfter = [long]$campaignReturn.state.economy.gold
+        nativeReceipts = $script:NativeReceipts.ToArray()
+    }
+    $result['passed'] = $result.mapStateDeploymentFinishRejected -and $result.mapStateDeploymentFinishPreservedState -and
+        $result.duplicateDeploymentFinishRejected -and $result.duplicateDeploymentFinishPreservedState -and
+        $result.sourceSaveUnchanged -and $result.disposableSaveRemoved -and $result.processStopped -and $result.missionEnded -and $result.postBattleGameState -ne 'MissionState'
+    $json = ConvertTo-Json -InputObject $result -Depth 10
+    [IO.File]::WriteAllText((Join-Path $runDirectory 'BattleMissionFormationProbe.json'), $json, [Text.UTF8Encoding]::new($false))
+    $json
+    if (-not $result.passed) { exit 1 }
+}
+finally {
+    if ($null -eq $priorMode) { Remove-Item Env:CHRONICLE_HARNESS_MODE -ErrorAction SilentlyContinue }
+    else { $env:CHRONICLE_HARNESS_MODE = $priorMode }
+    if (Test-Path -LiteralPath $sessionPath) { try { Invoke-AgentCli 'stop' | Out-Null } catch { } }
+    if ($disposableSaveOwned -and (Test-Path -LiteralPath $disposableSavePath -PathType Leaf) -and $null -ne $disposableSaveHash) {
+        $currentDisposableHash = (Get-FileHash -LiteralPath $disposableSavePath -Algorithm SHA256).Hash
+        if ($currentDisposableHash -eq $disposableSaveHash) { Remove-Item -LiteralPath $disposableSavePath }
+    }
+}

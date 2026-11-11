@@ -860,6 +860,9 @@ internal static class AgentHostBattleSimulationLoop
                         ["stage"] = "native-battle-mission-delegation",
                         ["iteration"] = iteration,
                         ["modelDecisionMade"] = false,
+                        ["missionModeAtEntry"] = missionResult.MissionModeAtEntry,
+                        ["nativeDeploymentFinishIssued"] = missionResult.NativeDeploymentFinishIssued,
+                        ["deploymentTransitionPollCount"] = missionResult.DeploymentTransitionPollCount,
                         ["nativeDelegationIssued"] = missionResult.DelegationIssued,
                         ["delegatedFormationCount"] = missionResult.DelegatedFormationCount,
                         ["mainHeroHealthAtStart"] = double.IsFinite(missionResult.MainHeroHealthAtStart) ? JsonValue.Create(missionResult.MainHeroHealthAtStart) : null,
@@ -886,6 +889,7 @@ internal static class AgentHostBattleSimulationLoop
                     {
                         ["action"] = "native-battle-mission-delegation",
                         ["status"] = "completed",
+                        ["nativeDeploymentFinishIssued"] = missionResult.NativeDeploymentFinishIssued,
                         ["termination"] = missionResult.Termination,
                         ["delegatedFormationCount"] = missionResult.DelegatedFormationCount,
                         ["mainHeroStayedPlayerControlled"] = missionResult.MainHeroStayedPlayerControlled
@@ -1986,13 +1990,17 @@ internal static class AgentHostBattleSimulationLoop
         var delegatedMissionTraceStep = delegatedMissionTrace?.OfType<JsonObject>().SingleOrDefault(step => ReadString(step, "stage") == "native-battle-mission-delegation");
         if (ReadString(delegatedMissionResult, "status") != "completed" || ReadString(delegatedMissionResult, "termination") != "battle-resolved-and-verified" ||
             delegatedMissionProvider.CallCount != 3 || delegatedMissionClient.DelegationCalls != 1 || delegatedMissionClient.ExitCalls != 1 ||
-            !delegatedMissionClient.Actions.SequenceEqual(new[] { "mapPartyTargets", "menuSelect:attack", "missionDelegateTroops", "missionRetreat" }) ||
+            delegatedMissionClient.DeploymentFinishCalls != 1 ||
+            !delegatedMissionClient.Actions.SequenceEqual(new[] { "mapPartyTargets", "menuSelect:attack", "missionFinishDeployment", "missionDelegateTroops", "missionRetreat" }) ||
             delegatedMissionTraceStep is null || ReadBoolean(delegatedMissionTraceStep, "modelDecisionMade") ||
             !ReadBoolean(delegatedMissionTraceStep, "mainHeroStayedPlayerControlled") ||
             ReadInt(delegatedMissionTraceStep, "delegatedFormationCount", 0) != 1 ||
+            !ReadBoolean(delegatedMissionTraceStep, "nativeDeploymentFinishIssued") ||
+            ReadInt(delegatedMissionTraceStep, "deploymentTransitionPollCount", 0) != 1 ||
+            ReadString(delegatedMissionTraceStep, "missionModeAtEntry") != "Deployment" ||
             ReadString(delegatedMissionTraceStep, "timeControlModeAtStart") != "Stop" ||
             ReadString(delegatedMissionTraceStep, "timeControlModeAtEnd") != "Stop")
-            throw new AgentHostException("battle-loop-self-test-attack-mission-f6-fallback-not-integrated", $"A model-selected Native attack fallback must delegate once, perform no per-poll model calls, return through Native aftermath, and preserve the MainHero/time state. status={ReadString(delegatedMissionResult, "status")}; termination={ReadString(delegatedMissionResult, "termination")}; providerCalls={delegatedMissionProvider.CallCount}; actions={string.Join(",", delegatedMissionClient.Actions)}; trace={delegatedMissionTraceStep?.ToJsonString()}");
+            throw new AgentHostException("battle-loop-self-test-attack-deployment-f6-fallback-not-integrated", $"A model-selected Native attack fallback must finish Native Deployment once, enter Battle before delegating once, perform no per-poll model calls, return through Native aftermath, and preserve MainHero/time. status={ReadString(delegatedMissionResult, "status")}; termination={ReadString(delegatedMissionResult, "termination")}; providerCalls={delegatedMissionProvider.CallCount}; actions={string.Join(",", delegatedMissionClient.Actions)}; trace={delegatedMissionTraceStep?.ToJsonString()}");
 
         var escapeClient = new FakeBattleSimulationNativeClient(simulateNativeEscape: true);
         var escapeProvider = new FakeTryToGetAwayDecisionProvider();
@@ -2185,7 +2193,7 @@ internal static class AgentHostBattleSimulationLoop
             throw new AgentHostException("battle-loop-self-test-surrender-without-battle-recovers-before-replanning", $"Native surrender without Send Troops must wait through captivity, verify the original ransom release to free Map, and defer the same unchanged hostile target before returning to the parent planner. termination={ReadString(surrenderRecovery, "termination")}; outcome={ReadString(surrenderRecovery, "playerOutcome")}; battleStarted={ReadBoolean(surrenderRecovery, "battleStarted")}; target={ReadString(surrenderDeferredTraceStep, "targetPartyId")}; deferred={surrenderDeferredIds.Contains("bandit-1")}; actions={string.Join(",", surrenderRecoveryClient.Actions)}.");
         return [
             new { scenario = "battle-loop-native-observe-pursue-send-troops-aftermath-return-and-verify", decisions = ReadInt(result, "decisions", 0), nativeActions = client.Actions.ToArray(), renownBefore = ReadDouble(result, "renownBefore", double.NaN), renownAfter = ReadDouble(result, "renownAfter", double.NaN), explicitClockActions = ReadInt(result, "explicitClockActionCount", -1), passed = true },
-            new { scenario = "battle-loop-model-selects-native-attack-then-host-delegates-f6-observes-without-model-and-returns-through-aftermath", providerCalls = delegatedMissionProvider.CallCount, nativeActions = delegatedMissionClient.Actions.ToArray(), delegatedFormationCount = ReadInt(delegatedMissionTraceStep, "delegatedFormationCount", 0), passed = true },
+            new { scenario = "battle-loop-model-selects-native-attack-finishes-deployment-delegates-f6-without-model-and-returns-through-aftermath", providerCalls = delegatedMissionProvider.CallCount, nativeActions = delegatedMissionClient.Actions.ToArray(), delegatedFormationCount = ReadInt(delegatedMissionTraceStep, "delegatedFormationCount", 0), passed = true },
             new { scenario = "battle-loop-model-chooses-observed-native-try-to-get-away-cost-and-returns-without-claiming-renown", nativeActions = escapeClient.Actions.ToArray(), playerOutcome = ReadString(escapeResult, "playerOutcome"), nativeEscapeCompleted = ReadBoolean(escapeResult, "nativeEscapeCompleted"), passed = true },
             rejectedEscapeRetryEvidence,
             surrenderAfterRejectedEscapeEvidence,
@@ -3044,13 +3052,14 @@ internal static class AgentHostBattleSimulationLoop
         private int _missionReads;
         internal int DelegationCalls { get; private set; }
         internal int ExitCalls { get; private set; }
+        internal int DeploymentFinishCalls { get; private set; }
         internal List<string> Actions { get; } = [];
 
         public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var missionActive = _stage == 1;
-            var missionEnded = missionActive && ++_missionReads >= 3;
+            var missionActive = _stage is 1 or 2;
+            var missionEnded = _stage == 2 && ++_missionReads >= 3;
             var gameState = missionActive ? "MissionState" : "MapState";
             var context = new JsonObject
             {
@@ -3084,8 +3093,8 @@ internal static class AgentHostBattleSimulationLoop
                 {
                     ["active"] = !missionEnded,
                     ["missionEnded"] = missionEnded,
-                    ["mode"] = "Battle",
-                    ["mainAgent"] = new JsonObject { ["isPlayerControlled"] = true, ["health"] = 100 }
+                    ["mode"] = _stage == 1 ? "Deployment" : "Battle",
+                    ["mainAgent"] = _stage == 1 ? null : new JsonObject { ["isPlayerControlled"] = true, ["health"] = 100 }
                 };
             var root = new JsonObject
             {
@@ -3124,15 +3133,50 @@ internal static class AgentHostBattleSimulationLoop
         public Task<JsonDocument> ReadBattleMissionStatusAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (_stage != 1)
+            if (_stage is not (1 or 2))
                 throw new AgentHostException("battle-mission-integration-status-outside-mission", "Mission status is only valid after the Native attack option entered a Mission.");
-            return Task.FromResult(JsonDocument.Parse("{\"processId\":321,\"status\":\"completed\",\"data\":{\"supported\":true,\"missionMode\":\"Battle\",\"mainAgent\":{\"isPlayerControlled\":true},\"playerTeam\":{\"formationCount\":1}}}"));
+            var mode = _stage == 1 ? "Deployment" : "Battle";
+            var mainAgent = _stage == 1 ? "null" : "{\"isPlayerControlled\":true}";
+            return Task.FromResult(JsonDocument.Parse($"{{\"processId\":321,\"status\":\"completed\",\"data\":{{\"supported\":true,\"missionMode\":\"{mode}\",\"mainAgent\":{mainAgent},\"playerTeam\":{{\"formationCount\":1}}}}}}"));
+        }
+
+        public Task<JsonDocument> FinishBattleMissionDeploymentAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_stage != 1 || DeploymentFinishCalls != 0)
+                throw new AgentHostException("battle-mission-integration-deployment-finish-invalid", "Native deployment finish must be submitted once while the current field Mission is in Deployment.");
+            DeploymentFinishCalls++;
+            Actions.Add("missionFinishDeployment");
+            _stage = 2;
+            var result = new JsonObject
+            {
+                ["processId"] = 321,
+                ["status"] = "completed",
+                ["data"] = new JsonObject
+                {
+                    ["nativeHandler"] = "OrderOfBattleVM.ExecuteBeginMission",
+                    ["nativeDeploymentHandler"] = "DeploymentHandler.FinishDeployment",
+                    ["nativeUiView"] = "OrderOfBattle.xml",
+                    ["canStartMission"] = true,
+                    ["modeBefore"] = "Deployment",
+                    ["modeAfter"] = "Deployment",
+                    ["mainAgentPresentBefore"] = false,
+                    ["mainAgentControllerBefore"] = null,
+                    ["mainAgentPresentAfter"] = false,
+                    ["mainAgentControllerAfter"] = null,
+                    ["campaignDayBefore"] = 100.0,
+                    ["campaignDayAfter"] = 100.0,
+                    ["timeControlModeBefore"] = "Stop",
+                    ["timeControlModeAfter"] = "Stop"
+                }
+            };
+            return Task.FromResult(JsonDocument.Parse(result.ToJsonString()));
         }
 
         public Task<JsonDocument> DelegateBattleMissionTroopsAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (_stage != 1 || DelegationCalls != 0)
+            if (_stage != 2 || DelegationCalls != 0)
                 throw new AgentHostException("battle-mission-integration-delegate-repeated", "Delegate Command must be issued once in the current active Battle Mission.");
             DelegationCalls++;
             Actions.Add("missionDelegateTroops");
@@ -3142,11 +3186,11 @@ internal static class AgentHostBattleSimulationLoop
         public Task<JsonDocument> ExitEndedBattleMissionAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (_stage != 1 || _missionReads < 3 || ExitCalls != 0)
+            if (_stage != 2 || _missionReads < 3 || ExitCalls != 0)
                 throw new AgentHostException("battle-mission-integration-exit-before-ended", "Native BattleEnd exit is issued once and only after a MissionEnded observation.");
             ExitCalls++;
             Actions.Add("missionRetreat");
-            _stage = 2;
+            _stage = 3;
             return Task.FromResult(JsonDocument.Parse("{\"processId\":321,\"status\":\"completed\",\"action\":\"missionRetreat\"}"));
         }
     }

@@ -1088,6 +1088,9 @@ internal sealed class ChronicleAgentProtocol
                 case "missionDelegateTroops":
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBattleMissionAdapter.DelegateCurrentTroopFormations());
                     break;
+                case "missionFinishDeployment":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBattleMissionAdapter.FinishCurrentBattleDeployment());
+                    break;
                 case "missionSceneAgents":
                     var sceneAgentsMission = Mission.Current;
                     var sceneAgentsMissionState = Game.Current?.GameStateManager?.ActiveState as MissionState;
