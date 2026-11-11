@@ -863,7 +863,8 @@ internal sealed class ChronicleAgentProtocol
                     var screenshotHarnessMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
                     if (!string.Equals(screenshotHarnessMode, "visual-capture", StringComparison.Ordinal) &&
                         !string.Equals(screenshotHarnessMode, "visual-battle-fixture", StringComparison.Ordinal) &&
-                        !string.Equals(screenshotHarnessMode, "battle-fixture", StringComparison.Ordinal))
+                        !string.Equals(screenshotHarnessMode, "battle-fixture", StringComparison.Ordinal) &&
+                        !string.Equals(screenshotHarnessMode, "solo-battle-fixture", StringComparison.Ordinal))
                         throw new InvalidOperationException("captureFrame is restricted to visual Harness modes");
                     var captureRootValue = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
                     if (string.IsNullOrWhiteSpace(captureRootValue)) throw new InvalidOperationException("Harness capture directory is unavailable");

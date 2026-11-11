@@ -7,7 +7,8 @@ param(
     [switch]$ProbeBattleMovementInput,
     [switch]$ProbeBattleAgentNavigator,
     [switch]$ProbeMainAgentNativeAiHandoff,
-    [switch]$ProbeAgentHostNativeAiAutopilot
+    [switch]$ProbeAgentHostNativeAiAutopilot,
+    [switch]$SoloMainHero
 )
 
 $ErrorActionPreference = 'Stop'
@@ -27,7 +28,7 @@ $disposableSaveHash = $null
 $disposableSaveOwned = $false
 $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\session.json'
 $priorMode = $env:CHRONICLE_HARNESS_MODE
-$env:CHRONICLE_HARNESS_MODE = 'battle-fixture'
+$env:CHRONICLE_HARNESS_MODE = if ($SoloMainHero) { 'solo-battle-fixture' } else { 'battle-fixture' }
 $prefix = 'battle-mission-formation-' + [Guid]::NewGuid().ToString('N')
 $probeName = if ($ProbeAgentHostNativeAiAutopilot) { 'BattleMissionHostNativeAiAutopilotProbe' } elseif ($ProbeMainAgentNativeAiHandoff) { 'BattleMissionNativeAiHandoffProbe' } elseif ($ProbeBattleAgentNavigator) { 'BattleMissionAgentNavigatorProbe' } elseif ($ProbeBattleMovementInput) { 'BattleMissionMovementInputProbe' } elseif ($ProbeMainAgentRtsCameraBehavior) { 'BattleMissionRtsCameraProbe' } elseif ($ProbeMainAgentAiController) { 'BattleMissionControllerProbe' } else { 'BattleMissionFormationProbe' }
 $runDirectory = if ($env:CHRONICLE_HARNESS_TEMP) { [IO.Path]::GetFullPath($env:CHRONICLE_HARNESS_TEMP) } else { Join-Path $PSScriptRoot ('TestResults\' + $probeName) }
@@ -59,6 +60,26 @@ function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @()) {
     $receiptLine = ($receipt | ConvertTo-Json -Depth 10 -Compress) + [Environment]::NewLine
     [IO.File]::AppendAllText($nativeReceiptPath, $receiptLine, [Text.UTF8Encoding]::new($false))
     return $receipt
+}
+
+function Capture-NativeMapFrame([string]$Name) {
+    if (-not $env:CHRONICLE_HARNESS_TEMP -or -not (Test-Path -LiteralPath $env:CHRONICLE_HARNESS_TEMP -PathType Container)) {
+        throw 'Native map-frame evidence requires the current Harness temporary directory.'
+    }
+    $frameDirectory = Join-Path $runDirectory 'TimelineFrames'
+    New-Item -ItemType Directory -Path $frameDirectory -Force | Out-Null
+    $temporaryFrame = Join-Path $env:CHRONICLE_HARNESS_TEMP ("$prefix-$Name.bmp")
+    $evidenceFrame = Join-Path $frameDirectory ("$Name.bmp")
+    if (Test-Path -LiteralPath $temporaryFrame) { Remove-Item -LiteralPath $temporaryFrame -Force }
+    $frameReceipt = Invoke-AgentCli 'captureFrame' @('-OutputPath', $temporaryFrame, '-CommandId', "$prefix-frame-$Name")
+    if ($frameReceipt.status -ne 'completed') { throw "Native map-frame capture '$Name' was rejected: $($frameReceipt.error)" }
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    while (-not (Test-Path -LiteralPath $temporaryFrame -PathType Leaf) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 100 }
+    if (-not (Test-Path -LiteralPath $temporaryFrame -PathType Leaf) -or (Get-Item -LiteralPath $temporaryFrame).Length -lt 4096) {
+        throw "Native map-frame capture '$Name' did not produce a readable engine frame."
+    }
+    Move-Item -LiteralPath $temporaryFrame -Destination $evidenceFrame -Force
+    return $evidenceFrame
 }
 
 function Invoke-AgentCliExpectedReject([string]$Action, [string[]]$Arguments, [string]$CommandId) {
@@ -124,6 +145,9 @@ try {
     $disposableSaveOwned = $true
     $disposableSaveHash = (Get-FileHash -LiteralPath $disposableSavePath -Algorithm SHA256).Hash
     $state = Invoke-AgentCli 'state' @('-CommandId', "$prefix-initial")
+    if ($SoloMainHero -and [int]$state.state.party.members -ne 1) {
+        throw "The solo MainHero probe requires a one-member Native MainParty; observed $($state.state.party.members)."
+    }
     $invalidDeploymentBefore = $state
     $invalidDeployment = Invoke-AgentCliExpectedReject 'missionFinishDeployment' @() "$prefix-map-deployment-reject"
     $invalidDeploymentAfter = Invoke-AgentCli 'state' @('-CommandId', "$prefix-after-map-deployment-reject")
@@ -145,17 +169,45 @@ try {
     $encounteredPartyId = [string]$state.state.context.encounteredPartyId
     $encounterActive = [bool]$state.state.context.encounterActive
     if (-not $encounterActive) {
-        $visibleTarget = @($state.state.nearbyParties | Where-Object { $_.hostile -and $_.type -eq 'bandit' } | Sort-Object distance | Select-Object -First 1)
+        $visibleTarget = @($state.state.nearbyParties | Where-Object { $_.id -eq 'chronicle_harness_looters' -and $_.hostile })
+        if ($visibleTarget.Count -ne 1) {
+            $visibleTarget = @($state.state.nearbyParties | Where-Object { $_.hostile -and $_.type -eq 'bandit' } | Sort-Object distance | Select-Object -First 1)
+        }
         if ($visibleTarget.Count -ne 1) { throw 'The source Campaign has no currently visible hostile Bandit party; the disposable copy will be cleaned without pursuing or advancing time.' }
         $targetId = [string]$visibleTarget[0].id
         $pursue = Invoke-AgentCli 'pursue' @('-PartyId', $targetId, '-CommandId', "$prefix-pursue")
         if ($pursue.status -ne 'completed') { throw 'Native pursuit did not accept the exact current visible hostile party.' }
+        if ($pursue.state.context.gameState -eq 'MapState' -and $pursue.timeControlMode -eq 'Stop') {
+            # Keep native pursuit and explicit clock control as separate, auditable fixture actions.
+            $clockResume = Invoke-AgentCli 'resume' @('-CommandId', "$prefix-resume-for-pursuit")
+            if ($clockResume.status -ne 'completed' -or $clockResume.state.context.gameState -ne 'MapState') {
+                throw "The explicit Native clock resume after pursuit was rejected; status='$($clockResume.status)', state='$($clockResume.state.context.gameState)', time='$($clockResume.timeControlMode)'."
+            }
+        }
+        $pursuitFrame = Capture-NativeMapFrame 'pursuit-target-selected'
         $deadline = [DateTime]::UtcNow.AddSeconds([Math]::Min(60, $TimeoutSeconds))
+        $lastWaitingCampaignDay = $null
+        $stableWaitingSince = $null
         do {
             Start-Sleep -Milliseconds 500
             $state = Invoke-AgentCli 'state' @('-CommandId', "$prefix-map-observe-$([Guid]::NewGuid().ToString('N'))")
             $encounterActive = [bool]$state.state.context.encounterActive
             $encounteredPartyId = [string]$state.state.context.encounteredPartyId
+            $samePartyStillTargeted = [string]$state.state.location.targetPartyId -eq $targetId
+            $isNativeWaitingOnTarget = $samePartyStillTargeted -and [bool]$state.state.context.isWaiting -and -not $state.state.party.isMoving
+            if ($isNativeWaitingOnTarget -and $null -ne $lastWaitingCampaignDay -and
+                [Math]::Abs([double]$state.campaignDay - [double]$lastWaitingCampaignDay) -lt 0.000001) {
+                if ($null -eq $stableWaitingSince) { $stableWaitingSince = [DateTime]::UtcNow }
+                if (([DateTime]::UtcNow - $stableWaitingSince).TotalSeconds -ge 3) {
+                    $waitingFrame = Capture-NativeMapFrame 'native-target-selected-but-waiting'
+                    throw "Native pursuit left MainParty waiting at its exact current target without a Campaign Encounter. TargetId='$targetId'; CampaignDay=$($state.campaignDay); TimeControlMode=$($state.timeControlMode); TargetFrame='$pursuitFrame'; WaitingFrame='$waitingFrame'."
+                }
+            }
+            elseif (-not $isNativeWaitingOnTarget -or $null -eq $lastWaitingCampaignDay -or
+                [Math]::Abs([double]$state.campaignDay - [double]$lastWaitingCampaignDay) -ge 0.000001) {
+                $stableWaitingSince = $null
+            }
+            $lastWaitingCampaignDay = [double]$state.campaignDay
         } while (-not $encounterActive -and [DateTime]::UtcNow -lt $deadline)
     }
     if (-not $encounterActive) { throw "The native pursuit did not reach a currently visible hostile Bandit before its bounded deadline; observed '$encounteredPartyId'." }
@@ -237,21 +289,21 @@ try {
         if ($hostMissionResult.mainHeroAutopilotIssued) { $hostNativeActions.Add('missionAutopilotMainAgent') }
         if ($hostMissionResult.nativeMissionExitIssued) { $hostNativeActions.Add('missionRetreat') }
         $stateAfterHost = Invoke-AgentCli 'state' @('-CommandId', "$prefix-host-autopilot-afterstate")
-        $deploymentStatusAfterHost = if ($stateAfterHost.state.context.gameState -eq 'MissionState' -and $stateAfterHost.state.mission.mode -eq 'Deployment') {
+        $nativeBattleStatusAfterHost = if ($stateAfterHost.state.context.gameState -eq 'MissionState' -and $stateAfterHost.state.mission.mode -in @('Deployment','Battle')) {
             Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-host-deployment-afterstatus")
         } else { $null }
         $hostFailureFrame = $null
         if (($hostMissionResult.termination -in @('battle-mission-native-deployment-precondition-failed','battle-mission-deployment-transition-timeout','battle-mission-deployment-ui-not-ready','battle-mission-native-ready-callback-not-bound','battle-mission-native-ready-did-not-finish-deployment') -or
              $hostMissionResult.termination -like 'battle-mission-native-deployment-action-campaign-day-changed:*' -or
              $hostMissionResult.termination -like 'battle-mission-native-auto-deploy-command-rejected:*') -and
-            $stateAfterHost.state.context.gameState -eq 'MissionState' -and $stateAfterHost.state.mission.mode -eq 'Deployment') {
-            $hostFailureFramePath = Join-Path $runDirectory 'HostNativeBattleDeploymentTimeout.bmp'
+            $stateAfterHost.state.context.gameState -eq 'MissionState' -and $stateAfterHost.state.mission.mode -in @('Deployment','Battle')) {
+            $hostFailureFramePath = Join-Path $runDirectory 'HostNativeBattlePreconditionFailure.bmp'
             $hostFailureFrame = Invoke-AgentCli 'captureFrame' @('-OutputPath', $hostFailureFramePath, '-CommandId', "$prefix-host-deployment-timeout-frame")
-            if ($hostFailureFrame.status -ne 'completed') { throw 'Native engine frame capture failed while the Host was stuck in the observed Deployment state.' }
+            if ($hostFailureFrame.status -ne 'completed') { throw 'Native engine frame capture failed while the Host remained in the observed Battle Mission.' }
             $frameDeadline = [DateTime]::UtcNow.AddSeconds(10)
             while (-not (Test-Path -LiteralPath $hostFailureFramePath) -and [DateTime]::UtcNow -lt $frameDeadline) { Start-Sleep -Milliseconds 100 }
             if (-not (Test-Path -LiteralPath $hostFailureFramePath) -or (Get-Item -LiteralPath $hostFailureFramePath).Length -lt 4096) {
-                throw 'Native engine did not write a usable Deployment-timeout frame.'
+                throw 'Native engine did not write a usable Battle Mission precondition frame.'
             }
         }
         $stop = Invoke-AgentCli 'stop'
@@ -262,11 +314,15 @@ try {
             Remove-Item -LiteralPath $disposableSavePath
             $disposableSaveRemoved = -not (Test-Path -LiteralPath $disposableSavePath)
         }
-        $expectedHostNativeActions = if ($missionState.state.mission.mode -eq 'Deployment') {
-            @('missionAutoDeploy','missionFinishDeployment','missionDelegateTroops','missionAutopilotMainAgent','missionRetreat')
-        } else {
-            @('missionDelegateTroops','missionAutopilotMainAgent','missionRetreat')
+        $expectedHostNativeActionsList = [System.Collections.Generic.List[string]]::new()
+        if ($missionState.state.mission.mode -eq 'Deployment') {
+            if ($hostMissionResult.nativeDeploymentAutoDeployIssued) { $expectedHostNativeActionsList.Add('missionAutoDeploy') }
+            if (-not $hostMissionResult.nativeDeploymentCompletedByNative) { $expectedHostNativeActionsList.Add('missionFinishDeployment') }
         }
+        if ([int]$deploymentStatusBeforeHost.data.playerTeam.formationCount -gt 0) { $expectedHostNativeActionsList.Add('missionDelegateTroops') }
+        $expectedHostNativeActionsList.Add('missionAutopilotMainAgent')
+        $expectedHostNativeActionsList.Add('missionRetreat')
+        $expectedHostNativeActions = $expectedHostNativeActionsList.ToArray()
         $result = [ordered]@{
             runId = $probeName
             scenario = 'production-host-loop-native-battle-autopilot-no-model'
@@ -289,11 +345,13 @@ try {
             hostMissionResult = [ordered]@{
                 completed = [bool]$hostMissionResult.completed
                 termination = [string]$hostMissionResult.termination
+                nativeDeploymentPreconditionDiagnostic = $hostMissionResult.nativeDeploymentPreconditionDiagnostic
+                nativeDeploymentCompletedByNative = [bool]$hostMissionResult.nativeDeploymentCompletedByNative
+                delegationIssued = [bool]$hostMissionResult.delegationIssued
                 nativeDeploymentAutoDeployIssued = [bool]$hostMissionResult.nativeDeploymentAutoDeployIssued
                 nativeDeploymentFinishIssued = [bool]$hostMissionResult.nativeDeploymentFinishIssued
                 nativeReadyCallbackDispatchedByBridge = [bool]$hostMissionResult.nativeReadyCallbackDispatchedByBridge
                 nativeReadyHandlerExceptionType = [string]$hostMissionResult.nativeReadyHandlerExceptionType
-                delegationIssued = [bool]$hostMissionResult.delegationIssued
                 delegatedFormationCount = [int]$hostMissionResult.delegatedFormationCount
                 mainHeroHealthAtStart = $hostMissionResult.mainHeroHealthAtStart
                 mainHeroHealthAtEnd = $hostMissionResult.mainHeroHealthAtEnd
@@ -316,17 +374,18 @@ try {
                 campaignTimeControlMode = [string]$deploymentStatusBeforeHost.data.campaignTimeControlMode
                 mainAgentController = if ($null -eq $deploymentStatusBeforeHost.data.mainAgent) { $null } else { [string]$deploymentStatusBeforeHost.data.mainAgent.controller }
                 mainAgentPlayerControlled = if ($null -eq $deploymentStatusBeforeHost.data.mainAgent) { $null } else { [bool]$deploymentStatusBeforeHost.data.mainAgent.isPlayerControlled }
+                playerTeamFormationCount = [int]$deploymentStatusBeforeHost.data.playerTeam.formationCount
                 deploymentUi = $deploymentStatusBeforeHost.data.deploymentUi
             }
-            deploymentStatusAfterHost = if ($deploymentStatusAfterHost) { [ordered]@{
-                supported = [bool]$deploymentStatusAfterHost.data.supported
-                reason = [string]$deploymentStatusAfterHost.data.reason
-                missionMode = [string]$deploymentStatusAfterHost.data.missionMode
-                campaignDay = $deploymentStatusAfterHost.data.campaignDay
-                campaignTimeControlMode = [string]$deploymentStatusAfterHost.data.campaignTimeControlMode
-                mainAgentController = if ($null -eq $deploymentStatusAfterHost.data.mainAgent) { $null } else { [string]$deploymentStatusAfterHost.data.mainAgent.controller }
-                mainAgentPlayerControlled = if ($null -eq $deploymentStatusAfterHost.data.mainAgent) { $null } else { [bool]$deploymentStatusAfterHost.data.mainAgent.isPlayerControlled }
-                deploymentUi = $deploymentStatusAfterHost.data.deploymentUi
+            nativeBattleStatusAfterHost = if ($nativeBattleStatusAfterHost) { [ordered]@{
+                supported = [bool]$nativeBattleStatusAfterHost.data.supported
+                reason = [string]$nativeBattleStatusAfterHost.data.reason
+                missionMode = [string]$nativeBattleStatusAfterHost.data.missionMode
+                campaignDay = $nativeBattleStatusAfterHost.data.campaignDay
+                campaignTimeControlMode = [string]$nativeBattleStatusAfterHost.data.campaignTimeControlMode
+                mainAgentController = if ($null -eq $nativeBattleStatusAfterHost.data.mainAgent) { $null } else { [string]$nativeBattleStatusAfterHost.data.mainAgent.controller }
+                mainAgentPlayerControlled = if ($null -eq $nativeBattleStatusAfterHost.data.mainAgent) { $null } else { [bool]$nativeBattleStatusAfterHost.data.mainAgent.isPlayerControlled }
+                deploymentUi = $nativeBattleStatusAfterHost.data.deploymentUi
             }} else { $null }
             nativeActionSequence = $hostNativeActions.ToArray()
             fixtureActionSequence = @($script:NativeReceipts | ForEach-Object { [string]$_.action })
@@ -338,13 +397,25 @@ try {
             renownAfter = [double]$stateAfterHost.state.economy.renown
             nativeReceipts = $script:NativeReceipts.ToArray()
         }
-        $result['passed'] = $hostProcess.ExitCode -eq 0 -and $hostResult.status -eq 'completed' -and $hostMissionResult.completed -eq $true -and
-            $hostMissionResult.mainHeroNativeAiControlMaintained -eq $true -and $hostMissionResult.delegatedFormationCount -gt 0 -and
+        $hostNativeAftermathValid = $hostProcess.ExitCode -eq 0 -and $hostResult.status -eq 'completed' -and $hostMissionResult.completed -eq $true -and
             $hostMissionResult.mainHeroAutopilotIssued -eq $true -and $hostMissionResult.nativeMissionExitIssued -eq $true -and
             $hostMissionResult.timeControlModeAtStart -eq 'Stop' -and $hostMissionResult.timeControlModeAtEnd -eq 'Stop' -and
             $result.postHostGameState -ne 'MissionState' -and $hostNativeActions.Count -eq $expectedHostNativeActions.Count -and
             -not (Compare-Object $expectedHostNativeActions $hostNativeActions.ToArray()) -and $result.sourceSaveUnchanged -and
             $result.disposableSaveRemoved -and $result.processStopped
+        if ($SoloMainHero) {
+            $soloControlDispositionValid = $hostMissionResult.mainHeroNativeAiControlMaintained -eq $true -or
+                ($hostMissionResult.mainAgentRemovedDuringMission -eq $true -and [bool]$stateAfterHost.state.context.captivity.isCaptive)
+            $result['passed'] = $hostNativeAftermathValid -and $hostMissionResult.nativeDeploymentCompletedByNative -eq $true -and
+                $deploymentStatusBeforeHost.data.playerTeam.formationCount -eq 0 -and
+                $hostMissionResult.delegationIssued -eq $false -and $hostMissionResult.delegatedFormationCount -eq 0 -and
+                $hostMissionResult.nativeDeploymentFinishIssued -eq $false -and
+                $soloControlDispositionValid
+        }
+        else {
+            $result['passed'] = $hostNativeAftermathValid -and $hostMissionResult.mainHeroNativeAiControlMaintained -eq $true -and
+                $hostMissionResult.delegatedFormationCount -gt 0
+        }
         [IO.File]::WriteAllText((Join-Path $runDirectory ($probeName + '.json')), (ConvertTo-Json -InputObject $result -Depth 8), [Text.UTF8Encoding]::new($false))
         $result | ConvertTo-Json -Depth 8
         if (-not $result.passed) { throw 'The production Host Native battle autopilot path failed its end-to-end disposable-clone acceptance checks.' }

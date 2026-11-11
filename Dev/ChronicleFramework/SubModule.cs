@@ -586,11 +586,11 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
     {
         var harnessMode = Environment.GetEnvironmentVariable(HarnessModeVariable);
         ChronicleDiagnostics.Write($"campaign-loaded|mode={harnessMode ?? "normal"}|version={_stateVersion}|count={_dailyTickCount}|day={_lastDailyTickDay:F3}");
-        if (harnessMode == "battle-fixture" || harnessMode == "visual-battle-fixture")
-            CreateDisposableBattleFixture(harnessMode == "visual-battle-fixture", harnessMode == "visual-battle-fixture");
+        if (harnessMode == "battle-fixture" || harnessMode == "visual-battle-fixture" || harnessMode == "solo-battle-fixture")
+            CreateDisposableBattleFixture(harnessMode == "visual-battle-fixture", harnessMode == "visual-battle-fixture" || harnessMode == "solo-battle-fixture", harnessMode == "solo-battle-fixture");
     }
 
-    private static void CreateDisposableBattleFixture(bool seedItemLoot, bool disableOpponentAiForBattleProbe)
+    private static void CreateDisposableBattleFixture(bool seedItemLoot, bool disableOpponentAiForBattleProbe, bool preserveSoloMainParty = false)
     {
         try
         {
@@ -612,16 +612,17 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
             if (hostileClan == null || partyTemplate == null || looterCharacter == null || testRecruit == null || homeSettlement == null || (seedItemLoot && testLootItem == null))
                 throw new InvalidOperationException("Native hostile clan, looter template or home settlement is unavailable.");
 
-            // Keep the disposable test encounter near the same scale for either
-            // the one-person lifecycle seed or a progressed StoryMode checkpoint.
-            var recruitsToAdd = Math.Max(0, 20 - mainParty.MemberRoster.TotalManCount);
+            // Ordinary battle probes scale to 20; the solo fixture must preserve the source Campaign's one-member MainParty.
+            var recruitsToAdd = preserveSoloMainParty ? 0 : Math.Max(0, 20 - mainParty.MemberRoster.TotalManCount);
             if (recruitsToAdd > 0)
                 mainParty.MemberRoster.AddToCounts(testRecruit, recruitsToAdd, insertAtFront: false, woundedCount: 0, xpChange: 0, removeDepleted: true, index: -1);
 
+            var fixtureOffset = preserveSoloMainParty ? 5.0f : 0.5f;
             var enemyParty = BanditPartyComponent.CreateLooterParty(
-                "chronicle_harness_looters", hostileClan, homeSettlement, false, partyTemplate, mainParty.Position + new Vec2(0.5f, 0f));
+                "chronicle_harness_looters", hostileClan, homeSettlement, false, partyTemplate, mainParty.Position + new Vec2(fixtureOffset, 0f));
             enemyParty.MemberRoster.Clear();
-            enemyParty.MemberRoster.AddToCounts(looterCharacter, 19, insertAtFront: false, woundedCount: 0, xpChange: 0, removeDepleted: true, index: -1);
+            var enemyCount = preserveSoloMainParty ? 1 : 19;
+            enemyParty.MemberRoster.AddToCounts(looterCharacter, enemyCount, insertAtFront: false, woundedCount: 0, xpChange: 0, removeDepleted: true, index: -1);
             if (disableOpponentAiForBattleProbe)
             {
                 enemyParty.Ai.DisableAi();
@@ -630,7 +631,7 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
             {
                 enemyParty.SetMoveEngageParty(mainParty, MobileParty.NavigationType.Default);
             }
-            ChronicleDiagnostics.Write($"battle-fixture-ready|party={enemyParty.StringId}|hostile={FactionManager.IsAtWarAgainstFaction(mainParty.MapFaction, enemyParty.MapFaction)}|enemyCount={enemyParty.MemberRoster.TotalManCount}|playerCount={mainParty.MemberRoster.TotalManCount}|lootFixtureEnabled={seedItemLoot}|lootFixtureItemId={testLootItem?.StringId}|opponentAiDisabledForBattleProbe={disableOpponentAiForBattleProbe}|playerMode={mainParty.DefaultBehavior}|clock={Campaign.Current.TimeControlMode}");
+            ChronicleDiagnostics.Write($"battle-fixture-ready|party={enemyParty.StringId}|hostile={FactionManager.IsAtWarAgainstFaction(mainParty.MapFaction, enemyParty.MapFaction)}|enemyCount={enemyParty.MemberRoster.TotalManCount}|playerCount={mainParty.MemberRoster.TotalManCount}|preserveSoloMainParty={preserveSoloMainParty}|lootFixtureEnabled={seedItemLoot}|lootFixtureItemId={testLootItem?.StringId}|opponentAiDisabledForBattleProbe={disableOpponentAiForBattleProbe}|playerMode={mainParty.DefaultBehavior}|clock={Campaign.Current.TimeControlMode}");
         }
         catch (Exception exception)
         {

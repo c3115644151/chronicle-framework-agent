@@ -27,7 +27,7 @@ internal static class Program
             {
                 if (args.Length != 2 || !int.TryParse(args[1], out var nativeBattleProcessId) || nativeBattleProcessId <= 0)
                     throw new AgentHostException("native-battle-mission-harness-arguments-invalid", "The Harness-only Native Battle Mission loop requires one positive Bannerlord process id.");
-                if (Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") != "battle-fixture" ||
+                if (Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") is not ("battle-fixture" or "solo-battle-fixture") ||
                     string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP")))
                     throw new AgentHostException("native-battle-mission-harness-not-authorized", "The real-Native Battle Mission loop probe is restricted to its disposable battle Harness phase.");
                 return await RunNativeBattleMissionLoopHarnessAsync(nativeBattleProcessId);
@@ -339,6 +339,7 @@ internal static class Program
                     passivePollCount = result.PassivePollCount,
                     nativeDeploymentFinishIssued = result.NativeDeploymentFinishIssued,
                     nativeDeploymentPreconditionDiagnostic = result.NativeDeploymentPreconditionDiagnostic?.DeepClone(),
+                    nativeDeploymentCompletedByNative = result.NativeDeploymentCompletedByNative,
                     nativeDeploymentAutoDeployIssued = result.NativeDeploymentAutoDeployIssued,
                     nativeReadyCallbackDispatchedByBridge = result.NativeReadyCallbackDispatchedByBridge,
                     nativeReadyHandlerExceptionType = result.NativeReadyHandlerExceptionType,

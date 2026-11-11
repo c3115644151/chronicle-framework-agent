@@ -20,6 +20,7 @@ param(
     [ValidateRange(1,5)][int]$FreshCampaignSupplyRuns = 5,
     [ValidateRange(1,10)][int]$RecruitmentFallbackMaxAttempts = 10,
     [string]$BattleSimulationSourceSaveName = 'AgentBridgeLifecycle',
+    [switch]$BattleMissionSoloMainHeroProbe,
     [string]$StoryModePlannerSourceSaveName = 'save002',
     [ValidateRange(60,86400)][int]$PersistentEycHostMaxElapsedSeconds = 86400,
     [ValidateRange(1,160)][int]$PersistentEycMaxProviderDecisionsPerContinuation = 1,
@@ -32,7 +33,10 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.576'
+$HarnessContractVersion = '7.577'
+if ($BattleMissionSoloMainHeroProbe -and $Phase -ne 'BattleMissionHostNativeAiAutopilotProbe') {
+    throw 'The solo MainHero option is only valid with -Phase BattleMissionHostNativeAiAutopilotProbe.'
+}
 if ($Phase -ceq 'EycObjectiveCheckpointReadback' -and [string]::IsNullOrWhiteSpace($PersistentEycCampaignKey)) {
     throw 'EycObjectiveCheckpointReadback requires -PersistentEycCampaignKey to select one owned Campaign branch.'
 }
@@ -1741,7 +1745,9 @@ foreach ($stage in $requestedStages) {
                     throw 'The self-contained Agent Host runtime package was not retained for the same-session Native battle loop probe.'
                 }
                 $childOutputPath = Join-Path $harnessTempDirectory 'BattleMissionHostNativeAiAutopilotProbeChild.log'
-                $childOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $battleMissionFormationProbeScript -SourceSaveName $BattleSimulationSourceSaveName -TimeoutSeconds 900 -ProbeAgentHostNativeAiAutopilot 2>&1 | Out-String
+                $battleProbeArguments = @('-SourceSaveName', $BattleSimulationSourceSaveName, '-TimeoutSeconds', '900', '-ProbeAgentHostNativeAiAutopilot')
+                if ($BattleMissionSoloMainHeroProbe) { $battleProbeArguments += '-SoloMainHero' }
+                $childOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $battleMissionFormationProbeScript @battleProbeArguments 2>&1 | Out-String
                 $childOutput | Set-Content -LiteralPath $childOutputPath -Encoding UTF8
                 if ($LASTEXITCODE -ne 0) { throw "Production AgentHost Native battle autopilot probe failed with exit code $LASTEXITCODE.`nChild output: $childOutput" }
                 $childOutput

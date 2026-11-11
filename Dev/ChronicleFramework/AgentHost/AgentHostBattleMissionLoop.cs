@@ -30,6 +30,7 @@ internal sealed record AgentHostBattleMissionLoopResult(
     public bool NativeMissionExitIssued { get; init; }
     public string NativeReadyHandlerExceptionType { get; init; } = string.Empty;
     public JsonObject? NativeDeploymentPreconditionDiagnostic { get; init; }
+    public bool NativeDeploymentCompletedByNative { get; init; }
 }
 
 /// <summary>
@@ -95,6 +96,7 @@ internal static class AgentHostBattleMissionLoop
         var nativeReadyCallbackDispatchedByBridge = false;
         var nativeReadyHandlerExceptionType = string.Empty;
         var deploymentTransitionPollCount = 0;
+        var deploymentCompletedByNativeBeforeHostSetup = false;
 
         if (missionModeAtEntry == "Deployment")
         {
@@ -115,7 +117,6 @@ internal static class AgentHostBattleMissionLoop
                 var deploymentPreconditionFailures = new List<string>();
                 if (ReadInt(deploymentStatus, "processId", -1) != processId) deploymentPreconditionFailures.Add("process-id");
                 if (!ReadBoolean(deploymentData, "supported")) deploymentPreconditionFailures.Add("unsupported:" + (ReadString(deploymentData, "reason") ?? "unspecified"));
-                if (ReadString(deploymentData, "missionMode") != "Deployment") deploymentPreconditionFailures.Add("mission-mode:" + (ReadString(deploymentData, "missionMode") ?? "missing"));
                 if (!double.IsFinite(deploymentCampaignDay)) deploymentPreconditionFailures.Add("campaign-day-nonfinite");
                 if (ReadString(deploymentData, "campaignTimeControlMode") != timeModeStart)
                     deploymentPreconditionFailures.Add("campaign-time-mode:" + (ReadString(deploymentData, "campaignTimeControlMode") ?? "missing"));
@@ -125,6 +126,50 @@ internal static class AgentHostBattleMissionLoop
                         deploymentFinishIssued: false, deploymentTransitionPollCount: deploymentTransitionPollCount, missionModeAtEntry: missionModeAtEntry,
                         nativeDeploymentPreconditionDiagnostic: BuildDeploymentPreconditionDiagnostic(deploymentStatus, deploymentPreconditionFailures));
                 campaignDayStart = deploymentCampaignDay;
+                var observedMissionMode = ReadString(deploymentData, "missionMode");
+                if (observedMissionMode == "Battle" && ReadBoolean(deploymentUi, "deploymentFinished") && !ReadBoolean(deploymentUi, "viewAvailable"))
+                {
+                    // Native can finish a one-hero deployment between the state snapshot and the first Host status read.
+                    // Reconcile only from Native Mission/time readback; never repeat Auto Deploy or Ready.
+                    native = await ReadStateAsync(stateClient, processId, cancellationToken);
+                    var spontaneousState = native["state"] as JsonObject ?? new JsonObject();
+                    var spontaneousContext = spontaneousState["context"] as JsonObject ?? new JsonObject();
+                    var spontaneousMission = spontaneousState["mission"] as JsonObject ?? new JsonObject();
+                    var spontaneousTransitionFailures = new List<string>();
+                    if (ReadString(spontaneousContext, "gameState") != "MissionState") spontaneousTransitionFailures.Add("game-state:" + (ReadString(spontaneousContext, "gameState") ?? "missing"));
+                    if (ReadString(spontaneousMission, "mode") != "Battle") spontaneousTransitionFailures.Add("native-mission-mode:" + (ReadString(spontaneousMission, "mode") ?? "missing"));
+                    if (ReadBoolean(spontaneousMission, "missionEnded")) spontaneousTransitionFailures.Add("mission-ended");
+                    if (ReadBoolean(spontaneousContext, "inquiryOpen")) spontaneousTransitionFailures.Add("inquiry-open");
+                    if (ReadString(native, "timeControlMode") != timeModeStart) spontaneousTransitionFailures.Add("time-mode:" + (ReadString(native, "timeControlMode") ?? "missing"));
+                    var nativeStateCampaignDay = ReadDouble(native, "campaignDay");
+                    // The public Chronicle state prints CampaignDay to three decimal places while Mission status keeps full precision.
+                    if (!double.IsFinite(nativeStateCampaignDay) || Math.Abs(nativeStateCampaignDay - deploymentCampaignDay) > 0.00051)
+                        spontaneousTransitionFailures.Add("campaign-day-changed-or-unreadable");
+                    if (spontaneousTransitionFailures.Count > 0)
+                    {
+                        deploymentPreconditionFailures.AddRange(spontaneousTransitionFailures.Select(failure => "native-state-" + failure));
+                        return Failure("battle-mission-native-spontaneous-deployment-transition-unverified", native, false, 0,
+                            heroHealthStart, heroHealthStart, false, campaignDayStart, ReadDouble(native, "campaignDay"),
+                            timeModeStart, ReadString(native, "timeControlMode") ?? string.Empty, pollCount,
+                            deploymentFinishIssued: false, deploymentTransitionPollCount: deploymentTransitionPollCount,
+                            missionModeAtEntry: missionModeAtEntry,
+                            nativeDeploymentPreconditionDiagnostic: BuildDeploymentPreconditionDiagnostic(deploymentStatus, deploymentPreconditionFailures));
+                    }
+                    initialState = spontaneousState;
+                    initialMission = spontaneousMission;
+                    heroHealthStart = ReadHeroHealth(initialMission);
+                    deploymentTransitionPollCount++;
+                    deploymentCompletedByNativeBeforeHostSetup = true;
+                    break;
+                }
+                if (observedMissionMode != "Deployment")
+                {
+                    deploymentPreconditionFailures.Add("mission-mode:" + (observedMissionMode ?? "missing"));
+                    return Failure("battle-mission-native-deployment-precondition-failed", native, false, 0, heroHealthStart, heroHealthStart,
+                        false, campaignDayStart, campaignDayStart, timeModeStart, timeModeStart, pollCount,
+                        deploymentFinishIssued: false, deploymentTransitionPollCount: deploymentTransitionPollCount, missionModeAtEntry: missionModeAtEntry,
+                        nativeDeploymentPreconditionDiagnostic: BuildDeploymentPreconditionDiagnostic(deploymentStatus, deploymentPreconditionFailures));
+                }
                 if (ReadBoolean(deploymentUi, "viewAvailable") && ReadBoolean(deploymentUi, "readyCallbackBound") &&
                     ReadBoolean(deploymentUi, "canStartMission") && !ReadBoolean(deploymentUi, "deploymentFinished"))
                 {
@@ -172,6 +217,12 @@ internal static class AgentHostBattleMissionLoop
                 }
                 if (deploymentPoll + 1 < missionEntryPollLimit) await Task.Delay(delay, cancellationToken);
             }
+            if (deploymentCompletedByNativeBeforeHostSetup)
+            {
+                // Native already committed the Deployment->Battle transition; keep its formation state intact.
+            }
+            else
+            {
             if (!deploymentUiReady)
                 return Failure("battle-mission-deployment-ui-not-ready", native, false, 0, heroHealthStart, heroHealthStart,
                     false, campaignDayStart, campaignDayStart, timeModeStart, timeModeStart, pollCount,
@@ -280,10 +331,13 @@ internal static class AgentHostBattleMissionLoop
             initialState = native!["state"]!.AsObject();
             initialMission = initialState["mission"] as JsonObject ?? new JsonObject();
             heroHealthStart = ReadHeroHealth(initialMission);
+            }
         }
 
         var battleMainAgentReady = false;
         var preciseBattleCampaignDayEstablished = missionModeAtEntry == "Deployment";
+        var availablePlayerFormationCount = -1;
+        var delegationIssued = false;
         for (var readinessPoll = 0; readinessPoll < missionEntryPollLimit; readinessPoll++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -294,8 +348,10 @@ internal static class AgentHostBattleMissionLoop
                     campaignDayStart, campaignDayStart, timeModeStart, timeModeStart, pollCount);
             var data = status["data"] as JsonObject;
             var statusCampaignDay = ReadDouble(data, "campaignDay");
+            var playerTeam = data?["playerTeam"] as JsonObject;
+            availablePlayerFormationCount = ReadInt(playerTeam, "formationCount", -1);
             if (!ReadBoolean(data, "supported") || !string.Equals(ReadString(data, "missionMode"), "Battle", StringComparison.Ordinal) ||
-                ReadInt(data?["playerTeam"] as JsonObject, "formationCount", 0) <= 0 || !double.IsFinite(statusCampaignDay) ||
+                playerTeam == null || availablePlayerFormationCount < 0 || !double.IsFinite(statusCampaignDay) ||
                 ReadString(data, "campaignTimeControlMode") != timeModeStart)
                 return Failure("battle-mission-native-delegation-precondition-failed", native, false, 0, heroHealthStart, heroHealthStart,
                     false, campaignDayStart, campaignDayStart, timeModeStart, timeModeStart, pollCount);
@@ -338,11 +394,13 @@ internal static class AgentHostBattleMissionLoop
             return Failure("battle-mission-mainagent-readiness-timeout", native, false, 0, heroHealthStart, heroHealthStart,
                 false, campaignDayStart, campaignDayStart, timeModeStart, timeModeStart, pollCount);
 
-        using (var delegateResponse = await missionClient.DelegateBattleMissionTroopsAsync(cancellationToken))
+        if (availablePlayerFormationCount > 0)
         {
+            delegationIssued = true;
+            using var delegateResponse = await missionClient.DelegateBattleMissionTroopsAsync(cancellationToken);
             var delegated = ParseRoot(delegateResponse.RootElement);
             if (ReadInt(delegated, "processId", -1) != processId || ReadString(delegated, "status") != "completed")
-                return Failure("battle-mission-delegation-rejected", native, false, 0, heroHealthStart, heroHealthStart,
+                return Failure("battle-mission-delegation-rejected", native, delegationIssued, 0, heroHealthStart, heroHealthStart,
                     false, campaignDayStart, campaignDayStart, timeModeStart, timeModeStart, pollCount);
             var receipt = delegated["data"] as JsonObject;
             delegatedFormationCount = ReadInt(receipt, "delegatedFormationCount", 0);
@@ -350,7 +408,7 @@ internal static class AgentHostBattleMissionLoop
                 ReadString(receipt, "timeControlModeBefore") != timeModeStart || ReadString(receipt, "timeControlModeAfter") != timeModeStart ||
                 !NearlyEqual(ReadDouble(receipt, "campaignDayBefore"), campaignDayStart) ||
                 !NearlyEqual(ReadDouble(receipt, "campaignDayAfter"), campaignDayStart))
-                return Failure("battle-mission-delegation-postcondition-failed", native, true,
+                return Failure("battle-mission-delegation-postcondition-failed", native, delegationIssued,
                     ReadInt(receipt, "delegatedFormationCount", 0), heroHealthStart, heroHealthStart, false,
                     campaignDayStart, campaignDayStart, timeModeStart, ReadString(receipt, "timeControlModeAfter") ?? string.Empty, pollCount);
         }
@@ -372,7 +430,7 @@ internal static class AgentHostBattleMissionLoop
                 ReadString(receipt, "timeControlModeBefore") != timeModeStart || ReadString(receipt, "timeControlModeAfter") != timeModeStart ||
                 !NearlyEqual(ReadDouble(receipt, "campaignDayBefore"), campaignDayStart) ||
                 !NearlyEqual(ReadDouble(receipt, "campaignDayAfter"), campaignDayStart))
-                return Failure("battle-mission-native-mainhero-autopilot-rejected", native, true,
+                return Failure("battle-mission-native-mainhero-autopilot-rejected", native, delegationIssued,
                     delegatedFormationCount, heroHealthStart, heroHealthStart, false, campaignDayStart,
                     ReadDouble(autopilot, "campaignDay", campaignDayStart), timeModeStart,
                     ReadString(autopilot, "timeControlMode") ?? timeModeStart, pollCount,
@@ -397,13 +455,13 @@ internal static class AgentHostBattleMissionLoop
             var mission = state["mission"] as JsonObject;
             var missionIsEnded = ReadBoolean(mission, "missionEnded");
             if (!string.Equals(gameState, "MissionState", StringComparison.Ordinal))
-                return BuildResult(true, "native-aftermath-reached", native, true,
+                return BuildResult(true, "native-aftermath-reached", native, delegationIssued,
                     delegatedFormationCount, heroHealthStart, heroHealthEnd,
                     mainHeroNativeAiControlMaintained, campaignDayStart, ReadDouble(native, "campaignDay"), timeModeStart,
                     ReadString(native, "timeControlMode") ?? string.Empty, pollCount, deploymentFinishIssued,
                     deploymentTransitionPollCount, missionModeAtEntry, mainAgentRemovedDuringMission,
                     mainHeroAutopilotIssued, nativeMissionExitIssued, deploymentAutoDeployIssued, nativeReadyCallbackDispatchedByBridge,
-                    nativeReadyHandlerExceptionType);
+                    nativeReadyHandlerExceptionType, nativeDeploymentCompletedByNative: deploymentCompletedByNativeBeforeHostSetup);
             if (missionIsEnded)
             {
                 missionEndedObserved = true;
@@ -431,7 +489,7 @@ internal static class AgentHostBattleMissionLoop
         }
 
         if (!missionEndedObserved)
-                return Failure("battle-mission-observation-timeout", native ?? new JsonObject(), true, 0, heroHealthStart, heroHealthEnd,
+                return Failure("battle-mission-observation-timeout", native ?? new JsonObject(), delegationIssued, delegatedFormationCount, heroHealthStart, heroHealthEnd,
                 mainHeroNativeAiControlMaintained, campaignDayStart, ReadDouble(native, "campaignDay"), timeModeStart,
                 ReadString(native, "timeControlMode") ?? string.Empty, pollCount,
                 mainHeroAutopilotIssued: mainHeroAutopilotIssued);
@@ -443,7 +501,7 @@ internal static class AgentHostBattleMissionLoop
             nativeMissionExitIssued = true;
             var exit = ParseRoot(exitResponse.RootElement);
             if (ReadInt(exit, "processId", -1) != processId || ReadString(exit, "status") != "completed")
-                return Failure("battle-mission-native-exit-rejected", native!, true, 0, heroHealthStart, heroHealthEnd,
+                return Failure("battle-mission-native-exit-rejected", native!, delegationIssued, delegatedFormationCount, heroHealthStart, heroHealthEnd,
                     mainHeroNativeAiControlMaintained, campaignDayStart, ReadDouble(native, "campaignDay"), timeModeStart,
                     ReadString(native, "timeControlMode") ?? string.Empty, pollCount,
                     mainHeroAutopilotIssued: mainHeroAutopilotIssued, nativeMissionExitIssued: nativeMissionExitIssued);
@@ -454,16 +512,16 @@ internal static class AgentHostBattleMissionLoop
             native = await ReadStateAsync(stateClient, processId, cancellationToken);
             var gameState = ReadString(native["state"]?["context"] as JsonObject, "gameState");
             if (!string.Equals(gameState, "MissionState", StringComparison.Ordinal))
-                return BuildResult(true, "native-aftermath-reached", native, true,
+                return BuildResult(true, "native-aftermath-reached", native, delegationIssued,
                     delegatedFormationCount, heroHealthStart, heroHealthEnd,
                     mainHeroNativeAiControlMaintained, campaignDayStart, ReadDouble(native, "campaignDay"), timeModeStart,
                     ReadString(native, "timeControlMode") ?? string.Empty, pollCount, deploymentFinishIssued,
                     deploymentTransitionPollCount, missionModeAtEntry, mainAgentRemovedDuringMission,
                     mainHeroAutopilotIssued, nativeMissionExitIssued, deploymentAutoDeployIssued, nativeReadyCallbackDispatchedByBridge,
-                    nativeReadyHandlerExceptionType);
+                    nativeReadyHandlerExceptionType, nativeDeploymentCompletedByNative: deploymentCompletedByNativeBeforeHostSetup);
             if (poll + 1 < endScreenExitPollLimit) await Task.Delay(delay, cancellationToken);
         }
-        return Failure("battle-mission-aftermath-transition-timeout", native ?? new JsonObject(), true, 0, heroHealthStart, heroHealthEnd,
+        return Failure("battle-mission-aftermath-transition-timeout", native ?? new JsonObject(), delegationIssued, delegatedFormationCount, heroHealthStart, heroHealthEnd,
             mainHeroNativeAiControlMaintained, campaignDayStart, ReadDouble(native, "campaignDay"), timeModeStart,
             ReadString(native, "timeControlMode") ?? string.Empty, pollCount,
             mainHeroAutopilotIssued: mainHeroAutopilotIssued, nativeMissionExitIssued: nativeMissionExitIssued);
@@ -525,6 +583,15 @@ internal static class AgentHostBattleMissionLoop
             controlLossClient.ExitCalls != 1)
             throw new AgentHostException("battle-mission-loop-self-test-native-ai-control-loss-overclaimed", "A completed Native aftermath may be returned after control loss, but the Host must record that Native AI control did not persist.");
 
+        var spontaneousDeploymentClient = new FakeBattleMissionNativeClient(nativeDeploymentCompletedBeforeHostSetup: true, hasPlayerTroopFormations: false);
+        var spontaneousDeployment = RunAsync(spontaneousDeploymentClient, spontaneousDeploymentClient, 101, CancellationToken.None, TimeSpan.Zero,
+            missionEntryPollLimit: 2, missionCompletionPollLimit: 6, endScreenExitPollLimit: 2).GetAwaiter().GetResult();
+        if (!spontaneousDeployment.Completed || !spontaneousDeployment.NativeDeploymentCompletedByNative ||
+            spontaneousDeployment.NativeDeploymentAutoDeployIssued || spontaneousDeployment.NativeDeploymentFinishIssued ||
+            spontaneousDeploymentClient.DelegationCalls != 0 || spontaneousDeploymentClient.AutopilotCalls != 1 ||
+            spontaneousDeploymentClient.ExitCalls != 1 || spontaneousDeployment.Termination != "native-aftermath-reached")
+            throw new AgentHostException("battle-mission-loop-self-test-native-deployment-transition-not-reconciled", $"When Native has already committed Deployment to Battle before the Host's first status read, the Host must verify Native state, skip Auto Deploy/Ready, and continue the bounded battle handoff once. completed={spontaneousDeployment.Completed}; termination={spontaneousDeployment.Termination}; nativeTransition={spontaneousDeployment.NativeDeploymentCompletedByNative}; autoDeploy={spontaneousDeployment.NativeDeploymentAutoDeployIssued}; ready={spontaneousDeployment.NativeDeploymentFinishIssued}; delegate={spontaneousDeploymentClient.DelegationCalls}; autopilot={spontaneousDeploymentClient.AutopilotCalls}; exit={spontaneousDeploymentClient.ExitCalls}; diagnostic={spontaneousDeployment.NativeDeploymentPreconditionDiagnostic?.ToJsonString()}");
+
         return [
             new { scenario = "battle-mission-delegates-troops-and-native-ai-controls-mainhero-until-aftermath", passed = true },
             new { scenario = "battle-mission-returns-native-defeat-aftermath-without-a-victory-claim", passed = true },
@@ -532,7 +599,8 @@ internal static class AgentHostBattleMissionLoop
             new { scenario = "battle-mission-rejects-unsupported-native-state-before-delegation", passed = true },
             new { scenario = "battle-mission-passive-observation-timeout-does-not-repeat-native-actions", passed = true },
             new { scenario = "battle-mission-native-mainhero-autopilot-rejection-remains-unresolved", passed = true },
-            new { scenario = "battle-mission-native-mainhero-control-loss-is-not-overclaimed", passed = true }
+            new { scenario = "battle-mission-native-mainhero-control-loss-is-not-overclaimed", passed = true },
+            new { scenario = "battle-mission-native-spontaneous-deployment-transition-is-reconciled-without-replaying-setup", passed = true }
         ];
     }
 
@@ -542,7 +610,7 @@ internal static class AgentHostBattleMissionLoop
         int deploymentTransitionPollCount = 0, string missionModeAtEntry = "", bool mainHeroAutopilotIssued = false,
         bool nativeMissionExitIssued = false, bool nativeDeploymentAutoDeployIssued = false,
         bool nativeReadyCallbackDispatchedByBridge = false, string nativeReadyHandlerExceptionType = "",
-        JsonObject? nativeDeploymentPreconditionDiagnostic = null) =>
+        JsonObject? nativeDeploymentPreconditionDiagnostic = null, bool nativeDeploymentCompletedByNative = false) =>
         BuildResult(false, termination, native, delegationIssued, delegatedFormationCount, heroHealthStart, heroHealthEnd,
             heroNativeAiControlMaintained, campaignDayStart, campaignDayEnd, timeModeStart ?? string.Empty, timeModeEnd ?? string.Empty,
             pollCount, deploymentFinishIssued, deploymentTransitionPollCount, missionModeAtEntry,
@@ -550,7 +618,8 @@ internal static class AgentHostBattleMissionLoop
             nativeDeploymentAutoDeployIssued: nativeDeploymentAutoDeployIssued,
             nativeReadyCallbackDispatchedByBridge: nativeReadyCallbackDispatchedByBridge,
             nativeReadyHandlerExceptionType: nativeReadyHandlerExceptionType,
-            nativeDeploymentPreconditionDiagnostic: nativeDeploymentPreconditionDiagnostic);
+            nativeDeploymentPreconditionDiagnostic: nativeDeploymentPreconditionDiagnostic,
+            nativeDeploymentCompletedByNative: nativeDeploymentCompletedByNative);
 
     private static AgentHostBattleMissionLoopResult BuildResult(bool completed, string termination, JsonObject native,
         bool delegationIssued, int delegatedFormationCount, double heroHealthStart, double heroHealthEnd,
@@ -559,7 +628,7 @@ internal static class AgentHostBattleMissionLoop
         string missionModeAtEntry = "", bool mainAgentRemovedDuringMission = false, bool mainHeroAutopilotIssued = false,
         bool nativeMissionExitIssued = false, bool nativeDeploymentAutoDeployIssued = false,
         bool nativeReadyCallbackDispatchedByBridge = false, string nativeReadyHandlerExceptionType = "",
-        JsonObject? nativeDeploymentPreconditionDiagnostic = null) =>
+        JsonObject? nativeDeploymentPreconditionDiagnostic = null, bool nativeDeploymentCompletedByNative = false) =>
         new(completed, termination, native, delegationIssued, delegatedFormationCount, heroHealthStart, heroHealthEnd,
             heroNativeAiControlMaintained, campaignDayStart, campaignDayEnd, timeModeStart, timeModeEnd, pollCount)
         {
@@ -572,7 +641,8 @@ internal static class AgentHostBattleMissionLoop
             MainAgentRemovedDuringMission = mainAgentRemovedDuringMission,
             MainHeroAutopilotIssued = mainHeroAutopilotIssued,
             NativeMissionExitIssued = nativeMissionExitIssued,
-            NativeDeploymentPreconditionDiagnostic = nativeDeploymentPreconditionDiagnostic?.DeepClone() as JsonObject
+            NativeDeploymentPreconditionDiagnostic = nativeDeploymentPreconditionDiagnostic?.DeepClone() as JsonObject,
+            NativeDeploymentCompletedByNative = nativeDeploymentCompletedByNative
         };
 
     private static JsonObject BuildDeploymentPreconditionDiagnostic(JsonObject status, IReadOnlyCollection<string> failures)
@@ -617,7 +687,8 @@ internal static class AgentHostBattleMissionLoop
     private static bool NearlyEqual(double left, double right) => double.IsFinite(left) && double.IsFinite(right) && Math.Abs(left - right) < 0.000001;
 
     private sealed class FakeBattleMissionNativeClient(bool supported = true, bool neverEnds = false, bool heroTakesDamage = false,
-        bool capturedAfterBattle = false, bool autopilotRejected = false, bool loseAutopilotControl = false) :
+        bool capturedAfterBattle = false, bool autopilotRejected = false, bool loseAutopilotControl = false,
+        bool nativeDeploymentCompletedBeforeHostSetup = false, bool hasPlayerTroopFormations = true) :
         IAgentHostBattleSimulationNativeClient, IAgentHostBattleMissionNativeClient
     {
         private int _reads;
@@ -638,7 +709,7 @@ internal static class AgentHostBattleMissionLoop
             {
                 ["active"] = !ended,
                 ["missionEnded"] = ended,
-                ["mode"] = "Battle",
+                ["mode"] = nativeDeploymentCompletedBeforeHostSetup && _reads == 1 ? "Deployment" : "Battle",
                 ["mainAgent"] = new JsonObject
                 {
                     ["controller"] = nativeAiControlActive ? "AI" : "Player",
@@ -685,8 +756,9 @@ internal static class AgentHostBattleMissionLoop
             {
                 ["supported"] = supported,
                 ["missionMode"] = "Battle",
-                ["campaignDay"] = 42.0,
+                ["campaignDay"] = nativeDeploymentCompletedBeforeHostSetup ? 42.0004 : 42.0,
                 ["campaignTimeControlMode"] = "Stop",
+                ["deploymentUi"] = new JsonObject { ["viewAvailable"] = false, ["readyCallbackBound"] = false, ["canStartMission"] = false, ["deploymentFinished"] = true },
             ["mainAgent"] = new JsonObject
                 {
                 ["controller"] = _autopilotStarted && !(loseAutopilotControl && _reads >= 3) ? "AI" : "Player",
@@ -698,7 +770,7 @@ internal static class AgentHostBattleMissionLoop
                 ["mainAgentAiControlLease"] = _autopilotStarted
                     ? new JsonObject { ["active"] = true, ["scope"] = "agenthost-native-battle-autopilot", ["status"] = "active" }
                     : new JsonObject { ["active"] = false, ["scope"] = "none", ["status"] = "never-started" },
-                ["playerTeam"] = new JsonObject { ["formationCount"] = 1 }
+                ["playerTeam"] = new JsonObject { ["formationCount"] = hasPlayerTroopFormations ? 1 : 0 }
             }
         }.ToJsonString()));
 
@@ -710,6 +782,8 @@ internal static class AgentHostBattleMissionLoop
 
         public Task<JsonDocument> DelegateBattleMissionTroopsAsync(CancellationToken cancellationToken)
         {
+            if (!hasPlayerTroopFormations)
+                throw new AgentHostException("battle-mission-fake-unexpected-delegation", "F6 delegation must be skipped when Native exposes zero PlayerTeam troop formations.");
             DelegationCalls++;
             return Task.FromResult(JsonDocument.Parse(new JsonObject
             {
@@ -720,8 +794,8 @@ internal static class AgentHostBattleMissionLoop
                     ["allRequestedFormationsDelegated"] = true,
                     ["delegatedFormationCount"] = 1,
                     ["mainAgentStillPlayerControlled"] = true,
-                    ["campaignDayBefore"] = 42.0,
-                    ["campaignDayAfter"] = 42.0,
+                    ["campaignDayBefore"] = nativeDeploymentCompletedBeforeHostSetup ? 42.0004 : 42.0,
+                    ["campaignDayAfter"] = nativeDeploymentCompletedBeforeHostSetup ? 42.0004 : 42.0,
                     ["timeControlModeBefore"] = "Stop",
                     ["timeControlModeAfter"] = "Stop"
                 }
@@ -731,8 +805,9 @@ internal static class AgentHostBattleMissionLoop
         public Task<JsonDocument> AutopilotMainAgentBattleMissionAsync(CancellationToken cancellationToken)
         {
             AutopilotCalls++;
-            if (AutopilotCalls != 1 || DelegationCalls != 1)
-                throw new AgentHostException("battle-mission-fake-autopilot-order-invalid", "Native MainHero AI handoff must occur once after Native troop delegation.");
+            var expectedDelegationCalls = hasPlayerTroopFormations ? 1 : 0;
+            if (AutopilotCalls != 1 || DelegationCalls != expectedDelegationCalls)
+                throw new AgentHostException("battle-mission-fake-autopilot-order-invalid", "Native MainHero AI handoff must occur once after any available Native troop delegation, and skip F6 when there are no troop formations.");
             if (autopilotRejected)
                 return Task.FromResult(JsonDocument.Parse("{\"processId\":101,\"status\":\"rejected\",\"campaignDay\":42.0,\"timeControlMode\":\"Stop\",\"data\":{\"scope\":\"agenthost-native-battle-autopilot\"}}"));
             _autopilotStarted = true;
@@ -740,7 +815,7 @@ internal static class AgentHostBattleMissionLoop
             {
                 ["processId"] = 101,
                 ["status"] = "completed",
-                ["campaignDay"] = 42.0,
+                ["campaignDay"] = nativeDeploymentCompletedBeforeHostSetup ? 42.0004 : 42.0,
                 ["timeControlMode"] = "Stop",
                 ["data"] = new JsonObject
                 {
@@ -753,8 +828,8 @@ internal static class AgentHostBattleMissionLoop
                     ["missionMainAgentIndexBefore"] = 34,
                     ["missionMainAgentIndexAfter"] = 34,
                     ["missionMainAgentControllerActiveAfter"] = false,
-                    ["campaignDayBefore"] = 42.0,
-                    ["campaignDayAfter"] = 42.0,
+                    ["campaignDayBefore"] = nativeDeploymentCompletedBeforeHostSetup ? 42.0004 : 42.0,
+                    ["campaignDayAfter"] = nativeDeploymentCompletedBeforeHostSetup ? 42.0004 : 42.0,
                     ["timeControlModeBefore"] = "Stop",
                     ["timeControlModeAfter"] = "Stop"
                 }
