@@ -862,6 +862,7 @@ internal static class AgentHostBattleSimulationLoop
                         ["modelDecisionMade"] = false,
                         ["missionModeAtEntry"] = missionResult.MissionModeAtEntry,
                         ["nativeDeploymentFinishIssued"] = missionResult.NativeDeploymentFinishIssued,
+                        ["nativeDeploymentPreconditionDiagnostic"] = missionResult.NativeDeploymentPreconditionDiagnostic?.DeepClone(),
                         ["deploymentTransitionPollCount"] = missionResult.DeploymentTransitionPollCount,
                         ["nativeDelegationIssued"] = missionResult.DelegationIssued,
                         ["delegatedFormationCount"] = missionResult.DelegatedFormationCount,

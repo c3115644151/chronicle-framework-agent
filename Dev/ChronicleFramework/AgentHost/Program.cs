@@ -338,6 +338,7 @@ internal static class Program
                     timeControlModeAtEnd = result.TimeControlModeAtEnd,
                     passivePollCount = result.PassivePollCount,
                     nativeDeploymentFinishIssued = result.NativeDeploymentFinishIssued,
+                    nativeDeploymentPreconditionDiagnostic = result.NativeDeploymentPreconditionDiagnostic?.DeepClone(),
                     nativeDeploymentAutoDeployIssued = result.NativeDeploymentAutoDeployIssued,
                     nativeReadyCallbackDispatchedByBridge = result.NativeReadyCallbackDispatchedByBridge,
                     nativeReadyHandlerExceptionType = result.NativeReadyHandlerExceptionType,
