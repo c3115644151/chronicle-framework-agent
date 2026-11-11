@@ -73,8 +73,10 @@ internal interface IAgentHostBattleSimulationNativeClient : IAgentHostCampaignNa
 internal interface IAgentHostBattleMissionNativeClient
 {
     Task<JsonDocument> ReadBattleMissionStatusAsync(CancellationToken cancellationToken);
+    Task<JsonDocument> AutoDeployBattleMissionAsync(CancellationToken cancellationToken);
     Task<JsonDocument> FinishBattleMissionDeploymentAsync(CancellationToken cancellationToken);
     Task<JsonDocument> DelegateBattleMissionTroopsAsync(CancellationToken cancellationToken);
+    Task<JsonDocument> AutopilotMainAgentBattleMissionAsync(CancellationToken cancellationToken);
     Task<JsonDocument> ExitEndedBattleMissionAsync(CancellationToken cancellationToken);
 }
 

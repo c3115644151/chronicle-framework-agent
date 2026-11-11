@@ -867,7 +867,8 @@ internal static class AgentHostBattleSimulationLoop
                         ["delegatedFormationCount"] = missionResult.DelegatedFormationCount,
                         ["mainHeroHealthAtStart"] = double.IsFinite(missionResult.MainHeroHealthAtStart) ? JsonValue.Create(missionResult.MainHeroHealthAtStart) : null,
                         ["mainHeroHealthAtEnd"] = double.IsFinite(missionResult.MainHeroHealthAtEnd) ? JsonValue.Create(missionResult.MainHeroHealthAtEnd) : null,
-                        ["mainHeroStayedPlayerControlled"] = missionResult.MainHeroStayedPlayerControlled,
+                        ["mainHeroNativeAiControlMaintained"] = missionResult.MainHeroNativeAiControlMaintained,
+                        ["mainAgentRemovedDuringMission"] = missionResult.MainAgentRemovedDuringMission,
                         ["campaignDayAtStart"] = double.IsFinite(missionResult.CampaignDayAtStart) ? JsonValue.Create(missionResult.CampaignDayAtStart) : null,
                         ["campaignDayAtEnd"] = double.IsFinite(missionResult.CampaignDayAtEnd) ? JsonValue.Create(missionResult.CampaignDayAtEnd) : null,
                         ["timeControlModeAtStart"] = missionResult.TimeControlModeAtStart,
@@ -892,7 +893,8 @@ internal static class AgentHostBattleSimulationLoop
                         ["nativeDeploymentFinishIssued"] = missionResult.NativeDeploymentFinishIssued,
                         ["termination"] = missionResult.Termination,
                         ["delegatedFormationCount"] = missionResult.DelegatedFormationCount,
-                        ["mainHeroStayedPlayerControlled"] = missionResult.MainHeroStayedPlayerControlled
+                        ["mainHeroNativeAiControlMaintained"] = missionResult.MainHeroNativeAiControlMaintained,
+                        ["mainAgentRemovedDuringMission"] = missionResult.MainAgentRemovedDuringMission
                     };
                     battleResult = "native-battle-mission-ended";
                 }
@@ -1989,18 +1991,18 @@ internal static class AgentHostBattleSimulationLoop
         var delegatedMissionTrace = delegatedMissionResult["trace"] as JsonArray;
         var delegatedMissionTraceStep = delegatedMissionTrace?.OfType<JsonObject>().SingleOrDefault(step => ReadString(step, "stage") == "native-battle-mission-delegation");
         if (ReadString(delegatedMissionResult, "status") != "completed" || ReadString(delegatedMissionResult, "termination") != "battle-resolved-and-verified" ||
-            delegatedMissionProvider.CallCount != 3 || delegatedMissionClient.DelegationCalls != 1 || delegatedMissionClient.ExitCalls != 1 ||
+            delegatedMissionProvider.CallCount != 3 || delegatedMissionClient.DelegationCalls != 1 || delegatedMissionClient.AutopilotCalls != 1 || delegatedMissionClient.ExitCalls != 1 ||
             delegatedMissionClient.DeploymentFinishCalls != 1 ||
-            !delegatedMissionClient.Actions.SequenceEqual(new[] { "mapPartyTargets", "menuSelect:attack", "missionFinishDeployment", "missionDelegateTroops", "missionRetreat" }) ||
+            !delegatedMissionClient.Actions.SequenceEqual(new[] { "mapPartyTargets", "menuSelect:attack", "missionAutoDeploy", "missionFinishDeployment", "missionDelegateTroops", "missionAutopilotMainAgent", "missionRetreat" }) ||
             delegatedMissionTraceStep is null || ReadBoolean(delegatedMissionTraceStep, "modelDecisionMade") ||
-            !ReadBoolean(delegatedMissionTraceStep, "mainHeroStayedPlayerControlled") ||
+            !ReadBoolean(delegatedMissionTraceStep, "mainHeroNativeAiControlMaintained") ||
             ReadInt(delegatedMissionTraceStep, "delegatedFormationCount", 0) != 1 ||
             !ReadBoolean(delegatedMissionTraceStep, "nativeDeploymentFinishIssued") ||
             ReadInt(delegatedMissionTraceStep, "deploymentTransitionPollCount", 0) != 1 ||
             ReadString(delegatedMissionTraceStep, "missionModeAtEntry") != "Deployment" ||
             ReadString(delegatedMissionTraceStep, "timeControlModeAtStart") != "Stop" ||
             ReadString(delegatedMissionTraceStep, "timeControlModeAtEnd") != "Stop")
-            throw new AgentHostException("battle-loop-self-test-attack-deployment-f6-fallback-not-integrated", $"A model-selected Native attack fallback must finish Native Deployment once, enter Battle before delegating once, perform no per-poll model calls, return through Native aftermath, and preserve MainHero/time. status={ReadString(delegatedMissionResult, "status")}; termination={ReadString(delegatedMissionResult, "termination")}; providerCalls={delegatedMissionProvider.CallCount}; actions={string.Join(",", delegatedMissionClient.Actions)}; trace={delegatedMissionTraceStep?.ToJsonString()}");
+            throw new AgentHostException("battle-loop-self-test-attack-deployment-f6-native-ai-fallback-not-integrated", $"A model-selected Native attack fallback must finish Native Deployment once, delegate troops once, hand MainHero to Native AI once, perform no per-poll model calls, return through Native aftermath, and preserve Campaign time. status={ReadString(delegatedMissionResult, "status")}; termination={ReadString(delegatedMissionResult, "termination")}; providerCalls={delegatedMissionProvider.CallCount}; actions={string.Join(",", delegatedMissionClient.Actions)}; trace={delegatedMissionTraceStep?.ToJsonString()}");
 
         var escapeClient = new FakeBattleSimulationNativeClient(simulateNativeEscape: true);
         var escapeProvider = new FakeTryToGetAwayDecisionProvider();
@@ -3050,7 +3052,10 @@ internal static class AgentHostBattleSimulationLoop
     {
         private int _stage;
         private int _missionReads;
+        private bool _autopilotStarted;
+        private bool _deploymentAutoDeployed;
         internal int DelegationCalls { get; private set; }
+        internal int AutopilotCalls { get; private set; }
         internal int ExitCalls { get; private set; }
         internal int DeploymentFinishCalls { get; private set; }
         internal List<string> Actions { get; } = [];
@@ -3094,7 +3099,14 @@ internal static class AgentHostBattleSimulationLoop
                     ["active"] = !missionEnded,
                     ["missionEnded"] = missionEnded,
                     ["mode"] = _stage == 1 ? "Deployment" : "Battle",
-                    ["mainAgent"] = _stage == 1 ? null : new JsonObject { ["isPlayerControlled"] = true, ["health"] = 100 }
+                    ["mainAgent"] = _stage == 1 ? null : new JsonObject
+                    {
+                        ["controller"] = _autopilotStarted ? "AI" : "Player",
+                        ["isPlayerControlled"] = !_autopilotStarted,
+                        ["isAIControlled"] = _autopilotStarted,
+                        ["missionMainAgentControllerActive"] = !_autopilotStarted,
+                        ["health"] = 100
+                    }
                 };
             var root = new JsonObject
             {
@@ -3136,8 +3148,22 @@ internal static class AgentHostBattleSimulationLoop
             if (_stage is not (1 or 2))
                 throw new AgentHostException("battle-mission-integration-status-outside-mission", "Mission status is only valid after the Native attack option entered a Mission.");
             var mode = _stage == 1 ? "Deployment" : "Battle";
-            var mainAgent = _stage == 1 ? "null" : "{\"isPlayerControlled\":true}";
-            return Task.FromResult(JsonDocument.Parse($"{{\"processId\":321,\"status\":\"completed\",\"data\":{{\"supported\":true,\"missionMode\":\"{mode}\",\"mainAgent\":{mainAgent},\"playerTeam\":{{\"formationCount\":1}}}}}}"));
+            var mainAgent = _stage == 1 ? "null" : _autopilotStarted
+                ? "{\"controller\":\"AI\",\"isPlayerControlled\":false,\"isAIControlled\":true,\"missionMainAgentControllerActive\":false,\"health\":100}"
+                : "{\"controller\":\"Player\",\"isPlayerControlled\":true,\"isAIControlled\":false,\"missionMainAgentControllerActive\":true,\"health\":100}";
+            var formationCount = _stage == 1 ? 0 : 1;
+            var deploymentUi = _stage == 1 ? ",\"deploymentUi\":{\"viewAvailable\":true,\"readyCallbackBound\":" + (_deploymentAutoDeployed ? "true" : "false") + ",\"canStartMission\":true,\"deploymentFinished\":false}" : string.Empty;
+            return Task.FromResult(JsonDocument.Parse($"{{\"processId\":321,\"status\":\"completed\",\"data\":{{\"supported\":true,\"missionMode\":\"{mode}\",\"campaignDay\":100.0,\"campaignTimeControlMode\":\"Stop\",\"mainAgent\":{mainAgent},\"playerTeam\":{{\"formationCount\":{formationCount}}}{deploymentUi}}}}}"));
+        }
+
+        public Task<JsonDocument> AutoDeployBattleMissionAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_stage != 1 || _deploymentAutoDeployed)
+                throw new AgentHostException("battle-mission-integration-auto-deploy-invalid", "Native Auto Deploy must be submitted once while the current field Mission is in Deployment.");
+            _deploymentAutoDeployed = true;
+            Actions.Add("missionAutoDeploy");
+            return Task.FromResult(JsonDocument.Parse("{\"processId\":321,\"status\":\"completed\",\"data\":{\"nativeHandler\":\"MissionGauntletSingleplayerOrderUIHandler.OnAutoDeploy\",\"nativeAutoDeployHandler\":\"MissionOrderDeploymentControllerVM.ExecuteAutoDeploy\",\"nativeDeploymentHandler\":\"MissionOrderDeploymentControllerVM.ExecuteDeployPlayerSide\",\"nativeDeploymentSideReadyHandlerInvoked\":true,\"canStartMission\":true,\"readyCallbackBoundAfter\":true,\"deploymentFinishedAfter\":false,\"campaignDayBefore\":100.0,\"campaignDayAfter\":100.0,\"timeControlModeBefore\":\"Stop\",\"timeControlModeAfter\":\"Stop\"}}"));
         }
 
         public Task<JsonDocument> FinishBattleMissionDeploymentAsync(CancellationToken cancellationToken)
@@ -3158,6 +3184,10 @@ internal static class AgentHostBattleSimulationLoop
                     ["nativeDeploymentHandler"] = "DeploymentHandler.FinishDeployment",
                     ["nativeUiView"] = "OrderOfBattle.xml",
                     ["canStartMission"] = true,
+                    ["readyCallbackBoundBefore"] = _deploymentAutoDeployed,
+                    ["deploymentFinishedAfter"] = true,
+                    ["readyCallbackBoundBefore"] = true,
+                    ["deploymentFinishedAfter"] = true,
                     ["modeBefore"] = "Deployment",
                     ["modeAfter"] = "Deployment",
                     ["mainAgentPresentBefore"] = false,
@@ -3181,6 +3211,17 @@ internal static class AgentHostBattleSimulationLoop
             DelegationCalls++;
             Actions.Add("missionDelegateTroops");
             return Task.FromResult(JsonDocument.Parse("{\"processId\":321,\"status\":\"completed\",\"data\":{\"delegatedFormationCount\":1,\"allRequestedFormationsDelegated\":true,\"mainAgentStillPlayerControlled\":true,\"campaignDayBefore\":100.0,\"campaignDayAfter\":100.0,\"timeControlModeBefore\":\"Stop\",\"timeControlModeAfter\":\"Stop\"}}"));
+        }
+
+        public Task<JsonDocument> AutopilotMainAgentBattleMissionAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_stage != 2 || DelegationCalls != 1 || AutopilotCalls != 0)
+                throw new AgentHostException("battle-mission-integration-native-ai-handoff-invalid", "Native MainHero AI handoff must follow one F6 delegation in the same active Battle Mission.");
+            AutopilotCalls++;
+            Actions.Add("missionAutopilotMainAgent");
+            _autopilotStarted = true;
+            return Task.FromResult(JsonDocument.Parse("{\"processId\":321,\"status\":\"completed\",\"campaignDay\":100.0,\"timeControlMode\":\"Stop\",\"data\":{\"scope\":\"agenthost-native-battle-autopilot\",\"handoffMode\":\"rts-camera-native-ai-initialization\",\"controllerBefore\":\"Player\",\"controllerAfter\":\"AI\",\"isPlayerControlledAfter\":false,\"isAIControlledAfter\":true,\"missionMainAgentControllerActiveAfter\":false,\"missionMainAgentIndexBefore\":34,\"missionMainAgentIndexAfter\":34,\"campaignDayBefore\":100.0,\"campaignDayAfter\":100.0,\"timeControlModeBefore\":\"Stop\",\"timeControlModeAfter\":\"Stop\"}}"));
         }
 
         public Task<JsonDocument> ExitEndedBattleMissionAsync(CancellationToken cancellationToken)

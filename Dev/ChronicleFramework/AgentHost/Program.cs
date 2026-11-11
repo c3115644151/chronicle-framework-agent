@@ -23,6 +23,16 @@ internal static class Program
                 return await RunNativeMapMovementMonitorProbeAsync(movementMonitorWaitSeconds);
             }
 
+            if (args.Length > 0 && string.Equals(args[0], "--native-battle-mission-loop-harness", StringComparison.Ordinal))
+            {
+                if (args.Length != 2 || !int.TryParse(args[1], out var nativeBattleProcessId) || nativeBattleProcessId <= 0)
+                    throw new AgentHostException("native-battle-mission-harness-arguments-invalid", "The Harness-only Native Battle Mission loop requires one positive Bannerlord process id.");
+                if (Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") != "battle-fixture" ||
+                    string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP")))
+                    throw new AgentHostException("native-battle-mission-harness-not-authorized", "The real-Native Battle Mission loop probe is restricted to its disposable battle Harness phase.");
+                return await RunNativeBattleMissionLoopHarnessAsync(nativeBattleProcessId);
+            }
+
             if (args.Length == 1 && string.Equals(args[0], "--parent-process-self-test-probe", StringComparison.Ordinal))
             {
                 await Task.Delay(TimeSpan.FromSeconds(1));
@@ -189,6 +199,12 @@ internal static class Program
                     : null,
                 providerSelfTestStack = args.Contains("--provider-self-test", StringComparer.Ordinal) && exception.StackTrace is string stack
                     ? stack[..Math.Min(stack.Length, 900)]
+                    : null,
+                nativeBattleMissionHarnessDetail = args.Contains("--native-battle-mission-loop-harness", StringComparer.Ordinal)
+                    ? exception.Message[..Math.Min(exception.Message.Length, 500)]
+                    : null,
+                nativeBattleMissionHarnessStack = args.Contains("--native-battle-mission-loop-harness", StringComparer.Ordinal) && exception.StackTrace is string nativeStack
+                    ? nativeStack[..Math.Min(nativeStack.Length, 1500)]
                     : null
             }, OutputJsonOptions));
             return 3;
@@ -290,6 +306,55 @@ internal static class Program
             value?[property] is JsonValue node && node.TryGetValue<string>(out var text) ? text : null;
         static bool NodeBoolean(JsonObject? value, string property) =>
             value?[property] is JsonValue node && node.TryGetValue<bool>(out var flag) && flag;
+    }
+
+    private static async Task<int> RunNativeBattleMissionLoopHarnessAsync(int processId)
+    {
+        try
+        {
+            var protocolRoot = NativeMailboxClient.GetDefaultProtocolRoot();
+            using var mutex = new Mutex(initiallyOwned: true, GetMutexName(protocolRoot), out var createdNew);
+            if (!createdNew) throw new AgentHostException("host-already-running", "A Chronicle Agent Host already owns this protocol root.");
+            var client = new NativeMailboxClient(protocolRoot, TimeSpan.FromSeconds(12), expectedProcessId: processId);
+            var result = await AgentHostBattleMissionLoop.RunAsync(client, client, processId, CancellationToken.None,
+                pollInterval: TimeSpan.FromSeconds(1), missionEntryPollLimit: 20, missionCompletionPollLimit: 900, endScreenExitPollLimit: 20);
+            var completed = result.Completed && result.MainHeroNativeAiControlMaintained;
+            Console.Out.WriteLine(JsonSerializer.Serialize(new
+            {
+                status = completed ? "completed" : "unresolved",
+                nativeResult = new
+                {
+                    completed = result.Completed,
+                    termination = result.Termination,
+                    finalNative = result.FinalNative,
+                    delegationIssued = result.DelegationIssued,
+                    delegatedFormationCount = result.DelegatedFormationCount,
+                    mainHeroHealthAtStart = double.IsFinite(result.MainHeroHealthAtStart) ? (double?)result.MainHeroHealthAtStart : null,
+                    mainHeroHealthAtEnd = double.IsFinite(result.MainHeroHealthAtEnd) ? (double?)result.MainHeroHealthAtEnd : null,
+                    mainHeroNativeAiControlMaintained = result.MainHeroNativeAiControlMaintained,
+                    campaignDayAtStart = double.IsFinite(result.CampaignDayAtStart) ? (double?)result.CampaignDayAtStart : null,
+                    campaignDayAtEnd = double.IsFinite(result.CampaignDayAtEnd) ? (double?)result.CampaignDayAtEnd : null,
+                    timeControlModeAtStart = result.TimeControlModeAtStart,
+                    timeControlModeAtEnd = result.TimeControlModeAtEnd,
+                    passivePollCount = result.PassivePollCount,
+                    nativeDeploymentFinishIssued = result.NativeDeploymentFinishIssued,
+                    nativeDeploymentAutoDeployIssued = result.NativeDeploymentAutoDeployIssued,
+                    nativeReadyCallbackDispatchedByBridge = result.NativeReadyCallbackDispatchedByBridge,
+                    nativeReadyHandlerExceptionType = result.NativeReadyHandlerExceptionType,
+                    deploymentTransitionPollCount = result.DeploymentTransitionPollCount,
+                    missionModeAtEntry = result.MissionModeAtEntry,
+                    mainAgentRemovedDuringMission = result.MainAgentRemovedDuringMission,
+                    mainHeroAutopilotIssued = result.MainHeroAutopilotIssued,
+                    nativeMissionExitIssued = result.NativeMissionExitIssued
+                }
+            }, OutputJsonOptions));
+            return completed ? 0 : 1;
+        }
+        catch (AgentHostException) { throw; }
+        catch (Exception exception)
+        {
+            throw new AgentHostException("native-battle-mission-loop-harness-failed", $"{exception.GetType().Name}: {exception.Message}");
+        }
     }
 
     internal static async Task<bool> WaitForStopSignalAsync(TextReader input, CancellationToken cancellationToken)

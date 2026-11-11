@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-11-11
+goal: Wire the tested Native MainAgent AI handoff into the existing single
+  battle-mission Host sequence without model polling, clock actions, or forced
+  combat outcomes, and validate it with deterministic package tests and one
+  Native clone run.

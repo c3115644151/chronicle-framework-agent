@@ -862,7 +862,8 @@ internal sealed class ChronicleAgentProtocol
                 case "captureFrame":
                     var screenshotHarnessMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
                     if (!string.Equals(screenshotHarnessMode, "visual-capture", StringComparison.Ordinal) &&
-                        !string.Equals(screenshotHarnessMode, "visual-battle-fixture", StringComparison.Ordinal))
+                        !string.Equals(screenshotHarnessMode, "visual-battle-fixture", StringComparison.Ordinal) &&
+                        !string.Equals(screenshotHarnessMode, "battle-fixture", StringComparison.Ordinal))
                         throw new InvalidOperationException("captureFrame is restricted to visual Harness modes");
                     var captureRootValue = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
                     if (string.IsNullOrWhiteSpace(captureRootValue)) throw new InvalidOperationException("Harness capture directory is unavailable");
@@ -1092,8 +1093,14 @@ internal sealed class ChronicleAgentProtocol
                 case "missionDelegateTroops":
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBattleMissionAdapter.DelegateCurrentTroopFormations());
                     break;
+                case "missionAutopilotMainAgent":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBattleMissionAdapter.BeginMainAgentNativeAiAutopilotLease());
+                    break;
                 case "missionFinishDeployment":
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBattleMissionAdapter.FinishCurrentBattleDeployment());
+                    break;
+                case "missionAutoDeploy":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBattleMissionAdapter.AutoDeployCurrentBattleDeployment());
                     break;
                 case "harnessMainAgentAiControllerProbe":
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBattleMissionAdapter.BeginMainAgentAiControllerProbe(ReadDouble(command, "durationSeconds")));

@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.574'
+$contractVersion = '7.576'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -273,6 +273,8 @@ $agentHostDecisionCycleSource = Get-Content (Join-Path $harnessRoot 'AgentHost\A
 $agentHostCampaignLoopEvaluationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostCampaignLoopEvaluation.ps1') -Raw -Encoding UTF8
 $agentHostLiveModelLoopSource = Get-Content (Join-Path $harnessRoot 'Test-AgentLiveModelLoop.ps1') -Raw -Encoding UTF8
 $agentHostBattleSimulationLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostBattleSimulationLoop.cs') -Raw -Encoding UTF8
+$agentHostBattleMissionLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostBattleMissionLoop.cs') -Raw -Encoding UTF8
+$agentHostBattleMissionLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostBattleMissionLoop.cs') -Raw -Encoding UTF8
 $agentEncounterEscapeTestSource = Get-Content (Join-Path $harnessRoot 'Test-AgentEncounterEscape.ps1') -Raw -Encoding UTF8
 $agentLootPartyTransferSource = Get-Content (Join-Path $harnessRoot 'AgentLootPartyTransferAdapter.cs') -Raw -Encoding UTF8
 $agentHostNativeInquiryResolutionSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostNativeInquiryResolution.cs') -Raw -Encoding UTF8
@@ -1706,6 +1708,41 @@ if ($harnessScript -notmatch "'BattleMissionNativeAiHandoffProbe' \{ @\('Preflig
     $battleMissionAdapterSource -notmatch 'RestoreNativeMainAgentAiHandoff') {
     throw 'The full Native MainAgent AI handoff probe must reproduce the installed initialization sequence, restore changed state, remain Harness-only, and stay out of AgentHost.'
 }
+if ($protocolSource -notmatch 'case "missionAutopilotMainAgent"' -or
+    $protocolSource -notmatch 'case "missionAutoDeploy"' -or
+    $battleMissionAdapterSource -notmatch 'BeginMainAgentNativeAiAutopilotLease' -or
+    $battleMissionAdapterSource -notmatch 'AutoDeployCurrentBattleDeployment' -or
+    $battleMissionAdapterSource -notmatch 'MissionOrderDeploymentControllerVM.ExecuteDeployPlayerSide' -or
+    $agentCliSource -notmatch "'missionAutopilotMainAgent'" -or
+    $agentCliSource -notmatch "'missionAutoDeploy'" -or
+    $agentHostMailboxSource -notmatch 'missionAutopilotMainAgent' -or
+    $agentHostMailboxSource -notmatch 'missionAutoDeploy' -or
+    $agentHostBattleMissionLoopSource -notmatch 'AutopilotMainAgentBattleMissionAsync' -or
+    $agentHostBattleMissionLoopSource -notmatch 'AutoDeployBattleMissionAsync' -or
+    $agentHostBattleMissionLoopSource -notmatch 'nativeReadyCallbackDispatchedByBridge' -or
+    $agentHostBattleMissionLoopSource -notmatch 'agenthost-native-battle-autopilot' -or
+    $agentHostBattleMissionLoopSource -notmatch 'mainHeroNativeAiControlMaintained' -or
+    $agentHostDecisionCycleSource -match 'missionAutopilotMainAgent|missionAutoDeploy') {
+    throw 'Native battle setup and MainHero AI handoff must remain Host-only, reuse verified original deployment callbacks, and be excluded from model action catalogs.'
+}
+if ($harnessScript -notmatch "'BattleMissionHostNativeAiAutopilotProbe' \{ @\('Preflight', 'Build', 'AgentHostPackage', 'BattleMissionHostNativeAiAutopilotProbe'\) \}" -or
+    $harnessScript -match "'All' \{[^\r\n]*'BattleMissionHostNativeAiAutopilotProbe'" -or
+    $harnessScript -notmatch 'retainPackageForSameSessionRuntime\s*=\s*\$Phase\s*-in\s*@\([^\r\n]*BattleMissionHostNativeAiAutopilotProbe' -or
+    $battleMissionFormationProbeSource -notmatch 'ProbeAgentHostNativeAiAutopilot' -or
+    $battleMissionFormationProbeSource -notmatch '--native-battle-mission-loop-harness' -or
+    $agentHostProgramSource -notmatch '--native-battle-mission-loop-harness' -or
+    $agentHostProgramSource -notmatch '(?s)CHRONICLE_HARNESS_MODE.*battle-fixture' -or
+    $agentHostBattleMissionLoopSource -notmatch 'AutopilotMainAgentBattleMissionAsync' -or
+    $agentHostBattleMissionLoopSource -notmatch 'nativeDeploymentAutoDeployIssued' -or
+    $agentHostBattleMissionLoopSource -notmatch 'battle-mission-native-deployment-command-rejected' -or
+    $agentHostBattleMissionLoopSource -notmatch 'missionMainAgentControllerActive' -or
+    $agentHostBattleMissionLoopSource -notmatch 'battle-mission-native-mainhero-autopilot-rejected' -or
+    $battleMissionAdapterSource -notmatch 'double\.IsNaN\(value\) \|\| double\.IsInfinity\(value\)' -or
+    $agentHostProgramSource -notmatch 'nativeReadyHandlerExceptionType' -or
+    $battleMissionFormationProbeSource -notmatch 'deploymentStatusBeforeHost' -or
+    $agentHostDecisionCycleSource -match 'missionAutopilotMainAgent|missionAutoDeploy') {
+    throw 'The production Native battle loop integration probe must use a packaged Host and disposable battle, recover only from state-verified Native callbacks, record UI setup evidence, and keep internal battle actions out of model catalogs.'
+}
 if ($battleFixtureSource -notmatch 'IO\.File\]::Open\(\$script:VideoCaptureEventsPath' -or $battleFixtureSource -notmatch 'FileShare\]::ReadWrite' -or $battleFixtureSource -notmatch 'for \(\$attempt = 0; \$attempt -lt 6; \$attempt\+\+\)') { throw 'Battle event trace appends must tolerate transient readers/locks with bounded retry and shared access.' }
 if ($developmentDoc -notmatch "Contract version:\s*$([regex]::Escape($contractVersion))") {
     throw "DEVELOPMENT.md is not synchronized with contract version $contractVersion."
@@ -2321,7 +2358,7 @@ if ($harnessScript -notmatch "'FreshStoryModeNativeInquiryResponseEvaluation' \{
 if ($harnessScript -notmatch 'function Remove-RetainedAgentHostPackage' -or
     $harnessScript -notmatch 'CHRONICLE_AGENT_HOST_TEST_PATH' -or
     $harnessScript -notmatch 'Remove-RetainedAgentHostPackage \$script:retainedAgentHostPackageRoot' -or
-    $harnessScript -notmatch 'retainPackageForSameSessionRuntime = \$Phase -in @\(''FreshStoryModeModelEvaluation'', ''PersistentEycCampaign'', ''AgentHostLifecycleEvaluation'', ''AgentHostLifecycleCompletionEvaluation''\)' -or
+    $harnessScript -notmatch 'retainPackageForSameSessionRuntime = \$Phase -in @\(''FreshStoryModeModelEvaluation'', ''PersistentEycCampaign'', ''AgentHostLifecycleEvaluation'', ''AgentHostLifecycleCompletionEvaluation'', ''BattleMissionHostNativeAiAutopilotProbe''\)' -or
     $harnessScript -notmatch 'finally \{[\s\S]*?Remove-RetainedAgentHostPackage \$script:retainedAgentHostPackageRoot[\s\S]*?AgentHostLifecycleEvaluation' -or
     $harnessScript -notmatch 'Test-AgentHostPackage\.ps1' -or $harnessScript -notmatch '-CleanupPackageRoot' -or
     $agentHostPackageSource -notmatch 'Cleanup-only mode refuses while a Bannerlord or Agent Host process may still use the package') { throw 'Same-session MCM runtime testing must use the verified self-contained D: package artifact and remove only its unique temporary folder after game/Host processes are gone.' }

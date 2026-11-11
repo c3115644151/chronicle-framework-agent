@@ -16,6 +16,7 @@ namespace ChronicleFramework;
 internal static class ChronicleAgentBattleMissionAdapter
 {
     private static Mission? _deploymentFinishSubmittedForMission;
+    private static Mission? _deploymentAutoDeploySubmittedForMission;
     private static Type? _nativeMainAgentControllerType;
     private static Mission? _mainAgentAiProbeMission;
     private static Agent? _mainAgentAiProbeOwner;
@@ -33,6 +34,7 @@ internal static class ChronicleAgentBattleMissionAdapter
     private static object? _mainAgentAiProbeOriginalCustomLookDir;
     private static float _mainAgentAiProbeExpiresAt;
     private static string? _mainAgentAiProbeStatus;
+    private static string? _mainAgentAiProbeScope;
     private static string? _mainAgentAiProbeLastOwnerController;
     private static int? _mainAgentAiProbeLastSurrogateAgentIndex;
     private static string? _mainAgentAiProbeLastSurrogateController;
@@ -71,6 +73,11 @@ internal static class ChronicleAgentBattleMissionAdapter
         AppendString(json, "missionCurrentState", mission?.CurrentState.ToString());
         AppendString(json, "missionCombatType", mission?.CombatType.ToString());
         AppendString(json, "missionTeamAIType", mission?.MissionTeamAIType.ToString());
+        var deploymentUi = GetDeploymentUiStatus(mission);
+        json.Append("\"deploymentUi\":{\"viewAvailable\":").Append(deploymentUi.ViewAvailable ? "true" : "false")
+            .Append(",\"readyCallbackBound\":").Append(deploymentUi.ReadyCallbackBound ? "true" : "false")
+            .Append(",\"canStartMission\":").Append(deploymentUi.CanStartMission ? "true" : "false")
+            .Append(",\"deploymentFinished\":").Append(deploymentUi.DeploymentFinished ? "true" : "false").Append("},");
         json.Append("\"campaignTimeControlMode\":");
         AppendStringValue(json, Campaign.Current?.TimeControlMode.ToString());
         json.Append(",\"campaignDay\":");
@@ -142,7 +149,7 @@ internal static class ChronicleAgentBattleMissionAdapter
                 .Append(",\"isSelected\":").Append(selected.Any(item => item == formation) ? "true" : "false")
                 .Append('}');
         }
-        json.Append("]},\"mainAgentAiControllerProbe\":").Append(BuildMainAgentAiControllerProbeJson()).Append('}');
+        json.Append("]},\"mainAgentAiControlLease\":").Append(BuildMainAgentAiControllerProbeJson()).Append('}');
         return json.ToString();
     }
 
@@ -211,8 +218,6 @@ internal static class ChronicleAgentBattleMissionAdapter
         if (mission.Mode != MissionMode.Deployment)
             throw new InvalidOperationException("missionFinishDeployment requires the current Native Mission to be in Deployment mode");
         var mainAgentBefore = mission.MainAgent;
-        if (mainAgentBefore != null && (!mainAgentBefore.IsActive() || !mainAgentBefore.IsPlayerControlled))
-            throw new InvalidOperationException("missionFinishDeployment rejects an active non-Player MainAgent");
         if (ChronicleInquiryAdapter.IsInquiryOpen)
             throw new InvalidOperationException("missionFinishDeployment refuses to bypass an active Native Inquiry");
         if (ReferenceEquals(_deploymentFinishSubmittedForMission, mission))
@@ -230,21 +235,43 @@ internal static class ChronicleAgentBattleMissionAdapter
         var canStartProperty = viewModelType.GetProperty("CanStartMission", BindingFlags.Instance | BindingFlags.Public);
         if (canStartProperty?.GetValue(orderBattleViewModel) is not bool canStart || !canStart)
             throw new InvalidOperationException("missionFinishDeployment refuses while the original Native Ready button is disabled");
+        var readyCallbackField = viewModelType.GetField("_onBeginMission", BindingFlags.Instance | BindingFlags.NonPublic);
+        var readyCallbackBound = readyCallbackField?.GetValue(orderBattleViewModel) is Delegate readyCallback && readyCallback.GetInvocationList().Length > 0;
+        if (!readyCallbackBound && !ReferenceEquals(_deploymentAutoDeploySubmittedForMission, mission))
+            throw new InvalidOperationException("missionFinishDeployment requires an initialized Native Ready callback or this Host's Native Auto Deploy fallback");
         var executeReady = viewModelType.GetMethods(BindingFlags.Instance | BindingFlags.Public)
             .FirstOrDefault(method => method.Name == "ExecuteBeginMission" && method.GetParameters().Length == 0);
         if (executeReady == null)
             throw new InvalidOperationException("missionFinishDeployment could not resolve the original Native OrderOfBattle Ready command");
+        var nativeReadyCallbackDispatchedByBridge = false;
 
         var modeBefore = mission.Mode.ToString();
         var campaignDayBefore = CampaignTime.Now.ToDays;
         var timeModeBefore = campaign.TimeControlMode.ToString();
+        string? nativeReadyHandlerExceptionType = null;
         try
         {
             executeReady.Invoke(orderBattleViewModel, null);
         }
         catch (TargetInvocationException exception) when (exception.InnerException != null)
         {
-            throw new InvalidOperationException("missionFinishDeployment original Native Ready command failed", exception.InnerException);
+            if (mission.Mode != MissionMode.Battle || !mission.IsDeploymentFinished || campaign.TimeControlMode.ToString() != timeModeBefore)
+                throw new InvalidOperationException("missionFinishDeployment original Native Ready command failed", exception.InnerException);
+            nativeReadyHandlerExceptionType = exception.InnerException.GetType().Name;
+        }
+        if (!readyCallbackBound)
+        {
+            var nativeReadyCallback = orderBattleView.GetType().GetMethod("OnBeginMission", BindingFlags.Instance | BindingFlags.NonPublic);
+            if (nativeReadyCallback == null)
+                throw new InvalidOperationException("missionFinishDeployment could not resolve the original Native OrderOfBattle OnBeginMission callback target");
+            try { nativeReadyCallback.Invoke(orderBattleView, null); }
+            catch (TargetInvocationException exception) when (exception.InnerException != null)
+            {
+                if (mission.Mode != MissionMode.Battle || !mission.IsDeploymentFinished || campaign.TimeControlMode.ToString() != timeModeBefore)
+                    throw new InvalidOperationException("missionFinishDeployment original Native OrderOfBattle OnBeginMission callback failed", exception.InnerException);
+                nativeReadyHandlerExceptionType = exception.InnerException.GetType().Name;
+            }
+            nativeReadyCallbackDispatchedByBridge = true;
         }
         _deploymentFinishSubmittedForMission = mission;
         var modeAfter = mission.Mode.ToString();
@@ -253,8 +280,12 @@ internal static class ChronicleAgentBattleMissionAdapter
 
         var json = new StringBuilder(512);
         json.Append("{\"schemaVersion\":1,\"nativeHandler\":\"OrderOfBattleVM.ExecuteBeginMission\",\"nativeDeploymentHandler\":\"DeploymentHandler.FinishDeployment\",\"nativeUiView\":\"OrderOfBattle.xml\",\"canStartMission\":true")
+            .Append(",\"readyCallbackBoundBefore\":").Append(readyCallbackBound ? "true" : "false")
+            .Append(",\"nativeReadyCallbackDispatchedByBridge\":").Append(nativeReadyCallbackDispatchedByBridge ? "true" : "false")
             .Append(",\"modeBefore\":"); AppendStringValue(json, modeBefore);
         json.Append(",\"modeAfter\":"); AppendStringValue(json, modeAfter);
+        json.Append(",\"nativeReadyHandlerExceptionType\":"); AppendStringValue(json, nativeReadyHandlerExceptionType);
+        json.Append(",\"deploymentFinishedAfter\":").Append(mission.IsDeploymentFinished ? "true" : "false");
         json.Append(",\"campaignDayBefore\":").Append(Number(campaignDayBefore))
             .Append(",\"campaignDayAfter\":").Append(Number(campaignDayAfter));
         json.Append(",\"timeControlModeBefore\":"); AppendStringValue(json, timeModeBefore);
@@ -268,7 +299,96 @@ internal static class ChronicleAgentBattleMissionAdapter
         return json.ToString();
     }
 
+    internal static string AutoDeployCurrentBattleDeployment()
+    {
+        if (!TryGetActiveCampaignFieldBattle(out var mission, out var reason))
+            throw new InvalidOperationException("missionAutoDeploy " + reason);
+        var campaign = Campaign.Current ?? throw new InvalidOperationException("missionAutoDeploy requires an active Campaign");
+        if (campaign.TimeControlMode != CampaignTimeControlMode.Stop)
+            throw new InvalidOperationException("missionAutoDeploy requires the Campaign clock to remain stopped");
+        if (mission.Mode != MissionMode.Deployment)
+            throw new InvalidOperationException("missionAutoDeploy requires the current Native Mission to remain in Deployment mode");
+        if (ChronicleInquiryAdapter.IsInquiryOpen)
+            throw new InvalidOperationException("missionAutoDeploy refuses to bypass an active Native Inquiry");
+        if (ReferenceEquals(_deploymentAutoDeploySubmittedForMission, mission))
+            throw new InvalidOperationException("missionAutoDeploy was already submitted for this Native Mission");
+
+        const string orderBattleHandlerTypeName = "TaleWorlds.MountAndBlade.GauntletUI.Mission.Singleplayer.MissionGauntletOrderOfBattleUIHandler";
+        const string deploymentOrderHandlerTypeName = "TaleWorlds.MountAndBlade.GauntletUI.Mission.Singleplayer.MissionGauntletSingleplayerOrderUIHandler";
+        var orderBattleHandler = mission.MissionBehaviors.FirstOrDefault(behavior => behavior?.GetType().FullName == orderBattleHandlerTypeName);
+        var deploymentOrderHandler = mission.MissionBehaviors.FirstOrDefault(behavior => behavior?.GetType().FullName == deploymentOrderHandlerTypeName);
+        if (orderBattleHandler == null || deploymentOrderHandler == null)
+            throw new InvalidOperationException("missionAutoDeploy requires the active Native Order of Battle and deployment order views");
+        var orderDataSource = orderBattleHandler.GetType().GetField("_dataSource", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(orderBattleHandler);
+        var canStartProperty = orderDataSource?.GetType().GetProperty("CanStartMission", BindingFlags.Instance | BindingFlags.Public);
+        if (canStartProperty?.GetValue(orderDataSource) is not bool canStart || !canStart)
+            throw new InvalidOperationException("missionAutoDeploy refuses while the Native Order of Battle does not allow starting");
+        var autoDeployHandler = deploymentOrderHandler.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
+            .FirstOrDefault(method => method.Name == "OnAutoDeploy" && method.GetParameters().Length == 0);
+        if (autoDeployHandler == null)
+            throw new InvalidOperationException("missionAutoDeploy could not resolve the original Native Auto Deploy UI handler");
+
+        var campaignDayBefore = CampaignTime.Now.ToDays;
+        var timeModeBefore = campaign.TimeControlMode.ToString();
+        try { autoDeployHandler.Invoke(deploymentOrderHandler, null); }
+        catch (TargetInvocationException exception) when (exception.InnerException != null)
+        {
+            throw new InvalidOperationException("missionAutoDeploy original Native Auto Deploy UI handler failed", exception.InnerException);
+        }
+        _deploymentAutoDeploySubmittedForMission = mission;
+        var nativeDeploymentSideReadyHandlerInvoked = false;
+        if (!GetDeploymentUiStatus(mission).ReadyCallbackBound)
+        {
+            var deploymentOrderDataSource = deploymentOrderHandler.GetType().GetField("_dataSource", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(deploymentOrderHandler);
+            var deploymentController = deploymentOrderDataSource?.GetType().GetProperty("DeploymentController", BindingFlags.Instance | BindingFlags.Public)?.GetValue(deploymentOrderDataSource);
+            var deployPlayerSide = deploymentController?.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                .FirstOrDefault(method => method.Name == "ExecuteDeployPlayerSide" && method.GetParameters().Length == 0);
+            if (deployPlayerSide == null)
+                throw new InvalidOperationException("missionAutoDeploy could not resolve the original Native Player Side Deployment Ready handler");
+            try { deployPlayerSide.Invoke(deploymentController, null); }
+            catch (TargetInvocationException exception) when (exception.InnerException != null)
+            {
+                throw new InvalidOperationException("missionAutoDeploy original Native Player Side Deployment Ready handler failed", exception.InnerException);
+            }
+            nativeDeploymentSideReadyHandlerInvoked = true;
+        }
+        var campaignDayAfter = CampaignTime.Now.ToDays;
+        var timeModeAfter = campaign.TimeControlMode.ToString();
+        var deploymentUiAfter = GetDeploymentUiStatus(mission);
+        var json = new StringBuilder(512);
+        json.Append("{\"schemaVersion\":1,\"nativeHandler\":\"MissionGauntletSingleplayerOrderUIHandler.OnAutoDeploy\",\"nativeAutoDeployHandler\":\"MissionOrderDeploymentControllerVM.ExecuteAutoDeploy\",\"nativeDeploymentHandler\":\"MissionOrderDeploymentControllerVM.ExecuteDeployPlayerSide\",\"nativeUiView\":\"OrderOfBattle.xml\",\"canStartMission\":true")
+            .Append(",\"nativeDeploymentSideReadyHandlerInvoked\":").Append(nativeDeploymentSideReadyHandlerInvoked ? "true" : "false")
+            .Append(",\"readyCallbackBoundAfter\":").Append(deploymentUiAfter.ReadyCallbackBound ? "true" : "false")
+            .Append(",\"deploymentFinishedAfter\":").Append(mission.IsDeploymentFinished ? "true" : "false")
+            .Append(",\"campaignDayBefore\":").Append(Number(campaignDayBefore))
+            .Append(",\"campaignDayAfter\":").Append(Number(campaignDayAfter))
+            .Append(",\"timeControlModeBefore\":"); AppendStringValue(json, timeModeBefore);
+        json.Append(",\"timeControlModeAfter\":"); AppendStringValue(json, timeModeAfter);
+        json.Append('}');
+        return json.ToString();
+    }
+
+    private static (bool ViewAvailable, bool ReadyCallbackBound, bool CanStartMission, bool DeploymentFinished) GetDeploymentUiStatus(Mission? mission)
+    {
+        if (mission == null || mission.Mode != MissionMode.Deployment)
+            return (false, false, false, mission?.IsDeploymentFinished ?? false);
+        const string handlerTypeName = "TaleWorlds.MountAndBlade.GauntletUI.Mission.Singleplayer.MissionGauntletOrderOfBattleUIHandler";
+        var handler = mission.MissionBehaviors.FirstOrDefault(behavior => behavior?.GetType().FullName == handlerTypeName);
+        var viewModel = handler?.GetType().GetField("_dataSource", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(handler);
+        if (viewModel == null) return (false, false, false, mission.IsDeploymentFinished);
+        var type = viewModel.GetType();
+        var callback = type.GetField("_onBeginMission", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(viewModel) as Delegate;
+        var canStart = type.GetProperty("CanStartMission", BindingFlags.Instance | BindingFlags.Public)?.GetValue(viewModel) is bool value && value;
+        return (true, callback != null && callback.GetInvocationList().Length > 0, canStart, mission.IsDeploymentFinished);
+    }
+
     internal static string BeginMainAgentAiControllerProbe(double requestedDurationSeconds, bool handoffToFriendlySurrogate = false, bool fullNativeHandoff = false)
+        => BeginMainAgentAiControlLease(requestedDurationSeconds, handoffToFriendlySurrogate, fullNativeHandoff, "harness-only");
+
+    internal static string BeginMainAgentNativeAiAutopilotLease()
+        => BeginMainAgentAiControlLease(900.0, handoffToFriendlySurrogate: false, fullNativeHandoff: true, scope: "agenthost-native-battle-autopilot");
+
+    private static string BeginMainAgentAiControlLease(double requestedDurationSeconds, bool handoffToFriendlySurrogate, bool fullNativeHandoff, string scope)
     {
         if (!TryGetSupportedBattleMission(out var mission, out var reason))
             throw new InvalidOperationException("harnessMainAgentAiControllerProbe " + reason);
@@ -277,7 +397,7 @@ internal static class ChronicleAgentBattleMissionAdapter
             throw new InvalidOperationException("harnessMainAgentAiControllerProbe requires the Campaign clock to remain stopped");
         if (_mainAgentAiProbeOwner != null)
             throw new InvalidOperationException("harnessMainAgentAiControllerProbe refuses while another MainAgent AI probe lease is active");
-        var maximumProbeDurationSeconds = fullNativeHandoff ? 180.0 : 10.0;
+        var maximumProbeDurationSeconds = scope == "harness-only" ? (fullNativeHandoff ? 180.0 : 10.0) : 900.0;
         if (double.IsNaN(requestedDurationSeconds) || double.IsInfinity(requestedDurationSeconds) || requestedDurationSeconds < 1.0 || requestedDurationSeconds > maximumProbeDurationSeconds)
             throw new InvalidOperationException("harnessMainAgentAiControllerProbe durationSeconds exceeds the bounded Native probe duration");
 
@@ -361,14 +481,19 @@ internal static class ChronicleAgentBattleMissionAdapter
         _mainAgentAiProbeSurrogateOriginalController = surrogate == null ? null : AgentControllerType.AI;
         _mainAgentAiProbeExpiresAt = EngineTime.ApplicationTime + (float)requestedDurationSeconds;
         _mainAgentAiProbeStatus = "active";
+        _mainAgentAiProbeScope = scope;
 
         var json = new StringBuilder(512);
-        json.Append("{\"schemaVersion\":1,\"scope\":\"harness-only\",\"nativeSetter\":\"Agent.Controller\",\"leaseClock\":\"EngineTime.ApplicationTime\"")
+        json.Append("{\"schemaVersion\":1,\"scope\":\"").Append(Escape(scope)).Append("\",\"nativeSetter\":\"Agent.Controller\",\"leaseClock\":\"EngineTime.ApplicationTime\"")
             .Append(",\"handoffMode\":\"").Append(fullNativeHandoff ? "rts-camera-native-ai-initialization" : "controller-only").Append('"')
             .Append(",\"durationSeconds\":").Append(Number(requestedDurationSeconds));
         json.Append(",\"controllerBefore\":"); AppendStringValue(json, controllerBefore);
         json.Append(",\"controllerAfter\":"); AppendStringValue(json, mainAgent.Controller.ToString());
-        json.Append(",\"isPlayerControlledAfter\":").Append(mainAgent.IsPlayerControlled ? "true" : "false");
+        json.Append(",\"isPlayerControlledAfter\":").Append(mainAgent.IsPlayerControlled ? "true" : "false")
+            .Append(",\"isAIControlledAfter\":").Append(mainAgent.IsAIControlled ? "true" : "false")
+            .Append(",\"missionMainAgentControllerActiveAfter\":");
+        try { json.Append(_mainAgentAiProbeMissionController == null ? "null" : ReadControllerActivated(_mainAgentAiProbeMissionController) ? "true" : "false"); }
+        catch { json.Append("null"); }
         json.Append(",\"originalMainAgentIndex\":").Append(mainAgent.Index)
             .Append(",\"missionMainAgentIndexBefore\":").Append(missionMainAgentBeforeIndex)
             .Append(",\"missionMainAgentIndexAfter\":").Append(mission.MainAgent.Index);
@@ -778,7 +903,7 @@ internal static class ChronicleAgentBattleMissionAdapter
         var activeBehavior = formation?.AI?.ActiveBehavior;
         var activeOrderTarget = formation != null && activeBehavior != null ? activeBehavior.CurrentOrder.GetPosition(formation) : (TaleWorlds.Library.Vec2?)null;
         var json = new StringBuilder(640);
-        json.Append("{\"active\":true,\"status\":\"" + Escape(_mainAgentAiProbeStatus ?? "active") + "\",\"secondsRemaining\":")
+        json.Append("{\"active\":true,\"scope\":\"" + Escape(_mainAgentAiProbeScope ?? "harness-only") + "\",\"status\":\"" + Escape(_mainAgentAiProbeStatus ?? "active") + "\",\"secondsRemaining\":")
             .Append(Number(remaining))
             .Append(",\"handoffMode\":\"").Append(_mainAgentAiProbeFullNativeHandoff ? "rts-camera-native-ai-initialization" : "controller-only").Append('"')
             .Append(",\"ownerAgentIndex\":").Append(owner.Index)
@@ -903,6 +1028,7 @@ internal static class ChronicleAgentBattleMissionAdapter
         _mainAgentAiProbeOriginalCustomLookDir = null;
         _mainAgentAiProbeExpiresAt = 0f;
         _mainAgentAiProbeStatus = status;
+        _mainAgentAiProbeScope = null;
         return status;
     }
 
@@ -966,7 +1092,9 @@ internal static class ChronicleAgentBattleMissionAdapter
         else json.Append(Number(value.Value));
     }
 
-    private static string Number(double value) => value.ToString("R", CultureInfo.InvariantCulture);
+    private static string Number(double value) => double.IsNaN(value) || double.IsInfinity(value)
+        ? "null"
+        : value.ToString("R", CultureInfo.InvariantCulture);
 
     private static string Escape(string value) => value.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "\\r").Replace("\n", "\\n");
 }

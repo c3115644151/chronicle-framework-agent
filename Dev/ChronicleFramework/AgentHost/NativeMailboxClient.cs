@@ -645,11 +645,17 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
     public Task<JsonDocument> ReadBattleMissionStatusAsync(CancellationToken cancellationToken) =>
         SendAsync("battleMissionStatus", new JsonObject(), acceptedResponseExpected: false, cancellationToken);
 
+    public Task<JsonDocument> AutoDeployBattleMissionAsync(CancellationToken cancellationToken) =>
+        SendAsync("missionAutoDeploy", new JsonObject(), acceptedResponseExpected: false, cancellationToken);
+
     public Task<JsonDocument> FinishBattleMissionDeploymentAsync(CancellationToken cancellationToken) =>
         SendAsync("missionFinishDeployment", new JsonObject(), acceptedResponseExpected: false, cancellationToken);
 
     public Task<JsonDocument> DelegateBattleMissionTroopsAsync(CancellationToken cancellationToken) =>
         SendAsync("missionDelegateTroops", new JsonObject(), acceptedResponseExpected: false, cancellationToken);
+
+    public Task<JsonDocument> AutopilotMainAgentBattleMissionAsync(CancellationToken cancellationToken) =>
+        SendAsync("missionAutopilotMainAgent", new JsonObject(), acceptedResponseExpected: false, cancellationToken);
 
     public Task<JsonDocument> ExitEndedBattleMissionAsync(CancellationToken cancellationToken) =>
         SendAsync("missionRetreat", new JsonObject(), acceptedResponseExpected: false, cancellationToken);
