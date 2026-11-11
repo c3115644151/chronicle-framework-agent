@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-11-11
+goal: "Resolve the MainHero safety acceptance in existing GitHub issue #132
+  using a bounded no-model disposable-campaign probe; do not add product
+  behavior unless Native evidence supports it."
+skip_specs: true

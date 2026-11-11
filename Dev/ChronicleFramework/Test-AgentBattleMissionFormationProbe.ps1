@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$SourceSaveName = 'AgentBridgeLifecycle',
-    [ValidateRange(30,900)][int]$TimeoutSeconds = 300
+    [ValidateRange(30,900)][int]$TimeoutSeconds = 300,
+    [switch]$ProbeMainAgentAiController
 )
 
 $ErrorActionPreference = 'Stop'
@@ -23,7 +24,8 @@ $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlo
 $priorMode = $env:CHRONICLE_HARNESS_MODE
 $env:CHRONICLE_HARNESS_MODE = 'battle-fixture'
 $prefix = 'battle-mission-formation-' + [Guid]::NewGuid().ToString('N')
-$runDirectory = if ($env:CHRONICLE_HARNESS_TEMP) { [IO.Path]::GetFullPath($env:CHRONICLE_HARNESS_TEMP) } else { Join-Path $PSScriptRoot 'TestResults\BattleMissionFormationProbe' }
+$probeName = if ($ProbeMainAgentAiController) { 'BattleMissionControllerProbe' } else { 'BattleMissionFormationProbe' }
+$runDirectory = if ($env:CHRONICLE_HARNESS_TEMP) { [IO.Path]::GetFullPath($env:CHRONICLE_HARNESS_TEMP) } else { Join-Path $PSScriptRoot ('TestResults\' + $probeName) }
 New-Item -ItemType Directory -Path $runDirectory -Force | Out-Null
 $script:NativeReceipts = [System.Collections.Generic.List[object]]::new()
 $script:ProcessId = $null
@@ -225,6 +227,50 @@ try {
     $statusAfter = Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-status-after")
     $mainAgentAfter = Get-FormationSnapshot $statusAfter
 
+    $controllerProbe = $null
+    $controllerProbeRestore = $null
+    $controllerProbeSamples = [System.Collections.Generic.List[object]]::new()
+    if ($ProbeMainAgentAiController) {
+        $controllerProbe = Invoke-AgentCli 'harnessMainAgentAiControllerProbe' @('-DurationSeconds', '10', '-CommandId', "$prefix-main-agent-ai-probe")
+        if ($controllerProbe.status -ne 'completed' -or $controllerProbe.data.scope -ne 'harness-only' -or
+            $controllerProbe.data.controllerBefore -ne 'Player' -or $controllerProbe.data.controllerAfter -ne 'AI' -or
+            $controllerProbe.data.timeControlModeBefore -ne 'Stop' -or $controllerProbe.data.timeControlModeAfter -ne 'Stop' -or
+            [Math]::Abs([double]$controllerProbe.data.campaignDayAfter - [double]$controllerProbe.data.campaignDayBefore) -gt 0.000001) {
+            throw 'The bounded Native MainAgent controller probe did not preserve the Campaign clock or switch Player-to-AI under its guards.'
+        }
+
+        $controllerProbeDeadline = [DateTime]::UtcNow.AddSeconds(12)
+        while ([DateTime]::UtcNow -lt $controllerProbeDeadline) {
+            Start-Sleep -Milliseconds 500
+            $controllerProbeState = Invoke-AgentCli 'state' @('-CommandId', "$prefix-main-agent-ai-state-$([Guid]::NewGuid().ToString('N'))")
+            if ($controllerProbeState.state.context.gameState -ne 'MissionState' -or $controllerProbeState.state.mission.missionEnded) { break }
+            $controllerProbeStatus = Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-main-agent-ai-status-$([Guid]::NewGuid().ToString('N'))")
+            if ($controllerProbeStatus.status -ne 'completed' -or $null -eq $controllerProbeStatus.data.mainAgent) { break }
+            $hero = $controllerProbeStatus.data.mainAgent
+            $controllerProbeSamples.Add([ordered]@{
+                missionMode = [string]$controllerProbeStatus.data.missionMode
+                controller = [string]$hero.controller
+                health = [double]$hero.health
+                position = $hero.position
+                formation = $hero.formation
+                lease = $controllerProbeStatus.data.mainAgentAiControllerProbe
+            })
+            if ($controllerProbeStatus.data.mainAgentAiControllerProbe.active -ne $true) { break }
+        }
+        $controllerProbeRestore = Invoke-AgentCli 'harnessRestoreMainAgentAiControllerProbe' @('-CommandId', "$prefix-main-agent-ai-restore")
+        if ($controllerProbeRestore.status -ne 'completed' -or $controllerProbeRestore.data.restored -ne $true) {
+            throw 'The bounded Native MainAgent controller probe failed to restore Player control.'
+        }
+        $restoredState = Invoke-AgentCli 'state' @('-CommandId', "$prefix-main-agent-ai-restored-state")
+        if ($restoredState.state.context.gameState -eq 'MissionState' -and -not $restoredState.state.mission.missionEnded) {
+            $restoredStatus = Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-main-agent-ai-restored-status")
+            if ($restoredStatus.status -ne 'completed' -or $null -eq $restoredStatus.data.mainAgent -or
+                $restoredStatus.data.mainAgent.controller -ne 'Player' -or $restoredStatus.data.mainAgent.isPlayerControlled -ne $true) {
+                throw 'The current Battle Mission did not read back MainAgent as Player-controlled after the probe restore.'
+            }
+        }
+    }
+
     $missionEnded = $false
     $healthSamples = [System.Collections.Generic.List[double]]::new()
     $positionSamples = [System.Collections.Generic.List[object]]::new()
@@ -270,7 +316,7 @@ try {
     }
     $finalParty = $campaignReturn.state.party
     $result = [ordered]@{
-        runId = 'BattleMissionFormationProbe'
+        runId = $probeName
         scenario = 'native-only-no-model-engine-control-probe'
         modelCalls = 0
         nativeCommands = $script:NativeReceipts.Count
@@ -293,6 +339,18 @@ try {
         mainAgentFormationBeforeDelegate = $mainAgentBefore
         mainAgentFormationAfterDelegate = $mainAgentAfter
         delegation = $delegation.data
+        mainAgentAiControllerProbe = if ($controllerProbe) { $controllerProbe.data } else { $null }
+        mainAgentAiControllerProbeSamples = $controllerProbeSamples.ToArray()
+        mainAgentAiControllerProbeRestore = if ($controllerProbeRestore) { $controllerProbeRestore.data } else { $null }
+        mainAgentPositionChangedWhileAiControlled = if ($controllerProbeSamples.Count -gt 1) {
+            $initialPosition = $controllerProbeSamples[0].position
+            @($controllerProbeSamples | Where-Object {
+                $dx = [double]$_.position.x - [double]$initialPosition.x
+                $dy = [double]$_.position.y - [double]$initialPosition.y
+                $dz = [double]$_.position.z - [double]$initialPosition.z
+                [Math]::Sqrt($dx * $dx + $dy * $dy + $dz * $dz) -gt 0.1
+            }).Count -gt 0
+        } else { $null }
         deploymentFinish = if ($deploymentFinish) { $deploymentFinish.data } else { $null }
         deploymentTransitionPollCount = $deploymentTransitionPollCount
         duplicateDeploymentFinishRejected = ($duplicateDeployment.status -eq 'rejected')
@@ -314,7 +372,7 @@ try {
         $result.duplicateDeploymentFinishRejected -and $result.duplicateDeploymentFinishPreservedState -and
         $result.sourceSaveUnchanged -and $result.disposableSaveRemoved -and $result.processStopped -and $result.missionEnded -and $result.postBattleGameState -ne 'MissionState'
     $json = ConvertTo-Json -InputObject $result -Depth 10
-    [IO.File]::WriteAllText((Join-Path $runDirectory 'BattleMissionFormationProbe.json'), $json, [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $runDirectory ($probeName + '.json')), $json, [Text.UTF8Encoding]::new($false))
     $json
     if (-not $result.passed) { exit 1 }
 }

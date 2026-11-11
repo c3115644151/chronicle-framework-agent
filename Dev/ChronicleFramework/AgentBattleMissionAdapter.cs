@@ -9,12 +9,18 @@ using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.Encounters;
 using TaleWorlds.Core;
 using TaleWorlds.MountAndBlade;
+using EngineTime = TaleWorlds.Engine.Time;
 
 namespace ChronicleFramework;
 
 internal static class ChronicleAgentBattleMissionAdapter
 {
     private static Mission? _deploymentFinishSubmittedForMission;
+    private static Mission? _mainAgentAiProbeMission;
+    private static Agent? _mainAgentAiProbeOwner;
+    private static AgentControllerType? _mainAgentAiProbeOriginalController;
+    private static float _mainAgentAiProbeExpiresAt;
+    private static string? _mainAgentAiProbeStatus;
 
     internal static string BuildStatusJson()
     {
@@ -93,7 +99,7 @@ internal static class ChronicleAgentBattleMissionAdapter
                 .Append(",\"isSelected\":").Append(selected.Any(item => item == formation) ? "true" : "false")
                 .Append('}');
         }
-        json.Append("]}}");
+        json.Append("]},\"mainAgentAiControllerProbe\":").Append(BuildMainAgentAiControllerProbeJson()).Append('}');
         return json.ToString();
     }
 
@@ -217,6 +223,133 @@ internal static class ChronicleAgentBattleMissionAdapter
         json.Append(",\"mainAgentControllerAfter\":"); AppendStringValue(json, mainAgentAfter?.Controller.ToString());
         json.Append('}');
         return json.ToString();
+    }
+
+    internal static string BeginMainAgentAiControllerProbe(double requestedDurationSeconds)
+    {
+        if (!TryGetSupportedBattleMission(out var mission, out var reason))
+            throw new InvalidOperationException("harnessMainAgentAiControllerProbe " + reason);
+        var campaign = Campaign.Current ?? throw new InvalidOperationException("harnessMainAgentAiControllerProbe requires an active Campaign");
+        if (campaign.TimeControlMode != CampaignTimeControlMode.Stop)
+            throw new InvalidOperationException("harnessMainAgentAiControllerProbe requires the Campaign clock to remain stopped");
+        if (_mainAgentAiProbeOwner != null)
+            throw new InvalidOperationException("harnessMainAgentAiControllerProbe refuses while another MainAgent AI probe lease is active");
+        if (double.IsNaN(requestedDurationSeconds) || double.IsInfinity(requestedDurationSeconds) || requestedDurationSeconds < 1.0 || requestedDurationSeconds > 10.0)
+            throw new InvalidOperationException("harnessMainAgentAiControllerProbe durationSeconds must be between 1 and 10");
+
+        var mainAgent = mission.MainAgent;
+        if (mainAgent == null || !mainAgent.IsActive() || mainAgent.Controller != AgentControllerType.Player)
+            throw new InvalidOperationException("harnessMainAgentAiControllerProbe requires the active MainAgent to be Player-controlled");
+
+        var campaignDayBefore = CampaignTime.Now.ToDays;
+        var timeModeBefore = campaign.TimeControlMode.ToString();
+        var controllerBefore = mainAgent.Controller.ToString();
+        var positionBefore = mainAgent.Position;
+        var healthBefore = mainAgent.Health;
+        try
+        {
+            mainAgent.Controller = AgentControllerType.AI;
+        }
+        catch
+        {
+            if (mainAgent.IsActive() && mainAgent.Controller != AgentControllerType.Player)
+            {
+                try { mainAgent.Controller = AgentControllerType.Player; }
+                catch { }
+            }
+            throw;
+        }
+
+        _mainAgentAiProbeMission = mission;
+        _mainAgentAiProbeOwner = mainAgent;
+        _mainAgentAiProbeOriginalController = AgentControllerType.Player;
+        _mainAgentAiProbeExpiresAt = EngineTime.ApplicationTime + (float)requestedDurationSeconds;
+        _mainAgentAiProbeStatus = "active";
+
+        var json = new StringBuilder(512);
+        json.Append("{\"schemaVersion\":1,\"scope\":\"harness-only\",\"nativeSetter\":\"Agent.Controller\",\"leaseClock\":\"EngineTime.ApplicationTime\"")
+            .Append(",\"durationSeconds\":").Append(Number(requestedDurationSeconds));
+        json.Append(",\"controllerBefore\":"); AppendStringValue(json, controllerBefore);
+        json.Append(",\"controllerAfter\":"); AppendStringValue(json, mainAgent.Controller.ToString());
+        json.Append(",\"isPlayerControlledAfter\":").Append(mainAgent.IsPlayerControlled ? "true" : "false");
+        json.Append(",\"healthBefore\":").Append(Number(healthBefore))
+            .Append(",\"healthAfter\":").Append(Number(mainAgent.Health));
+        json.Append(",\"positionBefore\":{\"x\":").Append(Number(positionBefore.X))
+            .Append(",\"y\":").Append(Number(positionBefore.Y))
+            .Append(",\"z\":").Append(Number(positionBefore.Z)).Append('}');
+        json.Append(",\"campaignDayBefore\":").Append(Number(campaignDayBefore))
+            .Append(",\"campaignDayAfter\":").Append(Number(CampaignTime.Now.ToDays));
+        json.Append(",\"timeControlModeBefore\":"); AppendStringValue(json, timeModeBefore);
+        json.Append(",\"timeControlModeAfter\":"); AppendStringValue(json, campaign.TimeControlMode.ToString());
+        json.Append('}');
+        return json.ToString();
+    }
+
+    internal static void UpdateMainAgentAiControllerProbeLease()
+    {
+        if (_mainAgentAiProbeOwner == null) return;
+        var mission = Mission.Current;
+        var activeState = Game.Current?.GameStateManager?.ActiveState?.GetType().Name == "MissionState";
+        if (EngineTime.ApplicationTime >= _mainAgentAiProbeExpiresAt)
+        {
+            ClearMainAgentAiControllerProbeLease("timed-out");
+            return;
+        }
+        if (mission == null || mission != _mainAgentAiProbeMission || mission.MissionEnded || !activeState || mission.MainAgent != _mainAgentAiProbeOwner)
+            ClearMainAgentAiControllerProbeLease("mission-ended-or-changed");
+    }
+
+    internal static string RestoreMainAgentAiControllerProbe()
+    {
+        if (_mainAgentAiProbeOwner == null || !_mainAgentAiProbeOriginalController.HasValue)
+        {
+            var lastStatus = _mainAgentAiProbeStatus ?? "never-started";
+            var currentMainAgent = Mission.Current?.MainAgent;
+            var isCurrentlyRestored = currentMainAgent == null || !currentMainAgent.IsActive() || currentMainAgent.Controller == AgentControllerType.Player;
+            return "{\"schemaVersion\":1,\"status\":\"" + Escape(lastStatus) + "\",\"restored\":" + (isCurrentlyRestored ? "true" : "false") + ",\"controllerAfter\":" + (currentMainAgent == null || !currentMainAgent.IsActive() ? "null" : "\"" + Escape(currentMainAgent.Controller.ToString()) + "\"") + "}";
+        }
+        var owner = _mainAgentAiProbeOwner;
+        ClearMainAgentAiControllerProbeLease("explicitly-restored");
+        var controller = owner.IsActive() ? owner.Controller.ToString() : null;
+        var restored = owner.IsActive() && controller == AgentControllerType.Player.ToString();
+        return "{\"schemaVersion\":1,\"status\":\"" + Escape(_mainAgentAiProbeStatus ?? "restored") + "\",\"restored\":" + (restored ? "true" : "false") + ",\"controllerAfter\":" + (controller == null ? "null" : "\"" + Escape(controller) + "\"") + "}";
+    }
+
+    private static string BuildMainAgentAiControllerProbeJson()
+    {
+        var owner = _mainAgentAiProbeOwner;
+        if (owner == null || _mainAgentAiProbeMission == null)
+            return "{\"active\":false,\"status\":\"" + Escape(_mainAgentAiProbeStatus ?? "never-started") + "\"}";
+        var remaining = Math.Max(0.0, _mainAgentAiProbeExpiresAt - EngineTime.ApplicationTime);
+        return "{\"active\":true,\"status\":\"" + Escape(_mainAgentAiProbeStatus ?? "active") + "\",\"secondsRemaining\":" + Number(remaining) + ",\"controller\":\"" + Escape(owner.Controller.ToString()) + "\"}";
+    }
+
+    internal static string ClearMainAgentAiControllerProbeLease(string status)
+    {
+        var owner = _mainAgentAiProbeOwner;
+        var original = _mainAgentAiProbeOriginalController;
+        var mission = _mainAgentAiProbeMission;
+        if (owner != null && original.HasValue && owner.IsActive())
+        {
+            if (owner.Controller == AgentControllerType.AI || owner.Controller == original.Value)
+            {
+                try { owner.Controller = original.Value; }
+                catch (Exception exception)
+                {
+                    ChronicleDiagnostics.Write($"agent-main-controller-probe-restore-failed|type={exception.GetType().Name}|message={exception.Message}");
+                    status = "restore-failed";
+                }
+            }
+            else status = "controller-changed-externally";
+        }
+        else if (mission != null && mission.MissionEnded) status = "mission-ended";
+
+        _mainAgentAiProbeMission = null;
+        _mainAgentAiProbeOwner = null;
+        _mainAgentAiProbeOriginalController = null;
+        _mainAgentAiProbeExpiresAt = 0f;
+        _mainAgentAiProbeStatus = status;
+        return status;
     }
 
     private static bool TryGetSupportedBattleMission(out Mission mission, out string reason)

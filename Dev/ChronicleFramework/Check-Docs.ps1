@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.564'
+$contractVersion = '7.565'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -1628,6 +1628,17 @@ if ($harnessScript -notmatch "'BattleMissionFormationProbe'" -or $harnessScript 
     $battleMissionFormationProbeSource -notmatch 'sourceSaveHashBefore' -or
     $battleMissionFormationProbeSource -notmatch 'modelCalls = 0') {
     throw 'The opt-in Battle Mission formation probe must use the Native CLI, collect MainAgent formation/ownership/health, keep model calls at zero, preserve its source save and remain outside All.'
+}
+if ($harnessScript -notmatch "'BattleMissionControllerProbe'" -or
+    $harnessScript -notmatch "'BattleMissionControllerProbe' \{ @\('Preflight', 'Build', 'BattleMissionControllerProbe'\) \}" -or
+    $harnessScript -match "'All' \{[^\r\n]*'BattleMissionControllerProbe'" -or
+    $battleMissionFormationProbeSource -notmatch 'ProbeMainAgentAiController' -or
+    $battleMissionFormationProbeSource -notmatch "Invoke-AgentCli 'harnessMainAgentAiControllerProbe'" -or
+    $battleMissionFormationProbeSource -notmatch "Invoke-AgentCli 'harnessRestoreMainAgentAiControllerProbe'" -or
+    $protocolSource -notmatch 'UpdateMainAgentAiControllerProbeLease\(\)' -or
+    $protocolSource -notmatch 'ClearMainAgentAiControllerProbeLease\("protocol-stopped"\)' -or
+    $agentHostDecisionCycleSource -match 'harnessMainAgentAiControllerProbe') {
+    throw 'The opt-in MainAgent AI-controller probe must remain bounded and restorable in Native Harness code, perform no model work, and stay out of the production AgentHost action catalog.'
 }
 if ($battleFixtureSource -notmatch 'IO\.File\]::Open\(\$script:VideoCaptureEventsPath' -or $battleFixtureSource -notmatch 'FileShare\]::ReadWrite' -or $battleFixtureSource -notmatch 'for \(\$attempt = 0; \$attempt -lt 6; \$attempt\+\+\)') { throw 'Battle event trace appends must tolerate transient readers/locks with bounded retry and shared access.' }
 if ($developmentDoc -notmatch "Contract version:\s*$([regex]::Escape($contractVersion))") {

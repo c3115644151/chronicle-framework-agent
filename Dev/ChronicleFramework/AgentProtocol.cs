@@ -100,6 +100,7 @@ internal sealed class ChronicleAgentProtocol
         string currentAction = null;
         try
         {
+            ChronicleAgentBattleMissionAdapter.UpdateMainAgentAiControllerProbeLease();
             UpdateMissionNavigationLease();
             UpdateMissionInputLease();
             UpdateMissionLeaveLease();
@@ -1091,6 +1092,12 @@ internal sealed class ChronicleAgentProtocol
                 case "missionFinishDeployment":
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBattleMissionAdapter.FinishCurrentBattleDeployment());
                     break;
+                case "harnessMainAgentAiControllerProbe":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBattleMissionAdapter.BeginMainAgentAiControllerProbe(ReadDouble(command, "durationSeconds")));
+                    break;
+                case "harnessRestoreMainAgentAiControllerProbe":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBattleMissionAdapter.RestoreMainAgentAiControllerProbe());
+                    break;
                 case "missionSceneAgents":
                     var sceneAgentsMission = Mission.Current;
                     var sceneAgentsMissionState = Game.Current?.GameStateManager?.ActiveState as MissionState;
@@ -1626,6 +1633,7 @@ internal sealed class ChronicleAgentProtocol
                     WriteResponse(commandId, action, "accepted", behavior);
                     break;
                 case "stop":
+                    ChronicleAgentBattleMissionAdapter.ClearMainAgentAiControllerProbeLease("protocol-stopped");
                     ClearMissionNavigationLease("stopped");
                     ClearMissionInputLease();
                     TaleWorlds.CampaignSystem.Campaign.Current.TimeControlMode = TaleWorlds.CampaignSystem.CampaignTimeControlMode.Stop;
