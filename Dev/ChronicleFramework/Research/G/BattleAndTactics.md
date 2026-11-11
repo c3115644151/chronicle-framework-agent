@@ -141,7 +141,7 @@ Chronicle当前可以启动战斗模拟并读取模拟结果，也有Mission撤�
 
 Mission中的 `Team` 拥有多个 `Formation`；Formation 把参战Agent组织成可分开选择与指挥的队伍，记录单位、逻辑/物理兵种类别、领队/队长、队形、目标位置/方向、间距、骑乘、射击等状态。`Formation` 不是战役 Party，也不等于兵种树/Party roster：战役队伍先提供可参战 troop 来源，Mission再生成场景Agent并分配给Team与Formation。
 
-玩家在可部署战斗的 Order of Battle 界面可调整Formation类型、权重、队长/英雄分配和自动部署；开始 Mission 后，还可用Formation选择控件、兵种分类与Orders控制多个Formation。适用性受Mission类型、战斗部署阶段、剩余可参战成员、队伍是否锁定/已有可用兵种影响；至少一个可参战Formation是开始条件之一。围城Mission中的器械/梯队有额外部署及控制对象，不应简化成野战队形设置。
+玩家在可部署战斗的 Order of Battle 界面可调整Formation类型、权重、队长/英雄分配和自动部署；开始 Mission 后，还可用Formation选择控件、兵种分类与Orders控制多个Formation。用户确认原版界面有“自动部署”和“准备”，实战中自动部署与手动分配士兵/编队队长两种都会使用（个人通常偏好不确定）；因此Host当前采用Native Auto Deploy只是自动化默认，不是原版唯一玩家流程。适用性受Mission类型、战斗部署阶段、剩余可参战成员、队伍是否锁定/已有可用兵种影响；至少一个可参战Formation是开始条件之一。围城Mission中的器械/梯队有额外部署及控制对象，不应简化成野战队形设置。
 
 当前1.4.8 `OrderOfBattleVM`源码显示这些交互设置在不同字段上，但类别、兵种Filter与Weight共同定义同一套Troop→Formation部署分配，并经`OrderController.RearrangeFormationsAccordingToFilters`重排Mission Agent；目录把它们作为一个“配置编队兵力分配”行为族，以类别/筛选/权重为参数，不按设置字段机械计数。Captain assignment还会写`Formation.Captain`、Hero Agent所属Formation与旗帜，并记录玩家角色指挥选择；Hero Troop assignment单独把Hero Agent加入Formation但不设Captain，故与Captain分成两个行为族。`ExecuteAutoDeploy`（仅Player General可用）通过Mission部署回调批量分配后刷新Formation与角色，是独立的自动部署行为。`ExecuteBeginMission`收集每个Formation启用的troop filter配置，再经Gauntlet Order of Battle UI callback→`MissionGauntletSingleplayerOrderUIHandler.OnBeginMission`→`MissionOrderDeploymentControllerVM.ExecuteBeginMission`结束部署；攻城分支若有器械未安置会先确认，成功后统一`FinishDeployment`并继续战斗，因此与G08 Siege成功路径去重为同一“结束部署、继续战斗”行为族。
 
