@@ -1098,6 +1098,9 @@ internal sealed class ChronicleAgentProtocol
                 case "harnessMainAgentAiControllerProbe":
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBattleMissionAdapter.BeginMainAgentAiControllerProbe(ReadDouble(command, "durationSeconds")));
                     break;
+                case "harnessMainAgentNativeAiHandoffProbe":
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBattleMissionAdapter.BeginMainAgentAiControllerProbe(ReadDouble(command, "durationSeconds"), fullNativeHandoff: true));
+                    break;
                 case "harnessMainAgentAiSurrogateControllerProbe":
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBattleMissionAdapter.BeginMainAgentAiControllerProbe(ReadDouble(command, "durationSeconds"), handoffToFriendlySurrogate: true));
                     break;

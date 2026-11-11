@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.573'
+$contractVersion = '7.574'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -1691,6 +1691,20 @@ if ($harnessScript -notmatch "'BattleMissionControllerProbe'" -or
     $agentHostDecisionCycleSource -match 'harnessBattleMovementInputProbe' -or
     $agentHostDecisionCycleSource -match 'harnessMainAgentAiControllerProbe') {
     throw 'The opt-in MainAgent AI-controller probe must remain bounded and restorable in Native Harness code, perform no model work, and stay out of the production AgentHost action catalog.'
+}
+if ($harnessScript -notmatch "'BattleMissionNativeAiHandoffProbe' \{ @\('Preflight', 'Build', 'BattleMissionNativeAiHandoffProbe'\) \}" -or
+    $harnessScript -match "'All' \{[^\r\n]*'BattleMissionNativeAiHandoffProbe'" -or
+    $battleMissionFormationProbeSource -notmatch 'ProbeMainAgentNativeAiHandoff' -or
+    $battleMissionFormationProbeSource -notmatch "Invoke-AgentCli 'harnessMainAgentNativeAiHandoffProbe'" -or
+    $agentCliSource -notmatch 'harnessMainAgentNativeAiHandoffProbe' -or
+    $agentHostDecisionCycleSource -match 'harnessMainAgentNativeAiHandoffProbe' -or
+    $protocolSource -notmatch 'harnessMainAgentNativeAiHandoffProbe' -or
+    $battleMissionAdapterSource -notmatch 'ApplyNativeMainAgentAiHandoff\(mainAgent, mission\)' -or
+    $battleMissionAdapterSource -notmatch 'CommonAIComponent' -or
+    $battleMissionAdapterSource -notmatch 'HumanAIComponent' -or
+    $battleMissionAdapterSource -notmatch 'DisableScriptedMovement\(\)' -or
+    $battleMissionAdapterSource -notmatch 'RestoreNativeMainAgentAiHandoff') {
+    throw 'The full Native MainAgent AI handoff probe must reproduce the installed initialization sequence, restore changed state, remain Harness-only, and stay out of AgentHost.'
 }
 if ($battleFixtureSource -notmatch 'IO\.File\]::Open\(\$script:VideoCaptureEventsPath' -or $battleFixtureSource -notmatch 'FileShare\]::ReadWrite' -or $battleFixtureSource -notmatch 'for \(\$attempt = 0; \$attempt -lt 6; \$attempt\+\+\)') { throw 'Battle event trace appends must tolerate transient readers/locks with bounded retry and shared access.' }
 if ($developmentDoc -notmatch "Contract version:\s*$([regex]::Escape($contractVersion))") {

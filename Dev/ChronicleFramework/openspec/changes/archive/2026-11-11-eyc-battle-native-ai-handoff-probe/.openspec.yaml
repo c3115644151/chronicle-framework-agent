@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-11-11
+goal: Determine whether the complete source-backed Native handoff moves MainHero
+  and what it does to safety, with zero model calls and no AgentHost behavior.
+skip_specs: true

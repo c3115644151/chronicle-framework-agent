@@ -16,6 +16,7 @@ namespace ChronicleFramework;
 internal static class ChronicleAgentBattleMissionAdapter
 {
     private static Mission? _deploymentFinishSubmittedForMission;
+    private static Type? _nativeMainAgentControllerType;
     private static Mission? _mainAgentAiProbeMission;
     private static Agent? _mainAgentAiProbeOwner;
     private static Agent? _mainAgentAiProbeSurrogate;
@@ -23,6 +24,13 @@ internal static class ChronicleAgentBattleMissionAdapter
     private static AgentControllerType? _mainAgentAiProbeSurrogateOriginalController;
     private static object? _mainAgentAiProbeOriginalWatchState;
     private static bool? _mainAgentAiProbeOriginalPlayerTroopInFormation;
+    private static bool _mainAgentAiProbeFullNativeHandoff;
+    private static AgentFlag? _mainAgentAiProbeOriginalAgentFlags;
+    private static object? _mainAgentAiProbeOriginalAiStateFlags;
+    private static bool? _mainAgentAiProbeOriginalAiPaused;
+    private static object? _mainAgentAiProbeMissionController;
+    private static bool? _mainAgentAiProbeOriginalMissionControllerActivated;
+    private static object? _mainAgentAiProbeOriginalCustomLookDir;
     private static float _mainAgentAiProbeExpiresAt;
     private static string? _mainAgentAiProbeStatus;
     private static string? _mainAgentAiProbeLastOwnerController;
@@ -107,6 +115,11 @@ internal static class ChronicleAgentBattleMissionAdapter
                 else json.Append("null,\"distanceToActiveAiOrderTarget\":null");
                 json.Append('}');
             }
+            json.Append(',');
+            var nativeMainAgentController = GetNativeMainAgentController(mission!);
+            json.Append("\"missionMainAgentControllerActive\":");
+            try { json.Append(nativeMainAgentController == null ? "null" : ReadControllerActivated(nativeMainAgentController) ? "true" : "false"); }
+            catch { json.Append("null"); }
             json.Append(',');
             json.Append("\"position\":{\"x\":").Append(Number(mainAgent.Position.X))
                 .Append(",\"y\":").Append(Number(mainAgent.Position.Y))
@@ -255,7 +268,7 @@ internal static class ChronicleAgentBattleMissionAdapter
         return json.ToString();
     }
 
-    internal static string BeginMainAgentAiControllerProbe(double requestedDurationSeconds, bool handoffToFriendlySurrogate = false)
+    internal static string BeginMainAgentAiControllerProbe(double requestedDurationSeconds, bool handoffToFriendlySurrogate = false, bool fullNativeHandoff = false)
     {
         if (!TryGetSupportedBattleMission(out var mission, out var reason))
             throw new InvalidOperationException("harnessMainAgentAiControllerProbe " + reason);
@@ -264,8 +277,9 @@ internal static class ChronicleAgentBattleMissionAdapter
             throw new InvalidOperationException("harnessMainAgentAiControllerProbe requires the Campaign clock to remain stopped");
         if (_mainAgentAiProbeOwner != null)
             throw new InvalidOperationException("harnessMainAgentAiControllerProbe refuses while another MainAgent AI probe lease is active");
-        if (double.IsNaN(requestedDurationSeconds) || double.IsInfinity(requestedDurationSeconds) || requestedDurationSeconds < 1.0 || requestedDurationSeconds > 10.0)
-            throw new InvalidOperationException("harnessMainAgentAiControllerProbe durationSeconds must be between 1 and 10");
+        var maximumProbeDurationSeconds = fullNativeHandoff ? 180.0 : 10.0;
+        if (double.IsNaN(requestedDurationSeconds) || double.IsInfinity(requestedDurationSeconds) || requestedDurationSeconds < 1.0 || requestedDurationSeconds > maximumProbeDurationSeconds)
+            throw new InvalidOperationException("harnessMainAgentAiControllerProbe durationSeconds exceeds the bounded Native probe duration");
 
         var mainAgent = mission.MainAgent;
         if (mainAgent == null || !mainAgent.IsActive() || mainAgent.Controller != AgentControllerType.Player)
@@ -289,13 +303,36 @@ internal static class ChronicleAgentBattleMissionAdapter
         var surrogateControllerBefore = surrogate?.Controller.ToString();
         var positionBefore = mainAgent.Position;
         var healthBefore = mainAgent.Health;
+        if (fullNativeHandoff && surrogate != null)
+            throw new InvalidOperationException("harnessMainAgentNativeAiHandoffProbe does not combine with a surrogate MainAgent");
+        if (fullNativeHandoff)
+        {
+            var nativeController = GetNativeMainAgentController(mission, required: fullNativeHandoff);
+            _mainAgentAiProbeFullNativeHandoff = true;
+            _mainAgentAiProbeOriginalAgentFlags = mainAgent.GetAgentFlags();
+            _mainAgentAiProbeOriginalAiStateFlags = ReadMemberValue(mainAgent, "AIStateFlags");
+            _mainAgentAiProbeOriginalAiPaused = mainAgent.IsPaused;
+            _mainAgentAiProbeMissionController = nativeController;
+            _mainAgentAiProbeOriginalMissionControllerActivated = nativeController == null ? null : ReadControllerActivated(nativeController);
+            _mainAgentAiProbeOriginalCustomLookDir = nativeController == null ? null : ReadControllerLookDirection(nativeController);
+            _mainAgentAiProbeOriginalWatchState = mainAgent.CurrentWatchState;
+        }
         try
         {
+            if (fullNativeHandoff)
+                InvokeControllerInteractionClearFocus(_mainAgentAiProbeMissionController);
             mainAgent.Controller = AgentControllerType.AI;
+            if (fullNativeHandoff)
+                ApplyNativeMainAgentAiHandoff(mainAgent, mission);
             if (surrogate != null) surrogate.Controller = AgentControllerType.Player;
         }
         catch
         {
+            if (fullNativeHandoff)
+            {
+                try { RestoreNativeMainAgentAiHandoff(mainAgent, mission); }
+                catch { }
+            }
             if (surrogate != null && surrogate.IsActive() && surrogate.Controller == AgentControllerType.Player)
             {
                 try { surrogate.Controller = AgentControllerType.AI; }
@@ -327,6 +364,7 @@ internal static class ChronicleAgentBattleMissionAdapter
 
         var json = new StringBuilder(512);
         json.Append("{\"schemaVersion\":1,\"scope\":\"harness-only\",\"nativeSetter\":\"Agent.Controller\",\"leaseClock\":\"EngineTime.ApplicationTime\"")
+            .Append(",\"handoffMode\":\"").Append(fullNativeHandoff ? "rts-camera-native-ai-initialization" : "controller-only").Append('"')
             .Append(",\"durationSeconds\":").Append(Number(requestedDurationSeconds));
         json.Append(",\"controllerBefore\":"); AppendStringValue(json, controllerBefore);
         json.Append(",\"controllerAfter\":"); AppendStringValue(json, mainAgent.Controller.ToString());
@@ -348,6 +386,163 @@ internal static class ChronicleAgentBattleMissionAdapter
         json.Append(",\"timeControlModeAfter\":"); AppendStringValue(json, campaign.TimeControlMode.ToString());
         json.Append('}');
         return json.ToString();
+    }
+
+    private static void ApplyNativeMainAgentAiHandoff(Agent mainAgent, Mission mission)
+    {
+        if (mainAgent.Controller != AgentControllerType.AI)
+            throw new InvalidOperationException("Native AI handoff setup requires the MainAgent controller to be AI");
+
+        // Reproduce the non-camera MainAgent setup used by the installed
+        // MissionSharedLibrary.Utilities.Utility.AIControlMainAgent path.
+        var hasHorseEquipment = false;
+        var character = mainAgent.Character;
+        if (character != null)
+        {
+            try { hasHorseEquipment = character.Equipment[(EquipmentIndex)10].Item != null; }
+            catch { }
+        }
+        if (hasHorseEquipment || (character?.IsMounted ?? false) || mainAgent.HasMount)
+            mainAgent.SetAgentFlags(mainAgent.GetAgentFlags() | (AgentFlag)0x2000);
+        else
+            mainAgent.SetAgentFlags(mainAgent.GetAgentFlags() & ~(AgentFlag)0x2000);
+
+        var commonAi = mainAgent.CommonAIComponent;
+        if (commonAi != null) commonAi.Initialize();
+        var humanAi = mainAgent.HumanAIComponent;
+        if (humanAi != null) humanAi.Initialize();
+
+        var formation = mainAgent.Formation;
+        if (formation != null)
+        {
+            mainAgent.SetRidingOrder(formation.RidingOrder.OrderEnum);
+            formation.OnUnitAddedOrRemoved();
+        }
+        if (!string.Equals(mainAgent.CurrentWatchState.ToString(), "Alarmed", StringComparison.Ordinal))
+            SetMainAgentWatchState(mainAgent, "Alarmed");
+        if (mainAgent.IsPaused)
+            mainAgent.SetIsAIPaused(false);
+        mainAgent.DisableScriptedMovement();
+        if (formation != null)
+        {
+            var currentOrder = formation.GetReadonlyMovementOrderReference();
+            currentOrder.OnUnitJoinOrLeave(formation, mainAgent, isJoining: true);
+        }
+
+        // RTS Camera disables the player input controller in free-camera AI
+        // mode. This probe keeps the camera unchanged but prevents its input
+        // controller from competing with the Native AI.
+        var missionController = _mainAgentAiProbeMissionController ?? GetNativeMainAgentController(mission, required: true);
+        if (missionController != null)
+        {
+            InvokeControllerInteractionClearFocus(missionController);
+            InvokeControllerMethod(missionController, "Disable");
+        }
+    }
+
+    private static void RestoreNativeMainAgentAiHandoff(Agent owner, Mission mission)
+    {
+        if (!owner.IsActive()) return;
+        if (_mainAgentAiProbeOriginalAgentFlags.HasValue)
+            owner.SetAgentFlags(_mainAgentAiProbeOriginalAgentFlags.Value);
+        if (_mainAgentAiProbeOriginalAiStateFlags != null)
+            WriteMemberValue(owner, "AIStateFlags", _mainAgentAiProbeOriginalAiStateFlags);
+        if (_mainAgentAiProbeOriginalWatchState != null)
+        {
+            var restoreWatchState = typeof(Agent).GetMethod("SetWatchState", BindingFlags.Instance | BindingFlags.Public);
+            restoreWatchState?.Invoke(owner, new[] { _mainAgentAiProbeOriginalWatchState });
+        }
+        if (_mainAgentAiProbeOriginalAiPaused.HasValue && owner.IsPaused != _mainAgentAiProbeOriginalAiPaused.Value)
+            owner.SetIsAIPaused(_mainAgentAiProbeOriginalAiPaused.Value);
+        if (owner.Formation != null)
+        {
+            owner.Formation.OnUnitAddedOrRemoved();
+            var currentOrder = owner.Formation.GetReadonlyMovementOrderReference();
+            currentOrder.OnUnitJoinOrLeave(owner.Formation, owner, isJoining: true);
+        }
+        var nativeController = _mainAgentAiProbeMissionController ?? GetNativeMainAgentController(mission);
+        if (nativeController != null)
+        {
+            if (_mainAgentAiProbeOriginalCustomLookDir != null)
+                WriteControllerLookDirection(nativeController, _mainAgentAiProbeOriginalCustomLookDir);
+            if (_mainAgentAiProbeOriginalMissionControllerActivated == true)
+                InvokeControllerMethod(nativeController, "Enable");
+            else
+                InvokeControllerMethod(nativeController, "Disable");
+        }
+    }
+
+    private static void SetMainAgentWatchState(Agent agent, string stateName)
+    {
+        var method = typeof(Agent).GetMethod("SetWatchState", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        var parameterType = method?.GetParameters().FirstOrDefault()?.ParameterType;
+        if (method == null || parameterType == null || !parameterType.IsEnum)
+            throw new MissingMethodException(typeof(Agent).FullName, "SetWatchState(WatchState)");
+        method.Invoke(agent, new[] { Enum.Parse(parameterType, stateName) });
+    }
+
+    private static object? GetNativeMainAgentController(Mission mission, bool required = false)
+    {
+        var controllerType = _nativeMainAgentControllerType ??= AppDomain.CurrentDomain.GetAssemblies()
+            .Select(assembly => assembly.GetType("TaleWorlds.MountAndBlade.View.MissionViews.MissionMainAgentController", throwOnError: false))
+            .FirstOrDefault(type => type != null);
+        if (controllerType == null)
+        {
+            if (required) throw new TypeLoadException("Native MissionMainAgentController type is not loaded");
+            return null;
+        }
+        var getter = typeof(Mission).GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .FirstOrDefault(method => method.Name == "GetMissionBehavior" && method.IsGenericMethodDefinition && method.GetParameters().Length == 0);
+        if (getter == null) throw new MissingMethodException(typeof(Mission).FullName, "GetMissionBehavior<T>()");
+        return getter.MakeGenericMethod(controllerType).Invoke(mission, null);
+    }
+
+    private static bool ReadControllerActivated(object controller)
+    {
+        var value = ReadMemberValue(controller, "_activated");
+        if (value is bool active) return active;
+        throw new MissingMemberException(controller.GetType().FullName, "_activated");
+    }
+
+    private static object? ReadControllerLookDirection(object controller)
+    {
+        var value = ReadMemberValue(controller, "CustomLookDir");
+        if (value == null) throw new MissingMemberException(controller.GetType().FullName, "CustomLookDir");
+        return value;
+    }
+
+    private static object? ReadMemberValue(object target, string name)
+    {
+        var type = target.GetType();
+        var property = type.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        if (property != null) return property.GetValue(target);
+        return type.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(target);
+    }
+
+    private static void WriteMemberValue(object target, string name, object value)
+    {
+        var type = target.GetType();
+        var property = type.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        if (property?.CanWrite == true) { property.SetValue(target, value); return; }
+        var field = type.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        if (field != null) { field.SetValue(target, value); return; }
+        throw new MissingMemberException(type.FullName, name);
+    }
+
+    private static void WriteControllerLookDirection(object controller, object value) => WriteMemberValue(controller, "CustomLookDir", value);
+
+    private static void InvokeControllerInteractionClearFocus(object? controller)
+    {
+        if (controller == null) return;
+        var interaction = ReadMemberValue(controller, "InteractionComponent");
+        interaction?.GetType().GetMethod("ClearFocus", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.Invoke(interaction, null);
+    }
+
+    private static void InvokeControllerMethod(object controller, string name)
+    {
+        var method = controller.GetType().GetMethod(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, binder: null, Type.EmptyTypes, modifiers: null);
+        if (method == null) throw new MissingMethodException(controller.GetType().FullName, name);
+        method.Invoke(controller, null);
     }
 
     internal static void UpdateMainAgentAiControllerProbeLease()
@@ -585,6 +780,7 @@ internal static class ChronicleAgentBattleMissionAdapter
         var json = new StringBuilder(640);
         json.Append("{\"active\":true,\"status\":\"" + Escape(_mainAgentAiProbeStatus ?? "active") + "\",\"secondsRemaining\":")
             .Append(Number(remaining))
+            .Append(",\"handoffMode\":\"").Append(_mainAgentAiProbeFullNativeHandoff ? "rts-camera-native-ai-initialization" : "controller-only").Append('"')
             .Append(",\"ownerAgentIndex\":").Append(owner.Index)
             .Append(",\"ownerController\":"); AppendStringValue(json, owner.Controller.ToString());
         json.Append(",\"missionMainAgentIndex\":").Append(Mission.Current?.MainAgent?.Index.ToString(CultureInfo.InvariantCulture) ?? "null")
@@ -594,6 +790,11 @@ internal static class ChronicleAgentBattleMissionAdapter
             .Append(",\"ownerHasActiveAiBehavior\":").Append(activeBehavior == null ? "false" : "true")
             .Append(",\"ownerActiveAiBehaviorType\":"); AppendStringValue(json, activeBehavior?.GetType().Name);
         json.Append(",\"ownerActiveAiOrderType\":"); AppendStringValue(json, activeBehavior?.CurrentOrder.OrderEnum.ToString());
+        json.Append(",\"ownerWatchState\":"); AppendStringValue(json, owner.CurrentWatchState.ToString());
+        json.Append(",\"ownerAiStateFlags\":"); AppendStringValue(json, ReadMemberValue(owner, "AIStateFlags")?.ToString());
+        json.Append(",\"missionMainAgentControllerActive\":");
+        try { json.Append(_mainAgentAiProbeMissionController == null ? "null" : ReadControllerActivated(_mainAgentAiProbeMissionController) ? "true" : "false"); }
+        catch { json.Append("null"); }
         json.Append(",\"ownerActiveAiOrderTarget\":");
         if (activeOrderTarget.HasValue)
         {
@@ -643,7 +844,16 @@ internal static class ChronicleAgentBattleMissionAdapter
             }
             else status = "surrogate-controller-changed-externally";
         }
-        if (owner != null && owner.IsActive() && _mainAgentAiProbeOriginalWatchState != null)
+        if (owner != null && owner.IsActive() && _mainAgentAiProbeFullNativeHandoff)
+        {
+            try { RestoreNativeMainAgentAiHandoff(owner, mission ?? Mission.Current!); }
+            catch (Exception exception)
+            {
+                ChronicleDiagnostics.Write($"agent-main-native-ai-handoff-restore-failed|type={exception.GetType().Name}|message={exception.Message}");
+                status = "restore-failed";
+            }
+        }
+        else if (owner != null && owner.IsActive() && _mainAgentAiProbeOriginalWatchState != null)
         {
             try
             {
@@ -684,6 +894,13 @@ internal static class ChronicleAgentBattleMissionAdapter
         _mainAgentAiProbeSurrogateOriginalController = null;
         _mainAgentAiProbeOriginalWatchState = null;
         _mainAgentAiProbeOriginalPlayerTroopInFormation = null;
+        _mainAgentAiProbeFullNativeHandoff = false;
+        _mainAgentAiProbeOriginalAgentFlags = null;
+        _mainAgentAiProbeOriginalAiStateFlags = null;
+        _mainAgentAiProbeOriginalAiPaused = null;
+        _mainAgentAiProbeMissionController = null;
+        _mainAgentAiProbeOriginalMissionControllerActivated = null;
+        _mainAgentAiProbeOriginalCustomLookDir = null;
         _mainAgentAiProbeExpiresAt = 0f;
         _mainAgentAiProbeStatus = status;
         return status;

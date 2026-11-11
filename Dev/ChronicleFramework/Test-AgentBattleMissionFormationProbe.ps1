@@ -5,7 +5,8 @@ param(
     [switch]$ProbeMainAgentAiController,
     [switch]$ProbeMainAgentRtsCameraBehavior,
     [switch]$ProbeBattleMovementInput,
-    [switch]$ProbeBattleAgentNavigator
+    [switch]$ProbeBattleAgentNavigator,
+    [switch]$ProbeMainAgentNativeAiHandoff
 )
 
 $ErrorActionPreference = 'Stop'
@@ -27,7 +28,7 @@ $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlo
 $priorMode = $env:CHRONICLE_HARNESS_MODE
 $env:CHRONICLE_HARNESS_MODE = 'battle-fixture'
 $prefix = 'battle-mission-formation-' + [Guid]::NewGuid().ToString('N')
-$probeName = if ($ProbeBattleAgentNavigator) { 'BattleMissionAgentNavigatorProbe' } elseif ($ProbeBattleMovementInput) { 'BattleMissionMovementInputProbe' } elseif ($ProbeMainAgentRtsCameraBehavior) { 'BattleMissionRtsCameraProbe' } elseif ($ProbeMainAgentAiController) { 'BattleMissionControllerProbe' } else { 'BattleMissionFormationProbe' }
+$probeName = if ($ProbeMainAgentNativeAiHandoff) { 'BattleMissionNativeAiHandoffProbe' } elseif ($ProbeBattleAgentNavigator) { 'BattleMissionAgentNavigatorProbe' } elseif ($ProbeBattleMovementInput) { 'BattleMissionMovementInputProbe' } elseif ($ProbeMainAgentRtsCameraBehavior) { 'BattleMissionRtsCameraProbe' } elseif ($ProbeMainAgentAiController) { 'BattleMissionControllerProbe' } else { 'BattleMissionFormationProbe' }
 $runDirectory = if ($env:CHRONICLE_HARNESS_TEMP) { [IO.Path]::GetFullPath($env:CHRONICLE_HARNESS_TEMP) } else { Join-Path $PSScriptRoot ('TestResults\' + $probeName) }
 New-Item -ItemType Directory -Path $runDirectory -Force | Out-Null
 $script:NativeReceipts = [System.Collections.Generic.List[object]]::new()
@@ -246,6 +247,56 @@ try {
     }
     $statusAfter = Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-status-after")
     $mainAgentAfter = Get-FormationSnapshot $statusAfter
+
+    $nativeAiHandoffProbe = $null
+    $nativeAiHandoffSamples = [System.Collections.Generic.List[object]]::new()
+    $mainAgentMovedDuringNativeAiHandoff = $null
+    if ($ProbeMainAgentNativeAiHandoff) {
+        $nativeAiHandoffProbe = Invoke-AgentCli 'harnessMainAgentNativeAiHandoffProbe' @('-DurationSeconds', '180', '-CommandId', "$prefix-main-agent-native-ai-handoff")
+        if ($nativeAiHandoffProbe.status -ne 'completed' -or $nativeAiHandoffProbe.data.scope -ne 'harness-only' -or
+            $nativeAiHandoffProbe.data.handoffMode -ne 'rts-camera-native-ai-initialization' -or
+            $nativeAiHandoffProbe.data.controllerBefore -ne 'Player' -or $nativeAiHandoffProbe.data.controllerAfter -ne 'AI' -or
+            $nativeAiHandoffProbe.data.timeControlModeBefore -ne 'Stop' -or $nativeAiHandoffProbe.data.timeControlModeAfter -ne 'Stop' -or
+            [Math]::Abs([double]$nativeAiHandoffProbe.data.campaignDayAfter - [double]$nativeAiHandoffProbe.data.campaignDayBefore) -gt 0.000001) {
+            throw 'The Native MainAgent AI handoff did not enter its bounded AI lease while preserving the Campaign clock.'
+        }
+        $nativeHandoffDeadline = [DateTime]::UtcNow.AddSeconds(185)
+        $nativeHandoffLeaseActive = $true
+        while ([DateTime]::UtcNow -lt $nativeHandoffDeadline -and $nativeHandoffLeaseActive) {
+            Start-Sleep -Milliseconds 2000
+            $nativeHandoffState = Invoke-AgentCli 'state' @('-CommandId', "$prefix-native-ai-handoff-state-$([Guid]::NewGuid().ToString('N'))")
+            if ($nativeHandoffState.state.context.gameState -ne 'MissionState' -or $nativeHandoffState.state.mission.missionEnded) { break }
+            $nativeHandoffStatus = Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-native-ai-handoff-status-$([Guid]::NewGuid().ToString('N'))")
+            if ($nativeHandoffStatus.status -ne 'completed' -or $null -eq $nativeHandoffStatus.data.mainAgent) { break }
+            $nativeHandoffAgent = $nativeHandoffStatus.data.mainAgent
+            $nativeAiHandoffSamples.Add([ordered]@{
+                controller = [string]$nativeHandoffAgent.controller
+                health = [double]$nativeHandoffAgent.health
+                position = $nativeHandoffAgent.position
+                isPlayerTroopInFormation = $nativeHandoffAgent.formation.isPlayerTroopInFormation
+                formationAIControlled = $nativeHandoffAgent.formation.isAIControlled
+                watchState = [string]$nativeHandoffAgent.currentWatchState
+                missionMainAgentControllerActive = $nativeHandoffStatus.data.mainAgent.missionMainAgentControllerActive
+                nativeHandoff = $nativeHandoffStatus.data.mainAgentAiControllerProbe
+            })
+            $nativeHandoffLeaseActive = $nativeHandoffAgent.controller -eq 'AI'
+        }
+        if ($nativeAiHandoffSamples.Count -gt 1) {
+            $handoffStart = $nativeAiHandoffSamples[0].position
+            $mainAgentMovedDuringNativeAiHandoff = @($nativeAiHandoffSamples | Where-Object {
+                $dx = [double]$_.position.x - [double]$handoffStart.x
+                $dy = [double]$_.position.y - [double]$handoffStart.y
+                $dz = [double]$_.position.z - [double]$handoffStart.z
+                [Math]::Sqrt($dx * $dx + $dy * $dy + $dz * $dz) -gt 0.1
+            }).Count -gt 0
+        }
+        $nativeHandoffRestoredState = Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-native-ai-handoff-restored-status")
+        if ($nativeHandoffRestoredState.status -eq 'completed' -and (
+            $nativeHandoffRestoredState.data.mainAgent.controller -ne 'Player' -or
+            $nativeHandoffRestoredState.data.mainAgent.missionMainAgentControllerActive -ne $statusAfter.data.mainAgent.missionMainAgentControllerActive)) {
+            throw 'Native MainAgent AI handoff did not restore Player control and the original MissionMainAgentController state before battle aftermath.'
+        }
+    }
 
     $battleAgentNavigatorProbe = $null
     $battleAgentNavigatorSamples = [System.Collections.Generic.List[object]]::new()
@@ -556,6 +607,9 @@ try {
                 [Math]::Sqrt($dx * $dx + $dy * $dy + $dz * $dz) -gt 0.1
             }).Count -gt 0
         } else { $null }
+        nativeAiHandoffProbe = if ($nativeAiHandoffProbe) { $nativeAiHandoffProbe.data } else { $null }
+        nativeAiHandoffSamples = $nativeAiHandoffSamples.ToArray()
+        mainAgentMovedDuringNativeAiHandoff = $mainAgentMovedDuringNativeAiHandoff
         mainAgentAiControllerProbeSamples = $controllerProbeSamples.ToArray()
         mainAgentAiFormationBehaviorPresenceSamples = @($controllerProbeSamples | ForEach-Object { $_.formation.hasActiveAiBehavior } | Sort-Object -Unique)
         mainAgentAiFormationBehaviorTypes = @($controllerProbeSamples | ForEach-Object { $_.formation.activeAiBehaviorType } | Sort-Object -Unique)
