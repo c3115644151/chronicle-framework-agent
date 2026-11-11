@@ -63,6 +63,9 @@ internal sealed class ChronicleAgentProtocol
     private float _missionNavigationExpiresAt;
     private float _lastMissionNavigationTickAt;
     private string _missionNavigationStatus;
+    private bool _missionNavigationBattleProbe;
+    private Formation _missionNavigationBattleProbeFormation;
+    private bool? _missionNavigationBattleProbeOriginalFormationAiControlled;
     private Mission _missionSceneAgentsObservationMission;
     private Dictionary<int, Agent> _missionSceneAgentsObservation;
     private float _missionSceneAgentsObservationAt;
@@ -1204,6 +1207,117 @@ internal sealed class ChronicleAgentProtocol
                     battleMovementProbeData.Append('}');
                     WriteResponse(commandId, action, "completed", behavior, null, battleMovementProbeData.ToString());
                     break;
+                case "harnessBattleAgentNavigatorProbe":
+                    var navigatorMission = Mission.Current;
+                    var navigatorMainAgent = navigatorMission?.MainAgent;
+                    if (!AgentMissionInputPatch.IsSupportedCampaignFieldBattleInput(navigatorMission, navigatorMainAgent))
+                        throw new InvalidOperationException("harnessBattleAgentNavigatorProbe requires the active stopped Campaign field Battle Mission and Player-controlled MainAgent");
+                    if (_missionNavigator != null || _missionInputAgent != null)
+                        throw new InvalidOperationException("harnessBattleAgentNavigatorProbe refuses while another Native movement lease is active");
+                    var navigatorFormation = navigatorMainAgent.Formation;
+                    if (navigatorFormation == null || navigatorFormation.CountOfUnits != 1 || !navigatorFormation.IsAIControlled)
+                        throw new InvalidOperationException("harnessBattleAgentNavigatorProbe requires the isolated singleton MainAgent Formation to be AI-controlled");
+                    var navigatorDuration = ReadDouble(command, "durationSeconds");
+                    if (navigatorDuration == 0.0) navigatorDuration = 8.0;
+                    if (double.IsNaN(navigatorDuration) || double.IsInfinity(navigatorDuration) || navigatorDuration < 1.0 || navigatorDuration > 10.0)
+                        throw new InvalidOperationException("harnessBattleAgentNavigatorProbe durationSeconds must be between 1 and 10");
+                    var nearestEnemy = navigatorMission.Agents
+                        .Where(agent => agent != null && agent != navigatorMainAgent && agent.IsActive() && agent.IsHuman && agent.Team != null && navigatorMainAgent.IsEnemyOf(agent))
+                        .Select(agent => new
+                        {
+                            Agent = agent,
+                            Distance = Math.Sqrt(Math.Pow(navigatorMainAgent.Position.X - agent.Position.X, 2) + Math.Pow(navigatorMainAgent.Position.Y - agent.Position.Y, 2) + Math.Pow(navigatorMainAgent.Position.Z - agent.Position.Z, 2))
+                        })
+                        .OrderBy(item => item.Distance)
+                        .ThenBy(item => item.Agent.Index)
+                        .FirstOrDefault();
+                    if (nearestEnemy == null)
+                        throw new InvalidOperationException("harnessBattleAgentNavigatorProbe requires one active enemy human Agent in the current Mission");
+                    double awayX = navigatorMainAgent.Position.X - nearestEnemy.Agent.Position.X;
+                    double awayY = navigatorMainAgent.Position.Y - nearestEnemy.Agent.Position.Y;
+                    var awayLength = Math.Sqrt(awayX * awayX + awayY * awayY);
+                    if (awayLength < 0.1)
+                        throw new InvalidOperationException("harnessBattleAgentNavigatorProbe cannot resolve a horizontal retreat direction from the nearest enemy");
+                    awayX /= awayLength;
+                    awayY /= awayLength;
+                    var startPosition = navigatorMainAgent.Position;
+                    TaleWorlds.Engine.WorldPosition battleNavigatorTargetWorldPosition = default;
+                    var targetResolved = false;
+                    foreach (var distance in new[] { 8f, 12f, 16f })
+                    {
+                        var target = new TaleWorlds.Library.Vec3((float)(startPosition.X + awayX * distance), (float)(startPosition.Y + awayY * distance), startPosition.Z);
+                        var candidate = new TaleWorlds.Engine.WorldPosition(navigatorMission.Scene, target);
+                        var start = new TaleWorlds.Engine.WorldPosition(navigatorMission.Scene, startPosition);
+                        if (navigatorMission.Scene.DoesPathExistBetweenPositions(start, candidate))
+                        {
+                            battleNavigatorTargetWorldPosition = candidate;
+                            targetResolved = true;
+                            break;
+                        }
+                    }
+                    if (!targetResolved)
+                        throw new InvalidOperationException("harnessBattleAgentNavigatorProbe found no 8/12/16-unit NavMesh path away from the nearest enemy");
+                    var navigatorDirectionX = battleNavigatorTargetWorldPosition.AsVec2.X - startPosition.X;
+                    var navigatorDirectionY = battleNavigatorTargetWorldPosition.AsVec2.Y - startPosition.Y;
+                    var navigatorDirection = (float)Math.Atan2(navigatorDirectionY, navigatorDirectionX);
+                    var navigatorCampaignDayBefore = CampaignTime.Now.ToDays;
+                    var navigatorTimeModeBefore = Campaign.Current.TimeControlMode.ToString();
+                    var originalNavigatorController = navigatorMainAgent.Controller;
+                    var originalNavigatorFormationAi = navigatorFormation.IsAIControlled;
+                    var battleNavigator = new SandBox.AgentNavigator(navigatorMainAgent);
+                    try
+                    {
+                        navigatorFormation.SetControlledByAI(false);
+                        navigatorMainAgent.Controller = AgentControllerType.AI;
+                        battleNavigator.SetTargetFrame(battleNavigatorTargetWorldPosition, navigatorDirection, rangeThreshold:1.5f, rotationThreshold:-10f, flags:(Agent.AIScriptedFrameFlags)0, disableClearTargetWhenTargetIsReached:false);
+                    }
+                    catch
+                    {
+                        try { battleNavigator.ClearTarget(); } catch { }
+                        if (navigatorMainAgent.IsActive() && navigatorMainAgent.Controller != originalNavigatorController)
+                        {
+                            try { navigatorMainAgent.Controller = originalNavigatorController; }
+                            catch { }
+                        }
+                        if (navigatorFormation.IsAIControlled != originalNavigatorFormationAi)
+                        {
+                            try { navigatorFormation.SetControlledByAI(originalNavigatorFormationAi); }
+                            catch { }
+                        }
+                        throw;
+                    }
+                    _missionNavigator = battleNavigator;
+                    _missionNavigationMission = navigatorMission;
+                    _missionNavigationOwner = navigatorMainAgent;
+                    _missionNavigationTargetAgentIndex = -1;
+                    _missionNavigationTargetPosition = battleNavigatorTargetWorldPosition.GetGroundVec3();
+                    _missionNavigationOriginalController = originalNavigatorController;
+                    _missionNavigationBattleProbeFormation = navigatorFormation;
+                    _missionNavigationBattleProbeOriginalFormationAiControlled = originalNavigatorFormationAi;
+                    _missionNavigationStartedAt = EngineTime.ApplicationTime;
+                    _missionNavigationExpiresAt = EngineTime.ApplicationTime + (float)navigatorDuration;
+                    _lastMissionNavigationTickAt = navigatorMission.CurrentTime;
+                    _missionNavigationStatus = battleNavigator._agentState.ToString();
+                    _missionNavigationBattleProbe = true;
+                    var battleNavigatorData = new StringBuilder(448);
+                    battleNavigatorData.Append("{\"schemaVersion\":1,\"scope\":\"harness-only\",\"nativeNavigator\":\"SandBox.AgentNavigator.SetTargetFrame\",\"targetMode\":\"away-from-nearest-active-enemy\"")
+                        .Append(",\"enemyAgentIndex\":").Append(nearestEnemy.Agent.Index)
+                        .Append(",\"enemyDistanceBefore\":").Append(nearestEnemy.Distance.ToString("R", CultureInfo.InvariantCulture))
+                        .Append(",\"durationSeconds\":").Append(navigatorDuration.ToString("R", CultureInfo.InvariantCulture))
+                        .Append(",\"controllerBefore\":\"").Append(Escape(originalNavigatorController.ToString())).Append('"')
+                        .Append(",\"controllerAfter\":\"").Append(Escape(navigatorMainAgent.Controller.ToString())).Append('"')
+                        .Append(",\"formationAiControlledBefore\":").Append(originalNavigatorFormationAi ? "true" : "false")
+                        .Append(",\"formationAiControlledAfter\":").Append(navigatorFormation.IsAIControlled ? "true" : "false")
+                        .Append(",\"navState\":\"").Append(Escape(_missionNavigationStatus)).Append('"')
+                        .Append(",\"target\":{\"x\":").Append(battleNavigatorTargetWorldPosition.GetGroundVec3().X.ToString("R", CultureInfo.InvariantCulture))
+                        .Append(",\"y\":").Append(battleNavigatorTargetWorldPosition.GetGroundVec3().Y.ToString("R", CultureInfo.InvariantCulture))
+                        .Append(",\"z\":").Append(battleNavigatorTargetWorldPosition.GetGroundVec3().Z.ToString("R", CultureInfo.InvariantCulture)).Append('}')
+                        .Append(",\"campaignDayBefore\":").Append(navigatorCampaignDayBefore.ToString("R", CultureInfo.InvariantCulture))
+                        .Append(",\"campaignDayAfter\":").Append(CampaignTime.Now.ToDays.ToString("R", CultureInfo.InvariantCulture))
+                        .Append(",\"timeControlModeBefore\":\"").Append(Escape(navigatorTimeModeBefore)).Append('"')
+                        .Append(",\"timeControlModeAfter\":\"").Append(Escape(Campaign.Current.TimeControlMode.ToString())).Append('"').Append('}');
+                    WriteResponse(commandId, action, "completed", behavior, null, battleNavigatorData.ToString());
+                    break;
                 case "missionNavigateToAgent":
                     var navigationMission = Mission.Current;
                     var navigationState = Game.Current.GameStateManager.ActiveState as MissionState;
@@ -1808,7 +1922,12 @@ internal sealed class ChronicleAgentProtocol
             ClearMissionNavigationLease("timed-out");
             return;
         }
-        if (mission == null || mission != _missionNavigationMission || mission.MissionEnded || activeState == null || mission.MainAgent != _missionNavigationOwner || !AgentMissionInputPatch.IsSupportedLocationMission(mission))
+        var isActiveBattleNavigatorProbe = _missionNavigationBattleProbe && mission != null && !mission.MissionEnded &&
+            mission.Mode == MissionMode.Battle && mission.IsFieldBattle && !mission.IsFriendlyMission &&
+            PlayerEncounter.IsActive && PlayerEncounter.Battle != null && Campaign.Current?.TimeControlMode == CampaignTimeControlMode.Stop &&
+            _missionNavigationOwner?.Controller == AgentControllerType.AI;
+        var supportedNavigationContext = AgentMissionInputPatch.IsSupportedLocationMission(mission) || isActiveBattleNavigatorProbe;
+        if (mission == null || mission != _missionNavigationMission || mission.MissionEnded || activeState == null || mission.MainAgent != _missionNavigationOwner || !supportedNavigationContext)
         {
             ClearMissionNavigationLease("scene-changed");
             return;
@@ -1824,6 +1943,8 @@ internal sealed class ChronicleAgentProtocol
 
     private void ClearMissionNavigationLease(string status)
     {
+        var battleProbeFormation = _missionNavigationBattleProbeFormation;
+        var battleProbeFormationAiOriginal = _missionNavigationBattleProbeOriginalFormationAiControlled;
         if (_missionNavigator != null)
         {
             try { _missionNavigator.ClearTarget(); }
@@ -1834,8 +1955,16 @@ internal sealed class ChronicleAgentProtocol
             try { _missionNavigationOwner.Controller = _missionNavigationOriginalController.Value; }
             catch (Exception exception) { ChronicleDiagnostics.Write($"agent-mission-controller-restore-failed|type={exception.GetType().Name}|message={exception.Message}"); }
         }
+        if (battleProbeFormation != null && battleProbeFormationAiOriginal.HasValue && battleProbeFormation.IsAIControlled != battleProbeFormationAiOriginal.Value)
+        {
+            try { battleProbeFormation.SetControlledByAI(battleProbeFormationAiOriginal.Value); }
+            catch (Exception exception) { ChronicleDiagnostics.Write($"agent-battle-navigator-formation-restore-failed|type={exception.GetType().Name}|message={exception.Message}"); }
+        }
         _missionNavigator = null;
         _missionNavigationStatus = status;
+        _missionNavigationBattleProbe = false;
+        _missionNavigationBattleProbeFormation = null;
+        _missionNavigationBattleProbeOriginalFormationAiControlled = null;
         _missionNavigationOriginalController = null;
         _missionNavigationExpiresAt = 0f;
         _lastMissionNavigationTickAt = 0f;
@@ -1844,7 +1973,8 @@ internal sealed class ChronicleAgentProtocol
     internal static string BuildMissionNavigationObservationJson(Agent mainAgent)
     {
         var protocol = _activeInstance;
-        if (protocol == null || mainAgent == null || protocol._missionNavigationMission == null || protocol._missionNavigationMission != Mission.Current || protocol._missionNavigationOwner != mainAgent || protocol._missionNavigationTargetAgentIndex < 0 || string.IsNullOrWhiteSpace(protocol._missionNavigationStatus))
+        var isBattlePointProbe = protocol?._missionNavigationBattleProbe == true;
+        if (protocol == null || mainAgent == null || protocol._missionNavigationMission == null || protocol._missionNavigationMission != Mission.Current || protocol._missionNavigationOwner != mainAgent || (protocol._missionNavigationTargetAgentIndex < 0 && !isBattlePointProbe) || string.IsNullOrWhiteSpace(protocol._missionNavigationStatus))
             return "null";
         var x = mainAgent.Position.X - protocol._missionNavigationTargetPosition.X;
         var y = mainAgent.Position.Y - protocol._missionNavigationTargetPosition.Y;
@@ -1852,7 +1982,7 @@ internal sealed class ChronicleAgentProtocol
         var distance = Math.Sqrt(x * x + y * y + z * z);
         var remaining = protocol._missionNavigator == null ? 0.0 : Math.Max(0.0, protocol._missionNavigationExpiresAt - EngineTime.ApplicationTime);
         var targetAgentJson = protocol._missionNavigationTargetAgentIndex < 0 ? "null" : protocol._missionNavigationTargetAgentIndex.ToString(CultureInfo.InvariantCulture);
-        return "{\"status\":\"" + Escape(protocol._missionNavigationStatus) + "\",\"active\":" + (protocol._missionNavigator != null ? "true" : "false") + ",\"targetAgentIndex\":" + targetAgentJson + ",\"targetPosition\":{\"x\":" + protocol._missionNavigationTargetPosition.X.ToString("R", CultureInfo.InvariantCulture) + ",\"y\":" + protocol._missionNavigationTargetPosition.Y.ToString("R", CultureInfo.InvariantCulture) + ",\"z\":" + protocol._missionNavigationTargetPosition.Z.ToString("R", CultureInfo.InvariantCulture) + "},\"distance\":" + distance.ToString("R", CultureInfo.InvariantCulture) + ",\"secondsRemaining\":" + remaining.ToString("R", CultureInfo.InvariantCulture) + "}";
+        return "{\"scope\":\"" + (isBattlePointProbe ? "harness-battle-point" : "friendly-location-agent") + "\",\"status\":\"" + Escape(protocol._missionNavigationStatus) + "\",\"active\":" + (protocol._missionNavigator != null ? "true" : "false") + ",\"targetAgentIndex\":" + targetAgentJson + ",\"targetPosition\":{\"x\":" + protocol._missionNavigationTargetPosition.X.ToString("R", CultureInfo.InvariantCulture) + ",\"y\":" + protocol._missionNavigationTargetPosition.Y.ToString("R", CultureInfo.InvariantCulture) + ",\"z\":" + protocol._missionNavigationTargetPosition.Z.ToString("R", CultureInfo.InvariantCulture) + "},\"distance\":" + distance.ToString("R", CultureInfo.InvariantCulture) + ",\"secondsRemaining\":" + remaining.ToString("R", CultureInfo.InvariantCulture) + "}";
     }
 
     private static string BuildHarnessMissionDiagnosticsJson(Mission mission)

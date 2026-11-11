@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-11-11
+goal: "Determine whether a source-backed NavMesh movement lease can reposition
+  MainHero under troop delegation without repeated model calls, using one
+  disposable no-model field-battle probe for issue #132."
+skip_specs: true

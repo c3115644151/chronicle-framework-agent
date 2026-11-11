@@ -4,7 +4,8 @@ param(
     [ValidateRange(30,900)][int]$TimeoutSeconds = 300,
     [switch]$ProbeMainAgentAiController,
     [switch]$ProbeMainAgentRtsCameraBehavior,
-    [switch]$ProbeBattleMovementInput
+    [switch]$ProbeBattleMovementInput,
+    [switch]$ProbeBattleAgentNavigator
 )
 
 $ErrorActionPreference = 'Stop'
@@ -26,7 +27,7 @@ $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlo
 $priorMode = $env:CHRONICLE_HARNESS_MODE
 $env:CHRONICLE_HARNESS_MODE = 'battle-fixture'
 $prefix = 'battle-mission-formation-' + [Guid]::NewGuid().ToString('N')
-$probeName = if ($ProbeBattleMovementInput) { 'BattleMissionMovementInputProbe' } elseif ($ProbeMainAgentRtsCameraBehavior) { 'BattleMissionRtsCameraProbe' } elseif ($ProbeMainAgentAiController) { 'BattleMissionControllerProbe' } else { 'BattleMissionFormationProbe' }
+$probeName = if ($ProbeBattleAgentNavigator) { 'BattleMissionAgentNavigatorProbe' } elseif ($ProbeBattleMovementInput) { 'BattleMissionMovementInputProbe' } elseif ($ProbeMainAgentRtsCameraBehavior) { 'BattleMissionRtsCameraProbe' } elseif ($ProbeMainAgentAiController) { 'BattleMissionControllerProbe' } else { 'BattleMissionFormationProbe' }
 $runDirectory = if ($env:CHRONICLE_HARNESS_TEMP) { [IO.Path]::GetFullPath($env:CHRONICLE_HARNESS_TEMP) } else { Join-Path $PSScriptRoot ('TestResults\' + $probeName) }
 New-Item -ItemType Directory -Path $runDirectory -Force | Out-Null
 $script:NativeReceipts = [System.Collections.Generic.List[object]]::new()
@@ -245,6 +246,48 @@ try {
     }
     $statusAfter = Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-status-after")
     $mainAgentAfter = Get-FormationSnapshot $statusAfter
+
+    $battleAgentNavigatorProbe = $null
+    $battleAgentNavigatorSamples = [System.Collections.Generic.List[object]]::new()
+    if ($ProbeBattleAgentNavigator) {
+        $battleAgentNavigatorProbe = Invoke-AgentCli 'harnessBattleAgentNavigatorProbe' @('-DurationSeconds', '8', '-CommandId', "$prefix-battle-agent-navigator")
+        if ($battleAgentNavigatorProbe.status -ne 'completed' -or $battleAgentNavigatorProbe.data.scope -ne 'harness-only' -or
+            $battleAgentNavigatorProbe.data.controllerBefore -ne 'Player' -or $battleAgentNavigatorProbe.data.controllerAfter -ne 'AI' -or
+            $battleAgentNavigatorProbe.data.timeControlModeBefore -ne 'Stop' -or $battleAgentNavigatorProbe.data.timeControlModeAfter -ne 'Stop' -or
+            [Math]::Abs([double]$battleAgentNavigatorProbe.data.campaignDayAfter - [double]$battleAgentNavigatorProbe.data.campaignDayBefore) -gt 0.000001) {
+            throw 'The bounded Battle AgentNavigator probe did not preserve the Campaign clock or switch MainAgent control under its guards.'
+        }
+        $navigatorProbeDeadline = [DateTime]::UtcNow.AddSeconds(6)
+        $navigatorStillActive = $false
+        $navigatorMissionStillActive = $true
+        while ([DateTime]::UtcNow -lt $navigatorProbeDeadline) {
+            Start-Sleep -Milliseconds 500
+            $navigatorState = Invoke-AgentCli 'state' @('-CommandId', "$prefix-agent-navigator-state-$([Guid]::NewGuid().ToString('N'))")
+            if ($navigatorState.state.context.gameState -ne 'MissionState' -or $navigatorState.state.mission.missionEnded) { $navigatorMissionStillActive = $false; break }
+            $navigatorStatus = Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-agent-navigator-status-$([Guid]::NewGuid().ToString('N'))")
+            if ($navigatorStatus.status -ne 'completed' -or $null -eq $navigatorStatus.data.mainAgent) { break }
+            $navigatorLease = $navigatorStatus.data.agentNavigator
+            $battleAgentNavigatorSamples.Add([ordered]@{
+                controller = [string]$navigatorStatus.data.mainAgent.controller
+                health = [double]$navigatorStatus.data.mainAgent.health
+                position = $navigatorStatus.data.mainAgent.position
+                navigator = $navigatorLease
+            })
+            $navigatorStillActive = $null -ne $navigatorLease -and $navigatorLease.active -eq $true
+            if (-not $navigatorStillActive) { break }
+        }
+        if ($navigatorStillActive -and $navigatorMissionStillActive) {
+            $cancelNavigator = Invoke-AgentCli 'missionCancelNavigation' @('-CommandId', "$prefix-agent-navigator-cancel")
+            if ($cancelNavigator.status -ne 'completed') { throw 'Native battle AgentNavigator lease did not accept bounded cleanup.' }
+        }
+        $navigatorRestoredState = Invoke-AgentCli 'state' @('-CommandId', "$prefix-agent-navigator-restored-state")
+        if ($navigatorRestoredState.state.context.gameState -eq 'MissionState' -and -not $navigatorRestoredState.state.mission.missionEnded) {
+            $navigatorRestoredStatus = Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-agent-navigator-restored-status")
+            if ($navigatorRestoredStatus.status -ne 'completed' -or $navigatorRestoredStatus.data.mainAgent.controller -ne 'Player') {
+                throw 'Battle AgentNavigator did not restore Player control after bounded movement.'
+            }
+        }
+    }
 
     $controllerProbe = $null
     $rtsCameraProbe = $null
@@ -502,6 +545,17 @@ try {
         mainAgentAiControllerProbe = if ($controllerProbe) { $controllerProbe.data } else { $null }
         mainAgentAiRtsCameraProbe = if ($rtsCameraProbe) { $rtsCameraProbe.data } else { $null }
         battleMovementInputProbe = $battleMovementInputProbe
+        battleAgentNavigatorProbe = if ($battleAgentNavigatorProbe) { $battleAgentNavigatorProbe.data } else { $null }
+        battleAgentNavigatorSamples = $battleAgentNavigatorSamples.ToArray()
+        mainAgentMovedDuringBattleNavigator = if ($battleAgentNavigatorSamples.Count -gt 1) {
+            $navigatorStart = $battleAgentNavigatorSamples[0].position
+            @($battleAgentNavigatorSamples | Where-Object {
+                $dx = [double]$_.position.x - [double]$navigatorStart.x
+                $dy = [double]$_.position.y - [double]$navigatorStart.y
+                $dz = [double]$_.position.z - [double]$navigatorStart.z
+                [Math]::Sqrt($dx * $dx + $dy * $dy + $dz * $dz) -gt 0.1
+            }).Count -gt 0
+        } else { $null }
         mainAgentAiControllerProbeSamples = $controllerProbeSamples.ToArray()
         mainAgentAiFormationBehaviorPresenceSamples = @($controllerProbeSamples | ForEach-Object { $_.formation.hasActiveAiBehavior } | Sort-Object -Unique)
         mainAgentAiFormationBehaviorTypes = @($controllerProbeSamples | ForEach-Object { $_.formation.activeAiBehaviorType } | Sort-Object -Unique)

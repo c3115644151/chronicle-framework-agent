@@ -111,6 +111,7 @@ internal static class ChronicleAgentBattleMissionAdapter
             json.Append("\"position\":{\"x\":").Append(Number(mainAgent.Position.X))
                 .Append(",\"y\":").Append(Number(mainAgent.Position.Y))
                 .Append(",\"z\":").Append(Number(mainAgent.Position.Z)).Append("}}");
+            json.Append(",\"agentNavigator\":").Append(ChronicleAgentProtocol.BuildMissionNavigationObservationJson(mainAgent));
         }
         json.Append(",\"playerTeam\":{\"formationCount\":").Append(formations.Length)
             .Append(",\"orderControllerAvailable\":").Append(orderController == null ? "false" : "true")

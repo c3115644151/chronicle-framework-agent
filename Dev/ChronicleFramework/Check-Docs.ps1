@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.572'
+$contractVersion = '7.573'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -1668,6 +1668,15 @@ if ($harnessScript -notmatch "'BattleMissionControllerProbe'" -or
     $battleMissionFormationProbeSource -notmatch "Invoke-AgentCli 'harnessBattleMovementInputProbe'" -or
     $agentCliSource -notmatch 'harnessBattleMovementInputProbe' -or
     $agentHostDecisionCycleSource -match 'harnessBattleMovementInputProbe' -or
+    $harnessScript -notmatch "'BattleMissionAgentNavigatorProbe' \{ @\('Preflight', 'Build', 'BattleMissionAgentNavigatorProbe'\) \}" -or
+    $harnessScript -match "'All' \{[^\r\n]*'BattleMissionAgentNavigatorProbe'" -or
+    $battleMissionFormationProbeSource -notmatch 'ProbeBattleAgentNavigator' -or
+    $battleMissionFormationProbeSource -notmatch "Invoke-AgentCli 'harnessBattleAgentNavigatorProbe'" -or
+    $agentCliSource -notmatch 'harnessBattleAgentNavigatorProbe' -or
+    $agentHostDecisionCycleSource -match 'harnessBattleAgentNavigatorProbe' -or
+    $protocolSource -notmatch 'harnessBattleAgentNavigatorProbe requires the active stopped Campaign field Battle Mission' -or
+    $protocolSource -notmatch 'isActiveBattleNavigatorProbe = _missionNavigationBattleProbe' -or
+    $protocolSource -notmatch 'battleProbeFormation\.SetControlledByAI\(battleProbeFormationAiOriginal\.Value\)' -or
     $protocolSource -notmatch 'BeginBattleMovementProbe\(movementProbeMission, movementProbeMainAgent\)' -or
     $protocolSource -notmatch 'missionInput requires a supported non-battle town or Tavern Location Mission' -or
     $harnessScript -notmatch "'BattleMissionMovementInputProbe' \{ @\('Preflight', 'Build', 'BattleMissionMovementInputProbe'\) \}" -or
@@ -1677,6 +1686,8 @@ if ($harnessScript -notmatch "'BattleMissionControllerProbe'" -or
     $protocolSource -notmatch 'harnessBattleMovementInputProbe requires the active stopped Campaign field Battle Mission' -or
     $protocolSource -notmatch 'missionInput requires a supported non-battle town or Tavern Location Mission' -or
     $missionInputPatchSource -notmatch 'IsActiveBattleMovementProbe' -or
+    $protocolSource -notmatch '_missionNavigationBattleProbe && mission != null' -or
+    $protocolSource -notmatch '_missionNavigationOwner\?\.Controller == AgentControllerType\.AI' -or
     $agentHostDecisionCycleSource -match 'harnessBattleMovementInputProbe' -or
     $agentHostDecisionCycleSource -match 'harnessMainAgentAiControllerProbe') {
     throw 'The opt-in MainAgent AI-controller probe must remain bounded and restorable in Native Harness code, perform no model work, and stay out of the production AgentHost action catalog.'
