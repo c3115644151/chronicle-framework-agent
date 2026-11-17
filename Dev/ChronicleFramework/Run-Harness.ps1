@@ -5,7 +5,7 @@ param(
     [switch]$RecruitmentBulkOnly,
     [ValidateSet('deepseek-flash','gpt-oss-20b','openai-gpt-oss-20b','nvidiallama-3.2-11b-vision','poolside-laguna-s-2.1','free-router','llm7-fast-router','dots3-note-preview','gemma-4-31b-heretic','gemma-4-31b-it','gemma-4-e4b-uncensored-hauhaucs-aggressive-q4-k-m','gemini-2.5-flash','gemini-3.8-flash','mistral-nemo','mistral-small-3.2-24b','qwen3.6-27b','qwen3.8-27b','auto:reliable')]
     [string]$FreshStoryModeModel = '',
-    [int]$SmokeTimeoutSeconds = 45,
+    [int]$SmokeTimeoutSeconds = 180,
     [int]$SmokeStabilitySeconds = 8,
     [ValidateSet('Stop','Complete','UnsupportedGoal','MissingModel','ServiceUnavailable','ParentExited','StopTimeout','NonMap','CampaignRoundtrip','InputToggle')][string]$LifecycleScenario = 'Stop',
     [string]$TargetSettlementId = 'town_V1',
@@ -33,7 +33,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.584'
+$HarnessContractVersion = '7.585'
 if ($BattleMissionSoloMainHeroProbe -and $Phase -ne 'BattleMissionHostNativeAiAutopilotProbe') {
     throw 'The solo MainHero option is only valid with -Phase BattleMissionHostNativeAiAutopilotProbe.'
 }

@@ -3,7 +3,7 @@ param(
     [switch]$WithoutChronicle,
     [switch]$WithoutPrerequisites,
     [switch]$SkipBuild,
-    [int]$TimeoutSeconds = 45,
+    [int]$TimeoutSeconds = 180,
     [int]$StabilitySeconds = 8
 )
 

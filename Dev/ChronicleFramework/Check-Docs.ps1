@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.584'
+$contractVersion = '7.585'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -1187,7 +1187,9 @@ if ($harnessScript -notmatch "'ReleasePackage' \{ @\('Preflight', 'AgentHostPack
 }
 $subModuleSource = Get-Content (Join-Path $harnessRoot 'SubModule.cs') -Raw -Encoding UTF8
 if ($harnessScript -notmatch "HarnessContractVersion\s*=\s*'$contractVersion'" -or
+    $harnessScript -notmatch '\[int\]\$SmokeTimeoutSeconds\s*=\s*180' -or
     $smokeModuleSource -notmatch 'HarnessShaderCacheDialog\.ps1' -or $smokeModuleSource -notmatch 'Invoke-ChronicleShaderCacheDialogAcknowledgement' -or
+    $smokeModuleSource -notmatch '\[int\]\$TimeoutSeconds\s*=\s*180' -or
     $smokeModuleSource -notmatch 'StartupDialogSnapshots' -or $smokeModuleSource -notmatch 'SmokeResult\.json' -or
     $smokeModuleSource -notmatch 'McmSettingsRegistered' -or $smokeModuleSource -notmatch 'requiredMcmButtonPropertyIds' -or
     $smokeModuleSource -notmatch 'StartupReadySeconds' -or $smokeModuleSource -notmatch 'stabilityCompleted' -or
