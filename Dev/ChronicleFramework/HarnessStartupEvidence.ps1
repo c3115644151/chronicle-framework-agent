@@ -224,6 +224,99 @@ function Disable-ChronicleHarnessGameSound {
     [pscustomobject]@{ Status = 'disabled'; OriginalDisableSound = $original; DisableSoundDuringTest = 1; BackupPath = $backupPath }
 }
 
+function Get-ChronicleSteamBranchSelectionFromManifestText {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$ManifestText)
+
+    $userConfig = [regex]::Matches($ManifestText, '(?s)"UserConfig"\s*\{(.*?)\}')
+    $mountedConfig = [regex]::Matches($ManifestText, '(?s)"MountedConfig"\s*\{(.*?)\}')
+    $buildIdMatch = [regex]::Match($ManifestText, '"buildid"\s+"([0-9]+)"')
+    if ($userConfig.Count -ne 1 -or $mountedConfig.Count -ne 1 -or -not $buildIdMatch.Success) {
+        throw 'Steam appmanifest must contain exactly one UserConfig, MountedConfig, and buildid before its game branch can be trusted.'
+    }
+    $userBranch = [regex]::Match($userConfig[0].Groups[1].Value, '"BetaKey"\s+"([^"]+)"')
+    $mountedBranch = [regex]::Match($mountedConfig[0].Groups[1].Value, '"BetaKey"\s+"([^"]+)"')
+    if (-not $userBranch.Success -or -not $mountedBranch.Success) {
+        throw 'Steam appmanifest is missing a BetaKey in its UserConfig or MountedConfig.'
+    }
+    return [pscustomobject]@{
+        UserConfigBranch = [string]$userBranch.Groups[1].Value
+        MountedConfigBranch = [string]$mountedBranch.Groups[1].Value
+        BuildId = [string]$buildIdMatch.Groups[1].Value
+    }
+}
+
+function Assert-ChronicleSteamGameBranch {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$GameRoot,
+        [Parameter(Mandatory)][string]$RequiredBranch
+    )
+
+    $steamAppsRoot = Split-Path -Parent (Split-Path -Parent ([IO.Path]::GetFullPath($GameRoot)))
+    $manifestPath = Join-Path $steamAppsRoot 'appmanifest_261550.acf'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw "Steam appmanifest not found; cannot prove the required Bannerlord $RequiredBranch runtime ($manifestPath)."
+    }
+    $selection = Get-ChronicleSteamBranchSelectionFromManifestText -ManifestText ([IO.File]::ReadAllText($manifestPath))
+    if ($selection.UserConfigBranch -cne $RequiredBranch -or $selection.MountedConfigBranch -cne $RequiredBranch) {
+        throw "Bannerlord runtime branch mismatch: required=$RequiredBranch, selected=$($selection.UserConfigBranch), installed=$($selection.MountedConfigBranch), build=$($selection.BuildId). Wait for Steam's branch update to finish before building or testing against Native assemblies."
+    }
+    return [pscustomobject]@{ Verified = $true; Branch = $RequiredBranch; BuildId = $selection.BuildId; ManifestPath = $manifestPath }
+}
+
+function Test-ChronicleSteamBranchSelectionContract {
+    $matched = @'
+"AppState" { "buildid" "24573425" "UserConfig" { "language" "schinese" "BetaKey" "v1.4.8" } "MountedConfig" { "language" "schinese" "BetaKey" "v1.4.8" } }
+'@
+    $transitioning = $matched.Replace('"MountedConfig" { "language" "schinese" "BetaKey" "v1.4.8" }', '"MountedConfig" { "language" "schinese" "BetaKey" "public" }')
+    $public = $matched.Replace('"UserConfig" { "language" "schinese" "BetaKey" "v1.4.8" }', '"UserConfig" { "language" "schinese" "BetaKey" "public" }').Replace('"MountedConfig" { "language" "schinese" "BetaKey" "v1.4.8" }', '"MountedConfig" { "language" "schinese" "BetaKey" "public" }')
+    $matchState = Get-ChronicleSteamBranchSelectionFromManifestText -ManifestText $matched
+    $transitionState = Get-ChronicleSteamBranchSelectionFromManifestText -ManifestText $transitioning
+    $publicState = Get-ChronicleSteamBranchSelectionFromManifestText -ManifestText $public
+    return ($matchState.UserConfigBranch -ceq 'v1.4.8' -and $matchState.MountedConfigBranch -ceq 'v1.4.8' -and
+        $matchState.BuildId -ceq '24573425' -and $transitionState.UserConfigBranch -ceq 'v1.4.8' -and
+        $transitionState.MountedConfigBranch -ceq 'public' -and $publicState.UserConfigBranch -ceq 'public' -and
+        $publicState.MountedConfigBranch -ceq 'public')
+}
+
+function ConvertTo-ChronicleStartupCrashEventEvidence {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object[]]$Events = @(),
+        [Parameter(Mandatory)][int]$ProcessId,
+        [Parameter(Mandatory)][string]$ProcessName
+    )
+
+    $pidHex = '0x{0:X}' -f $ProcessId
+    @($Events | Where-Object {
+        [int]$_.Id -in @(1000, 1001, 1026) -and
+        ([string]$_.Message -match [regex]::Escape($ProcessName) -or [string]$_.Message -match [regex]::Escape($pidHex))
+    } | Sort-Object TimeCreated -Descending | Select-Object -First 5 | ForEach-Object {
+        $message = [string]$_.Message
+        if ($message.Length -gt 8192) { $message = $message.Substring(0, 8192) }
+        [ordered]@{
+            TimeCreatedUtc = if ($_.TimeCreated) { $_.TimeCreated.ToUniversalTime().ToString('O') } else { $null }
+            EventId = [int]$_.Id
+            ProviderName = [string]$_.ProviderName
+            Message = $message
+        }
+    })
+}
+
+function Test-ChronicleStartupCrashEventEvidenceContract {
+    $now = [datetime]::SpecifyKind([datetime]'2026-11-17 12:00:00', [DateTimeKind]::Utc)
+    $events = @(
+        [pscustomobject]@{ Id=1000; ProviderName='Application Error'; TimeCreated=$now; Message='Faulting application: Bannerlord.BLSE.Standalone.exe; process id: 0xA13C; exception code 0xe0434352.' },
+        [pscustomobject]@{ Id=1001; ProviderName='Windows Error Reporting'; TimeCreated=$now.AddSeconds(1); Message='APPCRASH P1: Bannerlord.BLSE.Standalone.exe P7: e0434352.' },
+        [pscustomobject]@{ Id=1001; ProviderName='Windows Error Reporting'; TimeCreated=$now; Message='APPCRASH P1: unrelated.exe P7: e0434352.' },
+        [pscustomobject]@{ Id=9000; ProviderName='Other'; TimeCreated=$now; Message='Bannerlord.BLSE.Standalone.exe.' }
+    )
+    $evidence = @(ConvertTo-ChronicleStartupCrashEventEvidence -Events $events -ProcessId 41276 -ProcessName 'Bannerlord.BLSE.Standalone.exe')
+    return ($evidence.Count -eq 2 -and $evidence[0].EventId -eq 1001 -and $evidence[1].EventId -eq 1000 -and
+        $evidence[1].Message -match '0xe0434352' -and $evidence.ProviderName -notcontains 'Other')
+}
+
 function Get-ChronicleSteamClientReadiness {
     [CmdletBinding()]
     param(
@@ -502,6 +595,8 @@ function Test-ChronicleStartupAssessment {
     $secondAttempt = Get-ChronicleStartupAssessment -Attempt 2 -CrashDetected $true -SaveDirectoryMetadataUnchanged $true
     if ($secondAttempt.ShouldRetry) { throw 'An explicit crash may not trigger more than one retry.' }
     if (-not (Test-ChronicleCrashReportWindowTitleContract)) { throw 'Crash Report window titles are not classified safely.' }
+    if (-not (Test-ChronicleSteamBranchSelectionContract)) { throw 'Steam UserConfig and MountedConfig branch selection must be parsed separately.' }
+    if (-not (Test-ChronicleStartupCrashEventEvidenceContract)) { throw 'Windows crash-event evidence must be bounded and correlated to the test-owned Bannerlord process.' }
     return $true
 }
 

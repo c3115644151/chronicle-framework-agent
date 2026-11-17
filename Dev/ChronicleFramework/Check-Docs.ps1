@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.582'
+$contractVersion = '7.584'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -1551,13 +1551,26 @@ if ($harnessScript -notmatch 'FreshCampaignProgressionAttempt\$attempt' -or $har
 if ($harnessScript -notmatch 'recruitmentProgression = \$testResult\.RecruitmentProgression' -or $harnessScript -notmatch 'progressionSaveCycleVerified' -or $harnessScript -notmatch 'freshClanRenown = \$testResult\.ClanRenown') { throw 'FreshCampaignProgression must preserve the measurable baseline, save cycle, and recruit receipt summary.' }
 . $startupEvidenceScript
 if (-not (Test-ChronicleStartupAssessment)) { throw 'Startup evidence regression checks failed.' }
+$startupEvidenceSource = Get-Content -LiteralPath $startupEvidenceScript -Raw -Encoding UTF8
+if (-not (Test-ChronicleSteamBranchSelectionContract) -or
+    $startupEvidenceSource -notmatch 'function Get-ChronicleSteamBranchSelectionFromManifestText' -or
+    $startupEvidenceSource -notmatch 'function Assert-ChronicleSteamGameBranch' -or
+    $harnessScript -notmatch '(?m)\$targetGameBranch\s*=\s*''v1\.4\.8''' -or
+    $harnessScript -notmatch 'Assert-ChronicleSteamGameBranch -GameRoot \$gameRoot -RequiredBranch \$targetGameBranch' -or
+    $harnessScript -notmatch 'SteamBuildId\s*=\s*\$gameBranch\.BuildId') {
+    throw 'Harness Preflight must parse separate Steam selected/installed branches and stop before build or game launch unless both match the contracted v1.4.8 target.'
+}
 $agentCliSource = Get-Content -LiteralPath (Join-Path $harnessRoot 'Agent-Cli.ps1') -Raw -Encoding UTF8
 if (-not (Test-ChronicleCrashReportWindowTitleContract) -or
     $agentCliSource -notmatch 'Test-ChronicleCrashReportWindowTitle' -or
     $agentCliSource -notmatch 'startup-crash-report-' -or
     $agentCliSource -notmatch 'DialogReadError' -or
+    $agentCliSource -notmatch 'Get-WinEvent -FilterHashtable' -or
+    $agentCliSource -notmatch 'WindowsErrorEvents = \$windowsErrorEvents' -or
+    $startupEvidenceSource -notmatch 'function ConvertTo-ChronicleStartupCrashEventEvidence' -or
+    -not (Test-ChronicleStartupCrashEventEvidenceContract) -or
     $agentCliSource -notmatch 'No model request was sent and no crash-dialog button was pressed') {
-    throw 'Agent-Cli must recognize a process-owned Crash Report window, retain its readable dialog/log evidence, stop only the test-owned process tree, and never click the crash dialog.'
+    throw 'Agent-Cli must recognize a process-owned Crash Report window, retain correlated Windows/RGL evidence, stop only the test-owned process tree, and never click the crash dialog.'
 }
 $startupEvidenceSource = Get-Content -LiteralPath $startupEvidenceScript -Raw -Encoding UTF8
 if (-not (Test-ChronicleSteamClientReadiness)) { throw 'Steam API readiness regression checks failed.' }

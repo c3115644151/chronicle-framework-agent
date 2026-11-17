@@ -33,7 +33,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.582'
+$HarnessContractVersion = '7.584'
 if ($BattleMissionSoloMainHeroProbe -and $Phase -ne 'BattleMissionHostNativeAiAutopilotProbe') {
     throw 'The solo MainHero option is only valid with -Phase BattleMissionHostNativeAiAutopilotProbe.'
 }
@@ -405,6 +405,8 @@ foreach ($stage in $requestedStages) {
         'Preflight' {
             Invoke-Stage -Name 'Preflight' -Action {
                 if (-not (Test-Path $gameExe)) { throw "Game executable not found: $gameExe" }
+                $targetGameBranch = 'v1.4.8'
+                $gameBranch = Assert-ChronicleSteamGameBranch -GameRoot $gameRoot -RequiredBranch $targetGameBranch
                 if (-not (Test-Path $projectPath)) { throw "Project not found: $projectPath" }
                 if (-not (Test-Path $manifestPath)) { throw "Manifest not found: $manifestPath" }
                 if (-not (Test-Path $sourceManifestPath)) { throw "Version-controlled manifest not found: $sourceManifestPath" }
@@ -456,6 +458,9 @@ foreach ($stage in $requestedStages) {
                 $compileChangeset = if ($packageInfoText -match 'Compile Changeset:\s*(\d+)') { $Matches[1] } else { $null }
                 [pscustomobject]@{
                     GameExecutable = $gameExe
+                    TargetGameBranch = $gameBranch.Branch
+                    SteamBuildId = $gameBranch.BuildId
+                    SteamManifest = $gameBranch.ManifestPath
                     GameFileVersion = $gameFileVersion
                     CompileChangeset = $compileChangeset
                     Manifest = $manifestPath

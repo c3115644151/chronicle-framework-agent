@@ -375,6 +375,14 @@ if ($Action -in @('start','load')) {
                 $crashSnapshot = Get-ChronicleWindowAutomationSnapshot -ProcessId $launchProcess.Id -WindowHandle ([IntPtr]$launchProcess.MainWindowHandle)
             }
             catch { $crashSnapshotError = $_.Exception.Message }
+            $windowsErrorEvents = @()
+            $windowsErrorEventQueryError = $null
+            try {
+                $eventStartTime = $launchProcess.StartTime.AddMinutes(-2)
+                $rawWindowsErrorEvents = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; StartTime = $eventStartTime; EndTime = (Get-Date); Id = @(1000,1001,1026) } -MaxEvents 100 -ErrorAction Stop)
+                $windowsErrorEvents = @(ConvertTo-ChronicleStartupCrashEventEvidence -Events $rawWindowsErrorEvents -ProcessId $launchProcess.Id -ProcessName ($launchProcess.ProcessName + '.exe'))
+            }
+            catch { $windowsErrorEventQueryError = $_.Exception.Message }
             $rglPath = Join-Path $programDataLogs "rgl_log_$($launchProcess.Id).txt"
             $errorLogPath = Join-Path $programDataLogs "rgl_log_errors_$($launchProcess.Id).txt"
             $watchdogPath = Join-Path $programDataLogs "watchdog_log_$($launchProcess.Id).txt"
@@ -388,6 +396,8 @@ if ($Action -in @('start','load')) {
                 WindowTitle = [string]$launchProcess.MainWindowTitle
                 Dialog = if ($crashSnapshot) { ConvertTo-ChronicleStartupDialogEvidence -Snapshot $crashSnapshot } else { $null }
                 DialogReadError = $crashSnapshotError
+                WindowsErrorEvents = $windowsErrorEvents
+                WindowsErrorEventQueryError = $windowsErrorEventQueryError
                 RglLogTail = if (Test-Path -LiteralPath $rglPath -PathType Leaf) { @(Get-Content -LiteralPath $rglPath -Tail 100 -Encoding UTF8) } else { @() }
                 RglErrorLogTail = if (Test-Path -LiteralPath $errorLogPath -PathType Leaf) { @(Get-Content -LiteralPath $errorLogPath -Tail 100 -Encoding UTF8) } else { @() }
                 WatchdogLogTail = if (Test-Path -LiteralPath $watchdogPath -PathType Leaf) { @(Get-Content -LiteralPath $watchdogPath -Tail 100 -Encoding UTF8) } else { @() }
