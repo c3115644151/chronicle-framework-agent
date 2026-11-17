@@ -1012,6 +1012,11 @@ internal static class AgentHostBattleSimulationLoop
 
         if (string.Equals(gameState, "MapState", StringComparison.Ordinal))
         {
+            if (recoverPlayerCaptivity && AgentHostCaptivityRecoveryLoop.IsNativeReleaseContinuePage(state))
+            {
+                catalog.Add(AgentHostCaptivityRecoveryLoop.BuildNativeReleaseContinueAction(state)!);
+                return catalog;
+            }
             if (recoverPlayerCaptivity && IsPlayerCaptive(state))
             {
                 if (IsSupportedCaptivityRansomMenu(ReadString(context, "menuId")) &&
@@ -1313,6 +1318,13 @@ internal static class AgentHostBattleSimulationLoop
                     if (currentMenuId != ReadString(arguments, "menuId") || optionId != "try_to_get_away_continue" ||
                         !CurrentEnabledMenuOption(state, optionId))
                     { rejection = "Only the currently enabled Native debrief Continue option may close an accepted Try-to-get-away flow."; return false; }
+                }
+                else if (recoverPlayerCaptivity && AgentHostCaptivityRecoveryLoop.IsNativeReleaseContinuePage(state))
+                {
+                    var optionId = ReadString(arguments, "optionId");
+                    if (currentMenuId != ReadString(arguments, "menuId") || optionId != "mno_continue" ||
+                        !CurrentEnabledMenuOption(state, optionId))
+                    { rejection = "A Native captivity release page may submit only its currently enabled original mno_continue option."; return false; }
                 }
                 else if (recoverPlayerCaptivity && IsPlayerCaptive(state))
                 {
@@ -1672,6 +1684,34 @@ internal static class AgentHostBattleSimulationLoop
             !TryResolveDecision(new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "try_to_get_away_debrief", ["OptionId"] = "try_to_get_away_continue" } }, escapeContinueCatalog, new JsonArray(), escapeDebrief, candidates, "bandit-1", out _, out _, out _, out _) ||
             TryResolveDecision(new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "try_to_get_away_debrief", ["OptionId"] = "surrender" } }, escapeContinueCatalog, new JsonArray(), escapeDebrief, candidates, "bandit-1", out _, out _, out _, out _))
             throw new AgentHostException("battle-loop-self-test-native-escape-debrief-not-bounded", "After an accepted Native escape, the Host may submit only the current Continue option in the original debrief.");
+
+        var captivityEscapeContinue = ParseState("MapState", "menu_captivity_end_wilderness_escape", false, null, null)["state"]!.AsObject();
+        captivityEscapeContinue["context"]!["captivity"] = new JsonObject
+        {
+            ["isCaptive"] = false,
+            ["currentMenuId"] = "menu_captivity_end_wilderness_escape"
+        };
+        captivityEscapeContinue["availableMenuOptions"] = new JsonArray(
+            new JsonObject { ["id"] = "mno_continue", ["enabled"] = true, ["available"] = true });
+        var captivityEscapeCatalog = BuildActionCatalog(captivityEscapeContinue, candidates, "bandit-1", true, true, recoverPlayerCaptivity: true);
+        var captivityEscapeDecision = new JsonObject
+        {
+            ["action"] = "menuSelect",
+            ["arguments"] = new JsonObject { ["MenuId"] = "menu_captivity_end_wilderness_escape", ["OptionId"] = "mno_continue" }
+        };
+        var disabledCaptivityEscape = (JsonObject)captivityEscapeContinue.DeepClone();
+        disabledCaptivityEscape["availableMenuOptions"]![0]!["enabled"] = false;
+        var wrongCaptivityContinue = new JsonObject
+        {
+            ["action"] = "menuSelect",
+            ["arguments"] = new JsonObject { ["MenuId"] = "menu_captivity_end_wilderness_escape", ["OptionId"] = "captivity_end_ransom_deny" }
+        };
+        if (captivityEscapeCatalog.Count != 1 ||
+            !TryResolveDecision(captivityEscapeDecision, captivityEscapeCatalog, new JsonArray(), captivityEscapeContinue, candidates, "bandit-1", out _, out _, out _, out _, recoverPlayerCaptivity: true) ||
+            TryResolveDecision(wrongCaptivityContinue, captivityEscapeCatalog, new JsonArray(), captivityEscapeContinue, candidates, "bandit-1", out _, out _, out _, out _, recoverPlayerCaptivity: true) ||
+            BuildActionCatalog(captivityEscapeContinue, candidates, "bandit-1", true, true, recoverPlayerCaptivity: false).Count != 0 ||
+            BuildActionCatalog(disabledCaptivityEscape, candidates, "bandit-1", true, true, recoverPlayerCaptivity: true).Count != 0)
+            throw new AgentHostException("battle-loop-self-test-captivity-release-continue-not-bounded", "After Native captivity escape, recovery mode may offer only the currently enabled original mno_continue menu option; ordinary battle mode and disabled/incorrect options must not pass.");
         var playerFacingAttackMenu = ParseState("MapState", "encounter", true, null, null);
         playerFacingAttackMenu["state"]!["context"]!["encounteredPartyId"] = "bandit-1";
         playerFacingAttackMenu["state"]!["availableMenuOptions"] = new JsonArray(

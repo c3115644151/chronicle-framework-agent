@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.588'
+$contractVersion = '7.592'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -331,7 +331,7 @@ if ($agentProviderBudgetSource -notmatch 'function Get-AgentProviderBudgetLedger
 if ($agentProviderBudgetSource -notmatch 'File\]::Replace' -or $agentDecisionLoopSource -notmatch 'Get-SafeProviderErrorSummary' -or $agentDecisionLoopSource -notmatch 'response body omitted' -or $agentDecisionLoopSource -notmatch 'requestAttemptsUnavailableCalls' -or $agentDecisionLoopSource -notmatch 'requestAttemptsStatus = ''unknown''' -or $agentDecisionLoopSource -notmatch 'Write-AgentProviderBudgetLedger' -or $agentDecisionLoopSource -notmatch 'Initialize-AgentProviderBudgetLedger' -or $agentDecisionLoopSource -notmatch 'checkpoint-recovered-uncertain-provider-call' -or $agentDecisionLoopTestSource -notmatch 'checkpointBudgetRoundtripVerified' -or $agentDecisionLoopTestSource -notmatch 'ProviderBudgetCheckpointLedgerRoundtripVerified' -or $agentDecisionLoopTestSource -notmatch 'ProviderBudgetExhaustedAcrossCheckpointResume' -or $agentDecisionLoopTestSource -notmatch 'goalResumeTrace\.providerBudget\.reservedProviderCalls') { throw 'Budget reservations must be durable and resumable; unknown HTTP attempts cannot become zero, and error summaries must omit provider response bodies.' }
 $persistentEycCampaignSource = Get-Content (Join-Path $harnessRoot 'Test-AgentPersistentStoryModeCampaign.ps1') -Raw -Encoding UTF8
 $agentHostCampaignLoopEvaluationSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostCampaignLoopEvaluation.ps1') -Raw -Encoding UTF8
-if ($agentLiveModelLoopSource -notmatch 'ProviderProtocol' -or $agentLiveModelLoopSource -notmatch 'CHRONICLE_LLM_PROTOCOL' -or $agentLiveModelLoopSource -notmatch 'isFreeLlmApi' -or $agentLiveModelLoopSource -notmatch 'Get-ChronicleProviderCredential' -or $agentLiveModelLoopSource -notmatch 'available=true' -or $agentLiveModelLoopSource -notmatch 'configured provider model-list preflight' -or $agentLiveModelLoopSource -notmatch 'remote OpenAI-compatible provider requires an environment API key' -or $agentLiveModelLoopSource -notmatch 'no inference request was sent' -or $agentLiveModelLoopSource -notmatch 'ProviderRouteHistory' -or $agentLiveModelLoopSource -notmatch 'sargot-three-day-food-v1' -or $agentLiveModelLoopSource -notmatch 'CompletionContractBase64' -or $agentLiveModelLoopSource -notmatch 'termination.goalVerified' -or $agentLiveModelLoopSource -notmatch "CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION = '1'") { throw 'Live Campaign evaluation must health-check the configured OpenAI-compatible provider, require a key for remote HTTPS endpoints, retain FreeLLMAPI execution-status validation for its route, cap each test decision to one outbound provider request, record actual routing, and preserve Native goal verification.' }
+if ($agentLiveModelLoopSource -notmatch 'ProviderProtocol' -or $agentLiveModelLoopSource -notmatch 'CHRONICLE_LLM_PROTOCOL' -or $agentLiveModelLoopSource -notmatch 'isFreeLlmApi' -or $agentLiveModelLoopSource -notmatch 'Get-ChronicleProviderCredential' -or $agentLiveModelLoopSource -notmatch 'available=true' -or $agentLiveModelLoopSource -notmatch 'configured provider model-list preflight' -or $agentLiveModelLoopSource -notmatch 'remote OpenAI-compatible provider requires an environment API key' -or $agentLiveModelLoopSource -notmatch 'no inference request was sent' -or $agentLiveModelLoopSource -notmatch 'ProviderRouteHistory' -or $agentLiveModelLoopSource -notmatch 'sargot-three-day-food-v1' -or $agentLiveModelLoopSource -notmatch 'CompletionContractBase64' -or $agentLiveModelLoopSource -notmatch 'termination.goalVerified' -or $agentLiveModelLoopSource -notmatch 'CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION = \[string\]\$MaxHttpRequestsPerDecision') { throw 'Live Campaign evaluation must health-check the configured OpenAI-compatible provider, require a key for remote HTTPS endpoints, retain FreeLLMAPI execution-status validation for its route, use an explicit bounded provider HTTP request limit, record actual routing, and preserve Native goal verification.' }
 $freeLlmApiDedicatedUserKeyIndex = $freeLlmApiProfileSource.IndexOf("@{ Name = 'FREELLMAPI_API_KEY'; Target = 'User' }", [StringComparison]::Ordinal)
 $freeLlmApiGenericUserKeyIndex = $freeLlmApiProfileSource.IndexOf("@{ Name = 'CHRONICLE_LLM_API_KEY'; Target = 'User' }", [StringComparison]::Ordinal)
 if ($freeLlmApiDedicatedUserKeyIndex -lt 0 -or $freeLlmApiGenericUserKeyIndex -le $freeLlmApiDedicatedUserKeyIndex -or $freeLlmApiProfileSource -notmatch 'ApiKeySource = \$apiKeySource') { throw 'The FreeLLMAPI preflight must prefer its dedicated user credential over the generic model-provider key.' }
@@ -959,12 +959,17 @@ if ($harnessScript -notmatch "HarnessContractVersion\s*=\s*'$contractVersion'") 
 }
 if ($harnessScript -notmatch "PersistentEycMaxProviderDecisionsPerContinuation\s*=\s*1" -or
     $persistentStoryModeCampaignScript -notmatch "MaxProviderDecisionsPerContinuation\s*=\s*1" -or
+    $harnessScript -notmatch "PersistentEycMaxHttpRequestsPerDecision\s*=\s*1" -or
+    $harnessScript -notmatch '-MaxHttpRequestsPerDecision \$PersistentEycMaxHttpRequestsPerDecision' -or
+    $persistentStoryModeCampaignScript -notmatch '\[ValidateRange\(1,2\)\]\[int\]\$MaxHttpRequestsPerDecision = 1' -or
+    $persistentStoryModeCampaignScript -notmatch "'-MaxHttpRequestsPerDecision',\[string\]\`$MaxHttpRequestsPerDecision" -or
+    $agentLiveModelLoopSource -notmatch '\[ValidateRange\(1,2\)\]\[int\]\$MaxHttpRequestsPerDecision = 1' -or
+    $agentLiveModelLoopSource -notmatch "CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION = \[string\]\`$MaxHttpRequestsPerDecision" -or
     $harnessScript -notmatch "FreshStoryModeModel\s*=\s*''" -or
-    $harnessScript -notmatch "Select a verified FreeLLMAPI model explicitly with -FreshStoryModeModel; no game or model request was started\.") {
-    throw 'Persistent StoryMode runs must default to one provider decision and require explicit model selection before starting the game.'
-}
-if ($harnessScript -notmatch "'llm7-fast-router'") {
-    throw 'The explicitly selected FreeLLMAPI LLM7 candidate must be accepted by live StoryMode model phases.'
+    $harnessScript -notmatch 'Select an explicit model ID with -FreshStoryModeModel' -or
+    $harnessScript -match '\[ValidateSet\([^\r\n]*\)\]\[string\]\$FreshStoryModeModel' -or
+    $harnessScript -notmatch '\$modelRows \| Where-Object \{ \[string\]\$_.id -ceq \$FreshStoryModeModel \}') {
+    throw 'Persistent StoryMode runs must default to one provider decision, accept provider-neutral model IDs, and verify the selected ID in the configured provider catalog before game start.'
 }
 if ($harnessScript -notmatch "'FreshStoryModeModelEvaluation' \{ @\('Preflight', 'ConfiguredModelPreflight', 'Build', 'Smoke', 'AgentHostPackage', 'FreshStoryModeModelEvaluation'\) \}" -or
     $harnessScript -notmatch "'PersistentEycCampaign' \{ @\('Preflight', 'ConfiguredModelPreflight', 'Build', 'Smoke', 'AgentHostPackage', 'PersistentEycCampaign'\) \}" -or
@@ -1225,12 +1230,15 @@ $agentHostSupplyLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\Agen
 $agentHostMailboxSource = Get-Content (Join-Path $harnessRoot 'AgentHost\NativeMailboxClient.cs') -Raw -Encoding UTF8
 if ($agentHostProviderSource -notmatch 'CheckConfiguredModelAsync' -or $agentHostProviderSource -notmatch '/models' -or
     $agentHostProviderSource -notmatch 'FREELLMAPI_API_KEY' -or $agentHostProviderSource -notmatch 'X-Routed-Via' -or
+    $agentHostProviderSource -notmatch '_supportsParallelToolCalls' -or
+    $agentHostProviderSource -notmatch 'payload\["parallel_tool_calls"\] = false' -or
     $agentHostProviderContractSelfTestSource -notmatch 'generic-https-openai-compatible-provider-health-auth-and-structured-decision' -or
     $agentHostProviderContractSelfTestSource -notmatch 'canonical-observe-again-decision-is-recognized-by-native-subloops' -or
     $agentHostProviderSource -notmatch 'IsListedSingleArgumentValue' -or $agentHostProviderSource -notmatch 'IsStoryModeClanNameTextArgument' -or
     $agentHostProviderContractSelfTestSource -notmatch 'provider-repairs-only-exact-listed-single-enum-argument-shorthand' -or
     $agentHostProviderContractSelfTestSource -notmatch 'provider-repairs-single-storymode-clan-name-text-shorthand-for-native-validation' -or
     $agentHostProviderContractSelfTestSource -notmatch 'deepseek-run-cost-reservation-rejects-over-budget-before-http' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'required-tool-call-disables-advertised-parallel-calls-and-rejects-multiple-decisions' -or
     $agentHostHarnessProgressTraceSource -notmatch 'provider-progress-trace-records-request-size-cache-cost-and-goal-scope-without-request-content' -or
     $agentHostHarnessProgressTraceSource -notmatch 'observationFieldByteSizes' -or $agentHostHarnessProgressTraceSource -notmatch 'observationStateFieldByteSizes' -or
     $agentHostProviderSource -notmatch 'auto:reliable' -or
@@ -2264,7 +2272,7 @@ if ($freshCampaignSource -notmatch 'StoryModeNewGame' -or
     $harnessScript -notmatch "CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS.*, '86400000'" -or
     $harnessScript -notmatch "CHRONICLE_LLM_TIMEOUT_SECONDS', '300'" -or
     $agentHostRuntimeControllerSource -notmatch 'autoStopMilliseconds <= 86400000' -or
-    $harnessScript -notmatch "ValidateSet\('deepseek-flash','gpt-oss-20b','openai-gpt-oss-20b','nvidiallama-3.2-11b-vision','poolside-laguna-s-2.1','free-router','llm7-fast-router','dots3-note-preview','gemma-4-31b-heretic','gemma-4-31b-it','gemma-4-e4b-uncensored-hauhaucs-aggressive-q4-k-m','gemini-2.5-flash','gemini-3.8-flash','mistral-nemo','mistral-small-3.2-24b','qwen3.6-27b','qwen3.8-27b','auto:reliable'\)" -or
+    $harnessScript -match '\[ValidateSet\([^\r\n]*\)\]\[string\]\$FreshStoryModeModel' -or
     $harnessScript -notmatch 'CHRONICLE_HARNESS_AGENT_MODEL.*\$FreshStoryModeModel' -or
     $agentHostRuntimeControllerSource -notmatch 'CHRONICLE_HARNESS_AGENT_MODEL' -or
     $agentHostCampaignLoopSource -notmatch 'HasPostTutorialTrainingFieldMap' -or

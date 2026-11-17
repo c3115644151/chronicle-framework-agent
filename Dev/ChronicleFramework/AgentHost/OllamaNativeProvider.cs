@@ -29,6 +29,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     private DateTimeOffset _lastProviderRequestUtc;
     private string? _lastProviderRoute;
     private bool _useRequiredToolCallStrategy;
+    private bool _supportsParallelToolCalls;
     private bool _usePromptOnlyJsonMode;
     private double _reservedDeepSeekCostCny;
     private double _actualDeepSeekCostEstimateCny;
@@ -341,6 +342,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 throw new AgentHostException("provider-model-unavailable", "The configured model is not listed by the provider model service.");
 
             _useRequiredToolCallStrategy = false;
+            _supportsParallelToolCalls = false;
             if (IsFreeLlmApi(_settings.Endpoint) && modelFound &&
                 selectedModel.TryGetProperty("supported_parameters", out var supportedParameters) && supportedParameters.ValueKind == JsonValueKind.Array)
             {
@@ -349,6 +351,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     .Select(value => value.GetString())
                     .Where(value => !string.IsNullOrWhiteSpace(value))
                     .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                _supportsParallelToolCalls = capabilities.Contains("parallel_tool_calls");
                 var supportsResponseFormat = capabilities.Contains("response_format");
                 var supportsRequiredToolCall = capabilities.Contains("tools") && capabilities.Contains("tool_choice");
                 if (supportsResponseFormat)
@@ -449,6 +452,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     }
                 };
                 payload["tool_choice"] = "required";
+                if (_supportsParallelToolCalls) payload["parallel_tool_calls"] = false;
             }
             else if (!_usePromptOnlyJsonMode)
             {

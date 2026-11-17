@@ -2,6 +2,7 @@
 param(
     [ValidateRange(60,86400)][int]$HostMaxElapsedSeconds = 86400,
     [ValidateRange(1,160)][int]$MaxProviderDecisionsPerContinuation = 1,
+    [ValidateRange(1,2)][int]$MaxHttpRequestsPerDecision = 1,
     [ValidateRange(5,30)][int]$FrameRate = 5,
     [int]$StartupTimeoutSeconds = 240,
     [ValidateRange(300,87000)][int]$FreshStoryModeHostTimeoutSeconds = 87000,
@@ -421,6 +422,7 @@ try {
         Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
         $live = Invoke-JsonChild $liveModelScript @('-LoadSaveName',$sourceSaveName,'-CheckpointSaveName',$checkpointSaveName,
             '-EstablishYourClanAutonomyLoop','-AgentHostRuntime','-MaxProviderDecisions',[string]$MaxProviderDecisionsPerContinuation,'-FrameRate',[string]$FrameRate,
+            '-MaxHttpRequestsPerDecision',[string]$MaxHttpRequestsPerDecision,
             '-TimeoutSeconds',[string]$StartupTimeoutSeconds,'-HostMaxElapsedSeconds',[string]$HostMaxElapsedSeconds) 'LiveModelLoopResult.json'
         $liveExitCode = $live.ExitCode
         $liveEvidence = $live.Evidence
@@ -512,6 +514,7 @@ $result = [ordered]@{
     HostStatus = if ($liveTrace) { [string]$liveTrace.status } elseif ($seedEvidence) { [string]$seedEvidence.StoryModeAgentHostTerminalState } else { $null }
     HostFailureCode = if ($liveTrace) { [string]$liveTrace.failureCode } elseif ($seedEvidence) { [string]$seedEvidence.StoryModeAgentFailureCode } else { $null }
     DecisionsThisRun = $liveRunDecisions
+    MaxHttpRequestsPerDecision = $MaxHttpRequestsPerDecision
     PromptTokensThisRun = $liveRunPromptTokens
     CompletionTokensThisRun = $liveRunCompletionTokens
     ActualCostEstimateCnyThisRun = $liveRunActualCost

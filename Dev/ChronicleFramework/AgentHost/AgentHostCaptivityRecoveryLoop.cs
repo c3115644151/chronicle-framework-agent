@@ -58,21 +58,35 @@ internal static class AgentHostCaptivityRecoveryLoop
                 });
             }
         }
-        else if (CaptivityContinueMenus.Contains(menuId ?? string.Empty) &&
-            GetEnabledOptions(state).Any(option => ReadString(option, "id") == CaptivityContinueOption))
+        else if (IsNativeReleaseContinuePage(state))
         {
-            catalog.Add(new JsonObject
-            {
-                ["action"] = "menuSelect",
-                ["arguments"] = new JsonArray("MenuId", "OptionId"),
-                ["argumentValues"] = new JsonObject
-                {
-                    ["MenuId"] = new JsonArray(menuId),
-                    ["OptionId"] = new JsonArray(CaptivityContinueOption)
-                }
-            });
+            catalog.Add(BuildNativeReleaseContinueAction(state)!);
         }
         return catalog;
+    }
+
+    internal static bool IsNativeReleaseContinuePage(JsonObject state)
+    {
+        var context = state["context"] as JsonObject;
+        var menuId = ReadString(context, "menuId");
+        return CaptivityContinueMenus.Contains(menuId ?? string.Empty) &&
+            GetEnabledOptions(state).Any(option => ReadString(option, "id") == CaptivityContinueOption);
+    }
+
+    internal static JsonObject? BuildNativeReleaseContinueAction(JsonObject state)
+    {
+        if (!IsNativeReleaseContinuePage(state)) return null;
+        var menuId = ReadString(state["context"] as JsonObject, "menuId");
+        return new JsonObject
+        {
+            ["action"] = "menuSelect",
+            ["arguments"] = new JsonArray("MenuId", "OptionId"),
+            ["argumentValues"] = new JsonObject
+            {
+                ["MenuId"] = new JsonArray(menuId),
+                ["OptionId"] = new JsonArray(CaptivityContinueOption)
+            }
+        };
     }
 
     internal static JsonArray BuildControlCatalog(JsonObject state) => IsUsableFreeMap(state) ? new JsonArray("done") : new JsonArray();

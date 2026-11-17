@@ -3,6 +3,7 @@ param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
     [string]$CheckpointSaveName,
     [ValidateRange(1,160)][int]$MaxProviderDecisions = 160,
+    [ValidateRange(1,2)][int]$MaxHttpRequestsPerDecision = 1,
     [int]$TimeoutSeconds = 180,
     [ValidateRange(60,86400)][int]$HostMaxElapsedSeconds = 86400,
     [ValidateRange(5,30)][int]$FrameRate = 10,
@@ -322,7 +323,7 @@ try {
     $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { 'visual-battle-fixture' } else { 'visual-capture' }
     $env:CHRONICLE_HARNESS_AGENT_INPUT_LOCK = '1'
     $harnessInputLockRequired = $true
-    $env:CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION = '1'
+    $env:CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION = [string]$MaxHttpRequestsPerDecision
     $loadArguments = @('-SaveName', $LoadSaveName)
     if ($EstablishYourClanGoalPlanner -or $EstablishYourClanAutonomyLoop -or $CaptivityRecoveryLoop -or $EstablishClanGoldSaleLoop) { $loadArguments += '-IncludeChronicleFramework' }
     $start = Invoke-AgentCli 'load' $loadArguments
@@ -1689,6 +1690,7 @@ $result = [ordered]@{
     CheckpointStateContract = $checkpointStateContract
     CampaignInstanceId = $campaignInstanceId
     ProcessId = if ($start -and $start.session) { $start.session.processId } else { $null }
+    MaxHttpRequestsPerDecision = $MaxHttpRequestsPerDecision
     HarnessInputOwnershipRequired = $harnessInputLockRequired
     HarnessInputOwnershipConfirmed = $harnessInputLockConfirmed
     HostReadyMessages = @($hostReadyMessages)

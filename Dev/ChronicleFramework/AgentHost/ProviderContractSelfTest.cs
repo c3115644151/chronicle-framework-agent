@@ -705,7 +705,7 @@ internal static class ProviderContractSelfTest
         var toolCallHandler = new StubHandler((httpRequest, _) =>
         {
             if (httpRequest.Method == HttpMethod.Get)
-                return Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"north-mini-code\",\"supported_parameters\":[\"tools\",\"tool_choice\",\"max_tokens\"]}]}"));
+                return Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"north-mini-code\",\"supported_parameters\":[\"tools\",\"tool_choice\",\"max_tokens\",\"parallel_tool_calls\"]}]}"));
 
             toolCallRequestCount++;
             using var payloadDocument = JsonDocument.Parse(httpRequest.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
@@ -720,6 +720,7 @@ internal static class ProviderContractSelfTest
                 payload.GetProperty("model").GetString() == "north-mini-code" &&
                 !payload.TryGetProperty("response_format", out var ignoredResponseFormat) &&
                 payload.GetProperty("tool_choice").GetString() == "required" &&
+                payload.GetProperty("parallel_tool_calls").ValueKind == JsonValueKind.False &&
                 tools.Length == 1 &&
                 function.ValueKind == JsonValueKind.Object &&
                 function.TryGetProperty("name", out var functionName) && functionName.GetString() == "submit_chronicle_decision" &&
@@ -775,6 +776,61 @@ internal static class ProviderContractSelfTest
                 result.Decision["observeAgain"]?.GetValue<bool>() != true || result.Decision["waitSeconds"]?.GetValue<int>() != 10)
                 throw new AgentHostException("provider-self-test-exact-party-size-tool-schema-not-sent", "The required-tool-call provider payload must carry the exact PartySize wait bound and validate the returned ten-second control.");
             results.Add(new { scenario = "openai-compatible-required-tool-call-sends-exact-party-size-wait-schema", passed = true, modelCalls = 0, nativeCommands = 0 });
+        }
+
+        var multipleToolCallRequests = 0;
+        var parallelToolCallsDisabled = false;
+        var multipleToolCallHandler = new StubHandler((httpRequest, _) =>
+        {
+            if (httpRequest.Method == HttpMethod.Get)
+                return Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"north-mini-code\",\"supported_parameters\":[\"tools\",\"tool_choice\",\"parallel_tool_calls\"]}]}"));
+
+            multipleToolCallRequests++;
+            using var payloadDocument = JsonDocument.Parse(httpRequest.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            parallelToolCallsDisabled = payloadDocument.RootElement.TryGetProperty("parallel_tool_calls", out var parallelCalls) &&
+                parallelCalls.ValueKind == JsonValueKind.False;
+            var arguments = "{\"decision\":{\"control\":\"done\",\"reason\":\"one decision\"}}";
+            var response = JsonSerializer.Serialize(new
+            {
+                model = "north-mini-code",
+                choices = new[]
+                {
+                    new
+                    {
+                        index = 0,
+                        message = new
+                        {
+                            role = "assistant",
+                            content = (string?)null,
+                            tool_calls = new[]
+                            {
+                                new { id = "call-a", type = "function", function = new { name = "submit_chronicle_decision", arguments } },
+                                new { id = "call-b", type = "function", function = new { name = "submit_chronicle_decision", arguments } }
+                            }
+                        },
+                        finish_reason = "tool_calls"
+                    }
+                },
+                usage = new { prompt_tokens = 20, completion_tokens = 12 }
+            });
+            return Task.FromResult(JsonResponse(response));
+        });
+        using (var multipleToolCallClient = new HttpClient(multipleToolCallHandler) { Timeout = freeLlmApiSettings.Timeout })
+        using (var multipleToolCallProvider = new OllamaNativeProvider(freeLlmApiSettings with { Model = "north-mini-code" }, multipleToolCallClient))
+        using (var multipleToolCallRequest = JsonDocument.Parse(BuildDecisionRequest()))
+        {
+            await multipleToolCallProvider.CheckConfiguredModelAsync(CancellationToken.None);
+            try
+            {
+                _ = await multipleToolCallProvider.DecideAsync(multipleToolCallRequest.RootElement, CancellationToken.None);
+                throw new AgentHostException("provider-multiple-tool-call-self-test-failed", "A multi-call response must not be accepted as one decision.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-tool-call-missing")
+            {
+                if (!parallelToolCallsDisabled || exception.ProviderToolCallCount != 2 || multipleToolCallRequests != 1)
+                    throw new AgentHostException("provider-multiple-tool-call-contract-invalid", "The Host must disable advertised parallel calls and still reject any response that contains more than one decision call.");
+            }
+            results.Add(new { scenario = "required-tool-call-disables-advertised-parallel-calls-and-rejects-multiple-decisions", passed = true, modelCalls = 0, nativeCommands = 0 });
         }
 
         var invalidToolCallRequests = 0;
