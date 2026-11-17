@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'ReleasePackage', 'Campaign', 'CampaignActorThinkTrace', 'FreshCampaign', 'FreshStoryModeSetup', 'FreshStoryModeModelEvaluation', 'PersistentEycCampaign', 'EycObjectiveCheckpointReadback', 'FreshStoryModeNativeMenuLeaveEvaluation', 'FreshStoryModeNativeInquiryResponseEvaluation', 'FreshCampaignProgression', 'FreshCampaignBaselineMatrix', 'FreshCampaignLiveModelEvaluation', 'FreshCampaignSupplyBaseline', 'FreshCampaignRecruitmentFallback', 'Protocol', 'AgentHostProvider', 'AgentHostProviderHealth', 'AgentHostPackage', 'AgentHostSupplyEvaluation', 'AgentHostCampaignLoopEvaluation', 'AgentHostNativeMapMovementMonitorProbe', 'AgentHostVillageToolsQuestEvaluation', 'AgentHostEstablishClanGoalPlannerEvaluation', 'AgentHostEstablishClanAutonomyEvaluation', 'AgentHostCaptivityRecoveryEvaluation', 'AgentHostEstablishClanGoldSaleEvaluation', 'AgentHostBattleSimulationEvaluation', 'AgentHostBattleAndCaptivityEvaluation', 'AgentHostLifecycleEvaluation', 'AgentHostLifecycleCompletionEvaluation', 'AgentLoop', 'LiveModel', 'LiveModelArrival', 'LiveModelRecruitment', 'LiveModelSafePassageRecruitment', 'LiveModelRecruitmentEvaluation', 'LiveModelSupplyEvaluation', 'CheckpointPersistence', 'LiveModelResume', 'LiveModelRuntimeResume', 'LiveModelActionRecovery', 'CheckpointValidation', 'RecruitmentBaseline', 'MultiDaySupplyBaseline', 'TimeControlLoop', 'BattleMissionFormationProbe', 'BattleMissionControllerProbe', 'BattleMissionRtsCameraProbe', 'BattleMissionMovementInputProbe', 'BattleMissionAgentNavigatorProbe', 'BattleMissionNativeAiHandoffProbe', 'BattleMissionHostNativeAiAutopilotProbe', 'BattleFixture', 'PostBattle', 'Observation', 'CaptivityObservation', 'CaptivityOutcome', 'EncounterSurrender', 'EncounterEscape', 'JoinEncounterDefenders', 'JoinEncounterEligibility', 'JoinEncounterAbandonArmy', 'MovingArmyJoin', 'JoinSiegeEvent', 'MapNotifications', 'MapIncidentInputGuard', 'QuickInformation', 'SceneNotification', 'MissionLeave', 'VillageToolsDelivery', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyQuestMarkers', 'MapPartyQuestAcceptance', 'MapEscapeMenu', 'MapInquiry', 'AlleyLeaderInquiry', 'AlleyRosterManagement', 'AlleyAbandonment', 'AlleyEntryMenu', 'MissionSceneNavigation', 'AlleyVolunteerBranches', 'AlleyAttackYield', 'AlleyAttackFightMission', 'PersuasionDetails', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'BarterFightRoute', 'MissionInteraction', 'ArenaMasterInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EngageVisibility', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuickTalk', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'SettlementOverlayQuickTalkIssueGateProbe', 'VisualCapture', 'All')]
+    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'ReleasePackage', 'Campaign', 'CampaignActorThinkTrace', 'FreshCampaign', 'FreshStoryModeSetup', 'FreshStoryModeModelEvaluation', 'PersistentEycCampaign', 'EycObjectiveCheckpointReadback', 'FreshStoryModeNativeMenuLeaveEvaluation', 'FreshStoryModeNativeInquiryResponseEvaluation', 'FreshCampaignProgression', 'FreshCampaignBaselineMatrix', 'FreshCampaignLiveModelEvaluation', 'FreshCampaignSupplyBaseline', 'FreshCampaignRecruitmentFallback', 'Protocol', 'AgentHostProvider', 'AgentHostProviderHealth', 'AgentHostPackage', 'AgentHostSupplyEvaluation', 'AgentHostCampaignLoopEvaluation', 'AgentHostNativeMapMovementMonitorProbe', 'AgentHostVillageToolsQuestEvaluation', 'AgentHostEstablishClanGoalPlannerEvaluation', 'AgentHostEstablishClanAutonomyEvaluation', 'AgentHostCaptivityRecoveryEvaluation', 'AgentHostEstablishClanGoldSaleEvaluation', 'AgentHostBattleSimulationEvaluation', 'AgentHostBattleAndCaptivityEvaluation', 'AgentHostLifecycleEvaluation', 'AgentHostLifecycleCompletionEvaluation', 'AgentLoop', 'LiveModel', 'LiveModelArrival', 'LiveModelRecruitment', 'LiveModelSafePassageRecruitment', 'LiveModelRecruitmentEvaluation', 'LiveModelSupplyEvaluation', 'CheckpointPersistence', 'LiveModelResume', 'LiveModelRuntimeResume', 'LiveModelActionRecovery', 'CheckpointValidation', 'RecruitmentBaseline', 'MultiDaySupplyBaseline', 'TimeControlLoop', 'BattleMissionFormationProbe', 'BattleMissionInputIsolationProbe', 'BattleMissionControllerProbe', 'BattleMissionRtsCameraProbe', 'BattleMissionMovementInputProbe', 'BattleMissionAgentNavigatorProbe', 'BattleMissionNativeAiHandoffProbe', 'BattleMissionHostNativeAiAutopilotProbe', 'BattleFixture', 'PostBattle', 'Observation', 'CaptivityObservation', 'CaptivityOutcome', 'EncounterSurrender', 'EncounterEscape', 'JoinEncounterDefenders', 'JoinEncounterEligibility', 'JoinEncounterAbandonArmy', 'MovingArmyJoin', 'JoinSiegeEvent', 'MapNotifications', 'MapIncidentInputGuard', 'QuickInformation', 'SceneNotification', 'MissionLeave', 'VillageToolsDelivery', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyQuestMarkers', 'MapPartyQuestAcceptance', 'MapEscapeMenu', 'MapInquiry', 'AlleyLeaderInquiry', 'AlleyRosterManagement', 'AlleyAbandonment', 'AlleyEntryMenu', 'MissionSceneNavigation', 'AlleyVolunteerBranches', 'AlleyAttackYield', 'AlleyAttackFightMission', 'PersuasionDetails', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'BarterFightRoute', 'MissionInteraction', 'ArenaMasterInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EngageVisibility', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuickTalk', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'SettlementOverlayQuickTalkIssueGateProbe', 'VisualCapture', 'All')]
     [string]$Phase = 'All',
     [switch]$RecruitmentBulkOnly,
     [ValidateSet('deepseek-flash','gpt-oss-20b','openai-gpt-oss-20b','nvidiallama-3.2-11b-vision','poolside-laguna-s-2.1','free-router','llm7-fast-router','dots3-note-preview','gemma-4-31b-heretic','gemma-4-31b-it','gemma-4-e4b-uncensored-hauhaucs-aggressive-q4-k-m','gemini-2.5-flash','gemini-3.8-flash','mistral-nemo','mistral-small-3.2-24b','qwen3.6-27b','qwen3.8-27b','auto:reliable')]
@@ -21,6 +21,7 @@ param(
     [ValidateRange(1,10)][int]$RecruitmentFallbackMaxAttempts = 10,
     [string]$BattleSimulationSourceSaveName = 'AgentBridgeLifecycle',
     [switch]$BattleMissionSoloMainHeroProbe,
+    [switch]$BattleMissionDesktopInputIsolationOnly,
     [string]$StoryModePlannerSourceSaveName = 'save002',
     [ValidateRange(60,86400)][int]$PersistentEycHostMaxElapsedSeconds = 86400,
     [ValidateRange(1,160)][int]$PersistentEycMaxProviderDecisionsPerContinuation = 1,
@@ -33,9 +34,12 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.585'
+$HarnessContractVersion = '7.588'
 if ($BattleMissionSoloMainHeroProbe -and $Phase -ne 'BattleMissionHostNativeAiAutopilotProbe') {
     throw 'The solo MainHero option is only valid with -Phase BattleMissionHostNativeAiAutopilotProbe.'
+}
+if ($BattleMissionDesktopInputIsolationOnly -and $Phase -ne 'BattleMissionInputIsolationProbe') {
+    throw 'The desktop input isolation option is only valid with -Phase BattleMissionInputIsolationProbe.'
 }
 if ($Phase -ceq 'EycObjectiveCheckpointReadback' -and [string]::IsNullOrWhiteSpace($PersistentEycCampaignKey)) {
     throw 'EycObjectiveCheckpointReadback requires -PersistentEycCampaignKey to select one owned Campaign branch.'
@@ -309,6 +313,7 @@ $requestedStages = switch ($Phase) {
     'LiveModelSupplyEvaluation' { @('Preflight', 'Build', 'LiveModelSupplyEvaluation') }
     'TimeControlLoop' { @('Preflight', 'Build', 'TimeControlLoop') }
     'BattleMissionFormationProbe' { @('Preflight', 'Build', 'BattleMissionFormationProbe') }
+    'BattleMissionInputIsolationProbe' { @('Preflight', 'Build', 'BattleMissionInputIsolationProbe') }
     'BattleMissionControllerProbe' { @('Preflight', 'Build', 'BattleMissionControllerProbe') }
     'BattleMissionRtsCameraProbe' { @('Preflight', 'Build', 'BattleMissionRtsCameraProbe') }
     'BattleMissionMovementInputProbe' { @('Preflight', 'Build', 'BattleMissionMovementInputProbe') }
@@ -1696,6 +1701,15 @@ foreach ($stage in $requestedStages) {
                 $childOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $battleMissionFormationProbeScript -SourceSaveName $BattleSimulationSourceSaveName -TimeoutSeconds 300 2>&1 | Out-String
                 $childOutput | Set-Content -LiteralPath $childOutputPath -Encoding UTF8
                 if ($LASTEXITCODE -ne 0) { throw "Native Battle Mission formation probe failed with exit code $LASTEXITCODE. Child output: $childOutput" }
+                $childOutput
+            }
+        }
+        'BattleMissionInputIsolationProbe' {
+            Invoke-Stage -Name 'BattleMissionInputIsolationProbe' -Action {
+                $childOutputPath = Join-Path $harnessTempDirectory 'BattleMissionInputIsolationProbeChild.log'
+                $childOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $battleMissionFormationProbeScript -SourceSaveName $BattleSimulationSourceSaveName -TimeoutSeconds 300 -ProbeDesktopInputIsolationOnly 2>&1 | Out-String
+                $childOutput | Set-Content -LiteralPath $childOutputPath -Encoding UTF8
+                if ($LASTEXITCODE -ne 0) { throw "Native Battle Mission desktop-input isolation probe failed with exit code $LASTEXITCODE. Child output: $childOutput" }
                 $childOutput
             }
         }

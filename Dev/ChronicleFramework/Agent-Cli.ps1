@@ -285,7 +285,7 @@ if ($Action -in @('start','load')) {
         Set-ChronicleTestDisplayConfig -EngineConfigPath $engineConfig
         $gameSoundGuard = Disable-ChronicleHarnessGameSound
         Set-SafeExitMarker
-        $process = Start-ChronicleSteamGame -FilePath $launcher -ArgumentList "/continuesave $SaveName $moduleArgument /anticheat" -WorkingDirectory $binDirectory -WindowStyle Minimized
+        $process = Start-ChronicleSteamGame -FilePath $launcher -ArgumentList "/continuesave $SaveName $moduleArgument /anticheat" -WorkingDirectory $binDirectory -WindowStyle Hidden
         $startupTraceDirectory = if (-not [string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) { $env:CHRONICLE_HARNESS_TEMP } else { $protocolRoot }
         New-Item -ItemType Directory -Force -Path $startupTraceDirectory | Out-Null
         $startupProgressPath = Join-Path $startupTraceDirectory "agent-cli-startup-$($process.Id).jsonl"

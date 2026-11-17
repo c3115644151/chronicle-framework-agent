@@ -41,6 +41,7 @@ internal static class ChroniclePlayerInputOwnership
     private static bool _syntheticMouseProbeActive;
     private static int _ownershipToggleHarnessProbeStage;
     private static bool _toggleKeyWasDown;
+    private static bool _harnessInputLockReported;
 
     internal static bool IsLocked => _locked;
 
@@ -70,21 +71,25 @@ internal static class ChroniclePlayerInputOwnership
 
     internal static void Tick()
     {
-        TryInitialize();
+        var inputProtectionReady = TryInitialize();
         TryInstallFocusGuard();
 
-        var shouldLock = ChronicleAgentRuntimeController.ShouldOwnPlayerInput;
+        var runtimeOwnsInput = ChronicleAgentRuntimeController.ShouldOwnPlayerInput;
+        var harnessOwnsInput = inputProtectionReady && IsHarnessAgentInputLockRequested();
+        var shouldLock = runtimeOwnsInput || harnessOwnsInput;
         var runFocusProbe = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_INPUT_FOCUS_TEST") == "1";
-        if (runFocusProbe && !shouldLock && !_focusProbeBaselineCaptured)
+        if (runFocusProbe && !runtimeOwnsInput && !_focusProbeBaselineCaptured)
             TryCaptureNativeFocusPermissionBaseline();
-        if (shouldLock && (!HasUsableToggleBinding() || HasToggleBindingConflict()))
+        if (runtimeOwnsInput && (!HasUsableToggleBinding() || HasToggleBindingConflict()))
         {
             var conflict = FindToggleBindingConflict();
             if (conflict != null && TryRepairDefaultToggleBinding(conflict))
             {
                 _conflictWarningShown = false;
-                SetLocked(ChronicleAgentRuntimeController.ShouldOwnPlayerInput);
-                SyncMissionInput(ChronicleAgentRuntimeController.ShouldOwnPlayerInput);
+                runtimeOwnsInput = ChronicleAgentRuntimeController.ShouldOwnPlayerInput;
+                shouldLock = runtimeOwnsInput || harnessOwnsInput;
+                SetLocked(shouldLock, notifyPlayer: !harnessOwnsInput);
+                SyncMissionInput(shouldLock);
                 return;
             }
             if (!_conflictWarningShown)
@@ -100,8 +105,17 @@ internal static class ChroniclePlayerInputOwnership
             _conflictWarningShown = false;
         }
 
-        SetLocked(ChronicleAgentRuntimeController.ShouldOwnPlayerInput);
-        SyncMissionInput(ChronicleAgentRuntimeController.ShouldOwnPlayerInput);
+        SetLocked(shouldLock, notifyPlayer: !harnessOwnsInput);
+        SyncMissionInput(shouldLock);
+        if (harnessOwnsInput && !_harnessInputLockReported)
+        {
+            _harnessInputLockReported = true;
+            ChronicleDiagnostics.Write("harness-agent-input-lock|locked=" + _locked + "|scope=" + Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE"));
+        }
+        else if (!harnessOwnsInput)
+        {
+            _harnessInputLockReported = false;
+        }
         if (runFocusProbe && ChronicleAgentRuntimeController.ShouldOwnPlayerInput && !_focusLossProbeCompleted)
             TryRunFocusLossProbe();
         else if (runFocusProbe && !ChronicleAgentRuntimeController.ShouldOwnPlayerInput && _focusLossProbeCompleted && !_focusRestoreProbeCompleted)
@@ -111,6 +125,10 @@ internal static class ChroniclePlayerInputOwnership
         if (Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_INPUT_TOGGLE_TEST") == "1")
             AdvanceOwnershipToggleHarnessProbe();
     }
+
+    private static bool IsHarnessAgentInputLockRequested() =>
+        Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_INPUT_LOCK") == "1" &&
+        Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") is "visual-capture" or "visual-battle-fixture" or "battle-fixture" or "solo-battle-fixture" or "smoke";
 
     internal static void Release()
     {
@@ -670,6 +688,7 @@ internal static class ChroniclePlayerInputOwnership
 
     private static void PollToggleKey()
     {
+        if (IsHarnessAgentInputLockRequested()) return;
         if (!IsToggleKeyDown())
         {
             _toggleKeyWasDown = false;

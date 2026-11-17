@@ -8,11 +8,13 @@ param(
     [switch]$ProbeBattleAgentNavigator,
     [switch]$ProbeMainAgentNativeAiHandoff,
     [switch]$ProbeAgentHostNativeAiAutopilot,
+    [switch]$ProbeDesktopInputIsolationOnly,
     [switch]$SoloMainHero
 )
 
 $ErrorActionPreference = 'Stop'
 $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
+. (Join-Path $PSScriptRoot 'Test-WindowLayout.ps1')
 $saveRoot = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\Game Saves')).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
 if ($SourceSaveName -notmatch '^[A-Za-z0-9_-]{1,48}$') { throw 'Battle Mission formation probe requires one source save basename without a path or extension.' }
 $sourceSavePath = [IO.Path]::GetFullPath((Join-Path $saveRoot ($SourceSaveName + '.sav')))
@@ -27,10 +29,13 @@ if (-not $disposableSavePath.StartsWith($saveRoot, [StringComparison]::OrdinalIg
 $disposableSaveHash = $null
 $disposableSaveOwned = $false
 $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\session.json'
+$diagnosticLog = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\Configs\ModLogs\chronicle-framework.log'
 $priorMode = $env:CHRONICLE_HARNESS_MODE
+$priorInputLock = $env:CHRONICLE_HARNESS_AGENT_INPUT_LOCK
 $env:CHRONICLE_HARNESS_MODE = if ($SoloMainHero) { 'solo-battle-fixture' } else { 'battle-fixture' }
+$env:CHRONICLE_HARNESS_AGENT_INPUT_LOCK = '1'
 $prefix = 'battle-mission-formation-' + [Guid]::NewGuid().ToString('N')
-$probeName = if ($ProbeAgentHostNativeAiAutopilot) { 'BattleMissionHostNativeAiAutopilotProbe' } elseif ($ProbeMainAgentNativeAiHandoff) { 'BattleMissionNativeAiHandoffProbe' } elseif ($ProbeBattleAgentNavigator) { 'BattleMissionAgentNavigatorProbe' } elseif ($ProbeBattleMovementInput) { 'BattleMissionMovementInputProbe' } elseif ($ProbeMainAgentRtsCameraBehavior) { 'BattleMissionRtsCameraProbe' } elseif ($ProbeMainAgentAiController) { 'BattleMissionControllerProbe' } else { 'BattleMissionFormationProbe' }
+$probeName = if ($ProbeDesktopInputIsolationOnly) { 'BattleMissionInputIsolationProbe' } elseif ($ProbeAgentHostNativeAiAutopilot) { 'BattleMissionHostNativeAiAutopilotProbe' } elseif ($ProbeMainAgentNativeAiHandoff) { 'BattleMissionNativeAiHandoffProbe' } elseif ($ProbeBattleAgentNavigator) { 'BattleMissionAgentNavigatorProbe' } elseif ($ProbeBattleMovementInput) { 'BattleMissionMovementInputProbe' } elseif ($ProbeMainAgentRtsCameraBehavior) { 'BattleMissionRtsCameraProbe' } elseif ($ProbeMainAgentAiController) { 'BattleMissionControllerProbe' } else { 'BattleMissionFormationProbe' }
 $runDirectory = if ($env:CHRONICLE_HARNESS_TEMP) { [IO.Path]::GetFullPath($env:CHRONICLE_HARNESS_TEMP) } else { Join-Path $PSScriptRoot ('TestResults\' + $probeName) }
 New-Item -ItemType Directory -Path $runDirectory -Force | Out-Null
 $script:NativeReceipts = [System.Collections.Generic.List[object]]::new()
@@ -252,6 +257,71 @@ try {
         throw "The original Attack option did not reach a supported Battle Mission state; state='$($missionState.state.context.gameState)', mode='$($missionState.state.mission.mode)'."
     }
 
+    $missionWindowSafety = Set-ChronicleTestWindow -ProcessId $script:ProcessId
+    $inputLockPattern = 'pid=' + [regex]::Escape([string]$script:ProcessId) + '\|harness-agent-input-lock\|locked=True\|scope=' + [regex]::Escape([string]$env:CHRONICLE_HARNESS_MODE)
+    $missionInputBlockedPattern = 'pid=' + [regex]::Escape([string]$script:ProcessId) + '\|agent-mission-input-blocked\|mission='
+    $inputLockDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    $inputOwnershipConfirmed = $false
+    while ([DateTime]::UtcNow -lt $inputLockDeadline) {
+        if (Test-Path -LiteralPath $diagnosticLog -PathType Leaf) {
+            $missionDiagnostics = @(Get-Content -LiteralPath $diagnosticLog -Tail 512 -Encoding UTF8)
+            $inputLockObserved = @($missionDiagnostics | Where-Object { $_ -match $inputLockPattern }).Count -gt 0
+            $missionInputBlockedObserved = @($missionDiagnostics | Where-Object { $_ -match $missionInputBlockedPattern }).Count -gt 0
+            if ($inputLockObserved -and $missionInputBlockedObserved) { $inputOwnershipConfirmed = $true; break }
+        }
+        Start-Sleep -Milliseconds 200
+    }
+    $desktopInputIsolationPassed = [bool]($missionWindowSafety -and $missionWindowSafety.Applied -and $missionWindowSafety.NonActivating -and $missionWindowSafety.NotForeground -and $missionWindowSafety.CursorUnrestrictedAcrossDesktop)
+    if (-not $desktopInputIsolationPassed -or -not $inputOwnershipConfirmed) {
+        throw 'Mission safety gate failed: the battle window must remain non-activating/non-foreground, the desktop cursor clip must cover the full virtual desktop, and Chronicle must confirm its Agent lock plus empty Mission input before probe actions continue.'
+    }
+    $desktopInputIsolationReceipt = [ordered]@{
+        runId = $probeName
+        scenario = 'native-battle-mission-desktop-input-isolation-no-model'
+        capturedUtc = [DateTime]::UtcNow.ToString('O')
+        processId = $script:ProcessId
+        gameState = [string]$missionState.state.context.gameState
+        missionMode = [string]$missionState.state.mission.mode
+        missionName = [string]$missionState.state.mission.sceneName
+        windowSafety = $missionWindowSafety
+        desktopCursorUnrestricted = [bool]$missionWindowSafety.CursorUnrestrictedAcrossDesktop
+        harnessInputOwnershipConfirmed = $inputOwnershipConfirmed
+        emptyMissionInputObserved = $missionInputBlockedObserved
+        modelCalls = 0
+    }
+    [IO.File]::WriteAllText((Join-Path $runDirectory 'BattleMissionDesktopInputIsolation.json'), (ConvertTo-Json -InputObject $desktopInputIsolationReceipt -Depth 8), [Text.UTF8Encoding]::new($false))
+
+    if ($ProbeDesktopInputIsolationOnly) {
+        $stop = Invoke-AgentCli 'stop'
+        $sourceHashAfter = (Get-FileHash -LiteralPath $sourceSavePath -Algorithm SHA256).Hash
+        $disposableSaveHashAfter = if (Test-Path -LiteralPath $disposableSavePath -PathType Leaf) { (Get-FileHash -LiteralPath $disposableSavePath -Algorithm SHA256).Hash } else { $null }
+        $disposableSaveRemoved = $false
+        if ($disposableSaveOwned -and $null -ne $disposableSaveHashAfter -and $disposableSaveHashAfter -ceq $disposableSaveHash) {
+            Remove-Item -LiteralPath $disposableSavePath
+            $disposableSaveRemoved = -not (Test-Path -LiteralPath $disposableSavePath -PathType Leaf)
+        }
+        $result = [ordered]@{
+            runId = $probeName
+            scenario = [string]$desktopInputIsolationReceipt.scenario
+            passed = [bool]($desktopInputIsolationPassed -and $inputOwnershipConfirmed -and $stop.processStopped -and $sourceHashBefore -ceq $sourceHashAfter -and $disposableSaveRemoved)
+            modelCalls = 0
+            desktopInputIsolation = $desktopInputIsolationReceipt
+            sourceSaveName = $SourceSaveName
+            sourceSaveHashBefore = $sourceHashBefore
+            sourceSaveHashAfter = $sourceHashAfter
+            sourceSaveUnchanged = ($sourceHashBefore -ceq $sourceHashAfter)
+            disposableSaveName = $disposableSaveName
+            disposableSaveHashBefore = $disposableSaveHash
+            disposableSaveHashAfter = $disposableSaveHashAfter
+            disposableSaveRemoved = $disposableSaveRemoved
+            processStopped = [bool]$stop.processStopped
+        }
+        [IO.File]::WriteAllText((Join-Path $runDirectory ($probeName + '.json')), (ConvertTo-Json -InputObject $result -Depth 10), [Text.UTF8Encoding]::new($false))
+        $result | ConvertTo-Json -Depth 10
+        if (-not $result.passed) { throw '3D Mission desktop input isolation probe failed its cursor, focus, input-lock, or cleanup checks.' }
+        return
+    }
+
     if ($ProbeAgentHostNativeAiAutopilot) {
         $hostExecutablePath = $env:CHRONICLE_AGENT_HOST_TEST_PATH
         if ([string]::IsNullOrWhiteSpace($hostExecutablePath) -or -not (Test-Path -LiteralPath $hostExecutablePath -PathType Leaf)) {
@@ -337,6 +407,9 @@ try {
             disposableSaveHashAfterTest = $disposableSaveHashAfter
             disposableSaveRemoved = $disposableSaveRemoved
             processStopped = [bool]$stop.processStopped
+            desktopInputIsolationPassed = $desktopInputIsolationPassed
+            missionWindowSafety = $missionWindowSafety
+            harnessInputOwnershipConfirmed = $inputOwnershipConfirmed
             hostRuntimePath = $hostExecutablePath
             hostExitCode = $hostProcess.ExitCode
             hostStatus = [string]$hostResult.status
@@ -397,7 +470,7 @@ try {
             renownAfter = [double]$stateAfterHost.state.economy.renown
             nativeReceipts = $script:NativeReceipts.ToArray()
         }
-        $hostNativeAftermathValid = $hostProcess.ExitCode -eq 0 -and $hostResult.status -eq 'completed' -and $hostMissionResult.completed -eq $true -and
+        $hostNativeAftermathValid = $desktopInputIsolationPassed -and $inputOwnershipConfirmed -and $hostProcess.ExitCode -eq 0 -and $hostResult.status -eq 'completed' -and $hostMissionResult.completed -eq $true -and
             $hostMissionResult.mainHeroAutopilotIssued -eq $true -and $hostMissionResult.nativeMissionExitIssued -eq $true -and
             $hostMissionResult.timeControlModeAtStart -eq 'Stop' -and $hostMissionResult.timeControlModeAtEnd -eq 'Stop' -and
             $result.postHostGameState -ne 'MissionState' -and $hostNativeActions.Count -eq $expectedHostNativeActions.Count -and
@@ -807,6 +880,9 @@ try {
         disposableSaveHashAfterTest = $disposableSaveHashAfter
         disposableSaveRemoved = $disposableSaveRemoved
         processStopped = [bool]$stop.processStopped
+        desktopInputIsolationPassed = $desktopInputIsolationPassed
+        missionWindowSafety = $missionWindowSafety
+        harnessInputOwnershipConfirmed = $inputOwnershipConfirmed
         initialParty = [ordered]@{ members = $encounterMenu.state.party.members; healthy = $encounterMenu.state.party.healthy; wounded = $encounterMenu.state.party.wounded; morale = $encounterMenu.state.party.morale }
         opponentPartyId = $targetId
         sendTroopsWasUnavailable = ($sendTroops.Count -eq 0)
@@ -890,7 +966,7 @@ try {
         goldAfter = [long]$campaignReturn.state.economy.gold
         nativeReceipts = $script:NativeReceipts.ToArray()
     }
-    $result['passed'] = $result.mapStateDeploymentFinishRejected -and $result.mapStateDeploymentFinishPreservedState -and
+    $result['passed'] = $desktopInputIsolationPassed -and $inputOwnershipConfirmed -and $result.mapStateDeploymentFinishRejected -and $result.mapStateDeploymentFinishPreservedState -and
         $result.duplicateDeploymentFinishRejected -and $result.duplicateDeploymentFinishPreservedState -and
         $result.sourceSaveUnchanged -and $result.disposableSaveRemoved -and $result.processStopped -and $result.missionEnded -and $result.postBattleGameState -ne 'MissionState'
     $json = ConvertTo-Json -InputObject $result -Depth 10
@@ -901,6 +977,8 @@ try {
 finally {
     if ($null -eq $priorMode) { Remove-Item Env:CHRONICLE_HARNESS_MODE -ErrorAction SilentlyContinue }
     else { $env:CHRONICLE_HARNESS_MODE = $priorMode }
+    if ($null -eq $priorInputLock) { Remove-Item Env:CHRONICLE_HARNESS_AGENT_INPUT_LOCK -ErrorAction SilentlyContinue }
+    else { $env:CHRONICLE_HARNESS_AGENT_INPUT_LOCK = $priorInputLock }
     if (Test-Path -LiteralPath $sessionPath) { try { Invoke-AgentCli 'stop' | Out-Null } catch { } }
     if ($disposableSaveOwned -and (Test-Path -LiteralPath $disposableSavePath -PathType Leaf) -and $null -ne $disposableSaveHash) {
         $currentDisposableHash = (Get-FileHash -LiteralPath $disposableSavePath -Algorithm SHA256).Hash

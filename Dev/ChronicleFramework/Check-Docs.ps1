@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.585'
+$contractVersion = '7.588'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -84,6 +84,13 @@ $agentHostCampaignLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\Ag
 $agentHostProgramSource = Get-Content (Join-Path $harnessRoot 'AgentHost\Program.cs') -Raw -Encoding UTF8
 $agentHostRuntimeProgressLogSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostRuntimeProgressLog.cs') -Raw -Encoding UTF8
 $agentLiveModelLoopSource = Get-Content (Join-Path $harnessRoot 'Test-AgentLiveModelLoop.ps1') -Raw -Encoding UTF8
+$harnessInputLockArmIndex = $agentLiveModelLoopSource.IndexOf('$env:CHRONICLE_HARNESS_AGENT_INPUT_LOCK = ''1''', [StringComparison]::Ordinal)
+$harnessInputLockLoadIndex = $agentLiveModelLoopSource.IndexOf("Invoke-AgentCli 'load'", [StringComparison]::Ordinal)
+if ($agentLiveModelLoopSource -notmatch 'Harness game input lock was not confirmed' -or
+    $agentLiveModelLoopSource -notmatch 'HarnessInputOwnershipConfirmed = \$harnessInputLockConfirmed' -or
+    $harnessInputLockArmIndex -lt 0 -or $harnessInputLockLoadIndex -lt 0 -or $harnessInputLockArmIndex -gt $harnessInputLockLoadIndex) {
+    throw 'Live-model Harness must arm and verify test-owned game input lockdown before loading a scene or sending provider requests.'
+}
 $agentHostRecruitmentLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostEstablishClanRecruitmentLoop.cs') -Raw -Encoding UTF8
 $agentHostTrainingIssueLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostEstablishClanTrainingIssueLoop.cs') -Raw -Encoding UTF8
 $agentHostCompanionLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostEstablishClanCompanionLoop.cs') -Raw -Encoding UTF8
@@ -1194,6 +1201,12 @@ if ($harnessScript -notmatch "HarnessContractVersion\s*=\s*'$contractVersion'" -
     $smokeModuleSource -notmatch 'McmSettingsRegistered' -or $smokeModuleSource -notmatch 'requiredMcmButtonPropertyIds' -or
     $smokeModuleSource -notmatch 'StartupReadySeconds' -or $smokeModuleSource -notmatch 'stabilityCompleted' -or
     $smokeModuleSource -notmatch 'StartupTimeoutSeconds' -or $smokeModuleSource -notmatch 'ModuleIds = @\(\$modules\)' -or
+    $smokeModuleSource -notmatch 'WindowLayoutApplied' -or $smokeModuleSource -notmatch 'candidateWindowLayout\.Applied' -or
+    $smokeModuleSource -notmatch 'WindowLayoutNonActivating' -or $smokeModuleSource -notmatch 'candidateWindowLayout\.NonActivating' -or
+    $smokeModuleSource -notmatch 'WindowNotForeground' -or $smokeModuleSource -notmatch 'candidateWindowLayout\.NotForeground' -or
+    $smokeModuleSource -notmatch 'CursorUnrestrictedAcrossDesktop' -or $smokeModuleSource -notmatch '\$testWindowLayout\.CursorUnrestrictedAcrossDesktop' -or
+    $smokeModuleSource -notmatch 'ForegroundProcessId = if \(\$testWindowLayout\)' -or
+    $smokeModuleSource -notmatch 'HarnessInputLockObserved' -or $smokeModuleSource -notmatch 'CHRONICLE_HARNESS_AGENT_INPUT_LOCK' -or
     $smokeModuleSource -notmatch 'CampaignGoal' -or $smokeModuleSource -notmatch 'ViewAgentStatus' -or
     $subModuleSource -notmatch 'ProbeHarnessMcmSettingsRegistration' -or
     $subModuleSource -notmatch 'TrySkipHarnessStartupVideo' -or $subModuleSource -notmatch 'state\.CanUserSkip' -or
@@ -1311,6 +1324,11 @@ if ($harnessScript -notmatch "'AgentHostLifecycleEvaluation' \{ @\('Preflight', 
     $agentHostRuntimeControllerSource -notmatch 'ShouldOwnPlayerInput' -or
     $agentHostRuntimeControllerSource -notmatch 'agent-host-process-exit-observed' -or
     $agentPlayerInputOwnershipSource -notmatch 'ScreenManager\.AddGlobalLayer' -or
+    $agentPlayerInputOwnershipSource -notmatch 'IsHarnessAgentInputLockRequested' -or
+    $agentPlayerInputOwnershipSource -notmatch 'CHRONICLE_HARNESS_AGENT_INPUT_LOCK' -or
+    $agentPlayerInputOwnershipSource -notmatch '"battle-fixture" or "solo-battle-fixture"' -or
+    $agentPlayerInputOwnershipSource -notmatch 'harness-agent-input-lock\|locked=' -or
+    $agentPlayerInputOwnershipSource -notmatch 'SetLocked\(shouldLock, notifyPlayer: !harnessOwnsInput\)' -or
     $agentPlayerInputOwnershipSource -notmatch 'InputUsageMask\.All' -or
     $agentPlayerInputOwnershipSource -notmatch 'MissionState\.Current\?\.CurrentMission' -or
     $agentPlayerInputOwnershipSource -notmatch 'MapViewsContainer' -or
@@ -1588,20 +1606,21 @@ if ($startupEvidenceSource -notmatch 'function Ensure-ChronicleSteamClientReady'
     $startupEvidenceSource -notmatch "steam_appid\.txt" -or
     $startupEvidenceSource -notmatch "SetEnvironmentVariable\('SteamAppId'" -or
     $startupEvidenceSource -notmatch "SetEnvironmentVariable\('SteamGameId'" -or
+    $startupEvidenceSource -notmatch 'WindowStyle\s*=\s*''Hidden''' -or
     $agentCliSource -notmatch 'Ensure-ChronicleSteamClientReady' -or
-    $agentCliSource -notmatch 'Start-ChronicleSteamGame -FilePath \$launcher' -or
+    $agentCliSource -notmatch 'Start-ChronicleSteamGame -FilePath \$launcher.*-WindowStyle Hidden' -or
     $agentCliSource -notmatch 'Disable-ChronicleHarnessGameSound' -or
     $agentCliSource -notmatch 'Restore-ChronicleHarnessGameSound' -or
-    $freshCampaignSource -notmatch 'Start-ChronicleSteamGame -FilePath \$launcher' -or
+    $freshCampaignSource -notmatch 'Start-ChronicleSteamGame -FilePath \$launcher.*-WindowStyle Hidden' -or
     $freshCampaignSource -notmatch 'Disable-ChronicleHarnessGameSound' -or
     $freshCampaignSource -notmatch 'Restore-ChronicleHarnessGameSound' -or
     $freshCampaignSource -notmatch 'BannerlordSoundMutedForHarness' -or
-    $campaignTestSource -notmatch 'Start-ChronicleSteamGame -FilePath \$launcher' -or
+    $campaignTestSource -notmatch 'Start-ChronicleSteamGame -FilePath \$launcher.*-WindowStyle Hidden' -or
     $campaignTestSource -notmatch 'Disable-ChronicleHarnessGameSound' -or
     $campaignTestSource -notmatch 'Restore-ChronicleHarnessGameSound' -or
     $campaignTestSource -notmatch 'Ensure-ChronicleSteamClientReady' -or
     $smokeModuleSource -notmatch 'Ensure-ChronicleSteamClientReady' -or
-    $smokeModuleSource -notmatch 'Start-ChronicleSteamGame -FilePath \$gameExe' -or
+    $smokeModuleSource -notmatch 'Start-ChronicleSteamGame -FilePath \$gameExe.*-WindowStyle Hidden' -or
     $smokeModuleSource -notmatch 'Disable-ChronicleHarnessGameSound' -or
     $smokeModuleSource -notmatch 'Restore-ChronicleHarnessGameSound' -or
     $smokeModuleSource -notmatch 'BannerlordSoundMutedForHarness' -or
@@ -1657,6 +1676,24 @@ if ($battleFixtureSource -notmatch 'EycQuestObservedAtStart' -or $battleFixtureS
 if ($subModuleSource -notmatch 'preserveSoloMainParty \? 0 : Math\.Max\(0, 20 - mainParty\.MemberRoster\.TotalManCount\)' -or $subModuleSource -notmatch 'enemyCount = preserveSoloMainParty \? 1 : 19' -or $subModuleSource -notmatch 'fixtureOffset = preserveSoloMainParty \? 5\.0f : 0\.5f' -or $subModuleSource -notmatch 'enemyParty\.Ai\.DisableAi\(\)' -or $subModuleSource -notmatch 'opponentAiDisabledForBattleProbe' -or $subModuleSource -match 'RestartPlayerEncounter\(enemyParty\.Party' -or $battleFixtureSource -notmatch 'fixtureEnemyIsEncountered' -or $battleFixtureSource -notmatch 'Native pursuit lost the disposable looter target' -or $harnessScript -notmatch 'PostBattleChild\.log' -or $harnessScript -notmatch 'BattleFixtureChild\.log') { throw 'Battle fixtures must separately preserve a one-member MainParty/one-looter solo boundary at a non-overlapping map position or scale the ordinary roster, use Native pursuit/encounter, retain ordinary opponent AI for Retreat coverage, fail promptly on target loss, and retain child-process output.' }
 if ($battleMissionFormationProbeSource -notmatch '\[switch\]\$SoloMainHero' -or $battleMissionFormationProbeSource -notmatch "Invoke-AgentCli 'resume'" -or $battleMissionFormationProbeSource -notmatch 'id -eq ''chronicle_harness_looters'' -and \$_.hostile' -or $battleMissionFormationProbeSource -notmatch 'Capture-NativeMapFrame' -or $battleMissionFormationProbeSource -notmatch 'native-target-selected-but-waiting' -or $battleMissionFormationProbeSource -notmatch 'nativeDeploymentPreconditionDiagnostic = \$hostMissionResult\.nativeDeploymentPreconditionDiagnostic' -or $battleMissionFormationProbeSource -notmatch 'nativeDeploymentCompletedByNative' -or $battleMissionFormationProbeSource -notmatch 'formationCount -gt 0' -or $battleMissionFormationProbeSource -notmatch 'nativeBattleStatusAfterHost' -or $battleMissionFormationProbeSource -notmatch 'HostNativeBattlePreconditionFailure\.bmp' -or $agentHostBattleMissionLoopSource -notmatch 'battle-mission-native-spontaneous-deployment-transition-unverified' -or $agentHostBattleMissionLoopSource -notmatch 'availablePlayerFormationCount > 0' -or $harnessScript -notmatch '\[switch\]\$BattleMissionSoloMainHeroProbe' -or $agentHostProgramSource -notmatch 'solo-battle-fixture') { throw 'The opt-in solo MainHero battle probe must assert a one-member Native MainParty, target its isolated hostile fixture, preserve the exact Host precondition diagnostic/post-failure Mission status, skip empty F6, and verify Native deployment reconciliation.' }
 if ($battleFixtureSource -notmatch 'inventoryLootItemCountAfter -ne 0' -or $battleFixtureSource -match 'inventoryItemsTransferred -lt \$inventoryLootItemCountBefore|inventoryItemsTransferred -gt 0') { throw 'PostBattle must verify Native Loot All by checking zero remaining loot; inventory slot-count growth is not a valid item-transfer count when existing stacks merge.' }
+if ($battleMissionFormationProbeSource -notmatch 'CHRONICLE_HARNESS_AGENT_INPUT_LOCK = ''1''' -or
+    $battleMissionFormationProbeSource.IndexOf('$env:CHRONICLE_HARNESS_AGENT_INPUT_LOCK = ''1''', [StringComparison]::Ordinal) -gt $battleMissionFormationProbeSource.IndexOf("Invoke-AgentCli 'load'", [StringComparison]::Ordinal) -or
+    $battleMissionFormationProbeSource -notmatch 'desktopInputIsolationPassed' -or
+    $battleMissionFormationProbeSource -notmatch 'CursorUnrestrictedAcrossDesktop' -or
+    $battleMissionFormationProbeSource -notmatch 'harnessInputOwnershipConfirmed' -or
+    $battleMissionFormationProbeSource -notmatch 'agent-mission-input-blocked' -or
+    $battleMissionFormationProbeSource -notmatch 'mission safety gate failed') {
+    throw 'Native battle Mission probes must arm and verify non-foreground windowing plus empty Mission input before performing any in-Mission action.'
+}
+if ($harnessScript -notmatch "'BattleMissionInputIsolationProbe'" -or
+    $harnessScript -notmatch "'BattleMissionInputIsolationProbe' \{ @\('Preflight', 'Build', 'BattleMissionInputIsolationProbe'\) \}" -or
+    $harnessScript -match "'All' \{[^\r\n]*'BattleMissionInputIsolationProbe'" -or
+    $battleMissionFormationProbeSource -notmatch '\[switch\]\$ProbeDesktopInputIsolationOnly' -or
+    $battleMissionFormationProbeSource -notmatch 'BattleMissionDesktopInputIsolation\.json' -or
+    $battleMissionFormationProbeSource -notmatch '3D Mission desktop input isolation probe failed' -or
+    $battleMissionFormationProbeSource -notmatch 'scenario = ''native-battle-mission-desktop-input-isolation-no-model''') {
+    throw 'The desktop-input isolation phase must stop at the first safe 3D Mission state, record OS cursor/focus and Native input-lock evidence, use no model, and clean its disposable fixture.'
+}
 if ($harnessScript -notmatch "'BattleMissionFormationProbe'" -or $harnessScript -notmatch '\$battleMissionFormationProbeScript' -or
     $harnessScript -notmatch "'BattleMissionFormationProbe' \{ @\('Preflight', 'Build', 'BattleMissionFormationProbe'\) \}" -or
     $harnessScript -match "'All' \{[^\r\n]*'BattleMissionFormationProbe'" -or
@@ -2453,8 +2490,26 @@ if ($decisionLoopSource -notmatch 'previousActionReceipt' -or $agentLoopTest -no
 if ($decisionLoopSource -notmatch 'decision\.done -eq \$true' -or $decisionLoopSource -notmatch 'completedByProvider = \$true' -or $decisionLoopSource -notmatch 'decision-budget-exhausted' -or $agentLoopProviderSource -notmatch "CHRONICLE_TEST_PROVIDER_MODE -eq 'doneSignal'" -or $agentLoopTest -notmatch 'ExplicitGoalStopHonoredWithoutIssuingAnotherAction') { throw 'The decision loop must support an explicit, reasoned provider stop without executing another game action, and distinguish that request from verified goal success.' }
 $recruitmentTest = Get-Content (Join-Path $harnessRoot 'Test-AgentRecruitment.ps1') -Raw -Encoding UTF8
 if ($agentLoopProvider -notmatch "CHRONICLE_TEST_PROVIDER_MODE -eq 'recruitment'" -or $agentLoopProvider -notmatch '\$request\.previousActionReceipt' -or $agentLoopProvider -notmatch '\$receipt\.data\.offers' -or $recruitmentTest -notmatch 'OfferDataForwardedToNextDecision' -or $recruitmentTest -notmatch 'OfferSelectionMatchedReceipt' -or $recruitmentTest -notmatch 'RecruitmentDecisionSummary' -or $recruitmentTest -match 'RecruitmentDecisionTrace\s*=\s*\$recruitmentLoop\.trace') { throw 'Recruitment must test receipt-based selection and keep only concise evidence, not duplicate full observations.' }
-if ($freshCampaignTest -notmatch 'Set-ChronicleTestWindow' -or $freshCampaignTest -notmatch 'WindowLayoutApplied' -or $freshCampaignTest -notmatch 'display_width' -or $freshCampaignTest -notmatch '840') { throw 'FreshCampaign must enforce the existing non-activating windowed test layout.' }
-if ($testWindowLayoutSource -notmatch 'IsIconic' -or $testWindowLayoutSource -notmatch 'IsWindowVisible' -or $testWindowLayoutSource -notmatch '0x0050' -or $testWindowLayoutSource -notmatch 'Minimized = \$iconic' -or $testWindowLayoutSource -match 'SetForegroundWindow|BringWindowToTop') { throw 'Windowed capture must show the 840x472 game window without activating it or stealing the user focus.' }
+if ($freshCampaignTest -notmatch 'Set-ChronicleTestWindow' -or $freshCampaignTest -notmatch 'WindowLayoutApplied' -or $freshCampaignTest -notmatch 'Math\]::Abs\(\$windowLayout\.Width - 840\) -le 1' -or $freshCampaignTest -notmatch 'display_width' -or $freshCampaignTest -notmatch '840') { throw 'FreshCampaign must enforce the existing non-activating windowed test layout within one-pixel window-manager rounding.' }
+. (Join-Path $harnessRoot 'Test-WindowLayout.ps1')
+if (-not (Test-ChronicleNoActivateStyleContract) -or
+    $testWindowLayoutSource -notmatch 'EnsureNoActivate' -or
+    $testWindowLayoutSource -notmatch '0x08000000L' -or
+    $testWindowLayoutSource -notmatch 'GetForegroundProcessId' -or
+    $testWindowLayoutSource -notmatch 'NotForeground = \$notForeground' -or
+    $testWindowLayoutSource -notmatch 'GetClipCursor' -or
+    $testWindowLayoutSource -notmatch 'CursorUnrestrictedAcrossDesktop = \$cursorUnrestrictedAcrossDesktop' -or
+    $testWindowLayoutSource -notmatch 'GetSystemMetrics\(76\)' -or
+    $testWindowLayoutSource -notmatch 'withinExpectedBounds' -or
+    $testWindowLayoutSource -notmatch '0x0074' -or
+    $testWindowLayoutSource -notmatch 'if \(processId != targetProcessId\) return true;' -or
+    $testWindowLayoutSource -notmatch 'IsWindowVisible\(handle\) \? 10000000L' -or
+    $testWindowLayoutSource -notmatch 'Window foreground must not belong to the harness client' -or
+    $testWindowLayoutSource -notmatch 'IsIconic' -or $testWindowLayoutSource -notmatch 'IsWindowVisible' -or
+    $testWindowLayoutSource -notmatch 'Minimized = \$iconic' -or
+    $testWindowLayoutSource -match 'SetForegroundWindow|BringWindowToTop') {
+    throw 'Harness game windows must remain visible for capture but carry WS_EX_NOACTIVATE, verify the style, and never foreground/activate or inject global input.'
+}
 if ($agentCliSource -notmatch "'recoverTestConfig'" -or $testWindowLayoutSource -notmatch "max_framerate = 30" -or $agentCliSource -notmatch 'engine_config\.chronicle-backup' -or $agentCliSource -notmatch 'Restore-ChronicleTestEngineConfig' -or $agentCliSource -notmatch 'engineConfigRestored' -or $agentCliSource -notmatch 'startup-timeout-' -or $agentCliSource -notmatch 'RglErrorLogTail' -or $agentCliSource -notmatch 'WatchdogLogTail' -or $agentCliSource -notmatch 'Ensure-ChronicleSteamClient' -or $startupEvidenceSource -notmatch 'steamwebhelper' -or $startupEvidenceSource -notmatch 'Get-ChronicleSteamClientReadiness' -or $startupEvidenceSource -notmatch 'Bannerlord was not launched' -or $agentCliSource -notmatch 'ConvertTo-ChronicleStartupDialogEvidence' -or $agentCliSource -notmatch 'StreamReader') { throw 'Harness must wait for stable Steam WebHelper readiness, serialize sanitized startup dialog evidence, and preserve Steam API warnings without global input.' }
 if ($freshCampaignTest -notmatch 'FreshCampaign\.initial-state\.json' -or $freshCampaignTest -notmatch 'WriteAllBytes' -or $freshCampaignTest -notmatch 'creationCompleted -and \$initialSnapshotCaptured') { throw 'FreshCampaign must persist the post-creation Agent observation as UTF-8 evidence before passing.' }
 if ($freshCampaignTest -notmatch 'IssueConversationProbeApplicable' -or $freshCampaignTest -notmatch 'IssueConversationProbeSkipped' -or $freshCampaignTestCompact -notmatch 'issueConversationProbePassed = if \(\$issueProbeExpected\).*?\$null' -or $freshCampaignTest -notmatch 'issueConversationProbeOutcomeValid' -or $freshCampaignTest -notmatch 'issueConversationOfferDenied' -or $freshCampaignTest -notmatch 'issueOfferOptionAvailable') { throw 'FreshCampaign must distinguish an applicable offer/denial from a no-issue skip.' }

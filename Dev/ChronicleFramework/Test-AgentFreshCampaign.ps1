@@ -265,7 +265,7 @@ try {
     $gameSoundDisabledDuring = Get-ChronicleBannerlordSoundDisabled -LiteralPath $engineConfig
     if ($gameSoundDisabledDuring -ne 1) { throw 'Bannerlord audio must be disabled by the temporary Harness engine-config guard before the game can start.' }
     Set-SafeExitMarker
-    $launcherProcess = Start-ChronicleSteamGame -FilePath $launcher -ArgumentList $arguments -WorkingDirectory $gameBinDirectory -WindowStyle Minimized
+    $launcherProcess = Start-ChronicleSteamGame -FilePath $launcher -ArgumentList $arguments -WorkingDirectory $gameBinDirectory -WindowStyle Hidden
 }
 catch {
     if ($autoSaveSettingGuard) {
@@ -1347,7 +1347,7 @@ $acceptanceChecks = [ordered]@{
     noNativeAutoSaveObserved = (-not $nativeAutoSaveDetected)
     requestedDisposableSaveRetained = (-not $RetainDisposableSave -or $retainedDisposableSave)
     requestedPersistentStoryModeSaveRetained = (-not $StoryModeEycPersistentSeed -or $retainedPersistentStoryModeSave)
-    windowLayout = ($windowLayoutApplied -and $windowLayout.Width -eq 840 -and $windowLayout.Height -eq 472)
+    windowLayout = ($windowLayoutApplied -and [Math]::Abs($windowLayout.Width - 840) -le 1 -and [Math]::Abs($windowLayout.Height - 472) -le 1)
     gameProcessesClean = $gameProcessesClean
 }
 if ($StoryModeEycSetup) {

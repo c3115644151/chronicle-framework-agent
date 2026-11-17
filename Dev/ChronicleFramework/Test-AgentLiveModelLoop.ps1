@@ -33,6 +33,7 @@ $documentsRoot = Join-Path $documentsPath 'Mount and Blade II Bannerlord'
 $savePath = Join-Path $documentsRoot "Game Saves\$LoadSaveName.sav"
 $checkpointSavePath = if (-not [string]::IsNullOrWhiteSpace($CheckpointSaveName)) { Join-Path $documentsRoot "Game Saves\$CheckpointSaveName.sav" } else { $null }
 $sessionPath = Join-Path $documentsRoot 'AgentRuns\ChronicleAgent\session.json'
+$diagnosticLog = Join-Path $documentsRoot 'Configs\ModLogs\chronicle-framework.log'
 
 function Get-NativeCheckpointStateDisposition([object]$StateReceipt) {
     if ($null -eq $StateReceipt -or [string]$StateReceipt.status -cne 'completed' -or $null -eq $StateReceipt.state) { return $null }
@@ -218,6 +219,9 @@ $engineFrameFailurePath = Join-Path $runDirectory 'LiveModelEngine-failure.bmp'
 $fixtureHashBefore = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash
 $campaignInstanceId = $null
 $priorHarnessMode = $env:CHRONICLE_HARNESS_MODE
+$priorHarnessAgentInputLock = $env:CHRONICLE_HARNESS_AGENT_INPUT_LOCK
+$harnessInputLockRequired = $false
+$harnessInputLockConfirmed = $false
 $priorModelTimeout = $env:CHRONICLE_LLM_TIMEOUT_SECONDS
 $priorModelMaxTokens = $env:CHRONICLE_LLM_MAX_TOKENS
 $priorModelMaxHttpRequests = $env:CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION
@@ -316,6 +320,8 @@ try {
     $captureRecoveryProof = Test-ChronicleFragmentedCaptureResilience -EvidencePath (Join-Path $runDirectory 'FragmentedCaptureRecovery.json')
     Set-Content -LiteralPath $eventTracePath -Value '' -Encoding UTF8
     $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { 'visual-battle-fixture' } else { 'visual-capture' }
+    $env:CHRONICLE_HARNESS_AGENT_INPUT_LOCK = '1'
+    $harnessInputLockRequired = $true
     $env:CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION = '1'
     $loadArguments = @('-SaveName', $LoadSaveName)
     if ($EstablishYourClanGoalPlanner -or $EstablishYourClanAutonomyLoop -or $CaptivityRecoveryLoop -or $EstablishClanGoldSaleLoop) { $loadArguments += '-IncludeChronicleFramework' }
@@ -324,6 +330,18 @@ try {
     $baseline = Invoke-AgentCli 'state'
     if ($baseline.status -ne 'completed' -or $baseline.state.context.gameState -ne 'MapState') {
         throw 'Live-model fixture must load into Native Campaign Map state.'
+    }
+    $inputLockPattern = 'pid=' + [regex]::Escape([string]$start.session.processId) + '\|harness-agent-input-lock\|locked=True\|scope=' + [regex]::Escape([string]$env:CHRONICLE_HARNESS_MODE)
+    $inputLockDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    while ([DateTime]::UtcNow -lt $inputLockDeadline) {
+        if (Test-Path -LiteralPath $diagnosticLog -PathType Leaf) {
+            $inputLockLines = @(Get-Content -LiteralPath $diagnosticLog -Tail 256 -Encoding UTF8 | Where-Object { $_ -match $inputLockPattern })
+            if ($inputLockLines.Count -gt 0) { $harnessInputLockConfirmed = $true; break }
+        }
+        Start-Sleep -Milliseconds 200
+    }
+    if (-not $harnessInputLockConfirmed) {
+        throw 'Harness game input lock was not confirmed on the test-owned process; no model request or gameplay action was sent.'
     }
     if ($EstablishYourClanAutonomyLoop) {
         $campaignIdentity = Invoke-AgentCli 'agentCheckpointGet'
@@ -1630,6 +1648,8 @@ finally {
     }
     if ($null -eq $priorHarnessMode) { Remove-Item Env:CHRONICLE_HARNESS_MODE -ErrorAction SilentlyContinue }
     else { $env:CHRONICLE_HARNESS_MODE = $priorHarnessMode }
+    if ($null -eq $priorHarnessAgentInputLock) { Remove-Item Env:CHRONICLE_HARNESS_AGENT_INPUT_LOCK -ErrorAction SilentlyContinue }
+    else { $env:CHRONICLE_HARNESS_AGENT_INPUT_LOCK = $priorHarnessAgentInputLock }
     if ($null -eq $priorModelTimeout) { Remove-Item Env:CHRONICLE_LLM_TIMEOUT_SECONDS -ErrorAction SilentlyContinue }
     else { $env:CHRONICLE_LLM_TIMEOUT_SECONDS = $priorModelTimeout }
     if ($null -eq $priorModelMaxTokens) { Remove-Item Env:CHRONICLE_LLM_MAX_TOKENS -ErrorAction SilentlyContinue }
@@ -1643,7 +1663,7 @@ $fixtureUnchanged = ($fixtureHashBefore -ceq $fixtureHashAfter)
 $processStopped = ([bool]$stop.processStopped -and -not (Test-Path -LiteralPath $sessionPath -PathType Leaf) -and -not (Get-Process -Name Bannerlord* -ErrorAction SilentlyContinue))
 $capturePassed = ($captureResult -and $captureResult.Passed -and [double]$captureResult.FrameCoverageRatio -ge 0.9 -and $captureResult.WindowTitle -match 'Bannerlord')
 $checkpointSaveRetained = [bool]($CheckpointSaveName -and $checkpointSaveCompleted -and (Test-Path -LiteralPath $checkpointSavePath -PathType Leaf))
-$passed = (-not $failure -and $null -ne $liveModelTrace -and $fixtureUnchanged -and $processStopped -and $capturePassed)
+$passed = (-not $failure -and $null -ne $liveModelTrace -and $fixtureUnchanged -and $processStopped -and $capturePassed -and (-not $harnessInputLockRequired -or $harnessInputLockConfirmed))
 
 if ($captureResult -and $captureResult.Passed -and $captureResult.VideoRemovedAfterEvidence -and $liveModelTrace.VisualEvidence) {
     $liveModelTrace.VisualEvidence.SourceVideoPath = $null
@@ -1669,6 +1689,8 @@ $result = [ordered]@{
     CheckpointStateContract = $checkpointStateContract
     CampaignInstanceId = $campaignInstanceId
     ProcessId = if ($start -and $start.session) { $start.session.processId } else { $null }
+    HarnessInputOwnershipRequired = $harnessInputLockRequired
+    HarnessInputOwnershipConfirmed = $harnessInputLockConfirmed
     HostReadyMessages = @($hostReadyMessages)
     CaptureRecoveryProof = $captureRecoveryProof
     Capture = $captureResult

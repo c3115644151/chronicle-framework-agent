@@ -87,7 +87,7 @@ function Invoke-CampaignLifecycleRun {
     if ($soundDisabledDuring -ne 1) { throw 'Bannerlord game sound must be disabled by the temporary Harness guard before startup.' }
     try {
         $arguments = "/continuesave $LoadSaveName $moduleArgument /anticheat"
-        $launcherProcess = Start-ChronicleSteamGame -FilePath $launcher -ArgumentList $arguments -WorkingDirectory $binDirectory -WindowStyle Minimized
+        $launcherProcess = Start-ChronicleSteamGame -FilePath $launcher -ArgumentList $arguments -WorkingDirectory $binDirectory -WindowStyle Hidden
     }
     catch {
         try { if ($soundGuard) { [void](Restore-ChronicleHarnessGameSound) } } catch { }

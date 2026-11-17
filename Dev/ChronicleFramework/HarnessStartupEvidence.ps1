@@ -439,7 +439,7 @@ function Start-ChronicleSteamGame {
         [Parameter(Mandatory)][string]$FilePath,
         [Parameter(Mandatory)][string]$ArgumentList,
         [Parameter(Mandatory)][string]$WorkingDirectory,
-        [ValidateSet('Normal','Hidden','Minimized','Maximized')][string]$WindowStyle = 'Minimized'
+        [ValidateSet('Normal','Hidden','Minimized','Maximized')][string]$WindowStyle = 'Hidden'
     )
 
     $resolvedWorkingDirectory = [IO.Path]::GetFullPath($WorkingDirectory)

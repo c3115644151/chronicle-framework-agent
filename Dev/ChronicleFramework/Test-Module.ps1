@@ -110,7 +110,17 @@ if ($soundDisabledDuring -ne 1) { throw 'Bannerlord game sound must be disabled 
 $launchStart = Get-Date
 $startupWatch = [Diagnostics.Stopwatch]::StartNew()
 $diagnosticStartLineCount = if (Test-Path $diagnosticLog) { @(Get-Content $diagnosticLog).Count } else { 0 }
-$process = Start-ChronicleSteamGame -FilePath $gameExe -ArgumentList $arguments -WorkingDirectory (Split-Path $gameExe) -WindowStyle Minimized
+$priorHarnessMode = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_MODE', 'Process')
+$priorHarnessInputLock = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_INPUT_LOCK', 'Process')
+try {
+    [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_MODE', 'smoke', 'Process')
+    if (-not $WithoutChronicle) { [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_INPUT_LOCK', '1', 'Process') }
+    $process = Start-ChronicleSteamGame -FilePath $gameExe -ArgumentList $arguments -WorkingDirectory (Split-Path $gameExe) -WindowStyle Hidden
+}
+finally {
+    [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_MODE', $priorHarnessMode, 'Process')
+    [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_INPUT_LOCK', $priorHarnessInputLock, 'Process')
+}
 $trackedProcessId = $process.Id
 $rglLog = Join-Path $env:ProgramData "Mount and Blade II Bannerlord\logs\rgl_log_$trackedProcessId.txt"
 $watchdogLog = Join-Path $env:ProgramData "Mount and Blade II Bannerlord\logs\watchdog_log_$trackedProcessId.txt"
@@ -124,6 +134,7 @@ $gameStartObserved = $WithoutChronicle.IsPresent
 $mcmSettingsRegistered = $WithoutChronicle.IsPresent
 $inputControlKeyDisplayTextLoaded = $WithoutChronicle.IsPresent
 $inputControlKeyVisibleInNativeOptions = $WithoutChronicle.IsPresent
+$harnessInputLockObserved = $WithoutChronicle.IsPresent
 $mcmSettingPropertyIds = @()
 $mcmButtonPropertyIds = @()
 $validationButtonType = if ($WithoutChronicle) { 'not-tested' } else { 'missing' }
@@ -135,6 +146,7 @@ $stabilityCompleted = $false
 $startupFault = $null
 $startupDialogReceipts = [System.Collections.Generic.List[object]]::new()
 $startupDialogSnapshots = [System.Collections.Generic.List[object]]::new()
+$testWindowLayout = $null
 
 while ((Get-Date) -lt $deadline) {
     $candidateProcesses = @(Get-Process Bannerlord -ErrorAction SilentlyContinue | Where-Object { $_.StartTime -ge $launchStart })
@@ -143,7 +155,14 @@ while ((Get-Date) -lt $deadline) {
         $rglLog = Join-Path $env:ProgramData "Mount and Blade II Bannerlord\logs\rgl_log_$trackedProcessId.txt"
         $watchdogLog = Join-Path $env:ProgramData "Mount and Blade II Bannerlord\logs\watchdog_log_$trackedProcessId.txt"
     }
-    Set-ChronicleTestWindow -ProcessId $trackedProcessId | Out-Null
+    $candidateWindowLayout = Set-ChronicleTestWindow -ProcessId $trackedProcessId
+    if ($candidateWindowLayout) {
+        $testWindowLayout = $candidateWindowLayout
+        if (-not [bool]$candidateWindowLayout.Applied -or -not [bool]$candidateWindowLayout.NonActivating -or -not [bool]$candidateWindowLayout.NotForeground) {
+            $startupFault = 'Harness could not keep the test-owned game window visible without activating or foregrounding it; no UI/game interaction should proceed.'
+            break
+        }
+    }
     $trackedProcess = Get-Process -Id $trackedProcessId -ErrorAction SilentlyContinue
     if ($trackedProcess -and $trackedProcess.MainWindowTitle -ceq 'Mod change detected') {
         try {
@@ -183,6 +202,7 @@ while ((Get-Date) -lt $deadline) {
         $newDiagnosticLines = if ($diagnosticLines.Count -gt $diagnosticStartLineCount) { $diagnosticLines[$diagnosticStartLineCount..($diagnosticLines.Count - 1)] } else { @() }
         $lifecycleLoadObserved = [bool]($newDiagnosticLines -match '\|submodule-load$')
         $gameStartObserved = [bool]($newDiagnosticLines -match '\|game-start$')
+        $harnessInputLockObserved = $harnessInputLockObserved -or [bool]($newDiagnosticLines -match '\|harness-agent-input-lock\|locked=True\|scope=smoke$')
         $mcmSettingsLines = @($newDiagnosticLines | Where-Object { $_ -match '\|harness-mcm-settings\|' })
         $inputControlKeyTextLines = @($newDiagnosticLines | Where-Object { $_ -match '\|agent-input-key-display-text\|' })
         if ($inputControlKeyTextLines.Count -gt 0) {
@@ -207,7 +227,7 @@ while ((Get-Date) -lt $deadline) {
         @($requiredMcmPropertyIds | Where-Object { $_ -notin $mcmSettingPropertyIds }).Count -eq 0 -and
         @($requiredMcmButtonPropertyIds | Where-Object { $_ -notin $mcmButtonPropertyIds }).Count -eq 0 -and
         $inputControlKeyDisplayTextLoaded -and $inputControlKeyVisibleInNativeOptions)
-    if ($finishedAll -and -not $crashDetected -and $assemblyLoaded -and $lifecycleLoadObserved -and $mcmDefinitionComplete) {
+    if ($finishedAll -and -not $crashDetected -and $assemblyLoaded -and $lifecycleLoadObserved -and $mcmDefinitionComplete -and $harnessInputLockObserved -and $testWindowLayout -and $testWindowLayout.Applied) {
         $startupReadySeconds = [Math]::Round($startupWatch.Elapsed.TotalSeconds, 2)
         break
     }
@@ -301,6 +321,13 @@ $result = [ordered]@{
     McmSettingsRegistered = $mcmSettingsRegistered
     InputControlKeyDisplayTextLoaded = $inputControlKeyDisplayTextLoaded
     InputControlKeyVisibleInNativeOptions = $inputControlKeyVisibleInNativeOptions
+    WindowLayout = $testWindowLayout
+    WindowLayoutApplied = [bool]($testWindowLayout -and $testWindowLayout.Applied)
+    WindowLayoutNonActivating = [bool]($testWindowLayout -and $testWindowLayout.NonActivating)
+    WindowNotForeground = [bool]($testWindowLayout -and $testWindowLayout.NotForeground)
+    CursorUnrestrictedAcrossDesktop = [bool]($testWindowLayout -and $testWindowLayout.CursorUnrestrictedAcrossDesktop)
+    ForegroundProcessId = if ($testWindowLayout) { $testWindowLayout.ForegroundProcessId } else { $null }
+    HarnessInputLockObserved = [bool]$harnessInputLockObserved
     McmSettingPropertyIds = $mcmSettingPropertyIds
     McmButtonPropertyIds = $mcmButtonPropertyIds
     McmValidationButtonType = $validationButtonType
@@ -360,6 +387,6 @@ $receiptJson | Set-Content -LiteralPath $resultPath -Encoding UTF8
 Add-Content -LiteralPath $receiptStagePath -Value 'write-complete'
 Write-Output $receiptJson
 
-if (-not $soundRestoration.Restored -or -not $finishedAll -or -not $stabilityCompleted -or $crashDetected -or $processExitedUnexpectedly -or (-not $WithoutChronicle -and (-not $assemblyLoaded -or -not $lifecycleLoadObserved -or -not $mcmDefinitionComplete -or -not $inputControlKeyDisplayTextLoaded -or -not $inputControlKeyVisibleInNativeOptions))) {
+if (-not $soundRestoration.Restored -or -not [bool]$result.WindowLayoutApplied -or -not [bool]$result.WindowLayoutNonActivating -or -not [bool]$result.WindowNotForeground -or -not [bool]$result.CursorUnrestrictedAcrossDesktop -or -not [bool]$result.HarnessInputLockObserved -or -not $finishedAll -or -not $stabilityCompleted -or $crashDetected -or $processExitedUnexpectedly -or (-not $WithoutChronicle -and (-not $assemblyLoaded -or -not $lifecycleLoadObserved -or -not $mcmDefinitionComplete -or -not $inputControlKeyDisplayTextLoaded -or -not $inputControlKeyVisibleInNativeOptions))) {
     exit 1
 }
