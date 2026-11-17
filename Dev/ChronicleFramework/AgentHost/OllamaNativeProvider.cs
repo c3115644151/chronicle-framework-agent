@@ -30,6 +30,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     private string? _lastProviderRoute;
     private bool _useRequiredToolCallStrategy;
     private bool _supportsParallelToolCalls;
+    private bool _supportsReasoningEffort;
     private bool _usePromptOnlyJsonMode;
     private double _reservedDeepSeekCostCny;
     private double _actualDeepSeekCostEstimateCny;
@@ -343,6 +344,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
 
             _useRequiredToolCallStrategy = false;
             _supportsParallelToolCalls = false;
+            _supportsReasoningEffort = false;
             if (IsFreeLlmApi(_settings.Endpoint) && modelFound &&
                 selectedModel.TryGetProperty("supported_parameters", out var supportedParameters) && supportedParameters.ValueKind == JsonValueKind.Array)
             {
@@ -352,6 +354,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     .Where(value => !string.IsNullOrWhiteSpace(value))
                     .ToHashSet(StringComparer.OrdinalIgnoreCase);
                 _supportsParallelToolCalls = capabilities.Contains("parallel_tool_calls");
+                _supportsReasoningEffort = capabilities.Contains("reasoning_effort");
                 var supportsResponseFormat = capabilities.Contains("response_format");
                 var supportsRequiredToolCall = capabilities.Contains("tools") && capabilities.Contains("tool_choice");
                 if (supportsResponseFormat)
@@ -423,6 +426,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             ["model"] = _settings.Model,
             ["messages"] = messages
         };
+        string? reasoningEffortApplied = null;
         var useJsonObjectCompatibilityMode = !_settings.NativeOllama && UsesJsonObjectCompatibilityMode();
         if (_settings.NativeOllama)
         {
@@ -462,9 +466,14 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             }
             payload[_settings.MaxTokenParameter] = _settings.MaxOutputTokens;
             if (_settings.Thinking.HasValue) payload["thinking"] = new { type = _settings.Thinking.Value ? "enabled" : "disabled" };
+            var reasoningEffortIsExplicitlySupportedByFreeLlmApi = IsFreeLlmApi(_settings.Endpoint) && _supportsReasoningEffort;
             if (!string.IsNullOrWhiteSpace(_settings.ReasoningEffort) &&
-                !string.Equals(_settings.ReasoningEffort, "none", StringComparison.OrdinalIgnoreCase) && _settings.Thinking != false)
+                !string.Equals(_settings.ReasoningEffort, "none", StringComparison.OrdinalIgnoreCase) &&
+                (_settings.Thinking != false || reasoningEffortIsExplicitlySupportedByFreeLlmApi))
+            {
                 payload["reasoning_effort"] = _settings.ReasoningEffort;
+                reasoningEffortApplied = _settings.ReasoningEffort;
+            }
             if (_settings.Temperature.HasValue) payload["temperature"] = _settings.Temperature.Value;
         }
 
@@ -849,7 +858,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 _proxySelectionSource,
                 _proxyEndpointHostPort,
                 fallbackAttempts,
-                fallbackTrail);
+                fallbackTrail,
+                reasoningEffortApplied);
         }
     }
 
@@ -1661,7 +1671,8 @@ internal sealed record ProviderDecisionResult(
     string? ProxySelectionSource = null,
     string? ProxyEndpointHostPort = null,
     int? FallbackAttempts = null,
-    string? FallbackTrail = null);
+    string? FallbackTrail = null,
+    string? ReasoningEffortApplied = null);
 
 internal sealed class AgentHostException : Exception
 {

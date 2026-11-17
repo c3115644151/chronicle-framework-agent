@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.592'
+$contractVersion = '7.599'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -164,6 +164,28 @@ if ($agentHostProviderSource -notmatch 'toolCallsPresent=' -or
     $agentHostProviderContractSelfTestSource -notmatch 'provider-required-tool-call-missing-response-logs-safe-route-shape-and-usage' -or
     $agentHostProviderContractSelfTestSource -notmatch 'PRIVATE_FREE_LLM_API_RESPONSE_MUST_NOT_BE_LOGGED') {
     throw 'Missing required tool-call failures must retain only response-shape, route and token-use diagnostics; a self-test must prove response text is not copied into the failure message.'
+}
+if ($agentHostProviderSource -notmatch 'reasoningEffortIsExplicitlySupportedByFreeLlmApi' -or
+    $agentHostProviderSource -notmatch '_supportsReasoningEffort' -or
+    $agentHostProviderSource -notmatch 'ReasoningEffortApplied' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'freellmapi-advertised-reasoning-effort-low-is-applied-with-thinking-disabled' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'freellmapi-unadvertised-reasoning-effort-is-omitted' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'reasoningEffortApplied' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'reasoningEffortApplied') {
+    throw 'FreeLLMAPI reasoning effort must be sent only when the selected model advertises the capability, even with thinking disabled, and the applied setting must be auditable.'
+}
+if ($agentHostDecisionCycleSource -notmatch 'BuildBattleAndCaptivityDecisionPrompt' -or
+    $agentHostDecisionCycleSource -notmatch 'battle-and-captivity-prompt-scopes-visible-pursuit-to-current-target-action' -or
+    $agentHostDecisionCycleSource -notmatch 'battle-and-captivity-prompt-scopes-encounter-risk-without-postbattle-sections' -or
+    $agentHostDecisionCycleSource -notmatch 'battle-and-captivity-prompt-scopes-release-page-to-native-mno-continue') {
+    throw 'Battle/captivity prompts must be scoped to the latest Native state/action catalog and regression-test the current pursuit, encounter and captivity-release steps.'
+}
+if ($agentHostProviderSource -notmatch '_supportsReasoningEffort' -or
+    $agentHostProviderSource -notmatch 'reasoningEffortIsExplicitlySupportedByFreeLlmApi' -or
+    $agentHostProviderSource -notmatch 'ReasoningEffortApplied' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'freellmapi-advertised-reasoning-effort-low-is-applied-with-thinking-disabled' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'freellmapi-unadvertised-reasoning-effort-is-omitted') {
+    throw 'FreeLLMAPI reasoning effort must be sent only when the selected model advertises the capability, even when the separate thinking switch is disabled, and the applied setting must be auditable.'
 }
 if ($agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-localized-direct-offer-hidden' -or
     $agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-discovery-budget-not-bounded' -or
@@ -522,7 +544,7 @@ if ($harnessScript -notmatch "'AgentHostCampaignLoopEvaluation' \{ @\('Preflight
     throw 'The Host campaign loop must remain opt-in and prove its bounded Native map-arrival contract, natural time progression, real local-model path, visual evidence and cleanup.'
 }
 if ($harnessScript -notmatch "'AgentHostVillageToolsQuestEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostVillageToolsQuestEvaluation'\) \}" -or
-    -not $harnessScript.Contains("effectiveSmokeTimeoutSeconds = if (`$Phase -in @('FreshStoryModeModelEvaluation','PersistentEycCampaign','FreshStoryModeNativeInquiryResponseEvaluation','AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostEstablishClanAutonomyEvaluation','AgentHostCaptivityRecoveryEvaluation','AgentHostEstablishClanGoldSaleEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max(`$SmokeTimeoutSeconds, 240) }") -or
+    -not $harnessScript.Contains("effectiveSmokeTimeoutSeconds = if (`$Phase -in @('FreshStoryModeModelEvaluation','FreshStoryModeNativeInquiryResponseEvaluation','AgentHostVillageToolsQuestEvaluation','AgentHostEstablishClanGoalPlannerEvaluation','AgentHostEstablishClanAutonomyEvaluation','AgentHostCaptivityRecoveryEvaluation','AgentHostEstablishClanGoldSaleEvaluation','AgentHostBattleSimulationEvaluation','AgentHostBattleAndCaptivityEvaluation')) { [Math]::Max(`$SmokeTimeoutSeconds, 240) }") -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostVillageToolsQuestEvaluation'" -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'VerifyQuestInventoryDelta' -or
     $agentHostVillageToolsQuestLoopSource -notmatch 'village-tools-direct-quest-option-unavailable' -or
@@ -972,12 +994,12 @@ if ($harnessScript -notmatch "PersistentEycMaxProviderDecisionsPerContinuation\s
     throw 'Persistent StoryMode runs must default to one provider decision, accept provider-neutral model IDs, and verify the selected ID in the configured provider catalog before game start.'
 }
 if ($harnessScript -notmatch "'FreshStoryModeModelEvaluation' \{ @\('Preflight', 'ConfiguredModelPreflight', 'Build', 'Smoke', 'AgentHostPackage', 'FreshStoryModeModelEvaluation'\) \}" -or
-    $harnessScript -notmatch "'PersistentEycCampaign' \{ @\('Preflight', 'ConfiguredModelPreflight', 'Build', 'Smoke', 'AgentHostPackage', 'PersistentEycCampaign'\) \}" -or
+    $harnessScript -notmatch "'PersistentEycCampaign' \{ @\('Preflight', 'ConfiguredModelPreflight', 'Build', 'AgentHostPackage', 'PersistentEycCampaign'\) \}" -or
     $harnessScript -notmatch "Invoke-Stage -Name 'ConfiguredModelPreflight'" -or
     $harnessScript -notmatch "direct-remote-openai-compatible" -or
     $harnessScript -notmatch 'InferenceRequests = 0' -or
     $harnessScript -notmatch 'BannerlordStarted = \$false') {
-    throw 'Live Campaign phases must reject unavailable configured model routes before Build/Smoke and record that preflight sends no inference request or game launch.'
+    throw 'Live Campaign phases must reject unavailable configured model routes before Build or any game startup and record that preflight sends no inference request or client launch.'
 }
 $autonomyStages = [regex]::Match($harnessScript, "'AgentHostEstablishClanAutonomyEvaluation'\s*\{\s*@\(([^)]*)\)")
 $autonomyStageList = if ($autonomyStages.Success) { $autonomyStages.Groups[1].Value } else { '' }
@@ -1210,6 +1232,8 @@ if ($harnessScript -notmatch "HarnessContractVersion\s*=\s*'$contractVersion'" -
     $smokeModuleSource -notmatch 'WindowLayoutNonActivating' -or $smokeModuleSource -notmatch 'candidateWindowLayout\.NonActivating' -or
     $smokeModuleSource -notmatch 'WindowNotForeground' -or $smokeModuleSource -notmatch 'candidateWindowLayout\.NotForeground' -or
     $smokeModuleSource -notmatch 'CursorUnrestrictedAcrossDesktop' -or $smokeModuleSource -notmatch '\$testWindowLayout\.CursorUnrestrictedAcrossDesktop' -or
+    $smokeModuleSource -notmatch 'Get-ChronicleCursorClipSnapshot' -or $smokeModuleSource -notmatch '-CursorClipBaseline \$cursorClipBaseline' -or
+    $smokeModuleSource -notmatch 'CursorClipRestorationAfterExit' -or $smokeModuleSource -notmatch 'cursorClipRestoration\.Restored' -or
     $smokeModuleSource -notmatch 'ForegroundProcessId = if \(\$testWindowLayout\)' -or
     $smokeModuleSource -notmatch 'HarnessInputLockObserved' -or $smokeModuleSource -notmatch 'CHRONICLE_HARNESS_AGENT_INPUT_LOCK' -or
     $smokeModuleSource -notmatch 'CampaignGoal' -or $smokeModuleSource -notmatch 'ViewAgentStatus' -or
@@ -1604,7 +1628,11 @@ $startupEvidenceSource = Get-Content -LiteralPath $startupEvidenceScript -Raw -E
 if (-not (Test-ChronicleSteamClientReadiness)) { throw 'Steam API readiness regression checks failed.' }
 if ($startupEvidenceSource -notmatch 'function Ensure-ChronicleSteamClientReady' -or
     $startupEvidenceSource -notmatch 'function Get-ChronicleSteamLoginState' -or
+    $startupEvidenceSource -notmatch 'function Test-ChronicleSteamReconnectDelayExceedsHarnessWindow' -or
     $startupEvidenceSource -notmatch 'steam-user-logged-on' -or
+    $startupEvidenceSource -notmatch 'SteamServerConnectFailure_t' -or
+    $startupEvidenceSource -notmatch 'ReconnectDelaySeconds' -or
+    $startupEvidenceSource -notmatch 'ReconnectDelaySeconds -gt \$TimeoutSeconds' -or
     $startupEvidenceSource -notmatch "ArgumentList '-silent'.*-WindowStyle Hidden" -or
     $startupEvidenceSource -notmatch 'function Start-ChronicleSteamGame' -or
     $startupEvidenceSource -notmatch 'function Disable-ChronicleHarnessGameSound' -or
@@ -1682,7 +1710,7 @@ if ($battleFixtureSource -notmatch 'Start-ChronicleWindowVideoCapture' -or $batt
 if ($battleFixtureSource -notmatch 'RenownProgressionPassed' -or $battleFixtureSource -notmatch 'ClanRenownDelta -gt 0' -or $battleFixtureSource -notmatch 'BattleRewardTelemetryPassed' -or $battleFixtureSource -notmatch 'playerContribution' -or $battleFixtureSource -notmatch 'winnerPartyAwards') { throw 'PostBattle must require both a positive renown delta and complete player reward telemetry for the P5 battle progression check.' }
 if ($battleFixtureSource -notmatch 'EycQuestObservedAtStart' -or $battleFixtureSource -notmatch 'EycJournalRenownBeforeBattle' -or $battleFixtureSource -notmatch 'EycJournalRenownAfterBattle' -or $battleFixtureSource -notmatch 'Read-EycJournalRenown' -or $harnessScript -notmatch '-LoadSaveName \$BattleSimulationSourceSaveName -Scenario PostBattle -CaptureFrames') { throw 'PostBattle must optionally read the original EYC Journal on a selected disposable source fixture and retain its before/after Renown progress alongside Clan Renown telemetry.' }
 if ($subModuleSource -notmatch 'preserveSoloMainParty \? 0 : Math\.Max\(0, 20 - mainParty\.MemberRoster\.TotalManCount\)' -or $subModuleSource -notmatch 'enemyCount = preserveSoloMainParty \? 1 : 19' -or $subModuleSource -notmatch 'fixtureOffset = preserveSoloMainParty \? 5\.0f : 0\.5f' -or $subModuleSource -notmatch 'enemyParty\.Ai\.DisableAi\(\)' -or $subModuleSource -notmatch 'opponentAiDisabledForBattleProbe' -or $subModuleSource -match 'RestartPlayerEncounter\(enemyParty\.Party' -or $battleFixtureSource -notmatch 'fixtureEnemyIsEncountered' -or $battleFixtureSource -notmatch 'Native pursuit lost the disposable looter target' -or $harnessScript -notmatch 'PostBattleChild\.log' -or $harnessScript -notmatch 'BattleFixtureChild\.log') { throw 'Battle fixtures must separately preserve a one-member MainParty/one-looter solo boundary at a non-overlapping map position or scale the ordinary roster, use Native pursuit/encounter, retain ordinary opponent AI for Retreat coverage, fail promptly on target loss, and retain child-process output.' }
-if ($battleMissionFormationProbeSource -notmatch '\[switch\]\$SoloMainHero' -or $battleMissionFormationProbeSource -notmatch "Invoke-AgentCli 'resume'" -or $battleMissionFormationProbeSource -notmatch 'id -eq ''chronicle_harness_looters'' -and \$_.hostile' -or $battleMissionFormationProbeSource -notmatch 'Capture-NativeMapFrame' -or $battleMissionFormationProbeSource -notmatch 'native-target-selected-but-waiting' -or $battleMissionFormationProbeSource -notmatch 'nativeDeploymentPreconditionDiagnostic = \$hostMissionResult\.nativeDeploymentPreconditionDiagnostic' -or $battleMissionFormationProbeSource -notmatch 'nativeDeploymentCompletedByNative' -or $battleMissionFormationProbeSource -notmatch 'formationCount -gt 0' -or $battleMissionFormationProbeSource -notmatch 'nativeBattleStatusAfterHost' -or $battleMissionFormationProbeSource -notmatch 'HostNativeBattlePreconditionFailure\.bmp' -or $agentHostBattleMissionLoopSource -notmatch 'battle-mission-native-spontaneous-deployment-transition-unverified' -or $agentHostBattleMissionLoopSource -notmatch 'availablePlayerFormationCount > 0' -or $harnessScript -notmatch '\[switch\]\$BattleMissionSoloMainHeroProbe' -or $agentHostProgramSource -notmatch 'solo-battle-fixture') { throw 'The opt-in solo MainHero battle probe must assert a one-member Native MainParty, target its isolated hostile fixture, preserve the exact Host precondition diagnostic/post-failure Mission status, skip empty F6, and verify Native deployment reconciliation.' }
+if ($battleMissionFormationProbeSource -notmatch '\[switch\]\$SoloMainHero' -or $battleMissionFormationProbeSource -notmatch "Invoke-AgentCli 'resume'" -or $battleMissionFormationProbeSource -notmatch 'id -eq ''chronicle_harness_looters'' -and \$_.hostile' -or $battleMissionFormationProbeSource -notmatch 'Capture-NativeFrame' -or $battleMissionFormationProbeSource -notmatch 'native-target-selected-but-waiting' -or $battleMissionFormationProbeSource -notmatch 'nativeDeploymentPreconditionDiagnostic = \$hostMissionResult\.nativeDeploymentPreconditionDiagnostic' -or $battleMissionFormationProbeSource -notmatch 'nativeDeploymentCompletedByNative' -or $battleMissionFormationProbeSource -notmatch 'formationCount -gt 0' -or $battleMissionFormationProbeSource -notmatch 'nativeBattleStatusAfterHost' -or $battleMissionFormationProbeSource -notmatch 'HostNativeBattlePreconditionFailure\.bmp' -or $agentHostBattleMissionLoopSource -notmatch 'battle-mission-native-spontaneous-deployment-transition-unverified' -or $agentHostBattleMissionLoopSource -notmatch 'availablePlayerFormationCount > 0' -or $harnessScript -notmatch '\[switch\]\$BattleMissionSoloMainHeroProbe' -or $agentHostProgramSource -notmatch 'solo-battle-fixture') { throw 'The opt-in solo MainHero battle probe must assert a one-member Native MainParty, target its isolated hostile fixture, preserve the exact Host precondition diagnostic/post-failure Mission status, skip empty F6, and verify Native deployment reconciliation.' }
 if ($battleFixtureSource -notmatch 'inventoryLootItemCountAfter -ne 0' -or $battleFixtureSource -match 'inventoryItemsTransferred -lt \$inventoryLootItemCountBefore|inventoryItemsTransferred -gt 0') { throw 'PostBattle must verify Native Loot All by checking zero remaining loot; inventory slot-count growth is not a valid item-transfer count when existing stacks merge.' }
 if ($battleMissionFormationProbeSource -notmatch 'CHRONICLE_HARNESS_AGENT_INPUT_LOCK = ''1''' -or
     $battleMissionFormationProbeSource.IndexOf('$env:CHRONICLE_HARNESS_AGENT_INPUT_LOCK = ''1''', [StringComparison]::Ordinal) -gt $battleMissionFormationProbeSource.IndexOf("Invoke-AgentCli 'load'", [StringComparison]::Ordinal) -or
@@ -1783,8 +1811,15 @@ if ($harnessScript -notmatch "'BattleMissionNativeAiHandoffProbe' \{ @\('Preflig
     $battleMissionAdapterSource -notmatch 'CommonAIComponent' -or
     $battleMissionAdapterSource -notmatch 'HumanAIComponent' -or
     $battleMissionAdapterSource -notmatch 'DisableScriptedMovement\(\)' -or
+    $battleMissionAdapterSource -notmatch 'ResetNativeThirdPersonBattleCamera' -or
+    $battleMissionAdapterSource -notmatch 'NativeThirdPersonBattleCameraElevation = -0\.2f' -or
+    $battleMissionAdapterSource -notmatch 'NativeThirdPersonBattleCameraNearVerticalThreshold = -0\.7f' -or
+    $battleMissionFormationProbeSource -notmatch 'missionAutoDeploy' -or
+    $battleMissionFormationProbeSource -notmatch 'nativeAiHandoffCameraFrame' -or
+    $battleMissionFormationProbeSource -notmatch 'nativeAiHandoffExpectedCameraElevation' -or
+    $battleMissionFormationProbeSource -notmatch 'badCameraSamples' -or
     $battleMissionAdapterSource -notmatch 'RestoreNativeMainAgentAiHandoff') {
-    throw 'The full Native MainAgent AI handoff probe must reproduce the installed initialization sequence, restore changed state, remain Harness-only, and stay out of AgentHost.'
+    throw 'The Native MainAgent AI handoff must restore a readable 1.4.8 third-person camera; its disposable no-model probe must use Native Auto Deploy, retain a frame, and check camera samples.'
 }
 if ($protocolSource -notmatch 'case "missionAutopilotMainAgent"' -or
     $protocolSource -notmatch 'case "missionAutoDeploy"' -or
@@ -2299,7 +2334,7 @@ if ($freshCampaignSource -notmatch 'StoryModeNewGame' -or
     $freshCampaignTest -notmatch 'StoryModeAgentNativeActionTraceObserved' -or
     $freshCampaignTest -notmatch 'AgentHostLifecycleHostReceipt\.json' -or
     $freshCampaignTest -notmatch 'AgentHostProgress\.jsonl') { throw 'Fresh StoryMode setup must use the original StoryMode Campaign and exact skip-tutorial/confirmation dialogue choices, verify natural EYC activation, and never call the tutorial completion function directly; its optional live Host slice must use bounded same-session MCM startup with a real decision trace.' }
-if ($harnessScript -notmatch "'PersistentEycCampaign' \{ @\('Preflight', 'ConfiguredModelPreflight', 'Build', 'Smoke', 'AgentHostPackage', 'PersistentEycCampaign'\) \}" -or
+if ($harnessScript -notmatch "'PersistentEycCampaign' \{ @\('Preflight', 'ConfiguredModelPreflight', 'Build', 'AgentHostPackage', 'PersistentEycCampaign'\) \}" -or
     [regex]::Matches($harnessScript, "(?m)^        'PersistentEycCampaign' \{").Count -ne 1 -or
     $harnessScript -match "'All' \{[^\r\n]*'PersistentEycCampaign'" -or
     $harnessScript -notmatch '\[ValidatePattern\(''\^\(\[A-Za-z0-9_\-\]\{1,8\}\)\?\$''\)\]\[string\]\$PersistentEycCampaignKey' -or
@@ -2500,12 +2535,19 @@ $recruitmentTest = Get-Content (Join-Path $harnessRoot 'Test-AgentRecruitment.ps
 if ($agentLoopProvider -notmatch "CHRONICLE_TEST_PROVIDER_MODE -eq 'recruitment'" -or $agentLoopProvider -notmatch '\$request\.previousActionReceipt' -or $agentLoopProvider -notmatch '\$receipt\.data\.offers' -or $recruitmentTest -notmatch 'OfferDataForwardedToNextDecision' -or $recruitmentTest -notmatch 'OfferSelectionMatchedReceipt' -or $recruitmentTest -notmatch 'RecruitmentDecisionSummary' -or $recruitmentTest -match 'RecruitmentDecisionTrace\s*=\s*\$recruitmentLoop\.trace') { throw 'Recruitment must test receipt-based selection and keep only concise evidence, not duplicate full observations.' }
 if ($freshCampaignTest -notmatch 'Set-ChronicleTestWindow' -or $freshCampaignTest -notmatch 'WindowLayoutApplied' -or $freshCampaignTest -notmatch 'Math\]::Abs\(\$windowLayout\.Width - 840\) -le 1' -or $freshCampaignTest -notmatch 'display_width' -or $freshCampaignTest -notmatch '840') { throw 'FreshCampaign must enforce the existing non-activating windowed test layout within one-pixel window-manager rounding.' }
 . (Join-Path $harnessRoot 'Test-WindowLayout.ps1')
+$cursorClipRestoreContract = Test-ChronicleCursorClipRestoreContract
 if (-not (Test-ChronicleNoActivateStyleContract) -or
+    -not [bool]$cursorClipRestoreContract.RestoresOnlyTestIntroducedClip -or
+    -not [bool]$cursorClipRestoreContract.RefusesWhenGameIsForeground -or
+    -not [bool]$cursorClipRestoreContract.RefusesToOverridePreExistingRestriction -or
     $testWindowLayoutSource -notmatch 'EnsureNoActivate' -or
     $testWindowLayoutSource -notmatch '0x08000000L' -or
     $testWindowLayoutSource -notmatch 'GetForegroundProcessId' -or
     $testWindowLayoutSource -notmatch 'NotForeground = \$notForeground' -or
     $testWindowLayoutSource -notmatch 'GetClipCursor' -or
+    $testWindowLayoutSource -notmatch 'ClipCursor\(ref Rect rect\)' -or
+    $testWindowLayoutSource -notmatch 'CursorClipRestorePolicy' -or
+    $testWindowLayoutSource -match 'ClipCursor\(IntPtr.Zero\)' -or
     $testWindowLayoutSource -notmatch 'CursorUnrestrictedAcrossDesktop = \$cursorUnrestrictedAcrossDesktop' -or
     $testWindowLayoutSource -notmatch 'GetSystemMetrics\(76\)' -or
     $testWindowLayoutSource -notmatch 'withinExpectedBounds' -or
@@ -2516,7 +2558,7 @@ if (-not (Test-ChronicleNoActivateStyleContract) -or
     $testWindowLayoutSource -notmatch 'IsIconic' -or $testWindowLayoutSource -notmatch 'IsWindowVisible' -or
     $testWindowLayoutSource -notmatch 'Minimized = \$iconic' -or
     $testWindowLayoutSource -match 'SetForegroundWindow|BringWindowToTop') {
-    throw 'Harness game windows must remain visible for capture but carry WS_EX_NOACTIVATE, verify the style, and never foreground/activate or inject global input.'
+    throw 'Harness game windows must remain visible for capture but carry WS_EX_NOACTIVATE, verify the style, and restore only a test-introduced cursor clip to the previously unrestricted desktop bounds without foregrounding or injecting input.'
 }
 if ($agentCliSource -notmatch "'recoverTestConfig'" -or $testWindowLayoutSource -notmatch "max_framerate = 30" -or $agentCliSource -notmatch 'engine_config\.chronicle-backup' -or $agentCliSource -notmatch 'Restore-ChronicleTestEngineConfig' -or $agentCliSource -notmatch 'engineConfigRestored' -or $agentCliSource -notmatch 'startup-timeout-' -or $agentCliSource -notmatch 'RglErrorLogTail' -or $agentCliSource -notmatch 'WatchdogLogTail' -or $agentCliSource -notmatch 'Ensure-ChronicleSteamClient' -or $startupEvidenceSource -notmatch 'steamwebhelper' -or $startupEvidenceSource -notmatch 'Get-ChronicleSteamClientReadiness' -or $startupEvidenceSource -notmatch 'Bannerlord was not launched' -or $agentCliSource -notmatch 'ConvertTo-ChronicleStartupDialogEvidence' -or $agentCliSource -notmatch 'StreamReader') { throw 'Harness must wait for stable Steam WebHelper readiness, serialize sanitized startup dialog evidence, and preserve Steam API warnings without global input.' }
 if ($freshCampaignTest -notmatch 'FreshCampaign\.initial-state\.json' -or $freshCampaignTest -notmatch 'WriteAllBytes' -or $freshCampaignTest -notmatch 'creationCompleted -and \$initialSnapshotCaptured') { throw 'FreshCampaign must persist the post-creation Agent observation as UTF-8 evidence before passing.' }

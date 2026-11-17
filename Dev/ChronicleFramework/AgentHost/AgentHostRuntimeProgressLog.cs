@@ -143,6 +143,7 @@ internal static class AgentHostRuntimeProgressLog
             ["proxySelectionSource"] = result.ProxySelectionSource,
             ["proxyEndpointHostPort"] = result.ProxyEndpointHostPort,
             ["responseFormatMode"] = result.ResponseFormatMode,
+            ["reasoningEffortApplied"] = result.ReasoningEffortApplied,
             ["promptTokens"] = result.PromptTokens,
             ["completionTokens"] = result.CompletionTokens,
             ["promptCacheHitTokens"] = result.PromptCacheHitTokens,

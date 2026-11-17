@@ -15,6 +15,8 @@ namespace ChronicleFramework;
 
 internal static class ChronicleAgentBattleMissionAdapter
 {
+    private const float NativeThirdPersonBattleCameraElevation = -0.2f;
+    private const float NativeThirdPersonBattleCameraNearVerticalThreshold = -0.7f;
     private static Mission? _deploymentFinishSubmittedForMission;
     private static Mission? _deploymentAutoDeploySubmittedForMission;
     private static Type? _nativeMainAgentControllerType;
@@ -56,6 +58,7 @@ internal static class ChronicleAgentBattleMissionAdapter
         var orderController = team?.PlayerOrderController;
         var mainAgentFormation = mainAgent?.Formation;
         var mainAgentFormationActiveBehavior = mainAgentFormation?.AI?.ActiveBehavior;
+        var cameraController = mission == null ? null : GetNativeMainAgentController(mission);
         TaleWorlds.Library.Vec2? mainAgentFormationAiOrderTarget = null;
         if (mainAgentFormation != null && mainAgentFormationActiveBehavior != null)
             mainAgentFormationAiOrderTarget = mainAgentFormationActiveBehavior.CurrentOrder.GetPosition(mainAgentFormation);
@@ -123,7 +126,7 @@ internal static class ChronicleAgentBattleMissionAdapter
                 json.Append('}');
             }
             json.Append(',');
-            var nativeMainAgentController = GetNativeMainAgentController(mission!);
+            var nativeMainAgentController = cameraController;
             json.Append("\"missionMainAgentControllerActive\":");
             try { json.Append(nativeMainAgentController == null ? "null" : ReadControllerActivated(nativeMainAgentController) ? "true" : "false"); }
             catch { json.Append("null"); }
@@ -133,6 +136,7 @@ internal static class ChronicleAgentBattleMissionAdapter
                 .Append(",\"z\":").Append(Number(mainAgent.Position.Z)).Append("}}");
             json.Append(",\"agentNavigator\":").Append(ChronicleAgentProtocol.BuildMissionNavigationObservationJson(mainAgent));
         }
+        json.Append(",\"camera\":").Append(BuildMissionCameraSnapshot(mission, cameraController));
         json.Append(",\"playerTeam\":{\"formationCount\":").Append(formations.Length)
             .Append(",\"orderControllerAvailable\":").Append(orderController == null ? "false" : "true")
             .Append(",\"selectedFormationCount\":").Append(selected.Length)
@@ -423,11 +427,12 @@ internal static class ChronicleAgentBattleMissionAdapter
         var surrogateControllerBefore = surrogate?.Controller.ToString();
         var positionBefore = mainAgent.Position;
         var healthBefore = mainAgent.Health;
+        var nativeController = fullNativeHandoff ? GetNativeMainAgentController(mission, required: true) : null;
+        var cameraBefore = BuildMissionCameraSnapshot(mission, nativeController);
         if (fullNativeHandoff && surrogate != null)
             throw new InvalidOperationException("harnessMainAgentNativeAiHandoffProbe does not combine with a surrogate MainAgent");
         if (fullNativeHandoff)
         {
-            var nativeController = GetNativeMainAgentController(mission, required: fullNativeHandoff);
             _mainAgentAiProbeFullNativeHandoff = true;
             _mainAgentAiProbeOriginalAgentFlags = mainAgent.GetAgentFlags();
             _mainAgentAiProbeOriginalAiStateFlags = ReadMemberValue(mainAgent, "AIStateFlags");
@@ -502,6 +507,8 @@ internal static class ChronicleAgentBattleMissionAdapter
         json.Append(",\"surrogateControllerAfter\":"); AppendStringValue(json, surrogate?.Controller.ToString());
         json.Append(",\"healthBefore\":").Append(Number(healthBefore))
             .Append(",\"healthAfter\":").Append(Number(mainAgent.Health));
+        json.Append(",\"cameraBefore\":").Append(cameraBefore)
+            .Append(",\"cameraAfter\":").Append(BuildMissionCameraSnapshot(mission, nativeController));
         json.Append(",\"positionBefore\":{\"x\":").Append(Number(positionBefore.X))
             .Append(",\"y\":").Append(Number(positionBefore.Y))
             .Append(",\"z\":").Append(Number(positionBefore.Z)).Append('}');
@@ -554,6 +561,8 @@ internal static class ChronicleAgentBattleMissionAdapter
             currentOrder.OnUnitJoinOrLeave(formation, mainAgent, isJoining: true);
         }
 
+        ResetNativeThirdPersonBattleCamera(mission, _mainAgentAiProbeMissionController);
+
         // RTS Camera disables the player input controller in free-camera AI
         // mode. This probe keeps the camera unchanged but prevents its input
         // controller from competing with the Native AI.
@@ -563,6 +572,25 @@ internal static class ChronicleAgentBattleMissionAdapter
             InvokeControllerInteractionClearFocus(missionController);
             InvokeControllerMethod(missionController, "Disable");
         }
+    }
+
+    private static void ResetNativeThirdPersonBattleCamera(Mission mission, object? missionController)
+    {
+        if (mission.CameraIsFirstPerson || missionController == null ||
+            ReadMemberValue(missionController, "MissionScreen") is not object missionScreen)
+            return;
+
+        if (ReadMemberValue(missionScreen, "CameraElevation") is not float currentElevation ||
+            (!float.IsNaN(currentElevation) && !float.IsInfinity(currentElevation) &&
+             currentElevation >= NativeThirdPersonBattleCameraNearVerticalThreshold))
+            return;
+
+        // The Native MissionScreen starts from a shallow third-person angle
+        // (-0.2 radians). Deployment/idle camera input can leave the value at
+        // its near-vertical clamp before the AI lease begins; only then restore
+        // that Native baseline, preserving other valid player camera angles.
+        WriteMemberValue(missionScreen, "CameraElevation", NativeThirdPersonBattleCameraElevation);
+        WriteMemberValue(missionScreen, "_cameraElevationDelta", 0f);
     }
 
     private static void RestoreNativeMainAgentAiHandoff(Agent owner, Mission mission)
@@ -642,6 +670,16 @@ internal static class ChronicleAgentBattleMissionAdapter
         var property = type.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
         if (property != null) return property.GetValue(target);
         return type.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(target);
+    }
+
+    private static string BuildMissionCameraSnapshot(Mission? mission, object? controller)
+    {
+        if (mission == null || controller == null || ReadMemberValue(controller, "MissionScreen") is not object missionScreen) return "null";
+        if (ReadMemberValue(missionScreen, "CameraBearing") is not float bearing ||
+            ReadMemberValue(missionScreen, "CameraElevation") is not float elevation ||
+            float.IsNaN(bearing) || float.IsInfinity(bearing) || float.IsNaN(elevation) || float.IsInfinity(elevation)) return "null";
+        return "{\"bearing\":" + Number(bearing) + ",\"elevation\":" + Number(elevation) +
+            ",\"firstPerson\":" + (mission.CameraIsFirstPerson ? "true" : "false") + "}";
     }
 
     private static void WriteMemberValue(object target, string name, object value)

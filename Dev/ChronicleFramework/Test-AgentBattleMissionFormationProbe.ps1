@@ -67,7 +67,7 @@ function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @()) {
     return $receipt
 }
 
-function Capture-NativeMapFrame([string]$Name) {
+function Capture-NativeFrame([string]$Name) {
     if (-not $env:CHRONICLE_HARNESS_TEMP -or -not (Test-Path -LiteralPath $env:CHRONICLE_HARNESS_TEMP -PathType Container)) {
         throw 'Native map-frame evidence requires the current Harness temporary directory.'
     }
@@ -81,7 +81,7 @@ function Capture-NativeMapFrame([string]$Name) {
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
     while (-not (Test-Path -LiteralPath $temporaryFrame -PathType Leaf) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 100 }
     if (-not (Test-Path -LiteralPath $temporaryFrame -PathType Leaf) -or (Get-Item -LiteralPath $temporaryFrame).Length -lt 4096) {
-        throw "Native map-frame capture '$Name' did not produce a readable engine frame."
+        throw "Native engine-frame capture '$Name' did not produce a readable frame."
     }
     Move-Item -LiteralPath $temporaryFrame -Destination $evidenceFrame -Force
     return $evidenceFrame
@@ -189,7 +189,7 @@ try {
                 throw "The explicit Native clock resume after pursuit was rejected; status='$($clockResume.status)', state='$($clockResume.state.context.gameState)', time='$($clockResume.timeControlMode)'."
             }
         }
-        $pursuitFrame = Capture-NativeMapFrame 'pursuit-target-selected'
+        $pursuitFrame = Capture-NativeFrame 'pursuit-target-selected'
         $deadline = [DateTime]::UtcNow.AddSeconds([Math]::Min(60, $TimeoutSeconds))
         $lastWaitingCampaignDay = $null
         $stableWaitingSince = $null
@@ -204,7 +204,7 @@ try {
                 [Math]::Abs([double]$state.campaignDay - [double]$lastWaitingCampaignDay) -lt 0.000001) {
                 if ($null -eq $stableWaitingSince) { $stableWaitingSince = [DateTime]::UtcNow }
                 if (([DateTime]::UtcNow - $stableWaitingSince).TotalSeconds -ge 3) {
-                    $waitingFrame = Capture-NativeMapFrame 'native-target-selected-but-waiting'
+                    $waitingFrame = Capture-NativeFrame 'native-target-selected-but-waiting'
                     throw "Native pursuit left MainParty waiting at its exact current target without a Campaign Encounter. TargetId='$targetId'; CampaignDay=$($state.campaignDay); TimeControlMode=$($state.timeControlMode); TargetFrame='$pursuitFrame'; WaitingFrame='$waitingFrame'."
                 }
             }
@@ -495,9 +495,27 @@ try {
         return
     }
 
+    $deploymentAutoDeploy = $null
     $deploymentFinish = $null
     $deploymentTransitionPollCount = 0
     if ($missionState.state.mission.mode -eq 'Deployment') {
+        $deploymentStatus = Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-native-deployment-status")
+        if ($deploymentStatus.status -ne 'completed' -or $deploymentStatus.data.deploymentUi.viewAvailable -ne $true -or
+            $deploymentStatus.data.deploymentUi.canStartMission -ne $true -or $deploymentStatus.data.deploymentUi.deploymentFinished -eq $true) {
+            throw 'The Native battle deployment screen did not expose an enabled original Auto Deploy/Ready flow.'
+        }
+        $deploymentAutoDeploy = Invoke-AgentCli 'missionAutoDeploy' @('-CommandId', "$prefix-native-auto-deploy")
+        if ($deploymentAutoDeploy.status -ne 'completed' -or $deploymentAutoDeploy.data.nativeHandler -ne 'MissionGauntletSingleplayerOrderUIHandler.OnAutoDeploy' -or
+            $deploymentAutoDeploy.data.nativeAutoDeployHandler -ne 'MissionOrderDeploymentControllerVM.ExecuteAutoDeploy' -or
+            $deploymentAutoDeploy.data.nativeDeploymentHandler -ne 'MissionOrderDeploymentControllerVM.ExecuteDeployPlayerSide' -or
+            $deploymentAutoDeploy.data.canStartMission -ne $true -or $deploymentAutoDeploy.data.timeControlModeBefore -ne 'Stop' -or
+            $deploymentAutoDeploy.data.timeControlModeAfter -ne 'Stop' -or
+            [Math]::Abs([double]$deploymentAutoDeploy.data.campaignDayAfter - [double]$deploymentAutoDeploy.data.campaignDayBefore) -gt 0.000001) {
+            throw 'The Native Auto Deploy screen action did not preserve the stopped Campaign clock and original UI handler receipt.'
+        }
+        $missionState = Invoke-AgentCli 'state' @('-CommandId', "$prefix-after-native-auto-deploy")
+    }
+    if ($missionState.state.context.gameState -eq 'MissionState' -and $missionState.state.mission.mode -eq 'Deployment') {
         $deploymentFinish = Invoke-AgentCli 'missionFinishDeployment' @('-CommandId', "$prefix-native-finish-deployment")
         if ($deploymentFinish.status -ne 'completed' -or $deploymentFinish.data.nativeHandler -ne 'OrderOfBattleVM.ExecuteBeginMission' -or
             $deploymentFinish.data.nativeDeploymentHandler -ne 'DeploymentHandler.FinishDeployment' -or $deploymentFinish.data.canStartMission -ne $true -or
@@ -529,6 +547,20 @@ try {
         if ($missionState.state.mission.mode -ne 'Battle') { throw 'Native FinishDeployment timed out before Battle mode appeared.' }
     }
 
+    if ($missionState.state.context.gameState -ne 'MissionState' -or $missionState.state.mission.mode -ne 'Battle') {
+        $battleReadyDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Min(30, $TimeoutSeconds))
+        while ([DateTime]::UtcNow -lt $battleReadyDeadline) {
+            $missionState = Invoke-AgentCli 'state' @('-CommandId', "$prefix-battle-ready-$([Guid]::NewGuid().ToString('N'))")
+            $deploymentTransitionPollCount++
+            if ($missionState.state.context.gameState -eq 'MissionState' -and $missionState.state.mission.mode -eq 'Battle') { break }
+            if ($missionState.state.context.gameState -ne 'MissionState' -or $missionState.state.mission.missionEnded -or $missionState.state.context.inquiryOpen) {
+                throw "Native deployment did not advance the same Mission to Battle safely; state='$($missionState.state.context.gameState)', mode='$($missionState.state.mission.mode)', inquiry=$($missionState.state.context.inquiryOpen)."
+            }
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    if ($missionState.state.mission.mode -ne 'Battle') { throw 'Native deployment timed out before Battle mode appeared.' }
+
     $statusBefore = Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-status-before")
     if ($statusBefore.data.supported -ne $true -or $statusBefore.data.missionMode -ne 'Battle') { throw "Battle Mission status rejected the expected field battle: $($statusBefore.data.reason)" }
     $mainAgentBefore = Get-FormationSnapshot $statusBefore
@@ -545,6 +577,8 @@ try {
     $mainAgentAfter = Get-FormationSnapshot $statusAfter
 
     $nativeAiHandoffProbe = $null
+    $nativeAiHandoffCameraFrame = $null
+    $nativeAiHandoffExpectedCameraElevation = $null
     $nativeAiHandoffSamples = [System.Collections.Generic.List[object]]::new()
     $mainAgentMovedDuringNativeAiHandoff = $null
     if ($ProbeMainAgentNativeAiHandoff) {
@@ -556,6 +590,17 @@ try {
             [Math]::Abs([double]$nativeAiHandoffProbe.data.campaignDayAfter - [double]$nativeAiHandoffProbe.data.campaignDayBefore) -gt 0.000001) {
             throw 'The Native MainAgent AI handoff did not enter its bounded AI lease while preserving the Campaign clock.'
         }
+        $cameraBeforeHandoff = $nativeAiHandoffProbe.data.cameraBefore
+        $handoffCamera = $nativeAiHandoffProbe.data.cameraAfter
+        if ($null -eq $cameraBeforeHandoff -or $null -eq $handoffCamera) { throw 'Native battle camera telemetry was unavailable around the AI handoff.' }
+        $expectedHandoffCameraElevation = [double]$cameraBeforeHandoff.elevation
+        if ($cameraBeforeHandoff.firstPerson -eq $false -and $expectedHandoffCameraElevation -lt -0.7) { $expectedHandoffCameraElevation = -0.2 }
+        if ($handoffCamera.firstPerson -ne $cameraBeforeHandoff.firstPerson -or
+            [Math]::Abs([double]$handoffCamera.elevation - $expectedHandoffCameraElevation) -gt 0.01) {
+            throw "Native battle camera did not preserve a valid view or repair a near-vertical third-person angle; expected elevation=$expectedHandoffCameraElevation firstPerson=$($cameraBeforeHandoff.firstPerson), actual=$($handoffCamera | ConvertTo-Json -Compress)."
+        }
+        $nativeAiHandoffExpectedCameraElevation = $expectedHandoffCameraElevation
+        $nativeAiHandoffCameraFrame = Capture-NativeFrame 'native-ai-battle-camera-after-handoff'
         $nativeHandoffDeadline = [DateTime]::UtcNow.AddSeconds(185)
         $nativeHandoffLeaseActive = $true
         while ([DateTime]::UtcNow -lt $nativeHandoffDeadline -and $nativeHandoffLeaseActive) {
@@ -573,6 +618,7 @@ try {
                 formationAIControlled = $nativeHandoffAgent.formation.isAIControlled
                 watchState = [string]$nativeHandoffAgent.currentWatchState
                 missionMainAgentControllerActive = $nativeHandoffStatus.data.mainAgent.missionMainAgentControllerActive
+                camera = $nativeHandoffStatus.data.camera
                 nativeHandoff = $nativeHandoffStatus.data.mainAgentAiControlLease
             })
             $nativeHandoffLeaseActive = $nativeHandoffAgent.controller -eq 'AI'
@@ -585,6 +631,12 @@ try {
                 $dz = [double]$_.position.z - [double]$handoffStart.z
                 [Math]::Sqrt($dx * $dx + $dy * $dy + $dz * $dz) -gt 0.1
             }).Count -gt 0
+        }
+        $badCameraSamples = @($nativeAiHandoffSamples | Where-Object {
+            $null -eq $_.camera -or [Math]::Abs([double]$_.camera.elevation - $nativeAiHandoffExpectedCameraElevation) -gt 0.15 -or $_.camera.firstPerson -ne $cameraBeforeHandoff.firstPerson
+        })
+        if ($badCameraSamples.Count -gt 0) {
+            throw "Native battle camera left its expected view during AI control; expected elevation=$nativeAiHandoffExpectedCameraElevation, samples=$(($nativeAiHandoffSamples | ForEach-Object { $_.camera.elevation }) -join ',')."
         }
         $nativeHandoffRestoredState = Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-native-ai-handoff-restored-status")
         if ($nativeHandoffRestoredState.status -eq 'completed' -and (
@@ -892,6 +944,11 @@ try {
         mainAgentFormationAfterDelegate = $mainAgentAfter
         mainAgentFormationAiBehavior = $mainAgentAfter.formation
         delegation = $delegation.data
+        nativeAutoDeploy = if ($deploymentAutoDeploy) { $deploymentAutoDeploy.data } else { $null }
+        nativeDeploymentFinish = if ($deploymentFinish) { $deploymentFinish.data } else { $null }
+        cameraBeforeHandoff = $statusBefore.data.camera
+        cameraAfterTroopDelegation = $statusAfter.data.camera
+        nativeAiHandoffCameraFrame = if ($nativeAiHandoffCameraFrame) { [ordered]@{ path = $nativeAiHandoffCameraFrame; sha256 = (Get-FileHash -LiteralPath $nativeAiHandoffCameraFrame -Algorithm SHA256).Hash } } else { $null }
         mainAgentAiControllerProbe = if ($controllerProbe) { $controllerProbe.data } else { $null }
         mainAgentAiRtsCameraProbe = if ($rtsCameraProbe) { $rtsCameraProbe.data } else { $null }
         battleMovementInputProbe = $battleMovementInputProbe
@@ -907,6 +964,7 @@ try {
             }).Count -gt 0
         } else { $null }
         nativeAiHandoffProbe = if ($nativeAiHandoffProbe) { $nativeAiHandoffProbe.data } else { $null }
+        nativeAiHandoffExpectedCameraElevation = $nativeAiHandoffExpectedCameraElevation
         nativeAiHandoffSamples = $nativeAiHandoffSamples.ToArray()
         mainAgentMovedDuringNativeAiHandoff = $mainAgentMovedDuringNativeAiHandoff
         mainAgentAiControllerProbeSamples = $controllerProbeSamples.ToArray()

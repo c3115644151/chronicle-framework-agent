@@ -37,6 +37,7 @@ namespace ChronicleFramework
         [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)] public static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int index, IntPtr value);
         [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll", SetLastError = true)] public static extern bool GetClipCursor(out Rect rect);
+        [DllImport("user32.dll", SetLastError = true)] public static extern bool ClipCursor(ref Rect rect);
         [DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
         [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int command);
         [DllImport("user32.dll", SetLastError = true)] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int width, int height, uint flags);
@@ -111,7 +112,57 @@ function Set-ChronicleTestDisplayConfig([string]$EngineConfigPath) {
     Set-Content -Path $EngineConfigPath -Value $text -NoNewline
 }
 
-function Set-ChronicleTestWindow([int]$ProcessId) {
+function Get-ChronicleCursorClipSnapshot {
+    $rect = New-Object ChronicleFramework.WindowApi+Rect
+    $read = [ChronicleFramework.WindowApi]::GetClipCursor([ref]$rect)
+    $left = [ChronicleFramework.WindowApi]::GetSystemMetrics(76)
+    $top = [ChronicleFramework.WindowApi]::GetSystemMetrics(77)
+    $right = $left + [ChronicleFramework.WindowApi]::GetSystemMetrics(78)
+    $bottom = $top + [ChronicleFramework.WindowApi]::GetSystemMetrics(79)
+    return [pscustomobject]@{
+        Read = $read
+        Left = $rect.Left; Top = $rect.Top; Right = $rect.Right; Bottom = $rect.Bottom
+        VirtualLeft = $left; VirtualTop = $top; VirtualRight = $right; VirtualBottom = $bottom
+        IsUnrestricted = ($read -and $rect.Left -le $left -and $rect.Top -le $top -and $rect.Right -ge $right -and $rect.Bottom -ge $bottom)
+        ForegroundProcessId = [ChronicleFramework.WindowApi]::GetForegroundProcessId()
+    }
+}
+
+function Test-ChronicleCursorClipRestorePolicy([object]$Baseline, [object]$Current, [int]$TargetProcessId) {
+    return ($null -ne $Baseline -and [bool]$Baseline.Read -and [bool]$Baseline.IsUnrestricted -and
+        $null -ne $Current -and [bool]$Current.Read -and -not [bool]$Current.IsUnrestricted -and
+        [int]$Current.ForegroundProcessId -eq [int]$Baseline.ForegroundProcessId -and
+        [int]$Current.ForegroundProcessId -ne $TargetProcessId)
+}
+
+function Restore-ChronicleCursorClipBaseline([object]$Baseline, [int]$TargetProcessId) {
+    if ($null -eq $Baseline -or -not [bool]$Baseline.Read -or -not [bool]$Baseline.IsUnrestricted) {
+        return [pscustomobject]@{ Restored = $false; Attempted = $false; Reason = 'original-desktop-clip-was-not-unrestricted' }
+    }
+    $current = Get-ChronicleCursorClipSnapshot
+    if (-not (Test-ChronicleCursorClipRestorePolicy -Baseline $Baseline -Current $current -TargetProcessId $TargetProcessId)) {
+        $reason = if ($current.IsUnrestricted) { 'already-at-original-desktop-bounds' }
+            elseif ($current.ForegroundProcessId -ne $Baseline.ForegroundProcessId) { 'foreground-owner-changed; left-clip-untouched' }
+            elseif ($current.ForegroundProcessId -eq $TargetProcessId) { 'test-game-is-foreground; refused-global-clip-change' }
+            else { 'clip-change-not-attributable-to-test-window; left-untouched' }
+        return [pscustomobject]@{ Restored = [bool]$current.IsUnrestricted; Attempted = $false; Reason = $reason; Current = $current }
+    }
+    $rect = New-Object ChronicleFramework.WindowApi+Rect
+    # Desktop geometry can change between the prelaunch sample and the game window. Restore the full current virtual desktop, not stale pixel coordinates.
+    $rect.Left = [int]$current.VirtualLeft; $rect.Top = [int]$current.VirtualTop
+    $rect.Right = [int]$current.VirtualRight; $rect.Bottom = [int]$current.VirtualBottom
+    $set = [ChronicleFramework.WindowApi]::ClipCursor([ref]$rect)
+    Start-Sleep -Milliseconds 20
+    $after = Get-ChronicleCursorClipSnapshot
+    return [pscustomobject]@{
+        Restored = ($set -and $after.IsUnrestricted)
+        Attempted = $true
+        Reason = if ($set -and $after.IsUnrestricted) { 'original-unrestricted-desktop-bounds-restored' } else { 'restore-did-not-stick' }
+        Current = $after
+    }
+}
+
+function Set-ChronicleTestWindow([int]$ProcessId, [object]$CursorClipBaseline = $null) {
     if (-not (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) { return $null }
     $handle = [ChronicleFramework.WindowApi]::FindProcessWindow($ProcessId)
     if ($handle -eq [IntPtr]::Zero) { return $null }
@@ -124,6 +175,8 @@ function Set-ChronicleTestWindow([int]$ProcessId) {
     $cursorUnrestrictedAcrossDesktop = $false
     $visible = $false
     $iconic = $true
+    $cursorClipRestoreAttempted = $false
+    $cursorClipRestoreSucceeded = $false
     for ($attempt = 0; $attempt -lt 12; $attempt++) {
         $nonActivating = [ChronicleFramework.WindowApi]::EnsureNoActivate($handle)
         [ChronicleFramework.WindowApi]::ShowWindowAsync($handle, 4) | Out-Null
@@ -141,6 +194,27 @@ function Set-ChronicleTestWindow([int]$ProcessId) {
         $cursorUnrestrictedAcrossDesktop = $cursorClipRead -and
             $cursorClip.Left -le $virtualLeft -and $cursorClip.Top -le $virtualTop -and
             $cursorClip.Right -ge $virtualRight -and $cursorClip.Bottom -ge $virtualBottom
+        if (-not $cursorUnrestrictedAcrossDesktop) {
+            $currentClipSnapshot = [pscustomobject]@{
+                Read = $cursorClipRead
+                Left = $cursorClip.Left; Top = $cursorClip.Top; Right = $cursorClip.Right; Bottom = $cursorClip.Bottom
+                IsUnrestricted = $false
+                ForegroundProcessId = $foregroundProcessId
+            }
+            if (Test-ChronicleCursorClipRestorePolicy -Baseline $CursorClipBaseline -Current $currentClipSnapshot -TargetProcessId $ProcessId) {
+                $cursorClipRestoreAttempted = $true
+                $restore = Restore-ChronicleCursorClipBaseline -Baseline $CursorClipBaseline -TargetProcessId $ProcessId
+                $cursorClipRestoreSucceeded = [bool]$restore.Restored
+                $cursorClipRead = [ChronicleFramework.WindowApi]::GetClipCursor([ref]$cursorClip)
+                $virtualLeft = [ChronicleFramework.WindowApi]::GetSystemMetrics(76)
+                $virtualTop = [ChronicleFramework.WindowApi]::GetSystemMetrics(77)
+                $virtualRight = $virtualLeft + [ChronicleFramework.WindowApi]::GetSystemMetrics(78)
+                $virtualBottom = $virtualTop + [ChronicleFramework.WindowApi]::GetSystemMetrics(79)
+                $cursorUnrestrictedAcrossDesktop = $cursorClipRead -and
+                    $cursorClip.Left -le $virtualLeft -and $cursorClip.Top -le $virtualTop -and
+                    $cursorClip.Right -ge $virtualRight -and $cursorClip.Bottom -ge $virtualBottom
+            }
+        }
         $visible = [ChronicleFramework.WindowApi]::IsWindowVisible($handle)
         $iconic = [ChronicleFramework.WindowApi]::IsIconic($handle)
         if ($visible -and -not $iconic -and $nonActivating -and $notForeground -and $cursorUnrestrictedAcrossDesktop) { break }
@@ -161,6 +235,9 @@ function Set-ChronicleTestWindow([int]$ProcessId) {
         CursorClipRead = $cursorClipRead
         CursorUnrestrictedAcrossDesktop = $cursorUnrestrictedAcrossDesktop
         CursorClipRectangle = [ordered]@{ Left = $cursorClip.Left; Top = $cursorClip.Top; Right = $cursorClip.Right; Bottom = $cursorClip.Bottom }
+        CursorClipRestoreAttempted = $cursorClipRestoreAttempted
+        CursorClipRestoreSucceeded = $cursorClipRestoreSucceeded
+        CursorClipBaselineUnrestricted = [bool]($CursorClipBaseline -and $CursorClipBaseline.IsUnrestricted)
         Visible = $visible; Minimized = $iconic
         X = $rect.Left; Y = $rect.Top; Width = $width; Height = $height; DisplayMode = 0
     }
@@ -172,4 +249,16 @@ function Test-ChronicleNoActivateStyleContract {
     return ([ChronicleFramework.WindowApi]::HasNoActivateExtendedStyle($updated) -and
         ($updated -band $original) -eq $original -and
         -not [ChronicleFramework.WindowApi]::HasNoActivateExtendedStyle($original))
+}
+
+function Test-ChronicleCursorClipRestoreContract {
+    $baseline = [pscustomobject]@{ Read = $true; IsUnrestricted = $true; Left = 0; Top = 0; Right = 2560; Bottom = 1440; ForegroundProcessId = 100 }
+    $captured = [pscustomobject]@{ Read = $true; IsUnrestricted = $false; Left = 1109; Top = 589; Right = 1112; Bottom = 592; ForegroundProcessId = 100 }
+    $capturedByForegroundGame = [pscustomobject]@{ Read = $true; IsUnrestricted = $false; Left = 0; Top = 0; Right = 840; Bottom = 472; ForegroundProcessId = 200 }
+    $preExistingRestriction = [pscustomobject]@{ Read = $true; IsUnrestricted = $false; Left = 50; Top = 50; Right = 850; Bottom = 522; ForegroundProcessId = 100 }
+    return [pscustomobject]@{
+        RestoresOnlyTestIntroducedClip = (Test-ChronicleCursorClipRestorePolicy -Baseline $baseline -Current $captured -TargetProcessId 200)
+        RefusesWhenGameIsForeground = -not (Test-ChronicleCursorClipRestorePolicy -Baseline $baseline -Current $capturedByForegroundGame -TargetProcessId 200)
+        RefusesToOverridePreExistingRestriction = -not (Test-ChronicleCursorClipRestorePolicy -Baseline $preExistingRestriction -Current $captured -TargetProcessId 200)
+    }
 }

@@ -14,6 +14,7 @@ internal static class ProviderContractSelfTest
     internal static async Task<object> RunAsync()
     {
         var results = new List<object>();
+        results.AddRange(AgentHostDecisionCycle.RunBattleAndCaptivityPromptContractSelfTests());
         var terminalReceipt = Program.BuildCampaignLoopTerminalReceipt(new JsonObject
         {
             ["status"] = "failed", ["providerModelId"] = "deepseek-flash", ["providerConfigurationSource"] = "mcm-start-request",
@@ -541,6 +542,53 @@ internal static class ProviderContractSelfTest
             if (freeLlmApiHandler.LastAuthorization?.Scheme != "Bearer" || result.RoutedVia != "google/gemini-test-model")
                 throw new AgentHostException("freellmapi-routing-evidence-self-test-failed", "FreeLLMAPI inference must carry bearer auth and preserve the actual routed provider/model header.");
             results.Add(new { scenario = "freellmapi-bearer-auth-available-model-preflight-and-routed-model-evidence", passed = true });
+        }
+
+        var reasoningEffortRequestShapeValid = false;
+        var freeLlmApiReasoningHandler = new StubHandler((httpRequest, _) =>
+        {
+            if (httpRequest.Method == HttpMethod.Get)
+                return Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"free-reasoning-route\",\"supported_parameters\":[\"tools\",\"tool_choice\",\"reasoning_effort\"]}]}"));
+            using var body = JsonDocument.Parse(httpRequest.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            reasoningEffortRequestShapeValid =
+                body.RootElement.TryGetProperty("reasoning_effort", out var effort) && effort.GetString() == "low" &&
+                body.RootElement.TryGetProperty("thinking", out var thinking) &&
+                thinking.GetProperty("type").GetString() == "disabled";
+            return Task.FromResult(JsonResponse(BuildToolCallChatResponse("{\"action\":\"tradeConfirm\",\"arguments\":{}}", "tool_calls")));
+        });
+        var freeLlmApiReasoningSettings = freeLlmApiSettings with
+        {
+            Model = "free-reasoning-route", OutputMode = "required_tool_call", Thinking = false, ReasoningEffort = "low"
+        };
+        using (var reasoningClient = new HttpClient(freeLlmApiReasoningHandler) { Timeout = freeLlmApiReasoningSettings.Timeout })
+        using (var reasoningProvider = new OllamaNativeProvider(freeLlmApiReasoningSettings, reasoningClient))
+        using (var request = JsonDocument.Parse(BuildActionDecisionRequest()))
+        {
+            await reasoningProvider.CheckConfiguredModelAsync(CancellationToken.None);
+            var result = await reasoningProvider.DecideAsync(request.RootElement, CancellationToken.None);
+            if (!reasoningEffortRequestShapeValid || result.ReasoningEffortApplied != "low" ||
+                result.Decision["action"]?.GetValue<string>() != "tradeConfirm")
+                throw new AgentHostException("freellmapi-reasoning-effort-support-contract-failed", "When FreeLLMAPI advertises reasoning_effort, the Host must send the configured low reasoning budget even with thinking disabled and report the applied setting.");
+            results.Add(new { scenario = "freellmapi-advertised-reasoning-effort-low-is-applied-with-thinking-disabled", passed = true });
+        }
+
+        var unsupportedReasoningHandler = new StubHandler((httpRequest, _) => httpRequest.Method == HttpMethod.Get
+            ? Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"free-no-reasoning-route\",\"supported_parameters\":[\"tools\",\"tool_choice\"]}]}"))
+            : Task.FromResult(JsonResponse(BuildToolCallChatResponse("{\"action\":\"tradeConfirm\",\"arguments\":{}}", "tool_calls"))));
+        var unsupportedReasoningSettings = freeLlmApiSettings with
+        {
+            Model = "free-no-reasoning-route", OutputMode = "required_tool_call", Thinking = false, ReasoningEffort = "low"
+        };
+        using (var unsupportedReasoningClient = new HttpClient(unsupportedReasoningHandler) { Timeout = unsupportedReasoningSettings.Timeout })
+        using (var unsupportedReasoningProvider = new OllamaNativeProvider(unsupportedReasoningSettings, unsupportedReasoningClient))
+        using (var request = JsonDocument.Parse(BuildActionDecisionRequest()))
+        {
+            await unsupportedReasoningProvider.CheckConfiguredModelAsync(CancellationToken.None);
+            var result = await unsupportedReasoningProvider.DecideAsync(request.RootElement, CancellationToken.None);
+            using var sentBody = JsonDocument.Parse(unsupportedReasoningHandler.LastRequestBody ?? "{}");
+            if (sentBody.RootElement.TryGetProperty("reasoning_effort", out _) || result.ReasoningEffortApplied is not null)
+                throw new AgentHostException("freellmapi-unadvertised-reasoning-effort-was-sent", "The Host must not send reasoning_effort to a FreeLLMAPI route that did not advertise that request capability.");
+            results.Add(new { scenario = "freellmapi-unadvertised-reasoning-effort-is-omitted", passed = true });
         }
 
         const string privatePlainTextToolFailure = "PRIVATE_FREE_LLM_API_RESPONSE_MUST_NOT_BE_LOGGED";

@@ -107,6 +107,7 @@ $soundGuard = Disable-ChronicleHarnessGameSound
 $soundDisabledDuring = Get-ChronicleBannerlordSoundDisabled -LiteralPath $engineConfig
 if ($soundDisabledDuring -ne 1) { throw 'Bannerlord game sound must be disabled by the temporary Harness guard before startup.' }
 
+$cursorClipBaseline = Get-ChronicleCursorClipSnapshot
 $launchStart = Get-Date
 $startupWatch = [Diagnostics.Stopwatch]::StartNew()
 $diagnosticStartLineCount = if (Test-Path $diagnosticLog) { @(Get-Content $diagnosticLog).Count } else { 0 }
@@ -155,7 +156,7 @@ while ((Get-Date) -lt $deadline) {
         $rglLog = Join-Path $env:ProgramData "Mount and Blade II Bannerlord\logs\rgl_log_$trackedProcessId.txt"
         $watchdogLog = Join-Path $env:ProgramData "Mount and Blade II Bannerlord\logs\watchdog_log_$trackedProcessId.txt"
     }
-    $candidateWindowLayout = Set-ChronicleTestWindow -ProcessId $trackedProcessId
+    $candidateWindowLayout = Set-ChronicleTestWindow -ProcessId $trackedProcessId -CursorClipBaseline $cursorClipBaseline
     if ($candidateWindowLayout) {
         $testWindowLayout = $candidateWindowLayout
         if (-not [bool]$candidateWindowLayout.Applied -or -not [bool]$candidateWindowLayout.NonActivating -or -not [bool]$candidateWindowLayout.NotForeground) {
@@ -281,6 +282,11 @@ do {
     if (@(Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue).Count -eq 0) { break }
     Start-Sleep -Milliseconds 150
 } while ((Get-Date) -lt $soundRestoreDeadline)
+$cursorClipRestoration = if (@(Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue).Count -eq 0) {
+    Restore-ChronicleCursorClipBaseline -Baseline $cursorClipBaseline -TargetProcessId $trackedProcessId
+} else {
+    [pscustomobject]@{ Restored = $false; Attempted = $false; Reason = 'game-process-still-running' }
+}
 $soundRestoration = Restore-ChronicleHarnessGameSound
 $soundDisabledAfter = Get-ChronicleBannerlordSoundDisabled -LiteralPath $engineConfig
 if (Test-Path $engineConfig) {
@@ -326,6 +332,8 @@ $result = [ordered]@{
     WindowLayoutNonActivating = [bool]($testWindowLayout -and $testWindowLayout.NonActivating)
     WindowNotForeground = [bool]($testWindowLayout -and $testWindowLayout.NotForeground)
     CursorUnrestrictedAcrossDesktop = [bool]($testWindowLayout -and $testWindowLayout.CursorUnrestrictedAcrossDesktop)
+    CursorClipBaseline = $cursorClipBaseline
+    CursorClipRestorationAfterExit = $cursorClipRestoration
     ForegroundProcessId = if ($testWindowLayout) { $testWindowLayout.ForegroundProcessId } else { $null }
     HarnessInputLockObserved = [bool]$harnessInputLockObserved
     McmSettingPropertyIds = $mcmSettingPropertyIds
@@ -387,6 +395,6 @@ $receiptJson | Set-Content -LiteralPath $resultPath -Encoding UTF8
 Add-Content -LiteralPath $receiptStagePath -Value 'write-complete'
 Write-Output $receiptJson
 
-if (-not $soundRestoration.Restored -or -not [bool]$result.WindowLayoutApplied -or -not [bool]$result.WindowLayoutNonActivating -or -not [bool]$result.WindowNotForeground -or -not [bool]$result.CursorUnrestrictedAcrossDesktop -or -not [bool]$result.HarnessInputLockObserved -or -not $finishedAll -or -not $stabilityCompleted -or $crashDetected -or $processExitedUnexpectedly -or (-not $WithoutChronicle -and (-not $assemblyLoaded -or -not $lifecycleLoadObserved -or -not $mcmDefinitionComplete -or -not $inputControlKeyDisplayTextLoaded -or -not $inputControlKeyVisibleInNativeOptions))) {
+if (-not $soundRestoration.Restored -or ($cursorClipBaseline.IsUnrestricted -and -not [bool]$cursorClipRestoration.Restored) -or -not [bool]$result.WindowLayoutApplied -or -not [bool]$result.WindowLayoutNonActivating -or -not [bool]$result.WindowNotForeground -or -not [bool]$result.CursorUnrestrictedAcrossDesktop -or -not [bool]$result.HarnessInputLockObserved -or -not $finishedAll -or -not $stabilityCompleted -or $crashDetected -or $processExitedUnexpectedly -or (-not $WithoutChronicle -and (-not $assemblyLoaded -or -not $lifecycleLoadObserved -or -not $mcmDefinitionComplete -or -not $inputControlKeyDisplayTextLoaded -or -not $inputControlKeyVisibleInNativeOptions))) {
     exit 1
 }

@@ -351,23 +351,49 @@ function Get-ChronicleSteamLoginState {
     )
 
     $latestState = $null
+    $latestFailureReason = $null
+    $latestReconnectDelaySeconds = $null
     foreach ($line in $Lines) {
-        if ($line -notmatch '^\[(?<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s+\[(?<state>Logged On|Logged Off),') { continue }
-        $localTimestamp = [datetime]::MinValue
-        if (-not [datetime]::TryParseExact($Matches.timestamp, 'yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture,
-                [Globalization.DateTimeStyles]::AssumeLocal, [ref]$localTimestamp)) { continue }
-        $latestState = [pscustomobject]@{
-            LoggedOn = ($Matches.state -eq 'Logged On')
-            EventUtc = $localTimestamp.ToUniversalTime()
+        if ($line -match '^\[(?<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s+\[(?<state>Logged On|Logged Off),') {
+            $localTimestamp = [datetime]::MinValue
+            if ([datetime]::TryParseExact($Matches.timestamp, 'yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture,
+                    [Globalization.DateTimeStyles]::AssumeLocal, [ref]$localTimestamp)) {
+                $latestState = [pscustomobject]@{
+                    LoggedOn = ($Matches.state -eq 'Logged On')
+                    EventUtc = $localTimestamp.ToUniversalTime()
+                }
+            }
+        }
+        if ($line -match 'SteamServerConnectFailure_t\s+(?<reason>.+?)\s+Reconnect') {
+            $failureCandidate = ([string]$Matches.reason).Trim()
+            $latestFailureReason = if ($failureCandidate -match '^[A-Za-z ]{1,64}$') { $failureCandidate } else { 'Other' }
+        }
+        if ($line -match 'StartAutoReconnect\(\) will start in (?<delay>\d+(?:\.\d+)?) seconds') {
+            $latestReconnectDelaySeconds = [double]$Matches.delay
         }
     }
 
-    if ($null -eq $latestState) { return [pscustomobject]@{ Ready = $false; Reason = 'steam-login-state-unavailable'; EventUtc = $null } }
-    if (-not $latestState.LoggedOn) { return [pscustomobject]@{ Ready = $false; Reason = 'steam-user-not-logged-on'; EventUtc = $latestState.EventUtc.ToString('O') } }
+    if ($null -eq $latestState) { return [pscustomobject]@{ Ready = $false; Reason = 'steam-login-state-unavailable'; EventUtc = $null; FailureReason = $latestFailureReason; ReconnectDelaySeconds = $latestReconnectDelaySeconds } }
+    if (-not $latestState.LoggedOn) { return [pscustomobject]@{ Ready = $false; Reason = 'steam-user-not-logged-on'; EventUtc = $latestState.EventUtc.ToString('O'); FailureReason = $latestFailureReason; ReconnectDelaySeconds = $latestReconnectDelaySeconds } }
     if ($RequireEventAfterUtc -ne [datetime]::MinValue -and $latestState.EventUtc -lt $RequireEventAfterUtc) {
-        return [pscustomobject]@{ Ready = $false; Reason = 'steam-login-event-predates-current-client-start'; EventUtc = $latestState.EventUtc.ToString('O') }
+        return [pscustomobject]@{ Ready = $false; Reason = 'steam-login-event-predates-current-client-start'; EventUtc = $latestState.EventUtc.ToString('O'); FailureReason = $latestFailureReason; ReconnectDelaySeconds = $latestReconnectDelaySeconds }
     }
-    return [pscustomobject]@{ Ready = $true; Reason = 'steam-user-logged-on'; EventUtc = $latestState.EventUtc.ToString('O') }
+    return [pscustomobject]@{ Ready = $true; Reason = 'steam-user-logged-on'; EventUtc = $latestState.EventUtc.ToString('O'); FailureReason = $latestFailureReason; ReconnectDelaySeconds = $latestReconnectDelaySeconds }
+}
+
+function Test-ChronicleSteamReconnectDelayExceedsHarnessWindow {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object]$LoginState,
+        [Parameter(Mandatory)][ValidateRange(1,180)][int]$TimeoutSeconds,
+        [Parameter(Mandatory)][int]$WebHelperProcessCount,
+        [Parameter(Mandatory)][double]$WebHelperStableSeconds,
+        [ValidateRange(0,60)][double]$RequiredStableSeconds = 5
+    )
+
+    return (-not [bool]$LoginState.Ready -and -not [string]::IsNullOrWhiteSpace([string]$LoginState.FailureReason) -and
+        $null -ne $LoginState.ReconnectDelaySeconds -and [double]$LoginState.ReconnectDelaySeconds -gt $TimeoutSeconds -and
+        $WebHelperProcessCount -gt 0 -and $WebHelperStableSeconds -ge $RequiredStableSeconds)
 }
 
 function Ensure-ChronicleSteamClientReady {
@@ -426,6 +452,10 @@ function Ensure-ChronicleSteamClientReady {
                 readiness = $readiness
             }
         }
+        if (Test-ChronicleSteamReconnectDelayExceedsHarnessWindow -LoginState $loginState -TimeoutSeconds $TimeoutSeconds `
+                -WebHelperProcessCount $webHelperProcesses.Count -WebHelperStableSeconds $stableSeconds -RequiredStableSeconds $RequiredStableSeconds) {
+            throw "Steam connection reported '$($loginState.FailureReason)' and scheduled reconnect in $($loginState.ReconnectDelaySeconds) seconds, beyond this $TimeoutSeconds-second Harness readiness window; Bannerlord was not launched."
+        }
         Start-Sleep -Milliseconds 500
     }
 
@@ -478,9 +508,19 @@ function Test-ChronicleSteamClientReadiness {
     $requireAfterUtc = [datetime]::SpecifyKind([datetime]::ParseExact('2026-11-03 05:19:42', 'yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture), [DateTimeKind]::Local).ToUniversalTime()
     $loggedOnLines = @('[2026-11-03 05:19:44] [Connecting, 4, 7] Logging on', '[2026-11-03 05:19:47] [Logged On, 4, 7] processing complete')
     $loggedOffLines = @('[2026-11-03 05:19:44] [Logged On, 4, 7] processing complete', '[2026-11-03 05:19:48] [Logged Off, 4, 0] connection closed')
+    $longReconnectLines = @(
+        '[2026-11-18 07:19:36] [Logged Off, 4, 0] connection closed',
+        '[2026-11-18 07:19:36] Sending SteamServerConnectFailure_t Busy Reconnect',
+        '[2026-11-18 07:19:36] StartAutoReconnect() will start in 525.0 seconds (attempt 9)'
+    )
     $loggedOn = Get-ChronicleSteamLoginState -Lines $loggedOnLines -RequireEventAfterUtc $requireAfterUtc
     $predatesStart = Get-ChronicleSteamLoginState -Lines $loggedOnLines -RequireEventAfterUtc ($requireAfterUtc.AddMinutes(1))
     $loggedOff = Get-ChronicleSteamLoginState -Lines $loggedOffLines
+    $longReconnect = Get-ChronicleSteamLoginState -Lines $longReconnectLines
+    $longReconnectFailsFast = Test-ChronicleSteamReconnectDelayExceedsHarnessWindow -LoginState $longReconnect -TimeoutSeconds 45 -WebHelperProcessCount 8 -WebHelperStableSeconds 6
+    $shortReconnectState = [pscustomobject]@{ Ready = $false; FailureReason = 'Busy'; ReconnectDelaySeconds = 20 }
+    $shortReconnectWaits = Test-ChronicleSteamReconnectDelayExceedsHarnessWindow -LoginState $shortReconnectState -TimeoutSeconds 45 -WebHelperProcessCount 8 -WebHelperStableSeconds 6
+    $unstableReconnectWaits = Test-ChronicleSteamReconnectDelayExceedsHarnessWindow -LoginState $longReconnect -TimeoutSeconds 45 -WebHelperProcessCount 8 -WebHelperStableSeconds 1
     return (-not $missingSteam.Ready -and $missingSteam.Reason -eq 'steam-process-missing' -and
         -not $startingClient.Ready -and $startingClient.Reason -eq 'steam-webhelper-not-started' -and
         -not $warmingHelper.Ready -and $warmingHelper.Reason -eq 'steam-webhelper-not-stable' -and
@@ -488,6 +528,8 @@ function Test-ChronicleSteamClientReadiness {
         $loggedOn.Ready -and $loggedOn.Reason -eq 'steam-user-logged-on' -and
         -not $predatesStart.Ready -and $predatesStart.Reason -eq 'steam-login-event-predates-current-client-start' -and
         -not $loggedOff.Ready -and $loggedOff.Reason -eq 'steam-user-not-logged-on' -and
+        -not $longReconnect.Ready -and $longReconnect.FailureReason -eq 'Busy' -and $longReconnect.ReconnectDelaySeconds -eq 525 -and
+        $longReconnectFailsFast -and -not $shortReconnectWaits -and -not $unstableReconnectWaits -and
         $readyClient.Ready -and $readyClient.Reason -eq 'ready')
 }
 
