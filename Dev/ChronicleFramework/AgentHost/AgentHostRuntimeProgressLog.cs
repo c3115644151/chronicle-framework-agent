@@ -208,7 +208,9 @@ internal static class AgentHostRuntimeProgressLog
         string? providerResponseServer = null, string? providerResponseVia = null, string? providerResponseRequestId = null,
         string? providerRetryAfter = null, string? providerErrorBodyKind = null, string? providerErrorContentType = null,
         string? providerErrorType = null, string? providerErrorCode = null, int? providerFallbackAttempts = null,
-        string? providerFallbackTrail = null)
+        string? providerFallbackTrail = null, bool? providerToolCallsPresent = null, int? providerToolCallCount = null,
+        string? providerResponseContentKind = null, int? providerResponseContentCharacters = null, string? providerFinishReason = null,
+        string? providerResponseModel = null, int? providerResponsePromptTokens = null, int? providerResponseCompletionTokens = null)
     {
         var runId = ReadString(request, "runId");
         if (!IsActiveProductRun(runId) || !TryGetPath(runId, out var path)) return;
@@ -246,6 +248,14 @@ internal static class AgentHostRuntimeProgressLog
                 ["providerErrorCode"] = providerErrorCode,
                 ["providerFallbackAttempts"] = providerFallbackAttempts,
                 ["providerFallbackTrail"] = providerFallbackTrail,
+                ["providerToolCallsPresent"] = providerToolCallsPresent,
+                ["providerToolCallCount"] = providerToolCallCount,
+                ["providerResponseContentKind"] = providerResponseContentKind,
+                ["providerResponseContentCharacters"] = providerResponseContentCharacters,
+                ["providerFinishReason"] = providerFinishReason,
+                ["providerResponseModel"] = providerResponseModel,
+                ["providerResponsePromptTokens"] = providerResponsePromptTokens,
+                ["providerResponseCompletionTokens"] = providerResponseCompletionTokens,
                 ["nativeActionSent"] = false,
                 ["responseBodiesLogged"] = false,
                 ["credentialsLogged"] = false

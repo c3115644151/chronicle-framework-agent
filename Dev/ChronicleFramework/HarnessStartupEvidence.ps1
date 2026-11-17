@@ -501,6 +501,23 @@ function Test-ChronicleStartupAssessment {
 
     $secondAttempt = Get-ChronicleStartupAssessment -Attempt 2 -CrashDetected $true -SaveDirectoryMetadataUnchanged $true
     if ($secondAttempt.ShouldRetry) { throw 'An explicit crash may not trigger more than one retry.' }
+    if (-not (Test-ChronicleCrashReportWindowTitleContract)) { throw 'Crash Report window titles are not classified safely.' }
+    return $true
+}
+
+function Test-ChronicleCrashReportWindowTitle {
+    [CmdletBinding()]
+    param([AllowNull()][AllowEmptyString()][string]$WindowTitle)
+    return ([string]$WindowTitle -match '(?i)Crash\s*Report|CrashReporter')
+}
+
+function Test-ChronicleCrashReportWindowTitleContract {
+    if (-not (Test-ChronicleCrashReportWindowTitle 'Bannerlord Crash Report') -or
+        -not (Test-ChronicleCrashReportWindowTitle 'CrashReporter') -or
+        (Test-ChronicleCrashReportWindowTitle 'Mount and Blade II Bannerlord') -or
+        (Test-ChronicleCrashReportWindowTitle 'Warning')) {
+        throw 'Crash Report title detection must match known crash windows and reject ordinary game/warning windows.'
+    }
     return $true
 }
 

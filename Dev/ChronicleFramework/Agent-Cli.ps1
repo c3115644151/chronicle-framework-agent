@@ -365,6 +365,40 @@ if ($Action -in @('start','load')) {
                 }
                 throw "Bannerlord reported an unhandled startup exception. Test-owned processStopped=$crashStopped; crash evidence: $crashEvidencePath. No model request was sent."
         }
+        if (Test-ChronicleCrashReportWindowTitle -WindowTitle ([string]$launchProcess.MainWindowTitle)) {
+            $crashEvidenceRoot = if (-not [string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) { $env:CHRONICLE_HARNESS_TEMP } else { $protocolRoot }
+            New-Item -ItemType Directory -Force -Path $crashEvidenceRoot | Out-Null
+            $crashEvidencePath = Join-Path $crashEvidenceRoot "startup-crash-report-$($launchProcess.Id).json"
+            $crashSnapshot = $null
+            $crashSnapshotError = $null
+            try {
+                $crashSnapshot = Get-ChronicleWindowAutomationSnapshot -ProcessId $launchProcess.Id -WindowHandle ([IntPtr]$launchProcess.MainWindowHandle)
+            }
+            catch { $crashSnapshotError = $_.Exception.Message }
+            $rglPath = Join-Path $programDataLogs "rgl_log_$($launchProcess.Id).txt"
+            $errorLogPath = Join-Path $programDataLogs "rgl_log_errors_$($launchProcess.Id).txt"
+            $watchdogPath = Join-Path $programDataLogs "watchdog_log_$($launchProcess.Id).txt"
+            $crashEvidence = [ordered]@{
+                Detected = $true
+                Detection = 'process-owned Crash Report window title'
+                RootProcessId = $process.Id
+                ProcessId = $launchProcess.Id
+                SaveName = $SaveName
+                ActiveModules = $modules
+                WindowTitle = [string]$launchProcess.MainWindowTitle
+                Dialog = if ($crashSnapshot) { ConvertTo-ChronicleStartupDialogEvidence -Snapshot $crashSnapshot } else { $null }
+                DialogReadError = $crashSnapshotError
+                RglLogTail = if (Test-Path -LiteralPath $rglPath -PathType Leaf) { @(Get-Content -LiteralPath $rglPath -Tail 100 -Encoding UTF8) } else { @() }
+                RglErrorLogTail = if (Test-Path -LiteralPath $errorLogPath -PathType Leaf) { @(Get-Content -LiteralPath $errorLogPath -Tail 100 -Encoding UTF8) } else { @() }
+                WatchdogLogTail = if (Test-Path -LiteralPath $watchdogPath -PathType Leaf) { @(Get-Content -LiteralPath $watchdogPath -Tail 100 -Encoding UTF8) } else { @() }
+                DetectedUtc = [DateTime]::UtcNow.ToString('O')
+            }
+            $crashEvidence | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $crashEvidencePath -Encoding UTF8
+            $crashStopped = Stop-ChronicleStartupProcessTree -RootProcessId $process.Id -KnownProcessIds @($observedStartupProcessIds)
+            Set-SafeExitMarker
+            if ($crashStopped -and $engineConfigBackupCreated) { Restore-ChronicleTestEngineConfig -BackupPath $engineConfigBackupPath | Out-Null }
+            throw "Bannerlord displayed a Crash Report during startup. Test-owned processStopped=$crashStopped; crash evidence: $crashEvidencePath. No model request was sent and no crash-dialog button was pressed."
+        }
         if ($launchProcess.MainWindowTitle -match '^Mod change detected$') {
             try {
                 $dialogResult = Invoke-ChronicleShaderCacheDialogAcknowledgement -ProcessId $launchProcess.Id -WindowHandle $launchProcess.MainWindowHandle

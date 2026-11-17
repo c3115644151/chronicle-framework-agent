@@ -763,7 +763,12 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                         var responseCompletionTokens = ReadNonNegativeInt(responseUsage, "completion_tokens");
                         var responseRoute = SafeDiagnosticField(ReadResponseHeader(response, "X-Routed-Via"));
                         throw new AgentHostException("provider-tool-call-missing",
-                            $"The model must return exactly one required decision tool call (toolCallsPresent={hasToolCalls}; toolCallCount={toolCallCount}; contentKind={contentKind}; contentCharacters={contentCharacters}; finishReason={SafeDiagnosticField(finishReason)}; format={responseFormatMode}; responseModel={SafeDiagnosticField(responseModel)}; routedVia={responseRoute}; promptTokens={responsePromptTokens?.ToString(CultureInfo.InvariantCulture) ?? "unknown"}; completionTokens={responseCompletionTokens?.ToString(CultureInfo.InvariantCulture) ?? "unknown"}).");
+                            $"The model must return exactly one required decision tool call (toolCallsPresent={hasToolCalls}; toolCallCount={toolCallCount}; contentKind={contentKind}; contentCharacters={contentCharacters}; finishReason={SafeDiagnosticField(finishReason)}; format={responseFormatMode}; responseModel={SafeDiagnosticField(responseModel)}; routedVia={responseRoute}; promptTokens={responsePromptTokens?.ToString(CultureInfo.InvariantCulture) ?? "unknown"}; completionTokens={responseCompletionTokens?.ToString(CultureInfo.InvariantCulture) ?? "unknown"}).",
+                            providerRoute: responseRoute, providerOutputFormat: responseFormatMode,
+                            providerToolCallsPresent: hasToolCalls, providerToolCallCount: toolCallCount,
+                            providerResponseContentKind: contentKind, providerResponseContentCharacters: contentCharacters,
+                            providerFinishReason: SafeDiagnosticField(finishReason), providerResponseModel: SafeDiagnosticField(responseModel),
+                            providerResponsePromptTokens: responsePromptTokens, providerResponseCompletionTokens: responseCompletionTokens);
                     }
                     var toolCall = toolCalls[0];
                     if (ReadString(toolCall, "type") != "function" ||
@@ -1662,7 +1667,10 @@ internal sealed class AgentHostException : Exception
         int? providerRequestBodyBytes = null, string? providerTransportErrorType = null, string? providerResponseServer = null,
         string? providerResponseVia = null, string? providerResponseRequestId = null, string? providerRetryAfter = null,
         string? providerErrorBodyKind = null, string? providerErrorContentType = null, string? providerErrorType = null, string? providerErrorCode = null,
-        int? providerFallbackAttempts = null, string? providerFallbackTrail = null) : base(message, innerException)
+        int? providerFallbackAttempts = null, string? providerFallbackTrail = null,
+        bool? providerToolCallsPresent = null, int? providerToolCallCount = null, string? providerResponseContentKind = null,
+        int? providerResponseContentCharacters = null, string? providerFinishReason = null, string? providerResponseModel = null,
+        int? providerResponsePromptTokens = null, int? providerResponseCompletionTokens = null) : base(message, innerException)
     {
         Code = code;
         ProviderHttpStatus = providerHttpStatus;
@@ -1686,6 +1694,14 @@ internal sealed class AgentHostException : Exception
         ProviderErrorCode = providerErrorCode;
         ProviderFallbackAttempts = providerFallbackAttempts;
         ProviderFallbackTrail = providerFallbackTrail;
+        ProviderToolCallsPresent = providerToolCallsPresent;
+        ProviderToolCallCount = providerToolCallCount;
+        ProviderResponseContentKind = providerResponseContentKind;
+        ProviderResponseContentCharacters = providerResponseContentCharacters;
+        ProviderFinishReason = providerFinishReason;
+        ProviderResponseModel = providerResponseModel;
+        ProviderResponsePromptTokens = providerResponsePromptTokens;
+        ProviderResponseCompletionTokens = providerResponseCompletionTokens;
     }
 
     internal string Code { get; }
@@ -1710,4 +1726,12 @@ internal sealed class AgentHostException : Exception
     internal string? ProviderErrorCode { get; }
     internal int? ProviderFallbackAttempts { get; }
     internal string? ProviderFallbackTrail { get; }
+    internal bool? ProviderToolCallsPresent { get; }
+    internal int? ProviderToolCallCount { get; }
+    internal string? ProviderResponseContentKind { get; }
+    internal int? ProviderResponseContentCharacters { get; }
+    internal string? ProviderFinishReason { get; }
+    internal string? ProviderResponseModel { get; }
+    internal int? ProviderResponsePromptTokens { get; }
+    internal int? ProviderResponseCompletionTokens { get; }
 }

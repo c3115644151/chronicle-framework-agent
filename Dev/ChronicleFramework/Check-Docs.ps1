@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.577'
+$contractVersion = '7.580'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -207,7 +207,14 @@ if ($agentHostHarnessProgressTraceSource -notmatch 'AgentHostRuntimeProgressLog\
     $agentHostRuntimeProgressLogSource -notmatch 'providerErrorCode' -or
     $agentHostRuntimeProgressLogSource -notmatch 'providerFallbackAttempts' -or
     $agentHostRuntimeProgressLogSource -notmatch 'providerFallbackTrail' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'providerToolCallsPresent' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'providerResponseContentKind' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'providerFinishReason' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'providerResponseModel' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'providerResponsePromptTokens' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'providerResponseContentCharacters' -or
     $agentHostProviderSource -notmatch 'ReadSafeProviderErrorMetadataAsync' -or
+    $agentHostProviderSource -notmatch 'providerToolCallsPresent: hasToolCalls' -or
     $agentHostRuntimeProgressLogSource -notmatch 'providerRequestBodyBytes' -or
     $agentHostRuntimeProgressLogSource -notmatch 'providerFailureEventsWithoutUsage' -or
     $agentHostRuntimeProgressLogSource -notmatch 'promptCacheHitRatioFromRows' -or
@@ -217,6 +224,8 @@ if ($agentHostHarnessProgressTraceSource -notmatch 'AgentHostRuntimeProgressLog\
     $agentHostHarnessProgressTraceSource -notmatch 'providerResponseRequestId' -or
     $agentHostHarnessProgressTraceSource -notmatch 'providerFallbackAttempts' -or
     $agentHostHarnessProgressTraceSource -notmatch 'providerFallbackTrail' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'host-progress-trace-provider-tool-shape' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'providerResponseCompletionTokens' -or
     $agentHostHarnessProgressTraceSource -notmatch 'providerProxyEndpointHostPort' -or
     $agentHostHarnessProgressTraceSource -notmatch 'host-progress-trace-provider-failure' -or
     $agentHostRuntimeControllerSource -notmatch 'CHRONICLE_LLM_PROXY_SELECTION_SOURCE' -or
@@ -1542,6 +1551,14 @@ if ($harnessScript -notmatch 'FreshCampaignProgressionAttempt\$attempt' -or $har
 if ($harnessScript -notmatch 'recruitmentProgression = \$testResult\.RecruitmentProgression' -or $harnessScript -notmatch 'progressionSaveCycleVerified' -or $harnessScript -notmatch 'freshClanRenown = \$testResult\.ClanRenown') { throw 'FreshCampaignProgression must preserve the measurable baseline, save cycle, and recruit receipt summary.' }
 . $startupEvidenceScript
 if (-not (Test-ChronicleStartupAssessment)) { throw 'Startup evidence regression checks failed.' }
+$agentCliSource = Get-Content -LiteralPath (Join-Path $harnessRoot 'Agent-Cli.ps1') -Raw -Encoding UTF8
+if (-not (Test-ChronicleCrashReportWindowTitleContract) -or
+    $agentCliSource -notmatch 'Test-ChronicleCrashReportWindowTitle' -or
+    $agentCliSource -notmatch 'startup-crash-report-' -or
+    $agentCliSource -notmatch 'DialogReadError' -or
+    $agentCliSource -notmatch 'No model request was sent and no crash-dialog button was pressed') {
+    throw 'Agent-Cli must recognize a process-owned Crash Report window, retain its readable dialog/log evidence, stop only the test-owned process tree, and never click the crash dialog.'
+}
 $startupEvidenceSource = Get-Content -LiteralPath $startupEvidenceScript -Raw -Encoding UTF8
 if (-not (Test-ChronicleSteamClientReadiness)) { throw 'Steam API readiness regression checks failed.' }
 if ($startupEvidenceSource -notmatch 'function Ensure-ChronicleSteamClientReady' -or

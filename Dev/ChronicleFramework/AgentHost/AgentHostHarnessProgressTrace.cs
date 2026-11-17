@@ -258,7 +258,9 @@ internal static class AgentHostHarnessProgressTrace
             exception.ProviderProxySelectionSource, exception.ProviderTimeoutSeconds, exception.ProviderRequestBodyBytes, exception.ProviderTransportErrorType,
             exception.ProviderProxyEndpointHostPort, exception.ProviderResponseServer, exception.ProviderResponseVia, exception.ProviderResponseRequestId,
             exception.ProviderRetryAfter, exception.ProviderErrorBodyKind, exception.ProviderErrorContentType, exception.ProviderErrorType, exception.ProviderErrorCode,
-            exception.ProviderFallbackAttempts, exception.ProviderFallbackTrail);
+            exception.ProviderFallbackAttempts, exception.ProviderFallbackTrail, exception.ProviderToolCallsPresent, exception.ProviderToolCallCount,
+            exception.ProviderResponseContentKind, exception.ProviderResponseContentCharacters, exception.ProviderFinishReason, exception.ProviderResponseModel,
+            exception.ProviderResponsePromptTokens, exception.ProviderResponseCompletionTokens);
 
     internal static void RecordProviderFailure(JsonElement request, string failureCode, int? providerHttpStatus = null,
         string? providerRoute = null, string? providerOutputFormat = null, int? providerRetryAttempts = null, long? providerRetryWaitMilliseconds = null,
@@ -266,13 +268,18 @@ internal static class AgentHostHarnessProgressTrace
         int? providerRequestBodyBytes = null, string? providerTransportErrorType = null, string? providerProxyEndpointHostPort = null,
         string? providerResponseServer = null, string? providerResponseVia = null, string? providerResponseRequestId = null, string? providerRetryAfter = null,
         string? providerErrorBodyKind = null, string? providerErrorContentType = null, string? providerErrorType = null, string? providerErrorCode = null,
-        int? providerFallbackAttempts = null, string? providerFallbackTrail = null)
+        int? providerFallbackAttempts = null, string? providerFallbackTrail = null,
+        bool? providerToolCallsPresent = null, int? providerToolCallCount = null, string? providerResponseContentKind = null,
+        int? providerResponseContentCharacters = null, string? providerFinishReason = null, string? providerResponseModel = null,
+        int? providerResponsePromptTokens = null, int? providerResponseCompletionTokens = null)
     {
         AgentHostRuntimeProgressLog.RecordProviderFailure(request, failureCode, providerHttpStatus, providerRoute,
             providerOutputFormat, providerRetryAttempts, providerRetryWaitMilliseconds, providerFailureStage,
             providerProxySelectionSource, providerTimeoutSeconds, providerRequestBodyBytes, providerTransportErrorType,
             providerProxyEndpointHostPort, providerResponseServer, providerResponseVia, providerResponseRequestId, providerRetryAfter,
-            providerErrorBodyKind, providerErrorContentType, providerErrorType, providerErrorCode, providerFallbackAttempts, providerFallbackTrail);
+            providerErrorBodyKind, providerErrorContentType, providerErrorType, providerErrorCode, providerFallbackAttempts, providerFallbackTrail,
+            providerToolCallsPresent, providerToolCallCount, providerResponseContentKind, providerResponseContentCharacters,
+            providerFinishReason, providerResponseModel, providerResponsePromptTokens, providerResponseCompletionTokens);
         var harnessMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
         if (harnessMode is not ("visual-capture" or "agent-host-lifecycle-test")) return;
         var directory = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
@@ -313,6 +320,14 @@ internal static class AgentHostHarnessProgressTrace
                 ["providerErrorCode"] = providerErrorCode,
                 ["providerFallbackAttempts"] = providerFallbackAttempts,
                 ["providerFallbackTrail"] = providerFallbackTrail,
+                ["providerToolCallsPresent"] = providerToolCallsPresent,
+                ["providerToolCallCount"] = providerToolCallCount,
+                ["providerResponseContentKind"] = providerResponseContentKind,
+                ["providerResponseContentCharacters"] = providerResponseContentCharacters,
+                ["providerFinishReason"] = providerFinishReason,
+                ["providerResponseModel"] = providerResponseModel,
+                ["providerResponsePromptTokens"] = providerResponsePromptTokens,
+                ["providerResponseCompletionTokens"] = providerResponseCompletionTokens,
                 ["nativeActionSent"] = false,
                 ["responseBodiesLogged"] = false,
                 ["credentialsLogged"] = false
@@ -847,6 +862,28 @@ internal static class AgentHostHarnessProgressTrace
                 providerFailureLine?.ContainsKey("responseBody") == true || providerFailureLine?.ContainsKey("apiKey") == true)
                 throw new AgentHostException("host-progress-trace-provider-failure", "Harness diagnostics must persist bounded HTTP status/retry metadata without response bodies or credentials.");
 
+            var missingToolCallDiagnostic = new AgentHostException("provider-tool-call-missing", "safe-shape-only",
+                providerRoute: "ovh/Mistral-Small-3.2-24B-Instruct-2506", providerOutputFormat: "required_tool_call",
+                providerToolCallsPresent: false, providerToolCallCount: 0, providerResponseContentKind: "String",
+                providerResponseContentCharacters: 47, providerFinishReason: "stop", providerResponseModel: "Mistral-Small-3.2-24B-Instruct-2506",
+                providerResponsePromptTokens: 1385, providerResponseCompletionTokens: 40);
+            RecordProviderFailure(request.RootElement, missingToolCallDiagnostic);
+            var missingToolCallLine = JsonNode.Parse(File.ReadAllLines(path).Last()) as JsonObject;
+            if (ReadString(missingToolCallLine, "event") != "provider-failure" ||
+                ReadString(missingToolCallLine, "failureCode") != "provider-tool-call-missing" ||
+                ReadString(missingToolCallLine, "providerRoute") != "ovh/Mistral-Small-3.2-24B-Instruct-2506" ||
+                ReadBoolean(missingToolCallLine, "providerToolCallsPresent") != false ||
+                ReadInt(missingToolCallLine, "providerToolCallCount", -1) != 0 ||
+                ReadString(missingToolCallLine, "providerResponseContentKind") != "String" ||
+                ReadInt(missingToolCallLine, "providerResponseContentCharacters", -1) != 47 ||
+                ReadString(missingToolCallLine, "providerFinishReason") != "stop" ||
+                ReadString(missingToolCallLine, "providerResponseModel") != "Mistral-Small-3.2-24B-Instruct-2506" ||
+                ReadInt(missingToolCallLine, "providerResponsePromptTokens", -1) != 1385 ||
+                ReadInt(missingToolCallLine, "providerResponseCompletionTokens", -1) != 40 ||
+                missingToolCallLine?.ContainsKey("responseBody") == true || missingToolCallLine?.ContainsKey("prompt") == true ||
+                missingToolCallLine?.ContainsKey("apiKey") == true || missingToolCallLine?.ContainsKey("toolArguments") == true)
+                throw new AgentHostException("host-progress-trace-provider-tool-shape", "A missing tool call must persist only response shape/route/usage metadata, never response or prompt text, arguments, or credentials.");
+
             RecordPassiveObservation("native-party-pursuit-passive-window", new JsonObject
             {
                 ["targetPartyId"] = "bandit-test",
@@ -872,12 +909,13 @@ internal static class AgentHostHarnessProgressTrace
 
             Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "normal");
             RecordDecision(request.RootElement, new ProviderDecisionResult("completed", "selftest-model", 1, 1, "stop", decision, "selftest/route"));
-            if (File.ReadAllLines(path).Length != 7)
+            if (File.ReadAllLines(path).Length != 8)
                 throw new AgentHostException("host-progress-trace-self-test-mode-gate", "Progress tracing must be disabled outside Harness visual-capture/lifecycle modes.");
             return [
                 new { scenario = "harness-progress-trace-records-current-modal-and-visible-buttons-without-one-use-token", passed = true },
                 new { scenario = "harness-progress-trace-persists-native-decision-and-route-without-free-text-in-visual-capture-and-lifecycle-modes", passed = true },
                 new { scenario = "provider-progress-trace-records-request-size-cache-cost-and-goal-scope-without-request-content", passed = true },
+                new { scenario = "provider-progress-trace-preserves-missing-tool-response-shape-without-text", passed = true },
                 new { scenario = "harness-progress-trace-reports-only-aggregate-affordable-recruitment-offer-counts", passed = true },
                 new { scenario = "harness-progress-trace-reports-only-aggregate-companion-navigation-progress", passed = true },
                 new { scenario = "harness-progress-trace-records-bounded-native-tavern-entry-transition-summary", passed = true },
