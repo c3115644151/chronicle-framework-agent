@@ -32,6 +32,7 @@ internal static class ChronicleAgentBattleMissionAdapter
     private static object? _mainAgentAiProbeOriginalAiStateFlags;
     private static bool? _mainAgentAiProbeOriginalAiPaused;
     private static object? _mainAgentAiProbeMissionController;
+    private static float? _mainAgentAiProbeDesiredCameraElevation;
     private static bool? _mainAgentAiProbeOriginalMissionControllerActivated;
     private static object? _mainAgentAiProbeOriginalCustomLookDir;
     private static float _mainAgentAiProbeExpiresAt;
@@ -396,6 +397,7 @@ internal static class ChronicleAgentBattleMissionAdapter
     {
         if (!TryGetSupportedBattleMission(out var mission, out var reason))
             throw new InvalidOperationException("harnessMainAgentAiControllerProbe " + reason);
+        if (fullNativeHandoff) AgentMissionInputPatch.Install();
         var campaign = Campaign.Current ?? throw new InvalidOperationException("harnessMainAgentAiControllerProbe requires an active Campaign");
         if (campaign.TimeControlMode != CampaignTimeControlMode.Stop)
             throw new InvalidOperationException("harnessMainAgentAiControllerProbe requires the Campaign clock to remain stopped");
@@ -516,6 +518,7 @@ internal static class ChronicleAgentBattleMissionAdapter
             .Append(",\"campaignDayAfter\":").Append(Number(CampaignTime.Now.ToDays));
         json.Append(",\"timeControlModeBefore\":"); AppendStringValue(json, timeModeBefore);
         json.Append(",\"timeControlModeAfter\":"); AppendStringValue(json, campaign.TimeControlMode.ToString());
+        json.Append(",\"nativeBattleCameraCorrectionPatchInstalled\":").Append(AgentMissionInputPatch.IsBattleCameraPatchInstalled ? "true" : "false");
         json.Append('}');
         return json.ToString();
     }
@@ -581,16 +584,58 @@ internal static class ChronicleAgentBattleMissionAdapter
             return;
 
         if (ReadMemberValue(missionScreen, "CameraElevation") is not float currentElevation ||
-            (!float.IsNaN(currentElevation) && !float.IsInfinity(currentElevation) &&
-             currentElevation >= NativeThirdPersonBattleCameraNearVerticalThreshold))
+            float.IsNaN(currentElevation) || float.IsInfinity(currentElevation) ||
+            ReadMemberValue(missionScreen, "CameraBearing") is not float cameraBearing ||
+            float.IsNaN(cameraBearing) || float.IsInfinity(cameraBearing))
             return;
 
         // The Native MissionScreen starts from a shallow third-person angle
         // (-0.2 radians). Deployment/idle camera input can leave the value at
-        // its near-vertical clamp before the AI lease begins; only then restore
-        // that Native baseline, preserving other valid player camera angles.
-        WriteMemberValue(missionScreen, "CameraElevation", NativeThirdPersonBattleCameraElevation);
+        // that Native baseline only if the existing angle is near-vertical.
+        // Synchronize MissionMainAgentController.CustomLookDir to the current
+        // valid camera angle in all third-person cases so MissionScreen does
+        // not revive a stale pre-handoff direction on a later tick.
+        var desiredElevation = currentElevation < NativeThirdPersonBattleCameraNearVerticalThreshold
+            ? NativeThirdPersonBattleCameraElevation
+            : currentElevation;
+        _mainAgentAiProbeDesiredCameraElevation = desiredElevation;
+        var cameraRotation = TaleWorlds.Library.Mat3.Identity;
+        cameraRotation.RotateAboutUp(cameraBearing);
+        cameraRotation.RotateAboutSide(desiredElevation);
+        WriteControllerLookDirection(missionController, cameraRotation.f);
+        WriteMemberValue(missionScreen, "CameraElevation", desiredElevation);
         WriteMemberValue(missionScreen, "_cameraElevationDelta", 0f);
+    }
+
+    internal static void EnforceNativeAiBattleCamera(object missionScreen)
+    {
+        var mission = Mission.Current;
+        var owner = _mainAgentAiProbeOwner;
+        var desiredElevation = _mainAgentAiProbeDesiredCameraElevation;
+        if (missionScreen == null || mission == null || !ReferenceEquals(mission, _mainAgentAiProbeMission) ||
+            !_mainAgentAiProbeFullNativeHandoff ||
+            (!string.Equals(_mainAgentAiProbeScope, "harness-only", StringComparison.Ordinal) &&
+             !string.Equals(_mainAgentAiProbeScope, "agenthost-native-battle-autopilot", StringComparison.Ordinal)) ||
+            mission.Mode != MissionMode.Battle || mission.CameraIsFirstPerson || !desiredElevation.HasValue || owner == null ||
+            !ReferenceEquals(owner, mission.MainAgent) || owner.Controller != AgentControllerType.AI)
+            return;
+
+        if (ReadMemberValue(missionScreen, "CameraElevation") is not float elevation ||
+            (!float.IsNaN(elevation) && !float.IsInfinity(elevation) && Math.Abs(elevation - desiredElevation.Value) <= 0.05f))
+            return;
+        if (ReadMemberValue(missionScreen, "CameraBearing") is not float bearing || float.IsNaN(bearing) || float.IsInfinity(bearing) ||
+            ReadMemberValue(missionScreen, "CombatCamera") is not TaleWorlds.Engine.Camera combatCamera ||
+            ReadMemberValue(combatCamera, "Frame") is not TaleWorlds.Library.MatrixFrame cameraFrame)
+            return;
+
+        WriteMemberValue(missionScreen, "CameraElevation", desiredElevation.Value);
+        WriteMemberValue(missionScreen, "_cameraElevationDelta", 0f);
+        var rotation = TaleWorlds.Library.Mat3.Identity;
+        rotation.RotateAboutSide(1.5707964f);
+        rotation.RotateAboutForward(bearing);
+        rotation.RotateAboutSide(desiredElevation.Value);
+        cameraFrame.rotation = rotation;
+        WriteMemberValue(combatCamera, "Frame", cameraFrame);
     }
 
     private static void RestoreNativeMainAgentAiHandoff(Agent owner, Mission mission)
@@ -1062,6 +1107,7 @@ internal static class ChronicleAgentBattleMissionAdapter
         _mainAgentAiProbeOriginalAiStateFlags = null;
         _mainAgentAiProbeOriginalAiPaused = null;
         _mainAgentAiProbeMissionController = null;
+        _mainAgentAiProbeDesiredCameraElevation = null;
         _mainAgentAiProbeOriginalMissionControllerActivated = null;
         _mainAgentAiProbeOriginalCustomLookDir = null;
         _mainAgentAiProbeExpiresAt = 0f;

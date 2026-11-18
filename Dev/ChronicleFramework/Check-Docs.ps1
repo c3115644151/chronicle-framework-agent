@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.599'
+$contractVersion = '7.601'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -1814,9 +1814,15 @@ if ($harnessScript -notmatch "'BattleMissionNativeAiHandoffProbe' \{ @\('Preflig
     $battleMissionAdapterSource -notmatch 'ResetNativeThirdPersonBattleCamera' -or
     $battleMissionAdapterSource -notmatch 'NativeThirdPersonBattleCameraElevation = -0\.2f' -or
     $battleMissionAdapterSource -notmatch 'NativeThirdPersonBattleCameraNearVerticalThreshold = -0\.7f' -or
+    $battleMissionAdapterSource -notmatch 'EnforceNativeAiBattleCamera' -or
+    $missionInputPatchSource -notmatch 'IsBattleCameraPatchInstalled' -or
+    $missionInputPatchSource -notmatch 'MissionScreen.UpdateCamera' -or
+    $battleMissionFormationProbeSource -notmatch 'nativeBattleCameraCorrectionPatchInstalled' -or
     $battleMissionFormationProbeSource -notmatch 'missionAutoDeploy' -or
     $battleMissionFormationProbeSource -notmatch 'nativeAiHandoffCameraFrame' -or
+    $battleMissionFormationProbeSource -notmatch 'nativeAiHandoffSustainedCameraFrame' -or
     $battleMissionFormationProbeSource -notmatch 'nativeAiHandoffExpectedCameraElevation' -or
+    $battleMissionFormationProbeSource -notmatch 'activeAiCameraSamples' -or
     $battleMissionFormationProbeSource -notmatch 'badCameraSamples' -or
     $battleMissionAdapterSource -notmatch 'RestoreNativeMainAgentAiHandoff') {
     throw 'The Native MainAgent AI handoff must restore a readable 1.4.8 third-person camera; its disposable no-model probe must use Native Auto Deploy, retain a frame, and check camera samples.'

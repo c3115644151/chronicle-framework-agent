@@ -15,6 +15,7 @@ internal static class AgentMissionInputPatch
     private const string HarmonyId = "ChronicleFramework.TavernMissionInput";
 
     internal static bool IsInstalled { get; private set; }
+    internal static bool IsBattleCameraPatchInstalled { get; private set; }
     private static Mission _battleMovementProbeMission;
     private static Agent _battleMovementProbeAgent;
 
@@ -99,6 +100,12 @@ internal static class AgentMissionInputPatch
 
     internal static void Install()
     {
+        TryInstallControlTickPatch();
+        TryInstallBattleCameraPatch();
+    }
+
+    private static void TryInstallControlTickPatch()
+    {
         if (IsInstalled) return;
         try
         {
@@ -120,8 +127,38 @@ internal static class AgentMissionInputPatch
         }
     }
 
+    private static void TryInstallBattleCameraPatch()
+    {
+        if (IsBattleCameraPatchInstalled) return;
+        try
+        {
+            var missionScreenType = AccessTools.TypeByName("TaleWorlds.MountAndBlade.View.Screens.MissionScreen");
+            var updateCamera = missionScreenType == null ? null : AccessTools.Method(missionScreenType, "UpdateCamera");
+            var cameraPostfix = AccessTools.Method(typeof(AgentMissionInputPatch), nameof(AfterNativeBattleCameraUpdate));
+            if (updateCamera == null || cameraPostfix == null)
+            {
+                ChronicleDiagnostics.Write("agent-battle-camera-patch-wait|reason=mission-screen-update-camera-not-loaded");
+                return;
+            }
+
+            new Harmony(HarmonyId).Patch(updateCamera, postfix: new HarmonyMethod(cameraPostfix));
+            IsBattleCameraPatchInstalled = true;
+            ChronicleDiagnostics.Write("agent-battle-camera-patch-installed|target=MissionScreen.UpdateCamera");
+        }
+        catch (Exception exception)
+        {
+            ChronicleDiagnostics.Write($"agent-battle-camera-patch-install-failed|type={exception.GetType().Name}|message={exception.Message}");
+        }
+    }
+
     private static void AfterNativeControlTick(MissionMainAgentController __instance)
     {
         ChronicleAgentProtocol.ApplyMissionInputAfterNativeControl(__instance?.Mission?.MainAgent);
     }
+
+    private static void AfterNativeBattleCameraUpdate(object __instance)
+    {
+        if (__instance != null) ChronicleAgentBattleMissionAdapter.EnforceNativeAiBattleCamera(__instance);
+    }
+
 }

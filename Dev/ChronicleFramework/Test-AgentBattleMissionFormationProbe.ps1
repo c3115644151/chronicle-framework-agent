@@ -578,6 +578,7 @@ try {
 
     $nativeAiHandoffProbe = $null
     $nativeAiHandoffCameraFrame = $null
+    $nativeAiHandoffSustainedCameraFrame = $null
     $nativeAiHandoffExpectedCameraElevation = $null
     $nativeAiHandoffSamples = [System.Collections.Generic.List[object]]::new()
     $mainAgentMovedDuringNativeAiHandoff = $null
@@ -585,6 +586,7 @@ try {
         $nativeAiHandoffProbe = Invoke-AgentCli 'harnessMainAgentNativeAiHandoffProbe' @('-DurationSeconds', '180', '-CommandId', "$prefix-main-agent-native-ai-handoff")
         if ($nativeAiHandoffProbe.status -ne 'completed' -or $nativeAiHandoffProbe.data.scope -ne 'harness-only' -or
             $nativeAiHandoffProbe.data.handoffMode -ne 'rts-camera-native-ai-initialization' -or
+            $nativeAiHandoffProbe.data.nativeBattleCameraCorrectionPatchInstalled -ne $true -or
             $nativeAiHandoffProbe.data.controllerBefore -ne 'Player' -or $nativeAiHandoffProbe.data.controllerAfter -ne 'AI' -or
             $nativeAiHandoffProbe.data.timeControlModeBefore -ne 'Stop' -or $nativeAiHandoffProbe.data.timeControlModeAfter -ne 'Stop' -or
             [Math]::Abs([double]$nativeAiHandoffProbe.data.campaignDayAfter - [double]$nativeAiHandoffProbe.data.campaignDayBefore) -gt 0.000001) {
@@ -621,6 +623,9 @@ try {
                 camera = $nativeHandoffStatus.data.camera
                 nativeHandoff = $nativeHandoffStatus.data.mainAgentAiControlLease
             })
+            if ($nativeAiHandoffSamples.Count -eq 3) {
+                $nativeAiHandoffSustainedCameraFrame = Capture-NativeFrame 'native-ai-battle-camera-sustained'
+            }
             $nativeHandoffLeaseActive = $nativeHandoffAgent.controller -eq 'AI'
         }
         if ($nativeAiHandoffSamples.Count -gt 1) {
@@ -632,11 +637,13 @@ try {
                 [Math]::Sqrt($dx * $dx + $dy * $dy + $dz * $dz) -gt 0.1
             }).Count -gt 0
         }
-        $badCameraSamples = @($nativeAiHandoffSamples | Where-Object {
-            $null -eq $_.camera -or [Math]::Abs([double]$_.camera.elevation - $nativeAiHandoffExpectedCameraElevation) -gt 0.15 -or $_.camera.firstPerson -ne $cameraBeforeHandoff.firstPerson
+        $activeAiCameraSamples = @($nativeAiHandoffSamples | Where-Object controller -eq 'AI')
+        $badCameraSamples = @($activeAiCameraSamples | Where-Object {
+            $null -eq $_.camera -or [Math]::Abs([double]$_.camera.elevation - $nativeAiHandoffExpectedCameraElevation) -gt 0.15 -or
+                $_.camera.firstPerson -ne $cameraBeforeHandoff.firstPerson
         })
-        if ($badCameraSamples.Count -gt 0) {
-            throw "Native battle camera left its expected view during AI control; expected elevation=$nativeAiHandoffExpectedCameraElevation, samples=$(($nativeAiHandoffSamples | ForEach-Object { $_.camera.elevation }) -join ',')."
+        if ($activeAiCameraSamples.Count -lt 3 -or $badCameraSamples.Count -gt 0 -or $null -eq $nativeAiHandoffSustainedCameraFrame) {
+            throw "Native battle camera did not remain near its selected third-person elevation for at least three AI-controlled samples; target=$nativeAiHandoffExpectedCameraElevation, activeSamples=$($activeAiCameraSamples.Count), badSamples=$($badCameraSamples.Count), elevations=$(($activeAiCameraSamples | ForEach-Object { $_.camera.elevation }) -join ',')."
         }
         $nativeHandoffRestoredState = Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-native-ai-handoff-restored-status")
         if ($nativeHandoffRestoredState.status -eq 'completed' -and (
@@ -965,6 +972,7 @@ try {
         } else { $null }
         nativeAiHandoffProbe = if ($nativeAiHandoffProbe) { $nativeAiHandoffProbe.data } else { $null }
         nativeAiHandoffExpectedCameraElevation = $nativeAiHandoffExpectedCameraElevation
+        nativeAiHandoffSustainedCameraFrame = if ($nativeAiHandoffSustainedCameraFrame) { [ordered]@{ path = $nativeAiHandoffSustainedCameraFrame; sha256 = (Get-FileHash -LiteralPath $nativeAiHandoffSustainedCameraFrame -Algorithm SHA256).Hash } } else { $null }
         nativeAiHandoffSamples = $nativeAiHandoffSamples.ToArray()
         mainAgentMovedDuringNativeAiHandoff = $mainAgentMovedDuringNativeAiHandoff
         mainAgentAiControllerProbeSamples = $controllerProbeSamples.ToArray()
