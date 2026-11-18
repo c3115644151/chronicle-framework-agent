@@ -524,8 +524,18 @@ internal static class AgentHostDecisionCycle
         IAgentHostDecisionProvider provider,
         JsonObject request,
         CancellationToken cancellationToken) =>
-        DecideAsync(provider, request, EstablishClanTrainingIssueSystemPrompt +
-            " MAP DIALOGUE INTERRUPTION: If an unrelated Native MapState conversation interrupts settlement travel, use only the currently listed clickable option or no-choice Continue. Do not accept another Issue/Quest, start a Mission, or choose combat. Re-read Native state after the current response before resuming the training route. VILLAGERS IN NEED INTERRUPTION: If the exact automatic StoryMode VillagersInNeed ConversationMission at village_ES3_2 interrupts travel, treat it as this known non-combat dialogue, not a hostile battle or training Issue. Advance no-choice lines only with currently listed Native dialogueContinue. At clickable answers, use only the current listed non-starting dialogueSelect and never choose Lead on/villa start; choose the visible postpone branch when shown, then reread state and resume. Do not generalize this exception to other Missions.", cancellationToken);
+        DecideAsync(provider, request, BuildEstablishClanTrainingIssueSystemPrompt(request), cancellationToken);
+
+    internal static string BuildEstablishClanTrainingIssueSystemPrompt(JsonObject request)
+    {
+        var prompt = EstablishClanTrainingIssueSystemPrompt +
+            " MAP DIALOGUE INTERRUPTION: If an unrelated Native MapState conversation interrupts settlement travel, use only the currently listed clickable option or no-choice Continue. Do not accept another Issue/Quest, start a Mission, or choose combat. Re-read Native state after the current response before resuming the training route. VILLAGERS IN NEED INTERRUPTION: If the exact automatic StoryMode VillagersInNeed ConversationMission at village_ES3_2 interrupts travel, treat it as this known non-combat dialogue, not a hostile battle or training Issue. Advance no-choice lines only with currently listed Native dialogueContinue. At clickable answers, use only the current listed non-starting dialogueSelect and never choose Lead on/villa start; choose the visible postpone branch when shown, then reread state and resume. Do not generalize this exception to other Missions.";
+        var feedback = request["decisionFeedback"] as JsonObject;
+        var requiredNextStep = ReadString(feedback, "requiredNextStep");
+        if (ReadString(feedback, "kind") == "decision-rejected-before-native" && !string.IsNullOrWhiteSpace(requiredNextStep))
+            prompt += " RECOVERY DIRECTIVE: The previous response was rejected before any Native command. Follow this exact next step using the latest catalog; no Native action was sent. " + requiredNextStep;
+        return prompt;
+    }
 
     internal static string BuildVillageToolsQuestSystemPrompt(JsonObject request)
     {

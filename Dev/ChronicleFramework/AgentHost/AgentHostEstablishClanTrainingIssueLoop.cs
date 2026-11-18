@@ -13,6 +13,32 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
     internal const int MaximumTrainingIssueDiscoveryDecisions = 32;
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
+        var recoveryActions = new JsonArray(new JsonObject
+        {
+            ["action"] = "menuSelect",
+            ["arguments"] = new JsonArray("MenuId", "OptionId"),
+            ["argumentValues"] = new JsonObject
+            {
+                ["MenuId"] = new JsonArray("encounter"),
+                ["OptionId"] = new JsonArray("surrender")
+            }
+        });
+        var recoveryFeedback = AgentHostProviderDecisionRecovery.BuildFeedback("provider-response-truncated", recoveryActions, new JsonArray());
+        var recoveryRequest = new JsonObject
+        {
+            ["decisionFeedback"] = recoveryFeedback,
+            ["allowedActions"] = recoveryActions.DeepClone()
+        };
+        var recoveryPrompt = AgentHostDecisionCycle.BuildEstablishClanTrainingIssueSystemPrompt(recoveryRequest);
+        var recoveryOptionRemainsListed = (recoveryRequest["allowedActions"] as JsonArray)?[0]?["argumentValues"]?["OptionId"]?[0]?.GetValue<string>() == "surrender";
+        if (!AgentHostProviderDecisionRecovery.CanRetry("provider-response-truncated", rejectedDecisions: 0) ||
+            AgentHostProviderDecisionRecovery.CanRetry("provider-response-truncated", rejectedDecisions: 1) ||
+            !recoveryPrompt.Contains("RECOVERY DIRECTIVE", StringComparison.Ordinal) ||
+            !recoveryPrompt.Contains("No Native action was sent", StringComparison.Ordinal) ||
+            !recoveryPrompt.Contains("listed catalog", StringComparison.Ordinal) || !recoveryOptionRemainsListed)
+            throw new AgentHostException("training-issue-self-test-truncated-response-recovery-missing", "A required-tool truncation must receive one same-catalog correction before any Native action, including the currently enabled surrender-only fallback.");
+        var truncatedResponseRecoveryScenario = new { scenario = "training-issue-retries-one-truncated-required-tool-response-with-current-catalog", passed = true };
+
         var discoveryMap = NativeState(null, null, new JsonArray());
         var discoveryBelowLimit = !ShouldStopUnproductiveTrainingIssueSearch(discoveryMap, MaximumTrainingIssueDiscoveryDecisions - 1, 0,
             activeTrainingIssue: false, directOfferAccepted: false);
@@ -314,6 +340,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
             throw new AgentHostException("training-issue-self-test-inquiry-scope-failed", "Only the visible Native return-borrowed-troops prompt may enter the training Issue completion response path.");
 
         return [
+            truncatedResponseRecoveryScenario,
             discoveryLimitScenario,
             new { scenario = "training-issue-targets-only-current-visible-available-issue-givers", passed = true },
             new { scenario = "training-issue-movement-observation-hides-settlement-targets-rejected-by-current-catalog", passed = true },
@@ -439,6 +466,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
         var completionTokens = priorCompletionTokens;
         var actionsExecuted = 0;
         var rejected = 0;
+        var rejectedProviderDecisions = 0;
         var processId = -1;
         JsonObject? initialNative = null;
         JsonObject? currentNative = null;
@@ -704,7 +732,16 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                 {
                     providerResult = await AgentHostDecisionCycle.DecideEstablishClanTrainingIssueAsync(provider, modelRequest, elapsed.Token);
                     decisions++;
+                    rejectedProviderDecisions = 0;
                     AddProviderRoute(routes, provider, providerResult, decisions, ref promptTokens, ref completionTokens);
+                }
+                catch (AgentHostException exception) when (AgentHostProviderDecisionRecovery.CanRetry(exception.Code, rejectedProviderDecisions))
+                {
+                    decisions++;
+                    rejectedProviderDecisions++;
+                    feedback = AgentHostProviderDecisionRecovery.BuildFeedback(exception.Code, catalog, controls);
+                    trace.Add(BuildDecisionStep(decisionIndex, modelRequest, null, feedback, null, false));
+                    continue;
                 }
                 catch (Exception exception)
                 {

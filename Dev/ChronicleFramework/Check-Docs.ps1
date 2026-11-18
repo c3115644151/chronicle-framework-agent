@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.614'
+$contractVersion = '7.616'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -190,6 +190,8 @@ if ($agentHostProviderSource -notmatch '_supportsReasoningEffort' -or
 }
 if ($agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-localized-direct-offer-hidden' -or
     $agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-discovery-budget-not-bounded' -or
+    $agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-truncated-response-recovery-missing' -or
+    $agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-truncated-response-recovery-missing' -or
     $agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-no-upgrade-query-loop' -or
     $agentHostTrainingIssueLoopSource -notmatch 'UpdateUpgradeOptionsReceipt' -or
     $agentHostTrainingIssueLoopSource -notmatch 'native-storymode-training-issue-gold' -or
