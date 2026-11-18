@@ -2094,6 +2094,21 @@ internal static class AgentHostBattleSimulationLoop
             surrenderAfterRejectedEscapeClient.Actions.Contains("battleSkip") || surrenderAfterRejectedEscapeClient.Actions.Contains("battleFinish"))
             throw new AgentHostException("battle-loop-native-surrender-after-rejected-escape-not-recovered", $"With Try-to-get-away suppressed and no Send Troops/Leave, the current Native surrender should remain model-selectable in recovery mode and return through Native ransom. termination={ReadString(surrenderAfterRejectedEscape, "termination")}, outcome={ReadString(surrenderAfterRejectedEscape, "playerOutcome")}, captivityChoice={ReadString(surrenderAfterRejectedEscape, "captivityChoiceOptionId")}, options={string.Join(",", surrenderAfterRejectedEscapeProvider.PostRejectEncounterOptionIds ?? Array.Empty<string>())}, actions={string.Join(",", surrenderAfterRejectedEscapeClient.Actions)}.");
         var surrenderAfterRejectedEscapeEvidence = new { scenario = "battle-loop-keeps-native-surrender-as-model-selected-recovery-fallback-after-rejected-escape-without-other-options", providerDecisions = surrenderAfterRejectedEscapeProvider.CallCount, nativeActions = surrenderAfterRejectedEscapeClient.Actions.ToArray(), captivityChoiceOptionId = ReadString(surrenderAfterRejectedEscape, "captivityChoiceOptionId"), nativeReturnToMapVerified = ReadBoolean(surrenderAfterRejectedEscape, "nativeReturnToMapVerified"), passed = true };
+        var truncatedSurrenderClient = new FakeBattleSimulationNativeClient(simulateNativeEscape: true, surrenderAfterEscapeReject: true);
+        var truncatedSurrenderProvider = new FakeEscapeRejectRetryDecisionProvider(surrenderFallback: true, truncateSurrenderOnce: true);
+        var truncatedSurrender = await RunAsync(request.RootElement, truncatedSurrenderClient, truncatedSurrenderProvider,
+            CancellationToken.None, recoverPlayerCaptivity: true, passiveCaptivityPollSeconds: 1);
+        if (ReadString(truncatedSurrender, "status") != "completed" ||
+            ReadString(truncatedSurrender, "termination") != "native-captivity-recovered-without-battle" ||
+            ReadString(truncatedSurrender, "playerOutcome") != "captured-then-recovered" ||
+            !ReadBoolean(truncatedSurrender, "captivityRecoveryVerified") ||
+            truncatedSurrenderProvider.CallCount != 8 || !truncatedSurrenderProvider.TruncatedResponseObserved ||
+            !truncatedSurrenderProvider.TruncatedRecoveryPromptPassed ||
+            truncatedSurrenderClient.MenuChoices.Count(choice => choice == "encounter:surrender") != 1 ||
+            truncatedSurrenderClient.ClockActions.Count != 0 || truncatedSurrenderClient.Actions.Contains("battleSkip") ||
+            truncatedSurrenderClient.Actions.Contains("battleFinish"))
+            throw new AgentHostException("battle-loop-truncated-native-surrender-recovery-failed", $"A truncated required-tool response at the surrender-only Native encounter must receive one same-catalog retry before the original surrender action, then complete the enabled captivity recovery. termination={ReadString(truncatedSurrender, "termination")}, outcome={ReadString(truncatedSurrender, "playerOutcome")}, calls={truncatedSurrenderProvider.CallCount}, failureObserved={truncatedSurrenderProvider.TruncatedResponseObserved}, recoveryPrompt={truncatedSurrenderProvider.TruncatedRecoveryPromptPassed}, actions={string.Join(",", truncatedSurrenderClient.Actions)}.");
+        var truncatedSurrenderRecoveryEvidence = new { scenario = "battle-loop-retries-one-truncated-required-tool-at-surrender-only-native-encounter-before-captivity-recovery", providerRequests = truncatedSurrenderProvider.CallCount, retryPromptPassed = truncatedSurrenderProvider.TruncatedRecoveryPromptPassed, nativeActions = truncatedSurrenderClient.Actions.ToArray(), termination = ReadString(truncatedSurrender, "termination"), passed = true };
         var visibleThreatClient = new FakeBattleSimulationNativeClient(visibleHostileAtStart: true);
         var visibleThreatProvider = new FakeBattleSimulationDecisionProvider();
         var visibleThreatResult = await RunAsync(request.RootElement, visibleThreatClient, visibleThreatProvider, CancellationToken.None);
@@ -2242,6 +2257,7 @@ internal static class AgentHostBattleSimulationLoop
             new { scenario = "battle-loop-model-chooses-observed-native-try-to-get-away-cost-and-returns-without-claiming-renown", nativeActions = escapeClient.Actions.ToArray(), playerOutcome = ReadString(escapeResult, "playerOutcome"), nativeEscapeCompleted = ReadBoolean(escapeResult, "nativeEscapeCompleted"), passed = true },
             rejectedEscapeRetryEvidence,
             surrenderAfterRejectedEscapeEvidence,
+            truncatedSurrenderRecoveryEvidence,
             new { scenario = "battle-loop-auto-continues-no-choice-map-dialogue-before-renown-planning", nativeActions = mapConversationClient.Actions.ToArray(), passed = true },
             new { scenario = "battle-loop-auto-continues-active-encounter-no-choice-line-before-model-sees-native-options", nativeActions = activeEncounterConversationClient.Actions.ToArray(), providerDecisions = activeEncounterConversationProvider.CallCount, passed = true },
             new { scenario = "battle-loop-map-incident-interrupts-before-model-or-native-actions", passed = true },
@@ -2717,6 +2733,7 @@ internal static class AgentHostBattleSimulationLoop
         private string _timeControlMode = "Stop";
         internal List<string> Actions { get; } = [];
         internal List<string> ClockActions { get; } = [];
+        internal List<string> MenuChoices { get; } = [];
         internal string? LastInquiryChoice { get; private set; }
 
         internal FakeBattleSimulationNativeClient(bool simulateCaptivity = false, bool simulatePartyInquiry = false, bool visibleHostileAtStart = false, bool mapIncidentAtStart = false, bool mapConversationAtStart = false, bool mapConversationEncounterAtStart = false, bool simulateNativeEscape = false, bool simulateSurrenderWithoutBattle = false, bool surrenderAfterEscapeReject = false)
@@ -2772,6 +2789,7 @@ internal static class AgentHostBattleSimulationLoop
                     else _stage = 4;
                     break;
                 case "menuSelect":
+                    MenuChoices.Add(ReadString(arguments, "menuId") + ":" + ReadString(arguments, "optionId"));
                     if ((_simulateSurrenderWithoutBattle || _surrenderAfterEscapeReject && _escapeRejected) && _stage == 4 && ReadString(arguments, "optionId") == "surrender") _stage = 10;
                     else if (_simulateNativeEscape && _stage == 4 && ReadString(arguments, "optionId") == "leave_soldiers_behind") _stage = 14;
                     else if (_simulateNativeEscape && _stage == 14 && ReadString(arguments, "optionId") == "try_to_get_away_accept") _stage = 15;
@@ -2983,13 +3001,22 @@ internal static class AgentHostBattleSimulationLoop
         ["mapPartyTargets", "pursue", "dialogueSelect", "escape-start", "escape-reject", "surrender-after-rejection", "ransom-accept"];
 
         private readonly bool _surrenderFallback;
+        private readonly bool _truncateSurrenderOnce;
+        private bool _surrenderTruncationSent;
+        private int _stepIndex;
         internal int CallCount { get; private set; }
         internal string[]? PostRejectEncounterOptionIds { get; private set; }
         internal bool RecoveryPromptPassed { get; private set; }
+        internal bool TruncatedResponseObserved { get; private set; }
+        internal bool TruncatedRecoveryPromptPassed { get; private set; }
         public string ModelId => "deterministic-native-escape-reject-self-test";
         public string ConfigurationSource => "harness-fake-provider";
 
-        internal FakeEscapeRejectRetryDecisionProvider(bool surrenderFallback = false) => _surrenderFallback = surrenderFallback;
+        internal FakeEscapeRejectRetryDecisionProvider(bool surrenderFallback = false, bool truncateSurrenderOnce = false)
+        {
+            _surrenderFallback = surrenderFallback;
+            _truncateSurrenderOnce = truncateSurrenderOnce;
+        }
 
         public Task CheckConfiguredModelAsync(CancellationToken cancellationToken)
         {
@@ -3001,14 +3028,29 @@ internal static class AgentHostBattleSimulationLoop
         {
             cancellationToken.ThrowIfCancellationRequested();
             var expectedSteps = _surrenderFallback ? ExpectedSurrenderSteps : ExpectedAttackSteps;
-            if (CallCount >= expectedSteps.Length)
+            if (_stepIndex >= expectedSteps.Length)
                 throw new AgentHostException("battle-loop-native-escape-reject-self-test-exhausted", "The fake provider exceeded the bounded post-rejection recovery route.");
-            var index = CallCount++;
+            CallCount++;
+            var index = _stepIndex;
             var step = expectedSteps[index];
+            if (step == "surrender-after-rejection" && _truncateSurrenderOnce && !_surrenderTruncationSent)
+            {
+                _surrenderTruncationSent = true;
+                TruncatedResponseObserved = true;
+                throw new AgentHostException("provider-response-truncated", "Synthetic required-tool response truncation.");
+            }
             if (step is "attack-after-rejection" or "surrender-after-rejection")
             {
                 RecoveryPromptPassed = systemPrompt.Contains("NATIVE ESCAPE RECOVERY DIRECTIVE", StringComparison.Ordinal) &&
                     systemPrompt.Contains("do not repeat the rejected escape attempt", StringComparison.Ordinal);
+                if (step == "surrender-after-rejection" && _surrenderTruncationSent)
+                {
+                    var recoveryRequest = ParseObject(request);
+                    var feedback = recoveryRequest["decisionFeedback"] as JsonObject;
+                    TruncatedRecoveryPromptPassed = systemPrompt.Contains("RECOVERY DIRECTIVE", StringComparison.Ordinal) &&
+                        ReadString(feedback, "code") == "provider-response-truncated" &&
+                        (ReadString(feedback, "requiredNextStep") ?? string.Empty).Contains("No Native action was sent", StringComparison.Ordinal);
+                }
                 var requestNode = ParseObject(request);
                 var menuAction = (requestNode["allowedActions"] as JsonArray)?.OfType<JsonObject>()
                     .FirstOrDefault(action => ReadString(action, "action") == "menuSelect");
@@ -3035,6 +3077,7 @@ internal static class AgentHostBattleSimulationLoop
                 "partyTakeAll" => new JsonObject { ["action"] = "partyTakeAll", ["arguments"] = new JsonObject { ["TroopType"] = "members" }, ["rationale"] = "Resolve current transferable battle aftermath." },
                 _ => new JsonObject { ["action"] = step, ["arguments"] = new JsonObject(), ["rationale"] = "Use the current Native action." }
             };
+            _stepIndex++;
             return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 1, 1, "harness-fake-provider", decision));
         }
 

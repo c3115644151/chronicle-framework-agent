@@ -330,8 +330,15 @@ internal static class AgentHostDecisionCycle
     internal static Task<ProviderDecisionResult> DecideBattleAndCaptivityAsync(
         IAgentHostDecisionProvider provider,
         JsonObject request,
-        CancellationToken cancellationToken) =>
-        DecideAsync(provider, request, BuildBattleAndCaptivityDecisionPrompt(request, recoveryEnabled: true), cancellationToken);
+        CancellationToken cancellationToken)
+    {
+        var prompt = BuildBattleAndCaptivityDecisionPrompt(request, recoveryEnabled: true);
+        var feedback = request["decisionFeedback"] as JsonObject;
+        var recovery = ReadString(feedback, "requiredNextStep");
+        if (ReadString(feedback, "kind") == "decision-rejected-before-native" && !string.IsNullOrWhiteSpace(recovery))
+            prompt += " RECOVERY DIRECTIVE: The previous response was rejected before any Native command. Follow this exact next step using the latest catalog; no Native action was sent. " + recovery;
+        return DecideAsync(provider, request, prompt, cancellationToken);
+    }
 
     internal static Task<ProviderDecisionResult> DecideEstablishYourClanGoalAsync(
         IAgentHostDecisionProvider provider,
