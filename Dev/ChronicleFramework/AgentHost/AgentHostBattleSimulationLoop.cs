@@ -543,19 +543,12 @@ internal static class AgentHostBattleSimulationLoop
                     decisions++;
                     AddRoute(routes, provider, result, decisions, ref promptTokens, ref completionTokens);
                 }
-                catch (AgentHostException exception) when (IsRecoverableProviderError(exception.Code) && rejected < MaxRejectedDecisions)
+                catch (AgentHostException exception) when (CanRecoverProviderError(exception.Code, rejected))
                 {
                     decisions++;
                     rejected++;
-                    feedback = new JsonObject
-                    {
-                        ["kind"] = "decision-rejected-before-native",
-                        ["code"] = exception.Code,
-                        ["message"] = exception.Message,
-                        ["requiredNextStep"] = exception.Code == "provider-arguments-invalid-json"
-                            ? "Return arguments as a JSON object using exactly the listed names and latest observed IDs."
-                            : "Choose exactly one action or control from the latest catalog; do not repeat the rejected response."
-                    };
+                    feedback = AgentHostProviderDecisionRecovery.BuildFeedback(exception.Code, catalog, controls);
+                    feedback["message"] = exception.Message;
                     var providerErrorCompletedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
                     trace.Add(BuildTraceStep(iteration, providerStarted, requestNow, null, feedback, previousReceipt, null, providerCompletedUtc: providerErrorCompletedUtc));
                     continue;
@@ -1447,6 +1440,14 @@ internal static class AgentHostBattleSimulationLoop
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
         var results = new List<object>();
+        if (!CanRecoverProviderError("provider-response-truncated", rejected: 0) ||
+            CanRecoverProviderError("provider-response-truncated", rejected: 1) ||
+            !CanRecoverProviderError("provider-multiple-tool-calls", rejected: 0) ||
+            CanRecoverProviderError("provider-multiple-tool-calls", rejected: 1) ||
+            !CanRecoverProviderError("provider-arguments-invalid-json", rejected: 1) ||
+            CanRecoverProviderError("provider-arguments-invalid-json", rejected: MaxRejectedDecisions) ||
+            CanRecoverProviderError("provider-http-error", rejected: 0))
+            throw new AgentHostException("battle-loop-provider-recovery-budget-invalid", "Battle provider recovery must retry a truncated/multi-tool response once, retain the ordinary bounded argument correction, and never retry transport or quota errors.");
         if (!AgentHostDecisionCycle.BattleAndCaptivitySystemPrompt.Contains("surrender only as an emergency survival fallback", StringComparison.Ordinal) ||
             AgentHostDecisionCycle.BattleSimulationSystemPrompt.Contains("surrender only as a survival fallback", StringComparison.Ordinal) ||
             !AgentHostDecisionCycle.BattleSimulationSystemPrompt.Contains("nearby hostile parties may join the same battle", StringComparison.Ordinal) ||
@@ -2671,6 +2672,11 @@ internal static class AgentHostBattleSimulationLoop
             }
         };
     }
+
+    private static bool CanRecoverProviderError(string code, int rejected) =>
+        AgentHostProviderDecisionRecovery.CanRetry(code, rejected) ||
+        (code is not "provider-response-truncated" and not "provider-multiple-tool-calls" &&
+         IsRecoverableProviderError(code) && rejected < MaxRejectedDecisions);
 
     private static bool IsRecoverableProviderError(string code) => code is
         "provider-decision-invalid" or "provider-action-unavailable" or "provider-control-unavailable" or
