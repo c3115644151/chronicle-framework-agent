@@ -36,6 +36,10 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             ["status"] = "completed",
             ["data"] = new JsonObject
             {
+                ["buyOffers"] = new JsonArray
+                {
+                    new JsonObject { ["viewModelItemId"] = "market-goods", ["nativeTooltipType"] = "Goods", ["inventorySide"] = "OtherInventory", ["stock"] = 99, ["inventoryLogicUnitPrice"] = 1, ["isTransferable"] = true }
+                },
                 ["sellOffers"] = new JsonArray
                 {
                     new JsonObject { ["viewModelItemId"] = "goods-1", ["nativeTooltipType"] = "Goods", ["inventorySide"] = "PlayerInventory", ["stock"] = 2, ["inventoryLogicUnitPrice"] = 100, ["isTransferable"] = true },
@@ -67,8 +71,24 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             ReadString(providerTradeReceipt?["data"] as JsonObject, "candidateScope") != "currently sellable PlayerInventory Goods" ||
             (tradeOptions["data"]?["sellOffers"] as JsonArray)?.Count != 5)
             throw new AgentHostException("gold-sale-self-test-provider-trade-receipt-projection-failed", "The model view must contain only current transferable PlayerInventory Goods while Native action validation retains the full quote.");
+        var postEmptyTradeTown = MapState("town", "sargot", new JsonArray(
+            new JsonObject { ["id"] = "trade", ["available"] = true, ["enabled"] = true, ["isLeave"] = false },
+            new JsonObject { ["id"] = "town_leave", ["available"] = true, ["enabled"] = true, ["isLeave"] = true }));
+        postEmptyTradeTown["context"]!["encounteredPartyId"] = "sargot";
+        var emptyTradeReceipt = new JsonObject { ["action"] = "tradeCancel", ["status"] = "completed" };
+        var postCancelCatalog = BuildActionCatalog(postEmptyTradeTown, emptyTradeReceipt, null, null);
+        var repeatedTradeWasRejected = !TryResolveAction(postEmptyTradeTown, emptyTradeReceipt, postCancelCatalog,
+            new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "town", ["OptionId"] = "trade" } },
+            null, null, out _, out _, out _);
+        var nativeLeaveAfterEmptyTradeAccepted = TryResolveAction(postEmptyTradeTown, emptyTradeReceipt, postCancelCatalog,
+            new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "town", ["OptionId"] = "town_leave" } },
+            null, null, out var resolvedLeaveAction, out _, out _) && resolvedLeaveAction == "menuSelect";
+        if (postCancelCatalog[0]?["argumentValues"]?["OptionId"]?[0]?.GetValue<string>() != "town_leave" ||
+            !repeatedTradeWasRejected || !nativeLeaveAfterEmptyTradeAccepted)
+            throw new AgentHostException("gold-sale-self-test-empty-trade-cannot-reopen-market", "After an empty Native Trade cancel, only the currently listed Native town-leave option may proceed; visible but unlisted Trade must be rejected.");
         var largeTradeReceipt = tradeOptions.DeepClone().AsObject();
         var largeTradeOffers = largeTradeReceipt["data"]?["sellOffers"] as JsonArray ?? new JsonArray();
+        var largeBuyOffers = new JsonArray();
         for (var offerIndex = 0; offerIndex < 512; offerIndex++)
         {
             largeTradeOffers.Add(new JsonObject
@@ -81,12 +101,25 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 ["isTransferable"] = true,
                 ["nativeTooltipText"] = new string('x', 256)
             });
+            largeBuyOffers.Add(new JsonObject
+            {
+                ["viewModelItemId"] = $"unrelated-market-buy-{offerIndex}",
+                ["nativeTooltipType"] = "Goods",
+                ["inventorySide"] = "OtherInventory",
+                ["stock"] = 20,
+                ["inventoryLogicUnitPrice"] = 100,
+                ["isTransferable"] = true,
+                ["nativeTooltipText"] = new string('y', 256)
+            });
         }
+        largeTradeReceipt["data"]!["buyOffers"] = largeBuyOffers;
         var compactLargeTradeReceipt = BuildProviderPreviousReceipt(largeTradeReceipt, null);
         var compactLargeSellOffers = compactLargeTradeReceipt?["data"]?["sellOffers"] as JsonArray;
         var fullTradeReceiptBytes = System.Text.Encoding.UTF8.GetByteCount(largeTradeReceipt.ToJsonString());
         var providerTradeReceiptBytes = System.Text.Encoding.UTF8.GetByteCount(compactLargeTradeReceipt?.ToJsonString() ?? string.Empty);
         if (compactLargeSellOffers?.Count != 1 || (largeTradeReceipt["data"]?["sellOffers"] as JsonArray)?.Count != 517 ||
+            (largeTradeReceipt["data"]?["buyOffers"] as JsonArray)?.Count != 512 ||
+            compactLargeTradeReceipt?["data"]?["buyOffers"] is not null ||
             providerTradeReceiptBytes * 4 >= fullTradeReceiptBytes)
             throw new AgentHostException("gold-sale-self-test-provider-trade-receipt-volume-not-reduced", "A verbose quote with more than five hundred unrelated market rows must stay intact for Native checks but be compacted to the model's sellable choices.");
 
@@ -1193,12 +1226,16 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             var optionId = ReadString(supplied, "OptionId");
             var currentMenuId = ReadString(state["context"] as JsonObject, "menuId");
             var currentOption = GetEnabledOptions(state).OfType<JsonObject>().FirstOrDefault(option => ReadString(option, "id") == optionId);
-            var isMainTownTrade = menuId == "town" && optionId == "trade";
+            var listedMenuIds = listed["argumentValues"]?["MenuId"] as JsonArray;
+            var listedOptionIds = listed["argumentValues"]?["OptionId"] as JsonArray;
+            var isListedMenuChoice = listedMenuIds?.Any(value => value?.GetValue<string>() == menuId) == true &&
+                listedOptionIds?.Any(value => value?.GetValue<string>() == optionId) == true;
+            var isMainTownTrade = menuId == "town" && optionId == "trade" && ReadString(previousReceipt, "action") != "tradeCancel";
             var isSelectPrisonersForSale = menuId == "town_backstreet" && optionId == "sell_some_prisoners";
             var isTownLeaveAfterEmptyTrade = menuId == "town" && ReadString(previousReceipt, "action") == "tradeCancel" && ReadBoolean(currentOption, "isLeave");
             var isNativeLocationLeave = AgentHostCampaignStateFacts.IsNativeLocationMenu(state) && ReadBoolean(currentOption, "isLeave") &&
                                         (menuId != "town" || isTownLeaveAfterEmptyTrade);
-            if (menuId != currentMenuId || (!isMainTownTrade && !isSelectPrisonersForSale && !isNativeLocationLeave) || currentOption is null)
+            if (!isListedMenuChoice || menuId != currentMenuId || (!isMainTownTrade && !isSelectPrisonersForSale && !isNativeLocationLeave) || currentOption is null)
             {
                 rejection = "Only the current Native Town Trade entry or a visible Native location-menu Leave option can be selected.";
                 return false;
@@ -1369,13 +1406,17 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         if (action == "tradeOptions")
         {
             var compactTrade = previousReceipt?.DeepClone() as JsonObject;
-            var tradeData = compactTrade?["data"] as JsonObject;
+            if (compactTrade is null) return null;
+            var tradeData = compactTrade["data"] as JsonObject;
             if (tradeData is null || tradeData["sellOffers"] is not JsonArray)
                 return compactTrade;
             var sellableGoods = GetSellableGoods(previousReceipt);
-            tradeData["sellOffers"] = new JsonArray(sellableGoods.Select(offer => (JsonNode?)offer.DeepClone()).ToArray());
-            tradeData["candidateScope"] = "currently sellable PlayerInventory Goods";
-            tradeData["candidateCount"] = sellableGoods.Length;
+            compactTrade["data"] = new JsonObject
+            {
+                ["sellOffers"] = new JsonArray(sellableGoods.Select(offer => (JsonNode?)offer.DeepClone()).ToArray()),
+                ["candidateScope"] = "currently sellable PlayerInventory Goods",
+                ["candidateCount"] = sellableGoods.Length
+            };
             return compactTrade;
         }
         if (action != "mapSettlementTargets") return previousReceipt?.DeepClone() as JsonObject;
