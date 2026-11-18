@@ -413,11 +413,54 @@ internal static class AgentHostEstablishClanCompanionLoop
             projectedSceneTokenEstimate.Method != fullSceneTokenEstimate.Method ||
             fullSceneTokenEstimate.TokenizerTokens <= projectedSceneTokenEstimate.TokenizerTokens)
             throw new AgentHostException("establish-clan-companion-observation-projection-failed", "The model payload must omit the raw Tavern agent roster and irrelevant MainHero skill list while preserving Native scene identity, current Wanderer summaries, and current Gold; byte/token savings must be measurable. originalMissionBytes=" + originalMissionBytes + "; projectedMissionBytes=" + projectedMissionBytes + "; originalStateBytes=" + originalStateBytes + "; projectedStateBytes=" + projectedStateBytes + "; candidates=" + projectedCandidates?.Count + "; nearby=" + projectedNearby?.Count + "; fullPromptTokens=" + fullSceneTokenEstimate.TokenizerTokens + "; projectedPromptTokens=" + projectedSceneTokenEstimate.TokenizerTokens);
+        var mapPromptRequest = new JsonObject
+        {
+            ["goal"] = "PRIVATE_GOAL_TEXT",
+            ["observation"] = new JsonObject
+            {
+                ["state"] = new JsonObject { ["context"] = new JsonObject { ["gameState"] = "MapState", ["menuId"] = null } },
+                ["visibleSafeTownTargets"] = new JsonArray(new JsonObject { ["id"] = "town-visible" })
+            },
+            ["allowedActions"] = new JsonArray(new JsonObject { ["action"] = "move" }),
+            ["allowedControls"] = new JsonArray("observeAgain")
+        };
+        var mapPrompt = AgentHostDecisionCycle.BuildEstablishClanCompanionSystemPrompt(mapPromptRequest);
+        var menuPromptRequest = new JsonObject
+        {
+            ["observation"] = new JsonObject { ["state"] = new JsonObject { ["context"] = new JsonObject { ["gameState"] = "MapState", ["menuId"] = "town" } } },
+            ["allowedActions"] = new JsonArray(new JsonObject { ["action"] = "menuSelect" }),
+            ["allowedControls"] = new JsonArray()
+        };
+        var menuPrompt = AgentHostDecisionCycle.BuildEstablishClanCompanionSystemPrompt(menuPromptRequest);
+        var missionPromptRequest = new JsonObject
+        {
+            ["observation"] = new JsonObject { ["state"] = new JsonObject { ["context"] = new JsonObject { ["gameState"] = "MissionState", ["menuId"] = "town_tavern" } } },
+            ["allowedActions"] = new JsonArray(new JsonObject { ["action"] = "missionNavigateToAgent" }, new JsonObject { ["action"] = "missionLeave" }),
+            ["allowedControls"] = new JsonArray()
+        };
+        var missionPrompt = AgentHostDecisionCycle.BuildEstablishClanCompanionSystemPrompt(missionPromptRequest);
+        var dialoguePromptRequest = new JsonObject
+        {
+            ["observation"] = new JsonObject { ["state"] = new JsonObject { ["context"] = new JsonObject { ["gameState"] = "MissionState", ["conversation"] = new JsonObject { ["heroId"] = "wanderer-visible" } } } },
+            ["allowedActions"] = new JsonArray(new JsonObject { ["action"] = "dialogueSelect" }),
+            ["allowedControls"] = new JsonArray()
+        };
+        var dialoguePrompt = AgentHostDecisionCycle.BuildEstablishClanCompanionSystemPrompt(dialoguePromptRequest);
+        if (mapPrompt.Length > 950 || menuPrompt.Length > 950 || missionPrompt.Length > 950 || dialoguePrompt.Length > 950 ||
+            !mapPrompt.Contains("visibleSafeTownTargets", StringComparison.Ordinal) || !mapPrompt.Contains("observeAgain", StringComparison.Ordinal) ||
+            mapPrompt.Contains("player_companion_hire_response_1", StringComparison.Ordinal) || mapPrompt.Contains("FindingFirstBannerPieceSceneNotificationItem", StringComparison.Ordinal) ||
+            !menuPrompt.Contains("currently listed enabled menuSelect", StringComparison.Ordinal) || menuPrompt.Contains("missionNavigateToAgent", StringComparison.Ordinal) ||
+            !missionPrompt.Contains("current-location", StringComparison.Ordinal) || !missionPrompt.Contains("missionLeave", StringComparison.Ordinal) || missionPrompt.Contains("visibleSafeTownTargets", StringComparison.Ordinal) ||
+            !dialoguePrompt.Contains("player_companion_hire_response_1", StringComparison.Ordinal) || !dialoguePrompt.Contains("clickable listed response", StringComparison.Ordinal) ||
+            new[] { mapPrompt, menuPrompt, missionPrompt, dialoguePrompt }.Any(prompt => prompt.Contains("PRIVATE_GOAL_TEXT", StringComparison.Ordinal) ||
+                !prompt.Contains("reason <= 8 words", StringComparison.Ordinal) || !prompt.Contains("required decision-tool call only", StringComparison.Ordinal)))
+            throw new AgentHostException("establish-clan-companion-prompt-stage-projection-failed", "Companion prompts must reveal only the current Native phase, retain the current-action and Journal contract, and omit setup/dialogue rules that cannot apply at that phase.");
         return [
             new { scenario = "companion-navigation-stall-policy-excludes-only-after-two-no-progress-native-approaches", passed = true },
             new { scenario = "establish-clan-companion-targets-only-current-safe-unvisited-town-and-friendly-wanderer", passed = true },
             new { scenario = "establish-clan-companion-town-choice-window-pages-without-world-target-cap", passed = true, totalWorldTargets = 21, choiceWindow = SafeTownDecisionWindowSize },
             new { scenario = "establish-clan-companion-model-observation-compacts-raw-mission-agent-roster-and-preserves-current-wanderer-candidates", originalMissionBytes, projectedMissionBytes, missionBytesSaved = originalMissionBytes - projectedMissionBytes, fullPromptTokens = fullSceneTokenEstimate.TokenizerTokens, projectedPromptTokens = projectedSceneTokenEstimate.TokenizerTokens, estimatedPromptTokensSaved = fullSceneTokenEstimate.TokenizerTokens - projectedSceneTokenEstimate.TokenizerTokens, passed = true },
+            new { scenario = "establish-clan-companion-prompt-is-projected-to-the-current-native-map-menu-mission-or-dialogue-stage", mapPromptCharacters = mapPrompt.Length, menuPromptCharacters = menuPrompt.Length, missionPromptCharacters = missionPrompt.Length, dialoguePromptCharacters = dialoguePrompt.Length, passed = true },
             new { scenario = "establish-clan-companion-dialogue-catalog-excludes-unrelated-native-options", passed = true },
             new { scenario = "establish-clan-companion-resolves-current-map-dialogue-before-resuming-travel", passed = true },
             new { scenario = "establish-clan-companion-continues-only-no-choice-map-dialogue", passed = true },

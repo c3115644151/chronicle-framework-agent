@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.605'
+$contractVersion = '7.607'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -104,6 +104,7 @@ $agentHostMapIncidentLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost
 $agentHostStoryModeBootstrapLoopSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostStoryModeBootstrapLoop.cs') -Raw -Encoding UTF8
 $agentHostHarnessProgressTraceSource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostHarnessProgressTrace.cs') -Raw -Encoding UTF8
 $agentHostProviderContractSelfTestSource = Get-Content (Join-Path $harnessRoot 'AgentHost\ProviderContractSelfTest.cs') -Raw -Encoding UTF8
+$agentHostProviderDecisionRecoverySource = Get-Content (Join-Path $harnessRoot 'AgentHost\AgentHostProviderDecisionRecovery.cs') -Raw -Encoding UTF8
 $freshCampaignTestSource = Get-Content (Join-Path $harnessRoot 'Test-AgentFreshCampaign.ps1') -Raw -Encoding UTF8
 $agentHostProviderSource = Get-Content (Join-Path $harnessRoot 'AgentHost\OllamaNativeProvider.cs') -Raw -Encoding UTF8
 $agentHostRuntimeControllerSource = Get-Content (Join-Path $harnessRoot 'AgentHostRuntimeController.cs') -Raw -Encoding UTF8
@@ -259,6 +260,10 @@ if ($agentHostHarnessProgressTraceSource -notmatch 'AgentHostRuntimeProgressLog\
     $agentHostHarnessProgressTraceSource -notmatch 'providerFallbackAttempts' -or
     $agentHostHarnessProgressTraceSource -notmatch 'providerFallbackTrail' -or
     $agentHostHarnessProgressTraceSource -notmatch 'host-progress-trace-provider-tool-shape' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'BuildProviderFailureRequestDiagnostics' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'provider-progress-trace-records-request-prompt-size-and-listed-action-names-without-content' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'systemPromptBytes' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'allowedActionNames' -or
     $agentHostHarnessProgressTraceSource -notmatch 'providerResponseCompletionTokens' -or
     $agentHostHarnessProgressTraceSource -notmatch 'providerProxyEndpointHostPort' -or
     $agentHostHarnessProgressTraceSource -notmatch 'host-progress-trace-provider-failure' -or
@@ -1261,6 +1266,9 @@ if ($agentHostProviderSource -notmatch 'CheckConfiguredModelAsync' -or $agentHos
     $agentHostProviderSource -notmatch 'FREELLMAPI_API_KEY' -or $agentHostProviderSource -notmatch 'X-Routed-Via' -or
     $agentHostProviderSource -notmatch '_supportsParallelToolCalls' -or
     $agentHostProviderSource -notmatch 'payload\["parallel_tool_calls"\] = false' -or
+    $agentHostProviderSource -notmatch 'provider-multiple-tool-calls' -or
+    $agentHostProviderDecisionRecoverySource -notmatch 'provider-multiple-tool-calls' -or
+    $agentHostProviderDecisionRecoverySource -notmatch 'provider-decision-recovery-retries-multiple-tool-calls-once-without-native-actions' -or
     $agentHostProviderContractSelfTestSource -notmatch 'generic-https-openai-compatible-provider-health-auth-and-structured-decision' -or
     $agentHostProviderContractSelfTestSource -notmatch 'canonical-observe-again-decision-is-recognized-by-native-subloops' -or
     $agentHostProviderSource -notmatch 'IsListedSingleArgumentValue' -or $agentHostProviderSource -notmatch 'IsStoryModeClanNameTextArgument' -or
@@ -2079,7 +2087,10 @@ if ($agentHostCompanionLoopSource -notmatch 'BuildControlCatalog\(gameState == "
     $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-bounds-unlisted-action-retries-before-native' -or
     $agentHostCompanionLoopSource -notmatch 'SawActiveMissionNavigation' -or
     $agentHostCompanionLoopSource -notmatch 'missionLeave' -or
-    $agentHostDecisionCycleSource -notmatch 'var prompt = EstablishClanCompanionSystemPrompt' -or
+    $agentHostDecisionCycleSource -notmatch 'BuildEstablishClanCompanionSystemPrompt\(request\)' -or
+    $agentHostDecisionCycleSource -notmatch 'reason <= 8 words' -or
+    $agentHostDecisionCycleSource -notmatch 'visibleSafeTownTargets' -or
+    $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-prompt-stage-projection-failed' -or
     $agentHostDecisionCycleSource -notmatch 'RECOVERY DIRECTIVE') { throw 'Companion Mission stops must be rejected before action, provide a bounded recovery from the exact Native catalog, and keep a Native missionLeave option beside Wanderer navigation/interact.' }
 if ($agentHostEstablishClanAutonomySource -notmatch 'IsFreeMapForObjectiveReplan\(failedState\.RootElement\)' -or
     $agentHostEstablishClanAutonomySource -notmatch 'AgentHostCampaignStateFacts\.IsActiveEncounter\(state\)' -or
@@ -2095,7 +2106,7 @@ if ($agentHostEstablishClanAutonomySource -notmatch 'IsRecoverableObjectiveProvi
 if ($agentHostEstablishClanAutonomySource -notmatch 'IsFreeMapForObjectiveReplan\(failedState\.RootElement\)' -or
     $agentHostEstablishClanAutonomySource -notmatch 'AgentHostCampaignStateFacts\.IsActiveEncounter\(state\)' -or
     $agentHostEstablishClanAutonomySource -notmatch 'town-menu-is-free-map-for-objective-replan-but-hostile-encounter-is-not') { throw 'Parent EYC replan safety must use the shared Native location-menu classifier so a Town menu is not mistaken for a hostile Party encounter, while true encounters remain blocked.' }
-if ($agentHostCompanionLoopSource -notmatch 'SafeTownDecisionWindowSize' -or $agentHostCompanionLoopSource -notmatch 'BuildSafeTownDecisionWindow' -or $agentHostCompanionLoopSource -notmatch 'additionalSafeTownTargetsAvailable' -or $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-town-choice-window-pages-without-world-target-cap' -or $agentHostCompanionLoopSource -notmatch 'while \(decisions < maxDecisions\)' -or $agentHostCompanionLoopSource -notmatch 'do not spend a model decision or issue another move/time command' -or $agentHostDecisionCycleSource -notmatch 'nearest unvisited decision window') { throw 'Companion map travel must use a bounded nearest-Town decision window that preserves access to the remaining world, and must observe active Native movement without repeated model calls or hidden clock actions.' }
+if ($agentHostCompanionLoopSource -notmatch 'SafeTownDecisionWindowSize' -or $agentHostCompanionLoopSource -notmatch 'BuildSafeTownDecisionWindow' -or $agentHostCompanionLoopSource -notmatch 'additionalSafeTownTargetsAvailable' -or $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-town-choice-window-pages-without-world-target-cap' -or $agentHostCompanionLoopSource -notmatch 'while \(decisions < maxDecisions\)' -or $agentHostCompanionLoopSource -notmatch 'do not spend a model decision or issue another move/time command' -or $agentHostDecisionCycleSource -notmatch 'visibleSafeTownTargets window') { throw 'Companion map travel must use a bounded Native visible-Town decision window that preserves access to the remaining world, and must observe active Native movement without repeated model calls or hidden clock actions.' }
 if ($agentHostNativeMapMovementMonitorSource -notmatch 'MapPartyTargets' -or $agentHostNativeMapMovementMonitorSource -notmatch 'PauseForVisibleHostileDecisionAsync' -or $agentHostNativeMapMovementMonitorSource -notmatch 'IsStalledNativeSettlementMove' -or $agentHostNativeMapMovementMonitorSource -notmatch 'campaign-map-movement-stopped-clock-wait-return-failed' -or $agentHostCampaignLoopSource -notmatch 'AgentHostNativeMapMovementMonitor\.WaitAsync' -or $agentHostCampaignLoopSource -notmatch 'IsCampaignTimeAdvancing\(state\)' -or $agentHostRecruitmentLoopSource -notmatch 'IsCampaignTimeAdvancing\(state\)' -or $agentHostEstablishClanAutonomySource -notmatch 'ShouldRouteToBattleSimulation\(failedState\.RootElement, childFailureCode\)' -or $agentHostEstablishClanAutonomySource -notmatch 'ShouldRouteToBattleSimulation\(afterRefresh\.RootElement, refreshFailureCode\)' -or $agentHostEstablishClanAutonomySource -notmatch 'failureCode == AgentHostNativeMapMovementMonitor\.FailureCode' -or $agentHostEstablishClanAutonomySource -notmatch 'incident-bandit-target-lost-returned-to-safe-map' -or $agentHostEstablishClanAutonomySource -notmatch 'ShouldReplanAfterIncidentBattleNoSafeAction' -or $agentHostCompanionLoopSource -notmatch 'native-stalled-move-returned-by-companion' -or $agentHostCompanionLoopSource -notmatch 'mapMovementTimeAdvancing') { throw 'EYC travel must observe current Native visible parties, return stopped moves to the bounded Native Move retry path instead of model-paid waits, record any separate Native Pause, resolve visible bandits through the existing BattleSimulation loop, and replan without claiming Renown when a lost target returns to a safe free Map.' }
 if ($agentHostProgramSource -notmatch '--native-map-movement-monitor-probe' -or $agentHostProgramSource -notmatch 'agent-host-native-map-movement-monitor-probe' -or $agentHostProgramSource -notmatch 'AgentHostNativeMapMovementMonitor\.WaitAsync' -or $agentHostNativeMapMovementProbeSource -notmatch 'ChronicleW7P-manual-' -or $agentHostNativeMapMovementProbeSource -notmatch 'modelCalls' -or $harnessScript -notmatch 'AgentHostNativeMapMovementMonitorProbe' -or $harnessScript -notmatch 'AgentHostProbeBuild') { throw 'The live movement-monitor diagnostic must run the production Host monitor on an active disposable EYC map session, make no model call, and remain available as a dedicated Harness phase.' }
 if (-not (Test-Path (Join-Path $harnessRoot 'AgentHost\AgentHostCampaignStateFacts.cs')) -or
@@ -2448,7 +2459,9 @@ if ($agentHostCompanionLoopSource -notmatch 'BuildControlCatalog\(gameState == "
     $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-mission-stop-did-not-recover-to-map' -or
     $agentHostCompanionLoopSource -notmatch 'decisionFeedback = AgentHostProviderDecisionRecovery\.BuildFeedback' -or
     $agentHostCompanionLoopSource -notmatch 'ReadBoolean\(decision\.Decision, "stop"\)' -or
-    $agentHostDecisionCycleSource -notmatch 'var prompt = EstablishClanCompanionSystemPrompt' -or
+    $agentHostDecisionCycleSource -notmatch 'BuildEstablishClanCompanionSystemPrompt\(request\)' -or
+    $agentHostDecisionCycleSource -notmatch 'reason <= 8 words' -or
+    $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-prompt-stage-projection-failed' -or
     $agentHostDecisionCycleSource -notmatch 'RECOVERY DIRECTIVE' -or
     $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-listed-safe-stop-is-interrupted-with-zero-native-actions' -or
     $agentHostProviderSource -notmatch 'ContainsString\(request, "allowedControls", "stop"\)' -or
@@ -2467,12 +2480,12 @@ if ($agentHostCompanionLoopSource -notmatch 'var journalTargetMet = ReadBoolean\
 if ($agentHostCompanionLoopSource -notmatch 'player_is_leaving_neutral_or_friendly' -or
     $agentHostCompanionLoopSource -notmatch 'currentConversationHeroDeclined' -or
     $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-declined-wanderer-exit-not-gated' -or
-    $agentHostDecisionCycleSource -notmatch 'After declining, if the same Wanderer asks' -or
-    $agentHostDecisionCycleSource -notmatch 'Do not decline only to preserve Gold for the separate Gold objective') { throw 'A declined Wanderer quote must expose the current Native conversation exit and prevent reopening that same hire offer; an enabled affordable offer should advance the unmet Companion objective instead of preserving Gold without a concrete constraint.' }
+    $agentHostDecisionCycleSource -notmatch 'If acceptance is absent, do not estimate price or retry the same offer' -or
+    $agentHostDecisionCycleSource -notmatch 'use only a safe listed decline/exit') { throw 'A declined Wanderer quote must expose the current Native conversation exit and prevent reopening that same hire offer; an enabled affordable offer should advance the unmet Companion objective instead of preserving Gold without a concrete constraint.' }
 if ($agentHostCompanionLoopSource -notmatch 'establish-clan-companion-unlisted-navigation-duration-feedback-failed' -or
     $agentHostCompanionLoopSource -notmatch 'AgentIndex \[\{allowedIndexes\}\]' -or
     $agentHostCompanionLoopSource -notmatch 'DurationSeconds \[\{allowedDurationValues\}\]' -or
-    $agentHostDecisionCycleSource -notmatch 'DurationSeconds pair without interpolation') { throw 'An unlisted Tavern navigation lease must be rejected before Native execution with the exact current AgentIndex and DurationSeconds values for a bounded correction.' }
+    $agentHostDecisionCycleSource -notmatch 'exact listed AgentIndex and DurationSeconds') { throw 'An unlisted Tavern navigation lease must be rejected before Native execution with the exact current AgentIndex and DurationSeconds values for a bounded correction.' }
 if ($agentHostCampaignLoopEvaluationSource -notmatch 'Initialize-ChronicleCampaignLoopProviderProfile' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'CHRONICLE_LLM_BASE_URL' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'ProviderBaseUrl' -or

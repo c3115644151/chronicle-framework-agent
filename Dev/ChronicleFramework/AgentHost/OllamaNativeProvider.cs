@@ -775,7 +775,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                         var responsePromptTokens = ReadNonNegativeInt(responseUsage, "prompt_tokens");
                         var responseCompletionTokens = ReadNonNegativeInt(responseUsage, "completion_tokens");
                         var responseRoute = SafeDiagnosticField(ReadResponseHeader(response, "X-Routed-Via"));
-                        throw new AgentHostException("provider-tool-call-missing",
+                        var toolCallFailureCode = toolCallCount > 1 ? "provider-multiple-tool-calls" : "provider-tool-call-missing";
+                        throw new AgentHostException(toolCallFailureCode,
                             $"The model must return exactly one required decision tool call (toolCallsPresent={hasToolCalls}; toolCallCount={toolCallCount}; contentKind={contentKind}; contentCharacters={contentCharacters}; finishReason={SafeDiagnosticField(finishReason)}; format={responseFormatMode}; responseModel={SafeDiagnosticField(responseModel)}; routedVia={responseRoute}; promptTokens={responsePromptTokens?.ToString(CultureInfo.InvariantCulture) ?? "unknown"}; completionTokens={responseCompletionTokens?.ToString(CultureInfo.InvariantCulture) ?? "unknown"}).",
                             providerRoute: responseRoute, providerOutputFormat: responseFormatMode,
                             providerToolCallsPresent: hasToolCalls, providerToolCallCount: toolCallCount,

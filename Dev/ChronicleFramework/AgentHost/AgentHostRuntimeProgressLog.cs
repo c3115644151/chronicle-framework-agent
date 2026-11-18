@@ -211,7 +211,9 @@ internal static class AgentHostRuntimeProgressLog
         string? providerErrorType = null, string? providerErrorCode = null, int? providerFallbackAttempts = null,
         string? providerFallbackTrail = null, bool? providerToolCallsPresent = null, int? providerToolCallCount = null,
         string? providerResponseContentKind = null, int? providerResponseContentCharacters = null, string? providerFinishReason = null,
-        string? providerResponseModel = null, int? providerResponsePromptTokens = null, int? providerResponseCompletionTokens = null)
+        string? providerResponseModel = null, int? providerResponsePromptTokens = null, int? providerResponseCompletionTokens = null,
+        int? systemPromptBytes = null, int? userPayloadBytes = null, int? observationBytes = null,
+        JsonArray? allowedActionNames = null, JsonArray? allowedControls = null, string? decisionFeedbackKind = null)
     {
         var runId = ReadString(request, "runId");
         if (!IsActiveProductRun(runId) || !TryGetPath(runId, out var path)) return;
@@ -257,6 +259,12 @@ internal static class AgentHostRuntimeProgressLog
                 ["providerResponseModel"] = providerResponseModel,
                 ["providerResponsePromptTokens"] = providerResponsePromptTokens,
                 ["providerResponseCompletionTokens"] = providerResponseCompletionTokens,
+                ["systemPromptBytes"] = systemPromptBytes,
+                ["userPayloadBytes"] = userPayloadBytes,
+                ["observationBytes"] = observationBytes,
+                ["allowedActionNames"] = allowedActionNames?.DeepClone(),
+                ["allowedControls"] = allowedControls?.DeepClone(),
+                ["decisionFeedbackKind"] = decisionFeedbackKind,
                 ["nativeActionSent"] = false,
                 ["responseBodiesLogged"] = false,
                 ["credentialsLogged"] = false

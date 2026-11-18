@@ -11,11 +11,12 @@ internal static class AgentHostProviderDecisionRecovery
         "provider-action-unavailable", "provider-control-unavailable", "provider-control-arguments-invalid",
         "provider-arguments-missing", "provider-arguments-invalid-json", "provider-arguments-shape-invalid",
         "provider-argument-unavailable", "provider-decision-ambiguous", "provider-decision-field-unavailable",
-        "provider-response-truncated"
+        "provider-response-truncated", "provider-multiple-tool-calls"
     };
 
     internal static bool CanRetry(string errorCode, int rejectedDecisions) =>
-        rejectedDecisions < MaxRejectedDecisions && RecoverableErrorCodes.Contains(errorCode);
+        RecoverableErrorCodes.Contains(errorCode) &&
+        rejectedDecisions < (errorCode == "provider-multiple-tool-calls" ? 1 : MaxRejectedDecisions);
 
     internal static async Task<ProviderDecisionResult> DecideWithSingleRetryAsync(
         JsonObject request,
@@ -44,7 +45,9 @@ internal static class AgentHostProviderDecisionRecovery
     {
         var actionNames = CurrentActionNames(actions).Select(node => node?.GetValue<string>()).Where(name => name is not null);
         var controlNames = controls.Select(node => node?.GetValue<string>()).Where(name => name is not null);
-        var requiredNextStep = errorCode == "provider-response-truncated"
+        var requiredNextStep = errorCode == "provider-multiple-tool-calls"
+            ? "The previous response contained multiple decision tool calls. Return exactly one tool call for one currently listed action/control; no Native action was sent."
+            : errorCode == "provider-response-truncated"
             ? "The previous provider response was truncated before it could be parsed. Return only one compact JSON object matching the current schema and listed catalog; omit explanations and do not repeat the prior response. No Native action was sent."
             : errorCode == "provider-arguments-invalid-json"
             ? "Return arguments as a JSON object matching the currently listed names and values. Do not quote or nest JSON; no Native action was sent."
@@ -70,6 +73,7 @@ internal static class AgentHostProviderDecisionRecovery
             CanRetry("provider-arguments-invalid-json", 1) &&
             !CanRetry("provider-arguments-invalid-json", 2) &&
             CanRetry("provider-response-truncated", 0) && !CanRetry("provider-response-truncated", 2) &&
+            CanRetry("provider-multiple-tool-calls", 0) && !CanRetry("provider-multiple-tool-calls", 1) &&
             !CanRetry("provider-http-error", 0);
         if (!retryCountBounded ||
             ReadString(feedback, "kind") != "decision-rejected-before-native" ||
@@ -84,6 +88,12 @@ internal static class AgentHostProviderDecisionRecovery
         if (ReadString(truncatedFeedback, "requiredNextStep")?.Contains("only one compact JSON object", StringComparison.Ordinal) != true ||
             ReadBoolean(truncatedFeedback, "nativeActionSent"))
             throw new AgentHostException("provider-truncated-response-feedback-self-test-failed", "A truncated model response may receive one bounded retry with a concise schema-only instruction; it must state no Native action was sent.");
+
+        var multipleCallFeedback = BuildFeedback("provider-multiple-tool-calls", actions, controls);
+        if (ReadString(multipleCallFeedback, "requiredNextStep")?.Contains("multiple decision tool calls", StringComparison.Ordinal) != true ||
+            ReadString(multipleCallFeedback, "requiredNextStep")?.Contains("exactly one tool call", StringComparison.Ordinal) != true ||
+            ReadBoolean(multipleCallFeedback, "nativeActionSent"))
+            throw new AgentHostException("provider-multiple-tool-call-feedback-self-test-failed", "A duplicate tool-call response may receive one bounded correction, and the feedback must explicitly require one call with no Native action sent.");
 
         var retryRequest = new JsonObject
         {
@@ -105,9 +115,27 @@ internal static class AgentHostProviderDecisionRecovery
             ReadBoolean(retryRequest["decisionFeedback"] as JsonObject, "nativeActionSent"))
             throw new AgentHostException("provider-decision-bounded-retry-selftest-failed", "A recoverable provider failure must trigger exactly one same-catalog retry and must explicitly preserve the no-Native-action boundary.");
 
+        var multipleCallRetryRequest = new JsonObject { ["allowedActions"] = actions.DeepClone(), ["allowedControls"] = controls.DeepClone() };
+        var multipleCallRetryCalls = 0;
+        string? observedMultipleCallFailure = null;
+        var recoveredMultipleCall = DecideWithSingleRetryAsync(multipleCallRetryRequest, cancellationToken =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (multipleCallRetryCalls++ == 0)
+                throw new AgentHostException("provider-multiple-tool-calls", "Synthetic multiple calls.", providerToolCallCount: 2);
+            return Task.FromResult(new ProviderDecisionResult("completed", "recovery-selftest", 1, 1, "self-test",
+                new JsonObject { ["action"] = "move", ["arguments"] = new JsonObject { ["SettlementId"] = "town-a" } }));
+        }, code => observedMultipleCallFailure = code, CancellationToken.None).GetAwaiter().GetResult();
+        if (multipleCallRetryCalls != 2 || observedMultipleCallFailure != "provider-multiple-tool-calls" ||
+            ReadString(recoveredMultipleCall.Decision, "action") != "move" ||
+            ReadString(multipleCallRetryRequest["decisionFeedback"] as JsonObject, "code") != "provider-multiple-tool-calls" ||
+            ReadBoolean(multipleCallRetryRequest["decisionFeedback"] as JsonObject, "nativeActionSent"))
+            throw new AgentHostException("provider-multiple-tool-call-bounded-retry-self-test-failed", "A provider duplicate-call failure must get one same-catalog correction before Native execution and must preserve the no-action boundary.");
+
         return [
             new { scenario = "provider-decision-recovery-is-bounded-and-preserves-the-current-native-catalog", passed = true },
-            new { scenario = "provider-decision-recovery-retries-one-truncated-response-without-native-actions", passed = true }
+            new { scenario = "provider-decision-recovery-retries-one-truncated-response-without-native-actions", passed = true },
+            new { scenario = "provider-decision-recovery-retries-multiple-tool-calls-once-without-native-actions", passed = true }
         ];
     }
 

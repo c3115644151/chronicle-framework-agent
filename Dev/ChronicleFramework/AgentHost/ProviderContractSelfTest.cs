@@ -873,7 +873,7 @@ internal static class ProviderContractSelfTest
                 _ = await multipleToolCallProvider.DecideAsync(multipleToolCallRequest.RootElement, CancellationToken.None);
                 throw new AgentHostException("provider-multiple-tool-call-self-test-failed", "A multi-call response must not be accepted as one decision.");
             }
-            catch (AgentHostException exception) when (exception.Code == "provider-tool-call-missing")
+            catch (AgentHostException exception) when (exception.Code == "provider-multiple-tool-calls")
             {
                 if (!parallelToolCallsDisabled || exception.ProviderToolCallCount != 2 || multipleToolCallRequests != 1)
                     throw new AgentHostException("provider-multiple-tool-call-contract-invalid", "The Host must disable advertised parallel calls and still reject any response that contains more than one decision call.");

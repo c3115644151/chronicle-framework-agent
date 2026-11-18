@@ -253,7 +253,7 @@ internal static class AgentHostHarnessProgressTrace
         }
     }
 
-    internal static void RecordProviderFailure(JsonElement request, AgentHostException exception) =>
+    internal static void RecordProviderFailure(JsonElement request, AgentHostException exception, string? systemPrompt = null) =>
         RecordProviderFailure(request, exception.Code, exception.ProviderHttpStatus, exception.ProviderRoute,
             exception.ProviderOutputFormat, exception.ProviderRetryAttempts, exception.ProviderRetryWaitMilliseconds, exception.ProviderFailureStage,
             exception.ProviderProxySelectionSource, exception.ProviderTimeoutSeconds, exception.ProviderRequestBodyBytes, exception.ProviderTransportErrorType,
@@ -261,7 +261,7 @@ internal static class AgentHostHarnessProgressTrace
             exception.ProviderRetryAfter, exception.ProviderErrorBodyKind, exception.ProviderErrorContentType, exception.ProviderErrorType, exception.ProviderErrorCode,
             exception.ProviderFallbackAttempts, exception.ProviderFallbackTrail, exception.ProviderToolCallsPresent, exception.ProviderToolCallCount,
             exception.ProviderResponseContentKind, exception.ProviderResponseContentCharacters, exception.ProviderFinishReason, exception.ProviderResponseModel,
-            exception.ProviderResponsePromptTokens, exception.ProviderResponseCompletionTokens);
+            exception.ProviderResponsePromptTokens, exception.ProviderResponseCompletionTokens, systemPrompt);
 
     internal static void RecordProviderFailure(JsonElement request, string failureCode, int? providerHttpStatus = null,
         string? providerRoute = null, string? providerOutputFormat = null, int? providerRetryAttempts = null, long? providerRetryWaitMilliseconds = null,
@@ -272,15 +272,19 @@ internal static class AgentHostHarnessProgressTrace
         int? providerFallbackAttempts = null, string? providerFallbackTrail = null,
         bool? providerToolCallsPresent = null, int? providerToolCallCount = null, string? providerResponseContentKind = null,
         int? providerResponseContentCharacters = null, string? providerFinishReason = null, string? providerResponseModel = null,
-        int? providerResponsePromptTokens = null, int? providerResponseCompletionTokens = null)
+        int? providerResponsePromptTokens = null, int? providerResponseCompletionTokens = null, string? systemPrompt = null)
     {
+        var requestDiagnostics = BuildProviderFailureRequestDiagnostics(request, systemPrompt);
         AgentHostRuntimeProgressLog.RecordProviderFailure(request, failureCode, providerHttpStatus, providerRoute,
             providerOutputFormat, providerRetryAttempts, providerRetryWaitMilliseconds, providerFailureStage,
             providerProxySelectionSource, providerTimeoutSeconds, providerRequestBodyBytes, providerTransportErrorType,
             providerProxyEndpointHostPort, providerResponseServer, providerResponseVia, providerResponseRequestId, providerRetryAfter,
             providerErrorBodyKind, providerErrorContentType, providerErrorType, providerErrorCode, providerFallbackAttempts, providerFallbackTrail,
             providerToolCallsPresent, providerToolCallCount, providerResponseContentKind, providerResponseContentCharacters,
-            providerFinishReason, providerResponseModel, providerResponsePromptTokens, providerResponseCompletionTokens);
+            providerFinishReason, providerResponseModel, providerResponsePromptTokens, providerResponseCompletionTokens,
+            ReadInt(requestDiagnostics, "systemPromptBytes"), ReadInt(requestDiagnostics, "userPayloadBytes"),
+            ReadInt(requestDiagnostics, "observationBytes"), requestDiagnostics["allowedActionNames"] as JsonArray,
+            requestDiagnostics["allowedControls"] as JsonArray, ReadString(requestDiagnostics, "decisionFeedbackKind"));
         var harnessMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
         if (harnessMode is not ("visual-capture" or "agent-host-lifecycle-test")) return;
         var directory = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
@@ -329,6 +333,12 @@ internal static class AgentHostHarnessProgressTrace
                 ["providerResponseModel"] = providerResponseModel,
                 ["providerResponsePromptTokens"] = providerResponsePromptTokens,
                 ["providerResponseCompletionTokens"] = providerResponseCompletionTokens,
+                ["systemPromptBytes"] = requestDiagnostics["systemPromptBytes"]?.DeepClone(),
+                ["userPayloadBytes"] = requestDiagnostics["userPayloadBytes"]?.DeepClone(),
+                ["observationBytes"] = requestDiagnostics["observationBytes"]?.DeepClone(),
+                ["allowedActionNames"] = requestDiagnostics["allowedActionNames"]?.DeepClone(),
+                ["allowedControls"] = requestDiagnostics["allowedControls"]?.DeepClone(),
+                ["decisionFeedbackKind"] = requestDiagnostics["decisionFeedbackKind"]?.DeepClone(),
                 ["nativeActionSent"] = false,
                 ["responseBodiesLogged"] = false,
                 ["credentialsLogged"] = false
@@ -339,6 +349,50 @@ internal static class AgentHostHarnessProgressTrace
         {
             // Provider diagnostics must never replace the original failure or emit payload contents.
         }
+    }
+
+    internal static JsonObject BuildProviderFailureRequestDiagnostics(JsonElement request, string? systemPrompt)
+    {
+        var actionNames = new JsonArray();
+        if (request.ValueKind == JsonValueKind.Object && request.TryGetProperty("allowedActions", out var actions) && actions.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var name in actions.EnumerateArray()
+                         .Select(action => ReadString(action, "action"))
+                         .Where(name => !string.IsNullOrWhiteSpace(name))
+                         .Distinct(StringComparer.Ordinal).Take(32))
+                actionNames.Add(SanitizeDiagnosticIdentifier(name));
+        }
+        var controls = new JsonArray();
+        if (request.ValueKind == JsonValueKind.Object && request.TryGetProperty("allowedControls", out var allowedControls) && allowedControls.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var name in allowedControls.EnumerateArray()
+                         .Where(value => value.ValueKind == JsonValueKind.String)
+                         .Select(value => value.GetString())
+                         .Where(name => !string.IsNullOrWhiteSpace(name))
+                         .Distinct(StringComparer.Ordinal).Take(32))
+                controls.Add(SanitizeDiagnosticIdentifier(name));
+        }
+        var observationBytes = request.ValueKind == JsonValueKind.Object && request.TryGetProperty("observation", out var observation) && observation.ValueKind == JsonValueKind.Object
+            ? Encoding.UTF8.GetByteCount(observation.GetRawText())
+            : (int?)null;
+        var feedbackKind = request.ValueKind == JsonValueKind.Object && request.TryGetProperty("decisionFeedback", out var feedback) && feedback.ValueKind == JsonValueKind.Object
+            ? ReadString(feedback, "kind")
+            : null;
+        return new JsonObject
+        {
+            ["systemPromptBytes"] = systemPrompt is null ? null : Encoding.UTF8.GetByteCount(systemPrompt),
+            ["userPayloadBytes"] = request.ValueKind == JsonValueKind.Undefined ? null : Encoding.UTF8.GetByteCount(request.GetRawText()),
+            ["observationBytes"] = observationBytes,
+            ["allowedActionNames"] = actionNames,
+            ["allowedControls"] = controls,
+            ["decisionFeedbackKind"] = SanitizeDiagnosticIdentifier(feedbackKind)
+        };
+    }
+
+    private static string? SanitizeDiagnosticIdentifier(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        return new string(value.Take(80).Select(character => char.IsLetterOrDigit(character) || character is '_' or '-' or '.' ? character : '_').ToArray());
     }
 
     internal static void RecordBudgetReservationRejected(JsonElement request, string modelId, int estimatedInputTokens, int reservedInputTokens,
@@ -608,7 +662,7 @@ internal static class AgentHostHarnessProgressTrace
             Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "visual-capture");
             Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_TEMP", temporaryDirectory);
             using var request = JsonDocument.Parse("""
-                {"runId":"trace-test","objectiveId":"partySize","observation":{"scope":"native-storymode-party-size-recruitment","state":{"campaignDay":12.5,"context":{"gameState":"MapState","menuId":"village","encounterActive":true,"encounteredPartyId":"bandit-a","conversation":{"sentenceText":"Tools are needed.","options":[{"id":"issue_offer_player_accept_quest","text":"I can do it.","clickable":true}] }},"location":{"currentSettlementId":"village-1","targetPartyId":"bandit-a"},"economy":{"gold":920,"renown":20},"party":{"members":5,"healthy":3,"wounded":1,"prisoners":1,"morale":12.5,"food":0.5,"foodChange":-0.25,"isMoving":true,"moveMode":"Party","defaultBehavior":"EngageParty"},"objectiveSnapshot":{"gold":{"current":920,"target":2000,"met":false},"partySize":{"current":5,"target":25,"met":false},"renown":{"current":20,"target":50,"met":false},"companions":{"current":0,"target":1,"met":false}},"nativeProgressionContext":{"clanTier":0,"partySizeLimit":20,"partyMembers":5,"partyIsMoving":false,"privateDiagnostic":"must-not-appear"},"quests":[],"settlementOverlayCharacters":[]}}}
+                {"runId":"trace-test","objectiveId":"partySize","observation":{"scope":"native-storymode-party-size-recruitment","state":{"campaignDay":12.5,"context":{"gameState":"MapState","menuId":"village","encounterActive":true,"encounteredPartyId":"bandit-a","conversation":{"sentenceText":"Tools are needed.","options":[{"id":"issue_offer_player_accept_quest","text":"I can do it.","clickable":true}] }},"location":{"currentSettlementId":"village-1","targetPartyId":"bandit-a"},"economy":{"gold":920,"renown":20},"party":{"members":5,"healthy":3,"wounded":1,"prisoners":1,"morale":12.5,"food":0.5,"foodChange":-0.25,"isMoving":true,"moveMode":"Party","defaultBehavior":"EngageParty"},"objectiveSnapshot":{"gold":{"current":920,"target":2000,"met":false},"partySize":{"current":5,"target":25,"met":false},"renown":{"current":20,"target":50,"met":false},"companions":{"current":0,"target":1,"met":false}},"nativeProgressionContext":{"clanTier":0,"partySizeLimit":20,"partyMembers":5,"partyIsMoving":false,"privateDiagnostic":"must-not-appear"},"quests":[],"settlementOverlayCharacters":[]}},"allowedActions":[{"action":"respondInquiry","arguments":["choice"]},{"action":"partyScreenDone","arguments":[]}],"allowedControls":[]}
                 """);
             var decision = JsonNode.Parse("""{"action":"dialogueSelect","arguments":{"OptionId":"issue_offer_player_accept_quest"},"rationale":"Rationale is deliberately excluded."}""")!.AsObject();
             RecordDecision(request.RootElement, new ProviderDecisionResult("completed", "selftest-model", 123, 17, "stop", decision, "selftest/route",
@@ -868,8 +922,11 @@ internal static class AgentHostHarnessProgressTrace
                 providerToolCallsPresent: false, providerToolCallCount: 0, providerResponseContentKind: "String",
                 providerResponseContentCharacters: 47, providerFinishReason: "stop", providerResponseModel: "Mistral-Small-3.2-24B-Instruct-2506",
                 providerResponsePromptTokens: 1385, providerResponseCompletionTokens: 40);
-            RecordProviderFailure(request.RootElement, missingToolCallDiagnostic);
+            const string failurePromptSentinel = "PRIVATE_SYSTEM_PROMPT";
+            RecordProviderFailure(request.RootElement, missingToolCallDiagnostic, failurePromptSentinel);
             var missingToolCallLine = JsonNode.Parse(File.ReadAllLines(path).Last()) as JsonObject;
+            var failureAllowedActions = missingToolCallLine?["allowedActionNames"] as JsonArray;
+            var failureAllowedControls = missingToolCallLine?["allowedControls"] as JsonArray;
             if (ReadString(missingToolCallLine, "event") != "provider-failure" ||
                 ReadString(missingToolCallLine, "failureCode") != "provider-tool-call-missing" ||
                 ReadString(missingToolCallLine, "providerRoute") != "ovh/Mistral-Small-3.2-24B-Instruct-2506" ||
@@ -881,9 +938,16 @@ internal static class AgentHostHarnessProgressTrace
                 ReadString(missingToolCallLine, "providerResponseModel") != "Mistral-Small-3.2-24B-Instruct-2506" ||
                 ReadInt(missingToolCallLine, "providerResponsePromptTokens", -1) != 1385 ||
                 ReadInt(missingToolCallLine, "providerResponseCompletionTokens", -1) != 40 ||
+                ReadInt(missingToolCallLine, "systemPromptBytes", -1) != Encoding.UTF8.GetByteCount(failurePromptSentinel) ||
+                ReadInt(missingToolCallLine, "userPayloadBytes", -1) != Encoding.UTF8.GetByteCount(request.RootElement.GetRawText()) ||
+                ReadInt(missingToolCallLine, "observationBytes", -1) != Encoding.UTF8.GetByteCount(request.RootElement.GetProperty("observation").GetRawText()) ||
+                failureAllowedActions?.Count != 2 || failureAllowedActions[0]?.GetValue<string>() != "respondInquiry" ||
+                failureAllowedActions[1]?.GetValue<string>() != "partyScreenDone" || failureAllowedControls?.Count != 0 ||
+                ReadString(missingToolCallLine, "decisionFeedbackKind") is not null ||
                 missingToolCallLine?.ContainsKey("responseBody") == true || missingToolCallLine?.ContainsKey("prompt") == true ||
-                missingToolCallLine?.ContainsKey("apiKey") == true || missingToolCallLine?.ContainsKey("toolArguments") == true)
-                throw new AgentHostException("host-progress-trace-provider-tool-shape", "A missing tool call must persist only response shape/route/usage metadata, never response or prompt text, arguments, or credentials.");
+                missingToolCallLine?.ContainsKey("apiKey") == true || missingToolCallLine?.ContainsKey("toolArguments") == true ||
+                (missingToolCallLine?.ToJsonString() ?? string.Empty).Contains("PRIVATE_", StringComparison.Ordinal))
+                throw new AgentHostException("host-progress-trace-provider-tool-shape", $"A missing tool call must persist safe request shape and sizes (system={ReadInt(missingToolCallLine, "systemPromptBytes")}/{Encoding.UTF8.GetByteCount(failurePromptSentinel)}, user={ReadInt(missingToolCallLine, "userPayloadBytes")}/{Encoding.UTF8.GetByteCount(request.RootElement.GetRawText())}, observation={ReadInt(missingToolCallLine, "observationBytes")}/{Encoding.UTF8.GetByteCount(request.RootElement.GetProperty("observation").GetRawText())}, actions={string.Join(",", failureAllowedActions?.Select(item => item?.GetValue<string>()) ?? Array.Empty<string?>())}, controls={failureAllowedControls?.Count}, feedback={ReadString(missingToolCallLine, "decisionFeedbackKind")}, leaks={((missingToolCallLine?.ToJsonString() ?? string.Empty).Contains("PRIVATE_", StringComparison.Ordinal))}).");
 
             RecordPassiveObservation("native-party-pursuit-passive-window", new JsonObject
             {
@@ -916,7 +980,7 @@ internal static class AgentHostHarnessProgressTrace
                 new { scenario = "harness-progress-trace-records-current-modal-and-visible-buttons-without-one-use-token", passed = true },
                 new { scenario = "harness-progress-trace-persists-native-decision-and-route-without-free-text-in-visual-capture-and-lifecycle-modes", passed = true },
                 new { scenario = "provider-progress-trace-records-request-size-cache-cost-and-goal-scope-without-request-content", passed = true },
-                new { scenario = "provider-progress-trace-preserves-missing-tool-response-shape-without-text", passed = true },
+                new { scenario = "provider-progress-trace-records-request-prompt-size-and-listed-action-names-without-content", passed = true },
                 new { scenario = "harness-progress-trace-reports-only-aggregate-affordable-recruitment-offer-counts", passed = true },
                 new { scenario = "harness-progress-trace-reports-only-aggregate-companion-navigation-progress", passed = true },
                 new { scenario = "harness-progress-trace-records-bounded-native-tavern-entry-transition-summary", passed = true },
