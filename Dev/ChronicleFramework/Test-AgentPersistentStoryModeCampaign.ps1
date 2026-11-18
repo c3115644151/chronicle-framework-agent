@@ -6,7 +6,8 @@ param(
     [ValidateRange(5,30)][int]$FrameRate = 5,
     [int]$StartupTimeoutSeconds = 240,
     [ValidateRange(300,87000)][int]$FreshStoryModeHostTimeoutSeconds = 87000,
-    [string]$CampaignKey = ''
+    [string]$CampaignKey = '',
+    [switch]$UsageSelfTest
 )
 
 $ErrorActionPreference = 'Stop'
@@ -111,30 +112,115 @@ function Test-HarnessFocusPauseLeaseContract {
 
 function Get-AgentHostProgressUsage([string]$ProgressPath) {
     $providerDecisions = 0
+    $providerRequests = 0
+    $providerFailures = 0
+    $providerFailuresWithUsage = 0
+    $providerFailuresWithoutUsage = 0
+    $unpricedProviderFailures = 0
+    $unpricedProviderResponses = 0
+    $tokenUsageComplete = $true
+    $costEstimateComplete = $true
     [long]$promptTokens = 0
     [long]$completionTokens = 0
+    [long]$failedPromptTokens = 0
+    [long]$failedCompletionTokens = 0
     [double]$costEstimateCny = 0
     if (Test-Path -LiteralPath $ProgressPath -PathType Leaf) {
         foreach ($line in Get-Content -LiteralPath $ProgressPath -Encoding UTF8) {
             if ([string]::IsNullOrWhiteSpace($line)) { continue }
             try { $entry = $line | ConvertFrom-Json } catch { continue }
-            if ([string]$entry.event -cne 'provider-decision') { continue }
-            $providerDecisions++
-            $promptTokens += [long]$entry.promptTokens
-            $completionTokens += [long]$entry.completionTokens
-            $costEstimateCny += [double]$entry.estimatedCostCny
+            if ([string]$entry.event -ceq 'provider-decision') {
+                $providerDecisions++
+                $providerRequests++
+                if ($null -ne $entry.promptTokens) { $promptTokens += [long]$entry.promptTokens } else { $tokenUsageComplete = $false }
+                if ($null -ne $entry.completionTokens) { $completionTokens += [long]$entry.completionTokens } else { $tokenUsageComplete = $false }
+                if ($null -ne $entry.estimatedCostCny) { $costEstimateCny += [double]$entry.estimatedCostCny } else { $costEstimateComplete = $false; $unpricedProviderResponses++ }
+                continue
+            }
+            if ([string]$entry.event -cne 'provider-failure') { continue }
+            $providerRequests++
+            $providerFailures++
+            $failureHasPrompt = $null -ne $entry.providerResponsePromptTokens
+            $failureHasCompletion = $null -ne $entry.providerResponseCompletionTokens
+            if ($failureHasPrompt) {
+                $failedPromptTokens += [long]$entry.providerResponsePromptTokens
+                $promptTokens += [long]$entry.providerResponsePromptTokens
+            }
+            if ($failureHasCompletion) {
+                $failedCompletionTokens += [long]$entry.providerResponseCompletionTokens
+                $completionTokens += [long]$entry.providerResponseCompletionTokens
+            }
+            if ($failureHasPrompt -and $failureHasCompletion) { $providerFailuresWithUsage++ }
+            else { $providerFailuresWithoutUsage++; $tokenUsageComplete = $false }
+            if ($null -ne $entry.providerFailureCostEstimateCny) { $costEstimateCny += [double]$entry.providerFailureCostEstimateCny }
+            else { $costEstimateComplete = $false; $unpricedProviderResponses++; $unpricedProviderFailures++ }
         }
     }
     [pscustomobject]@{
         ProviderDecisions = $providerDecisions
+        ProviderRequests = $providerRequests
+        ProviderFailures = $providerFailures
+        ProviderFailuresWithUsage = $providerFailuresWithUsage
+        ProviderFailuresWithoutUsage = $providerFailuresWithoutUsage
+        UnpricedProviderFailures = $unpricedProviderFailures
         PromptTokens = $promptTokens
         CompletionTokens = $completionTokens
+        FailedPromptTokens = $failedPromptTokens
+        FailedCompletionTokens = $failedCompletionTokens
+        TokenUsageComplete = $tokenUsageComplete
         CostEstimateCny = [Math]::Round($costEstimateCny, 9)
+        CostEstimateComplete = $costEstimateComplete
+        UnpricedProviderResponses = $unpricedProviderResponses
     }
 }
 
+function Set-PersistentManifestProperty([object]$Manifest, [string]$Name, [object]$Value) {
+    if ($null -eq $Manifest.PSObject.Properties[$Name]) {
+        $Manifest | Add-Member -NotePropertyName $Name -NotePropertyValue $Value
+    }
+    else { $Manifest.$Name = $Value }
+}
+
+function Test-AgentHostProgressUsageAccounting {
+    $path = Join-Path $env:CHRONICLE_HARNESS_TEMP ('PersistentEycUsageSelfTest-' + [Guid]::NewGuid().ToString('N') + '.jsonl')
+    try {
+        $rows = @(
+            [ordered]@{ event = 'provider-decision'; promptTokens = 100; completionTokens = 20; estimatedCostCny = 0.01 },
+            [ordered]@{ event = 'provider-failure'; providerResponsePromptTokens = 1437; providerResponseCompletionTokens = 256; providerRoute = 'kilo/test-model:free' },
+            [ordered]@{ event = 'provider-failure'; providerResponsePromptTokens = $null; providerResponseCompletionTokens = $null; providerRoute = 'https://untrusted.example' }
+        )
+        [IO.File]::WriteAllLines($path, @($rows | ForEach-Object { $_ | ConvertTo-Json -Compress }), [Text.UTF8Encoding]::new($false))
+        $usage = Get-AgentHostProgressUsage $path
+        if ($usage.ProviderDecisions -ne 1 -or $usage.ProviderRequests -ne 3 -or $usage.ProviderFailures -ne 2 -or
+            $usage.ProviderFailuresWithUsage -ne 1 -or $usage.ProviderFailuresWithoutUsage -ne 1 -or
+            $usage.UnpricedProviderFailures -ne 2 -or
+            $usage.PromptTokens -ne 1537 -or $usage.CompletionTokens -ne 276 -or
+            $usage.FailedPromptTokens -ne 1437 -or $usage.FailedCompletionTokens -ne 256 -or
+            $usage.TokenUsageComplete -or $usage.CostEstimateComplete -or $usage.UnpricedProviderResponses -ne 2 -or
+            [Math]::Abs([double]$usage.CostEstimateCny - 0.01) -gt 0.0000001) {
+            throw "Persistent EYC provider accounting dropped failed-response usage or overstated cost coverage: $($usage | ConvertTo-Json -Compress)."
+        }
+        $legacyManifest = [pscustomobject]@{ usageMetric = 'AgentHostProgress.jsonl provider-decision events'; cumulativeDecisions = 17 }
+        Set-PersistentManifestProperty $legacyManifest 'usageAccountingVersion' 2
+        Set-PersistentManifestProperty $legacyManifest 'failureUsageTrackingSinceUtc' 'self-test'
+        Set-PersistentManifestProperty $legacyManifest 'lastFailureUsageReconciledRunId' 'synthetic-run'
+        if ([int]$legacyManifest.usageAccountingVersion -ne 2 -or
+            [string]$legacyManifest.failureUsageTrackingSinceUtc -cne 'self-test' -or
+            [string]$legacyManifest.lastFailureUsageReconciledRunId -cne 'synthetic-run' -or
+            [int]$legacyManifest.cumulativeDecisions -ne 17) {
+            throw 'Persistent EYC manifest migration must add missing tracking fields without overwriting historical decision totals.'
+        }
+        return [pscustomobject]@{ passed = $true; successfulDecisions = $usage.ProviderDecisions; providerRequests = $usage.ProviderRequests; promptTokens = $usage.PromptTokens; completionTokens = $usage.CompletionTokens; failedResponsePromptTokens = $usage.FailedPromptTokens; failedResponseCompletionTokens = $usage.FailedCompletionTokens; costEstimateComplete = $usage.CostEstimateComplete; legacyManifestMigrationPreservedTotals = $true }
+    }
+    finally { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
+}
+
 function Get-VerifiedCampaignProgressUsage([string]$CampaignInstanceId) {
-    $total = [ordered]@{ ProviderDecisions = 0; PromptTokens = [long]0; CompletionTokens = [long]0; CostEstimateCny = [double]0; ReceiptRunCount = 0 }
+    $total = [ordered]@{
+        ProviderDecisions = 0; ProviderRequests = 0; ProviderFailures = 0; ProviderFailuresWithUsage = 0; ProviderFailuresWithoutUsage = 0
+        PromptTokens = [long]0; CompletionTokens = [long]0; FailedPromptTokens = [long]0; FailedCompletionTokens = [long]0
+        CostEstimateCny = [double]0; CostEstimateComplete = $true; TokenUsageComplete = $true; UnpricedProviderResponses = 0; UnpricedProviderFailures = 0; ReceiptRunCount = 0
+    }
     $resultsRoot = Join-Path $PSScriptRoot 'TestResults'
     foreach ($runDirectory in Get-ChildItem -LiteralPath $resultsRoot -Directory -ErrorAction SilentlyContinue) {
         $tempDirectory = Join-Path $runDirectory.FullName 'Temp'
@@ -161,9 +247,19 @@ function Get-VerifiedCampaignProgressUsage([string]$CampaignInstanceId) {
         if (-not $runBelongsToCampaign) { continue }
         $usage = Get-AgentHostProgressUsage (Join-Path $tempDirectory 'AgentHostProgress.jsonl')
         $total.ProviderDecisions += [int]$usage.ProviderDecisions
+        $total.ProviderRequests += [int]$usage.ProviderRequests
+        $total.ProviderFailures += [int]$usage.ProviderFailures
+        $total.ProviderFailuresWithUsage += [int]$usage.ProviderFailuresWithUsage
+        $total.ProviderFailuresWithoutUsage += [int]$usage.ProviderFailuresWithoutUsage
+        $total.UnpricedProviderFailures += [int]$usage.UnpricedProviderFailures
         $total.PromptTokens += [long]$usage.PromptTokens
         $total.CompletionTokens += [long]$usage.CompletionTokens
+        $total.FailedPromptTokens += [long]$usage.FailedPromptTokens
+        $total.FailedCompletionTokens += [long]$usage.FailedCompletionTokens
         $total.CostEstimateCny += [double]$usage.CostEstimateCny
+        if (-not $usage.CostEstimateComplete) { $total.CostEstimateComplete = $false }
+        if (-not $usage.TokenUsageComplete) { $total.TokenUsageComplete = $false }
+        $total.UnpricedProviderResponses += [int]$usage.UnpricedProviderResponses
         $total.ReceiptRunCount++
     }
     $total.CostEstimateCny = [Math]::Round([double]$total.CostEstimateCny, 9)
@@ -201,12 +297,30 @@ function Write-PersistentManifest([object]$Manifest) {
     Move-Item -LiteralPath $temporaryPath -Destination $manifestPath -Force
 }
 
+function Get-VerifiedCheckpointProviderFailureUsage([string]$CampaignInstanceId, [string]$SaveName, [string]$SaveHash) {
+    $resultsRoot = Join-Path $PSScriptRoot 'TestResults'
+    $matches = [Collections.Generic.List[object]]::new()
+    foreach ($runDirectory in Get-ChildItem -LiteralPath $resultsRoot -Directory -ErrorAction SilentlyContinue) {
+        $tempDirectory = Join-Path $runDirectory.FullName 'Temp'
+        $receiptPath = Join-Path $tempDirectory 'PersistentEycCampaignResult.json'
+        $progressPath = Join-Path $tempDirectory 'AgentHostProgress.jsonl'
+        if (-not (Test-Path -LiteralPath $receiptPath -PathType Leaf) -or -not (Test-Path -LiteralPath $progressPath -PathType Leaf)) { continue }
+        try { $receipt = Get-Content -LiteralPath $receiptPath -Raw -Encoding UTF8 | ConvertFrom-Json }
+        catch { continue }
+        if (-not [bool]$receipt.CheckpointSaved -or
+            [string]$receipt.CampaignInstanceId -cne $CampaignInstanceId -or
+            [string]$receipt.CheckpointSaveName -cne $SaveName -or
+            [string]$receipt.CheckpointSaveSha256 -cne $SaveHash) { continue }
+        $matches.Add([pscustomobject]@{ RunId = $runDirectory.Name; Usage = Get-AgentHostProgressUsage $progressPath })
+    }
+    if ($matches.Count -gt 1) { throw "Multiple persistent-run receipts claim the current checkpoint '$SaveName'; refusing to reconcile provider usage more than once." }
+    if ($matches.Count -eq 1) { return $matches[0] }
+    return $null
+}
+
 function New-PersistentSeedManifest([object]$Receipt, [string]$SaveName, [string]$SaveHash, [object]$Usage) {
     if ($null -eq $Usage) {
-        $Usage = [pscustomobject]@{ ProviderDecisions = 0; PromptTokens = [long]0; CompletionTokens = [long]0; CostEstimateCny = [double]0; ReceiptRunCount = 0 }
-    }
-    if ($null -eq $Usage) {
-        $Usage = [pscustomobject]@{ ProviderDecisions = 0; PromptTokens = [long]0; CompletionTokens = [long]0; CostEstimateCny = [double]0; ReceiptRunCount = 0 }
+        $Usage = [pscustomobject]@{ ProviderDecisions = 0; ProviderRequests = 0; ProviderFailures = 0; ProviderFailuresWithUsage = 0; ProviderFailuresWithoutUsage = 0; UnpricedProviderFailures = 0; PromptTokens = [long]0; CompletionTokens = [long]0; FailedPromptTokens = [long]0; FailedCompletionTokens = [long]0; CostEstimateCny = [double]0; CostEstimateComplete = $true; TokenUsageComplete = $true; UnpricedProviderResponses = 0; ReceiptRunCount = 0 }
     }
     return [pscustomobject]@{
         schemaVersion = 1
@@ -220,12 +334,25 @@ function New-PersistentSeedManifest([object]$Receipt, [string]$SaveName, [string
         seedRunUtc = [DateTime]::UtcNow.ToString('O')
         lastCheckpointUtc = [DateTime]::UtcNow.ToString('O')
         checkpointCount = 1
-        usageMetric = 'AgentHostProgress.jsonl provider-decision events'
+        usageMetric = 'AgentHostProgress.jsonl provider decisions plus failed response token usage; price coverage tracked separately'
+        usageAccountingVersion = 2
+        failureUsageTrackingSinceUtc = [DateTime]::UtcNow.ToString('O')
+        lastFailureUsageReconciledSaveName = $SaveName
         usageReceiptRunCount = if ($null -ne $Usage) { [int]$Usage.ReceiptRunCount } else { 0 }
         cumulativeDecisions = [int]$Usage.ProviderDecisions
+        cumulativeProviderRequests = [int]$Usage.ProviderRequests
+        cumulativeProviderFailures = [int]$Usage.ProviderFailures
+        cumulativeProviderFailuresWithUsage = [int]$Usage.ProviderFailuresWithUsage
+        cumulativeProviderFailuresWithoutUsage = [int]$Usage.ProviderFailuresWithoutUsage
+        cumulativeUnpricedProviderFailures = [int]$Usage.UnpricedProviderFailures
         cumulativePromptTokens = [long]$Usage.PromptTokens
         cumulativeCompletionTokens = [long]$Usage.CompletionTokens
+        cumulativeFailedPromptTokens = [long]$Usage.FailedPromptTokens
+        cumulativeFailedCompletionTokens = [long]$Usage.FailedCompletionTokens
         cumulativeProviderActualCostEstimateCny = [double]$Usage.CostEstimateCny
+        cumulativeUnpricedProviderResponses = [int]$Usage.UnpricedProviderResponses
+        cumulativeCostEstimateComplete = [bool]$Usage.CostEstimateComplete
+        cumulativeTokenUsageComplete = [bool]$Usage.TokenUsageComplete
         lastHostStatus = [string]$Receipt.StoryModeAgentHostTerminalState
         lastFailureCode = [string]$Receipt.StoryModeAgentFailureCode
     }
@@ -256,6 +383,12 @@ function Remove-ObsoleteOwnedSaves([string[]]$KeepNames) {
     }
 }
 
+if ($UsageSelfTest) {
+    $usageSelfTestResult = Test-AgentHostProgressUsageAccounting
+    $usageSelfTestResult | ConvertTo-Json -Depth 4
+    return
+}
+
 $manifest = $null
 $seedEvidence = $null
 $sourceSaveName = $null
@@ -275,6 +408,15 @@ $manifestUpdated = $false
 $failure = $null
 $liveRunActualCost = 0d
 $liveRunDecisions = 0
+$liveRunProviderRequests = 0
+$liveRunProviderFailures = 0
+$liveRunProviderFailuresWithUsage = 0
+$liveRunProviderFailuresWithoutUsage = 0
+$liveRunFailedPromptTokens = 0L
+$liveRunFailedCompletionTokens = 0L
+$liveRunUnpricedProviderResponses = 0
+$liveRunCostEstimateComplete = $true
+$liveRunTokenUsageComplete = $true
 $liveRunPromptTokens = 0L
 $liveRunCompletionTokens = 0L
 $seedHostStatus = $null
@@ -313,19 +455,51 @@ try {
         if ($null -eq $manifest.PSObject.Properties['usageReceiptRunCount']) {
             $manifest | Add-Member -NotePropertyName usageReceiptRunCount -NotePropertyValue 0
         }
-        if ([string]$manifest.usageMetric -cne 'AgentHostProgress.jsonl provider-decision events') {
-            $historicalUsage = Get-VerifiedCampaignProgressUsage $sourceCampaignInstanceId
-            if ($historicalUsage.ProviderDecisions -gt 0) {
-                $manifest.usageMetric = 'AgentHostProgress.jsonl provider-decision events'
-                $manifest.usageReceiptRunCount = [int]$historicalUsage.ReceiptRunCount
-                $manifest.cumulativeDecisions = [int]$historicalUsage.ProviderDecisions
-                $manifest.cumulativePromptTokens = [long]$historicalUsage.PromptTokens
-                $manifest.cumulativeCompletionTokens = [long]$historicalUsage.CompletionTokens
-                $manifest.cumulativeProviderActualCostEstimateCny = [double]$historicalUsage.CostEstimateCny
-                Write-PersistentManifest $manifest
-                $manifestUpdated = $true
-            }
+        $usageMetricV2 = 'AgentHostProgress.jsonl provider decisions plus failed response usage; provider cost coverage tracked separately'
+        if ([string]$manifest.usageMetric -cne $usageMetricV2) {
+            # Older manifests only counted accepted provider decisions. Preserve
+            # their cumulative totals as a historical lower bound; do not replace
+            # them from whatever subset of TestResults happens to be retained.
+            $manifest.usageMetric = $usageMetricV2
+            Set-PersistentManifestProperty $manifest 'usageAccountingVersion' 2
+            Set-PersistentManifestProperty $manifest 'failureUsageTrackingSinceUtc' ([DateTime]::UtcNow.ToString('O'))
+            if ($null -eq $manifest.PSObject.Properties['cumulativeProviderRequests']) { $manifest | Add-Member -NotePropertyName cumulativeProviderRequests -NotePropertyValue ([int]$manifest.cumulativeDecisions) }
+            if ($null -eq $manifest.PSObject.Properties['cumulativeProviderFailures']) { $manifest | Add-Member -NotePropertyName cumulativeProviderFailures -NotePropertyValue 0 }
+            if ($null -eq $manifest.PSObject.Properties['cumulativeProviderFailuresWithUsage']) { $manifest | Add-Member -NotePropertyName cumulativeProviderFailuresWithUsage -NotePropertyValue 0 }
+            if ($null -eq $manifest.PSObject.Properties['cumulativeProviderFailuresWithoutUsage']) { $manifest | Add-Member -NotePropertyName cumulativeProviderFailuresWithoutUsage -NotePropertyValue 0 }
+            if ($null -eq $manifest.PSObject.Properties['cumulativeFailedPromptTokens']) { $manifest | Add-Member -NotePropertyName cumulativeFailedPromptTokens -NotePropertyValue ([long]0) }
+            if ($null -eq $manifest.PSObject.Properties['cumulativeFailedCompletionTokens']) { $manifest | Add-Member -NotePropertyName cumulativeFailedCompletionTokens -NotePropertyValue ([long]0) }
+            if ($null -eq $manifest.PSObject.Properties['cumulativeUnpricedProviderResponses']) { $manifest | Add-Member -NotePropertyName cumulativeUnpricedProviderResponses -NotePropertyValue 0 }
+            if ($null -eq $manifest.PSObject.Properties['cumulativeUnpricedProviderFailures']) { $manifest | Add-Member -NotePropertyName cumulativeUnpricedProviderFailures -NotePropertyValue 0 }
+            if ($null -eq $manifest.PSObject.Properties['cumulativeCostEstimateComplete']) { $manifest | Add-Member -NotePropertyName cumulativeCostEstimateComplete -NotePropertyValue $false }
+            if ($null -eq $manifest.PSObject.Properties['cumulativeTokenUsageComplete']) { $manifest | Add-Member -NotePropertyName cumulativeTokenUsageComplete -NotePropertyValue $false }
+            if ($null -eq $manifest.PSObject.Properties['lastFailureUsageReconciledSaveName']) { $manifest | Add-Member -NotePropertyName lastFailureUsageReconciledSaveName -NotePropertyValue $null }
+            if ($null -eq $manifest.PSObject.Properties['lastFailureUsageReconciledRunId']) { $manifest | Add-Member -NotePropertyName lastFailureUsageReconciledRunId -NotePropertyValue $null }
+            $manifestUpdated = $true
         }
+
+        if ([string]$manifest.lastFailureUsageReconciledSaveName -cne $sourceSaveName) {
+            $previousCheckpointUsage = Get-VerifiedCheckpointProviderFailureUsage $sourceCampaignInstanceId $sourceSaveName $sourceHash
+            if ($previousCheckpointUsage) {
+                $previousFailureUsage = $previousCheckpointUsage.Usage
+                $manifest.cumulativeProviderRequests = [int]$manifest.cumulativeProviderRequests + [int]$previousFailureUsage.ProviderFailures
+                $manifest.cumulativeProviderFailures = [int]$manifest.cumulativeProviderFailures + [int]$previousFailureUsage.ProviderFailures
+                $manifest.cumulativeProviderFailuresWithUsage = [int]$manifest.cumulativeProviderFailuresWithUsage + [int]$previousFailureUsage.ProviderFailuresWithUsage
+                $manifest.cumulativeProviderFailuresWithoutUsage = [int]$manifest.cumulativeProviderFailuresWithoutUsage + [int]$previousFailureUsage.ProviderFailuresWithoutUsage
+                $manifest.cumulativePromptTokens = [long]$manifest.cumulativePromptTokens + [long]$previousFailureUsage.FailedPromptTokens
+                $manifest.cumulativeCompletionTokens = [long]$manifest.cumulativeCompletionTokens + [long]$previousFailureUsage.FailedCompletionTokens
+                $manifest.cumulativeFailedPromptTokens = [long]$manifest.cumulativeFailedPromptTokens + [long]$previousFailureUsage.FailedPromptTokens
+                $manifest.cumulativeFailedCompletionTokens = [long]$manifest.cumulativeFailedCompletionTokens + [long]$previousFailureUsage.FailedCompletionTokens
+                $manifest.cumulativeUnpricedProviderResponses = [int]$manifest.cumulativeUnpricedProviderResponses + [int]$previousFailureUsage.UnpricedProviderFailures
+                $manifest.cumulativeUnpricedProviderFailures = [int]$manifest.cumulativeUnpricedProviderFailures + [int]$previousFailureUsage.UnpricedProviderFailures
+                if ([int]$previousFailureUsage.UnpricedProviderFailures -gt 0) { $manifest.cumulativeCostEstimateComplete = $false }
+                if ([int]$previousFailureUsage.ProviderFailuresWithoutUsage -gt 0) { $manifest.cumulativeTokenUsageComplete = $false }
+                $manifest.lastFailureUsageReconciledRunId = [string]$previousCheckpointUsage.RunId
+            }
+            $manifest.lastFailureUsageReconciledSaveName = $sourceSaveName
+            $manifestUpdated = $true
+        }
+        if ($manifestUpdated) { Write-PersistentManifest $manifest }
     }
     else {
         $orphanSaves = @(Get-ChildItem -LiteralPath $saveDirectory -File -Filter ($persistentSavePrefix + '*.sav') -ErrorAction SilentlyContinue)
@@ -430,6 +604,15 @@ try {
         $liveUsage = Get-AgentHostProgressUsage (Join-Path $env:CHRONICLE_HARNESS_TEMP 'AgentHostProgress.jsonl')
         $liveRunActualCost = [double]$liveUsage.CostEstimateCny
         $liveRunDecisions = [int]$liveUsage.ProviderDecisions
+        $liveRunProviderRequests = [int]$liveUsage.ProviderRequests
+        $liveRunProviderFailures = [int]$liveUsage.ProviderFailures
+        $liveRunProviderFailuresWithUsage = [int]$liveUsage.ProviderFailuresWithUsage
+        $liveRunProviderFailuresWithoutUsage = [int]$liveUsage.ProviderFailuresWithoutUsage
+        $liveRunFailedPromptTokens = [long]$liveUsage.FailedPromptTokens
+        $liveRunFailedCompletionTokens = [long]$liveUsage.FailedCompletionTokens
+        $liveRunUnpricedProviderResponses = [int]$liveUsage.UnpricedProviderResponses
+        $liveRunCostEstimateComplete = [bool]$liveUsage.CostEstimateComplete
+        $liveRunTokenUsageComplete = [bool]$liveUsage.TokenUsageComplete
         $liveRunPromptTokens = [long]$liveUsage.PromptTokens
         $liveRunCompletionTokens = [long]$liveUsage.CompletionTokens
         $campaignContinued = [string]$liveEvidence.CampaignInstanceId -ceq $sourceCampaignInstanceId
@@ -455,13 +638,24 @@ try {
                 $manifest.checkpointCount = [int]$manifest.checkpointCount + 1
             }
             $manifest.cumulativeDecisions = [int]$manifest.cumulativeDecisions + $liveRunDecisions
+            $manifest.cumulativeProviderRequests = [int]$manifest.cumulativeProviderRequests + $liveRunProviderRequests
+            $manifest.cumulativeProviderFailures = [int]$manifest.cumulativeProviderFailures + $liveRunProviderFailures
+            $manifest.cumulativeProviderFailuresWithUsage = [int]$manifest.cumulativeProviderFailuresWithUsage + $liveRunProviderFailuresWithUsage
+            $manifest.cumulativeProviderFailuresWithoutUsage = [int]$manifest.cumulativeProviderFailuresWithoutUsage + $liveRunProviderFailuresWithoutUsage
             $manifest.cumulativePromptTokens = [long]$manifest.cumulativePromptTokens + $liveRunPromptTokens
             $manifest.cumulativeCompletionTokens = [long]$manifest.cumulativeCompletionTokens + $liveRunCompletionTokens
+            $manifest.cumulativeFailedPromptTokens = [long]$manifest.cumulativeFailedPromptTokens + $liveRunFailedPromptTokens
+            $manifest.cumulativeFailedCompletionTokens = [long]$manifest.cumulativeFailedCompletionTokens + $liveRunFailedCompletionTokens
             $manifest.cumulativeProviderActualCostEstimateCny = [Math]::Round([double]$manifest.cumulativeProviderActualCostEstimateCny + $liveRunActualCost, 6)
-            if ($liveRunDecisions -gt 0) {
-                $manifest.usageMetric = 'AgentHostProgress.jsonl provider-decision events'
+            $manifest.cumulativeUnpricedProviderResponses = [int]$manifest.cumulativeUnpricedProviderResponses + $liveRunUnpricedProviderResponses
+            $manifest.cumulativeUnpricedProviderFailures = [int]$manifest.cumulativeUnpricedProviderFailures + $liveUsage.UnpricedProviderFailures
+            $manifest.cumulativeCostEstimateComplete = [bool]$manifest.cumulativeCostEstimateComplete -and $liveRunCostEstimateComplete
+            $manifest.cumulativeTokenUsageComplete = [bool]$manifest.cumulativeTokenUsageComplete -and $liveRunTokenUsageComplete
+            if ($liveRunProviderRequests -gt 0) {
                 $manifest.usageReceiptRunCount = [int]$manifest.usageReceiptRunCount + 1
             }
+            $manifest.lastFailureUsageReconciledSaveName = if ($checkpointSaved) { $checkpointSaveName } else { $sourceSaveName }
+            $manifest.lastFailureUsageReconciledRunId = Split-Path -Leaf (Split-Path -Parent $env:CHRONICLE_HARNESS_TEMP)
             $manifest.lastHostStatus = [string]$liveTrace.status
             $manifest.lastFailureCode = if ($liveTrace.failureCode) { [string]$liveTrace.failureCode } else { $null }
             Write-PersistentManifest $manifest
@@ -514,11 +708,28 @@ $result = [ordered]@{
     HostStatus = if ($liveTrace) { [string]$liveTrace.status } elseif ($seedEvidence) { [string]$seedEvidence.StoryModeAgentHostTerminalState } else { $null }
     HostFailureCode = if ($liveTrace) { [string]$liveTrace.failureCode } elseif ($seedEvidence) { [string]$seedEvidence.StoryModeAgentFailureCode } else { $null }
     DecisionsThisRun = $liveRunDecisions
+    ProviderRequestsThisRun = $liveRunProviderRequests
+    ProviderFailuresThisRun = $liveRunProviderFailures
+    ProviderFailuresWithUsageThisRun = $liveRunProviderFailuresWithUsage
+    ProviderFailuresWithoutUsageThisRun = $liveRunProviderFailuresWithoutUsage
+    FailedPromptTokensThisRun = $liveRunFailedPromptTokens
+    FailedCompletionTokensThisRun = $liveRunFailedCompletionTokens
+    UnpricedProviderResponsesThisRun = $liveRunUnpricedProviderResponses
     MaxHttpRequestsPerDecision = $MaxHttpRequestsPerDecision
     PromptTokensThisRun = $liveRunPromptTokens
     CompletionTokensThisRun = $liveRunCompletionTokens
-    ActualCostEstimateCnyThisRun = $liveRunActualCost
+    KnownProviderCostEstimateCnyThisRun = $liveRunActualCost
+    ActualCostEstimateCnyThisRun = if ($liveRunCostEstimateComplete) { $liveRunActualCost } else { $null }
+    CostEstimateCompleteThisRun = $liveRunCostEstimateComplete
+    TokenUsageCompleteThisRun = $liveRunTokenUsageComplete
+    CostEstimateScope = 'Known response cost estimates only; inspect CostEstimateCompleteThisRun before treating the value as a total.'
     CumulativeDecisions = if ($manifest) { [int]$manifest.cumulativeDecisions } else { $null }
+    CumulativeProviderRequests = if ($manifest) { [int]$manifest.cumulativeProviderRequests } else { $null }
+    CumulativeProviderFailures = if ($manifest) { [int]$manifest.cumulativeProviderFailures } else { $null }
+    CumulativeFailedPromptTokens = if ($manifest) { [long]$manifest.cumulativeFailedPromptTokens } else { $null }
+    CumulativeFailedCompletionTokens = if ($manifest) { [long]$manifest.cumulativeFailedCompletionTokens } else { $null }
+    CumulativeUnpricedProviderResponses = if ($manifest) { [int]$manifest.cumulativeUnpricedProviderResponses } else { $null }
+    CumulativeCostEstimateComplete = if ($manifest) { [bool]$manifest.cumulativeCostEstimateComplete } else { $false }
     CumulativeActualCostEstimateCny = if ($manifest) { [double]$manifest.cumulativeProviderActualCostEstimateCny } else { $null }
     ManifestPath = $manifestPath
     ManifestUpdated = $manifestUpdated

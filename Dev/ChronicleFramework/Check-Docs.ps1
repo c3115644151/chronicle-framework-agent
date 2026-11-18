@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.601'
+$contractVersion = '7.605'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -246,8 +246,13 @@ if ($agentHostHarnessProgressTraceSource -notmatch 'AgentHostRuntimeProgressLog\
     $agentHostProviderSource -notmatch 'providerToolCallsPresent: hasToolCalls' -or
     $agentHostRuntimeProgressLogSource -notmatch 'providerRequestBodyBytes' -or
     $agentHostRuntimeProgressLogSource -notmatch 'providerFailureEventsWithoutUsage' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'providerFailureEventsWithUsage' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'providerFailurePromptTokens' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'totalObservedPromptTokens' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'overallTokenUsageComplete' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'overallCostEstimateComplete' -or
     $agentHostRuntimeProgressLogSource -notmatch 'promptCacheHitRatioFromRows' -or
-    $agentHostRuntimeProgressLogSource -notmatch 'successfully parsed provider responses only' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'provider-decision-and-failure-log-rows' -or
     $agentHostRuntimeProgressLogSource -notmatch 'RecordBudgetReservationRejected' -or
     $agentHostHarnessProgressTraceSource -notmatch 'provider-budget-reservation-rejected' -or
     $agentHostHarnessProgressTraceSource -notmatch 'providerResponseRequestId' -or
@@ -2377,7 +2382,12 @@ if ($harnessScript -notmatch "'PersistentEycCampaign' \{ @\('Preflight', 'Config
     $persistentEycCampaignSource -notmatch 'Get-VerifiedOrphanSeedReceipt' -or
     $persistentEycCampaignSource -notmatch 'Get-AgentHostProgressUsage' -or
     $persistentEycCampaignSource -notmatch 'Get-VerifiedCampaignProgressUsage' -or
-    $persistentEycCampaignSource -notmatch 'usageMetric = ''AgentHostProgress.jsonl provider-decision events''' -or
+    $persistentEycCampaignSource -notmatch 'usageMetric = ''AgentHostProgress.jsonl provider decisions plus failed response token usage; price coverage tracked separately''' -or
+    $persistentEycCampaignSource -notmatch 'providerResponsePromptTokens' -or
+    $persistentEycCampaignSource -notmatch 'cumulativeFailedPromptTokens' -or
+    $persistentEycCampaignSource -notmatch 'CostEstimateCompleteThisRun' -or
+    $persistentEycCampaignSource -notmatch 'Get-VerifiedCheckpointProviderFailureUsage' -or
+    $persistentEycCampaignSource -notmatch 'UsageSelfTest' -or
     $persistentEycCampaignSource -notmatch '\$manifest \| Add-Member -NotePropertyName usageMetric' -or
     $persistentEycCampaignSource -notmatch 'FreshCampaignResult\.json' -or
     $persistentEycCampaignSource -notmatch 'LiveModelLoopResult\.json' -or
@@ -2406,6 +2416,14 @@ if ($harnessScript -notmatch "'PersistentEycCampaign' \{ @\('Preflight', 'Config
     $persistentEycCampaignSource -notmatch 'cumulativeProviderActualCostEstimateCny' -or
     $persistentEycCampaignSource -notmatch 'no verified Native checkpoint') {
     throw 'Persistent EYC Harness must seed from natural StoryMode, resume only a hash- and Campaign-ID-matched Native save, checkpoint from a stable map or verified non-sieged settlement menu, bound save retention and retain cumulative run-cost evidence.'
+}
+$persistentUsageSelfTestOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $harnessRoot 'Test-AgentPersistentStoryModeCampaign.ps1') -UsageSelfTest 2>&1 | Out-String
+$persistentUsageSelfTest = $null
+try { $persistentUsageSelfTest = $persistentUsageSelfTestOutput | ConvertFrom-Json } catch { }
+if ($LASTEXITCODE -ne 0 -or -not $persistentUsageSelfTest.passed -or
+    $persistentUsageSelfTest.failedResponsePromptTokens -ne 1437 -or $persistentUsageSelfTest.failedResponseCompletionTokens -ne 256 -or
+    $persistentUsageSelfTest.costEstimateComplete) {
+    throw "Persistent EYC usage accounting must include failed provider response tokens and mark unpriced failures incomplete: $persistentUsageSelfTestOutput"
 }
 if ($harnessScript -notmatch "'FreshStoryModeNativeMenuLeaveEvaluation' \{ @\('Preflight', 'Build', 'FreshStoryModeNativeMenuLeaveEvaluation'\) \}" -or
     $harnessScript -notmatch '-StoryModeNativeMenuLeaveEvaluation -TimeoutSeconds 360' -or

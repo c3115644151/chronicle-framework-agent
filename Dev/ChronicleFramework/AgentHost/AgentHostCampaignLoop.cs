@@ -142,14 +142,20 @@ internal static class AgentHostCampaignLoop
         results.Add(new { scenario = "campaign-loop-settlement-refresh-only-classifies-native-map-arrival", passed = true });
         if (!ShouldReconsiderUnsupportedEycScope(activeEycGoal, activeEycControls, false, 0) ||
             ShouldReconsiderUnsupportedEycScope("Sell a sword to a nearby merchant.", activeEycControls, false, 0) ||
+            AgentHostDecisionCycle.IsExplicitEstablishYourClanGoal("Sell one currently sellable item through Native Trade to increase the active Establish Your Clan Gold Journal progress.") ||
             ShouldReconsiderUnsupportedEycScope(activeEycGoal, BuildGoalScopeClassificationControls(), false, 0) ||
             ShouldReconsiderUnsupportedEycScope(activeEycGoal, activeEycControls, false, MaxUnsupportedEycScopeReconsiderations))
             throw new AgentHostException("campaign-loop-self-test-eyc-scope-reconsideration-gate-failed", "Only an explicit Establish Your Clan request with its exact Native quest scope currently listed may receive one bounded unsupported-classification retry.");
         var eycClassifierRequest = new JsonObject { ["goal"] = activeEycGoal, ["allowedControls"] = activeEycControls.DeepClone() };
         var eycClassifierPrompt = AgentHostDecisionCycle.BuildCampaignGoalClassificationPrompt(eycClassifierRequest);
-        if (!eycClassifierPrompt.Contains("Multi-step execution within this exact quest is not a reason to choose unsupportedGoal", StringComparison.Ordinal))
-            throw new AgentHostException("campaign-loop-self-test-eyc-multistep-classification-guidance-missing", "The classifier must explicitly recognize the exact active multi-objective StoryMode quest as one supported high-level goal.");
-        results.Add(new { scenario = "campaign-loop-allows-one-bounded-reconsideration-for-explicit-active-eyc-multistep-scope", passed = true });
+        if (eycClassifierPrompt.Length > 700 ||
+            !eycClassifierPrompt.Contains("supportedEstablishYourClanGoal", StringComparison.Ordinal) ||
+            !eycClassifierPrompt.Contains("four Journal objectives are substeps of that one goal", StringComparison.Ordinal) ||
+            !eycClassifierPrompt.Contains("required decision-tool call only", StringComparison.Ordinal) ||
+            eycClassifierPrompt.Contains("VillageNeedsToolsIssue", StringComparison.Ordinal) ||
+            eycClassifierPrompt.Contains("BattleSimulation", StringComparison.Ordinal))
+            throw new AgentHostException("campaign-loop-self-test-eyc-classification-prompt-is-not-scoped", $"The explicit active EYC classification prompt violated its compactness contract (chars={eycClassifierPrompt.Length}, listedControl={eycClassifierPrompt.Contains("supportedEstablishYourClanGoal", StringComparison.Ordinal)}, substeps={eycClassifierPrompt.Contains("four Journal objectives are substeps of that one goal", StringComparison.Ordinal)}, toolOnly={eycClassifierPrompt.Contains("required decision-tool call only", StringComparison.Ordinal)}, unrelatedVillage={eycClassifierPrompt.Contains("VillageNeedsToolsIssue", StringComparison.Ordinal)}, unrelatedBattle={eycClassifierPrompt.Contains("BattleSimulation", StringComparison.Ordinal)}).");
+        results.Add(new { scenario = "campaign-loop-uses-compact-exact-control-for-explicit-active-eyc-classification", promptCharacters = eycClassifierPrompt.Length, passed = true });
         var postClassificationActions = BuildActionCatalog(null, moving: false, goalVerified: false);
         var postClassificationControls = BuildControlCatalog(moving: false, goalVerified: false);
         if (postClassificationActions.Count != 1 || ReadString(postClassificationActions[0] as JsonObject, "action") != "mapSettlementTargets" || postClassificationControls.Count != 0 ||
@@ -387,7 +393,9 @@ internal static class AgentHostCampaignLoop
             ReadInt(reconsideredEycScope, "decisions", 0) != 2 || ReadInt(reconsideredEycScope, "actionsExecuted", 0) != 0 ||
             eycScopeClient.MapQueryCount != 0 || eycScopeClient.MoveCount != 0 || eycScopeProvider.CallCount != 2 ||
             eycScopeProvider.SecondRequest?["decisionFeedback"]?["kind"]?.GetValue<string>() != "supported-establish-clan-scope-reconsideration" ||
-            !((eycScopeProvider.SecondSystemPrompt ?? string.Empty).Contains("Multi-step execution within this exact quest is not a reason to choose unsupportedGoal", StringComparison.Ordinal)) ||
+            !((eycScopeProvider.SecondSystemPrompt ?? string.Empty).Contains("supportedEstablishYourClanGoal", StringComparison.Ordinal)) ||
+            !((eycScopeProvider.SecondSystemPrompt ?? string.Empty).Contains("four Journal objectives are substeps of that one goal", StringComparison.Ordinal)) ||
+            (eycScopeProvider.SecondSystemPrompt ?? string.Empty).Contains("VillageNeedsToolsIssue", StringComparison.Ordinal) ||
             !reconsiderationTrace!.OfType<JsonObject>().Any(step =>
                 ReadString(step["decisionFeedback"] as JsonObject, "kind") == "supported-establish-clan-scope-reconsideration" &&
                 ReadBoolean(step["actionReceipt"] as JsonObject, "noNativeActionSent")))

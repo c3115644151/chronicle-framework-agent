@@ -386,7 +386,13 @@ internal static class AgentHostRuntimeProgressLog
     {
         var hasBaseRunId = TryGetBaseRunId(runId, out var baseRunId);
         var rows = new List<JsonObject>();
+        long providerFailurePromptTokens = 0;
+        long providerFailureCompletionTokens = 0;
+        double providerFailureCostCny = 0;
+        var providerFailureEvents = 0;
+        var providerFailureEventsWithUsage = 0;
         var providerFailureEventsWithoutUsage = 0;
+        var unpricedProviderFailureEvents = 0;
         var budgetReservationRejections = 0;
         try
         {
@@ -401,7 +407,23 @@ internal static class AgentHostRuntimeProgressLog
                 switch (ReadString(item, "event"))
                 {
                     case "provider-decision": rows.Add(item); break;
-                    case "provider-failure": providerFailureEventsWithoutUsage++; break;
+                    case "provider-failure":
+                    {
+                        providerFailureEvents++;
+                        var failurePromptTokens = ReadLong(item, "providerResponsePromptTokens");
+                        var failureCompletionTokens = ReadLong(item, "providerResponseCompletionTokens");
+                        if (failurePromptTokens.HasValue && failureCompletionTokens.HasValue)
+                        {
+                            providerFailureEventsWithUsage++;
+                            providerFailurePromptTokens += failurePromptTokens.Value;
+                            providerFailureCompletionTokens += failureCompletionTokens.Value;
+                        }
+                        else providerFailureEventsWithoutUsage++;
+                        var failureCost = ReadDouble(item, "providerFailureCostEstimateCny");
+                        if (failureCost.HasValue) providerFailureCostCny += failureCost.Value;
+                        else unpricedProviderFailureEvents++;
+                        break;
+                    }
                     case "provider-budget-reservation-rejected": budgetReservationRejections++; break;
                 }
             }
@@ -426,14 +448,32 @@ internal static class AgentHostRuntimeProgressLog
         var cacheTotal = cacheHitTokens.HasValue && cacheMissTokens.HasValue ? cacheHitTokens.Value + cacheMissTokens.Value : 0;
         var missingUsageRows = rows.Count(row => !ReadLong(row, "promptTokens").HasValue ||
             !ReadLong(row, "completionTokens").HasValue || !ReadDouble(row, "estimatedCostCny").HasValue);
+        var observedPromptTokens = rows.Count == 0 || loggedPromptTokens.HasValue
+            ? (rows.Count == 0 ? 0 : loggedPromptTokens!.Value) + providerFailurePromptTokens
+            : (long?)null;
+        var observedCompletionTokens = rows.Count == 0 || loggedCompletionTokens.HasValue
+            ? (rows.Count == 0 ? 0 : loggedCompletionTokens!.Value) + providerFailureCompletionTokens
+            : (long?)null;
+        var overallTokenUsageComplete = rows.All(row => ReadLong(row, "promptTokens").HasValue && ReadLong(row, "completionTokens").HasValue) &&
+            providerFailureEventsWithoutUsage == 0;
+        var overallCostEstimateComplete = missingUsageRows == 0 && unpricedProviderFailureEvents == 0;
         return new JsonObject
         {
-            ["accountingSource"] = "provider-decision-log-rows",
+            ["accountingSource"] = "provider-decision-and-failure-log-rows",
             ["providerResponseRows"] = rows.Count,
             ["rowsMissingTokenOrCostUsage"] = missingUsageRows,
             ["providerUsageRowsComplete"] = rows.Count > 0 && missingUsageRows == 0,
-            ["costEstimateScope"] = "successfully parsed provider responses only; provider failures may have unreported usage",
+            ["providerFailureEvents"] = providerFailureEvents,
+            ["providerFailureEventsWithUsage"] = providerFailureEventsWithUsage,
             ["providerFailureEventsWithoutUsage"] = providerFailureEventsWithoutUsage,
+            ["providerFailurePromptTokens"] = providerFailureEventsWithUsage > 0 ? providerFailurePromptTokens : null,
+            ["providerFailureCompletionTokens"] = providerFailureEventsWithUsage > 0 ? providerFailureCompletionTokens : null,
+            ["totalObservedPromptTokens"] = observedPromptTokens,
+            ["totalObservedCompletionTokens"] = observedCompletionTokens,
+            ["overallTokenUsageComplete"] = overallTokenUsageComplete,
+            ["unpricedProviderFailureEvents"] = unpricedProviderFailureEvents,
+            ["overallCostEstimateComplete"] = overallCostEstimateComplete,
+            ["costEstimateScope"] = "priced provider decisions plus explicitly priced failures; unpriced failures keep the total incomplete",
             ["budgetReservationRejectionEvents"] = budgetReservationRejections,
             ["reportedLoopDecisionCount"] = reportedDecisions,
             ["reportedLoopDecisionCountMinusProviderRows"] = reportedDecisions.HasValue ? reportedDecisions.Value - rows.Count : null,
@@ -442,7 +482,7 @@ internal static class AgentHostRuntimeProgressLog
             ["promptCacheHitTokensFromRows"] = cacheHitTokens,
             ["promptCacheMissTokensFromRows"] = cacheMissTokens,
             ["promptCacheHitRatioFromRows"] = cacheTotal > 0 ? Math.Round((double)cacheHitTokens!.Value / cacheTotal, 6) : null,
-            ["estimatedCostCnyFromRows"] = loggedEstimatedCost,
+            ["estimatedCostCnyFromRows"] = loggedEstimatedCost.HasValue ? Math.Round(loggedEstimatedCost.Value + providerFailureCostCny, 8) : null,
             ["providerPromptTokensFromTerminal"] = terminalPromptTokens,
             ["providerCompletionTokensFromTerminal"] = terminalCompletionTokens,
             ["providerEstimatedCostCnyFromTerminal"] = terminalEstimatedCost,
@@ -617,6 +657,10 @@ internal static class AgentHostRuntimeProgressLog
                         ["privateTownId"] = "PRIVATE_TOWN_ID"
                     }
                 });
+                RecordProviderFailure(request.RootElement, "provider-tool-call-missing", providerRoute: "kilo/dots-studio/dots-3-note-preview:free",
+                    providerOutputFormat: "required_tool_call", providerToolCallsPresent: false, providerToolCallCount: 0,
+                    providerResponseContentKind: "String", providerResponseContentCharacters: 1251, providerFinishReason: "length",
+                    providerResponseModel: "dots-studio/dots-3-note-preview:free", providerResponsePromptTokens: 1437, providerResponseCompletionTokens: 256);
                 RecordRunSummary(request.RootElement, new JsonObject
                 {
                     ["providerModelId"] = "deepseek-flash", ["status"] = "completed", ["decisions"] = 1,
@@ -633,12 +677,13 @@ internal static class AgentHostRuntimeProgressLog
             var productLogLines = File.ReadAllLines(productLog);
             var childDecision = productLogLines.Length > 2 ? JsonNode.Parse(productLogLines[2]) as JsonObject : null;
             var budgetEvent = productLogLines.Length > 3 ? JsonNode.Parse(productLogLines[3]) as JsonObject : null;
+            var missingToolFailureEvent = productLogLines.Length > 7 ? JsonNode.Parse(productLogLines[7]) as JsonObject : null;
             var companionMemoryEvent = productLogLines.Length > 6 ? JsonNode.Parse(productLogLines[6]) as JsonObject : null;
-            var summaryEvent = productLogLines.Length > 7 ? JsonNode.Parse(productLogLines[7]) as JsonObject : null;
+            var summaryEvent = productLogLines.Length > 8 ? JsonNode.Parse(productLogLines[8]) as JsonObject : null;
             var summaryUsage = summaryEvent?["loggedProviderUsage"] as JsonObject;
             var usageByScope = summaryUsage?["providerUsageByScope"] as JsonObject;
             var companionMemorySummary = companionMemoryEvent?["companionSearchMemory"] as JsonObject;
-            if (productLogLines.Length != 8 || productLogLines.Any(line => line.Contains("PRIVATE_", StringComparison.Ordinal) ||
+            if (productLogLines.Length != 9 || productLogLines.Any(line => line.Contains("PRIVATE_", StringComparison.Ordinal) ||
                     line.Contains("PRIVATE_OPTION_VALUE", StringComparison.Ordinal)) ||
                 ReadString(JsonNode.Parse(productLogLines[1]) as JsonObject, "event") != "provider-decision" ||
                 ReadInt(JsonNode.Parse(productLogLines[1]) as JsonObject, "fallbackAttempts") != 2 ||
@@ -666,6 +711,10 @@ internal static class AgentHostRuntimeProgressLog
                 ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerErrorCode") != "overloaded" ||
                 ReadInt(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerFallbackAttempts") != 2 ||
                 ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerFallbackTrail") != "ovh/model=rate_limited; nvidia/model=upstream_502" ||
+                ReadString(missingToolFailureEvent, "failureCode") != "provider-tool-call-missing" ||
+                ReadInt(missingToolFailureEvent, "providerResponsePromptTokens", -1) != 1437 ||
+                ReadInt(missingToolFailureEvent, "providerResponseCompletionTokens", -1) != 256 ||
+                ReadBoolean(missingToolFailureEvent, "responseBodiesLogged") ||
                 ReadString(JsonNode.Parse(productLogLines[5]) as JsonObject, "objectiveId") != "gold" ||
                 ReadString(companionMemoryEvent, "objectiveId") != "companions" ||
                 ReadBoolean(companionMemorySummary, "checkpointReadAttempted") != true ||
@@ -676,7 +725,16 @@ internal static class AgentHostRuntimeProgressLog
                 ReadString(companionMemorySummary, "lastCheckpointWriteStatus") != "completed" ||
                 ReadString(summaryEvent, "event") != "run-summary" ||
                 ReadInt(summaryUsage, "providerResponseRows", -1) != 2 ||
+                ReadInt(summaryUsage, "providerFailureEvents", -1) != 2 ||
+                ReadInt(summaryUsage, "providerFailureEventsWithUsage", -1) != 1 ||
                 ReadInt(summaryUsage, "providerFailureEventsWithoutUsage", -1) != 1 ||
+                ReadLong(summaryUsage, "providerFailurePromptTokens") != 1437 ||
+                ReadLong(summaryUsage, "providerFailureCompletionTokens") != 256 ||
+                ReadLong(summaryUsage, "totalObservedPromptTokens") != 1857 ||
+                ReadLong(summaryUsage, "totalObservedCompletionTokens") != 308 ||
+                ReadBoolean(summaryUsage, "overallTokenUsageComplete") ||
+                ReadInt(summaryUsage, "unpricedProviderFailureEvents", -1) != 2 ||
+                ReadBoolean(summaryUsage, "overallCostEstimateComplete") ||
                 ReadInt(summaryUsage, "budgetReservationRejectionEvents", -1) != 1 ||
                 ReadInt(usageByScope?["safe-settlement-arrival"] as JsonObject, "providerResponseRows", -1) != 1 ||
                 ReadInt(usageByScope?["native-battle-inquiry"] as JsonObject, "providerResponseRows", -1) != 1 ||
@@ -691,7 +749,7 @@ internal static class AgentHostRuntimeProgressLog
             {
                 var loggedEvents = string.Join(",", productLogLines.Select(line => ReadString(JsonNode.Parse(line) as JsonObject, "event") ?? "unknown"));
                 var privateMarkerFound = productLogLines.Any(line => line.Contains("PRIVATE_", StringComparison.Ordinal));
-                throw new AgentHostException("runtime-progress-log-end-to-end-self-test-failed", $"A MCM run must persist per-decision cost data and reconcile the final summary while omitting secret markers and free-text payloads. lines={productLogLines.Length}; events={loggedEvents}; privateMarker={privateMarkerFound}; providerRows={ReadInt(summaryUsage, "providerResponseRows", -1)}; decisionDelta={ReadInt(summaryUsage, "reportedLoopDecisionCountMinusProviderRows", 0)}; promptDelta={ReadLong(summaryUsage, "promptTokensRowsMinusTerminal")}; rowCost={ReadDouble(summaryUsage, "estimatedCostCnyFromRows")}; costDelta={ReadDouble(summaryUsage, "estimatedCostCnyRowsMinusTerminal")}; projectedReserve={ReadDouble(budgetEvent, "projectedReservedAfterCny")}.");
+                throw new AgentHostException("runtime-progress-log-end-to-end-self-test-failed", $"A MCM run must persist per-decision cost data and reconcile the final summary while omitting secret markers and free-text payloads. lines={productLogLines.Length}; events={loggedEvents}; privateMarker={privateMarkerFound}; providerRows={ReadInt(summaryUsage, "providerResponseRows", -1)}; decisionDelta={ReadInt(summaryUsage, "reportedLoopDecisionCountMinusProviderRows", 0)}; promptDelta={ReadLong(summaryUsage, "promptTokensRowsMinusTerminal")}; rowCost={ReadDouble(summaryUsage, "estimatedCostCnyFromRows")}; costDelta={ReadDouble(summaryUsage, "estimatedCostCnyRowsMinusTerminal")}; projectedReserve={ReadDouble(budgetEvent, "projectedReservedAfterCny")}; failures={ReadInt(summaryUsage, "providerFailureEvents", -1)}; failuresWithUsage={ReadInt(summaryUsage, "providerFailureEventsWithUsage", -1)}; failuresWithoutUsage={ReadInt(summaryUsage, "providerFailureEventsWithoutUsage", -1)}; failurePrompt={ReadLong(summaryUsage, "providerFailurePromptTokens")}; observedPrompt={ReadLong(summaryUsage, "totalObservedPromptTokens")}; failureCompletion={ReadLong(summaryUsage, "providerFailureCompletionTokens")}; observedCompletion={ReadLong(summaryUsage, "totalObservedCompletionTokens")}; unpricedFailures={ReadInt(summaryUsage, "unpricedProviderFailureEvents", -1)}; costComplete={ReadBoolean(summaryUsage, "overallCostEstimateComplete")}.");
             }
 
             var currentPath = Path.Combine(tempRoot, validRun + ".jsonl");

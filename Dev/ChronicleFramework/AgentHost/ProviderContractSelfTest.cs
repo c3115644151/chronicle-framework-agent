@@ -1887,9 +1887,21 @@ internal static class ProviderContractSelfTest
                 throw new AgentHostException("provider-goal-classification-self-test-failed", "Goal classification did not stay within its listed control catalog.");
             using var body = JsonDocument.Parse(handler.LastRequestBody ?? throw new AgentHostException("provider-goal-classification-prompt-missing", "The classification request was not sent."));
             var system = body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString() ?? string.Empty;
-            if (!system.Contains("complete requested final outcome", StringComparison.Ordinal) ||
-                !system.Contains("may be written in Chinese", StringComparison.Ordinal) ||
-                !system.Contains("live Native preconditions are currently met", StringComparison.Ordinal))
+            if (!AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("complete requested final outcome", StringComparison.Ordinal) ||
+                !AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("may be written in Chinese", StringComparison.Ordinal) ||
+                !AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("live Native preconditions are currently met", StringComparison.Ordinal))
+                throw new AgentHostException("provider-goal-classification-prompt-incomplete", "The classifier prompt omitted outcome-first, multilingual or scope-versus-availability guidance.");
+            if (control == "supportedEstablishYourClanGoal")
+            {
+                if (system.Length > 1000 ||
+                    !system.Contains("supportedEstablishYourClanGoal", StringComparison.Ordinal) ||
+                    !system.Contains("four Journal objectives are substeps of that one goal", StringComparison.Ordinal) ||
+                    system.Contains("VillageNeedsToolsIssue", StringComparison.Ordinal) || system.Contains("BattleSimulation", StringComparison.Ordinal))
+                    throw new AgentHostException("provider-goal-classification-eyc-prompt-not-compact", $"Explicit EYC prompt violated compactness (chars={system.Length}, listedControl={system.Contains("supportedEstablishYourClanGoal", StringComparison.Ordinal)}, substeps={system.Contains("four Journal objectives are substeps of that one goal", StringComparison.Ordinal)}, unrelatedVillage={system.Contains("VillageNeedsToolsIssue", StringComparison.Ordinal)}, unrelatedBattle={system.Contains("BattleSimulation", StringComparison.Ordinal)}).");
+            }
+            else if (!system.Contains("complete requested final outcome", StringComparison.Ordinal) ||
+                     !system.Contains("may be written in Chinese", StringComparison.Ordinal) ||
+                     !system.Contains("live Native preconditions are currently met", StringComparison.Ordinal))
                 throw new AgentHostException("provider-goal-classification-prompt-incomplete", "The classifier prompt omitted outcome-first, multilingual or scope-versus-availability guidance.");
             var scopeMarkers = new (string Control, string Marker)[]
             {
@@ -1905,7 +1917,7 @@ internal static class ProviderContractSelfTest
             var listedControlSet = new HashSet<string>(allowedControls, StringComparer.Ordinal);
             foreach (var scopeMarker in scopeMarkers)
             {
-                if (system.Contains(scopeMarker.Marker, StringComparison.Ordinal) != listedControlSet.Contains(scopeMarker.Control))
+                if (control != "supportedEstablishYourClanGoal" && system.Contains(scopeMarker.Marker, StringComparison.Ordinal) != listedControlSet.Contains(scopeMarker.Control))
                     throw new AgentHostException("provider-goal-classification-scope-catalog-mismatch", "The classifier prompt did not match its scope explanations to exactly the currently listed controls.");
             }
             if (control == "supportedCaptivityRecoveryGoal" &&
