@@ -16,7 +16,7 @@ internal static class AgentHostProviderDecisionRecovery
 
     internal static bool CanRetry(string errorCode, int rejectedDecisions) =>
         RecoverableErrorCodes.Contains(errorCode) &&
-        rejectedDecisions < (errorCode == "provider-multiple-tool-calls" ? 1 : MaxRejectedDecisions);
+        rejectedDecisions < (errorCode is "provider-multiple-tool-calls" or "provider-response-truncated" ? 1 : MaxRejectedDecisions);
 
     internal static async Task<ProviderDecisionResult> DecideWithSingleRetryAsync(
         JsonObject request,
@@ -72,7 +72,7 @@ internal static class AgentHostProviderDecisionRecovery
         var retryCountBounded = CanRetry("provider-arguments-invalid-json", 0) &&
             CanRetry("provider-arguments-invalid-json", 1) &&
             !CanRetry("provider-arguments-invalid-json", 2) &&
-            CanRetry("provider-response-truncated", 0) && !CanRetry("provider-response-truncated", 2) &&
+            CanRetry("provider-response-truncated", 0) && !CanRetry("provider-response-truncated", 1) &&
             CanRetry("provider-multiple-tool-calls", 0) && !CanRetry("provider-multiple-tool-calls", 1) &&
             !CanRetry("provider-http-error", 0);
         if (!retryCountBounded ||

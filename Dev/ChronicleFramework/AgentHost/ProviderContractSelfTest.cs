@@ -631,6 +631,28 @@ internal static class ProviderContractSelfTest
             results.Add(new { scenario = "provider-required-tool-call-missing-response-logs-safe-route-shape-and-usage", modelCalls = 0, nativeCommands = 0, passed = true });
         }
 
+        var truncatedRequiredToolCallHandler = new StubHandler((httpRequest, _) => httpRequest.Method == HttpMethod.Get
+            ? Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"gpt-oss-20b\",\"supported_parameters\":[\"tools\",\"tool_choice\"]}]}"))
+            : Task.FromResult(JsonResponse(BuildChatResponse(privatePlainTextToolFailure, "length"))));
+        using (var truncatedRequiredToolCallClient = new HttpClient(truncatedRequiredToolCallHandler) { Timeout = freeLlmApiSettings.Timeout })
+        using (var truncatedRequiredToolCallProvider = new OllamaNativeProvider(freeLlmApiSettings with { Model = "gpt-oss-20b" }, truncatedRequiredToolCallClient))
+        using (var request = JsonDocument.Parse(BuildDecisionRequest()))
+        {
+            await truncatedRequiredToolCallProvider.CheckConfiguredModelAsync(CancellationToken.None);
+            try
+            {
+                _ = await truncatedRequiredToolCallProvider.DecideAsync(request.RootElement, CancellationToken.None);
+                throw new AgentHostException("provider-truncated-required-tool-call-self-test-failed", "A length-limited required-tool response must not be accepted as an empty decision.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-response-truncated")
+            {
+                if (!exception.Message.Contains("finishReason=length", StringComparison.Ordinal) ||
+                    exception.Message.Contains(privatePlainTextToolFailure, StringComparison.Ordinal))
+                    throw new AgentHostException("provider-truncated-required-tool-call-safe-diagnostic-failed", "A truncated required-tool response must use the bounded truncation recovery code without logging its body.");
+            }
+            results.Add(new { scenario = "required-tool-call-length-response-is-routed-to-one-bounded-truncation-retry", modelCalls = 0, nativeCommands = 0, passed = true });
+        }
+
         var incompatibleSchemaResponseBody = "{\"model\":\"free-schema-mismatch\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"private-call-id\",\"type\":\"function\",\"function\":{\"name\":\"submit_chronicle_decision\",\"arguments\":\"PRIVATE_RESPONSE_SHOULD_NOT_LEAK\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":449,\"completion_tokens\":113}}";
         var incompatibleSchemaHandler = new StubHandler((httpRequest, _) => httpRequest.Method == HttpMethod.Get
             ? Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"free-schema-mismatch\",\"supported_parameters\":[\"response_format\"]}]}"))

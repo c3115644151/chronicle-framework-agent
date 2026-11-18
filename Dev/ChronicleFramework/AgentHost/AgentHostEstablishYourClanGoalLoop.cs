@@ -28,7 +28,15 @@ internal static class AgentHostEstablishYourClanGoalLoop
 
     internal static async Task<IReadOnlyList<object>> RunContractSelfTestsAsync()
     {
-        var plannerSystemPrompt = AgentHostDecisionCycle.EstablishYourClanGoalPlannerPrompt;
+        var plannerRequest = new JsonObject
+        {
+            ["allowedActions"] = new JsonArray(new JsonObject
+            {
+                ["action"] = "selectEstablishYourClanObjective",
+                ["argumentValues"] = new JsonObject { ["ObjectiveId"] = new JsonArray("gold", "partySize", "renown", "companions") }
+            })
+        };
+        var plannerSystemPrompt = AgentHostDecisionCycle.BuildEstablishYourClanGoalPlannerPrompt(plannerRequest);
         if (!plannerSystemPrompt.Contains("str_order_attack", StringComparison.Ordinal) ||
             !plannerSystemPrompt.Contains("real-time Mission", StringComparison.Ordinal) ||
             !plannerSystemPrompt.Contains("when companions remain unmet", StringComparison.Ordinal) ||
@@ -38,8 +46,24 @@ internal static class AgentHostEstablishYourClanGoalLoop
             !plannerSystemPrompt.Contains("do not use temporary MainParty troop-size over-limit volunteer or prisoner recruitment as a substitute", StringComparison.Ordinal) ||
             !plannerSystemPrompt.Contains("choose another feasible objective and replan after the Native state changes", StringComparison.Ordinal) ||
             !plannerSystemPrompt.Contains("Gold objective tracks current carried balance, not cumulative earnings", StringComparison.Ordinal) ||
-            !plannerSystemPrompt.Contains("Prefer completing Gold after other feasible objectives", StringComparison.Ordinal))
+            !plannerSystemPrompt.Contains("Prefer completing Gold after other feasible objectives", StringComparison.Ordinal) ||
+            plannerSystemPrompt.Length > 2200 ||
+            plannerSystemPrompt.Contains("privateDiagnostic", StringComparison.Ordinal))
             throw new AgentHostException("establish-clan-planner-native-renown-prerequisite-prompt-missing", "The read-only objective planner must know the Native Renown route, the current party limit/Tier1 over-limit attrition dependency and the volatile current-balance Gold objective.");
+        var companionOnlyPlannerPrompt = AgentHostDecisionCycle.BuildEstablishYourClanGoalPlannerPrompt(new JsonObject
+        {
+            ["allowedActions"] = new JsonArray(new JsonObject
+            {
+                ["action"] = "selectEstablishYourClanObjective",
+                ["argumentValues"] = new JsonObject { ["ObjectiveId"] = new JsonArray("companions") }
+            })
+        });
+        if (companionOnlyPlannerPrompt.Length >= plannerSystemPrompt.Length ||
+            companionOnlyPlannerPrompt.Length > 1250 ||
+            !companionOnlyPlannerPrompt.Contains("currently clickable Native acceptance", StringComparison.Ordinal) ||
+            companionOnlyPlannerPrompt.Contains("str_order_attack", StringComparison.Ordinal) ||
+            companionOnlyPlannerPrompt.Contains("nativeProgressionContext.partySizeLimit", StringComparison.Ordinal))
+            throw new AgentHostException("establish-clan-planner-only-includes-current-objective-contracts", "The planner must include only rules relevant to currently listed unmet objectives, while retaining the applicable Native route and safety checks.");
 
         var snapshot = new JsonObject
         {
@@ -147,6 +171,7 @@ internal static class AgentHostEstablishYourClanGoalLoop
         }
         return [
             new { scenario = "establish-clan-objective-planner-knows-native-renown-simulation-and-party-growth-prerequisite", passed = true },
+            new { scenario = "establish-clan-planner-projects-only-currently-listed-objective-guidance", allFourPromptCharacters = plannerSystemPrompt.Length, companionOnlyPromptCharacters = companionOnlyPlannerPrompt.Length, passed = true },
             new { scenario = "establish-clan-planner-observes-current-native-capacity-and-tier", passed = true },
             new { scenario = "establish-clan-planner-offers-only-currently-unmet-objectives", passed = true },
             new { scenario = "establish-clan-planner-reads-native-quest-and-never-mutates-campaign", passed = true },

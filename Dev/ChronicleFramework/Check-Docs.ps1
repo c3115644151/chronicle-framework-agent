@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.607'
+$contractVersion = '7.609'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -1267,7 +1267,10 @@ if ($agentHostProviderSource -notmatch 'CheckConfiguredModelAsync' -or $agentHos
     $agentHostProviderSource -notmatch '_supportsParallelToolCalls' -or
     $agentHostProviderSource -notmatch 'payload\["parallel_tool_calls"\] = false' -or
     $agentHostProviderSource -notmatch 'provider-multiple-tool-calls' -or
+    $agentHostProviderSource -notmatch 'finishReason is "length" or "max_tokens"' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'required-tool-call-length-response-is-routed-to-one-bounded-truncation-retry' -or
     $agentHostProviderDecisionRecoverySource -notmatch 'provider-multiple-tool-calls' -or
+    $agentHostProviderDecisionRecoverySource -notmatch 'rejectedDecisions < \(errorCode is "provider-multiple-tool-calls" or "provider-response-truncated" \? 1 : MaxRejectedDecisions\)' -or
     $agentHostProviderDecisionRecoverySource -notmatch 'provider-decision-recovery-retries-multiple-tool-calls-once-without-native-actions' -or
     $agentHostProviderContractSelfTestSource -notmatch 'generic-https-openai-compatible-provider-health-auth-and-structured-decision' -or
     $agentHostProviderContractSelfTestSource -notmatch 'canonical-observe-again-decision-is-recognized-by-native-subloops' -or
@@ -1340,11 +1343,12 @@ if ($agentHostCampaignLoopSource -notmatch 'supportedEstablishYourClanGoal' -or
     $agentHostEstablishClanPlannerSource -notmatch 'resultKind.*objective-plan' -or
     $agentHostEstablishClanPlannerSource -notmatch 'providerConfigurationSource' -or
     $agentHostEstablishClanPlannerSource -notmatch 'goalVerified.*false' -or
-    $agentHostDecisionCycleSource -notmatch 'EstablishYourClanGoalPlannerPrompt' -or
+    $agentHostDecisionCycleSource -notmatch 'BuildEstablishYourClanGoalPlannerPrompt' -or
     $agentHostDecisionCycleSource -notmatch 'JournalLog current/target values' -or
     $agentHostDecisionCycleSource -notmatch 'nativeProgressionContext.partySizeLimit' -or
     $agentHostDecisionCycleSource -notmatch 'DefaultPartySizeLimitModel' -or
     $agentHostDecisionCycleSource -notmatch 'do not use temporary MainParty troop-size over-limit volunteer or prisoner recruitment as a substitute' -or
+    $agentHostEstablishClanPlannerSource -notmatch 'establish-clan-planner-only-includes-current-objective-contracts' -or
     $agentHostEstablishClanPlannerSource -notmatch 'BuildNativeProgressionContext' -or
     $agentHostEstablishClanAutonomySource -notmatch 'observedNativeState: JsonNode.Parse\(current.RootElement.GetRawText\(\)\)' -or
     $agentHostProviderSource -notmatch 'supported-establish-your-clan') {
