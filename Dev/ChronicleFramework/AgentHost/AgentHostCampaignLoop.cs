@@ -596,24 +596,19 @@ internal static class AgentHostCampaignLoop
                         ["completionTokens"] = providerResult.CompletionTokens
                     });
                 }
-                catch (AgentHostException exception) when (IsRecoverableProviderDecisionError(exception.Code) && rejectedDecisionCount < MaxRejectedDecisions)
+                catch (AgentHostException exception) when (
+                    AgentHostProviderDecisionRecovery.CanRetry(exception.Code, rejectedDecisionCount) ||
+                    (IsRecoverableProviderDecisionError(exception.Code) && rejectedDecisionCount < MaxRejectedDecisions))
                 {
                     decisionCount++;
                     rejectedDecisionCount++;
                     var providerCompletedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
-                    feedback = new JsonObject
-                    {
-                        ["kind"] = "decision-rejected-before-native",
-                        ["code"] = exception.Code,
-                        ["message"] = exception.Message,
-                        ["requiredNextStep"] = exception.Code switch
-                        {
-                            "provider-goal-classification-unavailable" when goalScopeClassified => "Goal scope was already classified. Do not classify again; choose the currently listed mapSettlementTargets action.",
-                            "provider-action-unavailable" when movingToTarget => "Native move is already active. Do not repeat move; choose the listed observeAgain control to obtain fresh state without changing the game clock.",
-                            "provider-arguments-invalid-json" => "Return arguments as a JSON object, not a string; use exactly the listed names and current observed IDs.",
-                            _ => "Use exactly one action or control from the latest catalog; do not repeat the rejected response."
-                        }
-                    };
+                    feedback = AgentHostProviderDecisionRecovery.BuildFeedback(exception.Code, actionCatalog, controls);
+                    feedback["message"] = exception.Message;
+                    if (exception.Code == "provider-goal-classification-unavailable" && goalScopeClassified)
+                        feedback["requiredNextStep"] = "Goal scope was already classified. Do not classify again; choose the currently listed mapSettlementTargets action.";
+                    else if (exception.Code == "provider-action-unavailable" && movingToTarget)
+                        feedback["requiredNextStep"] = "Native move is already active. Do not repeat move; choose the listed observeAgain control to obtain fresh state without changing the game clock.";
                     trace.Add(BuildRejectedDecisionStep(iteration, observation, previousReceipt, actionCatalog, controls, feedback, providerStartedUtc, providerCompletedUtc, providerStartedTicks));
                     continue;
                 }

@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.616'
+$contractVersion = '7.617'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -191,7 +191,7 @@ if ($agentHostProviderSource -notmatch '_supportsReasoningEffort' -or
 if ($agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-localized-direct-offer-hidden' -or
     $agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-discovery-budget-not-bounded' -or
     $agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-truncated-response-recovery-missing' -or
-    $agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-truncated-response-recovery-missing' -or
+    $agentHostTrainingIssueLoopSource -notmatch 'AgentHostProviderDecisionRecovery.CanRetry' -or
     $agentHostTrainingIssueLoopSource -notmatch 'training-issue-self-test-no-upgrade-query-loop' -or
     $agentHostTrainingIssueLoopSource -notmatch 'UpdateUpgradeOptionsReceipt' -or
     $agentHostTrainingIssueLoopSource -notmatch 'native-storymode-training-issue-gold' -or
@@ -531,6 +531,7 @@ if ($harnessScript -notmatch "'AgentHostCampaignLoopEvaluation' \{ @\('Preflight
     $agentHostCampaignLoopSource -notmatch 'campaign-loop-does-not-repeat-map-query-after-empty-result' -or
     $agentHostCampaignLoopSource -notmatch 'campaign-loop-self-test-hostile-meeting-does-not-wait' -or
     $agentHostCampaignLoopSource -notmatch 'provider-goal-classification-unavailable' -or
+    $agentHostCampaignLoopSource -notmatch 'AgentHostProviderDecisionRecovery.CanRetry' -or
     $agentHostCampaignLoopSource -notmatch 'provider-arguments-invalid-json' -or
     $agentHostCampaignLoopSource -notmatch 'Native move is already active' -or
     $agentHostDecisionCycleSource -notmatch 'When the fresh Native state confirms the move to that selected target is active and observeAgain is listed' -or
@@ -1281,8 +1282,9 @@ if ($agentHostProviderSource -notmatch 'CheckConfiguredModelAsync' -or $agentHos
     $agentHostProviderSource -notmatch 'finishReason is "length" or "max_tokens"' -or
     $agentHostProviderContractSelfTestSource -notmatch 'required-tool-call-length-response-is-routed-to-one-bounded-truncation-retry' -or
     $agentHostProviderDecisionRecoverySource -notmatch 'provider-multiple-tool-calls' -or
-    $agentHostProviderDecisionRecoverySource -notmatch 'rejectedDecisions < \(errorCode is "provider-multiple-tool-calls" or "provider-response-truncated" \? 1 : MaxRejectedDecisions\)' -or
+    $agentHostProviderDecisionRecoverySource -notmatch 'rejectedDecisions < \(errorCode is "provider-multiple-tool-calls" or "provider-response-truncated" or "provider-tool-call-missing" \? 1 : MaxRejectedDecisions\)' -or
     $agentHostProviderDecisionRecoverySource -notmatch 'provider-decision-recovery-retries-multiple-tool-calls-once-without-native-actions' -or
+    $agentHostProviderDecisionRecoverySource -notmatch 'provider-missing-tool-call-feedback-self-test-failed' -or
     $agentHostProviderContractSelfTestSource -notmatch 'generic-https-openai-compatible-provider-health-auth-and-structured-decision' -or
     $agentHostProviderContractSelfTestSource -notmatch 'canonical-observe-again-decision-is-recognized-by-native-subloops' -or
     $agentHostProviderSource -notmatch 'IsListedSingleArgumentValue' -or $agentHostProviderSource -notmatch 'IsStoryModeClanNameTextArgument' -or

@@ -11,12 +11,12 @@ internal static class AgentHostProviderDecisionRecovery
         "provider-action-unavailable", "provider-control-unavailable", "provider-control-arguments-invalid",
         "provider-arguments-missing", "provider-arguments-invalid-json", "provider-arguments-shape-invalid",
         "provider-argument-unavailable", "provider-decision-ambiguous", "provider-decision-field-unavailable",
-        "provider-response-truncated", "provider-multiple-tool-calls"
+        "provider-response-truncated", "provider-multiple-tool-calls", "provider-tool-call-missing"
     };
 
     internal static bool CanRetry(string errorCode, int rejectedDecisions) =>
         RecoverableErrorCodes.Contains(errorCode) &&
-        rejectedDecisions < (errorCode is "provider-multiple-tool-calls" or "provider-response-truncated" ? 1 : MaxRejectedDecisions);
+        rejectedDecisions < (errorCode is "provider-multiple-tool-calls" or "provider-response-truncated" or "provider-tool-call-missing" ? 1 : MaxRejectedDecisions);
 
     internal static async Task<ProviderDecisionResult> DecideWithSingleRetryAsync(
         JsonObject request,
@@ -49,6 +49,8 @@ internal static class AgentHostProviderDecisionRecovery
             ? "The previous response contained multiple decision tool calls. Return exactly one tool call for one currently listed action/control; no Native action was sent."
             : errorCode == "provider-response-truncated"
             ? "The previous provider response was truncated before it could be parsed. Return only one compact JSON object matching the current schema and listed catalog; omit explanations and do not repeat the prior response. No Native action was sent."
+            : errorCode == "provider-tool-call-missing"
+            ? "The previous response did not contain its required decision tool call. Return exactly one currently listed action/control with current arguments and no prose; no Native action was sent."
             : errorCode == "provider-arguments-invalid-json"
             ? "Return arguments as a JSON object matching the currently listed names and values. Do not quote or nest JSON; no Native action was sent."
             : $"The prior response was rejected before any Native action. Choose exactly one action from [{string.Join(", ", actionNames)}] or control from [{string.Join(", ", controlNames)}] in the current catalog; do not repeat the rejected response.";
@@ -74,6 +76,7 @@ internal static class AgentHostProviderDecisionRecovery
             !CanRetry("provider-arguments-invalid-json", 2) &&
             CanRetry("provider-response-truncated", 0) && !CanRetry("provider-response-truncated", 1) &&
             CanRetry("provider-multiple-tool-calls", 0) && !CanRetry("provider-multiple-tool-calls", 1) &&
+            CanRetry("provider-tool-call-missing", 0) && !CanRetry("provider-tool-call-missing", 1) &&
             !CanRetry("provider-http-error", 0);
         if (!retryCountBounded ||
             ReadString(feedback, "kind") != "decision-rejected-before-native" ||
@@ -94,6 +97,12 @@ internal static class AgentHostProviderDecisionRecovery
             ReadString(multipleCallFeedback, "requiredNextStep")?.Contains("exactly one tool call", StringComparison.Ordinal) != true ||
             ReadBoolean(multipleCallFeedback, "nativeActionSent"))
             throw new AgentHostException("provider-multiple-tool-call-feedback-self-test-failed", "A duplicate tool-call response may receive one bounded correction, and the feedback must explicitly require one call with no Native action sent.");
+
+        var missingCallFeedback = BuildFeedback("provider-tool-call-missing", actions, controls);
+        if (ReadString(missingCallFeedback, "requiredNextStep")?.Contains("required decision tool call", StringComparison.Ordinal) != true ||
+            ReadString(missingCallFeedback, "requiredNextStep")?.Contains("no Native action was sent", StringComparison.Ordinal) != true ||
+            ReadBoolean(missingCallFeedback, "nativeActionSent"))
+            throw new AgentHostException("provider-missing-tool-call-feedback-self-test-failed", "A response without the required tool call may receive one bounded retry and must explicitly state that no Native action was sent.");
 
         var retryRequest = new JsonObject
         {
