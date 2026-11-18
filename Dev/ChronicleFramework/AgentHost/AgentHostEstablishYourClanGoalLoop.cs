@@ -37,17 +37,15 @@ internal static class AgentHostEstablishYourClanGoalLoop
             })
         };
         var plannerSystemPrompt = AgentHostDecisionCycle.BuildEstablishYourClanGoalPlannerPrompt(plannerRequest);
-        if (!plannerSystemPrompt.Contains("str_order_attack", StringComparison.Ordinal) ||
-            !plannerSystemPrompt.Contains("real-time Mission", StringComparison.Ordinal) ||
-            !plannerSystemPrompt.Contains("when companions remain unmet", StringComparison.Ordinal) ||
-            !plannerSystemPrompt.Contains("actual Native action availability", StringComparison.Ordinal) ||
+        if (!plannerSystemPrompt.Contains("str_order_attack Send Troops/BattleSimulation", StringComparison.Ordinal) ||
+            !plannerSystemPrompt.Contains("real-time Mission is not a substitute", StringComparison.Ordinal) ||
+            !plannerSystemPrompt.Contains("When companions remain unmet", StringComparison.Ordinal) ||
+            !plannerSystemPrompt.Contains("current progress and Native feasibility", StringComparison.Ordinal) ||
             !plannerSystemPrompt.Contains("nativeProgressionContext.partySizeLimit", StringComparison.Ordinal) ||
-            !plannerSystemPrompt.Contains("Tier1", StringComparison.Ordinal) ||
-            !plannerSystemPrompt.Contains("do not use temporary MainParty troop-size over-limit volunteer or prisoner recruitment as a substitute", StringComparison.Ordinal) ||
-            !plannerSystemPrompt.Contains("choose another feasible objective and replan after the Native state changes", StringComparison.Ordinal) ||
-            !plannerSystemPrompt.Contains("Gold objective tracks current carried balance, not cumulative earnings", StringComparison.Ordinal) ||
-            !plannerSystemPrompt.Contains("Prefer completing Gold after other feasible objectives", StringComparison.Ordinal) ||
-            plannerSystemPrompt.Length > 2200 ||
+            !plannerSystemPrompt.Contains("temporary over-limit troops can desert", StringComparison.Ordinal) ||
+            !plannerSystemPrompt.Contains("Gold is current carried balance, not lifetime earnings", StringComparison.Ordinal) ||
+            !plannerSystemPrompt.Contains("exactly one listed unmet ObjectiveId", StringComparison.Ordinal) ||
+            plannerSystemPrompt.Length > 1100 ||
             plannerSystemPrompt.Contains("privateDiagnostic", StringComparison.Ordinal))
             throw new AgentHostException("establish-clan-planner-native-renown-prerequisite-prompt-missing", "The read-only objective planner must know the Native Renown route, the current party limit/Tier1 over-limit attrition dependency and the volatile current-balance Gold objective.");
         var companionOnlyPlannerPrompt = AgentHostDecisionCycle.BuildEstablishYourClanGoalPlannerPrompt(new JsonObject
