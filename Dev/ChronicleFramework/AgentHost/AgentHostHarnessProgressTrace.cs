@@ -130,8 +130,10 @@ internal static class AgentHostHarnessProgressTrace
                 ["reservedCostUpperBoundCny"] = result.ReservedCostUpperBoundCny,
                 ["decision"] = decision,
                 ["allowedActions"] = SummarizeAllowedActionNames(requestNode?["allowedActions"] as JsonArray),
+                ["allowedActionCatalog"] = SummarizeAllowedActionCatalog(requestNode?["allowedActions"] as JsonArray),
                 ["allowedControls"] = requestNode?["allowedControls"]?.DeepClone(),
                 ["decisionFeedbackKind"] = Copy((observation?["decisionFeedback"] as JsonObject), "kind"),
+                ["decisionFeedbackCode"] = SanitizeDiagnosticIdentifier(ReadString(observation?["decisionFeedback"] as JsonObject, "code")),
                 ["observation"] = new JsonObject
                 {
                     ["campaignDay"] = Copy(state, "campaignDay"),
@@ -160,6 +162,7 @@ internal static class AgentHostHarnessProgressTrace
                     ["partyIsMoving"] = Copy(party, "isMoving"),
                     ["partyMoveMode"] = Copy(party, "moveMode"),
                     ["partyDefaultBehavior"] = Copy(party, "defaultBehavior"),
+                    ["menuOptions"] = SummarizeMenuOptions(state?["availableMenuOptions"] as JsonArray),
                     ["objectiveSnapshot"] = BuildObjectiveSnapshotSummary(state?["objectiveSnapshot"] as JsonObject),
                     ["nativeProgressionContext"] = BuildNativeProgressionContextSummary(state?["nativeProgressionContext"] as JsonObject),
                     ["questCount"] = quests.Count,
@@ -574,6 +577,63 @@ internal static class AgentHostHarnessProgressTrace
         .Select(name => (JsonNode?)JsonValue.Create(name))
         .ToArray());
 
+    private static JsonArray SummarizeAllowedActionCatalog(JsonArray? actions)
+    {
+        var summary = new JsonArray();
+        foreach (var item in (actions?.OfType<JsonObject>() ?? Enumerable.Empty<JsonObject>()).Take(32))
+        {
+            var actionName = SanitizeDiagnosticIdentifier(ReadString(item, "action"));
+            if (actionName is null) continue;
+            var argumentNames = new JsonArray();
+            if (item["arguments"] is JsonArray arguments)
+            {
+                foreach (var argument in arguments.OfType<JsonValue>().Take(16))
+                    if (argument.TryGetValue<string>(out var name) && SanitizeDiagnosticIdentifier(name) is { } safeName)
+                        argumentNames.Add(safeName);
+            }
+
+            var valuesSummary = new JsonObject();
+            if (item["argumentValues"] is JsonObject argumentValues)
+            {
+                foreach (var property in argumentValues.Take(16))
+                {
+                    var key = SanitizeDiagnosticIdentifier(property.Key);
+                    if (key is null || property.Value is not JsonArray values) continue;
+                    var safeValues = new JsonArray();
+                    foreach (var value in values.OfType<JsonValue>().Take(16))
+                        if (value.TryGetValue<string>(out var text) && SanitizeDiagnosticIdentifier(text) is { } safeValue)
+                            safeValues.Add(safeValue);
+                    valuesSummary[key] = safeValues;
+                }
+            }
+            summary.Add(new JsonObject
+            {
+                ["action"] = actionName,
+                ["arguments"] = argumentNames,
+                ["argumentValues"] = valuesSummary
+            });
+        }
+        return summary;
+    }
+
+    private static JsonArray SummarizeMenuOptions(JsonArray? options)
+    {
+        var summary = new JsonArray();
+        foreach (var option in (options?.OfType<JsonObject>() ?? Enumerable.Empty<JsonObject>()).Take(32))
+        {
+            var id = SanitizeDiagnosticIdentifier(ReadString(option, "id"));
+            if (id is null) continue;
+            summary.Add(new JsonObject
+            {
+                ["id"] = id,
+                ["available"] = Copy(option, "available"),
+                ["enabled"] = Copy(option, "enabled"),
+                ["isLeave"] = Copy(option, "isLeave")
+            });
+        }
+        return summary;
+    }
+
     internal static JsonObject? BuildPartyScreenSummary(JsonObject? screen)
     {
         if (screen is null) return null;
@@ -662,7 +722,7 @@ internal static class AgentHostHarnessProgressTrace
             Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "visual-capture");
             Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_TEMP", temporaryDirectory);
             using var request = JsonDocument.Parse("""
-                {"runId":"trace-test","objectiveId":"partySize","observation":{"scope":"native-storymode-party-size-recruitment","state":{"campaignDay":12.5,"context":{"gameState":"MapState","menuId":"village","encounterActive":true,"encounteredPartyId":"bandit-a","conversation":{"sentenceText":"Tools are needed.","options":[{"id":"issue_offer_player_accept_quest","text":"I can do it.","clickable":true}] }},"location":{"currentSettlementId":"village-1","targetPartyId":"bandit-a"},"economy":{"gold":920,"renown":20},"party":{"members":5,"healthy":3,"wounded":1,"prisoners":1,"morale":12.5,"food":0.5,"foodChange":-0.25,"isMoving":true,"moveMode":"Party","defaultBehavior":"EngageParty"},"objectiveSnapshot":{"gold":{"current":920,"target":2000,"met":false},"partySize":{"current":5,"target":25,"met":false},"renown":{"current":20,"target":50,"met":false},"companions":{"current":0,"target":1,"met":false}},"nativeProgressionContext":{"clanTier":0,"partySizeLimit":20,"partyMembers":5,"partyIsMoving":false,"privateDiagnostic":"must-not-appear"},"quests":[],"settlementOverlayCharacters":[]}},"allowedActions":[{"action":"respondInquiry","arguments":["choice"]},{"action":"partyScreenDone","arguments":[]}],"allowedControls":[]}
+                {"runId":"trace-test","objectiveId":"partySize","observation":{"scope":"native-storymode-party-size-recruitment","decisionFeedback":{"kind":"decision-rejected-before-native","code":"host-action-validation-failed","message":"PRIVATE_REJECTION_DETAIL"},"state":{"campaignDay":12.5,"context":{"gameState":"MapState","menuId":"village","encounterActive":true,"encounteredPartyId":"bandit-a","conversation":{"sentenceText":"Tools are needed.","options":[{"id":"issue_offer_player_accept_quest","text":"I can do it.","clickable":true}] }},"location":{"currentSettlementId":"village-1","targetPartyId":"bandit-a"},"availableMenuOptions":[{"id":"village_leave","available":true,"enabled":true,"isLeave":true,"text":"PRIVATE_MENU_TEXT","tooltip":"PRIVATE_MENU_TOOLTIP"}],"economy":{"gold":920,"renown":20},"party":{"members":5,"healthy":3,"wounded":1,"prisoners":1,"morale":12.5,"food":0.5,"foodChange":-0.25,"isMoving":true,"moveMode":"Party","defaultBehavior":"EngageParty"},"objectiveSnapshot":{"gold":{"current":920,"target":2000,"met":false},"partySize":{"current":5,"target":25,"met":false},"renown":{"current":20,"target":50,"met":false},"companions":{"current":0,"target":1,"met":false}},"nativeProgressionContext":{"clanTier":0,"partySizeLimit":20,"partyMembers":5,"partyIsMoving":false,"privateDiagnostic":"must-not-appear"},"quests":[],"settlementOverlayCharacters":[]}},"allowedActions":[{"action":"menuSelect","arguments":["MenuId","OptionId"],"argumentValues":{"MenuId":["village"],"OptionId":["village_leave"]}},{"action":"respondInquiry","arguments":["choice"]},{"action":"partyScreenDone","arguments":[]}],"allowedControls":[]}
                 """);
             var decision = JsonNode.Parse("""{"action":"dialogueSelect","arguments":{"OptionId":"issue_offer_player_accept_quest"},"rationale":"Rationale is deliberately excluded."}""")!.AsObject();
             RecordDecision(request.RootElement, new ProviderDecisionResult("completed", "selftest-model", 123, 17, "stop", decision, "selftest/route",
@@ -698,6 +758,17 @@ internal static class AgentHostHarnessProgressTrace
                 Math.Abs((ReadDouble(recorded, "reservedCostUpperBoundCny") ?? -1) - 0.001) > 0.0000001 ||
                 recorded!.ContainsKey("systemPrompt") || recorded.ContainsKey("userPayload") || recorded.ContainsKey("requestBody"))
                 throw new AgentHostException("host-progress-trace-self-test-content", "Harness trace must preserve route, Native choice, request/cache/cost diagnostics and state-field sizes while excluding prompt or body text.");
+            var recordedCatalog = recorded["allowedActionCatalog"] as JsonArray;
+            var menuSelectSummary = recordedCatalog?.OfType<JsonObject>().FirstOrDefault(item => ReadString(item, "action") == "menuSelect");
+            var menuValues = menuSelectSummary?["argumentValues"]?["OptionId"] as JsonArray;
+            var menuOptions = (recorded["observation"] as JsonObject)?["menuOptions"] as JsonArray;
+            if (ReadString(recorded, "decisionFeedbackKind") != "decision-rejected-before-native" ||
+                ReadString(recorded, "decisionFeedbackCode") != "host-action-validation-failed" ||
+                menuValues?.Count != 1 || menuValues[0]?.GetValue<string>() != "village_leave" ||
+                menuOptions?.Count != 1 || ReadString(menuOptions[0] as JsonObject, "id") != "village_leave" ||
+                ReadBoolean(menuOptions[0] as JsonObject, "available") != true ||
+                (recorded.ToJsonString().Contains("PRIVATE_MENU_", StringComparison.Ordinal) || recorded.ToJsonString().Contains("PRIVATE_REJECTION_DETAIL", StringComparison.Ordinal)))
+                throw new AgentHostException("host-progress-trace-menu-catalog-self-test", "Harness diagnostics must retain bounded current menu/action IDs and rejection codes without copying Native labels, tooltips or rejection text.");
             var traceObservation = recorded["observation"] as JsonObject;
             if (ReadBoolean(traceObservation, "encounterActive") != true ||
                 ReadString(traceObservation, "encounteredPartyId") != "bandit-a" ||
@@ -941,8 +1012,8 @@ internal static class AgentHostHarnessProgressTrace
                 ReadInt(missingToolCallLine, "systemPromptBytes", -1) != Encoding.UTF8.GetByteCount(failurePromptSentinel) ||
                 ReadInt(missingToolCallLine, "userPayloadBytes", -1) != Encoding.UTF8.GetByteCount(request.RootElement.GetRawText()) ||
                 ReadInt(missingToolCallLine, "observationBytes", -1) != Encoding.UTF8.GetByteCount(request.RootElement.GetProperty("observation").GetRawText()) ||
-                failureAllowedActions?.Count != 2 || failureAllowedActions[0]?.GetValue<string>() != "respondInquiry" ||
-                failureAllowedActions[1]?.GetValue<string>() != "partyScreenDone" || failureAllowedControls?.Count != 0 ||
+                failureAllowedActions?.Count != 3 || failureAllowedActions[0]?.GetValue<string>() != "menuSelect" ||
+                failureAllowedActions[1]?.GetValue<string>() != "respondInquiry" || failureAllowedActions[2]?.GetValue<string>() != "partyScreenDone" || failureAllowedControls?.Count != 0 ||
                 ReadString(missingToolCallLine, "decisionFeedbackKind") is not null ||
                 missingToolCallLine?.ContainsKey("responseBody") == true || missingToolCallLine?.ContainsKey("prompt") == true ||
                 missingToolCallLine?.ContainsKey("apiKey") == true || missingToolCallLine?.ContainsKey("toolArguments") == true ||

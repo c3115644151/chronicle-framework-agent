@@ -37,6 +37,7 @@ $result = [ordered]@{
     JournalQuestId = $null
     JournalObjectives = @()
     ObjectiveAttemptEntries = @()
+    UnaffordableHeroValidationDiagnostics = @()
     CheckpointSaveName = $null
     CheckpointSaveSha256 = $null
     SourceSaveUnchanged = $false
@@ -112,15 +113,39 @@ try {
     if ($null -ne $companionSearchMemory -and $null -ne $companionSearchMemory.PSObject.Properties['unaffordableHeroes']) {
         $unaffordableHeroEntries = @($companionSearchMemory.unaffordableHeroes)
         $unaffordableHeroIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-        foreach ($entry in $unaffordableHeroEntries) {
-            if ([string]::IsNullOrWhiteSpace([string]$entry.heroId) -or
-                [string]$entry.heroId -cne ([string]$entry.heroId).Trim() -or
-                [string]$entry.heroId.Length -gt 128 -or
-                $null -eq $entry.goldAtRefusal -or
-                [int]$entry.goldAtRefusal -lt 0 -or
-                -not $unaffordableHeroIds.Add([string]$entry.heroId)) {
-                throw 'The saved checkpoint contains a malformed or duplicate unaffordable Wanderer entry.'
+        $validationDiagnostics = [System.Collections.Generic.List[object]]::new()
+        for ($entryIndex = 0; $entryIndex -lt $unaffordableHeroEntries.Count; $entryIndex++) {
+            $entry = $unaffordableHeroEntries[$entryIndex]
+            $issues = [System.Collections.Generic.List[string]]::new()
+            $heroId = [string]$entry.heroId
+            $goldAtRefusal = $entry.goldAtRefusal
+            $goldValue = 0
+            if ([string]::IsNullOrWhiteSpace($heroId)) { $issues.Add('hero-id-empty') }
+            elseif ($heroId -cne $heroId.Trim()) { $issues.Add('hero-id-has-edge-whitespace') }
+            elseif ($heroId.Length -gt 128) { $issues.Add('hero-id-over-128-characters') }
+            elseif (-not $unaffordableHeroIds.Add($heroId)) { $issues.Add('duplicate-hero-id') }
+            if ($null -eq $goldAtRefusal) { $issues.Add('gold-at-refusal-missing') }
+            else {
+                try { $goldValue = [int]$goldAtRefusal }
+                catch { $issues.Add('gold-at-refusal-not-an-integer') }
+                if ($issues -notcontains 'gold-at-refusal-not-an-integer' -and $goldValue -lt 0) {
+                    $issues.Add('gold-at-refusal-negative')
+                }
             }
+            if ($issues.Count -gt 0) {
+                $validationDiagnostics.Add([pscustomobject]@{
+                    index = $entryIndex
+                    issues = @($issues)
+                    heroIdLength = $heroId.Length
+                    goldValueType = if ($null -eq $goldAtRefusal) { 'null' } else { $goldAtRefusal.GetType().FullName }
+                    goldValue = if ($null -eq $goldAtRefusal) { $null } else { [string]$goldAtRefusal }
+                })
+            }
+        }
+        $result.UnaffordableHeroValidationDiagnostics = @($validationDiagnostics)
+        if ($validationDiagnostics.Count -gt 0) {
+            $issueSummary = ($validationDiagnostics | ForEach-Object { ($_.issues -join ',') }) -join ';'
+            throw "The saved checkpoint contains invalid unaffordable Wanderer entries: $issueSummary"
         }
     }
 
@@ -187,6 +212,10 @@ finally {
             $result.ProcessStopped = [bool]$stop.processStopped -and -not (Get-Process -Name 'Bannerlord*' -ErrorAction SilentlyContinue) -and -not (Test-Path -LiteralPath $sessionPath -PathType Leaf)
         }
         catch { if (-not $result.Failure) { $result.Failure = "Cleanup failed: $($_.Exception.Message)" }; $result.Passed = $false }
+    }
+    if ($null -ne $savePath -and (Test-Path -LiteralPath $savePath -PathType Leaf)) {
+        try { $result.SourceSaveUnchanged = ((Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash -ceq $sourceHash) }
+        catch { $result.SourceSaveUnchanged = $false }
     }
     if ($null -eq $previousHarnessMode) { Remove-Item Env:CHRONICLE_HARNESS_MODE -ErrorAction SilentlyContinue }
     else { $env:CHRONICLE_HARNESS_MODE = $previousHarnessMode }

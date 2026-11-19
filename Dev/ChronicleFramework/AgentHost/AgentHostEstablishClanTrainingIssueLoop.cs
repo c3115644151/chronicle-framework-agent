@@ -103,6 +103,32 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
         if (mixedGivers?.Count != 1 || mixedGivers[0]?.GetValue<string>() != "hero-training")
             throw new AgentHostException("training-issue-self-test-mixed-issue-filter-failed", "Only a visible AvailableIssue marker whose Native title identifies retainer training may be contacted for the Gold training route.");
 
+        var townMenuWithoutSupportedGiver = NativeState("town", "town-a", new JsonArray(
+            new JsonObject { ["id"] = "town_leave", ["available"] = true, ["enabled"] = true, ["isLeave"] = true },
+            new JsonObject { ["id"] = "town_streets", ["available"] = true, ["enabled"] = true, ["isLeave"] = false }));
+        var currentTownCatalog = BuildActionCatalog(townMenuWithoutSupportedGiver, null, null, null, talkedToIssueGiver: false);
+        var unsupportedTownAction = new JsonObject
+        {
+            ["action"] = "menuSelect",
+            ["arguments"] = new JsonObject { ["MenuId"] = "town", ["OptionId"] = "town_streets" }
+        };
+        var rejectedFingerprint = BuildRejectedDecisionFingerprint(unsupportedTownAction,
+            townMenuWithoutSupportedGiver["state"] as JsonObject, currentTownCatalog);
+        var requiredNextStep = BuildRejectedDecisionNextStep(currentTownCatalog);
+        var rejectedPrompt = AgentHostDecisionCycle.BuildEstablishClanTrainingIssueSystemPrompt(new JsonObject
+        {
+            ["decisionFeedback"] = new JsonObject { ["kind"] = "decision-rejected-before-native", ["requiredNextStep"] = requiredNextStep }
+        });
+        var changedTown = (JsonObject)townMenuWithoutSupportedGiver.DeepClone();
+        changedTown["state"]!["location"]!["currentSettlementId"] = "town-b";
+        var changedTownFingerprint = BuildRejectedDecisionFingerprint(unsupportedTownAction,
+            changedTown["state"] as JsonObject, currentTownCatalog);
+        if (currentTownCatalog.Count != 1 || requiredNextStep is null || !requiredNextStep.Contains("town_leave", StringComparison.Ordinal) ||
+            !rejectedPrompt.Contains(requiredNextStep, StringComparison.Ordinal) || string.IsNullOrWhiteSpace(rejectedFingerprint) ||
+            rejectedFingerprint != BuildRejectedDecisionFingerprint(unsupportedTownAction, townMenuWithoutSupportedGiver["state"] as JsonObject, currentTownCatalog) ||
+            rejectedFingerprint == changedTownFingerprint)
+            throw new AgentHostException("training-issue-self-test-rejected-menu-recovery", "An unlisted Town option must produce a concrete current-menu correction; duplicate detection must reset after the Native settlement changes.");
+
         var unavailableOfferConversation = new JsonObject
         {
             ["options"] = new JsonArray(
@@ -466,6 +492,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
         var completionTokens = priorCompletionTokens;
         var actionsExecuted = 0;
         var rejected = 0;
+        var rejectedDecisionFingerprints = new HashSet<string>(StringComparer.Ordinal);
         var rejectedProviderDecisions = 0;
         var processId = -1;
         JsonObject? initialNative = null;
@@ -796,8 +823,31 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                 if (!TryResolveDecision(decision, catalog, state, visibleSafeTargets, upgradeOptionsReceipt,
                     talkedToIssueGiver, activeTrainingIssue, out var action, out var arguments, out var rejection, contactedIssueGivers))
                 {
+                    var rejectedFingerprint = BuildRejectedDecisionFingerprint(decision, state, catalog);
+                    if (rejectedFingerprint is not null && !rejectedDecisionFingerprints.Add(rejectedFingerprint))
+                    {
+                        feedback = new JsonObject
+                        {
+                            ["kind"] = "decision-rejected-before-native",
+                            ["code"] = "training-issue-repeated-rejected-action",
+                            ["message"] = "The same action and arguments were rejected again while the Native state and allowed catalog were unchanged.",
+                            ["requiredNextStep"] = BuildRejectedDecisionNextStep(catalog),
+                            ["nativeActionSent"] = false
+                        };
+                        trace.Add(BuildDecisionStep(decisionIndex, modelRequest, decision, feedback, null, false));
+                        failure = "The provider repeated the same unlisted Native action without a catalog or state change; this route returned control to the EYC parent.";
+                        failureCode = "training-issue-repeated-rejected-action";
+                        termination = failureCode;
+                        break;
+                    }
                     rejected++;
-                    feedback = new JsonObject { ["kind"] = "decision-rejected-before-native", ["message"] = rejection, ["nativeActionSent"] = false };
+                    feedback = new JsonObject
+                    {
+                        ["kind"] = "decision-rejected-before-native",
+                        ["message"] = rejection,
+                        ["requiredNextStep"] = BuildRejectedDecisionNextStep(catalog),
+                        ["nativeActionSent"] = false
+                    };
                     trace.Add(BuildDecisionStep(decisionIndex, modelRequest, decision, feedback, null, false));
                     if (rejected > MaxRejectedDecisions)
                     {
@@ -808,6 +858,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                     }
                     continue;
                 }
+                rejectedDecisionFingerprints.Clear();
                 rejected = 0;
 
                 if (action == "battleSimulation")
@@ -955,6 +1006,35 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
             ["initialNativeState"] = initialNative?.DeepClone(), ["finalNativeState"] = currentNative?.DeepClone(),
             ["providerRouteHistory"] = routes.DeepClone(), ["trace"] = trace.DeepClone()
         };
+    }
+
+    private static string? BuildRejectedDecisionNextStep(JsonArray catalog)
+    {
+        var menuAction = catalog.OfType<JsonObject>()
+            .Where(action => ReadString(action, "action") == "menuSelect")
+            .SingleOrDefault();
+        var optionIds = menuAction?["argumentValues"]?["OptionId"] as JsonArray;
+        if (menuAction is not null && optionIds?.Count == 1 && optionIds[0] is JsonValue onlyOption &&
+            onlyOption.TryGetValue<string>(out var optionId) && !string.IsNullOrWhiteSpace(optionId))
+            return $"The only currently allowed Native menu option is '{optionId}'. Select that exact listed option; the rejected menu option is outside this route.";
+        return "Choose one action with exact arguments from the latest allowed catalog; do not repeat the rejected action.";
+    }
+
+    private static string? BuildRejectedDecisionFingerprint(JsonObject decision, JsonObject? state, JsonArray catalog)
+    {
+        var action = ReadString(decision, "action");
+        if (string.IsNullOrWhiteSpace(action) || decision["arguments"] is not JsonObject arguments || state is null)
+            return null;
+        var context = state["context"] as JsonObject;
+        var location = state["location"] as JsonObject;
+        return string.Join("\n",
+            action,
+            arguments.ToJsonString(),
+            ReadString(context, "gameState") ?? string.Empty,
+            ReadString(context, "menuId") ?? string.Empty,
+            ReadString(location, "currentSettlementId") ?? string.Empty,
+            ReadString(location, "targetSettlementId") ?? string.Empty,
+            catalog.ToJsonString());
     }
 
     internal static JsonArray BuildActionCatalog(JsonObject native, JsonObject? previousReceipt, JsonObject? upgradeOptionsReceipt,
