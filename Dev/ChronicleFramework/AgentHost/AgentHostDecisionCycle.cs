@@ -518,7 +518,30 @@ internal static class AgentHostDecisionCycle
         IAgentHostDecisionProvider provider,
         JsonObject request,
         CancellationToken cancellationToken) =>
-        DecideAsync(provider, request, EstablishClanGoldSaleSystemPrompt, cancellationToken);
+        DecideAsync(provider, request, BuildEstablishClanGoldSaleSystemPrompt(request), cancellationToken);
+
+    internal static string BuildEstablishClanGoldSaleSystemPrompt(JsonObject request)
+    {
+        var actions = request["allowedActions"] as JsonArray;
+        if (actions?.Count != 1 || actions[0] is not JsonObject action || ReadString(action, "action") != "menuSelect")
+            return EstablishClanGoldSaleSystemPrompt;
+
+        var menuIds = action["argumentValues"]?["MenuId"] as JsonArray;
+        var optionIds = action["argumentValues"]?["OptionId"] as JsonArray;
+        if (menuIds?.Count != 1 || optionIds?.Count != 1 ||
+            ReadString(menuIds[0]) is not string menuId || ReadString(optionIds[0]) is not string optionId)
+            return EstablishClanGoldSaleSystemPrompt;
+
+        var state = (request["observation"] as JsonObject)?["state"] as JsonObject;
+        if (ReadString(state?["context"] as JsonObject, "menuId") != menuId)
+            return EstablishClanGoldSaleSystemPrompt;
+
+        var previousReceipt = request["previousActionReceipt"] as JsonObject;
+        if (menuId == "town" && optionId == "town_leave" && ReadString(previousReceipt, "action") == "tradeCancel")
+            return "The last Native Trade quote had no currently sellable PlayerInventory Goods and was cancelled. Return to the Campaign Map by calling exactly the one currently listed town_leave menuSelect. Do not reopen Trade, invent another option, change Campaign time, or explain. Return one required tool call; reason <= 3 words.";
+
+        return "The current Native menu exposes exactly one allowed menuSelect. Call it now with the exact listed MenuId and OptionId; do not invent or explain. Never change Campaign time. Return one required tool call; reason <= 3 words.";
+    }
 
     internal static Task<ProviderDecisionResult> DecideEstablishClanTrainingIssueAsync(
         IAgentHostDecisionProvider provider,

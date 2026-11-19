@@ -20,6 +20,27 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             !goldSalePrompt.Contains("Backstreet Ransom is optional", StringComparison.Ordinal) ||
             !goldSalePrompt.Contains("unchanged Campaign time", StringComparison.Ordinal))
             throw new AgentHostException("gold-sale-self-test-scoped-prompt-contract-failed", "The Gold sale prompt must stay compact while retaining Journal authority, natural travel, current sell offers, optional Ransom and unchanged-time verification.");
+        var emptyTradeExitRequest = new JsonObject
+        {
+            ["previousActionReceipt"] = new JsonObject { ["action"] = "tradeCancel", ["status"] = "completed" },
+            ["observation"] = new JsonObject { ["state"] = new JsonObject { ["context"] = new JsonObject { ["menuId"] = "town" } } },
+            ["allowedActions"] = new JsonArray(new JsonObject
+            {
+                ["action"] = "menuSelect",
+                ["arguments"] = new JsonArray("MenuId", "OptionId"),
+                ["argumentValues"] = new JsonObject
+                {
+                    ["MenuId"] = new JsonArray("town"),
+                    ["OptionId"] = new JsonArray("town_leave")
+                }
+            })
+        };
+        var emptyTradeExitPrompt = AgentHostDecisionCycle.BuildEstablishClanGoldSaleSystemPrompt(emptyTradeExitRequest);
+        if (emptyTradeExitPrompt.Length > 500 ||
+            !emptyTradeExitPrompt.Contains("no currently sellable PlayerInventory Goods", StringComparison.Ordinal) ||
+            !emptyTradeExitPrompt.Contains("Do not reopen Trade", StringComparison.Ordinal) ||
+            !emptyTradeExitPrompt.Contains("town_leave", StringComparison.Ordinal))
+            throw new AgentHostException("gold-sale-self-test-empty-trade-exit-prompt-not-scoped", "The sole post-cancel Town Leave choice must use a concise Native-only prompt that forbids restarting an empty market.");
 
         var nativeTown = MapState("town", "sargot", new JsonArray(
             new JsonObject { ["id"] = "trade", ["available"] = true, ["enabled"] = true },

@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.617'
+$contractVersion = '7.618'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -671,6 +671,8 @@ if ($harnessScript -notmatch "'AgentHostEstablishClanGoldSaleEvaluation' \{ @\('
     $agentHostGoldSaleLoopSource -notmatch 'gold-sale-self-test-provider-trade-receipt-projection-failed' -or
     $agentHostGoldSaleLoopSource -notmatch 'gold-sale-self-test-provider-trade-receipt-volume-not-reduced' -or
     $agentHostGoldSaleLoopSource -notmatch 'gold-sale-self-test-empty-trade-cannot-reopen-market' -or
+    $agentHostGoldSaleLoopSource -notmatch 'gold-sale-self-test-empty-trade-exit-prompt-not-scoped' -or
+    $agentHostDecisionCycleSource -notmatch 'BuildEstablishClanGoldSaleSystemPrompt' -or
     $agentHostGoldSaleLoopSource -notmatch 'compactTrade\["data"\] = new JsonObject' -or
     $agentHostGoldSaleLoopSource -notmatch 'gold-sale-native-commit-unverified' -or
     $agentHostGoldSaleLoopSource -notmatch 'partyScreenCancel' -or $agentHostGoldSaleLoopSource -notmatch 'gold-sale-ransom-cancel-unverified' -or
