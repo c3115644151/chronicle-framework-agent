@@ -1069,22 +1069,24 @@ internal static class AgentHostBattleSimulationLoop
                             .Where(optionId => CurrentEnabledMenuOption(state, optionId)));
                     return catalog;
                 }
-                var encounteredId = ReadString(context, "encounteredPartyId");
+                if (encounterMenuId == "join_encounter")
+                {
+                    var encounteredId = ReadString(context, "encounteredPartyId");
+                    var validJoinBandit = observedTargets.OfType<JsonObject>().Any(x =>
+                        ReadString(x, "id") == encounteredId && ReadString(x, "type") == "bandit" && ReadBoolean(x, "hostile"));
+                    var joinEncounterOptionIds = (validJoinBandit
+                            ? new[] { "join_encounter_help_attackers", "join_encounter_help_defenders", "join_encounter_abandon", "join_encounter_leave" }
+                            : new[] { "join_encounter_leave" })
+                        .Where(optionId => CurrentEnabledMenuOption(state, optionId));
+                    AddNativeMenuSelectAction(catalog, encounterMenuId, joinEncounterOptionIds);
+                    return catalog;
+                }
+                var encounteredPartyId = ReadString(context, "encounteredPartyId");
                 var validBandit = observedTargets.OfType<JsonObject>().Any(x =>
-                    ReadString(x, "id") == encounteredId && ReadString(x, "type") == "bandit" && ReadBoolean(x, "hostile"));
+                    ReadString(x, "id") == encounteredPartyId && ReadString(x, "type") == "bandit" && ReadBoolean(x, "hostile"));
                 if (!validBandit)
                 {
                     if (!mapPartyTargetsQueried) Add(catalog, "mapPartyTargets");
-                    return catalog;
-                }
-                if (encounterMenuId == "join_encounter")
-                {
-                    var joinEncounterOptionIds = new[]
-                    {
-                        "join_encounter_help_attackers", "join_encounter_help_defenders",
-                        "join_encounter_abandon", "join_encounter_leave"
-                    }.Where(optionId => CurrentEnabledMenuOption(state, optionId));
-                    AddNativeMenuSelectAction(catalog, encounterMenuId, joinEncounterOptionIds);
                     return catalog;
                 }
                 var conversation = context["conversation"] as JsonObject;
@@ -1336,7 +1338,10 @@ internal static class AgentHostBattleSimulationLoop
                         !CurrentEnabledMenuOption(state, selectedOptionId!))
                     { rejection = "A Native join-encounter choice must match a currently enabled Help, Abandon, or Leave menu option."; return false; }
                     var encounteredId = ReadString(state["context"] as JsonObject, "encounteredPartyId");
-                    if (!observedTargets.OfType<JsonObject>().Any(x => ReadString(x, "id") == encounteredId && ReadString(x, "type") == "bandit" && ReadBoolean(x, "hostile")))
+                    var isObservedHostileBandit = observedTargets.OfType<JsonObject>().Any(x =>
+                        ReadString(x, "id") == encounteredId && ReadString(x, "type") == "bandit" && ReadBoolean(x, "hostile"));
+                    var isHelpChoice = selectedOptionId is "join_encounter_help_attackers" or "join_encounter_help_defenders";
+                    if (isHelpChoice && !isObservedHostileBandit)
                     { rejection = "The join-encounter choice must belong to a currently observed hostile bandit interruption."; return false; }
                 }
                 else
@@ -1595,6 +1600,26 @@ internal static class AgentHostBattleSimulationLoop
             disabledJoinOptionResolves || !leaveSelectionRecognized || helpSelectionMisrecognizedAsLeave)
             throw new AgentHostException("battle-loop-self-test-join-encounter-native-options-not-bounded", $"For an observed hostile Bandit interrupt, list only current enabled Native join/leave options and recognize the Native join_encounter_leave option for no-battle return verification. catalog={joinEncounterCatalog.ToJsonString()}; help={joinHelpResolves}; leave={joinLeaveResolves}; disabled={disabledJoinOptionResolves}; leaveRecognized={leaveSelectionRecognized}; helpAsLeave={helpSelectionMisrecognizedAsLeave}.");
         results.Add(new { scenario = "battle-loop-observed-bandit-join-encounter-exposes-current-native-help-or-leave-and-verifies-leave-choice", passed = true });
+
+        var neutralJoinEncounter = ParseState("MapState", "join_encounter", true, null, null);
+        neutralJoinEncounter["state"]!["context"]!["encounteredPartyId"] = "village_EW1_1";
+        neutralJoinEncounter["state"]!["availableMenuOptions"] = new JsonArray(
+            new JsonObject { ["id"] = "join_encounter_help_attackers", ["enabled"] = false, ["available"] = false },
+            new JsonObject { ["id"] = "join_encounter_help_defenders", ["enabled"] = false, ["available"] = false },
+            new JsonObject { ["id"] = "join_encounter_leave", ["enabled"] = true, ["available"] = true, ["isLeave"] = true });
+        var neutralJoinCatalog = BuildActionCatalog(neutralJoinEncounter["state"]!.AsObject(), new JsonArray(), "village_EW1_1", false, true);
+        var neutralJoinOptionIds = neutralJoinCatalog.SingleOrDefault()?["argumentValues"]?["OptionId"] as JsonArray;
+        var neutralLeaveDecision = new JsonObject
+        {
+            ["action"] = "menuSelect",
+            ["arguments"] = new JsonObject { ["MenuId"] = "join_encounter", ["OptionId"] = "join_encounter_leave" }
+        };
+        if (neutralJoinCatalog.Count != 1 || ReadString(neutralJoinCatalog[0] as JsonObject, "action") != "menuSelect" ||
+            neutralJoinOptionIds?.Count != 1 || neutralJoinOptionIds[0]?.GetValue<string>() != "join_encounter_leave" ||
+            !TryResolveDecision(neutralLeaveDecision, neutralJoinCatalog, new JsonArray(), neutralJoinEncounter["state"]!.AsObject(), new JsonArray(), null, out _, out _, out _, out _) ||
+            TryResolveDecision(helpBanditSide, neutralJoinCatalog, new JsonArray(), neutralJoinEncounter["state"]!.AsObject(), new JsonArray(), null, out _, out _, out _, out _))
+            throw new AgentHostException("battle-loop-self-test-neutral-join-encounter-leave-missing", "A non-bandit Native join_encounter with only Leave enabled must expose exactly that original safe exit and no Help action.");
+        results.Add(new { scenario = "battle-loop-non-bandit-join-encounter-exposes-only-enabled-native-leave", passed = true });
 
         var encounter = ParseState("MapState", "encounter", true, null, null);
         encounter["state"]!["context"]!["encounteredPartyId"] = "bandit-1";

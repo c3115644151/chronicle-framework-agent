@@ -246,14 +246,22 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         using var pausedVisibleNeutralTravel = JsonDocument.Parse("""
             {"status":"completed","timeControlMode":"Stop","state":{"context":{"gameState":"MapState","menuId":null,"escapeMenuOpen":false,"inquiryOpen":false,"encounterActive":false,"isWaitMenu":false,"isWaitActive":false,"captivity":{"isCaptive":false}},"quests":[{"id":"rebuild_player_clan_storymode_quest"}],"party":{"isMoving":true},"location":{"currentSettlementId":null,"targetSettlementId":"town-a","targetPartyId":null},"nearbyParties":[{"id":"patrol-visible","type":"patrol","hostile":false,"members":9}]}}
             """);
+        using var neutralJoinEncounterWithLeave = JsonDocument.Parse("""
+            {"status":"completed","timeControlMode":"Stop","state":{"context":{"gameState":"MapState","menuId":"join_encounter","encounterActive":true,"encounteredPartyId":"village_EW1_1","captivity":{"isCaptive":false}},"availableMenuOptions":[{"id":"join_encounter_leave","available":true,"enabled":true,"isLeave":true}],"quests":[{"id":"rebuild_player_clan_storymode_quest"}]}}
+            """);
+        using var neutralJoinEncounterWithoutExit = JsonDocument.Parse("""
+            {"status":"completed","timeControlMode":"Stop","state":{"context":{"gameState":"MapState","menuId":"join_encounter","encounterActive":true,"encounteredPartyId":"village_EW1_1","captivity":{"isCaptive":false}},"availableMenuOptions":[{"id":"join_encounter_leave","available":false,"enabled":false,"isLeave":true}],"quests":[{"id":"rebuild_player_clan_storymode_quest"}]}}
+            """);
         if (!AgentHostNativeMapMovementMonitor.IsPausedVisibleBanditMove(pausedVisibleBanditTravel.RootElement) ||
             AgentHostNativeMapMovementMonitor.IsPausedVisibleBanditMove(pausedVisibleNeutralTravel.RootElement) ||
             !ShouldRouteToBattleSimulation(pausedVisibleBanditTravel.RootElement, AgentHostNativeMapMovementMonitor.FailureCode) ||
             ShouldRouteToBattleSimulation(pausedVisibleBanditTravel.RootElement, failureCode: null) ||
             ShouldRouteToBattleSimulation(pausedVisibleNeutralTravel.RootElement, AgentHostNativeMapMovementMonitor.FailureCode) ||
-            !ShouldRouteToBattleSimulation(hostileBanditInterruption.RootElement, failureCode: null))
-            throw new AgentHostException("establish-clan-autonomy-paused-visible-bandit-route-classification-failed", "The parent may route to BattleSimulation only when its movement monitor explicitly reported a hostile bandit and a fresh paused EYC Map still confirms the visible party and original settlement move.");
-        results.Add(new { scenario = "establish-clan-autonomy-routes-only-monitor-confirmed-paused-visible-bandit-travel-to-battle-simulation", passed = true });
+            !ShouldRouteToBattleSimulation(hostileBanditInterruption.RootElement, failureCode: null) ||
+            !ShouldRouteToBattleSimulation(neutralJoinEncounterWithLeave.RootElement, failureCode: "recruitment-encounter") ||
+            ShouldRouteToBattleSimulation(neutralJoinEncounterWithoutExit.RootElement, failureCode: "recruitment-encounter"))
+            throw new AgentHostException("establish-clan-autonomy-encounter-exit-route-classification-failed", "The EYC parent may route confirmed hostile Bandit interruptions to BattleSimulation and non-bandit join_encounter only when a current Native Leave option is enabled; unrelated neutral movement must not be routed.");
+        results.Add(new { scenario = "establish-clan-autonomy-routes-non-bandit-join-encounter-only-for-enabled-native-leave", passed = true });
         var pausedBanditChildFailure = new JsonObject { ["status"] = "interrupted", ["failureCode"] = AgentHostNativeMapMovementMonitor.FailureCode };
         var ordinaryPausedMoveChildFailure = new JsonObject { ["status"] = "failed", ["failureCode"] = "native-stalled-move-returned-by-training-issue" };
         if (ShouldReturnPausedNativeMoveToParent(pausedBanditChildFailure, pausedVisibleBanditTravel.RootElement, out _) ||
@@ -2070,7 +2078,20 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
 
     private static bool ShouldRouteToBattleSimulation(JsonElement native, string? failureCode) =>
         IsSupportedHostileBanditEncounter(native) ||
+        IsNativeJoinEncounterWithEnabledExit(native) ||
         failureCode == AgentHostNativeMapMovementMonitor.FailureCode && AgentHostNativeMapMovementMonitor.IsPausedVisibleBanditMove(native);
+
+    private static bool IsNativeJoinEncounterWithEnabledExit(JsonElement native)
+    {
+        if (native.ValueKind != JsonValueKind.Object || !native.TryGetProperty("state", out var stateElement) || stateElement.ValueKind != JsonValueKind.Object)
+            return false;
+        var state = JsonNode.Parse(stateElement.GetRawText())?.AsObject();
+        var context = state?["context"] as JsonObject;
+        return ReadString(context, "gameState") == "MapState" && ReadString(context, "menuId") == "join_encounter" &&
+               AgentHostCampaignStateFacts.IsActiveEncounter(state!) && !IsPlayerCaptive(native) &&
+               (state?["availableMenuOptions"] as JsonArray)?.OfType<JsonObject>().Any(option =>
+                   ReadString(option, "id") == "join_encounter_leave" && ReadBoolean(option, "available") && ReadBoolean(option, "enabled")) == true;
+    }
 
     internal static bool ShouldReplanAfterIncidentBattleNoSafeAction(JsonObject? battleResult, JsonElement nativeAfter) =>
         ReadString(battleResult, "status") == "failed" && ReadString(battleResult, "termination") == "no-safe-action" &&
