@@ -532,29 +532,54 @@ internal static class AgentHostBattleSimulationLoop
                 var requestNow = BuildDecisionRequest(runId, iteration, goal, observationNow, previousReceipt, feedback, catalog, controls);
                 var providerStarted = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
                 var providerTicks = Stopwatch.GetTimestamp();
-                ProviderDecisionResult result;
                 string providerCompletedUtc;
-                try
+                var decision = BuildPreauthorizedWeakPartySurrenderDecision(state, observedTargets, catalog, recoverPlayerCaptivity);
+                if (decision is not null)
                 {
-                    result = recoverPlayerCaptivity
-                        ? await AgentHostDecisionCycle.DecideBattleAndCaptivityAsync(provider, requestNow, elapsed.Token)
-                        : await AgentHostDecisionCycle.DecideBattleSimulationAsync(provider, requestNow, elapsed.Token);
                     providerCompletedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
-                    decisions++;
-                    AddRoute(routes, provider, result, decisions, ref promptTokens, ref completionTokens);
+                    trace.Add(new JsonObject
+                    {
+                        ["stage"] = "preauthorized-native-recovery-choice",
+                        ["iteration"] = priorDecisions + iteration,
+                        ["policy"] = "weak-party-surrender-sole-enabled-native-choice",
+                        ["decision"] = decision.DeepClone(),
+                        ["providerCallCount"] = 0,
+                        ["nativeActionSent"] = false
+                    });
+                    AgentHostHarnessProgressTrace.RecordPassiveObservation("native-weak-party-surrender-policy", new JsonObject
+                    {
+                        ["optionId"] = "bandit_start_defender_3",
+                        ["textId"] = WeakPartySurrenderResponseTextId,
+                        ["recoveryMode"] = true,
+                        ["noFightOptionClickable"] = true,
+                        ["onlyAllowedCatalogAction"] = true,
+                        ["providerCalls"] = 0
+                    });
                 }
-                catch (AgentHostException exception) when (CanRecoverProviderError(exception.Code, rejected))
+                else
                 {
-                    decisions++;
-                    rejected++;
-                    feedback = AgentHostProviderDecisionRecovery.BuildFeedback(exception.Code, catalog, controls);
-                    feedback["message"] = exception.Message;
-                    var providerErrorCompletedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
-                    trace.Add(BuildTraceStep(iteration, providerStarted, requestNow, null, feedback, previousReceipt, null, providerCompletedUtc: providerErrorCompletedUtc));
-                    continue;
+                    ProviderDecisionResult result;
+                    try
+                    {
+                        result = recoverPlayerCaptivity
+                            ? await AgentHostDecisionCycle.DecideBattleAndCaptivityAsync(provider, requestNow, elapsed.Token)
+                            : await AgentHostDecisionCycle.DecideBattleSimulationAsync(provider, requestNow, elapsed.Token);
+                        providerCompletedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+                        decisions++;
+                        AddRoute(routes, provider, result, decisions, ref promptTokens, ref completionTokens);
+                    }
+                    catch (AgentHostException exception) when (CanRecoverProviderError(exception.Code, rejected))
+                    {
+                        decisions++;
+                        rejected++;
+                        feedback = AgentHostProviderDecisionRecovery.BuildFeedback(exception.Code, catalog, controls);
+                        feedback["message"] = exception.Message;
+                        var providerErrorCompletedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+                        trace.Add(BuildTraceStep(iteration, providerStarted, requestNow, null, feedback, previousReceipt, null, providerCompletedUtc: providerErrorCompletedUtc));
+                        continue;
+                    }
+                    decision = result.Decision;
                 }
-
-                var decision = result.Decision;
                 if (!TryResolveDecision(decision, catalog, controls, state, observedTargets, requestedTargetId,
                         out var action, out var arguments, out var waitSeconds, out var rejection, recoverPlayerCaptivity,
                         rejectedEscapeOptionFingerprint))
@@ -1219,6 +1244,34 @@ internal static class AgentHostBattleSimulationLoop
             else Add(catalog, "inventoryDone");
         }
         return catalog;
+    }
+
+    private static JsonObject? BuildPreauthorizedWeakPartySurrenderDecision(JsonObject state, JsonArray observedTargets,
+        JsonArray catalog, bool recoverPlayerCaptivity)
+    {
+        if (!recoverPlayerCaptivity || ReadInt(state["party"] as JsonObject, "healthy", 0) != 0 ||
+            !AgentHostCampaignStateFacts.IsActiveEncounter(state)) return null;
+        var context = state["context"] as JsonObject;
+        if (ReadString(context, "gameState") != "MapState" || ReadString(context, "menuId") != "encounter_meeting") return null;
+        var encounteredId = ReadString(context, "encounteredPartyId");
+        if (string.IsNullOrWhiteSpace(encounteredId) ||
+            !observedTargets.OfType<JsonObject>().Any(party => ReadString(party, "id") == encounteredId &&
+                ReadString(party, "type") == "bandit" && ReadBoolean(party, "hostile"))) return null;
+        var options = (context?["conversation"] as JsonObject)?["options"] as JsonArray;
+        if (options?.OfType<JsonObject>().Any(option => ReadString(option, "id") == "bandit_start_defender_1" &&
+                ReadBoolean(option, "clickable")) == true ||
+            options?.OfType<JsonObject>().Any(option => ReadString(option, "id") == "bandit_start_defender_3" &&
+                ReadString(option, "textId") == WeakPartySurrenderResponseTextId && ReadBoolean(option, "clickable")) != true)
+            return null;
+        if (catalog.Count != 1 || ReadString(catalog[0] as JsonObject, "action") != "dialogueSelect") return null;
+        var optionIds = catalog[0]?["argumentValues"]?["OptionId"] as JsonArray;
+        if (optionIds?.Count != 1 || optionIds[0]?.GetValue<string>() != "bandit_start_defender_3") return null;
+        return new JsonObject
+        {
+            ["action"] = "dialogueSelect",
+            ["arguments"] = new JsonObject { ["OptionId"] = "bandit_start_defender_3" },
+            ["decisionSource"] = "preauthorized-native-recovery-policy"
+        };
     }
 
     private static bool HasPartyScreenTransferAction(JsonArray? catalog) => catalog?.OfType<JsonObject>().Any(action =>
@@ -1894,7 +1947,25 @@ internal static class AgentHostBattleSimulationLoop
             TryResolveDecision(weakPartyNegotiationDecision, recoveryWeakPartyOptions, new JsonArray(), banditMeeting["state"]!.AsObject(), candidates, "bandit-1",
                 out _, out _, out _, out _, recoverPlayerCaptivity: true))
             throw new AgentHostException("battle-loop-self-test-weak-party-surrender-fallback-scope-failed", "Only a recovery-enabled Host may use the current Native weak-party surrender response when Fight is absent; safe-passage/barter stays outside this battle route.");
-        results.Add(new { scenario = "battle-and-captivity-recovery-allows-native-weak-party-surrender-only-when-no-fight-choice-exists", passed = true });
+        var powerlessThreatState = (JsonObject)banditMeeting["state"]!.DeepClone();
+        powerlessThreatState["party"] = new JsonObject { ["healthy"] = 0 };
+        var powerlessThreatCatalog = BuildActionCatalog(powerlessThreatState, candidates, "bandit-1", false, true, recoverPlayerCaptivity: true);
+        var preauthorizedSurrender = BuildPreauthorizedWeakPartySurrenderDecision(powerlessThreatState, candidates, powerlessThreatCatalog, recoverPlayerCaptivity: true);
+        var healthyThreatState = (JsonObject)powerlessThreatState.DeepClone();
+        healthyThreatState["party"]!["healthy"] = 1;
+        var healthyThreatCatalog = BuildActionCatalog(healthyThreatState, candidates, "bandit-1", false, true, recoverPlayerCaptivity: true);
+        if (ReadString(preauthorizedSurrender, "decisionSource") != "preauthorized-native-recovery-policy" ||
+            ReadString(preauthorizedSurrender?["arguments"] as JsonObject, "OptionId") != "bandit_start_defender_3" ||
+            BuildPreauthorizedWeakPartySurrenderDecision(powerlessThreatState, candidates, powerlessThreatCatalog, recoverPlayerCaptivity: false) is not null ||
+            BuildPreauthorizedWeakPartySurrenderDecision(healthyThreatState, candidates, healthyThreatCatalog, recoverPlayerCaptivity: true) is not null)
+            throw new AgentHostException("battle-loop-self-test-preauthorized-weak-party-recovery-policy-failed", "A Host-only zero-call surrender is permitted only in captivity-recovery mode when the one exact Native weak-party surrender option is the sole listed choice and no healthy MainParty members remain.");
+        var fightVisibleThreatState = (JsonObject)powerlessThreatState.DeepClone();
+        (fightVisibleThreatState["context"]!["conversation"]!["options"] as JsonArray)!.Insert(0,
+            new JsonObject { ["id"] = "bandit_start_defender_1", ["text"] = "Fight.", ["clickable"] = true });
+        var fightVisibleThreatCatalog = BuildActionCatalog(fightVisibleThreatState, candidates, "bandit-1", false, true, recoverPlayerCaptivity: true);
+        if (BuildPreauthorizedWeakPartySurrenderDecision(fightVisibleThreatState, candidates, fightVisibleThreatCatalog, recoverPlayerCaptivity: true) is not null)
+            throw new AgentHostException("battle-loop-self-test-preauthorized-surrender-overrides-fight", "The Native recovery policy must never surrender automatically when an original Fight response is visible.");
+        results.Add(new { scenario = "battle-and-captivity-recovery-preauthorizes-only-sole-weak-party-surrender-with-no-healthy-troops", passed = true });
         banditMeeting["state"]!["context"]!["conversation"] = new JsonObject
         {
             ["sentenceText"] = "You have no choice but to surrender!",

@@ -849,7 +849,7 @@ internal static class AgentHostCampaignLoop
                                 priorTrace: priorSubTrace, priorProviderRouteHistory: priorSubRoutes),
                             "renown" => await AgentHostBattleSimulationLoop.RunAsync(childRequest.RootElement, battleClient, provider, subToken,
                                 priorDecisions: priorSubDecisions, priorPromptTokens: priorSubPromptTokens, priorCompletionTokens: priorSubCompletionTokens,
-                                priorTrace: priorSubTrace, priorProviderRouteHistory: priorSubRoutes),
+                                priorTrace: priorSubTrace, priorProviderRouteHistory: priorSubRoutes, recoverPlayerCaptivity: true),
                             "captivityRecovery" => client is IAgentHostCaptivityRecoveryNativeClient captivityRecoveryClient
                                 ? await AgentHostCaptivityRecoveryLoop.RunAsync(childRequest.RootElement, client, captivityRecoveryClient, questDetailsClient, provider, subToken,
                                     priorDecisions: priorSubDecisions, priorPromptTokens: priorSubPromptTokens, priorCompletionTokens: priorSubCompletionTokens,
