@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.618'
+$contractVersion = '7.619'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -1844,7 +1844,7 @@ if ($harnessScript -notmatch "'BattleMissionNativeAiHandoffProbe' \{ @\('Preflig
     $battleMissionAdapterSource -notmatch 'HumanAIComponent' -or
     $battleMissionAdapterSource -notmatch 'DisableScriptedMovement\(\)' -or
     $battleMissionAdapterSource -notmatch 'ResetNativeThirdPersonBattleCamera' -or
-    $battleMissionAdapterSource -notmatch 'NativeThirdPersonBattleCameraElevation = -0\.2f' -or
+    $battleMissionAdapterSource -notmatch 'NativeThirdPersonBattleCameraElevation = 0f' -or
     $battleMissionAdapterSource -notmatch 'NativeThirdPersonBattleCameraNearVerticalThreshold = -0\.7f' -or
     $battleMissionAdapterSource -notmatch 'EnforceNativeAiBattleCamera' -or
     $missionInputPatchSource -notmatch 'IsBattleCameraPatchInstalled' -or

@@ -15,7 +15,7 @@ namespace ChronicleFramework;
 
 internal static class ChronicleAgentBattleMissionAdapter
 {
-    private const float NativeThirdPersonBattleCameraElevation = -0.2f;
+    private const float NativeThirdPersonBattleCameraElevation = 0f;
     private const float NativeThirdPersonBattleCameraNearVerticalThreshold = -0.7f;
     private static Mission? _deploymentFinishSubmittedForMission;
     private static Mission? _deploymentAutoDeploySubmittedForMission;
@@ -589,12 +589,13 @@ internal static class ChronicleAgentBattleMissionAdapter
             float.IsNaN(cameraBearing) || float.IsInfinity(cameraBearing))
             return;
 
-        // The Native MissionScreen starts from a shallow third-person angle
-        // (-0.2 radians). Deployment/idle camera input can leave the value at
-        // that Native baseline only if the existing angle is near-vertical.
-        // Synchronize MissionMainAgentController.CustomLookDir to the current
-        // valid camera angle in all third-person cases so MissionScreen does
-        // not revive a stale pre-handoff direction on a later tick.
+        // CameraElevation is an angle below/above the horizon: the engine's
+        // lower clamp (-1.3659) renders a near-vertical top-down view. Preserve
+        // the existing player angle unless it is steeply downward; in that case
+        // return to a level view instead of the Native MissionScreen's -0.2
+        // startup value, which is still noticeably downward in battle frames.
+        // Synchronize CustomLookDir so later Native ticks do not restore the
+        // stale near-vertical pre-handoff direction.
         var desiredElevation = currentElevation < NativeThirdPersonBattleCameraNearVerticalThreshold
             ? NativeThirdPersonBattleCameraElevation
             : currentElevation;

@@ -596,7 +596,7 @@ try {
         $handoffCamera = $nativeAiHandoffProbe.data.cameraAfter
         if ($null -eq $cameraBeforeHandoff -or $null -eq $handoffCamera) { throw 'Native battle camera telemetry was unavailable around the AI handoff.' }
         $expectedHandoffCameraElevation = [double]$cameraBeforeHandoff.elevation
-        if ($cameraBeforeHandoff.firstPerson -eq $false -and $expectedHandoffCameraElevation -lt -0.7) { $expectedHandoffCameraElevation = -0.2 }
+        if ($cameraBeforeHandoff.firstPerson -eq $false -and $expectedHandoffCameraElevation -lt -0.7) { $expectedHandoffCameraElevation = 0.0 }
         if ($handoffCamera.firstPerson -ne $cameraBeforeHandoff.firstPerson -or
             [Math]::Abs([double]$handoffCamera.elevation - $expectedHandoffCameraElevation) -gt 0.01) {
             throw "Native battle camera did not preserve a valid view or repair a near-vertical third-person angle; expected elevation=$expectedHandoffCameraElevation firstPerson=$($cameraBeforeHandoff.firstPerson), actual=$($handoffCamera | ConvertTo-Json -Compress)."
