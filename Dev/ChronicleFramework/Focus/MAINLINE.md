@@ -1,4 +1,4 @@
-# 当前主线：AI自主游玩 Bannerlord 单机 Campaign
+﻿# 当前主线：AI自主游玩 Bannerlord 单机 Campaign
 
 ## 当前产品方向（2026-10-19）
 
@@ -1808,3 +1808,12 @@ The bounded live continuation `TestResults/20261121-113712` used max HTTP 1 and 
 A later run from `73849815`, `TestResults/20261121-091936`, used process-only `max_tokens=2048` with the same free Dots route and compact 1,078-byte planner request. The planner returned a valid `gold` selection (769 prompt/1,898 completion tokens). The route found no market goods at Town EW1, then searched the Native training Issue route; the visited village was looted and a nearby hostile interruption prevented a payout. The Host recovered MainHero through the preauthorized original surrender/captivity route, and the model reattempted Renown. During a later hostile-looter menu, FreeLLMAPI returned 3 tool calls for one `pursue`; the Host validated the first, executed it once, dropped the other 2 (`providerToolCallsDiscarded=2`), then reobserved. This is live verification of provider-batch serialization. The battle yielded no Renown and the subsequent Gold market also had no transferable goods. The run stopped at 40 requests with 39 accepted decisions, 102,911 prompt/16,267 completion tokens, 1 provider failure, no priced response, and no EYC Journal progress. The safe same-Campaign checkpoint `ChronicleEycDev-freshB-20261121092158-83c570e4` SHA-256 `461F736AAAA965CADB5C371A2709ADEDC190D2A8BE1B9C4317694F2680F261F5` passed zero-model readback `TestResults/20261121-093524`: MapState/Town, Gold0/2000, Party1/25 (0 healthy/1 wounded), Renown20/50, Companion0/1, Tier0; Renown is blocked at this route fingerprint and Gold remains pending. Source hash and game cleanup passed.
 
 FreeLLMAPI's read-only `/v1/usage` ledger after that run still reported November aggregate 434 requests/1,355,263 tokens (Kilo418/1,324,803; OVH15/29,375; custom1/1,085), unchanged from before this 40-request continuation. Thus this aggregate cannot presently corroborate the per-run Kilo token use or prove zero provider cost; cost remains unknown. Current worktree has committed the provider normalization and compact planner contract; the next safe continuation starts from `83c570e4` with Gold pending, and both this EYC gate and the second independent Campaign gate remain incomplete.
+
+
+## 2026-11-21：Gold路线安全取消与移动遭遇
+
+一次 4 决策真实模型续跑在城镇 Trade 页面耗尽预算。原版 Native 快照确认页面是 Trade，但没有返回 `hasPendingChanges` 字段；旧 Host 因此未能判断是否可安全离开。现在只有在“最后一项原版操作正是城镇菜单的 Trade、且之后没有任何交易动作”时，才允许通过原版取消退回 Map；若明确报告有未提交改动、已有交易动作或入口不是 Trade，仍然拒绝取消。`BuildReceipt` 现在保留这次菜单入口，Host 回归测试覆盖缺字段路径。
+
+验证结果：`TestResults/20261121-221956` 的 Build/AgentHostPackage 通过。真实 Native 续跑 `TestResults/20261121-222611` 用4次DeepSeek请求（估算¥0.021966048）验证了从未改动的Trade页面取消并保存回Town Map；正式源档不变。无模型回读 `TestResults/20261121-223428`确认同一原版EYC仍活动：Gold0/2000、Party1/25、Renown20/50、Companion0/1，Gold与Renown尝试暂时blocked，未有目标进展。
+
+`TestResults/20261121-220704` 的较长12决策运行花费估算¥0.084674112、38,714输入/647输出token，先安全离开没有可售物的Trade，再沿Gold训练任务路线向`village_EW1_1`移动时被11名劫匪打断。Native显示Campaign停表、主队1人且饥饿，并给出“Fight/谈判”两个当前对话选项；决策上限在AI响应前耗尽，未发生战斗或任务进展，且没有产生可安全保存的检查点。对应筛选回执在`TestResults/20261121-220704/Temp/NativeEncounterBoundary.json`。下一次长测需让EYC/战斗子流程在同一运行预算中处理该遭遇，并保留可安全读取的Map检查点；此分支仍未完成。

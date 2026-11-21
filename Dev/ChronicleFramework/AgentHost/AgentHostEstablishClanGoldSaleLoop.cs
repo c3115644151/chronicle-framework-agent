@@ -474,10 +474,16 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         };
         var budgetUnsafeTradeReceipt = budgetSafeTradeReceipt.DeepClone().AsObject();
         budgetUnsafeTradeReceipt["state"]!["inventoryScreen"]!["hasPendingChanges"] = true;
-        if (!CanSafelyCancelUntouchedNativeTrade(budgetSafeTradeReceipt, saleActionCount: 0) ||
-            CanSafelyCancelUntouchedNativeTrade(budgetUnsafeTradeReceipt, saleActionCount: 0) ||
-            CanSafelyCancelUntouchedNativeTrade(budgetSafeTradeReceipt, saleActionCount: 1))
-            throw new AgentHostException("gold-sale-self-test-budget-cancel-gate-failed", "A decision-budget exit may cancel only a current Native Trade page with no pending changes, no committed sale and the original EYC active.");
+        var tradeEntryReceipt = new JsonObject { ["action"] = "menuSelect", ["menuId"] = "town", ["optionId"] = "trade", ["status"] = "completed" };
+        var missingPendingTradeReceipt = budgetSafeTradeReceipt.DeepClone().AsObject();
+        (missingPendingTradeReceipt["state"]!["inventoryScreen"] as JsonObject)?.Remove("hasPendingChanges");
+        var unrelatedTownEntryReceipt = new JsonObject { ["action"] = "menuSelect", ["menuId"] = "town", ["optionId"] = "town_leave", ["status"] = "completed" };
+        if (!CanSafelyCancelUntouchedNativeTrade(budgetSafeTradeReceipt, saleActionCount: 0, previousReceipt: null) ||
+            CanSafelyCancelUntouchedNativeTrade(budgetUnsafeTradeReceipt, saleActionCount: 0, previousReceipt: tradeEntryReceipt) ||
+            CanSafelyCancelUntouchedNativeTrade(budgetSafeTradeReceipt, saleActionCount: 1, previousReceipt: null) ||
+            !CanSafelyCancelUntouchedNativeTrade(missingPendingTradeReceipt, saleActionCount: 0, previousReceipt: tradeEntryReceipt) ||
+            CanSafelyCancelUntouchedNativeTrade(missingPendingTradeReceipt, saleActionCount: 0, previousReceipt: unrelatedTownEntryReceipt))
+            throw new AgentHostException("gold-sale-self-test-budget-cancel-gate-failed", "A decision-budget exit may cancel only an unchanged Native Trade page; an absent pending-change field is sufficient only immediately after the exact Town Trade entry with no intervening transaction action.");
         var mapAfterTownLeave = MapState(null, null, []);
         mapAfterTownLeave["location"]!["targetSettlementId"] = "town-a";
         if (BuildActionCatalog(mapAfterTownLeave, null, null, null).Count != 0 ||
@@ -951,7 +957,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                         timeControlModeBefore, initialCaptivityRecovery);
                 }
             }
-        if (CanSafelyCancelUntouchedNativeTrade(currentNative, saleActionCount))
+        if (CanSafelyCancelUntouchedNativeTrade(currentNative, saleActionCount, previousReceipt))
         {
             var beforeState = currentNative?["state"] as JsonObject ?? new JsonObject();
             var beforeEconomy = beforeState["economy"] as JsonObject;
@@ -1538,6 +1544,11 @@ internal static class AgentHostEstablishClanGoldSaleLoop
     {
         var result = new JsonObject { ["action"] = action, ["status"] = ReadString(receipt, "status"), ["data"] = receipt["data"]?.DeepClone() };
         if (action == "mapSettlementTargets") result["data"] = receipt["data"]?.DeepClone();
+        if (action == "menuSelect")
+        {
+            result["menuId"] = arguments["menuId"]?.DeepClone();
+            result["optionId"] = arguments["optionId"]?.DeepClone();
+        }
         if (action == "move") result["targetSettlementId"] = arguments["settlementId"]?.DeepClone();
         if (action == "trade")
         {
@@ -1707,7 +1718,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         return $"No safe Gold sale action is available: gameState={ReadString(context, "gameState") ?? "<none>"}; menuId={ReadString(context, "menuId") ?? "<none>"}; sellOfferCount={offers}.";
     }
 
-    private static bool CanSafelyCancelUntouchedNativeTrade(JsonObject? native, int saleActionCount)
+    private static bool CanSafelyCancelUntouchedNativeTrade(JsonObject? native, int saleActionCount, JsonObject? previousReceipt)
     {
         if (native is null || saleActionCount != 0 || native["state"] is not JsonObject state || !HasActiveQuest(state)) return false;
         var context = state["context"] as JsonObject;
@@ -1716,9 +1727,14 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         if (ReadString(context, "gameState") != "InventoryState" || ReadString(inventory, "mode") != "Trade" ||
             ReadBoolean(context, "inquiryOpen") || ReadBoolean(context, "escapeMenuOpen") || ReadBoolean(captivity, "isCaptive"))
             return false;
-        if (inventory?["hasPendingChanges"] is not JsonValue pendingValue || !pendingValue.TryGetValue<bool>(out var hasPendingChanges))
-            return false;
-        return !hasPendingChanges;
+        if (inventory?["hasPendingChanges"] is JsonValue pendingValue && pendingValue.TryGetValue<bool>(out var hasPendingChanges))
+            return !hasPendingChanges;
+
+        // The game can omit the Native pending-change flag immediately after
+        // entering Trade. At that exact boundary no Trade item action has yet
+        // been sent, so the original Cancel is safe; do not infer this later.
+        return ReadString(previousReceipt, "action") == "menuSelect" &&
+            ReadString(previousReceipt, "menuId") == "town" && ReadString(previousReceipt, "optionId") == "trade";
     }
 
     private static JsonObject ParseObject(JsonElement element) => JsonNode.Parse(element.GetRawText())?.AsObject()
@@ -1854,7 +1870,10 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 ["location"] = new JsonObject { ["currentSettlementId"] = "town_EW1", ["targetSettlementId"] = null, ["targetPartyId"] = null },
                 ["party"] = new JsonObject { ["members"] = 1, ["healthy"] = 1, ["wounded"] = 0, ["isMoving"] = false },
                 ["economy"] = new JsonObject { ["gold"] = 32, ["renown"] = 5 },
-                ["inventoryScreen"] = _tradeOpen ? new JsonObject { ["mode"] = "Trade", ["hasPendingChanges"] = false } : null,
+                // Match Bannerlord 1.4.8 immediately after menuSelect(town, trade):
+                // the Trade page is open, but Native has not yet published the
+                // optional pending-change flag.
+                ["inventoryScreen"] = _tradeOpen ? new JsonObject { ["mode"] = "Trade" } : null,
                 ["availableMenuOptions"] = _tradeOpen ? new JsonArray() : new JsonArray(
                     new JsonObject { ["id"] = "trade", ["available"] = true, ["enabled"] = true },
                     new JsonObject { ["id"] = "town_leave", ["available"] = true, ["enabled"] = true, ["isLeave"] = true })
