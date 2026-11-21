@@ -871,6 +871,8 @@ FreeLLMAPI/HTTP诊断须分别记录HTTP状态码、可选响应头和网关路�
 
 Provider 凭据由共享 `SelectApiKey` 按目标端点选取，并用于 MCM、游戏内Host及Harness：FreeLLMAPI loopback优先专用 `FREELLMAPI_API_KEY`，绝不把远程provider的通用 `CHRONICLE_LLM_API_KEY`意外送给本地路由；非FreeLLMAPI端点只用通用provider key。预检只可输出所选变量名，不输出值；Host合同测试须使用合成密钥分别验证两种端点的选择顺序。
 
+OpenAI-compatible不是可以把任意供应商扩展字段广播给所有服务的许可。当前`thinking`扩展只对源码/协议已确认支持它的DeepSeek与FreeLLMAPI端点发送；普通HTTPS或本机OpenAI网关不发送该字段。`required_tool_call`是输出格式选择，不应因非DeepSeek服务没有DeepSeek `thinking`开关而被拒绝。Host回归覆盖`Thinking=false`时loopback OpenAI网关仍收到严格工具调用、且payload不含`thinking`扩展。DSH XD Pool的无游戏冒烟仅允许显式命令行opt-in和目录中的直接`xdpool-aggregate/*:free`模型，自动组合/回退链不进入推理路径。模型目录中的免费标签不能证明每个provider调用会成功；保留真实响应状态和token用量的证据，不记录完整错误正文或凭据。
+
 Harness 的 `save` 命令只允许 Native `MapState`，并拒绝上一笔 `SaveAs` 尚未收到 `SaveOver` 回调时再次排队。`PartyState/Ransom` 上曾观察到 SaveAs 返回 accepted、180秒内没有完成回执/存档文件，之后同一游戏进程仍可读状态；这是未完成的测试保存，不表示原版手动保存一定失败。不要在不支持的 Native GameState 下重复等待长超时，也不要用强制结束来伪造保存结果。
 
 FreeLLMAPI可用性诊断默认不重复调用自动回退路由：一次请求可能触发多家上游尝试并消耗免费额度。优先用单个明确的免费模型做至多一次小型探测；若失败先读本机网关请求ID及各上游失败记录，区分调用格式、上游限额、模型目录/映射与代理传输问题；只有错误证据表明可恢复且等待在当前deadline内，才重试。目录`ready`或`/api/ping`成功仅代表目录/本地服务可访问，不算推理通过。

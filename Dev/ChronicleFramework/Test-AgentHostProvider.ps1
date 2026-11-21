@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory = $true)][string]$HostDllPath,
     [Parameter(Mandatory = $true)][string]$EvidencePath,
     [ValidateRange(64,2048)][int]$MaxOutputTokens = 128,
+    [switch]$AllowDshXdPoolFreeRoute,
     [switch]$HealthOnly
 )
 
@@ -70,9 +71,19 @@ if ($providerUri.IsLoopback -and $providerUri.Port -eq 31415 -and $providerUri.A
     if ($freeLlmApiProfile.ModelExecutionStatus -notin @('ready','router')) { throw 'Configured FreeLLMAPI route is not currently available; no inference request was sent.' }
 }
 else {
-    if ($providerUri.Scheme -ne 'https') { throw 'Remote provider smoke requires HTTPS; no inference request was sent.' }
+    $isDshXdPoolFreeRoute = $providerUri.IsLoopback -and $providerUri.Port -eq 8326 -and
+        $providerUri.AbsolutePath.TrimEnd('/') -eq '/v1' -and
+        $model -match '^xdpool-aggregate/(?!combo:)[^\r\n]+:free$' -and
+        $model -notmatch '(?i)(fallback|fusion|auto:)'
+    if ($isDshXdPoolFreeRoute -and -not $AllowDshXdPoolFreeRoute) {
+        throw 'DSH XD Pool inference requires the explicit -AllowDshXdPoolFreeRoute opt-in; no inference request was sent.'
+    }
+    if ($providerUri.IsLoopback -and -not $isDshXdPoolFreeRoute) {
+        throw 'Only a directly named DSH XD Pool :free model may use this loopback smoke path; no inference request was sent.'
+    }
+    if (-not $providerUri.IsLoopback -and $providerUri.Scheme -ne 'https') { throw 'Remote provider smoke requires HTTPS; no inference request was sent.' }
     $providerCredential = Get-ChronicleProviderCredential -Endpoint $providerUri
-    if ([string]::IsNullOrWhiteSpace([string]$providerCredential.Value)) { throw 'Remote provider API key is missing; no inference request was sent.' }
+    if ([string]::IsNullOrWhiteSpace([string]$providerCredential.Value)) { throw 'Provider API key is missing; no inference request was sent.' }
 }
 
 $outputMode = [string]$env:CHRONICLE_LLM_OUTPUT_MODE

@@ -4,6 +4,7 @@ param(
     [string]$Phase = 'All',
     [switch]$RecruitmentBulkOnly,
     [string]$FreshStoryModeModel = '',
+    [switch]$AllowDshXdPoolFreeRoute,
     [int]$SmokeTimeoutSeconds = 180,
     [ValidateRange(64,2048)][int]$ProviderSmokeMaxOutputTokens = 128,
     [int]$SmokeStabilitySeconds = 8,
@@ -900,7 +901,10 @@ foreach ($stage in $requestedStages) {
                 $mailboxExitCode = $LASTEXITCODE
                 if ($mailboxExitCode -ne 0) { throw "Local Agent Host mailbox regression failed with exit code $mailboxExitCode.`n$mailboxOutput" }
                 $providerEvidencePath = Join-Path $harnessTempDirectory 'AgentHostProvider'
-                $providerOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $harnessRoot 'Test-AgentHostProvider.ps1') -HostDllPath $agentHostDllPath -EvidencePath $providerEvidencePath -MaxOutputTokens $ProviderSmokeMaxOutputTokens 2>&1 | Out-String
+                $providerArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $harnessRoot 'Test-AgentHostProvider.ps1'),
+                    '-HostDllPath', $agentHostDllPath, '-EvidencePath', $providerEvidencePath, '-MaxOutputTokens', [string]$ProviderSmokeMaxOutputTokens)
+                if ($AllowDshXdPoolFreeRoute) { $providerArguments += '-AllowDshXdPoolFreeRoute' }
+                $providerOutput = & powershell @providerArguments 2>&1 | Out-String
                 $providerExitCode = $LASTEXITCODE
                 if ($providerExitCode -ne 0) { throw "Local Agent Host provider contract/smoke failed with exit code $providerExitCode.`n$providerOutput" }
                 [ordered]@{ mailboxRegression = $mailboxOutput; providerContractAndSmoke = $providerOutput } | ConvertTo-Json -Depth 8

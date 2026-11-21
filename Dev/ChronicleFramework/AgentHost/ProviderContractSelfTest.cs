@@ -801,6 +801,44 @@ internal static class ProviderContractSelfTest
                 throw new AgentHostException("generic-remote-provider-decision-self-test-failed", "The generic HTTPS provider did not complete a structured Chronicle decision using its configured model and bearer key.");
             results.Add(new { scenario = "generic-https-openai-compatible-provider-health-auth-and-structured-decision", passed = true });
         }
+
+        var loopbackGatewayRequestCount = 0;
+        var loopbackGatewayPayloadValid = false;
+        var loopbackGatewaySettings = settings with
+        {
+            Endpoint = new Uri("http://127.0.0.1:8326/v1/chat/completions"),
+            Model = "xdpool-aggregate/open_router/inclusionai/ling-3.2-flash:free",
+            ApiKey = "loopback-gateway-self-test-secret",
+            OutputMode = "required_tool_call",
+            Thinking = false,
+            ReasoningEffort = "none",
+            MaxTokenParameter = "max_tokens",
+            MaxOutputTokens = 128
+        };
+        var loopbackGatewayHandler = new StubHandler((httpRequest, _) =>
+        {
+            if (httpRequest.Method == HttpMethod.Get)
+                return Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"xdpool-aggregate/open_router/inclusionai/ling-3.2-flash:free\"}]}"));
+            loopbackGatewayRequestCount++;
+            using var payloadDocument = JsonDocument.Parse(httpRequest.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            var payload = payloadDocument.RootElement;
+            loopbackGatewayPayloadValid = payload.GetProperty("tool_choice").GetString() == "required" &&
+                payload.GetProperty("model").GetString() == "xdpool-aggregate/open_router/inclusionai/ling-3.2-flash:free" &&
+                !payload.TryGetProperty("thinking", out var ignoredThinkingExtension) &&
+                !payload.TryGetProperty("response_format", out var ignoredResponseFormat);
+            return Task.FromResult(JsonResponse(BuildToolCallChatResponse(ValidDecision, "tool_calls")));
+        });
+        using (var loopbackGatewayClient = new HttpClient(loopbackGatewayHandler) { Timeout = loopbackGatewaySettings.Timeout })
+        using (var loopbackGatewayProvider = new OllamaNativeProvider(loopbackGatewaySettings, loopbackGatewayClient))
+        using (var request = JsonDocument.Parse(BuildDecisionRequest()))
+        {
+            await loopbackGatewayProvider.CheckConfiguredModelAsync(CancellationToken.None);
+            var result = await loopbackGatewayProvider.DecideAsync(request.RootElement, CancellationToken.None);
+            if (!loopbackGatewayPayloadValid || loopbackGatewayRequestCount != 1 || result.Status != "completed" ||
+                result.Decision["done"]?.GetValue<bool>() != true)
+                throw new AgentHostException("loopback-openai-gateway-tool-call-self-test-failed", "A provider-neutral loopback OpenAI gateway must receive the strict tool-call envelope without a provider-specific thinking extension, then pass the action through the normal decision validator.");
+            results.Add(new { scenario = "provider-neutral-loopback-gateway-tool-call-omits-nonstandard-thinking-extension", passed = true, modelCalls = 1, nativeCommands = 0 });
+        }
         var budgetGuardHandler = new StubHandler((_, _) => Task.FromResult(JsonResponse(BuildChatResponse(ValidDecision, "stop"))));
         var budgetGuardSettings = genericRemoteSettings with
         {

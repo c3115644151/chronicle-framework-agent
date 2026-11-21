@@ -168,7 +168,9 @@ if ($agentHostProviderSource -notmatch 'toolCallsPresent=' -or
 }
 if ($agentHostProviderSource -notmatch 'reasoningEffortIsExplicitlySupportedByFreeLlmApi' -or
     $agentHostProviderSource -notmatch '_supportsReasoningEffort' -or
+    $agentHostProviderSource -notmatch 'SupportsThinkingParameter' -or
     $agentHostProviderSource -notmatch 'ReasoningEffortApplied' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'provider-neutral-loopback-gateway-tool-call-omits-nonstandard-thinking-extension' -or
     $agentHostProviderContractSelfTestSource -notmatch 'freellmapi-advertised-reasoning-effort-low-is-applied-with-thinking-disabled' -or
     $agentHostProviderContractSelfTestSource -notmatch 'freellmapi-unadvertised-reasoning-effort-is-omitted' -or
     $agentHostRuntimeProgressLogSource -notmatch 'reasoningEffortApplied' -or
@@ -366,6 +368,14 @@ if ($agentHostPackageSource -notmatch "SelectNodes\('//PackageReference'\)" -or
     $agentHostPackageSource -notmatch "-match 'NU1900'") { throw 'NuGet audit fallback must reject every Host dependency except the single pinned Microsoft.ML.Tokenizers 2.0.1 package.' }
 $agentHostProviderSelfTestSource = Get-Content (Join-Path $harnessRoot 'AgentHost\ProviderContractSelfTest.cs') -Raw -Encoding UTF8
 $agentHostProviderSmokeSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostProvider.ps1') -Raw -Encoding UTF8
+if ($agentHostProviderSmokeSource -notmatch 'AllowDshXdPoolFreeRoute' -or
+    $agentHostProviderSmokeSource -notmatch 'Port -eq 8326' -or
+    $agentHostProviderSmokeSource -notmatch 'xdpool-aggregate/' -or
+    $agentHostProviderSmokeSource -notmatch ':free\$' -or
+    $agentHostProviderSmokeSource -notmatch 'no inference request was sent' -or
+    $harnessScript -notmatch 'AllowDshXdPoolFreeRoute') {
+    throw 'DSH XD Pool provider smoke must be explicit, loopback-only, require a direct named :free XD Pool model, and fail closed before model inference otherwise.'
+}
 if ($agentOpenAiProviderSource -notmatch "reason = 'invalid-action-arguments'" -or $agentOpenAiProviderSource -notmatch 'unsupportedArguments' -or $agentDecisionLoopSource -notmatch 'invalid-action-arguments' -or $agentDecisionLoopSource -notmatch 'noNativeActionSent' -or $agentOpenAiProviderTestSource -notmatch 'UnsupportedActionArgumentReturnsRecoverableRejection' -or $agentDecisionLoopTestSource -notmatch 'InvalidActionArgumentsRecoverWithoutNativeMutation' -or $agentDecisionTestProviderSource -notmatch 'invalidArgumentRecovery') { throw 'Unsupported model argument names must be rejected before Native, passed back with a fresh state, and covered in the provider and loop regressions.' }
 if ($agentOpenAiProviderSource -notmatch '\$argumentShapeDepth' -or $agentOpenAiProviderSource -notmatch 'allowedArguments.Count -eq 1' -or $agentOpenAiProviderSource -notmatch 'ConvertFrom-Json -ErrorAction Stop' -or $agentOpenAiProviderTestSource -notmatch 'StringEncodedObjectArgumentsNormalized' -or $agentOpenAiProviderTestSource -notmatch 'SingleStringArrayArgumentsNormalized' -or $agentOpenAiProviderTestSource -notmatch 'NestedStringArrayArgumentsNormalized' -or $agentOpenAiProviderTestSource -notmatch 'SingleScalarArgumentsNormalized') { throw 'The local OpenAI-compatible provider must normalize bounded nested JSON wrappers and unambiguous one-field scalars through the same field allowlist and regression tests.' }
 if ($agentOpenAiProviderSource -notmatch 'schemaVersion -ne 3' -or $agentOpenAiProviderSource -notmatch 'recentDecisionHistory = \$request\.recentDecisionHistory' -or $agentOpenAiProviderSource -notmatch 'completionContract = \$request\.completionContract' -or $agentOpenAiProviderSource -notmatch 'exact Native completion contract' -or $agentOpenAiProviderSource -notmatch 'bounded recentDecisionHistory' -or $agentOpenAiProviderSource -notmatch 'attempt=\$attempt/\$maxAttempts' -or $agentOpenAiProviderSource -notmatch 'CHRONICLE_LLM_PROTOCOL' -or $agentOpenAiProviderSource -notmatch 'ollama-native' -or $agentOpenAiProviderSource -notmatch '/api/chat' -or $agentOpenAiProviderSource -notmatch 'CHRONICLE_HARNESS_PROVIDER_MODE' -or $agentOpenAiProviderSource -notmatch 'FREELLMAPI_API_KEY' -or $agentOpenAiProviderSource -notmatch '31415' -or $agentOpenAiProviderSource -notmatch 'CHRONICLE_LLM_THINKING_MODE' -or $agentOpenAiProviderSource -notmatch 'payload\.thinking' -or $agentOpenAiProviderSource -notmatch "scope = 'trade-transaction'" -or $agentOpenAiProviderSource -notmatch 'observationScope = \$observationScope' -or $agentOpenAiProviderSource -notmatch "modelView -ceq 'campaign-multiday-supply'" -or $agentOpenAiProviderSource -notmatch "decision.action -ceq 'done'" -or $agentOpenAiProviderSource -notmatch 'A stop proposal cannot include action arguments' -or $agentOpenAiProviderTestSource -notmatch 'ActionDoneAliasNormalizesToStopProposal' -or $agentOpenAiProviderTestSource -notmatch 'TradeObservationCompactionWithinBudget' -or $agentOpenAiProviderTestSource -notmatch 'MultiDaySupplyProfileFitsRequestBudget' -or $agentOpenAiProviderTestSource -notmatch 'OllamaNativeProtocolNormalizesUsage' -or $agentOpenAiProviderTestSource -notmatch 'RecentDecisionHistoryForwarded' -or $agentOpenAiProviderTestSource -notmatch 'PreResponseConnectionFailureRetriesOnceAndClassifies' -or $agentOpenAiProviderTestSource -notmatch 'RequestFormatCorrect' -or $agentOpenAiProviderTestSource -notmatch "CHRONICLE_HARNESS_PROVIDER_MODE = 'protocol-stub'") { throw 'The PowerShell provider must restrict live calls to FreeLLMAPI, permit alternate loopback endpoints only inside the explicit protocol-stub harness, and preserve the structured-decision contract.' }
@@ -1181,7 +1191,8 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerSmokeSource -notmatch '\[ValidateRange\(64,2048\)\]\[int\]\$MaxOutputTokens = 128' -or
     $providerSmokeSource -notmatch '\$env:CHRONICLE_LLM_MAX_TOKENS = \[string\]\$MaxOutputTokens' -or
     $harnessScript -notmatch '\[ValidateRange\(64,2048\)\]\[int\]\$ProviderSmokeMaxOutputTokens = 128' -or
-    $harnessScript -notmatch '-MaxOutputTokens \$ProviderSmokeMaxOutputTokens' -or
+    $harnessScript -notmatch '\$providerArguments = @\(' -or
+    $harnessScript -notmatch "'-MaxOutputTokens', \[string\]\`$ProviderSmokeMaxOutputTokens" -or
     $providerSmokeSource -notmatch 'EffectiveMaxOutputTokens = \[int\]\$env:CHRONICLE_LLM_MAX_TOKENS' -or
     $providerSmokeSource -match '\[ref\]\$effectiveTimeout' -or
     $providerProfileTestSource -notmatch 'freellmapi-429-accepts-observed-315-second-retry-and-fails-closed-outside-bounds' -or

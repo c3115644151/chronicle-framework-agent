@@ -175,7 +175,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         if (string.IsNullOrWhiteSpace(outputMode)) outputMode = "auto";
         if (outputMode is not ("auto" or "json_schema" or "json_object" or "required_tool_call"))
             throw new AgentHostException("provider-output-mode-invalid", "Output mode must be auto, json_schema, json_object, or required_tool_call.");
-        if (outputMode == "required_tool_call" && thinking != false)
+        if (outputMode == "required_tool_call" && IsDeepSeekApi(endpoint) && thinking != false)
             throw new AgentHostException("provider-output-mode-thinking-conflict", "Required tool calls need CHRONICLE_LLM_THINKING_MODE=disabled for this API protocol.");
         var maxRunCostCny = ReadOptionalDoubleEnvironment("CHRONICLE_LLM_MAX_RUN_COST_CNY", 0.01d, 1000d) ?? 5d;
 
@@ -240,7 +240,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         var thinking = ReadOptionalThinkingModeEnvironment();
         if (outputMode == "required_tool_call" && thinking is null && string.Equals(endpoint.Host, "api.deepseek.com", StringComparison.OrdinalIgnoreCase))
             thinking = false;
-        if (outputMode == "required_tool_call" && thinking != false)
+        if (outputMode == "required_tool_call" && IsDeepSeekApi(endpoint) && thinking != false)
             throw new AgentHostException("provider-output-mode-thinking-conflict", "Required tool calls need CHRONICLE_LLM_THINKING_MODE=disabled for this API protocol.");
         var maxRunCostCny = profile.DeepSeekRunCostLimitCny;
         return new OllamaNativeProvider(new OllamaProviderSettings(
@@ -466,7 +466,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     : new { type = "json_schema", json_schema = new { name = "chronicle_agent_decision", strict = true, schema = BuildDecisionSchema(request) } };
             }
             payload[_settings.MaxTokenParameter] = _settings.MaxOutputTokens;
-            if (_settings.Thinking.HasValue) payload["thinking"] = new { type = _settings.Thinking.Value ? "enabled" : "disabled" };
+            if (_settings.Thinking.HasValue && SupportsThinkingParameter(_settings.Endpoint))
+                payload["thinking"] = new { type = _settings.Thinking.Value ? "enabled" : "disabled" };
             var reasoningEffortIsExplicitlySupportedByFreeLlmApi = IsFreeLlmApi(_settings.Endpoint) && _supportsReasoningEffort;
             if (!string.IsNullOrWhiteSpace(_settings.ReasoningEffort) &&
                 !string.Equals(_settings.ReasoningEffort, "none", StringComparison.OrdinalIgnoreCase) &&
@@ -928,6 +929,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     private static bool IsFreeLlmApi(Uri endpoint) => endpoint.Port == 31415 && (endpoint.Host is "127.0.0.1" or "localhost");
 
     private static bool IsDeepSeekApi(Uri endpoint) => string.Equals(endpoint.Host, "api.deepseek.com", StringComparison.OrdinalIgnoreCase);
+
+    private static bool SupportsThinkingParameter(Uri endpoint) => IsDeepSeekApi(endpoint) || IsFreeLlmApi(endpoint);
 
     internal sealed record RateLimitRetryHint(TimeSpan? Delay, TimeSpan? ObservedDelay, string Source, bool IsPoolExhaustion);
     private sealed record ProviderErrorMetadata(string BodyKind, string? ContentType, string? ErrorType, string? ErrorCode, string? RequestId);
