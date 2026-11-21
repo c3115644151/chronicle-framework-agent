@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -113,6 +114,11 @@ internal static class AgentHostEstablishYourClanGoalLoop
             ReadString(provider.FirstRequest?["observation"] as JsonObject, "scope") != "read-only-active-storymode-quest-objective-planning" ||
             provider.FirstRequest?["observation"]?["state"]?["objectiveSnapshot"] is not JsonObject modelObjectiveSnapshot ||
             modelObjectiveSnapshot.Count != ObjectiveIds.Length ||
+            provider.FirstRequest?["journalObjectiveSnapshot"] is not null ||
+            provider.FirstRequest?["observation"]?["state"]?["journalObjectiveSnapshot"] is not null ||
+            provider.FirstRequest?["targetConsistency"] is not null ||
+            provider.FirstRequest?["liveMetricDifferences"] is not null ||
+            Encoding.UTF8.GetByteCount(provider.FirstRequest?.ToJsonString() ?? string.Empty) > 1800 ||
             provider.FirstRequest?["observation"]?["state"]?["nativeProgressionContext"] is not JsonObject nativeProgressionContext ||
             ReadInt(nativeProgressionContext, "partySizeLimit", -1) != 20 || ReadInt(nativeProgressionContext, "clanTier", -1) != 0 ||
             !providerCatalog[0]!["argumentValues"]!["ObjectiveId"]!.AsArray().Any(value => value?.GetValue<string>() == "partySize") ||
@@ -173,6 +179,7 @@ internal static class AgentHostEstablishYourClanGoalLoop
             new { scenario = "establish-clan-planner-observes-current-native-capacity-and-tier", passed = true },
             new { scenario = "establish-clan-planner-offers-only-currently-unmet-objectives", passed = true },
             new { scenario = "establish-clan-planner-reads-native-quest-and-never-mutates-campaign", passed = true },
+            new { scenario = "EYC-planner-sends-one-compact-journal-snapshot-with-current-native-feasibility", requestBytes = Encoding.UTF8.GetByteCount(provider.FirstRequest!.ToJsonString()), passed = true },
             new { scenario = "establish-clan-planner-boundedly-retries-a-truncated-provider-response-before-native-actions", passed = true },
             new { scenario = "establish-clan-journal-progress-is-authoritative-when-live-metrics-lag", passed = true },
             new { scenario = "establish-clan-planner-stops-before-read-without-active-quest", passed = true }
@@ -257,10 +264,8 @@ internal static class AgentHostEstablishYourClanGoalLoop
         var modelRequest = new JsonObject
         {
             ["runId"] = ReadString(request, "runId"),
-            ["goal"] = ReadString(request, "goal"),
+            ["goal"] = "Select one feasible unmet objective from the currently active original StoryMode Establish Your Clan Journal.",
             ["goalKind"] = "active-storymode-establish-your-clan-objective-selection",
-            ["nativeQuestId"] = QuestId,
-            ["nativeQuestTitle"] = ReadString(data, "title"),
             ["observation"] = new JsonObject
             {
                 ["scope"] = "read-only-active-storymode-quest-objective-planning",
@@ -269,16 +274,9 @@ internal static class AgentHostEstablishYourClanGoalLoop
                     ["questId"] = QuestId,
                     ["title"] = ReadString(data, "title"),
                     ["objectiveSnapshot"] = snapshot.DeepClone(),
-                    ["journalObjectiveSnapshot"] = journalObjectives.DeepClone(),
-                    ["targetConsistency"] = targetConsistency.DeepClone(),
-                    ["liveMetricDifferences"] = liveMetricDifferences.DeepClone(),
                     ["nativeProgressionContext"] = BuildNativeProgressionContext(observedNativeState)
                 }
             },
-            ["journalObjectiveSnapshot"] = journalObjectives.DeepClone(),
-            ["objectiveSnapshot"] = snapshot.DeepClone(),
-            ["targetConsistency"] = targetConsistency.DeepClone(),
-            ["liveMetricDifferences"] = liveMetricDifferences.DeepClone(),
             ["allowedActions"] = actionCatalog,
             ["allowedControls"] = new JsonArray()
         };

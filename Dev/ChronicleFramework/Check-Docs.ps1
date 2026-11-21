@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.620'
+$contractVersion = '7.621'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -2520,6 +2520,9 @@ if ($agentHostCampaignLoopEvaluationSource -notmatch 'Initialize-ChronicleCampai
     $agentHostLiveModelLoopSource -notmatch 'isFreeLlmApi') { throw 'Campaign loop evaluations must use the configured provider-neutral OpenAI-compatible profile, health-check the configured model, and restore inherited process environment values without writing API keys to the model profile.' }
 if ($agentHostEstablishClanPlannerSource -notmatch 'objective-selection-rejected-before-native' -or
     $agentHostEstablishClanPlannerSource -notmatch 'allowed ObjectiveId values are exactly' -or
+    $agentHostEstablishClanPlannerSource -notmatch 'EYC-planner-sends-one-compact-journal-snapshot-with-current-native-feasibility' -or
+    $agentHostEstablishClanPlannerSource -notmatch 'journalObjectiveSnapshot.*is not null' -or
+    $agentHostEstablishClanPlannerSource -notmatch 'Encoding\.UTF8\.GetByteCount\(provider\.FirstRequest\?\.ToJsonString\(\) \?\? string\.Empty\) > 1800' -or
     $agentHostDecisionCycleSource -notmatch 'Treat the current allowedActions list as exact' -or
     $agentHostEstablishClanPlannerSource -notmatch 'establish-clan-objective-invalid-choice-correction-failed' -or
     $agentHostEstablishClanAutonomySource -notmatch 'objective-planner-failed') { throw 'The EYC planner must make at most one correction for an objective omitted from the current allowed catalog, preserve the request/evidence counts, and fail explicitly only after the bounded correction.' }
