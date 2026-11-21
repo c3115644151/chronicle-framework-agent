@@ -1262,7 +1262,14 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 var controlName = controlItem.GetString()!;
                 var properties = new JsonObject
                 {
-                    ["control"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray(controlName) }
+                    ["control"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray(controlName) },
+                    ["arguments"] = new JsonObject
+                    {
+                        ["type"] = "object",
+                        ["properties"] = new JsonObject(),
+                        ["required"] = new JsonArray(),
+                        ["additionalProperties"] = false
+                    }
                 };
                 var required = new JsonArray("control");
                 if (string.Equals(controlName, "observeAgain", StringComparison.Ordinal))
@@ -1272,7 +1279,6 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     required.Add("waitSeconds");
                 }
                 properties["reason"] = new JsonObject { ["type"] = "string" };
-                required.Add("reason");
                 alternatives.Add(new JsonObject
                 {
                     ["type"] = "object",
@@ -1356,13 +1362,14 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
 
         if (controlName == "stop")
         {
-            EnsureOnlyProperties(decision, "control", "reason", "rationale");
+            EnsureOnlyProperties(decision, "control", "arguments", "reason", "rationale");
+            EnsureControlArgumentsEmpty(decision);
             if (!ContainsString(request, "allowedControls", "stop"))
                 throw new AgentHostException("provider-control-unavailable", "stop is not currently listed; the workflow did not offer a safe stop control.");
             return new JsonObject
             {
                 ["stop"] = true,
-                ["reason"] = ValidateReason(ReadString(decision, "reason") ?? ReadString(decision, "rationale"))
+                ["reason"] = ValidateOptionalRationale(ReadString(decision, "reason") ?? ReadString(decision, "rationale"))
             };
         }
 
@@ -1384,13 +1391,14 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             {
                 ["observeAgain"] = true,
                 ["waitSeconds"] = waitSeconds,
-                ["reason"] = ValidateReason(ReadString(decision, "reason") ?? ReadString(decision, "rationale"))
+                ["reason"] = ValidateOptionalRationale(ReadString(decision, "reason") ?? ReadString(decision, "rationale"))
             };
         }
 
         if (hasControl && controlName is "supportedMapArrivalGoal" or "supportedVillageToolsQuestGoal" or "supportedBattleSimulationGoal" or "supportedBattleAndCaptivityGoal" or "supportedEstablishYourClanGoal" or "supportedCaptivityRecoveryGoal" or "supportedEstablishClanGoldSaleGoal" or "unsupportedGoal")
         {
-            EnsureOnlyProperties(decision, "control", "reason", "rationale");
+            EnsureOnlyProperties(decision, "control", "arguments", "reason", "rationale");
+            EnsureControlArgumentsEmpty(decision);
             var classificationPhase = ReadBoolean(request, "goalScopeClassificationRequired") == true &&
                 request.TryGetProperty("allowedActions", out var classificationActions) &&
                 classificationActions.ValueKind == JsonValueKind.Array && classificationActions.GetArrayLength() == 0;
@@ -1432,7 +1440,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     "supportedEstablishClanGoldSaleGoal" => "supported-establish-clan-gold-sale",
                     _ => "unsupported"
                 },
-                ["reason"] = ValidateReason(ReadString(decision, "reason") ?? ReadString(decision, "rationale"))
+                ["reason"] = ValidateOptionalRationale(ReadString(decision, "reason") ?? ReadString(decision, "rationale"))
             };
         }
 
@@ -1653,6 +1661,13 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             var safeNames = string.Join(',', unexpected.Select(name => name[..Math.Min(name.Length, 40)]));
             throw new AgentHostException("provider-decision-field-unavailable", "The model returned unsupported field names: " + safeNames + ".");
         }
+    }
+
+    private static void EnsureControlArgumentsEmpty(JsonElement decision)
+    {
+        if (!decision.TryGetProperty("arguments", out var arguments)) return;
+        if (arguments.ValueKind != JsonValueKind.Object || arguments.EnumerateObject().Any())
+            throw new AgentHostException("provider-control-arguments-invalid", "A Native control may include only an empty arguments object.");
     }
 
     private static string ValidateReason(string? value)

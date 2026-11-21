@@ -468,6 +468,30 @@ internal static class ProviderContractSelfTest
             results.Add(new { scenario = "provider-normalizes-only-workflow-listed-safe-stop-control", passed = true });
         }
 
+        using (var classificationRequest = JsonDocument.Parse("{\"goal\":\"Classify the active goal.\",\"observation\":{},\"allowedActions\":[],\"allowedControls\":[\"supportedEstablishYourClanGoal\"],\"goalScopeClassificationRequired\":true}"))
+        using (var uniformControlEnvelope = JsonDocument.Parse("{\"control\":\"supportedEstablishYourClanGoal\",\"arguments\":{}}"))
+        {
+            var schema = OllamaNativeProvider.BuildDecisionSchema(classificationRequest.RootElement);
+            var branch = (schema["properties"]?["decision"]?["anyOf"] as JsonArray)?.OfType<JsonObject>()
+                .FirstOrDefault(item => item["properties"]?["control"]?["enum"]?[0]?.GetValue<string>() == "supportedEstablishYourClanGoal");
+            var required = branch?["required"] as JsonArray;
+            var normalized = OllamaNativeProvider.NormalizeDecision(uniformControlEnvelope.RootElement, classificationRequest.RootElement);
+            if (normalized["goalClassification"]?.GetValue<string>() != "supported-establish-your-clan" ||
+                required is null || required.Count != 1 || required[0]?.GetValue<string>() != "control" ||
+                branch?["properties"]?["arguments"]?["additionalProperties"]?.GetValue<bool>() != false ||
+                branch["properties"]?["reason"] is null)
+                throw new AgentHostException("provider-goal-control-uniform-envelope-regression", "A catalog-listed goal control must accept the standard empty arguments envelope while keeping arguments and rationale non-authoritative.");
+
+            using var nonemptyArguments = JsonDocument.Parse("{\"control\":\"supportedEstablishYourClanGoal\",\"arguments\":{\"ObjectiveId\":\"gold\"}}");
+            try
+            {
+                _ = OllamaNativeProvider.NormalizeDecision(nonemptyArguments.RootElement, classificationRequest.RootElement);
+                throw new AgentHostException("provider-goal-control-nonempty-arguments-accepted", "A goal-classification control must not accept unlisted nested arguments.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-control-arguments-invalid") { }
+            results.Add(new { scenario = "provider-goal-control-accepts-only-empty-uniform-arguments-envelope", passed = true });
+        }
+
         var visibleInquiry = new JsonObject
         {
             ["supported"] = true,
