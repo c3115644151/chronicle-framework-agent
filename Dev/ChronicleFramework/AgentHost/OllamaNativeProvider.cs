@@ -1326,6 +1326,34 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             decision = wrappedDecision;
         }
 
+        var toolAlias = ReadString(decision, "tool");
+        if (!string.IsNullOrWhiteSpace(toolAlias))
+        {
+            if (!string.IsNullOrWhiteSpace(ReadString(decision, "action")) ||
+                !string.IsNullOrWhiteSpace(ReadString(decision, "control")))
+                throw new AgentHostException("provider-decision-ambiguous", "The model supplied both a tool alias and an explicit action/control.",
+                    providerDecisionFieldShape: DescribeDecisionFields(decision));
+
+            var actionListed = FindAllowedAction(request, toolAlias) is not null;
+            var classificationPhase = ReadBoolean(request, "goalScopeClassificationRequired") == true &&
+                request.TryGetProperty("allowedActions", out var classificationActions) &&
+                classificationActions.ValueKind == JsonValueKind.Array && classificationActions.GetArrayLength() == 0;
+            var classificationAliasAllowed = classificationPhase &&
+                toolAlias is "supportedEstablishYourClanGoal" or "supportedCaptivityRecoveryGoal";
+            var controlListed = ContainsString(request, "allowedControls", toolAlias) || classificationAliasAllowed;
+            if (actionListed == controlListed)
+                throw new AgentHostException(actionListed ? "provider-decision-ambiguous" : "provider-control-unavailable",
+                    "The model tool alias did not resolve to exactly one currently allowed Native action or control.",
+                    providerDecisionFieldShape: DescribeDecisionFields(decision));
+
+            var aliasedDecision = JsonNode.Parse(decision.GetRawText()) as JsonObject
+                ?? throw new AgentHostException("provider-decision-shape-invalid", "The provider tool alias envelope must be a JSON object.");
+            aliasedDecision.Remove("tool");
+            aliasedDecision[actionListed ? "action" : "control"] = toolAlias;
+            using var aliasedDecisionDocument = JsonDocument.Parse(aliasedDecision.ToJsonString());
+            return NormalizeDecision(aliasedDecisionDocument.RootElement, request);
+        }
+
         var controlName = ReadString(decision, "control");
         var rawActionName = ReadString(decision, "action");
         var controlNamesListedAction = !string.IsNullOrWhiteSpace(controlName) && controlName is not ("done" or "observeAgain") &&

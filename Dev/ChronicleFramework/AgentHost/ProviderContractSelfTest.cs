@@ -291,6 +291,11 @@ internal static class ProviderContractSelfTest
                 firstBranch?["additionalProperties"]?.GetValue<bool>() != false)
                 throw new AgentHostException("provider-self-test-decision-schema-strict-subset-failed", "The provider schema must use an object root with a nested anyOf, only supported constraints, and required action arguments; Native normalization still accepts the flattened action.");
 
+            using var toolActionAlias = JsonDocument.Parse("{\"tool\":\"tradeConfirm\",\"arguments\":{}}");
+            var normalizedToolActionAlias = OllamaNativeProvider.NormalizeDecision(toolActionAlias.RootElement, actionRequest.RootElement);
+            if (normalizedToolActionAlias["action"]?.GetValue<string>() != "tradeConfirm")
+                throw new AgentHostException("provider-self-test-listed-tool-alias-action-failed", "A provider tool alias must normalize only when it matches a current Native action.");
+
             using var invalidWrapper = JsonDocument.Parse("{\"decision\":{\"action\":\"tradeConfirm\",\"arguments\":{}},\"extra\":true}");
             try
             {
@@ -482,6 +487,11 @@ internal static class ProviderContractSelfTest
                 branch["properties"]?["reason"] is null)
                 throw new AgentHostException("provider-goal-control-uniform-envelope-regression", "A catalog-listed goal control must accept the standard empty arguments envelope while keeping arguments and rationale non-authoritative.");
 
+            using var toolControlAlias = JsonDocument.Parse("{\"tool\":\"supportedEstablishYourClanGoal\",\"reason\":\"Active quest scope.\"}");
+            var normalizedToolControlAlias = OllamaNativeProvider.NormalizeDecision(toolControlAlias.RootElement, classificationRequest.RootElement);
+            if (normalizedToolControlAlias["goalClassification"]?.GetValue<string>() != "supported-establish-your-clan")
+                throw new AgentHostException("provider-self-test-listed-tool-alias-control-failed", "A provider tool alias must normalize only when it matches a current Native control.");
+
             using var nonemptyArguments = JsonDocument.Parse("{\"control\":\"supportedEstablishYourClanGoal\",\"arguments\":{\"ObjectiveId\":\"gold\"}}");
             try
             {
@@ -489,6 +499,14 @@ internal static class ProviderContractSelfTest
                 throw new AgentHostException("provider-goal-control-nonempty-arguments-accepted", "A goal-classification control must not accept unlisted nested arguments.");
             }
             catch (AgentHostException exception) when (exception.Code == "provider-control-arguments-invalid") { }
+
+            using var unknownToolAlias = JsonDocument.Parse("{\"tool\":\"teleport\"}");
+            try
+            {
+                _ = OllamaNativeProvider.NormalizeDecision(unknownToolAlias.RootElement, classificationRequest.RootElement);
+                throw new AgentHostException("provider-self-test-unlisted-tool-alias-accepted", "A tool alias absent from current Native catalogs must be rejected.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-control-unavailable") { }
             results.Add(new { scenario = "provider-goal-control-accepts-only-empty-uniform-arguments-envelope", passed = true });
         }
 
