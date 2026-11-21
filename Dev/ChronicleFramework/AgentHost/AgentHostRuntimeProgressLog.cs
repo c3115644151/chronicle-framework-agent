@@ -144,6 +144,8 @@ internal static class AgentHostRuntimeProgressLog
             ["proxyEndpointHostPort"] = result.ProxyEndpointHostPort,
             ["responseFormatMode"] = result.ResponseFormatMode,
             ["reasoningEffortApplied"] = result.ReasoningEffortApplied,
+            ["providerToolCallsDiscarded"] = result.ProviderToolCallsDiscarded,
+            ["providerToolCallsDiscarded"] = result.ProviderToolCallsDiscarded,
             ["promptTokens"] = result.PromptTokens,
             ["completionTokens"] = result.CompletionTokens,
             ["promptCacheHitTokens"] = result.PromptCacheHitTokens,

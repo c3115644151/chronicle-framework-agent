@@ -112,6 +112,8 @@ internal static class AgentHostHarnessProgressTrace
                 ["proxyEndpointHostPort"] = result.ProxyEndpointHostPort,
                 ["responseFormatMode"] = result.ResponseFormatMode,
                 ["reasoningEffortApplied"] = result.ReasoningEffortApplied,
+                ["providerToolCallsDiscarded"] = result.ProviderToolCallsDiscarded,
+                ["providerToolCallsDiscarded"] = result.ProviderToolCallsDiscarded,
                 ["promptTokens"] = result.PromptTokens,
                 ["completionTokens"] = result.CompletionTokens,
                 ["promptCacheHitTokens"] = result.PromptCacheHitTokens,
@@ -731,13 +733,15 @@ internal static class AgentHostHarnessProgressTrace
                 DeepSeekEstimatedInputTokens: 35000, DeepSeekRawRequestTokens: 41000, DeepSeekReservedInputTokens: 42000,
                 DeepSeekInputTokenEstimator: "deepseek-v4-chat-template-plus-structured-metadata",
                 ProxySelectionSource: "local-listener", ProxyEndpointHostPort: "127.0.0.1:7890",
-                FallbackAttempts: 2, FallbackTrail: "ovh/model=rate_limited; nvidia/model=upstream_502"));
+                FallbackAttempts: 2, FallbackTrail: "ovh/model=rate_limited; nvidia/model=upstream_502",
+                ProviderToolCallsDiscarded: 2));
             var lines = File.ReadAllLines(path);
             if (lines.Length != 1) throw new AgentHostException("host-progress-trace-self-test-line-count", "Harness progress trace did not append exactly one decision.");
             var recorded = JsonNode.Parse(lines[0]) as JsonObject ?? throw new AgentHostException("host-progress-trace-self-test-json", "Harness progress trace did not contain one JSON object.");
             var recordedDecision = recorded["decision"] as JsonObject;
             if (ReadString(recorded, "routedVia") != "selftest/route" ||
                 ReadInt(recorded, "fallbackAttempts") != 2 ||
+                ReadInt(recorded, "providerToolCallsDiscarded") != 2 ||
                 ReadString(recorded, "fallbackTrail") != "ovh/model=rate_limited; nvidia/model=upstream_502" ||
                 ReadString(recorded, "proxySelectionSource") != "local-listener" ||
                 ReadString(recorded, "proxyEndpointHostPort") != "127.0.0.1:7890" ||

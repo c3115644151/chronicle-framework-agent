@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.619'
+$contractVersion = '7.620'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -172,7 +172,10 @@ if ($agentHostProviderSource -notmatch 'reasoningEffortIsExplicitlySupportedByFr
     $agentHostProviderContractSelfTestSource -notmatch 'freellmapi-advertised-reasoning-effort-low-is-applied-with-thinking-disabled' -or
     $agentHostProviderContractSelfTestSource -notmatch 'freellmapi-unadvertised-reasoning-effort-is-omitted' -or
     $agentHostRuntimeProgressLogSource -notmatch 'reasoningEffortApplied' -or
-    $agentHostHarnessProgressTraceSource -notmatch 'reasoningEffortApplied') {
+    $agentHostHarnessProgressTraceSource -notmatch 'reasoningEffortApplied' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'ProviderToolCallsDiscarded: 2' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'providerToolCallsDiscarded' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'providerToolCallsDiscarded') {
     throw 'FreeLLMAPI reasoning effort must be sent only when the selected model advertises the capability, even with thinking disabled, and the applied setting must be auditable.'
 }
 if ($agentHostDecisionCycleSource -notmatch 'BuildBattleAndCaptivityDecisionPrompt' -or
@@ -1280,7 +1283,10 @@ if ($agentHostProviderSource -notmatch 'CheckConfiguredModelAsync' -or $agentHos
     $agentHostProviderSource -notmatch 'FREELLMAPI_API_KEY' -or $agentHostProviderSource -notmatch 'X-Routed-Via' -or
     $agentHostProviderSource -notmatch '_supportsParallelToolCalls' -or
     $agentHostProviderSource -notmatch 'payload\["parallel_tool_calls"\] = false' -or
-    $agentHostProviderSource -notmatch 'provider-multiple-tool-calls' -or
+    $agentHostProviderSource -notmatch 'providerToolCallsDiscarded = toolCallCount - 1' -or
+    $agentHostProviderSource -notmatch 'var toolCall = toolCalls\[0\]' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'required-tool-call-disables-parallel-calls-and-serializes-a-native-decision-batch-to-its-first-current-action' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'provider-serializes-only-the-first-tool-call-and-validates-it-against-the-current-native-catalog' -or
     $agentHostProviderSource -notmatch 'finishReason is "length" or "max_tokens"' -or
     $agentHostProviderContractSelfTestSource -notmatch 'required-tool-call-length-response-is-routed-to-one-bounded-truncation-retry' -or
     $agentHostProviderDecisionRecoverySource -notmatch 'provider-multiple-tool-calls' -or
@@ -1293,7 +1299,7 @@ if ($agentHostProviderSource -notmatch 'CheckConfiguredModelAsync' -or $agentHos
     $agentHostProviderContractSelfTestSource -notmatch 'provider-repairs-only-exact-listed-single-enum-argument-shorthand' -or
     $agentHostProviderContractSelfTestSource -notmatch 'provider-repairs-single-storymode-clan-name-text-shorthand-for-native-validation' -or
     $agentHostProviderContractSelfTestSource -notmatch 'deepseek-run-cost-reservation-rejects-over-budget-before-http' -or
-    $agentHostProviderContractSelfTestSource -notmatch 'required-tool-call-disables-advertised-parallel-calls-and-rejects-multiple-decisions' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'required-tool-call-disables-parallel-calls-and-serializes-a-native-decision-batch-to-its-first-current-action' -or
     $agentHostHarnessProgressTraceSource -notmatch 'provider-progress-trace-records-request-size-cache-cost-and-goal-scope-without-request-content' -or
     $agentHostHarnessProgressTraceSource -notmatch 'observationFieldByteSizes' -or $agentHostHarnessProgressTraceSource -notmatch 'observationStateFieldByteSizes' -or
     $agentHostProviderSource -notmatch 'auto:reliable' -or

@@ -859,7 +859,8 @@ internal static class ProviderContractSelfTest
             using var payloadDocument = JsonDocument.Parse(httpRequest.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
             parallelToolCallsDisabled = payloadDocument.RootElement.TryGetProperty("parallel_tool_calls", out var parallelCalls) &&
                 parallelCalls.ValueKind == JsonValueKind.False;
-            var arguments = "{\"decision\":{\"control\":\"done\",\"reason\":\"one decision\"}}";
+            var arguments = "{\"decision\":{\"control\":\"done\",\"reason\":\"first ordered decision\"}}";
+            var laterArguments = "{\"decision\":{\"control\":\"stop\",\"reason\":\"stale later proposal\"}}";
             var response = JsonSerializer.Serialize(new
             {
                 model = "north-mini-code",
@@ -875,7 +876,7 @@ internal static class ProviderContractSelfTest
                             tool_calls = new[]
                             {
                                 new { id = "call-a", type = "function", function = new { name = "submit_chronicle_decision", arguments } },
-                                new { id = "call-b", type = "function", function = new { name = "submit_chronicle_decision", arguments } }
+                                new { id = "call-b", type = "function", function = new { name = "submit_chronicle_decision", arguments = laterArguments } }
                             }
                         },
                         finish_reason = "tool_calls"
@@ -890,17 +891,11 @@ internal static class ProviderContractSelfTest
         using (var multipleToolCallRequest = JsonDocument.Parse(BuildDecisionRequest()))
         {
             await multipleToolCallProvider.CheckConfiguredModelAsync(CancellationToken.None);
-            try
-            {
-                _ = await multipleToolCallProvider.DecideAsync(multipleToolCallRequest.RootElement, CancellationToken.None);
-                throw new AgentHostException("provider-multiple-tool-call-self-test-failed", "A multi-call response must not be accepted as one decision.");
-            }
-            catch (AgentHostException exception) when (exception.Code == "provider-multiple-tool-calls")
-            {
-                if (!parallelToolCallsDisabled || exception.ProviderToolCallCount != 2 || multipleToolCallRequests != 1)
-                    throw new AgentHostException("provider-multiple-tool-call-contract-invalid", "The Host must disable advertised parallel calls and still reject any response that contains more than one decision call.");
-            }
-            results.Add(new { scenario = "required-tool-call-disables-advertised-parallel-calls-and-rejects-multiple-decisions", passed = true, modelCalls = 0, nativeCommands = 0 });
+            var serializedDecision = await multipleToolCallProvider.DecideAsync(multipleToolCallRequest.RootElement, CancellationToken.None);
+            if (!parallelToolCallsDisabled || serializedDecision.ProviderToolCallsDiscarded != 1 || multipleToolCallRequests != 1 ||
+                serializedDecision.Decision["done"]?.GetValue<bool>() != true)
+                throw new AgentHostException("provider-multiple-tool-call-serialization-contract-invalid", "The Host must submit parallel_tool_calls=false, validate the first ordered Native decision, discard later batch entries, and execute only that one decision.");
+            results.Add(new { scenario = "required-tool-call-disables-parallel-calls-and-serializes-a-native-decision-batch-to-its-first-current-action", discardedProviderCalls = serializedDecision.ProviderToolCallsDiscarded, passed = true, modelCalls = 0, nativeCommands = 0 });
         }
 
         var invalidToolCallRequests = 0;
@@ -909,12 +904,35 @@ internal static class ProviderContractSelfTest
             if (httpRequest.Method == HttpMethod.Get)
                 return Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"north-mini-code\",\"supported_parameters\":[\"tools\",\"tool_choice\"]}]}"));
             invalidToolCallRequests++;
-            return Task.FromResult(JsonResponse(BuildToolCallChatResponse(
-                "{\"decision\":{\"action\":\"invented_action\",\"arguments\":{},\"rationale\":\"bad\"}}", "tool_calls")));
+            var invalidFirst = "{\"decision\":{\"action\":\"invented_action\",\"arguments\":{},\"rationale\":\"bad first call\"}}";
+            var validLater = "{\"decision\":{\"action\":\"tradeConfirm\",\"arguments\":{},\"rationale\":\"must not skip the first call\"}}";
+            return Task.FromResult(JsonResponse(JsonSerializer.Serialize(new
+            {
+                model = "north-mini-code",
+                choices = new[]
+                {
+                    new
+                    {
+                        index = 0,
+                        message = new
+                        {
+                            role = "assistant",
+                            content = (string?)null,
+                            tool_calls = new[]
+                            {
+                                new { id = "call-invalid-first", type = "function", function = new { name = "submit_chronicle_decision", arguments = invalidFirst } },
+                                new { id = "call-valid-later", type = "function", function = new { name = "submit_chronicle_decision", arguments = validLater } }
+                            }
+                        },
+                        finish_reason = "tool_calls"
+                    }
+                },
+                usage = new { prompt_tokens = 10, completion_tokens = 5 }
+            })));
         });
         using (var invalidToolCallClient = new HttpClient(invalidToolCallHandler) { Timeout = freeLlmApiSettings.Timeout })
         using (var invalidToolCallProvider = new OllamaNativeProvider(freeLlmApiSettings with { Model = "north-mini-code" }, invalidToolCallClient))
-        using (var request = JsonDocument.Parse(BuildDecisionRequest()))
+        using (var request = JsonDocument.Parse(BuildActionDecisionRequest()))
         {
             await invalidToolCallProvider.CheckConfiguredModelAsync(CancellationToken.None);
             try
@@ -927,7 +945,7 @@ internal static class ProviderContractSelfTest
                 if (invalidToolCallRequests != 1)
                     throw new AgentHostException("provider-self-test-tool-call-unlisted-action-request-count-invalid", "The Host must validate one tool call locally and must not repeat or dispatch it as a Native command.");
             }
-            results.Add(new { scenario = "freellmapi-tool-call-output-still-rejects-actions-outside-current-native-catalog", passed = true, modelCalls = 1, nativeCommands = 0 });
+            results.Add(new { scenario = "provider-serializes-only-the-first-tool-call-and-validates-it-against-the-current-native-catalog", passed = true, modelCalls = 1, nativeCommands = 0 });
         }
 
         var noStructuredOutputRequests = 0;

@@ -427,6 +427,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             ["messages"] = messages
         };
         string? reasoningEffortApplied = null;
+        var providerToolCallsDiscarded = 0;
         var useJsonObjectCompatibilityMode = !_settings.NativeOllama && UsesJsonObjectCompatibilityMode();
         if (_settings.NativeOllama)
         {
@@ -764,7 +765,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 {
                     var hasToolCalls = messageElement.TryGetProperty("tool_calls", out var toolCalls);
                     var toolCallCount = hasToolCalls && toolCalls.ValueKind == JsonValueKind.Array ? toolCalls.GetArrayLength() : 0;
-                    if (toolCallCount != 1)
+                    if (toolCallCount == 0)
                     {
                         var hasContent = messageElement.TryGetProperty("content", out var contentElement);
                         var contentKind = hasContent ? contentElement.ValueKind.ToString() : JsonValueKind.Undefined.ToString();
@@ -775,11 +776,9 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                         var responsePromptTokens = ReadNonNegativeInt(responseUsage, "prompt_tokens");
                         var responseCompletionTokens = ReadNonNegativeInt(responseUsage, "completion_tokens");
                         var responseRoute = SafeDiagnosticField(ReadResponseHeader(response, "X-Routed-Via"));
-                        var toolCallFailureCode = toolCallCount > 1
-                            ? "provider-multiple-tool-calls"
-                            : finishReason is "length" or "max_tokens"
-                                ? "provider-response-truncated"
-                                : "provider-tool-call-missing";
+                        var toolCallFailureCode = finishReason is "length" or "max_tokens"
+                            ? "provider-response-truncated"
+                            : "provider-tool-call-missing";
                         throw new AgentHostException(toolCallFailureCode,
                             $"The model must return exactly one required decision tool call (toolCallsPresent={hasToolCalls}; toolCallCount={toolCallCount}; contentKind={contentKind}; contentCharacters={contentCharacters}; finishReason={SafeDiagnosticField(finishReason)}; format={responseFormatMode}; responseModel={SafeDiagnosticField(responseModel)}; routedVia={responseRoute}; promptTokens={responsePromptTokens?.ToString(CultureInfo.InvariantCulture) ?? "unknown"}; completionTokens={responseCompletionTokens?.ToString(CultureInfo.InvariantCulture) ?? "unknown"}).",
                             providerRoute: responseRoute, providerOutputFormat: responseFormatMode,
@@ -788,6 +787,13 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                             providerFinishReason: SafeDiagnosticField(finishReason), providerResponseModel: SafeDiagnosticField(responseModel),
                             providerResponsePromptTokens: responsePromptTokens, providerResponseCompletionTokens: responseCompletionTokens);
                     }
+                    // Campaign actions are stateful and the Host always re-observes
+                    // after one action. Some compatible providers ignore
+                    // parallel_tool_calls=false and return a batch. Treat that batch
+                    // as an ordered proposal: validate and use only its first call;
+                    // discard later calls because their assumptions may be stale
+                    // after the first Native action changes the world.
+                    providerToolCallsDiscarded = toolCallCount - 1;
                     var toolCall = toolCalls[0];
                     if (ReadString(toolCall, "type") != "function" ||
                         !toolCall.TryGetProperty("function", out var function) || function.ValueKind != JsonValueKind.Object ||
@@ -864,7 +870,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 _proxyEndpointHostPort,
                 fallbackAttempts,
                 fallbackTrail,
-                reasoningEffortApplied);
+                reasoningEffortApplied,
+                providerToolCallsDiscarded);
         }
     }
 
@@ -1677,7 +1684,8 @@ internal sealed record ProviderDecisionResult(
     string? ProxyEndpointHostPort = null,
     int? FallbackAttempts = null,
     string? FallbackTrail = null,
-    string? ReasoningEffortApplied = null);
+    string? ReasoningEffortApplied = null,
+    int ProviderToolCallsDiscarded = 0);
 
 internal sealed class AgentHostException : Exception
 {
