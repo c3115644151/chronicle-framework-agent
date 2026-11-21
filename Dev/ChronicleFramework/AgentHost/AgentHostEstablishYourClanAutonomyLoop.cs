@@ -1024,8 +1024,8 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         if (!IsSafeVisibleSettlementTarget(mapTargetsReceipt, stalledMoveTarget))
                         {
                             stalledMoveTargetsMissingFromVisibleMapDays[stalledMoveTarget] = stalledMoveCampaignDay;
-                            foreach (var objectiveId in InitiallyIntegratedObjectives)
-                                MarkObjectiveUnavailable(objectiveId, current.RootElement);
+                            foreach (var blockedObjectiveId in InitiallyIntegratedObjectives)
+                                MarkObjectiveUnavailable(blockedObjectiveId, current.RootElement);
                             trace.Add(new JsonObject
                             {
                                 ["stage"] = "stalled-native-move-target-unlisted-replanned",
