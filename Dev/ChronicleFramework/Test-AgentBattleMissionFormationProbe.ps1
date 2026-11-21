@@ -389,7 +389,11 @@ try {
             if ($hostMissionResult.nativeDeploymentAutoDeployIssued) { $expectedHostNativeActionsList.Add('missionAutoDeploy') }
             if (-not $hostMissionResult.nativeDeploymentCompletedByNative) { $expectedHostNativeActionsList.Add('missionFinishDeployment') }
         }
-        if ([int]$deploymentStatusBeforeHost.data.playerTeam.formationCount -gt 0) { $expectedHostNativeActionsList.Add('missionDelegateTroops') }
+        $hostDelegatedFormationCount = [int]$hostMissionResult.delegatedFormationCount
+        if ([bool]$hostMissionResult.delegationIssued -ne ($hostDelegatedFormationCount -gt 0)) {
+            throw "Production Host battle result is inconsistent: delegationIssued=$($hostMissionResult.delegationIssued), delegatedFormationCount=$hostDelegatedFormationCount."
+        }
+        if ($hostMissionResult.delegationIssued) { $expectedHostNativeActionsList.Add('missionDelegateTroops') }
         $expectedHostNativeActionsList.Add('missionAutopilotMainAgent')
         $expectedHostNativeActionsList.Add('missionRetreat')
         $expectedHostNativeActions = $expectedHostNativeActionsList.ToArray()

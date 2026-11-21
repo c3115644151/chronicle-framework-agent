@@ -475,7 +475,24 @@ internal static class AgentHostBattleMissionLoop
                 var mainAgent = data?["mainAgent"] as JsonObject;
                 if (ReadInt(currentMissionStatus, "processId", -1) != processId || !ReadBoolean(data, "supported") ||
                     ReadString(data, "missionMode") != "Battle")
+                {
+                    // The state snapshot and the detailed Mission status are separate Native reads.
+                    // A battle can end between them: in that case the status query reports
+                    // "mission ended" even though the preceding state snapshot still said active.
+                    // Re-read Native state before classifying this as a lost AI lease.
+                    native = await ReadStateAsync(stateClient, processId, cancellationToken);
+                    pollCount++;
+                    var reobservedState = native["state"] as JsonObject ?? new JsonObject();
+                    var reobservedContext = reobservedState["context"] as JsonObject ?? new JsonObject();
+                    var reobservedMission = reobservedState["mission"] as JsonObject;
+                    if (!string.Equals(ReadString(reobservedContext, "gameState"), "MissionState", StringComparison.Ordinal) ||
+                        ReadBoolean(reobservedMission, "missionEnded"))
+                    {
+                        missionEndedObserved = true;
+                        break;
+                    }
                     mainHeroNativeAiControlMaintained = false;
+                }
                 else if (mainAgent == null)
                     mainAgentRemovedDuringMission = true;
                 else
@@ -583,6 +600,14 @@ internal static class AgentHostBattleMissionLoop
             controlLossClient.ExitCalls != 1)
             throw new AgentHostException("battle-mission-loop-self-test-native-ai-control-loss-overclaimed", "A completed Native aftermath may be returned after control loss, but the Host must record that Native AI control did not persist.");
 
+        var missionEndRaceClient = new FakeBattleMissionNativeClient(missionEndsBetweenStateAndStatus: true);
+        var missionEndRace = RunAsync(missionEndRaceClient, missionEndRaceClient, 101, CancellationToken.None, TimeSpan.Zero,
+            missionEntryPollLimit: 2, missionCompletionPollLimit: 6, endScreenExitPollLimit: 2).GetAwaiter().GetResult();
+        if (!missionEndRace.Completed || missionEndRace.Termination != "native-aftermath-reached" ||
+            !missionEndRace.MainHeroNativeAiControlMaintained || missionEndRaceClient.AutopilotCalls != 1 ||
+            missionEndRaceClient.ExitCalls != 1)
+            throw new AgentHostException("battle-mission-loop-self-test-mission-end-status-race-misclassified", "If Native ends the Mission between the loop's state and status reads, the loop must reobserve the ended Mission instead of recording a lost AI lease.");
+
         var spontaneousDeploymentClient = new FakeBattleMissionNativeClient(nativeDeploymentCompletedBeforeHostSetup: true, hasPlayerTroopFormations: false);
         var spontaneousDeployment = RunAsync(spontaneousDeploymentClient, spontaneousDeploymentClient, 101, CancellationToken.None, TimeSpan.Zero,
             missionEntryPollLimit: 2, missionCompletionPollLimit: 6, endScreenExitPollLimit: 2).GetAwaiter().GetResult();
@@ -600,6 +625,7 @@ internal static class AgentHostBattleMissionLoop
             new { scenario = "battle-mission-passive-observation-timeout-does-not-repeat-native-actions", passed = true },
             new { scenario = "battle-mission-native-mainhero-autopilot-rejection-remains-unresolved", passed = true },
             new { scenario = "battle-mission-native-mainhero-control-loss-is-not-overclaimed", passed = true },
+            new { scenario = "battle-mission-ended-between-native-reads-is-not-misclassified-as-ai-control-loss", passed = true },
             new { scenario = "battle-mission-native-spontaneous-deployment-transition-is-reconciled-without-replaying-setup", passed = true }
         ];
     }
@@ -688,12 +714,14 @@ internal static class AgentHostBattleMissionLoop
 
     private sealed class FakeBattleMissionNativeClient(bool supported = true, bool neverEnds = false, bool heroTakesDamage = false,
         bool capturedAfterBattle = false, bool autopilotRejected = false, bool loseAutopilotControl = false,
-        bool nativeDeploymentCompletedBeforeHostSetup = false, bool hasPlayerTroopFormations = true) :
+        bool nativeDeploymentCompletedBeforeHostSetup = false, bool hasPlayerTroopFormations = true,
+        bool missionEndsBetweenStateAndStatus = false) :
         IAgentHostBattleSimulationNativeClient, IAgentHostBattleMissionNativeClient
     {
         private int _reads;
         private bool _exitRequested;
         private bool _autopilotStarted;
+        private bool _missionEndStatusRaceReported;
         internal int DelegationCalls { get; private set; }
         internal int AutopilotCalls { get; private set; }
         internal int ExitCalls { get; private set; }
@@ -701,8 +729,8 @@ internal static class AgentHostBattleMissionLoop
         public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
         {
             _reads++;
-            var ended = !neverEnds && _reads >= 5;
-            var aftermathReached = _exitRequested && _reads >= 6;
+            var ended = _missionEndStatusRaceReported || (!neverEnds && _reads >= 5);
+            var aftermathReached = _exitRequested && (_missionEndStatusRaceReported || _reads >= 6);
             var gameState = aftermathReached ? (capturedAfterBattle ? "MapState" : "PartyState") : "MissionState";
             var nativeAiControlActive = _autopilotStarted && !(loseAutopilotControl && _reads >= 3);
             var mission = new JsonObject
@@ -749,30 +777,38 @@ internal static class AgentHostBattleMissionLoop
         public Task<JsonDocument> PauseForVisibleHostileDecisionAsync(CancellationToken cancellationToken) =>
             throw new AgentHostException("battle-mission-fake-unexpected-pause", "The delegated Mission loop must not change Campaign clock controls.");
 
-        public Task<JsonDocument> ReadBattleMissionStatusAsync(CancellationToken cancellationToken) => Task.FromResult(JsonDocument.Parse(new JsonObject
+        public Task<JsonDocument> ReadBattleMissionStatusAsync(CancellationToken cancellationToken)
         {
-            ["processId"] = 101,
-            ["data"] = new JsonObject
+            if (missionEndsBetweenStateAndStatus && _autopilotStarted && !_missionEndStatusRaceReported)
             {
-                ["supported"] = supported,
-                ["missionMode"] = "Battle",
-                ["campaignDay"] = nativeDeploymentCompletedBeforeHostSetup ? 42.0004 : 42.0,
-                ["campaignTimeControlMode"] = "Stop",
-                ["deploymentUi"] = new JsonObject { ["viewAvailable"] = false, ["readyCallbackBound"] = false, ["canStartMission"] = false, ["deploymentFinished"] = true },
-            ["mainAgent"] = new JsonObject
-                {
-                ["controller"] = _autopilotStarted && !(loseAutopilotControl && _reads >= 3) ? "AI" : "Player",
-                ["isPlayerControlled"] = !(_autopilotStarted && !(loseAutopilotControl && _reads >= 3)),
-                ["isAIControlled"] = _autopilotStarted && !(loseAutopilotControl && _reads >= 3),
-                    ["missionMainAgentControllerActive"] = !(_autopilotStarted && !(loseAutopilotControl && _reads >= 3)),
-                    ["health"] = heroTakesDamage && _reads >= 3 ? 40 : 100
-                },
-                ["mainAgentAiControlLease"] = _autopilotStarted
-                    ? new JsonObject { ["active"] = true, ["scope"] = "agenthost-native-battle-autopilot", ["status"] = "active" }
-                    : new JsonObject { ["active"] = false, ["scope"] = "none", ["status"] = "never-started" },
-                ["playerTeam"] = new JsonObject { ["formationCount"] = hasPlayerTroopFormations ? 1 : 0 }
+                _missionEndStatusRaceReported = true;
+                return Task.FromResult(JsonDocument.Parse("{\"processId\":101,\"status\":\"rejected\",\"error\":\"mission ended\",\"data\":{\"supported\":false,\"reason\":\"mission ended\"}}"));
             }
-        }.ToJsonString()));
+            return Task.FromResult(JsonDocument.Parse(new JsonObject
+            {
+                ["processId"] = 101,
+                ["data"] = new JsonObject
+                {
+                    ["supported"] = supported,
+                    ["missionMode"] = "Battle",
+                    ["campaignDay"] = nativeDeploymentCompletedBeforeHostSetup ? 42.0004 : 42.0,
+                    ["campaignTimeControlMode"] = "Stop",
+                    ["deploymentUi"] = new JsonObject { ["viewAvailable"] = false, ["readyCallbackBound"] = false, ["canStartMission"] = false, ["deploymentFinished"] = true },
+                    ["mainAgent"] = new JsonObject
+                    {
+                        ["controller"] = _autopilotStarted && !(loseAutopilotControl && _reads >= 3) ? "AI" : "Player",
+                        ["isPlayerControlled"] = !(_autopilotStarted && !(loseAutopilotControl && _reads >= 3)),
+                        ["isAIControlled"] = _autopilotStarted && !(loseAutopilotControl && _reads >= 3),
+                        ["missionMainAgentControllerActive"] = !(_autopilotStarted && !(loseAutopilotControl && _reads >= 3)),
+                        ["health"] = heroTakesDamage && _reads >= 3 ? 40 : 100
+                    },
+                    ["mainAgentAiControlLease"] = _autopilotStarted
+                        ? new JsonObject { ["active"] = true, ["scope"] = "agenthost-native-battle-autopilot", ["status"] = "active" }
+                        : new JsonObject { ["active"] = false, ["scope"] = "none", ["status"] = "never-started" },
+                    ["playerTeam"] = new JsonObject { ["formationCount"] = hasPlayerTroopFormations ? 1 : 0 }
+                }
+            }.ToJsonString()));
+        }
 
         public Task<JsonDocument> AutoDeployBattleMissionAsync(CancellationToken cancellationToken) =>
             throw new AgentHostException("battle-mission-fake-unexpected-auto-deploy", "The fixture already starts in Battle mode; Native Deployment auto-deploy is not expected.");
