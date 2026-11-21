@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$SourceSaveName = 'AgentBridgeLifecycle',
     [ValidateRange(30,900)][int]$TimeoutSeconds = 300,
@@ -42,6 +42,14 @@ $script:NativeReceipts = [System.Collections.Generic.List[object]]::new()
 $script:ProcessId = $null
 $nativeReceiptPath = Join-Path $runDirectory 'BattleMissionFormationProbe-NativeReceipts.jsonl'
 [IO.File]::WriteAllText($nativeReceiptPath, '', [Text.UTF8Encoding]::new($false))
+$hostBattleCameraCapture = $null
+$hostBattleCameraCaptureResult = $null
+$cameraMotionCapture = $null
+$cameraMotionCaptureResult = $null
+$cameraMotionEventPath = $null
+$playerControlledMainHeroCameraMotionSamples = [System.Collections.Generic.List[object]]::new()
+$nativeAiCameraMotionSamples = [System.Collections.Generic.List[object]]::new()
+$cameraMotionComparison = $null
 
 function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @()) {
     $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli $Action @Arguments -TimeoutSeconds $TimeoutSeconds -AsJson 2>&1 | Out-String
@@ -138,6 +146,147 @@ function Get-FormationSnapshot($MissionStatus) {
         })
         campaignDay = [double]$MissionStatus.campaignDay
         timeControlMode = [string]$MissionStatus.data.campaignTimeControlMode
+    }
+}
+
+function Add-CameraMotionSample($Status, [string]$Phase, [int]$Sequence, $Capture, [string]$EventPath) {
+    if ($Status.status -ne 'completed' -or $null -eq $Status.data.camera -or $null -eq $Status.data.mainAgent) {
+        throw "Camera-motion comparison '$Phase' did not receive a complete Native camera/MainAgent sample."
+    }
+    $sampleTicks = [Diagnostics.Stopwatch]::GetTimestamp()
+    $offsetMilliseconds = ($sampleTicks - [long]$Capture.StartedTicks) * 1000.0 / [double]$Capture.StopwatchFrequency
+    $camera = $Status.data.camera
+    $mainAgent = $Status.data.mainAgent
+    $sample = [ordered]@{
+        phase = $Phase
+        sequence = $Sequence
+        offsetMilliseconds = [Math]::Round($offsetMilliseconds, 2)
+        controller = [string]$mainAgent.controller
+        camera = $camera
+        position = $mainAgent.position
+        isPlayerControlled = [bool]$mainAgent.isPlayerControlled
+    }
+    $event = [ordered]@{
+        event = 'camera-sample'
+        utc = ([DateTimeOffset]::Parse([string]$Capture.StartedUtc).ToUniversalTime().AddMilliseconds($offsetMilliseconds).ToString('O'))
+        offsetMilliseconds = [Math]::Round($offsetMilliseconds, 2)
+        commandId = [string]$Status.commandId
+        action = 'camera-sample'
+        gameState = [string]$Status.state.context.gameState
+        menuId = [string]$Status.state.context.menuId
+        partyScreenMode = ''
+        inventoryMode = ''
+        campaignDay = $Status.campaignDay
+        stateFingerprint = "$Phase-$Sequence"
+    }
+    [IO.File]::AppendAllText($EventPath, ((ConvertTo-Json -InputObject $event -Compress -Depth 5) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
+    return [pscustomobject]$sample
+}
+
+function Get-CameraMotionSummary([object[]]$Samples) {
+    if ($Samples.Count -lt 2) { return [ordered]@{ sampleCount = $Samples.Count; available = $false } }
+    $bearingSpeeds = [System.Collections.Generic.List[double]]::new()
+    $elevationSpeeds = [System.Collections.Generic.List[double]]::new()
+    for ($index = 1; $index -lt $Samples.Count; $index++) {
+        $previous = $Samples[$index - 1]
+        $current = $Samples[$index]
+        $deltaSeconds = ([double]$current.offsetMilliseconds - [double]$previous.offsetMilliseconds) / 1000.0
+        if ($deltaSeconds -le 0.001) { continue }
+        $bearingDelta = [double]$current.camera.bearing - [double]$previous.camera.bearing
+        $bearingDelta = [Math]::Atan2([Math]::Sin($bearingDelta), [Math]::Cos($bearingDelta))
+        $elevationDelta = [double]$current.camera.elevation - [double]$previous.camera.elevation
+        $bearingSpeeds.Add([Math]::Abs($bearingDelta) / $deltaSeconds)
+        $elevationSpeeds.Add([Math]::Abs($elevationDelta) / $deltaSeconds)
+    }
+    $verticalOffsets = @($Samples | ForEach-Object { [double]$_.camera.cameraPositionZ - [double]$_.camera.mainAgentPositionZ })
+    $relativeFacingErrors = @($Samples | ForEach-Object {
+        $difference = [double]$_.camera.bearing - [double]$_.camera.mainAgentLookDirectionAsAngle
+        [Math]::Atan2([Math]::Sin($difference), [Math]::Cos($difference))
+    })
+    $verticalStats = $verticalOffsets | Measure-Object -Minimum -Maximum
+    $facingStats = $relativeFacingErrors | ForEach-Object { [Math]::Abs([double]$_) } | Measure-Object -Maximum
+    $bearingSpeedStats = $bearingSpeeds | Measure-Object -Maximum
+    $elevationSpeedStats = $elevationSpeeds | Measure-Object -Maximum
+    $shakeSamples = @($Samples | Where-Object { $_.camera.nativeCameraShake.active -eq $true })
+    $shakeIntensities = @($Samples | ForEach-Object { [double]$_.camera.nativeCameraShake.triggerIntensity })
+    $maximumShakeIntensity = ($shakeIntensities | Measure-Object -Maximum).Maximum
+    return [ordered]@{
+        sampleCount = $Samples.Count
+        available = $true
+        maximumBearingSpeedRadiansPerSecond = [Math]::Round([double]$bearingSpeedStats.Maximum, 3)
+        maximumElevationSpeedRadiansPerSecond = [Math]::Round([double]$elevationSpeedStats.Maximum, 3)
+        cameraAgentVerticalOffsetRangeMeters = [Math]::Round([double]$verticalStats.Maximum - [double]$verticalStats.Minimum, 4)
+        maximumBearingFacingErrorRadians = [Math]::Round([double]$facingStats.Maximum, 4)
+        nativeCameraShakeActiveSamples = $shakeSamples.Count
+        maximumNativeCameraShakeTriggerIntensity = [Math]::Round([double]$maximumShakeIntensity, 4)
+    }
+}
+
+function Add-CameraMotionSample($Status, [string]$Phase, [int]$Sequence, $Capture, [string]$EventPath) {
+    if ($Status.status -ne 'completed' -or $null -eq $Status.data.camera -or $null -eq $Status.data.mainAgent) {
+        throw "Camera-motion comparison '$Phase' did not receive a complete Native camera/MainAgent sample."
+    }
+    $sampleTicks = [Diagnostics.Stopwatch]::GetTimestamp()
+    $offsetMilliseconds = ($sampleTicks - [long]$Capture.StartedTicks) * 1000.0 / [double]$Capture.StopwatchFrequency
+    $camera = $Status.data.camera
+    $mainAgent = $Status.data.mainAgent
+    $sample = [ordered]@{
+        phase = $Phase
+        sequence = $Sequence
+        offsetMilliseconds = [Math]::Round($offsetMilliseconds, 2)
+        controller = [string]$mainAgent.controller
+        camera = $camera
+        position = $mainAgent.position
+        isPlayerControlled = [bool]$mainAgent.isPlayerControlled
+    }
+    $event = [ordered]@{
+        event = 'camera-sample'
+        utc = ([DateTimeOffset]::Parse([string]$Capture.StartedUtc).ToUniversalTime().AddMilliseconds($offsetMilliseconds).ToString('O'))
+        offsetMilliseconds = [Math]::Round($offsetMilliseconds, 2)
+        commandId = [string]$Status.commandId
+        action = 'camera-sample'
+        gameState = [string]$Status.state.context.gameState
+        menuId = [string]$Status.state.context.menuId
+        partyScreenMode = ''
+        inventoryMode = ''
+        campaignDay = $Status.campaignDay
+        stateFingerprint = "$Phase-$Sequence"
+    }
+    [IO.File]::AppendAllText($EventPath, ((ConvertTo-Json -InputObject $event -Compress -Depth 5) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
+    return [pscustomobject]$sample
+}
+
+function Get-CameraMotionSummary([object[]]$Samples) {
+    if ($Samples.Count -lt 2) { return [ordered]@{ sampleCount = $Samples.Count; available = $false } }
+    $bearingSpeeds = [System.Collections.Generic.List[double]]::new()
+    $elevationSpeeds = [System.Collections.Generic.List[double]]::new()
+    for ($index = 1; $index -lt $Samples.Count; $index++) {
+        $previous = $Samples[$index - 1]
+        $current = $Samples[$index]
+        $deltaSeconds = ([double]$current.offsetMilliseconds - [double]$previous.offsetMilliseconds) / 1000.0
+        if ($deltaSeconds -le 0.001) { continue }
+        $bearingDelta = [double]$current.camera.bearing - [double]$previous.camera.bearing
+        $bearingDelta = [Math]::Atan2([Math]::Sin($bearingDelta), [Math]::Cos($bearingDelta))
+        $elevationDelta = [double]$current.camera.elevation - [double]$previous.camera.elevation
+        $bearingSpeeds.Add([Math]::Abs($bearingDelta) / $deltaSeconds)
+        $elevationSpeeds.Add([Math]::Abs($elevationDelta) / $deltaSeconds)
+    }
+    $verticalOffsets = @($Samples | ForEach-Object { [double]$_.camera.cameraPositionZ - [double]$_.camera.mainAgentPositionZ })
+    $relativeFacingErrors = @($Samples | ForEach-Object {
+        $difference = [double]$_.camera.bearing - [double]$_.camera.mainAgentLookDirectionAsAngle
+        [Math]::Atan2([Math]::Sin($difference), [Math]::Cos($difference))
+    })
+    $verticalStats = $verticalOffsets | Measure-Object -Minimum -Maximum
+    $facingStats = $relativeFacingErrors | ForEach-Object { [Math]::Abs([double]$_) } | Measure-Object -Maximum
+    $bearingSpeedStats = $bearingSpeeds | Measure-Object -Maximum
+    $elevationSpeedStats = $elevationSpeeds | Measure-Object -Maximum
+    return [ordered]@{
+        sampleCount = $Samples.Count
+        available = $true
+        maximumBearingSpeedRadiansPerSecond = [Math]::Round([double]$bearingSpeedStats.Maximum, 3)
+        maximumElevationSpeedRadiansPerSecond = [Math]::Round([double]$elevationSpeedStats.Maximum, 3)
+        cameraAgentVerticalOffsetRangeMeters = [Math]::Round([double]$verticalStats.Maximum - [double]$verticalStats.Minimum, 4)
+        maximumBearingFacingErrorRadians = [Math]::Round([double]$facingStats.Maximum, 4)
     }
 }
 
@@ -327,6 +476,11 @@ try {
         if ([string]::IsNullOrWhiteSpace($hostExecutablePath) -or -not (Test-Path -LiteralPath $hostExecutablePath -PathType Leaf)) {
             throw 'The same-session self-contained Agent Host runtime package is unavailable for the Native loop integration probe.'
         }
+        . (Join-Path $PSScriptRoot 'HarnessVideoCapture.ps1')
+        $hostBattleCameraVideoPath = Join-Path $runDirectory 'HostNativeBattleCamera.mp4'
+        $hostBattleCameraContactPath = Join-Path $runDirectory 'HostNativeBattleCamera-contact.jpg'
+        $hostBattleCameraEventsPath = Join-Path $runDirectory 'HostNativeBattleCamera-events.jsonl'
+        $hostBattleCameraCapture = Start-ChronicleWindowVideoCapture -ProcessId $script:ProcessId -OutputPath $hostBattleCameraVideoPath -FrameRate 10 -DurationLimitSeconds 30
         $deploymentStatusBeforeHost = Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-host-deployment-status")
         $hostStartInfo = [Diagnostics.ProcessStartInfo]::new()
         $hostStartInfo.FileName = $hostExecutablePath
@@ -346,6 +500,29 @@ try {
             try { $hostProcess.Kill($true) } catch { }
             throw 'The production AgentHostBattleMissionLoop exceeded its bounded Native integration probe.'
         }
+        $captureStarted = [DateTimeOffset]::Parse([string]$hostBattleCameraCapture.StartedUtc).ToUniversalTime()
+        $captureDuration = ([Diagnostics.Stopwatch]::GetTimestamp() - [long]$hostBattleCameraCapture.StartedTicks) * 1000.0 / [double]$hostBattleCameraCapture.StopwatchFrequency
+        $sampleIntervalMilliseconds = 250.0
+        $cameraSampleIndex = 0
+        for ($offsetMilliseconds = $sampleIntervalMilliseconds; $offsetMilliseconds -lt ($captureDuration - 100.0) -and $cameraSampleIndex -lt 24; $offsetMilliseconds += $sampleIntervalMilliseconds) {
+            $cameraSampleIndex++
+            $sampleEvent = [ordered]@{
+                event = 'camera-sample'
+                utc = $captureStarted.AddMilliseconds($offsetMilliseconds).ToString('O')
+                offsetMilliseconds = [Math]::Round($offsetMilliseconds, 2)
+                commandId = $null
+                action = 'camera-sample'
+                gameState = 'MissionState'
+                menuId = ''
+                partyScreenMode = ''
+                inventoryMode = ''
+                campaignDay = $null
+                stateFingerprint = ('camera-frame-' + $cameraSampleIndex.ToString('D2'))
+            }
+            [IO.File]::AppendAllText($hostBattleCameraEventsPath, ((ConvertTo-Json -InputObject $sampleEvent -Compress -Depth 4) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
+        }
+        $hostBattleCameraCaptureResult = Stop-ChronicleWindowVideoCapture -Capture $hostBattleCameraCapture -ContactSheetPath $hostBattleCameraContactPath -EventTracePath $hostBattleCameraEventsPath
+        $hostBattleCameraCapture = $null
         $hostStdout = $hostStdoutTask.GetAwaiter().GetResult()
         $hostStderr = $hostStderrTask.GetAwaiter().GetResult()
         $hostPayload = if (-not [string]::IsNullOrWhiteSpace($hostStdout)) { $hostStdout } else { $hostStderr }
@@ -412,6 +589,17 @@ try {
             disposableSaveRemoved = $disposableSaveRemoved
             processStopped = [bool]$stop.processStopped
             desktopInputIsolationPassed = $desktopInputIsolationPassed
+            hostBattleCameraCapture = [ordered]@{
+                provider = 'FFmpeg gfxcapture, explicit Bannerlord HWND'
+                frameRate = [int]$hostBattleCameraCaptureResult.FrameRateTarget
+                frameCount = [int]$hostBattleCameraCaptureResult.FrameCount
+                durationSeconds = [double]$hostBattleCameraCaptureResult.DurationSeconds
+                periodicFrameSamples = $cameraSampleIndex
+                timelineFrameCount = [int]$hostBattleCameraCaptureResult.TimelineFrameCount
+                videoRemovedAfterEvidence = [bool]$hostBattleCameraCaptureResult.VideoRemovedAfterEvidence
+                contactSheetPath = $hostBattleCameraCaptureResult.ContactSheetPath
+                timelineIndexPath = $hostBattleCameraCaptureResult.TimelineIndexPath
+            }
             missionWindowSafety = $missionWindowSafety
             harnessInputOwnershipConfirmed = $inputOwnershipConfirmed
             hostRuntimePath = $hostExecutablePath
@@ -575,7 +763,7 @@ try {
     if ($delegation.status -ne 'completed' -or $delegation.data.allRequestedFormationsDelegated -ne $true -or
         $delegation.data.mainAgentStillPlayerControlled -ne $true -or $delegation.data.timeControlModeBefore -ne 'Stop' -or
         $delegation.data.timeControlModeAfter -ne 'Stop' -or [Math]::Abs([double]$delegation.data.campaignDayAfter - [double]$delegation.data.campaignDayBefore) -gt 0.000001) {
-        throw 'Native F6-equivalent delegation failed to preserve current formations, MainAgent controller, and Campaign time.'
+        throw 'Player-controlled MainHero-equivalent delegation failed to preserve current formations, MainAgent controller, and Campaign time.'
     }
     $statusAfter = Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-status-after")
     $mainAgentAfter = Get-FormationSnapshot $statusAfter
@@ -586,7 +774,53 @@ try {
     $nativeAiHandoffExpectedCameraElevation = $null
     $nativeAiHandoffSamples = [System.Collections.Generic.List[object]]::new()
     $mainAgentMovedDuringNativeAiHandoff = $null
+    $playerControlledMainHeroOrderViewClose = $null
     if ($ProbeMainAgentNativeAiHandoff) {
+        $playerControlledMainHeroOrderViewClose = Invoke-AgentCli 'harnessCloseMissionOrderMenu' @('-CommandId', "$prefix-player-controlled-mainhero-close-order-view")
+        if ($playerControlledMainHeroOrderViewClose.status -ne 'completed' -or $playerControlledMainHeroOrderViewClose.data.scope -ne 'harness-only' -or
+            ($playerControlledMainHeroOrderViewClose.data.orderViewOpenBefore -eq $true -and $playerControlledMainHeroOrderViewClose.data.status -ne 'closed') -or
+            $playerControlledMainHeroOrderViewClose.data.timeControlModeBefore -ne 'Stop' -or $playerControlledMainHeroOrderViewClose.data.timeControlModeAfter -ne 'Stop' -or
+            [Math]::Abs([double]$playerControlledMainHeroOrderViewClose.data.campaignDayAfter - [double]$playerControlledMainHeroOrderViewClose.data.campaignDayBefore) -gt 0.000001 -or
+            $playerControlledMainHeroOrderViewClose.data.mainAgentControllerBefore -ne 'Player' -or $playerControlledMainHeroOrderViewClose.data.mainAgentControllerAfter -ne 'Player') {
+            throw 'The Native order-view close probe did not use the original MissionScreen.OnEscape path without changing MainHero or Campaign time.'
+        }
+        $cameraBaselinePreparation = Invoke-AgentCli 'harnessPrepareCameraMotionBaseline' @('-CommandId', "$prefix-camera-motion-baseline-setup")
+        if ($cameraBaselinePreparation.status -ne 'completed' -or $cameraBaselinePreparation.data.scope -ne 'harness-only' -or
+            [Math]::Abs([double]$cameraBaselinePreparation.data.nativeDefaultThirdPersonElevation - (-0.2)) -gt 0.001 -or
+            $cameraBaselinePreparation.data.mainAgentController -ne 'Player' -or
+            $cameraBaselinePreparation.data.timeControlModeBefore -ne 'Stop' -or $cameraBaselinePreparation.data.timeControlModeAfter -ne 'Stop' -or
+            [Math]::Abs([double]$cameraBaselinePreparation.data.campaignDayAfter - [double]$cameraBaselinePreparation.data.campaignDayBefore) -gt 0.000001) {
+            throw 'Harness did not establish a normal Native third-person camera baseline without changing MainHero control or Campaign time.'
+        }
+        $statusAfterF6OrderClose = Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-player-controlled-mainhero-camera-baseline-after-close")
+        if ($statusAfterF6OrderClose.data.mainAgent.controller -ne 'Player' -or $statusAfterF6OrderClose.data.mainAgent.isPlayerControlled -ne $true -or
+            $statusAfterF6OrderClose.data.camera.firstPerson -ne $false) {
+            throw 'Preparing the Player-controlled MainHero camera baseline changed MainHero control or first/third-person mode.'
+        }
+        . (Join-Path $PSScriptRoot 'HarnessVideoCapture.ps1')
+        $cameraMotionVideoPath = Join-Path $runDirectory 'NativeAiHandoffCameraMotion.mp4'
+        $cameraMotionContactPath = Join-Path $runDirectory 'NativeAiHandoffCameraMotion-contact.jpg'
+        $cameraMotionEventPath = Join-Path $runDirectory 'NativeAiHandoffCameraMotion-events.jsonl'
+        [IO.File]::WriteAllText($cameraMotionEventPath, '', [Text.UTF8Encoding]::new($false))
+        $cameraMotionCapture = Start-ChronicleWindowVideoCapture -ProcessId $script:ProcessId -OutputPath $cameraMotionVideoPath -FrameRate 10 -DurationLimitSeconds 30
+
+        $playerControlledMainHeroBaseline = $statusAfterF6OrderClose
+        $playerControlledMainHeroDelegatedFormations = @($playerControlledMainHeroBaseline.data.playerTeam.formations | Where-Object { $_.isAIControlled -eq $true })
+        if ($playerControlledMainHeroBaseline.data.mainAgent.controller -ne 'Player' -or
+            $playerControlledMainHeroBaseline.data.mainAgent.isPlayerControlled -ne $true -or
+            $playerControlledMainHeroDelegatedFormations.Count -eq 0) {
+            throw 'The camera comparison baseline is not the Player-controlled MainHero state: at least one player formation must be AI-controlled while MainHero stays Player-controlled.'
+        }
+        $playerControlledMainHeroCameraMotionSamples.Add((Add-CameraMotionSample $playerControlledMainHeroBaseline 'player-controlled-mainhero-player-camera' 0 $cameraMotionCapture $cameraMotionEventPath))
+        for ($baselineIndex = 1; $baselineIndex -le 8; $baselineIndex++) {
+            Start-Sleep -Milliseconds 500
+            $playerControlledMainHeroSample = Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-player-controlled-mainhero-camera-baseline-$baselineIndex")
+            if ($playerControlledMainHeroSample.data.mainAgent.controller -ne 'Player' -or $playerControlledMainHeroSample.data.mainAgent.isPlayerControlled -ne $true) {
+                throw 'MainHero stopped being Player-controlled during the Player-controlled MainHero camera-motion baseline.'
+            }
+            $playerControlledMainHeroCameraMotionSamples.Add((Add-CameraMotionSample $playerControlledMainHeroSample 'player-controlled-mainhero-player-camera' $baselineIndex $cameraMotionCapture $cameraMotionEventPath))
+        }
+
         $nativeAiHandoffProbe = Invoke-AgentCli 'harnessMainAgentNativeAiHandoffProbe' @('-DurationSeconds', '180', '-CommandId', "$prefix-main-agent-native-ai-handoff")
         if ($nativeAiHandoffProbe.status -ne 'completed' -or $nativeAiHandoffProbe.data.scope -ne 'harness-only' -or
             $nativeAiHandoffProbe.data.handoffMode -ne 'rts-camera-native-ai-initialization' -or
@@ -599,14 +833,88 @@ try {
         $cameraBeforeHandoff = $nativeAiHandoffProbe.data.cameraBefore
         $handoffCamera = $nativeAiHandoffProbe.data.cameraAfter
         if ($null -eq $cameraBeforeHandoff -or $null -eq $handoffCamera) { throw 'Native battle camera telemetry was unavailable around the AI handoff.' }
+        $cameraInitialFacingErrorRadians = [Math]::Atan2(
+            [Math]::Sin([double]$handoffCamera.bearing - [double]$handoffCamera.mainAgentLookDirectionAsAngle),
+            [Math]::Cos([double]$handoffCamera.bearing - [double]$handoffCamera.mainAgentLookDirectionAsAngle))
         $expectedHandoffCameraElevation = [double]$cameraBeforeHandoff.elevation
         if ($cameraBeforeHandoff.firstPerson -eq $false -and $expectedHandoffCameraElevation -lt -0.7) { $expectedHandoffCameraElevation = 0.0 }
         if ($handoffCamera.firstPerson -ne $cameraBeforeHandoff.firstPerson -or
+            [Math]::Abs($cameraInitialFacingErrorRadians) -gt 0.02 -or
             [Math]::Abs([double]$handoffCamera.elevation - $expectedHandoffCameraElevation) -gt 0.01) {
-            throw "Native battle camera did not preserve a valid view or repair a near-vertical third-person angle; expected elevation=$expectedHandoffCameraElevation firstPerson=$($cameraBeforeHandoff.firstPerson), actual=$($handoffCamera | ConvertTo-Json -Compress)."
+            throw "Native battle camera did not align once with MainHero while preserving first-person mode and correcting only a near-vertical pitch; expected elevation=$expectedHandoffCameraElevation firstPerson=$($cameraBeforeHandoff.firstPerson), initialFacingError=$cameraInitialFacingErrorRadians, actual=$($handoffCamera | ConvertTo-Json -Compress)."
         }
         $nativeAiHandoffExpectedCameraElevation = $expectedHandoffCameraElevation
         $nativeAiHandoffCameraFrame = Capture-NativeFrame 'native-ai-battle-camera-after-handoff'
+        $nativeAiCameraMotionBaseline = Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-mainhero-ai-camera-baseline-00")
+        if ($nativeAiCameraMotionBaseline.data.mainAgent.controller -ne 'AI' -or $nativeAiCameraMotionBaseline.data.mainAgent.isPlayerControlled -ne $false) {
+            throw 'MainHero did not enter Native AI control for the camera-motion comparison.'
+        }
+        $nativeAiCameraMotionSamples.Add((Add-CameraMotionSample $nativeAiCameraMotionBaseline 'mainhero-native-ai-camera' 0 $cameraMotionCapture $cameraMotionEventPath))
+        $nativeAiHandoffSamples.Add([ordered]@{
+            controller = [string]$nativeAiCameraMotionBaseline.data.mainAgent.controller
+            health = [double]$nativeAiCameraMotionBaseline.data.mainAgent.health
+            position = $nativeAiCameraMotionBaseline.data.mainAgent.position
+            isPlayerTroopInFormation = $nativeAiCameraMotionBaseline.data.mainAgent.formation.isPlayerTroopInFormation
+            formationAIControlled = $nativeAiCameraMotionBaseline.data.mainAgent.formation.isAIControlled
+            watchState = [string]$nativeAiCameraMotionBaseline.data.mainAgent.currentWatchState
+            missionMainAgentControllerActive = $nativeAiCameraMotionBaseline.data.mainAgent.missionMainAgentControllerActive
+            camera = $nativeAiCameraMotionBaseline.data.camera
+            nativeHandoff = $nativeAiCameraMotionBaseline.data.mainAgentAiControlLease
+        })
+        if ($nativeAiHandoffSamples.Count -eq 3) { $nativeAiHandoffSustainedCameraFrame = Capture-NativeFrame 'native-ai-battle-camera-sustained' }
+        for ($cameraIndex = 1; $cameraIndex -le 12; $cameraIndex++) {
+            Start-Sleep -Milliseconds 500
+            $nativeAiCameraStatus = Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-mainhero-ai-camera-$cameraIndex")
+            if ($nativeAiCameraStatus.state.context.gameState -ne 'MissionState' -or $nativeAiCameraStatus.state.mission.missionEnded -or
+                $nativeAiCameraStatus.data.mainAgent.controller -ne 'AI') { break }
+            $cameraSample = Add-CameraMotionSample $nativeAiCameraStatus 'mainhero-native-ai-camera' $cameraIndex $cameraMotionCapture $cameraMotionEventPath
+            $nativeAiCameraMotionSamples.Add($cameraSample)
+            $nativeAiHandoffSamples.Add([ordered]@{
+                controller = [string]$nativeAiCameraStatus.data.mainAgent.controller
+                health = [double]$nativeAiCameraStatus.data.mainAgent.health
+                position = $nativeAiCameraStatus.data.mainAgent.position
+                isPlayerTroopInFormation = $nativeAiCameraStatus.data.mainAgent.formation.isPlayerTroopInFormation
+                formationAIControlled = $nativeAiCameraStatus.data.mainAgent.formation.isAIControlled
+                watchState = [string]$nativeAiCameraStatus.data.mainAgent.currentWatchState
+                missionMainAgentControllerActive = $nativeAiCameraStatus.data.mainAgent.missionMainAgentControllerActive
+                camera = $nativeAiCameraStatus.data.camera
+                nativeHandoff = $nativeAiCameraStatus.data.mainAgentAiControlLease
+            })
+            if ($nativeAiHandoffSamples.Count -eq 3) { $nativeAiHandoffSustainedCameraFrame = Capture-NativeFrame 'native-ai-battle-camera-sustained' }
+        }
+        $cameraMotionCaptureResult = Stop-ChronicleWindowVideoCapture -Capture $cameraMotionCapture -ContactSheetPath $cameraMotionContactPath -EventTracePath $cameraMotionEventPath
+        $cameraMotionCapture = $null
+        $playerControlledMainHeroSummary = Get-CameraMotionSummary $playerControlledMainHeroCameraMotionSamples.ToArray()
+        $nativeAiSummary = Get-CameraMotionSummary $nativeAiCameraMotionSamples.ToArray()
+        $playerControlledMainHeroNormalViewSampleCount = @($playerControlledMainHeroCameraMotionSamples | Where-Object {
+            $_.camera.firstPerson -eq $true -or [double]$_.camera.elevation -ge -0.7
+        }).Count
+        $playerControlledMainHeroBaselineViewNormal = $playerControlledMainHeroCameraMotionSamples.Count -gt 0 -and
+            $playerControlledMainHeroNormalViewSampleCount -eq $playerControlledMainHeroCameraMotionSamples.Count
+        $cameraMotionComparison = [ordered]@{
+            cameraBaselinePreparation = $cameraBaselinePreparation.data
+            playerControlledMainHeroPlayerControlled = $playerControlledMainHeroSummary
+            mainHeroNativeAi = $nativeAiSummary
+            playerControlledMainHeroBaselineViewNormal = [bool]$playerControlledMainHeroBaselineViewNormal
+            playerControlledMainHeroNormalViewSampleCount = $playerControlledMainHeroNormalViewSampleCount
+            cameraFacingAlignmentIssueDetected = [bool]($cameraFacingYawErrorMaxRadians -gt 0.2)
+            comparisonValid = [bool]($playerControlledMainHeroBaselineViewNormal -and $playerControlledMainHeroSummary.available -and $nativeAiSummary.available)
+            comparisonNote = if ($playerControlledMainHeroBaselineViewNormal) { 'Player-controlled MainHero and MainHero AI samples share a non-overhead third-person baseline.' } else { 'Player-controlled MainHero samples were collected, but the source battle camera remained near-vertical, so they are not a valid normal-view comparator.' }
+            playerControlledMainHeroOrderViewOpenBeforeClose = [bool]$playerControlledMainHeroOrderViewClose.data.orderViewOpenBefore
+            playerControlledMainHeroOrderViewCloseStatus = [string]$playerControlledMainHeroOrderViewClose.data.status
+            playerControlledMainHeroSamples = $playerControlledMainHeroCameraMotionSamples.ToArray()
+            mainHeroNativeAiSamples = $nativeAiCameraMotionSamples.ToArray()
+            video = [ordered]@{
+                frameRate = [int]$cameraMotionCaptureResult.FrameRateTarget
+                frameCount = [int]$cameraMotionCaptureResult.FrameCount
+                durationSeconds = [double]$cameraMotionCaptureResult.DurationSeconds
+                periodicFrameSamples = [int]($playerControlledMainHeroCameraMotionSamples.Count + $nativeAiCameraMotionSamples.Count)
+                timelineFrameCount = [int]$cameraMotionCaptureResult.TimelineFrameCount
+                videoRemovedAfterEvidence = [bool]$cameraMotionCaptureResult.VideoRemovedAfterEvidence
+                contactSheetPath = $cameraMotionCaptureResult.ContactSheetPath
+                timelineIndexPath = $cameraMotionCaptureResult.TimelineIndexPath
+            }
+        }
         $nativeHandoffDeadline = [DateTime]::UtcNow.AddSeconds(185)
         $nativeHandoffLeaseActive = $true
         while ([DateTime]::UtcNow -lt $nativeHandoffDeadline -and $nativeHandoffLeaseActive) {
@@ -642,18 +950,52 @@ try {
             }).Count -gt 0
         }
         $activeAiCameraSamples = @($nativeAiHandoffSamples | Where-Object controller -eq 'AI')
-        $badCameraSamples = @($activeAiCameraSamples | Where-Object {
-            $null -eq $_.camera -or [Math]::Abs([double]$_.camera.elevation - $nativeAiHandoffExpectedCameraElevation) -gt 0.15 -or
-                $_.camera.firstPerson -ne $cameraBeforeHandoff.firstPerson
+        $invalidCameraSamples = @($activeAiCameraSamples | Where-Object {
+            $null -eq $_.camera -or $_.camera.firstPerson -ne $cameraBeforeHandoff.firstPerson -or
+                ($_.camera.firstPerson -eq $false -and [double]$_.camera.elevation -lt -0.7)
         })
-        if ($activeAiCameraSamples.Count -lt 3 -or $badCameraSamples.Count -gt 0 -or $null -eq $nativeAiHandoffSustainedCameraFrame) {
-            throw "Native battle camera did not remain near its selected third-person elevation for at least three AI-controlled samples; target=$nativeAiHandoffExpectedCameraElevation, activeSamples=$($activeAiCameraSamples.Count), badSamples=$($badCameraSamples.Count), elevations=$(($activeAiCameraSamples | ForEach-Object { $_.camera.elevation }) -join ',')."
+        $cameraFollowSamples = @($activeAiCameraSamples | Where-Object {
+            $null -ne $_.camera -and $null -ne $_.camera.mainAgentLookDirectionAsAngle -and
+                $null -ne $_.camera.cameraPositionZ -and $null -ne $_.camera.mainAgentPositionZ
+        })
+        $cameraFacingYawErrors = @($cameraFollowSamples | ForEach-Object {
+            $difference = [double]$_.camera.bearing - [double]$_.camera.mainAgentLookDirectionAsAngle
+            [Math]::Atan2([Math]::Sin($difference), [Math]::Cos($difference))
+        })
+        $cameraFacingYawErrorMaxRadians = if ($cameraFacingYawErrors.Count -gt 0) {
+            ($cameraFacingYawErrors | ForEach-Object { [Math]::Abs([double]$_) } | Measure-Object -Maximum).Maximum
+        } else { $null }
+        $cameraVerticalOffsets = @($cameraFollowSamples | ForEach-Object {
+            [double]$_.camera.cameraPositionZ - [double]$_.camera.mainAgentPositionZ
+        })
+        $cameraVerticalOffsetRange = if ($cameraVerticalOffsets.Count -gt 1) {
+            $verticalStats = $cameraVerticalOffsets | Measure-Object -Minimum -Maximum
+            [double]$verticalStats.Maximum - [double]$verticalStats.Minimum
+        } else { $null }
+        if ($activeAiCameraSamples.Count -lt 3 -or $invalidCameraSamples.Count -gt 0 -or $null -eq $nativeAiHandoffSustainedCameraFrame) {
+            throw "Native battle camera switched view mode or returned to a near-vertical angle during AI control; targetElevation=$nativeAiHandoffExpectedCameraElevation, activeSamples=$($activeAiCameraSamples.Count), invalidSamples=$($invalidCameraSamples.Count), elevations=$(($activeAiCameraSamples | ForEach-Object { $_.camera.elevation }) -join ',')."
+        }
+        if ($cameraFollowSamples.Count -lt 3 -or [Math]::Abs($cameraInitialFacingErrorRadians) -gt 0.02) {
+            throw "Native battle camera handoff did not establish initial MainHero-facing alignment; telemetrySamples=$($cameraFollowSamples.Count), initialFacingErrorRadians=$cameraInitialFacingErrorRadians, maximumFacingYawErrorRadians=$cameraFacingYawErrorMaxRadians, verticalOffsetRangeMeters=$cameraVerticalOffsetRange."
+        }
+        if ($cameraFacingYawErrorMaxRadians -gt 0.2) {
+            throw "The Native camera drifted away from MainHero's facing direction during the AI lease; maximumFacingYawErrorRadians=$cameraFacingYawErrorMaxRadians."
         }
         $nativeHandoffRestoredState = Invoke-AgentCli 'battleMissionStatus' @('-CommandId', "$prefix-native-ai-handoff-restored-status")
         if ($nativeHandoffRestoredState.status -eq 'completed' -and (
             $nativeHandoffRestoredState.data.mainAgent.controller -ne 'Player' -or
             $nativeHandoffRestoredState.data.mainAgent.missionMainAgentControllerActive -ne $statusAfter.data.mainAgent.missionMainAgentControllerActive)) {
             throw 'Native MainAgent AI handoff did not restore Player control and the original MissionMainAgentController state before battle aftermath.'
+        }
+        if ($nativeHandoffRestoredState.status -eq 'completed' -and
+            $nativeHandoffRestoredState.state.context.gameState -eq 'MissionState' -and
+            $nativeHandoffRestoredState.state.mission.missionEnded -eq $false -and (
+            $nativeHandoffRestoredState.data.camera.firstPerson -ne $statusAfter.data.camera.firstPerson -or
+            [Math]::Abs([double]$nativeHandoffRestoredState.data.camera.elevation - [double]$statusAfter.data.camera.elevation) -gt 0.01 -or
+            [Math]::Abs([Math]::Atan2(
+                [Math]::Sin([double]$nativeHandoffRestoredState.data.camera.bearing - [double]$statusAfter.data.camera.bearing),
+                [Math]::Cos([double]$nativeHandoffRestoredState.data.camera.bearing - [double]$statusAfter.data.camera.bearing))) -gt 0.01)) {
+            throw 'Native MainAgent AI handoff changed the original third-person camera view after returning control while the Mission remained active.'
         }
     }
 
@@ -975,7 +1317,12 @@ try {
             }).Count -gt 0
         } else { $null }
         nativeAiHandoffProbe = if ($nativeAiHandoffProbe) { $nativeAiHandoffProbe.data } else { $null }
+        playerControlledMainHeroOrderViewClose = if ($playerControlledMainHeroOrderViewClose) { $playerControlledMainHeroOrderViewClose.data } else { $null }
+        cameraMotionComparison = $cameraMotionComparison
         nativeAiHandoffExpectedCameraElevation = $nativeAiHandoffExpectedCameraElevation
+        cameraInitialFacingErrorRadians = $cameraInitialFacingErrorRadians
+        cameraFacingYawErrorMaxRadians = $cameraFacingYawErrorMaxRadians
+        cameraVerticalOffsetRangeMeters = $cameraVerticalOffsetRange
         nativeAiHandoffSustainedCameraFrame = if ($nativeAiHandoffSustainedCameraFrame) { [ordered]@{ path = $nativeAiHandoffSustainedCameraFrame; sha256 = (Get-FileHash -LiteralPath $nativeAiHandoffSustainedCameraFrame -Algorithm SHA256).Hash } } else { $null }
         nativeAiHandoffSamples = $nativeAiHandoffSamples.ToArray()
         mainAgentMovedDuringNativeAiHandoff = $mainAgentMovedDuringNativeAiHandoff
@@ -1045,6 +1392,20 @@ try {
     if (-not $result.passed) { exit 1 }
 }
 finally {
+    if ($cameraMotionCapture) {
+        try {
+            $cameraMotionCaptureResult = Stop-ChronicleWindowVideoCapture -Capture $cameraMotionCapture -ContactSheetPath (Join-Path $runDirectory 'NativeAiHandoffCameraMotion-contact.jpg') -EventTracePath (Join-Path $runDirectory 'NativeAiHandoffCameraMotion-events.jsonl')
+        }
+        catch { }
+        $cameraMotionCapture = $null
+    }
+    if ($hostBattleCameraCapture) {
+        try {
+            $hostBattleCameraCaptureResult = Stop-ChronicleWindowVideoCapture -Capture $hostBattleCameraCapture -ContactSheetPath (Join-Path $runDirectory 'HostNativeBattleCamera-contact.jpg') -EventTracePath (Join-Path $runDirectory 'HostNativeBattleCamera-events.jsonl')
+        }
+        catch { }
+        $hostBattleCameraCapture = $null
+    }
     if ($null -eq $priorMode) { Remove-Item Env:CHRONICLE_HARNESS_MODE -ErrorAction SilentlyContinue }
     else { $env:CHRONICLE_HARNESS_MODE = $priorMode }
     if ($null -eq $priorInputLock) { Remove-Item Env:CHRONICLE_HARNESS_AGENT_INPUT_LOCK -ErrorAction SilentlyContinue }

@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.633'
+$contractVersion = '7.636'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -1753,7 +1753,7 @@ $battleFixtureSource = Get-Content (Join-Path $harnessRoot 'Test-AgentBattleFixt
 $battleMissionFormationProbeSource = Get-Content (Join-Path $harnessRoot 'Test-AgentBattleMissionFormationProbe.ps1') -Raw -Encoding UTF8
 $battleMissionAdapterSource = Get-Content (Join-Path $harnessRoot 'AgentBattleMissionAdapter.cs') -Raw -Encoding UTF8
 $missionInputPatchSource = Get-Content (Join-Path $harnessRoot 'AgentMissionInputPatch.cs') -Raw -Encoding UTF8
-if ($videoCaptureSource -notmatch 'keyframeInterval = \[Math\]::Max\(1, \$FrameRate \* 2\)' -or $videoCaptureSource -notmatch 'movflags \+frag_keyframe\+empty_moov\+default_base_moof' -or $videoCaptureSource -notmatch 'contactFrameBudget = Get-ChronicleContactFrameBudget' -or $videoCaptureSource -notmatch '\[Math\]::Ceiling\(\$frames / \$contactFrameBudget\)' -or $videoCaptureSource -notmatch '\$contactColumns = \[Math\]::Min\(4, \$contactSampleCount\)' -or $videoCaptureSource -notmatch 'frameExtractionFailures' -or $videoCaptureSource -notmatch 'agenthost-provider-response' -or $videoCaptureSource -notmatch '\$eventOnlyActions = @\(') { throw 'Continuous Bannerlord capture must preserve interrupted clips, include Host decisions, capture repeated motion events, add bounded periodic scene samples, and still remove completed source video after indexing.' }
+if ($videoCaptureSource -notmatch 'keyframeInterval = \[Math\]::Max\(1, \$FrameRate \* 2\)' -or $videoCaptureSource -notmatch 'movflags \+frag_keyframe\+empty_moov\+default_base_moof' -or $videoCaptureSource -notmatch 'contactFrameBudget = Get-ChronicleContactFrameBudget' -or $videoCaptureSource -notmatch '\[Math\]::Ceiling\(\$frames / \$contactFrameBudget\)' -or $videoCaptureSource -notmatch '\$contactColumns = \[Math\]::Min\(4, \$contactSampleCount\)' -or $videoCaptureSource -notmatch 'frameExtractionFailures' -or $videoCaptureSource -notmatch 'agenthost-provider-response' -or $videoCaptureSource -notmatch 'camera-sample' -or $videoCaptureSource -notmatch '\$eventOnlyActions = @\(') { throw 'Continuous Bannerlord capture must preserve interrupted clips, include Host decisions and periodic camera samples, and remove completed source video after indexing.' }
 if ($agentLiveModelLoopSource -notmatch 'Add-ChronicleAgentHostProgressCaptureEvents' -or $agentLiveModelLoopSource -notmatch 'AgentHostProgress\.jsonl' -or $videoCaptureSource -notmatch 'missionNavigateToAgent' -or $videoCaptureSource -notmatch 'PRIVATE_PROMPT_MARKER') { throw 'AgentHost video evidence must consume its sanitized decision log and cover repeated Native scene-navigation decisions without exposing prompts.' }
 if ([regex]::Matches($agentLiveModelLoopSource, 'Add-ChronicleAgentHostProgressCaptureEvents').Count -lt 2 -or $agentLiveModelLoopSource -notmatch 'agentHostCaptureEventsWritten') { throw 'AgentHost decision timeline events must be merged in both successful and failed model-loop outcomes without duplicate appends.' }
 if ($battleFixtureSource -notmatch 'BattleRewardTelemetry = if \(\$simulationFinish -and \$simulationFinish\.data\)') { throw 'PostBattle evidence must preserve the returned renown telemetry object.' }
@@ -1876,9 +1876,41 @@ if ($harnessScript -notmatch "'BattleMissionNativeAiHandoffProbe' \{ @\('Preflig
     $battleMissionFormationProbeSource -notmatch 'nativeAiHandoffSustainedCameraFrame' -or
     $battleMissionFormationProbeSource -notmatch 'nativeAiHandoffExpectedCameraElevation' -or
     $battleMissionFormationProbeSource -notmatch 'activeAiCameraSamples' -or
-    $battleMissionFormationProbeSource -notmatch 'badCameraSamples' -or
+    $battleMissionFormationProbeSource -notmatch 'invalidCameraSamples' -or
+    $battleMissionFormationProbeSource -notmatch 'cameraInitialFacingErrorRadians' -or
+    $battleMissionFormationProbeSource -notmatch 'cameraFacingYawErrorMaxRadians' -or
+    $battleMissionFormationProbeSource -notmatch 'cameraVerticalOffsetRangeMeters' -or
+    $battleMissionFormationProbeSource -notmatch 'cameraMotionComparison' -or
+    $battleMissionFormationProbeSource -notmatch 'playerControlledMainHeroOrderViewClose' -or
+    $battleMissionFormationProbeSource -notmatch 'cameraBaselinePreparation' -or
+    $battleMissionFormationProbeSource -notmatch 'playerControlledMainHeroCameraMotionSamples' -or
+    $battleMissionFormationProbeSource -notmatch 'nativeAiCameraMotionSamples' -or
+    $battleMissionFormationProbeSource -notmatch 'playerControlledMainHeroNormalViewSampleCount' -or
+    $battleMissionFormationProbeSource -notmatch 'comparisonValid' -or
+    $battleMissionFormationProbeSource -notmatch 'Get-CameraMotionSummary' -or
+    $battleMissionFormationProbeSource -notmatch 'nativeHandoffRestoredState.data.camera' -or
+    $battleMissionFormationProbeSource -notmatch 'Start-ChronicleWindowVideoCapture' -or
+    $battleMissionFormationProbeSource -notmatch 'Stop-ChronicleWindowVideoCapture' -or
+    $battleMissionFormationProbeSource -notmatch 'periodicFrameSamples' -or
+    $battleMissionAdapterSource -notmatch 'LookDirectionAsAngle' -or
+    $battleMissionAdapterSource -notmatch 'Native keeps a player camera bearing fixed' -or
+    $battleMissionAdapterSource -notmatch 'Track the agent heading after the' -or
+    $battleMissionAdapterSource -notmatch 'NativeThirdPersonBattleCameraBearingFollowThreshold = 0\.02f' -or
+    $battleMissionAdapterSource -notmatch 'RestoreNativeThirdPersonBattleCamera' -or
+    $battleMissionAdapterSource -notmatch '_mainAgentAiProbeOriginalCameraBearing' -or
     $battleMissionAdapterSource -notmatch 'RestoreNativeMainAgentAiHandoff') {
-    throw 'The Native MainAgent AI handoff must restore a readable 1.4.8 third-person camera; its disposable no-model probe must use Native Auto Deploy, retain a frame, and check camera samples.'
+    throw "The Native MainHero AI lease must initialize a readable view, track MainHero heading after the Native camera update, correct only the overhead clamp, and restore the user's original view; zero-model tests must retain camera-motion evidence."
+}
+if ($agentCliSource -notmatch "'harnessCloseMissionOrderMenu'" -or
+    $agentCliSource -notmatch "'harnessPrepareCameraMotionBaseline'" -or
+    $agentProtocolSource -notmatch 'case "harnessCloseMissionOrderMenu"' -or
+    $agentProtocolSource -notmatch 'case "harnessPrepareCameraMotionBaseline"' -or
+    $battleMissionAdapterSource -notmatch 'CloseNativeMissionOrderViewFromHarness' -or
+    $battleMissionAdapterSource -notmatch 'GetMethod\("OnEscape"' -or
+    $battleMissionAdapterSource -notmatch 'PrepareNativeThirdPersonCameraMotionBaseline' -or
+    $agentProtocolSource -notmatch 'harnessCloseMissionOrderMenu is restricted to a disposable battle-fixture Harness run' -or
+    $agentProtocolSource -notmatch 'harnessPrepareCameraMotionBaseline is restricted to a disposable battle-fixture Harness run') {
+    throw 'Camera-motion comparison setup must use the Native MissionScreen Escape path and a disposable-fixture-only third-person camera baseline.'
 }
 if ($protocolSource -notmatch 'case "missionAutopilotMainAgent"' -or
     $protocolSource -notmatch 'case "missionAutoDeploy"' -or

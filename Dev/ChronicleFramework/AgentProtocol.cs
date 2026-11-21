@@ -1091,6 +1091,20 @@ internal sealed class ChronicleAgentProtocol
                 case "battleMissionStatus":
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBattleMissionAdapter.BuildStatusJson());
                     break;
+                case "harnessCloseMissionOrderMenu":
+                    var orderMenuProbeMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var orderMenuProbeRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(orderMenuProbeMode, "battle-fixture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(orderMenuProbeRoot) || !Directory.Exists(orderMenuProbeRoot))
+                        throw new InvalidOperationException("harnessCloseMissionOrderMenu is restricted to a disposable battle-fixture Harness run");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBattleMissionAdapter.CloseNativeMissionOrderViewFromHarness());
+                    break;
+                case "harnessPrepareCameraMotionBaseline":
+                    var cameraBaselineMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+                    var cameraBaselineRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+                    if (!string.Equals(cameraBaselineMode, "battle-fixture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(cameraBaselineRoot) || !Directory.Exists(cameraBaselineRoot))
+                        throw new InvalidOperationException("harnessPrepareCameraMotionBaseline is restricted to a disposable battle-fixture Harness run");
+                    WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBattleMissionAdapter.PrepareNativeThirdPersonCameraMotionBaseline());
+                    break;
                 case "missionDelegateTroops":
                     WriteResponse(commandId, action, "completed", behavior, null, ChronicleAgentBattleMissionAdapter.DelegateCurrentTroopFormations());
                     break;

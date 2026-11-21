@@ -335,8 +335,8 @@ function Stop-ChronicleWindowVideoCapture {
     $timelineFrameCount = 0
     if (Test-Path -LiteralPath $EventTracePath) {
         $eventRows = @(Get-Content -LiteralPath $EventTracePath -Encoding UTF8 | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_ | ConvertFrom-Json })
-        $importantActions = @('menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','partyTakeAll','partyScreenDone','inventoryTakeAll','inventoryDone','mapSettlementTargets','mapPartyTargets','move','pursue','recruitOptions','recruit','provision','tradeConfirm','rest','providerDone','goalClassification','selectEstablishYourClanObjective','missionSceneAgents','missionNavigateToAgent','missionInteract','missionLeave','modelLoopFailure','crashReport','crashReportExpanded','crashReportScroll','crashObserved')
-        $eventOnlyActions = @('observeAgain','missionSceneAgents','missionNavigateToAgent','mapSettlementTargets','mapPartyTargets')
+        $importantActions = @('menuSelect','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','partyTakeAll','partyScreenDone','inventoryTakeAll','inventoryDone','mapSettlementTargets','mapPartyTargets','move','pursue','recruitOptions','recruit','provision','tradeConfirm','rest','providerDone','goalClassification','selectEstablishYourClanObjective','missionSceneAgents','missionNavigateToAgent','missionInteract','missionLeave','modelLoopFailure','crashReport','crashReportExpanded','crashReportScroll','crashObserved','camera-sample')
+        $eventOnlyActions = @('observeAgain','missionSceneAgents','missionNavigateToAgent','mapSettlementTargets','mapPartyTargets','camera-sample')
         $priorSignature = $null
         $priorWasBoundary = $false
         foreach ($event in $eventRows) {
