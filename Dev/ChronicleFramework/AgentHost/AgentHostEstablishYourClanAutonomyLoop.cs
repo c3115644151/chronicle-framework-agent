@@ -116,14 +116,24 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         retryAfter["partySize"]!["current"] = 5.0;
         if (!HasObjectiveSnapshotProgressChanged(retryBefore, retryAfter) || HasObjectiveSnapshotProgressChanged(retryAfter, retryAfter))
             throw new AgentHostException("establish-clan-autonomy-child-journal-progress-detection-failed", "A child result whose official Journal snapshot progressed must be recognized even if that child safely stopped before its target.");
-        using var routeStateBefore = JsonDocument.Parse("""{"campaignDay":1.0,"timeControlMode":"StoppablePlay","state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false,"captivity":{"isCaptive":false}},"location":{"currentSettlementId":null,"targetSettlementId":"town-a","targetPartyId":null},"party":{"members":11,"itemCount":1},"economy":{"gold":332,"renown":20},"nearbyParties":[]}}""");
+        using var routeStateBefore = JsonDocument.Parse("""{"campaignDay":1.0,"timeControlMode":"StoppablePlay","state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false,"captivity":{"isCaptive":false}},"location":{"currentSettlementId":null,"targetSettlementId":"town-a","targetPartyId":null},"party":{"members":11,"healthy":0,"wounded":1,"itemCount":1},"economy":{"gold":332,"renown":20},"nearbyParties":[]}}""");
         using var routeStateSame = JsonDocument.Parse(routeStateBefore.RootElement.GetRawText());
-        using var routeStateTimeOnly = JsonDocument.Parse("""{"campaignDay":2.0,"timeControlMode":"UnstoppableFastForward","state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false,"captivity":{"isCaptive":false}},"location":{"currentSettlementId":null,"targetSettlementId":"town-a","targetPartyId":null},"party":{"members":11,"itemCount":1},"economy":{"gold":332,"renown":20},"nearbyParties":[]}}""");
-        using var routeStateChanged = JsonDocument.Parse("""{"campaignDay":2.0,"timeControlMode":"StoppablePlay","state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false,"captivity":{"isCaptive":false}},"location":{"currentSettlementId":"town-a","targetSettlementId":"town-b","targetPartyId":null},"party":{"members":13,"itemCount":2},"economy":{"gold":432,"renown":20},"nearbyParties":[]}}""");
+        using var routeStateTimeOnly = JsonDocument.Parse("""{"campaignDay":2.0,"timeControlMode":"UnstoppableFastForward","state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false,"captivity":{"isCaptive":false}},"location":{"currentSettlementId":null,"targetSettlementId":"town-a","targetPartyId":null},"party":{"members":11,"healthy":0,"wounded":1,"itemCount":1},"economy":{"gold":332,"renown":20},"nearbyParties":[]}}""");
+        using var routeStateChanged = JsonDocument.Parse("""{"campaignDay":2.0,"timeControlMode":"StoppablePlay","state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false,"captivity":{"isCaptive":false}},"location":{"currentSettlementId":"town-a","targetSettlementId":"town-b","targetPartyId":null},"party":{"members":13,"healthy":2,"wounded":1,"itemCount":2},"economy":{"gold":432,"renown":20},"nearbyParties":[]}}""");
+        using var routeStateHealed = JsonDocument.Parse("""{"campaignDay":1.0,"timeControlMode":"StoppablePlay","state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false,"captivity":{"isCaptive":false}},"location":{"currentSettlementId":null,"targetSettlementId":"town-a","targetPartyId":null},"party":{"members":11,"healthy":1,"wounded":0,"itemCount":1},"economy":{"gold":332,"renown":20},"nearbyParties":[]}}""");
         if (BuildObjectiveRouteAvailabilityFingerprint(routeStateBefore.RootElement) != BuildObjectiveRouteAvailabilityFingerprint(routeStateSame.RootElement) ||
             BuildObjectiveRouteAvailabilityFingerprint(routeStateBefore.RootElement) != BuildObjectiveRouteAvailabilityFingerprint(routeStateTimeOnly.RootElement) ||
-            BuildObjectiveRouteAvailabilityFingerprint(routeStateBefore.RootElement) == BuildObjectiveRouteAvailabilityFingerprint(routeStateChanged.RootElement))
-            throw new AgentHostException("establish-clan-autonomy-route-state-fingerprint-failed", "Natural Campaign time and time-mode changes alone must not reopen a blocked route; meaningful Native location, Party or economy changes must.");
+            BuildObjectiveRouteAvailabilityFingerprint(routeStateBefore.RootElement) == BuildObjectiveRouteAvailabilityFingerprint(routeStateChanged.RootElement) ||
+            BuildObjectiveRouteAvailabilityFingerprint(routeStateBefore.RootElement) == BuildObjectiveRouteAvailabilityFingerprint(routeStateHealed.RootElement))
+            throw new AgentHostException("establish-clan-autonomy-route-state-fingerprint-failed", "Natural Campaign time and time-mode changes alone must not reopen a blocked route; meaningful Native location, Party, health or economy changes must.");
+        using var noHealthyNoBattleOptions = JsonDocument.Parse("""{"state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false},"party":{"healthy":0},"availableMenuOptions":[]}}""");
+        using var noHealthySendTroops = JsonDocument.Parse("""{"state":{"context":{"gameState":"MapState","menuId":"encounter","encounterActive":true},"party":{"healthy":0},"availableMenuOptions":[{"id":"str_order_attack","available":true,"enabled":true}]}}""");
+        using var healedNoBattleOptions = JsonDocument.Parse("""{"state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false},"party":{"healthy":1},"availableMenuOptions":[]}}""");
+        if (IsRenownObjectiveCurrentlySelectable(noHealthyNoBattleOptions.RootElement) ||
+            !IsRenownObjectiveCurrentlySelectable(noHealthySendTroops.RootElement) ||
+            !IsRenownObjectiveCurrentlySelectable(healedNoBattleOptions.RootElement))
+            throw new AgentHostException("establish-clan-autonomy-renown-health-readiness-gate-failed", "With no healthy MainParty members and no enabled Native Send Troops option, Renown is temporarily unavailable; a fresh Native battle option or recovered party reopens it.");
+        results.Add(new { scenario = "establish-clan-autonomy-renown-route-waits-for-healthy-party-or-native-send-troops-and-reopens-after-recovery", passed = true });
         results.Add(new { scenario = "establish-clan-autonomy-retries-partial-objective-after-child-journal-progress", passed = true });
         var noGoodsSaleOnFreeMap = new JsonObject
         {
@@ -1142,6 +1152,29 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 }
 
                 var selectableObjectives = new HashSet<string>(InitiallyIntegratedObjectives, StringComparer.Ordinal);
+                if (ReadBoolean(snapshot["renown"] as JsonObject, "met") == false &&
+                    !IsRenownObjectiveCurrentlySelectable(current.RootElement))
+                {
+                    var newlyBlocked = unavailableObjectives.Add("renown");
+                    MarkObjectiveUnavailable("renown", current.RootElement);
+                    if (objectiveAttemptCheckpointDirty && IsSafeObjectiveAttemptCheckpointState(current.RootElement))
+                        await PersistObjectiveAttemptCheckpointAsync(current.RootElement);
+                    if (newlyBlocked)
+                    {
+                        var currentState = current.RootElement.TryGetProperty("state", out var readinessStateElement) && readinessStateElement.ValueKind == JsonValueKind.Object
+                            ? JsonNode.Parse(readinessStateElement.GetRawText())?.AsObject() ?? new JsonObject()
+                            : new JsonObject();
+                        var currentParty = currentState["party"] as JsonObject;
+                        trace.Add(new JsonObject
+                        {
+                            ["stage"] = "objective-route-blocked-native-party-readiness",
+                            ["objectiveId"] = "renown",
+                            ["partyHealthy"] = ReadInt(currentParty, "healthy", -1),
+                            ["sendTroopsAvailable"] = IsSendTroopsCurrentlyAvailable(currentState),
+                            ["nativeActionSent"] = false
+                        });
+                    }
+                }
                 selectableObjectives.ExceptWith(unavailableObjectives);
                 JsonObject planner;
                 var resumeObjectiveId = pendingObjectiveId is not null && selectableObjectives.Contains(pendingObjectiveId) &&
@@ -1954,10 +1987,29 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         return string.Join("|",
             ReadString(context, "gameState"), ReadString(context, "menuId"), ReadBoolean(context, "encounterActive"),
             ReadString(location, "currentSettlementId"), ReadString(location, "targetSettlementId"), ReadString(location, "targetPartyId"),
-            ReadInt(party, "members", -1), ReadInt(party, "itemCount", -1), ReadInt(economy, "gold", -1),
+            ReadInt(party, "members", -1), ReadInt(party, "healthy", -1), ReadInt(party, "itemCount", -1), ReadInt(economy, "gold", -1),
             ReadDouble(economy, "renown").ToString("R", CultureInfo.InvariantCulture), ReadBoolean(captivity, "isCaptive"),
             nearbyPartyFingerprint);
     }
+
+    internal static bool IsRenownObjectiveCurrentlySelectable(JsonElement native)
+    {
+        if (!native.TryGetProperty("state", out var stateElement) || stateElement.ValueKind != JsonValueKind.Object)
+            return true;
+        var state = JsonNode.Parse(stateElement.GetRawText())?.AsObject();
+        var context = state?["context"] as JsonObject;
+        if (ReadString(context, "gameState") != "MapState") return true;
+        var party = state?["party"] as JsonObject;
+        var healthy = ReadInt(party, "healthy", -1);
+        if (healthy != 0) return true;
+        return IsSendTroopsCurrentlyAvailable(state!);
+    }
+
+    private static bool IsSendTroopsCurrentlyAvailable(JsonObject state) =>
+        (state["availableMenuOptions"] as JsonArray ?? new JsonArray())
+            .OfType<JsonObject>()
+            .Any(option => ReadString(option, "id") == "str_order_attack" &&
+                           ReadBoolean(option, "available") && ReadBoolean(option, "enabled"));
 
     internal static bool ShouldReconsiderUnavailableObjectives(bool journalProgressChanged) => journalProgressChanged;
 

@@ -38,17 +38,21 @@ internal static class AgentHostEstablishYourClanGoalLoop
             })
         };
         var plannerSystemPrompt = AgentHostDecisionCycle.BuildEstablishYourClanGoalPlannerPrompt(plannerRequest);
-        if (!plannerSystemPrompt.Contains("str_order_attack Send Troops/BattleSimulation", StringComparison.Ordinal) ||
-            !plannerSystemPrompt.Contains("real-time Mission is not a substitute", StringComparison.Ordinal) ||
-            !plannerSystemPrompt.Contains("When companions remain unmet", StringComparison.Ordinal) ||
-            !plannerSystemPrompt.Contains("current progress and Native feasibility", StringComparison.Ordinal) ||
-            !plannerSystemPrompt.Contains("nativeProgressionContext.partySizeLimit", StringComparison.Ordinal) ||
-            !plannerSystemPrompt.Contains("temporary over-limit troops can desert", StringComparison.Ordinal) ||
-            !plannerSystemPrompt.Contains("Gold is current carried balance, not lifetime earnings", StringComparison.Ordinal) ||
-            !plannerSystemPrompt.Contains("exactly one listed unmet ObjectiveId", StringComparison.Ordinal) ||
-            plannerSystemPrompt.Length > 1100 ||
-            plannerSystemPrompt.Contains("privateDiagnostic", StringComparison.Ordinal))
-            throw new AgentHostException("establish-clan-planner-native-renown-prerequisite-prompt-missing", "The read-only objective planner must know the Native Renown route, the current party limit/Tier1 over-limit attrition dependency and the volatile current-balance Gold objective.");
+        var plannerPromptFailures = new List<string>();
+        if (!plannerSystemPrompt.Contains("str_order_attack Send Troops/BattleSimulation", StringComparison.Ordinal)) plannerPromptFailures.Add("renown-route");
+        if (!plannerSystemPrompt.Contains("real-time Mission is not a substitute", StringComparison.Ordinal)) plannerPromptFailures.Add("mission-risk");
+        if (!plannerSystemPrompt.Contains("When companions remain unmet", StringComparison.Ordinal)) plannerPromptFailures.Add("companion-route");
+        if (!plannerSystemPrompt.Contains("currently allowed unmet ObjectiveId using Native feasibility", StringComparison.Ordinal)) plannerPromptFailures.Add("current-progress");
+        if (!plannerSystemPrompt.Contains("nativeProgressionContext.partySizeLimit", StringComparison.Ordinal)) plannerPromptFailures.Add("native-party-limit");
+        if (!plannerSystemPrompt.Contains("temporary over-limit troops can desert", StringComparison.Ordinal)) plannerPromptFailures.Add("attrition-risk");
+        if (!plannerSystemPrompt.Contains("Gold is current carried balance, not lifetime earnings", StringComparison.Ordinal)) plannerPromptFailures.Add("gold-balance");
+        if (!plannerSystemPrompt.Contains("exactly one currently allowed unmet ObjectiveId", StringComparison.Ordinal)) plannerPromptFailures.Add("one-objective");
+        if (!plannerSystemPrompt.Contains("Allowed ObjectiveId values for this request are exactly [gold, partySize, renown, companions]", StringComparison.Ordinal)) plannerPromptFailures.Add("exact-allowlist");
+        if (plannerSystemPrompt.Contains("reason <= 5 words", StringComparison.Ordinal)) plannerPromptFailures.Add("stale-rationale-instruction");
+        if (plannerSystemPrompt.Length > 1400) plannerPromptFailures.Add("prompt-over-budget:" + plannerSystemPrompt.Length);
+        if (plannerSystemPrompt.Contains("privateDiagnostic", StringComparison.Ordinal)) plannerPromptFailures.Add("private-diagnostic-leak");
+        if (plannerPromptFailures.Count > 0)
+            throw new AgentHostException("establish-clan-planner-native-renown-prerequisite-prompt-missing", "The read-only objective planner prompt contract failed: " + string.Join(",", plannerPromptFailures) + "; length=" + plannerSystemPrompt.Length + "; prompt=" + plannerSystemPrompt);
         var companionOnlyPlannerPrompt = AgentHostDecisionCycle.BuildEstablishYourClanGoalPlannerPrompt(new JsonObject
         {
             ["allowedActions"] = new JsonArray(new JsonObject
@@ -121,6 +125,9 @@ internal static class AgentHostEstablishYourClanGoalLoop
             Encoding.UTF8.GetByteCount(provider.FirstRequest?.ToJsonString() ?? string.Empty) > 1800 ||
             provider.FirstRequest?["observation"]?["state"]?["nativeProgressionContext"] is not JsonObject nativeProgressionContext ||
             ReadInt(nativeProgressionContext, "partySizeLimit", -1) != 20 || ReadInt(nativeProgressionContext, "clanTier", -1) != 0 ||
+            ReadInt(nativeProgressionContext, "partyHealthy", -1) != 6 || ReadInt(nativeProgressionContext, "partyWounded", -1) != 2 ||
+            ReadInt(nativeProgressionContext, "visibleHostileBanditCount", -1) != 0 ||
+            ReadBoolean(nativeProgressionContext, "sendTroopsAvailable") == true ||
             !providerCatalog[0]!["argumentValues"]!["ObjectiveId"]!.AsArray().Any(value => value?.GetValue<string>() == "partySize") ||
             providerCatalog[0]!["argumentValues"]!["ObjectiveId"]!.AsArray().Any(value => value?.GetValue<string>() is "gold" or "renown"))
             throw new AgentHostException("establish-clan-objective-planner-runtime-failed", "The read-only planner did not select an unmet objective from the exact current quest catalog.");
@@ -484,17 +491,34 @@ internal static class AgentHostEstablishYourClanGoalLoop
         var economy = state["economy"] as JsonObject;
         var location = state["location"] as JsonObject;
         var captivity = context?["captivity"] as JsonObject;
+        var visibleHostileBandits = (state["nearbyParties"] as JsonArray ?? new JsonArray())
+            .OfType<JsonObject>()
+            .Where(item => ReadBoolean(item, "hostile") == true && ReadString(item, "type") == "bandit")
+            .ToArray();
+        var enabledSendTroops = (state["availableMenuOptions"] as JsonArray ?? new JsonArray())
+            .OfType<JsonObject>()
+            .Any(option => ReadString(option, "id") == "str_order_attack" &&
+                           ReadBoolean(option, "available") == true && ReadBoolean(option, "enabled") == true);
         return new JsonObject
         {
             ["gameState"] = context?["gameState"]?.DeepClone(),
             ["menuId"] = context?["menuId"]?.DeepClone(),
             ["currentSettlementId"] = location?["currentSettlementId"]?.DeepClone(),
+            ["targetSettlementId"] = location?["targetSettlementId"]?.DeepClone(),
+            ["targetPartyId"] = location?["targetPartyId"]?.DeepClone(),
             ["clanTier"] = identity?["clanTier"]?.DeepClone(),
             ["clanRenown"] = economy?["renown"]?.DeepClone(),
             ["gold"] = economy?["gold"]?.DeepClone(),
             ["partyMembers"] = party?["members"]?.DeepClone(),
+            ["partyHealthy"] = party?["healthy"]?.DeepClone(),
+            ["partyWounded"] = party?["wounded"]?.DeepClone(),
+            ["partyMorale"] = party?["morale"]?.DeepClone(),
+            ["partyFood"] = party?["food"]?.DeepClone(),
             ["partySizeLimit"] = party?["sizeLimit"]?.DeepClone(),
             ["partyIsMoving"] = party?["isMoving"]?.DeepClone(),
+            ["visibleHostileBanditCount"] = visibleHostileBandits.Length,
+            ["largestVisibleHostileBanditMembers"] = visibleHostileBandits.Select(item => ReadInt(item, "members", 0)).DefaultIfEmpty(0).Max(),
+            ["sendTroopsAvailable"] = enabledSendTroops,
             ["encounterActive"] = context?["encounterActive"]?.DeepClone(),
             ["isCaptive"] = captivity?["isCaptive"]?.DeepClone()
         };
@@ -576,7 +600,18 @@ internal static class AgentHostEstablishYourClanGoalLoop
                     ["quests"] = quests,
                     ["context"] = new JsonObject { ["gameState"] = "MapState", ["encounterActive"] = false },
                     ["identity"] = new JsonObject { ["clanTier"] = 0 },
-                    ["party"] = new JsonObject { ["members"] = (int)(ReadNumber(snapshot["partySize"] as JsonObject, "current") ?? 0), ["sizeLimit"] = 20, ["isMoving"] = false },
+                    ["party"] = new JsonObject
+                    {
+                        ["members"] = (int)(ReadNumber(snapshot["partySize"] as JsonObject, "current") ?? 0),
+                        ["healthy"] = 6,
+                        ["wounded"] = 2,
+                        ["morale"] = 50.0,
+                        ["food"] = 0.95,
+                        ["sizeLimit"] = 20,
+                        ["isMoving"] = false
+                    },
+                    ["nearbyParties"] = new JsonArray(),
+                    ["availableMenuOptions"] = new JsonArray(),
                     ["economy"] = new JsonObject
                     {
                         ["gold"] = (int)(ReadNumber(snapshot["gold"] as JsonObject, "current") ?? 0),
