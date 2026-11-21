@@ -5,6 +5,7 @@ param(
     [switch]$RecruitmentBulkOnly,
     [string]$FreshStoryModeModel = '',
     [int]$SmokeTimeoutSeconds = 180,
+    [ValidateRange(64,2048)][int]$ProviderSmokeMaxOutputTokens = 128,
     [int]$SmokeStabilitySeconds = 8,
     [ValidateSet('Stop','Complete','UnsupportedGoal','MissingModel','ServiceUnavailable','ParentExited','StopTimeout','NonMap','CampaignRoundtrip','InputToggle')][string]$LifecycleScenario = 'Stop',
     [string]$TargetSettlementId = 'town_V1',
@@ -34,7 +35,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.624'
+$HarnessContractVersion = '7.628'
 if ($BattleMissionSoloMainHeroProbe -and $Phase -ne 'BattleMissionHostNativeAiAutopilotProbe') {
     throw 'The solo MainHero option is only valid with -Phase BattleMissionHostNativeAiAutopilotProbe.'
 }
@@ -896,7 +897,7 @@ foreach ($stage in $requestedStages) {
                 $mailboxExitCode = $LASTEXITCODE
                 if ($mailboxExitCode -ne 0) { throw "Local Agent Host mailbox regression failed with exit code $mailboxExitCode.`n$mailboxOutput" }
                 $providerEvidencePath = Join-Path $harnessTempDirectory 'AgentHostProvider'
-                $providerOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $harnessRoot 'Test-AgentHostProvider.ps1') -HostDllPath $agentHostDllPath -EvidencePath $providerEvidencePath 2>&1 | Out-String
+                $providerOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $harnessRoot 'Test-AgentHostProvider.ps1') -HostDllPath $agentHostDllPath -EvidencePath $providerEvidencePath -MaxOutputTokens $ProviderSmokeMaxOutputTokens 2>&1 | Out-String
                 $providerExitCode = $LASTEXITCODE
                 if ($providerExitCode -ne 0) { throw "Local Agent Host provider contract/smoke failed with exit code $providerExitCode.`n$providerOutput" }
                 [ordered]@{ mailboxRegression = $mailboxOutput; providerContractAndSmoke = $providerOutput } | ConvertTo-Json -Depth 8

@@ -266,7 +266,7 @@ internal static class AgentHostHarnessProgressTrace
             exception.ProviderRetryAfter, exception.ProviderErrorBodyKind, exception.ProviderErrorContentType, exception.ProviderErrorType, exception.ProviderErrorCode,
             exception.ProviderFallbackAttempts, exception.ProviderFallbackTrail, exception.ProviderToolCallsPresent, exception.ProviderToolCallCount,
             exception.ProviderResponseContentKind, exception.ProviderResponseContentCharacters, exception.ProviderFinishReason, exception.ProviderResponseModel,
-            exception.ProviderResponsePromptTokens, exception.ProviderResponseCompletionTokens, systemPrompt);
+            exception.ProviderResponsePromptTokens, exception.ProviderResponseCompletionTokens, systemPrompt, exception.ProviderDecisionFieldShape);
 
     internal static void RecordProviderFailure(JsonElement request, string failureCode, int? providerHttpStatus = null,
         string? providerRoute = null, string? providerOutputFormat = null, int? providerRetryAttempts = null, long? providerRetryWaitMilliseconds = null,
@@ -277,7 +277,8 @@ internal static class AgentHostHarnessProgressTrace
         int? providerFallbackAttempts = null, string? providerFallbackTrail = null,
         bool? providerToolCallsPresent = null, int? providerToolCallCount = null, string? providerResponseContentKind = null,
         int? providerResponseContentCharacters = null, string? providerFinishReason = null, string? providerResponseModel = null,
-        int? providerResponsePromptTokens = null, int? providerResponseCompletionTokens = null, string? systemPrompt = null)
+        int? providerResponsePromptTokens = null, int? providerResponseCompletionTokens = null, string? systemPrompt = null,
+        string? providerDecisionFieldShape = null)
     {
         var requestDiagnostics = BuildProviderFailureRequestDiagnostics(request, systemPrompt);
         AgentHostRuntimeProgressLog.RecordProviderFailure(request, failureCode, providerHttpStatus, providerRoute,
@@ -289,7 +290,7 @@ internal static class AgentHostHarnessProgressTrace
             providerFinishReason, providerResponseModel, providerResponsePromptTokens, providerResponseCompletionTokens,
             ReadInt(requestDiagnostics, "systemPromptBytes"), ReadInt(requestDiagnostics, "userPayloadBytes"),
             ReadInt(requestDiagnostics, "observationBytes"), requestDiagnostics["allowedActionNames"] as JsonArray,
-            requestDiagnostics["allowedControls"] as JsonArray, ReadString(requestDiagnostics, "decisionFeedbackKind"));
+            requestDiagnostics["allowedControls"] as JsonArray, ReadString(requestDiagnostics, "decisionFeedbackKind"), providerDecisionFieldShape);
         var harnessMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
         if (harnessMode is not ("visual-capture" or "agent-host-lifecycle-test")) return;
         var directory = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
@@ -338,6 +339,7 @@ internal static class AgentHostHarnessProgressTrace
                 ["providerResponseModel"] = providerResponseModel,
                 ["providerResponsePromptTokens"] = providerResponsePromptTokens,
                 ["providerResponseCompletionTokens"] = providerResponseCompletionTokens,
+                ["providerDecisionFieldShape"] = providerDecisionFieldShape,
                 ["systemPromptBytes"] = requestDiagnostics["systemPromptBytes"]?.DeepClone(),
                 ["userPayloadBytes"] = requestDiagnostics["userPayloadBytes"]?.DeepClone(),
                 ["observationBytes"] = requestDiagnostics["observationBytes"]?.DeepClone(),
@@ -996,7 +998,8 @@ internal static class AgentHostHarnessProgressTrace
                 providerRoute: "ovh/Mistral-Small-3.2-24B-Instruct-2506", providerOutputFormat: "required_tool_call",
                 providerToolCallsPresent: false, providerToolCallCount: 0, providerResponseContentKind: "String",
                 providerResponseContentCharacters: 47, providerFinishReason: "stop", providerResponseModel: "Mistral-Small-3.2-24B-Instruct-2506",
-                providerResponsePromptTokens: 1385, providerResponseCompletionTokens: 40);
+                providerResponsePromptTokens: 1385, providerResponseCompletionTokens: 40,
+                providerDecisionFieldShape: "action:String_control:String");
             const string failurePromptSentinel = "PRIVATE_SYSTEM_PROMPT";
             RecordProviderFailure(request.RootElement, missingToolCallDiagnostic, failurePromptSentinel);
             var missingToolCallLine = JsonNode.Parse(File.ReadAllLines(path).Last()) as JsonObject;
@@ -1013,6 +1016,7 @@ internal static class AgentHostHarnessProgressTrace
                 ReadString(missingToolCallLine, "providerResponseModel") != "Mistral-Small-3.2-24B-Instruct-2506" ||
                 ReadInt(missingToolCallLine, "providerResponsePromptTokens", -1) != 1385 ||
                 ReadInt(missingToolCallLine, "providerResponseCompletionTokens", -1) != 40 ||
+                ReadString(missingToolCallLine, "providerDecisionFieldShape") != "action:String_control:String" ||
                 ReadInt(missingToolCallLine, "systemPromptBytes", -1) != Encoding.UTF8.GetByteCount(failurePromptSentinel) ||
                 ReadInt(missingToolCallLine, "userPayloadBytes", -1) != Encoding.UTF8.GetByteCount(request.RootElement.GetRawText()) ||
                 ReadInt(missingToolCallLine, "observationBytes", -1) != Encoding.UTF8.GetByteCount(request.RootElement.GetProperty("observation").GetRawText()) ||

@@ -215,7 +215,8 @@ internal static class AgentHostRuntimeProgressLog
         string? providerResponseContentKind = null, int? providerResponseContentCharacters = null, string? providerFinishReason = null,
         string? providerResponseModel = null, int? providerResponsePromptTokens = null, int? providerResponseCompletionTokens = null,
         int? systemPromptBytes = null, int? userPayloadBytes = null, int? observationBytes = null,
-        JsonArray? allowedActionNames = null, JsonArray? allowedControls = null, string? decisionFeedbackKind = null)
+        JsonArray? allowedActionNames = null, JsonArray? allowedControls = null, string? decisionFeedbackKind = null,
+        string? providerDecisionFieldShape = null)
     {
         var runId = ReadString(request, "runId");
         if (!IsActiveProductRun(runId) || !TryGetPath(runId, out var path)) return;
@@ -261,6 +262,7 @@ internal static class AgentHostRuntimeProgressLog
                 ["providerResponseModel"] = providerResponseModel,
                 ["providerResponsePromptTokens"] = providerResponsePromptTokens,
                 ["providerResponseCompletionTokens"] = providerResponseCompletionTokens,
+                ["providerDecisionFieldShape"] = providerDecisionFieldShape,
                 ["systemPromptBytes"] = systemPromptBytes,
                 ["userPayloadBytes"] = userPayloadBytes,
                 ["observationBytes"] = observationBytes,

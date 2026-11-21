@@ -2,6 +2,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$HostDllPath,
     [Parameter(Mandatory = $true)][string]$EvidencePath,
+    [ValidateRange(64,2048)][int]$MaxOutputTokens = 128,
     [switch]$HealthOnly
 )
 
@@ -25,7 +26,9 @@ foreach ($setting in @(
 }
 
 # Keep this one-shot smoke bounded even when a larger production setting exists.
-$env:CHRONICLE_LLM_MAX_TOKENS = '128'
+# The caller may raise this small cap for a structured model that needs more room
+# to finish its schema response; it never changes the product run profile.
+$env:CHRONICLE_LLM_MAX_TOKENS = [string]$MaxOutputTokens
 
 $protocolSelfTestOutput = & dotnet $hostDll --provider-self-test 2>&1 | Out-String
 if ($LASTEXITCODE -ne 0) { throw "Provider transport-contract tests failed: $protocolSelfTestOutput" }

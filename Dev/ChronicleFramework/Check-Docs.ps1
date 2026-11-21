@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.624'
+$contractVersion = '7.628'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -270,6 +270,9 @@ if ($agentHostHarnessProgressTraceSource -notmatch 'AgentHostRuntimeProgressLog\
     $agentHostRuntimeProgressLogSource -notmatch 'systemPromptBytes' -or
     $agentHostRuntimeProgressLogSource -notmatch 'allowedActionNames' -or
     $agentHostHarnessProgressTraceSource -notmatch 'providerResponseCompletionTokens' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'providerDecisionFieldShape' -or
+    $agentHostRuntimeProgressLogSource -notmatch 'providerDecisionFieldShape' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'provider-decision-ambiguity-retains-safe-field-shape' -or
     $agentHostHarnessProgressTraceSource -notmatch 'providerProxyEndpointHostPort' -or
     $agentHostHarnessProgressTraceSource -notmatch 'host-progress-trace-provider-failure' -or
     $agentHostRuntimeControllerSource -notmatch 'CHRONICLE_LLM_PROXY_SELECTION_SOURCE' -or
@@ -1157,7 +1160,10 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerProfileTestSource -notmatch 'freellmapi-retry-after-delay-respects-overall-provider-timeout' -or
     $providerSmokeSource -notmatch 'function Resolve-ProviderSmokeTimeoutSeconds' -or
     $providerSmokeSource -notmatch 'Resolve-ProviderSmokeTimeoutSeconds \$null\) -ne 360' -or
-    $providerSmokeSource -notmatch "CHRONICLE_LLM_MAX_TOKENS = '128'" -or
+    $providerSmokeSource -notmatch '\[ValidateRange\(64,2048\)\]\[int\]\$MaxOutputTokens = 128' -or
+    $providerSmokeSource -notmatch '\$env:CHRONICLE_LLM_MAX_TOKENS = \[string\]\$MaxOutputTokens' -or
+    $harnessScript -notmatch '\[ValidateRange\(64,2048\)\]\[int\]\$ProviderSmokeMaxOutputTokens = 128' -or
+    $harnessScript -notmatch '-MaxOutputTokens \$ProviderSmokeMaxOutputTokens' -or
     $providerSmokeSource -notmatch 'EffectiveMaxOutputTokens = \[int\]\$env:CHRONICLE_LLM_MAX_TOKENS' -or
     $providerSmokeSource -match '\[ref\]\$effectiveTimeout' -or
     $providerProfileTestSource -notmatch 'freellmapi-429-accepts-observed-315-second-retry-and-fails-closed-outside-bounds' -or

@@ -299,6 +299,20 @@ internal static class ProviderContractSelfTest
             }
             catch (AgentHostException exception) when (exception.Code == "provider-decision-wrapper-invalid") { }
 
+            using var ambiguousDecision = JsonDocument.Parse("{\"action\":\"tradeConfirm\",\"control\":\"tradeConfirm\",\"arguments\":{}}");
+            try
+            {
+                _ = OllamaNativeProvider.NormalizeDecision(ambiguousDecision.RootElement, actionRequest.RootElement);
+                throw new AgentHostException("provider-self-test-ambiguous-shape-accepted", "The provider accepted simultaneous action and action-name control fields.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-decision-ambiguous")
+            {
+                if (exception.ProviderDecisionFieldShape != "action:String_control:String_arguments:Object")
+                    throw new AgentHostException("provider-self-test-ambiguous-shape-not-retained",
+                        $"An ambiguous decision must retain only its bounded field-name/type shape (actual={exception.ProviderDecisionFieldShape ?? "not-reported"}).");
+            }
+            results.Add(new { scenario = "provider-decision-ambiguity-retains-safe-field-shape", passed = true });
+
             var longRationale = string.Join(' ', Enumerable.Range(1, 25).Select(index => "word" + index));
             using var longActionDecision = JsonDocument.Parse(JsonSerializer.Serialize(new
             {

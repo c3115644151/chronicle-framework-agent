@@ -731,6 +731,10 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             int? completionTokens;
             int? promptCacheHitTokens = null;
             int? promptCacheMissTokens = null;
+            bool? providerToolCallsPresent = null;
+            int? providerToolCallCount = null;
+            string? providerResponseContentKind = null;
+            int? providerResponseContentCharacters = null;
             if (_settings.NativeOllama)
             {
                 if (root.TryGetProperty("done", out var completed) && completed.ValueKind == JsonValueKind.False)
@@ -765,6 +769,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 {
                     var hasToolCalls = messageElement.TryGetProperty("tool_calls", out var toolCalls);
                     var toolCallCount = hasToolCalls && toolCalls.ValueKind == JsonValueKind.Array ? toolCalls.GetArrayLength() : 0;
+                    providerToolCallsPresent = hasToolCalls;
+                    providerToolCallCount = toolCallCount;
                     if (toolCallCount == 0)
                     {
                         var hasContent = messageElement.TryGetProperty("content", out var contentElement);
@@ -772,6 +778,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                         var contentCharacters = hasContent && contentElement.ValueKind == JsonValueKind.String
                             ? contentElement.GetString()?.Length ?? 0
                             : 0;
+                        providerResponseContentKind = contentKind;
+                        providerResponseContentCharacters = contentCharacters;
                         var responseUsage = root.TryGetProperty("usage", out var responseUsageElement) ? responseUsageElement : default;
                         var responsePromptTokens = ReadNonNegativeInt(responseUsage, "prompt_tokens");
                         var responseCompletionTokens = ReadNonNegativeInt(responseUsage, "completion_tokens");
@@ -808,10 +816,14 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     {
                         var hasToolCalls = messageElement.TryGetProperty("tool_calls", out var toolCalls);
                         var toolCallCount = hasToolCalls && toolCalls.ValueKind == JsonValueKind.Array ? toolCalls.GetArrayLength() : 0;
+                        providerToolCallsPresent = hasToolCalls;
+                        providerToolCallCount = toolCallCount;
                         var hasContent = messageElement.TryGetProperty("content", out var missingContent);
                         throw new AgentHostException("provider-content-missing", $"The local OpenAI-compatible provider returned an incomplete structured message (hasContent={hasContent}; contentKind={(hasContent ? missingContent.ValueKind : JsonValueKind.Undefined)}; hasToolCalls={hasToolCalls}; toolCallCount={toolCallCount}; finishReason={finishReason}; format={responseFormatMode}).");
                     }
                     content = contentElement.GetString();
+                    providerResponseContentKind = contentElement.ValueKind.ToString();
+                    providerResponseContentCharacters = content?.Length ?? 0;
                 }
                 var usage = root.TryGetProperty("usage", out var usageValue) ? usageValue : default;
                 promptTokens = ReadNonNegativeInt(usage, "prompt_tokens");
@@ -823,12 +835,50 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 if (promptCacheMissTokens is null && promptTokens.HasValue)
                     promptCacheMissTokens = Math.Max(0, promptTokens.Value - (promptCacheHitTokens ?? 0));
             }
-            if (finishReason is "length" or "max_tokens")
-                throw new AgentHostException("provider-response-truncated", "The local model provider reached its output-token limit.");
-            if (string.IsNullOrWhiteSpace(content))
-                throw new AgentHostException("provider-content-empty", "The local model provider returned empty decision content.");
-            using var decisionDocument = ParseJson(Encoding.UTF8.GetBytes(content), "provider-decision-invalid-json");
-            var decision = NormalizeDecision(decisionDocument.RootElement, decisionRequestSnapshot.RootElement);
+            JsonObject decision;
+            JsonDocument? decisionDocument = null;
+            try
+            {
+                if (finishReason is "length" or "max_tokens")
+                    throw new AgentHostException("provider-response-truncated", "The local model provider reached its output-token limit.");
+                if (string.IsNullOrWhiteSpace(content))
+                    throw new AgentHostException("provider-content-empty", "The local model provider returned empty decision content.");
+                decisionDocument = ParseJson(Encoding.UTF8.GetBytes(content), "provider-decision-invalid-json");
+                decision = NormalizeDecision(decisionDocument.RootElement, decisionRequestSnapshot.RootElement);
+            }
+            catch (AgentHostException exception)
+            {
+                var decisionShape = exception.ProviderDecisionFieldShape ??
+                    (decisionDocument is null ? null : DescribeDecisionFields(decisionDocument.RootElement));
+                var route = SafeOptionalDiagnosticField(ReadResponseHeader(response, "X-Routed-Via"));
+                throw new AgentHostException(exception.Code, exception.Message, exception,
+                    providerHttpStatus: (int)response.StatusCode,
+                    providerRoute: route,
+                    providerOutputFormat: responseFormatMode,
+                    providerFailureStage: "decision-normalization",
+                    providerProxySelectionSource: _proxySelectionSource,
+                    providerProxyEndpointHostPort: _proxyEndpointHostPort,
+                    providerRequestBodyBytes: bodyBytes,
+                    providerResponseServer: SafeOptionalDiagnosticField(ReadResponseHeader(response, "Server")),
+                    providerResponseVia: SafeOptionalDiagnosticField(ReadResponseHeader(response, "Via")),
+                    providerResponseRequestId: SafeOptionalDiagnosticField(ReadResponseHeader(response, "X-Request-Id") ??
+                        ReadResponseHeader(response, "X-Correlation-Id") ?? ReadResponseHeader(response, "CF-Ray")),
+                    providerFallbackAttempts: ReadFallbackAttemptCount(response),
+                    providerFallbackTrail: SafeFallbackTrail(ReadResponseHeader(response, "X-Fallback-Trail")),
+                    providerToolCallsPresent: providerToolCallsPresent,
+                    providerToolCallCount: providerToolCallCount,
+                    providerResponseContentKind: providerResponseContentKind ?? (content is null ? null : "String"),
+                    providerResponseContentCharacters: providerResponseContentCharacters ?? content?.Length,
+                    providerDecisionFieldShape: decisionShape,
+                    providerFinishReason: SafeOptionalDiagnosticField(finishReason),
+                    providerResponseModel: SafeOptionalDiagnosticField(responseModel),
+                    providerResponsePromptTokens: promptTokens,
+                    providerResponseCompletionTokens: completionTokens);
+            }
+            finally
+            {
+                decisionDocument?.Dispose();
+            }
 
             var routedVia = ReadResponseHeader(response, "X-Routed-Via");
             if (!string.IsNullOrWhiteSpace(routedVia)) _lastProviderRoute = routedVia;
@@ -921,6 +971,14 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
 
     private static string? SafeOptionalDiagnosticField(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : SafeDiagnosticField(value);
+
+    private static string? DescribeDecisionFields(JsonElement decision)
+    {
+        if (decision.ValueKind != JsonValueKind.Object) return decision.ValueKind.ToString();
+        var shape = string.Join(",", decision.EnumerateObject().Take(12)
+            .Select(property => SafeDiagnosticField(property.Name) + ":" + property.Value.ValueKind));
+        return SafeOptionalDiagnosticField(shape);
+    }
 
     private static async Task<ProviderErrorMetadata> ReadSafeProviderErrorMetadataAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
@@ -1267,7 +1325,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         var controlNamesListedAction = !string.IsNullOrWhiteSpace(controlName) && controlName is not ("done" or "observeAgain") &&
             FindAllowedAction(request, controlName) is not null;
         if (controlNamesListedAction && !string.IsNullOrWhiteSpace(rawActionName))
-            throw new AgentHostException("provider-decision-ambiguous", "The local model supplied both an action and an action-name control.");
+            throw new AgentHostException("provider-decision-ambiguous", "The local model supplied both an action and an action-name control.",
+                providerDecisionFieldShape: DescribeDecisionFields(decision));
         var actionName = rawActionName ?? (controlNamesListedAction ? controlName : null);
         var isDone = ReadBoolean(decision, "done") == true || controlName == "done" || actionName == "done";
         var hasControl = !string.IsNullOrWhiteSpace(controlName) && controlName != "done" && !controlNamesListedAction;
@@ -1275,8 +1334,9 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         var hasAction = !string.IsNullOrWhiteSpace(actionName) && actionName is not ("observeAgain" or "done");
         if ((isDone ? 1 : 0) + (hasControl ? 1 : 0) + (hasObserveAgain && !hasControl ? 1 : 0) + (hasAction ? 1 : 0) != 1)
         {
-            var shape = string.Join(",", decision.EnumerateObject().Take(12).Select(property => property.Name + ":" + property.Value.ValueKind));
-            throw new AgentHostException("provider-decision-ambiguous", $"The local model must choose exactly one action, control, or stop; received fields [{shape}].");
+            var shape = DescribeDecisionFields(decision) ?? "unknown";
+            throw new AgentHostException("provider-decision-ambiguous", $"The local model must choose exactly one action, control, or stop; received fields [{shape}].",
+                providerDecisionFieldShape: shape);
         }
 
         if (isDone)
@@ -1698,7 +1758,7 @@ internal sealed class AgentHostException : Exception
         int? providerFallbackAttempts = null, string? providerFallbackTrail = null,
         bool? providerToolCallsPresent = null, int? providerToolCallCount = null, string? providerResponseContentKind = null,
         int? providerResponseContentCharacters = null, string? providerFinishReason = null, string? providerResponseModel = null,
-        int? providerResponsePromptTokens = null, int? providerResponseCompletionTokens = null) : base(message, innerException)
+        int? providerResponsePromptTokens = null, int? providerResponseCompletionTokens = null, string? providerDecisionFieldShape = null) : base(message, innerException)
     {
         Code = code;
         ProviderHttpStatus = providerHttpStatus;
@@ -1730,6 +1790,7 @@ internal sealed class AgentHostException : Exception
         ProviderResponseModel = providerResponseModel;
         ProviderResponsePromptTokens = providerResponsePromptTokens;
         ProviderResponseCompletionTokens = providerResponseCompletionTokens;
+        ProviderDecisionFieldShape = providerDecisionFieldShape;
     }
 
     internal string Code { get; }
@@ -1762,4 +1823,5 @@ internal sealed class AgentHostException : Exception
     internal string? ProviderResponseModel { get; }
     internal int? ProviderResponsePromptTokens { get; }
     internal int? ProviderResponseCompletionTokens { get; }
+    internal string? ProviderDecisionFieldShape { get; }
 }
