@@ -128,12 +128,14 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             throw new AgentHostException("establish-clan-autonomy-route-state-fingerprint-failed", "Natural Campaign time and time-mode changes alone must not reopen a blocked route; meaningful Native location, Party, health or economy changes must.");
         using var noHealthyNoBattleOptions = JsonDocument.Parse("""{"state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false},"party":{"healthy":0},"availableMenuOptions":[]}}""");
         using var noHealthySendTroops = JsonDocument.Parse("""{"state":{"context":{"gameState":"MapState","menuId":"encounter","encounterActive":true},"party":{"healthy":0},"availableMenuOptions":[{"id":"str_order_attack","available":true,"enabled":true}]}}""");
-        using var healedNoBattleOptions = JsonDocument.Parse("""{"state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false},"party":{"healthy":1},"availableMenuOptions":[]}}""");
+        using var healedNoBattleOptions = JsonDocument.Parse("""{"state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false},"party":{"healthy":1},"nearbyParties":[],"availableMenuOptions":[]}}""");
+        using var healthyVisibleBandit = JsonDocument.Parse("""{"state":{"context":{"gameState":"MapState","menuId":null,"encounterActive":false},"party":{"healthy":1},"nearbyParties":[{"id":"visible-bandit","type":"bandit","hostile":true,"members":3}],"availableMenuOptions":[]}}""");
         if (IsRenownObjectiveCurrentlySelectable(noHealthyNoBattleOptions.RootElement) ||
             !IsRenownObjectiveCurrentlySelectable(noHealthySendTroops.RootElement) ||
-            !IsRenownObjectiveCurrentlySelectable(healedNoBattleOptions.RootElement))
-            throw new AgentHostException("establish-clan-autonomy-renown-health-readiness-gate-failed", "With no healthy MainParty members and no enabled Native Send Troops option, Renown is temporarily unavailable; a fresh Native battle option or recovered party reopens it.");
-        results.Add(new { scenario = "establish-clan-autonomy-renown-route-waits-for-healthy-party-or-native-send-troops-and-reopens-after-recovery", passed = true });
+            IsRenownObjectiveCurrentlySelectable(healedNoBattleOptions.RootElement) ||
+            !IsRenownObjectiveCurrentlySelectable(healthyVisibleBandit.RootElement))
+            throw new AgentHostException("establish-clan-autonomy-renown-readiness-gate-failed", "Renown is temporarily unavailable without healthy MainParty members and a Native Send Troops option, or without any visible hostile Bandit target; recovery or a new visible target reopens it.");
+        results.Add(new { scenario = "establish-clan-autonomy-renown-route-requires-healthy-party-or-send-troops-and-visible-bandit", passed = true });
         results.Add(new { scenario = "establish-clan-autonomy-retries-partial-objective-after-child-journal-progress", passed = true });
         var noGoodsSaleOnFreeMap = new JsonObject
         {
@@ -2001,8 +2003,13 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         if (ReadString(context, "gameState") != "MapState") return true;
         var party = state?["party"] as JsonObject;
         var healthy = ReadInt(party, "healthy", -1);
-        if (healthy != 0) return true;
-        return IsSendTroopsCurrentlyAvailable(state!);
+        var sendTroopsAvailable = IsSendTroopsCurrentlyAvailable(state!);
+        if (healthy == 0 && !sendTroopsAvailable) return false;
+        if (ReadBoolean(context, "encounterActive")) return true;
+        var visibleHostileBanditCount = (state?["nearbyParties"] as JsonArray ?? new JsonArray())
+            .OfType<JsonObject>()
+            .Count(item => ReadBoolean(item, "hostile") && ReadString(item, "type") == "bandit");
+        return visibleHostileBanditCount > 0;
     }
 
     private static bool IsSendTroopsCurrentlyAvailable(JsonObject state) =>
@@ -2086,7 +2093,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         if (objectiveId == "gold") return termination is "provider-failure-returned-to-map" or "gold-sale-no-transferable-goods" or
             "gold-loot-no-current-visible-bandit" or "training-issue-no-visible-direct-offer" or "training-issue-no-safe-settlement-visible" or
             "training-issue-no-current-native-action" or "training-issue-battle-subflow-failed" or "training-issue-action-rejection-limit" or
-            "training-issue-direct-offer-unavailable" or "training-issue-direct-offer-rejected";
+            "training-issue-direct-offer-unavailable" or "training-issue-direct-offer-rejected" or "gold-sale-budget-exhausted-safe-map-recovered";
         if (objectiveId == "renown") return termination is "provider-failure-returned-to-map" or "no-safe-action" or "native-encounter-left-no-battle";
         if (objectiveId is "partySize" or "companions")
             return termination is "native-journal-refresh-pending" or "native-tavern-entry-transition-not-observed" or "recruitment-route-unavailable" or "companion-route-unavailable" or "companion-model-stopped" or "recruitment-model-stopped" or "recruitment-model-stopped-with-safe-actions" or "party-capacity-blocked-until-renown" or "provider-failure-returned-to-map" or "companion-provider-failure-returned-to-map";

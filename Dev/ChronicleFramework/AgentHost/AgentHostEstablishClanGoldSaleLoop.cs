@@ -460,6 +460,24 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "town", ["OptionId"] = "town_leave" } },
                 null, null, out var emptyMarketAction, out _, out _) || emptyMarketAction != "menuSelect")
             throw new AgentHostException("gold-sale-self-test-empty-market-not-exitable", "After Native Trade returns no transferable Goods, expose and accept only the current Town's Native Leave option so the route can inspect another market.");
+
+        var budgetSafeTradeReceipt = new JsonObject
+        {
+            ["status"] = "completed",
+            ["timeControlMode"] = "Stop",
+            ["state"] = new JsonObject
+            {
+                ["quests"] = new JsonArray(new JsonObject { ["id"] = QuestId }),
+                ["context"] = new JsonObject { ["gameState"] = "InventoryState", ["inquiryOpen"] = false, ["escapeMenuOpen"] = false, ["captivity"] = new JsonObject { ["isCaptive"] = false } },
+                ["inventoryScreen"] = new JsonObject { ["mode"] = "Trade", ["hasPendingChanges"] = false }
+            }
+        };
+        var budgetUnsafeTradeReceipt = budgetSafeTradeReceipt.DeepClone().AsObject();
+        budgetUnsafeTradeReceipt["state"]!["inventoryScreen"]!["hasPendingChanges"] = true;
+        if (!CanSafelyCancelUntouchedNativeTrade(budgetSafeTradeReceipt, saleActionCount: 0) ||
+            CanSafelyCancelUntouchedNativeTrade(budgetUnsafeTradeReceipt, saleActionCount: 0) ||
+            CanSafelyCancelUntouchedNativeTrade(budgetSafeTradeReceipt, saleActionCount: 1))
+            throw new AgentHostException("gold-sale-self-test-budget-cancel-gate-failed", "A decision-budget exit may cancel only a current Native Trade page with no pending changes, no committed sale and the original EYC active.");
         var mapAfterTownLeave = MapState(null, null, []);
         mapAfterTownLeave["location"]!["targetSettlementId"] = "town-a";
         if (BuildActionCatalog(mapAfterTownLeave, null, null, null).Count != 0 ||
@@ -474,6 +492,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         return [
             new { scenario = "gold-sale-orders-stable-goal-and-receipt-context-before-changing-map-state-for-prefix-cache", legacyCommonPrefixTokens = legacyGoldPrefixTokens, cacheOrderedCommonPrefixTokens = cacheOrderedGoldPrefixTokens, cacheablePrefixTokenGain = goldCacheablePrefixGain, passed = true },
             new { scenario = "gold-sale-offers-only-current-enabled-town-trade-entry", passed = true },
+            new { scenario = "gold-sale-budget-exit-may-cancel-only-an-unchanged-native-trade-screen", passed = true },
             new { scenario = "gold-sale-binds-one-current-native-goods-offer-and-positive-quote", passed = true },
             new { scenario = "gold-sale-native-move-start-transition-uses-one-bounded-observation", passed = true },
             new { scenario = "gold-sale-rejects-stale-offers-unsafe-targets-and-disabled-native-options", passed = true },
@@ -510,7 +529,27 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             compactTargetCandidates?.Count != 12 || compactTargetArgumentValues?.Count != 12 || rawTargetCandidates?.Count != 18 ||
             compactTargetCandidates.OfType<JsonObject>().Any(target => ReadString(target, "type") != "town" || ReadBoolean(target, "hostile") || ReadBoolean(target, "underSiege")))
             throw new AgentHostException("gold-sale-failure-receipt-selftest-failed", "The Host must correct malformed arguments before Native, preserve the full Native map receipt in trace, send only the current safe Town candidates to the model, preserve a later transport failure without replay, and leave the borrowed provider alive for its Campaign parent.");
-        return [new { scenario = "gold-sale-compacts-safe-town-targets-and-does-not-dispose-the-borrowed-campaign-provider", passed = true }];
+
+        var budgetExitClient = new FakeGoldSaleBudgetExitNativeClient();
+        var budgetExitProvider = new FakeGoldSaleBudgetExitProvider();
+        using var budgetExitRequest = JsonDocument.Parse("{\"runId\":\"gold-sale-budget-exit-selftest\",\"goal\":\"Raise Gold Journal progress with one Native sale.\",\"maxDecisions\":1,\"maxElapsedSeconds\":30}");
+        var budgetExitResult = await RunAsync(budgetExitRequest.RootElement, budgetExitClient, budgetExitClient, budgetExitProvider, CancellationToken.None);
+        var budgetExitFinalState = budgetExitResult["finalNativeState"]?["state"] as JsonObject;
+        var budgetExitTrace = budgetExitResult["trace"] as JsonArray;
+        if (ReadString(budgetExitResult, "status") != "failed" ||
+            ReadString(budgetExitResult, "failureCode") != "gold-sale-budget-exhausted-safe-map-recovered" ||
+            ReadInt(budgetExitResult, "decisions", 0) != 1 || ReadInt(budgetExitResult, "actionsExecuted", 0) != 2 ||
+            budgetExitProvider.CallCount != 1 || budgetExitClient.MenuTradeActions != 1 || budgetExitClient.TradeCancelCalls != 1 ||
+            budgetExitClient.TradeConfirmCalls != 0 || ReadString(budgetExitFinalState?["context"] as JsonObject, "gameState") != "MapState" ||
+            ReadString(budgetExitFinalState?["context"] as JsonObject, "menuId") != "town" ||
+            ReadInt(budgetExitFinalState?["economy"] as JsonObject, "gold", -1) != 32 ||
+            budgetExitTrace?.OfType<JsonObject>().All(step => ReadString(step, "stage") != "native-trade-decision-budget-exhausted-cancelled-unchanged-screen") == true)
+            throw new AgentHostException("gold-sale-budget-exit-selftest-failed", "At the cumulative decision limit, an untouched Native Trade screen must be cancelled once and verified back to the active Quest Map without a sale or extra model request.");
+
+        return [
+            new { scenario = "gold-sale-compacts-safe-town-targets-and-does-not-dispose-the-borrowed-campaign-provider", passed = true },
+            new { scenario = "gold-sale-decision-budget-exhaustion-cancels-unchanged-trade-and-returns-to-safe-map", passed = true }
+        ];
     }
 
     internal static async Task<JsonObject> RunAsync(
@@ -912,6 +951,50 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                         timeControlModeBefore, initialCaptivityRecovery);
                 }
             }
+        if (CanSafelyCancelUntouchedNativeTrade(currentNative, saleActionCount))
+        {
+            var beforeState = currentNative?["state"] as JsonObject ?? new JsonObject();
+            var beforeEconomy = beforeState["economy"] as JsonObject;
+            var goldBeforeBudgetExit = ReadInt(beforeEconomy, "gold", -1);
+            var campaignDayBeforeBudgetExit = ReadDouble(currentNative, "campaignDay", double.NaN);
+            var timeModeBeforeBudgetExit = ReadString(currentNative, "timeControlMode");
+            using var cancelResponse = await actionClient.ExecuteGoldSaleActionAsync("tradeCancel", new JsonObject(), elapsed.Token);
+            var cancelReceipt = ParseObject(cancelResponse.RootElement);
+            var cancelData = cancelReceipt["data"] as JsonObject;
+            if (ReadString(cancelReceipt, "status") != "completed" || ReadBoolean(cancelData, "cancelRequested") != true ||
+                ReadBoolean(cancelData, "discardConfirmed") || ReadBoolean(cancelData, "returnedToMap") != true ||
+                ReadBoolean(cancelData, "tradeStateStillActive"))
+                throw new AgentHostException("gold-sale-budget-safe-cancel-unverified", "Native did not confirm leaving the unchanged Trade screen through its original Cancel handler.");
+
+            actionCount++;
+            previousReceipt = BuildReceipt("tradeCancel", new JsonObject(), cancelReceipt);
+            using (var fresh = await stateClient.ReadStateAsync(elapsed.Token)) currentNative = ParseObject(fresh.RootElement);
+            var returnedState = currentNative["state"] as JsonObject ?? new JsonObject();
+            var goldAfterBudgetExit = ReadInt(returnedState["economy"] as JsonObject, "gold", -1);
+            if (!IsFreeCampaignMap(returnedState) || !HasActiveQuest(returnedState) ||
+                goldBeforeBudgetExit < 0 || goldAfterBudgetExit != goldBeforeBudgetExit ||
+                !double.IsFinite(campaignDayBeforeBudgetExit) ||
+                !double.IsFinite(ReadDouble(currentNative, "campaignDay", double.NaN)) ||
+                Math.Abs(campaignDayBeforeBudgetExit - ReadDouble(currentNative, "campaignDay", double.NaN)) > 0.000001 ||
+                timeModeBeforeBudgetExit != ReadString(currentNative, "timeControlMode"))
+                throw new AgentHostException("gold-sale-budget-safe-cancel-postcondition-failed", "Native Cancel did not return to the active EYC Map with unchanged Gold and Campaign time.");
+
+            trace.Add(new JsonObject
+            {
+                ["stage"] = "native-trade-decision-budget-exhausted-cancelled-unchanged-screen",
+                ["nativeAction"] = "tradeCancel",
+                ["nativeActionStatus"] = "completed",
+                ["nativeMapReturned"] = true,
+                ["goldUnchanged"] = true,
+                ["campaignDayUnchanged"] = true,
+                ["timeControlModeUnchanged"] = true,
+                ["saleActionCount"] = saleActionCount,
+                ["modelDecisionCount"] = decisionCount
+            });
+            return BuildFailure("gold-sale-budget-exhausted-safe-map-recovered",
+                "The decision limit was reached in an unchanged Native Trade screen; original Native Cancel restored the active Quest Map without sale or time changes.");
+        }
+
         throw new AgentHostException("gold-sale-budget-exhausted", "The bounded Native Gold sale loop did not complete one verified positive sale.");
         }
         catch (OperationCanceledException)
@@ -1624,6 +1707,20 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         return $"No safe Gold sale action is available: gameState={ReadString(context, "gameState") ?? "<none>"}; menuId={ReadString(context, "menuId") ?? "<none>"}; sellOfferCount={offers}.";
     }
 
+    private static bool CanSafelyCancelUntouchedNativeTrade(JsonObject? native, int saleActionCount)
+    {
+        if (native is null || saleActionCount != 0 || native["state"] is not JsonObject state || !HasActiveQuest(state)) return false;
+        var context = state["context"] as JsonObject;
+        var captivity = context?["captivity"] as JsonObject;
+        var inventory = state["inventoryScreen"] as JsonObject;
+        if (ReadString(context, "gameState") != "InventoryState" || ReadString(inventory, "mode") != "Trade" ||
+            ReadBoolean(context, "inquiryOpen") || ReadBoolean(context, "escapeMenuOpen") || ReadBoolean(captivity, "isCaptive"))
+            return false;
+        if (inventory?["hasPendingChanges"] is not JsonValue pendingValue || !pendingValue.TryGetValue<bool>(out var hasPendingChanges))
+            return false;
+        return !hasPendingChanges;
+    }
+
     private static JsonObject ParseObject(JsonElement element) => JsonNode.Parse(element.GetRawText())?.AsObject()
         ?? throw new AgentHostException("native-response-invalid", "Native returned no object.");
     private static int ReadInt(JsonElement element, string key, int fallback) => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(key, out var value) && value.TryGetInt32(out var number) ? number : fallback;
@@ -1734,5 +1831,107 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             throw new AgentHostException("provider-http-error", "Fake external provider rate-limit summary; no Native command followed.");
         }
         public void Dispose() { IsDisposed = true; }
+    }
+
+    private sealed class FakeGoldSaleBudgetExitNativeClient : IAgentHostGoldSaleNativeClient
+    {
+        private bool _tradeOpen;
+        internal int MenuTradeActions { get; private set; }
+        internal int TradeCancelCalls { get; private set; }
+        internal int TradeConfirmCalls { get; private set; }
+
+        public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var context = _tradeOpen
+                ? new JsonObject { ["gameState"] = "InventoryState", ["menuId"] = null, ["encounterActive"] = false, ["inquiryOpen"] = false, ["escapeMenuOpen"] = false, ["captivity"] = new JsonObject { ["isCaptive"] = false } }
+                : new JsonObject { ["gameState"] = "MapState", ["menuId"] = "town", ["encounterActive"] = false, ["inquiryOpen"] = false, ["escapeMenuOpen"] = false, ["captivity"] = new JsonObject { ["isCaptive"] = false } };
+            var state = new JsonObject
+            {
+                ["context"] = context,
+                ["storyModeEstablishClanStatus"] = new JsonObject { ["status"] = "active", ["questId"] = QuestId },
+                ["quests"] = new JsonArray(new JsonObject { ["id"] = QuestId }),
+                ["location"] = new JsonObject { ["currentSettlementId"] = "town_EW1", ["targetSettlementId"] = null, ["targetPartyId"] = null },
+                ["party"] = new JsonObject { ["members"] = 1, ["healthy"] = 1, ["wounded"] = 0, ["isMoving"] = false },
+                ["economy"] = new JsonObject { ["gold"] = 32, ["renown"] = 5 },
+                ["inventoryScreen"] = _tradeOpen ? new JsonObject { ["mode"] = "Trade", ["hasPendingChanges"] = false } : null,
+                ["availableMenuOptions"] = _tradeOpen ? new JsonArray() : new JsonArray(
+                    new JsonObject { ["id"] = "trade", ["available"] = true, ["enabled"] = true },
+                    new JsonObject { ["id"] = "town_leave", ["available"] = true, ["enabled"] = true, ["isLeave"] = true })
+            };
+            return Task.FromResult(JsonDocument.Parse(new JsonObject
+            {
+                ["status"] = "completed", ["processId"] = 321, ["campaignDay"] = 10.0,
+                ["timeControlMode"] = "Stop", ["state"] = state
+            }.ToJsonString()));
+        }
+
+        public Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken) =>
+            throw new AgentHostException("gold-sale-budget-exit-unexpected-campaign-action", "The budget recovery may only use the current Trade action and Native Cancel.");
+
+        public Task<JsonDocument> ReadQuestDetailsAsync(string questId, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (questId != QuestId) throw new AgentHostException("gold-sale-budget-exit-wrong-quest", "The budget recovery test must read the active original EYC Journal.");
+            var stages = new JsonArray(
+                new JsonObject { ["hasTask"] = true, ["currentProgress"] = 32, ["targetProgress"] = 2000, ["description"] = "Gold" },
+                new JsonObject { ["hasTask"] = true, ["currentProgress"] = 1, ["targetProgress"] = 25, ["description"] = "PartySize" },
+                new JsonObject { ["hasTask"] = true, ["currentProgress"] = 5, ["targetProgress"] = 50, ["description"] = "Renown" },
+                new JsonObject { ["hasTask"] = true, ["currentProgress"] = 0, ["targetProgress"] = 1, ["description"] = "Companion" });
+            return Task.FromResult(JsonDocument.Parse(new JsonObject
+            {
+                ["status"] = "completed",
+                ["data"] = new JsonObject { ["questId"] = QuestId, ["journalStages"] = stages }
+            }.ToJsonString()));
+        }
+
+        public Task<JsonDocument> ExecuteCaptivityRecoveryActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken) =>
+            throw new AgentHostException("gold-sale-budget-exit-unexpected-captivity", "The budget recovery fixture is not captive.");
+
+        public Task<JsonDocument> RespondNativeInquiryAsync(string token, string choice, CancellationToken cancellationToken) =>
+            throw new AgentHostException("gold-sale-budget-exit-unexpected-inquiry", "The unchanged Trade budget recovery must not answer an Inquiry.");
+
+        public Task<JsonDocument> SubmitStoryModeClanNameAsync(string token, string clanName, CancellationToken cancellationToken) =>
+            throw new AgentHostException("gold-sale-budget-exit-unexpected-clan-name", "The budget recovery fixture is already past StoryMode setup.");
+
+        public Task<JsonDocument> ExecuteGoldSaleActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (action == "menuSelect" && !_tradeOpen &&
+                ReadString(arguments, "menuId") == "town" && ReadString(arguments, "optionId") == "trade")
+            {
+                MenuTradeActions++;
+                _tradeOpen = true;
+                return Task.FromResult(JsonDocument.Parse("{\"status\":\"completed\",\"data\":{\"nativeHandler\":\"current-Town-trade-entry\"}}"));
+            }
+            if (action == "tradeCancel" && _tradeOpen && arguments.Count == 0)
+            {
+                TradeCancelCalls++;
+                _tradeOpen = false;
+                return Task.FromResult(JsonDocument.Parse("{\"status\":\"completed\",\"data\":{\"cancelRequested\":true,\"discardConfirmed\":false,\"returnedToMap\":true,\"tradeStateStillActive\":false}}"));
+            }
+            if (action == "tradeConfirm") TradeConfirmCalls++;
+            throw new AgentHostException("gold-sale-budget-exit-unexpected-native-action", "Only opening the Native Town Trade page and cancelling its untouched state are expected.");
+        }
+    }
+
+    private sealed class FakeGoldSaleBudgetExitProvider : IAgentHostDecisionProvider
+    {
+        internal int CallCount { get; private set; }
+        public string ModelId => "deterministic-gold-sale-budget-exit-selftest";
+        public string ConfigurationSource => "harness-fake-provider";
+        public Task CheckConfiguredModelAsync(CancellationToken cancellationToken) { cancellationToken.ThrowIfCancellationRequested(); return Task.CompletedTask; }
+        public Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CallCount++;
+            if (CallCount != 1) throw new AgentHostException("gold-sale-budget-exit-provider-overcalled", "The bounded budget fixture must not request a second model decision.");
+            return Task.FromResult(new ProviderDecisionResult("completed", ModelId, 2, 1, "selftest", new JsonObject
+            {
+                ["action"] = "menuSelect",
+                ["arguments"] = new JsonObject { ["MenuId"] = "town", ["OptionId"] = "trade" }
+            }));
+        }
+        public void Dispose() { }
     }
 }
