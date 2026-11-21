@@ -9,16 +9,12 @@ function Get-FreeLLMAPIModelExecutionStatus {
         'auto:fastest', 'auto:speed', 'auto:smartest', 'auto:cheapest', 'auto:budget')
     if ($routerStrategies -contains $ModelId) { return 'router' }
 
-    $routerStrategies = @('auto:smart', 'auto:fast', 'auto:cheap', 'auto:reliable', 'auto:balanced',
-        'auto:fastest', 'auto:speed', 'auto:smartest', 'auto:cheapest', 'auto:budget')
-    if ($routerStrategies -contains $ModelId) { return 'router' }
-
     $model = $ModelRows | Where-Object { [string]$_.id -ceq $ModelId } | Select-Object -First 1
     if ($null -eq $model) { return 'not-listed' }
+    if ($ModelId -match '^(auto|fusion)(:|$)' -or $ModelId -ceq 'free-router') { return 'router' }
 
     $status = [string]$model.execution_status
     if ($status -in @('ready', 'needsKey', 'exhausted')) { return $status }
-    if ($ModelId -match '^(auto|fusion)(:|$)') { return 'router' }
     return 'unknown'
 }
 

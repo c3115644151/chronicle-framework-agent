@@ -59,6 +59,8 @@ if ($providerUri.IsLoopback -and $providerUri.Port -eq 31415 -and $providerUri.A
         (Test-FreeLLMAPIModelExecutionReady -ModelRows $readinessFixture -ModelId 'unknown-model') -or
         (Get-FreeLLMAPIModelExecutionStatus -ModelRows $readinessFixture -ModelId 'absent-model') -ne 'not-listed' -or
         (Get-FreeLLMAPIModelExecutionStatus -ModelRows $readinessFixture -ModelId 'auto:typo-profile') -ne 'not-listed' -or
+        (Get-FreeLLMAPIModelExecutionStatus -ModelRows @([pscustomobject]@{ id='auto:noema-free'; execution_status='ready' }) -ModelId 'auto:noema-free') -ne 'router' -or
+        (Get-FreeLLMAPIModelExecutionStatus -ModelRows @([pscustomobject]@{ id='free-router'; execution_status='ready' }) -ModelId 'free-router') -ne 'router' -or
         -not (Test-FreeLLMAPIModelExecutionReady -ModelRows @([pscustomobject]@{ id = 'auto:noema-free' }) -ModelId 'auto:noema-free') -or
         -not (Test-FreeLLMAPIModelExecutionReady -ModelRows $readinessFixture -ModelId 'auto:reliable')) {
         throw 'FreeLLMAPI execution-readiness preflight readiness contract failed.'
@@ -114,6 +116,10 @@ if ($HealthOnly) {
     Set-Content -LiteralPath (Join-Path $evidencePath 'ProviderHealth.json') -Value $summaryJson -Encoding utf8
     $summaryJson
     return
+}
+
+if ($freeLlmApiProfile -and $freeLlmApiProfile.ModelExecutionStatus -eq 'router') {
+    throw 'FreeLLMAPI multi-provider router inference is blocked: this Harness has no verified free-only fallback chain and readable quota/cost receipt. Health-only checks remain available; select a directly verifiable model route before inference.'
 }
 
 $expectedClassification = if ($freeLlmApiProfile) { 'supported-village-tools-quest' } else { 'supported-map-arrival' }

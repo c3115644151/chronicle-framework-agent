@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.646'
+$contractVersion = '7.647'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -921,8 +921,13 @@ if ($agentHostEstablishClanAutonomySource -notmatch 'failed-objective-native-act
 }
 if ($agentLiveModelLoopSource -notmatch 'Get-FreeLLMAPIModelExecutionStatus -ModelRows @\(\$availableModelsResponse\.data\)' -or
     $agentLiveModelLoopSource -notmatch 'if \(\$modelExecutionStatus -eq ''not-listed''\)' -or
-    $agentLiveModelLoopSource -match '\[string\]\$env:CHRONICLE_LLM_MODEL -notin \$availableModelIds') {
-    throw 'Live-model preflight must use FreeLLMAPI router-aware execution status so documented auto strategy routes are not rejected for being absent from the model rows, while unknown profiles still fail before inference.'
+    $agentLiveModelLoopSource -match '\[string\]\$env:CHRONICLE_LLM_MODEL -notin \$availableModelIds' -or
+    $agentLiveModelLoopSource -notmatch 'modelExecutionStatus -eq ''router''' -or
+    $agentHostProviderSmokeSource -notmatch 'freeLlmApiProfile\.ModelExecutionStatus -eq ''router''' -or
+    $agentHostProviderSmokeSource.IndexOf('if ($HealthOnly)', [StringComparison]::Ordinal) -gt $agentHostProviderSmokeSource.IndexOf('if ($freeLlmApiProfile -and $freeLlmApiProfile.ModelExecutionStatus -eq ''router'')', [StringComparison]::Ordinal) -or
+    $harnessScript -notmatch 'FreeLLMAPI multi-provider router inference is blocked until its active chain is verified free-only' -or
+    $freeLlmApiProfileSource -notmatch 'ModelId -ceq ''free-router''') {
+    throw 'Live-model Harness must block unverified FreeLLMAPI automatic/fusion/free-router inference, while retaining zero-call health-only inspection and allowing direct routes to pass through current execution checks.'
 }
 $eycAutonomyLoopIndex = $agentLiveModelLoopSource.IndexOf('elseif ($EstablishYourClanAutonomyLoop)', [StringComparison]::Ordinal)
 $eycAutonomyLoopSource = if ($eycAutonomyLoopIndex -ge 0) { $agentLiveModelLoopSource.Substring($eycAutonomyLoopIndex, [Math]::Min(2500, $agentLiveModelLoopSource.Length - $eycAutonomyLoopIndex)) } else { '' }

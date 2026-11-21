@@ -192,6 +192,9 @@ if ($isFreeLlmApi) {
     if ($modelExecutionStatus -notin @('ready', 'router')) {
         throw "The configured FreeLLMAPI route is not executable now (execution_status=$modelExecutionStatus); no inference request was sent and no fixture was started. Wait for provider recovery or select another ready route."
     }
+    if ($modelExecutionStatus -eq 'router') {
+        throw 'Live-model inference through a FreeLLMAPI auto/fusion/free-router route is blocked until the active chain is verified free-only with readable quota/cost evidence; no model request or Native action was sent.'
+    }
 }
 elseif (@($availableModelsResponse.data | ForEach-Object { [string]$_.id }) -notcontains [string]$env:CHRONICLE_LLM_MODEL) {
     throw 'The configured model identifier is not listed by the configured provider; no inference request was sent and no fixture was started.'

@@ -35,7 +35,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.646'
+$HarnessContractVersion = '7.647'
 if ($BattleMissionSoloMainHeroProbe -and $Phase -ne 'BattleMissionHostNativeAiAutopilotProbe') {
     throw 'The solo MainHero option is only valid with -Phase BattleMissionHostNativeAiAutopilotProbe.'
 }
@@ -47,6 +47,9 @@ if ($Phase -ceq 'EycObjectiveCheckpointReadback' -and [string]::IsNullOrWhiteSpa
 }
 if ($Phase -in @('FreshStoryModeModelEvaluation','PersistentEycCampaign') -and [string]::IsNullOrWhiteSpace($FreshStoryModeModel)) {
     throw 'Select an explicit model ID with -FreshStoryModeModel; the configured provider catalog will verify it before any game or model request.'
+}
+if ($Phase -in @('FreshStoryModeModelEvaluation','PersistentEycCampaign') -and $FreshStoryModeModel -match '^(auto(?::|$)|fusion(?::|$)|free-router$)') {
+    throw 'FreeLLMAPI multi-provider router inference is blocked until its active chain is verified free-only with readable quota/cost evidence; no game or model request was sent.'
 }
 if (-not [string]::IsNullOrWhiteSpace($FreshStoryModeModel) -and ($FreshStoryModeModel.Length -gt 256 -or $FreshStoryModeModel -match '[\x00-\x1F\x7F]')) {
     throw 'FreshStoryModeModel must be a model ID of at most 256 characters with no control characters.'
