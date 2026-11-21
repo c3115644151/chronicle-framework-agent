@@ -330,6 +330,23 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             throw new AgentHostException("establish-clan-autonomy-stopped-move-recovery-classification-failed", "Only a stopped in-flight Native settlement move with a visible target and no encounter/modal may be reissued; active movement and party pursuit are excluded.");
         results.Add(new { scenario = "establish-clan-autonomy-detects-only-stopped-in-flight-native-settlement-moves", passed = true });
 
+        using var visibleSettlementTargetReceipt = JsonDocument.Parse("""
+            {"status":"completed","data":{"mapSettlementTargets":[{"id":"town-a","name":"Town A","type":"town","distance":12.0,"hostile":false,"underSiege":false}]}}
+            """);
+        using var missingSettlementTargetReceipt = JsonDocument.Parse("""
+            {"status":"completed","data":{"mapSettlementTargets":[{"id":"town-b","name":"Town B","type":"town","distance":12.0,"hostile":false,"underSiege":false}]}}
+            """);
+        var missingSettlementTargetDays = new Dictionary<string, double>(StringComparer.Ordinal);
+        if (!IsSafeVisibleSettlementTarget(JsonNode.Parse(visibleSettlementTargetReceipt.RootElement.GetRawText())?.AsObject(), "town-a") ||
+            IsSafeVisibleSettlementTarget(JsonNode.Parse(missingSettlementTargetReceipt.RootElement.GetRawText())?.AsObject(), "town-a") ||
+            !ShouldQueryStalledMoveTargetVisibility(missingSettlementTargetDays, "town-a", 91080.113))
+            throw new AgentHostException("establish-clan-autonomy-missing-stalled-move-target-replan-gate-failed", "An unlisted stale settlement target must replan without replay; a missing marker is rechecked only after Campaign time changes.");
+        missingSettlementTargetDays["town-a"] = 91080.113;
+        if (ShouldQueryStalledMoveTargetVisibility(missingSettlementTargetDays, "town-a", 91080.113) ||
+            !ShouldQueryStalledMoveTargetVisibility(missingSettlementTargetDays, "town-a", 91080.114))
+            throw new AgentHostException("establish-clan-autonomy-missing-stalled-move-target-refresh-failed", "A stale move marker may be refreshed once after Native Campaign time advances, but cannot trigger repeated reads in the same tick.");
+        results.Add(new { scenario = "establish-clan-autonomy-replans-stalled-move-when-target-is-not-in-current-safe-map-list", passed = true });
+
         var stoppedMoveResumeDays = new Dictionary<string, double>(StringComparer.Ordinal);
         if (!TryClaimStalledNativeMoveResume(stoppedMoveResumeDays, "town-a", 91080.113, out var firstTownResumeDay) ||
             double.IsFinite(firstTownResumeDay) ||
@@ -713,6 +730,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         var unavailableObjectiveFingerprints = new Dictionary<string, string>(StringComparer.Ordinal);
         var safeSettlementRefreshVisitedIds = new HashSet<string>(StringComparer.Ordinal);
         var resumedStalledNativeMoveCampaignDays = new Dictionary<string, double>(StringComparer.Ordinal);
+        var stalledMoveTargetsMissingFromVisibleMapDays = new Dictionary<string, double>(StringComparer.Ordinal);
         var lastNoProgressTownRestFingerprint = (string?)null;
         var nativeRestEligibilityRecorded = false;
         string? RememberCurrentSettlement(JsonElement nativeState)
@@ -987,60 +1005,84 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         return BuildResult("failed", "native-stalled-move-campaign-day-unavailable", false,
                             "The stopped Native settlement move has no finite Campaign day, so the Host cannot tell whether another original Move re-click would repeat without progress.",
                             "native-stalled-move-campaign-day-unavailable");
-                    if (!TryClaimStalledNativeMoveResume(resumedStalledNativeMoveCampaignDays, stalledMoveTarget, stalledMoveCampaignDay, out var previousResumeCampaignDay))
-                        return BuildResult("failed", "native-stalled-move-retry-exhausted", false,
-                            "The same Native settlement target remained stopped and Campaign time has not advanced since its last original Move re-click; no repeated re-click or explicit clock action was issued.",
-                            "native-stalled-move-retry-exhausted");
-
-                    var campaignDayBeforeResume = ReadDouble(current.RootElement, "campaignDay", double.NaN);
-                    var mapTargetsResponse = await client.ExecuteCampaignActionAsync("mapSettlementTargets", new JsonObject(), elapsed.Token);
-                    using var mapTargetsDocument = mapTargetsResponse;
-                    var mapTargetsReceipt = JsonNode.Parse(mapTargetsDocument.RootElement.GetRawText())?.AsObject() ?? new JsonObject();
-                    var safeVisibleTargets = AgentHostCampaignLoop.BuildSafeVisibleTargets(mapTargetsReceipt, settlementsOnly: true);
-                    if (!safeVisibleTargets.OfType<JsonObject>().Any(target => ReadString(target, "id") == stalledMoveTarget))
-                        return BuildResult("failed", "native-stalled-move-target-no-longer-visible", false,
-                            "The saved Native move target was not present in the latest safe settlement list; the Host did not invent or replay a hidden destination.",
-                            "native-stalled-move-target-no-longer-visible");
-
-                    var nativeMoveResponse = await client.ExecuteCampaignActionAsync("move",
-                        new JsonObject { ["settlementId"] = stalledMoveTarget }, elapsed.Token);
-                    using var nativeMoveDocument = nativeMoveResponse;
-                    var nativeMoveReceipt = JsonNode.Parse(nativeMoveDocument.RootElement.GetRawText())?.AsObject() ?? new JsonObject();
-                    nativeActions += ReadString(nativeMoveReceipt, "status") == "completed" ? 1 : 0;
-                    using var afterMoveResponse = await client.ReadStateAsync(elapsed.Token);
-                    var afterMoveState = afterMoveResponse.RootElement.TryGetProperty("state", out var afterMoveStateElement) && afterMoveStateElement.ValueKind == JsonValueKind.Object
-                        ? JsonNode.Parse(afterMoveStateElement.GetRawText())?.AsObject() ?? new JsonObject()
-                        : new JsonObject();
-                    var afterMoveContext = afterMoveState["context"] as JsonObject;
-                    var afterMoveLocation = afterMoveState["location"] as JsonObject;
-                    var afterMoveDay = ReadDouble(afterMoveResponse.RootElement, "campaignDay", double.NaN);
-                    var afterMoveMode = ReadString(afterMoveResponse.RootElement, "timeControlMode");
-                    var arrivedAtPreviousTarget = ReadString(afterMoveLocation, "currentSettlementId") == stalledMoveTarget;
-                    var newNativeBoundary = AgentHostCampaignStateFacts.IsActiveEncounter(afterMoveState) ||
-                        ReadBoolean(afterMoveContext, "inquiryOpen") || ReadBoolean(afterMoveContext, "escapeMenuOpen");
-                    var moveRestoredNativeTime = afterMoveMode is "StoppablePlay" or "UnstoppableFastForward";
-                    trace.Add(new JsonObject
+                    if (!ShouldQueryStalledMoveTargetVisibility(stalledMoveTargetsMissingFromVisibleMapDays, stalledMoveTarget, stalledMoveCampaignDay))
                     {
-                        ["stage"] = "native-stopped-move-reissued-through-current-target",
-                        ["targetSettlementId"] = stalledMoveTarget,
-                        ["campaignDayAtPreviousResume"] = double.IsFinite(previousResumeCampaignDay) ? JsonValue.Create(previousResumeCampaignDay) : null,
-                        ["campaignDayAtCurrentResume"] = stalledMoveCampaignDay,
-                        ["mapTargetsReceipt"] = mapTargetsReceipt.DeepClone(),
-                        ["nativeMoveReceipt"] = nativeMoveReceipt.DeepClone(),
-                        ["campaignDayBefore"] = double.IsFinite(campaignDayBeforeResume) ? JsonValue.Create(campaignDayBeforeResume) : null,
-                        ["campaignDayAfter"] = double.IsFinite(afterMoveDay) ? JsonValue.Create(afterMoveDay) : null,
-                        ["timeControlModeAfter"] = afterMoveMode,
-                        ["nativeMoveRestoredTime"] = moveRestoredNativeTime,
-                        ["arrivedAtPreviousTarget"] = arrivedAtPreviousTarget,
-                        ["newNativeBoundary"] = newNativeBoundary,
-                        ["explicitClockAction"] = false
-                    });
-                    if (ReadString(nativeMoveReceipt, "status") != "completed" ||
-                        !(moveRestoredNativeTime || arrivedAtPreviousTarget || newNativeBoundary))
-                        return BuildResult("failed", "native-stalled-move-resume-unverified", false,
-                            "Reissuing the original Native move did not verify resumed travel, arrival, or a new encounter/modal state; no clock command was substituted.",
-                            "native-stalled-move-resume-unverified");
-                    continue;
+                        trace.Add(new JsonObject
+                        {
+                            ["stage"] = "stalled-native-move-target-still-unlisted-replanned",
+                            ["targetStillCurrent"] = true,
+                            ["campaignDay"] = stalledMoveCampaignDay,
+                            ["nativeMoveReissued"] = false
+                        });
+                    }
+                    else
+                    {
+                        var mapTargetsResponse = await client.ExecuteCampaignActionAsync("mapSettlementTargets", new JsonObject(), elapsed.Token);
+                        using var mapTargetsDocument = mapTargetsResponse;
+                        var mapTargetsReceipt = JsonNode.Parse(mapTargetsDocument.RootElement.GetRawText())?.AsObject() ?? new JsonObject();
+                        var safeVisibleTargets = AgentHostCampaignLoop.BuildSafeVisibleTargets(mapTargetsReceipt, settlementsOnly: true);
+                        if (!IsSafeVisibleSettlementTarget(mapTargetsReceipt, stalledMoveTarget))
+                        {
+                            stalledMoveTargetsMissingFromVisibleMapDays[stalledMoveTarget] = stalledMoveCampaignDay;
+                            trace.Add(new JsonObject
+                            {
+                                ["stage"] = "stalled-native-move-target-unlisted-replanned",
+                                ["safeVisibleSettlementCount"] = safeVisibleTargets.Count,
+                                ["campaignDay"] = stalledMoveCampaignDay,
+                                ["nativeMoveReissued"] = false,
+                                ["parentDecisionAllowed"] = true
+                            });
+                        }
+                        else
+                        {
+                            stalledMoveTargetsMissingFromVisibleMapDays.Remove(stalledMoveTarget);
+                            if (!TryClaimStalledNativeMoveResume(resumedStalledNativeMoveCampaignDays, stalledMoveTarget, stalledMoveCampaignDay, out var previousResumeCampaignDay))
+                                return BuildResult("failed", "native-stalled-move-retry-exhausted", false,
+                                    "The same Native settlement target remained stopped and Campaign time has not advanced since its last original Move re-click; no repeated re-click or explicit clock action was issued.",
+                                    "native-stalled-move-retry-exhausted");
+
+                            var campaignDayBeforeResume = ReadDouble(current.RootElement, "campaignDay", double.NaN);
+                            var nativeMoveResponse = await client.ExecuteCampaignActionAsync("move",
+                                new JsonObject { ["settlementId"] = stalledMoveTarget }, elapsed.Token);
+                            using var nativeMoveDocument = nativeMoveResponse;
+                            var nativeMoveReceipt = JsonNode.Parse(nativeMoveDocument.RootElement.GetRawText())?.AsObject() ?? new JsonObject();
+                            nativeActions += ReadString(nativeMoveReceipt, "status") == "completed" ? 1 : 0;
+                            using var afterMoveResponse = await client.ReadStateAsync(elapsed.Token);
+                            var afterMoveState = afterMoveResponse.RootElement.TryGetProperty("state", out var afterMoveStateElement) && afterMoveStateElement.ValueKind == JsonValueKind.Object
+                                ? JsonNode.Parse(afterMoveStateElement.GetRawText())?.AsObject() ?? new JsonObject()
+                                : new JsonObject();
+                            var afterMoveContext = afterMoveState["context"] as JsonObject;
+                            var afterMoveLocation = afterMoveState["location"] as JsonObject;
+                            var afterMoveDay = ReadDouble(afterMoveResponse.RootElement, "campaignDay", double.NaN);
+                            var afterMoveMode = ReadString(afterMoveResponse.RootElement, "timeControlMode");
+                            var arrivedAtPreviousTarget = ReadString(afterMoveLocation, "currentSettlementId") == stalledMoveTarget;
+                            var newNativeBoundary = AgentHostCampaignStateFacts.IsActiveEncounter(afterMoveState) ||
+                                ReadBoolean(afterMoveContext, "inquiryOpen") || ReadBoolean(afterMoveContext, "escapeMenuOpen");
+                            var moveRestoredNativeTime = afterMoveMode is "StoppablePlay" or "UnstoppableFastForward";
+                            trace.Add(new JsonObject
+                            {
+                                ["stage"] = "native-stopped-move-reissued-through-current-target",
+                                ["targetSettlementId"] = stalledMoveTarget,
+                                ["campaignDayAtPreviousResume"] = double.IsFinite(previousResumeCampaignDay) ? JsonValue.Create(previousResumeCampaignDay) : null,
+                                ["campaignDayAtCurrentResume"] = stalledMoveCampaignDay,
+                                ["mapTargetsReceipt"] = mapTargetsReceipt.DeepClone(),
+                                ["nativeMoveReceipt"] = nativeMoveReceipt.DeepClone(),
+                                ["campaignDayBefore"] = double.IsFinite(campaignDayBeforeResume) ? JsonValue.Create(campaignDayBeforeResume) : null,
+                                ["campaignDayAfter"] = double.IsFinite(afterMoveDay) ? JsonValue.Create(afterMoveDay) : null,
+                                ["timeControlModeAfter"] = afterMoveMode,
+                                ["nativeMoveRestoredTime"] = moveRestoredNativeTime,
+                                ["arrivedAtPreviousTarget"] = arrivedAtPreviousTarget,
+                                ["newNativeBoundary"] = newNativeBoundary,
+                                ["explicitClockAction"] = false
+                            });
+                            if (ReadString(nativeMoveReceipt, "status") != "completed" ||
+                                !(moveRestoredNativeTime || arrivedAtPreviousTarget || newNativeBoundary))
+                                return BuildResult("failed", "native-stalled-move-resume-unverified", false,
+                                    "Reissuing the original Native move did not verify resumed travel, arrival, or a new encounter/modal state; no clock command was substituted.",
+                                    "native-stalled-move-resume-unverified");
+                            continue;
+                        }
+                    }
                 }
 
                 var nativeRestRecoveryFingerprint = BuildNoHealthyTownRestRecoveryFingerprint(current.RootElement);
@@ -2213,6 +2255,18 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         targetSettlementId = ReadString(location, "targetSettlementId") ?? string.Empty;
         return !string.IsNullOrWhiteSpace(targetSettlementId);
     }
+
+    internal static bool IsSafeVisibleSettlementTarget(JsonObject? receipt, string targetSettlementId) =>
+        receipt is not null && !string.IsNullOrWhiteSpace(targetSettlementId) &&
+        AgentHostCampaignLoop.BuildSafeVisibleTargets(receipt, settlementsOnly: true).OfType<JsonObject>()
+            .Any(target => string.Equals(ReadString(target, "id"), targetSettlementId, StringComparison.Ordinal));
+
+    internal static bool ShouldQueryStalledMoveTargetVisibility(
+        IDictionary<string, double> missingTargetsAtCampaignDay,
+        string targetSettlementId,
+        double campaignDay) =>
+        !string.IsNullOrWhiteSpace(targetSettlementId) && double.IsFinite(campaignDay) &&
+        (!missingTargetsAtCampaignDay.TryGetValue(targetSettlementId, out var priorDay) || campaignDay > priorDay);
 
     internal static bool ShouldReturnPausedNativeMoveToParent(JsonObject? child, JsonElement native, out string targetSettlementId)
     {
