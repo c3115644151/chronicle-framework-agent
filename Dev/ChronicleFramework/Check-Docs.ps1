@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.637'
+$contractVersion = '7.646'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -649,7 +649,11 @@ if ($harnessScript -notmatch "'AgentHostEstablishClanGoalPlannerEvaluation' \{ @
     $agentHostLiveModelLoopSource -notmatch 'NativeClockActions = @\(\$steps' -or
     $agentHostLiveModelLoopSource -notmatch 'objectiveId' -or
     $agentHostLiveModelLoopSource -notmatch 'FixtureUnchanged = \$fixtureUnchanged') {
-    throw 'W7-N must remain opt-in, use a disposable original StoryMode save with the exact naturally active quest, make real FreeLLMAPI decisions only, verify four objectives against Journal/native values without gameplay writes, and preserve source/time/world evidence.'
+    throw 'W7-N must remain opt-in, use a disposable original StoryMode save with the exact naturally active quest, make real decisions through the configured OpenAI-compatible provider, verify four objectives against Journal/native values without gameplay writes, and preserve source/time/world evidence.'
+}
+if ($agentCliSource -notmatch '\$TimeoutSeconds\s*=\s*\[Math\]::Min\(\$originalTimeoutSeconds,\s*5\)' -or
+    $agentCliSource -notmatch 'Stop-AgentProcessTree -RootProcessId \(\[int\]\$session\.processId\)') {
+    throw 'Agent-Cli stop must wait only briefly for Native acknowledgement, then always stop the owned Bannerlord process tree and restore Harness-owned files.'
 }
 if ($harnessScript -notmatch "'AgentHostCaptivityRecoveryEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostCaptivityRecoveryEvaluation'\) \}" -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostCaptivityRecoveryEvaluation'" -or
@@ -1762,8 +1766,9 @@ if ($protocolSource -notmatch 'inventoryDone refuses to skip the Native' -or $pr
 if ($battleFixtureSource -notmatch 'Start-ChronicleWindowVideoCapture' -or $battleFixtureSource -notmatch 'BattleToLoot-events\.jsonl' -or $battleFixtureSource -notmatch 'videoCapturePassed') { throw 'PostBattle must collect continuous HWND video, aligned action/state events, and enforce capture coverage.' }
 if ($battleFixtureSource -notmatch 'RenownProgressionPassed' -or $battleFixtureSource -notmatch 'ClanRenownDelta -gt 0' -or $battleFixtureSource -notmatch 'BattleRewardTelemetryPassed' -or $battleFixtureSource -notmatch 'playerContribution' -or $battleFixtureSource -notmatch 'winnerPartyAwards') { throw 'PostBattle must require both a positive renown delta and complete player reward telemetry for the P5 battle progression check.' }
 if ($battleFixtureSource -notmatch 'EycQuestObservedAtStart' -or $battleFixtureSource -notmatch 'EycJournalRenownBeforeBattle' -or $battleFixtureSource -notmatch 'EycJournalRenownAfterBattle' -or $battleFixtureSource -notmatch 'Read-EycJournalRenown' -or $harnessScript -notmatch '-LoadSaveName \$BattleSimulationSourceSaveName -Scenario PostBattle -CaptureFrames') { throw 'PostBattle must optionally read the original EYC Journal on a selected disposable source fixture and retain its before/after Renown progress alongside Clan Renown telemetry.' }
-if ($subModuleSource -notmatch 'preserveSoloMainParty \? 0 : Math\.Max\(0, 20 - mainParty\.MemberRoster\.TotalManCount\)' -or $subModuleSource -notmatch 'enemyCount = preserveSoloMainParty \? 1 : 19' -or $subModuleSource -notmatch 'fixtureOffset = preserveSoloMainParty \? 5\.0f : 0\.5f' -or $subModuleSource -notmatch 'enemyParty\.Ai\.DisableAi\(\)' -or $subModuleSource -notmatch 'opponentAiDisabledForBattleProbe' -or $subModuleSource -match 'RestartPlayerEncounter\(enemyParty\.Party' -or $battleFixtureSource -notmatch 'fixtureEnemyIsEncountered' -or $battleFixtureSource -notmatch 'Native pursuit lost the disposable looter target' -or $harnessScript -notmatch 'PostBattleChild\.log' -or $harnessScript -notmatch 'BattleFixtureChild\.log') { throw 'Battle fixtures must separately preserve a one-member MainParty/one-looter solo boundary at a non-overlapping map position or scale the ordinary roster, use Native pursuit/encounter, retain ordinary opponent AI for Retreat coverage, fail promptly on target loss, and retain child-process output.' }
+if ($subModuleSource -notmatch 'preserveSoloMainParty \? 0 : Math\.Max\(0, 20 - mainParty\.MemberRoster\.TotalManCount\)' -or $subModuleSource -notmatch 'enemyCount = preserveSoloMainParty \? 11 : 19' -or $subModuleSource -notmatch 'fixtureOffset = preserveSoloMainParty \? 5\.0f : 0\.5f' -or $subModuleSource -notmatch 'enemyParty\.Ai\.DisableAi\(\)' -or $subModuleSource -notmatch 'opponentAiDisabledForBattleProbe' -or $subModuleSource -match 'RestartPlayerEncounter\(enemyParty\.Party' -or $battleFixtureSource -notmatch 'fixtureEnemyIsEncountered' -or $battleFixtureSource -notmatch 'Native pursuit lost the disposable looter target' -or $harnessScript -notmatch 'PostBattleChild\.log' -or $harnessScript -notmatch 'BattleFixtureChild\.log') { throw 'Battle fixtures must preserve a one-member MainParty versus eleven hostile looters at a non-overlapping map position, scale ordinary rosters separately, use Native pursuit/encounter, retain opponent AI for Retreat coverage, fail promptly on target loss, and retain child-process output.' }
 if ($battleMissionFormationProbeSource -notmatch '\[switch\]\$SoloMainHero' -or $battleMissionFormationProbeSource -notmatch "Invoke-AgentCli 'resume'" -or $battleMissionFormationProbeSource -notmatch 'id -eq ''chronicle_harness_looters'' -and \$_.hostile' -or $battleMissionFormationProbeSource -notmatch 'Capture-NativeFrame' -or $battleMissionFormationProbeSource -notmatch 'native-target-selected-but-waiting' -or $battleMissionFormationProbeSource -notmatch 'nativeDeploymentPreconditionDiagnostic = \$hostMissionResult\.nativeDeploymentPreconditionDiagnostic' -or $battleMissionFormationProbeSource -notmatch 'nativeDeploymentCompletedByNative' -or $battleMissionFormationProbeSource -notmatch 'formationCount -gt 0' -or $battleMissionFormationProbeSource -notmatch 'nativeBattleStatusAfterHost' -or $battleMissionFormationProbeSource -notmatch 'HostNativeBattlePreconditionFailure\.bmp' -or $agentHostBattleMissionLoopSource -notmatch 'battle-mission-native-spontaneous-deployment-transition-unverified' -or $agentHostBattleMissionLoopSource -notmatch 'availablePlayerFormationCount > 0' -or $harnessScript -notmatch '\[switch\]\$BattleMissionSoloMainHeroProbe' -or $agentHostProgramSource -notmatch 'solo-battle-fixture') { throw 'The opt-in solo MainHero battle probe must assert a one-member Native MainParty, target its isolated hostile fixture, preserve the exact Host precondition diagnostic/post-failure Mission status, skip empty F6, and verify Native deployment reconciliation.' }
+if ($battleMissionFormationProbeSource -notmatch '\[switch\]\$SoloMainHero' -or $battleMissionFormationProbeSource -notmatch "Invoke-AgentCli 'resume'" -or $battleMissionFormationProbeSource -notmatch 'id -eq ''chronicle_harness_looters'' -and \$_.hostile' -or $battleMissionFormationProbeSource -notmatch 'Capture-NativeFrame' -or $battleMissionFormationProbeSource -notmatch 'native-target-selected-but-waiting' -or $battleMissionFormationProbeSource -notmatch 'nativeDeploymentPreconditionDiagnostic = \$hostMissionResult\.nativeDeploymentPreconditionDiagnostic' -or $battleMissionFormationProbeSource -notmatch 'nativeDeploymentCompletedByNative' -or $battleMissionFormationProbeSource -notmatch 'formationCount -gt 0' -or $battleMissionFormationProbeSource -notmatch 'nativeBattleStatusAfterHost' -or $battleMissionFormationProbeSource -notmatch 'HostNativeBattlePreconditionFailure\.bmp' -or $agentHostBattleMissionLoopSource -notmatch 'battle-mission-native-spontaneous-deployment-transition-unverified' -or $agentHostBattleMissionLoopSource -notmatch 'availablePlayerFormationCount > 0' -or $harnessScript -notmatch '\[switch\]\$BattleMissionSoloMainHeroProbe' -or $agentHostProgramSource -notmatch 'solo-battle-fixture' -or $subModuleSource -notmatch 'preserveSoloMainParty \? 11 : 19') { throw 'The opt-in solo MainHero battle probe must reproduce the EYC 1-vs-11 looter boundary, preserve the exact Host precondition diagnostic/post-failure Mission status, skip empty F6, and verify Native deployment reconciliation.' }
 if ($battleFixtureSource -notmatch 'inventoryLootItemCountAfter -ne 0' -or $battleFixtureSource -match 'inventoryItemsTransferred -lt \$inventoryLootItemCountBefore|inventoryItemsTransferred -gt 0') { throw 'PostBattle must verify Native Loot All by checking zero remaining loot; inventory slot-count growth is not a valid item-transfer count when existing stacks merge.' }
 if ($battleMissionFormationProbeSource -notmatch 'CHRONICLE_HARNESS_AGENT_INPUT_LOCK = ''1''' -or
     $battleMissionFormationProbeSource.IndexOf('$env:CHRONICLE_HARNESS_AGENT_INPUT_LOCK = ''1''', [StringComparison]::Ordinal) -gt $battleMissionFormationProbeSource.IndexOf("Invoke-AgentCli 'load'", [StringComparison]::Ordinal) -or
@@ -1954,6 +1959,35 @@ if ($harnessScript -notmatch "'BattleMissionHostNativeAiAutopilotProbe' \{ @\('P
     $battleMissionFormationProbeSource -notmatch 'deploymentStatusBeforeHost' -or
     $agentHostDecisionCycleSource -match 'missionAutopilotMainAgent|missionAutoDeploy') {
     throw 'The production Native battle loop integration probe must use a packaged Host and disposable battle, recover only from state-verified Native callbacks, record UI setup evidence, and keep internal battle actions out of model catalogs.'
+}
+if ($agentHostBattleMissionLoopSource -notmatch 'ReadBoolean\(deploymentUi, "viewInitialized"\)' -or
+    $agentHostBattleMissionLoopSource -notmatch 'ReadBoolean\(deploymentUi, "readyCallbackBound"\)' -or
+    $agentHostBattleMissionLoopSource -match 'if \(deploymentAutoDeployIssued && ReadBoolean\(deploymentUi, "viewAvailable"\)' -or
+    $agentHostBattleSimulationLoopSource -notmatch '_deploymentReadyCallbackStatusReads >= 2' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'readyCallbackBoundAfter\\":false') {
+    throw 'The Host must wait for the original Native Ready callback to be observed after Auto Deploy; a button being enabled alone is not a ready callback.'
+}
+if ($agentHostBattleMissionLoopSource -notmatch 'nonMainHeroAgentCount == 0' -or
+    $battleMissionAdapterSource -notmatch 'nonMainHeroAgentCount' -or
+    $battleMissionAdapterSource -notmatch 'agent\.IsHuman && agent\.Character != mainHeroCharacter' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'FakeDelegatedAttackBattleNativeClient\(soloMainHero: true\)' -or
+    $agentHostBattleSimulationLoopSource -notmatch 'battle-loop-self-test-solo-mainhero-waits-for-native-deployment') {
+    throw 'A lone MainHero must wait for the verified Native Deployment→Battle transition without invoking empty Auto Deploy/Ready/F6; the package test must cover that path separately from a troop-bearing side.'
+}
+$battleProbeScript = Get-Content -LiteralPath (Join-Path $harnessRoot 'Test-AgentBattleMissionFormationProbe.ps1') -Raw -Encoding UTF8
+if ($battleProbeScript -notmatch 'hostMissionResult\.missionModeAtEntry -eq ''Deployment''' -or
+    $battleProbeScript -notmatch '\$soloNativeDeploymentTransitionVerified\s*=\s*\$hostMissionResult\.nativeDeploymentCompletedByNative' -or
+    $battleProbeScript -notmatch 'missionModeObservedAtHostEntry') {
+    throw 'Battle Mission probe expectations must use the Host first-read Native state and preserve observed mode transitions.'
+}
+if ($battleMissionAdapterSource -notmatch 'viewInitialized' -or
+    $battleMissionAdapterSource -notmatch '"_gauntletLayer"' -or
+    $battleMissionAdapterSource -notmatch 'nativeCanDeployWithOrderOfBattle' -or
+    $battleMissionAdapterSource -notmatch 'CanPlayerSideDeployWithOrderOfBattle\(\)' -or
+    $battleMissionAdapterSource -notmatch 'playerRoleControllerAvailable' -or
+    $battleMissionAdapterSource -notmatch 'AssignPlayerRoleInTeamMissionController' -or
+    $agentHostBattleSimulationLoopSource -notmatch '_deploymentUiStatusReads\+\+\s*>=\s*1') {
+    throw 'Native Ready diagnostics must expose the Gauntlet view, original deployment eligibility, player-role controller, and lone-MainHero troop distinction; package simulation must cover delayed view readiness.'
 }
 if ($battleFixtureSource -notmatch 'IO\.File\]::Open\(\$script:VideoCaptureEventsPath' -or $battleFixtureSource -notmatch 'FileShare\]::ReadWrite' -or $battleFixtureSource -notmatch 'for \(\$attempt = 0; \$attempt -lt 6; \$attempt\+\+\)') { throw 'Battle event trace appends must tolerate transient readers/locks with bounded retry and shared access.' }
 if ($developmentDoc -notmatch "Contract version:\s*$([regex]::Escape($contractVersion))") {

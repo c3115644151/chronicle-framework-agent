@@ -996,8 +996,17 @@ switch ($Action) {
         $session = Get-Session
         $receipt = $null
         $commandError = $null
-        try { $receipt = Invoke-ProtocolCommand 'stop' }
+        $originalTimeoutSeconds = $TimeoutSeconds
+        try {
+            # A modal native conversation or broken Campaign tick must not hold
+            # cleanup for the caller's full command timeout. Give the game a
+            # short chance to acknowledge stop, then always stop the process
+            # tree that this session owns.
+            $TimeoutSeconds = [Math]::Min($originalTimeoutSeconds, 5)
+            $receipt = Invoke-ProtocolCommand 'stop'
+        }
         catch { $commandError = $_.Exception.Message }
+        finally { $TimeoutSeconds = $originalTimeoutSeconds }
         $processStopped = Stop-AgentProcessTree -RootProcessId ([int]$session.processId)
         Set-SafeExitMarker
         $engineConfigRestored = $false

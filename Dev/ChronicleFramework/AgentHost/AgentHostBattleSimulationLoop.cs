@@ -2143,6 +2143,22 @@ internal static class AgentHostBattleSimulationLoop
             ReadString(delegatedMissionTraceStep, "timeControlModeAtEnd") != "Stop")
             throw new AgentHostException("battle-loop-self-test-attack-deployment-f6-native-ai-fallback-not-integrated", $"A model-selected Native attack fallback must finish Native Deployment once, delegate troops once, hand MainHero to Native AI once, perform no per-poll model calls, return through Native aftermath, and preserve Campaign time. status={ReadString(delegatedMissionResult, "status")}; termination={ReadString(delegatedMissionResult, "termination")}; providerCalls={delegatedMissionProvider.CallCount}; actions={string.Join(",", delegatedMissionClient.Actions)}; trace={delegatedMissionTraceStep?.ToJsonString()}");
 
+        var soloMissionClient = new FakeDelegatedAttackBattleNativeClient(soloMainHero: true);
+        var soloMissionProvider = new FakeDelegatedAttackDecisionProvider();
+        var soloMissionResult = await RunAsync(request.RootElement, soloMissionClient, soloMissionProvider, CancellationToken.None);
+        var soloMissionTraceStep = (soloMissionResult["trace"] as JsonArray)?.OfType<JsonObject>()
+            .FirstOrDefault(step => ReadString(step, "stage") == "native-battle-mission-delegation");
+        if (ReadString(soloMissionResult, "status") != "completed" ||
+            ReadString(soloMissionResult, "termination") != "battle-resolved-and-verified" ||
+            soloMissionProvider.CallCount != 3 || soloMissionClient.NativeDeploymentCompletedByNative != true ||
+            soloMissionClient.DeploymentAutoDeployCalls != 0 || soloMissionClient.DeploymentFinishCalls != 0 ||
+            soloMissionClient.DelegationCalls != 0 || soloMissionClient.AutopilotCalls != 1 || soloMissionClient.ExitCalls != 1 ||
+            !soloMissionClient.Actions.SequenceEqual(new[] { "mapPartyTargets", "menuSelect:attack", "missionAutopilotMainAgent", "missionRetreat" }) ||
+            soloMissionTraceStep is null || !ReadBoolean(soloMissionTraceStep, "nativeDeploymentCompletedByNative") ||
+            !ReadBoolean(soloMissionTraceStep, "mainHeroNativeAiControlMaintained") ||
+            ReadString(soloMissionTraceStep, "missionModeAtEntry") != "Deployment")
+            throw new AgentHostException("battle-loop-self-test-solo-mainhero-waits-for-native-deployment", $"A solo MainHero must wait for the Native Deployment→Battle transition, then hand off MainHero without empty Auto Deploy/Ready/F6 calls. status={ReadString(soloMissionResult, "status")}; termination={ReadString(soloMissionResult, "termination")}; actions={string.Join(",", soloMissionClient.Actions)}; trace={soloMissionTraceStep?.ToJsonString()}");
+
         var escapeClient = new FakeBattleSimulationNativeClient(simulateNativeEscape: true);
         var escapeProvider = new FakeTryToGetAwayDecisionProvider();
         var escapeResult = await RunAsync(request.RootElement, escapeClient, escapeProvider, CancellationToken.None);
@@ -3237,14 +3253,21 @@ internal static class AgentHostBattleSimulationLoop
 
     private sealed class FakeDelegatedAttackBattleNativeClient : IAgentHostBattleSimulationNativeClient, IAgentHostBattleMissionNativeClient
     {
+        private readonly bool _soloMainHero;
         private int _stage;
         private int _missionReads;
+        private int _soloDeploymentStatusReads;
         private bool _autopilotStarted;
         private bool _deploymentAutoDeployed;
+        private int _deploymentUiStatusReads;
+        private int _deploymentReadyCallbackStatusReads;
+        internal FakeDelegatedAttackBattleNativeClient(bool soloMainHero = false) => _soloMainHero = soloMainHero;
         internal int DelegationCalls { get; private set; }
         internal int AutopilotCalls { get; private set; }
         internal int ExitCalls { get; private set; }
         internal int DeploymentFinishCalls { get; private set; }
+        internal int DeploymentAutoDeployCalls { get; private set; }
+        internal bool NativeDeploymentCompletedByNative { get; private set; }
         internal List<string> Actions { get; } = [];
 
         public Task<JsonDocument> ReadStateAsync(CancellationToken cancellationToken)
@@ -3268,7 +3291,7 @@ internal static class AgentHostBattleSimulationLoop
             {
                 ["context"] = context,
                 ["economy"] = new JsonObject { ["renown"] = 10.0, ["gold"] = 100 },
-                ["party"] = new JsonObject { ["members"] = 2, ["healthy"] = 1, ["wounded"] = 0, ["prisoners"] = 0 },
+                ["party"] = new JsonObject { ["members"] = _soloMainHero ? 1 : 2, ["healthy"] = 1, ["wounded"] = 0, ["prisoners"] = 0 },
                 ["location"] = new JsonObject { ["targetPartyId"] = null, ["currentSettlementId"] = null },
                 ["availableMenuOptions"] = _stage == 0
                     ? new JsonArray(
@@ -3334,13 +3357,26 @@ internal static class AgentHostBattleSimulationLoop
             cancellationToken.ThrowIfCancellationRequested();
             if (_stage is not (1 or 2))
                 throw new AgentHostException("battle-mission-integration-status-outside-mission", "Mission status is only valid after the Native attack option entered a Mission.");
+            if (_soloMainHero && _stage == 1 && _soloDeploymentStatusReads++ >= 1)
+            {
+                _stage = 2;
+                NativeDeploymentCompletedByNative = true;
+            }
             var mode = _stage == 1 ? "Deployment" : "Battle";
             var mainAgent = _stage == 1 ? "null" : _autopilotStarted
                 ? "{\"controller\":\"AI\",\"isPlayerControlled\":false,\"isAIControlled\":true,\"missionMainAgentControllerActive\":false,\"health\":100}"
                 : "{\"controller\":\"Player\",\"isPlayerControlled\":true,\"isAIControlled\":false,\"missionMainAgentControllerActive\":true,\"health\":100}";
-            var formationCount = _stage == 1 ? 0 : 1;
-            var deploymentUi = _stage == 1 ? ",\"deploymentUi\":{\"viewAvailable\":true,\"readyCallbackBound\":" + (_deploymentAutoDeployed ? "true" : "false") + ",\"canStartMission\":true,\"deploymentFinished\":false}" : string.Empty;
-            return Task.FromResult(JsonDocument.Parse($"{{\"processId\":321,\"status\":\"completed\",\"data\":{{\"supported\":true,\"missionMode\":\"{mode}\",\"campaignDay\":100.0,\"campaignTimeControlMode\":\"Stop\",\"mainAgent\":{mainAgent},\"playerTeam\":{{\"formationCount\":{formationCount}}}{deploymentUi}}}}}"));
+            var formationCount = _soloMainHero || _stage == 1 ? 0 : 1;
+            var viewInitialized = _stage != 1 || _deploymentUiStatusReads++ >= 1;
+            if (_stage == 1 && _deploymentAutoDeployed) _deploymentReadyCallbackStatusReads++;
+            var readyCallbackBound = _deploymentAutoDeployed && _deploymentReadyCallbackStatusReads >= 2;
+            var deploymentUi = _stage == 1
+                ? ",\"deploymentUi\":{\"viewAvailable\":true,\"viewInitialized\":" + (viewInitialized ? "true" : "false") + ",\"readyCallbackBound\":" + (readyCallbackBound ? "true" : "false") + ",\"canStartMission\":true,\"deploymentFinished\":false}"
+                : NativeDeploymentCompletedByNative
+                    ? ",\"deploymentUi\":{\"viewAvailable\":false,\"viewInitialized\":false,\"readyCallbackBound\":false,\"canStartMission\":false,\"deploymentFinished\":true}"
+                    : string.Empty;
+            var nonMainHeroAgentCount = _soloMainHero ? 0 : 1;
+            return Task.FromResult(JsonDocument.Parse($"{{\"processId\":321,\"status\":\"completed\",\"data\":{{\"supported\":true,\"missionMode\":\"{mode}\",\"campaignDay\":100.0,\"campaignTimeControlMode\":\"Stop\",\"mainAgent\":{mainAgent},\"playerTeam\":{{\"formationCount\":{formationCount},\"nonMainHeroAgentCount\":{nonMainHeroAgentCount}}}{deploymentUi}}}}}"));
         }
 
         public Task<JsonDocument> AutoDeployBattleMissionAsync(CancellationToken cancellationToken)
@@ -3348,9 +3384,12 @@ internal static class AgentHostBattleSimulationLoop
             cancellationToken.ThrowIfCancellationRequested();
             if (_stage != 1 || _deploymentAutoDeployed)
                 throw new AgentHostException("battle-mission-integration-auto-deploy-invalid", "Native Auto Deploy must be submitted once while the current field Mission is in Deployment.");
+            if (_deploymentUiStatusReads < 2)
+                throw new AgentHostException("battle-mission-integration-auto-deploy-before-view-ready", "Native Auto Deploy must wait until the original Gauntlet view has initialized.");
             _deploymentAutoDeployed = true;
+            DeploymentAutoDeployCalls++;
             Actions.Add("missionAutoDeploy");
-            return Task.FromResult(JsonDocument.Parse("{\"processId\":321,\"status\":\"completed\",\"data\":{\"nativeHandler\":\"MissionGauntletSingleplayerOrderUIHandler.OnAutoDeploy\",\"nativeAutoDeployHandler\":\"MissionOrderDeploymentControllerVM.ExecuteAutoDeploy\",\"nativeDeploymentHandler\":\"MissionOrderDeploymentControllerVM.ExecuteDeployPlayerSide\",\"nativeDeploymentSideReadyHandlerInvoked\":true,\"canStartMission\":true,\"readyCallbackBoundAfter\":true,\"deploymentFinishedAfter\":false,\"campaignDayBefore\":100.0,\"campaignDayAfter\":100.0,\"timeControlModeBefore\":\"Stop\",\"timeControlModeAfter\":\"Stop\"}}"));
+            return Task.FromResult(JsonDocument.Parse("{\"processId\":321,\"status\":\"completed\",\"data\":{\"nativeHandler\":\"MissionGauntletSingleplayerOrderUIHandler.OnAutoDeploy\",\"nativeAutoDeployHandler\":\"MissionOrderDeploymentControllerVM.ExecuteAutoDeploy\",\"nativeDeploymentHandler\":\"MissionOrderDeploymentControllerVM.ExecuteDeployPlayerSide\",\"nativeDeploymentSideReadyHandlerInvoked\":true,\"canStartMission\":true,\"readyCallbackBoundAfter\":false,\"deploymentFinishedAfter\":false,\"campaignDayBefore\":100.0,\"campaignDayAfter\":100.0,\"timeControlModeBefore\":\"Stop\",\"timeControlModeAfter\":\"Stop\"}}"));
         }
 
         public Task<JsonDocument> FinishBattleMissionDeploymentAsync(CancellationToken cancellationToken)
@@ -3358,6 +3397,8 @@ internal static class AgentHostBattleSimulationLoop
             cancellationToken.ThrowIfCancellationRequested();
             if (_stage != 1 || DeploymentFinishCalls != 0)
                 throw new AgentHostException("battle-mission-integration-deployment-finish-invalid", "Native deployment finish must be submitted once while the current field Mission is in Deployment.");
+            if (!_deploymentAutoDeployed || _deploymentReadyCallbackStatusReads < 2)
+                throw new AgentHostException("battle-mission-integration-ready-callback-not-bound", "Native Ready must not be submitted until the original OrderOfBattle callback is observed as bound after Auto Deploy.");
             DeploymentFinishCalls++;
             Actions.Add("missionFinishDeployment");
             _stage = 2;
@@ -3371,8 +3412,6 @@ internal static class AgentHostBattleSimulationLoop
                     ["nativeDeploymentHandler"] = "DeploymentHandler.FinishDeployment",
                     ["nativeUiView"] = "OrderOfBattle.xml",
                     ["canStartMission"] = true,
-                    ["readyCallbackBoundBefore"] = _deploymentAutoDeployed,
-                    ["deploymentFinishedAfter"] = true,
                     ["readyCallbackBoundBefore"] = true,
                     ["deploymentFinishedAfter"] = true,
                     ["modeBefore"] = "Deployment",
@@ -3403,7 +3442,8 @@ internal static class AgentHostBattleSimulationLoop
         public Task<JsonDocument> AutopilotMainAgentBattleMissionAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (_stage != 2 || DelegationCalls != 1 || AutopilotCalls != 0)
+            var expectedDelegationCalls = _soloMainHero ? 0 : 1;
+            if (_stage != 2 || DelegationCalls != expectedDelegationCalls || AutopilotCalls != 0)
                 throw new AgentHostException("battle-mission-integration-native-ai-handoff-invalid", "Native MainHero AI handoff must follow one F6 delegation in the same active Battle Mission.");
             AutopilotCalls++;
             Actions.Add("missionAutopilotMainAgent");

@@ -69,6 +69,8 @@ internal static class ChronicleAgentBattleMissionAdapter
             .Where(formation => formation != null && formation.CountOfUnits > 0)
             .OrderBy(formation => formation.FormationIndex)
             .ToArray() ?? Array.Empty<Formation>();
+        var mainHeroCharacter = Hero.MainHero?.CharacterObject;
+        var nonMainHeroAgentCount = team?.ActiveAgents.Count(agent => agent != null && agent.IsHuman && agent.Character != mainHeroCharacter) ?? 0;
         var selected = orderController?.SelectedFormations?.ToArray() ?? Array.Empty<Formation>();
         var json = new StringBuilder(768);
         json.Append("{\"schemaVersion\":1,");
@@ -81,6 +83,11 @@ internal static class ChronicleAgentBattleMissionAdapter
         AppendString(json, "missionTeamAIType", mission?.MissionTeamAIType.ToString());
         var deploymentUi = GetDeploymentUiStatus(mission);
         json.Append("\"deploymentUi\":{\"viewAvailable\":").Append(deploymentUi.ViewAvailable ? "true" : "false")
+            .Append(",\"viewInitialized\":").Append(deploymentUi.ViewInitialized ? "true" : "false")
+            .Append(",\"orderUiHandlerBound\":").Append(deploymentUi.OrderUiHandlerBound ? "true" : "false")
+            .Append(",\"nativeCanDeployWithOrderOfBattle\":").Append(deploymentUi.NativeCanDeployWithOrderOfBattle ? "true" : "false")
+            .Append(",\"playerRoleControllerAvailable\":").Append(deploymentUi.PlayerRoleControllerAvailable ? "true" : "false")
+            .Append(",\"playerIsGeneral\":").Append(deploymentUi.PlayerIsGeneral ? "true" : "false")
             .Append(",\"readyCallbackBound\":").Append(deploymentUi.ReadyCallbackBound ? "true" : "false")
             .Append(",\"canStartMission\":").Append(deploymentUi.CanStartMission ? "true" : "false")
             .Append(",\"deploymentFinished\":").Append(deploymentUi.DeploymentFinished ? "true" : "false").Append("},");
@@ -141,6 +148,7 @@ internal static class ChronicleAgentBattleMissionAdapter
         }
         json.Append(",\"camera\":").Append(BuildMissionCameraSnapshot(mission, cameraController));
         json.Append(",\"playerTeam\":{\"formationCount\":").Append(formations.Length)
+            .Append(",\"nonMainHeroAgentCount\":").Append(nonMainHeroAgentCount)
             .Append(",\"orderControllerAvailable\":").Append(orderController == null ? "false" : "true")
             .Append(",\"selectedFormationCount\":").Append(selected.Length)
             .Append(",\"formations\":[");
@@ -412,6 +420,9 @@ internal static class ChronicleAgentBattleMissionAdapter
         if (orderBattleHandler == null || deploymentOrderHandler == null)
             throw new InvalidOperationException("missionAutoDeploy requires the active Native Order of Battle and deployment order views");
         var orderDataSource = orderBattleHandler.GetType().GetField("_dataSource", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(orderBattleHandler);
+        var orderViewInitialized = orderBattleHandler.GetType().GetField("_gauntletLayer", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(orderBattleHandler) != null;
+        if (!orderViewInitialized)
+            throw new InvalidOperationException("missionAutoDeploy requires the original Native Order of Battle view to finish initialization");
         var canStartProperty = orderDataSource?.GetType().GetProperty("CanStartMission", BindingFlags.Instance | BindingFlags.Public);
         if (canStartProperty?.GetValue(orderDataSource) is not bool canStart || !canStart)
             throw new InvalidOperationException("missionAutoDeploy refuses while the Native Order of Battle does not allow starting");
@@ -460,18 +471,24 @@ internal static class ChronicleAgentBattleMissionAdapter
         return json.ToString();
     }
 
-    private static (bool ViewAvailable, bool ReadyCallbackBound, bool CanStartMission, bool DeploymentFinished) GetDeploymentUiStatus(Mission? mission)
+    private static (bool ViewAvailable, bool ViewInitialized, bool OrderUiHandlerBound, bool NativeCanDeployWithOrderOfBattle, bool PlayerRoleControllerAvailable, bool PlayerIsGeneral, bool ReadyCallbackBound, bool CanStartMission, bool DeploymentFinished) GetDeploymentUiStatus(Mission? mission)
     {
         if (mission == null || mission.Mode != MissionMode.Deployment)
-            return (false, false, false, mission?.IsDeploymentFinished ?? false);
+            return (false, false, false, false, false, false, false, false, mission?.IsDeploymentFinished ?? false);
         const string handlerTypeName = "TaleWorlds.MountAndBlade.GauntletUI.Mission.Singleplayer.MissionGauntletOrderOfBattleUIHandler";
         var handler = mission.MissionBehaviors.FirstOrDefault(behavior => behavior?.GetType().FullName == handlerTypeName);
         var viewModel = handler?.GetType().GetField("_dataSource", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(handler);
-        if (viewModel == null) return (false, false, false, mission.IsDeploymentFinished);
+        if (viewModel == null) return (false, false, false, false, false, false, false, false, mission.IsDeploymentFinished);
         var type = viewModel.GetType();
         var callback = type.GetField("_onBeginMission", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(viewModel) as Delegate;
         var canStart = type.GetProperty("CanStartMission", BindingFlags.Instance | BindingFlags.Public)?.GetValue(viewModel) is bool value && value;
-        return (true, callback != null && callback.GetInvocationList().Length > 0, canStart, mission.IsDeploymentFinished);
+        var viewInitialized = handler.GetType().GetField("_gauntletLayer", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(handler) != null;
+        var orderUiHandlerBound = handler.GetType().GetField("_orderUIHandler", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(handler) != null;
+        var nativeCanDeployWithOrderOfBattle = MissionGameModels.Current.BattleInitializationModel.CanPlayerSideDeployWithOrderOfBattle();
+        var playerRoleController = mission.MissionBehaviors.OfType<AssignPlayerRoleInTeamMissionController>().FirstOrDefault();
+        return (true, viewInitialized, orderUiHandlerBound, nativeCanDeployWithOrderOfBattle, playerRoleController != null,
+            mission.PlayerTeam?.IsPlayerGeneral ?? false,
+            callback != null && callback.GetInvocationList().Length > 0, canStart, mission.IsDeploymentFinished);
     }
 
     internal static string BeginMainAgentAiControllerProbe(double requestedDurationSeconds, bool handoffToFriendlySurrogate = false, bool fullNativeHandoff = false)

@@ -170,19 +170,32 @@ internal static class AgentHostBattleMissionLoop
                         deploymentFinishIssued: false, deploymentTransitionPollCount: deploymentTransitionPollCount, missionModeAtEntry: missionModeAtEntry,
                         nativeDeploymentPreconditionDiagnostic: BuildDeploymentPreconditionDiagnostic(deploymentStatus, deploymentPreconditionFailures));
                 }
-                if (ReadBoolean(deploymentUi, "viewAvailable") && ReadBoolean(deploymentUi, "readyCallbackBound") &&
-                    ReadBoolean(deploymentUi, "canStartMission") && !ReadBoolean(deploymentUi, "deploymentFinished"))
+                var deploymentPlayerTeam = deploymentData?["playerTeam"] as JsonObject;
+                var nonMainHeroAgentCount = ReadInt(deploymentPlayerTeam, "nonMainHeroAgentCount", -1);
+                if (nonMainHeroAgentCount < 0)
                 {
-                    deploymentUiReady = true;
-                    break;
+                    deploymentPreconditionFailures.Add("non-mainhero-agent-count-missing");
+                    return Failure("battle-mission-native-deployment-precondition-failed", native, false, 0, heroHealthStart, heroHealthStart,
+                        false, campaignDayStart, campaignDayStart, timeModeStart, timeModeStart, pollCount,
+                        deploymentFinishIssued: false, deploymentTransitionPollCount: deploymentTransitionPollCount, missionModeAtEntry: missionModeAtEntry,
+                        nativeDeploymentPreconditionDiagnostic: BuildDeploymentPreconditionDiagnostic(deploymentStatus, deploymentPreconditionFailures));
                 }
-                if (deploymentAutoDeployIssued && ReadBoolean(deploymentUi, "viewAvailable") &&
+                if (nonMainHeroAgentCount == 0)
+                {
+                    // A one-Hero side has no formations to auto-deploy. Native can advance this Deployment to Battle
+                    // on its own; don't invoke Auto Deploy/Ready against a VM whose callback is intentionally absent.
+                    if (deploymentPoll + 1 < missionEntryPollLimit) await Task.Delay(delay, cancellationToken);
+                    continue;
+                }
+                if (ReadBoolean(deploymentUi, "viewAvailable") && ReadBoolean(deploymentUi, "viewInitialized") &&
+                    ReadBoolean(deploymentUi, "readyCallbackBound") &&
                     ReadBoolean(deploymentUi, "canStartMission") && !ReadBoolean(deploymentUi, "deploymentFinished"))
                 {
                     deploymentUiReady = true;
                     break;
                 }
                 if (!deploymentAutoDeployIssued && ReadBoolean(deploymentUi, "viewAvailable") &&
+                    ReadBoolean(deploymentUi, "viewInitialized") &&
                     ReadBoolean(deploymentUi, "canStartMission") && !ReadBoolean(deploymentUi, "deploymentFinished"))
                 {
                     using var autoDeployResponse = await missionClient.AutoDeployBattleMissionAsync(cancellationToken);

@@ -621,7 +621,8 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
             var enemyParty = BanditPartyComponent.CreateLooterParty(
                 "chronicle_harness_looters", hostileClan, homeSettlement, false, partyTemplate, mainParty.Position + new Vec2(fixtureOffset, 0f));
             enemyParty.MemberRoster.Clear();
-            var enemyCount = preserveSoloMainParty ? 1 : 19;
+            // Match the real EYC failure boundary: a lone MainHero entering a much larger bandit party.
+            var enemyCount = preserveSoloMainParty ? 11 : 19;
             enemyParty.MemberRoster.AddToCounts(looterCharacter, enemyCount, insertAtFront: false, woundedCount: 0, xpChange: 0, removeDepleted: true, index: -1);
             if (disableOpponentAiForBattleProbe)
             {

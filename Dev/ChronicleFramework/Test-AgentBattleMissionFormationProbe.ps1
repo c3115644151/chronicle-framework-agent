@@ -562,7 +562,10 @@ try {
             $disposableSaveRemoved = -not (Test-Path -LiteralPath $disposableSavePath)
         }
         $expectedHostNativeActionsList = [System.Collections.Generic.List[string]]::new()
-        if ($missionState.state.mission.mode -eq 'Deployment') {
+        # Native can advance from Deployment to Battle while the Host is starting.
+        # Base the expected Host commands on the Host's own first observation,
+        # not the earlier polling snapshot captured before Host startup.
+        if ($hostMissionResult.missionModeAtEntry -eq 'Deployment') {
             if ($hostMissionResult.nativeDeploymentAutoDeployIssued) { $expectedHostNativeActionsList.Add('missionAutoDeploy') }
             if (-not $hostMissionResult.nativeDeploymentCompletedByNative) { $expectedHostNativeActionsList.Add('missionFinishDeployment') }
         }
@@ -611,6 +614,7 @@ try {
                 completed = [bool]$hostMissionResult.completed
                 termination = [string]$hostMissionResult.termination
                 nativeDeploymentPreconditionDiagnostic = $hostMissionResult.nativeDeploymentPreconditionDiagnostic
+                missionModeAtEntry = [string]$hostMissionResult.missionModeAtEntry
                 nativeDeploymentCompletedByNative = [bool]$hostMissionResult.nativeDeploymentCompletedByNative
                 delegationIssued = [bool]$hostMissionResult.delegationIssued
                 nativeDeploymentAutoDeployIssued = [bool]$hostMissionResult.nativeDeploymentAutoDeployIssued
@@ -669,9 +673,17 @@ try {
             -not (Compare-Object $expectedHostNativeActions $hostNativeActions.ToArray()) -and $result.sourceSaveUnchanged -and
             $result.disposableSaveRemoved -and $result.processStopped
         if ($SoloMainHero) {
+            $soloNativeDeploymentTransitionVerified = $hostMissionResult.nativeDeploymentCompletedByNative -eq $true -or
+                ($missionState.state.mission.mode -eq 'Deployment' -and
+                    $hostMissionResult.missionModeAtEntry -eq 'Battle' -and
+                    $deploymentStatusBeforeHost.data.missionMode -eq 'Battle')
             $soloControlDispositionValid = $hostMissionResult.mainHeroNativeAiControlMaintained -eq $true -or
                 ($hostMissionResult.mainAgentRemovedDuringMission -eq $true -and [bool]$stateAfterHost.state.context.captivity.isCaptive)
-            $result['passed'] = $hostNativeAftermathValid -and $hostMissionResult.nativeDeploymentCompletedByNative -eq $true -and
+            $result['soloNativeDeploymentTransitionVerified'] = [bool]$soloNativeDeploymentTransitionVerified
+            $result['missionModeObservedBeforeHost'] = [string]$missionState.state.mission.mode
+            $result['missionModeObservedAtHostEntry'] = [string]$hostMissionResult.missionModeAtEntry
+            $result['missionModeObservedBeforeHostStartup'] = [string]$deploymentStatusBeforeHost.data.missionMode
+            $result['passed'] = $hostNativeAftermathValid -and $soloNativeDeploymentTransitionVerified -and
                 $deploymentStatusBeforeHost.data.playerTeam.formationCount -eq 0 -and
                 $hostMissionResult.delegationIssued -eq $false -and $hostMissionResult.delegatedFormationCount -eq 0 -and
                 $hostMissionResult.nativeDeploymentFinishIssued -eq $false -and
