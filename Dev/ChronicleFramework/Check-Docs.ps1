@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.666'
+$contractVersion = '7.667'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -2115,8 +2115,11 @@ if ($harnessScript -notmatch "'EycObjectiveCheckpointReadback' \{ @\('Preflight'
     $eycObjectiveCheckpointReadbackSource -notmatch "UnaffordableHeroesSuppressedAtCurrentGold" -or
     $eycObjectiveCheckpointReadbackSource -notmatch "PSObject.Properties\['unaffordableHeroes'\]" -or
     $eycObjectiveCheckpointReadbackSource -notmatch "NativeParty" -or
-    $eycObjectiveCheckpointReadbackSource -notmatch "NativeClan") {
-    throw 'The EYC checkpoint readback must be a dedicated opt-in Native-only phase, verify saved attempt data, original Journal progress, MainParty capacity, Clan state and identity, preserve the source save, and make no model call.'
+    $eycObjectiveCheckpointReadbackSource -notmatch "NativeClan" -or
+    $eycObjectiveCheckpointReadbackSource -notmatch "NativeLocation" -or
+    $eycObjectiveCheckpointReadbackSource -notmatch "NativeTimeControlMode" -or
+    $eycObjectiveCheckpointReadbackSource -notmatch "MainPartyIsMoving") {
+    throw 'The EYC checkpoint readback must be a dedicated opt-in Native-only phase, verify saved attempt data, original Journal progress, location/movement/time, MainParty capacity, Clan state and identity, preserve the source save, and make no model call.'
 }
 if (-not (Test-Path (Join-Path $harnessRoot 'Test-AgentMapSettlementTargets.ps1'))) { throw 'MapSettlementTargets regression script is missing.' }
 foreach ($barterPath in @('AgentBarterAdapter.cs', 'AgentBarterViewCapture.cs', 'Test-AgentBarterTransactions.ps1')) {

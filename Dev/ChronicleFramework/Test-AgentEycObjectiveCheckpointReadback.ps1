@@ -32,7 +32,10 @@ $result = [ordered]@{
     UnaffordableHeroesSuppressedAtCurrentGold = 0
     NativeGameState = $null
     NativeMenuId = $null
+    NativeTimeControlMode = $null
+    NativeLocation = $null
     NativeParty = $null
+    MainPartyIsMoving = $null
     NativeClan = $null
     JournalQuestId = $null
     JournalObjectives = @()
@@ -165,6 +168,8 @@ try {
     $nativeParty = $stateReceipt.state.party
     $nativeEconomy = $stateReceipt.state.economy
     $nativeIdentity = $stateReceipt.state.identity
+    $nativeContext = $stateReceipt.state.context
+    $nativeLocation = $stateReceipt.state.location
     if ($null -eq $nativeParty -or $null -eq $nativeParty.PSObject.Properties['sizeLimit'] -or
         $null -eq $nativeIdentity -or $null -eq $nativeIdentity.PSObject.Properties['clanTier']) {
         throw 'The Native state did not expose current MainParty capacity and Clan tier alongside the Journal.'
@@ -176,6 +181,12 @@ try {
     $result.UnaffordableHeroCount = $unaffordableHeroEntries.Count
     $result.NativeGameState = [string]$stateReceipt.state.context.gameState
     $result.NativeMenuId = [string]$stateReceipt.state.context.menuId
+    $result.NativeTimeControlMode = [string]$nativeContext.timeControlMode
+    $result.NativeLocation = [ordered]@{
+        currentSettlementId = $nativeLocation.currentSettlementId
+        targetSettlementId = $nativeLocation.targetSettlementId
+        targetPartyId = $nativeLocation.targetPartyId
+    }
     $result.NativeParty = [ordered]@{
         members = $nativeParty.members
         healthy = $nativeParty.healthy
@@ -184,7 +195,9 @@ try {
         sizeLimit = $nativeParty.sizeLimit
         morale = $nativeParty.morale
         food = $nativeParty.food
+        isMoving = $nativeParty.isMoving
     }
+    $result.MainPartyIsMoving = $nativeParty.isMoving
     $result.NativeClan = [ordered]@{
         tier = $nativeIdentity.clanTier
         renown = $nativeEconomy.renown
