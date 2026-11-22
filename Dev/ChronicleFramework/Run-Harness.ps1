@@ -37,7 +37,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.659'
+$HarnessContractVersion = '7.660'
 $providerCredentialScript = Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1'
 function Get-HarnessConfiguredProviderCredential {
     . $providerCredentialScript
@@ -101,6 +101,10 @@ if ($Phase -in @('ConfiguredModelPreflight','FreshStoryModeModelEvaluation','Per
 }
 if ($Phase -in @('FreshStoryModeModelEvaluation','PersistentEycCampaign') -and $FreshStoryModeModel -match '^(auto(?::|$)|fusion(?::|$)|free-router$)') {
     throw 'FreeLLMAPI multi-provider router inference is blocked until its active chain is verified free-only with readable quota/cost evidence; no game or model request was sent.'
+}
+if ($Phase -ceq 'PersistentEycCampaign' -and $FreshStoryModeModel -match '^xdpool-aggregate/open_router/.+:free$' -and
+    ($PersistentEycMaxProviderDecisionsPerContinuation -gt 4 -or $PersistentEycMaxHttpRequestsPerDecision -ne 1)) {
+    throw 'OpenRouter :free persistent continuations are limited to four provider decisions and one HTTP request per decision; failed requests also consume the published 50/day quota. No game or model request was sent.'
 }
 if (-not [string]::IsNullOrWhiteSpace($FreshStoryModeModel) -and ($FreshStoryModeModel.Length -gt 256 -or $FreshStoryModeModel -match '[\x00-\x1F\x7F]')) {
     throw 'FreshStoryModeModel must be a model ID of at most 256 characters with no control characters.'

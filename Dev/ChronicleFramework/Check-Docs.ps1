@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.659'
+$contractVersion = '7.660'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -408,6 +408,9 @@ if ($agentHostProviderSmokeSource -notmatch 'AllowDshXdPoolFreeRoute' -or
     $harnessScript -notmatch 'pricing\.completion' -or
     $harnessScript -notmatch 'promptPrice -ne 0 -or \$completionPrice -ne 0' -or
     $harnessScript -notmatch 'ModelPriceReceiptAvailable = \$true' -or
+    $harnessScript -notmatch 'PersistentEycMaxProviderDecisionsPerContinuation -gt 4' -or
+    $harnessScript -notmatch 'PersistentEycMaxHttpRequestsPerDecision -ne 1' -or
+    $harnessScript -notmatch 'failed requests also consume the published 50/day quota' -or
     $harnessScript -notmatch 'ConfiguredModelPreflight' -or
     $harnessScript -notmatch "'ConfiguredModelPreflight' \{ @\('Preflight', 'ConfiguredModelPreflight'\) \}" -or
     $harnessScript -notmatch 'CatalogListed = \$true') {
