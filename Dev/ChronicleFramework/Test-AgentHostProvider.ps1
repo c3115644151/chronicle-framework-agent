@@ -119,10 +119,12 @@ if ($providerUri.IsLoopback -and $providerUri.Port -eq 31415 -and $providerUri.A
     if ($freeLlmApiProfile.ModelExecutionStatus -notin @('ready','router')) { throw 'Configured FreeLLMAPI route is not currently available; no inference request was sent.' }
 }
 else {
+    $isDshXdPoolWorkBuddyFreeRoute = $providerUri.IsLoopback -and $providerUri.Port -eq 8326 -and
+        $providerUri.AbsolutePath.TrimEnd('/') -eq '/v1' -and
+        $model -ceq 'xdpool/hy4flash-free'
     $isDshXdPoolFreeRoute = $providerUri.IsLoopback -and $providerUri.Port -eq 8326 -and
         $providerUri.AbsolutePath.TrimEnd('/') -eq '/v1' -and
-        $model -match '^xdpool-aggregate/(?!combo:)[^\r\n]+:free$' -and
-        $model -notmatch '(?i)(fallback|fusion|auto:)'
+        (($model -match '^xdpool-aggregate/(?!combo:)[^\r\n]+:free$' -and $model -notmatch '(?i)(fallback|fusion|auto:)') -or $isDshXdPoolWorkBuddyFreeRoute)
     $isDshWorkBuddyRoute = $providerUri.IsLoopback -and $providerUri.Port -eq 8328 -and
         $providerUri.AbsolutePath.TrimEnd('/') -eq '/v1' -and
         $model -match '^buddy:hy4flash(?:-free)?$'
@@ -134,6 +136,17 @@ else {
     }
     if ($providerUri.IsLoopback -and -not $isDshXdPoolFreeRoute -and -not $isDshWorkBuddyRoute) {
         throw 'Only a directly named DSH XD Pool or WorkBuddy model may use this loopback smoke path; no inference request was sent.'
+    }
+    if ($isDshXdPoolWorkBuddyFreeRoute) {
+        $dshXdPoolModelStatus = Get-DshXdPoolFreeModelStatus -ModelId $model -Region 'cn'
+        if (-not $dshXdPoolModelStatus.ReadyForBoundedInference) {
+            throw 'The selected DSH XD Pool WorkBuddy model is not enabled with a zero-multiplier free tag; no inference request was sent.'
+        }
+        # This route has no monetary price receipt. Keep the smoke to one request
+        # and the configured output cap while relying on the pool's zero multiplier.
+        $env:CHRONICLE_LLM_OUTPUT_MODE = 'json_object'
+        $env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER = 'max_tokens'
+        $env:CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION = '1'
     }
     if (-not $providerUri.IsLoopback -and $providerUri.Scheme -ne 'https') { throw 'Remote provider smoke requires HTTPS; no inference request was sent.' }
     $providerCredential = Get-ChronicleProviderCredential -Endpoint $providerUri
@@ -287,9 +300,9 @@ if ($freeLlmApiProfile -and $freeLlmApiProfile.ModelExecutionStatus -eq 'router'
     throw 'FreeLLMAPI multi-provider router inference is blocked: this Harness has no verified free-only fallback chain and readable quota/cost receipt. Health-only checks remain available; select a directly verifiable model route before inference.'
 }
 
-$expectedClassification = if ($freeLlmApiProfile) { 'supported-village-tools-quest' } elseif ($isDshWorkBuddyRoute) { 'supported-establish-your-clan' } else { 'supported-map-arrival' }
-$decisionGoal = if ($freeLlmApiProfile) { '完成当前可见的村庄工具委托' } elseif ($isDshWorkBuddyRoute) { '完成原版StoryMode“建立你的家族”主线任务' } else { '前往一个目前可见且安全的定居点' }
-$scopeControls = if ($freeLlmApiProfile) { @('supportedMapArrivalGoal','supportedVillageToolsQuestGoal','unsupportedGoal') } elseif ($isDshWorkBuddyRoute) { @('supportedEstablishYourClanGoal','unsupportedGoal') } else { @('supportedMapArrivalGoal','unsupportedGoal') }
+$expectedClassification = if ($freeLlmApiProfile) { 'supported-village-tools-quest' } elseif ($isDshWorkBuddyRoute -or $isDshXdPoolWorkBuddyFreeRoute) { 'supported-establish-your-clan' } else { 'supported-map-arrival' }
+$decisionGoal = if ($freeLlmApiProfile) { '完成当前可见的村庄工具委托' } elseif ($isDshWorkBuddyRoute -or $isDshXdPoolWorkBuddyFreeRoute) { '完成原版StoryMode“建立你的家族”主线任务' } else { '前往一个目前可见且安全的定居点' }
+$scopeControls = if ($freeLlmApiProfile) { @('supportedMapArrivalGoal','supportedVillageToolsQuestGoal','unsupportedGoal') } elseif ($isDshWorkBuddyRoute -or $isDshXdPoolWorkBuddyFreeRoute) { @('supportedEstablishYourClanGoal','unsupportedGoal') } else { @('supportedMapArrivalGoal','unsupportedGoal') }
 $decisionRequest = [ordered]@{ goal = $decisionGoal; goalScopeClassificationRequired = $true; goalScopeContract = 'native-campaign-goal-classification-v1'; observation = [ordered]@{ scope = 'goal-classification-only'; message = 'No goal-specific game action has run yet. Classify the complete requested outcome against the listed supported goals; only the selected goal executor will become available after this gate.' }; allowedActions = @(); allowedControls = $scopeControls }
 $startInfo = [Diagnostics.ProcessStartInfo]::new()
 $startInfo.FileName = (Get-Command dotnet -ErrorAction Stop).Source
@@ -396,6 +409,8 @@ $summary = [ordered]@{
     ProviderProxySelectionSource = [string]$hostHealth.proxySelectionSource
     ConfiguredModelId = $model
     ConfiguredRouteExecutionStatus = if ($freeLlmApiProfile) { $freeLlmApiProfile.ModelExecutionStatus } else { 'catalog-listed' }
+    DshXdPoolModelMultiplier = if ($isDshXdPoolWorkBuddyFreeRoute) { $dshXdPoolModelStatus.Multiplier } else { $null }
+    DshXdPoolFreePromotionTagVerified = if ($isDshXdPoolWorkBuddyFreeRoute) { $dshXdPoolModelStatus.HasFreePromotionTag } else { $false }
     EffectiveMaxOutputTokens = [int]$env:CHRONICLE_LLM_MAX_TOKENS
     MaxTokenParameter = if ([string]::IsNullOrWhiteSpace([string]$env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER)) { 'max_completion_tokens' } else { [string]$env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER }
     AvailableModelCount = [int]$hostHealth.availableModelCount

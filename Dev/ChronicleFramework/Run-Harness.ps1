@@ -38,7 +38,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.668'
+$HarnessContractVersion = '7.669'
 $providerCredentialScript = Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1'
 function Get-HarnessConfiguredProviderCredential {
     . $providerCredentialScript
@@ -107,8 +107,15 @@ if ($Phase -in @('ConfiguredModelPreflight','AgentHostProvider','AgentHostProvid
     $FreshStoryModeModel -match '^buddy:hy4flash(?:-free)?$' -and -not $AllowDshWorkBuddyGateway) {
     throw 'The DSH WorkBuddy gateway requires explicit -AllowDshWorkBuddyGateway opt-in; no game or model request was sent.'
 }
+if ($Phase -in @('ConfiguredModelPreflight','AgentHostProvider','AgentHostProviderHealth','PersistentEycCampaign') -and
+    $FreshStoryModeModel -ceq 'xdpool/hy4flash-free' -and -not $AllowDshXdPoolFreeRoute) {
+    throw 'The DSH XD Pool WorkBuddy free route requires explicit -AllowDshXdPoolFreeRoute opt-in; no game or model request was sent.'
+}
 if ($Phase -ceq 'FreshStoryModeModelEvaluation' -and $FreshStoryModeModel -match '^buddy:hy4flash(?:-free)?$') {
     throw 'The DSH WorkBuddy route is supported only by bounded Provider and PersistentEycCampaign phases; no unbounded fresh-Campaign model run was sent.'
+}
+if ($Phase -ceq 'FreshStoryModeModelEvaluation' -and $FreshStoryModeModel -ceq 'xdpool/hy4flash-free') {
+    throw 'The DSH XD Pool WorkBuddy free route is supported only by bounded Provider and PersistentEycCampaign phases; no unbounded fresh-Campaign model run was sent.'
 }
 if ($Phase -ceq 'PersistentEycCampaign' -and $FreshStoryModeModel -match '^xdpool-aggregate/open_router/.+:free$' -and
     ($PersistentEycMaxProviderDecisionsPerContinuation -gt 4 -or $PersistentEycMaxHttpRequestsPerDecision -ne 1)) {
@@ -117,6 +124,10 @@ if ($Phase -ceq 'PersistentEycCampaign' -and $FreshStoryModeModel -match '^xdpoo
 if ($Phase -ceq 'PersistentEycCampaign' -and $FreshStoryModeModel -match '^buddy:hy4flash(?:-free)?$' -and
     ($PersistentEycMaxProviderDecisionsPerContinuation -gt 4 -or $PersistentEycMaxHttpRequestsPerDecision -ne 1)) {
     throw 'DSH WorkBuddy persistent continuations are limited to four provider decisions and one HTTP request per decision. No game or model request was sent.'
+}
+if ($Phase -ceq 'PersistentEycCampaign' -and $FreshStoryModeModel -ceq 'xdpool/hy4flash-free' -and
+    ($PersistentEycMaxProviderDecisionsPerContinuation -gt 4 -or $PersistentEycMaxHttpRequestsPerDecision -ne 1)) {
+    throw 'DSH XD Pool WorkBuddy free continuations are limited to four provider decisions and one HTTP request per decision. No game or model request was sent.'
 }
 if (-not [string]::IsNullOrWhiteSpace($FreshStoryModeModel) -and ($FreshStoryModeModel.Length -gt 256 -or $FreshStoryModeModel -match '[\x00-\x1F\x7F]')) {
     throw 'FreshStoryModeModel must be a model ID of at most 256 characters with no control characters.'
@@ -642,13 +653,42 @@ foreach ($stage in $requestedStages) {
 
                     $isDshXdPoolFreeEndpoint = $endpoint.IsLoopback -and $endpoint.Port -eq 8326 -and $endpoint.AbsolutePath.TrimEnd('/') -eq '/v1'
                     if ($isDshXdPoolFreeEndpoint) {
-                        $isDirectDshFreeModel = $FreshStoryModeModel -match '^xdpool-aggregate/(?!combo:)[^\r\n]+:free$' -and
-                            $FreshStoryModeModel -notmatch '(?i)(combo:|fallback|fusion|auto:)'
+                        $isDshXdPoolWorkBuddyFreeModel = $FreshStoryModeModel -ceq 'xdpool/hy4flash-free'
+                        $isDirectDshFreeModel = ($FreshStoryModeModel -match '^xdpool-aggregate/(?!combo:)[^\r\n]+:free$' -and
+                            $FreshStoryModeModel -notmatch '(?i)(combo:|fallback|fusion|auto:)') -or $isDshXdPoolWorkBuddyFreeModel
                         if (-not $AllowDshXdPoolFreeRoute -or -not $isDirectDshFreeModel) {
-                            throw 'DSH campaign preflight requires explicit opt-in to one direct xdpool-aggregate/*:free model; combinations/fallbacks are blocked and no inference request was sent.'
+                            throw 'DSH campaign preflight requires explicit opt-in to one direct free XD Pool model; combinations/fallbacks are blocked and no inference request was sent.'
                         }
                         $credential = Get-ChronicleProviderCredential -Endpoint $endpoint
                         if ([string]::IsNullOrWhiteSpace([string]$credential.Value)) { throw 'The DSH OpenAI-compatible gateway credential is unavailable; no inference request was sent.' }
+                        if ($isDshXdPoolWorkBuddyFreeModel) {
+                            $dshFreeModelStatus = Get-DshXdPoolFreeModelStatus -ModelId $FreshStoryModeModel -Region 'cn'
+                            if (-not $dshFreeModelStatus.ReadyForBoundedInference) {
+                                throw 'The DSH XD Pool model is disabled or lacks its verified zero-multiplier free tag; no inference request was sent.'
+                            }
+                            $modelsUri = [UriBuilder]::new($endpoint)
+                            $modelsUri.Path = $endpoint.AbsolutePath.TrimEnd('/') + '/models'
+                            $modelsUri.Query = ''
+                            try { $catalog = Invoke-RestMethod -Uri $modelsUri.Uri -Headers @{ Authorization = "Bearer $($credential.Value)" } -TimeoutSec 12 }
+                            catch { throw 'The DSH loopback model-list preflight failed; no inference request was sent.' }
+                            $modelRows = @($catalog.data)
+                            $modelListed = @($modelRows | Where-Object { [string]$_.id -ceq $FreshStoryModeModel }).Count -gt 0
+                            if (-not $modelListed) { throw 'The selected DSH XD Pool WorkBuddy free model is absent from the current gateway catalog; no inference request was sent.' }
+                            [ordered]@{
+                                ProviderKind = 'DSH XD Pool WorkBuddy limited-time free model'
+                                ProviderHost = $endpoint.Host
+                                ModelId = $FreshStoryModeModel
+                                CatalogListed = $true
+                                AvailableModelCount = $modelRows.Count
+                                PoolMultiplier = $dshFreeModelStatus.Multiplier
+                                FreePromotionTagVerified = $dshFreeModelStatus.HasFreePromotionTag
+                                CurrencyPriceReceiptAvailable = $false
+                                InferenceRequests = 0
+                                BannerlordStarted = $false
+                                AutomaticFallbackEnabled = $false
+                            } | ConvertTo-Json -Depth 4
+                            return
+                        }
                         $modelRouteMatch = [regex]::Match($FreshStoryModeModel, '^xdpool-aggregate/([^/]+)/(.+)$')
                         if (-not $modelRouteMatch.Success) { throw 'The direct DSH model ID did not contain a provider segment; no inference request was sent.' }
                         $dshProviderId = $modelRouteMatch.Groups[1].Value

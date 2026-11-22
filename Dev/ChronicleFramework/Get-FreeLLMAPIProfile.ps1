@@ -86,6 +86,110 @@ function Get-ChronicleProviderCredential {
     return [pscustomobject]@{ Value = $null; Source = $null; IsFreeLLMAPI = $isFreeLlmApi; IsDshWorkBuddy = $false; EnvironmentVariableName = if ($isFreeLlmApi) { 'FREELLMAPI_API_KEY' } else { 'CHRONICLE_LLM_API_KEY' } }
 }
 
+function Get-DshXdPoolFreeModelStatus {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet('xdpool/hy4flash-free')][string]$ModelId,
+        [ValidateSet('cn','global')][string]$Region = 'cn'
+    )
+
+    $poolModelId = $ModelId.Substring('xdpool/'.Length)
+    try {
+        $status = Invoke-RestMethod -Uri 'http://127.0.0.1:2733/plugins/dsh-xdpool/status' -Method Get -TimeoutSec 5
+    }
+    catch {
+        # DSH 0.2 provider-id migration can remove the plugin status route while
+        # its saved profile and OpenAI gateway remain active. In that case,
+        # fail closed unless the exact model is selected in the current local
+        # DSH profile and a recent receipt recorded multiplier zero/free badge.
+        $dshHome = [string][Environment]::GetEnvironmentVariable('DSH_HOME', 'Process')
+        if ([string]::IsNullOrWhiteSpace($dshHome)) { $dshHome = [string][Environment]::GetEnvironmentVariable('DSH_HOME', 'User') }
+        if ([string]::IsNullOrWhiteSpace($dshHome)) { $dshHome = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)) '.dsh' }
+        $settingsPath = Join-Path $dshHome 'profiles/desktop/cordis.patch.yml'
+        $yamlModule = Join-Path $dshHome 'profiles/desktop/node_modules/yaml/dist/index.js'
+        if (-not (Test-Path -LiteralPath $settingsPath -PathType Leaf) -or -not (Test-Path -LiteralPath $yamlModule -PathType Leaf)) {
+            throw 'The DSH model status route and a parseable local profile are unavailable; no inference request was sent.'
+        }
+        $selectionKey = if ($Region -ceq 'cn') { 'modelSelectionCn' } else { 'modelSelectionGlobal' }
+        $nodeScript = @'
+const fs = require('fs');
+const YAML = require(process.env.CHRONICLE_DSH_YAML_MODULE);
+const doc = YAML.parse(fs.readFileSync(process.env.CHRONICLE_DSH_SETTINGS_PATH, 'utf8'));
+const key = process.env.CHRONICLE_DSH_MODEL_SELECTION_KEY;
+const target = process.env.CHRONICLE_DSH_POOL_MODEL_ID;
+const selections = [];
+function visit(value) {
+  if (!value || typeof value !== 'object') return;
+  if (Array.isArray(value)) { for (const item of value) visit(item); return; }
+  if (Object.prototype.hasOwnProperty.call(value, key)) selections.push(value[key]);
+  for (const [name, child] of Object.entries(value)) {
+    if (/key|token|secret|password|auth/i.test(name)) continue;
+    visit(child);
+  }
+}
+visit(doc);
+const value = selections[0];
+const enabled = Array.isArray(value) ? value : value && Array.isArray(value.enabledModelIds) ? value.enabledModelIds : [];
+const selected = selections.length === 1 && enabled.includes(target);
+console.log(JSON.stringify({ selectionDocumentCount: selections.length, selected }));
+'@
+        $nodePath = (Get-Command node -ErrorAction Stop).Source
+        $environmentNames = @('CHRONICLE_DSH_YAML_MODULE','CHRONICLE_DSH_SETTINGS_PATH','CHRONICLE_DSH_MODEL_SELECTION_KEY','CHRONICLE_DSH_POOL_MODEL_ID')
+        $previousEnvironment = @{}
+        foreach ($name in $environmentNames) { $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
+        try {
+            [Environment]::SetEnvironmentVariable('CHRONICLE_DSH_YAML_MODULE', $yamlModule, 'Process')
+            [Environment]::SetEnvironmentVariable('CHRONICLE_DSH_SETTINGS_PATH', $settingsPath, 'Process')
+            [Environment]::SetEnvironmentVariable('CHRONICLE_DSH_MODEL_SELECTION_KEY', $selectionKey, 'Process')
+            [Environment]::SetEnvironmentVariable('CHRONICLE_DSH_POOL_MODEL_ID', $poolModelId, 'Process')
+            $selectionJson = (& $nodePath -e $nodeScript 2>$null | Out-String).Trim()
+            $nodeExitCode = $LASTEXITCODE
+        }
+        finally {
+            foreach ($name in $environmentNames) { [Environment]::SetEnvironmentVariable($name, [string]$previousEnvironment[$name], 'Process') }
+        }
+        if ($nodeExitCode -ne 0) { throw 'The DSH profile verifier failed; no inference request was sent.' }
+        try { $selection = $selectionJson | ConvertFrom-Json -ErrorAction Stop } catch { throw 'The DSH profile verifier returned invalid structured data; no inference request was sent.' }
+        if ([int]$selection.selectionDocumentCount -ne 1 -or -not [bool]$selection.selected) {
+            throw 'The DSH saved profile does not uniquely enable the selected free model; no inference request was sent.'
+        }
+        $receiptFiles = @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'TestResults') -Directory -Filter '*-dsh-xdpool-selection' -ErrorAction SilentlyContinue |
+            ForEach-Object { Get-Item -LiteralPath (Join-Path $_.FullName 'DshPoolModelSelectionChange.json') -ErrorAction SilentlyContinue } |
+            Where-Object { $_ -and $_.LastWriteTime -gt (Get-Date).AddMinutes(-60) } |
+            Sort-Object LastWriteTime -Descending)
+        if ($receiptFiles.Count -eq 0) { throw 'The DSH status endpoint is unavailable and no recent zero-multiplier verification receipt exists; no inference request was sent.' }
+        try { $receipt = Get-Content -LiteralPath $receiptFiles[0].FullName -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop } catch { throw 'The recent DSH model status receipt is unreadable; no inference request was sent.' }
+        if ([string]$receipt.modelId -cne $poolModelId -or [string]$receipt.region -cne $Region -or
+            -not [bool]$receipt.enabled -or [double]$receipt.multiplier -ne 0 -or @($receipt.tags).Count -eq 0) {
+            throw 'The recent DSH model status receipt does not verify the selected zero-multiplier free model; no inference request was sent.'
+        }
+        return [pscustomobject]@{
+            ModelId = $poolModelId
+            Region = $Region
+            Enabled = $true
+            Multiplier = 0.0
+            HasFreePromotionTag = $true
+            ReadyForBoundedInference = $true
+            StatusSource = 'current-profile-plus-recent-runtime-receipt'
+        }
+    }
+    if ([string]$status.region -cne $Region) { throw 'The selected DSH XD Pool region does not match the configured free model route; no inference request was sent.' }
+    $rows = @($status.models | Where-Object { [string]$_.id -ceq $poolModelId } | Select-Object -First 2)
+    if ($rows.Count -ne 1) { throw 'The selected DSH XD Pool model is missing or duplicated in the current status; no inference request was sent.' }
+    $row = $rows[0]
+    $tags = @($row.tags | ForEach-Object { [string]$_ })
+    $isFreePromo = ($tags.Count -gt 0)
+    [pscustomobject]@{
+        ModelId = [string]$row.id
+        Region = [string]$status.region
+        Enabled = [bool]$row.enabled
+        Multiplier = if ($null -ne $row.multiplier) { [double]$row.multiplier } else { $null }
+        HasFreePromotionTag = $isFreePromo
+        ReadyForBoundedInference = ([bool]$row.enabled -and $null -ne $row.multiplier -and [double]$row.multiplier -eq 0 -and $isFreePromo)
+        StatusSource = 'live-plugin-status'
+    }
+}
+
 function Initialize-FreeLLMAPIProfile {
     [CmdletBinding()]
     param()

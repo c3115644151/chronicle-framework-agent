@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.668'
+$contractVersion = '7.669'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -1289,6 +1289,10 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerProgramSource -notmatch 'BuildSafeProviderFailureDetails' -or
     $providerProfileTestSource -notmatch 'provider-http-failure-cli-output-preserves-safe-error-fields-without-body' -or
     $providerProfileTestSource -notmatch 'dsh-workbuddy-risk-blocked-preserves-allowlisted-upstream-code-without-body-or-account-label' -or
+    $freeLlmApiProfileSource -notmatch 'Get-DshXdPoolFreeModelStatus' -or
+    $freeLlmApiProfileSource -notmatch 'current-profile-plus-recent-runtime-receipt' -or
+    $providerSmokeSource -notmatch 'xdpool/hy4flash-free' -or
+    $harnessScript -notmatch 'xdpool/hy4flash-free' -or
     $providerSmokeSource -notmatch 'ProviderSmokeFailure\.json' -or
     $providerHostSource -notmatch 'FREELLMAPI_API_KEY' -or $providerHostSource -notmatch 'CHRONICLE_LLM_API_KEY' -or
     $providerHostSource -notmatch 'X-Routed-Via' -or
