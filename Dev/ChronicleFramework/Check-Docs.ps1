@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.658'
+$contractVersion = '7.659'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -402,11 +402,16 @@ if ($agentHostProviderSmokeSource -notmatch 'AllowDshXdPoolFreeRoute' -or
     $harnessScript -notmatch 'aggregateProvider\[0\]\.configured' -or
     $harnessScript -notmatch 'selected direct DSH free model provider is disabled' -or
     $harnessScript -notmatch 'selected direct free DSH model is absent from the current gateway catalog' -or
+    $harnessScript -notmatch 'function Get-OpenRouterZeroPriceReceipt' -or
+    $harnessScript -notmatch 'https://openrouter.ai/api/v1/model/' -or
+    $harnessScript -notmatch 'pricing\.prompt' -or
+    $harnessScript -notmatch 'pricing\.completion' -or
+    $harnessScript -notmatch 'promptPrice -ne 0 -or \$completionPrice -ne 0' -or
+    $harnessScript -notmatch 'ModelPriceReceiptAvailable = \$true' -or
     $harnessScript -notmatch 'ConfiguredModelPreflight' -or
     $harnessScript -notmatch "'ConfiguredModelPreflight' \{ @\('Preflight', 'ConfiguredModelPreflight'\) \}" -or
-    $harnessScript -notmatch 'ModelPriceReceiptAvailable = \$false' -or
     $harnessScript -notmatch 'CatalogListed = \$true') {
-    throw 'DSH XD Pool provider smoke must be explicit, loopback-only, require a direct named :free XD Pool model, and keep its minimal compatibility probe separate from normal decision output.'
+    throw 'DSH XD Pool inference must be explicit and direct, require enabled/configured provider status plus an exact model listing, and verify current published zero prompt/completion price before inference.'
 }
 if ($agentOpenAiProviderSource -notmatch "reason = 'invalid-action-arguments'" -or $agentOpenAiProviderSource -notmatch 'unsupportedArguments' -or $agentDecisionLoopSource -notmatch 'invalid-action-arguments' -or $agentDecisionLoopSource -notmatch 'noNativeActionSent' -or $agentOpenAiProviderTestSource -notmatch 'UnsupportedActionArgumentReturnsRecoverableRejection' -or $agentDecisionLoopTestSource -notmatch 'InvalidActionArgumentsRecoverWithoutNativeMutation' -or $agentDecisionTestProviderSource -notmatch 'invalidArgumentRecovery') { throw 'Unsupported model argument names must be rejected before Native, passed back with a fresh state, and covered in the provider and loop regressions.' }
 if ($agentOpenAiProviderSource -notmatch '\$argumentShapeDepth' -or $agentOpenAiProviderSource -notmatch 'allowedArguments.Count -eq 1' -or $agentOpenAiProviderSource -notmatch 'ConvertFrom-Json -ErrorAction Stop' -or $agentOpenAiProviderTestSource -notmatch 'StringEncodedObjectArgumentsNormalized' -or $agentOpenAiProviderTestSource -notmatch 'SingleStringArrayArgumentsNormalized' -or $agentOpenAiProviderTestSource -notmatch 'NestedStringArrayArgumentsNormalized' -or $agentOpenAiProviderTestSource -notmatch 'SingleScalarArgumentsNormalized') { throw 'The local OpenAI-compatible provider must normalize bounded nested JSON wrappers and unambiguous one-field scalars through the same field allowlist and regression tests.' }

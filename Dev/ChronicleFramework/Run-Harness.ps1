@@ -37,7 +37,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.658'
+$HarnessContractVersion = '7.659'
 $providerCredentialScript = Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1'
 function Get-HarnessConfiguredProviderCredential {
     . $providerCredentialScript
@@ -54,6 +54,38 @@ function Get-HarnessConfiguredProviderCredential {
         throw 'The endpoint-specific provider credential is unavailable; no inference request was sent.'
     }
     return $credential
+}
+function Get-OpenRouterZeroPriceReceipt {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$ModelId)
+
+    if ($ModelId -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.:-]+$') {
+        throw 'The selected OpenRouter model ID is not a valid author/model slug; no inference request was sent.'
+    }
+    $modelUri = [Uri]::new('https://openrouter.ai/api/v1/model/' + $ModelId)
+    try {
+        $modelReceipt = Invoke-RestMethod -Method Get -Uri $modelUri -Proxy 'http://127.0.0.1:7890' -TimeoutSec 15
+    }
+    catch { throw 'The current OpenRouter public price receipt could not be fetched through the configured local proxy; no inference request was sent.' }
+    $data = $modelReceipt.data
+    $promptPrice = [decimal]0
+    $completionPrice = [decimal]0
+    if ([string]$data.id -cne $ModelId -or $null -eq $data.pricing -or
+        -not [decimal]::TryParse([string]$data.pricing.prompt, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$promptPrice) -or
+        -not [decimal]::TryParse([string]$data.pricing.completion, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$completionPrice)) {
+        throw 'OpenRouter did not return a matching model ID with explicit prompt and completion prices; no inference request was sent.'
+    }
+    if ($promptPrice -ne 0 -or $completionPrice -ne 0) {
+        throw 'The selected OpenRouter model is not currently zero-priced for both prompt and completion tokens; no inference request was sent.'
+    }
+    return [ordered]@{
+        Available = $true
+        ModelId = $ModelId
+        PromptPriceUsdPerToken = $promptPrice.ToString([Globalization.CultureInfo]::InvariantCulture)
+        CompletionPriceUsdPerToken = $completionPrice.ToString([Globalization.CultureInfo]::InvariantCulture)
+        Source = $modelUri.AbsoluteUri
+        VerifiedUtc = [DateTime]::UtcNow.ToString('O', [Globalization.CultureInfo]::InvariantCulture)
+    }
 }
 if ($BattleMissionSoloMainHeroProbe -and $Phase -ne 'BattleMissionHostNativeAiAutopilotProbe') {
     throw 'The solo MainHero option is only valid with -Phase BattleMissionHostNativeAiAutopilotProbe.'
@@ -563,6 +595,10 @@ foreach ($stage in $requestedStages) {
                             @($aggregateProvider[0].models | Where-Object { [string]$_ -ceq $dshProviderModelId }).Count -ne 1) {
                             throw 'The selected direct DSH free model provider is disabled, unconfigured, or absent from its selected model set; no inference request was sent.'
                         }
+                        if ($dshProviderId -cne 'open_router') {
+                            throw 'No current authoritative price verifier is configured for this DSH upstream provider; no inference request was sent.'
+                        }
+                        $openRouterPriceReceipt = Get-OpenRouterZeroPriceReceipt -ModelId $dshProviderModelId
                         $modelsUri = [UriBuilder]::new($endpoint)
                         $modelsUri.Path = $endpoint.AbsolutePath.TrimEnd('/') + '/models'
                         $modelsUri.Query = ''
@@ -577,7 +613,8 @@ foreach ($stage in $requestedStages) {
                             ModelId = $FreshStoryModeModel
                             CatalogListed = $true
                             AvailableModelCount = $modelRows.Count
-                            ModelPriceReceiptAvailable = $false
+                            ModelPriceReceiptAvailable = $true
+                            PriceReceipt = $openRouterPriceReceipt
                             InferenceRequests = 0
                             BannerlordStarted = $false
                             AutomaticFallbackEnabled = $false
