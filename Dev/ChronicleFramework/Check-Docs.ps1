@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.669'
+$contractVersion = '7.670'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -771,6 +771,9 @@ if ($harnessScript -notmatch "'AgentHostEstablishClanGoldSaleEvaluation' \{ @\('
     $agentHostGoldSaleLoopSource -notmatch 'gold-sale-self-test-native-move-start-transition-poll-failed' -or
     $agentHostGoldSaleLoopSource -notmatch 'MinimumActiveMapTravelObserveSeconds' -or
     $agentHostGoldSaleLoopSource -notmatch 'gold-sale-self-test-active-map-observation-cadence-failed' -or
+    $agentHostGoldSaleLoopSource -notmatch 'gold-sale-existing-native-move-adoption-self-test-failed' -or
+    $agentHostGoldSaleLoopSource -notmatch 'ReadExistingNativeSettlementMoveTarget' -or
+    $agentHostGoldSaleLoopSource -notmatch 'gold-sale-passively-observed-existing-native-move' -or
     $agentHostProviderSource -notmatch 'GetObserveAgainWaitBounds' -or
     $agentHostProviderSelfTestSource -notmatch 'provider-structured-output-enforces-context-specific-active-travel-observe-interval' -or
     $agentHostDecisionCycleSource -notmatch '5-10 second Host-side wait' -or

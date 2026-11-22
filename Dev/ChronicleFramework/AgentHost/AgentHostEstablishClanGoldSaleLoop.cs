@@ -20,6 +20,31 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             !goldSalePrompt.Contains("Backstreet Ransom is optional", StringComparison.Ordinal) ||
             !goldSalePrompt.Contains("unchanged Campaign time", StringComparison.Ordinal))
             throw new AgentHostException("gold-sale-self-test-scoped-prompt-contract-failed", "The Gold sale prompt must stay compact while retaining Journal authority, natural travel, current sell offers, optional Ransom and unchanged-time verification.");
+        var existingNativeMove = new JsonObject
+        {
+            ["status"] = "completed",
+            ["timeControlMode"] = "Stop",
+            ["state"] = new JsonObject
+            {
+                ["context"] = new JsonObject { ["gameState"] = "MapState", ["menuId"] = null, ["escapeMenuOpen"] = false, ["inquiryOpen"] = false, ["encounterActive"] = false, ["isWaitMenu"] = false, ["isWaitActive"] = false },
+                ["location"] = new JsonObject { ["currentSettlementId"] = null, ["targetSettlementId"] = "town_EW1", ["targetPartyId"] = null },
+                ["party"] = new JsonObject { ["isMoving"] = true }
+            }
+        };
+        var moveTargetParty = existingNativeMove.DeepClone().AsObject();
+        moveTargetParty["state"]!["location"]!["targetPartyId"] = "party_1";
+        var moveArrived = existingNativeMove.DeepClone().AsObject();
+        moveArrived["state"]!["location"]!["currentSettlementId"] = "town_EW1";
+        var moveStopped = existingNativeMove.DeepClone().AsObject();
+        moveStopped["state"]!["party"]!["isMoving"] = false;
+        var moveModal = existingNativeMove.DeepClone().AsObject();
+        moveModal["state"]!["context"]!["menuId"] = "town";
+        if (ReadExistingNativeSettlementMoveTarget(existingNativeMove) != "town_EW1" ||
+            ReadExistingNativeSettlementMoveTarget(moveTargetParty) is not null ||
+            ReadExistingNativeSettlementMoveTarget(moveArrived) is not null ||
+            ReadExistingNativeSettlementMoveTarget(moveStopped) is not null ||
+            ReadExistingNativeSettlementMoveTarget(moveModal) is not null)
+            throw new AgentHostException("gold-sale-existing-native-move-adoption-self-test-failed", "Gold must adopt only an active settlement move on a free Map, never a party pursuit, completed arrival, stopped party or open menu.");
         var emptyTradeExitRequest = new JsonObject
         {
             ["previousActionReceipt"] = new JsonObject { ["action"] = "tradeCancel", ["status"] = "completed" },
@@ -553,6 +578,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             throw new AgentHostException("gold-sale-budget-exit-selftest-failed", "At the cumulative decision limit, an untouched Native Trade screen must be cancelled once and verified back to the active Quest Map without a sale or extra model request.");
 
         return [
+            new { scenario = "gold-sale-adopts-preexisting-native-settlement-move-without-clock-action", passed = true },
             new { scenario = "gold-sale-compacts-safe-town-targets-and-does-not-dispose-the-borrowed-campaign-provider", passed = true },
             new { scenario = "gold-sale-decision-budget-exhaustion-cancels-unchanged-trade-and-returns-to-safe-map", passed = true }
         ];
@@ -643,6 +669,20 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 throw new AgentHostException("gold-sale-free-map-required", "The Gold sale slice requires a free Campaign Map after any approved Captivity recovery.");
             if (!HasActiveQuest(postRecoveryState) || ReadString(postRecoveryState["storyModeEstablishClanStatus"] as JsonObject, "status") != "active")
                 throw new AgentHostException("gold-sale-storymode-quest-no-longer-active", "The exact original StoryMode quest is no longer active after recovery.");
+
+            moveTargetId = ReadExistingNativeSettlementMoveTarget(currentNative);
+            if (moveTargetId is not null)
+            {
+                trace.Add(new JsonObject
+                {
+                    ["stage"] = "gold-sale-adopted-existing-native-settlement-move",
+                    ["targetSettlementId"] = moveTargetId,
+                    ["timeControlMode"] = ReadString(currentNative, "timeControlMode"),
+                    ["partyIsMoving"] = true,
+                    ["nativeMoveActionReplayed"] = false,
+                    ["modelDecisionRequiredToWait"] = false
+                });
+            }
 
             using var beforeDetails = await actionClient.ReadQuestDetailsAsync(QuestId, elapsed.Token);
             (objectiveSnapshotBefore, liveMetricDifferencesBefore) = ReadGoldJournal(beforeDetails.RootElement);
@@ -749,6 +789,57 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 {
                     moveTargetId = null;
                     moveStartPending = false;
+                }
+
+                if (moveTargetId is not null &&
+                    ReadString(state["location"] as JsonObject, "targetSettlementId") == moveTargetId &&
+                    ReadString(state["location"] as JsonObject, "currentSettlementId") != moveTargetId &&
+                    ReadString(state["location"] as JsonObject, "targetPartyId") is null &&
+                    ReadBoolean(state["party"] as JsonObject, "isMoving") && !IsMapConversationActive(state))
+                {
+                    if (AgentHostNativeMapMovementMonitor.IsStalledNativeSettlementMove(currentNative, moveTargetId))
+                    {
+                        trace.Add(new JsonObject
+                        {
+                            ["stage"] = "gold-sale-stopped-native-move-returned-to-parent",
+                            ["targetSettlementId"] = moveTargetId,
+                            ["timeControlMode"] = ReadString(currentNative, "timeControlMode"),
+                            ["nativeActionSent"] = false,
+                            ["explicitClockAction"] = false
+                        });
+                        return BuildFailure("gold-sale-paused-native-move-handoff",
+                            "A previously selected Native settlement move is still active while Campaign time is Stop; return it to the EYC parent for its bounded same-target Native Move recovery, without an implicit clock action.");
+                    }
+
+                    if (AgentHostNativeMapMovementMonitor.IsCampaignTimeAdvancing(currentNative))
+                    {
+                        const int passiveMoveWatchSeconds = AgentHostNativeMapMovementMonitor.MaximumWatchWindowSeconds;
+                        var movementWatch = await AgentHostNativeMapMovementMonitor.WaitAsync(
+                            stateClient,
+                            stateClient as IAgentHostBattleSimulationNativeClient,
+                            currentNative,
+                            moveTargetId,
+                            passiveMoveWatchSeconds,
+                            monitorVisibleBandits: AgentHostNativeMapMovementMonitor.HasActiveEycQuest(currentNative),
+                            elapsed.Token);
+                        currentNative = movementWatch.NativeReceipt;
+                        actionCount += movementWatch.MapPartyTargetPollCount + (movementWatch.PauseReceipt is null ? 0 : 1);
+                        trace.Add(new JsonObject
+                        {
+                            ["stage"] = "gold-sale-passively-observed-existing-native-move",
+                            ["targetSettlementId"] = moveTargetId,
+                            ["waitSeconds"] = passiveMoveWatchSeconds,
+                            ["nativeMapPartyTargetPollCount"] = movementWatch.MapPartyTargetPollCount,
+                            ["interruptedByVisibleHostileBandit"] = movementWatch.InterruptedByVisibleHostileBandit,
+                            ["nativePauseReceipt"] = movementWatch.PauseReceipt?.DeepClone(),
+                            ["providerDecisionDuringWait"] = false,
+                            ["explicitClockAction"] = false
+                        });
+                        if (movementWatch.InterruptedByVisibleHostileBandit)
+                            return BuildFailure(AgentHostNativeMapMovementMonitor.FailureCode,
+                                "A Native visible hostile Bandit interrupted the existing settlement move; the EYC parent must route the current paused map through BattleSimulation.");
+                        continue;
+                    }
                 }
 
                 var actionCatalog = BuildActionCatalog(state, previousReceipt, safeTowns, moveTargetId, allowMapAfterNativeTownLeave);
@@ -1220,6 +1311,25 @@ internal static class AgentHostEstablishClanGoldSaleLoop
     private static bool IsMapConversationActive(JsonObject state) =>
         ReadString(state["context"] as JsonObject, "gameState") == "MapState" &&
         state["context"]?["conversation"] is JsonObject;
+
+    private static string? ReadExistingNativeSettlementMoveTarget(JsonObject? native)
+    {
+        if (native is null) return null;
+        var state = native["state"] as JsonObject ?? native;
+        var context = state["context"] as JsonObject;
+        var location = state["location"] as JsonObject;
+        var party = state["party"] as JsonObject;
+        var targetSettlementId = ReadString(location, "targetSettlementId");
+        if (ReadString(context, "gameState") != "MapState" || !string.IsNullOrWhiteSpace(ReadString(context, "menuId")) ||
+            ReadBoolean(context, "escapeMenuOpen") || ReadBoolean(context, "inquiryOpen") || ReadBoolean(context, "encounterActive") ||
+            ReadBoolean(context, "isWaitMenu") || ReadBoolean(context, "isWaitActive") ||
+            ReadBoolean(context?["sceneNotification"] as JsonObject, "hasActiveNotification") ||
+            context?["conversation"] is JsonObject || !ReadBoolean(party, "isMoving") ||
+            string.IsNullOrWhiteSpace(targetSettlementId) || !string.IsNullOrWhiteSpace(ReadString(location, "targetPartyId")) ||
+            string.Equals(ReadString(location, "currentSettlementId"), targetSettlementId, StringComparison.Ordinal))
+            return null;
+        return targetSettlementId;
+    }
 
     private static bool IsInterruptedMapMove(JsonObject state, string? moveTargetId, bool moveStartPending)
     {
