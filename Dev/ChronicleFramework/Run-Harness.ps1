@@ -37,7 +37,24 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.655'
+$HarnessContractVersion = '7.658'
+$providerCredentialScript = Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1'
+function Get-HarnessConfiguredProviderCredential {
+    . $providerCredentialScript
+    $baseUrl = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_BASE_URL', 'Process')
+    if ([string]::IsNullOrWhiteSpace($baseUrl)) { $baseUrl = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_BASE_URL', 'User') }
+    $endpoint = $null
+    if (-not [Uri]::TryCreate($baseUrl, [UriKind]::Absolute, [ref]$endpoint) -or
+        -not [string]::IsNullOrWhiteSpace($endpoint.Query) -or -not [string]::IsNullOrWhiteSpace($endpoint.UserInfo) -or
+        -not [string]::IsNullOrWhiteSpace($endpoint.Fragment)) {
+        throw 'The configured model endpoint is invalid; no inference request was sent.'
+    }
+    $credential = Get-ChronicleProviderCredential -Endpoint $endpoint
+    if ([string]::IsNullOrWhiteSpace([string]$credential.Value)) {
+        throw 'The endpoint-specific provider credential is unavailable; no inference request was sent.'
+    }
+    return $credential
+}
 if ($BattleMissionSoloMainHeroProbe -and $Phase -ne 'BattleMissionHostNativeAiAutopilotProbe') {
     throw 'The solo MainHero option is only valid with -Phase BattleMissionHostNativeAiAutopilotProbe.'
 }
@@ -537,7 +554,7 @@ foreach ($stage in $requestedStages) {
                         if (-not $modelRouteMatch.Success) { throw 'The direct DSH model ID did not contain a provider segment; no inference request was sent.' }
                         $dshProviderId = $modelRouteMatch.Groups[1].Value
                         $dshProviderModelId = $modelRouteMatch.Groups[2].Value
-                        $aggregateUri = [Uri]::new('http://127.0.0.1:3477/plugins/dsh-xdpool/aggregate')
+                        $aggregateUri = [Uri]::new('http://127.0.0.1:2733/plugins/dsh-xdpool/aggregate')
                         try { $aggregateStatus = Invoke-RestMethod -Uri $aggregateUri -Headers @{ Authorization = "Bearer $($credential.Value)" } -TimeoutSec 8 }
                         catch { throw 'The DSH aggregate status preflight failed; no inference request was sent.' }
                         $aggregateProvider = @($aggregateStatus.providers | Where-Object { [string]$_.id -ceq $dshProviderId } | Select-Object -First 1)
@@ -764,8 +781,11 @@ foreach ($stage in $requestedStages) {
                 $savedHarnessGoal = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_GOAL', 'Process')
                 $savedHarnessModel = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL', 'Process')
                 $savedLlmModel = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL', 'Process')
+                $savedProviderKey = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_API_KEY', 'Process')
                 $savedProviderTimeout = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_TIMEOUT_SECONDS', 'Process')
                 try {
+                    $providerCredential = Get-HarnessConfiguredProviderCredential
+                    [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_API_KEY', [string]$providerCredential.Value, 'Process')
                     [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_START', '1', 'Process')
                     [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS', '86400000', 'Process')
                     [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_GOAL', '自主完成原版主线任务“建立你的家族”。', 'Process')
@@ -783,6 +803,7 @@ foreach ($stage in $requestedStages) {
                     [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_GOAL', $savedHarnessGoal, 'Process')
                     [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL', $savedHarnessModel, 'Process')
                     [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_MODEL', $savedLlmModel, 'Process')
+                    [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_API_KEY', $savedProviderKey, 'Process')
                     [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_TIMEOUT_SECONDS', $savedProviderTimeout, 'Process')
                     try {
                         if ($script:retainedAgentHostPackageRoot) { Remove-RetainedAgentHostPackage $script:retainedAgentHostPackageRoot }
@@ -799,7 +820,10 @@ foreach ($stage in $requestedStages) {
             Invoke-Stage -Name 'PersistentEycCampaign' -Action {
                 $savedLlmModel = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL', 'Process')
                 $savedHarnessModel = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL', 'Process')
+                $savedProviderKey = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_API_KEY', 'Process')
                 try {
+                    $providerCredential = Get-HarnessConfiguredProviderCredential
+                    [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_API_KEY', [string]$providerCredential.Value, 'Process')
                     [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_MODEL', $FreshStoryModeModel, 'Process')
                     [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL', $FreshStoryModeModel, 'Process')
                     $testOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $persistentEycCampaignScript `
@@ -817,6 +841,7 @@ foreach ($stage in $requestedStages) {
                 finally {
                     [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_MODEL', $savedLlmModel, 'Process')
                     [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL', $savedHarnessModel, 'Process')
+                    [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_API_KEY', $savedProviderKey, 'Process')
                 }
             }
         }
@@ -964,7 +989,10 @@ foreach ($stage in $requestedStages) {
         'AgentHostProviderHealth' {
             Invoke-Stage -Name 'AgentHostProviderHealth' -Action {
                 $providerHealthEvidencePath = Join-Path $harnessTempDirectory 'AgentHostProviderHealth'
-                $providerHealthOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $harnessRoot 'Test-AgentHostProvider.ps1') -HostDllPath $agentHostDllPath -EvidencePath $providerHealthEvidencePath -HealthOnly 2>&1 | Out-String
+                $providerHealthArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $harnessRoot 'Test-AgentHostProvider.ps1'),
+                    '-HostDllPath', $agentHostDllPath, '-EvidencePath', $providerHealthEvidencePath, '-HealthOnly')
+                if ($AllowDshXdPoolFreeRoute) { $providerHealthArguments += '-AllowDshXdPoolFreeRoute' }
+                $providerHealthOutput = & powershell @providerHealthArguments 2>&1 | Out-String
                 $providerHealthExitCode = $LASTEXITCODE
                 if ($providerHealthExitCode -ne 0) { throw "Read-only Agent Host provider health check failed with exit code $providerHealthExitCode.`n$providerHealthOutput" }
                 $providerHealthOutput

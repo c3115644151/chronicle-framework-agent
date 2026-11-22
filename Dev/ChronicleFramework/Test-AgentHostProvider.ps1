@@ -14,6 +14,45 @@ $hostDll = [IO.Path]::GetFullPath($HostDllPath)
 $evidencePath = [IO.Path]::GetFullPath($EvidencePath)
 if (-not (Test-Path -LiteralPath $hostDll -PathType Leaf)) { throw 'Local Agent Host binary is missing.' }
 New-Item -ItemType Directory -Path $evidencePath -Force | Out-Null
+$credentialContractRoot = Join-Path ([IO.Path]::GetTempPath()) ('ChronicleProviderCredentialContract-' + [Guid]::NewGuid().ToString('N'))
+$previousDshHome = [Environment]::GetEnvironmentVariable('DSH_HOME', 'Process')
+$previousProviderKey = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_API_KEY', 'Process')
+try {
+    New-Item -ItemType Directory -Path (Join-Path $credentialContractRoot 'openai-gateway') -Force | Out-Null
+    [Environment]::SetEnvironmentVariable('DSH_HOME', $credentialContractRoot, 'Process')
+    [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_API_KEY', 'paid-provider-key-must-not-be-used-for-dsh', 'Process')
+    $gatewayKeyPath = Join-Path $credentialContractRoot 'openai-gateway/api-key'
+    [IO.File]::WriteAllText($gatewayKeyPath, 'synthetic-dsh-gateway-key')
+    $dshCredential = Get-ChronicleProviderCredential -Endpoint ([Uri]'http://127.0.0.1:8326/v1')
+    if ($dshCredential.Value -cne 'synthetic-dsh-gateway-key' -or $dshCredential.Source -ne 'DSH gateway key file') {
+        throw 'DSH provider credential selection did not prefer its dedicated local gateway key.'
+    }
+    Remove-Item -LiteralPath $gatewayKeyPath -Force
+    $missingDshCredential = Get-ChronicleProviderCredential -Endpoint ([Uri]'http://127.0.0.1:8326/v1')
+    $remoteCredential = Get-ChronicleProviderCredential -Endpoint ([Uri]'https://api.example.invalid/v1')
+    if (-not [string]::IsNullOrWhiteSpace([string]$missingDshCredential.Value) -or
+        $remoteCredential.Value -cne 'paid-provider-key-must-not-be-used-for-dsh') {
+        throw 'Missing DSH gateway credentials must fail closed without borrowing the generic remote provider key.'
+    }
+}
+finally {
+    [Environment]::SetEnvironmentVariable('DSH_HOME', $previousDshHome, 'Process')
+    [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_API_KEY', $previousProviderKey, 'Process')
+    $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    $credentialContractRootFull = [IO.Path]::GetFullPath($credentialContractRoot).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    if ($credentialContractRootFull.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase) -and
+        (Split-Path -Leaf $credentialContractRoot) -match '^ChronicleProviderCredentialContract-[0-9a-f]{32}$' -and
+        (Test-Path -LiteralPath $credentialContractRoot)) {
+        Remove-Item -LiteralPath $credentialContractRoot -Recurse -Force
+    }
+}
+$credentialSelectionContract = [ordered]@{
+    DshGatewayUsesDedicatedLocalKey = $true
+    DshDoesNotBorrowGenericRemoteKey = $true
+    RemoteOpenAiCompatibleUsesGenericKey = $true
+    CredentialValuesLogged = $false
+}
+Set-Content -LiteralPath (Join-Path $evidencePath 'ProviderCredentialContract.json') -Value ($credentialSelectionContract | ConvertTo-Json -Depth 3) -Encoding utf8
 
 foreach ($setting in @(
     'CHRONICLE_LLM_PROTOCOL', 'CHRONICLE_LLM_BASE_URL', 'CHRONICLE_LLM_MODEL',
@@ -100,8 +139,13 @@ $healthRequest = [ordered]@{
     }
     providerConfigurationSource = 'agent-host-provider-health'
 } | ConvertTo-Json -Depth 5 -Compress
-$healthOutput = $healthRequest | & dotnet $hostDll --provider-health-only 2>&1 | Out-String
-$healthExitCode = $LASTEXITCODE
+$providerKeyBeforeHealth = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_API_KEY', 'Process')
+try {
+    if ($providerCredential) { [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_API_KEY', [string]$providerCredential.Value, 'Process') }
+    $healthOutput = $healthRequest | & dotnet $hostDll --provider-health-only 2>&1 | Out-String
+    $healthExitCode = $LASTEXITCODE
+}
+finally { [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_API_KEY', $providerKeyBeforeHealth, 'Process') }
 if ($healthExitCode -ne 0) { throw "Read-only Agent Host provider health failed (exit=$healthExitCode). No inference request was sent. $healthOutput" }
 try { $hostHealth = $healthOutput | ConvertFrom-Json }
 catch { throw 'Agent Host provider health returned invalid JSON; no inference request was sent.' }
@@ -120,6 +164,7 @@ if ($HealthOnly) {
         ProviderProxySelectionSource = [string]$hostHealth.proxySelectionSource
         ConfiguredRouteExecutionStatus = if ($freeLlmApiProfile) { $freeLlmApiProfile.ModelExecutionStatus } else { 'catalog-listed' }
         AvailableModelCount = [int]$hostHealth.availableModelCount
+        ProviderCredentialContract = $credentialSelectionContract
         ModelCalls = 0
         NativeCommands = 0
         NoModelEndpointOrCredentialLogged = $true
@@ -235,6 +280,7 @@ $startInfo = [Diagnostics.ProcessStartInfo]::new()
 $startInfo.FileName = (Get-Command dotnet -ErrorAction Stop).Source
 $startInfo.Arguments = '"{0}" --decision-once' -f $hostDll
 $startInfo.UseShellExecute = $false
+$startInfo.EnvironmentVariables['CHRONICLE_LLM_API_KEY'] = [string]$providerCredential.Value
 $startInfo.CreateNoWindow = $true
 $startInfo.RedirectStandardInput = $true
 $startInfo.RedirectStandardOutput = $true

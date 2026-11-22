@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.655'
+$contractVersion = '7.658'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -427,7 +427,7 @@ $freeLlmApiDedicatedUserKeyIndex = $freeLlmApiProfileSource.IndexOf("@{ Name = '
 $freeLlmApiGenericUserKeyIndex = $freeLlmApiProfileSource.IndexOf("@{ Name = 'CHRONICLE_LLM_API_KEY'; Target = 'User' }", [StringComparison]::Ordinal)
 if ($freeLlmApiDedicatedUserKeyIndex -lt 0 -or $freeLlmApiGenericUserKeyIndex -le $freeLlmApiDedicatedUserKeyIndex -or $freeLlmApiProfileSource -notmatch 'ApiKeySource = \$apiKeySource') { throw 'The FreeLLMAPI preflight must prefer its dedicated user credential over the generic model-provider key.' }
 if ($freeLlmApiProfileSource -notmatch 'Initialize-FreeLLMAPIProfile' -or $freeLlmApiProfileSource -notmatch 'FREELLMAPI_API_KEY' -or $freeLlmApiProfileSource -notmatch 'CHRONICLE_LLM_API_KEY' -or $freeLlmApiProfileSource -notmatch '31415' -or $freeLlmApiProfileSource -notmatch 'available=true' -or $freeLlmApiProfileSource -notmatch 'api/ping' -or $freeLlmApiProfileSource -notmatch 'Start-Process -FilePath \$ExecutablePath -WindowStyle Hidden' -or $freeLlmApiProfileSource -notmatch 'listenerDeadline' -or $freeLlmApiProfileSource -notmatch 'never read from UI or printed' -or $freeLlmApiProfileSource -notmatch 'Start-FreeLLMAPIWithInheritedProxy' -or $freeLlmApiProfileSource -notmatch 'Test-ChronicleLocalProxyListener' -or $freeLlmApiProfileSource -notmatch '127\.0\.0\.1.*7890' -or $freeLlmApiProfileSource -notmatch 'LocalProxyBootstrapApplied' -or $freeLlmApiProfileSource -notmatch 'originalValues') { throw 'Shared FreeLLMAPI preflight must reject local inference, start the installed desktop gateway hidden if stopped, pass persisted proxy configuration or the confirmed local 7890 proxy to that child only, wait for its local ping, retrieve credentials only from process/user environment, restore the parent environment, and never expose the key.' }
-if ($freeLlmApiProfileSource -notmatch 'function Get-ChronicleProviderCredential' -or $agentHostProviderSmokeSource -notmatch 'Get-ChronicleProviderCredential' -or $agentLiveModelLoopSource -notmatch 'Get-ChronicleProviderCredential' -or $agentHostCampaignLoopEvaluationSource -notmatch 'Get-ChronicleProviderCredential' -or $freshCampaignTest -notmatch 'Get-ChronicleProviderCredential') { throw 'Provider preflights must select the credential for the configured endpoint rather than reuse a paid-provider key against FreeLLMAPI.' }
+if ($freeLlmApiProfileSource -notmatch 'function Get-ChronicleProviderCredential' -or $freeLlmApiProfileSource -notmatch '8326' -or $freeLlmApiProfileSource -notmatch 'DSH gateway key file' -or $freeLlmApiProfileSource -notmatch 'Do not fall back to CHRONICLE_LLM_API_KEY here' -or $agentHostProviderSmokeSource -notmatch 'Get-ChronicleProviderCredential' -or $agentLiveModelLoopSource -notmatch 'Get-ChronicleProviderCredential' -or $agentHostCampaignLoopEvaluationSource -notmatch 'Get-ChronicleProviderCredential' -or $freshCampaignTest -notmatch 'Get-ChronicleProviderCredential' -or $agentHostProviderSmokeSource -notmatch 'paid-provider-key-must-not-be-used-for-dsh') { throw 'Provider preflights must select the dedicated DSH gateway credential for the DSH endpoint and must never borrow a generic paid-provider key.' }
 $freeLlmApiProfileTokens = $null
 $freeLlmApiProfileParseErrors = $null
 [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $harnessRoot 'Get-FreeLLMAPIProfile.ps1'), [ref]$freeLlmApiProfileTokens, [ref]$freeLlmApiProfileParseErrors) | Out-Null
@@ -1068,6 +1068,12 @@ if ($projectFile -notmatch [regex]::Escape('<Compile Remove="TestResults/**/*.cs
 
 if ($harnessScript -notmatch "HarnessContractVersion\s*=\s*'$contractVersion'") {
     throw "Run-Harness.ps1 does not declare contract version $contractVersion."
+}
+if ($harnessScript -notmatch 'function Get-HarnessConfiguredProviderCredential' -or
+    $harnessScript -notmatch 'Get-ChronicleProviderCredential -Endpoint \$endpoint' -or
+    $harnessScript -notmatch 'CHRONICLE_LLM_API_KEY.*providerCredential\.Value' -or
+    $harnessScript -notmatch 'savedProviderKey') {
+    throw 'Real-model Campaign phases must inject only the credential selected for their configured endpoint and restore the caller process environment afterward.'
 }
 if ($harnessScript -notmatch "PersistentEycMaxProviderDecisionsPerContinuation\s*=\s*1" -or
     $persistentStoryModeCampaignScript -notmatch "MaxProviderDecisionsPerContinuation\s*=\s*1" -or

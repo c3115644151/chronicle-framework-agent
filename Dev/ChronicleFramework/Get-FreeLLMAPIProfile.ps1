@@ -32,6 +32,23 @@ function Get-ChronicleProviderCredential {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][Uri]$Endpoint)
 
+    $isDshXdPool = $Endpoint.IsLoopback -and $Endpoint.Port -eq 8326 -and $Endpoint.AbsolutePath.TrimEnd('/') -eq '/v1'
+    if ($isDshXdPool) {
+        $dshHome = [string][Environment]::GetEnvironmentVariable('DSH_HOME', 'Process')
+        if ([string]::IsNullOrWhiteSpace($dshHome)) { $dshHome = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)) '.dsh' }
+        $gatewayKeyPath = Join-Path $dshHome 'openai-gateway/api-key'
+        if (Test-Path -LiteralPath $gatewayKeyPath -PathType Leaf) {
+            $gatewayKey = [string](Get-Content -LiteralPath $gatewayKeyPath -Raw -ErrorAction SilentlyContinue)
+            $gatewayKey = $gatewayKey.Trim()
+            if (-not [string]::IsNullOrWhiteSpace($gatewayKey)) {
+                return [pscustomobject]@{ Value = $gatewayKey; Source = 'DSH gateway key file'; IsFreeLLMAPI = $false }
+            }
+        }
+        # Do not fall back to CHRONICLE_LLM_API_KEY here: it may be a paid
+        # provider key and is not the credential for the DSH loopback gateway.
+        return [pscustomobject]@{ Value = $null; Source = $null; IsFreeLLMAPI = $false }
+    }
+
     $isFreeLlmApi = $Endpoint.IsLoopback -and $Endpoint.Port -eq 31415 -and $Endpoint.AbsolutePath.TrimEnd('/') -eq '/v1'
     $candidates = if ($isFreeLlmApi) {
         @(
