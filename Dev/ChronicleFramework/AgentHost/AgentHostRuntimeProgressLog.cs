@@ -210,7 +210,7 @@ internal static class AgentHostRuntimeProgressLog
         int? providerRequestBodyBytes = null, string? providerTransportErrorType = null, string? providerProxyEndpointHostPort = null,
         string? providerResponseServer = null, string? providerResponseVia = null, string? providerResponseRequestId = null,
         string? providerRetryAfter = null, string? providerErrorBodyKind = null, string? providerErrorContentType = null,
-        string? providerErrorType = null, string? providerErrorCode = null, int? providerFallbackAttempts = null,
+        string? providerErrorType = null, string? providerErrorCode = null, string? providerErrorParam = null, int? providerFallbackAttempts = null,
         string? providerFallbackTrail = null, bool? providerToolCallsPresent = null, int? providerToolCallCount = null,
         string? providerResponseContentKind = null, int? providerResponseContentCharacters = null, string? providerFinishReason = null,
         string? providerResponseModel = null, int? providerResponsePromptTokens = null, int? providerResponseCompletionTokens = null,
@@ -252,6 +252,7 @@ internal static class AgentHostRuntimeProgressLog
                 ["providerErrorContentType"] = providerErrorContentType,
                 ["providerErrorType"] = providerErrorType,
                 ["providerErrorCode"] = providerErrorCode,
+                ["providerErrorParam"] = providerErrorParam,
                 ["providerFallbackAttempts"] = providerFallbackAttempts,
                 ["providerFallbackTrail"] = providerFallbackTrail,
                 ["providerToolCallsPresent"] = providerToolCallsPresent,
@@ -650,7 +651,7 @@ internal static class AgentHostRuntimeProgressLog
                 RecordProviderFailure(request.RootElement, "provider-http-error", 429, "api.deepseek.com", "required_tool_call", 2, 1500,
                     "http-response-status", "local-listener", 360, 12000, "HttpRequestException",
                     "127.0.0.1:7890", "cloudflare", "1.1 proxy", "req-123", "30", "json-error", "application/json", "server_error", "overloaded",
-                    providerFallbackAttempts: 2, providerFallbackTrail: "ovh/model=rate_limited; nvidia/model=upstream_502");
+                    providerErrorParam: "tools_0_.function.parameters", providerFallbackAttempts: 2, providerFallbackTrail: "ovh/model=rate_limited; nvidia/model=upstream_502");
                 RecordObjectiveSubflowResult("gold", new JsonObject { ["runId"] = validRun, ["status"] = "failed", ["termination"] = "self-test" });
                 RecordObjectiveSubflowResult("companions", new JsonObject
                 {
@@ -721,6 +722,7 @@ internal static class AgentHostRuntimeProgressLog
                 ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerErrorContentType") != "application/json" ||
                 ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerErrorType") != "server_error" ||
                 ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerErrorCode") != "overloaded" ||
+                ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerErrorParam") != "tools_0_.function.parameters" ||
                 ReadInt(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerFallbackAttempts") != 2 ||
                 ReadString(JsonNode.Parse(productLogLines[4]) as JsonObject, "providerFallbackTrail") != "ovh/model=rate_limited; nvidia/model=upstream_502" ||
                 ReadString(missingToolFailureEvent, "failureCode") != "provider-tool-call-missing" ||

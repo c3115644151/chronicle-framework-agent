@@ -466,10 +466,24 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     : new { type = "json_schema", json_schema = new { name = "chronicle_agent_decision", strict = true, schema = BuildDecisionSchema(request) } };
             }
             payload[_settings.MaxTokenParameter] = _settings.MaxOutputTokens;
-            if (_settings.Thinking.HasValue && SupportsThinkingParameter(_settings.Endpoint))
+            var openRouterReasoningRoute = IsOpenRouterReasoningRoute(_settings.Endpoint, _settings.Model);
+            if (openRouterReasoningRoute && _settings.Thinking.HasValue)
+            {
+                payload["reasoning"] = new { enabled = _settings.Thinking.Value };
+                reasoningEffortApplied = _settings.Thinking.Value ? "enabled" : "disabled";
+            }
+            else if (openRouterReasoningRoute && !string.IsNullOrWhiteSpace(_settings.ReasoningEffort) &&
+                     !string.Equals(_settings.ReasoningEffort, "none", StringComparison.OrdinalIgnoreCase))
+            {
+                payload["reasoning"] = new { effort = _settings.ReasoningEffort };
+                reasoningEffortApplied = _settings.ReasoningEffort;
+            }
+            else if (_settings.Thinking.HasValue && SupportsThinkingParameter(_settings.Endpoint))
+            {
                 payload["thinking"] = new { type = _settings.Thinking.Value ? "enabled" : "disabled" };
+            }
             var reasoningEffortIsExplicitlySupportedByFreeLlmApi = IsFreeLlmApi(_settings.Endpoint) && _supportsReasoningEffort;
-            if (!string.IsNullOrWhiteSpace(_settings.ReasoningEffort) &&
+            if (!openRouterReasoningRoute && !string.IsNullOrWhiteSpace(_settings.ReasoningEffort) &&
                 !string.Equals(_settings.ReasoningEffort, "none", StringComparison.OrdinalIgnoreCase) &&
                 (_settings.Thinking != false || reasoningEffortIsExplicitlySupportedByFreeLlmApi))
             {
@@ -698,7 +712,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     providerResponseVia: SafeOptionalDiagnosticField(ReadResponseHeader(response, "Via")),
                     providerRetryAfter: SafeOptionalDiagnosticField(response.Headers.RetryAfter?.ToString()),
                     providerErrorBodyKind: errorMetadata.BodyKind, providerErrorContentType: errorMetadata.ContentType,
-                    providerErrorType: errorMetadata.ErrorType, providerErrorCode: errorMetadata.ErrorCode,
+                    providerErrorType: errorMetadata.ErrorType, providerErrorCode: errorMetadata.ErrorCode, providerErrorParam: errorMetadata.ErrorParam,
                     providerResponseRequestId: errorMetadata.RequestId ?? SafeOptionalDiagnosticField(ReadResponseHeader(response, "X-Request-Id") ??
                         ReadResponseHeader(response, "X-Correlation-Id") ?? ReadResponseHeader(response, "CF-Ray")));
             }
@@ -755,12 +769,57 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     ? choiceArray.EnumerateArray().ToArray()
                     : Array.Empty<JsonElement>();
                 if (choices.Length != 1)
-                    throw new AgentHostException("provider-content-missing", $"The local OpenAI-compatible provider did not return one structured message (choiceCount={choices.Length}; hasError={root.TryGetProperty("error", out _)}; format={responseFormatMode}; responseModel={SafeDiagnosticField(ReadString(root, "model"))}; routedVia={SafeDiagnosticField(ReadResponseHeader(response, "X-Routed-Via"))}).");
+                {
+                    var hasProviderError = root.TryGetProperty("error", out _);
+                    var responseUsage = root.TryGetProperty("usage", out var responseUsageElement) ? responseUsageElement : default;
+                    var responsePromptTokens = ReadNonNegativeInt(responseUsage, "prompt_tokens");
+                    var responseCompletionTokens = ReadNonNegativeInt(responseUsage, "completion_tokens");
+                    var responseModelSafe = SafeOptionalDiagnosticField(ReadString(root, "model"));
+                    var responseRoute = SafeOptionalDiagnosticField(ReadResponseHeader(response, "X-Routed-Via") ?? _lastProviderRoute);
+                    var requestId = SafeOptionalDiagnosticField(ReadResponseHeader(response, "X-Request-Id") ??
+                        ReadResponseHeader(response, "X-Correlation-Id") ?? ReadResponseHeader(response, "CF-Ray"));
+                    var responseShape = choices.Length == 0 ? "choices-empty" : "choices-multiple";
+                    throw new AgentHostException("provider-content-missing", $"The local OpenAI-compatible provider did not return one structured message (choiceCount={choices.Length}; hasError={hasProviderError}; format={responseFormatMode}; responseModel={SafeDiagnosticField(responseModelSafe)}; routedVia={SafeDiagnosticField(responseRoute)}; promptTokens={responsePromptTokens?.ToString(CultureInfo.InvariantCulture) ?? "unknown"}; completionTokens={responseCompletionTokens?.ToString(CultureInfo.InvariantCulture) ?? "unknown"}).",
+                        providerHttpStatus: (int)response.StatusCode, providerRoute: responseRoute, providerOutputFormat: responseFormatMode,
+                        providerFailureStage: "http-response-body", providerRequestBodyBytes: bodyBytes,
+                        providerResponseServer: SafeOptionalDiagnosticField(ReadResponseHeader(response, "Server")),
+                        providerResponseVia: SafeOptionalDiagnosticField(ReadResponseHeader(response, "Via")), providerResponseRequestId: requestId,
+                        providerErrorBodyKind: hasProviderError ? "json-error-body" : responseShape,
+                        providerErrorContentType: SafeOptionalDiagnosticField(response.Content.Headers.ContentType?.MediaType),
+                        providerToolCallsPresent: false, providerToolCallCount: 0,
+                        providerResponseContentKind: responseShape, providerResponseContentCharacters: 0,
+                        providerFinishReason: "not-reported", providerResponseModel: responseModelSafe,
+                        providerResponsePromptTokens: responsePromptTokens, providerResponseCompletionTokens: responseCompletionTokens);
+                }
                 if (choices[0].ValueKind != JsonValueKind.Object ||
                     !choices[0].TryGetProperty("message", out var messageElement) || messageElement.ValueKind != JsonValueKind.Object)
                 {
                     var choiceHasMessage = choices[0].ValueKind == JsonValueKind.Object && choices[0].TryGetProperty("message", out _);
-                    throw new AgentHostException("provider-content-missing", $"The local OpenAI-compatible provider returned no message object (choiceKind={choices[0].ValueKind}; hasMessage={choiceHasMessage}; format={responseFormatMode}).");
+                    var messageKind = choiceHasMessage ? choices[0].GetProperty("message").ValueKind.ToString() : "missing";
+                    var responseUsage = root.TryGetProperty("usage", out var responseUsageElement) ? responseUsageElement : default;
+                    var responsePromptTokens = ReadNonNegativeInt(responseUsage, "prompt_tokens");
+                    var responseCompletionTokens = ReadNonNegativeInt(responseUsage, "completion_tokens");
+                    var responseRoute = SafeOptionalDiagnosticField(ReadResponseHeader(response, "X-Routed-Via") ?? _lastProviderRoute);
+                    var responseModelSafe = SafeOptionalDiagnosticField(ReadString(root, "model"));
+                    var requestId = SafeOptionalDiagnosticField(ReadResponseHeader(response, "X-Request-Id") ??
+                        ReadResponseHeader(response, "X-Correlation-Id") ?? ReadResponseHeader(response, "CF-Ray"));
+                    var malformedChoiceFinishReason = choices[0].ValueKind == JsonValueKind.Object
+                        ? SafeOptionalDiagnosticField(ReadString(choices[0], "finish_reason"))
+                        : null;
+                    var responseShape = choices[0].ValueKind == JsonValueKind.Object
+                        ? $"choice-object-message-{(choiceHasMessage ? messageKind : "missing").ToLowerInvariant()}"
+                        : $"choice-{choices[0].ValueKind.ToString().ToLowerInvariant()}";
+                    throw new AgentHostException("provider-content-missing",
+                        $"The local OpenAI-compatible provider returned no message object (choiceKind={choices[0].ValueKind}; hasMessage={choiceHasMessage}; messageKind={messageKind}; format={responseFormatMode}; responseModel={SafeDiagnosticField(responseModelSafe)}; routedVia={SafeDiagnosticField(responseRoute)}; finishReason={SafeDiagnosticField(malformedChoiceFinishReason)}; promptTokens={responsePromptTokens?.ToString(CultureInfo.InvariantCulture) ?? "unknown"}; completionTokens={responseCompletionTokens?.ToString(CultureInfo.InvariantCulture) ?? "unknown"}).",
+                        providerHttpStatus: (int)response.StatusCode, providerRoute: responseRoute, providerOutputFormat: responseFormatMode,
+                        providerFailureStage: "http-response-body", providerRequestBodyBytes: bodyBytes,
+                        providerResponseServer: SafeOptionalDiagnosticField(ReadResponseHeader(response, "Server")),
+                        providerResponseVia: SafeOptionalDiagnosticField(ReadResponseHeader(response, "Via")), providerResponseRequestId: requestId,
+                        providerErrorBodyKind: responseShape, providerErrorContentType: SafeOptionalDiagnosticField(response.Content.Headers.ContentType?.MediaType),
+                        providerToolCallsPresent: null, providerToolCallCount: null,
+                        providerResponseContentKind: responseShape, providerResponseContentCharacters: 0,
+                        providerFinishReason: malformedChoiceFinishReason, providerResponseModel: responseModelSafe,
+                        providerResponsePromptTokens: responsePromptTokens, providerResponseCompletionTokens: responseCompletionTokens);
                 }
                 if (!string.IsNullOrWhiteSpace(ReadString(messageElement, "refusal")))
                     throw new AgentHostException("provider-refused", "The local model provider refused the decision request.");
@@ -932,8 +991,12 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
 
     private static bool SupportsThinkingParameter(Uri endpoint) => IsDeepSeekApi(endpoint) || IsFreeLlmApi(endpoint);
 
+    private static bool IsOpenRouterReasoningRoute(Uri endpoint, string modelId) =>
+        string.Equals(endpoint.Host, "openrouter.ai", StringComparison.OrdinalIgnoreCase) ||
+        (endpoint.IsLoopback && endpoint.Port == 8326 && modelId.StartsWith("xdpool-aggregate/open_router/", StringComparison.OrdinalIgnoreCase));
+
     internal sealed record RateLimitRetryHint(TimeSpan? Delay, TimeSpan? ObservedDelay, string Source, bool IsPoolExhaustion);
-    private sealed record ProviderErrorMetadata(string BodyKind, string? ContentType, string? ErrorType, string? ErrorCode, string? RequestId);
+    private sealed record ProviderErrorMetadata(string BodyKind, string? ContentType, string? ErrorType, string? ErrorCode, string? ErrorParam, string? RequestId);
 
     private void AddAuthorization(HttpRequestMessage request)
     {
@@ -988,9 +1051,9 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         const int maximumBytes = 8192;
         var contentType = SafeOptionalDiagnosticField(response.Content.Headers.ContentType?.MediaType);
         if (response.Content.Headers.ContentLength is long length && length > maximumBytes)
-            return new ProviderErrorMetadata("oversized", contentType, null, null, null);
+            return new ProviderErrorMetadata("oversized", contentType, null, null, null, null);
         if (contentType is not null && !contentType.Contains("json", StringComparison.OrdinalIgnoreCase))
-            return new ProviderErrorMetadata("non-json", contentType, null, null, null);
+            return new ProviderErrorMetadata("non-json", contentType, null, null, null, null);
 
         using var boundedRead = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         boundedRead.CancelAfter(TimeSpan.FromSeconds(2));
@@ -1005,29 +1068,30 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 if (read == 0) break;
                 total += read;
             }
-            if (total > maximumBytes) return new ProviderErrorMetadata("oversized", contentType, null, null, null);
-            if (total == 0) return new ProviderErrorMetadata("empty", contentType, null, null, null);
+            if (total > maximumBytes) return new ProviderErrorMetadata("oversized", contentType, null, null, null, null);
+            if (total == 0) return new ProviderErrorMetadata("empty", contentType, null, null, null, null);
             using var document = JsonDocument.Parse(buffer.AsMemory(0, total));
             var root = document.RootElement;
             var error = root.ValueKind == JsonValueKind.Object && root.TryGetProperty("error", out var errorNode) && errorNode.ValueKind == JsonValueKind.Object
                 ? errorNode : root;
             var errorType = SafeOptionalDiagnosticField(ReadString(error, "type"));
             var errorCode = SafeOptionalDiagnosticField(ReadString(error, "code"));
+            var errorParam = SafeOptionalDiagnosticField(ReadString(error, "param"));
             var requestId = SafeOptionalDiagnosticField(ReadString(error, "request_id") ?? ReadString(root, "request_id"));
             var kind = errorType is null && errorCode is null ? "json-without-error-code" : "json-error";
-            return new ProviderErrorMetadata(kind, contentType, errorType, errorCode, requestId);
+            return new ProviderErrorMetadata(kind, contentType, errorType, errorCode, errorParam, requestId);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return new ProviderErrorMetadata("metadata-read-timeout", contentType, null, null, null);
+            return new ProviderErrorMetadata("metadata-read-timeout", contentType, null, null, null, null);
         }
         catch (JsonException)
         {
-            return new ProviderErrorMetadata("invalid-json", contentType, null, null, null);
+            return new ProviderErrorMetadata("invalid-json", contentType, null, null, null, null);
         }
         catch
         {
-            return new ProviderErrorMetadata("metadata-unavailable", contentType, null, null, null);
+            return new ProviderErrorMetadata("metadata-unavailable", contentType, null, null, null, null);
         }
     }
 
@@ -1800,7 +1864,7 @@ internal sealed class AgentHostException : Exception
         string? providerFailureStage = null, string? providerProxySelectionSource = null, string? providerProxyEndpointHostPort = null, int? providerTimeoutSeconds = null,
         int? providerRequestBodyBytes = null, string? providerTransportErrorType = null, string? providerResponseServer = null,
         string? providerResponseVia = null, string? providerResponseRequestId = null, string? providerRetryAfter = null,
-        string? providerErrorBodyKind = null, string? providerErrorContentType = null, string? providerErrorType = null, string? providerErrorCode = null,
+        string? providerErrorBodyKind = null, string? providerErrorContentType = null, string? providerErrorType = null, string? providerErrorCode = null, string? providerErrorParam = null,
         int? providerFallbackAttempts = null, string? providerFallbackTrail = null,
         bool? providerToolCallsPresent = null, int? providerToolCallCount = null, string? providerResponseContentKind = null,
         int? providerResponseContentCharacters = null, string? providerFinishReason = null, string? providerResponseModel = null,
@@ -1826,6 +1890,7 @@ internal sealed class AgentHostException : Exception
         ProviderErrorContentType = providerErrorContentType;
         ProviderErrorType = providerErrorType;
         ProviderErrorCode = providerErrorCode;
+        ProviderErrorParam = providerErrorParam;
         ProviderFallbackAttempts = providerFallbackAttempts;
         ProviderFallbackTrail = providerFallbackTrail;
         ProviderToolCallsPresent = providerToolCallsPresent;
@@ -1859,6 +1924,7 @@ internal sealed class AgentHostException : Exception
     internal string? ProviderErrorContentType { get; }
     internal string? ProviderErrorType { get; }
     internal string? ProviderErrorCode { get; }
+    internal string? ProviderErrorParam { get; }
     internal int? ProviderFallbackAttempts { get; }
     internal string? ProviderFallbackTrail { get; }
     internal bool? ProviderToolCallsPresent { get; }

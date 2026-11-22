@@ -824,6 +824,7 @@ internal static class ProviderContractSelfTest
             var payload = payloadDocument.RootElement;
             loopbackGatewayPayloadValid = payload.GetProperty("tool_choice").GetString() == "required" &&
                 payload.GetProperty("model").GetString() == "xdpool-aggregate/open_router/inclusionai/ling-3.2-flash:free" &&
+                payload.GetProperty("reasoning").GetProperty("enabled").GetBoolean() == false &&
                 !payload.TryGetProperty("thinking", out var ignoredThinkingExtension) &&
                 !payload.TryGetProperty("response_format", out var ignoredResponseFormat);
             return Task.FromResult(JsonResponse(BuildToolCallChatResponse(ValidDecision, "tool_calls")));
@@ -839,6 +840,129 @@ internal static class ProviderContractSelfTest
                 throw new AgentHostException("loopback-openai-gateway-tool-call-self-test-failed", "A provider-neutral loopback OpenAI gateway must receive the strict tool-call envelope without a provider-specific thinking extension, then pass the action through the normal decision validator.");
             results.Add(new { scenario = "provider-neutral-loopback-gateway-tool-call-omits-nonstandard-thinking-extension", passed = true, modelCalls = 1, nativeCommands = 0 });
         }
+
+        var openRouterStructuredPayloadValid = false;
+        var openRouterReasoningSettings = settings with
+        {
+            Endpoint = new Uri("http://127.0.0.1:8326/v1/chat/completions"),
+            Model = "xdpool-aggregate/open_router/particle-ai/particle-1:free",
+            ApiKey = "loopback-openrouter-self-test-secret",
+            OutputMode = "json_schema",
+            Thinking = false,
+            ReasoningEffort = "none",
+            MaxTokenParameter = "max_tokens",
+            MaxOutputTokens = 256
+        };
+        var openRouterReasoningHandler = new StubHandler((httpRequest, _) =>
+        {
+            if (httpRequest.Method == HttpMethod.Get)
+                return Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"xdpool-aggregate/open_router/particle-ai/particle-1:free\"}]}"));
+            using var payloadDocument = JsonDocument.Parse(httpRequest.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            var payload = payloadDocument.RootElement;
+            openRouterStructuredPayloadValid = payload.GetProperty("model").GetString() == "xdpool-aggregate/open_router/particle-ai/particle-1:free" &&
+                payload.GetProperty("reasoning").GetProperty("enabled").GetBoolean() == false &&
+                !payload.TryGetProperty("thinking", out var ignoredThinkingExtension) &&
+                !payload.TryGetProperty("reasoning_effort", out var ignoredLegacyReasoningEffort) &&
+                payload.GetProperty("response_format").GetProperty("type").GetString() == "json_schema";
+            return Task.FromResult(JsonResponse(BuildChatResponse(ValidDecision, "stop")));
+        });
+        using (var openRouterReasoningClient = new HttpClient(openRouterReasoningHandler) { Timeout = openRouterReasoningSettings.Timeout })
+        using (var openRouterReasoningProvider = new OllamaNativeProvider(openRouterReasoningSettings, openRouterReasoningClient))
+        using (var request = JsonDocument.Parse(BuildDecisionRequest()))
+        {
+            await openRouterReasoningProvider.CheckConfiguredModelAsync(CancellationToken.None);
+            var result = await openRouterReasoningProvider.DecideAsync(request.RootElement, CancellationToken.None);
+            if (!openRouterStructuredPayloadValid || result.Status != "completed" || result.Decision["done"]?.GetValue<bool>() != true ||
+                result.ReasoningEffortApplied != "disabled")
+                throw new AgentHostException("openrouter-reasoning-off-provider-self-test-failed", "OpenRouter reasoning disable must use its documented reasoning.enabled field, preserve JSON Schema mode, and not spend the completion budget on hidden reasoning.");
+            results.Add(new { scenario = "openrouter-reasoning-disabled-uses-standard-reasoning-object", passed = true, modelCalls = 1, nativeCommands = 0 });
+        }
+
+        var emptyOpenRouterResponse = JsonSerializer.Serialize(new
+        {
+            model = "particle-ai/particle-1:free",
+            choices = Array.Empty<object>(),
+            usage = new { prompt_tokens = 455, completion_tokens = 256 }
+        });
+        var emptyOpenRouterHandler = new StubHandler((httpRequest, _) => httpRequest.Method == HttpMethod.Get
+            ? Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"xdpool-aggregate/open_router/particle-ai/particle-1:free\"}]}"))
+            : Task.FromResult(JsonResponse(emptyOpenRouterResponse)));
+        using (var emptyOpenRouterClient = new HttpClient(emptyOpenRouterHandler) { Timeout = openRouterReasoningSettings.Timeout })
+        using (var emptyOpenRouterProvider = new OllamaNativeProvider(openRouterReasoningSettings, emptyOpenRouterClient))
+        using (var request = JsonDocument.Parse(BuildDecisionRequest()))
+        {
+            await emptyOpenRouterProvider.CheckConfiguredModelAsync(CancellationToken.None);
+            try
+            {
+                _ = await emptyOpenRouterProvider.DecideAsync(request.RootElement, CancellationToken.None);
+                throw new AgentHostException("openrouter-empty-choices-self-test-failed", "A successful HTTP status without a structured choice must not become a model decision.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-content-missing")
+            {
+                if (exception.ProviderHttpStatus != 200 || exception.ProviderResponseContentKind != "choices-empty" ||
+                    exception.ProviderResponsePromptTokens != 455 || exception.ProviderResponseCompletionTokens != 256 ||
+                    exception.ProviderResponseModel != "particle-ai/particle-1:free" ||
+                    exception.Message.Contains(emptyOpenRouterResponse, StringComparison.Ordinal))
+                    throw new AgentHostException("openrouter-empty-choices-diagnostic-self-test-failed", "An empty-choice response must preserve only bounded model/usage/shape metadata, not the response body.");
+            }
+            results.Add(new { scenario = "openrouter-empty-choices-preserves-safe-response-shape-and-usage", passed = true, modelCalls = 1, nativeCommands = 0 });
+        }
+
+        var openRouterChoiceWithoutMessageResponse = JsonSerializer.Serialize(new
+        {
+            model = "particle-ai/particle-1:free",
+            choices = new[] { new { finish_reason = "stop" } },
+            usage = new { prompt_tokens = 455, completion_tokens = 12 }
+        });
+        var openRouterChoiceWithoutMessageHandler = new StubHandler((httpRequest, _) => httpRequest.Method == HttpMethod.Get
+            ? Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"xdpool-aggregate/open_router/particle-ai/particle-1:free\"}]}"))
+            : Task.FromResult(JsonResponse(openRouterChoiceWithoutMessageResponse)));
+        using (var malformedOpenRouterClient = new HttpClient(openRouterChoiceWithoutMessageHandler) { Timeout = openRouterReasoningSettings.Timeout })
+        using (var malformedOpenRouterProvider = new OllamaNativeProvider(openRouterReasoningSettings, malformedOpenRouterClient))
+        using (var request = JsonDocument.Parse(BuildDecisionRequest()))
+        {
+            await malformedOpenRouterProvider.CheckConfiguredModelAsync(CancellationToken.None);
+            try
+            {
+                _ = await malformedOpenRouterProvider.DecideAsync(request.RootElement, CancellationToken.None);
+                throw new AgentHostException("openrouter-missing-message-self-test-failed", "An OpenAI-compatible choice without a message object must not become a model decision.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-content-missing")
+            {
+                if (exception.ProviderHttpStatus != 200 || exception.ProviderFailureStage != "http-response-body" ||
+                    exception.ProviderOutputFormat != "json_schema" || exception.ProviderResponseContentKind != "choice-object-message-missing" ||
+                    exception.ProviderFinishReason != "stop" || exception.ProviderResponseModel != "particle-ai/particle-1:free" ||
+                    exception.ProviderResponsePromptTokens != 455 || exception.ProviderResponseCompletionTokens != 12 ||
+                    exception.Message.Contains(openRouterChoiceWithoutMessageResponse, StringComparison.Ordinal))
+                    throw new AgentHostException("openrouter-missing-message-diagnostic-self-test-failed", "A malformed choice must retain safe HTTP/model/usage/shape metadata without retaining its response body.");
+            }
+            results.Add(new { scenario = "openrouter-choice-without-message-preserves-safe-response-shape-and-usage", passed = true, modelCalls = 1, nativeCommands = 0 });
+        }
+
+        const string privateProviderErrorText = "PRIVATE_PROVIDER_RESPONSE_BODY_MUST_NOT_BE_SERIALIZED";
+        var safeProviderFailure = Program.BuildSafeProviderFailureDetails(new AgentHostException(
+            "provider-http-error", privateProviderErrorText, providerHttpStatus: 400,
+            providerRoute: "xdpool-aggregate/open_router", providerOutputFormat: "required_tool_call",
+            providerFailureStage: "http-response-status", providerRequestBodyBytes: 512,
+            providerResponseRequestId: "req-safe-diagnostic-id", providerErrorBodyKind: "json-error",
+            providerErrorContentType: "application/json", providerErrorType: "invalid_request_error",
+            providerErrorCode: "invalid_request", providerErrorParam: "tools_0_.function.parameters"));
+        var safeProviderFailureJson = safeProviderFailure?.ToJsonString() ?? "{}";
+        using (var safeProviderFailureDocument = JsonDocument.Parse(safeProviderFailureJson))
+        {
+            var details = safeProviderFailureDocument.RootElement;
+            if (details.GetProperty("httpStatus").GetInt32() != 400 ||
+                details.GetProperty("errorType").GetString() != "invalid_request_error" ||
+                details.GetProperty("errorCode").GetString() != "invalid_request" ||
+                details.GetProperty("errorParam").GetString() != "tools_0_.function.parameters" ||
+                details.GetProperty("responseRequestId").GetString() != "req-safe-diagnostic-id" ||
+                safeProviderFailureJson.Contains(privateProviderErrorText, StringComparison.Ordinal))
+                throw new AgentHostException("provider-http-failure-diagnostics-self-test-failed", "Provider CLI failure output must preserve only safe HTTP metadata and must never serialize the response body.");
+        }
+        if (Program.BuildSafeProviderFailureDetails(new AgentHostException("provider-timeout", "timeout")) is not null)
+            throw new AgentHostException("provider-http-failure-diagnostics-overreported-self-test-failed", "Non-HTTP provider failures must not fabricate HTTP diagnostics.");
+        results.Add(new { scenario = "provider-http-failure-cli-output-preserves-safe-error-fields-without-body", passed = true, modelCalls = 0, nativeCommands = 0 });
+
         var budgetGuardHandler = new StubHandler((_, _) => Task.FromResult(JsonResponse(BuildChatResponse(ValidDecision, "stop"))));
         var budgetGuardSettings = genericRemoteSettings with
         {

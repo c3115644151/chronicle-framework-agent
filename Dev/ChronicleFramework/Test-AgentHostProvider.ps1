@@ -4,6 +4,7 @@ param(
     [Parameter(Mandatory = $true)][string]$EvidencePath,
     [ValidateRange(64,2048)][int]$MaxOutputTokens = 128,
     [switch]$AllowDshXdPoolFreeRoute,
+    [switch]$ProbeDshFreeRouteWithMinimalChat,
     [switch]$HealthOnly
 )
 
@@ -129,6 +130,99 @@ if ($HealthOnly) {
     return
 }
 
+if ($ProbeDshFreeRouteWithMinimalChat) {
+    if (-not $AllowDshXdPoolFreeRoute -or -not $isDshXdPoolFreeRoute -or $null -eq $providerCredential) {
+        throw 'The minimal DSH chat probe requires an explicitly allowed direct XD Pool :free model and its local gateway credential; no inference request was sent.'
+    }
+    Add-Type -AssemblyName System.Net.Http
+    function Protect-ProviderDiagnosticField([AllowNull()][string]$Value) {
+        if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
+        $bounded = $Value.Substring(0, [Math]::Min($Value.Length, 96))
+        return [regex]::Replace($bounded, '[^A-Za-z0-9_.:/@+\-]', '_')
+    }
+    function Get-SafeMinimalChatProbeSummary([int]$StatusCode, [AllowNull()][object]$ResponseJson, [AllowNull()][string]$Route) {
+        $errorNode = if ($null -ne $ResponseJson -and $null -ne $ResponseJson.PSObject.Properties['error']) { $ResponseJson.error } else { $null }
+        $choice = $null
+        $choicesProperty = if ($null -ne $ResponseJson) { $ResponseJson.PSObject.Properties['choices'] } else { $null }
+        if ($null -ne $choicesProperty -and $null -ne $choicesProperty.Value) {
+            $choiceRows = @($choicesProperty.Value)
+            if ($choiceRows.Count -gt 0) { $choice = $choiceRows[0] }
+        }
+        $content = ''
+        if ($null -ne $choice -and $null -ne $choice.PSObject.Properties['message']) {
+            $messageNode = $choice.message
+            if ($null -ne $messageNode -and $null -ne $messageNode.PSObject.Properties['content']) { $content = [string]$messageNode.content }
+        }
+        $usage = if ($null -ne $ResponseJson -and $null -ne $ResponseJson.PSObject.Properties['usage']) { $ResponseJson.usage } else { $null }
+        [ordered]@{
+            Passed = ($StatusCode -eq 200 -and $content.Trim() -ceq 'OK')
+            ProviderHost = $providerUri.Host
+            ModelId = $model
+            HttpStatus = $StatusCode
+            Route = $Route
+            ErrorType = if ($errorNode) { Protect-ProviderDiagnosticField([string]$errorNode.type) } else { $null }
+            ErrorCode = if ($errorNode) { Protect-ProviderDiagnosticField([string]$errorNode.code) } else { $null }
+            ErrorParam = if ($errorNode) { Protect-ProviderDiagnosticField([string]$errorNode.param) } else { $null }
+            RequestId = if ($errorNode) { Protect-ProviderDiagnosticField([string]$errorNode.request_id) } else { $null }
+            FinishReason = if ($choice) { Protect-ProviderDiagnosticField([string]$choice.finish_reason) } else { $null }
+            PromptTokens = if ($usage) { $usage.prompt_tokens } else { $null }
+            CompletionTokens = if ($usage) { $usage.completion_tokens } else { $null }
+            ContentMatchedExpected = ($content.Trim() -ceq 'OK')
+            ResponseBodyPersisted = $false
+            CredentialPersisted = $false
+            NativeCommands = 0
+        }
+    }
+    $syntheticError = '{"error":{"type":"invalid_request_error","code":"invalid_request","param":"tools[0].function.parameters","message":"private response text"}}' | ConvertFrom-Json
+    $syntheticFailureSummary = Get-SafeMinimalChatProbeSummary -StatusCode 400 -ResponseJson $syntheticError -Route $null
+    $syntheticSuccess = '{"choices":[{"message":{"content":"OK"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1}}' | ConvertFrom-Json
+    $syntheticSuccessSummary = Get-SafeMinimalChatProbeSummary -StatusCode 200 -ResponseJson $syntheticSuccess -Route 'direct-free-route'
+    if ($syntheticFailureSummary.ErrorCode -ne 'invalid_request' -or $syntheticFailureSummary.ErrorParam -ne 'tools_0_.function.parameters' -or
+        $syntheticFailureSummary.ResponseBodyPersisted -or $syntheticSuccessSummary.Passed -ne $true -or
+        $syntheticSuccessSummary.PromptTokens -ne 3 -or $syntheticSuccessSummary.CompletionTokens -ne 1) {
+        throw 'Minimal free-route diagnostic parsing must handle both error-only and choices responses without storing bodies.'
+    }
+    $client = [System.Net.Http.HttpClient]::new()
+    $requestMessage = [System.Net.Http.HttpRequestMessage]::new(
+        [System.Net.Http.HttpMethod]::Post,
+        [Uri]::new($providerBaseUrl.TrimEnd('/') + '/chat/completions'))
+    try {
+        $requestMessage.Headers.Authorization = [System.Net.Http.Headers.AuthenticationHeaderValue]::new('Bearer', [string]$providerCredential.Value)
+        $minimalRequestJson = [ordered]@{
+            model = $model
+            messages = @([ordered]@{ role = 'user'; content = 'Reply with exactly OK.' })
+            max_tokens = 8
+            temperature = 0
+            stream = $false
+        } | ConvertTo-Json -Depth 4 -Compress
+        $requestMessage.Content = [System.Net.Http.StringContent]::new($minimalRequestJson, [Text.Encoding]::UTF8, 'application/json')
+        $response = $client.SendAsync($requestMessage).GetAwaiter().GetResult()
+        try {
+            $responseText = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            $responseJson = $null
+            try { $responseJson = $responseText | ConvertFrom-Json -ErrorAction Stop } catch { }
+            $route = $null
+            try { $route = Protect-ProviderDiagnosticField([string]::Join(',', $response.Headers.GetValues('X-Routed-Via'))) } catch { }
+            $safeSummary = Get-SafeMinimalChatProbeSummary -StatusCode ([int]$response.StatusCode) -ResponseJson $responseJson -Route $route
+            $safeSummaryJson = $safeSummary | ConvertTo-Json -Depth 4
+            Set-Content -LiteralPath (Join-Path $evidencePath 'ProviderSimpleChatProbe.json') -Value $safeSummaryJson -Encoding UTF8
+            $safeSummaryJson
+            if (-not $safeSummary.Passed) {
+                $errorType = if ($safeSummary.ErrorType) { $safeSummary.ErrorType } else { 'unknown' }
+                $errorCode = if ($safeSummary.ErrorCode) { $safeSummary.ErrorCode } else { 'unknown' }
+                $errorParam = if ($safeSummary.ErrorParam) { $safeSummary.ErrorParam } else { 'unknown' }
+                throw "Minimal DSH free-route request failed (http=$($safeSummary.HttpStatus); type=$errorType; code=$errorCode; param=$errorParam). Response body omitted; sanitized receipt saved to ProviderSimpleChatProbe.json."
+            }
+            return
+        }
+        finally { $response.Dispose() }
+    }
+    finally {
+        $requestMessage.Dispose()
+        $client.Dispose()
+    }
+}
+
 if ($freeLlmApiProfile -and $freeLlmApiProfile.ModelExecutionStatus -eq 'router') {
     throw 'FreeLLMAPI multi-provider router inference is blocked: this Harness has no verified free-only fallback chain and readable quota/cost receipt. Health-only checks remain available; select a directly verifiable model route before inference.'
 }
@@ -174,7 +268,52 @@ if (-not $process.WaitForExit(($effectiveTimeout + 15) * 1000)) {
 }
 $stdout = $stdoutTask.GetAwaiter().GetResult()
 $stderr = $stderrTask.GetAwaiter().GetResult()
-if ($process.ExitCode -ne 0) { throw "Configured provider returned an error (exit=$($process.ExitCode)); response text is omitted. $stderr" }
+if ($process.ExitCode -ne 0) {
+    $failurePayload = $null
+    try { $failurePayload = $stderr | ConvertFrom-Json -ErrorAction Stop } catch { }
+    $providerFailure = if ($failurePayload) { $failurePayload.provider } else { $null }
+    $failureSummary = [ordered]@{
+        Passed = $false
+        ProviderProtocol = $protocol
+        ProviderHost = $providerUri.Host
+        ConfiguredModelId = $model
+        ExitCode = [int]$process.ExitCode
+        ErrorCode = if ($failurePayload) { [string]$failurePayload.error } else { $null }
+        ProviderHttpStatus = if ($providerFailure) { $providerFailure.httpStatus } else { $null }
+        ProviderRoute = if ($providerFailure) { [string]$providerFailure.route } else { $null }
+        ProviderOutputFormat = if ($providerFailure) { [string]$providerFailure.outputFormat } else { $null }
+        ProviderFailureStage = if ($providerFailure) { [string]$providerFailure.failureStage } else { $null }
+        ProviderErrorBodyKind = if ($providerFailure) { [string]$providerFailure.errorBodyKind } else { $null }
+        ProviderErrorContentType = if ($providerFailure) { [string]$providerFailure.errorContentType } else { $null }
+        ProviderErrorType = if ($providerFailure) { [string]$providerFailure.errorType } else { $null }
+        ProviderErrorCode = if ($providerFailure) { [string]$providerFailure.errorCode } else { $null }
+        ProviderErrorParam = if ($providerFailure) { [string]$providerFailure.errorParam } else { $null }
+        ProviderResponseContentKind = if ($providerFailure) { [string]$providerFailure.responseContentKind } else { $null }
+        ProviderResponseContentCharacters = if ($providerFailure) { $providerFailure.responseContentCharacters } else { $null }
+        ProviderResponseFinishReason = if ($providerFailure) { [string]$providerFailure.finishReason } else { $null }
+        ProviderResponseModel = if ($providerFailure) { [string]$providerFailure.responseModel } else { $null }
+        ProviderResponsePromptTokens = if ($providerFailure) { $providerFailure.promptTokens } else { $null }
+        ProviderResponseCompletionTokens = if ($providerFailure) { $providerFailure.completionTokens } else { $null }
+        ProviderRequestId = if ($providerFailure) { [string]$providerFailure.responseRequestId } else { $null }
+        ProviderRetryAfter = if ($providerFailure) { [string]$providerFailure.retryAfter } else { $null }
+        ProviderFallbackAttempts = if ($providerFailure) { $providerFailure.fallbackAttempts } else { $null }
+        ProviderFallbackTrail = if ($providerFailure) { [string]$providerFailure.fallbackTrail } else { $null }
+        ProviderRequestBodyBytes = if ($providerFailure) { $providerFailure.requestBodyBytes } else { $null }
+        NativeCommands = 0
+        ResponseBodyPersisted = $false
+        CredentialPersisted = $false
+    }
+    $failureSummary | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $evidencePath 'ProviderSmokeFailure.json') -Encoding UTF8
+    $httpStatus = if ($providerFailure) { $providerFailure.httpStatus } else { 'unknown' }
+    $errorType = if ($providerFailure -and $providerFailure.errorType) { $providerFailure.errorType } else { 'unknown' }
+    $errorCode = if ($providerFailure -and $providerFailure.errorCode) { $providerFailure.errorCode } else { 'unknown' }
+    $errorParam = if ($providerFailure -and $providerFailure.errorParam) { $providerFailure.errorParam } else { 'unknown' }
+    $requestId = if ($providerFailure -and $providerFailure.responseRequestId) { $providerFailure.responseRequestId } else { 'unknown' }
+    $responseShape = if ($providerFailure -and $providerFailure.responseContentKind) { [string]$providerFailure.responseContentKind } else { 'unknown' }
+    $responseFinish = if ($providerFailure -and $providerFailure.finishReason) { [string]$providerFailure.finishReason } else { 'unknown' }
+    $responseTokens = if ($providerFailure -and $null -ne $providerFailure.completionTokens) { [string]$providerFailure.completionTokens } else { 'unknown' }
+    throw "Configured provider returned an error (exit=$($process.ExitCode); http=$httpStatus; type=$errorType; code=$errorCode; param=$errorParam; shape=$responseShape; finish=$responseFinish; completionTokens=$responseTokens; requestId=$requestId). Response body and credentials are omitted; sanitized receipt saved to ProviderSmokeFailure.json."
+}
 try { $result = $stdout | ConvertFrom-Json }
 catch { throw 'Local provider Host returned invalid structured JSON; raw response is omitted.' }
 if ($result.status -ne 'completed' -or $result.decision.goalClassification -cne $expectedClassification -or

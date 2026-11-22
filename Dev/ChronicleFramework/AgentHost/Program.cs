@@ -183,7 +183,8 @@ internal static class Program
             {
                 status = "failed",
                 error = exception.Code,
-                message = exception.Message
+                message = exception.Message,
+                provider = BuildSafeProviderFailureDetails(exception)
             }, OutputJsonOptions));
             return 2;
         }
@@ -209,6 +210,40 @@ internal static class Program
             }, OutputJsonOptions));
             return 3;
         }
+    }
+
+    internal static JsonObject? BuildSafeProviderFailureDetails(AgentHostException exception)
+    {
+        if (exception.ProviderHttpStatus is null) return null;
+        return new JsonObject
+        {
+            ["httpStatus"] = JsonValue.Create(exception.ProviderHttpStatus.Value),
+            ["route"] = JsonValue.Create(exception.ProviderRoute),
+            ["outputFormat"] = JsonValue.Create(exception.ProviderOutputFormat),
+            ["failureStage"] = JsonValue.Create(exception.ProviderFailureStage),
+            ["proxySelectionSource"] = JsonValue.Create(exception.ProviderProxySelectionSource),
+            ["proxyEndpointHostPort"] = JsonValue.Create(exception.ProviderProxyEndpointHostPort),
+            ["requestBodyBytes"] = JsonValue.Create(exception.ProviderRequestBodyBytes),
+            ["responseServer"] = JsonValue.Create(exception.ProviderResponseServer),
+            ["responseVia"] = JsonValue.Create(exception.ProviderResponseVia),
+            ["responseRequestId"] = JsonValue.Create(exception.ProviderResponseRequestId),
+            ["retryAfter"] = JsonValue.Create(exception.ProviderRetryAfter),
+            ["errorBodyKind"] = JsonValue.Create(exception.ProviderErrorBodyKind),
+            ["errorContentType"] = JsonValue.Create(exception.ProviderErrorContentType),
+            ["errorType"] = JsonValue.Create(exception.ProviderErrorType),
+            ["errorCode"] = JsonValue.Create(exception.ProviderErrorCode),
+            ["errorParam"] = JsonValue.Create(exception.ProviderErrorParam),
+            ["toolCallsPresent"] = JsonValue.Create(exception.ProviderToolCallsPresent),
+            ["toolCallCount"] = JsonValue.Create(exception.ProviderToolCallCount),
+            ["responseContentKind"] = JsonValue.Create(exception.ProviderResponseContentKind),
+            ["responseContentCharacters"] = JsonValue.Create(exception.ProviderResponseContentCharacters),
+            ["finishReason"] = JsonValue.Create(exception.ProviderFinishReason),
+            ["responseModel"] = JsonValue.Create(exception.ProviderResponseModel),
+            ["promptTokens"] = JsonValue.Create(exception.ProviderResponsePromptTokens),
+            ["completionTokens"] = JsonValue.Create(exception.ProviderResponseCompletionTokens),
+            ["fallbackAttempts"] = JsonValue.Create(exception.ProviderFallbackAttempts),
+            ["fallbackTrail"] = JsonValue.Create(exception.ProviderFallbackTrail)
+        };
     }
 
     internal static JsonObject BuildCampaignLoopTerminalReceipt(JsonObject result)

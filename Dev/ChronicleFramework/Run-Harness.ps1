@@ -1,10 +1,11 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateSet('Docs', 'Preflight', 'Api', 'Build', 'Smoke', 'ReleasePackage', 'Campaign', 'CampaignActorThinkTrace', 'FreshCampaign', 'FreshStoryModeSetup', 'FreshStoryModeModelEvaluation', 'PersistentEycCampaign', 'EycObjectiveCheckpointReadback', 'FreshStoryModeNativeMenuLeaveEvaluation', 'FreshStoryModeNativeInquiryResponseEvaluation', 'FreshCampaignProgression', 'FreshCampaignBaselineMatrix', 'FreshCampaignLiveModelEvaluation', 'FreshCampaignSupplyBaseline', 'FreshCampaignRecruitmentFallback', 'Protocol', 'AgentHostProvider', 'AgentHostProviderHealth', 'AgentHostPackage', 'AgentHostSupplyEvaluation', 'AgentHostCampaignLoopEvaluation', 'AgentHostNativeMapMovementMonitorProbe', 'AgentHostVillageToolsQuestEvaluation', 'AgentHostEstablishClanGoalPlannerEvaluation', 'AgentHostEstablishClanAutonomyEvaluation', 'AgentHostCaptivityRecoveryEvaluation', 'AgentHostEstablishClanGoldSaleEvaluation', 'AgentHostBattleSimulationEvaluation', 'AgentHostBattleAndCaptivityEvaluation', 'AgentHostLifecycleEvaluation', 'AgentHostLifecycleCompletionEvaluation', 'AgentLoop', 'LiveModel', 'LiveModelArrival', 'LiveModelRecruitment', 'LiveModelSafePassageRecruitment', 'LiveModelRecruitmentEvaluation', 'LiveModelSupplyEvaluation', 'CheckpointPersistence', 'LiveModelResume', 'LiveModelRuntimeResume', 'LiveModelActionRecovery', 'CheckpointValidation', 'RecruitmentBaseline', 'MultiDaySupplyBaseline', 'TimeControlLoop', 'BattleMissionFormationProbe', 'BattleMissionInputIsolationProbe', 'BattleMissionControllerProbe', 'BattleMissionRtsCameraProbe', 'BattleMissionMovementInputProbe', 'BattleMissionAgentNavigatorProbe', 'BattleMissionNativeAiHandoffProbe', 'BattleMissionHostNativeAiAutopilotProbe', 'BattleFixture', 'PostBattle', 'Observation', 'CaptivityObservation', 'CaptivityOutcome', 'EncounterSurrender', 'EncounterEscape', 'JoinEncounterDefenders', 'JoinEncounterEligibility', 'JoinEncounterAbandonArmy', 'MovingArmyJoin', 'JoinSiegeEvent', 'MapNotifications', 'MapIncidentInputGuard', 'QuickInformation', 'SceneNotification', 'MissionLeave', 'VillageToolsDelivery', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyQuestMarkers', 'MapPartyQuestAcceptance', 'MapEscapeMenu', 'MapInquiry', 'AlleyLeaderInquiry', 'AlleyRosterManagement', 'AlleyAbandonment', 'AlleyEntryMenu', 'MissionSceneNavigation', 'AlleyVolunteerBranches', 'AlleyAttackYield', 'AlleyAttackFightMission', 'PersuasionDetails', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'BarterFightRoute', 'MissionInteraction', 'ArenaMasterInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EngageVisibility', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuickTalk', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'SettlementOverlayQuickTalkIssueGateProbe', 'VisualCapture', 'All')]
+    [ValidateSet('Docs', 'Preflight', 'ConfiguredModelPreflight', 'Api', 'Build', 'Smoke', 'ReleasePackage', 'Campaign', 'CampaignActorThinkTrace', 'FreshCampaign', 'FreshStoryModeSetup', 'FreshStoryModeModelEvaluation', 'PersistentEycCampaign', 'EycObjectiveCheckpointReadback', 'FreshStoryModeNativeMenuLeaveEvaluation', 'FreshStoryModeNativeInquiryResponseEvaluation', 'FreshCampaignProgression', 'FreshCampaignBaselineMatrix', 'FreshCampaignLiveModelEvaluation', 'FreshCampaignSupplyBaseline', 'FreshCampaignRecruitmentFallback', 'Protocol', 'AgentHostProvider', 'AgentHostProviderHealth', 'AgentHostPackage', 'AgentHostSupplyEvaluation', 'AgentHostCampaignLoopEvaluation', 'AgentHostNativeMapMovementMonitorProbe', 'AgentHostVillageToolsQuestEvaluation', 'AgentHostEstablishClanGoalPlannerEvaluation', 'AgentHostEstablishClanAutonomyEvaluation', 'AgentHostCaptivityRecoveryEvaluation', 'AgentHostEstablishClanGoldSaleEvaluation', 'AgentHostBattleSimulationEvaluation', 'AgentHostBattleAndCaptivityEvaluation', 'AgentHostLifecycleEvaluation', 'AgentHostLifecycleCompletionEvaluation', 'AgentLoop', 'LiveModel', 'LiveModelArrival', 'LiveModelRecruitment', 'LiveModelSafePassageRecruitment', 'LiveModelRecruitmentEvaluation', 'LiveModelSupplyEvaluation', 'CheckpointPersistence', 'LiveModelResume', 'LiveModelRuntimeResume', 'LiveModelActionRecovery', 'CheckpointValidation', 'RecruitmentBaseline', 'MultiDaySupplyBaseline', 'TimeControlLoop', 'BattleMissionFormationProbe', 'BattleMissionInputIsolationProbe', 'BattleMissionControllerProbe', 'BattleMissionRtsCameraProbe', 'BattleMissionMovementInputProbe', 'BattleMissionAgentNavigatorProbe', 'BattleMissionNativeAiHandoffProbe', 'BattleMissionHostNativeAiAutopilotProbe', 'BattleFixture', 'PostBattle', 'Observation', 'CaptivityObservation', 'CaptivityOutcome', 'EncounterSurrender', 'EncounterEscape', 'JoinEncounterDefenders', 'JoinEncounterEligibility', 'JoinEncounterAbandonArmy', 'MovingArmyJoin', 'JoinSiegeEvent', 'MapNotifications', 'MapIncidentInputGuard', 'QuickInformation', 'SceneNotification', 'MissionLeave', 'VillageToolsDelivery', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyQuestMarkers', 'MapPartyQuestAcceptance', 'MapEscapeMenu', 'MapInquiry', 'AlleyLeaderInquiry', 'AlleyRosterManagement', 'AlleyAbandonment', 'AlleyEntryMenu', 'MissionSceneNavigation', 'AlleyVolunteerBranches', 'AlleyAttackYield', 'AlleyAttackFightMission', 'PersuasionDetails', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'BarterFightRoute', 'MissionInteraction', 'ArenaMasterInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EngageVisibility', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuickTalk', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'SettlementOverlayQuickTalkIssueGateProbe', 'VisualCapture', 'All')]
     [string]$Phase = 'All',
     [switch]$RecruitmentBulkOnly,
     [string]$FreshStoryModeModel = '',
     [switch]$AllowDshXdPoolFreeRoute,
+    [switch]$ProbeDshFreeRouteWithMinimalChat,
     [int]$SmokeTimeoutSeconds = 180,
     [ValidateRange(64,2048)][int]$ProviderSmokeMaxOutputTokens = 128,
     [int]$SmokeStabilitySeconds = 8,
@@ -36,7 +37,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.647'
+$HarnessContractVersion = '7.655'
 if ($BattleMissionSoloMainHeroProbe -and $Phase -ne 'BattleMissionHostNativeAiAutopilotProbe') {
     throw 'The solo MainHero option is only valid with -Phase BattleMissionHostNativeAiAutopilotProbe.'
 }
@@ -46,7 +47,7 @@ if ($BattleMissionDesktopInputIsolationOnly -and $Phase -ne 'BattleMissionInputI
 if ($Phase -ceq 'EycObjectiveCheckpointReadback' -and [string]::IsNullOrWhiteSpace($PersistentEycCampaignKey)) {
     throw 'EycObjectiveCheckpointReadback requires -PersistentEycCampaignKey to select one owned Campaign branch.'
 }
-if ($Phase -in @('FreshStoryModeModelEvaluation','PersistentEycCampaign') -and [string]::IsNullOrWhiteSpace($FreshStoryModeModel)) {
+if ($Phase -in @('ConfiguredModelPreflight','FreshStoryModeModelEvaluation','PersistentEycCampaign') -and [string]::IsNullOrWhiteSpace($FreshStoryModeModel)) {
     throw 'Select an explicit model ID with -FreshStoryModeModel; the configured provider catalog will verify it before any game or model request.'
 }
 if ($Phase -in @('FreshStoryModeModelEvaluation','PersistentEycCampaign') -and $FreshStoryModeModel -match '^(auto(?::|$)|fusion(?::|$)|free-router$)') {
@@ -271,6 +272,7 @@ $stages = @()
 $requestedStages = switch ($Phase) {
     'Docs' { @('Docs') }
     'Preflight' { @('Preflight') }
+    'ConfiguredModelPreflight' { @('Preflight', 'ConfiguredModelPreflight') }
     'Api' { @('Api') }
     'Build' { @('Build') }
     'Smoke' { @('Smoke') }
@@ -518,6 +520,50 @@ foreach ($stage in $requestedStages) {
                             InferenceRequests = 0
                             BannerlordStarted = $false
                             GatewayStartedByHarness = [bool]$profile.GatewayStartedByHarness
+                        } | ConvertTo-Json -Depth 4
+                        return
+                    }
+
+                    $isDshXdPoolFreeEndpoint = $endpoint.IsLoopback -and $endpoint.Port -eq 8326 -and $endpoint.AbsolutePath.TrimEnd('/') -eq '/v1'
+                    if ($isDshXdPoolFreeEndpoint) {
+                        $isDirectDshFreeModel = $FreshStoryModeModel -match '^xdpool-aggregate/(?!combo:)[^\r\n]+:free$' -and
+                            $FreshStoryModeModel -notmatch '(?i)(combo:|fallback|fusion|auto:)'
+                        if (-not $AllowDshXdPoolFreeRoute -or -not $isDirectDshFreeModel) {
+                            throw 'DSH campaign preflight requires explicit opt-in to one direct xdpool-aggregate/*:free model; combinations/fallbacks are blocked and no inference request was sent.'
+                        }
+                        $credential = Get-ChronicleProviderCredential -Endpoint $endpoint
+                        if ([string]::IsNullOrWhiteSpace([string]$credential.Value)) { throw 'The DSH OpenAI-compatible gateway credential is unavailable; no inference request was sent.' }
+                        $modelRouteMatch = [regex]::Match($FreshStoryModeModel, '^xdpool-aggregate/([^/]+)/(.+)$')
+                        if (-not $modelRouteMatch.Success) { throw 'The direct DSH model ID did not contain a provider segment; no inference request was sent.' }
+                        $dshProviderId = $modelRouteMatch.Groups[1].Value
+                        $dshProviderModelId = $modelRouteMatch.Groups[2].Value
+                        $aggregateUri = [Uri]::new('http://127.0.0.1:3477/plugins/dsh-xdpool/aggregate')
+                        try { $aggregateStatus = Invoke-RestMethod -Uri $aggregateUri -Headers @{ Authorization = "Bearer $($credential.Value)" } -TimeoutSec 8 }
+                        catch { throw 'The DSH aggregate status preflight failed; no inference request was sent.' }
+                        $aggregateProvider = @($aggregateStatus.providers | Where-Object { [string]$_.id -ceq $dshProviderId } | Select-Object -First 1)
+                        if ($aggregateProvider.Count -ne 1 -or -not [bool]$aggregateProvider[0].enabled -or
+                            -not [bool]$aggregateProvider[0].configured -or
+                            @($aggregateProvider[0].models | Where-Object { [string]$_ -ceq $dshProviderModelId }).Count -ne 1) {
+                            throw 'The selected direct DSH free model provider is disabled, unconfigured, or absent from its selected model set; no inference request was sent.'
+                        }
+                        $modelsUri = [UriBuilder]::new($endpoint)
+                        $modelsUri.Path = $endpoint.AbsolutePath.TrimEnd('/') + '/models'
+                        $modelsUri.Query = ''
+                        try { $catalog = Invoke-RestMethod -Uri $modelsUri.Uri -Headers @{ Authorization = "Bearer $($credential.Value)" } -TimeoutSec 12 }
+                        catch { throw 'The DSH loopback model-list preflight failed; no inference request was sent.' }
+                        $modelRows = @($catalog.data)
+                        $modelListed = @($modelRows | Where-Object { [string]$_.id -ceq $FreshStoryModeModel }).Count -gt 0
+                        if (-not $modelListed) { throw 'The selected direct free DSH model is absent from the current gateway catalog; no inference request was sent.' }
+                        [ordered]@{
+                            ProviderKind = 'DSH XD Pool direct free-labeled model'
+                            ProviderHost = $endpoint.Host
+                            ModelId = $FreshStoryModeModel
+                            CatalogListed = $true
+                            AvailableModelCount = $modelRows.Count
+                            ModelPriceReceiptAvailable = $false
+                            InferenceRequests = 0
+                            BannerlordStarted = $false
+                            AutomaticFallbackEnabled = $false
                         } | ConvertTo-Json -Depth 4
                         return
                     }
@@ -904,6 +950,7 @@ foreach ($stage in $requestedStages) {
                 $providerArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $harnessRoot 'Test-AgentHostProvider.ps1'),
                     '-HostDllPath', $agentHostDllPath, '-EvidencePath', $providerEvidencePath, '-MaxOutputTokens', [string]$ProviderSmokeMaxOutputTokens)
                 if ($AllowDshXdPoolFreeRoute) { $providerArguments += '-AllowDshXdPoolFreeRoute' }
+                if ($ProbeDshFreeRouteWithMinimalChat) { $providerArguments += '-ProbeDshFreeRouteWithMinimalChat' }
                 $providerOutput = & powershell @providerArguments 2>&1 | Out-String
                 $providerExitCode = $LASTEXITCODE
                 if ($providerExitCode -ne 0) { throw "Local Agent Host provider contract/smoke failed with exit code $providerExitCode.`n$providerOutput" }

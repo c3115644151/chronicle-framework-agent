@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.647'
+$contractVersion = '7.655'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -169,8 +169,21 @@ if ($agentHostProviderSource -notmatch 'toolCallsPresent=' -or
 if ($agentHostProviderSource -notmatch 'reasoningEffortIsExplicitlySupportedByFreeLlmApi' -or
     $agentHostProviderSource -notmatch '_supportsReasoningEffort' -or
     $agentHostProviderSource -notmatch 'SupportsThinkingParameter' -or
+    $agentHostProviderSource -notmatch 'IsOpenRouterReasoningRoute' -or
+    $agentHostProviderSource -notmatch 'payload\["reasoning"\]' -or
+    $agentHostProviderSource -notmatch 'ReadString\(error, "param"\)' -or
+    $agentHostProviderSource -notmatch 'ProviderErrorParam' -or
+    $agentHostProviderSource -notmatch 'providerErrorParam: errorMetadata.ErrorParam' -or
     $agentHostProviderSource -notmatch 'ReasoningEffortApplied' -or
     $agentHostProviderContractSelfTestSource -notmatch 'provider-neutral-loopback-gateway-tool-call-omits-nonstandard-thinking-extension' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'openrouter-reasoning-disabled-uses-standard-reasoning-object' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'openrouter-empty-choices-preserves-safe-response-shape-and-usage' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'provider-http-failure-cli-output-preserves-safe-error-fields-without-body' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'tools_0_.function.parameters' -or
+    $agentHostProgramSource -notmatch 'BuildSafeProviderFailureDetails' -or
+    $agentHostProgramSource -notmatch '\["errorParam"\]' -or
+    $agentHostRuntimeProgressLogSource -notmatch '\["providerErrorParam"\]' -or
+    $agentHostHarnessProgressTraceSource -notmatch '\["providerErrorParam"\]' -or
     $agentHostProviderContractSelfTestSource -notmatch 'freellmapi-advertised-reasoning-effort-low-is-applied-with-thinking-disabled' -or
     $agentHostProviderContractSelfTestSource -notmatch 'freellmapi-unadvertised-reasoning-effort-is-omitted' -or
     $agentHostRuntimeProgressLogSource -notmatch 'reasoningEffortApplied' -or
@@ -369,12 +382,31 @@ if ($agentHostPackageSource -notmatch "SelectNodes\('//PackageReference'\)" -or
 $agentHostProviderSelfTestSource = Get-Content (Join-Path $harnessRoot 'AgentHost\ProviderContractSelfTest.cs') -Raw -Encoding UTF8
 $agentHostProviderSmokeSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostProvider.ps1') -Raw -Encoding UTF8
 if ($agentHostProviderSmokeSource -notmatch 'AllowDshXdPoolFreeRoute' -or
+    $agentHostProviderSmokeSource -notmatch 'ProbeDshFreeRouteWithMinimalChat' -or
+    $agentHostProviderSmokeSource -notmatch 'ProviderSimpleChatProbe\.json' -or
+    $agentHostProviderSmokeSource -notmatch 'Get-SafeMinimalChatProbeSummary' -or
+    $agentHostProviderSmokeSource -notmatch 'syntheticFailureSummary' -or
+    $agentHostProviderSmokeSource -notmatch 'Protect-ProviderDiagnosticField' -or
+    $agentHostProviderSmokeSource -notmatch 'Add-Type -AssemblyName System.Net.Http' -or
+    $agentHostProviderSmokeSource -notmatch 'max_tokens = 8' -or
+    $agentHostProviderSmokeSource -notmatch 'ResponseBodyPersisted = \$false' -or
     $agentHostProviderSmokeSource -notmatch 'Port -eq 8326' -or
     $agentHostProviderSmokeSource -notmatch 'xdpool-aggregate/' -or
     $agentHostProviderSmokeSource -notmatch ':free\$' -or
     $agentHostProviderSmokeSource -notmatch 'no inference request was sent' -or
-    $harnessScript -notmatch 'AllowDshXdPoolFreeRoute') {
-    throw 'DSH XD Pool provider smoke must be explicit, loopback-only, require a direct named :free XD Pool model, and fail closed before model inference otherwise.'
+    $harnessScript -notmatch 'AllowDshXdPoolFreeRoute' -or
+    $harnessScript -notmatch 'ProbeDshFreeRouteWithMinimalChat' -or
+    $harnessScript -notmatch 'isDshXdPoolFreeEndpoint' -or
+    $harnessScript -notmatch 'aggregateStatus = Invoke-RestMethod' -or
+    $harnessScript -notmatch 'aggregateProvider\[0\]\.enabled' -or
+    $harnessScript -notmatch 'aggregateProvider\[0\]\.configured' -or
+    $harnessScript -notmatch 'selected direct DSH free model provider is disabled' -or
+    $harnessScript -notmatch 'selected direct free DSH model is absent from the current gateway catalog' -or
+    $harnessScript -notmatch 'ConfiguredModelPreflight' -or
+    $harnessScript -notmatch "'ConfiguredModelPreflight' \{ @\('Preflight', 'ConfiguredModelPreflight'\) \}" -or
+    $harnessScript -notmatch 'ModelPriceReceiptAvailable = \$false' -or
+    $harnessScript -notmatch 'CatalogListed = \$true') {
+    throw 'DSH XD Pool provider smoke must be explicit, loopback-only, require a direct named :free XD Pool model, and keep its minimal compatibility probe separate from normal decision output.'
 }
 if ($agentOpenAiProviderSource -notmatch "reason = 'invalid-action-arguments'" -or $agentOpenAiProviderSource -notmatch 'unsupportedArguments' -or $agentDecisionLoopSource -notmatch 'invalid-action-arguments' -or $agentDecisionLoopSource -notmatch 'noNativeActionSent' -or $agentOpenAiProviderTestSource -notmatch 'UnsupportedActionArgumentReturnsRecoverableRejection' -or $agentDecisionLoopTestSource -notmatch 'InvalidActionArgumentsRecoverWithoutNativeMutation' -or $agentDecisionTestProviderSource -notmatch 'invalidArgumentRecovery') { throw 'Unsupported model argument names must be rejected before Native, passed back with a fresh state, and covered in the provider and loop regressions.' }
 if ($agentOpenAiProviderSource -notmatch '\$argumentShapeDepth' -or $agentOpenAiProviderSource -notmatch 'allowedArguments.Count -eq 1' -or $agentOpenAiProviderSource -notmatch 'ConvertFrom-Json -ErrorAction Stop' -or $agentOpenAiProviderTestSource -notmatch 'StringEncodedObjectArgumentsNormalized' -or $agentOpenAiProviderTestSource -notmatch 'SingleStringArrayArgumentsNormalized' -or $agentOpenAiProviderTestSource -notmatch 'NestedStringArrayArgumentsNormalized' -or $agentOpenAiProviderTestSource -notmatch 'SingleScalarArgumentsNormalized') { throw 'The local OpenAI-compatible provider must normalize bounded nested JSON wrappers and unambiguous one-field scalars through the same field allowlist and regression tests.' }
@@ -1215,6 +1247,12 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerSmokeSource -notmatch 'DecisionClassification = \[string\]\$result.decision.goalClassification' -or
     $providerProgramSource -notmatch 'AgentHostDecisionCycle.DecideCampaignAsync' -or
     $providerSmokeSource -notmatch 'ResponseFormatMode = \[string\]\$result\.responseFormatMode' -or
+    $providerSmokeSource -notmatch 'ProviderErrorParam = if \(\$providerFailure\)' -or
+    $providerSmokeSource -notmatch 'ProviderResponseContentKind = if \(\$providerFailure\)' -or
+    $providerSmokeSource -notmatch 'ProviderResponseCompletionTokens = if \(\$providerFailure\)' -or
+    $providerProgramSource -notmatch 'BuildSafeProviderFailureDetails' -or
+    $providerProfileTestSource -notmatch 'provider-http-failure-cli-output-preserves-safe-error-fields-without-body' -or
+    $providerSmokeSource -notmatch 'ProviderSmokeFailure\.json' -or
     $providerHostSource -notmatch 'FREELLMAPI_API_KEY' -or $providerHostSource -notmatch 'CHRONICLE_LLM_API_KEY' -or
     $providerHostSource -notmatch 'X-Routed-Via' -or
     $providerProfileTestSource -notmatch 'mcm-global-profile-tolerates-legacy-and-unknown-fields' -or
