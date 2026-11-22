@@ -32,6 +32,20 @@ function Get-ChronicleProviderCredential {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][Uri]$Endpoint)
 
+    $isDshWorkBuddy = $Endpoint.IsLoopback -and $Endpoint.Port -eq 8328 -and $Endpoint.AbsolutePath.TrimEnd('/') -eq '/v1'
+    if ($isDshWorkBuddy) {
+        foreach ($candidate in @(
+            @{ Name = 'CHRONICLE_DSH_XDPOOL_API_KEY'; Target = 'Process' },
+            @{ Name = 'CHRONICLE_DSH_XDPOOL_API_KEY'; Target = 'User' }
+        )) {
+            $value = [string][Environment]::GetEnvironmentVariable($candidate.Name, $candidate.Target)
+            if (-not [string]::IsNullOrWhiteSpace($value)) {
+                return [pscustomobject]@{ Value = $value; Source = "$($candidate.Name):$($candidate.Target)"; IsFreeLLMAPI = $false; IsDshWorkBuddy = $true; EnvironmentVariableName = 'CHRONICLE_DSH_XDPOOL_API_KEY' }
+            }
+        }
+        return [pscustomobject]@{ Value = $null; Source = $null; IsFreeLLMAPI = $false; IsDshWorkBuddy = $true; EnvironmentVariableName = 'CHRONICLE_DSH_XDPOOL_API_KEY' }
+    }
+
     $isDshXdPool = $Endpoint.IsLoopback -and $Endpoint.Port -eq 8326 -and $Endpoint.AbsolutePath.TrimEnd('/') -eq '/v1'
     if ($isDshXdPool) {
         $dshHome = [string][Environment]::GetEnvironmentVariable('DSH_HOME', 'Process')
@@ -41,12 +55,12 @@ function Get-ChronicleProviderCredential {
             $gatewayKey = [string](Get-Content -LiteralPath $gatewayKeyPath -Raw -ErrorAction SilentlyContinue)
             $gatewayKey = $gatewayKey.Trim()
             if (-not [string]::IsNullOrWhiteSpace($gatewayKey)) {
-                return [pscustomobject]@{ Value = $gatewayKey; Source = 'DSH gateway key file'; IsFreeLLMAPI = $false }
+                return [pscustomobject]@{ Value = $gatewayKey; Source = 'DSH gateway key file'; IsFreeLLMAPI = $false; IsDshWorkBuddy = $false; EnvironmentVariableName = 'CHRONICLE_LLM_API_KEY' }
             }
         }
         # Do not fall back to CHRONICLE_LLM_API_KEY here: it may be a paid
         # provider key and is not the credential for the DSH loopback gateway.
-        return [pscustomobject]@{ Value = $null; Source = $null; IsFreeLLMAPI = $false }
+        return [pscustomobject]@{ Value = $null; Source = $null; IsFreeLLMAPI = $false; IsDshWorkBuddy = $false; EnvironmentVariableName = 'CHRONICLE_LLM_API_KEY' }
     }
 
     $isFreeLlmApi = $Endpoint.IsLoopback -and $Endpoint.Port -eq 31415 -and $Endpoint.AbsolutePath.TrimEnd('/') -eq '/v1'
@@ -66,10 +80,10 @@ function Get-ChronicleProviderCredential {
     foreach ($candidate in $candidates) {
         $value = [string][Environment]::GetEnvironmentVariable($candidate.Name, $candidate.Target)
         if (-not [string]::IsNullOrWhiteSpace($value)) {
-            return [pscustomobject]@{ Value = $value; Source = "$($candidate.Name):$($candidate.Target)"; IsFreeLLMAPI = $isFreeLlmApi }
+            return [pscustomobject]@{ Value = $value; Source = "$($candidate.Name):$($candidate.Target)"; IsFreeLLMAPI = $isFreeLlmApi; IsDshWorkBuddy = $false; EnvironmentVariableName = if ($isFreeLlmApi) { 'FREELLMAPI_API_KEY' } else { 'CHRONICLE_LLM_API_KEY' } }
         }
     }
-    return [pscustomobject]@{ Value = $null; Source = $null; IsFreeLLMAPI = $isFreeLlmApi }
+    return [pscustomobject]@{ Value = $null; Source = $null; IsFreeLLMAPI = $isFreeLlmApi; IsDshWorkBuddy = $false; EnvironmentVariableName = if ($isFreeLlmApi) { 'FREELLMAPI_API_KEY' } else { 'CHRONICLE_LLM_API_KEY' } }
 }
 
 function Initialize-FreeLLMAPIProfile {

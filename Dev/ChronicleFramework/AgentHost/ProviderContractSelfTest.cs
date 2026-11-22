@@ -151,11 +151,50 @@ internal static class ProviderContractSelfTest
             "https://api.deepseek.com/v1", "sk-process-provider", "sk-user-provider", null, "freellmapi-user");
         var remoteRejectsDedicatedGatewayKey = AgentProviderConfigurationValidator.SelectApiKey(
             "https://api.deepseek.com/v1", null, null, null, "freellmapi-user");
+        var dshWorkBuddyCredential = AgentProviderConfigurationValidator.SelectApiKey(
+            "http://127.0.0.1:8328/v1", "paid-provider-process", "paid-provider-user", "freellmapi-process", "freellmapi-user",
+            "dsh-workbuddy-process", "dsh-workbuddy-user");
+        var dshWorkBuddyRejectsGenericCredential = AgentProviderConfigurationValidator.SelectApiKey(
+            "http://127.0.0.1:8328/v1", "paid-provider-process", "paid-provider-user", "freellmapi-process", "freellmapi-user");
         if (localGatewayCredential.ApiKey != "freellmapi-user" || localGatewayCredential.Source != "FREELLMAPI_API_KEY:User" ||
             remoteProviderCredential.ApiKey != "sk-process-provider" || remoteProviderCredential.Source != "CHRONICLE_LLM_API_KEY:Process" ||
-            remoteRejectsDedicatedGatewayKey.ApiKey is not null)
+            remoteRejectsDedicatedGatewayKey.ApiKey is not null ||
+            dshWorkBuddyCredential.ApiKey != "dsh-workbuddy-process" || dshWorkBuddyCredential.Source != "CHRONICLE_DSH_XDPOOL_API_KEY:Process" ||
+            dshWorkBuddyRejectsGenericCredential.ApiKey is not null)
             throw new AgentHostException("provider-credential-selection-self-test-failed", "Provider credentials must follow the configured endpoint: dedicated FreeLLMAPI key for its local loopback gateway and generic key only for other providers.");
         results.Add(new { scenario = "provider-credential-selection-is-endpoint-scoped", passed = true });
+
+        var workBuddyEndpoint = new Uri("http://127.0.0.1:8328/v1/chat/completions");
+        if (OllamaNativeProvider.ResolveOutputModeForEndpoint(workBuddyEndpoint, "auto") != "json_object" ||
+            OllamaNativeProvider.ResolveOutputModeForEndpoint(workBuddyEndpoint, "json_object") != "json_object" ||
+            OllamaNativeProvider.ResolveOutputModeForEndpoint(workBuddyEndpoint, "json_schema") != "json_object" ||
+            OllamaNativeProvider.ResolveOutputModeForEndpoint(workBuddyEndpoint, "required_tool_call") != "json_object" ||
+            OllamaNativeProvider.ResolveOutputModeForEndpoint(new Uri("https://api.deepseek.com/v1/chat/completions"), "json_schema") != "json_schema" ||
+            !OllamaNativeProvider.ResolveSystemPromptForEndpoint(workBuddyEndpoint, "Return one required decision-tool call only.").Contains("JSON decision object only", StringComparison.Ordinal) ||
+            OllamaNativeProvider.ResolveSystemPromptForEndpoint(workBuddyEndpoint, "Return one required decision-tool call only.").Contains("required decision-tool call", StringComparison.Ordinal) ||
+            OllamaNativeProvider.ResolveSystemPromptForEndpoint(new Uri("https://api.deepseek.com/v1/chat/completions"), "Return one required decision-tool call only.") != "Return one required decision-tool call only.")
+            throw new AgentHostException("provider-workbuddy-output-mode-adapter-self-test-failed", "The DSH WorkBuddy endpoint must pin its verified JSON Object wire format without changing other provider profiles.");
+        results.Add(new { scenario = "dsh-workbuddy-provider-pins-json-object-and-aligns-prompt-while-preserving-other-provider-profile", passed = true, modelCalls = 0, nativeCommands = 0 });
+
+        using (var workBuddyEycClassificationRequest = JsonDocument.Parse("""
+            {"goal":"完成原版StoryMode建立你的家族主线任务","goalScopeClassificationRequired":true,"observation":{"privateSentinel":"must-not-be-forwarded"},"allowedActions":[],"allowedControls":["supportedEstablishYourClanGoal","unsupportedGoal"]}
+            """))
+        {
+            var compactPrompt = OllamaNativeProvider.ResolveSystemPromptForEndpoint(workBuddyEndpoint,
+                "Return one required decision-tool call only.", workBuddyEycClassificationRequest.RootElement);
+            var compactUserContent = OllamaNativeProvider.ResolveUserContentForEndpoint(workBuddyEndpoint, workBuddyEycClassificationRequest.RootElement);
+            var unchangedRemoteUserContent = OllamaNativeProvider.ResolveUserContentForEndpoint(
+                new Uri("https://api.deepseek.com/v1/chat/completions"), workBuddyEycClassificationRequest.RootElement);
+            if (!compactPrompt.Contains("four Journal objectives are steps toward that goal", StringComparison.Ordinal) ||
+                compactPrompt.Contains("required decision-tool call", StringComparison.Ordinal) ||
+                !compactUserContent.Contains("supportedEstablishYourClanGoal", StringComparison.Ordinal) ||
+                !compactUserContent.Contains("unsupportedGoal", StringComparison.Ordinal) ||
+                compactUserContent.Contains("must-not-be-forwarded", StringComparison.Ordinal) ||
+                compactUserContent.Contains("allowedActions", StringComparison.Ordinal) ||
+                !unchangedRemoteUserContent.Contains("must-not-be-forwarded", StringComparison.Ordinal))
+                throw new AgentHostException("dsh-workbuddy-eyc-classification-projection-self-test-failed", "WorkBuddy EYC classification must send only the complete goal and listed controls with a matching JSON prompt, while leaving other provider requests unchanged.");
+            results.Add(new { scenario = "dsh-workbuddy-eyc-classifier-compacts-input-and-aligns-json-output", passed = true, modelCalls = 0, nativeCommands = 0 });
+        }
 
         var remoteProxyEndpoint = new Uri("https://api.deepseek.com/v1");
         if (ProviderProxySelection.SelectProxyUrl(remoteProxyEndpoint, "http://explicit-https-proxy:8080", "http://http-proxy:8080", null, true) != "http://explicit-https-proxy:8080" ||
@@ -839,6 +878,51 @@ internal static class ProviderContractSelfTest
                 result.Decision["done"]?.GetValue<bool>() != true)
                 throw new AgentHostException("loopback-openai-gateway-tool-call-self-test-failed", "A provider-neutral loopback OpenAI gateway must receive the strict tool-call envelope without a provider-specific thinking extension, then pass the action through the normal decision validator.");
             results.Add(new { scenario = "provider-neutral-loopback-gateway-tool-call-omits-nonstandard-thinking-extension", passed = true, modelCalls = 1, nativeCommands = 0 });
+        }
+
+        var workBuddyStructuredPayloadValid = false;
+        var workBuddyPromptMatchesOutputMode = false;
+        var workBuddyRequestCount = 0;
+        var workBuddySettings = settings with
+        {
+            Endpoint = new Uri("http://127.0.0.1:8328/v1/chat/completions"),
+            Model = "buddy:hy4flash",
+            ApiKey = "workbuddy-gateway-self-test-secret",
+            OutputMode = OllamaNativeProvider.ResolveOutputModeForEndpoint(new Uri("http://127.0.0.1:8328/v1/chat/completions"), "auto"),
+            Thinking = null,
+            ReasoningEffort = "none",
+            MaxTokenParameter = "max_tokens",
+            MaxOutputTokens = 128
+        };
+        var workBuddyHandler = new StubHandler((httpRequest, cancellationToken) =>
+        {
+            if (httpRequest.Method == HttpMethod.Get)
+                return Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"buddy:hy4flash\"}]}"));
+            workBuddyRequestCount++;
+            using var payloadDocument = JsonDocument.Parse(httpRequest.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            var payload = payloadDocument.RootElement;
+            var postedSystemPrompt = payload.GetProperty("messages")[0].GetProperty("content").GetString() ?? string.Empty;
+            workBuddyPromptMatchesOutputMode = postedSystemPrompt.Contains("JSON decision object only", StringComparison.Ordinal) &&
+                !postedSystemPrompt.Contains("required decision-tool call", StringComparison.Ordinal);
+            workBuddyStructuredPayloadValid = httpRequest.Headers.Authorization?.Scheme == "Bearer" &&
+                payload.GetProperty("model").GetString() == "buddy:hy4flash" &&
+                payload.GetProperty("response_format").GetProperty("type").GetString() == "json_object" &&
+                payload.TryGetProperty("max_tokens", out var workBuddyTokens) && workBuddyTokens.GetInt32() == 128 &&
+                !payload.TryGetProperty("max_completion_tokens", out var ignoredMaxCompletionTokens) &&
+                !payload.TryGetProperty("tools", out var ignoredTools) && !payload.TryGetProperty("tool_choice", out var ignoredToolChoice) &&
+                !payload.TryGetProperty("thinking", out var ignoredThinking) && !payload.TryGetProperty("reasoning_effort", out var ignoredReasoningEffort);
+            return Task.FromResult(JsonResponse(BuildChatResponse(ValidDecision, "stop")));
+        });
+        using (var workBuddyClient = new HttpClient(workBuddyHandler) { Timeout = workBuddySettings.Timeout })
+        using (var workBuddyProvider = new OllamaNativeProvider(workBuddySettings, workBuddyClient))
+        using (var request = JsonDocument.Parse(BuildDecisionRequest()))
+        {
+            await workBuddyProvider.CheckConfiguredModelAsync(CancellationToken.None);
+            var result = await workBuddyProvider.DecideAsync(request.RootElement, "Return one required decision-tool call only.", CancellationToken.None);
+            if (!workBuddyStructuredPayloadValid || !workBuddyPromptMatchesOutputMode || workBuddyRequestCount != 1 || result.Status != "completed" ||
+                result.Decision["done"]?.GetValue<bool>() != true || result.ResponseFormatMode != "json_object_compatibility")
+                throw new AgentHostException("dsh-workbuddy-json-object-provider-self-test-failed", $"The DSH WorkBuddy adapter contract failed (payloadValid={workBuddyStructuredPayloadValid}; requestCount={workBuddyRequestCount}; status={result.Status}; outputMode={result.ResponseFormatMode}).");
+            results.Add(new { scenario = "dsh-workbuddy-json-object-adapter-is-single-request-and-host-validated", passed = true, modelCalls = 1, nativeCommands = 0 });
         }
 
         var openRouterStructuredPayloadValid = false;

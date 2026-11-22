@@ -12,8 +12,25 @@ internal static class AgentProviderConfigurationValidator
         string? genericProcessKey,
         string? genericUserKey,
         string? freeLlmApiProcessKey,
-        string? freeLlmApiUserKey)
+        string? freeLlmApiUserKey,
+        string? dshWorkBuddyProcessKey = null,
+        string? dshWorkBuddyUserKey = null)
     {
+        var isDshWorkBuddy = Uri.TryCreate(baseUrl?.Trim(), UriKind.Absolute, out var dshUri) &&
+            dshUri.IsLoopback && dshUri.Port == 8328 && string.Equals(dshUri.AbsolutePath.TrimEnd('/'), "/v1", StringComparison.Ordinal);
+        if (isDshWorkBuddy)
+        {
+            foreach (var candidate in new (string? Value, string Source)[]
+            {
+                (dshWorkBuddyProcessKey, "CHRONICLE_DSH_XDPOOL_API_KEY:Process"),
+                (dshWorkBuddyUserKey, "CHRONICLE_DSH_XDPOOL_API_KEY:User")
+            })
+                if (!string.IsNullOrWhiteSpace(candidate.Value)) return (candidate.Value, candidate.Source);
+            // This is a provider-specific loopback gateway. A DeepSeek or
+            // FreeLLMAPI key is not its credential and must not be forwarded.
+            return (null, null);
+        }
+
         var isFreeLlmApi = Uri.TryCreate(baseUrl?.Trim(), UriKind.Absolute, out var uri) &&
             uri.IsLoopback && uri.Port == 31415 && string.Equals(uri.AbsolutePath.TrimEnd('/'), "/v1", StringComparison.Ordinal);
         var candidates = isFreeLlmApi

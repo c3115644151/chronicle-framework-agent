@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.660'
+$contractVersion = '7.666'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -381,7 +381,20 @@ if ($agentHostPackageSource -notmatch "SelectNodes\('//PackageReference'\)" -or
     $agentHostPackageSource -notmatch "-match 'NU1900'") { throw 'NuGet audit fallback must reject every Host dependency except the single pinned Microsoft.ML.Tokenizers 2.0.1 package.' }
 $agentHostProviderSelfTestSource = Get-Content (Join-Path $harnessRoot 'AgentHost\ProviderContractSelfTest.cs') -Raw -Encoding UTF8
 $agentHostProviderSmokeSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHostProvider.ps1') -Raw -Encoding UTF8
+$providerHostSource = Get-Content (Join-Path $harnessRoot 'AgentHost\OllamaNativeProvider.cs') -Raw -Encoding UTF8
+$providerCredentialValidatorSource = Get-Content (Join-Path $harnessRoot 'AgentProviderConfigurationValidator.cs') -Raw -Encoding UTF8
 if ($agentHostProviderSmokeSource -notmatch 'AllowDshXdPoolFreeRoute' -or
+    $agentHostProviderSmokeSource -notmatch 'AllowDshWorkBuddyGateway' -or
+    $agentHostProviderSmokeSource -notmatch 'buddy:hy4flash' -or
+    $agentHostProviderSmokeSource -notmatch 'supported-establish-your-clan' -or
+    $agentHostProviderSmokeSource -notmatch '完成原版StoryMode' -or
+    $agentHostProviderSelfTestSource -notmatch 'dsh-workbuddy-provider-pins-json-object' -or
+    $agentHostProviderSelfTestSource -notmatch 'dsh-workbuddy-json-object-adapter-is-single-request-and-host-validated' -or
+    $providerHostSource -notmatch 'ResolveSystemPromptForEndpoint' -or
+    $providerHostSource -notmatch 'ResolveUserContentForEndpoint' -or
+    $agentHostProviderSelfTestSource -notmatch 'dsh-workbuddy-eyc-classifier-compacts-input-and-aligns-json-output' -or
+    $agentHostProviderSmokeSource -notmatch 'providerCredentialEnvironmentVariable' -or
+    $providerHostSource -notmatch 'ResolveOutputModeForEndpoint' -or
     $agentHostProviderSmokeSource -notmatch 'ProbeDshFreeRouteWithMinimalChat' -or
     $agentHostProviderSmokeSource -notmatch 'ProviderSimpleChatProbe\.json' -or
     $agentHostProviderSmokeSource -notmatch 'Get-SafeMinimalChatProbeSummary' -or
@@ -402,6 +415,9 @@ if ($agentHostProviderSmokeSource -notmatch 'AllowDshXdPoolFreeRoute' -or
     $harnessScript -notmatch 'aggregateProvider\[0\]\.configured' -or
     $harnessScript -notmatch 'selected direct DSH free model provider is disabled' -or
     $harnessScript -notmatch 'selected direct free DSH model is absent from the current gateway catalog' -or
+    $harnessScript -notmatch 'isDshWorkBuddyEndpoint' -or
+    $harnessScript -notmatch 'WorkBuddyCreditMultiplier' -or
+    $harnessScript -notmatch 'CurrencyPriceReceiptAvailable = \$false' -or
     $harnessScript -notmatch 'function Get-OpenRouterZeroPriceReceipt' -or
     $harnessScript -notmatch 'https://openrouter.ai/api/v1/model/' -or
     $harnessScript -notmatch 'pricing\.prompt' -or
@@ -414,7 +430,7 @@ if ($agentHostProviderSmokeSource -notmatch 'AllowDshXdPoolFreeRoute' -or
     $harnessScript -notmatch 'ConfiguredModelPreflight' -or
     $harnessScript -notmatch "'ConfiguredModelPreflight' \{ @\('Preflight', 'ConfiguredModelPreflight'\) \}" -or
     $harnessScript -notmatch 'CatalogListed = \$true') {
-    throw 'DSH XD Pool inference must be explicit and direct, require enabled/configured provider status plus an exact model listing, and verify current published zero prompt/completion price before inference.'
+    throw 'DSH inference must be explicit and direct, verify the exact listed model and the applicable OpenRouter price or WorkBuddy credit metadata before inference, and apply the provider-specific structured-output adapter.'
 }
 if ($agentOpenAiProviderSource -notmatch "reason = 'invalid-action-arguments'" -or $agentOpenAiProviderSource -notmatch 'unsupportedArguments' -or $agentDecisionLoopSource -notmatch 'invalid-action-arguments' -or $agentDecisionLoopSource -notmatch 'noNativeActionSent' -or $agentOpenAiProviderTestSource -notmatch 'UnsupportedActionArgumentReturnsRecoverableRejection' -or $agentDecisionLoopTestSource -notmatch 'InvalidActionArgumentsRecoverWithoutNativeMutation' -or $agentDecisionTestProviderSource -notmatch 'invalidArgumentRecovery') { throw 'Unsupported model argument names must be rejected before Native, passed back with a fresh state, and covered in the provider and loop regressions.' }
 if ($agentOpenAiProviderSource -notmatch '\$argumentShapeDepth' -or $agentOpenAiProviderSource -notmatch 'allowedArguments.Count -eq 1' -or $agentOpenAiProviderSource -notmatch 'ConvertFrom-Json -ErrorAction Stop' -or $agentOpenAiProviderTestSource -notmatch 'StringEncodedObjectArgumentsNormalized' -or $agentOpenAiProviderTestSource -notmatch 'SingleStringArrayArgumentsNormalized' -or $agentOpenAiProviderTestSource -notmatch 'NestedStringArrayArgumentsNormalized' -or $agentOpenAiProviderTestSource -notmatch 'SingleScalarArgumentsNormalized') { throw 'The local OpenAI-compatible provider must normalize bounded nested JSON wrappers and unambiguous one-field scalars through the same field allowlist and regression tests.' }
@@ -435,7 +451,7 @@ $freeLlmApiDedicatedUserKeyIndex = $freeLlmApiProfileSource.IndexOf("@{ Name = '
 $freeLlmApiGenericUserKeyIndex = $freeLlmApiProfileSource.IndexOf("@{ Name = 'CHRONICLE_LLM_API_KEY'; Target = 'User' }", [StringComparison]::Ordinal)
 if ($freeLlmApiDedicatedUserKeyIndex -lt 0 -or $freeLlmApiGenericUserKeyIndex -le $freeLlmApiDedicatedUserKeyIndex -or $freeLlmApiProfileSource -notmatch 'ApiKeySource = \$apiKeySource') { throw 'The FreeLLMAPI preflight must prefer its dedicated user credential over the generic model-provider key.' }
 if ($freeLlmApiProfileSource -notmatch 'Initialize-FreeLLMAPIProfile' -or $freeLlmApiProfileSource -notmatch 'FREELLMAPI_API_KEY' -or $freeLlmApiProfileSource -notmatch 'CHRONICLE_LLM_API_KEY' -or $freeLlmApiProfileSource -notmatch '31415' -or $freeLlmApiProfileSource -notmatch 'available=true' -or $freeLlmApiProfileSource -notmatch 'api/ping' -or $freeLlmApiProfileSource -notmatch 'Start-Process -FilePath \$ExecutablePath -WindowStyle Hidden' -or $freeLlmApiProfileSource -notmatch 'listenerDeadline' -or $freeLlmApiProfileSource -notmatch 'never read from UI or printed' -or $freeLlmApiProfileSource -notmatch 'Start-FreeLLMAPIWithInheritedProxy' -or $freeLlmApiProfileSource -notmatch 'Test-ChronicleLocalProxyListener' -or $freeLlmApiProfileSource -notmatch '127\.0\.0\.1.*7890' -or $freeLlmApiProfileSource -notmatch 'LocalProxyBootstrapApplied' -or $freeLlmApiProfileSource -notmatch 'originalValues') { throw 'Shared FreeLLMAPI preflight must reject local inference, start the installed desktop gateway hidden if stopped, pass persisted proxy configuration or the confirmed local 7890 proxy to that child only, wait for its local ping, retrieve credentials only from process/user environment, restore the parent environment, and never expose the key.' }
-if ($freeLlmApiProfileSource -notmatch 'function Get-ChronicleProviderCredential' -or $freeLlmApiProfileSource -notmatch '8326' -or $freeLlmApiProfileSource -notmatch 'DSH gateway key file' -or $freeLlmApiProfileSource -notmatch 'Do not fall back to CHRONICLE_LLM_API_KEY here' -or $agentHostProviderSmokeSource -notmatch 'Get-ChronicleProviderCredential' -or $agentLiveModelLoopSource -notmatch 'Get-ChronicleProviderCredential' -or $agentHostCampaignLoopEvaluationSource -notmatch 'Get-ChronicleProviderCredential' -or $freshCampaignTest -notmatch 'Get-ChronicleProviderCredential' -or $agentHostProviderSmokeSource -notmatch 'paid-provider-key-must-not-be-used-for-dsh') { throw 'Provider preflights must select the dedicated DSH gateway credential for the DSH endpoint and must never borrow a generic paid-provider key.' }
+if ($freeLlmApiProfileSource -notmatch 'function Get-ChronicleProviderCredential' -or $freeLlmApiProfileSource -notmatch '8326' -or $freeLlmApiProfileSource -notmatch 'DSH gateway key file' -or $freeLlmApiProfileSource -notmatch '8328' -or $freeLlmApiProfileSource -notmatch 'CHRONICLE_DSH_XDPOOL_API_KEY' -or $providerCredentialValidatorSource -notmatch 'dshUri.Port == 8328' -or $agentHostProviderSmokeSource -notmatch 'Get-ChronicleProviderCredential' -or $agentLiveModelLoopSource -notmatch 'Get-ChronicleProviderCredential' -or $agentHostCampaignLoopEvaluationSource -notmatch 'Get-ChronicleProviderCredential' -or $freshCampaignTest -notmatch 'Get-ChronicleProviderCredential' -or $agentHostProviderSmokeSource -notmatch 'paid-provider-key-must-not-be-used-for-dsh') { throw 'Provider preflights must select the dedicated DSH gateway credential for each DSH endpoint and must never borrow a generic paid-provider key.' }
 $freeLlmApiProfileTokens = $null
 $freeLlmApiProfileParseErrors = $null
 [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $harnessRoot 'Get-FreeLLMAPIProfile.ps1'), [ref]$freeLlmApiProfileTokens, [ref]$freeLlmApiProfileParseErrors) | Out-Null
@@ -1079,7 +1095,9 @@ if ($harnessScript -notmatch "HarnessContractVersion\s*=\s*'$contractVersion'") 
 }
 if ($harnessScript -notmatch 'function Get-HarnessConfiguredProviderCredential' -or
     $harnessScript -notmatch 'Get-ChronicleProviderCredential -Endpoint \$endpoint' -or
-    $harnessScript -notmatch 'CHRONICLE_LLM_API_KEY.*providerCredential\.Value' -or
+    $harnessScript -notmatch 'providerKeyVariable = \[string\]\$providerCredential\.EnvironmentVariableName' -or
+    $harnessScript -notmatch 'SetEnvironmentVariable\(\$providerKeyVariable, \[string\]\$providerCredential\.Value' -or
+    $harnessScript -notmatch 'SetEnvironmentVariable\(\$providerKeyVariable, \$savedProviderKey' -or
     $harnessScript -notmatch 'savedProviderKey') {
     throw 'Real-model Campaign phases must inject only the credential selected for their configured endpoint and restore the caller process environment afterward.'
 }

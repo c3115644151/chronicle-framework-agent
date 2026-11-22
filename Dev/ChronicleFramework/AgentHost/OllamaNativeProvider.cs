@@ -153,7 +153,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         var maximumTimeoutSeconds = nativeOllama ? 240 : 360;
         var timeoutSeconds = ReadIntegerEnvironment("CHRONICLE_LLM_TIMEOUT_SECONDS", defaultTimeoutSeconds, 5, maximumTimeoutSeconds);
         var maxOutputTokens = ReadIntegerEnvironment("CHRONICLE_LLM_MAX_TOKENS", 256, 64, 4096);
-        var maxHttpRequestsDefault = IsFreeLlmApi(endpoint) ? 1 : 8;
+        var maxHttpRequestsDefault = IsFreeLlmApi(endpoint) || IsDshWorkBuddyGateway(endpoint) ? 1 : 8;
         var maxHttpRequestsPerDecision = ReadIntegerEnvironment("CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION", maxHttpRequestsDefault, 1, 8);
         var temperature = ReadOptionalDoubleEnvironment("CHRONICLE_LLM_TEMPERATURE", 0d, 2d);
         var thinkingMode = Environment.GetEnvironmentVariable("CHRONICLE_LLM_THINKING_MODE");
@@ -175,6 +175,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         if (string.IsNullOrWhiteSpace(outputMode)) outputMode = "auto";
         if (outputMode is not ("auto" or "json_schema" or "json_object" or "required_tool_call"))
             throw new AgentHostException("provider-output-mode-invalid", "Output mode must be auto, json_schema, json_object, or required_tool_call.");
+        outputMode = ResolveOutputModeForEndpoint(endpoint, outputMode);
+        if (IsDshWorkBuddyGateway(endpoint)) maxTokenParameter = "max_tokens";
         if (outputMode == "required_tool_call" && IsDeepSeekApi(endpoint) && thinking != false)
             throw new AgentHostException("provider-output-mode-thinking-conflict", "Required tool calls need CHRONICLE_LLM_THINKING_MODE=disabled for this API protocol.");
         var maxRunCostCny = ReadOptionalDoubleEnvironment("CHRONICLE_LLM_MAX_RUN_COST_CNY", 0.01d, 1000d) ?? 5d;
@@ -227,12 +229,14 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         var endpoint = new Uri(profile.BaseUrl.TrimEnd('/') + "/chat/completions", UriKind.Absolute);
         var maxTokenParameter = Environment.GetEnvironmentVariable("CHRONICLE_LLM_MAX_TOKEN_PARAMETER");
         if (string.IsNullOrWhiteSpace(maxTokenParameter))
-            maxTokenParameter = string.Equals(endpoint.Host, "api.deepseek.com", StringComparison.OrdinalIgnoreCase) ? "max_tokens" : "max_completion_tokens";
+            maxTokenParameter = string.Equals(endpoint.Host, "api.deepseek.com", StringComparison.OrdinalIgnoreCase) || IsDshWorkBuddyGateway(endpoint) ? "max_tokens" : "max_completion_tokens";
         if (maxTokenParameter is not ("max_completion_tokens" or "max_tokens"))
             throw new AgentHostException("provider-token-parameter-invalid", "The configured output-token parameter is unsupported.");
+        if (IsDshWorkBuddyGateway(endpoint)) maxTokenParameter = "max_tokens";
         var outputMode = profile.OutputMode;
         if (outputMode == "auto" && string.Equals(endpoint.Host, "api.deepseek.com", StringComparison.OrdinalIgnoreCase))
             outputMode = "required_tool_call";
+        outputMode = ResolveOutputModeForEndpoint(endpoint, outputMode);
         var reasoningEffort = Environment.GetEnvironmentVariable("CHRONICLE_LLM_REASONING_EFFORT");
         if (string.IsNullOrWhiteSpace(reasoningEffort)) reasoningEffort = "none";
         if (reasoningEffort is not ("none" or "low" or "medium" or "high"))
@@ -249,7 +253,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             NativeOllama: false,
             Timeout: TimeSpan.FromSeconds(ReadIntegerEnvironment("CHRONICLE_LLM_TIMEOUT_SECONDS", 360, 5, 360)),
             MaxOutputTokens: ReadIntegerEnvironment("CHRONICLE_LLM_MAX_TOKENS", 256, 64, 4096),
-            MaxHttpRequestsPerDecision: ReadIntegerEnvironment("CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION", IsFreeLlmApi(endpoint) ? 1 : 8, 1, 8),
+            MaxHttpRequestsPerDecision: ReadIntegerEnvironment("CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION", IsFreeLlmApi(endpoint) || IsDshWorkBuddyGateway(endpoint) ? 1 : 8, 1, 8),
             Temperature: 0d,
             Thinking: thinking,
             ReasoningEffort: reasoningEffort,
@@ -280,8 +284,73 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             Environment.GetEnvironmentVariable("CHRONICLE_LLM_API_KEY"),
             Environment.GetEnvironmentVariable("CHRONICLE_LLM_API_KEY", EnvironmentVariableTarget.User),
             Environment.GetEnvironmentVariable("FREELLMAPI_API_KEY"),
-            Environment.GetEnvironmentVariable("FREELLMAPI_API_KEY", EnvironmentVariableTarget.User));
+            Environment.GetEnvironmentVariable("FREELLMAPI_API_KEY", EnvironmentVariableTarget.User),
+            Environment.GetEnvironmentVariable("CHRONICLE_DSH_XDPOOL_API_KEY"),
+            Environment.GetEnvironmentVariable("CHRONICLE_DSH_XDPOOL_API_KEY", EnvironmentVariableTarget.User));
         return string.IsNullOrWhiteSpace(credential.ApiKey) ? null : credential.ApiKey.Trim();
+    }
+
+    private static bool IsDshWorkBuddyGateway(Uri endpoint) =>
+        endpoint.IsLoopback && endpoint.Port == 8328 &&
+        (string.Equals(endpoint.AbsolutePath.TrimEnd('/'), "/v1", StringComparison.OrdinalIgnoreCase) ||
+         endpoint.AbsolutePath.EndsWith("/v1/chat/completions", StringComparison.OrdinalIgnoreCase));
+
+    internal static string ResolveOutputModeForEndpoint(Uri endpoint, string requestedOutputMode)
+    {
+        // The installed WorkBuddy shim accepted JSON Object in a live smoke,
+        // while tool-call and JSON Schema requests returned 403. Keep the
+        // player-facing model profile provider-neutral, but select the only
+        // verified wire format for this endpoint before sending a request.
+        return IsDshWorkBuddyGateway(endpoint) ? "json_object" : requestedOutputMode;
+    }
+
+    internal static string ResolveSystemPromptForEndpoint(Uri endpoint, string systemPrompt, JsonElement? request = null)
+    {
+        if (!IsDshWorkBuddyGateway(endpoint)) return systemPrompt;
+
+        if (request is JsonElement classificationRequest && IsCompactWorkBuddyEycClassification(classificationRequest))
+        {
+            return "Classify the user's complete final goal. supportedEstablishYourClanGoal means completing the original Bannerlord StoryMode Establish Your Clan quest; its four Journal objectives are steps toward that goal. unsupportedGoal means any other final outcome. Choose exactly one ID from allowedControls. This only classifies the goal type; perform no game action. Return one JSON object with control and a reason of at most 8 words.";
+        }
+
+        // This gateway is pinned to JSON Object and does not receive a tool
+        // catalog. Keep provider-neutral Host prompts aligned with the actual
+        // wire format instead of telling the model to call an unavailable tool.
+        return systemPrompt
+            .Replace("required decision-tool call", "JSON decision object", StringComparison.Ordinal)
+            .Replace("required decision tool call", "JSON decision object", StringComparison.Ordinal);
+    }
+
+    internal static string ResolveUserContentForEndpoint(Uri endpoint, JsonElement request)
+    {
+        if (IsDshWorkBuddyGateway(endpoint) && IsCompactWorkBuddyEycClassification(request))
+        {
+            var allowedControls = request.GetProperty("allowedControls").EnumerateArray()
+                .Where(item => item.ValueKind == JsonValueKind.String)
+                .Select(item => item.GetString())
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .ToArray();
+            return JsonSerializer.Serialize(new
+            {
+                goal = ReadString(request, "goal"),
+                allowedControls
+            }, JsonOptions);
+        }
+
+        return JsonSerializer.Serialize(request, JsonOptions);
+    }
+
+    private static bool IsCompactWorkBuddyEycClassification(JsonElement request)
+    {
+        if (!request.TryGetProperty("goalScopeClassificationRequired", out var required) ||
+            required.ValueKind != JsonValueKind.True ||
+            !request.TryGetProperty("allowedControls", out var controls) || controls.ValueKind != JsonValueKind.Array ||
+            !controls.EnumerateArray().Any(item => item.ValueKind == JsonValueKind.String && item.GetString() == "supportedEstablishYourClanGoal") ||
+            !controls.EnumerateArray().Any(item => item.ValueKind == JsonValueKind.String && item.GetString() == "unsupportedGoal"))
+            return false;
+
+        var goal = ReadString(request, "goal");
+        return !string.IsNullOrWhiteSpace(goal) && AgentHostDecisionCycle.IsExplicitEstablishYourClanGoal(goal);
     }
 
     internal Task<ProviderDecisionResult> DecideAsync(JsonElement request, CancellationToken cancellationToken) =>
@@ -409,7 +478,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     internal async Task<ProviderDecisionResult> DecideAsync(JsonElement request, string systemPrompt, CancellationToken cancellationToken)
     {
         ValidateDecisionRequest(request);
-        var userContent = JsonSerializer.Serialize(request, JsonOptions);
+        systemPrompt = ResolveSystemPromptForEndpoint(_settings.Endpoint, systemPrompt, request);
+        var userContent = ResolveUserContentForEndpoint(_settings.Endpoint, request);
         var userPayloadBytes = Encoding.UTF8.GetByteCount(userContent);
         var systemPromptBytes = Encoding.UTF8.GetByteCount(systemPrompt);
         var observationBytes = request.TryGetProperty("observation", out var observationElement)

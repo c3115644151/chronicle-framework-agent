@@ -1868,3 +1868,11 @@ The direct OpenRouter model-detail endpoint was verified without an API key or i
 The first dynamic pricing gate passed in `TestResults/20261122-204648`: exact model `particle-ai/particle-1:free`, prompt price `0`, completion price `0`, direct OpenRouter provider enabled/configured, exact model selected, and zero inference/game activity. This is a current published-price receipt only; the provider has not returned a bill for a Chronicle request.
 
 OpenRouter's official Free Models documentation currently caps `:free` variants at 20 requests/minute and 50 requests/day, and says failed attempts count. Harness contract 7.660 now limits one persistent continuation to at most four provider decisions with one outer HTTP request per decision. This bounds one Chronicle run but cannot account for the same OpenRouter account's requests from other DSH clients; no daily account-headroom receipt exists. [OpenRouter Free Models and rate limits](https://openrouter.ai/collections/free-models).
+
+#### 2026-11-23 DSH WorkBuddy 实际请求证据
+
+用户提供的本机 DSH XD Pool OpenAI 兼容网关已接入独立凭据 `CHRONICLE_DSH_XDPOOL_API_KEY`；本轮没有把该值写入仓库，也没有覆盖现有用户级 DeepSeek 地址。模型目录列出 `buddy:hy4flash`，倍率为 0.03（XD Pool 内部倍率，不是货币价格）；本机状态显示 4 个账户有正积分，但状态接口不提供该模型的风险冷却详情。Provider 将此端点固定为单请求 JSON Object，且 EYC 目标分类只向模型发送完整目标和当前允许的 goal ID；AgentHost 仍按原始 Native 请求校验结果。此投影把真实 Host 请求从 1478 字节降到 855 字节，不能单独证明模型可用。
+
+`TestResults/20261123-001652` 的 AgentHostPackage 通过（422 Provider 契约场景、27 Campaign loop、32 BattleSimulation loop；真实模型调用 0、Native 命令 0）；`TestResults/20261123-002119` 的 Docs / OpenSpec 检查通过（126/126 系统映射、7/7 OpenSpec 检查）。真实 AgentHostProvider 在 `TestResults/20261122-234220`、`20261122-235413`、`20261123-000948`、`20261123-002417`、`20261123-002918` 均返回 HTTP 403 `risk_blocked`；最新精简请求仍相同。失败收据没有 token usage 或货币价格，故失败请求成本未知；所有尝试均 `NativeCommands=0`，没有启动游戏。
+
+两条无游戏的简短诊断请求返回 HTTP 200，但在 64 / 48 completion-token 上限分别报告 68/64 与 93/48 tokens、`finish_reason=length`，没有形成可解析、可接受的分类决策；合计 161 prompt / 112 completion tokens，仍无货币价格收据。安装的 `dsh-xdpool` 源码仅在上游 HTTP 403 且响应码为 11140/11141 时归类 `risk_blocked`，并对该模型下的账户执行 30 分钟冷却；插件文档说明 11140 表示账号风控。Chronicle 的安全收据只保存归一化类型，没有保存上游数字码，因此该批请求的具体账号/代码无法核实。当前应把此路由标为已配置、简单请求可达，但真实 Host 决策尚未验证；不要因通用 prompt/预算而继续重发，先从 DSH 的脱敏路由诊断确认模型账户可用状态。

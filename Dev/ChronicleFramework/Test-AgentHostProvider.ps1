@@ -4,6 +4,7 @@ param(
     [Parameter(Mandatory = $true)][string]$EvidencePath,
     [ValidateRange(64,2048)][int]$MaxOutputTokens = 128,
     [switch]$AllowDshXdPoolFreeRoute,
+    [switch]$AllowDshWorkBuddyGateway,
     [switch]$ProbeDshFreeRouteWithMinimalChat,
     [switch]$HealthOnly
 )
@@ -17,6 +18,7 @@ New-Item -ItemType Directory -Path $evidencePath -Force | Out-Null
 $credentialContractRoot = Join-Path ([IO.Path]::GetTempPath()) ('ChronicleProviderCredentialContract-' + [Guid]::NewGuid().ToString('N'))
 $previousDshHome = [Environment]::GetEnvironmentVariable('DSH_HOME', 'Process')
 $previousProviderKey = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_API_KEY', 'Process')
+$previousDshWorkBuddyKey = [Environment]::GetEnvironmentVariable('CHRONICLE_DSH_XDPOOL_API_KEY', 'Process')
 try {
     New-Item -ItemType Directory -Path (Join-Path $credentialContractRoot 'openai-gateway') -Force | Out-Null
     [Environment]::SetEnvironmentVariable('DSH_HOME', $credentialContractRoot, 'Process')
@@ -30,14 +32,19 @@ try {
     Remove-Item -LiteralPath $gatewayKeyPath -Force
     $missingDshCredential = Get-ChronicleProviderCredential -Endpoint ([Uri]'http://127.0.0.1:8326/v1')
     $remoteCredential = Get-ChronicleProviderCredential -Endpoint ([Uri]'https://api.example.invalid/v1')
+    [Environment]::SetEnvironmentVariable('CHRONICLE_DSH_XDPOOL_API_KEY', 'synthetic-workbuddy-gateway-key', 'Process')
+    $workBuddyCredential = Get-ChronicleProviderCredential -Endpoint ([Uri]'http://127.0.0.1:8328/v1')
     if (-not [string]::IsNullOrWhiteSpace([string]$missingDshCredential.Value) -or
-        $remoteCredential.Value -cne 'paid-provider-key-must-not-be-used-for-dsh') {
-        throw 'Missing DSH gateway credentials must fail closed without borrowing the generic remote provider key.'
+        $remoteCredential.Value -cne 'paid-provider-key-must-not-be-used-for-dsh' -or
+        $workBuddyCredential.Value -cne 'synthetic-workbuddy-gateway-key' -or
+        $workBuddyCredential.EnvironmentVariableName -ne 'CHRONICLE_DSH_XDPOOL_API_KEY') {
+        throw 'Provider credentials must remain endpoint-specific: the WorkBuddy gateway uses its dedicated key, never the generic remote-provider key.'
     }
 }
 finally {
     [Environment]::SetEnvironmentVariable('DSH_HOME', $previousDshHome, 'Process')
     [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_API_KEY', $previousProviderKey, 'Process')
+    [Environment]::SetEnvironmentVariable('CHRONICLE_DSH_XDPOOL_API_KEY', $previousDshWorkBuddyKey, 'Process')
     $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
     $credentialContractRootFull = [IO.Path]::GetFullPath($credentialContractRoot).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
     if ($credentialContractRootFull.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase) -and
@@ -49,6 +56,7 @@ finally {
 $credentialSelectionContract = [ordered]@{
     DshGatewayUsesDedicatedLocalKey = $true
     DshDoesNotBorrowGenericRemoteKey = $true
+    DshWorkBuddyUsesDedicatedGatewayKey = $true
     RemoteOpenAiCompatibleUsesGenericKey = $true
     CredentialValuesLogged = $false
 }
@@ -115,11 +123,17 @@ else {
         $providerUri.AbsolutePath.TrimEnd('/') -eq '/v1' -and
         $model -match '^xdpool-aggregate/(?!combo:)[^\r\n]+:free$' -and
         $model -notmatch '(?i)(fallback|fusion|auto:)'
+    $isDshWorkBuddyRoute = $providerUri.IsLoopback -and $providerUri.Port -eq 8328 -and
+        $providerUri.AbsolutePath.TrimEnd('/') -eq '/v1' -and
+        $model -match '^buddy:hy4flash(?:-free)?$'
     if ($isDshXdPoolFreeRoute -and -not $AllowDshXdPoolFreeRoute) {
         throw 'DSH XD Pool inference requires the explicit -AllowDshXdPoolFreeRoute opt-in; no inference request was sent.'
     }
-    if ($providerUri.IsLoopback -and -not $isDshXdPoolFreeRoute) {
-        throw 'Only a directly named DSH XD Pool :free model may use this loopback smoke path; no inference request was sent.'
+    if ($isDshWorkBuddyRoute -and -not $AllowDshWorkBuddyGateway) {
+        throw 'DSH WorkBuddy inference requires the explicit -AllowDshWorkBuddyGateway opt-in; no inference request was sent.'
+    }
+    if ($providerUri.IsLoopback -and -not $isDshXdPoolFreeRoute -and -not $isDshWorkBuddyRoute) {
+        throw 'Only a directly named DSH XD Pool or WorkBuddy model may use this loopback smoke path; no inference request was sent.'
     }
     if (-not $providerUri.IsLoopback -and $providerUri.Scheme -ne 'https') { throw 'Remote provider smoke requires HTTPS; no inference request was sent.' }
     $providerCredential = Get-ChronicleProviderCredential -Endpoint $providerUri
@@ -139,13 +153,14 @@ $healthRequest = [ordered]@{
     }
     providerConfigurationSource = 'agent-host-provider-health'
 } | ConvertTo-Json -Depth 5 -Compress
-$providerKeyBeforeHealth = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_API_KEY', 'Process')
+$providerCredentialEnvironmentVariable = if ($providerCredential -and -not [string]::IsNullOrWhiteSpace([string]$providerCredential.EnvironmentVariableName)) { [string]$providerCredential.EnvironmentVariableName } else { 'CHRONICLE_LLM_API_KEY' }
+$providerKeyBeforeHealth = [Environment]::GetEnvironmentVariable($providerCredentialEnvironmentVariable, 'Process')
 try {
-    if ($providerCredential) { [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_API_KEY', [string]$providerCredential.Value, 'Process') }
+    if ($providerCredential) { [Environment]::SetEnvironmentVariable($providerCredentialEnvironmentVariable, [string]$providerCredential.Value, 'Process') }
     $healthOutput = $healthRequest | & dotnet $hostDll --provider-health-only 2>&1 | Out-String
     $healthExitCode = $LASTEXITCODE
 }
-finally { [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_API_KEY', $providerKeyBeforeHealth, 'Process') }
+finally { [Environment]::SetEnvironmentVariable($providerCredentialEnvironmentVariable, $providerKeyBeforeHealth, 'Process') }
 if ($healthExitCode -ne 0) { throw "Read-only Agent Host provider health failed (exit=$healthExitCode). No inference request was sent. $healthOutput" }
 try { $hostHealth = $healthOutput | ConvertFrom-Json }
 catch { throw 'Agent Host provider health returned invalid JSON; no inference request was sent.' }
@@ -272,15 +287,15 @@ if ($freeLlmApiProfile -and $freeLlmApiProfile.ModelExecutionStatus -eq 'router'
     throw 'FreeLLMAPI multi-provider router inference is blocked: this Harness has no verified free-only fallback chain and readable quota/cost receipt. Health-only checks remain available; select a directly verifiable model route before inference.'
 }
 
-$expectedClassification = if ($freeLlmApiProfile) { 'supported-village-tools-quest' } else { 'supported-map-arrival' }
-$decisionGoal = if ($freeLlmApiProfile) { '完成当前可见的村庄工具委托' } else { '前往一个目前可见且安全的定居点' }
-$scopeControls = if ($freeLlmApiProfile) { @('supportedMapArrivalGoal','supportedVillageToolsQuestGoal','unsupportedGoal') } else { @('supportedMapArrivalGoal','unsupportedGoal') }
+$expectedClassification = if ($freeLlmApiProfile) { 'supported-village-tools-quest' } elseif ($isDshWorkBuddyRoute) { 'supported-establish-your-clan' } else { 'supported-map-arrival' }
+$decisionGoal = if ($freeLlmApiProfile) { '完成当前可见的村庄工具委托' } elseif ($isDshWorkBuddyRoute) { '完成原版StoryMode“建立你的家族”主线任务' } else { '前往一个目前可见且安全的定居点' }
+$scopeControls = if ($freeLlmApiProfile) { @('supportedMapArrivalGoal','supportedVillageToolsQuestGoal','unsupportedGoal') } elseif ($isDshWorkBuddyRoute) { @('supportedEstablishYourClanGoal','unsupportedGoal') } else { @('supportedMapArrivalGoal','unsupportedGoal') }
 $decisionRequest = [ordered]@{ goal = $decisionGoal; goalScopeClassificationRequired = $true; goalScopeContract = 'native-campaign-goal-classification-v1'; observation = [ordered]@{ scope = 'goal-classification-only'; message = 'No goal-specific game action has run yet. Classify the complete requested outcome against the listed supported goals; only the selected goal executor will become available after this gate.' }; allowedActions = @(); allowedControls = $scopeControls }
 $startInfo = [Diagnostics.ProcessStartInfo]::new()
 $startInfo.FileName = (Get-Command dotnet -ErrorAction Stop).Source
 $startInfo.Arguments = '"{0}" --decision-once' -f $hostDll
 $startInfo.UseShellExecute = $false
-$startInfo.EnvironmentVariables['CHRONICLE_LLM_API_KEY'] = [string]$providerCredential.Value
+$startInfo.EnvironmentVariables[$providerCredentialEnvironmentVariable] = [string]$providerCredential.Value
 $startInfo.CreateNoWindow = $true
 $startInfo.RedirectStandardInput = $true
 $startInfo.RedirectStandardOutput = $true

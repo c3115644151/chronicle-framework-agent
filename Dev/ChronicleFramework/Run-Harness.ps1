@@ -5,6 +5,7 @@ param(
     [switch]$RecruitmentBulkOnly,
     [string]$FreshStoryModeModel = '',
     [switch]$AllowDshXdPoolFreeRoute,
+    [switch]$AllowDshWorkBuddyGateway,
     [switch]$ProbeDshFreeRouteWithMinimalChat,
     [int]$SmokeTimeoutSeconds = 180,
     [ValidateRange(64,2048)][int]$ProviderSmokeMaxOutputTokens = 128,
@@ -37,7 +38,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.660'
+$HarnessContractVersion = '7.666'
 $providerCredentialScript = Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1'
 function Get-HarnessConfiguredProviderCredential {
     . $providerCredentialScript
@@ -102,9 +103,20 @@ if ($Phase -in @('ConfiguredModelPreflight','FreshStoryModeModelEvaluation','Per
 if ($Phase -in @('FreshStoryModeModelEvaluation','PersistentEycCampaign') -and $FreshStoryModeModel -match '^(auto(?::|$)|fusion(?::|$)|free-router$)') {
     throw 'FreeLLMAPI multi-provider router inference is blocked until its active chain is verified free-only with readable quota/cost evidence; no game or model request was sent.'
 }
+if ($Phase -in @('ConfiguredModelPreflight','AgentHostProvider','AgentHostProviderHealth','PersistentEycCampaign') -and
+    $FreshStoryModeModel -match '^buddy:hy4flash(?:-free)?$' -and -not $AllowDshWorkBuddyGateway) {
+    throw 'The DSH WorkBuddy gateway requires explicit -AllowDshWorkBuddyGateway opt-in; no game or model request was sent.'
+}
+if ($Phase -ceq 'FreshStoryModeModelEvaluation' -and $FreshStoryModeModel -match '^buddy:hy4flash(?:-free)?$') {
+    throw 'The DSH WorkBuddy route is supported only by bounded Provider and PersistentEycCampaign phases; no unbounded fresh-Campaign model run was sent.'
+}
 if ($Phase -ceq 'PersistentEycCampaign' -and $FreshStoryModeModel -match '^xdpool-aggregate/open_router/.+:free$' -and
     ($PersistentEycMaxProviderDecisionsPerContinuation -gt 4 -or $PersistentEycMaxHttpRequestsPerDecision -ne 1)) {
     throw 'OpenRouter :free persistent continuations are limited to four provider decisions and one HTTP request per decision; failed requests also consume the published 50/day quota. No game or model request was sent.'
+}
+if ($Phase -ceq 'PersistentEycCampaign' -and $FreshStoryModeModel -match '^buddy:hy4flash(?:-free)?$' -and
+    ($PersistentEycMaxProviderDecisionsPerContinuation -gt 4 -or $PersistentEycMaxHttpRequestsPerDecision -ne 1)) {
+    throw 'DSH WorkBuddy persistent continuations are limited to four provider decisions and one HTTP request per decision. No game or model request was sent.'
 }
 if (-not [string]::IsNullOrWhiteSpace($FreshStoryModeModel) -and ($FreshStoryModeModel.Length -gt 256 -or $FreshStoryModeModel -match '[\x00-\x1F\x7F]')) {
     throw 'FreshStoryModeModel must be a model ID of at most 256 characters with no control characters.'
@@ -577,6 +589,57 @@ foreach ($stage in $requestedStages) {
                         return
                     }
 
+                    $isDshWorkBuddyEndpoint = $endpoint.IsLoopback -and $endpoint.Port -eq 8328 -and $endpoint.AbsolutePath.TrimEnd('/') -eq '/v1'
+                    if ($isDshWorkBuddyEndpoint) {
+                        if (-not $AllowDshWorkBuddyGateway -or $FreshStoryModeModel -notmatch '^buddy:hy4flash(?:-free)?$') {
+                            throw 'The DSH WorkBuddy route requires explicit opt-in to the listed buddy:hy4flash or buddy:hy4flash-free model; no inference request was sent.'
+                        }
+                        $credential = Get-ChronicleProviderCredential -Endpoint $endpoint
+                        if ([string]::IsNullOrWhiteSpace([string]$credential.Value)) { throw 'The dedicated DSH WorkBuddy gateway credential is unavailable; no inference request was sent.' }
+                        $modelsUri = [UriBuilder]::new($endpoint)
+                        $modelsUri.Path = '/v1/models'
+                        $modelsUri.Query = ''
+                        try { $catalog = Invoke-RestMethod -Uri $modelsUri.Uri -Headers @{ Authorization = "Bearer $($credential.Value)" } -TimeoutSec 12 }
+                        catch { throw 'The DSH WorkBuddy model-list preflight failed; no inference request was sent.' }
+                        $modelRows = @($catalog.data)
+                        if (@($modelRows | Where-Object { [string]$_.id -ceq $FreshStoryModeModel }).Count -ne 1) {
+                            throw 'The selected direct DSH WorkBuddy model is absent from the current gateway catalog; no inference request was sent.'
+                        }
+                        $dshHome = [string][Environment]::GetEnvironmentVariable('DSH_HOME', 'Process')
+                        if ([string]::IsNullOrWhiteSpace($dshHome)) { $dshHome = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)) '.dsh' }
+                        $dshStatusKeyPath = Join-Path $dshHome 'openai-gateway/api-key'
+                        $dshStatusKey = if (Test-Path -LiteralPath $dshStatusKeyPath -PathType Leaf) { [string](Get-Content -LiteralPath $dshStatusKeyPath -Raw).Trim() } else { $null }
+                        if ([string]::IsNullOrWhiteSpace($dshStatusKey)) { throw 'The local DSH status credential is unavailable; no inference request was sent.' }
+                        try { $dshStatus = Invoke-RestMethod -Uri 'http://127.0.0.1:2733/plugins/dsh-xdpool/status' -Headers @{ Authorization = "Bearer $dshStatusKey" } -TimeoutSec 8 }
+                        catch { throw 'The read-only DSH WorkBuddy model-status check failed; no inference request was sent.' }
+                        $bareWorkBuddyModelId = $FreshStoryModeModel.Substring('buddy:'.Length)
+                        $workBuddyModel = @($dshStatus.models | Where-Object { [string]$_.id -ceq $bareWorkBuddyModelId } | Select-Object -First 1)
+                        if ($workBuddyModel.Count -ne 1 -or $null -eq $workBuddyModel[0].multiplier -or [double]$workBuddyModel[0].multiplier -lt 0) {
+                            throw 'The selected DSH WorkBuddy model has no current credit-multiplier record; no inference request was sent.'
+                        }
+                        $usableWorkBuddyAccounts = @($dshStatus.accounts | Where-Object {
+                            -not [bool]$_.cooling -and $_.credentialDead -ne $true -and
+                            (($null -eq $_.credits) -or [double]$_.credits.total -gt 0)
+                        })
+                        if ($usableWorkBuddyAccounts.Count -eq 0) { throw 'The DSH WorkBuddy account pool has no currently usable account; no inference request was sent.' }
+                        [ordered]@{
+                            ProviderKind = 'DSH XD Pool WorkBuddy direct loopback gateway'
+                            ProviderHost = $endpoint.Host
+                            ModelId = $FreshStoryModeModel
+                            CatalogListed = $true
+                            AvailableModelCount = $modelRows.Count
+                            WorkBuddyCreditMultiplier = [double]$workBuddyModel[0].multiplier
+                            WorkBuddyModelTags = @($workBuddyModel[0].tags)
+                            WorkBuddyCreditReceiptAvailable = $true
+                            CurrencyPriceReceiptAvailable = $false
+                            UsableAccountCount = $usableWorkBuddyAccounts.Count
+                            InferenceRequests = 0
+                            BannerlordStarted = $false
+                            AutomaticFallbackEnabled = $false
+                        } | ConvertTo-Json -Depth 4
+                        return
+                    }
+
                     $isDshXdPoolFreeEndpoint = $endpoint.IsLoopback -and $endpoint.Port -eq 8326 -and $endpoint.AbsolutePath.TrimEnd('/') -eq '/v1'
                     if ($isDshXdPoolFreeEndpoint) {
                         $isDirectDshFreeModel = $FreshStoryModeModel -match '^xdpool-aggregate/(?!combo:)[^\r\n]+:free$' -and
@@ -822,11 +885,14 @@ foreach ($stage in $requestedStages) {
                 $savedHarnessGoal = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_GOAL', 'Process')
                 $savedHarnessModel = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL', 'Process')
                 $savedLlmModel = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL', 'Process')
-                $savedProviderKey = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_API_KEY', 'Process')
+                $providerKeyVariable = 'CHRONICLE_LLM_API_KEY'
+                $savedProviderKey = [Environment]::GetEnvironmentVariable($providerKeyVariable, 'Process')
                 $savedProviderTimeout = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_TIMEOUT_SECONDS', 'Process')
                 try {
                     $providerCredential = Get-HarnessConfiguredProviderCredential
-                    [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_API_KEY', [string]$providerCredential.Value, 'Process')
+                    $providerKeyVariable = [string]$providerCredential.EnvironmentVariableName
+                    $savedProviderKey = [Environment]::GetEnvironmentVariable($providerKeyVariable, 'Process')
+                    [Environment]::SetEnvironmentVariable($providerKeyVariable, [string]$providerCredential.Value, 'Process')
                     [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_START', '1', 'Process')
                     [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_AUTO_STOP_AFTER_MS', '86400000', 'Process')
                     [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_GOAL', '自主完成原版主线任务“建立你的家族”。', 'Process')
@@ -844,7 +910,7 @@ foreach ($stage in $requestedStages) {
                     [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_GOAL', $savedHarnessGoal, 'Process')
                     [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL', $savedHarnessModel, 'Process')
                     [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_MODEL', $savedLlmModel, 'Process')
-                    [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_API_KEY', $savedProviderKey, 'Process')
+                    [Environment]::SetEnvironmentVariable($providerKeyVariable, $savedProviderKey, 'Process')
                     [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_TIMEOUT_SECONDS', $savedProviderTimeout, 'Process')
                     try {
                         if ($script:retainedAgentHostPackageRoot) { Remove-RetainedAgentHostPackage $script:retainedAgentHostPackageRoot }
@@ -861,10 +927,13 @@ foreach ($stage in $requestedStages) {
             Invoke-Stage -Name 'PersistentEycCampaign' -Action {
                 $savedLlmModel = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL', 'Process')
                 $savedHarnessModel = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL', 'Process')
-                $savedProviderKey = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_API_KEY', 'Process')
+                $providerKeyVariable = 'CHRONICLE_LLM_API_KEY'
+                $savedProviderKey = [Environment]::GetEnvironmentVariable($providerKeyVariable, 'Process')
                 try {
                     $providerCredential = Get-HarnessConfiguredProviderCredential
-                    [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_API_KEY', [string]$providerCredential.Value, 'Process')
+                    $providerKeyVariable = [string]$providerCredential.EnvironmentVariableName
+                    $savedProviderKey = [Environment]::GetEnvironmentVariable($providerKeyVariable, 'Process')
+                    [Environment]::SetEnvironmentVariable($providerKeyVariable, [string]$providerCredential.Value, 'Process')
                     [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_MODEL', $FreshStoryModeModel, 'Process')
                     [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL', $FreshStoryModeModel, 'Process')
                     $testOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $persistentEycCampaignScript `
@@ -882,7 +951,7 @@ foreach ($stage in $requestedStages) {
                 finally {
                     [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_MODEL', $savedLlmModel, 'Process')
                     [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL', $savedHarnessModel, 'Process')
-                    [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_API_KEY', $savedProviderKey, 'Process')
+                    [Environment]::SetEnvironmentVariable($providerKeyVariable, $savedProviderKey, 'Process')
                 }
             }
         }
@@ -1016,6 +1085,7 @@ foreach ($stage in $requestedStages) {
                 $providerArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $harnessRoot 'Test-AgentHostProvider.ps1'),
                     '-HostDllPath', $agentHostDllPath, '-EvidencePath', $providerEvidencePath, '-MaxOutputTokens', [string]$ProviderSmokeMaxOutputTokens)
                 if ($AllowDshXdPoolFreeRoute) { $providerArguments += '-AllowDshXdPoolFreeRoute' }
+                if ($AllowDshWorkBuddyGateway) { $providerArguments += '-AllowDshWorkBuddyGateway' }
                 if ($ProbeDshFreeRouteWithMinimalChat) { $providerArguments += '-ProbeDshFreeRouteWithMinimalChat' }
                 $providerOutput = & powershell @providerArguments 2>&1 | Out-String
                 $providerExitCode = $LASTEXITCODE
@@ -1033,6 +1103,7 @@ foreach ($stage in $requestedStages) {
                 $providerHealthArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $harnessRoot 'Test-AgentHostProvider.ps1'),
                     '-HostDllPath', $agentHostDllPath, '-EvidencePath', $providerHealthEvidencePath, '-HealthOnly')
                 if ($AllowDshXdPoolFreeRoute) { $providerHealthArguments += '-AllowDshXdPoolFreeRoute' }
+                if ($AllowDshWorkBuddyGateway) { $providerHealthArguments += '-AllowDshWorkBuddyGateway' }
                 $providerHealthOutput = & powershell @providerHealthArguments 2>&1 | Out-String
                 $providerHealthExitCode = $LASTEXITCODE
                 if ($providerHealthExitCode -ne 0) { throw "Read-only Agent Host provider health check failed with exit code $providerHealthExitCode.`n$providerHealthOutput" }
