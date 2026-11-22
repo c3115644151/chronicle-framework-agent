@@ -783,6 +783,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     providerRetryAfter: SafeOptionalDiagnosticField(response.Headers.RetryAfter?.ToString()),
                     providerErrorBodyKind: errorMetadata.BodyKind, providerErrorContentType: errorMetadata.ContentType,
                     providerErrorType: errorMetadata.ErrorType, providerErrorCode: errorMetadata.ErrorCode, providerErrorParam: errorMetadata.ErrorParam,
+                    providerDshUpstreamCode: errorMetadata.DshUpstreamCode,
                     providerResponseRequestId: errorMetadata.RequestId ?? SafeOptionalDiagnosticField(ReadResponseHeader(response, "X-Request-Id") ??
                         ReadResponseHeader(response, "X-Correlation-Id") ?? ReadResponseHeader(response, "CF-Ray")));
             }
@@ -1066,7 +1067,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         (endpoint.IsLoopback && endpoint.Port == 8326 && modelId.StartsWith("xdpool-aggregate/open_router/", StringComparison.OrdinalIgnoreCase));
 
     internal sealed record RateLimitRetryHint(TimeSpan? Delay, TimeSpan? ObservedDelay, string Source, bool IsPoolExhaustion);
-    private sealed record ProviderErrorMetadata(string BodyKind, string? ContentType, string? ErrorType, string? ErrorCode, string? ErrorParam, string? RequestId);
+    private sealed record ProviderErrorMetadata(string BodyKind, string? ContentType, string? ErrorType, string? ErrorCode, string? ErrorParam, string? RequestId, string? DshUpstreamCode = null);
 
     private void AddAuthorization(HttpRequestMessage request)
     {
@@ -1116,7 +1117,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         return SafeOptionalDiagnosticField(shape);
     }
 
-    private static async Task<ProviderErrorMetadata> ReadSafeProviderErrorMetadataAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    private async Task<ProviderErrorMetadata> ReadSafeProviderErrorMetadataAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         const int maximumBytes = 8192;
         var contentType = SafeOptionalDiagnosticField(response.Content.Headers.ContentType?.MediaType);
@@ -1147,9 +1148,10 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
             var errorType = SafeOptionalDiagnosticField(ReadString(error, "type"));
             var errorCode = SafeOptionalDiagnosticField(ReadString(error, "code"));
             var errorParam = SafeOptionalDiagnosticField(ReadString(error, "param"));
+            var dshUpstreamCode = TryReadDshWorkBuddyUpstreamCode(response, error, errorType);
             var requestId = SafeOptionalDiagnosticField(ReadString(error, "request_id") ?? ReadString(root, "request_id"));
             var kind = errorType is null && errorCode is null ? "json-without-error-code" : "json-error";
-            return new ProviderErrorMetadata(kind, contentType, errorType, errorCode, errorParam, requestId);
+            return new ProviderErrorMetadata(kind, contentType, errorType, errorCode, errorParam, requestId, dshUpstreamCode);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -1163,6 +1165,19 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         {
             return new ProviderErrorMetadata("metadata-unavailable", contentType, null, null, null, null);
         }
+    }
+
+    private string? TryReadDshWorkBuddyUpstreamCode(HttpResponseMessage response, JsonElement error, string? errorType)
+    {
+        if (!IsDshWorkBuddyGateway(_settings.Endpoint) || response.StatusCode != HttpStatusCode.Forbidden ||
+            !string.Equals(errorType, "risk_blocked", StringComparison.Ordinal)) return null;
+        var message = ReadString(error, "message");
+        if (string.IsNullOrWhiteSpace(message) || !message.StartsWith("workbuddy upstream risk_blocked (http 403)", StringComparison.OrdinalIgnoreCase)) return null;
+        var upstreamDetailStart = message.IndexOf("]:", StringComparison.Ordinal);
+        if (upstreamDetailStart < 0 || upstreamDetailStart + 2 >= message.Length) return null;
+        var upstreamDetail = message[(upstreamDetailStart + 2)..];
+        var match = System.Text.RegularExpressions.Regex.Match(upstreamDetail, "\\\"code\\\"\\s*:\\s*\\\"?(11140|11141)\\\"?(?=\\s|,|})", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        return match.Success ? match.Groups[1].Value : null;
     }
 
     internal string BuildHttpFailureMessage(HttpResponseMessage response, int rateLimitRetryAttempts, long rateLimitRetryWaitMilliseconds, RateLimitRetryHint? retryHint = null, bool? retryFitsDeadline = null)
@@ -1938,7 +1953,8 @@ internal sealed class AgentHostException : Exception
         int? providerFallbackAttempts = null, string? providerFallbackTrail = null,
         bool? providerToolCallsPresent = null, int? providerToolCallCount = null, string? providerResponseContentKind = null,
         int? providerResponseContentCharacters = null, string? providerFinishReason = null, string? providerResponseModel = null,
-        int? providerResponsePromptTokens = null, int? providerResponseCompletionTokens = null, string? providerDecisionFieldShape = null) : base(message, innerException)
+        int? providerResponsePromptTokens = null, int? providerResponseCompletionTokens = null, string? providerDecisionFieldShape = null,
+        string? providerDshUpstreamCode = null) : base(message, innerException)
     {
         Code = code;
         ProviderHttpStatus = providerHttpStatus;
@@ -1972,6 +1988,7 @@ internal sealed class AgentHostException : Exception
         ProviderResponsePromptTokens = providerResponsePromptTokens;
         ProviderResponseCompletionTokens = providerResponseCompletionTokens;
         ProviderDecisionFieldShape = providerDecisionFieldShape;
+        ProviderDshUpstreamCode = providerDshUpstreamCode;
     }
 
     internal string Code { get; }
@@ -2006,4 +2023,5 @@ internal sealed class AgentHostException : Exception
     internal int? ProviderResponsePromptTokens { get; }
     internal int? ProviderResponseCompletionTokens { get; }
     internal string? ProviderDecisionFieldShape { get; }
+    internal string? ProviderDshUpstreamCode { get; }
 }

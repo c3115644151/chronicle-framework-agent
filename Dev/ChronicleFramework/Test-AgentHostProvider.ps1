@@ -348,6 +348,7 @@ if ($process.ExitCode -ne 0) {
         ProviderErrorContentType = if ($providerFailure) { [string]$providerFailure.errorContentType } else { $null }
         ProviderErrorType = if ($providerFailure) { [string]$providerFailure.errorType } else { $null }
         ProviderErrorCode = if ($providerFailure) { [string]$providerFailure.errorCode } else { $null }
+        ProviderDshUpstreamCode = if ($providerFailure) { [string]$providerFailure.dshUpstreamCode } else { $null }
         ProviderErrorParam = if ($providerFailure) { [string]$providerFailure.errorParam } else { $null }
         ProviderResponseContentKind = if ($providerFailure) { [string]$providerFailure.responseContentKind } else { $null }
         ProviderResponseContentCharacters = if ($providerFailure) { $providerFailure.responseContentCharacters } else { $null }
@@ -368,12 +369,13 @@ if ($process.ExitCode -ne 0) {
     $httpStatus = if ($providerFailure) { $providerFailure.httpStatus } else { 'unknown' }
     $errorType = if ($providerFailure -and $providerFailure.errorType) { $providerFailure.errorType } else { 'unknown' }
     $errorCode = if ($providerFailure -and $providerFailure.errorCode) { $providerFailure.errorCode } else { 'unknown' }
+    $dshUpstreamCode = if ($providerFailure -and $providerFailure.dshUpstreamCode) { $providerFailure.dshUpstreamCode } else { 'unknown' }
     $errorParam = if ($providerFailure -and $providerFailure.errorParam) { $providerFailure.errorParam } else { 'unknown' }
     $requestId = if ($providerFailure -and $providerFailure.responseRequestId) { $providerFailure.responseRequestId } else { 'unknown' }
     $responseShape = if ($providerFailure -and $providerFailure.responseContentKind) { [string]$providerFailure.responseContentKind } else { 'unknown' }
     $responseFinish = if ($providerFailure -and $providerFailure.finishReason) { [string]$providerFailure.finishReason } else { 'unknown' }
     $responseTokens = if ($providerFailure -and $null -ne $providerFailure.completionTokens) { [string]$providerFailure.completionTokens } else { 'unknown' }
-    throw "Configured provider returned an error (exit=$($process.ExitCode); http=$httpStatus; type=$errorType; code=$errorCode; param=$errorParam; shape=$responseShape; finish=$responseFinish; completionTokens=$responseTokens; requestId=$requestId). Response body and credentials are omitted; sanitized receipt saved to ProviderSmokeFailure.json."
+    throw "Configured provider returned an error (exit=$($process.ExitCode); http=$httpStatus; type=$errorType; code=$errorCode; dshUpstreamCode=$dshUpstreamCode; param=$errorParam; shape=$responseShape; finish=$responseFinish; completionTokens=$responseTokens; requestId=$requestId). Response body and credentials are omitted; sanitized receipt saved to ProviderSmokeFailure.json."
 }
 try { $result = $stdout | ConvertFrom-Json }
 catch { throw 'Local provider Host returned invalid structured JSON; raw response is omitted.' }

@@ -233,6 +233,7 @@ internal static class Program
             ["errorType"] = JsonValue.Create(exception.ProviderErrorType),
             ["errorCode"] = JsonValue.Create(exception.ProviderErrorCode),
             ["errorParam"] = JsonValue.Create(exception.ProviderErrorParam),
+            ["dshUpstreamCode"] = JsonValue.Create(exception.ProviderDshUpstreamCode),
             ["toolCallsPresent"] = JsonValue.Create(exception.ProviderToolCallsPresent),
             ["toolCallCount"] = JsonValue.Create(exception.ProviderToolCallCount),
             ["responseContentKind"] = JsonValue.Create(exception.ProviderResponseContentKind),

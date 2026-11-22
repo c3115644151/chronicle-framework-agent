@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.667'
+$contractVersion = '7.668'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -182,8 +182,11 @@ if ($agentHostProviderSource -notmatch 'reasoningEffortIsExplicitlySupportedByFr
     $agentHostProviderContractSelfTestSource -notmatch 'tools_0_.function.parameters' -or
     $agentHostProgramSource -notmatch 'BuildSafeProviderFailureDetails' -or
     $agentHostProgramSource -notmatch '\["errorParam"\]' -or
+    $agentHostProgramSource -notmatch '\["dshUpstreamCode"\]' -or
     $agentHostRuntimeProgressLogSource -notmatch '\["providerErrorParam"\]' -or
+    $agentHostRuntimeProgressLogSource -notmatch '\["providerDshUpstreamCode"\]' -or
     $agentHostHarnessProgressTraceSource -notmatch '\["providerErrorParam"\]' -or
+    $agentHostHarnessProgressTraceSource -notmatch '\["providerDshUpstreamCode"\]' -or
     $agentHostProviderContractSelfTestSource -notmatch 'freellmapi-advertised-reasoning-effort-low-is-applied-with-thinking-disabled' -or
     $agentHostProviderContractSelfTestSource -notmatch 'freellmapi-unadvertised-reasoning-effort-is-omitted' -or
     $agentHostRuntimeProgressLogSource -notmatch 'reasoningEffortApplied' -or
@@ -1280,10 +1283,12 @@ if ($projectFile -notmatch 'Reference Include="MCMv5"' -or $projectFile -notmatc
     $providerProgramSource -notmatch 'AgentHostDecisionCycle.DecideCampaignAsync' -or
     $providerSmokeSource -notmatch 'ResponseFormatMode = \[string\]\$result\.responseFormatMode' -or
     $providerSmokeSource -notmatch 'ProviderErrorParam = if \(\$providerFailure\)' -or
+    $providerSmokeSource -notmatch 'ProviderDshUpstreamCode = if \(\$providerFailure\)' -or
     $providerSmokeSource -notmatch 'ProviderResponseContentKind = if \(\$providerFailure\)' -or
     $providerSmokeSource -notmatch 'ProviderResponseCompletionTokens = if \(\$providerFailure\)' -or
     $providerProgramSource -notmatch 'BuildSafeProviderFailureDetails' -or
     $providerProfileTestSource -notmatch 'provider-http-failure-cli-output-preserves-safe-error-fields-without-body' -or
+    $providerProfileTestSource -notmatch 'dsh-workbuddy-risk-blocked-preserves-allowlisted-upstream-code-without-body-or-account-label' -or
     $providerSmokeSource -notmatch 'ProviderSmokeFailure\.json' -or
     $providerHostSource -notmatch 'FREELLMAPI_API_KEY' -or $providerHostSource -notmatch 'CHRONICLE_LLM_API_KEY' -or
     $providerHostSource -notmatch 'X-Routed-Via' -or

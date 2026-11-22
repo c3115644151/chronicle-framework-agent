@@ -1047,6 +1047,52 @@ internal static class ProviderContractSelfTest
             throw new AgentHostException("provider-http-failure-diagnostics-overreported-self-test-failed", "Non-HTTP provider failures must not fabricate HTTP diagnostics.");
         results.Add(new { scenario = "provider-http-failure-cli-output-preserves-safe-error-fields-without-body", passed = true, modelCalls = 0, nativeCommands = 0 });
 
+        const string privateDshAccountLabel = "PRIVATE_DSH_ACCOUNT_LABEL";
+        const string privateDshUpstreamBodyMarker = "PRIVATE_DSH_UPSTREAM_BODY_MARKER";
+        var dshHttpFailureRequests = 0;
+        var dshRiskBlockedMessage = $"workbuddy upstream risk_blocked (http 403) after 1 account(s) [{privateDshAccountLabel}]: upstream detail {{\"code\":11140,\"message\":\"{privateDshUpstreamBodyMarker}\"}}";
+        var dshRiskBlockedBody = JsonSerializer.Serialize(new { error = new { message = dshRiskBlockedMessage, type = "risk_blocked", code = "risk_blocked" } });
+        var dshRiskBlockedHandler = new StubHandler((httpRequest, _) =>
+        {
+            dshHttpFailureRequests++;
+            if (httpRequest.Method == HttpMethod.Get)
+                return Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"buddy:hy4flash\"}]}"));
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Forbidden)
+            {
+                Content = new StringContent(dshRiskBlockedBody, Encoding.UTF8, "application/json")
+            });
+        });
+        var dshRiskBlockedSettings = settings with
+        {
+            Endpoint = new Uri("http://127.0.0.1:8328/v1"),
+            Model = "buddy:hy4flash",
+            MaxTokenParameter = "max_tokens",
+            ApiKey = "dsh-workbuddy-self-test-key",
+            MaxHttpRequestsPerDecision = 1
+        };
+        using (var dshRiskBlockedClient = new HttpClient(dshRiskBlockedHandler) { Timeout = dshRiskBlockedSettings.Timeout })
+        using (var dshRiskBlockedProvider = new OllamaNativeProvider(dshRiskBlockedSettings, dshRiskBlockedClient))
+        using (var request = JsonDocument.Parse(BuildDecisionRequest()))
+        {
+            try
+            {
+                _ = await dshRiskBlockedProvider.DecideAsync(request.RootElement, CancellationToken.None);
+                throw new AgentHostException("dsh-risk-blocked-self-test-accepted", "A DSH risk-blocked response unexpectedly produced a decision.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-http-error")
+            {
+                var safeFailure = Program.BuildSafeProviderFailureDetails(exception)?.ToJsonString() ?? "{}";
+                if (dshHttpFailureRequests != 1 || exception.ProviderDshUpstreamCode != "11140" ||
+                    exception.ProviderErrorType != "risk_blocked" || exception.ProviderErrorCode != "risk_blocked" ||
+                    exception.Message.Contains(privateDshAccountLabel, StringComparison.Ordinal) ||
+                    exception.Message.Contains(privateDshUpstreamBodyMarker, StringComparison.Ordinal) ||
+                    !safeFailure.Contains("\"dshUpstreamCode\":\"11140\"", StringComparison.Ordinal) ||
+                    safeFailure.Contains(privateDshAccountLabel, StringComparison.Ordinal) || safeFailure.Contains(privateDshUpstreamBodyMarker, StringComparison.Ordinal))
+                    throw new AgentHostException("dsh-risk-blocked-diagnostics-self-test-failed", $"A DSH risk-blocked response must expose only the allowlisted upstream code and omit account/message content (requests={dshHttpFailureRequests}; codeRecognized={exception.ProviderDshUpstreamCode == "11140"}; errorEnvelopeCorrect={exception.ProviderErrorType == "risk_blocked" && exception.ProviderErrorCode == "risk_blocked"}; exceptionLeakedContent={exception.Message.Contains(privateDshAccountLabel, StringComparison.Ordinal) || exception.Message.Contains(privateDshUpstreamBodyMarker, StringComparison.Ordinal)}; safeCodePresent={safeFailure.Contains("\"dshUpstreamCode\":\"11140\"", StringComparison.Ordinal)}; safeLeakedContent={safeFailure.Contains(privateDshAccountLabel, StringComparison.Ordinal) || safeFailure.Contains(privateDshUpstreamBodyMarker, StringComparison.Ordinal)}).");
+                results.Add(new { scenario = "dsh-workbuddy-risk-blocked-preserves-allowlisted-upstream-code-without-body-or-account-label", passed = true, httpRequests = dshHttpFailureRequests, nativeCommands = 0 });
+            }
+        }
+
         var budgetGuardHandler = new StubHandler((_, _) => Task.FromResult(JsonResponse(BuildChatResponse(ValidDecision, "stop"))));
         var budgetGuardSettings = genericRemoteSettings with
         {

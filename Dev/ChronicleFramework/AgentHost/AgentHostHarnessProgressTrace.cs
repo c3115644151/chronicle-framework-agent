@@ -266,7 +266,8 @@ internal static class AgentHostHarnessProgressTrace
             exception.ProviderRetryAfter, exception.ProviderErrorBodyKind, exception.ProviderErrorContentType, exception.ProviderErrorType, exception.ProviderErrorCode, exception.ProviderErrorParam,
             exception.ProviderFallbackAttempts, exception.ProviderFallbackTrail, exception.ProviderToolCallsPresent, exception.ProviderToolCallCount,
             exception.ProviderResponseContentKind, exception.ProviderResponseContentCharacters, exception.ProviderFinishReason, exception.ProviderResponseModel,
-            exception.ProviderResponsePromptTokens, exception.ProviderResponseCompletionTokens, systemPrompt, exception.ProviderDecisionFieldShape);
+            exception.ProviderResponsePromptTokens, exception.ProviderResponseCompletionTokens, systemPrompt, exception.ProviderDecisionFieldShape,
+            exception.ProviderDshUpstreamCode);
 
     internal static void RecordProviderFailure(JsonElement request, string failureCode, int? providerHttpStatus = null,
         string? providerRoute = null, string? providerOutputFormat = null, int? providerRetryAttempts = null, long? providerRetryWaitMilliseconds = null,
@@ -278,7 +279,7 @@ internal static class AgentHostHarnessProgressTrace
         bool? providerToolCallsPresent = null, int? providerToolCallCount = null, string? providerResponseContentKind = null,
         int? providerResponseContentCharacters = null, string? providerFinishReason = null, string? providerResponseModel = null,
         int? providerResponsePromptTokens = null, int? providerResponseCompletionTokens = null, string? systemPrompt = null,
-        string? providerDecisionFieldShape = null)
+        string? providerDecisionFieldShape = null, string? providerDshUpstreamCode = null)
     {
         var requestDiagnostics = BuildProviderFailureRequestDiagnostics(request, systemPrompt);
         AgentHostRuntimeProgressLog.RecordProviderFailure(request, failureCode, providerHttpStatus, providerRoute,
@@ -290,7 +291,8 @@ internal static class AgentHostHarnessProgressTrace
             providerFinishReason, providerResponseModel, providerResponsePromptTokens, providerResponseCompletionTokens,
             ReadInt(requestDiagnostics, "systemPromptBytes"), ReadInt(requestDiagnostics, "userPayloadBytes"),
             ReadInt(requestDiagnostics, "observationBytes"), requestDiagnostics["allowedActionNames"] as JsonArray,
-            requestDiagnostics["allowedControls"] as JsonArray, ReadString(requestDiagnostics, "decisionFeedbackKind"), providerDecisionFieldShape);
+            requestDiagnostics["allowedControls"] as JsonArray, ReadString(requestDiagnostics, "decisionFeedbackKind"), providerDecisionFieldShape,
+            providerDshUpstreamCode);
         var harnessMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
         if (harnessMode is not ("visual-capture" or "agent-host-lifecycle-test")) return;
         var directory = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
@@ -330,6 +332,7 @@ internal static class AgentHostHarnessProgressTrace
                 ["providerErrorType"] = providerErrorType,
                 ["providerErrorCode"] = providerErrorCode,
                 ["providerErrorParam"] = providerErrorParam,
+                ["providerDshUpstreamCode"] = providerDshUpstreamCode,
                 ["providerFallbackAttempts"] = providerFallbackAttempts,
                 ["providerFallbackTrail"] = providerFallbackTrail,
                 ["providerToolCallsPresent"] = providerToolCallsPresent,
