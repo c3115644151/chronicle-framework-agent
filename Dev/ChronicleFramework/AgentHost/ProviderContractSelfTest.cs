@@ -962,6 +962,38 @@ internal static class ProviderContractSelfTest
             results.Add(new { scenario = "openrouter-reasoning-disabled-uses-standard-reasoning-object", passed = true, modelCalls = 1, nativeCommands = 0 });
         }
 
+        Uri? openRouterSelectedModelHealthUri = null;
+        var openRouterSelectedModelHealthRequests = 0;
+        var openRouterSelectedModelInferenceRequests = 0;
+        var openRouterSelectedModelSettings = openRouterReasoningSettings with
+        {
+            Endpoint = new Uri("https://openrouter.ai/api/v1/chat/completions"),
+            Model = "particle-ai/particle-1:free",
+            ApiKey = "openrouter-selected-model-health-self-test-secret"
+        };
+        var openRouterSelectedModelHandler = new StubHandler((httpRequest, _) =>
+        {
+            if (httpRequest.Method == HttpMethod.Get)
+            {
+                openRouterSelectedModelHealthRequests++;
+                openRouterSelectedModelHealthUri = httpRequest.RequestUri;
+                return Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"particle-ai/particle-1:free\",\"supported_parameters\":[\"tools\",\"tool_choice\",\"response_format\"]}]}"));
+            }
+            openRouterSelectedModelInferenceRequests++;
+            return Task.FromResult(JsonResponse(BuildChatResponse(ValidDecision, "stop")));
+        });
+        using (var openRouterSelectedModelClient = new HttpClient(openRouterSelectedModelHandler) { Timeout = openRouterSelectedModelSettings.Timeout })
+        using (var openRouterSelectedModelProvider = new OllamaNativeProvider(openRouterSelectedModelSettings, openRouterSelectedModelClient))
+        {
+            await openRouterSelectedModelProvider.CheckConfiguredModelAsync(CancellationToken.None);
+            if (openRouterSelectedModelHealthRequests != 1 || openRouterSelectedModelInferenceRequests != 0 ||
+                openRouterSelectedModelHealthUri is null || openRouterSelectedModelHealthUri.AbsolutePath != "/api/v1/models" ||
+                Uri.UnescapeDataString(openRouterSelectedModelHealthUri.Query) != "?q=particle-ai/particle-1:free" ||
+                openRouterSelectedModelProvider.AvailableModelCount != 1)
+                throw new AgentHostException("openrouter-selected-model-health-filter-failed", "OpenRouter health must query only the selected model, accept the bounded model row, and send no inference request.");
+            results.Add(new { scenario = "openrouter-health-filters-large-model-catalog-to-selected-model", passed = true, healthRequests = 1, modelCalls = 0, nativeCommands = 0 });
+        }
+
         var emptyOpenRouterResponse = JsonSerializer.Serialize(new
         {
             model = "particle-ai/particle-1:free",

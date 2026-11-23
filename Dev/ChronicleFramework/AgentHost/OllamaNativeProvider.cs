@@ -295,6 +295,10 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         (string.Equals(endpoint.AbsolutePath.TrimEnd('/'), "/v1", StringComparison.OrdinalIgnoreCase) ||
          endpoint.AbsolutePath.EndsWith("/v1/chat/completions", StringComparison.OrdinalIgnoreCase));
 
+    private static bool IsOpenRouterEndpoint(Uri endpoint) =>
+        string.Equals(endpoint.Host, "openrouter.ai", StringComparison.OrdinalIgnoreCase) &&
+        endpoint.AbsolutePath.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase);
+
     internal static string ResolveOutputModeForEndpoint(Uri endpoint, string requestedOutputMode)
     {
         // The installed WorkBuddy shim accepted JSON Object in a live smoke,
@@ -376,6 +380,8 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         };
         if (IsFreeLlmApi(_settings.Endpoint) && !string.IsNullOrWhiteSpace(_settings.ApiKey))
             modelsUriBuilder.Query = "available=true";
+        else if (IsOpenRouterEndpoint(_settings.Endpoint))
+            modelsUriBuilder.Query = "q=" + Uri.EscapeDataString(_settings.Model);
         if ((!_settings.Endpoint.IsLoopback || IsFreeLlmApi(_settings.Endpoint)) && string.IsNullOrWhiteSpace(_settings.ApiKey))
             throw new AgentHostException("provider-api-key-missing", "This provider requires an API key; configure CHRONICLE_LLM_API_KEY without placing it in the model profile.");
 
