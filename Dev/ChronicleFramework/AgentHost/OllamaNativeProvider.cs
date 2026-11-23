@@ -1238,7 +1238,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
     internal static TimeSpan? GetBoundedRateLimitRetryAfter(Uri endpoint, HttpResponseMessage response, string? modelId = null)
     {
         var isFreeLlmApi = IsFreeLlmApi(endpoint);
-        var isOpenRouterFreeModel = IsOpenRouterEndpoint(endpoint) && modelId?.EndsWith(":free", StringComparison.Ordinal) == true;
+        var isOpenRouterFreeModel = IsOpenRouterFreeModel(endpoint, modelId);
         if ((!isFreeLlmApi && !isOpenRouterFreeModel) || response.StatusCode != HttpStatusCode.TooManyRequests || response.Headers.RetryAfter is null)
             return null;
         var delay = response.Headers.RetryAfter.Delta ?? response.Headers.RetryAfter.Date - DateTimeOffset.UtcNow;
@@ -1344,11 +1344,15 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
 
     internal static TimeSpan GetMinimumRequestInterval(Uri endpoint, string model, string? previousRoute)
     {
+        if (IsOpenRouterFreeModel(endpoint, model)) return TimeSpan.FromMilliseconds(3100);
         if (!IsFreeLlmApi(endpoint)) return TimeSpan.Zero;
         return IsMistralSmall32(model) || previousRoute?.StartsWith("ovh/", StringComparison.OrdinalIgnoreCase) == true
             ? TimeSpan.FromSeconds(45)
             : TimeSpan.Zero;
     }
+
+    private static bool IsOpenRouterFreeModel(Uri endpoint, string? modelId) =>
+        IsOpenRouterEndpoint(endpoint) && modelId?.EndsWith(":free", StringComparison.Ordinal) == true;
 
     private async Task WaitForProviderRateWindowAsync(CancellationToken cancellationToken)
     {

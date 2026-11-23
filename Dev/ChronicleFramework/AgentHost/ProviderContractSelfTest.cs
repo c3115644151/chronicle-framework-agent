@@ -2116,12 +2116,16 @@ internal static class ProviderContractSelfTest
         }
 
         var rateWindowEndpoint = new Uri("http://127.0.0.1:31415/v1/chat/completions");
+        var openRouterFreeRateWindowEndpoint = new Uri("https://openrouter.ai/api/v1/chat/completions");
         if (OllamaNativeProvider.GetMinimumRequestInterval(rateWindowEndpoint, "mistral-small-3.2-24b", null) != TimeSpan.FromSeconds(45) ||
             OllamaNativeProvider.GetMinimumRequestInterval(rateWindowEndpoint, "auto:noema-free", "ovh/Mistral-Small-3.2-24B-Instruct-2506") != TimeSpan.FromSeconds(45) ||
             OllamaNativeProvider.GetMinimumRequestInterval(rateWindowEndpoint, "auto:noema-free", "kilo/openrouter/free") != TimeSpan.Zero ||
+            OllamaNativeProvider.GetMinimumRequestInterval(openRouterFreeRateWindowEndpoint, "particle-ai/particle-1:free", null) != TimeSpan.FromMilliseconds(3100) ||
+            OllamaNativeProvider.GetMinimumRequestInterval(openRouterFreeRateWindowEndpoint, "particle-ai/particle-1", null) != TimeSpan.Zero ||
             OllamaNativeProvider.GetMinimumRequestInterval(new Uri("http://127.0.0.1:11434/v1/chat/completions"), "mistral-small-3.2-24b", null) != TimeSpan.Zero)
-            throw new AgentHostException("provider-self-test-rate-window-policy-failed", "Only the known FreeLLMAPI-to-OVH Mistral route should receive the conservative 31-second request spacing.");
+            throw new AgentHostException("provider-self-test-rate-window-policy-failed", "Known FreeLLMAPI model routes and OpenRouter :free models must be paced within their published limits without throttling unrelated paid or local providers.");
         results.Add(new { scenario = "freellmapi-ovh-model-rate-window-is-route-specific", passed = true });
+        results.Add(new { scenario = "openrouter-free-model-rate-window-stays-under-published-20-rpm", passed = true });
 
         var pacedRouteCalls = 0;
         var pacedRouteHandler = new StubHandler((_, _) =>
