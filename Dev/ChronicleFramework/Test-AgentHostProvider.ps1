@@ -300,9 +300,10 @@ if ($freeLlmApiProfile -and $freeLlmApiProfile.ModelExecutionStatus -eq 'router'
     throw 'FreeLLMAPI multi-provider router inference is blocked: this Harness has no verified free-only fallback chain and readable quota/cost receipt. Health-only checks remain available; select a directly verifiable model route before inference.'
 }
 
-$expectedClassification = if ($freeLlmApiProfile) { 'supported-village-tools-quest' } elseif ($isDshWorkBuddyRoute -or $isDshXdPoolWorkBuddyFreeRoute) { 'supported-establish-your-clan' } else { 'supported-map-arrival' }
-$decisionGoal = if ($freeLlmApiProfile) { '完成当前可见的村庄工具委托' } elseif ($isDshWorkBuddyRoute -or $isDshXdPoolWorkBuddyFreeRoute) { '完成原版StoryMode“建立你的家族”主线任务' } else { '前往一个目前可见且安全的定居点' }
-$scopeControls = if ($freeLlmApiProfile) { @('supportedMapArrivalGoal','supportedVillageToolsQuestGoal','unsupportedGoal') } elseif ($isDshWorkBuddyRoute -or $isDshXdPoolWorkBuddyFreeRoute) { @('supportedEstablishYourClanGoal','unsupportedGoal') } else { @('supportedMapArrivalGoal','unsupportedGoal') }
+$isOpenRouterFreeRouter = $providerUri.Host -ceq 'openrouter.ai' -and $model -ceq 'openrouter/free'
+$expectedClassification = if ($freeLlmApiProfile) { 'supported-village-tools-quest' } elseif ($isDshWorkBuddyRoute -or $isDshXdPoolWorkBuddyFreeRoute -or $isOpenRouterFreeRouter) { 'supported-establish-your-clan' } else { 'supported-map-arrival' }
+$decisionGoal = if ($freeLlmApiProfile) { '完成当前可见的村庄工具委托' } elseif ($isDshWorkBuddyRoute -or $isDshXdPoolWorkBuddyFreeRoute -or $isOpenRouterFreeRouter) { '完成原版StoryMode“建立你的家族”主线任务' } else { '前往一个目前可见且安全的定居点' }
+$scopeControls = if ($freeLlmApiProfile) { @('supportedMapArrivalGoal','supportedVillageToolsQuestGoal','unsupportedGoal') } elseif ($isDshWorkBuddyRoute -or $isDshXdPoolWorkBuddyFreeRoute -or $isOpenRouterFreeRouter) { @('supportedEstablishYourClanGoal','unsupportedGoal') } else { @('supportedMapArrivalGoal','unsupportedGoal') }
 $decisionRequest = [ordered]@{ goal = $decisionGoal; goalScopeClassificationRequired = $true; goalScopeContract = 'native-campaign-goal-classification-v1'; observation = [ordered]@{ scope = 'goal-classification-only'; message = 'No goal-specific game action has run yet. Classify the complete requested outcome against the listed supported goals; only the selected goal executor will become available after this gate.' }; allowedActions = @(); allowedControls = $scopeControls }
 $startInfo = [Diagnostics.ProcessStartInfo]::new()
 $startInfo.FileName = (Get-Command dotnet -ErrorAction Stop).Source
