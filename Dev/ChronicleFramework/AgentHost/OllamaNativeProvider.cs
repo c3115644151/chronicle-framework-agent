@@ -714,10 +714,11 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                     lastRateLimitRetryFitsDeadline = retryHint.Delay.HasValue && retryHint.Delay.Value + MinimumRateLimitRetryRequestBudget <= remaining;
                 }
                 // A FreeLLMAPI request may traverse several provider/model candidates and expose
-                // a new Retry-After window on each 429. Permit one more bounded header retry so
-                // an early short wait cannot consume the budget before a later, still-in-deadline
-                // reset hint. Pool-exhaustion bodies remain limited to one retry.
-                var maximumRateLimitRetries = retryHint.Source == "body-exhaustion" ? 1 : 3;
+                // a new Retry-After window on each 429. Permit bounded follow-up waits there.
+                // Direct OpenRouter :free requests get one explicit header retry; failed attempts
+                // consume daily quota, so do not loop through a free route. Pool-exhaustion bodies
+                // remain limited to one retry.
+                var maximumRateLimitRetries = retryHint.Source == "body-exhaustion" || !IsFreeLlmApi(_settings.Endpoint) ? 1 : 3;
                 if (rateLimitRetryAttempts < maximumRateLimitRetries && retryHint.Delay.HasValue && lastRateLimitRetryFitsDeadline == true)
                 {
                     ThrowIfProviderHttpRequestBudgetExhausted(response);
@@ -1234,16 +1235,19 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                !fallbackTrail.Contains("provider_bad_request", StringComparison.OrdinalIgnoreCase);
     }
 
-    internal static TimeSpan? GetBoundedRateLimitRetryAfter(Uri endpoint, HttpResponseMessage response)
+    internal static TimeSpan? GetBoundedRateLimitRetryAfter(Uri endpoint, HttpResponseMessage response, string? modelId = null)
     {
-        if (!IsFreeLlmApi(endpoint) || response.StatusCode != HttpStatusCode.TooManyRequests || response.Headers.RetryAfter is null)
+        var isFreeLlmApi = IsFreeLlmApi(endpoint);
+        var isOpenRouterFreeModel = IsOpenRouterEndpoint(endpoint) && modelId?.EndsWith(":free", StringComparison.Ordinal) == true;
+        if ((!isFreeLlmApi && !isOpenRouterFreeModel) || response.StatusCode != HttpStatusCode.TooManyRequests || response.Headers.RetryAfter is null)
             return null;
         var delay = response.Headers.RetryAfter.Delta ?? response.Headers.RetryAfter.Date - DateTimeOffset.UtcNow;
-        if (!delay.HasValue || delay.Value <= TimeSpan.Zero || delay.Value > TimeSpan.FromSeconds(360)) return null;
+        var maximumDelay = isFreeLlmApi ? TimeSpan.FromSeconds(360) : TimeSpan.FromSeconds(30);
+        if (!delay.HasValue || delay.Value <= TimeSpan.Zero || delay.Value > maximumDelay) return null;
         return delay.Value;
     }
 
-    private static async Task<RateLimitRetryHint> ReadRateLimitRetryHintAsync(Uri endpoint, HttpResponseMessage response, CancellationToken cancellationToken)
+    private async Task<RateLimitRetryHint> ReadRateLimitRetryHintAsync(Uri endpoint, HttpResponseMessage response, CancellationToken cancellationToken)
     {
         if (response.StatusCode != HttpStatusCode.TooManyRequests)
             return new RateLimitRetryHint(null, null, "none", false);
@@ -1251,7 +1255,7 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         var explicitHeader = response.Headers.RetryAfter;
         if (explicitHeader is not null)
         {
-            var boundedHeaderDelay = GetBoundedRateLimitRetryAfter(endpoint, response);
+            var boundedHeaderDelay = GetBoundedRateLimitRetryAfter(endpoint, response, _settings.Model);
             var observedHeaderDelay = explicitHeader.Delta ?? explicitHeader.Date - DateTimeOffset.UtcNow;
             return new RateLimitRetryHint(boundedHeaderDelay, observedHeaderDelay, boundedHeaderDelay.HasValue ? "header" : "header-ineligible", false);
         }

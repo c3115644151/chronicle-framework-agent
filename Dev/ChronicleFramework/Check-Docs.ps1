@@ -6,7 +6,7 @@ $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.671'
+$contractVersion = '7.672'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -1313,7 +1313,7 @@ if ($providerHostSource -notmatch 'defaultTimeoutSeconds = nativeOllama \? 60 : 
     $providerHostSource -notmatch 'maximumTimeoutSeconds = nativeOllama \? 240 : 360' -or
     $providerHostSource -notmatch 'ReadIntegerEnvironment\("CHRONICLE_LLM_TIMEOUT_SECONDS", defaultTimeoutSeconds, 5, maximumTimeoutSeconds\)' -or
     $providerHostSource -notmatch 'ReadIntegerEnvironment\("CHRONICLE_LLM_TIMEOUT_SECONDS", 360, 5, 360\)' -or
-    $providerHostSource -notmatch 'maximumRateLimitRetries = retryHint.Source == "body-exhaustion" \? 1 : 3' -or
+    $providerHostSource -notmatch 'maximumRateLimitRetries = retryHint.Source == "body-exhaustion" \|\| !IsFreeLlmApi\(_settings\.Endpoint\) \? 1 : 3' -or
     $providerHostSource -notmatch 'ReadRateLimitRetryHintAsync' -or
     $providerHostSource -notmatch 'MaxRateLimitErrorBytes = 16 \* 1024' -or
     $providerHostSource -notmatch 'MinimumRateLimitRetryRequestBudget = TimeSpan.FromSeconds\(5\)' -or

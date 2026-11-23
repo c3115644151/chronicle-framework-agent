@@ -994,6 +994,75 @@ internal static class ProviderContractSelfTest
             results.Add(new { scenario = "openrouter-health-filters-large-model-catalog-to-selected-model", passed = true, healthRequests = 1, modelCalls = 0, nativeCommands = 0 });
         }
 
+        var openRouterRetryPosts = 0;
+        var openRouterRetryHandler = new StubHandler((httpRequest, _) =>
+        {
+            if (httpRequest.Method == HttpMethod.Get)
+                return Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"particle-ai/particle-1:free\"}]}"));
+            openRouterRetryPosts++;
+            if (openRouterRetryPosts == 1)
+            {
+                var limited = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+                {
+                    Content = new StringContent("{\"error\":{\"message\":\"retry shortly\"}}")
+                };
+                limited.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(1));
+                return Task.FromResult(limited);
+            }
+            return Task.FromResult(JsonResponse(BuildChatResponse(ValidDecision, "stop")));
+        });
+        var openRouterRetrySettings = openRouterSelectedModelSettings with
+        {
+            MaxHttpRequestsPerDecision = 2,
+            Timeout = TimeSpan.FromSeconds(10)
+        };
+        using (var openRouterRetryClient = new HttpClient(openRouterRetryHandler) { Timeout = openRouterRetrySettings.Timeout })
+        using (var openRouterRetryProvider = new OllamaNativeProvider(openRouterRetrySettings, openRouterRetryClient))
+        using (var request = JsonDocument.Parse(BuildDecisionRequest()))
+        {
+            await openRouterRetryProvider.CheckConfiguredModelAsync(CancellationToken.None);
+            var result = await openRouterRetryProvider.DecideAsync(request.RootElement, CancellationToken.None);
+            if (openRouterRetryPosts != 2 || result.Status != "completed" || result.ResponseFormatMode != "json_schema")
+                throw new AgentHostException("openrouter-free-rate-limit-retry-failed", "A single explicit OpenRouter :free Retry-After must retry once within a two-request decision budget and preserve JSON Schema mode.");
+            results.Add(new { scenario = "openrouter-free-retry-after-uses-one-bounded-retry", passed = true, providerRequests = openRouterRetryPosts, nativeCommands = 0 });
+        }
+
+        var openRouterSingleRequestPosts = 0;
+        var openRouterSingleRequestHandler = new StubHandler((httpRequest, _) =>
+        {
+            if (httpRequest.Method == HttpMethod.Get)
+                return Task.FromResult(JsonResponse("{\"data\":[{\"id\":\"particle-ai/particle-1:free\"}]}"));
+            openRouterSingleRequestPosts++;
+            var limited = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+            {
+                Content = new StringContent("{\"error\":{\"message\":\"retry shortly\"}}")
+            };
+            limited.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(1));
+            return Task.FromResult(limited);
+        });
+        var openRouterSingleRequestSettings = openRouterSelectedModelSettings with
+        {
+            MaxHttpRequestsPerDecision = 1,
+            Timeout = TimeSpan.FromSeconds(10)
+        };
+        using (var openRouterSingleRequestClient = new HttpClient(openRouterSingleRequestHandler) { Timeout = openRouterSingleRequestSettings.Timeout })
+        using (var openRouterSingleRequestProvider = new OllamaNativeProvider(openRouterSingleRequestSettings, openRouterSingleRequestClient))
+        using (var request = JsonDocument.Parse(BuildDecisionRequest()))
+        {
+            await openRouterSingleRequestProvider.CheckConfiguredModelAsync(CancellationToken.None);
+            try
+            {
+                _ = await openRouterSingleRequestProvider.DecideAsync(request.RootElement, CancellationToken.None);
+                throw new AgentHostException("openrouter-free-http-budget-self-test-failed", "An OpenRouter retry must not exceed a one-request decision limit.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "provider-http-request-budget-exhausted")
+            {
+                if (openRouterSingleRequestPosts != 1 || exception.ProviderHttpStatus != 429)
+                    throw new AgentHostException("openrouter-free-http-budget-self-test-invalid", "The one-request OpenRouter budget must stop after the initial rate-limited request.");
+                results.Add(new { scenario = "openrouter-free-retry-respects-one-request-budget", passed = true, providerRequests = openRouterSingleRequestPosts, nativeCommands = 0 });
+            }
+        }
+
         var emptyOpenRouterResponse = JsonSerializer.Serialize(new
         {
             model = "particle-ai/particle-1:free",
@@ -1934,18 +2003,27 @@ internal static class ProviderContractSelfTest
         using (var observedLongRetryAfter = new HttpResponseMessage(HttpStatusCode.TooManyRequests))
         using (var longRetryAfter = new HttpResponseMessage(HttpStatusCode.TooManyRequests))
         using (var nonFreeRetryAfter = new HttpResponseMessage(HttpStatusCode.TooManyRequests))
+        using (var openRouterRetryAfter = new HttpResponseMessage(HttpStatusCode.TooManyRequests))
+        using (var openRouterLongRetryAfter = new HttpResponseMessage(HttpStatusCode.TooManyRequests))
         {
             observedRetryAfter.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(85));
             observedLongRetryAfter.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(315));
             longRetryAfter.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(361));
             nonFreeRetryAfter.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(1));
+            openRouterRetryAfter.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(1));
+            openRouterLongRetryAfter.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(31));
+            var openRouterEndpoint = new Uri("https://openrouter.ai/api/v1/chat/completions");
             if (OllamaNativeProvider.GetBoundedRateLimitRetryAfter(freeLlmApiSettings.Endpoint, observedRetryAfter) != TimeSpan.FromSeconds(85) ||
                 OllamaNativeProvider.GetBoundedRateLimitRetryAfter(freeLlmApiSettings.Endpoint, observedLongRetryAfter) != TimeSpan.FromSeconds(315) ||
                 OllamaNativeProvider.GetBoundedRateLimitRetryAfter(freeLlmApiSettings.Endpoint, missingRetryAfter).HasValue ||
                 OllamaNativeProvider.GetBoundedRateLimitRetryAfter(freeLlmApiSettings.Endpoint, longRetryAfter).HasValue ||
-                OllamaNativeProvider.GetBoundedRateLimitRetryAfter(settings.Endpoint, nonFreeRetryAfter).HasValue)
-                throw new AgentHostException("provider-self-test-unbounded-rate-limit-retry-accepted", "Only explicit FreeLLMAPI Retry-After delays from 1 through 360 seconds may be retried automatically; the observed 315-second delay must remain eligible.");
+                OllamaNativeProvider.GetBoundedRateLimitRetryAfter(settings.Endpoint, nonFreeRetryAfter).HasValue ||
+                OllamaNativeProvider.GetBoundedRateLimitRetryAfter(openRouterEndpoint, openRouterRetryAfter, "particle-ai/particle-1:free") != TimeSpan.FromSeconds(1) ||
+                OllamaNativeProvider.GetBoundedRateLimitRetryAfter(openRouterEndpoint, openRouterRetryAfter, "particle-ai/particle-1").HasValue ||
+                OllamaNativeProvider.GetBoundedRateLimitRetryAfter(openRouterEndpoint, openRouterLongRetryAfter, "particle-ai/particle-1:free").HasValue)
+                throw new AgentHostException("provider-self-test-unbounded-rate-limit-retry-accepted", "FreeLLMAPI keeps its explicit 1-360 second window; direct OpenRouter retries require an exact :free model and a 1-30 second Retry-After, while paid routes are never retried automatically.");
             results.Add(new { scenario = "freellmapi-429-accepts-observed-315-second-retry-and-fails-closed-outside-bounds", passed = true });
+            results.Add(new { scenario = "openrouter-free-retry-window-is-restricted-to-explicit-1-to-30-second-headers", passed = true });
         }
 
         var boundedTransientRetryCalls = 0;
