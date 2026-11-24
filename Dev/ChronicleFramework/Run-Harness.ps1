@@ -38,7 +38,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.674'
+$HarnessContractVersion = '7.675'
 $providerCredentialScript = Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1'
 function Get-HarnessConfiguredProviderCredential {
     . $providerCredentialScript
@@ -859,15 +859,20 @@ foreach ($stage in $requestedStages) {
                             $smokeWorker.WaitForExit()
                             throw "Smoke worker exceeded its startup/stability/receipt deadline; worker logs and receipt-stage markers are retained in $harnessTempDirectory."
                         }
-                        $smokeExitCode = $smokeWorker.ExitCode
+                        # A redirected worker that runs for minutes can exit without publishing an exit code on the Process object, so the receipt gate below decides the stage; the exit code is only an additional failure signal.
+                        $smokeWorker.WaitForExit()
+                        try { $smokeExitCode = $smokeWorker.ExitCode } catch { $smokeExitCode = $null }
                     }
                     finally { $smokeWorker.Dispose() }
                     $smokeOutput = (Get-Content -LiteralPath $smokeStdout -Raw) + (Get-Content -LiteralPath $smokeStderr -Raw)
-                    if ($smokeExitCode -ne 0) { throw "Smoke test failed with exit code $smokeExitCode. Evidence: $smokeOutput" }
+                    if ($null -ne $smokeExitCode -and $smokeExitCode -ne 0) { throw "Smoke test failed with exit code $smokeExitCode. Evidence: $smokeOutput" }
                     $smokeReceipt = Get-Content -LiteralPath (Join-Path $harnessTempDirectory 'SmokeResult.json') -Raw -Encoding UTF8 | ConvertFrom-Json
                     foreach ($flagName in @('FinishedAll','AssemblyLoaded','CrashDetected','McmSettingsRegistered','StableAfterFinishedAll','ProcessExitedUnexpectedly')) {
                         if ($smokeReceipt.$flagName -isnot [bool]) { throw "Smoke receipt field '$flagName' must be a Boolean; collection/string truthiness is not verification." }
                     }
+                    if ($smokeReceipt.Passed -isnot [bool]) { throw "Smoke receipt field 'Passed' must be a Boolean; the worker has to serialize its own gate verdict." }
+                    if (-not $smokeReceipt.Passed) { throw "Smoke worker reported its gate failed: $(@($smokeReceipt.GateFailures) -join ', '). Evidence: $smokeOutput" }
+                    if ($null -eq $smokeExitCode) { $smokeOutput += "`nSmoke worker exit code was unavailable; the stage verdict came from the worker receipt (Passed=true)." }
                 }
                 finally {
                     if ($null -eq $priorHarnessMode) { Remove-Item Env:CHRONICLE_HARNESS_MODE -ErrorAction SilentlyContinue }

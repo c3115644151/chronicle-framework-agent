@@ -366,6 +366,26 @@ New-Item -ItemType Directory -Path $harnessEvidenceDirectory -Force | Out-Null
 $result.RglLogCopy = if (Test-Path -LiteralPath $rglLog -PathType Leaf) { $copy = Join-Path $harnessEvidenceDirectory "Smoke-rgl-$trackedProcessId.txt"; Copy-Item -LiteralPath $rglLog -Destination $copy -Force; $copy } else { $null }
 $result.RglErrorLogCopy = if (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $rglLog) "rgl_log_errors_$trackedProcessId.txt") -PathType Leaf) { $copy = Join-Path $harnessEvidenceDirectory "Smoke-rgl-errors-$trackedProcessId.txt"; Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $rglLog) "rgl_log_errors_$trackedProcessId.txt") -Destination $copy -Force; $copy } else { $null }
 $result.WatchdogLogCopy = if (Test-Path -LiteralPath $watchdogLog -PathType Leaf) { $copy = Join-Path $harnessEvidenceDirectory "Smoke-watchdog-$trackedProcessId.txt"; Copy-Item -LiteralPath $watchdogLog -Destination $copy -Force; $copy } else { $null }
+$smokeGateFailures = @(
+    if (-not $soundRestoration.Restored) { 'BannerlordSoundRestored' }
+    if ($cursorClipBaseline.IsUnrestricted -and -not [bool]$cursorClipRestoration.Restored) { 'CursorClipRestorationAfterExit' }
+    if (-not [bool]$result.WindowLayoutApplied) { 'WindowLayoutApplied' }
+    if (-not [bool]$result.WindowLayoutNonActivating) { 'WindowLayoutNonActivating' }
+    if (-not [bool]$result.WindowNotForeground) { 'WindowNotForeground' }
+    if (-not [bool]$result.CursorUnrestrictedAcrossDesktop) { 'CursorUnrestrictedAcrossDesktop' }
+    if (-not [bool]$result.HarnessInputLockObserved) { 'HarnessInputLockObserved' }
+    if (-not $finishedAll) { 'FinishedAll' }
+    if (-not $stabilityCompleted) { 'StableAfterFinishedAll' }
+    if ($crashDetected) { 'CrashDetected' }
+    if ($processExitedUnexpectedly) { 'ProcessExitedUnexpectedly' }
+    if (-not $WithoutChronicle -and -not $assemblyLoaded) { 'AssemblyLoaded' }
+    if (-not $WithoutChronicle -and -not $lifecycleLoadObserved) { 'LifecycleLoadObserved' }
+    if (-not $WithoutChronicle -and -not $mcmDefinitionComplete) { 'McmDefinitionComplete' }
+    if (-not $WithoutChronicle -and -not $inputControlKeyDisplayTextLoaded) { 'InputControlKeyDisplayTextLoaded' }
+    if (-not $WithoutChronicle -and -not $inputControlKeyVisibleInNativeOptions) { 'InputControlKeyVisibleInNativeOptions' }
+)
+$result.Passed = ($smokeGateFailures.Count -eq 0)
+$result.GateFailures = @($smokeGateFailures)
 $resultPath = Join-Path $harnessEvidenceDirectory 'SmokeResult.json'
 $result.EvidenceResultPath = $resultPath
 $receiptStagePath = Join-Path $harnessEvidenceDirectory 'SmokeReceiptStages.log'
@@ -395,6 +415,6 @@ $receiptJson | Set-Content -LiteralPath $resultPath -Encoding UTF8
 Add-Content -LiteralPath $receiptStagePath -Value 'write-complete'
 Write-Output $receiptJson
 
-if (-not $soundRestoration.Restored -or ($cursorClipBaseline.IsUnrestricted -and -not [bool]$cursorClipRestoration.Restored) -or -not [bool]$result.WindowLayoutApplied -or -not [bool]$result.WindowLayoutNonActivating -or -not [bool]$result.WindowNotForeground -or -not [bool]$result.CursorUnrestrictedAcrossDesktop -or -not [bool]$result.HarnessInputLockObserved -or -not $finishedAll -or -not $stabilityCompleted -or $crashDetected -or $processExitedUnexpectedly -or (-not $WithoutChronicle -and (-not $assemblyLoaded -or -not $lifecycleLoadObserved -or -not $mcmDefinitionComplete -or -not $inputControlKeyDisplayTextLoaded -or -not $inputControlKeyVisibleInNativeOptions))) {
+if (-not $result.Passed) {
     exit 1
 }
