@@ -6,6 +6,9 @@
 
 No scripted playbook. No injected commands. The model reads the same screens a player reads, and the Mod performs only the actions a player could perform.
 
+[![Documentation gate](https://github.com/c3115644151/chronicle-framework-agent/actions/workflows/docs-gate.yml/badge.svg)](https://github.com/c3115644151/chronicle-framework-agent/actions/workflows/docs-gate.yml)
+[![Agent host build](https://github.com/c3115644151/chronicle-framework-agent/actions/workflows/agenthost-build.yml/badge.svg)](https://github.com/c3115644151/chronicle-framework-agent/actions/workflows/agenthost-build.yml)
+
 ![Chronicle Framework moving through a Bannerlord town, world map and pursuit](Dev/ChronicleFramework/docs/media/map-perception.gif)
 
 </div>
@@ -22,7 +25,7 @@ This is a research project, not a finished mod. It is honest about where it stan
 
 | Area | State |
 | --- | --- |
-| Native action surface (menus, dialogues, trade, party, quests, map movement, battle hand-off) | Implemented and tracked by the harness catalog: 126 catalog entries, 183 acceptance-tracked actions, 74 observable-only behaviours |
+| Native action surface (menus, dialogues, trade, party, quests, map movement, battle hand-off) | Implemented, and tracked by the harness catalog that ARCHITECTURE.md describes |
 | Model loop (OpenAI-compatible provider, structured output, bounded decision budget) | Working against real providers; single decisions and multi-decision slices verified in live campaigns |
 | Establish Your Clan, end to end in one autonomous run | **Open milestone.** Increments are verified one at a time (tutorial skip, clan naming, banner, gold trading, recruitment, tournament); the uninterrupted closure is what is being worked on now |
 | Cost control | Per-decision HTTP budget, token receipts, optional CNY ceiling for direct DeepSeek endpoints |
