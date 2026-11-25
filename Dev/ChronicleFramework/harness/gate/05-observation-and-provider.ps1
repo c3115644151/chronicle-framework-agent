@@ -257,6 +257,10 @@ if ($harnessScript -notmatch "'AgentHostEstablishClanGoldSaleEvaluation' \{ @\('
     $agentHostCampaignLoopSource -notmatch 'supportedEstablishClanGoldSaleGoal' -or
     $agentHostGoldSaleLoopSource -notmatch 'nativeTooltipType"\) == "Goods"' -or
     $agentHostGoldSaleLoopSource -notmatch 'gold-sale-self-test-scoped-prompt-contract-failed' -or
+    $agentHostGoldSaleLoopSource -notmatch 'gold-sale-self-test-whole-stack-sale-rejected' -or
+    $agentHostGoldSaleLoopSource -notmatch 'gold-sale-self-test-oversized-sale-accepted' -or
+    $agentHostGoldSaleLoopSource -notmatch 'var sellAmounts = new JsonArray\(1\)' -or
+    $agentHostGoldSaleLoopSource -notmatch 'amount > offerStock' -or
     $agentHostGoldSaleLoopSource -notmatch 'BuildProviderPreviousReceipt' -or
     $agentHostGoldSaleLoopSource -notmatch 'currently sellable PlayerInventory Goods' -or
     $agentHostGoldSaleLoopSource -notmatch 'gold-sale-self-test-provider-trade-receipt-projection-failed' -or

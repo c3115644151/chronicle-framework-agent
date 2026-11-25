@@ -270,6 +270,8 @@ EYC 产品路线的金币动词最窄：`agenthost/AgentHostEstablishClanGoldSal
 
 现在主机把「市场」定义为任何打开 Trade 的聚落：`AgentHostEstablishClanGoldSaleLoop.IsMarketMenu(menuId)`（`town` 或 `village`）与 `IsMarketTargetType(type)`，候选筛选改名 `FilterSafeMarkets`，菜单目录按当前 `menuId` 发出 `trade` 或该聚落自己的 `leave`，自测覆盖村庄菜单、外来 `menuId` 拒绝与空市场后的村庄 `leave`。仍未量的是同等货物上村庄与城镇的价格差、以及村庄商人的补货节奏；在拿到收据之前，场景只应把村庄当成快速清仓的出口。
 
+一次原生交易能结算整堆，不是一件。`TestResults/20261126-village-market-3/VillageMarketProbeResult.json`（零模型请求，`harness/Test-AgentVillageMarketProbe.ps1 -SellUnits 10`）在村庄对单价 8、库存 4 的 `fish` 下 10 件：原版 `tradeConfirm` 回执 `amount=4`、`playerGoldBefore/After` 2199/2231（+32 = 4×8）、库存 3→2 之外其余物品不变，`campaignDayBefore/After` 相同、时钟档位 Stop→Stop。所以 InventoryLogic 的成交数量就是请求数量与报价行库存的较小值，单件上限只存在于旧的调用约定里。主机侧据此把可卖数量从硬编码 1 改成「1 与该报价行库存」：`AgentHostEstablishClanGoldSaleLoop.BuildActionCatalog` 的 `sellAmounts`、`TryResolveAction` 用 `amount > offerStock` 拒单（不静默截断），自测覆盖整堆接受与超量拒绝。
+
 ### 货物、负重、动物与战后物资
 
 Party `ItemRoster` 同时承载食品、贸易物、动物与战利品；缓存的 `TotalFoodAtInventory`、`TotalWeightCarried`、`InventoryCapacity`、动物数量会分别影响食物、载重、速度或交易判断。战后 ItemRoster 可能先进入 Encounter 的待领取 Loot Roster，再经原生 InventoryState 领取到 Party；那不是“战斗奖励已到账”的同义词，处理链见 G/H 域及 MAINLINE 的 partyLoot 契约。队伍内囚犯、受伤/健康成员、战利品/库存的转移则由对应 PartyScreen、InventoryLogic 和结算动作分别提交。

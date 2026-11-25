@@ -4,6 +4,7 @@ param(
     [string]$LoadSaveName = 'ChronicleW7P-manual-20261101-eyc-complete',
     [ValidateRange(30,900)][int]$ArrivalTimeoutSeconds = 240,
     [ValidateRange(1,20)][int]$BuyAmount = 1,
+    [ValidateRange(1,50)][int]$SellUnits = 1,
     [int]$TimeoutSeconds = 180
 )
 
@@ -214,7 +215,11 @@ try {
         [string]$_.inventorySide -eq 'PlayerInventory'
     } | Sort-Object { -[int]$_.unitPrice }, { [string]$_.viewModelItemId })
     if ($candidates.Count -lt 1) { throw "The village market at '$villageId' buys none of the player's goods, so a village cannot be an income market here." }
-    $chosen = $candidates[0]
+    # Single-unit probes keep the highest price first, which is what the Host gold route picks today.
+    # A multi-unit probe instead takes the largest stack, because the question it answers is whether
+    # one Native trade can settle more than one unit at a single quoted price.
+    $chosen = if ($SellUnits -gt 1) { @($candidates | Sort-Object { -[int]$_.stock }, { -[int]$_.unitPrice })[0] } else { @($candidates)[0] }
+    $soldUnits = [Math]::Min($SellUnits, [int]$chosen.stock)
     $record.chosenGood = [ordered]@{
         itemId = [string]$chosen.itemId
         viewModelItemId = [string]$chosen.viewModelItemId
@@ -222,8 +227,10 @@ try {
         unitPrice = [int]$chosen.unitPrice
         stock = [int]$chosen.stock
         candidateCount = $candidates.Count
+        requestedUnits = $SellUnits
+        soldUnits = $soldUnits
     }
-    $draft = Invoke-AgentCli 'trade' @('-Direction', 'sell', '-ItemViewModelId', [string]$chosen.viewModelItemId, '-InventorySide', 'PlayerInventory', '-Amount', '1', '-CommandId', "$commandPrefix-sell")
+    $draft = Invoke-AgentCli 'trade' @('-Direction', 'sell', '-ItemViewModelId', [string]$chosen.viewModelItemId, '-InventorySide', 'PlayerInventory', '-Amount', [string]$soldUnits, '-CommandId', "$commandPrefix-sell")
     if ($draft.status -ne 'completed') { throw "Native village sale of '$($chosen.itemId)' did not complete: status=$($draft.status)." }
     $confirm = Invoke-AgentCli 'tradeConfirm' @('-CommandId', "$commandPrefix-sell-confirm")
     if ($confirm.status -notin @('completed', 'accepted')) { throw "Native tradeConfirm did not accept the village sale: status=$($confirm.status)." }
@@ -231,15 +238,21 @@ try {
     $afterSale = Invoke-Checkpoint 'after-village-sale'
     $goldDelta = [int]$afterSale.state.economy.gold - [int]$beforeSale.state.economy.gold
     $dayStable = ([double]$afterSale.state.campaignDay -eq [double]$beforeSale.state.campaignDay)
-    $priceExact = ($goldDelta -eq [int]$chosen.unitPrice)
+    $quotedTotal = [int]$chosen.unitPrice * $soldUnits
+    $itemCountDelta = [int]$afterSale.state.party.itemCount - [int]$beforeSale.state.party.itemCount
+    $receiptUnits = [int]$confirm.data.amount
+    $priceExact = ($goldDelta -eq $quotedTotal)
     $record.afterSale = [ordered]@{
         gold = [int]$afterSale.state.economy.gold
         goldDelta = $goldDelta
         itemCount = [int]$afterSale.state.party.itemCount
-        itemCountDelta = [int]$afterSale.state.party.itemCount - [int]$beforeSale.state.party.itemCount
+        itemCountDelta = $itemCountDelta
         campaignDay = [double]$afterSale.state.campaignDay
         dayAdvancedDuringSale = (-not $dayStable)
         quotedUnitPrice = [int]$chosen.unitPrice
+        soldUnits = $soldUnits
+        receiptUnits = $receiptUnits
+        quotedTotal = $quotedTotal
         priceMatchedExactly = $priceExact
         confirmReceipt = $confirm.data
     }
@@ -247,6 +260,9 @@ try {
     # Campaign time is frozen inside the market, so the banks-exactly-the-quote check only holds on
     # an unbroken campaigns day; a wage payment would otherwise make a correct sale look wrong.
     $assertions['VillageSalePaidTheQuotedPrice'] = if ($dayStable) { $priceExact } else { $goldDelta -gt 0 }
+    # A multi-unit sale is only useful to the Host if one confirm really moves the whole stack; the
+    # item count and the receipt's own amount both have to say so.
+    $assertions['VillageSaleMovedRequestedUnits'] = ($itemCountDelta -eq -$soldUnits) -and ($receiptUnits -eq $soldUnits)
 
 
     Leave-Village $villageId | Out-Null

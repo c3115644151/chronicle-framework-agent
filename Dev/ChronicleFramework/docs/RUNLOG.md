@@ -1121,3 +1121,15 @@ Contract 7.673为直接OpenRouter `:free`模型增加每请求至少3.1秒的间
 改动：新增 `harness/HarnessFocusRestore.ps1`（`Restore-ChroniclePreLaunchForeground`，只交还给启动前记录的前台窗口，拒绝游戏自身/Harness 自身/已退出/无可见窗口，并回读前台进程核对）；`harness/Test-WindowLayout.ps1` 在不满足 `NotForeground` 时调用它（预算 3 次）；`harness/Test-Module.ps1` 改为 20 秒宽限内累计 `WindowLayoutFailures`，并在收据里写 `FocusRestoreReason`；`harness/gate/17-runtime-loops.ps1` 断言这些前提。
 
 复跑 `TestResults/20261126-030235`：Smoke 通过（36s、`WindowLayoutFailures=0`、`FocusRestoreReason=no-focus-restore-attempt`、前台 21912、游戏 17944）——说明抢前台是间歇现象，宽限窗口与交还逻辑两道防线都需要。
+
+## 2026-11-26 整堆卖出：一次原生交易结算整个堆叠（契约 7.710）
+
+探针 `harness/Test-AgentVillageMarketProbe.ps1` 新增 `-SellUnits`（1..50，默认 1；大于 1 时改选库存最大的候选，`soldUnits = min(SellUnits, stock)`），并加第九条断言 `VillageSaleMovedRequestedUnits`（`itemCountDelta == -soldUnits && confirm.data.amount == soldUnits`），`priceMatchedExactly` 改比 `unitPrice * soldUnits`。
+
+`TestResults/20261126-village-market-3/VillageMarketProbeResult.json`：夹具 `ChronicleW7P-manual-20261101-eyc-complete`（SHA256 前后一致 `CB0F62D0…446402B1`），村庄里选单价 8 的 `fish`（库存 4）请求 10 件 → `soldUnits=4`，`tradeConfirm` 回执 `amount=4`、金币 2199→2231、库存 −4、`campaignDay` 不变；九条断言全真、exit 0。
+
+主机侧（`agenthost/AgentHostEstablishClanGoldSaleLoop.cs`）：`BuildActionCatalog` 的 `sellAmounts` 由硬编码 `[1]` 改成 `[1] + 库存去重降序的前两个大于 1 的值`；`TryResolveAction` 读 `offer.stock` 并拒 `amount < 1 || amount > offerStock`（不静默截断）；三处后置校验按 `amount` 比对库存变化。自测加 `gold-sale-self-test-whole-stack-sale-rejected` 与 `gold-sale-self-test-oversized-sale-accepted`，全套 430/430 与基线逐索引一致。
+
+同轮把 `harness/Test-AgentLiveModelLoop.ps1` 的金币切片从硬编码 8 动作改为读 `--campaign-action-catalog` 发布的 `gold-sale` profile（11 个动词）；`TestResults/20261126-031238` 因此真正跑到模型，失败点变成世界：7 决策 7 动作后 `native-visible-hostile-bandit-interrupted-settlement-move`。
+
+可复跑：`./harness/Run-Harness.ps1 -Phase VillageMarketProbe`；整堆用法：`./harness/Test-AgentVillageMarketProbe.ps1 -SellUnits 10`。

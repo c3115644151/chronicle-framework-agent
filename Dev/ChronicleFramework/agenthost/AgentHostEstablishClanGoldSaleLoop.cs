@@ -174,9 +174,9 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         var saleAmountValues = saleCatalog[0]?["argumentValues"]?["Amount"] as JsonArray;
         if (saleCatalog.Count != 1 || ReadString(saleCatalog[0] as JsonObject, "action") != "trade" ||
             saleItemIds?.Count != 1 || saleItemIds[0]?.GetValue<string>() != "goods-1" ||
-            saleAmountValues?.Count != 1 || saleAmountValues[0]?.GetValue<int>() != 1 ||
+            saleAmountValues?.Count != 2 || saleAmountValues[0]?.GetValue<int>() != 1 || saleAmountValues[1]?.GetValue<int>() != 2 ||
             saleCatalog[0]?["arguments"]?[1]?.GetValue<string>() != "ItemViewModelId")
-            throw new AgentHostException("gold-sale-self-test-current-sell-offer-scope-failed", "The sale catalog must expose exactly one current transferable Goods offer at the quoted positive price and limit the slice to one unit.");
+            throw new AgentHostException("gold-sale-self-test-current-sell-offer-scope-failed", "The sale catalog must expose exactly one current transferable Goods offer at the quoted positive price, and offer both one unit and that offer's whole stack.");
         var noGoodsQuote = tradeOptions.DeepClone() as JsonObject ?? throw new AgentHostException("gold-sale-self-test-no-goods-quote-invalid", "The no-goods quote fixture could not be cloned.");
         noGoodsQuote["data"]!["sellOffers"] = new JsonArray(
             new JsonObject { ["viewModelItemId"] = "bound-banner", ["nativeTooltipType"] = "Banner", ["inventorySide"] = "PlayerInventory", ["stock"] = 1, ["inventoryLogicUnitPrice"] = 1, ["isTransferable"] = false });
@@ -194,6 +194,19 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 ["arguments"] = new JsonObject { ["Direction"] = "sell", ["ItemViewModelId"] = "goods-1", ["InventorySide"] = "PlayerInventory", ["Amount"] = 1 }
             }, null, null, out _, out _, out _))
             throw new AgentHostException("gold-sale-self-test-stale-trade-quote-accepted", "A sell item id from a prior Trade VM must not be accepted.");
+        if (!TryResolveAction(tradeState, tradeOptions, saleCatalog, new JsonObject
+            {
+                ["action"] = "trade",
+                ["arguments"] = new JsonObject { ["Direction"] = "sell", ["ItemViewModelId"] = "goods-1", ["InventorySide"] = "PlayerInventory", ["Amount"] = 2 }
+            }, null, null, out _, out var wholeStackArguments, out _) ||
+            ReadInt(wholeStackArguments, "amount", 0) != 2)
+            throw new AgentHostException("gold-sale-self-test-whole-stack-sale-rejected", "The slice must accept a sale of the whole current offer stock at the quoted unit price.");
+        if (TryResolveAction(tradeState, tradeOptions, saleCatalog, new JsonObject
+            {
+                ["action"] = "trade",
+                ["arguments"] = new JsonObject { ["Direction"] = "sell", ["ItemViewModelId"] = "goods-1", ["InventorySide"] = "PlayerInventory", ["Amount"] = 3 }
+            }, null, null, out _, out _, out _))
+            throw new AgentHostException("gold-sale-self-test-oversized-sale-accepted", "A sale larger than the current offer stock must be rejected instead of clamped.");
 
         var moveTargetReceipt = new JsonObject
         {
@@ -743,9 +756,9 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                     if (ReadString(inquiry, "choice") == "affirmative")
                     {
                         if (ReadBoolean(tradeResolution, "transactionCommitted") != true ||
-                            ReadString(tradeResolution, "direction") != "sell" || ReadInt(tradeResolution, "amount", 0) != 1 ||
+                            ReadString(tradeResolution, "direction") != "sell" || ReadInt(tradeResolution, "amount", 0) < 1 ||
                             ReadInt(tradeResolution, "playerGoldAfter", 0) <= ReadInt(tradeResolution, "playerGoldBefore", 0) ||
-                            ReadInt(tradeResolution, "playerCountAfter", -1) != ReadInt(tradeResolution, "playerCountBefore", -1) - 1 ||
+                            ReadInt(tradeResolution, "playerCountAfter", -1) != ReadInt(tradeResolution, "playerCountBefore", -1) - ReadInt(tradeResolution, "amount", 0) ||
                             ReadString(tradeResolution, "timeControlModeBefore") != ReadString(tradeResolution, "timeControlModeAfter") ||
                             Math.Abs(ReadDouble(tradeResolution, "campaignDayBefore", double.NaN) - ReadDouble(tradeResolution, "campaignDayAfter", double.NaN)) > 0.000001 ||
                             ReadInt(tradeResolution, "playerGoldAfter", 0) - ReadInt(tradeResolution, "playerGoldBefore", 0) != Math.Abs(ReadInt(tradeResolution, "nativeTransactionAmount", 0)))
@@ -977,9 +990,9 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 {
                     var data = receipt["data"] as JsonObject ?? new JsonObject();
                     if (ReadBoolean(data, "nativeCanCompleteTransaction") != true ||
-                        ReadString(data, "direction") != "sell" || ReadInt(data, "amount", 0) != 1 ||
+                        ReadString(data, "direction") != "sell" || ReadInt(data, "amount", 0) < 1 ||
                         ReadString(data, "inventorySide") != "PlayerInventory")
-                        throw new AgentHostException("gold-sale-native-draft-invalid", "The Native Trade handler did not produce the expected one-unit sell draft.");
+                        throw new AgentHostException("gold-sale-native-draft-invalid", "The Native Trade handler did not produce the expected positive sell draft.");
                 }
                 if (action == "tradeOptions")
                     noTransferableGoodsInPlayerInventory = !HasTransferableGoodsInventory(receipt);
@@ -987,12 +1000,12 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 {
                     var data = receipt["data"] as JsonObject ?? new JsonObject();
                     if (ReadBoolean(data, "postconditionPassed") != true || ReadString(data, "direction") != "sell" ||
-                        ReadInt(data, "amount", 0) != 1 || ReadInt(data, "playerGoldAfter", 0) <= ReadInt(data, "playerGoldBefore", 0) ||
-                        ReadInt(data, "playerCountAfter", -1) != ReadInt(data, "playerCountBefore", -1) - 1 ||
+                        ReadInt(data, "amount", 0) < 1 || ReadInt(data, "playerGoldAfter", 0) <= ReadInt(data, "playerGoldBefore", 0) ||
+                        ReadInt(data, "playerCountAfter", -1) != ReadInt(data, "playerCountBefore", -1) - ReadInt(data, "amount", 0) ||
                         ReadString(data, "timeControlModeBefore") != ReadString(data, "timeControlModeAfter") ||
                         Math.Abs(ReadDouble(data, "campaignDayBefore", double.NaN) - ReadDouble(data, "campaignDayAfter", double.NaN)) > 0.000001 ||
                         ReadInt(data, "playerGoldAfter", 0) - ReadInt(data, "playerGoldBefore", 0) != Math.Abs(ReadInt(data, "nativeTransactionAmount", 0)))
-                        throw new AgentHostException("gold-sale-native-commit-unverified", "Native Trade did not confirm a positive one-unit sale with matching Gold and inventory deltas.");
+                        throw new AgentHostException("gold-sale-native-commit-unverified", "Native Trade did not confirm a positive sale with matching Gold and inventory deltas.");
                     saleReceipt = data.DeepClone() as JsonObject;
                     saleActionCount++;
                 }
@@ -1174,6 +1187,12 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 var offers = GetSellableGoods(previousReceipt);
                 if (offers.Length == 0) return new JsonArray(new JsonObject { ["action"] = "tradeCancel", ["arguments"] = new JsonArray() });
                 var itemIds = new JsonArray(offers.Select(offer => (JsonNode?)JsonValue.Create(ReadString(offer, "viewModelItemId"))).ToArray());
+                // One Native trade settles a whole stack at the quoted unit price
+                // (TestResults/20261126-village-market-3: four fish at eight gold). Offering only
+                // one unit per visit would make the Gold Journal target a matter of travel, not trade.
+                var sellAmounts = new JsonArray(1);
+                foreach (var stack in offers.Select(offer => ReadInt(offer, "stock", 0)).Where(stock => stock > 1).Distinct().OrderByDescending(stock => stock).Take(2))
+                    sellAmounts.Add(stack);
                 return new JsonArray(new JsonObject
                 {
                     ["action"] = "trade",
@@ -1183,7 +1202,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                         ["Direction"] = new JsonArray("sell"),
                         ["ItemViewModelId"] = itemIds,
                         ["InventorySide"] = new JsonArray("PlayerInventory"),
-                        ["Amount"] = new JsonArray(1)
+                        ["Amount"] = sellAmounts
                     }
                 });
             }
@@ -1475,13 +1494,18 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             var side = ReadString(supplied, "InventorySide");
             var amount = ReadInt(supplied, "Amount", 0);
             var offer = GetSellableGoods(previousReceipt).FirstOrDefault(candidate => ReadString(candidate, "viewModelItemId") == itemId);
-            if (ReadString(previousReceipt, "action") != "tradeOptions" || direction != "sell" || side != "PlayerInventory" || amount != 1 || offer is null ||
-                !listed["argumentValues"]!["ItemViewModelId"]!.AsArray().Any(value => value?.GetValue<string>() == itemId))
+            var offerStock = ReadInt(offer, "stock", 0);
+            if (ReadString(previousReceipt, "action") != "tradeOptions" || direction != "sell" || side != "PlayerInventory" ||
+                offer is null || amount < 1 || amount > offerStock ||
+                !listed["argumentValues"]!["ItemViewModelId"]!.AsArray().Any(value => value?.GetValue<string>() == itemId) ||
+                !listed["argumentValues"]!["Amount"]!.AsArray().Any(value => value?.GetValue<int>() == amount))
             {
-                rejection = "Sale must be exactly one unit from the current Native transferable Goods sell offer.";
+                rejection = offer is null
+                    ? "Sale item must come from the current Native Trade quote."
+                    : $"Sale must move between one and {offerStock} units of the current Native transferable Goods sell offer.";
                 return false;
             }
-            arguments = new JsonObject { ["direction"] = "sell", ["itemViewModelId"] = itemId, ["inventorySide"] = "PlayerInventory", ["amount"] = 1 };
+            arguments = new JsonObject { ["direction"] = "sell", ["itemViewModelId"] = itemId, ["inventorySide"] = "PlayerInventory", ["amount"] = amount };
             return true;
         }
         if (action == "sellPrisonerOne")

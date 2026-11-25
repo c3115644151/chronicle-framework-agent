@@ -565,10 +565,15 @@ try {
         $env:CHRONICLE_LLM_MAX_TOKENS = '2048'
     }
     elseif ($EstablishClanGoldSaleLoop) {
-        $goal = 'Make exactly one positive Native sale from the current PlayerInventory to increase the active original Establish Your Clan Gold Journal objective. If already captive at the start, first recover only through the current native captivity options; after reaching a usable free Map, move only to a fresh visible safe Town, enter its current Trade option, inspect current sell offers, sell exactly one transferable Goods unit and commit the Native draft. Read the active Quest Journal again and verify the Gold current progress increased. Do not buy, start a battle, alter resources directly, or claim the whole quest complete.'
+        $goal = 'Make exactly one positive Native sale from the current PlayerInventory to increase the active original Establish Your Clan Gold Journal objective. If already captive at the start, first recover only through the current native captivity options; after reaching a usable free Map, move only to a fresh visible safe Town, enter its current Trade option, inspect current sell offers, sell exactly one transferable Goods unit and commit the Native draft. Read the active Quest Journal again and verify the Gold current progress increased. Do not buy, start a battle, alter resources directly, or claim the whole quest complete. This acceptance slice verifies the Goods route; the Ransom prisoner verbs (sellPrisonerOne, partyScreenDone, partyScreenCancel) are published with the profile but must not be used here.'
         $maxDecisions = 160
         $maxElapsedSeconds = 7200
-        $allowedActions = 'mapSettlementTargets,move,menuSelect,tradeOptions,trade,tradeConfirm,tradeCancel,tradeCancelChanges'
+        # The Gold slice is the Host's own gold-sale profile, not a hand-copied subset: the Host
+        # accepts exactly one published action set per slice, so a stale copy is rejected before
+        # the first Native command.
+        $goldSaleProfile = @($catalog.profiles | Where-Object { [string]$_.name -ceq 'gold-sale' })
+        if ($goldSaleProfile.Count -ne 1) { throw 'The current Agent Host action catalog published no single gold-sale profile; no game was launched.' }
+        $allowedActions = [string]::Join(',', @($goldSaleProfile[0].actions | ForEach-Object { [string]$_ }))
         Set-LiveModelProviderTimeout 360
         $env:CHRONICLE_LLM_MAX_TOKENS = '2048'
     }
