@@ -193,6 +193,18 @@ agent 侧已经中立：`agenthost` 全部 33 个源文件对 `Hero.MainHero` / 
 
 两跑的金币曲线逐日相同（每天 −78），差别只在粮仓。于是「伤兵」在这套仪器里可以当饥饿证据用，不必再怀疑是随机遭遇；能当判据的是顺序（断粮后伤兵累积、随后掉人），不是精确的伤兵数值。
 
+**城墙里也问了一遍，结论一样。** 补粮对照说明的是「有粮不挨饿」；把变量换成「在城里还是在地图上挨饿」才能把地图上的随机遭遇彻底排除。同一夹具、同样 4 天一块共 12 天、零模型请求，三跑对照（都不给模型请求、都从战役日 91179.34 起跑）：
+
+| 跑法 | 停因 | 12 天后粮 | 伤兵 | 人数 | 士气 | 收据 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 地图上闲等、不补粮 | `party-shrunk` | −1.3 | 0 → 14 | 25 → 24 | 42 → 6 | `TestResults/20261125-210118/IdlePressureResult.json` |
+| **城里闲等、不补粮** | `party-shrunk` | −1.3 | 0 → **15** | 25 → 24 | 42 → 6 | `TestResults/20261126-idle-sheltered-2/IdlePressureResult.json` |
+| 地图上闲等、先补到 30 单位粮 | `chunk-budget-exhausted` | +14.9 | **0** | 25 | 42 → 47 | `TestResults/20261126-idle-stocked/IdlePressureResult.json` |
+
+城里那一跑每个采样点都是 `menuId=town`、`encounterActive=true` 且 `encounteredPartyId=town_ES3`（那座城自己），`ShelteredPartyNotEncountered`、`ShelteredPartyNotBesieged`、`ShelteredPartyStayedInTown` 全为 true——城墙内不可能被谁截住，伤兵照样从 0 涨到 15，与地图上的 14 同量级。所以断粮是把人变成伤兵的那一件事，地图遭遇不是；补粮那一跑 12 天后还剩 14.9 单位粮、一个伤兵没有，把「闲等本身伤人」这条也排除了。三跑的金币曲线逐日相同（每天 −78，12 天 −936），差别只在粮仓和城墙。
+
+这一轮同时修掉仪器里的两处自相矛盾。**一是断言没有按「那座城自己」豁免**：`ShelteredPartyNotEncountered` 原来数「任何 `encounterActive` 为真的采样」，而进城的第一个采样必然为真，于是这次跑在第一块就红了一次假警报；现在采样多记一个 `encounteredPartyId`，断言只把「与城里不同的队伍」算作被截住（与 `Invoke-SeekTownShelter` 的到达判定同口径）。**二是断粮时的 `rest` 会超时**：饥饿状态下的 4 天 Wait 有时比 `max(60, 天数×70)` 秒的墙钟预算晚几秒收尾，仪器原来直接记 `wait-timed-out`；现在超时后再读一次战役日，追上目标日就记 `reachedTargetDay=true`。
+
 由此还得到一个对场景设计更有用的数字：**补粮便宜得不成比例**。24 单位粮（够 18.5 天）只花 144 金，摊到每天 9.2 金，只有日工资 78 的 12%。所以空闲场景里真正咬人的是**工资**，饿只是「忘了买粮」时的惩罚；压力源该写成「每天 78 金不停止地烧」，判据则是「它会不会在闲等的第二天就进城补一次粮」——这也是一个在选之前就能算清代价的选择。
 
 同一趟的市场报价（战役日 91179.3、`town_ES3`、单价/库存）：`grain` 12/268、`fish` 14/237、`butter` 22/33、`meat` 24/99、`cheese` 26/43、`grape` 30/13、`olives` 41/16、`beer` 64/35、`date_fruit` 85/6。粮价随城镇与库存浮动，`docs/Research/E/EconomyAndTrade.md` 里另一处的谷物 19–30 是别处行情，预算要读当前市场而不是背价格表。

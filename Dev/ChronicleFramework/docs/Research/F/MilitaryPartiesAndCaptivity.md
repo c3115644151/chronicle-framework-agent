@@ -348,6 +348,8 @@ Party troop progression由 `TroopRoster` 的成员计数/伤员数/XP与 `Charac
 
 这条机制的对照实验在 25 人夹具上做成了 2×2（`harness/Test-AgentIdlePressure.ps1`，1 天/块、零模型请求）：断粮跑 `TestResults/20261125-idle-hp-starved/IdlePressureResult.json` 里前 9 天粮为正、主角 HP 一直 100/100、伤兵 0；粮变负的第 10 天起 HP 100→87→68→49、伤兵 0→3→9→14。补粮跑 `TestResults/20261125-idle-hp-fed/IdlePressureResult.json`（起点 24.5 单位粮）12 天里 HP 始终 100/100、伤兵始终 0。两跑金币曲线逐日相同（每天 −78）。结论：**饥饿是唯一在场的原因；伤兵数 = 当前 HP 低于 20% 门槛的人数**，不是战伤计数，因此可以在零战斗的等待里增长。
 
+城墙里也做了一次同样的对照（`harness/Test-AgentIdlePressure.ps1 -ShelterInTown -ChunkDays 4 -MaxChunks 3`，收据 `TestResults/20261126-idle-sheltered-2/IdlePressureResult.json`）：同一 25 人夹具进城等待 12 天，每个采样点都是 `menuId=town`、`encounteredPartyId=town_ES3`，粮 12.5 → −1.3 的同一块里伤兵 0 → 15、健康 25 → 9、人数 25 → 24、士气 42 → 6。城墙内没有别的队伍能截住它，伤兵照涨，所以这条因果不需要地图遭遇也成立。同一夹具补粮另跑（`TestResults/20261126-idle-stocked/IdlePressureResult.json`，先买 18 单位 grain 花 216 金、粮 30 → 14.9）12 天里伤兵 0、人数 25、士气 47；三跑金币曲线都是每天 −78。
+
 `cargoCapacity` 30 → 10 与 `speed` 5.189 → 4.988 仍未归因（随队动物损失？伤兵？本例分不出来）。
 
 遭遇对话的观察面：`context.conversation` 给出 `characterId`（`mountain_bandits_chief` / `looter`）、`characterName`（拦路强盗 / 劫匪）、`sentenceText` 与 `options[]`（每项 `id`/`text`/`textId`/`clickable`）。在这个 1 人且已受伤的场合，原版只给出两条 `bandit_start_defender_3`「我们已无力再战，全凭你的处置。」与 `bandit_start_defender_2`「也许我们可以找个两全其美的办法。」——同一个 1 人队伍面对山贼和劫匪拿到的是同一组 option id，说明选项集合由玩家方的处境决定，不由对话文本决定。没有出现「迎战」类选项；这一点在源码层未核实，只记为两次实测的观察。

@@ -50,7 +50,7 @@ $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.700'
+$HarnessContractVersion = '7.701'
 $providerCredentialScript = Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1'
 function Get-HarnessConfiguredProviderCredential {
     . $providerCredentialScript

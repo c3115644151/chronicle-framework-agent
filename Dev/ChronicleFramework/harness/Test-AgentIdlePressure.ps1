@@ -60,6 +60,7 @@ function Get-Snapshot($Observation, [string]$Label) {
         menuId = [string]$state.context.menuId
         timeControlMode = [string]$state.context.timeControlMode
         encounterActive = [bool]$state.context.encounterActive
+        encounteredPartyId = [string]$state.context.encounteredPartyId
         gold = [int]$state.economy.gold
         members = [int]$state.party.members
         healthy = [int]$state.party.healthy
@@ -256,6 +257,11 @@ function Invoke-ShelteredWait([int]$Chunk, [double]$Days) {
         Start-Sleep -Milliseconds 700
     }
     $record.reachedTargetDay = $reached
+    if (-not $reached) {
+        # A starving party finishes its wait late; one more read tells a slow wait from a stuck one.
+        $late = Get-State "shelter-late-$Chunk" 30
+        if ([double]$late.state.campaignDay -ge $record.targetCampaignDay) { $record.reachedTargetDay = $true }
+    }
     $after = Get-TownMenu "shelter-after-$Chunk" 90
     $record.menuIdAfter = [string]$after.state.context.menuId
     return [pscustomobject]@{ Record = $record; Observation = $after }
@@ -360,7 +366,8 @@ if ($first -and $last) {
     $assertions['GoldNeverRose'] = [int]$last.gold -le [int]$first.gold
     $assertions['TimeModeReturnedToStop'] = ([string]$last.timeControlMode -eq 'Stop') -or ([string]$last.gameState -ne 'MapState')
 }
-$assertions['ShelteredPartyNotEncountered'] = if ($shelter) { @($samples | Where-Object { [bool]$_['encounterActive'] }).Count -eq 0 } else { $true }
+# Entering the shelter town opens that town's own encounter, so only an encounter with a different party is one the walls failed to stop.
+$assertions['ShelteredPartyNotEncountered'] = if ($shelter) { @($samples | Where-Object { [bool]$_['encounterActive'] -and [string]$_['encounteredPartyId'] -ne [string]$shelter.townId }).Count -eq 0 } else { $true }
 # A siege that starts while the party waits inside the walls replaces the town menu with a siege
 # encounter. That is the world acting on the shelter, not a defect in the window, so it is recorded
 # as its own verdict instead of hiding behind a generic failed wait.
