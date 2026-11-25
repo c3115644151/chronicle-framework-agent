@@ -6,6 +6,10 @@ param(
     [ValidateRange(0.01,0.5)][double]$StepDays = 0.05,
     [ValidateRange(1,5)][int]$Repeats = 3,
     [ValidateRange(120,900)][int]$RepeatWallClockSeconds = 600,
+    [ValidateSet('', 'bandit_start_defender_1', 'bandit_start_defender_2', 'bandit_start_defender_3', 'common_encounter_ultimatum', 'common_bandit_surrender_declined')][string]$Answer = '',
+    [ValidateRange(0.05,2.0)][double]$AnswerFollowupDays = 0.5,
+    [ValidateRange(0,120)][int]$WatchSeconds = 0,
+    [string]$EncounterOption = '',
     [int]$TimeoutSeconds = 240
 )
 
@@ -87,6 +91,7 @@ function Get-Snapshot($Observation, [string]$Label) {
         food = [double]$state.party.food
         foodInventory = [int]$state.party.foodInventory
         dailyWage = [int]$state.party.dailyWage
+        captivity = [bool]$state.context.captivity
         isMoving = [bool]$state.party.isMoving
     }
 }
@@ -119,12 +124,26 @@ function Get-Fork($Observation) {
             }
         })
     }
+    # The option surface lives at the top of the state, not under context: the map menu is a
+    # MapMenu on the campaign map, so context carries only its id. Clickable means both flags.
+    $menuOptionsAll = @($Observation.state.availableMenuOptions | ForEach-Object {
+        [ordered]@{
+            id = [string]$_.id
+            text = [string]$_.text
+            available = [bool]$_.available
+            enabled = [bool]$_.enabled
+            isLeave = [bool]$_.isLeave
+        }
+    })
+    $menuOptions = @($menuOptionsAll | Where-Object { $_.available -and $_.enabled })
     $fork = [ordered]@{
         menuId = [string]$context.menuId
         encounterActive = [bool]$context.encounterActive
         encounteredPartyId = [string]$context.encounteredPartyId
         conversation = $null
         options = $options
+        menuOptions = $menuOptions
+        menuOptionsAll = $menuOptionsAll
     }
     if ($null -ne $conversation) {
         $fork.conversation = [ordered]@{
@@ -134,6 +153,18 @@ function Get-Fork($Observation) {
         }
     }
     return $fork
+}
+
+function Get-Probe([string]$Action, [string]$Tag, [string[]]$Arguments = @()) {
+    # A probe records what the protocol does with a verb in the state the world put us in;
+    # a rejection is the measurement, so it must not abort the run.
+    try {
+        $receipt = Invoke-AgentCli $Action (@('-CommandId', "$commandPrefix-$Tag") + $Arguments) 60
+        return [ordered]@{ status = [string]$receipt.status; error = [string]$receipt.error }
+    }
+    catch {
+        return [ordered]@{ status = 'rejected'; error = ($_.Exception.Message -split '\r?\n')[0] }
+    }
 }
 
 function Get-ForkKind($Fork, [bool]$ScenarioExhausted) {
@@ -162,6 +193,18 @@ try {
             stepsRequested = $steps
             stepsTaken = 0
             scenarioExhausted = $false
+            answer = $Answer
+            answerReceipt = $null
+            answeredOptionWasOffered = $false
+            answerAccepted = $false
+            afterAnswer = [System.Collections.Generic.List[object]]::new()
+            secondFork = $null
+            secondForkKind = ''
+            dialogueContinues = [System.Collections.Generic.List[object]]::new()
+            watch = [System.Collections.Generic.List[object]]::new()
+            encounterOption = $EncounterOption
+            encounterOptionWasClickable = $null
+            encounterOptionReceipt = $null
             reachedCampaignDay = 0.0
             forkKind = ''
             start = $null
@@ -188,6 +231,100 @@ try {
             if ($advance.status -notin @('completed', 'accepted')) { throw "Native advance stopped at step $step of repeat #${repeat}: status=$($advance.status) error=$($advance.error)" }
         }
         $record.forkKind = Get-ForkKind $record.fork ([bool]$record.scenarioExhausted)
+        if (-not [string]::IsNullOrWhiteSpace($Answer)) {
+            # Answering the fork is the other half of the measurement: the world's answer to the one move
+            # the model is offered, sampled the way the walk to the fork was.
+            if (-not $record.fork) { throw "Repeat #${repeat} was asked to answer '$Answer' but never reached a fork." }
+            $record.answeredOptionWasOffered = @($record.fork.options | Where-Object { [string]$_.id -eq $Answer }).Count -gt 0
+            Write-Progress-Line "repeat ${repeat}: answering $Answer (offered: $($record.answeredOptionWasOffered))"
+            $answerReceipt = Invoke-AgentCli 'dialogueSelect' @('-OptionId', $Answer, '-CommandId', "$commandPrefix-r$repeat-answer") -CommandTimeout 120
+            $record.answerReceipt = [ordered]@{ status = [string]$answerReceipt.status; error = [string]$answerReceipt.error }
+            $record.answerAccepted = ([string]$answerReceipt.status -eq 'completed')
+            $followupSteps = [int][Math]::Ceiling($AnswerFollowupDays / $StepDays)
+            for ($followup = 1; $followup -le $followupSteps; $followup++) {
+                $sample = Get-State "r$repeat-a$followup" 60
+                $snapshot = Get-Snapshot $sample "r$repeat-a$followup"
+                $record.afterAnswer.Add($snapshot)
+                $options = @()
+                if ($null -ne $sample.state.context.conversation -and $null -ne $sample.state.context.conversation.options) {
+                    $options = @($sample.state.context.conversation.options)
+                }
+                $line = [string]$sample.state.context.conversation.sentenceText
+                Write-Progress-Line "repeat ${repeat} answer step ${followup}: day $($snapshot.campaignDay) hp $($snapshot.heroHitPoints) state $($snapshot.gameState) menu $($snapshot.menuId) options $($options.Count) captivity $($snapshot.captivity) line=$line"
+                $answeredOptionStillListed = @($options | Where-Object { [string]$_.id -eq $Answer }).Count -gt 0
+                if ($options.Count -gt 0 -and -not $answeredOptionStillListed) {
+                    $record.secondFork = Get-Fork $sample
+                    $record.secondForkKind = Get-ForkKind $record.secondFork $false
+                    break
+                }
+                if ([string]$sample.state.context.gameState -ne 'MapState') { break }
+                # A menu with clickable options is the next decision point, whether or not an Encounter
+                # is running; the Encounter meeting menu alone is not, it is just where the line is read.
+                if (@($sample.state.availableMenuOptions | Where-Object { [bool]$_.available -and [bool]$_.enabled }).Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$snapshot.menuId)) {
+                    $record.secondFork = Get-Fork $sample
+                    $record.secondForkKind = Get-ForkKind $record.secondFork $false
+                    break
+                }
+                # A Native conversation line without options is a click, not a decision: keep it moving
+                # so the sample lands on the option set the game actually offers next.
+                if ($null -ne $sample.state.context.conversation -and $options.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace($line)) {
+                    $continueReceipt = Invoke-AgentCli 'dialogueContinue' @('-CommandId', "$commandPrefix-r$repeat-a$followup") -CommandTimeout 120
+                    $record.dialogueContinues.Add([ordered]@{ step = $followup; status = [string]$continueReceipt.status; error = [string]$continueReceipt.error })
+                    if ($continueReceipt.status -notin @('completed', 'accepted')) { throw "Native dialogue continue failed after answering at step $followup of repeat #${repeat}: status=$($continueReceipt.status) error=$($continueReceipt.error)" }
+                    continue
+                }
+                if ($snapshot.encounterActive) {
+                    $record.secondForkProbes = [ordered]@{
+                        menu = (Get-Probe 'menu' "r$repeat-probe-menu")
+                        battleSkip = (Get-Probe 'battleSkip' "r$repeat-probe-battle")
+                        dialogueSelect = (Get-Probe 'dialogueSelect' "r$repeat-probe-dialogue" @('-OptionId', $Answer))
+                        menuSelect = (Get-Probe 'menuSelect' "r$repeat-probe-menuselect" @('-MenuId', 'encounter', '-OptionId', 'str_order_attack'))
+                    }
+                    $framePath = Join-Path $runDirectory "OpeningScenario-r$repeat-second-fork.bmp"
+                    $frameReceipt = Get-Probe 'captureFrame' "r$repeat-probe-frame" @('-OutputPath', $framePath)
+                    $record.secondForkFrame = [ordered]@{ path = $framePath; status = [string]$frameReceipt.status; error = [string]$frameReceipt.error; bytes = if (Test-Path -LiteralPath $framePath) { (Get-Item -LiteralPath $framePath).Length } else { 0 } }
+                    $record.secondFork = Get-Fork $sample
+                    $record.secondForkKind = Get-ForkKind $record.secondFork $false
+                    break
+                }
+                $advance = Invoke-AgentCli 'advance' @('-Days', $StepDays.ToString('0.00', [System.Globalization.CultureInfo]::InvariantCulture), '-CommandId', "$commandPrefix-r$repeat-a$followup") -CommandTimeout 120
+                if ($advance.status -notin @('completed', 'accepted')) { throw "Native advance stopped after answering at step $followup of repeat #${repeat}: status=$($advance.status) error=$($advance.error)" }
+            }
+        }
+        if ($null -ne $record.secondFork -and -not [string]::IsNullOrWhiteSpace([string]$record.secondFork.menuId) -and @($record.secondFork.menuOptions).Count -eq 0) {
+            # The encounter menu is filled by the map state's own tick, so the first sample can land
+            # before its options exist. Settle before declaring the surface empty.
+            for ($settle = 1; $settle -le 6; $settle++) {
+                Start-Sleep -Milliseconds 500
+                $settled = Get-State "r$repeat-s$settle" 60
+                $settledOptions = @($settled.state.availableMenuOptions | Where-Object { [bool]$_.available -and [bool]$_.enabled })
+                Write-Progress-Line "repeat ${repeat} settle ${settle}: menu $($settled.state.context.menuId) options $($settledOptions.Count)"
+                if ($settledOptions.Count -gt 0) {
+                    $record.secondFork = Get-Fork $settled
+                    $record.secondForkKind = Get-ForkKind $record.secondFork $false
+                    break
+                }
+            }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($EncounterOption) -and $null -ne $record.secondFork -and [string]$record.secondFork.menuId -eq 'encounter') {
+            # In a cornered encounter the game offers exactly one clickable option. Clicking it is how
+            # the scenario reaches captivity without a model, so the receipt says whether the surface
+            # the Harness published and the surface the game accepts agree.
+            $record.encounterOptionWasClickable = @($record.secondFork.menuOptions | Where-Object { [string]$_.id -eq $EncounterOption }).Count -gt 0
+            Write-Progress-Line "repeat ${repeat}: clicking encounter option $EncounterOption (listed clickable: $($record.encounterOptionWasClickable))"
+            $encounterReceipt = Get-Probe 'menuSelect' "r$repeat-encounter-option" @('-MenuId', 'encounter', '-OptionId', $EncounterOption)
+            $record.encounterOptionReceipt = [ordered]@{ status = [string]$encounterReceipt.status; error = [string]$encounterReceipt.error }
+            Write-Progress-Line "repeat ${repeat}: encounter option $EncounterOption -> $($record.encounterOptionReceipt.status) $($record.encounterOptionReceipt.error)"
+        }
+        for ($watch = 1; $watch -le $WatchSeconds; $watch++) {
+            # After the fork is answered there is sometimes nothing to click: the world finishes the scene
+            # on its own tick. Watching records which way it went without acting.
+            Start-Sleep -Seconds 1
+            $watched = Get-State "r$repeat-w$watch" 60
+            $record.watch.Add((Get-Snapshot $watched "r$repeat-w$watch"))
+            Write-Progress-Line "repeat ${repeat} watch ${watch}: state $($watched.state.context.gameState) menu $($watched.state.context.menuId) hp $($watched.state.party.heroHitPoints) captivity $($watched.state.context.captivity)"
+            if ([string]$watched.state.context.gameState -ne 'MapState') { break }
+        }
         Write-Progress-Line "repeat ${repeat}: fork $($record.forkKind) at day $($record.reachedCampaignDay); stopping"
         $stop = Invoke-AgentCli 'stop' @() -CommandTimeout 120
         $record.processStopped = [bool]$stop.processStopped
@@ -213,13 +350,15 @@ $assertions['EveryRepeatReachedAVerdict'] = @($runs | Where-Object { [string]::I
 # captured between two ticks rather than at the moment the party has to answer.
 $assertions['ConversationForksCarryNativeOptions'] = @($conversationRepeats | Where-Object { @($_.fork.options | Where-Object { [bool]$_.clickable }).Count -lt 2 }).Count -eq 0
 $assertions['EveryRepeatStoppedItsProcess'] = @($runs | Where-Object { -not [bool]$_.processStopped }).Count -eq 0
+$assertions['EncounterOptionWasClickableWhenAsked'] = if ([string]::IsNullOrWhiteSpace($EncounterOption)) { $true } else { @($runs | Where-Object { -not [bool]$_.encounterOptionWasClickable }).Count -eq 0 }
+$assertions['AnswerAcceptedWhenAsked'] = if ([string]::IsNullOrWhiteSpace($Answer)) { $true } else { @($runs | Where-Object { -not [bool]$_.answerAccepted }).Count -eq 0 }
 $failedAssertions = @($assertions.Keys | Where-Object { -not $assertions[$_] })
 
 $receipt = [ordered]@{
     TimestampUtc = [DateTime]::UtcNow.ToString('o')
     Fixture = $LoadSaveName
     FixtureSha256 = $fixtureHashBefore
-    Parameters = [ordered]@{ ScenarioDays = $ScenarioDays; StepDays = $StepDays; Repeats = $Repeats; RepeatWallClockSeconds = $RepeatWallClockSeconds }
+    Parameters = [ordered]@{ ScenarioDays = $ScenarioDays; StepDays = $StepDays; Repeats = $Repeats; RepeatWallClockSeconds = $RepeatWallClockSeconds; Answer = $Answer; AnswerFollowupDays = $AnswerFollowupDays; WatchSeconds = $WatchSeconds; EncounterOption = $EncounterOption }
     ForkKinds = $forkKinds
     Repeats = $runs
     Assertions = $assertions

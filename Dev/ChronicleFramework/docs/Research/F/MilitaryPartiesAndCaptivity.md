@@ -305,6 +305,7 @@ Campaign 地图上的遭遇/战斗由 `MapEvent` 管理；它区分 `BattleTypes
 
 所以「一次遭遇摆在面前」在这个起点上是开局第一天的事，而不是中后期的事；至于这次的人员损失是坐镇模拟结算的、还是遭遇前的饥饿造成的，本节无法区分（见 F11 同名实测段）。
 
+同一遭遇在菜单层面的完整选项面见 `TestResults/20261126-opening-surrender/Temp/OpeningScenarioResult.json`（零模型请求）：对话收尾后 `menuId=encounter`，12 个菜单项里只有 `surrender` 同时 available 且 enabled，`attack` 与 `leave_soldiers_behind` 是 available=true/enabled=false，其余 9 项 available=false。原版用「按钮被灰掉」表达打不了也逃不了，不是把项从菜单里删掉；所以 Host 侧不能拿「动作目录为空」推断原版没有选择。
 ### Chronicle 当前处理与证据
 
 Observer 在BattleSimulation活动时只提供 finished/retreated/battleState等少量模拟状态，Encounter section输出当前参与方基本身份/loot count；Protocol中battlePause/battleSkip、完成和战后清理入口需以 MAINLINE的精确 actions契约为准。现有测试夹具可以为目标窗口注入明确的battle数据，但这不证明任意自然战斗、所有MapEvent类型和各种Party援军的Autonomous战斗处理已完整支持。
@@ -397,6 +398,7 @@ Chronicle 主队观察输出俘虏总数，当前 PartyState 观察分别序列�
 
 该动作直接处理队伍归属和人物状态，不在动作本身修改个人关系。
 
+投降之后原版自己推进被俘：`prisoner_wait`（`captivity.isCaptive=true`，heroHitPoints 6→11）→ `menu_captivity_end_wilderness_escape`（hit points 16，`ransomOfferVisible=false`），停在该菜单，唯一可点项 `mno_continue`「继续……」。收据同上（`TestResults/20261126-opening-surrender/Temp/OpeningScenarioResult.json`）。投降给的是一段被俘流程，不是一局终止。
 ### 俘虏持有
 
 Hero 俘虏可以存在于：

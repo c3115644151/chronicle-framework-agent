@@ -1842,6 +1842,25 @@ internal static class AgentHostBattleSimulationLoop
         var leavePreferredIds = leavePreferredCatalog.FirstOrDefault()?["argumentValues"]?["OptionId"] as JsonArray;
         if (leavePreferredIds?.Count != 1 || leavePreferredIds[0]?.GetValue<string>() != "leave")
             throw new AgentHostException("battle-loop-self-test-leave-prioritized-over-surrender", "When Native Leave is enabled, it remains the no-capture fallback and surrender must not be offered.");
+        var surrenderOnlyState = new JsonObject
+        {
+            ["context"] = new JsonObject
+            {
+                ["gameState"] = "MapState", ["menuId"] = "encounter", ["encounterActive"] = true, ["conversation"] = null,
+                ["encounteredPartyId"] = "bandit-1", ["battleSimulation"] = null, ["captivity"] = new JsonObject { ["isCaptive"] = false }
+            },
+            ["party"] = new JsonObject { ["healthy"] = 0 },
+            ["availableMenuOptions"] = new JsonArray(
+                new JsonObject { ["id"] = "attack", ["enabled"] = false, ["available"] = true },
+                new JsonObject { ["id"] = "str_order_attack", ["enabled"] = false, ["available"] = false },
+                new JsonObject { ["id"] = "leave", ["enabled"] = false, ["available"] = false },
+                new JsonObject { ["id"] = "surrender", ["enabled"] = true, ["available"] = true })
+        };
+        var surrenderOnlyExplanation = ExplainNoAction(surrenderOnlyState, false, candidates);
+        if (BuildActionCatalog(surrenderOnlyState, candidates, "bandit-1", false, true).Count != 0 ||
+            !surrenderOnlyExplanation.Contains("only its original surrender option", StringComparison.Ordinal) ||
+            !surrenderOnlyExplanation.Contains("captivity-recovery", StringComparison.Ordinal))
+            throw new AgentHostException("battle-loop-self-test-surrender-only-explanation", $"A Native encounter whose only enabled choice is surrender must be explained as such instead of claiming no bounded action exists; got: {surrenderOnlyExplanation}");
         results.Add(new { scenario = "battle-loop-surrenders-only-as-last-resort-in-explicit-captivity-recovery-mode", passed = true });
         var encounterLeftMap = new JsonObject
         {
@@ -2752,6 +2771,9 @@ internal static class AgentHostBattleSimulationLoop
         var menuId = ReadString(context, "menuId");
         if (ReadBoolean(context, "encounterActive") && menuId == "encounter_meeting")
             return "The Native encounter is in a dialogue meeting, not a verified Send Troops menu; no toll, surrender, or invented dialogue option was chosen.";
+        if (menuId == "encounter" && !IsPlayerCaptive(state) && CurrentEnabledMenuOption(state, "surrender") &&
+            !CurrentEnabledMenuOption(state, "str_order_attack") && !CurrentEnabledMenuOption(state, "leave"))
+            return "The Native encounter menu currently offers only its original surrender option; outside captivity-recovery mode the Host leaves that choice unmade instead of surrendering on the player's behalf.";
         if (!ReadBoolean(context, "encounterActive") && observedTargets.Count == 0 && !battleWasStarted)
             return "No currently Native-visible hostile bandit party was observed; the Host stopped without using a hidden target or fabricating an encounter.";
         return "Current Native context has no bounded BattleSimulation action; the Host stopped without changing the game clock or entering a Mission.";

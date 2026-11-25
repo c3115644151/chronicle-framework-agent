@@ -241,6 +241,15 @@ EYC 这条产品路线的金币动词最窄：`agenthost/AgentHostEstablishClanG
 
 这不是能力缺口，是 slice 选择的缺口：`bandit_start_defender_2` 在别处已经能用——VillageToolsQuest slice 把它当「找折中办法」（`agenthost/AgentHostVillageToolsQuestLoop.cs:1148`、`agenthost/AgentHostVillageToolsQuestPolicy.cs:729`），safe-passage 那条 harness 也走通过（`harness/Test-AgentSafePassageBarterContext.ps1:228` 选中它之后进 barter）。战斗 slice 里没有 barter 动词，所以它把这条路过滤掉了。
 
+**实测：围困那一刻，原版只给一个可点的动作。** 用 `-Answer bandit_start_defender_3` 走到对话末尾，`menuId` 变成 `encounter`，此刻菜单的完整选项面（`TestResults/20261126-opening-surrender/Temp/OpeningScenarioResult.json`，零模型请求）是 12 项：`continue_preparations`「继续围攻准备。」、`village_raid_action`「洗劫这座村庄，然后将它夷为平地。」、`village_force_volunteer_action`「强迫要人为你募兵。」、`village_force_supplies_action`「向平民强征给养。」、`attack`「攻入敌阵！」（available=true、enabled=false）、`capture_the_enemy`「俘虏敌人。」、`str_order_attack`（text 为空）、`leave_soldiers_behind`「掩护撤退。」（available=true、enabled=false）、`surrender`「投降。」（available=true、enabled=true）、`leave`「离开……」、`abandon_army`「抛弃军团」、`go_back_to_settlement`「返回。」。可点的只有 `surrender`。
+
+![围困遭遇](media/opening-cornered-encounter.png)
+
+截图里的三行菜单是「进入战斗！」「掩护撤退。」「撤退。」，后两行是灰的；左侧文字是「你被敌人围困住了。你的状态无法作战，你唯一的选择只有投降。」。
+
+点下去之后不是死路：原版自己走完被俘与回血，`menu prisoner_wait`（`captivity.isCaptive=true`，heroHitPoints 6→11）→ 第 4 秒起 `menu menu_captivity_end_wilderness_escape`（hit points 16，`ransomOfferVisible=false`），此后停住，唯一可点项是 `mno_continue`「继续……」，恢复路径已实现在 `agenthost/AgentHostBattleSimulationLoop.cs:1357-1362`（只允许提交当前启用的 `mno_continue`）。代价是被俘一段流程，不是终局。
+
+EYC/Autonomy 的 BattleSimulation 调用点都带 `recoverPlayerCaptivity: true`（`agenthost/AgentHostCampaignLoop.cs:689`、`:777`、`:814`，`agenthost/AgentHostEstablishYourClanAutonomyLoop.cs:1287`、`:1441`，`agenthost/AgentHostEstablishClanTrainingIssueLoop.cs:860`），所以这条投降在这些路线里在册。普通 Renown 战斗 slice（`agenthost/AgentHostCampaignLoop.cs:678`）不带 recovery，遇到同样的「只剩投降」会得到空目录并以 `no-safe-action` 停下；旧消息说「没有受限动作」，等于把「原版也只有投降」写成「什么都没有」。现在 `ExplainNoAction` 单独认这一种局面：`The Native encounter menu currently offers only its original surrender option; outside captivity-recovery mode the Host leaves that choice unmade instead of surrendering on the player's behalf.`，并由 `battle-loop-surrenders-only-as-last-resort-in-explicit-captivity-recovery-mode` 这个自测场景断言，防止措辞退回含糊。
 对场景设计，后果有两个：
 
 - 「开局求生」现在不能拿「它会怎么谈」当判据，因为它拿不到谈判动词；能判的只有「它认不认这个已经输掉的结局，以及认输之后怎么爬起来」。
