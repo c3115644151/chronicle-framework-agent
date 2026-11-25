@@ -220,7 +220,23 @@ W7 的 `IdlePressure` 阶段把「AI 什么都不做」变成可复跑仪器：�
 
 工资这一侧再次出现模型不符：本夹具 25 人实测 `dailyWage` 78（3.12 金/人），而按本文件记录的 2 × 非主角人数估算应为 50。差值的可能来源是混合兵种（含骑兵与高 Tier 单位）、主角/同伴修正或安装版模型的额外项，本轮没有单兵级工资读回可归因；使用时的规则是「按实测值预算、不要按人数线性外推」。
 
-未归因项：12 天里每个采样点的 `encounterActive` 都是 false，mod 事件流（`Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\events.jsonl`）中该 session 只有 `advance`（accepted → completed，`dailyTickCount` 逐日 +1）与 `state`，没有任何 battle/encounter 命令，但伤兵仍从 0 涨到 14。饥饿本身造成伤兵、或快进期间有一次未留回执的地图遭遇，当前观察面分不出；判它需要「粮食充足、其余相同」的对照跑。这条未知项也限制了把「伤兵」当作战斗证据的用法。
+### 补粮对照跑：伤兵来自饥饿，不来自路上遭遇
+
+上一节的未归因项（伤兵在零遭遇的情况下从 0 涨到 14）由一次干预关掉：`harness/Test-AgentIdlePressure.ps1` 新增 `-TopUpFoodUnits`，在闲置窗口之前用原版市场买粮——最近的友好城镇 `town_ES3`、`menuSelect town/trade` → `tradeOptions` → `trade`（`direction=buy`、`inventorySide=OtherInventory`、按单价升序）→ 一次 `tradeConfirm` → `town_leave`——然后跑同样的 1 天/块 12 天。收据 `TestResults/20261125-idle-pressure-fed-2/IdlePressureResult.json`（Passed=true、`ModelRequests=0`、停因 `chunk-budget-exhausted`）。
+
+买粮的回执本身就是一条机制事实：`tradeConfirm` 返回 `committed=true`、`nativeTransactionClosed=true`、`postconditionPassed=true`、`amount=12`、`nativeTransactionAmount=144`、`playerGoldBefore/After` 2277→2133、`marketCountBefore/After` 268→256，而 `campaignDayBefore`/`campaignDayAfter`/`campaignDayAtCommit` 三者完全相同、`timeControlModeBefore/After` 都是 `Stop`——**在城镇市场买东西不消耗战役时间**。赶路的 0.13 个战役日（91179.210 → 91179.341）没有跨过每日边界，所以也没有扣工资。
+
+| | 断粮跑（`20261125-idle-pressure-daily`） | 补粮跑（`20261125-idle-pressure-fed-2`） |
+| --- | --- | --- |
+| 起点 | 战役日 91179.210、2277 金、25 人、粮 12.5/12、士气 42 | 战役日 91179.341、2133 金、25 人、粮 24.5/24、士气 42 |
+| 第 9–10 天 | 粮见底 → 变负，士气 46→13（−33），首发 3 名伤兵 | 粮 12.8/11，士气 46，无伤兵 |
+| 第 12 天 | 人数 24、健康 10、伤兵 14、士气 6、`party-shrunk` 停 | 人数 25、健康 25、伤兵 0、士气 47、预算跑完停 |
+| 12 天金币 | −936（每天 −78，整额） | −936（每天 −78，整额） |
+| 12 天粮变化 | −13.8（12.5 → −1.3） | −15.6（24.5 → 8.9） |
+
+两次断粮跑的曲线逐日一致（`20261125-idle-pressure-daily` 与 `20261125-idle-pressure-daily-b`，仅第 12 天成员数与伤兵数在分布内略有差异），补粮跑把伤兵清零。结论：**在这套夹具上，伤兵是饥饿的后果，不是快进期间未留回执的地图遭遇**。同时保留上一节的可判定口径——能当判据的是顺序（断粮 → 士气塌 → 伤兵累积 → 掉人），不是伤兵的具体数值。
+
+新的经济事实：**补粮的边际成本远低于工资**。24 单位粮（1.3/天，够 18.5 天）花 144 金，折合 9.2 金/天，只有 78 金日工资的 12%。同一市场的食物报价（战役日 91179.3、`town_ES3`、单价/库存）：`grain` 12/268、`fish` 14/237、`butter` 22/33、`meat` 24/99、`cheese` 26/43、`grape` 30/13、`olives` 41/16、`beer` 64/35、`date_fruit` 85/6。上一节引用的「橄榄 9、谷物 19–30」是别处行情——粮价随城镇与库存浮动，预算要读当前 `tradeOptions` 报价，不能背价格表。
 
 ### 收益侧：主机动作白名单决定能赚哪些钱
 
