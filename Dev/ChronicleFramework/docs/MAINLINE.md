@@ -2264,3 +2264,11 @@ TestResults/20261026-191500改用FreeLLMAPI keyless kilo-auto做单次Provider S
 ## 运行日志（不进入默认上下文）
 
 2026-10-26 起的每次真实运行、诊断与续跑记录在 [RUNLOG.md](RUNLOG.md)。本文件只保留持久技术事实、机制契约、未知、分母定义与验收规则；新的运行记录写进 RUNLOG，不再回流到此处。
+### 自主运行对手夹具与 visual 模式边界
+
+`visual-opponent-fixture` 生成的敌队是 `chronicle_harness_looters`（3 名 looter，敌方 AI 开启，`SetMoveEngageParty` 主动交战），MainParty 名册与背包保持不变，且不播种 `seedVisualLoot`。`mod/AgentObserver.cs:430-435` 的 `mapPartyTargets` 无半径上限，所以模型看到这支队伍表示它当时确实可见；没有看到时也不能归因于观察口径太窄。
+
+三处 visual Harness 特权的模式判断原本各写一份列表，新增模式漏改会分别导致输入锁拒绝、`captureFrame` 被拒和失败帧缺失。现在 `mod/HarnessScreenModes.cs::IsCurrent()` 是唯一来源；`smoke` 仍只属于输入锁例外。`SubModule.cs` 的 fixture 构造通过 `CreateDisposableHostileFixture` 参数化，但保留旧 battle-fixture 断言所需的 19/11 敌人与单人主角语义；其 canonical hash 在 `harness/HarnessResearchReadiness.ps1` 中精确审查。
+
+真实模型证据：`TestResults/20261126-live-host-opponent3` 看见并进入两次战斗，但 1 对 3 时自动驾驶撤退，40 决策后仍未形成可卖战利品；`20261126-live-host-opponent4` 的 1 敌夹具没有战斗事件。这些是决策层缺口，不是 Native 拾取/出售链缺口（后者由 `BattleLootSale` 17/17 证明）。
+

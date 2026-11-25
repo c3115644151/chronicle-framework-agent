@@ -76,7 +76,7 @@ if ($harnessScript -notmatch "'AgentHostLifecycleEvaluation' \{ @\('Preflight', 
     $agentPlayerInputOwnershipSource -notmatch 'ScreenManager\.AddGlobalLayer' -or
     $agentPlayerInputOwnershipSource -notmatch 'IsHarnessAgentInputLockRequested' -or
     $agentPlayerInputOwnershipSource -notmatch 'CHRONICLE_HARNESS_AGENT_INPUT_LOCK' -or
-    $agentPlayerInputOwnershipSource -notmatch '"battle-fixture" or "solo-battle-fixture"' -or
+    $agentPlayerInputOwnershipSource -notmatch 'HarnessScreenModes.IsCurrent()' -or
     $agentPlayerInputOwnershipSource -notmatch 'harness-agent-input-lock\|locked=' -or
     $agentPlayerInputOwnershipSource -notmatch 'SetLocked\(shouldLock, notifyPlayer: !harnessOwnsInput\)' -or
     $agentPlayerInputOwnershipSource -notmatch 'InputUsageMask\.All' -or

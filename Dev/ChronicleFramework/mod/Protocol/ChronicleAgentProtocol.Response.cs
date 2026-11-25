@@ -74,9 +74,8 @@ internal sealed partial class ChronicleAgentProtocol
     private static void TryCaptureUnexpectedProtocolFailureFrame(string commandId, string action, Exception exception)
     {
         if (_unexpectedProtocolFailureFrameCaptured || exception is InvalidOperationException) return;
-        var mode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
         var rootValue = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
-        if ((mode != "visual-capture" && mode != "visual-battle-fixture") || string.IsNullOrWhiteSpace(rootValue) || !Directory.Exists(rootValue)) return;
+        if (!HarnessScreenModes.IsCurrent() || string.IsNullOrWhiteSpace(rootValue) || !Directory.Exists(rootValue)) return;
 
         _unexpectedProtocolFailureFrameCaptured = true;
         try

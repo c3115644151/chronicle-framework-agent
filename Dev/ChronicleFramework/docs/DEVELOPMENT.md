@@ -1,6 +1,14 @@
 ﻿# Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.714
+Contract version: 7.715
+
+## Contract 7.715 — share visual-mode authorization and measure a live opponent fixture
+
+`visual-opponent-fixture` was added so a live Agent run can face a small current visible hostile party without being handed extra troops or seeded loot. Three independent mode tables had to accept the same mode: input ownership, `captureFrame`, and the unexpected-failure screenshot. They now share `mod/HarnessScreenModes.cs::HarnessScreenModes.IsCurrent()`, with `smoke` remaining an input-ownership-only exception; gate assertions check the shared predicate rather than another copied list.
+
+`opponent3` (`TestResults/20261126-live-host-opponent3`) proved the model saw `chronicle_harness_looters` at distance 4.408 and entered two Native battles, but a lone hero versus three looters ended in `missionRetreat` twice and the run finished at `recruitment-decision-budget-exhausted` with 40 decisions and 46 actions. `opponent4` reduced the fixture to one opponent and the model stopped entering battle, spending 28 decisions and 37 actions on trade/recruitment instead. The end-to-end battle-to-sale chain is already proven by the zero-model `BattleLootSale` stage; these live runs measure the decision gap and are not repeated to force a receipt.
+
+`mod/SubModule.cs` keeps the existing battle-fixture literals for the research gate. A parameterized `CreateDisposableHostileFixture` now takes roster seeding, AI state, roster preservation, enemy count and a fixture kind; the standard battle fixture still has 19 enemies (11 for the solo case), while the opponent fixture has three enemies and leaves the MainParty roster untouched. Its exact reviewed content hash is recorded in `harness/HarnessResearchReadiness.ps1`.
 
 ## Contract 7.714 — the Gold objective spends its budget on the leg that can pay
 

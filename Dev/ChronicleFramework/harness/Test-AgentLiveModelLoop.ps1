@@ -19,7 +19,8 @@ param(
     [switch]$EstablishYourClanGoalPlanner,
     [switch]$EstablishYourClanAutonomyLoop,
     [switch]$EstablishClanGoldSaleLoop,
-    [switch]$AgentHostRuntime
+    [switch]$AgentHostRuntime,
+    [switch]$FixtureOpponent
 )
 
 $ErrorActionPreference = 'Stop'
@@ -339,7 +340,10 @@ try {
     . $videoLibrary
     $captureRecoveryProof = Test-ChronicleFragmentedCaptureResilience -EvidencePath (Join-Path $runDirectory 'FragmentedCaptureRecovery.json')
     Set-Content -LiteralPath $eventTracePath -Value '' -Encoding UTF8
-    $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { 'visual-battle-fixture' } else { 'visual-capture' }
+    # A live Agent run may be given one current visible opponent instead of a seeded battle party: the fixture places a
+# small hostile looter party beside an untouched MainParty, so the recipe still tests the Agent's own decision and
+# not a roster the harness handed it.
+$env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { 'visual-battle-fixture' } elseif ($FixtureOpponent) { 'visual-opponent-fixture' } else { 'visual-capture' }
     $env:CHRONICLE_HARNESS_AGENT_INPUT_LOCK = '1'
     $harnessInputLockRequired = $true
     $env:CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION = [string]$MaxHttpRequestsPerDecision

@@ -128,7 +128,7 @@ internal static class ChroniclePlayerInputOwnership
 
     private static bool IsHarnessAgentInputLockRequested() =>
         Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_INPUT_LOCK") == "1" &&
-        Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") is "visual-capture" or "visual-battle-fixture" or "battle-fixture" or "solo-battle-fixture" or "smoke";
+        (HarnessScreenModes.IsCurrent() || Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") is "smoke");
 
     internal static void Release()
     {

@@ -1197,3 +1197,10 @@ $env:CHRONICLE_LLM_MAX_TOKENS='1000'
 根因是预算口径而不是模型偏好：`MaximumTrainingIssueDiscoveryDecisions = 32`（`agenthost/AgentHostEstablishClanTrainingIssueLoop.cs:13`），而整场只有 26 个决策；发现预算永远等不到自己的止损点，先耗尽共享预算，于是带着 `training-issue-budget-exhausted` 退出，排在后面的战斗兜底拿不到任何决策。
 
 改法（`AgentHostCampaignLoop.TrainingIssueSkipReason` + `AgentHostEstablishClanTrainingIssueLoop.HasReachableTrainingIssue`）：训练腿只在「委托已经够得着」且「剩余预算 ≥ 32」时进入，否则跳过并记录 `trainingIssueAttempt.skippedReason`。自测新增场景 `gold-objective-skips-training-issue-discovery-unless-a-giver-is-visible-and-the-remaining-budget-covers-its-search`（431 场景全绿、模型调用 0）。
+## 2026-11-26 自主运行里的可见对手夹具（契约 7.715）
+
+为了回答“没有可见敌人时战斗兜底是否只是无米之炊”，`Test-AgentLiveModelLoop.ps1` 新增 `-FixtureOpponent`，启动 `visual-opponent-fixture`。该模式只生成一个 3 人 `chronicle_harness_looters` 敌队，不补玩家兵、不播种战利品、敌方 AI 保持运行；模型看到什么、是否交战，都来自它自己的决策。
+
+`TestResults/20261126-live-host-opponent3`：40 决策 / 46 动作，模型两次从 `mapPartyTargets` 看到距离 4.408 的敌队并 `pursue` → `dialogueSelect` → `dialogueContinue` → `menuSelect` 进入战斗；事件流有 83 条 `battleMissionStatus`、2 条 `missionAutopilotMainAgent`、2 条 `missionRetreat`。终局 `recruitment-decision-budget-exhausted`，没有闭合到拾取/卖出。`TestResults/20261126-live-host-opponent4` 把敌人降到 1 后，28 决策 / 37 动作里没有战斗事件，模型转去 trade/recruitment，终局 `recruitment-rejection-limit`。因此停止用更多同型重跑凑收据；链路本身由 `BattleLootSale` 的 17/17 零模型收据证明，缺的是自主决策把它串起来。
+
+实现上，`HarnessScreenModes.IsCurrent()` 统一输入锁、captureFrame 与失败截图三处对 visual 模式的判断；`SubModule.CreateDisposableHostileFixture` 参数化生成 fixture，但保留原 battle-fixture 的断言字面量和 19/11 敌人设置。已重建：`dotnet build Dev\ChronicleFramework\mod\ChronicleFramework.csproj -c Release -p:ChronicleGameRoot='D:\Program Files (x86)\Steam\steamapps\common\Mount & Blade II Bannerlord' --nologo`，0 错误 / 9 个既有警告。

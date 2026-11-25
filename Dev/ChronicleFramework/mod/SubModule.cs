@@ -588,9 +588,27 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
         ChronicleDiagnostics.Write($"campaign-loaded|mode={harnessMode ?? "normal"}|version={_stateVersion}|count={_dailyTickCount}|day={_lastDailyTickDay:F3}");
         if (harnessMode == "battle-fixture" || harnessMode == "visual-battle-fixture" || harnessMode == "solo-battle-fixture")
             CreateDisposableBattleFixture(harnessMode == "visual-battle-fixture", harnessMode == "visual-battle-fixture" || harnessMode == "solo-battle-fixture", harnessMode == "solo-battle-fixture");
+        else if (harnessMode == "visual-opponent-fixture")
+            CreateDisposableOpponentFixture();
     }
 
     private static void CreateDisposableBattleFixture(bool seedItemLoot, bool disableOpponentAiForBattleProbe, bool preserveSoloMainParty = false)
+    {
+        // Match the real EYC failure boundary: a lone MainHero entering a much larger bandit party.
+        var enemyCount = preserveSoloMainParty ? 11 : 19;
+        CreateDisposableHostileFixture(seedItemLoot, disableOpponentAiForBattleProbe, preserveSoloMainParty, enemyCount, "battle");
+    }
+
+    // A live Agent run needs a current visible opponent to decide about, and it must not be handed a party it
+    // did not earn: this fixture places one hostile looter party beside an untouched MainParty, with no seeded
+    // roster, no seeded loot and the opponent AI left running, so whatever the Agent does with it is its own
+    // decision. Ordinary battle fixtures scale the player party to a battle-sized roster instead.
+    private static void CreateDisposableOpponentFixture() =>
+        CreateDisposableHostileFixture(seedItemLoot: false, disableOpponentAiForBattleProbe: false, preserveSoloMainParty: true,
+            enemyCount: 3, fixtureKind: "opponent");
+
+    private static void CreateDisposableHostileFixture(bool seedItemLoot, bool disableOpponentAiForBattleProbe, bool preserveSoloMainParty,
+        int enemyCount, string fixtureKind)
     {
         try
         {
@@ -605,14 +623,14 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
             var hostileClan = Clan.BanditFactions.FirstOrDefault(clan => FactionManager.IsAtWarAgainstFaction(mainParty.MapFaction, clan));
             var partyTemplate = Game.Current.ObjectManager.GetObject<PartyTemplateObject>("looters_template");
             var looterCharacter = Game.Current.ObjectManager.GetObject<CharacterObject>("looter");
-            var testRecruit = Game.Current.ObjectManager.GetObject<CharacterObject>("vlandian_recruit");
+            var testRecruit = preserveSoloMainParty ? null : Game.Current.ObjectManager.GetObject<CharacterObject>("vlandian_recruit");
             var testLootItem = seedItemLoot ? Game.Current.ObjectManager.GetObject<ItemObject>("wool") : null;
             var homeSettlement = Settlement.All.Where(settlement => settlement != null && settlement.IsActive)
                 .OrderBy(settlement => mainParty.Position.Distance(settlement.Position)).FirstOrDefault();
-            if (hostileClan == null || partyTemplate == null || looterCharacter == null || testRecruit == null || homeSettlement == null || (seedItemLoot && testLootItem == null))
+            if (hostileClan == null || partyTemplate == null || looterCharacter == null || (!preserveSoloMainParty && testRecruit == null) || homeSettlement == null || (seedItemLoot && testLootItem == null))
                 throw new InvalidOperationException("Native hostile clan, looter template or home settlement is unavailable.");
 
-            // Ordinary battle probes scale to 20; the solo fixture must preserve the source Campaign's one-member MainParty.
+            // Ordinary battle probes scale to 20; the solo and opponent fixtures preserve the source Campaign's own roster.
             var recruitsToAdd = preserveSoloMainParty ? 0 : Math.Max(0, 20 - mainParty.MemberRoster.TotalManCount);
             if (recruitsToAdd > 0)
                 mainParty.MemberRoster.AddToCounts(testRecruit, recruitsToAdd, insertAtFront: false, woundedCount: 0, xpChange: 0, removeDepleted: true, index: -1);
@@ -621,8 +639,6 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
             var enemyParty = BanditPartyComponent.CreateLooterParty(
                 "chronicle_harness_looters", hostileClan, homeSettlement, false, partyTemplate, mainParty.Position + new Vec2(fixtureOffset, 0f));
             enemyParty.MemberRoster.Clear();
-            // Match the real EYC failure boundary: a lone MainHero entering a much larger bandit party.
-            var enemyCount = preserveSoloMainParty ? 11 : 19;
             enemyParty.MemberRoster.AddToCounts(looterCharacter, enemyCount, insertAtFront: false, woundedCount: 0, xpChange: 0, removeDepleted: true, index: -1);
             if (disableOpponentAiForBattleProbe)
             {
@@ -632,12 +648,12 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
             {
                 enemyParty.SetMoveEngageParty(mainParty, MobileParty.NavigationType.Default);
             }
-            ChronicleDiagnostics.Write($"battle-fixture-ready|party={enemyParty.StringId}|hostile={FactionManager.IsAtWarAgainstFaction(mainParty.MapFaction, enemyParty.MapFaction)}|enemyCount={enemyParty.MemberRoster.TotalManCount}|playerCount={mainParty.MemberRoster.TotalManCount}|preserveSoloMainParty={preserveSoloMainParty}|lootFixtureEnabled={seedItemLoot}|lootFixtureItemId={testLootItem?.StringId}|opponentAiDisabledForBattleProbe={disableOpponentAiForBattleProbe}|playerMode={mainParty.DefaultBehavior}|clock={Campaign.Current.TimeControlMode}");
+            ChronicleDiagnostics.Write($"{fixtureKind}-fixture-ready|party={enemyParty.StringId}|hostile={FactionManager.IsAtWarAgainstFaction(mainParty.MapFaction, enemyParty.MapFaction)}|enemyCount={enemyParty.MemberRoster.TotalManCount}|playerCount={mainParty.MemberRoster.TotalManCount}|preserveSoloMainParty={preserveSoloMainParty}|lootFixtureEnabled={seedItemLoot}|lootFixtureItemId={testLootItem?.StringId}|opponentAiDisabledForBattleProbe={disableOpponentAiForBattleProbe}|playerMode={mainParty.DefaultBehavior}|clock={Campaign.Current.TimeControlMode}");
         }
         catch (Exception exception)
         {
             var detail = exception.ToString().Replace('\r', ' ').Replace('\n', ' ');
-            ChronicleDiagnostics.Write($"battle-fixture-failed|{detail}");
+            ChronicleDiagnostics.Write($"{fixtureKind}-fixture-failed|{detail}");
         }
     }
 
