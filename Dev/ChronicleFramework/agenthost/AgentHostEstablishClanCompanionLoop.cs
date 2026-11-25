@@ -664,12 +664,8 @@ internal static class AgentHostEstablishClanCompanionLoop
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
         var maxDecisions = Math.Clamp(ReadInt(request, "maxDecisions", MaxDecisions), 1, MaxDecisions);
         var maxSeconds = Math.Clamp(ReadInt(request, "maxElapsedSeconds", (int)MaxElapsed.TotalSeconds), 10, (int)MaxElapsed.TotalSeconds);
-        var decisions = priorDecisions;
+        var ledger = new DecisionRunLedger(provider, runId, priorDecisions, priorPromptTokens, priorCompletionTokens, priorTrace, priorProviderRouteHistory);
         var actionsExecuted = 0;
-        long promptTokens = priorPromptTokens;
-        long completionTokens = priorCompletionTokens;
-        var trace = priorTrace?.DeepClone() as JsonArray ?? new JsonArray();
-        var routes = priorProviderRouteHistory?.DeepClone() as JsonArray ?? new JsonArray();
         var safeTowns = (JsonArray?)null;
         var sceneAgentsReceipt = (JsonObject?)null;
         string? moveTargetId = null;
@@ -763,7 +759,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                 unaffordableHeroGold = AgentHostEycCompanionSearchMemory.ReadUnaffordableHeroGold(campaignCheckpoint);
             }
             await provider.CheckConfiguredModelAsync(elapsed.Token);
-            while (decisions < maxDecisions)
+            while (ledger.Decisions < maxDecisions)
             {
                 elapsed.Token.ThrowIfCancellationRequested();
                 using var nativeState = await campaignClient.ReadStateAsync(elapsed.Token);
@@ -794,7 +790,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                         tavernEntryTransitionPending = false;
                         visitedTowns.Add(pendingTavernEntrySettlementId);
                         tavernEntryTransitionConfirmedCount++;
-                        trace.Add(new JsonObject
+                        ledger.Trace.Add(new JsonObject
                         {
                             ["stage"] = "native-tavern-entry-transition-confirmed",
                             ["settlementId"] = pendingTavernEntrySettlementId,
@@ -816,7 +812,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                             !string.Equals(currentEntrySettlementId, pendingTavernEntrySettlementId, StringComparison.Ordinal);
                         if (settlementChanged || tavernEntryTransitionWaits >= MaxTavernEntryTransitionWaits)
                         {
-                            trace.Add(new JsonObject
+                            ledger.Trace.Add(new JsonObject
                             {
                                 ["stage"] = "native-tavern-entry-transition-not-observed",
                                 ["expectedSettlementId"] = pendingTavernEntrySettlementId,
@@ -833,7 +829,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                                 "native-tavern-entry-transition-not-observed", state);
                         }
 
-                        trace.Add(new JsonObject
+                        ledger.Trace.Add(new JsonObject
                         {
                             ["stage"] = "native-tavern-entry-transition-wait",
                             ["expectedSettlementId"] = pendingTavernEntrySettlementId,
@@ -866,7 +862,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                     if (!AgentHostEstablishYourClanGoalLoop.HasActiveQuest(settledMissionState.RootElement))
                         return BuildResult("failed", "native-tavern-mission-startup-lost-eyc", "The exact Tavern Mission startup wait did not preserve the original active EYC Quest.", "native-tavern-mission-startup-lost-eyc", settledState);
                     var startupCampaignDayAfter = ReadDouble(settledState, "campaignDay");
-                    trace.Add(new JsonObject
+                    ledger.Trace.Add(new JsonObject
                     {
                         ["stage"] = "native-tavern-mission-startup-settle",
                         ["attempt"] = tavernMissionStartupWaits,
@@ -956,7 +952,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                         checkpointWriteCount++;
                         if (unaffordableCheckpointDirty)
                         {
-                            trace.Add(new JsonObject
+                            ledger.Trace.Add(new JsonObject
                             {
                                 ["stepKind"] = "unaffordable-wanderer-memory-checkpoint-write",
                                 ["status"] = "completed",
@@ -969,7 +965,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                         unaffordableCheckpointDirty = false;
                         lastCheckpointWriteStatus = "completed";
                     }
-                    trace.Add(new JsonObject
+                    ledger.Trace.Add(new JsonObject
                     {
                         ["stage"] = "native-campaign-companion-search-memory-saved",
                         ["campaignMemoryCount"] = noCandidateTownIds.Count,
@@ -1002,7 +998,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                 {
                     moveTargetId = targetSettlementId;
                     moveStartPending = false;
-                    trace.Add(new JsonObject
+                    ledger.Trace.Add(new JsonObject
                     {
                         ["stage"] = "native-settlement-move-inherited-by-companion-route",
                         ["targetSettlementId"] = moveTargetId,
@@ -1058,7 +1054,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                         elapsed.Token);
                     state = movementWatch.NativeState;
                     actionsExecuted += movementWatch.MapPartyTargetPollCount + (movementWatch.PauseReceipt is null ? 0 : 1);
-                    trace.Add(new JsonObject
+                    ledger.Trace.Add(new JsonObject
                     {
                         ["stage"] = movementWatch.InterruptedByVisibleHostileBandit ? AgentHostNativeMapMovementMonitor.FailureCode : "native-map-move-passive-observation",
                         ["targetSettlementId"] = moveTargetId,
@@ -1094,7 +1090,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                 }
                 if (missionWaitPending)
                 {
-                    trace.Add(new JsonObject
+                    ledger.Trace.Add(new JsonObject
                     {
                         ["stage"] = "native-mission-activity-ended",
                         ["gameState"] = gameState,
@@ -1127,10 +1123,10 @@ internal static class AgentHostEstablishClanCompanionLoop
                         companionCheckpointDirty = true;
                     }
                     actionsExecuted++;
-                    var sceneObservation = BuildObservation(state, journal, objective, safeTowns, sceneAgentsReceipt, selectedHeroId, interactTargetHeroId, trace.Count);
-                    trace.Add(new JsonObject
+                    var sceneObservation = BuildObservation(state, journal, objective, safeTowns, sceneAgentsReceipt, selectedHeroId, interactTargetHeroId, ledger.Trace.Count);
+                    ledger.Trace.Add(new JsonObject
                     {
-                        ["decision"] = decisions,
+                        ["decision"] = ledger.Decisions,
                         ["observation"] = sceneObservation,
                         ["selectedDecision"] = null,
                         ["nativeReceipt"] = SafeReceipt(sceneObservationReceipt, "missionSceneAgents", null, null, safeTowns),
@@ -1151,9 +1147,9 @@ internal static class AgentHostEstablishClanCompanionLoop
                         selectedHeroId = null;
                         interactTargetHeroId = null;
                         sceneAgentsReceipt = null;
-                        trace.Add(new JsonObject
+                        ledger.Trace.Add(new JsonObject
                         {
-                            ["decision"] = decisions,
+                            ["decision"] = ledger.Decisions,
                             ["observation"] = sceneObservation.DeepClone(),
                             ["selectedDecision"] = null,
                             ["nativeReceipt"] = SafeReceipt(emptyTavernLeaveReceipt, "missionLeave", null, null, safeTowns),
@@ -1178,17 +1174,17 @@ internal static class AgentHostEstablishClanCompanionLoop
                 if (catalog.Count == 0 && controls.Count == 0)
                     return BuildResult("interrupted", "companion-route-unavailable", DescribeNoAction(state, safeTowns, sceneAgentsReceipt, journal), "companion-route-unavailable", state, journal, objective);
 
-                var observation = BuildObservation(state, journal, objective, safeTowns, sceneAgentsReceipt, selectedHeroId, interactTargetHeroId, trace.Count);
+                var observation = BuildObservation(state, journal, objective, safeTowns, sceneAgentsReceipt, selectedHeroId, interactTargetHeroId, ledger.Trace.Count);
                 var modelRequest = new JsonObject
                 {
                     ["runId"] = runId,
                     ["goal"] = ReadString(request, "goal"),
                     ["goalKind"] = "active-storymode-establish-clan-companion",
-                    ["iteration"] = decisions + 1,
+                    ["iteration"] = ledger.NextDecisionNumber,
                     ["observation"] = observation,
                     ["allowedActions"] = catalog.DeepClone(),
                     ["allowedControls"] = controls.DeepClone(),
-                    ["previousActionReceipt"] = trace.LastOrDefault() is JsonObject lastTrace ? lastTrace["nativeReceipt"]?.DeepClone() : null,
+                    ["previousActionReceipt"] = ledger.Trace.LastOrDefault() is JsonObject lastTrace ? lastTrace["nativeReceipt"]?.DeepClone() : null,
                     ["decisionFeedback"] = decisionFeedback?.DeepClone()
                 };
                 ProviderDecisionResult decision;
@@ -1198,12 +1194,12 @@ internal static class AgentHostEstablishClanCompanionLoop
                 }
                 catch (AgentHostException exception) when (AgentHostProviderDecisionRecovery.CanRetry(exception.Code, rejectedProviderDecisions))
                 {
-                    decisions++;
+                    ledger.RecordUnsentDecision();
                     rejectedProviderDecisions++;
                     decisionFeedback = AgentHostProviderDecisionRecovery.BuildFeedback(exception.Code, catalog, controls);
-                    trace.Add(new JsonObject
+                    ledger.Trace.Add(new JsonObject
                     {
-                        ["iteration"] = decisions,
+                        ["iteration"] = ledger.Decisions,
                         ["stage"] = "decision-rejected-before-native",
                         ["rejectionCode"] = exception.Code,
                         ["nativeActionSent"] = false,
@@ -1213,18 +1209,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                     });
                     continue;
                 }
-                decisions++;
-                promptTokens += decision.PromptTokens ?? 0;
-                completionTokens += decision.CompletionTokens ?? 0;
-                routes.Add(new JsonObject
-                {
-                    ["decision"] = decisions,
-                    ["requestedModelId"] = provider.ModelId,
-                    ["responseModelId"] = decision.ModelId,
-                    ["routedVia"] = decision.RoutedVia,
-                    ["promptTokens"] = decision.PromptTokens,
-                    ["completionTokens"] = decision.CompletionTokens
-                });
+                ledger.RecordDecision(decision);
 
                 if (ReadBoolean(decision.Decision, "stop") && !controls.Any(control => control?.GetValue<string>() == "stop"))
                 {
@@ -1232,7 +1217,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                         return BuildResult("failed", "companion-stop-recovery-exhausted", "The model kept requesting a stop while still inside a Native Mission; no map replan was claimed.", "companion-stop-recovery-exhausted", state, journal, objective);
                     rejectedProviderDecisions++;
                     decisionFeedback = AgentHostProviderDecisionRecovery.BuildFeedback("provider-control-unavailable", catalog, controls);
-                    trace.Add(BuildStep(decisions, observation, decision.Decision, null, state, "rejected",
+                    ledger.Trace.Add(BuildStep(ledger.Decisions, observation, decision.Decision, null, state, "rejected",
                         new JsonObject { ["kind"] = "decision-rejected-before-native", ["message"] = decisionFeedback["requiredNextStep"]?.DeepClone() }));
                     continue;
                 }
@@ -1263,7 +1248,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                             elapsed.Token);
                         var waitedState = movementWatch.NativeState;
                         actionsExecuted += movementWatch.MapPartyTargetPollCount + (movementWatch.PauseReceipt is null ? 0 : 1);
-                        var waitStep = BuildStep(decisions, observation, decision.Decision, null, waitedState,
+                        var waitStep = BuildStep(ledger.Decisions, observation, decision.Decision, null, waitedState,
                             movementWatch.InterruptedByVisibleHostileBandit ? AgentHostNativeMapMovementMonitor.FailureCode : "bounded-native-observation");
                         waitStep["movementMonitor"] = new JsonObject
                         {
@@ -1271,7 +1256,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                             ["visibleHostileBanditTargets"] = movementWatch.VisibleHostileBanditTargets.DeepClone(),
                             ["nativePauseReceipt"] = movementWatch.PauseReceipt?.DeepClone()
                         };
-                        trace.Add(waitStep);
+                        ledger.Trace.Add(waitStep);
                         if (movementWatch.InterruptedByVisibleHostileBandit)
                             return BuildResult("interrupted", AgentHostNativeMapMovementMonitor.FailureCode,
                                 "A Native visible hostile Bandit interrupted Companion travel. The EYC parent must resolve the current map target before resuming the Companion route.",
@@ -1282,7 +1267,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                         await Task.Delay(TimeSpan.FromSeconds(waitSeconds), elapsed.Token);
                         using var afterWait = await campaignClient.ReadStateAsync(elapsed.Token);
                         var waitedState = ReadState(afterWait.RootElement);
-                        trace.Add(BuildStep(decisions, observation, decision.Decision, null, waitedState, "bounded-native-observation"));
+                        ledger.Trace.Add(BuildStep(ledger.Decisions, observation, decision.Decision, null, waitedState, "bounded-native-observation"));
                     }
                     continue;
                 }
@@ -1296,7 +1281,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                     if (ReadString(decision.Decision, "action") == "missionNavigateToAgent" &&
                         rejection.StartsWith("Native navigation requires current listed AgentIndex and DurationSeconds values:", StringComparison.Ordinal))
                         decisionFeedback["requiredNextStep"] = rejection;
-                    trace.Add(BuildStep(decisions, observation, decision.Decision, null, state, "rejected",
+                    ledger.Trace.Add(BuildStep(ledger.Decisions, observation, decision.Decision, null, state, "rejected",
                         new JsonObject
                         {
                             ["kind"] = "decision-rejected-before-native",
@@ -1322,7 +1307,7 @@ internal static class AgentHostEstablishClanCompanionLoop
                         ?? throw new AgentHostException("companion-native-response-invalid", "Native returned no Companion action receipt.");
                     if (ReadString(receipt, "status") != "completed")
                     {
-                        trace.Add(BuildStep(decisions, observation, decision.Decision, SafeReceipt(receipt, action, selectedSettlementId, targetHeroId, safeTowns), state, actionStarted));
+                        ledger.Trace.Add(BuildStep(ledger.Decisions, observation, decision.Decision, SafeReceipt(receipt, action, selectedSettlementId, targetHeroId, safeTowns), state, actionStarted));
                         continue;
                     }
                     actionsExecuted++;
@@ -1403,7 +1388,7 @@ internal static class AgentHostEstablishClanCompanionLoop
 
                     using var refreshed = await campaignClient.ReadStateAsync(elapsed.Token);
                     var afterState = ReadState(refreshed.RootElement);
-                    trace.Add(BuildStep(decisions, observation, decision.Decision, SafeReceipt(receipt, action, selectedSettlementId, targetHeroId, safeTowns), afterState, actionStarted));
+                    ledger.Trace.Add(BuildStep(ledger.Decisions, observation, decision.Decision, SafeReceipt(receipt, action, selectedSettlementId, targetHeroId, safeTowns), afterState, actionStarted));
                 }
             }
 
@@ -1455,13 +1440,13 @@ internal static class AgentHostEstablishClanCompanionLoop
                     ["checkpointWriteCount"] = checkpointWriteCount,
                     ["lastCheckpointWriteStatus"] = lastCheckpointWriteStatus
                 },
-                ["decisions"] = decisions,
+                ["decisions"] = ledger.Decisions,
                 ["actionsExecuted"] = actionsExecuted,
-                ["promptTokens"] = promptTokens,
-                ["completionTokens"] = completionTokens,
+                ["promptTokens"] = ledger.PromptTokens,
+                ["completionTokens"] = ledger.CompletionTokens,
                 ["elapsedSeconds"] = Math.Round(Stopwatch.GetElapsedTime(start).TotalSeconds, 3),
-                ["providerRouteHistory"] = routes.DeepClone(),
-                ["trace"] = trace.DeepClone(),
+                ["providerRouteHistory"] = ledger.Routes.DeepClone(),
+                ["trace"] = ledger.Trace.DeepClone(),
                 ["currentCompanionCount"] = finalState?["storyModeEstablishClan"]?["companions"]?["current"]?.DeepClone(),
                 ["journalObjectiveSnapshot"] = journal?.DeepClone(),
                 ["objectiveSnapshot"] = objective?.DeepClone(),
