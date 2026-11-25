@@ -494,6 +494,15 @@ if ($agentHostEstablishClanAutonomySource -notmatch 'AgentHostBattleSimulationLo
     $agentHostDecisionCycleSource -notmatch 'Never choose surrender in the ordinary Renown BattleSimulation route') {
     throw 'Only an approved incidental encounter in Captivity-recovery mode may use current Native surrender after Send Troops and Leave are disabled; ordinary Renown Simulation must remain separate.'
 }
+if ($agentHostCampaignLoopSource -notmatch 'TrainingIssueSkipReason\(sale\["finalNativeState"\] as JsonObject, maxDecisions - runLedger\.Decisions\)' -or
+    $agentHostCampaignLoopSource -notmatch 'no-reachable-training-issue' -or
+    $agentHostCampaignLoopSource -notmatch 'training-issue-discovery-longer-than-remaining-budget' -or
+    $agentHostCampaignLoopSource -notmatch '\["skippedReason"\] = trainingSkipReason' -or
+    $agentHostTrainingIssueLoopSource -notmatch 'gold-objective-skips-training-issue-discovery-unless-a-giver-is-visible-and-the-remaining-budget-covers-its-search' -or
+    $agentHostTrainingIssueLoopSource -notmatch 'HasReachableTrainingIssue\(JsonObject\? native\)' -or
+    $agentHostTrainingIssueLoopSource -notmatch 'GetVisibleAvailableTrainingIssueGivers\(state\)\.Length > 0') {
+    throw 'The Gold objective may enter the retainers-training Issue route only when a training Issue is already reachable and the remaining Campaign budget can cover its bounded discovery; the battle-loot fallback that can supply goods must keep the budget (TestResults/20261126-live-host-opening4 spent a whole run in training discovery).'
+}
 if ($agentHostEstablishClanAutonomySource -notmatch 'failed-objective-native-actions-reopened-other-routes' -or
     $agentHostEstablishClanAutonomySource -notmatch 'HasObjectiveSnapshotProgressChanged\(snapshot, child\["objectiveSnapshot"\] as JsonObject\)' -or
     $agentHostEstablishClanAutonomySource -notmatch 'BuildObjectiveRouteAvailabilityFingerprint' -or

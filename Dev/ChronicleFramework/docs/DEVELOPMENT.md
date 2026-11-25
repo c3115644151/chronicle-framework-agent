@@ -1,7 +1,14 @@
 ﻿# Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.713
+Contract version: 7.714
 
+## Contract 7.714 — the Gold objective spends its budget on the leg that can pay
+
+The Gold objective used to try three income legs in a fixed order: a Native Goods sale, then a retainer-training Issue, then a battle-loot fallback. The training leg may spend up to `MaximumTrainingIssueDiscoveryDecisions` (32) decisions searching settlements for an Issue that is not there, while the fallback that produces saleable goods needs a handful. `TestResults/20261126-live-host-opening4` shows the cost: a 26-decision run spent 21 actions and every remaining decision walking between `castle_EW3` and `castle_village_EW3_1`, never moved Gold off 1022, and ended with `training-issue-budget-exhausted` without ever calling the fallback.
+
+`AgentHostEstablishClanTrainingIssueLoop.HasReachableTrainingIssue` now answers whether an Issue is already within reach (a training Issue in the Journal, a training marker on a hero in the current settlement overlay, or the villagers-in-need conversation). `AgentHostCampaignLoop.TrainingIssueSkipReason(nativeStateReceipt, remainingDecisions)` returns `no-reachable-training-issue` when nothing is reachable and `training-issue-discovery-longer-than-remaining-budget` when fewer than 32 decisions remain. On either reason the training leg is skipped, the battle-loot fallback takes the budget, and the receipt records `trainingIssueAttempt.skippedReason`.
+
+`harness/gate/05-observation-and-provider.ps1` asserts both helpers and the skip reasons, and the self-test set grows to 431 scenarios with no model calls.
 ## Contract 7.713 — the battle and the market are one chain, and a probe now proves it
 
 The battle fixture proved that Native postbattle looting fills the player inventory, and the market probes proved that a quote settles into Gold. Neither proved the chain, and no live-model run has ever crossed it: the campaign loop and the Gold slice are separate subflows, so the model must finish a fight, return to the planner, and pick the Gold objective before looted goods can become money.

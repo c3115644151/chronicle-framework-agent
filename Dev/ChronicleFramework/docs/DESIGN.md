@@ -254,6 +254,9 @@ EYC 这条产品路线的金币动词最窄：`agenthost/AgentHostEstablishClanG
 这条链顺带钉住两个读数细节，都写在 `docs/Research/E/EconomyAndTrade.md`：战后取物走的是 `inventoryHandler.ExecuteLootingScript()`（`mod/Actions/ChronicleAgentProtocol.Actions.Party.cs:164`），所以战利品进的是**玩家背包**而不是队伍的 Loot 侧，之后就能当普通货物卖；报价字段是 `inventoryLogicUnitPrice`，它在城镇卖盘上也等于实际结算单价（3 件盐 ×30 = 90），所以主机 `GetSellableGoods` 用「单价 > 0」筛候选是成立的。我自己在第一版探针里把字段写成 `unitPrice` 读成 0、差点据此判断主机漏掉可卖货——记录在这里，因为读数口径错一次就会把工具缺陷写进产品结论。
 
 场景层面的结论：「以战养战」这一族的链路是通的，缺的不是动词，是**一次运行里把它串起来**。战役循环与金币切片是两个 slice：打完一场仗拿到 6 件货之后，模型必须先结束战斗子流程回到规划器，再选金币目标，才能把背包里的东西换成一笔钱。这条串法在 `opening2`/`opening4` 都没发生过——那两局一场仗都没打，只卖了开局背包里那一份粮。
+**金币目标的三条腿有成本差，而顺序曾经是最贵的先跑。** 主机把「涨金币」拆成三条收入路线：①卖 Goods（`AgentHostEstablishClanGoldSaleLoop`）②接一个领主训练委托、把借调兵升满再送回（`AgentHostEstablishClanTrainingIssueLoop`）③打一支可见敌意强盗、拿战利品再卖（`AgentHostBattleSimulationLoop` 的 loot fallback）。②在没有任何可见委托时要靠「逐村找」来发现，上限 32 个决策；③通常几个决策就能出结果。`opening4` 的终局正是这样死的：26 个决策的整场预算，先花 21 个动作在②上搜委托（`mapSettlementTargets` → `move castle_EW3` → 两次 `observeAgain 10s` → 离开 → `move castle_village_EW3_1`），金币一直是 1022，然后带着 `training-issue-budget-exhausted` 结束——③一次都没被调用过。
+
+现在②只有在「委托已经够得着」（Journal 里已有训练委托、当前聚落 overlay 里站着带训练标记的委托人、或村民求助对话已打开）**且**剩余预算 ≥ 32 时才进入，否则直接把预算交给③，并在回执里写 `trainingIssueAttempt.skippedReason`（`no-reachable-training-issue` 或 `training-issue-discovery-longer-than-remaining-budget`）。这条规则对场景设计的意义是通用的：**当一条收入路线需要先做一次昂贵的搜索，而另一条能立刻产出时，先跑贵的那条等于用整场预算换一个「可能没有」的答案。**
 
 ### 9.3 决策面：模型做决定的那一刻手里有哪些动词
 

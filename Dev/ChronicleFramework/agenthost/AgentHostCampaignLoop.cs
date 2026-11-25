@@ -750,31 +750,36 @@ internal static class AgentHostCampaignLoop
                             var sale = await AgentHostEstablishClanGoldSaleLoop.RunAsync(childRequest.RootElement, client, goldSaleClient, provider, runLedger, subToken);
                             if (!AgentHostEstablishYourClanAutonomyLoop.ShouldUseBattleLootFallback(sale)) return sale;
 
-                            var trainingRequestNode = JsonNode.Parse(childRequest.RootElement.GetRawText())?.AsObject()
-                                ?? throw new AgentHostException("establish-clan-training-issue-request-invalid", "The active Gold objective could not be cloned for a current visible Native training Issue.");
-                            trainingRequestNode["goal"] = "Raise the current original Establish Your Clan Gold Journal by completing a currently visible direct Native Train Troops for Retainers Issue, upgrading its borrowed troops through PartyVM and returning them to the giver through the visible Native inquiry. Re-read the EYC Journal after the real payout.";
-                            using var trainingRequest = JsonDocument.Parse(trainingRequestNode.ToJsonString());
-                            var training = await AgentHostEstablishClanTrainingIssueLoop.RunAsync(trainingRequest.RootElement, trainingIssueClient, battleClient, provider, runLedger, subToken);
-                            AgentHostHarnessProgressTrace.RecordObjectiveSubflowResult("goldTrainingIssueIncome", training);
-                            training["resultKind"] = "establish-clan-gold-sale-with-training-issue-route";
-                            training["actionsExecuted"] = ReadInt(sale, "actionsExecuted", 0) + ReadInt(training, "actionsExecuted", 0);
-                            training["saleActionsExecuted"] = ReadInt(sale, "saleActionsExecuted", 0);
-                            training["goldSaleFailureCode"] = ReadString(sale, "failureCode");
-                            training["goldObjectiveVerified"] = training["eycGoldJournalDelta"] is JsonValue trainingDeltaNode &&
-                                trainingDeltaNode.TryGetValue<double>(out var trainingGoldDelta) && trainingGoldDelta > 0;
-                            if (ReadString(training, "status") == "completed" || ReadBoolean(training, "directOfferAccepted")) return training;
+                            var trainingSkipReason = TrainingIssueSkipReason(sale["finalNativeState"] as JsonObject, maxDecisions - runLedger.Decisions);
+                            JsonObject? training = null;
+                            if (trainingSkipReason is null)
+                            {
+                                var trainingRequestNode = JsonNode.Parse(childRequest.RootElement.GetRawText())?.AsObject()
+                                    ?? throw new AgentHostException("establish-clan-training-issue-request-invalid", "The active Gold objective could not be cloned for a current visible Native training Issue.");
+                                trainingRequestNode["goal"] = "Raise the current original Establish Your Clan Gold Journal by completing a currently visible direct Native Train Troops for Retainers Issue, upgrading its borrowed troops through PartyVM and returning them to the giver through the visible Native inquiry. Re-read the EYC Journal after the real payout.";
+                                using var trainingRequest = JsonDocument.Parse(trainingRequestNode.ToJsonString());
+                                training = await AgentHostEstablishClanTrainingIssueLoop.RunAsync(trainingRequest.RootElement, trainingIssueClient, battleClient, provider, runLedger, subToken);
+                                AgentHostHarnessProgressTrace.RecordObjectiveSubflowResult("goldTrainingIssueIncome", training);
+                                training["resultKind"] = "establish-clan-gold-sale-with-training-issue-route";
+                                training["actionsExecuted"] = ReadInt(sale, "actionsExecuted", 0) + ReadInt(training, "actionsExecuted", 0);
+                                training["saleActionsExecuted"] = ReadInt(sale, "saleActionsExecuted", 0);
+                                training["goldSaleFailureCode"] = ReadString(sale, "failureCode");
+                                training["goldObjectiveVerified"] = training["eycGoldJournalDelta"] is JsonValue trainingDeltaNode &&
+                                    trainingDeltaNode.TryGetValue<double>(out var trainingGoldDelta) && trainingGoldDelta > 0;
+                                if (ReadString(training, "status") == "completed" || ReadBoolean(training, "directOfferAccepted")) return training;
 
-                            var retryableIssueSearch = ReadString(training, "failureCode") is "training-issue-no-visible-direct-offer" or
-                                "training-issue-no-safe-settlement-visible" or "training-issue-direct-offer-unavailable" or
-                                "training-issue-search-budget-exhausted";
-                            var trainingFinalContext = (training["finalNativeState"]?["state"]?["context"] as JsonObject);
-                            var trainingEndedOnFreeMap = ReadString(trainingFinalContext, "gameState") == "MapState" &&
-                                ReadString(trainingFinalContext, "menuId") is null && !ReadBoolean(trainingFinalContext, "encounterActive") &&
-                                !ReadBoolean(trainingFinalContext, "escapeMenuOpen") && !ReadBoolean(trainingFinalContext, "inquiryOpen") &&
-                                !ReadBoolean((trainingFinalContext?["captivity"] as JsonObject), "isCaptive");
-                            if (!retryableIssueSearch || !trainingEndedOnFreeMap) return training;
+                                var retryableIssueSearch = ReadString(training, "failureCode") is "training-issue-no-visible-direct-offer" or
+                                    "training-issue-no-safe-settlement-visible" or "training-issue-direct-offer-unavailable" or
+                                    "training-issue-search-budget-exhausted";
+                                var trainingFinalContext = (training["finalNativeState"]?["state"]?["context"] as JsonObject);
+                                var trainingEndedOnFreeMap = ReadString(trainingFinalContext, "gameState") == "MapState" &&
+                                    ReadString(trainingFinalContext, "menuId") is null && !ReadBoolean(trainingFinalContext, "encounterActive") &&
+                                    !ReadBoolean(trainingFinalContext, "escapeMenuOpen") && !ReadBoolean(trainingFinalContext, "inquiryOpen") &&
+                                    !ReadBoolean((trainingFinalContext?["captivity"] as JsonObject), "isCaptive");
+                                if (!retryableIssueSearch || !trainingEndedOnFreeMap) return training;
+                            }
 
-                            var battleRequestNode = JsonNode.Parse(trainingRequest.RootElement.GetRawText())?.AsObject()
+                            var battleRequestNode = JsonNode.Parse(childRequest.RootElement.GetRawText())?.AsObject()
                                 ?? throw new AgentHostException("establish-clan-gold-loot-request-invalid", "The Native no-goods sale result could not be cloned for its bounded battle-loot fallback.");
                             battleRequestNode["goal"] = "The original Establish Your Clan Gold Journal objective is unmet and the current Native PlayerInventory has no transferable Goods. Resolve one currently visible hostile Bandit through the original Campaign BattleSimulation, take only currently offered Native loot, and return to the EYC planner. This may produce saleable goods but does not prove Gold progress; do not enter a real-time Mission or control the Campaign clock.";
                             using var battleRequest = JsonDocument.Parse(battleRequestNode.ToJsonString());
@@ -782,15 +787,17 @@ internal static class AgentHostCampaignLoop
                                 recoverPlayerCaptivity: true);
                             AgentHostHarnessProgressTrace.RecordObjectiveSubflowResult("goldLootBattleFallback", battle);
                             battle["resultKind"] = "establish-clan-gold-sale-with-battle-loot-fallback";
-                            battle["actionsExecuted"] = ReadInt(sale, "actionsExecuted", 0) + ReadInt(training, "actionsExecuted", 0) + ReadInt(battle, "actionsExecuted", 0);
+                            battle["actionsExecuted"] = ReadInt(sale, "actionsExecuted", 0) + (training is null ? 0 : ReadInt(training, "actionsExecuted", 0)) + ReadInt(battle, "actionsExecuted", 0);
                             battle["saleActionsExecuted"] = ReadInt(sale, "saleActionsExecuted", 0);
-                            battle["trainingIssueAttempt"] = new JsonObject
-                            {
-                                ["failureCode"] = ReadString(training, "failureCode"),
-                                ["termination"] = ReadString(training, "termination"),
-                                ["directOfferAccepted"] = ReadBoolean(training, "directOfferAccepted"),
-                                ["issueQuestId"] = ReadString(training, "trainingIssueQuestId")
-                            };
+                            battle["trainingIssueAttempt"] = training is null
+                                ? new JsonObject { ["skippedReason"] = trainingSkipReason }
+                                : new JsonObject
+                                {
+                                    ["failureCode"] = ReadString(training, "failureCode"),
+                                    ["termination"] = ReadString(training, "termination"),
+                                    ["directOfferAccepted"] = ReadBoolean(training, "directOfferAccepted"),
+                                    ["issueQuestId"] = ReadString(training, "trainingIssueQuestId")
+                                };
                             battle["goldSaleFailureCode"] = ReadString(sale, "failureCode");
                             battle["goldSaleTermination"] = ReadString(sale["termination"] as JsonObject, "reason");
                             battle["goldObjectiveVerified"] = false;
@@ -1155,6 +1162,20 @@ internal static class AgentHostCampaignLoop
 
     internal static bool IsSupportedRequestedActionSet(HashSet<string> requestedActions) =>
         SupportedActionProfiles.Any(profile => requestedActions.SetEquals(profile.Actions));
+
+    // The Gold objective tries three income routes in order: a Native Goods sale, a retainer-training Issue, and a
+    // battle-loot fallback. The training route may spend up to MaximumTrainingIssueDiscoveryDecisions decisions
+    // searching settlements for an Issue that is not there, so it is entered only when an Issue is already reachable
+    // and the remaining budget can cover that search; otherwise the battle-loot route, which acts in a handful of
+    // decisions, gets the budget instead. Evidence: TestResults/20261126-live-host-opening4 spent a whole
+    // 26-decision run inside training discovery and died with training-issue-budget-exhausted before the fallback
+    // that would have produced saleable loot could run.
+    internal static string? TrainingIssueSkipReason(JsonObject? nativeStateReceipt, int remainingDecisions)
+    {
+        if (!AgentHostEstablishClanTrainingIssueLoop.HasReachableTrainingIssue(nativeStateReceipt)) return "no-reachable-training-issue";
+        if (remainingDecisions < AgentHostEstablishClanTrainingIssueLoop.MaximumTrainingIssueDiscoveryDecisions) return "training-issue-discovery-longer-than-remaining-budget";
+        return null;
+    }
 
     private static JsonObject BuildObservation(JsonObject native, JsonArray? targets, string? targetId, string? targetName, bool goalVerified)
     {

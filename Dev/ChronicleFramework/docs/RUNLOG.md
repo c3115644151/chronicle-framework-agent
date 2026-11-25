@@ -1187,3 +1187,13 @@ $env:CHRONICLE_LLM_MAX_TOKENS='1000'
 收据 `TestResults/20261126-battle-loot-sale-4/BattleLootSaleProbeResult.json`（17 条断言全真）：战利品 9 件全部入包（玩家可见物品 30→36），城镇 `town_ES3`「波罗斯」卖出 3 件 `salt` 单价 30，原版回执 `amount=3`、`nativeTransactionAmount=-90`，金币 2277→2367，商人金 54361→54271，背包 76→73，`campaignDay` 91179.353 前后不动，时钟 `Stop→Stop`。
 
 三次失败都出在探针自己身上，记下来省下一代：`$_.unitPrice` 写成 `unitPrice`（真实字段是 `inventoryLogicUnitPrice`）导致「市场不收战利品」的假结论；`[ordered]@{}` 里把逗号写在 `@()` 后面会报「',' 后缺少表达式」；`battleSimulation.playerWon` 在该夹具上不暴露（回执记 null，不参与断言）。
+
+## 2026-11-26 金币目标的收入腿顺序：训练委托先吃掉整场预算（契约 7.714）
+
+`TestResults/20261126-live-host-opening4`（llama3.2:3b、json_schema、26 决策 / 54 动作 / 45,476 输入 token / 570 输出 token、夹具 `ChronicleEycDev-opening-20261126`）的收据读法：`Temp/AgentHostProgress.jsonl` 里 `campaign-agent-loop` 10 条决策、`native-storymode-training-issue-gold` 7 条；`objective-subflow-result` 依次是 `gold` completed（`one-native-sale-and-journal-gold-increase-verified`，23 动作 / 14 决策，day 91077.375→91077.604，town_ES3，金币 1000→1022）、`goldTrainingIssueIncome` failed（`training-issue-budget-exhausted`，21 动作 / 26 决策）、外层 `gold` 同因（25 动作 / 26 决策）。
+
+训练腿的 7 条决策：`mapSettlementTargets` → `move castle_EW3`（城堡没有训练委托）→ `observeAgain 10s` ×2 → `menuSelect castle_outside/town_outside_leave` → `mapSettlementTargets` → `move castle_village_EW3_1`。金币全程 1022，战斗战利品兜底一次都没跑到。
+
+根因是预算口径而不是模型偏好：`MaximumTrainingIssueDiscoveryDecisions = 32`（`agenthost/AgentHostEstablishClanTrainingIssueLoop.cs:13`），而整场只有 26 个决策；发现预算永远等不到自己的止损点，先耗尽共享预算，于是带着 `training-issue-budget-exhausted` 退出，排在后面的战斗兜底拿不到任何决策。
+
+改法（`AgentHostCampaignLoop.TrainingIssueSkipReason` + `AgentHostEstablishClanTrainingIssueLoop.HasReachableTrainingIssue`）：训练腿只在「委托已经够得着」且「剩余预算 ≥ 32」时进入，否则跳过并记录 `trainingIssueAttempt.skippedReason`。自测新增场景 `gold-objective-skips-training-issue-discovery-unless-a-giver-is-visible-and-the-remaining-budget-covers-its-search`（431 场景全绿、模型调用 0）。

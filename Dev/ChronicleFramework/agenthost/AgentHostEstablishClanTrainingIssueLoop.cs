@@ -55,6 +55,30 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
             throw new AgentHostException("training-issue-self-test-discovery-budget-not-bounded", "Only an unproductive free-map search is capped after 32 local decisions; an accepted or active Native training Issue and an already-moving MainParty remain eligible to finish safely.");
         var discoveryLimitScenario = new { scenario = "training-issue-search-returns-to-parent-after-32-unproductive-decisions-but-does-not-cut-off-an-active-issue", maximumDiscoveryDecisions = MaximumTrainingIssueDiscoveryDecisions, passed = true };
 
+        var noReachableIssue = NativeState(null, null, new JsonArray());
+        var skipWithoutIssue = AgentHostCampaignLoop.TrainingIssueSkipReason(noReachableIssue, MaximumTrainingIssueDiscoveryDecisions * 4);
+        var reachableGiver = NativeState("village", "village-a", new JsonArray(
+            new JsonObject { ["id"] = "leave", ["available"] = true, ["enabled"] = true, ["isLeave"] = true }),
+            new JsonArray(new JsonObject
+            {
+                ["heroId"] = "hero-training",
+                ["questMarkers"] = new JsonArray(new JsonObject { ["type"] = "AvailableIssue", ["title"] = "为领主训练士兵" })
+            }));
+        var skipShortBudget = AgentHostCampaignLoop.TrainingIssueSkipReason(reachableGiver, MaximumTrainingIssueDiscoveryDecisions - 1);
+        var enterWithBudget = AgentHostCampaignLoop.TrainingIssueSkipReason(reachableGiver, MaximumTrainingIssueDiscoveryDecisions);
+        if (skipWithoutIssue != "no-reachable-training-issue" ||
+            skipShortBudget != "training-issue-discovery-longer-than-remaining-budget" || enterWithBudget is not null)
+            throw new AgentHostException("training-issue-self-test-gold-route-budget-order-failed",
+                "The Gold objective may enter the training Issue route only when a training Issue is already reachable and the remaining Campaign budget can cover its bounded discovery; otherwise the battle-loot fallback keeps the budget.");
+        var goldRouteBudgetScenario = new
+        {
+            scenario = "gold-objective-skips-training-issue-discovery-unless-a-giver-is-visible-and-the-remaining-budget-covers-its-search",
+            maximumDiscoveryDecisions = MaximumTrainingIssueDiscoveryDecisions,
+            skippedWithoutGiver = skipWithoutIssue,
+            skippedWithShortBudget = skipShortBudget,
+            passed = true
+        };
+
         var villageMenu = NativeState("village", "village-a", new JsonArray(
             new JsonObject { ["id"] = "leave", ["available"] = true, ["enabled"] = true, ["isLeave"] = true }),
             new JsonArray(new JsonObject
@@ -368,6 +392,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
         return [
             truncatedResponseRecoveryScenario,
             discoveryLimitScenario,
+            goldRouteBudgetScenario,
             new { scenario = "training-issue-targets-only-current-visible-available-issue-givers", passed = true },
             new { scenario = "training-issue-movement-observation-hides-settlement-targets-rejected-by-current-catalog", passed = true },
             new { scenario = "training-issue-accepts-only-the-source-identified-direct-quest-option", passed = true },
@@ -1274,6 +1299,21 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                     .Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => (JsonNode?)JsonValue.Create(id)).ToArray())
             }
         });
+    }
+
+    // A training-Issue route is only worth entering when the Issue is already reachable: a training Issue
+    // is in the Journal, a training giver stands in the current settlement overlay, or the villagers-in-need
+    // conversation is open. Otherwise the loop has to search settlements for up to
+    // MaximumTrainingIssueDiscoveryDecisions decisions before it can conclude there is nothing to do, and the
+    // Gold objective enters this route ahead of the battle-loot fallback that can actually supply goods
+    // (TestResults/20261126-live-host-opening4 spent a whole 26-decision run in training discovery and never
+    // reached that fallback).
+    internal static bool HasReachableTrainingIssue(JsonObject? native)
+    {
+        if (native?["state"] is not JsonObject state) return false;
+        return !string.IsNullOrWhiteSpace(FindTrainingIssueQuestId(state)) ||
+            GetVisibleAvailableTrainingIssueGivers(state).Length > 0 ||
+            AgentHostEstablishClanRecruitmentLoop.IsVillagersInNeedConversation(state);
     }
 
     private static string[] GetVisibleAvailableTrainingIssueGivers(JsonObject state, IReadOnlySet<string>? excludedHeroIds = null) =>

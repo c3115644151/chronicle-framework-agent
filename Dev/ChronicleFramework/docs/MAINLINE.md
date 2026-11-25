@@ -711,6 +711,11 @@ AgentHostRuntime 的切片动作集必须与 `AgentHostCampaignLoop.SupportedAct
 夹具存档 `ChronicleW7P-manual-20261101-eyc-complete` 周边没有敌意队伍（`mapPartyTargets` 只有 3 支商队，`nearbyParties` 无 hostile，gold 2277 / members 25 / day 91179.21），因此自然战斗要么靠地图上另找劫匪，要么用 harness fixture 模式生成 `chronicle_harness_looters`。`BattleLootSale` 用后者，并在收据 `lootOrigin` 里写明 `seeded-fixture-after-native-autoresolve(count=N,naturalDrop=False)`，不把播种来的战利品说成自然掉落。
 
 战役循环与金币切片是两个 slice：一场仗的战利品要变成金币，模型必须先结束战斗子流程回到规划器、再选金币目标，才能把背包里的货卖掉。`opening2`/`opening4` 里这条串法一次都没发生——那两局一场仗都没打，只卖了开局背包里的那一份粮。
+金币目标的收入腿与预算顺序（`agenthost/AgentHostCampaignLoop.cs` `ExecuteGoldObjectiveAsync`）：①Native Goods 卖出（`AgentHostEstablishClanGoldSaleLoop`）→ ②领主训练委托（`AgentHostEstablishClanTrainingIssueLoop`）→ ③战斗战利品兜底（`AgentHostBattleSimulationLoop`，`recoverPlayerCaptivity: true`）。②在无可见委托时靠逐聚落搜索发现，止损点是 `MaximumTrainingIssueDiscoveryDecisions = 32`（`agenthost/AgentHostEstablishClanTrainingIssueLoop.cs:13`）个本地决策；③通常数个决策即有结果。
+
+`TestResults/20261126-live-host-opening4` 证明这套顺序会吃掉整场预算：26 决策的运行里，②用了 21 动作 / 26 决策在 `castle_EW3` 与 `castle_village_EW3_1` 之间找委托（城堡本身没有训练委托），金币恒为 1022，最终 `training-issue-budget-exhausted`，③一次未被调用。
+
+现行规则：`TrainingIssueSkipReason(nativeStateReceipt, remainingDecisions)` 在「无可达训练委托」（`HasReachableTrainingIssue`：Journal 里已有训练委托 / 当前聚落 overlay 里有带训练标记的委托英雄 / 村民求助对话已打开）时返回 `no-reachable-training-issue`，在剩余预算 < 32 时返回 `training-issue-discovery-longer-than-remaining-budget`；命中任一即跳过②，把预算交给③，并在回执 `trainingIssueAttempt.skippedReason` 里留痕。
 ### Campaign存档内的Agent目标Checkpoint
 
 本机1.4.8的`CampaignBehaviorBase.SyncData(IDataStore)`会随Native Campaign存档序列化行为字段；
