@@ -179,7 +179,7 @@ if (-not (Test-Path (Join-Path $agentHostRoot 'AgentHostCampaignStateFacts.cs'))
     $agentHostCampaignStateFactsSource -notmatch 'campaign-state-facts-hostile-encounter-misclassified' -or
     $agentHostCompanionLoopSource -notmatch 'establish-clan-companion-training-field-menu-misclassified' -or
     $agentHostRecruitmentLoopSource -notmatch 'establish-clan-recruitment-training-field-menu-not-exitable' -or
-    $agentHostRecruitmentLoopSource -notmatch 'while \(decisions < maxDecisions\)' -or
+    $agentHostRecruitmentLoopSource -notmatch 'while \(ledger\.Decisions < maxDecisions\)' -or
     $agentHostRecruitmentLoopSource -notmatch 'decision.Decision, "stop"\) && \(catalog.Count > 0 \|\| controls.Count > 0\)' -or
     $agentHostRecruitmentLoopSource -notmatch 'safe-stop-rejected-with-listed-actions' -or
     $agentHostRecruitmentLoopSource -notmatch 'Choose the currently listed recruitOptions action now' -or
