@@ -6,7 +6,26 @@ Chronicle的核心产品是AI作为单机战役玩家，直接控制原版`Hero.
 
 MainHero是首个Agent的原生行动身体和基础设施，不等于首个产品门禁就是最终玩法。当前“建立你的家族”只是一项有边界的第一段长程验收；完成它只能证明该段连续自主闭环，之后仍须逐步扩展到更广泛的战役自治。陪伴者/同伴代理可能提供长期共处的玩家体验，但不是天然更简单的技术起点：同伴留在`MainParty`时没有独立的Campaign Party Think身体，赋予它独立目标与行动还需新增身份、行动权限、原版AI冲突仲裁及玩家影响规则。因此本阶段先打通MainHero自治底座；不把同伴路线删除，保留为后续玩法设计候选，并在主角闭环形成后按玩家体验和引擎成本重新评估。
 
-产品纵向门禁从一个全新、自然创建且无预处理进度的StoryMode战役开始；玩家可走原版角色创建和开局流程。当前首测约定：若新战役自动进入Training Field教程，玩家可在AI接管前使用原版兄长对话的“跳过教程”选项及确认；它不是角色创建菜单选项，必须在首个Campaign MapState前于原版训练场Mission完成。用户确认该对话项本身就是直接离开教程的分支；若确认后仍留在3D场景，长按Tab可用原版Leave Area离开，但必须先等兄长对话UI退出。源码/运行又证实：2次对话继续后，原版可已不显示对话UI而`ConversationManager`仍报告在进度中；Harness以Native `MissionScreen.IsConversationActive`识别该UI边界，UI已关闭且无选项才允许原版长按Tab兜底，随后首次Campaign MapState仍可能停在`tutorial_training_field`菜单，另有原版`training_field_leave`菜单动作；该Town入口与3D场景TAB是不同操作。跳过自然结束Tutorial并激活`Establish Your Clan`后，Map上可能紧接着出现原版“通知”Yes/No、首块龙旗碎片棕色SceneNotification、家族名TextInquiry、BannerEditor及“潜行教程”确认。用户要求这些姓名/旗帜步骤也由AI完成，而不额外要求玩家逐步代点；AI需走原版当前UI/VM链并在结束后回Map，再进入四目标规划。本机源码与真正新建档的运行已确认最后这项“潜行教程/继续”Inquiry仅启动独立的`VillagersInNeed`任务，不直接进入3D Mission；该任务不是EYC四目标之一，不能因其自动激活就让Agent偏离当前EYC Journal。此链所有动作须按当前Native界面逐步观测/验证，不允许预制档、注入Quest/资源、直接改Clan/Banner或预先达成目标。AI随后从MainHero第一个稳定Campaign MapState接管，并由真实模型自主完成“建立你的家族”(Establish Your Clan)四项目标：Gold 2000、达到当前藏身处战斗人数门槛、Renown 50、招募至少一名同伴。若AI接管时Tutorial仍未结束，本首测不宣称AI能完成教程；全教程自治是独立后续扩展。每项都以Quest Journal/Native状态和最终原版Quest完成后验核验。这是首个长程闭环，不声称覆盖骑砍所有玩法。
+产品纵向门禁从一个全新、自然创建且无预处理进度的StoryMode战役开始；
+玩家可走原版角色创建和开局流程。
+当前首测约定：若新战役自动进入Training Field教程，玩家可在AI接管前使用原版兄长对话的“跳过教程”选项及确认；
+它不是角色创建菜单选项，必须在首个Campaign MapState前于原版训练场Mission完成。
+用户确认该对话项本身就是直接离开教程的分支；
+若确认后仍留在3D场景，长按Tab可用原版Leave Area离开，但必须先等兄长对话UI退出。
+源码/运行又证实：2次对话继续后，原版可已不显示对话UI而`ConversationManager`仍报告在进度中；
+Harness以Native `MissionScreen.IsConversationActive`识别该UI边界，UI已关闭且无选项才允许原版长按Tab兜底，随后首次Campaign MapState仍可能停在`tutorial_training_field`菜单，另有原版`training_field_leave`菜单动作；
+该Town入口与3D场景TAB是不同操作。
+跳过自然结束Tutorial并激活`Establish Your Clan`后，Map上可能紧接着出现原版“通知”Yes/No、首块龙旗碎片棕色SceneNotification、家族名TextInquiry、BannerEditor及“潜行教程”确认。
+用户要求这些姓名/旗帜步骤也由AI完成，而不额外要求玩家逐步代点；
+AI需走原版当前UI/VM链并在结束后回Map，再进入四目标规划。
+本机源码与真正新建档的运行已确认最后这项“潜行教程/继续”Inquiry仅启动独立的`VillagersInNeed`任务，不直接进入3D Mission；
+该任务不是EYC四目标之一，不能因其自动激活就让Agent偏离当前EYC Journal。
+此链所有动作须按当前Native界面逐步观测/验证，不允许预制档、注入Quest/资源、直接改Clan/Banner或预先达成目标。
+AI随后从MainHero第一个稳定Campaign MapState接管，并由真实模型自主完成“建立你的家族”(Establish Your Clan)四项目标：Gold 2000、达到当前藏身处战斗人数门槛、Renown 50、招募至少一名同伴。
+若AI接管时Tutorial仍未结束，本首测不宣称AI能完成教程；
+全教程自治是独立后续扩展。
+每项都以Quest Journal/Native状态和最终原版Quest完成后验核验。
+这是首个长程闭环，不声称覆盖骑砍所有玩法。
 
 Research Gate: **READY**
 Research gate scope: compose the four source-verified StoryMode objective routes after the user-approved Native Tutorial-skip setup and the newly verified post-skip native name/banner setup; W1/W2's 182 ACT / 73 OBS baseline alone does not prove the longitudinal loop.
@@ -23,7 +42,14 @@ Implementation gate scope: Host composition only—the four goal values, existin
 
 ### 2026-10-18 NPC Campaign Actor 研究快照（历史候选，不是当前产品路线）
 
-当时的源码研究显示NPC Campaign AI的分层骨架：`AiPartyThinkBehavior`在`TickPartialHourlyAiEvent`收集Native AIBehavior目标评分，选择后经`SetPartyAiAction`落成Party行为；`MobilePartyAi`再负责短期路径、接敌/规避、逃离与地形导航（详见`Research/F/MilitaryPartiesAndCaptivity.md` F02/F03/F04）。v1.4.8公开`AIBehaviorData`目标结构与`PartyThinkParams.AddBehaviorScore/SetBehaviorScore`。只读Harness捕获过真实非MainHero Lord Think样本：110个目标候选、含GoToSettlement、PatrolAroundPoint、BesiegeSettlement、RaidSettlement及目标ID/评分；完整证据见`TestResults/20261019-022445`。这证明该缓存可提供真实Native决策上下文，但不证明候选被最终选中、后续持续性、Agent可控制它或不同存档/状态均一致。该Actor接入提议只属于未来候选研究：Host异步决定高层目标/偏好后，游戏主线程需在有效Think边界重新核验身份、当前候选、权限和期限，不能假定与Vanilla行为评分、Army/Encounter状态兼容；它与MainHero玩家输入API是不同技术接口。
+当时的源码研究显示NPC Campaign AI的分层骨架：`AiPartyThinkBehavior`在`TickPartialHourlyAiEvent`收集Native AIBehavior目标评分，选择后经`SetPartyAiAction`落成Party行为；
+`MobilePartyAi`再负责短期路径、接敌/规避、逃离与地形导航（详见`Research/F/MilitaryPartiesAndCaptivity.md` F02/F03/F04）。
+v1.4.8公开`AIBehaviorData`目标结构与`PartyThinkParams.AddBehaviorScore/SetBehaviorScore`。
+只读Harness捕获过真实非MainHero Lord Think样本：110个目标候选、含GoToSettlement、PatrolAroundPoint、BesiegeSettlement、RaidSettlement及目标ID/评分；
+完整证据见`TestResults/20261019-022445`。
+这证明该缓存可提供真实Native决策上下文，但不证明候选被最终选中、后续持续性、Agent可控制它或不同存档/状态均一致。
+该Actor接入提议只属于未来候选研究：Host异步决定高层目标/偏好后，游戏主线程需在有效Think边界重新核验身份、当前候选、权限和期限，不能假定与Vanilla行为评分、Army/Encounter状态兼容；
+它与MainHero玩家输入API是不同技术接口。
 
 这段研究当时讨论的边界是单机 Campaign 中的人类玩家 + AI 世界角色，而非AI接管玩家；这是已被后续MainHero主线取代的历史候选。其关于Campaign暂停、Actor生命周期、多人共享战役和3D战斗的机制调查仍可复用，但不构成当前产品的首发承诺。
 
@@ -31,7 +57,14 @@ Implementation gate scope: Host composition only—the four goal values, existin
 
 本轮外部研究发现两个重要边界：其一，BUTR的Bannerlord.GABS公开声明已提供MCP/GABP工具桥、90+游戏工具、地图威胁检测/逃离、贸易、对话及坐镇战斗等，故“第一个把AI接到骑砍工具”不成立；其仓库/README只证明项目自述和工具覆盖，不能证明多小时目标自主或StoryMode完整成功。[Bannerlord.GABS](https://github.com/BUTR/Bannerlord.GABS)。其二，《AI效应》与《重铸者/AnimusForge》的公开功能已远超纯聊天；具体能力需按它们实际运行/原版状态验证，不能从功能宣传推断或贬低。[AI效应](https://www.nexusmods.com/mountandblade2bannerlord/mods/9711) [重铸者](https://www.mountblade.com.cn/news/Bannerlord/2026-08-14/3294.html)。
 
-“AI-native”可操作化为AI是否构成玩法核心：若移除AI后核心玩法几乎不变，它更像AI增强/聊天层。2026综述分析53个公开游戏/原型，指出目前偏语言叙事，主要设计难点是把语义开放性放进稳定的目标、规则、状态、反馈、节奏和玩家能动性；这是一种学术分类与现状分析，不是商业成功证明。[AI Native Games: A Survey and Roadmap](https://arxiv.org/abs/2607.00527)。OpenGameAgent目前自称alpha/早期接入；另有商业合作方宣布将AI反射层与深思层分开、计划于2027年推出的合作模式。这说明业态在演进，但尚非可据以宣称的爆品案例。[OpenGameAgent](https://opengameagent.com/) [Dimensional Double Shift announcement](https://www.globenewswire.com/news-release/2026/09/14/3361481/0/en/artificial-agency-integrates-agentic-behavior-into-first-commercial-video-game-in-dimensional-double-shift-s-new-single-player-mode.html)。
+“AI-native”可操作化为AI是否构成玩法核心：若移除AI后核心玩法几乎不变，它更像AI增强/聊天层。
+2026综述分析53个公开游戏/原型，指出目前偏语言叙事，主要设计难点是把语义开放性放进稳定的目标、规则、状态、反馈、节奏和玩家能动性；
+这是一种学术分类与现状分析，不是商业成功证明。
+[AI Native Games: A Survey and Roadmap](https://arxiv.org/abs/2607.00527)。
+OpenGameAgent目前自称alpha/早期接入；
+另有商业合作方宣布将AI反射层与深思层分开、计划于2027年推出的合作模式。
+这说明业态在演进，但尚非可据以宣称的爆品案例。
+[OpenGameAgent](https://opengameagent.com/) [Dimensional Double Shift announcement](https://www.globenewswire.com/news-release/2026/09/14/3361481/0/en/artificial-agency-integrates-agentic-behavior-into-first-commercial-video-game-in-dimensional-double-shift-s-new-single-player-mode.html)。
 
 历史决策（2026-10-18）：先证明一个自主Campaign Actor能产生真实、可重复且玩家可感知的因果链，再决定扩展到多个Actor。该决定已由2026-10-19 MainHero自主游玩主线取代；StoryMode `Establish Your Clan`现在是首个产品北极星门禁，而NPC/同伴Actor仅保留为后续候选。
 
@@ -111,31 +144,168 @@ Minecraft Agent 的环境、规划、技能、记忆和评测研究已沉淀到�
 | 玩家安装与启动 | MCM全局设置提供本地模型地址/名称、配置检查、战役目标及Start/Stop/Status按钮。Mod按模块相对路径启动Host，经stdin传目标、当前MCM模型配置快照、固定动作白名单和游戏PID/启动时刻；Host校验父进程身份、核对Native返回PID并持续监护父进程退出。Mod/Host共用轻量Ready协议，核对版本、运行编号和Native PID后才显示Running；输出异步读取，游戏线程仅在任务完成后取结果。Stop发送显式协议请求，有界超时仅终止本Mod创建且身份匹配的Host；模型格式规则仍复用共享校验器。 | `TestResults/20261012-141629`完整阶段通过：Smoke注册七个设置属性、四个Button；自包含包41项无模型/无Native命令回归及不存在父进程的启动拒绝通过；生命周期在一次性Campaign中调用注册的MCM Action委托，游戏PID36556/Host12548握手版本与protocol 1，Starting→Running→Stopping→Stopped、Host退出码0，随后Native状态仍可查询，位置/源存档hash不变且会话/进程清理通过；过期Native会话请求明确被拒；独立临时设置的空目标、超长目标、外部地址、空模型和缺失Host五例均在建进程前被拒；再次调用已注册Start委托仍仅一个Host。后续独立证据：`20261012-182631`验证五种启动拒绝/重复Start/正常Stop，`185348`与`185544`验证缺失模型和服务不可达，`192012`验证父进程退出监护，`192640`验证Stop超时清理，`193445`验证非Map拒绝，`211525`验证同PID同进程Native Campaign退出/重载并拒绝旧Session写入。`20261013-004218`验证游戏内真实4B支持目标完成，`004434`验证一级家族目标被拒且零Native动作。真实游戏内MCM按钮视觉点击、用户设置保存重载及发行安装/升级仍留Epic #18验收。 |
 | 本地首装发行包 | 标准 `ChronicleFramework/` 模块目录内含版本化`SubModule.xml`、游戏DLL、`AgentHost/`自包含win-x64 Host、manifest及私测许可说明；XML必需依赖明确列出Harmony、ButterLib、UIExtenderEx、MCM、Native、SandBoxCore、SandBox和本机已验证最低版本。 | `New-ChronicleReleasePackage.ps1`从独立stage构建；manifest记录每个文件长度/SHA256、模块/程序集版本、游戏基线和依赖最低版本；zip固定Entry排序/时间。`TestResults/20261013-013038`重复构建SHA相同，归档清单逐项验hash；安装到隔离D盘游戏根（官方目录以junction复用、Chronicle目录单独复制）后Main Menu Smoke、程序集生命周期和七个MCM属性/四个按钮注册通过，已安装Mod整目录hash、用户MCM配置、正式存档hash不变，测试包/隔离根/进程清理通过。此验证覆盖隔离模块副本，不代表第三方管理器真实鼠标安装；公发渠道与玩家最终安装体验留Epic验收。 |
 
-FreeLLMAPI 模型服务边界（2026-10-21实现约束）：当前真实模型测试改走本机`http://127.0.0.1:31415/v1` OpenAI兼容接口，默认路由`auto`，请求经FreeLLMAPI当前启用的免费上游服务商；MCM保留历史JSON字段`OllamaBaseUrl`以避免设置迁移，但新默认指向网关，实时Start在非Harness运行下拒绝其它端点、本地推理和缺少统一API key的情况。key只从启动游戏前继承的`FREELLMAPI_API_KEY`或`CHRONICLE_LLM_API_KEY`进程环境读取，不写MCM配置、命令行或日志；Host通过只读`/v1/models?available=true`校验路由，再记录每次回复的`X-Routed-Via`、响应模型和token数及格式模式；HTTP失败仅保留路由响应头、严格提取的有限诊断字段与安全错误码，不保留响应正文。FreeLLMAPI在HTTP 400/422或带`provider_bad_request`回退链的502时，Host仅对该次决策退回JSON对象模式一次；若轨迹表明回退到OVH Mistral Small，则同时切换为其已验证的`max_tokens`并按OVH请求节奏等待。仍在Native操作前验证结构与当前动作/参数目录，失败恢复不重放已执行的Native操作。当前Mistral Small 3.2→OVH路由直接使用JSON对象模式、`max_tokens`，不发送已测会触发该上游拒绝的额外字段。FreeLLMAPI服务商目录为OVH匿名Mistral注明每模型每分钟2请求，但本轮真实游戏闭环在31秒请求间隔下仍观察到网关`rpm/rpd-limit`拒绝；因此Host对直连Mistral以及最近成功路由为`ovh/`的请求保守地按开始时间间隔45秒，后续若仍被限流再按响应头/路由证据细化。其它FreeLLMAPI路由不延迟。无游戏的真实Provider冒烟测试用唯一合成Native动作和参数检验模型是否服从当前动作目录，且断言没有发送游戏命令；实时回归另记录真实路由。Quest提示须使用协议目录中的精确动作ID（当前联系人动作是`talkToSettlementHero`），不能把界面术语当调用名。FreeLLMAPI官方CLI用于客户端配置/Provider key管理，逐轮推理直接调用官方OpenAI兼容HTTP API，不通过CLI子进程。过去Qwen/Ollama收据仍是历史原型证据，不代表当前W7-K模型路径；实时游戏闭环必须经FreeLLMAPI实际外部路由验收。
+FreeLLMAPI 模型服务边界（2026-10-21实现约束）：当前真实模型测试改走本机`http://127.0.0.1:31415/v1` OpenAI兼容接口，默认路由`auto`，请求经FreeLLMAPI当前启用的免费上游服务商；
+MCM保留历史JSON字段`OllamaBaseUrl`以避免设置迁移，但新默认指向网关，实时Start在非Harness运行下拒绝其它端点、本地推理和缺少统一API key的情况。
+key只从启动游戏前继承的`FREELLMAPI_API_KEY`或`CHRONICLE_LLM_API_KEY`进程环境读取，不写MCM配置、命令行或日志；
+Host通过只读`/v1/models?available=true`校验路由，再记录每次回复的`X-Routed-Via`、响应模型和token数及格式模式；
+HTTP失败仅保留路由响应头、严格提取的有限诊断字段与安全错误码，不保留响应正文。
+FreeLLMAPI在HTTP 400/422或带`provider_bad_request`回退链的502时，Host仅对该次决策退回JSON对象模式一次；
+若轨迹表明回退到OVH Mistral Small，则同时切换为其已验证的`max_tokens`并按OVH请求节奏等待。
+仍在Native操作前验证结构与当前动作/参数目录，失败恢复不重放已执行的Native操作。
+当前Mistral Small 3.2→OVH路由直接使用JSON对象模式、`max_tokens`，不发送已测会触发该上游拒绝的额外字段。
+FreeLLMAPI服务商目录为OVH匿名Mistral注明每模型每分钟2请求，但本轮真实游戏闭环在31秒请求间隔下仍观察到网关`rpm/rpd-limit`拒绝；
+因此Host对直连Mistral以及最近成功路由为`ovh/`的请求保守地按开始时间间隔45秒，后续若仍被限流再按响应头/路由证据细化。
+其它FreeLLMAPI路由不延迟。
+无游戏的真实Provider冒烟测试用唯一合成Native动作和参数检验模型是否服从当前动作目录，且断言没有发送游戏命令；
+实时回归另记录真实路由。
+Quest提示须使用协议目录中的精确动作ID（当前联系人动作是`talkToSettlementHero`），不能把界面术语当调用名。
+FreeLLMAPI官方CLI用于客户端配置/Provider key管理，逐轮推理直接调用官方OpenAI兼容HTTP API，不通过CLI子进程。
+过去Qwen/Ollama收据仍是历史原型证据，不代表当前W7-K模型路径；
+实时游戏闭环必须经FreeLLMAPI实际外部路由验收。
 
-2026-11-06 FreeLLMAPI上游调用成本审计：FreeLLMAPI官方REST说明`auto`按启用回退链选路并可在上游失败后继续尝试，`fusion`会并行调用多个模型；响应可通过`X-Routed-Via`、`X-Fallback-Attempts`和`X-Fallback-Trail`识别实际服务商及先前尝试。[FreeLLMAPI REST API](https://github.com/tashfeenahmed/freellmapi/blob/main/docs/en/api/01-rest-api.md) 本机`TestResults/20261105-164619`的`auto:noema-free`请求在一次Host模型请求下产生6条网关上游尝试，且回退轨迹涉及自定义NVIDIA端点；FreeLLMAPI数据库累计记有4,842输入/128输出token，但无法据此确认实际货币费用。此前Host成功响应只记录最终`X-Routed-Via`，未记录成功响应的上游回退次数；现在Provider决策结果、Harness轨迹与产品运行日志都会安全记录响应中的回退次数/受限字符集轨迹，确定性回归通过`TestResults/20261106-012106`。这项记录能揭示回退，不等于能阻止网关内部上游尝试或计算其费用。
+2026-11-06 FreeLLMAPI上游调用成本审计：FreeLLMAPI官方REST说明`auto`按启用回退链选路并可在上游失败后继续尝试，`fusion`会并行调用多个模型；
+响应可通过`X-Routed-Via`、`X-Fallback-Attempts`和`X-Fallback-Trail`识别实际服务商及先前尝试。
+[FreeLLMAPI REST API](https://github.com/tashfeenahmed/freellmapi/blob/main/docs/en/api/01-rest-api.md) 本机`TestResults/20261105-164619`的`auto:noema-free`请求在一次Host模型请求下产生6条网关上游尝试，且回退轨迹涉及自定义NVIDIA端点；
+FreeLLMAPI数据库累计记有4,842输入/128输出token，但无法据此确认实际货币费用。
+此前Host成功响应只记录最终`X-Routed-Via`，未记录成功响应的上游回退次数；
+现在Provider决策结果、Harness轨迹与产品运行日志都会安全记录响应中的回退次数/受限字符集轨迹，确定性回归通过`TestResults/20261106-012106`。
+这项记录能揭示回退，不等于能阻止网关内部上游尝试或计算其费用。
 
-`TestResults/20261106-014801`验证了可控续跑参数`PersistentEycMaxProviderDecisionsPerContinuation=1`能一路传到LiveModel AgentHost；本轮唯一配置模型请求指定`gpt-oss-20b`、JSON对象模式和256最大输出token，没有使用`auto`/`fusion`。FreeLLMAPI本机SQLite请求6340与上游尝试表证实该请求只试了一个OVH `gpt-oss-20b`端点（1,114输入token、0输出token、一次`format_ignored`、HTTP 502）；因此这是结构化输出兼容失败，不是Host重复决策/自动路由扩散。FreeLLMAPI当前目录把OVH `gpt-oss-20b`标为每IP每分钟2次免费额度，但本请求用量仍计入该服务商限额。Host因此未生成任何模型决策或Native动作。Harness在同一原版Campaign实例上通过Native另存了检查点`ChronicleEycDev-20261106015029-9cafd1df`，进程清理通过，源检查点未改。另，本机服务目录/模型表将`Qwen3.8-27B` OVH行标为支持工具调用、免费2请求/分钟；当前模型API未将这个精确行列入`available=true`，只显示聚合名`qwen3.8-27b`为ready，故还不能据目录推断其请求会走哪个上游或适合作为下一个真实Campaign路由。
+`TestResults/20261106-014801`验证了可控续跑参数`PersistentEycMaxProviderDecisionsPerContinuation=1`能一路传到LiveModel AgentHost；
+本轮唯一配置模型请求指定`gpt-oss-20b`、JSON对象模式和256最大输出token，没有使用`auto`/`fusion`。
+FreeLLMAPI本机SQLite请求6340与上游尝试表证实该请求只试了一个OVH `gpt-oss-20b`端点（1,114输入token、0输出token、一次`format_ignored`、HTTP 502）；
+因此这是结构化输出兼容失败，不是Host重复决策/自动路由扩散。
+FreeLLMAPI当前目录把OVH `gpt-oss-20b`标为每IP每分钟2次免费额度，但本请求用量仍计入该服务商限额。
+Host因此未生成任何模型决策或Native动作。
+Harness在同一原版Campaign实例上通过Native另存了检查点`ChronicleEycDev-20261106015029-9cafd1df`，进程清理通过，源检查点未改。
+另，本机服务目录/模型表将`Qwen3.8-27B` OVH行标为支持工具调用、免费2请求/分钟；
+当前模型API未将这个精确行列入`available=true`，只显示聚合名`qwen3.8-27b`为ready，故还不能据目录推断其请求会走哪个上游或适合作为下一个真实Campaign路由。
 
-`TestResults/20261106-022345`后续使用聚合名`qwen3.8-27b`与`required_tool_call`在同一个持久战役上做了两次有界续跑：30秒Provider deadline在单次OVH `Qwen3.8-27B`请求上触发`client_abort`，0模型token；将deadline调为120秒后，FreeLLMAPI请求6342在OVH返回429/Retry-After 85秒，Host等待后重试的请求6343仍返回OVH 429/Retry-After 75秒。两次请求各记录1,531输入/0输出token、各只走一个OVH尝试；模型目录标注该路由为免费2请求/分钟IP额度。Host全程0个有效决策/Native动作，检查点`ChronicleEycDev-20261106023327-2cb5ac95`已安全另存，游戏与Host进程清理通过。该事实修正了“请求数上限=决策数上限”的误解：rate-limit重试会在一个Host决策内再发请求。现Host支持`CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION`；FreeLLMAPI Host默认每个决策最多1个外层HTTP请求，直连Provider默认最多8个，Harness实时模型测试也强制设为1。`TestResults/20261106-030051`在该Harness上限下记录一次OVH Qwen请求6344（1,531输入/0输出token、一个上游尝试），Host拒绝了同一决策的额外HTTP请求，0个有效决策/Native动作；检查点`ChronicleEycDev-20261106030317-2324ec41`已安全另存。`TestResults/20261106-030819` Provider合同验证429与可重试502都在延迟/重试前被请求上限拦截，未发送第二个HTTP请求。此上限避免Host自身在一个决策中重复提交，但不限制FreeLLMAPI内部的上游尝试，也不是全战役货币预算。
+`TestResults/20261106-022345`后续使用聚合名`qwen3.8-27b`与`required_tool_call`在同一个持久战役上做了两次有界续跑：30秒Provider deadline在单次OVH `Qwen3.8-27B`请求上触发`client_abort`，0模型token；
+将deadline调为120秒后，FreeLLMAPI请求6342在OVH返回429/Retry-After 85秒，Host等待后重试的请求6343仍返回OVH 429/Retry-After 75秒。
+两次请求各记录1,531输入/0输出token、各只走一个OVH尝试；
+模型目录标注该路由为免费2请求/分钟IP额度。
+Host全程0个有效决策/Native动作，检查点`ChronicleEycDev-20261106023327-2cb5ac95`已安全另存，游戏与Host进程清理通过。
+该事实修正了“请求数上限=决策数上限”的误解：rate-limit重试会在一个Host决策内再发请求。
+现Host支持`CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION`；
+FreeLLMAPI Host默认每个决策最多1个外层HTTP请求，直连Provider默认最多8个，Harness实时模型测试也强制设为1。
+`TestResults/20261106-030051`在该Harness上限下记录一次OVH Qwen请求6344（1,531输入/0输出token、一个上游尝试），Host拒绝了同一决策的额外HTTP请求，0个有效决策/Native动作；
+检查点`ChronicleEycDev-20261106030317-2324ec41`已安全另存。
+`TestResults/20261106-030819` Provider合同验证429与可重试502都在延迟/重试前被请求上限拦截，未发送第二个HTTP请求。
+此上限避免Host自身在一个决策中重复提交，但不限制FreeLLMAPI内部的上游尝试，也不是全战役货币预算。
 
-另外几条可核实的免费路由切片也未返回决策。`TestResults/20261106-033930`请求`gemini-3.8-flash`时，FreeLLMAPI实际选中Google并向Host返回429/Retry-After 86,400秒；本机对应请求ID `6f56aa` 的上游日志显示Google原始响应为403：“此项目不可使用Gemini API免费层，需升级账单”。本机记录1,531输入/0输出token、0个Host决策/Native动作，随后保存检查点`ChronicleEycDev-20261106034157-b8850f99`。`TestResults/20261106-034704`请求`dots3-note-preview`时实际选中Kilo，返回`socket hang up`，本机记录1,531输入/0输出token、单次Kilo上游、0个Host决策/Native动作，并保存检查点`ChronicleEycDev-20261106034926-0766c5a0`。该Kilo请求前，本机代理`127.0.0.1:7890`监听、FreeLLMAPI全局代理已启用且指向该端口；经同一代理对Kilo官方`/api/gateway/models`只读GET返回HTTP 200，Kilo聊天POST仍挂断。这排除了“本机代理完全不可达”，但不能仅凭目录GET确定聊天POST的故障根因。`gemma-4-31b-it`实际映射到Google；AI Horde候选`gemma-4-31b-heretic`通过prompt-only JSON模式路由到AI Horde后得到503：“No worker is currently serving the model”，没有Host决策/Native动作。当前本机模型数据中，支持工具调用且标注免费额度的Groq Qwen3.8路由没有Groq Key配置；Google项目免费层受上游403限制，OVH Qwen受429限制，Kilo聊天返回socket hang up，AI Horde无worker。当前持久Campaign保存为`ChronicleEycDev-20261106045241-30cb08a6`，同一Campaign实例、累计真实模型决策仍3243，最近续跑没有原版进度变化；免费路由消耗了服务商输入/排队额度，但没有记录到货币费用，FreeLLMAPI `/v1/usage`仍无法认证读取。
+另外几条可核实的免费路由切片也未返回决策。
+`TestResults/20261106-033930`请求`gemini-3.8-flash`时，FreeLLMAPI实际选中Google并向Host返回429/Retry-After 86,400秒；
+本机对应请求ID `6f56aa` 的上游日志显示Google原始响应为403：“此项目不可使用Gemini API免费层，需升级账单”。
+本机记录1,531输入/0输出token、0个Host决策/Native动作，随后保存检查点`ChronicleEycDev-20261106034157-b8850f99`。
+`TestResults/20261106-034704`请求`dots3-note-preview`时实际选中Kilo，返回`socket hang up`，本机记录1,531输入/0输出token、单次Kilo上游、0个Host决策/Native动作，并保存检查点`ChronicleEycDev-20261106034926-0766c5a0`。
+该Kilo请求前，本机代理`127.0.0.1:7890`监听、FreeLLMAPI全局代理已启用且指向该端口；
+经同一代理对Kilo官方`/api/gateway/models`只读GET返回HTTP 200，Kilo聊天POST仍挂断。
+这排除了“本机代理完全不可达”，但不能仅凭目录GET确定聊天POST的故障根因。
+`gemma-4-31b-it`实际映射到Google；
+AI Horde候选`gemma-4-31b-heretic`通过prompt-only JSON模式路由到AI Horde后得到503：“No worker is currently serving the model”，没有Host决策/Native动作。
+当前本机模型数据中，支持工具调用且标注免费额度的Groq Qwen3.8路由没有Groq Key配置；
+Google项目免费层受上游403限制，OVH Qwen受429限制，Kilo聊天返回socket hang up，AI Horde无worker。
+当前持久Campaign保存为`ChronicleEycDev-20261106045241-30cb08a6`，同一Campaign实例、累计真实模型决策仍3243，最近续跑没有原版进度变化；
+免费路由消耗了服务商输入/排队额度，但没有记录到货币费用，FreeLLMAPI `/v1/usage`仍无法认证读取。
 
-AI Horde候选的接口边界已从官方适配器源码核实：它接收一般Chat Completion，但会剥掉`tools`、`tool_choice`及`response_format`；Host此前因此在模型能力预检阶段拒绝`gemma-4-31b-heretic`，没有发推理请求。`TestResults/20261106-041815`随后发现FreeLLMAPI拒绝原因是AI Horde候选`platform drops response_format`，无上游尝试、无Token usage、无游戏动作。现在仅当配置明确选择JSON object模式时，Host会对不支持服务端结构化输出的模型采用“系统提示要求JSON、不给上游发送response_format、返回后本地严格校验”的路径；`AgentHostPackage`自测`TestResults/20261106-043140`验证符合Native动作目录的JSON会被接受，非法字段仍由原有动作白名单拒绝；更新后包测试`TestResults/20261106-044626`通过。`TestResults/20261106-045016`首次真实prompt-only请求已路由到AI Horde，但上游返回503：“No worker is currently serving the model”；请求6348估算1,114输入/0输出token、只有一次AI Horde上游，Host请求上限阻止第二次重试，0 Host决策/Native动作。其后只读AI Horde状态接口对同名模型报告4个worker、队列512、ETA 8秒，表明聚合worker状态并不能保证该次聊天请求有可服务的worker。另一个状态快照显示AI Horde模型`koboldcpp/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M`有1个worker；FreeLLMAPI目录中的对应别名`gemma-4-e4b-uncensored-hauhaucs-aggressive-q4-k-m`标为ready，Kudos预算免费、ETA约35秒。它是下一个候选，但实际聊天路由还未验证。FreeLLMAPI本机的Provider Keys列表仍无Groq Key；虽然Groq Qwen3.8条目标注支持工具调用和免费额度，当前没有配置可用的Groq凭据。[AI Horde适配器](https://github.com/tashfeenahmed/freellmapi/blob/main/server/src/providers/aihorde.ts) 本机可用目录显示`gemma-4-31b-heretic`映射到AI Horde模型，Kudos排队、无token额度上限且不支持tools；已验证Host可以安全解析其JSON决策格式，但尚无真实模型输出。当前持久Campaign检查点`ChronicleEycDev-20261106045241-30cb08a6`仍未产生战役进度，进程已清理。
+AI Horde候选的接口边界已从官方适配器源码核实：它接收一般Chat Completion，但会剥掉`tools`、`tool_choice`及`response_format`；
+Host此前因此在模型能力预检阶段拒绝`gemma-4-31b-heretic`，没有发推理请求。
+`TestResults/20261106-041815`随后发现FreeLLMAPI拒绝原因是AI Horde候选`platform drops response_format`，无上游尝试、无Token usage、无游戏动作。
+现在仅当配置明确选择JSON object模式时，Host会对不支持服务端结构化输出的模型采用“系统提示要求JSON、不给上游发送response_format、返回后本地严格校验”的路径；
+`AgentHostPackage`自测`TestResults/20261106-043140`验证符合Native动作目录的JSON会被接受，非法字段仍由原有动作白名单拒绝；
+更新后包测试`TestResults/20261106-044626`通过。
+`TestResults/20261106-045016`首次真实prompt-only请求已路由到AI Horde，但上游返回503：“No worker is currently serving the model”；
+请求6348估算1,114输入/0输出token、只有一次AI Horde上游，Host请求上限阻止第二次重试，0 Host决策/Native动作。
+其后只读AI Horde状态接口对同名模型报告4个worker、队列512、ETA 8秒，表明聚合worker状态并不能保证该次聊天请求有可服务的worker。
+另一个状态快照显示AI Horde模型`koboldcpp/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M`有1个worker；
+FreeLLMAPI目录中的对应别名`gemma-4-e4b-uncensored-hauhaucs-aggressive-q4-k-m`标为ready，Kudos预算免费、ETA约35秒。
+它是下一个候选，但实际聊天路由还未验证。
+FreeLLMAPI本机的Provider Keys列表仍无Groq Key；
+虽然Groq Qwen3.8条目标注支持工具调用和免费额度，当前没有配置可用的Groq凭据。
+[AI Horde适配器](https://github.com/tashfeenahmed/freellmapi/blob/main/server/src/providers/aihorde.ts) 本机可用目录显示`gemma-4-31b-heretic`映射到AI Horde模型，Kudos排队、无token额度上限且不支持tools；
+已验证Host可以安全解析其JSON决策格式，但尚无真实模型输出。
+当前持久Campaign检查点`ChronicleEycDev-20261106045241-30cb08a6`仍未产生战役进度，进程已清理。
 
-成本门槛的边界：当前CNY预留/拒绝只针对直连DeepSeek端点；FreeLLMAPI响应可记录模型token用量及网关实际路由，但Host没有可靠的FreeLLMAPI逐请求货币成本来源，故不能把配置中的DeepSeek上限解释成FreeLLMAPI硬费用上限。本机只读`/v1/usage`查询返回401，当前运行记录无法独立确认FreeLLMAPI账单/余额。EYC续跑可限制Host决策数；FreeLLMAPI每个Host决策默认至多一个外层HTTP请求，直连Provider默认上限8，LiveModel Harness也强制为1。这仍不限制FreeLLMAPI内部上游尝试，也不是全战役货币预算。FreeLLMAPI目录的`ready`和模型名本身不保证请求不会被限流或产生免费额度消耗。今后的真实模型运行须避免`auto`/`fusion`等多路由模式，除非已核实该路由的回退链仅含明确免费额度端点并有可读配额证据；否则不进行推理调用。本机2026-11-22只读数据库审计显示`noema-free`启用11条路由，其中6条custom没有单价或配额记录，并且包含有付费单价的Gemini；两条明确标注免费额度的Kilo/OVH路由当前不在`available=true`目录中。当前统一API key访问`/api/fallback`与`/api/settings`均401，无法核验链配置；Dots/Kilo真实调用404，Qwen真实调用空429，Gemini 2.5 Flash-Lite的free-tier调用429且Retry-After为81039秒；`auto:noema-free`实际使用NVIDIA/Cohere路由但没有价格回执。Harness contract 7.654在真实推理前拒绝auto/fusion/free-router，ProviderHealth仅允许零调用只读检查。继续评估全战役的通用调用/Token预算与FreeLLMAPI路由策略，但在不误称货币费用可控前不得用未定价路由启动长测。
+成本门槛的边界：当前CNY预留/拒绝只针对直连DeepSeek端点；
+FreeLLMAPI响应可记录模型token用量及网关实际路由，但Host没有可靠的FreeLLMAPI逐请求货币成本来源，故不能把配置中的DeepSeek上限解释成FreeLLMAPI硬费用上限。
+本机只读`/v1/usage`查询返回401，当前运行记录无法独立确认FreeLLMAPI账单/余额。
+EYC续跑可限制Host决策数；
+FreeLLMAPI每个Host决策默认至多一个外层HTTP请求，直连Provider默认上限8，LiveModel Harness也强制为1。
+这仍不限制FreeLLMAPI内部上游尝试，也不是全战役货币预算。
+FreeLLMAPI目录的`ready`和模型名本身不保证请求不会被限流或产生免费额度消耗。
+今后的真实模型运行须避免`auto`/`fusion`等多路由模式，除非已核实该路由的回退链仅含明确免费额度端点并有可读配额证据；
+否则不进行推理调用。
+本机2026-11-22只读数据库审计显示`noema-free`启用11条路由，其中6条custom没有单价或配额记录，并且包含有付费单价的Gemini；
+两条明确标注免费额度的Kilo/OVH路由当前不在`available=true`目录中。
+当前统一API key访问`/api/fallback`与`/api/settings`均401，无法核验链配置；
+Dots/Kilo真实调用404，Qwen真实调用空429，Gemini 2.5 Flash-Lite的free-tier调用429且Retry-After为81039秒；
+`auto:noema-free`实际使用NVIDIA/Cohere路由但没有价格回执。
+Harness contract 7.654在真实推理前拒绝auto/fusion/free-router，ProviderHealth仅允许零调用只读检查。
+继续评估全战役的通用调用/Token预算与FreeLLMAPI路由策略，但在不误称货币费用可控前不得用未定价路由启动长测。
 
-2026-11-22 DSH XD Pool候选通道：本机`http://127.0.0.1:8326/v1/models`只读认证成功，列出45个模型；XD Pool中有直接`open_router/...:free`与`kilo/...:free`模型，也有NVIDIA付费模型和两个组合路由，故不能把整池或组合路由视为免费。Harness仅在显式`-AllowDshXdPoolFreeRoute`时接受端口8326的直接`xdpool-aggregate/*:free`模型，拒绝组合/回退路径；此限制只用于无游戏Provider冒烟，不改变玩家可配置的通用OpenAI兼容接口。OpenRouter官方目录把`inclusionai/ling-3.2-flash:free`标为零价格并声明支持tools、tool_choice及JSON Schema；[模型页](https://openrouter.ai/inclusionai/ling-3.2-flash%3Afree/)。Host对该模型和另一条直接Kilo `:free` 路由共进行了四次无游戏定向请求；Ling required-tool两次HTTP 400、JSON Schema一次HTTP 502，Kilo required-tool一次HTTP 400。四次都无有效决策、无Native动作；服务仅返回通用`invalid_request_error / invalid_request`，未提供param、request ID、路由或用量回执，因此错误仍不能归因于Host schema、DSH gateway或上游提供者，实际额度使用也未判定。不能据此判模型本身不支持工具调用；通用OpenAI兼容入口的真正失败根因仍未知。Host现将非标准`thinking`字段限制为已核实的DeepSeek和FreeLLMAPI端点。此前一次性Host错误输出遗漏了已解析的服务端字段；AgentHost现在把安全HTTP状态、error type/code/param、请求ID及路由元数据传至Harness和产品日志，不记录错误正文。AgentHostPackage回归`TestResults/20261122-161803`通过基础字段；本轮补上param传播后的包回归与Docs仍待完成。后续仅在Harness提供独立无工具的8-token最小请求模式后，才允许一次免费路由诊断，以区分Chat Completions入口本身与结构化输出payload；两个自然StoryMode Campaign与EYC完成门禁仍未通过。
+2026-11-22 DSH XD Pool候选通道：本机`http://127.0.0.1:8326/v1/models`只读认证成功，列出45个模型；
+XD Pool中有直接`open_router/...:free`与`kilo/...:free`模型，也有NVIDIA付费模型和两个组合路由，故不能把整池或组合路由视为免费。
+Harness仅在显式`-AllowDshXdPoolFreeRoute`时接受端口8326的直接`xdpool-aggregate/*:free`模型，拒绝组合/回退路径；
+此限制只用于无游戏Provider冒烟，不改变玩家可配置的通用OpenAI兼容接口。
+OpenRouter官方目录把`inclusionai/ling-3.2-flash:free`标为零价格并声明支持tools、tool_choice及JSON Schema；
+[模型页](https://openrouter.ai/inclusionai/ling-3.2-flash%3Afree/)。
+Host对该模型和另一条直接Kilo `:free` 路由共进行了四次无游戏定向请求；
+Ling required-tool两次HTTP 400、JSON Schema一次HTTP 502，Kilo required-tool一次HTTP 400。
+四次都无有效决策、无Native动作；
+服务仅返回通用`invalid_request_error / invalid_request`，未提供param、request ID、路由或用量回执，因此错误仍不能归因于Host schema、DSH gateway或上游提供者，实际额度使用也未判定。
+不能据此判模型本身不支持工具调用；
+通用OpenAI兼容入口的真正失败根因仍未知。
+Host现将非标准`thinking`字段限制为已核实的DeepSeek和FreeLLMAPI端点。
+此前一次性Host错误输出遗漏了已解析的服务端字段；
+AgentHost现在把安全HTTP状态、error type/code/param、请求ID及路由元数据传至Harness和产品日志，不记录错误正文。
+AgentHostPackage回归`TestResults/20261122-161803`通过基础字段；
+本轮补上param传播后的包回归与Docs仍待完成。
+后续仅在Harness提供独立无工具的8-token最小请求模式后，才允许一次免费路由诊断，以区分Chat Completions入口本身与结构化输出payload；
+两个自然StoryMode Campaign与EYC完成门禁仍未通过。
 
-2026-11-22 DSH Kilo direct-free model Host smoke: the local gateway's plain Chat Completions response matched `OK` at `87/3` prompt/completion tokens (`TestResults/20261122-170510`); the production AgentHost JSON Schema goal-classification smoke then selected `supported-map-arrival` at `465/60` tokens with `NativeCommands=0` and no game process (`TestResults/20261122-170856`). These prove a real model response and structured Host decision, not EYC progress, and DSH supplied no currency receipt. The other direct OpenRouter Ling route returned generic HTTP 400/502 errors; its minimal plain chat returned 502 `server_error/RATE_LIMIT`, while the direct Kilo route works for both plain text and the Host's JSON Schema decision. `Run-Harness -Phase PersistentEycCampaign` now has a guarded DSH preflight: only explicit opt-in to a direct `xdpool-aggregate/*:free` ID is accepted, the local `/v1/models` catalog must contain that exact ID, and preflight sends no inference request. The checkpoint hash was re-read before continuation and remains `6D0AD0F58DF85EA67D3D46A5F81417DE11C7DB3D21A76E57993945F0301FA8A3` for the same `freshB` campaign. Next use the configured Kilo JSON Schema route with one HTTP request per decision and four decisions maximum on this same branch; this is the first real Campaign continuation through DSH and still does not satisfy either complete-campaign gate.
+2026-11-22 DSH Kilo direct-free model Host smoke: the local gateway's plain Chat Completions response matched `OK` at `87/3` prompt/completion tokens (`TestResults/20261122-170510`); the production AgentHost JSON Schema goal-classification smoke then selected `supported-map-arrival` at `465/60` tokens with `NativeCommands=0` and no game process (`TestResults/20261122-170856`).
+These prove a real model response and structured Host decision, not EYC progress, and DSH supplied no currency receipt.
+The other direct OpenRouter Ling route returned generic HTTP 400/502 errors; its minimal plain chat returned 502 `server_error/RATE_LIMIT`, while the direct Kilo route works for both plain text and the Host's JSON Schema decision.
+`Run-Harness -Phase PersistentEycCampaign` now has a guarded DSH preflight: only explicit opt-in to a direct `xdpool-aggregate/*:free` ID is accepted, the local `/v1/models` catalog must contain that exact ID, and preflight sends no inference request.
+The checkpoint hash was re-read before continuation and remains `6D0AD0F58DF85EA67D3D46A5F81417DE11C7DB3D21A76E57993945F0301FA8A3` for the same `freshB` campaign.
+Next use the configured Kilo JSON Schema route with one HTTP request per decision and four decisions maximum on this same branch; this is the first real Campaign continuation through DSH and still does not satisfy either complete-campaign gate.
 
 Harness FreeLLMAPI服务启动（2026-10-15）：真实模型预检先用本机`/api/ping`探测桌面网关；没有监听时若默认安装路径含FreeLLMAPI.exe，就用隐藏窗口启动一次并最多等待30秒，仍不就绪则在游戏启动/推理前明确失败。启动FreeLLMAPI子进程时，Harness仅把用户级代理变量临时投影到该子进程；若没有任何显式代理变量且本机`127.0.0.1:7890`通过TCP监听检查，则仅为该FreeLLMAPI子进程临时提供`HTTPS_PROXY=http://127.0.0.1:7890`，之后恢复Harness父进程的环境变量。已运行的FreeLLMAPI不会被悄悄重启或改写其运行时代理。该Harness动作不通过computer-use操作UI、不读UI中的密钥，也不把API key写入任何额外文件；服务保持运行供后续测试复用。此Harness动作针对2026-10-15真实模型请求中FreeLLMAPI上游TLS/socket失败、而显式7890代理探测可达所暴露的启动环境缺口；是否解决需由下一次真实路由回包验证，不宣称配置即代表已修复。
 
-2026-11-22 DSH免费路由对照结果：在同一DSH网关上，`xdpool-aggregate/kilo/particle-ai/particle-1:free`的无tools普通聊天返回HTTP200并按要求输出`OK`（87输入/3输出token）；随后生产AgentHost以JSON Schema完成当前`supported-map-arrival`目标分类（465输入/60输出token，0 Native命令、未启动Bannerlord）。两者均未产生费用回执，目录免费标签不等于账单证据。该路由现已通过协议级真实模型Smoke，但不是Campaign行动或EYC进度。`Run-Harness`的Campaign预检现可显式允许端口8326的直接`:free`模型，并先用本地gateway key只读核验`/v1/models`中的精确ID；该预检尚未实跑。当前`freshB`安全Campaign fixture仍是`ChronicleEycDev-freshB-20261122040902-21e5dd65`，SHA256 `6D0AD0F58DF85EA67D3D46A5F81417DE11C7DB3D21A76E57993945F0301FA8A3`，同一Campaign实例`683a2e21c4a64cfd8a1bb4f3392afc3d`；目标值此前读回为Gold 0/2000、MainParty 1/25、Renown 20/50、Companion 0/1。下一步在Hash复核后以该Kilo JSON Schema直连免费模型做4决策续跑，检查是否产生真实Native目标进度与安全新checkpoint；该续跑仍只计作第一Campaign样本，不满足两个Campaign完成门禁。
+2026-11-22 DSH免费路由对照结果：在同一DSH网关上，`xdpool-aggregate/kilo/particle-ai/particle-1:free`的无tools普通聊天返回HTTP200并按要求输出`OK`（87输入/3输出token）；
+随后生产AgentHost以JSON Schema完成当前`supported-map-arrival`目标分类（465输入/60输出token，0 Native命令、未启动Bannerlord）。
+两者均未产生费用回执，目录免费标签不等于账单证据。
+该路由现已通过协议级真实模型Smoke，但不是Campaign行动或EYC进度。
+`Run-Harness`的Campaign预检现可显式允许端口8326的直接`:free`模型，并先用本地gateway key只读核验`/v1/models`中的精确ID；
+该预检尚未实跑。
+当前`freshB`安全Campaign fixture仍是`ChronicleEycDev-freshB-20261122040902-21e5dd65`，SHA256 `6D0AD0F58DF85EA67D3D46A5F81417DE11C7DB3D21A76E57993945F0301FA8A3`，同一Campaign实例`683a2e21c4a64cfd8a1bb4f3392afc3d`；
+目标值此前读回为Gold 0/2000、MainParty 1/25、Renown 20/50、Companion 0/1。
+下一步在Hash复核后以该Kilo JSON Schema直连免费模型做4决策续跑，检查是否产生真实Native目标进度与安全新checkpoint；
+该续跑仍只计作第一Campaign样本，不满足两个Campaign完成门禁。
 
-FreeLLMAPI模型请求恢复边界（2026-10-21更新）：若网关以HTTP 502及回退链`keyN=error`/`keyN=upstream_error`标识临时上游故障，Host仅在当前决定尚未转成Native动作前，对同一模型决定最多重试两次，分别延迟5秒、15秒；第三次失败则安全终止本轮，不重放已执行游戏操作。对HTTP 429，优先使用有效`Retry-After`（单次≤360秒，最多两次）；若该头缺失，仅接受FreeLLMAPI明确的`All models exhausted`错误消息中的`Soonest reset ~N[s/m/h]`，最多一次、单次≤360秒。提示等待必须放入当前Provider deadline并留出至少5秒推理余量，否则Host立即报错，不空等至超时、不发后续Provider请求。正文只限16KiB，仅保留解析出的ETA/池耗尽标记，不记录原文。当前Provider deadline上限360秒，NativeMailbox等待保持独立180/240秒，不因模型冷却延长。确定性Host Package覆盖正文ETA一次成功重试、超deadline时快速失败、原文不泄露，以及既有315秒/361秒和显式`Retry-After`边界；尚无实机无`Retry-After`正文提示的运行收据。JSON Schema的`provider_bad_request`回退是不同的单次JSON对象兼容规则。
+FreeLLMAPI模型请求恢复边界（2026-10-21更新）：若网关以HTTP 502及回退链`keyN=error`/`keyN=upstream_error`标识临时上游故障，Host仅在当前决定尚未转成Native动作前，对同一模型决定最多重试两次，分别延迟5秒、15秒；
+第三次失败则安全终止本轮，不重放已执行游戏操作。
+对HTTP 429，优先使用有效`Retry-After`（单次≤360秒，最多两次）；
+若该头缺失，仅接受FreeLLMAPI明确的`All models exhausted`错误消息中的`Soonest reset ~N[s/m/h]`，最多一次、单次≤360秒。
+提示等待必须放入当前Provider deadline并留出至少5秒推理余量，否则Host立即报错，不空等至超时、不发后续Provider请求。
+正文只限16KiB，仅保留解析出的ETA/池耗尽标记，不记录原文。
+当前Provider deadline上限360秒，NativeMailbox等待保持独立180/240秒，不因模型冷却延长。
+确定性Host Package覆盖正文ETA一次成功重试、超deadline时快速失败、原文不泄露，以及既有315秒/361秒和显式`Retry-After`边界；
+尚无实机无`Retry-After`正文提示的运行收据。
+JSON Schema的`provider_bad_request`回退是不同的单次JSON对象兼容规则。
 
-FreeLLMAPI `format_ignored`兼容回退（2026-10-14）：最近一次真实Campaign run `TestResults/20261014-171433`在20次决策/11条Native动作后已接取“卡利奥克需要工具”，`questDetails`能读到活动委托；退出村庄并读取附近目标后，下一模型请求收到HTTP 502，轨迹为`custom/nvidia/llama-3.2-11b-vision key1=format_ignored`。官方`fallback-loop.ts`将模型返回忽略`response_format`或截断JSON分类为`format_ignored`，并非普通传输失败。Host现允许仅针对FreeLLMAPI HTTP 502且轨迹明确含`keyN=format_ignored`的当前决策，一次性改用`json_object`重试；不放宽本地JSON解析、动作ID/参数目录、当前Native状态检查，也不重新执行之前的Native命令。Provider自测覆盖精确轨迹只发第二次JSON对象请求，并将合法`tradeConfirm`动作和省略的审计理由交给原有严格归一化；不执行Native动作。真实模型复验待FreeLLMAPI用户密钥与模型配置恢复。此次运行证明任务已被接受但未完成工具购买/交付，不能标作Quest通关。用户确认头人3D对话中的金色“点击继续”由点击/按键推进对话直到出现可选回答；该输入事实已进入`dialogueContinue`机制契约，时钟语义仍未知。
+FreeLLMAPI `format_ignored`兼容回退（2026-10-14）：最近一次真实Campaign run `TestResults/20261014-171433`在20次决策/11条Native动作后已接取“卡利奥克需要工具”，`questDetails`能读到活动委托；
+退出村庄并读取附近目标后，下一模型请求收到HTTP 502，轨迹为`custom/nvidia/llama-3.2-11b-vision key1=format_ignored`。
+官方`fallback-loop.ts`将模型返回忽略`response_format`或截断JSON分类为`format_ignored`，并非普通传输失败。
+Host现允许仅针对FreeLLMAPI HTTP 502且轨迹明确含`keyN=format_ignored`的当前决策，一次性改用`json_object`重试；
+不放宽本地JSON解析、动作ID/参数目录、当前Native状态检查，也不重新执行之前的Native命令。
+Provider自测覆盖精确轨迹只发第二次JSON对象请求，并将合法`tradeConfirm`动作和省略的审计理由交给原有严格归一化；
+不执行Native动作。
+真实模型复验待FreeLLMAPI用户密钥与模型配置恢复。
+此次运行证明任务已被接受但未完成工具购买/交付，不能标作Quest通关。
+用户确认头人3D对话中的金色“点击继续”由点击/按键推进对话直到出现可选回答；
+该输入事实已进入`dialogueContinue`机制契约，时钟语义仍未知。
 
 W7-K Quest交谈策略修正（2026-10-14）：真实模型回归显示，Quest接取后对话会在玩家离开前继续出现多个交谈节点；若任务仍欠工具，Host现在只允许当前Native对话中的离开选项，聚落菜单不再开放重复`talkToSettlementHero`，引导Agent转向Town市场；只有Journal显示数量满足且已采集交付前Inventory基线后，才重新开放Quest给予者对话。此为Chronicle动作目录策略，不改原版对话/任务机制；动作目录/拒绝非法选项由策略自测覆盖，真实模型运行仍待复验。
 
@@ -155,7 +325,18 @@ W7-K代理恢复后的重新验证（2026-10-14）：用户表示已恢复7890�
 
 最新只读Provider探针（`TestResults/20261014-121616`、`122233`）对目录中明确存在的`nvidianemotron-3-nano-omni-30b-a3b-reasoning`先通过Preflight和Build，再在FreeLLMAPI调用层因`ECONNRESET blockrun.ai via proxy`返回HTTP 502并耗尽该直连候选。两次之间curl曾短暂返回BlockRun HTTP 200，但FreeLLMAPI健康检查和随后模型请求又记录Google、OVH与BlockRun多条代理传输重置，证明出口处于间歇状态而非稳定恢复。此后应先以无游戏Provider探针确认调用持续稳定，避免重新启动完整Campaign Fixture。
 
-W7-K直接免费模型对话推进（`TestResults/20261014-134529`，源commit `3bfbf27`）：NVIDIA Llama 11B的模型门禁通过，完整Native界面切片也实际启动；真实模型5轮决策，提交3个Native动作（`talkToSettlementHero`、`dialogueSelect`选择`lord_meet_player_response1`、`dialogueContinue`）。它曾提出当前目录不允许的`leaveSettlement`，Host明确指出当前唯一动作和三个精确对话选项ID后，模型随后按新目录恢复并完成可用的交谈步骤；截图直接显示下一层有“我听说你有个问题需要帮助”等选项，说明模型已到达委托入口前一层。下一模型请求收到HTTP429后停止；该运行约53秒结束，未记录85秒`Retry-After`等待，故不能声称本轮触发了新的429等待重试。任务尚未接取，QuestId仍空；没有把对话开始误报为Quest完成。决策使用10281输入/667输出token，CampaignDay未前进，源fixture未变，游戏进程已停止；视频覆盖277/277帧并保留。此运行证明玩家对话入口和先前动作名纠错在真实模型下可用，但限流阻断了继续选择委托选项；下一次应从相同自然可见任务起点继续完整验收，不把这次三动作当作完成。
+W7-K直接免费模型对话推进（`TestResults/20261014-134529`，源commit `3bfbf27`）：NVIDIA Llama 11B的模型门禁通过，完整Native界面切片也实际启动；
+真实模型5轮决策，提交3个Native动作（`talkToSettlementHero`、`dialogueSelect`选择`lord_meet_player_response1`、`dialogueContinue`）。
+它曾提出当前目录不允许的`leaveSettlement`，Host明确指出当前唯一动作和三个精确对话选项ID后，模型随后按新目录恢复并完成可用的交谈步骤；
+截图直接显示下一层有“我听说你有个问题需要帮助”等选项，说明模型已到达委托入口前一层。
+下一模型请求收到HTTP429后停止；
+该运行约53秒结束，未记录85秒`Retry-After`等待，故不能声称本轮触发了新的429等待重试。
+任务尚未接取，QuestId仍空；
+没有把对话开始误报为Quest完成。
+决策使用10281输入/667输出token，CampaignDay未前进，源fixture未变，游戏进程已停止；
+视频覆盖277/277帧并保留。
+此运行证明玩家对话入口和先前动作名纠错在真实模型下可用，但限流阻断了继续选择委托选项；
+下一次应从相同自然可见任务起点继续完整验收，不把这次三动作当作完成。
 
 W7-K 429诊断收据（`TestResults/20261014-140403`）：因134529最后一轮的`Retry-After=85`与约53秒总录制时长不一致，Host错误现在会附带实际`rateLimitRetryAttempts`和`rateLimitRetryWaitMilliseconds`，不记录响应正文或凭据。自托管包回归模拟“先429/等待1秒/重试后仍429”，确认收据记录一次重试与实际等待；包内89个Provider合同场景通过。该诊断改动尚未在真实模型429下复验，后续错误收据将区分未进入等待与等待后仍失败。
 
@@ -167,17 +348,49 @@ W7-K直接免费模型完整场景（`TestResults/20261014-120307`）：固定`n
 
 单机当前玩家客户端以及“游戏内Native Mod身体 + 游戏外本地Agent Host模型循环”已有3/3可重复的技术原型；设置注册、Native-PID/会话绑定及游戏内正常启停另有上述运行证据，不需要第二游戏账号。可重建的首装zip及隔离游戏根Smoke已有证据；第三方Mod管理器实际安装、升级/回滚/卸载由发行后续工作及Epic验收处理。现有证据没有覆盖完整Campaign或跨3D场景持续游玩。多人客户端/共享Campaign由W6另行研究，首发单机证据不能替代多人验收。
 
-W7-K无游戏Provider门禁超时诊断（`TestResults/20261014-143328`、`144834`、`144127`、`145331`、`145735`、`145950`）：两次Provider smoke在外层超时后被杀，均没有启动Campaign。已确认Harness自身原因：PowerShell `TryParse('', [ref]$default)`会把引用参数清成0，原代码因此把缺省180秒变成0并只等待额外15秒；本机复现确认。现在用独立解析变量，缺失/无效值回到180秒、有效值限制5–240秒，脚本内四个边界自检通过，Docs通过`145331`。另一个独立问题是429/502退避等待原先不受Provider总Deadline约束；现已将等待与响应读取共用Deadline，自托管回归以250毫秒总期限/5秒Retry-After确认超时后不再发请求，完整包93个Provider合同场景通过（`144127`）。修复后真实无游戏门禁`145735`成功并返回NVIDIA Llama合成动作；完整任务阶段`145950`的前置门禁触发`provider-timeout`，提示Host在有限总Deadline内等待FreeLLMAPI限流重试仍无响应，Campaign未启动。当前Harness超时与重试越界已分别有证据和回归；真实上游仍间歇限流/延迟，不应再把这类失败归因于游戏逻辑或模型决策质量。
+W7-K无游戏Provider门禁超时诊断（`TestResults/20261014-143328`、`144834`、`144127`、`145331`、`145735`、`145950`）：两次Provider smoke在外层超时后被杀，均没有启动Campaign。
+已确认Harness自身原因：PowerShell `TryParse('', [ref]$default)`会把引用参数清成0，原代码因此把缺省180秒变成0并只等待额外15秒；
+本机复现确认。
+现在用独立解析变量，缺失/无效值回到180秒、有效值限制5–240秒，脚本内四个边界自检通过，Docs通过`145331`。
+另一个独立问题是429/502退避等待原先不受Provider总Deadline约束；
+现已将等待与响应读取共用Deadline，自托管回归以250毫秒总期限/5秒Retry-After确认超时后不再发请求，完整包93个Provider合同场景通过（`144127`）。
+修复后真实无游戏门禁`145735`成功并返回NVIDIA Llama合成动作；
+完整任务阶段`145950`的前置门禁触发`provider-timeout`，提示Host在有限总Deadline内等待FreeLLMAPI限流重试仍无响应，Campaign未启动。
+当前Harness超时与重试越界已分别有证据和回归；
+真实上游仍间歇限流/延迟，不应再把这类失败归因于游戏逻辑或模型决策质量。
 
 Harness包下载代理探测（`TestResults/20261014-161824`）：每次AgentHostPackage之前的`Test-NetConnection`曾反复在7890端口停留约30秒并打印交互进度；现改为500ms上限`TcpClient`本机回环探测，并用临时listener验证开放端口通过、关闭端口拒绝。Package通过；未绕过7890代理，也不影响产品功能。
 
-W7-K真实模型对话“点击继续”切片（`TestResults/20261014-150844`）：直连免费NVIDIA Llama 11B通过Provider门禁后，Agent在自然可见的卡利奥克任务标记开始；5fps游戏窗口录像覆盖1179/1179帧、235.8秒。模型完成`talkToSettlementHero`并选择`lord_meet_player_response1`，到达原版头人对话的无选项文本屏；随后5次模型输出在只有`dialogueContinue`可用时仍多次尝试`leave_settlement`或`talkToSettlementHero`，均由Host在Native前拒绝。决策总数8、Native动作2，Quest未接取、CampaignDay 91077.634未变、源档未变、游戏进程停止。末帧显示金色“点击继续”；用户确认点击/按键会推进文字直到可选回答出现。已将这一视觉事实加入现有交互契约/系统提示，并增加“拒绝leave→dialogueContinue→出现任务选项”的自托管闭环回归；包测试`TestResults/20261014-153444`通过，但这一新提示尚未由真实模型重验。不能把此阶段误报成Quest完成。
+W7-K真实模型对话“点击继续”切片（`TestResults/20261014-150844`）：直连免费NVIDIA Llama 11B通过Provider门禁后，Agent在自然可见的卡利奥克任务标记开始；
+5fps游戏窗口录像覆盖1179/1179帧、235.8秒。
+模型完成`talkToSettlementHero`并选择`lord_meet_player_response1`，到达原版头人对话的无选项文本屏；
+随后5次模型输出在只有`dialogueContinue`可用时仍多次尝试`leave_settlement`或`talkToSettlementHero`，均由Host在Native前拒绝。
+决策总数8、Native动作2，Quest未接取、CampaignDay 91077.634未变、源档未变、游戏进程停止。
+末帧显示金色“点击继续”；
+用户确认点击/按键会推进文字直到可选回答出现。
+已将这一视觉事实加入现有交互契约/系统提示，并增加“拒绝leave→dialogueContinue→出现任务选项”的自托管闭环回归；
+包测试`TestResults/20261014-153444`通过，但这一新提示尚未由真实模型重验。
+不能把此阶段误报成Quest完成。
 
 W7-K真实限流链端到端验证（`TestResults/20261014-153952`）：FreeLLMAPI Provider门禁通过后启动Campaign与连续帧捕获；真实模型首次任务决定收到HTTP429/Retry-After 85，Host按新逻辑真实等待85001毫秒后只重试一次，第二个429提示43秒时因该决定已使用一次重试而fail closed。诊断收据明确`rateLimitRetryAttempts=1`、`rateLimitRetryWaitMilliseconds=85001`、`rateLimitRetryEligible=true`；没有模型决策/Native动作，CampaignDay未变，Quest未接取，源fixture未变、游戏进程清理，视频覆盖607/607帧。该结果验证了502/429重分类和一次429等待确实在Campaign Host路径工作；本轮没有测试前一段“点击继续”Prompt反馈，因为模型在首个决定前被限流。
 
-W7-K System恢复指令真实模型复验与动作审计调整（`TestResults/20261014-165249`、`TestResults/20261014-170725`）：165249模型在Native对话中先返回一次非法`leave_settlement`，收到置于System role的当前恢复指令后成功选择当前`dialogueSelect`；随后尝试继续对话时返回了缺少`rationale`的结构化动作，Host以`provider-reason-missing`拒绝。5决策、2个Native动作，CampaignDay 91077.635不变、Quest未接取、源fixture未变、进程停止，录像覆盖602/602帧。因`rationale`只用于审计且不参与Native安全判定，现将动作rationale改为可选（若提供仍受长度校验）；action/arguments当前目录严格校验不变，done/等待等控制的reason仍必需。确定性Provider合同验证无rationale动作可规范化为空审计字段，自包含包95个Provider合同场景通过（170725）。该调整尚需真实模型复测，也不代表委托完成。
+W7-K System恢复指令真实模型复验与动作审计调整（`TestResults/20261014-165249`、`TestResults/20261014-170725`）：165249模型在Native对话中先返回一次非法`leave_settlement`，收到置于System role的当前恢复指令后成功选择当前`dialogueSelect`；
+随后尝试继续对话时返回了缺少`rationale`的结构化动作，Host以`provider-reason-missing`拒绝。
+5决策、2个Native动作，CampaignDay 91077.635不变、Quest未接取、源fixture未变、进程停止，录像覆盖602/602帧。
+因`rationale`只用于审计且不参与Native安全判定，现将动作rationale改为可选（若提供仍受长度校验）；
+action/arguments当前目录严格校验不变，done/等待等控制的reason仍必需。
+确定性Provider合同验证无rationale动作可规范化为空审计字段，自包含包95个Provider合同场景通过（170725）。
+该调整尚需真实模型复测，也不代表委托完成。
 
-W7-K用户界面反馈后的真实重试（`TestResults/20261014-155314`）：FreeLLMAPI门禁通过，真实NVIDIA Llama又进入村庄对话。模型仅执行`talkToSettlementHero`，随后在当前只开放三个确切`dialogueSelect`选项时返回`talkToSettlementHero`/`leave_settlement`并重复；Host原生前拒绝3次并已返回当前OptionId列表。5次决策/1条Native动作，6996输入/253输出token，CampaignDay 91077.635未变，Quest未接取，源fixture未变；原生窗口录像542/542帧、108.4秒，进程清理。该失败发生在“出现可选回答”阶段，而不是用户刚确认的“点击继续”阶段。基于模型反复忽略用户消息中的requiredNextStep，已新增短System层恢复指令：仅把Host生成的下一步要求提升到System role，不回显模型原文，也不执行确定性动作；自托管闭环回归`TestResults/20261014-160535`通过，包内94个Provider场景通过。该System反馈强化尚未由真实模型复验。
+W7-K用户界面反馈后的真实重试（`TestResults/20261014-155314`）：FreeLLMAPI门禁通过，真实NVIDIA Llama又进入村庄对话。
+模型仅执行`talkToSettlementHero`，随后在当前只开放三个确切`dialogueSelect`选项时返回`talkToSettlementHero`/`leave_settlement`并重复；
+Host原生前拒绝3次并已返回当前OptionId列表。
+5次决策/1条Native动作，6996输入/253输出token，CampaignDay 91077.635未变，Quest未接取，源fixture未变；
+原生窗口录像542/542帧、108.4秒，进程清理。
+该失败发生在“出现可选回答”阶段，而不是用户刚确认的“点击继续”阶段。
+基于模型反复忽略用户消息中的requiredNextStep，已新增短System层恢复指令：仅把Host生成的下一步要求提升到System role，不回显模型原文，也不执行确定性动作；
+自托管闭环回归`TestResults/20261014-160535`通过，包内94个Provider场景通过。
+该System反馈强化尚未由真实模型复验。
 
 ### 多人独立客户端候选：共享战役 Mod 的实际边界
 
@@ -193,7 +406,8 @@ W7-K用户界面反馈后的真实重试（`TestResults/20261014-155314`）：Fr
 | Mod兼容与本机状态 | 公开兼容建议要求关闭其它 Mod、关闭 War Sails，并让所有玩家运行相同协作Mod版本；项目当前页面称其它Mod兼容未保证。对照本机 1.4.8 `Modules` 目录仅见原版 `Multiplayer`，未见 Bannerlord Coop 模块；Steam common目录也没有独立 Bannerlord Dedicated Server 安装。 | 现有本机安装和当前大量Campaign Mod列表不能作为已具备共享战役测试环境的证据。若选这条路，须单独安装固定版本及服务器到隔离环境，并验证 Chronicle 与其模块集兼容；不能在当前正式/主力模组环境里直接尝试。 |
 | 玩家使用步骤 | 当前公开入门步骤至少要订阅并启用协作Mod；创建/选择 Campaign 保存；启动 Host 或专服；每个玩家另启客户端 Join；确认游戏/Mod版本一致，主机需要保持服务端运行。 | 这比单机需要更多安装、联机和服务端概念；玩家如何把 AI 模型 Runtime 绑定到自己的第二客户端、如何自动启动/看护客户端，尚无 Chronicle 产品路径，也不能要求玩家安装 Codex/MCP。 |
 
-参照来源： [Bannerlord Coop 项目说明/版本/许可](https://github.com/Bannerlord-Coop-Team/BannerlordCoop)、[其多人身份/服务器约定](https://github.com/Bannerlord-Coop-Team/BannerlordCoop/blob/development/AGENTS.md)、[服务器部署与连接说明](https://github.com/Bannerlord-Coop-Team/BannerlordCoop/blob/development/deploy/Server%20Instructions.md)、[其权威同步/线程约定](https://github.com/Bannerlord-Coop-Team/BannerlordCoop/wiki/Framework-Definitions)、[Steam Workshop 项目类型/版本标记](https://steamcommunity.com/sharedfiles/filedetails/?id=3770450698)、[TaleWorlds Dedicated Server 指南](https://moddocs.bannerlord.com/multiplayer/hosting_server/)、[Steam Families 并发游戏规则](https://help.steampowered.com/en/faqs/view/054C-3167-DD7F-49D4)。这些公开文件可证明项目自述和架构约定，不是 Chronicle 在本机安装后通过运行测试得到的兼容性证据。
+参照来源： [Bannerlord Coop 项目说明/版本/许可](https://github.com/Bannerlord-Coop-Team/BannerlordCoop)、[其多人身份/服务器约定](https://github.com/Bannerlord-Coop-Team/BannerlordCoop/blob/development/AGENTS.md)、[服务器部署与连接说明](https://github.com/Bannerlord-Coop-Team/BannerlordCoop/blob/development/deploy/Server%20Instructions.md)、[其权威同步/线程约定](https://github.com/Bannerlord-Coop-Team/BannerlordCoop/wiki/Framework-Definitions)、[Steam Workshop 项目类型/版本标记](https://steamcommunity.com/sharedfiles/filedetails/?id=3770450698)、[TaleWorlds Dedicated Server 指南](https://moddocs.bannerlord.com/multiplayer/hosting_server/)、[Steam Families 并发游戏规则](https://help.steampowered.com/en/faqs/view/054C-3167-DD7F-49D4)。
+这些公开文件可证明项目自述和架构约定，不是 Chronicle 在本机安装后通过运行测试得到的兼容性证据。
 
 阶段判断：多人路线确实能提供“AI作为独立Hero/Party进入同一个Campaign”的产品形态，但它不是轻量地给Chronicle加一个联机开关，而是依赖一个独立共享战役服务器、客户端身份与同步协议；AI仍须占用一个真实游戏客户端。它解决了单机 NPC 路线的身份和世界推进问题，却带来第二个客户端授权、服务端部署、版本兼容以及目前共享战役Mod不承诺兼容其它Mod等成本。现阶段只确认其概念/公开契约匹配，并未在本机运行该Mod，也未验证 Chronicle 可连接；W6 Epic 需要结合单机候选和这些成本再决定首发路线，不能由“技术上可想象”直接定案。
 
@@ -289,49 +503,166 @@ Mindcraft 将命令路由、ActionManager、SelfPrompter、History、SkillLibrar
 
 这些项目没有共同固定的LLM，也不应把论文使用的旧模型名当成今天的性能基线：Voyager论文/代码以GPT-4为主要Action/Curriculum/Critic模型、GPT-3.5承担技能管理；DEPS Minecraft实验用`code-davinci-002`，并比较Codex、GPT-3、ChatGPT、GPT-4及LLaMA2变体；GITM论文使用`gpt-3.5-turbo`承担分解、规划、结构化动作生成和经验摘要；JARVIS-1组合GPT系规划、MineCLIP感知与STEVE-I控制，并用ChatGPT/GPT-4、LLaMA2-70B和Minecraft微调LLaMA2-13B作对照。Mindcraft是持续变化的多Provider项目：截至2026-10-07，develop默认profile为`gpt-5.4-mini`，支持分离chat/code/vision/embedding模型，也列出Ollama和专用Andy-4-Micro本地选项。以上仅是角色/接口证据，不意味着这些旧版本优劣可直接迁移到Bannerlord。
 
-本项目以可替换OpenAI-Compatible Chat Completions Provider作为W3-A真实模型边界，不迁移到代码生成、Minecraft键鼠动作、VLM截图驾驶或固定云厂商。参考项目的旧模型名仍只作历史角色证据，不直接外推为今天的模型优劣。Mindcraft的Andy-4-Micro（Qwen2 1.78B Q8）只作Minecraft领域微调对照，不能直接代表Bannerlord能力。[Voyager](https://github.com/MineDojo/Voyager) · [DEPS](https://arxiv.org/abs/2302.01560) · [GITM](https://github.com/OpenGVLab/GITM) · [JARVIS-1](https://github.com/CraftJarvis/JARVIS-1) · [Mindcraft](https://github.com/mindcraft-bots/mindcraft) · [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) · [Ollama Qwen3.5 quantizations](https://ollama.com/library/qwen3.5/tags)
+本项目以可替换OpenAI-Compatible Chat Completions Provider作为W3-A真实模型边界，不迁移到代码生成、Minecraft键鼠动作、VLM截图驾驶或固定云厂商。
+参考项目的旧模型名仍只作历史角色证据，不直接外推为今天的模型优劣。
+Mindcraft的Andy-4-Micro（Qwen2 1.78B Q8）只作Minecraft领域微调对照，不能直接代表Bannerlord能力。
+[Voyager](https://github.com/MineDojo/Voyager) · [DEPS](https://arxiv.org/abs/2302.01560) · [GITM](https://github.com/OpenGVLab/GITM) · [JARVIS-1](https://github.com/CraftJarvis/JARVIS-1) · [Mindcraft](https://github.com/mindcraft-bots/mindcraft) · [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) · [Ollama Qwen3.5 quantizations](https://ollama.com/library/qwen3.5/tags)
 
 本机W3-A本地基准已实际部署并通过一次LiveModel切片：Ollama 0.40.0安装于D盘，`OLLAMA_MODELS`指向D盘，模型为`qwen3.5:4b-q4_K_M`（官方manifest注册层总计3,324,173,934字节）。主机Windows 11 build 26200、15.6 GiB可见RAM、RTX 4060 Laptop 8 GiB、NVIDIA驱动617.14；Ollama启动日志识别CUDA显卡且默认上下文4096。下载由显式7890本地代理经可续传分段传输完成，安装器SHA-256与Authenticode签名验证通过；model、projector、config及元数据blob按官方manifest摘要核验后置于D盘模型库。上述路径和环境值是本机私有配置，不进入Git；Ollama的用户密钥未配置、测试不访问云端。
 
-本机Chronicle Provider配置为loopback `/v1`、`max_tokens`、`reasoning_effort=none`、temperature 0。Reasoning关闭是针对Qwen3.5该模型在本切片上结构化输出预算的本地设置，不代表所有模型的默认策略。Provider输入会在模型视图中把大型`mapSettlementTargets`上一回执压缩为最近12个安全目标和最多4个风险目标，并明确总数/省略数；原始Native回执、Harness追踪与执行白名单不变。LiveModel运行`TestResults/20261008-034029`通过：模型先调用地图聚落查询（本次原生回执有393个结果），再选观察到的安全萨哥特`town_V1`发出一次Native移动，并在后验状态后主动停止；查询/移动回执完成、模板存档hash不变、Bannerlord与Agent进程清理完成。明确窗口视频以10fps完整覆盖，事件帧/联系表生成后成功剪除原始MP4。一次成功仅证明此模型配置和该Campaign切片可运行，不证明长期规划、Quest闭环、一般决策稳定性或与游戏并发显存/FPS的统计稳定；Qwen3.5-2B仍是可比较的低资源候选，模型选择和性能仍需重复测量。[Ollama Windows配置](https://docs.ollama.com/windows) · [Ollama OpenAI兼容端点](https://docs.ollama.com/api/openai-compatibility)
+本机Chronicle Provider配置为loopback `/v1`、`max_tokens`、`reasoning_effort=none`、temperature 0。
+Reasoning关闭是针对Qwen3.5该模型在本切片上结构化输出预算的本地设置，不代表所有模型的默认策略。
+Provider输入会在模型视图中把大型`mapSettlementTargets`上一回执压缩为最近12个安全目标和最多4个风险目标，并明确总数/省略数；
+原始Native回执、Harness追踪与执行白名单不变。
+LiveModel运行`TestResults/20261008-034029`通过：模型先调用地图聚落查询（本次原生回执有393个结果），再选观察到的安全萨哥特`town_V1`发出一次Native移动，并在后验状态后主动停止；
+查询/移动回执完成、模板存档hash不变、Bannerlord与Agent进程清理完成。
+明确窗口视频以10fps完整覆盖，事件帧/联系表生成后成功剪除原始MP4。
+一次成功仅证明此模型配置和该Campaign切片可运行，不证明长期规划、Quest闭环、一般决策稳定性或与游戏并发显存/FPS的统计稳定；
+Qwen3.5-2B仍是可比较的低资源候选，模型选择和性能仍需重复测量。
+[Ollama Windows配置](https://docs.ollama.com/windows) · [Ollama OpenAI兼容端点](https://docs.ollama.com/api/openai-compatibility)
 
-W5-I本地候选`qwen3:8b-q4_K_M`文件安装与短推理通过，但固定补给闭环两轮失败，故不以增大本地模型规模处理该问题。用户提供DeepSeek API后，Provider真实OpenAI-compatible smoke可返回结构化动作。旧工作树上曾有3/3成功，但收据均标记tracked tree dirty，不能作为可复现验收。提交`51c3a8e`后，thinking默认模式的一次干净源码组遇到一次无HTTP响应的连接失败；Provider现仅对此类请求前连接/解析错误重试一次，不重试超时或已有响应。默认thinking的`TestResults/20261010-142510`两轮中，一轮结果达标但耗时396.743秒超出300秒冻结限时，另一轮216.358秒通过。DeepSeek官方兼容接口支持`thinking.type`；本次实测显示默认thinking可能产生长延迟尾部，因此Provider新增可选`CHRONICLE_LLM_THINKING_MODE=disabled`，且在关闭thinking时不发送`reasoning_effort`，以同模型/同动作契约做延迟控制，不升级模型规模。提交`df3ac33`后，`TestResults/20261010-145733`按同一DeepSeek Flash配置`thinking=disabled`、`reasoning_effort=none`、同一Native模板完成干净tracked tree的3/3正式重复验收：三轮分别162.877/163.469/164.000秒、均16次决策、一次购买1单位最低价橄榄（9 Denar）、一次`rest(days=3)`、Campaign tick 2→5、最终6人/Food 1.05/Gold 861、零拒绝、录像覆盖100%、源存档不变、成功后MP4删除、游戏进程/Agent session清理；三份收据均绑定commit `df3ac33de5f30e11488bfc8d402aabdbbcd0e1ab`且`SourceTrackedTreeClean=true`。相同设置下固定Native补给切片达到冻结验收；这不证明不同seed或更广泛生涯决策的稳定性。
+W5-I本地候选`qwen3:8b-q4_K_M`文件安装与短推理通过，但固定补给闭环两轮失败，故不以增大本地模型规模处理该问题。
+用户提供DeepSeek API后，Provider真实OpenAI-compatible smoke可返回结构化动作。
+旧工作树上曾有3/3成功，但收据均标记tracked tree dirty，不能作为可复现验收。
+提交`51c3a8e`后，thinking默认模式的一次干净源码组遇到一次无HTTP响应的连接失败；
+Provider现仅对此类请求前连接/解析错误重试一次，不重试超时或已有响应。
+默认thinking的`TestResults/20261010-142510`两轮中，一轮结果达标但耗时396.743秒超出300秒冻结限时，另一轮216.358秒通过。
+DeepSeek官方兼容接口支持`thinking.type`；
+本次实测显示默认thinking可能产生长延迟尾部，因此Provider新增可选`CHRONICLE_LLM_THINKING_MODE=disabled`，且在关闭thinking时不发送`reasoning_effort`，以同模型/同动作契约做延迟控制，不升级模型规模。
+提交`df3ac33`后，`TestResults/20261010-145733`按同一DeepSeek Flash配置`thinking=disabled`、`reasoning_effort=none`、同一Native模板完成干净tracked tree的3/3正式重复验收：三轮分别162.877/163.469/164.000秒、均16次决策、一次购买1单位最低价橄榄（9 Denar）、一次`rest(days=3)`、Campaign tick 2→5、最终6人/Food 1.05/Gold 861、零拒绝、录像覆盖100%、源存档不变、成功后MP4删除、游戏进程/Agent session清理；
+三份收据均绑定commit `df3ac33de5f30e11488bfc8d402aabdbbcd0e1ab`且`SourceTrackedTreeClean=true`。
+相同设置下固定Native补给切片达到冻结验收；
+这不证明不同seed或更广泛生涯决策的稳定性。
 
-W5-J五个独立新Campaign矩阵已在`TestResults/20261010-155907`完成；Native Seed未知，五个Campaign实例ID唯一。4/5实例在萨哥特可经Native招募准备至6人并配对完成三日等待，1例在两名志愿兵已招募（Party 3/Gold 960）后，当前Town剩余3个Volunteer offer全部`available=false`。这只证明该Town当前无更多可用志愿兵，不证明其他聚落均无机会。四个可配对实例的无补给臂均为Food 0.95→0.05、库存0、Gold 900→870；当轮最低价Native食物报价分别为橄榄11/9/13/9 Denar，购买1份后的供应臂均从Food 0.95增至1.95、结束Food 1.05且库存1，结束Gold分别为859/861/857/861。两臂源存档SHA-256逐组相同、起始Party/Gold/Food/tick匹配；CampaignInstanceId不作为Seed或唯一配对依据。8个成功分支均为Native `rest(days=3)`自然推进、无Harness时钟调用，窗口录像10fps覆盖100%、MP4删除；临时新档均移除，既有保存清单哈希不变，进程/session清理。Harness矩阵以5/5全配对为状态门槛而失败，但按本卡验收，4个有效配对加1个有证据的Native招募前置不足已形成完整矩阵；这不足以声称所有新档都可到达相同起点，也不足以直接开展同起点真实模型矩阵。
+W5-J五个独立新Campaign矩阵已在`TestResults/20261010-155907`完成；
+Native Seed未知，五个Campaign实例ID唯一。
+4/5实例在萨哥特可经Native招募准备至6人并配对完成三日等待，1例在两名志愿兵已招募（Party 3/Gold 960）后，当前Town剩余3个Volunteer offer全部`available=false`。
+这只证明该Town当前无更多可用志愿兵，不证明其他聚落均无机会。
+四个可配对实例的无补给臂均为Food 0.95→0.05、库存0、Gold 900→870；
+当轮最低价Native食物报价分别为橄榄11/9/13/9 Denar，购买1份后的供应臂均从Food 0.95增至1.95、结束Food 1.05且库存1，结束Gold分别为859/861/857/861。
+两臂源存档SHA-256逐组相同、起始Party/Gold/Food/tick匹配；
+CampaignInstanceId不作为Seed或唯一配对依据。
+8个成功分支均为Native `rest(days=3)`自然推进、无Harness时钟调用，窗口录像10fps覆盖100%、MP4删除；
+临时新档均移除，既有保存清单哈希不变，进程/session清理。
+Harness矩阵以5/5全配对为状态门槛而失败，但按本卡验收，4个有效配对加1个有证据的Native招募前置不足已形成完整矩阵；
+这不足以声称所有新档都可到达相同起点，也不足以直接开展同起点真实模型矩阵。
 
 W5-K在`TestResults/20261010-181412`以两次独立New Campaign完成：第1次萨哥特原生名额足够；第2次在萨哥特4次招募后Party=5，剩余offer不可用，触发回退。仅凭该Campaign当时`mapSettlementTargets`列出的可见、安全、未围城地点，原版Move到卡利奥克村并通过Native RecruitmentVM以20 Denar招入1名`vlandian_recruit`，Party到6；随后原版返回地图、移动至萨哥特市场Town。这个单例证明已观察到回退可行，不证明所有新档、所有安全目标或长期路线都稳定。测试期间发现并修正Harness两项错误：村庄出现`trade`选项不能证明已到Town；从聚落菜单保存的状态不能假定重载后为Campaign Map。修正后的准备档在离开Town返回MapState后保存，供两臂加载。
 
-从同一准备档SHA-256`931EC4B42070178CFC8F6F224A949F2CD5B91DFC3FFE2D0F553BF586143F5122`加载的两臂起始配置相同，起始CampaignDay差`0.001`日、Campaign实例ID本轮一致（只记录，不假定每轮都一致）。无补给臂：Party 6、Gold 900、Food 0.95、库存0，Native三日等待结束Gold 870、Food 0.05、库存0；购粮臂以Native TradeVM买1份橄榄花费11 Denar，起始Gold 889、Food 1.95、库存1，经过相同3个自然Daily tick后Gold 859、Food 1.05、库存1。Food两个分支都自然下降0.9，购粮优势体现在起始与结束均多1单位Food并保留1份库存，不应误述为日耗下降。两臂无Harness时钟动作，录像覆盖100%、成功后MP4删除；源档hash前后不变、准备档/新档删除、Bannerlord及Agent session清理。该结果完成可达性回退验证与其后固定六人三日Native供给压力对照，但仅为一次槽位耗尽样本；真实模型评测和多种子回退成功率仍未验证。
+从同一准备档SHA-256`931EC4B42070178CFC8F6F224A949F2CD5B91DFC3FFE2D0F553BF586143F5122`加载的两臂起始配置相同，起始CampaignDay差`0.001`日、Campaign实例ID本轮一致（只记录，不假定每轮都一致）。
+无补给臂：Party 6、Gold 900、Food 0.95、库存0，Native三日等待结束Gold 870、Food 0.05、库存0；
+购粮臂以Native TradeVM买1份橄榄花费11 Denar，起始Gold 889、Food 1.95、库存1，经过相同3个自然Daily tick后Gold 859、Food 1.05、库存1。
+Food两个分支都自然下降0.9，购粮优势体现在起始与结束均多1单位Food并保留1份库存，不应误述为日耗下降。
+两臂无Harness时钟动作，录像覆盖100%、成功后MP4删除；
+源档hash前后不变、准备档/新档删除、Bannerlord及Agent session清理。
+该结果完成可达性回退验证与其后固定六人三日Native供给压力对照，但仅为一次槽位耗尽样本；
+真实模型评测和多种子回退成功率仍未验证。
 
-架构核对参照了Minecraft项目的实际执行环，而不是只借用名称：Mindcraft任务文件把goal、目标物品/数量、timeout作为可机器评估的任务条件，其evaluation脚本读取任务结束分数；Voyager每轮执行动作、记录Native环境事件，由独立`CriticAgent.check_task_success`判定是否完成，并把事件/critique重新提供给下一轮。源码：[Mindcraft evaluation_script.py](https://github.com/mindcraft-bots/mindcraft/blob/develop/tasks/evaluation_script.py) · [Voyager voyager.py](https://github.com/MineDojo/Voyager/blob/main/voyager/voyager.py)。Chronicle的schema v3有限动作历史解决了模型丢失较早动作上下文的问题，但模型`done`仍只是声明；W5-I的后验门禁能拒绝不达标结果，却没有把缺失条件交回同一个循环恢复。后续架构应评估通用目标完成契约/独立Verifier反馈，使不完整声明能基于当前Native状态被拒绝并返回精确缺项，而不是为补给任务编写硬编码路线。
+架构核对参照了Minecraft项目的实际执行环，而不是只借用名称：Mindcraft任务文件把goal、目标物品/数量、timeout作为可机器评估的任务条件，其evaluation脚本读取任务结束分数；
+Voyager每轮执行动作、记录Native环境事件，由独立`CriticAgent.check_task_success`判定是否完成，并把事件/critique重新提供给下一轮。
+源码：[Mindcraft evaluation_script.py](https://github.com/mindcraft-bots/mindcraft/blob/develop/tasks/evaluation_script.py) · [Voyager voyager.py](https://github.com/MineDojo/Voyager/blob/main/voyager/voyager.py)。
+Chronicle的schema v3有限动作历史解决了模型丢失较早动作上下文的问题，但模型`done`仍只是声明；
+W5-I的后验门禁能拒绝不达标结果，却没有把缺失条件交回同一个循环恢复。
+后续架构应评估通用目标完成契约/独立Verifier反馈，使不完整声明能基于当前Native状态被拒绝并返回精确缺项，而不是为补给任务编写硬编码路线。
 
 上文末尾关于“后续架构应评估”的表述是本次实现前的差距记录，现已由第一版受限Native完成契约实现：Provider报`done`后，本地只读Verifier核对最多24项允许Native字段与`eq`/`gte`条件；未满足或未知会把逐项条件和当前值反馈给同一循环，不发Native动作，也不把Provider停止冒充成功。契约随Campaign Agent checkpoint保存，重载先重读Native状态；目标已满足则记录`verified-complete`，未满足则带缺项继续。`TestResults/20261010-194136`的AgentLoop阶段通过：确定性Provider两次故意过早报done均未被当成成功，循环收到缺项后继续；不完整契约经disposable Native存档保存/重载后仍被重新判定为未完成。该证据覆盖循环和checkpoint路径，不替代真实模型三次供给目标验收；有限比较器不是任意脚本或通用无限DSL。
 
 ### 本地Provider运行核验
 
-W7-K免费路由比较（`TestResults/20261015-085245`、`090038`、`090226`、`090926`、`091708`）：FreeLLMAPI可用目录返回85条；`auto:noema-free`无游戏Provider门禁通过并返回`custom/nvidia/llama-3.2-11b-vision`合成动作，但完整auto链Campaign只完成一次Native对话后返回无Retry-After的HTTP429，未接Quest。此前直连NVIDIA Llama真实运行推进到接取Quest、读Journal和地图目标查询，最深入；随后同一模型在后续运行遇BlockRun socket resets。Gemini 3.8 Flash虽在目录中，Google实回403 `project has been denied access`；Cohere North Mini Code的Schema及JSON对象模式回复均被FreeLLMAPI标为`format_ignored`/截断并结束HTTP502。基于当时证据，下一次原计划仍以已有进展最多的NVIDIA Llama直连复验，而不是把模型尺寸当作根因；后续7890代理继承和Mistral试验见下文。所有候选均未完成Quest验收。
+W7-K免费路由比较（`TestResults/20261015-085245`、`090038`、`090226`、`090926`、`091708`）：FreeLLMAPI可用目录返回85条；
+`auto:noema-free`无游戏Provider门禁通过并返回`custom/nvidia/llama-3.2-11b-vision`合成动作，但完整auto链Campaign只完成一次Native对话后返回无Retry-After的HTTP429，未接Quest。
+此前直连NVIDIA Llama真实运行推进到接取Quest、读Journal和地图目标查询，最深入；
+随后同一模型在后续运行遇BlockRun socket resets。
+Gemini 3.8 Flash虽在目录中，Google实回403 `project has been denied access`；
+Cohere North Mini Code的Schema及JSON对象模式回复均被FreeLLMAPI标为`format_ignored`/截断并结束HTTP502。
+基于当时证据，下一次原计划仍以已有进展最多的NVIDIA Llama直连复验，而不是把模型尺寸当作根因；
+后续7890代理继承和Mistral试验见下文。
+所有候选均未完成Quest验收。
 
-最新W7-K真实模型纵切片（`TestResults/20261015-015125`，源码`0a89f71`）：Preflight、Build、Steam修复后的Smoke、自包含AgentHostPackage及真实FreeLLMAPI Provider门禁全部通过；Provider门禁实际路由为`custom/nvidia/llama-3.2-11b-vision`，703输入/32输出token、无Native命令。Campaign内模型在20次决策/11条Native动作中通过可见对话接取“卡利奥克需要工具”、读到Journal，并离开村庄查询地图目标；随后误把当前`village_V1_1`作为工具购买目标。Agent Host依据当前动作目录在Native前拒绝这次move，因而没有移动或改存档。FreeLLMAPI日志显示本轮也持续遭遇`blockrun.ai via proxy` socket reset/cooldown，最终Provider失败；CampaignDay未变、正式源存档hash不变、游戏/Host/session清理通过，5fps视频覆盖3214/3214帧并因失败保留。此运行没有买工具或交付，不算Quest通过。
+最新W7-K真实模型纵切片（`TestResults/20261015-015125`，源码`0a89f71`）：Preflight、Build、Steam修复后的Smoke、自包含AgentHostPackage及真实FreeLLMAPI Provider门禁全部通过；
+Provider门禁实际路由为`custom/nvidia/llama-3.2-11b-vision`，703输入/32输出token、无Native命令。
+Campaign内模型在20次决策/11条Native动作中通过可见对话接取“卡利奥克需要工具”、读到Journal，并离开村庄查询地图目标；
+随后误把当前`village_V1_1`作为工具购买目标。
+Agent Host依据当前动作目录在Native前拒绝这次move，因而没有移动或改存档。
+FreeLLMAPI日志显示本轮也持续遭遇`blockrun.ai via proxy` socket reset/cooldown，最终Provider失败；
+CampaignDay未变、正式源存档hash不变、游戏/Host/session清理通过，5fps视频覆盖3214/3214帧并因失败保留。
+此运行没有买工具或交付，不算Quest通过。
 
 针对这个已复现的模型参数错误，Native拒绝反馈现在从当前`move`动作目录提取安全Town ID，并明确允许模型仅用这些新鲜ID重试`move`。此前全局Village工具System提示无条件禁止重复被拒动作，会与此参数纠错冲突；现在基础提示要求遵循Host恢复指令，只有`sameActionRetryAllowed=true`才可对同一动作纠正参数重试，其它拒绝仍明确禁止重复。`TestResults/20261015-021534`自包含Host包测试通过，覆盖Village ID在Native前被拒、恢复指令只列当前安全Town ID、且Prompt区分授权/未授权重复。该恢复逻辑尚未真实模型复验；下一轮必须在当前同一Quest起点检查模型是否改选Town并继续购物，不将这次安全拒绝算作进展完成。
 
 Steam/Smoke启动守卫的真实验证（`TestResults/20261014-223256`、`224145`、`225755`）：`220946`暴露Smoke绕过Agent-Cli的Steam前置检查，游戏在Steam未运行时弹`Unable to initialize Steam API`。现在Agent-Cli与Smoke共用`HarnessStartupEvidence.ps1`的隐藏Steam启动和5秒WebHelper稳定检查；第一次验证发现Windows PowerShell 5.1 JavaScriptSerializer无法处理用于收据的整数数组并报PSMethod循环引用，Smoke结果改为记录Steam状态计数/标量。最终`225755` Smoke通过，Bannerlord到达主菜单且收据成功序列化；完整`225912`阶段中的Smoke也通过。该修复只影响Harness启动前置和证据，不发送全局键鼠。
 
-W7-K模型阶段的上游失败（`TestResults/20261014-225912`）：真实Campaign从卡利奥克可见任务标记开始，Host在首个模型决策没有执行Native动作；CampaignDay不变、任务仍未接取、源存档不变、游戏/Host进程清理，窗口录像覆盖完整。FreeLLMAPI响应为HTTP 429，明确记录`Retry-After=75`，Host合规等待85014ms后重试仍失败。同期FreeLLMAPI本机日志显示NVIDIA自定义路由请求经`blockrun.ai via proxy`遇到`UND_ERR_SOCKET`/`ECONNRESET`及候选cooldown，因此网络/网关路由故障是更有力的解释；“免费配额耗尽”未被证实。之后`TestResults/20261015-014649` Provider合成门禁再次通过，真实路由`custom/nvidia/llama-3.2-11b-vision`返回动作、703输入/32输出token、NativeCommands=0；当前7890代理直连BlockRun与GitHub只读探针均HTTP 200，但不能保证下一次推理稳定。仍需在最新代码下重跑真实Quest。
+W7-K模型阶段的上游失败（`TestResults/20261014-225912`）：真实Campaign从卡利奥克可见任务标记开始，Host在首个模型决策没有执行Native动作；
+CampaignDay不变、任务仍未接取、源存档不变、游戏/Host进程清理，窗口录像覆盖完整。
+FreeLLMAPI响应为HTTP 429，明确记录`Retry-After=75`，Host合规等待85014ms后重试仍失败。
+同期FreeLLMAPI本机日志显示NVIDIA自定义路由请求经`blockrun.ai via proxy`遇到`UND_ERR_SOCKET`/`ECONNRESET`及候选cooldown，因此网络/网关路由故障是更有力的解释；
+“免费配额耗尽”未被证实。
+之后`TestResults/20261015-014649` Provider合成门禁再次通过，真实路由`custom/nvidia/llama-3.2-11b-vision`返回动作、703输入/32输出token、NativeCommands=0；
+当前7890代理直连BlockRun与GitHub只读探针均HTTP 200，但不能保证下一次推理稳定。
+仍需在最新代码下重跑真实Quest。
 
-2026-10-15 FreeLLMAPI密钥与出站代理核验：用户提供的统一API key已写入Windows User级`FREELLMAPI_API_KEY`，Harness既有`Get-FreeLLMAPIProfile.ps1`从User环境读取后只注入测试进程；从未打印、写入MCM/日志/命令行或提交Git。发现当前Codex进程启动时间早于User环境设置，故它自身不含该值；Harness读取User级值解决本次启动，后续新进程也会继承。多模型请求同时显示FreeLLMAPI上游TLS/socket断开，但`127.0.0.1:7890`只读HTTP代理探测当时可到达Google/OpenRouter。为让重启后的FreeLLMAPI复用用户已指定的本地代理，Harness启动网关前现将用户已有代理变量临时传给该子进程；仅当没有其它代理设置且7890正在监听时，设置子进程`HTTPS_PROXY`，随后立即还原Harness环境。无游戏真实Provider试验`TestResults/20261015-095850`通过，实际路由`ovh/Mistral-Small-3.2-24B-Instruct-2506`、JSON对象兼容模式、687输入/32输出token、0 Native命令。随后`TestResults/20261015-100014`的Preflight/Build/Smoke/Package/Provider均通过，但Campaign首轮模型决策在执行任何Native动作前收到HTTP429（`Retry-After=51`），等待49005ms后仍失败；0个模型决策/Native动作，CampaignDay未变、Quest未接取、正式源档hash未变、游戏与Host已清理、视频帧覆盖100%并保留。期间OVH路由日志也出现socket/TLS断开，因此本轮只能证明凭据可读、Provider冒烟可通及代理启动继承曾成功一次，不能证明稳定出站或任务能力通过。后续真实任务复验应先继续使用已有Mistral Provider门禁；若当前网关/上游拒绝，优先诊断代理与FreeLLMAPI路由健康，不把失败归因于Agent策略。
+2026-10-15 FreeLLMAPI密钥与出站代理核验：用户提供的统一API key已写入Windows User级`FREELLMAPI_API_KEY`，Harness既有`Get-FreeLLMAPIProfile.ps1`从User环境读取后只注入测试进程；
+从未打印、写入MCM/日志/命令行或提交Git。
+发现当前Codex进程启动时间早于User环境设置，故它自身不含该值；
+Harness读取User级值解决本次启动，后续新进程也会继承。
+多模型请求同时显示FreeLLMAPI上游TLS/socket断开，但`127.0.0.1:7890`只读HTTP代理探测当时可到达Google/OpenRouter。
+为让重启后的FreeLLMAPI复用用户已指定的本地代理，Harness启动网关前现将用户已有代理变量临时传给该子进程；
+仅当没有其它代理设置且7890正在监听时，设置子进程`HTTPS_PROXY`，随后立即还原Harness环境。
+无游戏真实Provider试验`TestResults/20261015-095850`通过，实际路由`ovh/Mistral-Small-3.2-24B-Instruct-2506`、JSON对象兼容模式、687输入/32输出token、0 Native命令。
+随后`TestResults/20261015-100014`的Preflight/Build/Smoke/Package/Provider均通过，但Campaign首轮模型决策在执行任何Native动作前收到HTTP429（`Retry-After=51`），等待49005ms后仍失败；
+0个模型决策/Native动作，CampaignDay未变、Quest未接取、正式源档hash未变、游戏与Host已清理、视频帧覆盖100%并保留。
+期间OVH路由日志也出现socket/TLS断开，因此本轮只能证明凭据可读、Provider冒烟可通及代理启动继承曾成功一次，不能证明稳定出站或任务能力通过。
+后续真实任务复验应先继续使用已有Mistral Provider门禁；
+若当前网关/上游拒绝，优先诊断代理与FreeLLMAPI路由健康，不把失败归因于Agent策略。
 
 更新Provider收据后再次无游戏重测`TestResults/20261015-101143`：Build通过，但真实请求因FreeLLMAPI上游冷却/传输失败结束；没有启动游戏，也没有Native命令。它表明仅成功一次的Mistral冒烟不足以证明路由稳定，后续真实任务应先等本机Provider门禁再次成功，再进入Campaign测试。
 
 随后`TestResults/20261015-104326`重试完整阶段：Preflight/Build/Smoke/AgentHostPackage通过；Mistral真实Provider门禁在OVH TLS/socket重置后失败，因此未启动Campaign、无Native命令。此处继续关闭而不是跳过门禁启动游戏；再次运行需先等FreeLLMAPI确认上游可用。
 
-FreeLLMAPI代理恢复后的首次真实模型Quest进展（`TestResults/20261015-102131`）：Preflight/Build/Smoke/AgentHostPackage/无游戏Provider门禁通过，真实路由为`ovh/Mistral-Small-3.2-24B-Instruct-2506`。Campaign中模型先对当前可见村庄联系人使用`talkToSettlementHero`，再按当时Native选项选择对话、执行一次`dialogueContinue`，接受`issue_offer_player_accept_quest`并调用`questDetails`；Native活动Quest列表确认出现`issue_64_quest`“卡利奥克需要工具”。公开Journal文本要求交1单位tools、奖励73单位flax；进度为0/1。运行累计9次模型决策（8次有返回，1次Provider超时）、8条Native动作、32172输入/284输出tokens；CampaignDay维持91077.635，没有到市场购买或交付。失败末帧仍显示委托人3D对话和金色“点击继续”，说明交付前还需恢复对话/回聚落菜单。Host因FreeLLMAPI `provider-timeout`安全终止；测试源档未变、进程已清理、原生窗口录像覆盖100%并因失败保留。该收据首次证明外部模型能接受并查询这条可见委托，但不代表工具购入/交付完成；下次须继续Native市场移动与原版交易，且先解决/等待路由超时。
+FreeLLMAPI代理恢复后的首次真实模型Quest进展（`TestResults/20261015-102131`）：Preflight/Build/Smoke/AgentHostPackage/无游戏Provider门禁通过，真实路由为`ovh/Mistral-Small-3.2-24B-Instruct-2506`。
+Campaign中模型先对当前可见村庄联系人使用`talkToSettlementHero`，再按当时Native选项选择对话、执行一次`dialogueContinue`，接受`issue_offer_player_accept_quest`并调用`questDetails`；
+Native活动Quest列表确认出现`issue_64_quest`“卡利奥克需要工具”。
+公开Journal文本要求交1单位tools、奖励73单位flax；
+进度为0/1。
+运行累计9次模型决策（8次有返回，1次Provider超时）、8条Native动作、32172输入/284输出tokens；
+CampaignDay维持91077.635，没有到市场购买或交付。
+失败末帧仍显示委托人3D对话和金色“点击继续”，说明交付前还需恢复对话/回聚落菜单。
+Host因FreeLLMAPI `provider-timeout`安全终止；
+测试源档未变、进程已清理、原生窗口录像覆盖100%并因失败保留。
+该收据首次证明外部模型能接受并查询这条可见委托，但不代表工具购入/交付完成；
+下次须继续Native市场移动与原版交易，且先解决/等待路由超时。
 
-自动免费路由实测（`TestResults/20261015-105130`、`105251`）：无游戏Provider门禁通过，首轮实际路由为`custom/nvidia/llama-3.2-11b-vision`，703输入/32输出token。随后完整Campaign的Preflight/Build/Smoke/Package/Provider均通过；真实路由在六次决策/四条Native动作内先后使用NVIDIA Llama 11B、Poolside Laguna XS、NVIDIA Nemotron 3.5 Lightning与Nemotron Ultra，打开当前可见头人对话、选择当前选项并推进文字，但在再次请求时FreeLLMAPI返回无Retry-After的HTTP429且八候选均冷却/不可用。没有接取Quest；CampaignDay不变、源存档hash不变、游戏/Host清理、窗口帧覆盖100%且失败视频保留。自动路由能跨供应商切换，但不代表各候选在当前账号网络下稳定，也没有比直连Mistral更深地推进Quest。此后`TestResults/20261015-105000`只重跑Mistral Provider门禁，FreeLLMAPI返回`Retry-After=315`且超出Host允许等待上限，未启动游戏。FreeLLMAPI数据库只读核对显示`proxy_enabled=1`、`proxy_mode=forward`、全局`proxy_url`为空；因此Harness通过子进程`HTTPS_PROXY`提供7890是其官方环境优先级链的有效输入，数据库未见覆盖该环境的全局URL。它不能消除代理/上游的间歇TLS重置，也不能把模型目录状态当作可用性证明。
+自动免费路由实测（`TestResults/20261015-105130`、`105251`）：无游戏Provider门禁通过，首轮实际路由为`custom/nvidia/llama-3.2-11b-vision`，703输入/32输出token。
+随后完整Campaign的Preflight/Build/Smoke/Package/Provider均通过；
+真实路由在六次决策/四条Native动作内先后使用NVIDIA Llama 11B、Poolside Laguna XS、NVIDIA Nemotron 3.5 Lightning与Nemotron Ultra，打开当前可见头人对话、选择当前选项并推进文字，但在再次请求时FreeLLMAPI返回无Retry-After的HTTP429且八候选均冷却/不可用。
+没有接取Quest；
+CampaignDay不变、源存档hash不变、游戏/Host清理、窗口帧覆盖100%且失败视频保留。
+自动路由能跨供应商切换，但不代表各候选在当前账号网络下稳定，也没有比直连Mistral更深地推进Quest。
+此后`TestResults/20261015-105000`只重跑Mistral Provider门禁，FreeLLMAPI返回`Retry-After=315`且超出Host允许等待上限，未启动游戏。
+FreeLLMAPI数据库只读核对显示`proxy_enabled=1`、`proxy_mode=forward`、全局`proxy_url`为空；
+因此Harness通过子进程`HTTPS_PROXY`提供7890是其官方环境优先级链的有效输入，数据库未见覆盖该环境的全局URL。
+它不能消除代理/上游的间歇TLS重置，也不能把模型目录状态当作可用性证明。
 
 随后`TestResults/20261015-175357`Mistral Provider冒烟再次通过，实际`ovh/Mistral-Small-3.2-24B-Instruct-2506`、687输入/32输出token；但完整重跑`TestResults/20261015-175512`在真实Provider门禁失败，未启动Campaign。FreeLLMAPI返回bounded retry wait超时，日志为OVH TLS断连与候选cooldown。只读`provider_quota_state`中的Mistral quota记录仍为0但重置时间停在2026-09-29、confidence 0.55、strategy unknown；这是过期/低置信缓存，不能据此断言当前免费额度已用尽。后续只能依当前调用回包、路由日志和Fresh Provider smoke判断可用性。
 
-2026-10-29 FreeLLMAPI真实路由核验：Harness原先在FreeLLMAPI请求前优先取通用`CHRONICLE_LLM_API_KEY`，而用户环境中的该变量是DeepSeek密钥、FreeLLMAPI专用密钥另存于`FREELLMAPI_API_KEY`，存在将错密钥发给本地网关的风险。现由共享`AgentProviderConfigurationValidator.SelectApiKey`按端点挑密钥，覆盖MCM校验、Host启动、Host推理和Harness冒烟：FreeLLMAPI loopback优先专用密钥，其他HTTPS仅使用通用provider密钥；返回所选环境变量名，不记录值。实际认证目录GET已通过；FreeLLMAPI报告199条可用目录记录、其中190条`ready`，但真实请求证明该标记仍不等于推理成功。`gemini-3.8-flash`一次无游戏冒烟返回429，Google key状态`forbidden`、Retry-After 86400秒；只读`/v1/providers`确认Google处于rate-limited至2026-10-30 13:44Z，Kilo/OVH/Custom/AI Horde显示healthy。`gpt-oss-20b`一次冒烟返回429/Retry-After 85秒，回包的`lastSuccessfulRoute=ovh`不能确认本次失败的准确上游。随后`qwen3.8-27b`真实冒烟通过：实际`ovh/Qwen3.8-27B`、required-tool-call、962输入/118输出token、0 Native命令；该次Provider契约自测279项通过。修复了Host provider selftest受用户MaxOutputTokens环境污染：用临时清理再恢复的独立参数运行；随后另一轮Provider合同测试280项通过。以当前Native Ransom观察尝试让Qwen从两个真实可见俘虏ID中选一名，Host返回FreeLLMAPI HTTP429/Retry-After 85秒，模型决策与Native动作均未发生；具体失败上游未知，收据`RansomActionDecisionSmokeFailure.json`，不把`lastSuccessfulRoute=ovh`误当当前失败源。Native模块隔离编译通过，尚未部署到运行中的Bannerlord。证据：`TestResults/20261029-204402/FreeLLMAPIProfilePreflight.json`、`FreeLLMAPIAvailableRoutes.json`、`FreeLLMAPIProviderHealthSummary.json`、`FreeLLMAPIProviderHealthDetails.json`、两条失败冒烟收据、`FreeLLMAPIHostProviderSmoke-Qwen38/ProviderSmoke.json`、`RansomActionDecisionSmokeFailure.json`与`CredentialRouteNativeModuleCompile.json`。以上只验证端点凭据选择、目录/健康只读接口与一个短结构化决策，不是Campaign行动或EYC闭环；当前Bannerlord客户端仍运行旧DLL，完整EYC门禁未完成。
+2026-10-29 FreeLLMAPI真实路由核验：Harness原先在FreeLLMAPI请求前优先取通用`CHRONICLE_LLM_API_KEY`，而用户环境中的该变量是DeepSeek密钥、FreeLLMAPI专用密钥另存于`FREELLMAPI_API_KEY`，存在将错密钥发给本地网关的风险。
+现由共享`AgentProviderConfigurationValidator.SelectApiKey`按端点挑密钥，覆盖MCM校验、Host启动、Host推理和Harness冒烟：FreeLLMAPI loopback优先专用密钥，其他HTTPS仅使用通用provider密钥；
+返回所选环境变量名，不记录值。
+实际认证目录GET已通过；
+FreeLLMAPI报告199条可用目录记录、其中190条`ready`，但真实请求证明该标记仍不等于推理成功。
+`gemini-3.8-flash`一次无游戏冒烟返回429，Google key状态`forbidden`、Retry-After 86400秒；
+只读`/v1/providers`确认Google处于rate-limited至2026-10-30 13:44Z，Kilo/OVH/Custom/AI Horde显示healthy。
+`gpt-oss-20b`一次冒烟返回429/Retry-After 85秒，回包的`lastSuccessfulRoute=ovh`不能确认本次失败的准确上游。
+随后`qwen3.8-27b`真实冒烟通过：实际`ovh/Qwen3.8-27B`、required-tool-call、962输入/118输出token、0 Native命令；
+该次Provider契约自测279项通过。
+修复了Host provider selftest受用户MaxOutputTokens环境污染：用临时清理再恢复的独立参数运行；
+随后另一轮Provider合同测试280项通过。
+以当前Native Ransom观察尝试让Qwen从两个真实可见俘虏ID中选一名，Host返回FreeLLMAPI HTTP429/Retry-After 85秒，模型决策与Native动作均未发生；
+具体失败上游未知，收据`RansomActionDecisionSmokeFailure.json`，不把`lastSuccessfulRoute=ovh`误当当前失败源。
+Native模块隔离编译通过，尚未部署到运行中的Bannerlord。
+证据：`TestResults/20261029-204402/FreeLLMAPIProfilePreflight.json`、`FreeLLMAPIAvailableRoutes.json`、`FreeLLMAPIProviderHealthSummary.json`、`FreeLLMAPIProviderHealthDetails.json`、两条失败冒烟收据、`FreeLLMAPIHostProviderSmoke-Qwen38/ProviderSmoke.json`、`RansomActionDecisionSmokeFailure.json`与`CredentialRouteNativeModuleCompile.json`。
+以上只验证端点凭据选择、目录/健康只读接口与一个短结构化决策，不是Campaign行动或EYC闭环；
+当前Bannerlord客户端仍运行旧DLL，完整EYC门禁未完成。
 
 本地Provider需区分模型目录存在与推理可用。本机Ollama 0.40.1曾缺少`lib/ollama/llama-server.exe`及配套库，目录查询成功但推理进程无法创建。使用同版本官方Windows包修复，包SHA-256为`b394d14436d38032f23190e3f14eb2c6dad5ebbe4e192414f74c8fdca01703ab`，主程序与原安装文件哈希一致；旧库保留于`D:\Ollama\App\lib-incomplete-20261012`，未重下模型。原`qwen3.5:4b-q4_K_M`短推理返回OK（5.19秒、17 tokens），日志确认33/33层GPU加载；服务以`OLLAMA_NO_CLOUD=true`运行，日志在D盘BuildCache/OllamaRepair。此证据仅证明本机推理恢复。单次Provider时限现覆盖响应头与正文，无模型回归验证正文停滞返回`provider-timeout`；真实生命周期完成测试先做有界一token推理预检，避免运行库失效时启动游戏。目录探测本身仍只证明模型登记/服务可达。
 
@@ -347,7 +678,15 @@ FreeLLMAPI代理恢复后的首次真实模型Quest进展（`TestResults/2026101
 
 ### Campaign存档内的Agent目标Checkpoint
 
-本机1.4.8的`CampaignBehaviorBase.SyncData(IDataStore)`会随Native Campaign存档序列化行为字段；Chronicle用这一入口保存Campaign实例GUID和受限大小的Agent checkpoint JSON。`agentCheckpointGet/Set`是Mod/Host内部协议，不暴露给LLM动作白名单，并且只允许Campaign Map上下文；原版世界状态始终以读档后的新Observer结果为准，旧观察快照不是恢复真值。当前checkpoint v1包含目标、`schemaVersion`、Campaign实例ID、provider停止状态、最后一个已确认Native动作回执的紧凑摘要及最近状态摘要；`done`只记为`provider-stopped`，并不等同成功判定。`Agent-DecisionLoop -PersistCheckpoint`在新的Agent运行时写入目标并于每个原生动作/后验观察后更新；`-ResumeCheckpoint`先获取新Native state，再核对Campaign实例和checkpoint版本，将目标与receipt送回模型。若最后receipt只是只读`mapSettlementTargets`，恢复时安全地重新查询而不重复世界副作用。
+本机1.4.8的`CampaignBehaviorBase.SyncData(IDataStore)`会随Native Campaign存档序列化行为字段；
+Chronicle用这一入口保存Campaign实例GUID和受限大小的Agent checkpoint JSON。
+`agentCheckpointGet/Set`是Mod/Host内部协议，不暴露给LLM动作白名单，并且只允许Campaign Map上下文；
+原版世界状态始终以读档后的新Observer结果为准，旧观察快照不是恢复真值。
+当前checkpoint v1包含目标、`schemaVersion`、Campaign实例ID、provider停止状态、最后一个已确认Native动作回执的紧凑摘要及最近状态摘要；
+`done`只记为`provider-stopped`，并不等同成功判定。
+`Agent-DecisionLoop -PersistCheckpoint`在新的Agent运行时写入目标并于每个原生动作/后验观察后更新；
+`-ResumeCheckpoint`先获取新Native state，再核对Campaign实例和checkpoint版本，将目标与receipt送回模型。
+若最后receipt只是只读`mapSettlementTargets`，恢复时安全地重新查询而不重复世界副作用。
 
 `TestResults/20261008-053911`证明checkpoint和move receipt随Native SaveAs/跨进程Load保存并恢复，Campaign GUID与目标匹配；源模板档不变，测试另存档已删除。真实模型阶段`TestResults/20261008-054805`保存了一个尚未招募的活动目标，关闭首个客户端，再不提供Goal文本重载并恢复；模型从已确认move receipt和当前Settlement menu继续，通过现有RecruitmentVM招募一次（队伍1→2、金币1000→980），没有重复move或招募。两段窗口视频均完整覆盖、生成关键帧后删除，源档hash与进程清理通过。恢复窗口只验证“已确认动作+正常保存/关闭/重新载入”；游戏/Agent在Native副作用提交中途崩溃、checkpoint损坏/迁移、存档模块更换、严格Exactly-once均未证明，失败应重观察/安全重规划而不能盲目重发。
 
@@ -473,7 +812,19 @@ flowchart TD
 | W2-AY `context.multiSelectionInquiry` / `respondMultiSelectionInquiry`，以玩家Owned Alley更换负责人`ACT-D08-02`为首个Native实例（复用UI协议，不新建行为分母） | Town Settlement菜单`manage_alley`中的`change_leader_of_alley`；只限此GameMenu入口。原生`AlleyHelper.CreateMultiSelectionInquiryForSelectingClanMemberToAlley`按`AlleyModel.GetClanMembersAndAvailabilityDetailsForLeadingAnAlley`给出Clan Hero候选、启用与不可用提示；Alley受攻击时原菜单禁用 | `MultiSelectionQueryPopUpVM`处理当前`InquiryElements`/Min/Max；选定项设为`InquiryElementVM.IsSelected`会回调原生计数/单选逻辑。确认收集当前VM选中的InquiryElements并执行Alley回调，Native consequence更换`PlayerAlleyData.AssignedClanMember`、替换驻守Roster Hero并延迟传送新负责人；原负责人若在当前定居点，原版还会把其`LocationCharacter`移到酒馆。Exit/X调用否定回调，不应提交 | Native Inquiry以`pauseGameActiveState=true`显示并disable active GameState；不操作Campaign `TimeControlMode`。专项夹具开弹窗前原始档位已为Stop；取消/确认后`CampaignDay`和raw档位仍稳定为91077.400/Stop，测试没有advance/pause动作。此证据验证本夹具在停止档位下不改时钟，不推导其他档位下暂停/恢复时序 | 首次限定当前活动`MultiSelectionInquiryData`和`MultiSelectionQueryPopUpVM`；仅暴露当前VM实际显示的元素、可选状态、提示、选择范围、Done文案/启用和右上角X退出可见性/token；只选一名本体enabled Clan Hero或取消。禁止任意选身份、直接写AssignedClanMember/Roster、选择队列/过期项目；名称/技能之外不补查不可见Clan候选 | 本机1.4.8.119303静态源码链及截图核验：`AlleyHelper.CreateMultiSelectionInquiryForSelectingClanMemberToAlley`生成`MultiSelectionInquiryData` (min=max=1, ShowExit, GameState pause=true)；`GauntletQueryManager`active VM、`MultiSelectionQueryPopUpVM`及Alley Behavior handler。运行`20261004-034423`在Sargot的Native `town→manage_alley→change_leader_of_alley`完成：引擎帧显示“选择同伴”、描述、禁用当前负责人及提示、一个可选Clan Hero、底部“完成”与右上角X；非法ID拒绝且弹窗保留，负向退出不改负责人/Roster/Owner/Gold/Influence，重新打开后Native正向handler更换AssignedClanMember与驻守Roster，并保留Owner/Gold/Influence/CampaignDay/raw档位；旧负责人的LocationCharacter由Native AddPlayerAlleyCharacters夹具生命周期建立后可被原版回调移动。时钟基线Stop；源Campaign hash相同、Bannerlord进程族清理完成。证据：`TestResults/20261004-034423/Temp/AlleyLeaderInquiryResult.json`与四张Native引擎帧(`alley-leader-town-menu.bmp`, `alley-leader-multiselection.bmp`, `alley-leader-after-cancel.bmp`, `alley-leader-after-accept.bmp`)。这是通过内存内原版Alley/Clan-Hero数据夹具并真实调用菜单与VM callback的集成验证，不是自然存档/实际鼠标操作；不同城镇、真实存档自然Alley及非Stop档位未覆盖 |
 | W2-AW `context.escapeMenuOpen` / `closeEscapeMenu`（仅Campaign Map UI恢复，不另计世界动作） | 地图窗口失焦或玩家打开MapScreen原生Escape overlay；此时活动GameState仍可为`MapState`且GameMenu为空。原版“Return to the Game/继续游戏”会关闭该overlay；不含Options、Save/Load、Quit、Mission菜单或Campaign GameMenu | Overlay阻止地图输入，但不等于显式Campaign时间档位。关闭动作不可调用`SetTimeSpeed`、`advance`、`pause`或`resume`；只比较CampaignDay/raw mode/`isWaiting`自然读数 | 只读`MapScreen.IsEscapeMenuOpened`作为MapState上下文；关闭动作要求MapState且当前确有Escape菜单，然后调用Native `MapScreen.CloseEscapeMenu()`（与原生返回游戏回调同一`OnEscapeMenuToggled(false)`后果）。不发OS键鼠，不点击任意Escape菜单项，不强制切GameState；`pursue`等地图写动作仍须在AtMenu/overlay打开时先拒绝 | 安装版1.4.8来源：`MapScreen.OnGameWindowFocusChange`、`OnEscapeMenuToggled`、`CloseEscapeMenu`、`IsEscapeMenuOpened`、`MapViewsContainer.IsOpeningEscapeMenuOnFocusChangeAllowedForAll`及`EscapeMenuVM`回调。`TestResults/20261003-111556/Temp/harness-failure-frame.bmp`曾记录Harness失焦触发真实overlay；Harness专用guard于`37c0dfe`修复。运行`TestResults/20261003-124654/Temp/MapEscapeMenuResult.json`通过：暂停后在MapState打开真实Native overlay，Observer在普通`state`中报告true，overlay截图显示原生菜单；关闭后标记false且地图恢复。`pursue`在overlay打开时返回rejected，关闭前后CampaignDay=91077.378、raw mode=Stop、waiting=false、金币/影响力/目标/任务数不变；三张原生引擎帧、源存档SHA一致、进程退出均通过。测试首次发现的协议重复命令ID和`rejected`状态断言误写已修复并保留失败run。未验证失焦触发菜单的完整真实玩家窗口焦点时序；本测试以Native Open/Close API复现overlay与回调，不将其伪称鼠标或键盘操作 |
 
-W2-AA实现修订（优先于下方较早的ACT-A02-01实现记录）：CLI `pause`/`resume`/`fastForward`统一调用原生 `Campaign.SetTimeSpeed(0/1/2)`，只允许Campaign Map且时间未锁定、活动菜单为空或可用Wait菜单；回执同时给出raw/effective模式、waiting和调用瞬间CampaignDay。`AgentLoop`仅验证只读 `state → mapPartyTargets` 闭环；`TimeControlLoop`用确定性Provider在真实Agent循环中分别运行Play→FastForward→Pause和Hold→Play。证据：`TestResults/20260930-020009/Temp/AgentTimeControlLoopResult.json`全部断言通过：Play档在下一次档位选择前CampaignDay由91077.378增至91077.413；FastForward档设置后日期继续增长；Pause后日期保持91077.444；第二个隔离进程先Hold使`IsMainPartyWaiting=true`，再显式Play令有效模式为UnstoppablePlay，等待状态持续且日期从91077.378自然增至91077.387。Harness `advance`越权被拒；源fixture hash一致，两进程均正常停止。通用只读循环`TestResults/20260930-013829/AgentLoop.json`通过。仍未人工视觉核对热键绑定/全部菜单锁定状态，API动作不模拟按钮焦点与动画；产品事项验收仍需确认UI与各原生限制边界。
+W2-AA实现修订（优先于下方较早的ACT-A02-01实现记录）：CLI `pause`/`resume`/`fastForward`统一调用原生 `Campaign.SetTimeSpeed(0/1/2)`，只允许Campaign Map且时间未锁定、活动菜单为空或可用Wait菜单；
+回执同时给出raw/effective模式、waiting和调用瞬间CampaignDay。
+`AgentLoop`仅验证只读 `state → mapPartyTargets` 闭环；
+`TimeControlLoop`用确定性Provider在真实Agent循环中分别运行Play→FastForward→Pause和Hold→Play。
+证据：`TestResults/20260930-020009/Temp/AgentTimeControlLoopResult.json`全部断言通过：Play档在下一次档位选择前CampaignDay由91077.378增至91077.413；
+FastForward档设置后日期继续增长；
+Pause后日期保持91077.444；
+第二个隔离进程先Hold使`IsMainPartyWaiting=true`，再显式Play令有效模式为UnstoppablePlay，等待状态持续且日期从91077.378自然增至91077.387。
+Harness `advance`越权被拒；
+源fixture hash一致，两进程均正常停止。
+通用只读循环`TestResults/20260930-013829/AgentLoop.json`通过。
+仍未人工视觉核对热键绑定/全部菜单锁定状态，API动作不模拟按钮焦点与动画；
+产品事项验收仍需确认UI与各原生限制边界。
 
 | 动作 | 玩家入口 | 原版自然副作用 | Campaign 时间行为 | UI/API 差异及当前实现 | 证据 / 未知 |
 | --- | --- | --- | --- | --- | --- |
@@ -579,7 +930,14 @@ flowchart LR
 
 这是当前首发产品的长程垂直门禁：AI接管MainHero后，必须从自然激活的原版StoryMode Quest推进并完成四个目标；单次动作通过、只读规划成功或一个目标达标都不算通过。门禁聚焦该任务段，不能据此声称覆盖全骑砍玩法；仍禁止注入目标/资源或用预设动作脚本冒充真实模型自主。NPC/同伴独立自主权是后续扩展，不替代此门禁。
 
-本机 Bannerlord `1.4.8.119303` 安装版 `StoryMode.dll` 反编译 `RebuildPlayerClanQuest` 已核到：Quest 标题为 `Establish Your Clan`；`FirstPhaseCampaignBehavior.OnStoryModeTutorialEnded()`会在StoryMode教程结束时通过原版`StartQuest()`自然启动它。必要门禁从一个真实流程自然激活该Quest的disposable StoryMode存档开始，不得预注入Quest/进度/资源；这只验证该长程目标闭环，不声称AI已经能从新档开始完成前置教程。成功条件由`UpdateProgresses()`读取四个官方JournalLog的缓存进度并比较当前目标；Party的log进度按事件/小时从MainParty roster刷新，但俘虏释放本身未注册为此Quest的刷新事件，因此短时间内真实Roster人数可能先于Journal current值更新。规划以玩家可见Journal的current/target为官方任务进度，直接实时资源与队伍值仅作差异诊断，不能替换任务log进度或据此报完成。成功条件由原版`UpdateProgresses()`同时检查以下四项：
+本机 Bannerlord `1.4.8.119303` 安装版 `StoryMode.dll` 反编译 `RebuildPlayerClanQuest` 已核到：Quest 标题为 `Establish Your Clan`；
+`FirstPhaseCampaignBehavior.OnStoryModeTutorialEnded()`会在StoryMode教程结束时通过原版`StartQuest()`自然启动它。
+必要门禁从一个真实流程自然激活该Quest的disposable StoryMode存档开始，不得预注入Quest/进度/资源；
+这只验证该长程目标闭环，不声称AI已经能从新档开始完成前置教程。
+成功条件由`UpdateProgresses()`读取四个官方JournalLog的缓存进度并比较当前目标；
+Party的log进度按事件/小时从MainParty roster刷新，但俘虏释放本身未注册为此Quest的刷新事件，因此短时间内真实Roster人数可能先于Journal current值更新。
+规划以玩家可见Journal的current/target为官方任务进度，直接实时资源与队伍值仅作差异诊断，不能替换任务log进度或据此报完成。
+成功条件由原版`UpdateProgresses()`同时检查以下四项：
 
 1. MainHero 当前金币达到 2000。日志文本说“增加 1000 第纳尔”，但代码将初始当前金币作为进度、目标常量设为 2000；验收以运行时 Native Journal/Quest 状态为准，不把措辞误读成净赚1000。
 2. MainParty人数达到当前模型动态门槛 `_partySizeGoal = BanditDensityModel.GetMinimumTroopCountForHideoutMission(MainParty, false)`；不得把它硬编码成一个跨档案恒定值。
@@ -590,7 +948,12 @@ flowchart LR
 
 ### 当前代码缺口（W7-P 2026-10-19源码/Host包核对，非端到端验收）
 
-`AgentObserver`已读出原版Quest/Journal四个目标进度；`AgentHostEstablishYourClanGoalLoop`仍负责只读地选择Journal未完成目标，`AgentHostEstablishYourClanAutonomyLoop`则按Journal允许的目标调用Native Host子流程、重新读取Journal，并且只在Native历史Quest状态为`completed`时才报完成。现在四个目标族都已接入调度器：Gold出售、Renown战斗模拟、PartySize原版RecruitmentVM招募、Companion酒馆Wanderer雇佣。`TestResults/20261019-044720` AgentHostPackage通过：Fake Native/假Provider沿已知菜单/对话协议走过“town→town_backstreet→town_tavern→当前Mission Wanderer观察→Native导航→重新观察→Agent.OnUse交谈→限定当前雇佣对话选项→模拟原版接受→Journal目标刷新”，并覆盖不相关对话选项排除、非Wanderer/敌对/Notable候选过滤、当前安全Town筛选和Native动作边界。这只能证明已编写的Host决策/调度合同在夹具中运行，不是Native游戏行为回归、真实模型决策或实际Campaign体验；没有启动游戏，没有任何真实Hire/Gold/Clan副作用。
+`AgentObserver`已读出原版Quest/Journal四个目标进度；
+`AgentHostEstablishYourClanGoalLoop`仍负责只读地选择Journal未完成目标，`AgentHostEstablishYourClanAutonomyLoop`则按Journal允许的目标调用Native Host子流程、重新读取Journal，并且只在Native历史Quest状态为`completed`时才报完成。
+现在四个目标族都已接入调度器：Gold出售、Renown战斗模拟、PartySize原版RecruitmentVM招募、Companion酒馆Wanderer雇佣。
+`TestResults/20261019-044720` AgentHostPackage通过：Fake Native/假Provider沿已知菜单/对话协议走过“town→town_backstreet→town_tavern→当前Mission Wanderer观察→Native导航→重新观察→Agent.OnUse交谈→限定当前雇佣对话选项→模拟原版接受→Journal目标刷新”，并覆盖不相关对话选项排除、非Wanderer/敌对/Notable候选过滤、当前安全Town筛选和Native动作边界。
+这只能证明已编写的Host决策/调度合同在夹具中运行，不是Native游戏行为回归、真实模型决策或实际Campaign体验；
+没有启动游戏，没有任何真实Hire/Gold/Clan副作用。
 
 2026-10-22窄Native补证：`TestResults/20261022-040327` 的`CompanionHiring`阶段在`AgentBridgeLifecycle`可丢弃fixture中真实进入当前城镇酒馆Mission、导航/交谈并雇佣当轮可见Wanderer；Native报价660，金币661→1、MainParty +1、Clan/Companion后验成立。严格金币相等的第二场景没有显示接受选项、没有部分雇佣；源fixture hash前后相同、两个游戏进程均停。它修正“尚无真实Hire副作用”的陈述，证明底层Native招募交互可用；该路线仍由Harness按脚本驱动，不是真实模型自主决策，也不代表EYC子目标已被真实Agent完成。
 
@@ -598,7 +961,18 @@ flowchart LR
 
 因此当前主要缺口不再是四目标有没有代码执行器，而是每条目标路由和父级选择/恢复逻辑能否在自然Campaign状态中被真实模型持续使用并最终串成Quest成功。当前代码已由Fake流程覆盖每条执行器的局部合同，但与真实原版Campaign的用户入口、观察面、成本取舍、自然移动/时间、遭遇/俘虏、Journal刷新和跨目标重规划仍没有整体运行收据。当前**Host代码覆盖4/4不等于首个门禁可用**。教程源码路线和本首测边界已明确记录在`Research/J/TasksEventsAndNarrative.md` J12：玩家在角色创建后Training Field兄长对话中选择原版Skip并确认；这是Native开局设置，不是Agent已经支持的动作，也不计作预制进度。这样AI可从首个MapState接管且Quest自然激活。未跳过的教程含指定遭遇与藏身处Mission；它们不在本首测门禁内，也不声称已适配。
 
-真实模型debug（非门禁）`TestResults/20261019-054022`从`save002`逐字节派生副本加载。OVH Llama 70B成功回复：分类为EYC、目标规划选择Gold；在被俘状态执行原版`resume`，再选当前`menu_captivity_end_wilderness_escape/mno_continue`；随后查询到395个Native聚落目标。之后Host在下一次模型调用中失败（当时摘要仅保存通用`provider-http-error`，具体响应原因未留存）；本轮无交易/Gold增长或目标完成。源SHA前后不变、派生档删除、游戏进程清理，视频覆盖100%、MP4已按时间索引生成联系表后删除。CLI响应目录另核到上述Native `resume`、释放选项及`mapSettlementTargets`均成功；旧父循环failure receipt却报告0动作，说明子流程异常曾丢失局部收据。`AgentHostEstablishClanGoldSaleLoop`现改为在失败时返回有界子流程Trace、已执行动作数、路由与安全失败码；`TestResults/20261019-112922` AgentHostPackage中的Fake-provider故障回归验证了“一个Native查询成功→下个Provider请求失败”仍保留一次已执行动作和子流程证据，不重放动作。该预备档/模型partial run不计作自然新战役门禁。
+真实模型debug（非门禁）`TestResults/20261019-054022`从`save002`逐字节派生副本加载。
+OVH Llama 70B成功回复：分类为EYC、目标规划选择Gold；
+在被俘状态执行原版`resume`，再选当前`menu_captivity_end_wilderness_escape/mno_continue`；
+随后查询到395个Native聚落目标。
+之后Host在下一次模型调用中失败（当时摘要仅保存通用`provider-http-error`，具体响应原因未留存）；
+本轮无交易/Gold增长或目标完成。
+源SHA前后不变、派生档删除、游戏进程清理，视频覆盖100%、MP4已按时间索引生成联系表后删除。
+CLI响应目录另核到上述Native `resume`、释放选项及`mapSettlementTargets`均成功；
+旧父循环failure receipt却报告0动作，说明子流程异常曾丢失局部收据。
+`AgentHostEstablishClanGoldSaleLoop`现改为在失败时返回有界子流程Trace、已执行动作数、路由与安全失败码；
+`TestResults/20261019-112922` AgentHostPackage中的Fake-provider故障回归验证了“一个Native查询成功→下个Provider请求失败”仍保留一次已执行动作和子流程证据，不重放动作。
+该预备档/模型partial run不计作自然新战役门禁。
 
 另做的Provider诊断显示可用目录的`ready`并不能保证当前请求成功：Google Gemini请求返回429且FallbackTrail标记该key为`forbidden`，OVH某些路由曾429 exhausted或Qwen timeout，Kilo auto 429；当前Llama/OVH曾有成功决策但后续请求中断。这些受限/失败请求均未产生游戏动作。FreeLLMAPI统一key只允许本机`/v1`模型访问；管理接口`/api/fallback`以统一key返回401，且当前环境没有Dashboard token/CLI管理凭据，故Agent不能据此检查或改写上游provider key/fallback配置。下一次真实Campaign必须先取得可用远端路由的实际`X-Routed-Via`/响应证据，再评估模型；绝不回退到本地推理。
 
@@ -608,7 +982,18 @@ flowchart LR
 
 1.4.8新档与成长证据
 
-2026-10-22 原版StoryMode开局与连续视觉回归 `TestResults/20261022-142200`：Harness经BLSE standalone及稳定Steam就绪门禁启动，调用原版初始菜单`StoryModeNewGame`委托与CharacterCreation流程；在`tutorial_training_field`用原版兄长ConversationManager选项`player_answer_skip_tutorial`及`end_tutorial_yes`推进，不直接调用Tutorial完成函数、不注入Quest/资源、未请求或写入存档。原版`Establish Your Clan`自然激活，首个MapState Native观察记录Clan Renown 20、Campaign Clock Stop。四张已稳定渲染的引擎帧（兄长对话、Skip选项、确认选项、EYC地图）各有不同SHA-256；目标窗口视频覆盖703/703帧并按事件索引18个关键帧，MP4已删除。帧图显示初次MapState仍有训练场地点面板并显示“你找到了第一块族群部件”提示；该界面仍需由AI后续按当前Native菜单处理，不能默认已在无面板自由地图。测试未保存、正式存档目录元数据未变、游戏进程清理。它证明新StoryMode与Tutorial-skip起点可由测试Harness重复进入、视觉证据真实覆盖并识别首个MapState画面；尚非真实模型自治、鼠标/UI玩家点击验证、两个独立战役或EYC完成门禁。下一增量应在同一新Campaign进程中从该观察启动真实AgentHost并记录首个决策及动作后验；不可为接入便利先保存/回载预备档。
+2026-10-22 原版StoryMode开局与连续视觉回归 `TestResults/20261022-142200`：Harness经BLSE standalone及稳定Steam就绪门禁启动，调用原版初始菜单`StoryModeNewGame`委托与CharacterCreation流程；
+在`tutorial_training_field`用原版兄长ConversationManager选项`player_answer_skip_tutorial`及`end_tutorial_yes`推进，不直接调用Tutorial完成函数、不注入Quest/资源、未请求或写入存档。
+原版`Establish Your Clan`自然激活，首个MapState Native观察记录Clan Renown 20、Campaign Clock Stop。
+四张已稳定渲染的引擎帧（兄长对话、Skip选项、确认选项、EYC地图）各有不同SHA-256；
+目标窗口视频覆盖703/703帧并按事件索引18个关键帧，MP4已删除。
+帧图显示初次MapState仍有训练场地点面板并显示“你找到了第一块族群部件”提示；
+该界面仍需由AI后续按当前Native菜单处理，不能默认已在无面板自由地图。
+测试未保存、正式存档目录元数据未变、游戏进程清理。
+它证明新StoryMode与Tutorial-skip起点可由测试Harness重复进入、视觉证据真实覆盖并识别首个MapState画面；
+尚非真实模型自治、鼠标/UI玩家点击验证、两个独立战役或EYC完成门禁。
+下一增量应在同一新Campaign进程中从该观察启动真实AgentHost并记录首个决策及动作后验；
+不可为接入便利先保存/回载预备档。
 
 - 角色创建反编译显示：成年背景选择在新档起始给予 Clan Renown +20；Tier 1 门槛为50，因此示例背景下缺30。StoryMode 的+25奖励要在Tier 1 后才可能取得，不能作为前置成长路径。
 - 在确定性、非模型Provider下，测试招募入口通过VM产生过以下原生副作用：招入一名瓦兰迪亚新兵花费20第纳尔、工资2/日、队伍人数+1；此类单动作结果不代表Agent具备自主成长能力。
@@ -625,17 +1010,47 @@ flowchart LR
 
 当前判断：地图战斗与已有 battle bridge 的复用度最高，只能列为一个可检验候选；不能把P5偷换为“反复打劫匪直到50”。在确定验证场景前，还需从玩家实际可用路径、出现率、损失/收益及尚未适配的入口完成比较，并继续保持 Tier 1 是Agent成熟度夹具而非产品目标。
 
-真实315秒重试上限扩展后的本地代码审计发现，第一轮Full phase Provider smoke通过`--decision-once`进入`OllamaNativeProvider.FromEnvironment`，而Campaign loop使用`FromProfile`。先前只把Profile超时从180扩到360，Smoke路径仍保留本地协议60/240秒默认/上限，因此FreeLLMAPI在回退等待中仍可提前超时；这是Harness/Host入口差异，不是模型决策。现已按协议分别设置：FreeLLMAPI/OpenAI-compatible `FromEnvironment` 默认/最大360秒，Native Ollama仍默认60/最大240秒；Profile默认/最大360秒；VillageTools Harness切片也已把360秒传给Host，不再用旧180秒值覆盖。`TestResults/20261015-182025` AgentHostPackage有97个Provider合同场景通过；`TestResults/20261015-182144`的无游戏真实Mistral smoke通过（OVH路由、687/32 tokens、0 Native命令），但这尚未真实等待315秒。`TestResults/20261015-182256`随后启动过真实Campaign，却没有写出最终LiveModelLoop/summary收据；Capture JSONL只有起始事件，25分钟MP4尾部缺少`moov`、ffprobe无法解码，故运行过程/动作不作猜测或能力结论。Native夹具收据确认源存档hash不变，测试游戏已退出，唯一派生`ChronicleW7K-*`存档已清理。针对该证据缺口，FFmpeg输出已改为fragmented MP4并每2秒关键帧；自动故障注入探针`TestResults/FragmentedCaptureProbe/Recovery.json`强制杀FFmpeg后仍由ffprobe解码31985帧且能生成联系表，stderr记下不完整尾片NAL警告，合成临时视频/联系表已清理。这个测试最初被PowerShell `ErrorActionPreference=Stop`把ffprobe stderr误当终止错误；现把媒体探测/抽帧命令的返回码与stderr字节数分开记录，保留有效前缀证据。真实LiveModel现在在开Campaign前执行该短探针；Docs/Host包已通过，315秒真实等待和随后完整Quest仍待验，不能用合成录像测试替代游戏录像结果。
+真实315秒重试上限扩展后的本地代码审计发现，第一轮Full phase Provider smoke通过`--decision-once`进入`OllamaNativeProvider.FromEnvironment`，而Campaign loop使用`FromProfile`。
+先前只把Profile超时从180扩到360，Smoke路径仍保留本地协议60/240秒默认/上限，因此FreeLLMAPI在回退等待中仍可提前超时；
+这是Harness/Host入口差异，不是模型决策。
+现已按协议分别设置：FreeLLMAPI/OpenAI-compatible `FromEnvironment` 默认/最大360秒，Native Ollama仍默认60/最大240秒；
+Profile默认/最大360秒；
+VillageTools Harness切片也已把360秒传给Host，不再用旧180秒值覆盖。
+`TestResults/20261015-182025` AgentHostPackage有97个Provider合同场景通过；
+`TestResults/20261015-182144`的无游戏真实Mistral smoke通过（OVH路由、687/32 tokens、0 Native命令），但这尚未真实等待315秒。
+`TestResults/20261015-182256`随后启动过真实Campaign，却没有写出最终LiveModelLoop/summary收据；
+Capture JSONL只有起始事件，25分钟MP4尾部缺少`moov`、ffprobe无法解码，故运行过程/动作不作猜测或能力结论。
+Native夹具收据确认源存档hash不变，测试游戏已退出，唯一派生`ChronicleW7K-*`存档已清理。
+针对该证据缺口，FFmpeg输出已改为fragmented MP4并每2秒关键帧；
+自动故障注入探针`TestResults/FragmentedCaptureProbe/Recovery.json`强制杀FFmpeg后仍由ffprobe解码31985帧且能生成联系表，stderr记下不完整尾片NAL警告，合成临时视频/联系表已清理。
+这个测试最初被PowerShell `ErrorActionPreference=Stop`把ffprobe stderr误当终止错误；
+现把媒体探测/抽帧命令的返回码与stderr字节数分开记录，保留有效前缀证据。
+真实LiveModel现在在开Campaign前执行该短探针；
+Docs/Host包已通过，315秒真实等待和随后完整Quest仍待验，不能用合成录像测试替代游戏录像结果。
 
 Host计时职责分离：`CHRONICLE_LLM_TIMEOUT_SECONDS`只用于FreeLLMAPI模型回复及429退避等待；Campaign/Supply的NativeMailboxClient分别读取`CHRONICLE_NATIVE_MAILBOX_TIMEOUT_SECONDS`，缺省180秒、最大240秒，不会因为模型有315秒Retry-After而无限延长Native命令等待。此次修正的Provider合同覆盖Retry-After315边界；实机315秒等待仍需验证。
 
 315秒重试的新边界合同收据`TestResults/20261015-205325`：AgentHostPackage中的97个Provider合同场景全部通过，`Retry-After=315`仍处于360秒总期限内、361秒/缺失header被拒、429最多重试两次、总Deadline到期后不再发第三次请求且NativeCommands=0。该测试使用短Stub延迟，只验证边界/计数，不等同真实315秒网络等待；真实等待与任务继续仍由下一次OVH Campaign实测证明。
 
-实时Mistral纵切片重验（`TestResults/20261015-223657`）：Provider smoke及片段恢复探针均通过；游戏进入一次性`MapState`村庄菜单后，真实路由`ovh/Mistral-Small-3.2-24B-Instruct-2506`成功完成4个Native动作：`talkToSettlementHero`、选择`lord_meet_player_response1`、`dialogueContinue`、选择`hero_give_issue`。下一决策遇OVH `socket hang up`，Host经过有限的502恢复后最终仍收到上游错误并停止；没有接取Quest。Native前后CampaignDay均为91077.635，正式源档不变、Host/游戏/CLI清理成功，视频完整覆盖3505/3505帧（701秒）并保留；失败帧显示头人正在说明工具委托、等待下一对话选择。此运行证明新超时/录像探针已进入实际Campaign流程，且真实玩家入口与对话可走到Issue解释，但不证明315秒Retry-After、委托接受或购买/交付通过；下一步继续从自然蓝标入口推进并记录路由重试结果。
+实时Mistral纵切片重验（`TestResults/20261015-223657`）：Provider smoke及片段恢复探针均通过；
+游戏进入一次性`MapState`村庄菜单后，真实路由`ovh/Mistral-Small-3.2-24B-Instruct-2506`成功完成4个Native动作：`talkToSettlementHero`、选择`lord_meet_player_response1`、`dialogueContinue`、选择`hero_give_issue`。
+下一决策遇OVH `socket hang up`，Host经过有限的502恢复后最终仍收到上游错误并停止；
+没有接取Quest。
+Native前后CampaignDay均为91077.635，正式源档不变、Host/游戏/CLI清理成功，视频完整覆盖3505/3505帧（701秒）并保留；
+失败帧显示头人正在说明工具委托、等待下一对话选择。
+此运行证明新超时/录像探针已进入实际Campaign流程，且真实玩家入口与对话可走到Issue解释，但不证明315秒Retry-After、委托接受或购买/交付通过；
+下一步继续从自然蓝标入口推进并记录路由重试结果。
 
 FreeLLMAPI路由复核与预检修正（2026-10-16）：上一轮`TestResults/20261015-231052`的真实Mistral Host从Native当前蓝色委托入口自主接受`issue_64_quest`，读到“需1工具、奖励73亚麻、期限30天”，在调用下一次模型时FreeLLMAPI上游以502/OVH fallback key error结束；实际10决策/9个Native动作，输入/输出36,676/296 token，CampaignDay未变，委托未购买/交付，正式源档hash不变，游戏和Host已清理。保留录像覆盖完整6522/6522帧；这证明真实模型能走到委托接受，但不证明后续采购/交付。
 
-后续模型对照区分了可用目录与实际可执行性：用户当前配置的NVIDIA自定义路由在`TestResults/20261016-003709`真实Provider单决策中返回502/timeout，未启动游戏；`qwen3.8-27b`在`20261016-004046`冒烟由FreeLLMAPI路由到`ovh/Qwen3.8-27B`，正确选择唯一列出的Native交谈动作（712/165 token），但完整Campaign`20261016-004408`首次模型调用即收到`Retry-After=585`，超过360秒安全上限，经过两次有界等待后停止，0 Native动作、CampaignDay不变、源档不变、测试进程已清理；其中自动截图画面仍在村庄菜单，蓝色工具委托标记可见。`auto`在`20261016-010434`冒烟成功选择动作，但实际仍路由到`ovh/Mistral-Small-3.2`（687/32 token）；`gpt-oss-120b`与`kilo-auto`冒烟分别在`20261016-010721`、`20261016-011251`返回429，前者给出585秒Retry-After，后者未给Retry-After。FreeLLMAPI当时的只读状态快照为AI Horde/Custom/Kilo healthy、Google/OVH rate_limited；这是瞬时状态，不代表永久健康。无任何一次失败冒烟向游戏发出Native命令。
+后续模型对照区分了可用目录与实际可执行性：用户当前配置的NVIDIA自定义路由在`TestResults/20261016-003709`真实Provider单决策中返回502/timeout，未启动游戏；
+`qwen3.8-27b`在`20261016-004046`冒烟由FreeLLMAPI路由到`ovh/Qwen3.8-27B`，正确选择唯一列出的Native交谈动作（712/165 token），但完整Campaign`20261016-004408`首次模型调用即收到`Retry-After=585`，超过360秒安全上限，经过两次有界等待后停止，0 Native动作、CampaignDay不变、源档不变、测试进程已清理；
+其中自动截图画面仍在村庄菜单，蓝色工具委托标记可见。
+`auto`在`20261016-010434`冒烟成功选择动作，但实际仍路由到`ovh/Mistral-Small-3.2`（687/32 token）；
+`gpt-oss-120b`与`kilo-auto`冒烟分别在`20261016-010721`、`20261016-011251`返回429，前者给出585秒Retry-After，后者未给Retry-After。
+FreeLLMAPI当时的只读状态快照为AI Horde/Custom/Kilo healthy、Google/OVH rate_limited；
+这是瞬时状态，不代表永久健康。
+无任何一次失败冒烟向游戏发出Native命令。
 
 从真实失败中确认`available=true`会把“密钥/模型已配置”误当成“当前能推理”，造成模型全耗尽时仍启动客户端或白等约175秒。FreeLLMAPI目录还提供每模型的`execution_status=ready|needsKey|exhausted`；现已在共享Harness预检加入显式模型状态门禁，`ready`和命名路由入口可继续，`exhausted`、缺Key、未知/缺失状态在模型调用/游戏启动前快速拒绝。`Test-AgentHostProvider`加入对应纯本地回归；该状态只是快照，不能消除检查后瞬时限流。状态合同与PowerShell AST解析通过；直接profile预检对耗尽的`gpt-oss-120b`在0.53秒内拒绝，实际`Test-AgentLiveModelLoop` Campaign前门禁在0.37秒内拒绝且没有推理请求、存档加载或游戏启动；Agent Host Provider合同自测通过（`modelCalls=0`、`nativeCommands=0`）；Docs通过。Quest端到端仍未通过，仍需找可用免费服务路线并继续实测。
 
@@ -651,17 +1066,62 @@ W7-K真实模型分类/入口复验：
 - 后续Campaign运行`TestResults/20261016-030347`从自然蓝色工具标记进入原版聚落对话，逐步读取任务说明与1工具/73亚麻/30日条件；Native可见对话曾进入Alternative Solution分支，显示需贸易同伴和护卫，并回到Issue对话但Quest未出现在活动列表中。该运行没有最终`LiveModelLoopResult.json`，只能把保存的Native响应/游戏视频当作部分证据，不宣布模型实际接受/拒绝选项或完成任务。源`AgentBridgeLifecycle`存档hash在夹具准备前后相同；当次派生`ChronicleW7K-7f61d37cd0894cf7a4e383ae54d53b23.sav`已在确认无游戏进程、stale session恢复配置后按精确路径清理；片段视频保留为不完整诊断证据。
 - 本机`TaleWorlds.CampaignSystem.dll`反编译显示该Issue子类的`VillageNeedsToolsIssue.CanPlayerTakeQuestConditions`只产生“IssueGiver关系≥-10且不与玩家交战”的Issue专属条件；共享`IssueBase.CheckPreconditions`还会执行同类型Issue正在被Quest/Alternative解决的通用前置。对话路由经源码确认：`issue_alternative_solution_player_response`只进入`IssueAlternativeSolutionExplanationByIssueGiver`说明，随后原版`issue_offer_player_response`列表仍含标准`issue_offer_player_accept_quest`；最终派遣动作是不同ID `issue_offer_player_accept_alternative`，领主方案则为`issue_offer_player_accept_lord`。W7-K允许前者“说明入口”用于走到最终选择，但过滤后两种不在本任务范围内的结果。
 
-`TestResults/20261016-113813`真实`auto`模型运行完成6次决策/5条Native动作，停在头人给出“1工具、30天内、73亚麻报酬”后唯一的`issue_alternative_solution_player_response`入口；Native任务列表为空，故任务并没有接取。源码证明这只是通往替代方案解释，不是接受操作。无模型Harness `TestResults/20261016-124045`按原版顺序点入该解释，并在最终选择前停止：Native对话显示标准`issue_offer_player_accept_quest`可点击，派遣选项因没有同伴而灰显；Quest仍0、CampaignDay不变、源档不变、进程已停止。该状态关系=1、无战争、8条同类Issue均为`OngoingWithoutQuest`，没有正由同类Issue处理。此前Agent把说明入口误当成最终替代结果，是本次停滞根因；现已允许说明导航，同时只过滤最终Alternative/Lord接受。`TestResults/20261016-123502`AgentHostPackage自包含回归通过；仍需更新后的真实模型回到最终选项并完成任务，再用物品净变化/Quest状态验收。
+`TestResults/20261016-113813`真实`auto`模型运行完成6次决策/5条Native动作，停在头人给出“1工具、30天内、73亚麻报酬”后唯一的`issue_alternative_solution_player_response`入口；
+Native任务列表为空，故任务并没有接取。
+源码证明这只是通往替代方案解释，不是接受操作。
+无模型Harness `TestResults/20261016-124045`按原版顺序点入该解释，并在最终选择前停止：Native对话显示标准`issue_offer_player_accept_quest`可点击，派遣选项因没有同伴而灰显；
+Quest仍0、CampaignDay不变、源档不变、进程已停止。
+该状态关系=1、无战争、8条同类Issue均为`OngoingWithoutQuest`，没有正由同类Issue处理。
+此前Agent把说明入口误当成最终替代结果，是本次停滞根因；
+现已允许说明导航，同时只过滤最终Alternative/Lord接受。
+`TestResults/20261016-123502`AgentHostPackage自包含回归通过；
+仍需更新后的真实模型回到最终选项并完成任务，再用物品净变化/Quest状态验收。
 
 更新后真实Campaign复验`TestResults/20261016-124328`使用FreeLLMAPI显式`nvidiallama-3.2-11b-vision`：目标分类成功，模型原生执行`talkToSettlementHero`，第三次请求由`custom/nvidia/llama-3.2-11b-vision`返回HTTP 502，fallback尝试1次后失败关闭；因此没机会验证真实模型如何走说明页及选择标准Quest。2决策、1 Native动作、3,611输入/54输出token；任务0、CampaignDay未变、源fixture不变，窗口录像完整、派生存档与进程清理通过。此为FreeLLMAPI路由/上游错误证据，不是模型决策失败，不能当作适配行为的验收；下轮仅在测试进程覆写model route为`auto`（不改持久配置），继续已被观察到可跨多供应商返回的真实Quest循环。
 
-`TestResults/20261016-125754`重试FreeLLMAPI `auto`后，真实模型分类目标、与卡利奥克头人交谈并接受`issue_64_quest`；截断JSON前缀显示模型查询可见聚落并发出向`town_V1`的Native Move，最后可见位置仍在村庄，不能确认抵达。C盘耗尽导致收据写入及ffmpeg muxer失败、contact/timeline未完成，所以raw partial暂留为恢复证据；外层记录确认游戏/Host/CLI与派生档清理。该运行共享events.jsonl曾累积至214MB，现已限为16MiB并滚动记录。2026-10-17对TestResults盘点时发现3,767个运行目录、约10.16GiB，其中219个原始MP4约5.85GiB；对有完整contact/index/关键帧的历史视频按现行规则清理，对没有后处理证据的视频保留。新增`Prune-TestResults.ps1`并接入Harness收尾：保留文档引用运行、最近30次运行、未完成录像和本轮收据，其他旧的标准时间戳运行目录自动清除；非标准目录不处理。一次预演后清理共移除3,496个旧目录、约8.08GiB，当前`TestResults`约2.08GiB；31段未索引片段(约1.11GiB)仍保留，另有一个超出Windows PowerShell安全路径长度的旧目录跳过。清理回执为`TestResults/20261017-011927/TestResultsRetention.json`；该轮Docs通过，回执明确记录1个跳过目录，不把局部保留误报为全清理成功。
+`TestResults/20261016-125754`重试FreeLLMAPI `auto`后，真实模型分类目标、与卡利奥克头人交谈并接受`issue_64_quest`；
+截断JSON前缀显示模型查询可见聚落并发出向`town_V1`的Native Move，最后可见位置仍在村庄，不能确认抵达。
+C盘耗尽导致收据写入及ffmpeg muxer失败、contact/timeline未完成，所以raw partial暂留为恢复证据；
+外层记录确认游戏/Host/CLI与派生档清理。
+该运行共享events.jsonl曾累积至214MB，现已限为16MiB并滚动记录。
+2026-10-17对TestResults盘点时发现3,767个运行目录、约10.16GiB，其中219个原始MP4约5.85GiB；
+对有完整contact/index/关键帧的历史视频按现行规则清理，对没有后处理证据的视频保留。
+新增`Prune-TestResults.ps1`并接入Harness收尾：保留文档引用运行、最近30次运行、未完成录像和本轮收据，其他旧的标准时间戳运行目录自动清除；
+非标准目录不处理。
+一次预演后清理共移除3,496个旧目录、约8.08GiB，当前`TestResults`约2.08GiB；
+31段未索引片段(约1.11GiB)仍保留，另有一个超出Windows PowerShell安全路径长度的旧目录跳过。
+清理回执为`TestResults/20261017-011927/TestResultsRetention.json`；
+该轮Docs通过，回执明确记录1个跳过目录，不把局部保留误报为全清理成功。
 
 同日复盘发现固定每秒四分之一帧生成联系表会在长录像超出JPEG尺寸上限时失败；`TestResults/20261017-051001`正是因此保留了1.26GiB原片，虽然已有原生失败截图和事件轨迹。用现有事件时序从该录像后处理出接触表和6张事件关键帧后，确认全片可解码且覆盖率100%，随后删除原片，释放约1.26GiB；这个失败运行的有效画面和事件记录仍在。现已将均匀抽样上限设为64帧，并扩展保留回归：已成功抽取接触表/索引、但没有事件关键帧的录像也可清除原片；未成功后处理的原片依然保留。新的Harness收尾逻辑仍需Docs和真实长录像证据验证。
 
-随后继续实测修正的证据清理路径：`TestResults/20261016-125754`的尾部H.264损坏导致3张末尾关键帧无法抽取，但全片仍有99.8%帧覆盖；新逻辑保留接触表、已有原生前/失败截图和事件索引，记录缺失帧后删除原片(约242MiB)。`TestResults/20261016-030347`也完成相同长录像后处理并删除原片(约272MiB)；`20260924-142619` 8.3秒片段保留4张成功关键帧后删原片。`Prune-TestResults.ps1`现在在精确验证`ffprobe`确认文件为空/无可解码流后写入逐文件哈希与错误收据，再删除不可恢复MP4；对有失败收据指向的原始片段继续保留，不删除用于恢复的未完成录像。完成后清理再删除27个过期且无文档引用的时间戳运行目录(约503MB)，以及一段确认不可解码的录像(约187MiB)。当时`TestResults`从清理前约3.63GB/280目录降至约0.965GB/254目录，原始MP4为0；`TestResults/20261017-155941/TestResultsRetention.json`为`Passed=true, Complete=true, SkippedRuns=0`。在此前一次运行中，超过PowerShell安全遍历长度的`20260926-103345`曾被跳过；该路径随后已作为历史证据被MAINLINE精确引用而保护，不需为了清理而绕过路径限制。Retention自检覆盖已索引、无事件关键帧、无法解码、失败收据、文档引用和非时间戳目录的保留/删除分支。
+随后继续实测修正的证据清理路径：`TestResults/20261016-125754`的尾部H.264损坏导致3张末尾关键帧无法抽取，但全片仍有99.8%帧覆盖；
+新逻辑保留接触表、已有原生前/失败截图和事件索引，记录缺失帧后删除原片(约242MiB)。
+`TestResults/20261016-030347`也完成相同长录像后处理并删除原片(约272MiB)；
+`20260924-142619` 8.3秒片段保留4张成功关键帧后删原片。
+`Prune-TestResults.ps1`现在在精确验证`ffprobe`确认文件为空/无可解码流后写入逐文件哈希与错误收据，再删除不可恢复MP4；
+对有失败收据指向的原始片段继续保留，不删除用于恢复的未完成录像。
+完成后清理再删除27个过期且无文档引用的时间戳运行目录(约503MB)，以及一段确认不可解码的录像(约187MiB)。
+当时`TestResults`从清理前约3.63GB/280目录降至约0.965GB/254目录，原始MP4为0；
+`TestResults/20261017-155941/TestResultsRetention.json`为`Passed=true, Complete=true, SkippedRuns=0`。
+在此前一次运行中，超过PowerShell安全遍历长度的`20260926-103345`曾被跳过；
+该路径随后已作为历史证据被MAINLINE精确引用而保护，不需为了清理而绕过路径限制。
+Retention自检覆盖已索引、无事件关键帧、无法解码、失败收据、文档引用和非时间戳目录的保留/删除分支。
 
-之后发现“文档提到某次run ID就整目录无限期保留”仍会累积大量已无直接用途的视觉附件。新保留规则为：最近30次运行常规产物完整保留；对时间线索引明确记录“原片已删除”、所有选中帧齐全的运行，联系表仅限最近5张；较早但被文档引用的运行保留结构化收据、日志、时间线索引、索引选中帧及文档明确引用的图片；仅清理旧于最近30次、且未被索引或文档引用的BMP截图。未完成录像、明确引用图片、非标准目录和正式存档不受此规则影响。`TestResults/20261017-223707`时260个run目录约970MiB，第一轮识别332张旧图片/联系表、约473MiB；Harness在`20261017-225306`删除332个附件，保留241个run目录/约497MiB。第二轮`20261017-225655`又按5张联系表额度清理7个可确认冗余附件/约9.23MiB，当前242个run目录/约488MiB。另有25张旧联系表的索引仍标记源片段`retained=true`且`removedAfterEvidence=false`；即使目前找不到MP4，也保留这些不确定旧证据，不误删。原始MP4当前为0；运行收据保留文件级清单。目录`20260926-103345`因路径超长仍安全跳过，未绕过路径限制。
+之后发现“文档提到某次run ID就整目录无限期保留”仍会累积大量已无直接用途的视觉附件。
+新保留规则为：最近30次运行常规产物完整保留；
+对时间线索引明确记录“原片已删除”、所有选中帧齐全的运行，联系表仅限最近5张；
+较早但被文档引用的运行保留结构化收据、日志、时间线索引、索引选中帧及文档明确引用的图片；
+仅清理旧于最近30次、且未被索引或文档引用的BMP截图。
+未完成录像、明确引用图片、非标准目录和正式存档不受此规则影响。
+`TestResults/20261017-223707`时260个run目录约970MiB，第一轮识别332张旧图片/联系表、约473MiB；
+Harness在`20261017-225306`删除332个附件，保留241个run目录/约497MiB。
+第二轮`20261017-225655`又按5张联系表额度清理7个可确认冗余附件/约9.23MiB，当前242个run目录/约488MiB。
+另有25张旧联系表的索引仍标记源片段`retained=true`且`removedAfterEvidence=false`；
+即使目前找不到MP4，也保留这些不确定旧证据，不误删。
+原始MP4当前为0；
+运行收据保留文件级清单。
+目录`20260926-103345`因路径超长仍安全跳过，未绕过路径限制。
 
 同日Harness磁盘审计发现另一项重复产物：D盘`BuildCache/Packages`下有307个`ChronicleAgentHost-win-x64-<guid>`自包含测试包目录，合计41.25GiB；每个包只用于单轮独立可执行验证，逐文件SHA-256已写入该轮`AgentHostPackageManifest.json`，包本体不承担长期证据价值。已修订`Test-AgentHostPackage.ps1`：成功或异常退出都仅清理该脚本自己创建、且经精确父目录/GUID校验的本轮目录；`TestResults/20261016-185024`的Preflight/Build/AgentHostPackage三阶段通过，新目录被清理，包清单(187文件、74,565,753字节)保留。历史307份清理仍受同一文件操作策略阻止；不得以改名、移动或其他调用方式绕过。
 
@@ -677,7 +1137,12 @@ W7-K真实模型分类/入口复验：
 
 固定FreeLLMAPI `mistral-small-3.2-24b`的`TestResults/20261016-195123`在30分钟Harness时限内完成25次模型回复/26个决策/20个Native动作，共91,787输入/679输出token。所有Provider请求均成功，约1,744秒耗在模型往返；没有因路由/HTTP错误停止。实际完成Quest接受、Journal读取、萨哥特Trade无货后由模型调用`tradeCancel`、离开后通过Native地图目标和Move自然抵达另一Town；CampaignDay 91077.635→91078.588。第二个市场town_V6也无工具，模型在当前仅允许`tradeCancel`时尝试`observeAgain`；Host以通用控制拒绝后，模型没有足够剩余时间完成恢复/采购，30分钟上限以`TaskCanceledException`终止。任务未采购/交付；源档、派生档、游戏与CLI session清理通过，视频索引后删除。
 
-W7-K任务时限由1800延至3600秒后，真实FreeLLMAPI `auto:reliable`收据`TestResults/20261017-035504`在3602秒时达到loop Deadline：81次模型决策/Provider路由、63个Native动作、282,346输入/8,327输出token，实际路过/探查多个安全Town并仍在前往Town的Native move中；无HTTP/Provider故障、源档未变、Host/Game/session清理通过，Quest未采购/交付。原因是本任务的自然市场搜索样本耗时超过一小时，不是代码崩溃或“目标永远在同一Town”的旧循环。已把`Test-AgentLiveModelLoop`、MCM父循环请求、AgentHost父/子循环统一提高到最多160次决策、7200秒总墙钟上限；单次Provider请求仍限制360秒，Stop/取消仍有效，普通Move/等待没有加入显式时钟动作。`TestResults/20261017-034957`AgentHostPackage此前已通过Safe Passage accepted→`dialogueContinue`合同回归，但2小时预算对真实Quest是否足够仍未判定。
+W7-K任务时限由1800延至3600秒后，真实FreeLLMAPI `auto:reliable`收据`TestResults/20261017-035504`在3602秒时达到loop Deadline：81次模型决策/Provider路由、63个Native动作、282,346输入/8,327输出token，实际路过/探查多个安全Town并仍在前往Town的Native move中；
+无HTTP/Provider故障、源档未变、Host/Game/session清理通过，Quest未采购/交付。
+原因是本任务的自然市场搜索样本耗时超过一小时，不是代码崩溃或“目标永远在同一Town”的旧循环。
+已把`Test-AgentLiveModelLoop`、MCM父循环请求、AgentHost父/子循环统一提高到最多160次决策、7200秒总墙钟上限；
+单次Provider请求仍限制360秒，Stop/取消仍有效，普通Move/等待没有加入显式时钟动作。
+`TestResults/20261017-034957`AgentHostPackage此前已通过Safe Passage accepted→`dialogueContinue`合同回归，但2小时预算对真实Quest是否足够仍未判定。
 
 `TestResults/20261016-220612`在Bannerlord启动和模型调用前由FreeLLMAPI配置预检阻止，因本机`/v1/models?available=true`不列`auto:reliable`。对照FreeLLMAPI官方路由文档发现，这是其内置策略别名，不是模型目录项；真正失效的是Harness先按目录做空检查。修正`Get-FreeLLMAPIModelExecutionStatus`并补纯回归，显式接受官方文档中的auto策略别名、继续要求用户profile名出现在目录；`auto:reliable`单测通过，拼写错误profile仍`not-listed`。该结果0模型调用、0Native动作，不能当作Provider或游戏故障，也未验证该策略的实际上游稳定性。
 
@@ -687,17 +1152,55 @@ W7-K任务时限由1800延至3600秒后，真实FreeLLMAPI `auto:reliable`收据
 
 该真实控制错误促使空市场恢复条件覆盖`provider-action-unavailable`与`provider-control-unavailable`两种拒绝；仅当上一份成功Native`tradeOptions`后Journal仍显示有未交付工具，且唯一当前动作严格等于`tradeCancel`时，提示模型取消而非重复查询/等待；若剩余需求为0则不误导取消去找货。`TestResults/20261016-205258`的AgentHostPackage Provider自检通过，覆盖两类拒绝、任务剩余数量门控与Native零副作用；该最新控制提示还没有真实模型复测。
 
-Harness启动边界核验（`TestResults/20261016-061057`与`061235`）：前次Detached完整阶段在Smoke冷启动Steam时被“Unable to initialize Steam API”弹窗挡住，Module/Lifecycle未加载，不是任务代码崩溃；保留已有Steam进程后第二次Smoke正常加载Chronicle assembly和Campaign lifecycle，Harness还自动确认“mod change detected / deleting shader cache”提示，但普通`Smoke`的45秒启动门限在GameStart前超时（`CrashDetected=false`、`ProcessExitedUnexpectedly=false`、没有正式存档修改）。W7-K完整阶段配置240秒Smoke预算，不等于上述45秒单独Phase；下一次完整阶段应在当前Steam会话下验证这条启动链，而不是用单独Smoke超时判定失败。 2026-11-03 `TestResults/20261103-051917`复现了同类失败：Harness只等WebHelper稳定5秒，Steam日志直到05:19:47才记为`Logged On`，Bannerlord已在05:19:48报“Unable to initialize Steam API”，Chronicle未加载、无Campaign/存档改动。Harness源码已增加对Steam `connection_log.txt`最新登录状态的检查；冷启动要求登录事件晚于本次Steam进程启动，Smoke收据记登录时间。固定回归覆盖未登录、登录后、退出登录和旧登录时间；Steam前置检查通过，修复后实机Smoke仍待验证。
+Harness启动边界核验（`TestResults/20261016-061057`与`061235`）：前次Detached完整阶段在Smoke冷启动Steam时被“Unable to initialize Steam API”弹窗挡住，Module/Lifecycle未加载，不是任务代码崩溃；
+保留已有Steam进程后第二次Smoke正常加载Chronicle assembly和Campaign lifecycle，Harness还自动确认“mod change detected / deleting shader cache”提示，但普通`Smoke`的45秒启动门限在GameStart前超时（`CrashDetected=false`、`ProcessExitedUnexpectedly=false`、没有正式存档修改）。
+W7-K完整阶段配置240秒Smoke预算，不等于上述45秒单独Phase；
+下一次完整阶段应在当前Steam会话下验证这条启动链，而不是用单独Smoke超时判定失败。
+2026-11-03 `TestResults/20261103-051917`复现了同类失败：Harness只等WebHelper稳定5秒，Steam日志直到05:19:47才记为`Logged On`，Bannerlord已在05:19:48报“Unable to initialize Steam API”，Chronicle未加载、无Campaign/存档改动。
+Harness源码已增加对Steam `connection_log.txt`最新登录状态的检查；
+冷启动要求登录事件晚于本次Steam进程启动，Smoke收据记登录时间。
+固定回归覆盖未登录、登录后、退出登录和旧登录时间；
+Steam前置检查通过，修复后实机Smoke仍待验证。
 
 同一真实运行的时序审计发现：FreeLLMAPI已命中OVH后的45秒请求间隔等待原先使用Campaign循环令牌，而非单次模型请求deadline；因此在429/502重试路径上，速率等待可能延长360秒模型请求上限。现已让该等待遵守Provider请求deadline，并新增`freellmapi-rate-window-wait-respects-per-request-deadline`回归，验证deadline到期后不再等满45秒且不发出第二次请求。本轮`TestResults/20261016-015916`的AgentHostPackage通过，Provider合同场景98项全过，模型调用和Native命令均为0；Quest端到端仍未通过。
 
 W7-K真实收据完整性修正：`AgentHostCampaignLoop`完成目标分类后会把执行权交给`AgentHostVillageToolsQuestLoop`；此前子loop终态只返回自己的trace/providerRouteHistory，丢失了父loop第一轮分类调用及其token/路由。现将父级trace、实际路由与token数传入并继续累计，决策编号按全局序号，避免真实模型每轮耗时/token/route证据不完整。`TestResults/20261016-063752`自包含AgentHostPackage通过（Provider 101、Campaign 12、共享决策循环2项，模型调用/Native命令为0），新增回归覆盖分类路由与统计跨loop保留。当前真实Model smoke分类已实测成功，但Quest接受/购买/交付仍未完成。
 
-W7-K真实闭环返回路线断点与修复（2026-10-17）：`TestResults/20261016-232129`真实`auto:reliable`运行确实接受Quest、在`town_V6`通过Native Trade购入工具并读到Journal；随后55次模型决策/47个Native动作后仍停在`town_V6`，Quest仍活动、29日剩余。逐轮trace显示模型不断在同一Town执行`mapSettlementTargets → move town_V6 → menuSelect离开 → mapSettlementTargets`。这不是原版地图移动失效：Host在“工具数量满足”后仍只允许Town目标，已把采购目标类型当成永恒动作白名单；同时`tradeConfirm`清空Journal缓存后又未强制读取新的任务日志。Host现根据Native `questDetails`进度区分路线：欠工具时仅选择安全Town，Native Trade提交后先强制重新读取Journal；确认欠数归零后，`mapSettlementTargets`回执/动作目录/`move`解析器统一仅允许接取任务时从当前Native村庄状态记录的原始Quest-giver Village。来源村庄未观测到时安全失败，不从所有村庄中猜选；没有改原版移动、任务或时钟行为，也未注入世界状态。`TestResults/20261017-014316`的Preflight、Build、AgentHostPackage通过；新增自检覆盖“采购期仅Town”“进度满足后只回原村”“未知来源不猜测”及“交易提交后先读新Journal”。该收据不调用外部模型或Native命令；真实FreeLLMAPI闭环重跑待进行，Quest完成尚未证实。
+W7-K真实闭环返回路线断点与修复（2026-10-17）：`TestResults/20261016-232129`真实`auto:reliable`运行确实接受Quest、在`town_V6`通过Native Trade购入工具并读到Journal；
+随后55次模型决策/47个Native动作后仍停在`town_V6`，Quest仍活动、29日剩余。
+逐轮trace显示模型不断在同一Town执行`mapSettlementTargets → move town_V6 → menuSelect离开 → mapSettlementTargets`。
+这不是原版地图移动失效：Host在“工具数量满足”后仍只允许Town目标，已把采购目标类型当成永恒动作白名单；
+同时`tradeConfirm`清空Journal缓存后又未强制读取新的任务日志。
+Host现根据Native `questDetails`进度区分路线：欠工具时仅选择安全Town，Native Trade提交后先强制重新读取Journal；
+确认欠数归零后，`mapSettlementTargets`回执/动作目录/`move`解析器统一仅允许接取任务时从当前Native村庄状态记录的原始Quest-giver Village。
+来源村庄未观测到时安全失败，不从所有村庄中猜选；
+没有改原版移动、任务或时钟行为，也未注入世界状态。
+`TestResults/20261017-014316`的Preflight、Build、AgentHostPackage通过；
+新增自检覆盖“采购期仅Town”“进度满足后只回原村”“未知来源不猜测”及“交易提交后先读新Journal”。
+该收据不调用外部模型或Native命令；
+真实FreeLLMAPI闭环重跑待进行，Quest完成尚未证实。
 
-`TestResults/20261017-014847`真实`auto:reliable`复验确认前述返回路由修复确实在实机生效：模型从蓝色委托自然接取、在Town通过Native Trade买入1件工具、Trade提交后重读Journal，读取交付前Inventory基线，随后仅移动回原`village_V1_1`并经QuickConversation交付；Native活动Quest由1变0。75次决策、58个Native动作、74条真实路由记录，输入/输出265,846/5,299 tokens；CampaignDay 91077.634→91084.115，使用真实FreeLLMAPI路由且未观察到Provider失败。最终验收仍失败关闭：交付后模型推进了“谢谢你”对话，但Host的动作目录因Quest蓝标消失而为空，没能重新打开Native MainHero Inventory；因此工具精确消耗和`73 flax`奖励净差未核实，`inventoryVerifiedAfterTurnIn=false`，不能算任务通过。当前修复是在已记录交付前基线的前提下，即使活动Quest和蓝标已消失，也允许原版`inventoryOpen`→Inventory VM读取；随后仍须核对精确物品差值才开放`done`。该失败为Host后验入口门禁遗漏，不是NPC交付/FreeLLMAPI失败；`TestResults/20261017-025554`Preflight、Build、AgentHostPackage通过。更新后的真实模型复验待进行。
+`TestResults/20261017-014847`真实`auto:reliable`复验确认前述返回路由修复确实在实机生效：模型从蓝色委托自然接取、在Town通过Native Trade买入1件工具、Trade提交后重读Journal，读取交付前Inventory基线，随后仅移动回原`village_V1_1`并经QuickConversation交付；
+Native活动Quest由1变0。
+75次决策、58个Native动作、74条真实路由记录，输入/输出265,846/5,299 tokens；
+CampaignDay 91077.634→91084.115，使用真实FreeLLMAPI路由且未观察到Provider失败。
+最终验收仍失败关闭：交付后模型推进了“谢谢你”对话，但Host的动作目录因Quest蓝标消失而为空，没能重新打开Native MainHero Inventory；
+因此工具精确消耗和`73 flax`奖励净差未核实，`inventoryVerifiedAfterTurnIn=false`，不能算任务通过。
+当前修复是在已记录交付前基线的前提下，即使活动Quest和蓝标已消失，也允许原版`inventoryOpen`→Inventory VM读取；
+随后仍须核对精确物品差值才开放`done`。
+该失败为Host后验入口门禁遗漏，不是NPC交付/FreeLLMAPI失败；
+`TestResults/20261017-025554`Preflight、Build、AgentHostPackage通过。
+更新后的真实模型复验待进行。
 
-W7-K第二次真实验收在路上触发BanditFaction遭遇（`TestResults/20261017-025918`）：45次决策/36个Native动作、153,346/4,800 tokens后，FreeLLMAPI模型走完原版Safe Passage的Auto Balance与Offer；Native Offer回执明确`accepted=true`、付款后金币904→767且无战斗。失败画面显示提示条“对方接受到提案！”和金色“点击继续”，遭遇仍是`encounter_meeting`，最后一句也仍在对话框。Host此前在任意`barterOffer`/`barterCancel`后直接给空动作目录，因此这不是上游模型/网络失败，也不是任务移动失效，而是漏掉成交后原版对话关闭步骤。现在只在当前遭遇身份不变、Native Offer回执接受、没有可点击选项且尚未用过一次Continue时开放`dialogueContinue`；再次观察后若遭遇仍活跃即停止，不重复收费或切入战斗。`TestResults/20261017-034957`Preflight/Build/AgentHostPackage通过，自检覆盖接受结果后的Continue；仍未用更新后真实模型验证遭遇关闭和继续Quest。
+W7-K第二次真实验收在路上触发BanditFaction遭遇（`TestResults/20261017-025918`）：45次决策/36个Native动作、153,346/4,800 tokens后，FreeLLMAPI模型走完原版Safe Passage的Auto Balance与Offer；
+Native Offer回执明确`accepted=true`、付款后金币904→767且无战斗。
+失败画面显示提示条“对方接受到提案！
+”和金色“点击继续”，遭遇仍是`encounter_meeting`，最后一句也仍在对话框。
+Host此前在任意`barterOffer`/`barterCancel`后直接给空动作目录，因此这不是上游模型/网络失败，也不是任务移动失效，而是漏掉成交后原版对话关闭步骤。
+现在只在当前遭遇身份不变、Native Offer回执接受、没有可点击选项且尚未用过一次Continue时开放`dialogueContinue`；
+再次观察后若遭遇仍活跃即停止，不重复收费或切入战斗。
+`TestResults/20261017-034957`Preflight/Build/AgentHostPackage通过，自检覆盖接受结果后的Continue；
+仍未用更新后真实模型验证遭遇关闭和继续Quest。
 
 首次 Safe Passage Continue 自检只覆盖Host动作排序。真实截图`TestResults/20261017-025918/AgentHostCampaignRun-01/LiveModelEngine-failure.bmp`证实 Offer accepted 后界面仍显示`encounter_meeting`、成功提示和“点击继续”，Native回执也显示accepted/Gold差，但不能证明继续后遭遇退出。正式自检现让Native Fake在Offer后保持Encounter与空选项/结果对白，仅在接到一次`dialogueContinue`后清除；`TestResults/20261017-034957`AgentHostPackage通过且动作顺序锁定，FreeLLMAPI真实复验还待进行。
 
@@ -705,19 +1208,76 @@ W7-K第二次真实验收在路上触发BanditFaction遭遇（`TestResults/20261
 
 `TestResults/20261017-163357`启动FreeLLMAPI `auto:reliable`真实Campaign循环：Preflight/Build/Smoke/AgentHostPackage通过，Native入口确实观察到卡利奥克头人的可见蓝色工具Issue标记，并完成32个原生协议读/写事件；CampaignDay停在91077.634，活动Quest一直为0。可见对话进入任务说明，Native Offer屏幕曾显示“我觉得能亲自处理这件事”可点；随后又回到该Notable的`hero_give_issue`对话，Quest仍未启动。由于当时Harness只在完整子循环结束时写`LiveModelLoopResult.json`，中途终止后没有保留模型实际选择的OptionId，故目前能证明无Quest接受，不能归因是模型拒绝、Native选项后果异常或其它中断原因。Windows Application日志没有该时间窗的Bannerlord崩溃记录，但缺少Harness终态和原生失败帧，终止原因保持未知，不伪报为游戏崩溃或模型成功。
 
-该轮原始窗口录像(约126MiB)已缩为64帧均匀联系表并删除原片；捕获开始画面及32条Native协议事件仍保留。初次手工恢复的事件相对时间误把本地时区当作UTC，生成的动作关键帧位置不可信；随后把索引改为明确的“capture-start画面对齐、Native事件时间另存、动作画面不宣称对齐”，并通过响应文件UTC修改时间重建实际0–642.8秒原生事件顺序。该收据只能证明持续处于村庄对话/地图过程中与Native当前回执，不含模型决策参数。为了使下一轮即使被外部中断仍能说明选择原因，Host现在在FreeLLMAPI每次成功回复后增量追加受限的`AgentHostProgress.jsonl`：记录具体动作/OptionId、实际服务商路由、token及当时玩家可见状态摘要，不写prompt、原始回答或rationale，仅在Harness `visual-capture`目录启用并限16MiB。`AgentHostPackage`自检覆盖该trace记录/非Harness关闭分支并于`TestResults/20261017-184917`通过；Docs于`20261017-184530`通过。评测脚本亦会只在确认Bannerlord/PID退出、会话记录属于`ChronicleW7K-`且精确路径位于Game Saves时，自动按原CLI恢复并清理遗留派生档；正式存档名、活跃会话一律安全拒绝。下一步以已推送版本重新进行FreeLLMAPI真实Quest纵切片，先核对增量trace中的实际选项及原生结果，再判断是否需要修Prompt或Native适配。
+该轮原始窗口录像(约126MiB)已缩为64帧均匀联系表并删除原片；
+捕获开始画面及32条Native协议事件仍保留。
+初次手工恢复的事件相对时间误把本地时区当作UTC，生成的动作关键帧位置不可信；
+随后把索引改为明确的“capture-start画面对齐、Native事件时间另存、动作画面不宣称对齐”，并通过响应文件UTC修改时间重建实际0–642.8秒原生事件顺序。
+该收据只能证明持续处于村庄对话/地图过程中与Native当前回执，不含模型决策参数。
+为了使下一轮即使被外部中断仍能说明选择原因，Host现在在FreeLLMAPI每次成功回复后增量追加受限的`AgentHostProgress.jsonl`：记录具体动作/OptionId、实际服务商路由、token及当时玩家可见状态摘要，不写prompt、原始回答或rationale，仅在Harness `visual-capture`目录启用并限16MiB。
+`AgentHostPackage`自检覆盖该trace记录/非Harness关闭分支并于`TestResults/20261017-184917`通过；
+Docs于`20261017-184530`通过。
+评测脚本亦会只在确认Bannerlord/PID退出、会话记录属于`ChronicleW7K-`且精确路径位于Game Saves时，自动按原CLI恢复并清理遗留派生档；
+正式存档名、活跃会话一律安全拒绝。
+下一步以已推送版本重新进行FreeLLMAPI真实Quest纵切片，先核对增量trace中的实际选项及原生结果，再判断是否需要修Prompt或Native适配。
 
-`TestResults/20261017-191010`的新版本真实FreeLLMAPI循环完整走到了实际交付和库存核验：52个模型决策/46个Native动作，181,252输入/5,480输出token，52次Provider路由；任务由蓝色Issue入口原版接受(`issue_64_quest` 0→1)，模型在萨哥特无货后取消交易并到奥斯蒂港购买1件`tools`(原版交易提交，Gold 777→189)，遇BanditFaction时走原版Safe Passage，Offer真实被接受、Gold 920→785、`timeControlMode=Stop`且未战斗；通过用户确认的原生“点击继续”后回到Map继续Quest。原版Journal在买货后进度0→1/1；模型回到卡利奥克并沿原版头人对话提交工具，Quest由1变0。交付前MainHero Inventory为`tools=1, flax=0`，交付后为`tools=0, flax=73`，与Journal的1件工具/73亚麻报酬完全吻合，Gold交付前后均189。CampaignDay 91077.634→91079.023均由自然旅行推进，未调用显式时钟动作；正式源fixture hash不变，Host/游戏/session已停止，录像覆盖100%且原片按索引删除。
+`TestResults/20261017-191010`的新版本真实FreeLLMAPI循环完整走到了实际交付和库存核验：52个模型决策/46个Native动作，181,252输入/5,480输出token，52次Provider路由；
+任务由蓝色Issue入口原版接受(`issue_64_quest` 0→1)，模型在萨哥特无货后取消交易并到奥斯蒂港购买1件`tools`(原版交易提交，Gold 777→189)，遇BanditFaction时走原版Safe Passage，Offer真实被接受、Gold 920→785、`timeControlMode=Stop`且未战斗；
+通过用户确认的原生“点击继续”后回到Map继续Quest。
+原版Journal在买货后进度0→1/1；
+模型回到卡利奥克并沿原版头人对话提交工具，Quest由1变0。
+交付前MainHero Inventory为`tools=1, flax=0`，交付后为`tools=0, flax=73`，与Journal的1件工具/73亚麻报酬完全吻合，Gold交付前后均189。
+CampaignDay 91077.634→91079.023均由自然旅行推进，未调用显式时钟动作；
+正式源fixture hash不变，Host/游戏/session已停止，录像覆盖100%且原片按索引删除。
 
-本次整体Evaluation仍返回失败，但不再是模型、Provider、移动、Native Offer、Quest提交或物品后验失败：`AgentHostVillageToolsQuestLoop`的最终观察明确`questWasObservedActive=true`、`inventoryVerifiedAfterTurnIn=true`、Quest已关闭、MapState并返回任务人所在`village`菜单；Host `BuildControlCatalog`却把任何非空Settlement menu都当作不允许`done`的上下文，于是动作/控制目录为空并误报`quest-not-observable-or-verification-incomplete`。代码修正为无对话且Native后置条件已证实时，即使停在任务聚落菜单也开放终止控制；MapState仍不满足任务/库存条件或仍有对话时照常拒绝。`AgentHostVillageToolsQuestPolicy`自检新增这一菜单场景，要求AgentHostPackage/Docs再过后，以原FreeLLMAPI真实路径复验整条闭环；旧运行的源码提交为`e4ecda8`，不能当作修复后通过。
+本次整体Evaluation仍返回失败，但不再是模型、Provider、移动、Native Offer、Quest提交或物品后验失败：`AgentHostVillageToolsQuestLoop`的最终观察明确`questWasObservedActive=true`、`inventoryVerifiedAfterTurnIn=true`、Quest已关闭、MapState并返回任务人所在`village`菜单；
+Host `BuildControlCatalog`却把任何非空Settlement menu都当作不允许`done`的上下文，于是动作/控制目录为空并误报`quest-not-observable-or-verification-incomplete`。
+代码修正为无对话且Native后置条件已证实时，即使停在任务聚落菜单也开放终止控制；
+MapState仍不满足任务/库存条件或仍有对话时照常拒绝。
+`AgentHostVillageToolsQuestPolicy`自检新增这一菜单场景，要求AgentHostPackage/Docs再过后，以原FreeLLMAPI真实路径复验整条闭环；
+旧运行的源码提交为`e4ecda8`，不能当作修复后通过。
 
-最终真实复验`TestResults/20261017-202926`在推送提交`e390cac`通过：43次模型决策与FreeLLMAPI路由(实际请求依次命中Mistral Small、Qwen2.5-VL、Qwen3.8、Qwen3.5、gpt-oss-120b、Mistral-Nemo等已配置OVH免费端点)，37个完成的Native动作，156,691/2,812输入/输出Token。蓝色工具标记自然可见，Quest接受、Journal读取、市场搜索、`town_V6`Native Trade购入并提交1件`tools`、返回原Quest-giver、Native对话交付均由真实模型决策完成；Quest 1→0，MainHero Inventory精确`tools 1→0`与`flax 0→73`。日志给出的工具交易Native净价588金币，故事段从Gold 912降至324；交付前后金币324未变。四项验收层包括自然路径、实际FreeLLMAPI路由、准确Native后置、显式clock action数0、seed hash不变、Host/游戏/session清理及100%画面覆盖，全数通过。`AgentHostProgress.jsonl`保存了43条逐决策的玩家可见摘要/OptionId/路由/token，不含原始prompt/回答；源MP4已删除且关键帧索引保留。`AgentHostCampaignLoopEvaluation`由Harness直接启动Campaign Host以稳定隔离模型循环；游戏内注册MCM Start/Stop另由依赖#119通过生命周期验证。本卡只完成一条VillageNeedsTools纵切片，并不构成Epic #18的StoryMode四项“Establish Your Clan”目标或全Campaign自主通过。
+最终真实复验`TestResults/20261017-202926`在推送提交`e390cac`通过：43次模型决策与FreeLLMAPI路由(实际请求依次命中Mistral Small、Qwen2.5-VL、Qwen3.8、Qwen3.5、gpt-oss-120b、Mistral-Nemo等已配置OVH免费端点)，37个完成的Native动作，156,691/2,812输入/输出Token。
+蓝色工具标记自然可见，Quest接受、Journal读取、市场搜索、`town_V6`Native Trade购入并提交1件`tools`、返回原Quest-giver、Native对话交付均由真实模型决策完成；
+Quest 1→0，MainHero Inventory精确`tools 1→0`与`flax 0→73`。
+日志给出的工具交易Native净价588金币，故事段从Gold 912降至324；
+交付前后金币324未变。
+四项验收层包括自然路径、实际FreeLLMAPI路由、准确Native后置、显式clock action数0、seed hash不变、Host/游戏/session清理及100%画面覆盖，全数通过。
+`AgentHostProgress.jsonl`保存了43条逐决策的玩家可见摘要/OptionId/路由/token，不含原始prompt/回答；
+源MP4已删除且关键帧索引保留。
+`AgentHostCampaignLoopEvaluation`由Harness直接启动Campaign Host以稳定隔离模型循环；
+游戏内注册MCM Start/Stop另由依赖#119通过生命周期验证。
+本卡只完成一条VillageNeedsTools纵切片，并不构成Epic #18的StoryMode四项“Establish Your Clan”目标或全Campaign自主通过。
 
-修复后复验`TestResults/20261017-202926`基于推送提交`e390cac`通过W7-K验收。真实FreeLLMAPI `auto:reliable`完成43次模型决策/Provider路由、37个Native动作，156,691输入/2,812输出Token；实际服务商为FreeLLMAPI可用的OVH Mistral Small、Qwen2.5-VL、Qwen3.8、Qwen3.5、gpt-oss-120b、Mistral-Nemo。初始Village人物overlay自然暴露`CharacterObject_1691`蓝色“卡利奥克需要工具”标记，模型沿Native问候/说明/解决方案解释到最终可点击的`issue_offer_player_accept_quest`并成功接取。它先在town_V1当前市场无货时通过Native tradeCancel退出，再按已观察的town_V6候选买入1件`tools`并提交Trade；Journal从0/1变为1/1。模型返回原Quest-giver Village，经Native quick conversation交付；任务1→0。主角Inventory交付前后精确为`tools 1→0`、`flax 0→73`，与原生Journal要求完全一致；Gold由购入后324保持至交付后324。最终模型在任务完成、库存精确核对后调用`done`，此时仍在`MapState`的Village菜单，证明上述终止门槛修复有效。
+修复后复验`TestResults/20261017-202926`基于推送提交`e390cac`通过W7-K验收。
+真实FreeLLMAPI `auto:reliable`完成43次模型决策/Provider路由、37个Native动作，156,691输入/2,812输出Token；
+实际服务商为FreeLLMAPI可用的OVH Mistral Small、Qwen2.5-VL、Qwen3.8、Qwen3.5、gpt-oss-120b、Mistral-Nemo。
+初始Village人物overlay自然暴露`CharacterObject_1691`蓝色“卡利奥克需要工具”标记，模型沿Native问候/说明/解决方案解释到最终可点击的`issue_offer_player_accept_quest`并成功接取。
+它先在town_V1当前市场无货时通过Native tradeCancel退出，再按已观察的town_V6候选买入1件`tools`并提交Trade；
+Journal从0/1变为1/1。
+模型返回原Quest-giver Village，经Native quick conversation交付；
+任务1→0。
+主角Inventory交付前后精确为`tools 1→0`、`flax 0→73`，与原生Journal要求完全一致；
+Gold由购入后324保持至交付后324。
+最终模型在任务完成、库存精确核对后调用`done`，此时仍在`MapState`的Village菜单，证明上述终止门槛修复有效。
 
 该次CampaignDay为91077.635→91079.022，只有地图旅行自然推进；显式advance/pause/resume/fastForward动作数0。Seed fixture哈希未变、临时`ChronicleW7K-`存档已删、Bannerlord/Host/CLI session均清理、录像覆盖率100%并移除原片，Host跟踪树为clean。运行记录与任务卡只证明这一个自然可见的VillageNeedsTools闭环；W7-K Campaign Host循环由Harness发起，注册MCM Start/Stop生命周期另由其已通过的依赖#119验证，Epic #18的完整玩家界面验收仍未完成。该证据足以关闭#123，下一工作项仍须按GitHub Project现有依赖与顺序推进，不能把一次Quest成功外推为完整战役自主能力。
 
-W7-N `Establish Your Clan`目标规划切片已完成真实模型只读门禁（`TestResults/20261018-070853`，提交`b136e57`）：从原版StoryMode模块组的`save002`逐字节复制为`ChronicleW7N-*`，加载时仅在启动参数临时附加ChronicleFramework；源SHA-256前后同为`5A1CBACF6A67202F68CF71CDDD56A2485A5E04E41A2BFB9DF7003EA8B337875F`。FreeLLMAPI `auto:reliable`完成2次真实决策/Provider路由（OVH Mistral Small；689/40与1080/30输入/输出tokens），先从Native当前Quest list选中精确的活动StoryMode目标，再经独立`questDetails`只读适配读取四个玩家可见Journal阶段；当时Journal current/target为Gold 32/2000、Party 0/25、Renown 5/50、Companion 1/1，模型只选择未完成的Renown目标；游戏动作0、Journal只读调用1，CampaignDay 91080.216保持、time mode Stop，Gold/Party/Renown/活动Quest集合不变且未声称Quest完成。玩家确认：主线任务界面会为这四项目标分别显示当前进度和目标数值，包括藏身处人数；这是玩家界面观察，不替代Native Journal/Quest判定证据。该样本的直接Party/Gold/Renown/Companion live值刚好与Journal一致，不能推出所有状态都一致。此后真实W7-O运行发现释放后Party roster=1而原Quest Journal仍显示Party current=0；这是原版事件驱动缓存与实时 roster 的差异，源码确认Quest成功判定使用JournalLog缓存，Host必须以Journal current/target作为任务进度，只额外记录live差异而不能因此误判为错误或停住。录像覆盖100%、源片已按索引删除、临时存档/游戏/Host/CLI均清理。`AgentObserver.state.storyModeEstablishClanStatus`现按当前Campaign类型、Tutorial/MainStoryLine阶段、活动QuestManager与原版Old Quests `JournalLogEntry`区分非StoryMode、尚未激活、活动、历史完成、历史失败；特殊StoryMode Quest历史保留期10000年，状态分类的6种输入组合有确定性回归。若StoryMode教程已结束但当前Quest与历史Journal均缺失，明确返回unknown，不猜测已完成或失败。W7-N完成的是“从原版Quest状态选一个下一项目标”的规划切片，不代表四目标执行、Quest完成或Epic #18长程门禁通过。
+W7-N `Establish Your Clan`目标规划切片已完成真实模型只读门禁（`TestResults/20261018-070853`，提交`b136e57`）：从原版StoryMode模块组的`save002`逐字节复制为`ChronicleW7N-*`，加载时仅在启动参数临时附加ChronicleFramework；
+源SHA-256前后同为`5A1CBACF6A67202F68CF71CDDD56A2485A5E04E41A2BFB9DF7003EA8B337875F`。
+FreeLLMAPI `auto:reliable`完成2次真实决策/Provider路由（OVH Mistral Small；
+689/40与1080/30输入/输出tokens），先从Native当前Quest list选中精确的活动StoryMode目标，再经独立`questDetails`只读适配读取四个玩家可见Journal阶段；
+当时Journal current/target为Gold 32/2000、Party 0/25、Renown 5/50、Companion 1/1，模型只选择未完成的Renown目标；
+游戏动作0、Journal只读调用1，CampaignDay 91080.216保持、time mode Stop，Gold/Party/Renown/活动Quest集合不变且未声称Quest完成。
+玩家确认：主线任务界面会为这四项目标分别显示当前进度和目标数值，包括藏身处人数；
+这是玩家界面观察，不替代Native Journal/Quest判定证据。
+该样本的直接Party/Gold/Renown/Companion live值刚好与Journal一致，不能推出所有状态都一致。
+此后真实W7-O运行发现释放后Party roster=1而原Quest Journal仍显示Party current=0；
+这是原版事件驱动缓存与实时 roster 的差异，源码确认Quest成功判定使用JournalLog缓存，Host必须以Journal current/target作为任务进度，只额外记录live差异而不能因此误判为错误或停住。
+录像覆盖100%、源片已按索引删除、临时存档/游戏/Host/CLI均清理。
+`AgentObserver.state.storyModeEstablishClanStatus`现按当前Campaign类型、Tutorial/MainStoryLine阶段、活动QuestManager与原版Old Quests `JournalLogEntry`区分非StoryMode、尚未激活、活动、历史完成、历史失败；
+特殊StoryMode Quest历史保留期10000年，状态分类的6种输入组合有确定性回归。
+若StoryMode教程已结束但当前Quest与历史Journal均缺失，明确返回unknown，不猜测已完成或失败。
+W7-N完成的是“从原版Quest状态选一个下一项目标”的规划切片，不代表四目标执行、Quest完成或Epic #18长程门禁通过。
 
 ## 维护规则
 
@@ -734,9 +1294,32 @@ FreeLLMAPI路由错误已分成两类，不能统称“模型不可用”：
 
 为让模型犯一次格式错误不至于直接终止子目标，`AgentHostProviderDecisionRecovery`现对“响应已到达但未通过当前Native动作/控制目录校验”的错误最多给两次受限修正反馈；只传错误码与当前目录，不回显原模型全文；每次此前提必须是`nativeActionSent=false`，因此不重放已执行的交易或移动。俘虏子流程用Fake Provider复现“错误的未列出observeAgain→明确目录反馈→原版resume成功”；Gold售卖子流程用Fake Provider复现“参数JSON无效→反馈→地图查询成功→之后HTTP故障仍保留查询回执”。`TestResults/20261019-130951`AgentHostPackage通过；`TestResults/20261019-131148`因FreeLLMAPI 502在Gold参数纠正分支之前失败，尚未真实模型验证该重试。
 
-`TestResults/20261019-174846`验证了新的前置烟测：真实Mistral Small烟测通过（OVH，874/26 tokens）后才启动游戏；真实模型完成EYC分类、选择Gold，并以Native `resume`、`menu_captivity_end_wilderness_escape/mno_continue`及Native自由地图后验完成4个动作/8个决策，源档未变且临时游戏/存档/session清理。之后Provider经OVH发生socket/TLS重置，因Native路由cooldown在约22分钟后以`provider-http-error`终止，Gold未出售、Quest未完成。对应FreeLLMAPI日志多个upstream reset与cooldown，不是模型API key或EYC分类错误。进一步发现一次真实运行从环境显式传入90秒timeout，但`Test-AgentLiveModelLoop.ps1`的EYC分支又无条件设回360秒；这确实是Harness操作问题，会让网络重试拖长。代码现让显式`CHRONICLE_LLM_TIMEOUT_SECONDS`覆盖各场景默认、无显式值时才用场景默认，并将EYC实机阶段默认设为90秒；helper在启动前验证5–360范围，Check-Docs防止硬编码回归。`TestResults/20261019-183116`验证超时修复：同一Mistral无游戏烟测通过后启动客户端；后续上游冷却/重试等待在Host总deadline 94秒时以`provider-timeout`结束，0个游戏动作，源档未变、游戏与session已清理、录像覆盖100%后移除原片。这证实等待上限被传入实机Host，但不证明Gold参数修正或整项目标成功。Provider烟测可以阻止启动前已知不可用的路由，但不能保证后续调用不掉线。契约版本递增至7.241；以上诊断运行不是自然新战役门禁。`TestResults/20261019-184022`的`auto:reliable`无游戏烟测记录Google/Gemini 403“project has been denied access”，随后FreeLLMAPI回退到OVH Mistral并成功返回合法决策（874/33 tokens）；这证明此具体拒绝来自上游平台权限，且FreeLLMAPI能在该次请求中回退，不证明后续路由持续健康。
+`TestResults/20261019-174846`验证了新的前置烟测：真实Mistral Small烟测通过（OVH，874/26 tokens）后才启动游戏；
+真实模型完成EYC分类、选择Gold，并以Native `resume`、`menu_captivity_end_wilderness_escape/mno_continue`及Native自由地图后验完成4个动作/8个决策，源档未变且临时游戏/存档/session清理。
+之后Provider经OVH发生socket/TLS重置，因Native路由cooldown在约22分钟后以`provider-http-error`终止，Gold未出售、Quest未完成。
+对应FreeLLMAPI日志多个upstream reset与cooldown，不是模型API key或EYC分类错误。
+进一步发现一次真实运行从环境显式传入90秒timeout，但`Test-AgentLiveModelLoop.ps1`的EYC分支又无条件设回360秒；
+这确实是Harness操作问题，会让网络重试拖长。
+代码现让显式`CHRONICLE_LLM_TIMEOUT_SECONDS`覆盖各场景默认、无显式值时才用场景默认，并将EYC实机阶段默认设为90秒；
+helper在启动前验证5–360范围，Check-Docs防止硬编码回归。
+`TestResults/20261019-183116`验证超时修复：同一Mistral无游戏烟测通过后启动客户端；
+后续上游冷却/重试等待在Host总deadline 94秒时以`provider-timeout`结束，0个游戏动作，源档未变、游戏与session已清理、录像覆盖100%后移除原片。
+这证实等待上限被传入实机Host，但不证明Gold参数修正或整项目标成功。
+Provider烟测可以阻止启动前已知不可用的路由，但不能保证后续调用不掉线。
+契约版本递增至7.241；
+以上诊断运行不是自然新战役门禁。
+`TestResults/20261019-184022`的`auto:reliable`无游戏烟测记录Google/Gemini 403“project has been denied access”，随后FreeLLMAPI回退到OVH Mistral并成功返回合法决策（874/33 tokens）；
+这证明此具体拒绝来自上游平台权限，且FreeLLMAPI能在该次请求中回退，不证明后续路由持续健康。
 
-`TestResults/20261019-184452`的Auto路由实机整合样本中，模型确实选择了当前Native安全城镇`town_ES3`；Native `move`回执成功，后验显示`party.isMoving=true`且目标仍为`town_ES3`。Host因读取规范化参数时把`settlementId`误写成`SettlementId`而丢失目标，错误终止Gold子流程。代码已修为读取规范化键并补回归；`TestResults/20261019-185739`AgentHostPackage通过。随后`20261019-185937`Auto路由在大型地图目标查询后遇FreeLLMAPI 45秒Fallback预算耗尽、没有进入move；`20261019-191115`Mistral无游戏预检命中cooldown，在Bannerlord启动前以provider-timeout失败、零Native动作。先前`TestResults/20261019-184022`Auto无游戏烟测通过且实际回退到OVH，说明可发现替代路由，但不保证后续game loop稳定。修复后的实机Move重测仍未通过provider前置/路由稳定门槛，故只可称Fake/Package链路通过，不可称Move问题已实机闭环。
+`TestResults/20261019-184452`的Auto路由实机整合样本中，模型确实选择了当前Native安全城镇`town_ES3`；
+Native `move`回执成功，后验显示`party.isMoving=true`且目标仍为`town_ES3`。
+Host因读取规范化参数时把`settlementId`误写成`SettlementId`而丢失目标，错误终止Gold子流程。
+代码已修为读取规范化键并补回归；
+`TestResults/20261019-185739`AgentHostPackage通过。
+随后`20261019-185937`Auto路由在大型地图目标查询后遇FreeLLMAPI 45秒Fallback预算耗尽、没有进入move；
+`20261019-191115`Mistral无游戏预检命中cooldown，在Bannerlord启动前以provider-timeout失败、零Native动作。
+先前`TestResults/20261019-184022`Auto无游戏烟测通过且实际回退到OVH，说明可发现替代路由，但不保证后续game loop稳定。
+修复后的实机Move重测仍未通过provider前置/路由稳定门槛，故只可称Fake/Package链路通过，不可称Move问题已实机闭环。
 
 `TestResults/20261019-221352`的`auto:noema-free`无游戏烟测实际路由到`custom/cohere/north-mini-code`并返回合法分类；FreeLLMAPI同时警告该上游报告服务模型ID为`nvidia/llama-3.2-11b-vision`，与路由ID不一致，响应格式虽正常，模型身份需谨慎标记。其后`TestResults/20261019-221715`完整EYC Harness在Smoke阶段因Steam WebHelper数量/稳定条件不满足而停止，Bannerlord没有启动；检查确认该次阶段顺序把Smoke放在Provider烟测前，因而未执行本可更早发现问题的无游戏模型检查。Harness阶段现调整为`Preflight→Build→AgentHostPackage→AgentHostProvider→Smoke→Campaign`，Docs静态门禁锁定此先后关系。这是测试效率/归因修复，不是游戏能力或Campaign动作证据。
 
@@ -744,21 +1327,72 @@ FreeLLMAPI路由错误已分成两类，不能统称“模型不可用”：
 
 `TestResults/20261019-192515`在`mistral-small-3.2-24b`直连下再次验证 timeout 传播：Provider smoke通过、第一条真实EYC分类请求成功；随后的第二次请求在FreeLLMAPI等待OVH route cooldown/retry时触发`provider-timeout`（Host.Elapsed 96秒），没有发出Native动作，源存档不变且客户端/session/临时副本清理、录像覆盖100%。这证明新timeout确实快速止住长等待，不构成EYC目标执行或Move修复的实机验证；失败仍是FreeLLMAPI/上游暂时不可用。下一次能完成有效模型决策时，继续用现有收据确认move目标是否稳定保留及Gold子目标后续路由。
 
-2026-10-20针对用户提出“错误可能是Harness操作造成”进行只读与单次受控验证：FreeLLMAPI loopback `ping=ok`、本地统一key授权目录读取成功（86条路由）、7890监听存在。`20261019-223430`的`auto:noema-free`游戏请求收到429时，原始FreeLLMAPI日志对应FallbackLoop记录`no upstream tried`，候选因冷却或平台丢弃`response_format`而被跳过；前序实际调用有跨NVIDIA/Cohere/Poolside/OVH的TLS断开和`socket hang up`。同一日志把Google 403具体记为project access denied。之后仅发出一次当前配置NVIDIA Llama路由的极小`json_object`请求，网关记为HTTP 200、60输入/6输出tokens；请求已成功，但我临时输出器读取不存在的可选fallback响应头时抛出PowerShell异常，错误地把输出标成`transport-error`。该异常属于Agent的诊断脚本，不是FreeLLMAPI响应；以原始网关日志为准，没有重试模型请求。随后`TestResults/20261020-022851`无游戏AgentHostProvider一次性真实烟测成功：Harness启动FreeLLMAPI并确认应用记录`socks5h://127.0.0.1:7890`，当前配置NVIDIA Llama路由实际收到严格`json_schema`请求并返回`custom/nvidia/llama-3.2-11b-vision`分类（873输入/50输出tokens、Native命令0）。这证实同一条Host生产请求在当前连接条件下格式兼容且能执行，也说明重启后该路由可用；但不反证之前发生的供应商/冷却失败，也不保证随后长程请求仍在线。综合判断：那次EYC 429是FreeLLMAPI没有可执行候选时返回的路由耗尽状态，而不是已证实的Host请求构造错误；更早的连接重置可能受代理/VPN到各上游的时段性连接影响，尚无法定位代理商还是上游服务。先前反复测试及多余Smoke调用可能消耗免费候选/使其进入cooldown，完整EYC现已去掉重复Smoke；继续避免重复烟测并按需单次诊断。
+2026-10-20针对用户提出“错误可能是Harness操作造成”进行只读与单次受控验证：FreeLLMAPI loopback `ping=ok`、本地统一key授权目录读取成功（86条路由）、7890监听存在。
+`20261019-223430`的`auto:noema-free`游戏请求收到429时，原始FreeLLMAPI日志对应FallbackLoop记录`no upstream tried`，候选因冷却或平台丢弃`response_format`而被跳过；
+前序实际调用有跨NVIDIA/Cohere/Poolside/OVH的TLS断开和`socket hang up`。
+同一日志把Google 403具体记为project access denied。
+之后仅发出一次当前配置NVIDIA Llama路由的极小`json_object`请求，网关记为HTTP 200、60输入/6输出tokens；
+请求已成功，但我临时输出器读取不存在的可选fallback响应头时抛出PowerShell异常，错误地把输出标成`transport-error`。
+该异常属于Agent的诊断脚本，不是FreeLLMAPI响应；
+以原始网关日志为准，没有重试模型请求。
+随后`TestResults/20261020-022851`无游戏AgentHostProvider一次性真实烟测成功：Harness启动FreeLLMAPI并确认应用记录`socks5h://127.0.0.1:7890`，当前配置NVIDIA Llama路由实际收到严格`json_schema`请求并返回`custom/nvidia/llama-3.2-11b-vision`分类（873输入/50输出tokens、Native命令0）。
+这证实同一条Host生产请求在当前连接条件下格式兼容且能执行，也说明重启后该路由可用；
+但不反证之前发生的供应商/冷却失败，也不保证随后长程请求仍在线。
+综合判断：那次EYC 429是FreeLLMAPI没有可执行候选时返回的路由耗尽状态，而不是已证实的Host请求构造错误；
+更早的连接重置可能受代理/VPN到各上游的时段性连接影响，尚无法定位代理商还是上游服务。
+先前反复测试及多余Smoke调用可能消耗免费候选/使其进入cooldown，完整EYC现已去掉重复Smoke；
+继续避免重复烟测并按需单次诊断。
 
 Gold售卖循环的Native地图目标原始回执可以含395个聚落，而安全动作目录只开放最多12个当前安全Town。Host现仅向模型请求传该12个候选组成的紧凑`previousActionReceipt`，完整原始Native回执仍保留于trace；动作权限与Campaign状态不变。Fake Provider回归用18个原始候选（15个安全Town、1个敌对Town、1个被围Town、1个村庄）验证模型请求和动作目录只含12个安全Town、trace保留18个目标，后续模拟HTTP失败也不重放Native查询。`TestResults/20261020-022517`Preflight、Build及AgentHostPackage通过：Provider合同167项、Campaign loop 13项，模型调用0、Native命令0、临时包清理。该Host上下文减量改动尚未经真实Campaign模型验证。
 
-2026-10-20 EYC端到端诊断发现两处真实Host组合缺口并用同一未改动`save002`派生副本复现。`TestResults/20261020-023155`真实模型经FreeLLMAPI严格JSON Schema成功分类`Establish Your Clan`并选声望，但Native观察已是`prisoner_wait`且`captivity.isCaptive=true`；EYC父循环没有先调已有俘虏恢复器，直接把声望战斗子流程送入无可用战斗行动状态后以`no-safe-action`失败。现父循环每周期都先核验真实Native俘虏状态；若被俘则只调用既有俘虏恢复流程，要求它返回后重新读取并确认仍在原任务、MainHero已脱俘且处于可用MapState，然后再做新的Journal读取和目标选择。恢复子流程新增“不代父循环再规划一次”返回方式，避免重复模型决策。`AgentHostPackage`的Fake Native/Provider回归覆盖“俘虏→恢复→再选Gold→Native完成”顺序及无模型重复规划；`TestResults/20261020-024156`通过，Provider合同167项、Campaign loop 13项，模型调用/Native命令0。
+2026-10-20 EYC端到端诊断发现两处真实Host组合缺口并用同一未改动`save002`派生副本复现。
+`TestResults/20261020-023155`真实模型经FreeLLMAPI严格JSON Schema成功分类`Establish Your Clan`并选声望，但Native观察已是`prisoner_wait`且`captivity.isCaptive=true`；
+EYC父循环没有先调已有俘虏恢复器，直接把声望战斗子流程送入无可用战斗行动状态后以`no-safe-action`失败。
+现父循环每周期都先核验真实Native俘虏状态；
+若被俘则只调用既有俘虏恢复流程，要求它返回后重新读取并确认仍在原任务、MainHero已脱俘且处于可用MapState，然后再做新的Journal读取和目标选择。
+恢复子流程新增“不代父循环再规划一次”返回方式，避免重复模型决策。
+`AgentHostPackage`的Fake Native/Provider回归覆盖“俘虏→恢复→再选Gold→Native完成”顺序及无模型重复规划；
+`TestResults/20261020-024156`通过，Provider合同167项、Campaign loop 13项，模型调用/Native命令0。
 
-真实`auto:reliable`运行`TestResults/20261020-024826`进一步验证了新增恢复闭环：模型在自由地图状态下先发原版`resume`，自然被释后选择当前Native `mno_continue`；Host后验确认已回自由Map，父级重新选Gold并读取安全城镇，模型发Native `move`到`town_ES3`。此运行为7次真实模型决策、4条Native动作，实际路由包括OVH Qwen与Mistral；没有完成Gold出售。运行最后停于`gold-sale-encounter-out-of-scope`。失败前后Native和Harness视频帧明确显示已到`town_ES3`，`menuId=town`、`encounteredPartyId=town_ES3`、`encounterActive=true`，画面是正常波罗斯城镇菜单而非敌方部队/战斗。旧Gold guard把“与当前定居点同ID的Town菜单遭遇”当成敌对遭遇，故禁止了它自己必须进入的Trade入口。现`IsActiveEncounter`把`battleSimulation`/普通encounter与`menuId=town && currentSettlementId==encounteredPartyId`区分；仅后者可以通过当前启用Trade菜单进入市场，敌方Party encounter仍fail-closed。新增Fake回归覆盖城镇允许、敌对部队仍拒绝；`TestResults/20261020-025835`AgentHostPackage通过（Provider 171项、Campaign 13项；模型调用0、Native命令0）。
+真实`auto:reliable`运行`TestResults/20261020-024826`进一步验证了新增恢复闭环：模型在自由地图状态下先发原版`resume`，自然被释后选择当前Native `mno_continue`；
+Host后验确认已回自由Map，父级重新选Gold并读取安全城镇，模型发Native `move`到`town_ES3`。
+此运行为7次真实模型决策、4条Native动作，实际路由包括OVH Qwen与Mistral；
+没有完成Gold出售。
+运行最后停于`gold-sale-encounter-out-of-scope`。
+失败前后Native和Harness视频帧明确显示已到`town_ES3`，`menuId=town`、`encounteredPartyId=town_ES3`、`encounterActive=true`，画面是正常波罗斯城镇菜单而非敌方部队/战斗。
+旧Gold guard把“与当前定居点同ID的Town菜单遭遇”当成敌对遭遇，故禁止了它自己必须进入的Trade入口。
+现`IsActiveEncounter`把`battleSimulation`/普通encounter与`menuId=town && currentSettlementId==encounteredPartyId`区分；
+仅后者可以通过当前启用Trade菜单进入市场，敌方Party encounter仍fail-closed。
+新增Fake回归覆盖城镇允许、敌对部队仍拒绝；
+`TestResults/20261020-025835`AgentHostPackage通过（Provider 171项、Campaign 13项；
+模型调用0、Native命令0）。
 
 修复后的实机复验尚未闭环：`TestResults/20261020-030004`的`auto:reliable`路由选到Qwen 2.5 VL并在第一条真实请求将目标分类为`unsupported`，决策数1、Native动作0；这发生在业务代码动作目录之前。`TestResults/20261020-030335`直连Mistral有效分类并再次完成原版俘虏恢复，但后续Gold决策前FreeLLMAPI报告OVH socket hang up，Host因唯一配置路由进入cooldown而在90秒请求deadline安全失败（累计决策3、Native恢复动作2、Campaign未变）。因此当前证据确认真实俘虏恢复工作，Town/hostile encounter区别只通过Fake包测试，下一次真实运行仍须重新验证Town菜单Trade；不能称Gold子目标或完整EYC通过。FreeLLMAPI路由状态不是实时可用性证明，失败的上游日志与有效Native动作/模型分类必须分别归因。
 
-后续`TestResults/20261020-031213`在新的 Mistral 路由诊断中只留下三个有效模型决定：EYC目标分类、Native `resume`、Native `menu_captivity_end_wilderness_escape/mno_continue`；可观察到 CampaignDay 91080.216→91082.894，表明该时间段Native世界自然推进。随后运行没有 `summary.json` 或Host终态收据，视频文件未完成，不能判断俘虏后续结果、Gold执行或代码通过。复核确认无Bannerlord/Host进程仍在；通过既有Agent CLI停止/恢复流程清掉过期session，并仅清理Harness前缀`ChronicleW7P-89aa286cb6654072`副本。源`save002.sav`清理前后SHA-256均为`5A1CBACF6A67202F68CF71CDDD56A2485A5E04E41A2BFB9DF7003EA8B337875F`，session和engine_config备份均已移除，正式源档未改。这是一次未完成的实机运行，不视为通过或失败的业务结果。
+后续`TestResults/20261020-031213`在新的 Mistral 路由诊断中只留下三个有效模型决定：EYC目标分类、Native `resume`、Native `menu_captivity_end_wilderness_escape/mno_continue`；
+可观察到 CampaignDay 91080.216→91082.894，表明该时间段Native世界自然推进。
+随后运行没有 `summary.json` 或Host终态收据，视频文件未完成，不能判断俘虏后续结果、Gold执行或代码通过。
+复核确认无Bannerlord/Host进程仍在；
+通过既有Agent CLI停止/恢复流程清掉过期session，并仅清理Harness前缀`ChronicleW7P-89aa286cb6654072`副本。
+源`save002.sav`清理前后SHA-256均为`5A1CBACF6A67202F68CF71CDDD56A2485A5E04E41A2BFB9DF7003EA8B337875F`，session和engine_config备份均已移除，正式源档未改。
+这是一次未完成的实机运行，不视为通过或失败的业务结果。
 
-最新`TestResults/20261021-134037`使用已提交代码`5de3535`、显式90秒单次Provider deadline和直连Mistral重复同一诊断：真实模型通过`json_object_compatibility`分类EYC，执行`resume`和当前Native `mno_continue`，现有俘虏恢复器完成并回到父循环；之后新的Gold目标规划调用再次遇OVH `socket hang up`，FreeLLMAPI把单路由置入cooldown，Host在下一次有效决策前以`provider-timeout`失败。Native动作2仅为俘虏恢复，Gold未开始；Host记录4个模型决定计数（其中一次传输失败无可接受决策），总时长224.425秒。RunHarness Preflight/Build/AgentHostPackage/Smoke通过，EYC未通过。Clone `ChronicleW7P-e18d952fc8f74d14`及session均由Harness清理，Bannerlord进程为0，`save002.sav`前后SHA-256仍为上述相同值。本次没有实测到修正后的Town菜单交易；Town encounter 区分仍只有包内回归通过。
+最新`TestResults/20261021-134037`使用已提交代码`5de3535`、显式90秒单次Provider deadline和直连Mistral重复同一诊断：真实模型通过`json_object_compatibility`分类EYC，执行`resume`和当前Native `mno_continue`，现有俘虏恢复器完成并回到父循环；
+之后新的Gold目标规划调用再次遇OVH `socket hang up`，FreeLLMAPI把单路由置入cooldown，Host在下一次有效决策前以`provider-timeout`失败。
+Native动作2仅为俘虏恢复，Gold未开始；
+Host记录4个模型决定计数（其中一次传输失败无可接受决策），总时长224.425秒。
+RunHarness Preflight/Build/AgentHostPackage/Smoke通过，EYC未通过。
+Clone `ChronicleW7P-e18d952fc8f74d14`及session均由Harness清理，Bannerlord进程为0，`save002.sav`前后SHA-256仍为上述相同值。
+本次没有实测到修正后的Town菜单交易；
+Town encounter 区分仍只有包内回归通过。
 
-2026-10-21针对`TestResults/20261020-030004`中Qwen 2.5 VL将显式EYC长程目标误判unsupported的源证据（reason称多步自动目标“超出单一scope”，但Native exact EYC control已经列表化），Host分类器新增一次有界澄清：仅当请求文字明确为Establish Your Clan、Native当前列出该精确原版Quest、且尚未重判时，才在任何Native动作前提示“多步objective仍是单一受支持EYC高层目标”并重问一次；别的unsupported任务仍立即终止，第二次仍unsupported也会fail-closed。`TestResults/20261021-142509`的AgentHostPackage通过，Provider合同self-test包含目标文本/当前控件/重试次数门控及第二次分类无Native副作用。`TestResults/20261021-143021`最新代码下`auto:reliable`真实运行分类通过、恢复俘虏（resume→当前mno_continue）；随后向多供应商池请求新的目标规划时，多个上游TLS/socket断开或超时，FreeLLMAPI 45秒Fallback预算耗尽，Host按90秒请求deadline以provider-timeout安全结束，决策数3、恢复动作2、Gold未开始。该运行未触发新的unsupported重判分支，故这里只能说Fake合同验证通过、真实重判仍未验证；不能把路由失败归给分类逻辑。
+2026-10-21针对`TestResults/20261020-030004`中Qwen 2.5 VL将显式EYC长程目标误判unsupported的源证据（reason称多步自动目标“超出单一scope”，但Native exact EYC control已经列表化），Host分类器新增一次有界澄清：仅当请求文字明确为Establish Your Clan、Native当前列出该精确原版Quest、且尚未重判时，才在任何Native动作前提示“多步objective仍是单一受支持EYC高层目标”并重问一次；
+别的unsupported任务仍立即终止，第二次仍unsupported也会fail-closed。
+`TestResults/20261021-142509`的AgentHostPackage通过，Provider合同self-test包含目标文本/当前控件/重试次数门控及第二次分类无Native副作用。
+`TestResults/20261021-143021`最新代码下`auto:reliable`真实运行分类通过、恢复俘虏（resume→当前mno_continue）；
+随后向多供应商池请求新的目标规划时，多个上游TLS/socket断开或超时，FreeLLMAPI 45秒Fallback预算耗尽，Host按90秒请求deadline以provider-timeout安全结束，决策数3、恢复动作2、Gold未开始。
+该运行未触发新的unsupported重判分支，故这里只能说Fake合同验证通过、真实重判仍未验证；
+不能把路由失败归给分类逻辑。
 
 `TestResults/20261021-142707`对Qwen 2.5 VL直连配置在FreeLLMAPI执行状态预检就得到`exhausted`，未发送推理请求、未打开Campaign副本，不能用来判断新的重判提示。`TestResults/20261021-140403`真实`auto:reliable`在多次上游TLS/socket失败后仍成功以Mistral分类EYC、再以Qwen执行Native `resume`，最后由Mistral选择Native `mno_continue`；其后的子目标规划同样在请求内遇多上游断连，90秒deadline前未产生有效决策。重判实现已编译并由`TestResults/20261021-142509`合同覆盖，但截至本记录，真实模型尚未产出一次`unsupported`后再成功EYC分类的样本。该Host提示修正保存在提交`999d363`中。FreeLLMAPI当前错误以“执行目录ready但路由无可用上游”区分，不能把没有有效模型输出的超时归为Mod成功或模型拒绝。
 
@@ -776,61 +1410,216 @@ Gold售卖循环的Native地图目标原始回执可以含395个聚落，而安�
 `TestResults/20261021-144939`加载了包含最新EYC分类重判代码的隔离`save002`副本。FreeLLMAPI第一次Mistral请求成功且分类为EYC，但下一次实际目标循环请求收到HTTP429；Host日志说明没有有界Retry-After，FreeLLMAPI原始Fallback日志显示多候选处于cooldown/不兼容，因而在第二次有效模型决策前安全终止（有效决策1、Native动作0）。源`save002.sav`前后SHA-256一致，临时`ChronicleW7P-12b98703f3fa48ec`副本/session清理，Bannerlord进程0。此运行验证新提交可构建、游戏可启动及失败清理，不验证Gold、交易、分类重判或EYC进展；无实时有效上游时不重复轰击路由。
 
 
-`TestResults/20261021-151955`以直连`gpt-oss-20b`替代auto路由作对照；FreeLLMAPI对`ovh/gpt-oss-20b`的第一次上游TLS握手在0.44秒失败，fallback总结仅有2个候选（该OVH路由冷却、另10个模型所属平台无启用/健康key），随后Host在bounded retry deadline退出，决策/Native动作均为0。路由目录预检和本地`/api/ping`当时均成功，源save002哈希前后相同、临时副本/session被清理。加上之前的Mistral、NVIDIA和auto路由故障，证据表明本次重点不是单一模型不理解prompt，而是本机FreeLLMAPI已配置的多条远端provider网络连接不稳定并造成候选冷却。当前安装版本为0.16.4；官方0.16.5/0.16.6更新说明是Windows premium激活网络栈与key“last worked”可见性，没有声称修复provider fallback连通性，故未把盲目升级当根因修复。[FreeLLMAPI官方release notes](https://github.com/tashfeenahmed/freellmapi/releases)
+`TestResults/20261021-151955`以直连`gpt-oss-20b`替代auto路由作对照；
+FreeLLMAPI对`ovh/gpt-oss-20b`的第一次上游TLS握手在0.44秒失败，fallback总结仅有2个候选（该OVH路由冷却、另10个模型所属平台无启用/健康key），随后Host在bounded retry deadline退出，决策/Native动作均为0。
+路由目录预检和本地`/api/ping`当时均成功，源save002哈希前后相同、临时副本/session被清理。
+加上之前的Mistral、NVIDIA和auto路由故障，证据表明本次重点不是单一模型不理解prompt，而是本机FreeLLMAPI已配置的多条远端provider网络连接不稳定并造成候选冷却。
+当前安装版本为0.16.4；
+官方0.16.5/0.16.6更新说明是Windows premium激活网络栈与key“last worked”可见性，没有声称修复provider fallback连通性，故未把盲目升级当根因修复。
+[FreeLLMAPI官方release notes](https://github.com/tashfeenahmed/freellmapi/releases)
 
-2026-10-21的无密钥网络探针使用FreeLLMAPI已配置的SOCKS5H代理`127.0.0.1:7890`，只访问公开HTTP端点：GitHub返回HTTP 200、Google根API返回HTTP 404（均完成TLS/HTTP），NVIDIA模型API在Windows Schannel TLS阶段断开，Cohere则报证书吊销检查离线。它说明该代理端口并非整体不可达，但不同上游域名/Windows证书链的实际连通性不一致；curl/Schannel与FreeLLMAPI Node TLS不是同一客户端栈，因此不能据此定位是StarVPN代理、系统证书状态还是具体provider服务器。FreeLLMAPI官方说明中，heuristic cooldown probe约每60秒扫描，并且仅在provider验证成功时提前清除cooldown；该信息支持等待/观察可恢复窗口，不构成新的推理可用性证明。[FreeLLMAPI cooldown & probe documentation](https://github.com/tashfeenahmed/freellmapi/blob/main/docs/en/architecture/02-quota-and-cooldown-engine.md)
+2026-10-21的无密钥网络探针使用FreeLLMAPI已配置的SOCKS5H代理`127.0.0.1:7890`，只访问公开HTTP端点：GitHub返回HTTP 200、Google根API返回HTTP 404（均完成TLS/HTTP），NVIDIA模型API在Windows Schannel TLS阶段断开，Cohere则报证书吊销检查离线。
+它说明该代理端口并非整体不可达，但不同上游域名/Windows证书链的实际连通性不一致；
+curl/Schannel与FreeLLMAPI Node TLS不是同一客户端栈，因此不能据此定位是StarVPN代理、系统证书状态还是具体provider服务器。
+FreeLLMAPI官方说明中，heuristic cooldown probe约每60秒扫描，并且仅在provider验证成功时提前清除cooldown；
+该信息支持等待/观察可恢复窗口，不构成新的推理可用性证明。
+[FreeLLMAPI cooldown & probe documentation](https://github.com/tashfeenahmed/freellmapi/blob/main/docs/en/architecture/02-quota-and-cooldown-engine.md)
 
 同一分钟内对官方OVH `/v1/models`做协议对照：经`socks5h://127.0.0.1:7890`返回HTTP 200，经`http://127.0.0.1:7890`则Windows Schannel在TLS握手失败。7890监听进程已由只读Windows进程查询确认为`XingchenCore.exe`（星辰VPN核心）。故不同时间的curl结果不能作为“FreeLLMAPI代理协议设错”的证据，现有SOCKS5H配置与本次探测一致；provider health log仍在同一时段报告OVH Node请求断开。仅可判为各上游/客户端TLS路径有时段性差异，不能据此指认StarVPN配置错误或直接更改其协议。
 
-2026-10-21继续核验FreeLLMAPI 0.16.4原生日志：Google Gemini多次返回`403 Your project has been denied access`，属于Google项目授权拒绝；BlockRun custom曾明确返回免费容量耗尽429；当日`auto:reliable`的一条请求先由Kilo Poolside路由返回429，再回退到AI Horde的Behemoth-X模型并返回`406 Model None not known`。同一时段Host使用本机FreeLLMAPI `/v1`接口，`/api/ping`成功、带统一密钥读取到87个目录条目；请求日志已显示进入Kilo和AI Horde上游，因此没有证据表明本次是Chronicle endpoint/API认证失败，但AI Horde的精确model映射来源仍未知。该日志文件在2026-10-16至10-21记录580条代理请求（10-21为23条），日志不含调用方身份，不能把全部请求归给Harness；不过反复真实测试很可能贡献了部分流量并放大免费额度/冷却压力。今后诊断不再重复打`auto`链，先单个免费路由、单次小请求；不要用`ready`状态代替真实推理证明。
+2026-10-21继续核验FreeLLMAPI 0.16.4原生日志：Google Gemini多次返回`403 Your project has been denied access`，属于Google项目授权拒绝；
+BlockRun custom曾明确返回免费容量耗尽429；
+当日`auto:reliable`的一条请求先由Kilo Poolside路由返回429，再回退到AI Horde的Behemoth-X模型并返回`406 Model None not known`。
+同一时段Host使用本机FreeLLMAPI `/v1`接口，`/api/ping`成功、带统一密钥读取到87个目录条目；
+请求日志已显示进入Kilo和AI Horde上游，因此没有证据表明本次是Chronicle endpoint/API认证失败，但AI Horde的精确model映射来源仍未知。
+该日志文件在2026-10-16至10-21记录580条代理请求（10-21为23条），日志不含调用方身份，不能把全部请求归给Harness；
+不过反复真实测试很可能贡献了部分流量并放大免费额度/冷却压力。
+今后诊断不再重复打`auto`链，先单个免费路由、单次小请求；
+不要用`ready`状态代替真实推理证明。
 
-2026-10-21后续真实模型诊断：`TestResults/20261021-175115`用单模型`gpt-oss-20b`探针成功经`ovh/gpt-oss-20b`返回` supported-village-tools-quest`（891输入/103输出tokens，Native命令0）；这只证明一次远端分类可用。随后EYC隔离切片`175453`在90秒请求期限下遇`Retry-After=85`，尚未等待即快速失败；`175954`把期限提高到120秒后实际等待85.011秒并重试一次，但第二次仍未获得模型回答，FreeLLMAPI报`Retry-After=585`，Host按360秒上限立即安全终止。两次EYC均0个有效模型决定/Native动作，源`save002.sav`哈希不变，临时副本、游戏进程和session清理成功，录像完整覆盖；失败帧是战役地图上的通知/提示面板。对应FreeLLMAPI日志在10:02和10:04记录两次`ovh/gpt-oss-20b` socket hang up，随后路由池将该模型置于cooldown。与此同时，只读数据库确认代理启用、模式为forward、代理来源dashboard、地址`socks5h://127.0.0.1:7890`、无key级代理覆盖；同一时段Windows curl经该SOCKS5H访问OVH与Kilo公开`/models`均HTTP 200。故可排除“代理未设置/Host API认证错误”，但Node Provider TLS路径与Windows Schannel表现不同或具有间歇性，具体根因仍待定位，不把curl GET成功当作模型推理成功。AI Horde公共文本模型目录当前没有日志所选`aphrodite/TheDrummer/Behemoth-X-123B-v2.1`（当前Behemoth项为不同名称/版本），支持此回退模型ID过时的判断，但其在FreeLLMAPI内部的映射来源尚未知；不再重复调用`auto`链。
+2026-10-21后续真实模型诊断：`TestResults/20261021-175115`用单模型`gpt-oss-20b`探针成功经`ovh/gpt-oss-20b`返回` supported-village-tools-quest`（891输入/103输出tokens，Native命令0）；
+这只证明一次远端分类可用。
+随后EYC隔离切片`175453`在90秒请求期限下遇`Retry-After=85`，尚未等待即快速失败；
+`175954`把期限提高到120秒后实际等待85.011秒并重试一次，但第二次仍未获得模型回答，FreeLLMAPI报`Retry-After=585`，Host按360秒上限立即安全终止。
+两次EYC均0个有效模型决定/Native动作，源`save002.sav`哈希不变，临时副本、游戏进程和session清理成功，录像完整覆盖；
+失败帧是战役地图上的通知/提示面板。
+对应FreeLLMAPI日志在10:02和10:04记录两次`ovh/gpt-oss-20b` socket hang up，随后路由池将该模型置于cooldown。
+与此同时，只读数据库确认代理启用、模式为forward、代理来源dashboard、地址`socks5h://127.0.0.1:7890`、无key级代理覆盖；
+同一时段Windows curl经该SOCKS5H访问OVH与Kilo公开`/models`均HTTP 200。
+故可排除“代理未设置/Host API认证错误”，但Node Provider TLS路径与Windows Schannel表现不同或具有间歇性，具体根因仍待定位，不把curl GET成功当作模型推理成功。
+AI Horde公共文本模型目录当前没有日志所选`aphrodite/TheDrummer/Behemoth-X-123B-v2.1`（当前Behemoth项为不同名称/版本），支持此回退模型ID过时的判断，但其在FreeLLMAPI内部的映射来源尚未知；
+不再重复调用`auto`链。
 
-2026-10-21 FreeLLMAPI SOCKS传输A/B诊断（不修改安装应用）：FreeLLMAPI 0.16.4官方lockfile固定`socks-proxy-agent@10.0.0`，其SOCKS传输代码将`lookup: socksHostnameLookup`传给`https.request`；应用本地DB确认代理开关已开、forward模式、dashboard来源为`socks5h://127.0.0.1:7890`且无key级覆盖。[0.16.4 proxy.ts](https://github.com/tashfeenahmed/freellmapi/blob/v0.16.4/server/src/lib/proxy.ts) [0.16.4 package-lock](https://github.com/tashfeenahmed/freellmapi/blob/v0.16.4/package-lock.json)。通过7890下载npm tarball并以registry SHA-512校验后，在同机Node 20.18.1、同一OVH URL对照：手工SOCKS5H→TLS GET为HTTP 200；`socks-proxy-agent@8.0.4`不加自定义lookup为200、加callback `callback(null, hostname, 4)`为`ECONNRESET`；`@10.0.0`加/不加callback均`ECONNRESET`；`@10.1.0`不加callback为200、加callback又`ECONNRESET`。Kilo TLS握手在这些代理Agent下可完成。该A/B高置信指向FreeLLMAPI的SOCKS client/dependency/lookup组合，而非用户忘配7890或Chronicle endpoint/auth错误；仍未在实际Electron进程替换依赖后复验，故不称为已修复。FreeLLMAPI当前`main`源码仍传lookup callback且lockfile仍锁10.0.0；v0.16.6 release notes没有该传输路径修复，盲目升级不解决已证实的代码形状问题。[当前main proxy.ts](https://github.com/tashfeenahmed/freellmapi/blob/main/server/src/lib/proxy.ts) [v0.16.6 release notes](https://github.com/tashfeenahmed/freellmapi/releases)。本轮未更改FreeLLMAPI安装文件/DB，也未启动第二个代理服务。后续若要让真实Campaign路由稳定，需要FreeLLMAPI在`socks5h`上移除/调整该lookup override并更新依赖，或用户授权做可回滚的本地应用补丁；在此之前不重复发自动回退模型请求。
+2026-10-21 FreeLLMAPI SOCKS传输A/B诊断（不修改安装应用）：FreeLLMAPI 0.16.4官方lockfile固定`socks-proxy-agent@10.0.0`，其SOCKS传输代码将`lookup: socksHostnameLookup`传给`https.request`；
+应用本地DB确认代理开关已开、forward模式、dashboard来源为`socks5h://127.0.0.1:7890`且无key级覆盖。
+[0.16.4 proxy.ts](https://github.com/tashfeenahmed/freellmapi/blob/v0.16.4/server/src/lib/proxy.ts) [0.16.4 package-lock](https://github.com/tashfeenahmed/freellmapi/blob/v0.16.4/package-lock.json)。
+通过7890下载npm tarball并以registry SHA-512校验后，在同机Node 20.18.1、同一OVH URL对照：手工SOCKS5H→TLS GET为HTTP 200；
+`socks-proxy-agent@8.0.4`不加自定义lookup为200、加callback `callback(null, hostname, 4)`为`ECONNRESET`；
+`@10.0.0`加/不加callback均`ECONNRESET`；
+`@10.1.0`不加callback为200、加callback又`ECONNRESET`。
+Kilo TLS握手在这些代理Agent下可完成。
+该A/B高置信指向FreeLLMAPI的SOCKS client/dependency/lookup组合，而非用户忘配7890或Chronicle endpoint/auth错误；
+仍未在实际Electron进程替换依赖后复验，故不称为已修复。
+FreeLLMAPI当前`main`源码仍传lookup callback且lockfile仍锁10.0.0；
+v0.16.6 release notes没有该传输路径修复，盲目升级不解决已证实的代码形状问题。
+[当前main proxy.ts](https://github.com/tashfeenahmed/freellmapi/blob/main/server/src/lib/proxy.ts) [v0.16.6 release notes](https://github.com/tashfeenahmed/freellmapi/releases)。
+本轮未更改FreeLLMAPI安装文件/DB，也未启动第二个代理服务。
+后续若要让真实Campaign路由稳定，需要FreeLLMAPI在`socks5h`上移除/调整该lookup override并更新依赖，或用户授权做可回滚的本地应用补丁；
+在此之前不重复发自动回退模型请求。
 
-2026-10-21 实机复核修订先前Node依赖A/B结论：FreeLLMAPI 0.16.4的SOCKS代码形状和`socks-proxy-agent@10.0.0`仍是待查线索，但外部Node A/B不足以归因Electron应用。用户已授权后，我临时替换app.asar验证移除lookup并加入10.1.0对应的SOCKS事件行为：FreeLLMAPI启动、`/api/ping`成功，应用原生SOCKS探测到Kilo模型目录HTTP 200/2.922秒；真实Host模型探针`TestResults/20261021-192550`仍由OVH请求在约3.1秒报`socket hang up`，FreeLLMAPI冷却后以HTTP 429结束，未产生有效决策或Native动作。恢复原app.asar并核对原始SHA-256 `C0FFD46F35B1AB2A1F6B79B54AFC18B40D626718198C69E236199736E5E5D3EF`，原版成功重启；同一原生SOCKS探测在未修改版本对Kilo也HTTP 200/2.008秒。因此该候选补丁未证明改进，也未解释OVH推理断连，不保留。FreeLLMAPI最终安装文件、数据库及SOCKS5H设置均原样；该模型源站/额度冷却原因仍未判定，不再反复调用真实模型或改代理协议。
+2026-10-21 实机复核修订先前Node依赖A/B结论：FreeLLMAPI 0.16.4的SOCKS代码形状和`socks-proxy-agent@10.0.0`仍是待查线索，但外部Node A/B不足以归因Electron应用。
+用户已授权后，我临时替换app.asar验证移除lookup并加入10.1.0对应的SOCKS事件行为：FreeLLMAPI启动、`/api/ping`成功，应用原生SOCKS探测到Kilo模型目录HTTP 200/2.922秒；
+真实Host模型探针`TestResults/20261021-192550`仍由OVH请求在约3.1秒报`socket hang up`，FreeLLMAPI冷却后以HTTP 429结束，未产生有效决策或Native动作。
+恢复原app.asar并核对原始SHA-256 `C0FFD46F35B1AB2A1F6B79B54AFC18B40D626718198C69E236199736E5E5D3EF`，原版成功重启；
+同一原生SOCKS探测在未修改版本对Kilo也HTTP 200/2.008秒。
+因此该候选补丁未证明改进，也未解释OVH推理断连，不保留。
+FreeLLMAPI最终安装文件、数据库及SOCKS5H设置均原样；
+该模型源站/额度冷却原因仍未判定，不再反复调用真实模型或改代理协议。
 
-FreeLLMAPI模型路由现况（2026-10-21/22）：原版FreeLLMAPI的单请求`gpt-oss-20b→ovh/gpt-oss-20b`曾一次成功完成JSON Schema分类（`TestResults/20261021-194935`，891/160 tokens，Native 0）；后续EYC测试多次遭OVH socket hang-up及冷却池429。Kilo `north-mini-code`路由曾报告pool exhausted/Soonest reset约64,800秒且无上游尝试（`201348`）。最近`TestResults/20261022-035531`从原版`save002`隔离副本重试EYC：首次OVH连接约3秒socket hang-up，85秒后重试再次断连，FreeLLMAPI返回Retry-After=585的冷却/耗尽错误；0个有效模型决定或Native动作，最终画面录像568/568帧覆盖、源存档未变且进程/副本清理通过。这再次确认`/v1/models`的`ready`不是实时推理可用证明；原版FreeLLMAPI通用SOCKS探测可通，具体模型上游仍间歇不可用。Host已实现按`/v1/models.supported_parameters`选择JSON Schema或工具调用的适配（见下段），Kilo策略尚待冷却解除后的真实模型验证；不再重试OVH直连以免重复启动游戏和消耗配额。
+FreeLLMAPI模型路由现况（2026-10-21/22）：原版FreeLLMAPI的单请求`gpt-oss-20b→ovh/gpt-oss-20b`曾一次成功完成JSON Schema分类（`TestResults/20261021-194935`，891/160 tokens，Native 0）；
+后续EYC测试多次遭OVH socket hang-up及冷却池429。
+Kilo `north-mini-code`路由曾报告pool exhausted/Soonest reset约64,800秒且无上游尝试（`201348`）。
+最近`TestResults/20261022-035531`从原版`save002`隔离副本重试EYC：首次OVH连接约3秒socket hang-up，85秒后重试再次断连，FreeLLMAPI返回Retry-After=585的冷却/耗尽错误；
+0个有效模型决定或Native动作，最终画面录像568/568帧覆盖、源存档未变且进程/副本清理通过。
+这再次确认`/v1/models`的`ready`不是实时推理可用证明；
+原版FreeLLMAPI通用SOCKS探测可通，具体模型上游仍间歇不可用。
+Host已实现按`/v1/models.supported_parameters`选择JSON Schema或工具调用的适配（见下段），Kilo策略尚待冷却解除后的真实模型验证；
+不再重试OVH直连以免重复启动游戏和消耗配额。
 
-最新隔离EYC模型整合运行`TestResults/20261022-034131`从`save002`逐字节副本开始，非自然新战役门禁。真实`gpt-oss-20b→ovh/gpt-oss-20b`完成4个有效决策（5757/637输入/输出tokens）：识别EYC目标、在俘虏wait页按Native菜单启用`resume`、再选择原版`menu_captivity_end_prison_escape/mno_continue`，捕俘恢复子流程核验MainHero返回自由MapState后，Journal调度器选择未完成Gold目标。原版time自然推进使CampaignDay 91080.216→91082.894，Gold仍32、Renown 5、Party 0；后续Gold子流程请求遇OVH socket hang-up及FreeLLMAPI 429/Retry-After=85，在任何Gold Native动作前安全失败。因此此次证明真实模型可把EYC识别→原版俘虏恢复→目标重规划串接，并未证明金币子目标完成或整个Quest完成。6分左右连续视频100%覆盖/1826帧，Timeline已索引且MP4清理；source save hash前后相同，临时副本和Session/游戏进程清理通过。正式两个自然StoryMode新战役门禁仍未运行/通过。
+最新隔离EYC模型整合运行`TestResults/20261022-034131`从`save002`逐字节副本开始，非自然新战役门禁。
+真实`gpt-oss-20b→ovh/gpt-oss-20b`完成4个有效决策（5757/637输入/输出tokens）：识别EYC目标、在俘虏wait页按Native菜单启用`resume`、再选择原版`menu_captivity_end_prison_escape/mno_continue`，捕俘恢复子流程核验MainHero返回自由MapState后，Journal调度器选择未完成Gold目标。
+原版time自然推进使CampaignDay 91080.216→91082.894，Gold仍32、Renown 5、Party 0；
+后续Gold子流程请求遇OVH socket hang-up及FreeLLMAPI 429/Retry-After=85，在任何Gold Native动作前安全失败。
+因此此次证明真实模型可把EYC识别→原版俘虏恢复→目标重规划串接，并未证明金币子目标完成或整个Quest完成。
+6分左右连续视频100%覆盖/1826帧，Timeline已索引且MP4清理；
+source save hash前后相同，临时副本和Session/游戏进程清理通过。
+正式两个自然StoryMode新战役门禁仍未运行/通过。
 
-2026-10-22 为FreeLLMAPI直接模型增加能力感知的结构化输出选择：在模型目录声明`response_format`时保留原严格JSON Schema；若没有它但同时声明`tools`和`tool_choice`，Host改用单一强制`submit_chronicle_decision`函数格式并把arguments交给原有本地`NormalizeDecision`/当前动作目录验证，工具绝不被当作Native动作执行；两类能力都缺失时在推理前安全拒绝。FreeLLMAPI `auto`路由仍发送JSON Schema，以让路由器避开不兼容候选。此选择遵循LangChain正式文档中ProviderStrategy优先、无原生结构化输出时使用ToolStrategy并校验输出的模式；Kilo官方OpenAI-compatible Gateway文档确认`tool_choice`接受`required`。[LangChain Structured output](https://docs.langchain.com/oss/python/langchain/structured-output) [Kilo Gateway API Reference](https://kilo.ai/docs/gateway/api-reference)。本机FreeLLMAPI目录读取到`north-mini-code`有`tools/tool_choice`、无`response_format`，`thedrummer-behemoth-128b-v3-q4-k-m`无两者；`TestResults/20261022-032333` AgentHostPackage通过（Provider合同178项，模型调用0、Native命令0），覆盖工具调用构造/解析、目录外动作拒绝和无兼容格式时的请求前失败。Kilo路由池当前报告耗尽，故此新协议尚未由真实模型或游戏实测；不能据此宣称EYC完成。
+2026-10-22 为FreeLLMAPI直接模型增加能力感知的结构化输出选择：在模型目录声明`response_format`时保留原严格JSON Schema；
+若没有它但同时声明`tools`和`tool_choice`，Host改用单一强制`submit_chronicle_decision`函数格式并把arguments交给原有本地`NormalizeDecision`/当前动作目录验证，工具绝不被当作Native动作执行；
+两类能力都缺失时在推理前安全拒绝。
+FreeLLMAPI `auto`路由仍发送JSON Schema，以让路由器避开不兼容候选。
+此选择遵循LangChain正式文档中ProviderStrategy优先、无原生结构化输出时使用ToolStrategy并校验输出的模式；
+Kilo官方OpenAI-compatible Gateway文档确认`tool_choice`接受`required`。
+[LangChain Structured output](https://docs.langchain.com/oss/python/langchain/structured-output) [Kilo Gateway API Reference](https://kilo.ai/docs/gateway/api-reference)。
+本机FreeLLMAPI目录读取到`north-mini-code`有`tools/tool_choice`、无`response_format`，`thedrummer-behemoth-128b-v3-q4-k-m`无两者；
+`TestResults/20261022-032333` AgentHostPackage通过（Provider合同178项，模型调用0、Native命令0），覆盖工具调用构造/解析、目录外动作拒绝和无兼容格式时的请求前失败。
+Kilo路由池当前报告耗尽，故此新协议尚未由真实模型或游戏实测；
+不能据此宣称EYC完成。
 
 2026-10-21 20:35Z同一时段请求形态对照：Windows `curl` 经`socks5h://127.0.0.1:7890`访问OVH `/v1/models` GET返回HTTP 200/TLS约0.46秒；向同一主机发送一个极小、无密钥的JSON-Schema `/v1/chat/completions` POST则以curl exit 56（`server closed abruptly (missing close_notify)`）、HTTP 000结束。它说明推理POST故障不只出现在FreeLLMAPI Node包装器，但因GET与POST行为不同，仍不能判定是星辰SOCKS代理、OVH匿名推理入口还是两者交互；没有模型响应/可用量回执、没有修改代理或应用设置，也没有游戏动作。只凭公开`/models`成功不得宣称推理可用。
 
-2026-10-21 20:35Z同一时段请求形态对照：Windows `curl` 经`socks5h://127.0.0.1:7890`访问OVH `/v1/models` GET返回HTTP 200/TLS约0.46秒；向同一主机发送一个极小、无密钥的JSON-Schema `/v1/chat/completions` POST则以curl exit 56（`server closed abruptly (missing close_notify)`）、HTTP 000结束。紧接着不带`response_format`的最小chat POST通过同一SOCKS5H返回HTTP 200、模型`gpt-oss-20b`；这提示请求格式或相关上游/代理路径可能影响推理请求，但只是一组单次对照，不能推翻先前JSON-Schema成功样本，也不能确定责任在星辰代理、OVH还是具体格式。未改应用/代理设置、未用该文本探针对游戏发Native动作；下一条实测优先用Host现有的直接Kilo `north-mini-code` required-tool-call路径，待Kilo池冷却窗口自然恢复后再做。
+2026-10-21 20:35Z同一时段请求形态对照：Windows `curl` 经`socks5h://127.0.0.1:7890`访问OVH `/v1/models` GET返回HTTP 200/TLS约0.46秒；
+向同一主机发送一个极小、无密钥的JSON-Schema `/v1/chat/completions` POST则以curl exit 56（`server closed abruptly (missing close_notify)`）、HTTP 000结束。
+紧接着不带`response_format`的最小chat POST通过同一SOCKS5H返回HTTP 200、模型`gpt-oss-20b`；
+这提示请求格式或相关上游/代理路径可能影响推理请求，但只是一组单次对照，不能推翻先前JSON-Schema成功样本，也不能确定责任在星辰代理、OVH还是具体格式。
+未改应用/代理设置、未用该文本探针对游戏发Native动作；
+下一条实测优先用Host现有的直接Kilo `north-mini-code` required-tool-call路径，待Kilo池冷却窗口自然恢复后再做。
 
 2026-10-22当前用户配置路由的无游戏Host烟测（`TestResults/20261022-044617`）用于核查先前失败是否由Harness操作造成：配置读取为FreeLLMAPI `nvidiallama-3.2-11b-vision`，目录快照为`ready`，真实请求随即由该custom/NVIDIA路由返回HTTP 429，响应明确为“Free model capacity exhausted”，`Retry-After=90`，没有模型决策/token或Native命令。Host在有界截止时间内拒绝等待该90秒，不启动游戏；FreeLLMAPI同秒日志以相同路由记录容量错误。故这次失败可归因于该免费上游当时容量/限额，而不是游戏输入、Bannerlord启动或已执行动作；模型目录`ready`仍不足以保证下一次推理可用。由于只收到上游限流响应，不能据此彻底证明所有请求字段均适配，但此错误不是格式拒绝（没有400/422或format错误证据）。
 
-同日继续对照时发现Provider smoke的默认输出预算确有Harness偏差：一次性Host入口的默认值为256 tokens，而游戏MCM profile默认1024；`Test-AgentHostProvider.ps1`现仅在用户未显式配置时使用1024，并在结果回执记录有效额度，`Check-Docs.ps1`增加防回归检查。修后真实配置模型再测：NVIDIA Llama路由曾由服务端实际交付`nvidia/nemotron-3-super-120b`而非所请求模型，在1024 tokens下仍等待到上游120秒超时；临时选取的Nemotron 3.5 Lightning也实际交付`nvidia/nemotron-3.5-lightning-nim`并正好耗尽1024输出tokens，形成截断，均无Native命令。此前可用的Mistral Nemo在一次OVH socket断连/冷却后成功回包（872/33 tokens），但把“完成当前可见村庄工具委托”误分为`supported-map-arrival`，所以Provider smoke失败。结论需分开：256额度是已修正的Harness偏差；模型身份漂移、120秒超时、输出截断和错误目标分类分别是当前远端响应证据，尚未证明由同一根因造成；本轮没有启动游戏或执行Native动作，不据此宣布产品决策链通过。
+同日继续对照时发现Provider smoke的默认输出预算确有Harness偏差：一次性Host入口的默认值为256 tokens，而游戏MCM profile默认1024；
+`Test-AgentHostProvider.ps1`现仅在用户未显式配置时使用1024，并在结果回执记录有效额度，`Check-Docs.ps1`增加防回归检查。
+修后真实配置模型再测：NVIDIA Llama路由曾由服务端实际交付`nvidia/nemotron-3-super-120b`而非所请求模型，在1024 tokens下仍等待到上游120秒超时；
+临时选取的Nemotron 3.5 Lightning也实际交付`nvidia/nemotron-3.5-lightning-nim`并正好耗尽1024输出tokens，形成截断，均无Native命令。
+此前可用的Mistral Nemo在一次OVH socket断连/冷却后成功回包（872/33 tokens），但把“完成当前可见村庄工具委托”误分为`supported-map-arrival`，所以Provider smoke失败。
+结论需分开：256额度是已修正的Harness偏差；
+模型身份漂移、120秒超时、输出截断和错误目标分类分别是当前远端响应证据，尚未证明由同一根因造成；
+本轮没有启动游戏或执行Native动作，不据此宣布产品决策链通过。
 
-把目标分类上下文改为中性描述后，同一路由Mistral Nemo的复验仍选择`unsupported`，理由误称`VillageNeedsToolsIssue`不受支持；这说明去掉“地图到达”偏置本身不足以解决分类。对照较早的同一Mistral Nemo Provider烟测`TestResults/20261016-030055`曾以420输入/20输出tokens正确识别同一中文村庄委托；当时分类Prompt只列2个支持范围，现在已扩展为7个。无法仅凭跨日期样本把错误归因于Prompt长度，但将全部7个场景同时塞入每次分类并无必要：Host现改为只按当前`allowedControls`动态附加对应范围说明，并为地图/村庄委托/建家任务增加中文语义例子；离线Host合同要求说明范围与允许控制严格一致。随后的`TestResults/20261022-051502`真实响应（448/39 tokens）仍把中文目标判为unsupported，理由称模型无法从goal-only observation确认“具体可见任务”。这暴露另一个输入契约矛盾：分类本应只判断目标类型，当前Native任务/地点可用性由Host在分类后核实；现已把这个边界写进共享Prompt，并在村庄范围说明“支持类型”不等于“当前已观察到Issue”。offline package合同通过。将该范围/可用性区别进一步加入Prompt后的Provider smoke `TestResults/20261022-051835`未取得模型决定：OVH返回HTTP429、Retry-After=75且不适配180秒以内剩余预算，因此没有Native动作，也没有得到该新Prompt的实模结果。该提示修正仍未获实模验证，不代表分类已解决。
+把目标分类上下文改为中性描述后，同一路由Mistral Nemo的复验仍选择`unsupported`，理由误称`VillageNeedsToolsIssue`不受支持；
+这说明去掉“地图到达”偏置本身不足以解决分类。
+对照较早的同一Mistral Nemo Provider烟测`TestResults/20261016-030055`曾以420输入/20输出tokens正确识别同一中文村庄委托；
+当时分类Prompt只列2个支持范围，现在已扩展为7个。
+无法仅凭跨日期样本把错误归因于Prompt长度，但将全部7个场景同时塞入每次分类并无必要：Host现改为只按当前`allowedControls`动态附加对应范围说明，并为地图/村庄委托/建家任务增加中文语义例子；
+离线Host合同要求说明范围与允许控制严格一致。
+随后的`TestResults/20261022-051502`真实响应（448/39 tokens）仍把中文目标判为unsupported，理由称模型无法从goal-only observation确认“具体可见任务”。
+这暴露另一个输入契约矛盾：分类本应只判断目标类型，当前Native任务/地点可用性由Host在分类后核实；
+现已把这个边界写进共享Prompt，并在村庄范围说明“支持类型”不等于“当前已观察到Issue”。
+offline package合同通过。
+将该范围/可用性区别进一步加入Prompt后的Provider smoke `TestResults/20261022-051835`未取得模型决定：OVH返回HTTP429、Retry-After=75且不适配180秒以内剩余预算，因此没有Native动作，也没有得到该新Prompt的实模结果。
+该提示修正仍未获实模验证，不代表分类已解决。
 
-`TestResults/20261022-052725`窄Native PostBattle实机切片通过：在隔离的`AgentBridgeLifecycle`测试存档中，Native hostile looter encounter→`str_order_attack`→BattleSimulation→`battlePause`/`battleSkip`/`battleFinish`完整发生；Native telemetry记录MainHero Renown 20.000→22.562（Contribution 1600，奖励2.562）。之后Native自动进入PartyState/Loot，8名可转移俘虏全部加入MainParty，再经`partyScreenDone`进入InventoryState/Loot；为验证界面/按钮，本夹具战后特意调用仅测试用`seedVisualLoot`放入9件可见物品（不代表自然掉落），`inventoryTakeAll`清空后Native返回Map。战斗流程CampaignDay保持91077.379，源夹具未变、游戏进程已停止；整段MP4完整索引为Contact Sheet/Timeline后删除，保留5张Native截图和事件序列。这个结果确认当前1.4.8 Native坐镇战斗确实能产生Renown，且PostBattle两层原版清理顺序已可自动执行；它不是LLM决策、自然战利品或EYC长程任务通过的证据。
+`TestResults/20261022-052725`窄Native PostBattle实机切片通过：在隔离的`AgentBridgeLifecycle`测试存档中，Native hostile looter encounter→`str_order_attack`→BattleSimulation→`battlePause`/`battleSkip`/`battleFinish`完整发生；
+Native telemetry记录MainHero Renown 20.000→22.562（Contribution 1600，奖励2.562）。
+之后Native自动进入PartyState/Loot，8名可转移俘虏全部加入MainParty，再经`partyScreenDone`进入InventoryState/Loot；
+为验证界面/按钮，本夹具战后特意调用仅测试用`seedVisualLoot`放入9件可见物品（不代表自然掉落），`inventoryTakeAll`清空后Native返回Map。
+战斗流程CampaignDay保持91077.379，源夹具未变、游戏进程已停止；
+整段MP4完整索引为Contact Sheet/Timeline后删除，保留5张Native截图和事件序列。
+这个结果确认当前1.4.8 Native坐镇战斗确实能产生Renown，且PostBattle两层原版清理顺序已可自动执行；
+它不是LLM决策、自然战利品或EYC长程任务通过的证据。
 
 `TestResults/20261022-053115`TradeTransactions窄Native测试通过：从Town原版Trade菜单取当前`olives` Goods报价，在TradeVM中先draft再用原版`tradeConfirm`提交，验证金币959→950买入1件后950→957卖回、玩家该商品1→0、市场库存165→166；Native交易金额为7，CampaignDay保持91077.401175且timeControl仍为Stop。测试还验证过期报价/错误库存侧/超预算草案在Native确认前拒绝并回滚；`AgentBridgeLifecycle.sav`源SHA-256前后相同，游戏进程已停止。它确认AI可用的原版交易事务能净增7第纳尔，但样例是已有人物/市场状态的单笔夹具，不证明自然EYC中拥有可卖商品、能持续到2000或真实模型会选对报价。
 
-随后`TestResults/20261022-054303`用`mistral-nemo`在`save002`的逐字节EYC临时副本尝试完整父循环（不是自然新战役门禁）：真实模型正确识别原版EYC目标，并选择`resume`；随后的Native观察显示Captivity `Stop→UnstoppablePlay`，CampaignDay从91080.216自然走到91083.454，期间Vanilla自动出现`menu_captivity_end_prison_escape`；引擎截图可见原版“继续……”选项。模型等待未作弊快进世界，但在该新Continuation选项需要下一次决定时，OVH `Mistral-Nemo-Instruct-2407`发生socket hang-up，FreeLLMAPI进入cooldown，Host按HTTP429/Retry-After75有界重试后安全失败（Retry 1次、等待85.004秒、无可用模型决定）。因此该切片没有通过下一原版选项/释放、没有任何EYC子目标进展；收据记录目标循环决策1、Native动作0、总耗时416.532秒（含真实Campaign等待）、源档hash不变、临时Clone/游戏/session均清理、失败画面/完整视觉覆盖保留且MP4已删除。这里支持“分类与自动等待衔接到原版逃离菜单”的部分结论；Native继续动作、完整自治与最后失败根因仍未判定为模型/上游不可用，不应称为EYC通过。
+随后`TestResults/20261022-054303`用`mistral-nemo`在`save002`的逐字节EYC临时副本尝试完整父循环（不是自然新战役门禁）：真实模型正确识别原版EYC目标，并选择`resume`；
+随后的Native观察显示Captivity `Stop→UnstoppablePlay`，CampaignDay从91080.216自然走到91083.454，期间Vanilla自动出现`menu_captivity_end_prison_escape`；
+引擎截图可见原版“继续……”选项。
+模型等待未作弊快进世界，但在该新Continuation选项需要下一次决定时，OVH `Mistral-Nemo-Instruct-2407`发生socket hang-up，FreeLLMAPI进入cooldown，Host按HTTP429/Retry-After75有界重试后安全失败（Retry 1次、等待85.004秒、无可用模型决定）。
+因此该切片没有通过下一原版选项/释放、没有任何EYC子目标进展；
+收据记录目标循环决策1、Native动作0、总耗时416.532秒（含真实Campaign等待）、源档hash不变、临时Clone/游戏/session均清理、失败画面/完整视觉覆盖保留且MP4已删除。
+这里支持“分类与自动等待衔接到原版逃离菜单”的部分结论；
+Native继续动作、完整自治与最后失败根因仍未判定为模型/上游不可用，不应称为EYC通过。
 
 同日后续按最新分类契约复验Provider smoke：`TestResults/20261022-053525`实际模型`mistral-nemo→ovh/Mistral-Nemo-Instruct-2407`用496/33输入/输出tokens将中文“完成当前可见的村庄工具委托”正确分类为`supported-village-tools-quest`，返回`json_schema`，模型调用1、Native命令0。它验证的是当前Prompt可正确分类该目标类型，并不证明地图Host下发行动或任务完成；前一段`051835`的429记录仍解释了当时失败，但不再代表最新提示词未实测。
 
-最新真实模型长循环切片`TestResults/20261022-054303`仍从隔离的既有EYC `save002`副本开始，不是自然新战役门禁。Mistral Nemo先分类为`supported-establish-your-clan`，随后选择原版显式`resume`；Native地图从`prisoner_wait`/Stop进入`UnstoppablePlay`并自然推进约3.238 Campaign days，随后出现原版`menu_captivity_end_prison_escape`（游戏截图显示“继续……”）。在需要下一次决策选择该当前原版继续选项时，OVH再次socket hang-up、FreeLLMAPI把路由置cooldown并回429/Retry-After=75；Host安全失败前没有成功释放或推进EYC子目标。Gate收据显示模型行动决策1、Native objective actions 0、Gold32/Renown5/Party0，Clone removed、`save002` hash相同、Bannerlord/Host/session clean；失败屏截图和Timeline保留，MP4已移除。此轮证明真实模型分类→显式时间选择→Native自然等待→转入原版逃离继续菜单能够衔接，但最后一个Provider故障阻断选择；它不证明Captivity通过、目标推进或原版Quest完成。
+最新真实模型长循环切片`TestResults/20261022-054303`仍从隔离的既有EYC `save002`副本开始，不是自然新战役门禁。
+Mistral Nemo先分类为`supported-establish-your-clan`，随后选择原版显式`resume`；
+Native地图从`prisoner_wait`/Stop进入`UnstoppablePlay`并自然推进约3.238 Campaign days，随后出现原版`menu_captivity_end_prison_escape`（游戏截图显示“继续……”）。
+在需要下一次决策选择该当前原版继续选项时，OVH再次socket hang-up、FreeLLMAPI把路由置cooldown并回429/Retry-After=75；
+Host安全失败前没有成功释放或推进EYC子目标。
+Gate收据显示模型行动决策1、Native objective actions 0、Gold32/Renown5/Party0，Clone removed、`save002` hash相同、Bannerlord/Host/session clean；
+失败屏截图和Timeline保留，MP4已移除。
+此轮证明真实模型分类→显式时间选择→Native自然等待→转入原版逃离继续菜单能够衔接，但最后一个Provider故障阻断选择；
+它不证明Captivity通过、目标推进或原版Quest完成。
 
 2026-10-22自然StoryMode同进程MCM Host首轮真实评测（`TestResults/20261022-163050`、`164200`、`173044`、`174157`、`175650`、`172047`）：测试经原版`StoryModeNewGame`、原版角色创建及玩家允许的兄长Skip/确认开始，无保存/回载；可见截图/视频覆盖训练场对话、Skip、确认、自然激活EYC后的首个MapState地点菜单。现有MCM Host Start确实可在这个自然Campaign/同一Bannerlord PID启动本轮自包含Win64 Host，读取当前EYC并向FreeLLMAPI发真实模型决策。已观察的有效决策包括`Mistral Small 3.2`/`Mistral Nemo`分类为EYC、选择未完成的Companion或Renown目标；**未执行任何Native目标动作，EYC四项目标未推进，Host/游戏正常清理且正式档不变**，不能把这一门禁切片称为AI游戏已跑通。
 
-该评测发现并修正一个玩家入口/观察理解缺口：Tutorial Skip后首个MapState不是无面板的自由地图，而是`training_field_menu`；原生状态同时标`encounterActive=true`，其`encounteredPartyId`与`currentSettlementId`同为`tutorial_training_field`，画面显示可用原版“离开”选项。错误的`encounterActive`布尔判断使Companion子流程把训练场当作劫匪/战斗而中止（164200，Native动作0）。共同状态判定`AgentHostCampaignStateFacts`现仅在当前Native地点菜单ID与地点ID匹配时将它归为location menu，真正遭遇仍保持fail-closed；GoldSale/Recruitment/Companion/BattleSimulation各自只允许当前原版Leave菜单动作退出。另一次模型在Renown路线下返回了`MenuId="MenuId"`的无效menuSelect提案（173044）：BattleSimulation原菜单Leave动作目录此前只列参数名，未枚举当前真实`MenuId`/enabled Leave `OptionId`；现schema精确绑定可见菜单和可用退出选项，并由Package合同测试覆盖。
+该评测发现并修正一个玩家入口/观察理解缺口：Tutorial Skip后首个MapState不是无面板的自由地图，而是`training_field_menu`；
+原生状态同时标`encounterActive=true`，其`encounteredPartyId`与`currentSettlementId`同为`tutorial_training_field`，画面显示可用原版“离开”选项。
+错误的`encounterActive`布尔判断使Companion子流程把训练场当作劫匪/战斗而中止（164200，Native动作0）。
+共同状态判定`AgentHostCampaignStateFacts`现仅在当前Native地点菜单ID与地点ID匹配时将它归为location menu，真正遭遇仍保持fail-closed；
+GoldSale/Recruitment/Companion/BattleSimulation各自只允许当前原版Leave菜单动作退出。
+另一次模型在Renown路线下返回了`MenuId="MenuId"`的无效menuSelect提案（173044）：BattleSimulation原菜单Leave动作目录此前只列参数名，未枚举当前真实`MenuId`/enabled Leave `OptionId`；
+现schema精确绑定可见菜单和可用退出选项，并由Package合同测试覆盖。
 
 后续把`auto`路由临时换成只读模型目录中`execution_status=ready`且此前真实回复过的`mistral-nemo`，避免每个请求自动扇出到多家不稳定Provider；但同程第一次仍在需要BattleSimulation Native菜单决策时遭FreeLLMAPI该路由TLS/socket断连，Host以`provider-timeout`停止（175650；Native动作0）。自动路由运行的FreeLLMAPI日志亦显示多家socket hang-up及45秒fallback超时，故这是清楚的上游/传输失败收据，不是修复后菜单动作被真实模型拒绝的证据。`AgentHostPackage`在`TestResults/20261022-180417`已重新Build并通过共享状态/四个目标子流程的自检；真实模型尚未用一份成功返回的menuSelect再次实测该修复。下一次只在FreeLLMAPI有实际可用响应时重跑该单个自然起点切片，不重复provider smoke、不回退本地模型，也不注入动作。
 
-`TestResults/20261022-181338`进一步做直连路由对照：MCM配置保持原样，Harness临时让同进程Host使用只读目录中`ready`的`gpt-oss-20b`，实际FreeLLMAPI返回一条EYC分类成功（921/138 tokens，`supported-establish-your-clan`）；下一次同一路由请求约3秒`socket hang up`后由FreeLLMAPI返回HTTP429/Retry-After=85，Host的单请求90秒总Deadline判定该等待无法放进剩余期限并fail-closed。结果为模型决定1、Native objective actions 0、无任务/资源变化，Campaign/Host/session/临时包均清理、自然存档未保存。这个样本不是Quest/Host执行器失败，也没验证训练场Leave动作；与`175650`的Mistral-Nemo“分类+选择Renown后第三请求TLS断开”并列，证据定位为当前上游路由不稳定。测试专用模型覆盖不改MCM全局设置，避免默认`auto`的fallback fan-out；目前最小真实状态只能推进到EYC分类，状态菜单后的首个Native动作等待后续可用Provider再实测。
+`TestResults/20261022-181338`进一步做直连路由对照：MCM配置保持原样，Harness临时让同进程Host使用只读目录中`ready`的`gpt-oss-20b`，实际FreeLLMAPI返回一条EYC分类成功（921/138 tokens，`supported-establish-your-clan`）；
+下一次同一路由请求约3秒`socket hang up`后由FreeLLMAPI返回HTTP429/Retry-After=85，Host的单请求90秒总Deadline判定该等待无法放进剩余期限并fail-closed。
+结果为模型决定1、Native objective actions 0、无任务/资源变化，Campaign/Host/session/临时包均清理、自然存档未保存。
+这个样本不是Quest/Host执行器失败，也没验证训练场Leave动作；
+与`175650`的Mistral-Nemo“分类+选择Renown后第三请求TLS断开”并列，证据定位为当前上游路由不稳定。
+测试专用模型覆盖不改MCM全局设置，避免默认`auto`的fallback fan-out；
+目前最小真实状态只能推进到EYC分类，状态菜单后的首个Native动作等待后续可用Provider再实测。
 
-同一阶段再用Harness生命周期临时指定的`gpt-oss-20b`做自然新StoryMode直连对照，`TestResults/20261022-181338`只收到一条真实模型分类（921输入/138输出tokens，route `ovh/gpt-oss-20b`，结果`supported-establish-your-clan`）。第二次模型请求约3秒`socket hang up`，FreeLLMAPI随后向Host返回HTTP429/Retry-After=85；单次90秒deadline判定退避装不进剩余时间而fail-closed，未进入目标规划或任何Native objective action；Campaign/正式存档状态未变、Host/游戏/session/本轮唯一GUID包均清理。模型目录`ready`仍非实时调用可用证明。`AgentHostPackage`合同`TestResults/20261022-181136`已覆盖Native训练场地点Leave目录及精确参数枚举，Package自检通过；直接模型覆盖仅属于本轮Harness，不更改MCM `auto`设置。现在真实MCM Host已经能从自然首个MapState启动，实际只观察到EYC范围分类，没有目标后验/Native动作成功证据；下一次待上游有可用响应时窄测同一入口，不重复打模型，也不把此切片称作门禁通过。
+同一阶段再用Harness生命周期临时指定的`gpt-oss-20b`做自然新StoryMode直连对照，`TestResults/20261022-181338`只收到一条真实模型分类（921输入/138输出tokens，route `ovh/gpt-oss-20b`，结果`supported-establish-your-clan`）。
+第二次模型请求约3秒`socket hang up`，FreeLLMAPI随后向Host返回HTTP429/Retry-After=85；
+单次90秒deadline判定退避装不进剩余时间而fail-closed，未进入目标规划或任何Native objective action；
+Campaign/正式存档状态未变、Host/游戏/session/本轮唯一GUID包均清理。
+模型目录`ready`仍非实时调用可用证明。
+`AgentHostPackage`合同`TestResults/20261022-181136`已覆盖Native训练场地点Leave目录及精确参数枚举，Package自检通过；
+直接模型覆盖仅属于本轮Harness，不更改MCM `auto`设置。
+现在真实MCM Host已经能从自然首个MapState启动，实际只观察到EYC范围分类，没有目标后验/Native动作成功证据；
+下一次待上游有可用响应时窄测同一入口，不重复打模型，也不把此切片称作门禁通过。
 
-2026-10-22 训练场出口顺序校正：此前一次窄试验`TestResults/20261022-193820`在兄长对话尚未结束时过早模拟Native Leave Area，触发`MissionGauntletConversationView.OnConversationEndOneShot`空引用崩溃。报告栈已保存；根因是Harness输入时机，而非有证据指向原版正常玩家流程。Harness现按可见的“点击继续”节奏每1.5秒推进一次原版对话，只有ConversationManager已结束且Mission仍留在训练场时才考虑Tab/Leave Area兜底。修正后`TestResults/20261022-194410`通过：新建StoryMode、兄长Skip/确认、两次原生对话推进、EYC自然激活、首个`training_field_menu`上的原版Leave选项离开；CampaignDay/Stop档位保持、无保存、录像覆盖与7张引擎截图有效、无崩溃、进程清理。第二次`TestResults/20261022-195530`同样通过，并在结构化收据中明确记为`brother-dialogue-path-no-tab-fallback`。两次成功样本都没有使用Tab兜底，所以训练场Tab分支仍未单独验证。测试只证明跳过教程开局和该地点菜单的Native退出，不是AI/真实模型或EYC完成通过。
+2026-10-22 训练场出口顺序校正：此前一次窄试验`TestResults/20261022-193820`在兄长对话尚未结束时过早模拟Native Leave Area，触发`MissionGauntletConversationView.OnConversationEndOneShot`空引用崩溃。
+报告栈已保存；
+根因是Harness输入时机，而非有证据指向原版正常玩家流程。
+Harness现按可见的“点击继续”节奏每1.5秒推进一次原版对话，只有ConversationManager已结束且Mission仍留在训练场时才考虑Tab/Leave Area兜底。
+修正后`TestResults/20261022-194410`通过：新建StoryMode、兄长Skip/确认、两次原生对话推进、EYC自然激活、首个`training_field_menu`上的原版Leave选项离开；
+CampaignDay/Stop档位保持、无保存、录像覆盖与7张引擎截图有效、无崩溃、进程清理。
+第二次`TestResults/20261022-195530`同样通过，并在结构化收据中明确记为`brother-dialogue-path-no-tab-fallback`。
+两次成功样本都没有使用Tab兜底，所以训练场Tab分支仍未单独验证。
+测试只证明跳过教程开局和该地点菜单的Native退出，不是AI/真实模型或EYC完成通过。
 
 2026-10-22自然StoryMode真实Host复测`TestResults/20261022-200511`：新Campaign经兄长官方Skip、教程自然结束、EYC原版激活；同一PID的MCM Host启动并通过版本/Campaign连接。首个模型请求使用经先前实际请求确认的远端`gpt-oss-20b`，FreeLLMAPI最终路由`ovh`返回HTTP429/Retry-After=85秒，单请求90秒Deadline判断冷却不可容纳后安全停止。Host收据确认模型/输入/输出tokens均0、真实决定0、Native目标动作0；不应归因提示词或Host动作。自然StoryMode进程无崩溃、未保存、源/正式存档清单不变，Host/游戏/session/临时包清理；连续录像831/831帧并提取24关键帧后删除MP4。`/v1/models`的`ready`不等于上游当前可用；本轮不重试同一受限路线，不使用本地模型。门禁仍未推进任何EYC目标，也没有真实模型规划证据。
 
-2026-10-22远端模型切片与Harness反馈改进：`TestResults/20261022-203216`、`205226` 使用FreeLLMAPI NVIDIA远端路由后，真实模型各成功两步：把目标分类为`supported-establish-your-clan`，随后选择当前未完成的`partySize`目标（合计约1.9k prompt tokens/135 completion tokens）；但PartySize Native子流程未执行动作并返回通用失败。`205226`暴露Lifecycle收据在序列化`objectiveRuns`时抛`SerializationException`，导致关键Native子流程原因丢失。现将子流程终止原因/失败码/动作数/决策数以无自由文本的`objective-subflow-result`事件写进现有`AgentHostProgress.jsonl`，同时把顶层`decisions`映射为收据的`decisionCount`；并把Campaign自动启动标记改为一次性，避免每帧重复日志。Build、Docs与`AgentHostPackage`合同测试`TestResults/20261022-214809`通过，但尚未用一次成功的真实模型/子流程再次实测新版诊断收据。
+2026-10-22远端模型切片与Harness反馈改进：`TestResults/20261022-203216`、`205226` 使用FreeLLMAPI NVIDIA远端路由后，真实模型各成功两步：把目标分类为`supported-establish-your-clan`，随后选择当前未完成的`partySize`目标（合计约1.9k prompt tokens/135 completion tokens）；
+但PartySize Native子流程未执行动作并返回通用失败。
+`205226`暴露Lifecycle收据在序列化`objectiveRuns`时抛`SerializationException`，导致关键Native子流程原因丢失。
+现将子流程终止原因/失败码/动作数/决策数以无自由文本的`objective-subflow-result`事件写进现有`AgentHostProgress.jsonl`，同时把顶层`decisions`映射为收据的`decisionCount`；
+并把Campaign自动启动标记改为一次性，避免每帧重复日志。
+Build、Docs与`AgentHostPackage`合同测试`TestResults/20261022-214809`通过，但尚未用一次成功的真实模型/子流程再次实测新版诊断收据。
 
 后续服务商轮换与诊断修正：`TestResults/20261022-220746`显示Google `gemini-2.5-flash`虽在本机目录标`ready`，实际上游返回HTTP404 `model_not_found`；`TestResults/20261022-221321`和`222136`再次对NVIDIA路由得到429/Retry-After=85秒，均0模型tokens/0Native动作，`212742`的Poolside/OpenRouter也为429。`AgentHostProgress.jsonl`现在有无自由文本的`objective-subflow-result`条目，Lifecycle收据不再尝试把复杂`objectiveRuns`数组强制序列化，从而避免诊断器自身出错；`AgentHostPackage`合同测试通过。当前上游不可用/模型目录过时，未宣称任务推进。下次优先选择一个真实能回答的远端路由，在真实Game/Host任务中验证新收据并修正partySize child failure；不调用本地模型或无法审计的`auto`。
 
@@ -840,9 +1629,27 @@ FreeLLMAPI模型路由现况（2026-10-21/22）：原版FreeLLMAPI的单请求`g
 
 FreeLLMAPI官方目录将NVIDIA Llama 3.2 11B Vision和Poolside Laguna S 2.1分别列为NVIDIA与OpenRouter远端服务，可复核来源：[NVIDIA模型目录](https://freellmapi.co/free-nvidia-api) · [Poolside Laguna S 2.1](https://freellmapi.co/uk/model/poolside-laguna-s-2-1)。
 
-2026-10-23本机FreeLLMAPI目录核验：通用`gpt-oss-20b`当前为`ready`，但已知真实调用曾被路由到OVH并受到429限制；独立模型ID `openai-gpt-oss-20b` 当前为`needsKey/no_key`且不可用。FreeLLMAPI产品页把此独立ID标为Groq提供的GPT-OSS 20B路线（[模型页](https://freellmapi.co/uk/model/gpt-oss-20b)）；它不是本地推理，也不同于通用`gpt-oss-20b`。即使该路线尚不可用，本机目录已声明其context_length为128000、supported_parameters包括`response_format`；因此路由可用后Host应走既有JSON Schema结构化响应协议，而非tool-call回退。Harness的自然StoryMode真实模型参数现允许显式选择该ID，避免测试意外落回OVH/自动多路由；在Groq key添加并且目录确认此路由可用前，不请求该模型。目录就绪仍不等于实时上游调用成功；首个真实请求应在自然StoryMode Host循环内完成，而非另做一次模型烟测。
+2026-10-23本机FreeLLMAPI目录核验：通用`gpt-oss-20b`当前为`ready`，但已知真实调用曾被路由到OVH并受到429限制；
+独立模型ID `openai-gpt-oss-20b` 当前为`needsKey/no_key`且不可用。
+FreeLLMAPI产品页把此独立ID标为Groq提供的GPT-OSS 20B路线（[模型页](https://freellmapi.co/uk/model/gpt-oss-20b)）；
+它不是本地推理，也不同于通用`gpt-oss-20b`。
+即使该路线尚不可用，本机目录已声明其context_length为128000、supported_parameters包括`response_format`；
+因此路由可用后Host应走既有JSON Schema结构化响应协议，而非tool-call回退。
+Harness的自然StoryMode真实模型参数现允许显式选择该ID，避免测试意外落回OVH/自动多路由；
+在Groq key添加并且目录确认此路由可用前，不请求该模型。
+目录就绪仍不等于实时上游调用成功；
+首个真实请求应在自然StoryMode Host循环内完成，而非另做一次模型烟测。
 
-自然新战役模型切片`TestResults/20261023-001618`用固定NVIDIA远端ID完成原版StoryMode创建、兄长Tutorial Skip、EYC自然激活、首个MapState Host就绪；5张Native开局截图不同，连续引擎录屏821/821帧，录像缩帧检查后删除，Bannerlord/Host/临时档清理且没有存档写入。Native初始EYC为活动，MainHero 1000 Gold/20 Renown、MainParty 1/20。Host真实首请求收到FreeLLMAPI HTTP429/Retry-After=85，`retryAfterFitsDeadline=false`；本轮90秒单请求期限剩余预算不适合再等85秒重试，所以0有效模型决策、0模型token、0 Native目标动作，最后安全失败。收据的`provider-http-error`及真实上游429定位为服务商容量/速率限制，不是Host/原版教程交互失败；本轮没有评估模型决策质量或Native目标执行。基于明确Retry-After证据，FreshStoryMode实测的Harness默认单请求期限已从90调整为120秒，与Host上限一致，使约85秒退避可容纳一次重试；这不是循环拉长超时，超过剩余预算的退避仍会立即停止。下一次待Groq专属路由加入后优先用自然EYC首请求验证，也会验证这个有界重试合同。
+自然新战役模型切片`TestResults/20261023-001618`用固定NVIDIA远端ID完成原版StoryMode创建、兄长Tutorial Skip、EYC自然激活、首个MapState Host就绪；
+5张Native开局截图不同，连续引擎录屏821/821帧，录像缩帧检查后删除，Bannerlord/Host/临时档清理且没有存档写入。
+Native初始EYC为活动，MainHero 1000 Gold/20 Renown、MainParty 1/20。
+Host真实首请求收到FreeLLMAPI HTTP429/Retry-After=85，`retryAfterFitsDeadline=false`；
+本轮90秒单请求期限剩余预算不适合再等85秒重试，所以0有效模型决策、0模型token、0 Native目标动作，最后安全失败。
+收据的`provider-http-error`及真实上游429定位为服务商容量/速率限制，不是Host/原版教程交互失败；
+本轮没有评估模型决策质量或Native目标执行。
+基于明确Retry-After证据，FreshStoryMode实测的Harness默认单请求期限已从90调整为120秒，与Host上限一致，使约85秒退避可容纳一次重试；
+这不是循环拉长超时，超过剩余预算的退避仍会立即停止。
+下一次待Groq专属路由加入后优先用自然EYC首请求验证，也会验证这个有界重试合同。
 
 `TestResults/20261023-002830`在该120秒预算下复测：自然StoryMode skip/MapState/EYC激活、Host就绪、5个开局截图与1852/1852录像帧、Build/AgentHostPackage均通过；Bannerlord干净退出、无崩溃、未写入存档。NVIDIA真实请求先收到HTTP429/Retry-After=85，Host按FreeLLMAPI明确头部等待85006ms并实际发起一次重试；第二次响应的Retry-After=585无法装入剩余期限，按设计安全失败。总结果仍为0模型token/0决策/0 Native动作；已验证的是Harness有界重试行为，不是模型或EYC任务进度，持续失败根因仍是该免费上游当前限流/耗尽。
 
@@ -850,127 +1657,514 @@ FreeLLMAPI官方目录将NVIDIA Llama 3.2 11B Vision和Poolside Laguna S 2.1分�
 
 `TestResults/20261023-004523`的Free Router自然StoryMode实测首轮终于得到有效模型响应：真实模型经`kilo/openrouter/free`返回`supported-establish-your-clan`分类，1602输入/277输出tokens。HostReady后该请求用了约100秒，120秒测试自动停止窗仅留下约20秒；在后续目标选择前触发`host-stop-requested`，所以0 Native动作/0 EYC进度。Skip、自然激活、开局视觉、Build/Package均通过，1847帧覆盖，游戏无崩溃/存档写入且进程清理。该失败是测试窗口过短，不是模型分类/Provider失败。为允许真实模型继续从分类到目标规划与首条Native动作，FreshStoryMode测试窗口现扩大为Host Ready后360秒、整轮外限600秒，单次请求仍120秒；这只扩大Harness有界诊断范围，不改变玩家MCM启动后的正常Agent寿命，也不等于完整Quest门禁通过。
 
-`TestResults/20261023-005450`在扩窗后再次测free-router，模型首请求改为`provider-tool-call-missing`，没有决策/Token/Native动作；之前该路由能成功给一次分类，但再次调用未返回必需工具调用，说明此动态free-router的工具协议一致性不足。`TestResults/20261023-010053`换到支持JSON Schema的通用`gpt-oss-20b`后，FreeLLMAPI经`ovh/gpt-oss-20b`真实完成`supported-establish-your-clan`分类（921/149 tokens）；随后第二个请求遇HTTP429/Retry-After=85，但在约50秒等待/调用后已不够120秒重试预算，0 Native动作。新证据说明将Host窗口扩到360秒仍不够；FreshStoryMode测试专用默认单请求期限现进一步调整为180秒，保留360秒总观察窗和600秒外限，让明确85秒退避有机会重试。还需通过下一次自然EYC实测验证长窗下是否能完成目标选择及原版动作，不把分类成功计为游戏进展。
+`TestResults/20261023-005450`在扩窗后再次测free-router，模型首请求改为`provider-tool-call-missing`，没有决策/Token/Native动作；
+之前该路由能成功给一次分类，但再次调用未返回必需工具调用，说明此动态free-router的工具协议一致性不足。
+`TestResults/20261023-010053`换到支持JSON Schema的通用`gpt-oss-20b`后，FreeLLMAPI经`ovh/gpt-oss-20b`真实完成`supported-establish-your-clan`分类（921/149 tokens）；
+随后第二个请求遇HTTP429/Retry-After=85，但在约50秒等待/调用后已不够120秒重试预算，0 Native动作。
+新证据说明将Host窗口扩到360秒仍不够；
+FreshStoryMode测试专用默认单请求期限现进一步调整为180秒，保留360秒总观察窗和600秒外限，让明确85秒退避有机会重试。
+还需通过下一次自然EYC实测验证长窗下是否能完成目标选择及原版动作，不把分类成功计为游戏进展。
 
-`TestResults/20261023-010655`用全新StoryMode与`gpt-oss-20b`检验扩大窗口：原版教程Skip及确认被选择，RGL最后记录`I called EndMission`；持续引擎录像约4分钟处仍显示训练场项目列表和原版“按住Tab离开训练场”提示。此轮未出现`fresh-storymode-e2e-ready`，也没有启动Host；同时Harness缺少Skip后第一张MapState快照，因此不能仅以这个收据判定原版EYC未激活或训练场出口的确切Native状态。**已证实的Harness问题**是Host启动门禁硬性等待EYC活动Quest，违反Issue #130“从首个稳定Campaign MapState接管”的边界；下一步改为记录首个Skip后MapState并在那里启动真实Host。若Native此时尚无EYC Quest，仅当当前Native状态明确是Tutorial已结束的`tutorial_training_field`/`training_field_menu`且`training_field_leave`确实启用时，允许模型从当前菜单选项中作一次原版`menuSelect`，随后重新读状态；不满足这些精确条件就安全停止，不用Harness预设选项或时钟宏。该区分经新自然实测复核后再收口。
+`TestResults/20261023-010655`用全新StoryMode与`gpt-oss-20b`检验扩大窗口：原版教程Skip及确认被选择，RGL最后记录`I called EndMission`；
+持续引擎录像约4分钟处仍显示训练场项目列表和原版“按住Tab离开训练场”提示。
+此轮未出现`fresh-storymode-e2e-ready`，也没有启动Host；
+同时Harness缺少Skip后第一张MapState快照，因此不能仅以这个收据判定原版EYC未激活或训练场出口的确切Native状态。
+**已证实的Harness问题**是Host启动门禁硬性等待EYC活动Quest，违反Issue #130“从首个稳定Campaign MapState接管”的边界；
+下一步改为记录首个Skip后MapState并在那里启动真实Host。
+若Native此时尚无EYC Quest，仅当当前Native状态明确是Tutorial已结束的`tutorial_training_field`/`training_field_menu`且`training_field_leave`确实启用时，允许模型从当前菜单选项中作一次原版`menuSelect`，随后重新读状态；
+不满足这些精确条件就安全停止，不用Harness预设选项或时钟宏。
+该区分经新自然实测复核后再收口。
 
-`TestResults/20261023-015624`验证首MapState接管后，Native自然已激活EYC；真实`gpt-oss-20b→ovh/gpt-oss-20b`完成目标分类（927/138 tokens）和目标选择（`gold`，1088/204 tokens），之后GoldSale在首个Native动作前以`gold-sale-free-map-required`停止。源码差异定位为GoldSale入口的`IsFreeCampaignMap`仍把原版训练场地点菜单的`encounterActive=true`直接当敌对遭遇拒绝；共享`AgentHostCampaignStateFacts`已经能以当前菜单/定居点身份区分真实地点菜单和敌队。现将这个GoldSale前置检查改用共享事实分类，并在AgentHostPackage增加“training_field_menu 是合法Campaign Map入口而真实敌对encounter仍拒绝”的回归。此次没有执行Native动作或推进Journal；下一次同一自然起点应验证模型选择当前启用的`training_field_leave`后重新观察并继续Gold目标，而不是把模型目标选择误报成金币进展。Skip后MapState/Quest激活状态由新的视频关键帧和Native快照同时记录；在Quest未激活的变体中，第一地图模型接管与训练场Leave bootstrap也有单独的严格状态/选项门禁。
+`TestResults/20261023-015624`验证首MapState接管后，Native自然已激活EYC；
+真实`gpt-oss-20b→ovh/gpt-oss-20b`完成目标分类（927/138 tokens）和目标选择（`gold`，1088/204 tokens），之后GoldSale在首个Native动作前以`gold-sale-free-map-required`停止。
+源码差异定位为GoldSale入口的`IsFreeCampaignMap`仍把原版训练场地点菜单的`encounterActive=true`直接当敌对遭遇拒绝；
+共享`AgentHostCampaignStateFacts`已经能以当前菜单/定居点身份区分真实地点菜单和敌队。
+现将这个GoldSale前置检查改用共享事实分类，并在AgentHostPackage增加“training_field_menu 是合法Campaign Map入口而真实敌对encounter仍拒绝”的回归。
+此次没有执行Native动作或推进Journal；
+下一次同一自然起点应验证模型选择当前启用的`training_field_leave`后重新观察并继续Gold目标，而不是把模型目标选择误报成金币进展。
+Skip后MapState/Quest激活状态由新的视频关键帧和Native快照同时记录；
+在Quest未激活的变体中，第一地图模型接管与训练场Leave bootstrap也有单独的严格状态/选项门禁。
 
-后续自然实测`TestResults/20261023-014459`验证新的第一MapState捕获：skip后首个MapState `menuId=training_field_menu`、settled截图通过，Native EYC Quest此时已经active，故未实际调用bootstrap菜单动作；真实模型完成EYC scope分类（927/140 tokens，`ovh/gpt-oss-20b` JSON Schema），第二个目标规划请求遇OVH HTTP429。Host先按85秒重试一次，随后又收到Retry-After=75；这次约50秒的上游调用+85秒等待耗尽180秒单请求预算，未作Native动作。无崩溃/存档写入、录像完整覆盖、进程清理。为让下次请求有足够预算验证一个约50–100秒模型响应后再等85秒，本地FreshStoryMode单请求默认再从180增至300秒，仍受Host Ready后360秒和整轮600秒双上限约束。下次需要获得模型目标选择与训练场菜单的原版`menuSelect`证据；该回合当前尚未证明菜单bootstrap在自然运行中实际触发。
+后续自然实测`TestResults/20261023-014459`验证新的第一MapState捕获：skip后首个MapState `menuId=training_field_menu`、settled截图通过，Native EYC Quest此时已经active，故未实际调用bootstrap菜单动作；
+真实模型完成EYC scope分类（927/140 tokens，`ovh/gpt-oss-20b` JSON Schema），第二个目标规划请求遇OVH HTTP429。
+Host先按85秒重试一次，随后又收到Retry-After=75；
+这次约50秒的上游调用+85秒等待耗尽180秒单请求预算，未作Native动作。
+无崩溃/存档写入、录像完整覆盖、进程清理。
+为让下次请求有足够预算验证一个约50–100秒模型响应后再等85秒，本地FreshStoryMode单请求默认再从180增至300秒，仍受Host Ready后360秒和整轮600秒双上限约束。
+下次需要获得模型目标选择与训练场菜单的原版`menuSelect`证据；
+该回合当前尚未证明菜单bootstrap在自然运行中实际触发。
 
 `TestResults/20261023-015624`在新的首MapState接管路径里，Host收到Native training-field menu和活动EYC；真实模型完成分类（927/138）与Gold目标选择（1088/204）。Gold子流程没有再以`gold-sale-free-map-required`提前中止，说明它已进入后续流程；但第三次远端请求没有在Host的360秒自动停止前返回，收据为`host-stop-requested`、累计0个Native动作。此样本证明初始菜单分类和目标调度，不证明离开训练场、售卖物品或Journal进度。按照这次实际约239秒的两次有效决策加一次未完成的下一请求，FreshStoryMode Harness专用Host窗口从360扩为600秒，单请求300秒、整个启动/清理外限900秒；这仍只是有限实测窗口，产品自身不启用这个自动停止值。
 
 `TestResults/20261023-025858`用全新StoryMode和Mistral Nemo再次验证首MapState接管：真实模型完成EYC目标分类、选择Renown、从当前训练场菜单调用原版`training_field_leave`（1个Native动作）；附近无敌队，BattleSimulation依当前观察安全返回`no-safe-action`，父循环再选择Gold。Gold子流程在0动作下以`gold-sale-free-map-required`失败，FreshStoryMode总收据为4次决策、5279输入/151输出token，仍未推进任何Journal目标。引擎关键帧`TestResults/20261023-025858/Temp/TimelineFrames/036-menuSelect-MapState---after.jpg`显示离开训练场后的原版“通知”弹窗，只有一个“好”按钮。
 
-原弹窗的精确Native类型并非未知：独立自然StoryMode原版菜单测试`TestResults/20261022-194410/Temp/FreshStoryMode.native-menu-leave.json`捕获到同一训练场退出后的PostAction状态：`context.inquiryOpen=true`、`supported=true`、`kind=YesNoInquiry`、标题“通知”、单个显示且启用的affirmative“好”、negative隐藏、`pauseGameActiveState=false`；正文说明离开训练场后发现受伤者并收到与“涅雷采斯的愚行”有关的物件，EYC保持活动。原测试结果log却输出InquiryOpen=false/Inquiry=null，因为FreshCampaignObserver的PostAction快照本来就是扁平`{..., context:...}`，汇总代码错误读取成`.state.context`；该错误掩盖了已经保存的准确证据。这是Harness报告路径错误，不是游戏/Native observer遗漏。现在汇总改读`.context`，Docs静态检查防止回退；尚未重跑该游戏阶段来生成修正后的新收据。游戏/源存档未崩溃或写入，原收据进程清理通过。
+原弹窗的精确Native类型并非未知：独立自然StoryMode原版菜单测试`TestResults/20261022-194410/Temp/FreshStoryMode.native-menu-leave.json`捕获到同一训练场退出后的PostAction状态：`context.inquiryOpen=true`、`supported=true`、`kind=YesNoInquiry`、标题“通知”、单个显示且启用的affirmative“好”、negative隐藏、`pauseGameActiveState=false`；
+正文说明离开训练场后发现受伤者并收到与“涅雷采斯的愚行”有关的物件，EYC保持活动。
+原测试结果log却输出InquiryOpen=false/Inquiry=null，因为FreshCampaignObserver的PostAction快照本来就是扁平`{..., context:...}`，汇总代码错误读取成`.state.context`；
+该错误掩盖了已经保存的准确证据。
+这是Harness报告路径错误，不是游戏/Native observer遗漏。
+现在汇总改读`.context`，Docs静态检查防止回退；
+尚未重跑该游戏阶段来生成修正后的新收据。
+游戏/源存档未崩溃或写入，原收据进程清理通过。
 
-针对该失配，AgentHost现在在任一EYC子流程失败且fresh Native状态明确显示当前Inquiry仍打开时（包括该子流程此前已执行动作的情况），读取当前可支持的Campaign Map `YesNoInquiry`，把真实标题/文案/可见且启用的按钮交给模型；一回合只允许模型选择当前可见/启用的 affirmative/negative，Host隐藏并绑定Native一次性token，调用已存在的原版`respondInquiry` handler后重新观察。若弹窗未关闭、转成另一种模态、当前Map/活动EYC状态不成立或模型选择无效，则安全失败；只有确认已回到无模态、无遭遇且EYC仍active的MapState后，父循环才重新读取Journal并发起全新的父级模型规划，永不自动恢复/重放已经失败的子流程。受限进度轨迹现另存当前modal类型/标题/截断文案/按钮可见性与时钟暂停标志，排除一次性token；Host自检覆盖单按钮通知、隐藏token、隐藏选项拒绝、未知Inquiry类型关闭失败，以及此前已执行一动作后，弹窗回调成功并由新父级模型计划恢复、没有自动重放旧子流程。
+针对该失配，AgentHost现在在任一EYC子流程失败且fresh Native状态明确显示当前Inquiry仍打开时（包括该子流程此前已执行动作的情况），读取当前可支持的Campaign Map `YesNoInquiry`，把真实标题/文案/可见且启用的按钮交给模型；
+一回合只允许模型选择当前可见/启用的 affirmative/negative，Host隐藏并绑定Native一次性token，调用已存在的原版`respondInquiry` handler后重新观察。
+若弹窗未关闭、转成另一种模态、当前Map/活动EYC状态不成立或模型选择无效，则安全失败；
+只有确认已回到无模态、无遭遇且EYC仍active的MapState后，父循环才重新读取Journal并发起全新的父级模型规划，永不自动恢复/重放已经失败的子流程。
+受限进度轨迹现另存当前modal类型/标题/截断文案/按钮可见性与时钟暂停标志，排除一次性token；
+Host自检覆盖单按钮通知、隐藏token、隐藏选项拒绝、未知Inquiry类型关闭失败，以及此前已执行一动作后，弹窗回调成功并由新父级模型计划恢复、没有自动重放旧子流程。
 
-`TestResults/20261023-032442`AgentHostPackage Build/ProviderContract SelfTest与打包通过（195个Host契约场景；早期父循环测试覆盖失败子流程0动作时处理Inquiry再规划）。随后发现只允许0动作失败会卡住“子流程先执行一动作、后被模态挡住”的同类恢复路径，因此父循环现可在任意子流程失败后检查fresh Native `inquiryOpen`；仅当模型响应、Native handler完成、Map/EYC无模态状态重读确认后，父循环才请求新的规划决定，绝不自动重放旧子流程。`TestResults/20261023-142313`AgentHostPackage Build/ProviderContract SelfTest与打包通过（195个场景），其中Fake集成样例模拟原子流程已经提交1个动作后弹出单按钮Inquiry，再由模型fake选择affirmative；Host调用Native responder、重读EYC/Map、发起新的父模型计划后才二次调用目标执行器，完整动作计数3，且无隐式重放。该结果仍是假Native/Fake Provider集成，不是FreeLLMAPI真实模型处理这条训练场通知的游戏内证据；Gold或其它Journal目标仍无进展。
+`TestResults/20261023-032442`AgentHostPackage Build/ProviderContract SelfTest与打包通过（195个Host契约场景；
+早期父循环测试覆盖失败子流程0动作时处理Inquiry再规划）。
+随后发现只允许0动作失败会卡住“子流程先执行一动作、后被模态挡住”的同类恢复路径，因此父循环现可在任意子流程失败后检查fresh Native `inquiryOpen`；
+仅当模型响应、Native handler完成、Map/EYC无模态状态重读确认后，父循环才请求新的规划决定，绝不自动重放旧子流程。
+`TestResults/20261023-142313`AgentHostPackage Build/ProviderContract SelfTest与打包通过（195个场景），其中Fake集成样例模拟原子流程已经提交1个动作后弹出单按钮Inquiry，再由模型fake选择affirmative；
+Host调用Native responder、重读EYC/Map、发起新的父模型计划后才二次调用目标执行器，完整动作计数3，且无隐式重放。
+该结果仍是假Native/Fake Provider集成，不是FreeLLMAPI真实模型处理这条训练场通知的游戏内证据；
+Gold或其它Journal目标仍无进展。
 
-`TestResults/20261023-033645`重新运行`FreshStoryModeNativeMenuLeaveEvaluation`，确认报告提取修正真实生效：6张原版引擎帧/训练场Skip和Exit动作均通过，post-action汇总现在显示`InquiryOpenAfter=true`、标题“通知”、受支持`YesNoInquiry`、affirmative“好”可见且启用、negative不可见、`pauseGameActiveState=false`；CampaignDay前后91077.374962、clock Stop、EYC仍active，源存档未写入、Bannerlord/BLSE进程清理通过。原版快照保留其运行内token以支持精确Native回放，但简化summary只输出玩家可见文本和按钮，不复制一次性token。`TestResults/20261023-035447`再次通过相同窄阶段，确认摘要继续报告InquiryOpenAfter=true且不含token字段。两次测试都不调用模型，只验证原版可见状态和Harness提取，不等于真实模型已处理Inquiry。
+`TestResults/20261023-033645`重新运行`FreshStoryModeNativeMenuLeaveEvaluation`，确认报告提取修正真实生效：6张原版引擎帧/训练场Skip和Exit动作均通过，post-action汇总现在显示`InquiryOpenAfter=true`、标题“通知”、受支持`YesNoInquiry`、affirmative“好”可见且启用、negative不可见、`pauseGameActiveState=false`；
+CampaignDay前后91077.374962、clock Stop、EYC仍active，源存档未写入、Bannerlord/BLSE进程清理通过。
+原版快照保留其运行内token以支持精确Native回放，但简化summary只输出玩家可见文本和按钮，不复制一次性token。
+`TestResults/20261023-035447`再次通过相同窄阶段，确认摘要继续报告InquiryOpenAfter=true且不含token字段。
+两次测试都不调用模型，只验证原版可见状态和Harness提取，不等于真实模型已处理Inquiry。
 
-`TestResults/20261023-040924`首次尝试模型外的真实Native Inquiry回调集成：从另一个全新StoryMode自然教程skip与原版training-field leave开始，在新观察到的活动单按钮`YesNoInquiry`上通过`Agent-Cli.ps1 respondInquiry`仅提交当前affirmative token。**首次尝试因没有CLI session而安全失败**；没有Native命令发送，session/命令文件保持清洁。修正后`TestResults/20261023-041539`通过：原版`SingleQueryPopUpVM.ExecuteAffirmativeAction`回执完成，fresh MapState证实Inquiry关闭且仍是原版EYC活动任务，CampaignDay仍91077.375/clock Stop，整次期间无LLM调用、无正式存档写入、游戏进程/测试session/命令响应文件均清理。结果仅验证Native Handler/CLI桥，不能计为真实模型动作或EYC目标进展；下一次带可用FreeLLMAPI模型的Campaign评测应从真实弹窗让AgentHost自行选按钮，并验证父循环确实回到Gold目标。
+`TestResults/20261023-040924`首次尝试模型外的真实Native Inquiry回调集成：从另一个全新StoryMode自然教程skip与原版training-field leave开始，在新观察到的活动单按钮`YesNoInquiry`上通过`Agent-Cli.ps1 respondInquiry`仅提交当前affirmative token。
+**首次尝试因没有CLI session而安全失败**；
+没有Native命令发送，session/命令文件保持清洁。
+修正后`TestResults/20261023-041539`通过：原版`SingleQueryPopUpVM.ExecuteAffirmativeAction`回执完成，fresh MapState证实Inquiry关闭且仍是原版EYC活动任务，CampaignDay仍91077.375/clock Stop，整次期间无LLM调用、无正式存档写入、游戏进程/测试session/命令响应文件均清理。
+结果仅验证Native Handler/CLI桥，不能计为真实模型动作或EYC目标进展；
+下一次带可用FreeLLMAPI模型的Campaign评测应从真实弹窗让AgentHost自行选按钮，并验证父循环确实回到Gold目标。
 
 `FreshStoryModeNativeInquiryResponseEvaluation`首次通过后，当前一项原版入口链已经由同一新战役串接证明：教程skip→自然EYC激活→Native training-field Leave→原版通知Inquiry→产品协议`respondInquiry`→Native affirmative callback→Inquiry关闭。Harness之所以首次因`No active Chronicle Agent session`在发送前失败，是CLI客户端要求的session文件与无AgentHost的原版Native集成测试不匹配；新阶段只在无活动/无现存session时CreateNew一个绑定当前Bannerlord PID的临时CLI桥session，用生产的同一`Agent-Cli.ps1`与Native Protocol调用，然后按PID精确清理，不启AgentHost、不请求LLM。测试记录已验证回调后Quest仍active、EYC仍active、时钟/日期不变。它验证桥接的可执行性，真实AI自主选择与父循环恢复仍未验证。
 
-`TestResults/20261023-033959`以同一真实Mistral Nemo远端路由重跑FreshStoryMode Model Evaluation：官方新StoryMode/教程skip/EYC自然激活、稳定MapState Host接管与完整录像均通过；Host第一条模型请求约211秒后以`provider-http-error`终止，0输入/输出tokens、0模型决策、0 Native动作，FreeLLMAPI receipt为HTTP 502、`lastSuccessfulRoute=ovh`、唯一fallback尝试`ovh/Mistral-Nemo-Instruct-2407 key1`在`json_schema`格式失败。FreeLLMAPI随后目录把`mistral-nemo`标成`exhausted`。这不是Agent对弹窗的拒绝或原生动作问题：请求没有返回到Host以生成决策，真实弹窗仍留在原版Inquiry状态；不重放这次失败请求。Campaign无崩溃/保存，Bannerlord/Host清理通过。当前可继续先用另一个明确远端FreeLLMAPI模型做单次provider诊断；目录`ready`仍不能视作上游已可用。
+`TestResults/20261023-033959`以同一真实Mistral Nemo远端路由重跑FreshStoryMode Model Evaluation：官方新StoryMode/教程skip/EYC自然激活、稳定MapState Host接管与完整录像均通过；
+Host第一条模型请求约211秒后以`provider-http-error`终止，0输入/输出tokens、0模型决策、0 Native动作，FreeLLMAPI receipt为HTTP 502、`lastSuccessfulRoute=ovh`、唯一fallback尝试`ovh/Mistral-Nemo-Instruct-2407 key1`在`json_schema`格式失败。
+FreeLLMAPI随后目录把`mistral-nemo`标成`exhausted`。
+这不是Agent对弹窗的拒绝或原生动作问题：请求没有返回到Host以生成决策，真实弹窗仍留在原版Inquiry状态；
+不重放这次失败请求。
+Campaign无崩溃/保存，Bannerlord/Host清理通过。
+当前可继续先用另一个明确远端FreeLLMAPI模型做单次provider诊断；
+目录`ready`仍不能视作上游已可用。
 
-为先确认是否只有Nemo不可用，在不启动游戏的情况下各做一次受限`AgentHostProvider`真实远端诊断：`TestResults/20261023-034916`指定`gpt-oss-20b`、`20261023-035105`指定`gpt-oss-120b`，两次FreeLLMAPI都返回HTTP429/Retry-After=85，`lastSuccessfulRoute=ovh`；0模型决策/0token/0Native命令。FreeLLMAPI目录中gpt-oss-20b随后也变为`exhausted`，gpt-oss-120b虽仍标ready但这次真实请求同样限流。再对独立`kilo-auto`做一次provider smoke（`TestResults/20261023-035715`），网关直接返回HTTP429、`freeLlmApiPoolExhausted=true`和RetryAfter 43200秒，仍0 tokens/0决策/0动作。由此当前证据足以停止继续试打这些被实测限流的路由，而不是通过重复调用消耗上游配额：本轮被验证的多个“ready”远端别名实际落到OVH或耗尽的FreeLLMAPI池并返回502/429，真实LLM下一步应等待服务状态恢复或使用已在FreeLLMAPI添加的其它Provider key。当前没有证据证明Groq key已添加，不能假定其路由可用。
+为先确认是否只有Nemo不可用，在不启动游戏的情况下各做一次受限`AgentHostProvider`真实远端诊断：`TestResults/20261023-034916`指定`gpt-oss-20b`、`20261023-035105`指定`gpt-oss-120b`，两次FreeLLMAPI都返回HTTP429/Retry-After=85，`lastSuccessfulRoute=ovh`；
+0模型决策/0token/0Native命令。
+FreeLLMAPI目录中gpt-oss-20b随后也变为`exhausted`，gpt-oss-120b虽仍标ready但这次真实请求同样限流。
+再对独立`kilo-auto`做一次provider smoke（`TestResults/20261023-035715`），网关直接返回HTTP429、`freeLlmApiPoolExhausted=true`和RetryAfter 43200秒，仍0 tokens/0决策/0动作。
+由此当前证据足以停止继续试打这些被实测限流的路由，而不是通过重复调用消耗上游配额：本轮被验证的多个“ready”远端别名实际落到OVH或耗尽的FreeLLMAPI池并返回502/429，真实LLM下一步应等待服务状态恢复或使用已在FreeLLMAPI添加的其它Provider key。
+当前没有证据证明Groq key已添加，不能假定其路由可用。
 
 FreeLLMAPI 官方 CLI 现已从 Electron Local Storage 的本地 dashboard session（仅进程内、未显示/持久化）完成只读`keys list`调用：提供商key状态为`custom`/`aihorde`/`ovh`/`kilo`/`google`，其中Groq未配置。`/api/models`安全元数据表有9个Groq模型行，其中GPT-OSS 20B/120B已注册但`keyCount=0`；本次实际尝试的模型即使目录标`ready`也返回限流。FreeLLMAPI AIHorde候选确认为35行但没有Tools能力；安装版Host的结构化输出预检不支持这类模型，不能假装它们可以驱动当前Agent，也未添加未验证的纯文本JSON绕过。
 
 另有当前`custom`端点指向BlockRun，配置了Nemotron、Cohere North和Poolside等6个远端模型，均声明支持Tools。BlockRun官方模型目录把Nemotron 3.5 Lightning列在免费模型中；不过`TestResults/20261023-144206`真实FreeLLMAPI请求收到HTTP429/Retry-After=85，等待85秒后`144805`重测仍同样429，因此不再重复调用。该情况定位为BlockRun当前按IP/上游限流，而非本地模型或Host动作错误。[BlockRun官方免费/计费模型目录](https://blockrun.ai/docs/api-reference/models)
 
-`TestResults/20261024-024213`首次从自然新建StoryMode运行真实模型Host接管，Preflight/Build/Smoke/AgentHostPackage、教程skip、EYC自然激活、连续录像、无存档写入与进程清理均通过。`gpt-oss-20b→ovh/gpt-oss-20b`第一条EYC范围分类成功（923输入/144输出token）；随后在原版“通知”弹窗前/弹窗处的下一决策请求，FreeLLMAPI本机日志记录OVH `socket hang up`（约3秒），随后FallbackLoop报告该路由cooldown且未再尝试上游；Host按重试策略之后的请求仍遇同类断连，最终`provider-http-error`、共1条有效模型决策、0条Native动作。该运行只确认真实模型理解了EYC目标类型，**没有**证明模型按按钮、抵达棕色龙旗卡片、提交家族名或完成BannerEditor。33帧索引图显示地图“通知/好”弹窗停留；本次没有触发棕色卡片。游戏无崩溃/正式存档修改，录像3126/3126帧覆盖后已压缩为索引图并删除视频。失败证据来自FreeLLMAPI app log中与同一时间窗/模型对应的OVH断连及路由冷却，归因在上游/代理调用链而非Native交互逻辑；在该模型恢复前不重复同一路由。用户已确认棕色卡片显示时地图时间与队伍移动停止，这和`PauseActiveState=true`契约一致。
+`TestResults/20261024-024213`首次从自然新建StoryMode运行真实模型Host接管，Preflight/Build/Smoke/AgentHostPackage、教程skip、EYC自然激活、连续录像、无存档写入与进程清理均通过。
+`gpt-oss-20b→ovh/gpt-oss-20b`第一条EYC范围分类成功（923输入/144输出token）；
+随后在原版“通知”弹窗前/弹窗处的下一决策请求，FreeLLMAPI本机日志记录OVH `socket hang up`（约3秒），随后FallbackLoop报告该路由cooldown且未再尝试上游；
+Host按重试策略之后的请求仍遇同类断连，最终`provider-http-error`、共1条有效模型决策、0条Native动作。
+该运行只确认真实模型理解了EYC目标类型，**没有**证明模型按按钮、抵达棕色龙旗卡片、提交家族名或完成BannerEditor。
+33帧索引图显示地图“通知/好”弹窗停留；
+本次没有触发棕色卡片。
+游戏无崩溃/正式存档修改，录像3126/3126帧覆盖后已压缩为索引图并删除视频。
+失败证据来自FreeLLMAPI app log中与同一时间窗/模型对应的OVH断连及路由冷却，归因在上游/代理调用链而非Native交互逻辑；
+在该模型恢复前不重复同一路由。
+用户已确认棕色卡片显示时地图时间与队伍移动停止，这和`PauseActiveState=true`契约一致。
 
-换用`mistral-small-3.2-24b`的自然纵切`TestResults/20261024-025912`则是另一种失配：Preflight/Build/Smoke/Package及远端调用都通过，真实模型用两次有效决策分类EYC并选择Companion目标；之后Host于0 Native动作以`provider-control-unavailable`终止，日志中模型第3次响应成功到达FreeLLMAPI但未写进有效决策trace，因此其具体返回控制值未知，不能凭错误码断言模型原因。连续帧与Native开局快照确认玩家仍在`training_field_menu`、EYC已active、唯一合理的当前离开入口`training_field_leave`可用。代码核对发现父循环仅在Quest未active时调用`AgentHostStoryModeBootstrapLoop`，而原版Skip可先激活EYC、同时仍停在训练场菜单；于是模型被错误地放进Companion子流程处理一个开局Bootstrap。另一个源代码事实是该Companion prompt允许输出`control=stop`，但当前allowedControls只有移动等待时才列`observeAgain`，Host只在列表中验证的control会通过；这与`provider-control-unavailable`相符但不证明第3次究竟返回了哪个control。修复方向：目标规划前，对精确training-field MapState无论EYC已active与否，都让模型通过专用Native menuSelect完成训练场Leave；后验必须同时确认已离开训练场且原版EYC仍active。随后再进入StoryMode姓名/旗帜设置和目标循环。此轮未发生崩溃、存档写入或Native动作，不能算游戏逻辑通过。
+换用`mistral-small-3.2-24b`的自然纵切`TestResults/20261024-025912`则是另一种失配：Preflight/Build/Smoke/Package及远端调用都通过，真实模型用两次有效决策分类EYC并选择Companion目标；
+之后Host于0 Native动作以`provider-control-unavailable`终止，日志中模型第3次响应成功到达FreeLLMAPI但未写进有效决策trace，因此其具体返回控制值未知，不能凭错误码断言模型原因。
+连续帧与Native开局快照确认玩家仍在`training_field_menu`、EYC已active、唯一合理的当前离开入口`training_field_leave`可用。
+代码核对发现父循环仅在Quest未active时调用`AgentHostStoryModeBootstrapLoop`，而原版Skip可先激活EYC、同时仍停在训练场菜单；
+于是模型被错误地放进Companion子流程处理一个开局Bootstrap。
+另一个源代码事实是该Companion prompt允许输出`control=stop`，但当前allowedControls只有移动等待时才列`observeAgain`，Host只在列表中验证的control会通过；
+这与`provider-control-unavailable`相符但不证明第3次究竟返回了哪个control。
+修复方向：目标规划前，对精确training-field MapState无论EYC已active与否，都让模型通过专用Native menuSelect完成训练场Leave；
+后验必须同时确认已离开训练场且原版EYC仍active。
+随后再进入StoryMode姓名/旗帜设置和目标循环。
+此轮未发生崩溃、存档写入或Native动作，不能算游戏逻辑通过。
 
-按源码核对实现上述Bootstrap后，`TestResults/20261024-032743`真实Campaign的前两类问题实际跨过：模型先分类EYC、再选原版`training_field_leave`，Native `menuSelect`完成，状态确认已回Map/离开训练场且EYC active；接着模型对原版“通知”选择唯一可见affirmative“好”，Native callback成功，出现真实第一块旗帜`SceneNotification`。但该卡片此刻`hasActiveNotification=true/isShown=true`，同时`isReady=false/canContinue=false`；Host当时错误地将尚未完成异步加载的精确StoryMode卡片判成`storymode-setup-scene-notification-unsupported`，3个模型决策、2个Native动作，尚未继续该卡片。用户确认卡片显示后世界时间与移动暂停；这一测试保持Campaign `Stop`，没有调时。**这是UI等待适配问题，不是未知通知类型，也不是按钮操作失败。**
+按源码核对实现上述Bootstrap后，`TestResults/20261024-032743`真实Campaign的前两类问题实际跨过：模型先分类EYC、再选原版`training_field_leave`，Native `menuSelect`完成，状态确认已回Map/离开训练场且EYC active；
+接着模型对原版“通知”选择唯一可见affirmative“好”，Native callback成功，出现真实第一块旗帜`SceneNotification`。
+但该卡片此刻`hasActiveNotification=true/isShown=true`，同时`isReady=false/canContinue=false`；
+Host当时错误地将尚未完成异步加载的精确StoryMode卡片判成`storymode-setup-scene-notification-unsupported`，3个模型决策、2个Native动作，尚未继续该卡片。
+用户确认卡片显示后世界时间与移动暂停；
+这一测试保持Campaign `Stop`，没有调时。
+**这是UI等待适配问题，不是未知通知类型，也不是按钮操作失败。
+**
 
-现有`AgentHostStoryModeSetupLoop`对精确`FindingFirstBannerPieceSceneNotificationItem`及`storymode-clan-name-setup`但尚未Ready的状态，改为Host内250ms只读轮询，不请求模型、不发Native动作、不改变时钟；仅在新鲜Native帧同时报告Ready与canContinue后才问模型并调用原版Close handler。假Native集成现特意让卡片先返回一次未Ready，再变为Ready，验证等待后完整走过姓名/旗帜链、没有额外LLM调用。`TestResults/20261024-033437`AgentHostPackage/Build通过。真实Mistral Small自然战役尚未重跑此等待修复；下一次仍需验证模型能点卡片、提交有效家族名、完成Banner Done和后续Inquiry后回到Map。早先的`provider-arguments-invalid-json`会由Host严格修复为当前唯一且值在Native允许列表中的单选参数对象；其他字符串/多参数/非枚举值依旧拒绝，Fake Package合同通过，尚未将此修复算作真实模型证据。
+现有`AgentHostStoryModeSetupLoop`对精确`FindingFirstBannerPieceSceneNotificationItem`及`storymode-clan-name-setup`但尚未Ready的状态，改为Host内250ms只读轮询，不请求模型、不发Native动作、不改变时钟；
+仅在新鲜Native帧同时报告Ready与canContinue后才问模型并调用原版Close handler。
+假Native集成现特意让卡片先返回一次未Ready，再变为Ready，验证等待后完整走过姓名/旗帜链、没有额外LLM调用。
+`TestResults/20261024-033437`AgentHostPackage/Build通过。
+真实Mistral Small自然战役尚未重跑此等待修复；
+下一次仍需验证模型能点卡片、提交有效家族名、完成Banner Done和后续Inquiry后回到Map。
+早先的`provider-arguments-invalid-json`会由Host严格修复为当前唯一且值在Native允许列表中的单选参数对象；
+其他字符串/多参数/非枚举值依旧拒绝，Fake Package合同通过，尚未将此修复算作真实模型证据。
 
-`TestResults/20261024-034735`是首个真实模型确实走完这段开局链的自然战役样本：Mistral Small经OVH完成EYC分类、Native训练场Leave、原版“通知” affirmative、等待场景卡片Native Ready、调用`SceneNotificationVM.ExecuteClose`、由Native校验并提交模型家族名“盖·马拉大”、在BannerEditor保留当前旗帜并调用Native Done、再选择原版“潜行教程”affirmative；Host回读已返回MapState，累计6个Native动作。CampaignDay保持91077.375/clock Stop，Gold仍1000、Renown仍20、Roster仍1，没有改Quest进度、没有存档写入或崩溃；引擎录像全覆盖后压为时间线关键帧并删除。这里证明新链的真实模型—Host—Native交互可运行，但**并未完成EYC四目标**：父级随后选择Companion目标，子流程在0动作以`provider-control-unavailable`结束，Model HTTP调用已成功；当前Provider合同拒绝未列control且原始拒绝值未保留。Companion prompt确实允许`control=stop`，而此前该Loop catalog只在行动中列`observeAgain`，故这是明确的prompt/catalog不一致，虽无法从脱敏收据反证该次返回的一定是stop。现增加仅当`stop`列在当前`allowedControls`时才规范化的安全退出控制，Companion将它报告为`interrupted`且Native动作必须为0；其后父循环仅把该free-Map Companion路线标记不可用，并转而重新规划其它未完成目标，不伪称Companion已完成。`TestResults/20261024-042131`Host Package/Build覆盖“允许的stop→非成功中断、0 Native动作”、未列stop仍拒绝、以及只对Companion safe stop开放重规划且不掩盖捕获/其它目标失败，均通过。**该父级重规划修改还没有真实模型Campaign复测**；后续继续验证其它目标是否可有效接续，不将本次阶段级`FreshStoryModeModelEvaluation Passed=true`误当整个Host或Issue已通过。
+`TestResults/20261024-034735`是首个真实模型确实走完这段开局链的自然战役样本：Mistral Small经OVH完成EYC分类、Native训练场Leave、原版“通知” affirmative、等待场景卡片Native Ready、调用`SceneNotificationVM.ExecuteClose`、由Native校验并提交模型家族名“盖·马拉大”、在BannerEditor保留当前旗帜并调用Native Done、再选择原版“潜行教程”affirmative；
+Host回读已返回MapState，累计6个Native动作。
+CampaignDay保持91077.375/clock Stop，Gold仍1000、Renown仍20、Roster仍1，没有改Quest进度、没有存档写入或崩溃；
+引擎录像全覆盖后压为时间线关键帧并删除。
+这里证明新链的真实模型—Host—Native交互可运行，但**并未完成EYC四目标**：父级随后选择Companion目标，子流程在0动作以`provider-control-unavailable`结束，Model HTTP调用已成功；
+当前Provider合同拒绝未列control且原始拒绝值未保留。
+Companion prompt确实允许`control=stop`，而此前该Loop catalog只在行动中列`observeAgain`，故这是明确的prompt/catalog不一致，虽无法从脱敏收据反证该次返回的一定是stop。
+现增加仅当`stop`列在当前`allowedControls`时才规范化的安全退出控制，Companion将它报告为`interrupted`且Native动作必须为0；
+其后父循环仅把该free-Map Companion路线标记不可用，并转而重新规划其它未完成目标，不伪称Companion已完成。
+`TestResults/20261024-042131`Host Package/Build覆盖“允许的stop→非成功中断、0 Native动作”、未列stop仍拒绝、以及只对Companion safe stop开放重规划且不掩盖捕获/其它目标失败，均通过。
+**该父级重规划修改还没有真实模型Campaign复测**；
+后续继续验证其它目标是否可有效接续，不将本次阶段级`FreshStoryModeModelEvaluation Passed=true`误当整个Host或Issue已通过。
 
 第二次父级重规划的真实样本`TestResults/20261024-042450`进一步定位了下一层问题：按当前提交的安全策略，Companion子流程在无Native动作时以`stop`中断并将该路由标记不可用；fresh objective planner随后仍返回了已排除的`companions`，Host以`establish-clan-objective-selection-invalid`安全失败，没有执行任何新Native动作。首段真实设置仍完整通过，Campaign世界状态未变。当前代码已对目标选择增加**最多一次**“仅选当前allowedActions未完成目标”的模型纠正请求；Host Provider Package回归覆盖“先选被排除的Companion→收到当前列表反馈→改选唯一保留的PartySize、0 Native planner动作”。`TestResults/20261024-044153`Build/AgentHostPackage通过；该纠正尚无真实模型运行证据。
 
 该一般性纠正的真实复测`TestResults/20261024-044451`证明Mistral Small仍会重复选择已排除的`companions`，随后Host以`establish-clan-objective-selection-invalid`停止；沒有执行新Native动作，源战役未改动。现在的修订把**当前可选ObjectiveId值本身**写进唯一一次纠正反馈，并仍从当前Native Journal/支持集合构建目录；Package通过后再做真实复测。不可将“模型回了一个值”当作选择已满足当前有效目录。
 
-`TestResults/20261024-050131`以`f2a8d58`及未提交Host修订再测真实Mistral路线：原版tutorial skip、active-EYC训练场Leave、通知答复、Ready后龙旗卡片、模型家族名Native提交、BannerEditor Done和后续tutorial答复均完成；随后Companion子流程安全stop，且宿主进入父级重新规划请求。此请求在FreeLLMAPI→OVH候选处`socket hang up`，FreeLLMAPI冷却；600秒Harness窗口在模型重规划结果返回前结束，Host `host-stop-requested`，本样本没有证明父级已重选，也没有任何EYC Journal资源进展。游戏无崩溃/正式存档写入，视频完整切片后清理，Host/游戏进程收尾。故当前真实已验证边界是全开局链+对子目标的安全stop；由于provider故障，精确allowed-objective correction反馈的真实响应仍未知，下一轮应先有单次可用路由或提高当前真实测试窗口可用时间，再判断模型是否会在被排除Companion后转选其它Journal目标。
+`TestResults/20261024-050131`以`f2a8d58`及未提交Host修订再测真实Mistral路线：原版tutorial skip、active-EYC训练场Leave、通知答复、Ready后龙旗卡片、模型家族名Native提交、BannerEditor Done和后续tutorial答复均完成；
+随后Companion子流程安全stop，且宿主进入父级重新规划请求。
+此请求在FreeLLMAPI→OVH候选处`socket hang up`，FreeLLMAPI冷却；
+600秒Harness窗口在模型重规划结果返回前结束，Host `host-stop-requested`，本样本没有证明父级已重选，也没有任何EYC Journal资源进展。
+游戏无崩溃/正式存档写入，视频完整切片后清理，Host/游戏进程收尾。
+故当前真实已验证边界是全开局链+对子目标的安全stop；
+由于provider故障，精确allowed-objective correction反馈的真实响应仍未知，下一轮应先有单次可用路由或提高当前真实测试窗口可用时间，再判断模型是否会在被排除Companion后转选其它Journal目标。
 
-`TestResults/20261024-052148`是父级精确ObjectiveId纠正第一次真实生效的样本：真实模型仍先选择已被标记不可用的Companion；Host只发一条明确列出剩余候选的纠正请求，模型随后改选PartySize，未重放Companion也未发其Native动作。原版开局链再度真实完成，Gold/PartySize/Renown/Companions仍未有Journal进展。随后PartySize Recruitment子流程在第一个Native招募动作前以`provider-control-unavailable`终止。源码对照显示Recruitment提示允许`control=stop`，但其allowedControls仍只在移动中暴露`observeAgain`；这与先前Companion同类，实际模型“stop”因此不能按安全中断协议消费。现已给Recruitment也添加明示的stop目录项/零动作`recruitment-model-stopped`中断，并让父循环在free Map仅将PartySize route标记不可用后重规划；Package假回归和真实Campaign复测待跑。
+`TestResults/20261024-052148`是父级精确ObjectiveId纠正第一次真实生效的样本：真实模型仍先选择已被标记不可用的Companion；
+Host只发一条明确列出剩余候选的纠正请求，模型随后改选PartySize，未重放Companion也未发其Native动作。
+原版开局链再度真实完成，Gold/PartySize/Renown/Companions仍未有Journal进展。
+随后PartySize Recruitment子流程在第一个Native招募动作前以`provider-control-unavailable`终止。
+源码对照显示Recruitment提示允许`control=stop`，但其allowedControls仍只在移动中暴露`observeAgain`；
+这与先前Companion同类，实际模型“stop”因此不能按安全中断协议消费。
+现已给Recruitment也添加明示的stop目录项/零动作`recruitment-model-stopped`中断，并让父循环在free Map仅将PartySize route标记不可用后重规划；
+Package假回归和真实Campaign复测待跑。
 
 `TestResults/20261024-052148`证明父级可从Companion安全stop后重新规划：模型起初重复选已排除Companion，随后在精确候选列表纠正下选中PartySize。真实主线开局姓名/旗帜链再次完整通过；随后Recruitment子流程在Native动作前再次给出`provider-control-unavailable`。源码对应的第二处同类协议缺陷也已确认：Recruitment提示允许`control=stop`，但其allowedControls只在移动中列`observeAgain`。现为Recruitment列出stop并把它映射为零动作的安全中断，父循环只将该PartySize路由标记不可用再重规划；`TestResults/20261024-053836`Build/AgentHostPackage回归通过。此Recruitment stop修复尚无真实模型Campaign证据。
 
-`TestResults/20261024-054410`用真实FreeLLMAPI Mistral Small从全新自然StoryMode再次走完教程跳过后的训练场Leave、原版通知、龙旗卡片、模型生成家族名、BannerEditor保留默认旗帜与后续教程Inquiry；Native回到Map后，模型先选Companion并用允许的`stop`无动作安全退出。父规划再次选已排除Companion后，精确候选反馈成功引导它改选PartySize，第一次真实Campaign证明该修正可被模型遵循。PartySize接着只执行`mapSettlementTargets`观察（全程Gold 1000、Renown 20、Party 1，EYC Journal无进展）；下一FreeLLMAPI请求遇OVH socket hang-up及路由冷却，Host在10分钟生命周期停止窗结束，累计12个模型决策/7个Native动作，无崩溃、正式存档写入或遗留进程。收据的Harness `Passed=true`只表示其观测/清理条件通过，不表示Quest完成；现增加单独的`StoryModeOriginalEstablishYourClanCompleted`字段，只有Host回执同时为completed且`goalVerified=true`才为真。此次字段修改不能回填旧收据，旧样本的原版Quest完成状态仍明确为未完成。
+`TestResults/20261024-054410`用真实FreeLLMAPI Mistral Small从全新自然StoryMode再次走完教程跳过后的训练场Leave、原版通知、龙旗卡片、模型生成家族名、BannerEditor保留默认旗帜与后续教程Inquiry；
+Native回到Map后，模型先选Companion并用允许的`stop`无动作安全退出。
+父规划再次选已排除Companion后，精确候选反馈成功引导它改选PartySize，第一次真实Campaign证明该修正可被模型遵循。
+PartySize接着只执行`mapSettlementTargets`观察（全程Gold 1000、Renown 20、Party 1，EYC Journal无进展）；
+下一FreeLLMAPI请求遇OVH socket hang-up及路由冷却，Host在10分钟生命周期停止窗结束，累计12个模型决策/7个Native动作，无崩溃、正式存档写入或遗留进程。
+收据的Harness `Passed=true`只表示其观测/清理条件通过，不表示Quest完成；
+现增加单独的`StoryModeOriginalEstablishYourClanCompleted`字段，只有Host回执同时为completed且`goalVerified=true`才为真。
+此次字段修改不能回填旧收据，旧样本的原版Quest完成状态仍明确为未完成。
 
 为让下一次真实门禁尝试覆盖多项Native行动，而非在10分钟人为窗口内只记录一两步，FreshStoryMode模型评测的Harness-only自动停止窗现提高到7200秒，并匹配Host自治循环已有的7200秒硬预算；测试外限为7500秒。只在带Harness临时目录的`agent-host-lifecycle-test`运行下生效，正常MCM Agent不会被此窗中止。下一次可用远端评测将试用FreeLLMAPI `auto:reliable`，不是把目录ready视为可用：每一条真实回复都须记录它实际路由到的Provider，并按当时的成功率排序决定候选；FreeLLMAPI官方说明`auto:reliable`偏重近期成功率、结构化响应候选会按`response_format`能力过滤，真实效果仍以本机请求收据为准。[FreeLLMAPI routing strategies](https://github.com/lov0u/freellmapi/blob/main/docs/api.md#routing-strategies-auto)
 
-`TestResults/20261024-061135`用`auto:reliable`真实自然战役验证了FreeLLMAPI会先实际路由/回退（Google别名404、Qwen socket断连后曾由OVH GPT-OSS接续）；AI完整完成Native姓名/默认旗帜开局、自然移动到两个不同Town，并通过`town_backstreet`→`town_tavern`进入Town Tavern Mission。第二个Town的Native `missionSceneAgents`返回了一位符合源码候选过滤条件的Wanderer Hero；视觉关键帧也显示AI在酒馆3D场景中，真实模型随后却选择`stop`。当时Host把`stop`放在Mission可用控制中，但父循环只允许无遭遇的free Map终止子路线，所以Host按保护规则失败退出，没有把Mission当作已完成或自动改选动作；EYC四目标仍为Gold1000/Renown20/Party1/Companion0。这个样本把下一处真实缺口收敛为Mission内退出/重规划协议，而不是模型路由或Banner设置：Host现只在Map暴露子目标`stop`，Mission目录在Wanderer Navigate/Interact同时始终列原版`missionLeave`；Mission模型误回stop/未列控制时，按当前Native动作目录最多纠正两次，执行Native Leave并回Map后才允许父循环重规划。`TestResults/20261024-064520`Build/AgentHostPackage已通过211项Provider合同，其中Fake Native/Provider样例验证Mission内stop→恢复请求明确列出`missionLeave`→原版Leave回Map后才允许安全stop；修复后的真实模型Campaign仍待重跑，产品全Quest门禁仍未完成。
+`TestResults/20261024-061135`用`auto:reliable`真实自然战役验证了FreeLLMAPI会先实际路由/回退（Google别名404、Qwen socket断连后曾由OVH GPT-OSS接续）；
+AI完整完成Native姓名/默认旗帜开局、自然移动到两个不同Town，并通过`town_backstreet`→`town_tavern`进入Town Tavern Mission。
+第二个Town的Native `missionSceneAgents`返回了一位符合源码候选过滤条件的Wanderer Hero；
+视觉关键帧也显示AI在酒馆3D场景中，真实模型随后却选择`stop`。
+当时Host把`stop`放在Mission可用控制中，但父循环只允许无遭遇的free Map终止子路线，所以Host按保护规则失败退出，没有把Mission当作已完成或自动改选动作；
+EYC四目标仍为Gold1000/Renown20/Party1/Companion0。
+这个样本把下一处真实缺口收敛为Mission内退出/重规划协议，而不是模型路由或Banner设置：Host现只在Map暴露子目标`stop`，Mission目录在Wanderer Navigate/Interact同时始终列原版`missionLeave`；
+Mission模型误回stop/未列控制时，按当前Native动作目录最多纠正两次，执行Native Leave并回Map后才允许父循环重规划。
+`TestResults/20261024-064520`Build/AgentHostPackage已通过211项Provider合同，其中Fake Native/Provider样例验证Mission内stop→恢复请求明确列出`missionLeave`→原版Leave回Map后才允许安全stop；
+修复后的真实模型Campaign仍待重跑，产品全Quest门禁仍未完成。
 
-新修复后的真实重跑`TestResults/20261024-065616`证实上一条Mission边界已跨过：教程后开局setup、模型选EYC Companion、到`town_ES3`后Native `missionSceneAgents`只返回25个本地非Hero市民、没有Wanderer；模型用原版missionLeave返回Map，再用当前Backstreet/Town Leave离开聚落，随后在Town菜单安全stop。Host父循环却再次失败。对应Native收据给出`gameState=MapState, menuId=town, encounterActive=true, encounteredPartyId=currentSettlementId=town_ES3`；共享`AgentHostCampaignStateFacts.IsNativeLocationMenu`已证明这是一张原版地点菜单，不是敌队遭遇，但父循环仍用原始`encounterActive`布尔判定freeMap，误把可replan地点挡掉。现改为复用共享遭遇分类，并加回归：Town Native location menu允许安全replan、真劫匪encounter仍拒绝。该Campaign仍无EYC Journal进度；此最新父循环修正已进入`TestResults/20261024-065342`后的源码，需要再跑真实模型验证 parent 确实选中PartySize/其他目标。
+新修复后的真实重跑`TestResults/20261024-065616`证实上一条Mission边界已跨过：教程后开局setup、模型选EYC Companion、到`town_ES3`后Native `missionSceneAgents`只返回25个本地非Hero市民、没有Wanderer；
+模型用原版missionLeave返回Map，再用当前Backstreet/Town Leave离开聚落，随后在Town菜单安全stop。
+Host父循环却再次失败。
+对应Native收据给出`gameState=MapState, menuId=town, encounterActive=true, encounteredPartyId=currentSettlementId=town_ES3`；
+共享`AgentHostCampaignStateFacts.IsNativeLocationMenu`已证明这是一张原版地点菜单，不是敌队遭遇，但父循环仍用原始`encounterActive`布尔判定freeMap，误把可replan地点挡掉。
+现改为复用共享遭遇分类，并加回归：Town Native location menu允许安全replan、真劫匪encounter仍拒绝。
+该Campaign仍无EYC Journal进度；
+此最新父循环修正已进入`TestResults/20261024-065342`后的源码，需要再跑真实模型验证 parent 确实选中PartySize/其他目标。
 
-`TestResults/20261024-072241`复测上述free-map修正后，父循环确实从Companion安全stop转到Renown，再转到Gold；但Gold目标在模型耗时约45秒期间，Native Map UI状态变为`escapeMenuOpen=true`。此前新鲜观察中Escape overlay为false；Native的`move` handler按原版前置拒绝，收据确认时钟/日期和队伍移动均未改变，并记录无额外Native目标状态。引擎关键帧显示Campaign Escape overlay与Host失败提示，但它是命令拒绝前已打开还是失败提示阶段才出现，当前时序证据尚不能定论。代码核对发现现有Native focus-loss Escape guard只安装于`visual-capture`，本自然模型评测使用`agent-host-lifecycle-test`，故本测试PID从未记录guard安装标记；这是明确的Harness覆盖缺口，焦点丢失是强可能解释但尚非单收据证明。现已把同一focus-loss guard扩展到隔离的`agent-host-lifecycle-test`和`fresh-campaign-renown`模式，并要求真实StoryMode/新战役收据证明guard安装；不改变正常玩家模式或屏蔽玩家手动开Escape。`TestResults/20261024-075426`的SubModule build/readiness gate通过，`TestResults/20261024-075449`Docs通过，SubModule审阅hash同步到`HarnessResearchReadiness.ps1`。
+`TestResults/20261024-072241`复测上述free-map修正后，父循环确实从Companion安全stop转到Renown，再转到Gold；
+但Gold目标在模型耗时约45秒期间，Native Map UI状态变为`escapeMenuOpen=true`。
+此前新鲜观察中Escape overlay为false；
+Native的`move` handler按原版前置拒绝，收据确认时钟/日期和队伍移动均未改变，并记录无额外Native目标状态。
+引擎关键帧显示Campaign Escape overlay与Host失败提示，但它是命令拒绝前已打开还是失败提示阶段才出现，当前时序证据尚不能定论。
+代码核对发现现有Native focus-loss Escape guard只安装于`visual-capture`，本自然模型评测使用`agent-host-lifecycle-test`，故本测试PID从未记录guard安装标记；
+这是明确的Harness覆盖缺口，焦点丢失是强可能解释但尚非单收据证明。
+现已把同一focus-loss guard扩展到隔离的`agent-host-lifecycle-test`和`fresh-campaign-renown`模式，并要求真实StoryMode/新战役收据证明guard安装；
+不改变正常玩家模式或屏蔽玩家手动开Escape。
+`TestResults/20261024-075426`的SubModule build/readiness gate通过，`TestResults/20261024-075449`Docs通过，SubModule审阅hash同步到`HarnessResearchReadiness.ps1`。
 
-`TestResults/20261024-075801`自然StoryMode长测实际记录`harness-focus-loss-escape-guard-installed|scope=agent-host-lifecycle-test`，此前“通知/棕色点击继续卡片/姓名/旗帜/潜行教程”链由真实模型完整完成，随后模型由训练场地图移动到萨哥特，经过Town/backstreet进入酒馆Mission。该样本的Escape overlay拒绝没有复现，说明这一组测试条件下工具没有再阻断地图移动；但guard是否为唯一原因不能由单次运行证明。模型累计35个有效决策、13个Native动作、94622输入与3806输出token；原版EYC四项仍无进度。连续录像索引覆盖66帧并删除586MB原始MP4，画面末帧在酒馆Wanderer旁明确显示Native `F 交谈`提示，表明走到了可交谈的位置；Host随后以`provider-decision-field-unavailable`结束Companion子目标。该时间窗的FreeLLMAPI日志出现OVH截断/断连和多次真实回退；Native原始模型文本未持久化，故目前不能区分最终缺字段是上游模型输出还是Provider解析边界。Host未伪报聘用/任务进度，未写正式存档，无崩溃，进程清理通过；Harness阶段`Passed=true`仅表示测试门禁和清理完成，`StoryModeOriginalEstablishYourClanCompleted=false`。
+`TestResults/20261024-075801`自然StoryMode长测实际记录`harness-focus-loss-escape-guard-installed|scope=agent-host-lifecycle-test`，此前“通知/棕色点击继续卡片/姓名/旗帜/潜行教程”链由真实模型完整完成，随后模型由训练场地图移动到萨哥特，经过Town/backstreet进入酒馆Mission。
+该样本的Escape overlay拒绝没有复现，说明这一组测试条件下工具没有再阻断地图移动；
+但guard是否为唯一原因不能由单次运行证明。
+模型累计35个有效决策、13个Native动作、94622输入与3806输出token；
+原版EYC四项仍无进度。
+连续录像索引覆盖66帧并删除586MB原始MP4，画面末帧在酒馆Wanderer旁明确显示Native `F 交谈`提示，表明走到了可交谈的位置；
+Host随后以`provider-decision-field-unavailable`结束Companion子目标。
+该时间窗的FreeLLMAPI日志出现OVH截断/断连和多次真实回退；
+Native原始模型文本未持久化，故目前不能区分最终缺字段是上游模型输出还是Provider解析边界。
+Host未伪报聘用/任务进度，未写正式存档，无崩溃，进程清理通过；
+Harness阶段`Passed=true`仅表示测试门禁和清理完成，`StoryModeOriginalEstablishYourClanCompleted=false`。
 
 根据该运行与Host源码，Companion子流程在Native导航/Leave租约活动期间曾让模型反复选择短`observeAgain`等待；这是无需模型决策的Native等待，产生额外延迟与token。现在Host在已观察到Mission导航、Leave或地图切换租约活动时改为每秒只读轮询Native，直到租约结束后再向模型请求下一步；未匹配当前动作目录的模型回复最多进行两次无副作用纠正，再安全终止，不允许无界调用或重放之前动作。Fake Native/Provider合同验证活动导航期间模型调用数不增加、租约完成后才继续Tavern交互，以及两次未列导航目标后安全终止且没有发出越权Native动作。最新代码`TestResults/20261024-085955`的Build及AgentHostPackage通过（212项Provider合同、16项CampaignLoop合同、9项BattleSimulation合同；模型调用0、Native命令0）；该改动尚待下一次真实Campaign复测，不改变正常玩家的Native交互或时钟。
 
-对`TestResults/20261024-075801`的另一项真实失败，父Host曾因为Companion Mission内的可恢复结构化回复错误直接结束整个自治循环，即使当时是无对话的友好酒馆、当前MainHero仍能安全退出。现在任何已集成目标若遇到Recoverable Provider错误且新鲜状态是无对话/弹窗、非移动的自由Campaign Map，父Host暂时屏蔽本轮失败路线并用新的Journal计划选择其它目标；不重放该子流程动作。若错误发生在Companion的友好Town/Tavern `StartUp` Mission内，父Host通过当前Native `missionLeave`租约退出一次；它逐秒只读等到自由Map且原版EYC仍活动后才重新规划。遇到Conversation、Battle/Encounter、Captivity、非聚落Mission、退出未成功或返回状态不清均安全失败，不执行回退。`TestResults/20261024-085955`Fake Parent/Native/Provider集成合同已实际验证“Companion provider失败→Native酒馆退出→只在自由Map重规划Gold→Journal进度变化后Companion路由重新开放→Native原版Quest完成验证”，Package Build通过；这是主循环容错合同，不表示真实Campaign已按此恢复。真实外部模型和游戏内录像复验仍待后续纵向运行。
+对`TestResults/20261024-075801`的另一项真实失败，父Host曾因为Companion Mission内的可恢复结构化回复错误直接结束整个自治循环，即使当时是无对话的友好酒馆、当前MainHero仍能安全退出。
+现在任何已集成目标若遇到Recoverable Provider错误且新鲜状态是无对话/弹窗、非移动的自由Campaign Map，父Host暂时屏蔽本轮失败路线并用新的Journal计划选择其它目标；
+不重放该子流程动作。
+若错误发生在Companion的友好Town/Tavern `StartUp` Mission内，父Host通过当前Native `missionLeave`租约退出一次；
+它逐秒只读等到自由Map且原版EYC仍活动后才重新规划。
+遇到Conversation、Battle/Encounter、Captivity、非聚落Mission、退出未成功或返回状态不清均安全失败，不执行回退。
+`TestResults/20261024-085955`Fake Parent/Native/Provider集成合同已实际验证“Companion provider失败→Native酒馆退出→只在自由Map重规划Gold→Journal进度变化后Companion路由重新开放→Native原版Quest完成验证”，Package Build通过；
+这是主循环容错合同，不表示真实Campaign已按此恢复。
+真实外部模型和游戏内录像复验仍待后续纵向运行。
 
-`TestResults/20261024-090339`是新父Host恢复逻辑尚未编译入本次包时的下一次自然纵测：真实模型完成完整原版Tutorial-skip/name/banner开局，第一次Companion搜索没有可雇Wanderer时经Native Leave返回Map并重规划到PartySize；第二目标随后因`provider-decision-ambiguous`退出，故EYC仍活动且无Gold/Party/Renown/Companion进度。记录40个决策、30个Native动作、145388输入/2301输出token；引擎录像完整19602/19602帧并生成126个时间线帧后删除762MB原视频，没有崩溃、正式保存命令或遗留游戏/Host进程，原版EYC总门禁未通过。**另有比玩法失败更重要的Harness安全错误**：Native日志确认09:18:22调用`AutoSaveCurrentGame: saveauto1`，`Test-AgentFreshCampaign`最终`SaveDirectoryMetadataUnchanged=false`；这是原版自动保存覆盖当前本地`saveauto1.sav`，不是Agent显式Save。Steam云日志显示该槽已与远端版本发生SHA冲突，云端旧副本没有下载到本机远端缓存；没有覆盖/删除任何现存版本，也尚未恢复远端版本。源码已确认`SandBoxSaveManager.IsAutoSaveDisabled()`仅在`BannerlordConfig.AutoSaveInterval == -1`时为真。FreshCampaign Harness已在游戏启动前暂时写入`-1`、保存原设置备份、正常结束后恢复，并让未来Harness启动恢复异常中断的备份；这条保护随后由`TestResults/20261024-101825`真实复验通过：`AutoSaveInterval`在10→-1→10之间变化，原版日志未见`AutoSaveCurrentGame`，Save目录manifest未变且进程清理通过。
+`TestResults/20261024-090339`是新父Host恢复逻辑尚未编译入本次包时的下一次自然纵测：真实模型完成完整原版Tutorial-skip/name/banner开局，第一次Companion搜索没有可雇Wanderer时经Native Leave返回Map并重规划到PartySize；
+第二目标随后因`provider-decision-ambiguous`退出，故EYC仍活动且无Gold/Party/Renown/Companion进度。
+记录40个决策、30个Native动作、145388输入/2301输出token；
+引擎录像完整19602/19602帧并生成126个时间线帧后删除762MB原视频，没有崩溃、正式保存命令或遗留游戏/Host进程，原版EYC总门禁未通过。
+**另有比玩法失败更重要的Harness安全错误**：Native日志确认09:18:22调用`AutoSaveCurrentGame: saveauto1`，`Test-AgentFreshCampaign`最终`SaveDirectoryMetadataUnchanged=false`；
+这是原版自动保存覆盖当前本地`saveauto1.sav`，不是Agent显式Save。
+Steam云日志显示该槽已与远端版本发生SHA冲突，云端旧副本没有下载到本机远端缓存；
+没有覆盖/删除任何现存版本，也尚未恢复远端版本。
+源码已确认`SandBoxSaveManager.IsAutoSaveDisabled()`仅在`BannerlordConfig.AutoSaveInterval == -1`时为真。
+FreshCampaign Harness已在游戏启动前暂时写入`-1`、保存原设置备份、正常结束后恢复，并让未来Harness启动恢复异常中断的备份；
+这条保护随后由`TestResults/20261024-101825`真实复验通过：`AutoSaveInterval`在10→-1→10之间变化，原版日志未见`AutoSaveCurrentGame`，Save目录manifest未变且进程清理通过。
 
-`TestResults/20261024-101825`是加上父Host自然恢复后首次实测新战役纵向闭环。用户确认家族命名与旗帜编辑也必须由AI自主完成；真实模型从Tutorial Skip后的第一张Campaign MapState接管，先原版选择`training_field_leave`，依次处理自动通知、棕色SceneNotification“点击继续”、提交模型生成的家族名`盖·图格里克`，并在`BannerEditorState`选择`bannerEditorDone`保留默认旗帜。随后模型在同一Campaign中完成Companion失败后的父级重规划、PartySize零动作停止后的重规划、Renown无安全动作停止后的重规划，并在费卡翁通过原版交易出售1件谷物，将金币从1000实增到1024；Native Journal当前四项目标均未完成。共36个模型决策、29个Native动作、109850输入/899输出tokens；无崩溃、Native自动存档或正式存档写入，游戏/Host清理完成，然而父循环随后报`ObjectDisposedException`并以`establish-clan-autonomy-unexpected-error`终止，所以Harness阶段`Passed=true`并不等于产品门禁通过，`goalVerified=false`。旧结果只保留异常类型，没有调用栈；现已让父循环失败收据保留`exception.ToString()`以便精确定位。`TestResults/20261024-110127` Docs及`20261024-110158` Build/AgentHostPackage通过；需用这一可诊断版本复测该Campaign转换，未定位异常并完成原版Quest之前不关闭EYC Issue #130。
+`TestResults/20261024-101825`是加上父Host自然恢复后首次实测新战役纵向闭环。
+用户确认家族命名与旗帜编辑也必须由AI自主完成；
+真实模型从Tutorial Skip后的第一张Campaign MapState接管，先原版选择`training_field_leave`，依次处理自动通知、棕色SceneNotification“点击继续”、提交模型生成的家族名`盖·图格里克`，并在`BannerEditorState`选择`bannerEditorDone`保留默认旗帜。
+随后模型在同一Campaign中完成Companion失败后的父级重规划、PartySize零动作停止后的重规划、Renown无安全动作停止后的重规划，并在费卡翁通过原版交易出售1件谷物，将金币从1000实增到1024；
+Native Journal当前四项目标均未完成。
+共36个模型决策、29个Native动作、109850输入/899输出tokens；
+无崩溃、Native自动存档或正式存档写入，游戏/Host清理完成，然而父循环随后报`ObjectDisposedException`并以`establish-clan-autonomy-unexpected-error`终止，所以Harness阶段`Passed=true`并不等于产品门禁通过，`goalVerified=false`。
+旧结果只保留异常类型，没有调用栈；
+现已让父循环失败收据保留`exception.ToString()`以便精确定位。
+`TestResults/20261024-110127` Docs及`20261024-110158` Build/AgentHostPackage通过；
+需用这一可诊断版本复测该Campaign转换，未定位异常并完成原版Quest之前不关闭EYC Issue #130。
 
 `TestResults/20261024-110509`在模型改选PartySize后，真实Campaign进入波罗斯Town；Native RecruitmentVM返回当前数名志愿兵均不可招募，Host此前每轮仍重新暴露`recruitOptions`，模型连续重复同一个无副作用查询且没有状态变化。为避免继续消耗模型请求等待其碰到160决策上限，结束该测试自有Host；该回合按计划标记为中止而非通过，Native自动存档仍禁用/恢复成功、无崩溃/正式存档写入且客户端清理通过。基于源码和当前原版菜单事实，Recruitment Host现在在当前RecruitmentVM没有任何可负担且可用报价时只暴露本Town/Village已启用的原版Leave，再从地图观察其他聚落；`TestResults/20261024-113258`的Build和AgentHostPackage合同通过，真实该路径仍待Campaign复验。
 
-`TestResults/20261024-113451`自然实测重复确认了前述Host失败并取得调用栈：AI自主完成教程跳过、模型家族命名`铁·格额尔`与默认旗帜确认；父Host选择Renown、在当前无安全敌军时安全重规划Gold，并通过Native Town交易卖出1单位谷物，金币1000→1030、Gold Journal推进。随后父Host在让模型为下一目标重新规划时失败；调用栈指向共享`HttpClient`已释放。代码事实证明Gold子循环用`using(provider)`错误地处理了由Campaign父级创建并持有的共享决策Provider，子循环一返回就销毁客户端。现已去掉子循环对借用Provider的Dispose，并给Gold子循环合同测试加入Dispose计数回归；`TestResults/20261024-115735` Docs、`20261024-115810` Build/AgentHostPackage通过。此次仍只完成Gold一个子目标，不是EYC完成；下一次自然Campaign必须验证Gold后父级能再次调用模型并继续重规划。全程AutoSaveInterval为10→-1→10，无原版AutoSave调用、正式存档写入、崩溃或遗留游戏进程。
+`TestResults/20261024-113451`自然实测重复确认了前述Host失败并取得调用栈：AI自主完成教程跳过、模型家族命名`铁·格额尔`与默认旗帜确认；
+父Host选择Renown、在当前无安全敌军时安全重规划Gold，并通过Native Town交易卖出1单位谷物，金币1000→1030、Gold Journal推进。
+随后父Host在让模型为下一目标重新规划时失败；
+调用栈指向共享`HttpClient`已释放。
+代码事实证明Gold子循环用`using(provider)`错误地处理了由Campaign父级创建并持有的共享决策Provider，子循环一返回就销毁客户端。
+现已去掉子循环对借用Provider的Dispose，并给Gold子循环合同测试加入Dispose计数回归；
+`TestResults/20261024-115735` Docs、`20261024-115810` Build/AgentHostPackage通过。
+此次仍只完成Gold一个子目标，不是EYC完成；
+下一次自然Campaign必须验证Gold后父级能再次调用模型并继续重规划。
+全程AutoSaveInterval为10→-1→10，无原版AutoSave调用、正式存档写入、崩溃或遗留游戏进程。
 
-`TestResults/20261024-120135`是Provider生命周期修复后的最新自然战役复测：启动、教程跳过、EYC自然激活、AI家族命名`Khergit`与默认旗帜编辑通过。模型执行Companion路线并在不同Town间原版移动；路上实际遭遇5人敌对Mountain Bandits，Native日志/状态记录其`encounter_meeting`对话及当前敌对队伍。旧父循环将它作为`companion-campaign-interruption`直接终止；未进入坐镇指挥，也未产生主线进度。全轮26模型决策、24 Native动作，Original EYC未完成；Native自动存档无调用、设置10→-1→10恢复、manifest不变，无崩溃/正式保存/遗留进程。根因不是Provider或走位：Companion子流程明确发现`IsActiveEncounter`就安全退出，而父级没有通用遭遇处理路由。现仅对Native当前状态明确列出“敌对Bandit队伍”的意外地图遭遇，父级调用既有BattleSimulation适配，验证返回自由地图与更新后的Quest Journal后再规划；非敌对遭遇和领主队伍不走这条新路径。`TestResults/20261024-130547` Docs及`20261024-130639` Build/AgentHostPackage通过，真实验证该父级遭遇恢复待下一轮自然Campaign。
+`TestResults/20261024-120135`是Provider生命周期修复后的最新自然战役复测：启动、教程跳过、EYC自然激活、AI家族命名`Khergit`与默认旗帜编辑通过。
+模型执行Companion路线并在不同Town间原版移动；
+路上实际遭遇5人敌对Mountain Bandits，Native日志/状态记录其`encounter_meeting`对话及当前敌对队伍。
+旧父循环将它作为`companion-campaign-interruption`直接终止；
+未进入坐镇指挥，也未产生主线进度。
+全轮26模型决策、24 Native动作，Original EYC未完成；
+Native自动存档无调用、设置10→-1→10恢复、manifest不变，无崩溃/正式保存/遗留进程。
+根因不是Provider或走位：Companion子流程明确发现`IsActiveEncounter`就安全退出，而父级没有通用遭遇处理路由。
+现仅对Native当前状态明确列出“敌对Bandit队伍”的意外地图遭遇，父级调用既有BattleSimulation适配，验证返回自由地图与更新后的Quest Journal后再规划；
+非敌对遭遇和领主队伍不走这条新路径。
+`TestResults/20261024-130547` Docs及`20261024-130639` Build/AgentHostPackage通过，真实验证该父级遭遇恢复待下一轮自然Campaign。
 
 `TestResults/20261024-140535`再次证明真实模型能完成原版Gold出售（Native Journal前后1000→约1029），但随后父级规划请求遇`provider-response-truncated`而退出；这一收据尚未验证“Gold子目标返回后父级继续规划”。基于此明确的无Native动作Provider错误，已为目标规划和StoryMode启动UI/Inquiry阶段加入每次最多一次、要求精简结构化响应的安全重试；不会重放前一条Native动作。该次收据不包含修复后的重试结果，需后续真实运行复核。
 
 `TestResults/20261024-152024`是加入planner重试后复测：AI完成开局/旗帜、一次Gold原版交易令Journal前进，再次Gold路线遇到当前Town无可出售Goods后按原版`tradeCancel`退出；父级确实从Gold失败重规划到PartySize，AI安全选择`stop`后父级在Renown无当前安全敌军且其它已集成目标暂不可用时停止。金币真实变化1000→1029，但EYC未完成；所有未集成目标仍有未完成进度，不能把Run-Harness `Passed=true`误读为通关。该次不再因共享HttpClient被释放或在Gold完成后立刻退出，但Provider截断重试在该样本未被触发。依据真实Town交易结果，Gold无货现在仅在Native自由地图状态下将该路线暂时标为当前不可用，父级可以改选其它目标；下一步仍需完善无货后的跨聚落销售/资源路径和更广的EYC目标覆盖。存档/自动存档/崩溃/进程清理门禁均通过。
 
-`TestResults/20261024-173205`真实`auto:reliable`纵测确认AI在无可售货物时能通过Native城镇菜单离开并搜索多个Town，但遇敌后坐镇子流程因旧菜单ID不匹配而停下。`TestResults/20261024-190745`真实模型复测中，AI完成Tutorial后续原版界面、卖出1单位谷物（Gold 1000→1024并经原版Journal后验），之后在Town间移动时遭遇`looters_595`并由模型选当前Native Fight回答。Native encounter菜单实际`attack=enabled`而`str_order_attack=disabled`；实验性Host误把`attack`当作坐镇fallback提交，Native post-action进入`MissionState`、`battleSimulationActive=false`，时间线显示战斗Mission加载画面，Host没有Mission动作便安全停止。后续反编译本机1.4.8 `MenuHelper.EncounterOrderAttackCondition`查明：两侧均须有兵力、对侧有Leader，玩家MapEvent侧至少有1名健康的非MainHero成员才提供“派遣部队”选项；若当前MainParty自身没有此类成员但同侧别的Party有兵，按钮文本会是“交由其他人处理”；士气不足也会将选项禁用。坐镇回调是`EncounterOrderAttack`→`PlayerEncounter.InitSimulation`→`MapState.StartBattleSimulation`，与`attack`的实时Mission回调不同。该Run的当前MainParty人数为1且坐镇选项禁用，但Observer没有收齐该MapEvent各侧完整Roster/士气，故不能把本次禁用单因归结为缺兵；设计上应先从Journal驱动的PartySize/Companion增长路线取得可能的战斗兵力，再在实际Encounter重读原版选项确认是否开放坐镇，而不是AI临时学会3D战斗。已撤销错误fallback，只在当前`str_order_attack`确实enabled时开放BattleSimulation；仅`attack`enabled时目录为空/拒绝。父级EYC目标规划现在也有来源明确的提示：Renown当前只能由Native Send Troops模拟路线取得，PartySize/Companions未达标时考虑先发展队伍，但最终仍以Journal和运行时菜单为准、不固定目标顺序。`TestResults/20261024-210753`Build与AgentHostPackage通过（226个Provider、16个Campaign、9个BattleSimulation合同场景；模型调用0、Native命令0），包括“实时attack启用但Send Troops禁用时拒绝该动作”的回归；这验证了工具不会再误入实时Mission，不代表真实模型会遵循新的目标排序提示。该Run共63个模型决策、48个Native动作、196922输入/3284输出tokens；Gold完成一次，Renown/PartySize/Companions仍未达成，`goalVerified=false`。存档目录未变、AutoSave 10→-1→10恢复、Native无AutoSave记录、没有崩溃，游戏/Host/session清理通过；阶段`Passed=true`只表示Harness流程与清理正常。用户再次明确确认原版通知后的棕色“点击继续”卡片出现时Campaign时间和队伍移动都停住；仍按阻塞式Native场景通知处理，等待ready再走原版回调，不注入时钟动作。
+`TestResults/20261024-173205`真实`auto:reliable`纵测确认AI在无可售货物时能通过Native城镇菜单离开并搜索多个Town，但遇敌后坐镇子流程因旧菜单ID不匹配而停下。
+`TestResults/20261024-190745`真实模型复测中，AI完成Tutorial后续原版界面、卖出1单位谷物（Gold 1000→1024并经原版Journal后验），之后在Town间移动时遭遇`looters_595`并由模型选当前Native Fight回答。
+Native encounter菜单实际`attack=enabled`而`str_order_attack=disabled`；
+实验性Host误把`attack`当作坐镇fallback提交，Native post-action进入`MissionState`、`battleSimulationActive=false`，时间线显示战斗Mission加载画面，Host没有Mission动作便安全停止。
+后续反编译本机1.4.8 `MenuHelper.EncounterOrderAttackCondition`查明：两侧均须有兵力、对侧有Leader，玩家MapEvent侧至少有1名健康的非MainHero成员才提供“派遣部队”选项；
+若当前MainParty自身没有此类成员但同侧别的Party有兵，按钮文本会是“交由其他人处理”；
+士气不足也会将选项禁用。
+坐镇回调是`EncounterOrderAttack`→`PlayerEncounter.InitSimulation`→`MapState.StartBattleSimulation`，与`attack`的实时Mission回调不同。
+该Run的当前MainParty人数为1且坐镇选项禁用，但Observer没有收齐该MapEvent各侧完整Roster/士气，故不能把本次禁用单因归结为缺兵；
+设计上应先从Journal驱动的PartySize/Companion增长路线取得可能的战斗兵力，再在实际Encounter重读原版选项确认是否开放坐镇，而不是AI临时学会3D战斗。
+已撤销错误fallback，只在当前`str_order_attack`确实enabled时开放BattleSimulation；
+仅`attack`enabled时目录为空/拒绝。
+父级EYC目标规划现在也有来源明确的提示：Renown当前只能由Native Send Troops模拟路线取得，PartySize/Companions未达标时考虑先发展队伍，但最终仍以Journal和运行时菜单为准、不固定目标顺序。
+`TestResults/20261024-210753`Build与AgentHostPackage通过（226个Provider、16个Campaign、9个BattleSimulation合同场景；
+模型调用0、Native命令0），包括“实时attack启用但Send Troops禁用时拒绝该动作”的回归；
+这验证了工具不会再误入实时Mission，不代表真实模型会遵循新的目标排序提示。
+该Run共63个模型决策、48个Native动作、196922输入/3284输出tokens；
+Gold完成一次，Renown/PartySize/Companions仍未达成，`goalVerified=false`。
+存档目录未变、AutoSave 10→-1→10恢复、Native无AutoSave记录、没有崩溃，游戏/Host/session清理通过；
+阶段`Passed=true`只表示Harness流程与清理正常。
+用户再次明确确认原版通知后的棕色“点击继续”卡片出现时Campaign时间和队伍移动都停住；
+仍按阻塞式Native场景通知处理，等待ready再走原版回调，不注入时钟动作。
 
-`TestResults/20261024-211418`在更新规划提示后的真实新战役里，模型先选择Companions并安全`stop`（0动作），随后重新规划PartySize；真实模型调用地图目标观察并向当前可见村庄`village_ES3_2`发出Native移动，接下来一次`observeAgain`后PartySize子流程以`recruitment-map-unavailable`终止。Native实际终止GameState/Menu未保留在子流程结果中，因此这个错误码不足以说明是任务切换、遭遇或其它界面造成；本轮不能据此更改游戏动作逻辑。为封闭这一证据缺口，Recruitment子流程现在把起始/最终Native状态缩成脱敏summary随结果返回，Progress trace复用已有Summary字段，不持久化一次性Inquiry token；回归确保非Map起始失败能保留`MenuState/town`而不调用模型/Native动作。`TestResults/20261024-214327`Build与AgentHostPackage通过（226 Provider、16 Campaign、9 BattleSimulation合同），但真实失配仍需用新收据确认。该自然运行14个模型决策，91,319输入/327输出tokens；Gold/Renown/PartySize/Companions均未达标，`goalVerified=false`，没有崩溃或正式保存，AutoSave 10→-1→10恢复且Save目录manifest不变，游戏/Host进程清理。Harness阶段`Passed=true`不代表原版Quest已完成。
+`TestResults/20261024-211418`在更新规划提示后的真实新战役里，模型先选择Companions并安全`stop`（0动作），随后重新规划PartySize；
+真实模型调用地图目标观察并向当前可见村庄`village_ES3_2`发出Native移动，接下来一次`observeAgain`后PartySize子流程以`recruitment-map-unavailable`终止。
+Native实际终止GameState/Menu未保留在子流程结果中，因此这个错误码不足以说明是任务切换、遭遇或其它界面造成；
+本轮不能据此更改游戏动作逻辑。
+为封闭这一证据缺口，Recruitment子流程现在把起始/最终Native状态缩成脱敏summary随结果返回，Progress trace复用已有Summary字段，不持久化一次性Inquiry token；
+回归确保非Map起始失败能保留`MenuState/town`而不调用模型/Native动作。
+`TestResults/20261024-214327`Build与AgentHostPackage通过（226 Provider、16 Campaign、9 BattleSimulation合同），但真实失配仍需用新收据确认。
+该自然运行14个模型决策，91,319输入/327输出tokens；
+Gold/Renown/PartySize/Companions均未达标，`goalVerified=false`，没有崩溃或正式保存，AutoSave 10→-1→10恢复且Save目录manifest不变，游戏/Host进程清理。
+Harness阶段`Passed=true`不代表原版Quest已完成。
 
-`TestResults/20261024-215927`使用更新后的Native状态摘要重跑同一自然StoryMode后，行为链更清晰：AI完成原版开局设置；第一次Companions路线以`provider-decision-field-unavailable`失败，父级重新规划PartySize；PartySize子流程在萨哥特Backstreet选择Native Leave退出聚落，再由模型用`stop`安全结束，并有前后Native地图状态收据；父级再规划Gold，在萨哥特卖出1份谷物、Gold 1000→1024并确认Journal进度；之后再次选择Companions，在酒馆Mission内产生FreeLLMAPI/OVH HTTP 502，旧父循环以`provider-http-error`安全失败，`goalVerified=false`。这次没有复现`recruitment-map-unavailable`；新的Native状态摘要显示PartySize实际执行了Backstreet退出到自由地图，而不是隐藏Mission/遭遇。为避免502截断同伴子流程后即终止整轮，现在仅对明确的FreeLLMAPI上游HTTP 502/503/504开启父级恢复；只有当前状态经Native检查为友好Town/Tavern Mission、无对话/Inquiry/逃脱界面/捕获或活动导航时，才执行一次原版`missionLeave`，确认回到自由Map及原版Quest仍active后重新规划，不重放前面动作。HTTP 401、429及其它配置/限流错误不走此恢复。Fake Parent/Native/Provider合同已把错误设置为真实502并检验Leave→新规划、无动作重放及不可安全离开时拒绝。`TestResults/20261024-230120`Build/AgentHostPackage通过（227 Provider合同、16 Campaign合同、9 BattleSimulation合同；模型调用0、Native命令0），该502恢复修复尚待真实Campaign验证。全轮32个模型决策、24个Native动作、90460输入/2169输出tokens；Original EYC未完成，AutoSave 10→-1→10恢复、无Native AutoSave/正式存档写入/崩溃/进程遗留。阶段`Passed=true`仍不等于完成建立家族任务。
+`TestResults/20261024-215927`使用更新后的Native状态摘要重跑同一自然StoryMode后，行为链更清晰：AI完成原版开局设置；
+第一次Companions路线以`provider-decision-field-unavailable`失败，父级重新规划PartySize；
+PartySize子流程在萨哥特Backstreet选择Native Leave退出聚落，再由模型用`stop`安全结束，并有前后Native地图状态收据；
+父级再规划Gold，在萨哥特卖出1份谷物、Gold 1000→1024并确认Journal进度；
+之后再次选择Companions，在酒馆Mission内产生FreeLLMAPI/OVH HTTP 502，旧父循环以`provider-http-error`安全失败，`goalVerified=false`。
+这次没有复现`recruitment-map-unavailable`；
+新的Native状态摘要显示PartySize实际执行了Backstreet退出到自由地图，而不是隐藏Mission/遭遇。
+为避免502截断同伴子流程后即终止整轮，现在仅对明确的FreeLLMAPI上游HTTP 502/503/504开启父级恢复；
+只有当前状态经Native检查为友好Town/Tavern Mission、无对话/Inquiry/逃脱界面/捕获或活动导航时，才执行一次原版`missionLeave`，确认回到自由Map及原版Quest仍active后重新规划，不重放前面动作。
+HTTP 401、429及其它配置/限流错误不走此恢复。
+Fake Parent/Native/Provider合同已把错误设置为真实502并检验Leave→新规划、无动作重放及不可安全离开时拒绝。
+`TestResults/20261024-230120`Build/AgentHostPackage通过（227 Provider合同、16 Campaign合同、9 BattleSimulation合同；
+模型调用0、Native命令0），该502恢复修复尚待真实Campaign验证。
+全轮32个模型决策、24个Native动作、90460输入/2169输出tokens；
+Original EYC未完成，AutoSave 10→-1→10恢复、无Native AutoSave/正式存档写入/崩溃/进程遗留。
+阶段`Passed=true`仍不等于完成建立家族任务。
 
-`TestResults/20261025-114027`是`20261025-113726`打包后开始的又一次自然StoryMode实测。源流程完整启动、AI完成教程后原版开局界面；经过Town游走和一次Gold原版交易后遭遇`mountain_bandits_816`。模型选择原版Fight对话，但Native encounter中`attack=enabled`、`str_order_attack=disabled`；新BattleSimulation catalog没有暴露实时`attack`，故父Host以`incident-bandit-battle-failed`安全停止，Battle子结果为`no-safe-action`且后验仍是MapState encounter，没有进入实时Mission。这证明防止误入实时战斗的修复在自然遇敌运行中生效；它也揭示当前只有1人的队伍会在Native Send Troops条件不满足时无法通过现有Renown路径。该轮执行到CaptureEnd后流程没有生成最终`summary.json`/retention receipt，Timeline视频帧提取未完成，故该run标作中断，不计为完整测试通过；Host/游戏/ffmpeg进程现已消失。中断留下了Harness AutoSave备份，配置仍为`-1`；确认当时无Bannerlord进程后，通过同一Harness恢复函数恢复为原值10并删除其专属备份。由于未生成完整收尾摘要，本轮Save目录最终manifest仍未核验，不能声称该轮存档不变。原始录屏和已生成的接触表/时间线帧按不完整测试证据保留待后续Retention处理，不作为成功自动卸载记录。
+`TestResults/20261025-114027`是`20261025-113726`打包后开始的又一次自然StoryMode实测。
+源流程完整启动、AI完成教程后原版开局界面；
+经过Town游走和一次Gold原版交易后遭遇`mountain_bandits_816`。
+模型选择原版Fight对话，但Native encounter中`attack=enabled`、`str_order_attack=disabled`；
+新BattleSimulation catalog没有暴露实时`attack`，故父Host以`incident-bandit-battle-failed`安全停止，Battle子结果为`no-safe-action`且后验仍是MapState encounter，没有进入实时Mission。
+这证明防止误入实时战斗的修复在自然遇敌运行中生效；
+它也揭示当前只有1人的队伍会在Native Send Troops条件不满足时无法通过现有Renown路径。
+该轮执行到CaptureEnd后流程没有生成最终`summary.json`/retention receipt，Timeline视频帧提取未完成，故该run标作中断，不计为完整测试通过；
+Host/游戏/ffmpeg进程现已消失。
+中断留下了Harness AutoSave备份，配置仍为`-1`；
+确认当时无Bannerlord进程后，通过同一Harness恢复函数恢复为原值10并删除其专属备份。
+由于未生成完整收尾摘要，本轮Save目录最终manifest仍未核验，不能声称该轮存档不变。
+原始录屏和已生成的接触表/时间线帧按不完整测试证据保留待后续Retention处理，不作为成功自动卸载记录。
 
-`TestResults/20261024-231601`使用父级502/503/504安全恢复后第三次自然新战役。真实模型完成开局原版界面，Companions首轮结构化决定失败后父级重规划PartySize；AI随后安全停止PartySize并重规划Gold，卖出1单位谷物，Gold 1000→1025。Gold跨两个无货Town后在ES6再次交易子流程以通用`provider-http-error`失败，真实Native末态是普通Town `MapState`（`town_ES6`，无捕获/Inquiry/Escape），父级没有重新规划；由于该收据仅记通用failureCode，当前不能判定这次不重规划是正确地碰到429/认证等非恢复状态，还是Transient 5xx判别没有按预期触发，不能臆断新恢复代码失效。为分开这两种情形，Harness lifecycle的子目标进度收据现在增加只含数字的`providerHttpStatus`（仅在错误码是`provider-http-error`时从已经脱敏的错误摘要提取），继续排除原始错误正文/密钥；若是502/503/504，允许当前安全地图重规划或酒馆Native Leave；若是429/认证/其它HTTP码则不恢复。`TestResults/20261025-113217` Build/AgentHostPackage通过，合同版本升至7.305，227个Provider场景，含“只记HTTP状态码、仍不写入自由文本错误”的ProgressTrace自检；这轮本地合同未请求模型、未发Native动作，真实HTTP分支仍待下一次自然Campaign确认。自然战役本身无崩溃/正式保存/Native自动保存，设置10→-1→10恢复，Save目录manifest未变，主机和游戏进程退出；Host `goalVerified=false`，没有达到StoryMode任务完成门禁。
+`TestResults/20261024-231601`使用父级502/503/504安全恢复后第三次自然新战役。
+真实模型完成开局原版界面，Companions首轮结构化决定失败后父级重规划PartySize；
+AI随后安全停止PartySize并重规划Gold，卖出1单位谷物，Gold 1000→1025。
+Gold跨两个无货Town后在ES6再次交易子流程以通用`provider-http-error`失败，真实Native末态是普通Town `MapState`（`town_ES6`，无捕获/Inquiry/Escape），父级没有重新规划；
+由于该收据仅记通用failureCode，当前不能判定这次不重规划是正确地碰到429/认证等非恢复状态，还是Transient 5xx判别没有按预期触发，不能臆断新恢复代码失效。
+为分开这两种情形，Harness lifecycle的子目标进度收据现在增加只含数字的`providerHttpStatus`（仅在错误码是`provider-http-error`时从已经脱敏的错误摘要提取），继续排除原始错误正文/密钥；
+若是502/503/504，允许当前安全地图重规划或酒馆Native Leave；
+若是429/认证/其它HTTP码则不恢复。
+`TestResults/20261025-113217` Build/AgentHostPackage通过，合同版本升至7.305，227个Provider场景，含“只记HTTP状态码、仍不写入自由文本错误”的ProgressTrace自检；
+这轮本地合同未请求模型、未发Native动作，真实HTTP分支仍待下一次自然Campaign确认。
+自然战役本身无崩溃/正式保存/Native自动保存，设置10→-1→10恢复，Save目录manifest未变，主机和游戏进程退出；
+Host `goalVerified=false`，没有达到StoryMode任务完成门禁。
 
-`TestResults/20261024-184509`在新构建版本中再次从自然新战役起步，真实模型完成EYC分类、原版训练场离开、通知回应、Ready后的棕色卡片继续、家族名“风影”提交、Banner Editor Done和教程Inquiry；这再次实证AI可自主穿过整段开局UI链，卡片前后CampaignDay保持91077.375。父级随后规划遇FreeLLMAPI 502（当轮实际`gpt-oss-20b→ovh/gpt-oss-20b`，含一次fallback失败），Host安全停止，总计7个模型决策、6个Native动作、5534输入/314输出tokens，`goalVerified=false`；没有进入Bandit encounter，故该轮不验证刚修的`attack`菜单路径。游戏录像正常结束、原版自动存档保护/进程清理按Harness阶段收尾；不可把阶段`Passed=true`当作EYC成功。下一次Campaign仍需拿到同一Bandit遭遇的真实Native `attack`选择与BattleSimulation回Map证据，且如果单次provider HTTP 502持续阻断目标规划，先检查免费上游路由状态而不是把它误归因给Agent动作或升级模型。
+`TestResults/20261024-184509`在新构建版本中再次从自然新战役起步，真实模型完成EYC分类、原版训练场离开、通知回应、Ready后的棕色卡片继续、家族名“风影”提交、Banner Editor Done和教程Inquiry；
+这再次实证AI可自主穿过整段开局UI链，卡片前后CampaignDay保持91077.375。
+父级随后规划遇FreeLLMAPI 502（当轮实际`gpt-oss-20b→ovh/gpt-oss-20b`，含一次fallback失败），Host安全停止，总计7个模型决策、6个Native动作、5534输入/314输出tokens，`goalVerified=false`；
+没有进入Bandit encounter，故该轮不验证刚修的`attack`菜单路径。
+游戏录像正常结束、原版自动存档保护/进程清理按Harness阶段收尾；
+不可把阶段`Passed=true`当作EYC成功。
+下一次Campaign仍需拿到同一Bandit遭遇的真实Native `attack`选择与BattleSimulation回Map证据，且如果单次provider HTTP 502持续阻断目标规划，先检查免费上游路由状态而不是把它误归因给Agent动作或升级模型。
 
-`TestResults/20261025-135818`自然StoryMode评估中，真实模型完成教程跳过后原版通知、龙旗碎片继续、家族名称“盖·巴图”提交、BannerEditor Done及后续Inquiry，之后Campaign父循环自然启动EYC四目标。该轮Companion执行器在酒馆反复收到不可解析的`AgentIndex`参数（`"1"`后为`"[1]"`）并以`companion-action-recovery-exhausted`退出；PartySize执行器当时位于Town Backstreet，Native菜单仍列出`town_backstreet_back`安全退出项，但模型返回`stop`，子流程0动作退出；父循环随后继续尝试Renown，在一次Native退出动作后遇到FreeLLMAPI HTTP 429（状态仅记数值、上游文本未保留），故`goalVerified=false`。自然Campaign无崩溃、正式保存或Native自动存档，AutoSave设置恢复、存档目录manifest未变、进程清理通过。该证据指出一个严格局限的AgentHost改进点：在PartySize目录仍有可执行的安全Native动作时，先拒绝`stop`且不发游戏命令，以当前目录向模型给一次恢复反馈；重复停止仍安全中止，Host不代替模型执行。测试也发现招募循环原实现的for循环同时按iteration和decision递减预算，实际可用决策数约为配置的一半，现改成仅以已发模型决策计数为门槛。`TestResults/20261025-150951` Build/AgentHostPackage通过（228 Provider、16 Campaign、9 BattleSimulation场景；模型调用0、Native命令0），包含“premature stop→当前菜单选项反馈→原版离开→RecruitmentVM→招募→Journal确认”的模拟回归；这不是实机或真实模型复验。需要下一轮自然Campaign确认修复后模型是否会按目录行动，且后续仍要通过两个独立新战役完成原版Quest。
+`TestResults/20261025-135818`自然StoryMode评估中，真实模型完成教程跳过后原版通知、龙旗碎片继续、家族名称“盖·巴图”提交、BannerEditor Done及后续Inquiry，之后Campaign父循环自然启动EYC四目标。
+该轮Companion执行器在酒馆反复收到不可解析的`AgentIndex`参数（`"1"`后为`"[1]"`）并以`companion-action-recovery-exhausted`退出；
+PartySize执行器当时位于Town Backstreet，Native菜单仍列出`town_backstreet_back`安全退出项，但模型返回`stop`，子流程0动作退出；
+父循环随后继续尝试Renown，在一次Native退出动作后遇到FreeLLMAPI HTTP 429（状态仅记数值、上游文本未保留），故`goalVerified=false`。
+自然Campaign无崩溃、正式保存或Native自动存档，AutoSave设置恢复、存档目录manifest未变、进程清理通过。
+该证据指出一个严格局限的AgentHost改进点：在PartySize目录仍有可执行的安全Native动作时，先拒绝`stop`且不发游戏命令，以当前目录向模型给一次恢复反馈；
+重复停止仍安全中止，Host不代替模型执行。
+测试也发现招募循环原实现的for循环同时按iteration和decision递减预算，实际可用决策数约为配置的一半，现改成仅以已发模型决策计数为门槛。
+`TestResults/20261025-150951` Build/AgentHostPackage通过（228 Provider、16 Campaign、9 BattleSimulation场景；
+模型调用0、Native命令0），包含“premature stop→当前菜单选项反馈→原版离开→RecruitmentVM→招募→Journal确认”的模拟回归；
+这不是实机或真实模型复验。
+需要下一轮自然Campaign确认修复后模型是否会按目录行动，且后续仍要通过两个独立新战役完成原版Quest。
 
-`TestResults/20261025-151729`使用真实`auto:reliable` FreeLLMAPI模型从全新自然StoryMode起步。AI在教程跳过后的原版链中自行接受通知/潜行教程、继续棕色龙旗卡片、提交家族名“哈拉图”、确认BannerEditor默认旗帜并回到地图；原版EYC自然激活。该轮PartySize最初从Town Backstreet通过Native `town_backstreet_back`返回聚落菜单，读取RecruitmentVM并实际招入1名兵，Gold 1000→980、Party 1→2；后来在Town再执行一笔Native谷物销售，Gold 980→1007并由子流程验证Journal金币进展。Host所加“有安全菜单动作时拒绝stop并要求一次新决策”在实机确实触发，但模型连续两次返回stop，因此以`recruitment-model-stopped-with-safe-actions` fail closed；画面显示Town菜单仍有原版“招募志愿兵”，队伍目标仍未完成。Companion路线另有参数格式恢复耗尽，Renown路线在当前无可用Bandit目标时安全结束；最终`goalVerified=false`，没有伪报建族完成。总计39个模型决策、25条Native动作；全程自动存档设置10→-1→10恢复、无Native自动存档/崩溃/存档目录变化，进程清理和完整录像帧覆盖21463/21463通过。关键帧`TestResults/20261025-151729/Temp/TimelineFrames/126-capture-MapState---after.jpg`显示了Host失败横幅、波罗斯城镇菜单、2人队伍与1007金币，支持“模型停在可见菜单状态”的结论。
+`TestResults/20261025-151729`使用真实`auto:reliable` FreeLLMAPI模型从全新自然StoryMode起步。
+AI在教程跳过后的原版链中自行接受通知/潜行教程、继续棕色龙旗卡片、提交家族名“哈拉图”、确认BannerEditor默认旗帜并回到地图；
+原版EYC自然激活。
+该轮PartySize最初从Town Backstreet通过Native `town_backstreet_back`返回聚落菜单，读取RecruitmentVM并实际招入1名兵，Gold 1000→980、Party 1→2；
+后来在Town再执行一笔Native谷物销售，Gold 980→1007并由子流程验证Journal金币进展。
+Host所加“有安全菜单动作时拒绝stop并要求一次新决策”在实机确实触发，但模型连续两次返回stop，因此以`recruitment-model-stopped-with-safe-actions` fail closed；
+画面显示Town菜单仍有原版“招募志愿兵”，队伍目标仍未完成。
+Companion路线另有参数格式恢复耗尽，Renown路线在当前无可用Bandit目标时安全结束；
+最终`goalVerified=false`，没有伪报建族完成。
+总计39个模型决策、25条Native动作；
+全程自动存档设置10→-1→10恢复、无Native自动存档/崩溃/存档目录变化，进程清理和完整录像帧覆盖21463/21463通过。
+关键帧`TestResults/20261025-151729/Temp/TimelineFrames/126-capture-MapState---after.jpg`显示了Host失败横幅、波罗斯城镇菜单、2人队伍与1007金币，支持“模型停在可见菜单状态”的结论。
 
 因为151729的恢复提示只列动作类型，没解释当前唯一安全动作的用途，PartySize恢复反馈现按当前目录补充具体解释：`recruitOptions`只读取Native RecruitmentVM报价、不招兵也不花金币；`menuSelect`提示使用当前启用的原版选项；地图目标查询提示只读且不移动。`TestResults/20261025-161254` Build/AgentHostPackage通过（228 Provider、16 Campaign、9 BattleSimulation场景；模型调用0、Native命令0），包括读招募选项提示的回归。它仍未由新的真实模型战役验证；之后继续完成EYC必须保留“真实Journal进度+最终原版Quest完成”，不能把一次成功招募或金币交易当作过关。
 
-`TestResults/20261025-164902`真实新Campaign验证了父循环在多个目标受阻时继续工作的路径：教程后原版命名/默认旗帜链完成；Companion两次失败；PartySize收到两个stop后临时不可用；父级随后在ES3通过原版交易卖出谷物并由Journal验证Gold进展，又重新尝试Companion、PartySize和Gold。之后普通地图移动自然遇到`looters_339`，Battle子流程走原版威胁对话选择Fight，但Native菜单仅`attack`启用、`str_order_attack`禁用，现有动作层不进入实时Mission，于是以`incident-bandit-battle-failed`安全结束，`goalVerified=false`。主队当时只有MainHero一人，没有坐镇指挥条件；Native在战斗菜单里仍显示攻击/投降等选项，但本Agent只支持Send Troops，未把这些选项伪装成已解决战斗。该轮69个模型决策、50条Native命令；无崩溃、正式保存、Native自动存档或存档目录变更，AutoSave 10→-1→10恢复，游戏进程清理通过，连续录像覆盖33923/33923帧并按Harness规则压成126张时间线关键帧后删除MP4。父循环的安全重规划已由真实模型运行验证；战斗适配/新增士兵的可持续路径仍是未完成门禁。
+`TestResults/20261025-164902`真实新Campaign验证了父循环在多个目标受阻时继续工作的路径：教程后原版命名/默认旗帜链完成；
+Companion两次失败；
+PartySize收到两个stop后临时不可用；
+父级随后在ES3通过原版交易卖出谷物并由Journal验证Gold进展，又重新尝试Companion、PartySize和Gold。
+之后普通地图移动自然遇到`looters_339`，Battle子流程走原版威胁对话选择Fight，但Native菜单仅`attack`启用、`str_order_attack`禁用，现有动作层不进入实时Mission，于是以`incident-bandit-battle-failed`安全结束，`goalVerified=false`。
+主队当时只有MainHero一人，没有坐镇指挥条件；
+Native在战斗菜单里仍显示攻击/投降等选项，但本Agent只支持Send Troops，未把这些选项伪装成已解决战斗。
+该轮69个模型决策、50条Native命令；
+无崩溃、正式保存、Native自动存档或存档目录变更，AutoSave 10→-1→10恢复，游戏进程清理通过，连续录像覆盖33923/33923帧并按Harness规则压成126张时间线关键帧后删除MP4。
+父循环的安全重规划已由真实模型运行验证；
+战斗适配/新增士兵的可持续路径仍是未完成门禁。
 
 针对164902中Backstreet的模型stop阻断招兵，PartySize现在只在精确条件下用原版导航返回：模型已经收到一次恢复提示后再次停止、State仍是MapState的`town_backstreet`、目录只有当前启用的`town_backstreet_back` Leave时，Host调用当前原版菜单处理器一次，并后验要求同一Settlement的`town` Map菜单、EYC仍活动、没有Inquiry或真实敌对Encounter，然后继续模型招募循环。其他位置或返回验证失败一律不做替代动作。`TestResults/20261025-182805` Build/AgentHostPackage通过（228 Provider、16 Campaign、9 BattleSimulation场景；模型调用0、Native命令0），假Native/Provider测试以“模型stop两次→Native backstreet leave→Town菜单→招募报价→一名志愿兵→Journal达标”覆盖这条恢复；它尚未由新的真实Campaign运行验证。
 
-`TestResults/20261025-162307`对上述具体恢复提示作真实新战役复验。AI再次自然完成Tutorial-skip后的通知、棕色龙旗卡片、模型命名“哈拉图”、BannerEditor Done与后续Inquiry，并自然激活原版EYC；Companion子目标由模型安全停止（2条Native动作，未声称招募）。PartySize在波罗斯Town菜单启动时，原版`recruit_volunteers`选项可用、MainParty仍为1人、Gold 1000；真实模型连续两次选择stop，Host按安全边界没有发出任何PartySize动作，结果为`recruitment-model-stopped-with-safe-actions`。当时父循环不识别这个新终止名，导致整轮停止而没有继续其它目标。该次14个模型决策、8条Native动作、没有Gold/Renown/Party/Journal进展，`goalVerified=false`；不应把Host按约束安全中断称为模型完成或原版问题。无游戏崩溃、正式保存/自动存档或保存目录变化，AutoSave 10→-1→10恢复且进程清理通过。现在父循环只在可用free Map上把这个PartySize路线临时加入`unavailableObjectives`，继续其他未完成目标；之后Native Journal进展可清空临时阻塞集合，重试该目标。`TestResults/20261025-164525` Build/AgentHostPackage通过（228 Provider、16 Campaign、9 BattleSimulation场景；模型调用0、Native命令0），该父循环修复的真实Campaign效果待下一轮验证。
+`TestResults/20261025-162307`对上述具体恢复提示作真实新战役复验。
+AI再次自然完成Tutorial-skip后的通知、棕色龙旗卡片、模型命名“哈拉图”、BannerEditor Done与后续Inquiry，并自然激活原版EYC；
+Companion子目标由模型安全停止（2条Native动作，未声称招募）。
+PartySize在波罗斯Town菜单启动时，原版`recruit_volunteers`选项可用、MainParty仍为1人、Gold 1000；
+真实模型连续两次选择stop，Host按安全边界没有发出任何PartySize动作，结果为`recruitment-model-stopped-with-safe-actions`。
+当时父循环不识别这个新终止名，导致整轮停止而没有继续其它目标。
+该次14个模型决策、8条Native动作、没有Gold/Renown/Party/Journal进展，`goalVerified=false`；
+不应把Host按约束安全中断称为模型完成或原版问题。
+无游戏崩溃、正式保存/自动存档或保存目录变化，AutoSave 10→-1→10恢复且进程清理通过。
+现在父循环只在可用free Map上把这个PartySize路线临时加入`unavailableObjectives`，继续其他未完成目标；
+之后Native Journal进展可清空临时阻塞集合，重试该目标。
+`TestResults/20261025-164525` Build/AgentHostPackage通过（228 Provider、16 Campaign、9 BattleSimulation场景；
+模型调用0、Native命令0），该父循环修复的真实Campaign效果待下一轮验证。
 
-`TestResults/20261025-183732`使用`f0c68e9`后的真实`auto:reliable`模型评估。AI自行完成Skip Tutorial后的通知/旗帜卡片/家族名“Khergit”/默认Banner Done/后续Inquiry并自然激活原版EYC。Companion首次安全停止后，PartySize在Town主菜单调用一次RecruitmentVM报价观察，模型仍stop两次；父级将该目标临时标为不可用，继续到Gold，真实Native Grain sale从1000→1029并由Journal确认。之后复试Companion时收到FreeLLMAPI HTTP429，遵循门禁不重试非网关限流、不回放动作，整个Host以`provider-http-error`结束，`goalVerified=false`；本轮没有遇到`town_backstreet`，所以没有验证新Backstreet专用Leave恢复。总计29个模型决定、19条Native命令；无崩溃、正式存档、自动存档或存档目录变更，AutoSave 10→-1→10恢复，游戏/Host清理和录像覆盖15257/15257通过。它真实证明“PartySize受阻→父级继续Gold并获得原版Journal进度”，不证明士兵增长、Renown、同伴招募或Quest完成。
+`TestResults/20261025-183732`使用`f0c68e9`后的真实`auto:reliable`模型评估。
+AI自行完成Skip Tutorial后的通知/旗帜卡片/家族名“Khergit”/默认Banner Done/后续Inquiry并自然激活原版EYC。
+Companion首次安全停止后，PartySize在Town主菜单调用一次RecruitmentVM报价观察，模型仍stop两次；
+父级将该目标临时标为不可用，继续到Gold，真实Native Grain sale从1000→1029并由Journal确认。
+之后复试Companion时收到FreeLLMAPI HTTP429，遵循门禁不重试非网关限流、不回放动作，整个Host以`provider-http-error`结束，`goalVerified=false`；
+本轮没有遇到`town_backstreet`，所以没有验证新Backstreet专用Leave恢复。
+总计29个模型决定、19条Native命令；
+无崩溃、正式存档、自动存档或存档目录变更，AutoSave 10→-1→10恢复，游戏/Host清理和录像覆盖15257/15257通过。
+它真实证明“PartySize受阻→父级继续Gold并获得原版Journal进度”，不证明士兵增长、Renown、同伴招募或Quest完成。
 
 该轮的Companion Native命令收据还显示模型输出`missionNavigateToAgent`时把当前观察到的数值索引/时长格式化为带方括号的字符串，Native动作边界未接受该参数，后续请求又触到429，未产生雇佣或Journal进度。现在只在Host规范化后数值仍精确存在当前`missionSceneAgents`的候选索引及动作`argumentValues`时允许执行：如`"[4]"`、`"**4**"`及反引号包裹的4可解析为4，但绝不扩展候选或接受任意数字；负向测试确认`"[5]"`即使可解析，未在本轮候选中也被拒。`TestResults/20261025-193149`Build/AgentHostPackage通过；这是自托管参数合同，不代表模型已成功导航/招募。后续自然Campaign仍需确认真实参数格式恢复，且最终以Original EYC Journal/Quest验收。
 
-`TestResults/20261025-194213`使用`a88f2a6`的真实模型再次从自然新StoryMode运行。真实模型完成开局命名“Khergit”和默认旗帜、PartySize尝试后安全stop、Gold出售粮食，随后遭遇`looters_366`。它选择原版Fight对话和Native `str_order_attack`后，成功用BattleSimulation执行`battleSkip`/`battleFinish`，返回地图并验证原版Encounter结束；这一局开战时MainParty仍只有1名成员。Native源码此前显示坐镇选项条件是MapEvent玩家侧有健康非MainHero战斗成员，因此该观察证明“MainParty总人数1必然禁用坐镇”的简单推断不成立，实际合格成员来自同一事件其他友军还是其他Roster上下文仍未收集，不能猜来源。战后Clan Renown仍为20，Party仍为1；随后Renown目标无当前Bandit候选，原版Journal未推进，完整StoryMode Quest最终以所有当前路线不可用安全结束（`goalVerified=false`），未进实时战斗Mission。总计69个模型决策、42条Native命令；无崩溃/正式存档/自动存档，AutoSave 10→-1→10恢复，存档目录manifest不变，游戏进程清理，录像覆盖31132/31132帧。该轮是首次自然Campaign中真正完成坐镇指挥模拟的证据，但不是Renown增长或EYC通关证明；Backstreet-only Host fallback没有被触发，模型本轮选择了当前Native返回选项。
+`TestResults/20261025-194213`使用`a88f2a6`的真实模型再次从自然新StoryMode运行。
+真实模型完成开局命名“Khergit”和默认旗帜、PartySize尝试后安全stop、Gold出售粮食，随后遭遇`looters_366`。
+它选择原版Fight对话和Native `str_order_attack`后，成功用BattleSimulation执行`battleSkip`/`battleFinish`，返回地图并验证原版Encounter结束；
+这一局开战时MainParty仍只有1名成员。
+Native源码此前显示坐镇选项条件是MapEvent玩家侧有健康非MainHero战斗成员，因此该观察证明“MainParty总人数1必然禁用坐镇”的简单推断不成立，实际合格成员来自同一事件其他友军还是其他Roster上下文仍未收集，不能猜来源。
+战后Clan Renown仍为20，Party仍为1；
+随后Renown目标无当前Bandit候选，原版Journal未推进，完整StoryMode Quest最终以所有当前路线不可用安全结束（`goalVerified=false`），未进实时战斗Mission。
+总计69个模型决策、42条Native命令；
+无崩溃/正式存档/自动存档，AutoSave 10→-1→10恢复，存档目录manifest不变，游戏进程清理，录像覆盖31132/31132帧。
+该轮是首次自然Campaign中真正完成坐镇指挥模拟的证据，但不是Renown增长或EYC通关证明；
+Backstreet-only Host fallback没有被触发，模型本轮选择了当前Native返回选项。
 
 该轮的PartySize模型在Town菜单执行了一次RecruitmentVM报价查询，然后安全停止；此前的Objective子流程收据只记录停止码/队伍与金币，不包含Offer数据，因此不能判定它当时看到了没有可负担志愿兵，还是看到了报价却拒绝继续。新的Harness `AgentHostProgress.jsonl`对子目标只增加脱敏聚合量（Gold、队伍人数/容量、报价总数、可用及可负担数量、最低可负担价格），不保存Notable/Troop ID、名称或自由文本。它只改善诊断，不替模型选择/招募；`TestResults/20261025-193149`自测试检查这一信息边界。
 
-`TestResults/20261025-214713`使用`auto:reliable`真实路由从全新自然StoryMode开始。AI完成教程跳过后的棕色龙旗卡片、家族名“盖·克鲁沙白”、默认旗帜确认及后续Inquiry，原版EYC自然激活。首个PartySize尝试共9个决策、1个动作，在取得`RecruitmentVM`报价前遇`provider-response-truncated`，故本次无法判断志愿兵报价是否可用。父级继续到Companions：AI进入ES3酒馆，在Tavern Mission中进行了33个原版动作/51个决策；完整Progress trace里有21次`missionNavigateToAgent`与17次`missionSceneAgents`，输入263908 token，随后以`companion-action-recovery-exhausted`结束。酒馆连续关键帧显示角色在场景中移动，但未留下成功对话/招募后验。父级继续Gold并通过原版粮食交易使金币1000→1027、Journal前进；再次尝试Companions时又执行5个动作后遭FreeLLMAPI HTTP429，最终`goalVerified=false`。全Run共64个模型决策、51条已执行Native动作、累计模型用量约321780输入/4647输出token；未完成Original Quest。自动存档10→-1→10恢复、存档目录manifest未变，无原版自动存档调用/崩溃/遗留游戏或录屏进程。Harness `Passed=true`仅说明各阶段、保护与收尾完成；两次Companion失败说明当前循环没有持续有效推进，不能因父级重规划后Gold成功而算作闭环。
+`TestResults/20261025-214713`使用`auto:reliable`真实路由从全新自然StoryMode开始。
+AI完成教程跳过后的棕色龙旗卡片、家族名“盖·克鲁沙白”、默认旗帜确认及后续Inquiry，原版EYC自然激活。
+首个PartySize尝试共9个决策、1个动作，在取得`RecruitmentVM`报价前遇`provider-response-truncated`，故本次无法判断志愿兵报价是否可用。
+父级继续到Companions：AI进入ES3酒馆，在Tavern Mission中进行了33个原版动作/51个决策；
+完整Progress trace里有21次`missionNavigateToAgent`与17次`missionSceneAgents`，输入263908 token，随后以`companion-action-recovery-exhausted`结束。
+酒馆连续关键帧显示角色在场景中移动，但未留下成功对话/招募后验。
+父级继续Gold并通过原版粮食交易使金币1000→1027、Journal前进；
+再次尝试Companions时又执行5个动作后遭FreeLLMAPI HTTP429，最终`goalVerified=false`。
+全Run共64个模型决策、51条已执行Native动作、累计模型用量约321780输入/4647输出token；
+未完成Original Quest。
+自动存档10→-1→10恢复、存档目录manifest未变，无原版自动存档调用/崩溃/遗留游戏或录屏进程。
+Harness `Passed=true`仅说明各阶段、保护与收尾完成；
+两次Companion失败说明当前循环没有持续有效推进，不能因父级重规划后Gold成功而算作闭环。
 
 该Run还证明单看模型决策和屏幕关键帧，仍无法回答重复导航有没有缩短到目标的实际距离：progress trace原先不保存Native导航收据及之后的新观察之间的距离关联。当前Harness增量给子流程结果增加脱敏`companionNavigationSummary`，只汇总扫描/导航次数、重复同一目标次数、起始距离与后续观测距离范围、可交互观察次数、交互尝试及成功打开对话次数；目标身份/姓名只用于内存关联，不落盘。它与上述已增加的`recruitmentOfferSummary`一样只诊断，不下达替代动作。下一轮自然运行需核验此摘要是否能区分“接近路径无进展”和“已可交谈但模型没交互”；若仍未进入RecruitmentVM，则不能从offer摘要推断招聘条件。
 
-`TestResults/20261025-232055`在`18b8642`构建后再次从自然StoryMode开局，AI完成教程后续通知、棕色龙旗卡片、家族名“盖·加尔多”、默认旗帜确认及后续Inquiry，EYC自然激活。真实模型把PartySize候选选为当前可见村庄`village_ES3_2`；原版Map旅行后进入Village `MissionState`，Host在11个目标决策、2个PartySize动作后以`recruitment-map-unavailable`安全失败。截图`TimelineFrames/054-capture-MapState---after.jpg`显示角色进入村庄3D场景，和“帝国农民”处在一段原版“点击继续”对话中；当帧未见可选回答。此状态不是坐镇遭遇或已进入RecruitmentVM，当前不能断言该对话是否要求接取新任务，也不能假设自动离开。Gold/Party/Renown/Companion均未推进，原版Quest未完成，`goalVerified=false`。Party子流程收据中两种新增摘要均为null，分别因为未读取RecruitmentVM报价、未进入Companion酒馆路线；因此这个Run并未实测两项摘要。整轮8条Native动作、11次真实模型决策、约86346输入/535输出token；画面录制覆盖5768/5768帧并转换为54张关键帧后删除视频。无崩溃/正式存档/Native自动存档，AutoSave 10→-1→10恢复、Save目录manifest不变，游戏/Host/ffmpeg进程清理通过。Harness `Passed=true`只证明启动、收尾和证据门禁完成，不能当作产品目标成功。
+`TestResults/20261025-232055`在`18b8642`构建后再次从自然StoryMode开局，AI完成教程后续通知、棕色龙旗卡片、家族名“盖·加尔多”、默认旗帜确认及后续Inquiry，EYC自然激活。
+真实模型把PartySize候选选为当前可见村庄`village_ES3_2`；
+原版Map旅行后进入Village `MissionState`，Host在11个目标决策、2个PartySize动作后以`recruitment-map-unavailable`安全失败。
+截图`TimelineFrames/054-capture-MapState---after.jpg`显示角色进入村庄3D场景，和“帝国农民”处在一段原版“点击继续”对话中；
+当帧未见可选回答。
+此状态不是坐镇遭遇或已进入RecruitmentVM，当前不能断言该对话是否要求接取新任务，也不能假设自动离开。
+Gold/Party/Renown/Companion均未推进，原版Quest未完成，`goalVerified=false`。
+Party子流程收据中两种新增摘要均为null，分别因为未读取RecruitmentVM报价、未进入Companion酒馆路线；
+因此这个Run并未实测两项摘要。
+整轮8条Native动作、11次真实模型决策、约86346输入/535输出token；
+画面录制覆盖5768/5768帧并转换为54张关键帧后删除视频。
+无崩溃/正式存档/Native自动存档，AutoSave 10→-1→10恢复、Save目录manifest不变，游戏/Host/ffmpeg进程清理通过。
+Harness `Passed=true`只证明启动、收尾和证据门禁完成，不能当作产品目标成功。
 
-`TestResults/20261026-010410`是在Observer schema 27和PartySize自动VillagersInNeed恢复改动合入后跑的真实`auto:reliable`Campaign。AI自行完成教程后续通知/旗帜卡片/家族名/旗帜确认；Companion多次受阻，Gold在ES3售卖粮食，PartySize在town_ES6读取到8个Volunteer报价，其中7个可用且当前Gold可负担，之后FreeLLMAPI 502阻断了招募决定。当前StoryMode自然流没有再次进village_ES3_2，所以CharacterId gate和村民“先处理别的事”分支未得到实机验证。Host最终在81个模型决策、53条Native动作、269511输入/7461输出Token后停止，EYC未完成。复核Root receipt和My Documents AgentRuns response events发现Native snapshot含`"characterName":"劫匪""heroId":null`：AgentObserver新增CharacterName后漏了下一字段分隔逗号，导致原版Bandit对话MapState响应成为无效JSON，Host在NativeMailbox读取时终止。已补`prependComma=true`，并让Check-Docs锁定该分隔符约束；`TestResults/20261026-024216`AgentHostPackage通过（233 Provider、16 Campaign、9 BattleSimulation自测，模型/Native命令0），`TestResults/20261026-024428`Docs通过。下一项窄验证应重新运行一个原版当前地图对话的Native切片，确认当前Character/Hero字段序列化可被Host解析；随后再用真实AI自然到村验证schema27 CharacterId识别和拒绝Villa启动路线。全Run未崩溃、未写正式存档/Native自动存档，AutoSave 10→-1→10恢复、存档目录manifest不变，进程和视频清理通过；阶段`Passed=true`不代表EYC完成。
+`TestResults/20261026-010410`是在Observer schema 27和PartySize自动VillagersInNeed恢复改动合入后跑的真实`auto:reliable`Campaign。
+AI自行完成教程后续通知/旗帜卡片/家族名/旗帜确认；
+Companion多次受阻，Gold在ES3售卖粮食，PartySize在town_ES6读取到8个Volunteer报价，其中7个可用且当前Gold可负担，之后FreeLLMAPI 502阻断了招募决定。
+当前StoryMode自然流没有再次进village_ES3_2，所以CharacterId gate和村民“先处理别的事”分支未得到实机验证。
+Host最终在81个模型决策、53条Native动作、269511输入/7461输出Token后停止，EYC未完成。
+复核Root receipt和My Documents AgentRuns response events发现Native snapshot含`"characterName":"劫匪""heroId":null`：AgentObserver新增CharacterName后漏了下一字段分隔逗号，导致原版Bandit对话MapState响应成为无效JSON，Host在NativeMailbox读取时终止。
+已补`prependComma=true`，并让Check-Docs锁定该分隔符约束；
+`TestResults/20261026-024216`AgentHostPackage通过（233 Provider、16 Campaign、9 BattleSimulation自测，模型/Native命令0），`TestResults/20261026-024428`Docs通过。
+下一项窄验证应重新运行一个原版当前地图对话的Native切片，确认当前Character/Hero字段序列化可被Host解析；
+随后再用真实AI自然到村验证schema27 CharacterId识别和拒绝Villa启动路线。
+全Run未崩溃、未写正式存档/Native自动存档，AutoSave 10→-1→10恢复、存档目录manifest不变，进程和视频清理通过；
+阶段`Passed=true`不代表EYC完成。
 
 `TestResults/20261026-024929`EncounterSurrender窄Native回归在当前schema27的实际Bandit会话中读取到`conversation.characterId=looter`、`characterName=劫匪`、`heroId=null`，随后通过原版Fight/SendTroops前置、Surrender、captivity后验并成功收尾；源档SHA一致、Host/游戏进程停止。它正好覆盖`TestResults/20261026-010410`触发过的非Hero对话对象类型并确认补逗号后的Snapshot是完整JSON，不代表StoryMode村民拒绝分支已实机通过。
 
@@ -1000,13 +2194,28 @@ TestResults/20261026-180613将当前配置临时覆盖为FreeLLMAPI qwen3.6-27b�
 
 TestResults/20261026-173814的FreeLLMAPI默认用户路由
 vidiallama-3.2-11b-vision在无游戏Provider Smoke中返回HTTP503，0决策/0动作；模型目录虽然显示ready，但真实上游调用未成功。TestResults/20261026-174205把请求限制为一次小型EYC目标分类，qwen3.8-27b经ovh/Qwen3.8-27B成功返回 supported-village-tools-quest分类（527输入/188输出token，0 Native命令）。随后完整自然StoryMode TestResults/20261026-175234却在输出格式切换到
-equired_tool_call时收到HTTP502，0决策/0动作；该模型当前已被FreeLLMAPI标为exhausted。这个差异说明分类Smoke不能证明行动目录请求协议可用。TestResults/20261026-180613的qwen3.6-27bSmoke收到429 Retry-After=85秒，但单次Smoke有90秒总预算，按Native最小重试预算判定不可等待并停止，没有重放。之后完整自然战役 TestResults/20261026-181615采用300秒生产请求预算，自然激活EYC；模型请求先等85秒再发，下一次429带Retry-After=585秒，超出本次300秒界限，Host以provider-http-error结束，0决策/0Native动作。TestResults/20261026-182645FreeLLMAPI uto:reliable路由尝试17次后仍HTTP502，日志摘要可读到的候选包括custom OpenAI gpt-4.1-nano额度不足及Google Gemini 3.5/3.6/3.8 forbidden；TestResults/20261026-183324查询gemma-4-31b-it时本地目录已标xhausted，Harness在发出推理前安全拒绝。上述几次完整自然Campaign均在Tutorial skip/EYC激活后失败，未发Native命令，无存档修改/崩溃，Host/Game/Autosave恢复通过。当前直接障碍从Host协议/游戏交互前移为FreeLLMAPI上游可用凭据/额度或模型路由能力；先恢复至少一个可承担结构化工具请求的可用免费Provider，再继续两个StoryMode通关门禁，不再重复上述已失败路由。
+equired_tool_call时收到HTTP502，0决策/0动作；
+该模型当前已被FreeLLMAPI标为exhausted。
+这个差异说明分类Smoke不能证明行动目录请求协议可用。
+TestResults/20261026-180613的qwen3.6-27bSmoke收到429 Retry-After=85秒，但单次Smoke有90秒总预算，按Native最小重试预算判定不可等待并停止，没有重放。
+之后完整自然战役 TestResults/20261026-181615采用300秒生产请求预算，自然激活EYC；
+模型请求先等85秒再发，下一次429带Retry-After=585秒，超出本次300秒界限，Host以provider-http-error结束，0决策/0Native动作。
+TestResults/20261026-182645FreeLLMAPI uto:reliable路由尝试17次后仍HTTP502，日志摘要可读到的候选包括custom OpenAI gpt-4.1-nano额度不足及Google Gemini 3.5/3.6/3.8 forbidden；
+TestResults/20261026-183324查询gemma-4-31b-it时本地目录已标xhausted，Harness在发出推理前安全拒绝。
+上述几次完整自然Campaign均在Tutorial skip/EYC激活后失败，未发Native命令，无存档修改/崩溃，Host/Game/Autosave恢复通过。
+当前直接障碍从Host协议/游戏交互前移为FreeLLMAPI上游可用凭据/额度或模型路由能力；
+先恢复至少一个可承担结构化工具请求的可用免费Provider，再继续两个StoryMode通关门禁，不再重复上述已失败路由。
 
 
 TestResults/20261026-184919再次对FreeLLMAPI当时目录标ready的qwen3.6-27b做无游戏真实Provider Smoke，单请求预算150秒；上游两次返回429，第一次Retry-After=85秒已实际等待约85秒，第二次Retry-After=75秒加最小重试预算超出剩余时限而安全停止。结果是0决策/0Native命令；之后目录状态由ready转exhausted，未发起StoryMode，也没有重放此前请求。该复测确认提升Smoke时间预算仍未获得可用Qwen响应；当前应先恢复/添加有效上游Provider key，不继续对Qwen/OVH路线试探。
 
 
-经FreeLLMAPI上游文档核验了一个可供用户配置的候选：FreeLLMAPI注册了需用户Key的Groq OpenAI兼容提供商（[FreeLLMAPI平台目录](https://github.com/tashfeenahmed/freellmapi/blob/main/docs/en/providers/01-supported-platforms.md)）；Groq官方qwen/qwen3.8-27b页面列出Tool Use与JSON Schema能力（[Groq Qwen 3.8文档](https://console.groq.com/docs/model/qwen/qwen3.8-27b)）。Groq文档同时说明Tool Use与Structured Outputs不在同一请求中并用；Chronicle Provider当前根据目录能力二选一输出格式，仍须真实AllowedActions smoke验证。FreeLLMAPI尚未配置/实测Groq Key，且当前Qwen别名曾被路由到OVH，所以这只是待验候选，不是当前可用路由。拿到一个免费上游Key后，先走无游戏结构化动作请求，确认X-Routed-Via和Native动作格式，再启动自然StoryMode，不再把
+经FreeLLMAPI上游文档核验了一个可供用户配置的候选：FreeLLMAPI注册了需用户Key的Groq OpenAI兼容提供商（[FreeLLMAPI平台目录](https://github.com/tashfeenahmed/freellmapi/blob/main/docs/en/providers/01-supported-platforms.md)）；
+Groq官方qwen/qwen3.8-27b页面列出Tool Use与JSON Schema能力（[Groq Qwen 3.8文档](https://console.groq.com/docs/model/qwen/qwen3.8-27b)）。
+Groq文档同时说明Tool Use与Structured Outputs不在同一请求中并用；
+Chronicle Provider当前根据目录能力二选一输出格式，仍须真实AllowedActions smoke验证。
+FreeLLMAPI尚未配置/实测Groq Key，且当前Qwen别名曾被路由到OVH，所以这只是待验候选，不是当前可用路由。
+拿到一个免费上游Key后，先走无游戏结构化动作请求，确认X-Routed-Via和Native动作格式，再启动自然StoryMode，不再把
 eady或分类Smoke当作闭环证据。
 
 
