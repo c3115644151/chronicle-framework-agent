@@ -401,7 +401,7 @@ function Ensure-ChronicleSteamClientReady {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$SteamRoot,
-        [ValidateRange(1,180)][int]$TimeoutSeconds = 45,
+        [ValidateRange(1,180)][int]$TimeoutSeconds = 90,
         [ValidateRange(0,60)][double]$RequiredStableSeconds = 5
     )
 

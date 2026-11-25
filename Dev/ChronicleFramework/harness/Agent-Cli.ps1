@@ -121,7 +121,7 @@ function Restore-ChronicleTestEngineConfig([string]$BackupPath) {
     return $true
 }
 
-function Ensure-ChronicleSteamClient([int]$TimeoutSeconds = 45) {
+function Ensure-ChronicleSteamClient([int]$TimeoutSeconds = 90) {
     Ensure-ChronicleSteamClientReady -SteamRoot $steamRoot -TimeoutSeconds $TimeoutSeconds
 }
 
