@@ -3,7 +3,7 @@ schema: spec-driven
 context: |
   Chronicle Framework is a Bannerlord single-player autonomous-player mod. Write OpenSpec artifacts in Simplified Chinese.
   GitHub Project 5 remains the source for product issue order/status. OpenSpec records one scoped change and its evidence, not a second task board or full roadmap; link the existing parent issue.
-  Before planning, read DEVELOPMENT.md and Focus/MAINLINE.md. Treat exact TestResults receipts as runtime evidence and distinguish package tests from live Native Campaign evidence.
+  Before planning, read docs/DEVELOPMENT.md and docs/MAINLINE.md. Treat exact TestResults receipts as runtime evidence and distinguish package tests from live Native Campaign evidence.
   Before billable model tests, record the hypothesis, expected new signal, provider-decision cap, and CNY ceiling. Do not repeat the same code/save/prompt combination without a new reason.
 
 rules:

@@ -16,4 +16,4 @@ jobs:
       - uses: actions/checkout@v5
       - name: Validate documentation routing and harness contracts
         shell: pwsh
-        run: ./Dev/ChronicleFramework/Check-Docs.ps1
+        run: ./Dev/ChronicleFramework/harness/Check-Docs.ps1
