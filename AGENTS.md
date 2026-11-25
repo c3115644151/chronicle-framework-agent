@@ -20,7 +20,7 @@
 
 ## 事实归属与资料读取
 
-- GitHub Project：产品工作项、依赖和状态；Git：源码历史；`TestResults/latest.json`：最近一次本机测试收据；`Focus/MAINLINE.md`：持久技术事实、机制契约、未知、分母定义和验收规则。不得在文档或 Harness 结果复制动态任务状态；Harness 不调用 GitHub。
+- GitHub Project：产品工作项、依赖和状态（Project #5「Chronicle Framework Agent」）；工程翻新（目录、门禁、架构、开源装点）在 Project #7「Chronicle Framework 工程翻新」推进，两板各只保留一个 `In Progress`，翻新项不写成产品验收；Git：源码历史；`TestResults/latest.json`：最近一次本机测试收据；`Focus/MAINLINE.md`：持久技术事实、机制契约、未知、分母定义和验收规则。不得在文档或 Harness 结果复制动态任务状态；Harness 不调用 GitHub。
 - `ContextState.json` 只做当前技术焦点、读取路由和 hash/复核元数据。默认上下文只读 `DEVELOPMENT.md` 与当前 MAINLINE；`DESIGN.md` 仅设计任务读取，`SYSTEM_INVENTORY.md` 与研究资料仅相关系统研究时按路由读取。
 - 每个 `Research/<类别>/` 只维护一份权威文档。某类首次进入已批准的W1研究且还没有文件时，把创建并路由一份有实际研究内容的类别文档作为该域研究交付的一部分；不预建空文档、不另立流程Issue。拆分已有类别文件才需用户确认，并同步更新路由与检查。
 - 文档变化直接改权威段落；MAINLINE 修改后运行 `Set-ContextFocus.ps1 -Review`。真实主线切换才使用 `Complete-ContextFocus.ps1`。Harness 契约或验证门禁变化时同步更新 DEVELOPMENT、门禁并递增 contract version。
